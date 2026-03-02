@@ -84,3 +84,19 @@ endif()
 if(CMAKE_BUILD_TYPE STREQUAL "Release")
     target_compile_options(langx PRIVATE -O2)
 endif()
+
+# --- install targets ---
+
+include(GNUInstallDirs)
+
+install(TARGETS langx_lib
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+)
+install(FILES
+    include/langx.h
+    include/langx.hpp
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/langx
+)
+install(TARGETS langx
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+)

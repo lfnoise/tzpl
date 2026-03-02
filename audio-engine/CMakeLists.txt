@@ -49,5 +49,33 @@ endif()
 
 # --- audio-engine executable ---
 
-add_executable(audio-engine src/main.cpp)
+add_executable(audio-engine src/main.cpp src/jscs_test_plugins.cpp)
 target_link_libraries(audio-engine PRIVATE audio_engine_lib)
+
+# --- install targets ---
+
+include(GNUInstallDirs)
+
+install(TARGETS audio_engine_lib
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+)
+install(FILES
+    src/jscs_client_interface.hpp
+    src/jscs_node.hpp
+    src/jscs_engine.hpp
+    src/jscs_common.hpp
+    src/jscs_hash.hpp
+    src/jscs_sexpr.hpp
+    src/jscs_command.hpp
+    src/jscs_command_subclasses.hpp
+    src/jscs_atomic_fifo.hpp
+    src/jscs_random.hpp
+    src/jscs_complex.hpp
+    src/jscs_silo.hpp
+    src/jscs_xfader.hpp
+    src/jscs_sexpr_binary_buffer.hpp
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/jscs
+)
+install(TARGETS audio-engine
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+)

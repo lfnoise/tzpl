@@ -52,3 +52,38 @@ set(EXE_SOURCES
 add_executable(synthdef-compiler ${EXE_SOURCES})
 target_link_libraries(synthdef-compiler PRIVATE synthdef_compiler_lib rtaudio)
 target_compile_options(synthdef-compiler PRIVATE -ffast-math)
+
+# --- install targets ---
+
+include(GNUInstallDirs)
+
+install(TARGETS synthdef_compiler_lib
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+)
+install(FILES
+    src/synthdef_compile.hpp
+    src/synthdef_synth.hpp
+    src/synthdef_sexpr.hpp
+    src/synthdef_from_sexpr.hpp
+    src/synthdef_expr.hpp
+    src/synthdef_value.hpp
+    src/synthdef_types.hpp
+    src/synthdef_types2.hpp
+    src/synthdef_arena.hpp
+    src/synthdef_builtin_ops.hpp
+    src/synthdef_common_ops.hpp
+    src/synthdef_cpp_codegen.hpp
+    src/synthdef_expr_visitor.hpp
+    src/synthdef_hash.hpp
+    src/synthdef_math_ops.hpp
+    src/synthdef_matrix.hpp
+    src/synthdef_plugin_interface.hpp
+    src/synthdef_pretty_print.hpp
+    src/synthdef_rewrite.hpp
+    src/synthdef_signal_type.hpp
+    src/synthdef_str_util.hpp
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/synthdef
+)
+install(TARGETS synthdef-compiler
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+)
