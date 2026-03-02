@@ -1,0 +1,7 @@
+Tree.node(Tree.leaf(1), Tree.node(Tree.leaf(2), Tree.leaf(3)))
+6
+1
+3
+IntList.cons(1, IntList.cons(2, IntList.cons(3, IntList.empty)))
+6
+0

@@ -1,0 +1,13 @@
+List(1, 2, 3)
+nil
+List(0, 1, 2, 3)
+List(1, 2, 3)
+1
+List(2, 3)
+1
+2
+List(3)
+1 2 3 
+List(1, 2, 4, 8, 16, 32, 64, 128, 256, 512)
+List(0, 1, 2, 3, 4)
+List(a, aa, aaaa, aaaaaaaa)

@@ -1,0 +1,34 @@
+hello	world
+line1
+line2
+back\slash
+a"quote"b
+A
+é
+αβγ
+☃
+B
+😀
+😎
+café
+naïve
+price: £5
+hello world
+no \n escapes \t here
+contains "quotes" inside
+line one
+line two
+line three
+C:\Users\test\new
+hello world
+no \n escapes \t here
+contains "quotes" inside
+line one
+line two
+line three
+C:\Users\test\new
+2
+4
+hello ☃ world
+
+

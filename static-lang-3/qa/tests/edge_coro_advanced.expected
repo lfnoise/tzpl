@@ -1,0 +1,14 @@
+List((1, 10), (2, 20), (3, 30))
+List(Point { x: 1, y: 2 }, Point { x: 3, y: 4 })
+List(1, 2, Fizz, 4, Buzz, Fizz, 7, 8, Fizz, Buzz, ...)
+List(2, 4, 6, 8, 10)
+List(2, 4, 6, 8, 10)
+Option<Int>.some(1)
+Option<String>.some(a)
+Option<Int>.some(2)
+Option<String>.some(b)
+Option<Int>.some(3)
+Option<String>.some(c)
+Option<Int>.some(4)
+Option<String>.none
+[1, 2, 3, 4, 5]

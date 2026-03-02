@@ -1,0 +1,15 @@
+42
+hello
+[5]
+(1, hi)
+42
+hello
+Pair<Int, Float> { first: 10, second: 2.5 }
+1
+Wrapper<Int>(42)
+42
+Wrapper<String>(hello)
+Option<Int>.some(42)
+Option<Int>.none
+10
+0

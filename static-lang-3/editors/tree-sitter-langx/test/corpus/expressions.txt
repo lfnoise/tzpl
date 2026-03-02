@@ -1,0 +1,396 @@
+================================================================================
+Integer literals
+================================================================================
+
+42;
+0xFF;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (expression_statement
+    (primary_expression
+      (integer_literal)))
+  (expression_statement
+    (primary_expression
+      (integer_literal))))
+
+================================================================================
+Float literal
+================================================================================
+
+3.14;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (expression_statement
+    (primary_expression
+      (float_literal))))
+
+================================================================================
+String literal
+================================================================================
+
+"hello world";
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (expression_statement
+    (primary_expression
+      (string_literal
+        (string_content)))))
+
+================================================================================
+Symbol literal
+================================================================================
+
+'ok;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (expression_statement
+    (primary_expression
+      (symbol_literal))))
+
+================================================================================
+Boolean literals
+================================================================================
+
+true;
+false;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (expression_statement
+    (primary_expression
+      (boolean_literal)))
+  (expression_statement
+    (primary_expression
+      (boolean_literal))))
+
+================================================================================
+Nil literal
+================================================================================
+
+nil;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (expression_statement
+    (primary_expression
+      (nil_literal))))
+
+================================================================================
+Binary arithmetic
+================================================================================
+
+a + b * c;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (expression_statement
+    (binary_expression
+      left: (primary_expression
+        (identifier))
+      right: (binary_expression
+        left: (primary_expression
+          (identifier))
+        right: (primary_expression
+          (identifier))))))
+
+================================================================================
+Function call
+================================================================================
+
+println(42);
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (expression_statement
+    (call_expression
+      function: (primary_expression
+        (identifier))
+      (primary_expression
+        (integer_literal)))))
+
+================================================================================
+Array literal
+================================================================================
+
+[1, 2, 3];
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (expression_statement
+    (array_expression
+      (primary_expression
+        (integer_literal))
+      (primary_expression
+        (integer_literal))
+      (primary_expression
+        (integer_literal)))))
+
+================================================================================
+Field access
+================================================================================
+
+point.x;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (expression_statement
+    (field_expression
+      object: (primary_expression
+        (identifier))
+      field: (identifier))))
+
+================================================================================
+Index expression
+================================================================================
+
+arr[0];
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (expression_statement
+    (index_expression
+      object: (primary_expression
+        (identifier))
+      index: (primary_expression
+        (integer_literal)))))
+
+================================================================================
+Ternary expression
+================================================================================
+
+x > 0 ? x : 0;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (expression_statement
+    (ternary_expression
+      condition: (binary_expression
+        left: (primary_expression
+          (identifier))
+        right: (primary_expression
+          (integer_literal)))
+      consequence: (primary_expression
+        (identifier))
+      alternative: (primary_expression
+        (integer_literal)))))
+
+================================================================================
+Lambda expression
+================================================================================
+
+let f = fn(x Int) { x * 2 };
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (let_declaration
+    pattern: (identifier)
+    value: (lambda_expression
+      (parameter_list
+        (parameter
+          name: (identifier)
+          type: (primitive_type)))
+      body: (block
+        (expression_statement
+          (binary_expression
+            left: (primary_expression
+              (identifier))
+            right: (primary_expression
+              (integer_literal))))))))
+
+================================================================================
+Struct construction
+================================================================================
+
+Point { x: 1, y: 2 };
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (expression_statement
+    (struct_construction
+      type: (identifier)
+      (struct_field_value
+        name: (identifier)
+        value: (primary_expression
+          (integer_literal)))
+      (struct_field_value
+        name: (identifier)
+        value: (primary_expression
+          (integer_literal))))))
+
+================================================================================
+Match expression
+================================================================================
+
+match (x) {
+    0: "zero";
+    _: "other";
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (expression_statement
+    (match_expression
+      value: (primary_expression
+        (identifier))
+      (match_arm
+        pattern: (pattern
+          (literal_pattern
+            (integer_literal)))
+        body: (primary_expression
+          (string_literal
+            (string_content))))
+      (match_arm
+        pattern: (pattern
+          (wildcard_pattern))
+        body: (primary_expression
+          (string_literal
+            (string_content)))))))
+
+================================================================================
+Line comment
+================================================================================
+
+-- this is a comment
+42;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (line_comment)
+  (expression_statement
+    (primary_expression
+      (integer_literal))))
+
+================================================================================
+Cons expression
+================================================================================
+
+1 :: 2 :: nil;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (expression_statement
+    (binary_expression
+      left: (primary_expression
+        (integer_literal))
+      right: (binary_expression
+        left: (primary_expression
+          (integer_literal))
+        right: (primary_expression
+          (nil_literal))))))
+
+================================================================================
+Pipeline expression
+================================================================================
+
+42 |> println;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (expression_statement
+    (binary_expression
+      left: (primary_expression
+        (integer_literal))
+      right: (primary_expression
+        (identifier)))))
+
+================================================================================
+For loop
+================================================================================
+
+for (x : arr) {
+    x;
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (for_statement
+    variable: (identifier)
+    iterable: (primary_expression
+      (identifier))
+    body: (block
+      (expression_statement
+        (primary_expression
+          (identifier))))))
+
+================================================================================
+While loop
+================================================================================
+
+while (i < 10) {
+    i;
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (while_statement
+    condition: (binary_expression
+      left: (primary_expression
+        (identifier))
+      right: (primary_expression
+        (integer_literal)))
+    body: (block
+      (expression_statement
+        (primary_expression
+          (identifier))))))
+
+================================================================================
+Space pipeline
+================================================================================
+
+arr sort println;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (expression_statement
+    (space_pipeline
+      value: (space_pipeline
+        value: (primary_expression
+          (identifier))
+        function: (identifier))
+      function: (identifier))))
+
+================================================================================
+Space pipeline with arguments
+================================================================================
+
+arr sort take(3) println;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (expression_statement
+    (space_pipeline
+      value: (space_pipeline
+        value: (space_pipeline
+          value: (primary_expression
+            (identifier))
+          function: (identifier))
+        function: (identifier)
+        (primary_expression
+          (integer_literal)))
+      function: (identifier))))

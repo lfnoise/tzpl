@@ -1,0 +1,5 @@
+Type error [tests/errors/rt_unsafe_call.x:2:1]
+  |
+2 | println("hello");
+  | ^-----^
+  Function 'println' is not real-time safe and cannot be called when compiling for a real-time VM

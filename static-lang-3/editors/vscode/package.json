@@ -1,0 +1,27 @@
+{
+  "name": "langx",
+  "displayName": "Language X",
+  "description": "Syntax highlighting for Language X (.x files)",
+  "version": "0.1.0",
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": ["Programming Languages"],
+  "contributes": {
+    "languages": [
+      {
+        "id": "langx",
+        "aliases": ["Language X", "langx"],
+        "extensions": [".x"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "langx",
+        "scopeName": "source.x",
+        "path": "./syntaxes/langx.tmLanguage.json"
+      }
+    ]
+  }
+}

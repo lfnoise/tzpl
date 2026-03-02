@@ -1,0 +1,28 @@
+Option<Int>.some(0)
+Option<Int>.some(1)
+Option<Int>.some(2)
+Option<Int>.none
+Option<Int>.some(1)
+Option<Int>.some(2)
+Option<Int>.some(3)
+Option<Int>.none
+0
+1
+2
+3
+List(0, 1, 2, 3, 4)
+Option<Int>.none
+Option<String>.some(hello)
+Option<String>.some(world)
+Option<String>.none
+Option<Int>.some(0)
+Option<Int>.some(0)
+Option<Int>.some(1)
+Option<Int>.some(1)
+Option<Int>.some(0)
+Option<Int>.some(1)
+Option<Int>.none
+List(1, 10, 20, 99)
+List(1, 10, 20, 99)
+List(1, 2, 999)
+List(100, 200, 999)

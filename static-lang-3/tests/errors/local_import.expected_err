@@ -1,0 +1,5 @@
+Parse error [tests/errors/local_import.x:3:5]
+  |
+3 |     import Math;
+  |     ^----^
+  Import declarations are only allowed at the top level

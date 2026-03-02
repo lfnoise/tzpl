@@ -1,0 +1,40 @@
+3.0
+1/3
+0.8333333333333333
+0.3333333333333333
+1+2i
+1+2i
+42
+3.14
+hello
+true
+[1, 2, 3]
+[1.0, 2.0, 3.0]
+(1, hello, 3.14, true)
+1
+hello
+3.14
+true
+42
+hello
+3.14
+true
+(1, hello)
+(true, 3.14)
+1
+hello
+true
+true
+false
+true
+true
+after side_effect
+42
+3.14
+hello
+true
+false
+1/3
+[1, 2, 3]
+(1, 2, 3)
+List(1, 2, 3)

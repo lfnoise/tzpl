@@ -1,0 +1,95 @@
+//
+//  langx.hpp
+//  Language X — C++ embedding API
+//
+//  Single include for embedding the Language X interpreter.
+//
+//  Usage:
+//      #include <langx.hpp>
+//
+//      ts::TypeUniverse types;
+//      ts::Compiler compiler(types);
+//      ts::VMTarget target = compiler.createTarget();
+//      ts::VM vm(64 * 1024 * 1024, types, target);
+//
+//      ts::CompileResult result = compiler.compile(source, "file.x", target);
+//      vm.makeCurrent();
+//      vm.install(result);
+//      vm.execute(result.mainBlock);
+//
+//  Multiple VMs can share a target:
+//      ts::VM vm2(64 * 1024 * 1024, types, target);
+//      vm2.install(result);  // same result, same target — works
+//
+//  Key types:
+//      ts::TypeUniverse  — shared type interning, one per process
+//      ts::Compiler      — compiles source code, one per process (NRT thread)
+//      ts::VMTarget      — shared compilation target (global layout)
+//      ts::CompileResult — output of compilation, bridge between Compiler and VM
+//      ts::VM            — executes compiled code, one per thread
+//
+
+#ifndef LANGX_HPP
+#define LANGX_HPP
+
+// Public embedding API headers
+#include "vm.hpp"
+#include "compiler.hpp"
+#include "type_universe.hpp"
+#include "error.hpp"
+
+namespace ts {
+
+// --- Exported function lookup ---
+
+// Find an exported function by name (and optionally by param types for overload selection).
+// Returns nullptr if not found.
+inline const CompileResult::ExportedFunc* findExportedFunction(
+    const CompileResult& result, const std::string& name,
+    const std::vector<Type*>& paramTypes = {}) {
+    for (auto& ef : result.exportedFunctions) {
+        if (ef.name != name) continue;
+        if (!paramTypes.empty()) {
+            if (ef.paramTypes.size() != paramTypes.size()) continue;
+            bool match = true;
+            for (size_t i = 0; i < paramTypes.size(); ++i) {
+                if (ef.paramTypes[i] != paramTypes[i]) { match = false; break; }
+            }
+            if (!match) continue;
+        }
+        return &ef;
+    }
+    return nullptr;
+}
+
+// --- Object accessor API ---
+
+// String
+const char* stringData(Obj* obj);
+size_t      stringSize(Obj* obj);
+
+// Fraction
+int64_t fractionNumer(Obj* obj);
+int64_t fractionDenom(Obj* obj);
+
+// Complex
+double complexReal(Obj* obj);
+double complexImag(Obj* obj);
+
+// Array
+size_t  arraySize(Obj* obj);
+int64_t arrayGetInt(Obj* obj, size_t index);
+double  arrayGetFloat(Obj* obj, size_t index);
+Obj*    arrayGetObj(Obj* obj, size_t index);
+
+// Tuple
+size_t tupleSize(Obj* obj);
+Word   tupleGet(Obj* obj, size_t index);
+
+// Struct
+size_t structFieldCount(Obj* obj);
+Word   structGetField(Obj* obj, size_t index);
+
+} // namespace ts
+
+#endif /* LANGX_HPP */

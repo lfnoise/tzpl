@@ -1,0 +1,14 @@
+Vec2 { x: -1.0, y: -2.0 }
+Vec2 { x: 1.0, y: 2.0 }
+Vec2 { x: -1.0, y: -2.0 }
+Vec2 { x: -1.0, y: -2.0 }
+Pair(-3, -7)
+Flag { val: false }
+Flag { val: true }
+Mask { bits: -1 }
+Mask { bits: -256 }
+Vec2 { x: 2.0, y: 2.0 }
+-42
+-3.14
+false
+-1

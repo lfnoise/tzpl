@@ -1,0 +1,11 @@
+Point { x: 4.0, y: 6.0 }
+Point { x: 2.0, y: 2.0 }
+Point { x: 2.0, y: 4.0 }
+true
+false
+Mask { bits: 15 }
+Mask { bits: 255 }
+Mask { bits: 240 }
+an integer
+a float
+a string

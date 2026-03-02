@@ -1,0 +1,16 @@
+-- Array-only Functions from Builtin_Functions.html
+
+-- reverse
+println([1, 2, 3, 4, 5] reverse);
+println([1, 2, 3] reverse);
+
+-- push
+println([1, 2, 3] push(4));
+
+-- pop
+println([1, 2, 3, 4] pop);
+println([1, 2, 3] pop);
+
+-- sort
+println([3, 1, 4, 1, 5, 9, 2, 6] sort);
+println([5, 3, 1, 4, 2] sort);

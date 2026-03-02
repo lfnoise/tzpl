@@ -1,0 +1,633 @@
+//
+//  synthdef_from_sexpr.cpp
+//  synthdef-compiler
+//
+//  Created by James McCartney on 1/11/25.
+//
+
+#include "synthdef_from_sexpr.hpp"
+#include "synthdef_value.hpp"
+#include "synthdef_builtin_ops.hpp"
+#include <print>
+
+namespace synthdef {
+
+SExprGraphBuilder::SExprGraphBuilder(std::string const& name) {
+    synth = new Synth(name);
+    PushSynth ps(synth);
+    // Graph is already created in Synth constructor
+}
+
+DelayBuf* SExprGraphBuilder::getOrCreateDelayBuf(int64_t delayId) {
+    auto it = delayMap.find(delayId);
+    if (it != delayMap.end()) {
+        return it->second.get();
+    }
+    D delay = new DelayBuf();
+    delayMap.emplace(delayId, delay);
+    synth->delayBufs.insert(delay);
+    return delay.get();
+}
+
+std::expected<vector<S>, std::string> SExprGraphBuilder::resolveInputs(sexpr::ItemVec const& inputList) {
+    vector<S> inputs;
+    for (auto const& item : inputList) {
+        if (!item.is<int64_t>()) {
+            return std::unexpected("Input ID must be an integer");
+        }
+        int64_t id = item.get<int64_t>();
+        auto it = exprMap.find(id);
+        if (it == exprMap.end()) {
+            return std::unexpected(std::format("Input ID {} not found", id));
+        }
+        inputs.push_back(it->second);
+    }
+    return inputs;
+}
+
+std::expected<S, std::string> SExprGraphBuilder::parseConstant(sexpr::ItemVec const& list) {
+    // Format: (id Constant chans type values)
+    if (list.size() < 5) {
+        return std::unexpected("Constant requires at least 5 elements");
+    }
+
+    if (!list[0].is<int64_t>()) return std::unexpected("ID must be integer");
+    int64_t id = list[0].get<int64_t>();
+
+    if (!list[2].is<int64_t>()) return std::unexpected("Chans must be integer");
+    int64_t chans = list[2].get<int64_t>();
+
+    if (!list[3].is<int64_t>()) return std::unexpected("Type must be integer");
+    int64_t typeVal = list[3].get<int64_t>();
+    NumType type((u32)typeVal);
+
+    // Parse values - could be a single value or a list
+    vector<f64> values;
+    if (list[4].is<sexpr::ItemVec>()) {
+        auto const& valList = list[4].get<sexpr::ItemVec>();
+        for (auto const& val : valList) {
+            if (val.is<double>()) {
+                values.push_back(val.get<double>());
+            } else if (val.is<int64_t>()) {
+                values.push_back((f64)val.get<int64_t>());
+            } else {
+                return std::unexpected("Constant value must be a number");
+            }
+        }
+    } else if (list[4].is<double>()) {
+        values.push_back(list[4].get<double>());
+    } else if (list[4].is<int64_t>()) {
+        values.push_back((f64)list[4].get<int64_t>());
+    }
+
+    Constant* c = new Constant(values, type);
+    c->chans = chans;
+    S expr = addConstantExpr(c);
+    exprMap[id] = expr;
+    return expr;
+}
+
+std::expected<S, std::string> SExprGraphBuilder::parseSampleRate(sexpr::ItemVec const& list) {
+    // Format: (id SampleRate)
+    if (list.size() < 2) {
+        return std::unexpected("SampleRate requires 2 elements");
+    }
+
+    if (!list[0].is<int64_t>()) return std::unexpected("ID must be integer");
+    int64_t id = list[0].get<int64_t>();
+
+    S expr = addExpr(new SampleRate());
+    exprMap[id] = expr;
+    return expr;
+}
+
+std::expected<S, std::string> SExprGraphBuilder::parseSampleDur(sexpr::ItemVec const& list) {
+    // Format: (id SampleDur)
+    if (list.size() < 2) {
+        return std::unexpected("SampleDur requires 2 elements");
+    }
+
+    if (!list[0].is<int64_t>()) return std::unexpected("ID must be integer");
+    int64_t id = list[0].get<int64_t>();
+
+    S expr = addExpr(new SampleDur());
+    exprMap[id] = expr;
+    return expr;
+}
+
+std::expected<S, std::string> SExprGraphBuilder::parseURand(sexpr::ItemVec const& list) {
+    // Format: (id URand rate chans)
+    if (list.size() < 4) {
+        return std::unexpected("URand requires 4 elements");
+    }
+
+    if (!list[0].is<int64_t>()) return std::unexpected("ID must be integer");
+    int64_t id = list[0].get<int64_t>();
+
+    if (!list[2].is<int64_t>()) return std::unexpected("Rate must be integer");
+    // TODO: parse rate properly
+
+    if (!list[3].is<int64_t>()) return std::unexpected("Chans must be integer");
+    int64_t chans = list[3].get<int64_t>();
+
+    S expr = addExpr(new URandExpr(chans));
+    exprMap[id] = expr;
+    return expr;
+}
+
+std::expected<S, std::string> SExprGraphBuilder::parseBiRand(sexpr::ItemVec const& list) {
+    // Format: (id BiRand rate chans)
+    if (list.size() < 4) {
+        return std::unexpected("BiRand requires 4 elements");
+    }
+
+    if (!list[0].is<int64_t>()) return std::unexpected("ID must be integer");
+    int64_t id = list[0].get<int64_t>();
+
+    if (!list[3].is<int64_t>()) return std::unexpected("Chans must be integer");
+    int64_t chans = list[3].get<int64_t>();
+
+    S expr = addExpr(new BiRandExpr(chans));
+    exprMap[id] = expr;
+    return expr;
+}
+
+std::expected<S, std::string> SExprGraphBuilder::parseRand64(sexpr::ItemVec const& list) {
+    // Format: (id Rand64 rate chans)
+    if (list.size() < 4) {
+        return std::unexpected("Rand64 requires 4 elements");
+    }
+
+    if (!list[0].is<int64_t>()) return std::unexpected("ID must be integer");
+    int64_t id = list[0].get<int64_t>();
+
+    if (!list[3].is<int64_t>()) return std::unexpected("Chans must be integer");
+    int64_t chans = list[3].get<int64_t>();
+
+    S expr = addExpr(new Rand64Expr(chans));
+    exprMap[id] = expr;
+    return expr;
+}
+
+std::expected<S, std::string> SExprGraphBuilder::parseInlet(sexpr::ItemVec const& list) {
+    // Format: (id Inlet name chans type)
+    if (list.size() < 5) {
+        return std::unexpected("Inlet requires 5 elements");
+    }
+
+    if (!list[0].is<int64_t>()) return std::unexpected("ID must be integer");
+    int64_t id = list[0].get<int64_t>();
+
+    if (!list[2].is<std::string>()) return std::unexpected("Name must be string");
+    std::string name = list[2].get<std::string>();
+
+    if (!list[3].is<int64_t>()) return std::unexpected("Chans must be integer");
+    int64_t chans = list[3].get<int64_t>();
+
+    if (!list[4].is<int64_t>()) return std::unexpected("Type must be integer");
+    int64_t typeVal = list[4].get<int64_t>();
+    NumType type((u32)typeVal);
+
+    S expr = addExpr(new Inlet(type, chans, name));
+    exprMap[id] = expr;
+    return expr;
+}
+
+std::expected<S, std::string> SExprGraphBuilder::parseOutlet(sexpr::ItemVec const& list) {
+    // Format: (id Outlet name value_id)
+    if (list.size() < 4) {
+        return std::unexpected("Outlet requires 4 elements");
+    }
+
+    if (!list[0].is<int64_t>()) return std::unexpected("ID must be integer");
+    int64_t id = list[0].get<int64_t>();
+
+    if (!list[2].is<std::string>()) return std::unexpected("Name must be string");
+    std::string name = list[2].get<std::string>();
+
+    if (!list[3].is<int64_t>()) return std::unexpected("Value ID must be integer");
+    int64_t valueId = list[3].get<int64_t>();
+
+    auto it = exprMap.find(valueId);
+    if (it == exprMap.end()) {
+        return std::unexpected(std::format("Value ID {} not found", valueId));
+    }
+
+    S expr = addExpr(new Outlet(it->second, name));
+    exprMap[id] = expr;
+    return expr;
+}
+
+// Helper to parse operator symbols
+std::expected<UnaryOp, std::string> parseUnaryOp(sexpr::Symbol const& sym) {
+    static std::unordered_map<std::string, UnaryOp> const opMap = {
+        {"-", UnaryOp::Neg}, {"!", UnaryOp::Not}, {"~", UnaryOp::BitNot},
+        {"abs", UnaryOp::Abs}, {"floor", UnaryOp::Floor}, {"ceil", UnaryOp::Ceil},
+        {"trunc", UnaryOp::Trunc}, {"sqrt", UnaryOp::Sqrt}, {"cbrt", UnaryOp::Cbrt},
+        {"exp", UnaryOp::Exp}, {"exp2", UnaryOp::Exp2}, {"exp10", UnaryOp::Exp10},
+        {"expm1", UnaryOp::Expm1}, {"log", UnaryOp::Log}, {"log2", UnaryOp::Log2},
+        {"log10", UnaryOp::Log10}, {"log1p", UnaryOp::Log1p},
+        {"sin", UnaryOp::Sin}, {"cos", UnaryOp::Cos}, {"tan", UnaryOp::Tan},
+        {"asin", UnaryOp::Asin}, {"acos", UnaryOp::Acos}, {"atan", UnaryOp::Atan},
+        {"sinh", UnaryOp::Sinh}, {"cosh", UnaryOp::Cosh}, {"tanh", UnaryOp::Tanh},
+        {"asinh", UnaryOp::Asinh}, {"acosh", UnaryOp::Acosh}, {"atanh", UnaryOp::Atanh},
+        {"sinpi", UnaryOp::SinPi}, {"cospi", UnaryOp::CosPi}, {"tanpi", UnaryOp::TanPi},
+        {"erf", UnaryOp::Erf}, {"erfc", UnaryOp::Erfc},
+    };
+
+    auto it = opMap.find(sym.name);
+    if (it == opMap.end()) {
+        return std::unexpected(std::format("Unknown unary operator: {}", sym.name));
+    }
+    return it->second;
+}
+
+std::expected<BinaryOp, std::string> parseBinaryOp(sexpr::Symbol const& sym) {
+    static std::unordered_map<std::string, BinaryOp> const opMap = {
+        {"+", BinaryOp::Add}, {"-", BinaryOp::Sub}, {"*", BinaryOp::Mul}, {"/", BinaryOp::Div},
+        {"%", BinaryOp::Mod}, {"&", BinaryOp::BitAnd}, {"|", BinaryOp::BitOr}, {"^", BinaryOp::BitXor},
+        {"<<", BinaryOp::ShiftLeft}, {">>", BinaryOp::ShiftRight}, {">>>", BinaryOp::UnsignedShiftRight},
+        {"min", BinaryOp::Min}, {"max", BinaryOp::Max}, {"pow", BinaryOp::Pow},
+        {"hypot", BinaryOp::Hypot}, {"atan2", BinaryOp::Atan2}, {"copysign", BinaryOp::Copysign},
+        {"mod", BinaryOp::Mod},
+    };
+
+    auto it = opMap.find(sym.name);
+    if (it == opMap.end()) {
+        return std::unexpected(std::format("Unknown binary operator: {}", sym.name));
+    }
+    return it->second;
+}
+
+std::expected<CompareOp, std::string> parseCompareOp(sexpr::Symbol const& sym) {
+    static std::unordered_map<std::string, CompareOp> const opMap = {
+        {"<", CompareOp::LT}, {"<=", CompareOp::LE}, {">", CompareOp::GT},
+        {">=", CompareOp::GE}, {"==", CompareOp::EQ}, {"!=", CompareOp::NE},
+    };
+
+    auto it = opMap.find(sym.name);
+    if (it == opMap.end()) {
+        return std::unexpected(std::format("Unknown compare operator: {}", sym.name));
+    }
+    return it->second;
+}
+
+std::expected<S, std::string> SExprGraphBuilder::parseUnaryOp(sexpr::ItemVec const& list) {
+    // Format: (id UnaryOp op (input_ids))
+    if (list.size() < 4) {
+        return std::unexpected("UnaryOp requires 4 elements");
+    }
+
+    if (!list[0].is<int64_t>()) return std::unexpected("ID must be integer");
+    int64_t id = list[0].get<int64_t>();
+
+    if (!list[2].is<sexpr::Symbol>()) return std::unexpected("Op must be symbol");
+    auto opResult = ::synthdef::parseUnaryOp(list[2].get<sexpr::Symbol>());
+    if (!opResult) return std::unexpected(opResult.error());
+
+    if (!list[3].is<sexpr::ItemVec>()) return std::unexpected("Inputs must be a list");
+    auto inputsResult = resolveInputs(list[3].get<sexpr::ItemVec>());
+    if (!inputsResult) return std::unexpected(inputsResult.error());
+    if (inputsResult->size() != 1) return std::unexpected("UnaryOp requires exactly 1 input");
+
+    S expr = addExpr(new UnaryOpExpr(opResult.value(), (*inputsResult)[0]));
+    exprMap[id] = expr;
+    return expr;
+}
+
+std::expected<S, std::string> SExprGraphBuilder::parseBinaryOp(sexpr::ItemVec const& list) {
+    // Format: (id BinaryOp op (input_ids))
+    if (list.size() < 4) {
+        return std::unexpected("BinaryOp requires 4 elements");
+    }
+
+    if (!list[0].is<int64_t>()) return std::unexpected("ID must be integer");
+    int64_t id = list[0].get<int64_t>();
+
+    if (!list[2].is<sexpr::Symbol>()) return std::unexpected("Op must be symbol");
+    auto opResult = ::synthdef::parseBinaryOp(list[2].get<sexpr::Symbol>());
+    if (!opResult) return std::unexpected(opResult.error());
+
+    if (!list[3].is<sexpr::ItemVec>()) return std::unexpected("Inputs must be a list");
+    auto inputsResult = resolveInputs(list[3].get<sexpr::ItemVec>());
+    if (!inputsResult) return std::unexpected(inputsResult.error());
+    if (inputsResult->size() != 2) return std::unexpected("BinaryOp requires exactly 2 inputs");
+
+    S expr = binary_op((*inputsResult)[0], (*inputsResult)[1], opResult.value());
+    exprMap[id] = expr;
+    return expr;
+}
+
+std::expected<S, std::string> SExprGraphBuilder::parseCompareOp(sexpr::ItemVec const& list) {
+    // Format: (id CompareOp op (input_ids))
+    if (list.size() < 4) {
+        return std::unexpected("CompareOp requires 4 elements");
+    }
+
+    if (!list[0].is<int64_t>()) return std::unexpected("ID must be integer");
+    int64_t id = list[0].get<int64_t>();
+
+    if (!list[2].is<sexpr::Symbol>()) return std::unexpected("Op must be symbol");
+    auto opResult = ::synthdef::parseCompareOp(list[2].get<sexpr::Symbol>());
+    if (!opResult) return std::unexpected(opResult.error());
+
+    if (!list[3].is<sexpr::ItemVec>()) return std::unexpected("Inputs must be a list");
+    auto inputsResult = resolveInputs(list[3].get<sexpr::ItemVec>());
+    if (!inputsResult) return std::unexpected(inputsResult.error());
+    if (inputsResult->size() != 2) return std::unexpected("CompareOp requires exactly 2 inputs");
+
+    S expr = compare_op((*inputsResult)[0], (*inputsResult)[1], opResult.value());
+    exprMap[id] = expr;
+    return expr;
+}
+
+std::expected<S, std::string> SExprGraphBuilder::parseCastOp(sexpr::ItemVec const& list) {
+    // Format: (id CastOp type (input_ids))
+    if (list.size() < 4) {
+        return std::unexpected("CastOp requires 4 elements");
+    }
+
+    if (!list[0].is<int64_t>()) return std::unexpected("ID must be integer");
+    int64_t id = list[0].get<int64_t>();
+
+    if (!list[2].is<int64_t>()) return std::unexpected("Type must be integer");
+    NumType type((u32)list[2].get<int64_t>());
+
+    if (!list[3].is<sexpr::ItemVec>()) return std::unexpected("Inputs must be a list");
+    auto inputsResult = resolveInputs(list[3].get<sexpr::ItemVec>());
+    if (!inputsResult) return std::unexpected(inputsResult.error());
+    if (inputsResult->size() != 1) return std::unexpected("CastOp requires exactly 1 input");
+
+    S expr = cast_op((*inputsResult)[0], type);
+    exprMap[id] = expr;
+    return expr;
+}
+
+std::expected<S, std::string> SExprGraphBuilder::parseVecReduce(sexpr::ItemVec const& list) {
+    // Format: (id VecReduce op cols (input_ids))
+    if (list.size() < 5) {
+        return std::unexpected("VecReduce requires 5 elements");
+    }
+
+    if (!list[0].is<int64_t>()) return std::unexpected("ID must be integer");
+    int64_t id = list[0].get<int64_t>();
+
+    if (!list[2].is<sexpr::Symbol>()) return std::unexpected("Op must be symbol");
+    auto opResult = ::synthdef::parseBinaryOp(list[2].get<sexpr::Symbol>());
+    if (!opResult) return std::unexpected(opResult.error());
+
+    if (!list[3].is<int64_t>()) return std::unexpected("Cols must be integer");
+    int64_t cols = list[3].get<int64_t>();
+
+    if (!list[4].is<sexpr::ItemVec>()) return std::unexpected("Inputs must be a list");
+    auto inputsResult = resolveInputs(list[4].get<sexpr::ItemVec>());
+    if (!inputsResult) return std::unexpected(inputsResult.error());
+    if (inputsResult->size() != 1) return std::unexpected("VecReduce requires exactly 1 input");
+
+    S expr = reduce((*inputsResult)[0], opResult.value(), cols);
+    exprMap[id] = expr;
+    return expr;
+}
+
+// Delay operations
+std::expected<S, std::string> SExprGraphBuilder::parseMaxDelay(sexpr::ItemVec const& list) {
+    // Format: (id MaxDelay delayVarId (input_ids))
+    if (list.size() < 4) {
+        return std::unexpected("MaxDelay requires 4 elements");
+    }
+
+    if (!list[0].is<int64_t>()) return std::unexpected("ID must be integer");
+    int64_t id = list[0].get<int64_t>();
+
+    if (!list[2].is<int64_t>()) return std::unexpected("DelayVar ID must be integer");
+    int64_t delayId = list[2].get<int64_t>();
+    DelayBuf* delayBuf = getOrCreateDelayBuf(delayId);
+
+    if (!list[3].is<sexpr::ItemVec>()) return std::unexpected("Inputs must be a list");
+    auto inputsResult = resolveInputs(list[3].get<sexpr::ItemVec>());
+    if (!inputsResult) return std::unexpected(inputsResult.error());
+    if (inputsResult->size() != 1) return std::unexpected("MaxDelay requires exactly 1 input");
+
+    S expr = addExpr(new MaxDelay(delayBuf, (*inputsResult)[0]));
+    delayBuf->maxDelay = expr;  // Set the maxDelay field on the delay buffer
+    exprMap[id] = expr;
+    return expr;
+}
+
+std::expected<S, std::string> SExprGraphBuilder::parseDelayInit(sexpr::ItemVec const& list) {
+    // Format: (id DelayInit delayVarId offset (input_ids))
+    if (list.size() < 5) {
+        return std::unexpected("DelayInit requires 5 elements");
+    }
+
+    if (!list[0].is<int64_t>()) return std::unexpected("ID must be integer");
+    int64_t id = list[0].get<int64_t>();
+
+    if (!list[2].is<int64_t>()) return std::unexpected("DelayVar ID must be integer");
+    int64_t delayId = list[2].get<int64_t>();
+    DelayBuf* delayBuf = getOrCreateDelayBuf(delayId);
+
+    if (!list[3].is<int64_t>()) return std::unexpected("Offset must be integer");
+    int64_t offset = list[3].get<int64_t>();
+
+    if (!list[4].is<sexpr::ItemVec>()) return std::unexpected("Inputs must be a list");
+    auto inputsResult = resolveInputs(list[4].get<sexpr::ItemVec>());
+    if (!inputsResult) return std::unexpected(inputsResult.error());
+    if (inputsResult->size() != 1) return std::unexpected("DelayInit requires exactly 1 input");
+
+    S expr = addExpr(new DelayInit(delayBuf, offset, (*inputsResult)[0]));
+    exprMap[id] = expr;
+    return expr;
+}
+
+std::expected<S, std::string> SExprGraphBuilder::parseDelayFixRead(sexpr::ItemVec const& list) {
+    // Format: (id DelayFixRead delayVarId offset)
+    if (list.size() < 4) {
+        return std::unexpected("DelayFixRead requires 4 elements");
+    }
+
+    if (!list[0].is<int64_t>()) return std::unexpected("ID must be integer");
+    int64_t id = list[0].get<int64_t>();
+
+    if (!list[2].is<int64_t>()) return std::unexpected("DelayVar ID must be integer");
+    int64_t delayId = list[2].get<int64_t>();
+    DelayBuf* delayBuf = getOrCreateDelayBuf(delayId);
+
+    if (!list[3].is<int64_t>()) return std::unexpected("Offset must be integer");
+    int64_t offset = list[3].get<int64_t>();
+
+    S expr = addExpr(new DelayFixRead(delayBuf, offset));
+    exprMap[id] = expr;
+    return expr;
+}
+
+std::expected<S, std::string> SExprGraphBuilder::parseDelayVarRead(sexpr::ItemVec const& list) {
+    // Format: (id DelayVarRead delayVarId (input_ids))
+    if (list.size() < 4) {
+        return std::unexpected("DelayVarRead requires 4 elements");
+    }
+
+    if (!list[0].is<int64_t>()) return std::unexpected("ID must be integer");
+    int64_t id = list[0].get<int64_t>();
+
+    if (!list[2].is<int64_t>()) return std::unexpected("DelayVar ID must be integer");
+    int64_t delayId = list[2].get<int64_t>();
+    DelayBuf* delayBuf = getOrCreateDelayBuf(delayId);
+
+    if (!list[3].is<sexpr::ItemVec>()) return std::unexpected("Inputs must be a list");
+    auto inputsResult = resolveInputs(list[3].get<sexpr::ItemVec>());
+    if (!inputsResult) return std::unexpected(inputsResult.error());
+    if (inputsResult->size() != 1) return std::unexpected("DelayVarRead requires exactly 1 input");
+
+    S expr = addExpr(new DelayVarRead(delayBuf, (*inputsResult)[0]));
+    exprMap[id] = expr;
+    return expr;
+}
+
+std::expected<S, std::string> SExprGraphBuilder::parseDelayWrite(sexpr::ItemVec const& list) {
+    // Format: (id DelayWrite delayVarId (input_ids))
+    if (list.size() < 4) {
+        return std::unexpected("DelayWrite requires 4 elements");
+    }
+
+    if (!list[0].is<int64_t>()) return std::unexpected("ID must be integer");
+    int64_t id = list[0].get<int64_t>();
+
+    if (!list[2].is<int64_t>()) return std::unexpected("DelayVar ID must be integer");
+    int64_t delayId = list[2].get<int64_t>();
+    DelayBuf* delayBuf = getOrCreateDelayBuf(delayId);
+
+    if (!list[3].is<sexpr::ItemVec>()) return std::unexpected("Inputs must be a list");
+    auto inputsResult = resolveInputs(list[3].get<sexpr::ItemVec>());
+    if (!inputsResult) return std::unexpected(inputsResult.error());
+    if (inputsResult->size() != 1) return std::unexpected("DelayWrite requires exactly 1 input");
+
+    S expr = addExpr(new DelayWrite(delayBuf, (*inputsResult)[0]));
+    exprMap[id] = expr;
+    return expr;
+}
+
+// Control flow - these need special handling for subgraphs
+std::expected<S, std::string> SExprGraphBuilder::parseSelectExpr(sexpr::ItemVec const& list) {
+    // Format: (id SelectExpr (input_ids))
+    if (list.size() < 3) {
+        return std::unexpected("SelectExpr requires 3 elements");
+    }
+
+    if (!list[0].is<int64_t>()) return std::unexpected("ID must be integer");
+    int64_t id = list[0].get<int64_t>();
+
+    if (!list[2].is<sexpr::ItemVec>()) return std::unexpected("Inputs must be a list");
+    auto inputsResult = resolveInputs(list[2].get<sexpr::ItemVec>());
+    if (!inputsResult) return std::unexpected(inputsResult.error());
+
+    S expr = addExpr(new SelectExpr(*inputsResult));
+    exprMap[id] = expr;
+    return expr;
+}
+
+// Control flow expressions with subgraphs - stub implementations for now
+// These need more complex handling
+std::expected<S, std::string> SExprGraphBuilder::parseIfExpr(sexpr::ItemVec const& list) {
+    // Format: (id IfExpr (input_ids) thenGraphId elseGraphId)
+    // TODO: Need to handle subgraph construction properly
+    return std::unexpected("IfExpr parsing not yet implemented - requires subgraph handling");
+}
+
+std::expected<S, std::string> SExprGraphBuilder::parseSwitchExpr(sexpr::ItemVec const& list) {
+    // Format: (id SwitchExpr (input_ids) (caseGraphIds))
+    // TODO: Need to handle subgraph construction properly
+    return std::unexpected("SwitchExpr parsing not yet implemented - requires subgraph handling");
+}
+
+std::expected<S, std::string> SExprGraphBuilder::parseForExpr(sexpr::ItemVec const& list) {
+    // Format: (id ForExpr (input_ids) bodyGraphId)
+    // TODO: Need to handle subgraph construction properly
+    return std::unexpected("ForExpr parsing not yet implemented - requires subgraph handling");
+}
+
+std::expected<S, std::string> SExprGraphBuilder::parseControl(sexpr::ItemVec const& list) {
+    // Format: (id Control name chans type spec)
+    // TODO: Need to parse ControlSpec
+    return std::unexpected("Control parsing not yet implemented - requires ControlSpec parsing");
+}
+
+std::expected<S, std::string> SExprGraphBuilder::parseExpr(sexpr::Item const& item) {
+    if (!item.is<sexpr::ItemVec>()) {
+        return std::unexpected("Expression must be a list");
+    }
+
+    auto const& list = item.get<sexpr::ItemVec>();
+    if (list.size() < 2) {
+        return std::unexpected("Expression list must have at least 2 elements");
+    }
+
+    if (!list[1].is<sexpr::Symbol>()) {
+        return std::unexpected("Second element must be a type symbol");
+    }
+
+    auto const& typeSym = list[1].get<sexpr::Symbol>();
+    std::string const& type = typeSym.name;
+
+    // Dispatch to appropriate parser based on type
+    if (type == "Constant") return parseConstant(list);
+    else if (type == "SampleRate") return parseSampleRate(list);
+    else if (type == "SampleDur") return parseSampleDur(list);
+    else if (type == "URand") return parseURand(list);
+    else if (type == "BiRand") return parseBiRand(list);
+    else if (type == "Rand64") return parseRand64(list);
+    else if (type == "Inlet") return parseInlet(list);
+    else if (type == "Outlet") return parseOutlet(list);
+    else if (type == "Control") return parseControl(list);
+    else if (type == "UnaryOp") return parseUnaryOp(list);
+    else if (type == "BinaryOp") return parseBinaryOp(list);
+    else if (type == "CompareOp") return parseCompareOp(list);
+    else if (type == "CastOp") return parseCastOp(list);
+    else if (type == "VecReduce") return parseVecReduce(list);
+    else if (type == "MaxDelay") return parseMaxDelay(list);
+    else if (type == "DelayInit") return parseDelayInit(list);
+    else if (type == "DelayFixRead") return parseDelayFixRead(list);
+    else if (type == "DelayVarRead") return parseDelayVarRead(list);
+    else if (type == "DelayWrite") return parseDelayWrite(list);
+    else if (type == "SelectExpr") return parseSelectExpr(list);
+    else if (type == "IfExpr") return parseIfExpr(list);
+    else if (type == "SwitchExpr") return parseSwitchExpr(list);
+    else if (type == "ForExpr") return parseForExpr(list);
+    else {
+        return std::unexpected(std::format("Unknown expression type: {}", type));
+    }
+}
+
+std::expected<Synth*, std::string> SExprGraphBuilder::buildFromSExpr(sexpr::ItemVec const& exprList) {
+    PushSynth ps(synth);
+
+    // Parse each expression in order
+    for (auto const& item : exprList) {
+        auto result = parseExpr(item);
+        if (!result) {
+            return std::unexpected(result.error());
+        }
+    }
+
+    return synth;
+}
+
+GraphResult synthFromSExprText(std::string const& sexprText, std::string const& synthName) {
+    auto parseResult = sexpr::parse_sexpr(sexprText);
+    if (!parseResult) {
+        return std::unexpected(std::format("Parse error: {}", parseResult.error()));
+    }
+
+    return synthFromSExpr(parseResult.value(), synthName);
+}
+
+GraphResult synthFromSExpr(sexpr::Item const& sexprRoot, std::string const& synthName) {
+    if (!sexprRoot.is<sexpr::ItemVec>()) {
+        return std::unexpected("Root must be a list of expressions");
+    }
+
+    SExprGraphBuilder builder(synthName);
+    return builder.buildFromSExpr(sexprRoot.get<sexpr::ItemVec>());
+}
+
+} // namespace synthdef

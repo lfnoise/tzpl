@@ -1,0 +1,6 @@
+(block "{" @indent "}" @outdent)
+(struct_body "{" @indent "}" @outdent)
+(enum_definition "{" @indent "}" @outdent)
+(match_expression "{" @indent "}" @outdent)
+(array_expression "[" @indent "]" @outdent)
+(parameter_list "(" @indent ")" @outdent)

@@ -1,0 +1,9 @@
+3.0
+3.0
+4.0
+Alice
+30
+3.0
+8.0
+Point { x: 3.0, y: 4.0 }
+Person { name: Alice, age: 30 }

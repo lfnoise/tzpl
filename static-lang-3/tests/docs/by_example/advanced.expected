@@ -1,0 +1,33 @@
+0
+1
+55
+55
+6765
+1
+2
+Fizz
+4
+Buzz
+Fizz
+7
+8
+Fizz
+Buzz
+11
+Fizz
+13
+14
+FizzBuzz
+16
+17
+Fizz
+19
+Buzz
+31875000
+0+1i
+-1+0i
+-0-1i
+1-0i
+Mask { bits: 15 }
+Mask { bits: 255 }
+Mask { bits: 4080 }

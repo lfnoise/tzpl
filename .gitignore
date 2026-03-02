@@ -1,0 +1,7 @@
+build/
+DerivedData/
+sapf3_dir/
+.DS_Store
+*.o
+*.a
+*.dylib

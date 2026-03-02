@@ -1,0 +1,15 @@
+IntList.empty
+IntList.cons(1, IntList.cons(2, IntList.cons(3, IntList.empty)))
+Node { value: 1, next: Option<Node>.none }
+Node { value: 1, next: Option<Node>.some(Node { value: 2, next: Option<Node>.none }) }
+Expr.lit(42)
+Expr.neg(Expr.lit(1))
+Expr.add(Expr.lit(1), Expr.neg(Expr.lit(2)))
+Tree { value: 1, children: ChildList.leaf }
+Tree { value: 0, children: ChildList.branch(Tree { value: 1, children: ChildList.leaf }, ChildList.leaf) }
+PairA { value: 1, other: Option<PairB>.some(PairB { value: 2, other: Option<PairA>.none }) }
+60
+42
+-5
+7
+60

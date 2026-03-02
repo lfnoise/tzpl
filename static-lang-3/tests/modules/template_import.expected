@@ -1,0 +1,11 @@
+42
+hello
+10
+(1, two)
+1007
+4.0
+99
+hello
+3.14
+Option<Int>.some(42)
+Option<Int>.none

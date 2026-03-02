@@ -1,0 +1,1992 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Built-in Functions Reference</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            line-height: 1.6;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+            color: #333;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background-color: white;
+            padding: 40px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+
+        h1 {
+            color: #2c3e50;
+            border-bottom: 3px solid #3498db;
+            padding-bottom: 10px;
+            margin-bottom: 30px;
+        }
+
+        h2 {
+            color: #34495e;
+            border-bottom: 2px solid #ecf0f1;
+            padding-bottom: 8px;
+            margin-top: 40px;
+            margin-bottom: 20px;
+        }
+
+        h3 {
+            color: #2c3e50;
+            margin-top: 30px;
+            margin-bottom: 15px;
+        }
+
+        .intro {
+            font-size: 1.1em;
+            color: #555;
+            background-color: #f8f9fa;
+            padding: 20px;
+            border-left: 4px solid #3498db;
+            margin-bottom: 30px;
+        }
+
+        .toc {
+            background-color: #f8f9fa;
+            padding: 20px;
+            border-radius: 5px;
+            margin-bottom: 30px;
+        }
+
+        .toc h2 {
+            margin-top: 0;
+            color: #2c3e50;
+            border-bottom: 1px solid #bdc3c7;
+        }
+
+        .toc ul {
+            list-style: none;
+            padding-left: 0;
+        }
+
+        .toc li {
+            margin: 8px 0;
+        }
+
+        .toc a {
+            color: #3498db;
+            text-decoration: none;
+            padding: 5px 10px;
+            display: block;
+            border-radius: 3px;
+            transition: background-color 0.2s;
+        }
+
+        .toc a:hover {
+            background-color: #e8f4f8;
+        }
+
+        code {
+            background-color: #ecf0f1;
+            color: #2c3e50;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Monaco', 'Consolas', 'Courier New', monospace;
+        }
+
+        pre {
+            background-color: #2c3e50;
+            color: #ecf0f1;
+            padding: 20px;
+            border-radius: 5px;
+            overflow-x: auto;
+            margin: 15px 0;
+            border-left: 4px solid #3498db;
+        }
+
+        pre code {
+            background-color: transparent;
+            color: inherit;
+            padding: 0;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 15px 0 25px 0;
+        }
+
+        th {
+            background-color: #34495e;
+            color: white;
+            padding: 12px 15px;
+            text-align: left;
+            font-weight: 600;
+        }
+
+        td {
+            padding: 10px 15px;
+            border-bottom: 1px solid #ecf0f1;
+        }
+
+        tr:hover {
+            background-color: #f8f9fa;
+        }
+
+        td code {
+            font-size: 0.95em;
+        }
+
+        .section {
+            margin-bottom: 40px;
+        }
+
+        .highlight {
+            background-color: #fff3cd;
+            padding: 15px;
+            border-left: 4px solid #ffc107;
+            margin: 15px 0;
+            border-radius: 0 5px 5px 0;
+        }
+
+        .note {
+            background-color: #e8f5e8;
+            padding: 15px;
+            border-left: 4px solid #27ae60;
+            margin: 15px 0;
+            border-radius: 0 5px 5px 0;
+        }
+
+        .overload-badge {
+            display: inline-block;
+            background-color: #3498db;
+            color: white;
+            font-size: 0.7em;
+            padding: 2px 6px;
+            border-radius: 3px;
+            vertical-align: middle;
+            margin-left: 6px;
+        }
+
+        .type-int { color: #2980b9; font-weight: 600; }
+        .type-float { color: #e67e22; font-weight: 600; }
+        .type-bool { color: #8e44ad; font-weight: 600; }
+        .type-fraction { color: #16a085; font-weight: 600; }
+        .type-complex { color: #c0392b; font-weight: 600; }
+        .type-range { color: #7f8c8d; font-weight: 600; }
+        .type-array { color: #2c3e50; font-weight: 600; }
+        .type-list { color: #27ae60; font-weight: 600; }
+
+        .back-to-top {
+            display: inline-block;
+            margin-top: 10px;
+            color: #3498db;
+            text-decoration: none;
+            font-size: 0.9em;
+        }
+
+        .back-to-top:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1 id="top">Built-in Functions Reference</h1>
+
+        <div class="intro">
+            This document lists all built-in functions available in the language. Functions are overloaded on their argument types &mdash; many function names accept multiple type signatures. All built-in functions are real-time safe.
+        </div>
+
+        <div class="toc">
+            <h2>Table of Contents</h2>
+            <ul>
+                <li><a href="#general">General Numeric Functions</a> &mdash; abs, sign, min, max, clamp, cmp, gcd, lcm</li>
+                <li><a href="#random">Random Number Generation</a> &mdash; urand, brand, irand, xrand, pick</li>
+                <li><a href="#rounding">Rounding Functions</a> &mdash; floor, ceil, round, trunc, frac</li>
+                <li><a href="#powers">Powers &amp; Roots</a> &mdash; sqrt, cbrt, pow, hypot</li>
+                <li><a href="#exponential">Exponential &amp; Logarithmic</a> &mdash; exp, exp2, exp10, expm1, log, log2, log10, log1p</li>
+                <li><a href="#trig">Trigonometric</a> &mdash; sin, cos, tan, asin, acos, atan, atan2, sinpi, cospi, tanpi</li>
+                <li><a href="#hyperbolic">Hyperbolic</a> &mdash; sinh, cosh, tanh, asinh, acosh, atanh</li>
+                <li><a href="#special">Special Functions</a> &mdash; erf, erfc, tgamma, lgamma</li>
+                <li><a href="#float-util">Float Utilities</a> &mdash; copysign, nextafter, isNan, isInf, isFinite, isNormal</li>
+                <li><a href="#bitwise">Bit Manipulation</a> &mdash; clz, clo, ctz, cto, popCount, rotl, rotr, bitCeil, bitFloor, bitWidth, hasSingleBit</li>
+                <li><a href="#complex">Complex Number Functions</a> &mdash; Complex, real, imag, arg, norm, conj, polar</li>
+                <li><a href="#string">String Functions</a> &mdash; length, substring, contains, startsWith, endsWith, split, trim, toUpper, toLower, replace, indexing, min, max, cmp</li>
+                <li><a href="#formatting">String Formatting</a> &mdash; fmt</li>
+                <li><a href="#range">Range Functions</a> &mdash; length, toArray, toList</li>
+                <li><a href="#collections">Collection Functions (Arrays &amp; Lists)</a> &mdash; length, map, filter, fold, scan, fold1, scan1, find, zip, enumerate, take, drop, takeWhile, dropWhile, stride, stutter, cat, join, flatten</li>
+                <li><a href="#array-only">Array-only Functions</a> &mdash; reverse, push, pop, sort, muss</li>
+                <li><a href="#list-only">List-only Functions</a> &mdash; head, tail, cons, isNil, notNil, cyc, ncyc, hang, iter</li>
+                <li><a href="#map-functions">Map Functions</a> &mdash; get, put, remove, contains, keys, values, pairs, merge, length</li>
+                <li><a href="#option-functions">Option Functions</a> &mdash; unwrap, unwrapOr, isSome, isNone</li>
+                <li><a href="#any-functions">Any Functions</a> &mdash; any, toAnyArray, as(Type)</li>
+                <li><a href="#coroutine-functions">Coroutine Functions</a> &mdash; next, yield, yieldAll, toList</li>
+                <li><a href="#set-functions">Set Functions</a> &mdash; add, remove, contains, union, intersection, difference, toArray, length</li>
+                <li><a href="#hashing">Hashing &amp; Equality</a> &mdash; hash, ==, !=</li>
+                <li><a href="#enum-functions">Enum Functions</a> &mdash; ordinal, tag</li>
+                <li><a href="#operators">Built-in Operators</a> &mdash; arithmetic, comparison, bitwise, logical, string</li>
+                <li><a href="#type-conversions">Type Conversions</a> &mdash; toInt, toFloat, toFraction, toComplex</li>
+                <li><a href="#io">I/O Functions</a> &mdash; print, println, getListPrintLimit, setListPrintLimit</li>
+            </ul>
+        </div>
+
+        <!-- ============================================================ -->
+        <div class="section" id="general">
+            <h2>General Numeric Functions</h2>
+            <p>These functions are overloaded across multiple numeric types.</p>
+
+            <h3><code>abs(x)</code></h3>
+            <p>Returns the absolute value of <code>x</code>.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>abs(Int) &rarr; Int</code></td><td>Absolute value of an integer.</td></tr>
+                <tr><td><code>abs(Float) &rarr; Float</code></td><td>Absolute value of a float.</td></tr>
+                <tr><td><code>abs(Fraction) &rarr; Fraction</code></td><td>Absolute value of a fraction.</td></tr>
+                <tr><td><code>abs(Complex) &rarr; Float</code></td><td>Magnitude (modulus) of a complex number.</td></tr>
+            </table>
+            <pre><code>-5 abs           <span style="color:#95a5a6">-- 5</span>
+-3.14 abs        <span style="color:#95a5a6">-- 3.14</span>
+(3+4i) abs       <span style="color:#95a5a6">-- 5.0</span></code></pre>
+
+            <h3><code>sign(x)</code></h3>
+            <p>Returns <code>-1</code>, <code>0</code>, or <code>1</code> indicating the sign of <code>x</code>.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>sign(Int) &rarr; Int</code></td><td>Sign of an integer.</td></tr>
+                <tr><td><code>sign(Float) &rarr; Int</code></td><td>Sign of a float.</td></tr>
+                <tr><td><code>sign(Fraction) &rarr; Int</code></td><td>Sign of a fraction.</td></tr>
+            </table>
+
+            <h3><code>min(a, b)</code></h3>
+            <p>Returns the smaller of two values.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>min(Int, Int) &rarr; Int</code></td><td>Minimum of two integers.</td></tr>
+                <tr><td><code>min(Float, Float) &rarr; Float</code></td><td>Minimum of two floats.</td></tr>
+                <tr><td><code>min(Fraction, Fraction) &rarr; Fraction</code></td><td>Minimum of two fractions.</td></tr>
+                <tr><td><code>min(String, String) &rarr; String</code></td><td>Lexicographically smaller of two strings.</td></tr>
+            </table>
+
+            <h3><code>max(a, b)</code></h3>
+            <p>Returns the larger of two values.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>max(Int, Int) &rarr; Int</code></td><td>Maximum of two integers.</td></tr>
+                <tr><td><code>max(Float, Float) &rarr; Float</code></td><td>Maximum of two floats.</td></tr>
+                <tr><td><code>max(Fraction, Fraction) &rarr; Fraction</code></td><td>Maximum of two fractions.</td></tr>
+                <tr><td><code>max(String, String) &rarr; String</code></td><td>Lexicographically larger of two strings.</td></tr>
+            </table>
+
+            <h3><code>clamp(x, lo, hi)</code></h3>
+            <p>Clamps <code>x</code> to the range [<code>lo</code>, <code>hi</code>].</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>clamp(Int, Int, Int) &rarr; Int</code></td><td>Clamp an integer to a range.</td></tr>
+                <tr><td><code>clamp(Float, Float, Float) &rarr; Float</code></td><td>Clamp a float to a range.</td></tr>
+                <tr><td><code>clamp(Fraction, Fraction, Fraction) &rarr; Fraction</code></td><td>Clamp a fraction to a range.</td></tr>
+            </table>
+            <pre><code>15 clamp(0, 10)      <span style="color:#95a5a6">-- 10</span>
+-5 clamp(0, 10)      <span style="color:#95a5a6">-- 0</span>
+5 clamp(0, 10)       <span style="color:#95a5a6">-- 5</span></code></pre>
+
+            <h3><code>cmp(a, b)</code></h3>
+            <p>Three-way comparison. Returns <code>-1</code> if <code>a &lt; b</code>, <code>0</code> if <code>a == b</code>, <code>1</code> if <code>a &gt; b</code>.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>cmp(Int, Int) &rarr; Int</code></td><td>Compare two integers.</td></tr>
+                <tr><td><code>cmp(Float, Float) &rarr; Int</code></td><td>Compare two floats.</td></tr>
+                <tr><td><code>cmp(Fraction, Fraction) &rarr; Int</code></td><td>Compare two fractions.</td></tr>
+                <tr><td><code>cmp(String, String) &rarr; Int</code></td><td>Lexicographic comparison of two strings.</td></tr>
+            </table>
+
+            <h3><code>gcd(a, b)</code></h3>
+            <p>Greatest common divisor of two integers. Always returns a non-negative result.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>gcd(Int, Int) &rarr; Int</code></td><td>Greatest common divisor.</td></tr>
+            </table>
+            <pre><code>gcd(12, 8)     <span style="color:#95a5a6">-- 4</span>
+gcd(7, 13)     <span style="color:#95a5a6">-- 1</span>
+gcd(0, 5)      <span style="color:#95a5a6">-- 5</span>
+gcd(-12, 8)    <span style="color:#95a5a6">-- 4</span></code></pre>
+
+            <h3><code>lcm(a, b)</code></h3>
+            <p>Least common multiple of two integers. Returns 0 if either argument is 0. Always returns a non-negative result.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>lcm(Int, Int) &rarr; Int</code></td><td>Least common multiple.</td></tr>
+            </table>
+            <pre><code>lcm(4, 6)      <span style="color:#95a5a6">-- 12</span>
+lcm(7, 13)     <span style="color:#95a5a6">-- 91</span>
+lcm(0, 5)      <span style="color:#95a5a6">-- 0</span>
+lcm(-4, 6)     <span style="color:#95a5a6">-- 12</span></code></pre>
+
+            <a href="#top" class="back-to-top">&uarr; Back to top</a>
+        </div>
+
+        <!-- ============================================================ -->
+        <div class="section" id="random">
+            <h2>Random Number Generation</h2>
+            <p>Random number functions use a per-VM <a href="https://prng.di.unimi.it/">xoshiro256**</a> generator, seeded from the system entropy source at VM creation. Each VM instance has its own independent RNG state. These functions are never constant-folded.</p>
+
+            <h3><code>urand()</code></h3>
+            <p>Returns a uniform random <code>Float</code> in the range [0.0, 1.0).</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>urand() &rarr; Float</code></td><td>Uniform random float in [0.0, 1.0).</td></tr>
+            </table>
+<pre><code>urand()    <span style="color:#95a5a6">-- e.g. 0.7320508075688772</span></code></pre>
+
+            <h3><code>urands()</code> / <code>urands(n)</code></h3>
+            <p>Multiple uniform random floats in [0.0, 1.0). With no arguments, returns an infinite lazy list. With one argument, returns an array of <code>n</code> values.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>urands() &rarr; List&lt;Float&gt;</code></td><td>Infinite lazy list of uniform random floats.</td></tr>
+                <tr><td><code>urands(Int) &rarr; [Float]</code></td><td>Array of <code>n</code> uniform random floats.</td></tr>
+            </table>
+<pre><code>urands() take(3)   <span style="color:#95a5a6">-- e.g. List(0.312, 0.449, 0.641)</span>
+urands(4)          <span style="color:#95a5a6">-- e.g. [0.041, 0.718, 0.013, 0.554]</span></code></pre>
+
+            <h3><code>brand()</code></h3>
+            <p>Returns a bipolar random <code>Float</code> in the range [-1.0, 1.0).</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>brand() &rarr; Float</code></td><td>Bipolar random float in [-1.0, 1.0).</td></tr>
+            </table>
+<pre><code>brand()    <span style="color:#95a5a6">-- e.g. -0.4142135623730951</span></code></pre>
+
+            <h3><code>brands()</code> / <code>brands(n)</code></h3>
+            <p>Multiple bipolar random floats in [-1.0, 1.0). With no arguments, returns an infinite lazy list. With one argument, returns an array of <code>n</code> values.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>brands() &rarr; List&lt;Float&gt;</code></td><td>Infinite lazy list of bipolar random floats.</td></tr>
+                <tr><td><code>brands(Int) &rarr; [Float]</code></td><td>Array of <code>n</code> bipolar random floats.</td></tr>
+            </table>
+<pre><code>brands() take(3)   <span style="color:#95a5a6">-- e.g. List(-0.945, 0.620, -0.570)</span>
+brands(4)          <span style="color:#95a5a6">-- e.g. [0.232, -0.846, -0.553, 0.714]</span></code></pre>
+
+            <h3><code>irand(lo, hi)</code></h3>
+            <p>Returns a uniform random <code>Int</code> in the inclusive range [lo, hi]. Uses unbiased rejection sampling. If <code>lo &gt; hi</code>, the arguments are swapped.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>irand(Int, Int) &rarr; Int</code></td><td>Uniform random integer in [lo, hi].</td></tr>
+            </table>
+<pre><code>irand(1, 6)      <span style="color:#95a5a6">-- e.g. 4 (simulates a die roll)</span>
+irand(0, 99)     <span style="color:#95a5a6">-- e.g. 42</span></code></pre>
+
+            <h3><code>irands(lo, hi)</code> / <code>irands(n, lo, hi)</code></h3>
+            <p>Multiple uniform random integers in [lo, hi]. With two arguments, returns an infinite lazy list. With three arguments, the first is the count <code>n</code> and returns an array.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>irands(Int, Int) &rarr; List&lt;Int&gt;</code></td><td>Infinite lazy list of uniform random integers in [lo, hi].</td></tr>
+                <tr><td><code>irands(Int, Int, Int) &rarr; [Int]</code></td><td>Array of <code>n</code> uniform random integers in [lo, hi].</td></tr>
+            </table>
+<pre><code>irands(1, 6) take(5)   <span style="color:#95a5a6">-- e.g. List(3, 6, 1, 4, 2)</span>
+irands(4, 1, 6)        <span style="color:#95a5a6">-- e.g. [5, 2, 6, 1]</span></code></pre>
+
+            <h3><code>rand(lo, hi)</code></h3>
+            <p>Returns a uniform random <code>Float</code> in the range [lo, hi).</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>rand(Float, Float) &rarr; Float</code></td><td>Uniform random float in [lo, hi).</td></tr>
+            </table>
+<pre><code>rand(5.0, 10.0)    <span style="color:#95a5a6">-- e.g. 7.764822845349203</span>
+rand(-1.0, 1.0)    <span style="color:#95a5a6">-- e.g. -0.271028337412</span></code></pre>
+
+            <h3><code>rands(lo, hi)</code> / <code>rands(n, lo, hi)</code></h3>
+            <p>Multiple uniform random floats in [lo, hi). With two arguments, returns an infinite lazy list. With three arguments, the first is the count <code>n</code> and returns an array.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>rands(Float, Float) &rarr; List&lt;Float&gt;</code></td><td>Infinite lazy list of uniform random floats in [lo, hi).</td></tr>
+                <tr><td><code>rands(Int, Float, Float) &rarr; [Float]</code></td><td>Array of <code>n</code> uniform random floats in [lo, hi).</td></tr>
+            </table>
+<pre><code>rands(5.0, 10.0) take(3)   <span style="color:#95a5a6">-- e.g. List(8.41, 7.51, 7.24)</span>
+rands(4, 5.0, 10.0)        <span style="color:#95a5a6">-- e.g. [6.07, 5.49, 6.27, 6.92]</span></code></pre>
+
+            <h3><code>xrand(lo, hi)</code></h3>
+            <p>Returns an exponentially distributed random <code>Float</code> in [lo, hi). Computed as <code>lo * pow(hi/lo, urand())</code>. Useful for generating values that span several orders of magnitude with equal probability per octave (e.g. frequencies, durations).</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>xrand(Float, Float) &rarr; Float</code></td><td>Exponentially distributed float in [lo, hi).</td></tr>
+            </table>
+<pre><code>xrand(20.0, 20000.0)   <span style="color:#95a5a6">-- e.g. 632.4555320336759 (random frequency)</span>
+xrand(0.01, 10.0)      <span style="color:#95a5a6">-- e.g. 0.2154434690031882 (random duration)</span></code></pre>
+
+            <h3><code>xrands(lo, hi)</code> / <code>xrands(n, lo, hi)</code></h3>
+            <p>Multiple exponentially distributed random floats in [lo, hi). With two arguments, returns an infinite lazy list. With three arguments, the first is the count <code>n</code> and returns an array.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>xrands(Float, Float) &rarr; List&lt;Float&gt;</code></td><td>Infinite lazy list of exponentially distributed floats in [lo, hi).</td></tr>
+                <tr><td><code>xrands(Int, Float, Float) &rarr; [Float]</code></td><td>Array of <code>n</code> exponentially distributed floats in [lo, hi).</td></tr>
+            </table>
+<pre><code>xrands(20.0, 20000.0) take(3)   <span style="color:#95a5a6">-- e.g. List(632.5, 47.8, 8841.2)</span>
+xrands(4, 0.01, 10.0)           <span style="color:#95a5a6">-- e.g. [0.215, 3.42, 0.078, 1.56]</span></code></pre>
+
+            <h3><code>pick(a)</code></h3>
+            <p>Returns a randomly chosen element from the array <code>a</code>.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>pick([T]) &rarr; T</code></td><td>Choose a random element from the array.</td></tr>
+            </table>
+<pre><code>pick([1, 2, 3, 4, 5])        <span style="color:#95a5a6">-- e.g. 3</span>
+pick(["red", "green", "blue"])  <span style="color:#95a5a6">-- e.g. "green"</span></code></pre>
+
+            <h3><code>picks(a)</code> / <code>picks(a, n)</code></h3>
+            <p>Returns random elements chosen from the array <code>a</code>. With one argument, returns an infinite lazy list of random picks. With two arguments, returns an array of <code>n</code> random picks.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>picks([T]) &rarr; List&lt;T&gt;</code></td><td>Infinite lazy list of random picks from the array.</td></tr>
+                <tr><td><code>picks([T], Int) &rarr; [T]</code></td><td>Array of <code>n</code> random picks from the array.</td></tr>
+            </table>
+<pre><code>picks([1, 2, 3]) take(5)     <span style="color:#95a5a6">-- e.g. List(2, 1, 3, 3, 1)</span>
+picks(["a", "b", "c"], 4)   <span style="color:#95a5a6">-- e.g. ["b", "a", "c", "a"]</span></code></pre>
+
+            <a href="#top" class="back-to-top">&uarr; Back to top</a>
+        </div>
+
+        <!-- ============================================================ -->
+        <div class="section" id="rounding">
+            <h2>Rounding Functions</h2>
+            <p>All rounding functions take a <code>Float</code> and return a <code>Float</code>.</p>
+
+            <table>
+                <tr><th>Function</th><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>floor(x)</code></td><td><code>Float &rarr; Float</code></td><td>Largest integer value &le; <code>x</code>.</td></tr>
+                <tr><td><code>ceil(x)</code></td><td><code>Float &rarr; Float</code></td><td>Smallest integer value &ge; <code>x</code>.</td></tr>
+                <tr><td><code>round(x)</code></td><td><code>Float &rarr; Float</code></td><td>Round to nearest integer (halfway cases round away from zero).</td></tr>
+                <tr><td><code>trunc(x)</code></td><td><code>Float &rarr; Float</code></td><td>Round toward zero (drop the fractional part).</td></tr>
+                <tr><td><code>frac(x)</code></td><td><code>Float &rarr; Float</code></td><td>Fractional part: <code>x - floor(x)</code>.</td></tr>
+            </table>
+            <pre><code>3.7 floor     <span style="color:#95a5a6">-- 3.0</span>
+3.2 ceil      <span style="color:#95a5a6">-- 4.0</span>
+2.5 round     <span style="color:#95a5a6">-- 3.0</span>
+-3.7 trunc    <span style="color:#95a5a6">-- -3.0</span>
+3.75 frac     <span style="color:#95a5a6">-- 0.75</span></code></pre>
+
+            <a href="#top" class="back-to-top">&uarr; Back to top</a>
+        </div>
+
+        <!-- ============================================================ -->
+        <div class="section" id="powers">
+            <h2>Powers &amp; Roots</h2>
+
+            <table>
+                <tr><th>Function</th><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>sqrt(x)</code></td><td><code>Float &rarr; Float</code></td><td>Square root.</td></tr>
+                <tr><td><code>sqrt(z)</code></td><td><code>Complex &rarr; Complex</code></td><td>Complex square root.</td></tr>
+                <tr><td><code>cbrt(x)</code></td><td><code>Float &rarr; Float</code></td><td>Cube root.</td></tr>
+                <tr><td><code>pow(x, y)</code></td><td><code>(Float, Float) &rarr; Float</code></td><td>Raise <code>x</code> to the power <code>y</code>.</td></tr>
+                <tr><td><code>pow(z, w)</code></td><td><code>(Complex, Complex) &rarr; Complex</code></td><td>Complex power.</td></tr>
+                <tr><td><code>hypot(x, y)</code></td><td><code>(Float, Float) &rarr; Float</code></td><td>Hypotenuse: <code>sqrt(x&sup2; + y&sup2;)</code> without overflow.</td></tr>
+                <tr><td><code>remainder(x, y)</code></td><td><code>(Float, Float) &rarr; Float</code></td><td>IEEE remainder of <code>x / y</code>. Result is <code>x &minus; n*y</code> where <code>n</code> is the nearest integer to <code>x/y</code>.</td></tr>
+            </table>
+            <pre><code>16.0 sqrt            <span style="color:#95a5a6">-- 4.0</span>
+27.0 cbrt            <span style="color:#95a5a6">-- 3.0</span>
+pow(2.0, 10.0)       <span style="color:#95a5a6">-- 1024.0</span>
+hypot(3.0, 4.0)      <span style="color:#95a5a6">-- 5.0</span>
+remainder(5.5, 2.0)  <span style="color:#95a5a6">-- -0.5</span></code></pre>
+
+            <a href="#top" class="back-to-top">&uarr; Back to top</a>
+        </div>
+
+        <!-- ============================================================ -->
+        <div class="section" id="exponential">
+            <h2>Exponential &amp; Logarithmic Functions</h2>
+
+            <table>
+                <tr><th>Function</th><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>exp(x)</code></td><td><code>Float &rarr; Float</code></td><td><i>e<sup>x</sup></i></td></tr>
+                <tr><td><code>exp(z)</code></td><td><code>Complex &rarr; Complex</code></td><td>Complex exponential.</td></tr>
+                <tr><td><code>exp2(x)</code></td><td><code>Float &rarr; Float</code></td><td>2<sup>x</sup></td></tr>
+                <tr><td><code>exp10(x)</code></td><td><code>Float &rarr; Float</code></td><td>10<sup>x</sup></td></tr>
+                <tr><td><code>expm1(x)</code></td><td><code>Float &rarr; Float</code></td><td><i>e<sup>x</sup></i> &minus; 1, accurate for small <code>x</code>.</td></tr>
+                <tr><td><code>log(x)</code></td><td><code>Float &rarr; Float</code></td><td>Natural logarithm (base <i>e</i>).</td></tr>
+                <tr><td><code>log(z)</code></td><td><code>Complex &rarr; Complex</code></td><td>Complex natural logarithm.</td></tr>
+                <tr><td><code>log2(x)</code></td><td><code>Float &rarr; Float</code></td><td>Base-2 logarithm.</td></tr>
+                <tr><td><code>log10(x)</code></td><td><code>Float &rarr; Float</code></td><td>Base-10 logarithm.</td></tr>
+                <tr><td><code>log1p(x)</code></td><td><code>Float &rarr; Float</code></td><td>log(1 + <code>x</code>), accurate for small <code>x</code>.</td></tr>
+            </table>
+            <pre><code>1.0 exp       <span style="color:#95a5a6">-- 2.718281828...</span>
+1.0 exp log   <span style="color:#95a5a6">-- 1.0</span>
+1024.0 log2   <span style="color:#95a5a6">-- 10.0</span>
+1000.0 log10  <span style="color:#95a5a6">-- 3.0</span></code></pre>
+
+            <a href="#top" class="back-to-top">&uarr; Back to top</a>
+        </div>
+
+        <!-- ============================================================ -->
+        <div class="section" id="trig">
+            <h2>Trigonometric Functions</h2>
+            <p>Standard trigonometric functions operate in radians. The <code>sinpi</code>, <code>cospi</code>, and <code>tanpi</code> variants compute <code>sin(&pi;x)</code>, <code>cos(&pi;x)</code>, and <code>tan(&pi;x)</code> with better accuracy at exact multiples.</p>
+
+            <h3>Standard (radians)</h3>
+            <table>
+                <tr><th>Function</th><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>sin(x)</code></td><td><code>Float &rarr; Float</code></td><td>Sine.</td></tr>
+                <tr><td><code>sin(z)</code></td><td><code>Complex &rarr; Complex</code></td><td>Complex sine.</td></tr>
+                <tr><td><code>cos(x)</code></td><td><code>Float &rarr; Float</code></td><td>Cosine.</td></tr>
+                <tr><td><code>cos(z)</code></td><td><code>Complex &rarr; Complex</code></td><td>Complex cosine.</td></tr>
+                <tr><td><code>tan(x)</code></td><td><code>Float &rarr; Float</code></td><td>Tangent.</td></tr>
+                <tr><td><code>tan(z)</code></td><td><code>Complex &rarr; Complex</code></td><td>Complex tangent.</td></tr>
+            </table>
+
+            <h3>Inverse trigonometric</h3>
+            <table>
+                <tr><th>Function</th><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>asin(x)</code></td><td><code>Float &rarr; Float</code></td><td>Arcsine. Result in [&minus;&pi;/2, &pi;/2].</td></tr>
+                <tr><td><code>asin(z)</code></td><td><code>Complex &rarr; Complex</code></td><td>Complex arcsine.</td></tr>
+                <tr><td><code>acos(x)</code></td><td><code>Float &rarr; Float</code></td><td>Arccosine. Result in [0, &pi;].</td></tr>
+                <tr><td><code>acos(z)</code></td><td><code>Complex &rarr; Complex</code></td><td>Complex arccosine.</td></tr>
+                <tr><td><code>atan(x)</code></td><td><code>Float &rarr; Float</code></td><td>Arctangent. Result in [&minus;&pi;/2, &pi;/2].</td></tr>
+                <tr><td><code>atan(z)</code></td><td><code>Complex &rarr; Complex</code></td><td>Complex arctangent.</td></tr>
+                <tr><td><code>atan2(y, x)</code></td><td><code>(Float, Float) &rarr; Float</code></td><td>Two-argument arctangent. Result in [&minus;&pi;, &pi;].</td></tr>
+            </table>
+
+            <h3>Pi-scaled</h3>
+            <table>
+                <tr><th>Function</th><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>sinpi(x)</code></td><td><code>Float &rarr; Float</code></td><td>sin(&pi; &middot; <code>x</code>). Exact at integer values.</td></tr>
+                <tr><td><code>cospi(x)</code></td><td><code>Float &rarr; Float</code></td><td>cos(&pi; &middot; <code>x</code>). Exact at half-integer values.</td></tr>
+                <tr><td><code>tanpi(x)</code></td><td><code>Float &rarr; Float</code></td><td>tan(&pi; &middot; <code>x</code>).</td></tr>
+            </table>
+            <pre><code>0.0 sin        <span style="color:#95a5a6">-- 0.0</span>
+1.0 sinpi      <span style="color:#95a5a6">-- 0.0  (exact)</span>
+0.5 cospi      <span style="color:#95a5a6">-- 0.0  (exact)</span>
+atan2(1.0, 1.0) <span style="color:#95a5a6">-- 0.7853... (pi/4)</span></code></pre>
+
+            <a href="#top" class="back-to-top">&uarr; Back to top</a>
+        </div>
+
+        <!-- ============================================================ -->
+        <div class="section" id="hyperbolic">
+            <h2>Hyperbolic Functions</h2>
+
+            <table>
+                <tr><th>Function</th><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>sinh(x)</code></td><td><code>Float &rarr; Float</code></td><td>Hyperbolic sine.</td></tr>
+                <tr><td><code>sinh(z)</code></td><td><code>Complex &rarr; Complex</code></td><td>Complex hyperbolic sine.</td></tr>
+                <tr><td><code>cosh(x)</code></td><td><code>Float &rarr; Float</code></td><td>Hyperbolic cosine.</td></tr>
+                <tr><td><code>cosh(z)</code></td><td><code>Complex &rarr; Complex</code></td><td>Complex hyperbolic cosine.</td></tr>
+                <tr><td><code>tanh(x)</code></td><td><code>Float &rarr; Float</code></td><td>Hyperbolic tangent.</td></tr>
+                <tr><td><code>tanh(z)</code></td><td><code>Complex &rarr; Complex</code></td><td>Complex hyperbolic tangent.</td></tr>
+                <tr><td><code>asinh(x)</code></td><td><code>Float &rarr; Float</code></td><td>Inverse hyperbolic sine.</td></tr>
+                <tr><td><code>asinh(z)</code></td><td><code>Complex &rarr; Complex</code></td><td>Complex inverse hyperbolic sine.</td></tr>
+                <tr><td><code>acosh(x)</code></td><td><code>Float &rarr; Float</code></td><td>Inverse hyperbolic cosine.</td></tr>
+                <tr><td><code>acosh(z)</code></td><td><code>Complex &rarr; Complex</code></td><td>Complex inverse hyperbolic cosine.</td></tr>
+                <tr><td><code>atanh(x)</code></td><td><code>Float &rarr; Float</code></td><td>Inverse hyperbolic tangent.</td></tr>
+                <tr><td><code>atanh(z)</code></td><td><code>Complex &rarr; Complex</code></td><td>Complex inverse hyperbolic tangent.</td></tr>
+            </table>
+
+            <a href="#top" class="back-to-top">&uarr; Back to top</a>
+        </div>
+
+        <!-- ============================================================ -->
+        <div class="section" id="special">
+            <h2>Special Functions</h2>
+
+            <table>
+                <tr><th>Function</th><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>erf(x)</code></td><td><code>Float &rarr; Float</code></td><td>Error function.</td></tr>
+                <tr><td><code>erfc(x)</code></td><td><code>Float &rarr; Float</code></td><td>Complementary error function: 1 &minus; erf(<code>x</code>).</td></tr>
+                <tr><td><code>tgamma(x)</code></td><td><code>Float &rarr; Float</code></td><td>Gamma function: &Gamma;(<code>x</code>).</td></tr>
+                <tr><td><code>lgamma(x)</code></td><td><code>Float &rarr; Float</code></td><td>Natural log of the absolute value of &Gamma;(<code>x</code>).</td></tr>
+            </table>
+            <pre><code>5.0 tgamma     <span style="color:#95a5a6">-- 24.0  (i.e. 4!)</span>
+0.0 erf        <span style="color:#95a5a6">-- 0.0</span></code></pre>
+
+            <a href="#top" class="back-to-top">&uarr; Back to top</a>
+        </div>
+
+        <!-- ============================================================ -->
+        <div class="section" id="float-util">
+            <h2>Float Utilities</h2>
+
+            <h3>Manipulation</h3>
+            <table>
+                <tr><th>Function</th><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>copysign(x, y)</code></td><td><code>(Float, Float) &rarr; Float</code></td><td>Returns <code>x</code> with the sign of <code>y</code>.</td></tr>
+                <tr><td><code>nextafter(x, y)</code></td><td><code>(Float, Float) &rarr; Float</code></td><td>Next representable float from <code>x</code> toward <code>y</code>.</td></tr>
+            </table>
+
+            <h3>Predicates</h3>
+            <table>
+                <tr><th>Function</th><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>isNan(x)</code></td><td><code>Float &rarr; Bool</code></td><td><code>true</code> if <code>x</code> is NaN (not a number).</td></tr>
+                <tr><td><code>isInf(x)</code></td><td><code>Float &rarr; Bool</code></td><td><code>true</code> if <code>x</code> is positive or negative infinity.</td></tr>
+                <tr><td><code>isFinite(x)</code></td><td><code>Float &rarr; Bool</code></td><td><code>true</code> if <code>x</code> is neither NaN nor infinity.</td></tr>
+                <tr><td><code>isNormal(x)</code></td><td><code>Float &rarr; Bool</code></td><td><code>true</code> if <code>x</code> is a normal floating-point number (not zero, subnormal, infinite, or NaN).</td></tr>
+            </table>
+            <pre><code>isNan(0.0 / 0.0)   <span style="color:#95a5a6">-- true</span>
+isInf(1.0 / 0.0)   <span style="color:#95a5a6">-- true</span>
+42.0 isFinite      <span style="color:#95a5a6">-- true</span></code></pre>
+
+            <a href="#top" class="back-to-top">&uarr; Back to top</a>
+        </div>
+
+        <!-- ============================================================ -->
+        <div class="section" id="bitwise">
+            <h2>Bit Manipulation Functions</h2>
+            <p>These functions operate on <code>Int</code> values, treating them as 64-bit unsigned quantities where applicable.</p>
+
+            <h3>Bit counting</h3>
+            <table>
+                <tr><th>Function</th><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>clz(x)</code></td><td><code>Int &rarr; Int</code></td><td>Count leading zeros. Returns 64 if <code>x</code> is 0.</td></tr>
+                <tr><td><code>clo(x)</code></td><td><code>Int &rarr; Int</code></td><td>Count leading ones.</td></tr>
+                <tr><td><code>ctz(x)</code></td><td><code>Int &rarr; Int</code></td><td>Count trailing zeros. Returns 64 if <code>x</code> is 0.</td></tr>
+                <tr><td><code>cto(x)</code></td><td><code>Int &rarr; Int</code></td><td>Count trailing ones.</td></tr>
+                <tr><td><code>popCount(x)</code></td><td><code>Int &rarr; Int</code></td><td>Count the number of set (1) bits.</td></tr>
+            </table>
+
+            <h3>Bit rotation</h3>
+            <table>
+                <tr><th>Function</th><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>rotl(x, n)</code></td><td><code>(Int, Int) &rarr; Int</code></td><td>Rotate bits left by <code>n</code> positions.</td></tr>
+                <tr><td><code>rotr(x, n)</code></td><td><code>(Int, Int) &rarr; Int</code></td><td>Rotate bits right by <code>n</code> positions.</td></tr>
+            </table>
+
+            <h3>Power-of-two utilities</h3>
+            <table>
+                <tr><th>Function</th><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>bitCeil(x)</code></td><td><code>Int &rarr; Int</code></td><td>Smallest power of 2 &ge; <code>x</code>.</td></tr>
+                <tr><td><code>bitFloor(x)</code></td><td><code>Int &rarr; Int</code></td><td>Largest power of 2 &le; <code>x</code>.</td></tr>
+                <tr><td><code>bitWidth(x)</code></td><td><code>Int &rarr; Int</code></td><td>Number of bits needed to represent <code>x</code>.</td></tr>
+                <tr><td><code>hasSingleBit(x)</code></td><td><code>Int &rarr; Bool</code></td><td><code>true</code> if exactly one bit is set (i.e., <code>x</code> is a power of 2).</td></tr>
+            </table>
+            <pre><code>1 clz             <span style="color:#95a5a6">-- 63</span>
+0xFF popCount     <span style="color:#95a5a6">-- 8</span>
+5 bitCeil         <span style="color:#95a5a6">-- 8</span>
+5 bitFloor        <span style="color:#95a5a6">-- 4</span>
+8 hasSingleBit    <span style="color:#95a5a6">-- true</span>
+6 hasSingleBit    <span style="color:#95a5a6">-- false</span></code></pre>
+
+            <a href="#top" class="back-to-top">&uarr; Back to top</a>
+        </div>
+
+        <!-- ============================================================ -->
+        <div class="section" id="complex">
+            <h2>Complex Number Functions</h2>
+            <p>Functions for constructing and decomposing complex numbers. Many standard math functions (<code>sqrt</code>, <code>sin</code>, <code>cos</code>, <code>exp</code>, <code>log</code>, <code>pow</code>, etc.) also have Complex overloads listed in their respective sections above.</p>
+
+            <h3><code>Complex(real, imag)</code></h3>
+            <p>Construct a complex number from real and imaginary parts. Both arguments are promoted to Float.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>Complex(Numeric, Numeric) &rarr; Complex</code></td><td>Create a complex number. Both arguments are converted to Float.</td></tr>
+            </table>
+            <pre><code>Complex(3.0, 4.0)    <span style="color:#95a5a6">-- 3.0+4.0i</span>
+Complex(1, 0)        <span style="color:#95a5a6">-- 1.0+0.0i</span></code></pre>
+
+            <h3>Decomposition &amp; Properties</h3>
+            <table>
+                <tr><th>Function</th><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>real(z)</code></td><td><code>Complex &rarr; Float</code></td><td>Extract the real part.</td></tr>
+                <tr><td><code>imag(z)</code></td><td><code>Complex &rarr; Float</code></td><td>Extract the imaginary part.</td></tr>
+                <tr><td><code>arg(z)</code></td><td><code>Complex &rarr; Float</code></td><td>Phase angle (argument) in radians. Result in [&minus;&pi;, &pi;].</td></tr>
+                <tr><td><code>norm(z)</code></td><td><code>Complex &rarr; Float</code></td><td>Squared magnitude: real&sup2; + imag&sup2;.</td></tr>
+                <tr><td><code>conj(z)</code></td><td><code>Complex &rarr; Complex</code></td><td>Complex conjugate: if <code>z = a+bi</code>, then <code>conj(z) = a-bi</code>.</td></tr>
+                <tr><td><code>polar(r, &theta;)</code></td><td><code>(Float, Float) &rarr; Complex</code></td><td>Create complex from polar coordinates: <code>r &middot; (cos&theta; + i&middot;sin&theta;)</code>.</td></tr>
+            </table>
+            <pre><code>let z = 3.0 + 4.0i
+z real      <span style="color:#95a5a6">-- 3.0</span>
+z imag      <span style="color:#95a5a6">-- 4.0</span>
+z abs       <span style="color:#95a5a6">-- 5.0</span>
+z norm      <span style="color:#95a5a6">-- 25.0</span>
+z conj      <span style="color:#95a5a6">-- 3.0-4.0i</span>
+z arg       <span style="color:#95a5a6">-- 0.9272... (radians)</span>
+polar(5.0, 0.0)  <span style="color:#95a5a6">-- 5.0+0.0i</span></code></pre>
+
+            <a href="#top" class="back-to-top">&uarr; Back to top</a>
+        </div>
+
+        <!-- ============================================================ -->
+        <!-- ============================================================ -->
+        <div class="section" id="string">
+            <h2>String Functions</h2>
+            <p>Functions that operate on <code>String</code> values. Strings store UTF-8 bytes. Comparisons and <code>cmp</code> use lexicographic (byte-wise) ordering.</p>
+
+            <h3>Size &amp; Comparison</h3>
+            <table>
+                <tr><th>Function</th><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>length(s)</code></td><td><code>String &rarr; Int</code></td><td>Number of bytes in the string.</td></tr>
+                <tr><td><code>min(a, b)</code></td><td><code>(String, String) &rarr; String</code></td><td>Lexicographically smaller string.</td></tr>
+                <tr><td><code>max(a, b)</code></td><td><code>(String, String) &rarr; String</code></td><td>Lexicographically larger string.</td></tr>
+                <tr><td><code>cmp(a, b)</code></td><td><code>(String, String) &rarr; Int</code></td><td>Returns &minus;1, 0, or 1.</td></tr>
+            </table>
+            <pre><code>"hello" length            <span style="color:#95a5a6">-- 5</span>
+"" length                 <span style="color:#95a5a6">-- 0</span>
+min("apple", "banana")   <span style="color:#95a5a6">-- "apple"</span>
+max("apple", "banana")   <span style="color:#95a5a6">-- "banana"</span>
+cmp("apple", "banana")   <span style="color:#95a5a6">-- -1</span>
+"abc" < "abd"            <span style="color:#95a5a6">-- true</span></code></pre>
+
+            <h3><code>substring(s, start, len)</code></h3>
+            <p>Returns a substring starting at byte offset <code>start</code> with at most <code>len</code> bytes.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>substring(String, Int, Int) &rarr; String</code></td><td>Extract a substring by byte position and length.</td></tr>
+            </table>
+            <pre><code>substring("hello world", 0, 5)    <span style="color:#95a5a6">-- "hello"</span>
+substring("hello world", 6, 5)    <span style="color:#95a5a6">-- "world"</span>
+substring("abcdef", 2, 3)         <span style="color:#95a5a6">-- "cde"</span></code></pre>
+
+            <h3><code>contains(s, sub)</code></h3>
+            <p>Returns <code>true</code> if the string contains the given substring.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>contains(String, String) &rarr; Bool</code></td><td>Test whether <code>sub</code> appears anywhere in <code>s</code>.</td></tr>
+            </table>
+            <pre><code>contains("hello world", "world")  <span style="color:#95a5a6">-- true</span>
+contains("hello world", "xyz")    <span style="color:#95a5a6">-- false</span>
+contains("abc", "")               <span style="color:#95a5a6">-- true</span></code></pre>
+
+            <h3><code>startsWith(s, prefix)</code></h3>
+            <p>Returns <code>true</code> if the string begins with <code>prefix</code>.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>startsWith(String, String) &rarr; Bool</code></td><td>Test for a prefix match.</td></tr>
+            </table>
+            <pre><code>startsWith("hello world", "hello")  <span style="color:#95a5a6">-- true</span>
+startsWith("hello world", "world")  <span style="color:#95a5a6">-- false</span></code></pre>
+
+            <h3><code>endsWith(s, suffix)</code></h3>
+            <p>Returns <code>true</code> if the string ends with <code>suffix</code>.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>endsWith(String, String) &rarr; Bool</code></td><td>Test for a suffix match.</td></tr>
+            </table>
+            <pre><code>endsWith("hello world", "world")  <span style="color:#95a5a6">-- true</span>
+endsWith("hello world", "hello")  <span style="color:#95a5a6">-- false</span></code></pre>
+
+            <h3><code>split(s, delimiter)</code></h3>
+            <p>Splits a string by the given delimiter and returns an array of substrings. An empty delimiter splits into individual bytes.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>split(String, String) &rarr; [String]</code></td><td>Split string by delimiter.</td></tr>
+            </table>
+            <pre><code>split("a,b,c", ",")             <span style="color:#95a5a6">-- ["a", "b", "c"]</span>
+split("one--two--three", "--")  <span style="color:#95a5a6">-- ["one", "two", "three"]</span>
+split("hello", "")              <span style="color:#95a5a6">-- ["h", "e", "l", "l", "o"]</span></code></pre>
+
+            <h3><code>trim(s)</code></h3>
+            <p>Returns a new string with leading and trailing whitespace removed.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>trim(String) &rarr; String</code></td><td>Strip leading and trailing whitespace.</td></tr>
+            </table>
+            <pre><code>trim("  hello  ")    <span style="color:#95a5a6">-- "hello"</span>
+trim("  leading")    <span style="color:#95a5a6">-- "leading"</span>
+trim("trailing  ")   <span style="color:#95a5a6">-- "trailing"</span></code></pre>
+
+            <h3><code>toUpper(s)</code> / <code>toLower(s)</code></h3>
+            <p>Returns a new string with all ASCII letters converted to upper or lower case.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>toUpper(String) &rarr; String</code></td><td>Convert to upper case.</td></tr>
+                <tr><td><code>toLower(String) &rarr; String</code></td><td>Convert to lower case.</td></tr>
+            </table>
+            <pre><code>toUpper("hello")        <span style="color:#95a5a6">-- "HELLO"</span>
+toLower("HELLO")        <span style="color:#95a5a6">-- "hello"</span>
+toUpper("Hello World")  <span style="color:#95a5a6">-- "HELLO WORLD"</span>
+toLower("Hello World")  <span style="color:#95a5a6">-- "hello world"</span></code></pre>
+
+            <h3><code>replace(s, from, to)</code></h3>
+            <p>Returns a new string with all occurrences of <code>from</code> replaced by <code>to</code>.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>replace(String, String, String) &rarr; String</code></td><td>Replace all occurrences of a substring.</td></tr>
+            </table>
+            <pre><code>replace("hello world", "world", "there")  <span style="color:#95a5a6">-- "hello there"</span>
+replace("aabbcc", "bb", "XX")              <span style="color:#95a5a6">-- "aaXXcc"</span>
+replace("abcabc", "abc", "x")              <span style="color:#95a5a6">-- "xx"</span></code></pre>
+
+            <h3>Byte Indexing</h3>
+            <p>Strings support the <code>[]</code> indexing operator to access individual bytes. The index is zero-based and the result is an <code>Int</code> representing the byte value (0&ndash;255).</p>
+            <table>
+                <tr><th>Expression</th><th>Type</th><th>Description</th></tr>
+                <tr><td><code>s[i]</code></td><td><code>Int</code></td><td>Byte value at index <code>i</code>.</td></tr>
+            </table>
+            <pre><code>let s = "hello";
+s[0]   <span style="color:#95a5a6">-- 104  (ASCII 'h')</span>
+s[1]   <span style="color:#95a5a6">-- 101  (ASCII 'e')</span>
+s[4]   <span style="color:#95a5a6">-- 111  (ASCII 'o')</span></code></pre>
+
+            <a href="#top" class="back-to-top">&uarr; Back to top</a>
+        </div>
+
+        <!-- ============================================================ -->
+        <div class="section" id="formatting">
+            <h2>String Formatting</h2>
+            <p>The <code>fmt</code> function formats a string by substituting placeholders with values. It takes variadic arguments &mdash; any number of values of any type.</p>
+
+            <h3><code>fmt(template, ...values)</code></h3>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>fmt(String, ...args) &rarr; String</code></td><td>Format a string by replacing placeholders with the given values.</td></tr>
+            </table>
+
+            <h3>Placeholders</h3>
+            <table>
+                <tr><th>Placeholder</th><th>Description</th></tr>
+                <tr><td><code>%^</code></td><td>Positional &mdash; replaced by the next value in order (left to right).</td></tr>
+                <tr><td><code>%0</code> &ndash; <code>%9</code></td><td>Indexed &mdash; replaced by the value at the given zero-based index. Can be repeated.</td></tr>
+                <tr><td><code>%%</code></td><td>Literal percent sign.</td></tr>
+            </table>
+
+            <pre><code><span style="color:#95a5a6">-- Positional placeholders</span>
+"%^ + %^ = %^" fmt(1, 2, 3)         <span style="color:#95a5a6">-- "1 + 2 = 3"</span>
+
+<span style="color:#95a5a6">-- Indexed placeholders (zero-based)</span>
+"%0 and %2 and %1" fmt("a", "b", "c")  <span style="color:#95a5a6">-- "a and c and b"</span>
+
+<span style="color:#95a5a6">-- Repeated index</span>
+"%0 %0 %0" fmt("echo")              <span style="color:#95a5a6">-- "echo echo echo"</span>
+
+<span style="color:#95a5a6">-- Escape percent</span>
+"100%% done" fmt()                   <span style="color:#95a5a6">-- "100% done"</span>
+"%%=%^" fmt(42)                      <span style="color:#95a5a6">-- "%=42"</span>
+
+<span style="color:#95a5a6">-- Works with any type</span>
+"half = %^" fmt(1/2)                 <span style="color:#95a5a6">-- "half = 1/2"</span>
+"array: %^" fmt([10, 20, 30])        <span style="color:#95a5a6">-- "array: [10, 20, 30]"</span>
+"list: %^" fmt(1::2::3::nil)         <span style="color:#95a5a6">-- "list: List(1, 2, 3)"</span>
+
+<span style="color:#95a5a6">-- Pipeline style (idiomatic)</span>
+"hello %^!" fmt("world") println;    <span style="color:#95a5a6">-- hello world!</span>
+"%^ items" fmt(42) println;          <span style="color:#95a5a6">-- 42 items</span>
+
+<span style="color:#95a5a6">-- Zero args when no placeholders</span>
+"no placeholders" fmt()              <span style="color:#95a5a6">-- "no placeholders"</span></code></pre>
+
+            <a href="#top" class="back-to-top">&uarr; Back to top</a>
+        </div>
+
+        <!-- ============================================================ -->
+        <div class="section" id="range">
+            <h2>Range Functions</h2>
+            <p>Functions that operate on <code>Range&lt;Int&gt;</code> values.</p>
+
+            <table>
+                <tr><th>Function</th><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>length(r)</code></td><td><code>Range&lt;Int&gt; &rarr; Int</code></td><td>Number of elements in the range. Returns <code>-1</code> for infinite ranges.</td></tr>
+                <tr><td><code>toArray(r)</code></td><td><code>Range&lt;Int&gt; &rarr; [Int]</code></td><td>Materialize the range into an array.</td></tr>
+                <tr><td><code>toList(r)</code></td><td><code>Range&lt;Int&gt; &rarr; List&lt;Int&gt;</code></td><td>Create a lazy list from the range. Elements are generated on demand.</td></tr>
+            </table>
+            <pre><code>let r = (1..5);
+r length     <span style="color:#95a5a6">-- 5</span>
+r toArray    <span style="color:#95a5a6">-- [1, 2, 3, 4, 5]</span>
+r toList     <span style="color:#95a5a6">-- List(1, 2, 3, 4, 5) (lazy)</span></code></pre>
+
+            <a href="#top" class="back-to-top">&uarr; Back to top</a>
+        </div>
+
+        <!-- ============================================================ -->
+        <div class="section" id="collections">
+            <h2>Collection Functions (Arrays &amp; Lists)</h2>
+            <p>These functions are overloaded to work on both <code>[T]</code> and <code>List&lt;T&gt;</code>. Array versions are eager (return a new array); list versions are lazy (return a lazily-evaluated list). All functions support pipeline syntax: <code>xs map(f)</code> is equivalent to <code>map(xs, f)</code>.</p>
+
+            <div class="highlight">
+                <strong>Pipeline syntax:</strong> All collection functions can be called in pipeline style.
+                <code>xs take(3) map(f) filter(g)</code> is equivalent to <code>filter(map(take(xs, 3), f), g)</code>.
+            </div>
+
+            <h3>Size</h3>
+
+            <h3><code>length(collection)</code></h3>
+            <p>Returns the number of elements in the collection.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>length([T]) &rarr; Int</code></td><td>Number of elements in the array.</td></tr>
+                <tr><td><code>length(List&lt;T&gt;) &rarr; Int</code></td><td>Number of elements in the list. <strong>Forces the entire list.</strong></td></tr>
+            </table>
+            <div class="highlight" style="border-left: 4px solid #e74c3c; background: #fdf2f2;">
+                <strong>Warning:</strong> <code>length</code> on a <code>List</code> forces every element. Calling it on an infinite list (e.g. from <code>cyc</code> or a range like <code>(1..)</code>) will <strong>never terminate</strong>.
+            </div>
+            <pre><code>[1, 2, 3, 4, 5] length             <span style="color:#95a5a6">-- 5</span>
+List(1, 2, 3) length               <span style="color:#95a5a6">-- 3</span>
+[10, 20, 30] length                <span style="color:#95a5a6">-- 3</span></code></pre>
+
+            <h3>Slicing &amp; Selection</h3>
+
+            <h3><code>take(collection, n)</code></h3>
+            <p>Returns the first <code>n</code> elements.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>take([T], Int) &rarr; [T]</code></td><td>First <code>n</code> elements of an array.</td></tr>
+                <tr><td><code>take(List&lt;T&gt;, Int) &rarr; List&lt;T&gt;</code></td><td>Lazily takes first <code>n</code> elements of a list.</td></tr>
+            </table>
+            <pre><code>[1, 2, 3, 4, 5] take(3)            <span style="color:#95a5a6">-- [1, 2, 3]</span>
+List(1, 2, 3, 4, 5) take(3)       <span style="color:#95a5a6">-- List(1, 2, 3)</span></code></pre>
+
+            <h3><code>drop(collection, n)</code></h3>
+            <p>Skips the first <code>n</code> elements and returns the rest.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>drop([T], Int) &rarr; [T]</code></td><td>All but the first <code>n</code> elements of an array.</td></tr>
+                <tr><td><code>drop(List&lt;T&gt;, Int) &rarr; List&lt;T&gt;</code></td><td>Eagerly skips <code>n</code> elements, returns the rest of the list.</td></tr>
+            </table>
+            <pre><code>[1, 2, 3, 4, 5] drop(2)            <span style="color:#95a5a6">-- [3, 4, 5]</span>
+List(1, 2, 3, 4, 5) drop(2)       <span style="color:#95a5a6">-- List(3, 4, 5)</span></code></pre>
+
+            <h3><code>takeWhile(collection, predicate)</code></h3>
+            <p>Returns elements from the front while the predicate holds.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>takeWhile([T], (T) &rarr; Bool) &rarr; [T]</code></td><td>Eagerly takes elements while predicate is true.</td></tr>
+                <tr><td><code>takeWhile(List&lt;T&gt;, (T) &rarr; Bool) &rarr; List&lt;T&gt;</code></td><td>Lazily takes elements while predicate is true.</td></tr>
+            </table>
+            <pre><code>[1, 2, 3, 4, 5] takeWhile(fn(x Int) { x < 4 })     <span style="color:#95a5a6">-- [1, 2, 3]</span></code></pre>
+
+            <h3><code>dropWhile(collection, predicate)</code></h3>
+            <p>Drops elements from the front while the predicate holds, returns the rest.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>dropWhile([T], (T) &rarr; Bool) &rarr; [T]</code></td><td>Eagerly drops elements while predicate is true.</td></tr>
+                <tr><td><code>dropWhile(List&lt;T&gt;, (T) &rarr; Bool) &rarr; List&lt;T&gt;</code></td><td>Lazily drops elements while predicate is true.</td></tr>
+            </table>
+            <pre><code>[1, 2, 3, 4, 5] dropWhile(fn(x Int) { x < 4 })     <span style="color:#95a5a6">-- [4, 5]</span></code></pre>
+
+            <h3><code>stride(collection, n)</code></h3>
+            <p>Takes every <em>n</em>th element, starting from the first.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>stride([T], Int) &rarr; [T]</code></td><td>Every <code>n</code>th element of an array.</td></tr>
+                <tr><td><code>stride(List&lt;T&gt;, Int) &rarr; List&lt;T&gt;</code></td><td>Lazily takes every <code>n</code>th element of a list.</td></tr>
+            </table>
+            <pre><code>[1, 2, 3, 4, 5, 6, 7] stride(2)            <span style="color:#95a5a6">-- [1, 3, 5, 7]</span>
+[1, 2, 3, 4, 5, 6, 7, 8, 9] stride(3)     <span style="color:#95a5a6">-- [1, 4, 7]</span></code></pre>
+
+            <h3><code>stutter(collection, n)</code></h3>
+            <p>Repeats each element <code>n</code> times.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>stutter([T], Int) &rarr; [T]</code></td><td>Repeat each element <code>n</code> times in an array.</td></tr>
+                <tr><td><code>stutter(List&lt;T&gt;, Int) &rarr; List&lt;T&gt;</code></td><td>Lazily repeats each element <code>n</code> times.</td></tr>
+            </table>
+            <pre><code>[1, 2, 3] stutter(2)            <span style="color:#95a5a6">-- [1, 1, 2, 2, 3, 3]</span>
+[1, 2, 3] stutter(3)            <span style="color:#95a5a6">-- [1, 1, 1, 2, 2, 2, 3, 3, 3]</span></code></pre>
+
+            <h3>Transformation</h3>
+
+            <h3><code>map(collection, fn)</code></h3>
+            <p>Applies a function to each element, returning a new collection of the results.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>map([T], (T) &rarr; U) &rarr; [U]</code></td><td>Eagerly maps over an array.</td></tr>
+                <tr><td><code>map(List&lt;T&gt;, (T) &rarr; U) &rarr; List&lt;U&gt;</code></td><td>Lazily maps over a list.</td></tr>
+            </table>
+            <pre><code>[1, 2, 3] map(fn(x Int) { x * x })         <span style="color:#95a5a6">-- [1, 4, 9]</span>
+[1, 2, 3] map(fn(x Int) { x * 2 })         <span style="color:#95a5a6">-- [2, 4, 6]</span>
+List(1, 2, 3) map(fn(x Int) { x + 10 })    <span style="color:#95a5a6">-- List(11, 12, 13)</span></code></pre>
+
+            <h3><code>filter(collection, predicate)</code></h3>
+            <p>Returns elements that satisfy the predicate.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>filter([T], (T) &rarr; Bool) &rarr; [T]</code></td><td>Eagerly filters an array.</td></tr>
+                <tr><td><code>filter(List&lt;T&gt;, (T) &rarr; Bool) &rarr; List&lt;T&gt;</code></td><td>Lazily filters a list.</td></tr>
+            </table>
+            <pre><code>[1, 2, 3, 4, 5] filter(fn(x Int) { x > 2 })     <span style="color:#95a5a6">-- [3, 4, 5]</span>
+[1, 2, 3, 4, 5] filter(fn(x Int) { x % 2 == 0 })  <span style="color:#95a5a6">-- [2, 4]</span></code></pre>
+
+            <h3><code>zip(a, b)</code></h3>
+            <p>Combines two collections element-wise into a collection of tuples. Result length is the shorter of the two inputs.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>zip([T], [U]) &rarr; [(T, U)]</code></td><td>Eagerly zips two arrays into an array of tuples.</td></tr>
+                <tr><td><code>zip(List&lt;T&gt;, List&lt;U&gt;) &rarr; List&lt;(T, U)&gt;</code></td><td>Lazily zips two lists into a list of tuples.</td></tr>
+            </table>
+            <pre><code>zip([1, 2, 3], [10, 20, 30])     <span style="color:#95a5a6">-- [(1, 10), (2, 20), (3, 30)]</span>
+zip(["a", "b"], [1, 2])         <span style="color:#95a5a6">-- [("a", 1), ("b", 2)]</span></code></pre>
+
+            <h3><code>enumerate(collection)</code></h3>
+            <p>Pairs each element with its zero-based index.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>enumerate([T]) &rarr; [(Int, T)]</code></td><td>Eagerly enumerates an array.</td></tr>
+                <tr><td><code>enumerate(List&lt;T&gt;) &rarr; List&lt;(Int, T)&gt;</code></td><td>Lazily enumerates a list.</td></tr>
+            </table>
+            <pre><code>["a", "b", "c"] enumerate      <span style="color:#95a5a6">-- [(0, "a"), (1, "b"), (2, "c")]</span>
+[10, 20, 30] enumerate         <span style="color:#95a5a6">-- [(0, 10), (1, 20), (2, 30)]</span></code></pre>
+
+            <h3>Folding &amp; Scanning</h3>
+
+            <h3><code>fold(collection, init, fn)</code></h3>
+            <p>Left fold (reduce) with an initial accumulator value.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>fold([T], U, (U, T) &rarr; U) &rarr; U</code></td><td>Fold over an array.</td></tr>
+                <tr><td><code>fold(List&lt;T&gt;, U, (U, T) &rarr; U) &rarr; U</code></td><td>Fold over a list (eager &mdash; forces the entire list).</td></tr>
+            </table>
+            <pre><code>[1, 2, 3, 4, 5] fold(0, fn(acc Int, x Int) { acc + x })    <span style="color:#95a5a6">-- 15</span>
+["a", "b", "c"] fold("", fn(s String, x String) { s $ x })  <span style="color:#95a5a6">-- "abc"</span></code></pre>
+
+            <h3><code>scan(collection, init, fn)</code></h3>
+            <p>Like <code>fold</code>, but returns all intermediate accumulator values. The result has one more element than the input (starts with <code>init</code>).</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>scan([T], U, (U, T) &rarr; U) &rarr; [U]</code></td><td>Eagerly scans an array.</td></tr>
+                <tr><td><code>scan(List&lt;T&gt;, U, (U, T) &rarr; U) &rarr; List&lt;U&gt;</code></td><td>Lazily scans a list.</td></tr>
+            </table>
+            <pre><code>[1, 2, 3, 4, 5] scan(0, fn(a Int, x Int) { a + x })
+    <span style="color:#95a5a6">-- [0, 1, 3, 6, 10, 15]  (running sum)</span></code></pre>
+
+            <h3><code>fold1(collection, fn)</code></h3>
+            <p>Left fold using the first element as the initial accumulator. The collection must be non-empty.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>fold1([T], (T, T) &rarr; T) &rarr; T</code></td><td>Fold over an array using first element as init.</td></tr>
+                <tr><td><code>fold1(List&lt;T&gt;, (T, T) &rarr; T) &rarr; T</code></td><td>Fold over a list using first element as init.</td></tr>
+            </table>
+            <pre><code>[1, 2, 3, 4, 5] fold1(fn(a Int, b Int) { a + b })     <span style="color:#95a5a6">-- 15</span>
+[3, 1, 4, 1, 5] fold1(fn(a Int, b Int) { max(a, b) })   <span style="color:#95a5a6">-- 5</span></code></pre>
+
+            <h3><code>scan1(collection, fn)</code></h3>
+            <p>Like <code>fold1</code>, but returns all intermediate accumulator values. The result has the same length as the input.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>scan1([T], (T, T) &rarr; T) &rarr; [T]</code></td><td>Eagerly scans an array.</td></tr>
+                <tr><td><code>scan1(List&lt;T&gt;, (T, T) &rarr; T) &rarr; List&lt;T&gt;</code></td><td>Lazily scans a list.</td></tr>
+            </table>
+            <pre><code>[1, 2, 3, 4, 5] scan1(fn(a Int, b Int) { a + b })
+    <span style="color:#95a5a6">-- [1, 3, 6, 10, 15]  (running sum without init)</span></code></pre>
+
+            <h3><code>find(collection, predicate)</code></h3>
+            <p>Returns the index of the first element satisfying the predicate, or <code>-1</code> if not found.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>find([T], (T) &rarr; Bool) &rarr; Int</code></td><td>Index of first match in an array.</td></tr>
+                <tr><td><code>find(List&lt;T&gt;, (T) &rarr; Bool) &rarr; Int</code></td><td>Index of first match in a list (forces elements until found).</td></tr>
+            </table>
+            <pre><code>[10, 20, 30, 40] find(fn(x Int) { x > 25 })     <span style="color:#95a5a6">-- 2  (index of 30)</span>
+[1, 2, 3] find(fn(x Int) { x > 10 })            <span style="color:#95a5a6">-- -1  (not found)</span></code></pre>
+
+            <h3>Combining</h3>
+
+            <h3><code>cat(a, b)</code></h3>
+            <p>Concatenates two collections of the same type.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>cat([T], [T]) &rarr; [T]</code></td><td>Concatenate two arrays.</td></tr>
+                <tr><td><code>cat(List&lt;T&gt;, List&lt;T&gt;) &rarr; List&lt;T&gt;</code></td><td>Lazily concatenate two lists.</td></tr>
+            </table>
+            <pre><code>cat([1, 2, 3], [4, 5, 6])                <span style="color:#95a5a6">-- [1, 2, 3, 4, 5, 6]</span>
+cat(List(1, 2), List(3, 4))              <span style="color:#95a5a6">-- List(1, 2, 3, 4)</span></code></pre>
+
+            <h3><code>join(collection)</code></h3>
+            <p>Flattens one level of nesting. Given a collection of collections, returns a single flat collection.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>join([[T]]) &rarr; [T]</code></td><td>Flatten an array of arrays.</td></tr>
+                <tr><td><code>join(List&lt;List&lt;T&gt;&gt;) &rarr; List&lt;T&gt;</code></td><td>Lazily flatten a list of lists.</td></tr>
+            </table>
+            <pre><code>[[1, 2], [3, 4], [5]] join             <span style="color:#95a5a6">-- [1, 2, 3, 4, 5]</span>
+List(List(1, 2), List(3, 4)) join      <span style="color:#95a5a6">-- List(1, 2, 3, 4)</span></code></pre>
+
+            <h3><code>flatten(collection)</code></h3>
+            <p>Recursively flattens all nesting levels of the same container type. Unlike <code>join</code> which removes only one level, <code>flatten</code> removes all levels of <code>Array</code> (or <code>List</code>) nesting until the element type is no longer the same container type.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>flatten([[...[T]...]]) &rarr; [T]</code></td><td>Recursively flatten all Array nesting levels.</td></tr>
+                <tr><td><code>flatten(List&lt;..List&lt;T&gt;..&gt;) &rarr; List&lt;T&gt;</code></td><td>Lazily flatten all List nesting levels.</td></tr>
+            </table>
+            <pre><code>[[1, 2], [3, 4]] flatten                        <span style="color:#95a5a6">-- [1, 2, 3, 4]  (same as join)</span>
+[[[1, 2], [3]], [[4, 5, 6]]] flatten            <span style="color:#95a5a6">-- [1, 2, 3, 4, 5, 6]  (all levels)</span>
+[[[List(1, 2)], [List(3)]]] flatten             <span style="color:#95a5a6">-- [List(1, 2), List(3)]  (stops at List)</span></code></pre>
+            <div class="note">
+                <code>flatten</code> only removes layers of the <em>same</em> container type. A <code>[[List&lt;Int&gt;]]</code> flattens to <code>[List&lt;Int&gt;]</code> &mdash; the array layers are removed but the List is preserved.
+            </div>
+
+            <a href="#top" class="back-to-top">&uarr; Back to top</a>
+        </div>
+
+        <!-- ============================================================ -->
+        <div class="section" id="array-only">
+            <h2>Array-only Functions</h2>
+            <p>These functions operate exclusively on <code>[T]</code>.</p>
+
+            <h3><code>reverse(array)</code></h3>
+            <p>Returns a new array with elements in reverse order.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>reverse([T]) &rarr; [T]</code></td><td>Reverse an array.</td></tr>
+            </table>
+            <pre><code>[1, 2, 3, 4, 5] reverse         <span style="color:#95a5a6">-- [5, 4, 3, 2, 1]</span>
+[1, 2, 3] reverse               <span style="color:#95a5a6">-- [3, 2, 1]</span></code></pre>
+
+            <h3><code>push(array, element)</code></h3>
+            <p>Returns a new array with the element appended at the end.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>push([T], T) &rarr; [T]</code></td><td>Append an element to an array.</td></tr>
+            </table>
+            <pre><code>[1, 2, 3] push(4)               <span style="color:#95a5a6">-- [1, 2, 3, 4]</span></code></pre>
+
+            <h3><code>pop(array)</code></h3>
+            <p>Returns a new array with the last element removed.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>pop([T]) &rarr; [T]</code></td><td>Remove the last element of an array.</td></tr>
+            </table>
+            <pre><code>[1, 2, 3, 4] pop                <span style="color:#95a5a6">-- [1, 2, 3]</span>
+[1, 2, 3] pop                   <span style="color:#95a5a6">-- [1, 2]</span></code></pre>
+
+            <h3><code>sort(array)</code></h3>
+            <p>Returns a new array sorted in ascending order.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>sort([Int]) &rarr; [Int]</code></td><td>Sort integers ascending.</td></tr>
+                <tr><td><code>sort([Float]) &rarr; [Float]</code></td><td>Sort floats ascending.</td></tr>
+                <tr><td><code>sort([String]) &rarr; [String]</code></td><td>Sort strings lexicographically.</td></tr>
+            </table>
+            <pre><code>[3, 1, 4, 1, 5, 9, 2, 6] sort     <span style="color:#95a5a6">-- [1, 1, 2, 3, 4, 5, 6, 9]</span>
+[5, 3, 1, 4, 2] sort              <span style="color:#95a5a6">-- [1, 2, 3, 4, 5]</span></code></pre>
+
+            <h3><code>muss(array)</code></h3>
+            <p>Returns a new array with elements in a scrambled (pseudo-random) order. Uses a deterministic shuffle based on array content.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>muss([T]) &rarr; [T]</code></td><td>Scramble an array.</td></tr>
+            </table>
+            <pre><code>[1, 2, 3, 4, 5] muss     <span style="color:#95a5a6">-- e.g. [3, 5, 1, 4, 2]</span></code></pre>
+
+            <a href="#top" class="back-to-top">&uarr; Back to top</a>
+        </div>
+
+        <!-- ============================================================ -->
+        <div class="section" id="list-only">
+            <h2>List-only Functions</h2>
+            <p>These functions operate exclusively on <code>List&lt;T&gt;</code>.</p>
+
+            <h3><code>head(list)</code></h3>
+            <p>Returns the first element of the list. Behavior is undefined on a nil list.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>head(List&lt;T&gt;) &rarr; T</code></td><td>First element of the list.</td></tr>
+            </table>
+            <pre><code>List(1, 2, 3) head     <span style="color:#95a5a6">-- 1</span>
+List(42) head          <span style="color:#95a5a6">-- 42</span></code></pre>
+
+            <h3><code>tail(list)</code></h3>
+            <p>Returns the list without its first element. Returns <code>nil</code> if the list has only one element. Behavior is undefined on a nil list.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>tail(List&lt;T&gt;) &rarr; List&lt;T&gt;</code></td><td>All elements after the first.</td></tr>
+            </table>
+            <pre><code>List(1, 2, 3) tail     <span style="color:#95a5a6">-- List(2, 3)</span>
+List(42) tail          <span style="color:#95a5a6">-- nil</span></code></pre>
+
+            <h3><code>cons(element, list)</code></h3>
+            <p>Prepends an element to the front of a list, returning a new list. The list may be <code>nil</code>.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>cons(T, List&lt;T&gt;) &rarr; List&lt;T&gt;</code></td><td>Prepend an element to a list.</td></tr>
+            </table>
+            <pre><code>cons(0, List(1, 2, 3))     <span style="color:#95a5a6">-- List(0, 1, 2, 3)</span>
+let empty List&lt;Int&gt; = nil;
+cons(1, empty)             <span style="color:#95a5a6">-- List(1)</span></code></pre>
+            <div class="highlight">
+                <strong>Note:</strong> The <code>::</code> (cons) operator provides equivalent functionality with infix syntax: <code>0 :: List(1, 2, 3)</code>.
+            </div>
+
+            <h3><code>isNil(list)</code> / <code>notNil(list)</code></h3>
+            <p>Test whether a list is empty (<code>nil</code>) or non-empty.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>isNil(List&lt;T&gt;) &rarr; Bool</code></td><td>Returns <code>true</code> if the list is <code>nil</code>.</td></tr>
+                <tr><td><code>notNil(List&lt;T&gt;) &rarr; Bool</code></td><td>Returns <code>true</code> if the list is not <code>nil</code>.</td></tr>
+            </table>
+            <pre><code>let xs = List(1, 2, 3);
+let empty List&lt;Int&gt; = nil;
+isNil(xs)       <span style="color:#95a5a6">-- false</span>
+isNil(empty)    <span style="color:#95a5a6">-- true</span>
+notNil(xs)      <span style="color:#95a5a6">-- true</span>
+notNil(empty)   <span style="color:#95a5a6">-- false</span></code></pre>
+
+            <h3><code>cyc(list)</code></h3>
+            <p>Returns an infinite list that cycles through the elements of the input list repeatedly.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>cyc(List&lt;T&gt;) &rarr; List&lt;T&gt;</code></td><td>Infinite cycle of a list.</td></tr>
+            </table>
+            <pre><code>List(1, 2, 3) cyc take(10)     <span style="color:#95a5a6">-- List(1, 2, 3, 1, 2, 3, 1, 2, 3, 1)</span>
+List(1, 2, 3) cyc take(7)      <span style="color:#95a5a6">-- List(1, 2, 3, 1, 2, 3, 1)</span></code></pre>
+
+            <h3><code>ncyc(list, n)</code></h3>
+            <p>Returns a list that repeats the input list <code>n</code> times.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>ncyc(List&lt;T&gt;, Int) &rarr; List&lt;T&gt;</code></td><td>Cycle a list <code>n</code> times.</td></tr>
+            </table>
+            <pre><code>List(1, 2, 3) ncyc(3)     <span style="color:#95a5a6">-- List(1, 2, 3, 1, 2, 3, 1, 2, 3)</span>
+List(1, 2) ncyc(4)        <span style="color:#95a5a6">-- List(1, 2, 1, 2, 1, 2, 1, 2)</span></code></pre>
+
+            <h3><code>hang(list)</code></h3>
+            <p>Returns an infinite list that, upon reaching the last element, repeats it indefinitely.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>hang(List&lt;T&gt;) &rarr; List&lt;T&gt;</code></td><td>Hang on the last element forever.</td></tr>
+            </table>
+            <pre><code>List(1, 2, 3) hang take(8)     <span style="color:#95a5a6">-- List(1, 2, 3, 3, 3, 3, 3, 3)</span>
+List(10, 20) hang take(5)      <span style="color:#95a5a6">-- List(10, 20, 20, 20, 20)</span></code></pre>
+
+            <h3><code>iter(value, fn)</code></h3>
+            <p>Returns an infinite list of repeated applications of <code>fn</code> to <code>value</code>: <code>value, fn(value), fn(fn(value)), &hellip;</code></p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>iter(T, (T) &rarr; T) &rarr; List&lt;T&gt;</code></td><td>Infinite iterated function application.</td></tr>
+            </table>
+            <pre><code>iter(1, fn(x Int) Int { x * 2 }) take(10)
+    <span style="color:#95a5a6">-- List(1, 2, 4, 8, 16, 32, 64, 128, 256, 512)</span>
+iter(0, fn(x Int) Int { x + 1 }) take(5)
+    <span style="color:#95a5a6">-- List(0, 1, 2, 3, 4)</span></code></pre>
+
+            <a href="#top" class="back-to-top">&uarr; Back to top</a>
+        </div>
+
+        <!-- ============================================================ -->
+        <div class="section" id="map-functions">
+            <h2>Map Functions</h2>
+            <p>Functions that operate on <code>[K: V]</code> values. Maps are immutable hash maps &mdash; all operations return a new map. Map literals use <code>[key: value]</code> syntax.</p>
+
+            <h3><code>get(map, key)</code> / <code>get(map, key, default)</code></h3>
+            <p>Retrieves the value for a key. The two-argument form returns <code>Option&lt;V&gt;</code> &mdash; <code>Option.some(value)</code> if found, <code>Option.none</code> if missing. The three-argument form returns the value directly, using the provided default if the key is missing.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>get([K: V], K) &rarr; Option&lt;V&gt;</code></td><td>Get value for key; returns <code>Option.some(v)</code> or <code>Option.none</code>.</td></tr>
+                <tr><td><code>get([K: V], K, V) &rarr; V</code></td><td>Get value for key; returns default if missing.</td></tr>
+            </table>
+            <pre><code>let m = ["a": 1, "b": 2, "c": 3];
+m get("b") println;              <span style="color:#95a5a6">-- Option&lt;Int&gt;.some(2)</span>
+m get("z") println;              <span style="color:#95a5a6">-- Option&lt;Int&gt;.none</span>
+m get("b") unwrap println;       <span style="color:#95a5a6">-- 2</span>
+m get("z", 99) println;          <span style="color:#95a5a6">-- 99 (not found, returns default)</span></code></pre>
+            <p>Map subscript syntax also returns <code>Option&lt;V&gt;</code>:</p>
+            <pre><code>m["b"] println;                   <span style="color:#95a5a6">-- Option&lt;Int&gt;.some(2)</span>
+m["z"] println;                   <span style="color:#95a5a6">-- Option&lt;Int&gt;.none</span>
+m["b"] unwrap println;            <span style="color:#95a5a6">-- 2</span>
+m["z"] unwrapOr(99) println;      <span style="color:#95a5a6">-- 99</span></code></pre>
+
+            <h3><code>put(map, key, value)</code></h3>
+            <p>Returns a new map with the key-value pair added or updated.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>put([K: V], K, V) &rarr; [K: V]</code></td><td>Add or update a key-value pair.</td></tr>
+            </table>
+            <pre><code>let m = ["a": 1];
+let m2 = m put("b", 2);
+m2 println;                      <span style="color:#95a5a6">-- [a: 1, b: 2]</span></code></pre>
+
+            <h3><code>remove(map, key)</code></h3>
+            <p>Returns a new map with the given key removed.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>remove([K: V], K) &rarr; [K: V]</code></td><td>Remove a key from the map.</td></tr>
+            </table>
+
+            <h3><code>contains(map, key)</code></h3>
+            <p>Returns <code>true</code> if the key exists in the map.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>contains([K: V], K) &rarr; Bool</code></td><td>Check if key exists.</td></tr>
+            </table>
+            <pre><code>let m = ["a": 1, "b": 2];
+m contains("a") println;         <span style="color:#95a5a6">-- true</span>
+m contains("z") println;         <span style="color:#95a5a6">-- false</span></code></pre>
+
+            <h3><code>keys(map)</code></h3>
+            <p>Returns an array of all keys in the map.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>keys([K: V]) &rarr; [K]</code></td><td>Get all keys.</td></tr>
+            </table>
+
+            <h3><code>values(map)</code></h3>
+            <p>Returns an array of all values in the map.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>values([K: V]) &rarr; [V]</code></td><td>Get all values.</td></tr>
+            </table>
+            <pre><code>let m = ["x": 10, "y": 20];
+m keys println;                  <span style="color:#95a5a6">-- ["x", "y"]</span>
+m values println;                <span style="color:#95a5a6">-- [10, 20]</span></code></pre>
+
+            <h3><code>pairs(map)</code></h3>
+            <p>Returns an array of <code>(key, value)</code> tuples from the map.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>pairs([K: V]) &rarr; [(K, V)]</code></td><td>Get all key-value pairs as tuples.</td></tr>
+            </table>
+            <pre><code>let m = ["a": 1, "b": 2, "c": 3];
+m pairs println;                 <span style="color:#95a5a6">-- [(a, 1), (b, 2), (c, 3)]</span></code></pre>
+
+            <h3><code>merge(map1, map2)</code></h3>
+            <p>Returns a new map containing all key-value pairs from both maps. Values from the second map override those in the first for duplicate keys.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>merge([K: V], [K: V]) &rarr; [K: V]</code></td><td>Merge two maps (second wins on conflicts).</td></tr>
+            </table>
+            <pre><code>let a = ["x": 1, "y": 2];
+let b = ["y": 99, "z": 3];
+merge(a, b) println;             <span style="color:#95a5a6">-- [x: 1, y: 99, z: 3]</span></code></pre>
+
+            <h3><code>length(map)</code></h3>
+            <p>Returns the number of key-value pairs in the map.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>length([K: V]) &rarr; Int</code></td><td>Number of entries in the map.</td></tr>
+            </table>
+
+            <a href="#top" class="back-to-top">&uarr; Back to top</a>
+        </div>
+
+        <!-- ============================================================ -->
+        <div class="section" id="option-functions">
+            <h2>Option Functions</h2>
+            <p>Functions that operate on <code>Option&lt;T&gt;</code> values. <code>Option&lt;T&gt;</code> is a built-in template enum with cases <code>some T</code> and <code>none</code>. It is returned by map subscript (<code>map[key]</code>) and <code>get(map, key)</code> to safely handle missing keys.</p>
+
+            <h3><code>unwrap(option)</code></h3>
+            <p>Extracts the value from a <code>some</code>. Halts with an error if the option is <code>none</code>.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>unwrap(Option&lt;T&gt;) &rarr; T</code></td><td>Extract the value; halts on none.</td></tr>
+            </table>
+            <pre><code>let m = ["a": 1, "b": 2];
+m["a"] unwrap println;            <span style="color:#95a5a6">-- 1</span>
+<span style="color:#95a5a6">-- m["z"] unwrap println;         -- would halt: unwrap called on none</span></code></pre>
+
+            <h3><code>unwrapOr(option, default)</code></h3>
+            <p>Extracts the value from a <code>some</code>, or returns the default value if <code>none</code>.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>unwrapOr(Option&lt;T&gt;, T) &rarr; T</code></td><td>Extract the value or use default.</td></tr>
+            </table>
+            <pre><code>let m = ["a": 1, "b": 2];
+m["a"] unwrapOr(99) println;      <span style="color:#95a5a6">-- 1</span>
+m["z"] unwrapOr(99) println;      <span style="color:#95a5a6">-- 99</span></code></pre>
+
+            <h3><code>isSome(option)</code></h3>
+            <p>Returns <code>true</code> if the option contains a value.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>isSome(Option&lt;T&gt;) &rarr; Bool</code></td><td>Check if option has a value.</td></tr>
+            </table>
+            <pre><code>let m = ["a": 1];
+m["a"] isSome println;            <span style="color:#95a5a6">-- true</span>
+m["z"] isSome println;            <span style="color:#95a5a6">-- false</span></code></pre>
+
+            <h3><code>isNone(option)</code></h3>
+            <p>Returns <code>true</code> if the option is empty (no value).</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>isNone(Option&lt;T&gt;) &rarr; Bool</code></td><td>Check if option is empty.</td></tr>
+            </table>
+            <pre><code>let m = ["a": 1];
+m["a"] isNone println;            <span style="color:#95a5a6">-- false</span>
+m["z"] isNone println;            <span style="color:#95a5a6">-- true</span></code></pre>
+
+            <a href="#top" class="back-to-top">&uarr; Back to top</a>
+        </div>
+
+        <!-- ============================================================ -->
+        <div class="section" id="any-functions">
+            <h2>Any Functions</h2>
+            <p>Functions for working with the <code>Any</code> type. <code>Any</code> wraps a value of any type into a uniform runtime object, enabling heterogeneous collections and dynamic type dispatch.</p>
+
+            <h3><code>any(value)</code></h3>
+            <p>Wraps a single value of any type into an <code>Any</code> object.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>any(T) &rarr; Any</code></td><td>Wrap a value of any type into Any.</td></tr>
+            </table>
+            <pre><code>any(<span style="color:#e67e22">5</span>) println;              <span style="color:#95a5a6">-- Any(5, Int)</span>
+any(<span style="color:#27ae60">"hello"</span>) println;        <span style="color:#95a5a6">-- Any(hello, String)</span>
+any(<span style="color:#e67e22">3.14</span>) println;           <span style="color:#95a5a6">-- Any(3.14, Float)</span>
+any(<span style="color:#e74c3c">true</span>) println;           <span style="color:#95a5a6">-- Any(true, Bool)</span></code></pre>
+
+            <h3><code>any(v1, v2, ...)</code></h3>
+            <p>Wraps multiple values and returns a <code>[Any]</code>.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>any(T1, T2, ...) &rarr; [Any]</code></td><td>Wrap each argument into Any and return as an array.</td></tr>
+            </table>
+            <pre><code>any(<span style="color:#e67e22">1</span>, <span style="color:#27ae60">"two"</span>, <span style="color:#e67e22">3.0</span>) println;
+<span style="color:#95a5a6">-- [Any(1, Int), Any(two, String), Any(3.0, Float)]</span>
+
+<span style="color:#95a5a6">-- Nested calls work</span>
+any(<span style="color:#e67e22">1</span>, any(<span style="color:#e67e22">2</span>, <span style="color:#e67e22">3</span>)) println;
+<span style="color:#95a5a6">-- [Any(1, Int), Any([Any(2, Int), Any(3, Int)], [Any])]</span></code></pre>
+
+            <h3><code>toAnyArray</code></h3>
+            <p>Converts a tuple to a <code>[Any]</code>, wrapping each element.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>toAnyArray(Tuple) &rarr; [Any]</code></td><td>Convert a tuple to a heterogeneous Any array.</td></tr>
+            </table>
+            <pre><code>(<span style="color:#e67e22">1</span>, <span style="color:#27ae60">"two"</span>, 'three, <span style="color:#e67e22">4.0</span>) toAnyArray println;
+<span style="color:#95a5a6">-- [Any(1, Int), Any(two, String), Any('three, Symbol), Any(4.0, Float)]</span></code></pre>
+
+            <h3><code>as(Type)</code></h3>
+            <p>Postfix type-test operator on <code>Any</code> values. Returns <code>Option&lt;T&gt;</code> &mdash; <code>some(value)</code> if the wrapped type matches, <code>none</code> otherwise.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>Any as(T) &rarr; Option&lt;T&gt;</code></td><td>Test and unwrap the Any value to the given type.</td></tr>
+            </table>
+            <pre><code><span style="color:#e74c3c">let</span> a = any(<span style="color:#e67e22">5</span>);
+a as(Int) println;           <span style="color:#95a5a6">-- Option&lt;Int&gt;.some(5)</span>
+a as(String) println;        <span style="color:#95a5a6">-- Option&lt;String&gt;.none</span></code></pre>
+
+            <a href="#top" class="back-to-top">&uarr; Back to top</a>
+        </div>
+
+        <!-- ============================================================ -->
+        <div class="section" id="coroutine-functions">
+            <h2>Coroutine Functions</h2>
+            <p>Functions for working with coroutines. A coroutine is declared with <code>coro fn</code> and produces a <code>Coroutine&lt;T&gt;</code> value that lazily yields elements of type <code>T</code>. See the <a href="Coroutines.html">Coroutines</a> guide for full language details.</p>
+
+            <h3><code>next(coroutine)</code></h3>
+            <p>Resumes the coroutine and returns the next yielded value wrapped in <code>Option&lt;T&gt;</code>. Returns <code>none</code> when the coroutine is exhausted.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>next(Coroutine&lt;T&gt;) &rarr; Option&lt;T&gt;</code></td><td>Resume and get the next value.</td></tr>
+            </table>
+            <pre><code>coro fn count(n Int) Int {
+    var i = 0;
+    while (i &lt; n) {
+        yield i;
+        i = i + 1;
+    }
+}
+
+let c = count(3);
+c next println;     <span style="color:#95a5a6">-- Option&lt;Int&gt;.some(0)</span>
+c next println;     <span style="color:#95a5a6">-- Option&lt;Int&gt;.some(1)</span>
+c next println;     <span style="color:#95a5a6">-- Option&lt;Int&gt;.some(2)</span>
+c next println;     <span style="color:#95a5a6">-- Option&lt;Int&gt;.none</span></code></pre>
+
+            <h3><code>yield(value)</code></h3>
+            <p>Suspends the coroutine and produces a value. Can only be used inside a <code>coro fn</code> body. Supports both call and pipeline syntax.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>yield(T) &rarr; Void</code></td><td>Suspend and produce a value.</td></tr>
+            </table>
+            <pre><code>coro fn example() Int {
+    yield 1;           <span style="color:#95a5a6">-- prefix form</span>
+    2 yield;           <span style="color:#95a5a6">-- pipeline form</span>
+    yield(3);          <span style="color:#95a5a6">-- explicit call form</span>
+}</code></pre>
+
+            <h3><code>yieldAll(coroutine)</code></h3>
+            <p>Delegates to another coroutine, yielding all of its values. Can only be used inside a <code>coro fn</code> body. The inner coroutine must have the same yield type.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>yieldAll(Coroutine&lt;T&gt;) &rarr; Void</code></td><td>Yield all values from another coroutine.</td></tr>
+            </table>
+            <pre><code>coro fn inner() Int {
+    yield 10;
+    yield 20;
+}
+
+coro fn outer() Int {
+    yield 1;
+    yieldAll(inner());   <span style="color:#95a5a6">-- yields 10, 20</span>
+    yield 99;
+}
+<span style="color:#95a5a6">-- outer() yields: 1, 10, 20, 99</span></code></pre>
+
+            <h3><code>toList(coroutine)</code></h3>
+            <p>Converts a coroutine into a lazy <code>List&lt;T&gt;</code>. The coroutine is resumed on demand as list elements are accessed, so this works with infinite coroutines when combined with lazy list operations like <code>take</code>.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>toList(Coroutine&lt;T&gt;) &rarr; List&lt;T&gt;</code></td><td>Convert coroutine to a lazy list.</td></tr>
+            </table>
+            <pre><code><span style="color:#95a5a6">-- Finite coroutine</span>
+count(5) toList println;            <span style="color:#95a5a6">-- List(0, 1, 2, 3, 4)</span>
+
+<span style="color:#95a5a6">-- Empty coroutine</span>
+count(0) toList println;            <span style="color:#95a5a6">-- nil</span>
+
+<span style="color:#95a5a6">-- Infinite coroutine with take</span>
+coro fn fibs() Int {
+    var a = 0;
+    var b = 1;
+    while (true) {
+        yield a;
+        let tmp = a + b;
+        a = b;
+        b = tmp;
+    }
+}
+fibs() toList take(8) println;      <span style="color:#95a5a6">-- List(0, 1, 1, 2, 3, 5, 8, 13)</span>
+
+<span style="color:#95a5a6">-- Chain with other list operations</span>
+count(5) toList head println;       <span style="color:#95a5a6">-- 0</span>
+count(5) toList drop(3) println;    <span style="color:#95a5a6">-- List(3, 4)</span>
+fibs() toList collect(6) println;   <span style="color:#95a5a6">-- [0, 1, 1, 2, 3, 5]</span></code></pre>
+
+            <a href="#top" class="back-to-top">&uarr; Back to top</a>
+        </div>
+
+        <!-- ============================================================ -->
+        <div class="section" id="set-functions">
+            <h2>Set Functions</h2>
+            <p>Functions that operate on <code>Set&lt;T&gt;</code> values. Sets are immutable hash sets &mdash; all operations return a new set. Sets are constructed with <code>Set(elem1, elem2, ...)</code>.</p>
+
+            <h3><code>add(set, element)</code></h3>
+            <p>Returns a new set with the element added.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>add(Set&lt;T&gt;, T) &rarr; Set&lt;T&gt;</code></td><td>Add an element to the set.</td></tr>
+            </table>
+
+            <h3><code>remove(set, element)</code></h3>
+            <p>Returns a new set with the element removed.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>remove(Set&lt;T&gt;, T) &rarr; Set&lt;T&gt;</code></td><td>Remove an element from the set.</td></tr>
+            </table>
+
+            <h3><code>contains(set, element)</code></h3>
+            <p>Returns <code>true</code> if the element exists in the set.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>contains(Set&lt;T&gt;, T) &rarr; Bool</code></td><td>Check if element exists.</td></tr>
+            </table>
+            <pre><code>let s = Set(1, 2, 3);
+s contains(2) println;           <span style="color:#95a5a6">-- true</span>
+s contains(5) println;           <span style="color:#95a5a6">-- false</span></code></pre>
+
+            <h3><code>union(set1, set2)</code></h3>
+            <p>Returns a set containing all elements from both sets.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>union(Set&lt;T&gt;, Set&lt;T&gt;) &rarr; Set&lt;T&gt;</code></td><td>Set union.</td></tr>
+            </table>
+
+            <h3><code>intersection(set1, set2)</code></h3>
+            <p>Returns a set containing only elements present in both sets.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>intersection(Set&lt;T&gt;, Set&lt;T&gt;) &rarr; Set&lt;T&gt;</code></td><td>Set intersection.</td></tr>
+            </table>
+
+            <h3><code>difference(set1, set2)</code></h3>
+            <p>Returns a set containing elements in the first set but not in the second.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>difference(Set&lt;T&gt;, Set&lt;T&gt;) &rarr; Set&lt;T&gt;</code></td><td>Set difference.</td></tr>
+            </table>
+            <pre><code>let a = Set(1, 2, 3, 4);
+let b = Set(3, 4, 5, 6);
+union(a, b) println;             <span style="color:#95a5a6">-- Set(1, 2, 3, 4, 5, 6)</span>
+intersection(a, b) println;      <span style="color:#95a5a6">-- Set(3, 4)</span>
+difference(a, b) println;        <span style="color:#95a5a6">-- Set(1, 2)</span></code></pre>
+
+            <h3><code>toArray(set)</code></h3>
+            <p>Converts the set to an array of its elements.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>toArray(Set&lt;T&gt;) &rarr; [T]</code></td><td>Convert set to array.</td></tr>
+            </table>
+            <pre><code>let s = Set(1, 2, 3);
+s toArray println;               <span style="color:#95a5a6">-- [1, 2, 3]</span></code></pre>
+
+            <h3><code>length(set)</code></h3>
+            <p>Returns the number of elements in the set.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>length(Set&lt;T&gt;) &rarr; Int</code></td><td>Number of elements in the set.</td></tr>
+            </table>
+
+            <a href="#top" class="back-to-top">&uarr; Back to top</a>
+        </div>
+
+        <!-- ============================================================ -->
+        <div class="section" id="hashing">
+            <h2>Hashing &amp; Equality</h2>
+
+            <h3><code>hash(x)</code></h3>
+            <p>Returns an integer hash value for any value. Consistent across calls: equal values always produce the same hash. User-defined <code>hash</code> overloads take priority over the built-in implementation.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>hash(Int) &rarr; Int</code></td><td>Hash an integer.</td></tr>
+                <tr><td><code>hash(Float) &rarr; Int</code></td><td>Hash a float.</td></tr>
+                <tr><td><code>hash(Bool) &rarr; Int</code></td><td>Hash a boolean.</td></tr>
+                <tr><td><code>hash(Symbol) &rarr; Int</code></td><td>Hash a symbol.</td></tr>
+                <tr><td><code>hash(T) &rarr; Int</code></td><td>Hash any object type (String, Array, Tuple, Struct, Enum, etc.). Uses structural hashing.</td></tr>
+            </table>
+            <pre><code>hash(42) println;                <span style="color:#95a5a6">-- integer hash value</span>
+hash(3.14) println;              <span style="color:#95a5a6">-- integer hash value</span>
+hash('foo) println;              <span style="color:#95a5a6">-- integer hash value</span>
+
+<span style="color:#95a5a6">-- Equal values produce equal hashes</span>
+println(hash((1, 2)) == hash((1, 2)));     <span style="color:#95a5a6">-- true</span>
+println(hash([1, 2, 3]) == hash([1, 2, 3]));  <span style="color:#95a5a6">-- true</span></code></pre>
+
+            <h3>Universal Equality (<code>==</code> / <code>!=</code>)</h3>
+            <p>The <code>==</code> and <code>!=</code> operators work on all types with matching operands. For object types (Structs, Tuples, Arrays, Enums, etc.), structural equality is used: two values are equal if all their fields/elements are equal. User-defined <code>==</code> overloads take priority over built-in structural equality.</p>
+            <pre><code><span style="color:#95a5a6">-- Struct equality</span>
+struct Point { x Int, y Int }
+let p1 = Point{1, 2};
+println(p1 == Point{1, 2});      <span style="color:#95a5a6">-- true</span>
+println(p1 == Point{3, 4});      <span style="color:#95a5a6">-- false</span>
+
+<span style="color:#95a5a6">-- Tuple equality</span>
+println((1, 2) == (1, 2));       <span style="color:#95a5a6">-- true</span>
+
+<span style="color:#95a5a6">-- Array equality</span>
+println([1, 2, 3] == [1, 2, 3]); <span style="color:#95a5a6">-- true</span>
+
+<span style="color:#95a5a6">-- Symbol equality</span>
+println('foo == 'foo);           <span style="color:#95a5a6">-- true</span>
+
+<span style="color:#95a5a6">-- Enum equality</span>
+enum Color { red, green, blue }
+println(Color.red == Color.red); <span style="color:#95a5a6">-- true</span>
+
+<span style="color:#95a5a6">-- User-defined == overrides structural equality</span>
+struct Vec2 { x Float, y Float }
+fn ==(a Vec2, b Vec2) Bool {
+    let dx = a.x - b.x;
+    let dy = a.y - b.y;
+    dx * dx + dy * dy < 0.001    <span style="color:#95a5a6">-- approximate equality</span>
+}</code></pre>
+
+            <a href="#top" class="back-to-top">&uarr; Back to top</a>
+        </div>
+
+        <!-- ============================================================ -->
+        <div class="section" id="enum-functions">
+            <h2>Enum Functions</h2>
+
+            <h3><code>ordinal(enum_value)</code></h3>
+            <p>Returns the zero-based index of the enum case.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>ordinal(Enum) &rarr; Int</code></td><td>Get the case index of an enum value.</td></tr>
+            </table>
+            <pre><code>enum Color { red, green, blue }
+ordinal(Color.red) println;      <span style="color:#95a5a6">-- 0</span>
+ordinal(Color.green) println;    <span style="color:#95a5a6">-- 1</span>
+ordinal(Color.blue) println;     <span style="color:#95a5a6">-- 2</span></code></pre>
+
+            <h3><code>tag(enum_value)</code></h3>
+            <p>Returns the case name of an enum value as a Symbol.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>tag(Enum) &rarr; Symbol</code></td><td>Get the case name of an enum value.</td></tr>
+            </table>
+            <pre><code>enum Color { red, green, blue }
+tag(Color.red) println;      <span style="color:#95a5a6">-- 'red</span>
+tag(Color.green) println;    <span style="color:#95a5a6">-- 'green</span>
+tag(Color.blue) println;     <span style="color:#95a5a6">-- 'blue</span>
+
+enum Option { some Int, none }
+tag(Option.some(42)) println;  <span style="color:#95a5a6">-- 'some</span>
+tag(Option.none) println;      <span style="color:#95a5a6">-- 'none</span></code></pre>
+
+            <a href="#top" class="back-to-top">&uarr; Back to top</a>
+        </div>
+
+        <!-- ============================================================ -->
+        <div class="section" id="operators">
+            <h2>Built-in Operators</h2>
+            <p>The following operators are compiled directly to VM instructions. They are not callable as named functions but are fundamental to the language. Arithmetic operators also work element-wise on Arrays and Tuples of numeric types.</p>
+
+            <h3>Arithmetic Operators</h3>
+            <table>
+                <tr><th>Operator</th><th>Types</th><th>Description</th></tr>
+                <tr><td><code>+</code></td><td>Int, Float, Fraction, Complex</td><td>Addition.</td></tr>
+                <tr><td><code>-</code></td><td>Int, Float, Fraction, Complex</td><td>Subtraction.</td></tr>
+                <tr><td><code>*</code></td><td>Int, Float, Fraction, Complex</td><td>Multiplication.</td></tr>
+                <tr><td><code>/</code></td><td>Int, Float, Fraction, Complex</td><td>Division. Int division produces a Fraction.</td></tr>
+                <tr><td><code>%</code></td><td>Int</td><td>Modulo (remainder).</td></tr>
+                <tr><td><code>-</code> (unary)</td><td>Int, Float, Fraction, Complex</td><td>Negation.</td></tr>
+                <tr><td><code>//</code></td><td>Int</td><td>Truncating integer division.</td></tr>
+            </table>
+
+            <h3>Comparison Operators</h3>
+            <table>
+                <tr><th>Operator</th><th>Types</th><th>Description</th></tr>
+                <tr><td><code>==</code></td><td>All types (matching operands)</td><td>Equal. Structural equality for object types. User-defined overloads take priority.</td></tr>
+                <tr><td><code>!=</code></td><td>All types (matching operands)</td><td>Not equal. Structural inequality for object types. User-defined overloads take priority.</td></tr>
+                <tr><td><code>&lt;</code></td><td>Int, Float, Fraction, String</td><td>Less than.</td></tr>
+                <tr><td><code>&lt;=</code></td><td>Int, Float, Fraction, String</td><td>Less than or equal.</td></tr>
+                <tr><td><code>&gt;</code></td><td>Int, Float, Fraction, String</td><td>Greater than.</td></tr>
+                <tr><td><code>&gt;=</code></td><td>Int, Float, Fraction, String</td><td>Greater than or equal.</td></tr>
+            </table>
+
+            <h3>Bitwise Operators</h3>
+            <table>
+                <tr><th>Operator</th><th>Types</th><th>Description</th></tr>
+                <tr><td><code>&amp;</code></td><td>Int</td><td>Bitwise AND.</td></tr>
+                <tr><td><code>|</code></td><td>Int</td><td>Bitwise OR.</td></tr>
+                <tr><td><code>^</code></td><td>Int</td><td>Bitwise XOR.</td></tr>
+                <tr><td><code>~</code></td><td>Int</td><td>Bitwise NOT (complement).</td></tr>
+                <tr><td><code>&lt;&lt;</code></td><td>Int</td><td>Left shift.</td></tr>
+                <tr><td><code>&gt;&gt;</code></td><td>Int</td><td>Right shift (arithmetic, sign-extending).</td></tr>
+                <tr><td><code>&gt;&gt;&gt;</code></td><td>Int</td><td>Unsigned right shift (zero-filling).</td></tr>
+            </table>
+
+            <h3>Logical Operators</h3>
+            <table>
+                <tr><th>Operator</th><th>Types</th><th>Description</th></tr>
+                <tr><td><code>!</code></td><td>Bool</td><td>Logical NOT.</td></tr>
+                <tr><td><code>&&</code></td><td>Bool</td><td>Logical AND (short-circuit).</td></tr>
+                <tr><td><code>||</code></td><td>Bool</td><td>Logical OR (short-circuit).</td></tr>
+            </table>
+
+            <h3>Concatenation Operator</h3>
+            <table>
+                <tr><th>Operator</th><th>Types</th><th>Description</th></tr>
+                <tr><td><code>$</code></td><td>String, Array, List, Tuple</td><td>Concatenation.</td></tr>
+            </table>
+
+        </div>
+
+            <a href="#top" class="back-to-top">&uarr; Back to top</a>
+
+        <!-- ============================================================ -->
+        <div class="section" id="type-conversions">
+            <h2>Type Conversions</h2>
+            <p>Implicit conversions follow the numeric tower: <code>Int &rarr; Fraction &rarr; Float &rarr; Complex</code>. Implicit conversions are inserted automatically when a value of a lower-ranked type is used where a higher-ranked type is expected.</p>
+
+            <p>Explicit conversion functions are provided for all numeric types, including conversions <em>down</em> the tower (e.g. Float to Int):</p>
+
+            <h3><code>toInt(x)</code></h3>
+            <p>Convert a numeric value to Int by truncating toward zero.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>toInt(Int) &rarr; Int</code></td><td>Identity &mdash; returns the value unchanged.</td></tr>
+                <tr><td><code>toInt(Float) &rarr; Int</code></td><td>Truncate toward zero (fractional part discarded).</td></tr>
+                <tr><td><code>toInt(Fraction) &rarr; Int</code></td><td>Truncate toward zero (numerator/denominator as float, then truncated).</td></tr>
+            </table>
+            <pre><code>toInt(<span style="color:#e67e22">3.7</span>) println;            <span style="color:#95a5a6">-- 3</span>
+toInt(<span style="color:#e67e22">-2.9</span>) println;           <span style="color:#95a5a6">-- -2</span>
+toInt(<span style="color:#e67e22">7</span>/<span style="color:#e67e22">2</span>) println;             <span style="color:#95a5a6">-- 3</span></code></pre>
+
+            <h3><code>toFloat(x)</code></h3>
+            <p>Convert a numeric value to Float.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>toFloat(Int) &rarr; Float</code></td><td>Integer to double-precision float.</td></tr>
+                <tr><td><code>toFloat(Float) &rarr; Float</code></td><td>Identity &mdash; returns the value unchanged.</td></tr>
+                <tr><td><code>toFloat(Fraction) &rarr; Float</code></td><td>Fraction to double-precision float (numerator/denominator).</td></tr>
+                <tr><td><code>toFloat(Complex) &rarr; Float</code></td><td>Returns the real part, discarding the imaginary part.</td></tr>
+            </table>
+            <pre><code>toFloat(<span style="color:#e67e22">5</span>) println;             <span style="color:#95a5a6">-- 5.0</span>
+toFloat(<span style="color:#e67e22">7</span>/<span style="color:#e67e22">2</span>) println;           <span style="color:#95a5a6">-- 3.5</span>
+toFloat(<span style="color:#e67e22">3.0</span> + <span style="color:#e67e22">4.0</span>i) println;   <span style="color:#95a5a6">-- 3.0</span></code></pre>
+
+            <h3><code>toFraction(x)</code></h3>
+            <p>Convert a numeric value to Fraction.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>toFraction(Int) &rarr; Fraction</code></td><td>Integer to fraction (denominator 1).</td></tr>
+                <tr><td><code>toFraction(Fraction) &rarr; Fraction</code></td><td>Identity &mdash; returns the value unchanged.</td></tr>
+            </table>
+            <pre><code>toFraction(<span style="color:#e67e22">5</span>) println;         <span style="color:#95a5a6">-- 5/1</span></code></pre>
+
+            <h3><code>toComplex(x)</code></h3>
+            <p>Convert a numeric value to Complex (imaginary part 0).</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>toComplex(Int) &rarr; Complex</code></td><td>Integer to complex (imaginary part 0).</td></tr>
+                <tr><td><code>toComplex(Float) &rarr; Complex</code></td><td>Float to complex (imaginary part 0).</td></tr>
+                <tr><td><code>toComplex(Fraction) &rarr; Complex</code></td><td>Fraction to complex (via float, imaginary part 0).</td></tr>
+                <tr><td><code>toComplex(Complex) &rarr; Complex</code></td><td>Identity &mdash; returns the value unchanged.</td></tr>
+            </table>
+            <pre><code>toComplex(<span style="color:#e67e22">5</span>) println;          <span style="color:#95a5a6">-- 5+0i</span>
+toComplex(<span style="color:#e67e22">3.14</span>) println;       <span style="color:#95a5a6">-- 3.14+0i</span>
+toComplex(<span style="color:#e67e22">7</span>/<span style="color:#e67e22">2</span>) println;        <span style="color:#95a5a6">-- 3.5+0i</span></code></pre>
+
+            <a href="#top" class="back-to-top">&uarr; Back to top</a>
+        </div>
+
+        <!-- ============================================================ -->
+        <div class="section" id="io">
+            <h2>I/O Functions</h2>
+
+            <table>
+                <tr><th>Function</th><th>Description</th></tr>
+                <tr><td><code>print(...)</code></td><td>Print values without a trailing newline. Accepts any number of arguments of any type. Does not flush output.</td></tr>
+                <tr><td><code>println(...)</code></td><td>Print values followed by a newline. Accepts any number of arguments of any type. Flushes output.</td></tr>
+            </table>
+
+            <p>Both <code>print</code> and <code>println</code> accept any number of arguments of any type. Multiple arguments are separated by spaces. They participate in auto-mapping: passing an array with <code>@</code> prints each element individually.</p>
+
+            <pre><code><span style="color:#95a5a6">-- println prints values followed by a newline</span>
+println(<span style="color:#e67e22">42</span>);                       <span style="color:#95a5a6">-- 42</span>
+println(<span style="color:#27ae60">"hello"</span>, <span style="color:#27ae60">"world"</span>);        <span style="color:#95a5a6">-- hello world</span>
+println(<span style="color:#e67e22">1</span>, <span style="color:#e67e22">2.5</span>, <span style="color:#e74c3c">true</span>);            <span style="color:#95a5a6">-- 1 2.5 true</span>
+println();                          <span style="color:#95a5a6">-- (empty line)</span>
+
+<span style="color:#95a5a6">-- print does not add a newline</span>
+print(<span style="color:#27ae60">"x="</span>);
+println(<span style="color:#e67e22">42</span>);                       <span style="color:#95a5a6">-- x=42</span>
+
+<span style="color:#95a5a6">-- Pipeline syntax</span>
+<span style="color:#e67e22">42</span> println;                         <span style="color:#95a5a6">-- 42</span>
+<span style="color:#27ae60">"hello"</span> println;                    <span style="color:#95a5a6">-- hello</span>
+
+<span style="color:#95a5a6">-- Auto-mapping: print each element on its own line</span>
+[<span style="color:#e67e22">1</span>, <span style="color:#e67e22">2</span>, <span style="color:#e67e22">3</span>] @ println;                <span style="color:#95a5a6">-- 1  2  3  (each on its own line)</span></code></pre>
+
+            <h3>List Print Limit</h3>
+            <p>Control how many elements are displayed when printing lists.</p>
+            <table>
+                <tr><th>Function</th><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>getListPrintLimit()</code></td><td><code>() &rarr; Int</code></td><td>Get the current maximum number of list elements to display when printing.</td></tr>
+                <tr><td><code>setListPrintLimit(n)</code></td><td><code>Int &rarr; Int</code></td><td>Set the maximum number of list elements to display. Returns the previous limit.</td></tr>
+            </table>
+            <pre><code>let old = setListPrintLimit(3);
+(1..10) toList println;        <span style="color:#95a5a6">-- List(1, 2, 3, ...)</span>
+setListPrintLimit(old);        <span style="color:#95a5a6">-- restore previous limit</span>
+getListPrintLimit();           <span style="color:#95a5a6">-- check current limit</span></code></pre>
+
+            <a href="#top" class="back-to-top">&uarr; Back to top</a>
+        </div>
+
+        <!-- ============================================================ -->
+        <div class="section">
+            <h2>Summary by Type</h2>
+            <p>Quick reference of which named functions are available for each type.</p>
+
+            <h3 class="type-int">Int</h3>
+            <p>
+                <code>abs</code>, <code>sign</code>, <code>min</code>, <code>max</code>, <code>clamp</code>, <code>cmp</code>,
+                <code>gcd</code>, <code>lcm</code>,
+                <code>clz</code>, <code>clo</code>, <code>ctz</code>, <code>cto</code>, <code>popCount</code>,
+                <code>rotl</code>, <code>rotr</code>, <code>bitCeil</code>, <code>bitFloor</code>, <code>bitWidth</code>, <code>hasSingleBit</code>,
+                <code>hash</code>
+            </p>
+
+            <h3 class="type-float">Float</h3>
+            <p>
+                <code>abs</code>, <code>sign</code>, <code>min</code>, <code>max</code>, <code>clamp</code>, <code>cmp</code>,
+                <code>floor</code>, <code>ceil</code>, <code>round</code>, <code>trunc</code>, <code>frac</code>,
+                <code>sqrt</code>, <code>cbrt</code>, <code>pow</code>, <code>hypot</code>,
+                <code>exp</code>, <code>exp2</code>, <code>exp10</code>, <code>expm1</code>,
+                <code>log</code>, <code>log2</code>, <code>log10</code>, <code>log1p</code>,
+                <code>sin</code>, <code>cos</code>, <code>tan</code>,
+                <code>asin</code>, <code>acos</code>, <code>atan</code>, <code>atan2</code>,
+                <code>sinpi</code>, <code>cospi</code>, <code>tanpi</code>,
+                <code>sinh</code>, <code>cosh</code>, <code>tanh</code>,
+                <code>asinh</code>, <code>acosh</code>, <code>atanh</code>,
+                <code>erf</code>, <code>erfc</code>, <code>tgamma</code>, <code>lgamma</code>,
+                <code>copysign</code>, <code>nextafter</code>,
+                <code>isNan</code>, <code>isInf</code>, <code>isFinite</code>, <code>isNormal</code>,
+                <code>hash</code>
+            </p>
+
+            <h3 class="type-fraction">Fraction</h3>
+            <p>
+                <code>abs</code>, <code>sign</code>, <code>min</code>, <code>max</code>, <code>clamp</code>, <code>cmp</code>,
+                <code>hash</code>
+            </p>
+
+            <h3 class="type-complex">Complex</h3>
+            <p>
+                <code>abs</code>, <code>sqrt</code>, <code>pow</code>,
+                <code>real</code>, <code>imag</code>, <code>arg</code>, <code>norm</code>, <code>conj</code>, <code>polar</code>,
+                <code>exp</code>, <code>log</code>,
+                <code>sin</code>, <code>cos</code>, <code>tan</code>,
+                <code>asin</code>, <code>acos</code>, <code>atan</code>,
+                <code>sinh</code>, <code>cosh</code>, <code>tanh</code>,
+                <code>asinh</code>, <code>acosh</code>, <code>atanh</code>,
+                <code>hash</code>
+            </p>
+
+            <h3>String</h3>
+            <p>
+                <code>length</code>, <code>substring</code>, <code>contains</code>,
+                <code>startsWith</code>, <code>endsWith</code>, <code>split</code>,
+                <code>trim</code>, <code>toUpper</code>, <code>toLower</code>, <code>replace</code>,
+                <code>fmt</code>,
+                <code>s[i]</code> (byte indexing),
+                <code>min</code>, <code>max</code>, <code>cmp</code>,
+                <code>hash</code>
+            </p>
+
+            <h3>Symbol</h3>
+            <p>
+                <code>hash</code>
+            </p>
+
+            <h3 class="type-range">Range&lt;Int&gt;</h3>
+            <p>
+                <code>length</code>, <code>toArray</code>, <code>toList</code>
+            </p>
+
+            <h3 class="type-array">[T]</h3>
+            <p>
+                <code>length</code>,
+                <code>map</code>, <code>filter</code>, <code>fold</code>, <code>scan</code>, <code>fold1</code>, <code>scan1</code>, <code>find</code>,
+                <code>zip</code>, <code>enumerate</code>,
+                <code>take</code>, <code>drop</code>, <code>takeWhile</code>, <code>dropWhile</code>,
+                <code>stride</code>, <code>stutter</code>,
+                <code>cat</code>, <code>join</code>, <code>flatten</code>,
+                <code>reverse</code>, <code>push</code>, <code>pop</code>, <code>sort</code>, <code>muss</code>,
+                <code>hash</code>
+            </p>
+
+            <h3 class="type-list">List&lt;T&gt;</h3>
+            <p>
+                <code>length</code>,
+                <code>head</code>, <code>tail</code>, <code>cons</code>, <code>isNil</code>, <code>notNil</code>,
+                <code>map</code>, <code>filter</code>, <code>fold</code>, <code>scan</code>, <code>fold1</code>, <code>scan1</code>, <code>find</code>,
+                <code>zip</code>, <code>enumerate</code>,
+                <code>take</code>, <code>drop</code>, <code>takeWhile</code>, <code>dropWhile</code>,
+                <code>stride</code>, <code>stutter</code>,
+                <code>cat</code>, <code>join</code>, <code>flatten</code>,
+                <code>cyc</code>, <code>ncyc</code>, <code>hang</code>, <code>iter</code>,
+                <code>hash</code>
+            </p>
+
+            <h3>Coroutine&lt;T&gt;</h3>
+            <p>
+                <code>next</code>, <code>toList</code>
+            </p>
+
+            <h3>[K: V]</h3>
+            <p>
+                <code>length</code>,
+                <code>get</code>, <code>put</code>, <code>remove</code>, <code>contains</code>,
+                <code>keys</code>, <code>values</code>, <code>merge</code>,
+                <code>hash</code>
+            </p>
+
+            <h3>Set&lt;T&gt;</h3>
+            <p>
+                <code>length</code>,
+                <code>add</code>, <code>remove</code>, <code>contains</code>,
+                <code>union</code>, <code>intersection</code>, <code>difference</code>,
+                <code>toArray</code>,
+                <code>hash</code>
+            </p>
+
+            <h3>Enum</h3>
+            <p>
+                <code>ordinal</code>,
+                <code>tag</code>,
+                <code>hash</code>
+            </p>
+
+            <h3>Any</h3>
+            <p>
+                <code>any</code>, <code>toAnyArray</code>, <code>as(Type)</code>
+            </p>
+
+            <h3>All Types</h3>
+            <p>
+                <code>==</code>, <code>!=</code> (structural equality),
+                <code>hash</code>
+            </p>
+        </div>
+
+    </div>
+</body>
+</html>

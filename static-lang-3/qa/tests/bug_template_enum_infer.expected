@@ -1,0 +1,4 @@
+MyResult<Int, String>.ok(42)
+MyResult<Int, String>.err(oops)
+Option<Int>.some(42)
+Option<Int>.none

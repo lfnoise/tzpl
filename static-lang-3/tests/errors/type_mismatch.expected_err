@@ -1,0 +1,9 @@
+Type error [tests/errors/type_mismatch.x:3:9]
+  |
+3 | println(add("hello", 1));
+  |         ^^^
+  No matching overload for 'add'
+    Supplied types: (String, Int)
+    Available overloads:
+      add(<builtin template>)
+      add(Int, Int) -> Int

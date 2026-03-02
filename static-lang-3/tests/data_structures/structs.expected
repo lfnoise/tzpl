@@ -1,0 +1,27 @@
+Point { x: 1.0, y: 2.0 }
+1.0
+2.0
+Person { name: Alice, age: 30 }
+Alice
+30
+0.0
+1.0
+5.0
+5.0
+25.0
+Point { x: 5.0, y: 10.0 }
+5.0
+Line { start: Point { x: 1.0, y: 2.0 }, end: Point { x: 3.0, y: 4.0 } }
+Point { x: 1.0, y: 2.0 }
+Point { x: 3.0, y: 4.0 }
+1.0
+4.0
+true
+false
+Point { x: 3.0, y: 4.0 }
+3.0
+4.0
+Point { x: 7.0, y: 8.0 }
+Point { x: 50.0, y: 100.0 }
+50.0
+100.0

@@ -1,0 +1,161 @@
+Option<Int>.some(0)
+Option<Int>.some(1)
+Option<Int>.some(2)
+Option<Int>.none
+Option<Int>.some(0)
+Option<Int>.some(2)
+Option<Int>.some(4)
+Option<Int>.none
+Option<Int>.some(10)
+Option<Int>.some(20)
+Option<Int>.some(30)
+Option<Int>.none
+Option<Int>.some(1)
+Option<Int>.some(2)
+Option<Int>.some(999)
+Option<Int>.none
+Option<Int>.some(100)
+Option<Int>.some(200)
+Option<Int>.some(999)
+Option<Int>.none
+Option<Int>.some(0)
+Option<Int>.some(1)
+Option<Int>.some(2)
+Option<Int>.some(10)
+Option<Int>.some(11)
+Option<Int>.some(12)
+Option<Int>.none
+Option<String>.some(hello)
+Option<String>.some(world)
+Option<String>.some(goodbye)
+Option<String>.none
+Option<[Int]>.some([1, 2, 3])
+Option<[Int]>.some([4, 5])
+Option<[Int]>.some([6])
+Option<[Int]>.none
+Option<Int>.some(0)
+Option<Int>.some(0)
+Option<Int>.some(1)
+Option<Int>.some(1)
+Option<Int>.some(2)
+Option<Int>.some(2)
+Option<Int>.some(0)
+Option<Int>.some(1)
+Option<Int>.some(2)
+Option<Int>.some(3)
+Option<Int>.some(1)
+Option<Int>.some(2)
+Option<Int>.some(99)
+Option<Int>.none
+Option<(Int, Int)>.some(0, 0)
+Option<(Int, Int)>.some(1, 1)
+Option<(Int, Int)>.some(2, 4)
+Option<(Int, Int)>.none
+Option<String>.some(circle)
+Option<String>.some(rect)
+Option<String>.some(circle)
+Option<String>.none
+Option<Int>.some(0)
+Option<Int>.some(2)
+Option<Int>.some(4)
+Option<Int>.some(1)
+Option<Int>.some(3)
+Option<Int>.some(5)
+Option<Int>.some(0)
+Option<Int>.none
+Option<Int>.none
+Option<Int>.none
+Option<Int>.none
+Option<Int>.none
+Option<Int>.some(1)
+Option<Int>.some(3)
+Option<Int>.some(6)
+Option<Int>.some(10)
+Option<Int>.some(15)
+Option<Int>.none
+Option<Int>.some(0)
+Option<Int>.some(1)
+Option<Int>.some(1)
+Option<Int>.some(2)
+Option<Int>.some(3)
+Option<Int>.some(5)
+Option<Int>.some(8)
+Option<Int>.some(13)
+Option<Int>.some(1)
+Option<Int>.some(2)
+Option<Int>.some(3)
+Option<Int>.none
+Option<Int>.some(10)
+Option<Int>.some(20)
+Option<Int>.some(30)
+Option<Int>.none
+Option<String>.some(prefix)
+Option<String>.some(pipeline)
+Option<String>.some(explicit)
+Option<String>.none
+Option<Int>.some(1)
+Option<Int>.some(10)
+Option<Int>.some(20)
+Option<Int>.some(30)
+Option<Int>.some(99)
+Option<Int>.none
+Option<Int>.some(1)
+Option<Int>.some(10)
+Option<Int>.some(20)
+Option<Int>.some(30)
+Option<Int>.some(99)
+Option<Int>.none
+Option<Int>.some(0)
+Option<Int>.some(1)
+Option<Int>.some(10)
+Option<Int>.some(20)
+Option<Int>.some(30)
+Option<Int>.some(999)
+Option<Int>.none
+Option<String>.some(start)
+Option<String>.some(hello)
+Option<String>.some(world)
+Option<String>.some(end)
+Option<String>.none
+1
+2
+3
+4
+5
+0
+1
+1
+2
+3
+5
+8
+hello
+world
+goodbye
+red
+green
+blue
+0
+1
+2
+3
+List(0, 1, 2, 3, 4)
+nil
+List(0)
+List(hello, world, goodbye)
+List(0, 1, 1, 2, 3, 5, 8, 13)
+List(0)
+0
+List(1, 2, 3, 4)
+5
+List(3, 4)
+[0, 1, 1, 2, 3, 5]
+List(0, 10, 20)
+List((0, 10), (1, 11), (2, 12))
+nil
+List((0, 0), (1, 1), (2, 4))
+List(1, 10, 20, 30, 99)
+0
+1
+2
+3

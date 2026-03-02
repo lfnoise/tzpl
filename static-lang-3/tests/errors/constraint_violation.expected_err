@@ -1,0 +1,8 @@
+Type error [tests/errors/constraint_violation.x:4:1]
+  |
+4 | add_nums("hello", "world");
+  | ^------^
+  No matching overload for 'add_nums'
+    Supplied types: (String, String)
+    Available overloads:
+      add_nums<T>(a : <type>, b : <type>)

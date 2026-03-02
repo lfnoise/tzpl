@@ -1,0 +1,21 @@
+# Build artifacts
+build/
+*.o
+*.dylib
+
+# Xcode artifacts
+*.xcodeproj/xcuserdata/
+*.xcodeproj/project.xcworkspace/xcuserdata/
+DerivedData/
+
+# Code coverage files (LLVM/Clang profiling data)
+*.profraw
+*.profdata
+default.profraw
+
+# Compiled binaries
+*.a
+*.so
+
+# macOS system files
+.DS_Store

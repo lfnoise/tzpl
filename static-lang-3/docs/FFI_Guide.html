@@ -1,0 +1,1595 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Language X &mdash; Foreign Function Interface Guide</title>
+<style>
+  :root {
+    --bg: #fdfdfd;
+    --fg: #1a1a1a;
+    --accent: #2563eb;
+    --accent-dim: #93b4f5;
+    --code-bg: #f3f4f6;
+    --code-border: #dde1e6;
+    --warn-bg: #fef3c7;
+    --warn-border: #f59e0b;
+    --note-bg: #dbeafe;
+    --note-border: #3b82f6;
+    --table-stripe: #f8f9fa;
+    --sidebar-bg: #f8f9fb;
+    --sidebar-border: #e2e5ea;
+    --heading-fg: #0f172a;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    font-size: 16px;
+    line-height: 1.7;
+    color: var(--fg);
+    background: var(--bg);
+    display: flex;
+    min-height: 100vh;
+  }
+
+  /* --- Sidebar / Table of Contents --- */
+
+  nav.sidebar {
+    position: sticky;
+    top: 0;
+    align-self: flex-start;
+    width: 280px;
+    min-width: 280px;
+    height: 100vh;
+    overflow-y: auto;
+    padding: 2rem 1.25rem;
+    background: var(--sidebar-bg);
+    border-right: 1px solid var(--sidebar-border);
+    font-size: 0.875rem;
+  }
+
+  nav.sidebar h2 {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #64748b;
+    margin-bottom: 1rem;
+  }
+
+  nav.sidebar ol {
+    list-style: none;
+    counter-reset: toc;
+  }
+
+  nav.sidebar > ol > li {
+    counter-increment: toc;
+    margin-bottom: 0.4rem;
+  }
+
+  nav.sidebar > ol > li > a::before {
+    content: counter(toc) ". ";
+    color: var(--accent-dim);
+    font-weight: 600;
+  }
+
+  nav.sidebar a {
+    color: var(--fg);
+    text-decoration: none;
+    display: block;
+    padding: 0.15rem 0;
+  }
+
+  nav.sidebar a:hover { color: var(--accent); }
+
+  nav.sidebar ol ol {
+    margin-left: 1rem;
+    margin-top: 0.2rem;
+    font-size: 0.82rem;
+  }
+
+  nav.sidebar ol ol li { margin-bottom: 0.2rem; }
+
+  /* --- Main Content --- */
+
+  main {
+    flex: 1;
+    max-width: 52rem;
+    margin: 0 auto;
+    padding: 3rem 2.5rem 6rem;
+  }
+
+  h1 {
+    font-size: 2.2rem;
+    font-weight: 700;
+    color: var(--heading-fg);
+    margin-bottom: 0.4rem;
+    line-height: 1.2;
+  }
+
+  h1 + .subtitle {
+    font-size: 1.1rem;
+    color: #64748b;
+    margin-bottom: 2.5rem;
+  }
+
+  h2 {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--heading-fg);
+    margin-top: 3.5rem;
+    margin-bottom: 1rem;
+    padding-bottom: 0.35rem;
+    border-bottom: 2px solid var(--accent);
+  }
+
+  h3 {
+    font-size: 1.15rem;
+    font-weight: 600;
+    color: var(--heading-fg);
+    margin-top: 2.2rem;
+    margin-bottom: 0.6rem;
+  }
+
+  h4 {
+    font-size: 1rem;
+    font-weight: 600;
+    color: #475569;
+    margin-top: 1.6rem;
+    margin-bottom: 0.4rem;
+  }
+
+  p { margin-bottom: 1rem; }
+
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  /* Code */
+
+  code {
+    font-family: 'SF Mono', 'Fira Code', 'JetBrains Mono', Menlo, Consolas, monospace;
+    font-size: 0.88em;
+    background: var(--code-bg);
+    border: 1px solid var(--code-border);
+    border-radius: 4px;
+    padding: 0.15em 0.4em;
+  }
+
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--code-border);
+    border-radius: 6px;
+    padding: 1.1rem 1.3rem;
+    overflow-x: auto;
+    margin-bottom: 1.2rem;
+    line-height: 1.55;
+  }
+
+  pre code {
+    background: none;
+    border: none;
+    padding: 0;
+    font-size: 0.86rem;
+  }
+
+  /* Keyword colouring (manual spans) */
+  .kw  { color: #8b5cf6; font-weight: 600; }
+  .typ { color: #0891b2; }
+  .str { color: #16a34a; }
+  .cmt { color: #94a3b8; font-style: italic; }
+  .num { color: #d97706; }
+  .fn  { color: #2563eb; }
+
+  /* Tables */
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 1.4rem;
+    font-size: 0.92rem;
+  }
+
+  th, td {
+    text-align: left;
+    padding: 0.55rem 0.9rem;
+    border: 1px solid var(--code-border);
+  }
+
+  th {
+    background: var(--code-bg);
+    font-weight: 600;
+    color: var(--heading-fg);
+  }
+
+  tr:nth-child(even) { background: var(--table-stripe); }
+
+  /* Callout boxes */
+
+  .note, .warning, .tip {
+    border-left: 4px solid;
+    border-radius: 4px;
+    padding: 0.9rem 1.1rem;
+    margin-bottom: 1.2rem;
+    font-size: 0.94rem;
+  }
+
+  .note    { background: var(--note-bg); border-color: var(--note-border); }
+  .warning { background: var(--warn-bg); border-color: var(--warn-border); }
+  .tip     { background: #dcfce7; border-color: #22c55e; }
+
+  .note strong, .warning strong, .tip strong {
+    display: block;
+    margin-bottom: 0.25rem;
+  }
+
+  /* Lists */
+
+  ul, ol { margin-left: 1.6rem; margin-bottom: 1rem; }
+  li { margin-bottom: 0.3rem; }
+
+  /* Diagram */
+  .diagram {
+    background: #fff;
+    border: 1px solid var(--code-border);
+    border-radius: 6px;
+    padding: 1.5rem;
+    margin-bottom: 1.4rem;
+    overflow-x: auto;
+    text-align: center;
+  }
+
+  .diagram pre {
+    display: inline-block;
+    text-align: left;
+    background: none;
+    border: none;
+    padding: 0;
+    margin: 0;
+    font-size: 0.82rem;
+    line-height: 1.5;
+  }
+
+  /* Responsive */
+  @media (max-width: 900px) {
+    nav.sidebar { display: none; }
+    main { padding: 2rem 1.2rem 4rem; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ================================================================ -->
+<!--  SIDEBAR                                                         -->
+<!-- ================================================================ -->
+
+<nav class="sidebar">
+  <h2>Contents</h2>
+  <ol>
+    <li><a href="#overview">Overview</a></li>
+    <li><a href="#architecture">Architecture</a>
+      <ol>
+        <li><a href="#object-model">Object Model</a></li>
+        <li><a href="#compilation-pipeline">Compilation Pipeline</a></li>
+        <li><a href="#word-layout">Word Layout</a></li>
+      </ol>
+    </li>
+    <li><a href="#cpp-api">C++ Embedding API</a>
+      <ol>
+        <li><a href="#cpp-setup">Setup &amp; Lifecycle</a></li>
+        <li><a href="#cpp-register">Registering Foreign Functions</a></li>
+        <li><a href="#cpp-compile-run">Compiling &amp; Running</a></li>
+        <li><a href="#cpp-call-into-vm">Calling Language Functions</a></li>
+        <li><a href="#cpp-user-data">User Data</a></li>
+        <li><a href="#cpp-full-example">Full Example</a></li>
+        <li><a href="#cpp-obj-accessors">Object Accessors</a></li>
+      </ol>
+    </li>
+    <li><a href="#c-api">C Embedding API</a>
+      <ol>
+        <li><a href="#c-types">Opaque Types &amp; Handles</a></li>
+        <li><a href="#c-lifecycle">Lifecycle</a></li>
+        <li><a href="#c-register">Registering Foreign Functions</a></li>
+        <li><a href="#c-type-handles">Type Handles</a></li>
+        <li><a href="#c-register-access">Register Access</a></li>
+        <li><a href="#c-obj-accessors">Object Accessors</a></li>
+        <li><a href="#c-call-into-vm">Calling Language Functions</a></li>
+        <li><a href="#c-user-data">User Data</a></li>
+        <li><a href="#c-full-example">Full Example</a></li>
+      </ol>
+    </li>
+    <li><a href="#rt-safety">Real-Time Safety</a>
+      <ol>
+        <li><a href="#rt-model">Safety Model</a></li>
+        <li><a href="#rt-enforcement">Compile-Time Enforcement</a></li>
+        <li><a href="#rt-builtins">Built-in Classification</a></li>
+        <li><a href="#rt-cli">CLI Flag</a></li>
+      </ol>
+    </li>
+    <li><a href="#type-mapping">Type Mapping Reference</a></li>
+    <li><a href="#internals">Internals</a>
+      <ol>
+        <li><a href="#int-registration-flow">Registration Flow</a></li>
+        <li><a href="#int-c-trampoline">C API Trampoline</a></li>
+        <li><a href="#int-exported-funcs">Exported Functions</a></li>
+      </ol>
+    </li>
+    <li><a href="#api-reference">API Reference</a>
+      <ol>
+        <li><a href="#ref-cpp">C++ Reference</a></li>
+        <li><a href="#ref-c">C Reference</a></li>
+      </ol>
+    </li>
+  </ol>
+</nav>
+
+<!-- ================================================================ -->
+<!--  MAIN CONTENT                                                    -->
+<!-- ================================================================ -->
+
+<main>
+
+<h1>Language X &mdash; Foreign Function Interface</h1>
+<p class="subtitle">Comprehensive guide to embedding Language X and extending it with native functions.</p>
+
+<!-- ================================================================ -->
+<h2 id="overview">1. Overview</h2>
+
+<p>The Language X FFI enables two-way communication between host C/C++ code and the Language X interpreter:</p>
+
+<ul>
+  <li><strong>Host &rarr; VM:</strong> Register native C/C++ functions that Language X code calls as ordinary functions (e.g., audio DSP primitives, hardware I/O).</li>
+  <li><strong>VM &rarr; Host:</strong> Call compiled Language X functions by name from host code (e.g., invoke an event handler from an audio callback).</li>
+</ul>
+
+<p>The FFI also provides <strong>compile-time real-time safety enforcement</strong>: when compiling for a real-time VM, the type checker rejects any call to a function marked as non-RT-safe, guaranteeing that compiled RT code never calls a blocking function.</p>
+
+<p>Both a <strong>C++ API</strong> (via <code>langx.hpp</code>) and a <strong>C API</strong> (via <code>langx.h</code>) are provided. The C API wraps the C++ implementation with opaque handle types, making it suitable for use from C, Objective-C, Swift, and any language with a C FFI.</p>
+
+
+<!-- ================================================================ -->
+<h2 id="architecture">2. Architecture</h2>
+
+<!-- -------------------------------- -->
+<h3 id="object-model">2.1 Object Model</h3>
+
+<p>Language X has a three-object architecture:</p>
+
+<table>
+  <tr>
+    <th>Object</th>
+    <th>Thread</th>
+    <th>Cardinality</th>
+    <th>Purpose</th>
+  </tr>
+  <tr>
+    <td><code>TypeUniverse</code></td>
+    <td>Any (init only)</td>
+    <td>1 per process</td>
+    <td>Shared type interning. All <code>Type*</code> pointers come from here.</td>
+  </tr>
+  <tr>
+    <td><code>Compiler</code></td>
+    <td>Non-real-time</td>
+    <td>1 per process</td>
+    <td>Compiles source code. Creates shared compilation targets. Foreign functions are registered here.</td>
+  </tr>
+  <tr>
+    <td><code>VM</code></td>
+    <td>Any (including RT)</td>
+    <td>1 per thread</td>
+    <td>Executes compiled code. Owns a TLSF memory pool and incremental GC. Designed to run on a real-time audio thread.</td>
+  </tr>
+</table>
+
+<div class="diagram">
+<pre>
+  Host Application
+  +-------------------------------------------------+
+  |                                                 |
+  |   TypeUniverse                                  |
+  |       |                                         |
+  |   Compiler  &lt;-- registerForeignFunction(...)    |
+  |       |                                         |
+  |       | compile(source, file, target)           |
+  |       v                                         |
+  |   CompileResult                                 |
+  |       |                                         |
+  |       |--- install ---&gt;  VM (RT thread)         |
+  |       |--- execute --&gt;  VM                      |
+  |       |                                         |
+  |       |  Host can call vm.callFunction(...)     |
+  |       |  VM calls foreign functions via CFun    |
+  |                                                 |
+  +-------------------------------------------------+
+</pre>
+</div>
+
+
+<!-- -------------------------------- -->
+<h3 id="compilation-pipeline">2.2 Compilation Pipeline</h3>
+
+<ol>
+  <li><strong>Register foreign functions</strong> on the <code>Compiler</code> (before any compilation).</li>
+  <li><strong>Create a compilation target</strong> via <code>createTarget()</code>, specifying whether it is RT-restricted.</li>
+  <li><strong>Compile</strong> source code against the target. The type checker validates all function calls, including RT safety. Foreign functions are available to the source code as ordinary functions.</li>
+  <li><strong>Install</strong> the <code>CompileResult</code> into the VM (copies globals, including <code>Primitive</code> and <code>CodeBlock</code> objects).</li>
+  <li><strong>Execute</strong> the main block, or call individual functions by name.</li>
+</ol>
+
+
+<!-- -------------------------------- -->
+<h3 id="word-layout">2.3 Word Layout</h3>
+
+<p>All values in the VM are stored in a 64-bit <code>Word</code> union. Foreign functions interact with values through this type:</p>
+
+<pre><code><span class="cmt">// C++ (vm.hpp)</span>
+<span class="kw">union</span> <span class="typ">Word</span> {
+    <span class="typ">i64</span>       i;   <span class="cmt">// Integer, Bool (0 or 1)</span>
+    <span class="typ">f64</span>       f;   <span class="cmt">// Float</span>
+    <span class="typ">SymbolPtr</span> s;   <span class="cmt">// Symbol (interned string pointer)</span>
+    <span class="kw">void</span>*     p;   <span class="cmt">// Generic pointer (e.g. CodeBlock*)</span>
+    <span class="typ">Obj</span>*      o;   <span class="cmt">// GC-managed object pointer</span>
+};
+
+<span class="cmt">// C (langx.h)</span>
+<span class="kw">typedef union</span> { <span class="typ">int64_t</span> i; <span class="typ">double</span> f; <span class="kw">void</span>* p; } <span class="typ">langx_word</span>;</code></pre>
+
+
+<!-- ================================================================ -->
+<h2 id="cpp-api">3. C++ Embedding API</h2>
+
+<p>Include <code>&lt;langx.hpp&gt;</code> for the complete C++ embedding interface. All symbols are in the <code>ts</code> namespace.</p>
+
+
+<!-- -------------------------------- -->
+<h3 id="cpp-setup">3.1 Setup &amp; Lifecycle</h3>
+
+<pre><code><span class="kw">#include</span> <span class="str">&lt;langx.hpp&gt;</span>
+
+<span class="cmt">// 1. Create shared type universe (once per process)</span>
+ts::<span class="typ">TypeUniverse</span> types;
+
+<span class="cmt">// 2. Create compiler (once per process, non-RT thread)</span>
+ts::<span class="typ">Compiler</span> compiler(types);
+
+<span class="cmt">// 3. Create a shared compilation target</span>
+ts::<span class="typ">VMTarget</span> target = compiler.<span class="fn">createTarget</span>();
+
+<span class="cmt">// 4. Create VM bound to the target (one per thread, can live on RT thread)</span>
+ts::<span class="typ">VM</span> vm(<span class="num">64</span> * <span class="num">1024</span> * <span class="num">1024</span>, types, target);  <span class="cmt">// 64 MB pool</span></code></pre>
+
+<p>The <code>VM</code> constructor takes a pool size in bytes. This pool is managed by a TLSF allocator&mdash;the system allocator is never called after construction.</p>
+
+
+<!-- -------------------------------- -->
+<h3 id="cpp-register">3.2 Registering Foreign Functions</h3>
+
+<p>Foreign functions use the same <code>CFun</code> signature as built-in functions:</p>
+
+<pre><code><span class="kw">using</span> <span class="typ">CFun</span> = <span class="kw">void</span> (*)(<span class="typ">VM</span>&amp;, <span class="typ">u16</span> resultReg, <span class="typ">u16</span> argc, <span class="typ">u16</span> argBase);</code></pre>
+
+<table>
+  <tr><th>Parameter</th><th>Description</th></tr>
+  <tr><td><code>vm</code></td><td>The executing VM. Use <code>vm.reg(argBase + i)</code> to read argument <code>i</code>.</td></tr>
+  <tr><td><code>resultReg</code></td><td>Register to write the return value into: <code>vm.reg(resultReg)</code>.</td></tr>
+  <tr><td><code>argc</code></td><td>Number of arguments passed by the caller.</td></tr>
+  <tr><td><code>argBase</code></td><td>First argument register. Arguments are at <code>argBase</code>, <code>argBase+1</code>, &hellip;, <code>argBase+argc-1</code>.</td></tr>
+</table>
+
+<h4>Example: A simple <code>addTen</code> function</h4>
+
+<pre><code><span class="cmt">// Native implementation: addTen(x: Int) -&gt; Int</span>
+<span class="kw">void</span> <span class="fn">addTen</span>(ts::<span class="typ">VM</span>&amp; vm, <span class="typ">u16</span> dst, <span class="typ">u16</span> argc, <span class="typ">u16</span> argBase) {
+    <span class="typ">i64</span> x = vm.<span class="fn">reg</span>(argBase).<span class="fn">i</span>;
+    vm.<span class="fn">reg</span>(dst).<span class="fn">i</span> = x + <span class="num">10</span>;
+}
+
+<span class="cmt">// Register with the compiler</span>
+compiler.<span class="fn">registerForeignFunction</span>(
+    <span class="str">"addTen"</span>,                           <span class="cmt">// name in Language X</span>
+    types.<span class="fn">types</span>().intType,               <span class="cmt">// return type: Int</span>
+    { types.<span class="fn">types</span>().intType },            <span class="cmt">// param types: (Int)</span>
+    addTen,                              <span class="cmt">// function pointer</span>
+    <span class="kw">true</span>,                                <span class="cmt">// pure (can be constant-folded)</span>
+    <span class="kw">true</span>                                 <span class="cmt">// RT-safe</span>
+);</code></pre>
+
+<p>After registration, Language X code can call <code>addTen</code> as an ordinary function:</p>
+
+<pre><code><span class="cmt">-- Language X source</span>
+<span class="kw">let</span> result = <span class="fn">addTen</span>(<span class="num">32</span>);   <span class="cmt">-- result = 42</span></code></pre>
+
+<h4><code>registerForeignFunction</code> signature</h4>
+
+<pre><code><span class="kw">void</span> Compiler::<span class="fn">registerForeignFunction</span>(
+    <span class="kw">const</span> std::<span class="typ">string</span>&amp; name,
+    <span class="typ">Type</span>* returnType,
+    std::<span class="typ">vector</span>&lt;<span class="typ">Type</span>*&gt; paramTypes,
+    <span class="typ">CFun</span> cfun,
+    <span class="kw">bool</span> pure = <span class="kw">false</span>,     <span class="cmt">// pure functions can be constant-folded by the compiler</span>
+    <span class="kw">bool</span> rtSafe = <span class="kw">false</span>    <span class="cmt">// RT-safe functions can be called from RT-restricted VMs</span>
+);</code></pre>
+
+<div class="note">
+  <strong>Note:</strong> Foreign functions must be registered <em>before</em> compiling any source code that calls them. The type checker resolves foreign function names during compilation.
+</div>
+
+<h4>Example: A function with Float parameters</h4>
+
+<pre><code><span class="cmt">// lerp(a: Float, b: Float, t: Float) -&gt; Float</span>
+<span class="kw">void</span> <span class="fn">lerp</span>(ts::<span class="typ">VM</span>&amp; vm, <span class="typ">u16</span> dst, <span class="typ">u16</span> argc, <span class="typ">u16</span> argBase) {
+    <span class="typ">f64</span> a = vm.<span class="fn">reg</span>(argBase).<span class="fn">f</span>;
+    <span class="typ">f64</span> b = vm.<span class="fn">reg</span>(argBase + <span class="num">1</span>).<span class="fn">f</span>;
+    <span class="typ">f64</span> t = vm.<span class="fn">reg</span>(argBase + <span class="num">2</span>).<span class="fn">f</span>;
+    vm.<span class="fn">reg</span>(dst).<span class="fn">f</span> = a + (b - a) * t;
+}
+
+compiler.<span class="fn">registerForeignFunction</span>(
+    <span class="str">"lerp"</span>,
+    types.<span class="fn">types</span>().floatType,
+    { types.<span class="fn">types</span>().floatType,
+      types.<span class="fn">types</span>().floatType,
+      types.<span class="fn">types</span>().floatType },
+    lerp,
+    <span class="kw">true</span>,    <span class="cmt">// pure</span>
+    <span class="kw">true</span>     <span class="cmt">// RT-safe</span>
+);</code></pre>
+
+
+<!-- -------------------------------- -->
+<h3 id="cpp-compile-run">3.3 Compiling &amp; Running</h3>
+
+<pre><code><span class="cmt">// Compile source code</span>
+ts::<span class="typ">CompileResult</span> result = compiler.<span class="fn">compile</span>(source, <span class="str">"script.x"</span>, target);
+
+<span class="kw">if</span> (!result.success) {
+    <span class="cmt">// Handle errors</span>
+    <span class="kw">for</span> (<span class="kw">auto</span>&amp; err : result.errors) {
+        std::cerr &lt;&lt; err.message &lt;&lt; std::endl;
+    }
+    <span class="kw">return</span>;
+}
+
+<span class="cmt">// Install globals and execute the main block</span>
+vm.<span class="fn">makeCurrent</span>();
+vm.<span class="fn">install</span>(result);
+vm.<span class="fn">execute</span>(result.mainBlock);</code></pre>
+
+
+<!-- -------------------------------- -->
+<h3 id="cpp-call-into-vm">3.4 Calling Language Functions from the Host</h3>
+
+<p>After compiling and installing, the host can call Language X functions by name using <code>VM::callFunction()</code>. The <code>CompileResult</code> contains metadata about all exported functions.</p>
+
+<h4>Step 1: Find the function</h4>
+
+<pre><code><span class="cmt">// Look up a function by name</span>
+<span class="kw">const auto</span>* ef = ts::<span class="fn">findExportedFunction</span>(result, <span class="str">"myHandler"</span>);
+
+<span class="cmt">// Or with overload resolution by parameter types</span>
+<span class="kw">const auto</span>* ef = ts::<span class="fn">findExportedFunction</span>(result, <span class="str">"process"</span>,
+    { types.<span class="fn">types</span>().floatType, types.<span class="fn">types</span>().intType });</code></pre>
+
+<h4>Step 2: Call it</h4>
+
+<pre><code><span class="kw">if</span> (ef &amp;&amp; ef-&gt;isCodeBlock) {
+    <span class="cmt">// Get the CodeBlock from the VM's globals</span>
+    <span class="kw">auto</span>* block = <span class="kw">static_cast</span>&lt;ts::<span class="typ">CodeBlock</span>*&gt;(vm.<span class="fn">global</span>(ef-&gt;globalIndex).p);
+
+    <span class="cmt">// Prepare arguments</span>
+    ts::<span class="typ">Word</span> args[<span class="num">2</span>];
+    args[<span class="num">0</span>].f = <span class="num">440.0</span>;   <span class="cmt">// Float argument</span>
+    args[<span class="num">1</span>].i = <span class="num">48000</span>;   <span class="cmt">// Int argument</span>
+
+    <span class="cmt">// Call &mdash; returns value in register 0</span>
+    vm.<span class="fn">makeCurrent</span>();
+    ts::<span class="typ">Word</span> result = vm.<span class="fn">callFunction</span>(block, args, <span class="num">2</span>);
+
+    <span class="typ">f64</span> output = result.f;
+}</code></pre>
+
+<h4><code>ExportedFunc</code> structure</h4>
+
+<pre><code><span class="kw">struct</span> CompileResult::<span class="typ">ExportedFunc</span> {
+    std::<span class="typ">string</span>       name;
+    <span class="typ">u32</span>              globalIndex;    <span class="cmt">// index into VM's global array</span>
+    std::<span class="typ">vector</span>&lt;<span class="typ">Type</span>*&gt; paramTypes;
+    <span class="typ">Type</span>*            returnType;
+    <span class="kw">bool</span>             isCodeBlock;    <span class="cmt">// true = user-defined (CodeBlock*)</span>
+                                     <span class="cmt">// false = built-in (Primitive*)</span>
+};</code></pre>
+
+<h4><code>callFunction</code> signature</h4>
+
+<pre><code><span class="cmt">// Call a compiled function. Args are copied into registers.</span>
+<span class="cmt">// Returns the value in register 0.</span>
+<span class="typ">Word</span> VM::<span class="fn">callFunction</span>(<span class="typ">CodeBlock</span>* block, <span class="kw">const</span> <span class="typ">Word</span>* args, <span class="typ">u16</span> argc);</code></pre>
+
+<div class="warning">
+  <strong>Important:</strong> <code>callFunction</code> resets the VM's frame stack and register file. It is designed to be called from the host between events, not reentrantly from within a foreign function.
+</div>
+
+
+<!-- -------------------------------- -->
+<h3 id="cpp-user-data">3.5 User Data</h3>
+
+<p>The VM carries an opaque <code>void*</code> pointer that foreign functions can use to access host state (e.g., an audio engine, a game world, a database connection):</p>
+
+<pre><code><span class="kw">struct</span> <span class="typ">AudioEngine</span> { <span class="cmt">/* ... */</span> };
+
+<span class="typ">AudioEngine</span> engine;
+vm.<span class="fn">setUserData</span>(&amp;engine);
+
+<span class="cmt">// Inside a foreign function:</span>
+<span class="kw">void</span> <span class="fn">getAmplitude</span>(ts::<span class="typ">VM</span>&amp; vm, <span class="typ">u16</span> dst, <span class="typ">u16</span> argc, <span class="typ">u16</span> argBase) {
+    <span class="kw">auto</span>* engine = <span class="kw">static_cast</span>&lt;<span class="typ">AudioEngine</span>*&gt;(vm.<span class="fn">userData</span>());
+    vm.<span class="fn">reg</span>(dst).<span class="fn">f</span> = engine-&gt;<span class="fn">getAmplitude</span>();
+}</code></pre>
+
+<div class="note">
+  <strong>Note:</strong> When using the C API, <code>langx_vm_create()</code> automatically stores the wrapper pointer in <code>userData</code>. If you call <code>langx_vm_set_user_data()</code>, you will overwrite this internal pointer. The C API's foreign function trampoline uses <code>userData</code> to recover the <code>langx_vm*</code> wrapper, so setting user data from C requires care. For C API usage, prefer storing host state in a struct and passing a pointer to it via the <code>langx_vm_set_user_data()</code> mechanism (the trampoline is designed to work even when user data is replaced, since it recovers the C callback pointer from <code>ffiData_</code> on the <code>Primitive</code>).
+</div>
+
+
+<!-- -------------------------------- -->
+<h3 id="cpp-full-example">3.6 Full C++ Example</h3>
+
+<pre><code><span class="kw">#include</span> <span class="str">&lt;langx.hpp&gt;</span>
+<span class="kw">#include</span> <span class="str">&lt;iostream&gt;</span>
+
+<span class="cmt">// Foreign function: clamp(x: Float, lo: Float, hi: Float) -&gt; Float</span>
+<span class="kw">void</span> <span class="fn">ffi_clamp</span>(ts::<span class="typ">VM</span>&amp; vm, <span class="typ">u16</span> dst, <span class="typ">u16</span> argc, <span class="typ">u16</span> argBase) {
+    <span class="typ">f64</span> x  = vm.<span class="fn">reg</span>(argBase).<span class="fn">f</span>;
+    <span class="typ">f64</span> lo = vm.<span class="fn">reg</span>(argBase + <span class="num">1</span>).<span class="fn">f</span>;
+    <span class="typ">f64</span> hi = vm.<span class="fn">reg</span>(argBase + <span class="num">2</span>).<span class="fn">f</span>;
+    vm.<span class="fn">reg</span>(dst).<span class="fn">f</span> = (x &lt; lo) ? lo : (x &gt; hi) ? hi : x;
+}
+
+<span class="kw">int</span> <span class="fn">main</span>() {
+    <span class="cmt">// Setup</span>
+    ts::<span class="typ">TypeUniverse</span> types;
+    ts::<span class="typ">Compiler</span> compiler(types);
+
+    <span class="kw">auto</span>* <span class="typ">Float</span> = types.<span class="fn">types</span>().floatType;
+
+    <span class="cmt">// Register foreign function</span>
+    compiler.<span class="fn">registerForeignFunction</span>(
+        <span class="str">"clamp"</span>, <span class="typ">Float</span>, { <span class="typ">Float</span>, <span class="typ">Float</span>, <span class="typ">Float</span> },
+        ffi_clamp, <span class="kw">true</span>, <span class="kw">true</span>);
+
+    <span class="cmt">// Create target and compile</span>
+    ts::<span class="typ">VMTarget</span> target = compiler.<span class="fn">createTarget</span>();
+    ts::<span class="typ">CompileResult</span> result = compiler.<span class="fn">compile</span>(R<span class="str">"(
+        fn process(x: Float) -&gt; Float {
+            clamp(x * 2.0, -1.0, 1.0)
+        }
+    )"</span>, <span class="str">"dsp.x"</span>, target);
+
+    <span class="kw">if</span> (!result.success) {
+        std::cerr &lt;&lt; <span class="str">"Compile failed"</span> &lt;&lt; std::endl;
+        <span class="kw">return</span> <span class="num">1</span>;
+    }
+
+    <span class="cmt">// Create VM bound to the target, install, and call</span>
+    ts::<span class="typ">VM</span> vm(<span class="num">64</span> * <span class="num">1024</span> * <span class="num">1024</span>, types, target);
+    vm.<span class="fn">makeCurrent</span>();
+    vm.<span class="fn">install</span>(result);
+
+    <span class="kw">auto</span>* ef = ts::<span class="fn">findExportedFunction</span>(result, <span class="str">"process"</span>);
+    <span class="kw">if</span> (ef &amp;&amp; ef-&gt;isCodeBlock) {
+        <span class="kw">auto</span>* block = <span class="kw">static_cast</span>&lt;ts::<span class="typ">CodeBlock</span>*&gt;(vm.<span class="fn">global</span>(ef-&gt;globalIndex).p);
+        ts::<span class="typ">Word</span> args[<span class="num">1</span>];
+        args[<span class="num">0</span>].f = <span class="num">0.8</span>;
+        ts::<span class="typ">Word</span> r = vm.<span class="fn">callFunction</span>(block, args, <span class="num">1</span>);
+        std::cout &lt;&lt; <span class="str">"process(0.8) = "</span> &lt;&lt; r.f &lt;&lt; std::endl;
+        <span class="cmt">// Output: process(0.8) = 1.0  (0.8 * 2.0 = 1.6, clamped to 1.0)</span>
+    }
+
+    <span class="kw">return</span> <span class="num">0</span>;
+}</code></pre>
+
+
+<!-- -------------------------------- -->
+<h3 id="cpp-obj-accessors">3.7 Object Accessors</h3>
+
+<p>When a foreign function receives an object-typed argument (String, Fraction, Complex, Array, Tuple, or Struct), the register contains an <code>Obj*</code> pointer. The accessor API in <code>&lt;langx.hpp&gt;</code> provides type-safe functions to read data from these objects without needing to include internal headers:</p>
+
+<h4>String</h4>
+
+<pre><code><span class="typ">Obj</span>* obj = vm.<span class="fn">reg</span>(argBase).<span class="fn">o</span>;
+<span class="kw">const char</span>* data = ts::<span class="fn">stringData</span>(obj);   <span class="cmt">// pointer to UTF-8 bytes</span>
+<span class="typ">size_t</span>      len  = ts::<span class="fn">stringSize</span>(obj);   <span class="cmt">// byte length</span></code></pre>
+
+<h4>Fraction</h4>
+
+<pre><code><span class="typ">int64_t</span> n = ts::<span class="fn">fractionNumer</span>(obj);   <span class="cmt">// numerator</span>
+<span class="typ">int64_t</span> d = ts::<span class="fn">fractionDenom</span>(obj);   <span class="cmt">// denominator</span></code></pre>
+
+<h4>Complex</h4>
+
+<pre><code><span class="typ">double</span> re = ts::<span class="fn">complexReal</span>(obj);   <span class="cmt">// real part</span>
+<span class="typ">double</span> im = ts::<span class="fn">complexImag</span>(obj);   <span class="cmt">// imaginary part</span></code></pre>
+
+<h4>Array</h4>
+
+<pre><code><span class="typ">size_t</span> len = ts::<span class="fn">arraySize</span>(obj);
+
+<span class="cmt">// Use the getter matching the element type:</span>
+<span class="typ">int64_t</span> val = ts::<span class="fn">arrayGetInt</span>(obj, i);     <span class="cmt">// for [Int] or [Bool]</span>
+<span class="typ">double</span>  val = ts::<span class="fn">arrayGetFloat</span>(obj, i);   <span class="cmt">// for [Float]</span>
+<span class="typ">Obj</span>*    val = ts::<span class="fn">arrayGetObj</span>(obj, i);     <span class="cmt">// for [String], [T] where T is object type</span></code></pre>
+
+<div class="note">
+  <strong>Note:</strong> Out-of-bounds access returns <code>0</code>, <code>0.0</code>, or <code>nullptr</code> respectively.
+</div>
+
+<h4>Tuple</h4>
+
+<pre><code><span class="typ">size_t</span> len = ts::<span class="fn">tupleSize</span>(obj);
+ts::<span class="typ">Word</span>  w = ts::<span class="fn">tupleGet</span>(obj, i);   <span class="cmt">// element as Word (use .i, .f, or .o)</span></code></pre>
+
+<h4>Struct</h4>
+
+<pre><code><span class="typ">size_t</span> n = ts::<span class="fn">structFieldCount</span>(obj);
+ts::<span class="typ">Word</span> w = ts::<span class="fn">structGetField</span>(obj, i);   <span class="cmt">// field value by index</span></code></pre>
+
+<h4>Full accessor signatures</h4>
+
+<pre><code><span class="kw">namespace</span> ts {
+<span class="cmt">// String</span>
+<span class="kw">const char</span>* <span class="fn">stringData</span>(<span class="typ">Obj</span>* obj);
+<span class="typ">size_t</span>      <span class="fn">stringSize</span>(<span class="typ">Obj</span>* obj);
+
+<span class="cmt">// Fraction</span>
+<span class="typ">int64_t</span> <span class="fn">fractionNumer</span>(<span class="typ">Obj</span>* obj);
+<span class="typ">int64_t</span> <span class="fn">fractionDenom</span>(<span class="typ">Obj</span>* obj);
+
+<span class="cmt">// Complex</span>
+<span class="typ">double</span> <span class="fn">complexReal</span>(<span class="typ">Obj</span>* obj);
+<span class="typ">double</span> <span class="fn">complexImag</span>(<span class="typ">Obj</span>* obj);
+
+<span class="cmt">// Array</span>
+<span class="typ">size_t</span>  <span class="fn">arraySize</span>(<span class="typ">Obj</span>* obj);
+<span class="typ">int64_t</span> <span class="fn">arrayGetInt</span>(<span class="typ">Obj</span>* obj, <span class="typ">size_t</span> index);
+<span class="typ">double</span>  <span class="fn">arrayGetFloat</span>(<span class="typ">Obj</span>* obj, <span class="typ">size_t</span> index);
+<span class="typ">Obj</span>*    <span class="fn">arrayGetObj</span>(<span class="typ">Obj</span>* obj, <span class="typ">size_t</span> index);
+
+<span class="cmt">// Tuple</span>
+<span class="typ">size_t</span> <span class="fn">tupleSize</span>(<span class="typ">Obj</span>* obj);
+<span class="typ">Word</span>   <span class="fn">tupleGet</span>(<span class="typ">Obj</span>* obj, <span class="typ">size_t</span> index);
+
+<span class="cmt">// Struct</span>
+<span class="typ">size_t</span> <span class="fn">structFieldCount</span>(<span class="typ">Obj</span>* obj);
+<span class="typ">Word</span>   <span class="fn">structGetField</span>(<span class="typ">Obj</span>* obj, <span class="typ">size_t</span> index);
+}</code></pre>
+
+
+<!-- ================================================================ -->
+<h2 id="c-api">4. C Embedding API</h2>
+
+<p>Include <code>&lt;langx.h&gt;</code> for the C embedding interface. All functions are prefixed with <code>langx_</code>.</p>
+
+
+<!-- -------------------------------- -->
+<h3 id="c-types">4.1 Opaque Types &amp; Handles</h3>
+
+<pre><code><span class="kw">typedef struct</span> <span class="typ">langx_type_universe</span> <span class="typ">langx_type_universe</span>;
+<span class="kw">typedef struct</span> <span class="typ">langx_compiler</span>      <span class="typ">langx_compiler</span>;
+<span class="kw">typedef struct</span> <span class="typ">langx_vm</span>            <span class="typ">langx_vm</span>;
+<span class="kw">typedef struct</span> <span class="typ">langx_compile_result</span> <span class="typ">langx_compile_result</span>;
+<span class="kw">typedef struct</span> <span class="typ">langx_vm_target</span>     <span class="typ">langx_vm_target</span>;
+<span class="kw">typedef struct</span> { <span class="kw">void</span>* ptr; }       <span class="typ">langx_obj_handle</span>;   <span class="cmt">// opaque object handle</span>
+<span class="kw">typedef struct</span> { <span class="kw">void</span>* ptr; }       <span class="typ">langx_type_handle</span>;
+<span class="kw">typedef union</span>  { <span class="typ">int64_t</span> i; <span class="typ">double</span> f; <span class="kw">void</span>* p; } <span class="typ">langx_word</span>;</code></pre>
+
+<p>These are opaque wrappers around the C++ implementation. The host never accesses internal fields directly.</p>
+
+
+<!-- -------------------------------- -->
+<h3 id="c-lifecycle">4.2 Lifecycle</h3>
+
+<pre><code><span class="cmt">/* Create */</span>
+<span class="typ">langx_type_universe</span>* types    = <span class="fn">langx_type_universe_create</span>();
+<span class="typ">langx_compiler</span>*      compiler = <span class="fn">langx_compiler_create</span>(types);
+<span class="typ">langx_vm_target</span>*     target   = <span class="fn">langx_create_target</span>(compiler, <span class="num">0</span>);
+<span class="typ">langx_vm</span>*            vm       = <span class="fn">langx_vm_create</span>(<span class="num">64</span> * <span class="num">1024</span> * <span class="num">1024</span>, types, target);
+
+<span class="cmt">/* Compile */</span>
+<span class="typ">langx_compile_result</span>* result = <span class="fn">langx_compile</span>(compiler, source, <span class="str">"file.x"</span>, target);
+
+<span class="kw">if</span> (<span class="fn">langx_compile_result_success</span>(result)) {
+    <span class="fn">langx_vm_install</span>(vm, result);
+    <span class="fn">langx_vm_execute</span>(vm, result);
+}
+
+<span class="cmt">/* Cleanup (reverse order) */</span>
+<span class="fn">langx_compile_result_destroy</span>(result);
+<span class="fn">langx_vm_destroy</span>(vm);
+<span class="fn">langx_target_destroy</span>(target);
+<span class="fn">langx_compiler_destroy</span>(compiler);
+<span class="fn">langx_type_universe_destroy</span>(types);</code></pre>
+
+
+<!-- -------------------------------- -->
+<h3 id="c-register">4.3 Registering Foreign Functions</h3>
+
+<p>C foreign functions receive a <code>langx_vm*</code> (not a C++ reference) and use accessor functions to read/write registers:</p>
+
+<pre><code><span class="cmt">/* C foreign function signature */</span>
+<span class="kw">typedef void</span> (*<span class="typ">langx_cfun</span>)(<span class="typ">langx_vm</span>* vm, <span class="typ">uint16_t</span> result_reg,
+                            <span class="typ">uint16_t</span> argc, <span class="typ">uint16_t</span> arg_base);</code></pre>
+
+<h4>Example</h4>
+
+<pre><code><span class="cmt">/* addTen(x: Int) -&gt; Int */</span>
+<span class="kw">void</span> <span class="fn">my_add_ten</span>(<span class="typ">langx_vm</span>* vm, <span class="typ">uint16_t</span> dst,
+                 <span class="typ">uint16_t</span> argc, <span class="typ">uint16_t</span> arg_base) {
+    <span class="typ">int64_t</span> x = <span class="fn">langx_vm_reg_int</span>(vm, arg_base, arg_base);
+    <span class="fn">langx_vm_set_reg_int</span>(vm, dst, x + <span class="num">10</span>);
+}
+
+<span class="cmt">/* Register it */</span>
+<span class="typ">langx_type_handle</span> int_type = <span class="fn">langx_type_int</span>(types);
+
+<span class="fn">langx_register_foreign_function</span>(
+    compiler,
+    <span class="str">"addTen"</span>,       <span class="cmt">/* name */</span>
+    int_type,        <span class="cmt">/* return type */</span>
+    &amp;int_type,       <span class="cmt">/* param types array */</span>
+    <span class="num">1</span>,               <span class="cmt">/* param count */</span>
+    my_add_ten,      <span class="cmt">/* function pointer */</span>
+    <span class="num">1</span>,               <span class="cmt">/* pure */</span>
+    <span class="num">1</span>                <span class="cmt">/* RT-safe */</span>
+);</code></pre>
+
+
+<!-- -------------------------------- -->
+<h3 id="c-type-handles">4.4 Type Handles</h3>
+
+<p>Use these functions to obtain type handles for foreign function registration:</p>
+
+<table>
+  <tr><th>Function</th><th>Language Type</th><th>Word Field</th></tr>
+  <tr><td><code>langx_type_int(types)</code></td><td><code>Int</code></td><td><code>.i</code></td></tr>
+  <tr><td><code>langx_type_float(types)</code></td><td><code>Float</code></td><td><code>.f</code></td></tr>
+  <tr><td><code>langx_type_bool(types)</code></td><td><code>Bool</code></td><td><code>.i</code> (0 or 1)</td></tr>
+  <tr><td><code>langx_type_string(types)</code></td><td><code>String</code></td><td><code>.o</code></td></tr>
+  <tr><td><code>langx_type_symbol(types)</code></td><td><code>Symbol</code></td><td><code>.s</code></td></tr>
+  <tr><td><code>langx_type_void(types)</code></td><td><code>Void</code></td><td>(none)</td></tr>
+</table>
+
+
+<!-- -------------------------------- -->
+<h3 id="c-register-access">4.5 Register Access</h3>
+
+<p>Within a C foreign function, use these to read arguments and write results:</p>
+
+<pre><code><span class="cmt">/* Read argument registers */</span>
+<span class="typ">int64_t</span>          <span class="fn">langx_vm_reg_int</span>  (<span class="typ">langx_vm</span>* vm, <span class="typ">uint16_t</span> base, <span class="typ">uint16_t</span> reg);
+<span class="typ">double</span>           <span class="fn">langx_vm_reg_float</span>(<span class="typ">langx_vm</span>* vm, <span class="typ">uint16_t</span> base, <span class="typ">uint16_t</span> reg);
+<span class="typ">langx_obj_handle</span> <span class="fn">langx_vm_reg_obj</span>  (<span class="typ">langx_vm</span>* vm, <span class="typ">uint16_t</span> base, <span class="typ">uint16_t</span> reg);
+
+<span class="cmt">/* Write result register */</span>
+<span class="kw">void</span> <span class="fn">langx_vm_set_reg_int</span>  (<span class="typ">langx_vm</span>* vm, <span class="typ">uint16_t</span> reg, <span class="typ">int64_t</span> val);
+<span class="kw">void</span> <span class="fn">langx_vm_set_reg_float</span>(<span class="typ">langx_vm</span>* vm, <span class="typ">uint16_t</span> reg, <span class="typ">double</span> val);
+<span class="kw">void</span> <span class="fn">langx_vm_set_reg_obj</span>  (<span class="typ">langx_vm</span>* vm, <span class="typ">uint16_t</span> reg, <span class="typ">langx_obj_handle</span> obj);</code></pre>
+
+<div class="tip">
+  <strong>Tip:</strong> The <code>base</code> parameter in the read functions is currently unused (reserved for future stack frame support). Pass <code>arg_base</code> for consistency.
+</div>
+
+<h4>Reading arguments pattern</h4>
+
+<pre><code><span class="cmt">/* For a function f(a: Int, b: Float, c: Int): */</span>
+<span class="typ">int64_t</span> a = <span class="fn">langx_vm_reg_int</span>  (vm, arg_base, arg_base + <span class="num">0</span>);
+<span class="typ">double</span>  b = <span class="fn">langx_vm_reg_float</span>(vm, arg_base, arg_base + <span class="num">1</span>);
+<span class="typ">int64_t</span> c = <span class="fn">langx_vm_reg_int</span>  (vm, arg_base, arg_base + <span class="num">2</span>);</code></pre>
+
+
+<!-- -------------------------------- -->
+<h3 id="c-obj-accessors">4.6 Object Accessors</h3>
+
+<p>The C API provides accessor functions for reading data from object-typed values. First obtain a <code>langx_obj_handle</code> from a register, then use the appropriate accessor:</p>
+
+<h4>Obtaining an object handle</h4>
+
+<pre><code><span class="cmt">/* Read an object argument */</span>
+<span class="typ">langx_obj_handle</span> obj = <span class="fn">langx_vm_reg_obj</span>(vm, arg_base, arg_base + <span class="num">0</span>);</code></pre>
+
+<h4>String</h4>
+
+<pre><code><span class="kw">const char</span>* data = <span class="fn">langx_string_data</span>(obj);   <span class="cmt">/* pointer to UTF-8 bytes */</span>
+<span class="typ">size_t</span>      len  = <span class="fn">langx_string_size</span>(obj);   <span class="cmt">/* byte length */</span></code></pre>
+
+<h4>Fraction</h4>
+
+<pre><code><span class="typ">int64_t</span> n = <span class="fn">langx_fraction_numer</span>(obj);   <span class="cmt">/* numerator */</span>
+<span class="typ">int64_t</span> d = <span class="fn">langx_fraction_denom</span>(obj);   <span class="cmt">/* denominator */</span></code></pre>
+
+<h4>Complex</h4>
+
+<pre><code><span class="typ">double</span> re = <span class="fn">langx_complex_real</span>(obj);   <span class="cmt">/* real part */</span>
+<span class="typ">double</span> im = <span class="fn">langx_complex_imag</span>(obj);   <span class="cmt">/* imaginary part */</span></code></pre>
+
+<h4>Array</h4>
+
+<pre><code><span class="typ">size_t</span> len = <span class="fn">langx_array_size</span>(obj);
+
+<span class="cmt">/* Use the getter matching the element type: */</span>
+<span class="typ">int64_t</span>          val = <span class="fn">langx_array_get_int</span>(obj, i);     <span class="cmt">/* for [Int] or [Bool] */</span>
+<span class="typ">double</span>           val = <span class="fn">langx_array_get_float</span>(obj, i);   <span class="cmt">/* for [Float] */</span>
+<span class="typ">langx_obj_handle</span> val = <span class="fn">langx_array_get_obj</span>(obj, i);     <span class="cmt">/* for [String] etc. */</span></code></pre>
+
+<div class="note">
+  <strong>Note:</strong> Out-of-bounds access returns <code>0</code>, <code>0.0</code>, or a null handle respectively.
+</div>
+
+<h4>Tuple</h4>
+
+<pre><code><span class="typ">size_t</span>     len = <span class="fn">langx_tuple_size</span>(obj);
+<span class="typ">langx_word</span> w   = <span class="fn">langx_tuple_get</span>(obj, i);   <span class="cmt">/* element as langx_word */</span></code></pre>
+
+<h4>Struct</h4>
+
+<pre><code><span class="typ">size_t</span>     n = <span class="fn">langx_struct_field_count</span>(obj);
+<span class="typ">langx_word</span> w = <span class="fn">langx_struct_get_field</span>(obj, i);   <span class="cmt">/* field value by index */</span></code></pre>
+
+
+<!-- -------------------------------- -->
+<h3 id="c-call-into-vm">4.7 Calling Language Functions from C</h3>
+
+<pre><code><span class="cmt">/* Prepare arguments */</span>
+<span class="typ">langx_word</span> args[<span class="num">2</span>];
+args[<span class="num">0</span>].f = <span class="num">440.0</span>;
+args[<span class="num">1</span>].i = <span class="num">48000</span>;
+
+<span class="cmt">/* Call by name */</span>
+<span class="typ">langx_word</span> result = <span class="fn">langx_vm_call</span>(vm, compile_result,
+                                    <span class="str">"process"</span>, args, <span class="num">2</span>);
+
+<span class="typ">double</span> output = result.f;</code></pre>
+
+<p><code>langx_vm_call</code> looks up the named function in the <code>CompileResult</code>'s exported function list, matches by name and argument count, then dispatches to either <code>callFunction</code> (for user-defined functions) or <code>evalPrimitive</code> (for built-in/foreign functions). Returns a zero word if the function is not found.</p>
+
+<div class="warning">
+  <strong>Argument limit:</strong> <code>langx_vm_call</code> supports up to 16 arguments. This is a compile-time limit in the implementation.
+</div>
+
+
+<!-- -------------------------------- -->
+<h3 id="c-user-data">4.8 User Data</h3>
+
+<pre><code><span class="kw">void</span>  <span class="fn">langx_vm_set_user_data</span>(<span class="typ">langx_vm</span>* vm, <span class="kw">void</span>* data);
+<span class="kw">void</span>* <span class="fn">langx_vm_get_user_data</span>(<span class="typ">langx_vm</span>* vm);</code></pre>
+
+<p>Use these to attach arbitrary host state to the VM. Access it from within foreign functions via <code>langx_vm_get_user_data(vm)</code>.</p>
+
+
+<!-- -------------------------------- -->
+<h3 id="c-full-example">4.9 Full C Example</h3>
+
+<pre><code><span class="kw">#include</span> <span class="str">"langx.h"</span>
+<span class="kw">#include</span> <span class="str">&lt;stdio.h&gt;</span>
+
+<span class="cmt">/* Foreign function: square(x: Float) -&gt; Float */</span>
+<span class="kw">void</span> <span class="fn">ffi_square</span>(<span class="typ">langx_vm</span>* vm, <span class="typ">uint16_t</span> dst,
+                 <span class="typ">uint16_t</span> argc, <span class="typ">uint16_t</span> arg_base) {
+    <span class="typ">double</span> x = <span class="fn">langx_vm_reg_float</span>(vm, arg_base, arg_base);
+    <span class="fn">langx_vm_set_reg_float</span>(vm, dst, x * x);
+}
+
+<span class="kw">int</span> <span class="fn">main</span>(<span class="kw">void</span>) {
+    <span class="cmt">/* Setup */</span>
+    <span class="typ">langx_type_universe</span>* types    = <span class="fn">langx_type_universe_create</span>();
+    <span class="typ">langx_compiler</span>*      compiler = <span class="fn">langx_compiler_create</span>(types);
+
+    <span class="cmt">/* Register foreign function */</span>
+    <span class="typ">langx_type_handle</span> float_t = <span class="fn">langx_type_float</span>(types);
+    <span class="fn">langx_register_foreign_function</span>(
+        compiler, <span class="str">"square"</span>, float_t, &amp;float_t, <span class="num">1</span>,
+        ffi_square, <span class="num">1</span>, <span class="num">1</span>);
+
+    <span class="cmt">/* Create target and compile */</span>
+    <span class="typ">langx_vm_target</span>* target = <span class="fn">langx_create_target</span>(compiler, <span class="num">0</span>);
+
+    <span class="kw">const char</span>* source =
+        <span class="str">"fn hypotenuse(a: Float, b: Float) -&gt; Float {\n"</span>
+        <span class="str">"    sqrt(square(a) + square(b))\n"</span>
+        <span class="str">"}\n"</span>;
+
+    <span class="typ">langx_compile_result</span>* result = <span class="fn">langx_compile</span>(
+        compiler, source, <span class="str">"math.x"</span>, target);
+
+    <span class="kw">if</span> (!<span class="fn">langx_compile_result_success</span>(result)) {
+        <span class="kw">for</span> (<span class="kw">int</span> i = <span class="num">0</span>; i &lt; <span class="fn">langx_compile_result_error_count</span>(result); i++) {
+            fprintf(stderr, <span class="str">"%s\n"</span>, <span class="fn">langx_compile_result_error</span>(result, i));
+        }
+        <span class="kw">return</span> <span class="num">1</span>;
+    }
+
+    <span class="cmt">/* Create VM bound to target, install, and call */</span>
+    <span class="typ">langx_vm</span>* vm = <span class="fn">langx_vm_create</span>(<span class="num">64</span> * <span class="num">1024</span> * <span class="num">1024</span>, types, target);
+    <span class="fn">langx_vm_install</span>(vm, result);
+
+    <span class="typ">langx_word</span> args[<span class="num">2</span>];
+    args[<span class="num">0</span>].f = <span class="num">3.0</span>;
+    args[<span class="num">1</span>].f = <span class="num">4.0</span>;
+    <span class="typ">langx_word</span> r = <span class="fn">langx_vm_call</span>(vm, result, <span class="str">"hypotenuse"</span>, args, <span class="num">2</span>);
+    printf(<span class="str">"hypotenuse(3, 4) = %f\n"</span>, r.f);
+    <span class="cmt">/* Output: hypotenuse(3, 4) = 5.000000 */</span>
+
+    <span class="cmt">/* Cleanup */</span>
+    <span class="fn">langx_compile_result_destroy</span>(result);
+    <span class="fn">langx_vm_destroy</span>(vm);
+    <span class="fn">langx_target_destroy</span>(target);
+    <span class="fn">langx_compiler_destroy</span>(compiler);
+    <span class="fn">langx_type_universe_destroy</span>(types);
+
+    <span class="kw">return</span> <span class="num">0</span>;
+}</code></pre>
+
+
+<!-- ================================================================ -->
+<h2 id="rt-safety">5. Real-Time Safety</h2>
+
+
+<!-- -------------------------------- -->
+<h3 id="rt-model">5.1 Safety Model</h3>
+
+<p>Language X is designed to run on real-time audio threads where blocking system calls are forbidden. The FFI extends this with a per-function <code>rtSafe</code> flag and compile-time enforcement:</p>
+
+<ul>
+  <li>Every function (built-in, foreign, or user-defined) has an <code>rtSafe</code> attribute.</li>
+  <li><strong>User-defined functions</strong> default to <code>rtSafe = true</code>. This is safe because the type checker transitively prevents them from calling non-RT-safe functions&mdash;if any call site within the function body targets a non-RT-safe function, that call fails to compile.</li>
+  <li><strong>Foreign functions</strong> default to <code>rtSafe = false</code>. The host must explicitly opt in by passing <code>rtSafe = true</code> at registration time.</li>
+  <li><strong>Built-in functions</strong> default to <code>rtSafe = true</code>, except for I/O functions like <code>print</code> and <code>println</code>.</li>
+</ul>
+
+<div class="warning">
+  <strong>The <code>rtSafe</code> flag is a contract, not an enforcement mechanism at the C++ level.</strong> If you mark a foreign function as RT-safe, it is your responsibility to ensure it does not call <code>malloc</code>, <code>printf</code>, acquire mutexes, perform file I/O, or make any other potentially blocking system call. The flag controls only <em>compile-time</em> access control.
+</div>
+
+
+<!-- -------------------------------- -->
+<h3 id="rt-enforcement">5.2 Compile-Time Enforcement</h3>
+
+<p>When a target is created with <code>rtRestricted = true</code>, the type checker rejects all calls to non-RT-safe functions:</p>
+
+<pre><code><span class="cmt">// C++: create an RT-restricted target</span>
+ts::<span class="typ">VMTarget</span> target = compiler.<span class="fn">createTarget</span>(<span class="kw">true</span>);
+
+<span class="cmt">// C: create an RT-restricted target</span>
+<span class="typ">langx_vm_target</span>* target = <span class="fn">langx_create_target</span>(compiler, <span class="num">1</span>);</code></pre>
+
+<p>With RT restriction enabled, compiling this code:</p>
+
+<pre><code><span class="fn">println</span>(<span class="str">"hello"</span>);   <span class="cmt">-- println is not RT-safe</span></code></pre>
+
+<p>Produces a compile error:</p>
+
+<pre><code>Type error [script.x:1:1]
+  |
+1 | println("hello");
+  | ^-----^
+  Function 'println' is not real-time safe and cannot be called
+  when compiling for a real-time VM</code></pre>
+
+<p>Meanwhile, math functions like <code>sin</code>, <code>cos</code>, <code>sqrt</code>, and all user-defined functions that don't transitively call non-RT-safe functions compile without error.</p>
+
+
+<!-- -------------------------------- -->
+<h3 id="rt-builtins">5.3 Built-in Function RT Classification</h3>
+
+<table>
+  <tr><th>Category</th><th>Functions</th><th>RT-Safe</th></tr>
+  <tr>
+    <td>Math</td>
+    <td><code>sin</code>, <code>cos</code>, <code>tan</code>, <code>asin</code>, <code>acos</code>, <code>atan</code>, <code>atan2</code>,
+        <code>sqrt</code>, <code>cbrt</code>, <code>exp</code>, <code>log</code>, <code>log2</code>, <code>log10</code>,
+        <code>pow</code>, <code>abs</code>, <code>floor</code>, <code>ceil</code>, <code>round</code>, <code>trunc</code>,
+        <code>min</code>, <code>max</code>, <code>clamp</code>, <code>hypot</code>, etc.</td>
+    <td>Yes</td>
+  </tr>
+  <tr>
+    <td>Arithmetic</td>
+    <td><code>add</code>, <code>sub</code>, <code>mul</code>, <code>div</code>, <code>mod</code>, <code>negate</code>, etc.</td>
+    <td>Yes</td>
+  </tr>
+  <tr>
+    <td>Collections</td>
+    <td><code>len</code>, <code>head</code>, <code>tail</code>, <code>append</code>, <code>reverse</code>, <code>sort</code>, <code>map</code>, <code>filter</code>, <code>fold</code>, etc.</td>
+    <td>Yes</td>
+  </tr>
+  <tr>
+    <td>Conversions</td>
+    <td><code>toInt</code>, <code>toFloat</code>, <code>toString</code>, etc.</td>
+    <td>Yes</td>
+  </tr>
+  <tr>
+    <td>Random</td>
+    <td><code>urand</code>, <code>brand</code>, <code>irand</code>, <code>rand</code>, <code>xrand</code>, <code>pick</code>, <code>picks</code></td>
+    <td>Yes</td>
+  </tr>
+  <tr>
+    <td>I/O</td>
+    <td><code>print</code>, <code>println</code></td>
+    <td><strong>No</strong></td>
+  </tr>
+</table>
+
+<p>All user-defined functions inherit RT safety transitively. If a user function only calls RT-safe functions, it is itself RT-safe.</p>
+
+
+<!-- -------------------------------- -->
+<h3 id="rt-cli">5.4 CLI Flag</h3>
+
+<p>The interpreter's command-line interface supports an <code>--rt</code> flag for testing RT safety enforcement:</p>
+
+<pre><code><span class="cmt"># This will produce a compile error:</span>
+$ langx --rt script_with_println.x
+
+<span class="cmt"># This will succeed (only RT-safe functions used):</span>
+$ langx --rt dsp_code.x</code></pre>
+
+<p>Test files can use the <code>-- @rt</code> marker on the first line to automatically enable RT mode in the test runner:</p>
+
+<pre><code><span class="cmt">-- @rt</span>
+<span class="kw">let</span> x = <span class="fn">sin</span>(<span class="num">3.14</span>);
+<span class="kw">let</span> y = <span class="fn">cos</span>(<span class="num">0.0</span>);
+<span class="kw">let</span> z = x + y;</code></pre>
+
+
+<!-- ================================================================ -->
+<h2 id="type-mapping">6. Type Mapping Reference</h2>
+
+<p>This table shows how Language X types correspond to C/C++ access patterns within foreign functions:</p>
+
+<table>
+  <tr>
+    <th>Language Type</th>
+    <th>Word Field</th>
+    <th>C++ Access (in CFun)</th>
+    <th>C Access (in langx_cfun)</th>
+  </tr>
+  <tr>
+    <td><code>Bool</code></td>
+    <td><code>.i</code></td>
+    <td><code>vm.reg(argBase + i).i</code> <small>(0 or 1)</small></td>
+    <td><code>langx_vm_reg_int(vm, base, reg)</code></td>
+  </tr>
+  <tr>
+    <td><code>Int</code></td>
+    <td><code>.i</code></td>
+    <td><code>vm.reg(argBase + i).i</code></td>
+    <td><code>langx_vm_reg_int(vm, base, reg)</code></td>
+  </tr>
+  <tr>
+    <td><code>Float</code></td>
+    <td><code>.f</code></td>
+    <td><code>vm.reg(argBase + i).f</code></td>
+    <td><code>langx_vm_reg_float(vm, base, reg)</code></td>
+  </tr>
+  <tr>
+    <td><code>Symbol</code></td>
+    <td><code>.s</code></td>
+    <td><code>vm.reg(argBase + i).s</code></td>
+    <td><small>(use C++ API)</small></td>
+  </tr>
+  <tr>
+    <td><code>String</code></td>
+    <td><code>.o</code></td>
+    <td><code>ts::stringData(obj)</code>, <code>ts::stringSize(obj)</code></td>
+    <td><code>langx_string_data(h)</code>, <code>langx_string_size(h)</code></td>
+  </tr>
+  <tr>
+    <td><code>Fraction</code></td>
+    <td><code>.o</code></td>
+    <td><code>ts::fractionNumer(obj)</code>, <code>ts::fractionDenom(obj)</code></td>
+    <td><code>langx_fraction_numer(h)</code>, <code>langx_fraction_denom(h)</code></td>
+  </tr>
+  <tr>
+    <td><code>Complex</code></td>
+    <td><code>.o</code></td>
+    <td><code>ts::complexReal(obj)</code>, <code>ts::complexImag(obj)</code></td>
+    <td><code>langx_complex_real(h)</code>, <code>langx_complex_imag(h)</code></td>
+  </tr>
+  <tr>
+    <td><code>Array[T]</code></td>
+    <td><code>.o</code></td>
+    <td><code>ts::arraySize(obj)</code>, <code>ts::arrayGetInt/Float/Obj(obj, i)</code></td>
+    <td><code>langx_array_size(h)</code>, <code>langx_array_get_int/float/obj(h, i)</code></td>
+  </tr>
+  <tr>
+    <td><code>Tuple</code></td>
+    <td><code>.o</code></td>
+    <td><code>ts::tupleSize(obj)</code>, <code>ts::tupleGet(obj, i)</code></td>
+    <td><code>langx_tuple_size(h)</code>, <code>langx_tuple_get(h, i)</code></td>
+  </tr>
+  <tr>
+    <td><code>Struct</code></td>
+    <td><code>.o</code></td>
+    <td><code>ts::structFieldCount(obj)</code>, <code>ts::structGetField(obj, i)</code></td>
+    <td><code>langx_struct_field_count(h)</code>, <code>langx_struct_get_field(h, i)</code></td>
+  </tr>
+  <tr>
+    <td><code>Void</code></td>
+    <td>(none)</td>
+    <td>No return value; <code>resultReg</code> is ignored</td>
+    <td>No return value</td>
+  </tr>
+</table>
+
+<div class="note">
+  <strong>Note:</strong> For the C++ API, <code>obj</code> is an <code>Obj*</code> read from <code>vm.reg(argBase + i).o</code>. For the C API, <code>h</code> is a <code>langx_obj_handle</code> obtained via <code>langx_vm_reg_obj(vm, base, reg)</code>.
+</div>
+
+<h4>Writing return values</h4>
+
+<pre><code><span class="cmt">// C++ — write into the result register</span>
+vm.<span class="fn">reg</span>(resultReg).<span class="fn">i</span> = <span class="num">42</span>;       <span class="cmt">// Int or Bool</span>
+vm.<span class="fn">reg</span>(resultReg).<span class="fn">f</span> = <span class="num">3.14</span>;     <span class="cmt">// Float</span>
+vm.<span class="fn">reg</span>(resultReg).<span class="fn">o</span> = strObj;   <span class="cmt">// String or other Obj*</span>
+
+<span class="cmt">// C — write into the result register</span>
+<span class="fn">langx_vm_set_reg_int</span>(vm, dst, <span class="num">42</span>);
+<span class="fn">langx_vm_set_reg_float</span>(vm, dst, <span class="num">3.14</span>);
+<span class="fn">langx_vm_set_reg_obj</span>(vm, dst, obj_handle);</code></pre>
+
+
+<!-- ================================================================ -->
+<h2 id="internals">7. Internals</h2>
+
+<p>This section describes the internal implementation for contributors and advanced users.</p>
+
+
+<!-- -------------------------------- -->
+<h3 id="int-registration-flow">7.1 Registration Flow</h3>
+
+<p>When <code>registerForeignFunction()</code> is called on the <code>Compiler</code>, it stores a <code>ForeignFuncEntry</code>:</p>
+
+<pre><code><span class="kw">struct</span> <span class="typ">ForeignFuncEntry</span> {
+    std::<span class="typ">string</span>          name;
+    <span class="typ">Type</span>*               returnType;
+    std::<span class="typ">vector</span>&lt;<span class="typ">Type</span>*&gt;  paramTypes;
+    <span class="typ">CFun</span>                cfun;
+    <span class="kw">bool</span>                pure;
+    <span class="kw">bool</span>                rtSafe;
+    <span class="kw">void</span>*               ffiData = <span class="kw">nullptr</span>;   <span class="cmt">// stored on Primitive for trampolines</span>
+};</code></pre>
+
+<p>During compilation, the <code>TypeChecker</code> calls <code>registerBuiltins()</code>, which iterates the compiler's foreign function list and installs each one as a <code>Primitive</code> global:</p>
+
+<pre><code><span class="cmt">// In TypeChecker::registerBuiltins()</span>
+<span class="kw">for</span> (<span class="kw">auto</span>&amp; entry : compiler_.<span class="fn">foreignFunctions</span>()) {
+    <span class="typ">u32</span> idx = compiler_.<span class="fn">addGlobal</span>(<span class="kw">true</span>);
+    <span class="kw">auto</span>* prim = <span class="kw">new</span> <span class="typ">Primitive</span>(compiler_.<span class="fn">voidType</span>());
+    prim-&gt;cfun_    = entry.cfun;
+    prim-&gt;pure_    = entry.pure;
+    prim-&gt;rtSafe_  = entry.rtSafe;
+    prim-&gt;ffiData_ = entry.ffiData;
+    compiler_.<span class="fn">global</span>(idx).o = prim;
+
+    <span class="typ">FuncInfo</span> info;
+    info.returnType  = entry.returnType;
+    info.paramTypes  = entry.paramTypes;
+    info.globalIndex = idx;
+    info.bodyChecked = <span class="kw">true</span>;
+    info.isBuiltin   = <span class="kw">true</span>;
+    info.rtSafe      = entry.rtSafe;
+    functions_[entry.name].<span class="fn">push_back</span>(info);
+}</code></pre>
+
+<p>From this point on, foreign functions are indistinguishable from built-in functions. The overload resolver, auto-mapper, and pipeline operator all work with them.</p>
+
+
+<!-- -------------------------------- -->
+<h3 id="int-c-trampoline">7.2 C API Trampoline</h3>
+
+<p>The C API cannot use <code>ts::VM&amp;</code> references directly. A trampoline bridges the gap:</p>
+
+<div class="diagram">
+<pre>
+Language X code calls foreign function
+        |
+        v
+  VM dispatches via Primitive::cfun_
+        |
+        v
+  c_ffi_trampoline(VM&amp;, dst, argc, argBase)
+        |
+        |-- Recovers C callback from Primitive::ffiData_
+        |-- Recovers langx_vm* from VM::userData()
+        |
+        v
+  user's langx_cfun(langx_vm*, dst, argc, argBase)
+        |
+        v
+  User reads args via langx_vm_reg_int/float()
+  User writes result via langx_vm_set_reg_int/float()
+</pre>
+</div>
+
+<p>The trampoline implementation:</p>
+
+<pre><code><span class="cmt">// Recover the C wrapper from the VM's userData</span>
+<span class="kw">static</span> <span class="typ">langx_vm</span>* <span class="fn">to_langx_vm</span>(ts::<span class="typ">VM</span>* vm) {
+    <span class="kw">return static_cast</span>&lt;<span class="typ">langx_vm</span>*&gt;(vm-&gt;<span class="fn">userData</span>());
+}
+
+<span class="cmt">// Trampoline: VM calls this, it forwards to the C callback</span>
+<span class="kw">static void</span> <span class="fn">c_ffi_trampoline</span>(ts::<span class="typ">VM</span>&amp; vm, <span class="typ">u16</span> dst, <span class="typ">u16</span> argc, <span class="typ">u16</span> argBase) {
+    <span class="kw">auto</span>* prim = vm.<span class="fn">currentPrimitive</span>();
+    <span class="kw">auto</span> cfun = <span class="kw">reinterpret_cast</span>&lt;<span class="typ">langx_cfun</span>&gt;(prim-&gt;ffiData_);
+    <span class="kw">auto</span>* wrapper = <span class="fn">to_langx_vm</span>(&amp;vm);
+    <span class="fn">cfun</span>(wrapper, dst, argc, argBase);
+}</code></pre>
+
+<p>Key points:</p>
+<ul>
+  <li>The actual C function pointer is stored in <code>Primitive::ffiData_</code>, not in the <code>cfun_</code> field (which holds the trampoline).</li>
+  <li>The <code>langx_vm*</code> wrapper is stored in <code>VM::userData_</code> during <code>langx_vm_create()</code>.</li>
+  <li><code>VM::currentPrimitive()</code> returns the <code>Primitive*</code> being executed, set by the VM's opcode dispatcher.</li>
+</ul>
+
+
+<!-- -------------------------------- -->
+<h3 id="int-exported-funcs">7.3 Exported Functions</h3>
+
+<p>At the end of <code>Compiler::compile()</code>, the function table is iterated to populate <code>CompileResult::exportedFunctions</code>:</p>
+
+<pre><code><span class="kw">for</span> (<span class="kw">auto</span>&amp; [name, overloads] : typeChecker.<span class="fn">functions</span>()) {
+    <span class="kw">for</span> (<span class="kw">auto</span>&amp; fi : overloads) {
+        <span class="kw">if</span> (fi.isTemplate) <span class="kw">continue</span>;  <span class="cmt">// skip unresolved templates</span>
+        CompileResult::<span class="typ">ExportedFunc</span> ef;
+        ef.name        = name;
+        ef.globalIndex = fi.globalIndex;
+        ef.paramTypes  = fi.paramTypes;
+        ef.returnType  = fi.returnType;
+        ef.isCodeBlock = !fi.isBuiltin;
+        result.exportedFunctions.<span class="fn">push_back</span>(std::<span class="fn">move</span>(ef));
+    }
+}</code></pre>
+
+<p>The <code>isCodeBlock</code> field distinguishes user-defined functions (stored as <code>CodeBlock*</code> in the global) from built-in/foreign functions (stored as <code>Primitive*</code>). The host uses this to choose between <code>VM::callFunction()</code> and <code>VM::evalPrimitive()</code>.</p>
+
+
+<!-- ================================================================ -->
+<h2 id="api-reference">8. API Reference</h2>
+
+<!-- -------------------------------- -->
+<h3 id="ref-cpp">8.1 C++ API Reference</h3>
+
+<h4><code>Compiler</code></h4>
+
+<table>
+  <tr><th>Method</th><th>Description</th></tr>
+  <tr>
+    <td><code>VMTarget createTarget(bool rtRestricted = false)</code></td>
+    <td>Create a shared compilation target. Set <code>rtRestricted</code> to <code>true</code> to enable RT safety checking. Lifetime is managed by <code>shared_ptr</code>.</td>
+  </tr>
+  <tr>
+    <td><code>bool isRTRestricted() const</code></td>
+    <td>Query whether the current compilation target is RT-restricted.</td>
+  </tr>
+  <tr>
+    <td><code>void registerForeignFunction(name, returnType, paramTypes, cfun, pure, rtSafe)</code></td>
+    <td>Register a host-provided function. See <a href="#cpp-register">Section 3.2</a>.</td>
+  </tr>
+  <tr>
+    <td><code>const vector&lt;ForeignFuncEntry&gt;&amp; foreignFunctions() const</code></td>
+    <td>Access the registered foreign function list.</td>
+  </tr>
+  <tr>
+    <td><code>CompileResult compile(source, filename, target)</code></td>
+    <td>Compile source code against a target. Returns success/failure, errors, and exported function metadata.</td>
+  </tr>
+</table>
+
+<h4><code>VM</code></h4>
+
+<table>
+  <tr><th>Method</th><th>Description</th></tr>
+  <tr>
+    <td><code>void setUserData(void* data)</code></td>
+    <td>Store an opaque pointer accessible from foreign functions.</td>
+  </tr>
+  <tr>
+    <td><code>void* userData() const</code></td>
+    <td>Retrieve the stored user data pointer.</td>
+  </tr>
+  <tr>
+    <td><code>Word callFunction(CodeBlock* block, const Word* args, u16 argc)</code></td>
+    <td>Call a compiled function. Resets the frame stack. Returns register 0.</td>
+  </tr>
+  <tr>
+    <td><code>Word evalPrimitive(Primitive* prim, const Word* args, u16 argc)</code></td>
+    <td>Evaluate a <code>Primitive</code> with given arguments. Used for calling built-in/foreign functions directly.</td>
+  </tr>
+  <tr>
+    <td><code>Primitive* currentPrimitive() const</code></td>
+    <td>The <code>Primitive</code> currently being executed (set by the opcode dispatcher).</td>
+  </tr>
+  <tr>
+    <td><code>Word&amp; reg(u16 r)</code></td>
+    <td>Access register <code>r</code> in the current frame.</td>
+  </tr>
+  <tr>
+    <td><code>Word&amp; global(u32 index)</code></td>
+    <td>Access global variable at <code>index</code>.</td>
+  </tr>
+</table>
+
+<h4><code>CompileResult</code></h4>
+
+<table>
+  <tr><th>Field</th><th>Type</th><th>Description</th></tr>
+  <tr>
+    <td><code>success</code></td>
+    <td><code>bool</code></td>
+    <td>Whether compilation succeeded.</td>
+  </tr>
+  <tr>
+    <td><code>errors</code></td>
+    <td><code>vector&lt;Error&gt;</code></td>
+    <td>Compile errors (if any).</td>
+  </tr>
+  <tr>
+    <td><code>mainBlock</code></td>
+    <td><code>CodeBlock*</code></td>
+    <td>The compiled top-level code.</td>
+  </tr>
+  <tr>
+    <td><code>exportedFunctions</code></td>
+    <td><code>vector&lt;ExportedFunc&gt;</code></td>
+    <td>Metadata for all callable functions. See <a href="#int-exported-funcs">Section 7.3</a>.</td>
+  </tr>
+</table>
+
+<h4>Free Functions</h4>
+
+<table>
+  <tr><th>Function</th><th>Description</th></tr>
+  <tr>
+    <td><code>const ExportedFunc* findExportedFunction(result, name, paramTypes = {})</code></td>
+    <td>Look up an exported function by name (and optionally by parameter types for overload resolution). Returns <code>nullptr</code> if not found.</td>
+  </tr>
+</table>
+
+<h4>Object Accessors</h4>
+
+<table>
+  <tr><th>Function</th><th>Description</th></tr>
+  <tr><td><code>const char* stringData(Obj* obj)</code></td><td>Pointer to the String's UTF-8 bytes.</td></tr>
+  <tr><td><code>size_t stringSize(Obj* obj)</code></td><td>Byte length of the String.</td></tr>
+  <tr><td><code>int64_t fractionNumer(Obj* obj)</code></td><td>Fraction numerator.</td></tr>
+  <tr><td><code>int64_t fractionDenom(Obj* obj)</code></td><td>Fraction denominator.</td></tr>
+  <tr><td><code>double complexReal(Obj* obj)</code></td><td>Complex number real part.</td></tr>
+  <tr><td><code>double complexImag(Obj* obj)</code></td><td>Complex number imaginary part.</td></tr>
+  <tr><td><code>size_t arraySize(Obj* obj)</code></td><td>Number of elements in the Array.</td></tr>
+  <tr><td><code>int64_t arrayGetInt(Obj* obj, size_t index)</code></td><td>Get Int element from <code>[Int]</code> or <code>[Bool]</code>. Returns 0 if out of bounds.</td></tr>
+  <tr><td><code>double arrayGetFloat(Obj* obj, size_t index)</code></td><td>Get Float element from <code>[Float]</code>. Returns 0.0 if out of bounds.</td></tr>
+  <tr><td><code>Obj* arrayGetObj(Obj* obj, size_t index)</code></td><td>Get object element from <code>[T]</code> where T is an object type. Returns <code>nullptr</code> if out of bounds.</td></tr>
+  <tr><td><code>size_t tupleSize(Obj* obj)</code></td><td>Number of elements in the Tuple.</td></tr>
+  <tr><td><code>Word tupleGet(Obj* obj, size_t index)</code></td><td>Get Tuple element as Word. Returns zero Word if out of bounds.</td></tr>
+  <tr><td><code>size_t structFieldCount(Obj* obj)</code></td><td>Number of fields in the Struct.</td></tr>
+  <tr><td><code>Word structGetField(Obj* obj, size_t index)</code></td><td>Get Struct field value by index. Returns zero Word if out of bounds.</td></tr>
+</table>
+
+
+<!-- -------------------------------- -->
+<h3 id="ref-c">8.2 C API Reference</h3>
+
+<h4>TypeUniverse</h4>
+
+<table>
+  <tr><th>Function</th><th>Description</th></tr>
+  <tr><td><code>langx_type_universe* langx_type_universe_create(void)</code></td><td>Create a shared type universe.</td></tr>
+  <tr><td><code>void langx_type_universe_destroy(langx_type_universe*)</code></td><td>Destroy a type universe.</td></tr>
+</table>
+
+<h4>Compiler</h4>
+
+<table>
+  <tr><th>Function</th><th>Description</th></tr>
+  <tr><td><code>langx_compiler* langx_compiler_create(langx_type_universe*)</code></td><td>Create a compiler.</td></tr>
+  <tr><td><code>void langx_compiler_destroy(langx_compiler*)</code></td><td>Destroy a compiler.</td></tr>
+  <tr><td><code>langx_vm_target* langx_create_target(langx_compiler*, int rt_restricted)</code></td><td>Create a shared compilation target. Pass non-zero for RT safety enforcement.</td></tr>
+  <tr><td><code>void langx_target_destroy(langx_vm_target*)</code></td><td>Destroy a compilation target.</td></tr>
+  <tr><td><code>langx_compile_result* langx_compile(langx_compiler*, const char* source, const char* filename, langx_vm_target*)</code></td><td>Compile source code. Caller owns the result.</td></tr>
+</table>
+
+<h4>CompileResult</h4>
+
+<table>
+  <tr><th>Function</th><th>Description</th></tr>
+  <tr><td><code>int langx_compile_result_success(const langx_compile_result*)</code></td><td>Returns 1 on success, 0 on failure.</td></tr>
+  <tr><td><code>int langx_compile_result_error_count(const langx_compile_result*)</code></td><td>Number of compile errors.</td></tr>
+  <tr><td><code>const char* langx_compile_result_error(const langx_compile_result*, int index)</code></td><td>Get error message at index. Valid until result is destroyed.</td></tr>
+  <tr><td><code>void langx_compile_result_destroy(langx_compile_result*)</code></td><td>Destroy a compile result.</td></tr>
+</table>
+
+<h4>Type Handles</h4>
+
+<table>
+  <tr><th>Function</th><th>Returns</th></tr>
+  <tr><td><code>langx_type_handle langx_type_int(langx_type_universe*)</code></td><td>Handle for <code>Int</code> type</td></tr>
+  <tr><td><code>langx_type_handle langx_type_float(langx_type_universe*)</code></td><td>Handle for <code>Float</code> type</td></tr>
+  <tr><td><code>langx_type_handle langx_type_bool(langx_type_universe*)</code></td><td>Handle for <code>Bool</code> type</td></tr>
+  <tr><td><code>langx_type_handle langx_type_string(langx_type_universe*)</code></td><td>Handle for <code>String</code> type</td></tr>
+  <tr><td><code>langx_type_handle langx_type_symbol(langx_type_universe*)</code></td><td>Handle for <code>Symbol</code> type</td></tr>
+  <tr><td><code>langx_type_handle langx_type_void(langx_type_universe*)</code></td><td>Handle for <code>Void</code> type</td></tr>
+</table>
+
+<h4>Foreign Function Registration</h4>
+
+<table>
+  <tr><th>Function</th><th>Description</th></tr>
+  <tr>
+    <td><code>int langx_register_foreign_function(langx_compiler*, const char* name, langx_type_handle return_type, const langx_type_handle* param_types, int param_count, langx_cfun cfun, int pure, int rt_safe)</code></td>
+    <td>Register a foreign function. Returns 1 on success. <code>pure</code>: function can be constant-folded. <code>rt_safe</code>: function is safe for RT VMs.</td>
+  </tr>
+</table>
+
+<h4>VM</h4>
+
+<table>
+  <tr><th>Function</th><th>Description</th></tr>
+  <tr><td><code>langx_vm* langx_vm_create(size_t pool_size, langx_type_universe*, langx_vm_target*)</code></td><td>Create a VM bound to a target, with given pool size.</td></tr>
+  <tr><td><code>void langx_vm_destroy(langx_vm*)</code></td><td>Destroy a VM.</td></tr>
+  <tr><td><code>void langx_vm_make_current(langx_vm*)</code></td><td>Set this VM as current for the calling thread.</td></tr>
+  <tr><td><code>void langx_vm_install(langx_vm*, const langx_compile_result*)</code></td><td>Install compiled code into the VM.</td></tr>
+  <tr><td><code>void langx_vm_execute(langx_vm*, const langx_compile_result*)</code></td><td>Execute the main block.</td></tr>
+  <tr><td><code>void langx_vm_gc_heartbeat(langx_vm*)</code></td><td>Drive one GC heartbeat. Call on timer or audio callback.</td></tr>
+  <tr><td><code>void langx_vm_set_user_data(langx_vm*, void*)</code></td><td>Set user data pointer.</td></tr>
+  <tr><td><code>void* langx_vm_get_user_data(langx_vm*)</code></td><td>Get user data pointer.</td></tr>
+  <tr><td><code>langx_word langx_vm_call(langx_vm*, const langx_compile_result*, const char* name, const langx_word* args, int argc)</code></td><td>Call a language function by name. Returns result word (zero if not found).</td></tr>
+</table>
+
+<h4>Register Access</h4>
+
+<table>
+  <tr><th>Function</th><th>Description</th></tr>
+  <tr><td><code>int64_t langx_vm_reg_int(langx_vm*, uint16_t base, uint16_t reg)</code></td><td>Read integer value from register.</td></tr>
+  <tr><td><code>double langx_vm_reg_float(langx_vm*, uint16_t base, uint16_t reg)</code></td><td>Read float value from register.</td></tr>
+  <tr><td><code>langx_obj_handle langx_vm_reg_obj(langx_vm*, uint16_t base, uint16_t reg)</code></td><td>Read object handle from register.</td></tr>
+  <tr><td><code>void langx_vm_set_reg_int(langx_vm*, uint16_t reg, int64_t val)</code></td><td>Write integer value to register.</td></tr>
+  <tr><td><code>void langx_vm_set_reg_float(langx_vm*, uint16_t reg, double val)</code></td><td>Write float value to register.</td></tr>
+  <tr><td><code>void langx_vm_set_reg_obj(langx_vm*, uint16_t reg, langx_obj_handle obj)</code></td><td>Write object handle to register.</td></tr>
+</table>
+
+<h4>Object Accessors</h4>
+
+<table>
+  <tr><th>Function</th><th>Description</th></tr>
+  <tr><td><code>const char* langx_string_data(langx_obj_handle obj)</code></td><td>Pointer to the String's UTF-8 bytes.</td></tr>
+  <tr><td><code>size_t langx_string_size(langx_obj_handle obj)</code></td><td>Byte length of the String.</td></tr>
+  <tr><td><code>int64_t langx_fraction_numer(langx_obj_handle obj)</code></td><td>Fraction numerator.</td></tr>
+  <tr><td><code>int64_t langx_fraction_denom(langx_obj_handle obj)</code></td><td>Fraction denominator.</td></tr>
+  <tr><td><code>double langx_complex_real(langx_obj_handle obj)</code></td><td>Complex number real part.</td></tr>
+  <tr><td><code>double langx_complex_imag(langx_obj_handle obj)</code></td><td>Complex number imaginary part.</td></tr>
+  <tr><td><code>size_t langx_array_size(langx_obj_handle obj)</code></td><td>Number of elements in the Array.</td></tr>
+  <tr><td><code>int64_t langx_array_get_int(langx_obj_handle obj, size_t index)</code></td><td>Get Int element. Returns 0 if out of bounds.</td></tr>
+  <tr><td><code>double langx_array_get_float(langx_obj_handle obj, size_t index)</code></td><td>Get Float element. Returns 0.0 if out of bounds.</td></tr>
+  <tr><td><code>langx_obj_handle langx_array_get_obj(langx_obj_handle obj, size_t index)</code></td><td>Get object element. Returns null handle if out of bounds.</td></tr>
+  <tr><td><code>size_t langx_tuple_size(langx_obj_handle obj)</code></td><td>Number of elements in the Tuple.</td></tr>
+  <tr><td><code>langx_word langx_tuple_get(langx_obj_handle obj, size_t index)</code></td><td>Get Tuple element as <code>langx_word</code>. Returns zero if out of bounds.</td></tr>
+  <tr><td><code>size_t langx_struct_field_count(langx_obj_handle obj)</code></td><td>Number of fields in the Struct.</td></tr>
+  <tr><td><code>langx_word langx_struct_get_field(langx_obj_handle obj, size_t index)</code></td><td>Get Struct field by index. Returns zero if out of bounds.</td></tr>
+</table>
+
+<h4>Stats</h4>
+
+<table>
+  <tr><th>Function</th><th>Description</th></tr>
+  <tr><td><code>uint32_t langx_vm_num_globals(const langx_vm*)</code></td><td>Number of globals in the VM.</td></tr>
+  <tr><td><code>size_t langx_vm_allocated(const langx_vm*)</code></td><td>Bytes currently allocated.</td></tr>
+  <tr><td><code>size_t langx_vm_pool_size(const langx_vm*)</code></td><td>Total pool size.</td></tr>
+  <tr><td><code>uint32_t langx_vm_num_live_objects(const langx_vm*)</code></td><td>Number of live GC objects.</td></tr>
+  <tr><td><code>uint32_t langx_vm_num_live_words(const langx_vm*)</code></td><td>Number of live GC words.</td></tr>
+  <tr><td><code>void langx_vm_set_print_output(langx_vm*, FILE*)</code></td><td>Redirect print output.</td></tr>
+</table>
+
+</main>
+</body>
+</html>

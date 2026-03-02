@@ -1,0 +1,741 @@
+#include "synthdef_synth.hpp"
+
+namespace synthdef {
+
+    
+
+    Expr::Expr(SignalRate rate, vector<S> inputs) 
+        : rate(rate), inputs(std::move(inputs)), userial(nextExprSerialNo())
+    {}
+    
+    bool identical(vector<S> const& a, vector<S> const& b) {
+        if (a.size() != b.size()) return false;
+        for (usize i = 0; i < a.size(); ++i) {
+            if (a[i].get() != b[i].get()) return false;
+        }
+        return true;
+    }
+    
+    bool Expr::equals(Expr const& that) const {
+        return identical(inputs, that.inputs) && typeid(*this) == typeid(that) && this->equals_(that);
+    }
+    
+    bool Expr::is_root() const { return tree && tree->root.get() == this; }
+
+    Control::Control(ControlSpec spec, NumType itype, usize ichans, string name)
+        : Expr(eventSignalRate, {}), 
+        spec(spec), serial(nextControlSerialNo()), name(name)
+    {
+        type = itype;
+        chans = ichans;
+    }
+        
+    Inlet::Inlet(NumType itype, usize ichans, string name)
+        : Expr(audioSignalRate, {}), 
+        serial(nextInletSerialNo()), name(name)
+    {
+        type = itype;
+        chans = ichans;
+    }
+ 
+    Outlet::Outlet(S value, string name) 
+        : Expr(value->rate, {value}), serial(nextOutletSerialNo()), name(name)
+    {}
+   
+    URandExpr::URandExpr(usize ichans, SignalRate rate) 
+        : Expr(rate, {}), serial(nextRandSerialNo()) 
+    {
+        chans = ichans;
+    }
+
+    BiRandExpr::BiRandExpr(usize ichans, SignalRate rate) 
+        : Expr(rate, {}), serial(nextRandSerialNo()) 
+    {
+        chans = ichans;
+    }
+
+    Rand64Expr::Rand64Expr(usize ichans, SignalRate rate) 
+        : Expr(rate, {}), serial(nextRandSerialNo()) 
+    {
+        chans = ichans;
+    }
+
+    DelayBuf::DelayBuf() 
+        : graph(gGraph), serial(nextDelaySerialNo()) {}
+        
+    DelayBuf::DelayBuf(S maxDelayArg) 
+        : graph(gGraph), serial(nextDelaySerialNo()) 
+        {
+            maxDelay = addExpr(new MaxDelay(this, maxDelayArg));
+        }
+
+    u64 MaxDelay::hash() const {
+        return hash_combine(Expr::hash(), delayBuf.hash(), 0x8840E8B859B3D9FD);
+    }
+    u64 DelayFixRead::hash() const {
+        return hash_combine(Expr::hash(), delayBuf.hash(), delay_samples, 0xBAD5D99A2DA1741D);
+    }
+
+    u64 DelayVarRead::hash() const {
+        return hash_combine(Expr::hash(), delayBuf.hash(), 0xAAF87D428903FE61);
+    }
+
+    u64 DelayWrite::hash() const {
+        return hash_combine(Expr::hash(), delayBuf.hash(), 0x805F25D2236F5969);
+    }
+    u64 DelayInit::hash() const {
+        return hash_combine(Expr::hash(), delayBuf.hash(), offset, 0xA5FB72B0645B15FC);
+    }
+    
+    u64 Expr::hash() const {
+        u64 seed = kHashStart;
+        for (S expr : inputs) {
+            seed = hash_combine(seed, u64(expr.get()));
+        }
+        return seed;
+    }
+    
+#if 0
+    std::pair<S,S> sincos(S a) {
+        Constant const* ca = a.as<Constant>();
+        if (ca) {
+            auto [s,c] = sincos(ca);
+            return {addExpr(s), addExpr(c)};
+        } else {
+            S u = addExpr(new SinCosExpr{a});
+            S s = addExpr(new SinCosOutputExpr{0,u});
+            S c = addExpr(new SinCosOutputExpr{1,u});
+            return {s,c};
+        }
+    }
+#endif
+    S unary_op(S a, UnaryOp op) {
+        Constant const* ca = a.as<Constant>();
+        if (ca) {
+            return addExpr(unary_op(ca, op));
+        } else {
+            return addExpr(new UnaryOpExpr{op, a});
+        }
+    }
+
+    S binary_op(S a, S b, BinaryOp op) {
+        Constant const* ca = a.as<Constant>();
+        Constant const* cb = b.as<Constant>();
+        if (ca && cb) { 
+            return addExpr(binary_op(ca, cb, op));
+        } else {
+            return addExpr(new BinaryOpExpr{op, a, b});
+        }
+    }
+
+    S compare_op(S a, S b, CompareOp op) {
+        Constant const* ca = a.as<Constant>();
+        Constant const* cb = b.as<Constant>();
+        if (ca && cb) { 
+            return addExpr(compare_op(ca, cb, op));
+        } else {
+            return addExpr(new CompareOpExpr{op, a, b});
+        }
+    }
+
+    S reduce(S a, BinaryOp op, usize cols) {
+        printf("reduce op %d\n", op);
+        Constant const* ca = a.as<Constant>();
+        if (ca) { 
+            return addConstantExpr(reduce(ca, cols, op));
+        } else {
+            return addExpr(new ReduceExpr{op, cols, a});
+        }
+    }
+    S sum(S a, usize cols) { return reduce(a, BinaryOp::Add, cols); }
+    S product(S a, usize cols) { return reduce(a, BinaryOp::Mul, cols); }
+    S min(S a, usize cols) { return reduce(a, BinaryOp::Min, cols); }
+    S max(S a, usize cols) { return reduce(a, BinaryOp::Max, cols); }
+
+#if 0
+    S scan(S a, BinaryOp op, usize rows) {
+        Constant const* ca = a.as<Constant>();
+        if (ca) { 
+            return addConstantExpr(scan(ca, rows, op));
+        } else {
+            return addExpr(new ScanExpr{op, rows, a});
+        }
+    }
+#endif
+
+    S cast_op(S a, NumType type) {
+        Constant const* ca = a.as<Constant>();
+        if (ca) {
+            switch (type.flags) {
+                case NumTypeFlags::I32 : 
+                case NumTypeFlags::I64 : 
+                {
+                    auto b = to_int(ca);
+                    b->init_type = type;
+                    return addExpr(b);
+                }
+                case NumTypeFlags::F32 :
+                case NumTypeFlags::F64 :
+                {
+                    auto b = to_float(ca);
+                    b->init_type = type;
+                    return addExpr(b);
+                }
+                default:
+                    throw std::logic_error("unsupported cast type");
+            }
+        } else {
+            return addExpr(new CastOpExpr{type, a});
+        }
+    }
+
+    void Expr::propagate_input_type(ExprIdentitySet& worklist) {
+        { int i = 0; for (S input : inputs) {
+            auto new_input_type = inputTypeConstraint(i) & input->type;
+            if (new_input_type != input->type) {
+                input->type = new_input_type;
+                worklist.insert(input);
+            }
+            ++i;
+        }}
+    }
+    void Expr::propagate_output_type(ExprIdentitySet& worklist) {
+        for (S consumer : consumers.exprs()) {
+            worklist.insert(consumer);
+        }
+    }
+    void Expr::propagate_types(ExprIdentitySet& worklist) 
+    {
+        propagate_input_type(worklist);
+        propagate_output_type(worklist);
+    }
+
+    void propagate_delay_types(D delayBuf, ExprIdentitySet& worklist) 
+    {
+        for (S expr : delayBuf->fixReaders) {
+            worklist.insert(expr);
+        }
+        for (S expr : delayBuf->varReaders) {
+            worklist.insert(expr);
+        }
+        for (S expr : delayBuf->initters) {
+            worklist.insert(expr);
+        }
+        if (delayBuf->writer.notNull()) {
+            worklist.insert(delayBuf->writer);
+        }
+    }
+    
+    NumType UnaryOpExpr::initial_type() const {
+        NumType type;
+        if (is_float_unary_op(op)) {
+            return NumType::any_float;
+        } else if (is_integer_unary_op(op)) {
+            return NumType::any_int;
+        } else {
+            return NumType::any;
+        }
+    }
+
+    NumType BinaryOpExpr::initial_type() const {
+        NumType type;
+        if (is_float_binary_op(op)) {
+            return NumType::any_float;
+        } else if (is_integer_binary_op(op)) {
+            return NumType::any_int;
+        } else {
+            return NumType::any;
+        }
+    }
+
+
+    void Outlet::update_type(ExprIdentitySet& worklist) {
+        type = in0()->type;
+    }
+
+#if 0
+    NumType SinCosExpr::initial_type() const {
+        return NumType::any_float;
+    }
+    NumType SinCosOutputExpr::initial_type() const {
+        return NumType::any_float;
+    }
+
+    void SinCosExpr::update_type(ExprIdentitySet& worklist) {
+        auto new_type = type & in0()->type;
+        checkType(new_type);
+        if (type != new_type) {
+            type = new_type;
+            propagate_types(worklist);
+        }
+        
+    }
+
+    void SinCosOutputExpr::update_type(ExprIdentitySet& worklist) {
+        auto new_type = type & in0()->type;
+        checkType(new_type);
+        if (type != new_type) {
+            type = new_type;
+            propagate_types(worklist);
+        }
+        
+    }
+#endif
+
+    void UnaryOpExpr::update_type(ExprIdentitySet& worklist) {
+        auto new_type = type & in0()->type;
+        checkType(new_type);
+        if (type != new_type) {
+            type = new_type;
+            propagate_types(worklist);
+        }
+        
+    }
+
+    void BinaryOpExpr::update_type(ExprIdentitySet& worklist) {
+        auto new_type = type & in0()->type & in1()->type;
+        checkType(new_type);
+        if (type != new_type) {
+            type = new_type;
+            propagate_types(worklist);
+        }
+    }
+
+    void CompareOpExpr::update_type(ExprIdentitySet& worklist) {
+        auto new_input_type = in0()->type & in1()->type;
+        checkType(new_input_type);
+        if (input_type != new_input_type) {
+            propagate_types(worklist);
+        }
+    }
+    
+//    void MatMulExpr::update_type(ExprIdentitySet& worklist) {
+//        auto new_type = type & in0()->type & in1()->type;
+//        checkType(new_type);
+//        if (type != new_type) {
+//            type = new_type;
+//            propagate_types(worklist);
+//        }
+//    }
+
+    
+    void DelayFixRead::update_type(ExprIdentitySet& worklist) {
+        auto new_type = type & delayBuf->type;
+        checkType(new_type);
+        if (type != new_type) {
+            type = new_type;
+            propagate_types(worklist);
+        }
+        if (delayBuf->type != new_type) {
+            delayBuf->type = new_type;
+            propagate_delay_types(delayBuf, worklist);
+        }
+    }
+
+    void DelayVarRead::update_type(ExprIdentitySet& worklist) {
+        auto new_type = type & delayBuf->type;
+        checkType(new_type);
+        if (type != new_type) {
+            type = new_type;
+            propagate_types(worklist);
+        }
+        if (delayBuf->type != new_type) {
+            delayBuf->type = new_type;
+            propagate_delay_types(delayBuf, worklist);
+        }
+    }
+
+    void DelayWrite::update_type(ExprIdentitySet& worklist) {
+        auto new_type = type & in0()->type & delayBuf->type;
+        checkType(new_type);
+//        printf("DelayWrite::update_type %llu %s -> %s\n", delayBuf->serial, type.str().c_str(), new_type.str().c_str());
+        type = new_type;
+        if (delayBuf->type != new_type) {
+            delayBuf->type = new_type;
+            propagate_delay_types(delayBuf, worklist);
+        }
+    }
+
+#if 0    
+    void MatAt::update_type(ExprIdentitySet& worklist) {
+        auto new_type = type & in0()->type;
+        checkType(new_type);
+        if (new_type != type) {
+            type = new_type;
+            propagate_types(worklist);
+        }
+    }
+    void MatPut::update_type(ExprIdentitySet& worklist) {
+        auto new_type = type & in0()->type;
+        checkType(new_type);
+        if (new_type != type) {
+            type = new_type;
+            propagate_types(worklist);
+        }
+    }
+    void MatPermute::update_type(ExprIdentitySet& worklist) {
+        auto new_type = type & in0()->type;
+        checkType(new_type);
+        if (new_type != type) {
+            type = new_type;
+            propagate_types(worklist);
+        }
+    }
+    void MatTake::update_type(ExprIdentitySet& worklist) {
+        auto new_type = type & in0()->type;
+        checkType(new_type);
+        if (new_type != type) {
+            type = new_type;
+            propagate_types(worklist);
+        }
+    }
+    void MatSkip::update_type(ExprIdentitySet& worklist) {
+        auto new_type = type & in0()->type;
+        checkType(new_type);
+        if (new_type != type) {
+            type = new_type;
+            propagate_types(worklist);
+        }
+    }
+    void MatStride::update_type(ExprIdentitySet& worklist) {
+        auto new_type = type & in0()->type;
+        checkType(new_type);
+        if (new_type != type) {
+            type = new_type;
+            propagate_types(worklist);
+        }
+    }
+    void MatStutter::update_type(ExprIdentitySet& worklist) {
+        auto new_type = type & in0()->type;
+        checkType(new_type);
+        if (new_type != type) {
+            type = new_type;
+            propagate_types(worklist);
+        }
+    }
+    void MatCyc::update_type(ExprIdentitySet& worklist) {
+        auto new_type = type & in0()->type;
+        checkType(new_type);
+        if (new_type != type) {
+            type = new_type;
+            propagate_types(worklist);
+        }
+    }
+    void MatReverse::update_type(ExprIdentitySet& worklist) {
+        auto new_type = type & in0()->type;
+        checkType(new_type);
+        if (new_type != type) {
+            type = new_type;
+            propagate_types(worklist);
+        }
+    }
+    void MatRotate::update_type(ExprIdentitySet& worklist) {
+        auto new_type = type & in0()->type;
+        checkType(new_type);
+        if (new_type != type) {
+            type = new_type;
+            propagate_types(worklist);
+        }
+    }
+    void MatShift::update_type(ExprIdentitySet& worklist) {
+        auto new_type = type & in0()->type & in1()->type;
+        checkType(new_type);
+        if (new_type != type) {
+            type = new_type;
+            propagate_types(worklist);
+        }
+    }
+    void MatTranspose::update_type(ExprIdentitySet& worklist) {
+        auto new_type = type & in0()->type;
+        checkType(new_type);
+        if (new_type != type) {
+            type = new_type;
+            propagate_types(worklist);
+        }
+    }
+    void MatLace::update_type(ExprIdentitySet& worklist) {
+        auto new_type = type;
+        checkType(new_type);
+        for (S in : inputs) {
+            new_type = new_type & in->type;
+        }
+        if (new_type != type) {
+            type = new_type;
+            propagate_types(worklist);
+        }
+    }
+    void MatCat::update_type(ExprIdentitySet& worklist) {
+        auto new_type = type;
+        checkType(new_type);
+        for (S in : inputs) {
+            new_type = new_type & in->type;
+        }
+        if (new_type != type) {
+            type = new_type;
+            propagate_types(worklist);
+        }
+    }
+    
+    void MatReshape::update_type(ExprIdentitySet& worklist) {
+        auto new_type = type & in0()->type;
+        checkType(new_type);
+        if (new_type != type) {
+            type = new_type;
+            propagate_types(worklist);
+        }
+    }
+    
+    void ScanExpr::update_type(ExprIdentitySet& worklist) {
+        auto new_type = type & in0()->type;
+        checkType(new_type);
+        if (type != new_type) {
+            type = new_type;
+            propagate_types(worklist);
+        }
+    }
+#endif
+    void ReduceExpr::update_type(ExprIdentitySet& worklist) {
+        auto new_type = type & in0()->type;
+        checkType(new_type);
+        if (type != new_type) {
+            type = new_type;
+            propagate_types(worklist);
+        }
+    }
+
+    void PhiNodeExpr::update_type(ExprIdentitySet& worklist) {
+        auto new_type = type & in0()->type;
+        checkType(new_type);
+        if (type != new_type) {
+            type = new_type;
+            propagate_types(worklist);
+            if (target->type != new_type) {
+                worklist.insert(target);
+            }
+        }
+    }
+
+    void SelectExpr::update_type(ExprIdentitySet& worklist) {
+        auto new_type = type;
+        for (S in : inputs | stdv::drop(1)) {
+            new_type = new_type & in->type;
+        }
+        checkType(new_type);
+        if (type != new_type) {
+            type = new_type;
+            propagate_types(worklist);
+        }
+    }
+    void IfElseExpr::update_type(ExprIdentitySet& worklist) {
+        auto new_type = type & then_expr->type & else_expr->type;
+        checkType(new_type);
+        if (type != new_type) {
+            type = new_type;
+            propagate_types(worklist);
+            if (then_expr->type != new_type) {
+                then_expr->type = new_type;
+                worklist.insert(then_expr);
+            }
+            if (else_expr->type != new_type) {
+                else_expr->type = new_type;
+                worklist.insert(else_expr);
+            }
+        }
+    }
+    void SwitchExpr::update_type(ExprIdentitySet& worklist) {
+//        std::println("SwitchExpr::update_type {} in0 {}", (void*)this, in0()->type.str());
+        auto new_type = type;
+        for (S c : cases) {
+            new_type = c->type;
+        }
+        checkType(new_type);
+        if (type != new_type) {
+            type = new_type;
+            propagate_types(worklist);
+            for (S c : cases) {
+                if (c->type != new_type) {
+                    worklist.insert(c);
+                }
+            }
+        }
+    }
+
+    void Outlet::calcShape()  {
+        chans = in0()->chans;
+    }
+
+#if 0
+    void SinCosExpr::calcShape()  {
+        chans = in0()->chans;
+    }
+    void SinCosOutputExpr::calcShape()  {
+        chans = in0()->chans;
+    }
+#endif
+
+    void UnaryOpExpr::calcShape()  {
+        chans = in0()->chans;
+    }
+    void BinaryOpExpr::calcShape()  {
+        try {
+            chans = broadcast(in0()->chans, in1()->chans);
+        } catch (std::runtime_error const& e) {
+            throw std::runtime_error(std::format("binary op {}: incompatible shapes. {}", to_string(op), e.what()));
+        }
+    }
+    void CompareOpExpr::calcShape()  {
+         try {
+            chans = broadcast(in0()->chans, in1()->chans);
+        } catch (std::runtime_error const& e) {
+            throw std::runtime_error(std::format("compare op {}: incompatible shapes. {}", to_string(op), e.what()));
+        }
+    }
+    void CastOpExpr::calcShape()  {
+        chans = in0()->chans;
+    }
+//    void MatMulExpr::calcShape()  {
+//        Shape ashape = in0()->shape;
+//        Shape bshape = in1()->shape;
+//        if (ashape.cols != bshape.cols) {
+//            throw std::runtime_error(std::format("matmul: incompatible shapes. a.cols {} != b.rows {}", ashape.cols, bshape.rows));
+//        }
+//        shape = Shape(ashape.rows, bshape.cols);
+//    }
+
+    void DelayFixRead::calcShape()  {
+        chans = delayBuf->chans;
+    }
+    void DelayVarRead::calcShape()  {
+        chans = delayBuf->chans;
+    }
+    void DelayWrite::calcShape()  {
+        chans = in0()->chans;
+    }
+    
+#if 0
+    void MatAt::calcShape()  {
+        chans = in1()->chans;
+    }
+    void MatPut::calcShape()  {
+        chans = broadcast(in1()->chans, in2()->chans);
+    }
+    void MatPermute::calcShape()  {
+        chans = in1()->chans;
+    }
+    void MatTake::calcShape()  {
+        chans = n * rows;
+    }
+    void MatSkip::calcShape()  {
+        shape = in0()->shape.skip(n, axis);
+    }
+    void MatStride::calcShape()  {
+        shape = in0()->shape.stride(n, axis);
+    }
+    void MatStutter::calcShape()  {
+        shape = in0()->shape.scale(n, axis);
+    }
+    void MatCyc::calcShape()  {
+        shape = in0()->shape.scale(n, axis);
+    }
+    void MatReverse::calcShape()  {
+        chans = in0()->chans;
+    }
+    void MatRotate::calcShape()  {
+        chans = in0()->chans;
+    }
+    void MatShift::calcShape()  {
+        chans = in0()->chans;
+    }
+    void MatTranspose::calcShape()  {
+        shape = in0()->shape.transpose();
+    }
+    void MatLace::calcShape()  {
+        try {
+            for (S in : inputs) {
+                shape = shape.broadcast(in->shape);
+            }
+            shape.scale(inputs.size(), axis);
+        } catch (std::runtime_error const& e) {
+            throw std::runtime_error(std::format("lace: incompatible shapes. {}", e.what()));
+        }
+    }
+    void MatCat::calcShape()  {
+        try {
+            chans = in0()->chans;
+            for (S in : inputs | stdv::drop(1)) {
+                shape = shape.cat(in->shape, axis);
+            }
+        } catch (std::runtime_error const& e) {
+            throw std::runtime_error(std::format("vec: incompatible shapes. {}", e.what()));
+        }
+    }
+
+#endif
+
+    void SelectExpr::calcShape() {
+        try {
+//            if (in0()->chans != 1) {
+//                throw std::runtime_error(std::format("select: condition must be a scalar."));
+//            }
+            chans = in0()->chans;
+            for (S in : inputs | stdv::drop(1)) {
+                chans = broadcast(chans, in->chans);
+            }
+        } catch (std::runtime_error const& e) {
+            throw std::runtime_error(std::format("select: incompatible shapes. {}", e.what()));
+        }
+    }
+    void IfElseExpr::calcShape() {
+        try {
+            if (in0()->chans != 1) {
+                throw std::runtime_error(std::format("if_: condition must be a scalar."));
+            }
+            chans = broadcast(chans, then_expr->chans);
+            chans = broadcast(chans, else_expr->chans);
+//            std::println("then_expr {}", then_expr->typeName());
+//            std::println("IfElseExpr::calcShape sn {} : {} {} {} -> {}", 
+//                userial, in0()->chans, then_expr->chans, else_expr->chans, chans);
+        } catch (std::runtime_error const& e) {
+            throw std::runtime_error(std::format("if_: incompatible shapes. {}", e.what()));
+        }
+    }
+    void SwitchExpr::calcShape() {
+        try {
+            if (in0()->chans != 1) {
+                throw std::runtime_error(std::format("switch_: selector must be a scalar."));
+            }
+            for (S c : cases) {
+                chans = broadcast(chans, c->chans);
+            }
+        } catch (std::runtime_error const& e) {
+            throw std::runtime_error(std::format("switch_: incompatible shapes. {}", e.what()));
+        }
+    }
+    void PhiNodeExpr::calcShape() { 
+//        std::print("PhiNodeExpr::calcShape sn tgt {} {}\n", userial, target.get() ? std::to_string(target->userial) : "nil");
+        if (target.get()) {
+            chans = broadcast(chans, target->chans);
+        }
+        chans = broadcast(chans, in0()->chans);
+//        std::print("PhiNodeExpr::calcShape sn {}  shape {} tgt {}\n", userial, chans, target.get() ? target->chans : "nil");
+    }
+
+
+    string to_string(GraphCut cut) {
+        switch (cut) {
+            case GraphCut::None: return "None";
+            case GraphCut::Unused: return "Unused";
+            case GraphCut::Sink: return "Sink";
+            case GraphCut::Phi: return "Phi";
+            case GraphCut::Temp: return "Temp";
+            case GraphCut::Broadcast: return "Broadcast";
+            case GraphCut::ControlFlow: return "ControlFlow";
+            case GraphCut::SeparateLoop: return "SeparateLoop";
+            case GraphCut::FanOut: return "FanOut";
+            case GraphCut::Rate: return "Rate";
+            case GraphCut::Input: return "Input";
+            case GraphCut::Graph: return "Graph";
+            default: return "Unknown";
+        }
+    }
+}

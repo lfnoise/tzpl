@@ -1,0 +1,20 @@
+Box<Int> { value: 42 }
+42
+Box<String> { value: hello }
+hello
+Pair<Int, Float> { first: 1, second: 3.14 }
+1
+3.14
+Pair<String, Int> { first: hello, second: 42 }
+Pair<Int, Float> { first: 10, second: 2.5 }
+100
+abc
+Box<Pair<Int, Int>> { value: Pair<Int, Int> { first: 1, second: 2 } }
+Pair<Int, Int> { first: 1, second: 2 }
+1
+2
+1
+two
+3.14
+42
+world

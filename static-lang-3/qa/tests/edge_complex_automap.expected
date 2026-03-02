@@ -1,0 +1,14 @@
+[Hello Alice, Hello Bob, Hello Charlie]
+[HELLO, WORLD, TEST]
+[hello, world]
+3
+[true, false, true, false, true]
+[1, 2, 3]
+[10, 20, 30]
+[2, 4, 6]
+[Point { x: 1, y: 0 }, Point { x: 2, y: 0 }, Point { x: 3, y: 0 }]
+[1, 2, 3]
+[false, true, true]
+[2, 3]
+List(1, 2, 3)
+List(10, 20, 30)

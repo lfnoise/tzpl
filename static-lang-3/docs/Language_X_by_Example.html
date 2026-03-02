@@ -1,0 +1,2446 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Language X &mdash; By Example</title>
+<style>
+  :root {
+    --bg: #fdfdfd;
+    --fg: #1a1a1a;
+    --accent: #2563eb;
+    --accent-dim: #93b4f5;
+    --code-bg: #f3f4f6;
+    --code-border: #dde1e6;
+    --warn-bg: #fef3c7;
+    --warn-border: #f59e0b;
+    --note-bg: #dbeafe;
+    --note-border: #3b82f6;
+    --table-stripe: #f8f9fa;
+    --sidebar-bg: #f8f9fb;
+    --sidebar-border: #e2e5ea;
+    --heading-fg: #0f172a;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    font-size: 16px;
+    line-height: 1.7;
+    color: var(--fg);
+    background: var(--bg);
+    display: flex;
+    min-height: 100vh;
+  }
+
+  /* --- Sidebar / Table of Contents --- */
+
+  nav.sidebar {
+    position: sticky;
+    top: 0;
+    align-self: flex-start;
+    width: 280px;
+    min-width: 280px;
+    height: 100vh;
+    overflow-y: auto;
+    padding: 2rem 1.25rem;
+    background: var(--sidebar-bg);
+    border-right: 1px solid var(--sidebar-border);
+    font-size: 0.875rem;
+  }
+
+  nav.sidebar h2 {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #64748b;
+    margin-bottom: 1rem;
+  }
+
+  nav.sidebar ol {
+    list-style: none;
+    counter-reset: toc;
+  }
+
+  nav.sidebar > ol > li {
+    counter-increment: toc;
+    margin-bottom: 0.4rem;
+  }
+
+  nav.sidebar > ol > li > a::before {
+    content: counter(toc) ". ";
+    color: var(--accent-dim);
+    font-weight: 600;
+  }
+
+  nav.sidebar a {
+    color: var(--fg);
+    text-decoration: none;
+    display: block;
+    padding: 0.15rem 0;
+  }
+
+  nav.sidebar a:hover { color: var(--accent); }
+
+  nav.sidebar ol ol {
+    margin-left: 1rem;
+    margin-top: 0.2rem;
+    font-size: 0.82rem;
+  }
+
+  nav.sidebar ol ol li { margin-bottom: 0.2rem; }
+
+  /* --- Main Content --- */
+
+  main {
+    flex: 1;
+    max-width: 52rem;
+    margin: 0 auto;
+    padding: 3rem 2.5rem 6rem;
+  }
+
+  h1 {
+    font-size: 2.2rem;
+    font-weight: 700;
+    color: var(--heading-fg);
+    margin-bottom: 0.4rem;
+    line-height: 1.2;
+  }
+
+  h1 + .subtitle {
+    font-size: 1.1rem;
+    color: #64748b;
+    margin-bottom: 2.5rem;
+  }
+
+  h2 {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--heading-fg);
+    margin-top: 3.5rem;
+    margin-bottom: 1rem;
+    padding-bottom: 0.35rem;
+    border-bottom: 2px solid var(--accent);
+  }
+
+  h3 {
+    font-size: 1.15rem;
+    font-weight: 600;
+    color: var(--heading-fg);
+    margin-top: 2.2rem;
+    margin-bottom: 0.6rem;
+  }
+
+  h4 {
+    font-size: 1rem;
+    font-weight: 600;
+    color: #475569;
+    margin-top: 1.6rem;
+    margin-bottom: 0.4rem;
+  }
+
+  p { margin-bottom: 1rem; }
+
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  /* Code */
+
+  code {
+    font-family: 'SF Mono', 'Fira Code', 'JetBrains Mono', Menlo, Consolas, monospace;
+    font-size: 0.88em;
+    background: var(--code-bg);
+    border: 1px solid var(--code-border);
+    border-radius: 4px;
+    padding: 0.15em 0.4em;
+  }
+
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--code-border);
+    border-radius: 6px;
+    padding: 1.1rem 1.3rem;
+    overflow-x: auto;
+    margin-bottom: 1.2rem;
+    line-height: 1.55;
+  }
+
+  pre code {
+    background: none;
+    border: none;
+    padding: 0;
+    font-size: 0.86rem;
+  }
+
+  /* Keyword colouring (manual spans) */
+  .kw  { color: #8b5cf6; font-weight: 600; }
+  .typ { color: #0891b2; }
+  .str { color: #16a34a; }
+  .cmt { color: #94a3b8; font-style: italic; }
+  .num { color: #d97706; }
+  .fn  { color: #2563eb; }
+
+  /* Tables */
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 1.4rem;
+    font-size: 0.92rem;
+  }
+
+  th, td {
+    text-align: left;
+    padding: 0.55rem 0.9rem;
+    border: 1px solid var(--code-border);
+  }
+
+  th {
+    background: var(--code-bg);
+    font-weight: 600;
+    color: var(--heading-fg);
+  }
+
+  tr:nth-child(even) { background: var(--table-stripe); }
+
+  /* Callout boxes */
+
+  .note, .warning, .tip {
+    border-left: 4px solid;
+    border-radius: 4px;
+    padding: 0.9rem 1.1rem;
+    margin-bottom: 1.2rem;
+    font-size: 0.94rem;
+  }
+
+  .note    { background: var(--note-bg); border-color: var(--note-border); }
+  .warning { background: var(--warn-bg); border-color: var(--warn-border); }
+  .tip     { background: #dcfce7; border-color: #22c55e; }
+
+  .note strong, .warning strong, .tip strong {
+    display: block;
+    margin-bottom: 0.25rem;
+  }
+
+  /* Lists */
+
+  ul, ol { margin-left: 1.6rem; margin-bottom: 1rem; }
+  li { margin-bottom: 0.3rem; }
+
+  /* Diagram */
+  .diagram {
+    background: #fff;
+    border: 1px solid var(--code-border);
+    border-radius: 6px;
+    padding: 1.5rem;
+    margin-bottom: 1.4rem;
+    overflow-x: auto;
+    text-align: center;
+  }
+
+  .diagram pre {
+    display: inline-block;
+    text-align: left;
+    background: none;
+    border: none;
+    padding: 0;
+    margin: 0;
+    font-size: 0.82rem;
+    line-height: 1.5;
+  }
+
+  /* Responsive */
+  @media (max-width: 900px) {
+    nav.sidebar { display: none; }
+    main { padding: 2rem 1.2rem 4rem; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ================================================================ -->
+<!--  SIDEBAR                                                         -->
+<!-- ================================================================ -->
+
+<nav class="sidebar">
+  <h2>Contents</h2>
+  <ol>
+    <li><a href="#basic-syntax">Basic Syntax</a>
+      <ol>
+        <li><a href="#comments">Comments</a></li>
+        <li><a href="#literals">Literals</a></li>
+        <li><a href="#semicolons">Semicolons</a></li>
+        <li><a href="#printing-output">Printing Output</a></li>
+      </ol>
+    </li>
+    <li><a href="#variables">Variables and Constants</a>
+      <ol>
+        <li><a href="#immutable-bindings">Immutable Bindings</a></li>
+        <li><a href="#mutable-variables">Mutable Variables</a></li>
+        <li><a href="#constants">Constants</a></li>
+      </ol>
+    </li>
+    <li><a href="#types">Types and the Numeric Tower</a>
+      <ol>
+        <li><a href="#built-in-types">Built-in Types</a></li>
+        <li><a href="#numeric-tower">Numeric Tower</a></li>
+        <li><a href="#collection-types">Collection Types</a></li>
+      </ol>
+    </li>
+    <li><a href="#functions">Functions</a>
+      <ol>
+        <li><a href="#block-body">Block Body</a></li>
+        <li><a href="#expression-body">Expression Body</a></li>
+        <li><a href="#void-functions">Void Functions</a></li>
+        <li><a href="#inferred-return-types">Inferred Return Types</a></li>
+        <li><a href="#lambda-expressions">Lambda Expressions</a></li>
+        <li><a href="#operator-overloading">Operator Overloading</a></li>
+        <li><a href="#function-overloading">Function Overloading</a></li>
+        <li><a href="#default-arguments">Default Arguments</a></li>
+        <li><a href="#variadic-arguments">Variadic Arguments</a></li>
+        <li><a href="#string-formatting">String Formatting</a></li>
+      </ol>
+    </li>
+    <li><a href="#control-flow">Control Flow</a>
+      <ol>
+        <li><a href="#if-else">If/Else</a></li>
+        <li><a href="#ternary-expression">Ternary Expression</a></li>
+        <li><a href="#while-loops">While Loops</a></li>
+        <li><a href="#break-and-continue">Break and Continue</a></li>
+        <li><a href="#match">Match</a></li>
+      </ol>
+    </li>
+    <li><a href="#ranges">Ranges and For Loops</a>
+      <ol>
+        <li><a href="#range-expressions">Range Expressions</a></li>
+        <li><a href="#for-loops-ranges">For Loops over Ranges</a></li>
+        <li><a href="#for-loops-arrays-lists">For Loops over Arrays/Lists</a></li>
+        <li><a href="#range-builtins">Range Built-in Functions</a></li>
+        <li><a href="#fraction-ranges">Fraction Ranges</a></li>
+      </ol>
+    </li>
+    <li><a href="#data-structures">Data Structures</a>
+      <ol>
+        <li><a href="#structs">Structs</a></li>
+        <li><a href="#struct-update">Struct Update</a></li>
+        <li><a href="#tuple-structs">Tuple Structs</a></li>
+        <li><a href="#enums">Enums</a></li>
+        <li><a href="#ordinal">Ordinal</a></li>
+        <li><a href="#tag">Tag</a></li>
+      </ol>
+    </li>
+    <li><a href="#pattern-matching">Pattern Matching</a>
+      <ol>
+        <li><a href="#patterns-in-match">Patterns in Match</a></li>
+        <li><a href="#destructuring-in-declarations">Destructuring in Declarations</a></li>
+      </ol>
+    </li>
+    <li><a href="#operators">Operators</a>
+      <ol>
+        <li><a href="#arithmetic">Arithmetic</a></li>
+        <li><a href="#comparison">Comparison</a></li>
+        <li><a href="#logical">Logical</a></li>
+        <li><a href="#bitwise">Bitwise</a></li>
+        <li><a href="#concatenation">Concatenation</a></li>
+        <li><a href="#operator-precedence">Operator Precedence</a></li>
+      </ol>
+    </li>
+    <li><a href="#pipeline-syntax">Pipeline Syntax</a>
+      <ol>
+        <li><a href="#space-pipeline">Space Pipeline</a></li>
+        <li><a href="#pipe-operator">Pipe Operator</a></li>
+      </ol>
+    </li>
+    <li><a href="#array-tuple-math">Array and Tuple Arithmetic</a>
+      <ol>
+        <li><a href="#element-wise-operations">Element-wise Operations</a></li>
+        <li><a href="#scalar-broadcasting">Scalar Broadcasting</a></li>
+        <li><a href="#tuple-arithmetic">Tuple Arithmetic</a></li>
+        <li><a href="#tuple-array-broadcasting">Tuple-Array Broadcasting</a></li>
+      </ol>
+    </li>
+    <li><a href="#auto-mapping">Auto-mapping</a>
+      <ol>
+        <li><a href="#implicit-auto-mapping">Implicit Auto-mapping</a></li>
+        <li><a href="#auto-mapped-struct-construction">Auto-mapped Struct Construction</a></li>
+        <li><a href="#explicit-at-operator">Explicit @ Operator</a></li>
+        <li><a href="#at-binary-operators">@ on Binary Operators</a></li>
+        <li><a href="#cartesian-product">Cartesian Product</a></li>
+        <li><a href="#auto-map-field-access">Auto-map Field Access</a></li>
+        <li><a href="#auto-mapping-with-lists">Auto-mapping with Lists</a></li>
+      </ol>
+    </li>
+    <li><a href="#lists">Lists and Cons</a>
+      <ol>
+        <li><a href="#list-literals">List Literals</a></li>
+        <li><a href="#cons-operator">Cons Operator</a></li>
+        <li><a href="#pattern-matching-cons">Pattern Matching with Cons</a></li>
+        <li><a href="#iterating-lists">Iterating over Lists</a></li>
+        <li><a href="#infinite-lists">Infinite Lists</a></li>
+      </ol>
+    </li>
+    <li><a href="#maps">Maps</a>
+      <ol>
+        <li><a href="#map-literals">Map Literals</a></li>
+        <li><a href="#accessing-values">Accessing Values</a></li>
+        <li><a href="#modifying-maps">Modifying Maps</a></li>
+        <li><a href="#inspecting-maps">Inspecting Maps</a></li>
+      </ol>
+    </li>
+    <li><a href="#sets">Sets</a>
+      <ol>
+        <li><a href="#set-literals">Set Literals</a></li>
+        <li><a href="#set-membership">Membership</a></li>
+        <li><a href="#set-operations">Set Operations</a></li>
+        <li><a href="#set-conversion">Conversion and Size</a></li>
+      </ol>
+    </li>
+    <li><a href="#hashing">Hashing</a></li>
+    <li><a href="#refs">Refs</a>
+      <ol>
+        <li><a href="#creating-refs">Creating and Using Refs</a></li>
+        <li><a href="#refs-as-args">Refs as Function Arguments</a></li>
+        <li><a href="#overloading-assign">Overloading Assignment</a></li>
+      </ol>
+    </li>
+    <li><a href="#function-types">Function Type Annotations</a></li>
+    <li><a href="#templates">Templates</a>
+      <ol>
+        <li><a href="#template-functions">Template Functions</a></li>
+        <li><a href="#template-structs">Template Structs</a></li>
+        <li><a href="#template-enums">Template Enums</a></li>
+        <li><a href="#template-constraints">Template Constraints</a></li>
+        <li><a href="#template-lambdas">Template Lambdas</a></li>
+      </ol>
+    </li>
+    <li><a href="#type-aliases">Type Aliases</a>
+      <ol>
+        <li><a href="#concrete-type-aliases">Concrete Type Aliases</a></li>
+        <li><a href="#generic-type-aliases">Generic Type Aliases</a></li>
+        <li><a href="#type-alias-visibility">Visibility</a></li>
+      </ol>
+    </li>
+    <li><a href="#modules">Modules and Visibility</a>
+      <ol>
+        <li><a href="#import-syntax">Import Syntax</a></li>
+        <li><a href="#dotted-paths">Dotted Paths</a></li>
+        <li><a href="#file-resolution">File Resolution</a></li>
+        <li><a href="#visibility-exporting">Visibility and Exporting</a></li>
+        <li><a href="#circular-import">Circular Import Detection</a></li>
+      </ol>
+    </li>
+    <li><a href="#any-type">The Any Type</a>
+      <ol>
+        <li><a href="#wrapping-values">Wrapping Values</a></li>
+        <li><a href="#as-type-cast">Type Testing with as(Type)</a></li>
+        <li><a href="#any-match">Pattern Matching on Any</a></li>
+        <li><a href="#any-arrays">Heterogeneous Arrays</a></li>
+      </ol>
+    </li>
+    <li><a href="#advanced-examples">Advanced Examples</a>
+      <ol>
+        <li><a href="#fibonacci">Fibonacci</a></li>
+        <li><a href="#fizzbuzz">FizzBuzz</a></li>
+        <li><a href="#euler9">Euler Problem 9</a></li>
+        <li><a href="#complex-powers">Complex Number Powers</a></li>
+        <li><a href="#bitwise-overloading">Bitwise Operator Overloading</a></li>
+      </ol>
+    </li>
+  </ol>
+</nav>
+
+<!-- ================================================================ -->
+<!--  MAIN CONTENT                                                    -->
+<!-- ================================================================ -->
+
+<main>
+
+<h1>Language X &mdash; By Example</h1>
+<p class="subtitle">A comprehensive guide to Language X syntax and features, taught through annotated examples.</p>
+
+
+<!-- ================================================================ -->
+<h2 id="basic-syntax">1. Basic Syntax</h2>
+
+<h3 id="comments">1.1 Comments</h3>
+<pre><code><span class="cmt">-- Single line comment</span>
+
+<span class="cmt">/* Block comment
+   spans multiple lines
+   /* and can be nested */ */</span></code></pre>
+
+<h3 id="literals">1.2 Literals</h3>
+<pre><code><span class="cmt">-- Integer literals</span>
+<span class="num">42</span>
+<span class="num">0</span>
+<span class="num">123_456_789</span>
+
+<span class="cmt">-- Hexadecimal integer literals</span>
+<span class="num">0xFF</span>
+<span class="num">0x100</span>
+<span class="num">0xDeadBeef</span>
+
+<span class="cmt">-- Float literals (require a digit on both sides of the decimal point)</span>
+<span class="num">3.14</span>
+<span class="num">0.5</span>
+<span class="num">2.0</span>
+
+<span class="cmt">-- Fraction literals (integer/integer with no spaces around /)</span>
+<span class="num">1/2</span>
+<span class="num">3/4</span>
+<span class="num">-7/8</span>
+
+<span class="cmt">-- Fractions are automatically reduced</span>
+<span class="num">6/4</span>                <span class="cmt">-- 3/2</span>
+
+<span class="cmt">-- A fraction literal cannot be immediately followed by /</span>
+<span class="cmt">-- to prevent ambiguity. Use spaces for division:</span>
+<span class="cmt">--   1/2/3    -- ERROR: ambiguous</span>
+<span class="cmt">--   1/2 / 3  -- OK: fraction 1/2 divided by 3</span>
+
+<span class="cmt">-- Imaginary literals</span>
+<span class="num">4i</span>
+<span class="num">1.5i</span>
+
+<span class="cmt">-- String literals</span>
+<span class="str">"hello world"</span>
+
+<span class="cmt">-- Symbol literals (interned strings, compared by pointer)</span>
+<span class="num">'ok</span>
+<span class="num">'error</span>
+
+<span class="cmt">-- Boolean literals</span>
+<span class="kw">true</span>
+<span class="kw">false</span></code></pre>
+
+<h3 id="semicolons">1.3 Semicolons</h3>
+<pre><code><span class="cmt">-- Semicolons are required statement terminators</span>
+<span class="kw">let</span> x = <span class="num">42</span>;
+<span class="kw">let</span> y = <span class="num">10</span>;
+
+<span class="cmt">-- Exception: the last expression in a block is the implicit</span>
+<span class="cmt">-- return value and does NOT have a semicolon</span>
+<span class="kw">fn</span> square(x <span class="kw">Int</span>) <span class="kw">Int</span> {
+    x * x       <span class="cmt">-- no semicolon: this is the return value</span>
+}</code></pre>
+
+<h3 id="printing-output">1.4 Printing Output</h3>
+<pre><code><span class="cmt">-- println prints its arguments separated by spaces, followed by a newline</span>
+println(<span class="num">42</span>);                       <span class="cmt">-- 42</span>
+println(<span class="str">"hello"</span>, <span class="str">"world"</span>);        <span class="cmt">-- hello world</span>
+println(<span class="num">1</span>, <span class="num">2.5</span>, <span class="kw">true</span>);            <span class="cmt">-- 1 2.5 true</span>
+println();                          <span class="cmt">-- (empty line)</span>
+
+<span class="cmt">-- print is the same but without a trailing newline</span>
+print(<span class="str">"x="</span>);
+println(<span class="num">42</span>);                       <span class="cmt">-- x=42</span>
+
+<span class="cmt">-- Pipeline syntax works too</span>
+<span class="num">42</span> println;                         <span class="cmt">-- 42</span>
+<span class="str">"hello"</span> println;                    <span class="cmt">-- hello</span>
+
+<span class="cmt">-- Auto-map with @ to print each element on its own line</span>
+[<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>] @ println;
+<span class="cmt">-- 1</span>
+<span class="cmt">-- 2</span>
+<span class="cmt">-- 3</span></code></pre>
+
+
+<!-- ================================================================ -->
+<h2 id="variables">2. Variables and Constants</h2>
+
+<h3 id="immutable-bindings">2.1 Immutable Bindings (<code>let</code>)</h3>
+<pre><code><span class="kw">let</span> x = <span class="num">42</span>;
+<span class="kw">let</span> pi = <span class="num">3.14159</span>;
+<span class="kw">let</span> name = <span class="str">"Alice"</span>;
+
+<span class="cmt">-- Optional type annotation (type follows name)</span>
+<span class="kw">let</span> typed_var <span class="kw">Int</span> = <span class="num">100</span>;</code></pre>
+
+<h3 id="mutable-variables">2.2 Mutable Variables (<code>var</code>)</h3>
+<pre><code><span class="kw">var</span> counter = <span class="num">0</span>;
+<span class="kw">var</span> message = <span class="str">"hello"</span>;
+
+<span class="cmt">-- Can be reassigned</span>
+counter = counter + <span class="num">1</span>;
+message = <span class="str">"goodbye"</span>;</code></pre>
+
+<h3 id="constants">2.3 Constants (<code>const</code>)</h3>
+<pre><code><span class="kw">const</span> MAX_SIZE = <span class="num">1000</span>;
+<span class="kw">const</span> TAU = <span class="num">6.28318</span>;</code></pre>
+
+
+<!-- ================================================================ -->
+<h2 id="types">3. Types and the Numeric Tower</h2>
+
+<h3 id="built-in-types">3.1 Built-in Types</h3>
+<pre><code><span class="kw">Int</span>       <span class="cmt">-- 64-bit signed integer</span>
+<span class="kw">Float</span>     <span class="cmt">-- 64-bit double precision float</span>
+<span class="kw">Bool</span>      <span class="cmt">-- boolean (stored as 64-bit integer)</span>
+<span class="kw">String</span>    <span class="cmt">-- UTF-8 string</span>
+<span class="kw">Symbol</span>    <span class="cmt">-- interned string, compared by pointer</span>
+<span class="kw">Fraction</span>  <span class="cmt">-- rational number (64-bit numerator/denominator)</span>
+<span class="kw">Complex</span>   <span class="cmt">-- complex number (two 64-bit floats)</span>
+<span class="kw">Void</span>      <span class="cmt">-- no value</span></code></pre>
+
+<h3 id="numeric-tower">3.2 Numeric Tower</h3>
+<p>Types promote automatically: <code>Int</code> &rarr; <code>Fraction</code> &rarr; <code>Float</code> &rarr; <code>Complex</code></p>
+<pre><code><span class="cmt">-- Fraction literals (no spaces around /)</span>
+<span class="kw">let</span> half = <span class="num">1/2</span>;           <span class="cmt">-- 1/2 (fraction)</span>
+<span class="kw">let</span> third = <span class="num">1/3</span>;          <span class="cmt">-- 1/3 (fraction)</span>
+<span class="kw">let</span> sum = half + third;   <span class="cmt">-- 5/6 (fraction)</span>
+
+<span class="cmt">-- Int division also produces a fraction</span>
+<span class="kw">let</span> q = <span class="num">7</span> / <span class="num">4</span>;           <span class="cmt">-- 7/4 (fraction)</span>
+
+<span class="cmt">-- Int + float promotes to float</span>
+<span class="kw">let</span> x = <span class="num">2</span> + <span class="num">3.5</span>;         <span class="cmt">-- 5.5 (float)</span>
+
+<span class="cmt">-- Imaginary literals create complex numbers</span>
+<span class="kw">let</span> z = <span class="num">3.0</span> + <span class="num">4i</span>;        <span class="cmt">-- (3+4i) (complex)</span>
+<span class="kw">let</span> w = Complex(<span class="num">1.0</span>, <span class="num">-1.0</span>); <span class="cmt">-- (1-1i)</span></code></pre>
+
+<h3 id="collection-types">3.3 Collection Types</h3>
+<pre><code><span class="cmt">-- Array type (homogeneous)</span>
+[<span class="kw">Int</span>]                 <span class="cmt">-- array of integers</span>
+[<span class="kw">Float</span>]               <span class="cmt">-- array of floats</span>
+[<span class="kw">String</span>]              <span class="cmt">-- array of strings</span>
+
+<span class="cmt">-- Array literals</span>
+<span class="kw">let</span> nums = [<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>, <span class="num">4</span>, <span class="num">5</span>];
+<span class="kw">let</span> floats = [<span class="num">1.0</span>, <span class="num">2.0</span>, <span class="num">3.0</span>];
+
+<span class="cmt">-- Tuple literals (heterogeneous, fixed-length)</span>
+<span class="kw">let</span> point = (<span class="num">3</span>, <span class="num">4</span>);
+<span class="kw">let</span> mixed = (<span class="num">1</span>, <span class="num">2.5</span>, <span class="str">"hello"</span>);
+
+<span class="cmt">-- 1-element tuple (trailing comma distinguishes from parenthesized expression)</span>
+<span class="kw">let</span> single = (<span class="num">42</span>,);     <span class="cmt">-- type: (Int,)</span>
+single println;          <span class="cmt">-- (42,)</span>
+single.<span class="num">0</span> println;        <span class="cmt">-- 42</span>
+
+<span class="cmt">-- Empty tuple (unit value)</span>
+<span class="kw">let</span> u = ();              <span class="cmt">-- type: ()</span>
+u println;               <span class="cmt">-- ()</span>
+
+<span class="cmt">-- Trailing commas are allowed in all tuples</span>
+<span class="kw">let</span> t3 = (<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>,);   <span class="cmt">-- same as (1, 2, 3)</span>
+
+<span class="cmt">-- Map literals (key: value pairs)</span>
+<span class="kw">let</span> ages = [<span class="str">"Alice"</span>: <span class="num">30</span>, <span class="str">"Bob"</span>: <span class="num">25</span>];
+
+<span class="cmt">-- Set construction</span>
+<span class="kw">let</span> unique = Set(<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>);
+
+<span class="cmt">-- Access by index</span>
+<span class="kw">let</span> first = nums[<span class="num">0</span>];     <span class="cmt">-- array index</span>
+<span class="kw">let</span> x = point.<span class="num">0</span>;        <span class="cmt">-- tuple field access</span>
+
+<span class="cmt">-- Array indexing is cyclic (wraps around)</span>
+<span class="kw">let</span> a = [<span class="num">10</span>, <span class="num">20</span>, <span class="num">30</span>];
+a[<span class="num">0</span>]                     <span class="cmt">-- 10</span>
+a[<span class="num">3</span>]                     <span class="cmt">-- 10 (wraps around)</span>
+a[-<span class="num">1</span>]                    <span class="cmt">-- 30 (last element)</span>
+a[-<span class="num">2</span>]                    <span class="cmt">-- 20</span></code></pre>
+
+
+<!-- ================================================================ -->
+<h2 id="functions">4. Functions</h2>
+
+<h3 id="block-body">4.1 Block Body</h3>
+<pre><code><span class="kw">fn</span> max(a <span class="kw">Int</span>, b <span class="kw">Int</span>) <span class="kw">Int</span> {
+    <span class="kw">if</span> (a > b) {
+        a
+    } <span class="kw">else</span> {
+        b
+    }
+}
+
+<span class="cmt">-- The last expression in a block is the implicit return value</span>
+<span class="kw">fn</span> square(x <span class="kw">Int</span>) <span class="kw">Int</span> {
+    x * x
+}
+
+<span class="cmt">-- Explicit return is also allowed</span>
+<span class="kw">fn</span> abs(x <span class="kw">Int</span>) <span class="kw">Int</span> {
+    <span class="kw">if</span> (x < <span class="num">0</span>) {
+        <span class="kw">return</span> -x;
+    }
+    x
+}</code></pre>
+
+<h3 id="expression-body">4.2 Expression Body</h3>
+<pre><code><span class="cmt">-- Single-expression functions with = syntax</span>
+<span class="kw">fn</span> square(x <span class="kw">Int</span>) <span class="kw">Int</span> = x * x;
+
+<span class="kw">fn</span> max(a <span class="kw">Int</span>, b <span class="kw">Int</span>) <span class="kw">Int</span> = a > b ? a : b;
+
+<span class="kw">fn</span> average(a <span class="kw">Float</span>, b <span class="kw">Float</span>) <span class="kw">Float</span> = (a + b) / <span class="num">2.0</span>;
+
+<span class="kw">fn</span> greet(who <span class="kw">String</span>) <span class="kw">String</span> = <span class="str">"Hi, "</span> $ who $ <span class="str">"!"</span>;</code></pre>
+
+<h3 id="void-functions">4.3 Void Functions</h3>
+<pre><code><span class="cmt">-- Use Void as the return type for side-effecting functions</span>
+<span class="kw">fn</span> say_hello(name <span class="kw">String</span>) <span class="kw">Void</span> {
+    println(<span class="str">"Hello, "</span> $ name $ <span class="str">"!"</span>);
+}</code></pre>
+
+<h3 id="inferred-return-types">4.4 Inferred Return Types</h3>
+<pre><code><span class="cmt">-- Omit the return type to infer it from the body</span>
+<span class="kw">fn</span> square(x <span class="kw">Int</span>) = x * x;           <span class="cmt">-- inferred as Int</span>
+
+<span class="kw">fn</span> add_one(x <span class="kw">Int</span>) { x + <span class="num">1</span> }         <span class="cmt">-- block body works too</span>
+
+<span class="kw">fn</span> to_float(x <span class="kw">Int</span>) = x * <span class="num">1.0</span>;       <span class="cmt">-- inferred as Float</span>
+
+<span class="cmt">-- Works with if-else trailing expressions</span>
+<span class="kw">fn</span> abs_val(x <span class="kw">Int</span>) {
+    <span class="kw">if</span> (x < <span class="num">0</span>) { -x } <span class="kw">else</span> { x }
+}
+
+<span class="cmt">-- Declaration order doesn't matter: foo calls bar, declared after it</span>
+<span class="kw">fn</span> foo(x <span class="kw">Int</span>) = bar(x) + <span class="num">1</span>;
+<span class="kw">fn</span> bar(x <span class="kw">Int</span>) = x * <span class="num">2</span>;
+
+<span class="cmt">-- Lambdas infer return types too</span>
+<span class="kw">let</span> mul = <span class="kw">fn</span>(a <span class="kw">Int</span>, b <span class="kw">Int</span>) { a * b };
+
+<span class="cmt">-- Recursive and mutually recursive functions cannot infer their return type.</span>
+<span class="cmt">-- You must annotate the return type explicitly:</span>
+<span class="kw">fn</span> factorial(n <span class="kw">Int</span>) <span class="kw">Int</span> = <span class="kw">if</span> (n <= <span class="num">1</span>) { <span class="num">1</span> } <span class="kw">else</span> { n * factorial(n - <span class="num">1</span>) };</code></pre>
+
+<h3 id="lambda-expressions">4.5 Lambda Expressions</h3>
+<pre><code><span class="kw">let</span> double = <span class="kw">fn</span>(x <span class="kw">Int</span>) <span class="kw">Int</span> { x * <span class="num">2</span> };
+<span class="kw">let</span> add = <span class="kw">fn</span>(a <span class="kw">Int</span>, b <span class="kw">Int</span>) <span class="kw">Int</span> { a + b };
+
+<span class="cmt">-- Lambdas capture from their lexical environment</span>
+<span class="kw">let</span> greeting = <span class="str">"hello"</span>;
+<span class="kw">let</span> greet = <span class="kw">fn</span>(name <span class="kw">String</span>) <span class="kw">String</span> { greeting $ <span class="str">" "</span> $ name };
+<span class="str">"world"</span> greet println;  <span class="cmt">-- "hello world"</span></code></pre>
+
+<h3 id="operator-overloading">4.6 Operator Overloading</h3>
+<pre><code><span class="kw">struct</span> Point { x <span class="kw">Float</span>, y <span class="kw">Float</span> }
+
+<span class="kw">fn</span> +(a Point, b Point) Point = Point { x: a.x + b.x, y: a.y + b.y };
+<span class="kw">fn</span> -(a Point, b Point) Point = Point { x: a.x - b.x, y: a.y - b.y };
+<span class="kw">fn</span> *(s <span class="kw">Float</span>, p Point) Point = Point { x: s * p.x, y: s * p.y };
+
+<span class="kw">let</span> p1 = Point { x: <span class="num">1.0</span>, y: <span class="num">2.0</span> };
+<span class="kw">let</span> p2 = Point { x: <span class="num">3.0</span>, y: <span class="num">4.0</span> };
+println(p1 + p2);     <span class="cmt">-- Point { x: 4.0, y: 6.0 }</span>
+println(<span class="num">2.0</span> * p1);     <span class="cmt">-- Point { x: 2.0, y: 4.0 }</span></code></pre>
+
+<h3 id="function-overloading">4.7 Function Overloading</h3>
+<pre><code><span class="kw">fn</span> describe(x <span class="kw">Int</span>) <span class="kw">String</span> = <span class="str">"an integer"</span>;
+<span class="kw">fn</span> describe(x <span class="kw">Float</span>) <span class="kw">String</span> = <span class="str">"a float"</span>;
+<span class="kw">fn</span> describe(x <span class="kw">String</span>) <span class="kw">String</span> = <span class="str">"a string"</span>;
+
+<span class="num">42</span> describe println;     <span class="cmt">-- "an integer"</span>
+<span class="num">3.14</span> describe println;   <span class="cmt">-- "a float"</span>
+<span class="str">"hi"</span> describe println;   <span class="cmt">-- "a string"</span></code></pre>
+
+<h3 id="default-arguments">4.8 Default Arguments</h3>
+<p>Function parameters may have default values, specified with <code>= expr</code> after the type annotation. Parameters with defaults must come after all required parameters. Default expressions can reference preceding parameters.</p>
+<pre><code><span class="cmt">-- Basic default value</span>
+<span class="kw">fn</span> greet(name <span class="kw">String</span>, greeting <span class="kw">String</span> = <span class="str">"Hello"</span>) <span class="kw">String</span> = greeting $ <span class="str">" "</span> $ name;
+greet(<span class="str">"World"</span>, <span class="str">"Hi"</span>) println;   <span class="cmt">-- "Hi World"</span>
+greet(<span class="str">"World"</span>) println;          <span class="cmt">-- "Hello World"</span>
+
+<span class="cmt">-- Multiple defaults</span>
+<span class="kw">fn</span> range_info(start <span class="kw">Int</span> = <span class="num">0</span>, stop <span class="kw">Int</span> = <span class="num">10</span>, step <span class="kw">Int</span> = <span class="num">1</span>) <span class="kw">String</span> {
+    fmt(<span class="str">"%^ to %^ by %^"</span>, start, stop, step)
+}
+range_info(<span class="num">1</span>, <span class="num">5</span>, <span class="num">2</span>) println;  <span class="cmt">-- "1 to 5 by 2"</span>
+range_info(<span class="num">1</span>, <span class="num">5</span>) println;     <span class="cmt">-- "1 to 5 by 1"</span>
+range_info(<span class="num">1</span>) println;        <span class="cmt">-- "1 to 10 by 1"</span>
+range_info() println;         <span class="cmt">-- "0 to 10 by 1"</span>
+
+<span class="cmt">-- Default referencing a preceding parameter</span>
+<span class="kw">fn</span> make_range(lo <span class="kw">Int</span>, hi <span class="kw">Int</span> = lo + <span class="num">10</span>) <span class="kw">String</span> = fmt(<span class="str">"%^ to %^"</span>, lo, hi);
+make_range(<span class="num">5</span>, <span class="num">20</span>) println;   <span class="cmt">-- "5 to 20"</span>
+make_range(<span class="num">5</span>) println;       <span class="cmt">-- "5 to 15"</span></code></pre>
+
+<h3 id="variadic-arguments">4.9 Variadic Arguments</h3>
+<p>The last parameter of a function may be <em>variadic</em>, prefixed with <code>...</code>. Extra arguments at the call site are packed into a single value automatically.</p>
+<ul>
+    <li><strong>Untyped variadic</strong> (<code>...xs</code>) &mdash; the extra arguments are packed into a <code>Tuple</code>. Because different call sites may pass different types, the function is monomorphized per call site (like a template).</li>
+    <li><strong>Typed variadic</strong> (<code>...xs Int</code>) &mdash; all extra arguments must be the given type and are packed into an <code>Array</code>.</li>
+</ul>
+<pre><code><span class="cmt">-- Untyped variadic: packs args into a Tuple</span>
+<span class="kw">fn</span> wrap(...xs) = xs;
+wrap(<span class="num">1</span>, <span class="str">"hello"</span>, <span class="kw">true</span>) println;  <span class="cmt">-- (1, hello, true)</span>
+wrap(<span class="num">42</span>) println;                 <span class="cmt">-- (42,)</span>
+wrap() println;                   <span class="cmt">-- ()</span>
+
+<span class="cmt">-- Typed variadic: packs args into an Array</span>
+<span class="kw">fn</span> sumInts(...xs <span class="kw">Int</span>) <span class="kw">Int</span> {
+    <span class="kw">var</span> total = <span class="num">0</span>;
+    <span class="kw">for</span> (x : xs) {
+        total = total + x;
+    }
+    total
+}
+sumInts(<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>) println;   <span class="cmt">-- 6</span>
+sumInts() println;            <span class="cmt">-- 0</span>
+
+<span class="cmt">-- Fixed and variadic parameters can be mixed</span>
+<span class="kw">fn</span> greet(greeting <span class="kw">String</span>, ...names <span class="kw">String</span>) <span class="kw">String</span> {
+    <span class="kw">var</span> result = greeting;
+    <span class="kw">for</span> (name : names) {
+        result = result $ <span class="str">" "</span> $ name;
+    }
+    result
+}
+greet(<span class="str">"Hello"</span>, <span class="str">"Alice"</span>, <span class="str">"Bob"</span>) println;  <span class="cmt">-- Hello Alice Bob</span>
+greet(<span class="str">"Hi"</span>) println;                       <span class="cmt">-- Hi</span></code></pre>
+
+<h3 id="string-formatting">4.10 String Formatting with <code>fmt</code></h3>
+<p>The built-in <code>fmt</code> function formats a string by substituting placeholders with variadic arguments. It is especially natural with pipeline syntax.</p>
+<pre><code><span class="cmt">-- %^ is a positional placeholder (filled left to right)</span>
+<span class="str">"%^ + %^ = %^"</span> fmt(<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>) println;       <span class="cmt">-- 1 + 2 = 3</span>
+
+<span class="cmt">-- %0 through %9 select by index (zero-based)</span>
+<span class="str">"%0 and %1 and %0"</span> fmt(<span class="str">"x"</span>, <span class="str">"y"</span>) println;  <span class="cmt">-- x and y and x</span>
+
+<span class="cmt">-- %% produces a literal percent sign</span>
+<span class="str">"100%% done"</span> fmt() println;                <span class="cmt">-- 100% done</span>
+
+<span class="cmt">-- Works with any type</span>
+<span class="str">"value: %^"</span> fmt(<span class="num">42</span>) println;                <span class="cmt">-- value: 42</span>
+<span class="str">"pi = %^"</span> fmt(<span class="num">3.14</span>) println;               <span class="cmt">-- pi = 3.14</span>
+<span class="str">"list: %^"</span> fmt(<span class="num">1</span>::<span class="num">2</span>::<span class="num">3</span>::nil) println;     <span class="cmt">-- list: List(1, 2, 3)</span>
+
+<span class="cmt">-- Zero args is fine when no placeholders are used</span>
+<span class="str">"no placeholders"</span> fmt() println;           <span class="cmt">-- no placeholders</span></code></pre>
+
+<h2 id="control-flow">5. Control Flow</h2>
+
+<h3 id="if-else">5.1 If / Else</h3>
+<pre><code><span class="kw">if</span> (x > <span class="num">0</span>) {
+    <span class="str">"positive"</span> println;
+} <span class="kw">else if</span> (x < <span class="num">0</span>) {
+    <span class="str">"negative"</span> println;
+} <span class="kw">else</span> {
+    <span class="str">"zero"</span> println;
+}
+
+<span class="cmt">-- If/else as expression (last value in each branch)</span>
+<span class="kw">fn</span> classify(n <span class="kw">Int</span>) <span class="kw">String</span> {
+    <span class="kw">if</span> (n < <span class="num">0</span>) {
+        <span class="str">"negative"</span>
+    } <span class="kw">else if</span> (n == <span class="num">0</span>) {
+        <span class="str">"zero"</span>
+    } <span class="kw">else</span> {
+        <span class="str">"positive"</span>
+    }
+}</code></pre>
+
+<h3 id="ternary-expression">5.2 Ternary Expression</h3>
+<pre><code><span class="kw">fn</span> abs(x <span class="kw">Int</span>) <span class="kw">Int</span> = x < <span class="num">0</span> ? -x : x;
+
+<span class="cmt">-- Ternaries can be chained</span>
+<span class="kw">fn</span> clamp(x <span class="kw">Int</span>, lo <span class="kw">Int</span>, hi <span class="kw">Int</span>) <span class="kw">Int</span> = x < lo ? lo : x > hi ? hi : x;</code></pre>
+
+<h3 id="while-loops">5.3 While Loops</h3>
+<pre><code><span class="kw">var</span> i = <span class="num">0</span>;
+<span class="kw">while</span> (i < <span class="num">10</span>) {
+    i println;
+    i = i + <span class="num">1</span>;
+}</code></pre>
+
+<h3 id="break-and-continue">5.4 Break and Continue</h3>
+<pre><code><span class="cmt">-- break exits the innermost loop immediately</span>
+<span class="kw">var</span> i = <span class="num">0</span>;
+<span class="kw">while</span> (i < <span class="num">100</span>) {
+    <span class="kw">if</span> (i == <span class="num">5</span>) { <span class="kw">break</span>; }
+    i println;
+    i = i + <span class="num">1</span>;
+}
+<span class="cmt">-- Output: 0 1 2 3 4</span>
+
+<span class="cmt">-- continue skips to the next iteration</span>
+<span class="kw">for</span> (x : (<span class="num">1</span>..<span class="num">6</span>)) {
+    <span class="kw">if</span> (x == <span class="num">3</span>) { <span class="kw">continue</span>; }
+    x println;
+}
+<span class="cmt">-- Output: 1 2 4 5 6</span>
+
+<span class="cmt">-- break works with for loops over arrays, lists, and ranges</span>
+<span class="kw">let</span> arr = [<span class="num">10</span>, <span class="num">20</span>, <span class="num">30</span>, <span class="num">40</span>];
+<span class="kw">for</span> (x : arr) {
+    <span class="kw">if</span> (x == <span class="num">30</span>) { <span class="kw">break</span>; }
+    x println;
+}
+<span class="cmt">-- Output: 10 20</span>
+
+<span class="cmt">-- break is essential for infinite ranges</span>
+<span class="kw">var</span> sum = <span class="num">0</span>;
+<span class="kw">for</span> (n : (<span class="num">1</span>..)) {
+    <span class="kw">if</span> (n > <span class="num">10</span>) { <span class="kw">break</span>; }
+    sum = sum + n;
+}
+sum println;  <span class="cmt">-- 55</span>
+
+<span class="cmt">-- In nested loops, break and continue affect only the innermost loop</span>
+<span class="kw">for</span> (i : (<span class="num">1</span>..<span class="num">3</span>)) {
+    <span class="kw">for</span> (j : (<span class="num">1</span>..<span class="num">5</span>)) {
+        <span class="kw">if</span> (j > <span class="num">2</span>) { <span class="kw">break</span>; }
+        println(i * <span class="num">10</span> + j);
+    }
+}
+<span class="cmt">-- Output: 11 12 21 22 31 32</span></code></pre>
+
+<h3 id="match">5.5 Match (Pattern Matching)</h3>
+<pre><code><span class="kw">match</span> (value) {
+    <span class="num">1</span>: <span class="str">"one"</span> println;
+    <span class="num">2</span>: <span class="str">"two"</span> println;
+    _: <span class="str">"other"</span> println;
+}
+
+<span class="cmt">-- With guards</span>
+<span class="kw">match</span> (x) {
+    n <span class="kw">if</span> (n > <span class="num">0</span>): <span class="str">"positive"</span> println;
+    n <span class="kw">if</span> (n < <span class="num">0</span>): <span class="str">"negative"</span> println;
+    <span class="num">0</span>: <span class="str">"zero"</span> println;
+}
+
+<span class="cmt">-- Multi-statement match arms use blocks</span>
+<span class="kw">match</span> (shape) {
+    Shape.circle(r): {
+        <span class="str">"Circle"</span> println;
+        r println;
+    }
+    Shape.unknown: <span class="str">"Unknown"</span> println;
+}</code></pre>
+
+<h2 id="ranges">6. Ranges and For Loops</h2>
+
+<h3 id="range-expressions">6.1 Range Expressions</h3>
+<pre><code><span class="cmt">-- Ranges use (start..end) syntax with inclusive bounds</span>
+<span class="kw">let</span> r = (<span class="num">1</span>..<span class="num">5</span>);          <span class="cmt">-- Range from 1 to 5 inclusive</span>
+r println;                <span class="cmt">-- (1..5)</span>
+r length println;         <span class="cmt">-- 5</span>
+r toArray println;        <span class="cmt">-- [1, 2, 3, 4, 5]</span>
+
+<span class="cmt">-- Stepped ranges: (start,next..end)</span>
+<span class="kw">let</span> evens = (<span class="num">0</span>,<span class="num">2</span>..<span class="num">10</span>);    <span class="cmt">-- step inferred as next - start = 2</span>
+evens toArray println;   <span class="cmt">-- [0, 2, 4, 6, 8, 10]</span>
+
+<span class="cmt">-- Descending ranges infer step automatically</span>
+<span class="kw">let</span> down = (<span class="num">5</span>..<span class="num">1</span>);        <span class="cmt">-- step inferred as -1</span>
+down toArray println;    <span class="cmt">-- [5, 4, 3, 2, 1]</span>
+
+<span class="cmt">-- Descending with explicit step</span>
+<span class="kw">let</span> odds = (<span class="num">9</span>,<span class="num">7</span>..<span class="num">1</span>);     <span class="cmt">-- step = 7 - 9 = -2</span>
+odds toArray println;    <span class="cmt">-- [9, 7, 5, 3, 1]</span>
+
+<span class="cmt">-- Infinite ranges</span>
+<span class="kw">let</span> nat = (<span class="num">1</span>..);          <span class="cmt">-- 1, 2, 3, 4, ... (no end)</span>
+<span class="kw">let</span> by3 = (<span class="num">0</span>,<span class="num">3</span>..);        <span class="cmt">-- 0, 3, 6, 9, ... (stepped, no end)</span></code></pre>
+
+<h3 id="for-loops-ranges">6.2 For Loops over Ranges</h3>
+<pre><code><span class="cmt">-- Basic for loop: for (variable : iterable) { body }</span>
+<span class="kw">for</span> (i : (<span class="num">1</span>..<span class="num">5</span>)) {
+    i println;
+}
+<span class="cmt">-- Output: 1 2 3 4 5 (each on its own line)</span>
+
+<span class="cmt">-- Stepped range</span>
+<span class="kw">for</span> (i : (<span class="num">0</span>,<span class="num">2</span>..<span class="num">10</span>)) {
+    i println;
+}
+<span class="cmt">-- Output: 0 2 4 6 8 10</span>
+
+<span class="cmt">-- Descending range (step inferred as -1)</span>
+<span class="kw">for</span> (i : (<span class="num">5</span>..<span class="num">1</span>)) {
+    i println;
+}
+<span class="cmt">-- Output: 5 4 3 2 1</span>
+
+<span class="cmt">-- Descending with explicit step</span>
+<span class="kw">for</span> (i : (<span class="num">10</span>,<span class="num">7</span>..<span class="num">1</span>)) {
+    i println;
+}
+<span class="cmt">-- Output: 10 7 4 1</span></code></pre>
+
+<div class="note">
+    <h4>Range Optimization</h4>
+    <p>When a range literal appears directly in a for loop (e.g., <code>for (i : (1..100))</code>), the compiler emits an inline counter loop. No Range object is allocated and no array is materialized.</p>
+</div>
+
+<h3 id="for-loops-arrays-lists">6.3 For Loops over Arrays and Lists</h3>
+<pre><code><span class="cmt">-- For loop over an array</span>
+<span class="kw">let</span> arr = [<span class="num">10</span>, <span class="num">20</span>, <span class="num">30</span>];
+<span class="kw">for</span> (x : arr) {
+    x println;
+}
+<span class="cmt">-- Output: 10 20 30</span>
+
+<span class="cmt">-- For loop over a list</span>
+<span class="kw">let</span> lst = List(<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>);
+<span class="kw">for</span> (x : lst) {
+    x println;
+}
+<span class="cmt">-- Output: 1 2 3</span></code></pre>
+
+<h3 id="range-builtins">6.4 Range Built-in Functions</h3>
+<pre><code><span class="kw">let</span> r = (<span class="num">1</span>..<span class="num">5</span>);
+
+<span class="cmt">-- length: number of elements in the range</span>
+r length println;       <span class="cmt">-- 5</span>
+
+<span class="cmt">-- toArray: materialize into an [Int]</span>
+r toArray println;      <span class="cmt">-- [1, 2, 3, 4, 5]</span>
+
+<span class="cmt">-- toList: create a lazy List&lt;Int&gt;</span>
+r toList println;       <span class="cmt">-- List(1, 2, 3, 4, 5)</span>
+
+<span class="cmt">-- toList on an infinite range produces an infinite lazy list</span>
+<span class="kw">let</span> nat = (<span class="num">1</span>..);
+<span class="kw">let</span> nats = nat toList;
+nats println;           <span class="cmt">-- List(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, ...)</span></code></pre>
+
+<h3 id="fraction-ranges">6.5 Fraction Ranges</h3>
+<p>Ranges also support fraction endpoints and steps. Use fraction literals like <code>1/2</code> (no spaces around <code>/</code>).</p>
+<pre><code><span class="cmt">-- Basic fraction range (step defaults to 1)</span>
+<span class="kw">for</span> (i : (<span class="num">1/2</span>..<span class="num">5/2</span>)) {
+    i println;
+}
+<span class="cmt">-- Output: 1/2 3/2 5/2</span>
+
+<span class="cmt">-- Stepped fraction range: (start,next..end)</span>
+<span class="kw">for</span> (i : (<span class="num">1/4</span>, <span class="num">1/2</span>..<span class="num">2/1</span>)) {
+    i println;
+}
+<span class="cmt">-- Output: 1/4 1/2 3/4 1/1 5/4 3/2 7/4 2/1</span>
+
+<span class="cmt">-- Descending fraction range (step inferred)</span>
+<span class="kw">for</span> (i : (<span class="num">3/1</span>..<span class="num">1/2</span>)) {
+    i println;
+}
+<span class="cmt">-- Output: 3/1 2/1 1/1</span>
+
+<span class="cmt">-- Fraction range as value</span>
+<span class="kw">let</span> fr = (<span class="num">1/4</span>, <span class="num">3/4</span>..<span class="num">3/1</span>);
+fr length println;      <span class="cmt">-- 6</span>
+fr toArray println;     <span class="cmt">-- [1/4, 3/4, 5/4, 7/4, 9/4, 11/4]</span>
+fr toList println;      <span class="cmt">-- List(1/4, 3/4, 5/4, 7/4, 9/4, 11/4)</span>
+
+<span class="cmt">-- Infinite fraction range</span>
+<span class="kw">let</span> flinf = (<span class="num">1/2</span>..) toList;
+flinf println;          <span class="cmt">-- List(1/2, 3/2, 5/2, 7/2, 9/2, ...)</span></code></pre>
+
+<h2 id="data-structures">7. Data Structures</h2>
+
+<h3 id="structs">7.1 Structs</h3>
+<pre><code><span class="kw">struct</span> Point {
+    x <span class="kw">Float</span>,
+    y <span class="kw">Float</span>
+}
+
+<span class="kw">struct</span> Person {
+    name <span class="kw">String</span>,
+    age <span class="kw">Int</span>
+}
+
+<span class="cmt">-- Construction</span>
+<span class="kw">let</span> p = Point { x: <span class="num">3.0</span>, y: <span class="num">4.0</span> };
+<span class="kw">let</span> alice = Person { name: <span class="str">"Alice"</span>, age: <span class="num">30</span> };
+
+<span class="cmt">-- Positional construction (fields assigned in declaration order)</span>
+<span class="kw">let</span> p2 = Point{<span class="num">3.0</span>, <span class="num">4.0</span>};
+p2.x println;           <span class="cmt">-- 3.0</span>
+
+<span class="cmt">-- Field access</span>
+p.x println;
+alice.name println;
+
+<span class="cmt">-- Nested structs</span>
+<span class="kw">struct</span> Line {
+    start Point,
+    end Point
+}
+
+<span class="kw">let</span> line = Line { start: p, end: Point { x: <span class="num">6.0</span>, y: <span class="num">8.0</span> } };
+line.start.x println;</code></pre>
+
+<h3 id="struct-update">7.2 Struct Update (Spread)</h3>
+<p>Create a new struct from an existing one, overriding specific fields with <code>...</code>. The spread source comes first, followed by the fields to override. The original struct is not mutated.</p>
+<pre><code><span class="cmt">-- Start with p, override x</span>
+<span class="kw">let</span> p = Point { x: <span class="num">1.0</span>, y: <span class="num">2.0</span> };
+<span class="kw">let</span> p2 = Point { ...p, x: <span class="num">10.0</span> };
+p2.x println;           <span class="cmt">-- 10.0</span>
+p2.y println;           <span class="cmt">-- 2.0  (copied from p)</span>
+
+<span class="cmt">-- Copy all fields (clone)</span>
+<span class="kw">let</span> p3 = Point { ...p };
+
+<span class="cmt">-- Start with fred, override two fields</span>
+<span class="kw">struct</span> Employee { name <span class="kw">String</span>, age <span class="kw">Int</span>, dept <span class="kw">String</span> }
+<span class="kw">let</span> fred = Employee { name: <span class="str">"Fred"</span>, age: <span class="num">30</span>, dept: <span class="str">"Engineering"</span> };
+<span class="kw">let</span> fred2 = Employee { ...fred, age: <span class="num">31</span>, dept: <span class="str">"Management"</span> };
+fred2.age println;      <span class="cmt">-- 31</span>
+fred2.dept println;     <span class="cmt">-- Management</span>
+fred2.name println;     <span class="cmt">-- Fred  (unchanged)</span>
+fred.age println;       <span class="cmt">-- 30   (original unmodified)</span>
+
+<span class="cmt">-- Works with nested structs</span>
+<span class="kw">let</span> line2 = Line { ...line, start: Point { x: <span class="num">1.0</span>, y: <span class="num">1.0</span> } };
+
+<span class="cmt">-- Works with template structs</span>
+<span class="kw">struct</span> Pair&lt;A, B&gt; { first A, second B }
+<span class="kw">let</span> pair1 = Pair { first: <span class="num">1</span>, second: <span class="str">"hello"</span> };
+<span class="kw">let</span> pair2 = Pair { ...pair1, first: <span class="num">2</span> };
+pair2.second println;   <span class="cmt">-- hello</span>
+
+<span class="cmt">-- Int-to-float promotion works with spread</span>
+<span class="kw">let</span> p4 = Point { ...p, x: <span class="num">42</span> };
+p4.x println;           <span class="cmt">-- 42.0</span></code></pre>
+
+<h3 id="tuple-structs">7.3 Tuple Structs</h3>
+<p>Tuple structs have positional fields accessed by numeric index. They are useful for newtypes and lightweight wrappers.</p>
+<pre><code><span class="cmt">-- Tuple struct declaration (parentheses, semicolon terminated)</span>
+<span class="kw">struct</span> Point(<span class="kw">Float</span>, <span class="kw">Float</span>);
+<span class="kw">struct</span> Temperature(<span class="kw">Float</span>);
+
+<span class="cmt">-- Construction uses function-call syntax</span>
+<span class="kw">let</span> p = Point(<span class="num">3.0</span>, <span class="num">4.0</span>);
+<span class="kw">let</span> temp = Temperature(<span class="num">98.6</span>);
+
+<span class="cmt">-- Field access by numeric index</span>
+p.<span class="num">0</span> println;              <span class="cmt">-- 3.0</span>
+p.<span class="num">1</span> println;              <span class="cmt">-- 4.0</span>
+temp.<span class="num">0</span> println;           <span class="cmt">-- 98.6</span>
+
+<span class="cmt">-- Pattern matching on tuple structs</span>
+<span class="kw">let</span> Point(x, y) = p;
+println(x + y);            <span class="cmt">-- 7.0</span>
+
+<span class="kw">match</span> (temp) {
+    Temperature(v): v println;    <span class="cmt">-- 98.6</span>
+}
+
+<span class="cmt">-- Printing</span>
+p println;                 <span class="cmt">-- Point(3.0, 4.0)</span>
+temp println;              <span class="cmt">-- Temperature(98.6)</span></code></pre>
+
+<h3 id="enums">7.4 Enums (Tagged Unions)</h3>
+<pre><code><span class="kw">enum</span> Shape {
+    circle <span class="kw">Float</span>,
+    rect (<span class="kw">Float</span>, <span class="kw">Float</span>),
+    point
+}
+
+<span class="kw">enum</span> Result {
+    ok <span class="kw">String</span>,
+    error <span class="kw">String</span>
+}
+
+<span class="kw">enum</span> Value {
+    integer <span class="kw">Int</span>,
+    floating <span class="kw">Float</span>,
+    text <span class="kw">String</span>,
+    nothing
+}
+
+<span class="cmt">-- Construction</span>
+<span class="kw">let</span> s = Shape.circle(<span class="num">5.0</span>);
+<span class="kw">let</span> p = Shape.point;
+<span class="kw">let</span> ok = Result.ok(<span class="str">"success"</span>);
+
+<span class="cmt">-- Pattern match to extract values</span>
+<span class="kw">fn</span> area(s Shape) <span class="kw">Float</span> {
+    <span class="kw">match</span> (s) {
+        Shape.circle(r): <span class="kw">return</span> <span class="num">3.14159</span> * r * r;
+        Shape.rect(dims): <span class="kw">return</span> dims.<span class="num">0</span> * dims.<span class="num">1</span>;
+        Shape.point: <span class="kw">return</span> <span class="num">0.0</span>;
+    }
+    <span class="num">0.0</span>
+}</code></pre>
+
+<div class="note">
+    <h4>Built-in Option&lt;T&gt;</h4>
+    <p><code>Option&lt;T&gt;</code> is a built-in template enum with cases <code>some T</code> and <code>none</code>. It is returned by map subscript and <code>get(map, key)</code>. See <a href="#maps">Maps</a> and <a href="#templates">Templates</a> for details.</p>
+</div>
+
+<h3 id="ordinal">7.5 Ordinal (Case Index)</h3>
+<pre><code><span class="cmt">-- ordinal returns the zero-based index of an enum case</span>
+<span class="kw">enum</span> Color { red, green, blue }
+
+ordinal(Color.red) println;      <span class="cmt">-- 0</span>
+ordinal(Color.green) println;    <span class="cmt">-- 1</span>
+ordinal(Color.blue) println;     <span class="cmt">-- 2</span>
+
+<span class="cmt">-- Works with data-carrying cases too</span>
+ordinal(Option.some(<span class="num">42</span>)) println;  <span class="cmt">-- 0</span>
+ordinal(Option&lt;<span class="kw">Int</span>&gt;.none) println; <span class="cmt">-- 1</span>
+
+<span class="cmt">-- Works with template enums</span>
+<span class="kw">enum</span> Either&lt;L, R&gt; { left L, right R }
+ordinal(Either.left(<span class="num">42</span>)) println;              <span class="cmt">-- 0</span>
+ordinal(Either&lt;<span class="kw">Int</span>, <span class="kw">String</span>&gt;.right(<span class="str">"hi"</span>)) println; <span class="cmt">-- 1</span></code></pre>
+
+<h3 id="tag">7.6 Tag (Case Name)</h3>
+<pre><code><span class="cmt">-- tag returns the case name of an enum value as a Symbol</span>
+<span class="kw">enum</span> Color { red, green, blue }
+
+tag(Color.red) println;      <span class="cmt">-- 'red</span>
+tag(Color.green) println;    <span class="cmt">-- 'green</span>
+tag(Color.blue) println;     <span class="cmt">-- 'blue</span>
+
+<span class="cmt">-- Works with data-carrying cases too</span>
+tag(Option.some(<span class="num">42</span>)) println;  <span class="cmt">-- 'some</span>
+tag(Option&lt;<span class="kw">Int</span>&gt;.none) println; <span class="cmt">-- 'none</span>
+
+<span class="cmt">-- Works with template enums</span>
+<span class="kw">enum</span> Either&lt;L, R&gt; { left L, right R }
+tag(Either.left(<span class="num">42</span>)) println;              <span class="cmt">-- 'left</span>
+tag(Either&lt;<span class="kw">Int</span>, <span class="kw">String</span>&gt;.right(<span class="str">"hi"</span>)) println; <span class="cmt">-- 'right</span></code></pre>
+
+<h2 id="pattern-matching">8. Pattern Matching and Destructuring</h2>
+
+<h3 id="patterns-in-match">8.1 Patterns in Match</h3>
+<pre><code><span class="cmt">-- Literal patterns</span>
+<span class="kw">match</span> (n) {
+    <span class="num">0</span>: <span class="str">"zero"</span> println;
+    <span class="num">1</span>: <span class="str">"one"</span> println;
+    _: <span class="str">"other"</span> println;   <span class="cmt">-- wildcard</span>
+}
+
+<span class="cmt">-- Binding patterns</span>
+<span class="kw">match</span> (x) {
+    n: n println;        <span class="cmt">-- binds the value to n</span>
+}
+
+<span class="cmt">-- Tuple patterns</span>
+<span class="kw">let</span> tup = (<span class="num">3</span>, <span class="num">4</span>);
+<span class="kw">match</span> (tup) {
+    (x, y): println(x + y);
+}
+
+<span class="cmt">-- Struct patterns</span>
+<span class="kw">match</span> (point) {
+    Point { x: a, y: b }: println(a + b);
+}
+
+<span class="cmt">-- Tuple struct patterns</span>
+<span class="kw">match</span> (p) {
+    Point(x, y): println(x + y);
+}
+
+<span class="cmt">-- Enum patterns (Option&lt;T&gt; is a built-in enum)</span>
+<span class="kw">let</span> opt = Option.some(<span class="num">42</span>);
+<span class="kw">match</span> (opt) {
+    Option.some(v): v println;
+    Option.none: <span class="str">"nothing"</span> println;
+}
+
+<span class="cmt">-- Array patterns</span>
+<span class="kw">match</span> (arr) {
+    [<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>]: <span class="str">"exact match"</span> println;
+    [head, ...tail]: head println;
+    _: <span class="str">"no match"</span> println;
+}
+
+<span class="cmt">-- Boolean patterns</span>
+<span class="kw">match</span> (flag) {
+    <span class="kw">true</span>: <span class="str">"yes"</span> println;
+    <span class="kw">false</span>: <span class="str">"no"</span> println;
+}</code></pre>
+
+<h3 id="destructuring-in-declarations">8.2 Destructuring in Declarations</h3>
+<pre><code><span class="cmt">-- Tuple destructuring</span>
+<span class="kw">let</span> (x, y) = (<span class="num">1</span>, <span class="num">2</span>);
+<span class="kw">let</span> (a, b, c) = (<span class="num">10</span>, <span class="num">20</span>, <span class="num">30</span>);
+
+<span class="cmt">-- Struct destructuring</span>
+<span class="kw">let</span> Point { x: px, y: py } = Point { x: <span class="num">3</span>, y: <span class="num">4</span> };
+
+<span class="cmt">-- Array destructuring</span>
+<span class="kw">let</span> [d, e, f] = [<span class="num">100</span>, <span class="num">200</span>, <span class="num">300</span>];
+
+<span class="cmt">-- Array head/rest</span>
+<span class="kw">let</span> [head, ...tail] = [<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>, <span class="num">4</span>];
+head println;     <span class="cmt">-- 1</span>
+tail println;     <span class="cmt">-- [2, 3, 4]</span>
+
+<span class="cmt">-- Discard rest</span>
+<span class="kw">let</span> [first, ...] = [<span class="num">10</span>, <span class="num">20</span>, <span class="num">30</span>];
+
+<span class="cmt">-- Tuple head/rest</span>
+<span class="kw">let</span> (t1, t2, ...trest) = (<span class="num">10</span>, <span class="num">20</span>, <span class="num">30</span>, <span class="num">40</span>, <span class="num">50</span>);
+trest println;    <span class="cmt">-- (30, 40, 50)</span>
+
+<span class="cmt">-- Rest can capture any number of remaining elements (including 0 or 1)</span>
+<span class="kw">let</span> (a, ...r1) = (<span class="num">1</span>, <span class="num">2</span>);
+r1 println;       <span class="cmt">-- (2,)     -- 1-tuple</span>
+
+<span class="kw">let</span> (b, ...r0) = (<span class="num">1</span>,);
+r0 println;       <span class="cmt">-- ()       -- empty tuple</span>
+
+<span class="cmt">-- Tuple struct destructuring</span>
+<span class="kw">struct</span> Point(<span class="kw">Float</span>, <span class="kw">Float</span>);
+<span class="kw">let</span> Point(x, y) = Point(<span class="num">3.0</span>, <span class="num">4.0</span>);
+x println;        <span class="cmt">-- 3.0</span>
+y println;        <span class="cmt">-- 4.0</span>
+
+<span class="cmt">-- Works with var and const too</span>
+<span class="kw">var</span> (mx, my) = (<span class="num">100</span>, <span class="num">200</span>);
+mx = <span class="num">999</span>;
+<span class="kw">const</span> (cx, cy) = (<span class="num">42</span>, <span class="num">84</span>);</code></pre>
+
+<h2 id="operators">9. Operators</h2>
+
+<h3 id="arithmetic">9.1 Arithmetic</h3>
+<pre><code><span class="num">3</span> + <span class="num">4</span>         <span class="cmt">-- addition</span>
+<span class="num">10</span> - <span class="num">3</span>        <span class="cmt">-- subtraction</span>
+<span class="num">6</span> * <span class="num">7</span>         <span class="cmt">-- multiplication</span>
+<span class="num">1</span> / <span class="num">3</span>         <span class="cmt">-- division (int/int produces fraction)</span>
+<span class="num">10</span> // <span class="num">3</span>       <span class="cmt">-- integer (floor) division: 3</span>
+<span class="num">10</span> % <span class="num">3</span>        <span class="cmt">-- modulo: 1</span>
+-x            <span class="cmt">-- negation</span></code></pre>
+
+<h3 id="comparison">9.2 Comparison</h3>
+<pre><code>a == b        <span class="cmt">-- equal</span>
+a != b        <span class="cmt">-- not equal</span>
+a < b         <span class="cmt">-- less than</span>
+a <= b        <span class="cmt">-- less or equal</span>
+a > b         <span class="cmt">-- greater than</span>
+a >= b        <span class="cmt">-- greater or equal</span>
+
+<span class="cmt">-- Comparison works on strings (lexicographic)</span>
+<span class="str">"apple"</span> < <span class="str">"banana"</span>   <span class="cmt">-- true</span>
+<span class="str">"abc"</span> >= <span class="str">"abc"</span>      <span class="cmt">-- true</span>
+
+<span class="cmt">-- == and != work on ALL types (structural equality)</span>
+(<span class="num">1</span>, <span class="num">2</span>) == (<span class="num">1</span>, <span class="num">2</span>)         <span class="cmt">-- true</span>
+[<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>] == [<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>] <span class="cmt">-- true</span>
+<span class="num">'foo</span> == <span class="num">'foo</span>             <span class="cmt">-- true</span>
+
+<span class="cmt">-- User-defined == overloads take priority</span>
+<span class="kw">struct</span> Vec2 { x <span class="kw">Float</span>, y <span class="kw">Float</span> }
+<span class="kw">fn</span> ==(a Vec2, b Vec2) <span class="kw">Bool</span> {
+    <span class="kw">let</span> dx = a.x - b.x;
+    <span class="kw">let</span> dy = a.y - b.y;
+    dx * dx + dy * dy < <span class="num">0.001</span>
+}</code></pre>
+
+<h3 id="logical">9.3 Logical</h3>
+<pre><code>a && b        <span class="cmt">-- logical and</span>
+a || b        <span class="cmt">-- logical or</span>
+!a            <span class="cmt">-- logical not</span></code></pre>
+
+<h3 id="bitwise">9.4 Bitwise</h3>
+<pre><code><span class="num">255</span> & <span class="num">15</span>      <span class="cmt">-- bitwise and: 15</span>
+<span class="num">240</span> | <span class="num">15</span>      <span class="cmt">-- bitwise or: 255</span>
+<span class="num">255</span> ^ <span class="num">15</span>      <span class="cmt">-- bitwise xor: 240</span>
+~<span class="num">0</span>            <span class="cmt">-- bitwise not: -1</span>
+<span class="num">1</span> << <span class="num">10</span>       <span class="cmt">-- left shift: 1024</span>
+<span class="num">1024</span> >> <span class="num">5</span>     <span class="cmt">-- arithmetic right shift: 32</span>
+(-<span class="num">1</span>) >>> <span class="num">1</span>   <span class="cmt">-- unsigned right shift: 9223372036854775807</span></code></pre>
+
+<h3 id="concatenation">9.5 Concatenation (<code>$</code>)</h3>
+<pre><code><span class="cmt">-- String concatenation</span>
+<span class="str">"Hello"</span> $ <span class="str">", "</span> $ <span class="str">"World"</span>    <span class="cmt">-- "Hello, World"</span>
+
+<span class="cmt">-- Array concatenation (same element type)</span>
+[<span class="num">1</span>, <span class="num">2</span>] $ [<span class="num">3</span>, <span class="num">4</span>]              <span class="cmt">-- [1, 2, 3, 4]</span>
+
+<span class="cmt">-- List concatenation (lazy)</span>
+List(<span class="num">1</span>, <span class="num">2</span>) $ List(<span class="num">3</span>, <span class="num">4</span>)      <span class="cmt">-- List(1, 2, 3, 4)</span>
+
+<span class="cmt">-- Tuple concatenation</span>
+(<span class="num">1</span>, <span class="num">2</span>) $ (<span class="num">3</span>, <span class="num">4</span>)              <span class="cmt">-- (1, 2, 3, 4)</span></code></pre>
+
+<h3 id="operator-precedence">9.6 Operator Precedence (low to high)</h3>
+<ol>
+    <li><code>&lt;-</code> <code>-></code> &mdash; ref assignment (right-associative)</li>
+    <li><code>|></code> &mdash; pipeline</li>
+    <li><code>||</code> &mdash; logical or</li>
+    <li><code>&&</code> &mdash; logical and</li>
+    <li><code>::</code> &mdash; cons (right-associative)</li>
+    <li><code>==  !=</code> &mdash; equality</li>
+    <li><code>&lt;  &lt;=  &gt;  &gt;=</code> &mdash; comparison</li>
+    <li><code>|</code> &mdash; bitwise or</li>
+    <li><code>^</code> &mdash; bitwise xor</li>
+    <li><code>&amp;</code> &mdash; bitwise and</li>
+    <li><code>&lt;&lt;  &gt;&gt;  &gt;&gt;&gt;</code> &mdash; shifts</li>
+    <li><code>+  -  $</code> &mdash; additive / concatenation</li>
+    <li><code>*  /  %  //</code> &mdash; multiplicative</li>
+</ol>
+
+<h2 id="pipeline-syntax">10. Pipeline Syntax</h2>
+
+<div class="tip">
+    <h4>Two Pipeline Styles</h4>
+    <p>Language X supports both the <code>|></code> pipeline operator and space-separated pipeline syntax for chaining function calls.</p>
+</div>
+
+<h3 id="space-pipeline">10.1 Space Pipeline</h3>
+<pre><code><span class="cmt">-- x f         is  f(x)</span>
+<span class="cmt">-- x f(y)      is  f(x, y)</span>
+<span class="cmt">-- x f(y, z)   is  f(x, y, z)</span>
+<span class="cmt">-- x f g       is  g(f(x))</span>
+
+<span class="kw">fn</span> square(x <span class="kw">Int</span>) <span class="kw">Int</span> = x * x;
+<span class="kw">fn</span> collatz_len(n <span class="kw">Int</span>) <span class="kw">Int</span> {
+    <span class="kw">if</span> (n == <span class="num">1</span>) { <span class="num">0</span> }
+    <span class="kw">else if</span> (n % <span class="num">2</span> == <span class="num">0</span>) { <span class="num">1</span> + collatz_len(n // <span class="num">2</span>) }
+    <span class="kw">else</span> { <span class="num">1</span> + collatz_len(<span class="num">3</span> * n + <span class="num">1</span>) }
+}
+
+<span class="cmt">-- Simple 1-arg pipeline</span>
+<span class="num">7</span> collatz_len println;        <span class="cmt">-- println(collatz_len(7))</span>
+
+<span class="cmt">-- With extra args</span>
+<span class="num">3.0</span> average(<span class="num">7.0</span>) println;    <span class="cmt">-- println(average(3.0, 7.0))</span>
+
+<span class="cmt">-- Chaining with args</span>
+<span class="num">15</span> clamp(<span class="num">0</span>, <span class="num">10</span>) println;     <span class="cmt">-- println(clamp(15, 0, 10))</span>
+
+<span class="cmt">-- Chaining multiple</span>
+<span class="num">6</span> digit_sum collatz_len println;
+<span class="cmt">-- println(collatz_len(digit_sum(6)))</span></code></pre>
+
+<h3 id="pipe-operator">10.2 Pipe Operator (<code>|></code>)</h3>
+<pre><code><span class="cmt">-- x |> f         is  f(x)</span>
+<span class="cmt">-- x |> f(y)      is  f(x, y)</span>
+
+<span class="num">3</span> + <span class="num">4</span> |> collatz_len println;
+<span class="cmt">-- println(collatz_len(3 + 4))</span>
+
+<span class="num">1.0</span> + <span class="num">2.0</span> |> average(<span class="num">7.0</span>) println;
+<span class="cmt">-- println(average(1.0 + 2.0, 7.0))</span></code></pre>
+
+<div class="note">
+    <h4>Space vs Pipe</h4>
+    <p>Space pipeline binds tightly (at postfix level) while <code>|></code> has the lowest operator precedence. Use <code>|></code> when the left side is a complex expression like <code>a + b |> f</code>. Use space pipeline for simple chaining: <code>x f g</code>.</p>
+</div>
+
+<div class="tip">
+    <h4>Idiomatic Style: Prefer Left-to-Right</h4>
+    <p>Write code that reads left to right, threading data through transformations, rather than nesting function calls. Rules of thumb:</p>
+    <ul>
+        <li><strong>Single-arg functions</strong> — use space pipeline: <code>x f</code> instead of <code>f(x)</code>.</li>
+        <li><strong>First arg is primary, rest are parameters</strong> — use space pipeline with parens for extra args: <code>xs take(3)</code> instead of <code>take(xs, 3)</code>.</li>
+        <li><strong>All args equally important</strong> — keep nested: <code>min(a, b)</code>, <code>zip(xs, ys)</code>.</li>
+        <li><strong><code>|&gt;</code> pipe</strong> — use when the left side is a complex expression that space pipeline can't handle: <code>a + b |&gt; f</code>. Don't use <code>|&gt;</code> for trivially simple cases.</li>
+    </ul>
+    <pre><code><span class="cmt">-- Less idiomatic (nested):</span>
+println(toList(reverse(take(toArray((1..10)), 5))))
+
+<span class="cmt">-- Idiomatic (left to right):</span>
+(1..10) toArray take(5) reverse toList println</code></pre>
+</div>
+
+<h2 id="array-tuple-math">11. Array and Tuple Arithmetic</h2>
+
+<h3 id="element-wise-operations">11.1 Element-wise Operations</h3>
+<pre><code><span class="kw">let</span> a = [<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>, <span class="num">4</span>, <span class="num">5</span>];
+<span class="kw">let</span> b = [<span class="num">10</span>, <span class="num">20</span>, <span class="num">30</span>, <span class="num">40</span>, <span class="num">50</span>];
+
+println(a + b);     <span class="cmt">-- [11, 22, 33, 44, 55]</span>
+println(a * b);     <span class="cmt">-- [10, 40, 90, 160, 250]</span>
+println(b - a);     <span class="cmt">-- [9, 18, 27, 36, 45]</span>
+println(-a);        <span class="cmt">-- [-1, -2, -3, -4, -5]</span></code></pre>
+
+<h3 id="scalar-broadcasting">11.2 Scalar Broadcasting</h3>
+<pre><code><span class="kw">let</span> a = [<span class="num">100</span>, <span class="num">200</span>, <span class="num">300</span>];
+
+println(a + <span class="num">1</span>);      <span class="cmt">-- [101, 201, 301]</span>
+println(a * <span class="num">2</span>);      <span class="cmt">-- [200, 400, 600]</span>
+println(<span class="num">10</span> * a);      <span class="cmt">-- [1000, 2000, 3000]</span></code></pre>
+
+<h3 id="tuple-arithmetic">11.3 Tuple Arithmetic</h3>
+<pre><code><span class="kw">let</span> p1 = (<span class="num">1.0</span>, <span class="num">2.0</span>);
+<span class="kw">let</span> p2 = (<span class="num">3.0</span>, <span class="num">4.0</span>);
+
+println(p1 + p2);           <span class="cmt">-- (4.0, 6.0)</span>
+println((p1 + p2) * <span class="num">0.5</span>);  <span class="cmt">-- (2.0, 3.0) -- midpoint</span>
+println(p2 - p1);           <span class="cmt">-- (2.0, 2.0)</span>
+
+<span class="cmt">-- Mixed numeric types in tuples</span>
+<span class="kw">let</span> m1 = (<span class="num">1</span>, <span class="num">2.5</span>);
+<span class="kw">let</span> m2 = (<span class="num">3</span>, <span class="num">1.5</span>);
+println(m1 + m2);   <span class="cmt">-- (4, 4.0)</span></code></pre>
+
+<h3 id="tuple-array-broadcasting">11.4 Tuple-Array Broadcasting</h3>
+<pre><code><span class="kw">let</span> tup = (<span class="num">10</span>, <span class="num">20</span>);
+<span class="kw">let</span> arr = [<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>];
+
+<span class="cmt">-- Each tuple field is broadcast across the array</span>
+println(tup + arr);   <span class="cmt">-- ([11, 12, 13], [21, 22, 23])</span>
+println(tup * arr);   <span class="cmt">-- ([10, 20, 30], [20, 40, 60])</span>
+println(arr + tup);   <span class="cmt">-- ([11, 12, 13], [21, 22, 23])</span></code></pre>
+
+<!-- ================================================================ -->
+<h2 id="auto-mapping">12. Auto-mapping and the <code>@</code> Operator</h2>
+
+<div class="tip">
+<h4>Implicit and Explicit Auto-mapping</h4>
+<p>Functions that expect a scalar argument will automatically map over arrays or lists passed in that position. The postfix <code>@</code> operator gives explicit control over mapping depth, overload selection, and Cartesian products.</p>
+</div>
+
+<h3 id="implicit-auto-mapping">12.1 Implicit Auto-mapping</h3>
+<pre><code><span class="cmt">-- A function expecting Int, given an array of Int, maps automatically</span>
+<span class="kw">fn</span> double(x <span class="kw">Int</span>) <span class="kw">Int</span> = x * <span class="num">2</span>;
+
+<span class="kw">let</span> arr = [<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>, <span class="num">4</span>, <span class="num">5</span>];
+arr double println;
+<span class="cmt">-- [2, 4, 6, 8, 10]</span>
+
+<span class="cmt">-- Mixed: one auto-mapped arg, one scalar</span>
+<span class="kw">fn</span> add(a <span class="kw">Int</span>, b <span class="kw">Int</span>) <span class="kw">Int</span> = a + b;
+println(add(arr, <span class="num">10</span>));
+<span class="cmt">-- [11, 12, 13, 14, 15]</span>
+
+<span class="cmt">-- Multiple auto-mapped args (zip semantics, shortest length)</span>
+println(add(arr, [<span class="num">10</span>, <span class="num">20</span>, <span class="num">30</span>, <span class="num">40</span>, <span class="num">50</span>]));
+<span class="cmt">-- [11, 22, 33, 44, 55]</span>
+
+<span class="cmt">-- Deep auto-mapping: nested arrays unwrap to any depth</span>
+<span class="kw">let</span> nested = [[<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>], [<span class="num">4</span>, <span class="num">5</span>, <span class="num">6</span>]];
+nested double println;
+<span class="cmt">-- [[2, 4, 6], [8, 10, 12]]</span></code></pre>
+
+<h3 id="auto-mapped-struct-construction">12.2 Auto-mapped Struct Construction</h3>
+<pre><code><span class="kw">struct</span> Point { x <span class="kw">Int</span>, y <span class="kw">Int</span> }
+
+<span class="cmt">-- Array in a field: auto-maps to array of structs</span>
+<span class="kw">let</span> ps = Point { x: [<span class="num">10</span>, <span class="num">20</span>, <span class="num">30</span>], y: <span class="num">4</span> };
+ps println;
+<span class="cmt">-- [Point { x: 10, y: 4 }, Point { x: 20, y: 4 }, Point { x: 30, y: 4 }]</span>
+
+<span class="cmt">-- Arrays in both fields: zipped element-wise</span>
+<span class="kw">let</span> ps2 = Point { x: [<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>], y: [<span class="num">10</span>, <span class="num">20</span>, <span class="num">30</span>] };
+ps2 println;
+<span class="cmt">-- [Point { x: 1, y: 10 }, Point { x: 2, y: 20 }, Point { x: 3, y: 30 }]</span></code></pre>
+
+<h3 id="explicit-at-operator">12.3 Explicit <code>@</code> Operator</h3>
+<p>The postfix <code>@</code> operator forces the next function to see a scalar (by unwrapping one level), even when an array/list overload exists.</p>
+<pre><code><span class="kw">fn</span> process(x <span class="kw">Int</span>) <span class="kw">Int</span> = x * <span class="num">10</span>;
+<span class="kw">fn</span> process(arr [<span class="kw">Int</span>]) <span class="kw">Int</span> = arr[<span class="num">0</span>];
+
+<span class="cmt">-- Without @: the [Int] overload is selected</span>
+[<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>] process println;        <span class="cmt">-- 1</span>
+
+<span class="cmt">-- With @: unwrap one level, selects the Int overload, auto-maps</span>
+[<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>] @ process println;       <span class="cmt">-- [10, 20, 30]</span>
+
+<span class="cmt">-- @@ unwraps two levels</span>
+<span class="kw">let</span> nested = [[<span class="num">1</span>, <span class="num">2</span>], [<span class="num">3</span>, <span class="num">4</span>]];
+nested @@ process println;           <span class="cmt">-- [[10, 20], [30, 40]]</span></code></pre>
+
+<h3 id="at-binary-operators">12.4 <code>@</code> on Binary Operators</h3>
+<pre><code><span class="cmt">-- scalar + array @</span>
+println(<span class="num">10</span> + [<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>] @);       <span class="cmt">-- [11, 12, 13]</span>
+
+<span class="cmt">-- array @ + scalar</span>
+println([<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>] @ + <span class="num">10</span>);       <span class="cmt">-- [11, 12, 13]</span>
+
+<span class="cmt">-- Zip: both operands auto-mapped</span>
+println([<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>] @ + [<span class="num">10</span>, <span class="num">20</span>, <span class="num">30</span>] @);  <span class="cmt">-- [11, 22, 33]</span>
+
+<span class="cmt">-- Comparison</span>
+println([<span class="num">1</span>, <span class="num">5</span>, <span class="num">3</span>] @ > <span class="num">2</span>);        <span class="cmt">-- [false, true, true]</span>
+
+<span class="cmt">-- Deep map with @@</span>
+println([[<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>], [<span class="num">4</span>, <span class="num">5</span>, <span class="num">6</span>]] @@ + <span class="num">10</span>);  <span class="cmt">-- [[11, 12, 13], [14, 15, 16]]</span>
+
+<span class="cmt">-- Tuple + array @</span>
+println((<span class="num">10</span>, <span class="num">20</span>) + [<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>] @);  <span class="cmt">-- [(11, 21), (12, 22), (13, 23)]</span></code></pre>
+
+<h3 id="cartesian-product">12.5 Cartesian Product with <code>@1</code>, <code>@2</code></h3>
+<pre><code><span class="cmt">-- Ordered @ operators produce nested loops (outer product)</span>
+<span class="kw">fn</span> add(a <span class="kw">Int</span>, b <span class="kw">Int</span>) <span class="kw">Int</span> = a + b;
+
+println(add([<span class="num">1</span>, <span class="num">2</span>] @1, [<span class="num">10</span>, <span class="num">20</span>] @2));
+<span class="cmt">-- [[11, 21], [12, 22]]</span>
+
+<span class="cmt">-- Works on binary operators too</span>
+println([<span class="num">1</span>, <span class="num">2</span>] @1 + [<span class="num">10</span>, <span class="num">20</span>] @2);
+<span class="cmt">-- [[11, 21], [12, 22]]</span>
+
+<span class="kw">fn</span> mul(a <span class="kw">Int</span>, b <span class="kw">Int</span>) <span class="kw">Int</span> = a * b;
+println(mul([<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>] @1, [<span class="num">10</span>, <span class="num">100</span>] @2));
+<span class="cmt">-- [[10, 100], [20, 200], [30, 300]]</span></code></pre>
+
+<h3 id="auto-map-field-access">12.6 Auto-map Field Access</h3>
+<p>Field access on an array or list of structs/tuples automatically maps, extracting that field from each element.</p>
+<pre><code><span class="kw">struct</span> Point { x <span class="kw">Int</span>, y <span class="kw">Int</span> }
+
+<span class="cmt">-- Array of structs: field access auto-maps</span>
+<span class="kw">let</span> points = [Point{<span class="num">1</span>, <span class="num">2</span>}, Point{<span class="num">3</span>, <span class="num">4</span>}, Point{<span class="num">5</span>, <span class="num">6</span>}];
+points.x println;      <span class="cmt">-- [1, 3, 5]</span>
+points.y println;      <span class="cmt">-- [2, 4, 6]</span>
+
+<span class="cmt">-- Array of tuples: index access auto-maps</span>
+<span class="kw">let</span> tuples = [(<span class="num">1</span>, <span class="num">2</span>), (<span class="num">3</span>, <span class="num">4</span>), (<span class="num">5</span>, <span class="num">6</span>)];
+tuples.<span class="num">0</span> println;      <span class="cmt">-- [1, 3, 5]</span>
+tuples.<span class="num">1</span> println;      <span class="cmt">-- [2, 4, 6]</span>
+
+<span class="cmt">-- List of structs</span>
+<span class="kw">let</span> point_list = List(Point{<span class="num">1</span>, <span class="num">2</span>}, Point{<span class="num">3</span>, <span class="num">4</span>});
+point_list.x println;  <span class="cmt">-- List(1, 3)</span>
+
+<span class="cmt">-- Chained: .field on nested collections maps at each level</span>
+<span class="kw">let</span> nested = [[(<span class="num">1</span>, <span class="num">2</span>)], [(<span class="num">3</span>, <span class="num">4</span>), (<span class="num">5</span>, <span class="num">6</span>)]];
+nested.<span class="num">0</span> println;      <span class="cmt">-- [[1], [3, 5]]</span></code></pre>
+
+<h3 id="auto-mapping-lists">12.7 Auto-mapping with Lists</h3>
+<pre><code><span class="cmt">-- Lists auto-map the same way as arrays</span>
+<span class="kw">fn</span> double(x <span class="kw">Int</span>) <span class="kw">Int</span> = x * <span class="num">2</span>;
+List(<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>) double println;    <span class="cmt">-- List(2, 4, 6)</span>
+
+<span class="cmt">-- List arithmetic</span>
+println(List(<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>) + <span class="num">10</span>);      <span class="cmt">-- List(11, 12, 13)</span>
+println(List(<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>) + List(<span class="num">10</span>, <span class="num">20</span>, <span class="num">30</span>));  <span class="cmt">-- List(11, 22, 33)</span>
+
+<span class="cmt">-- List @ on binary ops</span>
+println(List(<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>) @ + <span class="num">10</span>);   <span class="cmt">-- List(11, 12, 13)</span>
+
+<span class="cmt">-- Mixed list + array: result is List when a List is present</span>
+<span class="kw">fn</span> add(a <span class="kw">Int</span>, b <span class="kw">Int</span>) <span class="kw">Int</span> = a + b;
+println(add(List(<span class="num">10</span>, <span class="num">20</span>, <span class="num">30</span>), [<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>]));  <span class="cmt">-- List(11, 22, 33)</span></code></pre>
+
+<!-- ================================================================ -->
+<h2 id="lists">13. Lists and the Cons Operator</h2>
+
+<h3 id="list-literals">13.1 List Literals</h3>
+<pre><code><span class="cmt">-- Create a list with the List constructor</span>
+<span class="kw">let</span> xs = List(<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>);
+xs println;             <span class="cmt">-- List(1, 2, 3)</span>
+
+<span class="cmt">-- Empty list with type annotation</span>
+<span class="kw">let</span> empty List&lt;<span class="kw">Int</span>&gt; = nil;
+empty println;          <span class="cmt">-- List()</span></code></pre>
+
+<h3 id="cons-operator">13.2 Cons Operator (<code>::</code>)</h3>
+<pre><code><span class="cmt">-- Prepend an element with ::</span>
+<span class="kw">let</span> xs = List(<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>);
+<span class="kw">let</span> ys = <span class="num">0</span> :: xs;
+ys println;             <span class="cmt">-- List(0, 1, 2, 3)</span>
+
+<span class="cmt">-- Build a list from scratch with :: and nil</span>
+<span class="kw">let</span> zs = <span class="num">1</span> :: <span class="num">2</span> :: <span class="num">3</span> :: nil;
+zs println;             <span class="cmt">-- List(1, 2, 3)</span></code></pre>
+
+<h3 id="pattern-matching-cons">13.3 Pattern Matching with Cons</h3>
+<pre><code><span class="kw">let</span> xs = List(<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>);
+
+<span class="cmt">-- Match head :: tail</span>
+<span class="kw">match</span> (xs) {
+    h :: t: {
+        h println;      <span class="cmt">-- 1</span>
+        t println;      <span class="cmt">-- List(2, 3)</span>
+    }
+    nil: <span class="str">"empty"</span> println;
+}
+
+<span class="cmt">-- Nested cons pattern</span>
+<span class="kw">match</span> (xs) {
+    a :: b :: rest: {
+        a println;      <span class="cmt">-- 1</span>
+        b println;      <span class="cmt">-- 2</span>
+        rest println;   <span class="cmt">-- List(3)</span>
+    }
+    _: <span class="str">"short"</span> println;
+}</code></pre>
+
+<h3 id="iterating-lists">13.4 Iterating over Lists</h3>
+<pre><code><span class="cmt">-- For loop over a list</span>
+<span class="kw">let</span> lst = List(<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>);
+<span class="kw">for</span> (x : lst) {
+    x println;
+}
+<span class="cmt">-- Output: 1 2 3</span></code></pre>
+
+<h3 id="infinite-lists">13.5 Infinite Lists with <code>iter</code></h3>
+<pre><code><span class="cmt">-- iter(value, fn) returns an infinite list: value, fn(value), fn(fn(value)), ...</span>
+
+<span class="cmt">-- Powers of two</span>
+<span class="kw">let</span> powers = iter(<span class="num">1</span>, <span class="kw">fn</span>(x <span class="kw">Int</span>) <span class="kw">Int</span> { x * <span class="num">2</span> });
+powers take(<span class="num">10</span>) println;
+<span class="cmt">-- List(1, 2, 4, 8, 16, 32, 64, 128, 256, 512)</span>
+
+<span class="cmt">-- Natural numbers</span>
+<span class="kw">let</span> nats = iter(<span class="num">0</span>, <span class="kw">fn</span>(x <span class="kw">Int</span>) <span class="kw">Int</span> { x + <span class="num">1</span> });
+nats take(<span class="num">5</span>) println;
+<span class="cmt">-- List(0, 1, 2, 3, 4)</span>
+
+<span class="cmt">-- Works with any type</span>
+iter(<span class="str">"a"</span>, <span class="kw">fn</span>(s <span class="kw">String</span>) <span class="kw">String</span> { s $ s }) take(<span class="num">4</span>) println;
+<span class="cmt">-- List(a, aa, aaaa, aaaaaaaa)</span></code></pre>
+
+<!-- ================================================================ -->
+<h2 id="maps">14. Maps</h2>
+
+<h3 id="map-literals">14.1 Map Literals</h3>
+<pre><code><span class="cmt">-- Create a map with [key: value] syntax</span>
+<span class="kw">let</span> ages = [<span class="str">"Alice"</span>: <span class="num">30</span>, <span class="str">"Bob"</span>: <span class="num">25</span>, <span class="str">"Carol"</span>: <span class="num">35</span>];
+
+<span class="cmt">-- Map type annotation: [K:V]</span>
+<span class="kw">let</span> scores [<span class="kw">String</span>:<span class="kw">Int</span>] = [<span class="str">"math"</span>: <span class="num">95</span>, <span class="str">"science"</span>: <span class="num">88</span>];</code></pre>
+
+<h3 id="accessing-values">14.2 Accessing Values</h3>
+<pre><code><span class="kw">let</span> m = [<span class="str">"a"</span>: <span class="num">1</span>, <span class="str">"b"</span>: <span class="num">2</span>, <span class="str">"c"</span>: <span class="num">3</span>];
+
+<span class="cmt">-- Subscript returns Option&lt;V&gt; (safe for missing keys)</span>
+m[<span class="str">"b"</span>] println;               <span class="cmt">-- Option&lt;Int&gt;.some(2)</span>
+m[<span class="str">"z"</span>] println;               <span class="cmt">-- Option&lt;Int&gt;.none</span>
+
+<span class="cmt">-- Use unwrap to extract the value (halts on none)</span>
+m[<span class="str">"b"</span>] unwrap println;        <span class="cmt">-- 2</span>
+
+<span class="cmt">-- Use unwrapOr to provide a default</span>
+m[<span class="str">"z"</span>] unwrapOr(<span class="num">99</span>) println; <span class="cmt">-- 99</span>
+
+<span class="cmt">-- get(map, key) also returns Option&lt;V&gt;</span>
+m get(<span class="str">"b"</span>) unwrap println;    <span class="cmt">-- 2</span>
+
+<span class="cmt">-- get(map, key, default) returns V directly</span>
+m get(<span class="str">"z"</span>, <span class="num">99</span>) println;       <span class="cmt">-- 99</span>
+
+<span class="cmt">-- contains(map, key)</span>
+m contains(<span class="str">"a"</span>) println;      <span class="cmt">-- true</span>
+m contains(<span class="str">"z"</span>) println;      <span class="cmt">-- false</span></code></pre>
+
+<h3 id="modifying-maps">14.3 Modifying Maps</h3>
+<pre><code><span class="kw">let</span> m = [<span class="str">"a"</span>: <span class="num">1</span>];
+
+<span class="cmt">-- put returns a new map with the key-value pair added</span>
+<span class="kw">let</span> m2 = m put(<span class="str">"b"</span>, <span class="num">2</span>);
+m2 println;                      <span class="cmt">-- [a: 1, b: 2]</span>
+
+<span class="cmt">-- remove returns a new map without the key</span>
+<span class="kw">let</span> m3 = m2 remove(<span class="str">"a"</span>);
+m3 println;                      <span class="cmt">-- [b: 2]</span>
+
+<span class="cmt">-- merge combines two maps (second wins on conflicts)</span>
+<span class="kw">let</span> a = [<span class="str">"x"</span>: <span class="num">1</span>, <span class="str">"y"</span>: <span class="num">2</span>];
+<span class="kw">let</span> b = [<span class="str">"y"</span>: <span class="num">99</span>, <span class="str">"z"</span>: <span class="num">3</span>];
+merge(a, b) println;             <span class="cmt">-- [x: 1, y: 99, z: 3]</span></code></pre>
+
+<h3 id="inspecting-maps">14.4 Inspecting Maps</h3>
+<pre><code><span class="kw">let</span> m = [<span class="str">"x"</span>: <span class="num">10</span>, <span class="str">"y"</span>: <span class="num">20</span>];
+
+m length println;                <span class="cmt">-- 2</span>
+m keys println;                  <span class="cmt">-- ["x", "y"]</span>
+m values println;                <span class="cmt">-- [10, 20]</span></code></pre>
+
+<div class="note">
+<h4>Immutability</h4>
+<p>Maps are immutable. Operations like <code>put</code>, <code>remove</code>, and <code>merge</code> return a new map; the original is unchanged.</p>
+</div>
+
+<!-- ================================================================ -->
+<h2 id="sets">15. Sets</h2>
+
+<h3 id="set-literals">15.1 Set Literals</h3>
+<pre><code><span class="cmt">-- Create a set with Set(elements...)</span>
+<span class="kw">let</span> s = Set(<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>, <span class="num">4</span>, <span class="num">5</span>);
+
+<span class="cmt">-- Set type annotation: Set&lt;T&gt;</span>
+<span class="kw">let</span> names Set&lt;<span class="kw">String</span>&gt; = Set(<span class="str">"Alice"</span>, <span class="str">"Bob"</span>);</code></pre>
+
+<h3 id="set-membership">15.2 Membership and Modification</h3>
+<pre><code><span class="kw">let</span> s = Set(<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>);
+
+<span class="cmt">-- contains</span>
+s contains(<span class="num">2</span>) println;          <span class="cmt">-- true</span>
+s contains(<span class="num">5</span>) println;          <span class="cmt">-- false</span>
+
+<span class="cmt">-- add returns a new set with the element added</span>
+<span class="kw">let</span> s2 = s add(<span class="num">4</span>);
+s2 println;                      <span class="cmt">-- Set(1, 2, 3, 4)</span>
+
+<span class="cmt">-- remove returns a new set without the element</span>
+<span class="kw">let</span> s3 = s remove(<span class="num">2</span>);
+s3 println;                      <span class="cmt">-- Set(1, 3)</span></code></pre>
+
+<h3 id="set-operations">15.3 Set Operations</h3>
+<pre><code><span class="kw">let</span> a = Set(<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>, <span class="num">4</span>);
+<span class="kw">let</span> b = Set(<span class="num">3</span>, <span class="num">4</span>, <span class="num">5</span>, <span class="num">6</span>);
+
+union(a, b) println;             <span class="cmt">-- Set(1, 2, 3, 4, 5, 6)</span>
+intersection(a, b) println;      <span class="cmt">-- Set(3, 4)</span>
+difference(a, b) println;        <span class="cmt">-- Set(1, 2)</span></code></pre>
+
+<h3 id="set-conversion">15.4 Conversion and Size</h3>
+<pre><code><span class="kw">let</span> s = Set(<span class="num">3</span>, <span class="num">1</span>, <span class="num">2</span>);
+
+s length println;                <span class="cmt">-- 3</span>
+s toArray println;               <span class="cmt">-- [3, 1, 2]</span></code></pre>
+
+<div class="note">
+<h4>Immutability</h4>
+<p>Like maps, sets are immutable. Operations like <code>add</code>, <code>remove</code>, <code>union</code>, <code>intersection</code>, and <code>difference</code> return new sets.</p>
+</div>
+
+<!-- ================================================================ -->
+<h2 id="hashing">16. Hashing</h2>
+
+<p>The <code>hash</code> function returns an integer hash for any value. Equal values always produce equal hashes. User-defined <code>hash</code> overloads take priority over the built-in structural hashing.</p>
+<pre><code><span class="cmt">-- Hash works on all types</span>
+hash(<span class="num">42</span>) println;
+hash(<span class="num">3.14</span>) println;
+hash(<span class="num">'foo</span>) println;
+hash([<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>]) println;
+hash((<span class="num">1</span>, <span class="num">2</span>)) println;
+
+<span class="cmt">-- Equal values produce equal hashes</span>
+println(hash((<span class="num">1</span>, <span class="num">2</span>)) == hash((<span class="num">1</span>, <span class="num">2</span>)));     <span class="cmt">-- true</span>
+println(hash([<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>]) == hash([<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>])); <span class="cmt">-- true</span>
+
+<span class="cmt">-- Structs, enums, strings &mdash; everything is hashable</span>
+<span class="kw">struct</span> Key { a <span class="kw">Int</span>, b <span class="kw">Int</span> }
+println(hash(Key{<span class="num">1</span>, <span class="num">2</span>}) == hash(Key{<span class="num">1</span>, <span class="num">2</span>}));  <span class="cmt">-- true</span></code></pre>
+
+<div class="note">
+<h4>Hashing and Maps/Sets</h4>
+<p>The <code>hash</code> function is used internally by <code>Map</code> and <code>Set</code>. Because <code>hash</code> is structural by default, any value can be used as a map key or set element &mdash; including structs, tuples, and enums.</p>
+</div>
+
+<!-- ================================================================ -->
+<h2 id="refs">17. Refs (Mutable References)</h2>
+
+<p>A <code>Ref</code> is a mutable container for a value. Create with <code>&amp;</code>, dereference with <code>*</code>, and assign with <code>&lt;-</code>.</p>
+
+<h3 id="creating-refs">17.1 Creating and Using Refs</h3>
+<pre><code><span class="cmt">-- Create a ref with &amp;</span>
+<span class="kw">let</span> x = &amp;<span class="num">42</span>;
+*x println;         <span class="cmt">-- 42 (dereference with *)</span>
+
+<span class="cmt">-- Mutate with &lt;-</span>
+x &lt;- <span class="num">100</span>;
+*x println;         <span class="cmt">-- 100</span>
+
+<span class="cmt">-- Works with any type</span>
+<span class="kw">let</span> s = &amp;<span class="str">"hello"</span>;
+s &lt;- <span class="str">"world"</span>;
+*s println;         <span class="cmt">-- "world"</span>
+
+<span class="cmt">-- Explicit type annotation</span>
+<span class="kw">let</span> r Ref&lt;<span class="kw">Int</span>&gt; = &amp;<span class="num">0</span>;
+
+<span class="cmt">-- Ref set returns the value</span>
+<span class="kw">let</span> v = (x &lt;- <span class="num">77</span>);
+v println;          <span class="cmt">-- 77</span></code></pre>
+
+<h3 id="refs-as-args">17.2 Refs as Function Arguments</h3>
+<pre><code><span class="kw">fn</span> increment(r Ref&lt;<span class="kw">Int</span>&gt;) <span class="kw">Int</span> {
+    <span class="kw">let</span> old = *r;
+    r &lt;- *r + <span class="num">1</span>;
+    old
+}
+
+<span class="kw">let</span> counter = &amp;<span class="num">0</span>;
+counter increment println;   <span class="cmt">-- 0</span>
+counter increment println;   <span class="cmt">-- 1</span>
+*counter println;             <span class="cmt">-- 2</span></code></pre>
+
+<h3 id="overloading-assign">17.3 Overloading <code>&lt;-</code></h3>
+<pre><code><span class="kw">struct</span> Accumulator { total Ref&lt;<span class="kw">Int</span>&gt;, count Ref&lt;<span class="kw">Int</span>&gt; }
+
+<span class="kw">fn</span> &lt;-(acc Accumulator, val <span class="kw">Int</span>) <span class="kw">Int</span> {
+    acc.total &lt;- *(acc.total) + val;
+    acc.count &lt;- *(acc.count) + <span class="num">1</span>;
+    val
+}
+
+<span class="kw">let</span> acc = Accumulator{&amp;<span class="num">0</span>, &amp;<span class="num">0</span>};
+acc &lt;- <span class="num">10</span>;
+acc &lt;- <span class="num">20</span>;
+acc &lt;- <span class="num">30</span>;
+*(acc.total) println;    <span class="cmt">-- 60</span>
+*(acc.count) println;    <span class="cmt">-- 3</span></code></pre>
+
+<!-- ================================================================ -->
+<h2 id="function-types">18. Function Type Annotations</h2>
+
+<p>Function types are written as <code>(ArgTypes) ReturnType</code>.</p>
+
+<pre><code><span class="cmt">-- Function type annotation on a variable</span>
+<span class="kw">let</span> add (<span class="kw">Int</span>, <span class="kw">Int</span>) <span class="kw">Int</span> = <span class="kw">fn</span>(a <span class="kw">Int</span>, b <span class="kw">Int</span>) <span class="kw">Int</span> { a + b };
+add(<span class="num">3</span>, <span class="num">4</span>) println;     <span class="cmt">-- 7</span>
+
+<span class="cmt">-- Single-argument function type</span>
+<span class="kw">let</span> double (<span class="kw">Int</span>) <span class="kw">Int</span> = <span class="kw">fn</span>(x <span class="kw">Int</span>) <span class="kw">Int</span> { x * <span class="num">2</span> };
+
+<span class="cmt">-- Zero-argument function type</span>
+<span class="kw">let</span> getVal () <span class="kw">Int</span> = <span class="kw">fn</span>() <span class="kw">Int</span> { <span class="num">42</span> };
+
+<span class="cmt">-- Function type as parameter</span>
+<span class="kw">fn</span> apply(f (<span class="kw">Int</span>) <span class="kw">Int</span>, x <span class="kw">Int</span>) <span class="kw">Int</span> = f(x);
+apply(double, <span class="num">5</span>) println;  <span class="cmt">-- 10</span>
+
+<span class="cmt">-- Function returning a function type</span>
+<span class="kw">fn</span> make_adder(n <span class="kw">Int</span>) (<span class="kw">Int</span>) <span class="kw">Int</span> {
+    <span class="kw">fn</span>(x <span class="kw">Int</span>) <span class="kw">Int</span> { x + n }
+}
+<span class="kw">let</span> add5 = make_adder(<span class="num">5</span>);
+<span class="num">10</span> add5 println;       <span class="cmt">-- 15</span>
+
+<span class="cmt">-- Compose: function taking two functions, returning a function</span>
+<span class="kw">fn</span> compose(f (<span class="kw">Int</span>) <span class="kw">Int</span>, g (<span class="kw">Int</span>) <span class="kw">Int</span>) (<span class="kw">Int</span>) <span class="kw">Int</span> {
+    <span class="kw">fn</span>(x <span class="kw">Int</span>) <span class="kw">Int</span> { f(g(x)) }
+}
+
+<span class="kw">let</span> inc = <span class="kw">fn</span>(x <span class="kw">Int</span>) <span class="kw">Int</span> { x + <span class="num">1</span> };
+<span class="kw">let</span> dbl = <span class="kw">fn</span>(x <span class="kw">Int</span>) <span class="kw">Int</span> { x * <span class="num">2</span> };
+<span class="kw">let</span> inc_then_dbl = compose(dbl, inc);
+<span class="num">3</span> inc_then_dbl println;  <span class="cmt">-- 8  (dbl(inc(3)) = (3+1)*2)</span></code></pre>
+
+<!-- ================================================================ -->
+<h2 id="templates">19. Templates</h2>
+
+<h3 id="template-functions">19.1 Template Functions</h3>
+<p>A function becomes a template when any of its parameters have an unspecified type.
+   The compiler introduces a type parameter for each untyped argument and monomorphizes
+   the function at each call site. You can also declare type parameters explicitly with
+   angle brackets.</p>
+<pre><code><span class="cmt">-- Leaving a parameter's type unspecified makes it a template.</span>
+<span class="cmt">-- The compiler infers a type parameter for each untyped argument.</span>
+<span class="kw">fn</span> identity(x) = x;
+
+<span class="cmt">-- Equivalent explicit template syntax:</span>
+<span class="kw">fn</span> identity&lt;T&gt;(x T) T = x;
+
+<span class="cmt">-- Multiple untyped parameters: each gets its own type parameter</span>
+<span class="kw">fn</span> pick_first(a, b) = a;          <span class="cmt">-- equivalent to pick_first&lt;A, B&gt;(a A, b B) A</span>
+<span class="kw">fn</span> pick_second(a, b) = b;         <span class="cmt">-- equivalent to pick_second&lt;A, B&gt;(a A, b B) B</span>
+
+<span class="cmt">-- Explicit type parameters</span>
+<span class="kw">fn</span> pick_first&lt;A, B&gt;(a A, b B) A = a;
+<span class="kw">fn</span> pick_second&lt;A, B&gt;(a A, b B) B = b;
+
+<span class="cmt">-- Mixing typed and untyped parameters: only untyped ones become template parameters</span>
+<span class="kw">fn</span> repeat(x, n <span class="kw">Int</span>) = {  <span class="cmt">-- x is generic, n is Int</span>
+    <span class="kw">let</span> result = [];
+    <span class="kw">for</span> (i <span class="kw">in</span> <span class="num">0</span>..n) { result = result ++ [x]; }
+    result
+};
+
+<span class="cmt">-- Type inferred from arguments</span>
+<span class="num">42</span> identity println;        <span class="cmt">-- T inferred as Int</span>
+<span class="str">"hello"</span> identity println;   <span class="cmt">-- T inferred as String</span>
+
+<span class="cmt">-- Explicit type parameter at call site</span>
+<span class="num">42</span> identity&lt;<span class="kw">Int</span>&gt; println;
+
+<span class="cmt">-- Templates work with arrays and tuples</span>
+<span class="kw">fn</span> wrap(x) = [x];
+<span class="kw">fn</span> pair(a, b) = (a, b);
+
+<span class="num">5</span> wrap println;            <span class="cmt">-- [5]</span>
+println(pair(<span class="num">1</span>, <span class="str">"hi"</span>));     <span class="cmt">-- (1, "hi")</span></code></pre>
+
+<h3 id="template-structs">19.2 Template Structs</h3>
+<pre><code><span class="kw">struct</span> Pair&lt;T, U&gt; {
+    first T,
+    second U
+}
+
+<span class="cmt">-- Type arguments inferred from field values</span>
+<span class="kw">let</span> p = Pair { first: <span class="num">42</span>, second: <span class="str">"hello"</span> };
+p.first println;      <span class="cmt">-- 42</span>
+p.second println;     <span class="cmt">-- "hello"</span>
+
+<span class="cmt">-- Explicit type arguments</span>
+<span class="kw">let</span> q = Pair&lt;<span class="kw">Int</span>, <span class="kw">Float</span>&gt; { first: <span class="num">10</span>, second: <span class="num">2.5</span> };
+
+<span class="cmt">-- Nested template types</span>
+<span class="kw">struct</span> Box&lt;T&gt; { value T }
+
+<span class="kw">let</span> nested = Box { value: Pair { first: <span class="num">1</span>, second: <span class="num">2</span> } };
+nested.value.first println;   <span class="cmt">-- 1</span>
+
+<span class="cmt">-- Template tuple structs</span>
+<span class="kw">struct</span> Wrapper&lt;T&gt;(T);
+
+<span class="kw">let</span> w = Wrapper(<span class="num">42</span>);          <span class="cmt">-- T inferred as Int</span>
+w println;                     <span class="cmt">-- Wrapper&lt;Int&gt;(42)</span>
+w.<span class="num">0</span> println;                  <span class="cmt">-- 42</span>
+
+<span class="kw">let</span> ws = Wrapper(<span class="str">"hello"</span>);     <span class="cmt">-- T inferred as String</span>
+ws println;                    <span class="cmt">-- Wrapper&lt;String&gt;(hello)</span></code></pre>
+
+<h3 id="template-enums">19.3 Template Enums</h3>
+<pre><code><span class="cmt">-- Option&lt;T&gt; is a built-in template enum (see below)</span>
+
+<span class="cmt">-- User-defined template enums</span>
+<span class="kw">enum</span> Either&lt;L, R&gt; {
+    left L,
+    right R
+}
+
+<span class="cmt">-- Type inferred from data case</span>
+<span class="kw">let</span> x = Either.left(<span class="num">42</span>);       <span class="cmt">-- Either&lt;Int, ?&gt;</span>
+
+<span class="cmt">-- Explicit type for no-data or ambiguous cases</span>
+<span class="kw">let</span> y = Either&lt;<span class="kw">Int</span>, <span class="kw">String</span>&gt;.left(<span class="num">42</span>);
+
+<span class="cmt">-- Pattern matching on template enums</span>
+<span class="kw">fn</span> describe&lt;L, R&gt;(e Either&lt;L, R&gt;) <span class="kw">String</span> {
+    <span class="kw">match</span> (e) {
+        Either.left(v): <span class="kw">return</span> <span class="str">"left"</span>;
+        Either.right(v): <span class="kw">return</span> <span class="str">"right"</span>;
+    }
+    <span class="str">""</span>
+}</code></pre>
+
+<h4>Built-in Option&lt;T&gt;</h4>
+<p><code>Option&lt;T&gt;</code> is a built-in template enum with cases <code>some T</code> and <code>none</code>. It is used for type-safe handling of missing values &mdash; for example, map subscript and <code>get(map, key)</code> return <code>Option&lt;V&gt;</code>.</p>
+<pre><code><span class="cmt">-- Construct Option values</span>
+<span class="kw">let</span> x = Option.some(<span class="num">42</span>);       <span class="cmt">-- Option&lt;Int&gt;</span>
+<span class="kw">let</span> y = Option&lt;<span class="kw">Int</span>&gt;.none;      <span class="cmt">-- explicit type for none</span>
+
+<span class="cmt">-- Built-in utility functions</span>
+x unwrap println;              <span class="cmt">-- 42</span>
+y unwrapOr(<span class="num">0</span>) println;         <span class="cmt">-- 0</span>
+x isSome println;              <span class="cmt">-- true</span>
+y isNone println;              <span class="cmt">-- true</span>
+
+<span class="cmt">-- Pattern matching works as with any enum</span>
+<span class="kw">match</span> (x) {
+    Option.some(v): v println;
+    Option.none: <span class="str">"nothing"</span> println;
+}</code></pre>
+
+<h3 id="template-constraints">19.4 Template Constraints</h3>
+<p>Template constraints restrict what types can be used for a type parameter.
+   When a concrete type does not satisfy the constraint, the template is
+   silently skipped during overload resolution, allowing other overloads to
+   match or producing a clear "no matching overload" error.</p>
+
+<h4>Constraint Declarations</h4>
+<p>There are three forms of constraint declaration.</p>
+
+<p><strong>Type-set constraints</strong> list the concrete types that are allowed:</p>
+<pre><code><span class="cmt">-- Only Int, Float, and Fraction may be used where Numeric is required</span>
+<span class="kw">constraint</span> Numeric = <span class="kw">Int</span> | <span class="kw">Float</span> | Fraction;</code></pre>
+
+<p><strong>Structural constraints</strong> require that certain functions or operators
+   exist for the type:</p>
+<pre><code><span class="cmt">-- Any type T that has a &lt; and &gt; operator returning Bool</span>
+<span class="kw">constraint</span> Comparable&lt;T&gt; = <span class="kw">requires</span> {
+    &lt;(T, T) <span class="kw">Bool</span>,
+    &gt;(T, T) <span class="kw">Bool</span>
+};
+
+<span class="cmt">-- A type T that has an addition operator</span>
+<span class="kw">constraint</span> Addable&lt;T&gt; = <span class="kw">requires</span> {
+    +(T, T) T
+};</code></pre>
+
+<p><strong>Composition constraints</strong> combine multiple constraints with <code>&amp;</code>:</p>
+<pre><code><span class="cmt">-- Ordered requires both Numeric and Comparable</span>
+<span class="kw">constraint</span> Ordered&lt;T&gt; = Numeric &amp; Comparable&lt;T&gt;;</code></pre>
+
+<h4>Applying Constraints</h4>
+<p>Constraints are applied to type parameters using either <strong>inline syntax</strong>
+   or a <strong><code>where</code> clause</strong>.</p>
+
+<p><strong>Inline syntax</strong> &mdash; place the constraint after the type parameter with a colon:</p>
+<pre><code><span class="cmt">-- T must satisfy Numeric</span>
+<span class="kw">fn</span> add&lt;T: Numeric&gt;(a T, b T) T = a + b;
+
+<span class="cmt">-- Multiple constraints with &amp;</span>
+<span class="kw">fn</span> clamp&lt;T: Comparable &amp; Numeric&gt;(val T, lo T, hi T) T {
+    <span class="kw">if</span> (val &lt; lo) lo
+    <span class="kw">else</span> <span class="kw">if</span> (val &gt; hi) hi
+    <span class="kw">else</span> val
+}</code></pre>
+
+<p><strong>Where clause</strong> &mdash; place constraints after the return type:</p>
+<pre><code><span class="kw">fn</span> multiply&lt;T&gt;(a T, b T) T <span class="kw">where</span> T: Numeric = a * b;
+
+<span class="cmt">-- Multiple constrained type parameters</span>
+<span class="kw">fn</span> merge&lt;K, V&gt;(a [K: V], b [K: V]) [K: V]
+    <span class="kw">where</span> K: Comparable {
+    <span class="cmt">-- ...</span>
+}</code></pre>
+
+<h4>Constraints on Structs, Enums, and Type Aliases</h4>
+<p>Constraints can be placed on any templated declaration, not just functions.</p>
+<pre><code><span class="cmt">-- Struct with constrained type parameter</span>
+<span class="kw">struct</span> SortedArray&lt;T: Comparable&gt; { items [T] }
+
+<span class="cmt">-- Enum with constrained type parameter</span>
+<span class="kw">enum</span> NumResult&lt;T: Numeric&gt; { ok T, err <span class="kw">String</span> }
+
+<span class="cmt">-- Type alias with constraint</span>
+<span class="kw">type</span> NumPair&lt;T: Numeric&gt; = (T, T);</code></pre>
+
+<h4>Constraint-Based Overload Filtering</h4>
+<p>When a constrained template does not match, the compiler moves on to the
+   next candidate. This lets you write specialized overloads alongside
+   constrained templates:</p>
+<pre><code><span class="kw">constraint</span> Numeric = <span class="kw">Int</span> | <span class="kw">Float</span>;
+
+<span class="kw">fn</span> describe&lt;T: Numeric&gt;(x T) <span class="kw">String</span> = <span class="str">"numeric"</span>;
+<span class="kw">fn</span> describe(x <span class="kw">String</span>) <span class="kw">String</span> = <span class="str">"string"</span>;
+
+describe(<span class="num">42</span>) println;        <span class="cmt">-- "numeric"</span>
+describe(<span class="str">"hello"</span>) println;   <span class="cmt">-- "string"  (template skipped because String is not Numeric)</span></code></pre>
+
+<h4>Complete Example</h4>
+<pre><code><span class="kw">constraint</span> Numeric = <span class="kw">Int</span> | <span class="kw">Float</span>;
+
+<span class="kw">constraint</span> Addable&lt;T&gt; = <span class="kw">requires</span> {
+    +(T, T) T
+};
+
+<span class="kw">constraint</span> NumericAddable&lt;T&gt; = Numeric &amp; Addable&lt;T&gt;;
+
+<span class="kw">fn</span> triple&lt;T: NumericAddable&gt;(x T) T = x + x + x;
+
+triple(<span class="num">5</span>) println;      <span class="cmt">-- 15</span>
+triple(<span class="num">1.0</span>) println;    <span class="cmt">-- 3.0</span>
+<span class="cmt">-- triple("hi");       -- error: String does not satisfy NumericAddable</span></code></pre>
+
+<h3 id="template-lambdas">19.5 Template Lambdas</h3>
+<p>Lambda expressions can have type parameters, creating generic lambdas that
+   are monomorphized at each call site. Just like template functions, leaving a
+   parameter's type unspecified makes the lambda generic. You can also declare
+   type parameters explicitly with angle brackets.</p>
+
+<pre><code><span class="cmt">-- Omitting parameter types makes a template lambda (sugar for fn&lt;T&gt;(x T))</span>
+<span class="kw">let</span> double = <span class="kw">fn</span>(x) { x + x };
+
+double(<span class="num">3</span>) println;      <span class="cmt">-- 6     (T = Int)</span>
+double(<span class="num">3.14</span>) println;   <span class="cmt">-- 6.28  (T = Float)</span>
+
+<span class="cmt">-- Equivalent explicit template syntax:</span>
+<span class="kw">let</span> double2 = <span class="kw">fn</span>&lt;T&gt;(x T) T { x + x };</code></pre>
+
+<h4>Captures</h4>
+<p>Template lambdas capture variables from their enclosing scope, just like
+   regular lambdas. The captured values are shared across all monomorphizations.</p>
+<pre><code><span class="kw">let</span> offset = <span class="num">10</span>;
+<span class="kw">let</span> shifted = <span class="kw">fn</span>(x) { x + offset };
+
+shifted(<span class="num">5</span>) println;     <span class="cmt">-- 15    (T = Int)</span>
+shifted(<span class="num">2.5</span>) println;   <span class="cmt">-- 12.5  (T = Float, offset promoted to Float)</span></code></pre>
+
+<h4>Higher-Order Functions</h4>
+<p>Template lambdas can be passed to higher-order functions. The compiler
+   specializes the lambda based on the expected function type.</p>
+<pre><code><span class="kw">let</span> add = <span class="kw">fn</span>(a, b) { a + b };
+
+<span class="cmt">-- Pass to a function expecting fn(Int, Int) Int</span>
+<span class="kw">let</span> nums = [<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>, <span class="num">4</span>, <span class="num">5</span>];
+fold1(nums, add) println;  <span class="cmt">-- 15</span></code></pre>
+
+<h4>Constrained Template Lambdas</h4>
+<p>Constraints can be applied to template lambda type parameters using the
+   same inline colon syntax as template functions.</p>
+<pre><code><span class="kw">constraint</span> Numeric = <span class="kw">Int</span> | <span class="kw">Float</span>;
+
+<span class="kw">let</span> square = <span class="kw">fn</span>&lt;T: Numeric&gt;(x T) T { x * x };
+
+square(<span class="num">4</span>) println;      <span class="cmt">-- 16</span>
+square(<span class="num">2.5</span>) println;    <span class="cmt">-- 6.25</span>
+<span class="cmt">-- square("hi");       -- error: String does not satisfy Numeric</span></code></pre>
+
+<h4>Return Type Inference</h4>
+<p>The return type can be omitted and will be inferred from the body,
+   just like regular lambdas.</p>
+<pre><code><span class="kw">let</span> triple = <span class="kw">fn</span>(x) { x + x + x };
+
+triple(<span class="num">7</span>) println;      <span class="cmt">-- 21</span>
+triple(<span class="num">1.5</span>) println;    <span class="cmt">-- 4.5</span></code></pre>
+
+<h4>Pipeline Syntax</h4>
+<p>Template lambdas stored in variables work with the space-pipeline syntax.</p>
+<pre><code><span class="kw">let</span> double = <span class="kw">fn</span>(x) { x + x };
+
+<span class="num">42</span> double println;      <span class="cmt">-- 84</span>
+<span class="num">3.14</span> double println;    <span class="cmt">-- 6.28</span></code></pre>
+
+<h4>Multiple Type Parameters</h4>
+<pre><code><span class="cmt">-- Multiple untyped params get separate type parameters</span>
+<span class="kw">let</span> pair = <span class="kw">fn</span>(a, b) { (a, b) };
+
+pair(<span class="num">1</span>, <span class="str">"hello"</span>) println;    <span class="cmt">-- (1, "hello")</span>
+pair(<span class="num">3.14</span>, <span class="kw">true</span>) println;    <span class="cmt">-- (3.14, true)</span></code></pre>
+
+<!-- ================================================================ -->
+<h2 id="type-aliases">20. Type Aliases</h2>
+
+<h3 id="concrete-type-aliases">20.1 Concrete Type Aliases</h3>
+<p>Use <code>type</code> to create a transparent alias for an existing type. The alias and the original type are fully interchangeable.</p>
+<pre><code><span class="cmt">-- Alias for a primitive type</span>
+<span class="kw">type</span> Natural = Int;
+<span class="kw">let</span> n Natural = <span class="num">42</span>;
+
+<span class="cmt">-- Alias for a collection type</span>
+<span class="kw">type</span> IntList = List&lt;Int&gt;;
+<span class="kw">let</span> xs IntList = List(<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>);
+
+<span class="cmt">-- Alias for a tuple type</span>
+<span class="kw">type</span> Point = (Float, Float);
+<span class="kw">let</span> p Point = (<span class="num">1.0</span>, <span class="num">2.0</span>);
+
+<span class="cmt">-- Alias for a function type</span>
+<span class="kw">type</span> IntToInt = (Int) Int;
+<span class="kw">fn</span> apply(f IntToInt, x Int) Int = f(x);
+
+<span class="cmt">-- Alias for a struct type</span>
+<span class="kw">struct</span> Vec2 { x Float, y Float }
+<span class="kw">type</span> Vector = Vec2;
+<span class="kw">let</span> v = Vector { x: <span class="num">1.0</span>, y: <span class="num">2.0</span> };
+
+<span class="cmt">-- Alias for a template struct instantiation</span>
+<span class="kw">struct</span> Box&lt;T&gt; { value T }
+<span class="kw">type</span> IntBox = Box&lt;Int&gt;;
+<span class="kw">let</span> b IntBox = Box { <span class="num">42</span> };
+<span class="kw">let</span> b2 Box&lt;Int&gt; = b;   <span class="cmt">-- alias is transparent</span></code></pre>
+
+<h3 id="generic-type-aliases">20.2 Generic Type Aliases</h3>
+<p>Type aliases can have type parameters. They are expanded when type arguments are provided.</p>
+<pre><code><span class="cmt">-- Generic alias for a tuple</span>
+<span class="kw">type</span> Pair&lt;T&gt; = (T, T);
+<span class="kw">let</span> ip Pair&lt;Int&gt; = (<span class="num">1</span>, <span class="num">2</span>);
+<span class="kw">let</span> fp Pair&lt;Float&gt; = (<span class="num">3.14</span>, <span class="num">2.72</span>);
+
+<span class="cmt">-- Multiple type parameters</span>
+<span class="kw">type</span> Entry&lt;K, V&gt; = (K, V);
+<span class="kw">let</span> e Entry&lt;String, Int&gt; = (<span class="str">"age"</span>, <span class="num">30</span>);
+
+<span class="cmt">-- Generic alias for an array</span>
+<span class="kw">type</span> Vec&lt;T&gt; = [T];
+<span class="kw">let</span> v Vec&lt;Int&gt; = [<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>];
+
+<span class="cmt">-- Generic alias wrapping a template struct</span>
+<span class="kw">type</span> Wrapper&lt;T&gt; = Box&lt;T&gt;;
+<span class="kw">fn</span> unwrap&lt;T&gt;(w Wrapper&lt;T&gt;) T = w.value;</code></pre>
+
+<h3 id="type-alias-visibility">20.3 Visibility</h3>
+<p>Type aliases can be marked <code>private</code> in modules to prevent them from being exported.</p>
+<pre><code><span class="kw">private</span> <span class="kw">type</span> InternalId = Int;
+<span class="kw">type</span> PublicId = Int;   <span class="cmt">-- exported by default</span></code></pre>
+
+<!-- ================================================================ -->
+<h2 id="modules">21. Modules and Visibility</h2>
+
+<h3 id="import-syntax">21.1 Import Syntax</h3>
+<pre><code><span class="cmt">-- Import entire module (qualified access)</span>
+<span class="kw">import</span> math;
+println(math.square(<span class="num">5</span>));    <span class="cmt">-- 25</span>
+
+<span class="cmt">-- Import with alias</span>
+<span class="kw">import</span> std.collections <span class="kw">as</span> cols;
+cols.get(mymap, <span class="str">"key"</span>);
+
+<span class="cmt">-- Import all exports into current scope (wildcard)</span>
+<span class="kw">import</span> std.math.*;
+<span class="num">1.0</span> sin println;            <span class="cmt">-- no qualifier needed</span>
+
+<span class="cmt">-- Import specific names</span>
+<span class="kw">import</span> std.math.{sin, cos, sqrt};
+<span class="num">1.0</span> sin println;
+
+<span class="cmt">-- Import with aliases</span>
+<span class="kw">import</span> std.math.{sin <span class="kw">as</span> sine, cos <span class="kw">as</span> cosine};
+<span class="num">1.0</span> sine println;</code></pre>
+
+<h3 id="dotted-paths">21.2 Dotted Paths</h3>
+<pre><code><span class="cmt">-- Dotted paths map to directories:</span>
+<span class="cmt">--   std.math  →  std/math.x</span>
+<span class="cmt">--   utils     →  utils.x</span>
+
+<span class="kw">import</span> std.math;            <span class="cmt">-- loads std/math.x</span>
+println(math.add(<span class="num">3</span>, <span class="num">4</span>));    <span class="cmt">-- qualified by last path component</span></code></pre>
+
+<h3 id="file-resolution">21.3 File Resolution</h3>
+<div class="note">
+    <h4>Module Search Order</h4>
+    <p>When resolving an import, the compiler searches in this order:</p>
+    <ol>
+        <li>Relative to the directory containing the importing file</li>
+        <li>Each directory in the CLI <code>-I path1:path2</code> argument</li>
+        <li>Each directory in the <code>LANGX_PATH</code> environment variable (colon-separated)</li>
+    </ol>
+</div>
+<p>Run with include paths:</p>
+<pre><code>./langx -I lib:vendor main.x</code></pre>
+<p>Or set the environment variable:</p>
+<pre><code>export LANGX_PATH=/usr/local/lib/langx:/home/user/libs</code></pre>
+
+<h3 id="visibility-exporting">21.4 Visibility and Exporting</h3>
+<pre><code><span class="cmt">-- By default, all top-level declarations are exported</span>
+<span class="kw">fn</span> add(a <span class="kw">Int</span>, b <span class="kw">Int</span>) <span class="kw">Int</span> = a + b;     <span class="cmt">-- exported</span>
+<span class="kw">const</span> PI = <span class="num">3.14159</span>;                       <span class="cmt">-- exported</span>
+<span class="kw">struct</span> Point { x <span class="kw">Float</span>, y <span class="kw">Float</span> }       <span class="cmt">-- exported</span>
+
+<span class="cmt">-- Two ways to make a declaration private (not exported):</span>
+
+<span class="cmt">-- 1. The private keyword</span>
+<span class="kw">private</span> <span class="kw">fn</span> helper(x <span class="kw">Int</span>) <span class="kw">Int</span> = x * <span class="num">2</span>;
+
+<span class="cmt">-- 2. Underscore prefix</span>
+<span class="kw">fn</span> _internal(x <span class="kw">Int</span>) <span class="kw">Int</span> = x + <span class="num">1</span>;</code></pre>
+
+<p>Private names cannot be accessed by importers:</p>
+<pre><code><span class="kw">import</span> utils.*;   _internal(<span class="num">5</span>);    <span class="cmt">-- compile error</span>
+<span class="kw">import</span> utils;     utils.helper(<span class="num">5</span>);  <span class="cmt">-- compile error</span></code></pre>
+
+<p>Imported names are NOT re-exported.
+If module A imports from module B, importers of A
+do not see B's names.</p>
+
+<h3 id="circular-import">21.5 Circular Import Detection</h3>
+<p>Circular imports are detected and reported as errors.
+If <code>a.x</code> imports <code>b.x</code> and <code>b.x</code> imports <code>a.x</code>, the compiler
+will report: <code>"Circular import detected: a"</code></p>
+
+<!-- ================================================================ -->
+<h2 id="any-type">22. The Any Type</h2>
+
+<p>The <code>Any</code> type wraps a value of any type into a uniform runtime object, enabling heterogeneous collections
+and dynamic type dispatch. The wrapped value retains its original type, which can be tested at runtime.</p>
+
+<h3 id="wrapping-values">22.1 Wrapping Values</h3>
+<p>Use the <code>any()</code> function to wrap a value. The result prints as <code>Any(value, Type)</code>.</p>
+<pre><code><span class="kw">let</span> a = any(<span class="num">5</span>);
+a println;              <span class="cmt">-- Any(5, Int)</span>
+
+<span class="kw">let</span> b = any(<span class="str">"hello"</span>);
+b println;              <span class="cmt">-- Any(hello, String)</span>
+
+<span class="kw">let</span> c = any(<span class="num">3.14</span>);
+c println;              <span class="cmt">-- Any(3.14, Float)</span>
+
+<span class="kw">let</span> d = any(<span class="sym">'foo</span>);
+d println;              <span class="cmt">-- Any('foo, Symbol)</span>
+
+any(<span class="kw">true</span>) println;      <span class="cmt">-- Any(true, Bool)</span></code></pre>
+
+<h3 id="as-type-cast">22.2 Type Testing with <code>as(Type)</code></h3>
+<p>The postfix <code>as(Type)</code> operator tests whether an <code>Any</code> value wraps the given type.
+It returns <code>Option&lt;T&gt;</code> &mdash; <code>some(value)</code> if the type matches, <code>none</code> otherwise.</p>
+<pre><code><span class="kw">let</span> a = any(<span class="num">5</span>);
+
+a as(<span class="kw">Int</span>) println;      <span class="cmt">-- Option&lt;Int&gt;.some(5)</span>
+a as(<span class="kw">String</span>) println;   <span class="cmt">-- Option&lt;String&gt;.none</span>
+
+<span class="kw">let</span> b = any(<span class="str">"hello"</span>);
+b as(<span class="kw">String</span>) println;   <span class="cmt">-- Option&lt;String&gt;.some(hello)</span></code></pre>
+
+<h3 id="any-match">22.3 Pattern Matching on Any</h3>
+<p>In a <code>match</code> expression, use <code>name Type</code> patterns to test the wrapped type and bind
+the unwrapped value to a name. Use <code>_</code> as a catch-all for unmatched types.</p>
+<pre><code><span class="kw">fn</span> describe(x Any) <span class="kw">String</span> {
+    <span class="kw">match</span>(x) {
+        i <span class="kw">Int</span>:    <span class="str">"int: "</span> $ toString(i);
+        s <span class="kw">String</span>: <span class="str">"string: "</span> $ s;
+        f <span class="kw">Float</span>:  <span class="str">"float: "</span> $ toString(f);
+        _:        <span class="str">"other"</span>;
+    }
+}
+
+describe(any(<span class="num">42</span>)) println;       <span class="cmt">-- int: 42</span>
+describe(any(<span class="str">"hi"</span>)) println;     <span class="cmt">-- string: hi</span>
+describe(any(<span class="num">2.7</span>)) println;      <span class="cmt">-- float: 2.7</span>
+describe(any(<span class="sym">'x</span>)) println;       <span class="cmt">-- other</span></code></pre>
+
+<h3 id="any-arrays">22.4 Heterogeneous Arrays</h3>
+<p>Use <code>any()</code> with multiple arguments or <code>toAnyArray</code> on a tuple to create an <code>[Any]</code>
+&mdash; an array where each element can be a different type.</p>
+<pre><code><span class="cmt">-- Variadic any() wraps each arg and returns [Any]</span>
+any(<span class="num">1</span>, <span class="str">"two"</span>, <span class="sym">'three</span>, <span class="num">4.0</span>) println;
+<span class="cmt">-- [Any(1, Int), Any(two, String), Any('three, Symbol), Any(4.0, Float)]</span>
+
+<span class="cmt">-- toAnyArray converts a tuple to [Any]</span>
+(<span class="num">1</span>, <span class="str">"two"</span>, <span class="sym">'three</span>, <span class="num">4.0</span>) toAnyArray println;
+<span class="cmt">-- [Any(1, Int), Any(two, String), Any('three, Symbol), Any(4.0, Float)]</span>
+
+<span class="cmt">-- Nested any calls</span>
+any(<span class="num">1</span>, any(<span class="num">2</span>, <span class="num">3</span>)) println;
+<span class="cmt">-- [Any(1, Int), Any([Any(2, Int), Any(3, Int)], [Any])]</span></code></pre>
+
+<!-- ================================================================ -->
+<h2 id="advanced-examples">23. Advanced Examples</h2>
+
+<h3 id="fibonacci">23.1 Fibonacci (Recursive and Iterative)</h3>
+<pre><code><span class="kw">fn</span> fib(n <span class="kw">Int</span>) <span class="kw">Int</span> {
+    <span class="kw">if</span> (n <= <span class="num">1</span>) { <span class="kw">return</span> n; }
+    fib(n - <span class="num">1</span>) + fib(n - <span class="num">2</span>)
+}
+
+<span class="kw">fn</span> fib_iter(n <span class="kw">Int</span>) <span class="kw">Int</span> {
+    <span class="kw">if</span> (n <= <span class="num">1</span>) { <span class="kw">return</span> n; }
+    <span class="kw">var</span> a = <span class="num">0</span>;
+    <span class="kw">var</span> b = <span class="num">1</span>;
+    <span class="kw">var</span> k = <span class="num">2</span>;
+    <span class="kw">while</span> (k <= n) {
+        <span class="kw">let</span> next = a + b;
+        a = b;
+        b = next;
+        k = k + <span class="num">1</span>;
+    }
+    b
+}</code></pre>
+
+<h3 id="fizzbuzz">23.2 FizzBuzz</h3>
+<pre><code><span class="kw">fn</span> fizzbuzz(n <span class="kw">Int</span>) <span class="kw">String</span> {
+    <span class="kw">if</span> (n % <span class="num">15</span> == <span class="num">0</span>) { <span class="kw">return</span> <span class="str">"FizzBuzz"</span>; }
+    <span class="kw">if</span> (n % <span class="num">3</span> == <span class="num">0</span>) { <span class="kw">return</span> <span class="str">"Fizz"</span>; }
+    <span class="kw">if</span> (n % <span class="num">5</span> == <span class="num">0</span>) { <span class="kw">return</span> <span class="str">"Buzz"</span>; }
+    <span class="str">""</span>
+}
+
+<span class="kw">var</span> i = <span class="num">1</span>;
+<span class="kw">while</span> (i <= <span class="num">20</span>) {
+    <span class="kw">let</span> fb = fizzbuzz(i);
+    <span class="kw">if</span> (fb == <span class="str">""</span>) { i println; } <span class="kw">else</span> { fb println; }
+    i = i + <span class="num">1</span>;
+}</code></pre>
+
+<h3 id="euler9">23.3 Euler Problem 9: Pythagorean Triplet</h3>
+<pre><code><span class="cmt">-- Find a*b*c where a+b+c=1000, a^2+b^2=c^2</span>
+<span class="kw">fn</span> euler9() <span class="kw">Int</span> {
+    <span class="kw">var</span> a = <span class="num">1</span>;
+    <span class="kw">while</span> (a < <span class="num">333</span>) {
+        <span class="kw">var</span> b = a + <span class="num">1</span>;
+        <span class="kw">while</span> (b < <span class="num">500</span>) {
+            <span class="kw">let</span> c = <span class="num">1000</span> - a - b;
+            <span class="kw">if</span> (c > b) {
+                <span class="kw">if</span> (a * a + b * b == c * c) {
+                    <span class="kw">return</span> a * b * c;
+                }
+            }
+            b = b + <span class="num">1</span>;
+        }
+        a = a + <span class="num">1</span>;
+    }
+    <span class="num">0</span>
+}</code></pre>
+
+<h3 id="complex-powers">23.4 Complex Number Powers of i</h3>
+<pre><code><span class="cmt">-- i^1=i, i^2=-1, i^3=-i, i^4=1</span>
+<span class="kw">let</span> i_1 = <span class="num">1i</span>;
+<span class="kw">let</span> i_2 = i_1 * i_1;      <span class="cmt">-- -1+0i</span>
+<span class="kw">let</span> i_3 = i_2 * i_1;      <span class="cmt">-- 0-1i</span>
+<span class="kw">let</span> i_4 = i_3 * i_1;      <span class="cmt">-- 1+0i</span></code></pre>
+
+<h3 id="bitwise-overloading">23.5 Bitwise Operator Overloading</h3>
+<pre><code><span class="kw">struct</span> Mask { bits <span class="kw">Int</span> }
+
+<span class="kw">fn</span> &(a Mask, b Mask) Mask = Mask { bits: a.bits & b.bits };
+<span class="kw">fn</span> |(a Mask, b Mask) Mask = Mask { bits: a.bits | b.bits };
+<span class="kw">fn</span> ^(a Mask, b Mask) Mask = Mask { bits: a.bits ^ b.bits };
+<span class="kw">fn</span> <<(a Mask, n <span class="kw">Int</span>) Mask = Mask { bits: a.bits << n };
+<span class="kw">fn</span> >>(a Mask, n <span class="kw">Int</span>) Mask = Mask { bits: a.bits >> n };
+
+<span class="kw">let</span> m1 = Mask { bits: <span class="num">255</span> };
+<span class="kw">let</span> m2 = Mask { bits: <span class="num">15</span> };
+println(m1 & m2);     <span class="cmt">-- Mask { bits: 15 }</span>
+println(m1 | m2);     <span class="cmt">-- Mask { bits: 255 }</span>
+println(m1 << <span class="num">4</span>);     <span class="cmt">-- Mask { bits: 4080 }</span></code></pre>
+
+</main>
+</body>
+</html>

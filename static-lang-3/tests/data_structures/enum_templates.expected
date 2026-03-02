@@ -1,0 +1,13 @@
+Option<Int>.some(42)
+Option<String>.some(hello)
+Option<Int>.none
+Option<String>.none
+Option<Float>.some(3.14)
+99
+nothing
+Either<Int, String>.Left(42)
+Either<Int, String>.Right(hello)
+0
+1
+0
+1

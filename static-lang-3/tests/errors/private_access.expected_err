@@ -1,0 +1,5 @@
+Type error [tests/errors/private_access.x:4:9]
+  |
+4 | println(_private_fn(5));
+  |         ^---------^
+  Undeclared function '_private_fn'

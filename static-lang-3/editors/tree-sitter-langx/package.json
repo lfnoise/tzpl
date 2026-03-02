@@ -1,0 +1,23 @@
+{
+  "name": "tree-sitter-langx",
+  "version": "0.1.0",
+  "description": "Tree-sitter grammar for Language X",
+  "main": "bindings/node",
+  "keywords": [
+    "parser",
+    "tree-sitter",
+    "langx"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "nan": "^2.18.0"
+  },
+  "devDependencies": {
+    "tree-sitter-cli": "^0.24.0"
+  },
+  "scripts": {
+    "generate": "tree-sitter generate",
+    "test": "tree-sitter test",
+    "parse": "tree-sitter parse"
+  }
+}

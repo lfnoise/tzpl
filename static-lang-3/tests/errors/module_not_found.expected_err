@@ -1,0 +1,23 @@
+Type error [tests/errors/module_not_found.x:1:1]
+  |
+1 | import nonexistent;
+  | ^----^
+  Cannot find module 'nonexistent'
+
+Type error [tests/errors/module_not_found.x:3:9]
+  |
+3 | println(nonexistent.foo(1));
+  |         ^---------^
+  Undeclared identifier 'nonexistent'
+
+Type error [tests/errors/module_not_found.x:3:9]
+  |
+3 | println(nonexistent.foo(1));
+  |         ^---------^
+  Field access not supported on this type
+
+Type error [tests/errors/module_not_found.x:3:9]
+  |
+3 | println(nonexistent.foo(1));
+  |         ^---------^
+  Expression is not callable

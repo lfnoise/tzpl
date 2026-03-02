@@ -1,0 +1,13 @@
+Any(42, Int)
+Any(hello, String)
+Any(true, Bool)
+Any(3.14, Float)
+Option<Int>.some(42)
+Option<String>.some(hello)
+int: 42
+str: hello
+bool: true
+float: 3.14
+3
+Any(1, Int)
+Option<Int>.some(42)

@@ -1,0 +1,20 @@
+quiet
+tone at 440.0
+noise at 0.5
+0
+1
+2
+'silence
+'tone
+'noise
+true
+true
+false
+false
+14
+word:hello
+num:42
+EOF
+[word:hi, num:1, EOF]
+true
+false

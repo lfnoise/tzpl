@@ -1,0 +1,1240 @@
+#pragma once
+#include "synthdef_signal_type.hpp"
+#include "synthdef_math_ops.hpp"
+#include "synthdef_arena.hpp"
+#include "synthdef_hash.hpp"
+#include "synthdef_value.hpp"
+#include <variant>
+
+namespace synthdef {
+
+    enum class GraphCut {
+        None,
+        Unused,
+        Sink,
+        Phi,
+        Temp,
+        Broadcast,
+        FanOut,
+        ControlFlow,
+        SeparateLoop,
+        Rate,
+        Input,
+        Graph,
+    };
+    
+    std::string to_string(GraphCut cut);
+
+    struct ExprVisitor;
+
+    struct DelayBuf;
+    //using D = DelayBuf*;
+
+    void propagate_types(S expr, ExprIdentitySet& worklist);
+    void propagate_types(D delayBuf, ExprIdentitySet& worklist);
+
+    inline bool type_changed(NumType new_type) { return false; }
+    
+    template <typename... Ts>
+    bool type_changed(NumType new_type, NumType t0, Ts... types) {
+        /// Return true if any type in Ts is different than new_type.
+        return (new_type != t0) || type_changed(new_type, types...); 
+    }
+    
+    // Exprs are the basic building blocks of the expr processing graph.
+    struct Expr : ArenaObj {
+        struct Graph* graph = nullptr;
+        vector<S> inputs;
+        u64 userial;
+        
+        // The following attributes are derived from analysis of the graph.
+        SignalRate rate;
+        NumType type = NumType::any;
+        usize chans = 0;
+        
+        GraphCut cut = GraphCut::None;
+        struct ExprTree* tree = nullptr;
+        ExprIdentityBag consumers;
+
+        Expr(SignalRate rate, vector<S> inputs);
+        
+        virtual string typeName() const = 0;
+        virtual string str() const = 0;
+
+        virtual bool is_constant() const { return false; }
+        virtual bool is_scalar_constant() const { return false; }
+        virtual bool is_scalar() const { return chans == 1; }
+        virtual bool is_sink() const { return false; }
+        virtual usize num_subgraphs() const { return 0; }
+        virtual S get_subgraph(usize i) const { throw std::runtime_error("no subgraphs"); }
+        
+        
+        virtual bool is_reorder() const { return false; }
+        virtual bool gets_own_loop() const { return false; }
+        virtual bool input_must_be_separate_loop(usize input) const { return gets_own_loop(); }
+        virtual bool output_must_be_separate_loop() const { return gets_own_loop(); } 
+        virtual bool is_control_flow() const { return false; }
+        virtual bool needs_input_temp_var(usize input) const { return false; }
+        virtual bool should_hash_cons() const { return true; }
+        
+        virtual optional<f64> get_scalar() const noexcept { return std::nullopt; }
+        virtual optional<i64> get_scalar_int() const noexcept { return std::nullopt; }
+        
+        virtual bool usesRandomNumberGenerator() const noexcept { return false; }
+        
+        //virtual optional<D> get_delay() const { return {}; }
+        
+        virtual NumType initial_type() const = 0;
+        virtual void update_type(ExprIdentitySet& worklist) = 0;
+        virtual void propagate_types(ExprIdentitySet& worklist);
+        virtual void propagate_input_type(ExprIdentitySet& worklist);
+        virtual void propagate_output_type(ExprIdentitySet& worklist);
+        virtual NumType inputTypeConstraint(int index) const { return type; }
+        void checkType(NumType t) {
+            if (t.is_empty()) {
+                string s;
+                for (S in : inputs) {
+                    s += std::format("#{} {} {}, ", in->userial, in->str(), in->type.str());
+                }
+                throw std::runtime_error(std::format("type error: #{} {} : {}", userial, str(), s));
+            }
+        }
+        virtual void calcShape()  = 0;
+        
+        virtual u64 hash() const;
+
+        bool equals(Expr const& that) const;
+        virtual bool equals_(Expr const& that) const { return true; }
+        bool is_root() const;
+        S in0() const { return inputs[0]; }
+        S in1() const { return inputs[1]; }
+        S in2() const { return inputs[2]; }
+        
+        virtual void accept(ExprVisitor& visitor) = 0; 
+    };
+
+    inline bool ExprEquals::operator()(S const& a, S  const&b) const {
+        return a->equals(*b);
+    }
+    
+    inline std::size_t ExprHasher::operator()(S expr) const {
+        return expr->hash();
+    }
+
+    inline bool ExprIdentical::operator()(S const& a, S  const&b) const {
+        return a.get() == b.get();
+    }
+
+    inline std::size_t ExprIdentityHasher::operator()(S expr) const {
+        return hash64((u64)expr.get());
+    }
+
+    struct SampleRate : Expr {
+        SampleRate() : Expr(initSignalRate, {}) { chans = 1; }
+        
+        string typeName() const override { return "SampleRate"; }
+        string str() const override { return "fs"; }
+        
+        u64 hash() const override { return 0x9C232E8666165C15; }
+        NumType initial_type() const override { return NumType::any; }
+        void update_type(ExprIdentitySet& worklist) override {}
+        void calcShape() override {}
+
+        void accept(ExprVisitor& visitor) override;
+    };
+
+    struct SampleDur : Expr {
+        SampleDur() : Expr(initSignalRate, {}) { chans = 1; }
+        
+        string typeName() const override { return "SampleDur"; }
+        string str() const override { return "sd"; }
+        
+        u64 hash() const override { return 0x7D4CE94D02C28225; }
+        NumType initial_type() const override { return NumType::any; }
+        void update_type(ExprIdentitySet& worklist) override {}
+        void calcShape() override {}
+
+        void accept(ExprVisitor& visitor) override;
+    };
+
+    struct Control : Expr {
+        ControlSpec spec;
+        u64 serial;
+        string name;
+        
+        Control(ControlSpec spec, NumType itype, usize ichans, string name = "");
+
+        string typeName() const override { return "Control"; }
+        string str() const override { return "control"; }
+        
+        u64 hash() const override { 
+            return hash_combine(Expr::hash(), spec.hash(), type.hash(), serial);
+        }
+        bool equals_(Expr const& that) const override {
+            auto& c = static_cast<Control const&>(that);
+            return spec == c.spec && type == c.type && serial == c.serial;
+        }
+        NumType initial_type() const override { return type; }
+        void update_type(ExprIdentitySet& worklist) override {}
+        void calcShape() override {}
+
+        void accept(ExprVisitor& visitor) override;
+    };
+
+    struct Inlet : Expr {
+        u64 serial;
+        string name;
+        
+        Inlet(NumType itype, usize ichans, string name = "");
+
+        string typeName() const override { return "Inlet"; }
+        string str() const override { return "inlet"; }
+        
+        u64 hash() const override {
+            return hash_combine(Expr::hash(), type.hash(), serial);
+        }
+        bool equals_(Expr const& that) const override {
+            auto& c = static_cast<Inlet const&>(that);
+            return type == c.type && serial == c.serial;
+        }
+        NumType initial_type() const override { return type; }
+        void update_type(ExprIdentitySet& worklist) override {}
+        void calcShape()  override {}
+        
+        bool should_hash_cons() const override { return false; }
+
+        void accept(ExprVisitor& visitor) override;
+    };
+
+    struct Outlet : Expr {
+        u64 serial;
+        string name;
+        
+        Outlet(S value, string name = "");
+        
+        string typeName() const override { return "Outlet"; }
+        string str() const override { return "outlet"; }
+        
+        u64 hash() const override {
+            return hash_combine(Expr::hash(), serial, 0x84ABEE4CF563BCEB);
+        }
+        bool equals_(Expr const& that) const override {
+            auto& c = static_cast<Outlet const&>(that);
+            return serial == c.serial;
+        }
+        NumType initial_type() const override { return NumType::any; }
+        void update_type(ExprIdentitySet& worklist) override;
+        void calcShape()  override;
+        
+        bool should_hash_cons() const override { return false; }
+        bool is_sink() const override { return true; }
+
+        void accept(ExprVisitor& visitor) override;
+    };
+
+    struct UnaryOpExpr : Expr {
+        UnaryOp op;
+        
+        UnaryOpExpr(UnaryOp op, S a) : Expr(a->rate, {a}), op(op) {}
+        
+        string typeName() const override { return "UnaryOpExpr"; }
+        string str() const override { return to_string(op); }
+        
+        u64 hash() const override {
+            return hash_combine(Expr::hash(), u64(op), 0x8E6F9D1673AE19BC);
+        }
+        bool equals_(Expr const& that) const override {
+            auto& c = static_cast<UnaryOpExpr const&>(that);
+            return op == c.op;
+        }
+        NumType initial_type() const override;
+        void update_type(ExprIdentitySet& worklist) override;
+        void calcShape()  override;
+
+        void accept(ExprVisitor& visitor) override;
+    };
+
+    struct BinaryOpExpr : Expr {
+        BinaryOp op;
+
+        BinaryOpExpr(BinaryOp op, S a, S b) 
+            : Expr(std::max(a->rate, b->rate), {a, b}), op(op) {
+            assert(!(a->rate == SignalRate::Const 
+                  && b->rate == SignalRate::Const));
+            }
+
+        string typeName() const override { return "BinaryOpExpr"; }
+        string str() const override { return to_string(op); }
+        
+        u64 hash() const override {
+            return hash_combine(Expr::hash(), u64(op), 0xB2E8CA2EF7702597);
+        }
+        bool equals_(Expr const& that) const override {
+            auto& c = static_cast<BinaryOpExpr const&>(that);
+            return op == c.op;
+        }
+        NumType initial_type() const override;
+        void update_type(ExprIdentitySet& worklist) override;
+        void calcShape()  override;
+
+        void accept(ExprVisitor& visitor) override;
+    };  
+
+    struct CompareOpExpr : Expr {
+        CompareOp op;
+        NumType input_type;
+        
+        CompareOpExpr(CompareOp op, S a, S b) 
+            : Expr(std::max(a->rate, b->rate), {a, b}), op(op) {}
+        
+        string typeName() const override { return "CompareOpExpr"; }
+        string str() const override { return to_string(op); }
+        
+        u64 hash() const override {
+            return hash_combine(Expr::hash(), u64(op), 0x9D732841C5497B27);
+        }
+        bool equals_(Expr const& that) const override {
+            auto& c = static_cast<CompareOpExpr const&>(that);
+            return op == c.op;
+        }
+        NumType initial_type() const override {
+            return NumType::any;
+        }
+        void update_type(ExprIdentitySet& worklist) override;
+        NumType inputTypeConstraint(int i) const override {
+            return input_type;
+        }
+        void calcShape()  override;
+
+        void accept(ExprVisitor& visitor) override;
+    };
+
+    struct CastOpExpr : Expr {
+        NumType cast_type;
+        
+        CastOpExpr(NumType cast_type, S a) : Expr(a->rate, {a}), cast_type(cast_type) {}
+        string str() const override { return string("cast_") + cast_type.str(); }
+        
+        string typeName() const override { return "CastOpExpr"; }
+        
+        u64 hash() const override {
+            return hash_combine(Expr::hash(), type.hash(), 0x89AE05D28A831026);
+        }
+        bool equals_(Expr const& that) const override {
+            auto& c = static_cast<CastOpExpr const&>(that);
+            return cast_type == c.cast_type;
+        }
+        NumType initial_type() const override {
+            return cast_type;
+        }
+        void update_type(ExprIdentitySet& worklist) override {
+//            std::println("CastOpExpr::update_type {} type {} cast_type {} in {}", 
+//                (void*)this, type.str(), cast_type.str(), in0()->type.str());
+
+        }
+        void calcShape()  override;
+
+        void accept(ExprVisitor& visitor) override;
+    };
+    
+#if 0
+    struct MatMulExpr : Expr {
+        MatMulExpr(S a, S b) : Expr(std::max(a->rate, b->rate), {a, b}) {}
+
+        string typeName() const override { return "MatMulExpr"; }
+        string str() const override { return "matmul"; }
+        
+        u64 hash() const override {
+            return hash_combine(Expr::hash(), 0xB41297AFDED1C8BF);
+        }
+
+        NumType initial_type() const override { return NumType::any; }
+        void update_type(ExprIdentitySet& worklist) override;
+        void calcShape()  override;
+
+        void accept(ExprVisitor& visitor) override;
+    };
+#endif
+    
+#if 0
+    struct SinCosExpr : Expr {
+        SinCosExpr(S a) : Expr(a->rate, {a}) {
+            cut = GraphCut::FanOut;
+        }
+        
+        string typeName() const override { return "SinCosExpr"; }
+        string str() const override { return "sincos"; }
+        
+        u64 hash() const override {
+            return hash_combine(Expr::hash(), 0xADD83628A264CCD4);
+        }
+        NumType initial_type() const override;
+        void update_type(ExprIdentitySet& worklist) override;
+        void calcShape()  override;
+    };
+    
+    struct SinCosOutputExpr : Expr {
+        int output_index; // 0 or 1, for sin or cos.
+        SinCosOutputExpr(int index, S a) : Expr(a->rate, {a}), output_index(index)
+        {
+            assert(a.as<SinCosExpr>() != nullptr);
+        }
+        
+        string typeName() const override { return "SinCosOutputExpr"; }
+        string str() const override { return output_index==0 ? "sincos_sin" : "sincos_cos"; }
+        
+        u64 hash() const override {
+            return hash_combine(Expr::hash(), u64(output_index), 0x88A4658AB475EC6F);
+        }
+        bool equals_(Expr const& that) const override {
+            auto& c = static_cast<SinCosOutputExpr const&>(that);
+            return output_index == c.output_index;
+        }
+        NumType initial_type() const override;
+        void update_type(ExprIdentitySet& worklist) override;
+        void calcShape()  override;
+    };
+#endif
+    
+    struct ReduceExpr : Expr {
+        BinaryOp op;
+        usize cols;
+        
+        ReduceExpr(BinaryOp op, usize cols, S a) 
+            : Expr(a->rate, {a}), op(op), cols(cols) 
+            {
+                assert(isPowerOfTwo(cols));
+            }
+        
+        string typeName() const override { return "ReduceExpr"; }
+        string str() const override { 
+            return FMT("reduce({}, {})", to_string(op), cols); 
+        }
+        
+        u64 hash() const override {
+            return hash_combine(Expr::hash(), 0x89F35AA7654D5F37, static_cast<u64>(op), static_cast<u64>(cols));
+        }
+        
+        bool equals_(Expr const& that) const override {
+            auto& c = static_cast<ReduceExpr const&>(that);
+            return op == c.op && cols == c.cols;
+        }
+        NumType initial_type() const override { return in0()->type; }
+        void update_type(ExprIdentitySet& worklist) override;
+        void calcShape() override { chans = cols; }
+        bool needs_input_temp_var(usize input) const override { return true; }
+        bool input_must_be_separate_loop(usize input) const override { return true; }
+        //bool output_must_be_separate_loop() const override { return true; }
+ 
+        void accept(ExprVisitor& visitor) override;
+    };
+                
+
+#if 0
+    struct ScanExpr : Expr {
+        BinaryOp op;
+        usize rows;
+        
+        ScanExpr(BinaryOp op, usize rows, S a) 
+            : Expr(a->rate, {a}), op(op), rows(rows) {}
+        
+        string typeName() const override { return "ScanExpr"; }
+        string str() const override { 
+            return FMT("scan({}, {})", to_string(op), rows); 
+        }
+        
+        u64 hash() const override {
+            return hash_combine(Expr::hash(), 0xB309CFAC86F23054, static_cast<u64>(op), static_cast<u64>(rows));
+        }
+        
+        bool equals_(Expr const& that) const override {
+            auto& c = static_cast<ScanExpr const&>(that);
+            return op == c.op && rows == c.rows;
+        }
+        NumType initial_type() const override { return in0()->type; }
+        void update_type(ExprIdentitySet& worklist) override;
+        void calcShape() override { chans = in0()->chans; }
+
+        void accept(ExprVisitor& visitor) override;
+    };
+#endif                
+
+    
+    inline SignalRate maxRate(vector<S> const& inputs) {
+        SignalRate rate = constSignalRate;
+        for (S input : inputs) {
+            rate = rate.max(input->rate);
+        }
+        return rate;
+    }
+    
+    struct VarExpr : Expr {
+        string varName;
+        NumType init_type;
+        
+        VarExpr(string varName, NumType init_type, SignalRate rate = audioSignalRate) 
+            : Expr(rate, {}), varName(varName), init_type(init_type) {}
+        
+        string typeName() const override { return "VarExpr"; }
+        string str() const override { return varName; }
+        
+        u64 hash() const override {  
+            return hash_combine(Expr::hash(), 
+                hash64(varName.length(), varName.c_str()), 0xBED360E6F075CC6B); 
+        }
+        
+        void calcShape() override {}
+        NumType initial_type() const override { return init_type; }
+        void update_type(ExprIdentitySet& worklist) override {}
+
+        void accept(ExprVisitor& visitor) override;
+    };
+    
+    struct PhiNodeExpr : Expr {
+        S target;
+        
+        PhiNodeExpr(S in) : Expr(in->rate, {in}) {}
+
+        void setTarget(S t) {
+            target = t;
+            rate = rate.max(t->rate);
+        }
+        string typeName() const override { return "PhiNode"; }
+        string str() const override { return "PhiNode"; }
+
+        u64 hash() const override {  
+            return hash_combine(Expr::hash(), u64(target.get()), 0x8088CD3FDF8A5603); 
+        }
+
+        void calcShape() override;
+
+        NumType initial_type() const override { return NumType::any; }
+        void update_type(ExprIdentitySet& worklist) override;
+        bool needs_input_temp_var(usize input) const override { return true; }
+        bool should_hash_cons() const override { return false; }
+
+        void accept(ExprVisitor& visitor) override;
+    };
+    
+    struct SelectExpr : Expr {
+        SelectExpr(vector<S> inputs) 
+            : Expr(maxRate(inputs), inputs) {}
+        
+        string typeName() const override { return "SelectExpr"; }
+        string str() const override { return "select"; }
+        
+        u64 hash() const override {  return hash_combine(Expr::hash(), 0xA1189BD94A4E6E4C); }
+
+        NumType initial_type() const override { return NumType::any; }
+        void update_type(ExprIdentitySet& worklist) override;
+        NumType inputTypeConstraint(int index) const override { 
+            return index == 0 ? NumType::any_int : type; 
+        }
+        void calcShape() override;
+
+        void accept(ExprVisitor& visitor) override;
+    };
+
+    struct ControlFlowExpr : Expr {
+        using Expr::Expr;
+        bool is_control_flow() const override { return true; }
+        virtual void insertPhiNodes(ExprIdentitySet& worklist) = 0;
+    };
+    
+    struct IfElseExpr : ControlFlowExpr {
+        S then_expr;
+        S else_expr;
+
+        IfElseExpr(S test, S then_expr, S else_expr)
+            : ControlFlowExpr(maxRate({test, then_expr, else_expr}), {test}), 
+            then_expr(then_expr),
+            else_expr(else_expr)
+        {
+            {
+                auto phi = then_expr.as<PhiNodeExpr>();
+                assert(phi != nullptr);
+                phi->setTarget(this);
+            }
+            {
+                auto phi = else_expr.as<PhiNodeExpr>();
+                assert(phi != nullptr);
+                phi->setTarget(this);
+            }
+        }
+        
+        string typeName() const override { return "IfElseExpr"; }
+        string str() const override { return "if_else"; }
+                
+        u64 hash() const override { 
+            return hash_combine(Expr::hash(), 
+                u64(then_expr.get()), u64(else_expr.get()), 0x92CD58C5E607DAD2); 
+        }
+
+        NumType initial_type() const override { return NumType::any; }
+        void update_type(ExprIdentitySet& worklist) override;
+        NumType inputTypeConstraint(int index) const override { 
+            return index == 0 ? NumType::any_int : type; 
+        }
+        void calcShape()  override;
+        void insertPhiNodes(ExprIdentitySet& worklist) override {
+            worklist.insert(then_expr);
+            worklist.insert(else_expr);
+        }
+        usize num_subgraphs() const override { return 2; }
+        S get_subgraph(usize i) const override { return i == 0 ? then_expr : else_expr; }
+
+        void accept(ExprVisitor& visitor) override;
+    };
+    
+    struct SwitchExpr : ControlFlowExpr {
+        vector<S> cases;
+                
+        SwitchExpr(S test, vector<S> cases) 
+            : ControlFlowExpr(test->rate.max(maxRate(cases)), {test}), cases(cases) 
+        {
+             for (S c : cases) {
+                auto phi = c.as<PhiNodeExpr>();
+                assert(phi != nullptr);
+                phi->setTarget(this);
+            }
+       
+        }
+        
+        string typeName() const override { return "SwitchExpr"; }
+        string str() const override { return "switch"; }
+        
+        u64 hash() const override { 
+            u64 h = hash_combine(Expr::hash(), 0x8EF08B9E0CF86A93);
+            for (S c : cases) {
+                hash_combine(h, u64(c.get()));
+            }
+            return h; 
+        }
+
+        NumType inputTypeConstraint(int index) const override { 
+            return index == 0 ? NumType::any_int : type; 
+        }
+        NumType initial_type() const override { return NumType::any; }
+        void update_type(ExprIdentitySet& worklist) override;
+        void calcShape()  override;
+        void insertPhiNodes(ExprIdentitySet& worklist) override {
+             for (S c : cases) {
+                auto phi = c.as<PhiNodeExpr>();
+                assert(phi != nullptr);
+                worklist.insert(phi);
+            }
+        }
+        usize num_subgraphs() const override { return cases.size(); }
+        S get_subgraph(usize i) const override { return cases[i]; }
+
+        void accept(ExprVisitor& visitor) override;
+    };
+    struct ForLoopExpr : ControlFlowExpr {
+        S loop_body;
+
+        ForLoopExpr(S count, S loop_body) 
+            : ControlFlowExpr(maxRate({count, loop_body}), {count}), loop_body(loop_body) 
+        {
+            {
+                auto phi = loop_body.as<PhiNodeExpr>();
+                assert(phi != nullptr);
+                phi->setTarget(this);
+            }
+
+        }
+        
+        string typeName() const override { return "ForLoopExpr"; }
+        string str() const override { return "for_loop"; }
+        
+        u64 hash() const override { 
+            return hash_combine(Expr::hash(), u64(loop_body.get()), 0x92DA541A1EE39861ull); }
+
+        NumType initial_type() const override { return NumType::any; }
+        void update_type(ExprIdentitySet& worklist) override {
+            throw std::runtime_error("ForLoopExpr update type not implemented");
+        }
+        void calcShape()  override {
+            throw std::runtime_error("ForLoopExpr calc shape not implemented");
+        }
+        void insertPhiNodes(ExprIdentitySet& worklist) override {
+            auto phi = loop_body.as<PhiNodeExpr>();
+            assert(phi != nullptr);
+            worklist.insert(phi);
+        }
+        usize num_subgraphs() const override { return 1; }
+        S get_subgraph(usize i) const override { return loop_body; }
+
+        void accept(ExprVisitor& visitor) override;
+    };
+    
+#if 0
+    struct MatAt : Expr {
+        MatAt(S a, S i) 
+            : Expr(std::max(a->rate, i->rate), {a, i}) {}
+    
+        string typeName() const override { return "MatAt"; }
+        string str() const override { return typeName(); }
+        
+        u64 hash() const override { return hash_combine(Expr::hash(), 0x9324C4D678E0355D); }
+
+        bool is_reorder() const override { return true; }
+        bool gets_own_loop() const override { return true; }
+    
+        NumType initial_type() const override { return NumType::any; }
+        void update_type(ExprIdentitySet& worklist) override;
+        NumType inputTypeConstraint(int i) const override {
+            return i == 0 ? type : NumType::any_int;
+        }
+        void calcShape()  override;
+        bool needs_input_temp_var(usize input) const override { return input == 0; }
+
+        void accept(ExprVisitor& visitor) override;
+    };
+    struct MatPut : Expr {
+        MatPut(S a, S i, S v) 
+            : Expr(std::max(a->rate, std::max(i->rate, v->rate)), {a, i, v}) {}
+    
+        string typeName() const override { return "MatPut"; }
+        string str() const override { return typeName(); }
+        
+        u64 hash() const override { return hash_combine(Expr::hash(), 0xA432B56FB1F41C62); }
+
+        bool is_reorder() const override { return true; }
+        bool gets_own_loop() const override { return true; }
+    
+        NumType initial_type() const override { return NumType::any; }
+        void update_type(ExprIdentitySet& worklist) override;
+        NumType inputTypeConstraint(int i) const override {
+            return i == 0 ? type : NumType::any_int;
+        }
+        void calcShape()  override;
+        bool needs_input_temp_var(usize input) const override { return input == 0; }
+
+        void accept(ExprVisitor& visitor) override;
+    };
+    struct MatPermute : Expr {
+        MatPermute(S a, S i) 
+            : Expr(std::max(a->rate, i->rate), {a, i}) {}
+        string str() const override { return typeName(); }
+    
+        string typeName() const override { return "MatPermute"; }
+        
+        u64 hash() const override { return hash_combine(Expr::hash(), 0x8FC0C51A34996A7A); }
+
+        bool is_reorder() const override { return true; }
+        bool gets_own_loop() const override { return true; }
+    
+        NumType initial_type() const override { return NumType::any; }
+        void update_type(ExprIdentitySet& worklist) override;
+        NumType inputTypeConstraint(int i) const override {
+            return i == 0 ? type : NumType::any_int;
+        }
+        void calcShape()  override;
+        bool needs_input_temp_var(usize input) const override { return input == 0; }
+
+        void accept(ExprVisitor& visitor) override;
+    };
+    struct MatReverse : Expr {
+        usize rows;
+        
+        MatReverse(S a, usize rows) 
+            : Expr(a->rate, {a}), rows(rows) {}
+    
+        string typeName() const override { return "MatReverse"; }
+        string str() const override { return "vec_reverse"; }
+        
+        u64 hash() const override { return hash_combine(Expr::hash(), 0x91D4742F74AF02F5); }
+
+        bool is_reorder() const override { return true; }
+        bool gets_own_loop() const override { return true; }
+
+        NumType initial_type() const override { return NumType::any; }
+        void update_type(ExprIdentitySet& worklist) override;
+        void calcShape()  override;
+        bool needs_input_temp_var(usize input) const override { return true; }
+
+        void accept(ExprVisitor& visitor) override;
+    };
+
+    struct MatTake : Expr { 
+        usize rows;
+        usize n; 
+
+        MatTake(S a, usize n, Axis axis) 
+            : Expr(a->rate, {a}), n(n), axis(axis) {}
+        
+        string typeName() const override { return "MatTake"; }
+        string str() const override { return "vec_take"; }
+        
+        u64 hash() const override {
+            return hash_combine(Expr::hash(), n, 0xB3DCB05D95AA5E79);
+        }
+        bool equals_(Expr const& that) const override {
+            auto& c = static_cast<MatTake const&>(that);
+            return n == c.n;
+        }
+        NumType initial_type() const override { return NumType::any; }
+        void update_type(ExprIdentitySet& worklist) override;
+        void calcShape()  override;
+        bool is_reorder() const override { return true; }
+        bool input_must_be_separate_loop(usize input) const override { return true; }
+        bool needs_input_temp_var(usize input) const override { return true; }
+
+        void accept(ExprVisitor& visitor) override;
+    };
+
+    struct MatSkip : Expr { 
+        Axis axis;
+        usize n; 
+        
+        MatSkip(S a, usize n, Axis axis) 
+            : Expr(a->rate, {a}), n(n), axis(axis) {}
+
+        string typeName() const override { return "MatSkip"; }
+        string str() const override { return "vec_skip"; }
+        
+        u64 hash() const override {
+            return hash_combine(Expr::hash(), n, 0xAE6CDB6919FDA8AF);
+        }
+        bool equals_(Expr const& that) const override {
+            auto& c = static_cast<MatSkip const&>(that);
+            return n == c.n;
+        }
+        NumType initial_type() const override { return NumType::any; }
+        void update_type(ExprIdentitySet& worklist) override;
+        void calcShape()  override;
+        bool is_reorder() const override { return true; }
+        bool input_must_be_separate_loop(usize input) const override { return true; }
+        bool needs_input_temp_var(usize input) const override { return true; }
+
+        void accept(ExprVisitor& visitor) override;
+    };
+
+    struct MatStride : Expr { 
+        Axis axis;
+        usize n; 
+        
+        MatStride(S a, usize n, Axis axis) 
+            : Expr(a->rate, {a}), n(n), axis(axis) {}
+        
+        string typeName() const override { return "MatStride"; }
+        string str() const override { return "vec_stride"; }
+        
+        u64 hash() const override {
+            return hash_combine(Expr::hash(), n, 0x8ABF2EAD81EC3B93);
+        }
+        bool equals_(Expr const& that) const override {
+            auto& c = static_cast<MatStride const&>(that);
+            return n == c.n;
+        }
+        bool is_reorder() const override { return true; }
+    
+        NumType initial_type() const override { return NumType::any; }
+        void update_type(ExprIdentitySet& worklist) override;
+        void calcShape()  override;
+        bool input_must_be_separate_loop(usize input) const override { return true; }
+        bool needs_input_temp_var(usize input) const override { return true; }
+
+        void accept(ExprVisitor& visitor) override;
+    };
+
+    struct MatStutter : Expr { 
+        Axis axis;
+        usize n; 
+        
+        MatStutter(S a, usize n, Axis axis) 
+            : Expr(a->rate, {a}), n(n), axis(axis) {}
+        
+        string typeName() const override { return "MatStutter"; }
+        string str() const override { return "vec_stutter"; }
+        
+        u64 hash() const override {
+            return hash_combine(Expr::hash(), n, 0x9E8164575545D5A6);
+        }
+        bool equals_(Expr const& that) const override {
+            auto& c = static_cast<MatStutter const&>(that);
+            return n == c.n;
+        }
+        bool is_reorder() const override { return true; }
+        bool gets_own_loop() const override { return true; }
+    
+        NumType initial_type() const override { return NumType::any; }
+        void update_type(ExprIdentitySet& worklist) override;
+        void calcShape()  override;
+        bool needs_input_temp_var(usize input) const override { return true; }
+
+        void accept(ExprVisitor& visitor) override;
+    };
+
+    struct MatRotate : Expr {         
+        Axis axis;
+
+        MatRotate(S a, S n, Axis axis) 
+            : Expr(std::max(a->rate, n->rate), {a, n}), axis(axis) {}
+        
+        string typeName() const override { return "MatRotate"; }
+        string str() const override { return "vec_rotate"; }
+        
+        u64 hash() const override {
+            return hash_combine(Expr::hash(), 0xAD828D5E53ECCD23);
+        }
+        bool is_reorder() const override { return true; }
+        bool gets_own_loop() const override { return true; }
+    
+        NumType initial_type() const override { return NumType::any; }
+        void update_type(ExprIdentitySet& worklist) override;
+        NumType inputTypeConstraint(int i) const override {
+            return i == 0 ? type : NumType::any_int;
+        }
+        void calcShape()  override;
+        bool needs_input_temp_var(usize input) const override { return true; }
+
+        void accept(ExprVisitor& visitor) override;
+    };
+
+    struct MatShift : Expr {         
+
+        MatShift(S a, S b) 
+            : Expr(std::max(a->rate, b->rate), {a, b}) {}
+        
+        string typeName() const override { return "MatShift"; }
+        string str() const override { return "vec_shift"; }
+        
+        u64 hash() const override {
+            return hash_combine(Expr::hash(), 0xB3740B33723FFA50);
+        }
+        bool is_reorder() const override { return true; }
+        bool gets_own_loop() const override { return true; }
+    
+        NumType initial_type() const override { return NumType::any; }
+        void update_type(ExprIdentitySet& worklist) override;
+        void calcShape()  override;
+        bool needs_input_temp_var(usize input) const override { return true; }
+
+        void accept(ExprVisitor& visitor) override;
+    };
+
+    struct MatTranspose : Expr { 
+        MatTranspose(S a) 
+            : Expr(a->rate, {a}) {}
+    
+        string typeName() const override { return "MatTranspose"; }
+        string str() const override { return "vec_transpose"; }
+        
+        u64 hash() const override {
+            return 0xBA088E1D3C375024;
+        }
+
+        bool is_reorder() const override { return true; }
+    
+        NumType initial_type() const override { return NumType::any; }
+        void update_type(ExprIdentitySet& worklist) override;
+        void calcShape()  override;
+        bool needs_input_temp_var(usize input) const override { return true; }
+
+        void accept(ExprVisitor& visitor) override;
+    };
+
+    struct MatCyc : Expr { 
+        Axis axis;
+        usize n; 
+        
+        MatCyc(S a, usize n, Axis axis) 
+            : Expr(a->rate, {a}), n(n), axis(axis) {}
+        
+        string typeName() const override { return "MatCyc"; }
+        string str() const override { return "vec_cyc"; }
+        
+        u64 hash() const override {
+            return hash_combine(Expr::hash(), u64(n), 0xAC9641A1505788FE);
+        }
+        bool equals_(Expr const& that) const override {
+            auto& c = static_cast<MatCyc const&>(that);
+            return n == c.n;
+        }
+        bool is_reorder() const override { return true; }
+        bool gets_own_loop() const override { return true; }
+    
+        NumType initial_type() const override { return NumType::any; }
+        void update_type(ExprIdentitySet& worklist) override;
+        void calcShape()  override;
+        bool needs_input_temp_var(usize input) const override { return true; }
+
+        void accept(ExprVisitor& visitor) override;
+    };
+
+    struct VecCat : Expr {
+        Axis axis;
+    
+        MatCat(SignalRate rate, Axis axis, vector<S> exprs) 
+            : Expr(rate, exprs), axis(axis) {}
+    
+        string typeName() const override { return "VecCat"; }
+        string str() const override { return "vec_cat"; }
+        
+        u64 hash() const override { return 0x90DFF4C90B3F3DB9; }
+
+        bool is_reorder() const override { return true; }
+        bool gets_own_loop() const override { return true; }
+    
+        NumType initial_type() const override { return NumType::any; }
+        void update_type(ExprIdentitySet& worklist) override;
+        void calcShape()  override;
+        bool needs_input_temp_var(usize input) const override { return true; }
+
+        void accept(ExprVisitor& visitor) override;
+    };
+
+#endif
+
+    struct URandExpr : Expr {
+        u64 serial;
+        
+        URandExpr(usize ichans, SignalRate rate = audioSignalRate);
+        string typeName() const override { return "URandExpr"; }
+        string str() const override { return "urand"; }
+        
+        u64 hash() const override { return hash64(serial, 0x8A5E8A7F3F0E1E2B); }
+        bool equals_(Expr const& that) const override {
+            auto& c = static_cast<URandExpr const&>(that);
+            return serial == c.serial;
+        }
+        NumType initial_type() const override { return NumType::any_float; }
+        void update_type(ExprIdentitySet& worklist) override {}
+        void calcShape()  override {}
+        bool usesRandomNumberGenerator() const noexcept override { return true; }
+
+        void accept(ExprVisitor& visitor) override;
+    };
+    struct BiRandExpr : Expr {
+        u64 serial;
+        
+        BiRandExpr(usize ichans, SignalRate rate = audioSignalRate);
+        string typeName() const override { return "BiRandExpr"; }
+        string str() const override { return "birand"; }
+        
+        u64 hash() const override { return hash64(serial, 0x8532EA76FFAF7D33); }
+        bool equals_(Expr const& that) const override {
+            auto& c = static_cast<BiRandExpr const&>(that);
+            return serial == c.serial;
+        }
+        NumType initial_type() const override { return NumType::any_float; }
+        void update_type(ExprIdentitySet& worklist) override {}
+        void calcShape()  override {}
+        bool usesRandomNumberGenerator() const noexcept override { return true; }
+
+        void accept(ExprVisitor& visitor) override;
+    };
+    struct Rand64Expr : Expr {
+        u64 serial;
+        
+        Rand64Expr(usize ichans, SignalRate rate = audioSignalRate);
+        string typeName() const override { return "Rand64Expr"; }
+        string str() const override { return "rand64"; }
+        
+        u64 hash() const override { return hash64(serial, 0x95B8AB0357A74951); }
+        bool equals_(Expr const& that) const override {
+            auto& c = static_cast<Rand64Expr const&>(that);
+            return serial == c.serial;
+        }
+        NumType initial_type() const override { return NumType::i64; }
+        void update_type(ExprIdentitySet& worklist) override {}
+        void calcShape()  override {}
+        bool usesRandomNumberGenerator() const noexcept override { return true; }
+
+        void accept(ExprVisitor& visitor) override;
+    };
+
+
+    struct DelayExpr : Expr {
+        D delayBuf;
+        
+        DelayExpr(DelayBuf* delayBuf, SignalRate rate, vector<S> inputs)
+            : Expr(rate, std::move(inputs)), delayBuf(delayBuf) {}
+    };
+    
+    struct MaxDelay : DelayExpr {        
+        MaxDelay(DelayBuf* delayBuf, S expr) 
+            : DelayExpr(delayBuf, initSignalRate, {expr})
+        {}
+        
+        string typeName() const override { return "MaxDelay"; }
+        string str() const override { return "max_delay"; }
+        
+        u64 hash() const override;
+        bool equals_(Expr const& that) const override {
+            auto& c = static_cast<MaxDelay const&>(that);
+            return delayBuf == c.delayBuf;
+        }
+        NumType initial_type() const override { return NumType::any; }
+        void update_type(ExprIdentitySet& worklist) override {}
+        void calcShape() override { chans = in0()->chans; }
+        bool is_sink() const override { return true; }
+
+        void accept(ExprVisitor& visitor) override;
+    };
+    
+    struct DelayFixRead : DelayExpr {
+        usize delay_samples;
+
+        DelayFixRead(DelayBuf* delayBuf, usize delay_samples)
+            : DelayExpr(delayBuf, audioSignalRate, {}), delay_samples(delay_samples) {}
+
+        string typeName() const override { return "DelayFixRead"; }
+        string str() const override { return "delay_fix_read(" + std::to_string(delay_samples) + ")"; }
+        
+        u64 hash() const override;
+        bool equals_(Expr const& that) const override {
+            auto& c = static_cast<DelayFixRead const&>(that);
+            return delayBuf == c.delayBuf && delay_samples == c.delay_samples;
+        }
+        NumType initial_type() const override { return NumType::any; }
+        void update_type(ExprIdentitySet& worklist) override;
+        void calcShape()  override;
+
+        void accept(ExprVisitor& visitor) override;
+    };
+
+    struct DelayVarRead : DelayExpr {
+
+        DelayVarRead(DelayBuf* delayBuf, S delay_samples)
+            : DelayExpr(delayBuf, audioSignalRate, {delay_samples}) {}
+    
+        string typeName() const override { return "DelayVarRead"; }
+        string str() const override { return "delay_var_read"; }
+        
+        u64 hash() const override;
+        bool equals_(Expr const& that) const override {
+            auto& c = static_cast<DelayVarRead const&>(that);
+            return delayBuf == c.delayBuf;
+        }
+        NumType initial_type() const override { return NumType::any; }
+        void update_type(ExprIdentitySet& worklist) override;
+        void calcShape()  override;
+
+        void accept(ExprVisitor& visitor) override;
+    };
+    struct DelayWrite : DelayExpr {
+
+        DelayWrite(DelayBuf* delayBuf, S value)
+            : DelayExpr(delayBuf, audioSignalRate, {value}) {}
+
+        string typeName() const override { return "DelayWrite"; }
+        string str() const override { return "delay_write"; }
+        
+        u64 hash() const override;
+        bool equals_(Expr const& that) const override {
+            auto& c = static_cast<DelayWrite const&>(that);
+            return delayBuf == c.delayBuf;
+        }
+        NumType initial_type() const override { return NumType::any; }
+        void update_type(ExprIdentitySet& worklist) override;
+        void calcShape()  override;
+        bool is_sink() const override { return true; }
+
+        void accept(ExprVisitor& visitor) override;
+    };
+    struct DelayInit : DelayExpr {
+        usize offset;
+        
+        DelayInit(DelayBuf* delayBuf, usize offset, S value) 
+            : DelayExpr(delayBuf, initSignalRate, {value}), offset(offset) {}
+        
+        string typeName() const override { return "DelayInit"; }
+        string str() const override { return "delay_init"; }
+        
+        u64 hash() const override;
+        bool equals_(Expr const& that) const override {
+            auto& c = static_cast<DelayInit const&>(that);
+            return delayBuf == c.delayBuf && offset == c.offset;
+        }
+        NumType initial_type() const override { return NumType::any; }
+        void update_type(ExprIdentitySet& worklist) override {}
+        void calcShape()  override {}
+        bool is_sink() const override { return true; }
+
+        void accept(ExprVisitor& visitor) override;
+    };
+
+//
+//
+//    
+//    inline bool needs_temp_var(ExprKind k) {
+//        return std::visit(overloaded {
+//            [](Outlet) { return true; },
+//            [](DelayFixRead) { return true; },
+//            [](DelayVarRead) { return true; },
+//            [](MatPermute) { return true; },
+//            [](MatReverse) { return true; },
+////            [](MatTake) { return true; },
+////            [](MatSkip) { return true; },
+//            [](MatStride) { return true; },
+//            [](MatStutter) { return true; },
+//            [](MatRotate) { return true; },
+//            [](MatTranspose) { return true; },
+//            [](MatCyc) { return true; },
+//            [](MatCat) { return true; },
+//            [](MatLace) { return true; },
+//            [](auto) { return false; }
+//        }, k);
+//    }
+//    
+//    
+    
+    ///////////////////////////////
+    
+
+
+    struct DelayBuf : ArenaObj {
+        struct Graph* graph;
+        NumType type = NumType::any;
+        usize chans = 1;
+        vector<S> fixReaders;
+        vector<S> varReaders;
+        vector<S> initters;
+        S writer;
+        S maxDelay;
+        usize allocSize = 0;
+        u64 serial;
+
+        DelayBuf();
+        DelayBuf(S maxDelayArg);
+
+        bool isEventRate() const {
+            return writer.notNull() && writer->rate == eventSignalRate;
+        }
+    };
+    
+    inline std::size_t DelayHasher::operator()(D delayBuf) const {
+        return delayBuf.hash();
+    }
+
+    inline bool is_sink(GraphCut cut) {
+        return cut == GraphCut::Sink;
+    }
+
+    inline bool is_temp_var(GraphCut cut) {
+        switch (cut) {
+            case GraphCut::Temp:
+            case GraphCut::Broadcast:
+            case GraphCut::ControlFlow:
+            case GraphCut::SeparateLoop:
+            case GraphCut::FanOut:
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    inline bool is_inst_var(GraphCut cut) {
+        switch (cut) {
+            case GraphCut::Rate:
+            case GraphCut::Input:
+            case GraphCut::Graph:
+                return true;    
+            default: 
+                return false;
+        }
+    }
+    
+}

@@ -1,0 +1,14 @@
+int
+float
+string
+bool
+5
+7
+6
+Vec2 { x: 4.0, y: 6.0 }
+Vec2 { x: 2.0, y: 2.0 }
+Vec2 { x: 2.0, y: 4.0 }
+processed int
+processed string
+1007
+4.0

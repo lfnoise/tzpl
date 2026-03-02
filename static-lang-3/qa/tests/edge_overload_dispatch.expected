@@ -1,0 +1,15 @@
+int: 42
+float: 3.14
+string: hello
+bool: true
+1
+3
+6
+Hello, World!
+Hi, World!
+Whiskers says meow
+Rex says woof
+[-1, -2, -3]
+[-1.0, -2.0, -3.0]
+(42,)
+(1, 2)

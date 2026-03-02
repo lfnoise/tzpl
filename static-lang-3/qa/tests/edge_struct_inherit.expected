@@ -1,0 +1,13 @@
+5.0
+5.0
+Point { x: 4.0, y: 6.0 }
+Point { x: 2.0, y: 2.0 }
+Point { x: 2.0, y: 4.0 }
+800
+600
+Test
+false
+1920
+1080
+Test
+false

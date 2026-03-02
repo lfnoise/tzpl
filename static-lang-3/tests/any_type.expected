@@ -1,0 +1,17 @@
+Any(5, Int)
+Any(hello, String)
+Any(3.14, Float)
+Any('foo, Symbol)
+Any(true, Bool)
+Option<Int>.some(5)
+Option<String>.none
+Option<String>.some(hello)
+[Any(1, Int), Any(two, String), Any('three, Symbol), Any(4.0, Float)]
+int: 5
+string: hello
+float: 3.14
+other
+[Any(1, Int), Any([Any(2, Int), Any(3, Int)], [Any])]
+[Any(Any(hello, String), Any), Any(Any(42, Int), Any)]
+[Any(1, Int), Any(2, Int), Any([Any(3, Int), Any(4, Int)], [Any]), Any(5, Int)]
+Any(Any(Any(true, Bool), Any), Any)

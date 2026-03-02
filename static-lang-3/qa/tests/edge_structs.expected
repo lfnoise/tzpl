@@ -1,0 +1,47 @@
+Wrapper { value: 42 }
+42
+Point { x: 10.0, y: 20.0 }
+Point { x: 1.0, y: 2.0 }
+1.0
+2.0
+3.0
+4.0
+Color(255, 0, 0)
+255
+0
+0
+255
+0
+0
+5.0
+true
+false
+false
+0.0
+1.0
+Pair<Int, String> { first: 1, second: hello }
+1
+hello
+99
+hello
+Shape.circle(5.0)
+Shape.rect(3.0, 4.0)
+Shape.point
+0
+1
+2
+'circle
+'rect
+'point
+true
+true
+false
+Result<Int, String>.ok(42)
+Result<Int, String>.err(oops)
+'ok
+'err
+Point { x: 4.0, y: 6.0 }
+Point { x: 1.0, y: 2.0 }
+3
+Point { x: 1.0, y: 2.0 }
+Point { x: 5.0, y: 6.0 }

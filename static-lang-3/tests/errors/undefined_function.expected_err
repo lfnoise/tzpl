@@ -1,0 +1,5 @@
+Type error [tests/errors/undefined_function.x:2:9]
+  |
+2 | println(nonexistent(42));
+  |         ^---------^
+  Undeclared function 'nonexistent'

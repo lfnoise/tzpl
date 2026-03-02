@@ -1,0 +1,1325 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Language X &mdash; Coroutines</title>
+<style>
+  :root {
+    --bg: #fdfdfd;
+    --fg: #1a1a1a;
+    --accent: #2563eb;
+    --accent-dim: #93b4f5;
+    --code-bg: #f3f4f6;
+    --code-border: #dde1e6;
+    --warn-bg: #fef3c7;
+    --warn-border: #f59e0b;
+    --note-bg: #dbeafe;
+    --note-border: #3b82f6;
+    --table-stripe: #f8f9fa;
+    --sidebar-bg: #f8f9fb;
+    --sidebar-border: #e2e5ea;
+    --heading-fg: #0f172a;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    font-size: 16px;
+    line-height: 1.7;
+    color: var(--fg);
+    background: var(--bg);
+    display: flex;
+    min-height: 100vh;
+  }
+
+  /* --- Sidebar / Table of Contents --- */
+
+  nav.sidebar {
+    position: sticky;
+    top: 0;
+    align-self: flex-start;
+    width: 280px;
+    min-width: 280px;
+    height: 100vh;
+    overflow-y: auto;
+    padding: 2rem 1.25rem;
+    background: var(--sidebar-bg);
+    border-right: 1px solid var(--sidebar-border);
+    font-size: 0.875rem;
+  }
+
+  nav.sidebar h2 {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #64748b;
+    margin-bottom: 1rem;
+  }
+
+  nav.sidebar ol {
+    list-style: none;
+    counter-reset: toc;
+  }
+
+  nav.sidebar > ol > li {
+    counter-increment: toc;
+    margin-bottom: 0.4rem;
+  }
+
+  nav.sidebar > ol > li > a::before {
+    content: counter(toc) ". ";
+    color: var(--accent-dim);
+    font-weight: 600;
+  }
+
+  nav.sidebar a {
+    color: var(--fg);
+    text-decoration: none;
+    display: block;
+    padding: 0.15rem 0;
+  }
+
+  nav.sidebar a:hover { color: var(--accent); }
+
+  nav.sidebar ol ol {
+    margin-left: 1rem;
+    margin-top: 0.2rem;
+    font-size: 0.82rem;
+  }
+
+  nav.sidebar ol ol li { margin-bottom: 0.2rem; }
+
+  /* --- Main Content --- */
+
+  main {
+    flex: 1;
+    max-width: 52rem;
+    margin: 0 auto;
+    padding: 3rem 2.5rem 6rem;
+  }
+
+  h1 {
+    font-size: 2.2rem;
+    font-weight: 700;
+    color: var(--heading-fg);
+    margin-bottom: 0.4rem;
+    line-height: 1.2;
+  }
+
+  h1 + .subtitle {
+    font-size: 1.1rem;
+    color: #64748b;
+    margin-bottom: 2.5rem;
+  }
+
+  h2 {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--heading-fg);
+    margin-top: 3.5rem;
+    margin-bottom: 1rem;
+    padding-bottom: 0.35rem;
+    border-bottom: 2px solid var(--accent);
+  }
+
+  h3 {
+    font-size: 1.15rem;
+    font-weight: 600;
+    color: var(--heading-fg);
+    margin-top: 2.2rem;
+    margin-bottom: 0.6rem;
+  }
+
+  h4 {
+    font-size: 1rem;
+    font-weight: 600;
+    color: #475569;
+    margin-top: 1.6rem;
+    margin-bottom: 0.4rem;
+  }
+
+  p { margin-bottom: 1rem; }
+
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  /* Code */
+
+  code {
+    font-family: 'SF Mono', 'Fira Code', 'JetBrains Mono', Menlo, Consolas, monospace;
+    font-size: 0.88em;
+    background: var(--code-bg);
+    border: 1px solid var(--code-border);
+    border-radius: 4px;
+    padding: 0.15em 0.4em;
+  }
+
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--code-border);
+    border-radius: 6px;
+    padding: 1.1rem 1.3rem;
+    overflow-x: auto;
+    margin-bottom: 1.2rem;
+    line-height: 1.55;
+  }
+
+  pre code {
+    background: none;
+    border: none;
+    padding: 0;
+    font-size: 0.86rem;
+  }
+
+  /* Keyword colouring (manual spans) */
+  .kw  { color: #8b5cf6; font-weight: 600; }
+  .typ { color: #0891b2; }
+  .str { color: #16a34a; }
+  .cmt { color: #94a3b8; font-style: italic; }
+  .num { color: #d97706; }
+  .fn  { color: #2563eb; }
+
+  /* Tables */
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 1.4rem;
+    font-size: 0.92rem;
+  }
+
+  th, td {
+    text-align: left;
+    padding: 0.55rem 0.9rem;
+    border: 1px solid var(--code-border);
+  }
+
+  th {
+    background: var(--code-bg);
+    font-weight: 600;
+    color: var(--heading-fg);
+  }
+
+  tr:nth-child(even) { background: var(--table-stripe); }
+
+  /* Callout boxes */
+
+  .note, .warning, .tip {
+    border-left: 4px solid;
+    border-radius: 4px;
+    padding: 0.9rem 1.1rem;
+    margin-bottom: 1.2rem;
+    font-size: 0.94rem;
+  }
+
+  .note    { background: var(--note-bg); border-color: var(--note-border); }
+  .warning { background: var(--warn-bg); border-color: var(--warn-border); }
+  .tip     { background: #dcfce7; border-color: #22c55e; }
+
+  .note strong, .warning strong, .tip strong {
+    display: block;
+    margin-bottom: 0.25rem;
+  }
+
+  /* Lists */
+
+  ul, ol { margin-left: 1.6rem; margin-bottom: 1rem; }
+  li { margin-bottom: 0.3rem; }
+
+  /* Diagram */
+  .diagram {
+    background: #fff;
+    border: 1px solid var(--code-border);
+    border-radius: 6px;
+    padding: 1.5rem;
+    margin-bottom: 1.4rem;
+    overflow-x: auto;
+    text-align: center;
+  }
+
+  .diagram pre {
+    display: inline-block;
+    text-align: left;
+    background: none;
+    border: none;
+    padding: 0;
+    margin: 0;
+    font-size: 0.82rem;
+    line-height: 1.5;
+  }
+
+  /* Responsive */
+  @media (max-width: 900px) {
+    nav.sidebar { display: none; }
+    main { padding: 2rem 1.2rem 4rem; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ================================================================ -->
+<!--  SIDEBAR                                                         -->
+<!-- ================================================================ -->
+
+<nav class="sidebar">
+  <h2>Contents</h2>
+  <ol>
+    <li><a href="#overview">Overview</a></li>
+    <li><a href="#language">Language Guide</a>
+      <ol>
+        <li><a href="#lang-declaring">Declaring Coroutines</a></li>
+        <li><a href="#lang-creating">Creating &amp; Resuming</a></li>
+        <li><a href="#lang-draining">Draining a Coroutine</a></li>
+        <li><a href="#lang-yield-types">Yield Types</a></li>
+        <li><a href="#lang-control-flow">Yield &amp; Control Flow</a></li>
+        <li><a href="#lang-nesting">Nesting Coroutines</a></li>
+        <li><a href="#lang-passing">Passing Coroutines</a></li>
+        <li><a href="#lang-infinite">Infinite Generators</a></li>
+        <li><a href="#lang-yieldall">Delegation with yieldAll</a></li>
+        <li><a href="#lang-for-loop">For Loops over Coroutines</a></li>
+        <li><a href="#lang-tolist">Converting to Lists</a></li>
+      </ol>
+    </li>
+    <li><a href="#design">Design Rationale</a>
+      <ol>
+        <li><a href="#design-why-heap">Why Save-Slot Frames</a></li>
+        <li><a href="#design-single-level">Single-Level Yield</a></li>
+        <li><a href="#design-rt-safety">Real-Time Safety</a></li>
+      </ol>
+    </li>
+    <li><a href="#type-system">Type System</a>
+      <ol>
+        <li><a href="#ts-coroutine-type">Coroutine&lt;T&gt;</a></li>
+        <li><a href="#ts-option-return">Option&lt;T&gt; Return</a></li>
+        <li><a href="#ts-type-checking">Type Checking Rules</a></li>
+      </ol>
+    </li>
+    <li><a href="#runtime">Runtime Architecture</a>
+      <ol>
+        <li><a href="#rt-state-machine">State Machine</a></li>
+        <li><a href="#rt-coroutine-obj">CoroutineObj</a></li>
+        <li><a href="#rt-coroutine-frame">CoroutineFrame (Save Slot)</a></li>
+        <li><a href="#rt-context-switch">Context Switching</a></li>
+        <li><a href="#rt-register-model">Register Model</a></li>
+      </ol>
+    </li>
+    <li><a href="#gc">Garbage Collection</a>
+      <ol>
+        <li><a href="#gc-maps">GC Maps</a></li>
+        <li><a href="#gc-scanning">Frame Scanning</a></li>
+        <li><a href="#gc-write-barrier">Write Barriers on Resume</a></li>
+        <li><a href="#gc-roots">Root Marking</a></li>
+      </ol>
+    </li>
+    <li><a href="#opcodes">Opcode Reference</a>
+      <ol>
+        <li><a href="#op-coro-create">op_coro_create</a></li>
+        <li><a href="#op-coro-resume">op_coro_resume</a></li>
+        <li><a href="#op-yield">op_yield</a></li>
+        <li><a href="#op-coro-done">op_coro_done</a></li>
+        <li><a href="#op-patched">Unpatched Opcodes</a></li>
+      </ol>
+    </li>
+    <li><a href="#compilation">Compilation Pipeline</a>
+      <ol>
+        <li><a href="#comp-lexer">Lexer</a></li>
+        <li><a href="#comp-parser">Parser</a></li>
+        <li><a href="#comp-typechecker">Type Checker</a></li>
+        <li><a href="#comp-codegen">Code Generator</a></li>
+        <li><a href="#comp-builtins">Builtin Resolution</a></li>
+      </ol>
+    </li>
+    <li><a href="#file-map">Source File Map</a></li>
+  </ol>
+</nav>
+
+<!-- ================================================================ -->
+<!--  MAIN CONTENT                                                    -->
+<!-- ================================================================ -->
+
+<main>
+
+<h1>Language X &mdash; Coroutines</h1>
+<p class="subtitle">Comprehensive guide to the coroutine system: language usage, runtime architecture, and implementation internals.</p>
+
+<!-- ================================================================ -->
+<h2 id="overview">1. Overview</h2>
+
+<p>Language X provides <strong>coroutines</strong> &mdash; cooperative generators that yield values one at a time and can be suspended and resumed on demand. A coroutine is declared with <code>coro fn</code>, yields values with <code>yield</code>, and is consumed via the <code>next</code> builtin which returns <code>Option&lt;T&gt;</code>.</p>
+
+<pre><code><span class="cmt">-- Declare a coroutine that yields integers</span>
+<span class="kw">coro fn</span> <span class="fn">count</span>(n <span class="typ">Int</span>) <span class="typ">Int</span> {
+    <span class="kw">var</span> i = <span class="num">0</span>;
+    <span class="kw">while</span> (i &lt; n) {
+        <span class="kw">yield</span> i;
+        i = i + <span class="num">1</span>;
+    }
+}
+
+<span class="cmt">-- Create and consume</span>
+<span class="kw">let</span> c = <span class="num">3</span> count;
+c next println;   <span class="cmt">-- Option&lt;Int&gt;.some(0)</span>
+c next println;   <span class="cmt">-- Option&lt;Int&gt;.some(1)</span>
+c next println;   <span class="cmt">-- Option&lt;Int&gt;.some(2)</span>
+c next println;   <span class="cmt">-- Option&lt;Int&gt;.none</span></code></pre>
+
+<p>Key properties of Language X coroutines:</p>
+
+<ul>
+  <li><strong>Statically typed.</strong> The yield type is known at compile time. <code>coro fn foo() Int</code> yields <code>Int</code> values and returns <code>Coroutine&lt;Int&gt;</code>.</li>
+  <li><strong>Single-level yield.</strong> <code>yield</code> is lexically restricted to <code>coro fn</code> bodies. A non-coroutine function called from within a coroutine cannot yield on the coroutine's behalf.</li>
+  <li><strong>Save-slot frames.</strong> Each coroutine has a single heap-allocated <code>CoroutineFrame</code> that serves as a save slot. During execution, the coroutine body and all functions it calls use the shared flat register file. At yield time, the coroutine body's registers are copied into the save slot; at resume time, they are copied back. This allows multiple coroutines to be suspended simultaneously without interfering with each other, while avoiding per-call heap allocation overhead.</li>
+  <li><strong>GC-safe.</strong> Per-yield-point GC maps track which registers hold object pointers in the save slot, enabling the incremental garbage collector to correctly scan suspended coroutines.</li>
+  <li><strong>Real-time safe.</strong> No system allocator calls, no blocking operations. Save-slot allocation uses the TLSF real-time allocator.</li>
+</ul>
+
+
+<!-- ================================================================ -->
+<h2 id="language">2. Language Guide</h2>
+
+<!-- -------------------------------- -->
+<h3 id="lang-declaring">2.1 Declaring Coroutines</h3>
+
+<p>A coroutine is declared by prefixing a function declaration with <code>coro</code>. The return type annotation specifies the <em>yield type</em> &mdash; the type of values that the coroutine produces.</p>
+
+<pre><code><span class="kw">coro fn</span> <span class="fn">naturals</span>() <span class="typ">Int</span> {
+    <span class="kw">var</span> i = <span class="num">0</span>;
+    <span class="kw">while</span> (<span class="kw">true</span>) {
+        <span class="kw">yield</span> i;
+        i = i + <span class="num">1</span>;
+    }
+}</code></pre>
+
+<p>The <code>yield</code> statement suspends the coroutine, returns the given value to the caller, and saves all local state. When the coroutine is next resumed, execution continues from the statement immediately after the <code>yield</code>.</p>
+
+<p>Coroutines may take parameters just like regular functions:</p>
+
+<pre><code><span class="kw">coro fn</span> <span class="fn">range</span>(start <span class="typ">Int</span>, end <span class="typ">Int</span>) <span class="typ">Int</span> {
+    <span class="kw">var</span> i = start;
+    <span class="kw">while</span> (i &lt; end) {
+        <span class="kw">yield</span> i;
+        i = i + <span class="num">1</span>;
+    }
+}</code></pre>
+
+<!-- -------------------------------- -->
+<h3 id="lang-creating">2.2 Creating &amp; Resuming</h3>
+
+<p>Calling a <code>coro fn</code> does <em>not</em> execute its body. Instead it creates a <code>Coroutine&lt;T&gt;</code> object in the <code>Created</code> state, capturing the arguments for later use:</p>
+
+<pre><code><span class="kw">let</span> c = <span class="num">5</span> count;   <span class="cmt">-- creates Coroutine&lt;Int&gt;, body not yet entered</span></code></pre>
+
+<p>To advance the coroutine, call <code>next</code>. Each call returns <code>Option&lt;T&gt;</code>:</p>
+
+<ul>
+  <li><code>Option&lt;T&gt;.some(value)</code> &mdash; the coroutine yielded a value and is now suspended.</li>
+  <li><code>Option&lt;T&gt;.none</code> &mdash; the coroutine body has finished; no more values.</li>
+</ul>
+
+<pre><code><span class="kw">let</span> c = <span class="num">3</span> count;
+c next println;   <span class="cmt">-- Option&lt;Int&gt;.some(0)</span>
+c next println;   <span class="cmt">-- Option&lt;Int&gt;.some(1)</span>
+c next println;   <span class="cmt">-- Option&lt;Int&gt;.some(2)</span>
+c next println;   <span class="cmt">-- Option&lt;Int&gt;.none</span>
+c next println;   <span class="cmt">-- Option&lt;Int&gt;.none  (remains none forever)</span></code></pre>
+
+<p>Once a coroutine is <code>Done</code>, all subsequent calls to <code>next</code> return <code>none</code>.</p>
+
+<!-- -------------------------------- -->
+<h3 id="lang-draining">2.3 Draining a Coroutine</h3>
+
+<p>A common pattern is to drain a coroutine until it is done. Use <code>isSome</code> and <code>unwrap</code> from the standard <code>Option</code> API:</p>
+
+<pre><code><span class="kw">fn</span> <span class="fn">drain</span>(c <span class="typ">Coroutine&lt;Int&gt;</span>) <span class="typ">Void</span> {
+    <span class="kw">var</span> result = c next;
+    <span class="kw">while</span> (result isSome) {
+        result println;
+        result = c next;
+    }
+}
+
+<span class="kw">let</span> c = <span class="num">4</span> count;
+c drain;</code></pre>
+
+<p>Output:</p>
+<pre><code>Option&lt;Int&gt;.some(0)
+Option&lt;Int&gt;.some(1)
+Option&lt;Int&gt;.some(2)
+Option&lt;Int&gt;.some(3)</code></pre>
+
+<!-- -------------------------------- -->
+<h3 id="lang-yield-types">2.4 Yield Types</h3>
+
+<p>Coroutines can yield any type &mdash; value types (Int, Float, Bool) and object types (String, Array, Tuple) alike:</p>
+
+<pre><code><span class="cmt">-- Yielding strings</span>
+<span class="kw">coro fn</span> <span class="fn">greetings</span>() <span class="typ">String</span> {
+    <span class="kw">yield</span> <span class="str">"hello"</span>;
+    <span class="kw">yield</span> <span class="str">"world"</span>;
+    <span class="kw">yield</span> <span class="str">"goodbye"</span>;
+}
+
+<span class="cmt">-- Yielding arrays</span>
+<span class="kw">coro fn</span> <span class="fn">make_arrays</span>() <span class="typ">[Int]</span> {
+    <span class="kw">yield</span> [<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>];
+    <span class="kw">yield</span> [<span class="num">4</span>, <span class="num">5</span>];
+}
+
+<span class="cmt">-- Yielding tuples</span>
+<span class="kw">coro fn</span> <span class="fn">pairs</span>(n <span class="typ">Int</span>) <span class="typ">(Int, Int)</span> {
+    <span class="kw">var</span> i = <span class="num">0</span>;
+    <span class="kw">while</span> (i &lt; n) {
+        <span class="kw">yield</span> (i, i * i);
+        i = i + <span class="num">1</span>;
+    }
+}</code></pre>
+
+<!-- -------------------------------- -->
+<h3 id="lang-control-flow">2.5 Yield &amp; Control Flow</h3>
+
+<p><code>yield</code> can appear inside any control flow structure: <code>if</code>/<code>else</code>, <code>match</code>, <code>while</code> loops, and sequences thereof. The coroutine correctly remembers where it was suspended and resumes from that exact point.</p>
+
+<h4>Yield in if/else</h4>
+
+<pre><code><span class="kw">coro fn</span> <span class="fn">conditional_yield</span>(flag <span class="typ">Bool</span>) <span class="typ">Int</span> {
+    <span class="kw">if</span> (flag) {
+        <span class="kw">yield</span> <span class="num">1</span>;
+        <span class="kw">yield</span> <span class="num">2</span>;
+    } <span class="kw">else</span> {
+        <span class="kw">yield</span> <span class="num">100</span>;
+        <span class="kw">yield</span> <span class="num">200</span>;
+    }
+    <span class="kw">yield</span> <span class="num">999</span>;
+}</code></pre>
+
+<h4>Yield in match</h4>
+
+<pre><code><span class="kw">enum</span> <span class="typ">Shape</span> {
+    circle <span class="typ">Float</span>,
+    rect <span class="typ">Float</span>
+}
+
+<span class="kw">coro fn</span> <span class="fn">describe_shapes</span>() <span class="typ">String</span> {
+    <span class="kw">let</span> shapes = [Shape.circle(<span class="num">1.0</span>), Shape.rect(<span class="num">4.0</span>)];
+    <span class="kw">var</span> i = <span class="num">0</span>;
+    <span class="kw">while</span> (i &lt; shapes length) {
+        <span class="kw">match</span> (shapes[i]) {
+            Shape.circle(r): <span class="kw">yield</span> <span class="str">"circle"</span>;
+            Shape.rect(w): <span class="kw">yield</span> <span class="str">"rect"</span>;
+        }
+        i = i + <span class="num">1</span>;
+    }
+}</code></pre>
+
+<h4>Sequential loops</h4>
+
+<pre><code><span class="kw">coro fn</span> <span class="fn">two_loops</span>() <span class="typ">Int</span> {
+    <span class="kw">var</span> i = <span class="num">0</span>;
+    <span class="kw">while</span> (i &lt; <span class="num">3</span>) {
+        <span class="kw">yield</span> i;
+        i = i + <span class="num">1</span>;
+    }
+    i = <span class="num">10</span>;
+    <span class="kw">while</span> (i &lt; <span class="num">13</span>) {
+        <span class="kw">yield</span> i;
+        i = i + <span class="num">1</span>;
+    }
+}
+
+<span class="cmt">-- Yields: 0, 1, 2, 10, 11, 12, then none</span></code></pre>
+
+<!-- -------------------------------- -->
+<h3 id="lang-nesting">2.6 Nesting Coroutines</h3>
+
+<p>A coroutine can call <code>next</code> on another coroutine, forwarding its values with <code>yield</code>. This allows coroutine composition:</p>
+
+<pre><code><span class="kw">coro fn</span> <span class="fn">inner</span>() <span class="typ">Int</span> {
+    <span class="kw">yield</span> <span class="num">1</span>;
+    <span class="kw">yield</span> <span class="num">2</span>;
+}
+
+<span class="kw">coro fn</span> <span class="fn">outer</span>() <span class="typ">Int</span> {
+    <span class="kw">let</span> ic = inner();
+    <span class="kw">var</span> r = ic next;
+    <span class="kw">while</span> (r isSome) {
+        <span class="kw">yield</span> r unwrap;
+        r = ic next;
+    }
+    <span class="kw">yield</span> <span class="num">99</span>;
+}
+
+<span class="kw">let</span> o = outer();
+o next println;   <span class="cmt">-- Option&lt;Int&gt;.some(1)</span>
+o next println;   <span class="cmt">-- Option&lt;Int&gt;.some(2)</span>
+o next println;   <span class="cmt">-- Option&lt;Int&gt;.some(99)</span>
+o next println;   <span class="cmt">-- Option&lt;Int&gt;.none</span></code></pre>
+
+<p>Coroutines can also call ordinary (non-coroutine) functions. Those function calls use the normal flat register file &mdash; no heap-allocated frames are needed because normal functions always complete before the coroutine can yield:</p>
+
+<pre><code><span class="kw">fn</span> <span class="fn">double</span>(x <span class="typ">Int</span>) <span class="typ">Int</span> = x * <span class="num">2</span>;
+
+<span class="kw">coro fn</span> <span class="fn">doubled_range</span>(n <span class="typ">Int</span>) <span class="typ">Int</span> {
+    <span class="kw">var</span> i = <span class="num">0</span>;
+    <span class="kw">while</span> (i &lt; n) {
+        <span class="kw">yield</span> i double;   <span class="cmt">-- calls double(), yields result</span>
+        i = i + <span class="num">1</span>;
+    }
+}</code></pre>
+
+<!-- -------------------------------- -->
+<h3 id="lang-passing">2.7 Passing Coroutines as Values</h3>
+
+<p><code>Coroutine&lt;T&gt;</code> is a first-class type. Coroutines can be stored in variables, passed to functions, and selected conditionally:</p>
+
+<pre><code><span class="cmt">-- Coroutine as function parameter</span>
+<span class="kw">fn</span> <span class="fn">drain</span>(c <span class="typ">Coroutine&lt;Int&gt;</span>) <span class="typ">Void</span> {
+    <span class="kw">var</span> result = c next;
+    <span class="kw">while</span> (result isSome) {
+        result println;
+        result = c next;
+    }
+}
+
+<span class="cmt">-- Conditional selection (both must yield same type)</span>
+<span class="kw">coro fn</span> <span class="fn">evens</span>() <span class="typ">Int</span> { <span class="kw">var</span> i = <span class="num">0</span>; <span class="kw">while</span> (i &lt; <span class="num">6</span>) { <span class="kw">yield</span> i; i = i + <span class="num">2</span>; } }
+<span class="kw">coro fn</span> <span class="fn">odds</span>()  <span class="typ">Int</span> { <span class="kw">var</span> i = <span class="num">1</span>; <span class="kw">while</span> (i &lt; <span class="num">6</span>) { <span class="kw">yield</span> i; i = i + <span class="num">2</span>; } }
+
+<span class="kw">let</span> selected = <span class="kw">true</span> ? evens() : odds();
+selected drain;</code></pre>
+
+<p>Multiple coroutines can be interleaved &mdash; each maintains its own independent state:</p>
+
+<pre><code><span class="kw">let</span> a = <span class="num">3</span> count;
+<span class="kw">let</span> b = <span class="num">3</span> count;
+a next println;   <span class="cmt">-- Option&lt;Int&gt;.some(0)</span>
+b next println;   <span class="cmt">-- Option&lt;Int&gt;.some(0)</span>
+a next println;   <span class="cmt">-- Option&lt;Int&gt;.some(1)</span>
+b next println;   <span class="cmt">-- Option&lt;Int&gt;.some(1)</span></code></pre>
+
+<!-- -------------------------------- -->
+<h3 id="lang-infinite">2.8 Infinite Generators</h3>
+
+<p>Coroutines with <code>while (true)</code> produce infinite sequences. Consume only as many values as needed:</p>
+
+<pre><code><span class="kw">coro fn</span> <span class="fn">fibs</span>() <span class="typ">Int</span> {
+    <span class="kw">var</span> a = <span class="num">0</span>;
+    <span class="kw">var</span> b = <span class="num">1</span>;
+    <span class="kw">while</span> (<span class="kw">true</span>) {
+        <span class="kw">yield</span> a;
+        <span class="kw">let</span> tmp = a + b;
+        a = b;
+        b = tmp;
+    }
+}
+
+<span class="kw">let</span> f = fibs();
+f next println;   <span class="cmt">-- Option&lt;Int&gt;.some(0)</span>
+f next println;   <span class="cmt">-- Option&lt;Int&gt;.some(1)</span>
+f next println;   <span class="cmt">-- Option&lt;Int&gt;.some(1)</span>
+f next println;   <span class="cmt">-- Option&lt;Int&gt;.some(2)</span>
+f next println;   <span class="cmt">-- Option&lt;Int&gt;.some(3)</span>
+f next println;   <span class="cmt">-- Option&lt;Int&gt;.some(5)</span>
+f next println;   <span class="cmt">-- Option&lt;Int&gt;.some(8)</span>
+f next println;   <span class="cmt">-- Option&lt;Int&gt;.some(13)</span></code></pre>
+
+<p>An empty coroutine (no <code>yield</code> statements) immediately returns <code>none</code>:</p>
+
+<pre><code><span class="kw">coro fn</span> <span class="fn">empty</span>() <span class="typ">Int</span> {}
+
+<span class="kw">let</span> e = empty();
+e next println;   <span class="cmt">-- Option&lt;Int&gt;.none</span></code></pre>
+
+<!-- -------------------------------- -->
+<h3 id="lang-yieldall">2.9 Delegation with yieldAll</h3>
+
+<p>The <code>yieldAll</code> builtin drains an inner coroutine, yielding each of its values on behalf of the outer coroutine. This replaces the manual <code>while</code>/<code>next</code>/<code>unwrap</code> loop shown in <a href="#lang-nesting">section 2.6</a>:</p>
+
+<pre><code><span class="kw">coro fn</span> <span class="fn">inner</span>() <span class="typ">Int</span> {
+    <span class="kw">yield</span> <span class="num">10</span>;
+    <span class="kw">yield</span> <span class="num">20</span>;
+    <span class="kw">yield</span> <span class="num">30</span>;
+}
+
+<span class="kw">coro fn</span> <span class="fn">outer</span>() <span class="typ">Int</span> {
+    <span class="kw">yield</span> <span class="num">1</span>;
+    <span class="fn">yieldAll</span>(inner());
+    <span class="kw">yield</span> <span class="num">99</span>;
+}
+
+<span class="kw">let</span> o = outer();
+o next println;   <span class="cmt">-- Option&lt;Int&gt;.some(1)</span>
+o next println;   <span class="cmt">-- Option&lt;Int&gt;.some(10)</span>
+o next println;   <span class="cmt">-- Option&lt;Int&gt;.some(20)</span>
+o next println;   <span class="cmt">-- Option&lt;Int&gt;.some(30)</span>
+o next println;   <span class="cmt">-- Option&lt;Int&gt;.some(99)</span>
+o next println;   <span class="cmt">-- Option&lt;Int&gt;.none</span></code></pre>
+
+<p><code>yieldAll</code> also works in pipeline form:</p>
+
+<pre><code><span class="kw">coro fn</span> <span class="fn">outer_pipe</span>() <span class="typ">Int</span> {
+    <span class="kw">yield</span> <span class="num">1</span>;
+    inner() <span class="fn">yieldAll</span>;
+    <span class="kw">yield</span> <span class="num">99</span>;
+}</code></pre>
+
+<p>The inner coroutine must yield the same type as the outer coroutine. <code>yieldAll</code> can only be used inside a <code>coro fn</code> body, just like <code>yield</code>.</p>
+
+<p>Multiple <code>yieldAll</code> calls can be combined with regular <code>yield</code> statements to compose sequences from several sources:</p>
+
+<pre><code><span class="kw">coro fn</span> <span class="fn">combined</span>() <span class="typ">Int</span> {
+    <span class="kw">var</span> i = <span class="num">0</span>;
+    <span class="kw">while</span> (i &lt; <span class="num">2</span>) {
+        <span class="kw">yield</span> i;
+        i = i + <span class="num">1</span>;
+    }
+    inner() <span class="fn">yieldAll</span>;
+    <span class="kw">yield</span> <span class="num">999</span>;
+}
+
+<span class="cmt">-- Yields: 0, 1, 10, 20, 30, 999, then none</span></code></pre>
+
+<!-- -------------------------------- -->
+<h3 id="lang-for-loop">2.10 For Loops over Coroutines</h3>
+
+<p>Coroutines are iterable &mdash; a <code>for</code> loop can iterate directly over a <code>Coroutine&lt;T&gt;</code>, extracting each yielded value until the coroutine is exhausted:</p>
+
+<pre><code><span class="kw">coro fn</span> <span class="fn">count_to</span>(n <span class="typ">Int</span>) <span class="typ">Int</span> {
+    <span class="kw">var</span> i = <span class="num">1</span>;
+    <span class="kw">while</span> (i &lt;= n) {
+        <span class="kw">yield</span> i;
+        i = i + <span class="num">1</span>;
+    }
+}
+
+<span class="kw">for</span> (x : count_to(<span class="num">5</span>)) {
+    x println;
+}
+<span class="cmt">-- Prints: 1, 2, 3, 4, 5</span></code></pre>
+
+<p>The loop variable <code>x</code> has the coroutine's yield type (<code>Int</code> in this case) &mdash; it receives the unwrapped value directly, not an <code>Option</code>. The loop terminates automatically when the coroutine returns <code>none</code>.</p>
+
+<p>This replaces the verbose manual drain pattern:</p>
+
+<pre><code><span class="cmt">-- Before: manual drain</span>
+<span class="kw">var</span> result = c next;
+<span class="kw">while</span> (result isSome) {
+    <span class="kw">let</span> x = result unwrap;
+    x println;
+    result = c next;
+}
+
+<span class="cmt">-- After: for loop</span>
+<span class="kw">for</span> (x : c) {
+    x println;
+}</code></pre>
+
+<h4>Break and continue</h4>
+
+<p><code>break</code> and <code>continue</code> work as expected. This is especially useful with infinite coroutines:</p>
+
+<pre><code><span class="kw">for</span> (x : fibs()) {
+    <span class="kw">if</span> (x &gt; <span class="num">10</span>) { <span class="kw">break</span>; }
+    x println;
+}
+<span class="cmt">-- Prints: 0, 1, 1, 2, 3, 5, 8</span></code></pre>
+
+<h4>Inline coroutine creation</h4>
+
+<p>Coroutines can be created inline in the <code>for</code> expression:</p>
+
+<pre><code><span class="kw">for</span> (s : greetings()) {
+    s println;
+}
+<span class="cmt">-- Prints: hello, world, goodbye</span></code></pre>
+
+<h4>Any yield type</h4>
+
+<p><code>for</code> loops over coroutines work with any yield type &mdash; strings, arrays, tuples, and other object types:</p>
+
+<pre><code><span class="kw">coro fn</span> <span class="fn">colors</span>() <span class="typ">String</span> {
+    <span class="kw">yield</span> <span class="str">"red"</span>;
+    <span class="kw">yield</span> <span class="str">"green"</span>;
+    <span class="kw">yield</span> <span class="str">"blue"</span>;
+}
+
+<span class="kw">for</span> (c : colors()) {
+    c println;
+}
+<span class="cmt">-- Prints: red, green, blue</span></code></pre>
+
+<div class="note">
+<strong>Coroutines join Array, List, and Range</strong> as iterable types in <code>for</code> loops. The loop variable type is inferred from the coroutine's yield type, just as it is inferred from the element type of an Array or List.
+</div>
+
+<!-- -------------------------------- -->
+<h3 id="lang-tolist">2.11 Converting to Lists</h3>
+
+<p>The <code>toList</code> function converts a <code>Coroutine&lt;T&gt;</code> into a <code>List&lt;T&gt;</code>. The resulting list is <strong>lazy</strong> &mdash; the coroutine is resumed on demand as list elements are accessed:</p>
+
+<pre><code><span class="kw">coro fn</span> <span class="fn">count</span>(n <span class="typ">Int</span>) <span class="typ">Int</span> {
+    <span class="kw">var</span> i = <span class="num">0</span>;
+    <span class="kw">while</span> (i &lt; n) {
+        <span class="kw">yield</span> i;
+        i = i + <span class="num">1</span>;
+    }
+}
+
+count(<span class="num">5</span>) toList println;       <span class="cmt">-- List(0, 1, 2, 3, 4)</span>
+count(<span class="num">0</span>) toList println;       <span class="cmt">-- nil</span></code></pre>
+
+<p>Because the list is lazy, <code>toList</code> works with <strong>infinite coroutines</strong> when combined with lazy list operations like <code>take</code>, <code>drop</code>, or <code>collect</code>:</p>
+
+<pre><code><span class="kw">coro fn</span> <span class="fn">fibs</span>() <span class="typ">Int</span> {
+    <span class="kw">var</span> a = <span class="num">0</span>;
+    <span class="kw">var</span> b = <span class="num">1</span>;
+    <span class="kw">while</span> (<span class="kw">true</span>) {
+        <span class="kw">yield</span> a;
+        <span class="kw">let</span> tmp = a + b;
+        a = b;
+        b = tmp;
+    }
+}
+
+fibs() toList take(<span class="num">8</span>) println;       <span class="cmt">-- List(0, 1, 1, 2, 3, 5, 8, 13)</span>
+fibs() toList collect(<span class="num">6</span>) println;    <span class="cmt">-- [0, 1, 1, 2, 3, 5]</span></code></pre>
+
+<p>Once converted, the full set of list operations is available &mdash; <code>head</code>, <code>tail</code>, <code>map</code>, <code>drop</code>, <code>zip</code>, and so on:</p>
+
+<pre><code>count(<span class="num">5</span>) toList head println;          <span class="cmt">-- 0</span>
+count(<span class="num">5</span>) toList drop(<span class="num">3</span>) println;      <span class="cmt">-- List(3, 4)</span>
+count(<span class="num">3</span>) toList map(<span class="kw">fn</span>(x <span class="typ">Int</span>) <span class="typ">Int</span> = x * <span class="num">10</span>) println;
+                                       <span class="cmt">-- List(0, 10, 20)</span></code></pre>
+
+<div class="note">
+<strong>toList vs for loops:</strong> Use a <code>for</code> loop when you want to process each value imperatively (with side effects). Use <code>toList</code> when you want to treat the coroutine's output as a data structure and apply functional list operations.
+</div>
+
+
+<!-- ================================================================ -->
+<h2 id="design">3. Design Rationale</h2>
+
+<!-- -------------------------------- -->
+<h3 id="design-why-heap">3.1 Why Save-Slot Frames</h3>
+
+<p>Language X is <strong>event-driven</strong>: the call stack collapses between events, so the garbage collector never needs to scan the stack. This is fundamental to the VM's real-time guarantees. Traditional stackful coroutines would violate this invariant because they keep live stack frames around across event boundaries.</p>
+
+<p>Each coroutine has a single heap-allocated <code>CoroutineFrame</code> that acts as a <strong>save slot</strong>. During execution, the coroutine body and all functions it calls use the shared flat register file &mdash; the same fast path as non-coroutine code. When the coroutine yields, its body registers are copied from the flat register file into the save slot. When resumed, they are copied back. The save slot is an ordinary GC-managed heap object that the incremental collector scans like any other <code>Obj</code>. This gives us:</p>
+
+<ul>
+  <li><strong>Multiple suspended coroutines.</strong> Each has its own independent save slot on the heap.</li>
+  <li><strong>Zero overhead for function calls.</strong> Normal functions called from within a coroutine use the flat register file with no heap allocation &mdash; identical to the non-coroutine path.</li>
+  <li><strong>GC compatibility.</strong> Suspended save slots are scanned incrementally via GC maps &mdash; no stack scanning required.</li>
+  <li><strong>No thread/fiber overhead.</strong> No separate stack allocation, no context switch machinery beyond copying registers and saving/restoring a few pointers.</li>
+</ul>
+
+<!-- -------------------------------- -->
+<h3 id="design-single-level">3.2 Single-Level Yield</h3>
+
+<p><code>yield</code> is restricted to the lexical body of a <code>coro fn</code>. A regular function called from within a coroutine cannot yield on the coroutine's behalf. This simplification:</p>
+
+<ul>
+  <li>Avoids the complexity of "deep yield" (where any frame in the call chain could yield).</li>
+  <li>Makes the write-barrier cost O(1) per resume (only one save slot to barrier).</li>
+  <li>Allows function calls inside coroutines to use the fast flat-register-file path &mdash; no heap allocation, no special branching in <code>op_call</code>/<code>op_return</code>. Since normal functions always complete before a yield, their registers don't need to be preserved across suspension.</li>
+</ul>
+
+<p>Despite this restriction, coroutines can still <em>call</em> <code>next</code> on other coroutines. The outer coroutine's context is saved while the inner coroutine runs, and restored when the inner coroutine yields or finishes. This enables powerful composition patterns.</p>
+
+<!-- -------------------------------- -->
+<h3 id="design-rt-safety">3.3 Real-Time Safety</h3>
+
+<p>All coroutine operations are real-time safe:</p>
+
+<table>
+  <tr><th>Operation</th><th>Cost</th><th>Allocator</th></tr>
+  <tr><td>Create coroutine (<code>op_coro_create</code>)</td><td>O(args) copy</td><td>TLSF</td></tr>
+  <tr><td>Resume (<code>op_coro_resume</code>)</td><td>O(regs) copy + O(1) write barrier</td><td>TLSF (first resume only)</td></tr>
+  <tr><td>Yield (<code>op_yield</code>)</td><td>O(regs) copy + O(1) context switch</td><td>TLSF (Option allocation)</td></tr>
+  <tr><td>Function call inside coroutine</td><td>Same as normal call</td><td>None (uses flat register file)</td></tr>
+  <tr><td>Function return inside coroutine</td><td>Same as normal return</td><td>None</td></tr>
+</table>
+
+<p>No system allocator calls. No blocking operations. All TLSF allocations are O(1) worst-case.</p>
+
+
+<!-- ================================================================ -->
+<h2 id="type-system">4. Type System</h2>
+
+<!-- -------------------------------- -->
+<h3 id="ts-coroutine-type">4.1 Coroutine&lt;T&gt;</h3>
+
+<p>When a function is declared with <code>coro fn</code>, its effective return type is <code>Coroutine&lt;T&gt;</code>, where <code>T</code> is the declared yield type. The type checker wraps the declared return type automatically:</p>
+
+<pre><code><span class="cmt">-- Declared as yielding Int, actual return type is Coroutine&lt;Int&gt;</span>
+<span class="kw">coro fn</span> <span class="fn">count</span>(n <span class="typ">Int</span>) <span class="typ">Int</span> { ... }</code></pre>
+
+<p><code>CoroutineType</code> is an object type (<code>ObjType</code>) parameterized by its yield type. Coroutine types are <strong>interned</strong> by the <code>TypeUniverse</code>: two calls to <code>coroutineType(intType)</code> return the same <code>CoroutineType*</code>.</p>
+
+<p><code>Coroutine&lt;T&gt;</code> can be used in type annotations for function parameters:</p>
+
+<pre><code><span class="kw">fn</span> <span class="fn">drain</span>(c <span class="typ">Coroutine&lt;Int&gt;</span>) <span class="typ">Void</span> { ... }</code></pre>
+
+<!-- -------------------------------- -->
+<h3 id="ts-option-return">4.2 Option&lt;T&gt; Return</h3>
+
+<p>The <code>next</code> builtin returns <code>Option&lt;T&gt;</code>, the language's standard sum type for nullable values:</p>
+
+<ul>
+  <li><code>Option&lt;T&gt;.some(value)</code> &mdash; <code>which_ = 0</code>, carries the yielded value.</li>
+  <li><code>Option&lt;T&gt;.none</code> &mdash; <code>which_ = 1</code>, coroutine is done.</li>
+</ul>
+
+<p>The <code>next</code> function is resolved as a <strong>template builtin</strong> that pattern-matches on its argument type:</p>
+
+<pre><code><span class="cmt">-- Pseudo-signature (resolved by template resolver)</span>
+<span class="fn">next</span>(<span class="typ">Coroutine&lt;T&gt;</span>) &rarr; <span class="typ">Option&lt;T&gt;</span></code></pre>
+
+<!-- -------------------------------- -->
+<h3 id="ts-type-checking">4.3 Type Checking Rules</h3>
+
+<table>
+  <tr><th>Rule</th><th>Description</th></tr>
+  <tr><td>Yield type match</td><td>The expression in <code>yield expr</code> must match the declared yield type <code>T</code>. Int-to-Float promotion is allowed.</td></tr>
+  <tr><td>Yield location</td><td><code>yield</code> is only allowed inside a <code>coro fn</code> body. Using it elsewhere is a compile-time error.</td></tr>
+  <tr><td>Body return type</td><td>The body of a <code>coro fn</code> has return type <code>Void</code>. The coroutine finishes by falling off the end (triggering <code>op_coro_done</code>), not by returning a value.</td></tr>
+  <tr><td>Call site marking</td><td>Calls to coroutine functions are marked <code>isCoroCall = true</code>. Calls to <code>next()</code> on a coroutine are marked <code>isCoroResume = true</code>. These flags direct the code generator to emit the correct opcodes.</td></tr>
+  <tr><td>Conditional selection</td><td><code>flag ? coroA() : coroB()</code> type-checks if both branches yield the same type, producing the same <code>Coroutine&lt;T&gt;</code> type.</td></tr>
+</table>
+
+
+<!-- ================================================================ -->
+<h2 id="runtime">5. Runtime Architecture</h2>
+
+<!-- -------------------------------- -->
+<h3 id="rt-state-machine">5.1 State Machine</h3>
+
+<p>Each <code>CoroutineObj</code> progresses through four states:</p>
+
+<div class="diagram">
+<pre><code>  Created ──(first next)──&gt; Running ──(yield)──&gt; Suspended
+                               │                     │
+                               │                 (next)
+                               │                     │
+                               │                     v
+                               │                  Running ──(yield)──&gt; Suspended
+                               │                     │
+                               └──(body ends)──&gt;  Done
+                                                     │
+                                               (all subsequent
+                                                next &rarr; none)</code></pre>
+</div>
+
+<table>
+  <tr><th>State</th><th>Description</th></tr>
+  <tr><td><code>Created</code></td><td>Coroutine object exists but body has not been entered. Arguments are stored in the <code>args_[]</code> flexible array.</td></tr>
+  <tr><td><code>Running</code></td><td>Coroutine body is actively executing. Set when <code>op_coro_resume</code> enters the coroutine.</td></tr>
+  <tr><td><code>Suspended</code></td><td>Coroutine has yielded a value. Frame chain is saved in <code>topFrame_</code>, resume PC in <code>resumePC_</code>.</td></tr>
+  <tr><td><code>Done</code></td><td>Coroutine body has finished. <code>topFrame_</code> is null. All future <code>next</code> calls return <code>none</code>.</td></tr>
+</table>
+
+<!-- -------------------------------- -->
+<h3 id="rt-coroutine-obj">5.2 CoroutineObj</h3>
+
+<p><code>CoroutineObj</code> is the main heap object representing a coroutine instance. It uses a <strong>flexible array member</strong> to store the initial arguments inline:</p>
+
+<pre><code><span class="kw">class</span> <span class="typ">CoroutineObj</span> : <span class="kw">public</span> <span class="typ">Obj</span> {
+    <span class="typ">CodeBlock*</span>       entryBlock_;       <span class="cmt">// compiled function body</span>
+    <span class="typ">State</span>            state_;            <span class="cmt">// Created | Running | Suspended | Done</span>
+    <span class="typ">CoroutineFrame*</span>  topFrame_;         <span class="cmt">// saved frame chain (null when Created/Done)</span>
+    <span class="typ">Code*</span>            resumePC_;         <span class="cmt">// instruction to resume from</span>
+
+    <span class="cmt">// Caller context (saved on resume, restored on yield/done)</span>
+    <span class="typ">Code*</span>            callerReturnPC_;
+    <span class="typ">u16</span>              callerResultReg_;
+    <span class="typ">u32</span>              callerBaseReg_;
+    <span class="typ">u32</span>              callerFrameCount_;
+    <span class="typ">CoroutineFrame*</span>  callerCoroFrame_;  <span class="cmt">// if caller is also a coroutine</span>
+    <span class="typ">CoroutineObj*</span>    callerCoroutine_;  <span class="cmt">// if caller is also a coroutine</span>
+
+    <span class="cmt">// Initial arguments</span>
+    <span class="typ">FunctionType*</span>    funcType_;         <span class="cmt">// for GC scanning of Obj* args</span>
+    <span class="typ">u16</span>              numArgs_;
+    <span class="typ">Word</span>             args_[];           <span class="cmt">// flexible array</span>
+};</code></pre>
+
+<p>The caller context fields allow <code>op_yield</code> and <code>op_coro_done</code> to restore the caller's execution state without any stack unwinding.</p>
+
+<!-- -------------------------------- -->
+<h3 id="rt-coroutine-frame">5.3 CoroutineFrame (Save Slot)</h3>
+
+<p><code>CoroutineFrame</code> serves as a <strong>save slot</strong> for a coroutine's body registers. Each coroutine has exactly one <code>CoroutineFrame</code>, allocated on first resume. During execution, the coroutine body uses the flat register file; the save slot is only populated when the coroutine yields (registers are copied in) and read when the coroutine resumes (registers are copied out).</p>
+
+<pre><code><span class="kw">class</span> <span class="typ">CoroutineFrame</span> : <span class="kw">public</span> <span class="typ">Obj</span> {
+    <span class="typ">CodeBlock*</span>       codeBlock_;   <span class="cmt">// which function this frame belongs to</span>
+    <span class="typ">Code*</span>            returnPC_;    <span class="cmt">// (legacy, unused in save-slot model)</span>
+    <span class="typ">CoroutineFrame*</span>  caller_;      <span class="cmt">// (legacy, always nullptr in save-slot model)</span>
+    <span class="typ">u16</span>              resultReg_;   <span class="cmt">// (legacy, unused in save-slot model)</span>
+    <span class="typ">u16</span>              numRegs_;     <span class="cmt">// number of registers in this frame</span>
+    <span class="typ">u16</span>              gcMapIndex_;  <span class="cmt">// index into codeBlock_-&gt;coroGCMaps_</span>
+    <span class="typ">Word</span>             regs_[];      <span class="cmt">// flexible array of saved register values</span>
+};</code></pre>
+
+<p>Normal functions called from within a coroutine use the flat register file and flat <code>CallFrame</code> stack, identical to non-coroutine execution. Since <code>yield</code> can only appear in the coroutine body itself (not in called functions), all normal function calls have returned by the time a yield occurs, so their registers do not need to be preserved.</p>
+
+<!-- -------------------------------- -->
+<h3 id="rt-context-switch">5.4 Context Switching</h3>
+
+<p>Context switching between the caller and coroutine involves saving and restoring a small set of pointers:</p>
+
+<h4>Resume (caller &rarr; coroutine)</h4>
+<ol>
+  <li>Save caller context into <code>CoroutineObj</code>: return PC, result register, base register, frame count, and (if the caller is itself a coroutine) the caller's coroutine frame pointer and coroutine object.</li>
+  <li>Set <code>vm.currentCoroutine_</code> and <code>vm.currentCoroFrame_</code>.</li>
+  <li>Compute <code>newBase</code> &mdash; place the coroutine body's registers after the caller's register window in the flat register file.</li>
+  <li>First resume: copy arguments from <code>CoroutineObj::args_[]</code> into the flat register file at <code>newBase</code>.</li>
+  <li>Subsequent resume: copy saved registers from <code>CoroutineFrame::regs_[]</code> into the flat register file at <code>newBase</code>. Apply write barrier to the save slot.</li>
+  <li>Push a flat <code>CallFrame</code> for the coroutine body (this updates <code>baseReg_</code> and <code>currentRegs_</code> to point into the flat register file).</li>
+  <li>Jump to entry point (first resume) or saved <code>resumePC_</code> (subsequent resumes).</li>
+</ol>
+
+<h4>Yield (coroutine &rarr; caller)</h4>
+<ol>
+  <li>Copy the coroutine body's registers from the flat register file into the <code>CoroutineFrame</code> save slot.</li>
+  <li>Save resume PC and GC map index into <code>CoroutineObj</code> and <code>CoroutineFrame</code>.</li>
+  <li>Mark coroutine as <code>Suspended</code>.</li>
+  <li>Wrap yielded value in <code>Option&lt;T&gt;.some</code>.</li>
+  <li>Restore caller context from <code>CoroutineObj</code> fields (baseReg, frameCount, currentCoroutine, currentCoroFrame).</li>
+  <li>Point <code>vm.currentRegs_</code> at the flat register file at the restored <code>baseReg_</code>.</li>
+  <li>Write <code>Option&lt;T&gt;.some(value)</code> to the caller's result register.</li>
+  <li>Clear stale caller references in the <code>CoroutineObj</code> (prevents false GC retention).</li>
+  <li>Tail-call to caller's return PC.</li>
+</ol>
+
+<h4>Done (coroutine &rarr; caller)</h4>
+<p>Same as yield, but without copying registers to the save slot. Sets state to <code>Done</code>, clears <code>topFrame_</code>, and writes <code>Option&lt;T&gt;.none</code>.</p>
+
+<!-- -------------------------------- -->
+<h3 id="rt-register-model">5.5 Register Model</h3>
+
+<p>The VM's <code>reg(i)</code> accessor uses an indirection pointer <code>currentRegs_</code>:</p>
+
+<pre><code><span class="kw">inline</span> <span class="typ">Word&amp;</span> <span class="fn">reg</span>(<span class="typ">u16</span> i) { <span class="kw">return</span> currentRegs_[i]; }</code></pre>
+
+<p><code>currentRegs_</code> always points to <code>regs_ + baseReg_</code> (the flat register file). This is true for both normal execution and coroutine execution. The <code>pushFrame</code> and <code>popFrame</code> functions unconditionally update <code>currentRegs_</code> when they change <code>baseReg_</code>.</p>
+
+<p>This means all opcodes &mdash; including <code>op_call</code>, <code>op_return</code>, and all others &mdash; work identically whether inside a coroutine or not. No coroutine-aware branching is needed in the call/return path. The only coroutine-specific opcodes are <code>op_coro_create</code>, <code>op_coro_resume</code>, <code>op_yield</code>, and <code>op_coro_done</code>.</p>
+
+
+<!-- ================================================================ -->
+<h2 id="gc">6. Garbage Collection</h2>
+
+<p>The incremental tri-color GC must correctly track object references inside suspended coroutines. This requires three mechanisms: GC maps, frame scanning, and write barriers.</p>
+
+<!-- -------------------------------- -->
+<h3 id="gc-maps">6.1 GC Maps</h3>
+
+<p>Each <code>CodeBlock</code> stores a vector of GC maps &mdash; one per <code>yield</code> point in the coroutine function:</p>
+
+<pre><code>std::vector&lt;std::vector&lt;<span class="typ">u16</span>&gt;&gt; coroGCMaps_;</code></pre>
+
+<p>Each inner vector lists the register indices that hold <code>Obj*</code> values at that particular yield point. These maps are built at compile time by inspecting the local variable scopes at each <code>yield</code> statement.</p>
+
+<p>For example, if a coroutine has two local variables &mdash; an <code>Int</code> in register 0 and a <code>String</code> in register 1 &mdash; the GC map at a yield point would be <code>[1]</code> (only register 1 holds an object pointer).</p>
+
+<!-- -------------------------------- -->
+<h3 id="gc-scanning">6.2 Frame Scanning</h3>
+
+<p><code>CoroutineFrame::gcScan()</code> uses the GC map to mark only the registers that hold live object pointers:</p>
+
+<pre><code><span class="kw">void</span> <span class="fn">gcScan</span>(<span class="typ">GC*</span> gc, <span class="typ">i32&amp;</span> ioWordsToScan) {
+    Obj::gcScan(gc, ioWordsToScan);
+    <span class="kw">if</span> (caller_) { gc-&gt;mark(caller_); --ioWordsToScan; }
+    <span class="cmt">// Scan Obj* registers using GC map</span>
+    <span class="kw">if</span> (codeBlock_ &amp;&amp; gcMapIndex_ &lt; codeBlock_-&gt;coroGCMaps_.size()) {
+        <span class="kw">auto&amp;</span> map = codeBlock_-&gt;coroGCMaps_[gcMapIndex_];
+        <span class="kw">for</span> (<span class="typ">u16</span> idx : map) {
+            <span class="kw">if</span> (idx &lt; numRegs_ &amp;&amp; regs_[idx].o) {
+                gc-&gt;mark(regs_[idx].o);
+                --ioWordsToScan;
+            }
+        }
+    }
+}</code></pre>
+
+<p><code>CoroutineObj::gcScan()</code> marks the top frame, any caller coroutine/frame references, and scans <code>Obj*</code> arguments using the function's type information:</p>
+
+<pre><code><span class="kw">void</span> <span class="fn">gcScan</span>(<span class="typ">GC*</span> gc, <span class="typ">i32&amp;</span> ioWordsToScan) {
+    Obj::gcScan(gc, ioWordsToScan);
+    <span class="kw">if</span> (topFrame_) { gc-&gt;mark(topFrame_); }
+    <span class="kw">if</span> (callerCoroFrame_) { gc-&gt;mark(callerCoroFrame_); }
+    <span class="kw">if</span> (callerCoroutine_) { gc-&gt;mark(callerCoroutine_); }
+    <span class="cmt">// Scan Obj* args using funcType_</span>
+    <span class="kw">for</span> (<span class="typ">u16</span> i = <span class="num">0</span>; i &lt; numArgs_; ++i) {
+        <span class="kw">if</span> (funcType_-&gt;argTypes_[i]-&gt;isObjType() &amp;&amp; args_[i].o)
+            gc-&gt;mark(args_[i].o);
+    }
+}</code></pre>
+
+<!-- -------------------------------- -->
+<h3 id="gc-write-barrier">6.3 Write Barriers on Resume</h3>
+
+<p>The incremental GC uses tri-color marking. Between a yield and the next resume, GC heartbeats may have scanned the suspended frames to <strong>black</strong> (fully scanned). When the coroutine resumes and writes new object pointers into those black frames, the tri-color invariant would be violated.</p>
+
+<p>To prevent this, <code>op_coro_resume</code> applies a <strong>write barrier</strong> to the save-slot <code>CoroutineFrame</code> before resuming:</p>
+
+<pre><code><span class="cmt">// Write barrier on CoroutineFrame (safety for incremental GC)</span>
+vm.gc().writeBarrier(frame);</code></pre>
+
+<p>This re-greys the save slot, ensuring it will be re-scanned by the GC and any new object references will be discovered. Since each coroutine has exactly one save slot, this is always O(1).</p>
+
+<div class="note">
+<strong>Why this is correct:</strong>
+After write-barriering, the save slot is at most grey. During execution (within an event), no <code>gcHeartbeat()</code> runs. The coroutine body executes using the flat register file (which the GC does not scan &mdash; the stack collapses between events). When the coroutine yields, registers are copied into the save slot, and a future heartbeat re-scans the grey save slot to see the latest values.
+</div>
+
+<!-- -------------------------------- -->
+<h3 id="gc-roots">6.4 Root Marking</h3>
+
+<p><code>GC::markRoots()</code> scans the VM's global variables and the active coroutine state:</p>
+
+<pre><code><span class="kw">void</span> GC::<span class="fn">markRoots</span>() {
+    <span class="cmt">// Scan global variables that hold Obj pointers</span>
+    <span class="kw">for</span> (<span class="typ">u32</span> i = <span class="num">0</span>; i &lt; gCurrentVM-&gt;numGlobals(); ++i) {
+        <span class="kw">if</span> (gCurrentVM-&gt;globalIsObj_[i]) {
+            <span class="typ">Obj*</span> obj = gCurrentVM-&gt;globals_[i].o;
+            <span class="kw">if</span> (obj) mark(obj);
+        }
+    }
+
+    <span class="cmt">// Scan active coroutine save slot (safety — should be null between events)</span>
+    <span class="kw">if</span> (gCurrentVM-&gt;currentCoroutine_)
+        mark(gCurrentVM-&gt;currentCoroutine_);
+    <span class="kw">if</span> (gCurrentVM-&gt;currentCoroFrame_) {
+        <span class="typ">CoroutineFrame*</span> f = gCurrentVM-&gt;currentCoroFrame_;
+        <span class="kw">while</span> (f) { mark(f); f = f-&gt;caller_; }
+    }
+}</code></pre>
+
+<p>Suspended coroutines that are stored in global variables are reachable through the global scan. The <code>gcScan</code> methods on <code>CoroutineObj</code> and <code>CoroutineFrame</code> then transitively mark all reachable objects within the coroutine's state.</p>
+
+
+<!-- ================================================================ -->
+<h2 id="opcodes">7. Opcode Reference</h2>
+
+<!-- -------------------------------- -->
+<h3 id="op-coro-create">7.1 op_coro_create</h3>
+
+<p>Creates a new <code>CoroutineObj</code> in the <code>Created</code> state.</p>
+
+<table>
+  <tr><th>Word</th><th>Field</th><th>Description</th></tr>
+  <tr><td>0</td><td><code>op</code></td><td>Opcode handler pointer</td></tr>
+  <tr><td>1</td><td><code>regs[0..2]</code></td><td><code>dst</code>, <code>argBase</code>, <code>argc</code></td></tr>
+  <tr><td>2</td><td><code>i</code></td><td>Global index containing the <code>CodeBlock*</code></td></tr>
+  <tr><td>3</td><td><code>p</code></td><td>Pointer to <code>CoroutineType*</code></td></tr>
+</table>
+
+<p><strong>Behavior:</strong> Allocates a <code>CoroutineObj</code> with space for <code>argc</code> arguments. Copies argument values from registers <code>argBase..argBase+argc-1</code> into the coroutine's <code>args_[]</code> array. Stores the coroutine object in register <code>dst</code>. Advances PC by 4.</p>
+
+<p><strong>Emitted for:</strong> calls to <code>coro fn</code> functions (when <code>isCoroCall</code> is true).</p>
+
+<!-- -------------------------------- -->
+<h3 id="op-coro-resume">7.2 op_coro_resume</h3>
+
+<p>Resumes a suspended coroutine, or returns <code>none</code> if it is done.</p>
+
+<table>
+  <tr><th>Word</th><th>Field</th><th>Description</th></tr>
+  <tr><td>0</td><td><code>op</code></td><td>Opcode handler pointer</td></tr>
+  <tr><td>1</td><td><code>regs[0..1]</code></td><td><code>dst</code>, <code>coroReg</code></td></tr>
+</table>
+
+<p><strong>Behavior:</strong></p>
+<ul>
+  <li>If <code>state_ == Done</code>: creates <code>Option&lt;T&gt;.none</code>, writes to <code>dst</code>, advances PC by 2.</li>
+  <li>Otherwise: saves caller context, activates coroutine, computes <code>newBase</code> (after caller's register window), then:
+    <ul>
+      <li>If <code>Created</code> (no <code>topFrame_</code>): allocates a <code>CoroutineFrame</code> save slot, copies args from <code>coro-&gt;args_[]</code> to flat register file, pushes a flat frame, jumps to entry point.</li>
+      <li>If <code>Suspended</code> (has <code>topFrame_</code>): applies write barrier to save slot, copies registers from save slot to flat register file, pushes a flat frame, jumps to <code>resumePC_</code>.</li>
+    </ul>
+  </li>
+</ul>
+
+<p><strong>Emitted for:</strong> calls to <code>next()</code> on a coroutine (when <code>isCoroResume</code> is true).</p>
+
+<!-- -------------------------------- -->
+<h3 id="op-yield">7.3 op_yield</h3>
+
+<p>Suspends the current coroutine and returns a value to the caller.</p>
+
+<table>
+  <tr><th>Word</th><th>Field</th><th>Description</th></tr>
+  <tr><td>0</td><td><code>op</code></td><td>Opcode handler pointer</td></tr>
+  <tr><td>1</td><td><code>regs[0..1]</code></td><td><code>src</code> (value register), <code>gcMapIndex</code></td></tr>
+  <tr><td>2</td><td><code>p</code></td><td>Pointer to <code>Option&lt;T&gt;</code> type (<code>EnumType*</code>)</td></tr>
+</table>
+
+<p><strong>Behavior:</strong> Copies the coroutine body's registers from the flat register file into the <code>CoroutineFrame</code> save slot. Saves <code>resumePC_ = pc + 3</code> and <code>gcMapIndex_</code> on the save slot. Sets state to <code>Suspended</code>. Creates <code>Option&lt;T&gt;.some(value)</code>. Restores caller context (baseReg, frameCount, currentRegs). Writes the <code>some</code> to the caller's result register. Clears stale caller refs. Tail-calls to the caller's return PC.</p>
+
+<p><strong>Emitted for:</strong> <code>yield expr;</code> statements inside a <code>coro fn</code> body.</p>
+
+<!-- -------------------------------- -->
+<h3 id="op-coro-done">7.4 op_coro_done</h3>
+
+<p>Marks the current coroutine as finished and returns <code>none</code> to the caller.</p>
+
+<table>
+  <tr><th>Word</th><th>Field</th><th>Description</th></tr>
+  <tr><td>0</td><td><code>op</code></td><td>Opcode handler pointer</td></tr>
+  <tr><td>1</td><td><code>p</code></td><td>Pointer to <code>Option&lt;T&gt;</code> type (<code>EnumType*</code>)</td></tr>
+</table>
+
+<p><strong>Behavior:</strong> Sets <code>topFrame_ = nullptr</code> and <code>state_ = Done</code>. Creates <code>Option&lt;T&gt;.none</code>. Restores caller context. Writes <code>none</code> to caller's result register. Tail-calls to caller's return PC.</p>
+
+<p><strong>Emitted for:</strong> the implicit end of a <code>coro fn</code> body (replaces <code>op_return_void</code>).</p>
+
+<!-- -------------------------------- -->
+<h3 id="op-patched">7.5 Unpatched Opcodes</h3>
+
+<p>With the save-slot model, no existing opcodes need coroutine-specific branching. <code>op_call</code>, <code>op_return</code>, <code>op_return_void</code>, <code>op_call_lambda</code>, <code>op_tail_call</code>, and <code>op_tail_call_lambda</code> all use the flat register file unconditionally. Since <code>pushFrame</code> and <code>popFrame</code> always update <code>currentRegs_ = regs_ + baseReg_</code>, these opcodes work identically inside and outside of coroutines.</p>
+
+<p>This is possible because <code>yield</code> is restricted to the coroutine body (single-level yield). Normal functions called from within a coroutine always complete before a yield can occur, so their registers do not need to survive across suspension points.</p>
+
+
+<!-- ================================================================ -->
+<h2 id="compilation">8. Compilation Pipeline</h2>
+
+<p>This section traces a <code>coro fn</code> from source text to executable opcodes.</p>
+
+<!-- -------------------------------- -->
+<h3 id="comp-lexer">8.1 Lexer</h3>
+
+<p>Two keywords are added to the <code>TokenKind</code> enum:</p>
+
+<table>
+  <tr><th>Token</th><th>Keyword</th><th>File</th></tr>
+  <tr><td><code>TokenKind::Coro</code></td><td><code>coro</code></td><td>lexer.hpp:34, lexer.cpp:170</td></tr>
+  <tr><td><code>TokenKind::Yield</code></td><td><code>yield</code></td><td>lexer.hpp:34, lexer.cpp:171</td></tr>
+</table>
+
+<!-- -------------------------------- -->
+<h3 id="comp-parser">8.2 Parser</h3>
+
+<p>The parser handles two new syntactic forms:</p>
+
+<h4><code>coro fn</code> declaration</h4>
+<p>When the parser encounters <code>TokenKind::Coro</code>, it consumes the token, expects <code>fn</code> to follow, parses the function declaration normally, and sets <code>isCoroutine = true</code> on the resulting <code>FnDeclNode</code>.</p>
+
+<h4><code>yield</code> statement</h4>
+<p>When the parser encounters <code>TokenKind::Yield</code> in statement position, it calls <code>parseYieldStmt()</code>, which follows the same pattern as <code>parseReturnStmt()</code>: consumes the keyword, optionally parses an expression, and expects a terminator.</p>
+
+<p>The AST node <code>YieldStmtNode</code> contains a single field <code>value</code> (the expression to yield).</p>
+
+<!-- -------------------------------- -->
+<h3 id="comp-typechecker">8.3 Type Checker</h3>
+
+<p>The type checker performs several coroutine-specific tasks:</p>
+
+<ol>
+  <li><strong>Return type wrapping.</strong> For a <code>coro fn</code> with declared return type <code>T</code>, the type checker wraps it to <code>Coroutine&lt;T&gt;</code> and stores this as the function's effective return type.</li>
+  <li><strong>Body return type.</strong> Inside a <code>coro fn</code> body, the current return type is set to <code>Void</code> (the body doesn't return values, it yields them).</li>
+  <li><strong>Yield checking.</strong> <code>checkYieldStmt()</code> verifies that:
+    <ul>
+      <li>The <code>yield</code> is inside a <code>coro fn</code> body (otherwise: compile error).</li>
+      <li>The yielded expression's type matches the declared yield type.</li>
+    </ul>
+  </li>
+  <li><strong>Call site marking.</strong> When resolving a function call:
+    <ul>
+      <li>If the target function returns <code>CoroutineType*</code>, the call is marked <code>isCoroCall = true</code>.</li>
+      <li>If the function is <code>next</code> and the argument is a <code>CoroutineType*</code>, the call is marked <code>isCoroResume = true</code>.</li>
+    </ul>
+  </li>
+  <li><strong>Type annotation resolution.</strong> <code>Coroutine&lt;T&gt;</code> in type annotations (e.g., function parameters) is resolved by matching the template name <code>"Coroutine"</code> and delegating to <code>coroutineType()</code>.</li>
+</ol>
+
+<!-- -------------------------------- -->
+<h3 id="comp-codegen">8.4 Code Generator</h3>
+
+<p>The code generator tracks three pieces of coroutine state:</p>
+
+<table>
+  <tr><th>Field</th><th>Purpose</th></tr>
+  <tr><td><code>inCoroutineFn_</code></td><td>Whether we're currently generating code for a <code>coro fn</code> body.</td></tr>
+  <tr><td><code>currentYieldCount_</code></td><td>Counter for GC map indices, incremented at each <code>yield</code>.</td></tr>
+  <tr><td><code>currentCoroOptionType_</code></td><td>The <code>Option&lt;T&gt;</code> type for the current coroutine's yield type.</td></tr>
+</table>
+
+<h4>Coroutine function body</h4>
+<p>A <code>coro fn</code> body is compiled identically to a normal function body, with two differences:</p>
+<ol>
+  <li>The <code>CodeBlock</code>'s <code>funcType</code> field is set (used by <code>op_coro_create</code> for GC scanning of arguments).</li>
+  <li>The implicit terminator at the end of the body is <code>op_coro_done</code> instead of <code>op_return_void</code>.</li>
+</ol>
+
+<h4>Yield statement</h4>
+<p><code>genYieldStmt()</code>:</p>
+<ol>
+  <li>Collects a GC map by scanning all local variable scopes for registers holding <code>Obj*</code> types.</li>
+  <li>Appends the map to <code>currentBlock_-&gt;coroGCMaps_</code> and records the index.</li>
+  <li>Generates the value expression.</li>
+  <li>Emits <code>op_yield [srcReg, gcMapIndex] [optionType*]</code>.</li>
+</ol>
+
+<h4>Call site emission</h4>
+<p>In <code>genCall()</code>, two special cases are handled:</p>
+<ul>
+  <li><code>isCoroResume</code>: emits <code>op_coro_resume [dst, coroReg]</code> instead of a normal function call.</li>
+  <li><code>isCoroCall</code>: emits <code>op_coro_create [dst, argBase, argc] [globalIdx] [coroType*]</code> instead of <code>op_call</code>.</li>
+</ul>
+
+<!-- -------------------------------- -->
+<h3 id="comp-builtins">8.5 Builtin Resolution</h3>
+
+<p>The <code>next</code> function is registered as a <strong>template builtin</strong> with a custom resolver:</p>
+
+<pre><code><span class="kw">static bool</span> <span class="fn">resolve_next</span>(Compiler&amp; compiler, <span class="kw">const</span> std::vector&lt;Type*&gt;&amp; args,
+    std::vector&lt;Type*&gt;&amp; pt, Type*&amp; rt, CFun&amp; cf) {
+    <span class="kw">if</span> (args.size() != <span class="num">1</span>) <span class="kw">return false</span>;
+    <span class="kw">auto*</span> ct = <span class="kw">dynamic_cast</span>&lt;CoroutineType*&gt;(args[<span class="num">0</span>]);
+    <span class="kw">if</span> (!ct) <span class="kw">return false</span>;
+    pt = {ct};
+    rt = compiler.optionType(ct-&gt;yieldType_);
+    cf = <span class="kw">nullptr</span>;  <span class="cmt">// codegen handles via op_coro_resume</span>
+    <span class="kw">return true</span>;
+}</code></pre>
+
+<p>Key detail: <code>cf = nullptr</code> signals to the code generator that this builtin has no C function implementation &mdash; the codegen must emit <code>op_coro_resume</code> directly. The type checker uses the resolver to determine the return type (<code>Option&lt;T&gt;</code>) and to mark the call as <code>isCoroResume</code>.</p>
+
+
+<!-- ================================================================ -->
+<h2 id="file-map">9. Source File Map</h2>
+
+<p>Summary of all files modified or created for the coroutine implementation:</p>
+
+<table>
+  <tr><th>File</th><th>Changes</th></tr>
+  <tr><td><code>src/lexer.hpp</code></td><td>Added <code>Coro</code>, <code>Yield</code> to <code>TokenKind</code> enum.</td></tr>
+  <tr><td><code>src/lexer.cpp</code></td><td>Added keyword recognition for <code>"coro"</code> and <code>"yield"</code>.</td></tr>
+  <tr><td><code>src/ast.hpp</code></td><td>Added <code>YieldStmt</code> to <code>Kind</code> enum. Added <code>YieldStmtNode</code>. Added <code>isCoroutine</code> flag on <code>FnDeclNode</code>. Added <code>isCoroCall</code>, <code>isCoroResume</code> flags on <code>CallExpr_</code>.</td></tr>
+  <tr><td><code>src/parser.hpp</code></td><td>Declared <code>parseYieldStmt()</code>.</td></tr>
+  <tr><td><code>src/parser.cpp</code></td><td>Added <code>Coro</code> case in <code>parseDeclaration()</code>. Added <code>Yield</code> case in <code>parseStatement()</code>. Implemented <code>parseYieldStmt()</code>.</td></tr>
+  <tr><td><code>src/type_system.hpp</code></td><td>Added <code>CoroutineType</code> class (inherits <code>ObjType</code>).</td></tr>
+  <tr><td><code>src/type_universe.hpp</code></td><td>Added <code>coroutineType()</code> factory declaration and <code>coroutineTypeCache_</code>.</td></tr>
+  <tr><td><code>src/type_universe.cpp</code></td><td>Implemented <code>coroutineType()</code> with interning.</td></tr>
+  <tr><td><code>src/value.hpp</code></td><td>Added <code>coroGCMaps_</code> to <code>CodeBlock</code>. Added <code>CoroutineFrame</code> and <code>CoroutineObj</code> classes.</td></tr>
+  <tr><td><code>src/value.cpp</code></td><td>Implemented <code>CoroutineFrame::create()</code> and <code>CoroutineObj::create()</code> factories.</td></tr>
+  <tr><td><code>src/vm.hpp</code></td><td>Added <code>currentCoroutine_</code>, <code>currentCoroFrame_</code>, <code>currentRegs_</code>. Changed <code>reg(i)</code> to use <code>currentRegs_</code>. Added coroutine accessors and <code>currentFrameNumRegs()</code>.</td></tr>
+  <tr><td><code>src/vm.cpp</code></td><td>Initialized <code>currentRegs_</code>. <code>pushFrame</code>/<code>popFrame</code> unconditionally update <code>currentRegs_</code>. Extended <code>markRoots()</code>. Added <code>currentFrameNumRegs()</code> accessor.</td></tr>
+  <tr><td><code>src/opcodes.hpp</code></td><td>Declared <code>op_coro_create</code>, <code>op_coro_resume</code>, <code>op_yield</code>, <code>op_coro_done</code>.</td></tr>
+  <tr><td><code>src/opcodes.cpp</code></td><td>Implemented four new opcodes (<code>op_coro_create</code>, <code>op_coro_resume</code>, <code>op_yield</code>, <code>op_coro_done</code>). Existing call/return opcodes are unmodified &mdash; they use the flat register file for all execution, including within coroutines.</td></tr>
+  <tr><td><code>src/type_checker.hpp</code></td><td>Added <code>inCoroutineBody_</code>, <code>currentYieldType_</code>, <code>checkYieldStmt()</code>.</td></tr>
+  <tr><td><code>src/type_checker.cpp</code></td><td>Coroutine return type wrapping. Yield statement checking. Call site marking. <code>Coroutine&lt;T&gt;</code> type annotation resolution.</td></tr>
+  <tr><td><code>src/codegen.hpp</code></td><td>Added <code>inCoroutineFn_</code>, <code>currentYieldCount_</code>, <code>currentCoroOptionType_</code>, <code>genYieldStmt()</code>.</td></tr>
+  <tr><td><code>src/codegen.cpp</code></td><td>Coroutine function codegen. Yield statement codegen. <code>op_coro_create</code>/<code>op_coro_resume</code> emission at call sites.</td></tr>
+  <tr><td><code>src/builtins.cpp</code></td><td>Added <code>resolve_next</code> template resolver. Registered <code>"next"</code> builtin template.</td></tr>
+  <tr><td><code>src/compiler.hpp</code></td><td>Added <code>coroutineType()</code> convenience accessor.</td></tr>
+  <tr><td><code>tests/coro_test.x</code></td><td>Comprehensive coroutine test (16 test sections).</td></tr>
+  <tr><td><code>tests/coro_test.expected</code></td><td>Expected output for the coroutine test.</td></tr>
+</table>
+
+</main>
+</body>
+</html>

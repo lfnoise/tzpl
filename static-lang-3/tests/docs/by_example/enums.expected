@@ -1,0 +1,10 @@
+Option.some(42)
+Option.none
+Result.ok(success)
+42
+99
+0
+1
+2
+0
+1

@@ -1,0 +1,15 @@
+Point(1.0, 2.0)
+1.0
+2.0
+Temperature(98.6)
+98.6
+3.0
+98.6
+Wrapper<Int>(42)
+42
+Wrapper<String>(hello)
+hello
+RGB(255, 128, 0)
+255
+128
+0

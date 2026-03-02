@@ -1,0 +1,17 @@
+Vec2 { x: 4.0, y: 6.0 }
+Vec2 { x: 2.0, y: 2.0 }
+Vec2 { x: 2.0, y: 4.0 }
+Vec2 { x: 3.0, y: 6.0 }
+Vec2 { x: 1.5, y: 2.0 }
+true
+false
+true
+7.211102550927978
+11.0
+Vec2 { x: 14.0, y: 16.0 }
+[1.0, 1.0, 5.0]
+Vec2 { x: -1.0, y: -2.0 }
+Mask { bits: -1 }
+Mask { bits: -256 }
+Flag { val: false }
+Flag { val: true }

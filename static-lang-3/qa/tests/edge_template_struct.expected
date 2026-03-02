@@ -1,0 +1,21 @@
+Box<Int> { value: 42 }
+Box<String> { value: hello }
+Box<Float> { value: 3.14 }
+42
+hello
+3.14
+Box<Int> { value: 99 }
+Pair<Int, String> { first: 1, second: one }
+1
+one
+[1, 2, 3]
+Option2<Box<Int>>.some2(Box<Int> { value: 42 })
+Pair<Int, String> { first: 100, second: one }
+100
+one
+Wrapper<(Int, Int, Int)> { data: (1, 2, 3), label: tuple }
+(1, 2, 3)
+tuple
+42
+Box<Int> { value: 99 }
+99

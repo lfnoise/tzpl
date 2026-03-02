@@ -1,0 +1,42 @@
+true
+false
+0
+42
+-7
+3.14
+-0.5
+0.0
+:hello
+:world
+abc
+
+1/2
+3/4
+3+4i
+0+1i
+[1, 2, 3]
+[true, false, true]
+[hello, world]
+[[1, 2], [3, 4]]
+(1, two, 3.0)
+(true, 42)
+((1, 2), (3, 4))
+List(10, 20, 30)
+List(1, 2, 3)
+Point { x: 1.0, y: 2.0 }
+Person { name: Alice, age: 30 }
+Line { start: Point { x: 0.0, y: 0.0 }, end: Point { x: 3.0, y: 4.0 } }
+Color.red
+Color.blue
+Option.some(42)
+Option.none
+Shape.circle(5.0)
+Shape.rect(3.0, 4.0)
+[b: 2, a: 1]
+Set(30, 20, 10)
+[Point { x: 1.0, y: 2.0 }, Point { x: 3.0, y: 4.0 }]
+[Option.some(1), Option.none, Option.some(3)]
+[(Point { x: 0.0, y: 0.0 }, origin), (Point { x: 1.0, y: 1.0 }, unit)]
+The answer is 42
+42
+[1, 2, 3]
