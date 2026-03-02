@@ -132,49 +132,11 @@ Current state: Already builds `langx_lib` as a static library with public C/C++ 
 
 ---
 
-## Phase 2: Finish Critical Language Features
+## Phase 2: FFI Bindings for Audio Engine
 
-**Goal**: Complete the static-lang-3 features needed before integration.
+**Goal**: Register audio-engine client functions as callable from Language X. Having FFI bindings early allows writing tests for the audio engine in the language.
 
-### 2.1 Module system — DONE
-
-The module system is fully implemented and tested. All three import syntaxes work (whole, wildcard, named with aliases), qualified access (`module.func(args)`) works including in space pipeline syntax, module file resolution supports relative and include-path-based lookup, circular import detection and module caching are in place, and all export types (functions, variables, structs, enums, templates, type aliases) are supported. No further work needed.
-
-### 2.2 Event-driven VM (Phase 12 in lang's plan)
-
-Critical for real-time audio integration — the VM must respond to events and then return control.
-
-**Tasks**:
-1. Implement an event dispatch loop: VM receives an event, executes the handler function, stack collapses, control returns to host.
-2. Define event types: timer tick, OSC message received, note trigger, control change, etc.
-3. Integrate with audio-engine's scheduling — language event handlers can be scheduled as engine commands.
-4. Ensure the VM can be "stepped" from a host loop (process one event, return).
-
-### 2.3 Methods (Phase 10 in lang's plan)
-
-Useful for ergonomic API design (e.g., `synth.setControl("freq", 440)`).
-
-**Tasks**:
-1. Implement method declaration syntax and dispatch on receiver type.
-2. Support `this` keyword in method bodies.
-3. Methods on built-in types (e.g., Array methods).
-
-### 2.4 Error handling improvements (Phase 15)
-
-Needed for a usable live coding environment — errors must not crash the VM.
-
-**Tasks**:
-1. Runtime error trapping (division by zero, index out of bounds, etc.) — return error to host instead of crashing.
-2. Better parser error recovery for live coding feedback.
-3. Source location tracking in error messages.
-
----
-
-## Phase 3: FFI Bindings for Audio Engine
-
-**Goal**: Register audio-engine client functions as callable from Language X.
-
-### 3.1 Design the language-side audio API
+### 2.1 Design the language-side audio API
 
 Define a set of Language X functions that map to audio-engine commands. These are registered as foreign functions via the existing FFI.
 
@@ -214,7 +176,7 @@ fn noteOff(nodeID: Int, noteID: Int) -> Void
 fn allNotesOff(nodeID: Int) -> Void
 ```
 
-### 3.2 Implement the FFI bridge
+### 2.2 Implement the FFI bridge
 
 **Tasks**:
 1. Write a C++ bridge layer that wraps each `jscs_client_interface` function into the `void (*cfun)(VM&, u16 result_reg, u16 argc, u16 arg_base)` FFI signature expected by langx.
@@ -223,7 +185,7 @@ fn allNotesOff(nodeID: Int) -> Void
 4. The bridge holds a pointer to the `Engine*` via the VM's user data pointer.
 5. Mark all scheduling functions as `rtSafe` so they can be called from event handlers on the audio thread.
 
-### 3.3 Test the FFI bridge
+### 2.3 Test the FFI bridge
 
 **Tasks**:
 1. Write Language X test scripts that create nodes, connect them, set parameters.
@@ -232,11 +194,11 @@ fn allNotesOff(nodeID: Int) -> Void
 
 ---
 
-## Phase 4: FFI Bindings for Synthdef Compiler
+## Phase 3: FFI Bindings for Synthdef Compiler
 
 **Goal**: Allow Language X to compile synth definitions at runtime.
 
-### 4.1 Design the language-side synthdef API
+### 3.1 Design the language-side synthdef API
 
 ```
 // Compile a synthdef from s-expression text
@@ -249,7 +211,7 @@ fn compileSynthDefAndLoad(name: String, sexpr: String) -> Void
 fn listSynthDefs() -> Array[String]
 ```
 
-### 4.2 Implement the FFI bridge
+### 3.2 Implement the FFI bridge
 
 **Tasks**:
 1. Write a C++ bridge that calls `synthdef::synthFromSExprText()`, `synthdef::cppCodeGen()`, and `synthdef::compileAndLink()`.
@@ -257,7 +219,7 @@ fn listSynthDefs() -> Array[String]
 3. Handle compilation errors gracefully — return error strings to the language.
 4. Consider caching: if a synthdef with the same name/hash already exists, skip recompilation.
 
-### 4.3 Higher-level DSL in Language X (future)
+### 3.3 Higher-level DSL in Language X (future)
 
 Once the basic s-expression bridge works, a more ergonomic Language X DSL could be built that generates s-expressions:
 
@@ -271,6 +233,42 @@ sine.compile()
 ```
 
 This is lower priority and can be built incrementally on top of the s-expression bridge.
+
+---
+
+## Phase 4: Finish Critical Language Features
+
+**Goal**: Complete the static-lang-3 features needed for deeper integration.
+
+### 4.1 Module system — DONE
+
+The module system is fully implemented and tested. All three import syntaxes work (whole, wildcard, named with aliases), qualified access (`module.func(args)`) works including in space pipeline syntax, module file resolution supports relative and include-path-based lookup, circular import detection and module caching are in place, and all export types (functions, variables, structs, enums, templates, type aliases) are supported. No further work needed.
+
+### 4.2 Event-driven VM (Phase 12 in lang's plan)
+
+Critical for real-time audio integration — the VM must respond to events and then return control. There are two classes of event handler with different constraints:
+
+**Real-time event handlers** run integrated into the audio-engine's `Silo` class. They must not call the system allocator or any blocking functions. They never handle I/O directly. Events include: timer tick, note trigger, control change, per-sample or per-buffer callbacks.
+
+**Non-real-time event handlers** run on a separate thread with fewer restrictions. They handle OSC and NATS I/O, file operations, and other tasks that may block or allocate.
+
+**All VMs** (RT and NRT) must support receiving code install updates (hot-reloading new function definitions or event handlers).
+
+**Tasks**:
+1. Implement an event dispatch loop: VM receives an event, executes the handler function, stack collapses, control returns to host.
+2. Define event types and which are RT vs NRT: RT events (timer tick, note trigger, control change, code update), NRT events (OSC message, NATS message, code update).
+3. Integrate RT event handlers into the audio-engine's Silo — the VM runs within the Silo's processing loop using only the RT-safe allocator and lock-free communication.
+4. Implement NRT event loop for handling I/O protocols (OSC, NATS) and dispatching to handler functions.
+5. Implement code install updates — all VMs can receive and apply new function/handler definitions while running.
+6. Ensure the VM can be "stepped" from a host loop (process one event, return).
+
+### 4.3 Error handling improvements
+
+Improve the live coding feedback loop.
+
+**Tasks**:
+1. Better parser error recovery — after the first error on a line, skip to end of line instead of producing spurious follow-on errors.
+2. Improve error location highlighting — currently the error highlights the token where the parser detects the failure, but the parser may consume several tokens through a whole rule before returning failure, so the highlighted location can be far from the actual cause.
 
 ---
 
@@ -305,7 +303,7 @@ Recommendation: **oscpack** or a minimal custom implementation to avoid external
 
 **Tasks**:
 1. Add an OSC listener that can dispatch events to the VM.
-2. Map OSC messages to VM events (ties into Phase 2.2 event-driven VM).
+2. Map OSC messages to VM events (ties into Phase 4.2 event-driven VM).
 3. `/eval <code>` — compile and execute a string of Language X code.
 4. `/call <functionName> <args...>` — call a named function.
 
@@ -413,12 +411,9 @@ Currently stubs.
 
 **Goal**: Complete lower-priority static-lang-3 features.
 
-### 9.1 Infinite lists and generators (Phase 7 in lang's plan)
+### 9.1 Infinite lists and generators — DONE
 
-**Tasks**:
-1. Implement `ord` built-in (infinite list of integers).
-2. Implement lazy `to()` for generating ranges as infinite lists.
-3. Auto-mapping over infinite lists.
+Fully implemented. No further work needed.
 
 ### 9.2 Dynamic scoping (Phase 11 in lang's plan)
 
@@ -438,11 +433,11 @@ Useful for implicit context passing (e.g., current silo, current bundle).
 
 ### 9.4 Optimizations (Phase 14 in lang's plan)
 
+Register allocation and tail call optimization are already done.
+
 **Tasks**:
-1. Register allocation optimization (minimize register pressure).
-2. Constant folding in the compiler.
-3. Function inlining for small functions.
-4. Tail call optimization.
+1. Improved constant folding — some constant folding exists but could cover more cases.
+2. Function inlining for small functions.
 
 ---
 
@@ -652,9 +647,9 @@ These are longer-term goals mentioned in the project description.
 ```
 Phase 0 (Build Infrastructure)
   └─> Phase 1 (Library-ify)
-        ├─> Phase 2 (Language Features)
-        │     └─> Phase 3 (FFI: Audio Engine)
-        │           └─> Phase 4 (FFI: Synthdef Compiler)
+        ├─> Phase 2 (FFI: Audio Engine)
+        │     └─> Phase 3 (FFI: Synthdef Compiler)
+        │           └─> Phase 4 (Language Features)
         │                 └─> Phase 5 (OSC)
         │                       └─> Phase 6 (NATS)
         ├─> Phase 7 (Engine Features) ──────────────────┐
@@ -683,9 +678,9 @@ Phase 0 (Build Infrastructure)
 |-------|-------------|--------|
 | 0 | Build infrastructure | Small |
 | 1 | Library-ify projects | Small |
-| 2 | Critical language features | Large (event-driven VM is the biggest piece) |
-| 3 | FFI: audio-engine | Medium |
-| 4 | FFI: synthdef-compiler | Medium |
+| 2 | FFI: audio-engine | Medium |
+| 3 | FFI: synthdef-compiler | Medium |
+| 4 | Critical language features | Large (event-driven VM is the biggest piece) |
 | 5 | OSC support | Medium |
 | 6 | NATS support | Medium |
 | 7 | Engine feature completion | Medium |
@@ -703,7 +698,7 @@ Phase 0 (Build Infrastructure)
 
 ## Key Risks & Decisions
 
-1. **Event-driven VM design** (Phase 2.2): This is the most architecturally significant remaining work. The VM must be able to process an event handler and return control to the host without blocking. This needs careful design to work with the audio-engine's sample-accurate scheduling.
+1. **Event-driven VM design** (Phase 4.2): This is the most architecturally significant remaining work. The VM must be able to process an event handler and return control to the host without blocking. This needs careful design to work with the audio-engine's sample-accurate scheduling.
 
 2. **UI framework choice** (Phase 10): Dear ImGui is recommended but the project description mentions Qt as an alternative. This should be decided before Phase 10 begins.
 
