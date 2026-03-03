@@ -2161,6 +2161,15 @@ Type* TypeChecker::inferExpr(Expr* expr, Type* expectedType) {
         }
 
         case ASTNode::EnumConstructor: {
+            // This node may be a re-tagged CallExpr_ or FieldExpr_ from a previous
+            // type-check pass (e.g., recheckTemplateBody).  In that case, the
+            // resolvedType is already set correctly — reuse it to avoid UB from
+            // static_cast<EnumConstructExpr*> on a node that isn't one.
+            if (auto* existingEnum = dynamic_cast<EnumType*>(expr->resolvedType)) {
+                result = existingEnum;
+                break;
+            }
+
             auto* ec = static_cast<EnumConstructExpr*>(expr);
             EnumType* etype = nullptr;
 
