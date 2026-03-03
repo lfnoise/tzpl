@@ -1352,6 +1352,30 @@ static void builtin_stutter_array(VM& vm, u16 dst, u16, u16 ab) {
     });
 }
 
+#define REPEAT_VALUETYPE(suffix, typeGetter, field, PodT) \
+static void builtin_repeat_##suffix(VM& vm, u16 dst, u16, u16 ab) { \
+    auto val = vm.reg(ab).field; i64 n = vm.reg(ab+1).i; \
+    if (n < 0) n = 0; \
+    auto* at = vm.arrayType(vm.typeGetter()); \
+    auto* arr = new PodArray<PodT>(at); \
+    arr->v.resize((size_t)n, val); \
+    vm.reg(dst).o = arr; \
+}
+REPEAT_VALUETYPE(int,    intType,    i, i64)
+REPEAT_VALUETYPE(float,  floatType,  f, f64)
+REPEAT_VALUETYPE(bool,   boolType,   i, i64)
+REPEAT_VALUETYPE(symbol, symbolType, i, i64)
+#undef REPEAT_VALUETYPE
+
+static void builtin_repeat_obj(VM& vm, u16 dst, u16, u16 ab) {
+    Obj* val = vm.reg(ab).o; i64 n = vm.reg(ab+1).i;
+    if (n < 0) n = 0;
+    auto* at = vm.arrayType(val->type_);
+    auto* arr = new ObjArray(at);
+    arr->v.resize((size_t)n, val);
+    vm.reg(dst).o = arr;
+}
+
 static void builtin_cat_array(VM& vm, u16 dst, u16, u16 ab) {
     auto* a = vm.reg(ab).o; auto* b = vm.reg(ab+1).o;
     auto* at = static_cast<ArrayType*>(a->type_);
@@ -2788,6 +2812,21 @@ RESOLVE_ARRAY_INT(stride, builtin_stride_array, builtin_stride_list)
 RESOLVE_ARRAY_INT(stutter, builtin_stutter_array, builtin_stutter_list)
 #undef RESOLVE_ARRAY_INT
 
+// repeat: (T, Int) -> Array[T]
+static bool resolve_repeat(Compiler& compiler, const std::vector<Type*>& args,
+    std::vector<Type*>& pt, Type*& rt, CFun& cf) {
+    if (args.size() != 2 || args[1] != compiler.intType()) return false;
+    Type* et = args[0];
+    pt = {et, compiler.intType()};
+    rt = compiler.arrayType(et);
+    if (et == compiler.intType())         cf = builtin_repeat_int;
+    else if (et == compiler.floatType())  cf = builtin_repeat_float;
+    else if (et == compiler.boolType())   cf = builtin_repeat_bool;
+    else if (et == compiler.symbolType()) cf = builtin_repeat_symbol;
+    else                                  cf = builtin_repeat_obj;
+    return true;
+}
+
 // cat: (Array[T], Array[T]) -> Array[T]  or  (List[T], List[T]) -> List[T]
 static bool resolve_cat(Compiler& compiler, const std::vector<Type*>& args,
     std::vector<Type*>& pt, Type*& rt, CFun& cf) {
@@ -3252,6 +3291,98 @@ static bool resolve_isNone(Compiler& compiler, const std::vector<Type*>& args,
     auto* et = dynamic_cast<EnumType*>(args[0]);
     if (!et || !isOptionType(et)) return false;
     pt = {et}; rt = compiler.boolType(); cf = builtin_isNone; return true;
+}
+
+// ============================================================================
+// Ref builtins: ref, deref, setref
+// ============================================================================
+
+// ref(T) -> Ref<T>  — per-type CFuns for value types
+
+static void builtin_ref_int(VM& vm, u16 dst, u16, u16 ab) {
+    auto* ref = new RefValue(vm.refType(vm.intType()));
+    ref->value_ = vm.reg(ab);
+    vm.reg(dst).o = ref;
+}
+
+static void builtin_ref_float(VM& vm, u16 dst, u16, u16 ab) {
+    auto* ref = new RefValue(vm.refType(vm.floatType()));
+    ref->value_ = vm.reg(ab);
+    vm.reg(dst).o = ref;
+}
+
+static void builtin_ref_bool(VM& vm, u16 dst, u16, u16 ab) {
+    auto* ref = new RefValue(vm.refType(vm.boolType()));
+    ref->value_ = vm.reg(ab);
+    vm.reg(dst).o = ref;
+}
+
+static void builtin_ref_symbol(VM& vm, u16 dst, u16, u16 ab) {
+    auto* ref = new RefValue(vm.refType(vm.symbolType()));
+    ref->value_ = vm.reg(ab);
+    vm.reg(dst).o = ref;
+}
+
+// ref for object types — get the type from the Obj*
+static void builtin_ref_obj(VM& vm, u16 dst, u16, u16 ab) {
+    auto* ref = new RefValue(vm.refType(vm.reg(ab).o->type_));
+    ref->value_ = vm.reg(ab);
+    vm.reg(dst).o = ref;
+}
+
+// deref(Ref<T>) -> T  — single implementation for all T
+static void builtin_deref(VM& vm, u16 dst, u16, u16 ab) {
+    auto* ref = static_cast<RefValue*>(vm.reg(ab).o);
+    vm.reg(dst) = ref->value_;
+}
+
+// setref(T, Ref<T>) -> T  — single implementation with write barrier
+static void builtin_setref(VM& vm, u16 dst, u16, u16 ab) {
+    auto* ref = static_cast<RefValue*>(vm.reg(ab + 1).o);
+    ref->value_ = vm.reg(ab);
+    vm.reg(dst) = vm.reg(ab);
+    auto* rt = static_cast<RefType*>(ref->type_);
+    if (rt->elemType_->isObjType()) vm.gc().writeBarrier(ref);
+}
+
+// --- Ref template resolvers ---
+
+static bool resolve_ref(Compiler& compiler, const std::vector<Type*>& args,
+    std::vector<Type*>& pt, Type*& rt, CFun& cf) {
+    if (args.size() != 1) return false;
+    Type* t = args[0];
+    if (t == compiler.intType())         cf = builtin_ref_int;
+    else if (t == compiler.floatType())  cf = builtin_ref_float;
+    else if (t == compiler.boolType())   cf = builtin_ref_bool;
+    else if (t == compiler.symbolType()) cf = builtin_ref_symbol;
+    else if (t->isObjType())             cf = builtin_ref_obj;
+    else return false;
+    pt = {t};
+    rt = compiler.refType(t);
+    return true;
+}
+
+static bool resolve_deref(Compiler& compiler, const std::vector<Type*>& args,
+    std::vector<Type*>& pt, Type*& rt, CFun& cf) {
+    if (args.size() != 1) return false;
+    auto* rft = dynamic_cast<RefType*>(args[0]);
+    if (!rft) return false;
+    pt = {rft};
+    rt = rft->elemType_;
+    cf = builtin_deref;
+    return true;
+}
+
+static bool resolve_setref(Compiler& compiler, const std::vector<Type*>& args,
+    std::vector<Type*>& pt, Type*& rt, CFun& cf) {
+    if (args.size() != 2) return false;
+    auto* rft = dynamic_cast<RefType*>(args[1]);
+    if (!rft) return false;
+    if (args[0] != rft->elemType_) return false;
+    pt = {args[0], rft};
+    rt = args[0];
+    cf = builtin_setref;
+    return true;
 }
 
 // next: Coroutine<T> -> Option<T>  (coroutine resume — handled by op_coro_resume in codegen)
@@ -4342,6 +4473,7 @@ void registerBuiltinFunctions(Compiler& compiler,
     registerTemplate(compiler, functions, "drop",      resolve_drop);
     registerTemplate(compiler, functions, "stride",    resolve_stride);
     registerTemplate(compiler, functions, "stutter",   resolve_stutter);
+    registerTemplate(compiler, functions, "repeat",    resolve_repeat);
     registerTemplate(compiler, functions, "cat",       resolve_cat);
     registerTemplate(compiler, functions, "join",      resolve_join);
     registerTemplate(compiler, functions, "flatten",   resolve_flatten);
@@ -4409,6 +4541,11 @@ void registerBuiltinFunctions(Compiler& compiler,
     // --- print/println builtins (not RT-safe: they write to stdout) ---
     registerTemplate(compiler, functions, "print",        resolve_print,   /*rtSafe=*/false);
     registerTemplate(compiler, functions, "println",      resolve_println, /*rtSafe=*/false);
+
+    // --- Ref builtins ---
+    registerTemplate(compiler, functions, "ref",          resolve_ref);
+    registerTemplate(compiler, functions, "deref",        resolve_deref);
+    registerTemplate(compiler, functions, "setref",       resolve_setref);
 
     // --- Any builtins ---
     registerTemplate(compiler, functions, "any",          resolve_any_single);

@@ -36,6 +36,9 @@ endif()
 if(JSCS_BUILD_BRIDGE AND JSCS_BUILD_LANG AND JSCS_BUILD_AUDIO_ENGINE)
     add_subdirectory(bridge)
 endif()
+# Note: The synthdef-compiler bridge inside bridge/CMakeLists.txt is guarded
+# by if(TARGET synthdef_compiler_lib), so it only builds when
+# JSCS_BUILD_SYNTHDEF_COMPILER is ON.
 
 if(JSCS_BUILD_APP AND EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/app/CMakeLists.txt)
     add_subdirectory(app)

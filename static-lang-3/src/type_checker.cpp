@@ -163,7 +163,23 @@ void TypeChecker::check(Program& program) {
         }
     }
 
-    // Second pass: resolve field/case types (all type names now registered)
+    // Register type aliases (after struct/enum names, before resolving fields/cases)
+    for (auto& item : program.items) {
+        if (item->kind == ASTNode::TypeAliasDecl) {
+            auto* ta = static_cast<TypeAliasDeclNode*>(item.get());
+            if (!ta->typeParams.empty()) {
+                // Generic alias: store unresolved (like template structs)
+                templateTypeAliases_[ta->name] = ta;
+            } else {
+                // Concrete alias: resolve immediately
+                Type* resolved = resolveTypeExpr(ta->typeExpr.get());
+                typeAliases_[ta->name] = resolved;
+                ta->resolvedType = resolved;
+            }
+        }
+    }
+
+    // Second pass: resolve field/case types (all type names and aliases now registered)
     for (auto& item : program.items) {
         if (item->kind == ASTNode::StructDecl) {
             auto* sd = static_cast<StructDeclNode*>(item.get());
@@ -186,22 +202,6 @@ void TypeChecker::check(Program& program) {
                 cases.push_back(NameTypePair{compiler_.intern(ucase.name), t});
             }
             static_cast<EnumType*>(ud->resolvedType)->setCases(std::move(cases));
-        }
-    }
-
-    // Register type aliases (after structs/enums, before functions)
-    for (auto& item : program.items) {
-        if (item->kind == ASTNode::TypeAliasDecl) {
-            auto* ta = static_cast<TypeAliasDeclNode*>(item.get());
-            if (!ta->typeParams.empty()) {
-                // Generic alias: store unresolved (like template structs)
-                templateTypeAliases_[ta->name] = ta;
-            } else {
-                // Concrete alias: resolve immediately
-                Type* resolved = resolveTypeExpr(ta->typeExpr.get());
-                typeAliases_[ta->name] = resolved;
-                ta->resolvedType = resolved;
-            }
         }
     }
 
@@ -366,7 +366,21 @@ void TypeChecker::checkREPLInput(Program& program) {
         }
     }
 
-    // Second pass: resolve field/case types (all type names now registered)
+    // Register type aliases (after struct/enum names, before resolving fields/cases)
+    for (auto& item : program.items) {
+        if (item->kind == ASTNode::TypeAliasDecl) {
+            auto* ta = static_cast<TypeAliasDeclNode*>(item.get());
+            if (!ta->typeParams.empty()) {
+                templateTypeAliases_[ta->name] = ta;
+            } else {
+                Type* resolved = resolveTypeExpr(ta->typeExpr.get());
+                typeAliases_[ta->name] = resolved;
+                ta->resolvedType = resolved;
+            }
+        }
+    }
+
+    // Second pass: resolve field/case types (all type names and aliases now registered)
     for (auto& item : program.items) {
         if (item->kind == ASTNode::StructDecl) {
             auto* sd = static_cast<StructDeclNode*>(item.get());
@@ -389,20 +403,6 @@ void TypeChecker::checkREPLInput(Program& program) {
                 cases.push_back(NameTypePair{compiler_.intern(ucase.name), t});
             }
             static_cast<EnumType*>(ud->resolvedType)->setCases(std::move(cases));
-        }
-    }
-
-    // Register type aliases
-    for (auto& item : program.items) {
-        if (item->kind == ASTNode::TypeAliasDecl) {
-            auto* ta = static_cast<TypeAliasDeclNode*>(item.get());
-            if (!ta->typeParams.empty()) {
-                templateTypeAliases_[ta->name] = ta;
-            } else {
-                Type* resolved = resolveTypeExpr(ta->typeExpr.get());
-                typeAliases_[ta->name] = resolved;
-                ta->resolvedType = resolved;
-            }
         }
     }
 
@@ -755,7 +755,9 @@ void TypeChecker::checkLetDecl(LetDeclNode* decl) {
         if (declaredType == compiler_.floatType() && initType == compiler_.intType()) {
             // OK: promotion
         } else {
-            error(decl->loc, "Type mismatch in let declaration");
+            error(decl->loc, "Type mismatch in let declaration: expected '" +
+                  std::string(declaredType->str()) + "', got '" +
+                  std::string(initType->str()) + "'");
         }
     }
     // nil init with declared ListType: set init's resolvedType
@@ -1227,13 +1229,13 @@ void TypeChecker::checkSwitchStmt(SwitchStmtNode* stmt) {
 
     for (auto& clause : stmt->cases) {
         pushScope();
-        checkPattern(clause.pattern.get(), subjType);
+        checkPattern(clause.pattern.get(), subjType, false, /*inMatch=*/true);
         checkNode(clause.body.get());
         popScope();
     }
 }
 
-void TypeChecker::checkPattern(Pattern* pat, Type* subjType, bool isMutable) {
+void TypeChecker::checkPattern(Pattern* pat, Type* subjType, bool isMutable, bool inMatch) {
     switch (pat->kind) {
         case Pattern::LiteralPat: {
             auto* lit = static_cast<LiteralPattern*>(pat);
@@ -1261,6 +1263,21 @@ void TypeChecker::checkPattern(Pattern* pat, Type* subjType, bool isMutable) {
             break;
         case Pattern::BindingPat: {
             auto* bp = static_cast<BindingPattern*>(pat);
+            // In match context, check if this is an unqualified no-data enum case
+            if (inMatch) {
+                if (auto* etype = dynamic_cast<EnumType*>(subjType)) {
+                    for (size_t i = 0; i < etype->cases_.size(); ++i) {
+                        if (etype->cases_[i].name->str() == bp->name) {
+                            if (etype->cases_[i].type != compiler_.voidType()) {
+                                error(pat->loc, "Enum case '" + bp->name + "' requires a value");
+                            }
+                            pat->enumCaseIndex = (int)i;
+                            pat->resolvedType = etype;
+                            return;
+                        }
+                    }
+                }
+            }
             pat->resolvedType = subjType;
             declareVar(bp->name, subjType, isMutable);
             break;
@@ -1320,7 +1337,7 @@ void TypeChecker::checkPattern(Pattern* pat, Type* subjType, bool isMutable) {
                         if (caseType == compiler_.voidType()) {
                             error(pat->loc, "Enum case '" + ep->caseName + "' has no data");
                         } else {
-                            checkPattern(ep->innerPattern.get(), caseType, isMutable);
+                            checkPattern(ep->innerPattern.get(), caseType, isMutable, inMatch);
                         }
                     }
                     break;
@@ -1382,7 +1399,7 @@ void TypeChecker::checkPattern(Pattern* pat, Type* subjType, bool isMutable) {
                 for (size_t j = 0; j < stype->fields_.size(); ++j) {
                     if (stype->fields_[j].name->str() == field.name) {
                         found = true;
-                        checkPattern(field.pattern.get(), stype->fields_[j].type, isMutable);
+                        checkPattern(field.pattern.get(), stype->fields_[j].type, isMutable, inMatch);
                         break;
                     }
                 }
@@ -1411,6 +1428,40 @@ void TypeChecker::checkPattern(Pattern* pat, Type* subjType, bool isMutable) {
                                   "' does not match subject type");
                             return;
                         }
+                    } else if (inMatch) {
+                        // Try as unqualified enum case with data
+                        if (auto* etype = dynamic_cast<EnumType*>(subjType)) {
+                            for (size_t i = 0; i < etype->cases_.size(); ++i) {
+                                if (etype->cases_[i].name->str() == tp->structName) {
+                                    Type* caseType = etype->cases_[i].type;
+                                    pat->enumCaseIndex = (int)i;
+                                    pat->enumCaseDataType = caseType;
+                                    pat->resolvedType = etype;
+                                    if (caseType == compiler_.voidType()) {
+                                        if (!tp->elements.empty()) {
+                                            error(pat->loc, "Enum case '" + tp->structName + "' has no data");
+                                        }
+                                    } else if (tp->elements.size() == 1) {
+                                        checkPattern(tp->elements[0].get(), caseType, isMutable, inMatch);
+                                    } else {
+                                        auto* ttype = dynamic_cast<TupleType*>(caseType);
+                                        if (!ttype) {
+                                            error(pat->loc, "Cannot destructure non-tuple enum case data with multiple patterns");
+                                        } else if (tp->elements.size() != ttype->fields_.size()) {
+                                            error(pat->loc, "Enum case pattern has " + std::to_string(tp->elements.size()) +
+                                                  " elements but case data has " + std::to_string(ttype->fields_.size()) + " fields");
+                                        } else {
+                                            for (size_t j = 0; j < tp->elements.size(); ++j) {
+                                                checkPattern(tp->elements[j].get(), ttype->fields_[j], isMutable, inMatch);
+                                            }
+                                        }
+                                    }
+                                    return;
+                                }
+                            }
+                        }
+                        error(pat->loc, "Unknown tuple struct '" + tp->structName + "'");
+                        return;
                     } else {
                         error(pat->loc, "Unknown tuple struct '" + tp->structName + "'");
                         return;
@@ -1432,7 +1483,7 @@ void TypeChecker::checkPattern(Pattern* pat, Type* subjType, bool isMutable) {
                     }
                 }
                 for (size_t i = 0; i < tp->elements.size() && i < stype->fields_.size(); ++i) {
-                    checkPattern(tp->elements[i].get(), stype->fields_[i].type, isMutable);
+                    checkPattern(tp->elements[i].get(), stype->fields_[i].type, isMutable, inMatch);
                 }
                 if (tp->hasRest && !tp->restName.empty()) {
                     Vec<Type*> restFields(rt::STLAllocator<Type*>(nullptr));
@@ -1463,7 +1514,7 @@ void TypeChecker::checkPattern(Pattern* pat, Type* subjType, bool isMutable) {
                 }
             }
             for (size_t i = 0; i < tp->elements.size() && i < ttype->fields_.size(); ++i) {
-                checkPattern(tp->elements[i].get(), ttype->fields_[i], isMutable);
+                checkPattern(tp->elements[i].get(), ttype->fields_[i], isMutable, inMatch);
             }
             // Rest binding gets a tuple of the remaining fields
             if (tp->hasRest && !tp->restName.empty()) {
@@ -1487,7 +1538,7 @@ void TypeChecker::checkPattern(Pattern* pat, Type* subjType, bool isMutable) {
             Type* elemType = atype->elemType_;
             // Check each fixed element pattern against the array's element type
             for (size_t i = 0; i < ap->elements.size(); ++i) {
-                checkPattern(ap->elements[i].get(), elemType, isMutable);
+                checkPattern(ap->elements[i].get(), elemType, isMutable, inMatch);
             }
             // Rest binding gets the same array type
             if (ap->hasRest && !ap->restName.empty()) {
@@ -1498,7 +1549,7 @@ void TypeChecker::checkPattern(Pattern* pat, Type* subjType, bool isMutable) {
         }
         case Pattern::GuardedPat: {
             auto* gp = static_cast<GuardedPattern*>(pat);
-            checkPattern(gp->pattern.get(), subjType, isMutable);
+            checkPattern(gp->pattern.get(), subjType, isMutable, inMatch);
             Type* guardType = inferExpr(static_cast<Expr*>(gp->guard.get()));
             if (guardType && guardType != compiler_.boolType() && guardType != compiler_.intType()) {
                 error(gp->guard->loc, "Guard expression must be bool");
@@ -1514,9 +1565,9 @@ void TypeChecker::checkPattern(Pattern* pat, Type* subjType, bool isMutable) {
                 return;
             }
             // Head pattern matches the element type
-            checkPattern(cp->head.get(), ltype->elemType_, isMutable);
+            checkPattern(cp->head.get(), ltype->elemType_, isMutable, inMatch);
             // Tail pattern matches the list type
-            checkPattern(cp->tail.get(), subjType, isMutable);
+            checkPattern(cp->tail.get(), subjType, isMutable, inMatch);
             pat->resolvedType = subjType;
             break;
         }

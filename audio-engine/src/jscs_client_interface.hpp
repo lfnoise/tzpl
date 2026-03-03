@@ -75,6 +75,12 @@ void safetyLimiter(Engine* e, Enable onoff); // default is on.
 // non real time commands
 bool loadDefs(Engine* e, const char* dirPath);
 bool loadDef(Engine* e, const char* dirPath, const char* defName);
+
+// Add a synthdef (from jscs_plugin_abi) to the engine's def table.
+void addSynthDef(Engine* e, jscs_SynthDef const& def);
+
+// Collect the names of all registered node defs.
+void listNodeDefs(Engine* e, std::vector<std::string>& names);
     
 f64 getStreamTime(Engine* e); // audio must be initialized, else exception.
 

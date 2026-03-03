@@ -420,6 +420,8 @@ struct Pattern {
     Kind kind;
     SourceRange loc;
     Type* resolvedType = nullptr;
+    int enumCaseIndex = -1;           // >= 0 when pattern matches an unqualified enum case
+    Type* enumCaseDataType = nullptr; // data type of the matched enum case
 
     Pattern(Kind k, SourceRange l) : kind(k), loc(l) {}
     virtual ~Pattern() = default;

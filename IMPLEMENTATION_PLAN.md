@@ -198,26 +198,26 @@ fn allNotesOff(nodeID Int) Void;
 
 **Goal**: Allow Language X to compile synth definitions at runtime.
 
-### 3.1 Design the language-side synthdef API
+### 3.1 Design the language-side synthdef API — DONE
 
 ```
--- Compile a synthdef from s-expression text
-fn compileSynthDef(name String, sexpr String) Void;
+-- Compile a synthdef from s-expression text (returns "" on success, error message on failure)
+fn compileSynthDef(name String, sexpr String) String;
 
--- Compile and load into running engine
-fn compileSynthDefAndLoad(name String, sexpr String) Void;
+-- Compile and load into running engine (returns "" on success, error message on failure)
+fn compileSynthDefAndLoad(name String, sexpr String) String;
 
 -- Query available synthdefs
 fn listSynthDefs() Array[String];
 ```
 
-### 3.2 Implement the FFI bridge
+### 3.2 Implement the FFI bridge — DONE
 
-**Tasks**:
-1. Write a C++ bridge that calls `synthdef::synthFromSExprText()`, `synthdef::cppCodeGen()`, and `synthdef::compileAndLink()`.
-2. After compilation, call `loadDef()` on the engine to make the new plugin available.
-3. Handle compilation errors gracefully — return error strings to the language.
-4. Consider caching: if a synthdef with the same name/hash already exists, skip recompilation.
+Implemented in `bridge/src/langx_synthdef_compiler_ffi.cpp`. The bridge:
+1. Calls `synthdef::synthFromSExprText()`, `synthdef::cppCodeGen()`, and `synthdef::compileAndLink()` (now in the library via `synthdef_compile_link.cpp`).
+2. After compilation, calls `engine::addSynthDef()` to register the def with the engine (new function in `jscs_client_interface`).
+3. Returns error strings to the language instead of crashing.
+4. Caches compilation results keyed by name + s-expression hash to skip recompilation.
 
 ### 3.3 Higher-level DSL in Language X (future)
 

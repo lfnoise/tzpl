@@ -1622,6 +1622,25 @@ void CodeGen::genPatternMatch(Pattern* pat, u16 subjReg, Type* subjType,
 
         case Pattern::BindingPat: {
             auto* bp = static_cast<BindingPattern*>(pat);
+            if (pat->enumCaseIndex >= 0) {
+                // Unqualified no-data enum case match
+                u16 whichReg = allocReg();
+                emitOp(op_enum_get_which);
+                emitRegs(whichReg, subjReg);
+
+                u16 expectedReg = allocReg();
+                emitOp(op_load_int_const);
+                emitRegs(expectedReg);
+                emitInt((i64)pat->enumCaseIndex);
+
+                u16 matchReg = allocReg();
+                emitOp(op_cmp_eq_int);
+                emitRegs(matchReg, whichReg, expectedReg);
+
+                u32 failJump = emitJump(op_jump_if_false, matchReg);
+                failJumps.push_back(failJump);
+                break;
+            }
             // Always matches — bind subject to a local variable
             u16 bindReg = allocReg();
             emitOp(op_mov);
@@ -1718,6 +1737,47 @@ void CodeGen::genPatternMatch(Pattern* pat, u16 subjReg, Type* subjType,
 
         case Pattern::TuplePat: {
             auto* tp = static_cast<TuplePattern*>(pat);
+
+            // Unqualified enum case pattern with data
+            if (pat->enumCaseIndex >= 0) {
+                u16 whichReg = allocReg();
+                emitOp(op_enum_get_which);
+                emitRegs(whichReg, subjReg);
+
+                u16 expectedReg = allocReg();
+                emitOp(op_load_int_const);
+                emitRegs(expectedReg);
+                emitInt((i64)pat->enumCaseIndex);
+
+                u16 matchReg = allocReg();
+                emitOp(op_cmp_eq_int);
+                emitRegs(matchReg, whichReg, expectedReg);
+
+                u32 failJump = emitJump(op_jump_if_false, matchReg);
+                failJumps.push_back(failJump);
+
+                // Extract and match inner data
+                if (pat->enumCaseDataType && pat->enumCaseDataType != compiler_.voidType()) {
+                    u16 valReg = allocReg();
+                    emitOp(op_enum_get_value);
+                    emitRegs(valReg, subjReg);
+
+                    if (tp->elements.size() == 1) {
+                        genPatternMatch(tp->elements[0].get(), valReg, pat->enumCaseDataType, failJumps, isMutable);
+                    } else {
+                        auto* ttype = dynamic_cast<TupleType*>(pat->enumCaseDataType);
+                        if (ttype) {
+                            for (size_t i = 0; i < tp->elements.size() && i < ttype->fields_.size(); ++i) {
+                                u16 elemReg = allocReg();
+                                emitOp(op_tuple_get);
+                                emitRegs(elemReg, valReg, (u16)i);
+                                genPatternMatch(tp->elements[i].get(), elemReg, ttype->fields_[i], failJumps, isMutable);
+                            }
+                        }
+                    }
+                }
+                break;
+            }
 
             // Tuple struct pattern: Name(pat, pat, ...)
             if (!tp->structName.empty()) {

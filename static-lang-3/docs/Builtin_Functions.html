@@ -346,11 +346,12 @@
                 <li><a href="#string">String Functions</a> &mdash; length, substring, contains, startsWith, endsWith, split, trim, toUpper, toLower, replace, indexing, min, max, cmp</li>
                 <li><a href="#formatting">String Formatting</a> &mdash; fmt</li>
                 <li><a href="#range">Range Functions</a> &mdash; length, toArray, toList</li>
-                <li><a href="#collections">Collection Functions (Arrays &amp; Lists)</a> &mdash; length, map, filter, fold, scan, fold1, scan1, find, zip, enumerate, take, drop, takeWhile, dropWhile, stride, stutter, cat, join, flatten</li>
+                <li><a href="#collections">Collection Functions (Arrays &amp; Lists)</a> &mdash; length, map, filter, fold, scan, fold1, scan1, find, zip, enumerate, take, drop, takeWhile, dropWhile, stride, stutter, repeat, cat, join, flatten</li>
                 <li><a href="#array-only">Array-only Functions</a> &mdash; reverse, push, pop, sort, muss</li>
                 <li><a href="#list-only">List-only Functions</a> &mdash; head, tail, cons, isNil, notNil, cyc, ncyc, hang, iter</li>
                 <li><a href="#map-functions">Map Functions</a> &mdash; get, put, remove, contains, keys, values, pairs, merge, length</li>
                 <li><a href="#option-functions">Option Functions</a> &mdash; unwrap, unwrapOr, isSome, isNone</li>
+                <li><a href="#ref-functions">Reference Functions</a> &mdash; ref, deref, setref</li>
                 <li><a href="#any-functions">Any Functions</a> &mdash; any, toAnyArray, as(Type)</li>
                 <li><a href="#coroutine-functions">Coroutine Functions</a> &mdash; next, yield, yieldAll, toList</li>
                 <li><a href="#set-functions">Set Functions</a> &mdash; add, remove, contains, union, intersection, difference, toArray, length</li>
@@ -1098,6 +1099,18 @@ List(1, 2, 3, 4, 5) drop(2)       <span class="cmt">-- List(3, 4, 5)</span></cod
             <pre><code>[1, 2, 3] stutter(2)            <span class="cmt">-- [1, 1, 2, 2, 3, 3]</span>
 [1, 2, 3] stutter(3)            <span class="cmt">-- [1, 1, 1, 2, 2, 2, 3, 3, 3]</span></code></pre>
 
+            <h3><code>repeat(value, n)</code></h3>
+            <p>Creates an array containing <code>value</code> repeated <code>n</code> times.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>repeat(T, Int) &rarr; [T]</code></td><td>Returns an array of <code>n</code> copies of the value. Works with any type.</td></tr>
+            </table>
+            <pre><code>repeat(0, 5)                    <span class="cmt">-- [0, 0, 0, 0, 0]</span>
+repeat(3.14, 3)                 <span class="cmt">-- [3.14, 3.14, 3.14]</span>
+repeat("hello", 2)              <span class="cmt">-- [hello, hello]</span>
+repeat(true, 4)                 <span class="cmt">-- [true, true, true, true]</span>
+repeat(42, 0)                   <span class="cmt">-- []</span></code></pre>
+
             <h3>Transformation</h3>
 
             <h3><code>map(collection, fn)</code></h3>
@@ -1516,6 +1529,60 @@ m["z"] isSome println;            <span class="cmt">-- false</span></code></pre>
             <pre><code>let m = ["a": 1];
 m["a"] isNone println;            <span class="cmt">-- false</span>
 m["z"] isNone println;            <span class="cmt">-- true</span></code></pre>
+
+            <a href="#top" class="back-to-top">&uarr; Back to top</a>
+        </div>
+
+        <!-- ============================================================ -->
+        <div class="section" id="ref-functions">
+            <h2>Reference Functions</h2>
+            <p>Functions for creating, reading, and writing mutable references. These are the functional equivalents of the <code>&amp;</code>, <code>*</code>, and <code>&lt;-</code> operators, and unlike operators they participate in automapping.</p>
+
+            <h3><code>ref(value)</code></h3>
+            <p>Creates a new mutable reference containing the given value.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>ref(T) &rarr; Ref&lt;T&gt;</code></td><td>Create a mutable reference to a value.</td></tr>
+            </table>
+            <pre><code>let x = ref(<span class="hl-num">42</span>);             <span class="cmt">-- Ref&lt;Int&gt;</span>
+let y = ref(<span class="hl-num">3.14</span>);           <span class="cmt">-- Ref&lt;Float&gt;</span>
+let s = ref(<span class="hl-str">"hello"</span>);        <span class="cmt">-- Ref&lt;String&gt;</span>
+
+<span class="cmt">-- Automap: create refs from an array</span>
+let refs = [<span class="hl-num">1</span>, <span class="hl-num">2</span>, <span class="hl-num">3</span>] ref;   <span class="cmt">-- [Ref&lt;Int&gt;]</span></code></pre>
+
+            <h3><code>deref(ref)</code></h3>
+            <p>Reads the current value from a mutable reference.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>deref(Ref&lt;T&gt;) &rarr; T</code></td><td>Read the value from a reference.</td></tr>
+            </table>
+            <pre><code>let x = ref(<span class="hl-num">42</span>);
+deref(x) println;               <span class="cmt">-- 42</span>
+x deref println;                 <span class="cmt">-- 42 (postfix)</span>
+
+<span class="cmt">-- Automap: deref an array of refs</span>
+let refs = [ref(<span class="hl-num">1</span>), ref(<span class="hl-num">2</span>), ref(<span class="hl-num">3</span>)];
+refs deref println;              <span class="cmt">-- [1, 2, 3]</span></code></pre>
+
+            <h3><code>setref(value, ref)</code></h3>
+            <p>Writes a new value into a mutable reference. Returns the written value.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>setref(T, Ref&lt;T&gt;) &rarr; T</code></td><td>Write a value into a reference; returns the value.</td></tr>
+            </table>
+            <pre><code>let x = ref(<span class="hl-num">0</span>);
+setref(<span class="hl-num">42</span>, x);
+x deref println;                 <span class="cmt">-- 42</span>
+
+<span class="cmt">-- Postfix style</span>
+<span class="hl-num">99</span> setref(x);
+x deref println;                 <span class="cmt">-- 99</span>
+
+<span class="cmt">-- Automap: set all refs in an array</span>
+let refs = [ref(<span class="hl-num">1</span>), ref(<span class="hl-num">2</span>), ref(<span class="hl-num">3</span>)];
+setref(<span class="hl-num">0</span>, refs);
+refs deref println;              <span class="cmt">-- [0, 0, 0]</span></code></pre>
 
             <a href="#top" class="back-to-top">&uarr; Back to top</a>
         </div>
@@ -2102,6 +2169,11 @@ getListPrintLimit();           <span class="cmt">-- check current limit</span></
                 <code>ordinal</code>,
                 <code>tag</code>,
                 <code>hash</code>
+            </p>
+
+            <h3>Ref&lt;T&gt;</h3>
+            <p>
+                <code>ref</code>, <code>deref</code>, <code>setref</code>
             </p>
 
             <h3>Any</h3>

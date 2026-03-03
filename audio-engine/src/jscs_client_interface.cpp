@@ -7,6 +7,7 @@
 
 #include "jscs_engine.hpp"
 #include "jscs_client_interface.hpp"
+#include "jscs_node.hpp"
 #include "RtAudio.h"
 #include "jscs_hash.hpp"
 #include "jscs_command_subclasses.hpp"
@@ -348,6 +349,50 @@ NodeDef* getNodeDef(Engine* e, const char* name) {
         def = def->next_;
     }
     return nullptr;
+}
+
+void addSynthDef(Engine* e, jscs_SynthDef const& def) {
+    // Build a NodeDefInfo from the jscs_SynthDef.
+    NodeDefInfo info{};
+    info.name = def.name;
+    info.funs = def.funs;
+    info.num_ins = def.num_ins;
+    info.num_outs = def.num_outs;
+    info.num_controls = def.num_controls;
+
+    // jscs_PortDef and PortInfo have identical layout: { const char* name; jscs_SignalType type; }
+    info.ins  = reinterpret_cast<PortInfo*>(def.ins);
+    info.outs = reinterpret_cast<PortInfo*>(def.outs);
+
+    // jscs_ControlDef → ControlInfo requires field mapping.
+    if (def.num_controls > 0) {
+        auto* controls = new ControlInfo[def.num_controls];
+        for (int i = 0; i < def.num_controls; ++i) {
+            jscs_ControlDef const& src = def.controls[i];
+            controls[i].PortInfo::name = src.name;
+            controls[i].PortInfo::type = src.type;
+            controls[i].name = src.name;
+            controls[i].type = src.type;
+            controls[i].controlID = static_cast<i64>(src.id);
+            controls[i].spec = src.spec;
+        }
+        info.controls = controls;
+    } else {
+        info.controls = nullptr;
+    }
+
+    addNodeDef(e, info);
+}
+
+void listNodeDefs(Engine* e, std::vector<std::string>& names) {
+    std::lock_guard<std::mutex> lck(e->nrt_lock_);
+    for (u32 bin = 0; bin < kHashBins; ++bin) {
+        NodeDef* def = e->defs_[bin];
+        while (def) {
+            names.emplace_back(def->info_.name);
+            def = def->next_;
+        }
+    }
 }
 
 struct CmdBundle : CommandList

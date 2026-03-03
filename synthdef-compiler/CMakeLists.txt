@@ -28,6 +28,7 @@ set(LIB_SOURCES
     src/synthdef_str_util.cpp
     src/synthdef_synth.cpp
     src/synthdef_value.cpp
+    src/synthdef_compile_link.cpp
 )
 
 add_library(synthdef_compiler_lib STATIC ${LIB_SOURCES})
@@ -82,6 +83,7 @@ install(FILES
     src/synthdef_rewrite.hpp
     src/synthdef_signal_type.hpp
     src/synthdef_str_util.hpp
+    src/synthdef_compile_link.hpp
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/synthdef
 )
 install(TARGETS synthdef-compiler

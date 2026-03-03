@@ -8,7 +8,7 @@ set -euo pipefail
 # --- Configuration ---
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-LANGX="$ROOT_DIR/build/langx"
+LANGX="$(cd "$ROOT_DIR/.." && pwd)/build/static-lang-3/langx"
 TIMEOUT_SEC=10
 
 # --- Colors ---

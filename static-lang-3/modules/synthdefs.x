@@ -25,9 +25,9 @@ struct NumType(Int);
 
 fn ~ (a NumType) NumType = NumType(~a.0);
 fn | (a NumType, b NumType) NumType = NumType(a.0 | b.0);
-fn & (a NumType, b NumType) NumType = NumType(a.0 & b.0)
-fn << (a NumType, b Int) NumType = NumType(a.0 << b)
-fn >> (a NumType, b Int) NumType = NumType(a.0 >> b)
+fn & (a NumType, b NumType) NumType = NumType(a.0 & b.0);
+fn << (a NumType, b Int) NumType = NumType(a.0 << b);
+fn >> (a NumType, b Int) NumType = NumType(a.0 >> b);
 
 const NO_NUM = NumType(0);
 const INT32 = NumType(1);
@@ -86,9 +86,9 @@ fn toString(a NumType) String {
 
 fn isIntegerValued(o Float) Bool = o == o floor;
 
-fn numType(o Bool) NumType = INT32
-fn numType(o Int)  NumType = ANY_NUM
-fn numType(o Float) NumType = o isIntegerValued ? ANY_NUM : ANY_FLOAT
+fn numType(o Bool) NumType = INT32;
+fn numType(o Int)  NumType = ANY_NUM;
+fn numType(o Float) NumType = o isIntegerValued ? ANY_NUM : ANY_FLOAT;
 
 ---------------------------------------------------------------------------
 --- Chans
@@ -134,13 +134,13 @@ struct SignalGraph {
 type ID = Int;
 
 struct SignalExpr {
-	id Ref<ID>,
+	id ID,
 	ins [SignalExpr],
 	kind SignalExprKind,
 }
 
-var curGraphExprs Array<SignalExpr> = [];
-var curGraphDelays Array<DelayVar> = [];
+var curGraphExprs [SignalExpr] = [];
+var curGraphDelays [DelayVar] = [];
 var exprIds = 0;
 var delayVarIds = 0;
 
@@ -157,27 +157,25 @@ fn nextDelayVarId() ID {
 }
 
 fn addToGraph(expr SignalExpr) SignalExpr {
-	expr.id <- nextExprId();
 	curGraphExprs = curGraphExprs push(expr);
 	expr
 }
 
-fn addToGraph(expr DelayVar) DelayVar {
-	expr.id <- delayVarIds();
-	curGraphExprs = curGraphDelays push(expr);
-	expr
+fn addToGraph(dv DelayVar) DelayVar {
+	curGraphDelays = curGraphDelays push(dv);
+	dv
 }
 
 fn newSignalExpr(kind SignalExprKind, ins [SignalExpr]) SignalExpr {
 	SignalExpr {
-		id: &0,
+		id: nextExprId(),
 		ins: ins,
 		kind: kind,
 	} addToGraph
 }
 
 fn newSignalExpr(kind SignalExprKind) SignalExpr {
-	kind newSignalExpr([])
+	kind newSignalExpr([SignalExpr]())
 }
 
 ---------------------------------------------------------------------------
@@ -202,10 +200,10 @@ fn fill(chans Int, x Float) SignalExpr {
 }
 
 fn vec(v [Int]) SignalExpr {
-	SignalExprKind.int(x, ANY_NUM) newSignalExpr
+	SignalExprKind.int(v, ANY_NUM) newSignalExpr
 }
 fn vec(v [Float]) SignalExpr {
-	SignalExprKind.float(x, ANY_FLOAT) newSignalExpr
+	SignalExprKind.float(v, ANY_FLOAT) newSignalExpr
 }
 
 fn asSignal(x SignalExpr) SignalExpr = x;
@@ -258,7 +256,7 @@ enum BinaryOp {
 
 	lt, le, eq, ne, gt, ge,
 
-	bitAnd, bitOr, bitXOr,
+	bitAnd, bitOr, bitXor,
 	shiftLeft, shiftRight, unsignedShiftRight,
 
 	gcd, lcm,
@@ -331,7 +329,7 @@ struct SignalType {
 
 struct DelayVar {
 	id ID,
-	maxDelay Optional<SignalExpr>,
+	maxDelay Option<SignalExpr>,
 }
 
 
@@ -361,12 +359,11 @@ enum SignalExprKind {
 	switch_([SignalGraph]),
 	select,
 	select2,
+	varexpr String,
 }
 
-struct SignalExpr {
-	ins [SignalExpr],
-	kind SignalExprKind,
-}
+---------------------------------------------------------------------------
+-- SignalExpr composition functions
 
 fn fs() SignalExpr {
     SignalExprKind.sampleRate newSignalExpr
@@ -384,7 +381,7 @@ fn outlet(a SignalExpr, name String = "out") SignalExpr {
     SignalExprKind.outlet(name) newSignalExpr([a])
 }
 
-fn control(spec ControlSpec, chans Chans = 1, name String) SignalExpr {
+fn control(name String, spec ControlSpec, chans Chans = 1) SignalExpr {
     SignalExprKind.control(spec, chans asChans, name) newSignalExpr
 }
 
@@ -631,41 +628,41 @@ fn put(a SignalExpr, i, v) SignalExpr {
 fn matmul(a SignalExpr, b SignalExpr) SignalExpr {
     SignalExprKind.vecop(VecOp.put) newSignalExpr([a, b])
 }
-fn take(m SignalExpr, n Int) SignalExpr {
+fn take(a SignalExpr, n Int) SignalExpr {
     SignalExprKind.vecop(VecOp.take(n)) newSignalExpr([a])
 }
-fn drop(m SignalExpr, n Int) SignalExpr {
+fn drop(a SignalExpr, n Int) SignalExpr {
     SignalExprKind.vecop(VecOp.drop(n)) newSignalExpr([a])
 }
-fn stride(m SignalExpr, n Int) SignalExpr {
+fn stride(a SignalExpr, n Int) SignalExpr {
     SignalExprKind.vecop(VecOp.stride(n)) newSignalExpr([a])
 }
-fn stutter(m SignalExpr, n Int) SignalExpr {
+fn stutter(a SignalExpr, n Int) SignalExpr {
     SignalExprKind.vecop(VecOp.stutter(n)) newSignalExpr([a])
 }
-fn ncyc(m SignalExpr, n Int) SignalExpr {
+fn ncyc(a SignalExpr, n Int) SignalExpr {
     SignalExprKind.vecop(VecOp.ncyc(n)) newSignalExpr([a])
 }
-fn rotate(m SignalExpr, b) SignalExpr {
+fn rotate(a SignalExpr, b) SignalExpr {
     SignalExprKind.vecop(VecOp.rotate) newSignalExpr([a, b asSignal])
 }
-fn reverse(m SignalExpr) SignalExpr {
+fn reverse(a SignalExpr) SignalExpr {
     SignalExprKind.vecop(VecOp.reverse) newSignalExpr([a])
 }
-fn reduce(m SignalExpr, op BinaryOp, chans Chans = 1) SignalExpr {
+fn reduce(a SignalExpr, op BinaryOp, chans Chans = 1) SignalExpr {
     SignalExprKind.vecop(VecOp.reduce(op, chans asChans)) newSignalExpr([a])
 }
-fn sum(m SignalExpr, chans Chans = 1) SignalExpr {
-    m reduce(BinaryOp.add, chans asChans)
+fn sum(a SignalExpr, chans Chans = 1) SignalExpr {
+    a reduce(BinaryOp.add, chans asChans)
 }
-fn product(m SignalExpr, chans Chans = 1) SignalExpr {
-    m reduce(BinaryOp.mul, chans asChans)
+fn product(a SignalExpr, chans Chans = 1) SignalExpr {
+    a reduce(BinaryOp.mul, chans asChans)
 }
-fn minOf(m SignalExpr, chans Chans = 1) SignalExpr {
-    m reduce(BinaryOp.min, chans asChans)
+fn minOf(a SignalExpr, chans Chans = 1) SignalExpr {
+    a reduce(BinaryOp.min, chans asChans)
 }
-fn maxOf(m SignalExpr, chans Chans = 1) SignalExpr {
-    m reduce(BinaryOp.max, chans asChans)
+fn maxOf(a SignalExpr, chans Chans = 1) SignalExpr {
+    a reduce(BinaryOp.max, chans asChans)
 }
 
 ---------------------------------------------------------------------------
@@ -674,7 +671,7 @@ fn maxOf(m SignalExpr, chans Chans = 1) SignalExpr {
 type GraphFn = fn() SignalExpr;
 type GraphFn1 = fn(SignalExpr) SignalExpr;
 
-fn callSubGraphFn(f GraphFn) SignalGraph {
+fn makeGraph(f GraphFn) SignalGraph {
     -- save graph state
 	let savedExprs = curGraphExprs;
 	let savedDelays = curGraphDelays;
@@ -698,7 +695,7 @@ fn callSubGraphFn(f GraphFn) SignalGraph {
 	graph
 }
 
-fn callForBodyFn (i SignalExpr, f GraphFn1) SignalExpr {
+fn makeGraph (f GraphFn1, i SignalExpr) SignalGraph {
 -- save graph state
 	let savedExprs = curGraphExprs;
 	let savedDelays = curGraphDelays;
@@ -726,32 +723,33 @@ fn callForBodyFn (i SignalExpr, f GraphFn1) SignalExpr {
 --- Control Flow Operators
 
 fn if_(test SignalExpr, thenFn GraphFn, elseFn GraphFn) SignalExpr {
-    let thenGraph = thenFn callSubGraphFn;
-    let elseGraph = elseFn callSubGraphFn;
+    let thenGraph SignalGraph = thenFn makeGraph;
+    let elseGraph SignalGraph = elseFn makeGraph;
     SignalExprKind.if_(thenGraph, elseGraph) newSignalExpr([test])
 }
 
 fn if_(test SignalExpr, thenFn GraphFn) SignalExpr {
-    let thenGraph = thenFn callSubGraphFn;
-    let elseGraph = fn() { 0 asSignal } callSubGraphFn
+    let thenGraph SignalGraph = thenFn makeGraph;
+    let elseGraph SignalGraph = fn() { 0 asSignal } makeGraph;
     SignalExprKind.if_(thenGraph, elseGraph) newSignalExpr([test])
 }
 
 fn if_(test Bool, thenFn GraphFn, elseFn GraphFn) SignalExpr = test ? thenFn() : elseFn();
 fn if_(test Bool, thenFn GraphFn) SignalExpr = test ? thenFn() : 0 asSignal;
 
-fn for_(count Int, bodyFn GraphFn) SignalExpr {
-    let bodyGraph = bodyFn callSubGraphFn;
+fn for_(varname String, count Int, bodyFn GraphFn1) SignalExpr {
+	let varexpr SignalExpr = SignalExprKind.varexpr(varname) newSignalExpr;
+    let bodyGraph SignalGraph = bodyFn makeGraph(varexpr);
     SignalExprKind.for_(count, bodyGraph) newSignalExpr
 }
 
 fn switch(test, funs [GraphFn]) SignalExpr {
-    let graphs = funs callSubGraphFn;
+    let graphs [SignalGraph] = funs makeGraph;
     SignalExprKind.switch_(graphs) newSignalExpr([test])
 }
 
 fn select(test SignalExpr, exprs [SignalExpr]) SignalExpr {
-    let ins = [test] $ exprs;
+    let ins [SignalExpr] = [test] $ exprs;
     SignalExprKind.select newSignalExpr(ins)
 }
 
@@ -765,34 +763,31 @@ fn select2(test SignalExpr, ifOne SignalExpr, ifZero SignalExpr) SignalExpr {
 enum Braces { round, square, curly, quotes }
 
 fn parens(s String) String = "(%^)" fmt(s);
-fn braces(s String, Braces b) String {
-    match (b) {
-        Braces.round  : "(%^)" fmt(s);
-        Braces.square : "[%^]" fmt(s);
-        Braces.curly  : "{%^}" fmt(s);
-        Braces.quotes : "\"%^\"" fmt(s);
-    }
-
-}
+fn brackets(s String) String = "[%^]" fmt(s);
+fn braces(s String) String = "{%^}" fmt(s);
+fn quotes(s String) String = "\"%^\"" fmt(s);
 
 fn separatedString(strings [String], separator String = " ") String {
     var out = "";
     var between = false;
     for (s : strings) {
         if (between) {
-            out = out + separator;
+            out = out $ separator;
         } else {
             between = true;
         }
-        out = out + s;
+        out = out $ s;
     }
     out
 }
 
+fn separatedString<T>(values [T], separator String = " ") String = values @ toString separatedString(separator);
+
+
 fn inputsToLisp(o SignalExpr) String = o.ins.id separatedString parens;
 
 fn idsToLisp(o [SignalExpr]) String = o.id separatedString parens;
-fn numbersToLisp(o [Int]) String = o.id separatedString parens;
+fn numbersToLisp(o [Int]) String = o separatedString parens;
 
 fn toLisp(o ControlSpec) String {
     "(ControlSpec %^ %^ %^ %^)" fmt(o.lo, o.hi, o.init, o.warp)
@@ -816,11 +811,11 @@ fn toLisp(o SignalExpr) String {
     match (o.kind) {
         sampleRate : "(%^ SampleRate)" fmt(o.id);
         sampleDur : "(%^ SampleDur)" fmt(o.id);
-        int(a) : "(%^ Constant %^ %^ %^)" fmt(o.id, a length, ANY_NUM, a separatedString parens);
-        float(a) : "(%^ Constant %^ %^ %^)" fmt(o.id, a length, ANY_FLOAT, a separatedString parens);
-        unop(op) : "(%^ UnaryOp %^ %^)" fmt(o.id, op name, o inputsToLisp);
-        binop(op) : "(%^ BinaryOp %^ %^)" fmt(o.id, op name, o inputsToLisp);
-        compareop(op) : "(%^ BinaryOp %^ %^)" fmt(o.id, op name, o inputsToLisp);
+        int(a, typ) : "(%^ Constant %^ %^ %^)" fmt(o.id, a length, typ, a separatedString parens);
+        float(a, typ) : "(%^ Constant %^ %^ %^)" fmt(o.id, a length, typ, a separatedString parens);
+        unop(op) : "(%^ UnaryOp %^ %^)" fmt(o.id, op tag, o inputsToLisp);
+        binop(op) : "(%^ BinaryOp %^ %^)" fmt(o.id, op tag, o inputsToLisp);
+        compareop(op) : "(%^ BinaryOp %^ %^)" fmt(o.id, op tag, o inputsToLisp);
         castop(op) : "(%^ CastOp %^ %^)" fmt(o.id, op numTypeInt, o inputsToLisp);
         random(op, rate, chans) : match (op) {
             frand(lo, hi) : "(%^ FRand %^ %^ %^ %^)" fmt(o.id, rate, chans asChans, lo, hi);
@@ -842,7 +837,7 @@ fn toLisp(o SignalExpr) String {
            	transpose(n) : "(%^ VecTranspose %^ %^)" fmt(o.id, n, o inputsToLisp);
            	permute : "(%^ VecAt %^)" fmt(o.id, o inputsToLisp);
            	reduce(op, chans) : "(%^ VecReduce %^ %^ %^)"
-                fmt(o.id, op name, chans asChans, o inputsToLisp);
+                fmt(o.id, op tag, chans asChans, o inputsToLisp);
            	sum(chans) : "(%^ VecSum %^ %^)" fmt(o.id, chans asChans, o inputsToLisp);
            	prod(chans) : "(%^ VecProd %^ %^)" fmt(o.id, chans asChans, o inputsToLisp);
            	minOf(chans) : "(%^ VecMin %^ %^)" fmt(o.id, chans asChans, o inputsToLisp);
@@ -874,8 +869,22 @@ fn toLisp(o SignalExpr) String {
 
         select : "(%^ SelectExpr %^)" fmt(o.id, o inputsToLisp);
         select2 : "(%^ SelectExpr %^)" fmt(o.id, o inputsToLisp);
+		varexpr(name) : "()%^ VarExpr %^)" fmt(o.id, name);
 	}
 }
+
+/*
+fn bubbles() =
+	0.4 lfsaw * 24
+	+ [8, 7.23] lfsaw * 3
+	+ 81
+	|> nnhz sinosc * 4c
+	|> combn(0.2,4) outlet;
+
+
+bubbles makeGraph toLisp println;
+*/
+
 ---------------------------------------------------------------------------
 ---------------------------------------------------------------------------
 ---------------------------------------------------------------------------

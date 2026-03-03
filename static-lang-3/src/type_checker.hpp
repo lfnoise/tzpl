@@ -289,7 +289,7 @@ private:
     void checkExprStmt(ExprStmtNode* stmt);
 
     // Pattern checking (validates and introduces bindings)
-    void checkPattern(Pattern* pat, Type* subjectType, bool isMutable = false);
+    void checkPattern(Pattern* pat, Type* subjectType, bool isMutable = false, bool inMatch = false);
 
     // Infer expression types (returns resolved type)
     Type* inferExpr(Expr* expr, Type* expectedType = nullptr);
