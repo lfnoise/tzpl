@@ -5,56 +5,148 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Built-in Functions Reference</title>
     <style>
+        :root {
+            --bg: #1a1b26;
+            --fg: #c9d1d9;
+            --container-bg: #21222c;
+            --accent: #58a6ff;
+            --heading-fg: #e6edf3;
+            --heading2-fg: #b0bec5;
+            --heading2-border: #30363d;
+            --intro-bg: #0d2137;
+            --intro-border: #58a6ff;
+            --intro-fg: #b0bec5;
+            --toc-bg: #1f2028;
+            --toc-border: #30363d;
+            --toc-hover: #2a2d3a;
+            --code-bg: #30363d;
+            --code-fg: #c9d1d9;
+            --pre-bg: #161b22;
+            --pre-fg: #e6edf3;
+            --pre-border: #58a6ff;
+            --table-th-bg: #2a2d3a;
+            --table-th-fg: #e6edf3;
+            --table-border: #30363d;
+            --table-hover: #1f2028;
+            --highlight-bg: #2d2308;
+            --highlight-border: #ffc107;
+            --note-bg: #0d2818;
+            --note-border: #27ae60;
+            --badge-bg: #58a6ff;
+            --badge-fg: #fff;
+            --shadow: rgba(0,0,0,0.3);
+            --syn-cmt: #6a737d;
+            --syn-num: #e5a537;
+            --syn-str: #4ec970;
+            --syn-kw: #c678dd;
+            --type-int: #58a6ff;
+            --type-float: #e5a537;
+            --type-bool: #c678dd;
+            --type-fraction: #56d4e0;
+            --type-complex: #f47067;
+            --type-range: #8b949e;
+            --type-array: #e6edf3;
+            --type-list: #4ec970;
+            --back-to-top: #58a6ff;
+        }
+
+        html.light {
+            --bg: #f5f5f5;
+            --fg: #333;
+            --container-bg: white;
+            --accent: #3498db;
+            --heading-fg: #2c3e50;
+            --heading2-fg: #34495e;
+            --heading2-border: #ecf0f1;
+            --intro-bg: #f8f9fa;
+            --intro-border: #3498db;
+            --intro-fg: #555;
+            --toc-bg: #f8f9fa;
+            --toc-border: #bdc3c7;
+            --toc-hover: #e8f4f8;
+            --code-bg: #ecf0f1;
+            --code-fg: #2c3e50;
+            --pre-bg: #2c3e50;
+            --pre-fg: #ecf0f1;
+            --pre-border: #3498db;
+            --table-th-bg: #34495e;
+            --table-th-fg: white;
+            --table-border: #ecf0f1;
+            --table-hover: #f8f9fa;
+            --highlight-bg: #fff3cd;
+            --highlight-border: #ffc107;
+            --note-bg: #e8f5e8;
+            --note-border: #27ae60;
+            --badge-bg: #3498db;
+            --badge-fg: white;
+            --shadow: rgba(0,0,0,0.1);
+            --syn-cmt: #95a5a6;
+            --syn-num: #e67e22;
+            --syn-str: #27ae60;
+            --syn-kw: #e74c3c;
+            --type-int: #2980b9;
+            --type-float: #e67e22;
+            --type-bool: #8e44ad;
+            --type-fraction: #16a085;
+            --type-complex: #c0392b;
+            --type-range: #7f8c8d;
+            --type-array: #2c3e50;
+            --type-list: #27ae60;
+            --back-to-top: #3498db;
+        }
+
+        * { box-sizing: border-box; }
+
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
             line-height: 1.6;
             margin: 0;
             padding: 20px;
-            background-color: #f5f5f5;
-            color: #333;
+            background-color: var(--bg);
+            color: var(--fg);
         }
 
         .container {
             max-width: 1200px;
             margin: 0 auto;
-            background-color: white;
+            background-color: var(--container-bg);
             padding: 40px;
             border-radius: 8px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            box-shadow: 0 2px 10px var(--shadow);
         }
 
         h1 {
-            color: #2c3e50;
-            border-bottom: 3px solid #3498db;
+            color: var(--heading-fg);
+            border-bottom: 3px solid var(--accent);
             padding-bottom: 10px;
             margin-bottom: 30px;
         }
 
         h2 {
-            color: #34495e;
-            border-bottom: 2px solid #ecf0f1;
+            color: var(--heading2-fg);
+            border-bottom: 2px solid var(--heading2-border);
             padding-bottom: 8px;
             margin-top: 40px;
             margin-bottom: 20px;
         }
 
         h3 {
-            color: #2c3e50;
+            color: var(--heading-fg);
             margin-top: 30px;
             margin-bottom: 15px;
         }
 
         .intro {
             font-size: 1.1em;
-            color: #555;
-            background-color: #f8f9fa;
+            color: var(--intro-fg);
+            background-color: var(--intro-bg);
             padding: 20px;
-            border-left: 4px solid #3498db;
+            border-left: 4px solid var(--intro-border);
             margin-bottom: 30px;
         }
 
         .toc {
-            background-color: #f8f9fa;
+            background-color: var(--toc-bg);
             padding: 20px;
             border-radius: 5px;
             margin-bottom: 30px;
@@ -62,8 +154,8 @@
 
         .toc h2 {
             margin-top: 0;
-            color: #2c3e50;
-            border-bottom: 1px solid #bdc3c7;
+            color: var(--heading-fg);
+            border-bottom: 1px solid var(--toc-border);
         }
 
         .toc ul {
@@ -76,7 +168,7 @@
         }
 
         .toc a {
-            color: #3498db;
+            color: var(--accent);
             text-decoration: none;
             padding: 5px 10px;
             display: block;
@@ -85,25 +177,25 @@
         }
 
         .toc a:hover {
-            background-color: #e8f4f8;
+            background-color: var(--toc-hover);
         }
 
         code {
-            background-color: #ecf0f1;
-            color: #2c3e50;
+            background-color: var(--code-bg);
+            color: var(--code-fg);
             padding: 2px 6px;
             border-radius: 3px;
             font-family: 'Monaco', 'Consolas', 'Courier New', monospace;
         }
 
         pre {
-            background-color: #2c3e50;
-            color: #ecf0f1;
+            background-color: var(--pre-bg);
+            color: var(--pre-fg);
             padding: 20px;
             border-radius: 5px;
             overflow-x: auto;
             margin: 15px 0;
-            border-left: 4px solid #3498db;
+            border-left: 4px solid var(--pre-border);
         }
 
         pre code {
@@ -119,8 +211,8 @@
         }
 
         th {
-            background-color: #34495e;
-            color: white;
+            background-color: var(--table-th-bg);
+            color: var(--table-th-fg);
             padding: 12px 15px;
             text-align: left;
             font-weight: 600;
@@ -128,11 +220,11 @@
 
         td {
             padding: 10px 15px;
-            border-bottom: 1px solid #ecf0f1;
+            border-bottom: 1px solid var(--table-border);
         }
 
         tr:hover {
-            background-color: #f8f9fa;
+            background-color: var(--table-hover);
         }
 
         td code {
@@ -144,25 +236,25 @@
         }
 
         .highlight {
-            background-color: #fff3cd;
+            background-color: var(--highlight-bg);
             padding: 15px;
-            border-left: 4px solid #ffc107;
+            border-left: 4px solid var(--highlight-border);
             margin: 15px 0;
             border-radius: 0 5px 5px 0;
         }
 
         .note {
-            background-color: #e8f5e8;
+            background-color: var(--note-bg);
             padding: 15px;
-            border-left: 4px solid #27ae60;
+            border-left: 4px solid var(--note-border);
             margin: 15px 0;
             border-radius: 0 5px 5px 0;
         }
 
         .overload-badge {
             display: inline-block;
-            background-color: #3498db;
-            color: white;
+            background-color: var(--badge-bg);
+            color: var(--badge-fg);
             font-size: 0.7em;
             padding: 2px 6px;
             border-radius: 3px;
@@ -170,19 +262,19 @@
             margin-left: 6px;
         }
 
-        .type-int { color: #2980b9; font-weight: 600; }
-        .type-float { color: #e67e22; font-weight: 600; }
-        .type-bool { color: #8e44ad; font-weight: 600; }
-        .type-fraction { color: #16a085; font-weight: 600; }
-        .type-complex { color: #c0392b; font-weight: 600; }
-        .type-range { color: #7f8c8d; font-weight: 600; }
-        .type-array { color: #2c3e50; font-weight: 600; }
-        .type-list { color: #27ae60; font-weight: 600; }
+        .type-int { color: var(--type-int); font-weight: 600; }
+        .type-float { color: var(--type-float); font-weight: 600; }
+        .type-bool { color: var(--type-bool); font-weight: 600; }
+        .type-fraction { color: var(--type-fraction); font-weight: 600; }
+        .type-complex { color: var(--type-complex); font-weight: 600; }
+        .type-range { color: var(--type-range); font-weight: 600; }
+        .type-array { color: var(--type-array); font-weight: 600; }
+        .type-list { color: var(--type-list); font-weight: 600; }
 
         .back-to-top {
             display: inline-block;
             margin-top: 10px;
-            color: #3498db;
+            color: var(--back-to-top);
             text-decoration: none;
             font-size: 0.9em;
         }
@@ -190,9 +282,46 @@
         .back-to-top:hover {
             text-decoration: underline;
         }
+
+        /* Syntax highlight classes for code examples */
+        .cmt { color: var(--syn-cmt); }
+        .hl-num { color: var(--syn-num); }
+        .hl-str { color: var(--syn-str); }
+        .hl-kw { color: var(--syn-kw); }
+
+        /* Theme toggle */
+        .theme-toggle {
+            position: fixed;
+            top: 1rem;
+            right: 1rem;
+            z-index: 1000;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.4rem 0.75rem;
+            background: var(--container-bg);
+            border: 1px solid var(--table-border);
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 1.1rem;
+            color: var(--fg);
+            box-shadow: 0 2px 6px var(--shadow);
+            transition: background 0.2s;
+        }
+        .theme-toggle:hover { background: var(--toc-hover); }
+
+        body, .container, pre, code, .note, .highlight, .intro, .toc, th, td {
+            transition: background-color 0.3s, color 0.3s, border-color 0.3s;
+        }
     </style>
+    <script>
+    if (localStorage.getItem('langx-docs-theme') === 'light') document.documentElement.classList.add('light');
+    </script>
 </head>
 <body>
+    <button class="theme-toggle" id="theme-toggle" aria-label="Toggle theme">
+        <span id="theme-icon">&#9790;</span>
+    </button>
     <div class="container">
         <h1 id="top">Built-in Functions Reference</h1>
 
@@ -247,9 +376,9 @@
                 <tr><td><code>abs(Fraction) &rarr; Fraction</code></td><td>Absolute value of a fraction.</td></tr>
                 <tr><td><code>abs(Complex) &rarr; Float</code></td><td>Magnitude (modulus) of a complex number.</td></tr>
             </table>
-            <pre><code>-5 abs           <span style="color:#95a5a6">-- 5</span>
--3.14 abs        <span style="color:#95a5a6">-- 3.14</span>
-(3+4i) abs       <span style="color:#95a5a6">-- 5.0</span></code></pre>
+            <pre><code>-5 abs           <span class="cmt">-- 5</span>
+-3.14 abs        <span class="cmt">-- 3.14</span>
+(3+4i) abs       <span class="cmt">-- 5.0</span></code></pre>
 
             <h3><code>sign(x)</code></h3>
             <p>Returns <code>-1</code>, <code>0</code>, or <code>1</code> indicating the sign of <code>x</code>.</p>
@@ -288,9 +417,9 @@
                 <tr><td><code>clamp(Float, Float, Float) &rarr; Float</code></td><td>Clamp a float to a range.</td></tr>
                 <tr><td><code>clamp(Fraction, Fraction, Fraction) &rarr; Fraction</code></td><td>Clamp a fraction to a range.</td></tr>
             </table>
-            <pre><code>15 clamp(0, 10)      <span style="color:#95a5a6">-- 10</span>
--5 clamp(0, 10)      <span style="color:#95a5a6">-- 0</span>
-5 clamp(0, 10)       <span style="color:#95a5a6">-- 5</span></code></pre>
+            <pre><code>15 clamp(0, 10)      <span class="cmt">-- 10</span>
+-5 clamp(0, 10)      <span class="cmt">-- 0</span>
+5 clamp(0, 10)       <span class="cmt">-- 5</span></code></pre>
 
             <h3><code>cmp(a, b)</code></h3>
             <p>Three-way comparison. Returns <code>-1</code> if <code>a &lt; b</code>, <code>0</code> if <code>a == b</code>, <code>1</code> if <code>a &gt; b</code>.</p>
@@ -308,10 +437,10 @@
                 <tr><th>Signature</th><th>Description</th></tr>
                 <tr><td><code>gcd(Int, Int) &rarr; Int</code></td><td>Greatest common divisor.</td></tr>
             </table>
-            <pre><code>gcd(12, 8)     <span style="color:#95a5a6">-- 4</span>
-gcd(7, 13)     <span style="color:#95a5a6">-- 1</span>
-gcd(0, 5)      <span style="color:#95a5a6">-- 5</span>
-gcd(-12, 8)    <span style="color:#95a5a6">-- 4</span></code></pre>
+            <pre><code>gcd(12, 8)     <span class="cmt">-- 4</span>
+gcd(7, 13)     <span class="cmt">-- 1</span>
+gcd(0, 5)      <span class="cmt">-- 5</span>
+gcd(-12, 8)    <span class="cmt">-- 4</span></code></pre>
 
             <h3><code>lcm(a, b)</code></h3>
             <p>Least common multiple of two integers. Returns 0 if either argument is 0. Always returns a non-negative result.</p>
@@ -319,10 +448,10 @@ gcd(-12, 8)    <span style="color:#95a5a6">-- 4</span></code></pre>
                 <tr><th>Signature</th><th>Description</th></tr>
                 <tr><td><code>lcm(Int, Int) &rarr; Int</code></td><td>Least common multiple.</td></tr>
             </table>
-            <pre><code>lcm(4, 6)      <span style="color:#95a5a6">-- 12</span>
-lcm(7, 13)     <span style="color:#95a5a6">-- 91</span>
-lcm(0, 5)      <span style="color:#95a5a6">-- 0</span>
-lcm(-4, 6)     <span style="color:#95a5a6">-- 12</span></code></pre>
+            <pre><code>lcm(4, 6)      <span class="cmt">-- 12</span>
+lcm(7, 13)     <span class="cmt">-- 91</span>
+lcm(0, 5)      <span class="cmt">-- 0</span>
+lcm(-4, 6)     <span class="cmt">-- 12</span></code></pre>
 
             <a href="#top" class="back-to-top">&uarr; Back to top</a>
         </div>
@@ -338,7 +467,7 @@ lcm(-4, 6)     <span style="color:#95a5a6">-- 12</span></code></pre>
                 <tr><th>Signature</th><th>Description</th></tr>
                 <tr><td><code>urand() &rarr; Float</code></td><td>Uniform random float in [0.0, 1.0).</td></tr>
             </table>
-<pre><code>urand()    <span style="color:#95a5a6">-- e.g. 0.7320508075688772</span></code></pre>
+<pre><code>urand()    <span class="cmt">-- e.g. 0.7320508075688772</span></code></pre>
 
             <h3><code>urands()</code> / <code>urands(n)</code></h3>
             <p>Multiple uniform random floats in [0.0, 1.0). With no arguments, returns an infinite lazy list. With one argument, returns an array of <code>n</code> values.</p>
@@ -347,8 +476,8 @@ lcm(-4, 6)     <span style="color:#95a5a6">-- 12</span></code></pre>
                 <tr><td><code>urands() &rarr; List&lt;Float&gt;</code></td><td>Infinite lazy list of uniform random floats.</td></tr>
                 <tr><td><code>urands(Int) &rarr; [Float]</code></td><td>Array of <code>n</code> uniform random floats.</td></tr>
             </table>
-<pre><code>urands() take(3)   <span style="color:#95a5a6">-- e.g. List(0.312, 0.449, 0.641)</span>
-urands(4)          <span style="color:#95a5a6">-- e.g. [0.041, 0.718, 0.013, 0.554]</span></code></pre>
+<pre><code>urands() take(3)   <span class="cmt">-- e.g. List(0.312, 0.449, 0.641)</span>
+urands(4)          <span class="cmt">-- e.g. [0.041, 0.718, 0.013, 0.554]</span></code></pre>
 
             <h3><code>brand()</code></h3>
             <p>Returns a bipolar random <code>Float</code> in the range [-1.0, 1.0).</p>
@@ -356,7 +485,7 @@ urands(4)          <span style="color:#95a5a6">-- e.g. [0.041, 0.718, 0.013, 0.5
                 <tr><th>Signature</th><th>Description</th></tr>
                 <tr><td><code>brand() &rarr; Float</code></td><td>Bipolar random float in [-1.0, 1.0).</td></tr>
             </table>
-<pre><code>brand()    <span style="color:#95a5a6">-- e.g. -0.4142135623730951</span></code></pre>
+<pre><code>brand()    <span class="cmt">-- e.g. -0.4142135623730951</span></code></pre>
 
             <h3><code>brands()</code> / <code>brands(n)</code></h3>
             <p>Multiple bipolar random floats in [-1.0, 1.0). With no arguments, returns an infinite lazy list. With one argument, returns an array of <code>n</code> values.</p>
@@ -365,8 +494,8 @@ urands(4)          <span style="color:#95a5a6">-- e.g. [0.041, 0.718, 0.013, 0.5
                 <tr><td><code>brands() &rarr; List&lt;Float&gt;</code></td><td>Infinite lazy list of bipolar random floats.</td></tr>
                 <tr><td><code>brands(Int) &rarr; [Float]</code></td><td>Array of <code>n</code> bipolar random floats.</td></tr>
             </table>
-<pre><code>brands() take(3)   <span style="color:#95a5a6">-- e.g. List(-0.945, 0.620, -0.570)</span>
-brands(4)          <span style="color:#95a5a6">-- e.g. [0.232, -0.846, -0.553, 0.714]</span></code></pre>
+<pre><code>brands() take(3)   <span class="cmt">-- e.g. List(-0.945, 0.620, -0.570)</span>
+brands(4)          <span class="cmt">-- e.g. [0.232, -0.846, -0.553, 0.714]</span></code></pre>
 
             <h3><code>irand(lo, hi)</code></h3>
             <p>Returns a uniform random <code>Int</code> in the inclusive range [lo, hi]. Uses unbiased rejection sampling. If <code>lo &gt; hi</code>, the arguments are swapped.</p>
@@ -374,8 +503,8 @@ brands(4)          <span style="color:#95a5a6">-- e.g. [0.232, -0.846, -0.553, 0
                 <tr><th>Signature</th><th>Description</th></tr>
                 <tr><td><code>irand(Int, Int) &rarr; Int</code></td><td>Uniform random integer in [lo, hi].</td></tr>
             </table>
-<pre><code>irand(1, 6)      <span style="color:#95a5a6">-- e.g. 4 (simulates a die roll)</span>
-irand(0, 99)     <span style="color:#95a5a6">-- e.g. 42</span></code></pre>
+<pre><code>irand(1, 6)      <span class="cmt">-- e.g. 4 (simulates a die roll)</span>
+irand(0, 99)     <span class="cmt">-- e.g. 42</span></code></pre>
 
             <h3><code>irands(lo, hi)</code> / <code>irands(n, lo, hi)</code></h3>
             <p>Multiple uniform random integers in [lo, hi]. With two arguments, returns an infinite lazy list. With three arguments, the first is the count <code>n</code> and returns an array.</p>
@@ -384,8 +513,8 @@ irand(0, 99)     <span style="color:#95a5a6">-- e.g. 42</span></code></pre>
                 <tr><td><code>irands(Int, Int) &rarr; List&lt;Int&gt;</code></td><td>Infinite lazy list of uniform random integers in [lo, hi].</td></tr>
                 <tr><td><code>irands(Int, Int, Int) &rarr; [Int]</code></td><td>Array of <code>n</code> uniform random integers in [lo, hi].</td></tr>
             </table>
-<pre><code>irands(1, 6) take(5)   <span style="color:#95a5a6">-- e.g. List(3, 6, 1, 4, 2)</span>
-irands(4, 1, 6)        <span style="color:#95a5a6">-- e.g. [5, 2, 6, 1]</span></code></pre>
+<pre><code>irands(1, 6) take(5)   <span class="cmt">-- e.g. List(3, 6, 1, 4, 2)</span>
+irands(4, 1, 6)        <span class="cmt">-- e.g. [5, 2, 6, 1]</span></code></pre>
 
             <h3><code>rand(lo, hi)</code></h3>
             <p>Returns a uniform random <code>Float</code> in the range [lo, hi).</p>
@@ -393,8 +522,8 @@ irands(4, 1, 6)        <span style="color:#95a5a6">-- e.g. [5, 2, 6, 1]</span></
                 <tr><th>Signature</th><th>Description</th></tr>
                 <tr><td><code>rand(Float, Float) &rarr; Float</code></td><td>Uniform random float in [lo, hi).</td></tr>
             </table>
-<pre><code>rand(5.0, 10.0)    <span style="color:#95a5a6">-- e.g. 7.764822845349203</span>
-rand(-1.0, 1.0)    <span style="color:#95a5a6">-- e.g. -0.271028337412</span></code></pre>
+<pre><code>rand(5.0, 10.0)    <span class="cmt">-- e.g. 7.764822845349203</span>
+rand(-1.0, 1.0)    <span class="cmt">-- e.g. -0.271028337412</span></code></pre>
 
             <h3><code>rands(lo, hi)</code> / <code>rands(n, lo, hi)</code></h3>
             <p>Multiple uniform random floats in [lo, hi). With two arguments, returns an infinite lazy list. With three arguments, the first is the count <code>n</code> and returns an array.</p>
@@ -403,8 +532,8 @@ rand(-1.0, 1.0)    <span style="color:#95a5a6">-- e.g. -0.271028337412</span></c
                 <tr><td><code>rands(Float, Float) &rarr; List&lt;Float&gt;</code></td><td>Infinite lazy list of uniform random floats in [lo, hi).</td></tr>
                 <tr><td><code>rands(Int, Float, Float) &rarr; [Float]</code></td><td>Array of <code>n</code> uniform random floats in [lo, hi).</td></tr>
             </table>
-<pre><code>rands(5.0, 10.0) take(3)   <span style="color:#95a5a6">-- e.g. List(8.41, 7.51, 7.24)</span>
-rands(4, 5.0, 10.0)        <span style="color:#95a5a6">-- e.g. [6.07, 5.49, 6.27, 6.92]</span></code></pre>
+<pre><code>rands(5.0, 10.0) take(3)   <span class="cmt">-- e.g. List(8.41, 7.51, 7.24)</span>
+rands(4, 5.0, 10.0)        <span class="cmt">-- e.g. [6.07, 5.49, 6.27, 6.92]</span></code></pre>
 
             <h3><code>xrand(lo, hi)</code></h3>
             <p>Returns an exponentially distributed random <code>Float</code> in [lo, hi). Computed as <code>lo * pow(hi/lo, urand())</code>. Useful for generating values that span several orders of magnitude with equal probability per octave (e.g. frequencies, durations).</p>
@@ -412,8 +541,8 @@ rands(4, 5.0, 10.0)        <span style="color:#95a5a6">-- e.g. [6.07, 5.49, 6.27
                 <tr><th>Signature</th><th>Description</th></tr>
                 <tr><td><code>xrand(Float, Float) &rarr; Float</code></td><td>Exponentially distributed float in [lo, hi).</td></tr>
             </table>
-<pre><code>xrand(20.0, 20000.0)   <span style="color:#95a5a6">-- e.g. 632.4555320336759 (random frequency)</span>
-xrand(0.01, 10.0)      <span style="color:#95a5a6">-- e.g. 0.2154434690031882 (random duration)</span></code></pre>
+<pre><code>xrand(20.0, 20000.0)   <span class="cmt">-- e.g. 632.4555320336759 (random frequency)</span>
+xrand(0.01, 10.0)      <span class="cmt">-- e.g. 0.2154434690031882 (random duration)</span></code></pre>
 
             <h3><code>xrands(lo, hi)</code> / <code>xrands(n, lo, hi)</code></h3>
             <p>Multiple exponentially distributed random floats in [lo, hi). With two arguments, returns an infinite lazy list. With three arguments, the first is the count <code>n</code> and returns an array.</p>
@@ -422,8 +551,8 @@ xrand(0.01, 10.0)      <span style="color:#95a5a6">-- e.g. 0.2154434690031882 (r
                 <tr><td><code>xrands(Float, Float) &rarr; List&lt;Float&gt;</code></td><td>Infinite lazy list of exponentially distributed floats in [lo, hi).</td></tr>
                 <tr><td><code>xrands(Int, Float, Float) &rarr; [Float]</code></td><td>Array of <code>n</code> exponentially distributed floats in [lo, hi).</td></tr>
             </table>
-<pre><code>xrands(20.0, 20000.0) take(3)   <span style="color:#95a5a6">-- e.g. List(632.5, 47.8, 8841.2)</span>
-xrands(4, 0.01, 10.0)           <span style="color:#95a5a6">-- e.g. [0.215, 3.42, 0.078, 1.56]</span></code></pre>
+<pre><code>xrands(20.0, 20000.0) take(3)   <span class="cmt">-- e.g. List(632.5, 47.8, 8841.2)</span>
+xrands(4, 0.01, 10.0)           <span class="cmt">-- e.g. [0.215, 3.42, 0.078, 1.56]</span></code></pre>
 
             <h3><code>pick(a)</code></h3>
             <p>Returns a randomly chosen element from the array <code>a</code>.</p>
@@ -431,8 +560,8 @@ xrands(4, 0.01, 10.0)           <span style="color:#95a5a6">-- e.g. [0.215, 3.42
                 <tr><th>Signature</th><th>Description</th></tr>
                 <tr><td><code>pick([T]) &rarr; T</code></td><td>Choose a random element from the array.</td></tr>
             </table>
-<pre><code>pick([1, 2, 3, 4, 5])        <span style="color:#95a5a6">-- e.g. 3</span>
-pick(["red", "green", "blue"])  <span style="color:#95a5a6">-- e.g. "green"</span></code></pre>
+<pre><code>pick([1, 2, 3, 4, 5])        <span class="cmt">-- e.g. 3</span>
+pick(["red", "green", "blue"])  <span class="cmt">-- e.g. "green"</span></code></pre>
 
             <h3><code>picks(a)</code> / <code>picks(a, n)</code></h3>
             <p>Returns random elements chosen from the array <code>a</code>. With one argument, returns an infinite lazy list of random picks. With two arguments, returns an array of <code>n</code> random picks.</p>
@@ -441,8 +570,8 @@ pick(["red", "green", "blue"])  <span style="color:#95a5a6">-- e.g. "green"</spa
                 <tr><td><code>picks([T]) &rarr; List&lt;T&gt;</code></td><td>Infinite lazy list of random picks from the array.</td></tr>
                 <tr><td><code>picks([T], Int) &rarr; [T]</code></td><td>Array of <code>n</code> random picks from the array.</td></tr>
             </table>
-<pre><code>picks([1, 2, 3]) take(5)     <span style="color:#95a5a6">-- e.g. List(2, 1, 3, 3, 1)</span>
-picks(["a", "b", "c"], 4)   <span style="color:#95a5a6">-- e.g. ["b", "a", "c", "a"]</span></code></pre>
+<pre><code>picks([1, 2, 3]) take(5)     <span class="cmt">-- e.g. List(2, 1, 3, 3, 1)</span>
+picks(["a", "b", "c"], 4)   <span class="cmt">-- e.g. ["b", "a", "c", "a"]</span></code></pre>
 
             <a href="#top" class="back-to-top">&uarr; Back to top</a>
         </div>
@@ -460,11 +589,11 @@ picks(["a", "b", "c"], 4)   <span style="color:#95a5a6">-- e.g. ["b", "a", "c", 
                 <tr><td><code>trunc(x)</code></td><td><code>Float &rarr; Float</code></td><td>Round toward zero (drop the fractional part).</td></tr>
                 <tr><td><code>frac(x)</code></td><td><code>Float &rarr; Float</code></td><td>Fractional part: <code>x - floor(x)</code>.</td></tr>
             </table>
-            <pre><code>3.7 floor     <span style="color:#95a5a6">-- 3.0</span>
-3.2 ceil      <span style="color:#95a5a6">-- 4.0</span>
-2.5 round     <span style="color:#95a5a6">-- 3.0</span>
--3.7 trunc    <span style="color:#95a5a6">-- -3.0</span>
-3.75 frac     <span style="color:#95a5a6">-- 0.75</span></code></pre>
+            <pre><code>3.7 floor     <span class="cmt">-- 3.0</span>
+3.2 ceil      <span class="cmt">-- 4.0</span>
+2.5 round     <span class="cmt">-- 3.0</span>
+-3.7 trunc    <span class="cmt">-- -3.0</span>
+3.75 frac     <span class="cmt">-- 0.75</span></code></pre>
 
             <a href="#top" class="back-to-top">&uarr; Back to top</a>
         </div>
@@ -483,11 +612,11 @@ picks(["a", "b", "c"], 4)   <span style="color:#95a5a6">-- e.g. ["b", "a", "c", 
                 <tr><td><code>hypot(x, y)</code></td><td><code>(Float, Float) &rarr; Float</code></td><td>Hypotenuse: <code>sqrt(x&sup2; + y&sup2;)</code> without overflow.</td></tr>
                 <tr><td><code>remainder(x, y)</code></td><td><code>(Float, Float) &rarr; Float</code></td><td>IEEE remainder of <code>x / y</code>. Result is <code>x &minus; n*y</code> where <code>n</code> is the nearest integer to <code>x/y</code>.</td></tr>
             </table>
-            <pre><code>16.0 sqrt            <span style="color:#95a5a6">-- 4.0</span>
-27.0 cbrt            <span style="color:#95a5a6">-- 3.0</span>
-pow(2.0, 10.0)       <span style="color:#95a5a6">-- 1024.0</span>
-hypot(3.0, 4.0)      <span style="color:#95a5a6">-- 5.0</span>
-remainder(5.5, 2.0)  <span style="color:#95a5a6">-- -0.5</span></code></pre>
+            <pre><code>16.0 sqrt            <span class="cmt">-- 4.0</span>
+27.0 cbrt            <span class="cmt">-- 3.0</span>
+pow(2.0, 10.0)       <span class="cmt">-- 1024.0</span>
+hypot(3.0, 4.0)      <span class="cmt">-- 5.0</span>
+remainder(5.5, 2.0)  <span class="cmt">-- -0.5</span></code></pre>
 
             <a href="#top" class="back-to-top">&uarr; Back to top</a>
         </div>
@@ -509,10 +638,10 @@ remainder(5.5, 2.0)  <span style="color:#95a5a6">-- -0.5</span></code></pre>
                 <tr><td><code>log10(x)</code></td><td><code>Float &rarr; Float</code></td><td>Base-10 logarithm.</td></tr>
                 <tr><td><code>log1p(x)</code></td><td><code>Float &rarr; Float</code></td><td>log(1 + <code>x</code>), accurate for small <code>x</code>.</td></tr>
             </table>
-            <pre><code>1.0 exp       <span style="color:#95a5a6">-- 2.718281828...</span>
-1.0 exp log   <span style="color:#95a5a6">-- 1.0</span>
-1024.0 log2   <span style="color:#95a5a6">-- 10.0</span>
-1000.0 log10  <span style="color:#95a5a6">-- 3.0</span></code></pre>
+            <pre><code>1.0 exp       <span class="cmt">-- 2.718281828...</span>
+1.0 exp log   <span class="cmt">-- 1.0</span>
+1024.0 log2   <span class="cmt">-- 10.0</span>
+1000.0 log10  <span class="cmt">-- 3.0</span></code></pre>
 
             <a href="#top" class="back-to-top">&uarr; Back to top</a>
         </div>
@@ -552,10 +681,10 @@ remainder(5.5, 2.0)  <span style="color:#95a5a6">-- -0.5</span></code></pre>
                 <tr><td><code>cospi(x)</code></td><td><code>Float &rarr; Float</code></td><td>cos(&pi; &middot; <code>x</code>). Exact at half-integer values.</td></tr>
                 <tr><td><code>tanpi(x)</code></td><td><code>Float &rarr; Float</code></td><td>tan(&pi; &middot; <code>x</code>).</td></tr>
             </table>
-            <pre><code>0.0 sin        <span style="color:#95a5a6">-- 0.0</span>
-1.0 sinpi      <span style="color:#95a5a6">-- 0.0  (exact)</span>
-0.5 cospi      <span style="color:#95a5a6">-- 0.0  (exact)</span>
-atan2(1.0, 1.0) <span style="color:#95a5a6">-- 0.7853... (pi/4)</span></code></pre>
+            <pre><code>0.0 sin        <span class="cmt">-- 0.0</span>
+1.0 sinpi      <span class="cmt">-- 0.0  (exact)</span>
+0.5 cospi      <span class="cmt">-- 0.0  (exact)</span>
+atan2(1.0, 1.0) <span class="cmt">-- 0.7853... (pi/4)</span></code></pre>
 
             <a href="#top" class="back-to-top">&uarr; Back to top</a>
         </div>
@@ -594,8 +723,8 @@ atan2(1.0, 1.0) <span style="color:#95a5a6">-- 0.7853... (pi/4)</span></code></p
                 <tr><td><code>tgamma(x)</code></td><td><code>Float &rarr; Float</code></td><td>Gamma function: &Gamma;(<code>x</code>).</td></tr>
                 <tr><td><code>lgamma(x)</code></td><td><code>Float &rarr; Float</code></td><td>Natural log of the absolute value of &Gamma;(<code>x</code>).</td></tr>
             </table>
-            <pre><code>5.0 tgamma     <span style="color:#95a5a6">-- 24.0  (i.e. 4!)</span>
-0.0 erf        <span style="color:#95a5a6">-- 0.0</span></code></pre>
+            <pre><code>5.0 tgamma     <span class="cmt">-- 24.0  (i.e. 4!)</span>
+0.0 erf        <span class="cmt">-- 0.0</span></code></pre>
 
             <a href="#top" class="back-to-top">&uarr; Back to top</a>
         </div>
@@ -619,9 +748,9 @@ atan2(1.0, 1.0) <span style="color:#95a5a6">-- 0.7853... (pi/4)</span></code></p
                 <tr><td><code>isFinite(x)</code></td><td><code>Float &rarr; Bool</code></td><td><code>true</code> if <code>x</code> is neither NaN nor infinity.</td></tr>
                 <tr><td><code>isNormal(x)</code></td><td><code>Float &rarr; Bool</code></td><td><code>true</code> if <code>x</code> is a normal floating-point number (not zero, subnormal, infinite, or NaN).</td></tr>
             </table>
-            <pre><code>isNan(0.0 / 0.0)   <span style="color:#95a5a6">-- true</span>
-isInf(1.0 / 0.0)   <span style="color:#95a5a6">-- true</span>
-42.0 isFinite      <span style="color:#95a5a6">-- true</span></code></pre>
+            <pre><code>isNan(0.0 / 0.0)   <span class="cmt">-- true</span>
+isInf(1.0 / 0.0)   <span class="cmt">-- true</span>
+42.0 isFinite      <span class="cmt">-- true</span></code></pre>
 
             <a href="#top" class="back-to-top">&uarr; Back to top</a>
         </div>
@@ -656,12 +785,12 @@ isInf(1.0 / 0.0)   <span style="color:#95a5a6">-- true</span>
                 <tr><td><code>bitWidth(x)</code></td><td><code>Int &rarr; Int</code></td><td>Number of bits needed to represent <code>x</code>.</td></tr>
                 <tr><td><code>hasSingleBit(x)</code></td><td><code>Int &rarr; Bool</code></td><td><code>true</code> if exactly one bit is set (i.e., <code>x</code> is a power of 2).</td></tr>
             </table>
-            <pre><code>1 clz             <span style="color:#95a5a6">-- 63</span>
-0xFF popCount     <span style="color:#95a5a6">-- 8</span>
-5 bitCeil         <span style="color:#95a5a6">-- 8</span>
-5 bitFloor        <span style="color:#95a5a6">-- 4</span>
-8 hasSingleBit    <span style="color:#95a5a6">-- true</span>
-6 hasSingleBit    <span style="color:#95a5a6">-- false</span></code></pre>
+            <pre><code>1 clz             <span class="cmt">-- 63</span>
+0xFF popCount     <span class="cmt">-- 8</span>
+5 bitCeil         <span class="cmt">-- 8</span>
+5 bitFloor        <span class="cmt">-- 4</span>
+8 hasSingleBit    <span class="cmt">-- true</span>
+6 hasSingleBit    <span class="cmt">-- false</span></code></pre>
 
             <a href="#top" class="back-to-top">&uarr; Back to top</a>
         </div>
@@ -677,8 +806,8 @@ isInf(1.0 / 0.0)   <span style="color:#95a5a6">-- true</span>
                 <tr><th>Signature</th><th>Description</th></tr>
                 <tr><td><code>Complex(Numeric, Numeric) &rarr; Complex</code></td><td>Create a complex number. Both arguments are converted to Float.</td></tr>
             </table>
-            <pre><code>Complex(3.0, 4.0)    <span style="color:#95a5a6">-- 3.0+4.0i</span>
-Complex(1, 0)        <span style="color:#95a5a6">-- 1.0+0.0i</span></code></pre>
+            <pre><code>Complex(3.0, 4.0)    <span class="cmt">-- 3.0+4.0i</span>
+Complex(1, 0)        <span class="cmt">-- 1.0+0.0i</span></code></pre>
 
             <h3>Decomposition &amp; Properties</h3>
             <table>
@@ -691,13 +820,13 @@ Complex(1, 0)        <span style="color:#95a5a6">-- 1.0+0.0i</span></code></pre>
                 <tr><td><code>polar(r, &theta;)</code></td><td><code>(Float, Float) &rarr; Complex</code></td><td>Create complex from polar coordinates: <code>r &middot; (cos&theta; + i&middot;sin&theta;)</code>.</td></tr>
             </table>
             <pre><code>let z = 3.0 + 4.0i
-z real      <span style="color:#95a5a6">-- 3.0</span>
-z imag      <span style="color:#95a5a6">-- 4.0</span>
-z abs       <span style="color:#95a5a6">-- 5.0</span>
-z norm      <span style="color:#95a5a6">-- 25.0</span>
-z conj      <span style="color:#95a5a6">-- 3.0-4.0i</span>
-z arg       <span style="color:#95a5a6">-- 0.9272... (radians)</span>
-polar(5.0, 0.0)  <span style="color:#95a5a6">-- 5.0+0.0i</span></code></pre>
+z real      <span class="cmt">-- 3.0</span>
+z imag      <span class="cmt">-- 4.0</span>
+z abs       <span class="cmt">-- 5.0</span>
+z norm      <span class="cmt">-- 25.0</span>
+z conj      <span class="cmt">-- 3.0-4.0i</span>
+z arg       <span class="cmt">-- 0.9272... (radians)</span>
+polar(5.0, 0.0)  <span class="cmt">-- 5.0+0.0i</span></code></pre>
 
             <a href="#top" class="back-to-top">&uarr; Back to top</a>
         </div>
@@ -716,12 +845,12 @@ polar(5.0, 0.0)  <span style="color:#95a5a6">-- 5.0+0.0i</span></code></pre>
                 <tr><td><code>max(a, b)</code></td><td><code>(String, String) &rarr; String</code></td><td>Lexicographically larger string.</td></tr>
                 <tr><td><code>cmp(a, b)</code></td><td><code>(String, String) &rarr; Int</code></td><td>Returns &minus;1, 0, or 1.</td></tr>
             </table>
-            <pre><code>"hello" length            <span style="color:#95a5a6">-- 5</span>
-"" length                 <span style="color:#95a5a6">-- 0</span>
-min("apple", "banana")   <span style="color:#95a5a6">-- "apple"</span>
-max("apple", "banana")   <span style="color:#95a5a6">-- "banana"</span>
-cmp("apple", "banana")   <span style="color:#95a5a6">-- -1</span>
-"abc" < "abd"            <span style="color:#95a5a6">-- true</span></code></pre>
+            <pre><code>"hello" length            <span class="cmt">-- 5</span>
+"" length                 <span class="cmt">-- 0</span>
+min("apple", "banana")   <span class="cmt">-- "apple"</span>
+max("apple", "banana")   <span class="cmt">-- "banana"</span>
+cmp("apple", "banana")   <span class="cmt">-- -1</span>
+"abc" < "abd"            <span class="cmt">-- true</span></code></pre>
 
             <h3><code>substring(s, start, len)</code></h3>
             <p>Returns a substring starting at byte offset <code>start</code> with at most <code>len</code> bytes.</p>
@@ -729,9 +858,9 @@ cmp("apple", "banana")   <span style="color:#95a5a6">-- -1</span>
                 <tr><th>Signature</th><th>Description</th></tr>
                 <tr><td><code>substring(String, Int, Int) &rarr; String</code></td><td>Extract a substring by byte position and length.</td></tr>
             </table>
-            <pre><code>substring("hello world", 0, 5)    <span style="color:#95a5a6">-- "hello"</span>
-substring("hello world", 6, 5)    <span style="color:#95a5a6">-- "world"</span>
-substring("abcdef", 2, 3)         <span style="color:#95a5a6">-- "cde"</span></code></pre>
+            <pre><code>substring("hello world", 0, 5)    <span class="cmt">-- "hello"</span>
+substring("hello world", 6, 5)    <span class="cmt">-- "world"</span>
+substring("abcdef", 2, 3)         <span class="cmt">-- "cde"</span></code></pre>
 
             <h3><code>contains(s, sub)</code></h3>
             <p>Returns <code>true</code> if the string contains the given substring.</p>
@@ -739,9 +868,9 @@ substring("abcdef", 2, 3)         <span style="color:#95a5a6">-- "cde"</span></c
                 <tr><th>Signature</th><th>Description</th></tr>
                 <tr><td><code>contains(String, String) &rarr; Bool</code></td><td>Test whether <code>sub</code> appears anywhere in <code>s</code>.</td></tr>
             </table>
-            <pre><code>contains("hello world", "world")  <span style="color:#95a5a6">-- true</span>
-contains("hello world", "xyz")    <span style="color:#95a5a6">-- false</span>
-contains("abc", "")               <span style="color:#95a5a6">-- true</span></code></pre>
+            <pre><code>contains("hello world", "world")  <span class="cmt">-- true</span>
+contains("hello world", "xyz")    <span class="cmt">-- false</span>
+contains("abc", "")               <span class="cmt">-- true</span></code></pre>
 
             <h3><code>startsWith(s, prefix)</code></h3>
             <p>Returns <code>true</code> if the string begins with <code>prefix</code>.</p>
@@ -749,8 +878,8 @@ contains("abc", "")               <span style="color:#95a5a6">-- true</span></co
                 <tr><th>Signature</th><th>Description</th></tr>
                 <tr><td><code>startsWith(String, String) &rarr; Bool</code></td><td>Test for a prefix match.</td></tr>
             </table>
-            <pre><code>startsWith("hello world", "hello")  <span style="color:#95a5a6">-- true</span>
-startsWith("hello world", "world")  <span style="color:#95a5a6">-- false</span></code></pre>
+            <pre><code>startsWith("hello world", "hello")  <span class="cmt">-- true</span>
+startsWith("hello world", "world")  <span class="cmt">-- false</span></code></pre>
 
             <h3><code>endsWith(s, suffix)</code></h3>
             <p>Returns <code>true</code> if the string ends with <code>suffix</code>.</p>
@@ -758,8 +887,8 @@ startsWith("hello world", "world")  <span style="color:#95a5a6">-- false</span><
                 <tr><th>Signature</th><th>Description</th></tr>
                 <tr><td><code>endsWith(String, String) &rarr; Bool</code></td><td>Test for a suffix match.</td></tr>
             </table>
-            <pre><code>endsWith("hello world", "world")  <span style="color:#95a5a6">-- true</span>
-endsWith("hello world", "hello")  <span style="color:#95a5a6">-- false</span></code></pre>
+            <pre><code>endsWith("hello world", "world")  <span class="cmt">-- true</span>
+endsWith("hello world", "hello")  <span class="cmt">-- false</span></code></pre>
 
             <h3><code>split(s, delimiter)</code></h3>
             <p>Splits a string by the given delimiter and returns an array of substrings. An empty delimiter splits into individual bytes.</p>
@@ -767,9 +896,9 @@ endsWith("hello world", "hello")  <span style="color:#95a5a6">-- false</span></c
                 <tr><th>Signature</th><th>Description</th></tr>
                 <tr><td><code>split(String, String) &rarr; [String]</code></td><td>Split string by delimiter.</td></tr>
             </table>
-            <pre><code>split("a,b,c", ",")             <span style="color:#95a5a6">-- ["a", "b", "c"]</span>
-split("one--two--three", "--")  <span style="color:#95a5a6">-- ["one", "two", "three"]</span>
-split("hello", "")              <span style="color:#95a5a6">-- ["h", "e", "l", "l", "o"]</span></code></pre>
+            <pre><code>split("a,b,c", ",")             <span class="cmt">-- ["a", "b", "c"]</span>
+split("one--two--three", "--")  <span class="cmt">-- ["one", "two", "three"]</span>
+split("hello", "")              <span class="cmt">-- ["h", "e", "l", "l", "o"]</span></code></pre>
 
             <h3><code>trim(s)</code></h3>
             <p>Returns a new string with leading and trailing whitespace removed.</p>
@@ -777,9 +906,9 @@ split("hello", "")              <span style="color:#95a5a6">-- ["h", "e", "l", "
                 <tr><th>Signature</th><th>Description</th></tr>
                 <tr><td><code>trim(String) &rarr; String</code></td><td>Strip leading and trailing whitespace.</td></tr>
             </table>
-            <pre><code>trim("  hello  ")    <span style="color:#95a5a6">-- "hello"</span>
-trim("  leading")    <span style="color:#95a5a6">-- "leading"</span>
-trim("trailing  ")   <span style="color:#95a5a6">-- "trailing"</span></code></pre>
+            <pre><code>trim("  hello  ")    <span class="cmt">-- "hello"</span>
+trim("  leading")    <span class="cmt">-- "leading"</span>
+trim("trailing  ")   <span class="cmt">-- "trailing"</span></code></pre>
 
             <h3><code>toUpper(s)</code> / <code>toLower(s)</code></h3>
             <p>Returns a new string with all ASCII letters converted to upper or lower case.</p>
@@ -788,10 +917,10 @@ trim("trailing  ")   <span style="color:#95a5a6">-- "trailing"</span></code></pr
                 <tr><td><code>toUpper(String) &rarr; String</code></td><td>Convert to upper case.</td></tr>
                 <tr><td><code>toLower(String) &rarr; String</code></td><td>Convert to lower case.</td></tr>
             </table>
-            <pre><code>toUpper("hello")        <span style="color:#95a5a6">-- "HELLO"</span>
-toLower("HELLO")        <span style="color:#95a5a6">-- "hello"</span>
-toUpper("Hello World")  <span style="color:#95a5a6">-- "HELLO WORLD"</span>
-toLower("Hello World")  <span style="color:#95a5a6">-- "hello world"</span></code></pre>
+            <pre><code>toUpper("hello")        <span class="cmt">-- "HELLO"</span>
+toLower("HELLO")        <span class="cmt">-- "hello"</span>
+toUpper("Hello World")  <span class="cmt">-- "HELLO WORLD"</span>
+toLower("Hello World")  <span class="cmt">-- "hello world"</span></code></pre>
 
             <h3><code>replace(s, from, to)</code></h3>
             <p>Returns a new string with all occurrences of <code>from</code> replaced by <code>to</code>.</p>
@@ -799,9 +928,9 @@ toLower("Hello World")  <span style="color:#95a5a6">-- "hello world"</span></cod
                 <tr><th>Signature</th><th>Description</th></tr>
                 <tr><td><code>replace(String, String, String) &rarr; String</code></td><td>Replace all occurrences of a substring.</td></tr>
             </table>
-            <pre><code>replace("hello world", "world", "there")  <span style="color:#95a5a6">-- "hello there"</span>
-replace("aabbcc", "bb", "XX")              <span style="color:#95a5a6">-- "aaXXcc"</span>
-replace("abcabc", "abc", "x")              <span style="color:#95a5a6">-- "xx"</span></code></pre>
+            <pre><code>replace("hello world", "world", "there")  <span class="cmt">-- "hello there"</span>
+replace("aabbcc", "bb", "XX")              <span class="cmt">-- "aaXXcc"</span>
+replace("abcabc", "abc", "x")              <span class="cmt">-- "xx"</span></code></pre>
 
             <h3>Byte Indexing</h3>
             <p>Strings support the <code>[]</code> indexing operator to access individual bytes. The index is zero-based and the result is an <code>Int</code> representing the byte value (0&ndash;255).</p>
@@ -810,9 +939,9 @@ replace("abcabc", "abc", "x")              <span style="color:#95a5a6">-- "xx"</
                 <tr><td><code>s[i]</code></td><td><code>Int</code></td><td>Byte value at index <code>i</code>.</td></tr>
             </table>
             <pre><code>let s = "hello";
-s[0]   <span style="color:#95a5a6">-- 104  (ASCII 'h')</span>
-s[1]   <span style="color:#95a5a6">-- 101  (ASCII 'e')</span>
-s[4]   <span style="color:#95a5a6">-- 111  (ASCII 'o')</span></code></pre>
+s[0]   <span class="cmt">-- 104  (ASCII 'h')</span>
+s[1]   <span class="cmt">-- 101  (ASCII 'e')</span>
+s[4]   <span class="cmt">-- 111  (ASCII 'o')</span></code></pre>
 
             <a href="#top" class="back-to-top">&uarr; Back to top</a>
         </div>
@@ -836,30 +965,30 @@ s[4]   <span style="color:#95a5a6">-- 111  (ASCII 'o')</span></code></pre>
                 <tr><td><code>%%</code></td><td>Literal percent sign.</td></tr>
             </table>
 
-            <pre><code><span style="color:#95a5a6">-- Positional placeholders</span>
-"%^ + %^ = %^" fmt(1, 2, 3)         <span style="color:#95a5a6">-- "1 + 2 = 3"</span>
+            <pre><code><span class="cmt">-- Positional placeholders</span>
+"%^ + %^ = %^" fmt(1, 2, 3)         <span class="cmt">-- "1 + 2 = 3"</span>
 
-<span style="color:#95a5a6">-- Indexed placeholders (zero-based)</span>
-"%0 and %2 and %1" fmt("a", "b", "c")  <span style="color:#95a5a6">-- "a and c and b"</span>
+<span class="cmt">-- Indexed placeholders (zero-based)</span>
+"%0 and %2 and %1" fmt("a", "b", "c")  <span class="cmt">-- "a and c and b"</span>
 
-<span style="color:#95a5a6">-- Repeated index</span>
-"%0 %0 %0" fmt("echo")              <span style="color:#95a5a6">-- "echo echo echo"</span>
+<span class="cmt">-- Repeated index</span>
+"%0 %0 %0" fmt("echo")              <span class="cmt">-- "echo echo echo"</span>
 
-<span style="color:#95a5a6">-- Escape percent</span>
-"100%% done" fmt()                   <span style="color:#95a5a6">-- "100% done"</span>
-"%%=%^" fmt(42)                      <span style="color:#95a5a6">-- "%=42"</span>
+<span class="cmt">-- Escape percent</span>
+"100%% done" fmt()                   <span class="cmt">-- "100% done"</span>
+"%%=%^" fmt(42)                      <span class="cmt">-- "%=42"</span>
 
-<span style="color:#95a5a6">-- Works with any type</span>
-"half = %^" fmt(1/2)                 <span style="color:#95a5a6">-- "half = 1/2"</span>
-"array: %^" fmt([10, 20, 30])        <span style="color:#95a5a6">-- "array: [10, 20, 30]"</span>
-"list: %^" fmt(1::2::3::nil)         <span style="color:#95a5a6">-- "list: List(1, 2, 3)"</span>
+<span class="cmt">-- Works with any type</span>
+"half = %^" fmt(1/2)                 <span class="cmt">-- "half = 1/2"</span>
+"array: %^" fmt([10, 20, 30])        <span class="cmt">-- "array: [10, 20, 30]"</span>
+"list: %^" fmt(1::2::3::nil)         <span class="cmt">-- "list: List(1, 2, 3)"</span>
 
-<span style="color:#95a5a6">-- Pipeline style (idiomatic)</span>
-"hello %^!" fmt("world") println;    <span style="color:#95a5a6">-- hello world!</span>
-"%^ items" fmt(42) println;          <span style="color:#95a5a6">-- 42 items</span>
+<span class="cmt">-- Pipeline style (idiomatic)</span>
+"hello %^!" fmt("world") println;    <span class="cmt">-- hello world!</span>
+"%^ items" fmt(42) println;          <span class="cmt">-- 42 items</span>
 
-<span style="color:#95a5a6">-- Zero args when no placeholders</span>
-"no placeholders" fmt()              <span style="color:#95a5a6">-- "no placeholders"</span></code></pre>
+<span class="cmt">-- Zero args when no placeholders</span>
+"no placeholders" fmt()              <span class="cmt">-- "no placeholders"</span></code></pre>
 
             <a href="#top" class="back-to-top">&uarr; Back to top</a>
         </div>
@@ -876,9 +1005,9 @@ s[4]   <span style="color:#95a5a6">-- 111  (ASCII 'o')</span></code></pre>
                 <tr><td><code>toList(r)</code></td><td><code>Range&lt;Int&gt; &rarr; List&lt;Int&gt;</code></td><td>Create a lazy list from the range. Elements are generated on demand.</td></tr>
             </table>
             <pre><code>let r = (1..5);
-r length     <span style="color:#95a5a6">-- 5</span>
-r toArray    <span style="color:#95a5a6">-- [1, 2, 3, 4, 5]</span>
-r toList     <span style="color:#95a5a6">-- List(1, 2, 3, 4, 5) (lazy)</span></code></pre>
+r length     <span class="cmt">-- 5</span>
+r toArray    <span class="cmt">-- [1, 2, 3, 4, 5]</span>
+r toList     <span class="cmt">-- List(1, 2, 3, 4, 5) (lazy)</span></code></pre>
 
             <a href="#top" class="back-to-top">&uarr; Back to top</a>
         </div>
@@ -905,9 +1034,9 @@ r toList     <span style="color:#95a5a6">-- List(1, 2, 3, 4, 5) (lazy)</span></c
             <div class="highlight" style="border-left: 4px solid #e74c3c; background: #fdf2f2;">
                 <strong>Warning:</strong> <code>length</code> on a <code>List</code> forces every element. Calling it on an infinite list (e.g. from <code>cyc</code> or a range like <code>(1..)</code>) will <strong>never terminate</strong>.
             </div>
-            <pre><code>[1, 2, 3, 4, 5] length             <span style="color:#95a5a6">-- 5</span>
-List(1, 2, 3) length               <span style="color:#95a5a6">-- 3</span>
-[10, 20, 30] length                <span style="color:#95a5a6">-- 3</span></code></pre>
+            <pre><code>[1, 2, 3, 4, 5] length             <span class="cmt">-- 5</span>
+List(1, 2, 3) length               <span class="cmt">-- 3</span>
+[10, 20, 30] length                <span class="cmt">-- 3</span></code></pre>
 
             <h3>Slicing &amp; Selection</h3>
 
@@ -918,8 +1047,8 @@ List(1, 2, 3) length               <span style="color:#95a5a6">-- 3</span>
                 <tr><td><code>take([T], Int) &rarr; [T]</code></td><td>First <code>n</code> elements of an array.</td></tr>
                 <tr><td><code>take(List&lt;T&gt;, Int) &rarr; List&lt;T&gt;</code></td><td>Lazily takes first <code>n</code> elements of a list.</td></tr>
             </table>
-            <pre><code>[1, 2, 3, 4, 5] take(3)            <span style="color:#95a5a6">-- [1, 2, 3]</span>
-List(1, 2, 3, 4, 5) take(3)       <span style="color:#95a5a6">-- List(1, 2, 3)</span></code></pre>
+            <pre><code>[1, 2, 3, 4, 5] take(3)            <span class="cmt">-- [1, 2, 3]</span>
+List(1, 2, 3, 4, 5) take(3)       <span class="cmt">-- List(1, 2, 3)</span></code></pre>
 
             <h3><code>drop(collection, n)</code></h3>
             <p>Skips the first <code>n</code> elements and returns the rest.</p>
@@ -928,8 +1057,8 @@ List(1, 2, 3, 4, 5) take(3)       <span style="color:#95a5a6">-- List(1, 2, 3)</
                 <tr><td><code>drop([T], Int) &rarr; [T]</code></td><td>All but the first <code>n</code> elements of an array.</td></tr>
                 <tr><td><code>drop(List&lt;T&gt;, Int) &rarr; List&lt;T&gt;</code></td><td>Eagerly skips <code>n</code> elements, returns the rest of the list.</td></tr>
             </table>
-            <pre><code>[1, 2, 3, 4, 5] drop(2)            <span style="color:#95a5a6">-- [3, 4, 5]</span>
-List(1, 2, 3, 4, 5) drop(2)       <span style="color:#95a5a6">-- List(3, 4, 5)</span></code></pre>
+            <pre><code>[1, 2, 3, 4, 5] drop(2)            <span class="cmt">-- [3, 4, 5]</span>
+List(1, 2, 3, 4, 5) drop(2)       <span class="cmt">-- List(3, 4, 5)</span></code></pre>
 
             <h3><code>takeWhile(collection, predicate)</code></h3>
             <p>Returns elements from the front while the predicate holds.</p>
@@ -938,7 +1067,7 @@ List(1, 2, 3, 4, 5) drop(2)       <span style="color:#95a5a6">-- List(3, 4, 5)</
                 <tr><td><code>takeWhile([T], (T) &rarr; Bool) &rarr; [T]</code></td><td>Eagerly takes elements while predicate is true.</td></tr>
                 <tr><td><code>takeWhile(List&lt;T&gt;, (T) &rarr; Bool) &rarr; List&lt;T&gt;</code></td><td>Lazily takes elements while predicate is true.</td></tr>
             </table>
-            <pre><code>[1, 2, 3, 4, 5] takeWhile(fn(x Int) { x < 4 })     <span style="color:#95a5a6">-- [1, 2, 3]</span></code></pre>
+            <pre><code>[1, 2, 3, 4, 5] takeWhile(fn(x Int) { x < 4 })     <span class="cmt">-- [1, 2, 3]</span></code></pre>
 
             <h3><code>dropWhile(collection, predicate)</code></h3>
             <p>Drops elements from the front while the predicate holds, returns the rest.</p>
@@ -947,7 +1076,7 @@ List(1, 2, 3, 4, 5) drop(2)       <span style="color:#95a5a6">-- List(3, 4, 5)</
                 <tr><td><code>dropWhile([T], (T) &rarr; Bool) &rarr; [T]</code></td><td>Eagerly drops elements while predicate is true.</td></tr>
                 <tr><td><code>dropWhile(List&lt;T&gt;, (T) &rarr; Bool) &rarr; List&lt;T&gt;</code></td><td>Lazily drops elements while predicate is true.</td></tr>
             </table>
-            <pre><code>[1, 2, 3, 4, 5] dropWhile(fn(x Int) { x < 4 })     <span style="color:#95a5a6">-- [4, 5]</span></code></pre>
+            <pre><code>[1, 2, 3, 4, 5] dropWhile(fn(x Int) { x < 4 })     <span class="cmt">-- [4, 5]</span></code></pre>
 
             <h3><code>stride(collection, n)</code></h3>
             <p>Takes every <em>n</em>th element, starting from the first.</p>
@@ -956,8 +1085,8 @@ List(1, 2, 3, 4, 5) drop(2)       <span style="color:#95a5a6">-- List(3, 4, 5)</
                 <tr><td><code>stride([T], Int) &rarr; [T]</code></td><td>Every <code>n</code>th element of an array.</td></tr>
                 <tr><td><code>stride(List&lt;T&gt;, Int) &rarr; List&lt;T&gt;</code></td><td>Lazily takes every <code>n</code>th element of a list.</td></tr>
             </table>
-            <pre><code>[1, 2, 3, 4, 5, 6, 7] stride(2)            <span style="color:#95a5a6">-- [1, 3, 5, 7]</span>
-[1, 2, 3, 4, 5, 6, 7, 8, 9] stride(3)     <span style="color:#95a5a6">-- [1, 4, 7]</span></code></pre>
+            <pre><code>[1, 2, 3, 4, 5, 6, 7] stride(2)            <span class="cmt">-- [1, 3, 5, 7]</span>
+[1, 2, 3, 4, 5, 6, 7, 8, 9] stride(3)     <span class="cmt">-- [1, 4, 7]</span></code></pre>
 
             <h3><code>stutter(collection, n)</code></h3>
             <p>Repeats each element <code>n</code> times.</p>
@@ -966,8 +1095,8 @@ List(1, 2, 3, 4, 5) drop(2)       <span style="color:#95a5a6">-- List(3, 4, 5)</
                 <tr><td><code>stutter([T], Int) &rarr; [T]</code></td><td>Repeat each element <code>n</code> times in an array.</td></tr>
                 <tr><td><code>stutter(List&lt;T&gt;, Int) &rarr; List&lt;T&gt;</code></td><td>Lazily repeats each element <code>n</code> times.</td></tr>
             </table>
-            <pre><code>[1, 2, 3] stutter(2)            <span style="color:#95a5a6">-- [1, 1, 2, 2, 3, 3]</span>
-[1, 2, 3] stutter(3)            <span style="color:#95a5a6">-- [1, 1, 1, 2, 2, 2, 3, 3, 3]</span></code></pre>
+            <pre><code>[1, 2, 3] stutter(2)            <span class="cmt">-- [1, 1, 2, 2, 3, 3]</span>
+[1, 2, 3] stutter(3)            <span class="cmt">-- [1, 1, 1, 2, 2, 2, 3, 3, 3]</span></code></pre>
 
             <h3>Transformation</h3>
 
@@ -978,9 +1107,9 @@ List(1, 2, 3, 4, 5) drop(2)       <span style="color:#95a5a6">-- List(3, 4, 5)</
                 <tr><td><code>map([T], (T) &rarr; U) &rarr; [U]</code></td><td>Eagerly maps over an array.</td></tr>
                 <tr><td><code>map(List&lt;T&gt;, (T) &rarr; U) &rarr; List&lt;U&gt;</code></td><td>Lazily maps over a list.</td></tr>
             </table>
-            <pre><code>[1, 2, 3] map(fn(x Int) { x * x })         <span style="color:#95a5a6">-- [1, 4, 9]</span>
-[1, 2, 3] map(fn(x Int) { x * 2 })         <span style="color:#95a5a6">-- [2, 4, 6]</span>
-List(1, 2, 3) map(fn(x Int) { x + 10 })    <span style="color:#95a5a6">-- List(11, 12, 13)</span></code></pre>
+            <pre><code>[1, 2, 3] map(fn(x Int) { x * x })         <span class="cmt">-- [1, 4, 9]</span>
+[1, 2, 3] map(fn(x Int) { x * 2 })         <span class="cmt">-- [2, 4, 6]</span>
+List(1, 2, 3) map(fn(x Int) { x + 10 })    <span class="cmt">-- List(11, 12, 13)</span></code></pre>
 
             <h3><code>filter(collection, predicate)</code></h3>
             <p>Returns elements that satisfy the predicate.</p>
@@ -989,8 +1118,8 @@ List(1, 2, 3) map(fn(x Int) { x + 10 })    <span style="color:#95a5a6">-- List(1
                 <tr><td><code>filter([T], (T) &rarr; Bool) &rarr; [T]</code></td><td>Eagerly filters an array.</td></tr>
                 <tr><td><code>filter(List&lt;T&gt;, (T) &rarr; Bool) &rarr; List&lt;T&gt;</code></td><td>Lazily filters a list.</td></tr>
             </table>
-            <pre><code>[1, 2, 3, 4, 5] filter(fn(x Int) { x > 2 })     <span style="color:#95a5a6">-- [3, 4, 5]</span>
-[1, 2, 3, 4, 5] filter(fn(x Int) { x % 2 == 0 })  <span style="color:#95a5a6">-- [2, 4]</span></code></pre>
+            <pre><code>[1, 2, 3, 4, 5] filter(fn(x Int) { x > 2 })     <span class="cmt">-- [3, 4, 5]</span>
+[1, 2, 3, 4, 5] filter(fn(x Int) { x % 2 == 0 })  <span class="cmt">-- [2, 4]</span></code></pre>
 
             <h3><code>zip(a, b)</code></h3>
             <p>Combines two collections element-wise into a collection of tuples. Result length is the shorter of the two inputs.</p>
@@ -999,8 +1128,8 @@ List(1, 2, 3) map(fn(x Int) { x + 10 })    <span style="color:#95a5a6">-- List(1
                 <tr><td><code>zip([T], [U]) &rarr; [(T, U)]</code></td><td>Eagerly zips two arrays into an array of tuples.</td></tr>
                 <tr><td><code>zip(List&lt;T&gt;, List&lt;U&gt;) &rarr; List&lt;(T, U)&gt;</code></td><td>Lazily zips two lists into a list of tuples.</td></tr>
             </table>
-            <pre><code>zip([1, 2, 3], [10, 20, 30])     <span style="color:#95a5a6">-- [(1, 10), (2, 20), (3, 30)]</span>
-zip(["a", "b"], [1, 2])         <span style="color:#95a5a6">-- [("a", 1), ("b", 2)]</span></code></pre>
+            <pre><code>zip([1, 2, 3], [10, 20, 30])     <span class="cmt">-- [(1, 10), (2, 20), (3, 30)]</span>
+zip(["a", "b"], [1, 2])         <span class="cmt">-- [("a", 1), ("b", 2)]</span></code></pre>
 
             <h3><code>enumerate(collection)</code></h3>
             <p>Pairs each element with its zero-based index.</p>
@@ -1009,8 +1138,8 @@ zip(["a", "b"], [1, 2])         <span style="color:#95a5a6">-- [("a", 1), ("b", 
                 <tr><td><code>enumerate([T]) &rarr; [(Int, T)]</code></td><td>Eagerly enumerates an array.</td></tr>
                 <tr><td><code>enumerate(List&lt;T&gt;) &rarr; List&lt;(Int, T)&gt;</code></td><td>Lazily enumerates a list.</td></tr>
             </table>
-            <pre><code>["a", "b", "c"] enumerate      <span style="color:#95a5a6">-- [(0, "a"), (1, "b"), (2, "c")]</span>
-[10, 20, 30] enumerate         <span style="color:#95a5a6">-- [(0, 10), (1, 20), (2, 30)]</span></code></pre>
+            <pre><code>["a", "b", "c"] enumerate      <span class="cmt">-- [(0, "a"), (1, "b"), (2, "c")]</span>
+[10, 20, 30] enumerate         <span class="cmt">-- [(0, 10), (1, 20), (2, 30)]</span></code></pre>
 
             <h3>Folding &amp; Scanning</h3>
 
@@ -1021,8 +1150,8 @@ zip(["a", "b"], [1, 2])         <span style="color:#95a5a6">-- [("a", 1), ("b", 
                 <tr><td><code>fold([T], U, (U, T) &rarr; U) &rarr; U</code></td><td>Fold over an array.</td></tr>
                 <tr><td><code>fold(List&lt;T&gt;, U, (U, T) &rarr; U) &rarr; U</code></td><td>Fold over a list (eager &mdash; forces the entire list).</td></tr>
             </table>
-            <pre><code>[1, 2, 3, 4, 5] fold(0, fn(acc Int, x Int) { acc + x })    <span style="color:#95a5a6">-- 15</span>
-["a", "b", "c"] fold("", fn(s String, x String) { s $ x })  <span style="color:#95a5a6">-- "abc"</span></code></pre>
+            <pre><code>[1, 2, 3, 4, 5] fold(0, fn(acc Int, x Int) { acc + x })    <span class="cmt">-- 15</span>
+["a", "b", "c"] fold("", fn(s String, x String) { s $ x })  <span class="cmt">-- "abc"</span></code></pre>
 
             <h3><code>scan(collection, init, fn)</code></h3>
             <p>Like <code>fold</code>, but returns all intermediate accumulator values. The result has one more element than the input (starts with <code>init</code>).</p>
@@ -1032,7 +1161,7 @@ zip(["a", "b"], [1, 2])         <span style="color:#95a5a6">-- [("a", 1), ("b", 
                 <tr><td><code>scan(List&lt;T&gt;, U, (U, T) &rarr; U) &rarr; List&lt;U&gt;</code></td><td>Lazily scans a list.</td></tr>
             </table>
             <pre><code>[1, 2, 3, 4, 5] scan(0, fn(a Int, x Int) { a + x })
-    <span style="color:#95a5a6">-- [0, 1, 3, 6, 10, 15]  (running sum)</span></code></pre>
+    <span class="cmt">-- [0, 1, 3, 6, 10, 15]  (running sum)</span></code></pre>
 
             <h3><code>fold1(collection, fn)</code></h3>
             <p>Left fold using the first element as the initial accumulator. The collection must be non-empty.</p>
@@ -1041,8 +1170,8 @@ zip(["a", "b"], [1, 2])         <span style="color:#95a5a6">-- [("a", 1), ("b", 
                 <tr><td><code>fold1([T], (T, T) &rarr; T) &rarr; T</code></td><td>Fold over an array using first element as init.</td></tr>
                 <tr><td><code>fold1(List&lt;T&gt;, (T, T) &rarr; T) &rarr; T</code></td><td>Fold over a list using first element as init.</td></tr>
             </table>
-            <pre><code>[1, 2, 3, 4, 5] fold1(fn(a Int, b Int) { a + b })     <span style="color:#95a5a6">-- 15</span>
-[3, 1, 4, 1, 5] fold1(fn(a Int, b Int) { max(a, b) })   <span style="color:#95a5a6">-- 5</span></code></pre>
+            <pre><code>[1, 2, 3, 4, 5] fold1(fn(a Int, b Int) { a + b })     <span class="cmt">-- 15</span>
+[3, 1, 4, 1, 5] fold1(fn(a Int, b Int) { max(a, b) })   <span class="cmt">-- 5</span></code></pre>
 
             <h3><code>scan1(collection, fn)</code></h3>
             <p>Like <code>fold1</code>, but returns all intermediate accumulator values. The result has the same length as the input.</p>
@@ -1052,7 +1181,7 @@ zip(["a", "b"], [1, 2])         <span style="color:#95a5a6">-- [("a", 1), ("b", 
                 <tr><td><code>scan1(List&lt;T&gt;, (T, T) &rarr; T) &rarr; List&lt;T&gt;</code></td><td>Lazily scans a list.</td></tr>
             </table>
             <pre><code>[1, 2, 3, 4, 5] scan1(fn(a Int, b Int) { a + b })
-    <span style="color:#95a5a6">-- [1, 3, 6, 10, 15]  (running sum without init)</span></code></pre>
+    <span class="cmt">-- [1, 3, 6, 10, 15]  (running sum without init)</span></code></pre>
 
             <h3><code>find(collection, predicate)</code></h3>
             <p>Returns the index of the first element satisfying the predicate, or <code>-1</code> if not found.</p>
@@ -1061,8 +1190,8 @@ zip(["a", "b"], [1, 2])         <span style="color:#95a5a6">-- [("a", 1), ("b", 
                 <tr><td><code>find([T], (T) &rarr; Bool) &rarr; Int</code></td><td>Index of first match in an array.</td></tr>
                 <tr><td><code>find(List&lt;T&gt;, (T) &rarr; Bool) &rarr; Int</code></td><td>Index of first match in a list (forces elements until found).</td></tr>
             </table>
-            <pre><code>[10, 20, 30, 40] find(fn(x Int) { x > 25 })     <span style="color:#95a5a6">-- 2  (index of 30)</span>
-[1, 2, 3] find(fn(x Int) { x > 10 })            <span style="color:#95a5a6">-- -1  (not found)</span></code></pre>
+            <pre><code>[10, 20, 30, 40] find(fn(x Int) { x > 25 })     <span class="cmt">-- 2  (index of 30)</span>
+[1, 2, 3] find(fn(x Int) { x > 10 })            <span class="cmt">-- -1  (not found)</span></code></pre>
 
             <h3>Combining</h3>
 
@@ -1073,8 +1202,8 @@ zip(["a", "b"], [1, 2])         <span style="color:#95a5a6">-- [("a", 1), ("b", 
                 <tr><td><code>cat([T], [T]) &rarr; [T]</code></td><td>Concatenate two arrays.</td></tr>
                 <tr><td><code>cat(List&lt;T&gt;, List&lt;T&gt;) &rarr; List&lt;T&gt;</code></td><td>Lazily concatenate two lists.</td></tr>
             </table>
-            <pre><code>cat([1, 2, 3], [4, 5, 6])                <span style="color:#95a5a6">-- [1, 2, 3, 4, 5, 6]</span>
-cat(List(1, 2), List(3, 4))              <span style="color:#95a5a6">-- List(1, 2, 3, 4)</span></code></pre>
+            <pre><code>cat([1, 2, 3], [4, 5, 6])                <span class="cmt">-- [1, 2, 3, 4, 5, 6]</span>
+cat(List(1, 2), List(3, 4))              <span class="cmt">-- List(1, 2, 3, 4)</span></code></pre>
 
             <h3><code>join(collection)</code></h3>
             <p>Flattens one level of nesting. Given a collection of collections, returns a single flat collection.</p>
@@ -1083,8 +1212,8 @@ cat(List(1, 2), List(3, 4))              <span style="color:#95a5a6">-- List(1, 
                 <tr><td><code>join([[T]]) &rarr; [T]</code></td><td>Flatten an array of arrays.</td></tr>
                 <tr><td><code>join(List&lt;List&lt;T&gt;&gt;) &rarr; List&lt;T&gt;</code></td><td>Lazily flatten a list of lists.</td></tr>
             </table>
-            <pre><code>[[1, 2], [3, 4], [5]] join             <span style="color:#95a5a6">-- [1, 2, 3, 4, 5]</span>
-List(List(1, 2), List(3, 4)) join      <span style="color:#95a5a6">-- List(1, 2, 3, 4)</span></code></pre>
+            <pre><code>[[1, 2], [3, 4], [5]] join             <span class="cmt">-- [1, 2, 3, 4, 5]</span>
+List(List(1, 2), List(3, 4)) join      <span class="cmt">-- List(1, 2, 3, 4)</span></code></pre>
 
             <h3><code>flatten(collection)</code></h3>
             <p>Recursively flattens all nesting levels of the same container type. Unlike <code>join</code> which removes only one level, <code>flatten</code> removes all levels of <code>Array</code> (or <code>List</code>) nesting until the element type is no longer the same container type.</p>
@@ -1093,9 +1222,9 @@ List(List(1, 2), List(3, 4)) join      <span style="color:#95a5a6">-- List(1, 2,
                 <tr><td><code>flatten([[...[T]...]]) &rarr; [T]</code></td><td>Recursively flatten all Array nesting levels.</td></tr>
                 <tr><td><code>flatten(List&lt;..List&lt;T&gt;..&gt;) &rarr; List&lt;T&gt;</code></td><td>Lazily flatten all List nesting levels.</td></tr>
             </table>
-            <pre><code>[[1, 2], [3, 4]] flatten                        <span style="color:#95a5a6">-- [1, 2, 3, 4]  (same as join)</span>
-[[[1, 2], [3]], [[4, 5, 6]]] flatten            <span style="color:#95a5a6">-- [1, 2, 3, 4, 5, 6]  (all levels)</span>
-[[[List(1, 2)], [List(3)]]] flatten             <span style="color:#95a5a6">-- [List(1, 2), List(3)]  (stops at List)</span></code></pre>
+            <pre><code>[[1, 2], [3, 4]] flatten                        <span class="cmt">-- [1, 2, 3, 4]  (same as join)</span>
+[[[1, 2], [3]], [[4, 5, 6]]] flatten            <span class="cmt">-- [1, 2, 3, 4, 5, 6]  (all levels)</span>
+[[[List(1, 2)], [List(3)]]] flatten             <span class="cmt">-- [List(1, 2), List(3)]  (stops at List)</span></code></pre>
             <div class="note">
                 <code>flatten</code> only removes layers of the <em>same</em> container type. A <code>[[List&lt;Int&gt;]]</code> flattens to <code>[List&lt;Int&gt;]</code> &mdash; the array layers are removed but the List is preserved.
             </div>
@@ -1114,8 +1243,8 @@ List(List(1, 2), List(3, 4)) join      <span style="color:#95a5a6">-- List(1, 2,
                 <tr><th>Signature</th><th>Description</th></tr>
                 <tr><td><code>reverse([T]) &rarr; [T]</code></td><td>Reverse an array.</td></tr>
             </table>
-            <pre><code>[1, 2, 3, 4, 5] reverse         <span style="color:#95a5a6">-- [5, 4, 3, 2, 1]</span>
-[1, 2, 3] reverse               <span style="color:#95a5a6">-- [3, 2, 1]</span></code></pre>
+            <pre><code>[1, 2, 3, 4, 5] reverse         <span class="cmt">-- [5, 4, 3, 2, 1]</span>
+[1, 2, 3] reverse               <span class="cmt">-- [3, 2, 1]</span></code></pre>
 
             <h3><code>push(array, element)</code></h3>
             <p>Returns a new array with the element appended at the end.</p>
@@ -1123,7 +1252,7 @@ List(List(1, 2), List(3, 4)) join      <span style="color:#95a5a6">-- List(1, 2,
                 <tr><th>Signature</th><th>Description</th></tr>
                 <tr><td><code>push([T], T) &rarr; [T]</code></td><td>Append an element to an array.</td></tr>
             </table>
-            <pre><code>[1, 2, 3] push(4)               <span style="color:#95a5a6">-- [1, 2, 3, 4]</span></code></pre>
+            <pre><code>[1, 2, 3] push(4)               <span class="cmt">-- [1, 2, 3, 4]</span></code></pre>
 
             <h3><code>pop(array)</code></h3>
             <p>Returns a new array with the last element removed.</p>
@@ -1131,8 +1260,8 @@ List(List(1, 2), List(3, 4)) join      <span style="color:#95a5a6">-- List(1, 2,
                 <tr><th>Signature</th><th>Description</th></tr>
                 <tr><td><code>pop([T]) &rarr; [T]</code></td><td>Remove the last element of an array.</td></tr>
             </table>
-            <pre><code>[1, 2, 3, 4] pop                <span style="color:#95a5a6">-- [1, 2, 3]</span>
-[1, 2, 3] pop                   <span style="color:#95a5a6">-- [1, 2]</span></code></pre>
+            <pre><code>[1, 2, 3, 4] pop                <span class="cmt">-- [1, 2, 3]</span>
+[1, 2, 3] pop                   <span class="cmt">-- [1, 2]</span></code></pre>
 
             <h3><code>sort(array)</code></h3>
             <p>Returns a new array sorted in ascending order.</p>
@@ -1142,8 +1271,8 @@ List(List(1, 2), List(3, 4)) join      <span style="color:#95a5a6">-- List(1, 2,
                 <tr><td><code>sort([Float]) &rarr; [Float]</code></td><td>Sort floats ascending.</td></tr>
                 <tr><td><code>sort([String]) &rarr; [String]</code></td><td>Sort strings lexicographically.</td></tr>
             </table>
-            <pre><code>[3, 1, 4, 1, 5, 9, 2, 6] sort     <span style="color:#95a5a6">-- [1, 1, 2, 3, 4, 5, 6, 9]</span>
-[5, 3, 1, 4, 2] sort              <span style="color:#95a5a6">-- [1, 2, 3, 4, 5]</span></code></pre>
+            <pre><code>[3, 1, 4, 1, 5, 9, 2, 6] sort     <span class="cmt">-- [1, 1, 2, 3, 4, 5, 6, 9]</span>
+[5, 3, 1, 4, 2] sort              <span class="cmt">-- [1, 2, 3, 4, 5]</span></code></pre>
 
             <h3><code>muss(array)</code></h3>
             <p>Returns a new array with elements in a scrambled (pseudo-random) order. Uses a deterministic shuffle based on array content.</p>
@@ -1151,7 +1280,7 @@ List(List(1, 2), List(3, 4)) join      <span style="color:#95a5a6">-- List(1, 2,
                 <tr><th>Signature</th><th>Description</th></tr>
                 <tr><td><code>muss([T]) &rarr; [T]</code></td><td>Scramble an array.</td></tr>
             </table>
-            <pre><code>[1, 2, 3, 4, 5] muss     <span style="color:#95a5a6">-- e.g. [3, 5, 1, 4, 2]</span></code></pre>
+            <pre><code>[1, 2, 3, 4, 5] muss     <span class="cmt">-- e.g. [3, 5, 1, 4, 2]</span></code></pre>
 
             <a href="#top" class="back-to-top">&uarr; Back to top</a>
         </div>
@@ -1167,8 +1296,8 @@ List(List(1, 2), List(3, 4)) join      <span style="color:#95a5a6">-- List(1, 2,
                 <tr><th>Signature</th><th>Description</th></tr>
                 <tr><td><code>head(List&lt;T&gt;) &rarr; T</code></td><td>First element of the list.</td></tr>
             </table>
-            <pre><code>List(1, 2, 3) head     <span style="color:#95a5a6">-- 1</span>
-List(42) head          <span style="color:#95a5a6">-- 42</span></code></pre>
+            <pre><code>List(1, 2, 3) head     <span class="cmt">-- 1</span>
+List(42) head          <span class="cmt">-- 42</span></code></pre>
 
             <h3><code>tail(list)</code></h3>
             <p>Returns the list without its first element. Returns <code>nil</code> if the list has only one element. Behavior is undefined on a nil list.</p>
@@ -1176,8 +1305,8 @@ List(42) head          <span style="color:#95a5a6">-- 42</span></code></pre>
                 <tr><th>Signature</th><th>Description</th></tr>
                 <tr><td><code>tail(List&lt;T&gt;) &rarr; List&lt;T&gt;</code></td><td>All elements after the first.</td></tr>
             </table>
-            <pre><code>List(1, 2, 3) tail     <span style="color:#95a5a6">-- List(2, 3)</span>
-List(42) tail          <span style="color:#95a5a6">-- nil</span></code></pre>
+            <pre><code>List(1, 2, 3) tail     <span class="cmt">-- List(2, 3)</span>
+List(42) tail          <span class="cmt">-- nil</span></code></pre>
 
             <h3><code>cons(element, list)</code></h3>
             <p>Prepends an element to the front of a list, returning a new list. The list may be <code>nil</code>.</p>
@@ -1185,9 +1314,9 @@ List(42) tail          <span style="color:#95a5a6">-- nil</span></code></pre>
                 <tr><th>Signature</th><th>Description</th></tr>
                 <tr><td><code>cons(T, List&lt;T&gt;) &rarr; List&lt;T&gt;</code></td><td>Prepend an element to a list.</td></tr>
             </table>
-            <pre><code>cons(0, List(1, 2, 3))     <span style="color:#95a5a6">-- List(0, 1, 2, 3)</span>
+            <pre><code>cons(0, List(1, 2, 3))     <span class="cmt">-- List(0, 1, 2, 3)</span>
 let empty List&lt;Int&gt; = nil;
-cons(1, empty)             <span style="color:#95a5a6">-- List(1)</span></code></pre>
+cons(1, empty)             <span class="cmt">-- List(1)</span></code></pre>
             <div class="highlight">
                 <strong>Note:</strong> The <code>::</code> (cons) operator provides equivalent functionality with infix syntax: <code>0 :: List(1, 2, 3)</code>.
             </div>
@@ -1201,10 +1330,10 @@ cons(1, empty)             <span style="color:#95a5a6">-- List(1)</span></code><
             </table>
             <pre><code>let xs = List(1, 2, 3);
 let empty List&lt;Int&gt; = nil;
-isNil(xs)       <span style="color:#95a5a6">-- false</span>
-isNil(empty)    <span style="color:#95a5a6">-- true</span>
-notNil(xs)      <span style="color:#95a5a6">-- true</span>
-notNil(empty)   <span style="color:#95a5a6">-- false</span></code></pre>
+isNil(xs)       <span class="cmt">-- false</span>
+isNil(empty)    <span class="cmt">-- true</span>
+notNil(xs)      <span class="cmt">-- true</span>
+notNil(empty)   <span class="cmt">-- false</span></code></pre>
 
             <h3><code>cyc(list)</code></h3>
             <p>Returns an infinite list that cycles through the elements of the input list repeatedly.</p>
@@ -1212,8 +1341,8 @@ notNil(empty)   <span style="color:#95a5a6">-- false</span></code></pre>
                 <tr><th>Signature</th><th>Description</th></tr>
                 <tr><td><code>cyc(List&lt;T&gt;) &rarr; List&lt;T&gt;</code></td><td>Infinite cycle of a list.</td></tr>
             </table>
-            <pre><code>List(1, 2, 3) cyc take(10)     <span style="color:#95a5a6">-- List(1, 2, 3, 1, 2, 3, 1, 2, 3, 1)</span>
-List(1, 2, 3) cyc take(7)      <span style="color:#95a5a6">-- List(1, 2, 3, 1, 2, 3, 1)</span></code></pre>
+            <pre><code>List(1, 2, 3) cyc take(10)     <span class="cmt">-- List(1, 2, 3, 1, 2, 3, 1, 2, 3, 1)</span>
+List(1, 2, 3) cyc take(7)      <span class="cmt">-- List(1, 2, 3, 1, 2, 3, 1)</span></code></pre>
 
             <h3><code>ncyc(list, n)</code></h3>
             <p>Returns a list that repeats the input list <code>n</code> times.</p>
@@ -1221,8 +1350,8 @@ List(1, 2, 3) cyc take(7)      <span style="color:#95a5a6">-- List(1, 2, 3, 1, 2
                 <tr><th>Signature</th><th>Description</th></tr>
                 <tr><td><code>ncyc(List&lt;T&gt;, Int) &rarr; List&lt;T&gt;</code></td><td>Cycle a list <code>n</code> times.</td></tr>
             </table>
-            <pre><code>List(1, 2, 3) ncyc(3)     <span style="color:#95a5a6">-- List(1, 2, 3, 1, 2, 3, 1, 2, 3)</span>
-List(1, 2) ncyc(4)        <span style="color:#95a5a6">-- List(1, 2, 1, 2, 1, 2, 1, 2)</span></code></pre>
+            <pre><code>List(1, 2, 3) ncyc(3)     <span class="cmt">-- List(1, 2, 3, 1, 2, 3, 1, 2, 3)</span>
+List(1, 2) ncyc(4)        <span class="cmt">-- List(1, 2, 1, 2, 1, 2, 1, 2)</span></code></pre>
 
             <h3><code>hang(list)</code></h3>
             <p>Returns an infinite list that, upon reaching the last element, repeats it indefinitely.</p>
@@ -1230,8 +1359,8 @@ List(1, 2) ncyc(4)        <span style="color:#95a5a6">-- List(1, 2, 1, 2, 1, 2, 
                 <tr><th>Signature</th><th>Description</th></tr>
                 <tr><td><code>hang(List&lt;T&gt;) &rarr; List&lt;T&gt;</code></td><td>Hang on the last element forever.</td></tr>
             </table>
-            <pre><code>List(1, 2, 3) hang take(8)     <span style="color:#95a5a6">-- List(1, 2, 3, 3, 3, 3, 3, 3)</span>
-List(10, 20) hang take(5)      <span style="color:#95a5a6">-- List(10, 20, 20, 20, 20)</span></code></pre>
+            <pre><code>List(1, 2, 3) hang take(8)     <span class="cmt">-- List(1, 2, 3, 3, 3, 3, 3, 3)</span>
+List(10, 20) hang take(5)      <span class="cmt">-- List(10, 20, 20, 20, 20)</span></code></pre>
 
             <h3><code>iter(value, fn)</code></h3>
             <p>Returns an infinite list of repeated applications of <code>fn</code> to <code>value</code>: <code>value, fn(value), fn(fn(value)), &hellip;</code></p>
@@ -1240,9 +1369,9 @@ List(10, 20) hang take(5)      <span style="color:#95a5a6">-- List(10, 20, 20, 2
                 <tr><td><code>iter(T, (T) &rarr; T) &rarr; List&lt;T&gt;</code></td><td>Infinite iterated function application.</td></tr>
             </table>
             <pre><code>iter(1, fn(x Int) Int { x * 2 }) take(10)
-    <span style="color:#95a5a6">-- List(1, 2, 4, 8, 16, 32, 64, 128, 256, 512)</span>
+    <span class="cmt">-- List(1, 2, 4, 8, 16, 32, 64, 128, 256, 512)</span>
 iter(0, fn(x Int) Int { x + 1 }) take(5)
-    <span style="color:#95a5a6">-- List(0, 1, 2, 3, 4)</span></code></pre>
+    <span class="cmt">-- List(0, 1, 2, 3, 4)</span></code></pre>
 
             <a href="#top" class="back-to-top">&uarr; Back to top</a>
         </div>
@@ -1260,15 +1389,15 @@ iter(0, fn(x Int) Int { x + 1 }) take(5)
                 <tr><td><code>get([K: V], K, V) &rarr; V</code></td><td>Get value for key; returns default if missing.</td></tr>
             </table>
             <pre><code>let m = ["a": 1, "b": 2, "c": 3];
-m get("b") println;              <span style="color:#95a5a6">-- Option&lt;Int&gt;.some(2)</span>
-m get("z") println;              <span style="color:#95a5a6">-- Option&lt;Int&gt;.none</span>
-m get("b") unwrap println;       <span style="color:#95a5a6">-- 2</span>
-m get("z", 99) println;          <span style="color:#95a5a6">-- 99 (not found, returns default)</span></code></pre>
+m get("b") println;              <span class="cmt">-- Option&lt;Int&gt;.some(2)</span>
+m get("z") println;              <span class="cmt">-- Option&lt;Int&gt;.none</span>
+m get("b") unwrap println;       <span class="cmt">-- 2</span>
+m get("z", 99) println;          <span class="cmt">-- 99 (not found, returns default)</span></code></pre>
             <p>Map subscript syntax also returns <code>Option&lt;V&gt;</code>:</p>
-            <pre><code>m["b"] println;                   <span style="color:#95a5a6">-- Option&lt;Int&gt;.some(2)</span>
-m["z"] println;                   <span style="color:#95a5a6">-- Option&lt;Int&gt;.none</span>
-m["b"] unwrap println;            <span style="color:#95a5a6">-- 2</span>
-m["z"] unwrapOr(99) println;      <span style="color:#95a5a6">-- 99</span></code></pre>
+            <pre><code>m["b"] println;                   <span class="cmt">-- Option&lt;Int&gt;.some(2)</span>
+m["z"] println;                   <span class="cmt">-- Option&lt;Int&gt;.none</span>
+m["b"] unwrap println;            <span class="cmt">-- 2</span>
+m["z"] unwrapOr(99) println;      <span class="cmt">-- 99</span></code></pre>
 
             <h3><code>put(map, key, value)</code></h3>
             <p>Returns a new map with the key-value pair added or updated.</p>
@@ -1278,7 +1407,7 @@ m["z"] unwrapOr(99) println;      <span style="color:#95a5a6">-- 99</span></code
             </table>
             <pre><code>let m = ["a": 1];
 let m2 = m put("b", 2);
-m2 println;                      <span style="color:#95a5a6">-- [a: 1, b: 2]</span></code></pre>
+m2 println;                      <span class="cmt">-- [a: 1, b: 2]</span></code></pre>
 
             <h3><code>remove(map, key)</code></h3>
             <p>Returns a new map with the given key removed.</p>
@@ -1294,8 +1423,8 @@ m2 println;                      <span style="color:#95a5a6">-- [a: 1, b: 2]</sp
                 <tr><td><code>contains([K: V], K) &rarr; Bool</code></td><td>Check if key exists.</td></tr>
             </table>
             <pre><code>let m = ["a": 1, "b": 2];
-m contains("a") println;         <span style="color:#95a5a6">-- true</span>
-m contains("z") println;         <span style="color:#95a5a6">-- false</span></code></pre>
+m contains("a") println;         <span class="cmt">-- true</span>
+m contains("z") println;         <span class="cmt">-- false</span></code></pre>
 
             <h3><code>keys(map)</code></h3>
             <p>Returns an array of all keys in the map.</p>
@@ -1311,8 +1440,8 @@ m contains("z") println;         <span style="color:#95a5a6">-- false</span></co
                 <tr><td><code>values([K: V]) &rarr; [V]</code></td><td>Get all values.</td></tr>
             </table>
             <pre><code>let m = ["x": 10, "y": 20];
-m keys println;                  <span style="color:#95a5a6">-- ["x", "y"]</span>
-m values println;                <span style="color:#95a5a6">-- [10, 20]</span></code></pre>
+m keys println;                  <span class="cmt">-- ["x", "y"]</span>
+m values println;                <span class="cmt">-- [10, 20]</span></code></pre>
 
             <h3><code>pairs(map)</code></h3>
             <p>Returns an array of <code>(key, value)</code> tuples from the map.</p>
@@ -1321,7 +1450,7 @@ m values println;                <span style="color:#95a5a6">-- [10, 20]</span><
                 <tr><td><code>pairs([K: V]) &rarr; [(K, V)]</code></td><td>Get all key-value pairs as tuples.</td></tr>
             </table>
             <pre><code>let m = ["a": 1, "b": 2, "c": 3];
-m pairs println;                 <span style="color:#95a5a6">-- [(a, 1), (b, 2), (c, 3)]</span></code></pre>
+m pairs println;                 <span class="cmt">-- [(a, 1), (b, 2), (c, 3)]</span></code></pre>
 
             <h3><code>merge(map1, map2)</code></h3>
             <p>Returns a new map containing all key-value pairs from both maps. Values from the second map override those in the first for duplicate keys.</p>
@@ -1331,7 +1460,7 @@ m pairs println;                 <span style="color:#95a5a6">-- [(a, 1), (b, 2),
             </table>
             <pre><code>let a = ["x": 1, "y": 2];
 let b = ["y": 99, "z": 3];
-merge(a, b) println;             <span style="color:#95a5a6">-- [x: 1, y: 99, z: 3]</span></code></pre>
+merge(a, b) println;             <span class="cmt">-- [x: 1, y: 99, z: 3]</span></code></pre>
 
             <h3><code>length(map)</code></h3>
             <p>Returns the number of key-value pairs in the map.</p>
@@ -1355,8 +1484,8 @@ merge(a, b) println;             <span style="color:#95a5a6">-- [x: 1, y: 99, z:
                 <tr><td><code>unwrap(Option&lt;T&gt;) &rarr; T</code></td><td>Extract the value; halts on none.</td></tr>
             </table>
             <pre><code>let m = ["a": 1, "b": 2];
-m["a"] unwrap println;            <span style="color:#95a5a6">-- 1</span>
-<span style="color:#95a5a6">-- m["z"] unwrap println;         -- would halt: unwrap called on none</span></code></pre>
+m["a"] unwrap println;            <span class="cmt">-- 1</span>
+<span class="cmt">-- m["z"] unwrap println;         -- would halt: unwrap called on none</span></code></pre>
 
             <h3><code>unwrapOr(option, default)</code></h3>
             <p>Extracts the value from a <code>some</code>, or returns the default value if <code>none</code>.</p>
@@ -1365,8 +1494,8 @@ m["a"] unwrap println;            <span style="color:#95a5a6">-- 1</span>
                 <tr><td><code>unwrapOr(Option&lt;T&gt;, T) &rarr; T</code></td><td>Extract the value or use default.</td></tr>
             </table>
             <pre><code>let m = ["a": 1, "b": 2];
-m["a"] unwrapOr(99) println;      <span style="color:#95a5a6">-- 1</span>
-m["z"] unwrapOr(99) println;      <span style="color:#95a5a6">-- 99</span></code></pre>
+m["a"] unwrapOr(99) println;      <span class="cmt">-- 1</span>
+m["z"] unwrapOr(99) println;      <span class="cmt">-- 99</span></code></pre>
 
             <h3><code>isSome(option)</code></h3>
             <p>Returns <code>true</code> if the option contains a value.</p>
@@ -1375,8 +1504,8 @@ m["z"] unwrapOr(99) println;      <span style="color:#95a5a6">-- 99</span></code
                 <tr><td><code>isSome(Option&lt;T&gt;) &rarr; Bool</code></td><td>Check if option has a value.</td></tr>
             </table>
             <pre><code>let m = ["a": 1];
-m["a"] isSome println;            <span style="color:#95a5a6">-- true</span>
-m["z"] isSome println;            <span style="color:#95a5a6">-- false</span></code></pre>
+m["a"] isSome println;            <span class="cmt">-- true</span>
+m["z"] isSome println;            <span class="cmt">-- false</span></code></pre>
 
             <h3><code>isNone(option)</code></h3>
             <p>Returns <code>true</code> if the option is empty (no value).</p>
@@ -1385,8 +1514,8 @@ m["z"] isSome println;            <span style="color:#95a5a6">-- false</span></c
                 <tr><td><code>isNone(Option&lt;T&gt;) &rarr; Bool</code></td><td>Check if option is empty.</td></tr>
             </table>
             <pre><code>let m = ["a": 1];
-m["a"] isNone println;            <span style="color:#95a5a6">-- false</span>
-m["z"] isNone println;            <span style="color:#95a5a6">-- true</span></code></pre>
+m["a"] isNone println;            <span class="cmt">-- false</span>
+m["z"] isNone println;            <span class="cmt">-- true</span></code></pre>
 
             <a href="#top" class="back-to-top">&uarr; Back to top</a>
         </div>
@@ -1402,10 +1531,10 @@ m["z"] isNone println;            <span style="color:#95a5a6">-- true</span></co
                 <tr><th>Signature</th><th>Description</th></tr>
                 <tr><td><code>any(T) &rarr; Any</code></td><td>Wrap a value of any type into Any.</td></tr>
             </table>
-            <pre><code>any(<span style="color:#e67e22">5</span>) println;              <span style="color:#95a5a6">-- Any(5, Int)</span>
-any(<span style="color:#27ae60">"hello"</span>) println;        <span style="color:#95a5a6">-- Any(hello, String)</span>
-any(<span style="color:#e67e22">3.14</span>) println;           <span style="color:#95a5a6">-- Any(3.14, Float)</span>
-any(<span style="color:#e74c3c">true</span>) println;           <span style="color:#95a5a6">-- Any(true, Bool)</span></code></pre>
+            <pre><code>any(<span class="hl-num">5</span>) println;              <span class="cmt">-- Any(5, Int)</span>
+any(<span class="hl-str">"hello"</span>) println;        <span class="cmt">-- Any(hello, String)</span>
+any(<span class="hl-num">3.14</span>) println;           <span class="cmt">-- Any(3.14, Float)</span>
+any(<span class="hl-kw">true</span>) println;           <span class="cmt">-- Any(true, Bool)</span></code></pre>
 
             <h3><code>any(v1, v2, ...)</code></h3>
             <p>Wraps multiple values and returns a <code>[Any]</code>.</p>
@@ -1413,12 +1542,12 @@ any(<span style="color:#e74c3c">true</span>) println;           <span style="col
                 <tr><th>Signature</th><th>Description</th></tr>
                 <tr><td><code>any(T1, T2, ...) &rarr; [Any]</code></td><td>Wrap each argument into Any and return as an array.</td></tr>
             </table>
-            <pre><code>any(<span style="color:#e67e22">1</span>, <span style="color:#27ae60">"two"</span>, <span style="color:#e67e22">3.0</span>) println;
-<span style="color:#95a5a6">-- [Any(1, Int), Any(two, String), Any(3.0, Float)]</span>
+            <pre><code>any(<span class="hl-num">1</span>, <span class="hl-str">"two"</span>, <span class="hl-num">3.0</span>) println;
+<span class="cmt">-- [Any(1, Int), Any(two, String), Any(3.0, Float)]</span>
 
-<span style="color:#95a5a6">-- Nested calls work</span>
-any(<span style="color:#e67e22">1</span>, any(<span style="color:#e67e22">2</span>, <span style="color:#e67e22">3</span>)) println;
-<span style="color:#95a5a6">-- [Any(1, Int), Any([Any(2, Int), Any(3, Int)], [Any])]</span></code></pre>
+<span class="cmt">-- Nested calls work</span>
+any(<span class="hl-num">1</span>, any(<span class="hl-num">2</span>, <span class="hl-num">3</span>)) println;
+<span class="cmt">-- [Any(1, Int), Any([Any(2, Int), Any(3, Int)], [Any])]</span></code></pre>
 
             <h3><code>toAnyArray</code></h3>
             <p>Converts a tuple to a <code>[Any]</code>, wrapping each element.</p>
@@ -1426,8 +1555,8 @@ any(<span style="color:#e67e22">1</span>, any(<span style="color:#e67e22">2</spa
                 <tr><th>Signature</th><th>Description</th></tr>
                 <tr><td><code>toAnyArray(Tuple) &rarr; [Any]</code></td><td>Convert a tuple to a heterogeneous Any array.</td></tr>
             </table>
-            <pre><code>(<span style="color:#e67e22">1</span>, <span style="color:#27ae60">"two"</span>, 'three, <span style="color:#e67e22">4.0</span>) toAnyArray println;
-<span style="color:#95a5a6">-- [Any(1, Int), Any(two, String), Any('three, Symbol), Any(4.0, Float)]</span></code></pre>
+            <pre><code>(<span class="hl-num">1</span>, <span class="hl-str">"two"</span>, 'three, <span class="hl-num">4.0</span>) toAnyArray println;
+<span class="cmt">-- [Any(1, Int), Any(two, String), Any('three, Symbol), Any(4.0, Float)]</span></code></pre>
 
             <h3><code>as(Type)</code></h3>
             <p>Postfix type-test operator on <code>Any</code> values. Returns <code>Option&lt;T&gt;</code> &mdash; <code>some(value)</code> if the wrapped type matches, <code>none</code> otherwise.</p>
@@ -1435,9 +1564,9 @@ any(<span style="color:#e67e22">1</span>, any(<span style="color:#e67e22">2</spa
                 <tr><th>Signature</th><th>Description</th></tr>
                 <tr><td><code>Any as(T) &rarr; Option&lt;T&gt;</code></td><td>Test and unwrap the Any value to the given type.</td></tr>
             </table>
-            <pre><code><span style="color:#e74c3c">let</span> a = any(<span style="color:#e67e22">5</span>);
-a as(Int) println;           <span style="color:#95a5a6">-- Option&lt;Int&gt;.some(5)</span>
-a as(String) println;        <span style="color:#95a5a6">-- Option&lt;String&gt;.none</span></code></pre>
+            <pre><code><span class="hl-kw">let</span> a = any(<span class="hl-num">5</span>);
+a as(Int) println;           <span class="cmt">-- Option&lt;Int&gt;.some(5)</span>
+a as(String) println;        <span class="cmt">-- Option&lt;String&gt;.none</span></code></pre>
 
             <a href="#top" class="back-to-top">&uarr; Back to top</a>
         </div>
@@ -1462,10 +1591,10 @@ a as(String) println;        <span style="color:#95a5a6">-- Option&lt;String&gt;
 }
 
 let c = count(3);
-c next println;     <span style="color:#95a5a6">-- Option&lt;Int&gt;.some(0)</span>
-c next println;     <span style="color:#95a5a6">-- Option&lt;Int&gt;.some(1)</span>
-c next println;     <span style="color:#95a5a6">-- Option&lt;Int&gt;.some(2)</span>
-c next println;     <span style="color:#95a5a6">-- Option&lt;Int&gt;.none</span></code></pre>
+c next println;     <span class="cmt">-- Option&lt;Int&gt;.some(0)</span>
+c next println;     <span class="cmt">-- Option&lt;Int&gt;.some(1)</span>
+c next println;     <span class="cmt">-- Option&lt;Int&gt;.some(2)</span>
+c next println;     <span class="cmt">-- Option&lt;Int&gt;.none</span></code></pre>
 
             <h3><code>yield(value)</code></h3>
             <p>Suspends the coroutine and produces a value. Can only be used inside a <code>coro fn</code> body. Supports both call and pipeline syntax.</p>
@@ -1474,9 +1603,9 @@ c next println;     <span style="color:#95a5a6">-- Option&lt;Int&gt;.none</span>
                 <tr><td><code>yield(T) &rarr; Void</code></td><td>Suspend and produce a value.</td></tr>
             </table>
             <pre><code>coro fn example() Int {
-    yield 1;           <span style="color:#95a5a6">-- prefix form</span>
-    2 yield;           <span style="color:#95a5a6">-- pipeline form</span>
-    yield(3);          <span style="color:#95a5a6">-- explicit call form</span>
+    yield 1;           <span class="cmt">-- prefix form</span>
+    2 yield;           <span class="cmt">-- pipeline form</span>
+    yield(3);          <span class="cmt">-- explicit call form</span>
 }</code></pre>
 
             <h3><code>yieldAll(coroutine)</code></h3>
@@ -1492,10 +1621,10 @@ c next println;     <span style="color:#95a5a6">-- Option&lt;Int&gt;.none</span>
 
 coro fn outer() Int {
     yield 1;
-    yieldAll(inner());   <span style="color:#95a5a6">-- yields 10, 20</span>
+    yieldAll(inner());   <span class="cmt">-- yields 10, 20</span>
     yield 99;
 }
-<span style="color:#95a5a6">-- outer() yields: 1, 10, 20, 99</span></code></pre>
+<span class="cmt">-- outer() yields: 1, 10, 20, 99</span></code></pre>
 
             <h3><code>toList(coroutine)</code></h3>
             <p>Converts a coroutine into a lazy <code>List&lt;T&gt;</code>. The coroutine is resumed on demand as list elements are accessed, so this works with infinite coroutines when combined with lazy list operations like <code>take</code>.</p>
@@ -1503,13 +1632,13 @@ coro fn outer() Int {
                 <tr><th>Signature</th><th>Description</th></tr>
                 <tr><td><code>toList(Coroutine&lt;T&gt;) &rarr; List&lt;T&gt;</code></td><td>Convert coroutine to a lazy list.</td></tr>
             </table>
-            <pre><code><span style="color:#95a5a6">-- Finite coroutine</span>
-count(5) toList println;            <span style="color:#95a5a6">-- List(0, 1, 2, 3, 4)</span>
+            <pre><code><span class="cmt">-- Finite coroutine</span>
+count(5) toList println;            <span class="cmt">-- List(0, 1, 2, 3, 4)</span>
 
-<span style="color:#95a5a6">-- Empty coroutine</span>
-count(0) toList println;            <span style="color:#95a5a6">-- nil</span>
+<span class="cmt">-- Empty coroutine</span>
+count(0) toList println;            <span class="cmt">-- nil</span>
 
-<span style="color:#95a5a6">-- Infinite coroutine with take</span>
+<span class="cmt">-- Infinite coroutine with take</span>
 coro fn fibs() Int {
     var a = 0;
     var b = 1;
@@ -1520,12 +1649,12 @@ coro fn fibs() Int {
         b = tmp;
     }
 }
-fibs() toList take(8) println;      <span style="color:#95a5a6">-- List(0, 1, 1, 2, 3, 5, 8, 13)</span>
+fibs() toList take(8) println;      <span class="cmt">-- List(0, 1, 1, 2, 3, 5, 8, 13)</span>
 
-<span style="color:#95a5a6">-- Chain with other list operations</span>
-count(5) toList head println;       <span style="color:#95a5a6">-- 0</span>
-count(5) toList drop(3) println;    <span style="color:#95a5a6">-- List(3, 4)</span>
-fibs() toList collect(6) println;   <span style="color:#95a5a6">-- [0, 1, 1, 2, 3, 5]</span></code></pre>
+<span class="cmt">-- Chain with other list operations</span>
+count(5) toList head println;       <span class="cmt">-- 0</span>
+count(5) toList drop(3) println;    <span class="cmt">-- List(3, 4)</span>
+fibs() toList collect(6) println;   <span class="cmt">-- [0, 1, 1, 2, 3, 5]</span></code></pre>
 
             <a href="#top" class="back-to-top">&uarr; Back to top</a>
         </div>
@@ -1556,8 +1685,8 @@ fibs() toList collect(6) println;   <span style="color:#95a5a6">-- [0, 1, 1, 2, 
                 <tr><td><code>contains(Set&lt;T&gt;, T) &rarr; Bool</code></td><td>Check if element exists.</td></tr>
             </table>
             <pre><code>let s = Set(1, 2, 3);
-s contains(2) println;           <span style="color:#95a5a6">-- true</span>
-s contains(5) println;           <span style="color:#95a5a6">-- false</span></code></pre>
+s contains(2) println;           <span class="cmt">-- true</span>
+s contains(5) println;           <span class="cmt">-- false</span></code></pre>
 
             <h3><code>union(set1, set2)</code></h3>
             <p>Returns a set containing all elements from both sets.</p>
@@ -1581,9 +1710,9 @@ s contains(5) println;           <span style="color:#95a5a6">-- false</span></co
             </table>
             <pre><code>let a = Set(1, 2, 3, 4);
 let b = Set(3, 4, 5, 6);
-union(a, b) println;             <span style="color:#95a5a6">-- Set(1, 2, 3, 4, 5, 6)</span>
-intersection(a, b) println;      <span style="color:#95a5a6">-- Set(3, 4)</span>
-difference(a, b) println;        <span style="color:#95a5a6">-- Set(1, 2)</span></code></pre>
+union(a, b) println;             <span class="cmt">-- Set(1, 2, 3, 4, 5, 6)</span>
+intersection(a, b) println;      <span class="cmt">-- Set(3, 4)</span>
+difference(a, b) println;        <span class="cmt">-- Set(1, 2)</span></code></pre>
 
             <h3><code>toArray(set)</code></h3>
             <p>Converts the set to an array of its elements.</p>
@@ -1592,7 +1721,7 @@ difference(a, b) println;        <span style="color:#95a5a6">-- Set(1, 2)</span>
                 <tr><td><code>toArray(Set&lt;T&gt;) &rarr; [T]</code></td><td>Convert set to array.</td></tr>
             </table>
             <pre><code>let s = Set(1, 2, 3);
-s toArray println;               <span style="color:#95a5a6">-- [1, 2, 3]</span></code></pre>
+s toArray println;               <span class="cmt">-- [1, 2, 3]</span></code></pre>
 
             <h3><code>length(set)</code></h3>
             <p>Returns the number of elements in the set.</p>
@@ -1618,41 +1747,41 @@ s toArray println;               <span style="color:#95a5a6">-- [1, 2, 3]</span>
                 <tr><td><code>hash(Symbol) &rarr; Int</code></td><td>Hash a symbol.</td></tr>
                 <tr><td><code>hash(T) &rarr; Int</code></td><td>Hash any object type (String, Array, Tuple, Struct, Enum, etc.). Uses structural hashing.</td></tr>
             </table>
-            <pre><code>hash(42) println;                <span style="color:#95a5a6">-- integer hash value</span>
-hash(3.14) println;              <span style="color:#95a5a6">-- integer hash value</span>
-hash('foo) println;              <span style="color:#95a5a6">-- integer hash value</span>
+            <pre><code>hash(42) println;                <span class="cmt">-- integer hash value</span>
+hash(3.14) println;              <span class="cmt">-- integer hash value</span>
+hash('foo) println;              <span class="cmt">-- integer hash value</span>
 
-<span style="color:#95a5a6">-- Equal values produce equal hashes</span>
-println(hash((1, 2)) == hash((1, 2)));     <span style="color:#95a5a6">-- true</span>
-println(hash([1, 2, 3]) == hash([1, 2, 3]));  <span style="color:#95a5a6">-- true</span></code></pre>
+<span class="cmt">-- Equal values produce equal hashes</span>
+println(hash((1, 2)) == hash((1, 2)));     <span class="cmt">-- true</span>
+println(hash([1, 2, 3]) == hash([1, 2, 3]));  <span class="cmt">-- true</span></code></pre>
 
             <h3>Universal Equality (<code>==</code> / <code>!=</code>)</h3>
             <p>The <code>==</code> and <code>!=</code> operators work on all types with matching operands. For object types (Structs, Tuples, Arrays, Enums, etc.), structural equality is used: two values are equal if all their fields/elements are equal. User-defined <code>==</code> overloads take priority over built-in structural equality.</p>
-            <pre><code><span style="color:#95a5a6">-- Struct equality</span>
+            <pre><code><span class="cmt">-- Struct equality</span>
 struct Point { x Int, y Int }
 let p1 = Point{1, 2};
-println(p1 == Point{1, 2});      <span style="color:#95a5a6">-- true</span>
-println(p1 == Point{3, 4});      <span style="color:#95a5a6">-- false</span>
+println(p1 == Point{1, 2});      <span class="cmt">-- true</span>
+println(p1 == Point{3, 4});      <span class="cmt">-- false</span>
 
-<span style="color:#95a5a6">-- Tuple equality</span>
-println((1, 2) == (1, 2));       <span style="color:#95a5a6">-- true</span>
+<span class="cmt">-- Tuple equality</span>
+println((1, 2) == (1, 2));       <span class="cmt">-- true</span>
 
-<span style="color:#95a5a6">-- Array equality</span>
-println([1, 2, 3] == [1, 2, 3]); <span style="color:#95a5a6">-- true</span>
+<span class="cmt">-- Array equality</span>
+println([1, 2, 3] == [1, 2, 3]); <span class="cmt">-- true</span>
 
-<span style="color:#95a5a6">-- Symbol equality</span>
-println('foo == 'foo);           <span style="color:#95a5a6">-- true</span>
+<span class="cmt">-- Symbol equality</span>
+println('foo == 'foo);           <span class="cmt">-- true</span>
 
-<span style="color:#95a5a6">-- Enum equality</span>
+<span class="cmt">-- Enum equality</span>
 enum Color { red, green, blue }
-println(Color.red == Color.red); <span style="color:#95a5a6">-- true</span>
+println(Color.red == Color.red); <span class="cmt">-- true</span>
 
-<span style="color:#95a5a6">-- User-defined == overrides structural equality</span>
+<span class="cmt">-- User-defined == overrides structural equality</span>
 struct Vec2 { x Float, y Float }
 fn ==(a Vec2, b Vec2) Bool {
     let dx = a.x - b.x;
     let dy = a.y - b.y;
-    dx * dx + dy * dy < 0.001    <span style="color:#95a5a6">-- approximate equality</span>
+    dx * dx + dy * dy < 0.001    <span class="cmt">-- approximate equality</span>
 }</code></pre>
 
             <a href="#top" class="back-to-top">&uarr; Back to top</a>
@@ -1669,9 +1798,9 @@ fn ==(a Vec2, b Vec2) Bool {
                 <tr><td><code>ordinal(Enum) &rarr; Int</code></td><td>Get the case index of an enum value.</td></tr>
             </table>
             <pre><code>enum Color { red, green, blue }
-ordinal(Color.red) println;      <span style="color:#95a5a6">-- 0</span>
-ordinal(Color.green) println;    <span style="color:#95a5a6">-- 1</span>
-ordinal(Color.blue) println;     <span style="color:#95a5a6">-- 2</span></code></pre>
+ordinal(Color.red) println;      <span class="cmt">-- 0</span>
+ordinal(Color.green) println;    <span class="cmt">-- 1</span>
+ordinal(Color.blue) println;     <span class="cmt">-- 2</span></code></pre>
 
             <h3><code>tag(enum_value)</code></h3>
             <p>Returns the case name of an enum value as a Symbol.</p>
@@ -1680,13 +1809,13 @@ ordinal(Color.blue) println;     <span style="color:#95a5a6">-- 2</span></code><
                 <tr><td><code>tag(Enum) &rarr; Symbol</code></td><td>Get the case name of an enum value.</td></tr>
             </table>
             <pre><code>enum Color { red, green, blue }
-tag(Color.red) println;      <span style="color:#95a5a6">-- 'red</span>
-tag(Color.green) println;    <span style="color:#95a5a6">-- 'green</span>
-tag(Color.blue) println;     <span style="color:#95a5a6">-- 'blue</span>
+tag(Color.red) println;      <span class="cmt">-- 'red</span>
+tag(Color.green) println;    <span class="cmt">-- 'green</span>
+tag(Color.blue) println;     <span class="cmt">-- 'blue</span>
 
 enum Option { some Int, none }
-tag(Option.some(42)) println;  <span style="color:#95a5a6">-- 'some</span>
-tag(Option.none) println;      <span style="color:#95a5a6">-- 'none</span></code></pre>
+tag(Option.some(42)) println;  <span class="cmt">-- 'some</span>
+tag(Option.none) println;      <span class="cmt">-- 'none</span></code></pre>
 
             <a href="#top" class="back-to-top">&uarr; Back to top</a>
         </div>
@@ -1764,9 +1893,9 @@ tag(Option.none) println;      <span style="color:#95a5a6">-- 'none</span></code
                 <tr><td><code>toInt(Float) &rarr; Int</code></td><td>Truncate toward zero (fractional part discarded).</td></tr>
                 <tr><td><code>toInt(Fraction) &rarr; Int</code></td><td>Truncate toward zero (numerator/denominator as float, then truncated).</td></tr>
             </table>
-            <pre><code>toInt(<span style="color:#e67e22">3.7</span>) println;            <span style="color:#95a5a6">-- 3</span>
-toInt(<span style="color:#e67e22">-2.9</span>) println;           <span style="color:#95a5a6">-- -2</span>
-toInt(<span style="color:#e67e22">7</span>/<span style="color:#e67e22">2</span>) println;             <span style="color:#95a5a6">-- 3</span></code></pre>
+            <pre><code>toInt(<span class="hl-num">3.7</span>) println;            <span class="cmt">-- 3</span>
+toInt(<span class="hl-num">-2.9</span>) println;           <span class="cmt">-- -2</span>
+toInt(<span class="hl-num">7</span>/<span class="hl-num">2</span>) println;             <span class="cmt">-- 3</span></code></pre>
 
             <h3><code>toFloat(x)</code></h3>
             <p>Convert a numeric value to Float.</p>
@@ -1777,9 +1906,9 @@ toInt(<span style="color:#e67e22">7</span>/<span style="color:#e67e22">2</span>)
                 <tr><td><code>toFloat(Fraction) &rarr; Float</code></td><td>Fraction to double-precision float (numerator/denominator).</td></tr>
                 <tr><td><code>toFloat(Complex) &rarr; Float</code></td><td>Returns the real part, discarding the imaginary part.</td></tr>
             </table>
-            <pre><code>toFloat(<span style="color:#e67e22">5</span>) println;             <span style="color:#95a5a6">-- 5.0</span>
-toFloat(<span style="color:#e67e22">7</span>/<span style="color:#e67e22">2</span>) println;           <span style="color:#95a5a6">-- 3.5</span>
-toFloat(<span style="color:#e67e22">3.0</span> + <span style="color:#e67e22">4.0</span>i) println;   <span style="color:#95a5a6">-- 3.0</span></code></pre>
+            <pre><code>toFloat(<span class="hl-num">5</span>) println;             <span class="cmt">-- 5.0</span>
+toFloat(<span class="hl-num">7</span>/<span class="hl-num">2</span>) println;           <span class="cmt">-- 3.5</span>
+toFloat(<span class="hl-num">3.0</span> + <span class="hl-num">4.0</span>i) println;   <span class="cmt">-- 3.0</span></code></pre>
 
             <h3><code>toFraction(x)</code></h3>
             <p>Convert a numeric value to Fraction.</p>
@@ -1788,7 +1917,7 @@ toFloat(<span style="color:#e67e22">3.0</span> + <span style="color:#e67e22">4.0
                 <tr><td><code>toFraction(Int) &rarr; Fraction</code></td><td>Integer to fraction (denominator 1).</td></tr>
                 <tr><td><code>toFraction(Fraction) &rarr; Fraction</code></td><td>Identity &mdash; returns the value unchanged.</td></tr>
             </table>
-            <pre><code>toFraction(<span style="color:#e67e22">5</span>) println;         <span style="color:#95a5a6">-- 5/1</span></code></pre>
+            <pre><code>toFraction(<span class="hl-num">5</span>) println;         <span class="cmt">-- 5/1</span></code></pre>
 
             <h3><code>toComplex(x)</code></h3>
             <p>Convert a numeric value to Complex (imaginary part 0).</p>
@@ -1799,9 +1928,9 @@ toFloat(<span style="color:#e67e22">3.0</span> + <span style="color:#e67e22">4.0
                 <tr><td><code>toComplex(Fraction) &rarr; Complex</code></td><td>Fraction to complex (via float, imaginary part 0).</td></tr>
                 <tr><td><code>toComplex(Complex) &rarr; Complex</code></td><td>Identity &mdash; returns the value unchanged.</td></tr>
             </table>
-            <pre><code>toComplex(<span style="color:#e67e22">5</span>) println;          <span style="color:#95a5a6">-- 5+0i</span>
-toComplex(<span style="color:#e67e22">3.14</span>) println;       <span style="color:#95a5a6">-- 3.14+0i</span>
-toComplex(<span style="color:#e67e22">7</span>/<span style="color:#e67e22">2</span>) println;        <span style="color:#95a5a6">-- 3.5+0i</span></code></pre>
+            <pre><code>toComplex(<span class="hl-num">5</span>) println;          <span class="cmt">-- 5+0i</span>
+toComplex(<span class="hl-num">3.14</span>) println;       <span class="cmt">-- 3.14+0i</span>
+toComplex(<span class="hl-num">7</span>/<span class="hl-num">2</span>) println;        <span class="cmt">-- 3.5+0i</span></code></pre>
 
             <a href="#top" class="back-to-top">&uarr; Back to top</a>
         </div>
@@ -1818,22 +1947,22 @@ toComplex(<span style="color:#e67e22">7</span>/<span style="color:#e67e22">2</sp
 
             <p>Both <code>print</code> and <code>println</code> accept any number of arguments of any type. Multiple arguments are separated by spaces. They participate in auto-mapping: passing an array with <code>@</code> prints each element individually.</p>
 
-            <pre><code><span style="color:#95a5a6">-- println prints values followed by a newline</span>
-println(<span style="color:#e67e22">42</span>);                       <span style="color:#95a5a6">-- 42</span>
-println(<span style="color:#27ae60">"hello"</span>, <span style="color:#27ae60">"world"</span>);        <span style="color:#95a5a6">-- hello world</span>
-println(<span style="color:#e67e22">1</span>, <span style="color:#e67e22">2.5</span>, <span style="color:#e74c3c">true</span>);            <span style="color:#95a5a6">-- 1 2.5 true</span>
-println();                          <span style="color:#95a5a6">-- (empty line)</span>
+            <pre><code><span class="cmt">-- println prints values followed by a newline</span>
+println(<span class="hl-num">42</span>);                       <span class="cmt">-- 42</span>
+println(<span class="hl-str">"hello"</span>, <span class="hl-str">"world"</span>);        <span class="cmt">-- hello world</span>
+println(<span class="hl-num">1</span>, <span class="hl-num">2.5</span>, <span class="hl-kw">true</span>);            <span class="cmt">-- 1 2.5 true</span>
+println();                          <span class="cmt">-- (empty line)</span>
 
-<span style="color:#95a5a6">-- print does not add a newline</span>
-print(<span style="color:#27ae60">"x="</span>);
-println(<span style="color:#e67e22">42</span>);                       <span style="color:#95a5a6">-- x=42</span>
+<span class="cmt">-- print does not add a newline</span>
+print(<span class="hl-str">"x="</span>);
+println(<span class="hl-num">42</span>);                       <span class="cmt">-- x=42</span>
 
-<span style="color:#95a5a6">-- Pipeline syntax</span>
-<span style="color:#e67e22">42</span> println;                         <span style="color:#95a5a6">-- 42</span>
-<span style="color:#27ae60">"hello"</span> println;                    <span style="color:#95a5a6">-- hello</span>
+<span class="cmt">-- Pipeline syntax</span>
+<span class="hl-num">42</span> println;                         <span class="cmt">-- 42</span>
+<span class="hl-str">"hello"</span> println;                    <span class="cmt">-- hello</span>
 
-<span style="color:#95a5a6">-- Auto-mapping: print each element on its own line</span>
-[<span style="color:#e67e22">1</span>, <span style="color:#e67e22">2</span>, <span style="color:#e67e22">3</span>] @ println;                <span style="color:#95a5a6">-- 1  2  3  (each on its own line)</span></code></pre>
+<span class="cmt">-- Auto-mapping: print each element on its own line</span>
+[<span class="hl-num">1</span>, <span class="hl-num">2</span>, <span class="hl-num">3</span>] @ println;                <span class="cmt">-- 1  2  3  (each on its own line)</span></code></pre>
 
             <h3>List Print Limit</h3>
             <p>Control how many elements are displayed when printing lists.</p>
@@ -1843,9 +1972,9 @@ println(<span style="color:#e67e22">42</span>);                       <span styl
                 <tr><td><code>setListPrintLimit(n)</code></td><td><code>Int &rarr; Int</code></td><td>Set the maximum number of list elements to display. Returns the previous limit.</td></tr>
             </table>
             <pre><code>let old = setListPrintLimit(3);
-(1..10) toList println;        <span style="color:#95a5a6">-- List(1, 2, 3, ...)</span>
-setListPrintLimit(old);        <span style="color:#95a5a6">-- restore previous limit</span>
-getListPrintLimit();           <span style="color:#95a5a6">-- check current limit</span></code></pre>
+(1..10) toList println;        <span class="cmt">-- List(1, 2, 3, ...)</span>
+setListPrintLimit(old);        <span class="cmt">-- restore previous limit</span>
+getListPrintLimit();           <span class="cmt">-- check current limit</span></code></pre>
 
             <a href="#top" class="back-to-top">&uarr; Back to top</a>
         </div>
@@ -1988,5 +2117,22 @@ getListPrintLimit();           <span style="color:#95a5a6">-- check current limi
         </div>
 
     </div>
+<script>
+(function() {
+  var btn = document.getElementById('theme-toggle');
+  var icon = document.getElementById('theme-icon');
+  function update() {
+    var isLight = document.documentElement.classList.contains('light');
+    icon.innerHTML = isLight ? '\u2600' : '\u263E';
+  }
+  update();
+  btn.addEventListener('click', function() {
+    document.documentElement.classList.toggle('light');
+    localStorage.setItem('langx-docs-theme',
+      document.documentElement.classList.contains('light') ? 'light' : 'dark');
+    update();
+  });
+})();
+</script>
 </body>
 </html>

@@ -6,6 +6,34 @@
 <title>Language X &mdash; By Example</title>
 <style>
   :root {
+    --bg: #1a1b26;
+    --fg: #c9d1d9;
+    --accent: #58a6ff;
+    --accent-dim: #3d6ea8;
+    --code-bg: #21222c;
+    --code-border: #30363d;
+    --warn-bg: #2d2308;
+    --warn-border: #f59e0b;
+    --note-bg: #0d2137;
+    --note-border: #3b82f6;
+    --table-stripe: #1f2028;
+    --sidebar-bg: #16171f;
+    --sidebar-border: #2a2d3a;
+    --heading-fg: #e6edf3;
+    --muted-fg: #8b949e;
+    --h4-fg: #a0aec0;
+    --tip-bg: #0d2818;
+    --tip-border: #22c55e;
+    --diagram-bg: #21222c;
+    --syn-kw: #c678dd;
+    --syn-typ: #56d4e0;
+    --syn-str: #4ec970;
+    --syn-cmt: #6a737d;
+    --syn-num: #e5a537;
+    --syn-fn: #58a6ff;
+  }
+
+  html.light {
     --bg: #fdfdfd;
     --fg: #1a1a1a;
     --accent: #2563eb;
@@ -20,6 +48,17 @@
     --sidebar-bg: #f8f9fb;
     --sidebar-border: #e2e5ea;
     --heading-fg: #0f172a;
+    --muted-fg: #64748b;
+    --h4-fg: #475569;
+    --tip-bg: #dcfce7;
+    --tip-border: #22c55e;
+    --diagram-bg: #fff;
+    --syn-kw: #8b5cf6;
+    --syn-typ: #0891b2;
+    --syn-str: #16a34a;
+    --syn-cmt: #94a3b8;
+    --syn-num: #d97706;
+    --syn-fn: #2563eb;
   }
 
   * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -54,7 +93,7 @@
     font-size: 0.75rem;
     text-transform: uppercase;
     letter-spacing: 0.08em;
-    color: #64748b;
+    color: var(--muted-fg);
     margin-bottom: 1rem;
   }
 
@@ -110,7 +149,7 @@
 
   h1 + .subtitle {
     font-size: 1.1rem;
-    color: #64748b;
+    color: var(--muted-fg);
     margin-bottom: 2.5rem;
   }
 
@@ -135,7 +174,7 @@
   h4 {
     font-size: 1rem;
     font-weight: 600;
-    color: #475569;
+    color: var(--h4-fg);
     margin-top: 1.6rem;
     margin-bottom: 0.4rem;
   }
@@ -174,12 +213,12 @@
   }
 
   /* Keyword colouring (manual spans) */
-  .kw  { color: #8b5cf6; font-weight: 600; }
-  .typ { color: #0891b2; }
-  .str { color: #16a34a; }
-  .cmt { color: #94a3b8; font-style: italic; }
-  .num { color: #d97706; }
-  .fn  { color: #2563eb; }
+  .kw  { color: var(--syn-kw); font-weight: 600; }
+  .typ { color: var(--syn-typ); }
+  .str { color: var(--syn-str); }
+  .cmt { color: var(--syn-cmt); font-style: italic; }
+  .num { color: var(--syn-num); }
+  .fn  { color: var(--syn-fn); }
 
   /* Tables */
 
@@ -216,7 +255,7 @@
 
   .note    { background: var(--note-bg); border-color: var(--note-border); }
   .warning { background: var(--warn-bg); border-color: var(--warn-border); }
-  .tip     { background: #dcfce7; border-color: #22c55e; }
+  .tip     { background: var(--tip-bg); border-color: var(--tip-border); }
 
   .note strong, .warning strong, .tip strong {
     display: block;
@@ -230,7 +269,7 @@
 
   /* Diagram */
   .diagram {
-    background: #fff;
+    background: var(--diagram-bg);
     border: 1px solid var(--code-border);
     border-radius: 6px;
     padding: 1.5rem;
@@ -250,12 +289,38 @@
     line-height: 1.5;
   }
 
+  /* Theme toggle */
+  .theme-toggle {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 1.5rem;
+    padding: 0.4rem 0.75rem;
+    background: var(--code-bg);
+    border: 1px solid var(--code-border);
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 1.1rem;
+    color: var(--fg);
+    transition: background 0.2s;
+    width: 100%;
+    justify-content: center;
+  }
+  .theme-toggle:hover { background: var(--table-stripe); }
+
+  body, nav.sidebar, pre, code, .note, .warning, .tip, .diagram, th, td {
+    transition: background-color 0.3s, color 0.3s, border-color 0.3s;
+  }
+
   /* Responsive */
   @media (max-width: 900px) {
     nav.sidebar { display: none; }
     main { padding: 2rem 1.2rem 4rem; }
   }
 </style>
+<script>
+if (localStorage.getItem('langx-docs-theme') === 'light') document.documentElement.classList.add('light');
+</script>
 </head>
 <body>
 
@@ -264,6 +329,9 @@
 <!-- ================================================================ -->
 
 <nav class="sidebar">
+  <button class="theme-toggle" id="theme-toggle" aria-label="Toggle theme">
+    <span id="theme-icon">&#9790;</span>
+  </button>
   <h2>Contents</h2>
   <ol>
     <li><a href="#basic-syntax">Basic Syntax</a>
@@ -1129,19 +1197,19 @@ temp println;              <span class="cmt">-- Temperature(98.6)</span></code><
 <pre><code><span class="kw">enum</span> Shape {
     circle <span class="kw">Float</span>,
     rect (<span class="kw">Float</span>, <span class="kw">Float</span>),
-    point
+    point,
 }
 
 <span class="kw">enum</span> Result {
     ok <span class="kw">String</span>,
-    error <span class="kw">String</span>
+    error <span class="kw">String</span>,
 }
 
 <span class="kw">enum</span> Value {
     integer <span class="kw">Int</span>,
     floating <span class="kw">Float</span>,
     text <span class="kw">String</span>,
-    nothing
+    nothing,
 }
 
 <span class="cmt">-- Construction</span>
@@ -1166,7 +1234,7 @@ temp println;              <span class="cmt">-- Temperature(98.6)</span></code><
 
 <h3 id="ordinal">7.5 Ordinal (Case Index)</h3>
 <pre><code><span class="cmt">-- ordinal returns the zero-based index of an enum case</span>
-<span class="kw">enum</span> Color { red, green, blue }
+<span class="kw">enum</span> Color { red, green, blue, }
 
 ordinal(Color.red) println;      <span class="cmt">-- 0</span>
 ordinal(Color.green) println;    <span class="cmt">-- 1</span>
@@ -1177,13 +1245,13 @@ ordinal(Option.some(<span class="num">42</span>)) println;  <span class="cmt">--
 ordinal(Option&lt;<span class="kw">Int</span>&gt;.none) println; <span class="cmt">-- 1</span>
 
 <span class="cmt">-- Works with template enums</span>
-<span class="kw">enum</span> Either&lt;L, R&gt; { left L, right R }
+<span class="kw">enum</span> Either&lt;L, R&gt; { left L, right R, }
 ordinal(Either.left(<span class="num">42</span>)) println;              <span class="cmt">-- 0</span>
 ordinal(Either&lt;<span class="kw">Int</span>, <span class="kw">String</span>&gt;.right(<span class="str">"hi"</span>)) println; <span class="cmt">-- 1</span></code></pre>
 
 <h3 id="tag">7.6 Tag (Case Name)</h3>
 <pre><code><span class="cmt">-- tag returns the case name of an enum value as a Symbol</span>
-<span class="kw">enum</span> Color { red, green, blue }
+<span class="kw">enum</span> Color { red, green, blue, }
 
 tag(Color.red) println;      <span class="cmt">-- 'red</span>
 tag(Color.green) println;    <span class="cmt">-- 'green</span>
@@ -1194,7 +1262,7 @@ tag(Option.some(<span class="num">42</span>)) println;  <span class="cmt">-- 'so
 tag(Option&lt;<span class="kw">Int</span>&gt;.none) println; <span class="cmt">-- 'none</span>
 
 <span class="cmt">-- Works with template enums</span>
-<span class="kw">enum</span> Either&lt;L, R&gt; { left L, right R }
+<span class="kw">enum</span> Either&lt;L, R&gt; { left L, right R, }
 tag(Either.left(<span class="num">42</span>)) println;              <span class="cmt">-- 'left</span>
 tag(Either&lt;<span class="kw">Int</span>, <span class="kw">String</span>&gt;.right(<span class="str">"hi"</span>)) println; <span class="cmt">-- 'right</span></code></pre>
 
@@ -1972,7 +2040,7 @@ ws println;                    <span class="cmt">-- Wrapper&lt;String&gt;(hello)
 <span class="cmt">-- User-defined template enums</span>
 <span class="kw">enum</span> Either&lt;L, R&gt; {
     left L,
-    right R
+    right R,
 }
 
 <span class="cmt">-- Type inferred from data case</span>
@@ -2068,7 +2136,7 @@ y isNone println;              <span class="cmt">-- true</span>
 <span class="kw">struct</span> SortedArray&lt;T: Comparable&gt; { items [T] }
 
 <span class="cmt">-- Enum with constrained type parameter</span>
-<span class="kw">enum</span> NumResult&lt;T: Numeric&gt; { ok T, err <span class="kw">String</span> }
+<span class="kw">enum</span> NumResult&lt;T: Numeric&gt; { ok T, err <span class="kw">String</span>, }
 
 <span class="cmt">-- Type alias with constraint</span>
 <span class="kw">type</span> NumPair&lt;T: Numeric&gt; = (T, T);</code></pre>
@@ -2442,5 +2510,22 @@ println(m1 | m2);     <span class="cmt">-- Mask { bits: 255 }</span>
 println(m1 << <span class="num">4</span>);     <span class="cmt">-- Mask { bits: 4080 }</span></code></pre>
 
 </main>
+<script>
+(function() {
+  var btn = document.getElementById('theme-toggle');
+  var icon = document.getElementById('theme-icon');
+  function update() {
+    var isLight = document.documentElement.classList.contains('light');
+    icon.innerHTML = isLight ? '\u2600' : '\u263E';
+  }
+  update();
+  btn.addEventListener('click', function() {
+    document.documentElement.classList.toggle('light');
+    localStorage.setItem('langx-docs-theme',
+      document.documentElement.classList.contains('light') ? 'light' : 'dark');
+    update();
+  });
+})();
+</script>
 </body>
 </html>
