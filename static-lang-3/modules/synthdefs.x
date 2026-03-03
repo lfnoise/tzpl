@@ -195,10 +195,10 @@ fn scalar(x Float) SignalExpr {
 }
 
 fn fill(chans Int, x Int) SignalExpr {
-	SignalExprKind.int(x repeat(chans), ANY_NUM) newSignalExpr
+	SignalExprKind.int(x repeat(chans asChans), ANY_NUM) newSignalExpr
 }
 fn fill(chans Int, x Float) SignalExpr {
-	SignalExprKind.float(x repeat(chans), x numType) newSignalExpr
+	SignalExprKind.float(x repeat(chans asChans), x numType) newSignalExpr
 }
 
 fn vec(v [Int]) SignalExpr {
@@ -385,7 +385,7 @@ fn outlet(a SignalExpr, name String = "out") SignalExpr {
 }
 
 fn control(spec ControlSpec, chans Chans = 1, name String) SignalExpr {
-    SignalExprKind.control(spec, chans, name) newSignalExpr
+    SignalExprKind.control(spec, chans asChans, name) newSignalExpr
 }
 
 fn frand(lo Float, hi Float, chans Chans = 1, rate Rate = Rate.audio) SignalExpr {
@@ -653,19 +653,19 @@ fn reverse(m SignalExpr) SignalExpr {
     SignalExprKind.vecop(VecOp.reverse) newSignalExpr([a])
 }
 fn reduce(m SignalExpr, op BinaryOp, chans Chans = 1) SignalExpr {
-    SignalExprKind.vecop(VecOp.reduce(op, chans)) newSignalExpr([a])
+    SignalExprKind.vecop(VecOp.reduce(op, chans asChans)) newSignalExpr([a])
 }
 fn sum(m SignalExpr, chans Chans = 1) SignalExpr {
-    m reduce(BinaryOp.add, chans)
+    m reduce(BinaryOp.add, chans asChans)
 }
 fn product(m SignalExpr, chans Chans = 1) SignalExpr {
-    m reduce(BinaryOp.mul, chans)
+    m reduce(BinaryOp.mul, chans asChans)
 }
 fn minOf(m SignalExpr, chans Chans = 1) SignalExpr {
-    m reduce(BinaryOp.min, chans)
+    m reduce(BinaryOp.min, chans asChans)
 }
 fn maxOf(m SignalExpr, chans Chans = 1) SignalExpr {
-    m reduce(BinaryOp.max, chans)
+    m reduce(BinaryOp.max, chans asChans)
 }
 
 ---------------------------------------------------------------------------
@@ -798,22 +798,36 @@ fn toLisp(o ControlSpec) String {
     "(ControlSpec %^ %^ %^ %^)" fmt(o.lo, o.hi, o.init, o.warp)
 }
 
+fn numTypeInt(op CastOp) Int {
+	match (op) {
+		i32 : 1;
+		i64 : 2;
+		f32 : 4;
+		f64 : 8;
+	}
+}
+
+fn toLisp(g SignalGraph) String {
+	let exprsStr = g.exprs toLisp separatedString(" ");
+	"(%^ %^)" fmt(g.root.id, exprsStr)
+}
+
 fn toLisp(o SignalExpr) String {
     match (o.kind) {
         sampleRate : "(%^ SampleRate)" fmt(o.id);
         sampleDur : "(%^ SampleDur)" fmt(o.id);
-        int(a) : "(%^ Constant %^ %^ %^)" fmt(o.id, ANY_NUM, a separatedString parens);
-        float(a) : "(%^ Constant %^ %^ %^)" fmt(o.id, ANY_FLOAT, a separatedString parens);
+        int(a) : "(%^ Constant %^ %^ %^)" fmt(o.id, a length, ANY_NUM, a separatedString parens);
+        float(a) : "(%^ Constant %^ %^ %^)" fmt(o.id, a length, ANY_FLOAT, a separatedString parens);
         unop(op) : "(%^ UnaryOp %^ %^)" fmt(o.id, op name, o inputsToLisp);
         binop(op) : "(%^ BinaryOp %^ %^)" fmt(o.id, op name, o inputsToLisp);
         compareop(op) : "(%^ BinaryOp %^ %^)" fmt(o.id, op name, o inputsToLisp);
-        castop(op) : "(%^ CastOp %^ %^)" fmt(o.id, op name, o inputsToLisp);
+        castop(op) : "(%^ CastOp %^ %^)" fmt(o.id, op numTypeInt, o inputsToLisp);
         random(op, rate, chans) : match (op) {
-            frand(lo, hi) : "(%^ FRand %^ %^ %^ %^)" fmt(o.id, rate, chans, lo, hi);
-            irand(lo, hi) : "(%^ IRand %^ %^ %^ %^)" fmt(o.id, rate, chans, lo, hi);
-            unipolar : "(%^ URand %^ %^)" fmt(o.id, rate, chans);
-            bipolar : "(%^ BRand %^ %^)" fmt(o.id, rate, chans);
-            bits : "(%^ Rand64 %^ %^)" fmt(o.id, rate, chans);
+            frand(lo, hi) : "(%^ FRand %^ %^ %^ %^)" fmt(o.id, rate, chans asChans, lo, hi);
+            irand(lo, hi) : "(%^ IRand %^ %^ %^ %^)" fmt(o.id, rate, chans asChans, lo, hi);
+            unipolar : "(%^ URand %^ %^)" fmt(o.id, rate, chans asChans);
+            bipolar : "(%^ BiRand %^ %^)" fmt(o.id, rate, chans asChans);
+            bits : "(%^ Rand64 %^ %^)" fmt(o.id, rate, chans asChans);
         }
         vecop(op) : match (op) {
             at : "(%^ VecAt %^)" fmt(o.id, o inputsToLisp);
@@ -828,36 +842,40 @@ fn toLisp(o SignalExpr) String {
            	transpose(n) : "(%^ VecTranspose %^ %^)" fmt(o.id, n, o inputsToLisp);
            	permute : "(%^ VecAt %^)" fmt(o.id, o inputsToLisp);
            	reduce(op, chans) : "(%^ VecReduce %^ %^ %^)"
-                fmt(o.id, op name, chans, o inputsToLisp);
-           	sum(chans) : "(%^ VecSum %^ %^)" fmt(o.id, chans, o inputsToLisp);
-           	prod(chans) : "(%^ VecProd %^ %^)" fmt(o.id, chans, o inputsToLisp);
-           	minOf(chans) : "(%^ VecMin %^ %^)" fmt(o.id, chans, o inputsToLisp);
-           	maxOf(chans) : "(%^ VecMax %^ %^)" fmt(o.id, chans, o inputsToLisp);
+                fmt(o.id, op name, chans asChans, o inputsToLisp);
+           	sum(chans) : "(%^ VecSum %^ %^)" fmt(o.id, chans asChans, o inputsToLisp);
+           	prod(chans) : "(%^ VecProd %^ %^)" fmt(o.id, chans asChans, o inputsToLisp);
+           	minOf(chans) : "(%^ VecMin %^ %^)" fmt(o.id, chans asChans, o inputsToLisp);
+           	maxOf(chans) : "(%^ VecMax %^ %^)" fmt(o.id, chans asChans, o inputsToLisp);
 
         }
-        inlet(typ, chans, name) : "(%^ Inlet \"%^\" %^ %^)" fmt(o.id, name, typ, chans);
-        outlet(name) : "(%^ Outlet \"%^\" %^)" fmt(o.id, name, o inputsToLisp);
+        inlet(typ, chans, name) : "(%^ Inlet \"%^\" %^ %^)" fmt(o.id, name, chans asChans, typ.0);
+        outlet(name) : "(%^ Outlet \"%^\" %^)" fmt(o.id, name, o.ins.id separatedString);
 
-        -- control(spec, chans, name) : "(%^ Control \"%^\" %^ %^)" fmt(o.id, name, chans, spec toLisp)
+        control(spec, chans, name) :
+            "(%^ Control \"%^\" %^ %^)" fmt(o.id, name, chans asChans, spec toLisp);
 
         delay(delayVar, op) : match (op) {
             maxDelayTime : "(%^ MaxDelay %^ %^)" fmt(o.id, delayVar.id, o inputsToLisp);
-            init(offset) : "(%^ DelayInit %^ %^)" fmt(o.id, delayVar.id, offset, o inputsToLisp);
+            init(offset) : "(%^ DelayInit %^ %^ %^)" fmt(o.id, delayVar.id, offset, o inputsToLisp);
             read(offset) : "(%^ DelayFixRead %^ %^)" fmt(o.id, delayVar.id, offset);
-            vread(interpolation) : "(%^ DelayVarRead %^ %^ %^)" fmt(o.id, delayVar.id, o inputsToLisp, interpolation);
+            vread(interpolation) : "(%^ DelayVarRead %^ %^)" fmt(o.id, delayVar.id, o inputsToLisp);
             write :  "(%^ DelayWrite %^ %^)" fmt(o.id, delayVar.id, o inputsToLisp);
         }
 
-	control(ControlSpec, Chans),
+        if_(thenGraph, elseGraph) :
+            "(%^ IfExpr %^ %^ %^)" fmt(o.id, o inputsToLisp, thenGraph toLisp, elseGraph toLisp);
 
-	delay(DelayVar, DelayOp),
+        for_(count, bodyGraph) :
+            "(%^ ForExpr %^ %^)" fmt(o.id, count, bodyGraph toLisp);
 
-	if_(SignalGraph, SignalGraph),
-	for_(Int, SignalGraph),
-	switch_([SignalGraph]),
-	select,
-	select2,
+        switch_(cases) :
+            "(%^ SwitchExpr %^ %^)" fmt(o.id, o inputsToLisp, cases toLisp separatedString(" "));
 
+        select : "(%^ SelectExpr %^)" fmt(o.id, o inputsToLisp);
+        select2 : "(%^ SelectExpr %^)" fmt(o.id, o inputsToLisp);
+	}
+}
 ---------------------------------------------------------------------------
 ---------------------------------------------------------------------------
 ---------------------------------------------------------------------------
