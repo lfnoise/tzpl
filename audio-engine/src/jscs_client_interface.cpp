@@ -10,6 +10,7 @@
 #include "RtAudio.h"
 #include "jscs_hash.hpp"
 #include "jscs_command_subclasses.hpp"
+#include <cstring>
 #include <dlfcn.h> // dlopen, dlclose
 #include <filesystem>
 #include <chrono>
@@ -343,7 +344,7 @@ NodeDef* getNodeDef(Engine* e, const char* name) {
 
     NodeDef* def = e->defs_[bin];
     while (def) {
-        if (def->info_.name == name) return def;
+        if (def->hash_ == hash && strcmp(def->info_.name, name) == 0) return def;
         def = def->next_;
     }
     return nullptr;

@@ -174,6 +174,7 @@ private:
     u16 emitVariadicPack(CallExpr_* expr, u16 callArgBase, u16 argc);
 
     // Insert conversions for numeric tower promotions
+    u16 ensureInt(u16 reg, Type* type);
     u16 ensureFloat(u16 reg, Type* type);
     u16 ensureFraction(u16 reg, Type* type);
     u16 ensureComplex(u16 reg, Type* type);

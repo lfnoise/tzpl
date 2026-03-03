@@ -181,8 +181,19 @@ u16 CodeGen::ensureComplex(u16 reg, Type* type) {
     return reg;
 }
 
+u16 CodeGen::ensureInt(u16 reg, Type* type) {
+    if (dynamic_cast<EnumType*>(type)) {
+        u16 dst = allocReg();
+        emitOp(op_enum_get_which);
+        emitRegs(dst, reg);
+        return dst;
+    }
+    return reg;
+}
+
 u16 CodeGen::ensureType(u16 reg, Type* fromType, Type* toType) {
     if (fromType == toType) return reg;
+    if (toType == compiler_.intType()) return ensureInt(reg, fromType);
     if (toType == compiler_.fractionType()) return ensureFraction(reg, fromType);
     if (toType == compiler_.floatType()) return ensureFloat(reg, fromType);
     if (toType == compiler_.complexType()) return ensureComplex(reg, fromType);

@@ -795,6 +795,7 @@ ASTPtr Parser::parseStructDecl() {
     }
 
     expect(TokenKind::RBrace, "Expected '}' after struct fields");
+    match(TokenKind::Semicolon); // optional trailing semicolon
 
     auto decl = std::make_unique<StructDeclNode>(start, name.text, std::move(typeParams), std::move(fields));
     decl->whereConstraints = std::move(whereConstraints);
@@ -864,6 +865,7 @@ ASTPtr Parser::parseUnionDecl() {
     }
 
     expect(TokenKind::RBrace, "Expected '}' after enum cases");
+    match(TokenKind::Semicolon); // optional trailing semicolon
 
     auto decl = std::make_unique<UnionDeclNode>(start, name.text, std::move(typeParams), std::move(cases));
     decl->whereConstraints = std::move(whereConstraints);

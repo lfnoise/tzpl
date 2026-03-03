@@ -6556,6 +6556,16 @@ bool TypeChecker::isAssignable(Type* from, Type* to) const {
     if (fromRank >= 0 && fromRank <= 4 && toRank >= 0 && toRank <= 4) {
         return fromRank <= toRank;
     }
+    // Simple enum -> Int coercion (enums with only nullary cases)
+    if (to == compiler_.intType()) {
+        if (auto* enumType = dynamic_cast<EnumType*>(from)) {
+            bool allNullary = true;
+            for (auto const& c : enumType->cases_) {
+                if (c.type != compiler_.voidType()) { allNullary = false; break; }
+            }
+            if (allNullary) return true;
+        }
+    }
     // Tuple element-wise assignability
     auto* fromTuple = dynamic_cast<TupleType*>(from);
     auto* toTuple = dynamic_cast<TupleType*>(to);

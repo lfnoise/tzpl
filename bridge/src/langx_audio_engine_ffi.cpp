@@ -9,6 +9,8 @@
 #include "langx_audio_engine_ffi.hpp"
 #include "langx.hpp"
 #include "jscs_client_interface.hpp"
+#include <thread>
+#include <chrono>
 
 // Both langx and audio-engine define i64/f64/etc. in different ways.
 // audio-engine: namespace engine { using i64 = long; }
@@ -70,6 +72,13 @@ static void ffi_masterGain(ts::VM& vm, u16 dst, u16, u16 argBase) {
 static void ffi_safetyLimiter(ts::VM& vm, u16 dst, u16, u16 argBase) {
     engine::Enable en = vm.reg(argBase).i ? engine::kOn : engine::kOff;
     engine::safetyLimiter(getEngine(vm), en);
+}
+
+// fn sleep(seconds: Float) -> Void
+// Blocking sleep — NRT only.  Will be replaced by a proper event scheduler.
+static void ffi_sleep(ts::VM& vm, u16, u16, u16 argBase) {
+    f64 seconds = vm.reg(argBase).f;
+    std::this_thread::sleep_for(std::chrono::duration<double>(seconds));
 }
 
 // ---------------------------------------------------------------------------
@@ -222,10 +231,11 @@ static void ffi_replaceNode(ts::VM& vm, u16 dst, u16, u16 argBase) {
 
 // fn setInput(nodeID: Int, portIndex: Int, value: Float) -> Int
 // Convenience: sets a single float value on an input port.
+// Passes as f32 to match the audio-engine's native sample type.
 static void ffi_setInput(ts::VM& vm, u16 dst, u16, u16 argBase) {
     engine::PortAddr port{static_cast<engine::i64>(vm.reg(argBase).i),
                           static_cast<int>(vm.reg(argBase + 1).i)};
-    engine::f64 val = vm.reg(argBase + 2).f;
+    engine::f32 val = static_cast<engine::f32>(vm.reg(argBase + 2).f);
     returnErr(vm, dst, engine::setInput(port, 1, &val));
 }
 
@@ -234,7 +244,7 @@ static void ffi_setInput(ts::VM& vm, u16 dst, u16, u16 argBase) {
 static void ffi_setInputX(ts::VM& vm, u16 dst, u16, u16 argBase) {
     engine::PortAddr port{static_cast<engine::i64>(vm.reg(argBase).i),
                           static_cast<int>(vm.reg(argBase + 1).i)};
-    engine::f64 val = vm.reg(argBase + 2).f;
+    engine::f32 val = static_cast<engine::f32>(vm.reg(argBase + 2).f);
     f64 xfade = vm.reg(argBase + 3).f;
     auto curve = static_cast<engine::FadeCurve>(vm.reg(argBase + 4).i);
     returnErr(vm, dst, engine::setInput(port, 1, &val, xfade, curve));
@@ -245,7 +255,7 @@ static void ffi_setInputX(ts::VM& vm, u16 dst, u16, u16 argBase) {
 static void ffi_setControl(ts::VM& vm, u16 dst, u16, u16 argBase) {
     auto nodeID = static_cast<engine::i64>(vm.reg(argBase).i);
     auto controlID = static_cast<engine::i64>(vm.reg(argBase + 1).i);
-    engine::f64 val = vm.reg(argBase + 2).f;
+    engine::f32 val = static_cast<engine::f32>(vm.reg(argBase + 2).f);
     returnErr(vm, dst, engine::setControl(nodeID, controlID, 1, &val));
 }
 
@@ -292,57 +302,31 @@ static void ffi_allNotesOff(ts::VM& vm, u16 dst, u16, u16 argBase) {
     returnErr(vm, dst, engine::allNotesOff(nodeID));
 }
 
-// ---------------------------------------------------------------------------
-// Scheduling policy constants
-// ---------------------------------------------------------------------------
+// fn noteSetParams(nodeID: Int, noteID: Int, firstParam: Int,
+//                  values: Array[Float]) -> Int
+static void ffi_noteSetParams(ts::VM& vm, u16 dst, u16, u16 argBase) {
+    auto nodeID = static_cast<engine::i64>(vm.reg(argBase).i);
+    int noteID = static_cast<int>(vm.reg(argBase + 1).i);
+    int first  = static_cast<int>(vm.reg(argBase + 2).i);
 
-// fn schedImmediate() -> Int
-static void ffi_schedImmediate(ts::VM& vm, u16 dst, u16, u16) {
-    vm.reg(dst).i = engine::schedImmediate;
+    auto* arr = vm.reg(argBase + 3).o;
+    int length = static_cast<int>(ts::arraySize(arr));
+
+    constexpr int kMaxStackParams = 64;
+    engine::f32 stackBuf[kMaxStackParams];
+    engine::f32* params = stackBuf;
+    std::unique_ptr<engine::f32[]> heapBuf;
+    if (length > kMaxStackParams) {
+        heapBuf = std::make_unique<engine::f32[]>(length);
+        params = heapBuf.get();
+    }
+    for (int i = 0; i < length; ++i) {
+        params[i] = static_cast<engine::f32>(ts::arrayGetFloat(arr, i));
+    }
+
+    returnErr(vm, dst, engine::noteSetParamRange(nodeID, noteID, first, length, params));
 }
 
-// fn schedBetterLateThanNever() -> Int
-static void ffi_schedBetterLateThanNever(ts::VM& vm, u16 dst, u16, u16) {
-    vm.reg(dst).i = engine::schedBetterLateThanNever;
-}
-
-// fn schedOnTimeOnly() -> Int
-static void ffi_schedOnTimeOnly(ts::VM& vm, u16 dst, u16, u16) {
-    vm.reg(dst).i = engine::schedOnTimeOnly;
-}
-
-// ---------------------------------------------------------------------------
-// Fade curve constants
-// ---------------------------------------------------------------------------
-
-// fn fadeLinear() -> Int
-static void ffi_fadeLinear(ts::VM& vm, u16 dst, u16, u16) {
-    vm.reg(dst).i = engine::fadeLinear;
-}
-
-// fn fadeExponential() -> Int
-static void ffi_fadeExponential(ts::VM& vm, u16 dst, u16, u16) {
-    vm.reg(dst).i = engine::fadeExponential;
-}
-
-// fn fadeSmoothstep() -> Int
-static void ffi_fadeSmoothstep(ts::VM& vm, u16 dst, u16, u16) {
-    vm.reg(dst).i = engine::fadeSmoothstep;
-}
-
-// fn fadeEqualPower() -> Int
-static void ffi_fadeEqualPower(ts::VM& vm, u16 dst, u16, u16) {
-    vm.reg(dst).i = engine::fadeEqualPower;
-}
-
-// ---------------------------------------------------------------------------
-// Error code constants
-// ---------------------------------------------------------------------------
-
-// fn errNone() -> Int
-static void ffi_errNone(ts::VM& vm, u16 dst, u16, u16) {
-    vm.reg(dst).i = jscs_errNone;
-}
 
 // ---------------------------------------------------------------------------
 // Registration
@@ -376,6 +360,9 @@ void registerAudioEngineFFI(ts::Compiler& compiler) {
     reg("getStreamTime",    Float, {},             ffi_getStreamTime);
     reg("masterGain",       Void, {Float},         ffi_masterGain);
     reg("safetyLimiter",    Void, {Bool},          ffi_safetyLimiter);
+
+    // Blocking sleep (NRT only — temporary, will be replaced by a scheduler)
+    reg("sleep",            Void, {Float},         ffi_sleep);
 
     // Plugin loading (NRT only)
     reg("loadPlugins",      Bool, {String},                ffi_loadPlugins);
@@ -412,18 +399,11 @@ void registerAudioEngineFFI(ts::Compiler& compiler) {
     reg("noteOff",          Int, {Int, Int},              ffi_noteOff,      true);
     reg("allNotesOff",      Int, {Int},                   ffi_allNotesOff,  true);
 
-    // Scheduling policy constants (pure, rtSafe)
-    auto regConst = [&](const char* name, R fn) {
-        compiler.registerForeignFunction(name, Int, {}, fn, /*pure=*/true, /*rtSafe=*/true);
-    };
-    regConst("schedImmediate",          ffi_schedImmediate);
-    regConst("schedBetterLateThanNever", ffi_schedBetterLateThanNever);
-    regConst("schedOnTimeOnly",         ffi_schedOnTimeOnly);
-    regConst("fadeLinear",              ffi_fadeLinear);
-    regConst("fadeExponential",         ffi_fadeExponential);
-    regConst("fadeSmoothstep",          ffi_fadeSmoothstep);
-    regConst("fadeEqualPower",          ffi_fadeEqualPower);
-    regConst("errNone",                 ffi_errNone);
+    reg("noteSetParams",    Int, {Int, Int, Int, FloatArray}, ffi_noteSetParams, true);
+
+    // Enum constants (SchedPolicy, FadeCurve, Err, Enable) are now defined
+    // in the Language X module: bridge/modules/audio_engine.x
+    // Use `import audio_engine.*;` and `ordinal(EnumType.value)` in scripts.
 }
 
 void setEngineOnVM(void* vm_ptr, engine::Engine* engine) {

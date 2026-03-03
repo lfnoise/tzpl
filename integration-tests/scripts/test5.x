@@ -1,0 +1,41 @@
+-- test5: Fan-out test
+import audio_engine.*;
+
+println("--- test5 ---------------------------------");
+
+engineStart();
+println(isAudioRunning());
+
+sleep(1.0);
+
+println("create graph A");
+begin(0);
+newNode("sinosc", 101);
+newNode("+", 102);
+setInput(101, 0, 240.0);
+setInputX(101, 1, 0.15, 0.2, FadeCurve.fadeLinear);
+connect(101, 0, 102, 0);
+connect(102, 0, 0, 0);
+go();
+
+sleep(1.0);
+
+println("test fan out");
+for (i : (0..3)) {
+    begin(0);
+    connectX(101, 0, 102, 1, 0.3, FadeCurve.fadeLinear);
+    go();
+
+    sleep(0.4);
+
+    begin(0);
+    disconnectInputX(102, 1, 0.3, FadeCurve.fadeLinear);
+    go();
+
+    sleep(0.4);
+}
+
+sleep(2.0);
+
+println("stop");
+engineStop();

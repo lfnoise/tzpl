@@ -3,16 +3,19 @@
 //  integration-tests
 //
 //  Integration test for the audio-engine FFI bridge.
-//  Creates a Language X VM with registered engine FFI functions,
-//  compiles and executes Language X code that exercises the bindings.
+//  Runs both quick compilation tests and script-based audio tests.
 //
 
 #include "langx_audio_engine_ffi.hpp"
 #include "langx.hpp"
+#include "module_compiler.hpp"
 #include "jscs_client_interface.hpp"
+#include "jscs_test_plugins.hpp"
 #include <print>
 #include <cstdlib>
 #include <string_view>
+#include <fstream>
+#include <sstream>
 
 // ---------------------------------------------------------------------------
 // Test runner helpers
@@ -33,9 +36,10 @@ static void check(bool condition, std::string_view description) {
 
 // Compile and run a Language X source string. Returns true on compilation success.
 static bool compileAndRun(ts::Compiler& compiler, ts::VM& vm,
-                          const char* source, const char* testName) {
+                          const char* source, const char* testName,
+                          ts::ModuleCompiler* moduleCompiler = nullptr) {
     auto target = vm.target();
-    auto result = compiler.compile(source, testName, target);
+    auto result = compiler.compile(source, testName, target, moduleCompiler);
     if (!result.success) {
         std::print("  Compilation FAILED for '{}':\n", testName);
         for (auto& err : result.errors) {
@@ -49,31 +53,50 @@ static bool compileAndRun(ts::Compiler& compiler, ts::VM& vm,
     return true;
 }
 
+// Read a file from disk into a string.
+static std::string readFile(std::string const& path) {
+    std::ifstream file(path);
+    if (!file.is_open()) {
+        std::print("  Cannot open file: {}\n", path);
+        return "";
+    }
+    std::stringstream ss;
+    ss << file.rdbuf();
+    return ss.str();
+}
+
 // ---------------------------------------------------------------------------
-// Tests
+// Quick compilation / binding tests (no audio output)
 // ---------------------------------------------------------------------------
 
 static void test_constants() {
-    std::print("Test: FFI constants are accessible\n");
+    std::print("Test: Enum constants are accessible via module import\n");
 
     ts::TypeUniverse types;
     ts::Compiler compiler(types);
     bridge::registerAudioEngineFFI(compiler);
 
+    ts::ModuleCompiler moduleCompiler(compiler, {MODULES_DIR});
+
     auto target = compiler.createTarget();
     ts::VM vm(16 * 1024 * 1024, types, target);
 
     const char* source = R"(
-        let s1 = schedImmediate();
-        let s2 = schedBetterLateThanNever();
-        let s3 = schedOnTimeOnly();
-        let f1 = fadeLinear();
-        let f2 = fadeExponential();
-        let e0 = errNone();
+        import audio_engine.*;
+        let s1 = ordinal(SchedPolicy.schedImmediate);
+        let s2 = ordinal(SchedPolicy.schedBetterLateThanNever);
+        let s3 = ordinal(SchedPolicy.schedOnTimeOnly);
+        let f1 = ordinal(FadeCurve.fadeLinear);
+        let f2 = ordinal(FadeCurve.fadeExponential);
+        let f3 = ordinal(FadeCurve.fadeSmoothstep);
+        let f4 = ordinal(FadeCurve.fadeEaseInCubic);
+        let f5 = ordinal(FadeCurve.fadeEaseOutCubic);
+        let f6 = ordinal(FadeCurve.fadeOutIn);
+        let e0 = ordinal(Err.errNone);
     )";
 
-    bool ok = compileAndRun(compiler, vm, source, "constants.x");
-    check(ok, "Constants source compiles and runs");
+    bool ok = compileAndRun(compiler, vm, source, "constants.x", &moduleCompiler);
+    check(ok, "Enum constants compile and run via module import");
 }
 
 static void test_engine_lifecycle() {
@@ -254,18 +277,126 @@ static void test_master_gain() {
 }
 
 // ---------------------------------------------------------------------------
+// Script-based audio tests
+// ---------------------------------------------------------------------------
+
+struct ScriptTestConfig {
+    const char* scriptFile;
+    int numSilos;
+    double sampleRate;
+    int bufferFrames;
+    bool needSine;
+    bool needAdd;
+    bool needMul;
+    bool needVoicer;
+};
+
+static void runScriptTest(ScriptTestConfig const& cfg) {
+    std::string scriptDir = SCRIPTS_DIR;
+    std::string path = scriptDir + "/" + cfg.scriptFile;
+    std::print("\nTest: Running script {}\n", cfg.scriptFile);
+
+    std::string source = readFile(path);
+    if (source.empty()) {
+        check(false, std::string("Script loaded: ") + cfg.scriptFile);
+        return;
+    }
+    check(true, std::string("Script loaded: ") + cfg.scriptFile);
+
+    ts::TypeUniverse types;
+    ts::Compiler compiler(types);
+    bridge::registerAudioEngineFFI(compiler);
+
+    ts::ModuleCompiler moduleCompiler(compiler, {MODULES_DIR});
+
+    engine::AudioStreamParameters params{};
+    params.channels = 2;
+    params.bufferFrames = cfg.bufferFrames;
+    params.sampleRate = cfg.sampleRate;
+    params.deviceName = "default";
+    params.firstChannel = 0;
+
+    engine::EngineConfig config;
+    config.numSilos = cfg.numSilos;
+
+    engine::Engine* eng = engine::newEngine(config, params);
+    if (!eng) {
+        check(false, std::string("Engine created: ") + cfg.scriptFile);
+        return;
+    }
+
+    if (cfg.needSine)   engine::createSineNode(eng);
+    if (cfg.needAdd)    engine::createAddOpNode(eng);
+    if (cfg.needMul)    engine::createMulOpNode(eng);
+    if (cfg.needVoicer) engine::createVoicerTestNode(eng);
+
+    auto target = compiler.createTarget();
+    ts::VM vm(16 * 1024 * 1024, types, target);
+    bridge::setEngineOnVM(&vm, eng);
+
+    auto result = compiler.compile(source, cfg.scriptFile, target, &moduleCompiler);
+    if (!result.success) {
+        std::print("  Compilation FAILED for '{}':\n", cfg.scriptFile);
+        for (auto& err : result.errors) {
+            std::print("    {}\n", err.message);
+        }
+        check(false, std::string("Script compiles: ") + cfg.scriptFile);
+        engine::freeEngine(eng);
+        return;
+    }
+    check(true, std::string("Script compiles: ") + cfg.scriptFile);
+
+    vm.makeCurrent();
+    vm.install(result);
+    vm.execute(result.mainBlock);
+
+    check(true, std::string("Script executes: ") + cfg.scriptFile);
+    engine::freeEngine(eng);
+}
+
+static constexpr ScriptTestConfig kScriptTests[] = {
+    // scriptFile  silos  rate     buf  sine  add   mul   voicer
+    {"test0.x",     1,    48000.,  256, true, false, false, false},
+    {"test5.x",     1,    48000.,  256, true, true,  false, false},
+    {"test1.x",     2,    96000.,  256, true, true,  true,  false},
+    {"test2.x",     8,    96000.,  256, true, true,  false, false},
+    {"test4.x",    10,    48000.,  256, true, false, false, false},
+    {"test3.x",     1,    96000.,  256, false, false, false, true},
+};
+
+// ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
 
-int main() {
+int main(int argc, char const* argv[]) {
     std::print("=== Audio Engine FFI Integration Tests ===\n\n");
 
+    // Quick compilation tests (no audio)
     test_constants();
     test_engine_lifecycle();
     test_command_bundling();
     test_type_checking();
     test_node_and_connect();
     test_master_gain();
+
+    // Script-based audio tests
+    std::print("\n=== Script-Based Audio Tests ===\n");
+
+    if (argc > 1) {
+        // Run a specific script by name
+        std::string_view requested = argv[1];
+        for (auto const& cfg : kScriptTests) {
+            if (requested == cfg.scriptFile) {
+                runScriptTest(cfg);
+                break;
+            }
+        }
+    } else {
+        // Run all scripts in order
+        for (auto const& cfg : kScriptTests) {
+            runScriptTest(cfg);
+        }
+    }
 
     std::print("\n=== Results: {} passed, {} failed ===\n",
                gTestsPassed, gTestsFailed);
