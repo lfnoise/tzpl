@@ -86,7 +86,7 @@ void Parser::expectTerminator() {
     if (current_.kind == TokenKind::RBrace) {
         return;  // Block end is an implicit terminator
     }
-    // Don't error here - some contexts don't need terminators
+    error("Expected ';'");
 }
 
 void Parser::error(const std::string& msg) {

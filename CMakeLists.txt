@@ -10,6 +10,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 option(JSCS_BUILD_AUDIO_ENGINE      "Build the audio-engine library and executable"      ON)
 option(JSCS_BUILD_SYNTHDEF_COMPILER "Build the synthdef-compiler library and executable"  ON)
 option(JSCS_BUILD_LANG              "Build the static-lang-3 library and executable"      ON)
+option(JSCS_BUILD_BRIDGE            "Build the FFI bridge libraries"                      ON)
 option(JSCS_BUILD_APP               "Build the live coding application"                   OFF)
 option(JSCS_BUILD_TESTS             "Build integration tests"                             OFF)
 
@@ -30,6 +31,10 @@ endif()
 
 if(JSCS_BUILD_SYNTHDEF_COMPILER)
     add_subdirectory(synthdef-compiler)
+endif()
+
+if(JSCS_BUILD_BRIDGE AND JSCS_BUILD_LANG AND JSCS_BUILD_AUDIO_ENGINE)
+    add_subdirectory(bridge)
 endif()
 
 if(JSCS_BUILD_APP AND EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/app/CMakeLists.txt)

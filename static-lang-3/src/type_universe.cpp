@@ -14,16 +14,36 @@ namespace ts {
 // Forward declare the thread-local that TypeUniverse needs to manage
 extern thread_local TypeUniverse* gCurrentTypeUniverse;
 
+// RAII guard: sets the thread-local state needed for type creation,
+// then restores all previous values. Type constructors read
+// gCurrentTypeUniverse, and GCObj::operator new uses gCurrentAllocator
+// (nullptr = system malloc, which is what we want for interned types).
+struct TypeCreationScope {
+    TypeUniverse* savedTU_;
+    VM* savedVM_;
+    rt::TLSFAllocator* savedAlloc_;
+    explicit TypeCreationScope(TypeUniverse* self)
+        : savedTU_(gCurrentTypeUniverse)
+        , savedVM_(gCurrentVM)
+        , savedAlloc_(rt::gCurrentAllocator)
+    {
+        gCurrentTypeUniverse = self;
+        gCurrentVM = nullptr;
+        rt::gCurrentAllocator = nullptr;
+    }
+    ~TypeCreationScope() {
+        gCurrentTypeUniverse = savedTU_;
+        gCurrentVM = savedVM_;
+        rt::gCurrentAllocator = savedAlloc_;
+    }
+    TypeCreationScope(const TypeCreationScope&) = delete;
+    TypeCreationScope& operator=(const TypeCreationScope&) = delete;
+};
+
 TypeUniverse::TypeUniverse() {
     // Ensure no VM allocator is active during type creation —
     // all types will be system-allocated (malloc).
-    auto* savedAllocator = rt::gCurrentAllocator;
-    auto* savedVM = gCurrentVM;
-    auto* savedTypeUniverse = gCurrentTypeUniverse;
-
-    rt::gCurrentAllocator = nullptr;
-    gCurrentVM = nullptr;
-    gCurrentTypeUniverse = this;
+    TypeCreationScope scope(this);
 
     // Bootstrap typeType: allocate raw memory, pre-set the pointer,
     // then placement-new so the constructor can find typeType.
@@ -58,15 +78,13 @@ TypeUniverse::TypeUniverse() {
     syms_.some = intern("some");
     syms_.none = intern("none");
 
-    // Restore previous state
-    rt::gCurrentAllocator = savedAllocator;
-    gCurrentVM = savedVM;
-    gCurrentTypeUniverse = savedTypeUniverse;
+    // TypeCreationScope destructor restores all thread-locals
 }
 
 ArrayType* TypeUniverse::arrayType(Type* elemType) {
     auto it = arrayTypeCache_.find(elemType);
     if (it != arrayTypeCache_.end()) return it->second;
+    TypeCreationScope scope(this);
     auto* t = new ArrayType(elemType);
     arrayTypeCache_[elemType] = t;
     return t;
@@ -75,6 +93,7 @@ ArrayType* TypeUniverse::arrayType(Type* elemType) {
 ListType* TypeUniverse::listType(Type* elemType) {
     auto it = listTypeCache_.find(elemType);
     if (it != listTypeCache_.end()) return it->second;
+    TypeCreationScope scope(this);
     auto* t = new ListType(elemType);
     listTypeCache_[elemType] = t;
     return t;
@@ -83,6 +102,7 @@ ListType* TypeUniverse::listType(Type* elemType) {
 RangeType* TypeUniverse::rangeType(Type* elemType) {
     auto it = rangeTypeCache_.find(elemType);
     if (it != rangeTypeCache_.end()) return it->second;
+    TypeCreationScope scope(this);
     auto* t = new RangeType(elemType);
     rangeTypeCache_[elemType] = t;
     return t;
@@ -91,6 +111,7 @@ RangeType* TypeUniverse::rangeType(Type* elemType) {
 RefType* TypeUniverse::refType(Type* elemType) {
     auto it = refTypeCache_.find(elemType);
     if (it != refTypeCache_.end()) return it->second;
+    TypeCreationScope scope(this);
     auto* t = new RefType(elemType);
     refTypeCache_[elemType] = t;
     return t;
@@ -101,6 +122,7 @@ TupleType* TypeUniverse::tupleType(Type* const* fields, size_t count) {
     auto it = tupleTypeCache_.find(key);
     if (it != tupleTypeCache_.end()) return it->second;
 
+    TypeCreationScope scope(this);
     // Build the TypeVec for the TupleType constructor
     auto alloc = rt::STLAllocator<Type*>{rt::gCurrentAllocator};
     TypeVec tv{alloc};
@@ -114,6 +136,7 @@ MapType* TypeUniverse::mapType(Type* keyType, Type* valueType) {
     auto key = std::make_pair(keyType, valueType);
     auto it = mapTypeCache_.find(key);
     if (it != mapTypeCache_.end()) return it->second;
+    TypeCreationScope scope(this);
     auto* t = new MapType(keyType, valueType);
     mapTypeCache_[key] = t;
     return t;
@@ -122,6 +145,7 @@ MapType* TypeUniverse::mapType(Type* keyType, Type* valueType) {
 SetType* TypeUniverse::setType(Type* elemType) {
     auto it = setTypeCache_.find(elemType);
     if (it != setTypeCache_.end()) return it->second;
+    TypeCreationScope scope(this);
     auto* t = new SetType(elemType);
     setTypeCache_[elemType] = t;
     return t;
@@ -131,6 +155,7 @@ EnumType* TypeUniverse::optionType(Type* elemType) {
     auto it = optionTypeCache_.find(elemType);
     if (it != optionTypeCache_.end()) return it->second;
 
+    TypeCreationScope scope(this);
     // Build cases: [some(elemType), none(Void)]
     auto alloc = rt::STLAllocator<NameTypePair>{rt::gCurrentAllocator};
     NameTypePairVec cases{alloc};
@@ -151,6 +176,7 @@ EnumType* TypeUniverse::optionType(Type* elemType) {
 CoroutineType* TypeUniverse::coroutineType(Type* yieldType) {
     auto it = coroutineTypeCache_.find(yieldType);
     if (it != coroutineTypeCache_.end()) return it->second;
+    TypeCreationScope scope(this);
     auto* t = new CoroutineType(yieldType);
     coroutineTypeCache_[yieldType] = t;
     return t;
@@ -166,6 +192,7 @@ FunctionType* TypeUniverse::functionType(Type* const* argTypes, size_t argCount,
     auto it = functionTypeCache_.find(key);
     if (it != functionTypeCache_.end()) return it->second;
 
+    TypeCreationScope scope(this);
     auto alloc = rt::STLAllocator<Type*>{rt::gCurrentAllocator};
     TypeVec tv{alloc};
     for (size_t i = 0; i < argCount; ++i) tv.push_back(argTypes[i]);

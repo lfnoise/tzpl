@@ -143,37 +143,37 @@ Define a set of Language X functions that map to audio-engine commands. These ar
 **Proposed API surface** (Language X syntax):
 
 ```
-// Engine lifecycle
-fn engineStart() -> Void
-fn engineStop() -> Void
+-- Engine lifecycle
+fn engineStart() Void;
+fn engineStop() Void;
 
-// Plugin management
-fn loadPlugins(path: String) -> Void
-fn loadPlugin(path: String, name: String) -> Void
+-- Plugin management
+fn loadPlugins(path String) Void;
+fn loadPlugin(path String, name String) Void;
 
-// Node operations
-fn newNode(defName: String, nodeID: Int) -> Void
-fn freeNode(nodeID: Int) -> Void
-fn freeAllNodes() -> Void
+-- Node operations
+fn newNode(defName String, nodeID Int) Void;
+fn freeNode(nodeID Int) Void;
+fn freeAllNodes() Void;
 
-// Connections
-fn connect(srcNode: Int, srcPort: Int, dstNode: Int, dstPort: Int) -> Void
-fn connectX(srcNode: Int, srcPort: Int, dstNode: Int, dstPort: Int, xfade: Float, curve: Int) -> Void
-fn disconnect(dstNode: Int, dstPort: Int) -> Void
+-- Connections
+fn connect(srcNode Int, srcPort Int, dstNode Int, dstPort Int) Void;
+fn connectX(srcNode Int, srcPort Int, dstNode Int, dstPort Int, xfade Float, curve Int) Void;
+fn disconnect(dstNode Int, dstPort Int) Void;
 
-// Parameter control
-fn setInput(nodeID: Int, portIndex: Int, value: Float) -> Void
-fn setControl(nodeID: Int, controlID: Int, value: Float) -> Void
+-- Parameter control
+fn setInput(nodeID Int, portIndex Int, value Float) Void;
+fn setControl(nodeID Int, controlID Int, value Float) Void;
 
-// Scheduling
-fn bundle() -> Void          // begin command bundle
-fn send() -> Void            // send bundle immediately
-fn sched(time: Float) -> Void // schedule bundle at time
+-- Scheduling
+fn bundle() Void;          -- begin command bundle
+fn send() Void;            -- send bundle immediately
+fn sched(time Float) Void; -- schedule bundle at time
 
-// Notes
-fn noteOn(nodeID: Int, noteID: Int, params: Array[Float]) -> Void
-fn noteOff(nodeID: Int, noteID: Int) -> Void
-fn allNotesOff(nodeID: Int) -> Void
+-- Notes
+fn noteOn(nodeID Int, noteID Int, params Array[Float]) Void;
+fn noteOff(nodeID Int, noteID Int) Void;
+fn allNotesOff(nodeID Int) Void;
 ```
 
 ### 2.2 Implement the FFI bridge
@@ -201,14 +201,14 @@ fn allNotesOff(nodeID: Int) -> Void
 ### 3.1 Design the language-side synthdef API
 
 ```
-// Compile a synthdef from s-expression text
-fn compileSynthDef(name: String, sexpr: String) -> Void
+-- Compile a synthdef from s-expression text
+fn compileSynthDef(name String, sexpr String) Void;
 
-// Compile and load into running engine
-fn compileSynthDefAndLoad(name: String, sexpr: String) -> Void
+-- Compile and load into running engine
+fn compileSynthDefAndLoad(name String, sexpr String) Void;
 
-// Query available synthdefs
-fn listSynthDefs() -> Array[String]
+-- Query available synthdefs
+fn listSynthDefs() Array[String];
 ```
 
 ### 3.2 Implement the FFI bridge
@@ -311,7 +311,7 @@ Recommendation: **oscpack** or a minimal custom implementation to avoid external
 
 **Tasks**:
 1. Add OSC send capability as Language X built-in functions.
-2. `fn oscSend(host: String, port: Int, address: String, args: Array[Any]) -> Void`
+2. `fn oscSend(host String, port Int, address String, args Array[Any]) Void;`
 
 ---
 
@@ -329,7 +329,7 @@ Recommendation: **oscpack** or a minimal custom implementation to avoid external
 ### 6.2 NATS for Language X
 
 **Tasks**:
-1. Add `fn natsPub(subject: String, data: String) -> Void` as FFI function.
+1. Add `fn natsPub(subject String, data String) Void;` as FFI function.
 2. Add NATS subscription support: incoming messages trigger VM events.
 
 ### 6.3 NATS for distributed engines
