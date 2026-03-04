@@ -212,6 +212,13 @@ void TypeChecker::check(Program& program) {
         }
     }
 
+    // Desugar constraint-as-param-type sugar before function registration
+    for (auto& item : program.items) {
+        if (item->kind == ASTNode::FnDecl) {
+            desugarConstraintParams(static_cast<FnDeclNode*>(item.get()));
+        }
+    }
+
     // Register all function declarations at global scope
     for (auto& item : program.items) {
         if (item->kind == ASTNode::FnDecl) {
@@ -410,6 +417,13 @@ void TypeChecker::checkREPLInput(Program& program) {
     for (auto& item : program.items) {
         if (item->kind == ASTNode::ConstraintDecl) {
             checkConstraintDecl(static_cast<ConstraintDeclNode*>(item.get()));
+        }
+    }
+
+    // Desugar constraint-as-param-type sugar before function registration
+    for (auto& item : program.items) {
+        if (item->kind == ASTNode::FnDecl) {
+            desugarConstraintParams(static_cast<FnDeclNode*>(item.get()));
         }
     }
 
@@ -5963,6 +5977,50 @@ Type* TypeChecker::resolveTypeAlias(const std::string& name,
 }
 
 // --- Constraint checking ---
+
+// Desugar constraint names used directly as parameter types into fresh type params.
+// e.g. fn foo(a AsSignal, b AsSignal) Signal
+//   => fn foo<__T0: AsSignal, __T1: AsSignal>(a __T0, b __T1) Signal
+void TypeChecker::desugarConstraintParams(FnDeclNode* decl) {
+    static const std::set<std::string> builtinTypeNames = {
+        "Int", "Float", "String", "Bool", "Symbol", "Void", "Fraction", "Complex", "Any"
+    };
+
+    int genCounter = 0;
+    for (auto& param : decl->params) {
+        if (!param.typeExpr) continue;
+        if (param.typeExpr->kind != ASTNode::NamedType) continue;
+
+        auto* named = static_cast<NamedTypeNode*>(param.typeExpr.get());
+
+        // Only desugar if name is a known constraint
+        if (constraints_.count(named->name) == 0) continue;
+
+        // Don't desugar if name is also a concrete type (built-in, struct, enum, alias)
+        if (builtinTypeNames.count(named->name)) continue;
+        if (structTypes_.count(named->name)) continue;
+        if (enumTypes_.count(named->name)) continue;
+        if (typeAliases_.count(named->name)) continue;
+
+        // Don't desugar if name is already a type parameter of this function
+        bool isTypeParam = false;
+        for (auto& tp : decl->typeParams) {
+            if (tp == named->name) { isTypeParam = true; break; }
+        }
+        if (isTypeParam) continue;
+
+        // Generate a fresh type parameter name
+        std::string constraintName = named->name;
+        std::string typeParamName = "__T" + std::to_string(genCounter++);
+
+        decl->typeParams.push_back(typeParamName);
+        decl->whereConstraints.push_back(
+            WhereConstraint{typeParamName, constraintName, param.loc});
+
+        // Replace the param type with the generated type parameter
+        named->name = typeParamName;
+    }
+}
 
 void TypeChecker::checkConstraintDecl(ConstraintDeclNode* decl) {
     if (constraints_.count(decl->name)) {

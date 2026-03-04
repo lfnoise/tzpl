@@ -2130,6 +2130,30 @@ y isNone println;              <span class="cmt">-- true</span>
     <span class="cmt">-- ...</span>
 }</code></pre>
 
+<p><strong>Constraint as parameter type</strong> &mdash; use a constraint name directly as a
+   parameter type. Each occurrence generates its own type parameter, so
+   different arguments may have different concrete types:</p>
+<pre><code><span class="cmt">-- Using a constraint name as a parameter type:</span>
+<span class="kw">fn</span> show(x Numeric) <span class="kw">String</span> = toString(x);
+
+<span class="cmt">-- The above is sugar for:</span>
+<span class="cmt">-- fn show&lt;__T0: Numeric&gt;(x __T0) String = toString(x);</span>
+
+<span class="cmt">-- Each parameter gets its own type parameter, so mixed types are allowed:</span>
+<span class="kw">fn</span> show_both(a Numeric, b Numeric) <span class="kw">String</span> = toString(a) $ <span class="str">" "</span> $ toString(b);
+
+show_both(<span class="num">1</span>, <span class="num">2</span>) println;      <span class="cmt">-- "1 2"</span>
+show_both(<span class="num">1</span>, <span class="num">2.5</span>) println;    <span class="cmt">-- "1 2.5"  (Int and Float are both Numeric)</span>
+
+<span class="cmt">-- To require both arguments to be the same type, use explicit generics:</span>
+<span class="kw">fn</span> add&lt;T: Numeric&gt;(a T, b T) T = a + b;
+
+<span class="cmt">-- Constraint sugar can be mixed with explicit type parameters:</span>
+<span class="kw">fn</span> mixed&lt;T: Numeric&gt;(a T, b Addable) <span class="kw">String</span> = toString(a);
+
+<span class="cmt">-- And with concrete types:</span>
+<span class="kw">fn</span> label(x Numeric, s <span class="kw">String</span>) <span class="kw">String</span> = s;</code></pre>
+
 <h4>Constraints on Structs, Enums, and Type Aliases</h4>
 <p>Constraints can be placed on any templated declaration, not just functions.</p>
 <pre><code><span class="cmt">-- Struct with constrained type parameter</span>

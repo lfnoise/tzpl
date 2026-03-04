@@ -268,6 +268,9 @@ private:
     void declareVar(const std::string& name, Type* type, bool isMutable);
     VarInfo* lookupVar(const std::string& name);
 
+    // Desugar constraint-as-param-type: fn foo(a C) => fn foo<__T0: C>(a __T0)
+    void desugarConstraintParams(FnDeclNode* decl);
+
     // Check nodes
     void checkNode(ASTNode* node);
     void checkBlock(BlockStmt* block);
