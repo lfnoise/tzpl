@@ -66,7 +66,7 @@ fn intToFloat(o NumType) NumType {
 }
 
 fn commonType(a NumType, b NumType) NumType {
-	if (a to64bits || b is64bits) {
+	if (a is64bits || b is64bits) {
 		a isFloat || b isFloat ? FLOAT64 : INT64
 	} else {
 		a isFloat || b isFloat ? FLOAT32 : INT32
@@ -118,6 +118,24 @@ struct ControlSpec {
 }
 
 ---------------------------------------------------------------------------
+-- SignalExpr
+
+
+type ID = Int;
+
+struct SignalExpr {
+	id ID,
+	ins [SignalExpr],
+	kind SignalExprKind,
+}
+
+constraint BasicValues = Bool | Int | Fraction | Float ;
+constraint AsConstantSignal = BasicValues | [BasicValues] ;
+constraint AsSignal = SignalExpr | AsConstantSignal ;
+
+type S = SignalExpr;
+
+---------------------------------------------------------------------------
 -- SynthContext
 
 ---------------------------------------------------------------------------
@@ -128,89 +146,114 @@ struct SignalGraph {
 	delays [DelayVar],
 	root SignalExpr,
 }
+
 ---------------------------------------------------------------------------
 -- Signal expressions
 
-type ID = Int;
+var _curGraphExprs [SignalExpr] = [];
+var _curGraphDelays [DelayVar] = [];
+var _exprIds = 0;
+var _delayVarIds = 0;
 
-struct SignalExpr {
-	id ID,
-	ins [SignalExpr],
-	kind SignalExprKind,
-}
-
-var curGraphExprs [SignalExpr] = [];
-var curGraphDelays [DelayVar] = [];
-var exprIds = 0;
-var delayVarIds = 0;
-
-fn nextExprId() ID {
-	let out = exprIds;
-	exprIds = exprIds + 1;
+fn _nextExprId() ID {
+	let out = _exprIds;
+	_exprIds = _exprIds + 1;
 	out
 }
 
-fn nextDelayVarId() ID {
-	let out = delayVarIds;
-	delayVarIds = delayVarIds + 1;
+fn _nextDelayVarId() ID {
+	let out = _delayVarIds;
+	_delayVarIds = _delayVarIds + 1;
 	out
 }
 
-fn addToGraph(expr SignalExpr) SignalExpr {
-	curGraphExprs = curGraphExprs push(expr);
+fn _addToGraph(expr S) S {
+	_curGraphExprs = _curGraphExprs push(expr);
 	expr
 }
 
-fn addToGraph(dv DelayVar) DelayVar {
-	curGraphDelays = curGraphDelays push(dv);
+fn _addToGraph(dv DelayVar) DelayVar {
+	_curGraphDelays = _curGraphDelays push(dv);
 	dv
 }
 
-fn newSignalExpr(kind SignalExprKind, ins [SignalExpr]) SignalExpr {
+fn _newSignalExpr(kind SignalExprKind, ins [S]) S {
 	SignalExpr {
-		id: nextExprId(),
+		id: _nextExprId(),
 		ins: ins,
 		kind: kind,
-	} addToGraph
+	} _addToGraph
 }
 
-fn newSignalExpr(kind SignalExprKind) SignalExpr {
-	kind newSignalExpr([SignalExpr]())
+fn _newSignalExpr(kind SignalExprKind) S {
+	kind _newSignalExpr([S]())
+}
+
+fn delayVar() DelayVar {
+	DelayVar {
+		id: _nextDelayVarId(),
+		maxDelay: Option<S>.none,
+	} _addToGraph
+}
+
+fn delayVar(maxDelay AsSignal) DelayVar {
+	DelayVar {
+		id: _nextDelayVarId(),
+		maxDelay: Option<S>.some(maxDelay asSignal),
+	} _addToGraph
 }
 
 ---------------------------------------------------------------------------
 -- Constant scalars and matrices
 
 
-fn scalar(x Bool) SignalExpr {
-	SignalExprKind.int([x ? 1 : 0], ANY_NUM) newSignalExpr
+fn scalar(x Bool) S {
+	SignalExprKind.int([x toInt], ANY_NUM) _newSignalExpr
 }
-fn scalar(x Int) SignalExpr {
-	SignalExprKind.int([x], ANY_NUM) newSignalExpr
+fn scalar(x Int) S {
+	SignalExprKind.int([x], ANY_NUM) _newSignalExpr
 }
-fn scalar(x Float) SignalExpr {
-	SignalExprKind.float([x], x numType) newSignalExpr
+fn scalar(x Fraction) S {
+	let x = x toFloat;
+	SignalExprKind.float([x], x numType) _newSignalExpr
 }
-
-fn fill(chans Int, x Int) SignalExpr {
-	SignalExprKind.int(x repeat(chans asChans), ANY_NUM) newSignalExpr
-}
-fn fill(chans Int, x Float) SignalExpr {
-	SignalExprKind.float(x repeat(chans asChans), x numType) newSignalExpr
+fn scalar(x Float) S {
+	SignalExprKind.float([x], x numType) _newSignalExpr
 }
 
-fn vec(v [Int]) SignalExpr {
-	SignalExprKind.int(v, ANY_NUM) newSignalExpr
+fn fill(chans Int, x Int) S {
+	SignalExprKind.int(x repeat(chans asChans), ANY_NUM) _newSignalExpr
 }
-fn vec(v [Float]) SignalExpr {
-	SignalExprKind.float(v, ANY_FLOAT) newSignalExpr
+fn fill(chans Int, x Fraction) S {
+	SignalExprKind.float(x toFloat repeat(chans asChans), ANY_NUM) _newSignalExpr
+}
+fn fill(chans Int, x Float) S {
+	SignalExprKind.float(x repeat(chans asChans), x numType) _newSignalExpr
 }
 
-fn asSignal(x SignalExpr) SignalExpr = x;
-fn asSignal(x Int) SignalExpr = x scalar;
-fn asSignal(x Float) SignalExpr = x scalar;
-fn asSignal(x [Int]) SignalExpr = x vec;
-fn asSignal(x [Float]) SignalExpr = x vec;
+fn vec(v [Bool]) S {
+	SignalExprKind.int(v toInt, ANY_NUM) _newSignalExpr
+}
+fn vec(v [Int]) S {
+	SignalExprKind.int(v, ANY_NUM) _newSignalExpr
+}
+fn vec(v [Fraction]) S {
+	let v = v toFloat;
+	SignalExprKind.float(v, ANY_FLOAT) _newSignalExpr
+}
+fn vec(v [Float]) S {
+	SignalExprKind.float(v, ANY_FLOAT) _newSignalExpr
+}
+
+fn asSignal(x S) S = x;
+fn asSignal(x Bool) S = x scalar;
+fn asSignal(x Int) S = x scalar;
+fn asSignal(x Fraction) S = x scalar;
+fn asSignal(x Float) S = x scalar;
+fn asSignal(x [Bool]) S = x vec;
+fn asSignal(x [Int]) S = x vec;
+fn asSignal(x [Fraction]) S = x vec;
+fn asSignal(x [Float]) S = x vec;
 
 
 ---------------------------------------------------------------------------
@@ -329,7 +372,7 @@ struct SignalType {
 
 struct DelayVar {
 	id ID,
-	maxDelay Option<SignalExpr>,
+	maxDelay Option<S>,
 }
 
 
@@ -363,358 +406,395 @@ enum SignalExprKind {
 }
 
 ---------------------------------------------------------------------------
--- SignalExpr composition functions
+-- Basic Units
 
-fn fs() SignalExpr {
-    SignalExprKind.sampleRate newSignalExpr
-}
-
-fn T() SignalExpr {
-    SignalExprKind.sampleDur newSignalExpr
+-- fs = sample rate
+fn fs() S {
+    SignalExprKind.sampleRate _newSignalExpr
 }
 
-fn inlet(typ NumType, chans Chans = 1, name String = "in") SignalExpr {
-    SignalExprKind.inlet(typ, chans asChans, name) newSignalExpr
+-- T = sample duration = 1/fs
+fn T() S {
+    SignalExprKind.sampleDur _newSignalExpr
 }
 
-fn outlet(a SignalExpr, name String = "out") SignalExpr {
-    SignalExprKind.outlet(name) newSignalExpr([a])
+fn inlet(typ NumType, chans Chans = 1, name String = "in") S {
+    SignalExprKind.inlet(typ, chans asChans, name) _newSignalExpr
 }
 
-fn control(name String, spec ControlSpec, chans Chans = 1) SignalExpr {
-    SignalExprKind.control(spec, chans asChans, name) newSignalExpr
+fn outlet(a S, name String = "out") S {
+    SignalExprKind.outlet(name) _newSignalExpr([a])
 }
 
-fn frand(lo Float, hi Float, chans Chans = 1, rate Rate = Rate.audio) SignalExpr {
-    SignalExprKind.random(RandOp.frand(lo, hi), rate, chans asChans) newSignalExpr
-}
-fn irand(lo Int, hi Int, chans Chans = 1, rate Rate = Rate.audio) SignalExpr {
-    SignalExprKind.random(RandOp.irand(lo, hi), rate, chans asChans) newSignalExpr
-}
-fn urand(chans Chans = 1, rate Rate = Rate.audio) SignalExpr {
-    SignalExprKind.random(RandOp.unipolar, rate, chans asChans) newSignalExpr
-}
-fn brand(chans Chans = 1, rate Rate = Rate.audio) SignalExpr {
-    SignalExprKind.random(RandOp.bipolar, rate, chans asChans) newSignalExpr
-}
-fn rand64(chans Chans = 1, rate Rate = Rate.audio) SignalExpr {
-    SignalExprKind.random(RandOp.bits, rate, chans asChans) newSignalExpr
+fn control(name String, spec ControlSpec, chans Chans = 1) S {
+    SignalExprKind.control(spec, chans asChans, name) _newSignalExpr
 }
 
-fn newUnaryOp(op UnaryOp, a) SignalExpr {
-    SignalExprKind.unop(op) newSignalExpr([a asSignal])
+---------------------------------------------------------------------------
+-- Random numbers
+
+fn frand(lo Float, hi Float, chans Chans = 1, rate Rate = Rate.audio) S {
+    SignalExprKind.random(RandOp.frand(lo, hi), rate, chans asChans) _newSignalExpr
+}
+fn irand(lo Int, hi Int, chans Chans = 1, rate Rate = Rate.audio) S {
+    SignalExprKind.random(RandOp.irand(lo, hi), rate, chans asChans) _newSignalExpr
+}
+fn urand(chans Chans = 1, rate Rate = Rate.audio) S {
+    SignalExprKind.random(RandOp.unipolar, rate, chans asChans) _newSignalExpr
+}
+fn brand(chans Chans = 1, rate Rate = Rate.audio) S {
+    SignalExprKind.random(RandOp.bipolar, rate, chans asChans) _newSignalExpr
+}
+fn rand64(chans Chans = 1, rate Rate = Rate.audio) S {
+    SignalExprKind.random(RandOp.bits, rate, chans asChans) _newSignalExpr
 }
 
-fn newBinaryOp(op BinaryOp, a, b) SignalExpr {
-    SignalExprKind.binop(op) newSignalExpr([a asSignal, b asSignal])
+---------------------------------------------------------------------------
+
+fn _newUnaryOp(op UnaryOp, a S) S {
+    SignalExprKind.unop(op) _newSignalExpr([a])
 }
 
-fn newCompareOp(op CompareOp, a, b) SignalExpr {
-    SignalExprKind.compareop(op) newSignalExpr([a asSignal, b asSignal])
+fn _newBinaryOp(op BinaryOp, a S, b S) S {
+    SignalExprKind.binop(op) _newSignalExpr([a, b])
 }
 
-fn newCastOp(op CastOp, a) SignalExpr {
-    SignalExprKind.castop(op) newSignalExpr([a asSignal])
+fn _newCompareOp(op CompareOp, a S, b S) S {
+    SignalExprKind.compareop(op) _newSignalExpr([a, b])
+}
+
+fn _newCastOp(op CastOp, a S) S {
+    SignalExprKind.castop(op) _newSignalExpr([a])
 }
 
 ---------------------------------------------------------------------------
 -- Unary Signal Operators
 
-fn - (a SignalExpr) SignalExpr = UnaryOp.neg newUnaryOp(a);
-fn ! (a SignalExpr) SignalExpr = UnaryOp.not newUnaryOp(a);
-fn ~ (a SignalExpr) SignalExpr = UnaryOp.bitNot newUnaryOp(a);
+fn - (a S) S = UnaryOp.neg _newUnaryOp(a);
+fn ! (a S) S = UnaryOp.not _newUnaryOp(a);
+fn ~ (a S) S = UnaryOp.bitNot _newUnaryOp(a);
 
-fn abs (a SignalExpr) SignalExpr = UnaryOp.abs newUnaryOp(a);
+fn abs (a S) S = UnaryOp.abs _newUnaryOp(a);
 
-fn sign (a SignalExpr) SignalExpr = UnaryOp.sign newUnaryOp(a);
-fn floor (a SignalExpr) SignalExpr = UnaryOp.floor newUnaryOp(a);
-fn ceil (a SignalExpr) SignalExpr = UnaryOp.ceil newUnaryOp(a);
-fn trunc (a SignalExpr) SignalExpr = UnaryOp.trunc newUnaryOp(a);
-fn round (a SignalExpr) SignalExpr = UnaryOp.round newUnaryOp(a);
+fn sign (a S) S = UnaryOp.sign _newUnaryOp(a);
+fn floor (a S) S = UnaryOp.floor _newUnaryOp(a);
+fn ceil (a S) S = UnaryOp.ceil _newUnaryOp(a);
+fn trunc (a S) S = UnaryOp.trunc _newUnaryOp(a);
+fn round (a S) S = UnaryOp.round _newUnaryOp(a);
 
-fn sqrt (a SignalExpr) SignalExpr = UnaryOp.sqrt newUnaryOp(a);
-fn cbrt (a SignalExpr) SignalExpr = UnaryOp.cbrt newUnaryOp(a);
+fn sqrt (a S) S = UnaryOp.sqrt _newUnaryOp(a);
+fn cbrt (a S) S = UnaryOp.cbrt _newUnaryOp(a);
 
-fn log (a SignalExpr) SignalExpr = UnaryOp.log newUnaryOp(a);
-fn log2 (a SignalExpr) SignalExpr = UnaryOp.log2 newUnaryOp(a);
-fn log10 (a SignalExpr) SignalExpr = UnaryOp.log10 newUnaryOp(a);
-fn log1p (a SignalExpr) SignalExpr = UnaryOp.log1p newUnaryOp(a);
+fn log (a S) S = UnaryOp.log _newUnaryOp(a);
+fn log2 (a S) S = UnaryOp.log2 _newUnaryOp(a);
+fn log10 (a S) S = UnaryOp.log10 _newUnaryOp(a);
+fn log1p (a S) S = UnaryOp.log1p _newUnaryOp(a);
 
-fn exp (a SignalExpr) SignalExpr = UnaryOp.exp newUnaryOp(a);
-fn exp2 (a SignalExpr) SignalExpr = UnaryOp.exp2 newUnaryOp(a);
-fn exp10 (a SignalExpr) SignalExpr = UnaryOp.exp10 newUnaryOp(a);
-fn expm1 (a SignalExpr) SignalExpr = UnaryOp.expm1 newUnaryOp(a);
+fn exp (a S) S = UnaryOp.exp _newUnaryOp(a);
+fn exp2 (a S) S = UnaryOp.exp2 _newUnaryOp(a);
+fn exp10 (a S) S = UnaryOp.exp10 _newUnaryOp(a);
+fn expm1 (a S) S = UnaryOp.expm1 _newUnaryOp(a);
 
-fn sin (a SignalExpr) SignalExpr = UnaryOp.sin newUnaryOp(a);
-fn cos (a SignalExpr) SignalExpr = UnaryOp.cos newUnaryOp(a);
-fn tan (a SignalExpr) SignalExpr = UnaryOp.tan newUnaryOp(a);
-fn asin (a SignalExpr) SignalExpr = UnaryOp.asin newUnaryOp(a);
-fn acos (a SignalExpr) SignalExpr = UnaryOp.acos newUnaryOp(a);
-fn atan (a SignalExpr) SignalExpr = UnaryOp.atan newUnaryOp(a);
+fn sin (a S) S = UnaryOp.sin _newUnaryOp(a);
+fn cos (a S) S = UnaryOp.cos _newUnaryOp(a);
+fn tan (a S) S = UnaryOp.tan _newUnaryOp(a);
+fn asin (a S) S = UnaryOp.asin _newUnaryOp(a);
+fn acos (a S) S = UnaryOp.acos _newUnaryOp(a);
+fn atan (a S) S = UnaryOp.atan _newUnaryOp(a);
 
-fn sinh (a SignalExpr) SignalExpr = UnaryOp.sinh newUnaryOp(a);
-fn cosh (a SignalExpr) SignalExpr = UnaryOp.cosh newUnaryOp(a);
-fn tanh (a SignalExpr) SignalExpr = UnaryOp.tanh newUnaryOp(a);
-fn asinh (a SignalExpr) SignalExpr = UnaryOp.asinh newUnaryOp(a);
-fn acosh (a SignalExpr) SignalExpr = UnaryOp.acosh newUnaryOp(a);
-fn atanh (a SignalExpr) SignalExpr = UnaryOp.atanh newUnaryOp(a);
+fn sinh (a S) S = UnaryOp.sinh _newUnaryOp(a);
+fn cosh (a S) S = UnaryOp.cosh _newUnaryOp(a);
+fn tanh (a S) S = UnaryOp.tanh _newUnaryOp(a);
+fn asinh (a S) S = UnaryOp.asinh _newUnaryOp(a);
+fn acosh (a S) S = UnaryOp.acosh _newUnaryOp(a);
+fn atanh (a S) S = UnaryOp.atanh _newUnaryOp(a);
 
-fn sinpi (a SignalExpr) SignalExpr = UnaryOp.sinpi newUnaryOp(a);
-fn cospi (a SignalExpr) SignalExpr = UnaryOp.cospi newUnaryOp(a);
-fn tanpi (a SignalExpr) SignalExpr = UnaryOp.tanpi newUnaryOp(a);
+fn sinpi (a S) S = UnaryOp.sinpi _newUnaryOp(a);
+fn cospi (a S) S = UnaryOp.cospi _newUnaryOp(a);
+fn tanpi (a S) S = UnaryOp.tanpi _newUnaryOp(a);
 
-fn lgamma (a SignalExpr) SignalExpr = UnaryOp.lgamma newUnaryOp(a);
-fn tgamma (a SignalExpr) SignalExpr = UnaryOp.tgamma newUnaryOp(a);
+fn lgamma (a S) S = UnaryOp.lgamma _newUnaryOp(a);
+fn tgamma (a S) S = UnaryOp.tgamma _newUnaryOp(a);
 
-fn erf (a SignalExpr) SignalExpr = UnaryOp.erf newUnaryOp(a);
-fn erfc (a SignalExpr) SignalExpr = UnaryOp.erfc newUnaryOp(a);
+fn erf (a S) S = UnaryOp.erf _newUnaryOp(a);
+fn erfc (a S) S = UnaryOp.erfc _newUnaryOp(a);
 
-fn clz (a SignalExpr) SignalExpr = UnaryOp.clz newUnaryOp(a);
-fn ctz (a SignalExpr) SignalExpr = UnaryOp.ctz newUnaryOp(a);
-fn clo (a SignalExpr) SignalExpr = UnaryOp.clo newUnaryOp(a);
-fn cto (a SignalExpr) SignalExpr = UnaryOp.cto newUnaryOp(a);
-fn rotr (a SignalExpr) SignalExpr = UnaryOp.rotr newUnaryOp(a);
-fn rtol (a SignalExpr) SignalExpr = UnaryOp.rotl newUnaryOp(a);
-fn bitCeil (a SignalExpr) SignalExpr = UnaryOp.bitCeil newUnaryOp(a);
-fn bitFloor (a SignalExpr) SignalExpr = UnaryOp.bitFloor newUnaryOp(a);
-fn bitWidth (a SignalExpr) SignalExpr = UnaryOp.bitWidth newUnaryOp(a);
-fn popCount (a SignalExpr) SignalExpr = UnaryOp.popCount newUnaryOp(a);
-fn hasSingleBit (a SignalExpr) SignalExpr = UnaryOp.hasSingleBit newUnaryOp(a);
+fn clz (a S) S = UnaryOp.clz _newUnaryOp(a);
+fn ctz (a S) S = UnaryOp.ctz _newUnaryOp(a);
+fn clo (a S) S = UnaryOp.clo _newUnaryOp(a);
+fn cto (a S) S = UnaryOp.cto _newUnaryOp(a);
+fn rotr (a S) S = UnaryOp.rotr _newUnaryOp(a);
+fn rtol (a S) S = UnaryOp.rotl _newUnaryOp(a);
+fn bitCeil (a S) S = UnaryOp.bitCeil _newUnaryOp(a);
+fn bitFloor (a S) S = UnaryOp.bitFloor _newUnaryOp(a);
+fn bitWidth (a S) S = UnaryOp.bitWidth _newUnaryOp(a);
+fn popCount (a S) S = UnaryOp.popCount _newUnaryOp(a);
+fn hasSingleBit (a S) S = UnaryOp.hasSingleBit _newUnaryOp(a);
 
 ---------------------------------------------------------------------------
 -- Binary Signal Operators
 
-fn + (a SignalExpr, b SignalExpr) SignalExpr = BinaryOp.add newBinaryOp(a, b);
-fn + (a SignalExpr, b) SignalExpr = BinaryOp.add newBinaryOp(a, b);
-fn + (a, b SignalExpr) SignalExpr = BinaryOp.add newBinaryOp(a, b);
+fn + (a S, b S) S = BinaryOp.add _newBinaryOp(a, b);
+fn + (a S, b AsConstantSignal) S = BinaryOp.add _newBinaryOp(a, b asSignal);
+fn + (a AsConstantSignal, b S) S = BinaryOp.add _newBinaryOp(a asSignal, b);
 
-fn - (a SignalExpr, b SignalExpr) SignalExpr = BinaryOp.sub newBinaryOp(a, b);
-fn - (a SignalExpr, b) SignalExpr = BinaryOp.sub newBinaryOp(a, b);
-fn - (a, b SignalExpr) SignalExpr = BinaryOp.sub newBinaryOp(a, b);
+fn - (a S, b S) S = BinaryOp.sub _newBinaryOp(a, b);
+fn - (a S, b AsConstantSignal) S = BinaryOp.sub _newBinaryOp(a, b asSignal);
+fn - (a AsConstantSignal, b S) S = BinaryOp.sub _newBinaryOp(a asSignal, b);
 
-fn * (a SignalExpr, b SignalExpr) SignalExpr = BinaryOp.mul newBinaryOp(a, b);
-fn * (a SignalExpr, b) SignalExpr = BinaryOp.mul newBinaryOp(a, b);
-fn * (a, b SignalExpr) SignalExpr = BinaryOp.mul newBinaryOp(a, b);
+fn * (a S, b S) S = BinaryOp.mul _newBinaryOp(a, b);
+fn * (a S, b AsConstantSignal) S = BinaryOp.mul _newBinaryOp(a, b asSignal);
+fn * (a AsConstantSignal, b S) S = BinaryOp.mul _newBinaryOp(a asSignal, b);
 
-fn / (a SignalExpr, b SignalExpr) SignalExpr = BinaryOp.div newBinaryOp(a, b);
-fn / (a SignalExpr, b) SignalExpr = BinaryOp.div newBinaryOp(a, b);
-fn / (a, b SignalExpr) SignalExpr = BinaryOp.div newBinaryOp(a, b);
+fn / (a S, b S) S = BinaryOp.div _newBinaryOp(a, b);
+fn / (a S, b AsConstantSignal) S = BinaryOp.div _newBinaryOp(a, b asSignal);
+fn / (a AsConstantSignal, b S) S = BinaryOp.div _newBinaryOp(a asSignal, b);
 
-fn // (a SignalExpr, b SignalExpr) SignalExpr = BinaryOp.idiv newBinaryOp(a, b);
-fn // (a SignalExpr, b) SignalExpr = BinaryOp.idiv newBinaryOp(a, b);
-fn // (a, b SignalExpr) SignalExpr = BinaryOp.idiv newBinaryOp(a, b);
+fn // (a S, b S) S = BinaryOp.idiv _newBinaryOp(a, b);
+fn // (a S, b AsConstantSignal) S = BinaryOp.idiv _newBinaryOp(a, b asSignal);
+fn // (a AsConstantSignal, b S) S = BinaryOp.idiv _newBinaryOp(a asSignal, b);
 
-fn % (a SignalExpr, b SignalExpr) SignalExpr = BinaryOp.mod newBinaryOp(a, b);
-fn % (a SignalExpr, b) SignalExpr = BinaryOp.mod newBinaryOp(a, b);
-fn % (a, b SignalExpr) SignalExpr = BinaryOp.mod newBinaryOp(a, b);
+fn % (a S, b S) S = BinaryOp.mod _newBinaryOp(a, b);
+fn % (a S, b AsConstantSignal) S = BinaryOp.mod _newBinaryOp(a, b asSignal);
+fn % (a AsConstantSignal, b S) S = BinaryOp.mod _newBinaryOp(a asSignal, b);
 
-fn & (a SignalExpr, b SignalExpr) SignalExpr = BinaryOp.bitAnd newBinaryOp(a, b);
-fn & (a SignalExpr, b) SignalExpr = BinaryOp.bitAnd newBinaryOp(a, b);
-fn & (a, b SignalExpr) SignalExpr = BinaryOp.bitAnd newBinaryOp(a, b);
+fn & (a S, b S) S = BinaryOp.bitAnd _newBinaryOp(a, b);
+fn & (a S, b AsConstantSignal) S = BinaryOp.bitAnd _newBinaryOp(a, b asSignal);
+fn & (a AsConstantSignal, b S) S = BinaryOp.bitAnd _newBinaryOp(a asSignal, b);
 
-fn | (a SignalExpr, b SignalExpr) SignalExpr = BinaryOp.bitOr newBinaryOp(a, b);
-fn | (a SignalExpr, b) SignalExpr = BinaryOp.bitOr newBinaryOp(a, b);
-fn | (a, b SignalExpr) SignalExpr = BinaryOp.bitOr newBinaryOp(a, b);
+fn | (a S, b S) S = BinaryOp.bitOr _newBinaryOp(a, b);
+fn | (a S, b AsConstantSignal) S = BinaryOp.bitOr _newBinaryOp(a, b asSignal);
+fn | (a AsConstantSignal, b S) S = BinaryOp.bitOr _newBinaryOp(a asSignal, b);
 
-fn ^ (a SignalExpr, b SignalExpr) SignalExpr = BinaryOp.bitXor newBinaryOp(a, b);
-fn ^ (a SignalExpr, b) SignalExpr = BinaryOp.bitXor newBinaryOp(a, b);
-fn ^ (a, b SignalExpr) SignalExpr = BinaryOp.bitXor newBinaryOp(a, b);
+fn ^ (a S, b S) S = BinaryOp.bitXor _newBinaryOp(a, b);
+fn ^ (a S, b AsConstantSignal) S = BinaryOp.bitXor _newBinaryOp(a, b asSignal);
+fn ^ (a AsConstantSignal, b S) S = BinaryOp.bitXor _newBinaryOp(a asSignal, b);
 
-fn << (a SignalExpr, b SignalExpr) SignalExpr = BinaryOp.shiftLeft newBinaryOp(a, b);
-fn << (a SignalExpr, b) SignalExpr = BinaryOp.shiftLeft newBinaryOp(a, b);
-fn << (a, b SignalExpr) SignalExpr = BinaryOp.shiftLeft newBinaryOp(a, b);
+fn << (a S, b S) S = BinaryOp.shiftLeft _newBinaryOp(a, b);
+fn << (a S, b AsConstantSignal) S = BinaryOp.shiftLeft _newBinaryOp(a, b asSignal);
+fn << (a AsConstantSignal, b S) S = BinaryOp.shiftLeft _newBinaryOp(a asSignal, b);
 
-fn >> (a SignalExpr, b SignalExpr) SignalExpr = BinaryOp.shiftRight newBinaryOp(a, b);
-fn >> (a SignalExpr, b) SignalExpr = BinaryOp.shiftRight newBinaryOp(a, b);
-fn >> (a, b SignalExpr) SignalExpr = BinaryOp.shiftRight newBinaryOp(a, b);
+fn >> (a S, b S) S = BinaryOp.shiftRight _newBinaryOp(a, b);
+fn >> (a S, b AsConstantSignal) S = BinaryOp.shiftRight _newBinaryOp(a, b asSignal);
+fn >> (a AsConstantSignal, b S) S = BinaryOp.shiftRight _newBinaryOp(a asSignal, b);
 
-fn >>> (a SignalExpr, b SignalExpr) SignalExpr = BinaryOp.unsignedShiftRight newBinaryOp(a, b);
-fn >>> (a SignalExpr, b) SignalExpr = BinaryOp.unsignedShiftRight newBinaryOp(a, b);
-fn >>> (a, b SignalExpr) SignalExpr = BinaryOp.unsignedShiftRight newBinaryOp(a, b);
+fn >>> (a S, b S) S = BinaryOp.unsignedShiftRight _newBinaryOp(a, b);
+fn >>> (a S, b AsConstantSignal) S = BinaryOp.unsignedShiftRight _newBinaryOp(a, b asSignal);
+fn >>> (a AsConstantSignal, b S) S = BinaryOp.unsignedShiftRight _newBinaryOp(a asSignal, b);
 
-fn min (a SignalExpr, b SignalExpr) SignalExpr = BinaryOp.min newBinaryOp(a, b);
-fn min (a SignalExpr, b) SignalExpr = BinaryOp.min newBinaryOp(a, b);
-fn min (a, b SignalExpr) SignalExpr = BinaryOp.min newBinaryOp(a, b);
+fn min (a S, b S) S = BinaryOp.min _newBinaryOp(a, b);
+fn min (a S, b AsConstantSignal) S = BinaryOp.min _newBinaryOp(a, b asSignal);
+fn min (a AsConstantSignal, b S) S = BinaryOp.min _newBinaryOp(a asSignal, b);
 
-fn max (a SignalExpr, b SignalExpr) SignalExpr = BinaryOp.max newBinaryOp(a, b);
-fn max (a SignalExpr, b) SignalExpr = BinaryOp.max newBinaryOp(a, b);
-fn max (a, b SignalExpr) SignalExpr = BinaryOp.max newBinaryOp(a, b);
+fn max (a S, b S) S = BinaryOp.max _newBinaryOp(a, b);
+fn max (a S, b AsConstantSignal) S = BinaryOp.max _newBinaryOp(a, b asSignal);
+fn max (a AsConstantSignal, b S) S = BinaryOp.max _newBinaryOp(a asSignal, b);
 
-fn pow (a SignalExpr, b SignalExpr) SignalExpr = BinaryOp.pow newBinaryOp(a, b);
-fn pow (a SignalExpr, b) SignalExpr = BinaryOp.pow newBinaryOp(a, b);
-fn pow (a, b SignalExpr) SignalExpr = BinaryOp.pow newBinaryOp(a, b);
+fn pow (a S, b S) S = BinaryOp.pow _newBinaryOp(a, b);
+fn pow (a S, b AsConstantSignal) S = BinaryOp.pow _newBinaryOp(a, b asSignal);
+fn pow (a AsConstantSignal, b S) S = BinaryOp.pow _newBinaryOp(a asSignal, b);
 
-fn atan2 (a SignalExpr, b SignalExpr) SignalExpr = BinaryOp.atan2 newBinaryOp(a, b);
-fn atan2 (a SignalExpr, b) SignalExpr = BinaryOp.atan2 newBinaryOp(a, b);
-fn atan2 (a, b SignalExpr) SignalExpr = BinaryOp.atan2 newBinaryOp(a, b);
+fn atan2 (a S, b S) S = BinaryOp.atan2 _newBinaryOp(a, b);
+fn atan2 (a S, b AsConstantSignal) S = BinaryOp.atan2 _newBinaryOp(a, b asSignal);
+fn atan2 (a AsConstantSignal, b S) S = BinaryOp.atan2 _newBinaryOp(a asSignal, b);
 
-fn hypot (a SignalExpr, b SignalExpr) SignalExpr = BinaryOp.hypot newBinaryOp(a, b);
-fn hypot (a SignalExpr, b) SignalExpr = BinaryOp.hypot newBinaryOp(a, b);
-fn hypot (a, b SignalExpr) SignalExpr = BinaryOp.hypot newBinaryOp(a, b);
+fn hypot (a S, b S) S = BinaryOp.hypot _newBinaryOp(a, b);
+fn hypot (a S, b AsConstantSignal) S = BinaryOp.hypot _newBinaryOp(a, b asSignal);
+fn hypot (a AsConstantSignal, b S) S = BinaryOp.hypot _newBinaryOp(a asSignal, b);
 
-fn copysign (a SignalExpr, b SignalExpr) SignalExpr = BinaryOp.copysign newBinaryOp(a, b);
-fn copysign (a SignalExpr, b) SignalExpr = BinaryOp.copysign newBinaryOp(a, b);
-fn copysign (a, b SignalExpr) SignalExpr = BinaryOp.copysign newBinaryOp(a, b);
+fn copysign (a S, b S) S = BinaryOp.copysign _newBinaryOp(a, b);
+fn copysign (a S, b AsConstantSignal) S = BinaryOp.copysign _newBinaryOp(a, b asSignal);
+fn copysign (a AsConstantSignal, b S) S = BinaryOp.copysign _newBinaryOp(a asSignal, b);
 
 ---------------------------------------------------------------------------
 -- Signal Comparison Operators
 
-fn < (a SignalExpr, b SignalExpr) SignalExpr = CompareOp.lt newCompareOp(a, b);
-fn < (a SignalExpr, b) SignalExpr = CompareOp.lt newCompareOp(a, b);
-fn < (a, b SignalExpr) SignalExpr = CompareOp.lt newCompareOp(a, b);
+fn < (a S, b S) S = CompareOp.lt _newCompareOp(a, b);
+fn < (a S, b AsConstantSignal) S = CompareOp.lt _newCompareOp(a, b asSignal);
+fn < (a AsConstantSignal, b S) S = CompareOp.lt _newCompareOp(a asSignal, b);
 
-fn <= (a SignalExpr, b SignalExpr) SignalExpr = CompareOp.le newCompareOp(a, b);
-fn <= (a SignalExpr, b) SignalExpr = CompareOp.le newCompareOp(a, b);
-fn <= (a, b SignalExpr) SignalExpr = CompareOp.le newCompareOp(a, b);
+fn <= (a S, b S) S = CompareOp.le _newCompareOp(a, b);
+fn <= (a S, b AsConstantSignal) S = CompareOp.le _newCompareOp(a, b asSignal);
+fn <= (a AsConstantSignal, b S) S = CompareOp.le _newCompareOp(a asSignal, b);
 
-fn == (a SignalExpr, b SignalExpr) SignalExpr = CompareOp.eq newCompareOp(a, b);
-fn == (a SignalExpr, b) SignalExpr = CompareOp.eq newCompareOp(a, b);
-fn == (a, b SignalExpr) SignalExpr = CompareOp.eq newCompareOp(a, b);
+fn == (a S, b S) S = CompareOp.eq _newCompareOp(a, b);
+fn == (a S, b AsConstantSignal) S = CompareOp.eq _newCompareOp(a, b asSignal);
+fn == (a AsConstantSignal, b S) S = CompareOp.eq _newCompareOp(a asSignal, b);
 
-fn != (a SignalExpr, b SignalExpr) SignalExpr = CompareOp.ne newCompareOp(a, b);
-fn != (a SignalExpr, b) SignalExpr = CompareOp.ne newCompareOp(a, b);
-fn != (a, b SignalExpr) SignalExpr = CompareOp.ne newCompareOp(a, b);
+fn != (a S, b S) S = CompareOp.ne _newCompareOp(a, b);
+fn != (a S, b AsConstantSignal) S = CompareOp.ne _newCompareOp(a, b asSignal);
+fn != (a AsConstantSignal, b S) S = CompareOp.ne _newCompareOp(a asSignal, b);
 
-fn >= (a SignalExpr, b SignalExpr) SignalExpr = CompareOp.ge newCompareOp(a, b);
-fn >= (a SignalExpr, b) SignalExpr = CompareOp.ge newCompareOp(a, b);
-fn >= (a, b SignalExpr) SignalExpr = CompareOp.ge newCompareOp(a, b);
+fn >= (a S, b S) S = CompareOp.ge _newCompareOp(a, b);
+fn >= (a S, b AsConstantSignal) S = CompareOp.ge _newCompareOp(a, b asSignal);
+fn >= (a AsConstantSignal, b S) S = CompareOp.ge _newCompareOp(a asSignal, b);
 
-fn > (a SignalExpr, b SignalExpr) SignalExpr = CompareOp.gt newCompareOp(a, b);
-fn > (a SignalExpr, b) SignalExpr = CompareOp.gt newCompareOp(a, b);
-fn > (a, b SignalExpr) SignalExpr = CompareOp.gt newCompareOp(a, b);
+fn > (a S, b S) S = CompareOp.gt _newCompareOp(a, b);
+fn > (a S, b AsConstantSignal) S = CompareOp.gt _newCompareOp(a, b asSignal);
+fn > (a AsConstantSignal, b S) S = CompareOp.gt _newCompareOp(a asSignal, b);
 
 ---------------------------------------------------------------------------
 -- Signal Cast Operators
 
-fn i32 (a SignalExpr) SignalExpr = CastOp.i32 newCastOp(a);
-fn i64 (a SignalExpr) SignalExpr = CastOp.i64 newCastOp(a);
-fn f32 (a SignalExpr) SignalExpr = CastOp.f32 newCastOp(a);
-fn f64 (a SignalExpr) SignalExpr = CastOp.f64 newCastOp(a);
+fn i32 (a AsSignal) S = CastOp.i32 _newCastOp(a asSignal);
+fn i64 (a AsSignal) S = CastOp.i64 _newCastOp(a asSignal);
+fn f32 (a AsSignal) S = CastOp.f32 _newCastOp(a asSignal);
+fn f64 (a AsSignal) S = CastOp.f64 _newCastOp(a asSignal);
 
 ---------------------------------------------------------------------------
 -- Delay Operators
 
-fn init(d DelayVar, index Int, s) SignalExpr {
-    SignalExprKind.delay(d, DelayOp.init(index)) newSignalExpr([s asSignal])
+fn init(d DelayVar, index Int, s AsSignal) S {
+    SignalExprKind.delay(d, DelayOp.init(index)) _newSignalExpr([s asSignal])
 }
 
-fn read(d DelayVar, index Int) SignalExpr {
-    SignalExprKind.delay(d, DelayOp.read(index)) newSignalExpr
+fn read(d DelayVar, index Int) S {
+    SignalExprKind.delay(d, DelayOp.read(index)) _newSignalExpr
 }
 
-fn vread(d DelayVar, index, interp Interpolation) SignalExpr {
-    SignalExprKind.delay(d, DelayOp.vread(interp)) newSignalExpr([index asSignal])
+fn vread(d DelayVar, index AsSignal, interp Interpolation) S {
+    SignalExprKind.delay(d, DelayOp.vread(interp)) _newSignalExpr([index asSignal])
 }
 
-fn write(d DelayVar, s) SignalExpr {
-    SignalExprKind.delay(d, DelayOp.write) newSignalExpr([s asSignal])
+fn write(d DelayVar, s AsSignal) S {
+    SignalExprKind.delay(d, DelayOp.write) _newSignalExpr([s asSignal])
 }
-fn write(s, d DelayVar) SignalExpr {
-    SignalExprKind.delay(d, DelayOp.write) newSignalExpr([s asSignal])
+fn write(s AsSignal, d DelayVar) S {
+    SignalExprKind.delay(d, DelayOp.write) _newSignalExpr([s asSignal])
 }
 
-fn <- (d DelayVar, s) SignalExpr = d write(s);
-fn -> (s, d DelayVar) SignalExpr = s write(d);
+fn <- (d DelayVar, s AsSignal) S = d write(s asSignal);
+fn -> (s AsSignal, d DelayVar) S = s asSignal write(d);
 
 ---------------------------------------------------------------------------
 --- Vector operations
 
-fn at(a SignalExpr, i) SignalExpr {
-    SignalExprKind.vecop(VecOp.at) newSignalExpr([a, i asSignal])
+fn at(a S, i) S {
+    SignalExprKind.vecop(VecOp.at) _newSignalExpr([a, i asSignal])
 }
-fn put(a SignalExpr, i, v) SignalExpr {
-    SignalExprKind.vecop(VecOp.put) newSignalExpr([a, i asSignal, v asSignal])
+fn put(a S, i, v) S {
+    SignalExprKind.vecop(VecOp.put) _newSignalExpr([a, i asSignal, v asSignal])
 }
-fn matmul(a SignalExpr, b SignalExpr) SignalExpr {
-    SignalExprKind.vecop(VecOp.put) newSignalExpr([a, b])
+fn matmul(a S, b S) S {
+    SignalExprKind.vecop(VecOp.put) _newSignalExpr([a, b])
 }
-fn take(a SignalExpr, n Int) SignalExpr {
-    SignalExprKind.vecop(VecOp.take(n)) newSignalExpr([a])
+fn take(a S, n Int) S {
+    SignalExprKind.vecop(VecOp.take(n)) _newSignalExpr([a])
 }
-fn drop(a SignalExpr, n Int) SignalExpr {
-    SignalExprKind.vecop(VecOp.drop(n)) newSignalExpr([a])
+fn drop(a S, n Int) S {
+    SignalExprKind.vecop(VecOp.drop(n)) _newSignalExpr([a])
 }
-fn stride(a SignalExpr, n Int) SignalExpr {
-    SignalExprKind.vecop(VecOp.stride(n)) newSignalExpr([a])
+fn stride(a S, n Int) S {
+    SignalExprKind.vecop(VecOp.stride(n)) _newSignalExpr([a])
 }
-fn stutter(a SignalExpr, n Int) SignalExpr {
-    SignalExprKind.vecop(VecOp.stutter(n)) newSignalExpr([a])
+fn stutter(a S, n Int) S {
+    SignalExprKind.vecop(VecOp.stutter(n)) _newSignalExpr([a])
 }
-fn ncyc(a SignalExpr, n Int) SignalExpr {
-    SignalExprKind.vecop(VecOp.ncyc(n)) newSignalExpr([a])
+fn ncyc(a S, n Int) S {
+    SignalExprKind.vecop(VecOp.ncyc(n)) _newSignalExpr([a])
 }
-fn rotate(a SignalExpr, b) SignalExpr {
-    SignalExprKind.vecop(VecOp.rotate) newSignalExpr([a, b asSignal])
+fn rotate(a AsSignal, b  AsSignal) S {
+    SignalExprKind.vecop(VecOp.rotate) _newSignalExpr([a asSignal, b asSignal])
 }
-fn reverse(a SignalExpr) SignalExpr {
-    SignalExprKind.vecop(VecOp.reverse) newSignalExpr([a])
+fn reverse(a S) S {
+    SignalExprKind.vecop(VecOp.reverse) _newSignalExpr([a])
 }
-fn reduce(a SignalExpr, op BinaryOp, chans Chans = 1) SignalExpr {
-    SignalExprKind.vecop(VecOp.reduce(op, chans asChans)) newSignalExpr([a])
+fn reduce(a S, op BinaryOp, chans Chans = 1) S {
+    SignalExprKind.vecop(VecOp.reduce(op, chans asChans)) _newSignalExpr([a])
 }
-fn sum(a SignalExpr, chans Chans = 1) SignalExpr {
+fn sum(a S, chans Chans = 1) S {
     a reduce(BinaryOp.add, chans asChans)
 }
-fn product(a SignalExpr, chans Chans = 1) SignalExpr {
+fn product(a S, chans Chans = 1) S {
     a reduce(BinaryOp.mul, chans asChans)
 }
-fn minOf(a SignalExpr, chans Chans = 1) SignalExpr {
+fn minOf(a S, chans Chans = 1) S {
     a reduce(BinaryOp.min, chans asChans)
 }
-fn maxOf(a SignalExpr, chans Chans = 1) SignalExpr {
+fn maxOf(a S, chans Chans = 1) S {
     a reduce(BinaryOp.max, chans asChans)
 }
 
 ---------------------------------------------------------------------------
---- Subgraphs
+--- Making Graphs
 
-type GraphFn = fn() SignalExpr;
-type GraphFn1 = fn(SignalExpr) SignalExpr;
+type GraphFn = fn() S;
+type GraphFn1 = fn(S) S;
 
-fn makeGraph(f GraphFn) SignalGraph {
+fn _makeTopGraph(f GraphFn) SignalGraph {
     -- save graph state
-	let savedExprs = curGraphExprs;
-	let savedDelays = curGraphDelays;
+	let savedExprs = _curGraphExprs;
+	let savedDelays = _curGraphDelays;
+	let saveExprIds = _exprIds;
+	let saveDelayVarIds = _delayVarIds;
 
 	-- fresh graph state
-	curGraphExprs = [];
-	curGraphDelays = [];
+	_curGraphExprs = [];
+	_curGraphDelays = [];
+	_exprIds = 0;
+	_delayVarIds = 0;
 
-	let root SignalExpr = f();
+	let root S = f();
 
 	let graph = SignalGraph {
-	    exprs: curGraphExprs,
-		delays: curGraphDelays,
+	    exprs: _curGraphExprs,
+		delays: _curGraphDelays,
 		root: root,
 	};
 
 	-- restore graph state
-	curGraphExprs = savedExprs;
-	curGraphDelays = savedDelays;
+	_delayVarIds = saveDelayVarIds;
+	_exprIds = saveExprIds;
+	_curGraphDelays = savedDelays;
+	_curGraphExprs = savedExprs;
+	
+	graph
+}
+
+fn _makeSubGraph(f GraphFn) SignalGraph {
+    -- save graph state
+	let savedExprs = _curGraphExprs;
+	let savedDelays = _curGraphDelays;
+
+	-- fresh graph state
+	_curGraphExprs = [];
+	_curGraphDelays = [];
+
+	let root S = f();
+
+	let graph = SignalGraph {
+	    exprs: _curGraphExprs,
+		delays: _curGraphDelays,
+		root: root,
+	};
+
+	-- restore graph state
+	_curGraphExprs = savedExprs;
+	_curGraphDelays = savedDelays;
 
 	graph
 }
 
-fn makeGraph (f GraphFn1, i SignalExpr) SignalGraph {
+fn _makeForGraph (f GraphFn1, i S) SignalGraph {
 -- save graph state
-	let savedExprs = curGraphExprs;
-	let savedDelays = curGraphDelays;
+	let savedExprs = _curGraphExprs;
+	let savedDelays = _curGraphDelays;
 
 	-- fresh graph state
-	curGraphExprs = [];
-	curGraphDelays = [];
+	_curGraphExprs = [];
+	_curGraphDelays = [];
 
 	let root = f(i);
 
 	let graph = SignalGraph {
-	    exprs: curGraphExprs,
-		delays: curGraphDelays,
+	    exprs: _curGraphExprs,
+		delays: _curGraphDelays,
 		root: root,
 	};
 
 	-- restore graph state
-	curGraphExprs = savedExprs;
-	curGraphDelays = savedDelays;
+	_curGraphExprs = savedExprs;
+	_curGraphDelays = savedDelays;
 
 	graph
 }
@@ -722,38 +802,38 @@ fn makeGraph (f GraphFn1, i SignalExpr) SignalGraph {
 ---------------------------------------------------------------------------
 --- Control Flow Operators
 
-fn if_(test SignalExpr, thenFn GraphFn, elseFn GraphFn) SignalExpr {
-    let thenGraph SignalGraph = thenFn makeGraph;
-    let elseGraph SignalGraph = elseFn makeGraph;
-    SignalExprKind.if_(thenGraph, elseGraph) newSignalExpr([test])
+fn if_(test S, thenFn GraphFn, elseFn GraphFn) S {
+    let thenGraph SignalGraph = thenFn _makeSubGraph;
+    let elseGraph SignalGraph = elseFn _makeSubGraph;
+    SignalExprKind.if_(thenGraph, elseGraph) _newSignalExpr([test])
 }
 
-fn if_(test SignalExpr, thenFn GraphFn) SignalExpr {
-    let thenGraph SignalGraph = thenFn makeGraph;
-    let elseGraph SignalGraph = fn() { 0 asSignal } makeGraph;
-    SignalExprKind.if_(thenGraph, elseGraph) newSignalExpr([test])
+fn if_(test S, thenFn GraphFn) S {
+    let thenGraph SignalGraph = thenFn _makeSubGraph;
+    let elseGraph SignalGraph = fn() { 0 asSignal } _makeSubGraph;
+    SignalExprKind.if_(thenGraph, elseGraph) _newSignalExpr([test])
 }
 
-fn if_(test Bool, thenFn GraphFn, elseFn GraphFn) SignalExpr = test ? thenFn() : elseFn();
-fn if_(test Bool, thenFn GraphFn) SignalExpr = test ? thenFn() : 0 asSignal;
+fn if_(test Bool, thenFn GraphFn, elseFn GraphFn) S = test ? thenFn() : elseFn();
+fn if_(test Bool, thenFn GraphFn) S = test ? thenFn() : 0 asSignal;
 
-fn for_(varname String, count Int, bodyFn GraphFn1) SignalExpr {
-	let varexpr SignalExpr = SignalExprKind.varexpr(varname) newSignalExpr;
-    let bodyGraph SignalGraph = bodyFn makeGraph(varexpr);
-    SignalExprKind.for_(count, bodyGraph) newSignalExpr
+fn for_(varname String, count Int, bodyFn GraphFn1) S {
+	let varexpr S = SignalExprKind.varexpr(varname) _newSignalExpr;
+    let bodyGraph SignalGraph = bodyFn _makeForGraph(varexpr);
+    SignalExprKind.for_(count, bodyGraph) _newSignalExpr
 }
 
-fn switch(test, funs [GraphFn]) SignalExpr {
-    let graphs [SignalGraph] = funs makeGraph;
-    SignalExprKind.switch_(graphs) newSignalExpr([test])
+fn switch(test, funs [GraphFn]) S {
+    let graphs [SignalGraph] = funs _makeSubGraph;
+    SignalExprKind.switch_(graphs) _newSignalExpr([test])
 }
 
-fn select(test SignalExpr, exprs [SignalExpr]) SignalExpr {
-    let ins [SignalExpr] = [test] $ exprs;
-    SignalExprKind.select newSignalExpr(ins)
+fn select(test S, exprs [S]) S {
+    let ins [S] = [test] $ exprs;
+    SignalExprKind.select _newSignalExpr(ins)
 }
 
-fn select2(test SignalExpr, ifOne SignalExpr, ifZero SignalExpr) SignalExpr {
+fn select2(test S, ifOne S, ifZero S) S {
     test select([ifZero, ifOne])
 }
 
@@ -784,9 +864,9 @@ fn separatedString(strings [String], separator String = " ") String {
 fn separatedString<T>(values [T], separator String = " ") String = values @ toString separatedString(separator);
 
 
-fn inputsToLisp(o SignalExpr) String = o.ins.id separatedString parens;
+fn inputsToLisp(o S) String = o.ins.id separatedString parens;
 
-fn idsToLisp(o [SignalExpr]) String = o.id separatedString parens;
+fn idsToLisp(o [S]) String = o.id separatedString parens;
 fn numbersToLisp(o [Int]) String = o separatedString parens;
 
 fn toLisp(o ControlSpec) String {
@@ -807,7 +887,7 @@ fn toLisp(g SignalGraph) String {
 	"(%^ %^)" fmt(g.root.id, exprsStr)
 }
 
-fn toLisp(o SignalExpr) String {
+fn toLisp(o S) String {
     match (o.kind) {
         sampleRate : "(%^ SampleRate)" fmt(o.id);
         sampleDur : "(%^ SampleDur)" fmt(o.id);
@@ -871,6 +951,31 @@ fn toLisp(o SignalExpr) String {
         select2 : "(%^ SelectExpr %^)" fmt(o.id, o inputsToLisp);
 		varexpr(name) : "()%^ VarExpr %^)" fmt(o.id, name);
 	}
+}
+
+fn indent(line String) String = "  %^" fmt(line);
+
+fn defSynth(synthFun GraphFn, synthName String) {
+	"Defining synth: %^" fmt(synthName) println
+
+	-- Increase string print limit to avoid truncation
+	--setStringPrintLimit(100000);
+
+	-- Build the graph by calling the synth function
+	let graph = synthFun _makeTopGraph;
+
+	-- Convert each expression to s-expression format
+	let sexprLines = graph.exprs toLisp;
+
+	-- Join with newlines and add indentation
+	let sexprBody = sexprLines indent separatedString("\n");
+
+	-- Wrap in parentheses to create the top-level list
+	let sexprText = "(%^)\n" fmt(sexprBody)
+
+	
+	
+	graph
 }
 
 /*
