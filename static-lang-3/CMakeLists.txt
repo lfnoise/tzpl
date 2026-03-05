@@ -56,7 +56,7 @@ target_compile_options(langx_lib PRIVATE ${LANGX_COMPILE_OPTIONS})
 
 # Debug flags
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-    target_compile_options(langx_lib PRIVATE -g -O1)
+    target_compile_options(langx_lib PRIVATE -g -O0)
 endif()
 
 # Release flags
@@ -77,7 +77,7 @@ target_compile_options(langx PRIVATE ${LANGX_COMPILE_OPTIONS})
 
 # Debug flags
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-    target_compile_options(langx PRIVATE -g -O1)
+    target_compile_options(langx PRIVATE -g -O0)
 endif()
 
 # Release flags

@@ -170,6 +170,17 @@ CallFrame VM::popFrame() {
     return frame;
 }
 
+void VM::dumpCallStack() const {
+    fprintf(stderr, "  Call stack (frameCount=%d):\n", frameCount_);
+    for (u32 i = frameCount_; i > 0; --i) {
+        auto& frame = frames_[i - 1];
+        const char* name = frame.codeBlock && frame.codeBlock->name
+            ? frame.codeBlock->name->cstr() : "<anon>";
+        fprintf(stderr, "    [%d] %s (baseReg=%d numRegs=%d)\n",
+                i - 1, name, frame.baseReg, frame.numRegs);
+    }
+}
+
 void VM::install(const CompileResult& result) {
     // Validate target match when there are new globals to install
     if (!result.newGlobals.empty()) {

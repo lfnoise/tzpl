@@ -367,18 +367,19 @@ fn bfold_cheaper(x) = select2(x < -1, -2 - x, select2(x > 1, 2 - x, x));
 
 -- chain
 
-fn chain(x, n, f) = n times(x, f);
+fn _chain(x S, n Int, f fn(S)S) S = n == 0 ? x : chain(f(x), n-1, f);
+fn chain(x AsSignal, n Int, f fn(S)S) S = _chain(x asSignal, n, f);
 
 
 -- common unit generator functions
 
-fn z1(a S) {
+fn z1(a S) S {
 	let d = delayVar();
 	d <- a;
 	d(1)
 }
 
-fn z2(a S) {
+fn z2(a S) S {
 	let d = delayVar();
 	d <- a;
 	d at(2)
@@ -391,102 +392,107 @@ fn tr(x S) = min(x > 0, x z1 <= 0);
 fn eoc(x S) = abs(x - x z1) > 0.5;
 
 -- one initial impulse, then zero forever.
-fn init() {
+fn init() S {
 	let d = delayVar() init(1, 1);
 	d <- 0;
 	d read(1)
 }
 
-fn sampleAndHold(x S, t S) {
+fn sampleAndHold(x S, t S) S {
 	let y = delayVar();
 	select2(t > 0, x, y(1)) write(y)
 }
 
+fn once(x S) S {
+	let y = delayVar();
+	select2(x > 0, 1, y(1)) write(y)
+}
+
 -- flip flops
 
-fn toggle(x S) {
+fn toggle(x S) S {
 	let y = delayVar();
 	select2(x > 0, 1 - y(1), y(1)) write(y)
 }
 
-fn setReset(s S, r S) {
+fn setReset(s S, r S) S {
 	let y = delayVar();
 	select2(r > 0, 0, select2(s > 0, 1, y(1))) write(y)
 }
 
-fn setResetToggle(s S, r S, t S) {
+fn setResetToggle(s S, r S, t S) S {
 	let y = delayVar();
 	select2(r > 0, 0, select2(s > 0, 1, select2(t > 0, 1 - y(1), y(1)))) write(y)
 }
 
 -- simple filters
 
-fn lag(x, t) {
+fn lag(x S, t AsSignal) S {
     let a = decay40dB(t * fs());
     let y = delayVar();
     y <- x + a * (y(1) - x)
 }
 
 -- leaky integrator
-fn leaky(x S, a) {
+fn leaky(x S, a AsSignal) S {
 	let y = delayVar();
     y <- x + a * y(1)
 }
 
-fn onepole(x, a) {
+fn onepole(x S, a AsSignal) S {
 	let y = delayVar();
 	y <- x + a * (y(1) - x)
 }
 
-fn onezero(x, a) = x + a * (z1(x) - x);
+fn onezero(x S, a AsSignal) S = x + a * (z1(x) - x);
 
-fn leakdc(x, k) {
+fn leakdc(x S, k AsSignal) S {
 	let y = delayVar();
 	y <- x - z1(x) + k * y(1)
 }
 
 -- exponential decay
-fn decay(x, t) = leaky(x, decay40dB(t * fs()));
+fn decay(x S, t AsSignal) S = leaky(x, decay40dB(t * fs()));
 
-fn decay2(x, atk, dcy) = x decay(dcy) - x decay(atk);
+fn decay2(x S, atk AsSignal, dcy AsSignal) S = x decay(dcy) - x decay(atk);
 
 -- differentiation
-fn diff(x S) = x - x z1;   -- unscaled sample to sample difference
-fn slope(x S) = diff(x) * fs();
-fn accel(x S) = slope(slope(x));
-fn jerk(x S) = slope(accel(x));
+fn diff(x S) S = x - x z1;   -- unscaled sample to sample difference
+fn slope(x S) S = diff(x) * fs();
+fn accel(x S) S = slope(slope(x));
+fn jerk(x S) S = slope(accel(x));
 
 -- integration
-fn unscaledIntegrator(x S)    { let y = delayVar(); y <- y(1) + x }
-fn trapezoidalIntegrator(x S) { let y = delayVar(); y <- y(1) + (x + x z1) * (T()/2) }
-fn forwardIntegrator(x S)     { let y = delayVar(); y <- y(1) + x z1 * T() }
-fn backwardIntegrator(x S)    { let y = delayVar(); y <- y(1) + x*T() }
+fn unscaledIntegrator(x S)    S { let y = delayVar(); y <- y(1) + x }
+fn trapezoidalIntegrator(x S) S { let y = delayVar(); y <- y(1) + (x + x z1) * (T()/2) }
+fn forwardIntegrator(x S)     S { let y = delayVar(); y <- y(1) + x z1 * T() }
+fn backwardIntegrator(x S)    S { let y = delayVar(); y <- y(1) + x*T() }
 
 -- integration with reset
-fn unscaledIntegrator(x S, r S)    { 
+fn unscaledIntegrator(x S, r S)    S { 
 	let y = delayVar();
 	select2(r > 0, 0, y(1) + x) write(y) 
 }
-fn trapezoidalIntegrator(x S, r S) { 
+fn trapezoidalIntegrator(x S, r S) S { 
 	let y = delayVar();
 	select2(r > 0, 0, y(1) + (x + x z1) * (T()/2)) write(y) 
 }
-fn forwardIntegrator(x S, r S) { 
+fn forwardIntegrator(x S, r S) S { 
 	let y = delayVar();
 	select2(r > 0, 0, y(1) + x z1 * T()) write(y)
 }
-fn backwardIntegrator(x S, r S) { 
+fn backwardIntegrator(x S, r S) S { 
 	let y = delayVar();
 	select2(r > 0, 0, y(1) + x * T()) write(y)
 }
 
 -- min and max followers
-fn minfollow(x S, r S) { 
+fn minfollow(x S, r S) S { 
 	let y = delayVar();
 	select2(r > 0, x, min(x, y(1))) write(y) 
 }
 
-fn maxfollow(x S, r S) { 
+fn maxfollow(x S, r S) S { 
 	let y = delayVar();
 	select2(r > 0, x, max(x, y(1))) write(y)
 }
@@ -505,12 +511,12 @@ fn panfuns(x) = [x, 1 - x] panfun;
 fn pan(x, pos) = x * pos uni panfuns;
 
 -- signal movement
-fn rising(x S)   = x > x z1;
-fn falling(x S)  = x < x z1;
-fn changing(x S) = x != x z1;
-fn nochange(x S) = x == x z1;
-fn localmax(x S) = (x < x z1) * (x z1 > x z2);
-fn localmin(x S) = (x > x z1) * (x z1 < x z2);
+fn rising(x S)   S = x > x z1;
+fn falling(x S)  S = x < x z1;
+fn changing(x S) S = x != x z1;
+fn nochange(x S) S = x == x z1;
+fn localmax(x S) S = (x < x z1) * (x z1 > x z2);
+fn localmin(x S) S = (x > x z1) * (x z1 < x z2);
 
 fn fadein(x, t) {
     let dt = 1 / (t * fs());
@@ -519,7 +525,7 @@ fn fadein(x, t) {
 }
 
 
-fn pinkingFilter(x) {
+fn pinkingFilter(x S) S {
     -- from Paul Kellett
     let b0 = delayVar(); (0.99886 * b0(1) + x * 0.0555179) write(b0);
     let b1 = delayVar(); (0.99332 * b1(1) + x * 0.0750759) write(b1);
@@ -532,7 +538,7 @@ fn pinkingFilter(x) {
 }
 
 
-fn pinkingFilterEco(x)
+fn pinkingFilterEco(x S) S
 {
     let b0 = delayVar(); (0.99765 * b0(1) + x * 0.0990460) write(b0);
     let b1 = delayVar(); (0.96300 * b1(1) + x * 0.2965164) write(b1);
@@ -541,7 +547,7 @@ fn pinkingFilterEco(x)
 }
 
 /*
-fn pinkingFilterMat(x) {
+fn pinkingFilterMat(x S) S {
     -- from Paul Kellett
     let bCoeffs = [0.0555179, 0.0750759, 0.1538520, 0.3104856, 0.5329522, -0.0168980];
     let aCoeffs = [0.99886,   0.99332,   0.96900,   0.86650,   0.55000,   -0.7616   ];
@@ -552,7 +558,7 @@ fn pinkingFilterMat(x) {
     0.5362 * x + d1 write(aCoeffs * d1(1) + bCoeffs * x) sum + d2(1)
 }
 
-fn pinkingFilterEcoMat(x)
+fn pinkingFilterEcoMat(x S) S
 {
     let bCoeffs = [0.0990460, 0.2965164, 1.0526913];
     let aCoeffs = [0.99765, 0.96300, 0.57000];
@@ -560,39 +566,39 @@ fn pinkingFilterEcoMat(x)
     0.1848 * x + d write(aCoeffs * d(1) + bCoeffs * x) sum;
 }
 
-fn pinkmf(chans Int = 1) = 0.25 * white(chans) pinkingFilterMat;
-fn pinkmfe(chans Int = 1) = 0.25 * white(chans) pinkingFilterEcoMat;
+fn pinkmf(chans Int = 1) S = 0.25 * white(chans) pinkingFilterMat;
+fn pinkmfe(chans Int = 1) S = 0.25 * white(chans) pinkingFilterEcoMat;
 */
 
-fn irand(n Int, cast = i64) = (urand() * n) floor toInt;
+fn irand(n Int, cast = i64) S = (urand() * n) floor toInt;
 
 
-fn white(chans Int = 1) = birand(chans);
+fn white(chans Int = 1) S = birand(chans);
 
-fn pinkf(chans Int = 1) = 0.25 * white(chans) pinkingFilter;
-fn pinkfe(chans Int = 1) = 0.25 * white(chans) pinkingFilterEco;
+fn pinkf(chans Int = 1) S = 0.25 * white(chans) pinkingFilter;
+fn pinkfe(chans Int = 1) S = 0.25 * white(chans) pinkingFilterEco;
 
 
-fn violet(chans Int = 1) = 0.5 * white(chans) diff;
+fn violet(chans Int = 1) S = 0.5 * white(chans) diff;
 
-fn blue(chans Int = 1) = 0.5 * pinkf(chans) diff;
+fn blue(chans Int = 1) S = 0.5 * pinkf(chans) diff;
 
-fn red(chans Int = 1, a=0.05) {
+fn red(chans Int = 1, a=0.05) S {
 	let y = delayVar();
 	(y(1) + chans birand * a) bfold_cheaper write(y)
 }
 
-fn coin(prob, chans Int = 1) = urand(chans) < prob;
+fn coin(prob AsSignal, chans Int = 1) S = urand(chans) < prob;
 
-fn velvet(freq, chans Int = 1) = coin(freq * T(), chans);
+fn velvet(freq AsSignal, chans Int = 1) S = coin(freq * T(), chans);
 
-fn dust(freq, chans Int = 1) = urand(chans) * velvet(freq, chans);
+fn dust(freq AsSignal, chans Int = 1) S = urand(chans) * velvet(freq, chans);
 
-fn dust2(freq, chans Int = 1) = birand(chans) * velvet(freq, chans);
+fn dust2(freq AsSignal, chans Int = 1) S = birand(chans) * velvet(freq, chans);
 
-fn dustep(freq, chans Int = 1) = white(chans) sampleAndHold(velvet(freq, chans));
+fn dustep(freq AsSignal, chans Int = 1) S = white(chans) sampleAndHold(velvet(freq, chans));
 
-fn exprand(a, b, chans Int = 1, rate = rates.audio) = urand(chans, rate) uniexp(a, b);
+fn exprand(a AsSignal, b AsSignal, chans Int = 1, rate = Rate.audio) S = urand(chans, rate) uniexp(a, b);
 
 
 -- unipolar waveshapers
@@ -647,42 +653,46 @@ fn bsquare(x) = sel(x < 0.5, -1, 1);
 
 -- phasor generates a unipolar sawtooth. 
 -- It is the core of many oscillators.
-fn phasor(fm, pm=0) {
+fn phasor(fm AsSignal, pm AsSignal) S {
+	let phase = delayVar();
+	let p = frac(phase(1) + fm * T()) write(phase);
+	frac(p + pm)
+}
+fn phasor(fm AsSignal, pm AsConstantSignal = 0) S {
 	let phase = delayVar();
 	let p = frac(phase(1) + fm * T()) write(phase);
 	pm == 0 ? p : frac(p + pm)
 }
 
-fn lfsaw(fm, pm=0) = phasor(fm, pm) bi;
-fn lfimp(fm, pm=0) = phasor(fm, pm) eoc;
-fn lftri(fm, pm=0) = phasor(fm, pm) btri;
-fn lfpar(fm, pm=0) = phasor(fm, pm) par;
-fn lftrap(fm, pm=0) = phasor(fm, pm) trapez0;
-fn lfusqr(fm, pm=0) = phasor(fm, pm) usquare;
-fn lfsqr(fm, pm=0) = phasor(fm, pm) bsquare;
-fn lfzig(fm, pm=0) = phasor(fm, pm) izigzag;
-fn lfzag(fm, pm=0) = phasor(fm, pm) ozigzag;
-fn lfpar(fm, pm=0) = phasor(fm, pm) par bi;
-fn lfvsaw(fm, pwm, pm=0) = phasor(fm, pm) varsaw(pwm);
-fn lfupulse(fm, pwm, pm=0) = phasor(fm, pm) upulse1(pwm);
-fn lfbpulse(fm, pwm, pm=0) = phasor(fm, pm) bpulse1(pwm);
-fn lfzpulse(fm, pwm, pm=0) = phasor(fm, pm) zpulse(pwm);
+fn lfsaw(fm AsSignal, pm AsSignal = 0) S = phasor(fm, pm) bi;
+fn lfimp(fm AsSignal, pm AsSignal = 0) S = phasor(fm, pm) eoc;
+fn lftri(fm AsSignal, pm AsSignal = 0) S = phasor(fm, pm) btri;
+fn lfpar(fm AsSignal, pm AsSignal = 0) S = phasor(fm, pm) par;
+fn lftrap(fm AsSignal, pm AsSignal = 0) S = phasor(fm, pm) trapez0;
+fn lfusqr(fm AsSignal, pm AsSignal = 0) S = phasor(fm, pm) usquare;
+fn lfsqr(fm AsSignal, pm AsSignal = 0) S = phasor(fm, pm) bsquare;
+fn lfzig(fm AsSignal, pm AsSignal = 0) S = phasor(fm, pm) izigzag;
+fn lfzag(fm AsSignal, pm AsSignal = 0) S = phasor(fm, pm) ozigzag;
+fn lfpar(fm AsSignal, pm AsSignal = 0) S = phasor(fm, pm) par bi;
+fn lfvsaw(fm AsSignal, pwm AsSignal, pm AsSignal = 0) S = phasor(fm, pm) varsaw(pwm);
+fn lfupulse(fm AsSignal, pwm AsSignal, pm AsSignal = 0) S = phasor(fm, pm) upulse1(pwm);
+fn lfbpulse(fm AsSignal, pwm AsSignal, pm AsSignal = 0) S = phasor(fm, pm) bpulse1(pwm);
+fn lfzpulse(fm AsSignal, pwm AsSignal, pm AsSignal = 0) S = phasor(fm, pm) zpulse(pwm);
 
 
-fn sinosc(fm, pm=0) = phasor(fm, pm) sin2pi;
-fn sinosc(fm, pm=0) = phasor(fm, pm) sin2pi;
+fn sinosc(fm AsSignal, pm AsSignal = 0) S = phasor(fm, pm) sin2pi;
 
-fn fsinosc(fm, pm=0) = phasor(fm, pm) fsin;
-fn fsinxosc(fm, pm=0) = phasor(fm, pm) fsinx;
+fn fsinosc(fm AsSignal, pm AsSignal = 0) S = phasor(fm, pm) fsin;
+fn fsinxosc(fm AsSignal, pm AsSignal = 0) S = phasor(fm, pm) fsinx;
 
-fn combn(x S, delay_time, decay_time) {
+fn combn(x S, delay_time AsSignal, decay_time AsSignal) S {
 	let a = decay60dB(decay_time / delay_time);
 	let delay_samples = delay_time * fs();
 	let y = delayVar(delay_samples);
 	x + a * y(delay_samples) |> write(y)
 }
 
-fn combl(x S, delay_time, max_delay_time, decay_time) {
+fn combl(x S, delay_time AsSignal, max_delay_time AsSignal, decay_time AsSignal) S {
 	let a = decay60dB(decay_time / delay_time);
 	let delay_samples = delay_time * fs();
 	let b = delay_samples frac;
@@ -691,16 +701,21 @@ fn combl(x S, delay_time, max_delay_time, decay_time) {
 }
 
 
-fn pull(gate S, initVal, gatedFun) {
+fn pull(gate S, initVal AsConstantSignal, gatedFun fn()S) S {
 	let d = delayVar();
-	d init(0, initVal asSignal);
+	d init(0, initVal);
 	if_(gate > 0, fn(){ gatedFun() write(d) }, fn(){ d(1) })
 }
-fn pause(gate S, gatedFun) = if_(gate > 0, fn(){ gate * gatedFun() });
+fn pause(gate S, gatedFun fn()S) S = if_(gate > 0, fn(){ gate * gatedFun() });
 
 -- tests
 
-fn bubbles() = 0.4 lfsaw * 24 + [8, 7.23] lfsaw * 3 + 81 |> nnhz sinosc * 4c |> combn(0.2,4) outlet;
+fn bubbles() S =
+	0.4 lfsaw * 24
+	+ [8, 7.23] lfsaw * 3
+	+ 81
+	|> nnhz sinosc * 0.04
+	|> combn(0.2, 4) outlet;
 
 bubbles defSynth("bubbles");
 
@@ -708,11 +723,11 @@ fn dustone() = 0.2 * decay2(dust(4, 2), 0.04, 0.3) * 800 fsinxosc |> outlet;
 
 dustone defSynth("dustone");
 
-fn init_urand_test() {
+fn init_urand_test() S {
 	let detune = [-1, 1] vec;
-	let freqs = exprand(100, 600, 8, rates.init) + detune;
-	let ampPhases = urand(16, rates.init);
-	let ampFreqs = exprand(0.1, 0.5, 16, rates.init);
+	let freqs = exprand(100, 600, 8, Rate.init) + detune;
+	let ampPhases = urand(16, Rate.init);
+	let ampFreqs = exprand(0.1, 0.5, 16, Rate.init);
 	let oscs = freqs fsinosc cb * ampFreqs fsinosc(ampPhases) uni;
 	oscs sum(2) * 0.1 |> outlet
 }
@@ -720,7 +735,7 @@ fn init_urand_test() {
 init_urand_test defSynth("init_urand_test");
 
 
-fn pause_bubbles() {
+fn pause_bubbles() S {
     let gate = 0.5 sinosc - 0.5;
     let out = gate pause(fn(){   
         let freq = nnhz(0.4 lfsaw * 24 + [8, 7.23] lfsaw * 3 + 81);
@@ -731,7 +746,7 @@ fn pause_bubbles() {
 
 pause_bubbles defSynth("pause_bubbles");
 
-fn tog_pause() {
+fn tog_pause() S {
     let s0 = 1 lfusqr;
     let s0f = s0      lag(0.05) - 0.01;
     let s1f = s0 cmpl lag(0.05) - 0.01;
@@ -742,7 +757,7 @@ fn tog_pause() {
 tog_pause defSynth("tog_pause")
 
 
-fn pull_nested() {
+fn pull_nested() S {
 	let gate1 = 0.3 fsinosc max0;
     let out = gate1 pause(fn(){ 
         let gate2 = 2 fsinosc max0;
@@ -750,7 +765,7 @@ fn pull_nested() {
        		let freq = nnhz(81 + 24 * 0.4 lfsaw + 3 * [8, 7.23] lfsaw);
             0.04 * freq fsinxosc
 		});
-        out fadein(0.1) combn(0.2, 4);
+        out fadein(0.1) combn(0.2, 4)
 	});
     out outlet
 }
@@ -758,7 +773,7 @@ fn pull_nested() {
 pull_nested defSynth("pull_nested");
 
 
-fn pulltwo() {
+fn pulltwo() S {
     let pullFun1 = fn(){
         let amp = 0.2 * dust(4, 2) decay2(0.04, 0.3);
         amp * 800 fsinxosc
@@ -776,7 +791,7 @@ fn pulltwo() {
 pulltwo defSynth("pulltwo");
 
 
-fn pch_seq() {
+fn pch_seq() S {
     let pch = 3 lfimp pull(200, fn(){ exprand(125, 1000) });
     let out = 0.1 * fsinxosc(pch lag(0.05) + [0,1]) cb;
     out fadein(0.1) combn(0.2, 4) outlet
@@ -786,10 +801,10 @@ fn pch_seq() {
 pch_seq defSynth("pch_seq");
 
 
-fn() S { 0.3 sinosc biexp(1h, 6k) velvet(2) * 0.2 |> outlet } defSynth("dust1");
+fn() S { 0.3 sinosc biexp(100, 6000) velvet(2) * 0.2 |> outlet } defSynth("dust1");
 
 
-fn sahtone1() {
+fn sahtone1() S {
 	let freq = 2 white sampleAndHold(coin(3*T())) biexp(120, 800) lag(0.04);
 	let in = freq lftri * 0.2;
 	in combn(0.2, 2) outlet
@@ -799,7 +814,7 @@ sahtone1 defSynth("sahtone1");
 
 
 
-fn sahtone2() {
+fn sahtone2() S {
 	let freq = 2 white sampleAndHold(3 lfimp) biexp(120, 800) lag(0.04);
 	let in = freq fsinxosc tanh * 0.2;
 	in combn(0.2, 2) outlet
@@ -808,64 +823,63 @@ fn sahtone2() {
 sahtone2 defSynth("sahtone2");
 
 
-fn mod1_test() {
+fn mod1_test() S {
 	let c = 1.4 fsinosc bilin(0.1, 0.95);
 	let in = [60, 61] lfsaw([0, 0.25]) * 0.1;
-	in chain(4, fn(x){x onepole(c)}) outlet
-	in chain(4, fn(x){x onepole(c)}) outlet
+	in chain(4, fn(x S)S{x onepole(c)}) outlet
 }
 
 mod1_test defSynth("mod1_test");
 
-fn mod4_test() {
-	let c = 0.4 fsinosc bilin(0.1, 0.95);
-	let amp = lfimp(1/1.2) decay2(0.01, 0.2) * 0.6;
-	let in = [200, 251] lfsaw([0, 0.25]);
-	let out = amp * in chain(4, fn(x){x onepole(c)});
+fn mod4_test() S {
+	let c S = 0.4 fsinosc bilin(0.1, 0.95);
+	let amp S = lfimp(1 / 1.2) decay2(0.01, 0.2) * 0.6;
+	let in S = [200, 251] lfsaw([0, 0.25]);
+	let out S = amp * in chain(4, fn(x S)S{x onepole(c)});
 	out combn([0.3,0.15], 4) outlet
 }
 
 mod4_test defSynth("mod4_test");
 
-fn mod5_test() {
+fn mod5_test() S {
 	let dv = 0.2;
 	let delayTimes = [0.3, 0.15];
 	let delayMod = 0.5 fsinosc lin(dv, 1);
 	let delayMax = (1 + dv) * delayTimes;
-	let amp = lfimp(1/1.2) decay2(0.01, 0.2) * 0.6;
+	let amp = lfimp(1 / 1.2) decay2(0.01, 0.2) * 0.6;
 	let in = [200, 251] lfzig([0, 0.25]);
-	let out = amp * in chain(4, fn(x){x onepole(0.9)});
+	let out = amp * in chain(4, fn(x S){x onepole(0.9)});
 	out combl(delayTimes * delayMod, delayMax, 4) outlet
 }
 
 mod5_test defSynth("mod5_test");
 
 
-fn white_test() = outlet(2 white * 0.2);
+fn white_test() S = outlet(2 white * 0.2);
 
 white_test defSynth("white_test");
 
 
-fn pink_test() = outlet(2 pinkf * 0.2);
+fn pink_test() S = outlet(2 pinkf * 0.2);
 
 pink_test defSynth("pink_test");
 
 
-fn violet_test() = outlet(2 violet * 0.2);
+fn violet_test() S = outlet(2 violet * 0.2);
 
 violet_test defSynth("violet_test");
 
 
-fn blue_test() = outlet(2 blue * 0.2);
+fn blue_test() S = outlet(2 blue * 0.2);
 
 blue_test defSynth("blue_test");
 
 
-fn red_test() = outlet(2 red * 0.2);
+fn red_test() S = outlet(2 red * 0.2);
 
 red_test defSynth("red_test");
 
-fn bubbles_lite() = 0.4 lfsaw * 24 + 8 lfsaw * 3 + 81 |> nnhz sinosc * 4c |> outlet;
+fn bubbles_lite() S = 0.4 lfsaw * 24 + 8 lfsaw * 3 + 81 |> nnhz sinosc * 0.04 |> outlet;
 
 -- bubbles_lite defSynth("bubbles_lite")
 

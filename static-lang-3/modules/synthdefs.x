@@ -644,7 +644,7 @@ fn f64 (a S) S = CastOp.f64 _newCastOp(a);
 ---------------------------------------------------------------------------
 -- Delay Operators
 
-fn init(d DelayVar, index Int, s AsSignal) DelayVar {
+fn init(d DelayVar, index Int, s AsConstantSignal) DelayVar {
     SignalExprKind.delay(d, DelayOp.init(index)) _newSignalExpr([s asSignal]);
     d
 }
@@ -755,7 +755,7 @@ fn _makeTopGraph(f GraphFn) SignalGraph {
 	_exprIds = saveExprIds;
 	_curGraphDelays = savedDelays;
 	_curGraphExprs = savedExprs;
-	
+
 	graph
 }
 
@@ -964,12 +964,6 @@ fn toLisp(o S) String {
 fn indent(line String) String = "  %^" fmt(line);
 
 fn defSynth(synthFun GraphFn, synthName String) {
-	"Defining synth: %^" fmt(synthName) println;
-
-	-- Increase string print limit to avoid truncation
-	--setStringPrintLimit(100000);
-
-	-- Build the graph by calling the synth function
 	let graph SignalGraph = synthFun _makeTopGraph;
 
 	-- Convert each expression to s-expression format

@@ -236,8 +236,10 @@ private:
     struct MonoKey {
         std::string name;
         std::vector<Type*> typeArgs;
+        void* templateDecl = nullptr;  // disambiguate overloads with same name+typeArgs
         bool operator==(const MonoKey& other) const {
-            return name == other.name && typeArgs == other.typeArgs;
+            return name == other.name && typeArgs == other.typeArgs
+                && templateDecl == other.templateDecl;
         }
     };
     struct MonoKeyHash {
@@ -246,6 +248,7 @@ private:
             for (Type* t : k.typeArgs) {
                 h ^= std::hash<void*>{}(t) + 0x9e3779b9 + (h << 6) + (h >> 2);
             }
+            h ^= std::hash<void*>{}(k.templateDecl) + 0x9e3779b9 + (h << 6) + (h >> 2);
             return h;
         }
     };

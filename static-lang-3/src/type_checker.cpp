@@ -3779,6 +3779,15 @@ Type* TypeChecker::inferBinaryOp(BinaryOpExpr* expr) {
 
     if (!leftType || !rightType) return compiler_.intType();
 
+    // Clear stale resolution from previous template monomorphizations on this
+    // shared AST node.  When the built-in numeric path matches, we must NOT let
+    // a previous overload resolution (e.g. signal-domain operator) persist —
+    // codegen checks resolvedFuncGlobalIndex to decide call vs direct opcode.
+    expr->resolvedFuncGlobalIndex = -1;
+    expr->isBuiltinCall = false;
+    expr->leftAutoMap = {};
+    expr->rightAutoMap = {};
+
     // Try built-in rules first
     switch (expr->op) {
         case BinaryOpExpr::Add:
@@ -4164,6 +4173,11 @@ Type* TypeChecker::inferUnaryOp(UnaryOpExpr* expr) {
 }
 
 Type* TypeChecker::inferCall(CallExpr_* expr) {
+    // Clear stale autoMapArgs/innerAutoMapArgs from previous template instantiation
+    // of the same AST node (template bodies share AST across monomorphizations)
+    expr->autoMapArgs.clear();
+    expr->innerAutoMapArgs.clear();
+
     // Check for module-qualified function call: module.func(args)
     if (expr->callee->kind == ASTNode::FieldExpr) {
         auto* fe = static_cast<FieldExpr_*>(expr->callee.get());
@@ -7245,10 +7259,23 @@ bool TypeChecker::inferTypeParams(const std::vector<std::string>& typeParams,
         }
     }
 
-    // Only unify the supplied arguments
+    // Only unify the supplied arguments (skip params with no typeExpr —
+    // they have no type param to bind, e.g. untyped "rate = Rate.audio")
     for (size_t i = 0; i < argTypes.size(); ++i) {
+        if (!params[i].typeExpr) continue;
         if (!unifyTypeExpr(params[i].typeExpr.get(), argTypes[i], typeParams, bindings)) {
             return false;
+        }
+    }
+
+    // For unsupplied params with defaults, infer type from default expression
+    // and unify to bind any remaining type params (e.g. pm AsSignal = 0)
+    for (size_t i = argTypes.size(); i < params.size(); ++i) {
+        if (params[i].defaultExpr && params[i].typeExpr) {
+            Type* defType = inferExpr(static_cast<Expr*>(params[i].defaultExpr.get()));
+            if (!defType || !unifyTypeExpr(params[i].typeExpr.get(), defType, typeParams, bindings)) {
+                return false;
+            }
         }
     }
 
@@ -7442,8 +7469,8 @@ FuncInfo* TypeChecker::tryResolveTemplate(const std::string& name,
                 typeArgs.push_back(inferArgTypes.back());  // the TupleType
             }
 
-            // Check monomorphization cache
-            MonoKey key{name, typeArgs};
+            // Check monomorphization cache (include declNode to disambiguate overloads)
+            MonoKey key{name, typeArgs, (void*)fi.declNode};
             auto cit = monoCache_.find(key);
             if (cit != monoCache_.end()) {
                 if (callExpr) {
@@ -7553,8 +7580,8 @@ FuncInfo* TypeChecker::tryResolveModuleTemplate(
                 typeArgs.push_back(bindings[tp]);
             }
 
-            // Check monomorphization cache
-            MonoKey key{name, typeArgs};
+            // Check monomorphization cache (include declNode to disambiguate overloads)
+            MonoKey key{name, typeArgs, (void*)fi.declNode};
             auto cit = monoCache_.find(key);
             if (cit != monoCache_.end()) {
                 callExpr->resolvedFuncGlobalIndex = (i32)cit->second->globalIndex;
@@ -7683,7 +7710,8 @@ FuncInfo* TypeChecker::monomorphize(FuncInfo& templateFI,
     functions_[decl->name].push_back(*fi);
 
     // Cache and track (using stable pointer from monoStorage_)
-    MonoKey key{decl->name, typeArgs};
+    // Include declNode to disambiguate overloads with same name+typeArgs
+    MonoKey key{decl->name, typeArgs, (void*)decl};
     monoCache_[key] = fi;
     monoInstances_.push_back(fi);
 

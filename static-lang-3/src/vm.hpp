@@ -334,6 +334,9 @@ public:
     // Pop a call frame - returns the popped frame's data
     CallFrame popFrame();
 
+    // Debug: dump call stack to stderr
+    void dumpCallStack() const;
+
     // --- Global variables ---
 
     u32 addGlobal(bool isObj = false) {
