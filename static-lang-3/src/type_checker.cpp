@@ -4378,26 +4378,33 @@ Type* TypeChecker::inferCall(CallExpr_* expr) {
     if (expr->callee->kind != ASTNode::Identifier) {
         Type* calleeType = inferExpr(static_cast<Expr*>(expr->callee.get()));
         auto* funcType = dynamic_cast<FunctionType*>(calleeType);
-        if (!funcType) {
+        if (funcType) {
+            // Type-check argument count and types
+            if (expr->args.size() != funcType->argTypes_.size()) {
+                error(expr->loc, "Expected " + std::to_string(funcType->argTypes_.size()) +
+                      " arguments, got " + std::to_string(expr->args.size()));
+            }
+            for (size_t i = 0; i < expr->args.size() && i < funcType->argTypes_.size(); ++i) {
+                Type* argType = inferExpr(static_cast<Expr*>(expr->args[i].get()));
+                if (argType && !typesEqual(argType, funcType->argTypes_[i])) {
+                    if (funcType->argTypes_[i] == compiler_.floatType() && argType == compiler_.intType()) {
+                        // promotion OK
+                    } else {
+                        error(expr->args[i]->loc, "Argument type mismatch");
+                    }
+                }
+            }
+            return funcType->returnType_;
+        }
+        // Not a function type — try callable object via `call` function
+        if (functions_.find("call") == functions_.end()) {
             error(expr->callee->loc, "Expression is not callable");
             return compiler_.intType();
         }
-        // Type-check argument count and types
-        if (expr->args.size() != funcType->argTypes_.size()) {
-            error(expr->loc, "Expected " + std::to_string(funcType->argTypes_.size()) +
-                  " arguments, got " + std::to_string(expr->args.size()));
-        }
-        for (size_t i = 0; i < expr->args.size() && i < funcType->argTypes_.size(); ++i) {
-            Type* argType = inferExpr(static_cast<Expr*>(expr->args[i].get()));
-            if (argType && !typesEqual(argType, funcType->argTypes_[i])) {
-                if (funcType->argTypes_[i] == compiler_.floatType() && argType == compiler_.intType()) {
-                    // promotion OK
-                } else {
-                    error(expr->args[i]->loc, "Argument type mismatch");
-                }
-            }
-        }
-        return funcType->returnType_;
+        // Rewrite: expr(args...) → call(expr, args...)
+        expr->args.insert(expr->args.begin(), std::move(expr->callee));
+        expr->callee = std::make_unique<IdentifierExpr>(expr->loc, "call");
+        // Fall through to identifier-based resolution below
     }
 
     auto* ident = static_cast<IdentifierExpr*>(expr->callee.get());
@@ -4912,6 +4919,15 @@ Type* TypeChecker::inferCall(CallExpr_* expr) {
             }
             return funcType->returnType_;
         }
+    }
+
+    // Callable object: variable of non-function type with a `call` function.
+    // Rewrite: myValue(args...) → call(myValue, args...)
+    if (calleeVar && calleeVar->type && functions_.find("call") != functions_.end()) {
+        auto calleeArg = std::make_unique<IdentifierExpr>(ident->loc, ident->name);
+        expr->args.insert(expr->args.begin(), std::move(calleeArg));
+        ident->name = "call";
+        // Fall through to standard function resolution
     }
 
     // Infer argument types first.
