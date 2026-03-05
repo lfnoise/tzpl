@@ -7745,6 +7745,9 @@ void TypeChecker::recheckTemplateBody(FnDeclNode* decl, FuncInfo* fi,
 
     pushScope();
     for (size_t i = 0; i < decl->params.size(); ++i) {
+        if (decl->params[i].defaultExpr) {
+            inferExpr(static_cast<Expr*>(decl->params[i].defaultExpr.get()));
+        }
         declareVar(decl->params[i].name, fi->paramTypes[i], false);
     }
 

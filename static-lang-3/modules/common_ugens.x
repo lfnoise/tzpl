@@ -531,6 +531,16 @@ fn pinkingFilter(x) {
     return b0() + b1() + b2() + b3() + b4() + b5() + b6(1) + x * 0.5362;
 }
 
+
+fn pinkingFilterEco(x)
+{
+    let b0 = delayVar(); (0.99765 * b0(1) + x * 0.0990460) write(b0);
+    let b1 = delayVar(); (0.96300 * b1(1) + x * 0.2965164) write(b1);
+    let b2 = delayVar(); (0.57000 * b2(1) + x * 1.0526913) write(b2);
+    b0() + b1() + b2() + x * 0.1848
+}
+
+/*
 fn pinkingFilterMat(x) {
     -- from Paul Kellett
     let bCoeffs = [0.0555179, 0.0750759, 0.1538520, 0.3104856, 0.5329522, -0.0168980];
@@ -542,23 +552,17 @@ fn pinkingFilterMat(x) {
     0.5362 * x + d1 write(aCoeffs * d1(1) + bCoeffs * x) sum + d2(1)
 }
 
-
-fn pinkingFilterEco(x)
-{
-    let b0 = delayVar(); (0.99765 * b0(1) + x * 0.0990460) write(b0);
-    let b1 = delayVar(); (0.96300 * b1(1) + x * 0.2965164) write(b1);
-    let b2 = delayVar(); (0.57000 * b2(1) + x * 1.0526913) write(b2);
-    b0 + b1 + b2 + x * 0.1848
-}
-
 fn pinkingFilterEcoMat(x)
 {
     let bCoeffs = [0.0990460, 0.2965164, 1.0526913];
     let aCoeffs = [0.99765, 0.96300, 0.57000];
 	let d = delayVar();
-    0.1848 * x + d1 write(aCoeffs * d(1) + bCoeffs * x) sum;
+    0.1848 * x + d write(aCoeffs * d(1) + bCoeffs * x) sum;
 }
 
+fn pinkmf(chans Int = 1) = 0.25 * white(chans) pinkingFilterMat;
+fn pinkmfe(chans Int = 1) = 0.25 * white(chans) pinkingFilterEcoMat;
+*/
 
 fn irand(n Int, cast = i64) = (urand() * n) floor toInt;
 
@@ -568,8 +572,6 @@ fn white(chans Int = 1) = birand(chans);
 fn pinkf(chans Int = 1) = 0.25 * white(chans) pinkingFilter;
 fn pinkfe(chans Int = 1) = 0.25 * white(chans) pinkingFilterEco;
 
-fn pinkmf(chans Int = 1) = 0.25 * white(chans) pinkingFilterMat;
-fn pinkmfe(chans Int = 1) = 0.25 * white(chans) pinkingFilterEcoMat;
 
 fn violet(chans Int = 1) = 0.5 * white(chans) diff;
 

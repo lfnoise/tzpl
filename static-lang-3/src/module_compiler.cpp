@@ -133,7 +133,8 @@ ModuleInfo* ModuleCompiler::compileModule(
     }
 
     // Compute display path (relative to CWD) for error diagnostics
-    std::string displayPath = std::filesystem::relative(resolvedPath).string();
+    std::string displayPath = std::filesystem::relative(
+        resolvedPath, std::filesystem::canonical(std::filesystem::current_path())).string();
 
     // Lex
     Lexer lexer(source, displayPath);
