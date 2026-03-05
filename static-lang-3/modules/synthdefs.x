@@ -636,16 +636,21 @@ fn > (a AsConstantSignal, b S) S = CompareOp.gt _newCompareOp(a asSignal, b);
 ---------------------------------------------------------------------------
 -- Signal Cast Operators
 
-fn i32 (a AsSignal) S = CastOp.i32 _newCastOp(a asSignal);
-fn i64 (a AsSignal) S = CastOp.i64 _newCastOp(a asSignal);
-fn f32 (a AsSignal) S = CastOp.f32 _newCastOp(a asSignal);
-fn f64 (a AsSignal) S = CastOp.f64 _newCastOp(a asSignal);
+fn i32 (a S) S = CastOp.i32 _newCastOp(a);
+fn i64 (a S) S = CastOp.i64 _newCastOp(a);
+fn f32 (a S) S = CastOp.f32 _newCastOp(a);
+fn f64 (a S) S = CastOp.f64 _newCastOp(a);
 
 ---------------------------------------------------------------------------
 -- Delay Operators
 
-fn init(d DelayVar, index Int, s AsSignal) S {
-    SignalExprKind.delay(d, DelayOp.init(index)) _newSignalExpr([s asSignal])
+fn init(d DelayVar, index Int, s AsSignal) DelayVar {
+    SignalExprKind.delay(d, DelayOp.init(index)) _newSignalExpr([s asSignal]);
+    d
+}
+
+fn at(d DelayVar, index Int) S {
+    SignalExprKind.delay(d, DelayOp.read(index)) _newSignalExpr
 }
 
 fn read(d DelayVar, index Int) S {
@@ -828,13 +833,13 @@ fn switch(test, funs [GraphFn]) S {
     SignalExprKind.switch_(graphs) _newSignalExpr([test])
 }
 
-fn select(test S, exprs [S]) S {
-    let ins [S] = [test] $ exprs;
+fn select(test S, exprs [AsSignal]) S {
+    let ins [S] = [test] $ exprs asSignal;
     SignalExprKind.select _newSignalExpr(ins)
 }
 
-fn select2(test S, ifOne S, ifZero S) S {
-    test select([ifZero, ifOne])
+fn select2(test AsSignal, ifOne AsSignal, ifZero AsSignal) S {
+    test asSignal select([ifZero asSignal, ifOne asSignal])
 }
 
 ---------------------------------------------------------------------------
@@ -956,13 +961,13 @@ fn toLisp(o S) String {
 fn indent(line String) String = "  %^" fmt(line);
 
 fn defSynth(synthFun GraphFn, synthName String) {
-	"Defining synth: %^" fmt(synthName) println
+	"Defining synth: %^" fmt(synthName) println;
 
 	-- Increase string print limit to avoid truncation
 	--setStringPrintLimit(100000);
 
 	-- Build the graph by calling the synth function
-	let graph = synthFun _makeTopGraph;
+	let graph SignalGraph = synthFun _makeTopGraph;
 
 	-- Convert each expression to s-expression format
 	let sexprLines = graph.exprs toLisp;
@@ -971,10 +976,8 @@ fn defSynth(synthFun GraphFn, synthName String) {
 	let sexprBody = sexprLines indent separatedString("\n");
 
 	-- Wrap in parentheses to create the top-level list
-	let sexprText = "(%^)\n" fmt(sexprBody)
+	let sexprText = "(%^)\n" fmt(sexprBody);
 
-	
-	
 	graph
 }
 
