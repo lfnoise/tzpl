@@ -111,6 +111,10 @@ std::string formatError(const CompileError& err,
                         const std::string& source,
                         const std::string& filename,
                         bool useColor) {
+    // Use per-error filename/source when available (e.g. errors from imported modules)
+    const std::string& effectiveFilename = err.filename.empty() ? filename : err.filename;
+    const std::string& effectiveSource = err.source.empty() ? source : err.source;
+
     const char* cBoldRed = useColor ? ansi::boldRed : "";
     const char* cCyan    = useColor ? ansi::cyan    : "";
     const char* cGreen   = useColor ? ansi::green   : "";
@@ -132,12 +136,12 @@ std::string formatError(const CompileError& err,
 
     // Header: "Type error [filename:line:col]"
     out << cBoldRed << kind << cReset
-        << " [" << filename << ":" << line << ":" << col << "]\n";
+        << " [" << effectiveFilename << ":" << line << ":" << col << "]\n";
 
     // Try to extract and display source context
-    bool hasSource = !source.empty() && line > 0 && err.loc.start.offset <= source.size();
+    bool hasSource = !effectiveSource.empty() && line > 0 && err.loc.start.offset <= effectiveSource.size();
     if (hasSource) {
-        auto [lineText, lineStart] = extractLine(source, err.loc.start.offset);
+        auto [lineText, lineStart] = extractLine(effectiveSource, err.loc.start.offset);
 
         // Gutter width = width of line number string
         std::string lineNumStr = std::to_string(line);

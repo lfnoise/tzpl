@@ -148,6 +148,7 @@ ModuleInfo* ModuleCompiler::compileModule(
     // Type check (with module compiler for recursive imports)
     TypeChecker typeChecker(compiler_, this);
     typeChecker.setSourceFilePath(resolvedPath);
+    typeChecker.setSourceText(source);
     typeChecker.check(program);
     if (typeChecker.hasErrors()) {
         for (const auto& err : typeChecker.errors()) errors.push_back(err);
@@ -279,6 +280,23 @@ ModuleInfo* ModuleCompiler::compileModule(
         entry.templateTypeAliasDecl = decl;
         mod->exports[name] = std::move(entry);
     }
+
+    // Export constraints
+    for (const auto& [name, cinfo] : typeChecker.constraints()) {
+        if (name.empty() || name[0] == '_') continue;
+        ExportEntry entry;
+        entry.kind = ExportEntry::ConstraintT;
+        entry.name = name;
+        entry.constraintInfo = cinfo;
+        mod->exports[name] = std::move(entry);
+    }
+
+    // Store all internal names for template body re-checking in importers
+    mod->allFunctions = typeChecker.functions();
+    mod->allStructTypes = typeChecker.structTypes();
+    mod->allEnumTypes = typeChecker.enumTypes();
+    mod->allTypeAliases = typeChecker.typeAliases();
+    mod->allConstraints = typeChecker.constraints();
 
     mod->compiling = false;
     return mod;

@@ -149,6 +149,7 @@ CompileResult Compiler::compile(const std::string& source, const std::string& fi
     // Type check
     TypeChecker typeChecker(*this, moduleCompiler);
     typeChecker.setSourceFilePath(filename);
+    typeChecker.setSourceText(source);
     typeChecker.check(program);
     if (typeChecker.hasErrors()) {
         result.errors = typeChecker.errors();

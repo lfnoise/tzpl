@@ -31,7 +31,7 @@ struct TypeAliasDeclNode;
 
 // A single exported name from a module
 struct ExportEntry {
-    enum Kind { Func, Var, StructT, EnumT, TemplateStructT, TemplateEnumT, TypeAlias, TemplateTypeAlias };
+    enum Kind { Func, Var, StructT, EnumT, TemplateStructT, TemplateEnumT, TypeAlias, TemplateTypeAlias, ConstraintT };
     Kind kind;
     std::string name;
     Type* type = nullptr;
@@ -43,6 +43,7 @@ struct ExportEntry {
     UnionDeclNode* templateEnumDecl = nullptr;
     Type* aliasType = nullptr;
     TypeAliasDeclNode* templateTypeAliasDecl = nullptr;
+    TypeChecker::ConstraintInfo constraintInfo;  // for constraint exports
 };
 
 // Information about a compiled module
@@ -56,6 +57,14 @@ struct ModuleInfo {
     u32 initFlagGlobalIndex = 0;  // global slot for "initialized" flag
     bool initialized = false;
     bool compiling = false;  // cycle detection
+
+    // All functions (including private) — needed for template body re-checking
+    std::unordered_map<std::string, std::vector<FuncInfo>> allFunctions;
+    // All types from the module scope — needed for template body re-checking
+    std::unordered_map<std::string, StructType*> allStructTypes;
+    std::unordered_map<std::string, EnumType*> allEnumTypes;
+    std::unordered_map<std::string, Type*> allTypeAliases;
+    std::unordered_map<std::string, TypeChecker::ConstraintInfo> allConstraints;
 };
 
 class ModuleCompiler {

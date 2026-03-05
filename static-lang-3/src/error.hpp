@@ -42,9 +42,16 @@ struct CompileError {
     Kind kind;
     SourceRange loc;
     std::string message;
+    std::string filename;  // source file where the error occurred (may differ from top-level file)
+    std::string source;    // source text of that file (for correct line display)
 
     CompileError(Kind k, SourceRange l, std::string msg)
         : kind(k), loc(l), message(std::move(msg)) {}
+
+    CompileError(Kind k, SourceRange l, std::string msg,
+                 std::string fname, std::string src)
+        : kind(k), loc(l), message(std::move(msg)),
+          filename(std::move(fname)), source(std::move(src)) {}
 };
 
 // Exception thrown when compilation fails

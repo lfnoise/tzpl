@@ -96,7 +96,8 @@ void Parser::error(const std::string& msg) {
 void Parser::error(SourceRange loc, const std::string& msg) {
     // Suppress cascading errors at the same source position
     if (!errors_.empty() && errors_.back().loc.start.offset == loc.start.offset) return;
-    errors_.push_back(CompileError(CompileError::ParseError, loc, msg));
+    errors_.push_back(CompileError(CompileError::ParseError, loc, msg,
+                                   lexer_.filename(), lexer_.source()));
 }
 
 void Parser::synchronize() {

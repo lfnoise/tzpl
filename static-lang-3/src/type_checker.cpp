@@ -18,6 +18,71 @@ namespace ts {
 TypeChecker::TypeChecker(Compiler& compiler, ModuleCompiler* mc)
     : compiler_(compiler), moduleCompiler_(mc), rtRestricted_(compiler.isRTRestricted()) {}
 
+TypeChecker::ImportedModuleScopeGuard::ImportedModuleScopeGuard(TypeChecker& tc, ModuleInfo* mod)
+    : tc(tc) {
+    if (!mod) return;
+    // Merge module's internal functions into type checker scope
+    for (const auto& [name, overloads] : mod->allFunctions) {
+        auto& existing = tc.functions_[name];
+        addedFunctions.push_back({name, existing.size()});
+        for (const auto& fi : overloads) {
+            // Avoid duplicates: skip if already present (by globalIndex)
+            bool found = false;
+            for (const auto& ef : existing) {
+                if (ef.globalIndex == fi.globalIndex) { found = true; break; }
+            }
+            if (!found) existing.push_back(fi);
+        }
+    }
+    // Merge struct types
+    for (const auto& [name, st] : mod->allStructTypes) {
+        if (tc.structTypes_.find(name) == tc.structTypes_.end()) {
+            tc.structTypes_[name] = st;
+            addedStructs.push_back(name);
+        }
+    }
+    // Merge enum types
+    for (const auto& [name, et] : mod->allEnumTypes) {
+        if (tc.enumTypes_.find(name) == tc.enumTypes_.end()) {
+            tc.enumTypes_[name] = et;
+            addedEnums.push_back(name);
+        }
+    }
+    // Merge type aliases
+    for (const auto& [name, at] : mod->allTypeAliases) {
+        if (tc.typeAliases_.find(name) == tc.typeAliases_.end()) {
+            tc.typeAliases_[name] = at;
+            addedAliases.push_back(name);
+        }
+    }
+    // Merge constraints
+    for (const auto& [name, ci] : mod->allConstraints) {
+        if (tc.constraints_.find(name) == tc.constraints_.end()) {
+            tc.constraints_[name] = ci;
+            addedConstraints.push_back(name);
+        }
+    }
+}
+
+TypeChecker::ImportedModuleScopeGuard::~ImportedModuleScopeGuard() {
+    // Undo function additions by truncating back to original sizes
+    for (auto& [name, origSize] : addedFunctions) {
+        auto it = tc.functions_.find(name);
+        if (it != tc.functions_.end()) {
+            it->second.resize(origSize);
+            if (it->second.empty()) tc.functions_.erase(it);
+        }
+    }
+    // Remove added struct types
+    for (auto& name : addedStructs) tc.structTypes_.erase(name);
+    // Remove added enum types
+    for (auto& name : addedEnums) tc.enumTypes_.erase(name);
+    // Remove added type aliases
+    for (auto& name : addedAliases) tc.typeAliases_.erase(name);
+    // Remove added constraints
+    for (auto& name : addedConstraints) tc.constraints_.erase(name);
+}
+
 bool TypeChecker::checkRTSafety(const FuncInfo* func, const std::string& name, SourceRange loc) {
     if (rtRestricted_ && func && !func->rtSafe) {
         error(loc, "Function '" + name + "' is not real-time safe and cannot be "
@@ -82,7 +147,8 @@ VarInfo* TypeChecker::lookupVar(const std::string& name) {
 }
 
 void TypeChecker::error(SourceRange loc, const std::string& msg) {
-    errors_.push_back(CompileError(CompileError::TypeError, loc, msg));
+    errors_.push_back(CompileError(CompileError::TypeError, loc, msg,
+                                   sourceFilePath_, sourceText_));
 }
 
 // --- Check program ---
@@ -646,7 +712,8 @@ void TypeChecker::checkImportDecl(ImportDeclNode* decl) {
             for (const auto& [name, entry] : mod->exports) {
                 switch (entry.kind) {
                     case ExportEntry::Func:
-                        for (const auto& fi : entry.funcOverloads) {
+                        for (auto fi : entry.funcOverloads) {
+                            if (fi.isTemplate) fi.sourceModule = mod;
                             functions_[name].push_back(fi);
                         }
                         break;
@@ -677,6 +744,9 @@ void TypeChecker::checkImportDecl(ImportDeclNode* decl) {
                     case ExportEntry::TemplateTypeAlias:
                         templateTypeAliases_[name] = entry.templateTypeAliasDecl;
                         break;
+                    case ExportEntry::ConstraintT:
+                        constraints_[name] = entry.constraintInfo;
+                        break;
                 }
             }
             break;
@@ -694,7 +764,8 @@ void TypeChecker::checkImportDecl(ImportDeclNode* decl) {
                 const ExportEntry& entry = it->second;
                 switch (entry.kind) {
                     case ExportEntry::Func:
-                        for (const auto& fi : entry.funcOverloads) {
+                        for (auto fi : entry.funcOverloads) {
+                            if (fi.isTemplate) fi.sourceModule = mod;
                             functions_[localName].push_back(fi);
                         }
                         break;
@@ -724,6 +795,9 @@ void TypeChecker::checkImportDecl(ImportDeclNode* decl) {
                         break;
                     case ExportEntry::TemplateTypeAlias:
                         templateTypeAliases_[localName] = entry.templateTypeAliasDecl;
+                        break;
+                    case ExportEntry::ConstraintT:
+                        constraints_[localName] = entry.constraintInfo;
                         break;
                 }
             }
@@ -2515,6 +2589,10 @@ Type* TypeChecker::inferExpr(Expr* expr, Type* expectedType) {
                         case ExportEntry::TemplateTypeAlias:
                             error(expr->loc, "Generic type alias '" + fe->field +
                                   "' requires type arguments");
+                            result = compiler_.intType();
+                            break;
+                        case ExportEntry::ConstraintT:
+                            error(expr->loc, "'" + fe->field + "' is a constraint, not a value");
                             result = compiler_.intType();
                             break;
                     }
@@ -5987,38 +6065,73 @@ void TypeChecker::desugarConstraintParams(FnDeclNode* decl) {
     };
 
     int genCounter = 0;
+
+    // Recursive helper: walk a type expression tree, replacing constraint
+    // names with fresh type parameters and adding where constraints.
+    std::function<void(TypeExpr*)> walkTypeExpr = [&](TypeExpr* expr) {
+        if (!expr) return;
+        switch (expr->kind) {
+        case ASTNode::NamedType: {
+            auto* named = static_cast<NamedTypeNode*>(expr);
+            if (constraints_.count(named->name) == 0) break;
+            if (builtinTypeNames.count(named->name)) break;
+            if (structTypes_.count(named->name)) break;
+            if (enumTypes_.count(named->name)) break;
+            if (typeAliases_.count(named->name)) break;
+            bool isTypeParam = false;
+            for (auto& tp : decl->typeParams) {
+                if (tp == named->name) { isTypeParam = true; break; }
+            }
+            if (isTypeParam) break;
+
+            std::string constraintName = named->name;
+            std::string typeParamName = "__T" + std::to_string(genCounter++);
+            decl->typeParams.push_back(typeParamName);
+            decl->whereConstraints.push_back(
+                WhereConstraint{typeParamName, constraintName, expr->loc});
+            named->name = typeParamName;
+            break;
+        }
+        case ASTNode::ArrayType:
+            walkTypeExpr(static_cast<ArrayTypeNode*>(expr)->elemType.get());
+            break;
+        case ASTNode::ListType:
+            walkTypeExpr(static_cast<ListTypeNode*>(expr)->elemType.get());
+            break;
+        case ASTNode::SetType:
+            walkTypeExpr(static_cast<SetTypeNode*>(expr)->elemType.get());
+            break;
+        case ASTNode::RefType:
+            walkTypeExpr(static_cast<RefTypeNode*>(expr)->elemType.get());
+            break;
+        case ASTNode::MapType: {
+            auto* m = static_cast<MapTypeNode*>(expr);
+            walkTypeExpr(m->keyType.get());
+            walkTypeExpr(m->valueType.get());
+            break;
+        }
+        case ASTNode::TupleType:
+            for (auto& e : static_cast<TupleTypeNode*>(expr)->elemTypes)
+                walkTypeExpr(e.get());
+            break;
+        case ASTNode::FunctionType: {
+            auto* f = static_cast<FunctionTypeNode*>(expr);
+            for (auto& p : f->paramTypes) walkTypeExpr(p.get());
+            walkTypeExpr(f->returnType.get());
+            break;
+        }
+        case ASTNode::TemplateType:
+            for (auto& a : static_cast<TemplateTypeNode*>(expr)->typeArgs)
+                walkTypeExpr(a.get());
+            break;
+        default:
+            break;
+        }
+    };
+
     for (auto& param : decl->params) {
         if (!param.typeExpr) continue;
-        if (param.typeExpr->kind != ASTNode::NamedType) continue;
-
-        auto* named = static_cast<NamedTypeNode*>(param.typeExpr.get());
-
-        // Only desugar if name is a known constraint
-        if (constraints_.count(named->name) == 0) continue;
-
-        // Don't desugar if name is also a concrete type (built-in, struct, enum, alias)
-        if (builtinTypeNames.count(named->name)) continue;
-        if (structTypes_.count(named->name)) continue;
-        if (enumTypes_.count(named->name)) continue;
-        if (typeAliases_.count(named->name)) continue;
-
-        // Don't desugar if name is already a type parameter of this function
-        bool isTypeParam = false;
-        for (auto& tp : decl->typeParams) {
-            if (tp == named->name) { isTypeParam = true; break; }
-        }
-        if (isTypeParam) continue;
-
-        // Generate a fresh type parameter name
-        std::string constraintName = named->name;
-        std::string typeParamName = "__T" + std::to_string(genCounter++);
-
-        decl->typeParams.push_back(typeParamName);
-        decl->whereConstraints.push_back(
-            WhereConstraint{typeParamName, constraintName, param.loc});
-
-        // Replace the param type with the generated type parameter
-        named->name = typeParamName;
+        walkTypeExpr(param.typeExpr.get());
     }
 }
 
@@ -7453,6 +7566,12 @@ FuncInfo* TypeChecker::monomorphize(FuncInfo& templateFI,
                                     CallExpr_* callExpr) {
     FnDeclNode* decl = templateFI.declNode;
 
+    // For imported templates, temporarily merge the source module's scope
+    std::unique_ptr<ImportedModuleScopeGuard> scopeGuard;
+    if (templateFI.sourceModule) {
+        scopeGuard = std::make_unique<ImportedModuleScopeGuard>(*this, templateFI.sourceModule);
+    }
+
     // Save typeParamBindings_
     auto savedBindings = typeParamBindings_;
     typeParamBindings_ = bindings;
@@ -7529,6 +7648,7 @@ FuncInfo* TypeChecker::monomorphize(FuncInfo& templateFI,
     monoPtr->fixedParamCount = templateFI.fixedParamCount;
     monoPtr->numDefaults = templateFI.numDefaults;
     monoPtr->minArity = templateFI.minArity;
+    monoPtr->sourceModule = templateFI.sourceModule;  // propagate for codegen recheck
 
     FuncInfo* fi = monoPtr.get();
     monoStorage_.push_back(std::move(monoPtr));
@@ -7588,6 +7708,12 @@ FuncInfo* TypeChecker::monomorphize(FuncInfo& templateFI,
 
 void TypeChecker::recheckTemplateBody(FnDeclNode* decl, FuncInfo* fi,
                                       const std::unordered_map<std::string, Type*>& bindings) {
+    // For imported templates, temporarily merge the source module's scope
+    std::unique_ptr<ImportedModuleScopeGuard> scopeGuard;
+    if (fi->sourceModule) {
+        scopeGuard = std::make_unique<ImportedModuleScopeGuard>(*this, fi->sourceModule);
+    }
+
     auto savedBindings = typeParamBindings_;
     typeParamBindings_ = bindings;
 

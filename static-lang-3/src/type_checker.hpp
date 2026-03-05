@@ -77,6 +77,9 @@ struct FuncInfo {
     // RT safety: safe to call from a real-time VM. Default true for user-defined fns
     // (the type checker transitively prevents them from calling non-RT-safe functions).
     bool rtSafe = true;
+
+    // Source module for imported template functions (needed for body re-checking)
+    struct ModuleInfo* sourceModule = nullptr;
 };
 
 class TypeChecker {
@@ -89,8 +92,9 @@ public:
     // Type-check a REPL input (incremental: preserves state across calls)
     void checkREPLInput(Program& program);
 
-    // Set the source file path (for module resolution)
+    // Set the source file path (for module resolution and error reporting)
     void setSourceFilePath(const std::string& path) { sourceFilePath_ = path; }
+    void setSourceText(const std::string& src) { sourceText_ = src; }
 
     // Error access
     void clearErrors() { errors_.clear(); }
@@ -113,8 +117,45 @@ public:
     const std::unordered_map<std::string, Type*>& typeAliases() const { return typeAliases_; }
     const std::unordered_map<std::string, TypeAliasDeclNode*>& templateTypeAliases() const { return templateTypeAliases_; }
 
+    // Constraint system types (public for module export/import)
+    struct ConstraintPattern {
+        enum Kind { ConcreteType, ConstraintRef, Parameterized };
+        Kind kind;
+        Type* type = nullptr;              // ConcreteType: exact match
+        std::string constraintName;        // ConstraintRef: check recursively
+
+        enum class Ctor { Array, List, Map, Set, Ref, Range, Coroutine };
+        Ctor ctor;                                  // Parameterized: type constructor
+        std::vector<ConstraintPattern> args;        // Parameterized: sub-patterns
+    };
+
+    struct ConstraintInfo {
+        std::string name;
+        std::vector<std::string> typeParams;   // e.g. ["T"]
+
+        // Union items: patterns joined by | (types, constraint refs, parameterized)
+        std::vector<ConstraintPattern> patterns;
+
+        // Structural: required function signatures
+        struct ReqFn {
+            std::string name;
+            std::vector<TypeExprPtr*> paramTypeExprs;  // pointers into the AST
+            TypeExprPtr* returnTypeExpr;
+        };
+        std::vector<ReqFn> requiredFns;
+
+        // Composition: names of constituent constraints joined by &
+        struct ComponentRef {
+            std::string name;
+            std::vector<TypeExprPtr*> typeArgExprs;  // pointers into the AST
+        };
+        std::vector<ComponentRef> components;
+
+        ConstraintDeclNode* declNode = nullptr;
+    };
+
     // Constraint registry access (for module export)
-    const auto& constraints() const { return constraints_; }
+    const std::unordered_map<std::string, ConstraintInfo>& constraints() const { return constraints_; }
 
     // Module system access
     const std::unordered_map<std::string, ModuleInfo*>& importedModules() const { return importedModules_; }
@@ -124,6 +165,16 @@ public:
     const std::vector<FuncInfo*>& monoInstances() const { return monoInstances_; }
     void recheckTemplateBody(FnDeclNode* decl, FuncInfo* fi,
                              const std::unordered_map<std::string, Type*>& bindings);
+
+    // RAII guard: temporarily merges an imported module's internal scope for template body re-checking
+    struct ImportedModuleScopeGuard {
+        TypeChecker& tc;
+        std::vector<std::pair<std::string, size_t>> addedFunctions;  // name → original size
+        std::vector<std::string> addedStructs, addedEnums, addedAliases, addedConstraints;
+
+        ImportedModuleScopeGuard(TypeChecker& tc, ModuleInfo* mod);
+        ~ImportedModuleScopeGuard();
+    };
     void recheckTemplateLambdaBody(LambdaExprNode* expr, LambdaType* lambdaType,
                                    TemplateLambdaType* tmplType);
 
@@ -131,6 +182,7 @@ private:
     Compiler& compiler_;
     ModuleCompiler* moduleCompiler_ = nullptr;
     std::string sourceFilePath_;
+    std::string sourceText_;
     bool builtinsRegistered_ = false;
 
     // Module system: whole-module imports (alias -> ModuleInfo*)
@@ -219,44 +271,7 @@ private:
     // Synthetic Option<T> template declaration (built-in, not from source)
     std::unique_ptr<UnionDeclNode> syntheticOptionDecl_;
 
-    // Constraint system
-
-    // A pattern that matches types in a constraint union item
-    struct ConstraintPattern {
-        enum Kind { ConcreteType, ConstraintRef, Parameterized };
-        Kind kind;
-        Type* type = nullptr;              // ConcreteType: exact match
-        std::string constraintName;        // ConstraintRef: check recursively
-
-        enum class Ctor { Array, List, Map, Set, Ref, Range, Coroutine };
-        Ctor ctor;                                  // Parameterized: type constructor
-        std::vector<ConstraintPattern> args;        // Parameterized: sub-patterns
-    };
-
-    struct ConstraintInfo {
-        std::string name;
-        std::vector<std::string> typeParams;   // e.g. ["T"]
-
-        // Union items: patterns joined by | (types, constraint refs, parameterized)
-        std::vector<ConstraintPattern> patterns;
-
-        // Structural: required function signatures
-        struct ReqFn {
-            std::string name;
-            std::vector<TypeExprPtr*> paramTypeExprs;  // pointers into the AST
-            TypeExprPtr* returnTypeExpr;
-        };
-        std::vector<ReqFn> requiredFns;
-
-        // Composition: names of constituent constraints joined by &
-        struct ComponentRef {
-            std::string name;
-            std::vector<TypeExprPtr*> typeArgExprs;  // pointers into the AST
-        };
-        std::vector<ComponentRef> components;
-
-        ConstraintDeclNode* declNode = nullptr;
-    };
+    // Constraint registry
     std::unordered_map<std::string, ConstraintInfo> constraints_;
 
     // Recursion guard for constraint checking

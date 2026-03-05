@@ -121,6 +121,10 @@ public:
     const std::vector<CompileError>& errors() const { return errors_; }
     bool hasErrors() const { return !errors_.empty(); }
 
+    // Source context access (for error reporting)
+    const std::string& source() const { return source_; }
+    const std::string& filename() const { return filename_; }
+
     // Save/restore state for tentative parsing
     struct State {
         u32 pos;
