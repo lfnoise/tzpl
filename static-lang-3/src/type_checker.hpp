@@ -171,6 +171,8 @@ public:
         TypeChecker& tc;
         std::vector<std::pair<std::string, size_t>> addedFunctions;  // name → original size
         std::vector<std::string> addedStructs, addedEnums, addedAliases, addedConstraints;
+        std::string savedSourceFilePath;
+        std::string savedSourceText;
 
         ImportedModuleScopeGuard(TypeChecker& tc, ModuleInfo* mod);
         ~ImportedModuleScopeGuard();

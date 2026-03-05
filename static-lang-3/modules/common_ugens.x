@@ -375,7 +375,7 @@ fn chain(x, n, f) = n times(x, f);
 fn z1(a S) {
 	let d = delayVar();
 	d <- a;
-	d at(1)
+	d(1)
 }
 
 fn z2(a S) {
@@ -399,24 +399,24 @@ fn init() {
 
 fn sampleAndHold(x S, t S) {
 	let y = delayVar();
-	select2(t > 0, x, y at(1)) write(y)
+	select2(t > 0, x, y(1)) write(y)
 }
 
 -- flip flops
 
 fn toggle(x S) {
 	let y = delayVar();
-	select2(x > 0, 1 - y at(1), y at(1)) write(y)
+	select2(x > 0, 1 - y(1), y(1)) write(y)
 }
 
 fn setReset(s S, r S) {
 	let y = delayVar();
-	select2(r > 0, 0, select2(s > 0, 1, y at(1))) write(y)
+	select2(r > 0, 0, select2(s > 0, 1, y(1))) write(y)
 }
 
 fn setResetToggle(s S, r S, t S) {
 	let y = delayVar();
-	select2(r > 0, 0, select2(s > 0, 1, select2(t > 0, 1 - y at(1), y at(1)))) write(y)
+	select2(r > 0, 0, select2(s > 0, 1, select2(t > 0, 1 - y(1), y(1)))) write(y)
 }
 
 -- simple filters
@@ -424,25 +424,25 @@ fn setResetToggle(s S, r S, t S) {
 fn lag(x, t) {
     let a = decay40dB(t * fs());
     let y = delayVar();
-    y <- x + a * (y at(1) - x)
+    y <- x + a * (y(1) - x)
 }
 
 -- leaky integrator
 fn leaky(x S, a) {
 	let y = delayVar();
-    y <- x + a * y at(1)
+    y <- x + a * y(1)
 }
 
 fn onepole(x, a) {
 	let y = delayVar();
-	y <- x + a * (y at(1) - x)
+	y <- x + a * (y(1) - x)
 }
 
 fn onezero(x, a) = x + a * (z1(x) - x);
 
 fn leakdc(x, k) {
 	let y = delayVar();
-	y <- x - z1(x) + k * y at(1)
+	y <- x - z1(x) + k * y(1)
 }
 
 -- exponential decay
@@ -457,38 +457,38 @@ fn accel(x S) = slope(slope(x));
 fn jerk(x S) = slope(accel(x));
 
 -- integration
-fn unscaledIntegrator(x S)    { let y = delayVar(); y <- y at(1) + x }
-fn trapezoidalIntegrator(x S) { let y = delayVar(); y <- y at(1) + (x + x z1) * (T()/2) }
-fn forwardIntegrator(x S)     { let y = delayVar(); y <- y at(1) + x z1 * T() }
-fn backwardIntegrator(x S)    { let y = delayVar(); y <- y at(1) + x*T() }
+fn unscaledIntegrator(x S)    { let y = delayVar(); y <- y(1) + x }
+fn trapezoidalIntegrator(x S) { let y = delayVar(); y <- y(1) + (x + x z1) * (T()/2) }
+fn forwardIntegrator(x S)     { let y = delayVar(); y <- y(1) + x z1 * T() }
+fn backwardIntegrator(x S)    { let y = delayVar(); y <- y(1) + x*T() }
 
 -- integration with reset
 fn unscaledIntegrator(x S, r S)    { 
 	let y = delayVar();
-	select2(r > 0, 0, y at(1) + x) write(y) 
+	select2(r > 0, 0, y(1) + x) write(y) 
 }
 fn trapezoidalIntegrator(x S, r S) { 
 	let y = delayVar();
-	select2(r > 0, 0, y at(1) + (x + x z1) * (T()/2)) write(y) 
+	select2(r > 0, 0, y(1) + (x + x z1) * (T()/2)) write(y) 
 }
 fn forwardIntegrator(x S, r S) { 
 	let y = delayVar();
-	select2(r > 0, 0, y at(1) + x z1 * T()) write(y)
+	select2(r > 0, 0, y(1) + x z1 * T()) write(y)
 }
 fn backwardIntegrator(x S, r S) { 
 	let y = delayVar();
-	select2(r > 0, 0, y at(1) + x * T()) write(y)
+	select2(r > 0, 0, y(1) + x * T()) write(y)
 }
 
 -- min and max followers
 fn minfollow(x S, r S) { 
 	let y = delayVar();
-	select2(r > 0, x, min(x, y at(1))) write(y) 
+	select2(r > 0, x, min(x, y(1))) write(y) 
 }
 
 fn maxfollow(x S, r S) { 
 	let y = delayVar();
-	select2(r > 0, x, max(x, y at(1))) write(y)
+	select2(r > 0, x, max(x, y(1))) write(y)
 }
 
 
@@ -515,20 +515,20 @@ fn localmin(x S) = (x > x z1) * (x z1 < x z2);
 fn fadein(x, t) {
     let dt = 1 / (t * fs());
     let y = delayVar();
-    min(1, dt + y at(1)) write(y) cb * x
+    min(1, dt + y(1)) write(y) cb * x
 }
 
 
 fn pinkingFilter(x) {
     -- from Paul Kellett
-    let b0 = delayVar(); (0.99886 * b0 at(1) + x * 0.0555179) write(b0);
-    let b1 = delayVar(); (0.99332 * b1 at(1) + x * 0.0750759) write(b1);
-    let b2 = delayVar(); (0.96900 * b2 at(1) + x * 0.1538520) write(b2);
-    let b3 = delayVar(); (0.86650 * b3 at(1) + x * 0.3104856) write(b3);
-    let b4 = delayVar(); (0.55000 * b4 at(1) + x * 0.5329522) write(b4);
-    let b5 = delayVar(); (-0.7616 * b5 at(1) - x * 0.0168980) write(b5);
+    let b0 = delayVar(); (0.99886 * b0(1) + x * 0.0555179) write(b0);
+    let b1 = delayVar(); (0.99332 * b1(1) + x * 0.0750759) write(b1);
+    let b2 = delayVar(); (0.96900 * b2(1) + x * 0.1538520) write(b2);
+    let b3 = delayVar(); (0.86650 * b3(1) + x * 0.3104856) write(b3);
+    let b4 = delayVar(); (0.55000 * b4(1) + x * 0.5329522) write(b4);
+    let b5 = delayVar(); (-0.7616 * b5(1) - x * 0.0168980) write(b5);
     let b6 = delayVar(); (x * 0.115926) write(b6);
-    return b0() + b1() + b2() + b3() + b4() + b5() + b6 at(1) + x * 0.5362;
+    return b0() + b1() + b2() + b3() + b4() + b5() + b6(1) + x * 0.5362;
 }
 
 fn pinkingFilterMat(x) {
@@ -539,15 +539,15 @@ fn pinkingFilterMat(x) {
 	let d2 = delayVar();
 
 	d2 <- x * 0.115926;
-    0.5362 * x + d1 write(aCoeffs * d1 at(1) + bCoeffs * x) sum + d2 at(1)
+    0.5362 * x + d1 write(aCoeffs * d1(1) + bCoeffs * x) sum + d2(1)
 }
 
 
 fn pinkingFilterEco(x)
 {
-    let b0 = delayVar(); (0.99765 * b0 at(1) + x * 0.0990460) write(b0);
-    let b1 = delayVar(); (0.96300 * b1 at(1) + x * 0.2965164) write(b1);
-    let b2 = delayVar(); (0.57000 * b2 at(1) + x * 1.0526913) write(b2);
+    let b0 = delayVar(); (0.99765 * b0(1) + x * 0.0990460) write(b0);
+    let b1 = delayVar(); (0.96300 * b1(1) + x * 0.2965164) write(b1);
+    let b2 = delayVar(); (0.57000 * b2(1) + x * 1.0526913) write(b2);
     b0 + b1 + b2 + x * 0.1848
 }
 
@@ -556,7 +556,7 @@ fn pinkingFilterEcoMat(x)
     let bCoeffs = [0.0990460, 0.2965164, 1.0526913];
     let aCoeffs = [0.99765, 0.96300, 0.57000];
 	let d = delayVar();
-    0.1848 * x + d1 write(aCoeffs * d at(1) + bCoeffs * x) sum;
+    0.1848 * x + d1 write(aCoeffs * d(1) + bCoeffs * x) sum;
 }
 
 
@@ -577,7 +577,7 @@ fn blue(chans Int = 1) = 0.5 * pinkf(chans) diff;
 
 fn red(chans Int = 1, a=0.05) {
 	let y = delayVar();
-	(y at(1) + chans birand * a) bfold_cheaper write(y)
+	(y(1) + chans birand * a) bfold_cheaper write(y)
 }
 
 fn coin(prob, chans Int = 1) = urand(chans) < prob;
@@ -647,7 +647,7 @@ fn bsquare(x) = sel(x < 0.5, -1, 1);
 -- It is the core of many oscillators.
 fn phasor(fm, pm=0) {
 	let phase = delayVar();
-	let p = frac(phase at(1) + fm * T()) write(phase);
+	let p = frac(phase(1) + fm * T()) write(phase);
 	pm == 0 ? p : frac(p + pm)
 }
 
@@ -692,7 +692,7 @@ fn combl(x S, delay_time, max_delay_time, decay_time) {
 fn pull(gate S, initVal, gatedFun) {
 	let d = delayVar();
 	d init(0, initVal asSignal);
-	if_(gate > 0, fn(){ gatedFun() write(d) }, fn(){ d at(1) })
+	if_(gate > 0, fn(){ gatedFun() write(d) }, fn(){ d(1) })
 }
 fn pause(gate S, gatedFun) = if_(gate > 0, fn(){ gate * gatedFun() });
 

@@ -442,7 +442,7 @@ fn irand(lo Int, hi Int, chans Chans = 1, rate Rate = Rate.audio) S {
 fn urand(chans Chans = 1, rate Rate = Rate.audio) S {
     SignalExprKind.random(RandOp.unipolar, rate, chans asChans) _newSignalExpr
 }
-fn brand(chans Chans = 1, rate Rate = Rate.audio) S {
+fn birand(chans Chans = 1, rate Rate = Rate.audio) S {
     SignalExprKind.random(RandOp.bipolar, rate, chans asChans) _newSignalExpr
 }
 fn rand64(chans Chans = 1, rate Rate = Rate.audio) S {
@@ -657,7 +657,7 @@ fn read(d DelayVar, index Int) S {
     SignalExprKind.delay(d, DelayOp.read(index)) _newSignalExpr
 }
 
-fn vread(d DelayVar, index AsSignal, interp Interpolation) S {
+fn vread(d DelayVar, index AsSignal, interp Interpolation = Interpolation.cubic) S {
     SignalExprKind.delay(d, DelayOp.vread(interp)) _newSignalExpr([index asSignal])
 }
 
@@ -667,6 +667,9 @@ fn write(d DelayVar, s AsSignal) S {
 fn write(s AsSignal, d DelayVar) S {
     SignalExprKind.delay(d, DelayOp.write) _newSignalExpr([s asSignal])
 }
+
+fn call(d DelayVar, index Int = 0) S = d read(index);
+fn call(d DelayVar, index S) S = d vread(index);
 
 fn <- (d DelayVar, s AsSignal) S = d write(s asSignal);
 fn -> (s AsSignal, d DelayVar) S = s asSignal write(d);

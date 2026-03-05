@@ -159,6 +159,8 @@ CompileResult Compiler::compile(const std::string& source, const std::string& fi
 
     // Code generation
     CodeGen codegen(*this, typeChecker);
+    codegen.setSourceFilePath(filename);
+    codegen.setSourceText(source);
     codegen.enableRegReclaim = enableRegReclaim;
     codegen.enableConstFold = enableConstFold;
     codegen.enableTailCalls = enableTailCalls;

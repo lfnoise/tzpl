@@ -93,7 +93,8 @@ CodeGen::LocalVar* CodeGen::lookupLocal(const std::string& name) {
 }
 
 void CodeGen::error(SourceRange loc, const std::string& msg) {
-    errors_.push_back(CompileError(CompileError::TypeError, loc, msg));
+    errors_.push_back(CompileError(CompileError::TypeError, loc, msg,
+                                   sourceFilePath_, sourceText_));
 }
 
 // --- Jump helpers ---
@@ -842,6 +843,14 @@ void CodeGen::genMonoInstance(FuncInfo& monoInfo) {
     FnDeclNode* decl = monoInfo.declNode;
     if (!decl) return;
 
+    // For imported templates, switch source context for correct error diagnostics
+    std::string savedFilePath = sourceFilePath_;
+    std::string savedText = sourceText_;
+    if (monoInfo.sourceModule && !monoInfo.sourceModule->sourceFilePath.empty()) {
+        sourceFilePath_ = monoInfo.sourceModule->sourceFilePath;
+        sourceText_ = monoInfo.sourceModule->sourceText;
+    }
+
     // Re-type-check the body with the monomorphization bindings
     typeChecker_.recheckTemplateBody(decl, &monoInfo, monoInfo.monoBindings);
 
@@ -972,6 +981,10 @@ void CodeGen::genMonoInstance(FuncInfo& monoInfo) {
     localScopes_ = std::move(savedScopes);
     jumpFixups_ = std::move(savedFixups);
     constRegs_ = std::move(savedConsts);
+
+    // Restore source context
+    sourceFilePath_ = savedFilePath;
+    sourceText_ = savedText;
 
     // Store the CodeBlock in the VM's globals
     compiler_.global(monoInfo.globalIndex).p = fnBlock;

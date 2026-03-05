@@ -21,6 +21,13 @@ TypeChecker::TypeChecker(Compiler& compiler, ModuleCompiler* mc)
 TypeChecker::ImportedModuleScopeGuard::ImportedModuleScopeGuard(TypeChecker& tc, ModuleInfo* mod)
     : tc(tc) {
     if (!mod) return;
+    // Switch source context to module's source for correct error diagnostics
+    savedSourceFilePath = tc.sourceFilePath_;
+    savedSourceText = tc.sourceText_;
+    if (!mod->sourceFilePath.empty()) {
+        tc.sourceFilePath_ = mod->sourceFilePath;
+        tc.sourceText_ = mod->sourceText;
+    }
     // Merge module's internal functions into type checker scope
     for (const auto& [name, overloads] : mod->allFunctions) {
         auto& existing = tc.functions_[name];
@@ -65,6 +72,9 @@ TypeChecker::ImportedModuleScopeGuard::ImportedModuleScopeGuard(TypeChecker& tc,
 }
 
 TypeChecker::ImportedModuleScopeGuard::~ImportedModuleScopeGuard() {
+    // Restore source context
+    tc.sourceFilePath_ = savedSourceFilePath;
+    tc.sourceText_ = savedSourceText;
     // Undo function additions by truncating back to original sizes
     for (auto& [name, origSize] : addedFunctions) {
         auto it = tc.functions_.find(name);

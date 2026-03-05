@@ -58,6 +58,10 @@ struct ModuleInfo {
     bool initialized = false;
     bool compiling = false;  // cycle detection
 
+    // Source file info — needed for correct error diagnostics in imported templates
+    std::string sourceFilePath;
+    std::string sourceText;
+
     // All functions (including private) — needed for template body re-checking
     std::unordered_map<std::string, std::vector<FuncInfo>> allFunctions;
     // All types from the module scope — needed for template body re-checking

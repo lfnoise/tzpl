@@ -40,10 +40,16 @@ public:
     bool enableConstFold = true;
     bool enableTailCalls = true;
 
+    // Source context for error diagnostics (set by caller)
+    void setSourceFilePath(const std::string& path) { sourceFilePath_ = path; }
+    void setSourceText(const std::string& src) { sourceText_ = src; }
+
 private:
     Compiler& compiler_;
     TypeChecker& typeChecker_;
     std::vector<CompileError> errors_;
+    std::string sourceFilePath_;
+    std::string sourceText_;
 
     // Current code block being emitted to
     CodeBlock* currentBlock_;

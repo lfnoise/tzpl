@@ -132,8 +132,11 @@ ModuleInfo* ModuleCompiler::compileModule(
         return nullptr;
     }
 
+    // Compute display path (relative to CWD) for error diagnostics
+    std::string displayPath = std::filesystem::relative(resolvedPath).string();
+
     // Lex
-    Lexer lexer(source, resolvedPath);
+    Lexer lexer(source, displayPath);
 
     // Parse — store AST in ModuleInfo so template declNode pointers stay valid
     Parser parser(lexer);
@@ -147,7 +150,7 @@ ModuleInfo* ModuleCompiler::compileModule(
 
     // Type check (with module compiler for recursive imports)
     TypeChecker typeChecker(compiler_, this);
-    typeChecker.setSourceFilePath(resolvedPath);
+    typeChecker.setSourceFilePath(displayPath);
     typeChecker.setSourceText(source);
     typeChecker.check(program);
     if (typeChecker.hasErrors()) {
@@ -158,6 +161,8 @@ ModuleInfo* ModuleCompiler::compileModule(
 
     // Code generation
     CodeGen codegen(compiler_, typeChecker);
+    codegen.setSourceFilePath(displayPath);
+    codegen.setSourceText(source);
     CodeBlock* initBlock = codegen.generate(program, true);  // module init ends with return, not halt
     if (codegen.hasErrors()) {
         for (const auto& err : codegen.errors()) errors.push_back(err);
@@ -290,6 +295,10 @@ ModuleInfo* ModuleCompiler::compileModule(
         entry.constraintInfo = cinfo;
         mod->exports[name] = std::move(entry);
     }
+
+    // Store source info for correct error diagnostics in imported templates
+    mod->sourceFilePath = displayPath;
+    mod->sourceText = source;
 
     // Store all internal names for template body re-checking in importers
     mod->allFunctions = typeChecker.functions();
