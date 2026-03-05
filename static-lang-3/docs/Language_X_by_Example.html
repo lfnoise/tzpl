@@ -368,6 +368,7 @@ if (localStorage.getItem('langx-docs-theme') === 'light') document.documentEleme
         <li><a href="#default-arguments">Default Arguments</a></li>
         <li><a href="#variadic-arguments">Variadic Arguments</a></li>
         <li><a href="#string-formatting">String Formatting</a></li>
+        <li><a href="#callable-objects">Callable Objects</a></li>
       </ol>
     </li>
     <li><a href="#control-flow">Control Flow</a>
@@ -881,6 +882,56 @@ greet(<span class="str">"Hi"</span>) println;                       <span class=
 
 <span class="cmt">-- Zero args is fine when no placeholders are used</span>
 <span class="str">"no placeholders"</span> fmt() println;           <span class="cmt">-- no placeholders</span></code></pre>
+
+<h3 id="callable-objects">4.11 Callable Objects</h3>
+<p>Any type can be made callable by defining a function named <code>call</code> whose first parameter is that type. This is similar to C++'s <code>operator()</code>. When a value of type <code>T</code> appears in call position, the compiler rewrites <code>value(args...)</code> to <code>call(value, args...)</code>.</p>
+<pre><code><span class="cmt">-- Define a callable struct</span>
+<span class="kw">struct</span> Adder { amount <span class="kw">Int</span> }
+<span class="kw">fn</span> call(a Adder, x <span class="kw">Int</span>) <span class="kw">Int</span> = x + a.amount;
+
+<span class="kw">let</span> add5 = Adder { <span class="num">5</span> };
+add5(<span class="num">10</span>) println;     <span class="cmt">-- 15</span>
+add5(<span class="num">0</span>) println;      <span class="cmt">-- 5</span></code></pre>
+
+<p>The <code>call</code> function supports all the same features as regular functions: overloading by arity and type, templates, and auto-mapping.</p>
+<pre><code><span class="cmt">-- Overloaded by arity</span>
+<span class="kw">struct</span> Multiplier { factor <span class="kw">Float</span> }
+<span class="kw">fn</span> call(m Multiplier, x <span class="kw">Float</span>) <span class="kw">Float</span> = x * m.factor;
+<span class="kw">fn</span> call(m Multiplier, x <span class="kw">Float</span>, y <span class="kw">Float</span>) <span class="kw">Float</span> = (x + y) * m.factor;
+
+<span class="kw">let</span> dbl = Multiplier { <span class="num">2.0</span> };
+dbl(<span class="num">3.0</span>) println;         <span class="cmt">-- 6.0</span>
+dbl(<span class="num">1.5</span>, <span class="num">2.5</span>) println;   <span class="cmt">-- 8.0</span>
+
+<span class="cmt">-- Overloaded by argument type</span>
+<span class="kw">struct</span> Formatter { prefix <span class="kw">String</span> }
+<span class="kw">fn</span> call(f Formatter, x <span class="kw">Int</span>) <span class="kw">String</span> = f.prefix $ x toString;
+<span class="kw">fn</span> call(f Formatter, x <span class="kw">String</span>) <span class="kw">String</span> = f.prefix $ x;
+
+<span class="kw">let</span> fmt = Formatter { <span class="str">">> "</span> };
+fmt(<span class="num">42</span>) println;       <span class="cmt">-- >> 42</span>
+fmt(<span class="str">"hello"</span>) println;  <span class="cmt">-- >> hello</span>
+
+<span class="cmt">-- Template call</span>
+<span class="kw">struct</span> Wrapper { value <span class="kw">Int</span> }
+<span class="kw">fn</span> call&lt;T&gt;(w Wrapper, f (<span class="kw">Int</span>) T) T = f(w.value);
+
+<span class="kw">let</span> w = Wrapper { <span class="num">10</span> };
+<span class="kw">let</span> sq = <span class="kw">fn</span>(x <span class="kw">Int</span>) <span class="kw">Int</span> { x * x };
+w(sq) println;        <span class="cmt">-- 100</span></code></pre>
+
+<p>Chained calls work naturally &mdash; if the first call returns another callable type, it can be called immediately.</p>
+<pre><code><span class="kw">struct</span> Counter { start <span class="kw">Int</span> }
+<span class="kw">struct</span> Stepper { base <span class="kw">Int</span>, step <span class="kw">Int</span> }
+<span class="kw">fn</span> call(c Counter, step <span class="kw">Int</span>) Stepper = Stepper { c.start, step };
+<span class="kw">fn</span> call(s Stepper, n <span class="kw">Int</span>) <span class="kw">Int</span> = s.base + s.step * n;
+
+<span class="kw">let</span> counter = Counter { <span class="num">100</span> };
+counter(<span class="num">5</span>)(<span class="num">3</span>) println;  <span class="cmt">-- 115  (100 + 5 * 3)</span></code></pre>
+
+<p>Auto-mapping works via pipeline syntax.</p>
+<pre><code><span class="kw">let</span> nums = [<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>, <span class="num">4</span>, <span class="num">5</span>];
+nums @ add5 println;  <span class="cmt">-- [6, 7, 8, 9, 10]</span></code></pre>
 
 <h2 id="control-flow">5. Control Flow</h2>
 
