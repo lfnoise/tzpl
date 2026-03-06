@@ -88,6 +88,11 @@ VM::VM(usize poolSize, TypeUniverse& typeUniverse, const VMTarget& target)
     , pc_(nullptr)
     , globals_(rt::STLAllocator<Word>(&allocator_))
     , globalIsObj_(rt::STLAllocator<u8>(&allocator_))
+    , dynVars_(rt::STLAllocator<Word>(&allocator_))
+    , dynVarIsObj_(rt::STLAllocator<u8>(&allocator_))
+    , dynStack_(nullptr)
+    , dynStackTop_(0)
+    , maxDynStack_(256)
     , halted_(false)
     , typeUniverse_(typeUniverse)
     , currentPrimitive_(nullptr)
@@ -113,6 +118,10 @@ VM::VM(usize poolSize, TypeUniverse& typeUniverse, const VMTarget& target)
     frames_ = static_cast<CallFrame*>(allocator_.allocate(maxFrames_ * sizeof(CallFrame)));
     if (!frames_) throw std::bad_alloc();
 
+    // Allocate dynamic scope save stack from TLSF
+    dynStack_ = static_cast<DynSaveEntry*>(allocator_.allocate(maxDynStack_ * sizeof(DynSaveEntry)));
+    if (!dynStack_) throw std::bad_alloc();
+
     // Types are already created by TypeUniverse — nothing to do here.
 
     // Initialize currentRegs_ to point at base of register file
@@ -128,9 +137,10 @@ VM::~VM() {
         gc_.heartbeat();
     }
 
-    // Deallocate register file and frame stack
+    // Deallocate register file, frame stack, and dynamic scope stack
     if (regs_) allocator_.deallocate(regs_);
     if (frames_) allocator_.deallocate(frames_);
+    if (dynStack_) allocator_.deallocate(dynStack_);
 }
 
 void VM::makeCurrent() {
@@ -153,6 +163,7 @@ void VM::pushFrame(Code* returnPC, CodeBlock* codeBlock, u32 newBase, u32 numReg
     frame.baseReg = baseReg_;
     frame.numRegs = numRegs;
     frame.resultReg = resultReg;
+    frame.dynStackMark = dynStackTop_;
 
     baseReg_ = newBase;
     currentRegs_ = regs_ + baseReg_;
@@ -165,6 +176,10 @@ CallFrame VM::popFrame() {
 
     --frameCount_;
     CallFrame frame = frames_[frameCount_];
+
+    // Restore dynamic scope bindings pushed during this frame
+    dynScopeRestore(frame.dynStackMark);
+
     baseReg_ = frame.baseReg;
     currentRegs_ = regs_ + baseReg_;
     return frame;
@@ -197,6 +212,12 @@ void VM::install(const CompileResult& result) {
     for (auto& slot : result.newGlobals) {
         globals_.push_back(slot.value);
         globalIsObj_.push_back(slot.isObj ? 1 : 0);
+    }
+
+    // Ensure dynamic variable table is large enough
+    while (dynVars_.size() < result.numDynVars) {
+        dynVars_.push_back(Word());
+        dynVarIsObj_.push_back(0);
     }
 }
 
@@ -272,6 +293,23 @@ void GC::markRoots() {
     for (u32 i = 0; i < gCurrentVM->numGlobals(); ++i) {
         if (gCurrentVM->globalIsObj_[i]) {
             Obj* obj = gCurrentVM->globals_[i].o;
+            if (obj) mark(obj);
+        }
+    }
+
+    // Scan dynamic scope variables that hold Obj pointers
+    for (u32 i = 0; i < gCurrentVM->numDynVars(); ++i) {
+        if (gCurrentVM->dynVarIsObj_[i]) {
+            Obj* obj = gCurrentVM->dynVars_[i].o;
+            if (obj) mark(obj);
+        }
+    }
+
+    // Scan saved values on the dynamic scope stack
+    for (u32 i = 0; i < gCurrentVM->dynStackTop_; ++i) {
+        auto& entry = gCurrentVM->dynStack_[i];
+        if (entry.isObj) {
+            Obj* obj = entry.savedValue.o;
             if (obj) mark(obj);
         }
     }

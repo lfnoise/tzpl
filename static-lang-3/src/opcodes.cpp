@@ -2714,4 +2714,31 @@ void op_any_get_type_ptr(VM& vm, Code* pc) {
     DISPATCH(2);
 }
 
+// --- Dynamic Scope ---
+
+// LOAD_DYNAMIC Rd, K (3 words: op, regs, dynvar_index)
+void op_load_dynamic(VM& vm, Code* pc) {
+    u16 dst = pc[1].regs[0];
+    u32 idx = (u32)pc[2].i;
+    vm.reg(dst) = vm.dynVar(idx);
+    DISPATCH(3);
+}
+
+// STORE_DYNAMIC Ra, K (3 words: op, regs, dynvar_index)
+void op_store_dynamic(VM& vm, Code* pc) {
+    u16 src = pc[1].regs[0];
+    u32 idx = (u32)pc[2].i;
+    vm.dynVar(idx) = vm.reg(src);
+    DISPATCH(3);
+}
+
+// DYNSCOPE_PUSH Ra, K (3 words: op, regs, dynvar_index)
+// Save current value of dynvar[K], set dynvar[K] = reg(Ra)
+void op_dynscope_push(VM& vm, Code* pc) {
+    u16 src = pc[1].regs[0];
+    u32 idx = (u32)pc[2].i;
+    vm.dynScopePush(idx, vm.reg(src));
+    DISPATCH(3);
+}
+
 } // namespace ts

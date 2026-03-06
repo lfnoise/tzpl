@@ -27,6 +27,7 @@ enum class TokenKind {
 
     // Identifiers and keywords
     Identifier,
+    DynamicVar,   // `varName (backtick-prefixed dynamic scope variable)
 
     // Keywords
     Fn, Let, Var, Const,

@@ -397,6 +397,11 @@ void TypeChecker::check(Program& program) {
         }
     }
 
+    // Pre-scan: register all dynamic variable declarations (enables forward references)
+    for (auto& item : program.items) {
+        prescanDynVars(item.get());
+    }
+
     // Second pass: type-check everything (omitted return types inferred on demand)
     for (auto& item : program.items) {
         checkNode(item.get());
@@ -624,9 +629,81 @@ void TypeChecker::checkREPLInput(Program& program) {
         }
     }
 
+    // Pre-scan: register all dynamic variable declarations (enables forward references)
+    for (auto& item : program.items) {
+        prescanDynVars(item.get());
+    }
+
     // Second pass: type-check everything
     for (auto& item : program.items) {
         checkNode(item.get());
+    }
+}
+
+// --- Pre-scan for dynamic variable declarations ---
+
+void TypeChecker::prescanDynVars(ASTNode* node) {
+    if (!node) return;
+    switch (node->kind) {
+        case ASTNode::VarDecl: {
+            auto* decl = static_cast<VarDeclNode*>(node);
+            if (decl->isDynamic && !compiler_.lookupDynVar(decl->name)) {
+                Type* varType = nullptr;
+                if (decl->typeExpr) {
+                    varType = resolveTypeExpr(decl->typeExpr.get());
+                } else if (decl->init) {
+                    // Extract type from simple literals only — avoid inferExpr
+                    // which could reference not-yet-registered dynamic vars
+                    switch (decl->init->kind) {
+                        case ASTNode::IntLiteral:     varType = compiler_.intType(); break;
+                        case ASTNode::FloatLiteral:   varType = compiler_.floatType(); break;
+                        case ASTNode::BoolLiteral:    varType = compiler_.boolType(); break;
+                        case ASTNode::StringLiteral:  varType = compiler_.stringType(); break;
+                        case ASTNode::SymbolLiteral:  varType = compiler_.symbolType(); break;
+                        case ASTNode::ImaginaryLiteral: varType = compiler_.complexType(); break;
+                        default: break;  // complex init — will be registered by another decl
+                    }
+                }
+                if (varType) {
+                    u32 idx;
+                    compiler_.registerDynVar(decl->name, varType, idx);
+                }
+            }
+            break;
+        }
+        case ASTNode::Block: {
+            auto* block = static_cast<BlockStmt*>(node);
+            for (auto& stmt : block->stmts) prescanDynVars(stmt.get());
+            break;
+        }
+        case ASTNode::FnDecl: {
+            auto* fn = static_cast<FnDeclNode*>(node);
+            if (fn->body) prescanDynVars(fn->body.get());
+            break;
+        }
+        case ASTNode::IfStmt: {
+            auto* ifStmt = static_cast<IfStmtNode*>(node);
+            prescanDynVars(ifStmt->thenBranch.get());
+            if (ifStmt->elseBranch) prescanDynVars(ifStmt->elseBranch.get());
+            break;
+        }
+        case ASTNode::WhileStmt: {
+            auto* ws = static_cast<WhileStmtNode*>(node);
+            prescanDynVars(ws->body.get());
+            break;
+        }
+        case ASTNode::ForStmt: {
+            auto* fs = static_cast<ForStmtNode*>(node);
+            prescanDynVars(fs->body.get());
+            break;
+        }
+        case ASTNode::SwitchStmt: {
+            auto* ss = static_cast<SwitchStmtNode*>(node);
+            for (auto& c : ss->cases) prescanDynVars(c.body.get());
+            break;
+        }
+        default:
+            break;
     }
 }
 
@@ -874,6 +951,30 @@ void TypeChecker::checkLetDecl(LetDeclNode* decl) {
 }
 
 void TypeChecker::checkVarDecl(VarDeclNode* decl) {
+    // Dynamic scope variable: var `name [Type] = expr;
+    if (decl->isDynamic) {
+        Type* declaredType = decl->typeExpr ? resolveTypeExpr(decl->typeExpr.get()) : nullptr;
+        Type* initType = inferExpr(static_cast<Expr*>(decl->init.get()), declaredType);
+        if (!initType) {
+            error(decl->loc, "Cannot infer type of dynamic variable");
+            initType = compiler_.intType();
+        }
+        Type* varType = declaredType ? declaredType : initType;
+        decl->resolvedType = varType;
+
+        // Check if already declared — reuse index
+        auto* existing = compiler_.lookupDynVar(decl->name);
+        if (existing) {
+            if (!typesEqual(existing->type, varType)) {
+                error(decl->loc, "Dynamic variable '`" + decl->name + "' redeclared with different type");
+            }
+        } else {
+            u32 idx;
+            compiler_.registerDynVar(decl->name, varType, idx);
+        }
+        return;
+    }
+
     Type* declaredType = decl->typeExpr ? resolveTypeExpr(decl->typeExpr.get()) : nullptr;
     Type* initType = inferExpr(static_cast<Expr*>(decl->init.get()), declaredType);
 
@@ -1721,6 +1822,24 @@ void TypeChecker::checkReturnStmt(ReturnStmtNode* stmt) {
 }
 
 void TypeChecker::checkAssignStmt(AssignStmtNode* stmt) {
+    // Dynamic scope variable assignment: `name = expr;
+    if (stmt->isDynamic) {
+        auto* dvi = compiler_.lookupDynVar(stmt->target);
+        if (!dvi) {
+            error(stmt->loc, "Undeclared dynamic variable '`" + stmt->target + "'");
+            return;
+        }
+        Type* valType = inferExpr(static_cast<Expr*>(stmt->value.get()), dvi->type);
+        if (dvi->type && valType && !typesEqual(dvi->type, valType)) {
+            if (dvi->type == compiler_.floatType() && valType == compiler_.intType()) {
+                // promotion OK
+            } else {
+                error(stmt->loc, "Type mismatch in assignment to dynamic variable '`" + stmt->target + "'");
+            }
+        }
+        return;
+    }
+
     VarInfo* var = lookupVar(stmt->target);
     if (!var) {
         error(stmt->loc, "Undeclared variable '" + stmt->target + "'");
@@ -1785,6 +1904,18 @@ Type* TypeChecker::inferExpr(Expr* expr, Type* expectedType) {
         case ASTNode::Identifier:
             result = inferIdentifier(static_cast<IdentifierExpr*>(expr));
             break;
+
+        case ASTNode::DynamicVar: {
+            auto* dv = static_cast<DynamicVarExpr*>(expr);
+            auto* dvi = compiler_.lookupDynVar(dv->name);
+            if (!dvi) {
+                error(expr->loc, "Undeclared dynamic variable '`" + dv->name + "'");
+                result = compiler_.intType();
+            } else {
+                result = dvi->type;
+            }
+            break;
+        }
 
         case ASTNode::BinaryOp:
             result = inferBinaryOp(static_cast<BinaryOpExpr*>(expr));

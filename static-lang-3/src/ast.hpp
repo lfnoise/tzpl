@@ -39,7 +39,7 @@ struct ASTNode {
 
         // Expressions
         IntLiteral, FloatLiteral, ImaginaryLiteral, FractionLiteral, StringLiteral, BoolLiteral, SymbolLiteral,
-        Identifier, BinaryOp, UnaryOp, CallExpr, IndexExpr, FieldExpr,
+        Identifier, DynamicVar, BinaryOp, UnaryOp, CallExpr, IndexExpr, FieldExpr,
         TupleLiteral, ArrayLiteral, ListLiteral, MapLiteral, SetLiteral, NilLiteral, StructLiteral, EnumConstructor,
         LambdaExpr, IfExpr, BlockExpr, AutoMap, RangeExpr, AsTypeExpr,
 
@@ -182,6 +182,12 @@ struct IdentifierExpr : Expr {
     LambdaType* templateLambdaSpecType = nullptr;  // Set by type checker: specialization for template lambda passed as arg
     IdentifierExpr(SourceRange l, std::string n)
         : Expr(Identifier, l), name(std::move(n)) {}
+};
+
+struct DynamicVarExpr : Expr {
+    std::string name;
+    DynamicVarExpr(SourceRange l, std::string n)
+        : Expr(DynamicVar, l), name(std::move(n)) {}
 };
 
 // Auto-map annotation for function call arguments, struct literal fields, and binary op operands
@@ -581,6 +587,7 @@ struct ReturnStmtNode : Stmt {
 struct AssignStmtNode : Stmt {
     std::string target;  // Variable name for MVP (could be extended to lvalues)
     ExprPtr value;
+    bool isDynamic = false;  // true for dynamic scope assignment: `name = expr;
 
     AssignStmtNode(SourceRange l, std::string t, ExprPtr v)
         : Stmt(AssignStmt, l), target(std::move(t)), value(std::move(v)) {}
@@ -630,6 +637,7 @@ struct VarDeclNode : Decl {
     ExprPtr init;
     PatternPtr pattern;    // nullable; when set, name is empty and pattern provides bindings
     bool isPrivate = false;
+    bool isDynamic = false;  // true for dynamic scope variables: var `name = expr;
 
     VarDeclNode(SourceRange l, std::string n, TypeExprPtr t, ExprPtr i)
         : Decl(VarDecl, l), name(std::move(n)),

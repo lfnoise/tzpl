@@ -119,6 +119,13 @@ union Code {
     }
 };
 
+// Dynamic scope save entry: saved value before rebinding
+struct DynSaveEntry {
+    u32  varIndex;    // which dynamic variable was rebound
+    Word savedValue;  // value before rebinding
+    bool isObj;       // whether savedValue is an Obj* (for GC)
+};
+
 // Call frame for register-based VM
 struct CallFrame {
     Code*      returnPC;    // Resume point in caller
@@ -126,6 +133,7 @@ struct CallFrame {
     u32        baseReg;     // Start of this frame's register window
     u32        numRegs;     // Registers allocated for this frame
     u16        resultReg;   // Caller's register for return value
+    u32        dynStackMark; // Dynamic scope stack level at function entry
 };
 
 // Forward declaration — defined in compiler.hpp
@@ -188,6 +196,15 @@ private:
     // Global variables (mutable, persist across events)
     Vec<Word> globals_;
     Vec<u8> globalIsObj_;  // Track which globals hold Obj* for GC
+
+    // Dynamic scope variables
+    Vec<Word> dynVars_;
+    Vec<u8>   dynVarIsObj_;  // Track which dynvars hold Obj* for GC
+
+    // Dynamic scope save stack (for save/restore on function return)
+    DynSaveEntry* dynStack_;
+    u32           dynStackTop_;
+    u32           maxDynStack_;
 
     // Flag set by HALT instruction
     bool halted_;
@@ -351,6 +368,44 @@ public:
     Word& global(u32 idx) { return globals_[idx]; }
     const Word& global(u32 idx) const { return globals_[idx]; }
     u32 numGlobals() const { return (u32)globals_.size(); }
+
+    // --- Dynamic scope variables ---
+
+    u32 addDynVar(bool isObj = false) {
+        u32 idx = (u32)dynVars_.size();
+        dynVars_.push_back(Word());
+        dynVarIsObj_.push_back(isObj ? 1 : 0);
+        return idx;
+    }
+
+    void setDynVarIsObj(u32 idx, bool isObj) { dynVarIsObj_[idx] = isObj ? 1 : 0; }
+
+    Word& dynVar(u32 idx) { return dynVars_[idx]; }
+    const Word& dynVar(u32 idx) const { return dynVars_[idx]; }
+    u32 numDynVars() const { return (u32)dynVars_.size(); }
+
+    // Save current value and set new one (called by op_dynscope_push)
+    void dynScopePush(u32 varIdx, Word newValue) {
+        if (dynStackTop_ >= maxDynStack_) {
+            throw std::runtime_error("Dynamic scope stack overflow");
+        }
+        auto& entry = dynStack_[dynStackTop_++];
+        entry.varIndex = varIdx;
+        entry.savedValue = dynVars_[varIdx];
+        entry.isObj = dynVarIsObj_[varIdx];
+        dynVars_[varIdx] = newValue;
+    }
+
+    // Restore dynamic variables back to a saved mark
+    void dynScopeRestore(u32 mark) {
+        while (dynStackTop_ > mark) {
+            --dynStackTop_;
+            auto& entry = dynStack_[dynStackTop_];
+            dynVars_[entry.varIndex] = entry.savedValue;
+        }
+    }
+
+    u32 dynStackTop() const { return dynStackTop_; }
 
     // Halted state
     bool isHalted() const { return halted_; }

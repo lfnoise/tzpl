@@ -391,6 +391,31 @@ ASTPtr Parser::parseVarDecl() {
         return std::make_unique<VarDeclNode>(start, std::move(pat), std::move(init));
     }
 
+    // Dynamic scope variable: var `name [Type] = expr;
+    if (check(TokenKind::DynamicVar)) {
+        Token dynName = advance();
+        TypeExprPtr typeExpr;
+        if (current_.kind != TokenKind::Equals
+            && current_.kind != TokenKind::Eof) {
+            if (current_.kind == TokenKind::KwInt || current_.kind == TokenKind::KwFloat ||
+                current_.kind == TokenKind::KwString || current_.kind == TokenKind::KwBool ||
+                current_.kind == TokenKind::KwSymbol || current_.kind == TokenKind::KwVoid ||
+                current_.kind == TokenKind::KwFraction || current_.kind == TokenKind::KwComplex ||
+                current_.kind == TokenKind::KwAny ||
+                current_.kind == TokenKind::Identifier ||
+                current_.kind == TokenKind::LBracket ||
+                current_.kind == TokenKind::LParen) {
+                typeExpr = parseTypeExpr();
+            }
+        }
+        expect(TokenKind::Equals, "Expected '=' in dynamic variable declaration");
+        ExprPtr init = parseExpression();
+        expectTerminator();
+        auto decl = std::make_unique<VarDeclNode>(start, dynName.text, std::move(typeExpr), std::move(init));
+        decl->isDynamic = true;
+        return decl;
+    }
+
     Token name = expect(TokenKind::Identifier, "Expected variable name after 'var'");
 
     // Check for struct pattern
@@ -1183,7 +1208,7 @@ ASTPtr Parser::parseExprStmtOrAssign() {
 
     ExprPtr expr = parseExpression();
 
-    // Check for assignment: identifier = expr
+    // Check for assignment: identifier = expr  or  `dynVar = expr
     if (match(TokenKind::Equals)) {
         if (expr->kind == ASTNode::Identifier) {
             auto* ident = static_cast<IdentifierExpr*>(expr.get());
@@ -1191,6 +1216,14 @@ ASTPtr Parser::parseExprStmtOrAssign() {
             ExprPtr value = parseExpression();
             expectTerminator();
             return std::make_unique<AssignStmtNode>(start, std::move(name), std::move(value));
+        } else if (expr->kind == ASTNode::DynamicVar) {
+            auto* dynVar = static_cast<DynamicVarExpr*>(expr.get());
+            std::string name = dynVar->name;
+            ExprPtr value = parseExpression();
+            expectTerminator();
+            auto stmt = std::make_unique<AssignStmtNode>(start, std::move(name), std::move(value));
+            stmt->isDynamic = true;
+            return stmt;
         } else {
             error("Left side of assignment must be a variable");
         }
@@ -1409,6 +1442,10 @@ ExprPtr Parser::parsePrimary() {
         case TokenKind::Nil: {
             Token tok = advance();
             return std::make_unique<NilLiteralExpr>(tok.loc);
+        }
+        case TokenKind::DynamicVar: {
+            Token tok = advance();
+            return std::make_unique<DynamicVarExpr>(tok.loc, tok.text);
         }
         case TokenKind::Identifier:
         case TokenKind::KwFraction:

@@ -150,30 +150,25 @@ struct SignalGraph {
 ---------------------------------------------------------------------------
 -- Signal expressions
 
-var _curGraphExprs [SignalExpr] = [];
-var _curGraphDelays [DelayVar] = [];
-var _exprIds = 0;
-var _delayVarIds = 0;
-
 fn _nextExprId() ID {
-	let out = _exprIds;
-	_exprIds = _exprIds + 1;
+	let out = `exprIds;
+	`exprIds = `exprIds + 1;
 	out
 }
 
 fn _nextDelayVarId() ID {
-	let out = _delayVarIds;
-	_delayVarIds = _delayVarIds + 1;
+	let out = `delayVarIds;
+	`delayVarIds = `delayVarIds + 1;
 	out
 }
 
 fn _addToGraph(expr S) S {
-	_curGraphExprs = _curGraphExprs push(expr);
+	`curGraphExprs = `curGraphExprs push(expr);
 	expr
 }
 
 fn _addToGraph(dv DelayVar) DelayVar {
-	_curGraphDelays = _curGraphDelays push(dv);
+	`curGraphDelays = `curGraphDelays push(dv);
 	dv
 }
 
@@ -730,79 +725,51 @@ type GraphFn = fn() S;
 type GraphFn1 = fn(S) S;
 
 fn _makeTopGraph(f GraphFn) SignalGraph {
-    -- save graph state
-	let savedExprs = _curGraphExprs;
-	let savedDelays = _curGraphDelays;
-	let saveExprIds = _exprIds;
-	let saveDelayVarIds = _delayVarIds;
-
 	-- fresh graph state
-	_curGraphExprs = [];
-	_curGraphDelays = [];
-	_exprIds = 0;
-	_delayVarIds = 0;
+	var `curGraphExprs [SignalExpr] = [];
+	var `curGraphDelays [DelayVar] = [];
+	var `exprIds Int = 0;
+	var `delayVarIds Int = 0;
 
 	let root S = f();
 
 	let graph = SignalGraph {
-	    exprs: _curGraphExprs,
-		delays: _curGraphDelays,
+	    exprs: `curGraphExprs,
+		delays: `curGraphDelays,
 		root: root,
 	};
-
-	-- restore graph state
-	_delayVarIds = saveDelayVarIds;
-	_exprIds = saveExprIds;
-	_curGraphDelays = savedDelays;
-	_curGraphExprs = savedExprs;
 
 	graph
 }
 
 fn _makeSubGraph(f GraphFn) SignalGraph {
-    -- save graph state
-	let savedExprs = _curGraphExprs;
-	let savedDelays = _curGraphDelays;
-
 	-- fresh graph state
-	_curGraphExprs = [];
-	_curGraphDelays = [];
+	var `curGraphExprs [SignalExpr] = [];
+	var `curGraphDelays [DelayVar] = [];
 
 	let root S = f();
 
 	let graph = SignalGraph {
-	    exprs: _curGraphExprs,
-		delays: _curGraphDelays,
+	    exprs: `curGraphExprs,
+		delays: `curGraphDelays,
 		root: root,
 	};
-
-	-- restore graph state
-	_curGraphExprs = savedExprs;
-	_curGraphDelays = savedDelays;
 
 	graph
 }
 
 fn _makeForGraph (f GraphFn1, i S) SignalGraph {
--- save graph state
-	let savedExprs = _curGraphExprs;
-	let savedDelays = _curGraphDelays;
-
 	-- fresh graph state
-	_curGraphExprs = [];
-	_curGraphDelays = [];
+	var `curGraphExprs [SignalExpr] = [];
+	var `curGraphDelays [DelayVar] = [];
 
 	let root = f(i);
 
 	let graph = SignalGraph {
-	    exprs: _curGraphExprs,
-		delays: _curGraphDelays,
+	    exprs: `curGraphExprs,
+		delays: `curGraphDelays,
 		root: root,
 	};
-
-	-- restore graph state
-	_curGraphExprs = savedExprs;
-	_curGraphDelays = savedDelays;
 
 	graph
 }
@@ -848,12 +815,12 @@ fn select2(test AsSignal, ifOne AsSignal, ifZero AsSignal) S {
 ---------------------------------------------------------------------------
 -- To S-Expressions
 
-enum Braces { round, square, curly, quotes }
-
 fn parens(s String) String = "(%^)" fmt(s);
 fn brackets(s String) String = "[%^]" fmt(s);
 fn braces(s String) String = "{%^}" fmt(s);
 fn quotes(s String) String = "\"%^\"" fmt(s);
+
+fn indent(s String, n Int = 1) String = n <= 0 ? s : "    "  $ indent(s, n-1);
 
 fn separatedString(strings [String], separator String = " ") String {
     var out = "";
@@ -890,9 +857,14 @@ fn numTypeInt(op CastOp) Int {
 	}
 }
 
-fn toLisp(g SignalGraph) String {
-	let exprsStr = g.exprs toLisp separatedString(" ");
-	"(%^ %^)" fmt(g.root.id, exprsStr)
+fn toLisp(graph SignalGraph) String {
+	var `indentLevel Int = `indentLevel + 1;
+	let sexprLines = graph.exprs toLisp;
+
+	-- Join with newlines and add indentation
+	let text = sexprLines indent(`indentLevel + 1) separatedString("\n");
+
+	"\n" $ "(Graph %^ (\n%^))" fmt(graph.root.id, text) indent(`indentLevel)
 }
 
 fn toLisp(o S) String {
@@ -901,9 +873,9 @@ fn toLisp(o S) String {
         sampleDur : "(%^ SampleDur)" fmt(o.id);
         int(a, typ) : "(%^ Constant %^ %^ %^)" fmt(o.id, a length, typ, a separatedString parens);
         float(a, typ) : "(%^ Constant %^ %^ %^)" fmt(o.id, a length, typ, a separatedString parens);
-        unop(op) : "(%^ UnaryOp %^ %^)" fmt(o.id, op tag, o inputsToLisp);
-        binop(op) : "(%^ BinaryOp %^ %^)" fmt(o.id, op tag, o inputsToLisp);
-        compareop(op) : "(%^ BinaryOp %^ %^)" fmt(o.id, op tag, o inputsToLisp);
+        unop(op) : "(%^ UnaryOp %^ %^)" fmt(o.id, op tag toString, o inputsToLisp);
+        binop(op) : "(%^ BinaryOp %^ %^)" fmt(o.id, op tag toString, o inputsToLisp);
+        compareop(op) : "(%^ BinaryOp %^ %^)" fmt(o.id, op tag toString, o inputsToLisp);
         castop(op) : "(%^ CastOp %^ %^)" fmt(o.id, op numTypeInt, o inputsToLisp);
         random(op, rate, chans) : match (op) {
             frand(lo, hi) : "(%^ FRand %^ %^ %^ %^)" fmt(o.id, rate, chans asChans, lo, hi);
@@ -925,7 +897,7 @@ fn toLisp(o S) String {
            	transpose(n) : "(%^ VecTranspose %^ %^)" fmt(o.id, n, o inputsToLisp);
            	permute : "(%^ VecAt %^)" fmt(o.id, o inputsToLisp);
            	reduce(op, chans) : "(%^ VecReduce %^ %^ %^)"
-                fmt(o.id, op tag, chans asChans, o inputsToLisp);
+                fmt(o.id, op tag toString, chans asChans, o inputsToLisp);
            	sum(chans) : "(%^ VecSum %^ %^)" fmt(o.id, chans asChans, o inputsToLisp);
            	prod(chans) : "(%^ VecProd %^ %^)" fmt(o.id, chans asChans, o inputsToLisp);
            	minOf(chans) : "(%^ VecMin %^ %^)" fmt(o.id, chans asChans, o inputsToLisp);
@@ -946,9 +918,10 @@ fn toLisp(o S) String {
             write :  "(%^ DelayWrite %^ %^)" fmt(o.id, delayVar.id, o inputsToLisp);
         }
 
-        if_(thenGraph, elseGraph) :
-            "(%^ IfExpr %^ %^ %^)" fmt(o.id, o inputsToLisp, thenGraph toLisp, elseGraph toLisp);
-
+        if_(thenGraph, elseGraph) : {
+			var `indentLevel = `indentLevel + 1;
+            "(%^ IfExpr %^ %^ %^)" fmt(o.id, o inputsToLisp, thenGraph toLisp, elseGraph toLisp)
+		}
         for_(count, bodyGraph) :
             "(%^ ForExpr %^ %^)" fmt(o.id, count, bodyGraph toLisp);
 
@@ -961,20 +934,19 @@ fn toLisp(o S) String {
 	}
 }
 
-fn indent(line String) String = "  %^" fmt(line);
 
-fn defSynth(synthFun GraphFn, synthName String) {
+fn defSynth(synthFun GraphFn, synthName String) SignalGraph {
+
 	let graph SignalGraph = synthFun _makeTopGraph;
+	
+	var `indentLevel Int = 0;
 
-	-- Convert each expression to s-expression format
-	let sexprLines = graph.exprs toLisp;
+	let text = graph toLisp;
 
-	-- Join with newlines and add indentation
-	let sexprBody = sexprLines indent separatedString("\n");
-
-	-- Wrap in parentheses to create the top-level list
-	let sexprText = "(%^)\n" fmt(sexprBody);
-
+	"--------" println;
+	"(Synth %^ %^)" fmt(synthName, text) println;
+	"--------" println;
+	
 	graph
 }
 

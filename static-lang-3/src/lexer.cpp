@@ -471,6 +471,21 @@ Token Lexer::nextToken() {
         return scanSymbolLiteral();
     }
 
+    // Dynamic scope variable `varName
+    if (c == '`') {
+        SourceLoc start = currentLoc();
+        advance(); // consume backtick
+        if (!isAlpha(current())) {
+            return errorToken("Expected identifier after '`'");
+        }
+        u32 startPos = pos_;
+        while (!atEnd() && isAlphaNumeric(current())) {
+            advance();
+        }
+        std::string text = source_.substr(startPos, pos_ - startPos);
+        return makeToken(TokenKind::DynamicVar, start, text);
+    }
+
     // Colon - could be :: or plain colon
     if (c == ':') {
         SourceLoc start = currentLoc();

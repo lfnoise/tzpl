@@ -610,6 +610,26 @@ void CodeGen::genLetDecl(LetDeclNode* decl) {
 }
 
 void CodeGen::genVarDecl(VarDeclNode* decl) {
+    // Dynamic scope variable: var `name = expr;
+    if (decl->isDynamic) {
+        u16 reg = genExpr(static_cast<Expr*>(decl->init.get()));
+        auto it = typeChecker_.dynamicVars().find(decl->name);
+        u32 dynIdx = it->second.dynIndex;
+
+        if (inFunctionBody_) {
+            // Inside a function: save old value, set new (restored on function return)
+            emitOp(op_dynscope_push);
+            emitRegs(reg);
+            emitInt(dynIdx);
+        } else {
+            // At global scope: just set the initial value
+            emitOp(op_store_dynamic);
+            emitRegs(reg);
+            emitInt(dynIdx);
+        }
+        return;
+    }
+
     u16 reg = genExpr(static_cast<Expr*>(decl->init.get()));
 
     // Pattern destructuring
@@ -693,6 +713,8 @@ void CodeGen::genFnDecl(FnDeclNode* decl) {
     auto savedFixups = std::move(jumpFixups_);
     auto savedConsts = std::move(constRegs_);
     inTailPosition_ = false;
+    bool savedInFunctionBody = inFunctionBody_;
+    inFunctionBody_ = true;
 
     // Save coroutine codegen state
     bool savedInCoroFn = inCoroutineFn_;
@@ -824,6 +846,7 @@ void CodeGen::genFnDecl(FnDeclNode* decl) {
     nextReg_ = savedNextReg;
     maxReg_ = savedMaxReg;
     inTailPosition_ = savedTailPos;
+    inFunctionBody_ = savedInFunctionBody;
     inCoroutineFn_ = savedInCoroFn;
     currentYieldCount_ = savedYieldCount;
     localScopes_ = std::move(savedScopes);
@@ -863,6 +886,8 @@ void CodeGen::genMonoInstance(FuncInfo& monoInfo) {
     auto savedFixups = std::move(jumpFixups_);
     auto savedConsts = std::move(constRegs_);
     inTailPosition_ = false;
+    bool savedInFunctionBody = inFunctionBody_;
+    inFunctionBody_ = true;
 
     // Save coroutine codegen state
     bool savedInCoroFn = inCoroutineFn_;
@@ -976,6 +1001,7 @@ void CodeGen::genMonoInstance(FuncInfo& monoInfo) {
     nextReg_ = savedNextReg;
     maxReg_ = savedMaxReg;
     inTailPosition_ = savedTailPos;
+    inFunctionBody_ = savedInFunctionBody;
     inCoroutineFn_ = savedInCoroFn;
     currentYieldCount_ = savedYieldCount;
     localScopes_ = std::move(savedScopes);
@@ -2005,6 +2031,15 @@ void CodeGen::genReturnStmt(ReturnStmtNode* stmt) {
 void CodeGen::genAssignStmt(AssignStmtNode* stmt) {
     u16 valReg = genExpr(static_cast<Expr*>(stmt->value.get()));
 
+    // Dynamic scope variable assignment: `name = expr;
+    if (stmt->isDynamic) {
+        auto it = typeChecker_.dynamicVars().find(stmt->target);
+        emitOp(op_store_dynamic);
+        emitRegs(valReg);
+        emitInt(it->second.dynIndex);
+        return;
+    }
+
     // Check local first
     LocalVar* local = lookupLocal(stmt->target);
     if (local) {
@@ -2053,6 +2088,15 @@ u16 CodeGen::genExpr(Expr* expr) {
         case ASTNode::StringLiteral:   return genStringLiteral(static_cast<StringLiteralExpr*>(expr));
         case ASTNode::SymbolLiteral:   return genSymbolLiteral(static_cast<SymbolLiteralExpr*>(expr));
         case ASTNode::Identifier:      return genIdentifier(static_cast<IdentifierExpr*>(expr));
+        case ASTNode::DynamicVar: {
+            auto* dv = static_cast<DynamicVarExpr*>(expr);
+            auto it = typeChecker_.dynamicVars().find(dv->name);
+            u16 dst = allocReg();
+            emitOp(op_load_dynamic);
+            emitRegs(dst);
+            emitInt(it->second.dynIndex);
+            return dst;
+        }
         case ASTNode::BinaryOp:        return genBinaryOp(static_cast<BinaryOpExpr*>(expr));
         case ASTNode::UnaryOp:         return genUnaryOp(static_cast<UnaryOpExpr*>(expr));
         case ASTNode::CallExpr:        return genCall(static_cast<CallExpr_*>(expr));
@@ -7993,6 +8037,8 @@ u16 CodeGen::genLambdaExpr(LambdaExprNode* expr) {
     auto savedFixups = std::move(jumpFixups_);
     auto savedConsts = std::move(constRegs_);
     inTailPosition_ = false;
+    bool savedInFunctionBody = inFunctionBody_;
+    inFunctionBody_ = true;
 
     // Create new CodeBlock for lambda body
     currentBlock_ = new CodeBlock();
@@ -8082,6 +8128,7 @@ u16 CodeGen::genLambdaExpr(LambdaExprNode* expr) {
     nextReg_ = savedNextReg;
     maxReg_ = savedMaxReg;
     inTailPosition_ = savedTailPos;
+    inFunctionBody_ = savedInFunctionBody;
     localScopes_ = std::move(savedScopes);
     jumpFixups_ = std::move(savedFixups);
     constRegs_ = std::move(savedConsts);

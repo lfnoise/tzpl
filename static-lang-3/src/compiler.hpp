@@ -52,6 +52,9 @@ struct CompileResult {
     std::vector<GlobalSlot> newGlobals;
     u32 globalBase = 0;  // VM global index where newGlobals starts
 
+    // Number of dynamic scope variables used
+    u32 numDynVars = 0;
+
     // The target this result was compiled against
     VMTarget target;
 
@@ -187,6 +190,17 @@ public:
     bool enableConstFold = true;
     bool enableTailCalls = true;
 
+    // --- Dynamic scope variable registry (shared across all TypeCheckers) ---
+    struct DynVarInfo {
+        Type* type;
+        u32 dynIndex;
+    };
+
+    const std::unordered_map<std::string, DynVarInfo>& dynamicVars() const;
+    u32 numDynVars() const;
+    bool registerDynVar(const std::string& name, Type* type, u32& outIndex);
+    const DynVarInfo* lookupDynVar(const std::string& name) const;
+
 private:
     TypeUniverse& typeUniverse_;
     u32 numTrackedObjects_ = 0;
@@ -199,6 +213,10 @@ private:
 
     // Foreign functions registered by host before compilation
     std::vector<ForeignFuncEntry> foreignFunctions_;
+
+    // Dynamic scope variable registry (shared across all TypeCheckers/modules)
+    std::unordered_map<std::string, DynVarInfo> dynamicVars_;
+    u32 nextDynIndex_ = 0;
 };
 
 } // namespace ts

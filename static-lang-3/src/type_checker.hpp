@@ -105,6 +105,11 @@ public:
     const std::unordered_map<std::string, std::vector<FuncInfo>>& functions() const { return functions_; }
     const std::unordered_map<std::string, VarInfo>& globalVars() const { return globalVars_; }
 
+    // Access dynamic variable registry (delegated to Compiler)
+    using DynVarInfo = Compiler::DynVarInfo;
+    const std::unordered_map<std::string, DynVarInfo>& dynamicVars() const { return compiler_.dynamicVars(); }
+    u32 numDynVars() const { return compiler_.numDynVars(); }
+
     // Access struct and enum type registries
     const std::unordered_map<std::string, StructType*>& structTypes() const { return structTypes_; }
     const std::unordered_map<std::string, EnumType*>& enumTypes() const { return enumTypes_; }
@@ -403,6 +408,9 @@ private:
                             const AutoMapArg& rightAM, bool anyList);
 
     void error(SourceRange loc, const std::string& msg);
+
+    // Pre-scan: recursively find and register all dynamic variable declarations
+    void prescanDynVars(ASTNode* node);
 };
 
 } // namespace ts

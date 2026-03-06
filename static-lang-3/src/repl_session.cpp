@@ -54,13 +54,15 @@ struct REPLSession::Impl {
 
     // Install pending globals after compilation
     void installPendingGlobals() {
+        u32 numDynVars = compiler.numDynVars();
         auto [newGlobals, globalBase] = compiler.takePendingGlobals();
         compiler.endCurrent();
         vm.makeCurrent();
-        if (!newGlobals.empty()) {
+        {
             CompileResult installResult;
             installResult.newGlobals = std::move(newGlobals);
             installResult.globalBase = globalBase;
+            installResult.numDynVars = numDynVars;
             installResult.target = target;
             vm.install(installResult);
         }

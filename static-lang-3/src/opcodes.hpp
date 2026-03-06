@@ -247,6 +247,11 @@ void op_coro_done(VM& vm, Code* pc);          // CORO_DONE (1 word: op)
 void op_coro_is_done(VM& vm, Code* pc);       // CORO_IS_DONE Rd, Rcoro (2 words: op, regs{dst, coroReg})
 void op_coro_wrap_option(VM& vm, Code* pc);   // CORO_WRAP_OPTION Rd, Rval, Rcoro (3 words: op, regs{dst, val, coro}, optionType*)
 
+// --- Dynamic Scope ---
+void op_load_dynamic(VM& vm, Code* pc);       // LOAD_DYNAMIC Rd, K (3 words, K is dynvar index)
+void op_store_dynamic(VM& vm, Code* pc);      // STORE_DYNAMIC Ra, K (3 words, K is dynvar index)
+void op_dynscope_push(VM& vm, Code* pc);      // DYNSCOPE_PUSH Ra, K (3 words: save current, set new)
+
 // --- Any ---
 void op_make_any(VM& vm, Code* pc);          // MAKE_ANY Rd, Rsrc, isObj (3 words: op, regs{dst, src, isObj}, Type*)
 void op_any_get_value(VM& vm, Code* pc);     // ANY_GET_VALUE Rd, Ra (2 words)

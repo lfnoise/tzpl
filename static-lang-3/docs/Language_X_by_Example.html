@@ -347,6 +347,7 @@ if (localStorage.getItem('langx-docs-theme') === 'light') document.documentEleme
         <li><a href="#immutable-bindings">Immutable Bindings</a></li>
         <li><a href="#mutable-variables">Mutable Variables</a></li>
         <li><a href="#constants">Constants</a></li>
+        <li><a href="#dynamic-scope-variables">Dynamic Scope Variables</a></li>
       </ol>
     </li>
     <li><a href="#types">Types and the Numeric Tower</a>
@@ -638,6 +639,72 @@ message = <span class="str">"goodbye"</span>;</code></pre>
 <h3 id="constants">2.3 Constants (<code>const</code>)</h3>
 <pre><code><span class="kw">const</span> MAX_SIZE = <span class="num">1000</span>;
 <span class="kw">const</span> TAU = <span class="num">6.28318</span>;</code></pre>
+
+<h3 id="dynamic-scope-variables">2.4 Dynamic Scope Variables</h3>
+
+<p>Dynamic scope variables are looked up in the <em>dynamic call chain</em> rather than
+the lexical scope. They are declared with <code>var</code> and a backtick-prefixed name.
+This is useful for implicit context that should propagate through function calls
+without being passed explicitly.</p>
+
+<pre><code><span class="cmt">-- Declare a dynamic variable at global scope</span>
+<span class="kw">var</span> `indent = <span class="num">0</span>;
+
+<span class="cmt">-- Read and assign like a regular mutable variable</span>
+println(`indent);           <span class="cmt">-- 0</span>
+`indent = <span class="num">5</span>;
+println(`indent);           <span class="cmt">-- 5</span>
+`indent = `indent + <span class="num">10</span>;
+println(`indent);           <span class="cmt">-- 15</span></code></pre>
+
+<p>Dynamic variables are visible to all functions called from the current scope:</p>
+
+<pre><code><span class="kw">fn</span> showIndent() {
+    println(`indent);       <span class="cmt">-- reads the caller's `indent</span>
+}
+showIndent();               <span class="cmt">-- 15</span></code></pre>
+
+<p>Re-declaring a dynamic variable inside a function <em>saves</em> the current value
+and sets a new one. When the function returns, the previous value is
+automatically restored:</p>
+
+<pre><code><span class="kw">fn</span> nested() {
+    <span class="kw">var</span> `indent = <span class="num">100</span>;   <span class="cmt">-- saves old value, sets to 100</span>
+    showIndent();           <span class="cmt">-- 100</span>
+    `indent = <span class="num">200</span>;
+    showIndent();           <span class="cmt">-- 200</span>
+}
+
+nested();
+println(`indent);           <span class="cmt">-- 15 (restored after nested() returns)</span></code></pre>
+
+<p>Save/restore nests to any depth:</p>
+
+<pre><code><span class="kw">fn</span> outer() {
+    <span class="kw">var</span> `indent = <span class="num">1000</span>;
+    <span class="kw">fn</span> inner() {
+        <span class="kw">var</span> `indent = <span class="num">2000</span>;
+        showIndent();       <span class="cmt">-- 2000</span>
+    }
+    inner();
+    showIndent();           <span class="cmt">-- 1000 (inner's binding was restored)</span>
+}
+outer();
+showIndent();               <span class="cmt">-- 15 (outer's binding was restored)</span></code></pre>
+
+<p>Dynamic variables can be any type:</p>
+
+<pre><code><span class="kw">var</span> `prefix = <span class="str">"&gt;&gt;&gt;"</span>;
+<span class="kw">fn</span> showPrefix() { println(`prefix); }
+
+showPrefix();               <span class="cmt">-- &gt;&gt;&gt;</span>
+
+<span class="kw">fn</span> withPrefix() {
+    <span class="kw">var</span> `prefix = <span class="str">"***"</span>;
+    showPrefix();           <span class="cmt">-- ***</span>
+}
+withPrefix();
+showPrefix();               <span class="cmt">-- &gt;&gt;&gt; (restored)</span></code></pre>
 
 
 <!-- ================================================================ -->

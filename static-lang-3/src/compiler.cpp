@@ -107,6 +107,32 @@ bool Compiler::isRTRestricted() const {
     return currentTarget_->rtRestricted;
 }
 
+// --- Dynamic scope variable registry ---
+
+const std::unordered_map<std::string, Compiler::DynVarInfo>& Compiler::dynamicVars() const {
+    return dynamicVars_;
+}
+
+u32 Compiler::numDynVars() const {
+    return nextDynIndex_;
+}
+
+bool Compiler::registerDynVar(const std::string& name, Type* type, u32& outIndex) {
+    auto it = dynamicVars_.find(name);
+    if (it != dynamicVars_.end()) {
+        outIndex = it->second.dynIndex;
+        return false;
+    }
+    outIndex = nextDynIndex_++;
+    dynamicVars_[name] = DynVarInfo{type, outIndex};
+    return true;
+}
+
+const Compiler::DynVarInfo* Compiler::lookupDynVar(const std::string& name) const {
+    auto it = dynamicVars_.find(name);
+    return it != dynamicVars_.end() ? &it->second : nullptr;
+}
+
 // --- Foreign function registration ---
 
 void Compiler::registerForeignFunction(const std::string& name, Type* returnType,
@@ -178,6 +204,7 @@ CompileResult Compiler::compile(const std::string& source, const std::string& fi
     result.mainBlock = mainBlock;
     result.newGlobals = std::move(newGlobals);
     result.globalBase = globalBase;
+    result.numDynVars = numDynVars();
     result.target = target;
 
     // Populate exported function metadata for host-to-VM calling

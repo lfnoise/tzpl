@@ -242,6 +242,9 @@ private:
     // --- Coroutine codegen state ---
     bool inCoroutineFn_ = false;
     u16 currentYieldCount_ = 0;
+
+    // --- Function body tracking (for dynamic scope push/pop) ---
+    bool inFunctionBody_ = false;
 };
 
 } // namespace ts
