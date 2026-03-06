@@ -3945,8 +3945,7 @@ static void builtin_toString_float(VM& vm, u16 dst, u16, u16 argBase) {
 
 static void builtin_toString_symbol(VM& vm, u16 dst, u16, u16 argBase) {
     auto* result = new StringObj();
-    result->s = rt::vmstr(":");
-    result->s += vm.reg(argBase).s->str();
+    result->s = vm.reg(argBase).s->str();
     registerNewObj(result);
     vm.reg(dst).o = result;
 }
