@@ -1687,8 +1687,8 @@ static Word dispatchBinopByKind(VM& vm, BinopListGen::OpKind kind,
 
 void BinopListGen::generate(VM& vm, ListNode* owner) {
     // Force source nodes if they are lazy
-    if (leftList_ && leftList_->generator_) leftList_->force(vm);
-    if (rightList_ && rightList_->generator_) rightList_->force(vm);
+    if (leftList_) leftList_->force(vm);
+    if (rightList_) rightList_->force(vm);
 
     // Determine head operands
     Word leftVal, rightVal;
@@ -1745,7 +1745,7 @@ void BinopListGen::generate(VM& vm, ListNode* owner) {
 
 void UnaryListGen::generate(VM& vm, ListNode* owner) {
     // Force source node if lazy
-    if (source_->generator_) source_->force(vm);
+    source_->force(vm);
 
     // Compute head via the appropriate unary operation
     switch (opKind_) {
@@ -2084,7 +2084,7 @@ void op_make_list(VM& vm, Code* pc) {
 void op_list_head(VM& vm, Code* pc) {
     u16 dst = pc[1].regs[0], src = pc[1].regs[1];
     auto* node = static_cast<ListNode*>(vm.reg(src).o);
-    if (node->generator_) node->force(vm);
+    node->force(vm);
     vm.reg(dst) = node->head_;
     DISPATCH(2);
 }
@@ -2093,7 +2093,7 @@ void op_list_head(VM& vm, Code* pc) {
 void op_list_tail(VM& vm, Code* pc) {
     u16 dst = pc[1].regs[0], src = pc[1].regs[1];
     auto* node = static_cast<ListNode*>(vm.reg(src).o);
-    if (node->generator_) node->force(vm);
+    node->force(vm);
     vm.reg(dst).o = node->tail_;
     DISPATCH(2);
 }

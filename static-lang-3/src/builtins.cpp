@@ -1678,7 +1678,7 @@ static void builtin_enumerate_array(VM& vm, u16 dst, u16, u16 ab) {
 
 void TakeListGen::generate(VM& vm, ListNode* owner) {
     if (remaining_ <= 0 || !source_) { owner->tail_ = nullptr; return; }
-    if (source_->generator_) source_->force(vm);
+    source_->force(vm);
     owner->head_ = source_->head_;
     if (remaining_ <= 1 || !source_->tail_) { owner->tail_ = nullptr; return; }
     auto* tail = new ListNode(listType_);
@@ -1691,23 +1691,23 @@ void DropListGen::generate(VM& vm, ListNode* owner) {
     ListNode* cur = source_;
     i64 rem = remaining_;
     while (rem > 0 && cur) {
-        if (cur->generator_) cur->force(vm);
+        cur->force(vm);
         cur = cur->tail_; rem--;
     }
     if (!cur) { owner->tail_ = nullptr; return; }
-    if (cur->generator_) cur->force(vm);
+    cur->force(vm);
     owner->head_ = cur->head_;
     owner->tail_ = cur->tail_;
 }
 
 void StrideListGen::generate(VM& vm, ListNode* owner) {
     if (!source_) { owner->tail_ = nullptr; return; }
-    if (source_->generator_) source_->force(vm);
+    source_->force(vm);
     owner->head_ = source_->head_;
     ListNode* cur = source_;
     for (i64 i = 0; i < stride_ && cur; i++) {
         cur = cur->tail_;
-        if (cur && cur->generator_) cur->force(vm);
+        if (cur) cur->force(vm);
     }
     if (!cur) { owner->tail_ = nullptr; return; }
     auto* tail = new ListNode(listType_);
@@ -1727,7 +1727,7 @@ void StutterListGen::generate(VM& vm, ListNode* owner) {
         return;
     }
     if (!source_) { owner->tail_ = nullptr; return; }
-    if (source_->generator_) source_->force(vm);
+    source_->force(vm);
     owner->head_ = source_->head_;
     i64 repsLeft = repeatCount_ - 1;
     if (repsLeft > 0 || source_->tail_) {
@@ -1744,7 +1744,7 @@ void CatListGen::generate(VM& vm, ListNode* owner) {
     if (!inSecond_) {
         if (!first_) { inSecond_ = true; }
         else {
-            if (first_->generator_) first_->force(vm);
+            first_->force(vm);
             owner->head_ = first_->head_;
             auto* tail = new ListNode(listType_);
             first_ = first_->tail_;
@@ -1754,7 +1754,7 @@ void CatListGen::generate(VM& vm, ListNode* owner) {
         }
     }
     if (!second_) { owner->tail_ = nullptr; return; }
-    if (second_->generator_) second_->force(vm);
+    second_->force(vm);
     owner->head_ = second_->head_;
     owner->tail_ = second_->tail_;
 }
@@ -1818,7 +1818,7 @@ void PicksListGen::generate(VM& vm, ListNode* owner) {
 void CycleListGen::generate(VM& vm, ListNode* owner) {
     if (!current_) current_ = head_;
     if (!current_) { owner->tail_ = nullptr; return; }
-    if (current_->generator_) current_->force(vm);
+    current_->force(vm);
     owner->head_ = current_->head_;
     auto* tail = new ListNode(listType_);
     current_ = current_->tail_ ? current_->tail_ : head_;
@@ -1832,7 +1832,7 @@ void NCycleListGen::generate(VM& vm, ListNode* owner) {
         current_ = head_; remaining_--;
     }
     if (!current_) { owner->tail_ = nullptr; return; }
-    if (current_->generator_) current_->force(vm);
+    current_->force(vm);
     owner->head_ = current_->head_;
     ListNode* next = current_->tail_;
     if (!next && remaining_ > 0) { next = head_; remaining_--; }
@@ -1851,7 +1851,7 @@ void HangListGen::generate(VM& vm, ListNode* owner) {
         return;
     }
     if (!source_) { owner->tail_ = nullptr; return; }
-    if (source_->generator_) source_->force(vm);
+    source_->force(vm);
     owner->head_ = source_->head_;
     auto* tail = new ListNode(listType_);
     lastValue_ = source_->head_; hasLast_ = true;
@@ -1863,7 +1863,7 @@ void HangListGen::generate(VM& vm, ListNode* owner) {
 
 void MapListGen::generate(VM& vm, ListNode* owner) {
     if (!source_) { owner->tail_ = nullptr; return; }
-    if (source_->generator_) source_->force(vm);
+    source_->force(vm);
     u16 sb = vm.currentCodeBlock()->numRegs;
     vm.reg(sb) = source_->head_;
     callOneArg(vm, fn_, sb);
@@ -1877,7 +1877,7 @@ void MapListGen::generate(VM& vm, ListNode* owner) {
 
 void AutoMapListGen::generate(VM& vm, ListNode* owner) {
     if (!source_) { owner->tail_ = nullptr; return; }
-    if (source_->generator_) source_->force(vm);
+    source_->force(vm);
 
     u16 sb = vm.currentCodeBlock()->numRegs;
     u16 argc = info_->argc;
@@ -1986,7 +1986,7 @@ void FilterListGen::generate(VM& vm, ListNode* owner) {
     ListNode* cur = source_;
     u16 sb = vm.currentCodeBlock()->numRegs;
     while (cur) {
-        if (cur->generator_) cur->force(vm);
+        cur->force(vm);
         vm.reg(sb) = cur->head_;
         callOneArg(vm, fn_, sb);
         if (vm.reg(sb).i) {
@@ -2010,12 +2010,12 @@ void PredicateListGen::generate(VM& vm, ListNode* owner) {
         // source_ is guaranteed to have passed the predicate (checked before
         // creating this generator).  Copy its head into owner.
         if (!source_) { owner->head_.i = 0; owner->tail_ = nullptr; return; }
-        if (source_->generator_) source_->force(vm);
+        source_->force(vm);
         owner->head_ = source_->head_;
         // Check if the NEXT source element passes the predicate
         ListNode* next = source_->tail_;
         if (!next) { owner->tail_ = nullptr; return; }
-        if (next->generator_) next->force(vm);
+        next->force(vm);
         vm.reg(sb) = next->head_;
         callOneArg(vm, fn_, sb);
         if (!vm.reg(sb).i) { owner->tail_ = nullptr; return; }
@@ -2028,7 +2028,7 @@ void PredicateListGen::generate(VM& vm, ListNode* owner) {
         ListNode* cur = source_;
         if (dropping_) {
             while (cur) {
-                if (cur->generator_) cur->force(vm);
+                cur->force(vm);
                 vm.reg(sb) = cur->head_;
                 callOneArg(vm, fn_, sb);
                 if (!vm.reg(sb).i) break;
@@ -2036,7 +2036,7 @@ void PredicateListGen::generate(VM& vm, ListNode* owner) {
             }
         }
         if (!cur) { owner->tail_ = nullptr; return; }
-        if (cur->generator_) cur->force(vm);
+        cur->force(vm);
         owner->head_ = cur->head_;
         owner->tail_ = cur->tail_;
     }
@@ -2045,7 +2045,7 @@ void PredicateListGen::generate(VM& vm, ListNode* owner) {
 void ScanListGen::generate(VM& vm, ListNode* owner) {
     owner->head_ = accumulator_;
     if (!source_) { owner->tail_ = nullptr; return; }
-    if (source_->generator_) source_->force(vm);
+    source_->force(vm);
     u16 sb = vm.currentCodeBlock()->numRegs;
     vm.reg(sb) = accumulator_;
     vm.reg(sb+1) = source_->head_;
@@ -2071,8 +2071,8 @@ void IterListGen::generate(VM& vm, ListNode* owner) {
 
 void ZipListGen::generate(VM& vm, ListNode* owner) {
     if (!left_ || !right_) { owner->tail_ = nullptr; return; }
-    if (left_->generator_) left_->force(vm);
-    if (right_->generator_) right_->force(vm);
+    left_->force(vm);
+    right_->force(vm);
     auto* tup = Tuple::create(tupleType_, 2);
     tup->v[0] = left_->head_; tup->v[1] = right_->head_;
     owner->head_.o = tup;
@@ -2086,7 +2086,7 @@ void ZipListGen::generate(VM& vm, ListNode* owner) {
 
 void EnumerateListGen::generate(VM& vm, ListNode* owner) {
     if (!source_) { owner->tail_ = nullptr; return; }
-    if (source_->generator_) source_->force(vm);
+    source_->force(vm);
     auto* tup = Tuple::create(tupleType_, 2);
     tup->v[0] = Word(index_); tup->v[1] = source_->head_;
     owner->head_.o = tup;
@@ -2101,11 +2101,11 @@ void JoinListGen::generate(VM& vm, ListNode* owner) {
     // Advance inner list; if exhausted, move to next outer element
     while (!inner_) {
         if (!outer_) { owner->head_.i = 0; owner->tail_ = nullptr; return; }
-        if (outer_->generator_) outer_->force(vm);
+        outer_->force(vm);
         inner_ = static_cast<ListNode*>(outer_->head_.o);
         outer_ = outer_->tail_;
     }
-    if (inner_->generator_) inner_->force(vm);
+    inner_->force(vm);
     owner->head_ = inner_->head_;
     // Check if there's more data before creating a tail
     ListNode* nextInner = inner_->tail_;
@@ -2116,7 +2116,7 @@ void JoinListGen::generate(VM& vm, ListNode* owner) {
         ListNode* o = nextOuter;
         ListNode* foundInner = nullptr;
         while (o) {
-            if (o->generator_) o->force(vm);
+            o->force(vm);
             foundInner = static_cast<ListNode*>(o->head_.o);
             o = o->tail_;
             if (foundInner) { nextOuter = o; nextInner = foundInner; break; }
@@ -2327,7 +2327,7 @@ static void builtin_collect(VM& vm, u16 dst, u16, u16 ab) {
     auto* arr = makeEmptyArray(arrType);
     ListNode* cur = src;
     for (i64 i = 0; i < n && cur; i++) {
-        if (cur->generator_) cur->force(vm);
+        cur->force(vm);
         arrayPush(vm, arr, elemType, cur->head_);
         cur = cur->tail_;
     }
@@ -2353,7 +2353,7 @@ static void builtin_drop_list(VM& vm, u16 dst, u16, u16 ab) {
     ListNode* cur = src;
     i64 rem = n;
     while (rem > 0 && cur) {
-        if (cur->generator_) cur->force(vm);
+        cur->force(vm);
         cur = cur->tail_; rem--;
     }
     vm.reg(dst).o = cur;  // nullptr if list is shorter than n
@@ -2448,7 +2448,7 @@ static void builtin_filter_list(VM& vm, u16 dst, u16, u16 ab) {
     u16 sb = vm.currentCodeBlock()->numRegs;
     ListNode* cur = src;
     while (cur) {
-        if (cur->generator_) cur->force(vm);
+        cur->force(vm);
         vm.reg(sb) = cur->head_;
         callOneArg(vm, fn, sb);
         if (vm.reg(sb).i) break;
@@ -2477,7 +2477,7 @@ static void builtin_fold_list(VM& vm, u16 dst, u16, u16 ab) {
     u16 sb = vm.currentCodeBlock()->numRegs;
     ListNode* cur = src;
     while (cur) {
-        if (cur->generator_) cur->force(vm);
+        cur->force(vm);
         vm.reg(sb) = acc; vm.reg(sb+1) = cur->head_;
         callTwoArgs(vm, fn, sb); acc = vm.reg(sb);
         cur = cur->tail_;
@@ -2504,12 +2504,12 @@ static void builtin_fold1_list(VM& vm, u16 dst, u16, u16 ab) {
     auto* src = static_cast<ListNode*>(vm.reg(ab).o);
     auto* fn = static_cast<Callable*>(vm.reg(ab+1).o);
     if (!src) { vm.reg(dst).i = 0; return; }
-    if (src->generator_) src->force(vm);
+    src->force(vm);
     Word acc = src->head_;
     u16 sb = vm.currentCodeBlock()->numRegs;
     ListNode* cur = src->tail_;
     while (cur) {
-        if (cur->generator_) cur->force(vm);
+        cur->force(vm);
         vm.reg(sb) = acc; vm.reg(sb+1) = cur->head_;
         callTwoArgs(vm, fn, sb); acc = vm.reg(sb);
         cur = cur->tail_;
@@ -2521,7 +2521,7 @@ static void builtin_scan1_list(VM& vm, u16 dst, u16, u16 ab) {
     auto* src = static_cast<ListNode*>(vm.reg(ab).o);
     auto* fn = static_cast<Callable*>(vm.reg(ab+1).o);
     if (!src) { vm.reg(dst).o = nullptr; return; }
-    if (src->generator_) src->force(vm);
+    src->force(vm);
     auto* lt = static_cast<ListType*>(src->type_);
     Type* et = lt->elemType_;
     auto* node = new ListNode(lt);
@@ -2552,7 +2552,7 @@ static void builtin_find_list(VM& vm, u16 dst, u16, u16 ab) {
     i64 idx = 0;
     ListNode* cur = src;
     while (cur) {
-        if (cur->generator_) cur->force(vm);
+        cur->force(vm);
         vm.reg(sb) = cur->head_;
         callOneArg(vm, fn, sb);
         if (vm.reg(sb).i) { vm.reg(dst).i = idx; return; }
@@ -2566,7 +2566,7 @@ static void builtin_takeWhile_list(VM& vm, u16 dst, u16, u16 ab) {
     auto* fn = static_cast<Callable*>(vm.reg(ab+1).o);
     if (!src) { vm.reg(dst).o = nullptr; return; }
     // Eagerly check the first element before creating the result node
-    if (src->generator_) src->force(vm);
+    src->force(vm);
     u16 sb = vm.currentCodeBlock()->numRegs;
     vm.reg(sb) = src->head_;
     callOneArg(vm, fn, sb);
@@ -2636,7 +2636,7 @@ static void builtin_join_list(VM& vm, u16 dst, u16, u16 ab) {
     ListNode* outer = src;
     ListNode* inner = nullptr;
     while (outer) {
-        if (outer->generator_) outer->force(vm);
+        outer->force(vm);
         inner = static_cast<ListNode*>(outer->head_.o);
         outer = outer->tail_;
         if (inner) break;
@@ -2668,7 +2668,7 @@ static void builtin_flatten_list(VM& vm, u16 dst, u16, u16 ab) {
         ListNode* outer = result;
         ListNode* inner = nullptr;
         while (outer) {
-            if (outer->generator_) outer->force(vm);
+            outer->force(vm);
             inner = static_cast<ListNode*>(outer->head_.o);
             outer = outer->tail_;
             if (inner) break;
@@ -2901,7 +2901,7 @@ static void builtin_length_list(VM& vm, u16 dst, u16, u16 ab) {
     auto* node = static_cast<ListNode*>(vm.reg(ab).o);
     i64 count = 0;
     while (node) {
-        if (node->generator_) node->force(vm);
+        node->force(vm);
         ++count;
         node = node->tail_;
     }
@@ -2911,14 +2911,14 @@ static void builtin_length_list(VM& vm, u16 dst, u16, u16 ab) {
 // head: List[T] -> T  (returns first element; undefined on nil list)
 static void builtin_head_list(VM& vm, u16 dst, u16, u16 ab) {
     auto* node = static_cast<ListNode*>(vm.reg(ab).o);
-    if (node->generator_) node->force(vm);
+    node->force(vm);
     vm.reg(dst) = node->head_;
 }
 
 // tail: List[T] -> List[T]  (returns rest of list; undefined on nil list)
 static void builtin_tail_list(VM& vm, u16 dst, u16, u16 ab) {
     auto* node = static_cast<ListNode*>(vm.reg(ab).o);
-    if (node->generator_) node->force(vm);
+    node->force(vm);
     vm.reg(dst).o = node->tail_;
 }
 

@@ -226,10 +226,7 @@ VMString ListNode::str() const {
     bool first = true;
     i64 count = 0;
     while (node) {
-        // Force lazy node if needed
-        if (node->generator_) {
-            node->force(*gCurrentVM);
-        }
+        node->force(*gCurrentVM);
 
         if (count >= limit) {
             s += ", ...";
@@ -775,7 +772,7 @@ size_t WordHash::operator()(Word w) const {
         auto* node = static_cast<ListNode*>(w.o);
         size_t h = 0;
         while (node) {
-            if (node->generator_) node->force(*gCurrentVM);
+            node->force(*gCurrentVM);
             h = hashCombine(h, sub(node->head_));
             node = node->tail_;
         }
@@ -918,8 +915,8 @@ bool WordEqual::operator()(Word a, Word b) const {
         auto* na = static_cast<ListNode*>(a.o);
         auto* nb = static_cast<ListNode*>(b.o);
         while (na && nb) {
-            if (na->generator_) na->force(*gCurrentVM);
-            if (nb->generator_) nb->force(*gCurrentVM);
+            na->force(*gCurrentVM);
+            nb->force(*gCurrentVM);
             if (!sub(na->head_, nb->head_)) return false;
             na = na->tail_;
             nb = nb->tail_;
