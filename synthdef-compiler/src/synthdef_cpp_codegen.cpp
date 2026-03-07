@@ -1085,24 +1085,11 @@ string CppCodeGen::genDelayDealloc() {
 string CppCodeGen::genAllocFun() {
     string s;
     s += FMT("{0}* {0}_alloc() {{\n", synth->name);
-    
+
     s += FMT("\t{0}* p = ({0}*)calloc(1, sizeof({0}));\n", synth->name);
     s += FMT("\tp->funs = {}_funs;\n", synth->name);
-    if (synth->inlets.size() > 0) {
-        s += FMT("\tp->inlets = (void**)calloc({}, sizeof(void*));\n", tos(synth->inlets.size()));
-    }
-    if (synth->outlets.size() > 0) {
-        s += FMT("\tp->outlets = (void**)calloc({}, sizeof(void*));\n", tos(synth->outlets.size()));
-    }
-    if (synth->controls.size() > 0) {
-        s += FMT("\tp->num_controls = {};\n", tos(synth->controls.size()));
-        s += FMT("\tp->controls = (void**)calloc({}, sizeof(void*));\n", tos(synth->controls.size()));
-        for (S u : synth->controls) {
-            auto ctrl = u.as<Control>();
-            s += FMT("\tp->controls[{}] = calloc({}, sizeof({}));\n",
-                ctrl->serial, u->chans, u->type.str());
-        }
-    }
+    // Note: inlets, outlets, and controls arrays are allocated and freed
+    // by the engine (Node::setupSynth / Node::~Node). Do not allocate here.
     s += "\treturn p;\n";
     s += "}\n\n";
     return s;
@@ -1113,13 +1100,8 @@ string CppCodeGen::genFreeFun() {
     s += FMT("jscs_SErr {0}_free({0}* p) {{\n", synth->name);
     s += FMT("\tjscs_SErr {0}_uninit({0}* p);\n", synth->name);
     s += FMT("\t{0}_uninit(p);\n", synth->name);
-    
-    if (synth->inlets.size() > 0) { s += "\tfree(p->inlets);\n"; }
-    if (synth->outlets.size() > 0) { s += "\tfree(p->outlets);\n"; }
-    if (synth->controls.size() > 0) {
-        s += FMT("\tfor (int i = 0; i < {}; i++) free(p->controls[i]);\n", synth->controls.size());
-        s += "\tfree(p->controls);\n";
-    }
+    // Note: inlets, outlets, and controls are freed by the engine
+    // (Node::~Node). Only free the synth struct itself here.
     s += "\tfree(p);\n";
     s += "\treturn jscs_errNone;\n";
     s += "}\n\n";

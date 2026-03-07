@@ -78,13 +78,14 @@ jscs_SynthData* Node::setupSynth(Engine* e, NodeDefInfo const& info) {
     }
 
     // initialize controls
-    for (int i = 0; i < synth->num_controls; ++i) {    
+    for (int i = 0; i < synth->num_controls; ++i) {
         ControlInfo const& cinfo = info.controls[i];
         Control control;
         control.controlID_ = cinfo.controlID;
         control.spec_ = cinfo.spec;
         control.type_ = cinfo.type;
         control.data_ = (void*)calloc(cinfo.type.chans, elemSize(cinfo.type.elem));
+        synth->controls[i] = control.data_;
         controls.push_back(control);
     }
     

@@ -24,7 +24,9 @@ DelayBuf* SExprGraphBuilder::getOrCreateDelayBuf(int64_t delayId) {
         return it->second.get();
     }
     D delay = new DelayBuf();
+    delay->graph = gGraph;
     delayMap.emplace(delayId, delay);
+    gGraph->delayBufs.insert(delay);
     synth->delayBufs.insert(delay);
     return delay.get();
 }
@@ -125,12 +127,13 @@ std::expected<S, std::string> SExprGraphBuilder::parseURand(sexpr::ItemVec const
     int64_t id = list[0].get<int64_t>();
 
     if (!list[2].is<int64_t>()) return std::unexpected("Rate must be integer");
-    // TODO: parse rate properly
+    int64_t rateIndex = list[2].get<int64_t>();
+    auto rate = SignalRate(static_cast<SignalRate::RateEnum>(rateIndex));
 
     if (!list[3].is<int64_t>()) return std::unexpected("Chans must be integer");
     int64_t chans = list[3].get<int64_t>();
 
-    S expr = addExpr(new URandExpr(chans));
+    S expr = addExpr(new URandExpr(chans, rate));
     exprMap[id] = expr;
     return expr;
 }
@@ -144,10 +147,14 @@ std::expected<S, std::string> SExprGraphBuilder::parseBiRand(sexpr::ItemVec cons
     if (!list[0].is<int64_t>()) return std::unexpected("ID must be integer");
     int64_t id = list[0].get<int64_t>();
 
+    if (!list[2].is<int64_t>()) return std::unexpected("Rate must be integer");
+    int64_t rateIndex = list[2].get<int64_t>();
+    auto rate = SignalRate(static_cast<SignalRate::RateEnum>(rateIndex));
+
     if (!list[3].is<int64_t>()) return std::unexpected("Chans must be integer");
     int64_t chans = list[3].get<int64_t>();
 
-    S expr = addExpr(new BiRandExpr(chans));
+    S expr = addExpr(new BiRandExpr(chans, rate));
     exprMap[id] = expr;
     return expr;
 }
@@ -231,6 +238,7 @@ std::expected<UnaryOp, std::string> parseUnaryOp(sexpr::Symbol const& sym) {
         {"asin", UnaryOp::Asin}, {"acos", UnaryOp::Acos}, {"atan", UnaryOp::Atan},
         {"sinh", UnaryOp::Sinh}, {"cosh", UnaryOp::Cosh}, {"tanh", UnaryOp::Tanh},
         {"asinh", UnaryOp::Asinh}, {"acosh", UnaryOp::Acosh}, {"atanh", UnaryOp::Atanh},
+        {"round", UnaryOp::Round},
         {"sinpi", UnaryOp::SinPi}, {"cospi", UnaryOp::CosPi}, {"tanpi", UnaryOp::TanPi},
         {"erf", UnaryOp::Erf}, {"erfc", UnaryOp::Erfc},
     };
@@ -250,6 +258,8 @@ std::expected<BinaryOp, std::string> parseBinaryOp(sexpr::Symbol const& sym) {
         {"min", BinaryOp::Min}, {"max", BinaryOp::Max}, {"pow", BinaryOp::Pow},
         {"hypot", BinaryOp::Hypot}, {"atan2", BinaryOp::Atan2}, {"copysign", BinaryOp::Copysign},
         {"mod", BinaryOp::Mod},
+        {"add", BinaryOp::Add}, {"sub", BinaryOp::Sub}, {"mul", BinaryOp::Mul}, {"div", BinaryOp::Div},
+        {"rem", BinaryOp::Rem},
     };
 
     auto it = opMap.find(sym.name);
@@ -263,6 +273,8 @@ std::expected<CompareOp, std::string> parseCompareOp(sexpr::Symbol const& sym) {
     static std::unordered_map<std::string, CompareOp> const opMap = {
         {"<", CompareOp::LT}, {"<=", CompareOp::LE}, {">", CompareOp::GT},
         {">=", CompareOp::GE}, {"==", CompareOp::EQ}, {"!=", CompareOp::NE},
+        {"lt", CompareOp::LT}, {"le", CompareOp::LE}, {"gt", CompareOp::GT},
+        {"ge", CompareOp::GE}, {"eq", CompareOp::EQ}, {"ne", CompareOp::NE},
     };
 
     auto it = opMap.find(sym.name);
@@ -526,12 +538,78 @@ std::expected<S, std::string> SExprGraphBuilder::parseSelectExpr(sexpr::ItemVec 
     return expr;
 }
 
-// Control flow expressions with subgraphs - stub implementations for now
-// These need more complex handling
+std::expected<S, std::string> SExprGraphBuilder::parseGraph(sexpr::ItemVec const& graphList) {
+    // Format: (Graph <root-id> (<expr-list>))
+    if (graphList.size() < 3) {
+        return std::unexpected("Graph requires at least 3 elements");
+    }
+
+    if (!graphList[0].is<sexpr::Symbol>() || graphList[0].get<sexpr::Symbol>().name != "Graph") {
+        return std::unexpected("Expected 'Graph' symbol");
+    }
+
+    if (!graphList[1].is<int64_t>()) {
+        return std::unexpected("Graph root ID must be integer");
+    }
+    int64_t rootId = graphList[1].get<int64_t>();
+
+    if (!graphList[2].is<sexpr::ItemVec>()) {
+        return std::unexpected("Graph expression list must be a list");
+    }
+
+    auto const& exprList = graphList[2].get<sexpr::ItemVec>();
+
+    // Create a new subgraph
+    Graph* graph = new Graph(synth, gGraph);
+    PushGraph pg(graph);
+
+    // Parse all expressions in this subgraph
+    for (auto const& item : exprList) {
+        auto result = parseExpr(item);
+        if (!result) {
+            return std::unexpected(result.error());
+        }
+    }
+
+    // The root expression is the result of this subgraph
+    auto it = exprMap.find(rootId);
+    if (it == exprMap.end()) {
+        return std::unexpected(std::format("Graph root ID {} not found", rootId));
+    }
+
+    // Wrap in PhiNodeExpr
+    S phi = addExpr(new PhiNodeExpr(it->second));
+    return phi;
+}
+
 std::expected<S, std::string> SExprGraphBuilder::parseIfExpr(sexpr::ItemVec const& list) {
-    // Format: (id IfExpr (input_ids) thenGraphId elseGraphId)
-    // TODO: Need to handle subgraph construction properly
-    return std::unexpected("IfExpr parsing not yet implemented - requires subgraph handling");
+    // Format: (id IfExpr (input_ids) (Graph ...) (Graph ...))
+    if (list.size() < 5) {
+        return std::unexpected("IfExpr requires 5 elements");
+    }
+
+    if (!list[0].is<int64_t>()) return std::unexpected("ID must be integer");
+    int64_t id = list[0].get<int64_t>();
+
+    if (!list[2].is<sexpr::ItemVec>()) return std::unexpected("Inputs must be a list");
+    auto inputsResult = resolveInputs(list[2].get<sexpr::ItemVec>());
+    if (!inputsResult) return std::unexpected(inputsResult.error());
+    if (inputsResult->size() != 1) return std::unexpected("IfExpr requires exactly 1 condition input");
+    S test = (*inputsResult)[0];
+
+    // Parse then-branch subgraph
+    if (!list[3].is<sexpr::ItemVec>()) return std::unexpected("Then branch must be a Graph list");
+    auto thenResult = parseGraph(list[3].get<sexpr::ItemVec>());
+    if (!thenResult) return std::unexpected("then branch: " + thenResult.error());
+
+    // Parse else-branch subgraph
+    if (!list[4].is<sexpr::ItemVec>()) return std::unexpected("Else branch must be a Graph list");
+    auto elseResult = parseGraph(list[4].get<sexpr::ItemVec>());
+    if (!elseResult) return std::unexpected("else branch: " + elseResult.error());
+
+    S expr = addExpr(new IfElseExpr(test, *thenResult, *elseResult));
+    exprMap[id] = expr;
+    return expr;
 }
 
 std::expected<S, std::string> SExprGraphBuilder::parseSwitchExpr(sexpr::ItemVec const& list) {
@@ -612,6 +690,33 @@ std::expected<Synth*, std::string> SExprGraphBuilder::buildFromSExpr(sexpr::Item
     return synth;
 }
 
+std::expected<Synth*, std::string> SExprGraphBuilder::buildFromGraph(sexpr::ItemVec const& graphList) {
+    // Format: (Graph <root-id> (<expr-list>))
+    if (graphList.size() < 3) {
+        return std::unexpected("Graph requires at least 3 elements");
+    }
+
+    if (!graphList[0].is<sexpr::Symbol>() || graphList[0].get<sexpr::Symbol>().name != "Graph") {
+        return std::unexpected("Expected 'Graph' symbol");
+    }
+
+    if (!graphList[2].is<sexpr::ItemVec>()) {
+        return std::unexpected("Graph expression list must be a list");
+    }
+
+    PushSynth ps(synth);
+
+    auto const& exprList = graphList[2].get<sexpr::ItemVec>();
+    for (auto const& item : exprList) {
+        auto result = parseExpr(item);
+        if (!result) {
+            return std::unexpected(result.error());
+        }
+    }
+
+    return synth;
+}
+
 GraphResult synthFromSExprText(std::string const& sexprText, std::string const& synthName) {
     auto parseResult = sexpr::parse_sexpr(sexprText);
     if (!parseResult) {
@@ -626,8 +731,44 @@ GraphResult synthFromSExpr(sexpr::Item const& sexprRoot, std::string const& synt
         return std::unexpected("Root must be a list of expressions");
     }
 
+    auto const& rootList = sexprRoot.get<sexpr::ItemVec>();
+
+    // Check if this is a (Synth <name> (Graph ...)) wrapper
+    if (!rootList.empty() && rootList[0].is<sexpr::Symbol>()
+        && rootList[0].get<sexpr::Symbol>().name == "Synth") {
+        return synthFromSynthExpr(rootList);
+    }
+
+    // Check if this is a (Graph <root-id> (...)) wrapper
+    if (!rootList.empty() && rootList[0].is<sexpr::Symbol>()
+        && rootList[0].get<sexpr::Symbol>().name == "Graph") {
+        SExprGraphBuilder builder(synthName);
+        return builder.buildFromGraph(rootList);
+    }
+
+    // Legacy: flat list of expressions
     SExprGraphBuilder builder(synthName);
-    return builder.buildFromSExpr(sexprRoot.get<sexpr::ItemVec>());
+    return builder.buildFromSExpr(rootList);
+}
+
+GraphResult synthFromSynthExpr(sexpr::ItemVec const& synthList) {
+    // Format: (Synth <name> (Graph <root-id> (<expr-list>)))
+    if (synthList.size() < 3) {
+        return std::unexpected("Synth requires at least 3 elements: (Synth <name> <graph>)");
+    }
+
+    if (!synthList[1].is<sexpr::Symbol>()) {
+        return std::unexpected("Synth name must be a symbol");
+    }
+    std::string name = synthList[1].get<sexpr::Symbol>().name;
+
+    if (!synthList[2].is<sexpr::ItemVec>()) {
+        return std::unexpected("Synth body must be a Graph list");
+    }
+
+    auto const& graphList = synthList[2].get<sexpr::ItemVec>();
+    SExprGraphBuilder builder(name);
+    return builder.buildFromGraph(graphList);
 }
 
 } // namespace synthdef

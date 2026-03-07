@@ -63,14 +63,23 @@ struct SExprGraphBuilder {
     // Helper to resolve input IDs
     std::expected<vector<S>, std::string> resolveInputs(sexpr::ItemVec const& inputList);
 
-    // Build synth from complete s-expression list
+    // Parse a (Graph <root-id> (<expr-list>)) as a subgraph, returning the PhiNode result
+    std::expected<S, std::string> parseGraph(sexpr::ItemVec const& graphList);
+
+    // Build synth from complete s-expression list (legacy flat format)
     std::expected<Synth*, std::string> buildFromSExpr(sexpr::ItemVec const& exprList);
+
+    // Build synth from (Graph <root-id> (<expr-list>)) top-level format
+    std::expected<Synth*, std::string> buildFromGraph(sexpr::ItemVec const& graphList);
 };
 
 // Main entry point: parse s-expression text and build synth
 GraphResult synthFromSExprText(std::string const& sexprText, std::string const& synthName = "synth");
 
-// Parse s-expression and build synth
+// Parse s-expression and build synth (auto-detects Synth/Graph/flat format)
 GraphResult synthFromSExpr(sexpr::Item const& sexprRoot, std::string const& synthName = "synth");
+
+// Parse a (Synth <name> (Graph ...)) s-expression (name extracted from the expression)
+GraphResult synthFromSynthExpr(sexpr::ItemVec const& synthList);
 
 } // namespace synthdef

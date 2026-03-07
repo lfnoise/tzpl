@@ -192,10 +192,12 @@ fn delayVar() DelayVar {
 }
 
 fn delayVar(maxDelay AsSignal) DelayVar {
-	DelayVar {
+	let d = DelayVar {
 		id: _nextDelayVarId(),
 		maxDelay: Option<S>.some(maxDelay asSignal),
-	} _addToGraph
+	} _addToGraph;
+	SignalExprKind.delay(d, DelayOp.maxDelayTime) _newSignalExpr([maxDelay asSignal]);
+	d
 }
 
 ---------------------------------------------------------------------------
@@ -657,10 +659,12 @@ fn vread(d DelayVar, index AsSignal, interp Interpolation = Interpolation.cubic)
 }
 
 fn write(d DelayVar, s AsSignal) S {
-    SignalExprKind.delay(d, DelayOp.write) _newSignalExpr([s asSignal])
+    SignalExprKind.delay(d, DelayOp.write) _newSignalExpr([s asSignal]);
+	s
 }
 fn write(s AsSignal, d DelayVar) S {
-    SignalExprKind.delay(d, DelayOp.write) _newSignalExpr([s asSignal])
+    SignalExprKind.delay(d, DelayOp.write) _newSignalExpr([s asSignal]);
+	s
 }
 
 fn call(d DelayVar, index Int = 0) S = d read(index);
@@ -871,18 +875,18 @@ fn toLisp(o S) String {
     match (o.kind) {
         sampleRate : "(%^ SampleRate)" fmt(o.id);
         sampleDur : "(%^ SampleDur)" fmt(o.id);
-        int(a, typ) : "(%^ Constant %^ %^ %^)" fmt(o.id, a length, typ, a separatedString parens);
-        float(a, typ) : "(%^ Constant %^ %^ %^)" fmt(o.id, a length, typ, a separatedString parens);
+        int(a, typ) : "(%^ Constant %^ %^ %^)" fmt(o.id, a length, typ.0, a separatedString parens);
+        float(a, typ) : "(%^ Constant %^ %^ %^)" fmt(o.id, a length, typ.0, a separatedString parens);
         unop(op) : "(%^ UnaryOp %^ %^)" fmt(o.id, op tag toString, o inputsToLisp);
         binop(op) : "(%^ BinaryOp %^ %^)" fmt(o.id, op tag toString, o inputsToLisp);
-        compareop(op) : "(%^ BinaryOp %^ %^)" fmt(o.id, op tag toString, o inputsToLisp);
+        compareop(op) : "(%^ CompareOp %^ %^)" fmt(o.id, op tag toString, o inputsToLisp);
         castop(op) : "(%^ CastOp %^ %^)" fmt(o.id, op numTypeInt, o inputsToLisp);
         random(op, rate, chans) : match (op) {
-            frand(lo, hi) : "(%^ FRand %^ %^ %^ %^)" fmt(o.id, rate, chans asChans, lo, hi);
-            irand(lo, hi) : "(%^ IRand %^ %^ %^ %^)" fmt(o.id, rate, chans asChans, lo, hi);
-            unipolar : "(%^ URand %^ %^)" fmt(o.id, rate, chans asChans);
-            bipolar : "(%^ BiRand %^ %^)" fmt(o.id, rate, chans asChans);
-            bits : "(%^ Rand64 %^ %^)" fmt(o.id, rate, chans asChans);
+            frand(lo, hi) : "(%^ FRand %^ %^ %^ %^)" fmt(o.id, rate ordinal, chans asChans, lo, hi);
+            irand(lo, hi) : "(%^ IRand %^ %^ %^ %^)" fmt(o.id, rate ordinal, chans asChans, lo, hi);
+            unipolar : "(%^ URand %^ %^)" fmt(o.id, rate ordinal, chans asChans);
+            bipolar : "(%^ BiRand %^ %^)" fmt(o.id, rate ordinal, chans asChans);
+            bits : "(%^ Rand64 %^ %^)" fmt(o.id, rate ordinal, chans asChans);
         }
         vecop(op) : match (op) {
             at : "(%^ VecAt %^)" fmt(o.id, o inputsToLisp);
@@ -935,33 +939,54 @@ fn toLisp(o S) String {
 }
 
 
-fn defSynth(synthFun GraphFn, synthName String) SignalGraph {
+fn defSynth(synthFun GraphFn, synthName String) String {
 
 	let graph SignalGraph = synthFun _makeTopGraph;
-	
+
 	var `indentLevel Int = 0;
 
-	let text = graph toLisp;
+	let sexprString = "(Synth %^ %^)" fmt(synthName, graph toLisp);
 
-	"--------" println;
-	"(Synth %^ %^)" fmt(synthName, text) println;
-	"--------" println;
-	
-	graph
+	let err = sexprString compileSynthDefAndLoad;
+	if (err length > 0) {
+		println("ERROR compiling " $ synthName $ ": " $ err);
+	}
+
+	sexprString
 }
 
-/*
-fn bubbles() =
-	0.4 lfsaw * 24
-	+ [8, 7.23] lfsaw * 3
-	+ 81
-	|> nnhz sinosc * 4c
-	|> combn(0.2,4) outlet;
-
-
-bubbles makeGraph toLisp println;
-*/
-
 ---------------------------------------------------------------------------
+-- Playing synthdefs
+
+var _nextNodeID = 1000;
+
+fn play(defName String, nodeID Int) Int {
+	begin(0);
+	newNode(defName, nodeID);
+	connect(nodeID, 0, 0, 0);
+	go();
+	nodeID
+}
+
+fn play(defName String) Int {
+	let nodeID = _nextNodeID;
+	_nextNodeID = _nextNodeID + 1;
+	play(defName, nodeID)
+}
+
+fn stop(nodeID Int) Int {
+	begin(0);
+	freeNode(nodeID);
+	go();
+	nodeID
+}
+
+fn playFor(defName String, seconds Float) Int {
+	let id = play(defName);
+	sleep(seconds);
+	stop(id);
+	id
+}
+
 ---------------------------------------------------------------------------
 ---------------------------------------------------------------------------

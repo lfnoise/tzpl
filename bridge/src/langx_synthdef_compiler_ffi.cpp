@@ -61,18 +61,20 @@ static std::string cacheKey(std::string const& name, std::string const& sexpr) {
 // ---------------------------------------------------------------------------
 
 // Runs the full synthdef compilation pipeline.
+// The sexpr should be in (Synth <name> (Graph ...)) format.
 // Returns "" on success, error message on failure.
-// On success, sets dylibPath to the path of the compiled .dylib.
-static std::string compileSynthDefPipeline(std::string const& name,
-                                            std::string const& sexpr,
+// On success, sets dylibPath and synthName.
+static std::string compileSynthDefPipeline(std::string const& sexpr,
+                                            std::string& synthName,
                                             std::string& dylibPath) {
-    // Parse s-expression and build synth graph
-    auto result = synthdef::synthFromSExprText(sexpr, name);
+    // Parse s-expression and build synth graph (name extracted from Synth wrapper)
+    auto result = synthdef::synthFromSExprText(sexpr);
     if (!result) {
         return std::string("parse error: ") + result.error();
     }
 
     synthdef::Synth* synth = result.value();
+    synthName = synth->name;
 
     // Graph analysis and code generation (need PushSynth scope)
     std::string cppCode;
@@ -87,18 +89,18 @@ static std::string compileSynthDefPipeline(std::string const& name,
     // Write generated code to file
     std::string dir = synthdef::getBuildDir();
     try {
-        synthdef::writeCodeToFile(dir, name, cppCode);
+        synthdef::writeCodeToFile(dir, synthName, cppCode);
     } catch (std::exception const& e) {
         return std::string("write error: ") + e.what();
     }
 
     // Compile and link to .dylib
-    int err = synthdef::compileAndLink(dir, name);
+    int err = synthdef::compileAndLink(dir, synthName);
     if (err) {
         return std::string("compile/link failed with exit code ") + std::to_string(err);
     }
 
-    dylibPath = dir + name + "_synth.dylib";
+    dylibPath = dir + synthName + "_synth.dylib";
     return "";
 }
 
@@ -106,40 +108,38 @@ static std::string compileSynthDefPipeline(std::string const& name,
 // FFI functions
 // ---------------------------------------------------------------------------
 
-// fn compileSynthDef(name String, sexpr String) String
+// fn compileSynthDef(sexpr String) String
 // Returns "" on success, error message on failure.
 static void ffi_compileSynthDef(ts::VM& vm, u16 dst, u16, u16 argBase) {
-    std::string name = regString(vm, argBase);
-    std::string sexpr = regString(vm, argBase + 1);
+    std::string sexpr = regString(vm, argBase);
 
-    std::string dylibPath;
-    std::string error = compileSynthDefPipeline(name, sexpr, dylibPath);
+    std::string synthName, dylibPath;
+    std::string error = compileSynthDefPipeline(sexpr, synthName, dylibPath);
 
     if (error.empty()) {
         // Cache the result
-        compilationCache()[cacheKey(name, sexpr)] = CacheEntry{dylibPath};
+        compilationCache()[cacheKey(synthName, sexpr)] = CacheEntry{dylibPath};
     }
 
     returnString(vm, dst, error);
 }
 
-// fn compileSynthDefAndLoad(name String, sexpr String) String
+// fn compileSynthDefAndLoad(sexpr String) String
 // Compiles, loads the .dylib, and registers the def with the engine.
 // Returns "" on success, error message on failure.
 static void ffi_compileSynthDefAndLoad(ts::VM& vm, u16 dst, u16, u16 argBase) {
-    std::string name = regString(vm, argBase);
-    std::string sexpr = regString(vm, argBase + 1);
+    std::string sexpr = regString(vm, argBase);
 
-    std::string key = cacheKey(name, sexpr);
-    std::string dylibPath;
+    std::string synthName, dylibPath;
 
-    // Check cache
+    // Check cache (use sexpr as key since name is embedded in it)
+    std::string key = cacheKey("", sexpr);
     auto it = compilationCache().find(key);
     if (it != compilationCache().end()) {
         dylibPath = it->second.dylibPath;
     } else {
         // Compile
-        std::string error = compileSynthDefPipeline(name, sexpr, dylibPath);
+        std::string error = compileSynthDefPipeline(sexpr, synthName, dylibPath);
         if (!error.empty()) {
             returnString(vm, dst, error);
             return;
@@ -202,8 +202,8 @@ void registerSynthdefCompilerFFI(ts::Compiler& compiler) {
                                           /*pure=*/false, /*rtSafe=*/false);
     };
 
-    reg("compileSynthDef",        String,      {String, String}, ffi_compileSynthDef);
-    reg("compileSynthDefAndLoad", String,      {String, String}, ffi_compileSynthDefAndLoad);
+    reg("compileSynthDef",        String,      {String}, ffi_compileSynthDef);
+    reg("compileSynthDefAndLoad", String,      {String}, ffi_compileSynthDefAndLoad);
     reg("listSynthDefs",          StringArray, {},               ffi_listSynthDefs);
 }
 

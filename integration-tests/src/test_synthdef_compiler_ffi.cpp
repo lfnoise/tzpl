@@ -88,8 +88,8 @@ static void test_compile_success() {
 
     // A minimal constant -> outlet synthdef
     const char* source = R"LANG(
-        let sexpr = "((0 Constant 1 12 (440.0)) (1 Outlet \"out\" 0))";
-        let err = compileSynthDef("test_sine_ffi", sexpr);
+        let sexpr = "(Synth test_sine_ffi (Graph 1 ((0 Constant 1 12 (440.0)) (1 Outlet \"out\" 0))))";
+        let err = compileSynthDef(sexpr);
         println(err);
     )LANG";
 
@@ -119,7 +119,7 @@ static void test_compile_error() {
 
     // Invalid s-expression
     const char* source = R"LANG(
-        let err = compileSynthDef("bad_synth", "this is not valid sexpr");
+        let err = compileSynthDef("this is not valid sexpr");
         println(err);
     )LANG";
 
@@ -149,8 +149,8 @@ static void test_compile_and_load() {
 
     // Compile and load, then verify the def was registered
     const char* source = R"LANG(
-        let sexpr = "((0 Constant 1 12 (440.0)) (1 Outlet \"out\" 0))";
-        let err = compileSynthDefAndLoad("loaded_sine", sexpr);
+        let sexpr = "(Synth loaded_sine (Graph 1 ((0 Constant 1 12 (440.0)) (1 Outlet \"out\" 0))))";
+        let err = compileSynthDefAndLoad(sexpr);
         println(err);
         let defs = listSynthDefs();
         println(defs);
@@ -191,9 +191,9 @@ static void test_caching() {
 
     // Compile twice — the second should be faster due to caching
     const char* source = R"LANG(
-        let sexpr = "((0 Constant 1 12 (440.0)) (1 Outlet \"out\" 0))";
-        let err1 = compileSynthDefAndLoad("cache_test", sexpr);
-        let err2 = compileSynthDefAndLoad("cache_test", sexpr);
+        let sexpr = "(Synth cache_test (Graph 1 ((0 Constant 1 12 (440.0)) (1 Outlet \"out\" 0))))";
+        let err1 = compileSynthDefAndLoad(sexpr);
+        let err2 = compileSynthDefAndLoad(sexpr);
         println(err1);
         println(err2);
     )LANG";

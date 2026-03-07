@@ -132,10 +132,70 @@ void test_sexpr_from_file() {
     synth->dump();
 }
 
+void test_sexpr_synth_wrapper() {
+    std::println("\n=== Testing Synth/Graph wrapper format ===");
+
+    std::string sexprText = R"(
+        (Synth test_wrapped
+            (Graph 3 (
+                (0 Constant 1 12 (440.0))
+                (1 Constant 1 12 (1.0))
+                (2 BinaryOp add (0 1))
+                (3 Outlet "out" 2))))
+    )";
+
+    auto result = synthFromSExprText(sexprText);
+    assert(result.has_value());
+
+    Synth* synth = result.value();
+    assert(synth->name == "test_wrapped");
+    std::println("SUCCESS: Synth name = {}, {} expressions", synth->name, synth->exprs.size());
+
+    {
+        PushSynth ps(synth);
+        synth->graphAnalysis();
+        synth->dump();
+    }
+}
+
+void test_sexpr_if_expr() {
+    std::println("\n=== Testing IfExpr with subgraphs ===");
+
+    std::string sexprText = R"(
+        (Synth test_if
+            (Graph 5 (
+                (0 Constant 1 15 (1))
+                (1 Constant 1 15 (0))
+                (2 CompareOp gt (0 1))
+                (4 IfExpr (2)
+                    (Graph 3 (
+                        (3 Constant 1 12 (440.0))))
+                    (Graph 100 (
+                        (100 Constant 1 12 (220.0)))))
+                (5 Outlet "out" 4))))
+    )";
+
+    auto result = synthFromSExprText(sexprText);
+    assert(result.has_value());
+
+    Synth* synth = result.value();
+    assert(synth->name == "test_if");
+    std::println("SUCCESS: Synth name = {}, {} expressions, {} graphs",
+        synth->name, synth->exprs.size(), synth->graphs.size());
+
+    {
+        PushSynth ps(synth);
+        synth->graphAnalysis();
+        synth->dump();
+    }
+}
+
 void test_sexpr_integration() {
     test_sexpr_simple();
     test_sexpr_binary_op();
     test_sexpr_from_language();
+    test_sexpr_synth_wrapper();
+    test_sexpr_if_expr();
     test_sexpr_from_file();
 
     std::println("\n=== S-Expression Integration Tests Complete ===");
