@@ -150,6 +150,11 @@ ModuleInfo* ModuleCompiler::compileModule(
                 "Circular import detected for module '" + cacheKey + "'"));
             return nullptr;
         }
+        if (mod->failed) {
+            errors.push_back(CompileError(CompileError::TypeError, loc,
+                "Module '" + modName + "' had compilation errors"));
+            return nullptr;
+        }
         return mod;
     }
 
@@ -197,6 +202,7 @@ ModuleInfo* ModuleCompiler::compileModule(
         errors.push_back(CompileError(CompileError::TypeError, loc,
             "Cannot read module file '" + resolvedPath + "'"));
         mod->compiling = false;
+        mod->failed = true;
         return nullptr;
     }
 
@@ -213,6 +219,7 @@ ModuleInfo* ModuleCompiler::compileModule(
     if (parser.hasErrors()) {
         for (const auto& err : parser.errors()) errors.push_back(err);
         mod->compiling = false;
+        mod->failed = true;
         return nullptr;
     }
     Program& program = mod->ast;
@@ -232,6 +239,7 @@ ModuleInfo* ModuleCompiler::compileModule(
     if (typeChecker.hasErrors()) {
         for (const auto& err : typeChecker.errors()) errors.push_back(err);
         mod->compiling = false;
+        mod->failed = true;
         return nullptr;
     }
 
@@ -243,6 +251,7 @@ ModuleInfo* ModuleCompiler::compileModule(
     if (codegen.hasErrors()) {
         for (const auto& err : codegen.errors()) errors.push_back(err);
         mod->compiling = false;
+        mod->failed = true;
         return nullptr;
     }
 

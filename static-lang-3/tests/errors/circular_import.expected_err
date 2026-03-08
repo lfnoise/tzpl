@@ -3,21 +3,3 @@ Type error [tests/errors/circular_import.x:1:1]
 1 | import circ_a;
   | ^----^
   Circular import detected for module 'tests/errors/_lib/circ_a.x'
-
-Type error [tests/errors/circular_import.x:3:9]
-  |
-3 | println(circ_a.fromA(10));
-  |         ^----^
-  Undeclared identifier 'circ_a'
-
-Type error [tests/errors/circular_import.x:3:9]
-  |
-3 | println(circ_a.fromA(10));
-  |         ^----^
-  Field access not supported on this type
-
-Type error [tests/errors/circular_import.x:3:9]
-  |
-3 | println(circ_a.fromA(10));
-  |         ^----^
-  Expression is not callable

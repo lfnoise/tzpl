@@ -179,6 +179,9 @@ fn bubbles_lite() S = 0.4 lfsaw * 24 + 8 lfsaw * 3 + 81 |> nnhz sinosc * 0.04 |>
 ---------------------------------------------------------------------------
 -- Play a demo
 
+import audio_engine as ae;
+ae.listSynthDefs() println;
+
 "init_urand_test" playFor(5.0);
 "bubbles" playFor(5.0);
 "dustone" playFor(5.0);

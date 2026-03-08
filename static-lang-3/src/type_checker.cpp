@@ -232,6 +232,9 @@ void TypeChecker::check(Program& program) {
         }
     }
 
+    // If any import failed, stop here to avoid cascading errors
+    if (hasErrors()) return;
+
     // First pass: register all struct and enum type names (empty shells)
     for (auto& item : program.items) {
         if (item->kind == ASTNode::StructDecl) {
@@ -446,6 +449,9 @@ void TypeChecker::checkREPLInput(Program& program) {
             checkImportDecl(static_cast<ImportDeclNode*>(item.get()));
         }
     }
+
+    // If any import failed, stop here to avoid cascading errors
+    if (hasErrors()) return;
 
     // First pass: register all struct and enum type names (empty shells)
     for (auto& item : program.items) {

@@ -958,13 +958,15 @@ fn defSynth(synthFun GraphFn, synthName String) String {
 ---------------------------------------------------------------------------
 -- Playing synthdefs
 
+import audio_engine as ae;
+
 var _nextNodeID = 1000;
 
 fn play(defName String, nodeID Int) Int {
-	begin(0);
-	newNode(defName, nodeID);
-	connect(nodeID, 0, 0, 0);
-	go();
+	ae.begin(0);
+	ae.newNode(defName, nodeID);
+	ae.connect(nodeID, 0, 0, 0);
+	ae.go();
 	nodeID
 }
 
@@ -975,15 +977,15 @@ fn play(defName String) Int {
 }
 
 fn stop(nodeID Int) Int {
-	begin(0);
-	freeNode(nodeID);
-	go();
+	ae.begin(0);
+	ae.freeNode(nodeID);
+	ae.go();
 	nodeID
 }
 
 fn playFor(defName String, seconds Float) Int {
 	let id = play(defName);
-	sleep(seconds);
+	ae.sleep(seconds);
 	stop(id);
 	id
 }

@@ -57,6 +57,7 @@ struct ModuleInfo {
     u32 initFlagGlobalIndex = 0;  // global slot for "initialized" flag
     bool initialized = false;
     bool compiling = false;  // cycle detection
+    bool failed = false;     // true if compilation failed (suppress cascading errors)
 
     // Source file info — needed for correct error diagnostics in imported templates
     std::string sourceFilePath;
