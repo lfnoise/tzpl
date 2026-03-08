@@ -108,11 +108,13 @@ struct TimeSortedCommandList {
 	
 	CommandList pop(i64 sampleTime) {
 		CommandList out;
+		if (!head) return out;
 		// pop from head of list
-		while (head && head->sampleTime_ <= sampleTime) {
+		while (head->sampleTime_ <= sampleTime) {
 			Command* next = head->next_;
 			out.add(head);
 			head = next;
+			if (!head) break;
 		}
 		if (head) head->prev_ = nullptr;
 		else tail = nullptr;
@@ -135,7 +137,8 @@ struct TimeSortedCommandList {
 
 class SchedulerQueue
 {
-	const int kQueueSize = 1021;
+	const i64 kQueueSize = 4096;
+	const i64 kQueueMask = kQueueSize - 1;
     std::vector<TimeSortedCommandList> queue_;
 public:
 	SchedulerQueue()
@@ -143,13 +146,12 @@ public:
 	{}
 		
 	void add(Command* cmd) {
-		//printf("schedQ add %8qd %4qd\n", cmd->sampleTime_, cmd->sampleTime_ % kQueueSize);
 		assert(cmd->sampleTime_ >= 0);
-		queue_[cmd->sampleTime_ % kQueueSize].add(cmd);
+		queue_[cmd->sampleTime_ & kQueueMask].add(cmd);
 	}
 	
 	CommandList popForTime(i64 sampleTime) {
-		return queue_[int(sampleTime) % kQueueSize].pop(sampleTime);
+		return queue_[sampleTime & kQueueMask].pop(sampleTime);
 	}
 
 	void clear() {
