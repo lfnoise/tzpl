@@ -141,6 +141,22 @@ void Compiler::registerForeignFunction(const std::string& name, Type* returnType
     foreignFunctions_.push_back({name, returnType, std::move(paramTypes), cfun, pure, rtSafe});
 }
 
+void Compiler::registerForeignModuleFunction(const std::string& moduleName,
+                                              const std::string& funcName,
+                                              Type* returnType,
+                                              std::vector<Type*> paramTypes, CFun cfun,
+                                              bool pure, bool rtSafe) {
+    foreignModuleFunctions_[moduleName].push_back(
+        {funcName, returnType, std::move(paramTypes), cfun, pure, rtSafe});
+}
+
+const std::vector<Compiler::ForeignFuncEntry>* Compiler::foreignModuleFunctions(
+    const std::string& moduleName) const {
+    auto it = foreignModuleFunctions_.find(moduleName);
+    if (it != foreignModuleFunctions_.end()) return &it->second;
+    return nullptr;
+}
+
 // --- Constant folding ---
 
 bool Compiler::evalPrimitive(Primitive* prim, const Word* args, u16 argc, Word& outResult) {

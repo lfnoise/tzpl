@@ -8,6 +8,7 @@
 #include "langx_synthdef_compiler_ffi.hpp"
 #include "langx_audio_engine_ffi.hpp"
 #include "langx.hpp"
+#include "module_compiler.hpp"
 #include "jscs_client_interface.hpp"
 #include "jscs_test_plugins.hpp"
 #include <print>
@@ -34,9 +35,10 @@ static void check(bool condition, std::string_view description) {
 
 // Compile and run a Language X source string. Returns true on compilation success.
 static bool compileAndRun(ts::Compiler& compiler, ts::VM& vm,
-                          const char* source, const char* testName) {
+                          const char* source, const char* testName,
+                          ts::ModuleCompiler* moduleCompiler = nullptr) {
     auto target = vm.target();
-    auto result = compiler.compile(source, testName, target);
+    auto result = compiler.compile(source, testName, target, moduleCompiler);
     if (!result.success) {
         std::print("  Compilation FAILED for '{}':\n", testName);
         for (auto& err : result.errors) {
@@ -79,6 +81,7 @@ static void test_compile_success() {
 
     engine::Engine* eng = makeTestEngine();
 
+    ts::ModuleCompiler moduleCompiler(compiler, {MODULES_DIR});
     auto target = compiler.createTarget();
     ts::VM vm(16 * 1024 * 1024, types, target);
     bridge::setEngineOnVM(&vm, eng);
@@ -88,12 +91,13 @@ static void test_compile_success() {
 
     // A minimal constant -> outlet synthdef
     const char* source = R"LANG(
+        import synthdef.*;
         let sexpr = "(Synth test_sine_ffi (Graph 1 ((0 Constant 1 12 (440.0)) (1 Outlet \"out\" 0))))";
         let err = compileSynthDef(sexpr);
         println(err);
     )LANG";
 
-    bool ok = compileAndRun(compiler, vm, source, "compile_success.x");
+    bool ok = compileAndRun(compiler, vm, source, "compile_success.x", &moduleCompiler);
     check(ok, "compileSynthDef source compiles and runs");
 
     fclose(devnull);
@@ -110,6 +114,7 @@ static void test_compile_error() {
 
     engine::Engine* eng = makeTestEngine();
 
+    ts::ModuleCompiler moduleCompiler(compiler, {MODULES_DIR});
     auto target = compiler.createTarget();
     ts::VM vm(16 * 1024 * 1024, types, target);
     bridge::setEngineOnVM(&vm, eng);
@@ -119,11 +124,12 @@ static void test_compile_error() {
 
     // Invalid s-expression
     const char* source = R"LANG(
+        import synthdef.*;
         let err = compileSynthDef("this is not valid sexpr");
         println(err);
     )LANG";
 
-    bool ok = compileAndRun(compiler, vm, source, "compile_error.x");
+    bool ok = compileAndRun(compiler, vm, source, "compile_error.x", &moduleCompiler);
     check(ok, "compileSynthDef with bad input compiles and runs (returns error string)");
 
     fclose(devnull);
@@ -140,6 +146,7 @@ static void test_compile_and_load() {
 
     engine::Engine* eng = makeTestEngine();
 
+    ts::ModuleCompiler moduleCompiler(compiler, {MODULES_DIR});
     auto target = compiler.createTarget();
     ts::VM vm(16 * 1024 * 1024, types, target);
     bridge::setEngineOnVM(&vm, eng);
@@ -149,6 +156,8 @@ static void test_compile_and_load() {
 
     // Compile and load, then verify the def was registered
     const char* source = R"LANG(
+        import synthdef.*;
+        import audio_engine.*;
         let sexpr = "(Synth loaded_sine (Graph 1 ((0 Constant 1 12 (440.0)) (1 Outlet \"out\" 0))))";
         let err = compileSynthDefAndLoad(sexpr);
         println(err);
@@ -156,7 +165,7 @@ static void test_compile_and_load() {
         println(defs);
     )LANG";
 
-    bool ok = compileAndRun(compiler, vm, source, "compile_and_load.x");
+    bool ok = compileAndRun(compiler, vm, source, "compile_and_load.x", &moduleCompiler);
     check(ok, "compileSynthDefAndLoad source compiles and runs");
 
     // Verify the def was registered
@@ -182,6 +191,7 @@ static void test_caching() {
 
     engine::Engine* eng = makeTestEngine();
 
+    ts::ModuleCompiler moduleCompiler(compiler, {MODULES_DIR});
     auto target = compiler.createTarget();
     ts::VM vm(16 * 1024 * 1024, types, target);
     bridge::setEngineOnVM(&vm, eng);
@@ -191,6 +201,7 @@ static void test_caching() {
 
     // Compile twice — the second should be faster due to caching
     const char* source = R"LANG(
+        import synthdef.*;
         let sexpr = "(Synth cache_test (Graph 1 ((0 Constant 1 12 (440.0)) (1 Outlet \"out\" 0))))";
         let err1 = compileSynthDefAndLoad(sexpr);
         let err2 = compileSynthDefAndLoad(sexpr);
@@ -199,7 +210,7 @@ static void test_caching() {
     )LANG";
 
     auto start = std::chrono::steady_clock::now();
-    bool ok = compileAndRun(compiler, vm, source, "caching.x");
+    bool ok = compileAndRun(compiler, vm, source, "caching.x", &moduleCompiler);
     auto elapsed = std::chrono::steady_clock::now() - start;
     check(ok, "Caching test compiles and runs (second call should be fast)");
 
@@ -220,6 +231,7 @@ static void test_list_synthdefs() {
     // Register a built-in test plugin so we have something to list
     engine::createSineNode(eng);
 
+    ts::ModuleCompiler moduleCompiler(compiler, {MODULES_DIR});
     auto target = compiler.createTarget();
     ts::VM vm(16 * 1024 * 1024, types, target);
     bridge::setEngineOnVM(&vm, eng);
@@ -228,11 +240,12 @@ static void test_list_synthdefs() {
     vm.setPrintOutput(devnull);
 
     const char* source = R"LANG(
+        import audio_engine.*;
         let defs = listSynthDefs();
         println(defs);
     )LANG";
 
-    bool ok = compileAndRun(compiler, vm, source, "list_synthdefs.x");
+    bool ok = compileAndRun(compiler, vm, source, "list_synthdefs.x", &moduleCompiler);
     check(ok, "listSynthDefs source compiles and runs");
 
     // Also verify via C++ that the def is listed

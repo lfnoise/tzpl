@@ -185,6 +185,18 @@ public:
 
     const std::vector<ForeignFuncEntry>& foreignFunctions() const { return foreignFunctions_; }
 
+    // --- Foreign module registration ---
+    // Register a foreign function into a named module namespace.
+    // Functions prefixed with '_' will be private to the module.
+    void registerForeignModuleFunction(const std::string& moduleName,
+                                        const std::string& funcName,
+                                        Type* returnType,
+                                        std::vector<Type*> paramTypes, CFun cfun,
+                                        bool pure = false, bool rtSafe = false);
+
+    // Look up foreign functions for a module. Returns nullptr if no foreign module registered.
+    const std::vector<ForeignFuncEntry>* foreignModuleFunctions(const std::string& moduleName) const;
+
     // Optimization flags (can be disabled individually for debugging)
     bool enableRegReclaim = true;
     bool enableConstFold = true;
@@ -213,6 +225,9 @@ private:
 
     // Foreign functions registered by host before compilation
     std::vector<ForeignFuncEntry> foreignFunctions_;
+
+    // Foreign functions grouped by module name
+    std::unordered_map<std::string, std::vector<ForeignFuncEntry>> foreignModuleFunctions_;
 
     // Dynamic scope variable registry (shared across all TypeCheckers/modules)
     std::unordered_map<std::string, DynVarInfo> dynamicVars_;

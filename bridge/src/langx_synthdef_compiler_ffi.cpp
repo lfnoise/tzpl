@@ -166,26 +166,6 @@ static void ffi_compileSynthDefAndLoad(ts::VM& vm, u16 dst, u16, u16 argBase) {
     returnString(vm, dst, "");
 }
 
-// fn listSynthDefs() Array[String]
-// Returns an array of all registered node def names.
-static void ffi_listSynthDefs(ts::VM& vm, u16 dst, u16, u16) {
-    engine::Engine* eng = getEngine(vm);
-
-    std::vector<std::string> names;
-    if (eng) {
-        engine::listNodeDefs(eng, names);
-    }
-
-    // Create a Language X Array[String]
-    auto* arrType = vm.arrayType(vm.stringType());
-    auto* arr = new ts::ObjArray(arrType);
-    for (auto const& name : names) {
-        auto* s = new ts::StringObj(name);
-        arr->v.push_back(s);
-    }
-    vm.reg(dst).o = arr;
-}
-
 // ---------------------------------------------------------------------------
 // Registration
 // ---------------------------------------------------------------------------
@@ -196,15 +176,16 @@ void registerSynthdefCompilerFFI(ts::Compiler& compiler) {
 
     using R = void (*)(ts::VM&, u16, u16, u16);
 
+    // All functions go into the "synthdef" module namespace.
     auto reg = [&](const char* name, ts::Type* retType,
                    std::vector<ts::Type*> params, R fn) {
-        compiler.registerForeignFunction(name, retType, std::move(params), fn,
-                                          /*pure=*/false, /*rtSafe=*/false);
+        compiler.registerForeignModuleFunction("synthdef", name, retType,
+                                               std::move(params), fn,
+                                               /*pure=*/false, /*rtSafe=*/false);
     };
 
     reg("compileSynthDef",        String,      {String}, ffi_compileSynthDef);
     reg("compileSynthDefAndLoad", String,      {String}, ffi_compileSynthDefAndLoad);
-    reg("listSynthDefs",          StringArray, {},               ffi_listSynthDefs);
 }
 
 } // namespace bridge

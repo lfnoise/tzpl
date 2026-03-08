@@ -1,6 +1,6 @@
 -- Example synthdefs
 
-import synthdefs.*;
+import synthdef.*;
 import common_ugens.*;
 
 fn bubbles() S =
@@ -180,7 +180,6 @@ fn bubbles_lite() S = 0.4 lfsaw * 24 + 8 lfsaw * 3 + 81 |> nnhz sinosc * 0.04 |>
 -- Play a demo
 
 "init_urand_test" playFor(5.0);
-/*
 "bubbles" playFor(5.0);
 "dustone" playFor(5.0);
 "pause_bubbles" playFor(5.0);
@@ -198,4 +197,4 @@ fn bubbles_lite() S = 0.4 lfsaw * 24 + 8 lfsaw * 3 + 81 |> nnhz sinosc * 0.04 |>
 "violet_test" playFor(5.0);
 "blue_test" playFor(5.0);
 "red_test" playFor(5.0);
-*/
+

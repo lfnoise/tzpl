@@ -166,7 +166,7 @@ void TypeChecker::error(SourceRange loc, const std::string& msg) {
 void TypeChecker::registerBuiltins() {
     registerBuiltinFunctions(compiler_, functions_);
 
-    // Register host-provided foreign functions
+    // Register host-provided global foreign functions
     for (auto& entry : compiler_.foreignFunctions()) {
         u32 idx = compiler_.addGlobal(true);
         auto* prim = new Primitive(compiler_.voidType());
@@ -184,6 +184,29 @@ void TypeChecker::registerBuiltins() {
         info.isBuiltin = true;
         info.rtSafe = entry.rtSafe;
         functions_[entry.name].push_back(info);
+    }
+
+    // Register foreign module functions (injected by ModuleCompiler for merged modules)
+    if (foreignModuleFunctions_) {
+        for (const auto& entry : *foreignModuleFunctions_) {
+            u32 idx = compiler_.addGlobal(true);
+            auto* prim = new Primitive(compiler_.voidType());
+            prim->cfun_ = entry.cfun;
+            prim->pure_ = entry.pure;
+            prim->rtSafe_ = entry.rtSafe;
+            prim->ffiData_ = entry.ffiData;
+            compiler_.global(idx).o = prim;
+
+            FuncInfo info;
+            info.returnType = entry.returnType;
+            info.paramTypes = entry.paramTypes;
+            info.globalIndex = idx;
+            info.bodyChecked = true;
+            info.isBuiltin = true;
+            info.isForeign = true;
+            info.rtSafe = entry.rtSafe;
+            functions_[entry.name].push_back(info);
+        }
     }
 
     // Register built-in Option<T> template enum: enum Option<T> { some T, none }

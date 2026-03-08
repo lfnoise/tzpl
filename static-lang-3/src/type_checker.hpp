@@ -55,6 +55,7 @@ struct FuncInfo {
     bool inferring = false;     // true while actively inferring return type (cycle detection)
     FnDeclNode* declNode = nullptr; // AST node for demand-driven inference of _ return types
     bool isBuiltin = false;     // true for primitive built-in functions (e.g. math)
+    bool isForeign = false;     // true for host-registered foreign functions
 
     // Template function support
     bool isTemplate = false;
@@ -95,6 +96,11 @@ public:
     // Set the source file path (for module resolution and error reporting)
     void setSourceFilePath(const std::string& path) { sourceFilePath_ = path; }
     void setSourceText(const std::string& src) { sourceText_ = src; }
+
+    // Set foreign functions to inject during registerBuiltins() (for foreign module support)
+    void setForeignModuleFunctions(const std::vector<Compiler::ForeignFuncEntry>* entries) {
+        foreignModuleFunctions_ = entries;
+    }
 
     // Error access
     void clearErrors() { errors_.clear(); }
@@ -188,6 +194,7 @@ public:
 private:
     Compiler& compiler_;
     ModuleCompiler* moduleCompiler_ = nullptr;
+    const std::vector<Compiler::ForeignFuncEntry>* foreignModuleFunctions_ = nullptr;
     std::string sourceFilePath_;
     std::string sourceText_;
     bool builtinsRegistered_ = false;

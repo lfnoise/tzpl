@@ -120,12 +120,14 @@ static void test_engine_lifecycle() {
     engine::Engine* eng = engine::newEngine(config, params);
     check(eng != nullptr, "Engine created successfully");
 
+    ts::ModuleCompiler moduleCompiler(compiler, {MODULES_DIR});
     auto target = compiler.createTarget();
     ts::VM vm(16 * 1024 * 1024, types, target);
     bridge::setEngineOnVM(&vm, eng);
 
     // Test isAudioRunning via Language X
     const char* source = R"(
+        import audio_engine.*;
         let running = isAudioRunning();
     )";
 
@@ -133,7 +135,7 @@ static void test_engine_lifecycle() {
     FILE* devnull = fopen("/dev/null", "w");
     vm.setPrintOutput(devnull);
 
-    bool ok = compileAndRun(compiler, vm, source, "lifecycle.x");
+    bool ok = compileAndRun(compiler, vm, source, "lifecycle.x", &moduleCompiler);
     check(ok, "Lifecycle source compiles and runs");
 
     fclose(devnull);
@@ -159,6 +161,7 @@ static void test_command_bundling() {
 
     engine::Engine* eng = engine::newEngine(config, params);
 
+    ts::ModuleCompiler moduleCompiler(compiler, {MODULES_DIR});
     auto target = compiler.createTarget();
     ts::VM vm(16 * 1024 * 1024, types, target);
     bridge::setEngineOnVM(&vm, eng);
@@ -168,11 +171,12 @@ static void test_command_bundling() {
 
     // Test begin/go without starting audio (commands run synchronously)
     const char* source = R"(
+        import audio_engine.*;
         let err1 = begin(0);
         let err2 = go();
     )";
 
-    bool ok = compileAndRun(compiler, vm, source, "bundling.x");
+    bool ok = compileAndRun(compiler, vm, source, "bundling.x", &moduleCompiler);
     check(ok, "Command bundling source compiles and runs");
 
     fclose(devnull);
@@ -186,14 +190,16 @@ static void test_type_checking() {
     ts::Compiler compiler(types);
     bridge::registerAudioEngineFFI(compiler);
 
+    ts::ModuleCompiler moduleCompiler(compiler, {MODULES_DIR});
     auto target = compiler.createTarget();
 
     // This should fail to compile: wrong argument type
     const char* badSource = R"(
+        import audio_engine.*;
         let err = begin(3.14);
     )";
 
-    auto result = compiler.compile(badSource, "bad_types.x", target);
+    auto result = compiler.compile(badSource, "bad_types.x", target, &moduleCompiler);
     check(!result.success, "Type mismatch correctly rejected at compile time");
 }
 
@@ -216,6 +222,7 @@ static void test_node_and_connect() {
 
     engine::Engine* eng = engine::newEngine(config, params);
 
+    ts::ModuleCompiler moduleCompiler(compiler, {MODULES_DIR});
     auto target = compiler.createTarget();
     ts::VM vm(16 * 1024 * 1024, types, target);
     bridge::setEngineOnVM(&vm, eng);
@@ -225,13 +232,14 @@ static void test_node_and_connect() {
 
     // Try to create a node with a def name that doesn't exist yet — should error
     const char* source = R"(
+        import audio_engine.*;
         let e1 = begin(0);
         let e2 = newNode("NonExistent", 100);
         let e3 = go();
         println(e2);
     )";
 
-    bool ok = compileAndRun(compiler, vm, source, "node_connect.x");
+    bool ok = compileAndRun(compiler, vm, source, "node_connect.x", &moduleCompiler);
     check(ok, "Node/connect source compiles and runs (error code expected for missing def)");
 
     fclose(devnull);
@@ -257,6 +265,7 @@ static void test_master_gain() {
 
     engine::Engine* eng = engine::newEngine(config, params);
 
+    ts::ModuleCompiler moduleCompiler(compiler, {MODULES_DIR});
     auto target = compiler.createTarget();
     ts::VM vm(16 * 1024 * 1024, types, target);
     bridge::setEngineOnVM(&vm, eng);
@@ -265,11 +274,12 @@ static void test_master_gain() {
     vm.setPrintOutput(devnull);
 
     const char* source = R"(
+        import audio_engine.*;
         masterGain(0.5);
         safetyLimiter(true);
     )";
 
-    bool ok = compileAndRun(compiler, vm, source, "master_gain.x");
+    bool ok = compileAndRun(compiler, vm, source, "master_gain.x", &moduleCompiler);
     check(ok, "masterGain/safetyLimiter calls compile and run");
 
     fclose(devnull);

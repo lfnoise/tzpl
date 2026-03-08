@@ -40,6 +40,7 @@ typedef struct langx_compiler langx_compiler;
 typedef struct langx_vm langx_vm;
 typedef struct langx_compile_result langx_compile_result;
 typedef struct langx_vm_target langx_vm_target;
+typedef struct langx_module langx_module;
 
 /* --- TypeUniverse --- */
 
@@ -102,6 +103,7 @@ typedef void (*langx_cfun)(langx_vm* vm, uint16_t result_reg,
                             uint16_t argc, uint16_t arg_base);
 
 /* Register a foreign (host-provided) function with the compiler.
+ * The function is placed in the global namespace.
  * Returns 1 on success, 0 on failure. */
 int langx_register_foreign_function(
     langx_compiler* compiler,
@@ -112,6 +114,38 @@ int langx_register_foreign_function(
     langx_cfun cfun,
     int pure,
     int rt_safe);
+
+/* --- Foreign module registration ---
+ *
+ * Create a named module and add foreign functions to it. The module
+ * behaves like a normal .x module: users import it with
+ *     import mymod;           -- qualified access: mymod.func()
+ *     import mymod.*;         -- unqualified
+ *     import mymod.{f1, f2};  -- selective
+ *
+ * Functions whose names begin with '_' are private to the module.
+ * If a .x file with the same module name exists, the foreign functions
+ * are injected into it so user code can wrap or extend them.
+ */
+
+/* Create a foreign module builder. */
+langx_module* langx_create_foreign_module(langx_compiler* compiler,
+                                           const char* module_name);
+
+/* Add a function to a foreign module.
+ * Returns 1 on success, 0 on failure. */
+int langx_module_add_function(
+    langx_module* mod,
+    const char* name,
+    langx_type_handle return_type,
+    const langx_type_handle* param_types,
+    int param_count,
+    langx_cfun cfun,
+    int pure,
+    int rt_safe);
+
+/* Destroy a foreign module builder (the registered functions persist). */
+void langx_module_destroy(langx_module* mod);
 
 /* --- VM --- */
 

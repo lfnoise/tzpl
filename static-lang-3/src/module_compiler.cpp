@@ -79,6 +79,34 @@ static std::string readModuleFile(const std::string& path) {
     return ss.str();
 }
 
+// Materialize foreign function entries into FuncInfos, adding globals and Primitives.
+// Used both for pure foreign modules and for injecting into a .x module's TypeChecker.
+static void materializeForeignFunctions(
+    Compiler& compiler,
+    const std::vector<Compiler::ForeignFuncEntry>& entries,
+    std::unordered_map<std::string, std::vector<FuncInfo>>& functions)
+{
+    for (const auto& entry : entries) {
+        u32 idx = compiler.addGlobal(true);
+        auto* prim = new Primitive(compiler.voidType());
+        prim->cfun_ = entry.cfun;
+        prim->pure_ = entry.pure;
+        prim->rtSafe_ = entry.rtSafe;
+        prim->ffiData_ = entry.ffiData;
+        compiler.global(idx).o = prim;
+
+        FuncInfo info;
+        info.returnType = entry.returnType;
+        info.paramTypes = entry.paramTypes;
+        info.globalIndex = idx;
+        info.bodyChecked = true;
+        info.isBuiltin = true;
+        info.isForeign = true;
+        info.rtSafe = entry.rtSafe;
+        functions[entry.name].push_back(info);
+    }
+}
+
 ModuleInfo* ModuleCompiler::compileModule(
     const std::vector<std::string>& modulePath,
     const std::string& importingFilePath,
@@ -90,36 +118,76 @@ ModuleInfo* ModuleCompiler::compileModule(
         importingDir = std::filesystem::path(importingFilePath).parent_path().string();
     }
 
+    // Check for host-registered foreign module functions
+    std::string modName = modulePath.back();
+    const auto* foreignFuncs = compiler_.foreignModuleFunctions(modName);
+
     // Resolve file path
     std::string resolvedPath = resolveModulePath(modulePath, importingDir);
-    if (resolvedPath.empty()) {
-        std::string modName;
+
+    if (resolvedPath.empty() && !foreignFuncs) {
+        std::string dotName;
         for (size_t i = 0; i < modulePath.size(); ++i) {
-            if (i > 0) modName += '.';
-            modName += modulePath[i];
+            if (i > 0) dotName += '.';
+            dotName += modulePath[i];
         }
         errors.push_back(CompileError(CompileError::TypeError, loc,
-            "Cannot find module '" + modName + "'"));
+            "Cannot find module '" + dotName + "'"));
         return nullptr;
     }
 
+    // Use a synthetic cache key for pure foreign modules (no .x file)
+    std::string cacheKey = resolvedPath.empty()
+        ? "<foreign:" + modName + ">"
+        : resolvedPath;
+
     // Check cache
-    auto it = modules_.find(resolvedPath);
+    auto it = modules_.find(cacheKey);
     if (it != modules_.end()) {
         ModuleInfo* mod = it->second.get();
         if (mod->compiling) {
             errors.push_back(CompileError(CompileError::TypeError, loc,
-                "Circular import detected for module '" + resolvedPath + "'"));
+                "Circular import detected for module '" + cacheKey + "'"));
             return nullptr;
         }
         return mod;
     }
 
+    // --- Pure foreign module (no .x file) ---
+    if (resolvedPath.empty()) {
+        auto modPtr = std::make_unique<ModuleInfo>();
+        ModuleInfo* mod = modPtr.get();
+        mod->canonicalPath = cacheKey;
+        mod->moduleName = modName;
+        modules_[cacheKey] = std::move(modPtr);
+
+        // Materialize foreign functions into FuncInfo entries
+        std::unordered_map<std::string, std::vector<FuncInfo>> functions;
+        materializeForeignFunctions(compiler_, *foreignFuncs, functions);
+
+        // Build exports (skip '_' prefixed — they are module-private)
+        for (const auto& [name, overloads] : functions) {
+            if (name.empty() || name[0] == '_') continue;
+            ExportEntry entry;
+            entry.kind = ExportEntry::Func;
+            entry.name = name;
+            entry.funcOverloads = overloads;
+            entry.type = overloads[0].returnType;
+            entry.globalIndex = overloads[0].globalIndex;
+            mod->exports[name] = std::move(entry);
+        }
+
+        mod->allFunctions = std::move(functions);
+        return mod;
+    }
+
+    // --- File-based module (possibly augmented with foreign functions) ---
+
     // Create module info
     auto modPtr = std::make_unique<ModuleInfo>();
     ModuleInfo* mod = modPtr.get();
     mod->canonicalPath = resolvedPath;
-    mod->moduleName = modulePath.back();
+    mod->moduleName = modName;
     mod->compiling = true;
     modules_[resolvedPath] = std::move(modPtr);
 
@@ -153,6 +221,13 @@ ModuleInfo* ModuleCompiler::compileModule(
     TypeChecker typeChecker(compiler_, this);
     typeChecker.setSourceFilePath(displayPath);
     typeChecker.setSourceText(source);
+
+    // Pass foreign module functions to the TypeChecker so they're materialized
+    // during registerBuiltins(), after standard builtins are registered
+    if (foreignFuncs) {
+        typeChecker.setForeignModuleFunctions(foreignFuncs);
+    }
+
     typeChecker.check(program);
     if (typeChecker.hasErrors()) {
         for (const auto& err : typeChecker.errors()) errors.push_back(err);
@@ -185,7 +260,7 @@ ModuleInfo* ModuleCompiler::compileModule(
         bool allPrivate = true;
         std::vector<FuncInfo> exportedOverloads;
         for (const auto& fi : overloads) {
-            if (fi.isBuiltin) continue;
+            if (fi.isBuiltin && !fi.isForeign) continue;
             bool isPriv = false;
             if (fi.declNode && fi.declNode->isPrivate) isPriv = true;
             if (!isPriv) {

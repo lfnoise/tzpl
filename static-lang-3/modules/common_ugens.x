@@ -1,4 +1,4 @@
-import synthdefs.*;
+import synthdef.*;
 
 const pi = 3.14159265358979323846264338327950;
 const twopi = 2 * pi;

@@ -239,6 +239,58 @@ int langx_register_foreign_function(
     return 1;
 }
 
+// --- Foreign module registration ---
+
+struct langx_module {
+    langx_compiler* compiler;
+    std::string moduleName;
+};
+
+langx_module* langx_create_foreign_module(langx_compiler* compiler,
+                                           const char* module_name) {
+    auto* mod = new langx_module();
+    mod->compiler = compiler;
+    mod->moduleName = module_name;
+    return mod;
+}
+
+int langx_module_add_function(
+    langx_module* mod,
+    const char* name,
+    langx_type_handle return_type,
+    const langx_type_handle* param_types,
+    int param_count,
+    langx_cfun cfun,
+    int pure,
+    int rt_safe) {
+
+    std::vector<ts::Type*> params;
+    params.reserve(param_count);
+    for (int i = 0; i < param_count; i++) {
+        params.push_back(static_cast<ts::Type*>(param_types[i].ptr));
+    }
+
+    mod->compiler->impl.registerForeignModuleFunction(
+        mod->moduleName,
+        std::string(name),
+        static_cast<ts::Type*>(return_type.ptr),
+        std::move(params),
+        c_ffi_trampoline,
+        pure != 0,
+        rt_safe != 0);
+
+    // Set the ffiData on the last-added entry to store the C callback pointer
+    auto* entries = const_cast<std::vector<ts::Compiler::ForeignFuncEntry>*>(
+        mod->compiler->impl.foreignModuleFunctions(mod->moduleName));
+    entries->back().ffiData = reinterpret_cast<void*>(cfun);
+
+    return 1;
+}
+
+void langx_module_destroy(langx_module* mod) {
+    delete mod;
+}
+
 // --- User data ---
 
 void langx_vm_set_user_data(langx_vm* vm, void* data) {

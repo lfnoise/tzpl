@@ -8,6 +8,7 @@
 
 #include "langx_audio_engine_ffi.hpp"
 #include "langx.hpp"
+#include "value.hpp"
 #include "jscs_client_interface.hpp"
 #include <thread>
 #include <chrono>
@@ -329,6 +330,30 @@ static void ffi_noteSetParams(ts::VM& vm, u16 dst, u16, u16 argBase) {
 
 
 // ---------------------------------------------------------------------------
+// Introspection
+// ---------------------------------------------------------------------------
+
+// fn listSynthDefs() Array[String]
+// Returns an array of all registered node def names.
+static void ffi_listSynthDefs(ts::VM& vm, u16 dst, u16, u16) {
+    engine::Engine* eng = getEngine(vm);
+
+    std::vector<std::string> names;
+    if (eng) {
+        engine::listNodeDefs(eng, names);
+    }
+
+    // Create a Language X Array[String]
+    auto* arrType = vm.arrayType(vm.stringType());
+    auto* arr = new ts::ObjArray(arrType);
+    for (auto const& name : names) {
+        auto* s = new ts::StringObj(name);
+        arr->v.push_back(s);
+    }
+    vm.reg(dst).o = arr;
+}
+
+// ---------------------------------------------------------------------------
 // Registration
 // ---------------------------------------------------------------------------
 
@@ -346,11 +371,13 @@ void registerAudioEngineFFI(ts::Compiler& compiler) {
     using R = void (*)(ts::VM&, u16, u16, u16);
 
     // Helper to reduce registration boilerplate.
+    // All functions go into the "audio_engine" module namespace.
     // pure=false for all (side-effecting), rtSafe varies.
     auto reg = [&](const char* name, ts::Type* retType,
                    std::vector<ts::Type*> params, R fn, bool rtSafe = false) {
-        compiler.registerForeignFunction(name, retType, std::move(params), fn,
-                                          /*pure=*/false, rtSafe);
+        compiler.registerForeignModuleFunction("audio_engine", name, retType,
+                                               std::move(params), fn,
+                                               /*pure=*/false, rtSafe);
     };
 
     // Engine lifecycle
@@ -401,9 +428,14 @@ void registerAudioEngineFFI(ts::Compiler& compiler) {
 
     reg("noteSetParams",    Int, {Int, Int, Int, FloatArray}, ffi_noteSetParams, true);
 
-    // Enum constants (SchedPolicy, FadeCurve, Err, Enable) are now defined
+    // Introspection
+    ts::Type* StringArray = reinterpret_cast<ts::Type*>(compiler.arrayType(String));
+    reg("listSynthDefs",    StringArray, {},  ffi_listSynthDefs);
+
+    // Enum constants (SchedPolicy, FadeCurve, Err, Enable) are defined
     // in the Language X module: bridge/modules/audio_engine.x
-    // Use `import audio_engine.*;` and `ordinal(EnumType.value)` in scripts.
+    // The foreign functions above merge into that module, so
+    // `import audio_engine.*;` gives access to both enums and functions.
 }
 
 void setEngineOnVM(void* vm_ptr, engine::Engine* engine) {
