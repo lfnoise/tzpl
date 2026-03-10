@@ -24,6 +24,9 @@ static int compile(string const& filepath_c, string const& filepath_o)
     cmd += " -o " + filepath_o;
     cmd += " -O3";
     cmd += " -ffast-math";
+#ifdef JSCS_SHARED_DIR
+    cmd += " -I " JSCS_SHARED_DIR;
+#endif
     cmd += " -c " + filepath_c;
 
     printf("COMPILE: %s\n", cmd.c_str());

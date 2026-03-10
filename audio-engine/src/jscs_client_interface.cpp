@@ -558,8 +558,10 @@ jscs_SErr replaceNode(i64 oldNodeID, i64 newNodeID, f64 xfadeTime, FadeCurve cur
 {
     Silo* s = tBundle.silo;
     Node* oldNode = s->nrt_getNode(oldNodeID);
+    if (!oldNode) return jscs_errNodeNotFound;
     Node* newNode = s->nrt_getNode(newNodeID);
-    
+    if (!newNode) return jscs_errNodeNotFound;
+
     if (oldNode->ins.size() != newNode->ins.size()) return jscs_errNumPortsMismatch;
     if (oldNode->outs.size() != newNode->outs.size()) return jscs_errNumPortsMismatch;
     

@@ -44,6 +44,8 @@ struct AudioStreamParameters {
     const char* deviceName;
     int channels;
     int firstChannel;
+    int inputChannels = 0;
+    int firstInputChannel = 0;
     int bufferFrames;
     f64 sampleRate;
 };

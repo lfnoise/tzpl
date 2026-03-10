@@ -624,10 +624,102 @@ std::expected<S, std::string> SExprGraphBuilder::parseForExpr(sexpr::ItemVec con
     return std::unexpected("ForExpr parsing not yet implemented - requires subgraph handling");
 }
 
+static std::expected<ControlSpec, std::string> parseControlSpec(sexpr::ItemVec const& specList) {
+    // Format: (ControlSpec lo hi init warp)
+    if (specList.size() < 5) {
+        return std::unexpected("ControlSpec requires 5 elements");
+    }
+    if (!specList[0].is<sexpr::Symbol>() || specList[0].get<sexpr::Symbol>().name != "ControlSpec") {
+        return std::unexpected("Expected 'ControlSpec' symbol");
+    }
+
+    auto getNum = [](sexpr::Item const& item) -> std::expected<f64, std::string> {
+        if (item.is<double>()) return item.get<double>();
+        if (item.is<int64_t>()) return (f64)item.get<int64_t>();
+        return std::unexpected("ControlSpec field must be a number");
+    };
+
+    auto lo = getNum(specList[1]);
+    if (!lo) return std::unexpected(lo.error());
+    auto hi = getNum(specList[2]);
+    if (!hi) return std::unexpected(hi.error());
+    auto init = getNum(specList[3]);
+    if (!init) return std::unexpected(init.error());
+
+    if (!specList[4].is<int64_t>()) return std::unexpected("Warp must be integer");
+    int warp = (int)specList[4].get<int64_t>();
+
+    return ControlSpec{*lo, *hi, *init, warp};
+}
+
 std::expected<S, std::string> SExprGraphBuilder::parseControl(sexpr::ItemVec const& list) {
-    // Format: (id Control name chans type spec)
-    // TODO: Need to parse ControlSpec
-    return std::unexpected("Control parsing not yet implemented - requires ControlSpec parsing");
+    // Format: (id Control "name" chans (ControlSpec lo hi init warp))
+    if (list.size() < 5) {
+        return std::unexpected("Control requires 5 elements");
+    }
+
+    if (!list[0].is<int64_t>()) return std::unexpected("ID must be integer");
+    int64_t id = list[0].get<int64_t>();
+
+    if (!list[2].is<std::string>()) return std::unexpected("Name must be string");
+    std::string name = list[2].get<std::string>();
+
+    if (!list[3].is<int64_t>()) return std::unexpected("Chans must be integer");
+    int64_t chans = list[3].get<int64_t>();
+
+    if (!list[4].is<sexpr::ItemVec>()) return std::unexpected("ControlSpec must be a list");
+    auto specResult = parseControlSpec(list[4].get<sexpr::ItemVec>());
+    if (!specResult) return std::unexpected(specResult.error());
+
+    S expr = addExpr(new Control(*specResult, NumType::f32, chans, name));
+    exprMap[id] = expr;
+    return expr;
+}
+
+std::expected<S, std::string> SExprGraphBuilder::parseNoteParam(sexpr::ItemVec const& list) {
+    // Format: (id NoteParam "name" chans (ControlSpec lo hi init warp))
+    if (list.size() < 5) {
+        return std::unexpected("NoteParam requires 5 elements");
+    }
+
+    if (!list[0].is<int64_t>()) return std::unexpected("ID must be integer");
+    int64_t id = list[0].get<int64_t>();
+
+    if (!list[2].is<std::string>()) return std::unexpected("Name must be string");
+    std::string name = list[2].get<std::string>();
+
+    if (!list[3].is<int64_t>()) return std::unexpected("Chans must be integer");
+    int64_t chans = list[3].get<int64_t>();
+
+    if (!list[4].is<sexpr::ItemVec>()) return std::unexpected("ControlSpec must be a list");
+    auto specResult = parseControlSpec(list[4].get<sexpr::ItemVec>());
+    if (!specResult) return std::unexpected(specResult.error());
+
+    S expr = addExpr(new NoteParam(*specResult, NumType::f32, chans, name));
+    exprMap[id] = expr;
+    return expr;
+}
+
+std::expected<S, std::string> SExprGraphBuilder::parseVoicerExpr(sexpr::ItemVec const& list) {
+    // Format: (id Voicer maxVoices (Graph root-id (exprs...)))
+    if (list.size() < 4) {
+        return std::unexpected("Voicer requires 4 elements");
+    }
+
+    if (!list[0].is<int64_t>()) return std::unexpected("ID must be integer");
+    int64_t id = list[0].get<int64_t>();
+
+    if (!list[2].is<int64_t>()) return std::unexpected("maxVoices must be integer");
+    int maxVoices = (int)list[2].get<int64_t>();
+
+    // Parse body subgraph
+    if (!list[3].is<sexpr::ItemVec>()) return std::unexpected("Voicer body must be a Graph list");
+    auto bodyResult = parseGraph(list[3].get<sexpr::ItemVec>());
+    if (!bodyResult) return std::unexpected("voicer body: " + bodyResult.error());
+
+    S expr = addExpr(new VoicerExpr(maxVoices, *bodyResult));
+    exprMap[id] = expr;
+    return expr;
 }
 
 std::expected<S, std::string> SExprGraphBuilder::parseExpr(sexpr::Item const& item) {
@@ -671,6 +763,8 @@ std::expected<S, std::string> SExprGraphBuilder::parseExpr(sexpr::Item const& it
     else if (type == "IfExpr") return parseIfExpr(list);
     else if (type == "SwitchExpr") return parseSwitchExpr(list);
     else if (type == "ForExpr") return parseForExpr(list);
+    else if (type == "NoteParam") return parseNoteParam(list);
+    else if (type == "Voicer") return parseVoicerExpr(list);
     else {
         return std::unexpected(std::format("Unknown expression type: {}", type));
     }

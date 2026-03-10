@@ -52,10 +52,12 @@ struct SExprGraphBuilder {
     std::expected<S, std::string> parseDelayWrite(sexpr::ItemVec const& list);
 
     // Control flow operations - these need special handling for subgraphs
+    std::expected<S, std::string> parseNoteParam(sexpr::ItemVec const& list);
     std::expected<S, std::string> parseSelectExpr(sexpr::ItemVec const& list);
     std::expected<S, std::string> parseIfExpr(sexpr::ItemVec const& list);
     std::expected<S, std::string> parseSwitchExpr(sexpr::ItemVec const& list);
     std::expected<S, std::string> parseForExpr(sexpr::ItemVec const& list);
+    std::expected<S, std::string> parseVoicerExpr(sexpr::ItemVec const& list);
 
     // Helper to get or create delay buffer
     DelayBuf* getOrCreateDelayBuf(int64_t delayId);

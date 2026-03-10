@@ -2,11 +2,13 @@
 
 This document is a step-by-step plan for integrating the three sub-projects (static-lang-3, synthdef-compiler, audio-engine) and building the final live coding application. It is based on an audit of the current state of each project.
 
+**Last updated**: 2026-03-09
+
 ---
 
 ## Current State Summary
 
-### audio-engine (most complete)
+### audio-engine
 - Real-time audio engine with CoreAudio/ALSA backends via RtAudio
 - Plugin loading via `dlopen`/`dlsym` of `.dylib` files conforming to `jscs_plugin_abi.h`
 - Dynamic graph editing with per-sample topological sort
@@ -18,9 +20,11 @@ This document is a step-by-step plan for integrating the three sub-projects (sta
 - S-expression command parser (text-based)
 - Polyphonic voice management (`Voicer` template)
 - Safety limiter on master output (lookahead, NaN zapping)
-- **Missing**: OSC support, NATS support, buffer operations, audio input, binary s-expression serialization (partial)
+- Builds as static library (`audio_engine_lib`) with install targets
+- Full FFI bridge to Language X (31 functions, 19 marked rtSafe)
+- **Remaining**: OSC support, NATS support, buffer operations (declared but not implemented), audio input, MasterGainCmd/ChannelOffsetCmd (declared but not implemented), binary s-expression serialization (stubbed)
 
-### synthdef-compiler (most complete)
+### synthdef-compiler
 - Two front-ends: S-expression parser and C++ DSL
 - ~200 audio operators (oscillators, filters, noise, envelopes, math, delays)
 - 14-pass graph analysis pipeline (topology sort, shape/type inference, constant folding, dead code removal, rate scheduling)
@@ -29,9 +33,12 @@ This document is a step-by-step plan for integrating the three sub-projects (sta
 - Full compilation pipeline: parse -> analyze -> codegen -> clang compile -> link -> dlopen
 - Hash-consing for common subexpression elimination
 - Multi-channel support with power-of-two broadcasting
-- **Missing**: SIMD codegen (infrastructure present), full subgraph s-expression support, event handling stubs
+- Builds as static library (`synthdef_compiler_lib`) with install targets
+- Full FFI bridge to Language X with compilation caching
+- Event/note handling codegen implemented (`genEventFun`, `genHandleEventsFun`)
+- **Remaining**: SIMD codegen (infrastructure present, generation not implemented), full subgraph s-expression support for `switch`/`for` (IfExpr partially works)
 
-### static-lang-3 (core complete, integration features not started)
+### static-lang-3
 - Full 5-phase compilation pipeline (lex -> parse -> type check -> codegen -> execute)
 - Register-based direct-threaded VM with `[[clang::musttail]]` dispatch
 - TLSF O(1) real-time allocator, incremental bounded-pause GC
@@ -39,162 +46,188 @@ This document is a step-by-step plan for integrating the three sub-projects (sta
 - Template monomorphization, function overloading, auto-mapping, pattern matching
 - C and C++ embedding APIs (`langx.h`, `langx.hpp`)
 - Foreign function interface for registering host-provided C functions
-- 170+ tests across all features
-- **Missing**: Methods/OO, event-driven VM, dynamic scoping, optimizations, error handling improvements
+- Module system with all import syntaxes, circular detection, module caching
+- Dynamic scoping (`var \`name = expr`) with zero-overhead save/restore
+- Infinite lists and generators (lazy evaluation)
+- Parser error recovery (synchronization, cascading error suppression)
+- Constant folding, register reclamation, tail call optimization
+- 232 tests, all passing
+- Builds as static library (`langx_lib`) with install targets
+- `callFunction()` API for host-driven function invocation (event handler infrastructure)
+- REPLSession class for interactive evaluation
+- **Remaining**: Event-driven VM (dispatch loop, handler registration, hot-reload), error location refinement, function inlining, Map operations, I/O functions
+
+### bridge/
+- `langx_audio_engine_ffi.cpp` — 31 FFI functions wrapping audio engine commands
+- `langx_synthdef_compiler_ffi.cpp` — 2 FFI functions for compile and compile-and-load
+- `modules/audio_engine.x` — Language X enum definitions (Enable, SchedPolicy, FadeCurve, Err)
+- Both bridges build as OBJECT libraries, linked into the app
 
 ### shared/
 - `jscs_plugin_abi.h` — Pure C plugin ABI (used by both audio-engine and synthdef-compiler)
 - `jscs_simd.hpp` — Cross-platform SIMD abstraction (Apple/Linux)
 - `jscs_random.hpp` — xoroshiro128++ PRNG (scalar and SIMD)
 - `jscs_matrix_transform.hpp` — Compile-time matrix operations
-- Legacy headers: `sapf_plugin_interface.hpp`, `sapf_client_interface.hpp`, `sapf_plugin_utils.hpp`
+- Builds as CMake INTERFACE library with install targets
+
+### app/
+- CLI application (`jscs`) that links all three libraries via FFI bridges
+- Runs Language X scripts with full audio engine and synthdef compiler access
+- Supports project directories with config files and pre-compiled plugin loading
+- No GUI — currently command-line only
 
 ---
 
-## Phase 0: Project Organization & Build Infrastructure
+## Phase 0: Project Organization & Build Infrastructure — DONE
 
 **Goal**: Establish a unified build system and repository structure.
 
-### 0.1 Repository structure decision
+### 0.1 Repository structure decision — DONE
 
-Current state: Each project has its own CMakeLists.txt, no top-level build. The `shared/` directory is a sibling referenced via `../shared`.
-
-**Recommended**: Single monorepo with a top-level CMakeLists.txt.
+Single monorepo with top-level `CMakeLists.txt` (project name: `jscs`, C++23).
 
 ```
 A-new-project/
 ├── CMakeLists.txt              (top-level, adds subdirectories)
-├── shared/                     (shared headers, remains here)
+├── build.sh                    (convenience build script)
+├── shared/                     (CMake INTERFACE library)
 ├── audio-engine/
-│   └── CMakeLists.txt          (builds libAudioEngine static/shared lib)
+│   └── CMakeLists.txt          (builds audio_engine_lib + audio-engine executable)
 ├── synthdef-compiler/
-│   └── CMakeLists.txt          (builds libSynthdefCompiler static/shared lib)
+│   └── CMakeLists.txt          (builds synthdef_compiler_lib + synthdef-compiler executable)
 ├── static-lang-3/
-│   └── CMakeLists.txt          (builds libLangX static/shared lib)
+│   └── CMakeLists.txt          (builds langx_lib + langx executable)
+├── bridge/
+│   └── CMakeLists.txt          (builds FFI bridge OBJECT libraries)
 ├── app/
-│   └── CMakeLists.txt          (the live coding application)
+│   └── CMakeLists.txt          (builds jscs CLI application)
 └── integration-tests/
-    └── CMakeLists.txt
+    └── CMakeLists.txt          (test_foreign_modules, test_audio_engine_ffi, test_synthdef_compiler_ffi)
 ```
 
-**Tasks**:
-1. Create top-level `CMakeLists.txt` that adds each sub-project via `add_subdirectory()`.
-2. Refactor each sub-project's CMakeLists.txt to produce a library target (static and/or shared) in addition to any executable.
-3. Define proper `target_include_directories(PUBLIC ...)` on each library so consumers automatically get the right include paths.
-4. Move `shared/` into a proper CMake interface library target (`add_library(shared INTERFACE)`).
-5. Clean up legacy/duplicate headers (e.g., `sapf_*` headers in shared/, duplicate `jscs_random.hpp` in audio-engine/src/).
-6. Ensure all three projects build successfully from the top level with a single `cmake --build build` command.
-7. Add a `build.sh` convenience script at the root.
+**Completed tasks**:
+1. ~~Create top-level `CMakeLists.txt` that adds each sub-project via `add_subdirectory()`.~~ Done. Build options: `JSCS_BUILD_AUDIO_ENGINE`, `JSCS_BUILD_SYNTHDEF_COMPILER`, `JSCS_BUILD_LANG`, `JSCS_BUILD_BRIDGE`, `JSCS_BUILD_APP` (OFF by default), `JSCS_BUILD_TESTS` (OFF by default).
+2. ~~Refactor each sub-project's CMakeLists.txt to produce a library target.~~ Done. Each sub-project also supports standalone builds via `if(NOT CMAKE_PROJECT_NAME STREQUAL "jscs")` guards.
+3. ~~Define proper `target_include_directories(PUBLIC ...)` on each library.~~ Done.
+4. ~~Move `shared/` into a proper CMake interface library target.~~ Done.
+5. ~~Clean up legacy/duplicate headers.~~ Done.
+6. ~~Ensure all three projects build successfully from the top level.~~ Done.
+7. ~~Add a `build.sh` convenience script at the root.~~ Done.
 
-### 0.2 Cross-platform build support
+### 0.2 Cross-platform build support — PARTIAL
 
-**Tasks**:
-1. Verify macOS ARM64 builds for all three.
-2. Add Linux build CI (GitHub Actions or similar) — audio-engine already has Linux stubs (ALSA).
-3. Define CMake options for optional features (e.g., `-DBUILD_APP=ON`, `-DBUILD_TESTS=ON`).
+**Completed tasks**:
+1. ~~Verify macOS ARM64 builds for all three.~~ Done.
+3. ~~Define CMake options for optional features.~~ Done.
+
+**Remaining tasks**:
+2. Add Linux build CI (GitHub Actions or similar).
 
 ---
 
-## Phase 1: Library-ify Each Project
+## Phase 1: Library-ify Each Project — DONE
 
 **Goal**: Each project becomes a linkable library with a clean public API.
 
-### 1.1 audio-engine as a library
+### 1.1 audio-engine as a library — DONE
 
-Current state: Builds an executable. The client API is in `jscs_client_interface.hpp/cpp`.
+- `audio_engine_lib` static library with all src/ files except main.cpp
+- Public headers exposed via `target_include_directories(PUBLIC)`
+- Separate `audio-engine` executable links `audio_engine_lib`
+- `install()` targets for library, headers (15+ headers), and executable
 
-**Tasks**:
-1. Split `main.cpp` — move built-in test plugins (SinOsc, AddOp, MulOp, VoicerTest) to a separate test file.
-2. Create `libAudioEngine` (static library) from all src/ files except the main entry point.
-3. Define a public header set: `jscs_client_interface.hpp` + `jscs_plugin_abi.h`.
-4. Build a separate `audio-engine` executable that links `libAudioEngine`.
-5. Add `install()` targets for headers and library.
+### 1.2 synthdef-compiler as a library — DONE
 
-### 1.2 synthdef-compiler as a library
+- `synthdef_compiler_lib` static library (21 source files)
+- Separate `synthdef-compiler` executable links `synthdef_compiler_lib`
+- `install()` targets for library, headers (22+ headers), and executable
 
-Current state: Builds an executable. Has a clear compilation API in `synthdef_compile.hpp`.
+### 1.3 static-lang-3 as a library — DONE
 
-**Tasks**:
-1. Split `main.cpp` — separate test/example code from entry point.
-2. Create `libSynthdefCompiler` (static library) from all src/ files except main.
-3. Define a public header set: `synthdef_compile.hpp`, `synthdef_synth.hpp`, `synthdef_sexpr.hpp`, `synthdef_from_sexpr.hpp`.
-4. Build a separate `synthdef-compiler` executable that links `libSynthdefCompiler`.
-5. Add `install()` targets.
-
-### 1.3 static-lang-3 as a library
-
-Current state: Already builds `langx_lib` as a static library with public C/C++ APIs.
-
-**Tasks**:
-1. Verify `langx_lib` can be linked by external projects.
-2. Ensure `include/langx.h` and `include/langx.hpp` are the complete public API surface.
-3. Add `install()` targets for headers and library.
+- `langx_lib` static library (16 source files)
+- Public API: `include/langx.h` (C) and `include/langx.hpp` (C++)
+- Separate `langx` executable with linenoise for CLI
+- `install()` targets for library, headers, and executable
 
 ---
 
-## Phase 2: FFI Bindings for Audio Engine
+## Phase 2: FFI Bindings for Audio Engine — DONE
 
-**Goal**: Register audio-engine client functions as callable from Language X. Having FFI bindings early allows writing tests for the audio engine in the language.
+**Goal**: Register audio-engine client functions as callable from Language X.
 
-### 2.1 Design the language-side audio API
+### 2.1 Design the language-side audio API — DONE
 
-Define a set of Language X functions that map to audio-engine commands. These are registered as foreign functions via the existing FFI.
+Implemented in `bridge/src/langx_audio_engine_ffi.cpp` (448 lines). Functions are registered under the `audio_engine` foreign module namespace. The API exceeds the original specification with 31 functions (vs. 17 planned).
 
-**Proposed API surface** (Language X syntax):
+**Implemented API surface** (Language X syntax):
 
 ```
 -- Engine lifecycle
 fn engineStart() Void;
 fn engineStop() Void;
+fn isAudioRunning() Bool;
+fn getStreamTime() Float;
+fn masterGain(gain Float) Void;
+fn safetyLimiter(on Bool) Void;
 
 -- Plugin management
-fn loadPlugins(path String) Void;
-fn loadPlugin(path String, name String) Void;
+fn loadPlugins(path String) Bool;
+fn loadPlugin(path String, name String) Bool;
+
+-- Command bundling/scheduling
+fn begin(silo Int) Int;
+fn go() Int;
+fn sched(time Float) Int;
+fn schedPolicy(time Float, policy Int) Int;
 
 -- Node operations
-fn newNode(defName String, nodeID Int) Void;
-fn freeNode(nodeID Int) Void;
-fn freeAllNodes() Void;
+fn newNode(defName String, nodeID Int) Int;
+fn freeNode(nodeID Int) Int;
+fn freeAllNodes() Int;
 
--- Connections
-fn connect(srcNode Int, srcPort Int, dstNode Int, dstPort Int) Void;
-fn connectX(srcNode Int, srcPort Int, dstNode Int, dstPort Int, xfade Float, curve Int) Void;
-fn disconnect(dstNode Int, dstPort Int) Void;
+-- Connections (8 variants including crossfade and reconnect)
+fn connect(srcNode Int, srcPort Int, dstNode Int, dstPort Int) Int;
+fn connectX(srcNode Int, srcPort Int, dstNode Int, dstPort Int, xfade Float, curve Int) Int;
+fn disconnectInput(dstNode Int, dstPort Int) Int;
+fn disconnectInputX(dstNode Int, dstPort Int, xfade Float, curve Int) Int;
+fn disconnectOutput(srcNode Int, srcPort Int) Int;
+fn disconnectNode(nodeID Int) Int;
+fn reconnectOutput(oldSrcNode Int, oldSrcPort Int, newSrcNode Int, newSrcPort Int, xfade Float, curve Int) Int;
+fn replaceNode(oldNodeID Int, newNodeID Int, xfade Float, curve Int) Int;
 
 -- Parameter control
-fn setInput(nodeID Int, portIndex Int, value Float) Void;
-fn setControl(nodeID Int, controlID Int, value Float) Void;
-
--- Scheduling
-fn bundle() Void;          -- begin command bundle
-fn send() Void;            -- send bundle immediately
-fn sched(time Float) Void; -- schedule bundle at time
+fn setInput(nodeID Int, portIndex Int, value Float) Int;
+fn setInputX(nodeID Int, portIndex Int, value Float, xfade Float, curve Int) Int;
+fn setControl(nodeID Int, controlID Int, value Float) Int;
 
 -- Notes
-fn noteOn(nodeID Int, noteID Int, params Array[Float]) Void;
-fn noteOff(nodeID Int, noteID Int) Void;
-fn allNotesOff(nodeID Int) Void;
+fn noteOn(nodeID Int, noteID Int, params Array[Float]) Int;
+fn noteOff(nodeID Int, noteID Int) Int;
+fn allNotesOff(nodeID Int) Int;
+fn noteSetParams(nodeID Int, noteID Int, firstParam Int, values Array[Float]) Int;
+
+-- Introspection
+fn listSynthDefs() Array[String];
+
+-- Utility
+fn sleep(seconds Float) Void;
 ```
 
-### 2.2 Implement the FFI bridge
+### 2.2 Implement the FFI bridge — DONE
 
-**Tasks**:
-1. Write a C++ bridge layer that wraps each `jscs_client_interface` function into the `void (*cfun)(VM&, u16 result_reg, u16 argc, u16 arg_base)` FFI signature expected by langx.
-2. Each wrapper extracts arguments from VM registers, calls the corresponding engine function, and stores the result.
-3. Register all functions with the VM's FFI system at initialization.
-4. The bridge holds a pointer to the `Engine*` via the VM's user data pointer.
-5. Mark all scheduling functions as `rtSafe` so they can be called from event handlers on the audio thread.
+1. ~~C++ bridge layer wrapping each function into FFI signature.~~ Done.
+2. ~~Each wrapper extracts arguments from VM registers.~~ Done.
+3. ~~Register all functions with the VM's FFI system.~~ Done (foreign module namespace `audio_engine`).
+4. ~~Engine pointer via VM user data pointer.~~ Done (`setEngineOnVM()`).
+5. ~~Mark scheduling functions as `rtSafe`.~~ Done (19 functions marked rtSafe).
 
-### 2.3 Test the FFI bridge
+### 2.3 Test the FFI bridge — DONE
 
-**Tasks**:
-1. Write Language X test scripts that create nodes, connect them, set parameters.
-2. Verify audio output (e.g., create a SinOsc node, connect to output, verify sound).
-3. Test error cases (invalid node ID, port out of range, etc.).
+Integration tests exist in `integration-tests/` (`test_audio_engine_ffi`). End-to-end audio playback verified.
 
 ---
 
-## Phase 3: FFI Bindings for Synthdef Compiler
+## Phase 3: FFI Bindings for Synthdef Compiler — DONE
 
 **Goal**: Allow Language X to compile synth definitions at runtime.
 
@@ -202,49 +235,40 @@ fn allNotesOff(nodeID Int) Void;
 
 ```
 -- Compile a synthdef from s-expression text (returns "" on success, error message on failure)
-fn compileSynthDef(name String, sexpr String) String;
+fn compileSynthDef(sexpr String) String;
 
 -- Compile and load into running engine (returns "" on success, error message on failure)
-fn compileSynthDefAndLoad(name String, sexpr String) String;
+fn compileSynthDefAndLoad(sexpr String) String;
 
--- Query available synthdefs
+-- Query available synthdefs (implemented in audio_engine FFI)
 fn listSynthDefs() Array[String];
 ```
 
+Note: The name parameter was removed vs. the original plan — the synth name is extracted from the s-expression itself, avoiding redundancy.
+
 ### 3.2 Implement the FFI bridge — DONE
 
-Implemented in `bridge/src/langx_synthdef_compiler_ffi.cpp`. The bridge:
-1. Calls `synthdef::synthFromSExprText()`, `synthdef::cppCodeGen()`, and `synthdef::compileAndLink()` (now in the library via `synthdef_compile_link.cpp`).
-2. After compilation, calls `engine::addSynthDef()` to register the def with the engine (new function in `jscs_client_interface`).
-3. Returns error strings to the language instead of crashing.
-4. Caches compilation results keyed by name + s-expression hash to skip recompilation.
+Implemented in `bridge/src/langx_synthdef_compiler_ffi.cpp` (192 lines). The bridge:
+1. ~~Calls `synthdef::synthFromSExprText()`, `synthdef::cppCodeGen()`, and `synthdef::compileAndLink()`.~~ Done.
+2. ~~After compilation, calls `engine::addSynthDef()` to register the def with the engine.~~ Done.
+3. ~~Returns error strings to the language instead of crashing.~~ Done (comprehensive error reporting across all pipeline stages).
+4. ~~Caches compilation results keyed by name + s-expression hash.~~ Done.
 
-### 3.3 Higher-level DSL in Language X (future)
+### 3.3 Higher-level DSL in Language X — DONE
 
-Once the basic s-expression bridge works, a more ergonomic Language X DSL could be built that generates s-expressions:
-
-```
-let sine = SynthDef("sine") {
-    let freq = control("freq", 20..20000, 440)
-    let phase = phasor(freq / sampleRate)
-    outlet(sin(phase) * 0.1, "out")
-}
-sine.compile()
-```
-
-This is lower priority and can be built incrementally on top of the s-expression bridge.
+A comprehensive Language X module (`static-lang-3/modules/synthdef.x`, 995 lines) provides a high-level DSL for creating synth definitions. It generates s-expressions and provides convenience functions like `play()`, `stop()`, `playFor()`. Imports the `audio_engine` module for playback. Additional modules: `common_ugens.x` (21KB), `dsp_math.x` (19.5KB), `example_synthdefs.x`.
 
 ---
 
-## Phase 4: Finish Critical Language Features
+## Phase 4: Finish Critical Language Features — PARTIAL
 
 **Goal**: Complete the static-lang-3 features needed for deeper integration.
 
 ### 4.1 Module system — DONE
 
-The module system is fully implemented and tested. All three import syntaxes work (whole, wildcard, named with aliases), qualified access (`module.func(args)`) works including in space pipeline syntax, module file resolution supports relative and include-path-based lookup, circular import detection and module caching are in place, and all export types (functions, variables, structs, enums, templates, type aliases) are supported. No further work needed.
+The module system is fully implemented and tested. All three import syntaxes work (whole, wildcard, named with aliases), qualified access (`module.func(args)`) works including in space pipeline syntax, module file resolution supports relative and include-path-based lookup, circular import detection and module caching are in place, and all export types (functions, variables, structs, enums, templates, type aliases) are supported. Cascading errors on failed imports are suppressed. 13 module-specific tests. No further work needed.
 
-### 4.2 Event-driven VM (Phase 12 in lang's plan)
+### 4.2 Event-driven VM (Phase 12 in lang's plan) — NOT STARTED
 
 Critical for real-time audio integration — the VM must respond to events and then return control. There are two classes of event handler with different constraints:
 
@@ -254,7 +278,13 @@ Critical for real-time audio integration — the VM must respond to events and t
 
 **All VMs** (RT and NRT) must support receiving code install updates (hot-reloading new function definitions or event handlers).
 
-**Tasks**:
+**Infrastructure already in place**:
+- `VM::callFunction(CodeBlock* block, const Word* args, u16 argc)` — host can invoke compiled functions and get return values
+- Direct-threaded dispatch naturally returns control after function completion
+- Global variables persist across calls (designed for event-driven use)
+- TLSF allocator and lock-free FIFOs available for RT-safe operation
+
+**Remaining tasks**:
 1. Implement an event dispatch loop: VM receives an event, executes the handler function, stack collapses, control returns to host.
 2. Define event types and which are RT vs NRT: RT events (timer tick, note trigger, control change, code update), NRT events (OSC message, NATS message, code update).
 3. Integrate RT event handlers into the audio-engine's Silo — the VM runs within the Silo's processing loop using only the RT-safe allocator and lock-free communication.
@@ -262,17 +292,15 @@ Critical for real-time audio integration — the VM must respond to events and t
 5. Implement code install updates — all VMs can receive and apply new function/handler definitions while running.
 6. Ensure the VM can be "stepped" from a host loop (process one event, return).
 
-### 4.3 Error handling improvements
+### 4.3 Error handling improvements — PARTIAL
 
-Improve the live coding feedback loop.
+**Parser error recovery — DONE**: Synchronization implemented in `parser.cpp` — after encountering an error, the parser skips to the next statement boundary (`Semicolon`, `Fn`, `Let`, `Var`, `Const`, `Struct`, `Enum`, `Import`, etc.). Progress-check mechanism prevents infinite loops. Cascading errors from failed module imports are suppressed.
 
-**Tasks**:
-1. Better parser error recovery — after the first error on a line, skip to end of line instead of producing spurious follow-on errors.
-2. Improve error location highlighting — currently the error highlights the token where the parser detects the failure, but the parser may consume several tokens through a whole rule before returning failure, so the highlighted location can be far from the actual cause.
+**Error location refinement — NOT DONE**: SourceRange/SourceLoc structures exist, but the parser still highlights the token where it detects the failure rather than the actual cause. The parser may consume several tokens through a rule before returning failure, so the highlighted location can be far from the real problem.
 
 ---
 
-## Phase 5: OSC (Open Sound Control) Support
+## Phase 5: OSC (Open Sound Control) Support — NOT STARTED
 
 **Goal**: Control both the audio engine and language VM via OSC messages.
 
@@ -315,7 +343,7 @@ Recommendation: **oscpack** or a minimal custom implementation to avoid external
 
 ---
 
-## Phase 6: NATS Support
+## Phase 6: NATS Support — NOT STARTED
 
 **Goal**: Enable networked control and distributed messaging via NATS.
 
@@ -340,13 +368,13 @@ Recommendation: **oscpack** or a minimal custom implementation to avoid external
 
 ---
 
-## Phase 7: Finish Remaining Engine Features
+## Phase 7: Finish Remaining Engine Features — NOT STARTED
 
 **Goal**: Complete audio-engine functionality gaps.
 
 ### 7.1 Buffer operations
 
-The audio-engine declares but doesn't implement: `newBuffer`, `freeBuffer`, `resizeBuffer`, `loadBuffer`, `zeroBuffer`.
+The audio-engine declares but doesn't implement: `newBuffer`, `freeBuffer`, `resizeBuffer`, `loadBuffer`, `zeroBuffer`. Function signatures exist in `jscs_client_interface.hpp` but no implementation in the .cpp file.
 
 **Tasks**:
 1. Implement a buffer pool (pre-allocated memory blocks for audio data).
@@ -356,6 +384,8 @@ The audio-engine declares but doesn't implement: `newBuffer`, `freeBuffer`, `res
 
 ### 7.2 Audio input support
 
+RtAudio is configured but input streams are not enabled. Comment in `jscs_silo.cpp`: "will need the same for input node..".
+
 **Tasks**:
 1. Enable input streams in RtAudio configuration.
 2. Route hardware input to a special input node per silo.
@@ -363,7 +393,7 @@ The audio-engine declares but doesn't implement: `newBuffer`, `freeBuffer`, `res
 
 ### 7.3 MasterGainCmd and ChannelOffsetCmd
 
-These are declared but not implemented.
+Struct definitions exist in `jscs_command_subclasses.hpp` but no command handler logic in Silo processing or command dispatch.
 
 **Tasks**:
 1. Implement master gain control (applied after safety limiter or integrated into it).
@@ -371,17 +401,20 @@ These are declared but not implemented.
 
 ### 7.4 Binary s-expression serialization
 
-Partially implemented. Complete it for efficient network transport of commands (useful with NATS).
+File `jscs_sexpr_binary_buffer.hpp` exists but contains only commented-out skeleton code. Text-based s-expression parsing is fully implemented.
+
+**Tasks**:
+1. Complete the binary parser/serializer for efficient network transport of commands (useful with NATS).
 
 ---
 
-## Phase 8: Finish Remaining Compiler Features
+## Phase 8: Finish Remaining Compiler Features — PARTIAL
 
 **Goal**: Complete synthdef-compiler gaps.
 
-### 8.1 SIMD code generation
+### 8.1 SIMD code generation — NOT STARTED
 
-Infrastructure exists (max_simd_width, unroll_by, SIMD type definitions).
+Infrastructure exists: `max_simd_width = 4`, `unroll_by = 4` in `synthdef_cpp_codegen.cpp`, SIMD type definitions (`f32x4`, `f64x2`, `f64x4`) in `synthdef_types.hpp`. But no SIMD loop body generation code — currently defaults to scalar codegen.
 
 **Tasks**:
 1. Generate SIMD loop bodies for multi-channel synths where channels align to SIMD widths (2, 4, 8).
@@ -389,61 +422,75 @@ Infrastructure exists (max_simd_width, unroll_by, SIMD type definitions).
 3. Generate scalar remainder loops for non-aligned channel counts.
 4. Benchmark against scalar codegen to validate speedup.
 
-### 8.2 Full s-expression subgraph support
+### 8.2 Full s-expression subgraph support — PARTIAL
 
-S-expression parsing for `if`, `switch`, `for` subgraphs is marked TODO.
+IfExpr parsing from s-expressions works (test exists in `synthdef_from_sexpr_test.cpp`). Switch and For subgraph parsing has TODO comments in `synthdef_from_sexpr.cpp`.
 
-**Tasks**:
-1. Implement subgraph parsing for control flow nodes in s-expressions.
+**Completed**:
+- IfExpr subgraph parsing and analysis
+
+**Remaining tasks**:
+1. Implement Switch and For subgraph parsing for control flow nodes in s-expressions.
 2. Test round-tripping: C++ DSL -> s-expression -> parse -> compile.
 
-### 8.3 Event and note handling
+### 8.3 Event and note handling — DONE
 
-Currently stubs.
-
-**Tasks**:
-1. Generate proper `event()` function bodies.
-2. Connect to the engine's note allocation system.
+Previously listed as stubs, now fully implemented:
+- `genEventFun()` generates control event routing via memcpy to control arrays
+- `genHandleEventsFun()` implements iso-group activation and event loop processing
+- Both functions properly mark controls as active and manage state
 
 ---
 
-## Phase 9: Finish Remaining Language Features
+## Phase 9: Finish Remaining Language Features — MOSTLY DONE
 
 **Goal**: Complete lower-priority static-lang-3 features.
 
 ### 9.1 Infinite lists and generators — DONE
 
-Fully implemented. No further work needed.
+Fully implemented with lazy evaluation support in Range type system. No further work needed.
 
-### 9.2 Dynamic scoping (Phase 11 in lang's plan)
+### 9.2 Dynamic scoping (Phase 11 in lang's plan) — DONE
 
-Useful for implicit context passing (e.g., current silo, current bundle).
+Fully implemented across all compiler phases. Backtick-prefixed variables (`var \`name = expr`) use dynamic (call-chain) scoping instead of lexical scoping.
 
-**Tasks**:
-1. Implement dynamic scope variable declaration and lookup.
-2. Dynamic variables are scoped to the current event handler invocation.
+Implementation details:
+- Lexer: `DynamicVar` token type
+- Type checker: Pre-scan registers dynamic vars before body checking, shared registry on Compiler
+- Codegen: `op_load_dynamic`, `op_store_dynamic`, `op_dynscope_push` opcodes
+- VM: Separate `dynVars_` table with save/restore stack, GC integration
+- Zero overhead on normal function calls (one u32 write on pushFrame, one comparison on popFrame)
 
-### 9.3 Standard library completion (Phase 13 in lang's plan)
+Test file: `static-lang-3/tests/dynamic_scope.x`. Module example: `static-lang-3/modules/dynvar.x`.
 
-**Tasks**:
-1. Complete string functions: charAt, substring, indexOf, split, replace, etc.
-2. Complete array/list utility functions.
-3. Add Map operations.
-4. Add I/O functions (file reading for loading scripts — NRT only).
+### 9.3 Standard library completion (Phase 13 in lang's plan) — MOSTLY DONE
 
-### 9.4 Optimizations (Phase 14 in lang's plan)
+**Completed**:
+1. ~~String functions~~: substring, split, contains, startsWith, endsWith, trim, toUpper, toLower, replace, byte indexing. Tested in `tests/builtins/string_functions.x`.
+2. ~~Array/list utility functions~~: Extensively tested.
+3. ~~Range operations~~: Working.
 
-Register allocation and tail call optimization are already done.
+**Remaining tasks**:
+1. Add Map operations.
+2. Add I/O functions (file reading for loading scripts — NRT only).
 
-**Tasks**:
-1. Improved constant folding — some constant folding exists but could cover more cases.
-2. Function inlining for small functions.
+### 9.4 Optimizations (Phase 14 in lang's plan) — MOSTLY DONE
+
+**Completed**:
+- ~~Register allocation~~ Done (register reclamation, `--no-reg-reclaim` flag to disable).
+- ~~Tail call optimization~~ Done (`--no-tco` flag to disable).
+- ~~Constant folding~~ Done (AST-level, `--no-const-fold` flag to disable).
+
+**Remaining tasks**:
+1. Function inlining for small functions.
 
 ---
 
-## Phase 10: Live Coding Application — UI Framework
+## Phase 10: Live Coding Application — UI Framework — NOT STARTED
 
 **Goal**: Choose and set up the UI framework.
+
+The app/ directory exists with a CMakeLists.txt and main.cpp, but it is currently a **CLI-only application** (no GUI). It successfully links all three libraries via FFI bridges and can run Language X scripts with audio.
 
 ### 10.1 Framework evaluation
 
@@ -464,17 +511,19 @@ Register allocation and tail call optimization are already done.
 ### 10.2 Application scaffold
 
 **Tasks**:
-1. Create `app/` directory with CMakeLists.txt.
+1. ~~Create `app/` directory with CMakeLists.txt.~~ Done (CLI only).
 2. Set up Dear ImGui with a Metal backend (macOS) / Vulkan or OpenGL backend (Linux).
 3. Create main application window with basic menu bar.
-4. Link against `libAudioEngine`, `libSynthdefCompiler`, `libLangX`.
-5. Initialize all three systems at startup.
+4. ~~Link against `libAudioEngine`, `libSynthdefCompiler`, `libLangX`.~~ Done.
+5. ~~Initialize all three systems at startup.~~ Done (in CLI app).
 
 ---
 
-## Phase 11: Code Editor & REPL
+## Phase 11: Code Editor & REPL — NOT STARTED
 
 **Goal**: Build the core live coding interface.
+
+**Note**: A `REPLSession` class exists in `static-lang-3/src/repl_session.hpp/cpp` providing `eval()`, `queryType()`, `listGlobals()`, `listFunctions()`. This is used by the language's CLI tool but not yet integrated into the GUI app.
 
 ### 11.1 Code editor panel
 
@@ -502,7 +551,7 @@ Register allocation and tail call optimization are already done.
 
 ---
 
-## Phase 12: Plugin & Module Management
+## Phase 12: Plugin & Module Management — NOT STARTED
 
 **Goal**: Browsing and managing synth plugins and language modules.
 
@@ -530,7 +579,7 @@ Register allocation and tail call optimization are already done.
 
 ---
 
-## Phase 13: Audio Graph Visualization
+## Phase 13: Audio Graph Visualization — NOT STARTED
 
 **Goal**: Visual representation of the running audio graph.
 
@@ -559,7 +608,7 @@ Register allocation and tail call optimization are already done.
 
 ---
 
-## Phase 14: Metering & Monitoring
+## Phase 14: Metering & Monitoring — NOT STARTED
 
 **Goal**: Audio level meters, scope displays, and performance monitoring.
 
@@ -588,9 +637,11 @@ Register allocation and tail call optimization are already done.
 
 ---
 
-## Phase 15: Session Management
+## Phase 15: Session Management — NOT STARTED
 
 **Goal**: Save and restore the state of a live coding session.
+
+**Note**: The app currently supports project directories with config files and auto-loading of pre-compiled plugins from `<project>/synthdefs/dylib/`, but full session save/restore is not implemented.
 
 ### 15.1 Project files
 
@@ -611,7 +662,7 @@ Register allocation and tail call optimization are already done.
 
 ---
 
-## Phase 16: Future Extensions (Lower Priority)
+## Phase 16: Future Extensions (Lower Priority) — NOT STARTED
 
 These are longer-term goals mentioned in the project description.
 
@@ -645,24 +696,24 @@ These are longer-term goals mentioned in the project description.
 ## Dependency Graph (Phases)
 
 ```
-Phase 0 (Build Infrastructure)
-  └─> Phase 1 (Library-ify)
-        ├─> Phase 2 (FFI: Audio Engine)
-        │     └─> Phase 3 (FFI: Synthdef Compiler)
-        │           └─> Phase 4 (Language Features)
-        │                 └─> Phase 5 (OSC)
-        │                       └─> Phase 6 (NATS)
-        ├─> Phase 7 (Engine Features) ──────────────────┐
-        ├─> Phase 8 (Compiler Features) ────────────────┤
-        └─> Phase 9 (Language Features cont.) ──────────┤
-                                                        v
-                                              Phase 10 (UI Framework)
-                                                └─> Phase 11 (Editor & REPL)
-                                                      └─> Phase 12 (Plugin/Module Mgmt)
-                                                            └─> Phase 13 (Graph Viz)
-                                                                  └─> Phase 14 (Metering)
-                                                                        └─> Phase 15 (Sessions)
-                                                                              └─> Phase 16 (Future)
+Phase 0 (Build Infrastructure)       ✅ DONE
+  └─> Phase 1 (Library-ify)          ✅ DONE
+        ├─> Phase 2 (FFI: Audio)     ✅ DONE
+        │     └─> Phase 3 (FFI: SD)  ✅ DONE
+        │           └─> Phase 4 (Lang Features)  🟡 PARTIAL (event-driven VM remaining)
+        │                 └─> Phase 5 (OSC)       ⬜ NOT STARTED
+        │                       └─> Phase 6 (NATS) ⬜ NOT STARTED
+        ├─> Phase 7 (Engine Features)              ⬜ NOT STARTED ────────────┐
+        ├─> Phase 8 (Compiler Features)            🟡 PARTIAL ───────────────┤
+        └─> Phase 9 (Language Features cont.)      🟢 MOSTLY DONE ───────────┤
+                                                                              v
+                                                                  Phase 10 (UI Framework)  ⬜ NOT STARTED
+                                                                    └─> Phase 11 (Editor)  ⬜ NOT STARTED
+                                                                          └─> Phase 12     ⬜ NOT STARTED
+                                                                                └─> Phase 13  ⬜ NOT STARTED
+                                                                                      └─> Phase 14  ⬜ NOT STARTED
+                                                                                            └─> Phase 15  ⬜ NOT STARTED
+                                                                                                  └─> Phase 16  ⬜ NOT STARTED
 ```
 
 **Notes on parallelism**:
@@ -672,33 +723,33 @@ Phase 0 (Build Infrastructure)
 
 ---
 
-## Estimated Effort Summary
+## Progress Summary
 
-| Phase | Description | Effort |
-|-------|-------------|--------|
-| 0 | Build infrastructure | Small |
-| 1 | Library-ify projects | Small |
-| 2 | FFI: audio-engine | Medium |
-| 3 | FFI: synthdef-compiler | Medium |
-| 4 | Critical language features | Large (event-driven VM is the biggest piece) |
-| 5 | OSC support | Medium |
-| 6 | NATS support | Medium |
-| 7 | Engine feature completion | Medium |
-| 8 | Compiler feature completion | Medium |
-| 9 | Language feature completion | Large |
-| 10 | UI framework setup | Small-Medium |
-| 11 | Code editor & REPL | Medium |
-| 12 | Plugin/module management | Medium |
-| 13 | Audio graph visualization | Large |
-| 14 | Metering & monitoring | Medium |
-| 15 | Session management | Medium |
-| 16 | Future extensions | Very Large (ongoing) |
+| Phase | Description | Status | Remaining Work |
+|-------|-------------|--------|----------------|
+| 0 | Build infrastructure | ✅ Done | CI setup |
+| 1 | Library-ify projects | ✅ Done | — |
+| 2 | FFI: audio-engine | ✅ Done | — |
+| 3 | FFI: synthdef-compiler | ✅ Done | — |
+| 4 | Critical language features | 🟡 Partial | Event-driven VM, error location refinement |
+| 5 | OSC support | ⬜ Not started | All tasks |
+| 6 | NATS support | ⬜ Not started | All tasks |
+| 7 | Engine feature completion | ⬜ Not started | Buffers, audio input, master gain, binary sexpr |
+| 8 | Compiler feature completion | 🟡 Partial | SIMD codegen, switch/for subgraphs |
+| 9 | Language feature completion | 🟢 Mostly done | Map ops, I/O functions, function inlining |
+| 10 | UI framework setup | ⬜ Not started | All tasks (CLI app exists) |
+| 11 | Code editor & REPL | ⬜ Not started | All tasks (REPLSession exists) |
+| 12 | Plugin/module management | ⬜ Not started | All tasks |
+| 13 | Audio graph visualization | ⬜ Not started | All tasks |
+| 14 | Metering & monitoring | ⬜ Not started | All tasks |
+| 15 | Session management | ⬜ Not started | All tasks |
+| 16 | Future extensions | ⬜ Not started | All tasks |
 
 ---
 
 ## Key Risks & Decisions
 
-1. **Event-driven VM design** (Phase 4.2): This is the most architecturally significant remaining work. The VM must be able to process an event handler and return control to the host without blocking. This needs careful design to work with the audio-engine's sample-accurate scheduling.
+1. **Event-driven VM design** (Phase 4.2): This is the most architecturally significant remaining work. The VM must be able to process an event handler and return control to the host without blocking. This needs careful design to work with the audio-engine's sample-accurate scheduling. Infrastructure (`callFunction()`, TLSF allocator, lock-free FIFOs) is in place, but the event management layer is not.
 
 2. **UI framework choice** (Phase 10): Dear ImGui is recommended but the project description mentions Qt as an alternative. This should be decided before Phase 10 begins.
 

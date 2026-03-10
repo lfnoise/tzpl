@@ -101,12 +101,14 @@ namespace synthdef {
         vector<S> inlets;
         vector<S> outlets;
         vector<S> controls;
+        vector<S> noteParams;
         unordered_set<D, DelayHasher> delayBufs;
         vector<D> delayAllocs;
         u64 exprSerialNos = 0;
         u64 delayBufSerialNos = 0;
         u64 randSerialNos = 0;
         u64 controlSerialNos = 0;
+        u64 noteParamSerialNos = 1; // gate is 0
         u64 inletSerialNos = 0;
         u64 outletSerialNos = 0;
 
@@ -154,6 +156,9 @@ namespace synthdef {
     }
     inline u64 nextControlSerialNo() {
         return gSynth->controlSerialNos++;
+    }
+    inline u64 nextNoteParamSerialNo() {
+        return gSynth->noteParamSerialNos++;
     }
     inline u64 nextInletSerialNo() {
         return gSynth->inletSerialNos++;

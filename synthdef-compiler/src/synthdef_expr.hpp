@@ -181,10 +181,37 @@ namespace synthdef {
         void accept(ExprVisitor& visitor) override;
     };
 
+    // NoteParam — per-voice parameter, only valid inside a VoicerExpr subgraph.
+    // Serial 0 is gate (auto-injected), user params start at 1.
+    struct NoteParam : Expr {
+        ControlSpec spec;
+        u64 serial;   // 1-based (0 = gate, auto-injected)
+        string name;
+
+        NoteParam(ControlSpec spec, NumType itype, usize ichans, string name = "");
+
+        string typeName() const override { return "NoteParam"; }
+        string str() const override { return "noteParam"; }
+
+        u64 hash() const override {
+            return hash_combine(Expr::hash(), spec.hash(), type.hash(), serial, 0xC4A3E7F192B5D608ull);
+        }
+        bool equals_(Expr const& that) const override {
+            auto& c = static_cast<NoteParam const&>(that);
+            return spec == c.spec && type == c.type && serial == c.serial;
+        }
+        NumType initial_type() const override { return type; }
+        void update_type(ExprIdentitySet& worklist) override {}
+        void calcShape() override {}
+        bool should_hash_cons() const override { return false; }
+
+        void accept(ExprVisitor& visitor) override;
+    };
+
     struct Inlet : Expr {
         u64 serial;
         string name;
-        
+
         Inlet(NumType itype, usize ichans, string name = "");
 
         string typeName() const override { return "Inlet"; }
@@ -666,12 +693,56 @@ namespace synthdef {
 
         void accept(ExprVisitor& visitor) override;
     };
-    
+
+    struct VoicerExpr : ControlFlowExpr {
+        S voice_body;      // PhiNode wrapping the per-voice subgraph result
+        int maxVoices;     // must be power of 2
+
+        VoicerExpr(int maxVoices, S voice_body)
+            : ControlFlowExpr(voice_body->rate, {}),
+            voice_body(voice_body),
+            maxVoices(maxVoices)
+        {
+            auto phi = voice_body.as<PhiNodeExpr>();
+            assert(phi != nullptr);
+            phi->setTarget(this);
+        }
+
+        string typeName() const override { return "VoicerExpr"; }
+        string str() const override { return "voicer"; }
+
+        u64 hash() const override {
+            return hash_combine(Expr::hash(), u64(voice_body.get()),
+                u64(maxVoices), 0xD7B3A1E4F5C28906ull);
+        }
+
+        NumType initial_type() const override { return NumType::any; }
+        void update_type(ExprIdentitySet& worklist) override {
+            NumType new_type = voice_body->in0()->type;
+            if (type_changed(new_type, type)) {
+                type = new_type;
+                propagate_types(worklist);
+            }
+        }
+        void calcShape() override {
+            // Output channels = maxVoices * subgraph output channels
+            usize voiceChans = voice_body->in0()->chans;
+            chans = maxVoices * voiceChans;
+        }
+        void insertPhiNodes(ExprIdentitySet& worklist) override {
+            worklist.insert(voice_body);
+        }
+        usize num_subgraphs() const override { return 1; }
+        S get_subgraph(usize i) const override { return voice_body; }
+
+        void accept(ExprVisitor& visitor) override;
+    };
+
 #if 0
     struct MatAt : Expr {
-        MatAt(S a, S i) 
+        MatAt(S a, S i)
             : Expr(std::max(a->rate, i->rate), {a, i}) {}
-    
+
         string typeName() const override { return "MatAt"; }
         string str() const override { return typeName(); }
         

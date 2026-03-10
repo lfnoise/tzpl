@@ -12,14 +12,90 @@
 #include <cstdlib>
 #include <unistd.h>
 #include <csignal>
+#include <optional>
+#include <filesystem>
 #include "langx.hpp"
 #include "module_compiler.hpp"
 #include "diagnostic.hpp"
 #include "langx_audio_engine_ffi.hpp"
 #include "langx_synthdef_compiler_ffi.hpp"
 #include "jscs_client_interface.hpp"
+#include "jscs_test_plugins.hpp"
 
 using namespace ts;
+namespace fs = std::filesystem;
+
+// ---------------------------------------------------------------------------
+// Configuration
+// ---------------------------------------------------------------------------
+
+struct Config {
+    std::string deviceName = "default";
+    int channels = 2;
+    int firstChannel = 0;
+    int inputChannels = 0;
+    int firstInputChannel = 0;
+    int bufferFrames = 512;
+    double sampleRate = 44100.0;
+    int numSilos = 4;
+    std::string projectDir;
+};
+
+static std::string trim(const std::string& s) {
+    size_t start = s.find_first_not_of(" \t\r\n");
+    if (start == std::string::npos) return "";
+    size_t end = s.find_last_not_of(" \t\r\n");
+    return s.substr(start, end - start + 1);
+}
+
+static std::string stripQuotes(const std::string& s) {
+    if (s.size() >= 2 && s.front() == '"' && s.back() == '"')
+        return s.substr(1, s.size() - 2);
+    return s;
+}
+
+static bool parseConfigFile(const std::string& path, Config& config) {
+    std::ifstream file(path);
+    if (!file.is_open()) return false;
+
+    std::string line;
+    int lineNum = 0;
+    while (std::getline(file, line)) {
+        ++lineNum;
+        std::string trimmed = trim(line);
+        if (trimmed.empty() || trimmed.starts_with("--")) continue;
+
+        auto eq = trimmed.find('=');
+        if (eq == std::string::npos) {
+            std::cerr << path << ":" << lineNum << ": expected 'key = value'\n";
+            continue;
+        }
+
+        std::string key = trim(trimmed.substr(0, eq));
+        std::string value = trim(trimmed.substr(eq + 1));
+
+        try {
+            if (key == "silos")            config.numSilos = std::stoi(value);
+            else if (key == "sampleRate")  config.sampleRate = std::stod(value);
+            else if (key == "bufferFrames") config.bufferFrames = std::stoi(value);
+            else if (key == "channels")    config.channels = std::stoi(value);
+            else if (key == "firstChannel") config.firstChannel = std::stoi(value);
+            else if (key == "device")      config.deviceName = stripQuotes(value);
+            else if (key == "inputChannels") config.inputChannels = std::stoi(value);
+            else if (key == "firstInputChannel") config.firstInputChannel = std::stoi(value);
+            else std::cerr << path << ":" << lineNum
+                           << ": unknown config key '" << key << "'\n";
+        } catch (const std::exception& e) {
+            std::cerr << path << ":" << lineNum
+                      << ": invalid value for '" << key << "': " << e.what() << "\n";
+        }
+    }
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 
 static void printErrors(const std::vector<CompileError>& errors,
                         const std::string& source,
@@ -74,18 +150,28 @@ static std::vector<std::string> splitPaths(const std::string& paths) {
 // Audio engine setup
 // ---------------------------------------------------------------------------
 
-static engine::Engine* createEngine() {
+static engine::Engine* createEngine(const Config& config) {
     engine::AudioStreamParameters params{};
-    params.channels = 2;
-    params.bufferFrames = 512;
-    params.sampleRate = 44100.0;
-    params.deviceName = "default";
-    params.firstChannel = 0;
+    params.channels = config.channels;
+    params.bufferFrames = config.bufferFrames;
+    params.sampleRate = config.sampleRate;
+    params.deviceName = config.deviceName.c_str();
+    params.firstChannel = config.firstChannel;
+    params.inputChannels = config.inputChannels;
+    params.firstInputChannel = config.firstInputChannel;
 
-    engine::EngineConfig config;
-    config.numSilos = 1;
+    engine::EngineConfig engineConfig;
+    engineConfig.numSilos = config.numSilos;
 
-    return engine::newEngine(config, params);
+    engine::Engine* e = engine::newEngine(engineConfig, params);
+
+    // Register built-in node definitions
+    engine::createSineNode(e);
+    engine::createAddOpNode(e);
+    engine::createMulOpNode(e);
+    engine::createVoicerTestNode(e);
+
+    return e;
 }
 
 // ---------------------------------------------------------------------------
@@ -96,6 +182,43 @@ static volatile sig_atomic_t gShouldQuit = 0;
 
 static void signalHandler(int) {
     gShouldQuit = 1;
+}
+
+// ---------------------------------------------------------------------------
+// Help text
+// ---------------------------------------------------------------------------
+
+static void printHelp() {
+    std::cout <<
+        "Usage: jscs [options] [file]\n"
+        "\n"
+        "Options:\n"
+        "  -h, --help              Show this help message\n"
+        "  -P, --project <dir>     Set project directory\n"
+        "  -I <path>               Add module include path (colon-separated)\n"
+        "  --no-audio              Don't start audio output\n"
+        "  --wait                  Wait for Ctrl-C after running script\n"
+        "\n"
+        "Audio options (override config file):\n"
+        "  --silos <n>             Number of parallel audio threads (default: 4)\n"
+        "  --sample-rate <hz>      Sample rate (default: 44100)\n"
+        "  --buffer-frames <n>     Audio buffer size in frames (default: 512)\n"
+        "  --channels <n>          Output channels (default: 2)\n"
+        "  --first-channel <n>     First output channel (default: 0)\n"
+        "  --input-channels <n>    Input channels (default: 0, disabled)\n"
+        "  --first-input-channel <n> First input channel (default: 0)\n"
+        "  --device <name>         Audio device name (default: \"default\")\n"
+        "\n"
+        "Project directory layout:\n"
+        "  <project>/\n"
+        "    config                Audio/engine configuration file\n"
+        "    src/                  Language X source files\n"
+        "    modules/              Language X modules\n"
+        "    synthdefs/sexpr/      Generated synthdef s-expressions\n"
+        "    synthdefs/cpp/        Generated synthdef C++ sources\n"
+        "    synthdefs/dylib/      Compiled synthdef plugins\n"
+        "\n"
+        "If no file is given, starts an interactive REPL.\n";
 }
 
 // ---------------------------------------------------------------------------
@@ -111,24 +234,26 @@ int main(int argc, const char* argv[]) {
         bridge::registerAudioEngineFFI(compiler);
         bridge::registerSynthdefCompilerFFI(compiler);
 
+        Config config;
         std::vector<std::string> includePaths;
         std::string filename;
         bool startAudio = true;
         bool waitAfterScript = false;
 
+        // CLI overrides — collected during parsing, applied after config file
+        std::optional<int> cliSilos, cliChannels, cliFirstChannel, cliBufferFrames;
+        std::optional<int> cliInputChannels, cliFirstInputChannel;
+        std::optional<double> cliSampleRate;
+        std::optional<std::string> cliDevice;
+
+        // --- Parse command line ---
         for (int i = 1; i < argc; ++i) {
             std::string arg = argv[i];
             if (arg == "--help" || arg == "-h") {
-                std::cout << "Usage: jscs [options] [file]\n"
-                          << "\n"
-                          << "Options:\n"
-                          << "  -h, --help         Show this help message\n"
-                          << "  -I <path>          Add module include path (colon-separated)\n"
-                          << "  --no-audio         Don't start audio output\n"
-                          << "  --wait             Wait for Ctrl-C after running script\n"
-                          << "\n"
-                          << "If no file is given, starts an interactive REPL.\n";
+                printHelp();
                 return 0;
+            } else if ((arg == "--project" || arg == "-P") && i + 1 < argc) {
+                config.projectDir = argv[++i];
             } else if (arg == "-I" && i + 1 < argc) {
                 auto paths = splitPaths(argv[++i]);
                 includePaths.insert(includePaths.end(), paths.begin(), paths.end());
@@ -136,13 +261,63 @@ int main(int argc, const char* argv[]) {
                 startAudio = false;
             } else if (arg == "--wait") {
                 waitAfterScript = true;
+            } else if (arg == "--silos" && i + 1 < argc) {
+                cliSilos = std::stoi(argv[++i]);
+            } else if (arg == "--sample-rate" && i + 1 < argc) {
+                cliSampleRate = std::stod(argv[++i]);
+            } else if (arg == "--buffer-frames" && i + 1 < argc) {
+                cliBufferFrames = std::stoi(argv[++i]);
+            } else if (arg == "--channels" && i + 1 < argc) {
+                cliChannels = std::stoi(argv[++i]);
+            } else if (arg == "--first-channel" && i + 1 < argc) {
+                cliFirstChannel = std::stoi(argv[++i]);
+            } else if (arg == "--device" && i + 1 < argc) {
+                cliDevice = argv[++i];
+            } else if (arg == "--input-channels" && i + 1 < argc) {
+                cliInputChannels = std::stoi(argv[++i]);
+            } else if (arg == "--first-input-channel" && i + 1 < argc) {
+                cliFirstInputChannel = std::stoi(argv[++i]);
             } else {
                 filename = arg;
             }
         }
 
-        // Create engine and VM
-        engine::Engine* eng = createEngine();
+        // --- Load config file from project directory ---
+        if (!config.projectDir.empty()) {
+            std::string configPath = config.projectDir + "/config";
+            if (fs::exists(configPath)) {
+                parseConfigFile(configPath, config);
+            }
+        }
+
+        // --- Apply CLI overrides (take priority over config file) ---
+        if (cliSilos)        config.numSilos = *cliSilos;
+        if (cliSampleRate)   config.sampleRate = *cliSampleRate;
+        if (cliBufferFrames) config.bufferFrames = *cliBufferFrames;
+        if (cliChannels)     config.channels = *cliChannels;
+        if (cliFirstChannel) config.firstChannel = *cliFirstChannel;
+        if (cliDevice)            config.deviceName = *cliDevice;
+        if (cliInputChannels)     config.inputChannels = *cliInputChannels;
+        if (cliFirstInputChannel) config.firstInputChannel = *cliFirstInputChannel;
+
+        // --- Add project directory paths ---
+        if (!config.projectDir.empty()) {
+            std::string modulesDir = config.projectDir + "/modules";
+            if (fs::is_directory(modulesDir)) {
+                includePaths.push_back(modulesDir);
+            }
+        }
+
+        // --- Create engine and VM ---
+        engine::Engine* eng = createEngine(config);
+
+        // Auto-load plugins from project directory
+        if (!config.projectDir.empty()) {
+            std::string dylibDir = config.projectDir + "/synthdefs/dylib";
+            if (fs::is_directory(dylibDir)) {
+                engine::loadDefs(eng, dylibDir.c_str());
+            }
+        }
 
         VMTarget target = compiler.createTarget();
         VM vm(64 * 1024 * 1024, types, target);

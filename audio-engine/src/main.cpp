@@ -29,7 +29,7 @@ void loadDef_test()
     EngineConfig config;
     config.numSilos = 1;
 
-    AudioStreamParameters asp{ "default", 2, 0, 256, 48000.};
+    AudioStreamParameters asp{.deviceName = "default", .channels = 2, .firstChannel = 0, .bufferFrames = 256, .sampleRate = 48000.};
     auto e = newEngine(config, asp);
 
     loadDef(e, "/Users/jamesmcc/sapf-build-5", "bubbles");
@@ -43,7 +43,7 @@ void test0()
     EngineConfig config;
     config.numSilos = 1;
 
-    AudioStreamParameters asp{ "default", 2, 0, 256, 48000.};
+    AudioStreamParameters asp{.deviceName = "default", .channels = 2, .firstChannel = 0, .bufferFrames = 256, .sampleRate = 48000.};
     auto e = newEngine(config, asp);
 
     createSineNode(e);
@@ -87,7 +87,7 @@ void test1()
     int siloA = 0;
     int siloB = 1;
 
-    AudioStreamParameters asp{ "default", 2, 0, 256, 96000.};
+    AudioStreamParameters asp{.deviceName = "default", .channels = 2, .firstChannel = 0, .bufferFrames = 256, .sampleRate = 96000.};
 
     auto e = newEngine(config, asp);
     printDevices(e);
@@ -304,7 +304,7 @@ void test5()
     EngineConfig config;
     config.numSilos = 1;
 
-    AudioStreamParameters asp{ "default", 2, 0, 256, 48000.};
+    AudioStreamParameters asp{.deviceName = "default", .channels = 2, .firstChannel = 0, .bufferFrames = 256, .sampleRate = 48000.};
     auto e = newEngine(config, asp);
 
     createAddOpNode(e);
@@ -365,7 +365,7 @@ void test2()
     EngineConfig config;
     config.numSilos = 8;
 
-    AudioStreamParameters asp{ "default", 2, 0, 256, 96000.};
+    AudioStreamParameters asp{.deviceName = "default", .channels = 2, .firstChannel = 0, .bufferFrames = 256, .sampleRate = 96000.};
     auto e = newEngine(config, asp);
 
     createAddOpNode(e);
@@ -462,7 +462,7 @@ void test3()
     EngineConfig config;
     config.numSilos = 1;
 
-    AudioStreamParameters asp{ "default", 2, 0, 256, 96000.};
+    AudioStreamParameters asp{.deviceName = "default", .channels = 2, .firstChannel = 0, .bufferFrames = 256, .sampleRate = 96000.};
     auto e = newEngine(config, asp);
 
     createVoicerTestNode(e);
@@ -644,7 +644,7 @@ void test4()
     EngineConfig config;
     config.numSilos = 10;
 
-    AudioStreamParameters asp{ "default", 2, 0, 256, 48000.};
+    AudioStreamParameters asp{.deviceName = "default", .channels = 2, .firstChannel = 0, .bufferFrames = 256, .sampleRate = 48000.};
     auto e = newEngine(config, asp);
 
     createSineNode(e);

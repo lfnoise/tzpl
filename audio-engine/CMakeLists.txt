@@ -34,6 +34,7 @@ set(LIB_SOURCES
     src/jscs_engine.cpp
     src/jscs_node.cpp
     src/jscs_xfader.cpp
+    src/jscs_test_plugins.cpp
 )
 
 add_library(audio_engine_lib STATIC ${LIB_SOURCES})
@@ -49,7 +50,7 @@ endif()
 
 # --- audio-engine executable ---
 
-add_executable(audio-engine src/main.cpp src/jscs_test_plugins.cpp)
+add_executable(audio-engine src/main.cpp)
 target_link_libraries(audio-engine PRIVATE audio_engine_lib)
 
 # --- install targets ---
@@ -74,6 +75,7 @@ install(FILES
     src/jscs_silo.hpp
     src/jscs_xfader.hpp
     src/jscs_sexpr_binary_buffer.hpp
+    src/jscs_test_plugins.hpp
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/jscs
 )
 install(TARGETS audio-engine

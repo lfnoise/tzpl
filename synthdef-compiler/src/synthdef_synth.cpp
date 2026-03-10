@@ -85,6 +85,8 @@ namespace synthdef {
             gSynth->outlets.push_back(expr);
         } else if (expr.as<Control>()) {
             gSynth->controls.push_back(expr);
+        } else if (expr.as<NoteParam>()) {
+            gSynth->noteParams.push_back(expr);
         } else if (auto u = expr.as<DelayInit>(); u) {
             u->delayBuf->initters.push_back(u);
         } else if (auto u = expr.as<DelayFixRead>(); u) {
@@ -219,7 +221,7 @@ namespace synthdef {
     
     void Synth::findGraphCuts() {
         for (S expr : sorted) {
-            if (expr.as<Inlet>() || expr.as<Control>()) {
+            if (expr.as<Inlet>() || expr.as<Control>() || expr.as<NoteParam>()) {
                 setGraphCut(expr, GraphCut::Input);
             }
             for (usize i = 0; i < expr->inputs.size(); ++i) {

@@ -391,6 +391,7 @@ enum SignalExprKind {
 	outlet(String),
 
 	control(ControlSpec, Chans, String),
+	noteParam(ControlSpec, Chans, String),
 
 	delay(DelayVar, DelayOp),
 
@@ -400,6 +401,7 @@ enum SignalExprKind {
 	select,
 	select2,
 	varexpr String,
+	voicer(Int, SignalGraph),
 }
 
 ---------------------------------------------------------------------------
@@ -425,6 +427,19 @@ fn outlet(a S, name String = "out") S {
 
 fn control(name String, spec ControlSpec, chans Chans = 1) S {
     SignalExprKind.control(spec, chans asChans, name) _newSignalExpr
+}
+
+fn noteParam(name String, spec ControlSpec, chans Chans = 1) S {
+    SignalExprKind.noteParam(spec, chans asChans, name) _newSignalExpr
+}
+
+fn gate() S {
+    noteParam("gate", ControlSpec { lo: 0.0, hi: 1.0, init: 0.0, warp: ControlWarp.linear })
+}
+
+fn voicer(maxVoices Int, voiceFn GraphFn) S {
+    let bodyGraph = voiceFn _makeSubGraph;
+    SignalExprKind.voicer(maxVoices, bodyGraph) _newSignalExpr
 }
 
 ---------------------------------------------------------------------------
@@ -914,6 +929,9 @@ fn toLisp(o S) String {
         control(spec, chans, name) :
             "(%^ Control \"%^\" %^ %^)" fmt(o.id, name, chans asChans, spec toLisp);
 
+        noteParam(spec, chans, name) :
+            "(%^ NoteParam \"%^\" %^ %^)" fmt(o.id, name, chans asChans, spec toLisp);
+
         delay(delayVar, op) : match (op) {
             maxDelayTime : "(%^ MaxDelay %^ %^)" fmt(o.id, delayVar.id, o inputsToLisp);
             init(offset) : "(%^ DelayInit %^ %^ %^)" fmt(o.id, delayVar.id, offset, o inputsToLisp);
@@ -935,6 +953,11 @@ fn toLisp(o S) String {
         select : "(%^ SelectExpr %^)" fmt(o.id, o inputsToLisp);
         select2 : "(%^ SelectExpr %^)" fmt(o.id, o inputsToLisp);
 		varexpr(name) : "()%^ VarExpr %^)" fmt(o.id, name);
+
+        voicer(maxVoices, bodyGraph) : {
+			var `indentLevel = `indentLevel + 1;
+            "(%^ Voicer %^ %^)" fmt(o.id, maxVoices, bodyGraph toLisp)
+		}
 	}
 }
 

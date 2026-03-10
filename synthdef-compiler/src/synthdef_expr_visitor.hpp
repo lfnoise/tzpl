@@ -20,6 +20,7 @@ struct ExprVisitor {
     virtual void visit(SampleRate* e) = 0;
     virtual void visit(SampleDur* e) = 0;
     virtual void visit(Control* e) = 0;
+    virtual void visit(NoteParam* e) = 0;
     virtual void visit(Inlet* e) = 0;
     virtual void visit(Outlet* e) = 0;
     virtual void visit(UnaryOpExpr* e) = 0;
@@ -35,6 +36,7 @@ struct ExprVisitor {
     virtual void visit(IfElseExpr* e) = 0;
     virtual void visit(SwitchExpr* e) = 0;
     virtual void visit(ForLoopExpr* e) = 0;
+    virtual void visit(VoicerExpr* e) = 0;
 //    virtual void visit(MatAt* e) = 0;
 //    virtual void visit(MatPut* e) = 0;
 //    virtual void visit(MatPermute* e) = 0;

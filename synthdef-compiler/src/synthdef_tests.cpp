@@ -677,6 +677,148 @@ void test_control_def_has_id() {
     assert(code.find(id1) != string::npos);
 }
 
+void test_voicer_codegen() {
+    printf("test_voicer_codegen\n");
+    using namespace synthdef;
+    PushSynth ps(new Synth("test_voicer"));
+
+    // Build a simple voicer: noteParam("freq") * gate(), 16 voices
+    // No branching in body, so should use flat voice mode (SoA, no per-voice loop).
+    Graph* subgraph = new Graph(gSynth, gGraph);
+    S voiceBody;
+    {
+        PushGraph pg(subgraph);
+        S freq = addExpr(new NoteParam({20, 20000, 440, 0}, NumType::f32, 1, "freq"));
+        S gate = addExpr(new NoteParam({0, 1, 0, 0}, NumType::f32, 1, "gate"));
+        S result = freq * gate;
+        voiceBody = addExpr(new PhiNodeExpr(result));
+    }
+
+    S voicer = addExpr(new VoicerExpr(16, voiceBody));
+    // Sum the 16 voices down to 1 channel
+    outlet(reduce(voicer, BinaryOp::Add, 1));
+
+    gSynth->graphAnalysis();
+    string code = cppCodeGen(gSynth);
+
+    // Flat voice mode: no VoiceState struct, no per-voice loop
+    assert(code.find("VoiceState") == string::npos);
+    assert(code.find("for (int v = 0; v < 16; ++v)") == string::npos);
+    assert(code.find("vparams") == string::npos);
+
+    // SoA voice state arrays
+    assert(code.find("voice_v0[16]") != string::npos);
+    assert(code.find("voice_v1[16]") != string::npos);
+
+    // Flat loop with correct iteration count (16, not 256)
+    assert(code.find("for (int i = 0; i < 16; ++i)") != string::npos);
+
+    // Voice-local inst vars properly indexed
+    assert(code.find("p->voice_v0[i]") != string::npos);
+    assert(code.find("p->voice_v1[i]") != string::npos);
+
+    // RowVoicer and note functions still present
+    assert(code.find("RowVoicer<16, 2>") != string::npos);
+    assert(code.find("_noteOn") != string::npos);
+    assert(code.find("_noteOff") != string::npos);
+    assert(code.find("_allNotesOff") != string::npos);
+    assert(code.find("jscs_voicer.hpp") != string::npos);
+
+    printf("  flat voice mode: SoA layout, flat loops, proper indexing\n");
+}
+
+void test_branching_voice_stays_looped() {
+    printf("test_branching_voice_stays_looped\n");
+    using namespace synthdef;
+    PushSynth ps(new Synth("test_voicer_branching"));
+
+    // Build a voicer with branching (IfElseExpr) in the body.
+    // This should fall back to per-voice loop mode (AoS).
+    Graph* voicerSubgraph = new Graph(gSynth, gGraph);
+    S voiceBody;
+    {
+        PushGraph pg(voicerSubgraph);
+        S freq = addExpr(new NoteParam({20, 20000, 440, 0}, NumType::f32, 1, "freq"));
+        S gate = addExpr(new NoteParam({0, 1, 0, 0}, NumType::f32, 1, "gate"));
+
+        // IfElseExpr: if (gate > 0.5) then freq else 0
+        S cond = gate > S(0.5f);
+
+        Graph* thenGraph = new Graph(gSynth, gGraph);
+        S thenBody;
+        {
+            PushGraph pg2(thenGraph);
+            thenBody = addExpr(new PhiNodeExpr(freq));
+        }
+        Graph* elseGraph = new Graph(gSynth, gGraph);
+        S elseBody;
+        {
+            PushGraph pg3(elseGraph);
+            elseBody = addExpr(new PhiNodeExpr(S(0.0f)));
+        }
+        S ifExpr = addExpr(new IfElseExpr(cond, thenBody, elseBody));
+
+        voiceBody = addExpr(new PhiNodeExpr(ifExpr));
+    }
+
+    S voicer = addExpr(new VoicerExpr(8, voiceBody));
+    outlet(reduce(voicer, BinaryOp::Add, 1));
+
+    gSynth->graphAnalysis();
+    string code = cppCodeGen(gSynth);
+
+    // Branching body: should use AoS mode with per-voice loop
+    assert(code.find("VoiceState") != string::npos);
+    assert(code.find("for (int v = 0; v < 8; ++v)") != string::npos);
+
+    // Should NOT have SoA flat arrays
+    assert(code.find("voice_v0[8]") == string::npos);
+
+    printf("  branching voice body falls back to per-voice loop\n");
+}
+
+void test_voicer_sexpr_parse() {
+    printf("test_voicer_sexpr_parse\n");
+    using namespace synthdef;
+
+    // A simple voicer: NoteParam "freq", gate * freq in subgraph
+    std::string sexprText = R"(
+        (Synth test_voicer_sexpr
+            (Graph 5 (
+                (0 NoteParam "freq" 1 (ControlSpec 20.0 20000.0 440.0 0))
+                (1 NoteParam "gate" 1 (ControlSpec 0.0 1.0 0.0 0))
+                (2 BinaryOp mul (0 1))
+                (3 Voicer 8
+                    (Graph 2 (
+                        (0 NoteParam "freq" 1 (ControlSpec 20.0 20000.0 440.0 0))
+                        (1 NoteParam "gate" 1 (ControlSpec 0.0 1.0 0.0 0))
+                        (2 BinaryOp mul (0 1)))))
+                (5 Outlet "out" 3))))
+    )";
+
+    auto result = synthFromSExprText(sexprText);
+    assert(result.has_value());
+
+    Synth* synth = result.value();
+    assert(synth->name == "test_voicer_sexpr");
+
+    // Verify we got noteParams
+    assert(!synth->noteParams.empty());
+
+    {
+        PushSynth ps(synth);
+        synth->graphAnalysis();
+
+        string code = cppCodeGen(synth);
+        // No branching in body, so flat voice mode is used (no VoiceState)
+        assert(code.find("VoiceState") == string::npos);
+        assert(code.find("RowVoicer") != string::npos);
+        assert(code.find("_noteOn") != string::npos);
+    }
+
+    printf("  sexpr parse and codegen succeeded\n");
+}
+
 extern void test_transforms();
 
 void all_tests() {
@@ -693,6 +835,12 @@ void all_tests() {
     test_ftos();
     //test_transforms();
     //test_synthdef();
+
+    // Voicer tests
+    test_voicer_codegen();
+    test_branching_voice_stays_looped();
+    test_voicer_sexpr_parse();
+
     test("bubbles", 5, bubbles);
 //    test("bubbles_lite", 5, bubbles_lite);
 //    test("no_reduce_test", 8, no_reduce_test);

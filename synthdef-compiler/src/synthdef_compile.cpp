@@ -102,6 +102,11 @@ void runInternalAudioEngine(string dir, string synthName, int seconds) {
         jscs_SynthData* data = def.funs.alloc();
 
         printf("data = %p\n", (void*)data);
+
+        // Allocate the outlets pointer array (alloc() zeros the struct)
+        data->num_outs = def.num_outs;
+        data->outlets = (void**)calloc(def.num_outs, sizeof(void*));
+
         printf("data->outlets = %p\n", (void*)data->outlets);
 
         f32 outs[2];
@@ -129,6 +134,8 @@ void runInternalAudioEngine(string dir, string synthName, int seconds) {
         sleep(seconds);
         stopAudio(&e);
         uninitAudio(&e);
+        free(data->outlets);
+        def.funs.free(data);
     } catch (std::exception& err) {
         printf("error: %s\n", err.what());
         exit(1);

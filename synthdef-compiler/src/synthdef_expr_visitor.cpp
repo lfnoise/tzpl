@@ -13,6 +13,7 @@ void Constant::accept(ExprVisitor& visitor) { visitor.visit(this); }
 void SampleRate::accept(ExprVisitor& visitor) { visitor.visit(this); }
 void SampleDur::accept(ExprVisitor& visitor) { visitor.visit(this); }
 void Control::accept(ExprVisitor& visitor) { visitor.visit(this); }
+void NoteParam::accept(ExprVisitor& visitor) { visitor.visit(this); }
 void Inlet::accept(ExprVisitor& visitor) { visitor.visit(this); }
 void Outlet::accept(ExprVisitor& visitor) { visitor.visit(this); }
 void UnaryOpExpr::accept(ExprVisitor& visitor) { visitor.visit(this); }
@@ -28,6 +29,7 @@ void SelectExpr::accept(ExprVisitor& visitor) { visitor.visit(this); }
 void IfElseExpr::accept(ExprVisitor& visitor) { visitor.visit(this); }
 void SwitchExpr::accept(ExprVisitor& visitor) { visitor.visit(this); }
 void ForLoopExpr::accept(ExprVisitor& visitor) { visitor.visit(this); }
+void VoicerExpr::accept(ExprVisitor& visitor) { visitor.visit(this); }
 
 #if 0
 void MatAt::accept(ExprVisitor& visitor) { visitor.visit(this); }

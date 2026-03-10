@@ -39,6 +39,7 @@ static const char* regString(ts::VM& vm, u16 reg) {
     return ts::stringData(vm.reg(reg).o);
 }
 
+
 // ---------------------------------------------------------------------------
 // Engine lifecycle
 // ---------------------------------------------------------------------------
@@ -124,8 +125,8 @@ static void ffi_sched(ts::VM& vm, u16 dst, u16, u16 argBase) {
 // fn schedPolicy(time: Float, policy: Int) -> Int
 static void ffi_schedPolicy(ts::VM& vm, u16 dst, u16, u16 argBase) {
     f64 time = vm.reg(argBase).f;
-    int policy = static_cast<int>(vm.reg(argBase + 1).i);
-    returnErr(vm, dst, engine::sched(time, static_cast<engine::SchedPolicy>(policy)));
+    auto policy = static_cast<engine::SchedPolicy>(vm.reg(argBase + 1).i);
+    returnErr(vm, dst, engine::sched(time, policy));
 }
 
 // ---------------------------------------------------------------------------

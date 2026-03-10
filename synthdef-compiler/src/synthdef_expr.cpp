@@ -23,8 +23,16 @@ namespace synthdef {
     bool Expr::is_root() const { return tree && tree->root.get() == this; }
 
     Control::Control(ControlSpec spec, NumType itype, usize ichans, string name)
-        : Expr(eventSignalRate, {}), 
+        : Expr(eventSignalRate, {}),
         spec(spec), serial(nextControlSerialNo()), name(name)
+    {
+        type = itype;
+        chans = ichans;
+    }
+
+    NoteParam::NoteParam(ControlSpec spec, NumType itype, usize ichans, string name)
+        : Expr(audioSignalRate, {}),
+        spec(spec), serial(nextNoteParamSerialNo()), name(name)
     {
         type = itype;
         chans = ichans;
