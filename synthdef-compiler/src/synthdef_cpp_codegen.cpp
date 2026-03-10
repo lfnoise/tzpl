@@ -506,9 +506,9 @@ struct ExprCodegenVisitor : ExprVisitor {
                 vi = FMT("{} >> {}", vxstr(cel), g.flatChanShift);
             }
             if (p->chans == 1) {
-                s += FMT("p->voicer_params[{}][{}]", vi, p->serial + 1);
+                s += FMT("p->voicer_params[{}][{}]", vi, p->serial);
             } else {
-                s += FMT("p->voicer_params[{}][{} + ({} & {})]", vi, p->serial + 1, vxstr(cel), p->chans - 1);
+                s += FMT("p->voicer_params[{}][{} + ({} & {})]", vi, p->serial, vxstr(cel), p->chans - 1);
             }
         } else {
             if (p->chans == 1) {
@@ -534,13 +534,49 @@ struct ExprCodegenVisitor : ExprVisitor {
     }
 //    void visit(MatMulExpr* p) override { fixme(p); }
     void visit(ReduceExpr* p) override {
-        string lambdaStr = FMT("[]({0} z, {0} x){{ return {1}; }}", 
+        string lambdaStr = FMT("[]({0} z, {0} x){{ return {1}; }}",
             p->type.str(), genBinopExprString(p->op, p->type, "z", "x"));
-        s += FMT("reduce_rows<{}, {}>({}, {}, {})", 
-            p->inputs[0]->chans / p->cols, p->cols, vxstr(cel), 
+        s += FMT("reduce_rows<{}, {}>({}, {}, {})",
+            p->inputs[0]->chans / p->cols, p->cols, vxstr(cel),
             g.genVarName(p->inputs[0]), lambdaStr);
     }
 //    void visit(ScanExpr* p) override { fixme(p); }
+    void visit(VecTakeExpr* p) override {
+        s += g.genExpr(p->in0(), cel);
+    }
+    void visit(VecDropExpr* p) override {
+        s += g.genExpr(p->in0(), cel + vx(ptrdiff_t(p->n)));
+    }
+    void visit(VecStrideExpr* p) override {
+        s += g.genExpr(p->in0(), cel * vx(ptrdiff_t(p->n)));
+    }
+    void visit(VecStutterExpr* p) override {
+        s += g.genExpr(p->in0(), cel / vx(ptrdiff_t(p->n)));
+    }
+    void visit(VecNCycExpr* p) override {
+        s += g.genExpr(p->in0(), mod(cel, vx(ptrdiff_t(p->in0()->chans))));
+    }
+    void visit(VecReverseExpr* p) override {
+        s += g.genExpr(p->in0(), vx(ptrdiff_t(p->in0()->chans - 1)) - cel);
+    }
+    void visit(VecTransposeExpr* p) override {
+        usize cols = p->n;
+        usize rows = p->in0()->chans / cols;
+        // Transpose rows×cols -> cols×rows: output[i] = input[(i%rows)*cols + i/rows]
+        s += g.genExpr(p->in0(), (cel % vx(ptrdiff_t(rows))) * vx(ptrdiff_t(cols)) + cel / vx(ptrdiff_t(rows)));
+    }
+    void visit(VecRotateExpr* p) override {
+        usize input_chans = p->in0()->chans;
+        string r = FMT("isize({})", g.genExpr(p->in1(), vx(0)));
+        s += g.genExpr(p->in0(), mod(cel + vx(r), vx(ptrdiff_t(input_chans))));
+    }
+    void visit(VecAtExpr* p) override {
+        string idx = g.genExpr(p->in1(), cel);
+        s += FMT("{}[synthdef::mod(isize({}), isize({}))]",
+            g.genVarName(p->in0()), idx, p->in0()->chans);
+    }
+    void visit(VecPutExpr* p) override { fixme(p); } // handled in GenLoopExprVisitor
+    void visit(VecJoinExpr* p) override { fixme(p); } // handled in GenLoopExprVisitor
     void visit(VarExpr* p) override { s += p->varName; }
     void visit(PhiNodeExpr* p) override { shouldBeHandledAsTree(p); }
     void visit(SelectExpr* p) override {
@@ -567,47 +603,6 @@ struct ExprCodegenVisitor : ExprVisitor {
     void visit(SwitchExpr* p) override { shouldBeHandledAsTree(p); }
     void visit(ForLoopExpr* p) override { shouldBeHandledAsTree(p); }
     void visit(VoicerExpr* p) override { shouldBeHandledAsTree(p); }
-//    void visit(VecAt* p) override { fixme(p); }
-//    void visit(VecPut* p) override { fixme(p); }
-//    void visit(VecPermute* p) override { fixme(p); }
-//    void visit(VecReverse* p) override { 
-//        s += g.genExpr(p->in0(), vx(p->in0()->chans - 1) - cel); 
-//    }
-//    void visit(VecTake* p) override { s += g.genExpr(p->in0(), cel); }
-//    void visit(VecSkip* p) override { s += g.genExpr(p->in0(), cel + vx(p->n)); }
-//    void visit(VecStride* p) override { s += g.genExpr(p->in0(), cel * vx(p->n)); }
-//    void visit(VecStutter* p) override { s += g.genExpr(p->in0(), cel / vx(p->n)); }
-//    void visit(VecRotate* p) override {
-//        usize input_chans = p->in0()->chans;
-//        usize rotator_shape = p->in1()->chans;
-//        if (!rotator_shape.is_scalar()) {
-//            throw std::runtime_error("rotate rows: in a rank1 loop, the rotation argument must be a scalar.");
-//        }
-//        string r = FMT("usize({})", g.genExpr(p->in1(), vx(0)));
-//        switch (p->axis) {
-//            case Row : {
-//                if (!input_shape.is_col_vector()) {
-//                    throw std::runtime_error("rank 1 rotate rows: input is not a column vector.");
-//                }
-//                s += g.genExpr(p->in0(), mod(cel + vx(r), vx(input_shape.rows))); 
-//            } break;
-//            case Col : {
-//                if (!input_shape.is_row_vector()) {
-//                    throw std::runtime_error("rank 1 rotate cols: input is not a row vector.");
-//                }
-//                s += g.genExpr(p->in0(), mod(cel + vx(r), vx(input_shape.cols))); 
-//            } break;
-//        }
-//    }
-//    void visit(VecShift* p) override { 
-//        s += g.genExpr(p->in0(), cel);
-//        s += g.genExpr(p->in1(), cel);
-//    }
-//    void visit(VecTranspose* p) override { s += g.genExpr(p->in0(), cel); }
-//    void visit(VecCyc* p) override { s += g.genExpr(p->in0(), mod(cel, vx(p->in0()->chans))); }
-//    void visit(VecReshape* p) override { s += g.genExpr(p->in0(), cel); }
-//    void visit(VecCat* p) override { shouldBeHandledAsTree(p); }
-//    void visit(VecLace* p) override { shouldBeHandledAsTree(p); }
     void visit(URandExpr* p) override {
         if (g.inFlatVoiceMode && g.isVoicerSubgraph(p->graph)) {
             string vi;
@@ -744,6 +739,17 @@ struct GenTreeExprVisitor : ExprVisitor {
 //    void visit(MatMulExpr* p) override {}
     void visit(ReduceExpr* p) override {}
 //    void visit(ScanExpr* p) override {}
+    void visit(VecTakeExpr* p) override {}
+    void visit(VecDropExpr* p) override {}
+    void visit(VecStrideExpr* p) override {}
+    void visit(VecStutterExpr* p) override {}
+    void visit(VecNCycExpr* p) override {}
+    void visit(VecReverseExpr* p) override {}
+    void visit(VecTransposeExpr* p) override {}
+    void visit(VecRotateExpr* p) override {}
+    void visit(VecAtExpr* p) override {}
+    void visit(VecPutExpr* p) override {}
+    void visit(VecJoinExpr* p) override {}
     void visit(VarExpr* p) override {}
     void visit(VoicerExpr* p) override {}
 
@@ -865,22 +871,6 @@ struct Rank1GenTreeExprVisitor : GenTreeExprVisitor {
         }
     }
     
-//    void visit(VecAt* p) override {}
-//    void visit(VecPut* p) override {}
-//    void visit(VecPermute* p) override {}
-//    void visit(VecReverse* p) override {}
-//    void visit(VecTake* p) override {}
-//    void visit(VecSkip* p) override {}
-//    void visit(VecStride* p) override {}
-//    void visit(VecStutter* p) override {}
-//    void visit(VecRotate* p) override {}
-//    void visit(VecShift* p) override {}
-//    void visit(VecTranspose* p) override {}
-//    void visit(VecCyc* p) override {}
-//    void visit(VecCat* p) override {}
-//    void visit(VecLace* p) override {}
-//    void visit(VecReshape* p) override {}
-
     void visit(DelayWrite* p) override {
         handled = true;
         if (g.inFlatVoiceMode && g.isVoicerSubgraph(p->delayBuf->graph)) {
@@ -958,12 +948,6 @@ string CppCodeGen::genTree(ExprTree const& tree, VarIndex cel) {
     return s;
 }
 
-//string genMatrixRef(CppCodeGen& g, S v) {
-//    return FMT("MatrixRef<{}, {}, {}>({})",
-//        v->type.str(), v->shape.rows, v->shape.cols,
-//        g.genVarName(v));
-//}
-
 struct GenLoopExprVisitor : ExprVisitor {
     CppCodeGen& g;
     GenLoop const& loop;
@@ -995,173 +979,53 @@ struct GenLoopExprVisitor : ExprVisitor {
     void visit(SwitchExpr* p) override {}
     void visit(ForLoopExpr* p) override {}
     void visit(VoicerExpr* p) override {}
-    
-//    void visit(VecAt* p) override {
-//        tabIndent(s, g.indent);
-//        s += FMT("at<{}, {}, {}, {}>({}, {}, {});\n",
-//            p->type.str(), 
-//            p->in1()->type.str(),
-//            p->in0()->chans, 
-//            p->in1()->chans,
-//            g.genVarName(p), 
-//            g.genVarName(p->in0()), 
-//            g.genVarName(p->in1()));
-//    
-//    }
-//    void visit(VecPut* p) override {}
-//    void visit(VecPermute* p) override {
-//        switch (p->axis) {
-//            case Row :
-//                tabIndent(s, g.indent);
-//                s += FMT("permute_rows<{}, {}, {}, {}, {}>({}, {}, {});\n",
-//                    p->type.str(), p->in1()->type.str(),
-//                    p->in0()->shape.rows, p->in0()->shape.cols,
-//                    p->in1()->chans,
-//                    g.genVarName(p), 
-//                    g.genVarName(p->in0()), 
-//                    g.genVarName(p->in1()));
-//                break;
-//            case Col :
-//                tabIndent(s, g.indent);
-//                s += FMT("permute_cols<{}, {}, {}, {}, {}>({}, {}, {});\n",
-//                    p->type.str(), p->in1()->type.str(),
-//                    p->in0()->shape.rows, p->in0()->shape.cols,
-//                    p->in1()->chans,
-//                    g.genVarName(p), 
-//                    g.genVarName(p->in0()), 
-//                    g.genVarName(p->in1()));
-//                break;
-//                break;
-//        }
-//        handled = true;
-//    }
-//    void visit(VecReverse* p) override {
-//        switch (p->axis) {
-//            case Row :
-//                tabIndent(s, g.indent);
-//                s += FMT("reverse_rows<{}, {}, {}>({}, {});\n",
-//                    p->type.str(), p->shape.rows, p->shape.cols,
-//                    g.genVarName(p), g.genVarName(p->in0()));
-//                break;
-//            case Col :
-//                tabIndent(s, g.indent);
-//                s += FMT("reverse_cols<{}, {}, {}>({}, {});\n",
-//                    p->type.str(), p->shape.rows, p->shape.cols,
-//                    g.genVarName(p), g.genVarName(p->in0()));
-//                break;
-//        }
-//        handled = true;
-//    }
-//    void visit(VecTake* p) override {}
-//    void visit(VecSkip* p) override {}
-//    void visit(VecStride* p) override {}
-//    void visit(VecStutter* p) override {
-//         switch (p->axis) {
-//           case Row :
-//                tabIndent(s, g.indent);
-//                s += FMT("stutter_rows<{}, {}, {}, {}>({}, {});\n",
-//                    p->type.str(), p->shape.rows, p->shape.cols, p->n,
-//                    g.genVarName(p), g.genVarName(p->in0()));
-//                break;
-//            case Col :
-//                tabIndent(s, g.indent);
-//                s += FMT("stutter_cols<{}, {}, {}, {}>({}, {});\n",
-//                    p->type.str(), p->shape.rows, p->shape.cols, p->n,
-//                    g.genVarName(p), g.genVarName(p->in0()));
-//                break;
-//        }
-//        handled = true;
-//    }
-//    void visit(VecRotate* p) override {
-//        switch (p->axis) {
-//            case Row :
-//                tabIndent(s, g.indent);
-//                s += FMT("rotate_rows<{}, {}, {}>({}, {}, isize({}));\n",
-//                    p->type.str(), p->shape.rows, p->shape.cols,
-//                    g.genVarName(p), g.genVarName(p->in0()), g.genExpr(p->in1(), vx(0)));
-//                break;
-//            case Col :
-//                tabIndent(s, g.indent);
-//                s += FMT("rotate_cols<{}, {}, {}>({}, {}, isize({}));\n",
-//                    p->type.str(), p->shape.rows, p->shape.cols,
-//                    g.genVarName(p), g.genVarName(p->in0()), g.genExpr(p->in1(), vx(0)));
-//                break;
-//        }
-//        handled = true;
-//    }
-//    void visit(VecShift* p) override {
-//        tabIndent(s, g.indent);
-//        s += FMT("shift<{}, {}, {}>({}, {}, isize({}));\n",
-//            p->type.str(), p->shape.rows, p->shape.cols,
-//            g.genVarName(p), g.genVarName(p->in0()), g.genVarName(p->in1()));
-//        handled = true;
-//    
-//    }
-//    void visit(VecTranspose* p) override {}
-//    void visit(VecCyc* p) override {
-//        switch (p->axis) {
-//            case Row :
-//                tabIndent(s, g.indent);
-//                s += FMT("cycle_rows<{}, {}, {}, {}>({}, {});\n",
-//                    p->type.str(), p->shape.rows, p->shape.cols, p->n,
-//                    g.genVarName(p), g.genVarName(p->in0()));
-//                break;
-//            case Col :
-//                tabIndent(s, g.indent);
-//                s += FMT("cyc_cols<{}, {}, {}, {}>({}, {});\n",
-//                    p->type.str(), p->shape.rows, p->shape.cols, p->n,
-//                    g.genVarName(p), g.genVarName(p->in0()));
-//                break;
-//        }
-//        handled = true;
-//    }
-//    void visit(VecCat* p) override {
-//        switch (p->axis) {
-//            case Row :
-//                tabIndent(s, g.indent);
-//                s += FMT("cat_rows<{}, {}, {}>({}",
-//                    p->type.str(), p->shape.rows, p->shape.cols, g.genVarName(p));
-//                for (S in : p->inputs) {
-//                    s += FMT(", {}", genMatrixRef(g, in));
-//                }
-//                s += ")";
-//                break;
-//            case Col :
-//                tabIndent(s, g.indent);
-//                s += FMT("cat_cols<{}, {}, {}>({}",
-//                    p->type.str(), p->shape.rows, p->shape.cols, g.genVarName(p));
-//                for (S in : p->inputs) {
-//                    s += FMT(", {}", genMatrixRef(g, in));
-//                }
-//                s += ")";
-//                break;
-//        }
-//        handled = true;
-//    }
-//    void visit(VecLace* p) override {
-//        switch (p->axis) {
-//            case Row :
-//                tabIndent(s, g.indent);
-//                s += FMT("lace_rows<{}, {}, {}>({}",
-//                    p->type.str(), p->shape.rows, p->shape.cols, g.genVarName(p));
-//                for (S in : p->inputs) {
-//                    s += FMT(", {}", genMatrixRef(g, in));
-//                }
-//                s += ")";
-//                break;
-//            case Col :
-//                tabIndent(s, g.indent);
-//                s += FMT("lace_cols<{}, {}, {}>({}",
-//                    p->type.str(), p->shape.rows, p->shape.cols, g.genVarName(p));
-//                for (S in : p->inputs) {
-//                    s += FMT(", {}", genMatrixRef(g, in));
-//                }
-//                s += ")";
-//                break;
-//        }
-//        handled = true;
-//    }
-//    void visit(VecReshape* p) override {}
+
+    void visit(VecTakeExpr* p) override {}
+    void visit(VecDropExpr* p) override {}
+    void visit(VecStrideExpr* p) override {}
+    void visit(VecStutterExpr* p) override {}
+    void visit(VecNCycExpr* p) override {}
+    void visit(VecReverseExpr* p) override {}
+    void visit(VecTransposeExpr* p) override {}
+    void visit(VecRotateExpr* p) override {}
+    void visit(VecAtExpr* p) override {}
+
+    void visit(VecPutExpr* p) override {
+        handled = true;
+        // Copy input array, then overwrite at index positions
+        tabIndent(s, g.indent);
+        s += FMT("memcpy({0}, {1}, {2} * sizeof({3}));\n",
+            g.genVarName(p), g.genVarName(p->in0()),
+            p->in0()->chans, p->type.str());
+        tabIndent(s, g.indent);
+        usize putCount = std::min(p->in1()->chans, p->in2()->chans);
+        s += FMT("for (usize _j = 0; _j < {}; ++_j) {{\n", putCount);
+        tabIndent(s, g.indent + 1);
+        s += FMT("{0}[synthdef::mod(isize({1}[_j]), isize({2}))] = {3}[_j];\n",
+            g.genVarName(p), g.genVarName(p->in1()),
+            p->in0()->chans, g.genVarName(p->in2()));
+        tabIndent(s, g.indent);
+        s += "}\n";
+    }
+
+    void visit(VecJoinExpr* p) override {
+        handled = true;
+        // Concatenate all inputs into the output array
+        usize offset = 0;
+        for (S in : p->inputs) {
+            tabIndent(s, g.indent);
+            s += FMT("memcpy({0} + {1}, {2}, {3} * sizeof({4}));\n",
+                g.genVarName(p), offset, g.genVarName(in),
+                in->chans, p->type.str());
+            offset += in->chans;
+        }
+        // Zero-fill padding channels if total was rounded up to power of two
+        if (offset < p->chans) {
+            tabIndent(s, g.indent);
+            s += FMT("memset({0} + {1}, 0, {2} * sizeof({3}));\n",
+                g.genVarName(p), offset, p->chans - offset, p->type.str());
+        }
+    }
 
     void visit(URandExpr* p) override {}
     void visit(BiRandExpr* p) override {}
@@ -1540,7 +1404,16 @@ string CppCodeGen::genInitFun() {
             s += FMT("\tarc4seedrand(p->rgen{});\n", graph->serial);
         }
     }
+    // If flat voice mode, enable inFlatVoiceMode during init loops so that
+    // voicer-subgraph inst_vars get the correct p->voice_ prefix and per-voice indexing.
+    if (flatVoiceMode && voicerExpr) {
+        inFlatVoiceMode = true;
+        flatVoiceCount = voicerExpr->maxVoices;
+    }
     s += genLoops(synth->initLoops);
+    if (flatVoiceMode && voicerExpr) {
+        inFlatVoiceMode = false;
+    }
     s += genDelayAlloc();
 
     if (voicerExpr) {
@@ -1819,6 +1692,8 @@ string CppCodeGen::genDeclVoiceState() {
 
     int maxVoices = voicerExpr->maxVoices;
     usize numNoteParams = synth->noteParams.size();
+    // User params exclude gate (serial 0). RowVoicer NumParams = user params only.
+    usize numUserParams = numNoteParams > 0 ? numNoteParams - 1 : 0;
     string s;
 
     if (flatVoiceMode) {
@@ -1856,8 +1731,8 @@ string CppCodeGen::genDeclVoiceState() {
         s += genDelayDeclsSoA(voiceDelays, "\t", maxVoices);
 
         // Voicer members
-        s += FMT("\tRowVoicer<{}, {}> voicer;\n", maxVoices, numNoteParams);
-        s += FMT("\tf32 voicer_params[{}][{}];\n\n", maxVoices, 1 + numNoteParams);
+        s += FMT("\tRowVoicer<{}, {}> voicer;\n", maxVoices, numUserParams);
+        s += FMT("\tf32 voicer_params[{}][{}];\n\n", maxVoices, 1 + numUserParams);
     } else {
         // AoS layout: VoiceState struct
         s += "\tstruct VoiceState {\n";
@@ -1894,8 +1769,8 @@ string CppCodeGen::genDeclVoiceState() {
 
         // Voicer members
         s += FMT("\tVoiceState voice_state[{}];\n", maxVoices);
-        s += FMT("\tRowVoicer<{}, {}> voicer;\n", maxVoices, numNoteParams);
-        s += FMT("\tf32 voicer_params[{}][{}];\n\n", maxVoices, 1 + numNoteParams);
+        s += FMT("\tRowVoicer<{}, {}> voicer;\n", maxVoices, numUserParams);
+        s += FMT("\tf32 voicer_params[{}][{}];\n\n", maxVoices, 1 + numUserParams);
     }
 
     return s;
@@ -1944,6 +1819,8 @@ string CppCodeGen::genNoteFuns() {
     string s;
     string name = synth->name;
     usize numNoteParams = synth->noteParams.size();
+    // User params exclude gate (serial 0)
+    usize numUserParams = numNoteParams > 0 ? numNoteParams - 1 : 0;
 
     // noteOn
     s += FMT("jscs_SErr {0}_noteOn({0}* p, i64 now, int noteID, int n, f32* params) {{\n", name);
@@ -1951,28 +1828,34 @@ string CppCodeGen::genNoteFuns() {
     s += "\tjscs_SErr err = p->voicer.noteOn(now, noteID, n, params, vi);\n";
     s += "\tif (err != jscs_errNone) return err;\n";
 
-    // Fill defaults for unprovided params
-    if (numNoteParams > 0) {
-        s += FMT("\tstatic const f32 defaults[{}] = {{", numNoteParams);
+    // Fill defaults for unprovided user params (gate is at column 0, managed by voicer)
+    if (numUserParams > 0) {
+        s += FMT("\tstatic const f32 defaults[{}] = {{", numUserParams);
+        bool first = true;
         for (usize i = 0; i < numNoteParams; ++i) {
             auto np = synth->noteParams[i].as<NoteParam>();
-            if (i > 0) s += ", ";
-            s += FMT("{}f", np->spec.param);
+            if (np->serial == 0) continue; // skip gate
+            if (!first) s += ", ";
+            first = false;
+            s += ftos(f32(np->spec.param));
         }
         s += "};\n";
         s += FMT("\tf32* row = p->voicer.getRow(vi);\n");
-        s += FMT("\tif (n < {}) {{\n", numNoteParams);
-        s += FMT("\t\tmemcpy(row + n + 1, defaults + n, ({} - n) * sizeof(f32));\n", numNoteParams);
+        s += FMT("\tif (n < {}) {{\n", numUserParams);
+        s += FMT("\t\tmemcpy(row + n + 1, defaults + n, ({} - n) * sizeof(f32));\n", numUserParams);
         s += "\t}\n";
     }
 
     // Reset per-voice state
     if (flatVoiceMode) {
         // SoA: zero individual arrays per voice
+        // Skip init-rate inst_vars — they are constants computed from sample rate
+        // and should be preserved across noteOn (not zeroed).
         for (GenLoop* loop : synth->loops) {
             for (ExprTree* tree : loop->trees) {
                 S expr = tree->root;
-                if (is_inst_var(expr->cut) && isVoicerSubgraph(expr->graph)) {
+                if (is_inst_var(expr->cut) && isVoicerSubgraph(expr->graph)
+                    && expr->rate != initSignalRate) {
                     string varname = genVarDeclName(expr);
                     if (expr->chans == 1) {
                         s += FMT("\tp->voice_{}[vi] = 0;\n", varname);
@@ -2107,6 +1990,8 @@ string CppCodeGen::genClass()
     // Detect voicer and populate subgraph set
     for (S expr : synth->sorted) {
         if (auto v = expr.as<VoicerExpr>(); v) {
+            if (voicerExpr)
+                throw std::runtime_error("multiple voicer expressions in a single synthdef are not supported");
             voicerExpr = v;
             auto phi = v->voice_body.as<PhiNodeExpr>();
             voicerSubgraphs.insert(phi->graph);
@@ -2121,7 +2006,6 @@ string CppCodeGen::genClass()
                     p = p->parent;
                 }
             }
-            break; // only one voicer supported for now
         }
     }
 
@@ -2142,9 +2026,6 @@ string CppCodeGen::genClass()
     s += "#include \"jscs_plugin_abi.h\"\n";
     s += "#include \"jscs_matrix_transform.hpp\"\n";
     s += "#include \"jscs_random.hpp\"\n";
-    if (voicerExpr) {
-        s += "#include \"jscs_voicer.hpp\"\n";
-    }
     s += "#include <cmath>\n";
     s += "#include <cstdio>\n";
     s += "#include <cstring>\n";
@@ -2152,6 +2033,13 @@ string CppCodeGen::genClass()
     s += "#include <array>\n";
     s += "\n";
     s += "using namespace synthdef;\n";
+    if (voicerExpr) {
+        // Include voicer AFTER 'using namespace synthdef;' so that synthdef types
+        // (f32, i64, etc.) are visible, and define the guard to suppress the
+        // voicer's own type aliases which would conflict.
+        s += "#define JSCS_VOICER_TYPES_DEFINED\n";
+        s += "#include \"jscs_voicer.hpp\"\n";
+    }
     s += "\n";
     s += "extern jscs_SynthFuns " + name + "_funs;\n";
 

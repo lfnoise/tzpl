@@ -225,6 +225,11 @@ void TypeChecker::check(Program& program) {
     // Register built-in math functions before user declarations
     registerBuiltins();
 
+    // Snapshot built-in functions for std.* qualified access
+    if (builtinFunctions_.empty()) {
+        builtinFunctions_ = functions_;
+    }
+
     // Phase 0: Process import declarations (before any other registration)
     for (auto& item : program.items) {
         if (item->kind == ASTNode::ImportDecl) {
@@ -441,6 +446,10 @@ void TypeChecker::checkREPLInput(Program& program) {
     if (!builtinsRegistered_) {
         registerBuiltins();
         builtinsRegistered_ = true;
+        // Snapshot built-in functions for std.* qualified access
+        if (builtinFunctions_.empty()) {
+            builtinFunctions_ = functions_;
+        }
     }
 
     // Phase 0: Process import declarations (before any other registration)
@@ -825,6 +834,11 @@ void TypeChecker::checkImportDecl(ImportDeclNode* decl) {
         }
         case ImportKind::Wildcard: {
             // import math.* — inject all exports into current scope
+            // Also register module name for qualified access (module.func())
+            {
+                std::string moduleName = decl->modulePath.back();
+                importedModules_[moduleName] = mod;
+            }
             for (const auto& [name, entry] : mod->exports) {
                 switch (entry.kind) {
                     case ExportEntry::Func:
@@ -2713,9 +2727,24 @@ Type* TypeChecker::inferExpr(Expr* expr, Type* expectedType) {
         case ASTNode::FieldExpr: {
             auto* fe = static_cast<FieldExpr_*>(expr);
 
-            // Check for module-qualified access: module.name
+            // Check for std-qualified or module-qualified access: std.name or module.name
             if (fe->object->kind == ASTNode::Identifier) {
                 auto* ident = static_cast<IdentifierExpr*>(fe->object.get());
+
+                // Handle std.name — access built-in functions/values by qualified name
+                if (ident->name == "std") {
+                    auto builtIt = builtinFunctions_.find(fe->field);
+                    if (builtIt != builtinFunctions_.end() && !builtIt->second.empty()) {
+                        // Function reference: use first overload's type
+                        auto& fi = builtIt->second[0];
+                        result = fi.returnType ? fi.returnType : compiler_.voidType();
+                        break;
+                    }
+                    error(expr->loc, "No built-in named '" + fe->field + "'");
+                    result = compiler_.intType();
+                    break;
+                }
+
                 auto modIt = importedModules_.find(ident->name);
                 if (modIt != importedModules_.end()) {
                     ModuleInfo* mod = modIt->second;
@@ -4190,6 +4219,68 @@ Type* TypeChecker::inferBinaryOp(BinaryOpExpr* expr) {
         return compiler_.boolType();
     }
 
+    // Implicit auto-mapping for operator overloads: if either operand is
+    // Array or List, unwrap one level and retry the overload resolution.
+    {
+        auto* leftArr  = dynamic_cast<ArrayType*>(leftType);
+        auto* leftList = dynamic_cast<ListType*>(leftType);
+        auto* rightArr  = dynamic_cast<ArrayType*>(rightType);
+        auto* rightList = dynamic_cast<ListType*>(rightType);
+        if (leftArr || leftList || rightArr || rightList) {
+            bool anyList = false;
+            Type* unwrappedLeft = leftType;
+            Type* unwrappedRight = rightType;
+            AutoMapArg leftAM{}, rightAM{};
+            if (leftArr) { unwrappedLeft = leftArr->elemType_; leftAM = {1, 0, false}; }
+            else if (leftList) { unwrappedLeft = leftList->elemType_; leftAM = {1, 0, true}; anyList = true; }
+            if (rightArr) { unwrappedRight = rightArr->elemType_; rightAM = {1, 0, false}; }
+            else if (rightList) { unwrappedRight = rightList->elemType_; rightAM = {1, 0, true}; anyList = true; }
+
+            const char* opN = opToFuncName(expr->op);
+            if (opN) {
+                std::vector<Type*> unwrappedArgs = {unwrappedLeft, unwrappedRight};
+                // Try exact match
+                FuncInfo* func = nullptr;
+                auto it2 = functions_.find(opN);
+                if (it2 != functions_.end()) {
+                    for (auto& fi : it2->second) {
+                        if (fi.isTemplate || fi.paramTypes.size() != unwrappedArgs.size()) continue;
+                        bool match = true;
+                        for (size_t j = 0; j < unwrappedArgs.size(); ++j) {
+                            if (fi.paramTypes[j] != unwrappedArgs[j]) { match = false; break; }
+                        }
+                        if (match) { func = &fi; break; }
+                    }
+                }
+                if (!func) func = tryResolveTemplate(opN, unwrappedArgs, nullptr);
+                if (!func) func = tryResolveOverload(opN, unwrappedArgs);
+
+                // Also try built-in numeric ops on unwrapped types
+                if (!func && isNumeric(unwrappedLeft) && isNumeric(unwrappedRight)) {
+                    expr->leftAutoMap = leftAM;
+                    expr->rightAutoMap = rightAM;
+                    Type* scalarResult;
+                    bool isDiv = (expr->op == BinaryOpExpr::Div);
+                    scalarResult = commonNumericType(unwrappedLeft, unwrappedRight, isDiv);
+                    return wrapAutoMapResult(scalarResult, leftAM, rightAM, anyList);
+                }
+
+                if (func) {
+                    checkRTSafety(func, opN, expr->loc);
+                    if (func->returnType == nullptr && func->declNode) {
+                        inferFunctionReturnType(func->declNode, func);
+                    }
+                    expr->resolvedFuncGlobalIndex = (i32)func->globalIndex;
+                    expr->isBuiltinCall = func->isBuiltin;
+                    expr->leftAutoMap = leftAM;
+                    expr->rightAutoMap = rightAM;
+                    Type* scalarResult = func->returnType ? func->returnType : compiler_.intType();
+                    return wrapAutoMapResult(scalarResult, leftAM, rightAM, anyList);
+                }
+            }
+        }
+    }
+
     // No overload found — report built-in error
     switch (expr->op) {
         case BinaryOpExpr::Add:
@@ -4338,11 +4429,98 @@ Type* TypeChecker::inferCall(CallExpr_* expr) {
     expr->autoMapArgs.clear();
     expr->innerAutoMapArgs.clear();
 
-    // Check for module-qualified function call: module.func(args)
+    // Check for std-qualified or module-qualified function call: std.func(args) or module.func(args)
     if (expr->callee->kind == ASTNode::FieldExpr) {
         auto* fe = static_cast<FieldExpr_*>(expr->callee.get());
         if (fe->object->kind == ASTNode::Identifier) {
             auto* ident = static_cast<IdentifierExpr*>(fe->object.get());
+
+            // Handle std.func(args) — access built-in functions by qualified name
+            if (ident->name == "std") {
+                auto builtIt = builtinFunctions_.find(fe->field);
+                if (builtIt == builtinFunctions_.end()) {
+                    error(expr->loc, "No built-in function named '" + fe->field + "'");
+                    return compiler_.intType();
+                }
+                // Infer argument types
+                std::vector<Type*> argTypes;
+                for (auto& arg : expr->args) {
+                    argTypes.push_back(inferExpr(static_cast<Expr*>(arg.get())));
+                }
+                // Resolve overload from built-in snapshot
+                FuncInfo* resolved = nullptr;
+                for (auto& fi : builtIt->second) {
+                    if (fi.isTemplate) continue;
+                    if (fi.paramTypes.size() == argTypes.size()) {
+                        bool match = true;
+                        for (size_t i = 0; i < argTypes.size(); ++i) {
+                            if (!isAssignable(argTypes[i], fi.paramTypes[i])) {
+                                match = false;
+                                break;
+                            }
+                        }
+                        if (match) { resolved = &fi; break; }
+                    }
+                }
+                // Try variadic built-ins
+                if (!resolved) {
+                    for (auto& fi : builtIt->second) {
+                        if (fi.isTemplate || !fi.isVariadic || fi.fixedParamCount < 0) continue;
+                        if ((int)argTypes.size() < fi.fixedParamCount) continue;
+                        bool match = true;
+                        for (int i = 0; i < fi.fixedParamCount; ++i) {
+                            if (!isAssignable(argTypes[i], fi.paramTypes[i])) { match = false; break; }
+                        }
+                        if (!match) continue;
+                        auto* arrType = dynamic_cast<ArrayType*>(fi.paramTypes.back());
+                        if (arrType) {
+                            for (size_t i = fi.fixedParamCount; i < argTypes.size(); ++i) {
+                                if (!isAssignable(argTypes[i], arrType->elemType_)) { match = false; break; }
+                            }
+                        }
+                        if (match) { resolved = &fi; break; }
+                    }
+                }
+                // Try built-in template resolution
+                if (!resolved) {
+                    for (auto& fi : builtIt->second) {
+                        if (!fi.isTemplate || !fi.builtinTemplate) continue;
+                        std::vector<Type*> paramTypes;
+                        Type* retType = nullptr;
+                        CFun cfun = nullptr;
+                        if (fi.builtinTemplate(compiler_, argTypes, paramTypes, retType, cfun)) {
+                            // Create a monomorphized instance
+                            auto mono = std::make_unique<FuncInfo>();
+                            mono->returnType = retType;
+                            mono->paramTypes = paramTypes;
+                            u32 idx = compiler_.addGlobal(true);
+                            auto* prim = new Primitive(compiler_.voidType());
+                            prim->cfun_ = cfun;
+                            compiler_.global(idx).o = prim;
+                            mono->globalIndex = idx;
+                            mono->bodyChecked = true;
+                            mono->isBuiltin = true;
+                            resolved = mono.get();
+                            monoStorage_.push_back(std::move(mono));
+                            break;
+                        }
+                    }
+                }
+                if (!resolved) {
+                    error(expr->loc, "No matching overload for std." + fe->field + "'");
+                    return compiler_.intType();
+                }
+                expr->resolvedFuncGlobalIndex = (i32)resolved->globalIndex;
+                expr->isBuiltinCall = resolved->isBuiltin;
+                if (resolved->returnType && dynamic_cast<CoroutineType*>(resolved->returnType)) {
+                    expr->isCoroCall = true;
+                }
+                if (resolved->returnType == nullptr && resolved->declNode) {
+                    inferFunctionReturnType(resolved->declNode, resolved);
+                }
+                return resolved->returnType ? resolved->returnType : compiler_.voidType();
+            }
+
             auto modIt = importedModules_.find(ident->name);
             if (modIt != importedModules_.end()) {
                 ModuleInfo* mod = modIt->second;

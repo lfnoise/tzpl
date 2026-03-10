@@ -499,16 +499,17 @@ fn maxfollow(x S, r S) S {
 
 
 -- cubic panning function approximation. sqrt(sq(f(x)) + sq(f(1-x))) ~= 1 with max abs error less than +/- 0.0006 dB
-fn panfun(x) {
+fn panfun(x AsSignal) {
     let a = 0.337403011047526069;
     let b = -1.334338069017510398;
     let c = -a-b-1;
     1 + x * (c + x * (b + x * a))
 }
 
-fn panfuns(x) = [x, 1 - x] panfun;
+fn panfuns(x AsSignal) = [x, 1 - x] panfun;
 
-fn pan(x, pos) = x * pos uni panfuns;
+fn pan(x S, pos S) [S] = x * pos uni panfuns;
+fn pan(x S, pos AsConstantSignal) [S] = x * pos uni panfuns;
 
 -- signal movement
 fn rising(x S)   S = x > x z1;
@@ -569,8 +570,6 @@ fn pinkingFilterEcoMat(x S) S
 fn pinkmf(chans Int = 1) S = 0.25 * white(chans) pinkingFilterMat;
 fn pinkmfe(chans Int = 1) S = 0.25 * white(chans) pinkingFilterEcoMat;
 */
-
-fn irand(n Int, cast = i64) S = (urand() * n) floor toInt;
 
 
 fn white(chans Int = 1) S = birand(chans);

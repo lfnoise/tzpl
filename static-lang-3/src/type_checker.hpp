@@ -109,6 +109,8 @@ public:
 
     // Access function table (for codegen to look up globals)
     const std::unordered_map<std::string, std::vector<FuncInfo>>& functions() const { return functions_; }
+    // Access built-in function snapshot (for std.* qualified access in codegen)
+    const std::unordered_map<std::string, std::vector<FuncInfo>>& builtinFunctions() const { return builtinFunctions_; }
     const std::unordered_map<std::string, VarInfo>& globalVars() const { return globalVars_; }
 
     // Access dynamic variable registry (delegated to Compiler)
@@ -213,6 +215,9 @@ private:
 
     // Function table (supports overloading: multiple FuncInfos per name)
     std::unordered_map<std::string, std::vector<FuncInfo>> functions_;
+
+    // Snapshot of built-in functions for std.* qualified access
+    std::unordered_map<std::string, std::vector<FuncInfo>> builtinFunctions_;
 
     // Struct type registry
     std::unordered_map<std::string, StructType*> structTypes_;

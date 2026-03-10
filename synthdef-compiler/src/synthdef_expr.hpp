@@ -738,325 +738,262 @@ namespace synthdef {
         void accept(ExprVisitor& visitor) override;
     };
 
-#if 0
-    struct MatAt : Expr {
-        MatAt(S a, S i)
-            : Expr(std::max(a->rate, i->rate), {a, i}) {}
+    // -- Vector operations --
 
-        string typeName() const override { return "MatAt"; }
-        string str() const override { return typeName(); }
-        
-        u64 hash() const override { return hash_combine(Expr::hash(), 0x9324C4D678E0355D); }
+    struct VecTakeExpr : Expr {
+        usize n;
 
-        bool is_reorder() const override { return true; }
-        bool gets_own_loop() const override { return true; }
-    
-        NumType initial_type() const override { return NumType::any; }
-        void update_type(ExprIdentitySet& worklist) override;
-        NumType inputTypeConstraint(int i) const override {
-            return i == 0 ? type : NumType::any_int;
-        }
-        void calcShape()  override;
-        bool needs_input_temp_var(usize input) const override { return input == 0; }
+        VecTakeExpr(S a, usize n)
+            : Expr(a->rate, {a}), n(n) {}
 
-        void accept(ExprVisitor& visitor) override;
-    };
-    struct MatPut : Expr {
-        MatPut(S a, S i, S v) 
-            : Expr(std::max(a->rate, std::max(i->rate, v->rate)), {a, i, v}) {}
-    
-        string typeName() const override { return "MatPut"; }
-        string str() const override { return typeName(); }
-        
-        u64 hash() const override { return hash_combine(Expr::hash(), 0xA432B56FB1F41C62); }
+        string typeName() const override { return "VecTakeExpr"; }
+        string str() const override { return FMT("vec_take({})", n); }
 
-        bool is_reorder() const override { return true; }
-        bool gets_own_loop() const override { return true; }
-    
-        NumType initial_type() const override { return NumType::any; }
-        void update_type(ExprIdentitySet& worklist) override;
-        NumType inputTypeConstraint(int i) const override {
-            return i == 0 ? type : NumType::any_int;
-        }
-        void calcShape()  override;
-        bool needs_input_temp_var(usize input) const override { return input == 0; }
-
-        void accept(ExprVisitor& visitor) override;
-    };
-    struct MatPermute : Expr {
-        MatPermute(S a, S i) 
-            : Expr(std::max(a->rate, i->rate), {a, i}) {}
-        string str() const override { return typeName(); }
-    
-        string typeName() const override { return "MatPermute"; }
-        
-        u64 hash() const override { return hash_combine(Expr::hash(), 0x8FC0C51A34996A7A); }
-
-        bool is_reorder() const override { return true; }
-        bool gets_own_loop() const override { return true; }
-    
-        NumType initial_type() const override { return NumType::any; }
-        void update_type(ExprIdentitySet& worklist) override;
-        NumType inputTypeConstraint(int i) const override {
-            return i == 0 ? type : NumType::any_int;
-        }
-        void calcShape()  override;
-        bool needs_input_temp_var(usize input) const override { return input == 0; }
-
-        void accept(ExprVisitor& visitor) override;
-    };
-    struct MatReverse : Expr {
-        usize rows;
-        
-        MatReverse(S a, usize rows) 
-            : Expr(a->rate, {a}), rows(rows) {}
-    
-        string typeName() const override { return "MatReverse"; }
-        string str() const override { return "vec_reverse"; }
-        
-        u64 hash() const override { return hash_combine(Expr::hash(), 0x91D4742F74AF02F5); }
-
-        bool is_reorder() const override { return true; }
-        bool gets_own_loop() const override { return true; }
-
-        NumType initial_type() const override { return NumType::any; }
-        void update_type(ExprIdentitySet& worklist) override;
-        void calcShape()  override;
-        bool needs_input_temp_var(usize input) const override { return true; }
-
-        void accept(ExprVisitor& visitor) override;
-    };
-
-    struct MatTake : Expr { 
-        usize rows;
-        usize n; 
-
-        MatTake(S a, usize n, Axis axis) 
-            : Expr(a->rate, {a}), n(n), axis(axis) {}
-        
-        string typeName() const override { return "MatTake"; }
-        string str() const override { return "vec_take"; }
-        
         u64 hash() const override {
             return hash_combine(Expr::hash(), n, 0xB3DCB05D95AA5E79);
         }
         bool equals_(Expr const& that) const override {
-            auto& c = static_cast<MatTake const&>(that);
-            return n == c.n;
+            return n == static_cast<VecTakeExpr const&>(that).n;
         }
+        bool is_reorder() const override { return true; }
         NumType initial_type() const override { return NumType::any; }
         void update_type(ExprIdentitySet& worklist) override;
-        void calcShape()  override;
-        bool is_reorder() const override { return true; }
+        void calcShape() override;
         bool input_must_be_separate_loop(usize input) const override { return true; }
         bool needs_input_temp_var(usize input) const override { return true; }
 
         void accept(ExprVisitor& visitor) override;
     };
 
-    struct MatSkip : Expr { 
-        Axis axis;
-        usize n; 
-        
-        MatSkip(S a, usize n, Axis axis) 
-            : Expr(a->rate, {a}), n(n), axis(axis) {}
+    struct VecDropExpr : Expr {
+        usize n;
 
-        string typeName() const override { return "MatSkip"; }
-        string str() const override { return "vec_skip"; }
-        
+        VecDropExpr(S a, usize n)
+            : Expr(a->rate, {a}), n(n) {}
+
+        string typeName() const override { return "VecDropExpr"; }
+        string str() const override { return FMT("vec_drop({})", n); }
+
         u64 hash() const override {
             return hash_combine(Expr::hash(), n, 0xAE6CDB6919FDA8AF);
         }
         bool equals_(Expr const& that) const override {
-            auto& c = static_cast<MatSkip const&>(that);
-            return n == c.n;
+            return n == static_cast<VecDropExpr const&>(that).n;
         }
+        bool is_reorder() const override { return true; }
         NumType initial_type() const override { return NumType::any; }
         void update_type(ExprIdentitySet& worklist) override;
-        void calcShape()  override;
-        bool is_reorder() const override { return true; }
+        void calcShape() override;
         bool input_must_be_separate_loop(usize input) const override { return true; }
         bool needs_input_temp_var(usize input) const override { return true; }
 
         void accept(ExprVisitor& visitor) override;
     };
 
-    struct MatStride : Expr { 
-        Axis axis;
-        usize n; 
-        
-        MatStride(S a, usize n, Axis axis) 
-            : Expr(a->rate, {a}), n(n), axis(axis) {}
-        
-        string typeName() const override { return "MatStride"; }
-        string str() const override { return "vec_stride"; }
-        
+    struct VecStrideExpr : Expr {
+        usize n;
+
+        VecStrideExpr(S a, usize n)
+            : Expr(a->rate, {a}), n(n) {}
+
+        string typeName() const override { return "VecStrideExpr"; }
+        string str() const override { return FMT("vec_stride({})", n); }
+
         u64 hash() const override {
             return hash_combine(Expr::hash(), n, 0x8ABF2EAD81EC3B93);
         }
         bool equals_(Expr const& that) const override {
-            auto& c = static_cast<MatStride const&>(that);
-            return n == c.n;
+            return n == static_cast<VecStrideExpr const&>(that).n;
         }
         bool is_reorder() const override { return true; }
-    
         NumType initial_type() const override { return NumType::any; }
         void update_type(ExprIdentitySet& worklist) override;
-        void calcShape()  override;
+        void calcShape() override;
         bool input_must_be_separate_loop(usize input) const override { return true; }
         bool needs_input_temp_var(usize input) const override { return true; }
 
         void accept(ExprVisitor& visitor) override;
     };
 
-    struct MatStutter : Expr { 
-        Axis axis;
-        usize n; 
-        
-        MatStutter(S a, usize n, Axis axis) 
-            : Expr(a->rate, {a}), n(n), axis(axis) {}
-        
-        string typeName() const override { return "MatStutter"; }
-        string str() const override { return "vec_stutter"; }
-        
+    struct VecStutterExpr : Expr {
+        usize n;
+
+        VecStutterExpr(S a, usize n)
+            : Expr(a->rate, {a}), n(n) {}
+
+        string typeName() const override { return "VecStutterExpr"; }
+        string str() const override { return FMT("vec_stutter({})", n); }
+
         u64 hash() const override {
             return hash_combine(Expr::hash(), n, 0x9E8164575545D5A6);
         }
         bool equals_(Expr const& that) const override {
-            auto& c = static_cast<MatStutter const&>(that);
-            return n == c.n;
+            return n == static_cast<VecStutterExpr const&>(that).n;
         }
         bool is_reorder() const override { return true; }
-        bool gets_own_loop() const override { return true; }
-    
         NumType initial_type() const override { return NumType::any; }
         void update_type(ExprIdentitySet& worklist) override;
-        void calcShape()  override;
+        void calcShape() override;
+        bool input_must_be_separate_loop(usize input) const override { return true; }
         bool needs_input_temp_var(usize input) const override { return true; }
 
         void accept(ExprVisitor& visitor) override;
     };
 
-    struct MatRotate : Expr {         
-        Axis axis;
+    struct VecNCycExpr : Expr {
+        usize n;
 
-        MatRotate(S a, S n, Axis axis) 
-            : Expr(std::max(a->rate, n->rate), {a, n}), axis(axis) {}
-        
-        string typeName() const override { return "MatRotate"; }
+        VecNCycExpr(S a, usize n)
+            : Expr(a->rate, {a}), n(n) {}
+
+        string typeName() const override { return "VecNCycExpr"; }
+        string str() const override { return FMT("vec_ncyc({})", n); }
+
+        u64 hash() const override {
+            return hash_combine(Expr::hash(), u64(n), 0xAC9641A1505788FE);
+        }
+        bool equals_(Expr const& that) const override {
+            return n == static_cast<VecNCycExpr const&>(that).n;
+        }
+        bool is_reorder() const override { return true; }
+        NumType initial_type() const override { return NumType::any; }
+        void update_type(ExprIdentitySet& worklist) override;
+        void calcShape() override;
+        bool input_must_be_separate_loop(usize input) const override { return true; }
+        bool needs_input_temp_var(usize input) const override { return true; }
+
+        void accept(ExprVisitor& visitor) override;
+    };
+
+    struct VecReverseExpr : Expr {
+        VecReverseExpr(S a)
+            : Expr(a->rate, {a}) {}
+
+        string typeName() const override { return "VecReverseExpr"; }
+        string str() const override { return "vec_reverse"; }
+
+        u64 hash() const override { return hash_combine(Expr::hash(), 0x91D4742F74AF02F5); }
+
+        bool is_reorder() const override { return true; }
+        NumType initial_type() const override { return NumType::any; }
+        void update_type(ExprIdentitySet& worklist) override;
+        void calcShape() override;
+        bool input_must_be_separate_loop(usize input) const override { return true; }
+        bool needs_input_temp_var(usize input) const override { return true; }
+
+        void accept(ExprVisitor& visitor) override;
+    };
+
+    struct VecTransposeExpr : Expr {
+        usize n; // number of columns for reshape-and-transpose
+
+        VecTransposeExpr(S a, usize n)
+            : Expr(a->rate, {a}), n(n) {}
+
+        string typeName() const override { return "VecTransposeExpr"; }
+        string str() const override { return FMT("vec_transpose({})", n); }
+
+        u64 hash() const override {
+            return hash_combine(Expr::hash(), n, 0xBA088E1D3C375024);
+        }
+        bool equals_(Expr const& that) const override {
+            return n == static_cast<VecTransposeExpr const&>(that).n;
+        }
+        bool is_reorder() const override { return true; }
+        NumType initial_type() const override { return NumType::any; }
+        void update_type(ExprIdentitySet& worklist) override;
+        void calcShape() override;
+        bool input_must_be_separate_loop(usize input) const override { return true; }
+        bool needs_input_temp_var(usize input) const override { return true; }
+
+        void accept(ExprVisitor& visitor) override;
+    };
+
+    struct VecRotateExpr : Expr {
+        VecRotateExpr(S a, S n)
+            : Expr(std::max(a->rate, n->rate), {a, n}) {}
+
+        string typeName() const override { return "VecRotateExpr"; }
         string str() const override { return "vec_rotate"; }
-        
+
         u64 hash() const override {
             return hash_combine(Expr::hash(), 0xAD828D5E53ECCD23);
         }
         bool is_reorder() const override { return true; }
-        bool gets_own_loop() const override { return true; }
-    
         NumType initial_type() const override { return NumType::any; }
         void update_type(ExprIdentitySet& worklist) override;
         NumType inputTypeConstraint(int i) const override {
             return i == 0 ? type : NumType::any_int;
         }
-        void calcShape()  override;
+        void calcShape() override;
+        bool input_must_be_separate_loop(usize input) const override { return true; }
         bool needs_input_temp_var(usize input) const override { return true; }
 
         void accept(ExprVisitor& visitor) override;
     };
 
-    struct MatShift : Expr {         
+    struct VecAtExpr : Expr {
+        VecAtExpr(S a, S i)
+            : Expr(std::max(a->rate, i->rate), {a, i}) {}
 
-        MatShift(S a, S b) 
-            : Expr(std::max(a->rate, b->rate), {a, b}) {}
-        
-        string typeName() const override { return "MatShift"; }
-        string str() const override { return "vec_shift"; }
-        
-        u64 hash() const override {
-            return hash_combine(Expr::hash(), 0xB3740B33723FFA50);
-        }
-        bool is_reorder() const override { return true; }
-        bool gets_own_loop() const override { return true; }
-    
-        NumType initial_type() const override { return NumType::any; }
-        void update_type(ExprIdentitySet& worklist) override;
-        void calcShape()  override;
-        bool needs_input_temp_var(usize input) const override { return true; }
+        string typeName() const override { return "VecAtExpr"; }
+        string str() const override { return "vec_at"; }
 
-        void accept(ExprVisitor& visitor) override;
-    };
-
-    struct MatTranspose : Expr { 
-        MatTranspose(S a) 
-            : Expr(a->rate, {a}) {}
-    
-        string typeName() const override { return "MatTranspose"; }
-        string str() const override { return "vec_transpose"; }
-        
-        u64 hash() const override {
-            return 0xBA088E1D3C375024;
-        }
+        u64 hash() const override { return hash_combine(Expr::hash(), 0x9324C4D678E0355D); }
 
         bool is_reorder() const override { return true; }
-    
         NumType initial_type() const override { return NumType::any; }
         void update_type(ExprIdentitySet& worklist) override;
-        void calcShape()  override;
-        bool needs_input_temp_var(usize input) const override { return true; }
+        NumType inputTypeConstraint(int i) const override {
+            return i == 0 ? type : NumType::any_int;
+        }
+        void calcShape() override;
+        bool input_must_be_separate_loop(usize input) const override { return true; }
+        bool needs_input_temp_var(usize input) const override { return input == 0; }
 
         void accept(ExprVisitor& visitor) override;
     };
 
-    struct MatCyc : Expr { 
-        Axis axis;
-        usize n; 
-        
-        MatCyc(S a, usize n, Axis axis) 
-            : Expr(a->rate, {a}), n(n), axis(axis) {}
-        
-        string typeName() const override { return "MatCyc"; }
-        string str() const override { return "vec_cyc"; }
-        
-        u64 hash() const override {
-            return hash_combine(Expr::hash(), u64(n), 0xAC9641A1505788FE);
-        }
-        bool equals_(Expr const& that) const override {
-            auto& c = static_cast<MatCyc const&>(that);
-            return n == c.n;
-        }
-        bool is_reorder() const override { return true; }
-        bool gets_own_loop() const override { return true; }
-    
-        NumType initial_type() const override { return NumType::any; }
-        void update_type(ExprIdentitySet& worklist) override;
-        void calcShape()  override;
-        bool needs_input_temp_var(usize input) const override { return true; }
+    struct VecPutExpr : Expr {
+        VecPutExpr(S a, S i, S v)
+            : Expr(std::max({a->rate, i->rate, v->rate}), {a, i, v}) {}
 
-        void accept(ExprVisitor& visitor) override;
-    };
+        string typeName() const override { return "VecPutExpr"; }
+        string str() const override { return "vec_put"; }
 
-    struct VecCat : Expr {
-        Axis axis;
-    
-        MatCat(SignalRate rate, Axis axis, vector<S> exprs) 
-            : Expr(rate, exprs), axis(axis) {}
-    
-        string typeName() const override { return "VecCat"; }
-        string str() const override { return "vec_cat"; }
-        
-        u64 hash() const override { return 0x90DFF4C90B3F3DB9; }
+        u64 hash() const override { return hash_combine(Expr::hash(), 0xA432B56FB1F41C62); }
 
         bool is_reorder() const override { return true; }
         bool gets_own_loop() const override { return true; }
-    
         NumType initial_type() const override { return NumType::any; }
         void update_type(ExprIdentitySet& worklist) override;
-        void calcShape()  override;
+        NumType inputTypeConstraint(int i) const override {
+            return i == 1 ? NumType::any_int : type;
+        }
+        void calcShape() override;
         bool needs_input_temp_var(usize input) const override { return true; }
 
         void accept(ExprVisitor& visitor) override;
     };
 
-#endif
+    struct VecJoinExpr : Expr {
+        VecJoinExpr(vector<S> inputs)
+            : Expr(maxRate(inputs), inputs) {}
+
+        string typeName() const override { return "VecJoinExpr"; }
+        string str() const override { return "vec_join"; }
+
+        u64 hash() const override { return hash_combine(Expr::hash(), 0x90DFF4C90B3F3DB9); }
+
+        bool is_reorder() const override { return true; }
+        bool gets_own_loop() const override { return true; }
+        NumType initial_type() const override { return NumType::any; }
+        void update_type(ExprIdentitySet& worklist) override;
+        void calcShape() override;
+        bool needs_input_temp_var(usize input) const override { return true; }
+
+        void accept(ExprVisitor& visitor) override;
+    };
 
     struct URandExpr : Expr {
         u64 serial;

@@ -43,6 +43,11 @@ struct SExprGraphBuilder {
     std::expected<S, std::string> parseCompareOp(sexpr::ItemVec const& list);
     std::expected<S, std::string> parseCastOp(sexpr::ItemVec const& list);
     std::expected<S, std::string> parseVecReduce(sexpr::ItemVec const& list);
+    std::expected<S, std::string> parseVecIntParam(sexpr::ItemVec const& list);
+    std::expected<S, std::string> parseVecNoParam(sexpr::ItemVec const& list);
+    std::expected<S, std::string> parseVecTwoInput(sexpr::ItemVec const& list);
+    std::expected<S, std::string> parseVecThreeInput(sexpr::ItemVec const& list);
+    std::expected<S, std::string> parseVecJoin(sexpr::ItemVec const& list);
 
     // Delay operations
     std::expected<S, std::string> parseMaxDelay(sexpr::ItemVec const& list);

@@ -2923,18 +2923,49 @@ u16 CodeGen::genCall(CallExpr_* expr) {
         return dst;
     }
 
-    // Check for module-qualified call: module.func(args)
+    // Check for module-qualified or std-qualified call: module.func(args) or std.func(args)
     // The type checker sets resolvedFuncGlobalIndex for these.
     if (expr->callee->kind == ASTNode::FieldExpr && expr->resolvedFuncGlobalIndex >= 0) {
         auto* fe = static_cast<FieldExpr_*>(expr->callee.get());
         if (fe->object->kind == ASTNode::Identifier) {
             const auto& importedModules = typeChecker_.importedModules();
             auto* ident = static_cast<IdentifierExpr*>(fe->object.get());
-            if (importedModules.count(ident->name)) {
+            if (importedModules.count(ident->name) || ident->name == "std") {
+                // Look up resolved FuncInfo for argument type promotion
+                const std::vector<Type*>* paramTypes = nullptr;
+                if (ident->name == "std") {
+                    const auto& builtins = typeChecker_.builtinFunctions();
+                    auto bIt = builtins.find(fe->field);
+                    if (bIt != builtins.end()) {
+                        for (const auto& fi : bIt->second) {
+                            if ((i32)fi.globalIndex == expr->resolvedFuncGlobalIndex) {
+                                paramTypes = &fi.paramTypes;
+                                break;
+                            }
+                        }
+                    }
+                } else {
+                    auto modIt2 = importedModules.find(ident->name);
+                    if (modIt2 != importedModules.end()) {
+                        auto expIt = modIt2->second->exports.find(fe->field);
+                        if (expIt != modIt2->second->exports.end()) {
+                            for (const auto& fi : expIt->second.funcOverloads) {
+                                if ((i32)fi.globalIndex == expr->resolvedFuncGlobalIndex) {
+                                    paramTypes = &fi.paramTypes;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
                 // Generate args into consecutive registers
                 u16 argBase = nextReg_;
                 for (size_t i = 0; i < expr->args.size(); ++i) {
                     u16 argReg = genExpr(static_cast<Expr*>(expr->args[i].get()));
+                    // Promote argument type if needed (e.g. Int -> Float)
+                    if (paramTypes && i < paramTypes->size()) {
+                        argReg = ensureType(argReg, expr->args[i]->resolvedType, (*paramTypes)[i]);
+                    }
                     if (argReg != argBase + (u16)i) {
                         emitOp(op_mov);
                         emitRegs(argBase + (u16)i, argReg);
@@ -7522,9 +7553,25 @@ u16 CodeGen::genAutoMapIndexIdxList(IndexExpr_* expr) {
 }
 
 u16 CodeGen::genFieldExpr(FieldExpr_* expr) {
-    // Check for module-qualified access: module.name -> load global directly
+    // Check for module-qualified or std-qualified access: module.name or std.name -> load global directly
     if (expr->object->kind == ASTNode::Identifier) {
         auto* ident = static_cast<IdentifierExpr*>(expr->object.get());
+
+        // Handle std.name — load built-in function's global
+        if (ident->name == "std") {
+            const auto& builtins = typeChecker_.builtinFunctions();
+            auto builtIt = builtins.find(expr->field);
+            if (builtIt != builtins.end() && !builtIt->second.empty()) {
+                u16 dst = allocReg();
+                emitOp(op_load_global);
+                emitRegs(dst);
+                emitInt(builtIt->second[0].globalIndex);
+                return dst;
+            }
+            error(expr->loc, "No built-in named '" + expr->field + "'");
+            return allocReg();
+        }
+
         const auto& importedModules = typeChecker_.importedModules();
         auto modIt = importedModules.find(ident->name);
         if (modIt != importedModules.end()) {

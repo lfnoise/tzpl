@@ -329,7 +329,7 @@ enum VecOp {
 	rotate,
 	reverse,
 	transpose Int,
-	permute,
+	join,
 	reduce(BinaryOp, Chans),
 	sum Int,
 	prod Int,
@@ -700,26 +700,32 @@ fn put(a S, i, v) S {
 fn matmul(a S, b S) S {
     SignalExprKind.vecop(VecOp.put) _newSignalExpr([a, b])
 }
-fn take(a S, n Int) S {
-    SignalExprKind.vecop(VecOp.take(n)) _newSignalExpr([a])
+fn take(a S, n Chans) S {
+    SignalExprKind.vecop(VecOp.take(n asChans)) _newSignalExpr([a])
 }
-fn drop(a S, n Int) S {
+fn drop(a S, n Chans) S {
     SignalExprKind.vecop(VecOp.drop(n)) _newSignalExpr([a])
 }
-fn stride(a S, n Int) S {
-    SignalExprKind.vecop(VecOp.stride(n)) _newSignalExpr([a])
+fn stride(a S, n Chans) S {
+    SignalExprKind.vecop(VecOp.stride(n asChans)) _newSignalExpr([a])
 }
-fn stutter(a S, n Int) S {
-    SignalExprKind.vecop(VecOp.stutter(n)) _newSignalExpr([a])
+fn stutter(a S, n Chans) S {
+    SignalExprKind.vecop(VecOp.stutter(n asChans)) _newSignalExpr([a])
 }
 fn ncyc(a S, n Int) S {
-    SignalExprKind.vecop(VecOp.ncyc(n)) _newSignalExpr([a])
+    SignalExprKind.vecop(VecOp.ncyc(n asChans)) _newSignalExpr([a])
 }
-fn rotate(a AsSignal, b  AsSignal) S {
+fn rotate(a AsSignal, b AsSignal) S {
     SignalExprKind.vecop(VecOp.rotate) _newSignalExpr([a asSignal, b asSignal])
 }
 fn reverse(a S) S {
     SignalExprKind.vecop(VecOp.reverse) _newSignalExpr([a])
+}
+fn transpose(a S, n Chans) S {
+    SignalExprKind.vecop(VecOp.transpose(n asChans)) _newSignalExpr([a])
+}
+fn join(a [S]) S {
+    SignalExprKind.vecop(VecOp.join) _newSignalExpr(a)
 }
 fn reduce(a S, op BinaryOp, chans Chans = 1) S {
     SignalExprKind.vecop(VecOp.reduce(op, chans asChans)) _newSignalExpr([a])
@@ -864,7 +870,7 @@ fn idsToLisp(o [S]) String = o.id separatedString parens;
 fn numbersToLisp(o [Int]) String = o separatedString parens;
 
 fn toLisp(o ControlSpec) String {
-    "(ControlSpec %^ %^ %^ %^)" fmt(o.lo, o.hi, o.init, o.warp)
+    "(ControlSpec %^ %^ %^ %^)" fmt(o.lo, o.hi, o.init, o.warp ordinal)
 }
 
 fn numTypeInt(op CastOp) Int {
@@ -914,7 +920,7 @@ fn toLisp(o S) String {
            	rotate : "(%^ VecRotate %^)" fmt(o.id, o inputsToLisp);
            	reverse : "(%^ VecReverse %^)" fmt(o.id, o inputsToLisp);
            	transpose(n) : "(%^ VecTranspose %^ %^)" fmt(o.id, n, o inputsToLisp);
-           	permute : "(%^ VecAt %^)" fmt(o.id, o inputsToLisp);
+           	join : "(%^ VecJoin %^)" fmt(o.id, o inputsToLisp);
            	reduce(op, chans) : "(%^ VecReduce %^ %^ %^)"
                 fmt(o.id, op tag toString, chans asChans, o inputsToLisp);
            	sum(chans) : "(%^ VecSum %^ %^)" fmt(o.id, chans asChans, o inputsToLisp);

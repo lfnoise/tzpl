@@ -401,6 +401,111 @@ std::expected<S, std::string> SExprGraphBuilder::parseVecReduce(sexpr::ItemVec c
     return expr;
 }
 
+// Vec ops with an integer parameter: (id Type n (input_ids))
+std::expected<S, std::string> SExprGraphBuilder::parseVecIntParam(sexpr::ItemVec const& list) {
+    if (list.size() < 4) return std::unexpected("VecOp requires 4 elements");
+    if (!list[0].is<int64_t>()) return std::unexpected("ID must be integer");
+    int64_t id = list[0].get<int64_t>();
+
+    auto& typeSym = list[1].get<sexpr::Symbol>();
+    std::string const& type = typeSym.name;
+
+    if (!list[2].is<int64_t>()) return std::unexpected("N must be integer");
+    int64_t n = list[2].get<int64_t>();
+
+    if (!list[3].is<sexpr::ItemVec>()) return std::unexpected("Inputs must be a list");
+    auto inputsResult = resolveInputs(list[3].get<sexpr::ItemVec>());
+    if (!inputsResult) return std::unexpected(inputsResult.error());
+    if (inputsResult->size() != 1) return std::unexpected("VecOp requires exactly 1 input");
+
+    S expr;
+    if (type == "VecTake")           expr = vec_take((*inputsResult)[0], n);
+    else if (type == "VecDrop")      expr = vec_drop((*inputsResult)[0], n);
+    else if (type == "VecStride")    expr = vec_stride((*inputsResult)[0], n);
+    else if (type == "VecStutter")   expr = vec_stutter((*inputsResult)[0], n);
+    else if (type == "VecNCyc")      expr = vec_ncyc((*inputsResult)[0], n);
+    else if (type == "VecTranspose") expr = vec_transpose((*inputsResult)[0], n);
+    else if (type == "VecSum")       expr = sum((*inputsResult)[0], n);
+    else if (type == "VecProd")      expr = product((*inputsResult)[0], n);
+    else if (type == "VecMin")       expr = synthdef::min((*inputsResult)[0], n);
+    else if (type == "VecMax")       expr = synthdef::max((*inputsResult)[0], n);
+    else return std::unexpected(std::format("Unknown VecOp type: {}", type));
+
+    exprMap[id] = expr;
+    return expr;
+}
+
+// Vec ops with no parameter: (id Type (input_ids))
+std::expected<S, std::string> SExprGraphBuilder::parseVecNoParam(sexpr::ItemVec const& list) {
+    if (list.size() < 3) return std::unexpected("VecOp requires 3 elements");
+    if (!list[0].is<int64_t>()) return std::unexpected("ID must be integer");
+    int64_t id = list[0].get<int64_t>();
+
+    if (!list[2].is<sexpr::ItemVec>()) return std::unexpected("Inputs must be a list");
+    auto inputsResult = resolveInputs(list[2].get<sexpr::ItemVec>());
+    if (!inputsResult) return std::unexpected(inputsResult.error());
+    if (inputsResult->size() != 1) return std::unexpected("VecReverse requires exactly 1 input");
+
+    S expr = vec_reverse((*inputsResult)[0]);
+    exprMap[id] = expr;
+    return expr;
+}
+
+// Vec ops with 2 inputs: (id Type (input_ids)) -- at, rotate
+std::expected<S, std::string> SExprGraphBuilder::parseVecTwoInput(sexpr::ItemVec const& list) {
+    if (list.size() < 3) return std::unexpected("VecOp requires 3 elements");
+    if (!list[0].is<int64_t>()) return std::unexpected("ID must be integer");
+    int64_t id = list[0].get<int64_t>();
+
+    auto& typeSym = list[1].get<sexpr::Symbol>();
+    std::string const& type = typeSym.name;
+
+    if (!list[2].is<sexpr::ItemVec>()) return std::unexpected("Inputs must be a list");
+    auto inputsResult = resolveInputs(list[2].get<sexpr::ItemVec>());
+    if (!inputsResult) return std::unexpected(inputsResult.error());
+    if (inputsResult->size() != 2) return std::unexpected("VecOp requires exactly 2 inputs");
+
+    S expr;
+    if (type == "VecAt")           expr = vec_at((*inputsResult)[0], (*inputsResult)[1]);
+    else if (type == "VecRotate")  expr = vec_rotate((*inputsResult)[0], (*inputsResult)[1]);
+    else return std::unexpected(std::format("Unknown VecOp type: {}", type));
+
+    exprMap[id] = expr;
+    return expr;
+}
+
+// Vec ops with 3 inputs: (id VecPut (input_ids))
+std::expected<S, std::string> SExprGraphBuilder::parseVecThreeInput(sexpr::ItemVec const& list) {
+    if (list.size() < 3) return std::unexpected("VecPut requires 3 elements");
+    if (!list[0].is<int64_t>()) return std::unexpected("ID must be integer");
+    int64_t id = list[0].get<int64_t>();
+
+    if (!list[2].is<sexpr::ItemVec>()) return std::unexpected("Inputs must be a list");
+    auto inputsResult = resolveInputs(list[2].get<sexpr::ItemVec>());
+    if (!inputsResult) return std::unexpected(inputsResult.error());
+    if (inputsResult->size() != 3) return std::unexpected("VecPut requires exactly 3 inputs");
+
+    S expr = vec_put((*inputsResult)[0], (*inputsResult)[1], (*inputsResult)[2]);
+    exprMap[id] = expr;
+    return expr;
+}
+
+// VecJoin with N inputs: (id VecJoin (input_ids))
+std::expected<S, std::string> SExprGraphBuilder::parseVecJoin(sexpr::ItemVec const& list) {
+    if (list.size() < 3) return std::unexpected("VecJoin requires 3 elements");
+    if (!list[0].is<int64_t>()) return std::unexpected("ID must be integer");
+    int64_t id = list[0].get<int64_t>();
+
+    if (!list[2].is<sexpr::ItemVec>()) return std::unexpected("Inputs must be a list");
+    auto inputsResult = resolveInputs(list[2].get<sexpr::ItemVec>());
+    if (!inputsResult) return std::unexpected(inputsResult.error());
+    if (inputsResult->size() < 1) return std::unexpected("VecJoin requires at least 1 input");
+
+    S expr = vec_join(*inputsResult);
+    exprMap[id] = expr;
+    return expr;
+}
+
 // Delay operations
 std::expected<S, std::string> SExprGraphBuilder::parseMaxDelay(sexpr::ItemVec const& list) {
     // Format: (id MaxDelay delayVarId (input_ids))
@@ -754,6 +859,14 @@ std::expected<S, std::string> SExprGraphBuilder::parseExpr(sexpr::Item const& it
     else if (type == "CompareOp") return parseCompareOp(list);
     else if (type == "CastOp") return parseCastOp(list);
     else if (type == "VecReduce") return parseVecReduce(list);
+    else if (type == "VecTake" || type == "VecDrop" || type == "VecStride"
+          || type == "VecStutter" || type == "VecNCyc" || type == "VecTranspose"
+          || type == "VecSum" || type == "VecProd" || type == "VecMin" || type == "VecMax")
+        return parseVecIntParam(list);
+    else if (type == "VecReverse") return parseVecNoParam(list);
+    else if (type == "VecAt" || type == "VecRotate") return parseVecTwoInput(list);
+    else if (type == "VecPut") return parseVecThreeInput(list);
+    else if (type == "VecJoin") return parseVecJoin(list);
     else if (type == "MaxDelay") return parseMaxDelay(list);
     else if (type == "DelayInit") return parseDelayInit(list);
     else if (type == "DelayFixRead") return parseDelayFixRead(list);

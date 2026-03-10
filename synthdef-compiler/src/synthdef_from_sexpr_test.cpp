@@ -190,6 +190,142 @@ void test_sexpr_if_expr() {
     }
 }
 
+void test_sexpr_vec_ops() {
+    std::println("\n=== Testing vector operations ===");
+
+    // Test VecTake: take first 2 of 4-channel signal
+    {
+        std::string sexprText = R"(
+            ((0 Constant 4 12 (1.0 2.0 3.0 4.0))
+             (1 VecTake 2 (0))
+             (2 Outlet "out" 1))
+        )";
+        auto result = synthFromSExprText(sexprText, "test_vec_take");
+        assert(result.has_value());
+        PushSynth ps(result.value());
+        result.value()->graphAnalysis();
+        std::println("  VecTake: OK");
+    }
+
+    // Test VecDrop: drop first 2 of 4-channel signal
+    {
+        std::string sexprText = R"(
+            ((0 Constant 4 12 (1.0 2.0 3.0 4.0))
+             (1 VecDrop 2 (0))
+             (2 Outlet "out" 1))
+        )";
+        auto result = synthFromSExprText(sexprText, "test_vec_drop");
+        assert(result.has_value());
+        PushSynth ps(result.value());
+        result.value()->graphAnalysis();
+        std::println("  VecDrop: OK");
+    }
+
+    // Test VecReverse
+    {
+        std::string sexprText = R"(
+            ((0 Constant 4 12 (1.0 2.0 3.0 4.0))
+             (1 VecReverse (0))
+             (2 Outlet "out" 1))
+        )";
+        auto result = synthFromSExprText(sexprText, "test_vec_reverse");
+        assert(result.has_value());
+        PushSynth ps(result.value());
+        result.value()->graphAnalysis();
+        std::println("  VecReverse: OK");
+    }
+
+    // Test VecStride
+    {
+        std::string sexprText = R"(
+            ((0 Constant 4 12 (1.0 2.0 3.0 4.0))
+             (1 VecStride 2 (0))
+             (2 Outlet "out" 1))
+        )";
+        auto result = synthFromSExprText(sexprText, "test_vec_stride");
+        assert(result.has_value());
+        PushSynth ps(result.value());
+        result.value()->graphAnalysis();
+        std::println("  VecStride: OK");
+    }
+
+    // Test VecStutter
+    {
+        std::string sexprText = R"(
+            ((0 Constant 2 12 (1.0 2.0))
+             (1 VecStutter 2 (0))
+             (2 Outlet "out" 1))
+        )";
+        auto result = synthFromSExprText(sexprText, "test_vec_stutter");
+        assert(result.has_value());
+        PushSynth ps(result.value());
+        result.value()->graphAnalysis();
+        std::println("  VecStutter: OK");
+    }
+
+    // Test VecNCyc
+    {
+        std::string sexprText = R"(
+            ((0 Constant 2 12 (1.0 2.0))
+             (1 VecNCyc 3 (0))
+             (2 Outlet "out" 1))
+        )";
+        auto result = synthFromSExprText(sexprText, "test_vec_ncyc");
+        assert(result.has_value());
+        PushSynth ps(result.value());
+        result.value()->graphAnalysis();
+        std::println("  VecNCyc: OK");
+    }
+
+    // Test VecTranspose: 2x2 transpose
+    {
+        std::string sexprText = R"(
+            ((0 Constant 4 12 (1.0 2.0 3.0 4.0))
+             (1 VecTranspose 2 (0))
+             (2 Outlet "out" 1))
+        )";
+        auto result = synthFromSExprText(sexprText, "test_vec_transpose");
+        assert(result.has_value());
+        PushSynth ps(result.value());
+        result.value()->graphAnalysis();
+        std::println("  VecTranspose: OK");
+    }
+
+    // Test VecJoin
+    {
+        std::string sexprText = R"(
+            ((0 Constant 2 12 (1.0 2.0))
+             (1 Constant 2 12 (3.0 4.0))
+             (2 VecJoin (0 1))
+             (3 Outlet "out" 2))
+        )";
+        auto result = synthFromSExprText(sexprText, "test_vec_join");
+        assert(result.has_value());
+        PushSynth ps(result.value());
+        result.value()->graphAnalysis();
+        assert(result.value()->exprs[2]->chans == 4); // 2+2 = 4, already power of two
+        std::println("  VecJoin: OK");
+    }
+
+    // Test VecJoin with non-power-of-two total (rounds up, zero-fills padding)
+    {
+        std::string sexprText = R"(
+            ((0 Constant 2 12 (1.0 2.0))
+             (1 Constant 1 12 (3.0))
+             (2 VecJoin (0 1))
+             (3 Outlet "out" 2))
+        )";
+        auto result = synthFromSExprText(sexprText, "test_vec_join_pad");
+        assert(result.has_value());
+        PushSynth ps(result.value());
+        result.value()->graphAnalysis();
+        assert(result.value()->exprs[2]->chans == 4); // 2+1 = 3, rounds up to 4
+        std::println("  VecJoin (non-pow2 padding): OK");
+    }
+
+    std::println("  All vector operation tests passed!");
+}
+
 void test_sexpr_integration() {
     test_sexpr_simple();
     test_sexpr_binary_op();
@@ -197,6 +333,7 @@ void test_sexpr_integration() {
     test_sexpr_synth_wrapper();
     test_sexpr_if_expr();
     test_sexpr_from_file();
+    test_sexpr_vec_ops();
 
     std::println("\n=== S-Expression Integration Tests Complete ===");
 }

@@ -197,22 +197,17 @@ namespace synthdef {
     S min(S a, usize cols = 1);
     S max(S a, usize cols = 1);
     
-#if 0
-    S scan(S a, BinaryOp op, usize cols = 1);
-#endif
-    
-//    S take(S a, usize n);
-//    S skip(S a, usize n);
-//    S stride(S a, usize n);
-//    S stutter(S a, usize n);
-//    S cyc(S a, usize n);
-//    S reverse(S a);
-//    S rotate(S a, S n);
-//    S transpose(S a, usize rows);
-//    S permute(S a, S i);
-//    
-//    S cat(vector<S> inputs);
-//    S lace(vector<S> inputs);
+    S vec_take(S a, usize n);
+    S vec_drop(S a, usize n);
+    S vec_stride(S a, usize n);
+    S vec_stutter(S a, usize n);
+    S vec_ncyc(S a, usize n);
+    S vec_reverse(S a);
+    S vec_transpose(S a, usize n);
+    S vec_rotate(S a, S n);
+    S vec_at(S a, S i);
+    S vec_put(S a, S i, S v);
+    S vec_join(vector<S> inputs);
     
     // Helper type trait to determine if any type in a pack is floating-point
     template<typename... Ts>

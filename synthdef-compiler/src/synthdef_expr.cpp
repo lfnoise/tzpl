@@ -32,7 +32,7 @@ namespace synthdef {
 
     NoteParam::NoteParam(ControlSpec spec, NumType itype, usize ichans, string name)
         : Expr(audioSignalRate, {}),
-        spec(spec), serial(nextNoteParamSerialNo()), name(name)
+        spec(spec), serial(name == "gate" ? 0 : nextNoteParamSerialNo()), name(name)
     {
         type = itype;
         chans = ichans;
@@ -160,16 +160,17 @@ namespace synthdef {
     S min(S a, usize cols) { return reduce(a, BinaryOp::Min, cols); }
     S max(S a, usize cols) { return reduce(a, BinaryOp::Max, cols); }
 
-#if 0
-    S scan(S a, BinaryOp op, usize rows) {
-        Constant const* ca = a.as<Constant>();
-        if (ca) { 
-            return addConstantExpr(scan(ca, rows, op));
-        } else {
-            return addExpr(new ScanExpr{op, rows, a});
-        }
-    }
-#endif
+    S vec_take(S a, usize n) { return addExpr(new VecTakeExpr{a, asChans(n)}); }
+    S vec_drop(S a, usize n) { return addExpr(new VecDropExpr{a, n}); }
+    S vec_stride(S a, usize n) { return addExpr(new VecStrideExpr{a, asChans(n)}); }
+    S vec_stutter(S a, usize n) { return addExpr(new VecStutterExpr{a, asChans(n)}); }
+    S vec_ncyc(S a, usize n) { return addExpr(new VecNCycExpr{a, asChans(n)}); }
+    S vec_reverse(S a) { return addExpr(new VecReverseExpr{a}); }
+    S vec_transpose(S a, usize n) { return addExpr(new VecTransposeExpr{a, n}); }
+    S vec_rotate(S a, S n) { return addExpr(new VecRotateExpr{a, n}); }
+    S vec_at(S a, S i) { return addExpr(new VecAtExpr{a, i}); }
+    S vec_put(S a, S i, S v) { return addExpr(new VecPutExpr{a, i, v}); }
+    S vec_join(vector<S> inputs) { return addExpr(new VecJoinExpr{std::move(inputs)}); }
 
     S cast_op(S a, NumType type) {
         Constant const* ca = a.as<Constant>();
@@ -364,144 +365,40 @@ namespace synthdef {
         }
     }
 
-#if 0    
-    void MatAt::update_type(ExprIdentitySet& worklist) {
-        auto new_type = type & in0()->type;
-        checkType(new_type);
-        if (new_type != type) {
-            type = new_type;
-            propagate_types(worklist);
-        }
+    // -- Vec* update_type --
+
+    #define VEC_UPDATE_TYPE_1INPUT(T) \
+    void T::update_type(ExprIdentitySet& worklist) { \
+        auto new_type = type & in0()->type; \
+        checkType(new_type); \
+        if (new_type != type) { type = new_type; propagate_types(worklist); } \
     }
-    void MatPut::update_type(ExprIdentitySet& worklist) {
-        auto new_type = type & in0()->type;
+
+    VEC_UPDATE_TYPE_1INPUT(VecTakeExpr)
+    VEC_UPDATE_TYPE_1INPUT(VecDropExpr)
+    VEC_UPDATE_TYPE_1INPUT(VecStrideExpr)
+    VEC_UPDATE_TYPE_1INPUT(VecStutterExpr)
+    VEC_UPDATE_TYPE_1INPUT(VecNCycExpr)
+    VEC_UPDATE_TYPE_1INPUT(VecReverseExpr)
+    VEC_UPDATE_TYPE_1INPUT(VecTransposeExpr)
+    VEC_UPDATE_TYPE_1INPUT(VecRotateExpr)
+    VEC_UPDATE_TYPE_1INPUT(VecAtExpr)
+
+    #undef VEC_UPDATE_TYPE_1INPUT
+
+    void VecPutExpr::update_type(ExprIdentitySet& worklist) {
+        auto new_type = type & in0()->type & in2()->type;
         checkType(new_type);
-        if (new_type != type) {
-            type = new_type;
-            propagate_types(worklist);
-        }
+        if (new_type != type) { type = new_type; propagate_types(worklist); }
     }
-    void MatPermute::update_type(ExprIdentitySet& worklist) {
-        auto new_type = type & in0()->type;
-        checkType(new_type);
-        if (new_type != type) {
-            type = new_type;
-            propagate_types(worklist);
-        }
-    }
-    void MatTake::update_type(ExprIdentitySet& worklist) {
-        auto new_type = type & in0()->type;
-        checkType(new_type);
-        if (new_type != type) {
-            type = new_type;
-            propagate_types(worklist);
-        }
-    }
-    void MatSkip::update_type(ExprIdentitySet& worklist) {
-        auto new_type = type & in0()->type;
-        checkType(new_type);
-        if (new_type != type) {
-            type = new_type;
-            propagate_types(worklist);
-        }
-    }
-    void MatStride::update_type(ExprIdentitySet& worklist) {
-        auto new_type = type & in0()->type;
-        checkType(new_type);
-        if (new_type != type) {
-            type = new_type;
-            propagate_types(worklist);
-        }
-    }
-    void MatStutter::update_type(ExprIdentitySet& worklist) {
-        auto new_type = type & in0()->type;
-        checkType(new_type);
-        if (new_type != type) {
-            type = new_type;
-            propagate_types(worklist);
-        }
-    }
-    void MatCyc::update_type(ExprIdentitySet& worklist) {
-        auto new_type = type & in0()->type;
-        checkType(new_type);
-        if (new_type != type) {
-            type = new_type;
-            propagate_types(worklist);
-        }
-    }
-    void MatReverse::update_type(ExprIdentitySet& worklist) {
-        auto new_type = type & in0()->type;
-        checkType(new_type);
-        if (new_type != type) {
-            type = new_type;
-            propagate_types(worklist);
-        }
-    }
-    void MatRotate::update_type(ExprIdentitySet& worklist) {
-        auto new_type = type & in0()->type;
-        checkType(new_type);
-        if (new_type != type) {
-            type = new_type;
-            propagate_types(worklist);
-        }
-    }
-    void MatShift::update_type(ExprIdentitySet& worklist) {
-        auto new_type = type & in0()->type & in1()->type;
-        checkType(new_type);
-        if (new_type != type) {
-            type = new_type;
-            propagate_types(worklist);
-        }
-    }
-    void MatTranspose::update_type(ExprIdentitySet& worklist) {
-        auto new_type = type & in0()->type;
-        checkType(new_type);
-        if (new_type != type) {
-            type = new_type;
-            propagate_types(worklist);
-        }
-    }
-    void MatLace::update_type(ExprIdentitySet& worklist) {
+    void VecJoinExpr::update_type(ExprIdentitySet& worklist) {
         auto new_type = type;
-        checkType(new_type);
         for (S in : inputs) {
             new_type = new_type & in->type;
         }
-        if (new_type != type) {
-            type = new_type;
-            propagate_types(worklist);
-        }
-    }
-    void MatCat::update_type(ExprIdentitySet& worklist) {
-        auto new_type = type;
         checkType(new_type);
-        for (S in : inputs) {
-            new_type = new_type & in->type;
-        }
-        if (new_type != type) {
-            type = new_type;
-            propagate_types(worklist);
-        }
+        if (new_type != type) { type = new_type; propagate_types(worklist); }
     }
-    
-    void MatReshape::update_type(ExprIdentitySet& worklist) {
-        auto new_type = type & in0()->type;
-        checkType(new_type);
-        if (new_type != type) {
-            type = new_type;
-            propagate_types(worklist);
-        }
-    }
-    
-    void ScanExpr::update_type(ExprIdentitySet& worklist) {
-        auto new_type = type & in0()->type;
-        checkType(new_type);
-        if (type != new_type) {
-            type = new_type;
-            propagate_types(worklist);
-        }
-    }
-#endif
     void ReduceExpr::update_type(ExprIdentitySet& worklist) {
         auto new_type = type & in0()->type;
         checkType(new_type);
@@ -620,65 +517,30 @@ namespace synthdef {
         chans = in0()->chans;
     }
     
-#if 0
-    void MatAt::calcShape()  {
-        chans = in1()->chans;
-    }
-    void MatPut::calcShape()  {
-        chans = broadcast(in1()->chans, in2()->chans);
-    }
-    void MatPermute::calcShape()  {
-        chans = in1()->chans;
-    }
-    void MatTake::calcShape()  {
-        chans = n * rows;
-    }
-    void MatSkip::calcShape()  {
-        shape = in0()->shape.skip(n, axis);
-    }
-    void MatStride::calcShape()  {
-        shape = in0()->shape.stride(n, axis);
-    }
-    void MatStutter::calcShape()  {
-        shape = in0()->shape.scale(n, axis);
-    }
-    void MatCyc::calcShape()  {
-        shape = in0()->shape.scale(n, axis);
-    }
-    void MatReverse::calcShape()  {
-        chans = in0()->chans;
-    }
-    void MatRotate::calcShape()  {
-        chans = in0()->chans;
-    }
-    void MatShift::calcShape()  {
-        chans = in0()->chans;
-    }
-    void MatTranspose::calcShape()  {
-        shape = in0()->shape.transpose();
-    }
-    void MatLace::calcShape()  {
-        try {
-            for (S in : inputs) {
-                shape = shape.broadcast(in->shape);
-            }
-            shape.scale(inputs.size(), axis);
-        } catch (std::runtime_error const& e) {
-            throw std::runtime_error(std::format("lace: incompatible shapes. {}", e.what()));
-        }
-    }
-    void MatCat::calcShape()  {
-        try {
-            chans = in0()->chans;
-            for (S in : inputs | stdv::drop(1)) {
-                shape = shape.cat(in->shape, axis);
-            }
-        } catch (std::runtime_error const& e) {
-            throw std::runtime_error(std::format("vec: incompatible shapes. {}", e.what()));
-        }
-    }
+    // -- Vec* calcShape --
 
-#endif
+    void VecTakeExpr::calcShape()     { chans = n; }
+    void VecDropExpr::calcShape()     {
+        chans = in0()->chans - n;
+        if (!std::has_single_bit(chans)) {
+            throw std::runtime_error(FMT("vec_drop({}): result has {} channels, which is not a power of two", n, chans));
+        }
+    }
+    void VecStrideExpr::calcShape()   { chans = (in0()->chans + n - 1) / n; }
+    void VecStutterExpr::calcShape()  { chans = in0()->chans * n; }
+    void VecNCycExpr::calcShape()     { chans = in0()->chans * n; }
+    void VecReverseExpr::calcShape()  { chans = in0()->chans; }
+    void VecTransposeExpr::calcShape(){ chans = in0()->chans; } // total size unchanged
+    void VecRotateExpr::calcShape()   { chans = in0()->chans; }
+    void VecAtExpr::calcShape()       { chans = in1()->chans; }
+    void VecPutExpr::calcShape()      { chans = in0()->chans; }
+    void VecJoinExpr::calcShape() {
+        usize raw = 0;
+        for (S in : inputs) {
+            raw += in->chans;
+        }
+        chans = asChans(raw);
+    }
 
     void SelectExpr::calcShape() {
         try {
