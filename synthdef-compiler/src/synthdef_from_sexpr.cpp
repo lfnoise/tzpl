@@ -717,16 +717,130 @@ std::expected<S, std::string> SExprGraphBuilder::parseIfExpr(sexpr::ItemVec cons
     return expr;
 }
 
+std::expected<S, std::string> SExprGraphBuilder::parseVarExpr(sexpr::ItemVec const& list) {
+    // Format: (id VarExpr "varName")
+    if (list.size() < 3) {
+        return std::unexpected("VarExpr requires at least 3 elements");
+    }
+
+    if (!list[0].is<int64_t>()) return std::unexpected("ID must be integer");
+    int64_t id = list[0].get<int64_t>();
+
+    if (!list[2].is<std::string>()) return std::unexpected("VarExpr name must be a string");
+    std::string varName = list[2].get<std::string>();
+
+    S expr = addExpr(new VarExpr(varName, NumType::any_int));
+    exprMap[id] = expr;
+    return expr;
+}
+
 std::expected<S, std::string> SExprGraphBuilder::parseSwitchExpr(sexpr::ItemVec const& list) {
-    // Format: (id SwitchExpr (input_ids) (caseGraphIds))
-    // TODO: Need to handle subgraph construction properly
-    return std::unexpected("SwitchExpr parsing not yet implemented - requires subgraph handling");
+    // Format: (id SwitchExpr (input_ids) (Graph ...) (Graph ...) ...)
+    if (list.size() < 5) {
+        return std::unexpected("SwitchExpr requires at least 5 elements (id, type, inputs, case1, case2)");
+    }
+
+    if (!list[0].is<int64_t>()) return std::unexpected("ID must be integer");
+    int64_t id = list[0].get<int64_t>();
+
+    if (!list[2].is<sexpr::ItemVec>()) return std::unexpected("Inputs must be a list");
+    auto inputsResult = resolveInputs(list[2].get<sexpr::ItemVec>());
+    if (!inputsResult) return std::unexpected(inputsResult.error());
+    if (inputsResult->size() != 1) return std::unexpected("SwitchExpr requires exactly 1 selector input");
+    S test = (*inputsResult)[0];
+
+    // Parse case subgraphs (from index 3 onwards)
+    std::vector<S> cases;
+    for (size_t i = 3; i < list.size(); ++i) {
+        if (!list[i].is<sexpr::ItemVec>()) return std::unexpected("Each case must be a Graph list");
+        auto caseResult = parseGraph(list[i].get<sexpr::ItemVec>());
+        if (!caseResult) return std::unexpected(std::format("case {}: {}", i-3, caseResult.error()));
+        cases.push_back(*caseResult);
+    }
+
+    if (cases.size() < 2) return std::unexpected("SwitchExpr requires at least 2 cases");
+
+    S expr = addExpr(new SwitchExpr(test, cases));
+    exprMap[id] = expr;
+    return expr;
 }
 
 std::expected<S, std::string> SExprGraphBuilder::parseForExpr(sexpr::ItemVec const& list) {
-    // Format: (id ForExpr (input_ids) bodyGraphId)
-    // TODO: Need to handle subgraph construction properly
-    return std::unexpected("ForExpr parsing not yet implemented - requires subgraph handling");
+    // Format: (id ForExpr (input_ids) (Graph root-id (exprs...)))
+    // The body graph should contain a VarExpr for the loop variable "i"
+    if (list.size() < 4) {
+        return std::unexpected("ForExpr requires 4 elements (id, type, inputs, body-graph)");
+    }
+
+    if (!list[0].is<int64_t>()) return std::unexpected("ID must be integer");
+    int64_t id = list[0].get<int64_t>();
+
+    if (!list[2].is<sexpr::ItemVec>()) return std::unexpected("Inputs must be a list");
+    auto inputsResult = resolveInputs(list[2].get<sexpr::ItemVec>());
+    if (!inputsResult) return std::unexpected(inputsResult.error());
+    if (inputsResult->size() != 1) return std::unexpected("ForExpr requires exactly 1 count input");
+    S count = (*inputsResult)[0];
+
+    // Parse body subgraph
+    if (!list[3].is<sexpr::ItemVec>()) return std::unexpected("Body must be a Graph list");
+    // The ForLoopExpr body subgraph is parsed via parseGraph which creates
+    // a new Graph context and wraps the root in a PhiNodeExpr.
+    // The body may contain a VarExpr node representing the loop variable "i".
+    auto bodyResult = parseGraph(list[3].get<sexpr::ItemVec>());
+    if (!bodyResult) return std::unexpected("body: " + bodyResult.error());
+
+    S expr = addExpr(new ForLoopExpr(count, *bodyResult));
+    exprMap[id] = expr;
+    return expr;
+}
+
+std::expected<S, std::string> SExprGraphBuilder::parseSpectralFrameInput(sexpr::ItemVec const& list) {
+    // Format: (id SpectralFrameInput fftSize)
+    if (list.size() < 3) return std::unexpected("SpectralFrameInput requires 3 elements");
+    if (!list[0].is<int64_t>()) return std::unexpected("ID must be integer");
+    int64_t id = list[0].get<int64_t>();
+
+    if (!list[2].is<int64_t>()) return std::unexpected("fftSize must be integer");
+    int fftSize = (int)list[2].get<int64_t>();
+
+    S expr = addExpr(new SpectralFrameInput(fftSize));
+    exprMap[id] = expr;
+    return expr;
+}
+
+std::expected<S, std::string> SExprGraphBuilder::parseSpectralChainExpr(sexpr::ItemVec const& list) {
+    // Format: (id SpectralChainExpr (input_ids) fftSize hopSize (Graph ...))
+    if (list.size() < 6) return std::unexpected("SpectralChainExpr requires 6 elements");
+
+    if (!list[0].is<int64_t>()) return std::unexpected("ID must be integer");
+    int64_t id = list[0].get<int64_t>();
+
+    if (!list[2].is<sexpr::ItemVec>()) return std::unexpected("Inputs must be a list");
+    auto inputsResult = resolveInputs(list[2].get<sexpr::ItemVec>());
+    if (!inputsResult) return std::unexpected(inputsResult.error());
+    if (inputsResult->size() != 1) return std::unexpected("SpectralChainExpr requires exactly 1 input");
+    S input = (*inputsResult)[0];
+
+    if (!list[3].is<int64_t>()) return std::unexpected("fftSize must be integer");
+    int fftSize = (int)list[3].get<int64_t>();
+
+    if (!list[4].is<int64_t>()) return std::unexpected("hopSize must be integer");
+    int hopSize = (int)list[4].get<int64_t>();
+
+    if (!list[5].is<sexpr::ItemVec>()) return std::unexpected("Body must be a Graph list");
+    auto bodyResult = parseGraph(list[5].get<sexpr::ItemVec>());
+    if (!bodyResult) return std::unexpected("body: " + bodyResult.error());
+
+    S expr = addExpr(new SpectralChainExpr(input, fftSize, hopSize, *bodyResult));
+    // Find the SpectralFrameInput in the body graph and set chainSerial
+    for (auto& [fid, fexpr] : exprMap) {
+        if (auto sfi = fexpr.as<SpectralFrameInput>(); sfi && sfi->chainSerial == 0) {
+            sfi->chainSerial = expr->userial;
+            sfi->chans = input->chans * fftSize;
+        }
+    }
+    exprMap[id] = expr;
+    return expr;
 }
 
 static std::expected<ControlSpec, std::string> parseControlSpec(sexpr::ItemVec const& specList) {
@@ -876,6 +990,9 @@ std::expected<S, std::string> SExprGraphBuilder::parseExpr(sexpr::Item const& it
     else if (type == "IfExpr") return parseIfExpr(list);
     else if (type == "SwitchExpr") return parseSwitchExpr(list);
     else if (type == "ForExpr") return parseForExpr(list);
+    else if (type == "VarExpr") return parseVarExpr(list);
+    else if (type == "SpectralFrameInput") return parseSpectralFrameInput(list);
+    else if (type == "SpectralChainExpr") return parseSpectralChainExpr(list);
     else if (type == "NoteParam") return parseNoteParam(list);
     else if (type == "Voicer") return parseVoicerExpr(list);
     else {

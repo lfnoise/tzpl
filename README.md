@@ -4,7 +4,7 @@ A cross-platform live coding platform for creating live music performances, comb
 
 ## Sub-Projects
 
-### Language X (`static-lang-3/`)
+### Language X (`lang/`)
 
 A statically typed, real-time safe interpreted language designed for audio and signal processing. Features include:
 
@@ -30,7 +30,7 @@ An audio signal flow graph compiler that takes graph descriptions and compiles t
 - C++ code generation targeting the `jscs_plugin_abi` interface
 - Full pipeline: parse → analyze → codegen → clang compile → link → dlopen
 
-### Audio Engine (`audio-engine/`)
+### Audio Engine (`engine/`)
 
 A real-time audio engine that loads native synth plugins and supports dynamic patching. Features include:
 
@@ -48,14 +48,14 @@ A real-time audio engine that loads native synth plugins and supports dynamic pa
 
 Common headers used by multiple sub-projects:
 
-- `jscs_plugin_abi.h` — Pure C plugin ABI (the interface between audio-engine and synthdef-compiler)
+- `jscs_plugin_abi.h` — Pure C plugin ABI (the interface between engine and synthdef-compiler)
 - `jscs_simd.hpp` — Cross-platform SIMD abstraction
 - `jscs_random.hpp` — xoroshiro128++ PRNG (scalar and SIMD)
 - `jscs_matrix_transform.hpp` — Compile-time matrix operations
 
 ### FFI Bridge (`bridge/`)
 
-Connects Language X to the audio-engine and synthdef-compiler via the language's foreign function interface. Includes Language X module files (e.g., `audio_engine.x`) that expose native functions to scripts.
+Connects Language X to the engine and synthdef-compiler via the language's foreign function interface. Includes Language X module files (e.g., `audio_engine.x`) that expose native functions to scripts.
 
 ## Directory Structure
 
@@ -64,7 +64,7 @@ A-new-project/
 ├── CMakeLists.txt              Top-level build configuration
 ├── build.sh                    Quick build script
 ├── shared/                     Shared headers (plugin ABI, SIMD, RNG)
-├── static-lang-3/              Language X interpreter
+├── lang/              Language X interpreter
 │   ├── src/                    Compiler and VM source
 │   ├── tests/                  Test suite (226 tests)
 │   ├── modules/                Standard library modules
@@ -72,7 +72,7 @@ A-new-project/
 │   └── editors/                Editor support packages
 ├── synthdef-compiler/          Signal graph → plugin compiler
 │   └── src/                    Compiler source
-├── audio-engine/               Real-time audio engine
+├── engine/               Real-time audio engine
 │   └── src/                    Engine source
 ├── bridge/                     FFI bridges between sub-projects
 │   ├── src/                    Bridge implementations
@@ -133,7 +133,7 @@ cmake --build build
 |--------|-------------|
 | `langx` | Language X interpreter executable |
 | `langx_lib` | Language X as a static library |
-| `audio-engine` | Audio engine executable |
+| `engine` | Audio engine executable |
 | `audio_engine_lib` | Audio engine as a static library |
 | `synthdef-compiler` | Synthdef compiler executable |
 | `synthdef_compiler_lib` | Synthdef compiler as a static library |
@@ -152,13 +152,13 @@ cmake --build build --target langx
 
 ```sh
 # Run a script
-./build/static-lang-3/langx program.x
+./build/lang/langx program.x
 
 # Start the REPL
-./build/static-lang-3/langx
+./build/lang/langx
 
 # Add module search paths
-./build/static-lang-3/langx -I lib:vendor program.x
+./build/lang/langx -I lib:vendor program.x
 ```
 
 ## Running Tests
@@ -168,7 +168,7 @@ cmake --build build --target langx
 The language has a comprehensive test suite with 226 tests covering arithmetic, auto-mapping, builtins, control flow, coroutines, data structures, destructuring, errors, expressions, FFI, functions, modules, operators, type system, and more.
 
 ```sh
-cd static-lang-3/tests && bash run_tests.sh
+cd lang/tests && bash run_tests.sh
 ```
 
 The test runner supports several flags:
@@ -190,26 +190,26 @@ bash run_tests.sh -x              # Stop on first failure
 
 ### Language X
 
-- [Language X by Example](static-lang-3/docs/Language_X_by_Example.html) — Comprehensive syntax and feature guide
-- [Built-in Functions](static-lang-3/docs/Builtin_Functions.html) — Reference for all built-in functions
-- [Coroutines](static-lang-3/docs/Coroutines.html) — Coroutine system design and usage
-- [FFI Guide](static-lang-3/docs/FFI_Guide.html) — Calling C functions from Language X
+- [Language X by Example](lang/docs/Language_X_by_Example.html) — Comprehensive syntax and feature guide
+- [Built-in Functions](lang/docs/Builtin_Functions.html) — Reference for all built-in functions
+- [Coroutines](lang/docs/Coroutines.html) — Coroutine system design and usage
+- [FFI Guide](lang/docs/FFI_Guide.html) — Calling C functions from Language X
 
 ### Architecture
 
 - [Synthdef Compiler Architecture](synthdef-compiler/ARCHITECTURE.md) — Compilation pipeline, expression graph, type system, and code generation
-- [Audio Engine Architecture](audio-engine/Architecture.md) — Engine design, silos, commands, plugin ABI, and thread safety
-- [Language X Theory of Operation](static-lang-3/Theory_of_Operation.md) — Detailed design document for the language implementation
+- [Audio Engine Architecture](engine/Architecture.md) — Engine design, silos, commands, plugin ABI, and thread safety
+- [Language X Theory of Operation](lang/Theory_of_Operation.md) — Detailed design document for the language implementation
 - [Integration Plan](IMPLEMENTATION_PLAN.md) — Step-by-step roadmap for integrating the sub-projects
 
 ### Editor Support
 
 Syntax highlighting for Language X is available for:
 
-- **VS Code** — `static-lang-3/editors/vscode`
-- **Zed** — `static-lang-3/editors/zed-langx`
-- **TextMate / Sublime Text** — `static-lang-3/editors/LangX.tmbundle`
-- **Tree-sitter grammar** — `static-lang-3/editors/tree-sitter-langx`
+- **VS Code** — `lang/editors/vscode`
+- **Zed** — `lang/editors/zed-langx`
+- **TextMate / Sublime Text** — `lang/editors/LangX.tmbundle`
+- **Tree-sitter grammar** — `lang/editors/tree-sitter-langx`
 
 ## License
 

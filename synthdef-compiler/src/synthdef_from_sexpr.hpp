@@ -62,7 +62,12 @@ struct SExprGraphBuilder {
     std::expected<S, std::string> parseIfExpr(sexpr::ItemVec const& list);
     std::expected<S, std::string> parseSwitchExpr(sexpr::ItemVec const& list);
     std::expected<S, std::string> parseForExpr(sexpr::ItemVec const& list);
+    std::expected<S, std::string> parseVarExpr(sexpr::ItemVec const& list);
     std::expected<S, std::string> parseVoicerExpr(sexpr::ItemVec const& list);
+
+    // Spectral operations
+    std::expected<S, std::string> parseSpectralFrameInput(sexpr::ItemVec const& list);
+    std::expected<S, std::string> parseSpectralChainExpr(sexpr::ItemVec const& list);
 
     // Helper to get or create delay buffer
     DelayBuf* getOrCreateDelayBuf(int64_t delayId);

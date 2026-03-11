@@ -1,5 +1,5 @@
 # bridge/CMakeLists.txt
-# FFI bridge libraries connecting Language X to the audio-engine and synthdef-compiler.
+# FFI bridge libraries connecting Language X to the engine and synthdef-compiler.
 
 add_library(langx_audio_engine_bridge OBJECT
     src/langx_audio_engine_ffi.cpp

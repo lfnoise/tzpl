@@ -41,6 +41,8 @@ void IfElseExpr::accept(ExprVisitor& visitor) { visitor.visit(this); }
 void SwitchExpr::accept(ExprVisitor& visitor) { visitor.visit(this); }
 void ForLoopExpr::accept(ExprVisitor& visitor) { visitor.visit(this); }
 void VoicerExpr::accept(ExprVisitor& visitor) { visitor.visit(this); }
+void SpectralFrameInput::accept(ExprVisitor& visitor) { visitor.visit(this); }
+void SpectralChainExpr::accept(ExprVisitor& visitor) { visitor.visit(this); }
 
 
 void URandExpr::accept(ExprVisitor& visitor) { visitor.visit(this); }

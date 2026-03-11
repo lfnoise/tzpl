@@ -2,7 +2,7 @@
 //  langx_audio_engine_ffi.cpp
 //  bridge
 //
-//  FFI bridge: wraps audio-engine client functions into the CFun signature
+//  FFI bridge: wraps engine client functions into the CFun signature
 //  expected by the Language X VM, and registers them with the compiler.
 //
 
@@ -13,8 +13,8 @@
 #include <thread>
 #include <chrono>
 
-// Both langx and audio-engine define i64/f64/etc. in different ways.
-// audio-engine: namespace engine { using i64 = long; }
+// Both langx and engine define i64/f64/etc. in different ways.
+// engine: namespace engine { using i64 = long; }
 // langx:        using i64 = int64_t;  (which is long long on macOS)
 // We use explicit namespace qualification and casts where needed.
 
@@ -233,7 +233,7 @@ static void ffi_replaceNode(ts::VM& vm, u16 dst, u16, u16 argBase) {
 
 // fn setInput(nodeID: Int, portIndex: Int, value: Float) -> Int
 // Convenience: sets a single float value on an input port.
-// Passes as f32 to match the audio-engine's native sample type.
+// Passes as f32 to match the engine's native sample type.
 static void ffi_setInput(ts::VM& vm, u16 dst, u16, u16 argBase) {
     engine::PortAddr port{static_cast<engine::i64>(vm.reg(argBase).i),
                           static_cast<int>(vm.reg(argBase + 1).i)};

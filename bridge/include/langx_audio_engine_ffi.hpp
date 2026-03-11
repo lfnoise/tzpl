@@ -2,7 +2,7 @@
 //  langx_audio_engine_ffi.hpp
 //  bridge
 //
-//  FFI bridge: registers audio-engine client functions as callable
+//  FFI bridge: registers engine client functions as callable
 //  foreign functions in the Language X compiler/VM.
 //
 
@@ -14,7 +14,7 @@ namespace engine { struct Engine; }
 
 namespace bridge {
 
-// Register all audio-engine FFI functions with the Language X compiler.
+// Register all engine FFI functions with the Language X compiler.
 // Must be called BEFORE compiling any Language X source that references these functions.
 void registerAudioEngineFFI(ts::Compiler& compiler);
 

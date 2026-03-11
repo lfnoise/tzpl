@@ -2,7 +2,7 @@
 //  test_audio_engine_ffi.cpp
 //  integration-tests
 //
-//  Integration test for the audio-engine FFI bridge.
+//  Integration test for the engine FFI bridge.
 //  Runs both quick compilation tests and script-based audio tests.
 //
 

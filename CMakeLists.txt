@@ -7,9 +7,9 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 # --- Options ----------------------------------------------------------------
 
-option(JSCS_BUILD_AUDIO_ENGINE      "Build the audio-engine library and executable"      ON)
+option(JSCS_BUILD_AUDIO_ENGINE      "Build the engine library and executable"             ON)
 option(JSCS_BUILD_SYNTHDEF_COMPILER "Build the synthdef-compiler library and executable"  ON)
-option(JSCS_BUILD_LANG              "Build the static-lang-3 library and executable"      ON)
+option(JSCS_BUILD_LANG              "Build the lang library and executable"                ON)
 option(JSCS_BUILD_BRIDGE            "Build the FFI bridge libraries"                      ON)
 option(JSCS_BUILD_APP               "Build the live coding application"                   OFF)
 option(JSCS_BUILD_TESTS             "Build integration tests"                             OFF)
@@ -22,11 +22,11 @@ add_subdirectory(shared)
 # --- Sub-projects ------------------------------------------------------------
 
 if(JSCS_BUILD_LANG)
-    add_subdirectory(static-lang-3)
+    add_subdirectory(lang)
 endif()
 
 if(JSCS_BUILD_AUDIO_ENGINE)
-    add_subdirectory(audio-engine)
+    add_subdirectory(engine)
 endif()
 
 if(JSCS_BUILD_SYNTHDEF_COMPILER)

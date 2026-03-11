@@ -236,6 +236,8 @@ namespace synthdef {
     S binary_op(S a, S b, BinaryOp op);
     S compare_op(S a, S b, CompareOp op);
     S cast_op(S a, NumType type);
+    S spectral_chain(S input, int fftSize, int hopSize, std::function<S(S)> body);
+
     S newSubgraph(std::function<S()> f);
     S newSubgraph(std::function<S(S)> f);
     

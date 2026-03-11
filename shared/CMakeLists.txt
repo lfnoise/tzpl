@@ -12,6 +12,7 @@ install(FILES
     jscs_random.hpp
     jscs_matrix_transform.hpp
     jscs_voicer.hpp
+    jscs_fft.hpp
     synthdef_plugin_interface.hpp
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/jscs
 )

@@ -314,8 +314,10 @@ string cppCodeGen(Synth* synth) {
 }
 
 string CppCodeGen::genVarDeclName(S u) {
-    if (auto p = u.as<Inlet>(); p) { 
-        return FMT("inlets[{}]", tos(p->serial));
+    if (auto p = u.as<Inlet>(); p) {
+        // Inlets are accessed via ((type**)p->inlets), not as a struct member.
+        // Return a dummy name that won't be used for declaration.
+        return FMT("_inlet_{}", tos(p->serial));
     } else if (auto p = u.as<Outlet>(); p) {
         return FMT("outlets[{}]", tos(p->serial + synth->inlets.size()));
     }
@@ -329,7 +331,7 @@ string CppCodeGen::genVarDeclName(S u) {
 
 string CppCodeGen::genVarName(S u) {
     if (auto p = u.as<Inlet>(); p) {
-        return FMT("p->inlets[{}]", tos(p->serial));
+        return FMT("(({}**)p->inlets)[{}]", p->type.str(), tos(p->serial));
     } else if (auto p = u.as<Outlet>(); p) {
         return FMT("p->outlets[{}]", tos(p->serial + synth->inlets.size()));
     }
@@ -399,7 +401,7 @@ string CppCodeGen::genVarRef(S expr, VarIndex cel) {
         return s;
     }
 
-    if (expr->is_scalar()) {
+    if (expr->is_scalar() && !expr.as<Inlet>()) {
         if (inFlatVoiceMode && isVoicerSubgraph(expr->graph)) {
             // Voice-local scalar in flat mode: needs voice indexing, fall through
         } else {
@@ -603,6 +605,11 @@ struct ExprCodegenVisitor : ExprVisitor {
     void visit(SwitchExpr* p) override { shouldBeHandledAsTree(p); }
     void visit(ForLoopExpr* p) override { shouldBeHandledAsTree(p); }
     void visit(VoicerExpr* p) override { shouldBeHandledAsTree(p); }
+    void visit(SpectralFrameInput* p) override {
+        // Inside the spectral subgraph, the frame data is accessed via the owning chain's buffer
+        s += FMT("p->spec{}_frame[{}]", p->chainSerial, vxstr(cel));
+    }
+    void visit(SpectralChainExpr* p) override { shouldBeHandledAsTree(p); }
     void visit(URandExpr* p) override {
         if (g.inFlatVoiceMode && g.isVoicerSubgraph(p->graph)) {
             string vi;
@@ -833,7 +840,126 @@ struct Rank1GenTreeExprVisitor : GenTreeExprVisitor {
         tabIndent(s, g.indent);
     }
     void visit(ForLoopExpr* p) override {
+        handled = true;
+        // count must be scalar. thus vx(0).
+        s += FMT("for (i32 i = 0; i < {}; ++i) {{\n", g.genExpr(p->in0(), vx(0)));
+        ++g.indent;
 
+        s += g.genLoops(p->loop_body->graph->loops);
+        s += g.genDelayAdvance(p->loop_body->graph);
+
+        --g.indent;
+        tabIndent(s, g.indent);
+        s += "}\n";
+    }
+    void visit(SpectralFrameInput* p) override {}
+    void visit(SpectralChainExpr* p) override {
+        handled = true;
+        auto phi = p->body.as<PhiNodeExpr>();
+        usize inputChans = p->in0()->chans;
+        int N = p->fftSize;
+        int hop = p->hopSize;
+
+        // Accumulate input sample into ring buffer
+        s += FMT("// SpectralChain: write input to ring buffer\n");
+        tabIndent(s, g.indent);
+        for (usize c = 0; c < inputChans; ++c) {
+            if (inputChans > 1) {
+                s += FMT("p->spec{0}_inbuf[{1}][p->spec{0}_wrpos] = {2};\n",
+                    p->userial, c, g.genExpr(p->in0(), vx(ptrdiff_t(c))));
+                tabIndent(s, g.indent);
+            } else {
+                s += FMT("p->spec{0}_inbuf[0][p->spec{0}_wrpos] = {1};\n",
+                    p->userial, g.genExpr(p->in0(), vx(0)));
+                tabIndent(s, g.indent);
+            }
+        }
+
+        // Read output from overlap-add buffer
+        for (usize c = 0; c < inputChans; ++c) {
+            if (inputChans > 1) {
+                s += FMT("{0} = p->spec{1}_outbuf[{2}][p->spec{1}_rdpos];\n",
+                    g.genVarRef(p, vx(ptrdiff_t(c))), p->userial, c);
+                tabIndent(s, g.indent);
+                s += FMT("p->spec{0}_outbuf[{1}][p->spec{0}_rdpos] = 0.f;\n", p->userial, c);
+                tabIndent(s, g.indent);
+            } else {
+                s += FMT("{0} = p->spec{1}_outbuf[0][p->spec{1}_rdpos];\n",
+                    g.genVarRef(p, vx(0)), p->userial);
+                tabIndent(s, g.indent);
+                s += FMT("p->spec{0}_outbuf[0][p->spec{0}_rdpos] = 0.f;\n", p->userial);
+                tabIndent(s, g.indent);
+            }
+        }
+
+        // Advance write/read positions
+        s += FMT("p->spec{0}_wrpos = (p->spec{0}_wrpos + 1) & {1};\n", p->userial, N - 1);
+        tabIndent(s, g.indent);
+        s += FMT("p->spec{0}_rdpos = (p->spec{0}_rdpos + 1) & {1};\n", p->userial, N - 1);
+        tabIndent(s, g.indent);
+
+        // Hop counter: process FFT frame at each hop
+        s += FMT("if (++p->spec{0}_hopcount >= {1}) {{\n", p->userial, hop);
+        ++g.indent;
+        tabIndent(s, g.indent);
+        s += FMT("p->spec{}_hopcount = 0;\n", p->userial);
+        tabIndent(s, g.indent);
+
+        // Window and collect input into FFT buffer, then FFT
+        s += FMT("for (int ch = 0; ch < {}; ++ch) {{\n", inputChans);
+        ++g.indent;
+        tabIndent(s, g.indent);
+        s += FMT("for (int k = 0; k < {}; ++k) {{\n", N);
+        ++g.indent;
+        tabIndent(s, g.indent);
+        s += FMT("int idx = (p->spec{0}_wrpos + k) & {1};\n", p->userial, N - 1);
+        tabIndent(s, g.indent);
+        s += FMT("p->spec{0}_fftbuf[ch * {1} + k] = p->spec{0}_inbuf[ch][idx] * p->spec{0}_window[k];\n",
+            p->userial, N);
+        --g.indent;
+        tabIndent(s, g.indent);
+        s += "}\n";
+        tabIndent(s, g.indent);
+        // Forward FFT per channel
+        s += FMT("jscs_fft_forward(p->spec{0}_fftsetup, p->spec{0}_fftbuf + ch * {1}, p->spec{0}_frame + ch * {1});\n",
+            p->userial, N);
+        --g.indent;
+        tabIndent(s, g.indent);
+        s += "}\n";
+        tabIndent(s, g.indent);
+
+        // Run the spectral processing subgraph
+        s += "// spectral subgraph\n";
+        s += g.genLoops(phi->graph->loops);
+        s += g.genDelayAdvance(phi->graph);
+        tabIndent(s, g.indent);
+
+        // IFFT and overlap-add
+        s += FMT("for (int ch = 0; ch < {}; ++ch) {{\n", inputChans);
+        ++g.indent;
+        tabIndent(s, g.indent);
+        // Inverse FFT per channel
+        s += FMT("jscs_fft_inverse(p->spec{0}_fftsetup, p->spec{0}_frame + ch * {1}, p->spec{0}_fftbuf + ch * {1});\n",
+            p->userial, N);
+        tabIndent(s, g.indent);
+        // Window and overlap-add to output buffer
+        s += FMT("for (int k = 0; k < {}; ++k) {{\n", N);
+        ++g.indent;
+        tabIndent(s, g.indent);
+        s += FMT("int idx = (p->spec{0}_wrpos + k) & {1};\n", p->userial, N - 1);
+        tabIndent(s, g.indent);
+        s += FMT("p->spec{0}_outbuf[ch][idx] += p->spec{0}_fftbuf[ch * {1} + k] * p->spec{0}_window[k];\n",
+            p->userial, N);
+        --g.indent;
+        tabIndent(s, g.indent);
+        s += "}\n";
+        --g.indent;
+        tabIndent(s, g.indent);
+        s += "}\n";
+
+        --g.indent;
+        tabIndent(s, g.indent);
+        s += "}\n";
     }
     void visit(VoicerExpr* p) override {
         handled = true;
@@ -979,6 +1105,8 @@ struct GenLoopExprVisitor : ExprVisitor {
     void visit(SwitchExpr* p) override {}
     void visit(ForLoopExpr* p) override {}
     void visit(VoicerExpr* p) override {}
+    void visit(SpectralFrameInput* p) override {}
+    void visit(SpectralChainExpr* p) override {}
 
     void visit(VecTakeExpr* p) override {}
     void visit(VecDropExpr* p) override {}
@@ -1283,6 +1411,24 @@ string CppCodeGen::genDelayAlloc() {
         }
     }
 
+    // Spectral chain allocations
+    for (S expr : synth->sorted) {
+        if (auto sc = expr.as<SpectralChainExpr>(); sc) {
+            usize inputChans = sc->in0()->chans;
+            int N = sc->fftSize;
+            s += FMT("\t// SpectralChain {} alloc\n", sc->userial);
+            s += FMT("\tp->spec{}_fftsetup = jscs_fft_create({});\n", sc->userial, N);
+            for (usize c = 0; c < inputChans; ++c) {
+                s += FMT("\tp->spec{0}_inbuf[{1}] = (f32*)calloc({2}, sizeof(f32));\n", sc->userial, c, N);
+                s += FMT("\tp->spec{0}_outbuf[{1}] = (f32*)calloc({2}, sizeof(f32));\n", sc->userial, c, N);
+            }
+            s += FMT("\tp->spec{}_wrpos = 0;\n", sc->userial);
+            s += FMT("\tp->spec{}_rdpos = 0;\n", sc->userial);
+            s += FMT("\tp->spec{}_hopcount = 0;\n", sc->userial);
+            s += FMT("\tjscs_window_sqrt_hann(p->spec{}_window, {});\n", sc->userial, N);
+        }
+    }
+
     return s;
 }
 
@@ -1349,6 +1495,20 @@ string CppCodeGen::genDelayDealloc() {
             s += "\t}\n";
         }
     }
+
+    // Spectral chain deallocations
+    for (S expr : synth->sorted) {
+        if (auto sc = expr.as<SpectralChainExpr>(); sc) {
+            usize inputChans = sc->in0()->chans;
+            s += FMT("\t// SpectralChain {} dealloc\n", sc->userial);
+            s += FMT("\tjscs_fft_destroy(p->spec{}_fftsetup);\n", sc->userial);
+            for (usize c = 0; c < inputChans; ++c) {
+                s += FMT("\tfree(p->spec{0}_inbuf[{1}]);\n", sc->userial, c);
+                s += FMT("\tfree(p->spec{0}_outbuf[{1}]);\n", sc->userial, c);
+            }
+        }
+    }
+
     return s;
 }
 
@@ -1786,7 +1946,8 @@ string CppCodeGen::genDeclInstVars() {
     for (GenLoop* loop : synth->loops) {
         for (ExprTree* tree : loop->trees) {
             S expr = tree->root;
-            if (is_inst_var(expr->cut) && !isVoicerSubgraph(expr->graph)) {
+            if (is_inst_var(expr->cut) && !isVoicerSubgraph(expr->graph)
+                && !expr.as<Inlet>() && !expr.as<Outlet>()) {
                 string varname = genVarDeclName(expr);
                 string shape = genShape(expr);
                 s += FMT("\t{} {}{};\n", expr->type.str(), varname, shape);
@@ -1800,6 +1961,25 @@ string CppCodeGen::genDeclInstVars() {
     }
     if (!s.empty()) {
         s = "\t// instance variables\n" + s + "\n";
+    }
+
+    // Spectral chain state
+    for (S expr : synth->sorted) {
+        if (auto sc = expr.as<SpectralChainExpr>(); sc) {
+            usize inputChans = sc->in0()->chans;
+            int N = sc->fftSize;
+            s += FMT("\t// SpectralChain {} (fftSize={}, hopSize={})\n", sc->userial, N, sc->hopSize);
+            s += FMT("\tJscsFFTSetup* spec{}_fftsetup;\n", sc->userial);
+            s += FMT("\tf32* spec{}_inbuf[{}];\n", sc->userial, inputChans);
+            s += FMT("\tf32* spec{}_outbuf[{}];\n", sc->userial, inputChans);
+            s += FMT("\tf32 spec{}_fftbuf[{}];\n", sc->userial, inputChans * N);
+            s += FMT("\tf32 spec{}_frame[{}];\n", sc->userial, inputChans * N);
+            s += FMT("\tf32 spec{}_window[{}];\n", sc->userial, N);
+            s += FMT("\tint spec{}_wrpos;\n", sc->userial);
+            s += FMT("\tint spec{}_rdpos;\n", sc->userial);
+            s += FMT("\tint spec{}_hopcount;\n", sc->userial);
+            s += "\n";
+        }
     }
 
     // Top-level delays (not inside voicer)
@@ -2026,6 +2206,14 @@ string CppCodeGen::genClass()
     s += "#include \"jscs_plugin_abi.h\"\n";
     s += "#include \"jscs_matrix_transform.hpp\"\n";
     s += "#include \"jscs_random.hpp\"\n";
+
+    // Include FFT wrapper if any spectral chain nodes exist
+    for (S expr : synth->sorted) {
+        if (expr.as<SpectralChainExpr>()) {
+            s += "#include \"jscs_fft.hpp\"\n";
+            break;
+        }
+    }
     s += "#include <cmath>\n";
     s += "#include <cstdio>\n";
     s += "#include <cstring>\n";

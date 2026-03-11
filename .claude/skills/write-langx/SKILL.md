@@ -1,10 +1,10 @@
 ---
 name: write-langx
-description: Use when writing, generating, or reviewing Language X code (.x files) for the static-lang-3 project. Provides syntax rules, conventions, and examples to avoid common mistakes.
+description: Use when writing, generating, or reviewing Language X code (.x files) for the lang project. Provides syntax rules, conventions, and examples to avoid common mistakes.
 allowed-tools: Read, Glob, Grep
 ---
 
-You are writing code in **Language X**, a statically typed language defined in `static-lang-3/`. Before writing any code, internalize these rules completely. Violations of these rules will cause parse or compile errors.
+You are writing code in **Language X**, a statically typed language defined in `lang/`. Before writing any code, internalize these rules completely. Violations of these rules will cause parse or compile errors.
 
 $ARGUMENTS
 
@@ -412,7 +412,7 @@ println(a, b, c);         -- multiple values, space-separated
 ```
 
 # Test Files for Reference
-When in doubt about syntax, check existing test files in `static-lang-3/tests/` for working examples. Key directories:
+When in doubt about syntax, check existing test files in `lang/tests/` for working examples. Key directories:
 - `functions/` - function definitions, overloading, defaults, variadic
 - `control_flow/` - if/else, while, for, match, break/continue
 - `data_structures/` - structs, enums, arrays, lists, maps, tuples

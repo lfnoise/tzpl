@@ -48,6 +48,8 @@ struct ExprVisitor {
     virtual void visit(SwitchExpr* e) = 0;
     virtual void visit(ForLoopExpr* e) = 0;
     virtual void visit(VoicerExpr* e) = 0;
+    virtual void visit(SpectralFrameInput* e) = 0;
+    virtual void visit(SpectralChainExpr* e) = 0;
     virtual void visit(URandExpr* e) = 0;
     virtual void visit(BiRandExpr* e) = 0;
     virtual void visit(Rand64Expr* e) = 0;

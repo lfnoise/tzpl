@@ -819,6 +819,267 @@ void test_voicer_sexpr_parse() {
     printf("  sexpr parse and codegen succeeded\n");
 }
 
+void test_switch_codegen() {
+    printf("test_switch_codegen\n");
+    using namespace synthdef;
+    PushSynth ps(new Synth("test_switch_codegen"));
+
+    // Build a switch expression with 3 cases
+    S selector = addExpr(new Control({0, 2, 0, 0}, NumType::i32, 1, "sel"));
+
+    Graph* case0Graph = new Graph(gSynth, gGraph);
+    S case0Body;
+    {
+        PushGraph pg(case0Graph);
+        case0Body = addExpr(new PhiNodeExpr(S(100.0f)));
+    }
+    Graph* case1Graph = new Graph(gSynth, gGraph);
+    S case1Body;
+    {
+        PushGraph pg(case1Graph);
+        case1Body = addExpr(new PhiNodeExpr(S(200.0f)));
+    }
+    Graph* case2Graph = new Graph(gSynth, gGraph);
+    S case2Body;
+    {
+        PushGraph pg(case2Graph);
+        case2Body = addExpr(new PhiNodeExpr(S(300.0f)));
+    }
+
+    S sw = addExpr(new SwitchExpr(selector, {case0Body, case1Body, case2Body}));
+    outlet(sw);
+
+    gSynth->graphAnalysis();
+    string code = cppCodeGen(gSynth);
+
+    // Verify switch codegen
+    assert(code.find("switch(") != string::npos);
+    assert(code.find("case 0:") != string::npos);
+    assert(code.find("case 1:") != string::npos);
+    assert(code.find("case 2:") != string::npos);
+    assert(code.find("break;") != string::npos);
+    // Bounds check with std::min
+    assert(code.find("std::min(u32(") != string::npos);
+
+    printf("  switch codegen produces correct C++ switch statement\n");
+}
+
+void test_for_loop_codegen() {
+    printf("test_for_loop_codegen\n");
+    using namespace synthdef;
+    PushSynth ps(new Synth("test_for_loop_codegen"));
+
+    // Build a for loop: for_(3, body)
+    S count = S(3);
+
+    Graph* bodyGraph = new Graph(gSynth, gGraph);
+    S body;
+    {
+        PushGraph pg(bodyGraph);
+        S i = addExpr(new VarExpr("i", NumType::any_int));
+        body = addExpr(new PhiNodeExpr(S(1.0f)));
+    }
+
+    S loop = addExpr(new ForLoopExpr(count, body));
+    outlet(loop);
+
+    gSynth->graphAnalysis();
+    string code = cppCodeGen(gSynth);
+
+    // Verify for loop codegen
+    assert(code.find("for (i32 i = 0; i <") != string::npos);
+    assert(code.find("++i)") != string::npos);
+
+    printf("  for loop codegen produces correct C++ for loop\n");
+}
+
+void test_for_loop_codegen_dynamic_count() {
+    printf("test_for_loop_codegen_dynamic_count\n");
+    using namespace synthdef;
+    PushSynth ps(new Synth("test_for_loop_dyn"));
+
+    // Build a for loop with dynamic count from a control
+    S count = addExpr(new Control({1, 8, 4, 0}, NumType::i32, 1, "count"));
+
+    Graph* bodyGraph = new Graph(gSynth, gGraph);
+    S body;
+    {
+        PushGraph pg(bodyGraph);
+        S i = addExpr(new VarExpr("i", NumType::any_int));
+        body = addExpr(new PhiNodeExpr(S(1.0f)));
+    }
+
+    S loop = addExpr(new ForLoopExpr(count, body));
+    outlet(loop);
+
+    gSynth->graphAnalysis();
+    string code = cppCodeGen(gSynth);
+
+    // Verify for loop codegen with dynamic count references the control
+    assert(code.find("for (i32 i = 0; i <") != string::npos);
+
+    printf("  for loop with dynamic count codegen works\n");
+}
+
+void test_switch_sexpr_parse() {
+    printf("test_switch_sexpr_parse\n");
+    using namespace synthdef;
+
+    std::string sexprText = R"(
+        (Synth test_switch_sexpr
+            (Graph 4 (
+                (0 Constant 1 8 (1))
+                (4 SwitchExpr (0)
+                    (Graph 1 (
+                        (1 Constant 1 12 (100.0))))
+                    (Graph 2 (
+                        (2 Constant 1 12 (200.0))))
+                    (Graph 3 (
+                        (3 Constant 1 12 (300.0)))))
+                (5 Outlet "out" 4))))
+    )";
+
+    auto result = synthFromSExprText(sexprText);
+    assert(result.has_value());
+
+    Synth* synth = result.value();
+    assert(synth->name == "test_switch_sexpr");
+
+    {
+        PushSynth ps(synth);
+        synth->graphAnalysis();
+        string code = cppCodeGen(synth);
+
+        assert(code.find("switch(") != string::npos);
+        assert(code.find("case 0:") != string::npos);
+        assert(code.find("case 1:") != string::npos);
+        assert(code.find("case 2:") != string::npos);
+    }
+
+    printf("  switch sexpr parse and codegen succeeded\n");
+}
+
+void test_for_loop_sexpr_parse() {
+    printf("test_for_loop_sexpr_parse\n");
+    using namespace synthdef;
+
+    std::string sexprText = R"(
+        (Synth test_for_sexpr
+            (Graph 3 (
+                (0 Constant 1 8 (4))
+                (3 ForExpr (0)
+                    (Graph 2 (
+                        (1 VarExpr "i")
+                        (2 Constant 1 12 (1.0)))))
+                (4 Outlet "out" 3))))
+    )";
+
+    auto result = synthFromSExprText(sexprText);
+    assert(result.has_value());
+
+    Synth* synth = result.value();
+    assert(synth->name == "test_for_sexpr");
+
+    {
+        PushSynth ps(synth);
+        synth->graphAnalysis();
+        string code = cppCodeGen(synth);
+
+        assert(code.find("for (i32 i = 0; i <") != string::npos);
+    }
+
+    printf("  for loop sexpr parse and codegen succeeded\n");
+}
+
+void test_spectral_chain_codegen() {
+    printf("test_spectral_chain_codegen\n");
+    using namespace synthdef;
+    PushSynth ps(new Synth("test_spectral"));
+
+    // Build a spectral chain: FFT -> identity (pass through) -> IFFT
+    S input = inlet(NumType::f32, 1, "in");
+    S result = spectral_chain(input, 256, 128, [](S frame) {
+        // Identity: just pass the spectrum through
+        return frame;
+    });
+    outlet(result);
+
+    gSynth->graphAnalysis();
+    string code = cppCodeGen(gSynth);
+
+    // Verify spectral chain codegen produces expected structures
+    assert(code.find("jscs_fft.hpp") != string::npos);
+    assert(code.find("JscsFFTSetup*") != string::npos);
+    assert(code.find("spec") != string::npos);
+    assert(code.find("_fftsetup") != string::npos);
+    assert(code.find("_inbuf") != string::npos);
+    assert(code.find("_outbuf") != string::npos);
+    assert(code.find("_window") != string::npos);
+    assert(code.find("_hopcount") != string::npos);
+    assert(code.find("jscs_fft_create(256)") != string::npos);
+    assert(code.find("jscs_fft_forward") != string::npos);
+    assert(code.find("jscs_fft_inverse") != string::npos);
+    assert(code.find("jscs_window_sqrt_hann") != string::npos);
+
+    printf("  spectral chain codegen produces correct C++ code\n");
+}
+
+void test_spectral_chain_multichannel_codegen() {
+    printf("test_spectral_chain_multichannel_codegen\n");
+    using namespace synthdef;
+    PushSynth ps(new Synth("test_spectral_mc"));
+
+    // Build a stereo spectral chain
+    S input = inlet(NumType::f32, 2, "in");
+    S result = spectral_chain(input, 512, 256, [](S frame) {
+        // Scale the spectrum by 0.5
+        return frame * S(0.5f);
+    });
+    outlet(result);
+
+    gSynth->graphAnalysis();
+    string code = cppCodeGen(gSynth);
+
+    // Verify stereo handling (2 channel buffers)
+    assert(code.find("_inbuf[2]") != string::npos);
+    assert(code.find("_outbuf[2]") != string::npos);
+
+    printf("  multichannel spectral chain codegen works\n");
+}
+
+void test_spectral_chain_sexpr_parse() {
+    printf("test_spectral_chain_sexpr_parse\n");
+    using namespace synthdef;
+
+    std::string sexprText = R"(
+        (Synth test_spectral_sexpr
+            (Graph 3 (
+                (0 Inlet "in" 12 1)
+                (3 SpectralChainExpr (0) 256 128
+                    (Graph 2 (
+                        (1 SpectralFrameInput 256)
+                        (2 BinaryOp mul (1 1)))))
+                (4 Outlet "out" 3))))
+    )";
+
+    auto result = synthFromSExprText(sexprText);
+    assert(result.has_value());
+
+    Synth* synth = result.value();
+    assert(synth->name == "test_spectral_sexpr");
+
+    {
+        PushSynth ps(synth);
+        synth->graphAnalysis();
+        string code = cppCodeGen(synth);
+
+        assert(code.find("jscs_fft_forward") != string::npos);
+        assert(code.find("jscs_fft_inverse") != string::npos);
+    }
+
+    printf("  spectral chain sexpr parse and codegen succeeded\n");
+}
+
 extern void test_transforms();
 
 void all_tests() {
@@ -835,6 +1096,36 @@ void all_tests() {
     test_ftos();
     //test_transforms();
     //test_synthdef();
+
+    // Control flow codegen tests
+    test_switch_codegen();
+    test_for_loop_codegen();
+    test_for_loop_codegen_dynamic_count();
+    test_switch_sexpr_parse();
+    test_for_loop_sexpr_parse();
+
+    // Spectral chain tests
+    test_spectral_chain_codegen();
+    test_spectral_chain_multichannel_codegen();
+    test_spectral_chain_sexpr_parse();
+
+    // Spectral chain compilation tests (compiles and links the generated plugin)
+    test("spectral_identity", 2, [](){
+        // White noise through an identity spectral chain
+        S noise = birand(1) * S(0.1f);
+        S result = spectral_chain(noise, 256, 128, [](S frame) {
+            return frame; // pass-through
+        });
+        outlet(result);
+    });
+    test("spectral_scale", 2, [](){
+        // Stereo noise through a spectral scaling chain
+        S noise = birand(2) * S(0.1f);
+        S result = spectral_chain(noise, 512, 256, [](S frame) {
+            return frame * S(0.5f);
+        });
+        outlet(result);
+    });
 
     // Voicer tests
     test_voicer_codegen();

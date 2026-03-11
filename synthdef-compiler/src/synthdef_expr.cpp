@@ -465,6 +465,28 @@ namespace synthdef {
         }
     }
 
+    void ForLoopExpr::update_type(ExprIdentitySet& worklist) {
+        auto new_type = type & loop_body->type;
+        checkType(new_type);
+        if (type != new_type) {
+            type = new_type;
+            propagate_types(worklist);
+            if (loop_body->type != new_type) {
+                loop_body->type = new_type;
+                worklist.insert(loop_body);
+            }
+        }
+    }
+
+    void SpectralChainExpr::update_type(ExprIdentitySet& worklist) {
+        // SpectralChainExpr always produces f32
+        NumType new_type = NumType::f32;
+        if (type != new_type) {
+            type = new_type;
+            propagate_types(worklist);
+        }
+    }
+
     void Outlet::calcShape()  {
         chans = in0()->chans;
     }
@@ -581,7 +603,21 @@ namespace synthdef {
             throw std::runtime_error(std::format("switch_: incompatible shapes. {}", e.what()));
         }
     }
-    void PhiNodeExpr::calcShape() { 
+    void ForLoopExpr::calcShape() {
+        try {
+            if (in0()->chans != 1) {
+                throw std::runtime_error(std::format("for_: count must be a scalar."));
+            }
+            chans = broadcast(chans, loop_body->chans);
+        } catch (std::runtime_error const& e) {
+            throw std::runtime_error(std::format("for_: incompatible shapes. {}", e.what()));
+        }
+    }
+    void SpectralChainExpr::calcShape() {
+        // Output has the same number of channels as input (audio domain)
+        chans = in0()->chans;
+    }
+    void PhiNodeExpr::calcShape() {
 //        std::print("PhiNodeExpr::calcShape sn tgt {} {}\n", userial, target.get() ? std::to_string(target->userial) : "nil");
         if (target.get()) {
             chans = broadcast(chans, target->chans);

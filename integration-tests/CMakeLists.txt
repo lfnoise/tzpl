@@ -11,7 +11,7 @@ target_link_libraries(test_foreign_modules
 
 add_executable(test_audio_engine_ffi
     src/test_audio_engine_ffi.cpp
-    ${CMAKE_SOURCE_DIR}/audio-engine/src/jscs_test_plugins.cpp
+    ${CMAKE_SOURCE_DIR}/engine/src/jscs_test_plugins.cpp
 )
 
 target_link_libraries(test_audio_engine_ffi
@@ -26,7 +26,7 @@ target_compile_definitions(test_audio_engine_ffi PRIVATE
 if(TARGET langx_synthdef_compiler_bridge)
     add_executable(test_synthdef_compiler_ffi
         src/test_synthdef_compiler_ffi.cpp
-        ${CMAKE_SOURCE_DIR}/audio-engine/src/jscs_test_plugins.cpp
+        ${CMAKE_SOURCE_DIR}/engine/src/jscs_test_plugins.cpp
     )
 
     target_link_libraries(test_synthdef_compiler_ffi

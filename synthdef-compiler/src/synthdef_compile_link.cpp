@@ -54,6 +54,9 @@ static int link(string const& filepath_o, string const& filepath_dylib) {
     cmd += " -dynamiclib";
     cmd += " -undefined dynamic_lookup";
     cmd += " -compatibility_version 1 -current_version 1";
+#ifdef __APPLE__
+    cmd += " -framework Accelerate";
+#endif
     cmd += " -o " + filepath_dylib;
     cmd += " " + filepath_o;
     printf("LINK: %s\n", cmd.c_str());

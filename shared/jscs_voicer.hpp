@@ -3,7 +3,7 @@
 //  shared
 //
 //  Polyphonic voice allocator template.
-//  Extracted from audio-engine/src/jscs_test_plugins.hpp.
+//  Extracted from engine/src/jscs_test_plugins.hpp.
 //
 
 #ifndef jscs_voicer_hpp
@@ -18,7 +18,7 @@
 #include <type_traits>
 
 // Type aliases for standalone use (e.g., generated plugin code).
-// The audio-engine uses `long` for i64 (for SIMD compat), while
+// The engine uses `long` for i64 (for SIMD compat), while
 // other contexts may use `int64_t` (long long). We use `long` here
 // to match the engine. To avoid redefinition errors, we only define
 // if the including context hasn't already defined them.

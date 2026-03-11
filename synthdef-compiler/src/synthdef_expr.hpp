@@ -677,12 +677,11 @@ namespace synthdef {
             return hash_combine(Expr::hash(), u64(loop_body.get()), 0x92DA541A1EE39861ull); }
 
         NumType initial_type() const override { return NumType::any; }
-        void update_type(ExprIdentitySet& worklist) override {
-            throw std::runtime_error("ForLoopExpr update type not implemented");
+        NumType inputTypeConstraint(int index) const override {
+            return index == 0 ? NumType::any_int : type;
         }
-        void calcShape()  override {
-            throw std::runtime_error("ForLoopExpr calc shape not implemented");
-        }
+        void update_type(ExprIdentitySet& worklist) override;
+        void calcShape() override;
         void insertPhiNodes(ExprIdentitySet& worklist) override {
             auto phi = loop_body.as<PhiNodeExpr>();
             assert(phi != nullptr);
@@ -734,6 +733,76 @@ namespace synthdef {
         }
         usize num_subgraphs() const override { return 1; }
         S get_subgraph(usize i) const override { return voice_body; }
+
+        void accept(ExprVisitor& visitor) override;
+    };
+
+    // Provides the packed split-complex spectrum inside a SpectralChainExpr subgraph.
+    // Shape: inputChans * fftSize (the packed FFT frame).
+    struct SpectralFrameInput : Expr {
+        int fftSize;
+        u64 chainSerial = 0; // set after SpectralChainExpr is created
+
+        SpectralFrameInput(int fftSize)
+            : Expr(audioSignalRate, {}), fftSize(fftSize)
+        {
+            type = NumType::f32;
+        }
+
+        string typeName() const override { return "SpectralFrameInput"; }
+        string str() const override { return FMT("spectral_frame({})", fftSize); }
+
+        u64 hash() const override {
+            return hash_combine(Expr::hash(), u64(fftSize), 0xA3F7C5D1E2B49806ull);
+        }
+        bool equals_(Expr const& that) const override {
+            return fftSize == static_cast<SpectralFrameInput const&>(that).fftSize;
+        }
+
+        NumType initial_type() const override { return NumType::f32; }
+        void update_type(ExprIdentitySet& worklist) override {}
+        void calcShape() override {} // set externally
+        bool should_hash_cons() const override { return false; }
+
+        void accept(ExprVisitor& visitor) override;
+    };
+
+    // Spectral processing chain: windowed FFT -> subgraph -> IFFT -> overlap-add.
+    // Input: audio signal (inputChans channels).
+    // Output: processed audio signal (same number of channels).
+    // The body subgraph processes packed split-complex frames of size inputChans * fftSize.
+    struct SpectralChainExpr : ControlFlowExpr {
+        S body;       // PhiNode wrapping the spectral processing subgraph result
+        int fftSize;
+        int hopSize;
+
+        SpectralChainExpr(S input, int fftSize, int hopSize, S body)
+            : ControlFlowExpr(input->rate, {input}),
+            body(body),
+            fftSize(fftSize),
+            hopSize(hopSize)
+        {
+            auto phi = body.as<PhiNodeExpr>();
+            assert(phi != nullptr);
+            phi->setTarget(this);
+        }
+
+        string typeName() const override { return "SpectralChainExpr"; }
+        string str() const override { return FMT("spectral_chain({}, {})", fftSize, hopSize); }
+
+        u64 hash() const override {
+            return hash_combine(Expr::hash(), u64(body.get()),
+                u64(fftSize), u64(hopSize), 0xE4A1B7C3D5F20968ull);
+        }
+
+        NumType initial_type() const override { return NumType::f32; }
+        void update_type(ExprIdentitySet& worklist) override;
+        void calcShape() override;
+        void insertPhiNodes(ExprIdentitySet& worklist) override {
+            worklist.insert(body);
+        }
+        usize num_subgraphs() const override { return 1; }
+        S get_subgraph(usize i) const override { return body; }
 
         void accept(ExprVisitor& visitor) override;
     };

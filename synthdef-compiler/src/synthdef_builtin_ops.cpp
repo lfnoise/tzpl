@@ -465,6 +465,27 @@ namespace synthdef {
     }
 #endif
 
+    S spectral_chain(S input, int fftSize, int hopSize, std::function<S(S)> body) {
+        assert(fftSize > 0 && (fftSize & (fftSize - 1)) == 0); // must be power of 2
+        assert(hopSize > 0 && hopSize <= fftSize);
+        S out;
+        SpectralFrameInput* framePtr;
+        {
+            Graph* graph = new Graph(gSynth, gGraph);
+            PushGraph pg(graph);
+            S frame = addExpr(new SpectralFrameInput(fftSize));
+            framePtr = frame.as<SpectralFrameInput>();
+            // Set the shape: inputChans * fftSize
+            frame->chans = input->chans * fftSize;
+            out = addExpr(new PhiNodeExpr(body(frame)));
+        }
+        // SpectralChainExpr is added in the parent graph (after PushGraph is destroyed)
+        S result = addExpr(new SpectralChainExpr(input, fftSize, hopSize, out));
+        // Set back-pointer so SpectralFrameInput codegen can find its owning chain
+        framePtr->chainSerial = result->userial;
+        return result;
+    }
+
     S newSubgraph(std::function<S()> f) {
         Graph* graph = new Graph(gSynth, gGraph);
         PushGraph pg(graph);
