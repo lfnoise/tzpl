@@ -213,4 +213,4 @@ Syntax highlighting for Tzopilotl is available for:
 
 ## License
 
-TBD
+This project is licensed under the [GNU General Public License v3.0](LICENSE).
