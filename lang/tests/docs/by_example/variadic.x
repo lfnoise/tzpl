@@ -1,4 +1,4 @@
--- Variadic Arguments from Language X by Example
+-- Variadic Arguments from Tzopilotl by Example
 
 -- Untyped variadic: packs args into a Tuple
 fn wrap(...xs) = xs;

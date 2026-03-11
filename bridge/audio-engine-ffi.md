@@ -1,10 +1,10 @@
 # Audio Engine FFI Reference
 
-Language X bindings for the audio engine, registered by `bridge::registerAudioEngineFFI()`.
+Tzopilotl bindings for the audio engine, registered by `bridge::registerAudioEngineFFI()`.
 
 All functions that modify the audio graph must be called between `begin()` and `go()` (or `sched()`). Error-returning functions return `Int` where `0` = success.
 
-Enum constants (`FadeCurve`, `SchedPolicy`, `Err`, `Enable`) are defined in the Language X module `audio_engine.x` (in `bridge/modules/`). Import with `import audio_engine.*;`. Simple enums are implicitly coerced to `Int` when passed to FFI functions.
+Enum constants (`FadeCurve`, `SchedPolicy`, `Err`, `Enable`) are defined in the Tzopilotl module `audio_engine.x` (in `bridge/modules/`). Import with `import audio_engine.*;`. Simple enums are implicitly coerced to `Int` when passed to FFI functions.
 
 ## Engine Lifecycle
 

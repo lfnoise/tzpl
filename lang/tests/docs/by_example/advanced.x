@@ -1,4 +1,4 @@
--- Advanced Examples from Language X by Example
+-- Advanced Examples from Tzopilotl by Example
 
 -- Fibonacci (recursive)
 fn fib(n Int) Int {

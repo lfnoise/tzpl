@@ -293,7 +293,7 @@ static void test_plain_module_control() {
     std::print("Test: Plain module control (no foreign functions)\n");
 
     // Write a temp module with no foreign functions
-    std::string tmpDir = std::filesystem::temp_directory_path().string() + "/langx_test_modules";
+    std::string tmpDir = std::filesystem::temp_directory_path().string() + "/tzpl_test_modules";
     std::filesystem::create_directories(tmpDir);
     {
         std::ofstream f(tmpDir + "/plainmod.x");
@@ -340,7 +340,7 @@ static void test_merged_foreign_and_x_module() {
         "fn pure_fn(x Int) Int { x * 10 }\n";
 
     // Write to a temp directory
-    std::string tmpDir = std::filesystem::temp_directory_path().string() + "/langx_test_modules";
+    std::string tmpDir = std::filesystem::temp_directory_path().string() + "/tzpl_test_modules";
     std::filesystem::create_directories(tmpDir);
     std::string modulePath = tmpDir + "/mathext.x";
     {

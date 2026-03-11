@@ -1,4 +1,4 @@
--- Ranges and For Loops from Language X by Example
+-- Ranges and For Loops from Tzopilotl by Example
 
 -- Basic range
 let r = (1..5);

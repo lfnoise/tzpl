@@ -57,19 +57,19 @@ cmake -DCMAKE_CXX_COMPILER=clang++ ..
 - `engine/` - Source code directory
   - `main.cpp` - Main entry point, built-in test plugins, Voicer template
   - `RtAudio.cpp/h` - Cross-platform audio I/O library (CoreAudio on macOS)
-  - `jscs_client_interface.cpp/hpp` - Public API: engine lifecycle, command bundling, plugin loading
-  - `jscs_engine.cpp/hpp` - Engine struct, safety limiter, background threads
-  - `jscs_silo.cpp/hpp` - Parallel processing units, topological sort, audio processing
-  - `jscs_node.cpp/hpp` - Node, port, and control data model
-  - `jscs_command.hpp` - Command base class and scheduler queue
-  - `jscs_command_subclasses.hpp` - All concrete command types
-  - `jscs_xfader.cpp/hpp` - Cross-fader with 7 fade curves
-  - `jscs_atomic_fifo.hpp` - Lock-free SPSC FIFO for RT-safe communication
-  - `jscs_sexpr.cpp/hpp` - S-expression parser for text-based commands
-  - `jscs_common.hpp` - Type aliases and SIMD types
-  - `jscs_hash.hpp` - 64-bit hash function
-  - `jscs_random.hpp` - SIMD-templated PRNG
-- `../shared/jscs_plugin_abi.h` - Pure C plugin ABI (shared with synthdef-compiler)
+  - `tzpl_client_interface.cpp/hpp` - Public API: engine lifecycle, command bundling, plugin loading
+  - `tzpl_engine.cpp/hpp` - Engine struct, safety limiter, background threads
+  - `tzpl_silo.cpp/hpp` - Parallel processing units, topological sort, audio processing
+  - `tzpl_node.cpp/hpp` - Node, port, and control data model
+  - `tzpl_command.hpp` - Command base class and scheduler queue
+  - `tzpl_command_subclasses.hpp` - All concrete command types
+  - `tzpl_xfader.cpp/hpp` - Cross-fader with 7 fade curves
+  - `tzpl_atomic_fifo.hpp` - Lock-free SPSC FIFO for RT-safe communication
+  - `tzpl_sexpr.cpp/hpp` - S-expression parser for text-based commands
+  - `tzpl_common.hpp` - Type aliases and SIMD types
+  - `tzpl_hash.hpp` - 64-bit hash function
+  - `tzpl_random.hpp` - SIMD-templated PRNG
+- `../shared/tzpl_plugin_abi.h` - Pure C plugin ABI (shared with synthdef-compiler)
 - `CMakeLists.txt` - CMake build configuration
 - `build.sh` - Build script
 

@@ -1,4 +1,4 @@
--- Enums from Language X by Example
+-- Enums from Tzopilotl by Example
 
 enum Option {
     some Int,

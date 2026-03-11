@@ -1,4 +1,4 @@
--- Variables and Constants from Language X by Example
+-- Variables and Constants from Tzopilotl by Example
 
 -- Immutable bindings (let)
 let x = 42;

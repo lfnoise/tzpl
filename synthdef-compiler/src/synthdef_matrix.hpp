@@ -10,7 +10,7 @@
 #include <variant>
 #include "synthdef_math_ops.hpp"
 #include "synthdef_expr.hpp"
-#include "jscs_matrix_transform.hpp"
+#include "tzpl_matrix_transform.hpp"
 #include "synthdef_str_util.hpp"
 
 namespace synthdef {

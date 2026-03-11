@@ -1,4 +1,4 @@
--- Structs from Language X by Example
+-- Structs from Tzopilotl by Example
 
 struct Point {
     x Float,

@@ -1,4 +1,4 @@
--- Type Aliases from Language X by Example
+-- Type Aliases from Tzopilotl by Example
 
 -- Alias for a primitive type
 type Natural = Int;

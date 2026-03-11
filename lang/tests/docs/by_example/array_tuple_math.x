@@ -1,4 +1,4 @@
--- Array and Tuple Arithmetic from Language X by Example
+-- Array and Tuple Arithmetic from Tzopilotl by Example
 
 -- Element-wise operations
 let a = [1, 2, 3, 4, 5];

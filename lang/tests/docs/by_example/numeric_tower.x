@@ -1,4 +1,4 @@
--- Numeric Tower from Language X by Example
+-- Numeric Tower from Tzopilotl by Example
 
 -- Int division produces a fraction
 let half = 1 / 2;

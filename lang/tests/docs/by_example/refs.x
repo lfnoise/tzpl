@@ -1,4 +1,4 @@
--- Refs from Language X by Example
+-- Refs from Tzopilotl by Example
 
 -- Create a ref with &
 let x = &42;

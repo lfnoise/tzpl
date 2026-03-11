@@ -47,7 +47,7 @@ thread-local CmdBundle
 ```
 
 
-## 1. Engine (`jscs_engine.hpp/cpp`)
+## 1. Engine (`tzpl_engine.hpp/cpp`)
 
 The `Engine` is the top-level object. It owns:
 
@@ -80,7 +80,7 @@ The `SafetyLimiter` is a lookahead brickwall limiter on the master output:
 Applied after all silos are mixed down but before the output reaches the audio device.
 
 
-## 2. Silos (`jscs_silo.hpp/cpp`)
+## 2. Silos (`tzpl_silo.hpp/cpp`)
 
 A **Silo** is an independent, parallel audio processing context. Each silo has its own:
 
@@ -138,16 +138,16 @@ The sort only runs when `needsSort_` is true (set by connect/disconnect operatio
 - During mixdown, even-indexed silos wait on the odd sibling's `done_sem_` and accumulate.
 
 
-## 3. Nodes (`jscs_node.hpp/cpp`)
+## 3. Nodes (`tzpl_node.hpp/cpp`)
 
 A **Node** is an instance of a synth plugin within a silo. It contains:
 
-- **`synth`**: A `jscs_SynthData*` — the plugin instance. Plugins extend this struct with
+- **`synth`**: A `tzpl_SynthData*` — the plugin instance. Plugins extend this struct with
   custom fields (C-style inheritance).
 - **`nodeID`**: An integer identifier. 0 = output node, 1 = input node, -1 = crossfader
   sub-node. User nodes have arbitrary positive IDs.
 - **`def`**: Pointer to the `NodeDef` describing this node type.
-- **`funs`**: The `jscs_SynthFuns` function table (alloc, free, init, processAudio, etc.).
+- **`funs`**: The `tzpl_SynthFuns` function table (alloc, free, init, processAudio, etc.).
 - **`ins`**: Vector of `InPort` objects.
 - **`outs`**: Vector of `OutPort` objects.
 - **`controls`**: Vector of `Control` objects.
@@ -186,7 +186,7 @@ inPort->node_->synth->inlets[inPort->index_] = inPort->dataBuffer_;
 
 ### Node Lifecycle
 
-1. **Creation** (NRT): `Node::setupSynth()` allocates the `jscs_SynthData` via
+1. **Creation** (NRT): `Node::setupSynth()` allocates the `tzpl_SynthData` via
    `funs.alloc()`, sets up the inlet/outlet/control pointer arrays, creates port objects
    with their own data buffers, calls `funs.init()`, and inserts the node into the NRT
    node table.
@@ -199,28 +199,28 @@ inPort->node_->synth->inlets[inPort->index_] = inPort->dataBuffer_;
 
 ## 4. NodeDefs and the Plugin System
 
-### NodeDef (`jscs_node.hpp`)
+### NodeDef (`tzpl_node.hpp`)
 
 A `NodeDef` describes a type of node. It is stored in the engine's `defs_` hash table.
 Key fields:
 
 - `name`: The def name (e.g., `"SinOsc"`, `"VoicerTest"`).
-- `funs`: The `jscs_SynthFuns` function table.
+- `funs`: The `tzpl_SynthFuns` function table.
 - `numIns`, `numOuts`, `numControls`: Port and control counts.
 - `ins`, `outs`: Arrays of `PortInfo` (name + signal type).
 - `controls`: Array of `ControlInfo` (name + signal type + controlID + spec).
 - `controlMap_`: Maps controlID to control index for O(1) lookup.
 
-### Plugin ABI (`../shared/jscs_plugin_abi.h`)
+### Plugin ABI (`../shared/tzpl_plugin_abi.h`)
 
 The plugin ABI is a pure C interface shared between the engine and the synthdef compiler.
 It defines:
 
-- **`jscs_SynthData`**: The base struct for plugin instances. Contains the function table,
+- **`tzpl_SynthData`**: The base struct for plugin instances. Contains the function table,
   engine/node pointers, inlet/outlet/control arrays, sample rate, and sample duration.
-  Plugins extend this by placing `jscs_SynthData` as the first member of their own struct.
+  Plugins extend this by placing `tzpl_SynthData` as the first member of their own struct.
 
-- **`jscs_SynthFuns`**: The plugin function table:
+- **`tzpl_SynthFuns`**: The plugin function table:
   | Function | Required | Purpose |
   |----------|----------|---------|
   | `alloc` | Yes | Allocate a new instance |
@@ -237,10 +237,10 @@ It defines:
   | `noteSetParams` | No | Set note parameters by index-value pairs |
   | `noteSetParamRange` | No | Set a range of note parameters |
 
-- **`jscs_SignalType`**: Describes a port's data format: element type (`i32`/`f32`/`i64`/`f64`),
+- **`tzpl_SignalType`**: Describes a port's data format: element type (`i32`/`f32`/`i64`/`f64`),
   rate (`const`/`init`/`reset`/`event`/`audio`), and channel count.
 
-- **`jscs_SynthDef`**: The static description of a plugin type, provided by the plugin's
+- **`tzpl_SynthDef`**: The static description of a plugin type, provided by the plugin's
   `load` function.
 
 ### Plugin Loading
@@ -264,7 +264,7 @@ Connections require type compatibility:
   are truncated.
 
 
-## 5. Commands (`jscs_command.hpp`, `jscs_command_subclasses.hpp`)
+## 5. Commands (`tzpl_command.hpp`, `tzpl_command_subclasses.hpp`)
 
 ### Command Model
 
@@ -321,7 +321,7 @@ pops commands due at the current `sampleTime_`.
 | `NoteSetParamsCmd` | Set note parameters by index-value pairs |
 
 
-## 6. Cross-Fading (`jscs_xfader.hpp/cpp`)
+## 6. Cross-Fading (`tzpl_xfader.hpp/cpp`)
 
 The crossfader system enables smooth transitions when connections change. It works by
 creating temporary nodes that are transparently spliced into the signal graph.
@@ -419,7 +419,7 @@ the Le, Guatto, Cohen, Pop algorithm (SBAC-PAD 2013).
   floating-point values from the output buffer.
 
 
-## 9. S-Expression Parser (`jscs_sexpr.hpp/cpp`)
+## 9. S-Expression Parser (`tzpl_sexpr.hpp/cpp`)
 
 The engine includes an s-expression parser for text-based command input. An s-expression
 is parsed into `sexpr::Item` values — a variant of `bool`, `int64_t`, `double`, `Symbol`,
@@ -449,7 +449,7 @@ Several plugins are defined directly in `main.cpp` for testing:
 | `MulOp` | Multiplication operator | 2: a (2ch f32 audio), b (2ch f32 audio) | 1: out (2ch f32 audio) |
 
 
-## 11. Client API Summary (`jscs_client_interface.hpp`)
+## 11. Client API Summary (`tzpl_client_interface.hpp`)
 
 ### Engine Lifecycle
 - `newEngine(config, streamParams)` / `freeEngine(e)`

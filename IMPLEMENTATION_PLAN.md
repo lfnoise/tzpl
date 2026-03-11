@@ -10,7 +10,7 @@ This document is a step-by-step plan for integrating the three sub-projects (lan
 
 ### engine
 - Real-time audio engine with CoreAudio/ALSA backends via RtAudio
-- Plugin loading via `dlopen`/`dlsym` of `.dylib` files conforming to `jscs_plugin_abi.h`
+- Plugin loading via `dlopen`/`dlsym` of `.dylib` files conforming to `tzpl_plugin_abi.h`
 - Dynamic graph editing with per-sample topological sort
 - Crossfading system (7 curves) for glitch-free connection changes
 - Lock-free SPSC FIFOs for RT/NRT communication
@@ -21,7 +21,7 @@ This document is a step-by-step plan for integrating the three sub-projects (lan
 - Polyphonic voice management (`Voicer` template)
 - Safety limiter on master output (lookahead, NaN zapping)
 - Builds as static library (`audio_engine_lib`) with install targets
-- Full FFI bridge to Language X (32 functions, 19 marked rtSafe)
+- Full FFI bridge to Tzopilotl (32 functions, 19 marked rtSafe)
 - **Remaining**: OSC support, NATS support, buffer operations (declared but not implemented), audio input (infrastructure exists but stream initialized as output-only), MasterGainCmd/ChannelOffsetCmd (empty struct definitions, no handlers), binary s-expression serialization (commented-out skeleton)
 
 ### synthdef-compiler
@@ -29,7 +29,7 @@ This document is a step-by-step plan for integrating the three sub-projects (lan
 - ~200 audio operators (oscillators, filters, noise, envelopes, math, delays) + 70 primitive math ops + 47 expression node types
 - 14-pass graph analysis pipeline (topology sort, shape/type inference, constant folding, dead code removal, rate scheduling)
 - Algebraic rewrite engine (~100 optimization rules)
-- C++ code generation targeting `jscs_plugin_abi.h`
+- C++ code generation targeting `tzpl_plugin_abi.h`
 - Full compilation pipeline: parse -> analyze -> codegen -> clang compile -> link -> dlopen
 - Hash-consing for common subexpression elimination
 - Multi-channel support with power-of-two broadcasting
@@ -38,7 +38,7 @@ This document is a step-by-step plan for integrating the three sub-projects (lan
 - Polyphonic voicer codegen with flat voice mode optimization
 - Full subgraph s-expression support (if/switch/for)
 - Builds as static library (`synthdef_compiler_lib`) with install targets
-- Full FFI bridge to Language X with compilation caching
+- Full FFI bridge to Tzopilotl with compilation caching
 - Event/note handling codegen implemented (`genEventFun`, `genHandleEventsFun`, `genNoteFuns`)
 - **Remaining**: SIMD codegen (infrastructure present, generation not implemented)
 
@@ -48,7 +48,7 @@ This document is a step-by-step plan for integrating the three sub-projects (lan
 - TLSF O(1) real-time allocator, incremental bounded-pause GC
 - Rich type system: Bool, Int, Float, Symbol, String, Fraction, Complex, Array, List, Range, Tuple, Struct, Enum, Ref, Function, Lambda, Coroutine
 - Template monomorphization, function overloading, auto-mapping, pattern matching
-- C and C++ embedding APIs (`langx.h`, `langx.hpp`)
+- C and C++ embedding APIs (`tzpl.h`, `tzpl.hpp`)
 - Foreign function interface for registering host-provided C functions
 - Module system with all import syntaxes, circular detection, module caching
 - Dynamic scoping (`var \`name = expr`) with zero-overhead save/restore
@@ -56,31 +56,31 @@ This document is a step-by-step plan for integrating the three sub-projects (lan
 - Parser error recovery (synchronization, cascading error suppression)
 - Constant folding, register reclamation, tail call optimization
 - 317 tests, all passing
-- Builds as static library (`langx_lib`) with install targets
+- Builds as static library (`tzpl_lib`) with install targets
 - `callFunction()` API for host-driven function invocation (event handler infrastructure)
 - REPLSession class for interactive evaluation
 - Map type with builtins (get, getDefault, contains, keys, values, copy, merge)
 - **Remaining**: Event-driven VM (dispatch loop, handler registration, hot-reload), error location refinement, general function inlining, I/O functions
 
 ### bridge/
-- `langx_audio_engine_ffi.cpp` — 32 FFI functions wrapping audio engine commands (including `listSynthDefs`)
-- `langx_synthdef_compiler_ffi.cpp` — 2 FFI functions for compile and compile-and-load
-- `modules/audio_engine.x` — Language X enum definitions (Enable, SchedPolicy, FadeCurve, Err)
+- `tzpl_audio_engine_ffi.cpp` — 32 FFI functions wrapping audio engine commands (including `listSynthDefs`)
+- `tzpl_synthdef_compiler_ffi.cpp` — 2 FFI functions for compile and compile-and-load
+- `modules/audio_engine.x` — Tzopilotl enum definitions (Enable, SchedPolicy, FadeCurve, Err)
 - Both bridges build as OBJECT libraries, linked into the app
 
 ### shared/
-- `jscs_plugin_abi.h` — Pure C plugin ABI (used by both engine and synthdef-compiler)
-- `jscs_simd.hpp` — Cross-platform SIMD abstraction (Apple/Linux)
-- `jscs_random.hpp` — xoroshiro128++ PRNG (scalar and SIMD)
-- `jscs_matrix_transform.hpp` — Compile-time matrix operations
-- `jscs_voicer.hpp` — Polyphonic voice management template
-- `jscs_fft.hpp` — Cross-platform FFT wrapper (vDSP/Accelerate on Apple, PFFFT planned for Linux)
+- `tzpl_plugin_abi.h` — Pure C plugin ABI (used by both engine and synthdef-compiler)
+- `tzpl_simd.hpp` — Cross-platform SIMD abstraction (Apple/Linux)
+- `tzpl_random.hpp` — xoroshiro128++ PRNG (scalar and SIMD)
+- `tzpl_matrix_transform.hpp` — Compile-time matrix operations
+- `tzpl_voicer.hpp` — Polyphonic voice management template
+- `tzpl_fft.hpp` — Cross-platform FFT wrapper (vDSP/Accelerate on Apple, PFFFT planned for Linux)
 - `synthdef_plugin_interface.hpp` — Plugin interface definitions
 - Builds as CMake INTERFACE library with install targets
 
 ### app/
-- CLI application (`jscs`) that links all three libraries via FFI bridges
-- Runs Language X scripts with full audio engine and synthdef compiler access
+- CLI application (`tzpl`) that links all three libraries via FFI bridges
+- Runs Tzopilotl scripts with full audio engine and synthdef compiler access
 - Supports project directories with config files and pre-compiled plugin loading
 - No GUI — currently command-line only
 
@@ -92,7 +92,7 @@ This document is a step-by-step plan for integrating the three sub-projects (lan
 
 ### 0.1 Repository structure decision — DONE
 
-Single monorepo with top-level `CMakeLists.txt` (project name: `jscs`, C++23).
+Single monorepo with top-level `CMakeLists.txt` (project name: `tzpl`, C++23).
 
 ```
 A-new-project/
@@ -104,18 +104,18 @@ A-new-project/
 ├── synthdef-compiler/
 │   └── CMakeLists.txt          (builds synthdef_compiler_lib + synthdef-compiler executable)
 ├── lang/
-│   └── CMakeLists.txt          (builds langx_lib + langx executable)
+│   └── CMakeLists.txt          (builds tzpl_lib + tzpl executable)
 ├── bridge/
 │   └── CMakeLists.txt          (builds FFI bridge OBJECT libraries)
 ├── app/
-│   └── CMakeLists.txt          (builds jscs CLI application)
+│   └── CMakeLists.txt          (builds tzpl CLI application)
 └── integration-tests/
     └── CMakeLists.txt          (test_foreign_modules, test_audio_engine_ffi, test_synthdef_compiler_ffi)
 ```
 
 **Completed tasks**:
-1. ~~Create top-level `CMakeLists.txt` that adds each sub-project via `add_subdirectory()`.~~ Done. Build options: `JSCS_BUILD_AUDIO_ENGINE`, `JSCS_BUILD_SYNTHDEF_COMPILER`, `JSCS_BUILD_LANG`, `JSCS_BUILD_BRIDGE`, `JSCS_BUILD_APP` (OFF by default), `JSCS_BUILD_TESTS` (OFF by default).
-2. ~~Refactor each sub-project's CMakeLists.txt to produce a library target.~~ Done. Each sub-project also supports standalone builds via `if(NOT CMAKE_PROJECT_NAME STREQUAL "jscs")` guards.
+1. ~~Create top-level `CMakeLists.txt` that adds each sub-project via `add_subdirectory()`.~~ Done. Build options: `TZPL_BUILD_AUDIO_ENGINE`, `TZPL_BUILD_SYNTHDEF_COMPILER`, `TZPL_BUILD_LANG`, `TZPL_BUILD_BRIDGE`, `TZPL_BUILD_APP` (OFF by default), `TZPL_BUILD_TESTS` (OFF by default).
+2. ~~Refactor each sub-project's CMakeLists.txt to produce a library target.~~ Done. Each sub-project also supports standalone builds via `if(NOT CMAKE_PROJECT_NAME STREQUAL "tzpl")` guards.
 3. ~~Define proper `target_include_directories(PUBLIC ...)` on each library.~~ Done.
 4. ~~Move `shared/` into a proper CMake interface library target.~~ Done.
 5. ~~Clean up legacy/duplicate headers.~~ Done.
@@ -152,22 +152,22 @@ A-new-project/
 
 ### 1.3 lang as a library — DONE
 
-- `langx_lib` static library (16 source files)
-- Public API: `include/langx.h` (C) and `include/langx.hpp` (C++)
-- Separate `langx` executable with linenoise for CLI
+- `tzpl_lib` static library (16 source files)
+- Public API: `include/tzpl.h` (C) and `include/tzpl.hpp` (C++)
+- Separate `tzpl` executable with linenoise for CLI
 - `install()` targets for library, headers, and executable
 
 ---
 
 ## Phase 2: FFI Bindings for Audio Engine — DONE
 
-**Goal**: Register engine client functions as callable from Language X.
+**Goal**: Register engine client functions as callable from Tzopilotl.
 
 ### 2.1 Design the language-side audio API — DONE
 
-Implemented in `bridge/src/langx_audio_engine_ffi.cpp` (447 lines). Functions are registered under the `audio_engine` foreign module namespace. The API exceeds the original specification with 32 functions (vs. 17 planned).
+Implemented in `bridge/src/tzpl_audio_engine_ffi.cpp` (447 lines). Functions are registered under the `audio_engine` foreign module namespace. The API exceeds the original specification with 32 functions (vs. 17 planned).
 
-**Implemented API surface** (Language X syntax):
+**Implemented API surface** (Tzopilotl syntax):
 
 ```
 -- Engine lifecycle
@@ -237,7 +237,7 @@ Integration tests exist in `integration-tests/` (`test_audio_engine_ffi`). End-t
 
 ## Phase 3: FFI Bindings for Synthdef Compiler — DONE
 
-**Goal**: Allow Language X to compile synth definitions at runtime.
+**Goal**: Allow Tzopilotl to compile synth definitions at runtime.
 
 ### 3.1 Design the language-side synthdef API — DONE
 
@@ -256,15 +256,15 @@ Note: The name parameter was removed vs. the original plan — the synth name is
 
 ### 3.2 Implement the FFI bridge — DONE
 
-Implemented in `bridge/src/langx_synthdef_compiler_ffi.cpp` (192 lines). The bridge:
+Implemented in `bridge/src/tzpl_synthdef_compiler_ffi.cpp` (192 lines). The bridge:
 1. ~~Calls `synthdef::synthFromSExprText()`, `synthdef::cppCodeGen()`, and `synthdef::compileAndLink()`.~~ Done.
 2. ~~After compilation, calls `engine::addSynthDef()` to register the def with the engine.~~ Done.
 3. ~~Returns error strings to the language instead of crashing.~~ Done (comprehensive error reporting across all pipeline stages).
 4. ~~Caches compilation results keyed by name + s-expression hash.~~ Done.
 
-### 3.3 Higher-level DSL in Language X — DONE
+### 3.3 Higher-level DSL in Tzopilotl — DONE
 
-A comprehensive Language X module (`lang/modules/synthdef.x`, 1038 lines) provides a high-level DSL for creating synth definitions. It generates s-expressions and provides convenience functions like `play()`, `stop()`, `playFor()`. Imports the `audio_engine` module for playback. Additional modules: `common_ugens.x`, `dsp_math.x`, `example_synthdefs.x`, `filters.x` (biquad filters), `test_vec_ops.x` (vector operation tests).
+A comprehensive Tzopilotl module (`lang/modules/synthdef.x`, 1038 lines) provides a high-level DSL for creating synth definitions. It generates s-expressions and provides convenience functions like `play()`, `stop()`, `playFor()`. Imports the `audio_engine` module for playback. Additional modules: `common_ugens.x`, `dsp_math.x`, `example_synthdefs.x`, `filters.x` (biquad filters), `test_vec_ops.x` (vector operation tests).
 
 ---
 
@@ -335,18 +335,18 @@ Recommendation: **oscpack** or a minimal custom implementation to avoid external
    - `/bundle <time> <messages...>` -> `begin()`/`sched()`
 3. OSC messages are parsed on the listener thread and converted to engine commands via the existing NRT command path (lock-free FIFO to RT thread).
 
-### 5.3 OSC server for Language X VM
+### 5.3 OSC server for Tzopilotl VM
 
 **Tasks**:
 1. Add an OSC listener that can dispatch events to the VM.
 2. Map OSC messages to VM events (ties into Phase 4.2 event-driven VM).
-3. `/eval <code>` — compile and execute a string of Language X code.
+3. `/eval <code>` — compile and execute a string of Tzopilotl code.
 4. `/call <functionName> <args...>` — call a named function.
 
 ### 5.4 OSC client (sending)
 
 **Tasks**:
-1. Add OSC send capability as Language X built-in functions.
+1. Add OSC send capability as Tzopilotl built-in functions.
 2. `fn oscSend(host String, port Int, address String, args Array[Any]) Void;`
 
 ---
@@ -362,7 +362,7 @@ Recommendation: **oscpack** or a minimal custom implementation to avoid external
 2. Integrate NATS client as an NRT service — messages received on NATS are converted to commands and pushed to the engine via the existing FIFO.
 3. Subscribe to subjects for engine commands (similar mapping to OSC addresses).
 
-### 6.2 NATS for Language X
+### 6.2 NATS for Tzopilotl
 
 **Tasks**:
 1. Add `fn natsPub(subject String, data String) Void;` as FFI function.
@@ -382,7 +382,7 @@ Recommendation: **oscpack** or a minimal custom implementation to avoid external
 
 ### 7.1 Buffer operations
 
-The engine declares but doesn't implement: `newBuffer`, `freeBuffer`, `resizeBuffer`, `loadBuffer`, `zeroBuffer`. Function signatures exist in `jscs_client_interface.hpp` but no implementation in the .cpp file.
+The engine declares but doesn't implement: `newBuffer`, `freeBuffer`, `resizeBuffer`, `loadBuffer`, `zeroBuffer`. Function signatures exist in `tzpl_client_interface.hpp` but no implementation in the .cpp file.
 
 **Tasks**:
 1. Implement a buffer pool (pre-allocated memory blocks for audio data).
@@ -392,7 +392,7 @@ The engine declares but doesn't implement: `newBuffer`, `freeBuffer`, `resizeBuf
 
 ### 7.2 Audio input support
 
-RtAudio is configured but input streams are not enabled. Comment in `jscs_silo.cpp`: "will need the same for input node..".
+RtAudio is configured but input streams are not enabled. Comment in `tzpl_silo.cpp`: "will need the same for input node..".
 
 **Tasks**:
 1. Enable input streams in RtAudio configuration.
@@ -401,7 +401,7 @@ RtAudio is configured but input streams are not enabled. Comment in `jscs_silo.c
 
 ### 7.3 MasterGainCmd and ChannelOffsetCmd
 
-Struct definitions exist in `jscs_command_subclasses.hpp` but no command handler logic in Silo processing or command dispatch.
+Struct definitions exist in `tzpl_command_subclasses.hpp` but no command handler logic in Silo processing or command dispatch.
 
 **Tasks**:
 1. Implement master gain control (applied after safety limiter or integrated into it).
@@ -409,7 +409,7 @@ Struct definitions exist in `jscs_command_subclasses.hpp` but no command handler
 
 ### 7.4 Binary s-expression serialization
 
-File `jscs_sexpr_binary_buffer.hpp` exists but contains only commented-out skeleton code. Text-based s-expression parsing is fully implemented.
+File `tzpl_sexpr_binary_buffer.hpp` exists but contains only commented-out skeleton code. Text-based s-expression parsing is fully implemented.
 
 **Tasks**:
 1. Complete the binary parser/serializer for efficient network transport of commands (useful with NATS).
@@ -426,7 +426,7 @@ Infrastructure exists: `max_simd_width = 4`, `unroll_by = 4` in `synthdef_cpp_co
 
 **Tasks**:
 1. Generate SIMD loop bodies for multi-channel synths where channels align to SIMD widths (2, 4, 8).
-2. Use `f64x2`/`f64x4` types from `jscs_simd.hpp`.
+2. Use `f64x2`/`f64x4` types from `tzpl_simd.hpp`.
 3. Generate scalar remainder loops for non-aligned channel counts.
 4. Benchmark against scalar codegen to validate speedup.
 
@@ -450,7 +450,7 @@ Previously listed as stubs, now fully implemented:
 
 Not in the original plan but now implemented:
 - `SpectralChainExpr` and `SpectralFrameInput` expression types
-- Forward/inverse FFT via `jscs_fft_forward()`/`jscs_fft_inverse()` (shared `jscs_fft.hpp`)
+- Forward/inverse FFT via `tzpl_fft_forward()`/`tzpl_fft_inverse()` (shared `tzpl_fft.hpp`)
 - Windowing (Hann, sqrt-Hann) and overlap-add for real-time processing
 - Ring buffer management, hop counter, per-channel FFT operations
 - S-expression parsing via `parseSpectralChainExpr()` and `parseSpectralFrameInput()`
@@ -516,7 +516,7 @@ Test file: `lang/tests/dynamic_scope.x`. Module example: `lang/modules/dynvar.x`
 
 **Goal**: Choose and set up the UI framework.
 
-The app/ directory exists with a CMakeLists.txt and main.cpp, but it is currently a **CLI-only application** (no GUI). It successfully links all three libraries via FFI bridges and can run Language X scripts with audio.
+The app/ directory exists with a CMakeLists.txt and main.cpp, but it is currently a **CLI-only application** (no GUI). It successfully links all three libraries via FFI bridges and can run Tzopilotl scripts with audio.
 
 ### 10.1 Framework evaluation
 
@@ -540,7 +540,7 @@ The app/ directory exists with a CMakeLists.txt and main.cpp, but it is currentl
 1. ~~Create `app/` directory with CMakeLists.txt.~~ Done (CLI only).
 2. Set up Dear ImGui with a Metal backend (macOS) / Vulkan or OpenGL backend (Linux).
 3. Create main application window with basic menu bar.
-4. ~~Link against `libAudioEngine`, `libSynthdefCompiler`, `libLangX`.~~ Done.
+4. ~~Link against `libAudioEngine`, `libSynthdefCompiler`, `libTzopilotl`.~~ Done.
 5. ~~Initialize all three systems at startup.~~ Done (in CLI app).
 
 ---
@@ -555,7 +555,7 @@ The app/ directory exists with a CMakeLists.txt and main.cpp, but it is currentl
 
 **Tasks**:
 1. Integrate ImGuiColorTextEdit (or similar) as the code editor widget.
-2. Add Language X syntax highlighting rules.
+2. Add Tzopilotl syntax highlighting rules.
 3. Add line numbers, current line highlighting, bracket matching.
 4. Support multiple editor tabs for different files/modules.
 
@@ -592,7 +592,7 @@ The app/ directory exists with a CMakeLists.txt and main.cpp, but it is currentl
 ### 12.2 Module browser panel
 
 **Tasks**:
-1. List available Language X modules.
+1. List available Tzopilotl modules.
 2. Show module exports (functions, types).
 3. Click-to-import into current editor.
 
@@ -657,7 +657,7 @@ The app/ directory exists with a CMakeLists.txt and main.cpp, but it is currentl
 **Tasks**:
 1. Display audio thread CPU usage.
 2. Display per-silo load.
-3. Display GC statistics from Language X VM.
+3. Display GC statistics from Tzopilotl VM.
 4. Display command queue depth.
 5. Alert on audio dropouts (buffer underruns).
 
@@ -779,10 +779,10 @@ Phase 0 (Build Infrastructure)       ✅ DONE
 
 2. **UI framework choice** (Phase 10): Dear ImGui is recommended but the project description mentions Qt as an alternative. This should be decided before Phase 10 begins.
 
-3. **Real-time safety across boundaries**: When Language X calls engine functions via FFI, the call chain must remain real-time safe. The bridge functions must not allocate memory or block. The existing TLSF allocator and lock-free FIFOs make this feasible, but it needs careful validation.
+3. **Real-time safety across boundaries**: When Tzopilotl calls engine functions via FFI, the call chain must remain real-time safe. The bridge functions must not allocate memory or block. The existing TLSF allocator and lock-free FIFOs make this feasible, but it needs careful validation.
 
 4. **Compilation latency for synthdef**: Calling clang at runtime to compile synth definitions takes time (100ms-1s+). This must happen on a background thread with the compiled plugin loaded asynchronously. The UI should show compilation status.
 
 5. **Cross-platform audio**: RtAudio handles CoreAudio (macOS) and ALSA (Linux). Windows support via WASAPI/ASIO would be needed for full cross-platform coverage.
 
-6. **Plugin ABI stability**: The `jscs_plugin_abi.h` interface is the contract between all three projects. Changes to it require coordinated updates. Consider versioning the ABI.
+6. **Plugin ABI stability**: The `tzpl_plugin_abi.h` interface is the contract between all three projects. Changes to it require coordinated updates. Consider versioning the ABI.

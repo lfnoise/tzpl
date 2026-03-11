@@ -1,4 +1,4 @@
--- Default Arguments from Language X by Example
+-- Default Arguments from Tzopilotl by Example
 
 -- Basic default value
 fn greet(name String, greeting String = "Hello") String = greeting $ " " $ name;

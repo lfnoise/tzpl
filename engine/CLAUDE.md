@@ -7,24 +7,24 @@ sample-accurate command scheduling.
 
 ## Project Layout
 
-All source files live in `src/` with the `jscs_` prefix.
-The shared plugin ABI header lives in `../shared/jscs_plugin_abi.h`.
+All source files live in `src/` with the `tzpl_` prefix.
+The shared plugin ABI header lives in `../shared/tzpl_plugin_abi.h`.
 
 | File(s) | Role |
 |---------|------|
-| `jscs_client_interface.hpp/cpp` | Public API: engine lifecycle, command bundling, plugin loading |
-| `jscs_engine.hpp/cpp` | Engine struct, safety limiter, built-in node defs, NRT/dead-node threads |
-| `jscs_silo.hpp/cpp` | Parallel processing unit: node tables, topological sort, audio processing, command dispatch |
-| `jscs_node.hpp/cpp` | Node, InPort, OutPort, Control, NodeDef — the graph data model |
-| `jscs_command.hpp`, `jscs_command_subclasses.hpp` | Command base class, scheduler queue, all concrete command types |
-| `jscs_xfader.hpp/cpp` | Crossfader node: 7 fade curves, automatic splice-in/splice-out |
-| `jscs_atomic_fifo.hpp` | Lock-free SPSC FIFO for RT-safe inter-thread communication |
-| `jscs_sexpr.hpp/cpp` | S-expression parser for text-based commands |
-| `jscs_common.hpp` | Type aliases (`f32`, `i64`, SIMD types) |
-| `jscs_hash.hpp` | 64-bit hash function for node/def lookup |
-| `jscs_random.hpp` | xoroshiro128++ PRNG, SIMD-templated |
-| `jscs_complex.hpp` | Complex number utilities |
-| `jscs_plugin_interface.hpp` | Legacy/reference plugin helpers (mostly commented out) |
+| `tzpl_client_interface.hpp/cpp` | Public API: engine lifecycle, command bundling, plugin loading |
+| `tzpl_engine.hpp/cpp` | Engine struct, safety limiter, built-in node defs, NRT/dead-node threads |
+| `tzpl_silo.hpp/cpp` | Parallel processing unit: node tables, topological sort, audio processing, command dispatch |
+| `tzpl_node.hpp/cpp` | Node, InPort, OutPort, Control, NodeDef — the graph data model |
+| `tzpl_command.hpp`, `tzpl_command_subclasses.hpp` | Command base class, scheduler queue, all concrete command types |
+| `tzpl_xfader.hpp/cpp` | Crossfader node: 7 fade curves, automatic splice-in/splice-out |
+| `tzpl_atomic_fifo.hpp` | Lock-free SPSC FIFO for RT-safe inter-thread communication |
+| `tzpl_sexpr.hpp/cpp` | S-expression parser for text-based commands |
+| `tzpl_common.hpp` | Type aliases (`f32`, `i64`, SIMD types) |
+| `tzpl_hash.hpp` | 64-bit hash function for node/def lookup |
+| `tzpl_random.hpp` | xoroshiro128++ PRNG, SIMD-templated |
+| `tzpl_complex.hpp` | Complex number utilities |
+| `tzpl_plugin_interface.hpp` | Legacy/reference plugin helpers (mostly commented out) |
 | `main.cpp` | Test code, built-in plugins (VoicerTest, SinOsc, AddOp, MulOp), Voicer template |
 | `RtAudio.h/cpp` | Third-party cross-platform audio I/O (CoreAudio on macOS) |
 
@@ -55,8 +55,8 @@ The shared plugin ABI header lives in `../shared/jscs_plugin_abi.h`.
 ## Plugin ABI
 
 Plugins are `.dylib` files exporting a `load` function. The stable C ABI is defined in
-`../shared/jscs_plugin_abi.h`. Plugins extend `jscs_SynthData` with custom fields and
-provide a `jscs_SynthFuns` function table (alloc, free, init, processAudio, noteOn, etc.).
+`../shared/tzpl_plugin_abi.h`. Plugins extend `tzpl_SynthData` with custom fields and
+provide a `tzpl_SynthFuns` function table (alloc, free, init, processAudio, noteOn, etc.).
 
 ## Thread Safety Rules
 

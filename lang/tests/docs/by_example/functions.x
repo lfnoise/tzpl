@@ -1,4 +1,4 @@
--- Functions from Language X by Example
+-- Functions from Tzopilotl by Example
 
 -- Block body
 fn max(a Int, b Int) Int {

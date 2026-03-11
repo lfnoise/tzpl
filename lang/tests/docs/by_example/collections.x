@@ -1,4 +1,4 @@
--- Collection Types from Language X by Example
+-- Collection Types from Tzopilotl by Example
 
 -- Array literals
 let nums = [1, 2, 3, 4, 5];

@@ -1,4 +1,4 @@
--- Operators from Language X by Example
+-- Operators from Tzopilotl by Example
 
 -- Arithmetic
 println(3 + 4);

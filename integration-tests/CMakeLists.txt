@@ -6,16 +6,16 @@ add_executable(test_foreign_modules
 )
 
 target_link_libraries(test_foreign_modules
-    PRIVATE langx_lib
+    PRIVATE tzpl_lib
 )
 
 add_executable(test_audio_engine_ffi
     src/test_audio_engine_ffi.cpp
-    ${CMAKE_SOURCE_DIR}/engine/src/jscs_test_plugins.cpp
+    ${CMAKE_SOURCE_DIR}/engine/src/tzpl_test_plugins.cpp
 )
 
 target_link_libraries(test_audio_engine_ffi
-    PRIVATE langx_audio_engine_bridge
+    PRIVATE tzpl_audio_engine_bridge
 )
 
 target_compile_definitions(test_audio_engine_ffi PRIVATE
@@ -23,15 +23,15 @@ target_compile_definitions(test_audio_engine_ffi PRIVATE
     MODULES_DIR="${CMAKE_SOURCE_DIR}/bridge/modules"
 )
 
-if(TARGET langx_synthdef_compiler_bridge)
+if(TARGET tzpl_synthdef_compiler_bridge)
     add_executable(test_synthdef_compiler_ffi
         src/test_synthdef_compiler_ffi.cpp
-        ${CMAKE_SOURCE_DIR}/engine/src/jscs_test_plugins.cpp
+        ${CMAKE_SOURCE_DIR}/engine/src/tzpl_test_plugins.cpp
     )
 
     target_link_libraries(test_synthdef_compiler_ffi
-        PRIVATE langx_synthdef_compiler_bridge
-        PRIVATE langx_audio_engine_bridge
+        PRIVATE tzpl_synthdef_compiler_bridge
+        PRIVATE tzpl_audio_engine_bridge
     )
 
     target_compile_definitions(test_synthdef_compiler_ffi PRIVATE

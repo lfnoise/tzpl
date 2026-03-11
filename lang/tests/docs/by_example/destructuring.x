@@ -1,4 +1,4 @@
--- Destructuring from Language X by Example
+-- Destructuring from Tzopilotl by Example
 
 -- Tuple destructuring
 let (x, y) = (1, 2);

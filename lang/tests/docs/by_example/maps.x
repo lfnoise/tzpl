@@ -1,4 +1,4 @@
--- Maps from Language X by Example
+-- Maps from Tzopilotl by Example
 
 -- Create a map with [key: value] syntax
 let ages = ["Alice": 30, "Bob": 25, "Carol": 35];

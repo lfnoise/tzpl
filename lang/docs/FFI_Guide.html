@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Language X &mdash; Foreign Function Interface Guide</title>
+<title>Tzopilotl &mdash; Foreign Function Interface Guide</title>
 <style>
   :root {
     --bg: #1a1b26;
@@ -319,7 +319,7 @@
   }
 </style>
 <script>
-if (localStorage.getItem('langx-docs-theme') === 'light') document.documentElement.classList.add('light');
+if (localStorage.getItem('tzpl-docs-theme') === 'light') document.documentElement.classList.add('light');
 </script>
 </head>
 <body>
@@ -397,22 +397,22 @@ if (localStorage.getItem('langx-docs-theme') === 'light') document.documentEleme
 
 <main>
 
-<h1>Language X &mdash; Foreign Function Interface</h1>
-<p class="subtitle">Comprehensive guide to embedding Language X and extending it with native functions.</p>
+<h1>Tzopilotl &mdash; Foreign Function Interface</h1>
+<p class="subtitle">Comprehensive guide to embedding Tzopilotl and extending it with native functions.</p>
 
 <!-- ================================================================ -->
 <h2 id="overview">1. Overview</h2>
 
-<p>The Language X FFI enables two-way communication between host C/C++ code and the Language X interpreter:</p>
+<p>The Tzopilotl FFI enables two-way communication between host C/C++ code and the Tzopilotl interpreter:</p>
 
 <ul>
-  <li><strong>Host &rarr; VM:</strong> Register native C/C++ functions that Language X code calls as ordinary functions (e.g., audio DSP primitives, hardware I/O).</li>
-  <li><strong>VM &rarr; Host:</strong> Call compiled Language X functions by name from host code (e.g., invoke an event handler from an audio callback).</li>
+  <li><strong>Host &rarr; VM:</strong> Register native C/C++ functions that Tzopilotl code calls as ordinary functions (e.g., audio DSP primitives, hardware I/O).</li>
+  <li><strong>VM &rarr; Host:</strong> Call compiled Tzopilotl functions by name from host code (e.g., invoke an event handler from an audio callback).</li>
 </ul>
 
 <p>The FFI also provides <strong>compile-time real-time safety enforcement</strong>: when compiling for a real-time VM, the type checker rejects any call to a function marked as non-RT-safe, guaranteeing that compiled RT code never calls a blocking function.</p>
 
-<p>Both a <strong>C++ API</strong> (via <code>langx.hpp</code>) and a <strong>C API</strong> (via <code>langx.h</code>) are provided. The C API wraps the C++ implementation with opaque handle types, making it suitable for use from C, Objective-C, Swift, and any language with a C FFI.</p>
+<p>Both a <strong>C++ API</strong> (via <code>tzpl.hpp</code>) and a <strong>C API</strong> (via <code>tzpl.h</code>) are provided. The C API wraps the C++ implementation with opaque handle types, making it suitable for use from C, Objective-C, Swift, and any language with a C FFI.</p>
 
 
 <!-- ================================================================ -->
@@ -421,7 +421,7 @@ if (localStorage.getItem('langx-docs-theme') === 'light') document.documentEleme
 <!-- -------------------------------- -->
 <h3 id="object-model">2.1 Object Model</h3>
 
-<p>Language X has a three-object architecture:</p>
+<p>Tzopilotl has a three-object architecture:</p>
 
 <table>
   <tr>
@@ -500,20 +500,20 @@ if (localStorage.getItem('langx-docs-theme') === 'light') document.documentEleme
     <span class="typ">Obj</span>*      o;   <span class="cmt">// GC-managed object pointer</span>
 };
 
-<span class="cmt">// C (langx.h)</span>
-<span class="kw">typedef union</span> { <span class="typ">int64_t</span> i; <span class="typ">double</span> f; <span class="kw">void</span>* p; } <span class="typ">langx_word</span>;</code></pre>
+<span class="cmt">// C (tzpl.h)</span>
+<span class="kw">typedef union</span> { <span class="typ">int64_t</span> i; <span class="typ">double</span> f; <span class="kw">void</span>* p; } <span class="typ">tzpl_word</span>;</code></pre>
 
 
 <!-- ================================================================ -->
 <h2 id="cpp-api">3. C++ Embedding API</h2>
 
-<p>Include <code>&lt;langx.hpp&gt;</code> for the complete C++ embedding interface. All symbols are in the <code>ts</code> namespace.</p>
+<p>Include <code>&lt;tzpl.hpp&gt;</code> for the complete C++ embedding interface. All symbols are in the <code>ts</code> namespace.</p>
 
 
 <!-- -------------------------------- -->
 <h3 id="cpp-setup">3.1 Setup &amp; Lifecycle</h3>
 
-<pre><code><span class="kw">#include</span> <span class="str">&lt;langx.hpp&gt;</span>
+<pre><code><span class="kw">#include</span> <span class="str">&lt;tzpl.hpp&gt;</span>
 
 <span class="cmt">// 1. Create shared type universe (once per process)</span>
 ts::<span class="typ">TypeUniverse</span> types;
@@ -555,7 +555,7 @@ ts::<span class="typ">VM</span> vm(<span class="num">64</span> * <span class="nu
 
 <span class="cmt">// Register with the compiler</span>
 compiler.<span class="fn">registerForeignFunction</span>(
-    <span class="str">"addTen"</span>,                           <span class="cmt">// name in Language X</span>
+    <span class="str">"addTen"</span>,                           <span class="cmt">// name in Tzopilotl</span>
     types.<span class="fn">types</span>().intType,               <span class="cmt">// return type: Int</span>
     { types.<span class="fn">types</span>().intType },            <span class="cmt">// param types: (Int)</span>
     addTen,                              <span class="cmt">// function pointer</span>
@@ -563,9 +563,9 @@ compiler.<span class="fn">registerForeignFunction</span>(
     <span class="kw">true</span>                                 <span class="cmt">// RT-safe</span>
 );</code></pre>
 
-<p>After registration, Language X code can call <code>addTen</code> as an ordinary function:</p>
+<p>After registration, Tzopilotl code can call <code>addTen</code> as an ordinary function:</p>
 
-<pre><code><span class="cmt">-- Language X source</span>
+<pre><code><span class="cmt">-- Tzopilotl source</span>
 <span class="kw">let</span> result = <span class="fn">addTen</span>(<span class="num">32</span>);   <span class="cmt">-- result = 42</span></code></pre>
 
 <h4><code>registerForeignFunction</code> signature</h4>
@@ -628,7 +628,7 @@ vm.<span class="fn">execute</span>(result.mainBlock);</code></pre>
 <!-- -------------------------------- -->
 <h3 id="cpp-call-into-vm">3.4 Calling Language Functions from the Host</h3>
 
-<p>After compiling and installing, the host can call Language X functions by name using <code>VM::callFunction()</code>. The <code>CompileResult</code> contains metadata about all exported functions.</p>
+<p>After compiling and installing, the host can call Tzopilotl functions by name using <code>VM::callFunction()</code>. The <code>CompileResult</code> contains metadata about all exported functions.</p>
 
 <h4>Step 1: Find the function</h4>
 
@@ -696,14 +696,14 @@ vm.<span class="fn">setUserData</span>(&amp;engine);
 }</code></pre>
 
 <div class="note">
-  <strong>Note:</strong> When using the C API, <code>langx_vm_create()</code> automatically stores the wrapper pointer in <code>userData</code>. If you call <code>langx_vm_set_user_data()</code>, you will overwrite this internal pointer. The C API's foreign function trampoline uses <code>userData</code> to recover the <code>langx_vm*</code> wrapper, so setting user data from C requires care. For C API usage, prefer storing host state in a struct and passing a pointer to it via the <code>langx_vm_set_user_data()</code> mechanism (the trampoline is designed to work even when user data is replaced, since it recovers the C callback pointer from <code>ffiData_</code> on the <code>Primitive</code>).
+  <strong>Note:</strong> When using the C API, <code>tzpl_vm_create()</code> automatically stores the wrapper pointer in <code>userData</code>. If you call <code>tzpl_vm_set_user_data()</code>, you will overwrite this internal pointer. The C API's foreign function trampoline uses <code>userData</code> to recover the <code>tzpl_vm*</code> wrapper, so setting user data from C requires care. For C API usage, prefer storing host state in a struct and passing a pointer to it via the <code>tzpl_vm_set_user_data()</code> mechanism (the trampoline is designed to work even when user data is replaced, since it recovers the C callback pointer from <code>ffiData_</code> on the <code>Primitive</code>).
 </div>
 
 
 <!-- -------------------------------- -->
 <h3 id="cpp-full-example">3.6 Full C++ Example</h3>
 
-<pre><code><span class="kw">#include</span> <span class="str">&lt;langx.hpp&gt;</span>
+<pre><code><span class="kw">#include</span> <span class="str">&lt;tzpl.hpp&gt;</span>
 <span class="kw">#include</span> <span class="str">&lt;iostream&gt;</span>
 
 <span class="cmt">// Foreign function: clamp(x: Float, lo: Float, hi: Float) -&gt; Float</span>
@@ -761,7 +761,7 @@ vm.<span class="fn">setUserData</span>(&amp;engine);
 <!-- -------------------------------- -->
 <h3 id="cpp-obj-accessors">3.7 Object Accessors</h3>
 
-<p>When a foreign function receives an object-typed argument (String, Fraction, Complex, Array, Tuple, or Struct), the register contains an <code>Obj*</code> pointer. The accessor API in <code>&lt;langx.hpp&gt;</code> provides type-safe functions to read data from these objects without needing to include internal headers:</p>
+<p>When a foreign function receives an object-typed argument (String, Fraction, Complex, Array, Tuple, or Struct), the register contains an <code>Obj*</code> pointer. The accessor API in <code>&lt;tzpl.hpp&gt;</code> provides type-safe functions to read data from these objects without needing to include internal headers:</p>
 
 <h4>String</h4>
 
@@ -836,20 +836,20 @@ ts::<span class="typ">Word</span> w = ts::<span class="fn">structGetField</span>
 <!-- ================================================================ -->
 <h2 id="c-api">4. C Embedding API</h2>
 
-<p>Include <code>&lt;langx.h&gt;</code> for the C embedding interface. All functions are prefixed with <code>langx_</code>.</p>
+<p>Include <code>&lt;tzpl.h&gt;</code> for the C embedding interface. All functions are prefixed with <code>tzpl_</code>.</p>
 
 
 <!-- -------------------------------- -->
 <h3 id="c-types">4.1 Opaque Types &amp; Handles</h3>
 
-<pre><code><span class="kw">typedef struct</span> <span class="typ">langx_type_universe</span> <span class="typ">langx_type_universe</span>;
-<span class="kw">typedef struct</span> <span class="typ">langx_compiler</span>      <span class="typ">langx_compiler</span>;
-<span class="kw">typedef struct</span> <span class="typ">langx_vm</span>            <span class="typ">langx_vm</span>;
-<span class="kw">typedef struct</span> <span class="typ">langx_compile_result</span> <span class="typ">langx_compile_result</span>;
-<span class="kw">typedef struct</span> <span class="typ">langx_vm_target</span>     <span class="typ">langx_vm_target</span>;
-<span class="kw">typedef struct</span> { <span class="kw">void</span>* ptr; }       <span class="typ">langx_obj_handle</span>;   <span class="cmt">// opaque object handle</span>
-<span class="kw">typedef struct</span> { <span class="kw">void</span>* ptr; }       <span class="typ">langx_type_handle</span>;
-<span class="kw">typedef union</span>  { <span class="typ">int64_t</span> i; <span class="typ">double</span> f; <span class="kw">void</span>* p; } <span class="typ">langx_word</span>;</code></pre>
+<pre><code><span class="kw">typedef struct</span> <span class="typ">tzpl_type_universe</span> <span class="typ">tzpl_type_universe</span>;
+<span class="kw">typedef struct</span> <span class="typ">tzpl_compiler</span>      <span class="typ">tzpl_compiler</span>;
+<span class="kw">typedef struct</span> <span class="typ">tzpl_vm</span>            <span class="typ">tzpl_vm</span>;
+<span class="kw">typedef struct</span> <span class="typ">tzpl_compile_result</span> <span class="typ">tzpl_compile_result</span>;
+<span class="kw">typedef struct</span> <span class="typ">tzpl_vm_target</span>     <span class="typ">tzpl_vm_target</span>;
+<span class="kw">typedef struct</span> { <span class="kw">void</span>* ptr; }       <span class="typ">tzpl_obj_handle</span>;   <span class="cmt">// opaque object handle</span>
+<span class="kw">typedef struct</span> { <span class="kw">void</span>* ptr; }       <span class="typ">tzpl_type_handle</span>;
+<span class="kw">typedef union</span>  { <span class="typ">int64_t</span> i; <span class="typ">double</span> f; <span class="kw">void</span>* p; } <span class="typ">tzpl_word</span>;</code></pre>
 
 <p>These are opaque wrappers around the C++ implementation. The host never accesses internal fields directly.</p>
 
@@ -858,49 +858,49 @@ ts::<span class="typ">Word</span> w = ts::<span class="fn">structGetField</span>
 <h3 id="c-lifecycle">4.2 Lifecycle</h3>
 
 <pre><code><span class="cmt">/* Create */</span>
-<span class="typ">langx_type_universe</span>* types    = <span class="fn">langx_type_universe_create</span>();
-<span class="typ">langx_compiler</span>*      compiler = <span class="fn">langx_compiler_create</span>(types);
-<span class="typ">langx_vm_target</span>*     target   = <span class="fn">langx_create_target</span>(compiler, <span class="num">0</span>);
-<span class="typ">langx_vm</span>*            vm       = <span class="fn">langx_vm_create</span>(<span class="num">64</span> * <span class="num">1024</span> * <span class="num">1024</span>, types, target);
+<span class="typ">tzpl_type_universe</span>* types    = <span class="fn">tzpl_type_universe_create</span>();
+<span class="typ">tzpl_compiler</span>*      compiler = <span class="fn">tzpl_compiler_create</span>(types);
+<span class="typ">tzpl_vm_target</span>*     target   = <span class="fn">tzpl_create_target</span>(compiler, <span class="num">0</span>);
+<span class="typ">tzpl_vm</span>*            vm       = <span class="fn">tzpl_vm_create</span>(<span class="num">64</span> * <span class="num">1024</span> * <span class="num">1024</span>, types, target);
 
 <span class="cmt">/* Compile */</span>
-<span class="typ">langx_compile_result</span>* result = <span class="fn">langx_compile</span>(compiler, source, <span class="str">"file.x"</span>, target);
+<span class="typ">tzpl_compile_result</span>* result = <span class="fn">tzpl_compile</span>(compiler, source, <span class="str">"file.x"</span>, target);
 
-<span class="kw">if</span> (<span class="fn">langx_compile_result_success</span>(result)) {
-    <span class="fn">langx_vm_install</span>(vm, result);
-    <span class="fn">langx_vm_execute</span>(vm, result);
+<span class="kw">if</span> (<span class="fn">tzpl_compile_result_success</span>(result)) {
+    <span class="fn">tzpl_vm_install</span>(vm, result);
+    <span class="fn">tzpl_vm_execute</span>(vm, result);
 }
 
 <span class="cmt">/* Cleanup (reverse order) */</span>
-<span class="fn">langx_compile_result_destroy</span>(result);
-<span class="fn">langx_vm_destroy</span>(vm);
-<span class="fn">langx_target_destroy</span>(target);
-<span class="fn">langx_compiler_destroy</span>(compiler);
-<span class="fn">langx_type_universe_destroy</span>(types);</code></pre>
+<span class="fn">tzpl_compile_result_destroy</span>(result);
+<span class="fn">tzpl_vm_destroy</span>(vm);
+<span class="fn">tzpl_target_destroy</span>(target);
+<span class="fn">tzpl_compiler_destroy</span>(compiler);
+<span class="fn">tzpl_type_universe_destroy</span>(types);</code></pre>
 
 
 <!-- -------------------------------- -->
 <h3 id="c-register">4.3 Registering Foreign Functions</h3>
 
-<p>C foreign functions receive a <code>langx_vm*</code> (not a C++ reference) and use accessor functions to read/write registers:</p>
+<p>C foreign functions receive a <code>tzpl_vm*</code> (not a C++ reference) and use accessor functions to read/write registers:</p>
 
 <pre><code><span class="cmt">/* C foreign function signature */</span>
-<span class="kw">typedef void</span> (*<span class="typ">langx_cfun</span>)(<span class="typ">langx_vm</span>* vm, <span class="typ">uint16_t</span> result_reg,
+<span class="kw">typedef void</span> (*<span class="typ">tzpl_cfun</span>)(<span class="typ">tzpl_vm</span>* vm, <span class="typ">uint16_t</span> result_reg,
                             <span class="typ">uint16_t</span> argc, <span class="typ">uint16_t</span> arg_base);</code></pre>
 
 <h4>Example</h4>
 
 <pre><code><span class="cmt">/* addTen(x: Int) -&gt; Int */</span>
-<span class="kw">void</span> <span class="fn">my_add_ten</span>(<span class="typ">langx_vm</span>* vm, <span class="typ">uint16_t</span> dst,
+<span class="kw">void</span> <span class="fn">my_add_ten</span>(<span class="typ">tzpl_vm</span>* vm, <span class="typ">uint16_t</span> dst,
                  <span class="typ">uint16_t</span> argc, <span class="typ">uint16_t</span> arg_base) {
-    <span class="typ">int64_t</span> x = <span class="fn">langx_vm_reg_int</span>(vm, arg_base, arg_base);
-    <span class="fn">langx_vm_set_reg_int</span>(vm, dst, x + <span class="num">10</span>);
+    <span class="typ">int64_t</span> x = <span class="fn">tzpl_vm_reg_int</span>(vm, arg_base, arg_base);
+    <span class="fn">tzpl_vm_set_reg_int</span>(vm, dst, x + <span class="num">10</span>);
 }
 
 <span class="cmt">/* Register it */</span>
-<span class="typ">langx_type_handle</span> int_type = <span class="fn">langx_type_int</span>(types);
+<span class="typ">tzpl_type_handle</span> int_type = <span class="fn">tzpl_type_int</span>(types);
 
-<span class="fn">langx_register_foreign_function</span>(
+<span class="fn">tzpl_register_foreign_function</span>(
     compiler,
     <span class="str">"addTen"</span>,       <span class="cmt">/* name */</span>
     int_type,        <span class="cmt">/* return type */</span>
@@ -919,12 +919,12 @@ ts::<span class="typ">Word</span> w = ts::<span class="fn">structGetField</span>
 
 <table>
   <tr><th>Function</th><th>Language Type</th><th>Word Field</th></tr>
-  <tr><td><code>langx_type_int(types)</code></td><td><code>Int</code></td><td><code>.i</code></td></tr>
-  <tr><td><code>langx_type_float(types)</code></td><td><code>Float</code></td><td><code>.f</code></td></tr>
-  <tr><td><code>langx_type_bool(types)</code></td><td><code>Bool</code></td><td><code>.i</code> (0 or 1)</td></tr>
-  <tr><td><code>langx_type_string(types)</code></td><td><code>String</code></td><td><code>.o</code></td></tr>
-  <tr><td><code>langx_type_symbol(types)</code></td><td><code>Symbol</code></td><td><code>.s</code></td></tr>
-  <tr><td><code>langx_type_void(types)</code></td><td><code>Void</code></td><td>(none)</td></tr>
+  <tr><td><code>tzpl_type_int(types)</code></td><td><code>Int</code></td><td><code>.i</code></td></tr>
+  <tr><td><code>tzpl_type_float(types)</code></td><td><code>Float</code></td><td><code>.f</code></td></tr>
+  <tr><td><code>tzpl_type_bool(types)</code></td><td><code>Bool</code></td><td><code>.i</code> (0 or 1)</td></tr>
+  <tr><td><code>tzpl_type_string(types)</code></td><td><code>String</code></td><td><code>.o</code></td></tr>
+  <tr><td><code>tzpl_type_symbol(types)</code></td><td><code>Symbol</code></td><td><code>.s</code></td></tr>
+  <tr><td><code>tzpl_type_void(types)</code></td><td><code>Void</code></td><td>(none)</td></tr>
 </table>
 
 
@@ -934,14 +934,14 @@ ts::<span class="typ">Word</span> w = ts::<span class="fn">structGetField</span>
 <p>Within a C foreign function, use these to read arguments and write results:</p>
 
 <pre><code><span class="cmt">/* Read argument registers */</span>
-<span class="typ">int64_t</span>          <span class="fn">langx_vm_reg_int</span>  (<span class="typ">langx_vm</span>* vm, <span class="typ">uint16_t</span> base, <span class="typ">uint16_t</span> reg);
-<span class="typ">double</span>           <span class="fn">langx_vm_reg_float</span>(<span class="typ">langx_vm</span>* vm, <span class="typ">uint16_t</span> base, <span class="typ">uint16_t</span> reg);
-<span class="typ">langx_obj_handle</span> <span class="fn">langx_vm_reg_obj</span>  (<span class="typ">langx_vm</span>* vm, <span class="typ">uint16_t</span> base, <span class="typ">uint16_t</span> reg);
+<span class="typ">int64_t</span>          <span class="fn">tzpl_vm_reg_int</span>  (<span class="typ">tzpl_vm</span>* vm, <span class="typ">uint16_t</span> base, <span class="typ">uint16_t</span> reg);
+<span class="typ">double</span>           <span class="fn">tzpl_vm_reg_float</span>(<span class="typ">tzpl_vm</span>* vm, <span class="typ">uint16_t</span> base, <span class="typ">uint16_t</span> reg);
+<span class="typ">tzpl_obj_handle</span> <span class="fn">tzpl_vm_reg_obj</span>  (<span class="typ">tzpl_vm</span>* vm, <span class="typ">uint16_t</span> base, <span class="typ">uint16_t</span> reg);
 
 <span class="cmt">/* Write result register */</span>
-<span class="kw">void</span> <span class="fn">langx_vm_set_reg_int</span>  (<span class="typ">langx_vm</span>* vm, <span class="typ">uint16_t</span> reg, <span class="typ">int64_t</span> val);
-<span class="kw">void</span> <span class="fn">langx_vm_set_reg_float</span>(<span class="typ">langx_vm</span>* vm, <span class="typ">uint16_t</span> reg, <span class="typ">double</span> val);
-<span class="kw">void</span> <span class="fn">langx_vm_set_reg_obj</span>  (<span class="typ">langx_vm</span>* vm, <span class="typ">uint16_t</span> reg, <span class="typ">langx_obj_handle</span> obj);</code></pre>
+<span class="kw">void</span> <span class="fn">tzpl_vm_set_reg_int</span>  (<span class="typ">tzpl_vm</span>* vm, <span class="typ">uint16_t</span> reg, <span class="typ">int64_t</span> val);
+<span class="kw">void</span> <span class="fn">tzpl_vm_set_reg_float</span>(<span class="typ">tzpl_vm</span>* vm, <span class="typ">uint16_t</span> reg, <span class="typ">double</span> val);
+<span class="kw">void</span> <span class="fn">tzpl_vm_set_reg_obj</span>  (<span class="typ">tzpl_vm</span>* vm, <span class="typ">uint16_t</span> reg, <span class="typ">tzpl_obj_handle</span> obj);</code></pre>
 
 <div class="tip">
   <strong>Tip:</strong> The <code>base</code> parameter in the read functions is currently unused (reserved for future stack frame support). Pass <code>arg_base</code> for consistency.
@@ -950,44 +950,44 @@ ts::<span class="typ">Word</span> w = ts::<span class="fn">structGetField</span>
 <h4>Reading arguments pattern</h4>
 
 <pre><code><span class="cmt">/* For a function f(a: Int, b: Float, c: Int): */</span>
-<span class="typ">int64_t</span> a = <span class="fn">langx_vm_reg_int</span>  (vm, arg_base, arg_base + <span class="num">0</span>);
-<span class="typ">double</span>  b = <span class="fn">langx_vm_reg_float</span>(vm, arg_base, arg_base + <span class="num">1</span>);
-<span class="typ">int64_t</span> c = <span class="fn">langx_vm_reg_int</span>  (vm, arg_base, arg_base + <span class="num">2</span>);</code></pre>
+<span class="typ">int64_t</span> a = <span class="fn">tzpl_vm_reg_int</span>  (vm, arg_base, arg_base + <span class="num">0</span>);
+<span class="typ">double</span>  b = <span class="fn">tzpl_vm_reg_float</span>(vm, arg_base, arg_base + <span class="num">1</span>);
+<span class="typ">int64_t</span> c = <span class="fn">tzpl_vm_reg_int</span>  (vm, arg_base, arg_base + <span class="num">2</span>);</code></pre>
 
 
 <!-- -------------------------------- -->
 <h3 id="c-obj-accessors">4.6 Object Accessors</h3>
 
-<p>The C API provides accessor functions for reading data from object-typed values. First obtain a <code>langx_obj_handle</code> from a register, then use the appropriate accessor:</p>
+<p>The C API provides accessor functions for reading data from object-typed values. First obtain a <code>tzpl_obj_handle</code> from a register, then use the appropriate accessor:</p>
 
 <h4>Obtaining an object handle</h4>
 
 <pre><code><span class="cmt">/* Read an object argument */</span>
-<span class="typ">langx_obj_handle</span> obj = <span class="fn">langx_vm_reg_obj</span>(vm, arg_base, arg_base + <span class="num">0</span>);</code></pre>
+<span class="typ">tzpl_obj_handle</span> obj = <span class="fn">tzpl_vm_reg_obj</span>(vm, arg_base, arg_base + <span class="num">0</span>);</code></pre>
 
 <h4>String</h4>
 
-<pre><code><span class="kw">const char</span>* data = <span class="fn">langx_string_data</span>(obj);   <span class="cmt">/* pointer to UTF-8 bytes */</span>
-<span class="typ">size_t</span>      len  = <span class="fn">langx_string_size</span>(obj);   <span class="cmt">/* byte length */</span></code></pre>
+<pre><code><span class="kw">const char</span>* data = <span class="fn">tzpl_string_data</span>(obj);   <span class="cmt">/* pointer to UTF-8 bytes */</span>
+<span class="typ">size_t</span>      len  = <span class="fn">tzpl_string_size</span>(obj);   <span class="cmt">/* byte length */</span></code></pre>
 
 <h4>Fraction</h4>
 
-<pre><code><span class="typ">int64_t</span> n = <span class="fn">langx_fraction_numer</span>(obj);   <span class="cmt">/* numerator */</span>
-<span class="typ">int64_t</span> d = <span class="fn">langx_fraction_denom</span>(obj);   <span class="cmt">/* denominator */</span></code></pre>
+<pre><code><span class="typ">int64_t</span> n = <span class="fn">tzpl_fraction_numer</span>(obj);   <span class="cmt">/* numerator */</span>
+<span class="typ">int64_t</span> d = <span class="fn">tzpl_fraction_denom</span>(obj);   <span class="cmt">/* denominator */</span></code></pre>
 
 <h4>Complex</h4>
 
-<pre><code><span class="typ">double</span> re = <span class="fn">langx_complex_real</span>(obj);   <span class="cmt">/* real part */</span>
-<span class="typ">double</span> im = <span class="fn">langx_complex_imag</span>(obj);   <span class="cmt">/* imaginary part */</span></code></pre>
+<pre><code><span class="typ">double</span> re = <span class="fn">tzpl_complex_real</span>(obj);   <span class="cmt">/* real part */</span>
+<span class="typ">double</span> im = <span class="fn">tzpl_complex_imag</span>(obj);   <span class="cmt">/* imaginary part */</span></code></pre>
 
 <h4>Array</h4>
 
-<pre><code><span class="typ">size_t</span> len = <span class="fn">langx_array_size</span>(obj);
+<pre><code><span class="typ">size_t</span> len = <span class="fn">tzpl_array_size</span>(obj);
 
 <span class="cmt">/* Use the getter matching the element type: */</span>
-<span class="typ">int64_t</span>          val = <span class="fn">langx_array_get_int</span>(obj, i);     <span class="cmt">/* for [Int] or [Bool] */</span>
-<span class="typ">double</span>           val = <span class="fn">langx_array_get_float</span>(obj, i);   <span class="cmt">/* for [Float] */</span>
-<span class="typ">langx_obj_handle</span> val = <span class="fn">langx_array_get_obj</span>(obj, i);     <span class="cmt">/* for [String] etc. */</span></code></pre>
+<span class="typ">int64_t</span>          val = <span class="fn">tzpl_array_get_int</span>(obj, i);     <span class="cmt">/* for [Int] or [Bool] */</span>
+<span class="typ">double</span>           val = <span class="fn">tzpl_array_get_float</span>(obj, i);   <span class="cmt">/* for [Float] */</span>
+<span class="typ">tzpl_obj_handle</span> val = <span class="fn">tzpl_array_get_obj</span>(obj, i);     <span class="cmt">/* for [String] etc. */</span></code></pre>
 
 <div class="note">
   <strong>Note:</strong> Out-of-bounds access returns <code>0</code>, <code>0.0</code>, or a null handle respectively.
@@ -995,104 +995,104 @@ ts::<span class="typ">Word</span> w = ts::<span class="fn">structGetField</span>
 
 <h4>Tuple</h4>
 
-<pre><code><span class="typ">size_t</span>     len = <span class="fn">langx_tuple_size</span>(obj);
-<span class="typ">langx_word</span> w   = <span class="fn">langx_tuple_get</span>(obj, i);   <span class="cmt">/* element as langx_word */</span></code></pre>
+<pre><code><span class="typ">size_t</span>     len = <span class="fn">tzpl_tuple_size</span>(obj);
+<span class="typ">tzpl_word</span> w   = <span class="fn">tzpl_tuple_get</span>(obj, i);   <span class="cmt">/* element as tzpl_word */</span></code></pre>
 
 <h4>Struct</h4>
 
-<pre><code><span class="typ">size_t</span>     n = <span class="fn">langx_struct_field_count</span>(obj);
-<span class="typ">langx_word</span> w = <span class="fn">langx_struct_get_field</span>(obj, i);   <span class="cmt">/* field value by index */</span></code></pre>
+<pre><code><span class="typ">size_t</span>     n = <span class="fn">tzpl_struct_field_count</span>(obj);
+<span class="typ">tzpl_word</span> w = <span class="fn">tzpl_struct_get_field</span>(obj, i);   <span class="cmt">/* field value by index */</span></code></pre>
 
 
 <!-- -------------------------------- -->
 <h3 id="c-call-into-vm">4.7 Calling Language Functions from C</h3>
 
 <pre><code><span class="cmt">/* Prepare arguments */</span>
-<span class="typ">langx_word</span> args[<span class="num">2</span>];
+<span class="typ">tzpl_word</span> args[<span class="num">2</span>];
 args[<span class="num">0</span>].f = <span class="num">440.0</span>;
 args[<span class="num">1</span>].i = <span class="num">48000</span>;
 
 <span class="cmt">/* Call by name */</span>
-<span class="typ">langx_word</span> result = <span class="fn">langx_vm_call</span>(vm, compile_result,
+<span class="typ">tzpl_word</span> result = <span class="fn">tzpl_vm_call</span>(vm, compile_result,
                                     <span class="str">"process"</span>, args, <span class="num">2</span>);
 
 <span class="typ">double</span> output = result.f;</code></pre>
 
-<p><code>langx_vm_call</code> looks up the named function in the <code>CompileResult</code>'s exported function list, matches by name and argument count, then dispatches to either <code>callFunction</code> (for user-defined functions) or <code>evalPrimitive</code> (for built-in/foreign functions). Returns a zero word if the function is not found.</p>
+<p><code>tzpl_vm_call</code> looks up the named function in the <code>CompileResult</code>'s exported function list, matches by name and argument count, then dispatches to either <code>callFunction</code> (for user-defined functions) or <code>evalPrimitive</code> (for built-in/foreign functions). Returns a zero word if the function is not found.</p>
 
 <div class="warning">
-  <strong>Argument limit:</strong> <code>langx_vm_call</code> supports up to 16 arguments. This is a compile-time limit in the implementation.
+  <strong>Argument limit:</strong> <code>tzpl_vm_call</code> supports up to 16 arguments. This is a compile-time limit in the implementation.
 </div>
 
 
 <!-- -------------------------------- -->
 <h3 id="c-user-data">4.8 User Data</h3>
 
-<pre><code><span class="kw">void</span>  <span class="fn">langx_vm_set_user_data</span>(<span class="typ">langx_vm</span>* vm, <span class="kw">void</span>* data);
-<span class="kw">void</span>* <span class="fn">langx_vm_get_user_data</span>(<span class="typ">langx_vm</span>* vm);</code></pre>
+<pre><code><span class="kw">void</span>  <span class="fn">tzpl_vm_set_user_data</span>(<span class="typ">tzpl_vm</span>* vm, <span class="kw">void</span>* data);
+<span class="kw">void</span>* <span class="fn">tzpl_vm_get_user_data</span>(<span class="typ">tzpl_vm</span>* vm);</code></pre>
 
-<p>Use these to attach arbitrary host state to the VM. Access it from within foreign functions via <code>langx_vm_get_user_data(vm)</code>.</p>
+<p>Use these to attach arbitrary host state to the VM. Access it from within foreign functions via <code>tzpl_vm_get_user_data(vm)</code>.</p>
 
 
 <!-- -------------------------------- -->
 <h3 id="c-full-example">4.9 Full C Example</h3>
 
-<pre><code><span class="kw">#include</span> <span class="str">"langx.h"</span>
+<pre><code><span class="kw">#include</span> <span class="str">"tzpl.h"</span>
 <span class="kw">#include</span> <span class="str">&lt;stdio.h&gt;</span>
 
 <span class="cmt">/* Foreign function: square(x: Float) -&gt; Float */</span>
-<span class="kw">void</span> <span class="fn">ffi_square</span>(<span class="typ">langx_vm</span>* vm, <span class="typ">uint16_t</span> dst,
+<span class="kw">void</span> <span class="fn">ffi_square</span>(<span class="typ">tzpl_vm</span>* vm, <span class="typ">uint16_t</span> dst,
                  <span class="typ">uint16_t</span> argc, <span class="typ">uint16_t</span> arg_base) {
-    <span class="typ">double</span> x = <span class="fn">langx_vm_reg_float</span>(vm, arg_base, arg_base);
-    <span class="fn">langx_vm_set_reg_float</span>(vm, dst, x * x);
+    <span class="typ">double</span> x = <span class="fn">tzpl_vm_reg_float</span>(vm, arg_base, arg_base);
+    <span class="fn">tzpl_vm_set_reg_float</span>(vm, dst, x * x);
 }
 
 <span class="kw">int</span> <span class="fn">main</span>(<span class="kw">void</span>) {
     <span class="cmt">/* Setup */</span>
-    <span class="typ">langx_type_universe</span>* types    = <span class="fn">langx_type_universe_create</span>();
-    <span class="typ">langx_compiler</span>*      compiler = <span class="fn">langx_compiler_create</span>(types);
+    <span class="typ">tzpl_type_universe</span>* types    = <span class="fn">tzpl_type_universe_create</span>();
+    <span class="typ">tzpl_compiler</span>*      compiler = <span class="fn">tzpl_compiler_create</span>(types);
 
     <span class="cmt">/* Register foreign function */</span>
-    <span class="typ">langx_type_handle</span> float_t = <span class="fn">langx_type_float</span>(types);
-    <span class="fn">langx_register_foreign_function</span>(
+    <span class="typ">tzpl_type_handle</span> float_t = <span class="fn">tzpl_type_float</span>(types);
+    <span class="fn">tzpl_register_foreign_function</span>(
         compiler, <span class="str">"square"</span>, float_t, &amp;float_t, <span class="num">1</span>,
         ffi_square, <span class="num">1</span>, <span class="num">1</span>);
 
     <span class="cmt">/* Create target and compile */</span>
-    <span class="typ">langx_vm_target</span>* target = <span class="fn">langx_create_target</span>(compiler, <span class="num">0</span>);
+    <span class="typ">tzpl_vm_target</span>* target = <span class="fn">tzpl_create_target</span>(compiler, <span class="num">0</span>);
 
     <span class="kw">const char</span>* source =
         <span class="str">"fn hypotenuse(a: Float, b: Float) -&gt; Float {\n"</span>
         <span class="str">"    sqrt(square(a) + square(b))\n"</span>
         <span class="str">"}\n"</span>;
 
-    <span class="typ">langx_compile_result</span>* result = <span class="fn">langx_compile</span>(
+    <span class="typ">tzpl_compile_result</span>* result = <span class="fn">tzpl_compile</span>(
         compiler, source, <span class="str">"math.x"</span>, target);
 
-    <span class="kw">if</span> (!<span class="fn">langx_compile_result_success</span>(result)) {
-        <span class="kw">for</span> (<span class="kw">int</span> i = <span class="num">0</span>; i &lt; <span class="fn">langx_compile_result_error_count</span>(result); i++) {
-            fprintf(stderr, <span class="str">"%s\n"</span>, <span class="fn">langx_compile_result_error</span>(result, i));
+    <span class="kw">if</span> (!<span class="fn">tzpl_compile_result_success</span>(result)) {
+        <span class="kw">for</span> (<span class="kw">int</span> i = <span class="num">0</span>; i &lt; <span class="fn">tzpl_compile_result_error_count</span>(result); i++) {
+            fprintf(stderr, <span class="str">"%s\n"</span>, <span class="fn">tzpl_compile_result_error</span>(result, i));
         }
         <span class="kw">return</span> <span class="num">1</span>;
     }
 
     <span class="cmt">/* Create VM bound to target, install, and call */</span>
-    <span class="typ">langx_vm</span>* vm = <span class="fn">langx_vm_create</span>(<span class="num">64</span> * <span class="num">1024</span> * <span class="num">1024</span>, types, target);
-    <span class="fn">langx_vm_install</span>(vm, result);
+    <span class="typ">tzpl_vm</span>* vm = <span class="fn">tzpl_vm_create</span>(<span class="num">64</span> * <span class="num">1024</span> * <span class="num">1024</span>, types, target);
+    <span class="fn">tzpl_vm_install</span>(vm, result);
 
-    <span class="typ">langx_word</span> args[<span class="num">2</span>];
+    <span class="typ">tzpl_word</span> args[<span class="num">2</span>];
     args[<span class="num">0</span>].f = <span class="num">3.0</span>;
     args[<span class="num">1</span>].f = <span class="num">4.0</span>;
-    <span class="typ">langx_word</span> r = <span class="fn">langx_vm_call</span>(vm, result, <span class="str">"hypotenuse"</span>, args, <span class="num">2</span>);
+    <span class="typ">tzpl_word</span> r = <span class="fn">tzpl_vm_call</span>(vm, result, <span class="str">"hypotenuse"</span>, args, <span class="num">2</span>);
     printf(<span class="str">"hypotenuse(3, 4) = %f\n"</span>, r.f);
     <span class="cmt">/* Output: hypotenuse(3, 4) = 5.000000 */</span>
 
     <span class="cmt">/* Cleanup */</span>
-    <span class="fn">langx_compile_result_destroy</span>(result);
-    <span class="fn">langx_vm_destroy</span>(vm);
-    <span class="fn">langx_target_destroy</span>(target);
-    <span class="fn">langx_compiler_destroy</span>(compiler);
-    <span class="fn">langx_type_universe_destroy</span>(types);
+    <span class="fn">tzpl_compile_result_destroy</span>(result);
+    <span class="fn">tzpl_vm_destroy</span>(vm);
+    <span class="fn">tzpl_target_destroy</span>(target);
+    <span class="fn">tzpl_compiler_destroy</span>(compiler);
+    <span class="fn">tzpl_type_universe_destroy</span>(types);
 
     <span class="kw">return</span> <span class="num">0</span>;
 }</code></pre>
@@ -1105,7 +1105,7 @@ args[<span class="num">1</span>].i = <span class="num">48000</span>;
 <!-- -------------------------------- -->
 <h3 id="rt-model">5.1 Safety Model</h3>
 
-<p>Language X is designed to run on real-time audio threads where blocking system calls are forbidden. The FFI extends this with a per-function <code>rtSafe</code> flag and compile-time enforcement:</p>
+<p>Tzopilotl is designed to run on real-time audio threads where blocking system calls are forbidden. The FFI extends this with a per-function <code>rtSafe</code> flag and compile-time enforcement:</p>
 
 <ul>
   <li>Every function (built-in, foreign, or user-defined) has an <code>rtSafe</code> attribute.</li>
@@ -1128,7 +1128,7 @@ args[<span class="num">1</span>].i = <span class="num">48000</span>;
 ts::<span class="typ">VMTarget</span> target = compiler.<span class="fn">createTarget</span>(<span class="kw">true</span>);
 
 <span class="cmt">// C: create an RT-restricted target</span>
-<span class="typ">langx_vm_target</span>* target = <span class="fn">langx_create_target</span>(compiler, <span class="num">1</span>);</code></pre>
+<span class="typ">tzpl_vm_target</span>* target = <span class="fn">tzpl_create_target</span>(compiler, <span class="num">1</span>);</code></pre>
 
 <p>With RT restriction enabled, compiling this code:</p>
 
@@ -1195,10 +1195,10 @@ ts::<span class="typ">VMTarget</span> target = compiler.<span class="fn">createT
 <p>The interpreter's command-line interface supports an <code>--rt</code> flag for testing RT safety enforcement:</p>
 
 <pre><code><span class="cmt"># This will produce a compile error:</span>
-$ langx --rt script_with_println.x
+$ tzpl --rt script_with_println.x
 
 <span class="cmt"># This will succeed (only RT-safe functions used):</span>
-$ langx --rt dsp_code.x</code></pre>
+$ tzpl --rt dsp_code.x</code></pre>
 
 <p>Test files can use the <code>-- @rt</code> marker on the first line to automatically enable RT mode in the test runner:</p>
 
@@ -1211,32 +1211,32 @@ $ langx --rt dsp_code.x</code></pre>
 <!-- ================================================================ -->
 <h2 id="type-mapping">6. Type Mapping Reference</h2>
 
-<p>This table shows how Language X types correspond to C/C++ access patterns within foreign functions:</p>
+<p>This table shows how Tzopilotl types correspond to C/C++ access patterns within foreign functions:</p>
 
 <table>
   <tr>
     <th>Language Type</th>
     <th>Word Field</th>
     <th>C++ Access (in CFun)</th>
-    <th>C Access (in langx_cfun)</th>
+    <th>C Access (in tzpl_cfun)</th>
   </tr>
   <tr>
     <td><code>Bool</code></td>
     <td><code>.i</code></td>
     <td><code>vm.reg(argBase + i).i</code> <small>(0 or 1)</small></td>
-    <td><code>langx_vm_reg_int(vm, base, reg)</code></td>
+    <td><code>tzpl_vm_reg_int(vm, base, reg)</code></td>
   </tr>
   <tr>
     <td><code>Int</code></td>
     <td><code>.i</code></td>
     <td><code>vm.reg(argBase + i).i</code></td>
-    <td><code>langx_vm_reg_int(vm, base, reg)</code></td>
+    <td><code>tzpl_vm_reg_int(vm, base, reg)</code></td>
   </tr>
   <tr>
     <td><code>Float</code></td>
     <td><code>.f</code></td>
     <td><code>vm.reg(argBase + i).f</code></td>
-    <td><code>langx_vm_reg_float(vm, base, reg)</code></td>
+    <td><code>tzpl_vm_reg_float(vm, base, reg)</code></td>
   </tr>
   <tr>
     <td><code>Symbol</code></td>
@@ -1248,37 +1248,37 @@ $ langx --rt dsp_code.x</code></pre>
     <td><code>String</code></td>
     <td><code>.o</code></td>
     <td><code>ts::stringData(obj)</code>, <code>ts::stringSize(obj)</code></td>
-    <td><code>langx_string_data(h)</code>, <code>langx_string_size(h)</code></td>
+    <td><code>tzpl_string_data(h)</code>, <code>tzpl_string_size(h)</code></td>
   </tr>
   <tr>
     <td><code>Fraction</code></td>
     <td><code>.o</code></td>
     <td><code>ts::fractionNumer(obj)</code>, <code>ts::fractionDenom(obj)</code></td>
-    <td><code>langx_fraction_numer(h)</code>, <code>langx_fraction_denom(h)</code></td>
+    <td><code>tzpl_fraction_numer(h)</code>, <code>tzpl_fraction_denom(h)</code></td>
   </tr>
   <tr>
     <td><code>Complex</code></td>
     <td><code>.o</code></td>
     <td><code>ts::complexReal(obj)</code>, <code>ts::complexImag(obj)</code></td>
-    <td><code>langx_complex_real(h)</code>, <code>langx_complex_imag(h)</code></td>
+    <td><code>tzpl_complex_real(h)</code>, <code>tzpl_complex_imag(h)</code></td>
   </tr>
   <tr>
     <td><code>Array[T]</code></td>
     <td><code>.o</code></td>
     <td><code>ts::arraySize(obj)</code>, <code>ts::arrayGetInt/Float/Obj(obj, i)</code></td>
-    <td><code>langx_array_size(h)</code>, <code>langx_array_get_int/float/obj(h, i)</code></td>
+    <td><code>tzpl_array_size(h)</code>, <code>tzpl_array_get_int/float/obj(h, i)</code></td>
   </tr>
   <tr>
     <td><code>Tuple</code></td>
     <td><code>.o</code></td>
     <td><code>ts::tupleSize(obj)</code>, <code>ts::tupleGet(obj, i)</code></td>
-    <td><code>langx_tuple_size(h)</code>, <code>langx_tuple_get(h, i)</code></td>
+    <td><code>tzpl_tuple_size(h)</code>, <code>tzpl_tuple_get(h, i)</code></td>
   </tr>
   <tr>
     <td><code>Struct</code></td>
     <td><code>.o</code></td>
     <td><code>ts::structFieldCount(obj)</code>, <code>ts::structGetField(obj, i)</code></td>
-    <td><code>langx_struct_field_count(h)</code>, <code>langx_struct_get_field(h, i)</code></td>
+    <td><code>tzpl_struct_field_count(h)</code>, <code>tzpl_struct_get_field(h, i)</code></td>
   </tr>
   <tr>
     <td><code>Void</code></td>
@@ -1289,7 +1289,7 @@ $ langx --rt dsp_code.x</code></pre>
 </table>
 
 <div class="note">
-  <strong>Note:</strong> For the C++ API, <code>obj</code> is an <code>Obj*</code> read from <code>vm.reg(argBase + i).o</code>. For the C API, <code>h</code> is a <code>langx_obj_handle</code> obtained via <code>langx_vm_reg_obj(vm, base, reg)</code>.
+  <strong>Note:</strong> For the C++ API, <code>obj</code> is an <code>Obj*</code> read from <code>vm.reg(argBase + i).o</code>. For the C API, <code>h</code> is a <code>tzpl_obj_handle</code> obtained via <code>tzpl_vm_reg_obj(vm, base, reg)</code>.
 </div>
 
 <h4>Writing return values</h4>
@@ -1300,9 +1300,9 @@ vm.<span class="fn">reg</span>(resultReg).<span class="fn">f</span> = <span clas
 vm.<span class="fn">reg</span>(resultReg).<span class="fn">o</span> = strObj;   <span class="cmt">// String or other Obj*</span>
 
 <span class="cmt">// C — write into the result register</span>
-<span class="fn">langx_vm_set_reg_int</span>(vm, dst, <span class="num">42</span>);
-<span class="fn">langx_vm_set_reg_float</span>(vm, dst, <span class="num">3.14</span>);
-<span class="fn">langx_vm_set_reg_obj</span>(vm, dst, obj_handle);</code></pre>
+<span class="fn">tzpl_vm_set_reg_int</span>(vm, dst, <span class="num">42</span>);
+<span class="fn">tzpl_vm_set_reg_float</span>(vm, dst, <span class="num">3.14</span>);
+<span class="fn">tzpl_vm_set_reg_obj</span>(vm, dst, obj_handle);</code></pre>
 
 
 <!-- ================================================================ -->
@@ -1358,7 +1358,7 @@ vm.<span class="fn">reg</span>(resultReg).<span class="fn">o</span> = strObj;   
 
 <div class="diagram">
 <pre>
-Language X code calls foreign function
+Tzopilotl code calls foreign function
         |
         v
   VM dispatches via Primitive::cfun_
@@ -1367,36 +1367,36 @@ Language X code calls foreign function
   c_ffi_trampoline(VM&amp;, dst, argc, argBase)
         |
         |-- Recovers C callback from Primitive::ffiData_
-        |-- Recovers langx_vm* from VM::userData()
+        |-- Recovers tzpl_vm* from VM::userData()
         |
         v
-  user's langx_cfun(langx_vm*, dst, argc, argBase)
+  user's tzpl_cfun(tzpl_vm*, dst, argc, argBase)
         |
         v
-  User reads args via langx_vm_reg_int/float()
-  User writes result via langx_vm_set_reg_int/float()
+  User reads args via tzpl_vm_reg_int/float()
+  User writes result via tzpl_vm_set_reg_int/float()
 </pre>
 </div>
 
 <p>The trampoline implementation:</p>
 
 <pre><code><span class="cmt">// Recover the C wrapper from the VM's userData</span>
-<span class="kw">static</span> <span class="typ">langx_vm</span>* <span class="fn">to_langx_vm</span>(ts::<span class="typ">VM</span>* vm) {
-    <span class="kw">return static_cast</span>&lt;<span class="typ">langx_vm</span>*&gt;(vm-&gt;<span class="fn">userData</span>());
+<span class="kw">static</span> <span class="typ">tzpl_vm</span>* <span class="fn">to_tzpl_vm</span>(ts::<span class="typ">VM</span>* vm) {
+    <span class="kw">return static_cast</span>&lt;<span class="typ">tzpl_vm</span>*&gt;(vm-&gt;<span class="fn">userData</span>());
 }
 
 <span class="cmt">// Trampoline: VM calls this, it forwards to the C callback</span>
 <span class="kw">static void</span> <span class="fn">c_ffi_trampoline</span>(ts::<span class="typ">VM</span>&amp; vm, <span class="typ">u16</span> dst, <span class="typ">u16</span> argc, <span class="typ">u16</span> argBase) {
     <span class="kw">auto</span>* prim = vm.<span class="fn">currentPrimitive</span>();
-    <span class="kw">auto</span> cfun = <span class="kw">reinterpret_cast</span>&lt;<span class="typ">langx_cfun</span>&gt;(prim-&gt;ffiData_);
-    <span class="kw">auto</span>* wrapper = <span class="fn">to_langx_vm</span>(&amp;vm);
+    <span class="kw">auto</span> cfun = <span class="kw">reinterpret_cast</span>&lt;<span class="typ">tzpl_cfun</span>&gt;(prim-&gt;ffiData_);
+    <span class="kw">auto</span>* wrapper = <span class="fn">to_tzpl_vm</span>(&amp;vm);
     <span class="fn">cfun</span>(wrapper, dst, argc, argBase);
 }</code></pre>
 
 <p>Key points:</p>
 <ul>
   <li>The actual C function pointer is stored in <code>Primitive::ffiData_</code>, not in the <code>cfun_</code> field (which holds the trampoline).</li>
-  <li>The <code>langx_vm*</code> wrapper is stored in <code>VM::userData_</code> during <code>langx_vm_create()</code>.</li>
+  <li>The <code>tzpl_vm*</code> wrapper is stored in <code>VM::userData_</code> during <code>tzpl_vm_create()</code>.</li>
   <li><code>VM::currentPrimitive()</code> returns the <code>Primitive*</code> being executed, set by the VM's opcode dispatcher.</li>
 </ul>
 
@@ -1552,41 +1552,41 @@ Language X code calls foreign function
 
 <table>
   <tr><th>Function</th><th>Description</th></tr>
-  <tr><td><code>langx_type_universe* langx_type_universe_create(void)</code></td><td>Create a shared type universe.</td></tr>
-  <tr><td><code>void langx_type_universe_destroy(langx_type_universe*)</code></td><td>Destroy a type universe.</td></tr>
+  <tr><td><code>tzpl_type_universe* tzpl_type_universe_create(void)</code></td><td>Create a shared type universe.</td></tr>
+  <tr><td><code>void tzpl_type_universe_destroy(tzpl_type_universe*)</code></td><td>Destroy a type universe.</td></tr>
 </table>
 
 <h4>Compiler</h4>
 
 <table>
   <tr><th>Function</th><th>Description</th></tr>
-  <tr><td><code>langx_compiler* langx_compiler_create(langx_type_universe*)</code></td><td>Create a compiler.</td></tr>
-  <tr><td><code>void langx_compiler_destroy(langx_compiler*)</code></td><td>Destroy a compiler.</td></tr>
-  <tr><td><code>langx_vm_target* langx_create_target(langx_compiler*, int rt_restricted)</code></td><td>Create a shared compilation target. Pass non-zero for RT safety enforcement.</td></tr>
-  <tr><td><code>void langx_target_destroy(langx_vm_target*)</code></td><td>Destroy a compilation target.</td></tr>
-  <tr><td><code>langx_compile_result* langx_compile(langx_compiler*, const char* source, const char* filename, langx_vm_target*)</code></td><td>Compile source code. Caller owns the result.</td></tr>
+  <tr><td><code>tzpl_compiler* tzpl_compiler_create(tzpl_type_universe*)</code></td><td>Create a compiler.</td></tr>
+  <tr><td><code>void tzpl_compiler_destroy(tzpl_compiler*)</code></td><td>Destroy a compiler.</td></tr>
+  <tr><td><code>tzpl_vm_target* tzpl_create_target(tzpl_compiler*, int rt_restricted)</code></td><td>Create a shared compilation target. Pass non-zero for RT safety enforcement.</td></tr>
+  <tr><td><code>void tzpl_target_destroy(tzpl_vm_target*)</code></td><td>Destroy a compilation target.</td></tr>
+  <tr><td><code>tzpl_compile_result* tzpl_compile(tzpl_compiler*, const char* source, const char* filename, tzpl_vm_target*)</code></td><td>Compile source code. Caller owns the result.</td></tr>
 </table>
 
 <h4>CompileResult</h4>
 
 <table>
   <tr><th>Function</th><th>Description</th></tr>
-  <tr><td><code>int langx_compile_result_success(const langx_compile_result*)</code></td><td>Returns 1 on success, 0 on failure.</td></tr>
-  <tr><td><code>int langx_compile_result_error_count(const langx_compile_result*)</code></td><td>Number of compile errors.</td></tr>
-  <tr><td><code>const char* langx_compile_result_error(const langx_compile_result*, int index)</code></td><td>Get error message at index. Valid until result is destroyed.</td></tr>
-  <tr><td><code>void langx_compile_result_destroy(langx_compile_result*)</code></td><td>Destroy a compile result.</td></tr>
+  <tr><td><code>int tzpl_compile_result_success(const tzpl_compile_result*)</code></td><td>Returns 1 on success, 0 on failure.</td></tr>
+  <tr><td><code>int tzpl_compile_result_error_count(const tzpl_compile_result*)</code></td><td>Number of compile errors.</td></tr>
+  <tr><td><code>const char* tzpl_compile_result_error(const tzpl_compile_result*, int index)</code></td><td>Get error message at index. Valid until result is destroyed.</td></tr>
+  <tr><td><code>void tzpl_compile_result_destroy(tzpl_compile_result*)</code></td><td>Destroy a compile result.</td></tr>
 </table>
 
 <h4>Type Handles</h4>
 
 <table>
   <tr><th>Function</th><th>Returns</th></tr>
-  <tr><td><code>langx_type_handle langx_type_int(langx_type_universe*)</code></td><td>Handle for <code>Int</code> type</td></tr>
-  <tr><td><code>langx_type_handle langx_type_float(langx_type_universe*)</code></td><td>Handle for <code>Float</code> type</td></tr>
-  <tr><td><code>langx_type_handle langx_type_bool(langx_type_universe*)</code></td><td>Handle for <code>Bool</code> type</td></tr>
-  <tr><td><code>langx_type_handle langx_type_string(langx_type_universe*)</code></td><td>Handle for <code>String</code> type</td></tr>
-  <tr><td><code>langx_type_handle langx_type_symbol(langx_type_universe*)</code></td><td>Handle for <code>Symbol</code> type</td></tr>
-  <tr><td><code>langx_type_handle langx_type_void(langx_type_universe*)</code></td><td>Handle for <code>Void</code> type</td></tr>
+  <tr><td><code>tzpl_type_handle tzpl_type_int(tzpl_type_universe*)</code></td><td>Handle for <code>Int</code> type</td></tr>
+  <tr><td><code>tzpl_type_handle tzpl_type_float(tzpl_type_universe*)</code></td><td>Handle for <code>Float</code> type</td></tr>
+  <tr><td><code>tzpl_type_handle tzpl_type_bool(tzpl_type_universe*)</code></td><td>Handle for <code>Bool</code> type</td></tr>
+  <tr><td><code>tzpl_type_handle tzpl_type_string(tzpl_type_universe*)</code></td><td>Handle for <code>String</code> type</td></tr>
+  <tr><td><code>tzpl_type_handle tzpl_type_symbol(tzpl_type_universe*)</code></td><td>Handle for <code>Symbol</code> type</td></tr>
+  <tr><td><code>tzpl_type_handle tzpl_type_void(tzpl_type_universe*)</code></td><td>Handle for <code>Void</code> type</td></tr>
 </table>
 
 <h4>Foreign Function Registration</h4>
@@ -1594,7 +1594,7 @@ Language X code calls foreign function
 <table>
   <tr><th>Function</th><th>Description</th></tr>
   <tr>
-    <td><code>int langx_register_foreign_function(langx_compiler*, const char* name, langx_type_handle return_type, const langx_type_handle* param_types, int param_count, langx_cfun cfun, int pure, int rt_safe)</code></td>
+    <td><code>int tzpl_register_foreign_function(tzpl_compiler*, const char* name, tzpl_type_handle return_type, const tzpl_type_handle* param_types, int param_count, tzpl_cfun cfun, int pure, int rt_safe)</code></td>
     <td>Register a foreign function. Returns 1 on success. <code>pure</code>: function can be constant-folded. <code>rt_safe</code>: function is safe for RT VMs.</td>
   </tr>
 </table>
@@ -1603,59 +1603,59 @@ Language X code calls foreign function
 
 <table>
   <tr><th>Function</th><th>Description</th></tr>
-  <tr><td><code>langx_vm* langx_vm_create(size_t pool_size, langx_type_universe*, langx_vm_target*)</code></td><td>Create a VM bound to a target, with given pool size.</td></tr>
-  <tr><td><code>void langx_vm_destroy(langx_vm*)</code></td><td>Destroy a VM.</td></tr>
-  <tr><td><code>void langx_vm_make_current(langx_vm*)</code></td><td>Set this VM as current for the calling thread.</td></tr>
-  <tr><td><code>void langx_vm_install(langx_vm*, const langx_compile_result*)</code></td><td>Install compiled code into the VM.</td></tr>
-  <tr><td><code>void langx_vm_execute(langx_vm*, const langx_compile_result*)</code></td><td>Execute the main block.</td></tr>
-  <tr><td><code>void langx_vm_gc_heartbeat(langx_vm*)</code></td><td>Drive one GC heartbeat. Call on timer or audio callback.</td></tr>
-  <tr><td><code>void langx_vm_set_user_data(langx_vm*, void*)</code></td><td>Set user data pointer.</td></tr>
-  <tr><td><code>void* langx_vm_get_user_data(langx_vm*)</code></td><td>Get user data pointer.</td></tr>
-  <tr><td><code>langx_word langx_vm_call(langx_vm*, const langx_compile_result*, const char* name, const langx_word* args, int argc)</code></td><td>Call a language function by name. Returns result word (zero if not found).</td></tr>
+  <tr><td><code>tzpl_vm* tzpl_vm_create(size_t pool_size, tzpl_type_universe*, tzpl_vm_target*)</code></td><td>Create a VM bound to a target, with given pool size.</td></tr>
+  <tr><td><code>void tzpl_vm_destroy(tzpl_vm*)</code></td><td>Destroy a VM.</td></tr>
+  <tr><td><code>void tzpl_vm_make_current(tzpl_vm*)</code></td><td>Set this VM as current for the calling thread.</td></tr>
+  <tr><td><code>void tzpl_vm_install(tzpl_vm*, const tzpl_compile_result*)</code></td><td>Install compiled code into the VM.</td></tr>
+  <tr><td><code>void tzpl_vm_execute(tzpl_vm*, const tzpl_compile_result*)</code></td><td>Execute the main block.</td></tr>
+  <tr><td><code>void tzpl_vm_gc_heartbeat(tzpl_vm*)</code></td><td>Drive one GC heartbeat. Call on timer or audio callback.</td></tr>
+  <tr><td><code>void tzpl_vm_set_user_data(tzpl_vm*, void*)</code></td><td>Set user data pointer.</td></tr>
+  <tr><td><code>void* tzpl_vm_get_user_data(tzpl_vm*)</code></td><td>Get user data pointer.</td></tr>
+  <tr><td><code>tzpl_word tzpl_vm_call(tzpl_vm*, const tzpl_compile_result*, const char* name, const tzpl_word* args, int argc)</code></td><td>Call a language function by name. Returns result word (zero if not found).</td></tr>
 </table>
 
 <h4>Register Access</h4>
 
 <table>
   <tr><th>Function</th><th>Description</th></tr>
-  <tr><td><code>int64_t langx_vm_reg_int(langx_vm*, uint16_t base, uint16_t reg)</code></td><td>Read integer value from register.</td></tr>
-  <tr><td><code>double langx_vm_reg_float(langx_vm*, uint16_t base, uint16_t reg)</code></td><td>Read float value from register.</td></tr>
-  <tr><td><code>langx_obj_handle langx_vm_reg_obj(langx_vm*, uint16_t base, uint16_t reg)</code></td><td>Read object handle from register.</td></tr>
-  <tr><td><code>void langx_vm_set_reg_int(langx_vm*, uint16_t reg, int64_t val)</code></td><td>Write integer value to register.</td></tr>
-  <tr><td><code>void langx_vm_set_reg_float(langx_vm*, uint16_t reg, double val)</code></td><td>Write float value to register.</td></tr>
-  <tr><td><code>void langx_vm_set_reg_obj(langx_vm*, uint16_t reg, langx_obj_handle obj)</code></td><td>Write object handle to register.</td></tr>
+  <tr><td><code>int64_t tzpl_vm_reg_int(tzpl_vm*, uint16_t base, uint16_t reg)</code></td><td>Read integer value from register.</td></tr>
+  <tr><td><code>double tzpl_vm_reg_float(tzpl_vm*, uint16_t base, uint16_t reg)</code></td><td>Read float value from register.</td></tr>
+  <tr><td><code>tzpl_obj_handle tzpl_vm_reg_obj(tzpl_vm*, uint16_t base, uint16_t reg)</code></td><td>Read object handle from register.</td></tr>
+  <tr><td><code>void tzpl_vm_set_reg_int(tzpl_vm*, uint16_t reg, int64_t val)</code></td><td>Write integer value to register.</td></tr>
+  <tr><td><code>void tzpl_vm_set_reg_float(tzpl_vm*, uint16_t reg, double val)</code></td><td>Write float value to register.</td></tr>
+  <tr><td><code>void tzpl_vm_set_reg_obj(tzpl_vm*, uint16_t reg, tzpl_obj_handle obj)</code></td><td>Write object handle to register.</td></tr>
 </table>
 
 <h4>Object Accessors</h4>
 
 <table>
   <tr><th>Function</th><th>Description</th></tr>
-  <tr><td><code>const char* langx_string_data(langx_obj_handle obj)</code></td><td>Pointer to the String's UTF-8 bytes.</td></tr>
-  <tr><td><code>size_t langx_string_size(langx_obj_handle obj)</code></td><td>Byte length of the String.</td></tr>
-  <tr><td><code>int64_t langx_fraction_numer(langx_obj_handle obj)</code></td><td>Fraction numerator.</td></tr>
-  <tr><td><code>int64_t langx_fraction_denom(langx_obj_handle obj)</code></td><td>Fraction denominator.</td></tr>
-  <tr><td><code>double langx_complex_real(langx_obj_handle obj)</code></td><td>Complex number real part.</td></tr>
-  <tr><td><code>double langx_complex_imag(langx_obj_handle obj)</code></td><td>Complex number imaginary part.</td></tr>
-  <tr><td><code>size_t langx_array_size(langx_obj_handle obj)</code></td><td>Number of elements in the Array.</td></tr>
-  <tr><td><code>int64_t langx_array_get_int(langx_obj_handle obj, size_t index)</code></td><td>Get Int element. Returns 0 if out of bounds.</td></tr>
-  <tr><td><code>double langx_array_get_float(langx_obj_handle obj, size_t index)</code></td><td>Get Float element. Returns 0.0 if out of bounds.</td></tr>
-  <tr><td><code>langx_obj_handle langx_array_get_obj(langx_obj_handle obj, size_t index)</code></td><td>Get object element. Returns null handle if out of bounds.</td></tr>
-  <tr><td><code>size_t langx_tuple_size(langx_obj_handle obj)</code></td><td>Number of elements in the Tuple.</td></tr>
-  <tr><td><code>langx_word langx_tuple_get(langx_obj_handle obj, size_t index)</code></td><td>Get Tuple element as <code>langx_word</code>. Returns zero if out of bounds.</td></tr>
-  <tr><td><code>size_t langx_struct_field_count(langx_obj_handle obj)</code></td><td>Number of fields in the Struct.</td></tr>
-  <tr><td><code>langx_word langx_struct_get_field(langx_obj_handle obj, size_t index)</code></td><td>Get Struct field by index. Returns zero if out of bounds.</td></tr>
+  <tr><td><code>const char* tzpl_string_data(tzpl_obj_handle obj)</code></td><td>Pointer to the String's UTF-8 bytes.</td></tr>
+  <tr><td><code>size_t tzpl_string_size(tzpl_obj_handle obj)</code></td><td>Byte length of the String.</td></tr>
+  <tr><td><code>int64_t tzpl_fraction_numer(tzpl_obj_handle obj)</code></td><td>Fraction numerator.</td></tr>
+  <tr><td><code>int64_t tzpl_fraction_denom(tzpl_obj_handle obj)</code></td><td>Fraction denominator.</td></tr>
+  <tr><td><code>double tzpl_complex_real(tzpl_obj_handle obj)</code></td><td>Complex number real part.</td></tr>
+  <tr><td><code>double tzpl_complex_imag(tzpl_obj_handle obj)</code></td><td>Complex number imaginary part.</td></tr>
+  <tr><td><code>size_t tzpl_array_size(tzpl_obj_handle obj)</code></td><td>Number of elements in the Array.</td></tr>
+  <tr><td><code>int64_t tzpl_array_get_int(tzpl_obj_handle obj, size_t index)</code></td><td>Get Int element. Returns 0 if out of bounds.</td></tr>
+  <tr><td><code>double tzpl_array_get_float(tzpl_obj_handle obj, size_t index)</code></td><td>Get Float element. Returns 0.0 if out of bounds.</td></tr>
+  <tr><td><code>tzpl_obj_handle tzpl_array_get_obj(tzpl_obj_handle obj, size_t index)</code></td><td>Get object element. Returns null handle if out of bounds.</td></tr>
+  <tr><td><code>size_t tzpl_tuple_size(tzpl_obj_handle obj)</code></td><td>Number of elements in the Tuple.</td></tr>
+  <tr><td><code>tzpl_word tzpl_tuple_get(tzpl_obj_handle obj, size_t index)</code></td><td>Get Tuple element as <code>tzpl_word</code>. Returns zero if out of bounds.</td></tr>
+  <tr><td><code>size_t tzpl_struct_field_count(tzpl_obj_handle obj)</code></td><td>Number of fields in the Struct.</td></tr>
+  <tr><td><code>tzpl_word tzpl_struct_get_field(tzpl_obj_handle obj, size_t index)</code></td><td>Get Struct field by index. Returns zero if out of bounds.</td></tr>
 </table>
 
 <h4>Stats</h4>
 
 <table>
   <tr><th>Function</th><th>Description</th></tr>
-  <tr><td><code>uint32_t langx_vm_num_globals(const langx_vm*)</code></td><td>Number of globals in the VM.</td></tr>
-  <tr><td><code>size_t langx_vm_allocated(const langx_vm*)</code></td><td>Bytes currently allocated.</td></tr>
-  <tr><td><code>size_t langx_vm_pool_size(const langx_vm*)</code></td><td>Total pool size.</td></tr>
-  <tr><td><code>uint32_t langx_vm_num_live_objects(const langx_vm*)</code></td><td>Number of live GC objects.</td></tr>
-  <tr><td><code>uint32_t langx_vm_num_live_words(const langx_vm*)</code></td><td>Number of live GC words.</td></tr>
-  <tr><td><code>void langx_vm_set_print_output(langx_vm*, FILE*)</code></td><td>Redirect print output.</td></tr>
+  <tr><td><code>uint32_t tzpl_vm_num_globals(const tzpl_vm*)</code></td><td>Number of globals in the VM.</td></tr>
+  <tr><td><code>size_t tzpl_vm_allocated(const tzpl_vm*)</code></td><td>Bytes currently allocated.</td></tr>
+  <tr><td><code>size_t tzpl_vm_pool_size(const tzpl_vm*)</code></td><td>Total pool size.</td></tr>
+  <tr><td><code>uint32_t tzpl_vm_num_live_objects(const tzpl_vm*)</code></td><td>Number of live GC objects.</td></tr>
+  <tr><td><code>uint32_t tzpl_vm_num_live_words(const tzpl_vm*)</code></td><td>Number of live GC words.</td></tr>
+  <tr><td><code>void tzpl_vm_set_print_output(tzpl_vm*, FILE*)</code></td><td>Redirect print output.</td></tr>
 </table>
 
 </main>
@@ -1670,7 +1670,7 @@ Language X code calls foreign function
   update();
   btn.addEventListener('click', function() {
     document.documentElement.classList.toggle('light');
-    localStorage.setItem('langx-docs-theme',
+    localStorage.setItem('tzpl-docs-theme',
       document.documentElement.classList.contains('light') ? 'light' : 'dark');
     update();
   });

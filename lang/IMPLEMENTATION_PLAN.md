@@ -1,6 +1,6 @@
-# Language X: Full Implementation Plan
+# Tzopilotl: Full Implementation Plan
 
-This plan covers the complete implementation of Language X, a statically-typed, real-time-safe interpreted language designed for audio thread execution. It is organized into phases, where each phase builds on the previous. Within each phase, tasks are ordered by dependency.
+This plan covers the complete implementation of Tzopilotl, a statically-typed, real-time-safe interpreted language designed for audio thread execution. It is organized into phases, where each phase builds on the previous. Within each phase, tasks are ordered by dependency.
 
 ---
 

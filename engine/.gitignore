@@ -2,8 +2,8 @@
 
 DerivedData/*
 build/*
-new_sapf_engine_one_file.xcodeproj/project.xcworkspace/*
-new_sapf_engine_one_file.xcodeproj/xcshareddata/*
-new_sapf_engine_one_file.xcodeproj/xcuserdata/*
+new_tzpl_engine_one_file.xcodeproj/project.xcworkspace/*
+new_tzpl_engine_one_file.xcodeproj/xcshareddata/*
+new_tzpl_engine_one_file.xcodeproj/xcuserdata/*
 RtAudio.*
 

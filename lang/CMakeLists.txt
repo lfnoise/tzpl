@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-if(NOT CMAKE_PROJECT_NAME STREQUAL "jscs")
+if(NOT CMAKE_PROJECT_NAME STREQUAL "tzpl")
     project(lang C CXX)
     set(CMAKE_CXX_STANDARD 23)
     set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -17,14 +17,14 @@ else()
 endif()
 
 # Common compiler flags
-set(LANGX_COMPILE_OPTIONS
+set(TZPL_COMPILE_OPTIONS
     -Wall -Wextra -Wpedantic
     -Wno-unused-parameter
     # Note: exceptions are used for initialization errors only.
     # The real-time execution path does not throw.
 )
 
-# --- langx_lib static library (everything except main.cpp) ---
+# --- tzpl_lib static library (everything except main.cpp) ---
 
 set(LIB_SOURCES
     src/vm.cpp
@@ -42,26 +42,26 @@ set(LIB_SOURCES
     src/module_compiler.cpp
     src/diagnostic.cpp
     src/repl_session.cpp
-    src/langx_c.cpp
-    src/langx_cpp.cpp
+    src/tzpl_c.cpp
+    src/tzpl_cpp.cpp
 )
 
-add_library(langx_lib STATIC ${LIB_SOURCES})
-set_target_properties(langx_lib PROPERTIES OUTPUT_NAME langx)
-target_include_directories(langx_lib PUBLIC
+add_library(tzpl_lib STATIC ${LIB_SOURCES})
+set_target_properties(tzpl_lib PROPERTIES OUTPUT_NAME tzpl)
+target_include_directories(tzpl_lib PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
-target_compile_options(langx_lib PRIVATE ${LANGX_COMPILE_OPTIONS})
+target_compile_options(tzpl_lib PRIVATE ${TZPL_COMPILE_OPTIONS})
 
 # Debug flags
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-    target_compile_options(langx_lib PRIVATE -g -O0)
+    target_compile_options(tzpl_lib PRIVATE -g -O0)
 endif()
 
 # Release flags
 if(CMAKE_BUILD_TYPE STREQUAL "Release")
-    target_compile_options(langx_lib PRIVATE -O2)
+    target_compile_options(tzpl_lib PRIVATE -O2)
 endif()
 
 # --- Linenoise line-editing library (vendored C, CLI only) ---
@@ -69,34 +69,34 @@ endif()
 add_library(linenoise STATIC ${CMAKE_CURRENT_SOURCE_DIR}/third_party/linenoise/linenoise.c)
 target_include_directories(linenoise PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/third_party/linenoise)
 
-# --- langx executable (CLI + REPL) ---
+# --- tzpl executable (CLI + REPL) ---
 
-add_executable(langx src/main.cpp)
-target_link_libraries(langx PRIVATE langx_lib linenoise)
-target_compile_options(langx PRIVATE ${LANGX_COMPILE_OPTIONS})
+add_executable(tzpl src/main.cpp)
+target_link_libraries(tzpl PRIVATE tzpl_lib linenoise)
+target_compile_options(tzpl PRIVATE ${TZPL_COMPILE_OPTIONS})
 
 # Debug flags
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-    target_compile_options(langx PRIVATE -g -O0)
+    target_compile_options(tzpl PRIVATE -g -O0)
 endif()
 
 # Release flags
 if(CMAKE_BUILD_TYPE STREQUAL "Release")
-    target_compile_options(langx PRIVATE -O2)
+    target_compile_options(tzpl PRIVATE -O2)
 endif()
 
 # --- install targets ---
 
 include(GNUInstallDirs)
 
-install(TARGETS langx_lib
+install(TARGETS tzpl_lib
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
 )
 install(FILES
-    include/langx.h
-    include/langx.hpp
-    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/langx
+    include/tzpl.h
+    include/tzpl.hpp
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/tzpl
 )
-install(TARGETS langx
+install(TARGETS tzpl
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )

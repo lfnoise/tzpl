@@ -1,4 +1,4 @@
--- Tuple Structs from Language X by Example
+-- Tuple Structs from Tzopilotl by Example
 
 -- Tuple struct declaration
 struct Point(Float, Float);

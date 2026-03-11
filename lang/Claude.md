@@ -87,11 +87,11 @@ There are a few files in this directory that implement the very beginnings of su
 - to be defined...
 
 ## Language Grammar
-- Language should have syntax as described in the file Language_X_by_Example.html in this directory.
+- Language should have syntax as described in the file Tzopilotl_by_Example.html in this directory.
 
 ## More about Auto-mapping and the `@` operator.
 
-The following text is taken from the README of the "sapf" or "sound as pure form" language which I previously wrote. Auto-mapping and the `@` operator should work similarly in this new language. The new language will not be a postfix language like "sapf". Note that `@` is a postfix operator — it is placed after the expression it applies to (e.g. `array @` not `@ array`), so that no parentheses are needed to chain calls like `array @ reverse drop(2)`.
+The following text is taken from the README of the "Tzopilotl" or "sound as pure form" language which I previously wrote. Auto-mapping and the `@` operator should work similarly in this new language. The new language will not be a postfix language like "Tzopilotl". Note that `@` is a postfix operator — it is placed after the expression it applies to (e.g. `array @` not `@ array`), so that no parentheses are needed to chain calls like `array @ reverse drop(2)`.
 
 ```
 AUTO-MAPPING

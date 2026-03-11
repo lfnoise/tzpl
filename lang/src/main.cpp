@@ -14,7 +14,7 @@
 #include <cstdlib>
 #include <unistd.h>
 #include "linenoise.h"
-#include "langx.hpp"
+#include "tzpl.hpp"
 #include "module_compiler.hpp"
 #include "diagnostic.hpp"
 #include "repl_session.hpp"
@@ -160,11 +160,11 @@ static bool isInputComplete(const std::string& input) {
         && !inTripleString;
 }
 
-// Get the history file path (~/.langx_history)
+// Get the history file path (~/.tzpl_history)
 static std::string historyPath() {
     const char* home = getenv("HOME");
     if (!home) return "";
-    return std::string(home) + "/.langx_history";
+    return std::string(home) + "/.tzpl_history";
 }
 
 // Read a possibly multi-line REPL input using linenoise
@@ -364,7 +364,7 @@ static void runREPL(VM& vm, Compiler& compiler, const VMTarget& target,
     auto hpath = historyPath();
     if (!hpath.empty()) linenoiseHistoryLoad(hpath.c_str());
 
-    std::cout << "Language X REPL. Type :help for commands, :quit to exit.\n";
+    std::cout << "Tzopilotl REPL. Type :help for commands, :quit to exit.\n";
 
     while (true) {
         bool eof = false;
@@ -414,7 +414,7 @@ int main(int argc, const char* argv[]) {
         for (int i = 1; i < argc; ++i) {
             std::string arg = argv[i];
             if (arg == "--help" || arg == "-h") {
-                std::cout << "Usage: langx [options] [file]\n"
+                std::cout << "Usage: tzpl [options] [file]\n"
                           << "\n"
                           << "Options:\n"
                           << "  -h, --help         Show this help message\n"

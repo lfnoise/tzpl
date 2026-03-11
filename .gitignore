@@ -1,6 +1,6 @@
 build/
 DerivedData/
-sapf3_dir/
+tzpl_dir/
 .DS_Store
 *.o
 *.a

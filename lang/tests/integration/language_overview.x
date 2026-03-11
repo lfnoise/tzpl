@@ -1,4 +1,4 @@
--- Test program for Language X
+-- Test program for Tzopilotl
 
 --- Simple functions ---
 fn square(x Int) Int = x * x;

@@ -1,4 +1,4 @@
-#include "jscs_plugin_abi.h"
+#include "tzpl_plugin_abi.h"
 #include "synthdef_synth.hpp"
 #include "synthdef_cpp_codegen.hpp"
 #include "synthdef_audio_io.hpp"
@@ -409,29 +409,29 @@ int test_bubbles_init(test_bubbles* p) {
     p->d4_mask = d4_size - 1;
     p->d4[0] = (f32*)calloc(d4_size, sizeof(f32));
     p->d4[1] = (f32*)calloc(d4_size, sizeof(f32));
-    return jscs_errNone;
+    return tzpl_errNone;
 }
 
 int test_bubbles_uninit(test_bubbles* p) {
     // FIXME genUninitFun
     free(p->d4[0]); p->d4[0] = nullptr;
     free(p->d4[1]); p->d4[1] = nullptr;
-    return jscs_errNone;
+    return tzpl_errNone;
 }
 
 int test_bubbles_reset(test_bubbles* p) {
     // FIXME genResetFun
-    return jscs_errNone;
+    return tzpl_errNone;
 }
 
 int test_bubbles_event(test_bubbles* p, u64 paramID, usize rows, usize cols, f64* values) {
     // FIXME genEventFun
-    return jscs_errNone;
+    return tzpl_errNone;
 }
 
 int test_bubbles_process_events(test_bubbles* p) {
     // FIXME genHandleEventsFun
-    return jscs_errNone;
+    return tzpl_errNone;
 }
 
 int test_bubbles_tick(test_bubbles* p) {
@@ -466,7 +466,7 @@ int test_bubbles_tick(test_bubbles* p) {
     }
     ++p->d4_wrpos;
 
-    return jscs_errNone;
+    return tzpl_errNone;
 }
 
 SynthFuns test_bubbles_funs = {
@@ -475,13 +475,13 @@ SynthFuns test_bubbles_funs = {
     .init = (int (*)(SynthData*))test_bubbles_init,
     .uninit = (int (*)(SynthData*))test_bubbles_uninit,
     .reset = (int (*)(SynthData*))test_bubbles_reset,
-    .event = (int (*)(SynthData*, u64, jscs_Slice, jscs_Slice))test_bubbles_event,
+    .event = (int (*)(SynthData*, u64, tzpl_Slice, tzpl_Slice))test_bubbles_event,
     .process_events = (int (*)(SynthData*))test_bubbles_process_events,
     .tick = (int (*)(SynthData*))test_bubbles_tick
 };
 
-extern "C" jscs_SynthDef load() {
-    jscs_SynthDef def;
+extern "C" tzpl_SynthDef load() {
+    tzpl_SynthDef def;
     def.name = "test_bubbles";
     def.funs = test_bubbles_funs;
     def.num_ins = 0;
@@ -504,7 +504,7 @@ void test_synthdef() {
     printf("test_synthdef\n");
 //    Engine e;
     
-    jscs_SynthDef def = load();
+    tzpl_SynthDef def = load();
     assert(def.num_ins == 0);
     assert(def.num_outs == 1);
     assert(def.num_controls == 0);
@@ -722,7 +722,7 @@ void test_voicer_codegen() {
     assert(code.find("_noteOn") != string::npos);
     assert(code.find("_noteOff") != string::npos);
     assert(code.find("_allNotesOff") != string::npos);
-    assert(code.find("jscs_voicer.hpp") != string::npos);
+    assert(code.find("tzpl_voicer.hpp") != string::npos);
 
     printf("  flat voice mode: SoA layout, flat loops, proper indexing\n");
 }
@@ -1008,7 +1008,7 @@ void test_spectral_chain_codegen() {
     string code = cppCodeGen(gSynth);
 
     // Verify spectral chain codegen produces expected structures
-    assert(code.find("jscs_fft.hpp") != string::npos);
+    assert(code.find("tzpl_fft.hpp") != string::npos);
     assert(code.find("JscsFFTSetup*") != string::npos);
     assert(code.find("spec") != string::npos);
     assert(code.find("_fftsetup") != string::npos);
@@ -1016,10 +1016,10 @@ void test_spectral_chain_codegen() {
     assert(code.find("_outbuf") != string::npos);
     assert(code.find("_window") != string::npos);
     assert(code.find("_hopcount") != string::npos);
-    assert(code.find("jscs_fft_create(256)") != string::npos);
-    assert(code.find("jscs_fft_forward") != string::npos);
-    assert(code.find("jscs_fft_inverse") != string::npos);
-    assert(code.find("jscs_window_sqrt_hann") != string::npos);
+    assert(code.find("tzpl_fft_create(256)") != string::npos);
+    assert(code.find("tzpl_fft_forward") != string::npos);
+    assert(code.find("tzpl_fft_inverse") != string::npos);
+    assert(code.find("tzpl_window_sqrt_hann") != string::npos);
 
     printf("  spectral chain codegen produces correct C++ code\n");
 }
@@ -1073,8 +1073,8 @@ void test_spectral_chain_sexpr_parse() {
         synth->graphAnalysis();
         string code = cppCodeGen(synth);
 
-        assert(code.find("jscs_fft_forward") != string::npos);
-        assert(code.find("jscs_fft_inverse") != string::npos);
+        assert(code.find("tzpl_fft_forward") != string::npos);
+        assert(code.find("tzpl_fft_inverse") != string::npos);
     }
 
     printf("  spectral chain sexpr parse and codegen succeeded\n");

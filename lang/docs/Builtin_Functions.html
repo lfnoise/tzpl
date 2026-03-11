@@ -315,7 +315,7 @@
         }
     </style>
     <script>
-    if (localStorage.getItem('langx-docs-theme') === 'light') document.documentElement.classList.add('light');
+    if (localStorage.getItem('tzpl-docs-theme') === 'light') document.documentElement.classList.add('light');
     </script>
 </head>
 <body>
@@ -2200,7 +2200,7 @@ getListPrintLimit();           <span class="cmt">-- check current limit</span></
   update();
   btn.addEventListener('click', function() {
     document.documentElement.classList.toggle('light');
-    localStorage.setItem('langx-docs-theme',
+    localStorage.setItem('tzpl-docs-theme',
       document.documentElement.classList.contains('light') ? 'light' : 'dark');
     update();
   });

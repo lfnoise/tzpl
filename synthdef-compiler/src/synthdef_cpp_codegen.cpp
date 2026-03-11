@@ -386,10 +386,10 @@ string genVarAddr(S u) {
 string genTypeTag(S u) {
     u8 t = u->type.flags;
     switch (t) {
-        case I32 : return "jscs_kI32";
-        case I64 : return "jscs_kI64";
-        case F32 : return "jscs_kF32";
-        case F64 : return "jscs_kF64";
+        case I32 : return "tzpl_kI32";
+        case I64 : return "tzpl_kI64";
+        case F32 : return "tzpl_kF32";
+        case F64 : return "tzpl_kF64";
         default: std::unreachable();
     }
 }
@@ -921,7 +921,7 @@ struct Rank1GenTreeExprVisitor : GenTreeExprVisitor {
         s += "}\n";
         tabIndent(s, g.indent);
         // Forward FFT per channel
-        s += FMT("jscs_fft_forward(p->spec{0}_fftsetup, p->spec{0}_fftbuf + ch * {1}, p->spec{0}_frame + ch * {1});\n",
+        s += FMT("tzpl_fft_forward(p->spec{0}_fftsetup, p->spec{0}_fftbuf + ch * {1}, p->spec{0}_frame + ch * {1});\n",
             p->userial, N);
         --g.indent;
         tabIndent(s, g.indent);
@@ -939,7 +939,7 @@ struct Rank1GenTreeExprVisitor : GenTreeExprVisitor {
         ++g.indent;
         tabIndent(s, g.indent);
         // Inverse FFT per channel
-        s += FMT("jscs_fft_inverse(p->spec{0}_fftsetup, p->spec{0}_frame + ch * {1}, p->spec{0}_fftbuf + ch * {1});\n",
+        s += FMT("tzpl_fft_inverse(p->spec{0}_fftsetup, p->spec{0}_frame + ch * {1}, p->spec{0}_fftbuf + ch * {1});\n",
             p->userial, N);
         tabIndent(s, g.indent);
         // Window and overlap-add to output buffer
@@ -1417,7 +1417,7 @@ string CppCodeGen::genDelayAlloc() {
             usize inputChans = sc->in0()->chans;
             int N = sc->fftSize;
             s += FMT("\t// SpectralChain {} alloc\n", sc->userial);
-            s += FMT("\tp->spec{}_fftsetup = jscs_fft_create({});\n", sc->userial, N);
+            s += FMT("\tp->spec{}_fftsetup = tzpl_fft_create({});\n", sc->userial, N);
             for (usize c = 0; c < inputChans; ++c) {
                 s += FMT("\tp->spec{0}_inbuf[{1}] = (f32*)calloc({2}, sizeof(f32));\n", sc->userial, c, N);
                 s += FMT("\tp->spec{0}_outbuf[{1}] = (f32*)calloc({2}, sizeof(f32));\n", sc->userial, c, N);
@@ -1425,7 +1425,7 @@ string CppCodeGen::genDelayAlloc() {
             s += FMT("\tp->spec{}_wrpos = 0;\n", sc->userial);
             s += FMT("\tp->spec{}_rdpos = 0;\n", sc->userial);
             s += FMT("\tp->spec{}_hopcount = 0;\n", sc->userial);
-            s += FMT("\tjscs_window_sqrt_hann(p->spec{}_window, {});\n", sc->userial, N);
+            s += FMT("\ttzpl_window_sqrt_hann(p->spec{}_window, {});\n", sc->userial, N);
         }
     }
 
@@ -1501,7 +1501,7 @@ string CppCodeGen::genDelayDealloc() {
         if (auto sc = expr.as<SpectralChainExpr>(); sc) {
             usize inputChans = sc->in0()->chans;
             s += FMT("\t// SpectralChain {} dealloc\n", sc->userial);
-            s += FMT("\tjscs_fft_destroy(p->spec{}_fftsetup);\n", sc->userial);
+            s += FMT("\ttzpl_fft_destroy(p->spec{}_fftsetup);\n", sc->userial);
             for (usize c = 0; c < inputChans; ++c) {
                 s += FMT("\tfree(p->spec{0}_inbuf[{1}]);\n", sc->userial, c);
                 s += FMT("\tfree(p->spec{0}_outbuf[{1}]);\n", sc->userial, c);
@@ -1527,13 +1527,13 @@ string CppCodeGen::genAllocFun() {
 
 string CppCodeGen::genFreeFun() {
     string s;
-    s += FMT("jscs_SErr {0}_free({0}* p) {{\n", synth->name);
-    s += FMT("\tjscs_SErr {0}_uninit({0}* p);\n", synth->name);
+    s += FMT("tzpl_SErr {0}_free({0}* p) {{\n", synth->name);
+    s += FMT("\ttzpl_SErr {0}_uninit({0}* p);\n", synth->name);
     s += FMT("\t{0}_uninit(p);\n", synth->name);
     // Note: inlets, outlets, and controls are freed by the engine
     // (Node::~Node). Only free the synth struct itself here.
     s += "\tfree(p);\n";
-    s += "\treturn jscs_errNone;\n";
+    s += "\treturn tzpl_errNone;\n";
     s += "}\n\n";
     return s;
 }
@@ -1555,7 +1555,7 @@ string CppCodeGen::genInitConstants() {
 
 string CppCodeGen::genInitFun() {
     string s;
-    s += FMT("jscs_SErr {0}_init({0}* p) {{\n", synth->name);
+    s += FMT("tzpl_SErr {0}_init({0}* p) {{\n", synth->name);
     s += "\tf64 fs = p->fs;\n";
     s += "\tp->sd = 1./fs;\n";
     s += genInitConstants();
@@ -1606,34 +1606,34 @@ string CppCodeGen::genInitFun() {
         }
     }
 
-    s += "\treturn jscs_errNone;\n";
+    s += "\treturn tzpl_errNone;\n";
     s += "}\n\n";
     return s;
 }
 
 string CppCodeGen::genUninitFun() {
     string s;
-    s += FMT("jscs_SErr {0}_uninit({0}* p) {{\n", synth->name);
+    s += FMT("tzpl_SErr {0}_uninit({0}* p) {{\n", synth->name);
     // free delay lines
     s += genDelayDealloc();
-    s += "\treturn jscs_errNone;\n";
+    s += "\treturn tzpl_errNone;\n";
     s += "}\n\n";
     return s;
 }
 
 string CppCodeGen::genResetFun() {
     string s;
-    s += FMT("jscs_SErr {0}_reset({0}* p) {{\n", synth->name);
+    s += FMT("tzpl_SErr {0}_reset({0}* p) {{\n", synth->name);
     s += "\t// FIXME genResetFun\n";
     s += genLoops(synth->resetLoops);
-    s += "\treturn jscs_errNone;\n";
+    s += "\treturn tzpl_errNone;\n";
     s += "}\n\n";
     return s;
 }
 
 string CppCodeGen::genEventFun() {
     string s;
-    s += FMT("jscs_SErr {0}_event({0}* p, u64 id, jscs_Slice dst, jscs_Slice data) {{\n", synth->name);
+    s += FMT("tzpl_SErr {0}_event({0}* p, u64 id, tzpl_Slice dst, tzpl_Slice data) {{\n", synth->name);
     if (synth->controls.size() > 0) {
         s += "\tswitch (id) {\n";
         for (S u : synth->controls) {
@@ -1646,7 +1646,7 @@ string CppCodeGen::genEventFun() {
         }
         s += "\t}\n";
     }
-    s += "\treturn jscs_errNone;\n";
+    s += "\treturn tzpl_errNone;\n";
     s += "}\n\n";
     return s;
 }
@@ -2003,10 +2003,10 @@ string CppCodeGen::genNoteFuns() {
     usize numUserParams = numNoteParams > 0 ? numNoteParams - 1 : 0;
 
     // noteOn
-    s += FMT("jscs_SErr {0}_noteOn({0}* p, i64 now, int noteID, int n, f32* params) {{\n", name);
+    s += FMT("tzpl_SErr {0}_noteOn({0}* p, i64 now, int noteID, int n, f32* params) {{\n", name);
     s += "\tint vi;\n";
-    s += "\tjscs_SErr err = p->voicer.noteOn(now, noteID, n, params, vi);\n";
-    s += "\tif (err != jscs_errNone) return err;\n";
+    s += "\ttzpl_SErr err = p->voicer.noteOn(now, noteID, n, params, vi);\n";
+    s += "\tif (err != tzpl_errNone) return err;\n";
 
     // Fill defaults for unprovided user params (gate is at column 0, managed by voicer)
     if (numUserParams > 0) {
@@ -2087,34 +2087,34 @@ string CppCodeGen::genNoteFuns() {
         }
     }
 
-    s += "\treturn jscs_errNone;\n";
+    s += "\treturn tzpl_errNone;\n";
     s += "}\n\n";
 
     // noteOff
-    s += FMT("jscs_SErr {0}_noteOff({0}* p, i64 now, int noteID) {{\n", name);
+    s += FMT("tzpl_SErr {0}_noteOff({0}* p, i64 now, int noteID) {{\n", name);
     s += "\treturn p->voicer.noteOff(now, noteID);\n";
     s += "}\n\n";
 
     // allNotesOff
-    s += FMT("jscs_SErr {0}_allNotesOff({0}* p, i64 now) {{\n", name);
+    s += FMT("tzpl_SErr {0}_allNotesOff({0}* p, i64 now) {{\n", name);
     s += "\tp->voicer.allOff(now);\n";
-    s += "\treturn jscs_errNone;\n";
+    s += "\treturn tzpl_errNone;\n";
     s += "}\n\n";
 
     // noteSetParams
-    s += FMT("jscs_SErr {0}_noteSetParams({0}* p, int noteID, int n, jscs_ParamPair* params) {{\n", name);
+    s += FMT("tzpl_SErr {0}_noteSetParams({0}* p, int noteID, int n, tzpl_ParamPair* params) {{\n", name);
     s += "\tint vi = p->voicer.findVoice(noteID);\n";
-    s += "\tif (vi < 0) return jscs_errNoteNotFound;\n";
+    s += "\tif (vi < 0) return tzpl_errNoteNotFound;\n";
     s += "\tp->voicer.setNoteParams(vi, n, params);\n";
-    s += "\treturn jscs_errNone;\n";
+    s += "\treturn tzpl_errNone;\n";
     s += "}\n\n";
 
     // noteSetParamRange
-    s += FMT("jscs_SErr {0}_noteSetParamRange({0}* p, int noteID, int first, int len, f32* vals) {{\n", name);
+    s += FMT("tzpl_SErr {0}_noteSetParamRange({0}* p, int noteID, int first, int len, f32* vals) {{\n", name);
     s += "\tint vi = p->voicer.findVoice(noteID);\n";
-    s += "\tif (vi < 0) return jscs_errNoteNotFound;\n";
+    s += "\tif (vi < 0) return tzpl_errNoteNotFound;\n";
     s += "\tp->voicer.setNoteParamRange(vi, first, len, vals);\n";
-    s += "\treturn jscs_errNone;\n";
+    s += "\treturn tzpl_errNone;\n";
     s += "}\n\n";
 
     return s;
@@ -2123,14 +2123,14 @@ string CppCodeGen::genNoteFuns() {
 string CppCodeGen::genFunPtrs() {
     string s;
 
-    s += FMT("jscs_SynthFuns {}_funs = {{\n", synth->name);
+    s += FMT("tzpl_SynthFuns {}_funs = {{\n", synth->name);
     
 //    SynthData* (*alloc)();
 //    SErr (*free)(SynthData* synth);
 //    SErr (*init)(SynthData* synth);
 //    SErr (*uninit)(SynthData* synth); // optional
 //    SErr (*reset)(SynthData* synth); // optional
-//    SErr (*event)(SynthData* synth, u64 id, jscs_Slice dst, jscs_Slice data);
+//    SErr (*event)(SynthData* synth, u64 id, tzpl_Slice dst, tzpl_Slice data);
 //    SErr (*push)(SynthData* synth, int inputIndex, int numChannels, void* data); // optional
 //    void (*processAudio)(SynthData* synth);
 //    
@@ -2141,21 +2141,21 @@ string CppCodeGen::genFunPtrs() {
 //    SErr (*noteSetParams)(SynthData* synth, int noteID, int n, ParamPair* params);
 //    SErr (*noteSetParamRange)(SynthData* synth, int noteID, int first, int length, f32* values);
 
-    s += FMT("\t.alloc = (jscs_SynthData* (*)()){}_alloc,\n", synth->name);
-    s += FMT("\t.free = (jscs_SErr (*)(jscs_SynthData*)){}_free,\n", synth->name);
-    s += FMT("\t.init = (jscs_SErr (*)(jscs_SynthData*)){}_init,\n", synth->name);
-    s += FMT("\t.uninit = (jscs_SErr (*)(jscs_SynthData*)){}_uninit,\n", synth->name);
-    s += FMT("\t.reset = (jscs_SErr (*)(jscs_SynthData*)){}_reset,\n", synth->name);
-    s += FMT("\t.event = (jscs_SErr (*)(jscs_SynthData*, u64, jscs_Slice, jscs_Slice)){}_event,\n", synth->name);
-    s += FMT("\t.processEvents = (void (*)(jscs_SynthData*)){}_processEvents,\n", synth->name);
-    s += FMT("\t.processAudio = (void (*)(jscs_SynthData*)){}_processAudio,\n", synth->name);
+    s += FMT("\t.alloc = (tzpl_SynthData* (*)()){}_alloc,\n", synth->name);
+    s += FMT("\t.free = (tzpl_SErr (*)(tzpl_SynthData*)){}_free,\n", synth->name);
+    s += FMT("\t.init = (tzpl_SErr (*)(tzpl_SynthData*)){}_init,\n", synth->name);
+    s += FMT("\t.uninit = (tzpl_SErr (*)(tzpl_SynthData*)){}_uninit,\n", synth->name);
+    s += FMT("\t.reset = (tzpl_SErr (*)(tzpl_SynthData*)){}_reset,\n", synth->name);
+    s += FMT("\t.event = (tzpl_SErr (*)(tzpl_SynthData*, u64, tzpl_Slice, tzpl_Slice)){}_event,\n", synth->name);
+    s += FMT("\t.processEvents = (void (*)(tzpl_SynthData*)){}_processEvents,\n", synth->name);
+    s += FMT("\t.processAudio = (void (*)(tzpl_SynthData*)){}_processAudio,\n", synth->name);
 
     if (voicerExpr) {
-        s += FMT("\t.noteOn = (jscs_SErr (*)(jscs_SynthData*, i64, int, int, f32*)){}_noteOn,\n", synth->name);
-        s += FMT("\t.noteOff = (jscs_SErr (*)(jscs_SynthData*, i64, int)){}_noteOff,\n", synth->name);
-        s += FMT("\t.allNotesOff = (jscs_SErr (*)(jscs_SynthData*, i64)){}_allNotesOff,\n", synth->name);
-        s += FMT("\t.noteSetParams = (jscs_SErr (*)(jscs_SynthData*, int, int, jscs_ParamPair*)){}_noteSetParams,\n", synth->name);
-        s += FMT("\t.noteSetParamRange = (jscs_SErr (*)(jscs_SynthData*, int, int, int, f32*)){}_noteSetParamRange,\n", synth->name);
+        s += FMT("\t.noteOn = (tzpl_SErr (*)(tzpl_SynthData*, i64, int, int, f32*)){}_noteOn,\n", synth->name);
+        s += FMT("\t.noteOff = (tzpl_SErr (*)(tzpl_SynthData*, i64, int)){}_noteOff,\n", synth->name);
+        s += FMT("\t.allNotesOff = (tzpl_SErr (*)(tzpl_SynthData*, i64)){}_allNotesOff,\n", synth->name);
+        s += FMT("\t.noteSetParams = (tzpl_SErr (*)(tzpl_SynthData*, int, int, tzpl_ParamPair*)){}_noteSetParams,\n", synth->name);
+        s += FMT("\t.noteSetParamRange = (tzpl_SErr (*)(tzpl_SynthData*, int, int, int, f32*)){}_noteSetParamRange,\n", synth->name);
     }
 
     s += "};\n\n";
@@ -2203,14 +2203,14 @@ string CppCodeGen::genClass()
 
     // generate includes
     s += "\n";
-    s += "#include \"jscs_plugin_abi.h\"\n";
-    s += "#include \"jscs_matrix_transform.hpp\"\n";
-    s += "#include \"jscs_random.hpp\"\n";
+    s += "#include \"tzpl_plugin_abi.h\"\n";
+    s += "#include \"tzpl_matrix_transform.hpp\"\n";
+    s += "#include \"tzpl_random.hpp\"\n";
 
     // Include FFT wrapper if any spectral chain nodes exist
     for (S expr : synth->sorted) {
         if (expr.as<SpectralChainExpr>()) {
-            s += "#include \"jscs_fft.hpp\"\n";
+            s += "#include \"tzpl_fft.hpp\"\n";
             break;
         }
     }
@@ -2225,17 +2225,17 @@ string CppCodeGen::genClass()
         // Include voicer AFTER 'using namespace synthdef;' so that synthdef types
         // (f32, i64, etc.) are visible, and define the guard to suppress the
         // voicer's own type aliases which would conflict.
-        s += "#define JSCS_VOICER_TYPES_DEFINED\n";
-        s += "#include \"jscs_voicer.hpp\"\n";
+        s += "#define TZPL_VOICER_TYPES_DEFINED\n";
+        s += "#include \"tzpl_voicer.hpp\"\n";
     }
     s += "\n";
-    s += "extern jscs_SynthFuns " + name + "_funs;\n";
+    s += "extern tzpl_SynthFuns " + name + "_funs;\n";
 
     s += "\n";
     s += "typedef struct " + name + " {\n";
-    s += "\tjscs_SynthFuns funs;\n"; // vtable
-    s += "\tstruct jscs_Engine* engine;\n";
-    s += "\tstruct jscs_Node* node;\n";
+    s += "\ttzpl_SynthFuns funs;\n"; // vtable
+    s += "\tstruct tzpl_Engine* engine;\n";
+    s += "\tstruct tzpl_Node* node;\n";
     s += "\tint num_ins;\n";
     s += "\tint num_outs;\n";
     s += "\tint num_controls;\n";
@@ -2267,25 +2267,25 @@ string CppCodeGen::genClass()
 
     s += genFunPtrs();
     
-    s += "extern \"C\" jscs_SynthDef load() {\n";
-    s += "\tjscs_SynthDef def;\n";
+    s += "extern \"C\" tzpl_SynthDef load() {\n";
+    s += "\ttzpl_SynthDef def;\n";
     s += "\tdef.name = \"" + name + "\";\n";
     s += "\tdef.funs = " + name + "_funs;\n";
     s += "\tdef.num_ins = " + tos(synth->inlets.size()) + ";\n";
     s += "\tdef.num_outs = " + tos(synth->outlets.size()) + ";\n";
     s += "\tdef.num_controls = " + tos(synth->controls.size()) + ";\n";
     if (synth->inlets.size()) {
-        s += "\tdef.ins = (jscs_PortDef*)calloc(def.num_ins, sizeof(jscs_PortDef));\n";
+        s += "\tdef.ins = (tzpl_PortDef*)calloc(def.num_ins, sizeof(tzpl_PortDef));\n";
     } else {
         s += "\tdef.ins = nullptr;\n";
     }
     if (synth->outlets.size()) {
-        s += "\tdef.outs = (jscs_PortDef*)calloc(def.num_outs, sizeof(jscs_PortDef));\n";
+        s += "\tdef.outs = (tzpl_PortDef*)calloc(def.num_outs, sizeof(tzpl_PortDef));\n";
     } else {
         s += "\tdef.outs = nullptr;\n";
     }
     if (synth->controls.size()) {
-        s += "\tdef.controls = (jscs_ControlDef*)calloc(def.num_controls, sizeof(jscs_ControlDef));\n";
+        s += "\tdef.controls = (tzpl_ControlDef*)calloc(def.num_controls, sizeof(tzpl_ControlDef));\n";
     } else {
         s += "\tdef.controls = nullptr;\n";
     }

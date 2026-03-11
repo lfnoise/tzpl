@@ -1,10 +1,10 @@
-# JSCS — Live Coding Audio Platform
+# TZPL — Live Coding Audio Platform
 
 A cross-platform live coding platform for creating live music performances, combining a statically typed programming language, an audio signal graph compiler, and a real-time audio engine.
 
 ## Sub-Projects
 
-### Language X (`lang/`)
+### Tzopilotl (`lang/`)
 
 A statically typed, real-time safe interpreted language designed for audio and signal processing. Features include:
 
@@ -27,14 +27,14 @@ An audio signal flow graph compiler that takes graph descriptions and compiles t
 - ~200 audio operators (oscillators, filters, noise, envelopes, math, delays)
 - 14-pass graph analysis pipeline (topology sort, shape/type inference, constant folding, dead code removal, rate scheduling)
 - Algebraic rewrite engine (~100 optimization rules)
-- C++ code generation targeting the `jscs_plugin_abi` interface
+- C++ code generation targeting the `tzpl_plugin_abi` interface
 - Full pipeline: parse → analyze → codegen → clang compile → link → dlopen
 
 ### Audio Engine (`engine/`)
 
 A real-time audio engine that loads native synth plugins and supports dynamic patching. Features include:
 
-- Plugin loading via `dlopen` of `.dylib` files conforming to `jscs_plugin_abi.h`
+- Plugin loading via `dlopen` of `.dylib` files conforming to `tzpl_plugin_abi.h`
 - Dynamic graph editing with on-demand topological sort (re-sorted only when connections change)
 - Crossfading system (7 curves) for glitch-free connection changes
 - Lock-free SPSC FIFOs for RT-safe inter-thread communication
@@ -48,14 +48,14 @@ A real-time audio engine that loads native synth plugins and supports dynamic pa
 
 Common headers used by multiple sub-projects:
 
-- `jscs_plugin_abi.h` — Pure C plugin ABI (the interface between engine and synthdef-compiler)
-- `jscs_simd.hpp` — Cross-platform SIMD abstraction
-- `jscs_random.hpp` — xoroshiro128++ PRNG (scalar and SIMD)
-- `jscs_matrix_transform.hpp` — Compile-time matrix operations
+- `tzpl_plugin_abi.h` — Pure C plugin ABI (the interface between engine and synthdef-compiler)
+- `tzpl_simd.hpp` — Cross-platform SIMD abstraction
+- `tzpl_random.hpp` — xoroshiro128++ PRNG (scalar and SIMD)
+- `tzpl_matrix_transform.hpp` — Compile-time matrix operations
 
 ### FFI Bridge (`bridge/`)
 
-Connects Language X to the engine and synthdef-compiler via the language's foreign function interface. Includes Language X module files (e.g., `audio_engine.x`) that expose native functions to scripts.
+Connects Tzopilotl to the engine and synthdef-compiler via the language's foreign function interface. Includes Tzopilotl module files (e.g., `audio_engine.x`) that expose native functions to scripts.
 
 ## Directory Structure
 
@@ -64,7 +64,7 @@ A-new-project/
 ├── CMakeLists.txt              Top-level build configuration
 ├── build.sh                    Quick build script
 ├── shared/                     Shared headers (plugin ABI, SIMD, RNG)
-├── lang/              Language X interpreter
+├── lang/              Tzopilotl interpreter
 │   ├── src/                    Compiler and VM source
 │   ├── tests/                  Test suite (226 tests)
 │   ├── modules/                Standard library modules
@@ -77,7 +77,7 @@ A-new-project/
 ├── bridge/                     FFI bridges between sub-projects
 │   ├── src/                    Bridge implementations
 │   ├── include/                Bridge headers
-│   └── modules/                Language X bridge modules
+│   └── modules/                Tzopilotl bridge modules
 ├── integration-tests/          Cross-project integration tests
 ├── third_party/
 │   └── rtaudio/                Cross-platform audio I/O library
@@ -113,17 +113,17 @@ cmake --build build -j$(sysctl -n hw.ncpu)
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `JSCS_BUILD_LANG` | `ON` | Build the Language X interpreter |
-| `JSCS_BUILD_AUDIO_ENGINE` | `ON` | Build the audio engine |
-| `JSCS_BUILD_SYNTHDEF_COMPILER` | `ON` | Build the synthdef compiler |
-| `JSCS_BUILD_BRIDGE` | `ON` | Build the FFI bridge libraries |
-| `JSCS_BUILD_APP` | `OFF` | Build the live coding application |
-| `JSCS_BUILD_TESTS` | `OFF` | Build integration tests |
+| `TZPL_BUILD_LANG` | `ON` | Build the Tzopilotl interpreter |
+| `TZPL_BUILD_AUDIO_ENGINE` | `ON` | Build the audio engine |
+| `TZPL_BUILD_SYNTHDEF_COMPILER` | `ON` | Build the synthdef compiler |
+| `TZPL_BUILD_BRIDGE` | `ON` | Build the FFI bridge libraries |
+| `TZPL_BUILD_APP` | `OFF` | Build the live coding application |
+| `TZPL_BUILD_TESTS` | `OFF` | Build integration tests |
 
 Example — build only the language:
 
 ```sh
-cmake -B build -DJSCS_BUILD_LANG=ON -DJSCS_BUILD_AUDIO_ENGINE=OFF -DJSCS_BUILD_SYNTHDEF_COMPILER=OFF
+cmake -B build -DTZPL_BUILD_LANG=ON -DTZPL_BUILD_AUDIO_ENGINE=OFF -DTZPL_BUILD_SYNTHDEF_COMPILER=OFF
 cmake --build build
 ```
 
@@ -131,39 +131,39 @@ cmake --build build
 
 | Target | Description |
 |--------|-------------|
-| `langx` | Language X interpreter executable |
-| `langx_lib` | Language X as a static library |
+| `tzpl` | Tzopilotl interpreter executable |
+| `tzpl_lib` | Tzopilotl as a static library |
 | `engine` | Audio engine executable |
 | `audio_engine_lib` | Audio engine as a static library |
 | `synthdef-compiler` | Synthdef compiler executable |
 | `synthdef_compiler_lib` | Synthdef compiler as a static library |
-| `langx_audio_engine_bridge` | FFI bridge: Language X ↔ audio engine |
-| `langx_synthdef_compiler_bridge` | FFI bridge: Language X ↔ synthdef compiler |
+| `tzpl_audio_engine_bridge` | FFI bridge: Tzopilotl ↔ audio engine |
+| `tzpl_synthdef_compiler_bridge` | FFI bridge: Tzopilotl ↔ synthdef compiler |
 | `test_audio_engine_ffi` | Audio engine FFI test executable |
 | `test_synthdef_compiler_ffi` | Synthdef compiler FFI test executable |
 
 Build a specific target:
 
 ```sh
-cmake --build build --target langx
+cmake --build build --target tzpl
 ```
 
-## Running Language X
+## Running Tzopilotl
 
 ```sh
 # Run a script
-./build/lang/langx program.x
+./build/lang/tzpl program.x
 
 # Start the REPL
-./build/lang/langx
+./build/lang/tzpl
 
 # Add module search paths
-./build/lang/langx -I lib:vendor program.x
+./build/lang/tzpl -I lib:vendor program.x
 ```
 
 ## Running Tests
 
-### Language X Tests
+### Tzopilotl Tests
 
 The language has a comprehensive test suite with 226 tests covering arithmetic, auto-mapping, builtins, control flow, coroutines, data structures, destructuring, errors, expressions, FFI, functions, modules, operators, type system, and more.
 
@@ -188,28 +188,28 @@ bash run_tests.sh -x              # Stop on first failure
 
 ## Documentation
 
-### Language X
+### Tzopilotl
 
-- [Language X by Example](lang/docs/Language_X_by_Example.html) — Comprehensive syntax and feature guide
+- [Tzopilotl by Example](lang/docs/Tzopilotl_by_Example.html) — Comprehensive syntax and feature guide
 - [Built-in Functions](lang/docs/Builtin_Functions.html) — Reference for all built-in functions
 - [Coroutines](lang/docs/Coroutines.html) — Coroutine system design and usage
-- [FFI Guide](lang/docs/FFI_Guide.html) — Calling C functions from Language X
+- [FFI Guide](lang/docs/FFI_Guide.html) — Calling C functions from Tzopilotl
 
 ### Architecture
 
 - [Synthdef Compiler Architecture](synthdef-compiler/ARCHITECTURE.md) — Compilation pipeline, expression graph, type system, and code generation
 - [Audio Engine Architecture](engine/Architecture.md) — Engine design, silos, commands, plugin ABI, and thread safety
-- [Language X Theory of Operation](lang/Theory_of_Operation.md) — Detailed design document for the language implementation
+- [Tzopilotl Theory of Operation](lang/Theory_of_Operation.md) — Detailed design document for the language implementation
 - [Integration Plan](IMPLEMENTATION_PLAN.md) — Step-by-step roadmap for integrating the sub-projects
 
 ### Editor Support
 
-Syntax highlighting for Language X is available for:
+Syntax highlighting for Tzopilotl is available for:
 
 - **VS Code** — `lang/editors/vscode`
-- **Zed** — `lang/editors/zed-langx`
-- **TextMate / Sublime Text** — `lang/editors/LangX.tmbundle`
-- **Tree-sitter grammar** — `lang/editors/tree-sitter-langx`
+- **Zed** — `lang/editors/zed-tzpl`
+- **TextMate / Sublime Text** — `lang/editors/Tzopilotl.tmbundle`
+- **Tree-sitter grammar** — `lang/editors/tree-sitter-tzpl`
 
 ## License
 

@@ -1,4 +1,4 @@
--- Printing examples from Language X by Example
+-- Printing examples from Tzopilotl by Example
 
 -- println prints its arguments separated by spaces, followed by a newline
 println(42);

@@ -6,11 +6,11 @@
 //  Runs both quick compilation tests and script-based audio tests.
 //
 
-#include "langx_audio_engine_ffi.hpp"
-#include "langx.hpp"
+#include "tzpl_audio_engine_ffi.hpp"
+#include "tzpl.hpp"
 #include "module_compiler.hpp"
-#include "jscs_client_interface.hpp"
-#include "jscs_test_plugins.hpp"
+#include "tzpl_client_interface.hpp"
+#include "tzpl_test_plugins.hpp"
 #include <print>
 #include <cstdlib>
 #include <string_view>
@@ -34,7 +34,7 @@ static void check(bool condition, std::string_view description) {
     }
 }
 
-// Compile and run a Language X source string. Returns true on compilation success.
+// Compile and run a Tzopilotl source string. Returns true on compilation success.
 static bool compileAndRun(ts::Compiler& compiler, ts::VM& vm,
                           const char* source, const char* testName,
                           ts::ModuleCompiler* moduleCompiler = nullptr) {
@@ -125,7 +125,7 @@ static void test_engine_lifecycle() {
     ts::VM vm(16 * 1024 * 1024, types, target);
     bridge::setEngineOnVM(&vm, eng);
 
-    // Test isAudioRunning via Language X
+    // Test isAudioRunning via Tzopilotl
     const char* source = R"(
         import audio_engine.*;
         let running = isAudioRunning();

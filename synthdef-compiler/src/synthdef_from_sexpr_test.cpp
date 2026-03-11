@@ -110,7 +110,7 @@ void test_sexpr_from_file() {
     std::ifstream file("/tmp/test_synth.sexpr");
     if (!file) {
         std::println("ERROR: Could not open /tmp/test_synth.sexpr");
-        std::println("Run the language test first: ./whatever test_sexpr_io.sapf3");
+        std::println("Run the language test first: ./whatever test_sexpr_io.tzpl");
         return;
     }
 

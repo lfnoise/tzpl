@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Test runner for the Language X interpreter.
+# Test runner for the Tzopilotl interpreter.
 # Finds *.x test files under tests/, runs them, and compares output against golden files.
 #
 set -euo pipefail
@@ -8,7 +8,7 @@ set -euo pipefail
 # --- Configuration ---
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-LANGX="$(cd "$ROOT_DIR/.." && pwd)/build/lang/langx"
+TZPL="$(cd "$ROOT_DIR/.." && pwd)/build/lang/tzpl"
 TIMEOUT_SEC=10
 
 # --- Colors ---
@@ -49,8 +49,8 @@ while [[ $# -gt 0 ]]; do
 done
 
 # --- Sanity checks ---
-if [[ ! -x "$LANGX" ]]; then
-    echo -e "${RED}Error: interpreter not found at $LANGX${RESET}"
+if [[ ! -x "$TZPL" ]]; then
+    echo -e "${RED}Error: interpreter not found at $TZPL${RESET}"
     echo "Run 'cmake --build build' first."
     exit 1
 fi
@@ -125,11 +125,11 @@ for test_file in "${TEST_FILES[@]}"; do
     fi
 
     if [[ -n "$TIMEOUT_CMD" ]]; then
-        $TIMEOUT_CMD "${TIMEOUT_SEC}s" "$LANGX" "${I_FLAGS[@]}" "$test_file" \
+        $TIMEOUT_CMD "${TIMEOUT_SEC}s" "$TZPL" "${I_FLAGS[@]}" "$test_file" \
             >"$stdout_file" 2>"$stderr_file" || exit_code=$?
     else
         # No timeout command available; run directly
-        "$LANGX" "${I_FLAGS[@]}" "$test_file" \
+        "$TZPL" "${I_FLAGS[@]}" "$test_file" \
             >"$stdout_file" 2>"$stderr_file" || exit_code=$?
     fi
 

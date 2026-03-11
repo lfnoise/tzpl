@@ -1,4 +1,4 @@
--- String Formatting (fmt) from Language X by Example
+-- String Formatting (fmt) from Tzopilotl by Example
 
 -- %^ is a positional placeholder (filled left to right)
 "%^ + %^ = %^" fmt(1, 2, 3) println;

@@ -2,7 +2,7 @@
 //  lexer.hpp
 //  lang
 //
-//  Hand-written lexer for Language X
+//  Hand-written lexer for Tzopilotl
 //
 
 #ifndef lexer_hpp

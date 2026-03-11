@@ -1,13 +1,13 @@
 //
-//  sapf_rational.hpp
+//  tzpl_rational.hpp
 //  routines
 //
 //  Created by James McCartney on 5/23/20.
 //  Copyright © 2020 James McCartney. All rights reserved.
 //
 
-#ifndef sapf_rational_hpp
-#define sapf_rational_hpp
+#ifndef tzpl_rational_hpp
+#define tzpl_rational_hpp
 
 #include "math.hpp"
 
@@ -242,4 +242,4 @@ namespace std {
 	};
 }
 
-#endif /* sapf_rational_hpp */
+#endif /* tzpl_rational_hpp */

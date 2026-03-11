@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Language X &mdash; Coroutines</title>
+<title>Tzopilotl &mdash; Coroutines</title>
 <style>
   :root {
     --bg: #1a1b26;
@@ -319,7 +319,7 @@
   }
 </style>
 <script>
-if (localStorage.getItem('langx-docs-theme') === 'light') document.documentElement.classList.add('light');
+if (localStorage.getItem('tzpl-docs-theme') === 'light') document.documentElement.classList.add('light');
 </script>
 </head>
 <body>
@@ -409,13 +409,13 @@ if (localStorage.getItem('langx-docs-theme') === 'light') document.documentEleme
 
 <main>
 
-<h1>Language X &mdash; Coroutines</h1>
+<h1>Tzopilotl &mdash; Coroutines</h1>
 <p class="subtitle">Comprehensive guide to the coroutine system: language usage, runtime architecture, and implementation internals.</p>
 
 <!-- ================================================================ -->
 <h2 id="overview">1. Overview</h2>
 
-<p>Language X provides <strong>coroutines</strong> &mdash; cooperative generators that yield values one at a time and can be suspended and resumed on demand. A coroutine is declared with <code>coro fn</code>, yields values with <code>yield</code>, and is consumed via the <code>next</code> builtin which returns <code>Option&lt;T&gt;</code>.</p>
+<p>Tzopilotl provides <strong>coroutines</strong> &mdash; cooperative generators that yield values one at a time and can be suspended and resumed on demand. A coroutine is declared with <code>coro fn</code>, yields values with <code>yield</code>, and is consumed via the <code>next</code> builtin which returns <code>Option&lt;T&gt;</code>.</p>
 
 <pre><code><span class="cmt">-- Declare a coroutine that yields integers</span>
 <span class="kw">coro fn</span> <span class="fn">count</span>(n <span class="typ">Int</span>) <span class="typ">Int</span> {
@@ -433,7 +433,7 @@ c next println;   <span class="cmt">-- Option&lt;Int&gt;.some(1)</span>
 c next println;   <span class="cmt">-- Option&lt;Int&gt;.some(2)</span>
 c next println;   <span class="cmt">-- Option&lt;Int&gt;.none</span></code></pre>
 
-<p>Key properties of Language X coroutines:</p>
+<p>Key properties of Tzopilotl coroutines:</p>
 
 <ul>
   <li><strong>Statically typed.</strong> The yield type is known at compile time. <code>coro fn foo() Int</code> yields <code>Int</code> values and returns <code>Coroutine&lt;Int&gt;</code>.</li>
@@ -871,7 +871,7 @@ count(<span class="num">3</span>) toList map(<span class="kw">fn</span>(x <span 
 <!-- -------------------------------- -->
 <h3 id="design-why-heap">3.1 Why Save-Slot Frames</h3>
 
-<p>Language X is <strong>event-driven</strong>: the call stack collapses between events, so the garbage collector never needs to scan the stack. This is fundamental to the VM's real-time guarantees. Traditional stackful coroutines would violate this invariant because they keep live stack frames around across event boundaries.</p>
+<p>Tzopilotl is <strong>event-driven</strong>: the call stack collapses between events, so the garbage collector never needs to scan the stack. This is fundamental to the VM's real-time guarantees. Traditional stackful coroutines would violate this invariant because they keep live stack frames around across event boundaries.</p>
 
 <p>Each coroutine has a single heap-allocated <code>CoroutineFrame</code> that acts as a <strong>save slot</strong>. During execution, the coroutine body and all functions it calls use the shared flat register file &mdash; the same fast path as non-coroutine code. When the coroutine yields, its body registers are copied from the flat register file into the save slot. When resumed, they are copied back. The save slot is an ordinary GC-managed heap object that the incremental collector scans like any other <code>Obj</code>. This gives us:</p>
 
@@ -1400,7 +1400,7 @@ After write-barriering, the save slot is at most grey. During execution (within 
   update();
   btn.addEventListener('click', function() {
     document.documentElement.classList.toggle('light');
-    localStorage.setItem('langx-docs-theme',
+    localStorage.setItem('tzpl-docs-theme',
       document.documentElement.classList.contains('light') ? 'light' : 'dark');
     update();
   });

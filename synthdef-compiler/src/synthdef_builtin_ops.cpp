@@ -7,7 +7,7 @@
 
 #include "synthdef_builtin_ops.hpp"
 #include "synthdef_synth.hpp"
-#include "jscs_random.hpp"
+#include "tzpl_random.hpp"
 #include "synthdef_matrix.hpp"
 
 namespace synthdef {

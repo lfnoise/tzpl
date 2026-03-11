@@ -1,6 +1,6 @@
 # Theory of Operation
 
-This document describes the internal architecture of the Language X compiler and virtual machine. It covers all phases from source text to execution, with particular attention to the type system and code generation.
+This document describes the internal architecture of the Tzopilotl compiler and virtual machine. It covers all phases from source text to execution, with particular attention to the type system and code generation.
 
 ## Overview
 
@@ -47,7 +47,7 @@ The `Parser` is a hand-written recursive descent parser that uses **Pratt parsin
 
 ### Grammar
 
-The following is the complete grammar of Language X as implemented by the parser. Notation: `|` for alternatives, `*` for zero-or-more, `+` for one-or-more, `?` for optional, and `'...'` for literal tokens.
+The following is the complete grammar of Tzopilotl as implemented by the parser. Notation: `|` for alternatives, `*` for zero-or-more, `+` for one-or-more, `?` for optional, and `'...'` for literal tokens.
 
 #### Top Level
 
@@ -197,7 +197,7 @@ Postfix         = TightPostfix
                 | IDENT CallArgs?                   -- space-pipeline: x f or x f(y)
 ```
 
-**Space-pipeline** is the key syntactic sugar of Language X. When an identifier appears after an expression at postfix level, the parser desugars it to a function call with the expression prepended as the first argument:
+**Space-pipeline** is the key syntactic sugar of Tzopilotl. When an identifier appears after an expression at postfix level, the parser desugars it to a function call with the expression prepended as the first argument:
 
 - `x f` becomes `f(x)` (single-arg pipeline)
 - `x f(y, z)` becomes `f(x, y, z)` (multi-arg pipeline with prepended receiver)

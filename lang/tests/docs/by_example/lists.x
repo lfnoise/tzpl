@@ -1,4 +1,4 @@
--- Lists and the Cons Operator from Language X by Example
+-- Lists and the Cons Operator from Tzopilotl by Example
 
 -- Create a list with the List constructor
 let xs = List(1, 2, 3);

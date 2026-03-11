@@ -1,4 +1,4 @@
--- Operator Overloading from Language X by Example
+-- Operator Overloading from Tzopilotl by Example
 
 struct Point { x Float, y Float }
 

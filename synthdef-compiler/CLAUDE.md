@@ -1,6 +1,6 @@
 # Synthdef Compiler
 
-An audio signal flow graph compiler that takes graph descriptions (via s-expressions or a C++ DSL) and compiles them into optimized C++ dynamic library plugins conforming to the `jscs_plugin_abi` interface.
+An audio signal flow graph compiler that takes graph descriptions (via s-expressions or a C++ DSL) and compiles them into optimized C++ dynamic library plugins conforming to the `tzpl_plugin_abi` interface.
 
 See `ARCHITECTURE.md` for a detailed description of the compilation pipeline, expression graph, type system, and code generation.
 
@@ -13,7 +13,7 @@ cmake --build build
 
 Platform: macOS ARM64 (Apple Silicon). Requires C++23 and the CoreAudio, CoreFoundation, and AudioToolbox frameworks (found automatically by CMake).
 
-The compiler itself invokes `clang` as a subprocess to compile generated C++ into `.dylib` plugins. Build output goes to `~/sapf-build-5/` or the path in `$SAPF3_BUILD`.
+The compiler itself invokes `clang` as a subprocess to compile generated C++ into `.dylib` plugins. Build output goes to `~/tzpl-build/` or the path in `$TZPL_BUILD`.
 
 ## Usage
 
@@ -27,7 +27,7 @@ The compiler itself invokes `clang` as a subprocess to compile generated C++ int
 
 ## Project Structure
 
-All source files are in `src/`. The shared plugin ABI header is at `../../shared/jscs_plugin_abi.h` (relative to `src/`).
+All source files are in `src/`. The shared plugin ABI header is at `../../shared/tzpl_plugin_abi.h` (relative to `src/`).
 
 Key areas:
 - **Expression graph**: `synthdef_expr`, `synthdef_value`, `synthdef_expr_visitor`

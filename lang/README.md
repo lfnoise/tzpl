@@ -1,8 +1,8 @@
-# Language X
+# Tzopilotl
 
 A statically typed, real-time safe interpreted language designed for audio and signal processing.
 
-Language X combines functional and imperative programming with static type inference, immutable-by-default data, and a runtime that never calls the system allocator or blocks. It is suitable for use within a real-time audio thread.
+Tzopilotl combines functional and imperative programming with static type inference, immutable-by-default data, and a runtime that never calls the system allocator or blocks. It is suitable for use within a real-time audio thread.
 
 ## Quick Example
 
@@ -62,13 +62,13 @@ cmake --build build
 
 ```sh
 # Run a file
-./build/langx program.x
+./build/tzpl program.x
 
 # Start the REPL
-./build/langx
+./build/tzpl
 
 # Add module search paths
-./build/langx -I lib:vendor program.x
+./build/tzpl -I lib:vendor program.x
 ```
 
 ## Running Tests
@@ -79,16 +79,16 @@ cmake --build build
 
 ## Documentation
 
-- [Language X by Example](docs/Language_X_by_Example.html) -- comprehensive syntax guide
+- [Tzopilotl by Example](docs/Tzopilotl_by_Example.html) -- comprehensive syntax guide
 - [Built-in Functions](docs/Builtin_Functions.html) -- reference for all built-in functions
 - [Coroutines](docs/Coroutines.html) -- coroutine system design and usage
-- [FFI Guide](docs/FFI_Guide.html) -- calling C from Language X
+- [FFI Guide](docs/FFI_Guide.html) -- calling C from Tzopilotl
 
 ## Editor Support
 
 Syntax highlighting packages are available in the `editors/` directory:
 
 - **VS Code** -- `editors/vscode`
-- **Zed** -- `editors/zed-langx`
-- **TextMate / Sublime Text** -- `editors/LangX.tmbundle`
-- **Tree-sitter grammar** -- `editors/tree-sitter-langx`
+- **Zed** -- `editors/zed-tzpl`
+- **TextMate / Sublime Text** -- `editors/Tzopilotl.tmbundle`
+- **Tree-sitter grammar** -- `editors/tree-sitter-tzpl`

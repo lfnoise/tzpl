@@ -9,7 +9,7 @@
 #include "synthdef_compile_link.hpp"
 #include "synthdef_synth.hpp"
 #include "synthdef_cpp_codegen.hpp"
-#include "jscs_plugin_abi.h"
+#include "tzpl_plugin_abi.h"
 #include "synthdef_audio_io.hpp"
 #include <dlfcn.h> // dlopen, dlclose
 #include <unistd.h>
@@ -33,20 +33,20 @@ string codegen(string synthName, std::function<void()> f)
 
 static string synthNameSuffix = "_synth";
 
-usize elemSize(jscs_ElemType elem) {
+usize elemSize(tzpl_ElemType elem) {
     switch (elem) {
-        case jscs_kI32 : return sizeof(i32);
-        case jscs_kI64 : return sizeof(i64);
-        case jscs_kF32 : return sizeof(f32);
-        case jscs_kF64 : return sizeof(f64);
+        case tzpl_kI32 : return sizeof(i32);
+        case tzpl_kI64 : return sizeof(i64);
+        case tzpl_kF32 : return sizeof(f32);
+        case tzpl_kF64 : return sizeof(f64);
         default: std::unreachable();
     }
 }
 
-jscs_SynthData* setupSynth(jscs_SynthDef const& def, f64 fs) {
+tzpl_SynthData* setupSynth(tzpl_SynthDef const& def, f64 fs) {
     auto funs = def.funs;
 
-    jscs_SynthData* synth = def.funs.alloc();
+    tzpl_SynthData* synth = def.funs.alloc();
     synth->engine = nullptr;
     synth->node = nullptr;
     synth->funs = funs;
@@ -63,19 +63,19 @@ jscs_SynthData* setupSynth(jscs_SynthDef const& def, f64 fs) {
 
     // initialize input ports
     for (int i = 0; i < synth->num_ins; ++i) {
-        jscs_PortDef const& in = def.ins[i];
+        tzpl_PortDef const& in = def.ins[i];
         synth->inlets[i] =  (void*)calloc(in.type.chans, elemSize(in.type.elem));
     }
 
     // initialize output ports
     for (int i = 0; i < synth->num_outs; ++i) {
-        jscs_PortDef const& out = def.outs[i];
+        tzpl_PortDef const& out = def.outs[i];
         synth->outlets[i] = (void*)calloc(out.type.chans, elemSize(out.type.elem));
     }
 
     // initialize controls
     for (int i = 0; i < synth->num_controls; ++i) {
-        jscs_ControlDef const& ctl = def.controls[i];
+        tzpl_ControlDef const& ctl = def.controls[i];
         synth->controls[i] = (void*)calloc(ctl.type.chans, elemSize(ctl.type.elem));
     }
 
@@ -93,13 +93,13 @@ void runInternalAudioEngine(string dir, string synthName, int seconds) {
             printf("load synthdef failed. exiting..\n");
             exit(1);
         }
-        jscs_SynthDef def = opt_synthdef.value();
+        tzpl_SynthDef def = opt_synthdef.value();
 
         assert(def.num_ins == 0);
         assert(def.num_outs == 1);
         assert(def.num_controls == 0);
 
-        jscs_SynthData* data = def.funs.alloc();
+        tzpl_SynthData* data = def.funs.alloc();
 
         printf("data = %p\n", (void*)data);
 
@@ -185,7 +185,7 @@ void test(string synthName, int seconds, std::function<void()> f)
 #if RUN_EXTERNAL_AUDIO_ENGINE
     try {
     printf("\nbegin run audio engine =====================================================\n");
-        string cmd = "/usr/local/bin/sapf_audioengine5 ";
+        string cmd = "/usr/local/bin/tzpl_audioengine ";
         cmd += synthName;
         cmd += " ";
         cmd += filepath_dylib;
@@ -201,7 +201,7 @@ void test(string synthName, int seconds, std::function<void()> f)
         }
         int status = pclose(pf);
         if (status) {
-            printf("sapf_audioengine5 failed: %d\n", status);
+            printf("tzpl_audioengine failed: %d\n", status);
             exit(1);
             //exit(WEXITSTATUS(status));
         }

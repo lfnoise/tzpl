@@ -5,9 +5,9 @@
 //  Created by James McCartney on 2/2/21.
 //
 
-#include "jscs_sexpr.hpp"
-#include "jscs_client_interface.hpp"
-#include "jscs_test_plugins.hpp"
+#include "tzpl_sexpr.hpp"
+#include "tzpl_client_interface.hpp"
+#include "tzpl_test_plugins.hpp"
 #include <thread>
 #include <chrono>
 #include <cassert>
@@ -32,7 +32,7 @@ void loadDef_test()
     AudioStreamParameters asp{.deviceName = "default", .channels = 2, .firstChannel = 0, .bufferFrames = 256, .sampleRate = 48000.};
     auto e = newEngine(config, asp);
 
-    loadDef(e, "/Users/jamesmcc/sapf-build-5", "bubbles");
+    loadDef(e, "/Users/jamesmcc/tzpl-build", "bubbles");
 }
 
 void test0()

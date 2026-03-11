@@ -1,4 +1,4 @@
--- Templates from Language X by Example
+-- Templates from Tzopilotl by Example
 
 -- Template function with type parameter
 fn identity<T>(x T) T = x;

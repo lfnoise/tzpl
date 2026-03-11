@@ -1,6 +1,6 @@
 Within this directory are directories for three projects:
 
-- @lang/ is an interpreter for a statically typed programming language that is designed to be able to run on a real-time thread.
+- @lang/ is an interpreter for the Tzopilotl programming language, a statically typed language designed to be able to run on a real-time thread.
 - @synthdef-compiler/ takes a description of a graph of audio signal operators and compiles a plugin for computing audio.
 - @engine/ An audio engine that can dynamically edit a graph of plugins with optional cross fading. Has a scheduling queue for scheduling events on the real-time thread. Can run multiple audio worker threads called Silos.
 

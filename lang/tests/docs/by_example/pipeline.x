@@ -1,4 +1,4 @@
--- Pipeline Syntax from Language X by Example
+-- Pipeline Syntax from Tzopilotl by Example
 
 fn square(x Int) Int = x * x;
 fn double(x Int) Int = x * 2;

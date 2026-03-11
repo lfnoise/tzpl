@@ -1,4 +1,4 @@
--- Function Type Annotations from Language X by Example
+-- Function Type Annotations from Tzopilotl by Example
 
 -- Function type annotation on a variable
 let add (Int, Int) Int = fn(a Int, b Int) Int { a + b };

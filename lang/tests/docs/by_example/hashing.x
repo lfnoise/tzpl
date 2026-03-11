@@ -1,4 +1,4 @@
--- Hashing from Language X by Example
+-- Hashing from Tzopilotl by Example
 
 -- Hash works on all types (values are deterministic for value types)
 hash(42) println;

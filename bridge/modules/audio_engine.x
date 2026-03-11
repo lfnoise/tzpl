@@ -1,6 +1,6 @@
 -- audio_engine.x
 -- Enum definitions mirroring the C++ audio engine enums.
--- These must be kept in sync with jscs_client_interface.hpp and jscs_plugin_abi.h.
+-- These must be kept in sync with tzpl_client_interface.hpp and tzpl_plugin_abi.h.
 
 enum Enable { kOff, kOn }
 

@@ -1,4 +1,4 @@
--- Sets from Language X by Example
+-- Sets from Tzopilotl by Example
 
 -- Create a set
 let s = Set(1, 2, 3, 4, 5);

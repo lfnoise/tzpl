@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-if(NOT CMAKE_PROJECT_NAME STREQUAL "jscs")
+if(NOT CMAKE_PROJECT_NAME STREQUAL "tzpl")
     project(engine LANGUAGES CXX)
     set(CMAKE_CXX_STANDARD 23)
     set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -26,15 +26,15 @@ endif()
 # --- audio_engine_lib static library (everything except main.cpp) ---
 
 set(LIB_SOURCES
-    src/jscs_sexpr.cpp
-    src/jscs_sexpr_binary_buffer.cpp
-    src/jscs_command.cpp
-    src/jscs_client_interface.cpp
-    src/jscs_silo.cpp
-    src/jscs_engine.cpp
-    src/jscs_node.cpp
-    src/jscs_xfader.cpp
-    src/jscs_test_plugins.cpp
+    src/tzpl_sexpr.cpp
+    src/tzpl_sexpr_binary_buffer.cpp
+    src/tzpl_command.cpp
+    src/tzpl_client_interface.cpp
+    src/tzpl_silo.cpp
+    src/tzpl_engine.cpp
+    src/tzpl_node.cpp
+    src/tzpl_xfader.cpp
+    src/tzpl_test_plugins.cpp
 )
 
 add_library(audio_engine_lib STATIC ${LIB_SOURCES})
@@ -61,22 +61,22 @@ install(TARGETS audio_engine_lib
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
 )
 install(FILES
-    src/jscs_client_interface.hpp
-    src/jscs_node.hpp
-    src/jscs_engine.hpp
-    src/jscs_common.hpp
-    src/jscs_hash.hpp
-    src/jscs_sexpr.hpp
-    src/jscs_command.hpp
-    src/jscs_command_subclasses.hpp
-    src/jscs_atomic_fifo.hpp
-    src/jscs_random.hpp
-    src/jscs_complex.hpp
-    src/jscs_silo.hpp
-    src/jscs_xfader.hpp
-    src/jscs_sexpr_binary_buffer.hpp
-    src/jscs_test_plugins.hpp
-    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/jscs
+    src/tzpl_client_interface.hpp
+    src/tzpl_node.hpp
+    src/tzpl_engine.hpp
+    src/tzpl_common.hpp
+    src/tzpl_hash.hpp
+    src/tzpl_sexpr.hpp
+    src/tzpl_command.hpp
+    src/tzpl_command_subclasses.hpp
+    src/tzpl_atomic_fifo.hpp
+    src/tzpl_random.hpp
+    src/tzpl_complex.hpp
+    src/tzpl_silo.hpp
+    src/tzpl_xfader.hpp
+    src/tzpl_sexpr_binary_buffer.hpp
+    src/tzpl_test_plugins.hpp
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/tzpl
 )
 install(TARGETS engine
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}

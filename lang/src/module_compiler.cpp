@@ -23,8 +23,8 @@ namespace ts {
 ModuleCompiler::ModuleCompiler(Compiler& compiler, std::vector<std::string> includePaths)
     : compiler_(compiler), includePaths_(std::move(includePaths))
 {
-    // Append LANGX_PATH directories
-    if (const char* envPath = std::getenv("LANGX_PATH")) {
+    // Append TZPL_PATH directories
+    if (const char* envPath = std::getenv("TZPL_PATH")) {
         std::string pathStr(envPath);
         size_t start = 0;
         while (start < pathStr.size()) {
@@ -59,7 +59,7 @@ std::string ModuleCompiler::resolveModulePath(
         }
     }
 
-    // 2. Try each include path (CLI -I paths + LANGX_PATH)
+    // 2. Try each include path (CLI -I paths + TZPL_PATH)
     for (const auto& dir : includePaths_) {
         std::filesystem::path candidate = std::filesystem::path(dir) / relPath;
         if (std::filesystem::exists(candidate)) {

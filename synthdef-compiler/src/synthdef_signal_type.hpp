@@ -45,11 +45,11 @@ namespace synthdef {
         }
         string codeStr() const {
             switch (rate) {
-                case Const: return "jscs_constRate";
-                case Init: return  "jscs_initRate";
-                case Reset: return "jscs_resetRate";
-                case Event: return "jscs_eventRate";
-                case Audio: return "jscs_audioRate";
+                case Const: return "tzpl_constRate";
+                case Init: return  "tzpl_initRate";
+                case Reset: return "tzpl_resetRate";
+                case Event: return "tzpl_eventRate";
+                case Audio: return "tzpl_audioRate";
                 default: return "Unknown";
             }
         }

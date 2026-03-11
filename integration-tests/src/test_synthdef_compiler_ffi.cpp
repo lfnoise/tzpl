@@ -5,12 +5,12 @@
 //  Integration test for the synthdef-compiler FFI bridge.
 //
 
-#include "langx_synthdef_compiler_ffi.hpp"
-#include "langx_audio_engine_ffi.hpp"
-#include "langx.hpp"
+#include "tzpl_synthdef_compiler_ffi.hpp"
+#include "tzpl_audio_engine_ffi.hpp"
+#include "tzpl.hpp"
 #include "module_compiler.hpp"
-#include "jscs_client_interface.hpp"
-#include "jscs_test_plugins.hpp"
+#include "tzpl_client_interface.hpp"
+#include "tzpl_test_plugins.hpp"
 #include <print>
 #include <cstdlib>
 #include <string_view>
@@ -33,7 +33,7 @@ static void check(bool condition, std::string_view description) {
     }
 }
 
-// Compile and run a Language X source string. Returns true on compilation success.
+// Compile and run a Tzopilotl source string. Returns true on compilation success.
 static bool compileAndRun(ts::Compiler& compiler, ts::VM& vm,
                           const char* source, const char* testName,
                           ts::ModuleCompiler* moduleCompiler = nullptr) {

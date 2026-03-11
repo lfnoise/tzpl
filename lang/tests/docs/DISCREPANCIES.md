@@ -1,6 +1,6 @@
 # Documentation vs Implementation Discrepancies
 
-This file lists examples from `Language_X_by_Example.html` and `Builtin_Functions.html`
+This file lists examples from `Tzopilotl_by_Example.html` and `Builtin_Functions.html`
 that were broken, required workarounds, or differ from the documented behavior.
 
 ## Fixed Issues
@@ -37,7 +37,7 @@ construction, not in function call expressions. Type inference works for all cas
 with type annotation (`let empty Map[String, Int] = [:];`) since typed empty maps
 are not implemented.
 
-**Files changed:** `Language_X_by_Example.html`, `tests/docs/by_example/maps.x`
+**Files changed:** `Tzopilotl_by_Example.html`, `tests/docs/by_example/maps.x`
 
 ---
 
@@ -82,7 +82,7 @@ actual output is `3/1 2/1 1/1`. The step is inferred as `-1`, so `1/2` is never 
 
 **Fix:** Documentation updated to show correct output.
 
-**Files changed:** `Language_X_by_Example.html`
+**Files changed:** `Tzopilotl_by_Example.html`
 
 ---
 
@@ -93,7 +93,7 @@ of the correct `%^` syntax.
 
 **Fix:** Documentation updated to use `%^`.
 
-**Files changed:** `Language_X_by_Example.html`
+**Files changed:** `Tzopilotl_by_Example.html`
 
 ---
 

@@ -23,7 +23,7 @@ let kInvSqrt2 = 1.0 / kSqrt2;
 -- NaN constant (IEEE 754)
 let NAN = 0.0 / 0.0;
 
--- The following are available as LangX builtins and are not redefined:
+-- The following are available as Tzopilotl builtins and are not redefined:
 --   sqrt, cbrt, abs, floor, ceil, round, trunc, frac,
 --   log, log2, log10, log1p, exp, exp2, expm1,
 --   sin, cos, tan, asin, acos, atan, atan2,

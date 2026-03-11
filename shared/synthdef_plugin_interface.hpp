@@ -1,6 +1,6 @@
 //
 //  synthdef_plugin_interface.hpp
-//  sapf-after-rust-cpp-xcode
+//  tzpl
 //
 //  Created by James McCartney on 8/6/24.
 //

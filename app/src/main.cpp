@@ -2,7 +2,7 @@
 //  main.cpp
 //  app
 //
-//  Live coding application: Language X with audio engine and synthdef compiler.
+//  Live coding application: Tzopilotl with audio engine and synthdef compiler.
 //  Runs scripts or an interactive REPL with full FFI access.
 //
 
@@ -14,13 +14,13 @@
 #include <csignal>
 #include <optional>
 #include <filesystem>
-#include "langx.hpp"
+#include "tzpl.hpp"
 #include "module_compiler.hpp"
 #include "diagnostic.hpp"
-#include "langx_audio_engine_ffi.hpp"
-#include "langx_synthdef_compiler_ffi.hpp"
-#include "jscs_client_interface.hpp"
-#include "jscs_test_plugins.hpp"
+#include "tzpl_audio_engine_ffi.hpp"
+#include "tzpl_synthdef_compiler_ffi.hpp"
+#include "tzpl_client_interface.hpp"
+#include "tzpl_test_plugins.hpp"
 
 using namespace ts;
 namespace fs = std::filesystem;
@@ -190,7 +190,7 @@ static void signalHandler(int) {
 
 static void printHelp() {
     std::cout <<
-        "Usage: jscs [options] [file]\n"
+        "Usage: tzpl [options] [file]\n"
         "\n"
         "Options:\n"
         "  -h, --help              Show this help message\n"
@@ -212,8 +212,8 @@ static void printHelp() {
         "Project directory layout:\n"
         "  <project>/\n"
         "    config                Audio/engine configuration file\n"
-        "    src/                  Language X source files\n"
-        "    modules/              Language X modules\n"
+        "    src/                  Tzopilotl source files\n"
+        "    modules/              Tzopilotl modules\n"
         "    synthdefs/sexpr/      Generated synthdef s-expressions\n"
         "    synthdefs/cpp/        Generated synthdef C++ sources\n"
         "    synthdefs/dylib/      Compiled synthdef plugins\n"
@@ -349,7 +349,7 @@ int main(int argc, const char* argv[]) {
                 std::cout << "\nStopping.\n";
             }
         } else {
-            std::cerr << "jscs: no input file specified. Use --help for usage.\n";
+            std::cerr << "tzpl: no input file specified. Use --help for usage.\n";
             exitCode = 1;
         }
 
@@ -359,8 +359,8 @@ int main(int argc, const char* argv[]) {
         engine::freeEngine(eng);
         return exitCode;
 
-    } catch (jscs_SErr err) {
-        std::cerr << "Fatal audio engine error (jscs_SErr code " << err << ")\n";
+    } catch (tzpl_SErr err) {
+        std::cerr << "Fatal audio engine error (tzpl_SErr code " << err << ")\n";
         return 1;
     } catch (const std::exception& e) {
         std::cerr << "Fatal error: " << e.what() << "\n";

@@ -12,7 +12,7 @@
 
 namespace synthdef {
 
-using SynthDefLoadFun = jscs_SynthDef (*)();
+using SynthDefLoadFun = tzpl_SynthDef (*)();
 
 static int compile(string const& filepath_c, string const& filepath_o)
 {
@@ -24,8 +24,8 @@ static int compile(string const& filepath_c, string const& filepath_o)
     cmd += " -o " + filepath_o;
     cmd += " -O3";
     cmd += " -ffast-math";
-#ifdef JSCS_SHARED_DIR
-    cmd += " -I " JSCS_SHARED_DIR;
+#ifdef TZPL_SHARED_DIR
+    cmd += " -I " TZPL_SHARED_DIR;
 #endif
     cmd += " -c " + filepath_c;
 
@@ -79,13 +79,13 @@ static int link(string const& filepath_o, string const& filepath_dylib) {
 
 string getBuildDir() {
     string builddir;
-    const char* sapf_build = getenv("SAPF3_BUILD");
-    if (sapf_build) {
-        builddir = sapf_build;
+    const char* tzpl_build = getenv("TZPL_BUILD");
+    if (tzpl_build) {
+        builddir = tzpl_build;
     } else {
         const char* homedir = getenv("HOME");
         if (homedir) {
-            builddir = string(homedir) + "/sapf-build-5/";
+            builddir = string(homedir) + "/tzpl-build/";
         } else {
             builddir = "/tmp/";
         }
@@ -132,7 +132,7 @@ int compileAndLink(string dir, string synthName) {
     return 0;
 }
 
-optional<jscs_SynthDef> loadDef(std::string path) {
+optional<tzpl_SynthDef> loadDef(std::string path) {
     const char* path_c = path.c_str();
 
     void* handle = dlopen(path_c, RTLD_NOW);
@@ -154,7 +154,7 @@ optional<jscs_SynthDef> loadDef(std::string path) {
 
     SynthDefLoadFun loadFunc = (SynthDefLoadFun)ptr;
 
-    jscs_SynthDef def = (*loadFunc)();
+    tzpl_SynthDef def = (*loadFunc)();
 
     return def;
 }

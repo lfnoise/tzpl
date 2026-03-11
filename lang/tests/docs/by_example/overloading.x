@@ -1,4 +1,4 @@
--- Function Overloading from Language X by Example
+-- Function Overloading from Tzopilotl by Example
 
 fn describe(x Int) String = "an integer";
 fn describe(x Float) String = "a float";

@@ -1,4 +1,4 @@
--- Control Flow from Language X by Example
+-- Control Flow from Tzopilotl by Example
 
 -- If/else as expression
 fn classify(n Int) String {

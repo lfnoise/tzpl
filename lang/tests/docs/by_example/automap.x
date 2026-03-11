@@ -1,4 +1,4 @@
--- Auto-mapping from Language X by Example
+-- Auto-mapping from Tzopilotl by Example
 
 -- A function expecting Int, given an array of Int, maps automatically
 fn double(x Int) Int = x * 2;
