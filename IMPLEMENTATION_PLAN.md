@@ -114,19 +114,19 @@ A-new-project/
 ```
 
 **Completed tasks**:
-1. ~~Create top-level `CMakeLists.txt` that adds each sub-project via `add_subdirectory()`.~~ Done. Build options: `TZPL_BUILD_AUDIO_ENGINE`, `TZPL_BUILD_SYNTHDEF_COMPILER`, `TZPL_BUILD_LANG`, `TZPL_BUILD_BRIDGE`, `TZPL_BUILD_APP` (OFF by default), `TZPL_BUILD_TESTS` (OFF by default).
-2. ~~Refactor each sub-project's CMakeLists.txt to produce a library target.~~ Done. Each sub-project also supports standalone builds via `if(NOT CMAKE_PROJECT_NAME STREQUAL "tzpl")` guards.
-3. ~~Define proper `target_include_directories(PUBLIC ...)` on each library.~~ Done.
-4. ~~Move `shared/` into a proper CMake interface library target.~~ Done.
-5. ~~Clean up legacy/duplicate headers.~~ Done.
-6. ~~Ensure all three projects build successfully from the top level.~~ Done.
-7. ~~Add a `build.sh` convenience script at the root.~~ Done.
+1. Create top-level `CMakeLists.txt` that adds each sub-project via `add_subdirectory()`. Done. Build options: `TZPL_BUILD_AUDIO_ENGINE`, `TZPL_BUILD_SYNTHDEF_COMPILER`, `TZPL_BUILD_LANG`, `TZPL_BUILD_BRIDGE`, `TZPL_BUILD_APP` (OFF by default), `TZPL_BUILD_TESTS` (OFF by default).
+2. Refactor each sub-project's CMakeLists.txt to produce a library target. Done. Each sub-project also supports standalone builds via `if(NOT CMAKE_PROJECT_NAME STREQUAL "tzpl")` guards.
+3. Define proper `target_include_directories(PUBLIC ...)` on each library. Done.
+4. Move `shared/` into a proper CMake interface library target. Done.
+5. Clean up legacy/duplicate headers. Done.
+6. Ensure all three projects build successfully from the top level. Done.
+7. Add a `build.sh` convenience script at the root. Done.
 
 ### 0.2 Cross-platform build support — PARTIAL
 
 **Completed tasks**:
-1. ~~Verify macOS ARM64 builds for all three.~~ Done.
-3. ~~Define CMake options for optional features.~~ Done.
+1. Verify macOS ARM64 builds for all three. Done.
+3. Define CMake options for optional features. Done.
 
 **Remaining tasks**:
 2. Add Linux build CI (GitHub Actions or similar).
@@ -223,11 +223,11 @@ fn sleep(seconds Float) Void;
 
 ### 2.2 Implement the FFI bridge — DONE
 
-1. ~~C++ bridge layer wrapping each function into FFI signature.~~ Done.
-2. ~~Each wrapper extracts arguments from VM registers.~~ Done.
-3. ~~Register all functions with the VM's FFI system.~~ Done (foreign module namespace `audio_engine`).
-4. ~~Engine pointer via VM user data pointer.~~ Done (`setEngineOnVM()`).
-5. ~~Mark scheduling functions as `rtSafe`.~~ Done (19 functions marked rtSafe).
+1. C++ bridge layer wrapping each function into FFI signature. Done.
+2. Each wrapper extracts arguments from VM registers. Done.
+3. Register all functions with the VM's FFI system. Done (foreign module namespace `audio_engine`).
+4. Engine pointer via VM user data pointer. Done (`setEngineOnVM()`).
+5. Mark scheduling functions as `rtSafe`. Done (19 functions marked rtSafe).
 
 ### 2.3 Test the FFI bridge — DONE
 
@@ -257,10 +257,10 @@ Note: The name parameter was removed vs. the original plan — the synth name is
 ### 3.2 Implement the FFI bridge — DONE
 
 Implemented in `bridge/src/tzpl_synthdef_compiler_ffi.cpp` (192 lines). The bridge:
-1. ~~Calls `synthdef::synthFromSExprText()`, `synthdef::cppCodeGen()`, and `synthdef::compileAndLink()`.~~ Done.
-2. ~~After compilation, calls `engine::addSynthDef()` to register the def with the engine.~~ Done.
-3. ~~Returns error strings to the language instead of crashing.~~ Done (comprehensive error reporting across all pipeline stages).
-4. ~~Caches compilation results keyed by name + s-expression hash.~~ Done.
+1. Calls `synthdef::synthFromSExprText()`, `synthdef::cppCodeGen()`, and `synthdef::compileAndLink()`. Done.
+2. After compilation, calls `engine::addSynthDef()` to register the def with the engine. Done.
+3. Returns error strings to the language instead of crashing. Done (comprehensive error reporting across all pipeline stages).
+4. Caches compilation results keyed by name + s-expression hash. Done.
 
 ### 3.3 Higher-level DSL in Tzopilotl — DONE
 
@@ -393,17 +393,17 @@ The engine declares but doesn't implement: `newBuffer`, `freeBuffer`, `resizeBuf
 ### 7.2 Audio input support -- DONE
 
 **Completed tasks**:
-1. ~~Enable input streams in RtAudio configuration.~~ Done. Supports three modes: duplex (same device for I/O), separate input device (second RtAudio instance with staging buffer), and macOS aggregate devices. `AudioStreamParameters` has `inputDeviceName`, `inputChannels`, `firstInputChannel` fields.
-2. ~~Route hardware input to a special input node per silo.~~ Done. "Audio In" node (nodeID=1) created per silo with an output port. `processFrames()` copies hardware input samples to the input node's outlet each sample, before running the node graph.
-3. ~~Plugins can receive live audio via inlet connections.~~ Done. Connect any plugin's input to the input node's output (nodeID=1, port 0) to receive live audio. The input node participates in topological sort like any other node.
+1. Enable input streams in RtAudio configuration. Done. Supports three modes: duplex (same device for I/O), separate input device (second RtAudio instance with staging buffer), and macOS aggregate devices. `AudioStreamParameters` has `inputDeviceName`, `inputChannels`, `firstInputChannel` fields.
+2. Route hardware input to a special input node per silo. Done. "Audio In" node (nodeID=1) created per silo with an output port. `processFrames()` copies hardware input samples to the input node's outlet each sample, before running the node graph.
+3. Plugins can receive live audio via inlet connections. Done. Connect any plugin's input to the input node's output (nodeID=1, port 0) to receive live audio. The input node participates in topological sort like any other node.
 4. App CLI supports `--input-channels`, `--input-device`, `--first-input-channel` flags and `inputDevice` config key.
 5. FFI bridge exposes `inputChannels()` for querying active input channel count.
 
 ### 7.3 MasterGainCmd and ChannelOffsetCmd -- DONE
 
 **Completed tasks**:
-1. ~~Implement master gain control (applied after safety limiter or integrated into it).~~ Done.
-2. ~~Implement channel offset for routing to specific hardware output channels.~~ Done.
+1. Implement master gain control (applied after safety limiter or integrated into it). Done.
+2. Implement channel offset for routing to specific hardware output channels. Done.
 
 ### 7.4 Binary s-expression serialization
 
@@ -490,10 +490,10 @@ Test file: `lang/tests/dynamic_scope.x`. Module example: `lang/modules/dynvar.x`
 ### 9.3 Standard library completion (Phase 13 in lang's plan) — MOSTLY DONE
 
 **Completed**:
-1. ~~String functions~~: substring, split, contains, startsWith, endsWith, trim, toUpper, toLower, replace, byte indexing. Tested in `tests/builtins/string_functions.x`.
-2. ~~Array/list utility functions~~: Extensively tested.
-3. ~~Range operations~~: Working.
-4. ~~Map operations~~: `MapObj` class with builtins -- get (returns Option), getDefault, contains, keys, values, copy, merge.
+1. String functions: substring, split, contains, startsWith, endsWith, trim, toUpper, toLower, replace, byte indexing. Tested in `tests/builtins/string_functions.x`.
+2. Array/list utility functions: Extensively tested.
+3. Range operations: Working.
+4. Map operations: `MapObj` class with builtins -- get (returns Option), getDefault, contains, keys, values, copy, merge.
 
 **Remaining tasks**:
 1. Add I/O functions (file reading for loading scripts -- NRT only).
@@ -501,10 +501,10 @@ Test file: `lang/tests/dynamic_scope.x`. Module example: `lang/modules/dynvar.x`
 ### 9.4 Optimizations (Phase 14 in lang's plan) — MOSTLY DONE
 
 **Completed**:
-- ~~Register allocation~~ Done (register reclamation, `--no-reg-reclaim` flag to disable).
-- ~~Tail call optimization~~ Done (`--no-tco` flag to disable).
-- ~~Constant folding~~ Done (AST-level, `--no-const-fold` flag to disable).
-- ~~Range loop inlining~~ Done (Int and Fraction range for-loops are inlined to avoid RangeObj allocation).
+- Register allocation. Done (register reclamation, `--no-reg-reclaim` flag to disable).
+- Tail call optimization. Done (`--no-tco` flag to disable).
+- Constant folding. Done (AST-level, `--no-const-fold` flag to disable).
+- Range loop inlining. Done (Int and Fraction range for-loops are inlined to avoid RangeObj allocation).
 
 **Remaining tasks**:
 1. General function inlining for small functions (beyond range loops).
@@ -536,11 +536,11 @@ The app/ directory exists with a CMakeLists.txt and main.cpp, but it is currentl
 ### 10.2 Application scaffold
 
 **Tasks**:
-1. ~~Create `app/` directory with CMakeLists.txt.~~ Done (CLI only).
+1. Create `app/` directory with CMakeLists.txt. Done (CLI only).
 2. Set up Dear ImGui with a Metal backend (macOS) / Vulkan or OpenGL backend (Linux).
 3. Create main application window with basic menu bar.
-4. ~~Link against `libAudioEngine`, `libSynthdefCompiler`, `libTzopilotl`.~~ Done.
-5. ~~Initialize all three systems at startup.~~ Done (in CLI app).
+4. Link against `libAudioEngine`, `libSynthdefCompiler`, `libTzopilotl`. Done.
+5. Initialize all three systems at startup. Done (in CLI app).
 
 ---
 
