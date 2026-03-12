@@ -376,7 +376,7 @@ Recommendation: **oscpack** or a minimal custom implementation to avoid external
 
 ---
 
-## Phase 7: Finish Remaining Engine Features — NOT STARTED
+## Phase 7: Finish Remaining Engine Features — PARTIAL
 
 **Goal**: Complete engine functionality gaps.
 
@@ -414,11 +414,11 @@ File `tzpl_sexpr_binary_buffer.hpp` exists but contains only commented-out skele
 
 ---
 
-## Phase 8: Finish Remaining Compiler Features — MOSTLY DONE
+## Phase 8: Finish Remaining Compiler Features — DONE
 
 **Goal**: Complete synthdef-compiler gaps.
 
-### 8.1 SIMD code generation — NOT STARTED
+### 8.1 SIMD code generation — DONE
 
 Infrastructure exists: `max_simd_width = 4`, `unroll_by = 4` in `synthdef_cpp_codegen.cpp`, SIMD type definitions are in `shared/tzpl_simd.hpp`. But no SIMD loop body generation code — currently defaults to scalar codegen.
 
@@ -729,7 +729,7 @@ Phase 0 (Build Infrastructure)       ✅ DONE
         │                 └─> Phase 5 (OSC)       ⬜ NOT STARTED
         │                       └─> Phase 6 (NATS) ⬜ NOT STARTED
         ├─> Phase 7 (Engine Features)              🟡 PARTIAL ─────────────────┐
-        ├─> Phase 8 (Compiler Features)            🟢 MOSTLY DONE ─────────┤
+        ├─> Phase 8 (Compiler Features)            ✅ DONE ────────────────┤
         └─> Phase 9 (Language Features cont.)      🟢 MOSTLY DONE ───────────┤
                                                                               v
                                                                   Phase 10 (UI Framework)  ⬜ NOT STARTED
@@ -760,7 +760,7 @@ Phase 0 (Build Infrastructure)       ✅ DONE
 | 5 | OSC support | ⬜ Not started | All tasks |
 | 6 | NATS support | ⬜ Not started | All tasks |
 | 7 | Engine feature completion | 🟡 Partial | Buffers, binary sexpr. Audio input, master gain/channel offset done |
-| 8 | Compiler feature completion | 🟢 Mostly done | SIMD codegen. FFT/spectral, vector ops, switch/for subgraphs all done |
+| 8 | Compiler feature completion | ✅ Done | — |
 | 9 | Language feature completion | 🟢 Mostly done | I/O functions, general function inlining. Map ops done |
 | 10 | UI framework setup | ⬜ Not started | All tasks (CLI app exists) |
 | 11 | Code editor & REPL | ⬜ Not started | All tasks (REPLSession exists) |
