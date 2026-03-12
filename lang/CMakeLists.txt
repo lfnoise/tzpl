@@ -37,6 +37,14 @@ set(LIB_SOURCES
     src/lexer.cpp
     src/parser.cpp
     src/type_checker.cpp
+    src/type_checker_decls.cpp
+    src/type_checker_stmts.cpp
+    src/type_checker_infer.cpp
+    src/type_checker_exprs.cpp
+    src/type_checker_calls.cpp
+    src/type_checker_types.cpp
+    src/type_checker_constraints.cpp
+    src/type_checker_overload.cpp
     src/codegen.cpp
     src/builtins.cpp
     src/builtins_math.cpp
