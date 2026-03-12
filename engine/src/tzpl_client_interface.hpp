@@ -91,6 +91,10 @@ bool isAudioRunning(Engine* e);
 void masterGain(Engine* e, f32 gain); // post safety limiter
 void safetyLimiter(Engine* e, Enable onoff); // default is on.
 
+// Set the channel offset for a silo's output in the hardware buffer.
+// Must be called inside a begin()/go() bundle.
+tzpl_SErr channelOffset(i32 offset);
+
 // non real time commands
 bool loadDefs(Engine* e, const char* dirPath);
 bool loadDef(Engine* e, const char* dirPath, const char* defName);

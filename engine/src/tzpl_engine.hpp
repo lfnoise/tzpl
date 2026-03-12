@@ -107,7 +107,11 @@ struct SafetyLimiter
 //		static bool wasEnable = false;
 		if (enable == kOn) {
 			calcGain(maxAbsPeak(nextBuf));
-			f32 nextCombinedGain = postGain * nextGain;
+			// When the limiter is active (nextGain < 1), master gain can reduce
+			// the effective gain further but never increase it above the limiter's
+			// gain.  When the limiter is not active, master gain applies freely.
+			f32 effectivePostGain = nextGain < 1.f ? std::min(postGain, 1.f) : postGain;
+			f32 nextCombinedGain = effectivePostGain * nextGain;
 //			if (!wasEnable) {
 //				printf("g %f %f %f  pk %f h %d\n",
 //					postGain, nextGain, nextCombinedGain, prevMaxPeak, holdCount);

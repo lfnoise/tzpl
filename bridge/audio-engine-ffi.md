@@ -21,10 +21,13 @@ Returns `true` if the audio stream is currently running.
 Returns the current audio stream time in seconds. Useful for scheduling events relative to "now".
 
 ### `masterGain(gain: Float) -> Void`
-Set the master output gain. `1.0` = unity, `0.0` = silence.
+Set the master output gain. `1.0` = unity, `0.0` = silence. When the safety limiter is enabled, the master gain can reduce the limiter's gain but never increase it -- it will not fight the limiter. When audio is below the limit, the master gain applies freely. When the safety limiter is disabled, the master gain is a simple multiply.
 
 ### `safetyLimiter(on: Bool) -> Void`
 Enable or disable the safety limiter on the master output. When enabled, output is hard-limited to prevent clipping/damage.
+
+### `inputChannels() -> Int`
+Returns the number of active hardware input channels (`0` if audio input is disabled).
 
 ### `sleep(seconds: Float) -> Void`
 Block the calling thread for the given duration. **NRT only.** This is a temporary function that will be replaced by a proper event scheduler.
@@ -74,9 +77,12 @@ Remove and free the node with the given ID. Returns an error code.
 ### `freeAllNodes() -> Int`
 Remove and free all nodes on the current silo. Returns an error code.
 
+### `channelOffset(offset: Int) -> Int`
+Set the channel offset for the current silo's output in the hardware buffer. With an offset of `2` on a 4-channel output, the silo writes to channels 2-3 instead of 0-1. This allows different silos to target different hardware output channels (e.g., for surround sound or multi-speaker setups). The offset is clamped to the hardware channel count. Default is `0`. Returns an error code.
+
 ## Connections
 
-These must be called within a `begin()`/`go()` block. Node `0` is the hardware output; connecting to `(0, 0)` sends audio to the first output channel.
+These must be called within a `begin()`/`go()` block. Node `0` is the hardware output; connecting to `(0, 0)` sends audio to the output. Node `1` is the hardware input; connecting from `(1, 0)` receives live audio (requires audio input to be enabled).
 
 ### `connect(srcNode: Int, srcPort: Int, dstNode: Int, dstPort: Int) -> Int`
 Connect an output port to an input port. The connection takes effect instantly (no crossfade).
@@ -131,6 +137,11 @@ Release all active voices on the given voicer node.
 ### `noteSetParams(nodeID: Int, noteID: Int, firstParam: Int, values: Array[Float]) -> Int`
 Update parameters on an active voice. Sets `len(values)` consecutive parameters starting at index `firstParam`.
 
+## Introspection
+
+### `listSynthDefs() -> Array[String]`
+Returns an array of the names of all registered node definitions (synth plugins).
+
 ## Enums (from `audio_engine.x` module)
 
 Import with `import audio_engine.*;` at the top of your script.
@@ -170,11 +181,22 @@ Error codes returned by FFI functions. Compare via `ordinal(Err.errNone)` or ass
 | `errNoteNotFound` | No active note with the given ID |
 | `errControlNotFound` | No control with the given ID |
 | `errDeviceNotFound` | Audio device not found |
+| `errAlreadyAdded` | Node was already added to the silo |
+| `errAlreadyRemoved` | Node was already removed from the silo |
 | `errSiloOutOfRange` | Silo index out of range |
 | `errInputOutOfRange` | Input port index out of range |
 | `errOutputOutOfRange` | Output port index out of range |
+| `errNoAudioDevices` | No audio devices available |
+| `errAudioNotInitialized` | Audio stream not initialized |
+| `errCommandsQueuedButNotSent` | Commands queued but `go()`/`sched()` not called before next `begin()` |
 | `errNoActiveBundle` | No `begin()` was called before commands |
+| `errEngineInUse` | Engine is already in use |
 | `errCyclicConnection` | Connection would create a cycle |
+| `errTypeMismatch` | Port element types do not match |
+| `errRateMismatch` | Port signal rates do not match |
+| `errChanMismatch` | Port channel counts do not match |
+| `errNumPortsMismatch` | Number of ports does not match |
+| `errNotImplemented` | Feature not yet implemented |
 | `errTooLate` | Scheduled event missed its deadline |
 
 ### `Enable`

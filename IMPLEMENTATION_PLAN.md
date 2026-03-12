@@ -22,7 +22,7 @@ This document is a step-by-step plan for integrating the three sub-projects (lan
 - Safety limiter on master output (lookahead, NaN zapping)
 - Builds as static library (`audio_engine_lib`) with install targets
 - Full FFI bridge to Tzopilotl (32 functions, 19 marked rtSafe)
-- **Remaining**: OSC support, NATS support, buffer operations (declared but not implemented), audio input (infrastructure exists but stream initialized as output-only), MasterGainCmd/ChannelOffsetCmd (empty struct definitions, no handlers), binary s-expression serialization (commented-out skeleton)
+- **Remaining**: OSC support, NATS support, buffer operations (declared but not implemented), binary s-expression serialization (commented-out skeleton)
 
 ### synthdef-compiler
 - Two front-ends: S-expression parser and C++ DSL
@@ -399,13 +399,11 @@ The engine declares but doesn't implement: `newBuffer`, `freeBuffer`, `resizeBuf
 4. App CLI supports `--input-channels`, `--input-device`, `--first-input-channel` flags and `inputDevice` config key.
 5. FFI bridge exposes `inputChannels()` for querying active input channel count.
 
-### 7.3 MasterGainCmd and ChannelOffsetCmd
+### 7.3 MasterGainCmd and ChannelOffsetCmd -- DONE
 
-Struct definitions exist in `tzpl_command_subclasses.hpp` but no command handler logic in Silo processing or command dispatch.
-
-**Tasks**:
-1. Implement master gain control (applied after safety limiter or integrated into it).
-2. Implement channel offset for routing to specific hardware output channels.
+**Completed tasks**:
+1. ~~Implement master gain control (applied after safety limiter or integrated into it).~~ Done.
+2. ~~Implement channel offset for routing to specific hardware output channels.~~ Done.
 
 ### 7.4 Binary s-expression serialization
 
@@ -422,12 +420,13 @@ File `tzpl_sexpr_binary_buffer.hpp` exists but contains only commented-out skele
 
 ### 8.1 SIMD code generation — NOT STARTED
 
-Infrastructure exists: `max_simd_width = 4`, `unroll_by = 4` in `synthdef_cpp_codegen.cpp`, SIMD type definitions (`f32x4`, `f64x2`, `f64x4`) in `synthdef_types.hpp`. But no SIMD loop body generation code — currently defaults to scalar codegen.
+Infrastructure exists: `max_simd_width = 4`, `unroll_by = 4` in `synthdef_cpp_codegen.cpp`, SIMD type definitions are in `shared/tzpl_simd.hpp`. But no SIMD loop body generation code — currently defaults to scalar codegen.
 
 **Tasks**:
-1. Generate SIMD loop bodies for multi-channel synths where channels align to SIMD widths (2, 4, 8).
-2. Use `f64x2`/`f64x4` types from `tzpl_simd.hpp`.
-3. Generate scalar remainder loops for non-aligned channel counts.
+0. SIMD code generation should be able to be turned on or off. Default is ON. Off useful for debugging.
+1. Generate SIMD loop bodies for multi-channel synths. The number of channels are always a power of two, so it should always be possible to vectorize loops whose channel counts are greater than 1. Since all channel counts are powers of two, there should be no need to have remainder loops. Some operations like vector ops that reorder vectors, may make vectorization impossible.
+2. Signal values can be both integer and float. Vectorize both integer and float operations.
+3. Ensure that all instance variables and local variables containing SIMD vectors are aligned.
 4. Benchmark against scalar codegen to validate speedup.
 
 ### 8.2 Full s-expression subgraph support — DONE
@@ -760,7 +759,7 @@ Phase 0 (Build Infrastructure)       ✅ DONE
 | 4 | Critical language features | 🟡 Partial | Event-driven VM, error location refinement |
 | 5 | OSC support | ⬜ Not started | All tasks |
 | 6 | NATS support | ⬜ Not started | All tasks |
-| 7 | Engine feature completion | 🟡 Partial | Buffers, master gain, binary sexpr. Audio input done |
+| 7 | Engine feature completion | 🟡 Partial | Buffers, binary sexpr. Audio input, master gain/channel offset done |
 | 8 | Compiler feature completion | 🟢 Mostly done | SIMD codegen. FFT/spectral, vector ops, switch/for subgraphs all done |
 | 9 | Language feature completion | 🟢 Mostly done | I/O functions, general function inlining. Map ops done |
 | 10 | UI framework setup | ⬜ Not started | All tasks (CLI app exists) |

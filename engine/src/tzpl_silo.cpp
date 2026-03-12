@@ -91,16 +91,26 @@ void Silo::processFrames() {
 
     InPort* dstPort = &outputNode_->ins[0];
     OutPort* srcPort = dstPort->srcPort_;
+
+    // Clamp channelOffset_ so we don't write past the hardware buffer.
+    int offset = std::min(channelOffset_, outChannels);
+    int availableChannels = outChannels - offset;
+
     int copyByteSize;
     if (srcPort) {
-        copyByteSize = std::min(calcByteSize(srcPort->type_), outByteSize);
-        if (copyByteSize < outByteSize) {
-            memset(out, 0, numFrames * outByteSize); // zero fill.
-        }
+        int srcBytes = calcByteSize(srcPort->type_);
+        int availBytes = availableChannels * (int)sizeof(f32);
+        copyByteSize = std::min(srcBytes, availBytes);
     } else {
-        copyByteSize = outByteSize;
+        copyByteSize = availableChannels * (int)sizeof(f32);
     }
-    f32* outp = out;
+
+    // Zero the entire output buffer when the silo's channels don't fill it.
+    if (copyByteSize < outByteSize) {
+        memset(out, 0, numFrames * outByteSize);
+    }
+
+    f32* outp = out + offset;
 
     for (int i = 0; i < numFrames; ++i) {
         // Copy hardware input to the input node's outlet before running nodes

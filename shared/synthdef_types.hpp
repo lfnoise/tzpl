@@ -22,7 +22,6 @@
 #pragma once
 #include <cstdint>
 #include <complex>
-#include <simd/simd.h>
 #include <cassert>
 #include <string>
 
@@ -46,28 +45,6 @@ using x64 = std::complex<f64>;
 
 using usize = std::size_t;
 using isize = std::ptrdiff_t;
-
-#pragma mark SIMD TYPES
-
-using u64x2 = simd::ulong2;
-using u64x4 = simd::ulong4;
-using u64x8 = simd::ulong8;
-
-using i32x2 = simd::int2;
-using i32x4 = simd::int4;
-using i32x8 = simd::int8;
-
-using i64x2 = simd::long2;
-using i64x4 = simd::long4;
-using i64x8 = simd::long8;
-
-using f32x2 = simd::float2;
-using f32x4 = simd::float4;
-using f32x8 = simd::float8;
-
-using f64x2 = simd::double2;
-using f64x4 = simd::double4;
-using f64x8 = simd::double8;
 
 // modulo function. C++'s % operator is remainder, not modulo.
 template <typename T, typename U>

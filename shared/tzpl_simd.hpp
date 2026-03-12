@@ -33,6 +33,10 @@
 
 #include <simd/simd.h>
 
+using u32x2 = simd::uint2;
+using u32x4 = simd::uint4;
+using u32x8 = simd::uint8;
+
 using u64x2 = simd::ulong2;
 using u64x4 = simd::ulong4;
 using u64x8 = simd::ulong8;

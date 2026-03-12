@@ -362,6 +362,12 @@ struct MasterGainCmd : Command
 struct ChannelOffsetCmd : Command
 {
     i32 offset_;
+
+    ChannelOffsetCmd(i32 offset) : offset_(offset) {}
+
+    void doRT(Silo* s) override {
+        s->channelOffset_ = offset_;
+    }
 };
 
 }

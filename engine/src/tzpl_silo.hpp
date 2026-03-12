@@ -82,6 +82,7 @@ struct Silo
     Node* outputNode_ = nullptr;
     f32* outbuf_ = nullptr;
     i64 sampleTime_ = 0;
+    int channelOffset_ = 0;
     bool needsSort_ = false;
         
     Silo();

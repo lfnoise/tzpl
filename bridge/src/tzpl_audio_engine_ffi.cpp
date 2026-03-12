@@ -176,6 +176,12 @@ static void ffi_freeAllNodes(ts::VM& vm, u16 dst, u16, u16) {
     returnErr(vm, dst, engine::freeAllNodes());
 }
 
+// fn channelOffset(offset: Int) -> Int
+static void ffi_channelOffset(ts::VM& vm, u16 dst, u16, u16 argBase) {
+    auto offset = static_cast<engine::i32>(vm.reg(argBase).i);
+    returnErr(vm, dst, engine::channelOffset(offset));
+}
+
 // ---------------------------------------------------------------------------
 // Connections
 // ---------------------------------------------------------------------------
@@ -432,6 +438,7 @@ void registerAudioEngineFFI(ts::Compiler& compiler) {
     reg("newNode",          Int, {String, Int},    ffi_newNode,       true);
     reg("freeNode",         Int, {Int},            ffi_freeNode,      true);
     reg("freeAllNodes",     Int, {},               ffi_freeAllNodes,  true);
+    reg("channelOffset",    Int, {Int},            ffi_channelOffset, true);
 
     // Connections (rtSafe)
     reg("connect",          Int, {Int, Int, Int, Int},             ffi_connect,          true);

@@ -25,6 +25,7 @@
 #define synthdef_random_hpp
 
 #include "synthdef_types.hpp"
+#include "tzpl_simd.hpp"
 #ifndef __APPLE__
 #include <sys/random.h>
 #endif

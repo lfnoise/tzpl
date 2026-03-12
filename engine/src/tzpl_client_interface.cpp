@@ -628,6 +628,14 @@ tzpl_SErr freeAllNodes() {
     return tzpl_errNone;
 }
 
+tzpl_SErr channelOffset(i32 offset) {
+    Engine* e = tBundle.engine;
+    if (!e) return tzpl_errNoActiveBundle;
+
+    tBundle.add(new ChannelOffsetCmd{offset});
+    return tzpl_errNone;
+}
+
 // TODO notes, controls, buffers...
 
 tzpl_SErr connect(PortAddr src, PortAddr dst, f64 xfadeTime, FadeCurve curve) {
