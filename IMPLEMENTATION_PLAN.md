@@ -390,14 +390,14 @@ The engine declares but doesn't implement: `newBuffer`, `freeBuffer`, `resizeBuf
 3. Add buffer read/write operations accessible from plugins.
 4. Add buffer-related commands to the command system.
 
-### 7.2 Audio input support
+### 7.2 Audio input support -- DONE
 
-RtAudio is configured but input streams are not enabled. Comment in `tzpl_silo.cpp`: "will need the same for input node..".
-
-**Tasks**:
-1. Enable input streams in RtAudio configuration.
-2. Route hardware input to a special input node per silo.
-3. Plugins can receive live audio via inlet connections.
+**Completed tasks**:
+1. ~~Enable input streams in RtAudio configuration.~~ Done. Supports three modes: duplex (same device for I/O), separate input device (second RtAudio instance with staging buffer), and macOS aggregate devices. `AudioStreamParameters` has `inputDeviceName`, `inputChannels`, `firstInputChannel` fields.
+2. ~~Route hardware input to a special input node per silo.~~ Done. "Audio In" node (nodeID=1) created per silo with an output port. `processFrames()` copies hardware input samples to the input node's outlet each sample, before running the node graph.
+3. ~~Plugins can receive live audio via inlet connections.~~ Done. Connect any plugin's input to the input node's output (nodeID=1, port 0) to receive live audio. The input node participates in topological sort like any other node.
+4. App CLI supports `--input-channels`, `--input-device`, `--first-input-channel` flags and `inputDevice` config key.
+5. FFI bridge exposes `inputChannels()` for querying active input channel count.
 
 ### 7.3 MasterGainCmd and ChannelOffsetCmd
 
@@ -729,7 +729,7 @@ Phase 0 (Build Infrastructure)       ✅ DONE
         │           └─> Phase 4 (Lang Features)  🟡 PARTIAL (event-driven VM remaining)
         │                 └─> Phase 5 (OSC)       ⬜ NOT STARTED
         │                       └─> Phase 6 (NATS) ⬜ NOT STARTED
-        ├─> Phase 7 (Engine Features)              ⬜ NOT STARTED ────────────┐
+        ├─> Phase 7 (Engine Features)              🟡 PARTIAL ─────────────────┐
         ├─> Phase 8 (Compiler Features)            🟢 MOSTLY DONE ─────────┤
         └─> Phase 9 (Language Features cont.)      🟢 MOSTLY DONE ───────────┤
                                                                               v
@@ -760,7 +760,7 @@ Phase 0 (Build Infrastructure)       ✅ DONE
 | 4 | Critical language features | 🟡 Partial | Event-driven VM, error location refinement |
 | 5 | OSC support | ⬜ Not started | All tasks |
 | 6 | NATS support | ⬜ Not started | All tasks |
-| 7 | Engine feature completion | ⬜ Not started | Buffers, audio input, master gain, binary sexpr |
+| 7 | Engine feature completion | 🟡 Partial | Buffers, master gain, binary sexpr. Audio input done |
 | 8 | Compiler feature completion | 🟢 Mostly done | SIMD codegen. FFT/spectral, vector ops, switch/for subgraphs all done |
 | 9 | Language feature completion | 🟢 Mostly done | I/O functions, general function inlining. Map ops done |
 | 10 | UI framework setup | ⬜ Not started | All tasks (CLI app exists) |

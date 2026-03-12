@@ -74,16 +74,21 @@ void Silo::runNodes() {
 }
 
 void Silo::processFrames() {
-    //f32 const* in = engine_->in_;
     f32* out = index_ > 0 ? outbuf_ : engine_->out_;
 
     auto& streamParams = engine_->streamParams_;
     int numFrames = streamParams.bufferFrames;
     int outChannels = streamParams.channels;
     int outByteSize = streamParams.channels * sizeof(f32);
-    
+
+    // Determine if we have hardware audio input to route
+    int inputChannels = streamParams.inputChannels;
+    f32 const* inBuf = (inputChannels > 0) ? engine_->in_ : nullptr;
+    int inputByteSize = inputChannels * sizeof(f32);
+    bool hasInputNode = inBuf && inputNode_->outs.size() > 0;
+
     processRTCommands();
-    
+
     InPort* dstPort = &outputNode_->ins[0];
     OutPort* srcPort = dstPort->srcPort_;
     int copyByteSize;
@@ -96,16 +101,22 @@ void Silo::processFrames() {
         copyByteSize = outByteSize;
     }
     f32* outp = out;
-    
-    for (int i = 0; i < numFrames; ++i) {        
+
+    for (int i = 0; i < numFrames; ++i) {
+        // Copy hardware input to the input node's outlet before running nodes
+        if (hasInputNode) {
+            f32* inputNodeOut = (f32*)inputNode_->synth->outlets[0];
+            memcpy(inputNodeOut, inBuf + i * inputChannels, inputByteSize);
+        }
+
         processScheduledEvents();
 
         sortNodes();
         runNodes();
-        
+
         f32* data = (f32*)getInput(outputNode_->synth, 0);
         memcpy(outp, data, copyByteSize);
-        
+
         outp += outChannels;
         ++sampleTime_;
     }
@@ -287,7 +298,8 @@ Node* Silo::removeAllNodes() {
             node = next;
         }
     }
-    // will need the same for input node..
+    inputNode_->rt_list.prev = nullptr;
+    inputNode_->rt_list.next = nullptr;
     outputNode_->rt_list.prev = nullptr;
     outputNode_->rt_list.next = nullptr;
     return outNodes;

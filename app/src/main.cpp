@@ -47,6 +47,7 @@ namespace fs = std::filesystem;
 
 struct Config {
     std::string deviceName = "default";
+    std::string inputDeviceName; // empty = same as output device
     int channels = 2;
     int firstChannel = 0;
     int inputChannels = 0;
@@ -99,6 +100,7 @@ static bool parseConfigFile(const std::string& path, Config& config) {
             else if (key == "device")      config.deviceName = stripQuotes(value);
             else if (key == "inputChannels") config.inputChannels = std::stoi(value);
             else if (key == "firstInputChannel") config.firstInputChannel = std::stoi(value);
+            else if (key == "inputDevice") config.inputDeviceName = stripQuotes(value);
             else std::cerr << path << ":" << lineNum
                            << ": unknown config key '" << key << "'\n";
         } catch (const std::exception& e) {
@@ -172,6 +174,8 @@ static engine::Engine* createEngine(const Config& config) {
     params.bufferFrames = config.bufferFrames;
     params.sampleRate = config.sampleRate;
     params.deviceName = config.deviceName.c_str();
+    params.inputDeviceName = config.inputDeviceName.empty()
+        ? nullptr : config.inputDeviceName.c_str();
     params.firstChannel = config.firstChannel;
     params.inputChannels = config.inputChannels;
     params.firstInputChannel = config.firstInputChannel;
@@ -223,7 +227,8 @@ static void printHelp() {
         "  --first-channel <n>     First output channel (default: 0)\n"
         "  --input-channels <n>    Input channels (default: 0, disabled)\n"
         "  --first-input-channel <n> First input channel (default: 0)\n"
-        "  --device <name>         Audio device name (default: \"default\")\n"
+        "  --device <name>         Audio output device name (default: \"default\")\n"
+        "  --input-device <name>   Audio input device (default: same as output)\n"
         "\n"
         "Project directory layout:\n"
         "  <project>/\n"
@@ -260,7 +265,7 @@ int main(int argc, const char* argv[]) {
         std::optional<int> cliSilos, cliChannels, cliFirstChannel, cliBufferFrames;
         std::optional<int> cliInputChannels, cliFirstInputChannel;
         std::optional<double> cliSampleRate;
-        std::optional<std::string> cliDevice;
+        std::optional<std::string> cliDevice, cliInputDevice;
 
         // --- Parse command line ---
         for (int i = 1; i < argc; ++i) {
@@ -293,6 +298,8 @@ int main(int argc, const char* argv[]) {
                 cliInputChannels = std::stoi(argv[++i]);
             } else if (arg == "--first-input-channel" && i + 1 < argc) {
                 cliFirstInputChannel = std::stoi(argv[++i]);
+            } else if (arg == "--input-device" && i + 1 < argc) {
+                cliInputDevice = argv[++i];
             } else {
                 filename = arg;
             }
@@ -313,6 +320,7 @@ int main(int argc, const char* argv[]) {
         if (cliChannels)     config.channels = *cliChannels;
         if (cliFirstChannel) config.firstChannel = *cliFirstChannel;
         if (cliDevice)            config.deviceName = *cliDevice;
+        if (cliInputDevice)       config.inputDeviceName = *cliInputDevice;
         if (cliInputChannels)     config.inputChannels = *cliInputChannels;
         if (cliFirstInputChannel) config.firstInputChannel = *cliFirstInputChannel;
 

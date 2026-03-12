@@ -26,6 +26,7 @@
 #include "tzpl.hpp"
 #include "value.hpp"
 #include "tzpl_client_interface.hpp"
+#include "tzpl_engine.hpp"
 #include <thread>
 #include <chrono>
 
@@ -90,6 +91,14 @@ static void ffi_masterGain(ts::VM& vm, u16 dst, u16, u16 argBase) {
 static void ffi_safetyLimiter(ts::VM& vm, u16 dst, u16, u16 argBase) {
     engine::Enable en = vm.reg(argBase).i ? engine::kOn : engine::kOff;
     engine::safetyLimiter(getEngine(vm), en);
+}
+
+// fn inputChannels() -> Int
+// Returns the number of hardware input channels (0 if input is disabled).
+static void ffi_inputChannels(ts::VM& vm, u16 dst, u16, u16) {
+    engine::Engine* eng = getEngine(vm);
+    // Access streamParams_ directly -- it's set at init time, safe to read.
+    vm.reg(dst).i = eng ? eng->streamParams_.inputChannels : 0;
 }
 
 // fn sleep(seconds: Float) -> Void
@@ -404,6 +413,7 @@ void registerAudioEngineFFI(ts::Compiler& compiler) {
     reg("getStreamTime",    Float, {},             ffi_getStreamTime);
     reg("masterGain",       Void, {Float},         ffi_masterGain);
     reg("safetyLimiter",    Void, {Bool},          ffi_safetyLimiter);
+    reg("inputChannels",    Int, {},               ffi_inputChannels);
 
     // Blocking sleep (NRT only — temporary, will be replaced by a scheduler)
     reg("sleep",            Void, {Float},         ffi_sleep);

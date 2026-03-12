@@ -58,6 +58,7 @@ using LoadNodeDefFun = void (*)(Engine* e);
 
 struct AudioStreamParameters {
     const char* deviceName;
+    const char* inputDeviceName = nullptr; // nullptr or "" = same as output device
     int channels;
     int firstChannel;
     int inputChannels = 0;

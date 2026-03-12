@@ -150,10 +150,13 @@ int audioCallback( void *outputBuffer, void *inputBuffer,
     Engine* e = (Engine*)userData;
     
     try {
-        f32 const* in = (f32 const*)inputBuffer;
         f32* out = (f32*)outputBuffer;
-        
-        e->in_ = in;
+
+        // For duplex mode, inputBuffer comes from the callback.
+        // For separate input device, use the staging buffer.
+        e->in_ = e->inputRtaudio_
+            ? (f32 const*)e->inputStagingBuf_
+            : (f32 const*)inputBuffer;
         e->out_ = out;
         e->anchorStreamTime_ = streamTime;
         
@@ -179,56 +182,156 @@ int audioCallback( void *outputBuffer, void *inputBuffer,
 }
 
 
+// Find a device ID by name on a given RtAudio instance.
+// Returns -1 if not found.
+int findDeviceByName(RtAudio* rta, const char* name) {
+    int n = rta->getDeviceCount();
+    for (int i = 0; i < n; ++i) {
+        auto info = rta->getDeviceInfo(i);
+        if (name == info.name) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+// Callback for a separate input-only stream.
+// Copies hardware input data into the engine's staging buffer.
+// NOTE: No clock drift compensation -- the input and output devices run on
+// independent sample clocks, so over time samples will be repeated or dropped.
+// For drift-free operation, use an aggregate device (macOS) or JACK (Linux).
+// A future improvement would be an adaptive resampler with a PLL to track the
+// rate difference.
+int inputAudioCallback(void* /*outputBuffer*/, void* inputBuffer,
+                       unsigned int numFrames,
+                       double /*streamTime*/,
+                       RtAudioStreamStatus /*status*/,
+                       void* userData)
+{
+    Engine* e = (Engine*)userData;
+    if (inputBuffer && e->inputStagingBuf_) {
+        memcpy(e->inputStagingBuf_, inputBuffer,
+               numFrames * e->streamParams_.inputChannels * sizeof(f32));
+    }
+    return 0;
+}
+
 void initAudio(Engine* e) {
-    //printf(">initAudio\n");
     auto& rta = e->rtaudio_;
-        
+
     int numDevices = rta->getDeviceCount();
     if (numDevices == 0) {
         throw tzpl_errNoAudioDevices;
     }
-    
-    int deviceID = -1;
+
+    // --- Resolve output device ---
+    int outputDeviceID = -1;
     if (strcmp(e->streamParams_.deviceName, "default") == 0) {
-        deviceID = rta->getDefaultOutputDevice();
+        outputDeviceID = rta->getDefaultOutputDevice();
     } else {
-        int n = rta->getDeviceCount();
-        for (int i = 0; i < n; ++i) {
-            auto info = rta->getDeviceInfo(i);
-            if (e->streamParams_.deviceName == info.name) {
-                deviceID = i;
-            }
-        }
-        if (deviceID < 0) {
+        outputDeviceID = findDeviceByName(rta.get(), e->streamParams_.deviceName);
+        if (outputDeviceID < 0) {
             throw tzpl_errDeviceNotFound;
         }
     }
-            
+
     RtAudio::StreamParameters outputParams;
-    outputParams.deviceId = deviceID;
+    outputParams.deviceId = outputDeviceID;
     outputParams.nChannels = e->streamParams_.channels;
     outputParams.firstChannel = e->streamParams_.firstChannel;
 
+    // --- Determine input configuration ---
+    int inputChannels = e->streamParams_.inputChannels;
+    bool hasInput = inputChannels > 0;
+    bool separateInputDevice = false;
+
+    if (hasInput) {
+        const char* inputDevName = e->streamParams_.inputDeviceName;
+        bool inputIsDefault = !inputDevName || strlen(inputDevName) == 0;
+        bool inputSameAsOutput = inputIsDefault
+            || strcmp(inputDevName, e->streamParams_.deviceName) == 0;
+
+        if (!inputSameAsOutput) {
+            // Different input device -- need a separate RtAudio instance
+            separateInputDevice = true;
+        }
+    }
+
     void* userData = (void*)e;
 
-    {
+    if (hasInput && !separateInputDevice) {
+        // --- Duplex mode: same device for input and output ---
+        RtAudio::StreamParameters inputParams;
+        inputParams.deviceId = outputDeviceID;
+        inputParams.nChannels = inputChannels;
+        inputParams.firstChannel = e->streamParams_.firstInputChannel;
+
         rta->setErrorCallback(errorCallback);
         unsigned int bufferFrames = e->streamParams_.bufferFrames;
-        rta->openStream(&outputParams, nullptr, RTAUDIO_FLOAT32, e->streamParams_.sampleRate, &bufferFrames, audioCallback,
-            userData);
+        rta->openStream(&outputParams, &inputParams, RTAUDIO_FLOAT32,
+                        e->streamParams_.sampleRate, &bufferFrames,
+                        audioCallback, userData);
 
         e->streamParams_.bufferFrames = bufferFrames;
         e->streamParams_.channels = outputParams.nChannels;
+        e->streamParams_.inputChannels = inputParams.nChannels;
+    } else {
+        // --- Output-only stream (or separate input device) ---
+        rta->setErrorCallback(errorCallback);
+        unsigned int bufferFrames = e->streamParams_.bufferFrames;
+        rta->openStream(&outputParams, nullptr, RTAUDIO_FLOAT32,
+                        e->streamParams_.sampleRate, &bufferFrames,
+                        audioCallback, userData);
+
+        e->streamParams_.bufferFrames = bufferFrames;
+        e->streamParams_.channels = outputParams.nChannels;
+
+        if (separateInputDevice) {
+            // --- Open a separate input-only stream ---
+            const char* inputDevName = e->streamParams_.inputDeviceName;
+
+#ifdef __APPLE__
+            e->inputRtaudio_ = std::make_unique<RtAudio>(RtAudio::MACOSX_CORE);
+#elif defined(__linux__)
+            e->inputRtaudio_ = std::make_unique<RtAudio>(RtAudio::LINUX_ALSA);
+#endif
+            e->inputRtaudio_->setErrorCallback(errorCallback);
+
+            int inputDeviceID = -1;
+            if (strcmp(inputDevName, "default") == 0) {
+                inputDeviceID = e->inputRtaudio_->getDefaultInputDevice();
+            } else {
+                inputDeviceID = findDeviceByName(e->inputRtaudio_.get(), inputDevName);
+                if (inputDeviceID < 0) {
+                    throw tzpl_errDeviceNotFound;
+                }
+            }
+
+            RtAudio::StreamParameters inputParams;
+            inputParams.deviceId = inputDeviceID;
+            inputParams.nChannels = inputChannels;
+            inputParams.firstChannel = e->streamParams_.firstInputChannel;
+
+            unsigned int inputBufFrames = e->streamParams_.bufferFrames;
+            e->inputRtaudio_->openStream(nullptr, &inputParams, RTAUDIO_FLOAT32,
+                                         e->streamParams_.sampleRate, &inputBufFrames,
+                                         inputAudioCallback, userData);
+
+            e->streamParams_.inputChannels = inputParams.nChannels;
+
+            // Allocate staging buffer for the input callback to write into
+            e->inputStagingBuf_ = (f32*)calloc(
+                e->streamParams_.bufferFrames * inputChannels, sizeof(f32));
+        }
     }
 
     int byteSize = e->streamParams_.bufferFrames * e->streamParams_.channels * sizeof(f32);
-    
-    //e->safetyLimiter_.reset(new SafetyLimiter(streamParams.bufferFrames, streamParams.channels));
+
     e->safetyLimiter_ = std::make_unique<SafetyLimiter>(
         e->streamParams_.bufferFrames,
         e->streamParams_.channels,
         int((.25 * e->streamParams_.sampleRate) / e->streamParams_.bufferFrames));
- 
+
     for (Silo& s : e->silos_) {
         s.sampleTime_ = 0;
         if (s.index_ > 0) {
@@ -236,13 +339,10 @@ void initAudio(Engine* e) {
         }
     }
     e->audioState_ = AudioState::initted;
-    //printf("<initAudio\n");
 }
 
 void uninitAudio(Engine* e) {
     stopAudio(e); // in case it was running.
-
-    //std::lock_guard<std::mutex> lck(e->nrt_lock_);
 
     if (e->audioState_ == AudioState::off) return;
 
@@ -254,6 +354,16 @@ void uninitAudio(Engine* e) {
     }
 
     e->safetyLimiter_.reset();
+
+    // Close separate input stream if present
+    if (e->inputRtaudio_) {
+        if (e->inputRtaudio_->isStreamOpen()) {
+            e->inputRtaudio_->closeStream();
+        }
+        e->inputRtaudio_.reset();
+    }
+    free(e->inputStagingBuf_);
+    e->inputStagingBuf_ = nullptr;
 
     e->rtaudio_->closeStream();
     e->audioState_ = AudioState::off;
@@ -267,6 +377,9 @@ void startAudio(Engine* e) {
         throw tzpl_errAudioNotInitialized;
     }
     e->muteGain_ = 1.f;
+    if (e->inputRtaudio_) {
+        e->inputRtaudio_->startStream();
+    }
     e->rtaudio_->startStream();
     e->audioState_ = AudioState::running;
 }
@@ -277,6 +390,9 @@ void stopAudio(Engine* e) {
     e->muteGain_ = 0.f;
     std::this_thread::sleep_for(std::chrono::microseconds(100000));
     e->rtaudio_->stopStream();
+    if (e->inputRtaudio_) {
+        e->inputRtaudio_->stopStream();
+    }
     e->audioState_ = AudioState::initted;
 }
 

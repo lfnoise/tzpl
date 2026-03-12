@@ -200,10 +200,15 @@ struct Engine
 	f32 const* in_ = nullptr;
 	f32* out_ = nullptr;
 
+	// Separate input device support
+	std::unique_ptr<RtAudio> inputRtaudio_;  // non-null when using a separate input device
+	f32* inputStagingBuf_ = nullptr;          // intermediate buffer for separate input device
+
     Engine(EngineConfig const& config, AudioStreamParameters& streamParams);
     ~Engine();
 
 	void defOutputNode(int numChannels);
+	void defInputNode(int inputChannels);
 	void defXFaderNode();
  
     bool isAudioInitialized() const { return audioState_ >= AudioState::initted; }
