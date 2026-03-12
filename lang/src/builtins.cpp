@@ -939,15 +939,54 @@ static bool resolve_deref(Compiler& compiler, const std::vector<Type*>& args,
     return true;
 }
 
+static int numericRank(Compiler& c, Type* t) {
+    if (t == c.boolType()) return 0;
+    if (t == c.intType()) return 1;
+    if (t == c.fractionType()) return 2;
+    if (t == c.floatType()) return 3;
+    if (t == c.complexType()) return 4;
+    return -1;
+}
+
+static bool isNumericPromotion(Compiler& c, Type* from, Type* to) {
+    int fromRank = numericRank(c, from);
+    int toRank = numericRank(c, to);
+    return fromRank >= 0 && toRank >= 0 && fromRank <= toRank;
+}
+
+// setref(T, Ref<T>) -> T
 static bool resolve_setref(Compiler& compiler, const std::vector<Type*>& args,
     std::vector<Type*>& pt, Type*& rt, CFun& cf) {
     if (args.size() != 2) return false;
     auto* rft = dynamic_cast<RefType*>(args[1]);
     if (!rft) return false;
-    if (args[0] != rft->elemType_) return false;
-    pt = {args[0], rft};
-    rt = args[0];
+    if (args[0] != rft->elemType_ && !isNumericPromotion(compiler, args[0], rft->elemType_))
+        return false;
+    pt = {rft->elemType_, rft};
+    rt = rft->elemType_;
     cf = builtin_setref;
+    return true;
+}
+
+// setref(Ref<T>, T) -> T
+static void builtin_setref_rev(VM& vm, u16 dst, u16, u16 ab) {
+    auto* ref = static_cast<RefValue*>(vm.reg(ab).o);
+    ref->value_ = vm.reg(ab + 1);
+    vm.reg(dst) = vm.reg(ab + 1);
+    auto* rt = static_cast<RefType*>(ref->type_);
+    if (rt->elemType_->isObjType()) vm.gc().writeBarrier(ref);
+}
+
+static bool resolve_setref_rev(Compiler& compiler, const std::vector<Type*>& args,
+    std::vector<Type*>& pt, Type*& rt, CFun& cf) {
+    if (args.size() != 2) return false;
+    auto* rft = dynamic_cast<RefType*>(args[0]);
+    if (!rft) return false;
+    if (args[1] != rft->elemType_ && !isNumericPromotion(compiler, args[1], rft->elemType_))
+        return false;
+    pt = {rft, rft->elemType_};
+    rt = rft->elemType_;
+    cf = builtin_setref_rev;
     return true;
 }
 
@@ -1581,6 +1620,7 @@ void registerBuiltinFunctions(Compiler& compiler,
     registerTemplate(compiler, functions, "ref",          resolve_ref);
     registerTemplate(compiler, functions, "deref",        resolve_deref);
     registerTemplate(compiler, functions, "setref",       resolve_setref);
+    registerTemplate(compiler, functions, "setref",       resolve_setref_rev);
 
     // --- Any builtins ---
     registerTemplate(compiler, functions, "any",          resolve_any_single);
