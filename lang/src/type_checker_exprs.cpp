@@ -950,9 +950,7 @@ Type* TypeChecker::inferBinaryOp(BinaryOpExpr* expr) {
             auto* refType = dynamic_cast<RefType*>(leftType);
             if (refType) {
                 if (!typesEqual(refType->elemType_, rightType)) {
-                    if (refType->elemType_ == compiler_.floatType() && rightType == compiler_.intType()) {
-                        // int-to-float promotion OK
-                    } else {
+                    if (!isAssignable(rightType, refType->elemType_)) {
                         error(expr->loc, "Type mismatch in '<-': Ref holds '" +
                               std::string(refType->elemType_->str().data(), refType->elemType_->str().size()) +
                               "' but assigned '" +
@@ -969,9 +967,7 @@ Type* TypeChecker::inferBinaryOp(BinaryOpExpr* expr) {
             auto* refType = dynamic_cast<RefType*>(rightType);
             if (refType) {
                 if (!typesEqual(refType->elemType_, leftType)) {
-                    if (refType->elemType_ == compiler_.floatType() && leftType == compiler_.intType()) {
-                        // int-to-float promotion OK
-                    } else {
+                    if (!isAssignable(leftType, refType->elemType_)) {
                         error(expr->loc, "Type mismatch in '->': Ref holds '" +
                               std::string(refType->elemType_->str().data(), refType->elemType_->str().size()) +
                               "' but assigned '" +
