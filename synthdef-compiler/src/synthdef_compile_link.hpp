@@ -29,16 +29,24 @@
 
 namespace synthdef {
 
-// Get the build directory for compiled plugins.
-// Uses $TZPL_BUILD if set, else ~/tzpl-build/, else /tmp/.
+// Get the base build directory for compiled plugins.
+// Uses $TZPL_BUILD if set, else ~/tzpl-build/.
 string getBuildDir();
 
-// Write generated C++ code to a file in the given directory.
-void writeCodeToFile(string dir, string synthName, string ccode);
+// Ensure the build directory subdirectories (include/, cpp/, dylib/) exist
+// and copy shared headers into include/. Call once before compile workflows.
+void ensureBuildDirs(string const& buildDir);
+
+// Write generated C++ code to {buildDir}/cpp/{synthName}_synth.cpp.
+void writeCodeToFile(string const& buildDir, string const& synthName, string const& ccode);
 
 // Compile and link a synthdef plugin to a .dylib.
+// Files: cpp/{name}.cpp -> cpp/{name}.o -> dylib/{name}.dylib
 // Returns 0 on success, non-zero on failure.
-int compileAndLink(string dir, string synthName);
+int compileAndLink(string const& buildDir, string const& synthName);
+
+// Return the path to a compiled dylib given base dir and synth name.
+string dylibPath(string const& buildDir, string const& synthName);
 
 // Load a compiled .dylib and return the tzpl_SynthDef it exports.
 optional<tzpl_SynthDef> loadDef(std::string path);

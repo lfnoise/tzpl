@@ -104,6 +104,7 @@ static std::string compileSynthDefPipeline(std::string const& sexpr,
 
     // Write generated code to file
     std::string dir = synthdef::getBuildDir();
+    synthdef::ensureBuildDirs(dir);
     try {
         synthdef::writeCodeToFile(dir, synthName, cppCode);
     } catch (std::exception const& e) {
@@ -116,7 +117,7 @@ static std::string compileSynthDefPipeline(std::string const& sexpr,
         return std::string("compile/link failed with exit code ") + std::to_string(err);
     }
 
-    dylibPath = dir + synthName + "_synth.dylib";
+    dylibPath = synthdef::dylibPath(dir, synthName);
     return "";
 }
 

@@ -92,29 +92,22 @@ int main(int argc, const char * argv[]) {
             continue;
         }
 
-        // Write C++ file (same directory as sexpr, _synth.cpp naming convention)
-        std::string outDir = path.parent_path().string();
-        if (!outDir.empty() && outDir.back() != '/') {
-            outDir += '/';
-        }
+        // Write C++ file to build directory
+        std::string buildDir = synthdef::getBuildDir();
+        synthdef::ensureBuildDirs(buildDir);
 
-        fs::path outPath = path.parent_path() / (synthName + "_synth.cpp");
-        std::ofstream outFile(outPath);
-        if (!outFile) {
-            std::println("  ERROR: Could not write to: {}", outPath.string());
+        try {
+            synthdef::writeCodeToFile(buildDir, synthName, cppCode);
+        } catch (std::exception const& e) {
+            std::println("  ERROR: Could not write code: {}", e.what());
             continue;
         }
 
-        outFile << cppCode;
-        outFile.close();
-
-        std::println("  SUCCESS: Wrote C++ code to: {}", outPath.string());
-
         // Compile and link to .dylib
         try {
-            synthdef::compileAndLink(outDir, synthName);
+            synthdef::compileAndLink(buildDir, synthName);
             std::println("  SUCCESS: Compiled and linked to: {}",
-                        (path.parent_path() / (synthName + "_synth.dylib")).string());
+                        synthdef::dylibPath(buildDir, synthName));
         } catch (std::exception const& e) {
             std::println("  ERROR: Compilation or linking failed: {}", e.what());
             continue;

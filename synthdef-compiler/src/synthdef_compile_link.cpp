@@ -24,25 +24,28 @@
 
 #include "synthdef_compile_link.hpp"
 #include <dlfcn.h>
+#include <filesystem>
+#include <fstream>
 #include <print>
+
+namespace fs = std::filesystem;
 
 namespace synthdef {
 
 using SynthDefLoadFun = tzpl_SynthDef (*)();
 
-static int compile(string const& filepath_c, string const& filepath_o)
+static string synthNameSuffix = "_synth";
+
+static int compile(string const& filepath_c, string const& filepath_o, string const& includeDir)
 {
     printf("\nbegin C compile plugin =====================================================\n");
 
-    // call compiler
     string cmd = "clang";
     cmd += " -x c++ -arch arm64 -std=c++23 -stdlib=libc++";
     cmd += " -o " + filepath_o;
     cmd += " -O3";
     cmd += " -ffast-math";
-#ifdef TZPL_SHARED_DIR
-    cmd += " -I " TZPL_SHARED_DIR;
-#endif
+    cmd += " -I " + includeDir;
     cmd += " -c " + filepath_c;
 
     printf("COMPILE: %s\n", cmd.c_str());
@@ -93,53 +96,74 @@ static int link(string const& filepath_o, string const& filepath_dylib) {
     return 0;
 }
 
+static string ensureTrailingSlash(string const& path) {
+    if (path.empty() || path.back() == '/') return path;
+    return path + '/';
+}
+
 string getBuildDir() {
-    string builddir;
     const char* tzpl_build = getenv("TZPL_BUILD");
-    if (tzpl_build) {
-        builddir = tzpl_build;
-    } else {
-        const char* homedir = getenv("HOME");
-        if (homedir) {
-            builddir = string(homedir) + "/tzpl-build/";
-        } else {
-            builddir = "/tmp/";
-        }
+    if (tzpl_build && tzpl_build[0] != '\0') {
+        return ensureTrailingSlash(tzpl_build);
     }
-    return builddir;
+    const char* homedir = getenv("HOME");
+    if (homedir) {
+        return string(homedir) + "/tzpl-build/";
+    }
+    return "/tmp/tzpl-build/";
 }
 
-static string synthNameSuffix = "_synth";
+void ensureBuildDirs(string const& buildDir) {
+    fs::create_directories(buildDir + "include");
+    fs::create_directories(buildDir + "cpp");
+    fs::create_directories(buildDir + "obj");
+    fs::create_directories(buildDir + "dylib");
 
-void writeCodeToFile(string dir, string synthName, string ccode) {
-    string filename = string(synthName) + synthNameSuffix;
-    string filename_c = filename + ".cpp";
-    string filepath_c = dir + filename_c;
-    std::println("writing code to {}", filepath_c);
-    {
-        // write file
-        FILE* fp = fopen(filepath_c.c_str(), "w");
-        if (!fp) {
-            throw std::runtime_error(std::format("couldn't open output file '{}'", filepath_c.c_str()));
+#ifdef TZPL_SHARED_DIR
+    string srcDir = ensureTrailingSlash(TZPL_SHARED_DIR);
+    string dstDir = buildDir + "include/";
+    for (auto const& entry : fs::directory_iterator(srcDir)) {
+        if (entry.is_regular_file()) {
+            auto ext = entry.path().extension().string();
+            if (ext == ".h" || ext == ".hpp") {
+                fs::copy_file(entry.path(), dstDir + entry.path().filename().string(),
+                              fs::copy_options::update_existing);
+            }
         }
-        const char* ccode_cstr = ccode.c_str();
-        auto writeSize = ccode.size();
-        auto writtenSize = fwrite(ccode_cstr, 1, writeSize, fp);
-        if (writtenSize != writeSize) {
-            throw std::runtime_error("failed to write everything");
-        }
+    }
+#endif
+}
+
+void writeCodeToFile(string const& buildDir, string const& synthName, string const& ccode) {
+    string filename = synthName + synthNameSuffix + ".cpp";
+    string filepath = buildDir + "cpp/" + filename;
+    std::println("writing code to {}", filepath);
+
+    FILE* fp = fopen(filepath.c_str(), "w");
+    if (!fp) {
+        throw std::runtime_error(std::format("couldn't open output file '{}'", filepath));
+    }
+    auto writeSize = ccode.size();
+    auto writtenSize = fwrite(ccode.c_str(), 1, writeSize, fp);
+    if (writtenSize != writeSize) {
         fclose(fp);
+        throw std::runtime_error("failed to write everything");
     }
+    fclose(fp);
 }
 
+string dylibPath(string const& buildDir, string const& synthName) {
+    return buildDir + "dylib/" + synthName + synthNameSuffix + ".dylib";
+}
 
-int compileAndLink(string dir, string synthName) {
+int compileAndLink(string const& buildDir, string const& synthName) {
     string filename = synthName + synthNameSuffix;
-    string filepath_o = dir + filename + ".o";
-    string filepath_c = dir + filename + ".cpp";
-    string filepath_dylib = dir + filename + ".dylib";
+    string filepath_c = buildDir + "cpp/" + filename + ".cpp";
+    string filepath_o = buildDir + "obj/" + filename + ".o";
+    string filepath_dylib = dylibPath(buildDir, synthName);
+    string includeDir = buildDir + "include";
 
-    int err = compile(filepath_c, filepath_o);
+    int err = compile(filepath_c, filepath_o, includeDir);
     if (err) return err;
 
     err = link(filepath_o, filepath_dylib);

@@ -48,7 +48,7 @@ void loadDef_test()
     AudioStreamParameters asp{.deviceName = "default", .channels = 2, .firstChannel = 0, .bufferFrames = 256, .sampleRate = 48000.};
     auto e = newEngine(config, asp);
 
-    loadDef(e, "/Users/jamesmcc/tzpl-build", "bubbles");
+    loadDef(e, "/Users/jamesmcc/tzpl-build/dylib", "bubbles");
 }
 
 void test0()
