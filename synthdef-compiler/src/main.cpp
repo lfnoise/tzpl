@@ -36,7 +36,7 @@ namespace fs = std::filesystem;
 int main(int argc, const char * argv[]) {
     std::println("---- synthdef-compiler version 0.1 ----");
     if (argc < 2) {
-        std::println("Usage: synthdef-compiler [--no-simd] <sexpr_file1> [sexpr_file2] ...");
+        std::println("Usage: synthdef-compiler [--no-simd] [--simd-2] <sexpr_file1> [sexpr_file2] ...");
         std::println("   or: synthdef-compiler --test");
         return 1;
     }
@@ -49,10 +49,14 @@ int main(int argc, const char * argv[]) {
 
     // Parse flags
     int maxSimdWidth = 4;
+    int minSimdWidth = 4; // default: skip 2-channel SIMD
     int firstFileArg = 1;
     for (int i = 1; i < argc; i++) {
         if (std::string(argv[i]) == "--no-simd") {
             maxSimdWidth = 0;
+            firstFileArg = i + 1;
+        } else if (std::string(argv[i]) == "--simd-2") {
+            minSimdWidth = 2;
             firstFileArg = i + 1;
         }
     }
@@ -97,7 +101,7 @@ int main(int argc, const char * argv[]) {
             synthdef::PushSynth ps(synth);
             synth->graphAnalysis();
 
-            cppCode = synthdef::cppCodeGen(synth, maxSimdWidth);
+            cppCode = synthdef::cppCodeGen(synth, maxSimdWidth, minSimdWidth);
         } catch (std::exception const& e) {
             std::println("  ERROR: Graph analysis or code generation failed: {}", e.what());
             continue;

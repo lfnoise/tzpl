@@ -333,6 +333,7 @@ struct CppCodeGen : ArenaObj {
     Synth* synth;
     int indent = 1;
     int max_simd_width = 4; // zero or one means no simd
+    int min_simd_width = 4; // minimum width to use SIMD (default 4 skips 2-channel SIMD)
     usize unroll_by = 4;  // zero or one means no unrolling
     S current_root = nullptr;
     GenLoop const* current_loop = nullptr;
@@ -403,9 +404,10 @@ struct CppCodeGen : ArenaObj {
 };
 
 
-string cppCodeGen(Synth* synth, int maxSimdWidth) {
+string cppCodeGen(Synth* synth, int maxSimdWidth, int minSimdWidth) {
     CppCodeGen gen(synth);
     gen.max_simd_width = maxSimdWidth;
+    gen.min_simd_width = minSimdWidth;
     return gen.genClass();
 }
 
@@ -459,7 +461,7 @@ int CppCodeGen::simdWidth(GenLoop const& loop) {
     }
 
     if (totalCount % 4 == 0 && max_simd_width >= 4) return 4;
-    if (totalCount % 2 == 0) return 2;
+    if (totalCount % 2 == 0 && min_simd_width <= 2) return 2;
     return 0;
 }
 

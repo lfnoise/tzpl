@@ -1114,10 +1114,13 @@ void test_simd_codegen_stereo() {
     outlet(sig);
 
     gSynth->graphAnalysis();
-    string code = cppCodeGen(gSynth);
+    string code = cppCodeGen(gSynth, 4, 2); // minSimdWidth=2 to enable 2-channel SIMD
+    string code_default = cppCodeGen(gSynth); // default minSimdWidth=4 skips 2-channel
 
-    // Should contain SIMD 2x comment
+    // Should contain SIMD 2x when enabled
     assert(code.find("SIMD 2x") != string::npos);
+    // Should NOT contain SIMD 2x with default settings
+    assert(code_default.find("SIMD 2x") == string::npos);
 }
 
 void test_simd_codegen_quad() {
@@ -1147,7 +1150,7 @@ void test_simd_codegen_with_delay() {
     outlet(sig);
 
     gSynth->graphAnalysis();
-    string code = cppCodeGen(gSynth);
+    string code = cppCodeGen(gSynth, 4, 2); // minSimdWidth=2 to enable 2-channel SIMD
 
     // Should contain SIMD 2x -- delays should not disqualify
     assert(code.find("SIMD 2x") != string::npos);
@@ -1166,7 +1169,7 @@ void test_simd_codegen_with_comb() {
     outlet(sig * S(0.1f));
 
     gSynth->graphAnalysis();
-    string code = cppCodeGen(gSynth);
+    string code = cppCodeGen(gSynth, 4, 2); // minSimdWidth=2 to enable 2-channel SIMD
 
     // Should contain SIMD -- comb uses ring buffer delays
     assert(code.find("SIMD 2x") != string::npos);
