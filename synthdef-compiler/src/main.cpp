@@ -36,7 +36,7 @@ namespace fs = std::filesystem;
 int main(int argc, const char * argv[]) {
     std::println("---- synthdef-compiler version 0.1 ----");
     if (argc < 2) {
-        std::println("Usage: synthdef-compiler <sexpr_file1> [sexpr_file2] ...");
+        std::println("Usage: synthdef-compiler [--no-simd] <sexpr_file1> [sexpr_file2] ...");
         std::println("   or: synthdef-compiler --test");
         return 1;
     }
@@ -47,9 +47,20 @@ int main(int argc, const char * argv[]) {
         return 0;
     }
 
-    // Process each sexpr file
+    // Parse flags
+    int maxSimdWidth = 4;
+    int firstFileArg = 1;
     for (int i = 1; i < argc; i++) {
+        if (std::string(argv[i]) == "--no-simd") {
+            maxSimdWidth = 0;
+            firstFileArg = i + 1;
+        }
+    }
+
+    // Process each sexpr file
+    for (int i = firstFileArg; i < argc; i++) {
         std::string sexprPath = argv[i];
+        if (sexprPath.starts_with("--")) continue; // skip flags
         std::println("\nProcessing: {}", sexprPath);
 
         // Read the sexpr file
@@ -86,7 +97,7 @@ int main(int argc, const char * argv[]) {
             synthdef::PushSynth ps(synth);
             synth->graphAnalysis();
 
-            cppCode = synthdef::cppCodeGen(synth);
+            cppCode = synthdef::cppCodeGen(synth, maxSimdWidth);
         } catch (std::exception const& e) {
             std::println("  ERROR: Graph analysis or code generation failed: {}", e.what());
             continue;

@@ -726,12 +726,16 @@ void test_voicer_codegen() {
     assert(code.find("voice_v0[16]") != string::npos);
     assert(code.find("voice_v1[16]") != string::npos);
 
-    // Flat loop with correct iteration count (16, not 256)
-    assert(code.find("for (int i = 0; i < 16; ++i)") != string::npos);
+    // Flat loop with correct iteration count (16)
+    assert(code.find("i < 16") != string::npos);
 
-    // Voice-local inst vars properly indexed
-    assert(code.find("p->voice_v0[i]") != string::npos);
-    assert(code.find("p->voice_v1[i]") != string::npos);
+    // Voice-local inst vars present
+    assert(code.find("voice_v0") != string::npos);
+    assert(code.find("voice_v1") != string::npos);
+
+    // SIMD should be used now (NoteParam is SIMD-eligible)
+    assert(code.find("SIMD") != string::npos);
+    assert(code.find("flat voice") != string::npos);
 
     // RowVoicer and note functions still present
     assert(code.find("RowVoicer<16, 2>") != string::npos);
@@ -1098,6 +1102,142 @@ void test_spectral_chain_sexpr_parse() {
 
 extern void test_transforms();
 
+void test_simd_codegen_stereo() {
+    printf("test_simd_codegen_stereo\n");
+    using namespace synthdef;
+    PushSynth ps(new Synth("test_simd_stereo"));
+
+    // Simple stereo arithmetic: all SIMD-eligible ops
+    S a = control("a", {0, 1, 0.5, 0}, NumType::f32, 2);
+    S b = control("b", {0, 1, 0.3, 0}, NumType::f32, 2);
+    S sig = sin(a) * b + S(0.1f);
+    outlet(sig);
+
+    gSynth->graphAnalysis();
+    string code = cppCodeGen(gSynth);
+
+    // Should contain SIMD 2x comment
+    assert(code.find("SIMD 2x") != string::npos);
+}
+
+void test_simd_codegen_quad() {
+    printf("test_simd_codegen_quad\n");
+    using namespace synthdef;
+    PushSynth ps(new Synth("test_simd_quad"));
+
+    // 4-channel arithmetic
+    S a = control("a", {0, 1, 0.5, 0}, NumType::f32, 4);
+    S sig = sin(a) * S(0.25f);
+    outlet(sig);
+
+    gSynth->graphAnalysis();
+    string code = cppCodeGen(gSynth);
+
+    // Should contain SIMD 4x comment
+    assert(code.find("SIMD 4x") != string::npos);
+}
+
+void test_simd_codegen_with_delay() {
+    printf("test_simd_codegen_with_delay\n");
+    using namespace synthdef;
+    PushSynth ps(new Synth("test_simd_delay"));
+
+    // Stereo oscillator: phasor uses a 1-sample delay
+    S sig = fsinosc(vec(440, 550)) * S(0.1f);
+    outlet(sig);
+
+    gSynth->graphAnalysis();
+    string code = cppCodeGen(gSynth);
+
+    // Should contain SIMD 2x -- delays should not disqualify
+    assert(code.find("SIMD 2x") != string::npos);
+    // Should contain delay gather pattern
+    assert(code.find("p->d") != string::npos);
+}
+
+void test_simd_codegen_with_comb() {
+    printf("test_simd_codegen_with_comb\n");
+    using namespace synthdef;
+    PushSynth ps(new Synth("test_simd_comb"));
+
+    // Stereo comb filter: ring buffer delay
+    S sig = fsinosc(vec(440, 550));
+    sig = combn(sig, .01, 2);
+    outlet(sig * S(0.1f));
+
+    gSynth->graphAnalysis();
+    string code = cppCodeGen(gSynth);
+
+    // Should contain SIMD -- comb uses ring buffer delays
+    assert(code.find("SIMD 2x") != string::npos);
+}
+
+void test_simd_flat_voice_codegen() {
+    printf("test_simd_flat_voice_codegen\n");
+    using namespace synthdef;
+    PushSynth ps(new Synth("test_simd_flat_voice"));
+
+    // 8 voices, each 1-chan: freq * gate
+    // totalCount = 8 * 1 = 8, SIMD width 4
+    Graph* subgraph = new Graph(gSynth, gGraph);
+    S voiceBody;
+    {
+        PushGraph pg(subgraph);
+        S freq = addExpr(new NoteParam({20, 20000, 440, 0}, NumType::f32, 1, "freq"));
+        S gate = addExpr(new NoteParam({0, 1, 0, 0}, NumType::f32, 1, "gate"));
+        S result = freq * gate;
+        voiceBody = addExpr(new PhiNodeExpr(result));
+    }
+    S voicer = addExpr(new VoicerExpr(8, voiceBody));
+    outlet(reduce(voicer, BinaryOp::Add, 1));
+
+    gSynth->graphAnalysis();
+    string code = cppCodeGen(gSynth);
+
+    // Should use SIMD in flat voice mode
+    assert(code.find("SIMD") != string::npos);
+    assert(code.find("flat voice") != string::npos);
+
+    // Should have voicer_params gather for NoteParam
+    assert(code.find("voicer_params") != string::npos);
+
+    // Should still be flat voice mode (no VoiceState)
+    assert(code.find("VoiceState") == string::npos);
+
+    printf("  SIMD flat voice mode: NoteParam gather, SIMD flat loops\n");
+}
+
+void test_simd_flat_voice_stereo_osc() {
+    printf("test_simd_flat_voice_stereo_osc\n");
+    using namespace synthdef;
+    PushSynth ps(new Synth("test_simd_fv_osc"));
+
+    // 4 voices, each 2-chan (stereo) sine oscillator
+    // totalCount = 4 * 2 = 8, SIMD width 4
+    // Each 4-wide vector spans 2 voices (2 chans each)
+    Graph* subgraph = new Graph(gSynth, gGraph);
+    S voiceBody;
+    {
+        PushGraph pg(subgraph);
+        S freq = addExpr(new NoteParam({20, 20000, 440, 0}, NumType::f32, 2, "freq"));
+        S sig = fsinosc(freq);
+        voiceBody = addExpr(new PhiNodeExpr(sig));
+    }
+    S voicer = addExpr(new VoicerExpr(4, voiceBody));
+    outlet(reduce(voicer, BinaryOp::Add, 2));
+
+    gSynth->graphAnalysis();
+    string code = cppCodeGen(gSynth);
+
+    // Should use SIMD in flat voice mode with delays
+    assert(code.find("SIMD") != string::npos);
+    assert(code.find("flat voice") != string::npos);
+    // Voice-local delay should be present
+    assert(code.find("voice_d") != string::npos);
+
+    printf("  SIMD flat voice stereo osc: delays + NoteParam gather\n");
+}
+
 void all_tests() {
     using namespace synthdef;
 
@@ -1120,10 +1260,43 @@ void all_tests() {
     test_switch_sexpr_parse();
     test_for_loop_sexpr_parse();
 
+    // SIMD codegen tests
+    test_simd_codegen_stereo();
+    test_simd_codegen_quad();
+    test_simd_codegen_with_delay();
+    test_simd_codegen_with_comb();
+    test_simd_flat_voice_codegen();
+    test_simd_flat_voice_stereo_osc();
+
+    // Voicer tests (assertion-based, run before compilation tests that may exit)
+    test_voicer_codegen();
+    test_branching_voice_stays_looped();
+    test_voicer_sexpr_parse();
+
     // Spectral chain tests
     test_spectral_chain_codegen();
     test_spectral_chain_multichannel_codegen();
     test_spectral_chain_sexpr_parse();
+
+    // SIMD compilation tests (generate, compile and link)
+    test("simd_stereo_sin", 2, [](){
+        // Stereo sine: SIMD-eligible, should use f32x2 or f64x2
+        S a = control("freq", {20, 20000, 440, 0}, NumType::f32, 2);
+        S sig = sin(a) * S(0.1f);
+        outlet(sig);
+    });
+    test("simd_quad_mul", 2, [](){
+        // 4-channel multiply: should use f32x4 or f64x4
+        S a = control("a", {0, 1, 0.5, 0}, NumType::f32, 4);
+        S b = control("b", {0, 1, 0.3, 0}, NumType::f32, 4);
+        outlet(a * b);
+    });
+
+    test("simd_stereo_osc", 2, [](){
+        // Stereo oscillator using phasor (has delay) -- tests SIMD delay codegen
+        S sig = fsinosc(vec(440, 550)) * S(0.1f);
+        outlet(sig);
+    });
 
     // Spectral chain compilation tests (compiles and links the generated plugin)
     test("spectral_identity", 2, [](){
@@ -1142,11 +1315,6 @@ void all_tests() {
         });
         outlet(result);
     });
-
-    // Voicer tests
-    test_voicer_codegen();
-    test_branching_voice_stays_looped();
-    test_voicer_sexpr_parse();
 
     test("bubbles", 5, bubbles);
 //    test("bubbles_lite", 5, bubbles_lite);

@@ -28,6 +28,6 @@
 
 namespace synthdef {
 
-string cppCodeGen(Synth* synth);
+string cppCodeGen(Synth* synth, int maxSimdWidth = 4);
 
 } // namespace synthdef

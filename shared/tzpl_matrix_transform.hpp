@@ -24,6 +24,7 @@
 #pragma once
 
 #include "synthdef_types.hpp"
+#include "tzpl_simd.hpp"
 #include <bit>
 
 namespace synthdef {
@@ -46,6 +47,19 @@ T mod(T a, T b) {
     T r = std::fmod(a, b);
     return r < 0. ? r + b : r;
 }
+
+// SIMD mod overloads (mathematical modulo: result is always non-negative for positive b)
+#ifdef __APPLE__
+inline f32x2 mod(f32x2 a, f32x2 b) { auto r = simd::fmod(a, b); return simd::select(r, r + b, r < 0.f); }
+inline f32x4 mod(f32x4 a, f32x4 b) { auto r = simd::fmod(a, b); return simd::select(r, r + b, r < 0.f); }
+inline f64x2 mod(f64x2 a, f64x2 b) { auto r = simd::fmod(a, b); return simd::select(r, r + b, r < 0.); }
+inline f64x4 mod(f64x4 a, f64x4 b) { auto r = simd::fmod(a, b); return simd::select(r, r + b, r < 0.); }
+#else
+inline f32x2 mod(f32x2 a, f32x2 b) { auto r = simd::fmod(a, b); return r < 0.f ? r + b : r; }
+inline f32x4 mod(f32x4 a, f32x4 b) { auto r = simd::fmod(a, b); return r < 0.f ? r + b : r; }
+inline f64x2 mod(f64x2 a, f64x2 b) { auto r = simd::fmod(a, b); return r < 0. ? r + b : r; }
+inline f64x4 mod(f64x4 a, f64x4 b) { auto r = simd::fmod(a, b); return r < 0. ? r + b : r; }
+#endif
 
 template <typename T>
 constexpr T fold(T a, T b) {

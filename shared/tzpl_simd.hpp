@@ -57,6 +57,19 @@ using f64x2 = simd::double2;
 using f64x4 = simd::double4;
 using f64x8 = simd::double8;
 
+// Apple: overloads for functions not provided by Apple's simd framework
+#include <cmath>
+
+inline f32x2 log1p(f32x2 x) { return f32x2{std::log1p(x[0]), std::log1p(x[1])}; }
+inline f32x4 log1p(f32x4 x) { return f32x4{std::log1p(x[0]), std::log1p(x[1]), std::log1p(x[2]), std::log1p(x[3])}; }
+inline f64x2 log1p(f64x2 x) { return f64x2{std::log1p(x[0]), std::log1p(x[1])}; }
+inline f64x4 log1p(f64x4 x) { return f64x4{std::log1p(x[0]), std::log1p(x[1]), std::log1p(x[2]), std::log1p(x[3])}; }
+
+inline f32x2 expm1(f32x2 x) { return f32x2{std::expm1(x[0]), std::expm1(x[1])}; }
+inline f32x4 expm1(f32x4 x) { return f32x4{std::expm1(x[0]), std::expm1(x[1]), std::expm1(x[2]), std::expm1(x[3])}; }
+inline f64x2 expm1(f64x2 x) { return f64x2{std::expm1(x[0]), std::expm1(x[1])}; }
+inline f64x4 expm1(f64x4 x) { return f64x4{std::expm1(x[0]), std::expm1(x[1]), std::expm1(x[2]), std::expm1(x[3])}; }
+
 #else // !__APPLE__
 
 // ============================================================================
@@ -83,8 +96,7 @@ using f64x2 = double        __attribute__((ext_vector_type(2)));
 using f64x4 = double        __attribute__((ext_vector_type(4)));
 using f64x8 = double        __attribute__((ext_vector_type(8)));
 
-#endif // __APPLE__
-
+#endif // !__APPLE__ (Section A)
 
 // ============================================================================
 // SECTION B — Traits: get_traits<T> and Vector<S,N>
@@ -188,6 +200,25 @@ inline f32x4 cosh(f32x4 x)       { return Sleef_coshf4_u10(x); }
 inline f32x4 copysign(f32x4 x, f32x4 y) { return Sleef_copysignf4(x, y); }
 inline f32x4 abs(f32x4 x)        { return Sleef_fabsf4(x); }
 inline f32x4 floor(f32x4 x)      { return Sleef_floorf4(x); }
+inline f32x4 tan(f32x4 x)        { return Sleef_tanf4_u10(x); }
+inline f32x4 asin(f32x4 x)       { return Sleef_asinf4_u10(x); }
+inline f32x4 acos(f32x4 x)       { return Sleef_acosf4_u10(x); }
+inline f32x4 atan(f32x4 x)       { return Sleef_atanf4_u10(x); }
+inline f32x4 tanh(f32x4 x)       { return Sleef_tanhf4_u10(x); }
+inline f32x4 asinh(f32x4 x)      { return Sleef_asinhf4_u10(x); }
+inline f32x4 acosh(f32x4 x)      { return Sleef_acoshf4_u10(x); }
+inline f32x4 atanh(f32x4 x)      { return Sleef_atanhf4_u10(x); }
+inline f32x4 pow(f32x4 x, f32x4 y) { return Sleef_powf4_u10(x, y); }
+inline f32x4 log2(f32x4 x)       { return Sleef_log2f4_u10(x); }
+inline f32x4 log10(f32x4 x)      { return Sleef_log10f4_u10(x); }
+inline f32x4 log1p(f32x4 x)      { return Sleef_log1pf4_u10(x); }
+inline f32x4 expm1(f32x4 x)      { return Sleef_expm1f4_u10(x); }
+inline f32x4 fmod(f32x4 x, f32x4 y) { return Sleef_fmodf4(x, y); }
+inline f32x4 ceil(f32x4 x)       { return f32x4{std::ceil(x.s0), std::ceil(x.s1), std::ceil(x.s2), std::ceil(x.s3)}; }
+inline f32x4 round(f32x4 x)      { return f32x4{std::round(x.s0), std::round(x.s1), std::round(x.s2), std::round(x.s3)}; }
+inline f32x4 trunc(f32x4 x)      { return f32x4{std::trunc(x.s0), std::trunc(x.s1), std::trunc(x.s2), std::trunc(x.s3)}; }
+inline f32x4 min(f32x4 a, f32x4 b) { return f32x4{std::min(a.s0, b.s0), std::min(a.s1, b.s1), std::min(a.s2, b.s2), std::min(a.s3, b.s3)}; }
+inline f32x4 max(f32x4 a, f32x4 b) { return f32x4{std::max(a.s0, b.s0), std::max(a.s1, b.s1), std::max(a.s2, b.s2), std::max(a.s3, b.s3)}; }
 
 // --- f64x4 math ---
 inline f64x4 sin(f64x4 x)        { return Sleef_sind4_u10(x); }
@@ -205,6 +236,25 @@ inline f64x4 cosh(f64x4 x)       { return Sleef_coshd4_u10(x); }
 inline f64x4 copysign(f64x4 x, f64x4 y) { return Sleef_copysignd4(x, y); }
 inline f64x4 abs(f64x4 x)        { return Sleef_fabsd4(x); }
 inline f64x4 floor(f64x4 x)      { return Sleef_floord4(x); }
+inline f64x4 tan(f64x4 x)        { return Sleef_tand4_u10(x); }
+inline f64x4 asin(f64x4 x)       { return Sleef_asind4_u10(x); }
+inline f64x4 acos(f64x4 x)       { return Sleef_acosd4_u10(x); }
+inline f64x4 atan(f64x4 x)       { return Sleef_atand4_u10(x); }
+inline f64x4 tanh(f64x4 x)       { return Sleef_tanhd4_u10(x); }
+inline f64x4 asinh(f64x4 x)      { return Sleef_asinhd4_u10(x); }
+inline f64x4 acosh(f64x4 x)      { return Sleef_acoshd4_u10(x); }
+inline f64x4 atanh(f64x4 x)      { return Sleef_atanhd4_u10(x); }
+inline f64x4 pow(f64x4 x, f64x4 y) { return Sleef_powd4_u10(x, y); }
+inline f64x4 log2(f64x4 x)       { return Sleef_log2d4_u10(x); }
+inline f64x4 log10(f64x4 x)      { return Sleef_log10d4_u10(x); }
+inline f64x4 log1p(f64x4 x)      { return Sleef_log1pd4_u10(x); }
+inline f64x4 expm1(f64x4 x)      { return Sleef_expm1d4_u10(x); }
+inline f64x4 fmod(f64x4 x, f64x4 y) { return Sleef_fmodd4(x, y); }
+inline f64x4 ceil(f64x4 x)       { return f64x4{std::ceil(x.s0), std::ceil(x.s1), std::ceil(x.s2), std::ceil(x.s3)}; }
+inline f64x4 round(f64x4 x)      { return f64x4{std::round(x.s0), std::round(x.s1), std::round(x.s2), std::round(x.s3)}; }
+inline f64x4 trunc(f64x4 x)      { return f64x4{std::trunc(x.s0), std::trunc(x.s1), std::trunc(x.s2), std::trunc(x.s3)}; }
+inline f64x4 min(f64x4 a, f64x4 b) { return f64x4{std::min(a.s0, b.s0), std::min(a.s1, b.s1), std::min(a.s2, b.s2), std::min(a.s3, b.s3)}; }
+inline f64x4 max(f64x4 a, f64x4 b) { return f64x4{std::max(a.s0, b.s0), std::max(a.s1, b.s1), std::max(a.s2, b.s2), std::max(a.s3, b.s3)}; }
 
 // --- f32x2 math (scalar fallback) ---
 inline f32x2 sin(f32x2 x)        { return f32x2{std::sin(x.s0), std::sin(x.s1)}; }
@@ -221,6 +271,26 @@ inline f32x2 cosh(f32x2 x)       { return f32x2{std::cosh(x.s0), std::cosh(x.s1)
 inline f32x2 copysign(f32x2 x, f32x2 y) { return f32x2{std::copysign(x.s0, y.s0), std::copysign(x.s1, y.s1)}; }
 inline f32x2 abs(f32x2 x)        { return f32x2{std::fabs(x.s0), std::fabs(x.s1)}; }
 inline f32x2 floor(f32x2 x)      { return f32x2{std::floor(x.s0), std::floor(x.s1)}; }
+inline f32x2 tan(f32x2 x)        { return f32x2{std::tan(x.s0), std::tan(x.s1)}; }
+inline f32x2 asin(f32x2 x)       { return f32x2{std::asin(x.s0), std::asin(x.s1)}; }
+inline f32x2 acos(f32x2 x)       { return f32x2{std::acos(x.s0), std::acos(x.s1)}; }
+inline f32x2 atan(f32x2 x)       { return f32x2{std::atan(x.s0), std::atan(x.s1)}; }
+inline f32x2 tanh(f32x2 x)       { return f32x2{std::tanh(x.s0), std::tanh(x.s1)}; }
+inline f32x2 asinh(f32x2 x)      { return f32x2{std::asinh(x.s0), std::asinh(x.s1)}; }
+inline f32x2 acosh(f32x2 x)      { return f32x2{std::acosh(x.s0), std::acosh(x.s1)}; }
+inline f32x2 atanh(f32x2 x)      { return f32x2{std::atanh(x.s0), std::atanh(x.s1)}; }
+inline f32x2 pow(f32x2 x, f32x2 y) { return f32x2{std::pow(x.s0, y.s0), std::pow(x.s1, y.s1)}; }
+inline f32x2 log2(f32x2 x)       { return f32x2{std::log2(x.s0), std::log2(x.s1)}; }
+inline f32x2 log10(f32x2 x)      { return f32x2{std::log10(x.s0), std::log10(x.s1)}; }
+inline f32x2 log1p(f32x2 x)      { return f32x2{std::log1p(x.s0), std::log1p(x.s1)}; }
+inline f32x2 exp10(f32x2 x)      { return f32x2{std::exp10(x.s0), std::exp10(x.s1)}; }
+inline f32x2 expm1(f32x2 x)      { return f32x2{std::expm1(x.s0), std::expm1(x.s1)}; }
+inline f32x2 fmod(f32x2 x, f32x2 y) { return f32x2{std::fmod(x.s0, y.s0), std::fmod(x.s1, y.s1)}; }
+inline f32x2 ceil(f32x2 x)       { return f32x2{std::ceil(x.s0), std::ceil(x.s1)}; }
+inline f32x2 round(f32x2 x)      { return f32x2{std::round(x.s0), std::round(x.s1)}; }
+inline f32x2 trunc(f32x2 x)      { return f32x2{std::trunc(x.s0), std::trunc(x.s1)}; }
+inline f32x2 min(f32x2 a, f32x2 b) { return f32x2{std::min(a.s0, b.s0), std::min(a.s1, b.s1)}; }
+inline f32x2 max(f32x2 a, f32x2 b) { return f32x2{std::max(a.s0, b.s0), std::max(a.s1, b.s1)}; }
 
 // --- f64x2 math (scalar fallback) ---
 inline f64x2 sin(f64x2 x)        { return f64x2{std::sin(x.s0), std::sin(x.s1)}; }
@@ -237,6 +307,26 @@ inline f64x2 cosh(f64x2 x)       { return f64x2{std::cosh(x.s0), std::cosh(x.s1)
 inline f64x2 copysign(f64x2 x, f64x2 y) { return f64x2{std::copysign(x.s0, y.s0), std::copysign(x.s1, y.s1)}; }
 inline f64x2 abs(f64x2 x)        { return f64x2{std::fabs(x.s0), std::fabs(x.s1)}; }
 inline f64x2 floor(f64x2 x)      { return f64x2{std::floor(x.s0), std::floor(x.s1)}; }
+inline f64x2 tan(f64x2 x)        { return f64x2{std::tan(x.s0), std::tan(x.s1)}; }
+inline f64x2 asin(f64x2 x)       { return f64x2{std::asin(x.s0), std::asin(x.s1)}; }
+inline f64x2 acos(f64x2 x)       { return f64x2{std::acos(x.s0), std::acos(x.s1)}; }
+inline f64x2 atan(f64x2 x)       { return f64x2{std::atan(x.s0), std::atan(x.s1)}; }
+inline f64x2 tanh(f64x2 x)       { return f64x2{std::tanh(x.s0), std::tanh(x.s1)}; }
+inline f64x2 asinh(f64x2 x)      { return f64x2{std::asinh(x.s0), std::asinh(x.s1)}; }
+inline f64x2 acosh(f64x2 x)      { return f64x2{std::acosh(x.s0), std::acosh(x.s1)}; }
+inline f64x2 atanh(f64x2 x)      { return f64x2{std::atanh(x.s0), std::atanh(x.s1)}; }
+inline f64x2 pow(f64x2 x, f64x2 y) { return f64x2{std::pow(x.s0, y.s0), std::pow(x.s1, y.s1)}; }
+inline f64x2 log2(f64x2 x)       { return f64x2{std::log2(x.s0), std::log2(x.s1)}; }
+inline f64x2 log10(f64x2 x)      { return f64x2{std::log10(x.s0), std::log10(x.s1)}; }
+inline f64x2 log1p(f64x2 x)      { return f64x2{std::log1p(x.s0), std::log1p(x.s1)}; }
+inline f64x2 exp10(f64x2 x)      { return f64x2{std::exp10(x.s0), std::exp10(x.s1)}; }
+inline f64x2 expm1(f64x2 x)      { return f64x2{std::expm1(x.s0), std::expm1(x.s1)}; }
+inline f64x2 fmod(f64x2 x, f64x2 y) { return f64x2{std::fmod(x.s0, y.s0), std::fmod(x.s1, y.s1)}; }
+inline f64x2 ceil(f64x2 x)       { return f64x2{std::ceil(x.s0), std::ceil(x.s1)}; }
+inline f64x2 round(f64x2 x)      { return f64x2{std::round(x.s0), std::round(x.s1)}; }
+inline f64x2 trunc(f64x2 x)      { return f64x2{std::trunc(x.s0), std::trunc(x.s1)}; }
+inline f64x2 min(f64x2 a, f64x2 b) { return f64x2{std::min(a.s0, b.s0), std::min(a.s1, b.s1)}; }
+inline f64x2 max(f64x2 a, f64x2 b) { return f64x2{std::max(a.s0, b.s0), std::max(a.s1, b.s1)}; }
 
 
 // ============================================================================

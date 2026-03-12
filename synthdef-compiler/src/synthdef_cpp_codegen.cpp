@@ -44,6 +44,32 @@ namespace synthdef {
 
 string to_cpp_scalar_compile_string(UnaryOp op, bool isF32);
 string to_cpp_scalar_compile_string(BinaryOp op, bool isF32);
+string to_cpp_simd_compile_string(UnaryOp op, bool isF32);
+string to_cpp_simd_compile_string(BinaryOp op, bool isF32);
+
+string simdTypeName(NumType type, int width) {
+    string base;
+    switch (type.flags & 0xF) {
+        case I32: base = "i32"; break;
+        case I64: base = "i64"; break;
+        case F32: base = "f32"; break;
+        case F64: base = "f64"; break;
+        default: base = "f64"; break;
+    }
+    return FMT("{}x{}", base, width);
+}
+
+string simdSplat(NumType type, int width, string scalarExpr) {
+    return FMT("({})({})", simdTypeName(type, width), scalarExpr);
+}
+
+string simdLoad(NumType type, int width, string ptrExpr) {
+    return FMT("*({}*)({})", simdTypeName(type, width), ptrExpr);
+}
+
+string simdStore(NumType type, int width, string ptrExpr, string valExpr) {
+    return FMT("*({}*)({}) = {}", simdTypeName(type, width), ptrExpr, valExpr);
+}
 
 
 template <typename T>
@@ -51,23 +77,27 @@ string tos(T x) { // in the interest of brevity...
     return std::to_string(x);
 }
 
-string genUnopExprString(UnaryOp op, NumType type, string a) {
+string genUnopExprString(UnaryOp op, NumType type, string a, bool simd = false) {
+    auto compile_string = simd ? to_cpp_simd_compile_string(op, type.is_f32())
+                               : to_cpp_scalar_compile_string(op, type.is_f32());
     switch (op_syntax(op)) {
         case OpSyntax::Function:
-            return FMT("{}({})", to_cpp_scalar_compile_string(op, type.is_f32()), a);
+            return FMT("{}({})", compile_string, a);
         case OpSyntax::Prefix:
-            return FMT("{}{}", to_cpp_scalar_compile_string(op, type.is_f32()), a);
+            return FMT("{}{}", compile_string, a);
         default:
             throw std::runtime_error("bad op syntax");
     }
 }
 
-string genBinopExprString(BinaryOp op, NumType type, string a, string b) {
+string genBinopExprString(BinaryOp op, NumType type, string a, string b, bool simd = false) {
+    auto compile_string = simd ? to_cpp_simd_compile_string(op, type.is_f32())
+                               : to_cpp_scalar_compile_string(op, type.is_f32());
     switch (op_syntax(op)) {
         case OpSyntax::Function:
-            return FMT("{}({}, {})", to_cpp_scalar_compile_string(op, type.is_f32()), a, b);
+            return FMT("{}({}, {})", compile_string, a, b);
         case OpSyntax::Infix:
-            return FMT("({} {} {})", a, to_cpp_scalar_compile_string(op, type.is_f32()), b);
+            return FMT("({} {} {})", a, compile_string, b);
         default:
             throw std::runtime_error("bad op syntax");
     }
@@ -120,6 +150,52 @@ VarIndex vx(ptrdiff_t i) {
 VarIndex vx(string s) {
     return VarIndex(s);
 }
+
+// Helper: voice index expression for lane j in flat SIMD mode.
+// chanShift = log2(loopChans). voiceIdx = (cel + j) >> chanShift.
+string flatSimdVoiceIdx(VarIndex cel, int j, int chanShift) {
+    if (auto* cp = std::get_if<ptrdiff_t>(&cel)) {
+        return std::to_string(((int)*cp + j) >> chanShift);
+    }
+    if (chanShift == 0) {
+        return j == 0 ? vxstr(cel) : FMT("({} + {})", vxstr(cel), j);
+    }
+    if (j == 0) return FMT("({} >> {})", vxstr(cel), chanShift);
+    return FMT("(({} + {}) >> {})", vxstr(cel), j, chanShift);
+}
+
+// Helper: buffer/element index for lane j in flat SIMD mode.
+// Multi-chan buffers use the SoA flat index (= loop iteration + j).
+// 1-chan buffers use the voice index.
+string flatSimdBufIdx(VarIndex cel, int j, int chanShift, int dchans) {
+    if (dchans > 1) {
+        if (auto* cp = std::get_if<ptrdiff_t>(&cel)) {
+            return std::to_string((int)*cp + j);
+        }
+        return j == 0 ? vxstr(cel) : FMT("({} + {})", vxstr(cel), j);
+    } else {
+        return flatSimdVoiceIdx(cel, j, chanShift);
+    }
+}
+
+// Returns the channel index expression for lane j of a SIMD vector.
+// bufChans is the delay buffer's channel count; loopChans is the loop's channel count.
+// When bufChans < loopChans, wraps with & (bufChans-1).
+string simdLaneChanIdx(VarIndex cel, int j, int bufChans, int loopChans) {
+    bool needWrap = bufChans < loopChans;
+    if (auto* p = std::get_if<ptrdiff_t>(&cel)) {
+        int idx = (int)*p + j;
+        if (needWrap) idx = idx & (bufChans - 1);
+        return std::to_string(idx);
+    }
+    // cel is a string (e.g., "i" in stride loop)
+    string idx = j == 0 ? vxstr(cel) : FMT("({} + {})", vxstr(cel), j);
+    if (needWrap) {
+        return FMT("({}) & {}", idx, bufChans - 1);
+    }
+    return idx;
+}
+
 VarIndex operator-(VarIndex x) {
     if (is_constant(x)) {
         return -constant_value(x);
@@ -261,6 +337,8 @@ struct CppCodeGen : ArenaObj {
     S current_root = nullptr;
     GenLoop const* current_loop = nullptr;
     bool inVoiceLoop = false;
+    bool inSimdMode = false;
+    int currentSimdWidth = 0;
 
     // Flat voice mode: when the voice body has no branching, all voices
     // can be computed as a single flat vector without a per-voice loop.
@@ -312,6 +390,7 @@ struct CppCodeGen : ArenaObj {
     string genInitConstants();
     string genLoops(vector<GenLoop*> const& loops);
 //    string genLoopsInner(vector<GenLoop*> const& loops);
+    int simdWidth(GenLoop const& loop);
     string genLoop(GenLoop const& loop);
 //    string genLoopInner(GenLoop const& loop);
     string genTree(ExprTree const& tree, VarIndex cel);
@@ -324,9 +403,64 @@ struct CppCodeGen : ArenaObj {
 };
 
 
-string cppCodeGen(Synth* synth) {
+string cppCodeGen(Synth* synth, int maxSimdWidth) {
     CppCodeGen gen(synth);
+    gen.max_simd_width = maxSimdWidth;
     return gen.genClass();
+}
+
+// Returns the SIMD vector width to use for this loop (0 = scalar, 2, or 4).
+int CppCodeGen::simdWidth(GenLoop const& loop) {
+    if (max_simd_width < 2) return 0;
+    if (loop.isControlFlow) return 0;
+
+    usize totalCount;
+    if (inFlatVoiceMode) {
+        // Check if PhiNode loop (already voice-expanded)
+        bool isPhiNodeLoop = false;
+        for (ExprTree* tree : loop.trees) {
+            if (tree->root.as<PhiNodeExpr>()) { isPhiNodeLoop = true; break; }
+        }
+        totalCount = isPhiNodeLoop ? loop.chans : flatVoiceCount * loop.chans;
+    } else {
+        totalCount = loop.chans;
+    }
+
+    if (totalCount < 2) return 0;
+
+    // Check for disqualifying expression types in the loop's trees.
+    // Vector reorder ops need per-element index computation that is
+    // incompatible with packed SIMD. Also exclude CompareOpExpr,
+    // SelectExpr, and ReduceExpr (ternary/?:/reduce don't work on
+    // Apple simd types).
+    for (ExprTree* tree : loop.trees) {
+        for (S expr : tree->exprs) {
+            if (expr.as<VecTransposeExpr>() ||
+                expr.as<VecRotateExpr>() ||
+                expr.as<VecReverseExpr>() ||
+                expr.as<VecStrideExpr>() ||
+                expr.as<VecStutterExpr>() ||
+                expr.as<VecAtExpr>() ||
+                expr.as<VecPutExpr>() ||
+                expr.as<VecJoinExpr>() ||
+                expr.as<VecNCycExpr>() ||
+                expr.as<CompareOpExpr>() ||
+                expr.as<SelectExpr>() ||
+                expr.as<ReduceExpr>() ||
+                expr.as<SpectralChainExpr>() ||
+                expr.as<SpectralFrameInput>() ||
+                expr.as<URandExpr>() ||
+                expr.as<BiRandExpr>() ||
+                expr.as<Rand64Expr>())
+            {
+                return 0;
+            }
+        }
+    }
+
+    if (totalCount % 4 == 0 && max_simd_width >= 4) return 4;
+    if (totalCount % 2 == 0) return 2;
+    return 0;
 }
 
 string CppCodeGen::genVarDeclName(S u) {
@@ -418,10 +552,119 @@ string CppCodeGen::genVarRef(S expr, VarIndex cel) {
     }
 
     if (expr->is_scalar() && !expr.as<Inlet>()) {
-        if (inFlatVoiceMode && isVoicerSubgraph(expr->graph)) {
+        if (inSimdMode) {
+            if (inFlatVoiceMode && isVoicerSubgraph(expr->graph)) {
+                // Voice-local scalar in SIMD flat mode: needs gather, fall through
+            } else {
+                // Non-voice scalar used in SIMD context: needs splat
+                return simdSplat(expr->type, currentSimdWidth, s);
+            }
+        } else if (inFlatVoiceMode && isVoicerSubgraph(expr->graph)) {
             // Voice-local scalar in flat mode: needs voice indexing, fall through
         } else {
             return s;
+        }
+    }
+
+    if (inSimdMode && inFlatVoiceMode) {
+        bool isVoiceLocal = isVoicerSubgraph(expr->graph) &&
+            (is_inst_var(expr->cut) || is_temp_var(expr->cut));
+
+        if (isVoiceLocal) {
+            // Voice-local SoA array: voice_v[flatVoiceCount * expr->chans]
+            usize loopChans = current_loop->chans;
+            if (expr->chans == loopChans || (expr->chans == 1 && flatChanShift == 0)) {
+                // SoA array elements are contiguous with loop iteration
+                return simdLoad(expr->type, currentSimdWidth, FMT("&{}[{}]", s, vxstr(cel)));
+            } else if (expr->chans == 1) {
+                // Scalar per voice, multi-chan loop: gather or splat
+                int log2Width = currentSimdWidth == 4 ? 2 : 1;
+                if (flatChanShift >= log2Width) {
+                    // All SIMD lanes within same voice
+                    return simdSplat(expr->type, currentSimdWidth,
+                        FMT("{}[{}]", s, flatSimdVoiceIdx(cel, 0, flatChanShift)));
+                } else {
+                    // Lanes span multiple voices
+                    string typeName = simdTypeName(expr->type, currentSimdWidth);
+                    string result = typeName + "{";
+                    for (int j = 0; j < currentSimdWidth; ++j) {
+                        if (j > 0) result += ", ";
+                        result += FMT("{}[{}]", s, flatSimdVoiceIdx(cel, j, flatChanShift));
+                    }
+                    result += "}";
+                    return result;
+                }
+            } else {
+                // Multi-chan var, fewer chans than loop: gather with wrapping
+                string typeName = simdTypeName(expr->type, currentSimdWidth);
+                string result = typeName + "{";
+                for (int j = 0; j < currentSimdWidth; ++j) {
+                    if (j > 0) result += ", ";
+                    if (auto* cp = std::get_if<ptrdiff_t>(&cel)) {
+                        int vi = ((int)*cp + j) >> flatChanShift;
+                        int ci = ((int)*cp + j) & (int)(expr->chans - 1);
+                        result += FMT("{}[{}]", s, vi * (int)expr->chans + ci);
+                    } else {
+                        result += FMT("{}[{} * {} + (({} + {}) & {})]", s,
+                            flatSimdVoiceIdx(cel, j, flatChanShift),
+                            expr->chans, vxstr(cel), j, expr->chans - 1);
+                    }
+                }
+                result += "}";
+                return result;
+            }
+        } else {
+            // Non-voice var in SIMD flat mode
+            if (expr->chans == 1) {
+                return simdSplat(expr->type, currentSimdWidth, s);
+            } else if (expr->chans >= (usize)currentSimdWidth) {
+                // Wrap channel index within var's range
+                if (auto* cp = std::get_if<ptrdiff_t>(&cel)) {
+                    int idx = (int)*cp & (int)(expr->chans - 1);
+                    return simdLoad(expr->type, currentSimdWidth, FMT("&{}[{}]", s, idx));
+                }
+                return simdLoad(expr->type, currentSimdWidth,
+                    FMT("&{}[{} & {}]", s, vxstr(cel), expr->chans - 1));
+            } else {
+                // Narrower non-voice var: expand element-wise
+                string typeName = simdTypeName(expr->type, currentSimdWidth);
+                string result = typeName + "{";
+                for (int j = 0; j < currentSimdWidth; ++j) {
+                    if (j > 0) result += ", ";
+                    if (auto* cp = std::get_if<ptrdiff_t>(&cel)) {
+                        result += FMT("{}[{}]", s, ((int)*cp + j) & (int)(expr->chans - 1));
+                    } else {
+                        result += FMT("{}[({} + {}) & {}]", s, vxstr(cel), j, expr->chans - 1);
+                    }
+                }
+                result += "}";
+                return result;
+            }
+        }
+    }
+
+    if (inSimdMode && !inFlatVoiceMode) {
+        // SIMD mode: inst vars and cross-loop temps are declared as scalar arrays.
+        // Use reinterpret-cast to load/store as vector types.
+        if (expr->chans == (usize)currentSimdWidth) {
+            // Same width: vector load from start of array
+            return simdLoad(expr->type, currentSimdWidth, FMT("&{}[0]", s));
+        } else if (expr->chans > (usize)currentSimdWidth) {
+            // Wider: vector load at stride offset
+            return simdLoad(expr->type, currentSimdWidth, FMT("&{}[{}]", s, vxstr(cel)));
+        } else if (expr->chans == 1) {
+            // Scalar into SIMD (shouldn't reach here -- caught above)
+            return simdSplat(expr->type, currentSimdWidth, s);
+        } else {
+            // Narrower (e.g., 2-chan into 4-chan): expand element-wise
+            string typeName = simdTypeName(expr->type, currentSimdWidth);
+            string result = typeName + "{";
+            for (int i = 0; i < currentSimdWidth; ++i) {
+                if (i > 0) result += ", ";
+                result += FMT("{}[{}]", s, i % expr->chans);
+            }
+            result += "}";
+            return result;
         }
     }
 
@@ -500,33 +743,89 @@ struct ExprCodegenVisitor : ExprVisitor {
     }
     void visit(Constant* p) override {
         if (p->is_scalar()) {
-            s += p->str();
+            if (g.inSimdMode) {
+                s += simdSplat(p->type, g.currentSimdWidth, p->str());
+            } else {
+                s += p->str();
+            }
         } else {
             s += g.genVarRef(p, cel);
         }
     }
-    void visit(SampleRate* p) override { s += "p->fs"; }
-    void visit(SampleDur* p) override { s += "p->sd"; }
-    void visit(Control* p) override {
-        if (p->chans == 1) {
-            s += FMT("(*({}*)p->controls[{}])", p->type.str(), p->serial);
+    void visit(SampleRate* p) override {
+        if (g.inSimdMode) {
+            s += simdSplat(NumType::f64, g.currentSimdWidth, "p->fs");
         } else {
-            s += FMT("(({}*)p->controls[{}])[{}]", p->type.str(), p->serial, vxstr(cel));
+            s += "p->fs";
+        }
+    }
+    void visit(SampleDur* p) override {
+        if (g.inSimdMode) {
+            s += simdSplat(NumType::f64, g.currentSimdWidth, "p->sd");
+        } else {
+            s += "p->sd";
+        }
+    }
+    void visit(Control* p) override {
+        if (g.inSimdMode) {
+            if (p->chans == 1) {
+                s += simdSplat(p->type, g.currentSimdWidth, FMT("(*({}*)p->controls[{}])", p->type.str(), p->serial));
+            } else if (p->chans == (usize)g.currentSimdWidth) {
+                s += simdLoad(p->type, g.currentSimdWidth, FMT("({}*)p->controls[{}]", p->type.str(), p->serial));
+            } else {
+                s += FMT("(({}*)p->controls[{}])[{}]", p->type.str(), p->serial, vxstr(cel));
+            }
+        } else {
+            if (p->chans == 1) {
+                s += FMT("(*({}*)p->controls[{}])", p->type.str(), p->serial);
+            } else {
+                s += FMT("(({}*)p->controls[{}])[{}]", p->type.str(), p->serial, vxstr(cel));
+            }
         }
     }
     void visit(NoteParam* p) override {
         if (g.inFlatVoiceMode) {
-            // Flat mode: access voicer_params by extracted voice index
-            string vi;
-            if (g.flatChanShift == 0) {
-                vi = vxstr(cel);
+            if (g.inSimdMode) {
+                // SIMD gather from voicer_params
+                int width = g.currentSimdWidth;
+                int log2Width = width == 4 ? 2 : 1;
+                if (p->chans == 1 && g.flatChanShift >= log2Width) {
+                    // All lanes same voice, 1-chan param: splat
+                    string vi = flatSimdVoiceIdx(cel, 0, g.flatChanShift);
+                    s += simdSplat(p->type, width, FMT("p->voicer_params[{}][{}]", vi, p->serial));
+                } else {
+                    // Gather
+                    s += simdTypeName(p->type, width) + "{";
+                    for (int j = 0; j < width; ++j) {
+                        if (j > 0) s += ", ";
+                        string vi = flatSimdVoiceIdx(cel, j, g.flatChanShift);
+                        if (p->chans == 1) {
+                            s += FMT("p->voicer_params[{}][{}]", vi, p->serial);
+                        } else {
+                            if (auto* cp = std::get_if<ptrdiff_t>(&cel)) {
+                                int ci = ((int)*cp + j) & (int)(p->chans - 1);
+                                s += FMT("p->voicer_params[{}][{}]", vi, p->serial + ci);
+                            } else {
+                                s += FMT("p->voicer_params[{}][{} + (({} + {}) & {})]",
+                                    vi, p->serial, vxstr(cel), j, p->chans - 1);
+                            }
+                        }
+                    }
+                    s += "}";
+                }
             } else {
-                vi = FMT("{} >> {}", vxstr(cel), g.flatChanShift);
-            }
-            if (p->chans == 1) {
-                s += FMT("p->voicer_params[{}][{}]", vi, p->serial);
-            } else {
-                s += FMT("p->voicer_params[{}][{} + ({} & {})]", vi, p->serial, vxstr(cel), p->chans - 1);
+                // Flat mode scalar: access voicer_params by extracted voice index
+                string vi;
+                if (g.flatChanShift == 0) {
+                    vi = vxstr(cel);
+                } else {
+                    vi = FMT("{} >> {}", vxstr(cel), g.flatChanShift);
+                }
+                if (p->chans == 1) {
+                    s += FMT("p->voicer_params[{}][{}]", vi, p->serial);
+                } else {
+                    s += FMT("p->voicer_params[{}][{} + ({} & {})]", vi, p->serial, vxstr(cel), p->chans - 1);
+                }
             }
         } else {
             if (p->chans == 1) {
@@ -536,19 +835,49 @@ struct ExprCodegenVisitor : ExprVisitor {
             }
         }
     }
-    void visit(Inlet* p) override { s += g.genVarRef(p, cel); }
-    void visit(Outlet* p) override { shouldBeHandledAsTree(p); }
-    void visit(UnaryOpExpr* p) override { 
-        s += genUnopExprString(p->op, p->type, g.genExpr(p->in0(), cel)); 
+    void visit(Inlet* p) override {
+        if (g.inSimdMode) {
+            if (p->chans == (usize)g.currentSimdWidth) {
+                s += simdLoad(p->type, g.currentSimdWidth,
+                    FMT("(({}**)p->inlets)[{}]", p->type.str(), p->serial));
+            } else if (p->chans > (usize)g.currentSimdWidth) {
+                s += simdLoad(p->type, g.currentSimdWidth,
+                    FMT("&(({}**)p->inlets)[{}][{}]", p->type.str(), p->serial, vxstr(cel)));
+            } else if (p->chans == 1) {
+                s += simdSplat(p->type, g.currentSimdWidth,
+                    FMT("(({}**)p->inlets)[{}][0]", p->type.str(), p->serial));
+            } else {
+                // Narrower inlet into wider SIMD: expand
+                string typeName = simdTypeName(p->type, g.currentSimdWidth);
+                string base = FMT("(({}**)p->inlets)[{}]", p->type.str(), p->serial);
+                string result = typeName + "{";
+                for (int i = 0; i < g.currentSimdWidth; ++i) {
+                    if (i > 0) result += ", ";
+                    result += FMT("{}[{}]", base, i % p->chans);
+                }
+                result += "}";
+                s += result;
+            }
+        } else {
+            s += g.genVarRef(p, cel);
+        }
     }
-    void visit(BinaryOpExpr* p) override { 
-        s += genBinopExprString(p->op, p->type, g.genExpr(p->in0(), cel), g.genExpr(p->in1(), cel)); 
+    void visit(Outlet* p) override { shouldBeHandledAsTree(p); }
+    void visit(UnaryOpExpr* p) override {
+        s += genUnopExprString(p->op, p->type, g.genExpr(p->in0(), cel), g.inSimdMode);
+    }
+    void visit(BinaryOpExpr* p) override {
+        s += genBinopExprString(p->op, p->type, g.genExpr(p->in0(), cel), g.genExpr(p->in1(), cel), g.inSimdMode);
     }
     void visit(CompareOpExpr* p) override {
         s += FMT("({} {} {})", g.genExpr(p->in0(), cel), to_string(p->op), g.genExpr(p->in1(), cel));
     }
     void visit(CastOpExpr* p) override {
-        s += FMT("{}({})", p->cast_type.str(), g.genExpr(p->in0(), cel));
+        if (g.inSimdMode) {
+            s += FMT("convert<{}>({})", p->cast_type.str(), g.genExpr(p->in0(), cel));
+        } else {
+            s += FMT("{}({})", p->cast_type.str(), g.genExpr(p->in0(), cel));
+        }
     }
 //    void visit(MatMulExpr* p) override { fixme(p); }
     void visit(ReduceExpr* p) override {
@@ -673,18 +1002,117 @@ struct ExprCodegenVisitor : ExprVisitor {
     }
     void visit(DelayFixRead* p) override {
         if (g.inFlatVoiceMode && g.isVoicerSubgraph(p->delayBuf->graph)) {
-            string vi = g.flatChanShift == 0 ? vxstr(cel)
-                : FMT("({} >> {})", vxstr(cel), g.flatChanShift);
-            string bi = p->delayBuf->chans > 1 ? vxstr(cel) : vi; // buffer index
-            auto ser = p->delayBuf->serial;
-            if (p->delayBuf->allocSize == 1) {
-                s += FMT("p->voice_d{}[{}]", ser, bi);
-            } else if (p->delayBuf->allocSize > 1) {
-                s += FMT("p->voice_d{0}[{1}][(p->voice_d{0}_wrpos[{2}] - u64({3})) & {4}]",
-                    ser, bi, vi, p->delay_samples, p->delayBuf->allocSize-1);
+            if (g.inSimdMode) {
+                // SIMD + flat voice mode
+                int ser = p->delayBuf->serial;
+                int dchans = p->delayBuf->chans;
+                int width = g.currentSimdWidth;
+                int loopChans = g.current_loop->chans;
+
+                if (p->delayBuf->allocSize == 1) {
+                    // Flat SoA array
+                    if (dchans == loopChans || (dchans == 1 && g.flatChanShift == 0)) {
+                        // Contiguous with loop iteration
+                        s += simdLoad(p->type, width, FMT("&p->voice_d{}[{}]", ser, vxstr(cel)));
+                    } else if (dchans == 1) {
+                        int log2Width = width == 4 ? 2 : 1;
+                        if (g.flatChanShift >= log2Width) {
+                            s += simdSplat(p->type, width,
+                                FMT("p->voice_d{}[{}]", ser, flatSimdVoiceIdx(cel, 0, g.flatChanShift)));
+                        } else {
+                            s += simdTypeName(p->type, width) + "{";
+                            for (int j = 0; j < width; ++j) {
+                                if (j > 0) s += ", ";
+                                s += FMT("p->voice_d{}[{}]", ser, flatSimdVoiceIdx(cel, j, g.flatChanShift));
+                            }
+                            s += "}";
+                        }
+                    } else {
+                        // Narrower delay: gather with wrap
+                        s += simdTypeName(p->type, width) + "{";
+                        for (int j = 0; j < width; ++j) {
+                            if (j > 0) s += ", ";
+                            s += FMT("p->voice_d{}[{}]", ser, flatSimdBufIdx(cel, j, g.flatChanShift, dchans));
+                        }
+                        s += "}";
+                    }
+                } else {
+                    // Ring buffer: always gather (per-voice wrpos)
+                    s += simdTypeName(p->type, width) + "{";
+                    for (int j = 0; j < width; ++j) {
+                        if (j > 0) s += ", ";
+                        string vi = flatSimdVoiceIdx(cel, j, g.flatChanShift);
+                        string bi = flatSimdBufIdx(cel, j, g.flatChanShift, dchans);
+                        string mask = p->delayBuf->allocSize > 1
+                            ? std::to_string(p->delayBuf->allocSize - 1)
+                            : FMT("p->voice_d{}_mask[{}]", ser, vi);
+                        s += FMT("p->voice_d{}[{}][(p->voice_d{}_wrpos[{}] - u64({})) & {}]",
+                            ser, bi, ser, vi, p->delay_samples, mask);
+                    }
+                    s += "}";
+                }
             } else {
-                s += FMT("p->voice_d{0}[{1}][(p->voice_d{0}_wrpos[{2}] - u64({3})) & p->voice_d{0}_mask[{2}]]",
-                    ser, bi, vi, p->delay_samples);
+                // Scalar flat voice mode
+                string vi = g.flatChanShift == 0 ? vxstr(cel)
+                    : FMT("({} >> {})", vxstr(cel), g.flatChanShift);
+                string bi = p->delayBuf->chans > 1 ? vxstr(cel) : vi;
+                auto ser = p->delayBuf->serial;
+                if (p->delayBuf->allocSize == 1) {
+                    s += FMT("p->voice_d{}[{}]", ser, bi);
+                } else if (p->delayBuf->allocSize > 1) {
+                    s += FMT("p->voice_d{0}[{1}][(p->voice_d{0}_wrpos[{2}] - u64({3})) & {4}]",
+                        ser, bi, vi, p->delay_samples, p->delayBuf->allocSize-1);
+                } else {
+                    s += FMT("p->voice_d{0}[{1}][(p->voice_d{0}_wrpos[{2}] - u64({3})) & p->voice_d{0}_mask[{2}]]",
+                        ser, bi, vi, p->delay_samples);
+                }
+            }
+        } else if (g.inSimdMode) {
+            string dp = "p->";
+            int ser = p->delayBuf->serial;
+            int dchans = p->delayBuf->chans;
+            int width = g.currentSimdWidth;
+            int loopChans = g.current_loop->chans;
+
+            // allocSize==1: delay buffer is a flat array d[chans]
+            if (p->delayBuf->allocSize == 1) {
+                if (dchans == 1) {
+                    // 1-chan delay: splat single value
+                    s += simdSplat(p->type, width, FMT("{}d{}", dp, ser));
+                } else if (dchans >= width) {
+                    // Contiguous vector load
+                    s += simdLoad(p->type, width, FMT("&{}d{}[{}]", dp, ser, vxstr(cel)));
+                } else {
+                    // Narrower delay buffer: gather with wrap
+                    s += simdTypeName(p->type, width) + "{";
+                    for (int j = 0; j < width; ++j) {
+                        if (j > 0) s += ", ";
+                        s += FMT("{}d{}[{}]", dp, ser, simdLaneChanIdx(cel, j, dchans, loopChans));
+                    }
+                    s += "}";
+                }
+            } else {
+                // Ring buffer: d[chans][allocSize] or d[allocSize] for 1-chan
+                string mask = p->delayBuf->allocSize > 1
+                    ? std::to_string(p->delayBuf->allocSize - 1)
+                    : FMT("{}d{}_mask", dp, ser);
+
+                if (dchans == 1) {
+                    // 1-chan ring: all lanes read same value, splat
+                    s += simdSplat(p->type, width,
+                        FMT("{}d{}[({}d{}_wrpos - u64({})) & {}]",
+                            dp, ser, dp, ser, p->delay_samples, mask));
+                } else {
+                    // Multi-chan ring: gather from per-channel rings
+                    s += simdTypeName(p->type, width) + "{";
+                    for (int j = 0; j < width; ++j) {
+                        if (j > 0) s += ", ";
+                        string ci = simdLaneChanIdx(cel, j, dchans, loopChans);
+                        s += FMT("{}d{}[{}][({}d{}_wrpos - u64({})) & {}]",
+                            dp, ser, ci, dp, ser, p->delay_samples, mask);
+                    }
+                    s += "}";
+                }
             }
         } else {
             string dp = g.inVoiceLoop ? "vs." : "p->";
@@ -705,12 +1133,92 @@ struct ExprCodegenVisitor : ExprVisitor {
     }
     void visit(DelayVarRead* p) override {
         if (g.inFlatVoiceMode && g.isVoicerSubgraph(p->delayBuf->graph)) {
-            string vi = g.flatChanShift == 0 ? vxstr(cel)
-                : FMT("({} >> {})", vxstr(cel), g.flatChanShift);
-            string bi = p->delayBuf->chans > 1 ? vxstr(cel) : vi;
-            auto ser = p->delayBuf->serial;
-            s += FMT("p->voice_d{0}[{1}][(p->voice_d{0}_wrpos[{2}] - u64({3})) & p->voice_d{0}_mask[{2}]]",
-                ser, bi, vi, g.genExpr(p->in0(), cel));
+            if (g.inSimdMode) {
+                // SIMD + flat voice mode: gather with per-voice wrpos
+                int ser = p->delayBuf->serial;
+                int dchans = p->delayBuf->chans;
+                int width = g.currentSimdWidth;
+
+                // Determine if offset is globally scalar (not voice-dependent)
+                bool globalScalar = p->in0()->is_scalar() &&
+                    !g.isVoicerSubgraph(p->in0()->graph);
+
+                string offsetExpr;
+                if (globalScalar) {
+                    bool prevSimd = g.inSimdMode;
+                    g.inSimdMode = false;
+                    offsetExpr = g.genExpr(p->in0(), vx(0));
+                    g.inSimdMode = prevSimd;
+                } else {
+                    // Compute as SIMD vector, then extract per lane
+                    offsetExpr = g.genExpr(p->in0(), cel);
+                }
+
+                s += simdTypeName(p->type, width) + "{";
+                for (int j = 0; j < width; ++j) {
+                    if (j > 0) s += ", ";
+                    string vi = flatSimdVoiceIdx(cel, j, g.flatChanShift);
+                    string bi = flatSimdBufIdx(cel, j, g.flatChanShift, dchans);
+                    string mask = p->delayBuf->allocSize > 1
+                        ? std::to_string(p->delayBuf->allocSize - 1)
+                        : FMT("p->voice_d{}_mask[{}]", ser, vi);
+                    string off = globalScalar ? offsetExpr : FMT("({})[{}]", offsetExpr, j);
+                    s += FMT("p->voice_d{}[{}][(p->voice_d{}_wrpos[{}] - u64({})) & {}]",
+                        ser, bi, ser, vi, off, mask);
+                }
+                s += "}";
+            } else {
+                // Scalar flat voice mode
+                string vi = g.flatChanShift == 0 ? vxstr(cel)
+                    : FMT("({} >> {})", vxstr(cel), g.flatChanShift);
+                string bi = p->delayBuf->chans > 1 ? vxstr(cel) : vi;
+                auto ser = p->delayBuf->serial;
+                s += FMT("p->voice_d{0}[{1}][(p->voice_d{0}_wrpos[{2}] - u64({3})) & p->voice_d{0}_mask[{2}]]",
+                    ser, bi, vi, g.genExpr(p->in0(), cel));
+            }
+        } else if (g.inSimdMode) {
+            string dp = "p->";
+            int ser = p->delayBuf->serial;
+            int dchans = p->delayBuf->chans;
+            int width = g.currentSimdWidth;
+            int loopChans = g.current_loop->chans;
+            string mask = FMT("{}d{}_mask", dp, ser);
+
+            // The offset expression: scalar offsets are used directly,
+            // vector offsets are evaluated once then per-lane elements extracted.
+            bool scalarOffset = p->in0()->is_scalar();
+            string offsetExpr;
+            if (scalarOffset) {
+                // Get the scalar value (bypass SIMD splat)
+                bool prevSimd = g.inSimdMode;
+                g.inSimdMode = false;
+                offsetExpr = g.genExpr(p->in0(), vx(0));
+                g.inSimdMode = prevSimd;
+            } else {
+                offsetExpr = g.genExpr(p->in0(), cel);
+            }
+
+            if (scalarOffset && dchans == 1) {
+                // All lanes read same value: splat the single ring read
+                s += simdSplat(p->type, width,
+                    FMT("{}d{}[({}d{}_wrpos - u64({})) & {}]",
+                        dp, ser, dp, ser, offsetExpr, mask));
+            } else {
+                s += simdTypeName(p->type, width) + "{";
+                for (int j = 0; j < width; ++j) {
+                    if (j > 0) s += ", ";
+                    string ci;
+                    if (dchans == 1) {
+                        ci = "";
+                    } else {
+                        ci = "[" + simdLaneChanIdx(cel, j, dchans, loopChans) + "]";
+                    }
+                    string off = scalarOffset ? offsetExpr : FMT("({})[{}]", offsetExpr, j);
+                    s += FMT("{}d{}{}[({}d{}_wrpos - u64({})) & {}]",
+                        dp, ser, ci, dp, ser, off, mask);
+                }
+                s += "}";
+            }
         } else {
             string dp = g.inVoiceLoop ? "vs." : "p->";
             string dindex;
@@ -793,6 +1301,20 @@ struct Rank1GenTreeExprVisitor : GenTreeExprVisitor {
     
     void visit(Outlet* p) override {
         handled = true;
+        if (g.inSimdMode) {
+            string expr = g.genExpr(p->in0(), cel);
+            string vtype = simdTypeName(p->type, g.currentSimdWidth);
+            if (p->chans == (usize)g.currentSimdWidth) {
+                s += FMT("*({0}*)(({1}**)p->outlets)[{2}] = {3}; // {4} Sink {5}\n",
+                    vtype, p->type.str(), p->serial, expr,
+                    tree.serial, g.current_root->str());
+            } else if (p->chans > (usize)g.currentSimdWidth) {
+                s += FMT("*({0}*)&(({1}**)p->outlets)[{2}][{3}] = {4}; // {5} Sink {6}\n",
+                    vtype, p->type.str(), p->serial, vxstr(cel), expr,
+                    tree.serial, g.current_root->str());
+            }
+            return;
+        }
         usize loopChans = p->tree->loop->chans;
         string pindex = p->chans == loopChans ? genIndex1(cel) : "";
         s += FMT("(({0}**)p->outlets)[{1}]{2} = {3}; // {4} Sink {5}\n",
@@ -1016,19 +1538,87 @@ struct Rank1GenTreeExprVisitor : GenTreeExprVisitor {
     void visit(DelayWrite* p) override {
         handled = true;
         if (g.inFlatVoiceMode && g.isVoicerSubgraph(p->delayBuf->graph)) {
-            string vi = g.flatChanShift == 0 ? vxstr(cel)
-                : FMT("({} >> {})", vxstr(cel), g.flatChanShift);
-            string bi = p->delayBuf->chans > 1 ? vxstr(cel) : vi;
-            auto ser = p->delayBuf->serial;
-            if (p->delayBuf->allocSize == 1) {
-                s += FMT("p->voice_d{0}[{1}] = {2}; // {3}\n",
-                    ser, bi, g.genExpr(p->in0(), cel), tree.serial);
-            } else if (p->delayBuf->allocSize > 1) {
-                s += FMT("p->voice_d{0}[{1}][p->voice_d{0}_wrpos[{2}] & {3}] = {4}; // {5}\n",
-                    ser, bi, vi, p->delayBuf->allocSize-1, g.genExpr(p->in0(), cel), tree.serial);
+            if (g.inSimdMode) {
+                // SIMD + flat voice mode
+                int ser = p->delayBuf->serial;
+                int dchans = p->delayBuf->chans;
+                int width = g.currentSimdWidth;
+                int loopChans = g.current_loop->chans;
+                string valueExpr = g.genExpr(p->in0(), cel);
+
+                if (p->delayBuf->allocSize == 1 &&
+                    (dchans == loopChans || (dchans == 1 && g.flatChanShift == 0))) {
+                    // Contiguous vector store
+                    s += FMT("{}; // {} DelayWrite\n",
+                        simdStore(p->type, width, FMT("&p->voice_d{}[{}]", ser, vxstr(cel)), valueExpr),
+                        tree.serial);
+                } else {
+                    // Scatter: evaluate value once, write per lane
+                    string vtype = simdTypeName(p->type, width);
+                    s += FMT("{} _dw{} = {}; // {} DelayWrite\n", vtype, ser, valueExpr, tree.serial);
+                    for (int j = 0; j < width; ++j) {
+                        tabIndent(s, g.indent);
+                        string vi = flatSimdVoiceIdx(cel, j, g.flatChanShift);
+                        string bi = flatSimdBufIdx(cel, j, g.flatChanShift, dchans);
+                        if (p->delayBuf->allocSize == 1) {
+                            s += FMT("p->voice_d{}[{}] = _dw{}[{}];\n", ser, bi, ser, j);
+                        } else {
+                            string mask = p->delayBuf->allocSize > 1
+                                ? std::to_string(p->delayBuf->allocSize - 1)
+                                : FMT("p->voice_d{}_mask[{}]", ser, vi);
+                            s += FMT("p->voice_d{}[{}][p->voice_d{}_wrpos[{}] & {}] = _dw{}[{}];\n",
+                                ser, bi, ser, vi, mask, ser, j);
+                        }
+                    }
+                }
             } else {
-                s += FMT("p->voice_d{0}[{1}][p->voice_d{0}_wrpos[{2}] & p->voice_d{0}_mask[{2}]] = {3}; // {4}\n",
-                    ser, bi, vi, g.genExpr(p->in0(), cel), tree.serial);
+                // Scalar flat voice mode
+                string vi = g.flatChanShift == 0 ? vxstr(cel)
+                    : FMT("({} >> {})", vxstr(cel), g.flatChanShift);
+                string bi = p->delayBuf->chans > 1 ? vxstr(cel) : vi;
+                auto ser = p->delayBuf->serial;
+                if (p->delayBuf->allocSize == 1) {
+                    s += FMT("p->voice_d{0}[{1}] = {2}; // {3}\n",
+                        ser, bi, g.genExpr(p->in0(), cel), tree.serial);
+                } else if (p->delayBuf->allocSize > 1) {
+                    s += FMT("p->voice_d{0}[{1}][p->voice_d{0}_wrpos[{2}] & {3}] = {4}; // {5}\n",
+                        ser, bi, vi, p->delayBuf->allocSize-1, g.genExpr(p->in0(), cel), tree.serial);
+                } else {
+                    s += FMT("p->voice_d{0}[{1}][p->voice_d{0}_wrpos[{2}] & p->voice_d{0}_mask[{2}]] = {3}; // {4}\n",
+                        ser, bi, vi, g.genExpr(p->in0(), cel), tree.serial);
+                }
+            }
+        } else if (g.inSimdMode) {
+            string dp = "p->";
+            int ser = p->delayBuf->serial;
+            int dchans = p->delayBuf->chans;
+            int width = g.currentSimdWidth;
+            int loopChans = g.current_loop->chans;
+            string valueExpr = g.genExpr(p->in0(), cel);
+
+            if (p->delayBuf->allocSize == 1 && dchans >= width) {
+                // Contiguous vector store
+                s += FMT("{}; // {} DelayWrite\n",
+                    simdStore(p->type, width, FMT("&{}d{}[{}]", dp, ser, vxstr(cel)), valueExpr),
+                    tree.serial);
+            } else {
+                // Element-wise scatter: evaluate value once, write per lane
+                string vtype = simdTypeName(p->type, width);
+                s += FMT("{} _dw{} = {}; // {} DelayWrite\n", vtype, ser, valueExpr, tree.serial);
+
+                for (int j = 0; j < width; ++j) {
+                    tabIndent(s, g.indent);
+                    string ci = simdLaneChanIdx(cel, j, dchans, loopChans);
+                    if (p->delayBuf->allocSize == 1) {
+                        s += FMT("{}d{}[{}] = _dw{}[{}];\n", dp, ser, ci, ser, j);
+                    } else {
+                        string mask = p->delayBuf->allocSize > 1
+                            ? std::to_string(p->delayBuf->allocSize - 1)
+                            : FMT("{}d{}_mask", dp, ser);
+                        s += FMT("{}d{}[{}][{}d{}_wrpos & {}] = _dw{}[{}];\n",
+                            dp, ser, ci, dp, ser, mask, ser, j);
+                    }
+                }
             }
         } else {
             string dp = g.inVoiceLoop ? "vs." : "p->";
@@ -1073,18 +1663,22 @@ string CppCodeGen::genTree(ExprTree const& tree, VarIndex cel) {
     if (is_sink(current_root->cut)) {
         s += FMT("{}; // {} Sink {}\n", genExpr(current_root, cel),
                     tree.serial, current_root->str());
-    } else if (tree.is_consumed_in_loop() || (is_temp_var(tree.root->cut) && tree.loop->chans == 1 && !inFlatVoiceMode)) {
-        s += FMT("{} {} = {}; // {} {}\n", 
-            current_root->type.str(), 
+    } else if (tree.is_consumed_in_loop() || (is_temp_var(tree.root->cut) && tree.loop->chans == 1 && !inFlatVoiceMode && !inSimdMode)) {
+        string typeName = current_root->type.str();
+        if (inSimdMode && (current_root->chans > 1 || inFlatVoiceMode)) {
+            typeName = simdTypeName(current_root->type, currentSimdWidth);
+        }
+        s += FMT("{} {} = {}; // {} {}\n",
+            typeName,
             genVarName(current_root),
             genExpr(current_root, cel),
-            tree.serial, 
+            tree.serial,
             to_string(current_root->cut));
     } else {
-        s += FMT("{} = {}; // {} {}\n", 
-            genVarRef(current_root, cel), 
+        s += FMT("{} = {}; // {} {}\n",
+            genVarRef(current_root, cel),
             genExpr(current_root, cel),
-            tree.serial, 
+            tree.serial,
             to_string(current_root->cut));
     }
     return s;
@@ -1270,15 +1864,44 @@ string CppCodeGen::genLoop(GenLoop const& loop) {
                     flatChanMask = loop.chans - 1;
                 }
             }
-            tabIndent(code, indent);
-            code += FMT("for (int i = 0; i < {}; ++i) {{\n", totalCount);
-            ++indent;
-            for (ExprTree* tree : loop.trees) {
-                code += genTree(*tree, "i");
+            int width = simdWidth(loop);
+            if (width > 0) {
+                inSimdMode = true;
+                currentSimdWidth = width;
+                if ((usize)width == totalCount) {
+                    // Case A: single vector op, no loop
+                    tabIndent(code, indent);
+                    code += FMT("// SIMD {}x (flat voice)\n", width);
+                    for (ExprTree* tree : loop.trees) {
+                        code += genTree(*tree, vx(0));
+                    }
+                } else {
+                    // Case B: stride loop
+                    tabIndent(code, indent);
+                    code += FMT("// SIMD {}x (flat voice)\n", width);
+                    tabIndent(code, indent);
+                    code += FMT("for (usize i = 0; i < {}; i += {}) {{\n", totalCount, width);
+                    ++indent;
+                    for (ExprTree* tree : loop.trees) {
+                        code += genTree(*tree, "i");
+                    }
+                    --indent;
+                    tabIndent(code, indent);
+                    code += "}\n";
+                }
+                inSimdMode = false;
+                currentSimdWidth = 0;
+            } else {
+                tabIndent(code, indent);
+                code += FMT("for (int i = 0; i < {}; ++i) {{\n", totalCount);
+                ++indent;
+                for (ExprTree* tree : loop.trees) {
+                    code += genTree(*tree, "i");
+                }
+                --indent;
+                tabIndent(code, indent);
+                code += "}\n";
             }
-            --indent;
-            tabIndent(code, indent);
-            code += "}\n";
         } else if (loop.isControlFlow) {
             //code += "\t// control flow\n";
             code += genTree(*loop.trees[0], vx(0));
@@ -1289,15 +1912,44 @@ string CppCodeGen::genLoop(GenLoop const& loop) {
                 code += genTree(*tree, vx(0));
             }
         } else {
-            tabIndent(code, indent);
-            code += "for (usize i = 0; i < " + std::to_string(loop.chans) + "; ++i) {\n";
-            ++indent;
-            for (ExprTree* tree : loop.trees) {
-                code += genTree(*tree, "i");
+            int width = simdWidth(loop);
+            if (width > 0) {
+                inSimdMode = true;
+                currentSimdWidth = width;
+                if (loop.chans == (usize)width) {
+                    // Case A: totalCount == width -- single vector op, no loop
+                    tabIndent(code, indent);
+                    code += FMT("// SIMD {}x\n", width);
+                    for (ExprTree* tree : loop.trees) {
+                        code += genTree(*tree, vx(0));
+                    }
+                } else {
+                    // Case B: totalCount > width -- stride loop
+                    tabIndent(code, indent);
+                    code += FMT("// SIMD {}x\n", width);
+                    tabIndent(code, indent);
+                    code += FMT("for (usize i = 0; i < {}; i += {}) {{\n", loop.chans, width);
+                    ++indent;
+                    for (ExprTree* tree : loop.trees) {
+                        code += genTree(*tree, "i");
+                    }
+                    --indent;
+                    tabIndent(code, indent);
+                    code += "}\n";
+                }
+                inSimdMode = false;
+                currentSimdWidth = 0;
+            } else {
+                tabIndent(code, indent);
+                code += "for (usize i = 0; i < " + std::to_string(loop.chans) + "; ++i) {\n";
+                ++indent;
+                for (ExprTree* tree : loop.trees) {
+                    code += genTree(*tree, "i");
+                }
+                --indent;
+                tabIndent(code, indent);
+                code += "}\n";
             }
-            --indent;
-            tabIndent(code, indent);
-            code += "}\n";
         }
         if (!code.empty()) { s += code; s += "\n"; }
     }
@@ -2237,6 +2889,7 @@ string CppCodeGen::genClass()
     s += "#include <array>\n";
     s += "\n";
     s += "using namespace synthdef;\n";
+    s += "using namespace simd;\n";
     if (voicerExpr) {
         // Include voicer AFTER 'using namespace synthdef;' so that synthdef types
         // (f32, i64, etc.) are visible, and define the guard to suppress the
@@ -2392,6 +3045,73 @@ string to_cpp_scalar_compile_string(BinaryOp op, bool isF32) {
         case BinaryOp::Hypot: return "std::hypot";
         case BinaryOp::Atan2: return "std::atan2";
         case BinaryOp::Copysign: return "std::copysign";
+        default: return "unknown";
+    }
+}
+
+// SIMD compile strings: drop std:: prefix so ADL/using finds SIMD overloads
+string to_cpp_simd_compile_string(UnaryOp op, bool isF32) {
+    switch (op) {
+        case UnaryOp::Neg: return "-";
+        case UnaryOp::Not: return "!";
+        case UnaryOp::Abs: return "abs";
+        case UnaryOp::BitNot: return "~";
+        case UnaryOp::Clz: return "clz";
+        case UnaryOp::Ctz: return "ctz";
+        case UnaryOp::PopCount: return "popcount";
+        case UnaryOp::NumBits: return "numbits";
+        case UnaryOp::Floor: return "floor";
+        case UnaryOp::Ceil: return "ceil";
+        case UnaryOp::Round: return "round";
+        case UnaryOp::Trunc: return "trunc";
+        case UnaryOp::Sqrt: return "sqrt";
+        case UnaryOp::Cbrt: return "cbrt";
+        case UnaryOp::Log: return "log";
+        case UnaryOp::Log2: return "log2";
+        case UnaryOp::Log10: return "log10";
+        case UnaryOp::Log1p: return "log1p";
+        case UnaryOp::Exp: return "exp";
+        case UnaryOp::Exp2: return "exp2";
+        case UnaryOp::Exp10: return "exp10";
+        case UnaryOp::Expm1: return "expm1";
+        case UnaryOp::SinPi: return isF32 ? "sinpi" : "sinpi";
+        case UnaryOp::CosPi: return isF32 ? "cospi" : "cospi";
+        case UnaryOp::TanPi: return isF32 ? "tanpi" : "tanpi";
+        case UnaryOp::Sin: return "sin";
+        case UnaryOp::Cos: return "cos";
+        case UnaryOp::Tan: return "tan";
+        case UnaryOp::Asin: return "asin";
+        case UnaryOp::Acos: return "acos";
+        case UnaryOp::Atan: return "atan";
+        case UnaryOp::Sinh: return "sinh";
+        case UnaryOp::Cosh: return "cosh";
+        case UnaryOp::Tanh: return "tanh";
+        case UnaryOp::Asinh: return "asinh";
+        case UnaryOp::Acosh: return "acosh";
+        case UnaryOp::Atanh: return "atanh";
+        default: return "unknown";
+    }
+}
+string to_cpp_simd_compile_string(BinaryOp op, bool isF32) {
+    switch (op) {
+        case BinaryOp::Add: return "+";
+        case BinaryOp::Sub: return "-";
+        case BinaryOp::Mul: return "*";
+        case BinaryOp::Div: return "/";
+        case BinaryOp::Rem: return "%";
+        case BinaryOp::BitAnd: return "&";
+        case BinaryOp::BitOr: return "|";
+        case BinaryOp::BitXor: return "^";
+        case BinaryOp::ShiftLeft: return "<<";
+        case BinaryOp::ShiftRight: return ">>";
+        case BinaryOp::UnsignedShiftRight: return "ushr";
+        case BinaryOp::Mod: return "mod";
+        case BinaryOp::Min: return "min";
+        case BinaryOp::Max: return "max";
+        case BinaryOp::Pow: return "pow";
+        case BinaryOp::Hypot: return "hypot";
+        case BinaryOp::Atan2: return "atan2";
+        case BinaryOp::Copysign: return "copysign";
         default: return "unknown";
     }
 }
