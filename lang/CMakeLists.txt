@@ -39,6 +39,9 @@ set(LIB_SOURCES
     src/type_checker.cpp
     src/codegen.cpp
     src/builtins.cpp
+    src/builtins_math.cpp
+    src/builtins_array.cpp
+    src/builtins_listgen.cpp
     src/module_compiler.cpp
     src/diagnostic.cpp
     src/repl_session.cpp
