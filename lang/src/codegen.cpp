@@ -2946,21 +2946,10 @@ u16 CodeGen::genCall(CallExpr_* expr) {
         if (fe->object->kind == ASTNode::Identifier) {
             const auto& importedModules = typeChecker_.importedModules();
             auto* ident = static_cast<IdentifierExpr*>(fe->object.get());
-            if (importedModules.count(ident->name) || ident->name == "std") {
+            if (importedModules.count(ident->name)) {
                 // Look up resolved FuncInfo for argument type promotion
                 const std::vector<Type*>* paramTypes = nullptr;
-                if (ident->name == "std") {
-                    const auto& builtins = typeChecker_.builtinFunctions();
-                    auto bIt = builtins.find(fe->field);
-                    if (bIt != builtins.end()) {
-                        for (const auto& fi : bIt->second) {
-                            if ((i32)fi.globalIndex == expr->resolvedFuncGlobalIndex) {
-                                paramTypes = &fi.paramTypes;
-                                break;
-                            }
-                        }
-                    }
-                } else {
+                {
                     auto modIt2 = importedModules.find(ident->name);
                     if (modIt2 != importedModules.end()) {
                         auto expIt = modIt2->second->exports.find(fe->field);
@@ -7572,21 +7561,6 @@ u16 CodeGen::genFieldExpr(FieldExpr_* expr) {
     // Check for module-qualified or std-qualified access: module.name or std.name -> load global directly
     if (expr->object->kind == ASTNode::Identifier) {
         auto* ident = static_cast<IdentifierExpr*>(expr->object.get());
-
-        // Handle std.name — load built-in function's global
-        if (ident->name == "std") {
-            const auto& builtins = typeChecker_.builtinFunctions();
-            auto builtIt = builtins.find(expr->field);
-            if (builtIt != builtins.end() && !builtIt->second.empty()) {
-                u16 dst = allocReg();
-                emitOp(op_load_global);
-                emitRegs(dst);
-                emitInt(builtIt->second[0].globalIndex);
-                return dst;
-            }
-            error(expr->loc, "No built-in named '" + expr->field + "'");
-            return allocReg();
-        }
 
         const auto& importedModules = typeChecker_.importedModules();
         auto modIt = importedModules.find(ident->name);

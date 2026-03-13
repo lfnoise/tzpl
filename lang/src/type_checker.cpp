@@ -235,16 +235,37 @@ void TypeChecker::registerBuiltins() {
             noLoc, "Option", std::vector<std::string>{"T"}, std::move(cases));
         templateEnums_["Option"] = syntheticOptionDecl_.get();
     }
+
+    // Build synthetic std ModuleInfo from all builtins
+    if (!stdModuleInfo_) {
+        stdModuleInfo_ = std::make_unique<ModuleInfo>();
+        stdModuleInfo_->canonicalPath = "<builtin:std>";
+        stdModuleInfo_->moduleName = "std";
+        for (auto& [name, overloads] : functions_) {
+            ExportEntry entry;
+            entry.kind = ExportEntry::Func;
+            entry.name = name;
+            entry.funcOverloads = overloads;
+            if (!overloads.empty()) {
+                entry.globalIndex = overloads[0].globalIndex;
+            }
+            stdModuleInfo_->exports[name] = std::move(entry);
+        }
+        // Also export Option template enum
+        {
+            ExportEntry entry;
+            entry.kind = ExportEntry::TemplateEnumT;
+            entry.name = "Option";
+            entry.templateEnumDecl = syntheticOptionDecl_.get();
+            stdModuleInfo_->exports["Option"] = std::move(entry);
+        }
+        importedModules_["std"] = stdModuleInfo_.get();
+    }
 }
 
 void TypeChecker::check(Program& program) {
     // Register built-in math functions before user declarations
     registerBuiltins();
-
-    // Snapshot built-in functions for std.* qualified access
-    if (builtinFunctions_.empty()) {
-        builtinFunctions_ = functions_;
-    }
 
     // Phase 0: Process import declarations (before any other registration)
     for (auto& item : program.items) {
@@ -462,10 +483,6 @@ void TypeChecker::checkREPLInput(Program& program) {
     if (!builtinsRegistered_) {
         registerBuiltins();
         builtinsRegistered_ = true;
-        // Snapshot built-in functions for std.* qualified access
-        if (builtinFunctions_.empty()) {
-            builtinFunctions_ = functions_;
-        }
     }
 
     // Phase 0: Process import declarations (before any other registration)

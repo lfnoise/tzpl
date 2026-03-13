@@ -125,8 +125,6 @@ public:
 
     // Access function table (for codegen to look up globals)
     const std::unordered_map<std::string, std::vector<FuncInfo>>& functions() const { return functions_; }
-    // Access built-in function snapshot (for std.* qualified access in codegen)
-    const std::unordered_map<std::string, std::vector<FuncInfo>>& builtinFunctions() const { return builtinFunctions_; }
     const std::unordered_map<std::string, VarInfo>& globalVars() const { return globalVars_; }
 
     // Access dynamic variable registry (delegated to Compiler)
@@ -232,8 +230,8 @@ private:
     // Function table (supports overloading: multiple FuncInfos per name)
     std::unordered_map<std::string, std::vector<FuncInfo>> functions_;
 
-    // Snapshot of built-in functions for std.* qualified access
-    std::unordered_map<std::string, std::vector<FuncInfo>> builtinFunctions_;
+    // Synthetic std module (built from builtins, registered as importedModules_["std"])
+    std::unique_ptr<ModuleInfo> stdModuleInfo_;
 
     // Struct type registry
     std::unordered_map<std::string, StructType*> structTypes_;
@@ -352,6 +350,29 @@ private:
     Type* inferBinaryOp(BinaryOpExpr* expr);
     Type* inferUnaryOp(UnaryOpExpr* expr);
     Type* inferCall(CallExpr_* expr);
+
+    // Extracted helpers for inferCall (Steps 1-7)
+    Type* finalizeResolvedCall(CallExpr_* expr, FuncInfo* func,
+                               const std::string& name,
+                               const std::vector<Type*>& argTypes);
+    FuncInfo* tryImplicitAutoMap(const std::string& name,
+                                 const std::vector<Type*>& argTypes,
+                                 CallExpr_* expr,
+                                 bool& isAutoMapped, bool& hasListArg);
+    FuncInfo* tryImplicitAutoMapInner(const std::string& name,
+                                      const std::vector<Type*>& unwrappedTypes,
+                                      const std::vector<AutoMapArg>& explicitAutoMap,
+                                      CallExpr_* expr);
+    Type* computeAutoMapReturnType(Type* scalarReturn,
+                                    const std::vector<AutoMapArg>& autoMapArgs,
+                                    const std::vector<AutoMapArg>& innerAutoMapArgs,
+                                    bool hasCartesian, int maxCartesianIndex,
+                                    bool anyListArg);
+    Type* tryInferEnumConstruct(CallExpr_* expr, FieldExpr_* fe, IdentifierExpr* ident);
+    Type* tryInferTupleStructConstruct(CallExpr_* expr, IdentifierExpr* ident);
+    Type* tryInferVariableCall(CallExpr_* expr, IdentifierExpr* ident);
+    Type* inferIndirectCall(CallExpr_* expr);
+
     Type* inferIdentifier(IdentifierExpr* expr);
     Type* inferLambdaExpr(LambdaExprNode* expr);
     Type* inferTemplateLambdaExpr(LambdaExprNode* expr);

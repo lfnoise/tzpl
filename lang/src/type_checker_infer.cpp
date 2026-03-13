@@ -852,20 +852,6 @@ Type* TypeChecker::inferExpr(Expr* expr, Type* expectedType) {
             if (fe->object->kind == ASTNode::Identifier) {
                 auto* ident = static_cast<IdentifierExpr*>(fe->object.get());
 
-                // Handle std.name — access built-in functions/values by qualified name
-                if (ident->name == "std") {
-                    auto builtIt = builtinFunctions_.find(fe->field);
-                    if (builtIt != builtinFunctions_.end() && !builtIt->second.empty()) {
-                        // Function reference: use first overload's type
-                        auto& fi = builtIt->second[0];
-                        result = fi.returnType ? fi.returnType : compiler_.voidType();
-                        break;
-                    }
-                    error(expr->loc, "No built-in named '" + fe->field + "'");
-                    result = compiler_.intType();
-                    break;
-                }
-
                 auto modIt = importedModules_.find(ident->name);
                 if (modIt != importedModules_.end()) {
                     ModuleInfo* mod = modIt->second;
