@@ -1,0 +1,7 @@
+-- osc.x
+-- OSC (Open Sound Control) module for Tzopilotl.
+-- Foreign functions are registered by the bridge; this module provides
+-- any enum/constant definitions needed by the OSC subsystem.
+--
+-- Currently no enums are needed. The foreign functions registered under
+-- the "osc" module namespace are accessible via: import osc.*;
