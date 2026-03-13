@@ -1434,6 +1434,29 @@ Type* TypeChecker::inferCall(CallExpr_* expr) {
         }
     }
 
+    // Error on still-deferred lambda arguments that couldn't be resolved
+    if (hasDeferredLambda) {
+        for (size_t i = 0; i < argTypes.size(); ++i) {
+            if (argTypes[i]) continue;
+            Expr* arg = static_cast<Expr*>(expr->args[i].get());
+            if (arg->kind == ASTNode::LambdaExpr) {
+                auto* lambda = static_cast<LambdaExprNode*>(arg);
+                if (!lambda->typeParams.empty()) {
+                    error(arg->loc, "Cannot infer type parameters for lambda"
+                          " -- add type annotations or provide context");
+                } else {
+                    for (auto& param : lambda->params) {
+                        if (!param.typeExpr && !param.resolvedType) {
+                            error(arg->loc, "Cannot infer type for lambda parameter '" +
+                                  param.name + "' -- add a type annotation");
+                        }
+                    }
+                }
+                argTypes[i] = compiler_.intType();
+            }
+        }
+    }
+
     // If explicit auto-map is used, unwrap array types at the appropriate depth
     // for overload resolution, then set the autoMapArgs.
     if (hasExplicitAutoMap) {
