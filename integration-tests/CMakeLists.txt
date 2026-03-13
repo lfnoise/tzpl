@@ -38,3 +38,20 @@ if(TARGET tzpl_synthdef_compiler_bridge)
         MODULES_DIR="${CMAKE_SOURCE_DIR}/bridge/modules"
     )
 endif()
+
+if(TARGET tzpl_osc_bridge)
+    add_executable(test_osc
+        src/test_osc.cpp
+        ${CMAKE_SOURCE_DIR}/engine/src/tzpl_test_plugins.cpp
+    )
+
+    target_link_libraries(test_osc
+        PRIVATE tzpl_osc_bridge
+        PRIVATE tzpl_audio_engine_bridge
+    )
+
+    target_compile_definitions(test_osc PRIVATE
+        SCRIPTS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/scripts"
+        MODULES_DIR="${CMAKE_SOURCE_DIR}/bridge/modules"
+    )
+endif()

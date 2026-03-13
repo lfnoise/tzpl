@@ -26,18 +26,19 @@
 #define tzpl_audio_engine_ffi_hpp
 
 namespace ts { class Compiler; }
-namespace engine { struct Engine; }
 
 namespace bridge {
+
+struct AppContext;
 
 // Register all engine FFI functions with the Tzopilotl compiler.
 // Must be called BEFORE compiling any Tzopilotl source that references these functions.
 void registerAudioEngineFFI(ts::Compiler& compiler);
 
-// Attach the engine pointer to a VM so FFI functions can access it.
+// Attach the AppContext to a VM so FFI functions can access the engine and other subsystems.
 // Must be called BEFORE executing any code that calls engine FFI functions.
 // Uses the VM's userData pointer.
-void setEngineOnVM(void* vm, engine::Engine* engine);
+void setAppContextOnVM(void* vm, AppContext* ctx);
 
 } // namespace bridge
 

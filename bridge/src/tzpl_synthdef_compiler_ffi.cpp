@@ -23,6 +23,7 @@
 //
 
 #include "tzpl_synthdef_compiler_ffi.hpp"
+#include "tzpl_app_context.hpp"
 #include "tzpl.hpp"
 #include "value.hpp"
 #include "tzpl_client_interface.hpp"
@@ -41,7 +42,8 @@ namespace bridge {
 // ---------------------------------------------------------------------------
 
 static engine::Engine* getEngine(ts::VM& vm) {
-    return static_cast<engine::Engine*>(vm.userData());
+    auto* ctx = static_cast<AppContext*>(vm.userData());
+    return ctx ? ctx->engine : nullptr;
 }
 
 static const char* regString(ts::VM& vm, u16 reg) {

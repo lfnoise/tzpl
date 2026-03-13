@@ -23,6 +23,7 @@
 //
 
 #include "tzpl_audio_engine_ffi.hpp"
+#include "tzpl_app_context.hpp"
 #include "tzpl.hpp"
 #include "value.hpp"
 #include "tzpl_client_interface.hpp"
@@ -41,9 +42,15 @@ namespace bridge {
 // Helpers
 // ---------------------------------------------------------------------------
 
-// Retrieve the Engine* stored in the VM's userData.
+// Retrieve the AppContext stored in the VM's userData.
+static AppContext* getAppContext(ts::VM& vm) {
+    return static_cast<AppContext*>(vm.userData());
+}
+
+// Retrieve the Engine* via AppContext.
 static engine::Engine* getEngine(ts::VM& vm) {
-    return static_cast<engine::Engine*>(vm.userData());
+    auto* ctx = getAppContext(vm);
+    return ctx ? ctx->engine : nullptr;
 }
 
 // Convert a tzpl_SErr to an Int return value (0 = success).
@@ -472,9 +479,9 @@ void registerAudioEngineFFI(ts::Compiler& compiler) {
     // `import audio_engine.*;` gives access to both enums and functions.
 }
 
-void setEngineOnVM(void* vm_ptr, engine::Engine* engine) {
+void setAppContextOnVM(void* vm_ptr, AppContext* ctx) {
     auto* vm = static_cast<ts::VM*>(vm_ptr);
-    vm->setUserData(engine);
+    vm->setUserData(ctx);
 }
 
 } // namespace bridge

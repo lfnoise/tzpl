@@ -23,6 +23,7 @@
 
 #include "tzpl_synthdef_compiler_ffi.hpp"
 #include "tzpl_audio_engine_ffi.hpp"
+#include "tzpl_app_context.hpp"
 #include "tzpl.hpp"
 #include "module_compiler.hpp"
 #include "tzpl_client_interface.hpp"
@@ -100,7 +101,8 @@ static void test_compile_success() {
     ts::ModuleCompiler moduleCompiler(compiler, {MODULES_DIR});
     auto target = compiler.createTarget();
     ts::VM vm(16 * 1024 * 1024, types, target);
-    bridge::setEngineOnVM(&vm, eng);
+    bridge::AppContext appCtx; appCtx.engine = eng;
+    bridge::setAppContextOnVM(&vm, &appCtx);
 
     FILE* devnull = fopen("/dev/null", "w");
     vm.setPrintOutput(devnull);
@@ -133,7 +135,8 @@ static void test_compile_error() {
     ts::ModuleCompiler moduleCompiler(compiler, {MODULES_DIR});
     auto target = compiler.createTarget();
     ts::VM vm(16 * 1024 * 1024, types, target);
-    bridge::setEngineOnVM(&vm, eng);
+    bridge::AppContext appCtx; appCtx.engine = eng;
+    bridge::setAppContextOnVM(&vm, &appCtx);
 
     FILE* devnull = fopen("/dev/null", "w");
     vm.setPrintOutput(devnull);
@@ -165,7 +168,8 @@ static void test_compile_and_load() {
     ts::ModuleCompiler moduleCompiler(compiler, {MODULES_DIR});
     auto target = compiler.createTarget();
     ts::VM vm(16 * 1024 * 1024, types, target);
-    bridge::setEngineOnVM(&vm, eng);
+    bridge::AppContext appCtx; appCtx.engine = eng;
+    bridge::setAppContextOnVM(&vm, &appCtx);
 
     FILE* devnull = fopen("/dev/null", "w");
     vm.setPrintOutput(devnull);
@@ -210,7 +214,8 @@ static void test_caching() {
     ts::ModuleCompiler moduleCompiler(compiler, {MODULES_DIR});
     auto target = compiler.createTarget();
     ts::VM vm(16 * 1024 * 1024, types, target);
-    bridge::setEngineOnVM(&vm, eng);
+    bridge::AppContext appCtx; appCtx.engine = eng;
+    bridge::setAppContextOnVM(&vm, &appCtx);
 
     FILE* devnull = fopen("/dev/null", "w");
     vm.setPrintOutput(devnull);
@@ -250,7 +255,8 @@ static void test_list_synthdefs() {
     ts::ModuleCompiler moduleCompiler(compiler, {MODULES_DIR});
     auto target = compiler.createTarget();
     ts::VM vm(16 * 1024 * 1024, types, target);
-    bridge::setEngineOnVM(&vm, eng);
+    bridge::AppContext appCtx; appCtx.engine = eng;
+    bridge::setAppContextOnVM(&vm, &appCtx);
 
     FILE* devnull = fopen("/dev/null", "w");
     vm.setPrintOutput(devnull);

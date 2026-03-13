@@ -33,10 +33,15 @@
 #include "tzpl.hpp"
 #include "module_compiler.hpp"
 #include "diagnostic.hpp"
+#include "tzpl_app_context.hpp"
 #include "tzpl_audio_engine_ffi.hpp"
 #include "tzpl_synthdef_compiler_ffi.hpp"
 #include "tzpl_client_interface.hpp"
 #include "tzpl_test_plugins.hpp"
+#if TZPL_HAS_OSC
+#include "tzpl_osc_ffi.hpp"
+#include "tzpl_osc.hpp"
+#endif
 
 using namespace ts;
 namespace fs = std::filesystem;
@@ -55,6 +60,7 @@ struct Config {
     int bufferFrames = 512;
     double sampleRate = 44100.0;
     int numSilos = 4;
+    int oscPort = 0;  // 0 = disabled
     std::string projectDir;
 };
 
@@ -101,6 +107,7 @@ static bool parseConfigFile(const std::string& path, Config& config) {
             else if (key == "inputChannels") config.inputChannels = std::stoi(value);
             else if (key == "firstInputChannel") config.firstInputChannel = std::stoi(value);
             else if (key == "inputDevice") config.inputDeviceName = stripQuotes(value);
+            else if (key == "oscPort")     config.oscPort = std::stoi(value);
             else std::cerr << path << ":" << lineNum
                            << ": unknown config key '" << key << "'\n";
         } catch (const std::exception& e) {
@@ -229,6 +236,11 @@ static void printHelp() {
         "  --first-input-channel <n> First input channel (default: 0)\n"
         "  --device <name>         Audio output device name (default: \"default\")\n"
         "  --input-device <name>   Audio input device (default: same as output)\n"
+#if TZPL_HAS_OSC
+        "\n"
+        "OSC options:\n"
+        "  --osc-port <port>       Start OSC server on this UDP port (default: off)\n"
+#endif
         "\n"
         "Project directory layout:\n"
         "  <project>/\n"
@@ -254,6 +266,9 @@ int main(int argc, const char* argv[]) {
         // Register FFI bridges before any compilation
         bridge::registerAudioEngineFFI(compiler);
         bridge::registerSynthdefCompilerFFI(compiler);
+#if TZPL_HAS_OSC
+        bridge::registerOscFFI(compiler);
+#endif
 
         Config config;
         std::vector<std::string> includePaths;
@@ -266,6 +281,7 @@ int main(int argc, const char* argv[]) {
         std::optional<int> cliInputChannels, cliFirstInputChannel;
         std::optional<double> cliSampleRate;
         std::optional<std::string> cliDevice, cliInputDevice;
+        std::optional<int> cliOscPort;
 
         // --- Parse command line ---
         for (int i = 1; i < argc; ++i) {
@@ -300,6 +316,8 @@ int main(int argc, const char* argv[]) {
                 cliFirstInputChannel = std::stoi(argv[++i]);
             } else if (arg == "--input-device" && i + 1 < argc) {
                 cliInputDevice = argv[++i];
+            } else if (arg == "--osc-port" && i + 1 < argc) {
+                cliOscPort = std::stoi(argv[++i]);
             } else {
                 filename = arg;
             }
@@ -323,6 +341,7 @@ int main(int argc, const char* argv[]) {
         if (cliInputDevice)       config.inputDeviceName = *cliInputDevice;
         if (cliInputChannels)     config.inputChannels = *cliInputChannels;
         if (cliFirstInputChannel) config.firstInputChannel = *cliFirstInputChannel;
+        if (cliOscPort)           config.oscPort = *cliOscPort;
 
         // --- Add project directory paths ---
         if (!config.projectDir.empty()) {
@@ -332,7 +351,7 @@ int main(int argc, const char* argv[]) {
             }
         }
 
-        // --- Create engine and VM ---
+        // --- Create engine and AppContext ---
         engine::Engine* eng = createEngine(config);
 
         // Auto-load plugins from project directory
@@ -343,13 +362,38 @@ int main(int argc, const char* argv[]) {
             }
         }
 
+        bridge::AppContext appCtx;
+        appCtx.engine = eng;
+
+#if TZPL_HAS_OSC
+        // Create OSC subsystem
+        osc::OscClient oscClient;
+        osc::OscDispatcher oscDispatcher;
+        oscDispatcher.setEngine(eng);
+        oscDispatcher.setClient(&oscClient);
+        osc::registerEngineHandlers(oscDispatcher);
+
+        osc::OscServer oscServer(oscDispatcher);
+
+        appCtx.oscClient = &oscClient;
+        appCtx.oscDispatcher = &oscDispatcher;
+        appCtx.oscServer = &oscServer;
+#endif
+
         VMTarget target = compiler.createTarget();
         VM vm(64 * 1024 * 1024, types, target);
-        bridge::setEngineOnVM(&vm, eng);
+        bridge::setAppContextOnVM(&vm, &appCtx);
 
         if (startAudio) {
             engine::startAudio(eng);
         }
+
+#if TZPL_HAS_OSC
+        // Start OSC server after engine is running
+        if (config.oscPort > 0) {
+            oscServer.start(config.oscPort);
+        }
+#endif
 
         // Set up signal handler for clean shutdown
         std::signal(SIGINT, signalHandler);
@@ -376,6 +420,10 @@ int main(int argc, const char* argv[]) {
             std::cerr << "tzpl: no input file specified. Use --help for usage.\n";
             exitCode = 1;
         }
+
+#if TZPL_HAS_OSC
+        oscServer.stop();
+#endif
 
         if (startAudio) {
             engine::stopAudio(eng);

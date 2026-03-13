@@ -46,3 +46,27 @@ if(TARGET synthdef_compiler_lib)
         target_compile_options(tzpl_synthdef_compiler_bridge PRIVATE -O2)
     endif()
 endif()
+
+# --- OSC FFI bridge ---
+
+if(TARGET osc_lib)
+    add_library(tzpl_osc_bridge OBJECT
+        src/tzpl_osc_ffi.cpp
+    )
+
+    target_include_directories(tzpl_osc_bridge
+        PUBLIC  ${CMAKE_CURRENT_SOURCE_DIR}/include
+    )
+
+    target_link_libraries(tzpl_osc_bridge
+        PUBLIC  tzpl_lib
+        PUBLIC  osc_lib
+    )
+
+    if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+        target_compile_options(tzpl_osc_bridge PRIVATE -O1)
+    endif()
+    if(CMAKE_BUILD_TYPE STREQUAL "Release")
+        target_compile_options(tzpl_osc_bridge PRIVATE -O2)
+    endif()
+endif()
