@@ -2994,6 +2994,42 @@ u16 CodeGen::genCall(CallExpr_* expr) {
     }
 
     if (expr->callee->kind != ASTNode::Identifier) {
+        // Template lambda through indirect callee (e.g., (*r)(x) where r = &fn(x){...})
+        if (expr->resolvedTemplateLambdaType) {
+            auto* concreteLT = expr->resolvedTemplateLambdaType;
+            u16 calleeReg = genExpr(static_cast<Expr*>(expr->callee.get()));
+
+            // Compile the CodeBlock for this instantiation if needed
+            auto* tmplType = dynamic_cast<TemplateLambdaType*>(expr->callee->resolvedType);
+            if (tmplType && tmplType->astNode_) {
+                compileTemplateLambdaBody(tmplType->astNode_, concreteLT);
+            }
+
+            // Generate args into consecutive registers
+            u16 argBase = nextReg_;
+            for (size_t i = 0; i < expr->args.size(); ++i) {
+                u16 argReg = genExpr(static_cast<Expr*>(expr->args[i].get()));
+                if (argReg != argBase + (u16)i) {
+                    emitOp(op_mov);
+                    emitRegs(argBase + (u16)i, argReg);
+                }
+                u16 next = argBase + (u16)i + 1;
+                if (nextReg_ < next) { nextReg_ = next; if (nextReg_ > maxReg_) maxReg_ = nextReg_; }
+            }
+
+            if (isTailCall) {
+                emitOp(op_tail_call_template_lambda);
+                emitRegs(0, (u16)expr->args.size(), argBase, calleeReg);
+                emitPtr(concreteLT->codeBlock_);
+                return allocReg();
+            }
+            u16 resultReg = allocReg();
+            emitOp(op_call_template_lambda);
+            emitRegs(resultReg, (u16)expr->args.size(), argBase, calleeReg);
+            emitPtr(concreteLT->codeBlock_);
+            return resultReg;
+        }
+
         // General expression callee (e.g., a[i](x, y))
         u16 calleeReg = genExpr(static_cast<Expr*>(expr->callee.get()));
 

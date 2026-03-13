@@ -749,6 +749,17 @@ Type* TypeChecker::inferIndirectCall(CallExpr_* expr) {
         }
         return funcType->returnType_;
     }
+    // Template lambda: monomorphize based on argument types
+    auto* tmplLambda = dynamic_cast<TemplateLambdaType*>(calleeType);
+    if (tmplLambda) {
+        std::vector<Type*> callArgTypes;
+        for (auto& arg : expr->args)
+            callArgTypes.push_back(inferExpr(static_cast<Expr*>(arg.get())));
+        LambdaType* concreteLT = monomorphizeTemplateLambda(tmplLambda, callArgTypes, expr->loc);
+        if (!concreteLT) return compiler_.intType();
+        expr->resolvedTemplateLambdaType = concreteLT;
+        return concreteLT->returnType_;
+    }
     // Not a function type -- try callable object via `call` function
     if (functions_.find("call") == functions_.end()) {
         error(expr->callee->loc, "Expression is not callable");
