@@ -495,7 +495,7 @@ fn gcd2(a Int, b Int) Int {
     var sign;
     if(a < 0 && b < 0) { sign = -1 } else { sign = 1 }
     if(u == 0 && v == 0) { return 0 }
-    if (u <= 1 || v <= 1) { return 1 * sign }
+    if (u <= 1 || v <= 1) { return sign }
     var running = true;
     while (running) {
         if (u < v) {
