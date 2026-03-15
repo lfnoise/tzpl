@@ -489,7 +489,7 @@ fn ipowf(b Float, e Int) Float {
 -- GCD / LCM
 -- ============================================================
 
-fn gcd2(a Int, b Int) Int {
+fn gcd(a Int, b Int) Int {
     var u = a abs;
     var v = b abs;
     var sign = if(a < 0 && b < 0) { -1 } else { 1 }
