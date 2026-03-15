@@ -492,7 +492,9 @@ fn ipowf(b Float, e Int) Float {
 fn gcd(a Int, b Int) Int {
     var u = a abs;
     var v = b abs;
-    if (u <= 1 || v <= 1) { return 1; }
+    var sign = if(a < 0 && b < 0) { -1 } else { 1 }
+    if(u == 0 && v == 0) { return 0 }
+    if (u <= 1 || v <= 1) { return sign }
     var running = true;
     while (running) {
         if (u < v) {
@@ -503,11 +505,11 @@ fn gcd(a Int, b Int) Int {
         u = u % v;
         running = u > 0;
     }
-    v
+    v * sign
 }
 
 fn lcm(a Int, b Int) Int {
-    if (a <= 0 || b <= 0) { return 0; }
+    if (a abs <= 0 || b abs <= 0) { return 0; }
     if (b == 1) { return a; }
     if (a == 1) { return b; }
     a // gcd(a, b) * b
