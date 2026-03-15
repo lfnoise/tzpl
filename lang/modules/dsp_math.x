@@ -492,8 +492,7 @@ fn ipowf(b Float, e Int) Float {
 fn gcd2(a Int, b Int) Int {
     var u = a abs;
     var v = b abs;
-    var sign;
-    if(a < 0 && b < 0) { sign = -1 } else { sign = 1 }
+    var sign = if(a < 0 && b < 0) { -1 } else { 1 }
     if(u == 0 && v == 0) { return 0 }
     if (u <= 1 || v <= 1) { return sign }
     var running = true;
