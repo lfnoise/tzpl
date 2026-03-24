@@ -2,7 +2,7 @@
 
 This document is a step-by-step plan for integrating the three sub-projects (lang, synthdef-compiler, engine) and building the final live coding application. It is based on an audit of the current state of each project.
 
-**Last updated**: 2026-03-11
+**Last updated**: 2026-03-21
 
 ---
 
@@ -22,7 +22,8 @@ This document is a step-by-step plan for integrating the three sub-projects (lan
 - Safety limiter on master output (lookahead, NaN zapping)
 - Builds as static library (`audio_engine_lib`) with install targets
 - Full FFI bridge to Tzopilotl (32 functions, 19 marked rtSafe)
-- **Remaining**: OSC support, NATS support, buffer operations (declared but not implemented), binary s-expression serialization (commented-out skeleton)
+- OSC support via vendored oscpack library (UDP server/client, engine command dispatch, bundle/timetag scheduling, FFI bridge with local and remote send, reply routing)
+- **Remaining**: NATS support, buffer operations (declared but not implemented), binary s-expression serialization (commented-out skeleton)
 
 ### synthdef-compiler
 - Two front-ends: S-expression parser and C++ DSL
@@ -308,46 +309,64 @@ Critical for real-time audio integration — the VM must respond to events and t
 
 ---
 
-## Phase 5: OSC (Open Sound Control) Support — NOT STARTED
+## Phase 5: OSC (Open Sound Control) Support — MOSTLY DONE
 
 **Goal**: Control both the audio engine and language VM via OSC messages.
 
-### 5.1 Choose an OSC library
+### 5.1 Choose an OSC library — DONE
 
-Options:
-- **liblo** — mature, C, widely used
-- **oscpack** — C++, header-only, simple
-- **Custom** — minimal implementation (OSC is a simple protocol)
+Selected **oscpack** (vendored in `third_party/oscpack/`, MIT license). Provides packet serialization/parsing without external dependencies.
 
-Recommendation: **oscpack** or a minimal custom implementation to avoid external dependencies and maintain real-time safety.
+CMake option: `TZPL_BUILD_OSC` (default OFF). Requires `TZPL_BUILD_AUDIO_ENGINE` to be enabled.
 
-### 5.2 OSC server for engine
+### 5.2 OSC server for engine — DONE
 
-**Tasks**:
-1. Add an OSC listener thread (UDP socket) to the engine.
-2. Map OSC addresses to engine commands:
-   - `/node/new <defName> <nodeID>` -> `newNode()`
-   - `/node/free <nodeID>` -> `freeNode()`
-   - `/connect <srcNode> <srcPort> <dstNode> <dstPort>` -> `connect()`
-   - `/node/set <nodeID> <controlName> <value>` -> `setControl()`
-   - `/note/on <nodeID> <noteID> <params...>` -> `noteOn()`
-   - `/note/off <nodeID> <noteID>` -> `noteOff()`
-   - `/bundle <time> <messages...>` -> `begin()`/`sched()`
-3. OSC messages are parsed on the listener thread and converted to engine commands via the existing NRT command path (lock-free FIFO to RT thread).
+Implemented in `osc/src/` as three components:
 
-### 5.3 OSC server for Tzopilotl VM
+1. **OscServer** (`tzpl_osc_server.cpp`): UDP listener thread (POSIX sockets, configurable port, 65KB max packet, clean start/stop). Done.
+2. **OscDispatcher** (`tzpl_osc_dispatcher.cpp`): Address-pattern routing to handler functions with mutex-protected registry. Supports bundles with timetag scheduling (NTP to engine stream time conversion), nested bundles, silo selection via `/engine/silo <int>`, and auto-wrapping single commands in `begin()/go()` transactions. Done.
+3. **Engine command handlers** (`tzpl_osc_engine_commands.cpp`): Full mapping of OSC addresses to engine commands. Done.
 
-**Tasks**:
-1. Add an OSC listener that can dispatch events to the VM.
-2. Map OSC messages to VM events (ties into Phase 4.2 event-driven VM).
-3. `/eval <code>` — compile and execute a string of Tzopilotl code.
-4. `/call <functionName> <args...>` — call a named function.
+**Implemented OSC addresses**:
+- Lifecycle: `/engine/startAudio`, `/engine/stopAudio`, `/engine/masterGain`, `/engine/safetyLimiter`, `/engine/loadDefs`, `/engine/loadDef`
+- Queries (with reply routing): `/engine/getStreamTime`, `/engine/listNodeDefs`, `/engine/isAudioRunning`
+- Graph manipulation: `/engine/newNode`, `/engine/freeNode`, `/engine/freeAllNodes`, `/engine/replaceNode`, `/engine/connect`, `/engine/connectX`, `/engine/disconnectInput`, `/engine/disconnectInputX`, `/engine/disconnectOutput`, `/engine/disconnectNode`, `/engine/reconnectOutput`, `/engine/setInput`, `/engine/setInputX`, `/engine/setControl`
+- Notes: `/engine/noteOn`, `/engine/noteOff`, `/engine/allNotesOff`, `/engine/noteSetParams`
 
-### 5.4 OSC client (sending)
+App integration: `--osc-port <port>` CLI flag, `oscPort` config file key. Server started after audio engine init, clean shutdown on Ctrl-C.
 
-**Tasks**:
-1. Add OSC send capability as Tzopilotl built-in functions.
-2. `fn oscSend(host String, port Int, address String, args Array[Any]) Void;`
+### 5.3 OSC server for Tzopilotl VM — NOT DONE
+
+Depends on event-driven VM (Phase 4.2). The OSC server infrastructure is in place, but dispatching OSC messages as VM events (`/eval`, `/call`) requires the event-driven VM to be implemented first.
+
+### 5.4 OSC client (sending) — DONE
+
+**OscClient** (`tzpl_osc_client.cpp`): UDP sender with typed message variants.
+
+FFI bridge (`bridge/src/tzpl_osc_ffi.cpp`) exposes both remote and local send functions:
+
+**Remote send** (over UDP):
+- `oscSend(host String, port Int, address String) Void`
+- `oscSendI(host String, port Int, address String, value Int) Void`
+- `oscSendF(host String, port Int, address String, value Float) Void`
+- `oscSendS(host String, port Int, address String, value String) Void`
+- `oscSendArgs(host String, port Int, address String, args Array[Float]) Void`
+
+**Local send** (in-process dispatch, bypasses network):
+- `oscSendLocal(address String) Void`
+- `oscSendLocalI(address String, value Int) Void`
+- `oscSendLocalF(address String, value Float) Void`
+- `oscSendLocalS(address String, value String) Void`
+- `oscSendLocalArgs(address String, args Array[Float]) Void`
+
+**Server control**:
+- `oscServerStart(port Int) Bool`
+- `oscServerStop() Void`
+- `oscServerPort() Int`
+
+### 5.5 Testing — DONE
+
+C++ integration tests (`integration-tests/src/test_osc.cpp`): server lifecycle, client sending, engine command dispatch, local dispatch, FFI compilation. Tzopilotl script test (`integration-tests/scripts/test_osc.x`).
 
 ---
 
@@ -726,7 +745,7 @@ Phase 0 (Build Infrastructure)       ✅ DONE
         ├─> Phase 2 (FFI: Audio)     ✅ DONE
         │     └─> Phase 3 (FFI: SD)  ✅ DONE
         │           └─> Phase 4 (Lang Features)  🟡 PARTIAL (event-driven VM remaining)
-        │                 └─> Phase 5 (OSC)       ⬜ NOT STARTED
+        │                 └─> Phase 5 (OSC)       🟢 MOSTLY DONE
         │                       └─> Phase 6 (NATS) ⬜ NOT STARTED
         ├─> Phase 7 (Engine Features)              🟡 PARTIAL ─────────────────┐
         ├─> Phase 8 (Compiler Features)            ✅ DONE ────────────────┤
@@ -757,7 +776,7 @@ Phase 0 (Build Infrastructure)       ✅ DONE
 | 2 | FFI: engine | ✅ Done | — |
 | 3 | FFI: synthdef-compiler | ✅ Done | — |
 | 4 | Critical language features | 🟡 Partial | Event-driven VM, error location refinement |
-| 5 | OSC support | ⬜ Not started | All tasks |
+| 5 | OSC support | 🟢 Mostly done | VM event dispatch (depends on Phase 4.2) |
 | 6 | NATS support | ⬜ Not started | All tasks |
 | 7 | Engine feature completion | 🟡 Partial | Buffers, binary sexpr. Audio input, master gain/channel offset done |
 | 8 | Compiler feature completion | ✅ Done | — |

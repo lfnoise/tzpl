@@ -25,7 +25,7 @@
 //  - O(1) allocation and deallocation
 //  - Deterministic and bounded execution time
 //  - Low fragmentation
-//  - Never calls system allocator in real-time paths
+//  - Optional backup allocator callback for pool growth on exhaustion
 //  - Thread-local (no locks needed)
 //
 
@@ -98,6 +98,14 @@ struct BlockHeader {
     }
 };
 
+// Callback type for backup allocator.
+// Called when the TLSF pool is exhausted. Returns a pointer to a new memory
+// block, or nullptr if no backup memory is available. Sets *outSize to the
+// size of the returned block. The returned memory must be freeable with
+// ::free() (or the caller must ensure the TLSFAllocator is destroyed before
+// the memory is reclaimed).
+typedef void* (*BackupAllocFn)(void* userData, usize* outSize);
+
 class TLSFAllocator {
 private:
     // Free list bitmaps for O(1) lookup
@@ -107,22 +115,34 @@ private:
     // Segregated free lists
     BlockHeader* blocks_[kFirstLevelCount][kSecondLevelCount];
 
-    // Memory pool
-    void* pool_;
-    usize pool_size_;
-    bool owns_pool_;
+    // Memory regions (supports non-contiguous pools)
+    struct MemoryRegion {
+        u8* base;
+        usize size;
+        bool owned;  // true if destructor should ::free() this
+    };
+    static constexpr usize kMaxRegions = 64;
+    MemoryRegion regions_[kMaxRegions];
+    usize regionCount_;
+
+    // Backup allocator (called when pool is exhausted)
+    BackupAllocFn backupAlloc_;
+    void* backupUserData_;
 
     // Statistics
     usize allocated_;
     usize free_;
     usize peak_;
 
-    // Check if a pointer is within the pool
+    // Check if a pointer is within any memory region
     bool isInPool(void* ptr) const {
         u8* p = static_cast<u8*>(ptr);
-        u8* pool_start = static_cast<u8*>(pool_);
-        u8* pool_end = pool_start + pool_size_;
-        return p >= pool_start && p < pool_end;
+        for (usize i = 0; i < regionCount_; ++i) {
+            if (p >= regions_[i].base && p < regions_[i].base + regions_[i].size) {
+                return true;
+            }
+        }
+        return false;
     }
 
     // Get next block if it exists within the pool
@@ -223,6 +243,19 @@ private:
         insertBlock(block, fl, sl);
     }
 
+    // Attempt to grow the pool by calling the backup allocator.
+    // The backup allocator determines the block size.
+    bool tryGrow(usize /*needed*/) {
+        usize blockSize = 0;
+        void* mem = backupAlloc_(backupUserData_, &blockSize);
+        if (!mem) return false;
+        if (!addPool(mem, blockSize, true)) {
+            ::free(mem);
+            return false;
+        }
+        return true;
+    }
+
     BlockHeader* splitBlock(BlockHeader* block, usize size) {
         usize remaining = block->size() - size - sizeof(BlockHeader);
         if (remaining >= kMinBlockSize) {
@@ -288,9 +321,9 @@ private:
 public:
     TLSFAllocator()
         : fl_bitmap_(0)
-        , pool_(nullptr)
-        , pool_size_(0)
-        , owns_pool_(false)
+        , regionCount_(0)
+        , backupAlloc_(nullptr)
+        , backupUserData_(nullptr)
         , allocated_(0)
         , free_(0)
         , peak_(0)
@@ -302,9 +335,9 @@ public:
     // Constructor that allocates and initializes pool
     explicit TLSFAllocator(usize pool_size)
         : fl_bitmap_(0)
-        , pool_(nullptr)
-        , pool_size_(0)
-        , owns_pool_(false)
+        , regionCount_(0)
+        , backupAlloc_(nullptr)
+        , backupUserData_(nullptr)
         , allocated_(0)
         , free_(0)
         , peak_(0)
@@ -318,8 +351,10 @@ public:
     }
 
     ~TLSFAllocator() {
-        if (owns_pool_ && pool_) {
-            ::free(pool_);
+        for (usize i = 0; i < regionCount_; ++i) {
+            if (regions_[i].owned) {
+                ::free(regions_[i].base);
+            }
         }
     }
 
@@ -327,44 +362,58 @@ public:
     TLSFAllocator(const TLSFAllocator&) = delete;
     TLSFAllocator& operator=(const TLSFAllocator&) = delete;
 
-    // Initialize with a pre-allocated pool
+    // Initialize with a pre-allocated pool (caller retains ownership)
     bool init(void* pool, usize pool_size) {
-        if (pool_size < sizeof(BlockHeader) + kMinBlockSize) {
-            return false;
-        }
-
-        pool_ = pool;
-        pool_size_ = pool_size;
-        owns_pool_ = false;
-
-        // Create initial free block
-        BlockHeader* block = static_cast<BlockHeader*>(pool_);
-        block->size_ = pool_size - sizeof(BlockHeader);
-        block->setFree(true);
-        block->setPrevFree(false);
-        block->prev_phys_ = nullptr;
-        block->next_free_ = nullptr;
-        block->prev_free_ = nullptr;
-
-        insertFreeBlock(block);
-
-        free_ = pool_size - sizeof(BlockHeader);
-
-        return true;
+        return addPool(pool, pool_size, false);
     }
 
     // Initialize by allocating a pool
     bool init(usize pool_size) {
         void* pool = ::malloc(pool_size);
         if (!pool) return false;
-
-        if (!init(pool, pool_size)) {
+        if (!addPool(pool, pool_size, true)) {
             ::free(pool);
             return false;
         }
-
-        owns_pool_ = true;
         return true;
+    }
+
+    // Add a memory region to the allocator. Sets up a single free block from
+    // the region in O(1) time. If owned is true, the memory will be freed
+    // with ::free() when the allocator is destroyed.
+    bool addPool(void* pool, usize poolSize, bool owned) {
+        if (regionCount_ >= kMaxRegions) {
+            return false;
+        }
+        if (poolSize < sizeof(BlockHeader) + kMinBlockSize) {
+            return false;
+        }
+
+        regions_[regionCount_++] = { static_cast<u8*>(pool), poolSize, owned };
+
+        // Create a single free block spanning the entire region
+        BlockHeader* block = static_cast<BlockHeader*>(pool);
+        block->size_ = poolSize - sizeof(BlockHeader);
+        block->setFree(true);
+        block->setPrevFree(false);
+        block->prev_phys_ = nullptr;
+        block->next_free_ = nullptr;
+        block->prev_free_ = nullptr;
+
+        free_ += block->size();
+        insertFreeBlock(block);
+
+        return true;
+    }
+
+    // Set a backup allocator callback. When the TLSF pool is exhausted,
+    // the callback is invoked to obtain a fresh memory block. The callback
+    // should return a pointer to the new block and set *outSize to its size,
+    // or return nullptr if no memory is available. The returned block will
+    // be freed with ::free() when the allocator is destroyed.
+    void setBackupAllocator(BackupAllocFn fn, void* userData) {
+        backupAlloc_ = fn;
+        backupUserData_ = userData;
     }
 
     // Real-time allocation - O(1) worst case
@@ -381,7 +430,16 @@ public:
         BlockHeader* block = findSuitableBlock(fl, sl);
 
         if (!block) {
-            return nullptr;  // Out of memory
+            // Try backup allocator to grow the pool
+            if (!backupAlloc_ || !tryGrow(size)) {
+                return nullptr;  // Out of memory
+            }
+            // Retry after growing
+            mappingSearch(size, fl, sl);
+            block = findSuitableBlock(fl, sl);
+            if (!block) {
+                return nullptr;  // Backup block was too small
+            }
         }
 
         // Remove from free list
@@ -440,7 +498,14 @@ public:
     usize getAllocated() const { return allocated_; }
     usize getFree() const { return free_; }
     usize getPeak() const { return peak_; }
-    usize getPoolSize() const { return pool_size_; }
+    usize getPoolSize() const {
+        usize total = 0;
+        for (usize i = 0; i < regionCount_; ++i) {
+            total += regions_[i].size;
+        }
+        return total;
+    }
+    usize getRegionCount() const { return regionCount_; }
 };
 
 } // namespace rt

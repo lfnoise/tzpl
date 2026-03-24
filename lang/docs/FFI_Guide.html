@@ -388,6 +388,17 @@ if (localStorage.getItem('tzpl-docs-theme') === 'light') document.documentElemen
         <li><a href="#ref-c">C Reference</a></li>
       </ol>
     </li>
+    <li><a href="#osc">OSC Integration</a>
+      <ol>
+        <li><a href="#osc-overview">Overview</a></li>
+        <li><a href="#osc-setup">Setup &amp; Configuration</a></li>
+        <li><a href="#osc-sending-remote">Remote Sending</a></li>
+        <li><a href="#osc-sending-local">Local Sending</a></li>
+        <li><a href="#osc-server-control">Server Control</a></li>
+        <li><a href="#osc-engine-addresses">Engine OSC Addresses</a></li>
+        <li><a href="#osc-bundles">Bundles &amp; Scheduling</a></li>
+      </ol>
+    </li>
   </ol>
 </nav>
 
@@ -1657,6 +1668,210 @@ Tzopilotl code calls foreign function
   <tr><td><code>uint32_t tzpl_vm_num_live_words(const tzpl_vm*)</code></td><td>Number of live GC words.</td></tr>
   <tr><td><code>void tzpl_vm_set_print_output(tzpl_vm*, FILE*)</code></td><td>Redirect print output.</td></tr>
 </table>
+
+<!-- ================================================================ -->
+<h2 id="osc">9. OSC Integration</h2>
+
+<!-- -------------------------------- -->
+<h3 id="osc-overview">9.1 Overview</h3>
+
+<p>Tzopilotl includes built-in <a href="https://opensoundcontrol.stanford.edu/">Open Sound Control</a> (OSC) support for controlling the audio engine and sending messages over the network. OSC functions are available when the application is built with <code>TZPL_BUILD_OSC=ON</code>.</p>
+
+<p>The OSC system has three components:</p>
+
+<ul>
+  <li><strong>OSC Server:</strong> A UDP listener that receives OSC messages and dispatches them to registered handlers (e.g., engine commands).</li>
+  <li><strong>OSC Client:</strong> Sends OSC messages to remote hosts over UDP.</li>
+  <li><strong>Local dispatch:</strong> Sends OSC messages directly to the dispatcher in-process, bypassing the network. Useful for controlling the engine from Tzopilotl code without network overhead.</li>
+</ul>
+
+<p>All OSC functions are registered under the <code>osc</code> foreign module. Import them with:</p>
+
+<pre><code><span class="kw">import</span> osc : *;</code></pre>
+
+<!-- -------------------------------- -->
+<h3 id="osc-setup">9.2 Setup &amp; Configuration</h3>
+
+<p>The OSC server can be started in two ways:</p>
+
+<h4>CLI flag</h4>
+
+<pre><code>tzpl --osc-port <span class="num">57120</span> myscript.x</code></pre>
+
+<h4>Project config file</h4>
+
+<p>In a project directory's config file, add:</p>
+
+<pre><code>oscPort = <span class="num">57120</span></code></pre>
+
+<p>Setting the port to <code>0</code> disables the OSC server. The server starts automatically after the audio engine is initialized and shuts down cleanly on exit.</p>
+
+<h4>From Tzopilotl code</h4>
+
+<p>The server can also be started and stopped programmatically:</p>
+
+<pre><code><span class="kw">import</span> osc : *;
+
+<span class="fn">oscServerStart</span>(<span class="num">57120</span>);  <span class="cmt">-- start listening on port 57120</span>
+<span class="fn">oscServerPort</span>() <span class="fn">println</span>;  <span class="cmt">-- prints 57120</span>
+<span class="fn">oscServerStop</span>();           <span class="cmt">-- stop the server</span></code></pre>
+
+<!-- -------------------------------- -->
+<h3 id="osc-sending-remote">9.3 Remote Sending</h3>
+
+<p>Send OSC messages to a remote host over UDP. Each variant sends a different argument type:</p>
+
+<table>
+  <tr><th>Function</th><th>Description</th></tr>
+  <tr><td><code>oscSend(host String, port Int, address String) Void</code></td><td>Send a message with no arguments.</td></tr>
+  <tr><td><code>oscSendI(host String, port Int, address String, value Int) Void</code></td><td>Send a message with one Int argument.</td></tr>
+  <tr><td><code>oscSendF(host String, port Int, address String, value Float) Void</code></td><td>Send a message with one Float argument.</td></tr>
+  <tr><td><code>oscSendS(host String, port Int, address String, value String) Void</code></td><td>Send a message with one String argument.</td></tr>
+  <tr><td><code>oscSendArgs(host String, port Int, address String, args Array[Float]) Void</code></td><td>Send a message with an array of Float arguments.</td></tr>
+</table>
+
+<h4>Example: sending to another application</h4>
+
+<pre><code><span class="kw">import</span> osc : *;
+
+<span class="cmt">-- Send a note-on to a remote synth</span>
+<span class="fn">oscSendArgs</span>(<span class="str">"192.168.1.50"</span>, <span class="num">57120</span>, <span class="str">"/note/on"</span>, [<span class="num">60.0</span>, <span class="num">0.8</span>]);
+
+<span class="cmt">-- Send a control change</span>
+<span class="fn">oscSendF</span>(<span class="str">"localhost"</span>, <span class="num">9000</span>, <span class="str">"/control/cutoff"</span>, <span class="num">1200.0</span>);</code></pre>
+
+<!-- -------------------------------- -->
+<h3 id="osc-sending-local">9.4 Local Sending</h3>
+
+<p>Local send functions dispatch OSC messages directly to the in-process dispatcher, bypassing the network entirely. This is the recommended way to control the audio engine from Tzopilotl code via OSC addresses.</p>
+
+<table>
+  <tr><th>Function</th><th>Description</th></tr>
+  <tr><td><code>oscSendLocal(address String) Void</code></td><td>Dispatch a message with no arguments.</td></tr>
+  <tr><td><code>oscSendLocalI(address String, value Int) Void</code></td><td>Dispatch a message with one Int argument.</td></tr>
+  <tr><td><code>oscSendLocalF(address String, value Float) Void</code></td><td>Dispatch a message with one Float argument.</td></tr>
+  <tr><td><code>oscSendLocalS(address String, value String) Void</code></td><td>Dispatch a message with one String argument.</td></tr>
+  <tr><td><code>oscSendLocalArgs(address String, args Array[Float]) Void</code></td><td>Dispatch a message with an array of Float arguments.</td></tr>
+</table>
+
+<h4>Example: controlling the engine locally</h4>
+
+<pre><code><span class="kw">import</span> osc : *;
+
+<span class="cmt">-- Start audio via local OSC dispatch</span>
+<span class="fn">oscSendLocal</span>(<span class="str">"/engine/startAudio"</span>);
+
+<span class="cmt">-- Set master gain to 0.5</span>
+<span class="fn">oscSendLocalF</span>(<span class="str">"/engine/masterGain"</span>, <span class="num">0.5</span>);
+
+<span class="cmt">-- Create a node and set a control</span>
+<span class="fn">oscSendLocalArgs</span>(<span class="str">"/engine/newNode"</span>, [<span class="num">1.0</span>]);  <span class="cmt">-- not ideal for mixed types; prefer the FFI bridge for this</span></code></pre>
+
+<div class="tip">
+  <strong>Tip:</strong> For engine operations with mixed argument types (String + Int, etc.), the direct FFI functions in the <code>audio_engine</code> module (<code>newNode</code>, <code>connect</code>, etc.) are more convenient. Local OSC dispatch is most useful for simple commands and for testing OSC address routing.
+</div>
+
+<!-- -------------------------------- -->
+<h3 id="osc-server-control">9.5 Server Control</h3>
+
+<table>
+  <tr><th>Function</th><th>Description</th></tr>
+  <tr><td><code>oscServerStart(port Int) Bool</code></td><td>Start the OSC server on the given UDP port. Returns <code>true</code> on success.</td></tr>
+  <tr><td><code>oscServerStop() Void</code></td><td>Stop the OSC server.</td></tr>
+  <tr><td><code>oscServerPort() Int</code></td><td>Return the port the server is listening on, or <code>0</code> if stopped.</td></tr>
+</table>
+
+<div class="note">
+  <strong>Note:</strong> All OSC functions are registered as non-RT-safe. They must not be called from a real-time context.
+</div>
+
+<!-- -------------------------------- -->
+<h3 id="osc-engine-addresses">9.6 Engine OSC Addresses</h3>
+
+<p>When the OSC server is running, the following addresses control the audio engine. These are the same commands available through the audio engine FFI, but accessible from any OSC client (external applications, hardware controllers, other machines on the network).</p>
+
+<h4>Lifecycle &amp; Configuration</h4>
+
+<table>
+  <tr><th>Address</th><th>Arguments</th><th>Description</th></tr>
+  <tr><td><code>/engine/startAudio</code></td><td><em>none</em></td><td>Start audio output.</td></tr>
+  <tr><td><code>/engine/stopAudio</code></td><td><em>none</em></td><td>Stop audio output.</td></tr>
+  <tr><td><code>/engine/masterGain</code></td><td><code>f</code> gain</td><td>Set master gain.</td></tr>
+  <tr><td><code>/engine/safetyLimiter</code></td><td><code>i</code> on/off</td><td>Enable (1) or disable (0) the safety limiter.</td></tr>
+  <tr><td><code>/engine/loadDefs</code></td><td><code>s</code> path</td><td>Load all plugin definitions from a directory.</td></tr>
+  <tr><td><code>/engine/loadDef</code></td><td><code>s</code> path, <code>s</code> name</td><td>Load a single plugin definition.</td></tr>
+</table>
+
+<h4>Queries</h4>
+
+<p>Query commands send a reply back to the sender's address and port:</p>
+
+<table>
+  <tr><th>Address</th><th>Reply Address</th><th>Reply Arguments</th></tr>
+  <tr><td><code>/engine/getStreamTime</code></td><td><code>/reply/getStreamTime</code></td><td><code>f</code> time</td></tr>
+  <tr><td><code>/engine/listNodeDefs</code></td><td><code>/reply/listNodeDefs</code></td><td><code>s...</code> names</td></tr>
+  <tr><td><code>/engine/isAudioRunning</code></td><td><code>/reply/isAudioRunning</code></td><td><code>i</code> 0 or 1</td></tr>
+</table>
+
+<h4>Graph Manipulation</h4>
+
+<p>Standalone graph commands are automatically wrapped in a <code>begin()/go()</code> transaction. Inside a bundle, they are batched together.</p>
+
+<table>
+  <tr><th>Address</th><th>Arguments</th><th>Description</th></tr>
+  <tr><td><code>/engine/newNode</code></td><td><code>s</code> defName, <code>i</code> nodeID</td><td>Create a new node.</td></tr>
+  <tr><td><code>/engine/freeNode</code></td><td><code>i</code> nodeID</td><td>Free a node.</td></tr>
+  <tr><td><code>/engine/freeAllNodes</code></td><td><em>none</em></td><td>Free all nodes.</td></tr>
+  <tr><td><code>/engine/replaceNode</code></td><td><code>i</code> old, <code>i</code> new, <code>f</code> xfade, <code>i</code> curve</td><td>Replace a node with crossfade.</td></tr>
+  <tr><td><code>/engine/connect</code></td><td><code>i</code> srcNode, <code>i</code> srcPort, <code>i</code> dstNode, <code>i</code> dstPort</td><td>Connect two nodes.</td></tr>
+  <tr><td><code>/engine/connectX</code></td><td><code>i i i i f i</code></td><td>Connect with crossfade and curve.</td></tr>
+  <tr><td><code>/engine/disconnectInput</code></td><td><code>i</code> nodeID, <code>i</code> port</td><td>Disconnect an input.</td></tr>
+  <tr><td><code>/engine/disconnectInputX</code></td><td><code>i i f i</code></td><td>Disconnect input with crossfade.</td></tr>
+  <tr><td><code>/engine/disconnectOutput</code></td><td><code>i</code> nodeID, <code>i</code> port</td><td>Disconnect an output.</td></tr>
+  <tr><td><code>/engine/disconnectNode</code></td><td><code>i</code> nodeID</td><td>Disconnect all connections of a node.</td></tr>
+  <tr><td><code>/engine/reconnectOutput</code></td><td><code>i i i i f i</code></td><td>Reconnect an output to a new source with crossfade.</td></tr>
+  <tr><td><code>/engine/setInput</code></td><td><code>i</code> nodeID, <code>i</code> port, <code>f</code> value</td><td>Set an input to a constant value.</td></tr>
+  <tr><td><code>/engine/setInputX</code></td><td><code>i i f f i</code></td><td>Set input with crossfade.</td></tr>
+  <tr><td><code>/engine/setControl</code></td><td><code>i</code> nodeID, <code>i</code> controlID, <code>f</code> value</td><td>Set a control parameter.</td></tr>
+</table>
+
+<h4>Notes</h4>
+
+<table>
+  <tr><th>Address</th><th>Arguments</th><th>Description</th></tr>
+  <tr><td><code>/engine/noteOn</code></td><td><code>i</code> nodeID, <code>i</code> noteID, <code>f...</code> params</td><td>Trigger a note with parameters.</td></tr>
+  <tr><td><code>/engine/noteOff</code></td><td><code>i</code> nodeID, <code>i</code> noteID</td><td>Release a note.</td></tr>
+  <tr><td><code>/engine/allNotesOff</code></td><td><code>i</code> nodeID</td><td>Release all notes on a node.</td></tr>
+  <tr><td><code>/engine/noteSetParams</code></td><td><code>i</code> nodeID, <code>i</code> noteID, <code>i</code> firstParam, <code>f...</code> values</td><td>Update parameters on a playing note.</td></tr>
+</table>
+
+<!-- -------------------------------- -->
+<h3 id="osc-bundles">9.7 Bundles &amp; Scheduling</h3>
+
+<p>OSC bundles group multiple messages into an atomic transaction with an optional timetag for scheduling:</p>
+
+<ul>
+  <li><strong>Timetag &le; 1</strong> (including the "immediately" timetag): execute all messages immediately via <code>begin()/go()</code>.</li>
+  <li><strong>Timetag &gt; 1</strong>: schedule execution at the corresponding engine stream time via <code>begin()/sched(time)</code>. The NTP timestamp is converted to engine stream time.</li>
+</ul>
+
+<h4>Silo selection</h4>
+
+<p>By default, bundle commands target silo 0. To target a different silo, include <code>/engine/silo &lt;int&gt;</code> as the first element of the bundle:</p>
+
+<pre><code><span class="cmt">-- OSC bundle (pseudo-notation):</span>
+<span class="cmt">-- #bundle timetag</span>
+<span class="cmt">--   /engine/silo 1</span>
+<span class="cmt">--   /engine/newNode "sine" 100</span>
+<span class="cmt">--   /engine/connect 100 0 0 0</span></code></pre>
+
+<h4>Auto-wrapping</h4>
+
+<p>Graph manipulation commands sent as standalone messages (outside a bundle) are automatically wrapped in a <code>begin(silo)/go()</code> transaction so they execute atomically. Inside a bundle, this auto-wrapping is suppressed and the bundle provides the transaction boundary.</p>
+
+<div class="note">
+  <strong>Note:</strong> Bundles can be nested. Inner bundles inherit the outer bundle's transaction context.
+</div>
 
 </main>
 <script>
