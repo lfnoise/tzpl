@@ -42,6 +42,7 @@
 #include "tzpl_test_plugins.hpp"
 #if TZPL_HAS_OSC
 #include "tzpl_osc_ffi.hpp"
+#include "tzpl_osc_vm_handlers.hpp"
 #include "tzpl_osc.hpp"
 #endif
 
@@ -393,6 +394,10 @@ int main(int argc, const char* argv[]) {
         ts::NRTTempoScheduler tempoScheduler(&nrtvm);
         appCtx.tempoScheduler = &tempoScheduler;
 
+        appCtx.nrtvm = &nrtvm;
+        appCtx.compiler = &compiler;
+        appCtx.target = target;
+
         bridge::setAppContextOnVM(&nrtvm.vm, &appCtx);
         tempoScheduler.start();
 
@@ -401,7 +406,8 @@ int main(int argc, const char* argv[]) {
         }
 
 #if TZPL_HAS_OSC
-        // Start OSC server after engine is running
+        // Register VM OSC handlers and start server
+        bridge::registerVMOscHandlers(oscDispatcher, appCtx);
         if (config.oscPort > 0) {
             oscServer.start(config.oscPort);
         }
@@ -419,6 +425,7 @@ int main(int argc, const char* argv[]) {
                 return 1;
             }
             ModuleCompiler moduleCompiler(compiler, std::move(includePaths));
+            appCtx.moduleCompiler = &moduleCompiler;
             exitCode = runSource(nrtvm.vm, compiler, target, source, filename, &moduleCompiler);
 
             if (waitAfterScript && exitCode == 0 && !gShouldQuit) {

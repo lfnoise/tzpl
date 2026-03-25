@@ -25,8 +25,17 @@
 #ifndef tzpl_app_context_hpp
 #define tzpl_app_context_hpp
 
+#include <memory>
+
 namespace engine { struct Engine; }
-namespace ts { class NRTTempoScheduler; }
+namespace ts {
+    struct NRTVM;
+    struct VMTargetData;
+    using VMTarget = std::shared_ptr<VMTargetData>;
+    class Compiler;
+    class ModuleCompiler;
+    class NRTTempoScheduler;
+}
 
 namespace osc {
 class OscServer;
@@ -38,6 +47,10 @@ namespace bridge {
 
 struct AppContext {
     engine::Engine* engine = nullptr;
+    ts::NRTVM* nrtvm = nullptr;
+    ts::Compiler* compiler = nullptr;
+    ts::ModuleCompiler* moduleCompiler = nullptr;
+    ts::VMTarget target;
     ts::NRTTempoScheduler* tempoScheduler = nullptr;
     osc::OscServer* oscServer = nullptr;
     osc::OscClient* oscClient = nullptr;

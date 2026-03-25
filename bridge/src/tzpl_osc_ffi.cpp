@@ -26,6 +26,7 @@
 #include "tzpl_app_context.hpp"
 #include "tzpl_osc.hpp"
 #include "osc/OscOutboundPacketStream.h"
+#include "osc/OscReceivedElements.h"
 #include "tzpl.hpp"
 #include "value.hpp"
 #include <print>
@@ -241,6 +242,172 @@ static void ffi_oscServerPort(ts::VM& vm, u16 dst, u16, u16) {
 }
 
 // ---------------------------------------------------------------------------
+// Handler registration -- osc.onMessage / osc.removeHandler
+// ---------------------------------------------------------------------------
+
+// Helper: register an OSC handler that invokes a Tzopilotl callable.
+// The callable is retained and stored in the NRTVM's handler table.
+// A dispatcher handler is registered that, on receipt, parses OSC args,
+// acquires the NRTVM mutex, and calls the callable.
+static void registerUserHandler(ts::VM& vm, const char* address, ts::Obj* handler) {
+    auto* ctx = getAppContext(vm);
+    if (!ctx || !ctx->oscDispatcher || !ctx->nrtvm) return;
+
+    handler->retain();
+
+    // Release any previous handler for this address
+    auto& table = ctx->nrtvm->handlers.oscHandlers;
+    auto it = table.find(address);
+    if (it != table.end()) {
+        it->second->release();
+    }
+    table[address] = handler;
+}
+
+// fn onMessage(address String, handler fn() Void) Void
+static void ffi_onMessage(ts::VM& vm, u16, u16, u16 argBase) {
+    auto* ctx = getAppContext(vm);
+    if (!ctx || !ctx->oscDispatcher || !ctx->nrtvm) return;
+    const char* address = regString(vm, argBase);
+    ts::Obj* handler = vm.reg(argBase + 1).o;
+
+    registerUserHandler(vm, address, handler);
+    auto* nrtvm = ctx->nrtvm;
+    ctx->oscDispatcher->addHandler(address,
+        [nrtvm, handler](const char*, const void*, int,
+                          const osc::SenderInfo&) {
+            nrtvm->callCallable(handler);
+        });
+}
+
+// fn onMessageI(address String, handler fn(Int) Void) Void
+static void ffi_onMessageI(ts::VM& vm, u16, u16, u16 argBase) {
+    auto* ctx = getAppContext(vm);
+    if (!ctx || !ctx->oscDispatcher || !ctx->nrtvm) return;
+    const char* address = regString(vm, argBase);
+    ts::Obj* handler = vm.reg(argBase + 1).o;
+
+    registerUserHandler(vm, address, handler);
+    auto* nrtvm = ctx->nrtvm;
+    ctx->oscDispatcher->addHandler(address,
+        [nrtvm, handler](const char*, const void* data, int size,
+                          const osc::SenderInfo&) {
+            ::osc::ReceivedMessage msg(
+                ::osc::ReceivedPacket(static_cast<const char*>(data), size));
+            auto arg = msg.ArgumentsBegin();
+            if (arg == msg.ArgumentsEnd()) return;
+            ts::Word args[1];
+            args[0].i = arg->AsInt32();
+            nrtvm->callCallable(handler, args, 1);
+        });
+}
+
+// fn onMessageF(address String, handler fn(Float) Void) Void
+static void ffi_onMessageF(ts::VM& vm, u16, u16, u16 argBase) {
+    auto* ctx = getAppContext(vm);
+    if (!ctx || !ctx->oscDispatcher || !ctx->nrtvm) return;
+    const char* address = regString(vm, argBase);
+    ts::Obj* handler = vm.reg(argBase + 1).o;
+
+    registerUserHandler(vm, address, handler);
+    auto* nrtvm = ctx->nrtvm;
+    ctx->oscDispatcher->addHandler(address,
+        [nrtvm, handler](const char*, const void* data, int size,
+                          const osc::SenderInfo&) {
+            ::osc::ReceivedMessage msg(
+                ::osc::ReceivedPacket(static_cast<const char*>(data), size));
+            auto arg = msg.ArgumentsBegin();
+            if (arg == msg.ArgumentsEnd()) return;
+            ts::Word args[1];
+            args[0].f = static_cast<f64>(arg->AsFloat());
+            nrtvm->callCallable(handler, args, 1);
+        });
+}
+
+// fn onMessageS(address String, handler fn(String) Void) Void
+static void ffi_onMessageS(ts::VM& vm, u16, u16, u16 argBase) {
+    auto* ctx = getAppContext(vm);
+    if (!ctx || !ctx->oscDispatcher || !ctx->nrtvm) return;
+    const char* address = regString(vm, argBase);
+    ts::Obj* handler = vm.reg(argBase + 1).o;
+
+    registerUserHandler(vm, address, handler);
+    auto* nrtvm = ctx->nrtvm;
+    ctx->oscDispatcher->addHandler(address,
+        [nrtvm, handler](const char*, const void* data, int size,
+                          const osc::SenderInfo&) {
+            ::osc::ReceivedMessage msg(
+                ::osc::ReceivedPacket(static_cast<const char*>(data), size));
+            auto arg = msg.ArgumentsBegin();
+            if (arg == msg.ArgumentsEnd()) return;
+            const char* str = arg->AsString();
+            // Must create String object inside mutex (needs VM allocator)
+            std::lock_guard lock(nrtvm->mtx);
+            nrtvm->vm.makeCurrent();
+            ts::Word args[1];
+            args[0].o = new ts::StringObj(str);
+            nrtvm->vm.callCallable(handler, args, 1);
+            nrtvm->vm.gcHeartbeat();
+        });
+}
+
+// fn onMessageArgs(address String, handler fn(Array[Float]) Void) Void
+static void ffi_onMessageArgs(ts::VM& vm, u16, u16, u16 argBase) {
+    auto* ctx = getAppContext(vm);
+    if (!ctx || !ctx->oscDispatcher || !ctx->nrtvm) return;
+    const char* address = regString(vm, argBase);
+    ts::Obj* handler = vm.reg(argBase + 1).o;
+
+    registerUserHandler(vm, address, handler);
+    auto* nrtvm = ctx->nrtvm;
+    ctx->oscDispatcher->addHandler(address,
+        [nrtvm, handler](const char*, const void* data, int size,
+                          const osc::SenderInfo&) {
+            ::osc::ReceivedMessage msg(
+                ::osc::ReceivedPacket(static_cast<const char*>(data), size));
+            // Collect all float args
+            constexpr int kMax = 64;
+            f64 values[kMax];
+            int count = 0;
+            for (auto arg = msg.ArgumentsBegin();
+                 arg != msg.ArgumentsEnd() && count < kMax; ++arg, ++count) {
+                if (arg->IsFloat()) values[count] = arg->AsFloat();
+                else if (arg->IsInt32()) values[count] = arg->AsInt32();
+                else values[count] = 0.0;
+            }
+            // Create array inside mutex (needs VM allocator and types)
+            std::lock_guard lock(nrtvm->mtx);
+            nrtvm->vm.makeCurrent();
+            auto* arr = new ts::PodArray<f64>(
+                nrtvm->vm.arrayType(nrtvm->vm.floatType()));
+            arr->v.reserve(count);
+            for (int i = 0; i < count; ++i) arr->v.push_back(values[i]);
+            ts::Word args[1];
+            args[0].o = arr;
+            nrtvm->vm.callCallable(handler, args, 1);
+            nrtvm->vm.gcHeartbeat();
+        });
+}
+
+// fn removeHandler(address String) Void
+static void ffi_removeHandler(ts::VM& vm, u16, u16, u16 argBase) {
+    auto* ctx = getAppContext(vm);
+    if (!ctx || !ctx->oscDispatcher || !ctx->nrtvm) return;
+    const char* address = regString(vm, argBase);
+
+    // Remove from dispatcher
+    ctx->oscDispatcher->removeHandler(address);
+
+    // Release from handler table
+    auto& table = ctx->nrtvm->handlers.oscHandlers;
+    auto it = table.find(address);
+    if (it != table.end()) {
+        it->second->release();
+        table.erase(it);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Registration
 // ---------------------------------------------------------------------------
 
@@ -279,6 +446,27 @@ void registerOscFFI(ts::Compiler& compiler) {
     reg("oscServerStart", Bool, {Int},  ffi_oscServerStart);
     reg("oscServerStop",  Void, {},     ffi_oscServerStop);
     reg("oscServerPort",  Int,  {},     ffi_oscServerPort);
+
+    // Handler function types
+    ts::Vec<ts::Type*> noArgs;
+    ts::Vec<ts::Type*> intArgs;   intArgs.push_back(Int);
+    ts::Vec<ts::Type*> floatArgs; floatArgs.push_back(Float);
+    ts::Vec<ts::Type*> strArgs;   strArgs.push_back(String);
+    ts::Vec<ts::Type*> arrArgs;   arrArgs.push_back(FloatArray);
+
+    ts::Type* FnVoid      = reinterpret_cast<ts::Type*>(compiler.functionType(noArgs, Void));
+    ts::Type* FnIntVoid   = reinterpret_cast<ts::Type*>(compiler.functionType(intArgs, Void));
+    ts::Type* FnFloatVoid = reinterpret_cast<ts::Type*>(compiler.functionType(floatArgs, Void));
+    ts::Type* FnStrVoid   = reinterpret_cast<ts::Type*>(compiler.functionType(strArgs, Void));
+    ts::Type* FnArrVoid   = reinterpret_cast<ts::Type*>(compiler.functionType(arrArgs, Void));
+
+    // Handler registration
+    reg("onMessage",     Void, {String, FnVoid},      ffi_onMessage);
+    reg("onMessageI",    Void, {String, FnIntVoid},    ffi_onMessageI);
+    reg("onMessageF",    Void, {String, FnFloatVoid},  ffi_onMessageF);
+    reg("onMessageS",    Void, {String, FnStrVoid},    ffi_onMessageS);
+    reg("onMessageArgs", Void, {String, FnArrVoid},    ffi_onMessageArgs);
+    reg("removeHandler", Void, {String},               ffi_removeHandler);
 }
 
 } // namespace bridge

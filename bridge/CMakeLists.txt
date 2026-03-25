@@ -75,6 +75,7 @@ endif()
 if(TARGET osc_lib)
     add_library(tzpl_osc_bridge OBJECT
         src/tzpl_osc_ffi.cpp
+        src/tzpl_osc_vm_handlers.cpp
     )
 
     target_include_directories(tzpl_osc_bridge

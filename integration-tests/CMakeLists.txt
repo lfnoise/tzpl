@@ -48,6 +48,7 @@ if(TARGET tzpl_osc_bridge)
     target_link_libraries(test_osc
         PRIVATE tzpl_osc_bridge
         PRIVATE tzpl_audio_engine_bridge
+        PRIVATE tzpl_clock_bridge
     )
 
     target_compile_definitions(test_osc PRIVATE

@@ -395,6 +395,8 @@ if (localStorage.getItem('tzpl-docs-theme') === 'light') document.documentElemen
         <li><a href="#osc-sending-remote">Remote Sending</a></li>
         <li><a href="#osc-sending-local">Local Sending</a></li>
         <li><a href="#osc-server-control">Server Control</a></li>
+        <li><a href="#osc-handler-registration">Handler Registration</a></li>
+        <li><a href="#osc-vm-addresses">VM OSC Addresses</a></li>
         <li><a href="#osc-engine-addresses">Engine OSC Addresses</a></li>
         <li><a href="#osc-bundles">Bundles &amp; Scheduling</a></li>
       </ol>
@@ -1697,7 +1699,7 @@ Tzopilotl code calls foreign function
 
 <p>All OSC functions are registered under the <code>osc</code> foreign module. Import them with:</p>
 
-<pre><code><span class="kw">import</span> osc : *;</code></pre>
+<pre><code><span class="kw">import</span> osc.*;</code></pre>
 
 <!-- -------------------------------- -->
 <h3 id="osc-setup">9.2 Setup &amp; Configuration</h3>
@@ -1720,7 +1722,7 @@ Tzopilotl code calls foreign function
 
 <p>The server can also be started and stopped programmatically:</p>
 
-<pre><code><span class="kw">import</span> osc : *;
+<pre><code><span class="kw">import</span> osc.*;
 
 <span class="fn">oscServerStart</span>(<span class="num">57120</span>);  <span class="cmt">-- start listening on port 57120</span>
 <span class="fn">oscServerPort</span>() <span class="fn">println</span>;  <span class="cmt">-- prints 57120</span>
@@ -1742,7 +1744,7 @@ Tzopilotl code calls foreign function
 
 <h4>Example: sending to another application</h4>
 
-<pre><code><span class="kw">import</span> osc : *;
+<pre><code><span class="kw">import</span> osc.*;
 
 <span class="cmt">-- Send a note-on to a remote synth</span>
 <span class="fn">oscSendArgs</span>(<span class="str">"192.168.1.50"</span>, <span class="num">57120</span>, <span class="str">"/note/on"</span>, [<span class="num">60.0</span>, <span class="num">0.8</span>]);
@@ -1766,7 +1768,7 @@ Tzopilotl code calls foreign function
 
 <h4>Example: controlling the engine locally</h4>
 
-<pre><code><span class="kw">import</span> osc : *;
+<pre><code><span class="kw">import</span> osc.*;
 
 <span class="cmt">-- Start audio via local OSC dispatch</span>
 <span class="fn">oscSendLocal</span>(<span class="str">"/engine/startAudio"</span>);
@@ -1796,7 +1798,73 @@ Tzopilotl code calls foreign function
 </div>
 
 <!-- -------------------------------- -->
-<h3 id="osc-engine-addresses">9.6 Engine OSC Addresses</h3>
+<h3 id="osc-handler-registration">9.6 Handler Registration</h3>
+
+<p>Register Tzopilotl functions as handlers for incoming OSC messages. When a message arrives at the registered address, the handler is called with the parsed OSC arguments via the NRTVM (mutex-serialized, non-RT).</p>
+
+<table>
+  <tr><th>Function</th><th>Description</th></tr>
+  <tr><td><code>onMessage(address String, handler fn() Void) Void</code></td><td>Register a no-argument handler for the given OSC address.</td></tr>
+  <tr><td><code>onMessageI(address String, handler fn(Int) Void) Void</code></td><td>Register a handler that receives one integer argument.</td></tr>
+  <tr><td><code>onMessageF(address String, handler fn(Float) Void) Void</code></td><td>Register a handler that receives one float argument.</td></tr>
+  <tr><td><code>onMessageS(address String, handler fn(String) Void) Void</code></td><td>Register a handler that receives one string argument.</td></tr>
+  <tr><td><code>onMessageArgs(address String, handler fn(Array[Float]) Void) Void</code></td><td>Register a handler that receives all OSC arguments as a float array.</td></tr>
+  <tr><td><code>removeHandler(address String) Void</code></td><td>Remove a previously registered handler.</td></tr>
+</table>
+
+<pre><code><span class="kw">import</span> osc;
+
+<span class="cmt">-- respond to /trigger by printing a message</span>
+osc.<span class="fn">onMessage</span>(<span class="str">"/trigger"</span>, <span class="kw">fn</span>() {
+    <span class="fn">println</span>(<span class="str">"triggered!"</span>);
+});
+
+<span class="cmt">-- respond to /volume with a float value</span>
+osc.<span class="fn">onMessageF</span>(<span class="str">"/volume"</span>, <span class="kw">fn</span>(level <span class="typ">Float</span>) {
+    <span class="fn">println</span>(<span class="str">"volume: "</span> $ level <span class="fn">toString</span>);
+});
+
+<span class="cmt">-- respond to /note with an integer (MIDI note number)</span>
+osc.<span class="fn">onMessageI</span>(<span class="str">"/note"</span>, <span class="kw">fn</span>(note <span class="typ">Int</span>) {
+    <span class="fn">println</span>(<span class="str">"note: "</span> $ note <span class="fn">toString</span>);
+});
+
+<span class="cmt">-- later, remove the handler</span>
+osc.<span class="fn">removeHandler</span>(<span class="str">"/trigger"</span>);</code></pre>
+
+<div class="note">
+  <strong>Note:</strong> Handlers are retained by the runtime and released when removed or replaced. Registering a new handler for the same address automatically replaces the previous one. All handler invocations are serialized through the NRTVM mutex, so handlers never run concurrently.
+</div>
+
+<!-- -------------------------------- -->
+<h3 id="osc-vm-addresses">9.7 VM OSC Addresses</h3>
+
+<p>The following built-in OSC addresses allow external applications to interact with the Tzopilotl VM:</p>
+
+<table>
+  <tr><th>Address</th><th>Arguments</th><th>Description</th></tr>
+  <tr><td><code>/tzpl/eval</code></td><td><code>s</code> source</td><td>Compile and execute Tzopilotl source code. Replies with <code>/tzpl/eval/ok</code> on success or <code>/tzpl/eval/error &lt;message&gt;</code> on failure.</td></tr>
+  <tr><td><code>/tzpl/call</code></td><td><code>s</code> address, <code>[i|f|s]...</code> args</td><td>Invoke a user-registered handler by its OSC address, passing optional typed arguments.</td></tr>
+</table>
+
+<pre><code><span class="cmt">-- From an external OSC client (e.g. Python, Max/MSP, SuperCollider):</span>
+<span class="cmt">--</span>
+<span class="cmt">-- Send to /tzpl/eval with a string argument:</span>
+<span class="cmt">--   /tzpl/eval "println(42 * 2);"</span>
+<span class="cmt">--</span>
+<span class="cmt">-- The VM compiles and runs the code, then replies:</span>
+<span class="cmt">--   /tzpl/eval/ok          (on success)</span>
+<span class="cmt">--   /tzpl/eval/error "..." (on failure)</span>
+<span class="cmt">--</span>
+<span class="cmt">-- Invoke a user-registered handler:</span>
+<span class="cmt">--   /tzpl/call "/volume" 0.75</span></code></pre>
+
+<div class="tip">
+  <strong>Tip:</strong> <code>/tzpl/eval</code> is the primary mechanism for live coding over the network. Combined with <code>osc.onMessage*()</code>, it enables interactive performance workflows where code and control messages are sent from external editors, controllers, or other applications.
+</div>
+
+<!-- -------------------------------- -->
+<h3 id="osc-engine-addresses">9.8 Engine OSC Addresses</h3>
 
 <p>When the OSC server is running, the following addresses control the audio engine. These are the same commands available through the audio engine FFI, but accessible from any OSC client (external applications, hardware controllers, other machines on the network).</p>
 
@@ -1856,7 +1924,7 @@ Tzopilotl code calls foreign function
 </table>
 
 <!-- -------------------------------- -->
-<h3 id="osc-bundles">9.7 Bundles &amp; Scheduling</h3>
+<h3 id="osc-bundles">9.9 Bundles &amp; Scheduling</h3>
 
 <p>OSC bundles group multiple messages into an atomic transaction with an optional timetag for scheduling:</p>
 
@@ -1905,7 +1973,7 @@ Tzopilotl code calls foreign function
 
 <p>All clock functions are registered under the <code>clock</code> foreign module. Import them with:</p>
 
-<pre><code><span class="kw">import</span> clock : *;</code></pre>
+<pre><code><span class="kw">import</span> clock.*;</code></pre>
 
 <!-- -------------------------------- -->
 <h3 id="clock-scheduling">10.2 Scheduling Functions</h3>
@@ -1984,8 +2052,8 @@ Tzopilotl code calls foreign function
 
 <h4>Repeating pattern</h4>
 
-<pre><code><span class="kw">import</span> clock : *;
-<span class="kw">import</span> audio_engine : *;
+<pre><code><span class="kw">import</span> clock.*;
+<span class="kw">import</span> audio_engine.*;
 
 <span class="cmt">-- Play a note every beat using the reschedule convention.</span>
 <span class="cmt">-- The handler returns 1.0, so it fires again 1 beat later.</span>
@@ -1998,8 +2066,8 @@ Tzopilotl code calls foreign function
 
 <h4>One-shot delayed event</h4>
 
-<pre><code><span class="kw">import</span> clock : *;
-<span class="kw">import</span> audio_engine : *;
+<pre><code><span class="kw">import</span> clock.*;
+<span class="kw">import</span> audio_engine.*;
 
 <span class="cmt">-- Turn off all notes after 8 beats</span>
 <span class="fn">after</span>(<span class="num">8.0</span>, <span class="kw">fn</span>() Void {
@@ -2010,7 +2078,7 @@ Tzopilotl code calls foreign function
 
 <h4>Tempo ramp</h4>
 
-<pre><code><span class="kw">import</span> clock : *;
+<pre><code><span class="kw">import</span> clock.*;
 
 <span class="fn">setTempo</span>(<span class="num">120.0</span>);  <span class="cmt">-- start at 120 BPM</span>
 
@@ -2022,8 +2090,8 @@ Tzopilotl code calls foreign function
 
 <h4>Scheduling from within a handler</h4>
 
-<pre><code><span class="kw">import</span> clock : *;
-<span class="kw">import</span> audio_engine : *;
+<pre><code><span class="kw">import</span> clock.*;
+<span class="kw">import</span> audio_engine.*;
 
 <span class="cmt">-- Schedule two notes a half-beat apart, starting at beat 4</span>
 <span class="fn">at</span>(<span class="num">4.0</span>, <span class="kw">fn</span>() Void {

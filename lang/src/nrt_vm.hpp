@@ -94,10 +94,11 @@ struct NRTVM {
     // Compile and install new code under the mutex.
     CompileResult compileAndInstall(Compiler& compiler, const std::string& source,
                                     const std::string& filename,
-                                    const VMTarget& target) {
+                                    const VMTarget& target,
+                                    ModuleCompiler* moduleCompiler = nullptr) {
         std::lock_guard lock(mtx);
         vm.makeCurrent();
-        auto result = compiler.compile(source, filename, target);
+        auto result = compiler.compile(source, filename, target, moduleCompiler);
         if (result.success) {
             vm.install(result);
         }

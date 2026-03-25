@@ -343,9 +343,21 @@ Implemented in `osc/src/` as three components:
 
 App integration: `--osc-port <port>` CLI flag, `oscPort` config file key. Server started after audio engine init, clean shutdown on Ctrl-C.
 
-### 5.3 OSC server for Tzopilotl VM — NOT DONE
+### 5.3 OSC server for Tzopilotl VM — DONE
 
-The event-driven VM infrastructure is now in place (Phase 4.2). The NRT VM with mutex serialization and handler table can receive OSC-dispatched events. Remaining work: wire the `OscDispatcher` to call `NRTVM::callCallable()` for `/tzpl/eval`, `/tzpl/call`, and user-registered addresses, and implement `osc.onMessage()` FFI for user handler registration.
+**Built-in OSC handlers** (`bridge/src/tzpl_osc_vm_handlers.cpp`):
+- `/tzpl/eval <source_string>` -- compile and execute Tzopilotl source code received via OSC. Replies with `/tzpl/eval/ok` on success or `/tzpl/eval/error <message>` on failure.
+- `/tzpl/call <address> [args...]` -- invoke a user-registered handler by OSC address, passing OSC args (int/float/string) as Tzopilotl values.
+
+**User handler registration FFI** (added to `bridge/src/tzpl_osc_ffi.cpp`):
+- `osc.onMessage(address String, handler fn() Void) Void` -- register a no-arg handler
+- `osc.onMessageI(address String, handler fn(Int) Void) Void` -- int arg handler
+- `osc.onMessageF(address String, handler fn(Float) Void) Void` -- float arg handler
+- `osc.onMessageS(address String, handler fn(String) Void) Void` -- string arg handler
+- `osc.onMessageArgs(address String, handler fn(Array[Float]) Void) Void` -- float array handler
+- `osc.removeHandler(address String) Void` -- remove a registered handler
+
+Handlers are retained via ARC, stored in NRTVM's HandlerTable, and dispatched via OscDispatcher. String and array args are created inside the NRTVM mutex to ensure correct allocator usage. AppContext extended with `nrtvm`, `compiler`, `moduleCompiler`, and `target` pointers for full VM access from OSC handlers.
 
 ### 5.4 OSC client (sending) — DONE
 

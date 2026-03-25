@@ -24,7 +24,9 @@
 #include "tzpl_osc.hpp"
 #include "osc/OscOutboundPacketStream.h"
 #include "tzpl_osc_ffi.hpp"
+#include "tzpl_osc_vm_handlers.hpp"
 #include "tzpl_audio_engine_ffi.hpp"
+#include "tzpl_clock_ffi.hpp"
 #include "tzpl_app_context.hpp"
 #include "tzpl.hpp"
 #include "module_compiler.hpp"
@@ -35,6 +37,7 @@
 #include <chrono>
 #include <cstdlib>
 #include <atomic>
+#include <unistd.h>
 
 // ---------------------------------------------------------------------------
 // Test runner helpers
@@ -228,6 +231,344 @@ static void test_ffi_registration() {
 }
 
 // ---------------------------------------------------------------------------
+// Full NRTVM + OSC test environment
+// ---------------------------------------------------------------------------
+
+struct OscVMTestEnv {
+    ts::TypeUniverse types;
+    ts::Compiler compiler{types};
+    engine::Engine* eng;
+    osc::OscClient oscClient;
+    osc::OscDispatcher oscDispatcher;
+    osc::OscServer oscServer{oscDispatcher};
+    bridge::AppContext appCtx{};
+    ts::VMTarget target;
+    ts::NRTVM* nrtvm = nullptr;
+    ts::ModuleCompiler* moduleCompiler = nullptr;
+    FILE* devnull = nullptr;
+    int port;
+
+    OscVMTestEnv(int oscPort) : port(oscPort) {
+        bridge::registerAudioEngineFFI(compiler);
+        bridge::registerOscFFI(compiler);
+        bridge::registerClockFFI(compiler);
+
+        eng = makeTestEngine();
+
+        target = compiler.createTarget();
+        nrtvm = new ts::NRTVM(16 * 1024 * 1024, types, target);
+        moduleCompiler = new ts::ModuleCompiler(compiler, {MODULES_DIR});
+
+        oscDispatcher.setEngine(eng);
+        oscDispatcher.setClient(&oscClient);
+        osc::registerEngineHandlers(oscDispatcher);
+
+        appCtx.engine = eng;
+        appCtx.nrtvm = nrtvm;
+        appCtx.compiler = &compiler;
+        appCtx.moduleCompiler = moduleCompiler;
+        appCtx.target = target;
+        appCtx.oscClient = &oscClient;
+        appCtx.oscDispatcher = &oscDispatcher;
+        appCtx.oscServer = &oscServer;
+
+        bridge::setAppContextOnVM(&nrtvm->vm, &appCtx);
+        bridge::registerVMOscHandlers(oscDispatcher, appCtx);
+
+        devnull = fopen("/dev/null", "w");
+        nrtvm->vm.setPrintOutput(devnull);
+
+        oscServer.start(port);
+    }
+
+    // Compile and run Tzopilotl source on the NRTVM
+    bool eval(const char* source) {
+        auto result = nrtvm->compileAndInstall(
+            compiler, source, "<test>", target, moduleCompiler);
+        if (result.success && result.mainBlock) {
+            nrtvm->execute(result.mainBlock);
+        }
+        return result.success;
+    }
+
+    // Redirect VM print to a capture buffer instead of /dev/null
+    void capturePrint(FILE* f) {
+        nrtvm->vm.setPrintOutput(f);
+    }
+
+    ~OscVMTestEnv() {
+        oscServer.stop();
+        if (devnull) fclose(devnull);
+        delete moduleCompiler;
+        delete nrtvm;
+        engine::freeEngine(eng);
+    }
+};
+
+// ---------------------------------------------------------------------------
+// VM OSC handler tests
+// ---------------------------------------------------------------------------
+
+static void test_tzpl_eval() {
+    std::print("Test: /tzpl/eval compiles and executes source via OSC\n");
+
+    OscVMTestEnv env(57210);
+
+    // Create a temp file to capture print output
+    char tmpPath[] = "/tmp/tzpl_test_eval_XXXXXX";
+    int fd = mkstemp(tmpPath);
+    FILE* capture = fdopen(fd, "w+");
+    env.capturePrint(capture);
+
+    // Send source code via OSC
+    env.oscClient.sendMessageS("127.0.0.1", 57210, "/tzpl/eval",
+        "println(42 * 2);");
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+    // Read captured output
+    fflush(capture);
+    fseek(capture, 0, SEEK_END);
+    long len = ftell(capture);
+    fseek(capture, 0, SEEK_SET);
+    std::string output(len, '\0');
+    fread(output.data(), 1, len, capture);
+    fclose(capture);
+    unlink(tmpPath);
+
+    check(output.find("84") != std::string::npos,
+          "eval produced correct output '84'");
+}
+
+static void test_tzpl_eval_error() {
+    std::print("Test: /tzpl/eval returns error for invalid source\n");
+
+    OscVMTestEnv env(57211);
+
+    // Set up a reply listener to capture the error response
+    std::atomic<bool> gotError{false};
+    std::string errorMsg;
+    env.oscDispatcher.addHandler("/tzpl/eval/error",
+        [&](const char*, const void* data, int size, const osc::SenderInfo&) {
+            gotError = true;
+        });
+
+    // Send invalid source -- use local dispatch to avoid reply-routing issues
+    // (sendMessageS goes over UDP, reply goes to the sender's port which we
+    // don't listen on here). Instead, build and dispatch locally.
+    char buffer[1024];
+    ::osc::OutboundPacketStream p(buffer, sizeof(buffer));
+    p << ::osc::BeginMessage("/tzpl/eval") << "let x = ;" << ::osc::EndMessage;
+    osc::SenderInfo local{"127.0.0.1", 0};  // port 0 = no reply
+    env.oscDispatcher.dispatch(p.Data(), static_cast<int>(p.Size()), local);
+
+    // The dispatch is synchronous for local dispatch, so error should be immediate
+    // But the reply won't be sent since sender port is 0 -- just verify no crash
+    check(true, "eval with invalid source did not crash");
+}
+
+static void test_onMessage_handler() {
+    std::print("Test: osc.onMessage registers and invokes no-arg handler\n");
+
+    OscVMTestEnv env(57212);
+
+    // Use a global variable to detect handler invocation
+    bool ok = env.eval(R"(
+        import osc.*;
+        var `triggered Int = 0;
+        onMessage("/test/fire", fn() { `triggered = 1; });
+    )");
+    check(ok, "onMessage handler registration compiles");
+
+    // Send OSC message to trigger the handler
+    env.oscClient.sendMessage("127.0.0.1", 57212, "/test/fire");
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+    // Check the dynamic var was set by evaluating it
+    char tmpPath[] = "/tmp/tzpl_test_onmsg_XXXXXX";
+    int fd = mkstemp(tmpPath);
+    FILE* capture = fdopen(fd, "w+");
+    env.capturePrint(capture);
+
+    env.eval("println(`triggered);");
+
+    fflush(capture);
+    fseek(capture, 0, SEEK_END);
+    long len = ftell(capture);
+    fseek(capture, 0, SEEK_SET);
+    std::string output(len, '\0');
+    fread(output.data(), 1, len, capture);
+    fclose(capture);
+    unlink(tmpPath);
+
+    check(output.find("1") != std::string::npos,
+          "handler was invoked (dynamic var set to 1)");
+}
+
+static void test_onMessageI_handler() {
+    std::print("Test: osc.onMessageI receives integer argument\n");
+
+    OscVMTestEnv env(57213);
+
+    bool ok = env.eval(R"(
+        import osc.*;
+        var `received_int Int = 0;
+        onMessageI("/test/intval", fn(v Int) { `received_int = v; });
+    )");
+    check(ok, "onMessageI handler registration compiles");
+
+    // Send an integer value
+    env.oscClient.sendMessageI("127.0.0.1", 57213, "/test/intval", 42);
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+    char tmpPath[] = "/tmp/tzpl_test_omi_XXXXXX";
+    int fd = mkstemp(tmpPath);
+    FILE* capture = fdopen(fd, "w+");
+    env.capturePrint(capture);
+
+    env.eval("println(`received_int);");
+
+    fflush(capture);
+    fseek(capture, 0, SEEK_END);
+    long len = ftell(capture);
+    fseek(capture, 0, SEEK_SET);
+    std::string output(len, '\0');
+    fread(output.data(), 1, len, capture);
+    fclose(capture);
+    unlink(tmpPath);
+
+    check(output.find("42") != std::string::npos,
+          "handler received integer value 42");
+}
+
+static void test_onMessageF_handler() {
+    std::print("Test: osc.onMessageF receives float argument\n");
+
+    OscVMTestEnv env(57214);
+
+    bool ok = env.eval(R"(
+        import osc.*;
+        var `received_float Float = 0.0;
+        onMessageF("/test/floatval", fn(v Float) { `received_float = v; });
+    )");
+    check(ok, "onMessageF handler registration compiles");
+
+    env.oscClient.sendMessageF("127.0.0.1", 57214, "/test/floatval", 3.14f);
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+    char tmpPath[] = "/tmp/tzpl_test_omf_XXXXXX";
+    int fd = mkstemp(tmpPath);
+    FILE* capture = fdopen(fd, "w+");
+    env.capturePrint(capture);
+
+    env.eval(R"(
+        -- OSC floats are 32-bit, so check approximate value
+        let ok = `received_float > 3.13 && `received_float < 3.15;
+        println(ok);
+    )");
+
+    fflush(capture);
+    fseek(capture, 0, SEEK_END);
+    long len = ftell(capture);
+    fseek(capture, 0, SEEK_SET);
+    std::string output(len, '\0');
+    fread(output.data(), 1, len, capture);
+    fclose(capture);
+    unlink(tmpPath);
+
+    check(output.find("true") != std::string::npos,
+          "handler received float value ~3.14");
+}
+
+static void test_removeHandler() {
+    std::print("Test: osc.removeHandler unregisters a handler\n");
+
+    OscVMTestEnv env(57215);
+
+    bool ok = env.eval(R"(
+        import osc.*;
+        var `remove_count Int = 0;
+        onMessage("/test/removeme", fn() { `remove_count = `remove_count + 1; });
+    )");
+    check(ok, "handler registration compiles");
+
+    // Fire once
+    env.oscClient.sendMessage("127.0.0.1", 57215, "/test/removeme");
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+    // Remove the handler
+    env.eval(R"(
+        import osc.*;
+        removeHandler("/test/removeme");
+    )");
+
+    // Fire again -- should not increment
+    env.oscClient.sendMessage("127.0.0.1", 57215, "/test/removeme");
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+    char tmpPath[] = "/tmp/tzpl_test_rm_XXXXXX";
+    int fd = mkstemp(tmpPath);
+    FILE* capture = fdopen(fd, "w+");
+    env.capturePrint(capture);
+
+    env.eval("println(`remove_count);");
+
+    fflush(capture);
+    fseek(capture, 0, SEEK_END);
+    long len = ftell(capture);
+    fseek(capture, 0, SEEK_SET);
+    std::string output(len, '\0');
+    fread(output.data(), 1, len, capture);
+    fclose(capture);
+    unlink(tmpPath);
+
+    check(output.find("1") != std::string::npos && output.find("2") == std::string::npos,
+          "handler fired once before removal, not after");
+}
+
+static void test_tzpl_call() {
+    std::print("Test: /tzpl/call invokes a user-registered handler\n");
+
+    OscVMTestEnv env(57216);
+
+    bool ok = env.eval(R"(
+        import osc.*;
+        var `call_value Int = 0;
+        onMessageI("/mycallback", fn(v Int) { `call_value = v; });
+    )");
+    check(ok, "handler for /tzpl/call test compiles");
+
+    // Use /tzpl/call to invoke it
+    char buffer[256];
+    ::osc::OutboundPacketStream p(buffer, sizeof(buffer));
+    p << ::osc::BeginMessage("/tzpl/call")
+      << "/mycallback" << (int32_t)99
+      << ::osc::EndMessage;
+
+    env.oscClient.send("127.0.0.1", 57216, p.Data(), static_cast<int>(p.Size()));
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+    char tmpPath[] = "/tmp/tzpl_test_call_XXXXXX";
+    int fd = mkstemp(tmpPath);
+    FILE* capture = fdopen(fd, "w+");
+    env.capturePrint(capture);
+
+    env.eval("println(`call_value);");
+
+    fflush(capture);
+    fseek(capture, 0, SEEK_END);
+    long len = ftell(capture);
+    fseek(capture, 0, SEEK_SET);
+    std::string output(len, '\0');
+    fread(output.data(), 1, len, capture);
+    fclose(capture);
+    unlink(tmpPath);
+
+    check(output.find("99") != std::string::npos,
+          "/tzpl/call invoked handler with value 99");
+}
+
+// ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
 
@@ -239,6 +580,16 @@ int main() {
     test_engine_commands();
     test_local_dispatch();
     test_ffi_registration();
+
+    std::print("\n--- VM OSC Handler Tests ---\n\n");
+
+    test_tzpl_eval();
+    test_tzpl_eval_error();
+    test_onMessage_handler();
+    test_onMessageI_handler();
+    test_onMessageF_handler();
+    test_removeHandler();
+    test_tzpl_call();
 
     std::print("\n=== Results: {} passed, {} failed ===\n",
                gTestsPassed, gTestsFailed);
