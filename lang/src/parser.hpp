@@ -52,6 +52,7 @@ private:
     bool check(TokenKind kind) const;
     bool match(TokenKind kind);
     Token expect(TokenKind kind, const std::string& msg);
+    Token expectClosing(TokenKind kind, const char* open, SourceRange openLoc);
     bool matchGreater();      // Match '>' with ">>" splitting (for template close)
     void expectTerminator();  // Expect ; or EOF or }
 

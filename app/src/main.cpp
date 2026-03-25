@@ -36,6 +36,8 @@
 #include "tzpl_app_context.hpp"
 #include "tzpl_audio_engine_ffi.hpp"
 #include "tzpl_synthdef_compiler_ffi.hpp"
+#include "tzpl_clock_ffi.hpp"
+#include "nrt_tempo_scheduler.hpp"
 #include "tzpl_client_interface.hpp"
 #include "tzpl_test_plugins.hpp"
 #if TZPL_HAS_OSC
@@ -266,6 +268,7 @@ int main(int argc, const char* argv[]) {
         // Register FFI bridges before any compilation
         bridge::registerAudioEngineFFI(compiler);
         bridge::registerSynthdefCompilerFFI(compiler);
+        bridge::registerClockFFI(compiler);
 #if TZPL_HAS_OSC
         bridge::registerOscFFI(compiler);
 #endif
@@ -381,8 +384,17 @@ int main(int argc, const char* argv[]) {
 #endif
 
         VMTarget target = compiler.createTarget();
-        VM vm(64 * 1024 * 1024, types, target);
-        bridge::setAppContextOnVM(&vm, &appCtx);
+
+        // Use NRTVM for mutex-serialized access from multiple threads
+        // (main thread for REPL/script, scheduler thread for timed events).
+        NRTVM nrtvm(64 * 1024 * 1024, types, target);
+
+        // Create tempo-based NRT scheduler (120 BPM default, 50ms latency)
+        ts::NRTTempoScheduler tempoScheduler(&nrtvm);
+        appCtx.tempoScheduler = &tempoScheduler;
+
+        bridge::setAppContextOnVM(&nrtvm.vm, &appCtx);
+        tempoScheduler.start();
 
         if (startAudio) {
             engine::startAudio(eng);
@@ -407,7 +419,7 @@ int main(int argc, const char* argv[]) {
                 return 1;
             }
             ModuleCompiler moduleCompiler(compiler, std::move(includePaths));
-            exitCode = runSource(vm, compiler, target, source, filename, &moduleCompiler);
+            exitCode = runSource(nrtvm.vm, compiler, target, source, filename, &moduleCompiler);
 
             if (waitAfterScript && exitCode == 0 && !gShouldQuit) {
                 std::cout << "Running. Press Ctrl-C to stop.\n";
@@ -420,6 +432,8 @@ int main(int argc, const char* argv[]) {
             std::cerr << "tzpl: no input file specified. Use --help for usage.\n";
             exitCode = 1;
         }
+
+        tempoScheduler.stop();
 
 #if TZPL_HAS_OSC
         oscServer.stop();

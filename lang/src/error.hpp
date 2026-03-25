@@ -47,6 +47,22 @@ struct SourceRange {
     SourceRange(SourceLoc s, SourceLoc e) : start(s), end(e) {}
 };
 
+// Secondary diagnostic attached to a CompileError (e.g. "to match '(' opened here")
+struct DiagnosticNote {
+    SourceRange loc;
+    std::string message;
+    std::string filename;
+    std::string source;
+
+    DiagnosticNote(SourceRange l, std::string msg)
+        : loc(l), message(std::move(msg)) {}
+
+    DiagnosticNote(SourceRange l, std::string msg,
+                   std::string fname, std::string src)
+        : loc(l), message(std::move(msg)),
+          filename(std::move(fname)), source(std::move(src)) {}
+};
+
 // Compile error with source location and message
 struct CompileError {
     enum Kind {
@@ -60,6 +76,7 @@ struct CompileError {
     std::string message;
     std::string filename;  // source file where the error occurred (may differ from top-level file)
     std::string source;    // source text of that file (for correct line display)
+    std::vector<DiagnosticNote> notes;
 
     CompileError(Kind k, SourceRange l, std::string msg)
         : kind(k), loc(l), message(std::move(msg)) {}

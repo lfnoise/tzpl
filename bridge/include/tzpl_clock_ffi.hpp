@@ -15,35 +15,23 @@
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 //
-//  tzpl_app_context.hpp
+//  tzpl_clock_ffi.hpp
 //  bridge
 //
-//  Application context: holds pointers to all subsystems accessible
-//  via the VM's userData pointer. Extensible for OSC, NATS, etc.
+//  FFI bridge for tempo-based scheduling (the "clock" module).
 //
 
-#ifndef tzpl_app_context_hpp
-#define tzpl_app_context_hpp
+#ifndef tzpl_clock_ffi_hpp
+#define tzpl_clock_ffi_hpp
 
-namespace engine { struct Engine; }
-namespace ts { class NRTTempoScheduler; }
-
-namespace osc {
-class OscServer;
-class OscClient;
-class OscDispatcher;
-}
+namespace ts { class Compiler; }
 
 namespace bridge {
 
-struct AppContext {
-    engine::Engine* engine = nullptr;
-    ts::NRTTempoScheduler* tempoScheduler = nullptr;
-    osc::OscServer* oscServer = nullptr;
-    osc::OscClient* oscClient = nullptr;
-    osc::OscDispatcher* oscDispatcher = nullptr;
-};
+// Register all clock FFI functions with the Tzopilotl compiler.
+// Must be called BEFORE compiling any Tzopilotl source that uses clock functions.
+void registerClockFFI(ts::Compiler& compiler);
 
 } // namespace bridge
 
-#endif /* tzpl_app_context_hpp */
+#endif /* tzpl_clock_ffi_hpp */

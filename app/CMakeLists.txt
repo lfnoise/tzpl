@@ -8,6 +8,7 @@ add_executable(tzpl_app
 target_link_libraries(tzpl_app
     PRIVATE tzpl_synthdef_compiler_bridge
     PRIVATE tzpl_audio_engine_bridge
+    PRIVATE tzpl_clock_bridge
     PRIVATE linenoise
 )
 

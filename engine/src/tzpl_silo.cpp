@@ -121,6 +121,10 @@ void Silo::processFrames() {
 
         processScheduledEvents();
 
+        if (tempoSchedFn_ && rtTempoScheduler_) {
+            tempoSchedFn_(rtTempoScheduler_, sampleTime_, vm_);
+        }
+
         sortNodes();
         runNodes();
 

@@ -22,6 +22,29 @@ if(CMAKE_BUILD_TYPE STREQUAL "Release")
     target_compile_options(tzpl_audio_engine_bridge PRIVATE -O2)
 endif()
 
+# --- Clock (tempo scheduler) FFI bridge ---
+
+add_library(tzpl_clock_bridge OBJECT
+    src/tzpl_clock_ffi.cpp
+    src/tzpl_rt_tempo_scheduler.cpp
+)
+
+target_include_directories(tzpl_clock_bridge
+    PUBLIC  ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+target_link_libraries(tzpl_clock_bridge
+    PUBLIC  tzpl_lib
+    PUBLIC  audio_engine_lib
+)
+
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+    target_compile_options(tzpl_clock_bridge PRIVATE -O1)
+endif()
+if(CMAKE_BUILD_TYPE STREQUAL "Release")
+    target_compile_options(tzpl_clock_bridge PRIVATE -O2)
+endif()
+
 # --- Synthdef-compiler FFI bridge ---
 
 if(TARGET synthdef_compiler_lib)

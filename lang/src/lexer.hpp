@@ -202,6 +202,9 @@ private:
     TokenKind keywordKind(const std::string& text) const;
 };
 
+// Human-readable name for a token kind (e.g. "';'", "'fn'", "identifier", "end of file")
+const char* tokenKindString(TokenKind kind);
+
 } // namespace ts
 
 #endif /* lexer_hpp */

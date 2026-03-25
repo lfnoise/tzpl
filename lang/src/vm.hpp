@@ -193,6 +193,7 @@ private:
     // ARC infrastructure
     AutoReleasePool autoReleasePool_;
     DeferredDeleteQueue deferredDeleteQueue_;
+    ForeignDeleteQueue foreignDeleteQueue_;
 
     // Register file (TLSF-allocated flat array)
     Word* regs_;
@@ -274,8 +275,11 @@ public:
     rt::TLSFAllocator& allocator() { return allocator_; }
     const rt::TLSFAllocator& allocator() const { return allocator_; }
 
-    // ARC heartbeat - drain auto-release pool and process deferred deletions
+    // ARC heartbeat - drain auto-release pool and process deferred deletions.
+    // Also drains the foreign delete queue (objects whose last reference was
+    // dropped on a different thread).
     void gcHeartbeat() {
+        foreignDeleteQueue_.drainInto(deferredDeleteQueue_);
         autoReleasePool_.drain();
         deferredDeleteQueue_.processN(256);
     }
@@ -283,6 +287,7 @@ public:
     // ARC access
     AutoReleasePool& autoReleasePool() { return autoReleasePool_; }
     DeferredDeleteQueue& deferredDeleteQueue() { return deferredDeleteQueue_; }
+    ForeignDeleteQueue& foreignDeleteQueue() { return foreignDeleteQueue_; }
 
     // Type universe access
     TypeUniverse& typeUniverse() { return typeUniverse_; }
@@ -452,6 +457,10 @@ public:
     // Call a compiled function from the host (e.g. event handler from audio callback).
     // Args are copied into registers. Returns the value in register 0.
     Word callFunction(CodeBlock* block, const Word* args, u16 argc);
+
+    // Call a Callable (Lambda or Primitive) from the host.
+    // Handles free variable setup for closures.
+    Word callCallable(Obj* callable, const Word* args, u16 argc);
 };
 
 // Thread-local current VM (set by VM::makeCurrent(), null during compilation)

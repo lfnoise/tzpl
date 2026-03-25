@@ -61,13 +61,18 @@ This document is a step-by-step plan for integrating the three sub-projects (lan
 - `callFunction()` API for host-driven function invocation (event handler infrastructure)
 - REPLSession class for interactive evaluation
 - Map type with builtins (get, getDefault, contains, keys, values, copy, merge)
-- **Remaining**: Event-driven VM (dispatch loop, handler registration, hot-reload), error location refinement, general function inlining, I/O functions
+- Event-driven VM infrastructure: cross-thread ARC deletion, NRT VM with mutex serialization, RT VM on Silo, NRT wall-clock scheduler, tempo-based NRT and RT schedulers with TempoRamp. See `EVENT_DRIVEN_VM_PLAN.md`.
+- Clock FFI module: `sched`, `schedAbs`, `after`, `at`, `cancel`, `setTempo`, `getTempo`, `getBeats`, `getBeatDur`, `schedTempoChange`, `setLatency`, `getLatency`. App migrated from bare VM to NRTVM with tempo scheduler.
+- **Remaining**: OSC handler dispatch, `rt.onNote`/`rt.onControl` FFI, error location refinement, general function inlining, I/O functions
 
 ### bridge/
 - `tzpl_audio_engine_ffi.cpp` — 32 FFI functions wrapping audio engine commands (including `listSynthDefs`)
 - `tzpl_synthdef_compiler_ffi.cpp` — 2 FFI functions for compile and compile-and-load
+- `tzpl_clock_ffi.cpp` — 12 FFI functions for tempo-based scheduling (`clock` module)
+- `tzpl_rt_tempo_scheduler.cpp` — RT tempo scheduler with pre-allocated entry pool (1024 entries), sample-accurate beat timing
+- `tzpl_vm_commands.hpp` — Engine command subclasses for VM event dispatch, code hot-reload, RT tempo scheduling
 - `modules/audio_engine.x` — Tzopilotl enum definitions (Enable, SchedPolicy, FadeCurve, Err)
-- Both bridges build as OBJECT libraries, linked into the app
+- Bridges build as OBJECT libraries, linked into the app
 
 ### shared/
 - `tzpl_plugin_abi.h` — Pure C plugin ABI (used by both engine and synthdef-compiler)
@@ -277,35 +282,38 @@ A comprehensive Tzopilotl module (`lang/modules/synthdef.x`, 1038 lines) provide
 
 The module system is fully implemented and tested. All three import syntaxes work (whole, wildcard, named with aliases), qualified access (`module.func(args)`) works including in space pipeline syntax, module file resolution supports relative and include-path-based lookup, circular import detection and module caching are in place, and all export types (functions, variables, structs, enums, templates, type aliases) are supported. Cascading errors on failed imports are suppressed. 13 module-specific tests. No further work needed.
 
-### 4.2 Event-driven VM (Phase 12 in lang's plan) — NOT STARTED
+### 4.2 Event-driven VM (Phase 12 in lang's plan) — DONE
 
-Critical for real-time audio integration — the VM must respond to events and then return control. There are two classes of event handler with different constraints:
+Core infrastructure implemented. See `EVENT_DRIVEN_VM_PLAN.md` for the full design.
 
-**Real-time event handlers** run integrated into the engine's `Silo` class. They must not call the system allocator or any blocking functions. They never handle I/O directly. Events include: timer tick, note trigger, control change, per-sample or per-buffer callbacks.
+**What was implemented**:
 
-**Non-real-time event handlers** run on a separate thread with fewer restrictions. They handle OSC and NATS I/O, file operations, and other tasks that may block or allocate.
+1. **Cross-thread ARC deletion** (`lang/src/gc.hpp`, `arc.hpp`, `tlsf_allocator.hpp`, `vm.hpp/cpp`): Lock-free MPSC `ForeignDeleteQueue` (Treiber stack) per VM. Objects whose last reference is dropped on a foreign thread are enqueued on the home VM's foreign delete queue and freed during `gcHeartbeat()`.
 
-**All VMs** (RT and NRT) must support receiving code install updates (hot-reloading new function definitions or event handlers).
+2. **NRT VM with mutex serialization** (`lang/src/nrt_vm.hpp`, `nrt_scheduler.hpp/cpp`): `NRTVM` wrapper provides `call()`, `callCallable()`, `compileAndInstall()`, `execute()` -- all acquire a per-VM mutex, call `makeCurrent()`, and run `gcHeartbeat()`. Any thread (OSC server, NATS client, scheduler, UI) can call in. `NRTScheduler` runs on its own thread with wall-clock timing and logical time for drift-free scheduling.
 
-**Infrastructure already in place**:
-- `VM::callFunction(CodeBlock* block, const Word* args, u16 argc)` — host can invoke compiled functions and get return values
-- Direct-threaded dispatch naturally returns control after function completion
-- Global variables persist across calls (designed for event-driven use)
-- TLSF allocator and lock-free FIFOs available for RT-safe operation
+3. **Tempo-based NRT scheduler** (`lang/src/tempo_ramp.hpp`, `nrt_tempo_scheduler.hpp/cpp`): Beat-based scheduler using `TempoRamp` for beat/second conversion. Tempo ramps are linear in beats (exponential in seconds). Queue is sorted by beat position (invariant under tempo changes). Fires events early by a user-specified latency so commands reach the RT thread in time. Tempo changes are scheduled as queue events. If a handler returns a positive finite number, it is rescheduled that many beats later (SuperCollider `Routine` convention). API: `sched(deltaBeats, handler)`, `schedAbs(beat, handler)`, `schedTempoChange(beat, targetTempo, rampBeats)`, `setTempo(bps)`, `setTempoBPM(bpm)`. Default 120 BPM, 50ms latency.
 
-**Remaining tasks**:
-1. Implement an event dispatch loop: VM receives an event, executes the handler function, stack collapses, control returns to host.
-2. Define event types and which are RT vs NRT: RT events (timer tick, note trigger, control change, code update), NRT events (OSC message, NATS message, code update).
-3. Integrate RT event handlers into the engine's Silo — the VM runs within the Silo's processing loop using only the RT-safe allocator and lock-free communication.
-4. Implement NRT event loop for handling I/O protocols (OSC, NATS) and dispatching to handler functions.
-5. Implement code install updates — all VMs can receive and apply new function/handler definitions while running.
-6. Ensure the VM can be "stepped" from a host loop (process one event, return).
+4. **RT tempo scheduler** (`bridge/include/tzpl_rt_tempo_scheduler.hpp`, `bridge/src/tzpl_rt_tempo_scheduler.cpp`): Same `TempoRamp` math as NRT, but uses sample time as the time base -- no latency compensation, events fire at the exact sample. Pre-allocated pool of 1024 entries (no RT allocation). Sorted doubly-linked list. Polled each sample via a callback on the Silo (`tempoSchedFn_`). Engine commands (`RTTempoSchedCmd`, `RTTempoChangeCmd`, `RTSetTempoCmd`, `AttachRTTempoSchedulerCmd`) deliver events and tempo changes from NRT to RT via the existing FIFO.
 
-### 4.3 Error handling improvements — PARTIAL
+5. **RT VM on Silo** (`bridge/include/tzpl_vm_commands.hpp`, `engine/src/tzpl_silo.hpp`): `Silo::vm_` opaque pointer for attaching a VM. Engine command subclasses (`VMEventCmd`, `VMCallableCmd`, `CodeInstallCmd`, `AttachVMCmd`, `DetachVMCmd`) flow through the existing FIFO/scheduler.
 
-**Parser error recovery — DONE**: Synchronization implemented in `parser.cpp` — after encountering an error, the parser skips to the next statement boundary (`Semicolon`, `Fn`, `Let`, `Var`, `Const`, `Struct`, `Enum`, `Import`, etc.). Progress-check mechanism prevents infinite loops. Cascading errors from failed module imports are suppressed.
+6. **VM::callCallable()** (`lang/src/vm.hpp/cpp`): Calls a Lambda or Primitive from C++ host code, handling free variable setup for closures.
 
-**Error location refinement — NOT DONE**: SourceRange/SourceLoc structures exist, but the parser still highlights the token where it detects the failure rather than the actual cause. The parser may consume several tokens through a rule before returning failure, so the highlighted location can be far from the real problem.
+7. **Clock FFI module** (`bridge/src/tzpl_clock_ffi.cpp`): 12 FFI functions registered in the `"clock"` module: `sched`, `schedAbs` (reschedulable, `Fn() Float` handler), `after`, `at` (one-shot, `Fn() Void` handler), `cancel`, `setTempo`, `getTempo`, `getBeats`, `getBeatDur`, `schedTempoChange`, `setLatency`, `getLatency`. Documented in `lang/docs/FFI_Guide.html` Section 10.
+
+8. **App migration**: The CLI app (`app/src/main.cpp`) migrated from bare `VM` to `NRTVM` with a `NRTTempoScheduler` (120 BPM, 50ms latency). Registered `clock` FFI alongside existing engine and synthdef-compiler FFIs.
+
+**Remaining wiring tasks** (not core infrastructure):
+- Wire OSC handler dispatch to NRT VM (`osc.onMessage()` FFI)
+- Wire `rt.onNote()`/`rt.onControl()` FFI functions
+- `VMReplyCmd` for RT-to-NRT messaging (Phase D of `EVENT_DRIVEN_VM_PLAN.md`)
+
+### 4.3 Error handling improvements — DONE
+
+**Parser error recovery — DONE**: Synchronization implemented in `parser.cpp` -- after encountering an error, the parser skips to the next statement boundary (`Semicolon`, `Fn`, `Let`, `Var`, `Const`, `Struct`, `Enum`, `Import`, etc.). Progress-check mechanism prevents infinite loops. Cascading errors from failed module imports are suppressed.
+
+**Error location refinement — DONE**: Three improvements made: (1) `expect()` now reports the actual token found (e.g. "Expected ')', got '{'"). (2) All closing-delimiter errors use `expectClosing()` which attaches a `DiagnosticNote` pointing to the opening delimiter (e.g. "to match ( here" at line 5). (3) `formatError()` renders notes with source context and caret underlining. Added `tokenKindString()` to produce readable names for all token kinds.
 
 ---
 
@@ -337,7 +345,7 @@ App integration: `--osc-port <port>` CLI flag, `oscPort` config file key. Server
 
 ### 5.3 OSC server for Tzopilotl VM — NOT DONE
 
-Depends on event-driven VM (Phase 4.2). The OSC server infrastructure is in place, but dispatching OSC messages as VM events (`/eval`, `/call`) requires the event-driven VM to be implemented first.
+The event-driven VM infrastructure is now in place (Phase 4.2). The NRT VM with mutex serialization and handler table can receive OSC-dispatched events. Remaining work: wire the `OscDispatcher` to call `NRTVM::callCallable()` for `/tzpl/eval`, `/tzpl/call`, and user-registered addresses, and implement `osc.onMessage()` FFI for user handler registration.
 
 ### 5.4 OSC client (sending) — DONE
 
@@ -744,7 +752,7 @@ Phase 0 (Build Infrastructure)       ✅ DONE
   └─> Phase 1 (Library-ify)          ✅ DONE
         ├─> Phase 2 (FFI: Audio)     ✅ DONE
         │     └─> Phase 3 (FFI: SD)  ✅ DONE
-        │           └─> Phase 4 (Lang Features)  🟡 PARTIAL (event-driven VM remaining)
+        │           └─> Phase 4 (Lang Features)  🟢 MOSTLY DONE (event-driven VM done)
         │                 └─> Phase 5 (OSC)       🟢 MOSTLY DONE
         │                       └─> Phase 6 (NATS) ⬜ NOT STARTED
         ├─> Phase 7 (Engine Features)              🟡 PARTIAL ─────────────────┐
@@ -775,8 +783,8 @@ Phase 0 (Build Infrastructure)       ✅ DONE
 | 1 | Library-ify projects | ✅ Done | — |
 | 2 | FFI: engine | ✅ Done | — |
 | 3 | FFI: synthdef-compiler | ✅ Done | — |
-| 4 | Critical language features | 🟡 Partial | Event-driven VM, error location refinement |
-| 5 | OSC support | 🟢 Mostly done | VM event dispatch (depends on Phase 4.2) |
+| 4 | Critical language features | 🟢 Mostly done | Error location refinement remaining; event-driven VM and clock FFI done |
+| 5 | OSC support | 🟢 Mostly done | VM event dispatch wiring (NRT VM infrastructure in place) |
 | 6 | NATS support | ⬜ Not started | All tasks |
 | 7 | Engine feature completion | 🟡 Partial | Buffers, binary sexpr. Audio input, master gain/channel offset done |
 | 8 | Compiler feature completion | ✅ Done | — |
@@ -793,7 +801,7 @@ Phase 0 (Build Infrastructure)       ✅ DONE
 
 ## Key Risks & Decisions
 
-1. **Event-driven VM design** (Phase 4.2): This is the most architecturally significant remaining work. The VM must be able to process an event handler and return control to the host without blocking. This needs careful design to work with the engine's sample-accurate scheduling. Infrastructure (`callFunction()`, TLSF allocator, lock-free FIFOs) is in place, but the event management layer is not.
+1. **Event-driven VM design** (Phase 4.2): Done. Cross-thread ARC deletion, NRT VM with mutex serialization, RT VM on Silo, NRT and RT tempo schedulers with TempoRamp, clock FFI (12 functions), app migrated to NRTVM. See `EVENT_DRIVEN_VM_PLAN.md` for the full design. Remaining wiring: OSC handler dispatch, RT handler registration (`rt.onNote`/`rt.onControl`).
 
 2. **UI framework choice** (Phase 10): Dear ImGui is recommended but the project description mentions Qt as an alternative. This should be decided before Phase 10 begins.
 

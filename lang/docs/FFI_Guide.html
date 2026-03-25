@@ -399,6 +399,16 @@ if (localStorage.getItem('tzpl-docs-theme') === 'light') document.documentElemen
         <li><a href="#osc-bundles">Bundles &amp; Scheduling</a></li>
       </ol>
     </li>
+    <li><a href="#clock">Clock / Tempo Scheduling</a>
+      <ol>
+        <li><a href="#clock-overview">Overview</a></li>
+        <li><a href="#clock-scheduling">Scheduling Functions</a></li>
+        <li><a href="#clock-tempo">Tempo Control</a></li>
+        <li><a href="#clock-queries">Beat &amp; Tempo Queries</a></li>
+        <li><a href="#clock-latency">Latency</a></li>
+        <li><a href="#clock-examples">Examples</a></li>
+      </ol>
+    </li>
   </ol>
 </nav>
 
@@ -1872,6 +1882,162 @@ Tzopilotl code calls foreign function
 <div class="note">
   <strong>Note:</strong> Bundles can be nested. Inner bundles inherit the outer bundle's transaction context.
 </div>
+
+<!-- ================================================================ -->
+<!--  10. CLOCK / TEMPO SCHEDULING                                     -->
+<!-- ================================================================ -->
+
+<h2 id="clock">10. Clock / Tempo Scheduling</h2>
+
+<!-- -------------------------------- -->
+<h3 id="clock-overview">10.1 Overview</h3>
+
+<p>Tzopilotl includes a beat-based tempo scheduler for musical timing. Events are scheduled at beat positions rather than wall-clock times, with automatic conversion using a <strong>TempoRamp</strong> that supports smooth tempo transitions.</p>
+
+<p>The scheduler follows the SuperCollider <code>TempoClock</code> model:</p>
+
+<ul>
+  <li>Events are scheduled by <strong>beat position</strong>, not seconds.</li>
+  <li>A handler that returns a positive <code>Float</code> is automatically rescheduled that many beats later (useful for repeating patterns).</li>
+  <li>Tempo can be changed immediately or ramped smoothly over a specified number of beats.</li>
+  <li>The scheduler fires events slightly early by a configurable latency, giving commands time to reach the real-time audio thread before they must execute.</li>
+</ul>
+
+<p>All clock functions are registered under the <code>clock</code> foreign module. Import them with:</p>
+
+<pre><code><span class="kw">import</span> clock : *;</code></pre>
+
+<!-- -------------------------------- -->
+<h3 id="clock-scheduling">10.2 Scheduling Functions</h3>
+
+<h4>Reschedulable handlers</h4>
+
+<p>These take a <code>Fn() Float</code> handler. If the handler returns a positive finite number, it is rescheduled that many beats later. Return <code>0.0</code> or a negative number to stop.</p>
+
+<table>
+  <tr><th>Function</th><th>Description</th></tr>
+  <tr><td><code>sched(deltaBeats Float, handler Fn() Float) Int</code></td><td>Schedule relative to the current logical beat. Returns a timer ID.</td></tr>
+  <tr><td><code>schedAbs(beat Float, handler Fn() Float) Int</code></td><td>Schedule at an absolute beat position. Returns a timer ID.</td></tr>
+</table>
+
+<h4>One-shot handlers</h4>
+
+<p>These take a <code>Fn() Void</code> handler and never reschedule.</p>
+
+<table>
+  <tr><th>Function</th><th>Description</th></tr>
+  <tr><td><code>after(deltaBeats Float, handler Fn() Void) Int</code></td><td>Schedule relative to the current logical beat. Returns a timer ID.</td></tr>
+  <tr><td><code>at(beat Float, handler Fn() Void) Int</code></td><td>Schedule at an absolute beat position. Returns a timer ID.</td></tr>
+</table>
+
+<h4>Cancellation</h4>
+
+<table>
+  <tr><th>Function</th><th>Description</th></tr>
+  <tr><td><code>cancel(timerID Int) Void</code></td><td>Cancel a scheduled event by its timer ID.</td></tr>
+</table>
+
+<!-- -------------------------------- -->
+<h3 id="clock-tempo">10.3 Tempo Control</h3>
+
+<p>Tempo is specified in <strong>beats per minute</strong> (BPM). The default tempo is 120 BPM.</p>
+
+<table>
+  <tr><th>Function</th><th>Description</th></tr>
+  <tr><td><code>setTempo(bpm Float) Void</code></td><td>Set the tempo immediately.</td></tr>
+  <tr><td><code>schedTempoChange(beat Float, targetBPM Float, rampBeats Float) Int</code></td><td>Schedule a smooth tempo ramp starting at the given beat, reaching <code>targetBPM</code> over <code>rampBeats</code> beats. The ramp is linear in beats (exponential in seconds). Returns a timer ID.</td></tr>
+</table>
+
+<p>A tempo ramp with <code>rampBeats = 0</code> is an instantaneous change at the specified beat.</p>
+
+<div class="note">
+  <strong>Note:</strong> Internally, tempo is stored as beats per second (BPS). The FFI converts: BPS = BPM / 60. After a ramp completes, the ending tempo is held constant until a new ramp is installed.
+</div>
+
+<!-- -------------------------------- -->
+<h3 id="clock-queries">10.4 Beat &amp; Tempo Queries</h3>
+
+<table>
+  <tr><th>Function</th><th>Description</th></tr>
+  <tr><td><code>getTempo() Float</code></td><td>Current tempo in BPM.</td></tr>
+  <tr><td><code>getBeats() Float</code></td><td>Current beat position. Inside a handler callback, returns the handler's logical beat; outside, returns the wall-clock beat.</td></tr>
+  <tr><td><code>getBeatDur() Float</code></td><td>Duration of one beat in seconds at the current tempo.</td></tr>
+</table>
+
+<!-- -------------------------------- -->
+<h3 id="clock-latency">10.5 Latency</h3>
+
+<p>The NRT scheduler fires events slightly ahead of their beat time by a configurable latency. This gives engine commands time to travel through the lock-free FIFO and arrive at the real-time thread before they must execute. The default latency is 50 ms.</p>
+
+<div class="note">
+  <strong>Note:</strong> These latency functions apply to the NRT (non-real-time) tempo scheduler only. The RT tempo scheduler runs directly on the audio thread using sample time as its time base, with no latency offset &mdash; events fire at the exact sample.
+</div>
+
+<table>
+  <tr><th>Function</th><th>Description</th></tr>
+  <tr><td><code>setLatency(seconds Float) Void</code></td><td>Set the latency compensation in seconds.</td></tr>
+  <tr><td><code>getLatency() Float</code></td><td>Get the current latency in seconds.</td></tr>
+</table>
+
+<!-- -------------------------------- -->
+<h3 id="clock-examples">10.6 Examples</h3>
+
+<h4>Repeating pattern</h4>
+
+<pre><code><span class="kw">import</span> clock : *;
+<span class="kw">import</span> audio_engine : *;
+
+<span class="cmt">-- Play a note every beat using the reschedule convention.</span>
+<span class="cmt">-- The handler returns 1.0, so it fires again 1 beat later.</span>
+<span class="fn">sched</span>(<span class="num">0.0</span>, <span class="kw">fn</span>() Float {
+    <span class="fn">begin</span>(<span class="num">0</span>);
+    <span class="fn">noteOn</span>(<span class="num">100</span>, <span class="num">60</span>, [<span class="num">440.0</span>, <span class="num">0.5</span>]);
+    <span class="fn">go</span>();
+    <span class="num">1.0</span>;  <span class="cmt">-- reschedule 1 beat later</span>
+});</code></pre>
+
+<h4>One-shot delayed event</h4>
+
+<pre><code><span class="kw">import</span> clock : *;
+<span class="kw">import</span> audio_engine : *;
+
+<span class="cmt">-- Turn off all notes after 8 beats</span>
+<span class="fn">after</span>(<span class="num">8.0</span>, <span class="kw">fn</span>() Void {
+    <span class="fn">begin</span>(<span class="num">0</span>);
+    <span class="fn">allNotesOff</span>(<span class="num">100</span>);
+    <span class="fn">go</span>();
+});</code></pre>
+
+<h4>Tempo ramp</h4>
+
+<pre><code><span class="kw">import</span> clock : *;
+
+<span class="fn">setTempo</span>(<span class="num">120.0</span>);  <span class="cmt">-- start at 120 BPM</span>
+
+<span class="cmt">-- At beat 16, begin ramping to 140 BPM over 8 beats</span>
+<span class="fn">schedTempoChange</span>(<span class="num">16.0</span>, <span class="num">140.0</span>, <span class="num">8.0</span>);
+
+<span class="cmt">-- At beat 32, instantly drop to 90 BPM</span>
+<span class="fn">schedTempoChange</span>(<span class="num">32.0</span>, <span class="num">90.0</span>, <span class="num">0.0</span>);</code></pre>
+
+<h4>Scheduling from within a handler</h4>
+
+<pre><code><span class="kw">import</span> clock : *;
+<span class="kw">import</span> audio_engine : *;
+
+<span class="cmt">-- Schedule two notes a half-beat apart, starting at beat 4</span>
+<span class="fn">at</span>(<span class="num">4.0</span>, <span class="kw">fn</span>() Void {
+    <span class="fn">begin</span>(<span class="num">0</span>);
+    <span class="fn">noteOn</span>(<span class="num">100</span>, <span class="num">60</span>, [<span class="num">440.0</span>, <span class="num">0.8</span>]);
+    <span class="fn">go</span>();
+
+    <span class="cmt">-- sched() is relative to the current logical beat (4.0)</span>
+    <span class="fn">after</span>(<span class="num">0.5</span>, <span class="kw">fn</span>() Void {
+        <span class="fn">begin</span>(<span class="num">0</span>);
+        <span class="fn">noteOn</span>(<span class="num">100</span>, <span class="num">67</span>, [<span class="num">587.33</span>, <span class="num">0.6</span>]);
+        <span class="fn">go</span>();
+    });
+});</code></pre>
 
 </main>
 <script>

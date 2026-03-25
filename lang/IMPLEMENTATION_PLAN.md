@@ -58,7 +58,7 @@ The following components exist and are functional:
 | **9** | **9.1** | **Module System** | Not started. Import/export system. |
 | **10** | **10.1–10.3** | **Methods & OO** | Not started. Method declarations, struct inheritance, where clauses. MethodType and Method value types exist but no syntax/dispatch. |
 | 11 | 11.1 | Dynamic Scoping | Not started. Dynamic scope variables. |
-| 12 | 12.1 | Event-Driven VM | Not started. Event system for real-time audio. |
+| 12 | 12.1 | Event-Driven VM | Done. See `EVENT_DRIVEN_VM_PLAN.md`. Cross-thread ARC, NRT VM, RT VM on Silo. |
 | 13 | 13.2–13.4 | Standard Library (remaining) | Partial. String/array/list utility functions, IO. |
 | 14 | 14.x | Optimizations | Not started. Register allocation, constant folding, inlining, tail calls. |
 | 15 | 15.x | Error Handling & Diagnostics | Not started. Better messages, runtime errors, parser recovery. |
@@ -446,20 +446,27 @@ See Phase 6 below. Implemented after templates were completed.
 
 ---
 
-## Phase 12: Event System
+## Phase 12: Event System (COMPLETE)
 
-### 12.1 Event-Driven VM
+### 12.1 Event-Driven VM -- Done
 
-**Goal**: The VM responds to external events. After processing an event, the stack collapses. No persistent call stack between events.
+**Status**: Complete. Full design and core infrastructure implemented. See `EVENT_DRIVEN_VM_PLAN.md` for the detailed plan covering RT and NRT VMs.
 
-**Files**: `vm.hpp/cpp`
+**What was implemented**:
 
-**Tasks**:
-1. Define event handler registration: `on eventName(params) { body }` or via a registration function.
-2. VM event loop: Wait for event (from external source, e.g., audio callback), dispatch to registered handler, execute to completion, clean up stack.
-3. GC heartbeat: Call `gc.heartbeat()` at the start or end of each event.
-4. Event sources: Define an external API for pushing events into the VM from C++ host code.
-5. Ensure no allocation or system call between events unless during GC heartbeat.
+1. **Cross-thread ARC deletion** (`gc.hpp`, `arc.hpp`, `tlsf_allocator.hpp`, `vm.hpp/cpp`): Lock-free MPSC `ForeignDeleteQueue` (Treiber stack) per VM. When an object's last reference is dropped on a foreign thread, it is enqueued on the home VM's foreign delete queue and freed during that VM's `gcHeartbeat()`. `GCObj::operator delete` uses `homeAllocator_` for correct cross-thread deallocation.
+
+2. **NRT VM with mutex serialization** (`nrt_vm.hpp`, `nrt_scheduler.hpp/cpp`): `NRTVM` wrapper struct provides `call()`, `callCallable()`, `compileAndInstall()`, and `execute()` -- all acquire a per-VM mutex, call `makeCurrent()`, and run `gcHeartbeat()`. Any thread (OSC server, NATS client, scheduler, UI) can call in. `NRTScheduler` runs on its own thread with wall-clock timing and logical time for drift-free scheduling. Handlers are retained `Obj*` with proper lifecycle management.
+
+3. **RT VM on Silo** (`bridge/include/tzpl_vm_commands.hpp`, `engine/src/tzpl_silo.hpp`): `Silo::vm_` opaque pointer for attaching a VM. Engine command subclasses (`VMEventCmd`, `VMCallableCmd`, `CodeInstallCmd`, `AttachVMCmd`, `DetachVMCmd`) flow through the existing FIFO/scheduler to deliver events to the RT VM.
+
+4. **VM::callCallable()** (`vm.hpp/cpp`): New method to call a Lambda or Primitive from C++ host code, handling free variable setup for closures.
+
+**Remaining wiring work** (not core infrastructure):
+- Register `after()`/`every()`/`cancel()` as FFI functions
+- Wire OSC handler registration (`osc.onMessage()` FFI)
+- Wire `rt.onNote()`/`rt.onControl()` FFI functions
+- Phase D from `EVENT_DRIVEN_VM_PLAN.md`: `VMReplyCmd` for RT-to-NRT messaging
 
 ---
 
@@ -598,7 +605,7 @@ See Phase 6 below. Implemented after templates were completed.
 | 19 | 10.2 | Struct inheritance | |
 | 20 | 10.3 | Where clauses / type constraints | |
 | 21 | 11.1 | Dynamic scoping | |
-| 22 | 12.1 | Event-driven VM | |
+| 22 | 12.1 | Event-driven VM | Done |
 | 23 | 13.2–13.4 | Standard library (remaining) | Partial |
 | 24 | 14.x | Optimizations | |
 | 25 | 15.x | Error handling / diagnostics | |

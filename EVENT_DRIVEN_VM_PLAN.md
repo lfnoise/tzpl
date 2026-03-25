@@ -2,7 +2,7 @@
 
 This document details the design for integrating the Tzopilotl VM into two fundamentally different execution environments: **real-time (RT) audio threads** and **non-real-time (NRT) threads**. These environments share the same VM core but differ in their event sources, constraints, and dispatch mechanisms.
 
-**Last updated**: 2026-03-22
+**Last updated**: 2026-03-24
 
 ---
 
@@ -19,7 +19,7 @@ The Tzopilotl VM is designed to be event-driven: receive an event, execute a han
                                    │
                     ┌──────────────┴───────────────┐
                     │         VM Core               │
-                    │  (registers, TLSF, GC,        │
+                    │  (registers, TLSF, ARC,        │
                     │   callFunction, dispatch)      │
                     └──────┬───────────────┬────────┘
                            │               │
@@ -51,7 +51,7 @@ Each VM instance is **serialized** -- at most one thread executes it at any time
 - **RT VMs** achieve this structurally: only the Silo's worker thread ever touches the VM. No mutex needed.
 - **NRT VMs** achieve this via a **per-VM mutex**. Any thread (OSC server, NATS client, scheduler, UI) may call into the VM, but must hold the mutex while doing so.
 
-This means the VM itself has no internal locking or atomics, which is critical for RT safety. The serialization guarantee is provided externally.
+This means the VM itself needs no internal locking. The only atomics are in the ARC refcount operations (`retain`/`release`), which use `std::atomic<u32>` with relaxed/acq_rel ordering -- these are lock-free and RT-safe on all target platforms. The serialization guarantee for VM execution is provided externally.
 
 ---
 
@@ -69,7 +69,7 @@ struct Silo {
 };
 ```
 
-The VM is allocated with a TLSF pool (e.g. 4-16 MB). If the pool is exhausted at runtime, the TLSF acquires more memory (from a pre-filled free-block queue or by calling the system allocator). This sacrifices real-time guarantees momentarily, but the rationale is: **it is better to glitch than to fail**. In a live performance, a brief audio dropout from a system allocation is far preferable to skipping an all-notes-off, missing a section trigger, or crashing. An aggressive GC sweep as an alternative could cause even longer degradation and still might not free enough memory in time.
+The VM is allocated with a TLSF pool (e.g. 4-16 MB). If the pool is exhausted at runtime, the TLSF acquires more memory (from a pre-filled free-block queue or by calling the system allocator). This sacrifices real-time guarantees momentarily, but the rationale is: **it is better to glitch than to fail**. In a live performance, a brief audio dropout from a system allocation is far preferable to skipping an all-notes-off, missing a section trigger, or crashing.
 
 ### 2.2 When the RT VM Executes
 
@@ -101,14 +101,14 @@ This reuses the scheduler's sample-accurate timing, scheduling policies (`schedI
 
 The RT VM does not do DSP computation directly. Audio DSP is handled by compiled native plugins (via the synthdef-compiler). The RT VM's role is to respond to events by issuing **RT-safe engine commands only** -- setting controls, triggering notes (noteOn, noteOff, allNotesOff), and setting note parameters. Graph-building operations (newNode, connect, setInput, disconnect) cannot be initiated from the RT thread because they contain an NRT stage that allocates or deallocates memory -- these must originate from an NRT thread. Graph modification is the responsibility of the NRT VM.
 
-### 2.3 GC Integration
+### 2.3 ARC Integration
 
-The incremental GC is already designed for bounded pauses. On the RT thread:
+The VM uses atomic reference counting (ARC) with deferred deletion instead of a garbage collector. On the RT thread:
 
-- **`gcHeartbeat()`** is called after each event handler returns (inside `VMEventCmd::doRT()`). Since the VM is event-driven, there is no per-buffer opportunity -- heartbeats are driven by event activity.
-- If events are infrequent, GC pressure is also low (no allocations happening between events), so the lag is acceptable.
-- Between events, only globals and coroutine frames are GC roots (the call stack is collapsed), which keeps root-scanning fast.
-- The heartbeat budget is tuned to complete a full GC cycle within a reasonable number of events.
+- **`gcHeartbeat()`** is called after each event handler returns (inside `VMEventCmd::doRT()`). It drains the auto-release pool (releasing temporary objects created during the event) and processes a bounded number of deferred deletions.
+- Object deallocation is RT-safe because the TLSF allocator provides O(1) deallocation. Destructors are simple (just decrement child refcounts), and the deletion budget bounds the work per heartbeat.
+- If events are infrequent, allocation pressure is also low, so the auto-release pool stays small.
+- Between events, the call stack is collapsed -- only globals and coroutine frames hold references. Temporary objects from the last event that have no heap references are freed when the pool drains.
 
 ### 2.4 RT Safety Enforcement
 
@@ -117,23 +117,23 @@ The compiler already supports an `rt_restricted` flag on compilation targets. Wh
 - All handler functions destined for RT execution must be compiled with `rt_restricted = true`.
 - The 19 engine FFI functions already marked `rtSafe` are callable.
 - User-defined pure functions (no I/O, no system allocation) are callable.
-- Functions that allocate GC objects are callable (TLSF is RT-safe).
+- Functions that allocate objects are callable (TLSF allocation and ARC refcounting are RT-safe).
 - Functions that call `print`, file I/O, or non-RT FFI functions are rejected at compile time.
 
 ### 2.5 Bounded Execution
 
-Unbounded loops on the RT thread would cause audio dropouts. Two approaches, which can be combined:
+It is the live coder's responsibility to keep RT handlers short. The runtime does not impose an instruction budget because:
 
-1. **Instruction budget**: The VM counts instructions executed and halts if a budget is exceeded. This adds a check per instruction (cheap but nonzero). The budget is configurable per VM.
-2. **Static analysis**: The compiler rejects unbounded loops (`while`, recursion without base case) in RT-restricted code, permitting only bounded `for` loops over known-size ranges. This is more restrictive but has zero runtime cost.
+- **Better to glitch than to fail.** A silent halt mid-handler during a performance would be worse than the audio dropout it tries to prevent. A performer's commands mysteriously failing could ruin a performance.
+- **Instructions are not equal cost.** An instruction budget assumes uniform cost, but a single hash-map lookup or list force can be orders of magnitude more expensive than an integer add.
+- **The halting problem.** Static analysis of bounded execution is fundamentally limited. Attempting it would either reject useful programs or give false confidence.
 
-The initial implementation should use approach 1 (instruction budget) as it is simpler and catches all cases. Approach 2 can be added later as an optimization that removes the per-instruction check.
+The `rt_restricted` compilation flag already prevents I/O and blocking calls. Beyond that, the coder controls their own execution bounds.
 
 ### 2.6 What the RT VM Cannot Do
 
 - Call blocking system calls (enforced by `rt_restricted` compilation)
 - Perform I/O (enforced by `rt_restricted` compilation)
-- Run unbounded computations (enforced by instruction budget)
 - Be accessed from any thread other than its Silo's worker thread
 
 Note: The TLSF allocator may grow on exhaustion by acquiring memory from the system allocator. This is a deliberate trade-off -- a brief RT violation is preferable to failure (see section 10, decision 1).
@@ -144,7 +144,7 @@ Note: The TLSF allocator may grow on exhaustion by acquiring memory from the sys
 
 ### 3.1 Architecture
 
-An NRT VM does **not** own a thread. Instead, it is a mutex-protected resource that any NRT thread can call into directly. The caller's thread acquires the VM's mutex, sets the thread-local `gCurrentVM`, calls `vm->callFunction()`, runs a GC heartbeat, and releases the mutex. The VM executes on whatever thread triggered the event.
+An NRT VM does **not** own a thread. Instead, it is a mutex-protected resource that any NRT thread can call into directly. The caller's thread acquires the VM's mutex, sets the thread-local `gCurrentVM`, calls `vm->callFunction()`, runs a heartbeat (drains auto-release pool and processes deferred deletions), and releases the mutex. The VM executes on whatever thread triggered the event.
 
 ```
 ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐
@@ -245,10 +245,20 @@ void evalUserCode(NRTVM& nrtVM, const std::string& code) {
 
 The NRT scheduler runs on its own thread and fires wall-clock-timed events. It does not live inside the VM -- it is an external service that calls into the VM when events are due.
 
+#### Logical Time
+
+To prevent timing drift in musical contexts, the NRT scheduler uses **logical time**. Each event carries the logical time at which it was supposed to fire. When user code schedules a new event with `after(dt, handler)`, the offset `dt` is added to the *current event's logical time*, not to the wall clock. This means:
+
+- If an event is scheduled for logical time T and takes 5ms to execute, a subsequent `after(1.0, ...)` schedules at T+1.0, not at wall_clock+1.0. No drift accumulates.
+- Repeating events (`every(interval, ...)`) advance by `interval` from the previous logical time, not from when execution finished.
+- If a handler runs late (e.g., mutex contention delayed it), the scheduler fires it immediately and maintains the correct logical time for downstream scheduling. This is analogous to the RT scheduler's `schedBetterLateThanNever` policy.
+
+The current logical time is stored as a thread-local or VM field, set by the scheduler before calling the handler.
+
 ```cpp
 struct NRTScheduler {
     struct Entry {
-        TimePoint when;
+        TimePoint logicalTime;     // when this event should logically occur
         CodeBlock* handler;
         std::vector<Word> args;
         u16 argc;
@@ -270,18 +280,21 @@ struct NRTScheduler {
                 continue;
             }
             auto next = queue_.top();
-            if (next.when > Clock::now()) {
-                cv.wait_until(lock, next.when);
+            if (next.logicalTime > Clock::now()) {
+                cv.wait_until(lock, next.logicalTime);
                 continue;
             }
             queue_.pop();
             lock.unlock();
 
+            // Set logical time so that after()/every() schedule relative to it
+            vm_->setLogicalTime(next.logicalTime);
+
             // Call the VM on the scheduler thread
             vm_->call(next.handler, next.args.data(), next.argc);
 
             if (next.repeating) {
-                next.when += next.interval;
+                next.logicalTime += next.interval;
                 std::lock_guard lock2(schedMtx);
                 queue_.push(next);
             }
@@ -292,10 +305,16 @@ struct NRTScheduler {
 
 Tzopilotl code schedules NRT events via FFI:
 ```
+-- Schedule relative to the current event's logical time (drift-free)
 fn after(seconds Float, handler Fn() Void) Void;
 fn every(seconds Float, handler Fn() Void) Void;
 fn cancel(timerID Int) Void;
+
+-- Schedule at an absolute logical time
+fn at(time Float, handler Fn() Void) Void;
 ```
+
+`after(dt, handler)` schedules at `currentLogicalTime + dt`. `every(interval, handler)` creates a repeating event that advances by `interval` from its own logical time each iteration. `at(t, handler)` schedules at an absolute time. These semantics match the RT scheduler's sample-accurate timing model, adapted for wall-clock NRT use.
 
 For sample-accurate scheduling on the engine, Tzopilotl code continues to use the existing `sched()` FFI function, which pushes commands through the engine's RT scheduler.
 
@@ -305,7 +324,7 @@ For sample-accurate scheduling on the engine, Tzopilotl code continues to use th
 - Perform I/O (file reads, print, network)
 - Call any FFI function (both RT-safe and non-RT-safe)
 - Block (the calling thread blocks, but other threads wait on the mutex -- acceptable for NRT)
-- Run unbounded computations (no instruction budget)
+- Run unbounded computations (no restrictions)
 - Send commands to the engine (via `begin()`/`go()`/`sched()`)
 - Compile code (compilation happens under the mutex on the calling thread)
 
@@ -315,7 +334,7 @@ For sample-accurate scheduling on the engine, Tzopilotl code continues to use th
 
 **Thread-local state**: The VM uses `thread_local` globals (`gCurrentVM`, `gCurrentTypeUniverse`). Since any thread may call the VM, `makeCurrent()` must be called under the mutex before each VM invocation to set these correctly for the calling thread.
 
-**GC heartbeats**: Each `call()` invocation runs one GC heartbeat. Since the VM has no dedicated thread, there is no idle-time GC. If events are infrequent, the GC may lag. This is acceptable -- the GC is incremental and will catch up when events resume. If needed, a periodic keepalive timer in the NRT scheduler can drive heartbeats.
+**ARC heartbeats**: Each `call()` invocation runs one heartbeat (drains the auto-release pool and processes deferred deletions). Since the VM has no dedicated thread, there is no idle-time cleanup. If events are infrequent, deferred deletions may accumulate. This is acceptable -- they will be processed when events resume. If needed, a periodic keepalive timer in the NRT scheduler can drive heartbeats.
 
 ---
 
@@ -440,7 +459,7 @@ fn stepSequencer(coro Coroutine[Void, Void]) Void {
 }
 ```
 
-Since coroutine frames are GC-managed objects, they persist in the VM's heap between events and are scanned as GC roots alongside globals.
+Suspended coroutine frames are reference-counted objects that persist in the VM's heap between events. They are retained by the globals or variables that reference them.
 
 ---
 
@@ -465,7 +484,7 @@ On the NRT VM, code installation happens under the mutex on whatever thread init
 2. The compiler runs, producing a new `CompileResult`.
 3. `vm.install(newCompileResult)` updates the VM's function table and global slots.
 4. Handler registrations in the new code take effect immediately.
-5. Old `CodeBlock` objects become unreferenced and are collected by the GC.
+5. Old `CodeBlock` objects become unreferenced (CodeBlocks are system-allocated and not reference-counted -- they are freed when their owning compilation context is released).
 6. The mutex is released.
 
 This is typically triggered by the UI thread (user edits code) or by an OSC `/tzpl/eval` message on the OSC server thread. In either case, the calling thread holds the mutex for the duration of both compilation and installation, ensuring no other event can execute on the VM mid-update.
@@ -488,7 +507,7 @@ struct CodeInstallCmd : Command {
         if (s->vm_) {
             auto old = s->vm_->install(newCode_);
             // old CodeBlocks are now unreferenced;
-            // GC will collect them, deletion deferred to NRT
+            // deletion deferred to NRT via dead_nodes_ FIFO
         }
     }
 
@@ -606,33 +625,53 @@ NRT VM:
 
 ## 9. Implementation Phases
 
-### Phase A: NRT VM with Mutex Serialization
+### Phase 0: ARC Memory Management (COMPLETED)
 
-**Why first**: The NRT VM is simpler (no RT constraints) and enables the most immediate user-facing features (OSC-driven live coding, REPL integration).
+The garbage collector has been replaced with atomic reference counting (ARC). This was a prerequisite for cross-VM object sharing.
 
-1. Implement `NRTVM` wrapper struct with mutex and `call()` method.
-2. Integrate with existing OSC server: OSC dispatcher acquires VM mutex and calls handlers directly on the OSC server thread.
-3. Implement `osc.onMessage()` FFI for user handler registration.
-4. Implement NRT scheduler (own thread, calls into VM via mutex).
-5. Implement `after()` / `every()` NRT timer FFI functions.
-6. Integrate with the app: the CLI app creates an NRT VM, UI thread calls into it for REPL evaluation.
-7. Implement code hot-reload for NRT (compile and install under mutex, old code collected by GC).
+- Replaced the incremental mark-sweep GC with atomic refcounting and deferred deletion.
+- Objects are born into an auto-release pool with refcount=1. Heap stores (globals, captures, struct fields) retain. The pool drains between events, freeing temporaries.
+- A deferred deletion queue processes a bounded number of deletions per heartbeat to avoid unbounded cascading.
+- Immortal objects (types, compile-time constants) use a saturated refcount where retain/release are no-ops.
+- Each object tracks its home TLSF allocator for future cross-thread deletion.
+- New opcodes: `op_init_global_obj`, `op_store_global_obj`, `op_init_dynamic_obj`, `op_store_dynamic_obj`.
 
-### Phase B: RT VM on Silo
+### Phase A: Cross-Thread Deletion (COMPLETED)
 
-**Why second**: Requires Phase A for the compilation pathway (code is compiled on NRT, sent to RT).
+Implemented lock-free cross-thread object deletion for safe multi-VM operation.
 
-1. Add `vm_` and `HandlerTable` to `Silo`.
-2. Implement `VMEventCmd` command subclass.
-3. Implement `CodeInstallCmd` for RT code hot-reload.
-4. Implement `rt.onNote()`, `rt.onControl()` FFI functions.
-5. Add instruction budget to the VM for bounded RT execution.
-6. Extend TLSF to grow on exhaustion (acquire free block from queue or system allocator).
-7. Test: compile an RT-restricted handler on NRT, send via FIFO, execute on RT, verify audio output.
+- Added `ForeignDeleteQueue` (Treiber stack, MPSC lock-free) in `arc.hpp`.
+- Added `foreignDeleteNext_` intrusive link pointer to `GCObj`.
+- Each `TLSFAllocator` stores a `foreignDeleteQueue_` pointer, registered by its owning VM.
+- `arcEnqueueForDeletion()` detects `homeAllocator_ != gCurrentAllocator` and routes to the foreign queue.
+- `gcHeartbeat()` drains the foreign queue into the local deferred delete queue before processing.
+- `GCObj::operator delete` now uses `homeAllocator_` directly (correct for cross-thread deletion).
+- VM destructor drains both foreign and local queues during teardown.
 
-### Phase C: Cross-VM Communication
+### Phase B: NRT VM with Mutex Serialization (COMPLETED)
 
-**Why third**: Refinement layer on top of working RT and NRT VMs.
+Implemented the NRT VM wrapper and wall-clock scheduler.
+
+- `NRTVM` struct (`nrt_vm.hpp`): wraps `VM` with `std::mutex`, provides `call()`, `callCallable()`, `compileAndInstall()`, `execute()` -- all acquire the mutex, call `makeCurrent()`, and run `gcHeartbeat()`.
+- `HandlerTable`: maps OSC addresses and NATS subjects to callable `Obj*` pointers (retained).
+- `NRTScheduler` (`nrt_scheduler.hpp/cpp`): own thread, wall-clock timer, priority queue of entries. Uses logical time for drift-free scheduling. Handlers are `Obj*` (retained/released properly).
+- `VM::callCallable()`: new method to call a Lambda or Primitive from C++ code, handling free variable setup for closures.
+- Remaining work for Phase B: OSC/NATS handler registration FFI functions, `after()`/`every()` FFI, app integration -- these are wiring tasks that depend on the specific event sources being connected.
+
+### Phase C: RT VM on Silo (COMPLETED)
+
+Implemented the RT VM infrastructure on the engine Silo.
+
+- Added `void* vm_` to `Silo` (opaque pointer to `ts::VM`).
+- `VMEventCmd` (`tzpl_vm_commands.hpp`): dispatches a CodeBlock handler to the Silo's VM with `callFunction()`, `resetInstructionCounter()`, and `gcHeartbeat()`.
+- `VMCallableCmd`: dispatches a retained Callable (Lambda) to the Silo's VM, with NRT-stage cleanup.
+- `CodeInstallCmd`: installs a new `CompileResult` on the RT VM.
+- `AttachVMCmd` / `DetachVMCmd`: attach/detach a VM to/from a Silo.
+- Remaining work for Phase C: `rt.onNote()`/`rt.onControl()` FFI functions, TLSF growth-on-exhaustion.
+
+### Phase D: Cross-VM Communication
+
+**Why fourth**: Refinement layer on top of working RT and NRT VMs.
 
 1. Implement `VMReplyCmd` for RT-to-NRT messaging.
 2. Implement shared lock-free buffers for metering/visualization data.
@@ -643,12 +682,14 @@ NRT VM:
 
 ## 10. Design Decisions (Resolved)
 
-1. **Pool exhaustion on RT**: The TLSF allocator will be extended to grow on demand -- acquiring a free block from a pre-filled queue or calling the system allocator. This briefly sacrifices real-time guarantees, but a glitch is preferable to failure. In a live performance, skipping an all-notes-off or a section trigger could be catastrophic. An aggressive GC sweep is not a viable alternative -- it may cause worse degradation and still might not free enough memory.
+1. **Pool exhaustion on RT**: The TLSF allocator will be extended to grow on demand -- acquiring a free block from a pre-filled queue or calling the system allocator. This briefly sacrifices real-time guarantees, but a glitch is preferable to failure. In a live performance, skipping an all-notes-off or a section trigger could be catastrophic.
 
 2. **Multiple NRT VMs**: One NRT VM per application for now. The architecture supports multiple VMs if needed later.
 
-3. **Coroutines**: Allowed on both RT and NRT VMs. Coroutines are important for scheduling ongoing tasks (e.g., multi-step sequences where each step is triggered by an event). Suspended coroutine frames are GC-managed objects that persist in the heap between events and are scanned as GC roots alongside globals.
+3. **Coroutines**: Allowed on both RT and NRT VMs. Coroutines are important for scheduling ongoing tasks (e.g., multi-step sequences where each step is triggered by an event). Suspended coroutine frames are reference-counted objects that persist in the heap between events, retained by the globals or variables that reference them.
 
 4. **RT VM execution model**: The RT VM is event-driven only -- it is NOT called per-sample or per-buffer. It executes when an event arrives from the command queue or from a sample-based or tempo-based scheduling queue. Audio DSP is handled by compiled native plugins; the VM orchestrates the audio graph by issuing engine commands in response to events.
 
 5. **Mutex contention on NRT**: Unlikely to be an issue in practice since NRT events (OSC, user input, timers) are sporadic. If it ever becomes a bottleneck, one or more additional NRT VMs dedicated to background tasks can be created, with work queued onto them.
+
+6. **ARC instead of GC**: The incremental mark-sweep garbage collector was replaced with atomic reference counting (ARC). This was motivated by the need for objects to be safely shared between VMs on different threads. With ARC, when an object's last reference is dropped, the object is enqueued for deferred deletion on its home allocator's thread -- no stop-the-world pause, no root scanning, no write barriers. Most objects are immutable and thus acyclic; mutable references and lazy lists could theoretically create cycles, which would leak. A cycle collector can be added later if needed. The auto-release pool mechanism avoids refcount churn for temporaries -- stack references never touch refcounts, only heap stores (globals, captures, struct fields) retain.

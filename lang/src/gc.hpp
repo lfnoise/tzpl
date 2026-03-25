@@ -51,6 +51,8 @@ void arcEnqueueForDeletion(GCObj* obj);
 class GCObj {
     mutable std::atomic<u32> refcount_{kImmortalRefcount};
     rt::TLSFAllocator* homeAllocator_ = nullptr;
+    GCObj* foreignDeleteNext_ = nullptr;  // intrusive link for cross-thread deletion
+    friend class ForeignDeleteQueue;
 public:
 
     static constexpr uintptr_t kPtrMask = ~(uintptr_t)1;

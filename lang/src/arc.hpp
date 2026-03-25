@@ -85,6 +85,43 @@ public:
     u32 size() const { return (u32)queue_.size(); }
 };
 
+// Lock-free MPSC (multi-producer, single-consumer) queue for cross-thread
+// object deletion. When an object's refcount reaches zero on a foreign thread
+// (i.e., one that does not own the object's home allocator), the object is
+// pushed onto this queue instead of the local DeferredDeleteQueue. The home
+// VM's gcHeartbeat() drains this queue, performing deletion on the correct
+// thread with the correct allocator.
+//
+// Implementation: Treiber stack. Push uses CAS (lock-free, RT-safe).
+// Drain atomically swaps the head to null and returns the entire chain.
+class ForeignDeleteQueue {
+    std::atomic<GCObj*> head_{nullptr};
+public:
+    // Push an object for deferred deletion. Lock-free, safe from any thread.
+    void enqueue(GCObj* obj) {
+        obj->foreignDeleteNext_ = head_.load(std::memory_order_relaxed);
+        while (!head_.compare_exchange_weak(
+            obj->foreignDeleteNext_, obj,
+            std::memory_order_release, std::memory_order_relaxed)) {
+            // CAS failed -- obj->foreignDeleteNext_ was updated to current head
+        }
+    }
+
+    // Drain all enqueued objects into the local DeferredDeleteQueue.
+    // Only called by the owning VM's thread (single consumer).
+    void drainInto(DeferredDeleteQueue& localQueue) {
+        GCObj* list = head_.exchange(nullptr, std::memory_order_acquire);
+        while (list) {
+            GCObj* next = list->foreignDeleteNext_;
+            list->foreignDeleteNext_ = nullptr;
+            localQueue.enqueue(list);
+            list = next;
+        }
+    }
+
+    bool empty() const { return head_.load(std::memory_order_relaxed) == nullptr; }
+};
+
 } // namespace ts
 
 #endif /* arc_hpp */

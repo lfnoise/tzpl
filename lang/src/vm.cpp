@@ -50,6 +50,21 @@ void registerNewObj(GCObj* obj) {
 }
 
 void arcEnqueueForDeletion(GCObj* obj) {
+    rt::TLSFAllocator* home = obj->homeAllocator();
+
+    if (home && home != rt::gCurrentAllocator) {
+        // Cross-thread deletion: object belongs to a different VM's allocator.
+        // Enqueue on the home allocator's foreign delete queue so the owning
+        // VM can delete it on its own thread during gcHeartbeat().
+        auto* queue = static_cast<ForeignDeleteQueue*>(home->getForeignDeleteQueue());
+        if (queue) {
+            queue->enqueue(obj);
+            return;
+        }
+        // Fallthrough: no foreign queue registered (shouldn't happen in normal
+        // multi-VM operation, but handle gracefully).
+    }
+
     if (gCurrentVM) {
         gCurrentVM->deferredDeleteQueue().enqueue(obj);
     } else {
@@ -88,8 +103,14 @@ void* GCObj::operator new(usize size) {
 
 void GCObj::operator delete(void* ptr) noexcept {
     if (!ptr) return;
-    if (rt::gCurrentAllocator) {
-        rt::gCurrentAllocator->deallocate(ptr);
+    // Use the object's home allocator for deallocation. This is correct even
+    // in cross-thread deletion scenarios: the object is always deleted by the
+    // home VM's heartbeat, which has set gCurrentAllocator to the home
+    // allocator. Using homeAllocator_ directly is belt-and-suspenders.
+    auto* obj = static_cast<GCObj*>(ptr);
+    rt::TLSFAllocator* alloc = obj->homeAllocator_;
+    if (alloc) {
+        alloc->deallocate(ptr);
     } else {
         ::free(ptr);
     }
@@ -139,6 +160,10 @@ VM::VM(usize poolSize, TypeUniverse& typeUniverse, const VMTarget& target)
     rt::gCurrentAllocator = &allocator_;
     gCurrentTypeUniverse = &typeUniverse_;
 
+    // Register this VM's foreign delete queue with the allocator so that
+    // cross-thread arcEnqueueForDeletion can find it from homeAllocator_.
+    allocator_.setForeignDeleteQueue(&foreignDeleteQueue_);
+
     // Allocate register file from TLSF
     regs_ = static_cast<Word*>(allocator_.allocate(maxRegs_ * sizeof(Word)));
     if (!regs_) throw std::bad_alloc();
@@ -161,9 +186,15 @@ VM::VM(usize poolSize, TypeUniverse& typeUniverse, const VMTarget& target)
 VM::~VM() {
     makeCurrent();
 
-    // Drain auto-release pool and delete all remaining objects
+    // Unregister the foreign delete queue so no new objects are enqueued
+    // after we start tearing down.
+    allocator_.setForeignDeleteQueue(nullptr);
+
+    // Drain foreign deletes, auto-release pool, and deferred deletions
+    foreignDeleteQueue_.drainInto(deferredDeleteQueue_);
     autoReleasePool_.drain();
     while (!deferredDeleteQueue_.empty()) {
+        foreignDeleteQueue_.drainInto(deferredDeleteQueue_);
         deferredDeleteQueue_.processN(1024);
     }
 
@@ -287,6 +318,51 @@ Word VM::callFunction(CodeBlock* block, const Word* args, u16 argc) {
     entry->op(*this, entry);
 
     return reg(0);
+}
+
+Word VM::callCallable(Obj* callable, const Word* args, u16 argc) {
+    // Check if it's a Lambda (closure)
+    auto* lambda = dynamic_cast<Lambda*>(static_cast<Obj*>(callable));
+    if (lambda) {
+        CodeBlock* block = lambda->codeBlock_;
+        halted_ = false;
+        frameCount_ = 0;
+        baseReg_ = 0;
+        currentRegs_ = regs_;
+        std::memset(regs_, 0, block->numRegs * sizeof(Word));
+
+        // Copy args
+        for (u16 i = 0; i < argc; i++) {
+            regs_[i] = args[i];
+        }
+
+        // Copy free vars after the declared parameters
+        for (u16 i = 0; i < lambda->numFreeVars_; ++i) {
+            regs_[block->numArgs + i] = lambda->freeVars_[i];
+        }
+
+        pushFrame(nullptr, block, 0, block->numRegs, 0);
+
+        // Handle default arguments
+        Code* entry;
+        if (!block->defaultEntryOffsets.empty()) {
+            u16 idx = argc - block->minArity;
+            entry = block->code.data() + block->defaultEntryOffsets[idx];
+        } else {
+            entry = block->code.data();
+        }
+        entry->op(*this, entry);
+        return reg(0);
+    }
+
+    // Primitive: call directly
+    auto* prim = dynamic_cast<Primitive*>(static_cast<Obj*>(callable));
+    if (prim) {
+        return evalPrimitive(prim, args, argc);
+    }
+
+    // Fallback: shouldn't happen
+    return Word();
 }
 
 Word VM::execute(CodeBlock* block) {

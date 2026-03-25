@@ -53,6 +53,10 @@
 #include "compiler.hpp"
 #include "type_universe.hpp"
 #include "error.hpp"
+#include "nrt_vm.hpp"
+#include "nrt_scheduler.hpp"
+#include "nrt_tempo_scheduler.hpp"
+#include "tempo_ramp.hpp"
 
 namespace ts {
 

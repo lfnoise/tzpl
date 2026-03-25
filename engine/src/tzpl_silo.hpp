@@ -84,6 +84,19 @@ struct Silo
     i64 sampleTime_ = 0;
     int channelOffset_ = 0;
     bool needsSort_ = false;
+
+    // Optional attached VM for event-driven scripting (opaque pointer to ts::VM).
+    // Set from an NRT thread via command; only accessed by the Silo's RT thread.
+    void* vm_ = nullptr;
+
+    // Optional tempo-based scheduler (opaque pointer).
+    // Polled each sample to fire beat-timed events on the attached VM.
+    void* rtTempoScheduler_ = nullptr;
+
+    // Callback for per-sample tempo scheduler processing.
+    // Set when a tempo scheduler is attached. Avoids engine depending on lang types.
+    using TempoSchedFn = void (*)(void* scheduler, i64 sampleTime, void* vm);
+    TempoSchedFn tempoSchedFn_ = nullptr;
         
     Silo();
     ~Silo();

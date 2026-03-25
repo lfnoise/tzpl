@@ -63,7 +63,23 @@ Token Parser::expect(TokenKind kind, const std::string& msg) {
     if (check(kind)) {
         return advance();
     }
-    error(msg);
+    error(msg + ", got " + tokenKindString(current_.kind));
+    return current_;
+}
+
+Token Parser::expectClosing(TokenKind kind, const char* open, SourceRange openLoc) {
+    if (check(kind)) {
+        return advance();
+    }
+    std::string msg = std::string("Expected ") + tokenKindString(kind)
+        + ", got " + tokenKindString(current_.kind);
+    error(current_.loc, msg);
+    // Add a note pointing to the opening delimiter
+    if (!errors_.empty()) {
+        errors_.back().notes.emplace_back(openLoc,
+            std::string("to match ") + open + " here",
+            lexer_.filename(), lexer_.source());
+    }
     return current_;
 }
 
@@ -102,7 +118,7 @@ void Parser::expectTerminator() {
     if (current_.kind == TokenKind::RBrace) {
         return;  // Block end is an implicit terminator
     }
-    error("Expected ';'");
+    error(std::string("Expected ';', got ") + tokenKindString(current_.kind));
 }
 
 void Parser::error(const std::string& msg) {
@@ -255,6 +271,7 @@ ASTPtr Parser::parseImportDecl() {
 
         // Check for named imports: import std.math.{sin, cos}
         if (check(TokenKind::LBrace)) {
+            SourceRange openLoc = currentLoc();
             advance(); // consume '{'
             std::vector<ImportName> names;
             do {
@@ -267,7 +284,7 @@ ASTPtr Parser::parseImportDecl() {
                 }
                 names.push_back(std::move(imp));
             } while (match(TokenKind::Comma));
-            expect(TokenKind::RBrace, "Expected '}' after import list");
+            expectClosing(TokenKind::RBrace, "{", openLoc);
             expectTerminator();
             return std::make_unique<ImportDeclNode>(start, std::move(modulePath),
                 ImportKind::Named, "", std::move(names));
@@ -308,6 +325,7 @@ ASTPtr Parser::parseLetDecl() {
     // Check for struct pattern: let Name { field: pat, ... } = ...
     if (check(TokenKind::LBrace)) {
         // Re-parse as struct pattern using the name we already consumed
+        SourceRange openLoc = currentLoc();
         advance(); // consume {
         std::vector<StructPatternField> fields;
         while (!check(TokenKind::RBrace) && !check(TokenKind::Eof)) {
@@ -322,7 +340,7 @@ ASTPtr Parser::parseLetDecl() {
             if (check(TokenKind::Comma)) advance();
             if (current_.loc.start.offset == offsetBefore) { synchronize(); }
         }
-        expect(TokenKind::RBrace, "Expected '}' after struct pattern");
+        expectClosing(TokenKind::RBrace, "{", openLoc);
         auto pat = std::make_unique<StructPattern>(name.loc, name.text, std::move(fields));
         expect(TokenKind::Equals, "Expected '=' after pattern in let declaration");
         ExprPtr init = parseExpression();
@@ -335,6 +353,7 @@ ASTPtr Parser::parseLetDecl() {
     // Disambiguate by peeking at what follows '(' — type keywords or ')' mean type annotation
     if (check(TokenKind::LParen) && !isTypeKeyword(lexer_.peek().kind)
         && lexer_.peek().kind != TokenKind::RParen) {
+        SourceRange openLoc = currentLoc();
         advance(); // consume (
         std::vector<PatternPtr> elements;
         bool hasRest = false;
@@ -360,7 +379,7 @@ ASTPtr Parser::parseLetDecl() {
                 }
             }
         }
-        expect(TokenKind::RParen, "Expected ')' after tuple struct pattern");
+        expectClosing(TokenKind::RParen, "(", openLoc);
         auto pat = std::make_unique<TuplePattern>(name.loc, std::move(elements),
             hasRest, std::move(restName), name.text);
         expect(TokenKind::Equals, "Expected '=' after pattern in let declaration");
@@ -436,6 +455,7 @@ ASTPtr Parser::parseVarDecl() {
 
     // Check for struct pattern
     if (check(TokenKind::LBrace)) {
+        SourceRange openLoc = currentLoc();
         advance(); // consume {
         std::vector<StructPatternField> fields;
         while (!check(TokenKind::RBrace) && !check(TokenKind::Eof)) {
@@ -450,7 +470,7 @@ ASTPtr Parser::parseVarDecl() {
             if (check(TokenKind::Comma)) advance();
             if (current_.loc.start.offset == offsetBefore) { synchronize(); }
         }
-        expect(TokenKind::RBrace, "Expected '}' after struct pattern");
+        expectClosing(TokenKind::RBrace, "{", openLoc);
         auto pat = std::make_unique<StructPattern>(name.loc, name.text, std::move(fields));
         expect(TokenKind::Equals, "Expected '=' after pattern in var declaration");
         ExprPtr init = parseExpression();
@@ -461,6 +481,7 @@ ASTPtr Parser::parseVarDecl() {
     // Check for tuple struct pattern: var Name(pat, pat) = ...
     if (check(TokenKind::LParen) && !isTypeKeyword(lexer_.peek().kind)
         && lexer_.peek().kind != TokenKind::RParen) {
+        SourceRange openLoc = currentLoc();
         advance(); // consume (
         std::vector<PatternPtr> elements;
         bool hasRest = false;
@@ -486,7 +507,7 @@ ASTPtr Parser::parseVarDecl() {
                 }
             }
         }
-        expect(TokenKind::RParen, "Expected ')' after tuple struct pattern");
+        expectClosing(TokenKind::RParen, "(", openLoc);
         auto pat = std::make_unique<TuplePattern>(name.loc, std::move(elements),
             hasRest, std::move(restName), name.text);
         expect(TokenKind::Equals, "Expected '=' after pattern in var declaration");
@@ -535,6 +556,7 @@ ASTPtr Parser::parseConstDecl() {
 
     // Check for struct pattern
     if (check(TokenKind::LBrace)) {
+        SourceRange openLoc = currentLoc();
         advance(); // consume {
         std::vector<StructPatternField> fields;
         while (!check(TokenKind::RBrace) && !check(TokenKind::Eof)) {
@@ -549,7 +571,7 @@ ASTPtr Parser::parseConstDecl() {
             if (check(TokenKind::Comma)) advance();
             if (current_.loc.start.offset == offsetBefore) { synchronize(); }
         }
-        expect(TokenKind::RBrace, "Expected '}' after struct pattern");
+        expectClosing(TokenKind::RBrace, "{", openLoc);
         auto pat = std::make_unique<StructPattern>(name.loc, name.text, std::move(fields));
         expect(TokenKind::Equals, "Expected '=' after pattern in const declaration");
         ExprPtr init = parseExpression();
@@ -560,6 +582,7 @@ ASTPtr Parser::parseConstDecl() {
     // Check for tuple struct pattern: const Name(pat, pat) = ...
     if (check(TokenKind::LParen) && !isTypeKeyword(lexer_.peek().kind)
         && lexer_.peek().kind != TokenKind::RParen) {
+        SourceRange openLoc = currentLoc();
         advance(); // consume (
         std::vector<PatternPtr> elements;
         bool hasRest = false;
@@ -585,7 +608,7 @@ ASTPtr Parser::parseConstDecl() {
                 }
             }
         }
-        expect(TokenKind::RParen, "Expected ')' after tuple struct pattern");
+        expectClosing(TokenKind::RParen, "(", openLoc);
         auto pat = std::make_unique<TuplePattern>(name.loc, std::move(elements),
             hasRest, std::move(restName), name.text);
         expect(TokenKind::Equals, "Expected '=' after pattern in const declaration");
@@ -657,6 +680,7 @@ ASTPtr Parser::parseFnDecl() {
     }
 
     // Parameters
+    SourceRange parenLoc = currentLoc();
     expect(TokenKind::LParen, "Expected '(' after function name");
     std::vector<FnParam> params;
     if (!check(TokenKind::RParen)) {
@@ -688,7 +712,7 @@ ASTPtr Parser::parseFnDecl() {
             params.push_back(std::move(param));
         } while (match(TokenKind::Comma));
     }
-    expect(TokenKind::RParen, "Expected ')' after parameters");
+    expectClosing(TokenKind::RParen, "(", parenLoc);
 
     // Validate default argument ordering:
     // - Once a default is seen, all subsequent non-variadic params must have defaults
@@ -790,6 +814,7 @@ ASTPtr Parser::parseStructDecl() {
 
     // Tuple struct: struct Name(Type, Type, ...);
     if (check(TokenKind::LParen)) {
+        SourceRange openLoc = currentLoc();
         advance(); // consume (
         std::vector<StructField> fields;
         int fieldIdx = 0;
@@ -802,7 +827,7 @@ ASTPtr Parser::parseStructDecl() {
                 fields.push_back(std::move(field));
             } while (match(TokenKind::Comma));
         }
-        expect(TokenKind::RParen, "Expected ')' after tuple struct fields");
+        expectClosing(TokenKind::RParen, "(", openLoc);
         expectTerminator();
         auto decl = std::make_unique<StructDeclNode>(start, name.text, std::move(typeParams), std::move(fields));
         decl->isTupleStruct = true;
@@ -810,6 +835,7 @@ ASTPtr Parser::parseStructDecl() {
         return decl;
     }
 
+    SourceRange braceLoc = currentLoc();
     expect(TokenKind::LBrace, "Expected '{' after struct name");
 
     std::vector<StructField> fields;
@@ -836,7 +862,7 @@ ASTPtr Parser::parseStructDecl() {
         if (current_.loc.start.offset == offsetBefore) { synchronize(); }
     }
 
-    expect(TokenKind::RBrace, "Expected '}' after struct fields");
+    expectClosing(TokenKind::RBrace, "{", braceLoc);
     match(TokenKind::Semicolon); // optional trailing semicolon
 
     auto decl = std::make_unique<StructDeclNode>(start, name.text, std::move(typeParams), std::move(fields));
@@ -868,6 +894,7 @@ ASTPtr Parser::parseUnionDecl() {
     // Where clause: enum Name<T> where T: Numeric { ... }
     parseWhereClause(whereConstraints);
 
+    SourceRange braceLoc = currentLoc();
     expect(TokenKind::LBrace, "Expected '{' after enum name");
 
     std::vector<UnionCase> cases;
@@ -882,7 +909,7 @@ ASTPtr Parser::parseUnionDecl() {
         if (current_.kind != TokenKind::Comma && current_.kind != TokenKind::Semicolon &&
             current_.kind != TokenKind::RBrace && current_.kind != TokenKind::Eof) {
             ucase.typeExpr = parseTypeExpr();
-            // Reject 1-element tuple types — use the element type directly
+            // Reject 1-element tuple types -- use the element type directly
             if (ucase.typeExpr && ucase.typeExpr->kind == TypeExpr::TupleType) {
                 auto* tt = static_cast<TupleTypeNode*>(ucase.typeExpr.get());
                 if (tt->elemTypes.size() == 1) {
@@ -906,7 +933,7 @@ ASTPtr Parser::parseUnionDecl() {
         }
     }
 
-    expect(TokenKind::RBrace, "Expected '}' after enum cases");
+    expectClosing(TokenKind::RBrace, "{", braceLoc);
     match(TokenKind::Semicolon); // optional trailing semicolon
 
     auto decl = std::make_unique<UnionDeclNode>(start, name.text, std::move(typeParams), std::move(cases));
@@ -998,6 +1025,7 @@ ASTPtr Parser::parseConstraintDecl() {
     if (check(TokenKind::Requires)) {
         // Structural form: constraint Comparable<T> = requires { <(T, T) Bool, ... }
         advance(); // consume 'requires'
+        SourceRange reqBraceLoc = currentLoc();
         expect(TokenKind::LBrace, "Expected '{' after 'requires'");
         while (!check(TokenKind::RBrace) && !check(TokenKind::Eof)) {
             RequiredFnSig sig;
@@ -1021,13 +1049,14 @@ ASTPtr Parser::parseConstraintDecl() {
                 break;
             }
             // Parameter types in parens
+            SourceRange reqParenLoc = currentLoc();
             expect(TokenKind::LParen, "Expected '(' after function name in requires block");
             if (!check(TokenKind::RParen)) {
                 do {
                     sig.paramTypes.push_back(parseTypeExpr());
                 } while (match(TokenKind::Comma));
             }
-            expect(TokenKind::RParen, "Expected ')' after parameter types in requires block");
+            expectClosing(TokenKind::RParen, "(", reqParenLoc);
             // Return type
             sig.returnType = parseTypeExpr();
             decl->requiredFns.push_back(std::move(sig));
@@ -1038,7 +1067,7 @@ ASTPtr Parser::parseConstraintDecl() {
                 advance();
             }
         }
-        expect(TokenKind::RBrace, "Expected '}' after requires block");
+        expectClosing(TokenKind::RBrace, "{", reqBraceLoc);
     } else {
         // Type-set or composition form
         // Parse first component
@@ -1117,6 +1146,7 @@ ASTPtr Parser::parseStatement() {
 
 ASTPtr Parser::parseBlock() {
     SourceRange start = currentLoc();
+    SourceRange openLoc = currentLoc();
     expect(TokenKind::LBrace, "Expected '{'");
 
     ASTList stmts;
@@ -1134,7 +1164,7 @@ ASTPtr Parser::parseBlock() {
         if (current_.loc.start.offset == offsetBefore) { synchronize(); }
     }
 
-    expect(TokenKind::RBrace, "Expected '}'");
+    expectClosing(TokenKind::RBrace, "{", openLoc);
     return std::make_unique<BlockStmt>(start, std::move(stmts));
 }
 
@@ -1142,9 +1172,10 @@ ASTPtr Parser::parseIfStmt() {
     SourceRange start = currentLoc();
     advance(); // consume 'if'
 
+    SourceRange openLoc = currentLoc();
     expect(TokenKind::LParen, "Expected '(' after 'if'");
     ExprPtr cond = parseExpression();
-    expect(TokenKind::RParen, "Expected ')' after condition");
+    expectClosing(TokenKind::RParen, "(", openLoc);
 
     ASTPtr thenBranch = parseBlock();
 
@@ -1165,9 +1196,10 @@ ASTPtr Parser::parseWhileStmt() {
     SourceRange start = currentLoc();
     advance(); // consume 'while'
 
+    SourceRange openLoc = currentLoc();
     expect(TokenKind::LParen, "Expected '(' after 'while'");
     ExprPtr cond = parseExpression();
-    expect(TokenKind::RParen, "Expected ')' after condition");
+    expectClosing(TokenKind::RParen, "(", openLoc);
 
     ASTPtr body = parseBlock();
 
@@ -1178,11 +1210,12 @@ ASTPtr Parser::parseForStmt() {
     SourceRange start = currentLoc();
     advance(); // consume 'for'
 
+    SourceRange openLoc = currentLoc();
     expect(TokenKind::LParen, "Expected '(' after 'for'");
     Token varName = expect(TokenKind::Identifier, "Expected variable name in for loop");
     expect(TokenKind::Colon, "Expected ':' after variable name in for loop");
     ExprPtr iterable = parseExpression();
-    expect(TokenKind::RParen, "Expected ')' after for loop iterable");
+    expectClosing(TokenKind::RParen, "(", openLoc);
 
     ASTPtr body = parseBlock();
 
@@ -1390,13 +1423,14 @@ ExprPtr Parser::parseExpression(int minPrec) {
             ExprList args;
             args.push_back(std::move(left));
             if (check(TokenKind::LParen)) {
+                SourceRange pipeOpenLoc = currentLoc();
                 advance(); // consume (
                 if (!check(TokenKind::RParen)) {
                     do {
                         args.push_back(parseExpression());
                     } while (match(TokenKind::Comma));
                 }
-                expect(TokenKind::RParen, "Expected ')' after arguments");
+                expectClosing(TokenKind::RParen, "(", pipeOpenLoc);
             }
             SourceRange loc = right->loc;
             left = std::make_unique<CallExpr_>(loc, std::move(right), std::move(args));
@@ -1470,6 +1504,7 @@ ExprPtr Parser::parsePrimary() {
             // Check for List(...) constructor
             if (tok.kind == TokenKind::Identifier && tok.text == "List" && check(TokenKind::LParen)) {
                 SourceRange loc = tok.loc;
+                SourceRange openLoc = currentLoc();
                 advance(); // consume (
                 ExprList elements;
                 if (!check(TokenKind::RParen)) {
@@ -1477,12 +1512,13 @@ ExprPtr Parser::parsePrimary() {
                         elements.push_back(parseExpression());
                     } while (match(TokenKind::Comma));
                 }
-                expect(TokenKind::RParen, "Expected ')' after List elements");
+                expectClosing(TokenKind::RParen, "(", openLoc);
                 return std::make_unique<ListLiteralExpr>(loc, std::move(elements));
             }
             // Check for Set(...) constructor
             if (tok.kind == TokenKind::Identifier && tok.text == "Set" && check(TokenKind::LParen)) {
                 SourceRange loc = tok.loc;
+                SourceRange openLoc = currentLoc();
                 advance(); // consume (
                 ExprList elements;
                 if (!check(TokenKind::RParen)) {
@@ -1490,7 +1526,7 @@ ExprPtr Parser::parsePrimary() {
                         elements.push_back(parseExpression());
                     } while (match(TokenKind::Comma));
                 }
-                expect(TokenKind::RParen, "Expected ')' after Set elements");
+                expectClosing(TokenKind::RParen, "(", openLoc);
                 return std::make_unique<SetLiteralExpr>(loc, std::move(elements));
             }
             // Check for Name<Types>{...} (template struct literal) or Name<Types>.Case (template enum)
@@ -1512,6 +1548,7 @@ ExprPtr Parser::parsePrimary() {
                         // We need to create an EnumConstructExpr directly
                         ExprPtr arg;
                         if (check(TokenKind::LParen)) {
+                            SourceRange ecOpenLoc = currentLoc();
                             advance(); // consume (
                             if (!check(TokenKind::RParen)) {
                                 SourceRange tupLoc = currentLoc();
@@ -1528,7 +1565,7 @@ ExprPtr Parser::parsePrimary() {
                                     arg = std::make_unique<TupleLiteralExpr>(tupLoc, std::move(elems));
                                 }
                             }
-                            expect(TokenKind::RParen, "Expected ')' after enum case argument");
+                            expectClosing(TokenKind::RParen, "(", ecOpenLoc);
                         }
                         auto ec = std::make_unique<EnumConstructExpr>(
                             tok.loc, tok.text, caseTok.text, std::move(arg));
@@ -1571,7 +1608,7 @@ ExprPtr Parser::parsePrimary() {
                     endExpr = parseExpression();
                     isInfinite = false;
                 }
-                expect(TokenKind::RParen, "Expected ')' after range expression");
+                expectClosing(TokenKind::RParen, "(", loc);
                 return std::make_unique<RangeExprNode>(loc, std::move(first), nullptr,
                                                         std::move(endExpr), isInfinite);
             }
@@ -1598,7 +1635,7 @@ ExprPtr Parser::parsePrimary() {
                         endExpr = parseExpression();
                         isInfinite = false;
                     }
-                    expect(TokenKind::RParen, "Expected ')' after range expression");
+                    expectClosing(TokenKind::RParen, "(", loc);
                     return std::make_unique<RangeExprNode>(loc, std::move(first), std::move(second),
                                                             std::move(endExpr), isInfinite);
                 }
@@ -1611,11 +1648,11 @@ ExprPtr Parser::parsePrimary() {
                     if (check(TokenKind::RParen)) break; // trailing comma
                     elements.push_back(parseExpression());
                 }
-                expect(TokenKind::RParen, "Expected ')' after tuple literal");
+                expectClosing(TokenKind::RParen, "(", loc);
                 return std::make_unique<TupleLiteralExpr>(loc, std::move(elements));
             }
 
-            expect(TokenKind::RParen, "Expected ')' after expression");
+            expectClosing(TokenKind::RParen, "(", loc);
             return first;
         }
         case TokenKind::Minus: {
@@ -1682,7 +1719,8 @@ ExprPtr Parser::parsePrimary() {
 
                 if (tryTypedConstructor) {
                     auto typeExpr = parseTypeExpr();
-                    expect(TokenKind::RBracket, "Expected ']' after type in typed array constructor");
+                    expectClosing(TokenKind::RBracket, "[", loc);
+                    SourceRange typedParenLoc = currentLoc();
                     expect(TokenKind::LParen, "Expected '(' after typed array constructor [Type]");
                     ExprList elements;
                     if (!check(TokenKind::RParen)) {
@@ -1690,7 +1728,7 @@ ExprPtr Parser::parsePrimary() {
                             elements.push_back(parseExpression());
                         } while (match(TokenKind::Comma));
                     }
-                    expect(TokenKind::RParen, "Expected ')' after typed array constructor arguments");
+                    expectClosing(TokenKind::RParen, "(", typedParenLoc);
                     auto arr = std::make_unique<ArrayLiteralExpr>(loc, std::move(elements));
                     arr->elemTypeExpr = std::move(typeExpr);
                     return arr;
@@ -1700,7 +1738,7 @@ ExprPtr Parser::parsePrimary() {
             // Empty map: [:]
             if (check(TokenKind::Colon)) {
                 advance(); // consume :
-                expect(TokenKind::RBracket, "Expected ']' after empty map literal [:]");
+                expectClosing(TokenKind::RBracket, "[", loc);
                 std::vector<MapLiteralExpr::Entry> entries;
                 return std::make_unique<MapLiteralExpr>(loc, std::move(entries));
             }
@@ -1728,7 +1766,7 @@ ExprPtr Parser::parsePrimary() {
                     ExprPtr value = parseExpression();
                     entries.push_back({std::move(key), std::move(value)});
                 }
-                expect(TokenKind::RBracket, "Expected ']' after map literal");
+                expectClosing(TokenKind::RBracket, "[", loc);
                 return std::make_unique<MapLiteralExpr>(loc, std::move(entries));
             }
 
@@ -1739,7 +1777,7 @@ ExprPtr Parser::parsePrimary() {
                 if (check(TokenKind::RBracket)) break; // trailing comma
                 elements.push_back(parseExpression());
             }
-            expect(TokenKind::RBracket, "Expected ']' after array literal");
+            expectClosing(TokenKind::RBracket, "[", loc);
             return std::make_unique<ArrayLiteralExpr>(loc, std::move(elements));
         }
         case TokenKind::Fn: {
@@ -1763,6 +1801,7 @@ ExprPtr Parser::parsePrimary() {
                 }
             }
 
+            SourceRange lambdaParenLoc = currentLoc();
             expect(TokenKind::LParen, "Expected '(' after 'fn' in lambda");
             std::vector<LambdaExprNode::Param> params;
             if (!check(TokenKind::RParen)) {
@@ -1770,14 +1809,14 @@ ExprPtr Parser::parsePrimary() {
                     LambdaExprNode::Param param;
                     Token paramName = expect(TokenKind::Identifier, "Expected parameter name");
                     param.name = paramName.text;
-                    // Type is optional — if omitted, inferred from call context
+                    // Type is optional -- if omitted, inferred from call context
                     if (!check(TokenKind::Comma) && !check(TokenKind::RParen)) {
                         param.typeExpr = parseTypeExpr();
                     }
                     params.push_back(std::move(param));
                 } while (match(TokenKind::Comma));
             }
-            expect(TokenKind::RParen, "Expected ')' after lambda parameters");
+            expectClosing(TokenKind::RParen, "(", lambdaParenLoc);
 
             // Generate synthetic type parameters for untyped parameters.
             // fn(a, b) { ... } desugars to fn<A,B>(a A, b B) { ... }
@@ -1832,9 +1871,10 @@ ExprPtr Parser::parsePrimary() {
             // if expression: if (cond) { ... } else { ... }
             SourceRange loc = currentLoc();
             advance(); // consume 'if'
+            SourceRange ifParenLoc = currentLoc();
             expect(TokenKind::LParen, "Expected '(' after 'if'");
             ExprPtr cond = parseExpression();
-            expect(TokenKind::RParen, "Expected ')' after condition");
+            expectClosing(TokenKind::RParen, "(", ifParenLoc);
             ASTPtr thenBranch = parseBlock();
             ASTPtr elseBranch;
             if (match(TokenKind::Else)) {
@@ -1881,6 +1921,7 @@ ExprPtr Parser::parseTightPostfix(ExprPtr left) {
     while (true) {
         if (check(TokenKind::LParen)) {
             // Function call: f(args)
+            SourceRange openLoc = currentLoc();
             advance(); // consume (
             ExprList args;
             if (!check(TokenKind::RParen)) {
@@ -1888,14 +1929,15 @@ ExprPtr Parser::parseTightPostfix(ExprPtr left) {
                     args.push_back(parseExpression());
                 } while (match(TokenKind::Comma));
             }
-            expect(TokenKind::RParen, "Expected ')' after arguments");
+            expectClosing(TokenKind::RParen, "(", openLoc);
             SourceRange loc = left->loc;
             left = std::make_unique<CallExpr_>(loc, std::move(left), std::move(args));
         } else if (check(TokenKind::LBracket)) {
             // Index access: a[i]
+            SourceRange openLoc = currentLoc();
             advance(); // consume [
             ExprPtr index = parseExpression();
-            expect(TokenKind::RBracket, "Expected ']' after index");
+            expectClosing(TokenKind::RBracket, "[", openLoc);
             SourceRange loc = left->loc;
             left = std::make_unique<IndexExpr_>(loc, std::move(left), std::move(index));
         } else if (check(TokenKind::Dot)) {
@@ -1942,6 +1984,7 @@ ExprPtr Parser::parsePostfix(ExprPtr left) {
     while (true) {
         if (check(TokenKind::LParen)) {
             // Function call: f(args)
+            SourceRange openLoc = currentLoc();
             advance(); // consume (
             ExprList args;
             if (!check(TokenKind::RParen)) {
@@ -1949,14 +1992,15 @@ ExprPtr Parser::parsePostfix(ExprPtr left) {
                     args.push_back(parseExpression());
                 } while (match(TokenKind::Comma));
             }
-            expect(TokenKind::RParen, "Expected ')' after arguments");
+            expectClosing(TokenKind::RParen, "(", openLoc);
             SourceRange loc = left->loc;
             left = std::make_unique<CallExpr_>(loc, std::move(left), std::move(args));
         } else if (check(TokenKind::LBracket)) {
             // Index access: a[i]
+            SourceRange openLoc = currentLoc();
             advance(); // consume [
             ExprPtr index = parseExpression();
-            expect(TokenKind::RBracket, "Expected ']' after index");
+            expectClosing(TokenKind::RBracket, "[", openLoc);
             SourceRange loc = left->loc;
             left = std::make_unique<IndexExpr_>(loc, std::move(left), std::move(index));
         } else if (check(TokenKind::Dot)) {
@@ -2012,9 +2056,10 @@ ExprPtr Parser::parsePostfix(ExprPtr left) {
             // as(TypeExpr): type cast/test on Any value
             SourceRange loc = currentLoc();
             advance(); // consume 'as'
+            SourceRange asOpenLoc = currentLoc();
             advance(); // consume '('
             TypeExprPtr targetType = parseTypeExpr();
-            expect(TokenKind::RParen, "Expected ')' after type in 'as'");
+            expectClosing(TokenKind::RParen, "(", asOpenLoc);
             left = std::make_unique<AsTypeExprNode>(loc, std::move(left), std::move(targetType));
         } else if (check(TokenKind::Identifier) && !check(TokenKind::Equals)) {
             // Space-pipeline: `x abs` -> `abs(x)`, `x f(y)` -> `f(x, y)`
@@ -2032,6 +2077,7 @@ ExprPtr Parser::parsePostfix(ExprPtr left) {
 
             // Check if followed by ( for additional args
             if (check(TokenKind::LParen)) {
+                SourceRange spOpenLoc = currentLoc();
                 advance(); // consume (
                 ExprList args;
                 args.push_back(std::move(left)); // prepend receiver
@@ -2040,7 +2086,7 @@ ExprPtr Parser::parsePostfix(ExprPtr left) {
                         args.push_back(parseExpression());
                     } while (match(TokenKind::Comma));
                 }
-                expect(TokenKind::RParen, "Expected ')' after arguments");
+                expectClosing(TokenKind::RParen, "(", spOpenLoc);
                 SourceRange loc = funcName.loc;
                 left = std::make_unique<CallExpr_>(loc, std::move(callee), std::move(args));
             } else {
@@ -2060,6 +2106,7 @@ ExprPtr Parser::parsePostfix(ExprPtr left) {
 
 ExprPtr Parser::parseStructLiteral(const Token& nameTok) {
     SourceRange start = nameTok.loc;
+    SourceRange openLoc = currentLoc();
     advance(); // consume {
 
     std::vector<StructFieldInit> fields;
@@ -2119,7 +2166,7 @@ ExprPtr Parser::parseStructLiteral(const Token& nameTok) {
         }
     }
 
-    expect(TokenKind::RBrace, "Expected '}' after struct literal fields");
+    expectClosing(TokenKind::RBrace, "{", openLoc);
 
     auto result = std::make_unique<StructLiteralExpr>(start, nameTok.text, std::move(fields));
     result->positional = positional;
@@ -2133,10 +2180,12 @@ ASTPtr Parser::parseMatchStmt() {
     SourceRange start = currentLoc();
     advance(); // consume 'match'
 
+    SourceRange matchParenLoc = currentLoc();
     expect(TokenKind::LParen, "Expected '(' after 'match'");
     ExprPtr subject = parseExpression();
-    expect(TokenKind::RParen, "Expected ')' after match subject");
+    expectClosing(TokenKind::RParen, "(", matchParenLoc);
 
+    SourceRange matchBraceLoc = currentLoc();
     expect(TokenKind::LBrace, "Expected '{' after match subject");
 
     std::vector<CaseClause> cases;
@@ -2151,9 +2200,10 @@ ASTPtr Parser::parseMatchStmt() {
         if (check(TokenKind::If)) {
             SourceRange guardLoc = currentLoc();
             advance(); // consume 'if'
+            SourceRange guardParenLoc = currentLoc();
             expect(TokenKind::LParen, "Expected '(' after 'if' in guard");
             ExprPtr guard = parseExpression();
-            expect(TokenKind::RParen, "Expected ')' after guard expression");
+            expectClosing(TokenKind::RParen, "(", guardParenLoc);
             clause.pattern = std::make_unique<GuardedPattern>(
                 guardLoc, std::move(clause.pattern), std::move(guard));
         }
@@ -2171,7 +2221,7 @@ ASTPtr Parser::parseMatchStmt() {
         if (current_.loc.start.offset == offsetBefore) { synchronize(); }
     }
 
-    expect(TokenKind::RBrace, "Expected '}' at end of match");
+    expectClosing(TokenKind::RBrace, "{", matchBraceLoc);
 
     return std::make_unique<SwitchStmtNode>(start, std::move(subject), std::move(cases));
 }
@@ -2238,7 +2288,7 @@ PatternPtr Parser::parsePrimaryPattern() {
                 }
             }
         }
-        expect(TokenKind::RBracket, "Expected ']' after array pattern");
+        expectClosing(TokenKind::RBracket, "[", loc);
         return std::make_unique<ArrayPattern>(loc, std::move(elements), hasRest, std::move(restName));
     }
 
@@ -2275,7 +2325,7 @@ PatternPtr Parser::parsePrimaryPattern() {
                 }
             }
         }
-        expect(TokenKind::RParen, "Expected ')' after tuple pattern");
+        expectClosing(TokenKind::RParen, "(", loc);
         return std::make_unique<TuplePattern>(loc, std::move(elements), hasRest, std::move(restName));
     }
 
@@ -2375,11 +2425,12 @@ PatternPtr Parser::parsePrimaryPattern() {
 
             PatternPtr innerPat;
             if (check(TokenKind::LParen)) {
+                SourceRange epOpenLoc = currentLoc();
                 advance(); // consume (
                 if (!check(TokenKind::RParen)) {
                     innerPat = parsePattern();
                 }
-                expect(TokenKind::RParen, "Expected ')' after enum pattern");
+                expectClosing(TokenKind::RParen, "(", epOpenLoc);
             }
 
             return std::make_unique<EnumPattern>(
@@ -2389,6 +2440,7 @@ PatternPtr Parser::parsePrimaryPattern() {
         // Tuple struct pattern: Name(pat, pat, ...rest)
         if (check(TokenKind::LParen)) {
             SourceRange loc = nameTok.loc;
+            SourceRange tspOpenLoc = currentLoc();
             advance(); // consume (
             std::vector<PatternPtr> elements;
             bool hasRest = false;
@@ -2418,13 +2470,14 @@ PatternPtr Parser::parsePrimaryPattern() {
                     }
                 }
             }
-            expect(TokenKind::RParen, "Expected ')' after tuple struct pattern");
+            expectClosing(TokenKind::RParen, "(", tspOpenLoc);
             return std::make_unique<TuplePattern>(loc, std::move(elements),
                 hasRest, std::move(restName), nameTok.text);
         }
 
         // Struct pattern: Name { field: pattern, ... }
         if (check(TokenKind::LBrace)) {
+            SourceRange spOpenLoc = currentLoc();
             advance(); // consume {
 
             std::vector<StructPatternField> fields;
@@ -2444,7 +2497,7 @@ PatternPtr Parser::parsePrimaryPattern() {
                 if (current_.loc.start.offset == offsetBefore) { synchronize(); }
             }
 
-            expect(TokenKind::RBrace, "Expected '}' after struct pattern");
+            expectClosing(TokenKind::RBrace, "{", spOpenLoc);
 
             return std::make_unique<StructPattern>(
                 nameTok.loc, nameTok.text, std::move(fields));
@@ -2521,10 +2574,10 @@ TypeExprPtr Parser::parseTypeExpr() {
             // Map type: [KeyType: ValueType]
             advance(); // consume :
             auto valueType = parseTypeExpr();
-            expect(TokenKind::RBracket, "Expected ']' after map value type");
+            expectClosing(TokenKind::RBracket, "[", loc);
             return std::make_unique<MapTypeNode>(loc, std::move(keyOrElemType), std::move(valueType));
         }
-        expect(TokenKind::RBracket, "Expected ']' after array element type");
+        expectClosing(TokenKind::RBracket, "[", loc);
         return std::make_unique<ArrayTypeNode>(loc, std::move(keyOrElemType));
     }
 
@@ -2564,7 +2617,7 @@ TypeExprPtr Parser::parseTypeExpr() {
                 if (check(TokenKind::RParen)) break;
                 elems.push_back(parseTypeExpr());
             }
-            expect(TokenKind::RParen, "Expected ')' after tuple type");
+            expectClosing(TokenKind::RParen, "(", loc);
             // Check if a return type follows — if so, this is a function type
             if (current_.kind == TokenKind::KwInt || current_.kind == TokenKind::KwFloat ||
                 current_.kind == TokenKind::KwString || current_.kind == TokenKind::KwBool ||
@@ -2580,7 +2633,7 @@ TypeExprPtr Parser::parseTypeExpr() {
             }
             return std::make_unique<TupleTypeNode>(loc, std::move(elems));
         }
-        expect(TokenKind::RParen, "Expected ')' after parenthesized type");
+        expectClosing(TokenKind::RParen, "(", loc);
         // Single-arg function type: (Type) ReturnType
         if (current_.kind == TokenKind::KwInt || current_.kind == TokenKind::KwFloat ||
             current_.kind == TokenKind::KwString || current_.kind == TokenKind::KwBool ||
@@ -2603,6 +2656,7 @@ TypeExprPtr Parser::parseTypeExpr() {
     if (current_.kind == TokenKind::Fn) {
         SourceRange loc = currentLoc();
         advance(); // consume 'fn'
+        SourceRange fnTypeParenLoc = currentLoc();
         expect(TokenKind::LParen, "Expected '(' after 'fn' in function type");
         std::vector<TypeExprPtr> params;
         if (!check(TokenKind::RParen)) {
@@ -2610,7 +2664,7 @@ TypeExprPtr Parser::parseTypeExpr() {
                 params.push_back(parseTypeExpr());
             } while (match(TokenKind::Comma));
         }
-        expect(TokenKind::RParen, "Expected ')' after function type parameters");
+        expectClosing(TokenKind::RParen, "(", fnTypeParenLoc);
         // Return type is optional (defaults to Void)
         TypeExprPtr retType;
         if (current_.kind == TokenKind::KwInt || current_.kind == TokenKind::KwFloat ||

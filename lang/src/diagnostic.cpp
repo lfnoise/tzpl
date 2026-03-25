@@ -221,8 +221,41 @@ std::string formatError(const CompileError& err,
             }
         }
     } else {
-        // No source context available — just print the message
+        // No source context available -- just print the message
         out << "  " << err.message << "\n";
+    }
+
+    // Render diagnostic notes (e.g. "to match '(' here")
+    for (const auto& note : err.notes) {
+        const std::string& noteFilename = note.filename.empty() ? filename : note.filename;
+        const std::string& noteSource = note.source.empty() ? source : note.source;
+
+        u32 noteLine = note.loc.start.line;
+        u32 noteCol  = note.loc.start.col;
+
+        out << cCyan << "note" << cReset
+            << " [" << noteFilename << ":" << noteLine << ":" << noteCol << "]\n";
+
+        bool hasNoteSource = !noteSource.empty() && noteLine > 0 && note.loc.start.offset <= noteSource.size();
+        if (hasNoteSource) {
+            auto [noteLineText, noteLineStart] = extractLine(noteSource, note.loc.start.offset);
+            std::string noteLineNumStr = std::to_string(noteLine);
+            size_t noteGutter = noteLineNumStr.size();
+            std::string notePad(noteGutter, ' ');
+
+            out << cCyan << notePad << cReset << " " << cDim << "|" << cReset << "\n";
+            out << cCyan << noteLineNumStr << cReset << " " << cDim << "|" << cReset
+                << " " << noteLineText << "\n";
+
+            size_t noteCaretStart = (noteCol > 0) ? noteCol - 1 : 0;
+            if (noteCaretStart > noteLineText.size()) noteCaretStart = noteLineText.size();
+            std::string noteSpaces(noteCaretStart, ' ');
+            out << cCyan << notePad << cReset << " " << cDim << "|" << cReset
+                << " " << noteSpaces << cCyan << "^" << cReset << "\n";
+            out << notePad << " " << note.message << "\n";
+        } else {
+            out << "  " << note.message << "\n";
+        }
     }
 
     return out.str();
