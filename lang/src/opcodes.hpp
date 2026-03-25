@@ -39,6 +39,8 @@ void op_load_obj(VM& vm, Code* pc);           // LOAD_OBJ Rd, idx (2 words, idx 
 void op_mov(VM& vm, Code* pc);               // MOV Rd, Ra (2 words)
 void op_load_global(VM& vm, Code* pc);        // LOAD_GLOBAL Rd, K (3 words, K is global index)
 void op_store_global(VM& vm, Code* pc);       // STORE_GLOBAL Ra, K (3 words, K is global index)
+void op_store_global_obj(VM& vm, Code* pc);   // STORE_GLOBAL_OBJ Ra, K (3 words, retains new, releases old)
+void op_init_global_obj(VM& vm, Code* pc);    // INIT_GLOBAL_OBJ Ra, K (3 words, retains new only)
 
 // --- Integer Arithmetic ---
 void op_add_int(VM& vm, Code* pc);            // ADD_INT Rd, Ra, Rb (2 words)
@@ -266,6 +268,8 @@ void op_coro_wrap_option(VM& vm, Code* pc);   // CORO_WRAP_OPTION Rd, Rval, Rcor
 // --- Dynamic Scope ---
 void op_load_dynamic(VM& vm, Code* pc);       // LOAD_DYNAMIC Rd, K (3 words, K is dynvar index)
 void op_store_dynamic(VM& vm, Code* pc);      // STORE_DYNAMIC Ra, K (3 words, K is dynvar index)
+void op_store_dynamic_obj(VM& vm, Code* pc);  // STORE_DYNAMIC_OBJ Ra, K (3 words, retains new, releases old)
+void op_init_dynamic_obj(VM& vm, Code* pc);   // INIT_DYNAMIC_OBJ Ra, K (3 words, retains new only)
 void op_dynscope_push(VM& vm, Code* pc);      // DYNSCOPE_PUSH Ra, K (3 words: save current, set new)
 
 // --- Any ---

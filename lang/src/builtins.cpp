@@ -907,8 +907,6 @@ static void builtin_setref(VM& vm, u16 dst, u16, u16 ab) {
     auto* ref = static_cast<RefValue*>(vm.reg(ab + 1).o);
     ref->value_ = vm.reg(ab);
     vm.reg(dst) = vm.reg(ab);
-    auto* rt = static_cast<RefType*>(ref->type_);
-    if (rt->elemType_->isObjType()) vm.gc().writeBarrier(ref);
 }
 
 // --- Ref template resolvers ---
@@ -973,8 +971,6 @@ static void builtin_setref_rev(VM& vm, u16 dst, u16, u16 ab) {
     auto* ref = static_cast<RefValue*>(vm.reg(ab).o);
     ref->value_ = vm.reg(ab + 1);
     vm.reg(dst) = vm.reg(ab + 1);
-    auto* rt = static_cast<RefType*>(ref->type_);
-    if (rt->elemType_->isObjType()) vm.gc().writeBarrier(ref);
 }
 
 static bool resolve_setref_rev(Compiler& compiler, const std::vector<Type*>& args,

@@ -34,7 +34,7 @@ void TakeListGen::generate(VM& vm, ListNode* owner) {
     if (remaining_ <= 1 || !source_->tail_) { owner->tail_ = nullptr; return; }
     auto* tail = new ListNode(listType_);
     source_ = source_->tail_; remaining_--;
-    vm.gc().writeBarrier(source_);
+
     tail->generator_ = this; owner->tail_ = tail;
 }
 
@@ -63,7 +63,7 @@ void StrideListGen::generate(VM& vm, ListNode* owner) {
     if (!cur) { owner->tail_ = nullptr; return; }
     auto* tail = new ListNode(listType_);
     source_ = cur;
-    vm.gc().writeBarrier(source_);
+
     tail->generator_ = this; owner->tail_ = tail;
 }
 
@@ -85,8 +85,7 @@ void StutterListGen::generate(VM& vm, ListNode* owner) {
         auto* tail = new ListNode(listType_);
         currentRepeat_ = repsLeft; currentValue_ = source_->head_;
         source_ = source_->tail_;
-        if (valueIsObj_ && currentValue_.o) vm.gc().writeBarrier(currentValue_.o);
-        if (source_) vm.gc().writeBarrier(source_);
+        // writeBarrier calls removed (ARC only)
         tail->generator_ = this; owner->tail_ = tail;
     } else { owner->tail_ = nullptr; }
 }
@@ -99,7 +98,7 @@ void CatListGen::generate(VM& vm, ListNode* owner) {
             owner->head_ = first_->head_;
             auto* tail = new ListNode(listType_);
             first_ = first_->tail_;
-            if (first_) vm.gc().writeBarrier(first_);
+            // writeBarrier removed (ARC only)
             tail->generator_ = this; owner->tail_ = tail;
             return;
         }
@@ -173,7 +172,7 @@ void CycleListGen::generate(VM& vm, ListNode* owner) {
     owner->head_ = current_->head_;
     auto* tail = new ListNode(listType_);
     current_ = current_->tail_ ? current_->tail_ : head_;
-    vm.gc().writeBarrier(current_);
+
     tail->generator_ = this; owner->tail_ = tail;
 }
 
@@ -190,7 +189,7 @@ void NCycleListGen::generate(VM& vm, ListNode* owner) {
     if (!next) { owner->tail_ = nullptr; return; }
     auto* tail = new ListNode(listType_);
     current_ = next;
-    vm.gc().writeBarrier(current_);
+
     tail->generator_ = this; owner->tail_ = tail;
 }
 
@@ -207,8 +206,7 @@ void HangListGen::generate(VM& vm, ListNode* owner) {
     auto* tail = new ListNode(listType_);
     lastValue_ = source_->head_; hasLast_ = true;
     source_ = source_->tail_;
-    if (valueIsObj_ && lastValue_.o) vm.gc().writeBarrier(lastValue_.o);
-    if (source_) vm.gc().writeBarrier(source_);
+    // writeBarrier calls removed (ARC only)
     tail->generator_ = this; owner->tail_ = tail;
 }
 
@@ -222,7 +220,7 @@ void MapListGen::generate(VM& vm, ListNode* owner) {
     if (!source_->tail_) { owner->tail_ = nullptr; return; }
     auto* tail = new ListNode(resultListType_);
     source_ = source_->tail_;
-    vm.gc().writeBarrier(source_);
+
     tail->generator_ = this; owner->tail_ = tail;
 }
 
@@ -327,7 +325,7 @@ void AutoMapListGen::generate(VM& vm, ListNode* owner) {
     if (!source_->tail_) { owner->tail_ = nullptr; return; }
     auto* tail = new ListNode(info_->resultListType);
     source_ = source_->tail_;
-    vm.gc().writeBarrier(source_);
+
     arrayIndex_++;
     tail->generator_ = this;
     owner->tail_ = tail;
@@ -346,7 +344,7 @@ void FilterListGen::generate(VM& vm, ListNode* owner) {
             if (!rest) { owner->tail_ = nullptr; return; }
             auto* tail = new ListNode(listType_);
             source_ = rest;
-            vm.gc().writeBarrier(source_);
+        
             tail->generator_ = this; owner->tail_ = tail;
             return;
         }
@@ -373,7 +371,7 @@ void PredicateListGen::generate(VM& vm, ListNode* owner) {
         // Next element passes -- create lazy tail
         auto* tail = new ListNode(listType_);
         source_ = next;
-        vm.gc().writeBarrier(source_);
+    
         tail->generator_ = this; owner->tail_ = tail;
     } else { // DropWhile
         ListNode* cur = source_;
@@ -404,8 +402,7 @@ void ScanListGen::generate(VM& vm, ListNode* owner) {
     Word newAcc = vm.reg(sb);
     auto* tail = new ListNode(resultListType_);
     accumulator_ = newAcc; source_ = source_->tail_;
-    if (accIsObj_ && accumulator_.o) vm.gc().writeBarrier(accumulator_.o);
-    if (source_) vm.gc().writeBarrier(source_);
+    // writeBarrier calls removed (ARC only)
     tail->generator_ = this; owner->tail_ = tail;
 }
 
@@ -416,7 +413,7 @@ void IterListGen::generate(VM& vm, ListNode* owner) {
     callOneArg(vm, fn_, sb);
     auto* tail = new ListNode(listType_);
     current_ = vm.reg(sb);
-    if (valueIsObj_ && current_.o) vm.gc().writeBarrier(current_.o);
+    // writeBarrier removed (ARC only)
     tail->generator_ = this; owner->tail_ = tail;
 }
 
@@ -430,8 +427,7 @@ void ZipListGen::generate(VM& vm, ListNode* owner) {
     if (!left_->tail_ || !right_->tail_) { owner->tail_ = nullptr; return; }
     auto* tail = new ListNode(resultListType_);
     left_ = left_->tail_; right_ = right_->tail_;
-    if (left_) vm.gc().writeBarrier(left_);
-    if (right_) vm.gc().writeBarrier(right_);
+    // writeBarrier calls removed (ARC only)
     tail->generator_ = this; owner->tail_ = tail;
 }
 
@@ -444,7 +440,7 @@ void EnumerateListGen::generate(VM& vm, ListNode* owner) {
     if (!source_->tail_) { owner->tail_ = nullptr; return; }
     auto* tail = new ListNode(resultListType_);
     source_ = source_->tail_; index_++;
-    if (source_) vm.gc().writeBarrier(source_);
+    // writeBarrier removed (ARC only)
     tail->generator_ = this; owner->tail_ = tail;
 }
 
@@ -476,8 +472,7 @@ void JoinListGen::generate(VM& vm, ListNode* owner) {
     }
     auto* tail = new ListNode(resultListType_);
     outer_ = nextOuter; inner_ = nextInner;
-    if (outer_) vm.gc().writeBarrier(outer_);
-    if (inner_) vm.gc().writeBarrier(inner_);
+    // writeBarrier calls removed (ARC only)
     tail->generator_ = this; owner->tail_ = tail;
 }
 
@@ -553,7 +548,7 @@ static Word syncResumeCoroutine(VM& vm, CoroutineObj* coro) {
         // Suspended state
         auto* frame = coro->topFrame_;
         vm.setCurrentCoroFrame(frame);
-        vm.gc().writeBarrier(frame);
+
 
         for (u16 i = 0; i < frame->numRegs_; ++i) {
             vm.regsBase()[newBase + i] = frame->regs_[i];

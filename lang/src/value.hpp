@@ -204,30 +204,9 @@ public:
         return s;
     }
 
-    void gcScan(GC* gc, i32& ioWordsToScan) override {
-        Obj::gcScan(gc, ioWordsToScan);
-        gcPartialScan(gc, ioWordsToScan, 0);
+    void releaseChildren() override {
+        for (auto* obj : v) { if (obj) obj->release(); }
     }
-    void gcPartialScan(GC* gc, i32& ioWordsToScan, i32 start) override {
-        i32 len = (i32)v.size();
-        i32 remain = len - start;
-        if (remain > ioWordsToScan) {
-            i32 end = start + ioWordsToScan;
-            for (i32 i = start; i < end; ++i) {
-                gc->mark(v[i]);
-            }
-            gc->setPartialScan(this, start + ioWordsToScan);
-            ioWordsToScan = 0;
-        } else {
-            for (i32 i = start; i < len; ++i) {
-                gc->mark(v[i]);
-            }
-            gc->setPartialScan(nullptr, 0);
-            ioWordsToScan -= remain;
-        }
-    }
-
-    u32 numObjSlots() const override { return Obj::numObjSlots() + (u32)v.size(); }
 };
 
 // Forward declaration
@@ -247,34 +226,14 @@ public:
 
     VMString str() const override;
 
-    void gcScan(GC* gc, i32& ioWordsToScan) override {
-        Obj::gcScan(gc, ioWordsToScan);
+    void releaseChildren() override {
         if (generator_) {
-            gc->mark(reinterpret_cast<GCObj*>(generator_));
-            --ioWordsToScan;
+            reinterpret_cast<GCObj*>(generator_)->release();
         } else {
             auto* lt = static_cast<ListType*>(type_);
-            if (lt->elemType_->isObjType()) {
-                gc->mark(head_.o);
-                --ioWordsToScan;
-            }
-            if (tail_) {
-                gc->mark(tail_);
-                --ioWordsToScan;
-            }
+            if (lt->elemType_->isObjType() && head_.o) head_.o->release();
+            if (tail_) tail_->release();
         }
-    }
-
-    u32 numObjSlots() const override {
-        u32 slots = Obj::numObjSlots();
-        if (generator_) {
-            slots++;  // generator_
-        } else {
-            auto* lt = static_cast<ListType*>(type_);
-            if (lt->elemType_->isObjType()) slots++;
-            if (tail_) slots++;
-        }
-        return slots;
     }
 };
 
@@ -313,24 +272,10 @@ public:
 
     void generate(VM& vm, ListNode* owner) override;
 
-    void gcScan(GC* gc, i32& ioWordsToScan) override {
-        Obj::gcScan(gc, ioWordsToScan);
-        if (leftList_) { gc->mark(leftList_); --ioWordsToScan; }
-        if (rightList_) { gc->mark(rightList_); --ioWordsToScan; }
-        if (broadcastValIsObj_ && broadcastVal_.o) { gc->mark(broadcastVal_.o); --ioWordsToScan; }
-        if (leftElemType_) { gc->mark(reinterpret_cast<GCObj*>(leftElemType_)); --ioWordsToScan; }
-        if (rightElemType_) { gc->mark(reinterpret_cast<GCObj*>(rightElemType_)); --ioWordsToScan; }
-        if (resultElemType_) { gc->mark(reinterpret_cast<GCObj*>(resultElemType_)); --ioWordsToScan; }
-        if (resultListType_) { gc->mark(reinterpret_cast<GCObj*>(resultListType_)); --ioWordsToScan; }
-    }
-
-    u32 numObjSlots() const override {
-        u32 slots = Obj::numObjSlots();
-        if (leftList_) slots++;
-        if (rightList_) slots++;
-        if (broadcastValIsObj_ && broadcastVal_.o) slots++;
-        slots += 4;  // leftElemType_, rightElemType_, resultElemType_, resultListType_
-        return slots;
+    void releaseChildren() override {
+        if (leftList_) leftList_->release();
+        if (rightList_) rightList_->release();
+        if (broadcastValIsObj_ && broadcastVal_.o) broadcastVal_.o->release();
     }
 };
 
@@ -349,19 +294,8 @@ public:
 
     void generate(VM& vm, ListNode* owner) override;
 
-    void gcScan(GC* gc, i32& ioWordsToScan) override {
-        Obj::gcScan(gc, ioWordsToScan);
-        if (source_) { gc->mark(source_); --ioWordsToScan; }
-        if (sourceElemType_) { gc->mark(reinterpret_cast<GCObj*>(sourceElemType_)); --ioWordsToScan; }
-        if (resultElemType_) { gc->mark(reinterpret_cast<GCObj*>(resultElemType_)); --ioWordsToScan; }
-        if (resultListType_) { gc->mark(reinterpret_cast<GCObj*>(resultListType_)); --ioWordsToScan; }
-    }
-
-    u32 numObjSlots() const override {
-        u32 slots = Obj::numObjSlots();
-        if (source_) slots++;
-        slots += 3;  // sourceElemType_, resultElemType_, resultListType_
-        return slots;
+    void releaseChildren() override {
+        if (source_) source_->release();
     }
 };
 
@@ -378,14 +312,7 @@ public:
 
     void generate(VM& vm, ListNode* owner) override;
 
-    void gcScan(GC* gc, i32& ioWordsToScan) override {
-        Obj::gcScan(gc, ioWordsToScan);
-        if (listType_) { gc->mark(reinterpret_cast<GCObj*>(listType_)); --ioWordsToScan; }
-    }
-
-    u32 numObjSlots() const override {
-        return Obj::numObjSlots() + 1;  // listType_
-    }
+    void releaseChildren() override {}
 };
 
 // Generator for lazily converting a Range<Fraction> to a List<Fraction>
@@ -401,16 +328,10 @@ public:
 
     void generate(VM& vm, ListNode* owner) override;
 
-    void gcScan(GC* gc, i32& ioWordsToScan) override {
-        Obj::gcScan(gc, ioWordsToScan);
-        if (current_) { gc->mark(current_); --ioWordsToScan; }
-        if (end_) { gc->mark(end_); --ioWordsToScan; }
-        if (step_) { gc->mark(step_); --ioWordsToScan; }
-        if (listType_) { gc->mark(reinterpret_cast<GCObj*>(listType_)); --ioWordsToScan; }
-    }
-
-    u32 numObjSlots() const override {
-        return Obj::numObjSlots() + 4;  // current_, end_, step_, listType_
+    void releaseChildren() override {
+        if (current_) current_->release();
+        if (end_) end_->release();
+        if (step_) step_->release();
     }
 };
 
@@ -430,12 +351,9 @@ public:
 
     TakeListGen(Type* type);
     void generate(VM& vm, ListNode* owner) override;
-    void gcScan(GC* gc, i32& ioWordsToScan) override {
-        ListGenerator::gcScan(gc, ioWordsToScan);
-        if (source_) { gc->mark(source_); --ioWordsToScan; }
-        if (listType_) { gc->mark(reinterpret_cast<GCObj*>(listType_)); --ioWordsToScan; }
+    void releaseChildren() override {
+        if (source_) source_->release();
     }
-    u32 numObjSlots() const override { return ListGenerator::numObjSlots() + 2; }
 };
 
 // Generator for drop(list, n) - skip first n elements
@@ -447,12 +365,9 @@ public:
 
     DropListGen(Type* type);
     void generate(VM& vm, ListNode* owner) override;
-    void gcScan(GC* gc, i32& ioWordsToScan) override {
-        ListGenerator::gcScan(gc, ioWordsToScan);
-        if (source_) { gc->mark(source_); --ioWordsToScan; }
-        if (listType_) { gc->mark(reinterpret_cast<GCObj*>(listType_)); --ioWordsToScan; }
+    void releaseChildren() override {
+        if (source_) source_->release();
     }
-    u32 numObjSlots() const override { return ListGenerator::numObjSlots() + 2; }
 };
 
 // Generator for stride(list, n) - every nth element
@@ -464,12 +379,9 @@ public:
 
     StrideListGen(Type* type);
     void generate(VM& vm, ListNode* owner) override;
-    void gcScan(GC* gc, i32& ioWordsToScan) override {
-        ListGenerator::gcScan(gc, ioWordsToScan);
-        if (source_) { gc->mark(source_); --ioWordsToScan; }
-        if (listType_) { gc->mark(reinterpret_cast<GCObj*>(listType_)); --ioWordsToScan; }
+    void releaseChildren() override {
+        if (source_) source_->release();
     }
-    u32 numObjSlots() const override { return ListGenerator::numObjSlots() + 2; }
 };
 
 // Generator for stutter(list, n) - repeat each element n times
@@ -484,14 +396,9 @@ public:
 
     StutterListGen(Type* type);
     void generate(VM& vm, ListNode* owner) override;
-    void gcScan(GC* gc, i32& ioWordsToScan) override {
-        ListGenerator::gcScan(gc, ioWordsToScan);
-        if (source_) { gc->mark(source_); --ioWordsToScan; }
-        if (valueIsObj_ && currentValue_.o) { gc->mark(currentValue_.o); --ioWordsToScan; }
-        if (listType_) { gc->mark(reinterpret_cast<GCObj*>(listType_)); --ioWordsToScan; }
-    }
-    u32 numObjSlots() const override {
-        return ListGenerator::numObjSlots() + 2 + (valueIsObj_ && currentValue_.o ? 1 : 0);
+    void releaseChildren() override {
+        if (source_) source_->release();
+        if (valueIsObj_ && currentValue_.o) currentValue_.o->release();
     }
 };
 
@@ -505,13 +412,10 @@ public:
 
     CatListGen(Type* type);
     void generate(VM& vm, ListNode* owner) override;
-    void gcScan(GC* gc, i32& ioWordsToScan) override {
-        ListGenerator::gcScan(gc, ioWordsToScan);
-        if (first_) { gc->mark(first_); --ioWordsToScan; }
-        if (second_) { gc->mark(second_); --ioWordsToScan; }
-        if (listType_) { gc->mark(reinterpret_cast<GCObj*>(listType_)); --ioWordsToScan; }
+    void releaseChildren() override {
+        if (first_) first_->release();
+        if (second_) second_->release();
     }
-    u32 numObjSlots() const override { return ListGenerator::numObjSlots() + 3; }
 };
 
 // Generator for urands() - infinite uniform [0, 1) floats
@@ -520,11 +424,7 @@ public:
     ListType* listType_;
     UrandsListGen(Type* type);
     void generate(VM& vm, ListNode* owner) override;
-    void gcScan(GC* gc, i32& ioWordsToScan) override {
-        ListGenerator::gcScan(gc, ioWordsToScan);
-        if (listType_) { gc->mark(reinterpret_cast<GCObj*>(listType_)); --ioWordsToScan; }
-    }
-    u32 numObjSlots() const override { return ListGenerator::numObjSlots() + 1; }
+    void releaseChildren() override {}
 };
 
 // Generator for brands() - infinite bipolar [-1, 1) floats
@@ -533,11 +433,7 @@ public:
     ListType* listType_;
     BrandsListGen(Type* type);
     void generate(VM& vm, ListNode* owner) override;
-    void gcScan(GC* gc, i32& ioWordsToScan) override {
-        ListGenerator::gcScan(gc, ioWordsToScan);
-        if (listType_) { gc->mark(reinterpret_cast<GCObj*>(listType_)); --ioWordsToScan; }
-    }
-    u32 numObjSlots() const override { return ListGenerator::numObjSlots() + 1; }
+    void releaseChildren() override {}
 };
 
 // Generator for irands(lo, hi) - infinite uniform random ints [lo, hi]
@@ -547,11 +443,7 @@ public:
     ListType* listType_;
     IrandsListGen(Type* type);
     void generate(VM& vm, ListNode* owner) override;
-    void gcScan(GC* gc, i32& ioWordsToScan) override {
-        ListGenerator::gcScan(gc, ioWordsToScan);
-        if (listType_) { gc->mark(reinterpret_cast<GCObj*>(listType_)); --ioWordsToScan; }
-    }
-    u32 numObjSlots() const override { return ListGenerator::numObjSlots() + 1; }
+    void releaseChildren() override {}
 };
 
 // Generator for xrands(lo, hi) - infinite exponentially distributed floats [lo, hi)
@@ -561,11 +453,7 @@ public:
     ListType* listType_;
     XrandsListGen(Type* type);
     void generate(VM& vm, ListNode* owner) override;
-    void gcScan(GC* gc, i32& ioWordsToScan) override {
-        ListGenerator::gcScan(gc, ioWordsToScan);
-        if (listType_) { gc->mark(reinterpret_cast<GCObj*>(listType_)); --ioWordsToScan; }
-    }
-    u32 numObjSlots() const override { return ListGenerator::numObjSlots() + 1; }
+    void releaseChildren() override {}
 };
 
 // Generator for rands(lo, hi) - infinite uniform random floats [lo, hi)
@@ -575,11 +463,7 @@ public:
     ListType* listType_;
     RandsListGen(Type* type);
     void generate(VM& vm, ListNode* owner) override;
-    void gcScan(GC* gc, i32& ioWordsToScan) override {
-        ListGenerator::gcScan(gc, ioWordsToScan);
-        if (listType_) { gc->mark(reinterpret_cast<GCObj*>(listType_)); --ioWordsToScan; }
-    }
-    u32 numObjSlots() const override { return ListGenerator::numObjSlots() + 1; }
+    void releaseChildren() override {}
 };
 
 // Generator for picks(array) - infinite random picks from an array
@@ -591,13 +475,9 @@ public:
 
     PicksListGen(Type* type);
     void generate(VM& vm, ListNode* owner) override;
-    void gcScan(GC* gc, i32& ioWordsToScan) override {
-        ListGenerator::gcScan(gc, ioWordsToScan);
-        if (array_) { gc->mark(array_); --ioWordsToScan; }
-        if (elemType_) { gc->mark(reinterpret_cast<GCObj*>(elemType_)); --ioWordsToScan; }
-        if (listType_) { gc->mark(reinterpret_cast<GCObj*>(listType_)); --ioWordsToScan; }
+    void releaseChildren() override {
+        if (array_) array_->release();
     }
-    u32 numObjSlots() const override { return ListGenerator::numObjSlots() + 3; }
 };
 
 // Generator for cyc(list) - infinitely cycle through a list
@@ -609,13 +489,10 @@ public:
 
     CycleListGen(Type* type);
     void generate(VM& vm, ListNode* owner) override;
-    void gcScan(GC* gc, i32& ioWordsToScan) override {
-        ListGenerator::gcScan(gc, ioWordsToScan);
-        if (current_) { gc->mark(current_); --ioWordsToScan; }
-        if (head_) { gc->mark(head_); --ioWordsToScan; }
-        if (listType_) { gc->mark(reinterpret_cast<GCObj*>(listType_)); --ioWordsToScan; }
+    void releaseChildren() override {
+        if (current_) current_->release();
+        if (head_) head_->release();
     }
-    u32 numObjSlots() const override { return ListGenerator::numObjSlots() + 3; }
 };
 
 // Generator for ncyc(list, n) - cycle n times
@@ -628,13 +505,10 @@ public:
 
     NCycleListGen(Type* type);
     void generate(VM& vm, ListNode* owner) override;
-    void gcScan(GC* gc, i32& ioWordsToScan) override {
-        ListGenerator::gcScan(gc, ioWordsToScan);
-        if (current_) { gc->mark(current_); --ioWordsToScan; }
-        if (head_) { gc->mark(head_); --ioWordsToScan; }
-        if (listType_) { gc->mark(reinterpret_cast<GCObj*>(listType_)); --ioWordsToScan; }
+    void releaseChildren() override {
+        if (current_) current_->release();
+        if (head_) head_->release();
     }
-    u32 numObjSlots() const override { return ListGenerator::numObjSlots() + 3; }
 };
 
 // Generator for hang(list) - repeat last element indefinitely
@@ -648,14 +522,9 @@ public:
 
     HangListGen(Type* type);
     void generate(VM& vm, ListNode* owner) override;
-    void gcScan(GC* gc, i32& ioWordsToScan) override {
-        ListGenerator::gcScan(gc, ioWordsToScan);
-        if (source_) { gc->mark(source_); --ioWordsToScan; }
-        if (valueIsObj_ && lastValue_.o) { gc->mark(lastValue_.o); --ioWordsToScan; }
-        if (listType_) { gc->mark(reinterpret_cast<GCObj*>(listType_)); --ioWordsToScan; }
-    }
-    u32 numObjSlots() const override {
-        return ListGenerator::numObjSlots() + 2 + (valueIsObj_ && lastValue_.o ? 1 : 0);
+    void releaseChildren() override {
+        if (source_) source_->release();
+        if (valueIsObj_ && lastValue_.o) lastValue_.o->release();
     }
 };
 
@@ -670,14 +539,10 @@ public:
 
     MapListGen(Type* type);
     void generate(VM& vm, ListNode* owner) override;
-    void gcScan(GC* gc, i32& ioWordsToScan) override {
-        ListGenerator::gcScan(gc, ioWordsToScan);
-        if (source_) { gc->mark(source_); --ioWordsToScan; }
-        if (fn_) { gc->mark(reinterpret_cast<GCObj*>(fn_)); --ioWordsToScan; }
-        if (resultElemType_) { gc->mark(reinterpret_cast<GCObj*>(resultElemType_)); --ioWordsToScan; }
-        if (resultListType_) { gc->mark(reinterpret_cast<GCObj*>(resultListType_)); --ioWordsToScan; }
+    void releaseChildren() override {
+        if (source_) source_->release();
+        if (fn_) reinterpret_cast<GCObj*>(fn_)->release();
     }
-    u32 numObjSlots() const override { return ListGenerator::numObjSlots() + 4; }
 };
 
 // Compile-time descriptor for lazy auto-map of function calls over lists.
@@ -709,28 +574,7 @@ public:
     AutoMapCallInfo();
 
     VMString str() const override { return rt::vmstr("[AutoMapCallInfo]"); }
-
-    void gcScan(GC* gc, i32& ioWordsToScan) override {
-        Obj::gcScan(gc, ioWordsToScan);
-        if (listElemType) { gc->mark(reinterpret_cast<GCObj*>(listElemType)); --ioWordsToScan; }
-        if (listParamType) { gc->mark(reinterpret_cast<GCObj*>(listParamType)); --ioWordsToScan; }
-        if (resultElemType) { gc->mark(reinterpret_cast<GCObj*>(resultElemType)); --ioWordsToScan; }
-        if (resultListType) { gc->mark(reinterpret_cast<GCObj*>(resultListType)); --ioWordsToScan; }
-        for (auto& ba : broadcastArgs) {
-            if (ba.srcType) { gc->mark(reinterpret_cast<GCObj*>(ba.srcType)); --ioWordsToScan; }
-            if (ba.dstType) { gc->mark(reinterpret_cast<GCObj*>(ba.dstType)); --ioWordsToScan; }
-            if (ba.elemType) { gc->mark(reinterpret_cast<GCObj*>(ba.elemType)); --ioWordsToScan; }
-        }
-    }
-    u32 numObjSlots() const override {
-        u32 slots = Obj::numObjSlots() + 4; // 4 Type* fields
-        for (auto& ba : broadcastArgs) {
-            if (ba.srcType) slots++;
-            if (ba.dstType) slots++;
-            if (ba.elemType) slots++;
-        }
-        return slots;
-    }
+    void releaseChildren() override {}
 };
 
 // Generator for lazy auto-map of a function call over a list.
@@ -746,25 +590,13 @@ public:
 
     AutoMapListGen(Type* type);
     void generate(VM& vm, ListNode* owner) override;
-
-    void gcScan(GC* gc, i32& ioWordsToScan) override {
-        ListGenerator::gcScan(gc, ioWordsToScan);
-        if (source_) { gc->mark(source_); --ioWordsToScan; }
-        if (info_) { gc->mark(info_); --ioWordsToScan; }
-        for (u16 i = 0; i < numBroadcast_; ++i) {
-            if (i < info_->broadcastArgs.size() && info_->broadcastArgs[i].isObj && broadcastVals_[i].o) {
-                gc->mark(broadcastVals_[i].o);
-                --ioWordsToScan;
-            }
-        }
-    }
-    u32 numObjSlots() const override {
-        u32 slots = ListGenerator::numObjSlots() + 2; // source_, info_
+    void releaseChildren() override {
+        if (source_) source_->release();
+        if (info_) info_->release();
         for (u16 i = 0; i < numBroadcast_; ++i) {
             if (i < info_->broadcastArgs.size() && info_->broadcastArgs[i].isObj && broadcastVals_[i].o)
-                slots++;
+                broadcastVals_[i].o->release();
         }
-        return slots;
     }
 };
 
@@ -778,13 +610,10 @@ public:
 
     FilterListGen(Type* type);
     void generate(VM& vm, ListNode* owner) override;
-    void gcScan(GC* gc, i32& ioWordsToScan) override {
-        ListGenerator::gcScan(gc, ioWordsToScan);
-        if (source_) { gc->mark(source_); --ioWordsToScan; }
-        if (fn_) { gc->mark(reinterpret_cast<GCObj*>(fn_)); --ioWordsToScan; }
-        if (listType_) { gc->mark(reinterpret_cast<GCObj*>(listType_)); --ioWordsToScan; }
+    void releaseChildren() override {
+        if (source_) source_->release();
+        if (fn_) reinterpret_cast<GCObj*>(fn_)->release();
     }
-    u32 numObjSlots() const override { return ListGenerator::numObjSlots() + 3; }
 };
 
 // Generator for takeWhile(list, fn) / dropWhile(list, fn)
@@ -800,13 +629,10 @@ public:
 
     PredicateListGen(Type* type);
     void generate(VM& vm, ListNode* owner) override;
-    void gcScan(GC* gc, i32& ioWordsToScan) override {
-        ListGenerator::gcScan(gc, ioWordsToScan);
-        if (source_) { gc->mark(source_); --ioWordsToScan; }
-        if (fn_) { gc->mark(reinterpret_cast<GCObj*>(fn_)); --ioWordsToScan; }
-        if (listType_) { gc->mark(reinterpret_cast<GCObj*>(listType_)); --ioWordsToScan; }
+    void releaseChildren() override {
+        if (source_) source_->release();
+        if (fn_) reinterpret_cast<GCObj*>(fn_)->release();
     }
-    u32 numObjSlots() const override { return ListGenerator::numObjSlots() + 3; }
 };
 
 // Generator for scan(list, init, fn) - running fold
@@ -822,16 +648,10 @@ public:
 
     ScanListGen(Type* type);
     void generate(VM& vm, ListNode* owner) override;
-    void gcScan(GC* gc, i32& ioWordsToScan) override {
-        ListGenerator::gcScan(gc, ioWordsToScan);
-        if (source_) { gc->mark(source_); --ioWordsToScan; }
-        if (fn_) { gc->mark(reinterpret_cast<GCObj*>(fn_)); --ioWordsToScan; }
-        if (accIsObj_ && accumulator_.o) { gc->mark(accumulator_.o); --ioWordsToScan; }
-        if (accElemType_) { gc->mark(reinterpret_cast<GCObj*>(accElemType_)); --ioWordsToScan; }
-        if (resultListType_) { gc->mark(reinterpret_cast<GCObj*>(resultListType_)); --ioWordsToScan; }
-    }
-    u32 numObjSlots() const override {
-        return ListGenerator::numObjSlots() + 4 + (accIsObj_ && accumulator_.o ? 1 : 0);
+    void releaseChildren() override {
+        if (source_) source_->release();
+        if (fn_) reinterpret_cast<GCObj*>(fn_)->release();
+        if (accIsObj_ && accumulator_.o) accumulator_.o->release();
     }
 };
 
@@ -847,16 +667,10 @@ public:
 
     ZipListGen(Type* type);
     void generate(VM& vm, ListNode* owner) override;
-    void gcScan(GC* gc, i32& ioWordsToScan) override {
-        ListGenerator::gcScan(gc, ioWordsToScan);
-        if (left_) { gc->mark(left_); --ioWordsToScan; }
-        if (right_) { gc->mark(right_); --ioWordsToScan; }
-        if (leftElemType_) { gc->mark(reinterpret_cast<GCObj*>(leftElemType_)); --ioWordsToScan; }
-        if (rightElemType_) { gc->mark(reinterpret_cast<GCObj*>(rightElemType_)); --ioWordsToScan; }
-        if (resultListType_) { gc->mark(reinterpret_cast<GCObj*>(resultListType_)); --ioWordsToScan; }
-        if (tupleType_) { gc->mark(reinterpret_cast<GCObj*>(tupleType_)); --ioWordsToScan; }
+    void releaseChildren() override {
+        if (left_) left_->release();
+        if (right_) right_->release();
     }
-    u32 numObjSlots() const override { return ListGenerator::numObjSlots() + 6; }
 };
 
 // Generator for enumerate(list) - pairs (index, element)
@@ -870,14 +684,9 @@ public:
 
     EnumerateListGen(Type* type);
     void generate(VM& vm, ListNode* owner) override;
-    void gcScan(GC* gc, i32& ioWordsToScan) override {
-        ListGenerator::gcScan(gc, ioWordsToScan);
-        if (source_) { gc->mark(source_); --ioWordsToScan; }
-        if (elemType_) { gc->mark(reinterpret_cast<GCObj*>(elemType_)); --ioWordsToScan; }
-        if (resultListType_) { gc->mark(reinterpret_cast<GCObj*>(resultListType_)); --ioWordsToScan; }
-        if (tupleType_) { gc->mark(reinterpret_cast<GCObj*>(tupleType_)); --ioWordsToScan; }
+    void releaseChildren() override {
+        if (source_) source_->release();
     }
-    u32 numObjSlots() const override { return ListGenerator::numObjSlots() + 4; }
 };
 
 // Generator for iter(value, fn) - infinite list: x, f(x), f(f(x)), ...
@@ -890,14 +699,9 @@ public:
 
     IterListGen(Type* type);
     void generate(VM& vm, ListNode* owner) override;
-    void gcScan(GC* gc, i32& ioWordsToScan) override {
-        ListGenerator::gcScan(gc, ioWordsToScan);
-        if (fn_) { gc->mark(reinterpret_cast<GCObj*>(fn_)); --ioWordsToScan; }
-        if (valueIsObj_ && current_.o) { gc->mark(current_.o); --ioWordsToScan; }
-        if (listType_) { gc->mark(reinterpret_cast<GCObj*>(listType_)); --ioWordsToScan; }
-    }
-    u32 numObjSlots() const override {
-        return ListGenerator::numObjSlots() + 2 + (valueIsObj_ && current_.o ? 1 : 0);
+    void releaseChildren() override {
+        if (fn_) reinterpret_cast<GCObj*>(fn_)->release();
+        if (valueIsObj_ && current_.o) current_.o->release();
     }
 };
 
@@ -910,13 +714,10 @@ public:
 
     JoinListGen(Type* type);
     void generate(VM& vm, ListNode* owner) override;
-    void gcScan(GC* gc, i32& ioWordsToScan) override {
-        ListGenerator::gcScan(gc, ioWordsToScan);
-        if (outer_) { gc->mark(outer_); --ioWordsToScan; }
-        if (inner_) { gc->mark(inner_); --ioWordsToScan; }
-        if (resultListType_) { gc->mark(reinterpret_cast<GCObj*>(resultListType_)); --ioWordsToScan; }
+    void releaseChildren() override {
+        if (outer_) outer_->release();
+        if (inner_) inner_->release();
     }
-    u32 numObjSlots() const override { return ListGenerator::numObjSlots() + 3; }
 };
 
 // Generator for toList(array) - lazily iterate over array elements
@@ -929,13 +730,9 @@ public:
 
     ArrayToListGen(Type* type);
     void generate(VM& vm, ListNode* owner) override;
-    void gcScan(GC* gc, i32& ioWordsToScan) override {
-        ListGenerator::gcScan(gc, ioWordsToScan);
-        if (array_) { gc->mark(array_); --ioWordsToScan; }
-        if (elemType_) { gc->mark(reinterpret_cast<GCObj*>(elemType_)); --ioWordsToScan; }
-        if (listType_) { gc->mark(reinterpret_cast<GCObj*>(listType_)); --ioWordsToScan; }
+    void releaseChildren() override {
+        if (array_) array_->release();
     }
-    u32 numObjSlots() const override { return ListGenerator::numObjSlots() + 3; }
 };
 
 // Generator for toList(coroutine) - lazily drain a coroutine into a list.
@@ -950,13 +747,10 @@ public:
 
     CoroutineListGen(Type* type);
     void generate(VM& vm, ListNode* owner) override;
-    void gcScan(GC* gc, i32& ioWordsToScan) override {
-        ListGenerator::gcScan(gc, ioWordsToScan);
-        if (coro_) { gc->mark(reinterpret_cast<GCObj*>(coro_)); --ioWordsToScan; }
-        if (listType_) { gc->mark(reinterpret_cast<GCObj*>(listType_)); --ioWordsToScan; }
-        if (valueIsObj_ && bufferedValue_.o) { gc->mark(bufferedValue_.o); --ioWordsToScan; }
+    void releaseChildren() override {
+        if (coro_) reinterpret_cast<GCObj*>(coro_)->release();
+        if (valueIsObj_ && bufferedValue_.o) bufferedValue_.o->release();
     }
-    u32 numObjSlots() const override { return ListGenerator::numObjSlots() + 3; }
 };
 
 // Ref (mutable reference)
@@ -968,18 +762,9 @@ public:
 
     VMString str() const override;
 
-    void gcScan(GC* gc, i32& ioWordsToScan) override {
-        Obj::gcScan(gc, ioWordsToScan);
+    void releaseChildren() override {
         auto* rt = static_cast<RefType*>(type_);
-        if (rt->elemType_->isObjType() && value_.o) {
-            gc->mark(value_.o);
-            --ioWordsToScan;
-        }
-    }
-
-    u32 numObjSlots() const override {
-        auto* rt = static_cast<RefType*>(type_);
-        return Obj::numObjSlots() + (rt->elemType_->isObjType() ? 1 : 0);
+        if (rt->elemType_->isObjType() && value_.o) value_.o->release();
     }
 };
 
@@ -995,34 +780,11 @@ public:
 
     VMString str() const override;
 
-    void gcScan(GC* gc, i32& ioWordsToScan) override {
-        Obj::gcScan(gc, ioWordsToScan);
-        gcPartialScan(gc, ioWordsToScan, 0);
-    }
-    void gcPartialScan(GC* gc, i32& ioWordsToScan, i32 start) override {
+    void releaseChildren() override {
         auto t = static_cast<StructType*>(type_);
-        i32 len = (i32)t->gcFields_.size();
-        i32 remain = len - start;
-        if (remain > ioWordsToScan) {
-            i32 end = start + ioWordsToScan;
-            for (i32 i = start; i < end; ++i) {
-                gc->mark(v[t->gcFields_[i]].o);
-            }
-            gc->setPartialScan(this, start + ioWordsToScan);
-            ioWordsToScan = 0;
-        } else {
-            for (i32 i = start; i < len; ++i) {
-                gc->mark(v[t->gcFields_[i]].o);
-            }
-            gc->setPartialScan(nullptr, 0);
-            ioWordsToScan -= remain;
+        for (auto idx : t->gcFields_) {
+            if (v[idx].o) v[idx].o->release();
         }
-    }
-
-    u32 numObjSlots() const override {
-        auto t = static_cast<StructType*>(type_);
-        u32 len = (u32)t->gcFields_.size();
-        return Obj::numObjSlots() + len;
     }
 
 private:
@@ -1042,33 +804,11 @@ public:
 
     VMString str() const override;
 
-    void gcScan(GC* gc, i32& ioWordsToScan) override {
-        Obj::gcScan(gc, ioWordsToScan);
-        gcPartialScan(gc, ioWordsToScan, 0);
-    }
-    void gcPartialScan(GC* gc, i32& ioWordsToScan, i32 start) override {
+    void releaseChildren() override {
         auto t = static_cast<StructType*>(type_);
-        i32 len = (i32)t->gcFields_.size();
-        i32 remain = len - start;
-        if (remain > ioWordsToScan) {
-            i32 end = start + ioWordsToScan;
-            for (i32 i = start; i < end; ++i) {
-                gc->mark(v[t->gcFields_[i]].o);
-            }
-            gc->setPartialScan(this, start + ioWordsToScan);
-            ioWordsToScan = 0;
-        } else {
-            for (i32 i = start; i < len; ++i) {
-                gc->mark(v[t->gcFields_[i]].o);
-            }
-            gc->setPartialScan(nullptr, 0);
-            ioWordsToScan -= remain;
+        for (auto idx : t->gcFields_) {
+            if (v[idx].o) v[idx].o->release();
         }
-    }
-    u32 numObjSlots() const override {
-        auto t = static_cast<StructType*>(type_);
-        u32 len = (u32)t->gcFields_.size();
-        return Obj::numObjSlots() + len;
     }
 
 private:
@@ -1112,18 +852,9 @@ public:
         return s;
     }
 
-    void gcScan(GC* gc, i32& ioWordsToScan) override {
-        Obj::gcScan(gc, ioWordsToScan);
+    void releaseChildren() override {
         auto t = static_cast<EnumType*>(type_);
-        if (t->gcCases_[which_]) {
-            gc->mark(word_.o);
-            --ioWordsToScan;
-        }
-    }
-
-    u32 numObjSlots() const override {
-        auto t = static_cast<EnumType*>(type_);
-        return Obj::numObjSlots() + (t->gcCases_[which_] ? 1 : 0);
+        if (t->gcCases_[which_] && word_.o) word_.o->release();
     }
 };
 
@@ -1148,18 +879,8 @@ public:
         return s;
     }
 
-    void gcScan(GC* gc, i32& ioWordsToScan) override {
-        Obj::gcScan(gc, ioWordsToScan);  // scans type_
-        gc->mark(reinterpret_cast<GCObj*>(wrappedType_));
-        --ioWordsToScan;
-        if (isObjType_ && value_.o) {
-            gc->mark(value_.o);
-            --ioWordsToScan;
-        }
-    }
-
-    u32 numObjSlots() const override {
-        return Obj::numObjSlots() + 1 + (isObjType_ ? 1 : 0);
+    void releaseChildren() override {
+        if (isObjType_ && value_.o) value_.o->release();
     }
 };
 
@@ -1176,24 +897,12 @@ public:
 
     VMString str() const override;
 
-    void gcScan(GC* gc, i32& ioWordsToScan) override {
-        Obj::gcScan(gc, ioWordsToScan);
+    void releaseChildren() override {
         if (!isInt_) {
-            // Fraction ranges: start_, end_, step_ hold Obj* (Fraction*)
-            if (start_.o) { gc->mark(start_.o); --ioWordsToScan; }
-            if (!isInfinite_ && end_.o) { gc->mark(end_.o); --ioWordsToScan; }
-            if (step_.o) { gc->mark(step_.o); --ioWordsToScan; }
+            if (start_.o) start_.o->release();
+            if (!isInfinite_ && end_.o) end_.o->release();
+            if (step_.o) step_.o->release();
         }
-    }
-
-    u32 numObjSlots() const override {
-        u32 slots = Obj::numObjSlots();
-        if (!isInt_) {
-            slots++;  // start_
-            if (!isInfinite_) slots++;  // end_
-            slots++;  // step_
-        }
-        return slots;
     }
 };
 
@@ -1208,12 +917,7 @@ public:
 
     VMString str() const override;
 
-    void gcScan(GC* gc, i32& ioWordsToScan) override {
-        Obj::gcScan(gc, ioWordsToScan);
-        gcPartialScan(gc, ioWordsToScan, 0);
-    }
-    void gcPartialScan(GC* gc, i32& ioWordsToScan, i32 start) override;
-    u32 numObjSlots() const override;
+    void releaseChildren() override;
 };
 
 // Set object (immutable hash set)
@@ -1227,12 +931,7 @@ public:
 
     VMString str() const override;
 
-    void gcScan(GC* gc, i32& ioWordsToScan) override {
-        Obj::gcScan(gc, ioWordsToScan);
-        gcPartialScan(gc, ioWordsToScan, 0);
-    }
-    void gcPartialScan(GC* gc, i32& ioWordsToScan, i32 start) override;
-    u32 numObjSlots() const override;
+    void releaseChildren() override;
 };
 
 // Function pointer type for built-in functions
@@ -1283,32 +982,11 @@ public:
     // Helper to get gcFreeVars from either LambdaType or TemplateLambdaType
     const Vec<int>& getGCFreeVars() const;
 
-    void gcScan(GC* gc, i32& ioWordsToScan) override {
-        Callable::gcScan(gc, ioWordsToScan);
-        // codeBlock_ is system-allocated (not a GCObj) — don't mark
-        gcPartialScan(gc, ioWordsToScan, 0);
-    }
-    void gcPartialScan(GC* gc, i32& ioWordsToScan, i32 start) override {
+    void releaseChildren() override {
         const auto& gcFreeVars = getGCFreeVars();
-        i32 len = (i32)gcFreeVars.size();
-        i32 remain = len - start;
-        if (remain > ioWordsToScan) {
-            i32 end = start + ioWordsToScan;
-            for (i32 i = start; i < end; ++i) {
-                gc->mark(freeVars_[gcFreeVars[i]].o);
-            }
-            gc->setPartialScan(this, start + ioWordsToScan);
-            ioWordsToScan = 0;
-        } else {
-            for (i32 i = start; i < len; ++i) {
-                gc->mark(freeVars_[gcFreeVars[i]].o);
-            }
-            gc->setPartialScan(nullptr, 0);
-            ioWordsToScan -= remain;
+        for (auto idx : gcFreeVars) {
+            if (freeVars_[idx].o) freeVars_[idx].o->release();
         }
-    }
-    u32 numObjSlots() const override {
-        return Obj::numObjSlots() + (u32)getGCFreeVars().size();
     }
 
 private:
@@ -1336,27 +1014,14 @@ public:
         return rt::vmstr("[CoroutineFrame]");
     }
 
-    void gcScan(GC* gc, i32& ioWordsToScan) override {
-        Obj::gcScan(gc, ioWordsToScan);
-        if (caller_) { gc->mark(caller_); --ioWordsToScan; }
-        // Scan Obj* registers using GC map
+    void releaseChildren() override {
+        if (caller_) caller_->release();
         if (codeBlock_ && gcMapIndex_ < codeBlock_->coroGCMaps_.size()) {
             auto& map = codeBlock_->coroGCMaps_[gcMapIndex_];
             for (u16 idx : map) {
-                if (idx < numRegs_ && regs_[idx].o) {
-                    gc->mark(regs_[idx].o);
-                    --ioWordsToScan;
-                }
+                if (idx < numRegs_ && regs_[idx].o) regs_[idx].o->release();
             }
         }
-    }
-
-    u32 numObjSlots() const override {
-        u32 slots = Obj::numObjSlots() + 1; // caller_
-        if (codeBlock_ && gcMapIndex_ < codeBlock_->coroGCMaps_.size()) {
-            slots += (u32)codeBlock_->coroGCMaps_[gcMapIndex_].size();
-        }
-        return slots;
     }
 
 private:
@@ -1404,30 +1069,15 @@ public:
         return s;
     }
 
-    void gcScan(GC* gc, i32& ioWordsToScan) override {
-        Obj::gcScan(gc, ioWordsToScan);
-        if (topFrame_) { gc->mark(topFrame_); --ioWordsToScan; }
-        if (callerCoroFrame_) { gc->mark(callerCoroFrame_); --ioWordsToScan; }
-        if (callerCoroutine_) { gc->mark(callerCoroutine_); --ioWordsToScan; }
-        // Scan Obj* args using funcType
+    void releaseChildren() override {
+        if (topFrame_) topFrame_->release();
+        if (callerCoroFrame_) callerCoroFrame_->release();
+        if (callerCoroutine_) callerCoroutine_->release();
         if (funcType_) {
             for (u16 i = 0; i < numArgs_ && i < funcType_->argTypes_.size(); ++i) {
-                if (funcType_->argTypes_[i]->isObjType() && args_[i].o) {
-                    gc->mark(args_[i].o);
-                    --ioWordsToScan;
-                }
+                if (funcType_->argTypes_[i]->isObjType() && args_[i].o) args_[i].o->release();
             }
         }
-    }
-
-    u32 numObjSlots() const override {
-        u32 slots = Obj::numObjSlots() + 3; // topFrame_, callerCoroFrame_, callerCoroutine_
-        if (funcType_) {
-            for (u16 i = 0; i < numArgs_ && i < funcType_->argTypes_.size(); ++i) {
-                if (funcType_->argTypes_[i]->isObjType()) slots++;
-            }
-        }
-        return slots;
     }
 
 private:

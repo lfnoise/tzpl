@@ -29,6 +29,7 @@
 #include "stl_allocator.hpp"
 #include "symbol.hpp"
 #include "gc.hpp"
+#include "arc.hpp"
 #include "type_universe.hpp"
 #include <cstdio>
 #include <memory>
@@ -96,9 +97,6 @@ public:
     virtual VMString str() const = 0;
 
     rt::TLSFAllocator* getAllocator() const;
-
-    void gcScan(GC* gc, i32& ioWordsToScan) override;
-    u32 numObjSlots() const override { return 1; }
 };
 
 // Forward declarations for direct-threaded dispatch
@@ -187,14 +185,14 @@ struct Xoshiro256 {
 // Virtual Machine
 class VM {
     friend class GCObj;
-    friend class GC;
 
 private:
     // Memory allocator
     rt::TLSFAllocator allocator_;
 
-    // Garbage collector
-    GC gc_;
+    // ARC infrastructure
+    AutoReleasePool autoReleasePool_;
+    DeferredDeleteQueue deferredDeleteQueue_;
 
     // Register file (TLSF-allocated flat array)
     Word* regs_;
@@ -276,14 +274,15 @@ public:
     rt::TLSFAllocator& allocator() { return allocator_; }
     const rt::TLSFAllocator& allocator() const { return allocator_; }
 
-    // Garbage collector access
-    GC& gc() { return gc_; }
-    const GC& gc() const { return gc_; }
-    u32 getNumLiveObjects() const { return gc_.getNumLiveObjects(); }
-    u32 getNumLiveWords() const { return gc_.getNumLiveWords(); }
+    // ARC heartbeat - drain auto-release pool and process deferred deletions
+    void gcHeartbeat() {
+        autoReleasePool_.drain();
+        deferredDeleteQueue_.processN(256);
+    }
 
-    // GC heartbeat - call this on timer or audio buffer callback
-    void gcHeartbeat() { gc_.heartbeat(); }
+    // ARC access
+    AutoReleasePool& autoReleasePool() { return autoReleasePool_; }
+    DeferredDeleteQueue& deferredDeleteQueue() { return deferredDeleteQueue_; }
 
     // Type universe access
     TypeUniverse& typeUniverse() { return typeUniverse_; }
@@ -467,13 +466,8 @@ extern thread_local Compiler* gCurrentCompiler;
 
 // Register a newly constructed GCObj.
 // During compilation: tracked by the Compiler (immortal, system-allocated).
-// During runtime: added to GC table directly.
+// During runtime: added to auto-release pool with initial refcount.
 void registerNewObj(GCObj* obj);
-
-inline void Obj::gcScan(GC* gc, i32& ioWordsToScan) {
-    gc->mark((GCObj*)type_);
-    --ioWordsToScan;
-}
 
 } // namespace ts
 

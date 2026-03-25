@@ -113,6 +113,31 @@ void op_store_global(VM& vm, Code* pc) {
     DISPATCH(3);
 }
 
+// STORE_GLOBAL_OBJ Ra, K  (3 words: op, regs, global_index)
+// Like STORE_GLOBAL but retains the new Obj* and releases the old one.
+void op_store_global_obj(VM& vm, Code* pc) {
+    u16 src = pc[1].regs[0];
+    u32 idx = (u32)pc[2].i;
+    Obj* newVal = vm.reg(src).o;
+    Obj* oldVal = vm.global(idx).o;
+    if (newVal) newVal->retain();
+    vm.global(idx) = vm.reg(src);
+    if (oldVal) oldVal->release();
+    DISPATCH(3);
+}
+
+// INIT_GLOBAL_OBJ Ra, K  (3 words: op, regs, global_index)
+// Like STORE_GLOBAL but retains the new Obj*. No release of old value.
+// Used for declarations (let/var/const) where the old value may be a different type.
+void op_init_global_obj(VM& vm, Code* pc) {
+    u16 src = pc[1].regs[0];
+    u32 idx = (u32)pc[2].i;
+    Obj* newVal = vm.reg(src).o;
+    if (newVal) newVal->retain();
+    vm.global(idx) = vm.reg(src);
+    DISPATCH(3);
+}
+
 // --- Integer Arithmetic ---
 
 // ADD_INT Rd, Ra, Rb  (2 words: op, regs)
@@ -853,6 +878,11 @@ void op_concat_tuple(VM& vm, Code* pc) {
     }
     for (usize i = 0; i < rightLen; ++i) {
         result->v[leftLen + i] = tupB->v[i];
+    }
+    // Retain Obj* fields
+    auto* st = static_cast<StructType*>(static_cast<Type*>(resultType));
+    for (auto idx : st->gcFields_) {
+        if (result->v[idx].o) result->v[idx].o->retain();
     }
     vm.reg(dst).o = result;
     DISPATCH(4);
@@ -1752,8 +1782,6 @@ void BinopListGen::generate(VM& vm, ListNode* owner) {
         auto* tailNode = new ListNode(resultListType_);
         leftList_ = nextLeft;
         rightList_ = nextRight;
-        if (leftList_) vm.gc().writeBarrier(leftList_);
-        if (rightList_) vm.gc().writeBarrier(rightList_);
         tailNode->generator_ = this;
         owner->tail_ = tailNode;
     }
@@ -1786,7 +1814,6 @@ void UnaryListGen::generate(VM& vm, ListNode* owner) {
     } else {
         auto* tailNode = new ListNode(resultListType_);
         source_ = nextSource;
-        vm.gc().writeBarrier(source_);
         tailNode->generator_ = this;
         owner->tail_ = tailNode;
     }
@@ -1868,7 +1895,6 @@ void FractionRangeListGen::generate(VM& vm, ListNode* owner) {
     } else {
         auto* tailNode = new ListNode(listType_);
         current_ = new Fraction(next);
-        vm.gc().writeBarrier(current_);
         tailNode->generator_ = this;
         owner->tail_ = tailNode;
     }
@@ -1897,8 +1923,10 @@ void op_make_array(VM& vm, Code* pc) {
     } else {
         auto* arr = new ObjArray(arrayType);
         arr->v.resize(numElems);
-        for (u16 i = 0; i < numElems; ++i)
+        for (u16 i = 0; i < numElems; ++i) {
             arr->v[i] = vm.reg(firstSrc + i).o;
+            if (arr->v[i]) arr->v[i]->retain();
+        }
         vm.reg(dst).o = arr;
     }
     DISPATCH(3);
@@ -1923,6 +1951,11 @@ void op_tuple_slice(VM& vm, Code* pc) {
     for (size_t i = 0; i < count; ++i) {
         newTuple->v[i] = srcTuple->v[startIdx + i];
     }
+    // Retain Obj* fields
+    auto* st = static_cast<StructType*>(static_cast<Type*>(resultType));
+    for (auto idx : st->gcFields_) {
+        if (newTuple->v[idx].o) newTuple->v[idx].o->retain();
+    }
     vm.reg(dst).o = newTuple;
     DISPATCH(3);
 }
@@ -1935,6 +1968,11 @@ void op_make_tuple(VM& vm, Code* pc) {
     for (u16 i = 0; i < numFields; ++i) {
         tuple->v[i] = vm.reg(firstSrc + i);
     }
+    // Retain Obj* fields so they survive the auto-release pool drain
+    auto* st = static_cast<StructType*>(static_cast<Type*>(tupleType));
+    for (auto idx : st->gcFields_) {
+        if (tuple->v[idx].o) tuple->v[idx].o->retain();
+    }
     vm.reg(dst).o = tuple;
     DISPATCH(3);
 }
@@ -1946,6 +1984,10 @@ void op_make_struct(VM& vm, Code* pc) {
     auto* s = Struct::create(structType, numFields);
     for (u16 i = 0; i < numFields; ++i) {
         s->v[i] = vm.reg(firstSrc + i);
+    }
+    // Retain Obj* fields so they survive the auto-release pool drain
+    for (auto idx : structType->gcFields_) {
+        if (s->v[idx].o) s->v[idx].o->retain();
     }
     vm.reg(dst).o = s;
     DISPATCH(3);
@@ -2133,6 +2175,11 @@ void op_make_lambda(VM& vm, Code* pc) {
     for (u16 i = 0; i < numFreeVars; ++i) {
         lambda->freeVars_[i] = vm.reg(captureBase + i);
     }
+    // Retain Obj* free variables so they survive the auto-release pool drain
+    const auto& gcFreeVars = lambda->getGCFreeVars();
+    for (auto idx : gcFreeVars) {
+        if (lambda->freeVars_[idx].o) lambda->freeVars_[idx].o->retain();
+    }
     vm.reg(dst).o = lambda;
     DISPATCH(3);
 }
@@ -2193,6 +2240,11 @@ void op_make_template_lambda(VM& vm, Code* pc) {
     auto* lambda = Lambda::create(tmplType, numFreeVars);
     for (u16 i = 0; i < numFreeVars; ++i) {
         lambda->freeVars_[i] = vm.reg(captureBase + i);
+    }
+    // Retain Obj* free variables so they survive the auto-release pool drain
+    const auto& gcFreeVars = lambda->getGCFreeVars();
+    for (auto idx : gcFreeVars) {
+        if (lambda->freeVars_[idx].o) lambda->freeVars_[idx].o->retain();
     }
     vm.reg(dst).o = lambda;
     DISPATCH(3);
@@ -2268,6 +2320,11 @@ void op_specialize_lambda(VM& vm, Code* pc) {
     auto* newLambda = Lambda::create(newType, srcLambda->numFreeVars_);
     for (u16 i = 0; i < srcLambda->numFreeVars_; ++i) {
         newLambda->freeVars_[i] = srcLambda->freeVars_[i];
+    }
+    // Retain Obj* free variables so they survive the auto-release pool drain
+    const auto& gcFreeVars = newLambda->getGCFreeVars();
+    for (auto idx : gcFreeVars) {
+        if (newLambda->freeVars_[idx].o) newLambda->freeVars_[idx].o->retain();
     }
     vm.reg(dst).o = newLambda;
     DISPATCH(3);
@@ -2500,17 +2557,11 @@ void op_ref_get(VM& vm, Code* pc) {
 // Sets the ref's value and returns the assigned value in dst.
 void op_ref_set(VM& vm, Code* pc) {
     u16 dst = pc[1].regs[0], refReg = pc[1].regs[1], valReg = pc[1].regs[2];
-    auto* refType = static_cast<RefType*>(pc[2].p);
     auto* ref = static_cast<RefValue*>(vm.reg(refReg).o);
 
     ref->value_ = vm.reg(valReg);
     vm.reg(dst) = vm.reg(valReg);
 
-    // Write barrier: if the ref holds an Obj*, the GC needs to know
-    // that this object was mutated during collection
-    if (refType->elemType_->isObjType()) {
-        vm.gc().writeBarrier(ref);
-    }
     DISPATCH(3);
 }
 
@@ -2532,6 +2583,13 @@ void op_coro_create(VM& vm, Code* pc) {
     // Copy arguments into coroutine
     for (u16 i = 0; i < argc; ++i) {
         coro->args_[i] = vm.reg(argBase + i);
+    }
+    // Retain Obj* args so they survive the auto-release pool drain
+    if (coro->funcType_) {
+        for (u16 i = 0; i < coro->numArgs_ && i < coro->funcType_->argTypes_.size(); ++i) {
+            if (coro->funcType_->argTypes_[i]->isObjType() && coro->args_[i].o)
+                coro->args_[i].o->retain();
+        }
     }
 
     vm.reg(dst).o = coro;
@@ -2592,9 +2650,6 @@ void op_coro_resume(VM& vm, Code* pc) {
         // Suspended state: restore registers from CoroutineFrame save slot
         auto* frame = coro->topFrame_;
         vm.setCurrentCoroFrame(frame);
-
-        // Write barrier on CoroutineFrame (safety for incremental GC)
-        vm.gc().writeBarrier(frame);
 
         // Copy registers from CoroutineFrame to flat register file
         for (u16 i = 0; i < frame->numRegs_; ++i) {
@@ -2744,6 +2799,30 @@ void op_load_dynamic(VM& vm, Code* pc) {
 void op_store_dynamic(VM& vm, Code* pc) {
     u16 src = pc[1].regs[0];
     u32 idx = (u32)pc[2].i;
+    vm.dynVar(idx) = vm.reg(src);
+    DISPATCH(3);
+}
+
+// STORE_DYNAMIC_OBJ Ra, K (3 words: op, regs, dynvar_index)
+// Like STORE_DYNAMIC but retains the new Obj* and releases the old one.
+void op_store_dynamic_obj(VM& vm, Code* pc) {
+    u16 src = pc[1].regs[0];
+    u32 idx = (u32)pc[2].i;
+    Obj* newVal = vm.reg(src).o;
+    Obj* oldVal = vm.dynVar(idx).o;
+    if (newVal) newVal->retain();
+    vm.dynVar(idx) = vm.reg(src);
+    if (oldVal) oldVal->release();
+    DISPATCH(3);
+}
+
+// INIT_DYNAMIC_OBJ Ra, K (3 words: op, regs, dynvar_index)
+// Like STORE_DYNAMIC but retains the new Obj*. No release of old value.
+void op_init_dynamic_obj(VM& vm, Code* pc) {
+    u16 src = pc[1].regs[0];
+    u32 idx = (u32)pc[2].i;
+    Obj* newVal = vm.reg(src).o;
+    if (newVal) newVal->retain();
     vm.dynVar(idx) = vm.reg(src);
     DISPATCH(3);
 }

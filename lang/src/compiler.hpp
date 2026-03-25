@@ -177,6 +177,7 @@ public:
     // These operate on the current VMTarget's layout (set by makeCurrent or compile).
     u32 addGlobal(bool isObj = false);
     void setGlobalIsObj(u32 idx, bool isObj);
+    bool isGlobalObj(u32 idx) const;
     Word& global(u32 idx);
     const Word& global(u32 idx) const;
     u32 numGlobals() const;

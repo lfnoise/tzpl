@@ -79,7 +79,7 @@ std::pair<std::vector<CompileResult::GlobalSlot>, u32> Compiler::takePendingGlob
 
 void Compiler::trackObject(GCObj* obj) {
     // Compile-time objects are system-allocated and immortal.
-    // They have gcindex_ = kGCIndexSentinel so the GC ignores them.
+    // They keep kImmortalRefcount so ARC ignores them.
     ++numTrackedObjects_;
 }
 
@@ -97,6 +97,12 @@ void Compiler::setGlobalIsObj(u32 idx, bool isObj) {
     assert(currentTarget_ && "No current target set (call makeCurrent first)");
     assert(idx < currentTarget_->allGlobals.size() && "Global index out of range");
     currentTarget_->allGlobals[idx].isObj = isObj;
+}
+
+bool Compiler::isGlobalObj(u32 idx) const {
+    assert(currentTarget_ && "No current target set (call makeCurrent first)");
+    assert(idx < currentTarget_->allGlobals.size() && "Global index out of range");
+    return currentTarget_->allGlobals[idx].isObj;
 }
 
 Word& Compiler::global(u32 idx) {

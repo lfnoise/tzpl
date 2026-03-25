@@ -120,13 +120,6 @@ void ListNode::force(VM& vm) {
         ListGenerator* gen = generator_;
         generator_ = nullptr;  // clear first to prevent re-entry
         gen->generate(vm, this);
-        // Write barrier: if the GC has already scanned this node (black),
-        // it won't revisit it, so mark the newly assigned targets directly
-        // to ensure the incremental GC doesn't miss them.
-        auto& gc = vm.gc();
-        if (tail_) gc.writeBarrier(tail_);
-        auto* lt = static_cast<ListType*>(type_);
-        if (lt->elemType_->isObjType() && head_.o) gc.writeBarrier(head_.o);
     }
 }
 
@@ -601,35 +594,15 @@ VMString MapObj::str() const {
     return s;
 }
 
-// MapObj GC scanning
-void MapObj::gcPartialScan(GC* gc, i32& ioWordsToScan, i32 start) {
+void MapObj::releaseChildren() {
     auto* mt = static_cast<MapType*>(type_);
     bool keyIsObj = mt->keyType_->isObjType();
     bool valIsObj = mt->valueType_->isObjType();
-    if (!keyIsObj && !valIsObj) {
-        gc->setPartialScan(nullptr, 0);
-        return;
-    }
-    i32 idx = 0;
+    if (!keyIsObj && !valIsObj) return;
     for (auto& [k, v] : entries_) {
-        if (idx < start) { ++idx; continue; }
-        if (ioWordsToScan <= 0) {
-            gc->setPartialScan(this, idx);
-            return;
-        }
-        if (keyIsObj && k.o) { gc->mark(k.o); --ioWordsToScan; }
-        if (valIsObj && v.o) { gc->mark(v.o); --ioWordsToScan; }
-        ++idx;
+        if (keyIsObj && k.o) k.o->release();
+        if (valIsObj && v.o) v.o->release();
     }
-    gc->setPartialScan(nullptr, 0);
-}
-
-u32 MapObj::numObjSlots() const {
-    auto* mt = static_cast<MapType*>(type_);
-    u32 perEntry = 0;
-    if (mt->keyType_->isObjType()) perEntry++;
-    if (mt->valueType_->isObjType()) perEntry++;
-    return Obj::numObjSlots() + (u32)entries_.size() * perEntry;
 }
 
 // SetObj constructor
@@ -657,30 +630,12 @@ VMString SetObj::str() const {
     return s;
 }
 
-// SetObj GC scanning
-void SetObj::gcPartialScan(GC* gc, i32& ioWordsToScan, i32 start) {
+void SetObj::releaseChildren() {
     auto* st = static_cast<SetType*>(type_);
-    if (!st->elemType_->isObjType()) {
-        gc->setPartialScan(nullptr, 0);
-        return;
-    }
-    i32 idx = 0;
+    if (!st->elemType_->isObjType()) return;
     for (auto& elem : entries_) {
-        if (idx < start) { ++idx; continue; }
-        if (ioWordsToScan <= 0) {
-            gc->setPartialScan(this, idx);
-            return;
-        }
-        if (elem.o) { gc->mark(elem.o); --ioWordsToScan; }
-        ++idx;
+        if (elem.o) elem.o->release();
     }
-    gc->setPartialScan(nullptr, 0);
-}
-
-u32 SetObj::numObjSlots() const {
-    auto* st = static_cast<SetType*>(type_);
-    if (!st->elemType_->isObjType()) return Obj::numObjSlots();
-    return Obj::numObjSlots() + (u32)entries_.size();
 }
 
 // --- WordHash ---

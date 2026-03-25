@@ -171,11 +171,11 @@ size_t tzpl_vm_pool_size(const tzpl_vm* vm) {
 }
 
 uint32_t tzpl_vm_num_live_objects(const tzpl_vm* vm) {
-    return vm->impl.getNumLiveObjects();
+    return const_cast<ts::VM&>(vm->impl).autoReleasePool().size();
 }
 
 uint32_t tzpl_vm_num_live_words(const tzpl_vm* vm) {
-    return vm->impl.getNumLiveWords();
+    return const_cast<ts::VM&>(vm->impl).deferredDeleteQueue().size();
 }
 
 // --- Type handles ---

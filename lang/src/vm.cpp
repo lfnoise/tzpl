@@ -41,8 +41,21 @@ thread_local Compiler* gCurrentCompiler = nullptr;
 void registerNewObj(GCObj* obj) {
     if (gCurrentCompiler) {
         gCurrentCompiler->trackObject(obj);
+        // Compiler objects are immortal -- refcount stays at kImmortalRefcount
     } else if (gCurrentVM) {
-        gCurrentVM->gc().addObj(obj);
+        // Set initial refcount for VM-allocated objects and add to auto-release pool
+        obj->setInitialRefcount();
+        gCurrentVM->autoReleasePool().add(obj);
+    }
+}
+
+void arcEnqueueForDeletion(GCObj* obj) {
+    if (gCurrentVM) {
+        gCurrentVM->deferredDeleteQueue().enqueue(obj);
+    } else {
+        // Fallback: immediate delete (should not happen in normal operation)
+        obj->releaseChildren();
+        delete obj;
     }
 }
 
@@ -57,7 +70,9 @@ namespace ts { // re-open
 
 // GCObj implementation
 
-GCObj::GCObj() {}
+GCObj::GCObj() {
+    homeAllocator_ = rt::gCurrentAllocator;
+}
 
 void* GCObj::operator new(usize size) {
     if (rt::gCurrentAllocator) {
@@ -94,7 +109,6 @@ CodeBlock* VM::currentCodeBlock() const {
 
 VM::VM(usize poolSize, TypeUniverse& typeUniverse, const VMTarget& target)
     : allocator_(poolSize)
-    , gc_()
     , regs_(nullptr)
     , maxRegs_(4096)
     , frames_(nullptr)
@@ -142,15 +156,15 @@ VM::VM(usize poolSize, TypeUniverse& typeUniverse, const VMTarget& target)
 
     // Initialize currentRegs_ to point at base of register file
     currentRegs_ = regs_;
-
-    // Make all objects created during VM init immortal (built-in types, etc.)
-    gc_.makeAllImmortal();
 }
 
 VM::~VM() {
-    // Complete any ongoing GC before destroying objects
-    while (gc_.isCollecting()) {
-        gc_.heartbeat();
+    makeCurrent();
+
+    // Drain auto-release pool and delete all remaining objects
+    autoReleasePool_.drain();
+    while (!deferredDeleteQueue_.empty()) {
+        deferredDeleteQueue_.processN(1024);
     }
 
     // Deallocate register file, frame stack, and dynamic scope stack
@@ -297,46 +311,6 @@ Word VM::execute(CodeBlock* block) {
 
     // When HALT runs, it returns here
     return reg(0);
-}
-
-// GC::markRoots() - scan globals and persistent state
-// Registers are empty at GC time (event-driven: stack collapses between events)
-// Types are system-allocated and immortal — no type cache scanning needed.
-void GC::markRoots() {
-    if (!gCurrentVM) return;
-
-    // Scan global variables that hold Obj pointers
-    for (u32 i = 0; i < gCurrentVM->numGlobals(); ++i) {
-        if (gCurrentVM->globalIsObj_[i]) {
-            Obj* obj = gCurrentVM->globals_[i].o;
-            if (obj) mark(obj);
-        }
-    }
-
-    // Scan dynamic scope variables that hold Obj pointers
-    for (u32 i = 0; i < gCurrentVM->numDynVars(); ++i) {
-        if (gCurrentVM->dynVarIsObj_[i]) {
-            Obj* obj = gCurrentVM->dynVars_[i].o;
-            if (obj) mark(obj);
-        }
-    }
-
-    // Scan saved values on the dynamic scope stack
-    for (u32 i = 0; i < gCurrentVM->dynStackTop_; ++i) {
-        auto& entry = gCurrentVM->dynStack_[i];
-        if (entry.isObj) {
-            Obj* obj = entry.savedValue.o;
-            if (obj) mark(obj);
-        }
-    }
-
-    // Scan active coroutine frame chain
-    if (gCurrentVM->currentCoroutine_)
-        mark(gCurrentVM->currentCoroutine_);
-    if (gCurrentVM->currentCoroFrame_) {
-        CoroutineFrame* f = gCurrentVM->currentCoroFrame_;
-        while (f) { mark(f); f = f->caller_; }
-    }
 }
 
 } // namespace ts

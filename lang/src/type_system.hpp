@@ -38,10 +38,6 @@ public:
     Type(Type* typeType) : Obj(typeType) {}
 
     virtual bool isObjType() const = 0;
-
-    // Type objects are permanent (system-allocated, never GC'd).
-    // They only reference other permanent types, so scanning is a no-op.
-    void gcScan(GC* gc, i32& ioWordsToScan) override {}
 };
 
 using TypeVec = Vec<Type*>;

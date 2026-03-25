@@ -24,9 +24,6 @@
 #include <iostream>
 #include <fstream>
 #include <sstream>
-#include <mutex>
-#include <thread>
-#include <condition_variable>
 #include <cstdlib>
 #include <unistd.h>
 #include "linenoise.h"
@@ -232,8 +229,7 @@ static bool handleREPLCommand(const std::string& input, REPLSession& session,
                   << "  :globals        List global variables\n"
                   << "  :functions      List user-defined functions\n"
                   << "  :memory         Show memory usage\n"
-                  << "  :gc             Show garbage collector state\n"
-                  << "  :collect        Run a full garbage collection\n";
+                  << "  :gc             Run ARC heartbeat\n";
         return false;
     }
 
@@ -264,44 +260,16 @@ static bool handleREPLCommand(const std::string& input, REPLSession& session,
     if (cmd == ":memory") {
         std::printf("  Allocated: %zu bytes\n", vm.allocator().getAllocated());
         std::printf("  Pool size: %zu bytes\n", vm.allocator().getPoolSize());
-        std::printf("  GC live objects: %u\n", vm.getNumLiveObjects());
-        std::printf("  GC live words: %u\n", vm.getNumLiveWords());
-        std::printf("  GC collecting: %s\n", vm.gc().isCollecting() ? "yes" : "no");
-        std::printf("  GC triggered: %s\n", vm.gc().isTriggered() ? "yes" : "no");
+        std::printf("  Auto-release pool: %u objects\n", vm.autoReleasePool().size());
+        std::printf("  Deferred delete queue: %u objects\n", vm.deferredDeleteQueue().size());
         return false;
     }
 
-    if (cmd == ":gc") {
-        auto& gc = vm.gc();
-        std::printf("  Collections completed: %u\n", gc.getCollectionsCompleted());
-        std::printf("  Collecting: %s\n", gc.isCollecting() ? "yes" : "no");
-        std::printf("  Triggered: %s\n", gc.isTriggered() ? "yes" : "no");
-        std::printf("  Compiled objects: %u\n", compiler.numTrackedObjects());
-        std::printf("  Black objects: %u\n", gc.getNumBlack());
-        std::printf("  Grey objects: %u\n", gc.getNumGrey());
-        std::printf("  White objects: %u\n", gc.getNumWhite());
-        std::printf("  Sweepable objects: %u\n", gc.getNumSweepable());
-        std::printf("  Total objects: %u\n", gc.getNumTotal());
-        std::printf("  Free slots: %u\n", gc.getNumFree());
-        std::printf("  Live words: %u\n", gc.getNumLiveWords());
-        std::printf("  Trigger threshold: %u words\n", gc.getTriggerThreshold());
-        std::printf("  Work budget: %u words/heartbeat\n", gc.getWorkBudget());
-        std::printf("  Avg pause: %.1f us\n", gc.getAveragePauseTime());
-        return false;
-    }
-
-    if (cmd == ":collect") {
-        auto& gc = vm.gc();
-        u32 before = gc.getNumTotal();
-        if (!gc.isCollecting()) {
-            gc.startCollection();
-        }
-        while (gc.isCollecting()) {
-            vm.gcHeartbeat();
-        }
-        gc.sweepAll();
-        u32 after = gc.getNumTotal();
-        std::printf("  Collected %u objects. %u remaining.\n", before - after, after);
+    if (cmd == ":gc" || cmd == ":collect") {
+        vm.gcHeartbeat();
+        std::printf("  ARC heartbeat complete.\n");
+        std::printf("  Auto-release pool: %u objects\n", vm.autoReleasePool().size());
+        std::printf("  Deferred delete queue: %u objects\n", vm.deferredDeleteQueue().size());
         return false;
     }
 
@@ -320,60 +288,10 @@ static bool handleREPLCommand(const std::string& input, REPLSession& session,
     return false;
 }
 
-// Background timer that drives GC heartbeats while the REPL waits for input
-class GCTimer {
-    VM& vm_;
-    std::mutex mutex_;
-    std::condition_variable cv_;
-    std::thread thread_;
-    bool collecting_ = false;
-    bool shutdown_ = false;
-
-    void run() {
-        vm_.makeCurrent();
-        std::unique_lock<std::mutex> lock(mutex_);
-        while (!shutdown_) {
-            cv_.wait(lock, [this] { return collecting_ || shutdown_; });
-            while (collecting_ && !shutdown_) {
-                vm_.gcHeartbeat();
-                if (!vm_.gc().isCollecting()) {
-                    collecting_ = false;
-                    break;
-                }
-                lock.unlock();
-                std::this_thread::sleep_for(std::chrono::milliseconds(1));
-                lock.lock();
-            }
-        }
-    }
-
-public:
-    GCTimer(VM& vm) : vm_(vm), thread_(&GCTimer::run, this) {}
-
-    ~GCTimer() {
-        {
-            std::lock_guard<std::mutex> lock(mutex_);
-            shutdown_ = true;
-        }
-        cv_.notify_one();
-        thread_.join();
-    }
-
-    std::mutex& mutex() { return mutex_; }
-
-    void startCollecting() {
-        // Caller must hold mutex_
-        vm_.gc().startCollection();
-        collecting_ = true;
-        cv_.notify_one();
-    }
-};
-
 // Run the interactive REPL
 static void runREPL(VM& vm, Compiler& compiler, const VMTarget& target,
                     std::vector<std::string> includePaths) {
     REPLSession session(compiler, vm, target, std::move(includePaths));
-    GCTimer gcTimer(vm);
 
     // Set up linenoise history
     linenoiseHistorySetMaxLen(500);
@@ -384,13 +302,11 @@ static void runREPL(VM& vm, Compiler& compiler, const VMTarget& target,
 
     while (true) {
         bool eof = false;
-        std::string input = readREPLInput(eof);  // No mutex — blocks on stdin
+        std::string input = readREPLInput(eof);
         if (input.empty()) {
             if (eof) break;
             continue;
         }
-
-        std::lock_guard<std::mutex> lock(gcTimer.mutex());
 
         if (input[0] == ':') {
             if (handleREPLCommand(input, session, vm, compiler)) break;
@@ -409,10 +325,8 @@ static void runREPL(VM& vm, Compiler& compiler, const VMTarget& target,
                 result.formattedValue.c_str(), result.typeName.c_str());
         }
 
-        // After execution, check if GC was triggered by allocations
-        if (vm.gc().isTriggered() && !vm.gc().isCollecting()) {
-            gcTimer.startCollecting();
-        }
+        // Drain auto-release pool and process deferred deletions after each evaluation
+        vm.gcHeartbeat();
     }
 }
 

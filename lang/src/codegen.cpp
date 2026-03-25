@@ -616,8 +616,7 @@ void CodeGen::genLetDecl(LetDeclNode* decl) {
     // Check if this is a global (no local scopes)
     auto it = typeChecker_.globalVars().find(decl->name);
     if (it != typeChecker_.globalVars().end() && localScopes_.size() <= 1) {
-        // Store to global
-        emitOp(op_store_global);
+        emitOp(decl->resolvedType->isObjType() ? op_init_global_obj : op_store_global);
         emitRegs(reg);
         emitInt(it->second.globalIndex);
     }
@@ -639,7 +638,7 @@ void CodeGen::genVarDecl(VarDeclNode* decl) {
             emitInt(dynIdx);
         } else {
             // At global scope: just set the initial value
-            emitOp(op_store_dynamic);
+            emitOp(decl->resolvedType->isObjType() ? op_init_dynamic_obj : op_store_dynamic);
             emitRegs(reg);
             emitInt(dynIdx);
         }
@@ -662,7 +661,7 @@ void CodeGen::genVarDecl(VarDeclNode* decl) {
 
     auto it = typeChecker_.globalVars().find(decl->name);
     if (it != typeChecker_.globalVars().end() && localScopes_.size() <= 1) {
-        emitOp(op_store_global);
+        emitOp(decl->resolvedType->isObjType() ? op_init_global_obj : op_store_global);
         emitRegs(reg);
         emitInt(it->second.globalIndex);
     }
@@ -683,7 +682,7 @@ void CodeGen::genConstDecl(ConstDeclNode* decl) {
     // Check if this is a global (no local scopes, e.g. REPL top level)
     auto it = typeChecker_.globalVars().find(decl->name);
     if (it != typeChecker_.globalVars().end() && localScopes_.size() <= 1) {
-        emitOp(op_store_global);
+        emitOp(decl->resolvedType->isObjType() ? op_init_global_obj : op_store_global);
         emitRegs(reg);
         emitInt(it->second.globalIndex);
     }
@@ -1620,7 +1619,7 @@ void CodeGen::genSwitchStmt(SwitchStmtNode* stmt) {
 void CodeGen::emitGlobalStoreIfNeeded(const std::string& name, u16 reg) {
     auto it = typeChecker_.globalVars().find(name);
     if (it != typeChecker_.globalVars().end() && localScopes_.size() <= 1) {
-        emitOp(op_store_global);
+        emitOp(it->second.type->isObjType() ? op_init_global_obj : op_store_global);
         emitRegs(reg);
         emitInt(it->second.globalIndex);
     }
@@ -2050,7 +2049,7 @@ void CodeGen::genAssignStmt(AssignStmtNode* stmt) {
     // Dynamic scope variable assignment: `name = expr;
     if (stmt->isDynamic) {
         auto it = typeChecker_.dynamicVars().find(stmt->target);
-        emitOp(op_store_dynamic);
+        emitOp(it->second.type->isObjType() ? op_store_dynamic_obj : op_store_dynamic);
         emitRegs(valReg);
         emitInt(it->second.dynIndex);
         return;
@@ -2069,7 +2068,7 @@ void CodeGen::genAssignStmt(AssignStmtNode* stmt) {
     // Check global
     auto it = typeChecker_.globalVars().find(stmt->target);
     if (it != typeChecker_.globalVars().end()) {
-        emitOp(op_store_global);
+        emitOp(it->second.type->isObjType() ? op_store_global_obj : op_store_global);
         emitRegs(valReg);
         emitInt(it->second.globalIndex);
         return;
