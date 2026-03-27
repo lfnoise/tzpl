@@ -1,6 +1,6 @@
-# TZPL — Live Coding Audio Platform
+# TZPL — Audio Coding Platform
 
-A cross-platform live coding platform for creating live music performances, combining a statically typed programming language, an audio signal graph compiler, and a real-time audio engine.
+A cross-platform audio coding platform for composing, experimenting with, and performing music, combining a statically typed programming language, an audio signal graph compiler, and a real-time audio engine.
 
 ## Sub-Projects
 
@@ -117,7 +117,7 @@ cmake --build build -j$(sysctl -n hw.ncpu)
 | `TZPL_BUILD_AUDIO_ENGINE` | `ON` | Build the audio engine |
 | `TZPL_BUILD_SYNTHDEF_COMPILER` | `ON` | Build the synthdef compiler |
 | `TZPL_BUILD_BRIDGE` | `ON` | Build the FFI bridge libraries |
-| `TZPL_BUILD_APP` | `OFF` | Build the live coding application |
+| `TZPL_BUILD_APP` | `OFF` | Build the audio coding application |
 | `TZPL_BUILD_TESTS` | `OFF` | Build integration tests |
 
 Example — build only the language:

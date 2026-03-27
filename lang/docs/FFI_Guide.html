@@ -1881,7 +1881,7 @@ osc.<span class="fn">removeHandler</span>(<span class="str">"/trigger"</span>);<
 <span class="cmt">--   /tzpl/call "/volume" 0.75</span></code></pre>
 
 <div class="tip">
-  <strong>Tip:</strong> <code>/tzpl/eval</code> is the primary mechanism for live coding over the network. Combined with <code>osc.onMessage*()</code>, it enables interactive performance workflows where code and control messages are sent from external editors, controllers, or other applications.
+  <strong>Tip:</strong> <code>/tzpl/eval</code> is the primary mechanism for interactive coding over the network. Combined with <code>osc.onMessage*()</code>, it enables workflows where code and control messages are sent from external editors, controllers, or other applications.
 </div>
 
 <!-- -------------------------------- -->
@@ -2393,7 +2393,7 @@ nats.<span class="fn">removeHandler</span>(<span class="str">"trigger"</span>);<
 <span class="cmt">--   nats pub tzpl.call 'volume 0.75'</span></code></pre>
 
 <div class="tip">
-  <strong>Tip:</strong> <code>tzpl.eval</code> is the primary mechanism for live coding over NATS. Combined with <code>nats.onMessage*()</code>, it enables interactive performance workflows across machines on a network, with NATS providing reliable delivery and automatic reconnection.
+  <strong>Tip:</strong> <code>tzpl.eval</code> is the primary mechanism for interactive coding over NATS. Combined with <code>nats.onMessage*()</code>, it enables workflows across machines on a network, with NATS providing reliable delivery and automatic reconnection.
 </div>
 
 <!-- -------------------------------- -->

@@ -11,7 +11,7 @@ option(TZPL_BUILD_AUDIO_ENGINE      "Build the engine library and executable"   
 option(TZPL_BUILD_SYNTHDEF_COMPILER "Build the synthdef-compiler library and executable"  ON)
 option(TZPL_BUILD_LANG              "Build the lang library and executable"                ON)
 option(TZPL_BUILD_BRIDGE            "Build the FFI bridge libraries"                      ON)
-option(TZPL_BUILD_APP               "Build the live coding application"                   OFF)
+option(TZPL_BUILD_APP               "Build the audio coding application"                  OFF)
 option(TZPL_BUILD_TESTS             "Build integration tests"                             OFF)
 option(TZPL_BUILD_BENCHMARKS        "Build benchmarks"                                    OFF)
 option(TZPL_BUILD_OSC               "Build OSC (Open Sound Control) support"              OFF)

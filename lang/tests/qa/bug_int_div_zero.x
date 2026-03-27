@@ -1,6 +1,6 @@
 -- QA: ACCEPTED - Integer division/modulo by zero returns silent wrong results
 -- Follows C semantics (undefined behavior). For a creative coding language
--- meant for live performance, weird results are preferable to crashing.
+-- meant for performance, weird results are preferable to crashing.
 
 -- Integer div/mod by zero produce platform-dependent results (C UB):
 println(1 // 0);     -- 0

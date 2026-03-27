@@ -18,7 +18,7 @@
 //  app_gui.hpp
 //  app
 //
-//  GUI mode entry point for the live coding application.
+//  GUI mode entry point for the audio coding application.
 //
 
 #ifndef app_gui_hpp

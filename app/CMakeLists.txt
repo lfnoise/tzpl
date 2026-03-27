@@ -1,5 +1,5 @@
 # app/CMakeLists.txt
-# Live coding application: tzpl + audio engine + synthdef compiler + OSC + GUI
+# Audio coding application: tzpl + audio engine + synthdef compiler + OSC + GUI
 
 # ---------------------------------------------------------------------------
 # GUI dependencies (Dear ImGui + GLFW) -- only when TZPL_BUILD_GUI is ON

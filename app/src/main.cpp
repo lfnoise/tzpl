@@ -18,7 +18,7 @@
 //  main.cpp
 //  app
 //
-//  Live coding application: Tzopilotl with audio engine and synthdef compiler.
+//  Audio coding application: Tzopilotl with audio engine and synthdef compiler.
 //  Supports GUI mode (Dear ImGui) and headless mode (--nogui).
 //
 

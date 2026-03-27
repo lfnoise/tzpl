@@ -11,7 +11,7 @@ The goals of the whole project are:
 - All three should be able to be libraries that can be linked into other applications.
 - There should be Open Sound Control and NATs support so that the language and the audio engine can be controlled by commands sent via these protocols.
 - The audio engine should be able to load any plugin that conforms to the plugin interface, not just those created by synthdef-compiler.
-- The main product is a cross-platform live coding application for creating live music performances. This could also function as an IDE for the language, and a librarian for managing built plugins and language modules.
+- The main product is a cross-platform audio coding application for composing, experimenting with, and performing music. This could also function as an IDE for the language, and a librarian for managing built plugins and language modules.
 - Whether to use Dear Imgui, Qt, or something else as a UI needs to be determined.
 - The application could grow over time to include video synthesis via composing shaders, visual node graph editor, piano roll and event list editors, etc.
 

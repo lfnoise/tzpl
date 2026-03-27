@@ -69,7 +69,7 @@ struct Silo {
 };
 ```
 
-The VM is allocated with a TLSF pool (e.g. 4-16 MB). If the pool is exhausted at runtime, the TLSF acquires more memory (from a pre-filled free-block queue or by calling the system allocator). This sacrifices real-time guarantees momentarily, but the rationale is: **it is better to glitch than to fail**. In a live performance, a brief audio dropout from a system allocation is far preferable to skipping an all-notes-off, missing a section trigger, or crashing.
+The VM is allocated with a TLSF pool (e.g. 4-16 MB). If the pool is exhausted at runtime, the TLSF acquires more memory (from a pre-filled free-block queue or by calling the system allocator). This sacrifices real-time guarantees momentarily, but the rationale is: **it is better to glitch than to fail**. In a performance, a brief audio dropout from a system allocation is far preferable to skipping an all-notes-off, missing a section trigger, or crashing.
 
 ### 2.2 When the RT VM Executes
 
@@ -122,13 +122,13 @@ The compiler already supports an `rt_restricted` flag on compilation targets. Wh
 
 ### 2.5 Bounded Execution
 
-It is the live coder's responsibility to keep RT handlers short. The runtime does not impose an instruction budget because:
+It is the programmer's responsibility to keep RT handlers short. The runtime does not impose an instruction budget because:
 
-- **Better to glitch than to fail.** A silent halt mid-handler during a performance would be worse than the audio dropout it tries to prevent. A performer's commands mysteriously failing could ruin a performance.
+- **Better to glitch than to fail.** A silent halt mid-handler during a performance would be worse than the audio dropout it tries to prevent. Commands mysteriously failing could ruin a performance.
 - **Instructions are not equal cost.** An instruction budget assumes uniform cost, but a single hash-map lookup or list force can be orders of magnitude more expensive than an integer add.
 - **The halting problem.** Static analysis of bounded execution is fundamentally limited. Attempting it would either reject useful programs or give false confidence.
 
-The `rt_restricted` compilation flag already prevents I/O and blocking calls. Beyond that, the coder controls their own execution bounds.
+The `rt_restricted` compilation flag already prevents I/O and blocking calls. Beyond that, the programmer controls their own execution bounds.
 
 ### 2.6 What the RT VM Cannot Do
 
@@ -682,7 +682,7 @@ Implemented the RT VM infrastructure on the engine Silo.
 
 ## 10. Design Decisions (Resolved)
 
-1. **Pool exhaustion on RT**: The TLSF allocator will be extended to grow on demand -- acquiring a free block from a pre-filled queue or calling the system allocator. This briefly sacrifices real-time guarantees, but a glitch is preferable to failure. In a live performance, skipping an all-notes-off or a section trigger could be catastrophic.
+1. **Pool exhaustion on RT**: The TLSF allocator will be extended to grow on demand -- acquiring a free block from a pre-filled queue or calling the system allocator. This briefly sacrifices real-time guarantees, but a glitch is preferable to failure. In a performance, skipping an all-notes-off or a section trigger could be catastrophic.
 
 2. **Multiple NRT VMs**: One NRT VM per application for now. The architecture supports multiple VMs if needed later.
 

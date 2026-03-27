@@ -1,6 +1,6 @@
 # Integration & Product Implementation Plan
 
-This document is a step-by-step plan for integrating the three sub-projects (lang, synthdef-compiler, engine) and building the final live coding application. It is based on an audit of the current state of each project.
+This document is a step-by-step plan for integrating the three sub-projects (lang, synthdef-compiler, engine) and building the final audio coding application. It is based on an audit of the current state of each project.
 
 **Last updated**: 2026-03-21
 
@@ -567,7 +567,7 @@ Test file: `lang/tests/dynamic_scope.x`. Module example: `lang/modules/dynvar.x`
 
 ---
 
-## Phase 10: Live Coding Application — UI Framework — NOT STARTED
+## Phase 10: Application — UI Framework — NOT STARTED
 
 **Goal**: Choose and set up the UI framework.
 
@@ -602,7 +602,7 @@ The app/ directory exists with a CMakeLists.txt and main.cpp, but it is currentl
 
 ## Phase 11: Code Editor & REPL — NOT STARTED
 
-**Goal**: Build the core live coding interface.
+**Goal**: Build the core code editor and REPL interface.
 
 **Note**: A `REPLSession` class exists in `lang/src/repl_session.hpp/cpp` providing `eval()`, `queryType()`, `listGlobals()`, `listFunctions()`. This is used by the language's CLI tool but not yet integrated into the GUI app.
 
@@ -720,7 +720,7 @@ The app/ directory exists with a CMakeLists.txt and main.cpp, but it is currentl
 
 ## Phase 15: Session Management — NOT STARTED
 
-**Goal**: Save and restore the state of a live coding session.
+**Goal**: Save and restore session state.
 
 **Note**: The app currently supports project directories with config files and auto-loading of pre-compiled plugins from `<project>/synthdefs/dylib/`, but full session save/restore is not implemented.
 
