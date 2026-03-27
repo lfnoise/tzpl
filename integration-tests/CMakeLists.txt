@@ -56,3 +56,21 @@ if(TARGET tzpl_osc_bridge)
         MODULES_DIR="${CMAKE_SOURCE_DIR}/bridge/modules"
     )
 endif()
+
+if(TARGET tzpl_nats_bridge)
+    add_executable(test_nats
+        src/test_nats.cpp
+        ${CMAKE_SOURCE_DIR}/engine/src/tzpl_test_plugins.cpp
+    )
+
+    target_link_libraries(test_nats
+        PRIVATE tzpl_nats_bridge
+        PRIVATE tzpl_audio_engine_bridge
+        PRIVATE tzpl_clock_bridge
+    )
+
+    target_compile_definitions(test_nats PRIVATE
+        SCRIPTS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/scripts"
+        MODULES_DIR="${CMAKE_SOURCE_DIR}/bridge/modules"
+    )
+endif()

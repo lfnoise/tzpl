@@ -548,6 +548,10 @@ void sendCmds(Engine* e, Silo* s, Command* cmd) noexcept {
     }
 }
 
+void sendCommand(Command* cmd) {
+    tBundle.add(cmd);
+}
+
 tzpl_SErr begin(Engine* e, int silo) {
     if (tBundle.head) {
         return tzpl_errCommandsQueuedButNotSent;

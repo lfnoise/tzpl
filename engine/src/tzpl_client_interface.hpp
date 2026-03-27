@@ -125,6 +125,11 @@ tzpl_SErr sched(f64 time, SchedPolicy policy = schedBetterLateThanNever);
 // go() is a convenience for calling sched(0., SchedPolicy::immediate)
 tzpl_SErr go();
 
+// Add a pre-built Command to the current bundle.
+// The Command must be heap-allocated; ownership is transferred.
+struct Command;
+void sendCommand(Command* cmd);
+
 // All of the following commands are queued up and are not submitted for execution
 // until either go() or sched() are called.
 // create or free nodes.

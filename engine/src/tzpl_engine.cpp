@@ -274,6 +274,8 @@ void Engine::processNRTCommands(Engine* e) {
                     }
                     if (toNRTList.head) s.from_nrt_.push(toNRTList.head);
                 }
+                // Process RT-to-NRT replies if callback is set
+                if (s.nrtProcessFn_) s.nrtProcessFn_(s.nrtProcessCtx_, &s);
             }
         }
         std::this_thread::sleep_for(std::chrono::microseconds(25000));

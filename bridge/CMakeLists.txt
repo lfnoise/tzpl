@@ -94,3 +94,28 @@ if(TARGET osc_lib)
         target_compile_options(tzpl_osc_bridge PRIVATE -O2)
     endif()
 endif()
+
+# --- NATS FFI bridge ---
+
+if(TARGET nats_lib)
+    add_library(tzpl_nats_bridge OBJECT
+        src/tzpl_nats_ffi.cpp
+        src/tzpl_nats_vm_handlers.cpp
+    )
+
+    target_include_directories(tzpl_nats_bridge
+        PUBLIC  ${CMAKE_CURRENT_SOURCE_DIR}/include
+    )
+
+    target_link_libraries(tzpl_nats_bridge
+        PUBLIC  tzpl_lib
+        PUBLIC  nats_lib
+    )
+
+    if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+        target_compile_options(tzpl_nats_bridge PRIVATE -O1)
+    endif()
+    if(CMAKE_BUILD_TYPE STREQUAL "Release")
+        target_compile_options(tzpl_nats_bridge PRIVATE -O2)
+    endif()
+endif()

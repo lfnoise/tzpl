@@ -26,6 +26,7 @@
 #define tzpl_app_context_hpp
 
 #include <memory>
+#include <string>
 
 namespace engine { struct Engine; }
 namespace ts {
@@ -43,6 +44,11 @@ class OscClient;
 class OscDispatcher;
 }
 
+namespace nats {
+class NatsClient;
+class NatsDispatcher;
+}
+
 namespace bridge {
 
 struct AppContext {
@@ -55,6 +61,9 @@ struct AppContext {
     osc::OscServer* oscServer = nullptr;
     osc::OscClient* oscClient = nullptr;
     osc::OscDispatcher* oscDispatcher = nullptr;
+    nats::NatsClient* natsClient = nullptr;
+    nats::NatsDispatcher* natsDispatcher = nullptr;
+    std::string engineName;  // empty = single-instance mode
 };
 
 } // namespace bridge
