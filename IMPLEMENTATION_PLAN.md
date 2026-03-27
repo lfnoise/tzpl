@@ -23,7 +23,8 @@ This document is a step-by-step plan for integrating the three sub-projects (lan
 - Builds as static library (`audio_engine_lib`) with install targets
 - Full FFI bridge to Tzopilotl (32 functions, 19 marked rtSafe)
 - OSC support via vendored oscpack library (UDP server/client, engine command dispatch, bundle/timetag scheduling, FFI bridge with local and remote send, reply routing)
-- **Remaining**: NATS support, buffer operations (declared but not implemented), binary s-expression serialization (commented-out skeleton)
+- NATS support via `nats_lib` (cnats C client): NatsClient, NatsDispatcher, engine command mapping, VM eval/call handlers, FFI bridge with pub/sub/request
+- **Remaining**: buffer operations (declared but not implemented), binary s-expression serialization (commented-out skeleton), distributed engine communication via NATS (Phase 6.3)
 
 ### synthdef-compiler
 - Two front-ends: S-expression parser and C++ DSL
@@ -274,7 +275,7 @@ A comprehensive Tzopilotl module (`lang/modules/synthdef.x`, 1038 lines) provide
 
 ---
 
-## Phase 4: Finish Critical Language Features — PARTIAL
+## Phase 4: Finish Critical Language Features — DONE
 
 **Goal**: Complete the lang features needed for deeper integration.
 
@@ -305,9 +306,9 @@ Core infrastructure implemented. See `EVENT_DRIVEN_VM_PLAN.md` for the full desi
 8. **App migration**: The CLI app (`app/src/main.cpp`) migrated from bare `VM` to `NRTVM` with a `NRTTempoScheduler` (120 BPM, 50ms latency). Registered `clock` FFI alongside existing engine and synthdef-compiler FFIs.
 
 **Remaining wiring tasks** (not core infrastructure):
-- Wire OSC handler dispatch to NRT VM (`osc.onMessage()` FFI)
-- Wire `rt.onNote()`/`rt.onControl()` FFI functions
-- `VMReplyCmd` for RT-to-NRT messaging (Phase D of `EVENT_DRIVEN_VM_PLAN.md`)
+- ~~Wire OSC handler dispatch to NRT VM (`osc.onMessage()` FFI)~~ Done (Phase 5).
+- ~~Wire `rt.onNote()`/`rt.onControl()` FFI functions~~ Done. Silo has callback pointers for note/control events, invoked from NoteOnCmd/NoteOffCmd/SetControlCmd. RegisterRTNoteHandlerCmd/RegisterRTControlHandlerCmd install handlers via the command FIFO. FFI functions: `rtOnNote`, `rtOnNoteOff`, `rtOnControl` in `audio_engine` module.
+- ~~`VMReplyCmd` for RT-to-NRT messaging (Phase D of `EVENT_DRIVEN_VM_PLAN.md`)~~ Done. Silo has an RT-safe ring buffer (`replySlots_`), NRT processing callback (`nrtProcessFn_`), and `rtReply(handler, value)` FFI function. Replies are drained from the ring buffer by the engine's NRT command processing thread.
 
 ### 4.3 Error handling improvements — DONE
 
@@ -317,7 +318,7 @@ Core infrastructure implemented. See `EVENT_DRIVEN_VM_PLAN.md` for the full desi
 
 ---
 
-## Phase 5: OSC (Open Sound Control) Support — MOSTLY DONE
+## Phase 5: OSC (Open Sound Control) Support — DONE
 
 **Goal**: Control both the audio engine and language VM via OSC messages.
 
@@ -390,28 +391,44 @@ C++ integration tests (`integration-tests/src/test_osc.cpp`): server lifecycle, 
 
 ---
 
-## Phase 6: NATS Support — NOT STARTED
+## Phase 6: NATS Support — DONE
 
 **Goal**: Enable networked control and distributed messaging via NATS.
 
-### 6.1 NATS client library
+### 6.1 NATS client library -- DONE
 
-**Tasks**:
-1. Evaluate NATS C client (`nats.c`) for real-time safety. It uses pthreads and malloc internally, so it must run on a non-RT thread.
-2. Integrate NATS client as an NRT service — messages received on NATS are converted to commands and pushed to the engine via the existing FIFO.
-3. Subscribe to subjects for engine commands (similar mapping to OSC addresses).
+**Completed tasks**:
+1. Evaluated NATS C client (`nats.c`, Apache-2.0, via `brew install cnats`). Uses pthreads and malloc -- runs on NRT thread only. Subscription callbacks are delivered on a nats.c-managed thread; dispatch acquires the handler mutex or NRTVM mutex as needed.
+2. `nats/` library (`nats_lib` static library) with `NatsClient` (connect/disconnect/publish/request), `NatsDispatcher` (subject->handler routing with per-subject subscription management), and engine command mapping (20 engine commands: lifecycle, queries, graph operations, notes).
+3. Engine command subjects use dot-separated names (e.g., `engine.newNode`, `engine.setControl`). Payloads are space-separated text arguments. Query handlers reply via NATS reply subjects.
+4. `tzpl.eval` and `tzpl.call` NATS handlers for remote code execution and handler invocation.
+5. Build controlled by `TZPL_BUILD_NATS` CMake option. Requires `cnats` system library.
+6. 22 integration tests (all passing): client connect/disconnect, pub/sub, request/reply, engine command dispatch, VM eval, FFI registration, handler registration/invocation/removal.
 
-### 6.2 NATS for Tzopilotl
+### 6.2 NATS for Tzopilotl -- DONE
 
-**Tasks**:
-1. Add `fn natsPub(subject String, data String) Void;` as FFI function.
-2. Add NATS subscription support: incoming messages trigger VM events.
+**Completed tasks**:
+1. FFI functions in `nats` module: `natsConnect(url)`, `natsDisconnect()`, `natsIsConnected()`, `natsUrl()`, `natsPub(subject, data)`, `natsPubI(subject, value)`, `natsPubF(subject, value)`, `natsRequest(subject, data, timeoutMs, handler)` (async callback-based).
+2. Subscription handlers: `onMessage(subject, handler)`, `onMessageS(subject, handler)`, `onMessageI(subject, handler)`, `onMessageF(subject, handler)`, `removeHandler(subject)`. Handlers are retained `Obj*` stored in NRTVM's `HandlerTable.natsHandlers` map.
+3. App CLI supports `--nats-url <url>` and config file `natsUrl` key.
+4. Conditional compilation via `TZPL_HAS_NATS` (set when `tzpl_nats_bridge` target exists).
 
-### 6.3 NATS for distributed engines
+### 6.3 NATS for distributed engines -- DONE
 
-**Tasks**:
-1. Multiple engine instances can communicate via NATS subjects.
-2. Useful for multi-machine performances or networked collaboration.
+**Goal**: Multiple application instances can communicate via NATS for multi-machine performances and networked collaboration. The initial scope is language-level messaging between nodes and immediate-mode engine commands. Timing synchronization is explicitly deferred -- each engine/silo maintains its own independent tempo (multi-tempo music is a design goal).
+
+**Completed tasks**:
+1. **Engine naming**: `--engine-name` CLI option and `engineName` config key. When set, all engine command and VM handlers are registered under three subject prefixes: flat (`engine.*`), namespaced (`engines.{name}.engine.*`), and broadcast (`engines.all.engine.*`). `natsEngineName()` FFI function exposes the name to Tzopilotl code.
+2. **Language-to-language messaging**: Works via existing `natsPub` / `onMessageS` etc. from 6.2. Convention: `nodes.{engineName}.{topic}` for addressing scripts on specific machines.
+3. **Immediate-mode engine commands via named subjects**: All 20 engine commands and `tzpl.eval`/`tzpl.call` are addressable via `engines.{name}.*` subjects.
+4. **Broadcast commands**: All commands addressable via `engines.all.*` for coordinated actions across all engines.
+5. 26 integration tests (4 new namespaced/broadcast tests).
+
+**Deferred**:
+- Tempo/clock synchronization across engines (multi-tempo is intentional).
+- State snapshot/restore for late-joining engines.
+- Cross-engine audio routing.
+- Latency-compensated scheduling.
 
 ---
 
@@ -764,9 +781,9 @@ Phase 0 (Build Infrastructure)       ✅ DONE
   └─> Phase 1 (Library-ify)          ✅ DONE
         ├─> Phase 2 (FFI: Audio)     ✅ DONE
         │     └─> Phase 3 (FFI: SD)  ✅ DONE
-        │           └─> Phase 4 (Lang Features)  🟢 MOSTLY DONE (event-driven VM done)
-        │                 └─> Phase 5 (OSC)       🟢 MOSTLY DONE
-        │                       └─> Phase 6 (NATS) ⬜ NOT STARTED
+        │           └─> Phase 4 (Lang Features)  ✅ DONE
+        │                 └─> Phase 5 (OSC)       ✅ DONE
+        │                       └─> Phase 6 (NATS) ✅ DONE
         ├─> Phase 7 (Engine Features)              🟡 PARTIAL ─────────────────┐
         ├─> Phase 8 (Compiler Features)            ✅ DONE ────────────────┤
         └─> Phase 9 (Language Features cont.)      🟢 MOSTLY DONE ───────────┤
@@ -792,15 +809,15 @@ Phase 0 (Build Infrastructure)       ✅ DONE
 | Phase | Description | Status | Remaining Work |
 |-------|-------------|--------|----------------|
 | 0 | Build infrastructure | ✅ Done | CI setup |
-| 1 | Library-ify projects | ✅ Done | — |
-| 2 | FFI: engine | ✅ Done | — |
-| 3 | FFI: synthdef-compiler | ✅ Done | — |
-| 4 | Critical language features | 🟢 Mostly done | Error location refinement remaining; event-driven VM and clock FFI done |
-| 5 | OSC support | 🟢 Mostly done | VM event dispatch wiring (NRT VM infrastructure in place) |
-| 6 | NATS support | ⬜ Not started | All tasks |
+| 1 | Library-ify projects | ✅ Done | -- |
+| 2 | FFI: engine | ✅ Done | -- |
+| 3 | FFI: synthdef-compiler | ✅ Done | -- |
+| 4 | Critical language features | ✅ Done | -- |
+| 5 | OSC support | ✅ Done | -- |
+| 6 | NATS support | ✅ Done | -- |
 | 7 | Engine feature completion | 🟡 Partial | Buffers, binary sexpr. Audio input, master gain/channel offset done |
-| 8 | Compiler feature completion | ✅ Done | — |
-| 9 | Language feature completion | 🟢 Mostly done | I/O functions, general function inlining. Map ops done |
+| 8 | Compiler feature completion | ✅ Done | -- |
+| 9 | Language feature completion | 🟢 Mostly done | I/O functions, general function inlining |
 | 10 | UI framework setup | ⬜ Not started | All tasks (CLI app exists) |
 | 11 | Code editor & REPL | ⬜ Not started | All tasks (REPLSession exists) |
 | 12 | Plugin/module management | ⬜ Not started | All tasks |
@@ -813,7 +830,7 @@ Phase 0 (Build Infrastructure)       ✅ DONE
 
 ## Key Risks & Decisions
 
-1. **Event-driven VM design** (Phase 4.2): Done. Cross-thread ARC deletion, NRT VM with mutex serialization, RT VM on Silo, NRT and RT tempo schedulers with TempoRamp, clock FFI (12 functions), app migrated to NRTVM. See `EVENT_DRIVEN_VM_PLAN.md` for the full design. Remaining wiring: OSC handler dispatch, RT handler registration (`rt.onNote`/`rt.onControl`).
+1. **Event-driven VM design** (Phase 4.2): Done. Cross-thread ARC deletion, NRT VM with mutex serialization, RT VM on Silo, NRT and RT tempo schedulers with TempoRamp, clock FFI (12 functions), app migrated to NRTVM. RT event handlers (`rtOnNote`, `rtOnNoteOff`, `rtOnControl`) and RT-to-NRT reply (`rtReply`) wired. OSC and NATS handler dispatch to NRT VM done. See `EVENT_DRIVEN_VM_PLAN.md` for the full design.
 
 2. **UI framework choice** (Phase 10): Dear ImGui is recommended but the project description mentions Qt as an alternative. This should be decided before Phase 10 begins.
 

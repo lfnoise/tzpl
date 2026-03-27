@@ -411,6 +411,27 @@ if (localStorage.getItem('tzpl-docs-theme') === 'light') document.documentElemen
         <li><a href="#clock-examples">Examples</a></li>
       </ol>
     </li>
+    <li><a href="#rt-handlers">RT Event Handlers</a>
+      <ol>
+        <li><a href="#rt-handlers-overview">Overview</a></li>
+        <li><a href="#rt-handlers-note">Note Handlers</a></li>
+        <li><a href="#rt-handlers-control">Control Handlers</a></li>
+        <li><a href="#rt-handlers-reply">RT-to-NRT Reply</a></li>
+      </ol>
+    </li>
+    <li><a href="#nats">NATS Integration</a>
+      <ol>
+        <li><a href="#nats-overview">Overview</a></li>
+        <li><a href="#nats-setup">Setup &amp; Configuration</a></li>
+        <li><a href="#nats-connection">Connection Management</a></li>
+        <li><a href="#nats-publishing">Publishing</a></li>
+        <li><a href="#nats-handler-registration">Handler Registration</a></li>
+        <li><a href="#nats-vm-subjects">VM NATS Subjects</a></li>
+        <li><a href="#nats-engine-subjects">Engine NATS Subjects</a></li>
+        <li><a href="#nats-distributed">Distributed Engines</a></li>
+        <li><a href="#nats-vs-osc">NATS vs. OSC</a></li>
+      </ol>
+    </li>
   </ol>
 </nav>
 
@@ -2106,6 +2127,429 @@ osc.<span class="fn">removeHandler</span>(<span class="str">"/trigger"</span>);<
         <span class="fn">go</span>();
     });
 });</code></pre>
+
+<!-- ================================================================ -->
+<!--  11. RT EVENT HANDLERS                                            -->
+<!-- ================================================================ -->
+
+<h2 id="rt-handlers">11. RT Event Handlers</h2>
+
+<!-- -------------------------------- -->
+<h3 id="rt-handlers-overview">11.1 Overview</h3>
+
+<p>Tzopilotl can register handlers that run on the <strong>real-time audio thread</strong> in response to note and control events. When a <code>noteOn</code>, <code>noteOff</code>, or <code>setControl</code> command is processed by a Silo, any registered RT handler is called alongside the plugin's own event processing.</p>
+
+<p>RT event handlers are registered from NRT code (during script execution) and installed on the Silo via the engine's command FIFO. When a note or control event arrives, the handler runs on the RT thread with the Silo's attached VM.</p>
+
+<p>All RT handler functions are in the <code>audio_engine</code> module:</p>
+
+<pre><code><span class="kw">import</span> audio_engine.*;</code></pre>
+
+<div class="warn">
+  <strong>Warning:</strong> RT handlers run on the audio thread. They must not call non-RT-safe functions (network I/O, file operations, heap allocation via <code>new</code>, etc.). The VM's TLSF allocator is RT-safe, but avoid unbounded work. Use <code>rtReply</code> to send data back to the NRT thread for non-RT-safe processing.
+</div>
+
+<!-- -------------------------------- -->
+<h3 id="rt-handlers-note">11.2 Note Handlers</h3>
+
+<p>Register handlers for note-on and note-off events. These fire on the RT thread whenever any <code>noteOn</code> or <code>noteOff</code> command is processed on silo 0, after the plugin's own note handler runs.</p>
+
+<table>
+  <tr><th>Function</th><th>Description</th></tr>
+  <tr><td><code>rtOnNote(handler fn(Int) Void) Void</code></td><td>Register a handler for note-on events. Receives the note ID.</td></tr>
+  <tr><td><code>rtOnNoteOff(handler fn(Int) Void) Void</code></td><td>Register a handler for note-off events. Receives the note ID.</td></tr>
+</table>
+
+<pre><code><span class="kw">import</span> audio_engine.*;
+
+<span class="cmt">-- Log note events (RT thread)</span>
+<span class="fn">rtOnNote</span>(<span class="kw">fn</span>(noteID <span class="typ">Int</span>) {
+    <span class="cmt">-- This runs on the audio thread</span>
+    <span class="cmt">-- noteID is the MIDI-style note identifier</span>
+});
+
+<span class="fn">rtOnNoteOff</span>(<span class="kw">fn</span>(noteID <span class="typ">Int</span>) {
+    <span class="cmt">-- Note released</span>
+});</code></pre>
+
+<div class="note">
+  <strong>Note:</strong> Registering a new handler replaces any previously registered handler of the same type. Handlers are retained by the runtime and released when replaced.
+</div>
+
+<!-- -------------------------------- -->
+<h3 id="rt-handlers-control">11.3 Control Handlers</h3>
+
+<p>Register a handler for control change events. Fires on the RT thread whenever a <code>setControl</code> command is processed on silo 0.</p>
+
+<table>
+  <tr><th>Function</th><th>Description</th></tr>
+  <tr><td><code>rtOnControl(handler fn(Int, Int, Float) Void) Void</code></td><td>Register a handler for control changes. Receives (nodeID, controlID, value).</td></tr>
+</table>
+
+<pre><code><span class="kw">import</span> audio_engine.*;
+
+<span class="fn">rtOnControl</span>(<span class="kw">fn</span>(nodeID <span class="typ">Int</span>, controlID <span class="typ">Int</span>, value <span class="typ">Float</span>) {
+    <span class="cmt">-- Respond to control changes on the RT thread</span>
+});</code></pre>
+
+<!-- -------------------------------- -->
+<h3 id="rt-handlers-reply">11.4 RT-to-NRT Reply</h3>
+
+<p>RT handlers can send data back to the NRT thread using <code>rtReply</code>. This is RT-safe: it writes to a lock-free ring buffer on the Silo. The NRT thread drains the buffer periodically and invokes the handler with the value.</p>
+
+<table>
+  <tr><th>Function</th><th>Description</th></tr>
+  <tr><td><code>rtReply(handler fn(Float) Void, value Float) Void</code></td><td>Push a reply from RT to NRT. The handler is called on the NRT thread with the given value. RT-safe (no allocation, lock-free). Drops the reply silently if the ring buffer is full.</td></tr>
+</table>
+
+<pre><code><span class="kw">import</span> audio_engine.*;
+
+<span class="cmt">-- NRT handler that processes replies from RT</span>
+<span class="kw">let</span> onReply = <span class="kw">fn</span>(value <span class="typ">Float</span>) {
+    <span class="fn">println</span>(<span class="str">"RT sent: "</span> $ value <span class="fn">toString</span>);
+};
+
+<span class="cmt">-- RT note handler that sends data back to NRT</span>
+<span class="fn">rtOnNote</span>(<span class="kw">fn</span>(noteID <span class="typ">Int</span>) {
+    <span class="cmt">-- Convert noteID to frequency and send to NRT</span>
+    <span class="fn">rtReply</span>(onReply, noteID <span class="fn">toFloat</span>);
+});</code></pre>
+
+<div class="tip">
+  <strong>Tip:</strong> Use <code>rtReply</code> whenever an RT handler needs to trigger NRT-side effects (printing, network I/O, updating shared state). Keep RT handlers minimal and defer heavy work to NRT via replies.
+</div>
+
+<!-- ================================================================ -->
+<!--  12. NATS INTEGRATION                                             -->
+<!-- ================================================================ -->
+
+<h2 id="nats">12. NATS Integration</h2>
+
+<!-- -------------------------------- -->
+<h3 id="nats-overview">12.1 Overview</h3>
+
+<p>Tzopilotl includes built-in <a href="https://nats.io/">NATS</a> messaging support for networked control and distributed communication. NATS functions are available when the application is built with <code>TZPL_BUILD_NATS=ON</code>.</p>
+
+<p>NATS is a high-performance publish/subscribe messaging system. Compared to OSC (UDP-based, connectionless), NATS provides:</p>
+
+<ul>
+  <li><strong>Reliable delivery</strong> over TCP with automatic reconnection.</li>
+  <li><strong>Request/reply</strong> messaging with built-in timeout support.</li>
+  <li><strong>Subject-based routing</strong> with wildcard subscriptions (future).</li>
+  <li><strong>Distributed messaging</strong> for multi-machine performances and networked collaboration.</li>
+</ul>
+
+<p>The NATS system has two components:</p>
+
+<ul>
+  <li><strong>NATS Client:</strong> Connects to a NATS server, publishes messages, and subscribes to subjects.</li>
+  <li><strong>NATS Dispatcher:</strong> Routes incoming messages by subject to registered handlers (engine commands, VM evaluation, user-defined handlers).</li>
+</ul>
+
+<p>All NATS functions are registered under the <code>nats</code> foreign module. Import them with:</p>
+
+<pre><code><span class="kw">import</span> nats.*;</code></pre>
+
+<div class="note">
+  <strong>Note:</strong> NATS requires a running NATS server. Install with <code>brew install nats-server</code> and start with <code>nats-server</code>. The C client library is also required: <code>brew install cnats</code>.
+</div>
+
+<!-- -------------------------------- -->
+<h3 id="nats-setup">12.2 Setup &amp; Configuration</h3>
+
+<p>The NATS client can be connected in two ways:</p>
+
+<h4>CLI flag</h4>
+
+<pre><code>tzpl --nats-url <span class="str">nats://127.0.0.1:4222</span> myscript.x
+tzpl --nats-url <span class="str">nats://127.0.0.1:4222</span> --engine-name <span class="str">piano</span> myscript.x</code></pre>
+
+<h4>Project config file</h4>
+
+<p>In a project directory's config file, add:</p>
+
+<pre><code>natsUrl = <span class="str">"nats://127.0.0.1:4222"</span>
+engineName = <span class="str">"piano"</span></code></pre>
+
+<p>Leaving <code>natsUrl</code> empty or omitting it disables NATS. When a URL is provided, the client connects after all subsystems are initialized. Engine command handlers and VM handlers are subscribed automatically.</p>
+
+<h4>From Tzopilotl code</h4>
+
+<p>The connection can also be managed programmatically:</p>
+
+<pre><code><span class="kw">import</span> nats.*;
+
+<span class="fn">natsConnect</span>(<span class="str">"nats://127.0.0.1:4222"</span>);  <span class="cmt">-- connect to server</span>
+<span class="fn">natsIsConnected</span>() <span class="fn">println</span>;              <span class="cmt">-- prints true</span>
+<span class="fn">natsUrl</span>() <span class="fn">println</span>;                      <span class="cmt">-- prints nats://127.0.0.1:4222</span>
+<span class="fn">natsDisconnect</span>();                        <span class="cmt">-- disconnect</span></code></pre>
+
+<!-- -------------------------------- -->
+<h3 id="nats-connection">12.3 Connection Management</h3>
+
+<table>
+  <tr><th>Function</th><th>Description</th></tr>
+  <tr><td><code>natsConnect(url String) Bool</code></td><td>Connect to a NATS server. Returns <code>true</code> on success. Automatically subscribes all registered handlers.</td></tr>
+  <tr><td><code>natsDisconnect() Void</code></td><td>Disconnect from the NATS server. Unsubscribes all active subscriptions.</td></tr>
+  <tr><td><code>natsIsConnected() Bool</code></td><td>Return <code>true</code> if the client is currently connected.</td></tr>
+  <tr><td><code>natsUrl() String</code></td><td>Return the URL of the current connection, or <code>""</code> if not connected.</td></tr>
+  <tr><td><code>natsEngineName() String</code></td><td>Return the engine name set via <code>--engine-name</code> or config, or <code>""</code> if unset.</td></tr>
+</table>
+
+<div class="note">
+  <strong>Note:</strong> All NATS functions are registered as non-RT-safe. They must not be called from a real-time context.
+</div>
+
+<!-- -------------------------------- -->
+<h3 id="nats-publishing">12.4 Publishing</h3>
+
+<p>Publish messages to NATS subjects. The payload is a string (for typed variants, the value is converted to its string representation).</p>
+
+<table>
+  <tr><th>Function</th><th>Description</th></tr>
+  <tr><td><code>natsPub(subject String, data String) Void</code></td><td>Publish a string payload to a subject.</td></tr>
+  <tr><td><code>natsPubI(subject String, value Int) Void</code></td><td>Publish an integer (as its string representation).</td></tr>
+  <tr><td><code>natsPubF(subject String, value Float) Void</code></td><td>Publish a float (as its string representation).</td></tr>
+  <tr><td><code>natsRequest(subject String, data String, timeoutMs Int, handler fn(String) Void) Void</code></td><td>Async request/reply: publishes a request and invokes the handler with the reply payload when it arrives. Returns immediately. Uses the nats.c delivery thread internally (no extra threads spawned). The <code>timeoutMs</code> parameter is reserved for future use.</td></tr>
+</table>
+
+<h4>Example: publishing messages</h4>
+
+<pre><code><span class="kw">import</span> nats.*;
+
+<span class="cmt">-- Send a control message</span>
+<span class="fn">natsPub</span>(<span class="str">"synth.cutoff"</span>, <span class="str">"1200.0"</span>);
+
+<span class="cmt">-- Send typed values</span>
+<span class="fn">natsPubF</span>(<span class="str">"synth.volume"</span>, <span class="num">0.8</span>);
+<span class="fn">natsPubI</span>(<span class="str">"synth.note"</span>, <span class="num">60</span>);
+
+<span class="cmt">-- Async request/reply (1 second timeout)</span>
+<span class="fn">natsRequest</span>(<span class="str">"engine.isAudioRunning"</span>, <span class="str">""</span>, <span class="num">1000</span>, <span class="kw">fn</span>(reply <span class="typ">String</span>) {
+    <span class="fn">println</span>(<span class="str">"audio running: "</span> $ reply);
+});</code></pre>
+
+<!-- -------------------------------- -->
+<h3 id="nats-handler-registration">12.5 Handler Registration</h3>
+
+<p>Register Tzopilotl functions as handlers for incoming NATS messages. When a message arrives on the subscribed subject, the handler is called via the NRTVM (mutex-serialized, non-RT). The message payload is passed as the argument.</p>
+
+<table>
+  <tr><th>Function</th><th>Description</th></tr>
+  <tr><td><code>onMessage(subject String, handler fn() Void) Void</code></td><td>Register a no-argument handler (payload ignored).</td></tr>
+  <tr><td><code>onMessageS(subject String, handler fn(String) Void) Void</code></td><td>Register a handler that receives the payload as a string.</td></tr>
+  <tr><td><code>onMessageI(subject String, handler fn(Int) Void) Void</code></td><td>Register a handler that parses the payload as an integer.</td></tr>
+  <tr><td><code>onMessageF(subject String, handler fn(Float) Void) Void</code></td><td>Register a handler that parses the payload as a float.</td></tr>
+  <tr><td><code>removeHandler(subject String) Void</code></td><td>Remove a previously registered handler and unsubscribe from the subject.</td></tr>
+</table>
+
+<pre><code><span class="kw">import</span> nats;
+
+<span class="cmt">-- respond to a trigger subject</span>
+nats.<span class="fn">onMessage</span>(<span class="str">"trigger"</span>, <span class="kw">fn</span>() {
+    <span class="fn">println</span>(<span class="str">"triggered!"</span>);
+});
+
+<span class="cmt">-- respond to a string message</span>
+nats.<span class="fn">onMessageS</span>(<span class="str">"chat"</span>, <span class="kw">fn</span>(msg <span class="typ">String</span>) {
+    <span class="fn">println</span>(<span class="str">"received: "</span> $ msg);
+});
+
+<span class="cmt">-- respond to a float value</span>
+nats.<span class="fn">onMessageF</span>(<span class="str">"volume"</span>, <span class="kw">fn</span>(level <span class="typ">Float</span>) {
+    <span class="fn">println</span>(<span class="str">"volume: "</span> $ level <span class="fn">toString</span>);
+});
+
+<span class="cmt">-- later, remove the handler</span>
+nats.<span class="fn">removeHandler</span>(<span class="str">"trigger"</span>);</code></pre>
+
+<div class="note">
+  <strong>Note:</strong> Handlers are retained by the runtime and released when removed or replaced. Registering a new handler for the same subject automatically replaces the previous one. All handler invocations are serialized through the NRTVM mutex. If the client is already connected when a handler is registered, the subscription is created immediately.
+</div>
+
+<!-- -------------------------------- -->
+<h3 id="nats-vm-subjects">12.6 VM NATS Subjects</h3>
+
+<p>The following built-in NATS subjects allow external applications to interact with the Tzopilotl VM:</p>
+
+<table>
+  <tr><th>Subject</th><th>Payload</th><th>Description</th></tr>
+  <tr><td><code>tzpl.eval</code></td><td>Tzopilotl source code</td><td>Compile and execute source code. If a NATS reply subject is provided, replies with <code>"ok"</code> on success or <code>"error: &lt;message&gt;"</code> on failure.</td></tr>
+  <tr><td><code>tzpl.call</code></td><td><code>subject arg1 arg2 ...</code></td><td>Invoke a user-registered handler by its NATS subject, passing space-separated arguments.</td></tr>
+</table>
+
+<h4>Example: remote eval via NATS</h4>
+
+<pre><code><span class="cmt">-- From an external NATS client (e.g. nats-cli, Python, Go):</span>
+<span class="cmt">--</span>
+<span class="cmt">-- Publish source code to tzpl.eval:</span>
+<span class="cmt">--   nats pub tzpl.eval 'println(42 * 2);'</span>
+<span class="cmt">--</span>
+<span class="cmt">-- Request/reply (with response):</span>
+<span class="cmt">--   nats request tzpl.eval 'println(42 * 2);'</span>
+<span class="cmt">--   -> "ok"</span>
+<span class="cmt">--</span>
+<span class="cmt">-- Invoke a user-registered handler:</span>
+<span class="cmt">--   nats pub tzpl.call 'volume 0.75'</span></code></pre>
+
+<div class="tip">
+  <strong>Tip:</strong> <code>tzpl.eval</code> is the primary mechanism for live coding over NATS. Combined with <code>nats.onMessage*()</code>, it enables interactive performance workflows across machines on a network, with NATS providing reliable delivery and automatic reconnection.
+</div>
+
+<!-- -------------------------------- -->
+<h3 id="nats-engine-subjects">12.7 Engine NATS Subjects</h3>
+
+<p>When connected to a NATS server, the following subjects control the audio engine. These mirror the OSC engine addresses but use dot-separated NATS subject names and space-separated text payloads.</p>
+
+<h4>Lifecycle &amp; Configuration</h4>
+
+<table>
+  <tr><th>Subject</th><th>Payload</th><th>Description</th></tr>
+  <tr><td><code>engine.startAudio</code></td><td><em>none</em></td><td>Start audio output.</td></tr>
+  <tr><td><code>engine.stopAudio</code></td><td><em>none</em></td><td>Stop audio output.</td></tr>
+  <tr><td><code>engine.masterGain</code></td><td><code>gain</code></td><td>Set master gain (float).</td></tr>
+  <tr><td><code>engine.safetyLimiter</code></td><td><code>0|1</code></td><td>Enable (1) or disable (0) the safety limiter.</td></tr>
+  <tr><td><code>engine.loadDefs</code></td><td><code>path</code></td><td>Load all plugin definitions from a directory.</td></tr>
+  <tr><td><code>engine.loadDef</code></td><td><code>path name</code></td><td>Load a single plugin definition.</td></tr>
+</table>
+
+<h4>Queries</h4>
+
+<p>Query commands reply via the NATS reply subject (use request/reply pattern):</p>
+
+<table>
+  <tr><th>Subject</th><th>Reply Payload</th></tr>
+  <tr><td><code>engine.getStreamTime</code></td><td>Stream time as a decimal number.</td></tr>
+  <tr><td><code>engine.listNodeDefs</code></td><td>Space-separated list of definition names.</td></tr>
+  <tr><td><code>engine.isAudioRunning</code></td><td><code>0</code> or <code>1</code>.</td></tr>
+</table>
+
+<h4>Graph Manipulation</h4>
+
+<p>Each graph command is automatically wrapped in a <code>begin(0)/go()</code> transaction. Payloads are space-separated values.</p>
+
+<table>
+  <tr><th>Subject</th><th>Payload</th><th>Description</th></tr>
+  <tr><td><code>engine.newNode</code></td><td><code>defName nodeID</code></td><td>Create a new node.</td></tr>
+  <tr><td><code>engine.freeNode</code></td><td><code>nodeID</code></td><td>Free a node.</td></tr>
+  <tr><td><code>engine.freeAllNodes</code></td><td><em>none</em></td><td>Free all nodes.</td></tr>
+  <tr><td><code>engine.replaceNode</code></td><td><code>oldID newID xfade curve</code></td><td>Replace a node with crossfade.</td></tr>
+  <tr><td><code>engine.connect</code></td><td><code>srcNode srcPort dstNode dstPort</code></td><td>Connect two nodes.</td></tr>
+  <tr><td><code>engine.connectX</code></td><td><code>srcNode srcPort dstNode dstPort xfade curve</code></td><td>Connect with crossfade and curve.</td></tr>
+  <tr><td><code>engine.disconnectInput</code></td><td><code>nodeID port</code></td><td>Disconnect an input.</td></tr>
+  <tr><td><code>engine.disconnectOutput</code></td><td><code>nodeID port</code></td><td>Disconnect an output.</td></tr>
+  <tr><td><code>engine.disconnectNode</code></td><td><code>nodeID</code></td><td>Disconnect all connections of a node.</td></tr>
+  <tr><td><code>engine.setInput</code></td><td><code>nodeID port value</code></td><td>Set an input to a constant value.</td></tr>
+  <tr><td><code>engine.setControl</code></td><td><code>nodeID controlID value</code></td><td>Set a control parameter.</td></tr>
+</table>
+
+<h4>Notes</h4>
+
+<table>
+  <tr><th>Subject</th><th>Payload</th><th>Description</th></tr>
+  <tr><td><code>engine.noteOn</code></td><td><code>nodeID noteID [param...]</code></td><td>Trigger a note with optional float parameters.</td></tr>
+  <tr><td><code>engine.noteOff</code></td><td><code>nodeID noteID</code></td><td>Release a note.</td></tr>
+  <tr><td><code>engine.allNotesOff</code></td><td><code>nodeID</code></td><td>Release all notes on a node.</td></tr>
+</table>
+
+<h4>Example: controlling the engine from the command line</h4>
+
+<pre><code><span class="cmt">-- Using the nats CLI tool:</span>
+<span class="cmt">--</span>
+<span class="cmt">-- Start audio</span>
+<span class="cmt">--   nats pub engine.startAudio ''</span>
+<span class="cmt">--</span>
+<span class="cmt">-- Create a node</span>
+<span class="cmt">--   nats pub engine.newNode 'sine 100'</span>
+<span class="cmt">--</span>
+<span class="cmt">-- Connect it to the output</span>
+<span class="cmt">--   nats pub engine.connect '100 0 0 0'</span>
+<span class="cmt">--</span>
+<span class="cmt">-- Query if audio is running</span>
+<span class="cmt">--   nats request engine.isAudioRunning ''</span>
+<span class="cmt">--   -> 1</span>
+<span class="cmt">--</span>
+<span class="cmt">-- Set master gain</span>
+<span class="cmt">--   nats pub engine.masterGain '0.5'</span></code></pre>
+
+<!-- -------------------------------- -->
+<h3 id="nats-distributed">12.8 Distributed Engines</h3>
+
+<p>When running multiple Tzopilotl instances on different machines (or in separate processes), NATS provides a natural coordination layer. Each instance can be given a unique <strong>engine name</strong> so that commands and messages can be addressed to specific engines.</p>
+
+<h4>Engine naming</h4>
+
+<p>Set the engine name via CLI or config file:</p>
+
+<pre><code>tzpl --nats-url <span class="str">nats://server:4222</span> --engine-name <span class="str">piano</span> piano_script.x
+tzpl --nats-url <span class="str">nats://server:4222</span> --engine-name <span class="str">drums</span> drums_script.x</code></pre>
+
+<p>When an engine name is set, all engine command handlers and VM handlers are registered under three subject prefixes:</p>
+
+<table>
+  <tr><th>Prefix</th><th>Example</th><th>Reaches</th></tr>
+  <tr><td><code>engine.*</code></td><td><code>engine.newNode</code></td><td>The local engine (always registered, backward-compatible).</td></tr>
+  <tr><td><code>engines.{name}.*</code></td><td><code>engines.piano.engine.newNode</code></td><td>Only the engine named "piano".</td></tr>
+  <tr><td><code>engines.all.*</code></td><td><code>engines.all.engine.newNode</code></td><td>All named engines (broadcast).</td></tr>
+</table>
+
+<h4>Sending commands to a specific engine</h4>
+
+<pre><code><span class="kw">import</span> nats.*;
+
+<span class="cmt">-- Send a command to the "drums" engine</span>
+<span class="fn">natsPub</span>(<span class="str">"engines.drums.engine.newNode"</span>, <span class="str">"kick 100"</span>);
+
+<span class="cmt">-- Eval code on the "piano" engine</span>
+<span class="fn">natsPub</span>(<span class="str">"engines.piano.tzpl.eval"</span>, <span class="str">"println(42);"</span>);
+
+<span class="cmt">-- Broadcast: stop audio on all engines</span>
+<span class="fn">natsPub</span>(<span class="str">"engines.all.engine.stopAudio"</span>, <span class="str">""</span>);
+
+<span class="cmt">-- Query your own engine name</span>
+<span class="kw">let</span> name = <span class="fn">natsEngineName</span>();
+<span class="fn">println</span>(<span class="str">"I am: "</span> $ name);</code></pre>
+
+<h4>Language-to-language messaging</h4>
+
+<p>Tzopilotl code on different machines can communicate freely using <code>natsPub</code> / <code>onMessageS</code> with any subject convention. A recommended pattern:</p>
+
+<pre><code><span class="kw">import</span> nats.*;
+
+<span class="cmt">-- On the "piano" engine: listen for chord changes</span>
+nats.<span class="fn">onMessageS</span>(<span class="str">"nodes.piano.chords"</span>, <span class="kw">fn</span>(chord <span class="typ">String</span>) {
+    <span class="fn">println</span>(<span class="str">"chord change: "</span> $ chord);
+});
+
+<span class="cmt">-- On the "drums" engine: send a chord change to "piano"</span>
+<span class="fn">natsPub</span>(<span class="str">"nodes.piano.chords"</span>, <span class="str">"Cmaj7"</span>);</code></pre>
+
+<div class="note">
+  <strong>Note:</strong> Each engine maintains its own independent tempo. There is no automatic tempo synchronization across engines. This is by design, as the system supports multi-tempo music. If you need synchronized timing, coordinate explicitly via NATS messages.
+</div>
+
+<!-- -------------------------------- -->
+<h3 id="nats-vs-osc">12.9 NATS vs. OSC</h3>
+
+<p>Both protocols are supported simultaneously and share the same engine command set. Choose based on your needs:</p>
+
+<table>
+  <tr><th>Feature</th><th>OSC</th><th>NATS</th></tr>
+  <tr><td>Transport</td><td>UDP (connectionless)</td><td>TCP (connection-oriented)</td></tr>
+  <tr><td>Reliability</td><td>Fire-and-forget; messages can be lost</td><td>Reliable delivery with auto-reconnection</td></tr>
+  <tr><td>Server required</td><td>No (direct peer-to-peer)</td><td>Yes (NATS server)</td></tr>
+  <tr><td>Payload format</td><td>Binary (typed OSC arguments)</td><td>Text (space-separated values)</td></tr>
+  <tr><td>Request/reply</td><td>Manual (reply to sender address)</td><td>Built-in async with timeout and callback</td></tr>
+  <tr><td>Bundling</td><td>Yes (atomic transactions with timetag)</td><td>No (each message is independent)</td></tr>
+  <tr><td>Multi-machine</td><td>Requires explicit host/port addressing</td><td>Transparent via NATS server clustering</td></tr>
+  <tr><td>Local dispatch</td><td>Yes (<code>oscSendLocal*</code>)</td><td>No (always goes through server)</td></tr>
+  <tr><td>Subject naming</td><td>Slash-separated (<code>/engine/newNode</code>)</td><td>Dot-separated (<code>engine.newNode</code>)</td></tr>
+  <tr><td>Ecosystem</td><td>Mature in music/audio (SuperCollider, Max/MSP)</td><td>Strong in cloud/microservices, growing in creative coding</td></tr>
+</table>
+
+<div class="tip">
+  <strong>Tip:</strong> Use OSC when working with existing music software that speaks OSC, or when low-latency local communication is essential. Use NATS when building distributed systems across multiple machines, or when you need reliable delivery and request/reply semantics.
+</div>
 
 </main>
 <script>
