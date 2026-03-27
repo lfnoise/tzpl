@@ -98,7 +98,10 @@ target_link_libraries(tzpl_app
 
 if(TZPL_BUILD_GUI)
     target_link_libraries(tzpl_app PRIVATE imgui_lib)
-    target_compile_definitions(tzpl_app PRIVATE TZPL_HAS_GUI=1)
+    target_compile_definitions(tzpl_app PRIVATE
+        TZPL_HAS_GUI=1
+        TZPL_FONT_DIR="${CMAKE_CURRENT_SOURCE_DIR}/resources/fonts"
+    )
     if(APPLE)
         set_source_files_properties(src/app_gui.mm
             PROPERTIES COMPILE_FLAGS "-fobjc-arc"
