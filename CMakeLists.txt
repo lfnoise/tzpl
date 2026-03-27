@@ -15,6 +15,8 @@ option(TZPL_BUILD_APP               "Build the live coding application"         
 option(TZPL_BUILD_TESTS             "Build integration tests"                             OFF)
 option(TZPL_BUILD_BENCHMARKS        "Build benchmarks"                                    OFF)
 option(TZPL_BUILD_OSC               "Build OSC (Open Sound Control) support"              OFF)
+option(TZPL_BUILD_NATS              "Build NATS messaging support"                       OFF)
+option(TZPL_BUILD_GUI               "Build with GUI support (Dear ImGui + GLFW)"         ON)
 
 # --- Core dependencies (always needed) --------------------------------------
 
@@ -42,6 +44,10 @@ if(TZPL_BUILD_OSC AND TZPL_BUILD_AUDIO_ENGINE AND EXISTS ${CMAKE_CURRENT_SOURCE_
     add_subdirectory(osc)
 endif()
 
+if(TZPL_BUILD_NATS AND TZPL_BUILD_AUDIO_ENGINE AND EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/nats/CMakeLists.txt)
+    add_subdirectory(nats)
+endif()
+
 if(TZPL_BUILD_BRIDGE AND TZPL_BUILD_LANG AND TZPL_BUILD_AUDIO_ENGINE)
     add_subdirectory(bridge)
 endif()
@@ -50,6 +56,8 @@ endif()
 # TZPL_BUILD_SYNTHDEF_COMPILER is ON.
 # The OSC bridge inside bridge/CMakeLists.txt is guarded
 # by if(TARGET osc_lib), so it only builds when TZPL_BUILD_OSC is ON.
+# The NATS bridge inside bridge/CMakeLists.txt is guarded
+# by if(TARGET nats_lib), so it only builds when TZPL_BUILD_NATS is ON.
 
 if(TZPL_BUILD_APP AND EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/app/CMakeLists.txt)
     add_subdirectory(app)

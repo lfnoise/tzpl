@@ -1,9 +1,93 @@
 # app/CMakeLists.txt
-# Live coding application: tzpl + audio engine + synthdef compiler + OSC
+# Live coding application: tzpl + audio engine + synthdef compiler + OSC + GUI
 
-add_executable(tzpl_app
-    src/main.cpp
-)
+# ---------------------------------------------------------------------------
+# GUI dependencies (Dear ImGui + GLFW) -- only when TZPL_BUILD_GUI is ON
+# ---------------------------------------------------------------------------
+
+if(TZPL_BUILD_GUI)
+    include(FetchContent)
+
+    # --- GLFW ---------------------------------------------------------------
+    set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
+    set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+    set(GLFW_INSTALL OFF CACHE BOOL "" FORCE)
+    FetchContent_Declare(glfw
+        GIT_REPOSITORY https://github.com/glfw/glfw.git
+        GIT_TAG 3.4
+        GIT_SHALLOW TRUE
+    )
+    FetchContent_MakeAvailable(glfw)
+
+    # --- Dear ImGui (no CMakeLists.txt -- populate and build manually) ------
+    FetchContent_Declare(imgui
+        GIT_REPOSITORY https://github.com/ocornut/imgui.git
+        GIT_TAG v1.91.0
+        GIT_SHALLOW TRUE
+    )
+    FetchContent_GetProperties(imgui)
+    if(NOT imgui_POPULATED)
+        FetchContent_Populate(imgui)
+    endif()
+
+    set(IMGUI_SOURCES
+        ${imgui_SOURCE_DIR}/imgui.cpp
+        ${imgui_SOURCE_DIR}/imgui_demo.cpp
+        ${imgui_SOURCE_DIR}/imgui_draw.cpp
+        ${imgui_SOURCE_DIR}/imgui_tables.cpp
+        ${imgui_SOURCE_DIR}/imgui_widgets.cpp
+        ${imgui_SOURCE_DIR}/backends/imgui_impl_glfw.cpp
+    )
+
+    if(APPLE)
+        list(APPEND IMGUI_SOURCES
+            ${imgui_SOURCE_DIR}/backends/imgui_impl_metal.mm
+        )
+    else()
+        list(APPEND IMGUI_SOURCES
+            ${imgui_SOURCE_DIR}/backends/imgui_impl_opengl3.cpp
+        )
+    endif()
+
+    add_library(imgui_lib STATIC ${IMGUI_SOURCES})
+    target_include_directories(imgui_lib SYSTEM PUBLIC
+        ${imgui_SOURCE_DIR}
+        ${imgui_SOURCE_DIR}/backends
+    )
+    target_link_libraries(imgui_lib PUBLIC glfw)
+
+    if(APPLE)
+        target_link_libraries(imgui_lib PUBLIC
+            "-framework Metal"
+            "-framework MetalKit"
+            "-framework Cocoa"
+            "-framework IOKit"
+            "-framework QuartzCore"
+        )
+        set_source_files_properties(
+            ${imgui_SOURCE_DIR}/backends/imgui_impl_metal.mm
+            PROPERTIES COMPILE_FLAGS "-fobjc-arc"
+        )
+    else()
+        find_package(OpenGL REQUIRED)
+        target_link_libraries(imgui_lib PUBLIC OpenGL::GL)
+    endif()
+endif()
+
+# ---------------------------------------------------------------------------
+# Application target
+# ---------------------------------------------------------------------------
+
+set(APP_SOURCES src/main.cpp)
+
+if(TZPL_BUILD_GUI AND APPLE)
+    list(APPEND APP_SOURCES src/app_gui.mm)
+elseif(TZPL_BUILD_GUI)
+    list(APPEND APP_SOURCES src/app_gui_gl.cpp)
+endif()
+
+add_executable(tzpl_app ${APP_SOURCES})
 
 target_link_libraries(tzpl_app
     PRIVATE tzpl_synthdef_compiler_bridge
@@ -12,9 +96,24 @@ target_link_libraries(tzpl_app
     PRIVATE linenoise
 )
 
+if(TZPL_BUILD_GUI)
+    target_link_libraries(tzpl_app PRIVATE imgui_lib)
+    target_compile_definitions(tzpl_app PRIVATE TZPL_HAS_GUI=1)
+    if(APPLE)
+        set_source_files_properties(src/app_gui.mm
+            PROPERTIES COMPILE_FLAGS "-fobjc-arc"
+        )
+    endif()
+endif()
+
 if(TARGET tzpl_osc_bridge)
     target_link_libraries(tzpl_app PRIVATE tzpl_osc_bridge)
     target_compile_definitions(tzpl_app PRIVATE TZPL_HAS_OSC=1)
+endif()
+
+if(TARGET tzpl_nats_bridge)
+    target_link_libraries(tzpl_app PRIVATE tzpl_nats_bridge)
+    target_compile_definitions(tzpl_app PRIVATE TZPL_HAS_NATS=1)
 endif()
 
 target_compile_definitions(tzpl_app PRIVATE
