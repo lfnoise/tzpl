@@ -2,7 +2,7 @@
 
 This document is a step-by-step plan for integrating the three sub-projects (lang, synthdef-compiler, engine) and building the final audio coding application. It is based on an audit of the current state of each project.
 
-**Last updated**: 2026-03-21
+**Last updated**: 2026-03-27
 
 ---
 
@@ -86,10 +86,12 @@ This document is a step-by-step plan for integrating the three sub-projects (lan
 - Builds as CMake INTERFACE library with install targets
 
 ### app/
-- CLI application (`tzpl`) that links all three libraries via FFI bridges
-- Runs Tzopilotl scripts with full audio engine and synthdef compiler access
+- Audio coding application (`tzpl_app`) that links all three libraries via FFI bridges
+- GUI mode (default): Dear ImGui with GLFW + Metal backend (macOS), bundled DejaVu Sans Mono font with runtime size switching (Cmd+=/-)
+- Headless mode (`--nogui`): runs scripts and/or interactive REPL with linenoise
 - Supports project directories with config files and pre-compiled plugin loading
-- No GUI — currently command-line only
+- OSC and NATS listeners run in both modes
+- Build option: `TZPL_BUILD_GUI` (default ON); Dear ImGui and GLFW fetched via CMake FetchContent
 
 ---
 
@@ -567,13 +569,11 @@ Test file: `lang/tests/dynamic_scope.x`. Module example: `lang/modules/dynvar.x`
 
 ---
 
-## Phase 10: Application — UI Framework — NOT STARTED
+## Phase 10: Application — UI Framework — DONE
 
 **Goal**: Choose and set up the UI framework.
 
-The app/ directory exists with a CMakeLists.txt and main.cpp, but it is currently a **CLI-only application** (no GUI). It successfully links all three libraries via FFI bridges and can run Tzopilotl scripts with audio.
-
-### 10.1 Framework evaluation
+### 10.1 Framework evaluation — DONE
 
 | Criterion | Dear ImGui | Qt | JUCE |
 |-----------|-----------|-----|------|
@@ -587,16 +587,19 @@ The app/ directory exists with a CMakeLists.txt and main.cpp, but it is currentl
 | Node graph editor | imnodes / ImNodes libraries | Qt Node Editor | None built-in |
 | Learning curve | Low | High | Medium |
 
-**Recommendation**: **Dear ImGui** — lightweight, MIT license, excellent for real-time applications, easy to embed, growing ecosystem of widgets. Node graph editors (imnodes) already exist. Code editors exist (ImGuiColorTextEdit). Pairs well with a custom audio engine.
+**Decision**: **Dear ImGui** — lightweight, MIT license, excellent for real-time applications, easy to embed, growing ecosystem of widgets. Node graph editors (imnodes) already exist. Code editors exist (ImGuiColorTextEdit). Pairs well with a custom audio engine.
 
-### 10.2 Application scaffold
+### 10.2 Application scaffold — DONE
 
-**Tasks**:
-1. Create `app/` directory with CMakeLists.txt. Done (CLI only).
-2. Set up Dear ImGui with a Metal backend (macOS) / Vulkan or OpenGL backend (Linux).
-3. Create main application window with basic menu bar.
-4. Link against `libAudioEngine`, `libSynthdefCompiler`, `libTzopilotl`. Done.
-5. Initialize all three systems at startup. Done (in CLI app).
+**Completed tasks**:
+1. Create `app/` directory with CMakeLists.txt. Done.
+2. Set up Dear ImGui with GLFW + Metal backend (macOS). Done. Dear ImGui v1.91.0 and GLFW 3.4 fetched via CMake FetchContent. OpenGL3 backend prepared for Linux. Build option: `TZPL_BUILD_GUI` (default ON).
+3. Create main application window. Done (1280x800, "Tzopilotl" title). ImGui demo window shown as scaffold UI.
+4. Link against all libraries via FFI bridges. Done.
+5. Initialize all three systems at startup. Done.
+6. Headless mode (`--nogui`): runs scripts with full engine access, drops to interactive REPL (linenoise, multi-line input, `:help`/`:quit`/`:type`/`:globals`/`:functions`/`:memory`/`:gc` commands). If OSC/NATS listeners are active, stays alive as a headless node. Done.
+7. Font setup: bundled DejaVu Sans Mono with runtime font search (exe-relative for deployment, compile-time path for dev builds, Monaco system fallback on macOS). Three pre-rasterised sizes (14/16/18pt) switchable at runtime via Cmd+=/-. Retina-crisp rendering via scaled atlas + FontGlobalScale. Done.
+8. Trackpad scroll dampening (25% of raw GLFW values) via chained scroll callback. Done.
 
 ---
 
@@ -788,7 +791,7 @@ Phase 0 (Build Infrastructure)       ✅ DONE
         ├─> Phase 8 (Compiler Features)            ✅ DONE ────────────────┤
         └─> Phase 9 (Language Features cont.)      🟢 MOSTLY DONE ───────────┤
                                                                               v
-                                                                  Phase 10 (UI Framework)  ⬜ NOT STARTED
+                                                                  Phase 10 (UI Framework)  ✅ DONE
                                                                     └─> Phase 11 (Editor)  ⬜ NOT STARTED
                                                                           └─> Phase 12     ⬜ NOT STARTED
                                                                                 └─> Phase 13  ⬜ NOT STARTED
@@ -818,7 +821,7 @@ Phase 0 (Build Infrastructure)       ✅ DONE
 | 7 | Engine feature completion | 🟡 Partial | Buffers, binary sexpr. Audio input, master gain/channel offset done |
 | 8 | Compiler feature completion | ✅ Done | -- |
 | 9 | Language feature completion | 🟢 Mostly done | I/O functions, general function inlining |
-| 10 | UI framework setup | ⬜ Not started | All tasks (CLI app exists) |
+| 10 | UI framework setup | ✅ Done | -- |
 | 11 | Code editor & REPL | ⬜ Not started | All tasks (REPLSession exists) |
 | 12 | Plugin/module management | ⬜ Not started | All tasks |
 | 13 | Audio graph visualization | ⬜ Not started | All tasks |
@@ -832,7 +835,7 @@ Phase 0 (Build Infrastructure)       ✅ DONE
 
 1. **Event-driven VM design** (Phase 4.2): Done. Cross-thread ARC deletion, NRT VM with mutex serialization, RT VM on Silo, NRT and RT tempo schedulers with TempoRamp, clock FFI (12 functions), app migrated to NRTVM. RT event handlers (`rtOnNote`, `rtOnNoteOff`, `rtOnControl`) and RT-to-NRT reply (`rtReply`) wired. OSC and NATS handler dispatch to NRT VM done. See `EVENT_DRIVEN_VM_PLAN.md` for the full design.
 
-2. **UI framework choice** (Phase 10): Dear ImGui is recommended but the project description mentions Qt as an alternative. This should be decided before Phase 10 begins.
+2. **UI framework choice** (Phase 10): Dear ImGui selected. GLFW + Metal on macOS, OpenGL3 prepared for Linux. Fetched via CMake FetchContent.
 
 3. **Real-time safety across boundaries**: When Tzopilotl calls engine functions via FFI, the call chain must remain real-time safe. The bridge functions must not allocate memory or block. The existing TLSF allocator and lock-free FIFOs make this feasible, but it needs careful validation.
 
