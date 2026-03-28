@@ -26,7 +26,17 @@ public:
     void newTab(const std::string& name = "untitled.x");
     void openFile(const std::string& path);
     void closeTab(int index);
+    void closeActiveTab();
     int tabCount() const { return (int)tabs_.size(); }
+    int activeTabIndex() const { return activeTab_; }
+
+    // File operations (return true on success)
+    bool save();                                   // save active tab
+    bool saveAs(const std::string& path);          // save active tab to path
+    bool saveCopy(const std::string& path);        // save copy without changing tab's path
+    bool hasFilePath() const;                      // active tab has a file path
+    std::string activeFilePath() const;
+    std::string activeTabName() const;
 
     // Text access for evaluation
     std::string getSelectedText() const;

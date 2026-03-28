@@ -106,6 +106,56 @@ void EditorPanel::openFile(const std::string& path) {
     activeTab_ = (int)tabs_.size() - 1;
 }
 
+void EditorPanel::closeActiveTab() {
+    closeTab(activeTab_);
+}
+
+bool EditorPanel::save() {
+    if (activeTab_ < 0 || activeTab_ >= (int)tabs_.size()) return false;
+    auto& tab = tabs_[activeTab_];
+    if (tab.filePath.empty()) return false; // needs saveAs
+    return saveAs(tab.filePath);
+}
+
+bool EditorPanel::saveAs(const std::string& path) {
+    if (activeTab_ < 0 || activeTab_ >= (int)tabs_.size()) return false;
+    std::ofstream file(path);
+    if (!file.is_open()) return false;
+    file << tabs_[activeTab_].editor.GetText();
+    file.close();
+
+    auto& tab = tabs_[activeTab_];
+    tab.filePath = path;
+    tab.modified = false;
+    // Update tab name from path
+    auto slash = path.find_last_of('/');
+    tab.name = (slash != std::string::npos) ? path.substr(slash + 1) : path;
+    return true;
+}
+
+bool EditorPanel::saveCopy(const std::string& path) {
+    if (activeTab_ < 0 || activeTab_ >= (int)tabs_.size()) return false;
+    std::ofstream file(path);
+    if (!file.is_open()) return false;
+    file << tabs_[activeTab_].editor.GetText();
+    return true;
+}
+
+bool EditorPanel::hasFilePath() const {
+    if (activeTab_ < 0 || activeTab_ >= (int)tabs_.size()) return false;
+    return !tabs_[activeTab_].filePath.empty();
+}
+
+std::string EditorPanel::activeFilePath() const {
+    if (activeTab_ < 0 || activeTab_ >= (int)tabs_.size()) return "";
+    return tabs_[activeTab_].filePath;
+}
+
+std::string EditorPanel::activeTabName() const {
+    if (activeTab_ < 0 || activeTab_ >= (int)tabs_.size()) return "";
+    return tabs_[activeTab_].name;
+}
+
 void EditorPanel::closeTab(int index) {
     if (index < 0 || index >= (int)tabs_.size()) return;
     tabs_.erase(tabs_.begin() + index);

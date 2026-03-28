@@ -126,6 +126,9 @@ if(TZPL_BUILD_GUI)
         set_source_files_properties(src/app_gui.mm
             PROPERTIES COMPILE_FLAGS "-fobjc-arc"
         )
+        target_link_libraries(tzpl_app PRIVATE
+            "-framework UniformTypeIdentifiers"
+        )
     endif()
 endif()
 

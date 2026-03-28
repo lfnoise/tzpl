@@ -49,6 +49,7 @@
 #include <string>
 #include <mutex>
 #include <sys/stat.h>
+#import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 
 extern volatile sig_atomic_t gShouldQuit;
 
@@ -93,6 +94,34 @@ static std::string findMonoFont() {
 }
 
 // ---------------------------------------------------------------------------
+// Native macOS file dialogs
+// ---------------------------------------------------------------------------
+
+static std::string nativeOpenFileDialog() {
+    NSOpenPanel* panel = [NSOpenPanel openPanel];
+    UTType* tzplType = [UTType typeWithFilenameExtension:@"x"];
+    panel.allowedContentTypes = tzplType ? @[tzplType] : @[];
+    panel.allowsOtherFileTypes = YES;
+    if ([panel runModal] == NSModalResponseOK) {
+        return std::string([[panel URL] fileSystemRepresentation]);
+    }
+    return "";
+}
+
+static std::string nativeSaveFileDialog(const std::string& suggestedName) {
+    NSSavePanel* panel = [NSSavePanel savePanel];
+    UTType* tzplType = [UTType typeWithFilenameExtension:@"x"];
+    panel.allowedContentTypes = tzplType ? @[tzplType] : @[];
+    panel.allowsOtherFileTypes = YES;
+    [panel setNameFieldStringValue:
+        [NSString stringWithUTF8String:suggestedName.c_str()]];
+    if ([panel runModal] == NSModalResponseOK) {
+        return std::string([[panel URL] fileSystemRepresentation]);
+    }
+    return "";
+}
+
+// ---------------------------------------------------------------------------
 // GLFW callbacks
 // ---------------------------------------------------------------------------
 
@@ -117,6 +146,13 @@ static ImFont** gFonts = nullptr;
 static bool gFontChanged = false;
 static GuiState* gGuiState = nullptr;
 
+// File operation flags (set by key callback, consumed by main loop)
+static bool gFileNew = false;
+static bool gFileOpen = false;
+static bool gFileSave = false;
+static bool gFileSaveAs = false;
+static bool gFileClose = false;
+
 static GLFWkeyfun gPrevKeyCallback = nullptr;
 
 static void keyCallback(GLFWwindow* window, int key, int scancode,
@@ -137,11 +173,19 @@ static void keyCallback(GLFWwindow* window, int key, int scancode,
             }
         }
 
+        // File shortcuts
+        if (cmd) {
+            if (key == GLFW_KEY_N && !shift) { gFileNew = true; return; }
+            if (key == GLFW_KEY_O && !shift) { gFileOpen = true; return; }
+            if (key == GLFW_KEY_S && !shift) { gFileSave = true; return; }
+            if (key == GLFW_KEY_S && shift)  { gFileSaveAs = true; return; }
+            if (key == GLFW_KEY_W && !shift) { gFileClose = true; return; }
+        }
+
         // Eval shortcuts
         if (gGuiState && key == GLFW_KEY_ENTER) {
             if (cmd && shift) {
                 gGuiState->evalFile = true;
-                // Don't forward to ImGui (would insert newline)
                 return;
             } else if (cmd) {
                 gGuiState->evalSelection = true;
@@ -332,6 +376,79 @@ int runGui(bridge::AppContext& appCtx) {
                 currentFontIdx = gCurrentFontIdx;
                 io.FontDefault = fonts[currentFontIdx];
                 gFontChanged = false;
+            }
+
+            // ---------------------------------------------------------------
+            // File menu
+            // ---------------------------------------------------------------
+            if (ImGui::BeginMainMenuBar()) {
+                if (ImGui::BeginMenu("File")) {
+                    if (ImGui::MenuItem("New", "Cmd+N"))      gFileNew = true;
+                    if (ImGui::MenuItem("Open...", "Cmd+O"))   gFileOpen = true;
+                    ImGui::Separator();
+                    if (ImGui::MenuItem("Save", "Cmd+S"))      gFileSave = true;
+                    if (ImGui::MenuItem("Save As...", "Cmd+Shift+S"))
+                                                               gFileSaveAs = true;
+                    if (ImGui::MenuItem("Save a Copy As..."))  {
+                        std::string path = nativeSaveFileDialog(
+                            editorPanel.activeTabName());
+                        if (!path.empty())
+                            editorPanel.saveCopy(path);
+                    }
+                    ImGui::Separator();
+                    if (ImGui::MenuItem("Close Tab", "Cmd+W")) gFileClose = true;
+                    ImGui::EndMenu();
+                }
+                if (ImGui::BeginMenu("View")) {
+                    if (ImGui::BeginMenu("Font Size")) {
+                        for (int i = 0; i < numFontSizes; ++i) {
+                            char label[32];
+                            snprintf(label, sizeof(label), "%.0f pt", fontSizes[i]);
+                            if (ImGui::MenuItem(label, nullptr,
+                                                currentFontIdx == i)) {
+                                gCurrentFontIdx = i;
+                                gFontChanged = true;
+                            }
+                        }
+                        ImGui::EndMenu();
+                    }
+                    ImGui::EndMenu();
+                }
+                ImGui::EndMainMenuBar();
+            }
+
+            // ---------------------------------------------------------------
+            // Process file operations
+            // ---------------------------------------------------------------
+            if (gFileNew) {
+                gFileNew = false;
+                editorPanel.newTab();
+            }
+            if (gFileOpen) {
+                gFileOpen = false;
+                std::string path = nativeOpenFileDialog();
+                if (!path.empty())
+                    editorPanel.openFile(path);
+            }
+            if (gFileSave) {
+                gFileSave = false;
+                if (editorPanel.hasFilePath()) {
+                    editorPanel.save();
+                } else {
+                    // No path yet -- fall through to Save As
+                    gFileSaveAs = true;
+                }
+            }
+            if (gFileSaveAs) {
+                gFileSaveAs = false;
+                std::string path = nativeSaveFileDialog(
+                    editorPanel.activeTabName());
+                if (!path.empty())
+                    editorPanel.saveAs(path);
+            }
+            if (gFileClose) {
+                gFileClose = false;
+                editorPanel.closeActiveTab();
             }
 
             // ---------------------------------------------------------------
