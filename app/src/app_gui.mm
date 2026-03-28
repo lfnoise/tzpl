@@ -54,6 +54,27 @@
 extern volatile sig_atomic_t gShouldQuit;
 
 // ---------------------------------------------------------------------------
+// Global state (declared early so native menu handlers can access them)
+// ---------------------------------------------------------------------------
+
+// Font size switching
+static int gCurrentFontIdx = 0;
+static int gNumFontSizes = 0;
+static ImFont** gFonts = nullptr;
+static bool gFontChanged = false;
+
+// File operation flags (set by native menu or GLFW key callback)
+static bool gFileNew = false;
+static bool gFileOpen = false;
+static bool gFileSave = false;
+static bool gFileSaveAs = false;
+static bool gFileSaveCopy = false;
+static bool gFileClose = false;
+
+// Eval request flags
+static GuiState* gGuiState = nullptr;
+
+// ---------------------------------------------------------------------------
 // Font discovery
 // ---------------------------------------------------------------------------
 
@@ -91,6 +112,136 @@ static std::string findMonoFont() {
         if (fileExists(loc)) return loc;
     }
     return "";
+}
+
+// ---------------------------------------------------------------------------
+// Native macOS menu bar action handler
+// ---------------------------------------------------------------------------
+
+@interface TzplMenuHandler : NSObject
+- (void)fileNew:(id)sender;
+- (void)fileOpen:(id)sender;
+- (void)fileSave:(id)sender;
+- (void)fileSaveAs:(id)sender;
+- (void)fileSaveCopy:(id)sender;
+- (void)fileClose:(id)sender;
+- (void)fontSizeAction:(id)sender;
+@end
+
+@implementation TzplMenuHandler
+- (void)fileNew:(id)sender     { gFileNew = true; }
+- (void)fileOpen:(id)sender    { gFileOpen = true; }
+- (void)fileSave:(id)sender    { gFileSave = true; }
+- (void)fileSaveAs:(id)sender  { gFileSaveAs = true; }
+- (void)fileSaveCopy:(id)sender { gFileSaveCopy = true; }
+- (void)fileClose:(id)sender   { gFileClose = true; }
+- (void)fontSizeAction:(id)sender {
+    NSMenuItem* item = (NSMenuItem*)sender;
+    int tag = (int)[item tag];
+    if (tag == -1) { // increase
+        if (gCurrentFontIdx < gNumFontSizes - 1) {
+            ++gCurrentFontIdx;
+            gFontChanged = true;
+        }
+    } else if (tag == -2) { // decrease
+        if (gCurrentFontIdx > 0) {
+            --gCurrentFontIdx;
+            gFontChanged = true;
+        }
+    } else {
+        gCurrentFontIdx = tag;
+        gFontChanged = true;
+    }
+}
+@end
+
+static TzplMenuHandler* gMenuHandler = nil;
+
+static void setupNativeMenuBar(const float* fontSizes, int numFontSizes) {
+    gMenuHandler = [[TzplMenuHandler alloc] init];
+
+    NSMenu* mainMenu = [[NSMenu alloc] init];
+
+    // -- App menu (required for Quit to work) --------------------------------
+    NSMenuItem* appMenuItem = [[NSMenuItem alloc] init];
+    NSMenu* appMenu = [[NSMenu alloc] initWithTitle:@"Tzopilotl"];
+    [appMenu addItemWithTitle:@"About Tzopilotl"
+                       action:nil keyEquivalent:@""];
+    [appMenu addItem:[NSMenuItem separatorItem]];
+    [appMenu addItemWithTitle:@"Quit Tzopilotl"
+                       action:@selector(terminate:) keyEquivalent:@"q"];
+    appMenuItem.submenu = appMenu;
+    [mainMenu addItem:appMenuItem];
+
+    // -- File menu -----------------------------------------------------------
+    NSMenuItem* fileMenuItem = [[NSMenuItem alloc] init];
+    NSMenu* fileMenu = [[NSMenu alloc] initWithTitle:@"File"];
+
+    NSMenuItem* newItem = [fileMenu addItemWithTitle:@"New"
+        action:@selector(fileNew:) keyEquivalent:@"n"];
+    newItem.target = gMenuHandler;
+
+    NSMenuItem* openItem = [fileMenu addItemWithTitle:@"Open..."
+        action:@selector(fileOpen:) keyEquivalent:@"o"];
+    openItem.target = gMenuHandler;
+
+    [fileMenu addItem:[NSMenuItem separatorItem]];
+
+    NSMenuItem* saveItem = [fileMenu addItemWithTitle:@"Save"
+        action:@selector(fileSave:) keyEquivalent:@"s"];
+    saveItem.target = gMenuHandler;
+
+    NSMenuItem* saveAsItem = [fileMenu addItemWithTitle:@"Save As..."
+        action:@selector(fileSaveAs:) keyEquivalent:@"S"];
+    saveAsItem.target = gMenuHandler;
+
+    NSMenuItem* saveCopyItem = [fileMenu addItemWithTitle:@"Save a Copy As..."
+        action:@selector(fileSaveCopy:) keyEquivalent:@""];
+    saveCopyItem.target = gMenuHandler;
+
+    [fileMenu addItem:[NSMenuItem separatorItem]];
+
+    NSMenuItem* closeItem = [fileMenu addItemWithTitle:@"Close Tab"
+        action:@selector(fileClose:) keyEquivalent:@"w"];
+    closeItem.target = gMenuHandler;
+
+    fileMenuItem.submenu = fileMenu;
+    [mainMenu addItem:fileMenuItem];
+
+    // -- View menu -----------------------------------------------------------
+    NSMenuItem* viewMenuItem = [[NSMenuItem alloc] init];
+    NSMenu* viewMenu = [[NSMenu alloc] initWithTitle:@"View"];
+
+    NSMenuItem* fontSizeMenuItem = [[NSMenuItem alloc] init];
+    fontSizeMenuItem.title = @"Font Size";
+    NSMenu* fontSizeMenu = [[NSMenu alloc] initWithTitle:@"Font Size"];
+    for (int i = 0; i < numFontSizes; ++i) {
+        NSString* title = [NSString stringWithFormat:@"%.0f pt", fontSizes[i]];
+        NSMenuItem* item = [fontSizeMenu addItemWithTitle:title
+            action:@selector(fontSizeAction:) keyEquivalent:@""];
+        item.target = gMenuHandler;
+        item.tag = i;
+    }
+    fontSizeMenuItem.submenu = fontSizeMenu;
+    [viewMenu addItem:fontSizeMenuItem];
+
+    // Font size shortcuts as separate menu items
+    NSMenuItem* fontUp = [viewMenu addItemWithTitle:@"Increase Font Size"
+        action:@selector(fontSizeAction:) keyEquivalent:@"="];
+    fontUp.keyEquivalentModifierMask = NSEventModifierFlagCommand;
+    fontUp.target = gMenuHandler;
+    fontUp.tag = -1; // handled specially
+
+    NSMenuItem* fontDown = [viewMenu addItemWithTitle:@"Decrease Font Size"
+        action:@selector(fontSizeAction:) keyEquivalent:@"-"];
+    fontDown.keyEquivalentModifierMask = NSEventModifierFlagCommand;
+    fontDown.target = gMenuHandler;
+    fontDown.tag = -2; // handled specially
+
+    viewMenuItem.submenu = viewMenu;
+    [mainMenu addItem:viewMenuItem];
+
+    [NSApp setMainMenu:mainMenu];
 }
 
 // ---------------------------------------------------------------------------
@@ -138,20 +289,6 @@ static void scrollCallback(GLFWwindow* window, double xoffset, double yoffset) {
         gPrevScrollCallback(window, xoffset * kScrollScale,
                             yoffset * kScrollScale);
 }
-
-// Font size switching + eval shortcuts
-static int gCurrentFontIdx = 0;
-static int gNumFontSizes = 0;
-static ImFont** gFonts = nullptr;
-static bool gFontChanged = false;
-static GuiState* gGuiState = nullptr;
-
-// File operation flags (set by key callback, consumed by main loop)
-static bool gFileNew = false;
-static bool gFileOpen = false;
-static bool gFileSave = false;
-static bool gFileSaveAs = false;
-static bool gFileClose = false;
 
 static GLFWkeyfun gPrevKeyCallback = nullptr;
 
@@ -332,6 +469,9 @@ int runGui(bridge::AppContext& appCtx) {
     gGuiState = &guiState;
     gPrevKeyCallback = glfwSetKeyCallback(window, keyCallback);
 
+    // --- Native macOS menu bar ---------------------------------------------
+    setupNativeMenuBar(fontSizes, numFontSizes);
+
     ImVec4 clearColor = ImVec4(0.10f, 0.10f, 0.10f, 1.00f);
 
     // --- Main loop ---------------------------------------------------------
@@ -379,46 +519,7 @@ int runGui(bridge::AppContext& appCtx) {
             }
 
             // ---------------------------------------------------------------
-            // File menu
-            // ---------------------------------------------------------------
-            if (ImGui::BeginMainMenuBar()) {
-                if (ImGui::BeginMenu("File")) {
-                    if (ImGui::MenuItem("New", "Cmd+N"))      gFileNew = true;
-                    if (ImGui::MenuItem("Open...", "Cmd+O"))   gFileOpen = true;
-                    ImGui::Separator();
-                    if (ImGui::MenuItem("Save", "Cmd+S"))      gFileSave = true;
-                    if (ImGui::MenuItem("Save As...", "Cmd+Shift+S"))
-                                                               gFileSaveAs = true;
-                    if (ImGui::MenuItem("Save a Copy As..."))  {
-                        std::string path = nativeSaveFileDialog(
-                            editorPanel.activeTabName());
-                        if (!path.empty())
-                            editorPanel.saveCopy(path);
-                    }
-                    ImGui::Separator();
-                    if (ImGui::MenuItem("Close Tab", "Cmd+W")) gFileClose = true;
-                    ImGui::EndMenu();
-                }
-                if (ImGui::BeginMenu("View")) {
-                    if (ImGui::BeginMenu("Font Size")) {
-                        for (int i = 0; i < numFontSizes; ++i) {
-                            char label[32];
-                            snprintf(label, sizeof(label), "%.0f pt", fontSizes[i]);
-                            if (ImGui::MenuItem(label, nullptr,
-                                                currentFontIdx == i)) {
-                                gCurrentFontIdx = i;
-                                gFontChanged = true;
-                            }
-                        }
-                        ImGui::EndMenu();
-                    }
-                    ImGui::EndMenu();
-                }
-                ImGui::EndMainMenuBar();
-            }
-
-            // ---------------------------------------------------------------
-            // Process file operations
+            // Process file operations (triggered by native menu or keyboard)
             // ---------------------------------------------------------------
             if (gFileNew) {
                 gFileNew = false;
@@ -445,6 +546,13 @@ int runGui(bridge::AppContext& appCtx) {
                     editorPanel.activeTabName());
                 if (!path.empty())
                     editorPanel.saveAs(path);
+            }
+            if (gFileSaveCopy) {
+                gFileSaveCopy = false;
+                std::string path = nativeSaveFileDialog(
+                    editorPanel.activeTabName());
+                if (!path.empty())
+                    editorPanel.saveCopy(path);
             }
             if (gFileClose) {
                 gFileClose = false;
