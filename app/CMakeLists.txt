@@ -31,6 +31,17 @@ if(TZPL_BUILD_GUI)
         FetchContent_Populate(imgui)
     endif()
 
+    # --- ImGuiColorTextEdit (code editor widget) ----------------------------
+    FetchContent_Declare(imgui_textedit
+        GIT_REPOSITORY https://github.com/BalazsJako/ImGuiColorTextEdit.git
+        GIT_TAG master
+        GIT_SHALLOW TRUE
+    )
+    FetchContent_GetProperties(imgui_textedit)
+    if(NOT imgui_textedit_POPULATED)
+        FetchContent_Populate(imgui_textedit)
+    endif()
+
     set(IMGUI_SOURCES
         ${imgui_SOURCE_DIR}/imgui.cpp
         ${imgui_SOURCE_DIR}/imgui_demo.cpp
@@ -38,6 +49,7 @@ if(TZPL_BUILD_GUI)
         ${imgui_SOURCE_DIR}/imgui_tables.cpp
         ${imgui_SOURCE_DIR}/imgui_widgets.cpp
         ${imgui_SOURCE_DIR}/backends/imgui_impl_glfw.cpp
+        ${imgui_textedit_SOURCE_DIR}/TextEditor.cpp
     )
 
     if(APPLE)
@@ -54,6 +66,7 @@ if(TZPL_BUILD_GUI)
     target_include_directories(imgui_lib SYSTEM PUBLIC
         ${imgui_SOURCE_DIR}
         ${imgui_SOURCE_DIR}/backends
+        ${imgui_textedit_SOURCE_DIR}
     )
     target_link_libraries(imgui_lib PUBLIC glfw)
 
@@ -81,10 +94,17 @@ endif()
 
 set(APP_SOURCES src/main.cpp)
 
-if(TZPL_BUILD_GUI AND APPLE)
-    list(APPEND APP_SOURCES src/app_gui.mm)
-elseif(TZPL_BUILD_GUI)
-    list(APPEND APP_SOURCES src/app_gui_gl.cpp)
+if(TZPL_BUILD_GUI)
+    list(APPEND APP_SOURCES
+        src/gui_state.cpp
+        src/editor_panel.cpp
+        src/output_panel.cpp
+    )
+    if(APPLE)
+        list(APPEND APP_SOURCES src/app_gui.mm)
+    else()
+        list(APPEND APP_SOURCES src/app_gui_gl.cpp)
+    endif()
 endif()
 
 add_executable(tzpl_app ${APP_SOURCES})

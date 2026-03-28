@@ -2,7 +2,7 @@
 
 This document is a step-by-step plan for integrating the three sub-projects (lang, synthdef-compiler, engine) and building the final audio coding application. It is based on an audit of the current state of each project.
 
-**Last updated**: 2026-03-27
+**Last updated**: 2026-03-28
 
 ---
 
@@ -603,35 +603,43 @@ Test file: `lang/tests/dynamic_scope.x`. Module example: `lang/modules/dynvar.x`
 
 ---
 
-## Phase 11: Code Editor & REPL — NOT STARTED
+## Phase 11: Code Editor & REPL — DONE
 
 **Goal**: Build the core code editor and REPL interface.
 
-**Note**: A `REPLSession` class exists in `lang/src/repl_session.hpp/cpp` providing `eval()`, `queryType()`, `listGlobals()`, `listFunctions()`. This is used by the language's CLI tool but not yet integrated into the GUI app.
+### 11.1 Code editor panel — DONE
 
-### 11.1 Code editor panel
+**Completed tasks**:
+1. Integrated ImGuiColorTextEdit (BalazsJako, via FetchContent) as the code editor widget. Done.
+2. Tzopilotl syntax highlighting: 34 keywords, `--` line comments, `/* */` block comments, hex/float/imaginary number literals, `"string"` literals, `'symbol` literals. Done.
+3. Line numbers, current line highlighting built into TextEditor widget. Done.
+4. Multiple editor tabs: tab bar with + button and close buttons, each tab has its own TextEditor instance. Starts with `scratch.x`. Done.
 
-**Tasks**:
-1. Integrate ImGuiColorTextEdit (or similar) as the code editor widget.
-2. Add Tzopilotl syntax highlighting rules.
-3. Add line numbers, current line highlighting, bracket matching.
-4. Support multiple editor tabs for different files/modules.
+New files: `app/src/editor_panel.hpp`, `app/src/editor_panel.cpp`.
 
-### 11.2 REPL / output panel
+### 11.2 REPL / output panel — DONE
 
-**Tasks**:
-1. Add a scrolling output panel for print/println output from the VM.
-2. Add a single-line REPL input field for interactive evaluation.
-3. Show compilation errors inline in the editor (underlines, margin markers).
-4. Show type information on hover or in a status bar.
+**Completed tasks**:
+1. Scrolling output panel with color-coded lines (white=print output, green=eval results, red=errors, blue=info). VM `print`/`println` output captured via pipe (`setPrintOutput` + non-blocking read each frame). Done.
+2. Single-line REPL input field with Enter-to-submit and Up/Down arrow command history. Done.
+3. Compilation errors set as red line markers on the editor via `TextEditor::SetErrorMarkers()`. Cleared on next successful evaluation. Done.
+4. Type information display deferred to a later phase (hover/status bar).
 
-### 11.3 Execute-on-keystroke
+New files: `app/src/output_panel.hpp`, `app/src/output_panel.cpp`, `app/src/gui_state.hpp`, `app/src/gui_state.cpp`.
 
-**Tasks**:
-1. Evaluate selected code block on Cmd+Enter (or configurable key).
-2. Evaluate current line on Shift+Enter.
-3. Evaluate entire file on Cmd+Shift+Enter.
-4. Show flash/highlight on evaluated lines for visual feedback.
+### 11.3 Execute-on-keystroke — DONE
+
+**Completed tasks**:
+1. Cmd+Enter evaluates selected text, or current block (contiguous non-empty lines around cursor) if no selection. Done.
+2. Shift+Enter evaluates current line. Done.
+3. Cmd+Shift+Enter evaluates entire file. Done.
+4. Eval flash: brief blue highlight overlay on evaluated lines, fades over ~0.33s. Done.
+
+Keyboard shortcuts intercepted at the GLFW key callback layer (`GLFW_MOD_SUPER`) to avoid macOS Cmd key conflicts. All evaluation goes through `REPLSession` with `NRTVM` mutex for thread safety with concurrent OSC/NATS handlers.
+
+### Layout
+
+Vertical split: editor panel on top, output+REPL panel on bottom, with a draggable horizontal splitter. Sizes computed from `ImGui::GetContentRegionAvail()` to fit within window bounds. `REPLSession` created inside `runGui()` using the `AppContext`'s compiler, NRTVM, and target.
 
 ---
 
@@ -792,7 +800,7 @@ Phase 0 (Build Infrastructure)       ✅ DONE
         └─> Phase 9 (Language Features cont.)      🟢 MOSTLY DONE ───────────┤
                                                                               v
                                                                   Phase 10 (UI Framework)  ✅ DONE
-                                                                    └─> Phase 11 (Editor)  ⬜ NOT STARTED
+                                                                    └─> Phase 11 (Editor)  ✅ DONE
                                                                           └─> Phase 12     ⬜ NOT STARTED
                                                                                 └─> Phase 13  ⬜ NOT STARTED
                                                                                       └─> Phase 14  ⬜ NOT STARTED
@@ -822,7 +830,7 @@ Phase 0 (Build Infrastructure)       ✅ DONE
 | 8 | Compiler feature completion | ✅ Done | -- |
 | 9 | Language feature completion | 🟢 Mostly done | I/O functions, general function inlining |
 | 10 | UI framework setup | ✅ Done | -- |
-| 11 | Code editor & REPL | ⬜ Not started | All tasks (REPLSession exists) |
+| 11 | Code editor & REPL | ✅ Done | Type info on hover |
 | 12 | Plugin/module management | ⬜ Not started | All tasks |
 | 13 | Audio graph visualization | ⬜ Not started | All tasks |
 | 14 | Metering & monitoring | ⬜ Not started | All tasks |
