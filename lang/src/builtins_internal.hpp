@@ -240,6 +240,7 @@ void builtin_isNil_list(VM&, u16, u16, u16);
 void builtin_notNil_list(VM&, u16, u16, u16);
 void builtin_toList_array(VM&, u16, u16, u16);
 void builtin_toList_coroutine(VM&, u16, u16, u16);
+void builtin_codePoints(VM&, u16, u16, u16);
 void builtin_collect(VM&, u16, u16, u16);
 void builtin_cyc_list(VM&, u16, u16, u16);
 void builtin_ncyc_list(VM&, u16, u16, u16);

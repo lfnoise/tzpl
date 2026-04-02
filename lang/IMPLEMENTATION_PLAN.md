@@ -23,7 +23,7 @@ The following components exist and are functional:
 
 **Working features**: Int/float/fraction/complex arithmetic, type conversions, let/var/const declarations, functions with overloading, if/else, while loops, for-each loops over arrays/lists/ranges, strings with comparisons, array/tuple literals, global variables, print/println, structs (with positional construction and templates), enums (with templates), match/pattern matching (including array/cons/rest patterns), lambda closures, pipeline syntax, implicit auto-mapping, explicit postfix `@` operator, List type with lazy arithmetic, Range type with range expressions, Ref type with `&`/`*`/`<-` operators, template functions/structs/enums with monomorphization.
 
-**Not yet working**: Methods, struct inheritance, infinite list generators (ord, lazy to()), modules, dynamic scoping, event system.
+**Not yet working**: Methods, struct inheritance.
 
 ---
 
@@ -46,7 +46,7 @@ The following components exist and are functional:
 | 6.2 Range Expressions | Done | `(start..end)`, `(start,next..end)` for stepped, `(start..)` for infinite. RangeObj + builtins. |
 | 8.1 Ref Type | Done | `&expr` creates ref, `*expr` dereferences, `refExpr <- value` assigns. `Ref<T>` type syntax. |
 | 13.1 Math Functions | Done | 100+ overloads: trig, exp/log, rounding, abs, min/max/clamp/cmp, sign, bitwise, complex. |
-| 13.2 String Functions | Partial | `length`, `cmp`, `min`, `max`, comparison operators. Missing: charAt, substring, indexOf, split, etc. |
+| 13.2 String Functions | Done | `length`, `cmp`, `min`, `max`, comparison operators, `substring`, `contains`, `startsWith`, `endsWith`, `split`, `trim`, `toUpper`, `toLower`, `replace`, byte indexing, `codePoints`. |
 
 ---
 
@@ -54,15 +54,15 @@ The following components exist and are functional:
 
 | Phase | Section | Description | Status |
 |-------|---------|-------------|--------|
-| **7** | **7.1** | **Infinite Lists & Generators** | Not started. Infrastructure exists (RangeListGen); needs `ord`, lazy `to()`, etc. |
-| **9** | **9.1** | **Module System** | Not started. Import/export system. |
-| **10** | **10.1–10.3** | **Methods & OO** | Not started. Method declarations, struct inheritance, where clauses. MethodType and Method value types exist but no syntax/dispatch. |
-| 11 | 11.1 | Dynamic Scoping | Not started. Dynamic scope variables. |
-| 12 | 12.1 | Event-Driven VM | Done. See `EVENT_DRIVEN_VM_PLAN.md`. Cross-thread ARC, NRT VM, RT VM on Silo. |
-| 13 | 13.2–13.4 | Standard Library (remaining) | Partial. String/array/list utility functions, IO. |
-| 14 | 14.x | Optimizations | Not started. Register allocation, constant folding, inlining, tail calls. |
-| 15 | 15.x | Error Handling & Diagnostics | Not started. Better messages, runtime errors, parser recovery. |
-| 16 | 16.x | Testing Infrastructure | Not started. Unit, integration, stress tests. |
+| **7** | **7.1** | **Infinite Lists & Generators** | Done. 20+ lazy generator types, `ord`, lazy `to()`, `take`, `drop`, `map`, `filter`, `fold`, `scan`, `zip`, `enumerate`, `iter`, `cyc`, `ncyc`, `hang`, `join`, random generators, coroutine-to-list, array-to-list, `codePoints`. |
+| **9** | **9.1** | **Module System** | Done. All import syntaxes, qualified access, circular detection, module caching, cascading error suppression. 13 module tests. |
+| **10** | **10.1--10.3** | **Methods & OO** | Not started. Method declarations, struct inheritance, where clauses. MethodType and Method value types exist but no syntax/dispatch. |
+| 11 | 11.1 | Dynamic Scoping | Done. Backtick-prefixed variables (`var \`name = expr`), `op_load_dynamic`/`op_store_dynamic`/`op_dynscope_push` opcodes, zero overhead on normal calls. |
+| 12 | 12.1 | Event-Driven VM | Done. See `EVENT_DRIVEN_VM_PLAN.md`. Cross-thread ARC, NRT VM, RT VM on Silo, NRT and RT tempo schedulers, clock FFI. |
+| 13 | 13.2--13.4 | Standard Library (remaining) | Mostly done. String functions complete. Array/list/map functions extensive. Remaining: file I/O functions (NRT only). |
+| 14 | 14.x | Optimizations | Mostly done. Register reclamation, tail call optimization, constant folding, range loop inlining all done. Remaining: general function inlining. |
+| 15 | 15.x | Error Handling & Diagnostics | Done. Parser error recovery with synchronization, cascading error suppression, `expectClosing()` with diagnostic notes pointing to opening delimiters, readable token names. |
+| 16 | 16.x | Testing Infrastructure | Done. 318 integration tests (`.x` files with expected output), `run_tests.sh` test runner, doc-extracted tests. |
 
 ---
 
@@ -325,19 +325,20 @@ See Phase 6 below. Implemented after templates were completed.
 
 ---
 
-## Phase 7: Infinite Lists and Generators
+## Phase 7: Infinite Lists and Generators (COMPLETE)
 
 **Rationale**: Core List infrastructure exists from Phase 4. This phase adds infinite list support.
 
-### 7.1 Infinite Lists and Generators
+### 7.1 Infinite Lists and Generators — Done
 
-**Goal**: Support infinite lists via generators. E.g. `ord` produces `[1, 2, 3, ...]`.
+**Status**: Complete. 20+ lazy generator types implemented in `value.hpp` and `builtins_listgen.cpp`.
 
-**Tasks**:
-1. Built-in `ord` function: Returns a List whose generator produces successive integers.
-2. `to(start, end)` can return a List for lazy evaluation.
-3. Ensure GC handles lazy list chains correctly — generators may hold closures.
-4. Guard against infinite evaluation: operations like `print` on an infinite list should print a bounded number of elements.
+**Completed tasks**:
+1. Built-in generators: `ord` (infinite integers), lazy `toList` for ranges/arrays/coroutines, `iter` (infinite function iteration), random generators (`urands`, `brands`, `irands`, `rands`, `xrands`), `picks` (random selection). Done.
+2. List operations: `take`, `drop`, `stride`, `stutter`, `cat`, `cyc`, `ncyc`, `hang`, `join`, `map`, `filter`, `fold`, `scan`, `zip`, `enumerate`, `takeWhile`, `dropWhile`. All lazy. Done.
+3. String-to-code-points: `codePoints(String) -> List[Int]` lazily decodes UTF-8. Done.
+4. GC handles lazy list chains correctly -- generators use `releaseChildren()` for proper lifecycle. Done.
+5. Infinite list printing bounded (displays first elements then `...`). Done.
 
 ---
 
@@ -370,23 +371,25 @@ See Phase 6 below. Implemented after templates were completed.
 
 ---
 
-## Phase 9: Module System
+## Phase 9: Module System (COMPLETE)
 
-### 9.1 Module Loading and Imports
+### 9.1 Module Loading and Imports — Done
+
+**Status**: Complete. All import syntaxes implemented and tested.
 
 **Goal**: `import module`, `import module as alias`, `import module.{ name1, name2 }`, `import module.*`.
 
-**Files**: `ast.hpp`, `parser.hpp/cpp`, `type_checker.hpp/cpp`, `codegen.hpp/cpp`, `vm.hpp/cpp`
-
-**Tasks**:
-1. Add `ImportDeclNode` to AST with module path, import kind (whole/star/named), aliases.
-2. Parse all import syntaxes.
-3. VM: Add a module registry. A module is a compiled unit with its own global scope, types, and functions.
-4. Module compilation: When an import is encountered, locate the source file, compile it (lex/parse/type-check/codegen) if not already compiled, and register it.
-5. Type checker: Resolve imported names. Qualified access (`module.name`) looks up in module's export table.
-6. Codegen: Imported globals reference the module's global table. Imported functions reference the module's CodeBlocks.
-7. Cycle detection: Track modules being compiled. Error on circular imports.
-8. Module caching: Don't recompile already-loaded modules.
+**Completed tasks**:
+1. `ImportDeclNode` in AST with module path, import kind (whole/star/named), aliases. Done.
+2. All import syntaxes parsed: whole, wildcard (`*`), named with aliases. Done.
+3. Module registry with compilation caching. Done.
+4. Module compilation on first import, with relative and include-path-based file resolution. Done.
+5. Qualified access (`module.func(args)`) works including in pipeline syntax. Done.
+6. All export types supported: functions, variables, structs, enums, templates, type aliases. Done.
+7. Circular import detection. Done.
+8. Module caching (don't recompile already-loaded modules). Done.
+9. Cascading errors from failed module imports suppressed. Done.
+10. 13 module-specific tests. Done.
 
 ---
 
@@ -429,20 +432,21 @@ See Phase 6 below. Implemented after templates were completed.
 
 ---
 
-## Phase 11: Dynamic Scoping
+## Phase 11: Dynamic Scoping (COMPLETE)
 
-### 11.1 Dynamic Scope Variables
+### 11.1 Dynamic Scope Variables — Done
+
+**Status**: Complete. Backtick-prefixed variables use dynamic (call-chain) scoping.
 
 **Goal**: Variables that are looked up in the dynamic call chain rather than lexical scope.
 
-**Files**: `vm.hpp/cpp`, `opcodes.hpp/cpp`, `parser.hpp/cpp`, `type_checker.hpp/cpp`, `codegen.hpp/cpp`
-
-**Tasks**:
-1. Define syntax for declaring and accessing dynamic variables. Possible: `dynamic varName Type = defaultValue`.
-2. VM: Maintain a dynamic scope stack (separate from call frame stack). On function entry, dynamic bindings can be pushed; on exit, they are popped.
-3. Add `op_load_dynamic`, `op_store_dynamic` opcodes: Look up variable by symbol in the dynamic scope chain.
-4. Type checker: Dynamic variables must have declared types. Type-check uses against declared type.
-5. Codegen: Emit dynamic load/store opcodes.
+**Completed tasks**:
+1. Syntax: `var \`name = expr` declares/sets a dynamic variable. Done.
+2. VM: Separate `dynVars_` table with save/restore stack. Zero overhead on normal function calls (one u32 write on pushFrame, one comparison on popFrame). GC integration. Done.
+3. `op_load_dynamic`, `op_store_dynamic`, `op_dynscope_push` opcodes. Done.
+4. Type checker: Pre-scan registers dynamic vars before body checking, shared registry on Compiler. Done.
+5. Codegen: Emit dynamic load/store opcodes. Done.
+6. Test file: `tests/dynamic_scope.x`. Module example: `modules/dynvar.x`. Done.
 
 ---
 
@@ -462,15 +466,15 @@ See Phase 6 below. Implemented after templates were completed.
 
 4. **VM::callCallable()** (`vm.hpp/cpp`): New method to call a Lambda or Primitive from C++ host code, handling free variable setup for closures.
 
-**Remaining wiring work** (not core infrastructure):
-- Register `after()`/`every()`/`cancel()` as FFI functions
-- Wire OSC handler registration (`osc.onMessage()` FFI)
-- Wire `rt.onNote()`/`rt.onControl()` FFI functions
-- Phase D from `EVENT_DRIVEN_VM_PLAN.md`: `VMReplyCmd` for RT-to-NRT messaging
+**All wiring work completed**:
+- Clock FFI module: `sched`, `schedAbs`, `after`, `at`, `cancel`, `setTempo`, `getTempo`, `getBeats`, `getBeatDur`, `schedTempoChange`, `setLatency`, `getLatency`. Done.
+- OSC handler registration (`osc.onMessage` and typed variants). Done.
+- RT event handlers (`rtOnNote`, `rtOnNoteOff`, `rtOnControl`). Done.
+- `VMReplyCmd` for RT-to-NRT messaging (`rtReply`). Done.
 
 ---
 
-## Phase 13: Standard Library (PARTIAL)
+## Phase 13: Standard Library (MOSTLY DONE)
 
 ### 13.1 Math Functions — Done
 
@@ -486,97 +490,89 @@ See Phase 6 below. Implemented after templates were completed.
 - **Range**: toArray, toList, length
 - All support auto-mapping.
 
-### 13.2 String Functions — Partial
+### 13.2 String Functions — Done
 
-**Done**: `length`, `cmp`, `min`, `max`, comparison operators (`<`, `<=`, `>`, `>=`, `==`, `!=`), `$` concatenation.
+**Done**: `length`, `cmp`, `min`, `max`, comparison operators (`<`, `<=`, `>`, `>=`, `==`, `!=`), `$` concatenation, `substring`, `contains`, `startsWith`, `endsWith`, `split`, `trim`, `toUpper`, `toLower`, `replace`, byte indexing (`s[i]`), `codePoints` (lazy `List[Int]` of Unicode code points), `toString`, `fmt`. Tested in `tests/builtins/string_functions.x` and `tests/builtins/codepoints.x`.
 
-**Not yet**: `charAt`, `substring`, `indexOf`, `contains`, `startsWith`, `endsWith`, `split`, `join`, `trim`, `toUpper`, `toLower`, `replace`, string interpolation.
+### 13.3 Array/List Functions — Done
 
-### 13.3 Array Functions
-
-**Done**: `length` (via `op_array_length`), indexing, slicing, concatenation (`$`), construction.
-
-**Not yet**: `push`, `pop`, `map`, `filter`, `fold`, `find`, `sort`, `reverse`, `zip`, `flatten` (most are achievable via auto-mapping and `@` but dedicated functions not registered).
+**Done**: `length`, indexing, concatenation (`$`), construction, `push`, `pop`, `reverse`, `sort`, `grade`, `muss`, `take`, `drop`, `stride`, `stutter`, `repeat`, `cat`, `join`, `flatten`, `map`, `filter`, `fold`, `fold1`, `scan`, `scan1`, `find`, `zip`, `enumerate`, `iter`, `cyc`, `ncyc`, `hang`, `head`, `tail`, `cons`, `isNil`, `notNil`, `toList`, `toArray`, `collect`, `pick`, `picks`, `takeWhile`, `dropWhile`. All lazy list operations use generators.
 
 ### 13.4 IO Functions (Non-Real-Time Only)
 
 **Done**: `print`, `println`.
 
-**Not yet**: `readFile`, `writeFile`.
+**Remaining**: `readFile`, `writeFile` (file I/O for loading scripts -- NRT only).
 
 ---
 
-## Phase 14: Optimizations
+## Phase 14: Optimizations (MOSTLY DONE)
 
-### 14.1 Register Allocation Improvements
+### 14.1 Register Allocation Improvements — Done
 
-**Tasks**:
-- Current codegen does simple linear register allocation. Add register reuse for temporaries that are no longer live.
-- Track liveness of registers to reclaim them sooner.
+Register reclamation implemented. Liveness tracking reclaims registers for temporaries that are no longer live. `--no-reg-reclaim` flag to disable for debugging.
 
-### 14.2 Constant Folding
+### 14.2 Constant Folding — Done
 
-**Tasks**:
-- Evaluate constant expressions at compile time.
-- Fold constant conditions in if/while (dead code elimination).
+AST-level constant folding evaluates constant expressions at compile time. `--no-const-fold` flag to disable.
 
 ### 14.3 Inline Caching for Method Dispatch
 
 **Tasks**:
 - Cache the last resolved method for a given call site to avoid repeated lookup.
+- Deferred (methods not yet implemented, see Phase 10).
 
-### 14.4 Tail Call Optimization
+### 14.4 Tail Call Optimization — Done
 
-**Tasks**:
-- Detect tail calls in codegen.
-- Emit `op_tail_call` that reuses the current frame instead of pushing a new one.
+Tail calls detected in codegen. `op_tail_call` reuses the current frame. `--no-tco` flag to disable.
+
+### 14.5 Range Loop Inlining — Done
+
+Int and Fraction range for-loops inlined to avoid `RangeObj` allocation. Direct counter loop emitted.
+
+### 14.6 General Function Inlining
+
+**Remaining**: Inline small functions at call sites (beyond range loops).
 
 ---
 
-## Phase 15: Error Handling and Diagnostics
+## Phase 15: Error Handling and Diagnostics (DONE)
 
-### 15.1 Better Error Messages
+### 15.1 Better Error Messages — Done
 
-**Tasks**:
-- Include source context (the offending line) in error messages.
-- Underline the specific span of the error.
-- Suggest fixes for common mistakes (typos in identifiers, missing types, etc.).
+- `expect()` reports the actual token found (e.g. "Expected ')', got '{'"). Done.
+- `expectClosing()` attaches a `DiagnosticNote` pointing to the opening delimiter (e.g. "to match ( here" at line 5). Done.
+- `formatError()` renders notes with source context and caret underlining. Done.
+- `tokenKindString()` produces readable names for all token kinds. Done.
 
 ### 15.2 Runtime Error Handling
 
-**Tasks**:
-- Division by zero, index out of bounds, null dereference — produce clean runtime errors with source location.
-- No exceptions in real-time path. Use error codes or a Result type.
+Runtime errors (division by zero, index out of bounds) produce error messages. No exceptions in real-time path.
 
-### 15.3 Parser Error Recovery
+### 15.3 Parser Error Recovery — Done
 
-**Tasks**:
-- On parse error, skip to next synchronization point (next statement, next `}`, etc.) and continue parsing.
-- Report multiple errors per compilation instead of stopping at the first.
+- On parse error, synchronization skips to next statement boundary (`Semicolon`, `Fn`, `Let`, `Var`, `Const`, `Struct`, `Enum`, `Import`, etc.). Done.
+- Progress-check mechanism prevents infinite loops. Done.
+- Multiple errors reported per compilation. Done.
+- Cascading errors from failed module imports suppressed. Done.
 
 ---
 
-## Phase 16: Testing Infrastructure
+## Phase 16: Testing Infrastructure (DONE)
 
 ### 16.1 Unit Tests
 
-**Tasks**:
-- Test each compiler phase independently: lexer token output, parser AST shape, type checker results, codegen instruction sequences, VM execution results.
-- Use a C++ test framework (e.g., Catch2 or doctest) — allocate from TLSF in test harness.
+C++ test framework not added. Testing done via integration tests (16.2).
 
-### 16.2 Integration Tests
+### 16.2 Integration Tests — Done
 
-**Tasks**:
-- Test programs in `.x` files with expected output.
-- Test script runner: compile and run each `.x` file, compare stdout to expected.
-- Cover: arithmetic, functions, recursion, closures, structs, enums, pattern matching, auto-mapping, pipelines, modules.
+- 318 test programs in `.x` files with expected output. Done.
+- `run_tests.sh` test runner: compiles and runs each `.x` file, compares stdout to `.expected`. Done.
+- Coverage: arithmetic, functions, recursion, closures, structs, enums, pattern matching, auto-mapping, pipelines, modules, coroutines, dynamic scoping, builtins (string, array, list, math, formatting, random, refs, sets, maps), error cases, type system, doc-extracted examples. Done.
 
 ### 16.3 Stress Tests
 
-**Tasks**:
-- GC stress: Allocate many objects, verify no leaks, verify bounded pause times.
-- Deep recursion: Verify stack overflow detection.
-- Large programs: Verify compilation and execution of non-trivial programs.
+Stress testing done informally. No dedicated stress test suite.
 
 ---
 
@@ -599,17 +595,17 @@ See Phase 6 below. Implemented after templates were completed.
 | 13 | 6.2 | Range expressions | Done |
 | 14 | 8.1 | Ref type | Done |
 | 15 | 13.1 | Math builtins (100+ overloads) | Done |
-| 16 | 7.1 | Infinite lists / generators | |
-| 17 | 9.1 | Module system | |
+| 16 | 7.1 | Infinite lists / generators | Done |
+| 17 | 9.1 | Module system | Done |
 | 18 | 10.1 | Method declarations | |
 | 19 | 10.2 | Struct inheritance | |
 | 20 | 10.3 | Where clauses / type constraints | |
-| 21 | 11.1 | Dynamic scoping | |
+| 21 | 11.1 | Dynamic scoping | Done |
 | 22 | 12.1 | Event-driven VM | Done |
-| 23 | 13.2–13.4 | Standard library (remaining) | Partial |
-| 24 | 14.x | Optimizations | |
-| 25 | 15.x | Error handling / diagnostics | |
-| 26 | 16.x | Testing infrastructure | |
+| 23 | 13.2--13.4 | Standard library (remaining) | Mostly done |
+| 24 | 14.x | Optimizations | Mostly done |
+| 25 | 15.x | Error handling / diagnostics | Done |
+| 26 | 16.x | Testing infrastructure | Done |
 
 ---
 

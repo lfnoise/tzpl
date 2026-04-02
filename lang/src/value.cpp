@@ -223,6 +223,7 @@ JoinListGen::JoinListGen(Type* type) : ListGenerator(type), outer_(nullptr), inn
 IterListGen::IterListGen(Type* type) : ListGenerator(type), current_(), fn_(nullptr), valueIsObj_(false), listType_(nullptr) {}
 ArrayToListGen::ArrayToListGen(Type* type) : ListGenerator(type), array_(nullptr), index_(0), elemType_(nullptr), listType_(nullptr) {}
 CoroutineListGen::CoroutineListGen(Type* type) : ListGenerator(type), coro_(nullptr), listType_(nullptr), bufferedValue_(), valueIsObj_(false) {}
+StringCodePointsListGen::StringCodePointsListGen(Type* type) : ListGenerator(type), str_(nullptr), byteIndex_(0), listType_(nullptr) {}
 
 // ListNode::str()
 VMString ListNode::str() const {

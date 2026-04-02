@@ -343,7 +343,7 @@
                 <li><a href="#float-util">Float Utilities</a> &mdash; copysign, nextafter, isNan, isInf, isFinite, isNormal</li>
                 <li><a href="#bitwise">Bit Manipulation</a> &mdash; clz, clo, ctz, cto, popCount, rotl, rotr, bitCeil, bitFloor, bitWidth, hasSingleBit</li>
                 <li><a href="#complex">Complex Number Functions</a> &mdash; Complex, real, imag, arg, norm, conj, polar</li>
-                <li><a href="#string">String Functions</a> &mdash; length, substring, contains, startsWith, endsWith, split, trim, toUpper, toLower, replace, indexing, min, max, cmp</li>
+                <li><a href="#string">String Functions</a> &mdash; length, substring, contains, startsWith, endsWith, split, trim, toUpper, toLower, replace, codePoints, indexing, min, max, cmp</li>
                 <li><a href="#formatting">String Formatting</a> &mdash; fmt</li>
                 <li><a href="#range">Range Functions</a> &mdash; length, toArray, toList</li>
                 <li><a href="#collections">Collection Functions (Arrays &amp; Lists)</a> &mdash; length, map, filter, fold, scan, fold1, scan1, find, zip, enumerate, take, drop, takeWhile, dropWhile, stride, stutter, repeat, cat, join, flatten</li>
@@ -932,6 +932,19 @@ toLower("Hello World")  <span class="cmt">-- "hello world"</span></code></pre>
             <pre><code>replace("hello world", "world", "there")  <span class="cmt">-- "hello there"</span>
 replace("aabbcc", "bb", "XX")              <span class="cmt">-- "aaXXcc"</span>
 replace("abcabc", "abc", "x")              <span class="cmt">-- "xx"</span></code></pre>
+
+            <h3><code>codePoints(s)</code></h3>
+            <p>Returns a lazy <code>List[Int]</code> of Unicode code points decoded from the UTF-8 string. Each element is the integer value of a single code point. Because the result is a lazy list, it composes naturally with <code>take</code>, <code>drop</code>, <code>map</code>, <code>filter</code>, and other list operations without decoding the entire string up front.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>codePoints(String) &rarr; List[Int]</code></td><td>Lazy list of Unicode code points.</td></tr>
+            </table>
+            <pre><code>codePoints("ABC") collect(3)        <span class="cmt">-- [65, 66, 67]</span>
+codePoints("") isNil                <span class="cmt">-- true</span>
+codePoints("Z") head                <span class="cmt">-- 90</span>
+codePoints("\u00e9") head           <span class="cmt">-- 233   (U+00E9, 2-byte UTF-8)</span>
+codePoints("\u20ac") head           <span class="cmt">-- 8364  (U+20AC, 3-byte UTF-8)</span>
+codePoints("hello") take(3) collect(3)  <span class="cmt">-- [104, 101, 108]</span></code></pre>
 
             <h3>Byte Indexing</h3>
             <p>Strings support the <code>[]</code> indexing operator to access individual bytes. The index is zero-based and the result is an <code>Int</code> representing the byte value (0&ndash;255).</p>
@@ -2101,6 +2114,7 @@ getListPrintLimit();           <span class="cmt">-- check current limit</span></
                 <code>length</code>, <code>substring</code>, <code>contains</code>,
                 <code>startsWith</code>, <code>endsWith</code>, <code>split</code>,
                 <code>trim</code>, <code>toUpper</code>, <code>toLower</code>, <code>replace</code>,
+                <code>codePoints</code>,
                 <code>fmt</code>,
                 <code>s[i]</code> (byte indexing),
                 <code>min</code>, <code>max</code>, <code>cmp</code>,

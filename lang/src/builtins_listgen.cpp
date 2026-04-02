@@ -486,6 +486,54 @@ void ArrayToListGen::generate(VM& vm, ListNode* owner) {
     tail->generator_ = this; owner->tail_ = tail;
 }
 
+void StringCodePointsListGen::generate(VM& vm, ListNode* owner) {
+    const char* data = str_->s.data();
+    size_t size = str_->s.size();
+    if (byteIndex_ >= size) { owner->tail_ = nullptr; return; }
+
+    // Decode one UTF-8 code point
+    unsigned char c = static_cast<unsigned char>(data[byteIndex_]);
+    i64 cp;
+    if (c < 0x80) {
+        cp = c;
+        byteIndex_ += 1;
+    } else if ((c & 0xE0) == 0xC0) {
+        cp = c & 0x1F;
+        if (byteIndex_ + 1 < size) cp = (cp << 6) | (static_cast<unsigned char>(data[byteIndex_+1]) & 0x3F);
+        byteIndex_ += 2;
+    } else if ((c & 0xF0) == 0xE0) {
+        cp = c & 0x0F;
+        if (byteIndex_ + 1 < size) cp = (cp << 6) | (static_cast<unsigned char>(data[byteIndex_+1]) & 0x3F);
+        if (byteIndex_ + 2 < size) cp = (cp << 6) | (static_cast<unsigned char>(data[byteIndex_+2]) & 0x3F);
+        byteIndex_ += 3;
+    } else if ((c & 0xF8) == 0xF0) {
+        cp = c & 0x07;
+        if (byteIndex_ + 1 < size) cp = (cp << 6) | (static_cast<unsigned char>(data[byteIndex_+1]) & 0x3F);
+        if (byteIndex_ + 2 < size) cp = (cp << 6) | (static_cast<unsigned char>(data[byteIndex_+2]) & 0x3F);
+        if (byteIndex_ + 3 < size) cp = (cp << 6) | (static_cast<unsigned char>(data[byteIndex_+3]) & 0x3F);
+        byteIndex_ += 4;
+    } else {
+        cp = 0xFFFD; // replacement character for invalid byte
+        byteIndex_ += 1;
+    }
+
+    owner->head_ = Word(cp);
+    if (byteIndex_ >= size) { owner->tail_ = nullptr; return; }
+    auto* tail = new ListNode(listType_);
+    tail->generator_ = this; owner->tail_ = tail;
+}
+
+// codePoints(String) -> List[Int]  (lazy)
+void builtin_codePoints(VM& vm, u16 dst, u16, u16 argBase) {
+    auto* strObj = static_cast<StringObj*>(vm.reg(argBase).o);
+    if (!strObj || strObj->s.empty()) { vm.reg(dst).o = nullptr; return; }
+    auto* listType = vm.listType(vm.intType());
+    auto* node = new ListNode(listType);
+    auto* gen = new StringCodePointsListGen(vm.typeType());
+    gen->str_ = strObj; gen->byteIndex_ = 0; gen->listType_ = listType;
+    node->generator_ = gen; vm.reg(dst).o = node;
+}
+
 // ============================================================================
 // Coroutine resume helper
 // ============================================================================

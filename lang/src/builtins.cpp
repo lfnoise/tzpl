@@ -234,6 +234,13 @@ static bool resolve_toList_coroutine(Compiler& compiler, const std::vector<Type*
     pt = {ct}; rt = compiler.listType(ct->yieldType_); cf = builtin_toList_coroutine; return true;
 }
 
+// codePoints: String -> List[Int]
+static bool resolve_codePoints(Compiler& compiler, const std::vector<Type*>& args,
+    std::vector<Type*>& pt, Type*& rt, CFun& cf) {
+    if (args.size() != 1 || args[0] != compiler.stringType()) return false;
+    pt = {compiler.stringType()}; rt = compiler.listType(compiler.intType()); cf = builtin_codePoints; return true;
+}
+
 // collect: (List[T], Int) -> Array[T]
 static bool resolve_collect(Compiler& compiler, const std::vector<Type*>& args,
     std::vector<Type*>& pt, Type*& rt, CFun& cf) {
@@ -1567,6 +1574,7 @@ void registerBuiltinFunctions(Compiler& compiler,
 
     registerTemplate(compiler, functions, "toList",    resolve_toList_array);
     registerTemplate(compiler, functions, "toList",    resolve_toList_coroutine);
+    registerTemplate(compiler, functions, "codePoints", resolve_codePoints);
     registerTemplate(compiler, functions, "collect",   resolve_collect);
     registerTemplate(compiler, functions, "pick",      resolve_pick);
     registerTemplate(compiler, functions, "picks",     resolve_picks);

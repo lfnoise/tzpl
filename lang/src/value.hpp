@@ -753,6 +753,20 @@ public:
     }
 };
 
+// Generator for codePoints(String) - lazily iterate Unicode code points.
+class StringCodePointsListGen : public ListGenerator {
+public:
+    StringObj* str_;
+    size_t byteIndex_;
+    ListType* listType_;
+
+    StringCodePointsListGen(Type* type);
+    void generate(VM& vm, ListNode* owner) override;
+    void releaseChildren() override {
+        if (str_) str_->release();
+    }
+};
+
 // Ref (mutable reference)
 class RefValue : public Obj {
 public:

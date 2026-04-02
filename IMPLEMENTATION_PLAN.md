@@ -2,7 +2,7 @@
 
 This document is a step-by-step plan for integrating the three sub-projects (lang, synthdef-compiler, engine) and building the final audio coding application. It is based on an audit of the current state of each project.
 
-**Last updated**: 2026-03-28
+**Last updated**: 2026-04-01
 
 ---
 
@@ -57,7 +57,7 @@ This document is a step-by-step plan for integrating the three sub-projects (lan
 - Infinite lists and generators (lazy evaluation)
 - Parser error recovery (synchronization, cascading error suppression)
 - Constant folding, register reclamation, tail call optimization
-- 317 tests, all passing
+- 318 tests, all passing
 - Builds as static library (`tzpl_lib`) with install targets
 - `callFunction()` API for host-driven function invocation (event handler infrastructure)
 - REPLSession class for interactive evaluation
@@ -478,14 +478,14 @@ File `tzpl_sexpr_binary_buffer.hpp` exists but contains only commented-out skele
 
 ### 8.1 SIMD code generation — DONE
 
-Infrastructure exists: `max_simd_width = 4`, `unroll_by = 4` in `synthdef_cpp_codegen.cpp`, SIMD type definitions are in `shared/tzpl_simd.hpp`. But no SIMD loop body generation code — currently defaults to scalar codegen.
+Fully implemented in `synthdef_cpp_codegen.cpp`. The `genLoop()` function generates SIMD loop bodies using `simdLoad()`, `simdStore()`, and `simdSplat()` helpers. Two code paths: single vector op (no loop needed) or stride loop with `i += width`. SIMD type definitions in `shared/tzpl_simd.hpp`.
 
-**Tasks**:
-0. SIMD code generation should be able to be turned on or off. Default is ON. Off useful for debugging.
-1. Generate SIMD loop bodies for multi-channel synths. The number of channels are always a power of two, so it should always be possible to vectorize loops whose channel counts are greater than 1. Since all channel counts are powers of two, there should be no need to have remainder loops. Some operations like vector ops that reorder vectors, may make vectorization impossible.
-2. Signal values can be both integer and float. Vectorize both integer and float operations.
-3. Ensure that all instance variables and local variables containing SIMD vectors are aligned.
-4. Benchmark against scalar codegen to validate speedup.
+**Completed tasks**:
+0. SIMD code generation is optional. `--simd-2` CLI flag enables 2-channel SIMD (minimum width = 2 instead of default 4). Default OFF for stability; scalar code used unless explicitly enabled. Done.
+1. SIMD loop bodies generated for multi-channel synths with power-of-two channel counts. Done.
+2. Both integer and float operations vectorized. Done.
+3. Instance variables and local variables containing SIMD vectors are aligned. Done.
+4. SIMD vs scalar benchmarks added. Done.
 
 ### 8.2 Full s-expression subgraph support — DONE
 
@@ -548,7 +548,7 @@ Test file: `lang/tests/dynamic_scope.x`. Module example: `lang/modules/dynvar.x`
 ### 9.3 Standard library completion (Phase 13 in lang's plan) — MOSTLY DONE
 
 **Completed**:
-1. String functions: substring, split, contains, startsWith, endsWith, trim, toUpper, toLower, replace, byte indexing. Tested in `tests/builtins/string_functions.x`.
+1. String functions: substring, split, contains, startsWith, endsWith, trim, toUpper, toLower, replace, byte indexing, codePoints (lazy `List[Int]` of Unicode code points from UTF-8 string). Tested in `tests/builtins/string_functions.x` and `tests/builtins/codepoints.x`.
 2. Array/list utility functions: Extensively tested.
 3. Range operations: Working.
 4. Map operations: `MapObj` class with builtins -- get (returns Option), getDefault, contains, keys, values, copy, merge.
@@ -600,6 +600,8 @@ Test file: `lang/tests/dynamic_scope.x`. Module example: `lang/modules/dynvar.x`
 6. Headless mode (`--nogui`): runs scripts with full engine access, drops to interactive REPL (linenoise, multi-line input, `:help`/`:quit`/`:type`/`:globals`/`:functions`/`:memory`/`:gc` commands). If OSC/NATS listeners are active, stays alive as a headless node. Done.
 7. Font setup: bundled DejaVu Sans Mono with runtime font search (exe-relative for deployment, compile-time path for dev builds, Monaco system fallback on macOS). Three pre-rasterised sizes (14/16/18pt) switchable at runtime via Cmd+=/-. Retina-crisp rendering via scaled atlas + FontGlobalScale. Done.
 8. Trackpad scroll dampening (25% of raw GLFW values) via chained scroll callback. Done.
+9. Native macOS menu bar replacing Dear ImGui menu bar. Objective-C `TzplMenuHandler` class bridges menu events to main loop via global state flags. Menus: App (About, Quit), File (New, Open, Save, Save As, Save a Copy As, Close Tab), View (font size Cmd+=/-). Done.
+10. Native file dialogs via `NSOpenPanel` / `NSSavePanel` with `.x` file type filtering. Integrated with File menu operations. Done.
 
 ---
 
@@ -636,6 +638,12 @@ New files: `app/src/output_panel.hpp`, `app/src/output_panel.cpp`, `app/src/gui_
 4. Eval flash: brief blue highlight overlay on evaluated lines, fades over ~0.33s. Done.
 
 Keyboard shortcuts intercepted at the GLFW key callback layer (`GLFW_MOD_SUPER`) to avoid macOS Cmd key conflicts. All evaluation goes through `REPLSession` with `NRTVM` mutex for thread safety with concurrent OSC/NATS handlers.
+
+### 11.4 File operations — DONE
+
+File operations integrated via native macOS menu bar (see Phase 10.2):
+- New tab, open file (native file dialog with `.x` filter), save, save as, save a copy as, close tab.
+- Untitled tabs prompt Save As on first save.
 
 ### Layout
 
