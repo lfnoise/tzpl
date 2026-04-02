@@ -417,6 +417,8 @@ struct AsTypeExprNode : Expr {
     ExprPtr subject;
     TypeExprPtr targetType;
     Type* resolvedTargetType = nullptr;  // filled by type checker
+    int autoMapDepth = 0;    // number of Array/List layers to map through
+    bool autoMapIsList = false;  // true if any layer is a List
     AsTypeExprNode(SourceRange l, ExprPtr subj, TypeExprPtr type)
         : Expr(AsTypeExpr, l), subject(std::move(subj)),
           targetType(std::move(type)) {}

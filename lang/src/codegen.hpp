@@ -170,6 +170,12 @@ private:
     u16 genSetLiteral(SetLiteralExpr* expr);
     u16 genRangeExpr(RangeExprNode* expr);
     u16 genAsTypeExpr(AsTypeExprNode* expr);
+    u16 emitNumericDowncast(u16 reg, Type* fromType, Type* toType);
+    u16 emitAutoMapDowncast(u16 subjReg, AsTypeExprNode* expr);
+    u16 emitAutoMapDowncastLoop(u16 arrReg, std::vector<Type*>& srcArrayTypes,
+                                 std::vector<Type*>& resultTypes,
+                                 int level, int depth,
+                                 Type* elemType, Type* targetType);
 
     // Emit helpers
     void emitOp(Operation op) { currentBlock_->emitOp(op); }

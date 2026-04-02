@@ -91,6 +91,10 @@ void op_int_to_complex(VM& vm, Code* pc);     // INT_TO_COMPLEX Rd, Ra (2 words)
 void op_fraction_to_float(VM& vm, Code* pc);  // FRACTION_TO_FLOAT Rd, Ra (2 words)
 void op_fraction_to_complex(VM& vm, Code* pc);// FRACTION_TO_COMPLEX Rd, Ra (2 words)
 void op_float_to_complex(VM& vm, Code* pc);   // FLOAT_TO_COMPLEX Rd, Ra (2 words)
+void op_fraction_to_int(VM& vm, Code* pc);    // FRACTION_TO_INT Rd, Ra (2 words)
+void op_complex_to_float(VM& vm, Code* pc);   // COMPLEX_TO_FLOAT Rd, Ra (2 words)
+void op_complex_to_int(VM& vm, Code* pc);     // COMPLEX_TO_INT Rd, Ra (2 words)
+void op_complex_to_fraction(VM& vm, Code* pc); // COMPLEX_TO_FRACTION Rd, Ra (2 words)
 
 // --- Construction ---
 void op_make_complex(VM& vm, Code* pc);       // MAKE_COMPLEX Rd, Ra(real), Rb(imag) (2 words)

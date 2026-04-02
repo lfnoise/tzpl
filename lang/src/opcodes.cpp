@@ -428,6 +428,34 @@ void op_float_to_complex(VM& vm, Code* pc) {
     DISPATCH(2);
 }
 
+void op_fraction_to_int(VM& vm, Code* pc) {
+    u16 dst = pc[1].regs[0], a = pc[1].regs[1];
+    auto* fa = static_cast<Fraction*>(vm.reg(a).o);
+    vm.reg(dst).i = fa->r.numer() / fa->r.denom();
+    DISPATCH(2);
+}
+
+void op_complex_to_float(VM& vm, Code* pc) {
+    u16 dst = pc[1].regs[0], a = pc[1].regs[1];
+    auto* ca = static_cast<Complex*>(vm.reg(a).o);
+    vm.reg(dst).f = ca->x.real();
+    DISPATCH(2);
+}
+
+void op_complex_to_int(VM& vm, Code* pc) {
+    u16 dst = pc[1].regs[0], a = pc[1].regs[1];
+    auto* ca = static_cast<Complex*>(vm.reg(a).o);
+    vm.reg(dst).i = (i64)ca->x.real();
+    DISPATCH(2);
+}
+
+void op_complex_to_fraction(VM& vm, Code* pc) {
+    u16 dst = pc[1].regs[0], a = pc[1].regs[1];
+    auto* ca = static_cast<Complex*>(vm.reg(a).o);
+    vm.reg(dst).o = new Fraction(r64((i64)ca->x.real()));
+    DISPATCH(2);
+}
+
 // --- Construction ---
 
 void op_make_complex(VM& vm, Code* pc) {

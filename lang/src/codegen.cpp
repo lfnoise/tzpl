@@ -2419,10 +2419,20 @@ u16 CodeGen::genRangeExpr(RangeExprNode* expr) {
 }
 
 u16 CodeGen::genAsTypeExpr(AsTypeExprNode* expr) {
-    // Generate subject (must be Any type)
     u16 subjReg = genExpr(static_cast<Expr*>(expr->subject.get()));
 
+    Type* subjType = expr->subject->resolvedType;
     Type* targetType = expr->resolvedTargetType;
+
+    // Numeric downcast (possibly auto-mapped)
+    if (!dynamic_cast<AnyType*>(subjType)) {
+        if (expr->autoMapDepth > 0) {
+            return emitAutoMapDowncast(subjReg, expr);
+        }
+        return emitNumericDowncast(subjReg, subjType, targetType);
+    }
+
+    // Any -> concrete type: fallible, returns Option
     auto* optType = static_cast<EnumType*>(expr->resolvedType);
 
     // Get wrapped type pointer from AnyObj
@@ -2464,6 +2474,149 @@ u16 CodeGen::genAsTypeExpr(AsTypeExprNode* expr) {
 
     patchJump(endJump);
     return dstReg;
+}
+
+u16 CodeGen::emitNumericDowncast(u16 reg, Type* fromType, Type* toType) {
+    u16 dst = allocReg();
+
+    if (fromType == compiler_.complexType()) {
+        if (toType == compiler_.floatType()) {
+            emitOp(op_complex_to_float);
+            emitRegs(dst, reg);
+        } else if (toType == compiler_.fractionType()) {
+            emitOp(op_complex_to_fraction);
+            emitRegs(dst, reg);
+        } else {
+            // Complex -> Int
+            emitOp(op_complex_to_int);
+            emitRegs(dst, reg);
+        }
+    } else if (fromType == compiler_.floatType()) {
+        if (toType == compiler_.intType()) {
+            emitOp(op_float_to_int);
+            emitRegs(dst, reg);
+        } else {
+            // Float -> Fraction: go through Int (truncation)
+            emitOp(op_float_to_int);
+            emitRegs(dst, reg);
+            u16 dst2 = allocReg();
+            emitOp(op_int_to_fraction);
+            emitRegs(dst2, dst);
+            return dst2;
+        }
+    } else if (fromType == compiler_.fractionType()) {
+        // Fraction -> Int
+        emitOp(op_fraction_to_int);
+        emitRegs(dst, reg);
+    } else {
+        return reg;
+    }
+    return dst;
+}
+
+u16 CodeGen::emitAutoMapDowncast(u16 subjReg, AsTypeExprNode* expr) {
+    int depth = expr->autoMapDepth;
+    Type* targetType = expr->resolvedTargetType;
+
+    // Find the element type at the innermost level
+    Type* elemType = expr->subject->resolvedType;
+    for (int i = 0; i < depth; ++i) {
+        if (auto* arrT = dynamic_cast<ArrayType*>(elemType))
+            elemType = arrT->elemType_;
+        else if (auto* lstT = dynamic_cast<ListType*>(elemType))
+            elemType = lstT->elemType_;
+    }
+
+    // Build result type from inside out: targetType, then wrap in Array layers
+    // e.g. for depth=2, Array[Array[Float]] as(Int) -> Array[Array[Int]]
+    std::vector<Type*> resultTypes(depth + 1);
+    resultTypes[0] = targetType;
+    for (int i = 1; i <= depth; ++i) {
+        resultTypes[i] = compiler_.arrayType(resultTypes[i - 1]);
+    }
+
+    // Build source array types from inside out for op_array_length/get_dyn
+    Type* srcType = expr->subject->resolvedType;
+    std::vector<Type*> srcArrayTypes(depth);
+    for (int i = depth - 1; i >= 0; --i) {
+        srcArrayTypes[i] = srcType;
+        if (auto* arrT = dynamic_cast<ArrayType*>(srcType))
+            srcType = arrT->elemType_;
+        else if (auto* lstT = dynamic_cast<ListType*>(srcType))
+            srcType = lstT->elemType_;
+    }
+
+    // For depth=1 (the common case), generate a simple loop
+    // For deeper nesting, generate nested loops recursively
+    return emitAutoMapDowncastLoop(subjReg, srcArrayTypes, resultTypes, 0, depth,
+                                   elemType, targetType);
+}
+
+u16 CodeGen::emitAutoMapDowncastLoop(u16 arrReg, std::vector<Type*>& srcArrayTypes,
+                                      std::vector<Type*>& resultTypes,
+                                      int level, int depth,
+                                      Type* elemType, Type* targetType) {
+    auto* srcArrType = dynamic_cast<ArrayType*>(srcArrayTypes[level]);
+
+    // Get length
+    u16 lenReg = allocReg();
+    emitOp(op_array_length);
+    emitRegs(lenReg, arrReg);
+    emitPtr(srcArrType);
+
+    // Allocate result array
+    auto* resultArrType = dynamic_cast<ArrayType*>(resultTypes[depth - level]);
+    u16 resultArrReg = allocReg();
+    emitOp(op_array_alloc);
+    emitRegs(resultArrReg, lenReg);
+    emitPtr(resultArrType);
+
+    // Loop counter
+    u16 iReg = allocReg();
+    emitOp(op_load_int_const);
+    emitRegs(iReg);
+    emitInt(0);
+
+    u16 oneReg = allocReg();
+    emitOp(op_load_int_const);
+    emitRegs(oneReg);
+    emitInt(1);
+
+    u16 condReg = allocReg();
+
+    // Loop start
+    u32 loopStart = (u32)currentBlock_->code.size();
+    emitOp(op_cmp_lt_int);
+    emitRegs(condReg, iReg, lenReg);
+    u32 exitJump = emitJump(op_jump_if_false, condReg);
+
+    // Extract element
+    u16 elemReg = allocReg();
+    emitOp(op_array_get_dyn);
+    emitRegs(elemReg, arrReg, iReg);
+    emitPtr(srcArrType);
+
+    // Either recurse for deeper levels or apply the downcast
+    u16 convertedReg;
+    if (level + 1 < depth) {
+        convertedReg = emitAutoMapDowncastLoop(elemReg, srcArrayTypes, resultTypes,
+                                                level + 1, depth, elemType, targetType);
+    } else {
+        convertedReg = emitNumericDowncast(elemReg, elemType, targetType);
+    }
+
+    // Store in result array
+    emitOp(op_array_set);
+    emitRegs(resultArrReg, iReg, convertedReg);
+    emitPtr(resultArrType);
+
+    // Increment and loop
+    emitOp(op_add_int);
+    emitRegs(iReg, iReg, oneReg);
+    emitJumpTo(loopStart);
+
+    patchJump(exitJump);
+    return resultArrReg;
 }
 
 u16 CodeGen::genIdentifier(IdentifierExpr* expr) {

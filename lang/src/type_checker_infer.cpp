@@ -785,12 +785,51 @@ Type* TypeChecker::inferExpr(Expr* expr, Type* expectedType) {
         case ASTNode::AsTypeExpr: {
             auto* node = static_cast<AsTypeExprNode*>(expr);
             Type* subjType = inferExpr(static_cast<Expr*>(node->subject.get()));
-            if (subjType && !dynamic_cast<AnyType*>(subjType)) {
-                error(node->loc, "as(Type) can only be used on values of type Any");
-            }
             Type* targetType = resolveTypeExpr(node->targetType.get());
             node->resolvedTargetType = targetType;
-            result = compiler_.optionType(targetType);
+            if (subjType && dynamic_cast<AnyType*>(subjType)) {
+                // Any -> concrete type: fallible, returns Option
+                result = compiler_.optionType(targetType);
+            } else if (subjType && isNumeric(subjType) && isNumeric(targetType)
+                       && numericRank(subjType) > numericRank(targetType)
+                       && numericRank(subjType) <= 4 && numericRank(targetType) >= 1) {
+                // Numeric downcast (not to Bool): infallible, returns target type
+                result = targetType;
+            } else if (subjType) {
+                // Try auto-mapping: unwrap Array/List layers to find a numeric element type
+                Type* elemType = subjType;
+                int depth = 0;
+                bool isList = false;
+                while (depth < 8) {
+                    if (auto* arrT = dynamic_cast<ArrayType*>(elemType)) {
+                        elemType = arrT->elemType_;
+                        ++depth;
+                    } else if (auto* lstT = dynamic_cast<ListType*>(elemType)) {
+                        elemType = lstT->elemType_;
+                        isList = true;
+                        ++depth;
+                    } else {
+                        break;
+                    }
+                }
+                if (depth > 0 && isNumeric(elemType) && isNumeric(targetType)
+                    && numericRank(elemType) > numericRank(targetType)
+                    && numericRank(elemType) <= 4 && numericRank(targetType) >= 1) {
+                    node->autoMapDepth = depth;
+                    node->autoMapIsList = isList;
+                    // Wrap target type in the same number of Array/List layers
+                    result = targetType;
+                    for (int i = 0; i < depth; ++i) {
+                        if (isList) {
+                            result = compiler_.listType(result);
+                        } else {
+                            result = compiler_.arrayType(result);
+                        }
+                    }
+                } else {
+                    error(node->loc, "as(Type) requires an Any value or a numeric downcast");
+                }
+            }
             break;
         }
 
