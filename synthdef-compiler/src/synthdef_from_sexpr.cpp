@@ -594,10 +594,20 @@ std::expected<S, std::string> SExprGraphBuilder::parseDelayFixRead(sexpr::ItemVe
     return expr;
 }
 
+static std::expected<Interpolation, std::string> interpFromString(std::string const& s) {
+    if (s == "none")     return interpNone;
+    if (s == "linear")   return interpLinear;
+    if (s == "cubic")    return interpCubic;
+    if (s == "lagrange") return interpLagrange;
+    if (s == "sinc")     return interpSinc;
+    return std::unexpected("Unknown interpolation type: " + s);
+}
+
 std::expected<S, std::string> SExprGraphBuilder::parseDelayVarRead(sexpr::ItemVec const& list) {
-    // Format: (id DelayVarRead delayVarId (input_ids))
+    // Format: (id DelayVarRead delayVarId interpType (input_ids))
+    // Legacy: (id DelayVarRead delayVarId (input_ids))
     if (list.size() < 4) {
-        return std::unexpected("DelayVarRead requires 4 elements");
+        return std::unexpected("DelayVarRead requires at least 4 elements");
     }
 
     if (!list[0].is<int64_t>()) return std::unexpected("ID must be integer");
@@ -607,12 +617,24 @@ std::expected<S, std::string> SExprGraphBuilder::parseDelayVarRead(sexpr::ItemVe
     int64_t delayId = list[2].get<int64_t>();
     DelayBuf* delayBuf = getOrCreateDelayBuf(delayId);
 
-    if (!list[3].is<sexpr::ItemVec>()) return std::unexpected("Inputs must be a list");
-    auto inputsResult = resolveInputs(list[3].get<sexpr::ItemVec>());
+    Interpolation interp = interpNone;
+    size_t inputsIdx = 3;
+
+    // If list[3] is a string, it's the interpolation type; inputs are at list[4]
+    if (list[3].is<std::string>()) {
+        auto interpResult = interpFromString(list[3].get<std::string>());
+        if (!interpResult) return std::unexpected(interpResult.error());
+        interp = *interpResult;
+        inputsIdx = 4;
+        if (list.size() < 5) return std::unexpected("DelayVarRead with interpolation requires 5 elements");
+    }
+
+    if (!list[inputsIdx].is<sexpr::ItemVec>()) return std::unexpected("Inputs must be a list");
+    auto inputsResult = resolveInputs(list[inputsIdx].get<sexpr::ItemVec>());
     if (!inputsResult) return std::unexpected(inputsResult.error());
     if (inputsResult->size() != 1) return std::unexpected("DelayVarRead requires exactly 1 input");
 
-    S expr = addExpr(new DelayVarRead(delayBuf, (*inputsResult)[0]));
+    S expr = addExpr(new DelayVarRead(delayBuf, (*inputsResult)[0], interp));
     exprMap[id] = expr;
     return expr;
 }

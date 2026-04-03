@@ -1139,6 +1139,35 @@ namespace synthdef {
     };
 
 
+    enum Interpolation : int {
+        interpNone,       // 1 point
+        interpLinear,     // 2 points
+        interpCubic,      // 4 points
+        interpLagrange,   // 8 points  7th order
+        interpSinc,       // 8 points  Hanning windowed sinc
+    };
+
+    // Extra samples read beyond the integer delay offset (on the "old" side)
+    inline int interpOverread(Interpolation interp) {
+        switch (interp) {
+            case interpNone:     return 0;
+            case interpLinear:   return 1;
+            case interpCubic:    return 2;
+            case interpLagrange: return 4;
+            case interpSinc:     return 4;
+        }
+    }
+
+    inline const char* interpToString(Interpolation interp) {
+        switch (interp) {
+            case interpNone:     return "none";
+            case interpLinear:   return "linear";
+            case interpCubic:    return "cubic";
+            case interpLagrange: return "lagrange";
+            case interpSinc:     return "sinc";
+        }
+    }
+
     struct DelayExpr : Expr {
         D delayBuf;
         
@@ -1189,17 +1218,18 @@ namespace synthdef {
     };
 
     struct DelayVarRead : DelayExpr {
+        Interpolation interp;
 
-        DelayVarRead(DelayBuf* delayBuf, S delay_samples)
-            : DelayExpr(delayBuf, audioSignalRate, {delay_samples}) {}
-    
+        DelayVarRead(DelayBuf* delayBuf, S delay_samples, Interpolation interp = interpNone)
+            : DelayExpr(delayBuf, audioSignalRate, {delay_samples}), interp(interp) {}
+
         string typeName() const override { return "DelayVarRead"; }
         string str() const override { return "delay_var_read"; }
-        
+
         u64 hash() const override;
         bool equals_(Expr const& that) const override {
             auto& c = static_cast<DelayVarRead const&>(that);
-            return delayBuf == c.delayBuf;
+            return delayBuf == c.delayBuf && interp == c.interp;
         }
         NumType initial_type() const override { return NumType::any; }
         void update_type(ExprIdentitySet& worklist) override;
@@ -1288,6 +1318,7 @@ namespace synthdef {
         S writer;
         S maxDelay;
         usize allocSize = 0;
+        int maxOverread = 0; // max interpolation overread across all varReaders
         u64 serial;
 
         DelayBuf();

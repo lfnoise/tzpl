@@ -299,8 +299,8 @@ namespace synthdef {
     S D::read(usize delaySamples) const {
         return addExpr(new DelayFixRead{delayBuf, delaySamples});
     }
-    S D::vread(S delaySamples) const {
-        return addExpr(new DelayVarRead{delayBuf, delaySamples});
+    S D::vread(S delaySamples, Interpolation interp) const {
+        return addExpr(new DelayVarRead{delayBuf, delaySamples, interp});
     }
     S D::operator()(usize delaySamples) const {
         return read(delaySamples);
@@ -308,8 +308,8 @@ namespace synthdef {
     S D::operator[](usize delaySamples) const {
         return read(delaySamples);
     }
-    S D::v(S delaySamples) const {
-        return vread(delaySamples);
+    S D::v(S delaySamples, Interpolation interp) const {
+        return vread(delaySamples, interp);
     }
     D::operator S() {
         return read(0);

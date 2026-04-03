@@ -101,7 +101,7 @@ namespace synthdef {
     }
 
     u64 DelayVarRead::hash() const {
-        return hash_combine(Expr::hash(), delayBuf.hash(), 0xAAF87D428903FE61);
+        return hash_combine(Expr::hash(), delayBuf.hash(), (u64)interp, 0xAAF87D428903FE61);
     }
 
     u64 DelayWrite::hash() const {

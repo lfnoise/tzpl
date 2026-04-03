@@ -179,6 +179,12 @@ namespace synthdef {
         for (D delay : delayBufs) {
             S maxDelay = delay->maxDelay;
 
+            // Compute max interpolation overread across all variable readers
+            for (S reader : delay->varReaders) {
+                auto* dvr = reader.as<DelayVarRead>();
+                delay->maxOverread = std::max(delay->maxOverread, interpOverread(dvr->interp));
+            }
+
             if (maxDelay.isNull()) {
                 usize maxFixedDelay = 0;
                 for (S u : delay->initters) {
@@ -195,15 +201,13 @@ namespace synthdef {
             if (maxDelay.isNull()) {
                 throw std::runtime_error("Delay line has no specified bound.");
             }
-            
+
+            usize headroom = std::max(4, delay->maxOverread);
+
             auto sc = maxDelay.as<Constant>();
             if (sc && sc->is_scalar_constant()) {
                 f64 scval = sc->get_scalar().value();
-//                printf("max delay %f\n", scval);
-//                printf("max delay ceil %f\n", std::ceil(scval));
-//                printf("max delay u64 %qu\n", u64(std::ceil(scval)));
-                delay->allocSize = std::bit_ceil(u64(std::ceil(scval)));
-//                printf("allocSize %qu\n", std::bit_ceil(u64(std::ceil(scval))));
+                delay->allocSize = std::bit_ceil(u64(std::ceil(scval)) + headroom);
             } else {
                 delayAllocs.push_back(delay);
             }

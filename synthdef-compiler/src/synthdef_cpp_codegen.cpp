@@ -1134,14 +1134,120 @@ struct ExprCodegenVisitor : ExprVisitor {
         }
     }
     void visit(DelayVarRead* p) override {
+        // Scalar read expression: direct buffer access or scalar helper call.
+        auto genRead = [&](string const& buf, string const& wrpos,
+                           string const& mask, string const& off) -> string {
+            if (p->interp == interpNone) {
+                return FMT("{}[({} - u64({})) & {}]", buf, wrpos, off, mask);
+            }
+            static const char* funcNames[] = {
+                "tzpl_delay_none", "tzpl_delay_linear", "tzpl_delay_cubic",
+                "tzpl_delay_lagrange", "tzpl_delay_sinc"
+            };
+            return FMT("{}({}, {}, {}, {})", funcNames[p->interp], buf, wrpos, mask, off);
+        };
+
+        // SIMD interpolation: generates a lambda that gathers per-lane samples
+        // into SIMD vectors, then calls the arithmetic kernel.
+        // bufs/wrposs/masks are per-lane expression strings.
+        auto genSimdInterp = [&](int width, string const& type, string const& stype,
+                                  vector<string> const& bufs,
+                                  vector<string> const& wrposs,
+                                  vector<string> const& masks,
+                                  string const& offsetExpr,
+                                  bool scalarOff) -> string
+        {
+            // Tap offsets relative to floor(delay)
+            struct TI { int n; int off[8]; };
+            TI ti;
+            switch (p->interp) {
+                case interpLinear:   ti = {2, {0, -1}}; break;
+                case interpCubic:    ti = {4, {1, 0, -1, -2}}; break;
+                case interpLagrange: ti = {8, {3, 2, 1, 0, -1, -2, -3, -4}}; break;
+                case interpSinc:     ti = {8, {3, 2, 1, 0, -1, -2, -3, -4}}; break;
+                default:             ti = {1, {0}}; break;
+            }
+
+            string r;
+            r += FMT("[&]() -> {} {{ ", type);
+
+            // Cache offset, compute per-lane integer delays
+            if (scalarOff) {
+                r += FMT("auto _off = {}; u64 _di = u64(_off); ", offsetExpr);
+            } else {
+                r += FMT("auto _off = {}; ", offsetExpr);
+                for (int j = 0; j < width; j++)
+                    r += FMT("u64 _di{} = u64(_off[{}]); ", j, j);
+            }
+
+            // Gather per-lane into SIMD sample vectors
+            for (int t = 0; t < ti.n; t++) {
+                r += FMT("{} _s{} = {}{{", type, t, type);
+                for (int j = 0; j < width; j++) {
+                    if (j > 0) r += ", ";
+                    string di = scalarOff ? "_di" : FMT("_di{}", j);
+                    int toff = ti.off[t];
+                    string idx;
+                    if (toff > 0) idx = FMT("({} - {} + {}) & {}", wrposs[j], di, toff, masks[j]);
+                    else if (toff < 0) idx = FMT("({} - {} - {}) & {}", wrposs[j], di, -toff, masks[j]);
+                    else idx = FMT("({} - {}) & {}", wrposs[j], di, masks[j]);
+                    r += FMT("{}[{}]", bufs[j], idx);
+                }
+                r += "}; ";
+            }
+
+            // Compute frac vector
+            if (scalarOff) {
+                r += FMT("{0} _frac = ({0})({1}(_off - {1}(_di))); ", type, stype);
+            } else {
+                r += FMT("{} _frac = _off - trunc(_off); ", type);
+            }
+
+            // Sinc: per-lane coefficient lookup from table
+            if (p->interp == interpSinc) {
+                if (scalarOff) {
+                    r += FMT("auto _sc = tzpl_sinc_coeffs(double({0}(_off - {0}(_di)))); ", stype);
+                    for (int k = 0; k < 8; k++)
+                        r += FMT("{0} _c{1} = ({0})({2}(_sc.c[{1}])); ", type, k, stype);
+                } else {
+                    for (int j = 0; j < width; j++)
+                        r += FMT("auto _sc{0} = tzpl_sinc_coeffs(double({1}(_off[{0}]) - {1}(_di{0}))); ", j, stype);
+                    for (int k = 0; k < 8; k++) {
+                        r += FMT("{} _c{} = {}{{", type, k, type);
+                        for (int j = 0; j < width; j++) {
+                            if (j > 0) r += ", ";
+                            r += FMT("{}(_sc{}.c[{}])", stype, j, k);
+                        }
+                        r += "}; ";
+                    }
+                }
+                r += "return tzpl_interp_sinc(_s0, _s1, _s2, _s3, _s4, _s5, _s6, _s7, "
+                     "_c0, _c1, _c2, _c3, _c4, _c5, _c6, _c7); ";
+            } else {
+                static const char* kernels[] = {
+                    nullptr, "tzpl_interp_linear", "tzpl_interp_cubic",
+                    "tzpl_interp_lagrange", nullptr
+                };
+                r += FMT("return {}(", kernels[p->interp]);
+                for (int t = 0; t < ti.n; t++) {
+                    if (t > 0) r += ", ";
+                    r += FMT("_s{}", t);
+                }
+                r += ", _frac); ";
+            }
+
+            r += "}()";
+            return r;
+        };
+
+        bool useSimdInterp = p->interp != interpNone && g.inSimdMode;
+
         if (g.inFlatVoiceMode && g.isVoicerSubgraph(p->delayBuf->graph)) {
             if (g.inSimdMode) {
-                // SIMD + flat voice mode: gather with per-voice wrpos
                 int ser = p->delayBuf->serial;
                 int dchans = p->delayBuf->chans;
                 int width = g.currentSimdWidth;
 
-                // Determine if offset is globally scalar (not voice-dependent)
                 bool globalScalar = p->in0()->is_scalar() &&
                     !g.isVoicerSubgraph(p->in0()->graph);
 
@@ -1152,31 +1258,50 @@ struct ExprCodegenVisitor : ExprVisitor {
                     offsetExpr = g.genExpr(p->in0(), vx(0));
                     g.inSimdMode = prevSimd;
                 } else {
-                    // Compute as SIMD vector, then extract per lane
                     offsetExpr = g.genExpr(p->in0(), cel);
                 }
 
-                s += simdTypeName(p->type, width) + "{";
-                for (int j = 0; j < width; ++j) {
-                    if (j > 0) s += ", ";
-                    string vi = flatSimdVoiceIdx(cel, j, g.flatChanShift);
-                    string bi = flatSimdBufIdx(cel, j, g.flatChanShift, dchans);
-                    string mask = p->delayBuf->allocSize > 1
-                        ? std::to_string(p->delayBuf->allocSize - 1)
-                        : FMT("p->voice_d{}_mask[{}]", ser, vi);
-                    string off = globalScalar ? offsetExpr : FMT("({})[{}]", offsetExpr, j);
-                    s += FMT("p->voice_d{}[{}][(p->voice_d{}_wrpos[{}] - u64({})) & {}]",
-                        ser, bi, ser, vi, off, mask);
+                if (useSimdInterp) {
+                    // Build per-lane expression arrays
+                    vector<string> bufs, wrposs, masks;
+                    for (int j = 0; j < width; ++j) {
+                        string vi = flatSimdVoiceIdx(cel, j, g.flatChanShift);
+                        string bi = flatSimdBufIdx(cel, j, g.flatChanShift, dchans);
+                        bufs.push_back(FMT("p->voice_d{}[{}]", ser, bi));
+                        wrposs.push_back(FMT("p->voice_d{}_wrpos[{}]", ser, vi));
+                        masks.push_back(p->delayBuf->allocSize > 1
+                            ? std::to_string(p->delayBuf->allocSize - 1)
+                            : FMT("p->voice_d{}_mask[{}]", ser, vi));
+                    }
+                    s += genSimdInterp(width, simdTypeName(p->type, width), p->type.str(),
+                                       bufs, wrposs, masks, offsetExpr, globalScalar);
+                } else {
+                    s += simdTypeName(p->type, width) + "{";
+                    for (int j = 0; j < width; ++j) {
+                        if (j > 0) s += ", ";
+                        string vi = flatSimdVoiceIdx(cel, j, g.flatChanShift);
+                        string bi = flatSimdBufIdx(cel, j, g.flatChanShift, dchans);
+                        string mask = p->delayBuf->allocSize > 1
+                            ? std::to_string(p->delayBuf->allocSize - 1)
+                            : FMT("p->voice_d{}_mask[{}]", ser, vi);
+                        string off = globalScalar ? offsetExpr : FMT("({})[{}]", offsetExpr, j);
+                        string buf = FMT("p->voice_d{}[{}]", ser, bi);
+                        string wrpos = FMT("p->voice_d{}_wrpos[{}]", ser, vi);
+                        s += genRead(buf, wrpos, mask, off);
+                    }
+                    s += "}";
                 }
-                s += "}";
             } else {
                 // Scalar flat voice mode
                 string vi = g.flatChanShift == 0 ? vxstr(cel)
                     : FMT("({} >> {})", vxstr(cel), g.flatChanShift);
                 string bi = p->delayBuf->chans > 1 ? vxstr(cel) : vi;
                 auto ser = p->delayBuf->serial;
-                s += FMT("p->voice_d{0}[{1}][(p->voice_d{0}_wrpos[{2}] - u64({3})) & p->voice_d{0}_mask[{2}]]",
-                    ser, bi, vi, g.genExpr(p->in0(), cel));
+                string buf = FMT("p->voice_d{}[{}]", ser, bi);
+                string wrpos = FMT("p->voice_d{}_wrpos[{}]", ser, vi);
+                string mask = FMT("p->voice_d{}_mask[{}]", ser, vi);
+                string off = g.genExpr(p->in0(), cel);
+                s += genRead(buf, wrpos, mask, off);
             }
         } else if (g.inSimdMode) {
             string dp = "p->";
@@ -1184,14 +1309,12 @@ struct ExprCodegenVisitor : ExprVisitor {
             int dchans = p->delayBuf->chans;
             int width = g.currentSimdWidth;
             int loopChans = g.current_loop->chans;
-            string mask = FMT("{}d{}_mask", dp, ser);
+            string maskStr = FMT("{}d{}_mask", dp, ser);
+            string wrposStr = FMT("{}d{}_wrpos", dp, ser);
 
-            // The offset expression: scalar offsets are used directly,
-            // vector offsets are evaluated once then per-lane elements extracted.
             bool scalarOffset = p->in0()->is_scalar();
             string offsetExpr;
             if (scalarOffset) {
-                // Get the scalar value (bypass SIMD splat)
                 bool prevSimd = g.inSimdMode;
                 g.inSimdMode = false;
                 offsetExpr = g.genExpr(p->in0(), vx(0));
@@ -1201,34 +1324,47 @@ struct ExprCodegenVisitor : ExprVisitor {
             }
 
             if (scalarOffset && dchans == 1) {
-                // All lanes read same value: splat the single ring read
-                s += simdSplat(p->type, width,
-                    FMT("{}d{}[({}d{}_wrpos - u64({})) & {}]",
-                        dp, ser, dp, ser, offsetExpr, mask));
+                // All lanes read same value: splat the single scalar read
+                string buf = FMT("{}d{}", dp, ser);
+                s += simdSplat(p->type, width, genRead(buf, wrposStr, maskStr, offsetExpr));
+            } else if (useSimdInterp) {
+                // Build per-lane expression arrays
+                vector<string> bufs, wrposs, masks;
+                for (int j = 0; j < width; ++j) {
+                    string ci;
+                    if (dchans == 1) ci = "";
+                    else ci = "[" + simdLaneChanIdx(cel, j, dchans, loopChans) + "]";
+                    bufs.push_back(FMT("{}d{}{}", dp, ser, ci));
+                    wrposs.push_back(wrposStr);
+                    masks.push_back(maskStr);
+                }
+                s += genSimdInterp(width, simdTypeName(p->type, width), p->type.str(),
+                                   bufs, wrposs, masks, offsetExpr, scalarOffset);
             } else {
                 s += simdTypeName(p->type, width) + "{";
                 for (int j = 0; j < width; ++j) {
                     if (j > 0) s += ", ";
                     string ci;
-                    if (dchans == 1) {
-                        ci = "";
-                    } else {
-                        ci = "[" + simdLaneChanIdx(cel, j, dchans, loopChans) + "]";
-                    }
+                    if (dchans == 1) ci = "";
+                    else ci = "[" + simdLaneChanIdx(cel, j, dchans, loopChans) + "]";
                     string off = scalarOffset ? offsetExpr : FMT("({})[{}]", offsetExpr, j);
-                    s += FMT("{}d{}{}[({}d{}_wrpos - u64({})) & {}]",
-                        dp, ser, ci, dp, ser, off, mask);
+                    string buf = FMT("{}d{}{}", dp, ser, ci);
+                    s += genRead(buf, wrposStr, maskStr, off);
                 }
                 s += "}";
             }
         } else {
+            // Scalar mode
             string dp = g.inVoiceLoop ? "vs." : "p->";
             string dindex;
             if (p->delayBuf->chans > 1) {
                 dindex = genIndexWrap(p->chans, g.current_loop->chans, cel);
             }
-            s += FMT("{0}d{1}{2}[({0}d{1}_wrpos - u64({3})) & {0}d{1}_mask]",
-                dp, p->delayBuf->serial, dindex, g.genExpr(p->in0(), cel));
+            string buf = FMT("{}d{}{}", dp, p->delayBuf->serial, dindex);
+            string wrpos = FMT("{}d{}_wrpos", dp, p->delayBuf->serial);
+            string mask = FMT("{}d{}_mask", dp, p->delayBuf->serial);
+            string off = g.genExpr(p->in0(), cel);
+            s += genRead(buf, wrpos, mask, off);
         }
     }
     void visit(DelayWrite* p) override { fixme(p); }
@@ -1991,8 +2127,9 @@ string CppCodeGen::genDelayAlloc() {
                 s += FMT("\tp->d{0}_mask = {1};\n", delay->serial, delay->allocSize-1);
             }
         } else if (delay->maxDelay.notNull()) {
-            s += FMT("\tu64 d{}_size = nextPowerOfTwo(4+u64(ceil({})));\n",
-                    delay->serial, genExpr(delay->maxDelay->in0(), vx(0)));
+            int headroom = std::max(4, delay->maxOverread);
+            s += FMT("\tu64 d{}_size = nextPowerOfTwo({}+u64(ceil({})));\n",
+                    delay->serial, headroom, genExpr(delay->maxDelay->in0(), vx(0)));
             s += FMT("\tp->d{0}_mask = d{0}_size - 1;\n", delay->serial);
             if (delay->chans == 1) {
                 s += FMT("\tp->d{0} = ({2}*)calloc(d{0}_size, sizeof({2}));\n",
@@ -2024,9 +2161,10 @@ string CppCodeGen::genDelayAlloc() {
                         mv, delay->serial, delay->allocSize-1);
                 }
             } else if (delay->maxDelay.notNull()) {
+                int headroom = std::max(4, delay->maxOverread);
                 s += FMT("\t{{\n");
-                s += FMT("\t\tu64 d{}_size = nextPowerOfTwo(4+u64(ceil({})));\n",
-                        delay->serial, genExpr(delay->maxDelay->in0(), vx(0)));
+                s += FMT("\t\tu64 d{}_size = nextPowerOfTwo({}+u64(ceil({})));\n",
+                        delay->serial, headroom, genExpr(delay->maxDelay->in0(), vx(0)));
                 s += FMT("\t\tfor (int v = 0; v < {}; ++v) {{\n", mv);
                 s += FMT("\t\t\tp->voice_d{0}_mask[v] = d{0}_size - 1;\n", delay->serial);
                 if (delay->chans == 1) {
@@ -2060,8 +2198,9 @@ string CppCodeGen::genDelayAlloc() {
                     s += FMT("\t\tvs.d{0}_mask = {1};\n", delay->serial, delay->allocSize-1);
                 }
             } else if (delay->maxDelay.notNull()) {
-                s += FMT("\t\tu64 d{}_size = nextPowerOfTwo(4+u64(ceil({})));\n",
-                        delay->serial, genExpr(delay->maxDelay->in0(), vx(0)));
+                int headroom = std::max(4, delay->maxOverread);
+                s += FMT("\t\tu64 d{}_size = nextPowerOfTwo({}+u64(ceil({})));\n",
+                        delay->serial, headroom, genExpr(delay->maxDelay->in0(), vx(0)));
                 s += FMT("\t\tvs.d{0}_mask = d{0}_size - 1;\n", delay->serial);
                 if (delay->chans == 1) {
                     s += FMT("\t\tvs.d{0} = ({2}*)calloc(d{0}_size, sizeof({2}));\n",
@@ -2876,6 +3015,7 @@ string CppCodeGen::genClass()
     s += "#include \"tzpl_plugin_abi.h\"\n";
     s += "#include \"tzpl_matrix_transform.hpp\"\n";
     s += "#include \"tzpl_random.hpp\"\n";
+    s += "#include \"tzpl_delay_interp.hpp\"\n";
 
     // Include FFT wrapper if any spectral chain nodes exist
     for (S expr : synth->sorted) {

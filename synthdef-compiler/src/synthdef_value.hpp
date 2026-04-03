@@ -29,6 +29,7 @@
 namespace synthdef {
 
     struct Expr;
+    enum Interpolation : int;
 
     // S represents a signal value and contains a pointer to the Expr that calculates the value. 
     // Since it is the most common type, a one character name is used.
@@ -283,10 +284,10 @@ public:
         S operator=(S in);
         
         S read(usize delaySamples) const;
-        S vread(S delaySamples) const;
+        S vread(S delaySamples, Interpolation interp = Interpolation(0)) const;
         S operator()(usize delaySamples) const;
         S operator[](usize delaySamples) const;
-        S v(S delaySamples) const;
+        S v(S delaySamples, Interpolation interp = Interpolation(0)) const;
         S setMaxDelay(S maxDelay);
         
         operator S();

@@ -345,6 +345,14 @@ enum Interpolation {
 	sinc,       -- 8 points
 }
 
+fn toLispString(i Interpolation) String = match(i) {
+	none:     "none";
+	linear:   "linear";
+	cubic:    "cubic";
+	lagrange: "lagrange";
+	sinc:     "sinc";
+}
+
 enum DelayOp {
 	maxDelayTime,
 	init Int,
@@ -950,7 +958,7 @@ fn toLisp(o S) String {
             maxDelayTime : "(%^ MaxDelay %^ %^)" fmt(o.id, delayVar.id, o inputsToLisp);
             init(offset) : "(%^ DelayInit %^ %^ %^)" fmt(o.id, delayVar.id, offset, o inputsToLisp);
             read(offset) : "(%^ DelayFixRead %^ %^)" fmt(o.id, delayVar.id, offset);
-            vread(interpolation) : "(%^ DelayVarRead %^ %^)" fmt(o.id, delayVar.id, o inputsToLisp);
+            vread(interpolation) : "(%^ DelayVarRead %^ %^ %^)" fmt(o.id, delayVar.id, interpolation toLispString, o inputsToLisp);
             write :  "(%^ DelayWrite %^ %^)" fmt(o.id, delayVar.id, o inputsToLisp);
         }
 
