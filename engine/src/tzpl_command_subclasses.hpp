@@ -26,6 +26,7 @@
 
 #include "tzpl_silo.hpp"
 #include "tzpl_xfader.hpp"
+#include "tzpl_audio_file.hpp"
 
 namespace engine {
 
@@ -383,6 +384,93 @@ struct ChannelOffsetCmd : Command
 
     void doRT(Silo* s) override {
         s->channelOffset_ = offset_;
+    }
+};
+
+// ---------------------------------------------------------------------------
+// Buffer commands
+// ---------------------------------------------------------------------------
+
+struct ResizeBufferCmd : Command {
+    i64 nodeID_;
+    i64 bufID_;
+    tzpl_Buffer* newBuf_;
+    tzpl_Buffer* oldBuf_ = nullptr;
+
+    ResizeBufferCmd(i64 nodeID, i64 bufID, int numChannels, i64 length)
+        : nodeID_(nodeID), bufID_(bufID)
+    {
+        newBuf_ = tzpl_createBuffer(numChannels, length);
+    }
+
+    void doRT(Silo* s) override {
+        Node* node = s->rt_getNode(nodeID_);
+        if (!node || !node->funs.swapBuffer) {
+            err_ = tzpl_errNodeNotFound;
+            return;
+        }
+        oldBuf_ = node->funs.swapBuffer(node->synth, bufID_, newBuf_);
+    }
+
+    bool doNRT(Silo* s) override {
+        tzpl_freeBuffer(oldBuf_);
+        return true;
+    }
+};
+
+struct ReplaceBufferCmd : Command {
+    i64 nodeID_;
+    i64 bufID_;
+    tzpl_Buffer* newBuf_;
+    tzpl_Buffer* oldBuf_ = nullptr;
+
+    ReplaceBufferCmd(i64 nodeID, i64 bufID, tzpl_Buffer* buffer)
+        : nodeID_(nodeID), bufID_(bufID), newBuf_(buffer) {}
+
+    void doRT(Silo* s) override {
+        Node* node = s->rt_getNode(nodeID_);
+        if (!node || !node->funs.swapBuffer) {
+            err_ = tzpl_errNodeNotFound;
+            return;
+        }
+        oldBuf_ = node->funs.swapBuffer(node->synth, bufID_, newBuf_);
+    }
+
+    bool doNRT(Silo* s) override {
+        tzpl_freeBuffer(oldBuf_);
+        return true;
+    }
+};
+
+struct LoadBufferCmd : Command {
+    i64 nodeID_;
+    i64 bufID_;
+    tzpl_Buffer* newBuf_;
+    tzpl_Buffer* oldBuf_ = nullptr;
+
+    LoadBufferCmd(i64 nodeID, i64 bufID, const char* path,
+                  int channelOffset, i64 frameOffset, i64 numFrames)
+        : nodeID_(nodeID), bufID_(bufID)
+    {
+        newBuf_ = tzpl_loadAudioFile(path, channelOffset, frameOffset, numFrames);
+    }
+
+    void doRT(Silo* s) override {
+        if (!newBuf_) {
+            err_ = tzpl_errInternal;
+            return;
+        }
+        Node* node = s->rt_getNode(nodeID_);
+        if (!node || !node->funs.swapBuffer) {
+            err_ = tzpl_errNodeNotFound;
+            return;
+        }
+        oldBuf_ = node->funs.swapBuffer(node->synth, bufID_, newBuf_);
+    }
+
+    bool doNRT(Silo* s) override {
+        tzpl_freeBuffer(oldBuf_);
+        return true;
     }
 };
 

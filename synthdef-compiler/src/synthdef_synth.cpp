@@ -114,6 +114,14 @@ namespace synthdef {
                 throw std::runtime_error("Delay buffer already has a writer");
             }
             u->delayBuf->writer = u;
+        } else if (auto u = expr.as<BufFixRead>(); u) {
+            u->sampleBuf->fixReaders.push_back(u);
+        } else if (auto u = expr.as<BufVarRead>(); u) {
+            u->sampleBuf->varReaders.push_back(u);
+        } else if (auto u = expr.as<BufWrite>(); u) {
+            u->sampleBuf->writers.push_back(u);
+        } else if (auto u = expr.as<BufLength>(); u) {
+            u->sampleBuf->lengthReaders.push_back(u);
         }
         if (expr->usesRandomNumberGenerator()) {
             gGraph->usesRandomNumberGenerator = true;

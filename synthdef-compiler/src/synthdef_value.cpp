@@ -359,6 +359,36 @@ namespace synthdef {
 
     u64 D::hash() const { return hash64(u64(delayBuf)); }
 
+    // -- B (SampleBuf handle) --
+
+    B::B() : sampleBuf(new SampleBuf()) {
+        sampleBuf->graph = gGraph;
+        gGraph->sampleBufs.insert(*this);
+        gSynth->sampleBufs.insert(*this);
+    }
+
+    B::B(SampleBuf* sampleBuf) : sampleBuf(sampleBuf) {}
+
+    B::B(B const& other) : sampleBuf(other.sampleBuf) {}
+
+    S B::read(i64 index, i64 readChans, i64 startChan) const {
+        return addExpr(new BufFixRead{sampleBuf, index, readChans, startChan});
+    }
+
+    S B::vread(S index, Interpolation interp, i64 readChans, i64 startChan) const {
+        return addExpr(new BufVarRead{sampleBuf, index, interp, readChans, startChan});
+    }
+
+    S B::write(S value, S index, i64 writeChans, i64 startChan) {
+        return addExpr(new BufWrite{sampleBuf, value, index, writeChans, startChan});
+    }
+
+    S B::length() const {
+        return addExpr(new BufLength{sampleBuf});
+    }
+
+    u64 B::hash() const { return hash64(u64(sampleBuf)); }
+
 //    Expr* hash_cons(Expr* expr) {
 //        auto it = gGraph->hashConsSet.find(expr);
 //        if (it != gGraph->hashConsSet.end()) {

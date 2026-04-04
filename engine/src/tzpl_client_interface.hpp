@@ -52,7 +52,7 @@ enum FadeCurve {
 
 struct Engine;
 struct NodeDef;
-struct Buffer;
+// struct Buffer removed -- use tzpl_Buffer from plugin ABI
 
 using LoadNodeDefFun = void (*)(Engine* e);
 
@@ -162,12 +162,10 @@ tzpl_SErr noteSetParams(i64 nodeID, int noteID, int n, tzpl_ParamPair* params);
 tzpl_SErr noteSetParamRange(i64 nodeID, int noteID, int first, int length, f32* values);
 
 // buffers
-Buffer* newBuffer(i64 bufID, int numChannels, i64 length);
-Buffer* newBuffer(i64 bufID, const char* path);
-tzpl_SErr freeBuffer(i64 bufID);
-tzpl_SErr resizeBuffer(i64 bufID, int numChannels, i64 length);
-tzpl_SErr loadBuffer(i64 bufID, const char* path, int channelOffset = 0, i64 frameOffset = 0, i64 numFrames = INT64_MAX);
-tzpl_SErr zeroBuffer(i64 bufID, int channelOffset = 0, i64 frameOffset = 0, i64 numFrames = INT64_MAX);
+tzpl_SErr resizeBuffer(i64 nodeID, i64 bufID, int numChannels, i64 length);
+tzpl_SErr loadBuffer(i64 nodeID, i64 bufID, const char* path,
+                     int channelOffset = 0, i64 frameOffset = 0, i64 numFrames = INT64_MAX);
+tzpl_SErr replaceBuffer(i64 nodeID, i64 bufID, tzpl_Buffer* buffer);
 
 inline bool isFloat(tzpl_ElemType e) {
     switch (e) {

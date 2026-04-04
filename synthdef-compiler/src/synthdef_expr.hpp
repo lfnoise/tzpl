@@ -1333,6 +1333,127 @@ namespace synthdef {
         return delayBuf.hash();
     }
 
+    ///////////////////////////////
+    // Sample Buffers
+    ///////////////////////////////
+
+    struct SampleBuf : ArenaObj {
+        struct Graph* graph;
+        vector<S> fixReaders;
+        vector<S> varReaders;
+        vector<S> writers;
+        vector<S> lengthReaders;
+        int maxOverread = 0;
+        u64 serial;
+
+        SampleBuf();
+    };
+
+    inline std::size_t SampleBufHasher::operator()(B buf) const {
+        return buf.hash();
+    }
+
+    struct BufExpr : Expr {
+        B sampleBuf;
+
+        BufExpr(SampleBuf* sb, SignalRate rate, vector<S> inputs)
+            : Expr(rate, std::move(inputs)), sampleBuf(sb) {}
+    };
+
+    struct BufFixRead : BufExpr {
+        i64 index;
+        i64 readChans;
+        i64 startChan;
+
+        BufFixRead(SampleBuf* sb, i64 index, i64 readChans, i64 startChan)
+            : BufExpr(sb, audioSignalRate, {}), index(index),
+              readChans(readChans), startChan(startChan) {}
+
+        string typeName() const override { return "BufFixRead"; }
+        string str() const override { return "buf_fix_read(" + std::to_string(index) + ")"; }
+
+        u64 hash() const override;
+        bool equals_(Expr const& that) const override {
+            auto& c = static_cast<BufFixRead const&>(that);
+            return sampleBuf == c.sampleBuf && index == c.index
+                && readChans == c.readChans && startChan == c.startChan;
+        }
+        NumType initial_type() const override { return NumType::f64; }
+        void update_type(ExprIdentitySet& worklist) override {}
+        void calcShape() override { chans = readChans; }
+
+        void accept(ExprVisitor& visitor) override;
+    };
+
+    struct BufVarRead : BufExpr {
+        Interpolation interp;
+        i64 readChans;
+        i64 startChan;
+
+        BufVarRead(SampleBuf* sb, S index, Interpolation interp, i64 readChans, i64 startChan)
+            : BufExpr(sb, audioSignalRate, {index}), interp(interp),
+              readChans(readChans), startChan(startChan) {}
+
+        string typeName() const override { return "BufVarRead"; }
+        string str() const override { return "buf_var_read"; }
+
+        u64 hash() const override;
+        bool equals_(Expr const& that) const override {
+            auto& c = static_cast<BufVarRead const&>(that);
+            return sampleBuf == c.sampleBuf && interp == c.interp
+                && readChans == c.readChans && startChan == c.startChan;
+        }
+        NumType initial_type() const override { return NumType::f64; }
+        void update_type(ExprIdentitySet& worklist) override {}
+        void calcShape() override { chans = readChans; }
+
+        void accept(ExprVisitor& visitor) override;
+    };
+
+    struct BufWrite : BufExpr {
+        i64 writeChans;
+        i64 startChan;
+
+        BufWrite(SampleBuf* sb, S value, S index, i64 writeChans, i64 startChan)
+            : BufExpr(sb, audioSignalRate, {value, index}),
+              writeChans(writeChans), startChan(startChan) {}
+
+        string typeName() const override { return "BufWrite"; }
+        string str() const override { return "buf_write"; }
+
+        u64 hash() const override;
+        bool equals_(Expr const& that) const override {
+            auto& c = static_cast<BufWrite const&>(that);
+            return sampleBuf == c.sampleBuf
+                && writeChans == c.writeChans && startChan == c.startChan;
+        }
+        NumType initial_type() const override { return NumType::f64; }
+        void update_type(ExprIdentitySet& worklist) override {}
+        void calcShape() override { chans = in0()->chans; }
+        bool is_sink() const override { return true; }
+
+        void accept(ExprVisitor& visitor) override;
+    };
+
+    struct BufLength : BufExpr {
+        BufLength(SampleBuf* sb)
+            : BufExpr(sb, audioSignalRate, {}) {}
+
+        string typeName() const override { return "BufLength"; }
+        string str() const override { return "buf_length"; }
+
+        u64 hash() const override;
+        bool equals_(Expr const& that) const override {
+            auto& c = static_cast<BufLength const&>(that);
+            return sampleBuf == c.sampleBuf;
+        }
+        NumType initial_type() const override { return NumType::f64; }
+        void update_type(ExprIdentitySet& worklist) override {}
+        void calcShape() override { chans = 1; }
+
+        void accept(ExprVisitor& visitor) override;
+    };
+
     inline bool is_sink(GraphCut cut) {
         return cut == GraphCut::Sink;
     }

@@ -88,8 +88,9 @@ namespace synthdef {
         vector<Graph*> subgraphs;
         vector<GenLoop*> loops;
         unordered_set<D, DelayHasher> delayBufs;
+        unordered_set<B, SampleBufHasher> sampleBufs;
 
-        Graph(Synth *synth, Graph* parent = nullptr); 
+        Graph(Synth *synth, Graph* parent = nullptr);
    };
     
     S addConstantExpr(S expr);
@@ -120,8 +121,10 @@ namespace synthdef {
         vector<S> noteParams;
         unordered_set<D, DelayHasher> delayBufs;
         vector<D> delayAllocs;
+        unordered_set<B, SampleBufHasher> sampleBufs;
         u64 exprSerialNos = 0;
         u64 delayBufSerialNos = 0;
+        u64 sampleBufSerialNos = 0;
         u64 randSerialNos = 0;
         u64 controlSerialNos = 0;
         u64 noteParamSerialNos = 1; // gate is 0
@@ -166,6 +169,9 @@ namespace synthdef {
     }
     inline u64 nextDelaySerialNo() {
         return gSynth->delayBufSerialNos++;
+    }
+    inline u64 nextSampleBufSerialNo() {
+        return gSynth->sampleBufSerialNos++;
     }
     inline u64 nextRandSerialNo() {
         return gSynth->randSerialNos++;

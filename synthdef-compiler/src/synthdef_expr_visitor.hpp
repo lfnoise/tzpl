@@ -74,6 +74,10 @@ struct ExprVisitor {
     virtual void visit(DelayVarRead* e) = 0;
     virtual void visit(DelayWrite* e) = 0;
     virtual void visit(DelayInit* e) = 0;
+    virtual void visit(BufFixRead* e) = 0;
+    virtual void visit(BufVarRead* e) = 0;
+    virtual void visit(BufWrite* e) = 0;
+    virtual void visit(BufLength* e) = 0;
 };
 
 } // namespace synthdef

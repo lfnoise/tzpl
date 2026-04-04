@@ -210,4 +210,64 @@ inline T tzpl_delay_sinc(T const* buf, uint64_t wrpos, uint64_t mask, T delay) {
                             T(sc.c[4]), T(sc.c[5]), T(sc.c[6]), T(sc.c[7]));
 }
 
+// ===========================================================================
+// Sample buffer read functions -- gather from flat buffer + kernel.
+// Like tzpl_delay_*, but index goes forward: (di + offset) & mask.
+// No wrpos -- buffers are not ring buffers.
+// ===========================================================================
+
+template<typename T>
+inline T tzpl_buf_none(T const* buf, uint64_t mask, T index) {
+    return buf[uint64_t(index) & mask];
+}
+
+template<typename T>
+inline T tzpl_buf_linear(T const* buf, uint64_t mask, T index) {
+    uint64_t di = uint64_t(index);
+    T s0 = buf[di & mask];
+    T s1 = buf[(di + 1) & mask];
+    return tzpl_interp_linear(s0, s1, index - T(di));
+}
+
+template<typename T>
+inline T tzpl_buf_cubic(T const* buf, uint64_t mask, T index) {
+    uint64_t di = uint64_t(index);
+    T ym1 = buf[(di - 1) & mask];
+    T y0  = buf[di & mask];
+    T y1  = buf[(di + 1) & mask];
+    T y2  = buf[(di + 2) & mask];
+    return tzpl_interp_cubic(ym1, y0, y1, y2, index - T(di));
+}
+
+template<typename T>
+inline T tzpl_buf_lagrange(T const* buf, uint64_t mask, T index) {
+    uint64_t di = uint64_t(index);
+    T s0 = buf[(di - 3) & mask];
+    T s1 = buf[(di - 2) & mask];
+    T s2 = buf[(di - 1) & mask];
+    T s3 = buf[di & mask];
+    T s4 = buf[(di + 1) & mask];
+    T s5 = buf[(di + 2) & mask];
+    T s6 = buf[(di + 3) & mask];
+    T s7 = buf[(di + 4) & mask];
+    return tzpl_interp_lagrange(s0, s1, s2, s3, s4, s5, s6, s7, index - T(di));
+}
+
+template<typename T>
+inline T tzpl_buf_sinc(T const* buf, uint64_t mask, T index) {
+    uint64_t di = uint64_t(index);
+    T s0 = buf[(di - 3) & mask];
+    T s1 = buf[(di - 2) & mask];
+    T s2 = buf[(di - 1) & mask];
+    T s3 = buf[di & mask];
+    T s4 = buf[(di + 1) & mask];
+    T s5 = buf[(di + 2) & mask];
+    T s6 = buf[(di + 3) & mask];
+    T s7 = buf[(di + 4) & mask];
+    auto sc = tzpl_sinc_coeffs(double(index - T(di)));
+    return tzpl_interp_sinc(s0, s1, s2, s3, s4, s5, s6, s7,
+                            T(sc.c[0]), T(sc.c[1]), T(sc.c[2]), T(sc.c[3]),
+                            T(sc.c[4]), T(sc.c[5]), T(sc.c[6]), T(sc.c[7]));
+}
+
 #endif // tzpl_delay_interp_hpp

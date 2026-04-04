@@ -144,6 +144,7 @@ type S = SignalExpr;
 struct SignalGraph {
     exprs [SignalExpr],
 	delays [DelayVar],
+	buffers [BufferVar],
 	root SignalExpr,
 }
 
@@ -170,6 +171,17 @@ fn _addToGraph(expr S) S {
 fn _addToGraph(dv DelayVar) DelayVar {
 	`curGraphDelays = `curGraphDelays push(dv);
 	dv
+}
+
+fn _nextBufferVarId() ID {
+	let out = `bufferVarIds;
+	`bufferVarIds = `bufferVarIds + 1;
+	out
+}
+
+fn _addToGraph(bv BufferVar) BufferVar {
+	`curGraphBuffers = `curGraphBuffers push(bv);
+	bv
 }
 
 fn _newSignalExpr(kind SignalExprKind, ins [S]) S {
@@ -380,6 +392,16 @@ struct DelayVar {
 	maxDelay Option<S>,
 }
 
+struct BufferVar {
+	id ID,
+}
+
+enum BufferOp {
+	fixRead(Int, Int, Int),         -- index, readChans, startChan
+	vread(Interpolation, Int, Int), -- interp, readChans, startChan
+	write(Int, Int),                -- writeChans, startChan
+	length,
+}
 
 enum SignalExprKind {
 	sampleRate,
@@ -402,6 +424,7 @@ enum SignalExprKind {
 	noteParam(ControlSpec, Chans, String),
 
 	delay(DelayVar, DelayOp),
+	buffer(BufferVar, BufferOp),
 
 	if_(SignalGraph, SignalGraph),
 	for_(Int, SignalGraph),
@@ -705,6 +728,30 @@ fn <- (d DelayVar, s AsSignal) S = d write(s asSignal);
 fn -> (s AsSignal, d DelayVar) S = s asSignal write(d);
 
 ---------------------------------------------------------------------------
+--- Buffer operations
+
+fn bufferVar() BufferVar {
+	BufferVar { id: _nextBufferVarId() } _addToGraph
+}
+
+fn read(b BufferVar, index Int, chans Int = 1, startChan Int = 0) S {
+	SignalExprKind.buffer(b, BufferOp.fixRead(index, chans, startChan)) _newSignalExpr
+}
+
+fn vread(b BufferVar, index AsSignal, interp Interpolation = Interpolation.cubic,
+         chans Int = 1, startChan Int = 0) S {
+	SignalExprKind.buffer(b, BufferOp.vread(interp, chans, startChan)) _newSignalExpr([index asSignal])
+}
+
+fn write(b BufferVar, value AsSignal, index AsSignal, chans Int = 1, startChan Int = 0) S {
+	SignalExprKind.buffer(b, BufferOp.write(chans, startChan)) _newSignalExpr([value asSignal, index asSignal])
+}
+
+fn length(b BufferVar) S {
+	SignalExprKind.buffer(b, BufferOp.length) _newSignalExpr
+}
+
+---------------------------------------------------------------------------
 --- Vector operations
 
 fn at(a S, i) S {
@@ -769,14 +816,17 @@ fn _makeTopGraph(f GraphFn) SignalGraph {
 	-- fresh graph state
 	var `curGraphExprs [SignalExpr] = [];
 	var `curGraphDelays [DelayVar] = [];
+	var `curGraphBuffers [BufferVar] = [];
 	var `exprIds Int = 0;
 	var `delayVarIds Int = 0;
+	var `bufferVarIds Int = 0;
 
 	let root S = f();
 
 	let graph = SignalGraph {
 	    exprs: `curGraphExprs,
 		delays: `curGraphDelays,
+		buffers: `curGraphBuffers,
 		root: root,
 	};
 
@@ -787,12 +837,14 @@ fn _makeSubGraph(f GraphFn) SignalGraph {
 	-- fresh graph state
 	var `curGraphExprs [SignalExpr] = [];
 	var `curGraphDelays [DelayVar] = [];
+	var `curGraphBuffers [BufferVar] = [];
 
 	let root S = f();
 
 	let graph = SignalGraph {
 	    exprs: `curGraphExprs,
 		delays: `curGraphDelays,
+		buffers: `curGraphBuffers,
 		root: root,
 	};
 
@@ -803,12 +855,14 @@ fn _makeSubGraph1 (f GraphFn1, x S) SignalGraph {
 	-- fresh graph state
 	var `curGraphExprs [SignalExpr] = [];
 	var `curGraphDelays [DelayVar] = [];
+	var `curGraphBuffers [BufferVar] = [];
 
 	let root = f(x);
 
 	let graph = SignalGraph {
 	    exprs: `curGraphExprs,
 		delays: `curGraphDelays,
+		buffers: `curGraphBuffers,
 		root: root,
 	};
 
@@ -960,6 +1014,17 @@ fn toLisp(o S) String {
             read(offset) : "(%^ DelayFixRead %^ %^)" fmt(o.id, delayVar.id, offset);
             vread(interpolation) : "(%^ DelayVarRead %^ %^ %^)" fmt(o.id, delayVar.id, interpolation toLispString, o inputsToLisp);
             write :  "(%^ DelayWrite %^ %^)" fmt(o.id, delayVar.id, o inputsToLisp);
+        }
+
+        buffer(bufferVar, op) : match (op) {
+            fixRead(index, chans, startChan) :
+                "(%^ BufFixRead %^ %^ %^ %^)" fmt(o.id, bufferVar.id, index, chans, startChan);
+            vread(interpolation, chans, startChan) :
+                "(%^ BufVarRead %^ %^ %^ %^ %^)" fmt(o.id, bufferVar.id, interpolation toLispString, chans, startChan, o inputsToLisp);
+            write(chans, startChan) :
+                "(%^ BufWrite %^ %^ %^ %^)" fmt(o.id, bufferVar.id, chans, startChan, o inputsToLisp);
+            length :
+                "(%^ BufLength %^)" fmt(o.id, bufferVar.id);
         }
 
         if_(thenGraph, elseGraph) : {

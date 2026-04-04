@@ -27,6 +27,7 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include <stdlib.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -179,6 +180,10 @@ typedef struct tzpl_SynthFuns {
                                int n, tzpl_ParamPair* params);
     tzpl_SErr (*noteSetParamRange)(struct tzpl_SynthData* synth, int noteID,
                                    int first, int length, float* values);
+
+    /* Buffer swap -- replaces buffer pointer, returns old buffer for NRT cleanup */
+    struct tzpl_Buffer* (*swapBuffer)(struct tzpl_SynthData* synth, int64_t bufID,
+                                      struct tzpl_Buffer* newBuffer);
 } tzpl_SynthFuns;
 
 /* Synth definition - returned by plugin load function */
@@ -208,6 +213,50 @@ typedef struct tzpl_SynthData {
     double fs, sd;  /* Sample rate, sample duration */
     /* Custom data follows in derived structs... */
 } tzpl_SynthData;
+
+/* Sample buffer -- externally managed, swappable at runtime */
+typedef struct tzpl_Buffer {
+    double** data;     /* one allocation per channel */
+    int64_t length;    /* actual content length in frames */
+    int64_t mask;      /* nextPowerOfTwo(length) - 1, for index wrapping */
+    int64_t chans;     /* channel count (power of 2) */
+} tzpl_Buffer;
+
+/* Buffer creation and destruction utilities */
+static inline tzpl_Buffer* tzpl_createBuffer(int64_t numChannels, int64_t length) {
+    tzpl_Buffer* buf = (tzpl_Buffer*)calloc(1, sizeof(tzpl_Buffer));
+    if (!buf) return NULL;
+    /* Round length up to power of 2 for mask-based wrapping */
+    int64_t allocLen = 1;
+    while (allocLen < length) allocLen <<= 1;
+    buf->length = length;
+    buf->mask = allocLen - 1;
+    /* Round chans up to power of 2 */
+    int64_t allocChans = 1;
+    while (allocChans < numChannels) allocChans <<= 1;
+    buf->chans = allocChans;
+    buf->data = (double**)calloc((size_t)allocChans, sizeof(double*));
+    if (!buf->data) { free(buf); return NULL; }
+    for (int64_t i = 0; i < allocChans; i++) {
+        buf->data[i] = (double*)calloc((size_t)allocLen, sizeof(double));
+        if (!buf->data[i]) {
+            for (int64_t j = 0; j < i; j++) free(buf->data[j]);
+            free(buf->data); free(buf);
+            return NULL;
+        }
+    }
+    return buf;
+}
+
+static inline void tzpl_freeBuffer(tzpl_Buffer* buf) {
+    if (!buf) return;
+    if (buf->data) {
+        for (int64_t i = 0; i < buf->chans; i++)
+            free(buf->data[i]);
+        free(buf->data);
+    }
+    free(buf);
+}
 
 /* Plugin load function type - returns a SynthDef describing the plugin */
 typedef tzpl_SynthDef (*tzpl_LoadSynthDefFun)(void);

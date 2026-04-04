@@ -34,6 +34,19 @@ SExprGraphBuilder::SExprGraphBuilder(std::string const& name) {
     // Graph is already created in Synth constructor
 }
 
+SampleBuf* SExprGraphBuilder::getOrCreateSampleBuf(int64_t bufId) {
+    auto it = sampleBufMap.find(bufId);
+    if (it != sampleBufMap.end()) {
+        return it->second.get();
+    }
+    B buf = new SampleBuf();
+    buf->graph = gGraph;
+    sampleBufMap.emplace(bufId, buf);
+    gGraph->sampleBufs.insert(buf);
+    synth->sampleBufs.insert(buf);
+    return buf.get();
+}
+
 DelayBuf* SExprGraphBuilder::getOrCreateDelayBuf(int64_t delayId) {
     auto it = delayMap.find(delayId);
     if (it != delayMap.end()) {
@@ -662,6 +675,81 @@ std::expected<S, std::string> SExprGraphBuilder::parseDelayWrite(sexpr::ItemVec 
     return expr;
 }
 
+// -- Buffer operations --
+
+std::expected<S, std::string> SExprGraphBuilder::parseBufFixRead(sexpr::ItemVec const& list) {
+    // Format: (id BufFixRead bufID index readChans startChan)
+    if (list.size() < 6) return std::unexpected("BufFixRead requires 6 elements");
+    if (!list[0].is<int64_t>()) return std::unexpected("ID must be integer");
+    int64_t id = list[0].get<int64_t>();
+    if (!list[2].is<int64_t>()) return std::unexpected("Buffer ID must be integer");
+    SampleBuf* sb = getOrCreateSampleBuf(list[2].get<int64_t>());
+    if (!list[3].is<int64_t>()) return std::unexpected("Index must be integer");
+    int64_t index = list[3].get<int64_t>();
+    if (!list[4].is<int64_t>()) return std::unexpected("readChans must be integer");
+    int64_t readChans = list[4].get<int64_t>();
+    if (!list[5].is<int64_t>()) return std::unexpected("startChan must be integer");
+    int64_t startChan = list[5].get<int64_t>();
+    S expr = addExpr(new BufFixRead(sb, index, readChans, startChan));
+    exprMap[id] = expr;
+    return expr;
+}
+
+std::expected<S, std::string> SExprGraphBuilder::parseBufVarRead(sexpr::ItemVec const& list) {
+    // Format: (id BufVarRead bufID interp readChans startChan (input_ids))
+    if (list.size() < 7) return std::unexpected("BufVarRead requires 7 elements");
+    if (!list[0].is<int64_t>()) return std::unexpected("ID must be integer");
+    int64_t id = list[0].get<int64_t>();
+    if (!list[2].is<int64_t>()) return std::unexpected("Buffer ID must be integer");
+    SampleBuf* sb = getOrCreateSampleBuf(list[2].get<int64_t>());
+    if (!list[3].is<std::string>()) return std::unexpected("Interpolation must be string");
+    auto interpResult = interpFromString(list[3].get<std::string>());
+    if (!interpResult) return std::unexpected(interpResult.error());
+    if (!list[4].is<int64_t>()) return std::unexpected("readChans must be integer");
+    int64_t readChans = list[4].get<int64_t>();
+    if (!list[5].is<int64_t>()) return std::unexpected("startChan must be integer");
+    int64_t startChan = list[5].get<int64_t>();
+    if (!list[6].is<sexpr::ItemVec>()) return std::unexpected("Inputs must be a list");
+    auto inputsResult = resolveInputs(list[6].get<sexpr::ItemVec>());
+    if (!inputsResult) return std::unexpected(inputsResult.error());
+    if (inputsResult->size() != 1) return std::unexpected("BufVarRead requires exactly 1 input");
+    S expr = addExpr(new BufVarRead(sb, (*inputsResult)[0], *interpResult, readChans, startChan));
+    exprMap[id] = expr;
+    return expr;
+}
+
+std::expected<S, std::string> SExprGraphBuilder::parseBufWrite(sexpr::ItemVec const& list) {
+    // Format: (id BufWrite bufID writeChans startChan (input_ids))
+    if (list.size() < 6) return std::unexpected("BufWrite requires 6 elements");
+    if (!list[0].is<int64_t>()) return std::unexpected("ID must be integer");
+    int64_t id = list[0].get<int64_t>();
+    if (!list[2].is<int64_t>()) return std::unexpected("Buffer ID must be integer");
+    SampleBuf* sb = getOrCreateSampleBuf(list[2].get<int64_t>());
+    if (!list[3].is<int64_t>()) return std::unexpected("writeChans must be integer");
+    int64_t writeChans = list[3].get<int64_t>();
+    if (!list[4].is<int64_t>()) return std::unexpected("startChan must be integer");
+    int64_t startChan = list[4].get<int64_t>();
+    if (!list[5].is<sexpr::ItemVec>()) return std::unexpected("Inputs must be a list");
+    auto inputsResult = resolveInputs(list[5].get<sexpr::ItemVec>());
+    if (!inputsResult) return std::unexpected(inputsResult.error());
+    if (inputsResult->size() != 2) return std::unexpected("BufWrite requires exactly 2 inputs (value, index)");
+    S expr = addExpr(new BufWrite(sb, (*inputsResult)[0], (*inputsResult)[1], writeChans, startChan));
+    exprMap[id] = expr;
+    return expr;
+}
+
+std::expected<S, std::string> SExprGraphBuilder::parseBufLength(sexpr::ItemVec const& list) {
+    // Format: (id BufLength bufID)
+    if (list.size() < 3) return std::unexpected("BufLength requires 3 elements");
+    if (!list[0].is<int64_t>()) return std::unexpected("ID must be integer");
+    int64_t id = list[0].get<int64_t>();
+    if (!list[2].is<int64_t>()) return std::unexpected("Buffer ID must be integer");
+    SampleBuf* sb = getOrCreateSampleBuf(list[2].get<int64_t>());
+    S expr = addExpr(new BufLength(sb));
+    exprMap[id] = expr;
+    return expr;
+}
+
 // Control flow - these need special handling for subgraphs
 std::expected<S, std::string> SExprGraphBuilder::parseSelectExpr(sexpr::ItemVec const& list) {
     // Format: (id SelectExpr (input_ids))
@@ -1024,6 +1112,10 @@ std::expected<S, std::string> SExprGraphBuilder::parseExpr(sexpr::Item const& it
     else if (type == "DelayFixRead") return parseDelayFixRead(list);
     else if (type == "DelayVarRead") return parseDelayVarRead(list);
     else if (type == "DelayWrite") return parseDelayWrite(list);
+    else if (type == "BufFixRead") return parseBufFixRead(list);
+    else if (type == "BufVarRead") return parseBufVarRead(list);
+    else if (type == "BufWrite") return parseBufWrite(list);
+    else if (type == "BufLength") return parseBufLength(list);
     else if (type == "SelectExpr") return parseSelectExpr(list);
     else if (type == "IfExpr") return parseIfExpr(list);
     else if (type == "SwitchExpr") return parseSwitchExpr(list);

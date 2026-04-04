@@ -110,7 +110,25 @@ namespace synthdef {
     u64 DelayInit::hash() const {
         return hash_combine(Expr::hash(), delayBuf.hash(), offset, 0xA5FB72B0645B15FC);
     }
-    
+
+    // -- SampleBuf --
+
+    SampleBuf::SampleBuf()
+        : graph(gGraph), serial(nextSampleBufSerialNo()) {}
+
+    u64 BufFixRead::hash() const {
+        return hash_combine(Expr::hash(), sampleBuf.hash(), (u64)index, (u64)readChans, (u64)startChan, 0xC3A7F1B2D4E5A6B7);
+    }
+    u64 BufVarRead::hash() const {
+        return hash_combine(Expr::hash(), sampleBuf.hash(), (u64)interp, (u64)readChans, (u64)startChan, 0xD8B6E2C3F4A5B7C9);
+    }
+    u64 BufWrite::hash() const {
+        return hash_combine(Expr::hash(), sampleBuf.hash(), (u64)writeChans, (u64)startChan, 0xE9C7D3A4B5F6C8D1);
+    }
+    u64 BufLength::hash() const {
+        return hash_combine(Expr::hash(), sampleBuf.hash(), 0xF1D8E4B5C6A7D9E2);
+    }
+
     u64 Expr::hash() const {
         u64 seed = kHashStart;
         for (S expr : inputs) {

@@ -44,7 +44,10 @@ target_include_directories(audio_engine_lib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/s
 target_link_libraries(audio_engine_lib PUBLIC shared rtaudio)
 target_compile_definitions(audio_engine_lib PUBLIC HAVE_GETTIMEOFDAY=1)
 
-if(UNIX AND NOT APPLE)
+if(APPLE)
+    find_library(AUDIOTOOLBOX_FRAMEWORK AudioToolbox REQUIRED)
+    target_link_libraries(audio_engine_lib PUBLIC ${AUDIOTOOLBOX_FRAMEWORK})
+elseif(UNIX)
     target_link_libraries(audio_engine_lib PUBLIC sleef)
 endif()
 

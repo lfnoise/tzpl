@@ -384,6 +384,8 @@ struct CppCodeGen : ArenaObj {
     string genDelayAlloc();
     string genDelayDealloc();
     string genDelayAdvance(Graph* graph);
+    string genBufDecls();
+    string genSwapBufferFun();
     
     string genUpdateDelayCounters();
 
@@ -1369,6 +1371,136 @@ struct ExprCodegenVisitor : ExprVisitor {
     }
     void visit(DelayWrite* p) override { fixme(p); }
     void visit(DelayInit* p) override { fixme(p); }
+    void visit(BufFixRead* p) override {
+        int ser = p->sampleBuf->serial;
+        string bufPtr = FMT("p->buf{}", ser);
+        if (g.inSimdMode) {
+            int width = g.currentSimdWidth;
+            int loopChans = g.current_loop->chans;
+            if (p->readChans == 1) {
+                // Single channel: splat
+                string scalar = FMT("{0} ? {0}->data[{1}][{2} & {0}->mask] : 0.0",
+                    bufPtr, p->startChan, p->index);
+                s += simdSplat(p->type, width, scalar);
+            } else {
+                // Multi-channel: per-lane gather
+                s += simdTypeName(p->type, width) + "{";
+                for (int j = 0; j < width; ++j) {
+                    if (j > 0) s += ", ";
+                    string ci = simdLaneChanIdx(cel, j, (int)p->readChans, loopChans);
+                    s += FMT("{0} ? {0}->data[({1} + {2}) & ({0}->chans - 1)][{3} & {0}->mask] : 0.0",
+                        bufPtr, p->startChan, ci, p->index);
+                }
+                s += "}";
+            }
+        } else {
+            string chanExpr;
+            if (p->readChans == 1) {
+                chanExpr = tos(p->startChan);
+            } else {
+                chanExpr = FMT("({} + {}) & ({} - 1)",
+                    p->startChan, vxstr(cel), FMT("{}->chans", bufPtr));
+            }
+            s += FMT("{0} ? {0}->data[{1}][{2} & {0}->mask] : 0.0",
+                bufPtr, chanExpr, p->index);
+        }
+    }
+    void visit(BufVarRead* p) override {
+        int ser = p->sampleBuf->serial;
+        string bufPtr = FMT("p->buf{}", ser);
+
+        if (g.inSimdMode) {
+            int width = g.currentSimdWidth;
+            int loopChans = g.current_loop->chans;
+            bool scalarOffset = p->in0()->is_scalar();
+            string offsetExpr;
+            if (scalarOffset) {
+                bool prevSimd = g.inSimdMode;
+                g.inSimdMode = false;
+                offsetExpr = g.genExpr(p->in0(), vx(0));
+                g.inSimdMode = prevSimd;
+            } else {
+                offsetExpr = g.genExpr(p->in0(), cel);
+            }
+
+            if (p->readChans == 1 && scalarOffset) {
+                // Scalar offset, single channel: splat
+                string scalar;
+                if (p->interp == interpNone) {
+                    scalar = FMT("{0} ? {0}->data[{1}][u64({2}) & {0}->mask] : 0.0",
+                        bufPtr, p->startChan, offsetExpr);
+                } else {
+                    static const char* funcNames[] = {
+                        "tzpl_buf_none", "tzpl_buf_linear", "tzpl_buf_cubic",
+                        "tzpl_buf_lagrange", "tzpl_buf_sinc"
+                    };
+                    scalar = FMT("{0} ? {1}({0}->data[{2}], {0}->mask, {3}) : 0.0",
+                        bufPtr, funcNames[p->interp], p->startChan, offsetExpr);
+                }
+                s += simdSplat(p->type, width, scalar);
+            } else {
+                // Per-lane gather
+                s += simdTypeName(p->type, width) + "{";
+                for (int j = 0; j < width; ++j) {
+                    if (j > 0) s += ", ";
+                    string ci;
+                    if (p->readChans == 1) {
+                        ci = tos(p->startChan);
+                    } else {
+                        ci = FMT("({} + {}) & (_b->chans - 1)",
+                            p->startChan, simdLaneChanIdx(cel, j, (int)p->readChans, loopChans));
+                    }
+                    string off = scalarOffset ? offsetExpr : FMT("({})[{}]", offsetExpr, j);
+                    if (p->interp == interpNone) {
+                        s += FMT("_b ? _b->data[{}][u64({}) & _b->mask] : 0.0", ci, off);
+                    } else {
+                        static const char* funcNames[] = {
+                            "tzpl_buf_none", "tzpl_buf_linear", "tzpl_buf_cubic",
+                            "tzpl_buf_lagrange", "tzpl_buf_sinc"
+                        };
+                        s += FMT("_b ? {}(_b->data[{}], _b->mask, {}) : 0.0",
+                            funcNames[p->interp], ci, off);
+                    }
+                }
+                s += "}";
+                // Wrap in lambda to cache buffer pointer
+                s = FMT("[&]() -> {} {{ auto _b = {}; return {}; }}()",
+                    simdTypeName(p->type, width), bufPtr, s);
+            }
+        } else {
+            // Scalar mode
+            string chanExpr;
+            if (p->readChans == 1) {
+                chanExpr = tos(p->startChan);
+            } else {
+                chanExpr = FMT("({} + {}) & ({} - 1)",
+                    p->startChan, vxstr(cel), FMT("{}->chans", bufPtr));
+            }
+            string indexExpr = g.genExpr(p->in0(), cel);
+            if (p->interp == interpNone) {
+                s += FMT("{0} ? {0}->data[{1}][u64({2}) & {0}->mask] : 0.0",
+                    bufPtr, chanExpr, indexExpr);
+            } else {
+                static const char* funcNames[] = {
+                    "tzpl_buf_none", "tzpl_buf_linear", "tzpl_buf_cubic",
+                    "tzpl_buf_lagrange", "tzpl_buf_sinc"
+                };
+                s += FMT("{0} ? {1}({0}->data[{2}], {0}->mask, {3}) : 0.0",
+                    bufPtr, funcNames[p->interp], chanExpr, indexExpr);
+            }
+        }
+    }
+    void visit(BufWrite* p) override { fixme(p); }
+    void visit(BufLength* p) override {
+        int ser = p->sampleBuf->serial;
+        string bufPtr = FMT("p->buf{}", ser);
+        string scalar = FMT("{0} ? (f64)({0}->length) : 0.0", bufPtr);
+        if (g.inSimdMode) {
+            s += simdSplat(p->type, g.currentSimdWidth, scalar);
+        } else {
+            s += scalar;
+        }
+    }
 };
 
 
@@ -1428,6 +1560,10 @@ struct GenTreeExprVisitor : ExprVisitor {
     void visit(MaxDelay* p) override { handled = true; }
     void visit(DelayFixRead* p) override {}
     void visit(DelayVarRead* p) override {}
+    void visit(BufFixRead* p) override {}
+    void visit(BufVarRead* p) override {}
+    void visit(BufWrite* p) override {}
+    void visit(BufLength* p) override {}
 };
 
 struct Rank1GenTreeExprVisitor : GenTreeExprVisitor {
@@ -1779,7 +1915,31 @@ struct Rank1GenTreeExprVisitor : GenTreeExprVisitor {
         }
     }
     void visit(DelayInit* p) override {}
-    
+    void visit(BufFixRead* p) override {}
+    void visit(BufVarRead* p) override {}
+    void visit(BufWrite* p) override {
+        handled = true;
+        int ser = p->sampleBuf->serial;
+        string bufPtr = FMT("p->buf{}", ser);
+        string indexExpr = g.genExpr(p->in1(), cel);
+        string valueExpr = g.genExpr(p->in0(), cel);
+        string chanExpr;
+        if (p->writeChans == 1) {
+            chanExpr = tos(p->startChan);
+        } else {
+            chanExpr = FMT("({} + {}) & ({}->chans - 1)",
+                p->startChan, vxstr(cel), bufPtr);
+        }
+        s += FMT("if ({0}) {{\n", bufPtr);
+        tabIndent(s, g.indent + 1);
+        s += FMT("u64 _idx = u64({}) & {}->mask;\n", indexExpr, bufPtr);
+        tabIndent(s, g.indent + 1);
+        s += FMT("{}->data[{}][_idx] = {};\n", bufPtr, chanExpr, valueExpr);
+        tabIndent(s, g.indent);
+        s += FMT("}} // {} BufWrite\n", tree.serial);
+    }
+    void visit(BufLength* p) override {}
+
 };
 
 
@@ -1911,6 +2071,10 @@ struct GenLoopExprVisitor : ExprVisitor {
     void visit(DelayVarRead* p) override {}
     void visit(DelayWrite* p) override {}
     void visit(DelayInit* p) override {}
+    void visit(BufFixRead* p) override {}
+    void visit(BufVarRead* p) override {}
+    void visit(BufWrite* p) override {}
+    void visit(BufLength* p) override {}
 };
 
 string CppCodeGen::genLoop(GenLoop const& loop) {
@@ -2385,6 +2549,11 @@ string CppCodeGen::genInitFun() {
     }
     s += genDelayAlloc();
 
+    // Initialize buffer pointers to null
+    for (B buf : synth->sampleBufs) {
+        s += FMT("\tp->buf{} = nullptr;\n", buf->serial);
+    }
+
     if (voicerExpr) {
         usize numNoteParams = synth->noteParams.size();
         s += FMT("\tp->voicer.setParams((f32*)p->voicer_params);\n");
@@ -2436,6 +2605,22 @@ string CppCodeGen::genResetFun() {
     s += "\t// FIXME genResetFun\n";
     s += genLoops(synth->resetLoops);
     s += "\treturn tzpl_errNone;\n";
+    s += "}\n\n";
+    return s;
+}
+
+string CppCodeGen::genSwapBufferFun() {
+    string s;
+    if (synth->sampleBufs.empty()) return s;
+    s += FMT("tzpl_Buffer* {0}_swapBuffer({0}* p, i64 bufID, tzpl_Buffer* newBuf) {{\n", synth->name);
+    s += "\ttzpl_Buffer* old = nullptr;\n";
+    s += "\tswitch (bufID) {\n";
+    for (B buf : synth->sampleBufs) {
+        s += FMT("\t\tcase {}: old = p->buf{}; p->buf{} = newBuf; break;\n",
+            buf->serial, buf->serial, buf->serial);
+    }
+    s += "\t}\n";
+    s += "\treturn old;\n";
     s += "}\n\n";
     return s;
 }
@@ -2656,6 +2841,14 @@ string genDelayDeclsSoA(unordered_set<D, DelayHasher> const& delays, string inde
     return s;
 }
 
+string CppCodeGen::genBufDecls() {
+    string s;
+    for (B buf : synth->sampleBufs) {
+        s += FMT("\ttzpl_Buffer* buf{};\n", buf->serial);
+    }
+    return s;
+}
+
 string CppCodeGen::genDeclVoiceState() {
     if (!voicerExpr) return "";
 
@@ -2799,6 +2992,9 @@ string CppCodeGen::genDeclInstVars() {
         }
     }
     s += genDelayDecls(topDelays, "\t");
+
+    // Sample buffer pointers
+    s += genBufDecls();
 
     return s;
 }
@@ -2967,6 +3163,10 @@ string CppCodeGen::genFunPtrs() {
         s += FMT("\t.noteSetParamRange = (tzpl_SErr (*)(tzpl_SynthData*, int, int, int, f32*)){}_noteSetParamRange,\n", synth->name);
     }
 
+    if (!synth->sampleBufs.empty()) {
+        s += FMT("\t.swapBuffer = (tzpl_Buffer* (*)(tzpl_SynthData*, i64, tzpl_Buffer*)){}_swapBuffer,\n", synth->name);
+    }
+
     s += "};\n\n";
     return s;
 }
@@ -3075,6 +3275,8 @@ string CppCodeGen::genClass()
     if (voicerExpr) {
         s += genNoteFuns();
     }
+
+    s += genSwapBufferFun();
 
     s += genFunPtrs();
     

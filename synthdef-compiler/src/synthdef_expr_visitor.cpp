@@ -69,5 +69,9 @@ void DelayFixRead::accept(ExprVisitor& visitor) { visitor.visit(this); }
 void DelayVarRead::accept(ExprVisitor& visitor) { visitor.visit(this); }
 void DelayWrite::accept(ExprVisitor& visitor) { visitor.visit(this); }
 void DelayInit::accept(ExprVisitor& visitor) { visitor.visit(this); }
+void BufFixRead::accept(ExprVisitor& visitor) { visitor.visit(this); }
+void BufVarRead::accept(ExprVisitor& visitor) { visitor.visit(this); }
+void BufWrite::accept(ExprVisitor& visitor) { visitor.visit(this); }
+void BufLength::accept(ExprVisitor& visitor) { visitor.visit(this); }
 
 }

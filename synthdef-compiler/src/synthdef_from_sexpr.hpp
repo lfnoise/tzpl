@@ -37,6 +37,7 @@ struct SExprGraphBuilder {
     Synth* synth;
     std::unordered_map<int64_t, S> exprMap;  // id -> expression
     std::unordered_map<int64_t, D> delayMap; // delay var id -> DelayBuf
+    std::unordered_map<int64_t, B> sampleBufMap; // buffer var id -> SampleBuf
     std::unordered_map<int64_t, Graph*> graphMap; // graph id -> Graph
 
     SExprGraphBuilder(std::string const& name);
@@ -85,8 +86,15 @@ struct SExprGraphBuilder {
     std::expected<S, std::string> parseSpectralFrameInput(sexpr::ItemVec const& list);
     std::expected<S, std::string> parseSpectralChainExpr(sexpr::ItemVec const& list);
 
+    // Buffer operations
+    std::expected<S, std::string> parseBufFixRead(sexpr::ItemVec const& list);
+    std::expected<S, std::string> parseBufVarRead(sexpr::ItemVec const& list);
+    std::expected<S, std::string> parseBufWrite(sexpr::ItemVec const& list);
+    std::expected<S, std::string> parseBufLength(sexpr::ItemVec const& list);
+
     // Helper to get or create delay buffer
     DelayBuf* getOrCreateDelayBuf(int64_t delayId);
+    SampleBuf* getOrCreateSampleBuf(int64_t bufId);
 
     // Helper to resolve input IDs
     std::expected<vector<S>, std::string> resolveInputs(sexpr::ItemVec const& inputList);

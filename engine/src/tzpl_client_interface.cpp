@@ -884,4 +884,28 @@ tzpl_SErr noteSetParamRange(i64 nodeID, int noteID, int first, int length, f32* 
     return tzpl_errNone;
 }
 
+// -- Buffer commands --
+
+tzpl_SErr resizeBuffer(i64 nodeID, i64 bufID, int numChannels, i64 length) {
+    Engine* e = tBundle.engine;
+    if (!e) return tzpl_errNoActiveBundle;
+    tBundle.add(new ResizeBufferCmd(nodeID, bufID, numChannels, length));
+    return tzpl_errNone;
+}
+
+tzpl_SErr loadBuffer(i64 nodeID, i64 bufID, const char* path,
+                     int channelOffset, i64 frameOffset, i64 numFrames) {
+    Engine* e = tBundle.engine;
+    if (!e) return tzpl_errNoActiveBundle;
+    tBundle.add(new LoadBufferCmd(nodeID, bufID, path, channelOffset, frameOffset, numFrames));
+    return tzpl_errNone;
+}
+
+tzpl_SErr replaceBuffer(i64 nodeID, i64 bufID, tzpl_Buffer* buffer) {
+    Engine* e = tBundle.engine;
+    if (!e) return tzpl_errNoActiveBundle;
+    tBundle.add(new ReplaceBufferCmd(nodeID, bufID, buffer));
+    return tzpl_errNone;
+}
+
 }

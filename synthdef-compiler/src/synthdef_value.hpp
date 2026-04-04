@@ -311,6 +311,39 @@ public:
         std::size_t operator()(D delayBuf) const;
     };
 
-        
+    struct SampleBuf;
+
+    // B is a SampleBuf reference type, parallel to D for DelayBuf.
+    class B {
+        SampleBuf* sampleBuf;
+    public:
+        B();
+        B(SampleBuf* sampleBuf);
+        B(B const& other);
+
+        SampleBuf* get() const { return sampleBuf; }
+
+        SampleBuf* operator->() { return sampleBuf; }
+        SampleBuf const* operator->() const { return sampleBuf; }
+
+        bool operator==(B that) const { return sampleBuf == that.sampleBuf; }
+        bool operator!=(B that) const { return sampleBuf != that.sampleBuf; }
+
+        bool isNull() const { return sampleBuf == nullptr; }
+        bool notNull() const { return sampleBuf != nullptr; }
+
+        S read(i64 index, i64 readChans = 1, i64 startChan = 0) const;
+        S vread(S index, Interpolation interp = Interpolation(0),
+                i64 readChans = 1, i64 startChan = 0) const;
+        S write(S value, S index, i64 writeChans = 1, i64 startChan = 0);
+        S length() const;
+
+        u64 hash() const;
+    };
+
+    struct SampleBufHasher {
+        std::size_t operator()(B buf) const;
+    };
+
 } // namespace synthdef
 
