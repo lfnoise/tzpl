@@ -737,8 +737,8 @@ void test_voicer_codegen() {
     assert(code.find("SIMD") != string::npos);
     assert(code.find("flat voice") != string::npos);
 
-    // RowVoicer and note functions still present
-    assert(code.find("RowVoicer<16, 2>") != string::npos);
+    // RowVoicer: 16 voices, 1 user param (gate is internal, not counted)
+    assert(code.find("RowVoicer<16, 1>") != string::npos);
     assert(code.find("_noteOn") != string::npos);
     assert(code.find("_noteOff") != string::npos);
     assert(code.find("_allNotesOff") != string::npos);
@@ -897,7 +897,9 @@ void test_for_loop_codegen() {
     {
         PushGraph pg(bodyGraph);
         S i = addExpr(new VarExpr("i", NumType::any_int));
-        body = addExpr(new PhiNodeExpr(S(1.0f)));
+        // Use the loop variable so it's not dead code
+        S result = i + S(1);
+        body = addExpr(new PhiNodeExpr(result));
     }
 
     S loop = addExpr(new ForLoopExpr(count, body));
@@ -948,7 +950,7 @@ void test_switch_sexpr_parse() {
     std::string sexprText = R"(
         (Synth test_switch_sexpr
             (Graph 4 (
-                (0 Constant 1 8 (1))
+                (0 Control "sel" 1 (ControlSpec 0 2 0 0))
                 (4 SwitchExpr (0)
                     (Graph 1 (
                         (1 Constant 1 12 (100.0))))
@@ -985,13 +987,14 @@ void test_for_loop_sexpr_parse() {
 
     std::string sexprText = R"(
         (Synth test_for_sexpr
-            (Graph 3 (
+            (Graph 4 (
                 (0 Constant 1 8 (4))
-                (3 ForExpr (0)
-                    (Graph 2 (
+                (4 ForExpr (0)
+                    (Graph 3 (
                         (1 VarExpr "i")
-                        (2 Constant 1 12 (1.0)))))
-                (4 Outlet "out" 3))))
+                        (2 Constant 1 8 (1))
+                        (3 BinaryOp + (1 2)))))
+                (5 Outlet "out" 4))))
     )";
 
     auto result = synthFromSExprText(sexprText);
@@ -1241,6 +1244,279 @@ void test_simd_flat_voice_stereo_osc() {
     printf("  SIMD flat voice stereo osc: delays + NoteParam gather\n");
 }
 
+// ---------------------------------------------------------------------------
+// Delay interpolation tests
+// ---------------------------------------------------------------------------
+
+void test_delay_interp_none() {
+    printf("test_delay_interp_none\n");
+    using namespace synthdef;
+    PushSynth ps(new Synth("test_delay_interp_none"));
+
+    S sig = fsinosc(S(440.0));
+    S dt = S(0.01) * fs();
+    D y(dt);
+    S out = y = sig + y.v(dt, interpNone) * S(0.5);
+    outlet(out);
+
+    gSynth->graphAnalysis();
+    string code = cppCodeGen(gSynth);
+
+    // interpNone should NOT call tzpl_delay_* functions (but header include is OK)
+    assert(code.find("tzpl_delay_none(") == string::npos);
+    assert(code.find("tzpl_delay_linear(") == string::npos);
+    // Should have direct buffer access
+    assert(code.find("p->d0[") != string::npos || code.find("p->d0_wrpos") != string::npos);
+    printf("  delay interpNone generates direct buffer access\n");
+}
+
+void test_delay_interp_linear() {
+    printf("test_delay_interp_linear\n");
+    using namespace synthdef;
+    PushSynth ps(new Synth("test_delay_interp_linear"));
+
+    S sig = fsinosc(S(440.0));
+    S dt = S(0.01) * fs();
+    D y(S(0.02) * fs());
+    S out = y = sig + y.v(dt, interpLinear) * S(0.5);
+    outlet(out);
+
+    gSynth->graphAnalysis();
+    string code = cppCodeGen(gSynth);
+
+    assert(code.find("tzpl_delay_linear") != string::npos);
+    printf("  delay interpLinear generates tzpl_delay_linear call\n");
+}
+
+void test_delay_interp_cubic() {
+    printf("test_delay_interp_cubic\n");
+    using namespace synthdef;
+    PushSynth ps(new Synth("test_delay_interp_cubic"));
+
+    S sig = fsinosc(S(440.0));
+    S dt = S(0.01) * fs();
+    D y(S(0.02) * fs());
+    S out = y = sig + y.v(dt, interpCubic) * S(0.5);
+    outlet(out);
+
+    gSynth->graphAnalysis();
+    string code = cppCodeGen(gSynth);
+
+    assert(code.find("tzpl_delay_cubic") != string::npos);
+    printf("  delay interpCubic generates tzpl_delay_cubic call\n");
+}
+
+void test_delay_interp_lagrange() {
+    printf("test_delay_interp_lagrange\n");
+    using namespace synthdef;
+    PushSynth ps(new Synth("test_delay_interp_lagrange"));
+
+    S sig = fsinosc(S(440.0));
+    S dt = S(0.01) * fs();
+    D y(S(0.02) * fs());
+    S out = y = sig + y.v(dt, interpLagrange) * S(0.5);
+    outlet(out);
+
+    gSynth->graphAnalysis();
+    string code = cppCodeGen(gSynth);
+
+    assert(code.find("tzpl_delay_lagrange") != string::npos);
+    printf("  delay interpLagrange generates tzpl_delay_lagrange call\n");
+}
+
+void test_delay_interp_sinc() {
+    printf("test_delay_interp_sinc\n");
+    using namespace synthdef;
+    PushSynth ps(new Synth("test_delay_interp_sinc"));
+
+    S sig = fsinosc(S(440.0));
+    S dt = S(0.01) * fs();
+    D y(S(0.02) * fs());
+    S out = y = sig + y.v(dt, interpSinc) * S(0.5);
+    outlet(out);
+
+    gSynth->graphAnalysis();
+    string code = cppCodeGen(gSynth);
+
+    assert(code.find("tzpl_delay_sinc") != string::npos);
+    printf("  delay interpSinc generates tzpl_delay_sinc call\n");
+}
+
+void test_delay_interp_simd() {
+    printf("test_delay_interp_simd\n");
+    using namespace synthdef;
+    PushSynth ps(new Synth("test_delay_interp_simd"));
+
+    // Stereo variable-delay with cubic interpolation
+    S sig = fsinosc(vec(440, 550));
+    S dt = S(0.01) * fs();
+    D y(S(0.02) * fs());
+    S out = y = sig + y.v(dt, interpCubic) * S(0.5);
+    outlet(out);
+
+    gSynth->graphAnalysis();
+    string code = cppCodeGen(gSynth, 4, 2);
+
+    // SIMD interp should use the kernel function via lambda
+    assert(code.find("tzpl_interp_cubic") != string::npos);
+    assert(code.find("SIMD 2x") != string::npos);
+    printf("  delay SIMD interpolation uses tzpl_interp_cubic kernel\n");
+}
+
+// ---------------------------------------------------------------------------
+// Buffer tests
+// ---------------------------------------------------------------------------
+
+void test_buf_fix_read() {
+    printf("test_buf_fix_read\n");
+    using namespace synthdef;
+    PushSynth ps(new Synth("test_buf_fix_read"));
+
+    B buf;
+    S out = buf.read(42, 1, 0);
+    outlet(out);
+
+    gSynth->graphAnalysis();
+    string code = cppCodeGen(gSynth);
+
+    // Should have a buffer pointer in the struct
+    assert(code.find("tzpl_Buffer* buf0") != string::npos);
+    // Should have null-safe read
+    assert(code.find("p->buf0") != string::npos);
+    // Init should set to nullptr
+    assert(code.find("buf0 = nullptr") != string::npos);
+    printf("  BufFixRead generates null-safe buffer read\n");
+}
+
+void test_buf_var_read_interp() {
+    printf("test_buf_var_read_interp\n");
+    using namespace synthdef;
+    PushSynth ps(new Synth("test_buf_var_read_interp"));
+
+    B buf;
+    S index = fsinosc(S(1.0)) * S(100.0);
+    S out = buf.vread(index, interpCubic, 1, 0);
+    outlet(out);
+
+    gSynth->graphAnalysis();
+    string code = cppCodeGen(gSynth);
+
+    assert(code.find("tzpl_buf_cubic") != string::npos);
+    printf("  BufVarRead with cubic interpolation generates tzpl_buf_cubic\n");
+}
+
+void test_buf_var_read_none() {
+    printf("test_buf_var_read_none\n");
+    using namespace synthdef;
+    PushSynth ps(new Synth("test_buf_var_read_none"));
+
+    B buf;
+    S index = fsinosc(S(1.0)) * S(100.0);
+    S out = buf.vread(index, interpNone, 1, 0);
+    outlet(out);
+
+    gSynth->graphAnalysis();
+    string code = cppCodeGen(gSynth);
+
+    // interpNone should NOT call tzpl_buf_* interpolation functions
+    assert(code.find("tzpl_buf_none(") == string::npos);
+    assert(code.find("tzpl_buf_linear(") == string::npos);
+    // Should have direct buffer access with mask
+    assert(code.find("buf0->mask") != string::npos);
+    printf("  BufVarRead interpNone generates direct buffer access\n");
+}
+
+void test_buf_write() {
+    printf("test_buf_write\n");
+    using namespace synthdef;
+    PushSynth ps(new Synth("test_buf_write"));
+
+    B buf;
+    S sig = fsinosc(S(440.0));
+    S index = S(0.0);
+    buf.write(sig, index, 1, 0);
+    outlet(sig);
+
+    gSynth->graphAnalysis();
+    string code = cppCodeGen(gSynth);
+
+    // Write should be null-guarded
+    assert(code.find("if (p->buf0)") != string::npos);
+    assert(code.find("buf0->data") != string::npos);
+    printf("  BufWrite generates null-guarded write\n");
+}
+
+void test_buf_length() {
+    printf("test_buf_length\n");
+    using namespace synthdef;
+    PushSynth ps(new Synth("test_buf_length"));
+
+    B buf;
+    S len = buf.length();
+    // Use len in a context that accepts f64 (length returns f64)
+    S index = len * S(0.5);
+    S out = buf.vread(index, interpNone, 1, 0);
+    outlet(out);
+
+    gSynth->graphAnalysis();
+    string code = cppCodeGen(gSynth);
+
+    assert(code.find("buf0->length") != string::npos);
+    printf("  BufLength generates buffer length access\n");
+}
+
+void test_buf_swap_buffer() {
+    printf("test_buf_swap_buffer\n");
+    using namespace synthdef;
+    PushSynth ps(new Synth("test_buf_swap"));
+
+    B buf0, buf1;
+    S out = buf0.read(0) + buf1.read(0);
+    outlet(out);
+
+    gSynth->graphAnalysis();
+    string code = cppCodeGen(gSynth);
+
+    // Should generate swapBuffer function with cases for both buffers
+    assert(code.find("swapBuffer") != string::npos);
+    assert(code.find("case 0:") != string::npos);
+    assert(code.find("case 1:") != string::npos);
+    printf("  swapBuffer generated with cases for all buffers\n");
+}
+
+void test_buf_sexpr_parse() {
+    printf("test_buf_sexpr_parse\n");
+    using namespace synthdef;
+
+    // Test parsing BufVarRead with interpolation from s-expression
+    std::string sexprText = R"(
+        ((0 Constant 1 12 (1.5))
+         (1 BufVarRead 0 "cubic" 1 0 (0))
+         (2 Outlet "out" 1))
+    )";
+
+    auto result = synthFromSExprText(sexprText, "test_buf_sexpr");
+    if (!result.has_value()) {
+        printf("  sexpr parse error: %s\n", result.error().c_str());
+    }
+    assert(result.has_value());
+
+    Synth* synth = result.value();
+    {
+        PushSynth ps(synth);
+        synth->graphAnalysis();
+        string code = cppCodeGen(gSynth);
+
+        // Should have buffer struct field
+        assert(code.find("tzpl_Buffer* buf0") != string::npos);
+        // Should have buffer data access with cubic interpolation
+        assert(code.find("tzpl_buf_cubic") != string::npos);
+        // Should have swapBuffer
+        assert(code.find("swapBuffer") != string::npos);
+    }
+    printf("  buffer s-expression parsing produces correct codegen\n");
+}
+
 void all_tests() {
     using namespace synthdef;
 
@@ -1255,6 +1531,23 @@ void all_tests() {
     test_ftos();
     //test_transforms();
     //test_synthdef();
+
+    // Delay interpolation tests
+    test_delay_interp_none();
+    test_delay_interp_linear();
+    test_delay_interp_cubic();
+    test_delay_interp_lagrange();
+    test_delay_interp_sinc();
+    test_delay_interp_simd();
+
+    // Buffer tests
+    test_buf_fix_read();
+    test_buf_var_read_interp();
+    test_buf_var_read_none();
+    test_buf_write();
+    test_buf_length();
+    test_buf_swap_buffer();
+    test_buf_sexpr_parse();
 
     // Control flow codegen tests
     test_switch_codegen();
