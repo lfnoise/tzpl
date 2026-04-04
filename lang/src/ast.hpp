@@ -726,6 +726,7 @@ struct FnDeclNode : Decl {
     std::vector<std::string> typeParams;  // Template type params, e.g. ["T", "U"]
     std::vector<FnParam> params;
     TypeExprPtr returnType;  // nullable (inferred as void)
+    TypeExprPtr returnTypeConstraint;  // Set by desugaring when return type contains constraint names
     ASTPtr body;             // BlockStmt
     i32 resolvedFuncGlobalIndex = -1;  // Set by type checker for codegen
     bool isPrivate = false;  // Set by parser when 'private' keyword is used

@@ -108,6 +108,65 @@ void TypeChecker::desugarConstraintParams(FnDeclNode* decl) {
         if (!param.typeExpr) continue;
         walkTypeExpr(param.typeExpr.get());
     }
+
+    // Check if the return type contains constraint references.
+    // If so, save it as a constraint to be validated after return type inference.
+    if (decl->returnType) {
+        bool hasConstraintRef = false;
+        std::function<bool(TypeExpr*)> checkForConstraints = [&](TypeExpr* expr) -> bool {
+            if (!expr) return false;
+            if (expr->kind == ASTNode::NamedType) {
+                auto* named = static_cast<NamedTypeNode*>(expr);
+                if (constraints_.count(named->name) &&
+                    !builtinTypeNames.count(named->name) &&
+                    !structTypes_.count(named->name) &&
+                    !enumTypes_.count(named->name) &&
+                    !typeAliases_.count(named->name)) {
+                    bool isTP = false;
+                    for (auto& tp : decl->typeParams) {
+                        if (tp == named->name) { isTP = true; break; }
+                    }
+                    if (!isTP) return true;
+                }
+                return false;
+            }
+            switch (expr->kind) {
+            case ASTNode::ArrayType:
+                return checkForConstraints(static_cast<ArrayTypeNode*>(expr)->elemType.get());
+            case ASTNode::ListType:
+                return checkForConstraints(static_cast<ListTypeNode*>(expr)->elemType.get());
+            case ASTNode::SetType:
+                return checkForConstraints(static_cast<SetTypeNode*>(expr)->elemType.get());
+            case ASTNode::RefType:
+                return checkForConstraints(static_cast<RefTypeNode*>(expr)->elemType.get());
+            case ASTNode::MapType: {
+                auto* m = static_cast<MapTypeNode*>(expr);
+                return checkForConstraints(m->keyType.get()) || checkForConstraints(m->valueType.get());
+            }
+            case ASTNode::TupleType:
+                for (auto& e : static_cast<TupleTypeNode*>(expr)->elemTypes)
+                    if (checkForConstraints(e.get())) return true;
+                return false;
+            case ASTNode::FunctionType: {
+                auto* f = static_cast<FunctionTypeNode*>(expr);
+                for (auto& p : f->paramTypes)
+                    if (checkForConstraints(p.get())) return true;
+                return checkForConstraints(f->returnType.get());
+            }
+            case ASTNode::TemplateType:
+                for (auto& a : static_cast<TemplateTypeNode*>(expr)->typeArgs)
+                    if (checkForConstraints(a.get())) return true;
+                return false;
+            default:
+                return false;
+            }
+        };
+        hasConstraintRef = checkForConstraints(decl->returnType.get());
+        if (hasConstraintRef) {
+            decl->returnTypeConstraint = std::move(decl->returnType);
+            decl->returnType = nullptr;
+        }
+    }
 }
 
 void TypeChecker::checkConstraintDecl(ConstraintDeclNode* decl) {
@@ -250,10 +309,54 @@ TypeChecker::ConstraintPattern TypeChecker::buildConstraintPattern(TypeExpr* exp
         return pat;
     }
 
+    if (expr->kind == ASTNode::TupleType) {
+        auto* tup = static_cast<TupleTypeNode*>(expr);
+        std::vector<ConstraintPattern> elemPats;
+        bool allConcrete = true;
+        for (auto& elem : tup->elemTypes) {
+            elemPats.push_back(buildConstraintPattern(elem.get()));
+            if (elemPats.back().kind != ConstraintPattern::ConcreteType)
+                allConcrete = false;
+        }
+        if (allConcrete) {
+            pat.kind = ConstraintPattern::ConcreteType;
+            pat.type = resolveTypeExpr(expr);
+            return pat;
+        }
+        pat.kind = ConstraintPattern::Parameterized;
+        pat.ctor = ConstraintPattern::Ctor::Tuple;
+        pat.args = std::move(elemPats);
+        return pat;
+    }
+
+    if (expr->kind == ASTNode::FunctionType) {
+        auto* fn = static_cast<FunctionTypeNode*>(expr);
+        std::vector<ConstraintPattern> argPats;
+        bool allConcrete = true;
+        for (auto& param : fn->paramTypes) {
+            argPats.push_back(buildConstraintPattern(param.get()));
+            if (argPats.back().kind != ConstraintPattern::ConcreteType)
+                allConcrete = false;
+        }
+        auto retPat = buildConstraintPattern(fn->returnType.get());
+        if (retPat.kind != ConstraintPattern::ConcreteType)
+            allConcrete = false;
+        if (allConcrete) {
+            pat.kind = ConstraintPattern::ConcreteType;
+            pat.type = resolveTypeExpr(expr);
+            return pat;
+        }
+        pat.kind = ConstraintPattern::Parameterized;
+        pat.ctor = ConstraintPattern::Ctor::Function;
+        pat.args = std::move(argPats);
+        pat.args.push_back(std::move(retPat));  // return type is last
+        return pat;
+    }
+
     // TemplateType: user-defined parameterized types like Pair<T>
     if (expr->kind == ASTNode::TemplateType) {
         auto* tmpl = static_cast<TemplateTypeNode*>(expr);
-        // Check if template name is a known constraint
+        // Check if template name itself is a known constraint
         if (constraints_.count(tmpl->name)) {
             // Not supported as parameterized constraint pattern for now
             error(expr->loc, "Parameterized constraint references not supported in union items");
@@ -261,9 +364,23 @@ TypeChecker::ConstraintPattern TypeChecker::buildConstraintPattern(TypeExpr* exp
             pat.type = compiler_.intType();
             return pat;
         }
-        // All concrete args → resolve as concrete
-        pat.kind = ConstraintPattern::ConcreteType;
-        pat.type = resolveTypeExpr(expr);
+        // Recursively process type args -- they may contain constraint refs
+        std::vector<ConstraintPattern> argPats;
+        bool allConcrete = true;
+        for (auto& arg : tmpl->typeArgs) {
+            argPats.push_back(buildConstraintPattern(arg.get()));
+            if (argPats.back().kind != ConstraintPattern::ConcreteType)
+                allConcrete = false;
+        }
+        if (allConcrete) {
+            pat.kind = ConstraintPattern::ConcreteType;
+            pat.type = resolveTypeExpr(expr);
+            return pat;
+        }
+        pat.kind = ConstraintPattern::Parameterized;
+        pat.ctor = ConstraintPattern::Ctor::Template;
+        pat.templateName = tmpl->name;
+        pat.args = std::move(argPats);
         return pat;
     }
 
@@ -319,6 +436,40 @@ bool TypeChecker::matchConstraintPattern(Type* concrete, const ConstraintPattern
                     if (!mt || pattern.args.size() != 2) return false;
                     return matchConstraintPattern(mt->keyType_, pattern.args[0]) &&
                            matchConstraintPattern(mt->valueType_, pattern.args[1]);
+                }
+                case ConstraintPattern::Ctor::Tuple: {
+                    auto* tt = dynamic_cast<TupleType*>(concrete);
+                    if (!tt || tt->fields_.size() != pattern.args.size()) return false;
+                    for (size_t i = 0; i < pattern.args.size(); ++i) {
+                        if (!matchConstraintPattern(tt->fields_[i], pattern.args[i]))
+                            return false;
+                    }
+                    return true;
+                }
+                case ConstraintPattern::Ctor::Function: {
+                    auto* ft = dynamic_cast<FunctionType*>(concrete);
+                    if (!ft) return false;
+                    // args layout: [param0, param1, ..., returnType]
+                    size_t numParams = pattern.args.size() - 1;
+                    if (ft->argTypes_.size() != numParams) return false;
+                    for (size_t i = 0; i < numParams; ++i) {
+                        if (!matchConstraintPattern(ft->argTypes_[i], pattern.args[i]))
+                            return false;
+                    }
+                    return matchConstraintPattern(ft->returnType_, pattern.args.back());
+                }
+                case ConstraintPattern::Ctor::Template: {
+                    // Look up the concrete type's monomorphization origin
+                    auto it = monoOrigin_.find(concrete);
+                    if (it == monoOrigin_.end()) return false;
+                    auto& origin = it->second;
+                    if (origin.templateName != pattern.templateName) return false;
+                    if (origin.typeArgs.size() != pattern.args.size()) return false;
+                    for (size_t i = 0; i < pattern.args.size(); ++i) {
+                        if (!matchConstraintPattern(origin.typeArgs[i], pattern.args[i]))
+                            return false;
+                    }
+                    return true;
                 }
             }
             return false;

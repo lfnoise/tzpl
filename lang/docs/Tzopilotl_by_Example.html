@@ -2207,6 +2207,39 @@ y isNone println;              <span class="cmt">-- true</span>
 <pre><code><span class="cmt">-- Only Int, Float, and Fraction may be used where Numeric is required</span>
 <span class="kw">constraint</span> Numeric = <span class="kw">Int</span> | <span class="kw">Float</span> | Fraction;</code></pre>
 
+<p>Constraint names can be used inside type expressions when defining other
+   constraints. The resulting constraint matches any combination of the
+   referenced constraint's allowed types:</p>
+<pre><code><span class="kw">constraint</span> Rational = <span class="kw">Int</span> | Fraction;
+
+<span class="cmt">-- Tuple containing any combination of Rational types</span>
+<span class="kw">constraint</span> RationalPair = (Rational, Rational);
+<span class="cmt">-- matches (Int, Int), (Int, Fraction), (Fraction, Int), (Fraction, Fraction)</span>
+
+<span class="cmt">-- Array of Rational values</span>
+<span class="kw">constraint</span> RationalArray = [Rational];
+<span class="cmt">-- matches [Int] and [Fraction]</span>
+
+<span class="cmt">-- Template struct with constraint type arguments</span>
+<span class="kw">struct</span> Pair&lt;A, B&gt; { first A; second B; }
+<span class="kw">constraint</span> RationalPairStruct = Pair&lt;Rational, Rational&gt;;
+<span class="cmt">-- matches Pair&lt;Int, Int&gt;, Pair&lt;Int, Fraction&gt;, etc.</span>
+
+<span class="cmt">-- Function type with constraint parameters and return type</span>
+<span class="kw">constraint</span> RationalUnaryFn = (Rational) Rational;
+<span class="cmt">-- matches (Int) Int, (Int) Fraction, (Fraction) Int, etc.</span></code></pre>
+
+<p>This works with any type expression: maps, sets, refs, and any nesting depth.
+   For example, <code>[Pair&lt;Rational, [Rational]&gt;]</code> would match
+   <code>[Pair&lt;Int, [Fraction]&gt;]</code>, <code>[Pair&lt;Fraction, [Int]&gt;]</code>, etc.</p>
+
+<p><strong>Note:</strong> Constraints are not supertypes. A container of a constraint
+   type like <code>[Rational]</code> does not create a heterogeneous container
+   that mixes <code>Int</code> and <code>Fraction</code> values together. It matches
+   a homogeneous <code>[Int]</code> or a homogeneous <code>[Fraction]</code>, because
+   all types are resolved statically at compile time. The same applies to
+   maps, sets, tuples, and any other parameterized type.</p>
+
 <p><strong>Structural constraints</strong> require that certain functions or operators
    exist for the type:</p>
 <pre><code><span class="cmt">-- Any type T that has a &lt; and &gt; operator returning Bool</span>
@@ -2271,6 +2304,30 @@ show_both(<span class="num">1</span>, <span class="num">2.5</span>) println;    
 
 <span class="cmt">-- And with concrete types:</span>
 <span class="kw">fn</span> label(x Numeric, s <span class="kw">String</span>) <span class="kw">String</span> = s;</code></pre>
+
+<p><strong>Constraint as return type</strong> &mdash; a constraint name in the return type
+   position means the return type is inferred from the body and then validated
+   against the constraint. Each parameter and the return type are independently
+   constrained, so they may all be different concrete types:</p>
+<pre><code><span class="kw">constraint</span> AsSignal = <span class="kw">Int</span> | <span class="kw">Float</span>;
+
+<span class="cmt">-- Return type is inferred from the body, then checked against AsSignal</span>
+<span class="kw">fn</span> mix(a AsSignal, b AsSignal) AsSignal {
+    a + b
+}
+
+mix(<span class="num">1</span>, <span class="num">2.5</span>) println;    <span class="cmt">-- 3.5  (a: Int, b: Float, returns Float)</span>
+mix(<span class="num">3</span>, <span class="num">4</span>) println;      <span class="cmt">-- 7    (a: Int, b: Int, returns Int)</span>
+
+<span class="cmt">-- Tuple return types work too</span>
+<span class="kw">fn</span> stereo(a AsSignal, b AsSignal) (AsSignal, AsSignal) {
+    (a + b, a - b)
+}
+
+stereo(<span class="num">1</span>, <span class="num">2.5</span>) println;  <span class="cmt">-- (3.5, -1.5)</span>
+
+<span class="cmt">-- The compiler rejects return types that don't satisfy the constraint:</span>
+<span class="cmt">-- fn bad(x AsSignal) AsSignal { toString(x) }  -- error: String does not satisfy AsSignal</span></code></pre>
 
 <h4>Constraints on Structs, Enums, and Type Aliases</h4>
 <p>Constraints can be placed on any templated declaration, not just functions.</p>

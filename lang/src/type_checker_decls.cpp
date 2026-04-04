@@ -430,6 +430,21 @@ void TypeChecker::inferFunctionReturnType(FnDeclNode* fn, FuncInfo* fi, bool isL
         resultType = compiler_.voidType();
     }
 
+    // Validate return type against constraint if present
+    if (fn->returnTypeConstraint && resultType) {
+        auto savedBindings2 = typeParamBindings_;
+        // Ensure monoBindings are active for template functions
+        if (fi->monoBindings.size() > 0) {
+            typeParamBindings_ = fi->monoBindings;
+        }
+        auto pattern = buildConstraintPattern(fn->returnTypeConstraint.get());
+        if (!matchConstraintPattern(resultType, pattern)) {
+            error(fn->loc, "Return type '" + std::string(resultType->str()) +
+                  "' does not satisfy return type constraint in function '" + fn->name + "'");
+        }
+        typeParamBindings_ = savedBindings2;
+    }
+
     // Update the FuncInfo and AST node
     fi->returnType = resultType;
     fi->bodyChecked = true;
@@ -446,6 +461,11 @@ void TypeChecker::inferFunctionReturnType(FnDeclNode* fn, FuncInfo* fi, bool isL
 }
 
 void TypeChecker::checkFnDecl(FnDeclNode* decl) {
+    // Desugar constraint-as-param-type for local functions (top-level already done)
+    if (decl->resolvedFuncGlobalIndex == -1) {
+        desugarConstraintParams(decl);
+    }
+
     // Skip template function declarations; they are type-checked per monomorphization
     if (!decl->typeParams.empty()) return;
     // Skip untyped variadic functions — registered as templates, checked per monomorphization

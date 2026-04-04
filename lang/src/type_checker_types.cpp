@@ -286,6 +286,7 @@ StructType* TypeChecker::monomorphizeStruct(const std::string& name,
     // Cache and register (by display name for pattern matching lookup)
     monoStructCache_[key] = structType;
     structTypes_[displayName] = structType;
+    monoOrigin_[structType] = MonoOrigin{name, typeArgs};
 
     // Restore bindings
     typeParamBindings_ = savedBindings;
@@ -305,6 +306,7 @@ EnumType* TypeChecker::monomorphizeEnum(const std::string& name,
     if (name == "Option" && typeArgs.size() == 1) {
         auto* enumType = compiler_.optionType(typeArgs[0]);
         monoEnumCache_[key] = enumType;
+        monoOrigin_[enumType] = MonoOrigin{name, typeArgs};
         auto nameStr = enumType->str();
         enumTypes_[std::string(nameStr.data(), nameStr.size())] = enumType;
         return enumType;
@@ -363,6 +365,7 @@ EnumType* TypeChecker::monomorphizeEnum(const std::string& name,
     // Cache and register (by display name for pattern matching lookup)
     monoEnumCache_[key] = enumType;
     enumTypes_[displayName] = enumType;
+    monoOrigin_[enumType] = MonoOrigin{name, typeArgs};
 
     // Restore bindings
     typeParamBindings_ = savedBindings;

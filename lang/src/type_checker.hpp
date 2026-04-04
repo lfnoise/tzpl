@@ -151,8 +151,9 @@ public:
         Type* type = nullptr;              // ConcreteType: exact match
         std::string constraintName;        // ConstraintRef: check recursively
 
-        enum class Ctor { Array, List, Map, Set, Ref, Range, Coroutine };
+        enum class Ctor { Array, List, Map, Set, Ref, Range, Coroutine, Tuple, Function, Template };
         Ctor ctor;                                  // Parameterized: type constructor
+        std::string templateName;                   // Template: original template name
         std::vector<ConstraintPattern> args;        // Parameterized: sub-patterns
     };
 
@@ -290,6 +291,13 @@ private:
     // Template struct/enum monomorphization caches
     std::unordered_map<MonoKey, StructType*, MonoKeyHash> monoStructCache_;
     std::unordered_map<MonoKey, EnumType*, MonoKeyHash> monoEnumCache_;
+
+    // Reverse maps: monomorphized type -> template origin (for constraint pattern matching)
+    struct MonoOrigin {
+        std::string templateName;
+        std::vector<Type*> typeArgs;
+    };
+    std::unordered_map<Type*, MonoOrigin> monoOrigin_;
 
     // Concrete type aliases (resolved)
     std::unordered_map<std::string, Type*> typeAliases_;
