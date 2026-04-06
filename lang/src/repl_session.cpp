@@ -42,15 +42,29 @@ struct REPLSession::Impl {
     Compiler& compiler;
     VM& vm;
     VMTarget target;
-    ModuleCompiler moduleCompiler;
+    std::unique_ptr<ModuleCompiler> ownedModuleCompiler;  // null when borrowing
+    ModuleCompiler& moduleCompiler;
     TypeChecker typeChecker;
     std::vector<Program> programs;  // keep ASTs alive for template declNodes
 
     Impl(Compiler& c, VM& v, const VMTarget& t, std::vector<std::string> includePaths)
         : compiler(c), vm(v), target(t),
-          moduleCompiler(c, std::move(includePaths)),
+          ownedModuleCompiler(std::make_unique<ModuleCompiler>(c, std::move(includePaths))),
+          moduleCompiler(*ownedModuleCompiler),
           typeChecker(c, &moduleCompiler)
     {
+        initBuiltins();
+    }
+
+    Impl(Compiler& c, VM& v, const VMTarget& t, ModuleCompiler& mc)
+        : compiler(c), vm(v), target(t),
+          moduleCompiler(mc),
+          typeChecker(c, &moduleCompiler)
+    {
+        initBuiltins();
+    }
+
+    void initBuiltins() {
         // TypeChecker constructor registers builtins (creates Primitive objects).
         // This requires compilation context for global allocation.
         compiler.makeCurrent(target);
@@ -88,6 +102,11 @@ struct REPLSession::Impl {
 REPLSession::REPLSession(Compiler& compiler, VM& vm, const VMTarget& target,
                          std::vector<std::string> includePaths)
     : impl_(std::make_unique<Impl>(compiler, vm, target, std::move(includePaths)))
+{}
+
+REPLSession::REPLSession(Compiler& compiler, VM& vm, const VMTarget& target,
+                         ModuleCompiler& moduleCompiler)
+    : impl_(std::make_unique<Impl>(compiler, vm, target, moduleCompiler))
 {}
 
 REPLSession::~REPLSession() = default;

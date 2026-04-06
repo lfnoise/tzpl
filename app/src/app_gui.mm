@@ -557,16 +557,21 @@ int runGui(bridge::AppContext& appCtx) {
         appCtx.nrtvm->vm.setPrintOutput(guiState.printCapture.captureFile());
     }
 
-    // Create REPL session for GUI evaluation
+    // Create REPL session for GUI evaluation.
+    // Reuse the app's ModuleCompiler so that modules compiled during the
+    // initial runSource() keep their cached type objects, avoiding dynamic
+    // variable type conflicts when the user re-imports them from the editor.
     ts::REPLSession* session = nullptr;
     std::unique_ptr<ts::REPLSession> ownedSession;
     if (appCtx.nrtvm && appCtx.compiler) {
-        std::vector<std::string> paths;
-        if (appCtx.moduleCompiler)
-            paths = appCtx.moduleCompiler->includePaths();
-        ownedSession = std::make_unique<ts::REPLSession>(
-            *appCtx.compiler, appCtx.nrtvm->vm, appCtx.target,
-            std::move(paths));
+        if (appCtx.moduleCompiler) {
+            ownedSession = std::make_unique<ts::REPLSession>(
+                *appCtx.compiler, appCtx.nrtvm->vm, appCtx.target,
+                *appCtx.moduleCompiler);
+        } else {
+            ownedSession = std::make_unique<ts::REPLSession>(
+                *appCtx.compiler, appCtx.nrtvm->vm, appCtx.target);
+        }
         session = ownedSession.get();
     }
 

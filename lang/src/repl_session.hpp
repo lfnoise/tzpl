@@ -33,10 +33,17 @@
 
 namespace ts {
 
+class ModuleCompiler;
+
 class REPLSession {
 public:
     REPLSession(Compiler& compiler, VM& vm, const VMTarget& target,
                 std::vector<std::string> includePaths = {});
+    // Use an existing ModuleCompiler (e.g. from a prior runSource) so that
+    // cached modules and their type objects are reused, avoiding dynamic
+    // variable type conflicts on re-import.
+    REPLSession(Compiler& compiler, VM& vm, const VMTarget& target,
+                ModuleCompiler& moduleCompiler);
     ~REPLSession();
 
     // Result of evaluating a REPL input
