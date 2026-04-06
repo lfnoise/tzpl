@@ -280,6 +280,8 @@ public:
 	static const Palette& GetLightPalette();
 	static const Palette& GetRetroBluePalette();
 
+	void EnsureCursorVisible();
+
 private:
 	typedef std::vector<std::pair<std::regex, PaletteIndex>> RegexList;
 
@@ -330,7 +332,6 @@ private:
 	void ColorizeRange(int aFromLine = 0, int aToLine = 0);
 	void ColorizeInternal();
 	float TextDistanceToLineStart(const Coordinates& aFrom) const;
-	void EnsureCursorVisible();
 	int GetPageSize() const;
 	std::string GetText(const Coordinates& aStart, const Coordinates& aEnd) const;
 	Coordinates GetActualCursorCoordinates() const;

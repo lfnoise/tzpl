@@ -79,12 +79,15 @@ private:
         std::string filePath;
         TextEditor editor;
         bool modified = false;
+        unsigned id = 0;           // stable ID for ImGui child window (scroll state)
+        std::string editorTitle;   // "##editorN" -- cached to avoid re-alloc
     };
 
     std::vector<Tab> tabs_;
     int activeTab_ = 0;
     int prevActiveTab_ = -1;
     bool needsFocus_ = false;
+    unsigned nextTabId_ = 0;
     TextEditor::LanguageDefinition langDef_;
     FindReplaceState findReplace_;
 };

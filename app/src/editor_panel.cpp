@@ -77,6 +77,8 @@ EditorPanel::EditorPanel()
 void EditorPanel::newTab(const std::string& name) {
     Tab tab;
     tab.name = name;
+    tab.id = nextTabId_++;
+    tab.editorTitle = "##editor" + std::to_string(tab.id);
     tab.editor.SetLanguageDefinition(langDef_);
     tab.editor.SetShowWhitespaces(false);
     tabs_.push_back(std::move(tab));
@@ -100,6 +102,8 @@ void EditorPanel::openFile(const std::string& path) {
     Tab tab;
     tab.name = name;
     tab.filePath = path;
+    tab.id = nextTabId_++;
+    tab.editorTitle = "##editor" + std::to_string(tab.id);
     tab.editor.SetLanguageDefinition(langDef_);
     tab.editor.SetText(ss.str());
     tab.editor.SetShowWhitespaces(false);
@@ -208,11 +212,14 @@ void EditorPanel::draw(float width, float height, GuiState& state) {
     if (activeTab_ >= 0 && activeTab_ < (int)tabs_.size()) {
         auto& editor = tabs_[activeTab_].editor;
 
-        // Give the editor ImGui focus once after tab switch or file open
+        // Give the editor ImGui focus once after tab switch or file open.
+        // EnsureCursorVisible() sets mScrollToCursor which triggers
+        // ImGui::SetWindowFocus() inside Render, giving the editor focus
+        // so the cursor blinks.
         if (activeTab_ != prevActiveTab_ || needsFocus_) {
             prevActiveTab_ = activeTab_;
             needsFocus_ = false;
-            editor.SetCursorPosition(editor.GetCursorPosition());
+            editor.EnsureCursorVisible();
         }
 
         // Draw eval flash overlay
@@ -230,7 +237,7 @@ void EditorPanel::draw(float width, float height, GuiState& state) {
             drawList->AddRectFilled(ImVec2(x1, y1), ImVec2(x2, y2), color);
         }
 
-        editor.Render("##editor");
+        editor.Render(tabs_[activeTab_].editorTitle.c_str());
 
         // Track modifications (latch on; cleared by save)
         if (editor.IsTextChanged())
