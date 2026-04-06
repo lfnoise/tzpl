@@ -2624,6 +2624,48 @@ void op_coro_create(VM& vm, Code* pc) {
     DISPATCH(4);
 }
 
+// CORO_CREATE_LAMBDA Rd, argBase, argc, lambdaReg (3 words: op, regs, CoroutineType*)
+// Like op_coro_create but reads CodeBlock from a Lambda object and copies free vars.
+void op_coro_create_lambda(VM& vm, Code* pc) {
+    u16 dst = pc[1].regs[0], argBase = pc[1].regs[1];
+    u16 argc = pc[1].regs[2], lambdaReg = pc[1].regs[3];
+    auto* coroType = static_cast<CoroutineType*>(pc[2].p);
+
+    auto* lambda = static_cast<Lambda*>(vm.reg(lambdaReg).o);
+    CodeBlock* codeBlock = lambda->codeBlock_;
+    auto* funcType = static_cast<FunctionType*>(codeBlock->funcType);
+
+    // Total stored values: args + free vars
+    u16 totalArgs = argc + lambda->numFreeVars_;
+    auto* coro = CoroutineObj::create(coroType, funcType, codeBlock, totalArgs);
+
+    // Copy function arguments
+    for (u16 i = 0; i < argc; ++i) {
+        coro->args_[i] = vm.reg(argBase + i);
+    }
+    // Copy free variables from Lambda
+    for (u16 i = 0; i < lambda->numFreeVars_; ++i) {
+        coro->args_[argc + i] = lambda->freeVars_[i];
+    }
+
+    // Retain Obj* args and free vars
+    if (funcType) {
+        for (u16 i = 0; i < argc && i < funcType->argTypes_.size(); ++i) {
+            if (funcType->argTypes_[i]->isObjType() && coro->args_[i].o)
+                coro->args_[i].o->retain();
+        }
+    }
+    // Free vars are Obj types — retain them
+    auto* lambdaType = static_cast<LambdaType*>(lambda->type_);
+    for (u16 i = 0; i < lambda->numFreeVars_; ++i) {
+        if (lambdaType->freeVarTypes_[i]->isObjType() && coro->args_[argc + i].o)
+            coro->args_[argc + i].o->retain();
+    }
+
+    vm.reg(dst).o = coro;
+    DISPATCH(3);
+}
+
 // CORO_RESUME Rd, Rcoro (2 words: op, regs{dst, coroReg})
 void op_coro_resume(VM& vm, Code* pc) {
     u16 dst = pc[1].regs[0], coroReg = pc[1].regs[1];
@@ -2684,6 +2726,19 @@ void op_coro_resume(VM& vm, Code* pc) {
             vm.regsBase()[newBase + i] = frame->regs_[i];
         }
 
+        // Release the yield-retained Obj* refs now that they're back in the
+        // live register file.  No pool drain can happen between here and the
+        // next yield (we're mid-execution), so the objects stay alive.
+        CodeBlock* cb = frame->codeBlock_;
+        u16 gmi = frame->gcMapIndex_;
+        if (cb && gmi < cb->coroGCMaps_.size()) {
+            for (u16 idx : cb->coroGCMaps_[gmi]) {
+                if (idx < frame->numRegs_ && frame->regs_[idx].o)
+                    frame->regs_[idx].o->release();
+            }
+        }
+        frame->gcMapIndex_ = UINT16_MAX;  // nothing retained until next yield
+
         // Push flat frame for coro body
         vm.pushFrame(nullptr, frame->codeBlock_, newBase, frame->numRegs_, 0);
 
@@ -2710,8 +2765,22 @@ void op_yield(VM& vm, Code* pc) {
     // Save coroutine state
     coro->resumePC_ = pc + 2;  // resume after yield
     frame->gcMapIndex_ = gcMapIdx;
+    if (!coro->topFrame_) frame->retain();  // first yield: retain for coro ownership
     coro->topFrame_ = frame;
     coro->state_ = CoroutineObj::Suspended;
+
+    // Retain Obj* values in saved registers so they survive auto-release pool
+    // draining between scheduler invocations.  The matching release happens in
+    // op_coro_resume (Suspended path) and CoroutineFrame::releaseChildren().
+    // DeferredDeleteQueue::processN() skips objects whose refcount was bumped
+    // back above 0 after enqueue, making retain-after-release-to-zero safe.
+    CodeBlock* cb = frame->codeBlock_;
+    if (cb && gcMapIdx < cb->coroGCMaps_.size()) {
+        for (u16 idx : cb->coroGCMaps_[gcMapIdx]) {
+            if (idx < frame->numRegs_ && frame->regs_[idx].o)
+                frame->regs_[idx].o->retain();
+        }
+    }
 
     // Restore caller context
     vm.setBaseReg(coro->callerBaseReg_);

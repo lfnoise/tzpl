@@ -73,7 +73,11 @@ public:
         while (budget > 0 && !queue_.empty()) {
             GCObj* obj = queue_.back();
             queue_.pop_back();
-            obj->releaseChildren();  // release children before destruction
+            // Object was enqueued when refcount hit 0, but may have been
+            // re-retained since (e.g. coroutine yield retaining saved regs).
+            // Skip deletion if the object is alive again.
+            if (obj->refcount() > 0) continue;
+            obj->releaseChildren();
             delete obj;
             ++deleted;
             --budget;

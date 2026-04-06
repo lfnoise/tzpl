@@ -22,6 +22,7 @@
 //
 
 #include "builtins_internal.hpp"
+#include "disassemble.hpp"
 
 namespace ts {
 
@@ -1522,6 +1523,34 @@ static bool resolve_toAnyArray(Compiler& compiler, const std::vector<Type*>& arg
 }
 
 // ============================================================================
+// disassemble builtin
+// ============================================================================
+
+static void builtin_disassemble(VM& vm, u16 dst, u16, u16 argBase) {
+    auto* callable = static_cast<Callable*>(vm.reg(argBase).o);
+    auto* lambda = dynamic_cast<Lambda*>(callable);
+    if (lambda && lambda->codeBlock_) {
+        disassembleCodeBlock(lambda->codeBlock_, vm.printOutput());
+    } else {
+        std::fprintf(vm.printOutput(), "[builtin function -- no bytecode]\n");
+    }
+    std::fflush(vm.printOutput());
+    vm.reg(dst).i = 0;
+}
+
+static bool resolve_disassemble(Compiler& compiler, const std::vector<Type*>& args,
+    std::vector<Type*>& pt, Type*& rt, CFun& cf) {
+    if (args.size() != 1) return false;
+    // Accept any function type (FunctionType, LambdaType)
+    if (!dynamic_cast<FunctionType*>(args[0]) && !dynamic_cast<TemplateLambdaType*>(args[0]))
+        return false;
+    pt = args;
+    rt = compiler.voidType();
+    cf = builtin_disassemble;
+    return true;
+}
+
+// ============================================================================
 // Registration
 // ============================================================================
 
@@ -1619,6 +1648,9 @@ void registerBuiltinFunctions(Compiler& compiler,
     // --- print/println builtins (not RT-safe: they write to stdout) ---
     registerTemplate(compiler, functions, "print",        resolve_print,   /*rtSafe=*/false);
     registerTemplate(compiler, functions, "println",      resolve_println, /*rtSafe=*/false);
+
+    // --- disassemble builtin (not RT-safe: writes to stdout) ---
+    registerTemplate(compiler, functions, "disassemble",  resolve_disassemble, /*rtSafe=*/false);
 
     // --- Ref builtins ---
     registerTemplate(compiler, functions, "ref",          resolve_ref);

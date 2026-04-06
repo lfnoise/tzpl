@@ -30,6 +30,7 @@
 
 #include "repl_session.hpp"
 #include "nrt_vm.hpp"
+#include "module_compiler.hpp"
 #include "diagnostic.hpp"
 
 #include "imgui.h"
@@ -70,6 +71,21 @@ static bool gFileSave = false;
 static bool gFileSaveAs = false;
 static bool gFileSaveCopy = false;
 static bool gFileClose = false;
+
+// Edit operation flags (set by native Edit menu)
+static bool gEditUndo = false;
+static bool gEditRedo = false;
+static bool gEditCut = false;
+static bool gEditCopy = false;
+static bool gEditPaste = false;
+static bool gEditSelectAll = false;
+
+// Find operation flags
+static bool gFindShow = false;
+static bool gFindNext = false;
+static bool gFindPrevious = false;
+static bool gFindUseSelection = false;
+static bool gFindUseSelectionReplace = false;
 
 // Eval request flags
 static GuiState* gGuiState = nullptr;
@@ -125,6 +141,17 @@ static std::string findMonoFont() {
 - (void)fileSaveAs:(id)sender;
 - (void)fileSaveCopy:(id)sender;
 - (void)fileClose:(id)sender;
+- (void)editUndo:(id)sender;
+- (void)editRedo:(id)sender;
+- (void)editCut:(id)sender;
+- (void)editCopy:(id)sender;
+- (void)editPaste:(id)sender;
+- (void)editSelectAll:(id)sender;
+- (void)findShow:(id)sender;
+- (void)findNext:(id)sender;
+- (void)findPrevious:(id)sender;
+- (void)findUseSelection:(id)sender;
+- (void)findUseSelectionReplace:(id)sender;
 - (void)fontSizeAction:(id)sender;
 @end
 
@@ -135,6 +162,17 @@ static std::string findMonoFont() {
 - (void)fileSaveAs:(id)sender  { gFileSaveAs = true; }
 - (void)fileSaveCopy:(id)sender { gFileSaveCopy = true; }
 - (void)fileClose:(id)sender   { gFileClose = true; }
+- (void)editUndo:(id)sender    { gEditUndo = true; }
+- (void)editRedo:(id)sender    { gEditRedo = true; }
+- (void)editCut:(id)sender     { gEditCut = true; }
+- (void)editCopy:(id)sender    { gEditCopy = true; }
+- (void)editPaste:(id)sender   { gEditPaste = true; }
+- (void)editSelectAll:(id)sender { gEditSelectAll = true; }
+- (void)findShow:(id)sender    { gFindShow = true; }
+- (void)findNext:(id)sender    { gFindNext = true; }
+- (void)findPrevious:(id)sender { gFindPrevious = true; }
+- (void)findUseSelection:(id)sender { gFindUseSelection = true; }
+- (void)findUseSelectionReplace:(id)sender { gFindUseSelectionReplace = true; }
 - (void)fontSizeAction:(id)sender {
     NSMenuItem* item = (NSMenuItem*)sender;
     int tag = (int)[item tag];
@@ -207,6 +245,70 @@ static void setupNativeMenuBar(const float* fontSizes, int numFontSizes) {
 
     fileMenuItem.submenu = fileMenu;
     [mainMenu addItem:fileMenuItem];
+
+    // -- Edit menu -----------------------------------------------------------
+    NSMenuItem* editMenuItem = [[NSMenuItem alloc] init];
+    NSMenu* editMenu = [[NSMenu alloc] initWithTitle:@"Edit"];
+
+    NSMenuItem* undoItem = [editMenu addItemWithTitle:@"Undo"
+        action:@selector(editUndo:) keyEquivalent:@"z"];
+    undoItem.target = gMenuHandler;
+
+    NSMenuItem* redoItem = [editMenu addItemWithTitle:@"Redo"
+        action:@selector(editRedo:) keyEquivalent:@"Z"];
+    redoItem.target = gMenuHandler;
+
+    [editMenu addItem:[NSMenuItem separatorItem]];
+
+    NSMenuItem* cutItem = [editMenu addItemWithTitle:@"Cut"
+        action:@selector(editCut:) keyEquivalent:@"x"];
+    cutItem.target = gMenuHandler;
+
+    NSMenuItem* copyItem = [editMenu addItemWithTitle:@"Copy"
+        action:@selector(editCopy:) keyEquivalent:@"c"];
+    copyItem.target = gMenuHandler;
+
+    NSMenuItem* pasteItem = [editMenu addItemWithTitle:@"Paste"
+        action:@selector(editPaste:) keyEquivalent:@"v"];
+    pasteItem.target = gMenuHandler;
+
+    [editMenu addItem:[NSMenuItem separatorItem]];
+
+    NSMenuItem* selectAllItem = [editMenu addItemWithTitle:@"Select All"
+        action:@selector(editSelectAll:) keyEquivalent:@"a"];
+    selectAllItem.target = gMenuHandler;
+
+    editMenuItem.submenu = editMenu;
+    [mainMenu addItem:editMenuItem];
+
+    // -- Find menu -----------------------------------------------------------
+    NSMenuItem* findMenuItem = [[NSMenuItem alloc] init];
+    NSMenu* findMenu = [[NSMenu alloc] initWithTitle:@"Find"];
+
+    NSMenuItem* findItem = [findMenu addItemWithTitle:@"Find..."
+        action:@selector(findShow:) keyEquivalent:@"f"];
+    findItem.target = gMenuHandler;
+
+    NSMenuItem* findNextItem = [findMenu addItemWithTitle:@"Find Next"
+        action:@selector(findNext:) keyEquivalent:@"g"];
+    findNextItem.target = gMenuHandler;
+
+    NSMenuItem* findPrevItem = [findMenu addItemWithTitle:@"Find Previous"
+        action:@selector(findPrevious:) keyEquivalent:@"G"];
+    findPrevItem.target = gMenuHandler;
+
+    [findMenu addItem:[NSMenuItem separatorItem]];
+
+    NSMenuItem* useSelFind = [findMenu addItemWithTitle:@"Use Selection for Find"
+        action:@selector(findUseSelection:) keyEquivalent:@"e"];
+    useSelFind.target = gMenuHandler;
+
+    NSMenuItem* useSelReplace = [findMenu addItemWithTitle:@"Use Selection for Replace"
+        action:@selector(findUseSelectionReplace:) keyEquivalent:@"E"];
+    useSelReplace.target = gMenuHandler;
+
+    findMenuItem.submenu = findMenu;
+    [mainMenu addItem:findMenuItem];
 
     // -- View menu -----------------------------------------------------------
     NSMenuItem* viewMenuItem = [[NSMenuItem alloc] init];
@@ -319,6 +421,15 @@ static void keyCallback(GLFWwindow* window, int key, int scancode,
             if (key == GLFW_KEY_W && !shift) { gFileClose = true; return; }
         }
 
+        // Find shortcuts
+        if (cmd) {
+            if (key == GLFW_KEY_F && !shift) { gFindShow = true; return; }
+            if (key == GLFW_KEY_G && !shift) { gFindNext = true; return; }
+            if (key == GLFW_KEY_G && shift)  { gFindPrevious = true; return; }
+            if (key == GLFW_KEY_E && !shift) { gFindUseSelection = true; return; }
+            if (key == GLFW_KEY_E && shift)  { gFindUseSelectionReplace = true; return; }
+        }
+
         // Eval shortcuts
         if (gGuiState && key == GLFW_KEY_ENTER) {
             if (cmd && shift) {
@@ -339,38 +450,7 @@ static void keyCallback(GLFWwindow* window, int key, int scancode,
         gPrevKeyCallback(window, key, scancode, action, mods);
 }
 
-// ---------------------------------------------------------------------------
-// Eval helper
-// ---------------------------------------------------------------------------
-
-static void evaluateCode(const std::string& code, bridge::AppContext& ctx,
-                         GuiState& state, ts::REPLSession& session,
-                         int flashStart = -1, int flashEnd = -1) {
-    if (code.empty()) return;
-
-    // Acquire NRTVM mutex for thread safety
-    std::lock_guard<std::mutex> lock(ctx.nrtvm->mtx);
-    ctx.nrtvm->vm.makeCurrent();
-
-    auto result = session.eval(code);
-
-    if (!result.errors.empty()) {
-        auto formatted = ts::formatErrorsPlain(result.errors, code, "<editor>");
-        for (auto& line : formatted) {
-            state.output.append(line, LineKind::Error);
-        }
-    } else if (result.hasValue) {
-        state.output.append("\xe2\x86\x92 " + result.formattedValue
-                            + " : " + result.typeName, LineKind::Result);
-    }
-
-    ctx.nrtvm->vm.gcHeartbeat();
-
-    // Trigger eval flash
-    if (flashStart >= 0 && flashEnd >= 0) {
-        state.flash.trigger(flashStart, flashEnd);
-    }
-}
+// evaluateCode is now handled by GuiState::asyncEval (see gui_state.cpp)
 
 // ---------------------------------------------------------------------------
 // runGui
@@ -419,10 +499,18 @@ int runGui(bridge::AppContext& appCtx) {
     int currentFontIdx = 0;
 
     std::string fontPath = findMonoFont();
+    // Default Latin range plus bullet (U+2022) and arrows (U+2190-21FF)
+    static const ImWchar glyphRanges[] = {
+        0x0020, 0x00FF, // Basic Latin + Latin Supplement
+        0x2010, 0x2027, // General Punctuation (includes bullet U+2022)
+        0x2190, 0x21FF, // Arrows (includes U+2192 right arrow)
+        0,
+    };
     for (int i = 0; i < numFontSizes; ++i) {
         float atlasSize = fontSizes[i] * xscale;
         if (!fontPath.empty())
-            fonts[i] = io.Fonts->AddFontFromFileTTF(fontPath.c_str(), atlasSize);
+            fonts[i] = io.Fonts->AddFontFromFileTTF(fontPath.c_str(), atlasSize,
+                                                      nullptr, glyphRanges);
         if (!fonts[i]) {
             ImFontConfig cfg;
             cfg.SizePixels = atlasSize;
@@ -448,8 +536,12 @@ int runGui(bridge::AppContext& appCtx) {
     ts::REPLSession* session = nullptr;
     std::unique_ptr<ts::REPLSession> ownedSession;
     if (appCtx.nrtvm && appCtx.compiler) {
+        std::vector<std::string> paths;
+        if (appCtx.moduleCompiler)
+            paths = appCtx.moduleCompiler->includePaths();
         ownedSession = std::make_unique<ts::REPLSession>(
-            *appCtx.compiler, appCtx.nrtvm->vm, appCtx.target);
+            *appCtx.compiler, appCtx.nrtvm->vm, appCtx.target,
+            std::move(paths));
         session = ownedSession.get();
     }
 
@@ -479,8 +571,9 @@ int runGui(bridge::AppContext& appCtx) {
         @autoreleasepool {
             glfwPollEvents();
 
-            // Drain captured print output
+            // Drain captured print output and collect async eval results
             guiState.printCapture.drain(guiState.output);
+            guiState.asyncEval.collect(guiState);
 
             // Update eval flash
             guiState.flash.update(io.DeltaTime);
@@ -527,9 +620,18 @@ int runGui(bridge::AppContext& appCtx) {
             }
             if (gFileOpen) {
                 gFileOpen = false;
+                // Native dialog pumps macOS events, so key callbacks (eval
+                // shortcuts) can fire during it.  Clear stale eval flags
+                // after the dialog returns to avoid evaluating the wrong tab.
                 std::string path = nativeOpenFileDialog();
+                guiState.evalFile = false;
+                guiState.evalSelection = false;
+                guiState.evalLine = false;
                 if (!path.empty())
                     editorPanel.openFile(path);
+                // Restore keyboard focus after native dialog
+                glfwFocusWindow(window);
+                [nswin makeFirstResponder:nswin.contentView];
             }
             if (gFileSave) {
                 gFileSave = false;
@@ -544,15 +646,21 @@ int runGui(bridge::AppContext& appCtx) {
                 gFileSaveAs = false;
                 std::string path = nativeSaveFileDialog(
                     editorPanel.activeTabName());
+                guiState.evalFile = guiState.evalSelection = guiState.evalLine = false;
                 if (!path.empty())
                     editorPanel.saveAs(path);
+                glfwFocusWindow(window);
+                [nswin makeFirstResponder:nswin.contentView];
             }
             if (gFileSaveCopy) {
                 gFileSaveCopy = false;
                 std::string path = nativeSaveFileDialog(
                     editorPanel.activeTabName());
+                guiState.evalFile = guiState.evalSelection = guiState.evalLine = false;
                 if (!path.empty())
                     editorPanel.saveCopy(path);
+                glfwFocusWindow(window);
+                [nswin makeFirstResponder:nswin.contentView];
             }
             if (gFileClose) {
                 gFileClose = false;
@@ -560,43 +668,70 @@ int runGui(bridge::AppContext& appCtx) {
             }
 
             // ---------------------------------------------------------------
-            // Process eval requests from keyboard shortcuts
+            // Process edit operations (triggered by native Edit menu)
             // ---------------------------------------------------------------
-            if (session) {
-                if (guiState.evalSelection) {
-                    guiState.evalSelection = false;
-                    editorPanel.clearErrorMarkers();
-                    std::string code = editorPanel.getSelectedText();
-                    int startLine = -1, endLine = -1;
-                    if (code.empty()) {
-                        // No selection: eval current block
-                        code = editorPanel.getCurrentBlockText(startLine, endLine);
-                    } else {
-                        auto cursor = editorPanel.getCursorPosition();
-                        startLine = endLine = cursor.mLine;
+            if (gEditUndo)      { gEditUndo = false;      editorPanel.undo(); }
+            if (gEditRedo)      { gEditRedo = false;      editorPanel.redo(); }
+            if (gEditCut)       { gEditCut = false;       editorPanel.cut(); }
+            if (gEditCopy)      { gEditCopy = false;      if (!outputPanel.tryCopy()) editorPanel.copy(); }
+            if (gEditPaste)     { gEditPaste = false;     editorPanel.paste(); }
+            if (gEditSelectAll) { gEditSelectAll = false;  if (!outputPanel.trySelectAll()) editorPanel.selectAll(); }
+
+            // ---------------------------------------------------------------
+            // Process find operations
+            // ---------------------------------------------------------------
+            if (gFindShow) {
+                gFindShow = false;
+                auto& fr = editorPanel.findReplace();
+                std::string sel = editorPanel.getSelectedText();
+                if (!sel.empty())
+                    fr.useSelectionForFind(sel);
+                fr.show();
+                if (auto* ed = editorPanel.activeEditor()) {
+                    fr.search(*ed);
+                    editorPanel.updateSearchHighlights();
+                }
+            }
+            if (gFindNext) {
+                gFindNext = false;
+                if (auto* ed = editorPanel.activeEditor()) {
+                    editorPanel.findReplace().findNext(*ed);
+                    editorPanel.updateSearchHighlights();
+                }
+            }
+            if (gFindPrevious) {
+                gFindPrevious = false;
+                if (auto* ed = editorPanel.activeEditor()) {
+                    editorPanel.findReplace().findPrevious(*ed);
+                    editorPanel.updateSearchHighlights();
+                }
+            }
+            if (gFindUseSelection) {
+                gFindUseSelection = false;
+                std::string sel = editorPanel.getSelectedText();
+                if (!sel.empty()) {
+                    auto& fr = editorPanel.findReplace();
+                    fr.useSelectionForFind(sel);
+                    fr.show();
+                    if (auto* ed = editorPanel.activeEditor()) {
+                        fr.search(*ed);
+                        editorPanel.updateSearchHighlights();
                     }
-                    evaluateCode(code, appCtx, guiState, *session,
-                                 startLine, endLine);
                 }
-                if (guiState.evalLine) {
-                    guiState.evalLine = false;
-                    editorPanel.clearErrorMarkers();
-                    std::string code = editorPanel.getCurrentLineText();
-                    auto cursor = editorPanel.getCursorPosition();
-                    evaluateCode(code, appCtx, guiState, *session,
-                                 cursor.mLine, cursor.mLine);
-                }
-                if (guiState.evalFile) {
-                    guiState.evalFile = false;
-                    editorPanel.clearErrorMarkers();
-                    std::string code = editorPanel.getAllText();
-                    evaluateCode(code, appCtx, guiState, *session, 0,
-                                 editorPanel.getCursorPosition().mLine);
+            }
+            if (gFindUseSelectionReplace) {
+                gFindUseSelectionReplace = false;
+                std::string sel = editorPanel.getSelectedText();
+                if (!sel.empty()) {
+                    editorPanel.findReplace().useSelectionForReplace(sel);
+                    editorPanel.findReplace().show();
                 }
             }
 
             // ---------------------------------------------------------------
             // Layout: editor on top, output on bottom, with splitter
+            // (Eval requests processed AFTER draw so ImGui tab bar has
+            //  updated activeTab_ to match the visually selected tab.)
             // ---------------------------------------------------------------
             ImGuiViewport* viewport = ImGui::GetMainViewport();
             ImGui::SetNextWindowPos(viewport->Pos);
@@ -630,8 +765,47 @@ int runGui(bridge::AppContext& appCtx) {
                 ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNS);
 
             // Output panel
-            outputPanel.draw(totalW, outputH, guiState.output,
-                             session, appCtx.nrtvm);
+            outputPanel.draw(totalW, outputH, guiState.output);
+
+            // ---------------------------------------------------------------
+            // Process eval requests AFTER draw (activeTab_ is now current)
+            // ---------------------------------------------------------------
+            if (session && !guiState.asyncEval.busy()) {
+                if (guiState.evalSelection) {
+                    guiState.evalSelection = false;
+                    editorPanel.clearErrorMarkers();
+                    std::string code = editorPanel.getSelectedText();
+                    int startLine = -1, endLine = -1;
+                    if (code.empty()) {
+                        code = editorPanel.getCurrentBlockText(startLine, endLine);
+                    } else {
+                        auto cursor = editorPanel.getCursorPosition();
+                        startLine = endLine = cursor.mLine;
+                    }
+                    guiState.asyncEval.launch(code, appCtx, *session,
+                                              startLine, endLine);
+                }
+                if (guiState.evalLine) {
+                    guiState.evalLine = false;
+                    editorPanel.clearErrorMarkers();
+                    std::string code = editorPanel.getCurrentLineText();
+                    auto cursor = editorPanel.getCursorPosition();
+                    guiState.asyncEval.launch(code, appCtx, *session,
+                                              cursor.mLine, cursor.mLine);
+                }
+                if (guiState.evalFile) {
+                    guiState.evalFile = false;
+                    editorPanel.clearErrorMarkers();
+                    std::string code = editorPanel.getAllText();
+                    guiState.asyncEval.launch(code, appCtx, *session, 0,
+                                              editorPanel.getCursorPosition().mLine);
+                }
+                // Dispatch pending REPL input
+                if (outputPanel.hasPendingInput()) {
+                    std::string input = outputPanel.takePendingInput();
+                    guiState.asyncEval.launch(input, appCtx, *session, -1, -1);
+                }
+            }
 
             ImGui::End();
 

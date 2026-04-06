@@ -152,11 +152,20 @@ Type* TypeChecker::inferLambdaExpr(LambdaExprNode* expr) {
     Type* savedReturnType = currentReturnType_;
     bool savedInferring = inferringReturnType_;
     Type* savedInferred = inferredReturnType_;
+    bool savedInCoro = inCoroutineBody_;
+    Type* savedYieldType = currentYieldType_;
 
     // Set up for capture detection
     currentCaptures_ = &expr->captures;
 
-    if (inferLambdaReturn) {
+    // Handle coroutine lambdas: declared return type is yield type,
+    // wrapped in Coroutine<T> (same convention as coro fn declarations)
+    if (expr->isCoroutine && retType) {
+        inCoroutineBody_ = true;
+        currentYieldType_ = retType;
+        retType = compiler_.coroutineType(retType);
+        currentReturnType_ = compiler_.voidType();
+    } else if (inferLambdaReturn) {
         inferringReturnType_ = true;
         currentReturnType_ = nullptr;
         inferredReturnType_ = nullptr;
@@ -204,6 +213,8 @@ Type* TypeChecker::inferLambdaExpr(LambdaExprNode* expr) {
     currentReturnType_ = savedReturnType;
     inferringReturnType_ = savedInferring;
     inferredReturnType_ = savedInferred;
+    inCoroutineBody_ = savedInCoro;
+    currentYieldType_ = savedYieldType;
 
     // Propagate captures upward: if we're inside a parent lambda, any variable
     // that the nested lambda captured from beyond the parent's boundary must also

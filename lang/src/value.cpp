@@ -516,7 +516,7 @@ CoroutineFrame::CoroutineFrame(Type* type, CodeBlock* cb, u16 numRegs)
     , caller_(nullptr)
     , resultReg_(0)
     , numRegs_(numRegs)
-    , gcMapIndex_(0)
+    , gcMapIndex_(UINT16_MAX)
 {
     for (u16 i = 0; i < numRegs; ++i) regs_[i] = Word();
 }
@@ -945,7 +945,7 @@ VMString wordToString(Word w, Type* type) {
         s += w.s->str();
         return s;
     }
-    if (type->isObjType()) {
+    if (!type || type->isObjType()) {
         if (w.o) return w.o->str();
         return rt::vmstr("nil");
     }

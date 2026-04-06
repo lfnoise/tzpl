@@ -599,7 +599,7 @@ tzpl_SErr newNode(const char* name, i64 nodeID) {
     std::lock_guard<std::mutex> lck(e->nrt_lock_);
     
     Node* test = tBundle.silo->nrt_getNode(nodeID);
-    if (test) throw tzpl_errNodeIDAlreadyTaken;
+    if (test) return tzpl_errNodeIDAlreadyTaken;
 
     Node* node = nullptr;
     try {
@@ -618,7 +618,7 @@ tzpl_SErr freeNode(i64 nodeID) {
     if (!e) return tzpl_errNoActiveBundle;
     
     Node* node = tBundle.silo->nrt_getNode(nodeID);
-    if (!node) throw tzpl_errNodeNotFound;
+    if (!node) return tzpl_errNodeNotFound;
 
     tBundle.add(new RemoveNodeCmd{nodeID});
     return tzpl_errNone;
@@ -735,8 +735,8 @@ tzpl_SErr replaceNode(i64 oldNodeID, i64 newNodeID, f64 xfadeTime, FadeCurve cur
 
 tzpl_SErr disconnectInput(PortAddr dst, f64 xfadeTime, FadeCurve curve) {
     Engine* e = tBundle.engine;
-    if (!e) throw tzpl_errNoActiveBundle;
-    
+    if (!e) return tzpl_errNoActiveBundle;
+
     InPort* port;
     tzpl_SErr err = tBundle.silo->nrt_getInPort(dst, port);
     if (err != tzpl_errNone) return err;

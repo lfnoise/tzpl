@@ -3,16 +3,91 @@
 
 #include "output_panel.hpp"
 #include "imgui.h"
-#include "repl_session.hpp"
-#include "nrt_vm.hpp"
-#include "diagnostic.hpp"
-#include <mutex>
 #include <cstring>
-
-using namespace ts;
 
 OutputPanel::OutputPanel() {
     reclaimFocus_ = false;
+}
+
+// Callback to auto-scroll output and track selection state
+int OutputPanel::outputScrollCallback(ImGuiInputTextCallbackData* cbData) {
+    auto* self = static_cast<OutputPanel*>(cbData->UserData);
+    ImGuiIO& io = ImGui::GetIO();
+
+    // macOS: Cmd+Arrow for line/text start/end
+    // ImGui's InputTextMultiline doesn't handle these correctly on macOS.
+    if (io.ConfigMacOSXBehaviors && io.KeySuper && !io.KeyCtrl && !io.KeyAlt) {
+        bool shift = io.KeyShift;
+        int newPos = cbData->CursorPos;
+        bool handled = false;
+
+        if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow)) {
+            // Move to beginning of current line (undo ImGui's char-left first)
+            int origPos = cbData->CursorPos + 1;
+            if (origPos > cbData->BufTextLen) origPos = cbData->BufTextLen;
+            newPos = origPos;
+            while (newPos > 0 && cbData->Buf[newPos - 1] != '\n')
+                --newPos;
+            handled = true;
+        } else if (ImGui::IsKeyPressed(ImGuiKey_RightArrow)) {
+            // Move to end of current line (undo ImGui's char-right first)
+            int origPos = cbData->CursorPos > 0 ? cbData->CursorPos - 1 : 0;
+            newPos = origPos;
+            while (newPos < cbData->BufTextLen && cbData->Buf[newPos] != '\n')
+                ++newPos;
+            handled = true;
+        } else if (ImGui::IsKeyPressed(ImGuiKey_UpArrow)) {
+            newPos = 0;
+            handled = true;
+        } else if (ImGui::IsKeyPressed(ImGuiKey_DownArrow)) {
+            newPos = cbData->BufTextLen;
+            handled = true;
+        }
+
+        if (handled) {
+            cbData->CursorPos = newPos;
+            if (shift) {
+                cbData->SelectionEnd = newPos;
+            } else {
+                cbData->SelectionStart = cbData->SelectionEnd = newPos;
+            }
+        }
+    }
+
+    // Handle pending select-all from native menu Cmd+A
+    if (self->pendingSelectAll_) {
+        cbData->SelectionStart = 0;
+        cbData->SelectionEnd = cbData->BufTextLen;
+        self->pendingSelectAll_ = false;
+    }
+
+    // Track selection for external copy support (native menu Cmd+C)
+    self->selStart_ = cbData->SelectionStart;
+    self->selEnd_ = cbData->SelectionEnd;
+
+    if (self->scrollToBottom_) {
+        cbData->CursorPos = cbData->BufTextLen;
+        cbData->SelectionStart = cbData->SelectionEnd = cbData->CursorPos;
+        self->scrollToBottom_ = false;
+    }
+    return 0;
+}
+
+bool OutputPanel::tryCopy() {
+    if (!outputActive_ || selStart_ == selEnd_) return false;
+    int s = std::min(selStart_, selEnd_);
+    int e = std::max(selStart_, selEnd_);
+    if (s < 0) s = 0;
+    if (e > (int)outputText_.size()) e = (int)outputText_.size();
+    std::string selected = outputText_.substr(s, e - s);
+    ImGui::SetClipboardText(selected.c_str());
+    return true;
+}
+
+bool OutputPanel::trySelectAll() {
+    if (!outputActive_) return false;
+    pendingSelectAll_ = true;
+    return true;
 }
 
 // ImGui InputText callback for command history navigation
@@ -44,35 +119,42 @@ int OutputPanel::inputCallback(ImGuiInputTextCallbackData* cbData) {
     return 0;
 }
 
-void OutputPanel::draw(float width, float height, OutputBuffer& output,
-                       REPLSession* session, NRTVM* nrtvm) {
+void OutputPanel::draw(float width, float height, OutputBuffer& output) {
     ImGui::BeginChild("OutputPanel", ImVec2(width, height), false);
 
     // Drain any new lines
     output.drain();
 
+    // Rebuild output text if line count changed
+    size_t lineCount = output.lines().size();
+    if (lineCount != lastLineCount_) {
+        lastLineCount_ = lineCount;
+        outputText_.clear();
+        for (auto& line : output.lines()) {
+            switch (line.kind) {
+                case LineKind::Result: outputText_ += "=> "; break;
+                case LineKind::Error:  outputText_ += "!! "; break;
+                case LineKind::Info:   outputText_ += "-- "; break;
+                default: break;
+            }
+            outputText_ += line.text;
+            outputText_ += '\n';
+        }
+        scrollToBottom_ = true;
+    }
+
     // Scrolling output area (leave room for input line)
     float inputHeight = ImGui::GetFrameHeightWithSpacing() + 4.0f;
     float outputHeight = height - inputHeight;
 
-    ImGui::BeginChild("OutputScroll", ImVec2(width, outputHeight), true);
-    for (auto& line : output.lines()) {
-        ImVec4 color;
-        switch (line.kind) {
-            case LineKind::Output: color = ImVec4(0.9f, 0.9f, 0.9f, 1.0f); break;
-            case LineKind::Result: color = ImVec4(0.4f, 0.9f, 0.5f, 1.0f); break;
-            case LineKind::Error:  color = ImVec4(1.0f, 0.4f, 0.4f, 1.0f); break;
-            case LineKind::Info:   color = ImVec4(0.6f, 0.7f, 0.9f, 1.0f); break;
-        }
-        ImGui::PushStyleColor(ImGuiCol_Text, color);
-        ImGui::TextWrapped("%s", line.text.c_str());
-        ImGui::PopStyleColor();
-    }
-    if (scrollToBottom_) {
-        ImGui::SetScrollHereY(1.0f);
-        scrollToBottom_ = false;
-    }
-    ImGui::EndChild();
+    // Selectable, copyable read-only text area
+    ImGuiInputTextFlags outputFlags = ImGuiInputTextFlags_ReadOnly
+                                    | ImGuiInputTextFlags_CallbackAlways;
+    ImGui::InputTextMultiline("##output_text",
+                              outputText_.data(), outputText_.size() + 1,
+                              ImVec2(width, outputHeight),
+                              outputFlags, outputScrollCallback, this);
+    outputActive_ = ImGui::IsItemActive();
 
     // REPL input line
     ImGui::PushItemWidth(width - 8.0f);
@@ -84,28 +166,11 @@ void OutputPanel::draw(float width, float height, OutputBuffer& output,
         inputBuf_[0] = '\0';
         reclaimFocus_ = true;
 
-        if (!input.empty() && session && nrtvm) {
-            // Add to history
+        if (!input.empty()) {
             history_.push_back(input);
             historyIdx_ = -1;
-
-            // Evaluate
-            std::lock_guard<std::mutex> lock(nrtvm->mtx);
-            nrtvm->vm.makeCurrent();
-
-            auto result = session->eval(input);
-
-            if (!result.errors.empty()) {
-                auto formatted = formatErrorsPlain(result.errors, input, "<repl>");
-                for (auto& line : formatted) {
-                    output.append(line, LineKind::Error);
-                }
-            } else if (result.hasValue) {
-                output.append("\xe2\x86\x92 " + result.formattedValue
-                              + " : " + result.typeName, LineKind::Result);
-            }
-
-            nrtvm->vm.gcHeartbeat();
+            output.append("> " + input, LineKind::Info);
+            pendingInput_ = input;
             scrollToBottom_ = true;
         }
     }

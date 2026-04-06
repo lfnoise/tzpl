@@ -263,6 +263,7 @@ void op_ref_set(VM& vm, Code* pc);            // REF_SET Rd, Ra, Rb (3 words: op
 
 // --- Coroutines ---
 void op_coro_create(VM& vm, Code* pc);        // CORO_CREATE Rd, argBase, argc (4 words: op, regs, global_idx, CoroutineType*)
+void op_coro_create_lambda(VM& vm, Code* pc); // CORO_CREATE_LAMBDA Rd, argBase, argc, lambdaReg (3 words: op, regs, CoroutineType*)
 void op_coro_resume(VM& vm, Code* pc);        // CORO_RESUME Rd, Rcoro (2 words: op, regs{dst, coroReg})
 void op_yield(VM& vm, Code* pc);              // YIELD Rsrc, gcMapIndex (2 words: op, regs{src, gcMapIdx})
 void op_coro_done(VM& vm, Code* pc);          // CORO_DONE (1 word: op)

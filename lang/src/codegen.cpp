@@ -3203,6 +3203,16 @@ u16 CodeGen::genCall(CallExpr_* expr) {
             if (nextReg_ < next) { nextReg_ = next; if (nextReg_ > maxReg_) maxReg_ = nextReg_; }
         }
 
+        // Coroutine lambda call
+        if (expr->isCoroCall) {
+            auto* coroType = dynamic_cast<CoroutineType*>(expr->resolvedType);
+            u16 resultReg = allocReg();
+            emitOp(op_coro_create_lambda);
+            emitRegs(resultReg, argBase, (u16)expr->args.size(), calleeReg);
+            emitPtr(coroType);
+            return resultReg;
+        }
+
         if (isTailCall) {
             emitOp(op_tail_call_lambda);
             emitRegs(0, (u16)expr->args.size(), argBase, calleeReg);
@@ -8264,10 +8274,17 @@ u16 CodeGen::genLambdaExpr(LambdaExprNode* expr) {
     inTailPosition_ = false;
     bool savedInFunctionBody = inFunctionBody_;
     inFunctionBody_ = true;
+    bool savedInCoroFn = inCoroutineFn_;
+    u32 savedYieldCount = currentYieldCount_;
+
+    if (expr->isCoroutine) {
+        inCoroutineFn_ = true;
+        currentYieldCount_ = 0;
+    }
 
     // Create new CodeBlock for lambda body
     currentBlock_ = new CodeBlock();
-    currentBlock_->name = compiler_.intern("<lambda>");
+    currentBlock_->name = compiler_.intern(expr->isCoroutine ? "<coro-lambda>" : "<lambda>");
     currentBlock_->numArgs = (u16)expr->params.size();
     currentBlock_->funcType = lambdaType;
     nextReg_ = 0;
@@ -8333,11 +8350,19 @@ u16 CodeGen::genLambdaExpr(LambdaExprNode* expr) {
         if (!emittedReturn) {
             if (currentBlock_->code.empty() ||
                 currentBlock_->code.back().op != op_return) {
-                emitOp(op_return_void);
+                if (inCoroutineFn_) {
+                    emitOp(op_coro_done);
+                } else {
+                    emitOp(op_return_void);
+                }
             }
         }
     } else {
-        emitOp(op_return_void);
+        if (inCoroutineFn_) {
+            emitOp(op_coro_done);
+        } else {
+            emitOp(op_return_void);
+        }
     }
 
     popScope();
@@ -8354,6 +8379,8 @@ u16 CodeGen::genLambdaExpr(LambdaExprNode* expr) {
     maxReg_ = savedMaxReg;
     inTailPosition_ = savedTailPos;
     inFunctionBody_ = savedInFunctionBody;
+    inCoroutineFn_ = savedInCoroFn;
+    currentYieldCount_ = savedYieldCount;
     localScopes_ = std::move(savedScopes);
     jumpFixups_ = std::move(savedFixups);
     constRegs_ = std::move(savedConsts);

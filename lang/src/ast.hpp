@@ -370,6 +370,8 @@ struct LambdaExprNode : Expr {
     std::vector<WhereConstraint> whereConstraints;    // constraints on type params
     TemplateLambdaType* templateLambdaType = nullptr;  // set by type checker for template lambdas
 
+    bool isCoroutine = false;  // Set by parser when 'coro fn(...)' lambda syntax is used
+
     LambdaExprNode(SourceRange l, std::vector<Param> p, TypeExprPtr ret, ASTPtr b)
         : Expr(LambdaExpr, l), params(std::move(p)),
           returnType(std::move(ret)), body(std::move(b)) {}

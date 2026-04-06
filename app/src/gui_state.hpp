@@ -12,7 +12,13 @@
 #include <string>
 #include <vector>
 #include <mutex>
+#include <atomic>
+#include <thread>
 #include <cstdio>
+
+#include "repl_session.hpp"
+
+namespace bridge { struct AppContext; }
 
 // ---------------------------------------------------------------------------
 // Output line kinds for color coding
@@ -84,6 +90,34 @@ struct EvalFlash {
 };
 
 // ---------------------------------------------------------------------------
+// Async evaluation (runs on a background thread)
+// ---------------------------------------------------------------------------
+
+struct GuiState;  // forward
+
+struct AsyncEval {
+    std::thread thread;
+    std::atomic<bool> running{false};
+
+    // Result (written by worker thread, read by main thread after running==false)
+    ts::REPLSession::EvalResult result;
+    std::string code;
+    int flashStart = -1;
+    int flashEnd = -1;
+
+    bool busy() const { return running.load(); }
+
+    // Launch eval on a background thread. Ignored if already running.
+    void launch(const std::string& code, bridge::AppContext& ctx,
+                ts::REPLSession& session, int flashStart, int flashEnd);
+
+    // If eval finished, join thread and process result into output. Returns true if collected.
+    bool collect(GuiState& state);
+
+    ~AsyncEval();
+};
+
+// ---------------------------------------------------------------------------
 // Shared GUI state
 // ---------------------------------------------------------------------------
 
@@ -91,6 +125,7 @@ struct GuiState {
     OutputBuffer output;
     PrintCapture printCapture;
     EvalFlash flash;
+    AsyncEval asyncEval;
     float splitRatio = 0.65f; // editor takes 65% of window height
 
     // Eval request flags (set by GLFW key callback, consumed by main loop)

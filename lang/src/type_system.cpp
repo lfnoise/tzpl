@@ -66,7 +66,7 @@ TupleType::TupleType(TypeVec fields)
     registerNewObj(this);
     int i = 0;
     for (Type* field : fields_) {
-        if (field->isObjType()) {
+        if (field && field->isObjType()) {
             gcFields_.push_back(i);
         }
         ++i;

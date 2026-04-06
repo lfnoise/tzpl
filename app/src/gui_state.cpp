@@ -2,6 +2,9 @@
 // Copyright (C) 2026 James McCartney
 
 #include "gui_state.hpp"
+#include "tzpl_app_context.hpp"
+#include "nrt_vm.hpp"
+#include "diagnostic.hpp"
 #include <unistd.h>
 #include <fcntl.h>
 #include <cstring>
@@ -98,4 +101,54 @@ void EvalFlash::update(float deltaTime) {
         alpha -= deltaTime * 3.0f; // fade over ~0.33s
         if (alpha < 0.0f) alpha = 0.0f;
     }
+}
+
+// ---------------------------------------------------------------------------
+// AsyncEval
+// ---------------------------------------------------------------------------
+
+AsyncEval::~AsyncEval() {
+    if (thread.joinable()) thread.join();
+}
+
+void AsyncEval::launch(const std::string& src, bridge::AppContext& ctx,
+                       ts::REPLSession& session, int fs, int fe) {
+    if (running.load()) return;
+    if (thread.joinable()) thread.join();
+
+    code = src;
+    flashStart = fs;
+    flashEnd = fe;
+    running.store(true);
+
+    thread = std::thread([this, &ctx, &session] {
+        {
+            std::lock_guard<std::mutex> lock(ctx.nrtvm->mtx);
+            ctx.nrtvm->vm.makeCurrent();
+            result = session.eval(code);
+            ctx.nrtvm->vm.gcHeartbeat();
+        }
+        running.store(false);
+    });
+}
+
+bool AsyncEval::collect(GuiState& state) {
+    if (running.load() || !thread.joinable()) return false;
+    thread.join();
+
+    if (!result.errors.empty()) {
+        auto formatted = ts::formatErrorsPlain(result.errors, code, "<editor>");
+        for (auto& line : formatted) {
+            state.output.append(line, LineKind::Error);
+        }
+    } else if (result.hasValue) {
+        state.output.append("\xe2\x86\x92 " + result.formattedValue
+                            + " : " + result.typeName, LineKind::Result);
+    }
+
+    if (flashStart >= 0 && flashEnd >= 0) {
+        state.flash.trigger(flashStart, flashEnd);
+    }
+
+    return true;
 }

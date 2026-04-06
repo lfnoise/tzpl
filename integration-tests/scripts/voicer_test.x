@@ -3,6 +3,7 @@
 
 import synthdef.*;
 import common_ugens.*;
+import clock.*;
 import audio_engine.*;
 
 println("--- voicer_test ----------------------------");
@@ -38,178 +39,171 @@ println(listSynthDefs());
 ---------------------------------------------------------------------------
 -- 2. Start the engine and instantiate the voicer node.
 
-engineStart();
-sleep(0.5);
-
 let nodeID = 200;
 
-begin(0);
-newNode("sine_voice", nodeID);
-connect(nodeID, 0, 0, 0);
-go();
-
-sleep(0.5);
-
----------------------------------------------------------------------------
--- 3. Single notes — ascending scale
-
-println("single notes");
-var nid = 0;
-let scale = [60.0, 62.0, 64.0, 65.0, 67.0, 69.0, 71.0, 72.0];
-let latency = 0.02;
-
-for (i : (0..7)) {
-    let t = getStreamTime();
-    begin(0);
-    noteOn(nodeID, nid, [scale[i], 0.4]);
-    sched(t + latency);
+go(coro fn() Float {
+    engineStart();
+    yield 0.5;
 
     begin(0);
-    noteOff(nodeID, nid);
-    sched(t + latency + 0.35);
+    newNode("sine_voice", nodeID);
+    connect(nodeID, 0, 0, 0);
+    sched();
+    yield 0.5;
 
-    nid = nid + 1;
-    sleep(0.4);
-}
+    ---------------------------------------------------------------------------
+    -- 3. Single notes -- ascending scale
 
-sleep(0.5);
+    println("single notes");
+    var nid = 0;
+    let scale = [60.0, 62.0, 64.0, 65.0, 67.0, 69.0, 71.0, 72.0];
+    let latency = 0.02;
 
----------------------------------------------------------------------------
--- 4. Chords — triads moving up
-
-println("chords");
-
-let roots    = [48.0, 50.0, 52.0, 53.0, 55.0, 57.0, 59.0, 60.0];
-let thirds   = [4.0,  3.0,  3.0,  4.0,  4.0,  3.0,  3.0,  4.0];  -- major / minor
-let fifths   = [7.0,  7.0,  7.0,  7.0,  7.0,  7.0,  6.0,  7.0];
-
-for (i : (0..7)) {
-    let t = getStreamTime();
-    let root = roots[i];
-
-    -- three note chord
-    begin(0);
-    noteOn(nodeID, nid,     [root,              0.35]);
-    noteOn(nodeID, nid + 1, [root + thirds[i],  0.35]);
-    noteOn(nodeID, nid + 2, [root + fifths[i],  0.35]);
-    sched(t + latency);
-
-    begin(0);
-    noteOff(nodeID, nid);
-    noteOff(nodeID, nid + 1);
-    noteOff(nodeID, nid + 2);
-    sched(t + latency + 0.6);
-
-    nid = nid + 3;
-    sleep(0.7);
-}
-
-sleep(0.5);
-
----------------------------------------------------------------------------
--- 5. Rapid arpeggiated chord
-
-println("arpeggio");
-
-let arpNotes = [48.0, 55.0, 60.0, 64.0, 67.0, 72.0];
-let t0 = getStreamTime();
-
-for (i : (0..5)) {
-    begin(0);
-    noteOn(nodeID, nid, [arpNotes[i], 0.3]);
-    sched(t0 + latency + 0.06 * i);
-
-    begin(0);
-    noteOff(nodeID, nid);
-    sched(t0 + latency + 0.06 * i + 1.0);
-
-    nid = nid + 1;
-}
-
-sleep(1.5);
-
----------------------------------------------------------------------------
--- 6. Polyphony stress — many simultaneous voices
-
-println("polyphony stress");
-
-for (k : (0..2)) {
-    let t = getStreamTime();
     for (i : (0..7)) {
-        let pitch = 48.0 + 3.0 * i + 12.0 * k;
+        let t = getStreamTime();
         begin(0);
-        noteOn(nodeID, nid, [pitch, 0.2]);
+        noteOn(nodeID, nid, [scale[i], 0.4]);
         sched(t + latency);
+
+        begin(0);
+        noteOff(nodeID, nid);
+        sched(t + latency + 0.35);
+
+        nid = nid + 1;
+        yield 0.4;
+    }
+    yield 0.5;
+
+    ---------------------------------------------------------------------------
+    -- 4. Chords -- triads moving up
+
+    println("chords");
+
+    let roots    = [48.0, 50.0, 52.0, 53.0, 55.0, 57.0, 59.0, 60.0];
+    let thirds   = [4.0,  3.0,  3.0,  4.0,  4.0,  3.0,  3.0,  4.0];  -- major / minor
+    let fifths   = [7.0,  7.0,  7.0,  7.0,  7.0,  7.0,  6.0,  7.0];
+
+    for (i : (0..7)) {
+        let t = getStreamTime();
+        let root = roots[i];
+
+        -- three note chord
+        begin(0);
+        noteOn(nodeID, nid,     [root,              0.35]);
+        noteOn(nodeID, nid + 1, [root + thirds[i],  0.35]);
+        noteOn(nodeID, nid + 2, [root + fifths[i],  0.35]);
+        sched(t + latency);
+
+        begin(0);
+        noteOff(nodeID, nid);
+        noteOff(nodeID, nid + 1);
+        noteOff(nodeID, nid + 2);
+        sched(t + latency + 0.6);
+
+        nid = nid + 3;
+        yield 0.7;
+    }
+    yield 0.5;
+
+    ---------------------------------------------------------------------------
+    -- 5. Rapid arpeggiated chord
+
+    println("arpeggio");
+
+    let arpNotes = [48.0, 55.0, 60.0, 64.0, 67.0, 72.0];
+    let t0 = getStreamTime();
+
+    for (i : (0..5)) {
+        begin(0);
+        noteOn(nodeID, nid, [arpNotes[i], 0.3]);
+        sched(t0 + latency + 0.06 * i);
+
+        begin(0);
+        noteOff(nodeID, nid);
+        sched(t0 + latency + 0.06 * i + 1.0);
+
         nid = nid + 1;
     }
+    yield 1.5;
 
-    -- release after 0.8s
-    begin(0);
-    for (j : (0..7)) {
-        noteOff(nodeID, nid - 8 + j);
+    ---------------------------------------------------------------------------
+    -- 6. Polyphony stress -- many simultaneous voices
+
+    println("polyphony stress");
+
+    for (k : (0..2)) {
+        let t = getStreamTime();
+        for (i : (0..7)) {
+            let pitch = 48.0 + 3.0 * i + 12.0 * k;
+            begin(0);
+            noteOn(nodeID, nid, [pitch, 0.2]);
+            sched(t + latency);
+            nid = nid + 1;
+        }
+
+        -- release after 0.8s
+        begin(0);
+        for (j : (0..7)) {
+            noteOff(nodeID, nid - 8 + j);
+        }
+        sched(t + latency + 0.8);
+        yield 1.0;
     }
-    sched(t + latency + 0.8);
+    yield 1.0;
 
-    sleep(1.0);
-}
+    ---------------------------------------------------------------------------
+    -- 7. noteSetParams -- glissando on a held note
 
-sleep(1.0);
+    println("glissando");
 
----------------------------------------------------------------------------
--- 7. noteSetParams — glissando on a held note
-
-println("glissando");
-
-let tGliss = getStreamTime();
-begin(0);
-noteOn(nodeID, nid, [60.0, 0.4]);
-sched(tGliss + latency);
-
-for (i : (1..24)) {
+    let tGliss = getStreamTime();
     begin(0);
-    noteSetParams(nodeID, nid, 0, [60.0 + 0.5 * i]);
-    sched(tGliss + latency + 0.05 * i);
-}
+    noteOn(nodeID, nid, [60.0, 0.4]);
+    sched(tGliss + latency);
 
-begin(0);
-noteOff(nodeID, nid);
-sched(tGliss + latency + 0.05 * 25);
-nid = nid + 1;
-
-sleep(2.0);
-
----------------------------------------------------------------------------
--- 8. random cloud
-
-println("random cloud");
-let tCloud = getStreamTime() + latency;
-for (i : (1..100)) {
-	let t = tCloud + 0.25 * (i + std.urand());
-	begin(0);
-	noteOn(nodeID, nid, [std.rand(48, 84), 0.4]);
-	sched(t);
+    for (i : (1..24)) {
+        begin(0);
+        noteSetParams(nodeID, nid, 0, [60.0 + 0.5 * i]);
+        sched(tGliss + latency + 0.05 * i);
+    }
 
     begin(0);
     noteOff(nodeID, nid);
-    sched(t + 0.25 * std.rand(1.0, 8.0));
-	nid = nid + 1;
-}
+    sched(tGliss + latency + 0.05 * 25);
+    nid = nid + 1;
+    yield 2.0;
 
-sleep(28.0);
+    ---------------------------------------------------------------------------
+    -- 8. random cloud
 
----------------------------------------------------------------------------
--- 9. allNotesOff
+    println("random cloud");
+    let tCloud = getStreamTime() + latency;
+    for (i : (1..100)) {
+        let t = tCloud + 0.25 * (i + std.urand());
+        begin(0);
+        noteOn(nodeID, nid, [std.rand(48, 84), 0.4]);
+        sched(t);
 
-println("all notes off");
-begin(0);
-allNotesOff(nodeID);
-go();
+        begin(0);
+        noteOff(nodeID, nid);
+        sched(t + 0.25 * std.rand(1.0, 8.0));
+        nid = nid + 1;
+    }
+    yield 28.0;
 
-sleep(1.0);
+    ---------------------------------------------------------------------------
+    -- 9. allNotesOff
 
----------------------------------------------------------------------------
--- 10. Cleanup
+    println("all notes off");
+    begin(0);
+    allNotesOff(nodeID);
+    sched();
+    yield 1.0;
 
-println("stop");
-engineStop();
-println("voicer_test done");
+    ---------------------------------------------------------------------------
+    -- 10. Cleanup
+
+    println("stop");
+    engineStop();
+    println("voicer_test done");
+}());

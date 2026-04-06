@@ -747,6 +747,10 @@ Type* TypeChecker::inferIndirectCall(CallExpr_* expr) {
                 }
             }
         }
+        // Mark coroutine calls on expression callees
+        if (funcType->returnType_ && dynamic_cast<CoroutineType*>(funcType->returnType_)) {
+            expr->isCoroCall = true;
+        }
         return funcType->returnType_;
     }
     // Template lambda: monomorphize based on argument types
@@ -908,6 +912,9 @@ Type* TypeChecker::tryInferVariableCall(CallExpr_* expr, IdentifierExpr* ident) 
         }
 
         if (allMatch) {
+            if (funcType->returnType_ && dynamic_cast<CoroutineType*>(funcType->returnType_)) {
+                expr->isCoroCall = true;
+            }
             return funcType->returnType_;
         }
 

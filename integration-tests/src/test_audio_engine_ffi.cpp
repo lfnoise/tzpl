@@ -192,7 +192,7 @@ static void test_command_bundling() {
     const char* source = R"(
         import audio_engine.*;
         let err1 = begin(0);
-        let err2 = go();
+        let err2 = sched();
     )";
 
     bool ok = compileAndRun(compiler, vm, source, "bundling.x", &moduleCompiler);
@@ -255,7 +255,7 @@ static void test_node_and_connect() {
         import audio_engine.*;
         let e1 = begin(0);
         let e2 = newNode("NonExistent", 100);
-        let e3 = go();
+        let e3 = sched();
         println(e2);
     )";
 

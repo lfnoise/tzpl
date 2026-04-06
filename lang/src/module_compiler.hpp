@@ -102,6 +102,7 @@ public:
     ModuleInfo* getModule(const std::string& canonicalPath) const;
 
     Compiler& compiler() { return compiler_; }
+    const std::vector<std::string>& includePaths() const { return includePaths_; }
 
 private:
     Compiler& compiler_;

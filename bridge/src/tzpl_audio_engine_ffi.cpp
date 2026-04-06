@@ -30,8 +30,6 @@
 #include "tzpl_engine.hpp"
 #include "tzpl_vm_commands.hpp"
 #include "nrt_vm.hpp"
-#include <thread>
-#include <chrono>
 
 // Both tzpl and engine define i64/f64/etc. in different ways.
 // engine: namespace engine { using i64 = long; }
@@ -110,13 +108,6 @@ static void ffi_inputChannels(ts::VM& vm, u16 dst, u16, u16) {
     vm.reg(dst).i = eng ? eng->streamParams_.inputChannels : 0;
 }
 
-// fn sleep(seconds: Float) -> Void
-// Blocking sleep — NRT only.  Will be replaced by a proper event scheduler.
-static void ffi_sleep(ts::VM& vm, u16, u16, u16 argBase) {
-    f64 seconds = vm.reg(argBase).f;
-    std::this_thread::sleep_for(std::chrono::duration<double>(seconds));
-}
-
 // ---------------------------------------------------------------------------
 // Plugin loading
 // ---------------------------------------------------------------------------
@@ -145,8 +136,8 @@ static void ffi_begin(ts::VM& vm, u16 dst, u16, u16 argBase) {
     returnErr(vm, dst, engine::begin(getEngine(vm), silo));
 }
 
-// fn go() -> Int
-static void ffi_go(ts::VM& vm, u16 dst, u16, u16) {
+// fn sched() -> Int  (send bundle for immediate execution)
+static void ffi_sched_immediate(ts::VM& vm, u16 dst, u16, u16) {
     returnErr(vm, dst, engine::go());
 }
 
@@ -371,134 +362,6 @@ static void ffi_noteSetParams(ts::VM& vm, u16 dst, u16, u16 argBase) {
 
 
 // ---------------------------------------------------------------------------
-// RT event handlers
-// ---------------------------------------------------------------------------
-
-// Static callbacks invoked by the engine on the RT thread when note/control
-// events fire. They retrieve the handler Obj* from the Silo and call it
-// on the attached VM.
-
-static void rtNoteOnCB(engine::Silo* silo, void* vm_ptr, int noteID,
-                        int /*numParams*/, engine::f32* /*params*/) {
-    auto* vm = static_cast<ts::VM*>(vm_ptr);
-    auto* handler = static_cast<ts::Obj*>(silo->noteOnHandler_);
-    if (!vm || !handler) return;
-    vm->makeCurrent();
-    ts::Word args[1];
-    args[0].i = noteID;
-    vm->callCallable(handler, args, 1);
-    vm->gcHeartbeat();
-}
-
-static void rtNoteOffCB(engine::Silo* silo, void* vm_ptr, int noteID) {
-    auto* vm = static_cast<ts::VM*>(vm_ptr);
-    auto* handler = static_cast<ts::Obj*>(silo->noteOffHandler_);
-    if (!vm || !handler) return;
-    vm->makeCurrent();
-    ts::Word args[1];
-    args[0].i = noteID;
-    vm->callCallable(handler, args, 1);
-    vm->gcHeartbeat();
-}
-
-static void rtControlChangeCB(engine::Silo* silo, void* vm_ptr,
-                                engine::i64 nodeID, engine::i64 controlID,
-                                int numValues, engine::f32* values) {
-    auto* vm = static_cast<ts::VM*>(vm_ptr);
-    auto* handler = static_cast<ts::Obj*>(silo->controlChangeHandler_);
-    if (!vm || !handler || numValues < 1) return;
-    vm->makeCurrent();
-    ts::Word args[3];
-    args[0].i = static_cast<i64>(nodeID);
-    args[1].i = static_cast<i64>(controlID);
-    args[2].f = static_cast<f64>(values[0]);
-    vm->callCallable(handler, args, 3);
-    vm->gcHeartbeat();
-}
-
-// NRT reply processing callback. Called from processNRTCommands on the NRT
-// thread. Drains the Silo's reply ring buffer and dispatches to handlers.
-static void nrtReplyProcessCB(void* ctx, engine::Silo* silo) {
-    auto* nrtvm = static_cast<ts::NRTVM*>(ctx);
-    if (!nrtvm) return;
-
-    uint32_t r = silo->replyReadPos_.load(std::memory_order_relaxed);
-    uint32_t w = silo->replyWritePos_.load(std::memory_order_acquire);
-
-    while (r != w) {
-        auto& slot = silo->replySlots_[r & engine::Silo::kReplyMask];
-        auto* handler = static_cast<ts::Obj*>(slot.handler);
-        if (handler) {
-            ts::Word args[1];
-            args[0].f = slot.value;
-            nrtvm->callCallable(handler, args, 1);
-            handler->release();
-        }
-        ++r;
-    }
-    silo->replyReadPos_.store(r, std::memory_order_release);
-}
-
-// fn rtOnNote(handler fn(Int) Void) Void
-// Register an RT handler for noteOn events on silo 0.
-static void ffi_rtOnNote(ts::VM& vm, u16, u16, u16 argBase) {
-    auto* ctx = getAppContext(vm);
-    if (!ctx || !ctx->engine) return;
-
-    ts::Obj* handler = vm.reg(argBase).o;
-
-    engine::begin(ctx->engine, 0);
-    engine::sendCommand(new bridge::RegisterRTNoteHandlerCmd(
-        handler, nullptr, rtNoteOnCB, nullptr));
-    engine::go();
-}
-
-// fn rtOnNoteOff(handler fn(Int) Void) Void
-static void ffi_rtOnNoteOff(ts::VM& vm, u16, u16, u16 argBase) {
-    auto* ctx = getAppContext(vm);
-    if (!ctx || !ctx->engine) return;
-
-    ts::Obj* handler = vm.reg(argBase).o;
-
-    engine::begin(ctx->engine, 0);
-    engine::sendCommand(new bridge::RegisterRTNoteHandlerCmd(
-        nullptr, handler, nullptr, rtNoteOffCB));
-    engine::go();
-}
-
-// fn rtOnControl(handler fn(Int, Int, Float) Void) Void
-// Handler receives (nodeID, controlID, value).
-static void ffi_rtOnControl(ts::VM& vm, u16, u16, u16 argBase) {
-    auto* ctx = getAppContext(vm);
-    if (!ctx || !ctx->engine) return;
-
-    ts::Obj* handler = vm.reg(argBase).o;
-
-    engine::begin(ctx->engine, 0);
-    engine::sendCommand(new bridge::RegisterRTControlHandlerCmd(
-        handler, rtControlChangeCB));
-    engine::go();
-}
-
-// fn rtReply(handler fn(Float) Void, value Float) Void
-// RT-safe: writes to the silo's reply ring buffer. The handler is called on
-// NRT by the reply processing callback.
-static void ffi_rtReply(ts::VM& vm, u16, u16, u16 argBase) {
-    auto* ctx = getAppContext(vm);
-    if (!ctx || !ctx->engine) return;
-
-    ts::Obj* handler = vm.reg(argBase).o;
-    f64 value = vm.reg(argBase + 1).f;
-
-    handler->retain();
-    // Find the silo -- for now, silo 0
-    engine::Silo& silo = ctx->engine->silos_[0];
-    if (!silo.pushReply(handler, value)) {
-        handler->release(); // ring buffer full, drop
-    }
-}
-
-// ---------------------------------------------------------------------------
 // Introspection
 // ---------------------------------------------------------------------------
 
@@ -558,16 +421,13 @@ void registerAudioEngineFFI(ts::Compiler& compiler) {
     reg("safetyLimiter",    Void, {Bool},          ffi_safetyLimiter);
     reg("inputChannels",    Int, {},               ffi_inputChannels);
 
-    // Blocking sleep (NRT only — temporary, will be replaced by a scheduler)
-    reg("sleep",            Void, {Float},         ffi_sleep);
-
     // Plugin loading (NRT only)
     reg("loadPlugins",      Bool, {String},                ffi_loadPlugins);
     reg("loadPlugin",       Bool, {String, String},        ffi_loadPlugin);
 
     // Command bundling (rtSafe — these just queue commands via lock-free FIFO)
     reg("begin",            Int, {Int},            ffi_begin,         true);
-    reg("go",               Int, {},               ffi_go,            true);
+    reg("sched",            Int, {},               ffi_sched_immediate, true);
     reg("sched",            Int, {Float},          ffi_sched,         true);
     reg("schedPolicy",      Int, {Float, Int},     ffi_schedPolicy,   true);
 
@@ -602,26 +462,6 @@ void registerAudioEngineFFI(ts::Compiler& compiler) {
     // Introspection
     ts::Type* StringArray = reinterpret_cast<ts::Type*>(compiler.arrayType(String));
     reg("listSynthDefs",    StringArray, {},  ffi_listSynthDefs);
-
-    // RT event handlers
-    ts::Vec<ts::Type*> intArgs;   intArgs.push_back(Int);
-    ts::Vec<ts::Type*> intIntFloatArgs;
-    intIntFloatArgs.push_back(Int);
-    intIntFloatArgs.push_back(Int);
-    intIntFloatArgs.push_back(Float);
-    ts::Vec<ts::Type*> floatArgs; floatArgs.push_back(Float);
-
-    ts::Type* FnIntVoid      = reinterpret_cast<ts::Type*>(
-        compiler.functionType(intArgs, Void));
-    ts::Type* FnIntIntFloatVoid = reinterpret_cast<ts::Type*>(
-        compiler.functionType(intIntFloatArgs, Void));
-    ts::Type* FnFloatVoid    = reinterpret_cast<ts::Type*>(
-        compiler.functionType(floatArgs, Void));
-
-    reg("rtOnNote",      Void, {FnIntVoid},            ffi_rtOnNote);
-    reg("rtOnNoteOff",   Void, {FnIntVoid},            ffi_rtOnNoteOff);
-    reg("rtOnControl",   Void, {FnIntIntFloatVoid},    ffi_rtOnControl);
-    reg("rtReply",       Void, {FnFloatVoid, Float},   ffi_rtReply,   true);
 
     // Enum constants (SchedPolicy, FadeCurve, Err, Enable) are defined
     // in the Tzopilotl module: bridge/modules/audio_engine.x

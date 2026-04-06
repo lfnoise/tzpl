@@ -1780,9 +1780,17 @@ ExprPtr Parser::parsePrimary() {
             expectClosing(TokenKind::RBracket, "[", loc);
             return std::make_unique<ArrayLiteralExpr>(loc, std::move(elements));
         }
+        case TokenKind::Coro:
         case TokenKind::Fn: {
             // Lambda expression: fn(params) retType { body }
+            // or coroutine lambda: coro fn(params) retType { body }
             // or template lambda: fn<T, U: Constraint>(params) retType { body }
+            bool isCoro = false;
+            if (current_.kind == TokenKind::Coro) {
+                isCoro = true;
+                advance(); // consume 'coro'
+                if (!check(TokenKind::Fn)) { error("Expected 'fn' after 'coro'"); return nullptr; }
+            }
             SourceRange loc = currentLoc();
             advance(); // consume 'fn'
 
@@ -1859,6 +1867,7 @@ ExprPtr Parser::parsePrimary() {
                                                             std::move(returnType), std::move(body));
             lambda->typeParams = std::move(typeParams);
             lambda->whereConstraints = std::move(whereConstraints);
+            lambda->isCoroutine = isCoro;
             return lambda;
         }
         case TokenKind::LBrace: {
