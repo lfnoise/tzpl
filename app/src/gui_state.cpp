@@ -136,6 +136,10 @@ bool AsyncEval::collect(GuiState& state) {
     if (running.load() || !thread.joinable()) return false;
     thread.join();
 
+    // Separator between evaluations
+    if (!state.output.lines().empty())
+        state.output.append("", LineKind::Separator);
+
     if (!result.errors.empty()) {
         auto formatted = ts::formatErrorsPlain(result.errors, code, "<editor>");
         for (auto& line : formatted) {

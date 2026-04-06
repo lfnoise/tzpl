@@ -24,7 +24,7 @@ namespace bridge { struct AppContext; }
 // Output line kinds for color coding
 // ---------------------------------------------------------------------------
 
-enum class LineKind { Output, Result, Error, Info };
+enum class LineKind { Output, Result, Error, Info, Separator };
 
 struct OutputLine {
     std::string text;

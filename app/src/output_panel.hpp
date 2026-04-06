@@ -31,6 +31,9 @@ public:
     // Whether the output text area currently has focus.
     bool hasFocus() const { return outputActive_; }
 
+    // Clear the output panel.
+    void clear(OutputBuffer& output);
+
 private:
     static int inputCallback(struct ImGuiInputTextCallbackData* data);
     static int outputScrollCallback(struct ImGuiInputTextCallbackData* data);

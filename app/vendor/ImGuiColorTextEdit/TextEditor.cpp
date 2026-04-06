@@ -758,22 +758,14 @@ void TextEditor::HandleKeyboardInputs()
 			Undo();
 		else if (!IsReadOnly() && ctrl && !shift && !alt && ImGui::IsKeyPressed(ImGuiKey_Y))
 			Redo();
-		else if (ctrl && !alt && io.ConfigMacOSXBehaviors && ImGui::IsKeyPressed(ImGuiKey_UpArrow))
-			MoveTop(shift);
-		else if (ctrl && !alt && io.ConfigMacOSXBehaviors && ImGui::IsKeyPressed(ImGuiKey_DownArrow))
-			MoveBottom(shift);
 		else if (!ctrl && !alt && ImGui::IsKeyPressed(ImGuiKey_UpArrow))
 			MoveUp(1, shift);
 		else if (!ctrl && !alt && ImGui::IsKeyPressed(ImGuiKey_DownArrow))
 			MoveDown(1, shift);
-		else if (ctrl && !alt && io.ConfigMacOSXBehaviors && ImGui::IsKeyPressed(ImGuiKey_LeftArrow))
-			MoveHome(shift);
-		else if (ctrl && !alt && io.ConfigMacOSXBehaviors && ImGui::IsKeyPressed(ImGuiKey_RightArrow))
-			MoveEnd(shift);
 		else if (!alt && ImGui::IsKeyPressed(ImGuiKey_LeftArrow))
-			MoveLeft(1, shift, ctrl || (io.ConfigMacOSXBehaviors && io.KeyAlt));
+			MoveLeft(1, shift, io.ConfigMacOSXBehaviors ? io.KeyAlt : ctrl);
 		else if (!alt && ImGui::IsKeyPressed(ImGuiKey_RightArrow))
-			MoveRight(1, shift, ctrl || (io.ConfigMacOSXBehaviors && io.KeyAlt));
+			MoveRight(1, shift, io.ConfigMacOSXBehaviors ? io.KeyAlt : ctrl);
 		else if (!alt && ImGui::IsKeyPressed(ImGuiKey_PageUp))
 			MoveUp(GetPageSize() - 4, shift);
 		else if (!alt && ImGui::IsKeyPressed(ImGuiKey_PageDown))

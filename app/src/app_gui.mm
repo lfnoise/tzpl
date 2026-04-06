@@ -79,6 +79,14 @@ static bool gEditCut = false;
 static bool gEditCopy = false;
 static bool gEditPaste = false;
 static bool gEditSelectAll = false;
+static bool gEditClearOutput = false;
+
+// Cursor movement flags (Cmd+Arrow, bypasses ImGui key routing)
+static bool gMoveHome = false;
+static bool gMoveEnd = false;
+static bool gMoveTop = false;
+static bool gMoveBottom = false;
+static bool gMoveShift = false;  // shift held during move
 
 // Find operation flags
 static bool gFindShow = false;
@@ -147,6 +155,7 @@ static std::string findMonoFont() {
 - (void)editCopy:(id)sender;
 - (void)editPaste:(id)sender;
 - (void)editSelectAll:(id)sender;
+- (void)editClearOutput:(id)sender;
 - (void)findShow:(id)sender;
 - (void)findNext:(id)sender;
 - (void)findPrevious:(id)sender;
@@ -168,6 +177,7 @@ static std::string findMonoFont() {
 - (void)editCopy:(id)sender    { gEditCopy = true; }
 - (void)editPaste:(id)sender   { gEditPaste = true; }
 - (void)editSelectAll:(id)sender { gEditSelectAll = true; }
+- (void)editClearOutput:(id)sender { gEditClearOutput = true; }
 - (void)findShow:(id)sender    { gFindShow = true; }
 - (void)findNext:(id)sender    { gFindNext = true; }
 - (void)findPrevious:(id)sender { gFindPrevious = true; }
@@ -277,6 +287,12 @@ static void setupNativeMenuBar(const float* fontSizes, int numFontSizes) {
     NSMenuItem* selectAllItem = [editMenu addItemWithTitle:@"Select All"
         action:@selector(editSelectAll:) keyEquivalent:@"a"];
     selectAllItem.target = gMenuHandler;
+
+    [editMenu addItem:[NSMenuItem separatorItem]];
+
+    NSMenuItem* clearOutputItem = [editMenu addItemWithTitle:@"Clear Output"
+        action:@selector(editClearOutput:) keyEquivalent:@"k"];
+    clearOutputItem.target = gMenuHandler;
 
     editMenuItem.submenu = editMenu;
     [mainMenu addItem:editMenuItem];
@@ -419,6 +435,15 @@ static void keyCallback(GLFWwindow* window, int key, int scancode,
             if (key == GLFW_KEY_S && !shift) { gFileSave = true; return; }
             if (key == GLFW_KEY_S && shift)  { gFileSaveAs = true; return; }
             if (key == GLFW_KEY_W && !shift) { gFileClose = true; return; }
+            if (key == GLFW_KEY_K && !shift) { gEditClearOutput = true; return; }
+        }
+
+        // Cmd+Arrow: cursor movement (bypass ImGui nav system)
+        if (cmd) {
+            if (key == GLFW_KEY_LEFT)  { gMoveHome = true; gMoveShift = shift; return; }
+            if (key == GLFW_KEY_RIGHT) { gMoveEnd = true; gMoveShift = shift; return; }
+            if (key == GLFW_KEY_UP)    { gMoveTop = true; gMoveShift = shift; return; }
+            if (key == GLFW_KEY_DOWN)  { gMoveBottom = true; gMoveShift = shift; return; }
         }
 
         // Find shortcuts
@@ -676,6 +701,15 @@ int runGui(bridge::AppContext& appCtx) {
             if (gEditCopy)      { gEditCopy = false;      if (!outputPanel.tryCopy()) editorPanel.copy(); }
             if (gEditPaste)     { gEditPaste = false;     editorPanel.paste(); }
             if (gEditSelectAll) { gEditSelectAll = false;  if (!outputPanel.trySelectAll()) editorPanel.selectAll(); }
+            if (gEditClearOutput) { gEditClearOutput = false; outputPanel.clear(guiState.output); }
+
+            // ---------------------------------------------------------------
+            // Process cursor movement (Cmd+Arrow)
+            // ---------------------------------------------------------------
+            if (gMoveHome)   { gMoveHome = false;   editorPanel.moveHome(gMoveShift); }
+            if (gMoveEnd)    { gMoveEnd = false;    editorPanel.moveEnd(gMoveShift); }
+            if (gMoveTop)    { gMoveTop = false;    editorPanel.moveTop(gMoveShift); }
+            if (gMoveBottom) { gMoveBottom = false;  editorPanel.moveBottom(gMoveShift); }
 
             // ---------------------------------------------------------------
             // Process find operations

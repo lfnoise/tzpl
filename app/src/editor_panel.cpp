@@ -344,6 +344,26 @@ void EditorPanel::selectAll() {
         tabs_[activeTab_].editor.SelectAll();
 }
 
+void EditorPanel::moveHome(bool select) {
+    if (activeTab_ >= 0 && activeTab_ < (int)tabs_.size())
+        tabs_[activeTab_].editor.MoveHome(select);
+}
+
+void EditorPanel::moveEnd(bool select) {
+    if (activeTab_ >= 0 && activeTab_ < (int)tabs_.size())
+        tabs_[activeTab_].editor.MoveEnd(select);
+}
+
+void EditorPanel::moveTop(bool select) {
+    if (activeTab_ >= 0 && activeTab_ < (int)tabs_.size())
+        tabs_[activeTab_].editor.MoveTop(select);
+}
+
+void EditorPanel::moveBottom(bool select) {
+    if (activeTab_ >= 0 && activeTab_ < (int)tabs_.size())
+        tabs_[activeTab_].editor.MoveBottom(select);
+}
+
 // ---------------------------------------------------------------------------
 // Error markers
 // ---------------------------------------------------------------------------

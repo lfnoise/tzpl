@@ -90,6 +90,12 @@ bool OutputPanel::trySelectAll() {
     return true;
 }
 
+void OutputPanel::clear(OutputBuffer& output) {
+    output.clear();
+    outputText_.clear();
+    lastLineCount_ = 0;
+}
+
 // ImGui InputText callback for command history navigation
 int OutputPanel::inputCallback(ImGuiInputTextCallbackData* cbData) {
     auto* self = static_cast<OutputPanel*>(cbData->UserData);
@@ -131,6 +137,10 @@ void OutputPanel::draw(float width, float height, OutputBuffer& output) {
         lastLineCount_ = lineCount;
         outputText_.clear();
         for (auto& line : output.lines()) {
+            if (line.kind == LineKind::Separator) {
+                outputText_ += "----------------------------------------\n";
+                continue;
+            }
             switch (line.kind) {
                 case LineKind::Result: outputText_ += "=> "; break;
                 case LineKind::Error:  outputText_ += "!! "; break;

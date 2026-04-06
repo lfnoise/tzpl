@@ -56,6 +56,12 @@ public:
     void redo();
     void selectAll();
 
+    // Cursor movement (for shortcuts handled outside ImGui)
+    void moveHome(bool select);
+    void moveEnd(bool select);
+    void moveTop(bool select);
+    void moveBottom(bool select);
+
     // Error markers
     void setErrorMarkers(const TextEditor::ErrorMarkers& markers);
     void clearErrorMarkers();
