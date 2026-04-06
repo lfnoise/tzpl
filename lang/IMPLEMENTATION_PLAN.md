@@ -469,8 +469,7 @@ See Phase 6 below. Implemented after templates were completed.
 **All wiring work completed**:
 - Clock FFI module: `sched`, `schedAbs`, `after`, `at`, `cancel`, `setTempo`, `getTempo`, `getBeats`, `getBeatDur`, `schedTempoChange`, `setLatency`, `getLatency`. Done.
 - OSC handler registration (`osc.onMessage` and typed variants). Done.
-- RT event handlers (`rtOnNote`, `rtOnNoteOff`, `rtOnControl`). Done.
-- `VMReplyCmd` for RT-to-NRT messaging (`rtReply`). Done.
+- RT event handlers and RT-to-NRT reply removed. General inter-VM messaging planned.
 
 ---
 

@@ -309,8 +309,7 @@ Core infrastructure implemented. See `EVENT_DRIVEN_VM_PLAN.md` for the full desi
 
 **Remaining wiring tasks** (not core infrastructure):
 - ~~Wire OSC handler dispatch to NRT VM (`osc.onMessage()` FFI)~~ Done (Phase 5).
-- ~~Wire `rt.onNote()`/`rt.onControl()` FFI functions~~ Done. Silo has callback pointers for note/control events, invoked from NoteOnCmd/NoteOffCmd/SetControlCmd. RegisterRTNoteHandlerCmd/RegisterRTControlHandlerCmd install handlers via the command FIFO. FFI functions: `rtOnNote`, `rtOnNoteOff`, `rtOnControl` in `audio_engine` module.
-- ~~`VMReplyCmd` for RT-to-NRT messaging (Phase D of `EVENT_DRIVEN_VM_PLAN.md`)~~ Done. Silo has an RT-safe ring buffer (`replySlots_`), NRT processing callback (`nrtProcessFn_`), and `rtReply(handler, value)` FFI function. Replies are drained from the ring buffer by the engine's NRT command processing thread.
+- RT event handlers (`rtOnNote`, `rtOnNoteOff`, `rtOnControl`) and RT-to-NRT reply (`rtReply`) were removed. A more general inter-VM messaging scheme is planned, potentially transparent over NATS.
 
 ### 4.3 Error handling improvements — DONE
 
@@ -849,7 +848,7 @@ Phase 0 (Build Infrastructure)       ✅ DONE
 
 ## Key Risks & Decisions
 
-1. **Event-driven VM design** (Phase 4.2): Done. Cross-thread ARC deletion, NRT VM with mutex serialization, RT VM on Silo, NRT and RT tempo schedulers with TempoRamp, clock FFI (12 functions), app migrated to NRTVM. RT event handlers (`rtOnNote`, `rtOnNoteOff`, `rtOnControl`) and RT-to-NRT reply (`rtReply`) wired. OSC and NATS handler dispatch to NRT VM done. See `EVENT_DRIVEN_VM_PLAN.md` for the full design.
+1. **Event-driven VM design** (Phase 4.2): Done. Cross-thread ARC deletion, NRT VM with mutex serialization, RT VM on Silo, NRT and RT tempo schedulers with TempoRamp, clock FFI (12 functions), app migrated to NRTVM. OSC and NATS handler dispatch to NRT VM done. See `EVENT_DRIVEN_VM_PLAN.md` for the full design.
 
 2. **UI framework choice** (Phase 10): Dear ImGui selected. GLFW + Metal on macOS, OpenGL3 prepared for Linux. Fetched via CMake FetchContent.
 

@@ -411,14 +411,6 @@ if (localStorage.getItem('tzpl-docs-theme') === 'light') document.documentElemen
         <li><a href="#clock-examples">Examples</a></li>
       </ol>
     </li>
-    <li><a href="#rt-handlers">RT Event Handlers</a>
-      <ol>
-        <li><a href="#rt-handlers-overview">Overview</a></li>
-        <li><a href="#rt-handlers-note">Note Handlers</a></li>
-        <li><a href="#rt-handlers-control">Control Handlers</a></li>
-        <li><a href="#rt-handlers-reply">RT-to-NRT Reply</a></li>
-      </ol>
-    </li>
     <li><a href="#nats">NATS Integration</a>
       <ol>
         <li><a href="#nats-overview">Overview</a></li>
@@ -430,6 +422,14 @@ if (localStorage.getItem('tzpl-docs-theme') === 'light') document.documentElemen
         <li><a href="#nats-engine-subjects">Engine NATS Subjects</a></li>
         <li><a href="#nats-distributed">Distributed Engines</a></li>
         <li><a href="#nats-vs-osc">NATS vs. OSC</a></li>
+      </ol>
+    </li>
+    <li><a href="#synthdef-compiler">SynthDef Compiler</a>
+      <ol>
+        <li><a href="#synthdef-overview">Overview</a></li>
+        <li><a href="#synthdef-functions">Functions</a></li>
+        <li><a href="#synthdef-caching">Compilation Caching</a></li>
+        <li><a href="#synthdef-examples">Examples</a></li>
       </ol>
     </li>
   </ol>
@@ -2029,7 +2029,7 @@ osc.<span class="fn">removeHandler</span>(<span class="str">"/trigger"</span>);<
 <!-- -------------------------------- -->
 <h3 id="clock-tempo">10.3 Tempo Control</h3>
 
-<p>Tempo is specified in <strong>beats per minute</strong> (BPM). The default tempo is 120 BPM.</p>
+<p>Tempo is specified in <strong>beats per minute</strong> (BPM). The default tempo is 60 BPM.</p>
 
 <table>
   <tr><th>Function</th><th>Description</th></tr>
@@ -2129,104 +2129,13 @@ osc.<span class="fn">removeHandler</span>(<span class="str">"/trigger"</span>);<
 });</code></pre>
 
 <!-- ================================================================ -->
-<!--  11. RT EVENT HANDLERS                                            -->
+<!--  11. NATS INTEGRATION                                             -->
 <!-- ================================================================ -->
 
-<h2 id="rt-handlers">11. RT Event Handlers</h2>
+<h2 id="nats">11. NATS Integration</h2>
 
 <!-- -------------------------------- -->
-<h3 id="rt-handlers-overview">11.1 Overview</h3>
-
-<p>Tzopilotl can register handlers that run on the <strong>real-time audio thread</strong> in response to note and control events. When a <code>noteOn</code>, <code>noteOff</code>, or <code>setControl</code> command is processed by a Silo, any registered RT handler is called alongside the plugin's own event processing.</p>
-
-<p>RT event handlers are registered from NRT code (during script execution) and installed on the Silo via the engine's command FIFO. When a note or control event arrives, the handler runs on the RT thread with the Silo's attached VM.</p>
-
-<p>All RT handler functions are in the <code>audio_engine</code> module:</p>
-
-<pre><code><span class="kw">import</span> audio_engine.*;</code></pre>
-
-<div class="warn">
-  <strong>Warning:</strong> RT handlers run on the audio thread. They must not call non-RT-safe functions (network I/O, file operations, heap allocation via <code>new</code>, etc.). The VM's TLSF allocator is RT-safe, but avoid unbounded work. Use <code>rtReply</code> to send data back to the NRT thread for non-RT-safe processing.
-</div>
-
-<!-- -------------------------------- -->
-<h3 id="rt-handlers-note">11.2 Note Handlers</h3>
-
-<p>Register handlers for note-on and note-off events. These fire on the RT thread whenever any <code>noteOn</code> or <code>noteOff</code> command is processed on silo 0, after the plugin's own note handler runs.</p>
-
-<table>
-  <tr><th>Function</th><th>Description</th></tr>
-  <tr><td><code>rtOnNote(handler fn(Int) Void) Void</code></td><td>Register a handler for note-on events. Receives the note ID.</td></tr>
-  <tr><td><code>rtOnNoteOff(handler fn(Int) Void) Void</code></td><td>Register a handler for note-off events. Receives the note ID.</td></tr>
-</table>
-
-<pre><code><span class="kw">import</span> audio_engine.*;
-
-<span class="cmt">-- Log note events (RT thread)</span>
-<span class="fn">rtOnNote</span>(<span class="kw">fn</span>(noteID <span class="typ">Int</span>) {
-    <span class="cmt">-- This runs on the audio thread</span>
-    <span class="cmt">-- noteID is the MIDI-style note identifier</span>
-});
-
-<span class="fn">rtOnNoteOff</span>(<span class="kw">fn</span>(noteID <span class="typ">Int</span>) {
-    <span class="cmt">-- Note released</span>
-});</code></pre>
-
-<div class="note">
-  <strong>Note:</strong> Registering a new handler replaces any previously registered handler of the same type. Handlers are retained by the runtime and released when replaced.
-</div>
-
-<!-- -------------------------------- -->
-<h3 id="rt-handlers-control">11.3 Control Handlers</h3>
-
-<p>Register a handler for control change events. Fires on the RT thread whenever a <code>setControl</code> command is processed on silo 0.</p>
-
-<table>
-  <tr><th>Function</th><th>Description</th></tr>
-  <tr><td><code>rtOnControl(handler fn(Int, Int, Float) Void) Void</code></td><td>Register a handler for control changes. Receives (nodeID, controlID, value).</td></tr>
-</table>
-
-<pre><code><span class="kw">import</span> audio_engine.*;
-
-<span class="fn">rtOnControl</span>(<span class="kw">fn</span>(nodeID <span class="typ">Int</span>, controlID <span class="typ">Int</span>, value <span class="typ">Float</span>) {
-    <span class="cmt">-- Respond to control changes on the RT thread</span>
-});</code></pre>
-
-<!-- -------------------------------- -->
-<h3 id="rt-handlers-reply">11.4 RT-to-NRT Reply</h3>
-
-<p>RT handlers can send data back to the NRT thread using <code>rtReply</code>. This is RT-safe: it writes to a lock-free ring buffer on the Silo. The NRT thread drains the buffer periodically and invokes the handler with the value.</p>
-
-<table>
-  <tr><th>Function</th><th>Description</th></tr>
-  <tr><td><code>rtReply(handler fn(Float) Void, value Float) Void</code></td><td>Push a reply from RT to NRT. The handler is called on the NRT thread with the given value. RT-safe (no allocation, lock-free). Drops the reply silently if the ring buffer is full.</td></tr>
-</table>
-
-<pre><code><span class="kw">import</span> audio_engine.*;
-
-<span class="cmt">-- NRT handler that processes replies from RT</span>
-<span class="kw">let</span> onReply = <span class="kw">fn</span>(value <span class="typ">Float</span>) {
-    <span class="fn">println</span>(<span class="str">"RT sent: "</span> $ value <span class="fn">toString</span>);
-};
-
-<span class="cmt">-- RT note handler that sends data back to NRT</span>
-<span class="fn">rtOnNote</span>(<span class="kw">fn</span>(noteID <span class="typ">Int</span>) {
-    <span class="cmt">-- Convert noteID to frequency and send to NRT</span>
-    <span class="fn">rtReply</span>(onReply, noteID <span class="fn">toFloat</span>);
-});</code></pre>
-
-<div class="tip">
-  <strong>Tip:</strong> Use <code>rtReply</code> whenever an RT handler needs to trigger NRT-side effects (printing, network I/O, updating shared state). Keep RT handlers minimal and defer heavy work to NRT via replies.
-</div>
-
-<!-- ================================================================ -->
-<!--  12. NATS INTEGRATION                                             -->
-<!-- ================================================================ -->
-
-<h2 id="nats">12. NATS Integration</h2>
-
-<!-- -------------------------------- -->
-<h3 id="nats-overview">12.1 Overview</h3>
+<h3 id="nats-overview">11.1 Overview</h3>
 
 <p>Tzopilotl includes built-in <a href="https://nats.io/">NATS</a> messaging support for networked control and distributed communication. NATS functions are available when the application is built with <code>TZPL_BUILD_NATS=ON</code>.</p>
 
@@ -2255,7 +2164,7 @@ osc.<span class="fn">removeHandler</span>(<span class="str">"/trigger"</span>);<
 </div>
 
 <!-- -------------------------------- -->
-<h3 id="nats-setup">12.2 Setup &amp; Configuration</h3>
+<h3 id="nats-setup">11.2 Setup &amp; Configuration</h3>
 
 <p>The NATS client can be connected in two ways:</p>
 
@@ -2285,7 +2194,7 @@ engineName = <span class="str">"piano"</span></code></pre>
 <span class="fn">natsDisconnect</span>();                        <span class="cmt">-- disconnect</span></code></pre>
 
 <!-- -------------------------------- -->
-<h3 id="nats-connection">12.3 Connection Management</h3>
+<h3 id="nats-connection">11.3 Connection Management</h3>
 
 <table>
   <tr><th>Function</th><th>Description</th></tr>
@@ -2301,7 +2210,7 @@ engineName = <span class="str">"piano"</span></code></pre>
 </div>
 
 <!-- -------------------------------- -->
-<h3 id="nats-publishing">12.4 Publishing</h3>
+<h3 id="nats-publishing">11.4 Publishing</h3>
 
 <p>Publish messages to NATS subjects. The payload is a string (for typed variants, the value is converted to its string representation).</p>
 
@@ -2330,7 +2239,7 @@ engineName = <span class="str">"piano"</span></code></pre>
 });</code></pre>
 
 <!-- -------------------------------- -->
-<h3 id="nats-handler-registration">12.5 Handler Registration</h3>
+<h3 id="nats-handler-registration">11.5 Handler Registration</h3>
 
 <p>Register Tzopilotl functions as handlers for incoming NATS messages. When a message arrives on the subscribed subject, the handler is called via the NRTVM (mutex-serialized, non-RT). The message payload is passed as the argument.</p>
 
@@ -2368,7 +2277,7 @@ nats.<span class="fn">removeHandler</span>(<span class="str">"trigger"</span>);<
 </div>
 
 <!-- -------------------------------- -->
-<h3 id="nats-vm-subjects">12.6 VM NATS Subjects</h3>
+<h3 id="nats-vm-subjects">11.6 VM NATS Subjects</h3>
 
 <p>The following built-in NATS subjects allow external applications to interact with the Tzopilotl VM:</p>
 
@@ -2397,7 +2306,7 @@ nats.<span class="fn">removeHandler</span>(<span class="str">"trigger"</span>);<
 </div>
 
 <!-- -------------------------------- -->
-<h3 id="nats-engine-subjects">12.7 Engine NATS Subjects</h3>
+<h3 id="nats-engine-subjects">11.7 Engine NATS Subjects</h3>
 
 <p>When connected to a NATS server, the following subjects control the audio engine. These mirror the OSC engine addresses but use dot-separated NATS subject names and space-separated text payloads.</p>
 
@@ -2473,7 +2382,7 @@ nats.<span class="fn">removeHandler</span>(<span class="str">"trigger"</span>);<
 <span class="cmt">--   nats pub engine.masterGain '0.5'</span></code></pre>
 
 <!-- -------------------------------- -->
-<h3 id="nats-distributed">12.8 Distributed Engines</h3>
+<h3 id="nats-distributed">11.8 Distributed Engines</h3>
 
 <p>When running multiple Tzopilotl instances on different machines (or in separate processes), NATS provides a natural coordination layer. Each instance can be given a unique <strong>engine name</strong> so that commands and messages can be addressed to specific engines.</p>
 
@@ -2529,7 +2438,7 @@ nats.<span class="fn">onMessageS</span>(<span class="str">"nodes.piano.chords"</
 </div>
 
 <!-- -------------------------------- -->
-<h3 id="nats-vs-osc">12.9 NATS vs. OSC</h3>
+<h3 id="nats-vs-osc">11.9 NATS vs. OSC</h3>
 
 <p>Both protocols are supported simultaneously and share the same engine command set. Choose based on your needs:</p>
 
@@ -2550,6 +2459,81 @@ nats.<span class="fn">onMessageS</span>(<span class="str">"nodes.piano.chords"</
 <div class="tip">
   <strong>Tip:</strong> Use OSC when working with existing music software that speaks OSC, or when low-latency local communication is essential. Use NATS when building distributed systems across multiple machines, or when you need reliable delivery and request/reply semantics.
 </div>
+
+<!-- ================================================================ -->
+<!--  12. SYNTHDEF COMPILER                                           -->
+<!-- ================================================================ -->
+
+<h2 id="synthdef-compiler">12. SynthDef Compiler</h2>
+
+<!-- -------------------------------- -->
+<h3 id="synthdef-overview">12.1 Overview</h3>
+
+<p>The <code>synthdef</code> foreign module provides functions for compiling synth definitions from s-expression descriptions. The compilation pipeline parses the s-expression, performs graph analysis, generates C++ code, compiles it into a dynamic library (<code>.dylib</code>), and optionally loads it into the running audio engine.</p>
+
+<p>All functions are registered under the <code>synthdef</code> foreign module. Import them with:</p>
+
+<pre><code><span class="kw">import</span> synthdef.*;</code></pre>
+
+<p>Both functions are marked as <strong>non-RT-safe</strong> (they invoke the system compiler and perform file I/O), so they cannot be called from a real-time compiled context.</p>
+
+<!-- -------------------------------- -->
+<h3 id="synthdef-functions">12.2 Functions</h3>
+
+<table>
+  <tr><th>Function</th><th>Description</th></tr>
+  <tr><td><code>compileSynthDef(sexpr String) String</code></td><td>Compile a synth definition from an s-expression string. Generates C++ code and compiles it to a <code>.dylib</code>, but does <em>not</em> load it into the engine. Returns <code>""</code> on success, or an error message on failure. The result is cached for subsequent calls.</td></tr>
+  <tr><td><code>compileSynthDefAndLoad(sexpr String) String</code></td><td>Compile a synth definition and load it into the running audio engine. Performs the same compilation as <code>compileSynthDef</code>, then loads the resulting <code>.dylib</code> and registers the definition with the engine. Returns <code>""</code> on success, or an error message on failure. Requires an engine to be attached to the VM.</td></tr>
+</table>
+
+<p>The <code>sexpr</code> argument must be in the format <code>(Synth &lt;name&gt; (Graph ...))</code>. The synth name is extracted from the s-expression.</p>
+
+<div class="note">
+  <strong>Note:</strong> <code>compileSynthDefAndLoad</code> requires an audio engine to be attached to the VM via the <code>AppContext</code> user data. If no engine is present, it returns the error <code>"no engine attached to VM"</code>.
+</div>
+
+<!-- -------------------------------- -->
+<h3 id="synthdef-caching">12.3 Compilation Caching</h3>
+
+<p>Both functions maintain an in-memory cache keyed by the s-expression content. When <code>compileSynthDefAndLoad</code> is called with an s-expression that has already been compiled, it skips recompilation and reuses the cached <code>.dylib</code> path, then loads and registers the definition directly. This makes repeated calls with the same definition fast.</p>
+
+<!-- -------------------------------- -->
+<h3 id="synthdef-examples">12.4 Examples</h3>
+
+<h4>Low-level: compiling from an s-expression string</h4>
+
+<pre><code><span class="kw">import</span> synthdef.*;
+<span class="kw">import</span> audio_engine.*;
+
+<span class="kw">let</span> sexpr = <span class="str">"(Synth mySine (Graph 1 ((0 Constant 1 12 (440.0)) (1 Outlet \"out\" 0))))"</span>;
+<span class="kw">let</span> err = <span class="fn">compileSynthDefAndLoad</span>(sexpr);
+<span class="kw">if</span> (err <span class="fn">length</span> > <span class="num">0</span>) {
+    <span class="fn">println</span>(<span class="str">"ERROR: "</span> $ err);
+};
+
+<span class="cmt">-- The "mySine" definition is now available in the engine.</span>
+<span class="cmt">-- Create a node using it:</span>
+<span class="fn">newNode</span>(<span class="str">"mySine"</span>, <span class="num">1</span>);</code></pre>
+
+<h4>High-level: using the synthdef module's <code>defSynth</code></h4>
+
+<p>The <code>synthdef</code> Tzopilotl module provides <code>defSynth</code>, which builds the graph from a function, converts it to an s-expression, and calls <code>compileSynthDefAndLoad</code> automatically:</p>
+
+<pre><code><span class="kw">import</span> synthdef.*;
+
+<span class="fn">defSynth</span>(<span class="kw">fn</span>() { <span class="num">440.0</span> <span class="fn">sinosc</span> <span class="fn">outlet</span> }, <span class="str">"mySine"</span>);</code></pre>
+
+<h4>Compile only (without loading)</h4>
+
+<pre><code><span class="kw">import</span> synthdef.*;
+
+<span class="kw">let</span> sexpr = <span class="str">"(Synth offlineDef (Graph 1 ((0 Constant 1 12 (440.0)) (1 Outlet \"out\" 0))))"</span>;
+<span class="kw">let</span> err = <span class="fn">compileSynthDef</span>(sexpr);
+<span class="kw">if</span> (err <span class="fn">length</span> > <span class="num">0</span>) {
+    <span class="fn">println</span>(<span class="str">"Compile failed: "</span> $ err);
+} <span class="kw">else</span> {
+    <span class="fn">println</span>(<span class="str">"Compiled successfully (not loaded into engine)"</span>);
+};</code></pre>
 
 </main>
 <script>
