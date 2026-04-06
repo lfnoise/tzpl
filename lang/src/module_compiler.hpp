@@ -31,6 +31,7 @@
 #include <vector>
 #include <unordered_map>
 #include <memory>
+#include <filesystem>
 
 namespace ts {
 
@@ -74,6 +75,8 @@ struct ModuleInfo {
     bool initialized = false;
     bool compiling = false;  // cycle detection
     bool failed = false;     // true if compilation failed (suppress cascading errors)
+    std::filesystem::file_time_type fileModTime {};  // for cache invalidation
+    std::vector<CompileError> compilationErrors;  // stored so re-imports can report them
 
     // Source file info — needed for correct error diagnostics in imported templates
     std::string sourceFilePath;

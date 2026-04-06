@@ -157,21 +157,37 @@ ModuleInfo* ModuleCompiler::compileModule(
         ? "<foreign:" + modName + ">"
         : resolvedPath;
 
+    // Invalidate cache if the source file has been modified
+    if (!resolvedPath.empty()) {
+        auto it = modules_.find(cacheKey);
+        if (it != modules_.end()) {
+            std::error_code ec;
+            auto currentModTime = std::filesystem::last_write_time(resolvedPath, ec);
+            if (!ec && currentModTime != it->second->fileModTime)
+                modules_.erase(it);
+        }
+    }
+
     // Check cache
-    auto it = modules_.find(cacheKey);
-    if (it != modules_.end()) {
-        ModuleInfo* mod = it->second.get();
-        if (mod->compiling) {
-            errors.push_back(CompileError(CompileError::TypeError, loc,
-                "Circular import detected for module '" + cacheKey + "'"));
-            return nullptr;
+    {
+        auto it = modules_.find(cacheKey);
+        if (it != modules_.end()) {
+            ModuleInfo* mod = it->second.get();
+            if (mod->compiling) {
+                errors.push_back(CompileError(CompileError::TypeError, loc,
+                    "Circular import detected for module '" + cacheKey + "'"));
+                return nullptr;
+            }
+            if (mod->failed) {
+                for (const auto& err : mod->compilationErrors) {
+                    errors.push_back(err);
+                }
+                errors.push_back(CompileError(CompileError::TypeError, loc,
+                    "Module '" + modName + "' had compilation errors"));
+                return nullptr;
+            }
+            return mod;
         }
-        if (mod->failed) {
-            errors.push_back(CompileError(CompileError::TypeError, loc,
-                "Module '" + modName + "' had compilation errors"));
-            return nullptr;
-        }
-        return mod;
     }
 
     // --- Pure foreign module (no .x file) ---
@@ -210,13 +226,19 @@ ModuleInfo* ModuleCompiler::compileModule(
     mod->canonicalPath = resolvedPath;
     mod->moduleName = modName;
     mod->compiling = true;
+    {
+        std::error_code ec;
+        mod->fileModTime = std::filesystem::last_write_time(resolvedPath, ec);
+    }
     modules_[resolvedPath] = std::move(modPtr);
 
     // Read source file
     std::string source = readModuleFile(resolvedPath);
     if (source.empty()) {
-        errors.push_back(CompileError(CompileError::TypeError, loc,
-            "Cannot read module file '" + resolvedPath + "'"));
+        CompileError err(CompileError::TypeError, loc,
+            "Cannot read module file '" + resolvedPath + "'");
+        mod->compilationErrors.push_back(err);
+        errors.push_back(err);
         mod->compiling = false;
         mod->failed = true;
         return nullptr;
@@ -233,6 +255,8 @@ ModuleInfo* ModuleCompiler::compileModule(
     Parser parser(lexer);
     mod->ast = parser.parseProgram();
     if (parser.hasErrors()) {
+        mod->compilationErrors.insert(mod->compilationErrors.end(),
+            parser.errors().begin(), parser.errors().end());
         for (const auto& err : parser.errors()) errors.push_back(err);
         mod->compiling = false;
         mod->failed = true;
@@ -253,6 +277,8 @@ ModuleInfo* ModuleCompiler::compileModule(
 
     typeChecker.check(program);
     if (typeChecker.hasErrors()) {
+        mod->compilationErrors.insert(mod->compilationErrors.end(),
+            typeChecker.errors().begin(), typeChecker.errors().end());
         for (const auto& err : typeChecker.errors()) errors.push_back(err);
         mod->compiling = false;
         mod->failed = true;
@@ -265,6 +291,8 @@ ModuleInfo* ModuleCompiler::compileModule(
     codegen.setSourceText(source);
     CodeBlock* initBlock = codegen.generate(program, true);  // module init ends with return, not halt
     if (codegen.hasErrors()) {
+        mod->compilationErrors.insert(mod->compilationErrors.end(),
+            codegen.errors().begin(), codegen.errors().end());
         for (const auto& err : codegen.errors()) errors.push_back(err);
         mod->compiling = false;
         mod->failed = true;
