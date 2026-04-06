@@ -633,9 +633,12 @@ std::expected<S, std::string> SExprGraphBuilder::parseDelayVarRead(sexpr::ItemVe
     Interpolation interp = interpNone;
     size_t inputsIdx = 3;
 
-    // If list[3] is a string, it's the interpolation type; inputs are at list[4]
-    if (list[3].is<std::string>()) {
-        auto interpResult = interpFromString(list[3].get<std::string>());
+    // If list[3] is a string or symbol, it's the interpolation type; inputs are at list[4]
+    if (list[3].is<std::string>() || list[3].is<sexpr::Symbol>()) {
+        std::string interpName = list[3].is<std::string>()
+            ? list[3].get<std::string>()
+            : list[3].get<sexpr::Symbol>().name;
+        auto interpResult = interpFromString(interpName);
         if (!interpResult) return std::unexpected(interpResult.error());
         interp = *interpResult;
         inputsIdx = 4;
