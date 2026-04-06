@@ -508,6 +508,20 @@ if (localStorage.getItem('tzpl-docs-theme') === 'light') document.documentElemen
         <li><a href="#any-arrays">Heterogeneous Arrays</a></li>
       </ol>
     </li>
+    <li><a href="#coroutines">Coroutines</a>
+      <ol>
+        <li><a href="#defining-coroutines">Defining Coroutines</a></li>
+        <li><a href="#resuming-with-next">Resuming with next</a></li>
+        <li><a href="#yield-forms">Yield Forms</a></li>
+        <li><a href="#coroutine-state">Coroutine State and Exhaustion</a></li>
+        <li><a href="#for-loops-coroutines">For Loops over Coroutines</a></li>
+        <li><a href="#infinite-coroutines">Infinite Coroutines</a></li>
+        <li><a href="#yield-delegation">Yield Delegation with yieldAll</a></li>
+        <li><a href="#coroutine-to-list">Converting to Lists with toList</a></li>
+        <li><a href="#coroutine-types">The Coroutine Type</a></li>
+        <li><a href="#coroutine-composition">Composition Patterns</a></li>
+      </ol>
+    </li>
     <li><a href="#advanced-examples">Advanced Examples</a>
       <ol>
         <li><a href="#fibonacci">Fibonacci</a></li>
@@ -2629,9 +2643,269 @@ any(<span class="num">1</span>, any(<span class="num">2</span>, <span class="num
 <span class="cmt">-- [Any(1, Int), Any([Any(2, Int), Any(3, Int)], [Any])]</span></code></pre>
 
 <!-- ================================================================ -->
-<h2 id="advanced-examples">23. Advanced Examples</h2>
+<h2 id="coroutines">23. Coroutines</h2>
 
-<h3 id="fibonacci">23.1 Fibonacci (Recursive and Iterative)</h3>
+<p>Coroutines are functions that can suspend execution and yield values one at a time.
+They are useful for lazy sequences, generators, and any scenario where you want to
+produce a stream of values on demand without computing them all up front.</p>
+
+<h3 id="defining-coroutines">23.1 Defining Coroutines</h3>
+<p>A coroutine is declared with <code>coro fn</code>. The return type is the type of
+values it yields. Use <code>yield</code> to produce values.</p>
+<pre><code><span class="cmt">-- A coroutine that yields integers 0..n-1</span>
+<span class="kw">coro fn</span> count(n <span class="kw">Int</span>) <span class="kw">Int</span> {
+    <span class="kw">var</span> i = <span class="num">0</span>;
+    <span class="kw">while</span> (i < n) {
+        yield i;
+        i = i + <span class="num">1</span>;
+    }
+}
+
+<span class="cmt">-- A coroutine with multiple explicit yield points</span>
+<span class="kw">coro fn</span> traffic_light() <span class="kw">String</span> {
+    yield <span class="str">"red"</span>;
+    yield <span class="str">"yellow"</span>;
+    yield <span class="str">"green"</span>;
+}</code></pre>
+
+<div class="note">
+<strong>Note:</strong> <code>yield</code> can only appear in the lexical body of a
+<code>coro fn</code>. A regular function called from within a coroutine cannot yield on
+the coroutine's behalf. Use <code>yieldAll</code> to delegate to an inner coroutine.
+</div>
+
+<h3 id="resuming-with-next">23.2 Resuming with <code>next</code></h3>
+<p>Calling a coroutine function creates a <code>Coroutine&lt;T&gt;</code> object.
+Use <code>next</code> to resume it and get the next yielded value wrapped in
+<code>Option&lt;T&gt;</code>. When the coroutine is exhausted, <code>next</code>
+returns <code>none</code>.</p>
+<pre><code><span class="kw">let</span> c = <span class="num">3</span> count;
+c next println;   <span class="cmt">-- Option.some(0)</span>
+c next println;   <span class="cmt">-- Option.some(1)</span>
+c next println;   <span class="cmt">-- Option.some(2)</span>
+c next println;   <span class="cmt">-- Option.none</span></code></pre>
+
+<h3 id="yield-forms">23.3 Yield Forms</h3>
+<p>There are three equivalent ways to yield a value.</p>
+<pre><code><span class="kw">coro fn</span> mixed_yield() <span class="kw">String</span> {
+    yield <span class="str">"prefix"</span>;          <span class="cmt">-- expression form</span>
+    <span class="str">"pipeline"</span> yield;       <span class="cmt">-- pipeline form</span>
+    yield(<span class="str">"explicit"</span>);       <span class="cmt">-- call form</span>
+}
+
+<span class="kw">let</span> m = mixed_yield();
+m next println;   <span class="cmt">-- Option.some(prefix)</span>
+m next println;   <span class="cmt">-- Option.some(pipeline)</span>
+m next println;   <span class="cmt">-- Option.some(explicit)</span></code></pre>
+
+<h3 id="coroutine-state">23.4 Coroutine State and Exhaustion</h3>
+<p>Each coroutine maintains its own local state across suspensions.
+Once finished, every subsequent call to <code>next</code> returns <code>none</code>.</p>
+<pre><code><span class="cmt">-- State is preserved between yields</span>
+<span class="kw">coro fn</span> running_sum(n <span class="kw">Int</span>) <span class="kw">Int</span> {
+    <span class="kw">var</span> sum = <span class="num">0</span>;
+    <span class="kw">var</span> i = <span class="num">1</span>;
+    <span class="kw">while</span> (i <= n) {
+        sum = sum + i;
+        yield sum;
+        i = i + <span class="num">1</span>;
+    }
+}
+
+<span class="kw">let</span> rs = <span class="num">4</span> running_sum;
+rs next println;   <span class="cmt">-- Option.some(1)</span>
+rs next println;   <span class="cmt">-- Option.some(3)</span>
+rs next println;   <span class="cmt">-- Option.some(6)</span>
+rs next println;   <span class="cmt">-- Option.some(10)</span>
+rs next println;   <span class="cmt">-- Option.none</span>
+rs next println;   <span class="cmt">-- Option.none (stays exhausted)</span>
+
+<span class="cmt">-- An empty coroutine (no yields) is immediately done</span>
+<span class="kw">coro fn</span> empty() <span class="kw">Int</span> {}
+empty() next println;   <span class="cmt">-- Option.none</span></code></pre>
+
+<h3 id="for-loops-coroutines">23.5 For Loops over Coroutines</h3>
+<p>Coroutines work directly with <code>for</code> loops. The loop variable
+receives unwrapped values (not <code>Option</code>), and the loop ends when
+the coroutine is exhausted.</p>
+<pre><code><span class="kw">for</span> (x : count(<span class="num">5</span>)) {
+    x println;
+}
+<span class="cmt">-- Output: 0 1 2 3 4</span>
+
+<span class="cmt">-- Works with any yield type</span>
+<span class="kw">coro fn</span> colors() <span class="kw">String</span> {
+    yield <span class="str">"red"</span>;
+    yield <span class="str">"green"</span>;
+    yield <span class="str">"blue"</span>;
+}
+
+<span class="kw">for</span> (c : colors()) {
+    c println;
+}
+<span class="cmt">-- Output: red green blue</span></code></pre>
+
+<h3 id="infinite-coroutines">23.6 Infinite Coroutines</h3>
+<p>Coroutines can yield indefinitely. Use <code>break</code> in a
+<code>for</code> loop to stop early.</p>
+<pre><code><span class="cmt">-- Infinite Fibonacci sequence</span>
+<span class="kw">coro fn</span> fibs() <span class="kw">Int</span> {
+    <span class="kw">var</span> a = <span class="num">0</span>;
+    <span class="kw">var</span> b = <span class="num">1</span>;
+    <span class="kw">while</span> (<span class="kw">true</span>) {
+        yield a;
+        <span class="kw">let</span> tmp = a + b;
+        a = b;
+        b = tmp;
+    }
+}
+
+<span class="cmt">-- Take the first 8 values</span>
+<span class="kw">let</span> f = fibs();
+<span class="kw">var</span> i = <span class="num">0</span>;
+<span class="kw">while</span> (i < <span class="num">8</span>) {
+    f next println;
+    i = i + <span class="num">1</span>;
+}
+<span class="cmt">-- Option.some(0), Option.some(1), Option.some(1), Option.some(2),</span>
+<span class="cmt">-- Option.some(3), Option.some(5), Option.some(8), Option.some(13)</span>
+
+<span class="cmt">-- Or use for with break</span>
+<span class="kw">for</span> (x : fibs()) {
+    <span class="kw">if</span> (x > <span class="num">10</span>) { <span class="kw">break</span>; }
+    x println;
+}
+<span class="cmt">-- Output: 0 1 1 2 3 5 8</span></code></pre>
+
+<h3 id="yield-delegation">23.7 Yield Delegation with <code>yieldAll</code></h3>
+<p><code>yieldAll</code> drains an inner coroutine, forwarding each of its values
+as a yield from the outer coroutine. The inner coroutine's yield type must match
+the outer's.</p>
+<pre><code><span class="kw">coro fn</span> inner() <span class="kw">Int</span> {
+    yield <span class="num">10</span>;
+    yield <span class="num">20</span>;
+    yield <span class="num">30</span>;
+}
+
+<span class="kw">coro fn</span> outer() <span class="kw">Int</span> {
+    yield <span class="num">1</span>;
+    yieldAll(inner());   <span class="cmt">-- delegates: yields 10, 20, 30</span>
+    yield <span class="num">99</span>;
+}
+
+<span class="kw">for</span> (x : outer()) {
+    x println;
+}
+<span class="cmt">-- Output: 1 10 20 30 99</span>
+
+<span class="cmt">-- Pipeline form works too</span>
+<span class="kw">coro fn</span> outer2() <span class="kw">Int</span> {
+    yield <span class="num">1</span>;
+    inner() yieldAll;
+    yield <span class="num">99</span>;
+}</code></pre>
+
+<h3 id="coroutine-to-list">23.8 Converting to Lists with <code>toList</code></h3>
+<p><code>toList</code> converts a coroutine into a (lazy) list, enabling all list
+operations. For infinite coroutines, use <code>take</code> or <code>collect</code>
+to bound the result.</p>
+<pre><code><span class="cmt">-- Finite coroutine to list</span>
+<span class="num">5</span> count toList println;
+<span class="cmt">-- List(0, 1, 2, 3, 4)</span>
+
+<span class="cmt">-- Infinite coroutine with take</span>
+fibs() toList take(<span class="num">8</span>) println;
+<span class="cmt">-- List(0, 1, 1, 2, 3, 5, 8, 13)</span>
+
+<span class="cmt">-- List operations on the result</span>
+<span class="num">5</span> count toList head println;     <span class="cmt">-- 0</span>
+<span class="num">5</span> count toList tail println;     <span class="cmt">-- List(1, 2, 3, 4)</span>
+<span class="num">5</span> count toList drop(<span class="num">3</span>) println;  <span class="cmt">-- List(3, 4)</span>
+
+<span class="cmt">-- Map over a coroutine-turned-list</span>
+<span class="num">3</span> count toList map(<span class="kw">fn</span>(x <span class="kw">Int</span>) <span class="kw">Int</span> = x * <span class="num">10</span>) println;
+<span class="cmt">-- List(0, 10, 20)</span>
+
+<span class="cmt">-- collect eagerly evaluates the first N elements</span>
+fibs() toList collect(<span class="num">6</span>) println;
+<span class="cmt">-- [0, 1, 1, 2, 3, 5]</span></code></pre>
+
+<h3 id="coroutine-types">23.9 The Coroutine Type</h3>
+<p>The type of a coroutine object is <code>Coroutine&lt;T&gt;</code>, where <code>T</code>
+is the yield type. This can be used in type annotations and as function parameter types.</p>
+<pre><code><span class="cmt">-- Explicit type annotation</span>
+<span class="kw">let</span> c Coroutine&lt;<span class="kw">Int</span>&gt; = <span class="num">3</span> count;
+
+<span class="cmt">-- Function that drains any Coroutine&lt;Int&gt;</span>
+<span class="kw">fn</span> drain(c Coroutine&lt;<span class="kw">Int</span>&gt;) <span class="kw">Void</span> {
+    <span class="kw">var</span> result = c next;
+    <span class="kw">while</span> (result isSome) {
+        result println;
+        result = c next;
+    }
+}
+
+<span class="num">4</span> count drain;
+<span class="cmt">-- Option.some(0) Option.some(1) Option.some(2) Option.some(3)</span></code></pre>
+
+<h3 id="coroutine-composition">23.10 Composition Patterns</h3>
+<p>Coroutines can yield any type including tuples, arrays, structs, and enums.
+They also compose well: a coroutine can create and drive other coroutines.</p>
+<pre><code><span class="cmt">-- Yielding tuples</span>
+<span class="kw">coro fn</span> pairs(n <span class="kw">Int</span>) (<span class="kw">Int</span>, <span class="kw">Int</span>) {
+    <span class="kw">var</span> i = <span class="num">0</span>;
+    <span class="kw">while</span> (i < n) {
+        yield (i, i * i);
+        i = i + <span class="num">1</span>;
+    }
+}
+
+<span class="kw">for</span> (p : <span class="num">4</span> pairs) {
+    p println;
+}
+<span class="cmt">-- (0, 0) (1, 1) (2, 4) (3, 9)</span>
+
+<span class="cmt">-- Yielding arrays</span>
+<span class="kw">coro fn</span> make_arrays() [<span class="kw">Int</span>] {
+    yield [<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>];
+    yield [<span class="num">4</span>, <span class="num">5</span>];
+    yield [<span class="num">6</span>];
+}
+
+<span class="kw">for</span> (a : make_arrays()) {
+    a println;
+}
+<span class="cmt">-- [1, 2, 3] [4, 5] [6]</span>
+
+<span class="cmt">-- Yield from conditionals and match</span>
+<span class="kw">coro fn</span> conditional(flag <span class="kw">Bool</span>) <span class="kw">Int</span> {
+    <span class="kw">if</span> (flag) {
+        yield <span class="num">1</span>;
+        yield <span class="num">2</span>;
+    } <span class="kw">else</span> {
+        yield <span class="num">100</span>;
+        yield <span class="num">200</span>;
+    }
+    yield <span class="num">999</span>;
+}
+
+<span class="kw">true</span> conditional toList println;   <span class="cmt">-- List(1, 2, 999)</span>
+<span class="kw">false</span> conditional toList println;  <span class="cmt">-- List(100, 200, 999)</span>
+
+<span class="cmt">-- Composing: one coroutine driving another</span>
+<span class="kw">coro fn</span> doubled(c Coroutine&lt;<span class="kw">Int</span>&gt;) <span class="kw">Int</span> {
+    <span class="kw">for</span> (x : c) {
+        yield x * <span class="num">2</span>;
+    }
+}
+
+<span class="num">4</span> count doubled toList println;
+<span class="cmt">-- List(0, 2, 4, 6)</span></code></pre>
+
+<!-- ================================================================ -->
+<h2 id="advanced-examples">24. Advanced Examples</h2>
+
+<h3 id="fibonacci">24.1 Fibonacci (Recursive and Iterative)</h3>
 <pre><code><span class="kw">fn</span> fib(n <span class="kw">Int</span>) <span class="kw">Int</span> {
     <span class="kw">if</span> (n <= <span class="num">1</span>) { <span class="kw">return</span> n; }
     fib(n - <span class="num">1</span>) + fib(n - <span class="num">2</span>)
@@ -2651,7 +2925,7 @@ any(<span class="num">1</span>, any(<span class="num">2</span>, <span class="num
     b
 }</code></pre>
 
-<h3 id="fizzbuzz">23.2 FizzBuzz</h3>
+<h3 id="fizzbuzz">24.2 FizzBuzz</h3>
 <pre><code><span class="kw">fn</span> fizzbuzz(n <span class="kw">Int</span>) <span class="kw">String</span> {
     <span class="kw">if</span> (n % <span class="num">15</span> == <span class="num">0</span>) { <span class="kw">return</span> <span class="str">"FizzBuzz"</span>; }
     <span class="kw">if</span> (n % <span class="num">3</span> == <span class="num">0</span>) { <span class="kw">return</span> <span class="str">"Fizz"</span>; }
@@ -2666,7 +2940,7 @@ any(<span class="num">1</span>, any(<span class="num">2</span>, <span class="num
     i = i + <span class="num">1</span>;
 }</code></pre>
 
-<h3 id="euler9">23.3 Euler Problem 9: Pythagorean Triplet</h3>
+<h3 id="euler9">24.3 Euler Problem 9: Pythagorean Triplet</h3>
 <pre><code><span class="cmt">-- Find a*b*c where a+b+c=1000, a^2+b^2=c^2</span>
 <span class="kw">fn</span> euler9() <span class="kw">Int</span> {
     <span class="kw">var</span> a = <span class="num">1</span>;
@@ -2686,14 +2960,14 @@ any(<span class="num">1</span>, any(<span class="num">2</span>, <span class="num
     <span class="num">0</span>
 }</code></pre>
 
-<h3 id="complex-powers">23.4 Complex Number Powers of i</h3>
+<h3 id="complex-powers">24.4 Complex Number Powers of i</h3>
 <pre><code><span class="cmt">-- i^1=i, i^2=-1, i^3=-i, i^4=1</span>
 <span class="kw">let</span> i_1 = <span class="num">1i</span>;
 <span class="kw">let</span> i_2 = i_1 * i_1;      <span class="cmt">-- -1+0i</span>
 <span class="kw">let</span> i_3 = i_2 * i_1;      <span class="cmt">-- 0-1i</span>
 <span class="kw">let</span> i_4 = i_3 * i_1;      <span class="cmt">-- 1+0i</span></code></pre>
 
-<h3 id="bitwise-overloading">23.5 Bitwise Operator Overloading</h3>
+<h3 id="bitwise-overloading">24.5 Bitwise Operator Overloading</h3>
 <pre><code><span class="kw">struct</span> Mask { bits <span class="kw">Int</span> }
 
 <span class="kw">fn</span> &(a Mask, b Mask) Mask = Mask { bits: a.bits & b.bits };
