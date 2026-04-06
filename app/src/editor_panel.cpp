@@ -81,8 +81,7 @@ void EditorPanel::newTab(const std::string& name) {
     tab.editor.SetShowWhitespaces(false);
     tabs_.push_back(std::move(tab));
     activeTab_ = (int)tabs_.size() - 1;
-    // Trigger ImGui focus on next render
-    tabs_[activeTab_].editor.SetCursorPosition(TextEditor::Coordinates(0, 0));
+    needsFocus_ = true;
 }
 
 void EditorPanel::openFile(const std::string& path) {
@@ -106,8 +105,7 @@ void EditorPanel::openFile(const std::string& path) {
     tab.editor.SetShowWhitespaces(false);
     tabs_.push_back(std::move(tab));
     activeTab_ = (int)tabs_.size() - 1;
-    // Trigger ImGui focus on next render
-    tabs_[activeTab_].editor.SetCursorPosition(TextEditor::Coordinates(0, 0));
+    needsFocus_ = true;
 }
 
 void EditorPanel::closeActiveTab() {
@@ -210,10 +208,12 @@ void EditorPanel::draw(float width, float height, GuiState& state) {
     if (activeTab_ >= 0 && activeTab_ < (int)tabs_.size()) {
         auto& editor = tabs_[activeTab_].editor;
 
-        // Give the editor ImGui focus if it doesn't have it yet
-        // (e.g. after opening a file, switching tabs, or returning from a dialog)
-        if (!ImGui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows))
+        // Give the editor ImGui focus once after tab switch or file open
+        if (activeTab_ != prevActiveTab_ || needsFocus_) {
+            prevActiveTab_ = activeTab_;
+            needsFocus_ = false;
             editor.SetCursorPosition(editor.GetCursorPosition());
+        }
 
         // Draw eval flash overlay
         if (state.flash.active()) {

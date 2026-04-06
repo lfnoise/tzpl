@@ -83,6 +83,8 @@ private:
 
     std::vector<Tab> tabs_;
     int activeTab_ = 0;
+    int prevActiveTab_ = -1;
+    bool needsFocus_ = false;
     TextEditor::LanguageDefinition langDef_;
     FindReplaceState findReplace_;
 };
