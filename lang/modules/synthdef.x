@@ -363,7 +363,7 @@ fn toLispString(i Interpolation) String = match(i) {
 	cubic:    "cubic";
 	lagrange: "lagrange";
 	sinc:     "sinc";
-}
+};
 
 enum DelayOp {
 	maxDelayTime,
@@ -722,7 +722,7 @@ fn write(s AsSignal, d DelayVar) S {
 }
 
 fn call(d DelayVar, index Int = 0) S = d read(index);
-fn call(d DelayVar, index S) S = d vread(index);
+fn call(d DelayVar, index S, interp Interpolation = Interpolation.cubic) S = d vread(index);
 
 fn <- (d DelayVar, s AsSignal) S = d write(s asSignal);
 fn -> (s AsSignal, d DelayVar) S = s asSignal write(d);
@@ -1083,7 +1083,7 @@ fn play(defName String, nodeID Int) Int {
 	ae.begin(0);
 	ae.newNode(defName, nodeID);
 	ae.connect(nodeID, 0, 0, 0);
-	ae.go();
+	ae.sched();
 	nodeID
 }
 
@@ -1096,16 +1096,22 @@ fn play(defName String) Int {
 fn stop(nodeID Int) Int {
 	ae.begin(0);
 	ae.freeNode(nodeID);
-	ae.go();
+	ae.sched();
 	nodeID
 }
 
-fn playFor(defName String, seconds Float) Int {
+import clock.*;
+
+coro fn playFor(defName String, seconds Float) Float {
 	let id = play(defName);
-	ae.sleep(seconds);
+	yield seconds;
 	stop(id);
-	id
 }
 
 ---------------------------------------------------------------------------
 ---------------------------------------------------------------------------
+
+
+
+
+

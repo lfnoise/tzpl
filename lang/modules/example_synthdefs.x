@@ -182,22 +182,26 @@ fn bubbles_lite() S = 0.4 lfsaw * 24 + 8 lfsaw * 3 + 81 |> nnhz sinosc * 0.04 |>
 import audio_engine as ae;
 ae.listSynthDefs() println;
 
-"init_urand_test" playFor(5.0);
-"bubbles" playFor(5.0);
-"dustone" playFor(5.0);
-"pause_bubbles" playFor(5.0);
-"tog_pause" playFor(5.0);
-"pull_nested" playFor(5.0);
-"pulltwo" playFor(5.0);
-"pch_seq" playFor(5.0);
-"sahtone1" playFor(5.0);
-"sahtone2" playFor(5.0);
-"mod1_test" playFor(5.0);
-"mod4_test" playFor(5.0);
-"mod5_test" playFor(5.0);
-"white_test" playFor(5.0);
-"pink_test" playFor(5.0);
-"violet_test" playFor(5.0);
-"blue_test" playFor(5.0);
-"red_test" playFor(5.0);
+go(coro fn() Float {
+	"init_urand_test" playFor(5.0) yieldAll;
+	"bubbles" playFor(5.0) yieldAll;
+	"dustone" playFor(5.0) yieldAll;
+	"pause_bubbles" playFor(5.0) yieldAll;
+	"tog_pause" playFor(5.0) yieldAll;
+	"pull_nested" playFor(5.0) yieldAll;
+	"pulltwo" playFor(5.0) yieldAll;
+	"pch_seq" playFor(5.0) yieldAll;
+	"sahtone1" playFor(5.0) yieldAll;
+	"sahtone2" playFor(5.0) yieldAll;
+	"mod1_test" playFor(5.0) yieldAll;
+	"mod4_test" playFor(5.0) yieldAll;
+	"mod5_test" playFor(5.0) yieldAll;
+	"white_test" playFor(5.0) yieldAll;
+	"pink_test" playFor(5.0) yieldAll;
+	"violet_test" playFor(5.0) yieldAll;
+	"blue_test" playFor(5.0) yieldAll;
+	"red_test" playFor(5.0) yieldAll;
+}());
+
+
 

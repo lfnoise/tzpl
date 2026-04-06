@@ -5,6 +5,9 @@ const twopi = 2 * pi;
 
 -- common math
 
+-- safe division.
+fn divz(numer, denom, otherwise) = select2(denom == 0.0, otherwise, numer / denom);
+
 fn sign(x) = (x > 0) - (x < 0);
 
 fn cmp(a, b) = (a > b) - (a < b);
@@ -36,7 +39,8 @@ fn sin2pi(x) = sinpi(2 * x);
 fn cos2pi(x) = cospi(2 * x);
 fn tan2pi(x) = tanpi(2 * x);
 
-fn sinc(x) = select2(x == 0, 1, x / x sin);
+fn sinc(x) = divz(x sin, x, 1);
+fn sincpi(x) = divz(x sin2pi, x, 1);
 
 -- fast approximation of sine
 fn fsin(x) {
@@ -104,15 +108,12 @@ fn excess(x, b) = x - x clip2(b);
 
 fn distort(x) = x / (1 + x abs);
 
-fn softclip_old(x) {
+fn softclip(x) {
     let ax = x abs;
-	sel(ax < 0.5, x, (ax - 0.25) / x)
+	select2(ax < 0.5, x, (ax - 0.25) / x)
 }
 
-fn softclip(x) = x - 4/27 * x clip(-1.25, 1.25) cb;
-
-
-fn sigmoid0(x) = sel(abs(x)>1.5, sgn(x), x - (4/27)*cb(x));
+fn sigmoid0(x) = select2(abs(x)>1.5, sgn(x), x - (4/27)*cb(x));
 fn sigmoid1(x) = erf(sqrt(pi)/2*x);
 fn sigmoid2(x) = 2*x/(abs(2*x)+3/(2+4*sq(x)));
 fn sigmoid3(x) = (27*x+cb(x))/(27+9*sq(x));
@@ -201,7 +202,7 @@ fn warp_asin_r(x) = 1 - (2 / pi) * arcsin(1 - x);
 
 
 -- unipolar to unipolar S warps
-fn swarp_pow(x, p) = sel(x < 0.5, 0.5 * pow(2 * x, p), 1 - 0.5 * pow(2 - 2 * x, p));
+fn swarp_pow(x, p) = select2(x < 0.5, 0.5 * pow(2 * x, p), 1 - 0.5 * pow(2 - 2 * x, p));
 
 fn swarp_sin(x) = sinpi(x - 1) uni;
 
@@ -209,11 +210,11 @@ fn swarp_asin(x) = x bi asin / pi + 0.5;
 
 
 -- unipolar to unipolar S warps, double reflection
-fn swarp_pow_r(x, p) = 0.5 * sel(x < 0.5, (1 - pow(1 - 2 * x, p)), (1 + pow(2 * x - 1, p)));
+fn swarp_pow_r(x, p) = 0.5 * select2(x < 0.5, (1 - pow(1 - 2 * x, p)), (1 + pow(2 * x - 1, p)));
 
-fn swarp_sin_r(x) = sel(x < 0.5, 0.5 * sinpi(x), 1 + 0.5 * sinpi(x + 1));
+fn swarp_sin_r(x) = select2(x < 0.5, 0.5 * sinpi(x), 1 + 0.5 * sinpi(x + 1));
 
-fn swarp_asin_r(x) = sel(x < 0.5, asin(2 * x) / pi, 1 + asin(2 * x - 2) / pi);
+fn swarp_asin_r(x) = select2(x < 0.5, asin(2 * x) / pi, 1 + asin(2 * x - 2) / pi);
 
 
 -- general purpose warp
@@ -251,6 +252,9 @@ let kSecsToMin = 1/60;
 let kMinToSecs = 60;
 let kDegToRad = pi/180;
 let kRadToDeg = 180/pi;
+
+fn hzw(x) S = x * twopi * T(); -- Hertz to radians per sample
+fn whz(x) S = x * fs() / twopi; -- radians per sample to Hertz
 
 fn octnn(x) = x * 12;   -- octaves to note number
 fn nnoct(x) = x / 12;    -- note number to octaves
@@ -331,19 +335,19 @@ fn absdif(a, b) = abs(a - b);
 
 fn vca(x, a) = x * max(0, a);
 
-fn scaleneg(x, a) = sel(x < 0, x * a, x);
-fn scalepos(x, a) = sel(x > 0, x * a, x);
-fn scalenegpos(x, a, b) = x * sel(x < 0, a, b);
+fn scaleneg(x, a) = select2(x < 0, x * a, x);
+fn scalepos(x, a) = select2(x > 0, x * a, x);
+fn scalenegpos(x, a, b) = x * select2(x < 0, a, b);
 
-fn above(x, a) = sel(x > a, x, 0);
-fn below(x, a) = sel(x < a, x, 0);
+fn above(x, a) = select2(x > a, x, 0);
+fn below(x, a) = select2(x < a, x, 0);
 
-fn absabove(x, a) = sel(x abs > a, x, 0);
-fn absbelow(x, a) = sel(x abs < a, x, 0);
+fn absabove(x, a) = select2(x abs > a, x, 0);
+fn absbelow(x, a) = select2(x abs < a, x, 0);
 
 fn zapgremlins(x) {
     let ax = x abs;
-    sel(1e-15 < ax && ax < 1e15, x, 0);
+    select2(1e-15 < ax && ax < 1e15, x, 0);
 }
 
 fn decayCoeff(n, amp) = amp pow(1/n);  -- calculate coefficient to decay to amp in n cycles.
@@ -400,39 +404,73 @@ fn init() S {
 
 fn sampleAndHold(x S, t S) S {
 	let y = delayVar();
-	select2(t > 0, x, y(1)) write(y)
+	y <- select2(t > 0, x, y(1))
 }
 
 fn once(x S) S {
 	let y = delayVar();
-	select2(x > 0, 1, y(1)) write(y)
+	y <- select2(x > 0, 1, y(1))
 }
 
 -- flip flops
 
 fn toggle(x S) S {
 	let y = delayVar();
-	select2(x > 0, 1 - y(1), y(1)) write(y)
+	y <- select2(x > 0, 1 - y(1), y(1))
 }
 
 fn setReset(s S, r S) S {
 	let y = delayVar();
-	select2(r > 0, 0, select2(s > 0, 1, y(1))) write(y)
+	y <- select2(r > 0, 0, select2(s > 0, 1, y(1)))
 }
 
 fn setResetToggle(s S, r S, t S) S {
 	let y = delayVar();
-	select2(r > 0, 0, select2(s > 0, 1, select2(t > 0, 1 - y(1), y(1)))) write(y)
+	y <- select2(r > 0, 0, select2(s > 0, 1, select2(t > 0, 1 - y(1), y(1))))
 }
 
 -- simple filters
 
-fn lag(x S, t AsSignal) S {
-    let a = decay40dB(t * fs());
-    let y = delayVar();
+-- lag
+fn _lag(x S, a AsSignal) {
+	let y = delayVar();
     y <- x + a * (y(1) - x)
 }
 
+fn lag(x S, t AsSignal) S {
+    let a = decay40dB(t * fs());
+	x _lag(a)
+}
+fn lag2(x S, t AsSignal) S {
+    let a = decay40dB(t/2 * fs());
+	x _lag(a) _lag(a)
+}
+fn lag3(x S, t AsSignal) S {
+    let a = decay40dB(t/3 * fs());
+	x _lag(a) _lag(a)
+}
+
+-- lag with different up and down time constants
+fn _lag(x S, u AsSignal, d AsSignal) S {
+	let y = delayVar();
+	let a = select2(x < y(1), u, d);
+    y <- x + a * (y(1) - x)
+}
+
+fn lag(x S, u AsSignal, d AsSignal) S {
+	let (u, d) = decay40dB((u, d));
+	x _lag(u, d)
+}
+fn lag2(x S, u AsSignal, d AsSignal) S {
+	let (u, d) = decay40dB((u, d)/2);
+	x _lag(u, d) _lag(u, d)
+}
+fn lag3(x S, u AsSignal, d AsSignal) S {
+	let (u, d) = decay40dB((u, d)/3);
+	x _lag(u, d) _lag(u, d) _lag(u, d)
+}
+
+ 
 -- leaky integrator
 fn leaky(x S, a AsSignal) S {
 	let y = delayVar();
@@ -457,7 +495,7 @@ fn decay(x S, t AsSignal) S = leaky(x, decay40dB(t * fs()));
 fn decay2(x S, atk AsSignal, dcy AsSignal) S = x decay(dcy) - x decay(atk);
 
 -- differentiation
-fn diff(x S) S = x - x z1;   -- unscaled sample to sample difference
+fn diff(x S) S = x - x z1;   -- unscaled sample-to-sample difference
 fn slope(x S) S = diff(x) * fs();
 fn accel(x S) S = slope(slope(x));
 fn jerk(x S) S = slope(accel(x));
@@ -471,30 +509,30 @@ fn backwardIntegrator(x S)    S { let y = delayVar(); y <- y(1) + x*T() }
 -- integration with reset
 fn unscaledIntegrator(x S, r S)    S { 
 	let y = delayVar();
-	select2(r > 0, 0, y(1) + x) write(y) 
+	y <- select2(r > 0, 0, y(1) + x) 
 }
 fn trapezoidalIntegrator(x S, r S) S { 
 	let y = delayVar();
-	select2(r > 0, 0, y(1) + (x + x z1) * (T()/2)) write(y) 
+	y <- select2(r > 0, 0, y(1) + (x + x z1) * (T()/2)) 
 }
 fn forwardIntegrator(x S, r S) S { 
 	let y = delayVar();
-	select2(r > 0, 0, y(1) + x z1 * T()) write(y)
+	y <- select2(r > 0, 0, y(1) + x z1 * T())
 }
 fn backwardIntegrator(x S, r S) S { 
 	let y = delayVar();
-	select2(r > 0, 0, y(1) + x * T()) write(y)
+	y <- select2(r > 0, 0, y(1) + x * T())
 }
 
 -- min and max followers
 fn minfollow(x S, r S) S { 
 	let y = delayVar();
-	select2(r > 0, x, min(x, y(1))) write(y) 
+	y <- select2(r > 0, x, min(x, y(1))) 
 }
 
 fn maxfollow(x S, r S) S { 
 	let y = delayVar();
-	select2(r > 0, x, max(x, y(1))) write(y)
+	y <- select2(r > 0, x, max(x, y(1)))
 }
 
 
@@ -584,7 +622,7 @@ fn blue(chans Int = 1) S = 0.5 * pinkf(chans) diff;
 
 fn red(chans Int = 1, a=0.05) S {
 	let y = delayVar();
-	(y(1) + chans birand * a) bfold_cheaper write(y)
+	y <- (y(1) + chans birand * a) bfold_cheaper
 }
 
 fn coin(prob AsSignal, chans Int = 1) S = urand(chans) < prob;
@@ -603,38 +641,38 @@ fn exprand(a AsSignal, b AsSignal, chans Int = 1, rate = Rate.audio) S = urand(c
 -- unipolar waveshapers
 
 fn sawshift(x, shift) = frac(x + shift); -- phase shift a unipolar sawtooth.
-fn quadr(x) = frac(x + 0.25) ;  -- shift a phasor by one quarter cycle
+fn quadrature(x) = frac(x + 0.25) ;  -- shift a phasor by one quarter cycle
 
 -- triangle waves
     -- Unipolar ramp to bipolar triangle wave.
 fn btri(x) = abs(4 * x - 2) - 1;
-fn btri0(x) = 1 - abs(4 * x quadr - 2);   --   0 degrees initial phase
-fn btri1(x) = abs(4 * x - 2) - 1;         --  90 degrees initial phase
-fn btri2(x) = abs(4 * x quadr - 2) - 1;   -- 180 degrees initial phase
-fn btri3(x) = 1 - abs(4 * x - 2);         -- 270 degrees initial phase
+fn btri0(x) = 1 - abs(4 * x quadrature - 2);   --   0 degrees initial phase
+fn btri1(x) = abs(4 * x - 2) - 1;              --  90 degrees initial phase
+fn btri2(x) = abs(4 * x quadrature - 2) - 1;   -- 180 degrees initial phase
+fn btri3(x) = 1 - abs(4 * x - 2);              -- 270 degrees initial phase
 
-fn utri0(x) = 1 - abs(1 - 2 * x quadr);   --   0 degrees. unipolar output. '\,  trisin
-fn utri1(x) = abs(1 - 2 * x);             --  90 degrees. unipolar output. \/   tricos
-fn utri2(x) = abs(1 - 2 * x quadr);       -- 180 degrees. unipolar output. ,/' -trisin
-fn utri3(x) = 1 - abs(1 - 2 * x);         -- 270 degrees. unipolar output. /\  -tricos
+fn utri0(x) = 1 - abs(1 - 2 * x quadrature);   --   0 degrees. unipolar output. '\,  trisin
+fn utri1(x) = abs(1 - 2 * x);                  --  90 degrees. unipolar output. \/   tricos
+fn utri2(x) = abs(1 - 2 * x quadrature);       -- 180 degrees. unipolar output. ,/' -trisin
+fn utri3(x) = 1 - abs(1 - 2 * x);              -- 270 degrees. unipolar output. /\  -tricos
 
 -- trapezoid waves
-fn trapez0(x) = bclip(2 - abs(4 - 8 * x quadr));    --   0 degrees. bipolar output.
-fn trapez1(x) = bclip(abs(4 - 8 * x) - 2);          --  90 degrees. bipolar output.
-fn trapez2(x) = bclip(abs(4 - 8 * x quadr) - 2);    -- 180 degrees. bipolar output.
-fn trapez3(x) = bclip(2 - abs(4 - 8 * x));          -- 270 degrees. bipolar output.
+fn trapez0(x) = bclip(2 - abs(4 - 8 * x quadrature));    --   0 degrees. bipolar output.
+fn trapez1(x) = bclip(abs(4 - 8 * x) - 2);               --  90 degrees. bipolar output.
+fn trapez2(x) = bclip(abs(4 - 8 * x quadrature) - 2);    -- 180 degrees. bipolar output.
+fn trapez3(x) = bclip(2 - abs(4 - 8 * x));               -- 270 degrees. bipolar output.
 
 -- pulse waves
 fn upulse(x, pwm) = x < pwm;              -- unipolar pulse wave
 fn bpulse(x, pwm) = upulse(x,pwm) bi;     -- bipolar pulse wave
 fn zpulse(x, pwm) = frac(x - pwm) - x;    -- zero DC pulse wave
 
-    -- pulse waves. As in SuperCollider, these always output one value of the opposite polarity each cycle.
-fn upulse1(x, pwm) = x eoc sel(pwm < 0.5, x < pwm);       -- unipolar
-fn bpulse1(x, pwm) = x upulse1(pwm) bi;                  -- bipolar
-fn zpulse1(x, pwm) = x eoc sel(pwm < 0.5, x zpulse(pwm)); -- zero DC
+-- pulse waves. As in SuperCollider, these always output one value of the opposite polarity each cycle.
+fn upulse1(x, pwm) = x eoc select2(pwm < 0.5, x < pwm);       -- unipolar
+fn bpulse1(x, pwm) = x upulse1(pwm) bi;                       -- bipolar
+fn zpulse1(x, pwm) = x eoc select2(pwm < 0.5, x zpulse(pwm)); -- zero DC
 
-    -- inspired by the Intellijel Rubicon waveform.
+-- inspired by the Intellijel Rubicon waveform.
 fn izigzag(x) = x utri1 - (x > 0.5);  -- moving inwards
 fn ozigzag(x) = x utri1 - (x < 0.5);  -- moving outwards
 
@@ -648,7 +686,18 @@ fn vartri(x, pwm) = (0.25 / (pwm - sq(pwm))) * (par(x) - par(frac(x - pwm)));
 fn varsaw(x, pwm) = bi(vartri(x, pwm));
 
 fn usquare(x) = x < 0.5;
-fn bsquare(x) = sel(x < 0.5, -1, 1);
+fn bsquare(x) = (x < 0.5) bi;
+
+-- window functions
+fn han(x)     = x sinpi sq; -- Hanning window
+fn ham(x)     = 0.54 - 0.46 * x cos2pi; -- Hamming window
+fn sinwin(x)  = x sinpi; -- aka cosine window
+fn sincwin(x) = x bi sincpi;
+fn triwin(x)  = x utri3; 
+fn welwin(x)  = 1 - x bi sq ; -- Welch window
+fn quadwin(x) = 1 - x bi sq sq ;
+fn octwin(x)  = 1 - x bi sq sq sq ;
+fn trapezwin(x) = min(1, 2 * x triwin);
 
 -- phasor generates a unipolar sawtooth. 
 -- It is the core of many oscillators.
@@ -684,19 +733,23 @@ fn sinosc(fm AsSignal, pm AsSignal = 0) S = phasor(fm, pm) sin2pi;
 fn fsinosc(fm AsSignal, pm AsSignal = 0) S = phasor(fm, pm) fsin;
 fn fsinxosc(fm AsSignal, pm AsSignal = 0) S = phasor(fm, pm) fsinx;
 
-fn combn(x S, delay_time AsSignal, decay_time AsSignal) S {
+fn comb(x S, delay_time AsSignal, decay_time AsSignal, interp Interpolation = Interpolation.lagrange) S {
 	let a = decay60dB(decay_time / delay_time);
 	let delay_samples = delay_time * fs();
 	let y = delayVar(delay_samples);
-	x + a * y(delay_samples) |> write(y)
+	y <- x + a * y(delay_samples, interp)
+}
+
+fn combn(x S, delay_time AsSignal, decay_time AsSignal) S {
+	x comb(delay_time, decay_time, Interpolation.none)
 }
 
 fn combl(x S, delay_time AsSignal, max_delay_time AsSignal, decay_time AsSignal) S {
-	let a = decay60dB(decay_time / delay_time);
-	let delay_samples = delay_time * fs();
-	let b = delay_samples frac;
-	let y = delayVar(max_delay_time * fs());
-	x + a * lerp(b, y(delay_samples), y(delay_samples+1)) |> write(y)
+	x comb(delay_time, decay_time, Interpolation.linear)
+}
+
+fn combc(x S, delay_time AsSignal, max_delay_time AsSignal, decay_time AsSignal) S {
+	x comb(delay_time, decay_time, Interpolation.cubic)
 }
 
 
@@ -709,5 +762,6 @@ fn pause(gate S, gatedFun fn()S) S = if_(gate > 0, fn(){ gate * gatedFun() });
 
 
 "DONE IMPORTING COMMON UGENS MODULE" println
+
 
 
