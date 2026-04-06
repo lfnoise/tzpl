@@ -11,6 +11,7 @@
 
 #include "TextEditor.h"
 #include "gui_state.hpp"
+#include "find_replace.hpp"
 #include <string>
 #include <vector>
 #include <map>
@@ -47,9 +48,22 @@ public:
     // Get the text of the current block (contiguous non-empty lines around cursor)
     std::string getCurrentBlockText(int& outStartLine, int& outEndLine) const;
 
+    // Edit operations (delegate to active tab's TextEditor)
+    void cut();
+    void copy();
+    void paste();
+    void undo();
+    void redo();
+    void selectAll();
+
     // Error markers
     void setErrorMarkers(const TextEditor::ErrorMarkers& markers);
     void clearErrorMarkers();
+
+    // Find/Replace
+    FindReplaceState& findReplace() { return findReplace_; }
+    TextEditor* activeEditor();
+    void updateSearchHighlights();
 
 private:
     static TextEditor::LanguageDefinition createTzopilotlDef();
@@ -64,6 +78,7 @@ private:
     std::vector<Tab> tabs_;
     int activeTab_ = 0;
     TextEditor::LanguageDefinition langDef_;
+    FindReplaceState findReplace_;
 };
 
 #endif /* editor_panel_hpp */

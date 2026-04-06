@@ -31,16 +31,8 @@ if(TZPL_BUILD_GUI)
         FetchContent_Populate(imgui)
     endif()
 
-    # --- ImGuiColorTextEdit (code editor widget) ----------------------------
-    FetchContent_Declare(imgui_textedit
-        GIT_REPOSITORY https://github.com/BalazsJako/ImGuiColorTextEdit.git
-        GIT_TAG master
-        GIT_SHALLOW TRUE
-    )
-    FetchContent_GetProperties(imgui_textedit)
-    if(NOT imgui_textedit_POPULATED)
-        FetchContent_Populate(imgui_textedit)
-    endif()
+    # --- ImGuiColorTextEdit (vendored, with undo-chunking patch) ------------
+    set(IMGUI_TEXTEDIT_DIR ${CMAKE_CURRENT_SOURCE_DIR}/vendor/ImGuiColorTextEdit)
 
     set(IMGUI_SOURCES
         ${imgui_SOURCE_DIR}/imgui.cpp
@@ -49,7 +41,7 @@ if(TZPL_BUILD_GUI)
         ${imgui_SOURCE_DIR}/imgui_tables.cpp
         ${imgui_SOURCE_DIR}/imgui_widgets.cpp
         ${imgui_SOURCE_DIR}/backends/imgui_impl_glfw.cpp
-        ${imgui_textedit_SOURCE_DIR}/TextEditor.cpp
+        ${IMGUI_TEXTEDIT_DIR}/TextEditor.cpp
     )
 
     if(APPLE)
@@ -66,7 +58,7 @@ if(TZPL_BUILD_GUI)
     target_include_directories(imgui_lib SYSTEM PUBLIC
         ${imgui_SOURCE_DIR}
         ${imgui_SOURCE_DIR}/backends
-        ${imgui_textedit_SOURCE_DIR}
+        ${IMGUI_TEXTEDIT_DIR}
     )
     target_link_libraries(imgui_lib PUBLIC glfw)
 
@@ -99,6 +91,7 @@ if(TZPL_BUILD_GUI)
         src/gui_state.cpp
         src/editor_panel.cpp
         src/output_panel.cpp
+        src/find_replace.cpp
     )
     if(APPLE)
         list(APPEND APP_SOURCES src/app_gui.mm)

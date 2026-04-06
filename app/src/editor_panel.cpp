@@ -81,6 +81,8 @@ void EditorPanel::newTab(const std::string& name) {
     tab.editor.SetShowWhitespaces(false);
     tabs_.push_back(std::move(tab));
     activeTab_ = (int)tabs_.size() - 1;
+    // Trigger ImGui focus on next render
+    tabs_[activeTab_].editor.SetCursorPosition(TextEditor::Coordinates(0, 0));
 }
 
 void EditorPanel::openFile(const std::string& path) {
@@ -104,6 +106,8 @@ void EditorPanel::openFile(const std::string& path) {
     tab.editor.SetShowWhitespaces(false);
     tabs_.push_back(std::move(tab));
     activeTab_ = (int)tabs_.size() - 1;
+    // Trigger ImGui focus on next render
+    tabs_[activeTab_].editor.SetCursorPosition(TextEditor::Coordinates(0, 0));
 }
 
 void EditorPanel::closeActiveTab() {
@@ -183,7 +187,7 @@ void EditorPanel::draw(float width, float height, GuiState& state) {
             bool open = true;
             // Show modified indicator
             std::string label = tabs_[i].name;
-            if (tabs_[i].modified) label += " *";
+            if (tabs_[i].modified) label += " \xe2\x80\xa2";
             label += "###tab" + std::to_string(i);
 
             if (ImGui::BeginTabItem(label.c_str(), &open)) {
@@ -197,9 +201,19 @@ void EditorPanel::draw(float width, float height, GuiState& state) {
         if (closeIdx >= 0) closeTab(closeIdx);
     }
 
+    // Find/replace bar (between tab bar and editor)
+    if (findReplace_.visible && activeTab_ >= 0 && activeTab_ < (int)tabs_.size()) {
+        findReplace_.drawBar(width, tabs_[activeTab_].editor);
+    }
+
     // Editor content
     if (activeTab_ >= 0 && activeTab_ < (int)tabs_.size()) {
         auto& editor = tabs_[activeTab_].editor;
+
+        // Give the editor ImGui focus if it doesn't have it yet
+        // (e.g. after opening a file, switching tabs, or returning from a dialog)
+        if (!ImGui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows))
+            editor.SetCursorPosition(editor.GetCursorPosition());
 
         // Draw eval flash overlay
         if (state.flash.active()) {
@@ -218,8 +232,9 @@ void EditorPanel::draw(float width, float height, GuiState& state) {
 
         editor.Render("##editor");
 
-        // Track modifications
-        tabs_[activeTab_].modified = editor.IsTextChanged();
+        // Track modifications (latch on; cleared by save)
+        if (editor.IsTextChanged())
+            tabs_[activeTab_].modified = true;
     }
 
     ImGui::EndChild();
@@ -296,6 +311,40 @@ std::string EditorPanel::getCurrentBlockText(int& outStartLine, int& outEndLine)
 }
 
 // ---------------------------------------------------------------------------
+// Edit operations
+// ---------------------------------------------------------------------------
+
+void EditorPanel::cut() {
+    if (activeTab_ >= 0 && activeTab_ < (int)tabs_.size())
+        tabs_[activeTab_].editor.Cut();
+}
+
+void EditorPanel::copy() {
+    if (activeTab_ >= 0 && activeTab_ < (int)tabs_.size())
+        tabs_[activeTab_].editor.Copy();
+}
+
+void EditorPanel::paste() {
+    if (activeTab_ >= 0 && activeTab_ < (int)tabs_.size())
+        tabs_[activeTab_].editor.Paste();
+}
+
+void EditorPanel::undo() {
+    if (activeTab_ >= 0 && activeTab_ < (int)tabs_.size())
+        tabs_[activeTab_].editor.Undo();
+}
+
+void EditorPanel::redo() {
+    if (activeTab_ >= 0 && activeTab_ < (int)tabs_.size())
+        tabs_[activeTab_].editor.Redo();
+}
+
+void EditorPanel::selectAll() {
+    if (activeTab_ >= 0 && activeTab_ < (int)tabs_.size())
+        tabs_[activeTab_].editor.SelectAll();
+}
+
+// ---------------------------------------------------------------------------
 // Error markers
 // ---------------------------------------------------------------------------
 
@@ -308,5 +357,20 @@ void EditorPanel::clearErrorMarkers() {
     if (activeTab_ >= 0 && activeTab_ < (int)tabs_.size()) {
         TextEditor::ErrorMarkers empty;
         tabs_[activeTab_].editor.SetErrorMarkers(empty);
+    }
+}
+
+TextEditor* EditorPanel::activeEditor() {
+    if (activeTab_ < 0 || activeTab_ >= (int)tabs_.size()) return nullptr;
+    return &tabs_[activeTab_].editor;
+}
+
+void EditorPanel::updateSearchHighlights() {
+    auto* ed = activeEditor();
+    if (!ed) return;
+    if (findReplace_.visible && findReplace_.findBuf[0] != '\0') {
+        ed->SetSearchHighlights(findReplace_.buildHighlights());
+    } else {
+        ed->ClearSearchHighlights();
     }
 }
