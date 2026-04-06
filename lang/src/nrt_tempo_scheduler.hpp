@@ -64,7 +64,7 @@ public:
         }
     };
 
-    explicit NRTTempoScheduler(NRTVM* vm, f64 bpm = 120.0,
+    explicit NRTTempoScheduler(NRTVM* vm, f64 bpm = 60.0,
                                 f64 latencySeconds = 0.05);
     ~NRTTempoScheduler();
 
