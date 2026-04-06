@@ -1914,7 +1914,7 @@ osc.<span class="fn">removeHandler</span>(<span class="str">"/trigger"</span>);<
 
 <h4>Graph Manipulation</h4>
 
-<p>Standalone graph commands are automatically wrapped in a <code>begin()/go()</code> transaction. Inside a bundle, they are batched together.</p>
+<p>Standalone graph commands are automatically wrapped in a <code>begin()/sched()</code> transaction. Inside a bundle, they are batched together.</p>
 
 <table>
   <tr><th>Address</th><th>Arguments</th><th>Description</th></tr>
@@ -1950,7 +1950,7 @@ osc.<span class="fn">removeHandler</span>(<span class="str">"/trigger"</span>);<
 <p>OSC bundles group multiple messages into an atomic transaction with an optional timetag for scheduling:</p>
 
 <ul>
-  <li><strong>Timetag &le; 1</strong> (including the "immediately" timetag): execute all messages immediately via <code>begin()/go()</code>.</li>
+  <li><strong>Timetag &le; 1</strong> (including the "immediately" timetag): execute all messages immediately via <code>begin()/sched()</code>.</li>
   <li><strong>Timetag &gt; 1</strong>: schedule execution at the corresponding engine stream time via <code>begin()/sched(time)</code>. The NTP timestamp is converted to engine stream time.</li>
 </ul>
 
@@ -1966,7 +1966,7 @@ osc.<span class="fn">removeHandler</span>(<span class="str">"/trigger"</span>);<
 
 <h4>Auto-wrapping</h4>
 
-<p>Graph manipulation commands sent as standalone messages (outside a bundle) are automatically wrapped in a <code>begin(silo)/go()</code> transaction so they execute atomically. Inside a bundle, this auto-wrapping is suppressed and the bundle provides the transaction boundary.</p>
+<p>Graph manipulation commands sent as standalone messages (outside a bundle) are automatically wrapped in a <code>begin(silo)/sched()</code> transaction so they execute atomically. Inside a bundle, this auto-wrapping is suppressed and the bundle provides the transaction boundary.</p>
 
 <div class="note">
   <strong>Note:</strong> Bundles can be nested. Inner bundles inherit the outer bundle's transaction context.
@@ -2081,7 +2081,7 @@ osc.<span class="fn">removeHandler</span>(<span class="str">"/trigger"</span>);<
 <span class="fn">sched</span>(<span class="num">0.0</span>, <span class="kw">fn</span>() Float {
     <span class="fn">begin</span>(<span class="num">0</span>);
     <span class="fn">noteOn</span>(<span class="num">100</span>, <span class="num">60</span>, [<span class="num">440.0</span>, <span class="num">0.5</span>]);
-    <span class="fn">go</span>();
+    <span class="fn">sched</span>();
     <span class="num">1.0</span>;  <span class="cmt">-- reschedule 1 beat later</span>
 });</code></pre>
 
@@ -2094,7 +2094,7 @@ osc.<span class="fn">removeHandler</span>(<span class="str">"/trigger"</span>);<
 <span class="fn">after</span>(<span class="num">8.0</span>, <span class="kw">fn</span>() Void {
     <span class="fn">begin</span>(<span class="num">0</span>);
     <span class="fn">allNotesOff</span>(<span class="num">100</span>);
-    <span class="fn">go</span>();
+    <span class="fn">sched</span>();
 });</code></pre>
 
 <h4>Tempo ramp</h4>
@@ -2118,13 +2118,13 @@ osc.<span class="fn">removeHandler</span>(<span class="str">"/trigger"</span>);<
 <span class="fn">at</span>(<span class="num">4.0</span>, <span class="kw">fn</span>() Void {
     <span class="fn">begin</span>(<span class="num">0</span>);
     <span class="fn">noteOn</span>(<span class="num">100</span>, <span class="num">60</span>, [<span class="num">440.0</span>, <span class="num">0.8</span>]);
-    <span class="fn">go</span>();
+    <span class="fn">sched</span>();
 
     <span class="cmt">-- sched() is relative to the current logical beat (4.0)</span>
     <span class="fn">after</span>(<span class="num">0.5</span>, <span class="kw">fn</span>() Void {
         <span class="fn">begin</span>(<span class="num">0</span>);
         <span class="fn">noteOn</span>(<span class="num">100</span>, <span class="num">67</span>, [<span class="num">587.33</span>, <span class="num">0.6</span>]);
-        <span class="fn">go</span>();
+        <span class="fn">sched</span>();
     });
 });</code></pre>
 
@@ -2335,7 +2335,7 @@ nats.<span class="fn">removeHandler</span>(<span class="str">"trigger"</span>);<
 
 <h4>Graph Manipulation</h4>
 
-<p>Each graph command is automatically wrapped in a <code>begin(0)/go()</code> transaction. Payloads are space-separated values.</p>
+<p>Each graph command is automatically wrapped in a <code>begin(0)/sched()</code> transaction. Payloads are space-separated values.</p>
 
 <table>
   <tr><th>Subject</th><th>Payload</th><th>Description</th></tr>
