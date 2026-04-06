@@ -239,14 +239,6 @@ struct SetControlCmd : Command
             int len = int(values_.size());
             s->setControl(node, controlID_, len, &values_[0]);
         }
-        if (s->controlChangeFn_) {
-            // Convert to f32 for the callback
-            int len = int(values_.size());
-            f32 tmp[8];
-            int n = std::min(len, 8);
-            for (int i = 0; i < n; ++i) tmp[i] = static_cast<f32>(values_[i]);
-            s->controlChangeFn_(s, s->vm_, nodeID_, controlID_, n, tmp);
-        }
     }
 };
 
@@ -275,11 +267,6 @@ struct NoteOnCmd : Command
             int len = int(values_.size());
             node->funs.noteOn(node->synth, now, noteID_, len, &values_[0]);
         }
-        // Invoke VM handler if registered
-        if (s->noteOnFn_) {
-            int len = int(values_.size());
-            s->noteOnFn_(s, s->vm_, noteID_, len, &values_[0]);
-        }
     }
 };
 
@@ -303,9 +290,6 @@ struct NoteOffCmd : Command
         } else {
             i64 now = s->sampleTime_;
             node->funs.noteOff(node->synth, now, noteID_);
-        }
-        if (s->noteOffFn_) {
-            s->noteOffFn_(s, s->vm_, noteID_);
         }
     }
 };

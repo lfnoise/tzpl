@@ -99,47 +99,6 @@ struct Silo
     using TempoSchedFn = void (*)(void* scheduler, i64 sampleTime, void* vm);
     TempoSchedFn tempoSchedFn_ = nullptr;
 
-    // Note/control event callbacks. Set by bridge via command; called from
-    // NoteOnCmd/NoteOffCmd/SetControlCmd after plugin dispatch.
-    // These follow the same opaque-pointer pattern as tempoSchedFn_.
-    using NoteOnFn = void (*)(Silo* silo, void* vm, int noteID,
-                              int numParams, f32* params);
-    using NoteOffFn = void (*)(Silo* silo, void* vm, int noteID);
-    using ControlChangeFn = void (*)(Silo* silo, void* vm, i64 nodeID,
-                                      i64 controlID, int numValues, f32* values);
-    NoteOnFn noteOnFn_ = nullptr;
-    NoteOffFn noteOffFn_ = nullptr;
-    ControlChangeFn controlChangeFn_ = nullptr;
-    void* noteOnHandler_ = nullptr;    // opaque retained handler (ts::Obj*)
-    void* noteOffHandler_ = nullptr;
-    void* controlChangeHandler_ = nullptr;
-
-    // RT-to-NRT reply ring buffer. Written by RT (lock-free), read by NRT.
-    struct RTReplySlot {
-        void* handler;  // retained ts::Obj*
-        f64 value;
-    };
-    static constexpr int kReplySlots = 256;
-    static constexpr int kReplyMask = kReplySlots - 1;
-    RTReplySlot replySlots_[kReplySlots] = {};
-    alignas(64) std::atomic<uint32_t> replyWritePos_{0};
-    alignas(64) std::atomic<uint32_t> replyReadPos_{0};
-
-    // RT-safe: push a reply to the ring buffer (returns false if full).
-    bool pushReply(void* handler, f64 value) {
-        uint32_t w = replyWritePos_.load(std::memory_order_relaxed);
-        uint32_t r = replyReadPos_.load(std::memory_order_acquire);
-        if (((w + 1) & kReplyMask) == (r & kReplyMask)) return false; // full
-        replySlots_[w & kReplyMask] = {handler, value};
-        replyWritePos_.store(w + 1, std::memory_order_release);
-        return true;
-    }
-
-    // NRT callback for processing replies (called from processNRTCommands).
-    using NRTProcessFn = void (*)(void* context, Silo* silo);
-    NRTProcessFn nrtProcessFn_ = nullptr;
-    void* nrtProcessCtx_ = nullptr;
-
     Silo();
     ~Silo();
 
