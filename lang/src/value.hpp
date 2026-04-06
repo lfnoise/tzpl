@@ -819,7 +819,7 @@ public:
     VMString str() const override;
 
     void releaseChildren() override {
-        auto t = static_cast<StructType*>(type_);
+        auto t = static_cast<TupleType*>(type_);
         for (auto idx : t->gcFields_) {
             if (v[idx].o) v[idx].o->release();
         }

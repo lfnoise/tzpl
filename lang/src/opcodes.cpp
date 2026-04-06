@@ -1980,8 +1980,7 @@ void op_tuple_slice(VM& vm, Code* pc) {
         newTuple->v[i] = srcTuple->v[startIdx + i];
     }
     // Retain Obj* fields
-    auto* st = static_cast<StructType*>(static_cast<Type*>(resultType));
-    for (auto idx : st->gcFields_) {
+    for (auto idx : resultType->gcFields_) {
         if (newTuple->v[idx].o) newTuple->v[idx].o->retain();
     }
     vm.reg(dst).o = newTuple;
@@ -1997,8 +1996,7 @@ void op_make_tuple(VM& vm, Code* pc) {
         tuple->v[i] = vm.reg(firstSrc + i);
     }
     // Retain Obj* fields so they survive the auto-release pool drain
-    auto* st = static_cast<StructType*>(static_cast<Type*>(tupleType));
-    for (auto idx : st->gcFields_) {
+    for (auto idx : tupleType->gcFields_) {
         if (tuple->v[idx].o) tuple->v[idx].o->retain();
     }
     vm.reg(dst).o = tuple;
