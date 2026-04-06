@@ -332,6 +332,30 @@ Type* TypeChecker::getBlockTrailingType(ASTNode* node) {
             if (thenType) return thenType;
         }
     }
+    // Trailing match (value-producing)
+    if (last->kind == ASTNode::SwitchStmt) {
+        return last->resolvedType;
+    }
+    return nullptr;
+}
+
+Type* TypeChecker::getNodeTrailingType(ASTNode* node) {
+    if (!node) return nullptr;
+    if (node->kind == ASTNode::Block) {
+        return getBlockTrailingType(node);
+    }
+    if (node->kind == ASTNode::ExprStmt) {
+        return static_cast<ExprStmtNode*>(node)->expr->resolvedType;
+    }
+    if (node->kind == ASTNode::SwitchStmt) {
+        return node->resolvedType;
+    }
+    if (node->kind == ASTNode::IfStmt) {
+        auto* ifStmt = static_cast<IfStmtNode*>(node);
+        if (ifStmt->elseBranch) {
+            return getNodeTrailingType(ifStmt->thenBranch.get());
+        }
+    }
     return nullptr;
 }
 

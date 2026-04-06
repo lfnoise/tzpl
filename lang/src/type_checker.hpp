@@ -391,6 +391,7 @@ private:
 
     // Return type inference helpers
     Type* getBlockTrailingType(ASTNode* node);
+    Type* getNodeTrailingType(ASTNode* node);
     void inferFunctionReturnType(FnDeclNode* fn, FuncInfo* fi, bool isLocal = false);
 
     // Resolve a type expression AST node to a Type*

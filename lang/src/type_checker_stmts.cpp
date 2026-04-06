@@ -97,12 +97,27 @@ void TypeChecker::checkContinueStmt(ContinueStmtNode* stmt) {
 void TypeChecker::checkSwitchStmt(SwitchStmtNode* stmt) {
     Type* subjType = inferExpr(static_cast<Expr*>(stmt->subject.get()));
 
+    Type* resultType = nullptr;
     for (auto& clause : stmt->cases) {
         pushScope();
         checkPattern(clause.pattern.get(), subjType, false, /*inMatch=*/true);
         checkNode(clause.body.get());
+
+        // Unify trailing types across arms for value-producing match
+        Type* armType = getNodeTrailingType(clause.body.get());
+        if (armType) {
+            if (!resultType) {
+                resultType = armType;
+            } else if (!typesEqual(resultType, armType)) {
+                if (isNumeric(resultType) && isNumeric(armType)) {
+                    resultType = commonNumericType(resultType, armType);
+                }
+            }
+        }
+
         popScope();
     }
+    stmt->resolvedType = resultType;
 }
 
 void TypeChecker::checkPattern(Pattern* pat, Type* subjType, bool isMutable, bool inMatch) {

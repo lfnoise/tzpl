@@ -765,13 +765,18 @@ ASTPtr Parser::parseFnDecl() {
 
     // Expression-body function: fn name(params) type = expr;
     if (match(TokenKind::Equals)) {
-        ExprPtr bodyExpr = parseExpression();
-        expectTerminator();
-        // Wrap in a block with a trailing ExprStmt
         ASTList stmts;
-        auto exprStmt = std::make_unique<ExprStmtNode>(bodyExpr->loc, std::move(bodyExpr));
-        exprStmt->isTrailing = true;
-        stmts.push_back(std::move(exprStmt));
+        if (check(TokenKind::Match)) {
+            // match as single-expression body
+            stmts.push_back(parseMatchStmt());
+        } else {
+            ExprPtr bodyExpr = parseExpression();
+            auto exprStmt = std::make_unique<ExprStmtNode>(bodyExpr->loc, std::move(bodyExpr));
+            exprStmt->isTrailing = true;
+            stmts.push_back(std::move(exprStmt));
+        }
+        expectTerminator();
+        // Wrap in a block
         auto body = std::make_unique<BlockStmt>(start, std::move(stmts));
         auto fn = std::make_unique<FnDeclNode>(start, name.text, std::move(typeParams),
                                                 std::move(params), std::move(returnType), std::move(body));
@@ -1853,11 +1858,15 @@ ExprPtr Parser::parsePrimary() {
             // Body: either { block } or = expr
             ASTPtr body;
             if (match(TokenKind::Equals)) {
-                ExprPtr bodyExpr = parseExpression();
                 ASTList stmts;
-                auto exprStmt = std::make_unique<ExprStmtNode>(bodyExpr->loc, std::move(bodyExpr));
-                exprStmt->isTrailing = true;
-                stmts.push_back(std::move(exprStmt));
+                if (check(TokenKind::Match)) {
+                    stmts.push_back(parseMatchStmt());
+                } else {
+                    ExprPtr bodyExpr = parseExpression();
+                    auto exprStmt = std::make_unique<ExprStmtNode>(bodyExpr->loc, std::move(bodyExpr));
+                    exprStmt->isTrailing = true;
+                    stmts.push_back(std::move(exprStmt));
+                }
                 body = std::make_unique<BlockStmt>(loc, std::move(stmts));
             } else {
                 body = parseBlock();
