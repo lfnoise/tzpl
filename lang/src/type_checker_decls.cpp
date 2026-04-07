@@ -60,7 +60,7 @@ void TypeChecker::checkImportDecl(ImportDeclNode* decl) {
                 switch (entry.kind) {
                     case ExportEntry::Func:
                         for (auto fi : entry.funcOverloads) {
-                            if (fi.isTemplate) fi.sourceModule = mod;
+                            if (fi.isTemplate && !fi.sourceModule) fi.sourceModule = mod;
                             functions_[name].push_back(fi);
                         }
                         break;
@@ -112,7 +112,7 @@ void TypeChecker::checkImportDecl(ImportDeclNode* decl) {
                 switch (entry.kind) {
                     case ExportEntry::Func:
                         for (auto fi : entry.funcOverloads) {
-                            if (fi.isTemplate) fi.sourceModule = mod;
+                            if (fi.isTemplate && !fi.sourceModule) fi.sourceModule = mod;
                             functions_[localName].push_back(fi);
                         }
                         break;
