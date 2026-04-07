@@ -57,6 +57,22 @@ static LineInfo extractLine(const std::string& source, u32 offset) {
     return {std::string_view(source.data() + lineStart, lineEnd - lineStart), lineStart};
 }
 
+// Extract a source line by 1-based line number (used as fallback when byte
+// offset belongs to a different source file than the display text).
+static LineInfo extractLineByNumber(const std::string& source, u32 lineNum) {
+    if (source.empty() || lineNum == 0) return {"", 0};
+    u32 currentLine = 1;
+    u32 pos = 0;
+    while (currentLine < lineNum && pos < source.size()) {
+        if (source[pos] == '\n') ++currentLine;
+        ++pos;
+    }
+    if (currentLine != lineNum) return {"", 0};
+    u32 lineStart = pos;
+    while (pos < source.size() && source[pos] != '\n') ++pos;
+    return {std::string_view(source.data() + lineStart, pos - lineStart), lineStart};
+}
+
 // --- Levenshtein edit distance ---
 
 int editDistance(std::string_view a, std::string_view b) {
@@ -155,9 +171,30 @@ std::string formatError(const CompileError& err,
         << " [" << effectiveFilename << ":" << line << ":" << col << "]\n";
 
     // Try to extract and display source context
-    bool hasSource = !effectiveSource.empty() && line > 0 && err.loc.start.offset <= effectiveSource.size();
+    bool hasSource = !effectiveSource.empty() && line > 0;
     if (hasSource) {
+        // Try offset-based extraction first; if the offset is out of bounds or
+        // lands on a different line (can happen when the error location is from
+        // a different source file, e.g. a template body in an imported module),
+        // fall back to line-number-based extraction.
         auto [lineText, lineStart] = extractLine(effectiveSource, err.loc.start.offset);
+        if (err.loc.start.offset > effectiveSource.size()) {
+            auto fallback = extractLineByNumber(effectiveSource, line);
+            lineText = fallback.text;
+            lineStart = fallback.lineStart;
+        } else {
+            // Verify offset-based result is on the expected line by counting
+            // newlines before lineStart.
+            u32 computedLine = 1;
+            for (u32 i = 0; i < lineStart && i < effectiveSource.size(); ++i) {
+                if (effectiveSource[i] == '\n') ++computedLine;
+            }
+            if (computedLine != line) {
+                auto fallback = extractLineByNumber(effectiveSource, line);
+                lineText = fallback.text;
+                lineStart = fallback.lineStart;
+            }
+        }
 
         // Gutter width = width of line number string
         std::string lineNumStr = std::to_string(line);
