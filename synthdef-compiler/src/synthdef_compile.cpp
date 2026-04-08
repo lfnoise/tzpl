@@ -109,7 +109,7 @@ void runInternalAudioEngine(string dir, string synthName, int seconds) {
             printf("load synthdef failed. exiting..\n");
             exit(1);
         }
-        tzpl_SynthDef def = opt_synthdef.value();
+        tzpl_SynthDef def = opt_synthdef->def;
 
         assert(def.num_ins == 0);
         assert(def.num_outs == 1);

@@ -1265,8 +1265,8 @@ void test_delay_interp_none() {
     // interpNone should NOT call tzpl_delay_* functions (but header include is OK)
     assert(code.find("tzpl_delay_none(") == string::npos);
     assert(code.find("tzpl_delay_linear(") == string::npos);
-    // Should have direct buffer access
-    assert(code.find("p->d0[") != string::npos || code.find("p->d0_wrpos") != string::npos);
+    // The variable delay (d1) should have direct buffer access, not interpolation calls
+    assert(code.find("_wrpos") != string::npos || code.find("d1[") != string::npos);
     printf("  delay interpNone generates direct buffer access\n");
 }
 

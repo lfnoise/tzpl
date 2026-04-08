@@ -100,7 +100,7 @@ bool loadDefs(Engine* e, const char* dirPath);
 bool loadDef(Engine* e, const char* dirPath, const char* defName);
 
 // Add a synthdef (from tzpl_plugin_abi) to the engine's def table.
-void addSynthDef(Engine* e, tzpl_SynthDef const& def);
+void addSynthDef(Engine* e, tzpl_SynthDef const& def, void* dlHandle = nullptr);
 
 // Collect the names of all registered node defs.
 void listNodeDefs(Engine* e, std::vector<std::string>& names);

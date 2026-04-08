@@ -48,7 +48,13 @@ int compileAndLink(string const& buildDir, string const& synthName);
 // Return the path to a compiled dylib given base dir and synth name.
 string dylibPath(string const& buildDir, string const& synthName);
 
-// Load a compiled .dylib and return the tzpl_SynthDef it exports.
-optional<tzpl_SynthDef> loadDef(std::string path);
+// Result of loading a compiled .dylib plugin.
+struct LoadedDef {
+    tzpl_SynthDef def;
+    void* dlHandle;
+};
+
+// Load a compiled .dylib and return the tzpl_SynthDef and dlopen handle.
+optional<LoadedDef> loadDef(std::string path);
 
 } // namespace synthdef

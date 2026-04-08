@@ -210,7 +210,7 @@ namespace synthdef {
                 throw std::runtime_error("Delay line has no specified bound.");
             }
 
-            usize headroom = std::max(4, delay->maxOverread);
+            usize headroom = delay->varReaders.empty() ? 0 : std::max(1, delay->maxOverread);
 
             auto sc = maxDelay.as<Constant>();
             if (sc && sc->is_scalar_constant()) {

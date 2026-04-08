@@ -27,12 +27,21 @@
 #include <filesystem>
 #include <fstream>
 #include <print>
+#include <unordered_map>
 
 namespace fs = std::filesystem;
 
 namespace synthdef {
 
 using SynthDefLoadFun = tzpl_SynthDef (*)();
+
+// Monotonic revision counter per synth name, used to give each compiled
+// dylib a unique path so that dlopen loads fresh code without invalidating
+// function pointers held by nodes still using a previous revision.
+static std::unordered_map<string, u64>& revisionCounters() {
+    static std::unordered_map<string, u64> counters;
+    return counters;
+}
 
 static string synthNameSuffix = "_synth";
 
@@ -153,10 +162,19 @@ void writeCodeToFile(string const& buildDir, string const& synthName, string con
 }
 
 string dylibPath(string const& buildDir, string const& synthName) {
-    return buildDir + "dylib/" + synthName + synthNameSuffix + ".dylib";
+    auto& counters = revisionCounters();
+    u64 rev = counters[synthName];
+    if (rev == 0)
+        return buildDir + "dylib/" + synthName + synthNameSuffix + ".dylib";
+    return buildDir + "dylib/" + synthName + synthNameSuffix + "_r" + std::to_string(rev) + ".dylib";
 }
 
 int compileAndLink(string const& buildDir, string const& synthName) {
+    // Bump revision so this compilation produces a unique dylib path.
+    // Old dylibs stay on disk (and in memory via dlopen) so that
+    // nodes still running the previous version keep valid function pointers.
+    revisionCounters()[synthName]++;
+
     string filename = synthName + synthNameSuffix;
     string filepath_c = buildDir + "cpp/" + filename + ".cpp";
     string filepath_o = buildDir + "obj/" + filename + ".o";
@@ -172,7 +190,7 @@ int compileAndLink(string const& buildDir, string const& synthName) {
     return 0;
 }
 
-optional<tzpl_SynthDef> loadDef(std::string path) {
+optional<LoadedDef> loadDef(std::string path) {
     const char* path_c = path.c_str();
 
     void* handle = dlopen(path_c, RTLD_NOW);
@@ -196,7 +214,7 @@ optional<tzpl_SynthDef> loadDef(std::string path) {
 
     tzpl_SynthDef def = (*loadFunc)();
 
-    return def;
+    return LoadedDef{def, handle};
 }
 
 } // namespace synthdef

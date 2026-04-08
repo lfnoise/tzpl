@@ -459,14 +459,57 @@ void hexdump(const void *addr, i32 len)
     }
 }
 
-void addNodeDef(Engine* e, NodeDefInfo const& info) {
+void addNodeDef(Engine* e, NodeDefInfo const& info, void* dlHandle) {
     NodeDef* def = new NodeDef(info);
+    def->dlHandle_ = dlHandle;
     u32 bin = def->hash_ & kHashMask;
 
     std::lock_guard<std::mutex> lck(e->nrt_lock_);
 
     def->next_ = e->defs_[bin];
     e->defs_[bin] = def;
+
+    // Mark any older def with the same name as superseded.
+    NodeDef* prev = def;
+    NodeDef* old = def->next_;
+    while (old) {
+        if (old->hash_ == def->hash_
+            && strcmp(old->info_.name, def->info_.name) == 0
+            && !old->superseded_) {
+            old->superseded_ = true;
+            if (old->refCount_ == 0) {
+                // No live nodes -- remove from chain and clean up now.
+                prev->next_ = old->next_;
+                if (old->dlHandle_) dlclose(old->dlHandle_);
+                delete old;
+            }
+            break;
+        }
+        prev = old;
+        old = old->next_;
+    }
+}
+
+void releaseNodeDef(Engine* e, NodeDef* def) {
+    // Caller must hold nrt_lock_ (or be in single-threaded shutdown).
+    def->refCount_--;
+    if (def->refCount_ == 0 && def->superseded_) {
+        // Remove from hash chain.
+        u32 bin = def->hash_ & kHashMask;
+        NodeDef* prev = nullptr;
+        NodeDef* cur = e->defs_[bin];
+        while (cur) {
+            if (cur == def) {
+                if (prev) prev->next_ = cur->next_;
+                else e->defs_[bin] = cur->next_;
+                break;
+            }
+            prev = cur;
+            cur = cur->next_;
+        }
+        if (def->dlHandle_) dlclose(def->dlHandle_);
+        delete def;
+    }
 }
 
 NodeDef* getNodeDef(Engine* e, const char* name) {
@@ -483,7 +526,7 @@ NodeDef* getNodeDef(Engine* e, const char* name) {
     return nullptr;
 }
 
-void addSynthDef(Engine* e, tzpl_SynthDef const& def) {
+void addSynthDef(Engine* e, tzpl_SynthDef const& def, void* dlHandle) {
     // Build a NodeDefInfo from the tzpl_SynthDef.
     NodeDefInfo info{};
     info.name = def.name;
@@ -513,7 +556,7 @@ void addSynthDef(Engine* e, tzpl_SynthDef const& def) {
         info.controls = nullptr;
     }
 
-    addNodeDef(e, info);
+    addNodeDef(e, info, dlHandle);
 }
 
 void listNodeDefs(Engine* e, std::vector<std::string>& names) {

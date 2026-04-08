@@ -115,28 +115,28 @@ Node::Node(Engine* e, Silo* silo, NodeDef* def, i64 nodeID)
     ++numNodesCreated;
 #endif
 
+    if (def) def->refCount_++;
+
     NodeDefInfo& info = def->info_;
 
     synth = setupSynth(e, info);
 
     init();
-    
-//    arc4seedrand(randState8);
-//    arc4seedrand(randState4);
-//    arc4seedrand(randState2);
-//    arc4seedrand(randState1);
 }
 
 Node::~Node() {
+    // Capture engine pointer before synth is freed.
+    Engine* engine = (Engine*)synth->engine;
+
     uninit();
 
-    for (int i = 0; i < synth->num_ins; ++i) {    
+    for (int i = 0; i < synth->num_ins; ++i) {
         free(synth->inlets[i]);
     }
-    for (int i = 0; i < synth->num_outs; ++i) {    
+    for (int i = 0; i < synth->num_outs; ++i) {
         free(synth->outlets[i]);
     }
-    for (int i = 0; i < synth->num_controls; ++i) {    
+    for (int i = 0; i < synth->num_controls; ++i) {
         free(synth->controls[i]);
     }
 
@@ -145,8 +145,12 @@ Node::~Node() {
     free(synth->controls);
 
     funs.free(synth);
-    
-    
+
+    // Release the def reference. May unload a superseded dylib.
+    if (def) {
+        releaseNodeDef(engine, def);
+    }
+
     // remove from nrt_list
     if (nodeID >= 0) {
         // remove node from nrt_nodeTable_

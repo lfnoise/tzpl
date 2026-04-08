@@ -180,7 +180,7 @@ static void ffi_compileSynthDefAndLoad(ts::VM& vm, u16 dst, u16, u16 argBase) {
         return;
     }
 
-    engine::addSynthDef(eng, optDef.value());
+    engine::addSynthDef(eng, optDef->def, optDef->dlHandle);
 
     returnString(vm, dst, "");
 }

@@ -132,9 +132,8 @@ static CompiledPlugin compileDSL(string const& name, std::function<void()> dslFu
             return result;
         }
 
-        result.def = opt.value();
-        // Keep dlopen handle so we can dlclose later
-        result.dlHandle = dlopen(path.c_str(), RTLD_NOW | RTLD_NOLOAD);
+        result.def = opt->def;
+        result.dlHandle = opt->dlHandle;
         result.valid = true;
     } catch (std::exception const& e) {
         std::println("  EXCEPTION compiling {}: {}", fullName, e.what());

@@ -72,9 +72,13 @@ struct NodeDef {
     u64 hash_;
     std::unordered_map<i64, int> controlMap_;
 
+    void* dlHandle_ = nullptr;     // dlopen handle, nullptr for built-in defs
+    int refCount_ = 0;             // number of live Nodes using this def
+    bool superseded_ = false;      // true if a newer def with same name exists
+
     NodeDef(NodeDefInfo const& info)
         : info_(info), hash_(hash64(info_.name, kHashStart))
-    {        
+    {
         // make a map to convert controlID to a control index.
         for (int i = 0; i < info_.num_controls; ++i) {
             ControlInfo& p = info_.controls[i];
@@ -84,7 +88,8 @@ struct NodeDef {
     }
 };
 
-void addNodeDef(Engine* e, NodeDefInfo const& info);
+void addNodeDef(Engine* e, NodeDefInfo const& info, void* dlHandle = nullptr);
+void releaseNodeDef(Engine* e, NodeDef* def);
 
 //=============================================================================================
 #pragma mark PORT, CONTROL
