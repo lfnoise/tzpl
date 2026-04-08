@@ -35,9 +35,9 @@ let NAN = 0.0 / 0.0;
 -- Sign functions
 -- ============================================================
 
-fn sgn(x Float) Float = x < 0.0 ? -1.0 : x > 0.0 ? 1.0 : 0.0;
-fn sgnn(x Float) Float = x <= 0.0 ? -1.0 : 1.0;            -- zero is -1
-fn sgnp(x Float) Float = x < 0.0 ? -1.0 : 1.0;             -- zero is +1
+fn sign(x Float) Float = x < 0.0 ? -1.0 : x > 0.0 ? 1.0 : 0.0;
+fn signn(x Float) Float = x <= 0.0 ? -1.0 : 1.0;            -- zero is -1
+fn signp(x Float) Float = x < 0.0 ? -1.0 : 1.0;             -- zero is +1
 fn ustep(x Float) Float = x < 0.0 ? 0.0 : x > 0.0 ? 1.0 : 0.5;  -- Heaviside
 
 fn cmp(a Float, b Float) Float = a < b ? -1.0 : a > b ? 1.0 : a == b ? 0.0 : NAN;
@@ -46,18 +46,18 @@ fn cmp(a Float, b Float) Float = a < b ? -1.0 : a > b ? 1.0 : a == b ? 0.0 : NAN
 -- Rounding to quantum
 -- ============================================================
 
-fn roundq(x Float, q Float) Float = q == 0.0 ? x : q * (x / q) round;
-fn roundUp(x Float, q Float) Float = q == 0.0 ? x : q * (x / q) ceil;
-fn roundDn(x Float, q Float) Float = q == 0.0 ? x : q * (x / q) floor;
+fn round(x Float, q Float) Float = q == 0.0 ? x : q * (x / q) round;
+fn ceil(x Float, q Float) Float = q == 0.0 ? x : q * (x / q) ceil;
+fn floor(x Float, q Float) Float = q == 0.0 ? x : q * (x / q) floor;
 
 -- ============================================================
 -- Powers and roots
 -- ============================================================
 
-fn sq(x Float) Float = x * x;
-fn cb(x Float) Float = x * x * x;
-fn qu(x Float) Float = x sq sq;
-fn ssq(x Float) Float = x * x abs;                              -- signed square
+fn sq(x) = x * x;
+fn cb(x) = x * x * x;
+fn qu(x) = x sq sq;
+fn ssq(x) = x * x abs;                              -- signed square
 fn ssqrt(x Float) Float = x sgn * (x abs sqrt);                 -- signed square root
 fn scbrt(x Float) Float = x sgn * (x abs cbrt);                 -- signed cube root
 fn spow(x Float, y Float) Float = x sgn * (x abs pow(y));       -- signed exponentiation

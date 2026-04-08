@@ -429,6 +429,29 @@ fn setResetToggle(s S, r S, t S) S {
 	y <- select2(r > 0, 0, select2(s > 0, 1, select2(t > 0, 1 - y(1), y(1))))
 }
 
+-- sequencer
+fn seq(trigger S, pattern AsSignal, length AsSignal) S {
+	let y = delayVar();
+	y <- if_(trigger > 0, fn(){
+		let index = delayVar();
+		let out = pattern at(index(1));
+		index <- ((index(1) + 1) % length) i32;
+		out
+	}, fn(){
+		y(1)
+	})
+}
+
+-- impulse sequencer
+fn iseq(trigger S, pattern AsSignal, length AsSignal) S {
+	if_(trigger > 0, fn(){
+		let index = delayVar();
+		let out = pattern at(index(1) % length);
+		index <- ((index(1) + 1) % length) i32;
+		out
+	})
+}
+
 -- simple filters
 
 -- lag
@@ -706,10 +729,9 @@ fn phasor(fm AsSignal, pm AsSignal) S {
 	let p = frac(phase(1) + fm * T()) write(phase);
 	frac(p + pm)
 }
-fn phasor(fm AsSignal, pm AsConstantSignal = 0) S {
+fn phasor(fm AsSignal) S {
 	let phase = delayVar();
-	let p = frac(phase(1) + fm * T()) write(phase);
-	pm == 0 ? p : frac(p + pm)
+	frac(phase(1) + fm * T()) write(phase);
 }
 
 fn lfsaw(fm AsSignal, pm AsSignal = 0) S = phasor(fm, pm) bi;
@@ -762,6 +784,7 @@ fn pause(gate S, gatedFun fn()S) S = if_(gate > 0, fn(){ gate * gatedFun() });
 
 
 "DONE IMPORTING COMMON UGENS MODULE" println
+
 
 
 

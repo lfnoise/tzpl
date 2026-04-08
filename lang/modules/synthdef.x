@@ -754,57 +754,47 @@ fn length(b BufferVar) S {
 ---------------------------------------------------------------------------
 --- Vector operations
 
-fn at(a S, i) S {
-    SignalExprKind.vecop(VecOp.at) _newSignalExpr([a, i asSignal])
+fn at(a S, i S) S        = SignalExprKind.vecop(VecOp.at) _newSignalExpr([a asSignal, i asSignal]);
+fn at(a S, i AsSignal) S = SignalExprKind.vecop(VecOp.at) _newSignalExpr([a asSignal, i asSignal]);
+fn at(a AsSignal, i S) S = SignalExprKind.vecop(VecOp.at) _newSignalExpr([a asSignal, i asSignal]);
+
+fn put(a AsSignal, i AsSignal, v AsSignal) S {
+    SignalExprKind.vecop(VecOp.put) _newSignalExpr([a asSignal, i asSignal, v asSignal])
 }
-fn put(a S, i, v) S {
-    SignalExprKind.vecop(VecOp.put) _newSignalExpr([a, i asSignal, v asSignal])
-}
-fn matmul(a S, b S) S {
-    SignalExprKind.vecop(VecOp.put) _newSignalExpr([a, b])
-}
-fn take(a S, n Chans) S {
-    SignalExprKind.vecop(VecOp.take(n asChans)) _newSignalExpr([a])
-}
-fn drop(a S, n Chans) S {
-    SignalExprKind.vecop(VecOp.drop(n)) _newSignalExpr([a])
-}
-fn stride(a S, n Chans) S {
-    SignalExprKind.vecop(VecOp.stride(n asChans)) _newSignalExpr([a])
-}
-fn stutter(a S, n Chans) S {
-    SignalExprKind.vecop(VecOp.stutter(n asChans)) _newSignalExpr([a])
-}
-fn ncyc(a S, n Int) S {
-    SignalExprKind.vecop(VecOp.ncyc(n asChans)) _newSignalExpr([a])
-}
-fn rotate(a AsSignal, b AsSignal) S {
-    SignalExprKind.vecop(VecOp.rotate) _newSignalExpr([a asSignal, b asSignal])
-}
-fn reverse(a S) S {
-    SignalExprKind.vecop(VecOp.reverse) _newSignalExpr([a])
-}
-fn transpose(a S, n Chans) S {
-    SignalExprKind.vecop(VecOp.transpose(n asChans)) _newSignalExpr([a])
-}
-fn join(a [S]) S {
-    SignalExprKind.vecop(VecOp.join) _newSignalExpr(a)
-}
+
+-- fn matmul(a S, b S) S        = SignalExprKind.vecop(VecOp.at) _newSignalExpr([a asSignal, i asSignal]);
+-- fn matmul(a S, b AsSignal) S = SignalExprKind.vecop(VecOp.at) _newSignalExpr([a asSignal, i asSignal]);
+-- fn matmul(a AsSignal, b S) S = SignalExprKind.vecop(VecOp.at) _newSignalExpr([a asSignal, i asSignal]);
+
+fn take(a S, n Chans) S = SignalExprKind.vecop(VecOp.take(n asChans)) _newSignalExpr([a]);
+
+fn drop(a S, n Chans) S = SignalExprKind.vecop(VecOp.drop(n)) _newSignalExpr([a]);
+
+fn stride(a S, n Chans) S = SignalExprKind.vecop(VecOp.stride(n asChans)) _newSignalExpr([a]);
+
+fn stutter(a S, n Chans) S = SignalExprKind.vecop(VecOp.stutter(n asChans)) _newSignalExpr([a]);
+
+fn ncyc(a S, n Int) S = SignalExprKind.vecop(VecOp.ncyc(n asChans)) _newSignalExpr([a]);
+
+fn rotate(a AsSignal, b AsSignal) S = SignalExprKind.vecop(VecOp.rotate) _newSignalExpr([a asSignal, b asSignal]);
+
+fn reverse(a S) S = SignalExprKind.vecop(VecOp.reverse) _newSignalExpr([a]);
+
+fn transpose(a S, n Chans) S = SignalExprKind.vecop(VecOp.transpose(n asChans)) _newSignalExpr([a]);
+
+fn join(a [S]) S = SignalExprKind.vecop(VecOp.join) _newSignalExpr(a);
+
 fn reduce(a S, op BinaryOp, chans Chans = 1) S {
     SignalExprKind.vecop(VecOp.reduce(op, chans asChans)) _newSignalExpr([a])
 }
-fn sum(a S, chans Chans = 1) S {
-    a reduce(BinaryOp.add, chans asChans)
-}
-fn product(a S, chans Chans = 1) S {
-    a reduce(BinaryOp.mul, chans asChans)
-}
-fn minOf(a S, chans Chans = 1) S {
-    a reduce(BinaryOp.min, chans asChans)
-}
-fn maxOf(a S, chans Chans = 1) S {
-    a reduce(BinaryOp.max, chans asChans)
-}
+fn sum(a S, chans Chans = 1) S = a reduce(BinaryOp.add, chans asChans);
+
+fn product(a S, chans Chans = 1) S = a reduce(BinaryOp.mul, chans asChans);
+
+fn minOf(a S, chans Chans = 1) S = a reduce(BinaryOp.min, chans asChans);
+
+fn maxOf(a S, chans Chans = 1) S = a reduce(BinaryOp.max, chans asChans);
+
 
 ---------------------------------------------------------------------------
 --- Making Graphs
