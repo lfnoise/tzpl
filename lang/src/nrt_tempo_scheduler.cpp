@@ -108,6 +108,7 @@ i64 NRTTempoScheduler::schedAbs(f64 beat, Obj* handler) {
         std::lock_guard lock(schedMtx_);
         queue_.push(entry);
     }
+    queueChanged_.store(true, std::memory_order_relaxed);
     cv_.notify_one();
     return id;
 }
@@ -135,6 +136,7 @@ i64 NRTTempoScheduler::schedTempoChange(f64 beat, f64 targetTempo,
         std::lock_guard lock(schedMtx_);
         queue_.push(entry);
     }
+    queueChanged_.store(true, std::memory_order_relaxed);
     cv_.notify_one();
     return id;
 }
@@ -197,8 +199,10 @@ void NRTTempoScheduler::run() {
 
         if (fireTime > now) {
             cv_.wait_until(lock, fireTime, [this] {
-                return !running_.load(std::memory_order_relaxed);
+                return !running_.load(std::memory_order_relaxed)
+                    || queueChanged_.load(std::memory_order_relaxed);
             });
+            queueChanged_.store(false, std::memory_order_relaxed);
             if (!running_.load(std::memory_order_relaxed)) break;
             continue;
         }

@@ -125,6 +125,7 @@ private:
     std::priority_queue<Entry, std::vector<Entry>, std::greater<Entry>> queue_;
     std::thread thread_;
     std::atomic<bool> running_{false};
+    std::atomic<bool> queueChanged_{false};  // wakes wait_until when new entries arrive
     std::atomic<i64> nextTimerID_{1};
 };
 

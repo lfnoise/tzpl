@@ -11,18 +11,11 @@
 
 #include "gui_state.hpp"
 #include <string>
-#include <vector>
 
 class OutputPanel {
 public:
-    OutputPanel();
-
-    // Draw the output panel (scrolling output + REPL input line).
+    // Draw the output panel (scrolling output).
     void draw(float width, float height, OutputBuffer& output);
-
-    // Pending REPL input (set by draw, consumed by main loop)
-    bool hasPendingInput() const { return !pendingInput_.empty(); }
-    std::string takePendingInput() { std::string s; s.swap(pendingInput_); return s; }
 
     // Copy selected output text to clipboard. Returns true if output was focused.
     bool tryCopy();
@@ -35,21 +28,15 @@ public:
     void clear(OutputBuffer& output);
 
 private:
-    static int inputCallback(struct ImGuiInputTextCallbackData* data);
     static int outputScrollCallback(struct ImGuiInputTextCallbackData* data);
 
-    char inputBuf_[4096] = {};
-    std::vector<std::string> history_;
-    int historyIdx_ = -1;
     bool scrollToBottom_ = false;
-    bool reclaimFocus_ = false;
     std::string outputText_;
     size_t lastLineCount_ = 0;
     bool outputActive_ = false;
     bool pendingSelectAll_ = false;
     int selStart_ = 0;
     int selEnd_ = 0;
-    std::string pendingInput_;
 };
 
 #endif /* output_panel_hpp */

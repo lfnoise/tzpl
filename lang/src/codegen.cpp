@@ -419,6 +419,13 @@ CodeBlock* CodeGen::generateREPL(Program& program) {
 
     pushScope();
 
+    // Phase 0: emit module init calls for import declarations
+    for (auto& item : program.items) {
+        if (item->kind == ASTNode::ImportDecl) {
+            genImportDecl(static_cast<ImportDeclNode*>(item.get()));
+        }
+    }
+
     // First pass: generate code for function declarations
     for (auto& item : program.items) {
         if (item->kind == ASTNode::FnDecl) {

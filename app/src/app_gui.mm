@@ -839,11 +839,6 @@ int runGui(bridge::AppContext& appCtx) {
                     guiState.asyncEval.launch(code, appCtx, *session, 0,
                                               editorPanel.getCursorPosition().mLine);
                 }
-                // Dispatch pending REPL input
-                if (outputPanel.hasPendingInput()) {
-                    std::string input = outputPanel.takePendingInput();
-                    guiState.asyncEval.launch(input, appCtx, *session, -1, -1);
-                }
             }
 
             ImGui::End();

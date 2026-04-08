@@ -3,11 +3,6 @@
 
 #include "output_panel.hpp"
 #include "imgui.h"
-#include <cstring>
-
-OutputPanel::OutputPanel() {
-    reclaimFocus_ = false;
-}
 
 // Callback to auto-scroll output and track selection state
 int OutputPanel::outputScrollCallback(ImGuiInputTextCallbackData* cbData) {
@@ -96,35 +91,6 @@ void OutputPanel::clear(OutputBuffer& output) {
     lastLineCount_ = 0;
 }
 
-// ImGui InputText callback for command history navigation
-int OutputPanel::inputCallback(ImGuiInputTextCallbackData* cbData) {
-    auto* self = static_cast<OutputPanel*>(cbData->UserData);
-
-    if (cbData->EventFlag == ImGuiInputTextFlags_CallbackHistory) {
-        if (self->history_.empty()) return 0;
-
-        if (cbData->EventKey == ImGuiKey_UpArrow) {
-            if (self->historyIdx_ < 0)
-                self->historyIdx_ = (int)self->history_.size() - 1;
-            else if (self->historyIdx_ > 0)
-                --self->historyIdx_;
-        } else if (cbData->EventKey == ImGuiKey_DownArrow) {
-            if (self->historyIdx_ >= 0) {
-                ++self->historyIdx_;
-                if (self->historyIdx_ >= (int)self->history_.size())
-                    self->historyIdx_ = -1;
-            }
-        }
-
-        const char* historyStr = (self->historyIdx_ >= 0)
-            ? self->history_[self->historyIdx_].c_str()
-            : "";
-        cbData->DeleteChars(0, cbData->BufTextLen);
-        cbData->InsertChars(0, historyStr);
-    }
-    return 0;
-}
-
 void OutputPanel::draw(float width, float height, OutputBuffer& output) {
     ImGui::BeginChild("OutputPanel", ImVec2(width, height), false);
 
@@ -153,44 +119,14 @@ void OutputPanel::draw(float width, float height, OutputBuffer& output) {
         scrollToBottom_ = true;
     }
 
-    // Scrolling output area (leave room for input line)
-    float inputHeight = ImGui::GetFrameHeightWithSpacing() + 4.0f;
-    float outputHeight = height - inputHeight;
-
     // Selectable, copyable read-only text area
     ImGuiInputTextFlags outputFlags = ImGuiInputTextFlags_ReadOnly
                                     | ImGuiInputTextFlags_CallbackAlways;
     ImGui::InputTextMultiline("##output_text",
                               outputText_.data(), outputText_.size() + 1,
-                              ImVec2(width, outputHeight),
+                              ImVec2(width, height),
                               outputFlags, outputScrollCallback, this);
     outputActive_ = ImGui::IsItemActive();
-
-    // REPL input line
-    ImGui::PushItemWidth(width - 8.0f);
-    ImGuiInputTextFlags flags = ImGuiInputTextFlags_EnterReturnsTrue
-                              | ImGuiInputTextFlags_CallbackHistory;
-    if (ImGui::InputText("##repl_input", inputBuf_, sizeof(inputBuf_),
-                         flags, inputCallback, this)) {
-        std::string input(inputBuf_);
-        inputBuf_[0] = '\0';
-        reclaimFocus_ = true;
-
-        if (!input.empty()) {
-            history_.push_back(input);
-            historyIdx_ = -1;
-            output.append("> " + input, LineKind::Info);
-            pendingInput_ = input;
-            scrollToBottom_ = true;
-        }
-    }
-    ImGui::PopItemWidth();
-
-    // Keep focus on input after submit
-    if (reclaimFocus_) {
-        ImGui::SetKeyboardFocusHere(-1);
-        reclaimFocus_ = false;
-    }
 
     ImGui::EndChild();
 }
