@@ -688,18 +688,17 @@ tzpl_SErr channelOffset(i32 offset) {
 tzpl_SErr connect(PortAddr src, PortAddr dst, f64 xfadeTime, FadeCurve curve) {
     Engine* e = tBundle.engine;
     if (!e) return tzpl_errNoActiveBundle;
-    
+
     tzpl_SErr err;
     OutPort* srcPort;
     err = tBundle.silo->nrt_getOutPort(src, srcPort);
     if (err != tzpl_errNone) return err;
-    
+
     InPort* dstPort;
     err = tBundle.silo->nrt_getInPort(dst, dstPort);
     if (err != tzpl_errNone) return err;
 
     if (dstPort->node_->nodeID == 0) {
-        // destination is the output node. It deals with channel mismatch.
         tzpl_SErr err = relaxedCompatibleTypes(srcPort->type_, dstPort->type_);
         if (err != tzpl_errNone) return err;
     } else {
@@ -707,12 +706,24 @@ tzpl_SErr connect(PortAddr src, PortAddr dst, f64 xfadeTime, FadeCurve curve) {
         if (err != tzpl_errNone) return err;
     }
 
+    // Always pre-allocate a mixer in NRT (cheap). The RT thread decides
+    // whether to use it based on the actual connection state at execution
+    // time. This avoids NRT/RT race conditions -- the NRT thread cannot
+    // reliably know whether previous connects have been applied yet.
+    //
+    // Use the SOURCE's type for the mixer, not the destination's. The source
+    // determines the actual channel count; the mixer-to-destination connect
+    // uses relaxed type checking (for the output node) which allows channel
+    // mismatch. If we used the destination's type, connecting a mono source
+    // to a stereo mixer input would fail strict type checking.
+    tzpl_SignalType type = srcPort->type_;
+    Node* mixerNode = newMixerNode(e, tBundle.silo, type, 4);
+
     Node* xfaderNode = nullptr;
-    tzpl_SignalType type = dstPort->type_;
-    if (xfadeTime > 0. && isFloat(type.elem)) {
-        xfaderNode = newXFaderNode(e, tBundle.silo, xfadeTime, curve, type);
+    if (xfadeTime > 0. && isFloat(srcPort->type_.elem)) {
+        xfaderNode = newXFaderNode(e, tBundle.silo, xfadeTime, curve, srcPort->type_);
     }
-    tBundle.add(new ConnectCmd(src, dst, xfaderNode, curve));
+    tBundle.add(new ConnectCmd(src, dst, xfaderNode, curve, mixerNode, -1));
     return tzpl_errNone;
 }
 
@@ -761,11 +772,25 @@ tzpl_SErr replaceNode(i64 oldNodeID, i64 newNodeID, f64 xfadeTime, FadeCurve cur
         if (err) return err;
     }
     
-    // connect new node to all the same inputs.
-    for (int i = 0; i < oldNode->ins.size(); ++i) {
-        OutPort* src = oldNode->ins[i].srcPort_;
-        i64 srcNodeID = src->node_->nodeID;
-        connect({srcNodeID, src->index_}, {newNodeID, i});
+    // Connect new node to all the same inputs.
+    // If an input has a hidden mixer, iterate the mixer's actual sources
+    // and connect each one. The additive connect() will automatically
+    // create a new mixer on the new node's input.
+    for (int i = 0; i < (int)oldNode->ins.size(); ++i) {
+        if (oldNode->ins[i].mixerNode_) {
+            Node* mixer = oldNode->ins[i].mixerNode_;
+            for (auto& mixerIn : mixer->ins) {
+                if (mixerIn.srcPort_ && mixerIn.srcPort_->node_->nodeID >= 0) {
+                    connect({mixerIn.srcPort_->node_->nodeID, mixerIn.srcPort_->index_},
+                            {newNodeID, i});
+                }
+            }
+        } else {
+            OutPort* src = oldNode->ins[i].srcPort_;
+            if (src && src->node_->nodeID >= 0) {
+                connect({src->node_->nodeID, src->index_}, {newNodeID, i});
+            }
+        }
     }
     
     // reconnect all outputs
@@ -790,6 +815,27 @@ tzpl_SErr disconnectInput(PortAddr dst, f64 xfadeTime, FadeCurve curve) {
         xfaderNode = newXFaderNode(e, tBundle.silo, xfadeTime, curve, type);
     }
     tBundle.add(new DisconnectInputCmd(dst, xfaderNode, curve));
+    return tzpl_errNone;
+}
+
+tzpl_SErr disconnectSource(PortAddr src, PortAddr dst, f64 xfadeTime, FadeCurve curve) {
+    Engine* e = tBundle.engine;
+    if (!e) return tzpl_errNoActiveBundle;
+
+    OutPort* srcPort;
+    tzpl_SErr err = tBundle.silo->nrt_getOutPort(src, srcPort);
+    if (err != tzpl_errNone) return err;
+
+    InPort* dstPort;
+    err = tBundle.silo->nrt_getInPort(dst, dstPort);
+    if (err != tzpl_errNone) return err;
+
+    Node* xfaderNode = nullptr;
+    tzpl_SignalType type = dstPort->type_;
+    if (xfadeTime > 0. && isFloat(type.elem)) {
+        xfaderNode = newXFaderNode(e, tBundle.silo, xfadeTime, curve, type);
+    }
+    tBundle.add(new DisconnectSourceCmd(src, dst, xfaderNode, curve));
     return tzpl_errNone;
 }
 

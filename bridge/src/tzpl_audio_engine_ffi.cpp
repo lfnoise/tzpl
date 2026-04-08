@@ -223,6 +223,27 @@ static void ffi_disconnectInputX(ts::VM& vm, u16 dst, u16, u16 argBase) {
     returnErr(vm, dst, engine::disconnectInput(dst_port, xfade, curve));
 }
 
+// fn disconnectSource(srcNode: Int, srcPort: Int, dstNode: Int, dstPort: Int) -> Int
+static void ffi_disconnectSource(ts::VM& vm, u16 dst, u16, u16 argBase) {
+    engine::PortAddr src{static_cast<engine::i64>(vm.reg(argBase).i),
+                         static_cast<int>(vm.reg(argBase + 1).i)};
+    engine::PortAddr dst_port{static_cast<engine::i64>(vm.reg(argBase + 2).i),
+                              static_cast<int>(vm.reg(argBase + 3).i)};
+    returnErr(vm, dst, engine::disconnectSource(src, dst_port));
+}
+
+// fn disconnectSourceX(srcNode: Int, srcPort: Int, dstNode: Int, dstPort: Int,
+//                      xfade: Float, curve: Int) -> Int
+static void ffi_disconnectSourceX(ts::VM& vm, u16 dst, u16, u16 argBase) {
+    engine::PortAddr src{static_cast<engine::i64>(vm.reg(argBase).i),
+                         static_cast<int>(vm.reg(argBase + 1).i)};
+    engine::PortAddr dst_port{static_cast<engine::i64>(vm.reg(argBase + 2).i),
+                              static_cast<int>(vm.reg(argBase + 3).i)};
+    f64 xfade = vm.reg(argBase + 4).f;
+    auto curve = static_cast<engine::FadeCurve>(vm.reg(argBase + 5).i);
+    returnErr(vm, dst, engine::disconnectSource(src, dst_port, xfade, curve));
+}
+
 // fn disconnectOutput(srcNode: Int, srcPort: Int) -> Int
 static void ffi_disconnectOutput(ts::VM& vm, u16 dst, u16, u16 argBase) {
     engine::PortAddr src{static_cast<engine::i64>(vm.reg(argBase).i),
@@ -442,6 +463,8 @@ void registerAudioEngineFFI(ts::Compiler& compiler) {
     reg("connectX",         Int, {Int, Int, Int, Int, Float, Int}, ffi_connectX,         true);
     reg("disconnectInput",  Int, {Int, Int},                       ffi_disconnectInput,  true);
     reg("disconnectInputX", Int, {Int, Int, Float, Int},           ffi_disconnectInputX, true);
+    reg("disconnectSource",  Int, {Int, Int, Int, Int},             ffi_disconnectSource,  true);
+    reg("disconnectSourceX",Int, {Int, Int, Int, Int, Float, Int}, ffi_disconnectSourceX, true);
     reg("disconnectOutput", Int, {Int, Int},                       ffi_disconnectOutput, true);
     reg("disconnectNode",   Int, {Int},                            ffi_disconnectNode,   true);
     reg("reconnectOutput",  Int, {Int, Int, Int, Int, Float, Int}, ffi_reconnectOutput,  true);

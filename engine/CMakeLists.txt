@@ -34,6 +34,7 @@ set(LIB_SOURCES
     src/tzpl_engine.cpp
     src/tzpl_node.cpp
     src/tzpl_xfader.cpp
+    src/tzpl_mixer.cpp
     src/tzpl_test_plugins.cpp
 )
 
@@ -77,6 +78,7 @@ install(FILES
     src/tzpl_complex.hpp
     src/tzpl_silo.hpp
     src/tzpl_xfader.hpp
+    src/tzpl_mixer.hpp
     src/tzpl_sexpr_binary_buffer.hpp
     src/tzpl_test_plugins.hpp
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/tzpl

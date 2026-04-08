@@ -26,6 +26,7 @@
 
 #include "tzpl_silo.hpp"
 #include "tzpl_xfader.hpp"
+#include "tzpl_mixer.hpp"
 #include "tzpl_audio_file.hpp"
 
 namespace engine {
@@ -48,14 +49,47 @@ struct RemoveNodeCmd : Command
 {
     i64 nodeID_;
     Node* node_ = nullptr;
-    
+    // Mixer nodes that need collapsing after removal (collected pre-disconnect)
+    static constexpr int kMaxMixerCollapse = 8;
+    InPort* mixerDsts_[kMaxMixerCollapse] = {};
+    int numMixerDsts_ = 0;
+
     RemoveNodeCmd(i64 nodeID) : nodeID_(nodeID) {}
-    
+
     void doRT(Silo* s) override {
         Node* node = s->rt_getNode(nodeID_);
-        if (node) {
-            err_ = s->removeNode(node);
-            node_ = node;
+        if (!node) return;
+
+        // Before disconnecting, find any mixer inputs this node's outputs feed.
+        // After removeNode, the dstList_ links will be gone.
+        for (auto& out : node->outs) {
+            for (InPort* dst = out.dstList_; dst; dst = dst->next_) {
+                // If this dst belongs to a mixer node, record the ultimate
+                // destination InPort (the one with mixerNode_ set).
+                Node* dstNode = dst->node_;
+                if (dstNode && dstNode->nodeID < 0) {
+                    // This is a hidden sub-node (mixer or xfader).
+                    // Find the InPort that owns this mixer.
+                    for (auto& mixerOut : dstNode->outs) {
+                        for (InPort* finalDst = mixerOut.dstList_; finalDst; finalDst = finalDst->next_) {
+                            if (finalDst->mixerNode_ == dstNode && numMixerDsts_ < kMaxMixerCollapse) {
+                                mixerDsts_[numMixerDsts_++] = finalDst;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        err_ = s->removeNode(node);
+        node_ = node;
+
+        // After removal, check if any collected mixers should collapse
+        for (int i = 0; i < numMixerDsts_; ++i) {
+            InPort* dst = mixerDsts_[i];
+            if (dst->mixerNode_ && countActiveMixerInputs(dst->mixerNode_) <= 1) {
+                collapseMixer(s, dst);
+            }
         }
     }
     bool doNRT(Silo* s) override {
@@ -82,27 +116,68 @@ struct ConnectCmd : Command
     PortAddr src_;
     PortAddr dst_;
     Node* xfaderNode_;
+    Node* mixerNode_;      // pre-allocated mixer (null if not needed)
+    int mixerSlot_;         // which mixer input slot to use (-1 if N/A)
     FadeCurve curve_;
-    
-    ConnectCmd(PortAddr src, PortAddr dst, Node* xfaderNode, FadeCurve curve)
-        : src_(src), dst_(dst), xfaderNode_(xfaderNode), curve_(curve)
+
+    ConnectCmd(PortAddr src, PortAddr dst, Node* xfaderNode, FadeCurve curve,
+               Node* mixerNode = nullptr, int mixerSlot = -1)
+        : src_(src), dst_(dst), xfaderNode_(xfaderNode),
+          mixerNode_(mixerNode), mixerSlot_(mixerSlot), curve_(curve)
     {}
-    
+
     void doRT(Silo* s) override {
         OutPort* src;
         err_ = s->rt_getOutPort(src_, src);
         if (err_ != tzpl_errNone) return;
-        
+
         InPort* dst;
         s->rt_getInPort(dst_, dst);
         if (err_ != tzpl_errNone) return;
 
-        if (xfaderNode_) {
-            err_ = setupXFader(s, xfaderNode_, src, dst, curve_, nullptr);
+        // RT decides based on actual connection state whether fan-in is needed.
+        bool needsFanIn = dst->srcPort_ != nullptr || dst->mixerNode_ != nullptr;
+
+        if (needsFanIn && dst->mixerNode_) {
+            // Already has a mixer: add source to an existing slot.
+            int slot = findFreeMixerSlot(dst->mixerNode_);
+            if (slot < 0) {
+                // Mixer full. Use the pre-allocated mixer as a replacement
+                // with double capacity (migrate existing connections).
+                // For now, just use a free slot on the pre-allocated mixer.
+                // TODO: implement mixer growth at RT
+                err_ = tzpl_errNone;
+                return;
+            }
+            if (xfaderNode_) {
+                err_ = setupXFader(s, xfaderNode_, src, &dst->mixerNode_->ins[slot], curve_, nullptr);
+            } else {
+                err_ = addToMixer(s, dst->mixerNode_, src, slot);
+            }
+            // Discard the pre-allocated mixer (not needed)
+            if (mixerNode_) s->pushDeadNode(mixerNode_);
+        } else if (needsFanIn && mixerNode_) {
+            // Transition from 1 source to 2: splice in the pre-allocated mixer.
+            if (xfaderNode_) {
+                OutPort* oldSrc = dst->srcPort_;
+                err_ = s->connect(&mixerNode_->outs[0], dst);
+                if (err_ != tzpl_errNone) return;
+                if (oldSrc) s->connect(oldSrc, &mixerNode_->ins[0]);
+                dst->mixerNode_ = mixerNode_;
+                err_ = setupXFader(s, xfaderNode_, src, &mixerNode_->ins[1], curve_, nullptr);
+            } else {
+                err_ = spliceMixer(s, mixerNode_, src, dst);
+            }
         } else {
-            err_ = s->connect(src, dst);
+            // No fan-in: first connection (or destination was empty).
+            if (xfaderNode_) {
+                err_ = setupXFader(s, xfaderNode_, src, dst, curve_, nullptr);
+            } else {
+                err_ = s->connect(src, dst);
+            }
+            // Discard the pre-allocated mixer (not needed)
+            if (mixerNode_) s->pushDeadNode(mixerNode_);
         }
-        //printf("connect RT err %d\n", err_);
     }
 };
 
@@ -150,6 +225,13 @@ struct DisconnectInputCmd : Command
         err_ = s->rt_getInPort(dst_, dst);
         if (err_ != tzpl_errNone) return;
 
+        // Tear down hidden mixer if present
+        if (dst->mixerNode_) {
+            s->disconnectNode(dst->mixerNode_);
+            s->pushDeadNode(dst->mixerNode_);
+            dst->mixerNode_ = nullptr;
+        }
+
         if (xfaderNode_) {
             err_ = setupXFader(s, xfaderNode_, nullptr, dst, curve_, dst->dataBuffer_);
         } else {
@@ -158,10 +240,61 @@ struct DisconnectInputCmd : Command
     }
 };
 
+struct DisconnectSourceCmd : Command
+{
+    PortAddr src_;
+    PortAddr dst_;
+    Node* xfaderNode_;
+    FadeCurve curve_;
+
+    DisconnectSourceCmd(PortAddr src, PortAddr dst, Node* xfaderNode, FadeCurve curve)
+        : src_(src), dst_(dst), xfaderNode_(xfaderNode), curve_(curve)
+    {}
+
+    void doRT(Silo* s) override {
+        OutPort* src;
+        err_ = s->rt_getOutPort(src_, src);
+        if (err_ != tzpl_errNone) return;
+
+        InPort* dst;
+        err_ = s->rt_getInPort(dst_, dst);
+        if (err_ != tzpl_errNone) return;
+
+        if (!dst->mixerNode_) {
+            // No mixer -- just disconnect the direct connection
+            if (xfaderNode_) {
+                err_ = setupXFader(s, xfaderNode_, nullptr, dst, curve_, dst->dataBuffer_);
+            } else {
+                err_ = s->disconnect(dst);
+            }
+            return;
+        }
+
+        // Has a mixer -- remove this specific source from it
+        Node* mixer = dst->mixerNode_;
+        if (xfaderNode_) {
+            // Find the mixer input slot connected to src and fade it out
+            for (int i = 0; i < (int)mixer->ins.size(); ++i) {
+                if (mixer->ins[i].srcPort_ == src) {
+                    err_ = setupXFader(s, xfaderNode_, nullptr, &mixer->ins[i],
+                                       curve_, mixer->ins[i].dataBuffer_);
+                    break;
+                }
+            }
+            // Mixer collapse after xfade is deferred (dead slot sums zero)
+        } else {
+            removeFromMixer(s, mixer, src);
+            if (countActiveMixerInputs(mixer) <= 1) {
+                collapseMixer(s, dst);
+            }
+        }
+    }
+};
+
 struct DisconnectOutputCmd : Command
 {
     PortAddr src_;
-    
+
     DisconnectOutputCmd(PortAddr src)
         : src_(src)
     {}

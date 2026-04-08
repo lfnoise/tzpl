@@ -140,6 +140,7 @@ tzpl_SErr freeAllNodes();
 // node connections
 tzpl_SErr connect(PortAddr src, PortAddr dst, f64 xfadeTime = 0., FadeCurve curve = fadeLinear);
 tzpl_SErr disconnectInput(PortAddr dst, f64 xfadeTime = 0., FadeCurve curve = fadeLinear);
+tzpl_SErr disconnectSource(PortAddr src, PortAddr dst, f64 xfadeTime = 0., FadeCurve curve = fadeLinear);
 tzpl_SErr disconnectOutput(PortAddr src);
 tzpl_SErr disconnectNode(i64 nodeID);
 

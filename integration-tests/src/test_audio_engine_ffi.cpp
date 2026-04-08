@@ -28,6 +28,9 @@
 #include "module_compiler.hpp"
 #include "tzpl_client_interface.hpp"
 #include "tzpl_test_plugins.hpp"
+#include "tzpl_mixer.hpp"
+#include "tzpl_xfader.hpp"
+#include "tzpl_engine.hpp"
 #include <print>
 #include <cstdlib>
 #include <string_view>
@@ -266,6 +269,241 @@ static void test_node_and_connect() {
     engine::freeEngine(eng);
 }
 
+// ---------------------------------------------------------------------------
+// Mixer fan-in tests -- exercise hidden mixer node creation and lifecycle
+// using low-level Silo primitives (no audio thread needed).
+// ---------------------------------------------------------------------------
+
+// Helper: create a minimal 1-output node (like a source generator)
+static engine::Node* makeTestSource(engine::Engine* e, engine::Silo* silo,
+                                     tzpl_SignalType type) {
+    tzpl_SynthFuns funs = {0};
+    funs.alloc = []() -> tzpl_SynthData* { return new tzpl_SynthData(); };
+    funs.free = [](tzpl_SynthData* s) -> tzpl_SErr { delete s; return tzpl_errNone; };
+    funs.processAudio = [](tzpl_SynthData*) {};
+
+    engine::NodeDefInfo info;
+    memset(&info, 0, sizeof(info));
+    info.name = "test_src";
+    info.num_outs = 1;
+    info.outs = (engine::PortInfo*)calloc(1, sizeof(engine::PortInfo));
+    info.outs[0] = engine::PortInfo{"out", type};
+    info.funs = funs;
+
+    auto* node = new engine::Node(e, silo, info);
+    free(info.outs);
+    return node;
+}
+
+// Helper: create a minimal 1-input, 1-output node (like a processor/destination)
+static engine::Node* makeTestDest(engine::Engine* e, engine::Silo* silo,
+                                   tzpl_SignalType type) {
+    tzpl_SynthFuns funs = {0};
+    funs.alloc = []() -> tzpl_SynthData* { return new tzpl_SynthData(); };
+    funs.free = [](tzpl_SynthData* s) -> tzpl_SErr { delete s; return tzpl_errNone; };
+    funs.processAudio = [](tzpl_SynthData*) {};
+
+    engine::NodeDefInfo info;
+    memset(&info, 0, sizeof(info));
+    info.name = "test_dst";
+    info.num_ins = 1;
+    info.num_outs = 1;
+    info.ins = (engine::PortInfo*)calloc(1, sizeof(engine::PortInfo));
+    info.ins[0] = engine::PortInfo{"in", type};
+    info.outs = (engine::PortInfo*)calloc(1, sizeof(engine::PortInfo));
+    info.outs[0] = engine::PortInfo{"out", type};
+    info.funs = funs;
+
+    auto* node = new engine::Node(e, silo, info);
+    free(info.ins);
+    free(info.outs);
+    return node;
+}
+
+static void test_mixer_fanin() {
+    using namespace engine;
+    std::print("Test: Mixer fan-in\n");
+
+    AudioStreamParameters params{};
+    params.channels = 2;
+    params.bufferFrames = 64;
+    params.sampleRate = 44100.0;
+    params.deviceName = "default";
+    params.firstChannel = 0;
+
+    EngineConfig config;
+    config.numSilos = 1;
+
+    Engine* eng = newEngine(config, params);
+    Silo& silo = eng->silos_[0];
+    tzpl_SignalType stereoF32{tzpl_kF32, tzpl_audioRate, 2};
+
+    // --- Test 1: 2-source fan-in ---
+    {
+        std::print("  [1] 2-source fan-in\n");
+        Node* A = makeTestSource(eng, &silo, stereoF32);
+        Node* B = makeTestSource(eng, &silo, stereoF32);
+        // Use the output node (silo.outputNode_, nodeID=0) as destination
+        InPort* dst = &silo.outputNode_->ins[0];
+
+        // First connect: direct (no mixer)
+        silo.connect(&A->outs[0], dst);
+        check(dst->mixerNode_ == nullptr, "1st connect: no mixer");
+        check(dst->srcPort_ == &A->outs[0], "1st connect: direct to A");
+
+        // Second connect: should create mixer via spliceMixer
+        Node* mixer = newMixerNode(eng, &silo, stereoF32, 4);
+        spliceMixer(&silo, mixer, &B->outs[0], dst);
+        check(dst->mixerNode_ == mixer, "2nd connect: mixer created");
+        check(dst->srcPort_ == &mixer->outs[0], "2nd connect: dst reads from mixer");
+        check(mixer->ins[0].srcPort_ == &A->outs[0], "2nd connect: mixer.in[0] = A");
+        check(mixer->ins[1].srcPort_ == &B->outs[0], "2nd connect: mixer.in[1] = B");
+
+        // Clean up
+        silo.disconnectNode(mixer);
+        silo.disconnectNode(A);
+        silo.disconnectNode(B);
+        dst->mixerNode_ = nullptr;
+        delete mixer; delete A; delete B;
+    }
+
+    // --- Test 2: 3+ source fan-in ---
+    {
+        std::print("  [2] 3-source fan-in\n");
+        Node* A = makeTestSource(eng, &silo, stereoF32);
+        Node* B = makeTestSource(eng, &silo, stereoF32);
+        Node* C = makeTestSource(eng, &silo, stereoF32);
+        InPort* dst = &silo.outputNode_->ins[0];
+
+        silo.connect(&A->outs[0], dst);
+        Node* mixer = newMixerNode(eng, &silo, stereoF32, 4);
+        spliceMixer(&silo, mixer, &B->outs[0], dst);
+
+        // Third source: add to existing mixer
+        int slot = findFreeMixerSlot(mixer);
+        check(slot >= 0, "3rd connect: free slot found");
+        addToMixer(&silo, mixer, &C->outs[0], slot);
+        check(mixer->ins[slot].srcPort_ == &C->outs[0], "3rd connect: mixer.in[slot] = C");
+        check(countActiveMixerInputs(mixer) == 3, "3rd connect: 3 active inputs");
+
+        silo.disconnectNode(mixer);
+        silo.disconnectNode(A);
+        silo.disconnectNode(B);
+        silo.disconnectNode(C);
+        dst->mixerNode_ = nullptr;
+        delete mixer; delete A; delete B; delete C;
+    }
+
+    // --- Test 3: Remove source, collapse to direct ---
+    {
+        std::print("  [3] Remove source, collapse mixer\n");
+        Node* A = makeTestSource(eng, &silo, stereoF32);
+        Node* B = makeTestSource(eng, &silo, stereoF32);
+        InPort* dst = &silo.outputNode_->ins[0];
+
+        silo.connect(&A->outs[0], dst);
+        Node* mixer = newMixerNode(eng, &silo, stereoF32, 4);
+        spliceMixer(&silo, mixer, &B->outs[0], dst);
+        check(dst->mixerNode_ == mixer, "before collapse: mixer exists");
+
+        // Remove B from mixer
+        removeFromMixer(&silo, mixer, &B->outs[0]);
+        check(countActiveMixerInputs(mixer) == 1, "after remove: 1 active input");
+
+        // Collapse: should restore direct A -> dst
+        collapseMixer(&silo, dst);
+        check(dst->mixerNode_ == nullptr, "after collapse: no mixer");
+        check(dst->srcPort_ == &A->outs[0], "after collapse: direct to A");
+
+        // mixer was pushed to dead nodes by collapseMixer, but we handle
+        // cleanup manually in tests
+        silo.disconnectNode(A);
+        silo.disconnectNode(B);
+        delete A; delete B;
+        // mixer deleted by collapseMixer -> pushDeadNode; skip manual delete
+    }
+
+    // --- Test 4: freeNode on source (simulated) ---
+    {
+        std::print("  [4] Disconnect source from mixer, collapse\n");
+        Node* A = makeTestSource(eng, &silo, stereoF32);
+        Node* B = makeTestSource(eng, &silo, stereoF32);
+        InPort* dst = &silo.outputNode_->ins[0];
+
+        silo.connect(&A->outs[0], dst);
+        Node* mixer = newMixerNode(eng, &silo, stereoF32, 4);
+        spliceMixer(&silo, mixer, &B->outs[0], dst);
+
+        // Simulate freeNode(A): disconnect A's output, then check mixer
+        silo.disconnect(&A->outs[0]);
+        check(mixer->ins[0].srcPort_ == nullptr, "A disconnected from mixer");
+        check(countActiveMixerInputs(mixer) == 1, "1 active input remains");
+
+        // Collapse
+        collapseMixer(&silo, dst);
+        check(dst->mixerNode_ == nullptr, "collapsed after A freed");
+        check(dst->srcPort_ == &B->outs[0], "B directly connected");
+
+        silo.disconnectNode(B);
+        delete A; delete B;
+    }
+
+    // --- Test 5: reconnectOutput through mixer ---
+    {
+        std::print("  [5] reconnectOutput through mixer\n");
+        Node* A = makeTestSource(eng, &silo, stereoF32);
+        Node* B = makeTestSource(eng, &silo, stereoF32);
+        Node* C = makeTestSource(eng, &silo, stereoF32);
+        InPort* dst = &silo.outputNode_->ins[0];
+
+        silo.connect(&A->outs[0], dst);
+        Node* mixer = newMixerNode(eng, &silo, stereoF32, 4);
+        spliceMixer(&silo, mixer, &B->outs[0], dst);
+        check(mixer->ins[0].srcPort_ == &A->outs[0], "before reconnect: A on slot 0");
+
+        // reconnectOutput: move A's connections to C
+        // This uses Silo::reconnectOutput which calls Silo::connect (replacement)
+        silo.reconnectOutput(&A->outs[0], &C->outs[0]);
+        check(mixer->ins[0].srcPort_ == &C->outs[0], "after reconnect: C on slot 0");
+        check(mixer->ins[1].srcPort_ == &B->outs[0], "after reconnect: B still on slot 1");
+
+        silo.disconnectNode(mixer);
+        silo.disconnectNode(A);
+        silo.disconnectNode(B);
+        silo.disconnectNode(C);
+        dst->mixerNode_ = nullptr;
+        delete mixer; delete A; delete B; delete C;
+    }
+
+    // --- Test 6: findFreeMixerSlot and countActiveMixerInputs ---
+    {
+        std::print("  [6] Slot management\n");
+        Node* A = makeTestSource(eng, &silo, stereoF32);
+        Node* B = makeTestSource(eng, &silo, stereoF32);
+        InPort* dst = &silo.outputNode_->ins[0];
+
+        Node* mixer = newMixerNode(eng, &silo, stereoF32, 4);
+        check(countActiveMixerInputs(mixer) == 0, "new mixer: 0 active");
+        check(findFreeMixerSlot(mixer) == 0, "new mixer: slot 0 free");
+
+        silo.connect(&A->outs[0], &mixer->ins[0]);
+        silo.connect(&B->outs[0], &mixer->ins[1]);
+        check(countActiveMixerInputs(mixer) == 2, "2 connected: 2 active");
+        check(findFreeMixerSlot(mixer) == 2, "2 connected: slot 2 free");
+
+        silo.disconnect(&mixer->ins[0]);
+        check(countActiveMixerInputs(mixer) == 1, "1 disconnected: 1 active");
+        check(findFreeMixerSlot(mixer) == 0, "1 disconnected: slot 0 free (reused)");
+
+        silo.disconnectNode(mixer);
+        silo.disconnectNode(A);
+        silo.disconnectNode(B);
+        delete mixer; delete A; delete B;
+    }
+
+    freeEngine(eng);
+}
+
 static void test_master_gain() {
     std::print("Test: masterGain FFI\n");
 
@@ -409,6 +647,7 @@ int main(int argc, char const* argv[]) {
     test_command_bundling();
     test_type_checking();
     test_node_and_connect();
+    test_mixer_fanin();
     test_master_gain();
 
     // Script-based audio tests

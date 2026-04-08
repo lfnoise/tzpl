@@ -110,6 +110,11 @@ struct InPort {
     // doubly linked list of InPorts connected to same OutPort.
     InPort* prev_ = nullptr;
     InPort* next_ = nullptr;
+
+    // Hidden mixer node for transparent fan-in. Non-null when 2+ sources
+    // feed this port through an auto-created sum node. Null for the common
+    // 1-to-1 case (zero overhead).
+    Node* mixerNode_ = nullptr;
 };
 
 struct OutPort {
