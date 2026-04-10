@@ -401,8 +401,7 @@ static void ffi_listSynthDefs(ts::VM& vm, u16 dst, u16, u16) {
     auto* arr = new ts::ObjArray(arrType);
     for (auto const& name : names) {
         auto* s = new ts::StringObj(name);
-        s->retain();  // ObjArray::releaseChildren will release
-        arr->v.push_back(s);
+        arr->push(s);
     }
     vm.reg(dst).o = arr;
 }

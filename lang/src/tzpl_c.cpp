@@ -384,7 +384,7 @@ size_t tzpl_array_size(tzpl_obj_handle obj) {
     auto* o = static_cast<ts::Obj*>(obj.ptr);
     auto* arrayType = static_cast<ts::ArrayType*>(o->type_);
     if (arrayType->elemType_->isObjType()) {
-        return static_cast<ts::ObjArray*>(o)->v.size();
+        return static_cast<ts::ObjArray*>(o)->size();
     } else {
         return static_cast<ts::PodArray<i64>*>(o)->v.size();
     }
@@ -404,8 +404,8 @@ double tzpl_array_get_float(tzpl_obj_handle obj, size_t index) {
 
 tzpl_obj_handle tzpl_array_get_obj(tzpl_obj_handle obj, size_t index) {
     auto* arr = static_cast<ts::ObjArray*>(static_cast<ts::Obj*>(obj.ptr));
-    if (index >= arr->v.size()) return tzpl_obj_handle{nullptr};
-    return tzpl_obj_handle{arr->v[index]};
+    if (index >= arr->size()) return tzpl_obj_handle{nullptr};
+    return tzpl_obj_handle{arr->get(index)};
 }
 
 size_t tzpl_tuple_size(tzpl_obj_handle obj) {

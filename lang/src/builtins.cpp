@@ -621,7 +621,7 @@ static void builtin_keys_map(VM& vm, u16 dst, u16, u16 ab) {
         vm.reg(dst).o = arr;
     } else {
         auto* arr = new ObjArray(arrType);
-        for (auto& [k, v] : map->entries_) arr->v.push_back(k.o);
+        for (auto& [k, v] : map->entries_) arr->push(k.o);
         vm.reg(dst).o = arr;
     }
 }
@@ -642,7 +642,7 @@ static void builtin_values_map(VM& vm, u16 dst, u16, u16 ab) {
         vm.reg(dst).o = arr;
     } else {
         auto* arr = new ObjArray(arrType);
-        for (auto& [k, v] : map->entries_) arr->v.push_back(v.o);
+        for (auto& [k, v] : map->entries_) arr->push(v.o);
         vm.reg(dst).o = arr;
     }
 }
@@ -760,7 +760,7 @@ static void builtin_pairs_map(VM& vm, u16 dst, u16, u16 ab) {
         auto* tup = Tuple::create(tt, 2);
         tup->v[0] = k;
         tup->v[1] = v;
-        result->v.push_back(tup);
+        result->push(tup);
     }
     vm.reg(dst).o = result;
 }
@@ -1116,7 +1116,7 @@ static void builtin_toArray_set(VM& vm, u16 dst, u16, u16 ab) {
         vm.reg(dst).o = arr;
     } else {
         auto* arr = new ObjArray(arrType);
-        for (auto& elem : set->entries_) arr->v.push_back(elem.o);
+        for (auto& elem : set->entries_) arr->push(elem.o);
         vm.reg(dst).o = arr;
     }
 }
@@ -1469,13 +1469,13 @@ static void builtin_any_variadic(VM& vm, u16 dst, u16, u16 argBase) {
     auto* anyArrayType = vm.arrayType(vm.anyType());
     auto* arr = new ObjArray(anyArrayType);
     size_t n = tuple->numFields_;
-    arr->v.resize(n);
+    arr->reserve(n);
     for (size_t i = 0; i < n; ++i) {
         auto* any = new AnyObj(vm.anyType());
         any->value_ = tuple->v[i];
         any->wrappedType_ = tupleType->fields_[i];
         any->isObjType_ = tupleType->fields_[i]->isObjType();
-        arr->v[i] = any;
+        arr->push(any);
     }
     vm.reg(dst).o = arr;
 }
@@ -1500,13 +1500,13 @@ static void builtin_toAnyArray(VM& vm, u16 dst, u16, u16 argBase) {
     auto* anyArrayType = vm.arrayType(vm.anyType());
     auto* arr = new ObjArray(anyArrayType);
     size_t n = tuple->numFields_;
-    arr->v.resize(n);
+    arr->reserve(n);
     for (size_t i = 0; i < n; ++i) {
         auto* any = new AnyObj(vm.anyType());
         any->value_ = tuple->v[i];
         any->wrappedType_ = tupleType->fields_[i];
         any->isObjType_ = tupleType->fields_[i]->isObjType();
-        arr->v[i] = any;
+        arr->push(any);
     }
     vm.reg(dst).o = arr;
 }

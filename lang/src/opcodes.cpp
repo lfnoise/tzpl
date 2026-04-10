@@ -881,10 +881,9 @@ void op_concat_array(VM& vm, Code* pc) {
         auto* arrA = static_cast<ObjArray*>(vm.reg(a).o);
         auto* arrB = static_cast<ObjArray*>(vm.reg(b).o);
         auto* result = new ObjArray(arrayType);
-        result->v.reserve(arrA->v.size() + arrB->v.size());
-        result->v.insert(result->v.end(), arrA->v.begin(), arrA->v.end());
-        result->v.insert(result->v.end(), arrB->v.begin(), arrB->v.end());
-        for (auto* obj : result->v) { if (obj) obj->retain(); }
+        result->reserve(arrA->size() + arrB->size());
+        for (auto* obj : *arrA) result->push(obj);
+        for (auto* obj : *arrB) result->push(obj);
         vm.reg(dst).o = result;
     }
     DISPATCH(3);
@@ -951,7 +950,7 @@ void op_array_get(VM& vm, Code* pc) {
         vm.reg(dst).f = arr->v[cyclicIndex(idx, arr->v.size())];
     } else {
         auto* arr = static_cast<ObjArray*>(vm.reg(src).o);
-        vm.reg(dst).o = arr->v[cyclicIndex(idx, arr->v.size())];
+        vm.reg(dst).o = arr->get(cyclicIndex(idx, arr->size()));
     }
     DISPATCH(3);
 }
@@ -980,10 +979,10 @@ void op_array_slice(VM& vm, Code* pc) {
     } else {
         auto* arr = static_cast<ObjArray*>(vm.reg(src).o);
         auto* result = new ObjArray(arrayType);
-        if (startIdx < arr->v.size()) {
-            result->v.assign(arr->v.begin() + startIdx, arr->v.end());
+        if (startIdx < arr->size()) {
+            for (size_t i = startIdx; i < arr->size(); ++i)
+                result->push(arr->get(i));
         }
-        for (auto* obj : result->v) { if (obj) obj->retain(); }
         vm.reg(dst).o = result;
     }
     DISPATCH(3);
@@ -1004,7 +1003,7 @@ void op_array_length(VM& vm, Code* pc) {
         vm.reg(dst).i = (i64)arr->v.size();
     } else {
         auto* arr = static_cast<ObjArray*>(vm.reg(src).o);
-        vm.reg(dst).i = (i64)arr->v.size();
+        vm.reg(dst).i = (i64)arr->size();
     }
     DISPATCH(3);
 }
@@ -1083,7 +1082,7 @@ static usize arrayLen(Obj* arr, Type* elemType, VM& vm) {
         return static_cast<PodArray<i64>*>(arr)->v.size();
     if (elemType == vm.floatType())
         return static_cast<PodArray<f64>*>(arr)->v.size();
-    return static_cast<ObjArray*>(arr)->v.size();
+    return static_cast<ObjArray*>(arr)->size();
 }
 
 static Word readElem(Obj* arr, usize i, Type* elemType, VM& vm) {
@@ -1091,7 +1090,7 @@ static Word readElem(Obj* arr, usize i, Type* elemType, VM& vm) {
         return Word(static_cast<PodArray<i64>*>(arr)->v[i]);
     if (elemType == vm.floatType())
         return Word(static_cast<PodArray<f64>*>(arr)->v[i]);
-    return Word(static_cast<ObjArray*>(arr)->v[i]);
+    return Word(static_cast<ObjArray*>(arr)->get(i));
 }
 
 static Obj* makeArray(VM& vm, ArrayType* type, usize len) {
@@ -1107,7 +1106,7 @@ static Obj* makeArray(VM& vm, ArrayType* type, usize len) {
         return arr;
     }
     auto* arr = new ObjArray(type);
-    arr->v.resize(len);
+    arr->resize(len);
     return arr;
 }
 
@@ -1117,8 +1116,7 @@ static void writeElem(Obj* arr, usize i, Word w, Type* elemType, VM& vm) {
     else if (elemType == vm.floatType())
         static_cast<PodArray<f64>*>(arr)->v[i] = w.f;
     else {
-        static_cast<ObjArray*>(arr)->v[i] = w.o;
-        if (w.o) w.o->retain();
+        static_cast<ObjArray*>(arr)->set(i, w.o);
     }
 }
 
@@ -1954,10 +1952,9 @@ void op_make_array(VM& vm, Code* pc) {
         vm.reg(dst).o = arr;
     } else {
         auto* arr = new ObjArray(arrayType);
-        arr->v.resize(numElems);
+        arr->reserve(numElems);
         for (u16 i = 0; i < numElems; ++i) {
-            arr->v[i] = vm.reg(firstSrc + i).o;
-            if (arr->v[i]) arr->v[i]->retain();
+            arr->push(vm.reg(firstSrc + i).o);
         }
         vm.reg(dst).o = arr;
     }
@@ -2089,7 +2086,7 @@ void op_array_alloc(VM& vm, Code* pc) {
         vm.reg(dst).o = arr;
     } else {
         auto* arr = new ObjArray(arrayType);
-        arr->v.resize(len);
+        arr->resize(len);
         vm.reg(dst).o = arr;
     }
     DISPATCH(3);
@@ -2111,12 +2108,7 @@ void op_array_set(VM& vm, Code* pc) {
         arr->v[cyclicIndex(idx, arr->v.size())] = vm.reg(valReg).f;
     } else {
         auto* arr = static_cast<ObjArray*>(vm.reg(arrReg).o);
-        auto ci = cyclicIndex(idx, arr->v.size());
-        Obj* oldVal = arr->v[ci];
-        Obj* newVal = vm.reg(valReg).o;
-        if (newVal) newVal->retain();
-        arr->v[ci] = newVal;
-        if (oldVal) oldVal->release();
+        arr->set(cyclicIndex(idx, arr->size()), vm.reg(valReg).o);
     }
     DISPATCH(3);
 }
@@ -2137,7 +2129,7 @@ void op_array_get_dyn(VM& vm, Code* pc) {
         vm.reg(dst).f = arr->v[cyclicIndex(idx, arr->v.size())];
     } else {
         auto* arr = static_cast<ObjArray*>(vm.reg(arrReg).o);
-        vm.reg(dst).o = arr->v[cyclicIndex(idx, arr->v.size())];
+        vm.reg(dst).o = arr->get(cyclicIndex(idx, arr->size()));
     }
     DISPATCH(3);
 }

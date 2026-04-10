@@ -595,7 +595,7 @@ static void builtin_split_string(VM& vm, u16 dst, u16, u16 ab) {
             auto* elem = new StringObj();
             elem->s = VMString(1, str[i], str.get_allocator());
             registerNewObj(elem);
-            arr->v.push_back(elem);
+            arr->push(elem);
         }
     } else {
         size_t start = 0;
@@ -604,13 +604,13 @@ static void builtin_split_string(VM& vm, u16 dst, u16, u16 ab) {
             auto* elem = new StringObj();
             elem->s = str.substr(start, pos - start);
             registerNewObj(elem);
-            arr->v.push_back(elem);
+            arr->push(elem);
             start = pos + d.size();
         }
         auto* elem = new StringObj();
         elem->s = str.substr(start);
         registerNewObj(elem);
-        arr->v.push_back(elem);
+        arr->push(elem);
     }
     vm.reg(dst).o = arr;
 }
@@ -786,11 +786,11 @@ static void builtin_toArray_range_fraction(VM& vm, u16 dst, u16, u16 argBase) {
     auto* arr = new ObjArray(arrayType);
     if (step > r64(0)) {
         for (r64 i = start; i <= end; i += step) {
-            arr->v.push_back(new Fraction(i));
+            arr->push(new Fraction(i));
         }
     } else if (step < r64(0)) {
         for (r64 i = start; i >= end; i += step) {
-            arr->v.push_back(new Fraction(i));
+            arr->push(new Fraction(i));
         }
     }
     vm.reg(dst).o = arr;

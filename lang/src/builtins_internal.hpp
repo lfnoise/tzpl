@@ -78,13 +78,13 @@ inline void registerTemplate(Compiler& compiler, FuncMap& functions,
 inline Word getArrayElem(VM& vm, Obj* a, Type* et, size_t i) {
     if (et == vm.intType() || et == vm.boolType() || et == vm.symbolType()) return Word(static_cast<PodArray<i64>*>(a)->v[i]);
     if (et == vm.floatType()) return Word(static_cast<PodArray<f64>*>(a)->v[i]);
-    return Word(static_cast<ObjArray*>(a)->v[i]);
+    return Word(static_cast<ObjArray*>(a)->get(i));
 }
 
 inline size_t getArraySize(VM& vm, Obj* a, Type* et) {
     if (et == vm.intType() || et == vm.boolType() || et == vm.symbolType()) return static_cast<PodArray<i64>*>(a)->v.size();
     if (et == vm.floatType()) return static_cast<PodArray<f64>*>(a)->v.size();
-    return static_cast<ObjArray*>(a)->v.size();
+    return static_cast<ObjArray*>(a)->size();
 }
 
 inline Obj* makeEmptyArray(ArrayType* at) {
@@ -97,7 +97,7 @@ inline Obj* makeEmptyArray(ArrayType* at) {
 inline void arrayPush(VM& vm, Obj* a, Type* et, Word v) {
     if (et == vm.intType() || et == vm.boolType() || et == vm.symbolType()) static_cast<PodArray<i64>*>(a)->v.push_back(v.i);
     else if (et == vm.floatType()) static_cast<PodArray<f64>*>(a)->v.push_back(v.f);
-    else { if (v.o) v.o->retain(); static_cast<ObjArray*>(a)->v.push_back(v.o); }
+    else { static_cast<ObjArray*>(a)->push(v.o); }
 }
 
 template<typename F>
@@ -111,10 +111,10 @@ inline void txArray(VM& vm, u16 dst, Obj* src, ArrayType* at, F&& f) {
         auto* r = new PodArray<f64>(at); f(s->v, r->v); vm.reg(dst).o = r;
     } else {
         auto* s = static_cast<ObjArray*>(src);
-        auto* r = new ObjArray(at); f(s->v, r->v);
+        auto* r = new ObjArray(at); f(s->rawVec(), r->rawVec());
         // Retain all Obj* elements copied into the new array.
         // releaseChildren will release them when the array is destroyed.
-        for (auto* obj : r->v) { if (obj) obj->retain(); }
+        for (auto* obj : *r) { if (obj) obj->retain(); }
         vm.reg(dst).o = r;
     }
 }

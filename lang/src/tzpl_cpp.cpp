@@ -66,7 +66,7 @@ double complexImag(Obj* obj) {
 size_t arraySize(Obj* obj) {
     auto* arrayType = static_cast<ArrayType*>(obj->type_);
     if (arrayType->elemType_->isObjType()) {
-        return static_cast<ObjArray*>(obj)->v.size();
+        return static_cast<ObjArray*>(obj)->size();
     } else {
         // PodArray<i64> and PodArray<f64> have the same layout
         return static_cast<PodArray<i64>*>(obj)->v.size();
@@ -87,8 +87,8 @@ double arrayGetFloat(Obj* obj, size_t index) {
 
 Obj* arrayGetObj(Obj* obj, size_t index) {
     auto* arr = static_cast<ObjArray*>(obj);
-    if (index >= arr->v.size()) return nullptr;
-    return arr->v[index];
+    if (index >= arr->size()) return nullptr;
+    return arr->get(index);
 }
 
 // --- Tuple ---

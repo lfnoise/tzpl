@@ -99,7 +99,7 @@ template class PodArray<f64>;
 // ObjArray constructor
 ObjArray::ObjArray(Type* type)
     : Obj(type)
-    , v(rt::STLAllocator<Obj*>(rt::gCurrentAllocator))
+    , v_(rt::STLAllocator<Obj*>(rt::gCurrentAllocator))
 {
     registerNewObj(this);
 }
@@ -731,8 +731,8 @@ size_t WordHash::operator()(Word w) const {
         }
         auto* a = static_cast<ObjArray*>(w.o);
         WordHash sub{et};
-        size_t h = a->v.size();
-        for (auto* obj : a->v) {
+        size_t h = a->size();
+        for (auto* obj : *a) {
             Word ew; ew.o = obj;
             h = hashCombine(h, sub(ew));
         }
@@ -872,11 +872,11 @@ bool WordEqual::operator()(Word a, Word b) const {
         }
         auto* aa = static_cast<ObjArray*>(a.o);
         auto* ab = static_cast<ObjArray*>(b.o);
-        if (aa->v.size() != ab->v.size()) return false;
+        if (aa->size() != ab->size()) return false;
         WordEqual sub{et};
-        for (size_t i = 0; i < aa->v.size(); ++i) {
-            Word wa; wa.o = aa->v[i];
-            Word wb; wb.o = ab->v[i];
+        for (size_t i = 0; i < aa->size(); ++i) {
+            Word wa; wa.o = aa->get(i);
+            Word wb; wb.o = ab->get(i);
             if (!sub(wa, wb)) return false;
         }
         return true;

@@ -52,11 +52,8 @@ void builtin_push_array(VM& vm, u16 dst, u16, u16 ab) {
         r->v.push_back(vm.reg(ab+1).f); vm.reg(dst).o = r;
     } else {
         auto* s = static_cast<ObjArray*>(src);
-        auto* r = new ObjArray(at); r->v = s->v;
-        for (auto* obj : r->v) { if (obj) obj->retain(); }
-        Obj* newElem = vm.reg(ab+1).o;
-        if (newElem) newElem->retain();
-        r->v.push_back(newElem); vm.reg(dst).o = r;
+        auto* r = new ObjArray(at); r->copyFrom(s);
+        r->push(vm.reg(ab+1).o); vm.reg(dst).o = r;
     }
 }
 
@@ -306,9 +303,8 @@ void builtin_picks_array(VM& vm, u16 dst, u16, u16 ab) {
     } else {
         auto* src = static_cast<ObjArray*>(arr);
         auto* r = new ObjArray(at);
-        r->v.resize((size_t)n);
-        for (i64 i = 0; i < n; i++) r->v[i] = src->v[vm.rng().next() % len];
-        for (auto* obj : r->v) { if (obj) obj->retain(); }
+        r->reserve((size_t)n);
+        for (i64 i = 0; i < n; i++) r->push(src->get(vm.rng().next() % len));
         vm.reg(dst).o = r;
     }
 }
@@ -325,9 +321,8 @@ void builtin_sort_float_array(VM& vm, u16 dst, u16, u16 ab) {
 }
 void builtin_sort_string_array(VM& vm, u16 dst, u16, u16 ab) {
     auto* s = static_cast<ObjArray*>(vm.reg(ab).o);
-    auto* r = new ObjArray(static_cast<ArrayType*>(s->type_)); r->v = s->v;
-    for (auto* obj : r->v) { if (obj) obj->retain(); }
-    std::sort(r->v.begin(), r->v.end(), [](Obj* a, Obj* b) {
+    auto* r = new ObjArray(static_cast<ArrayType*>(s->type_)); r->copyFrom(s);
+    std::sort(r->rawVec().begin(), r->rawVec().end(), [](Obj* a, Obj* b) {
         return static_cast<StringObj*>(a)->s < static_cast<StringObj*>(b)->s;
     });
     vm.reg(dst).o = r;
@@ -440,8 +435,8 @@ void builtin_repeat_obj(VM& vm, u16 dst, u16, u16 ab) {
     if (n < 0) n = 0;
     auto* at = vm.arrayType(val->type_);
     auto* arr = new ObjArray(at);
-    arr->v.resize((size_t)n, val);
-    for (auto* obj : arr->v) { if (obj) obj->retain(); }
+    arr->reserve((size_t)n);
+    for (i64 i = 0; i < n; i++) arr->push(val);
     vm.reg(dst).o = arr;
 }
 
@@ -460,11 +455,12 @@ void builtin_cat_array(VM& vm, u16 dst, u16, u16 ab) {
         auto& bv = static_cast<PodArray<f64>*>(b)->v;
         for (auto& x : bv) r->v.push_back(x); vm.reg(dst).o = r;
     } else {
+        auto* sa = static_cast<ObjArray*>(a);
+        auto* sb = static_cast<ObjArray*>(b);
         auto* r = new ObjArray(at);
-        r->v = static_cast<ObjArray*>(a)->v;
-        auto& bv = static_cast<ObjArray*>(b)->v;
-        for (auto& x : bv) r->v.push_back(x);
-        for (auto* obj : r->v) { if (obj) obj->retain(); }
+        r->reserve(sa->size() + sb->size());
+        for (auto* obj : *sa) r->push(obj);
+        for (auto* obj : *sb) r->push(obj);
         vm.reg(dst).o = r;
     }
 }
@@ -477,10 +473,10 @@ void builtin_join_array(VM& vm, u16 dst, u16, u16 ab) {
     auto* outer = static_cast<ObjArray*>(src);
     auto* result = makeEmptyArray(innerType);
     Type* et = innerType->elemType_;
-    for (size_t i = 0; i < outer->v.size(); i++) {
-        if (!outer->v[i]) continue;
-        size_t n = getArraySize(vm, outer->v[i], et);
-        for (size_t j = 0; j < n; j++) arrayPush(vm, result, et, getArrayElem(vm, outer->v[i], et, j));
+    for (size_t i = 0; i < outer->size(); i++) {
+        if (!outer->get(i)) continue;
+        size_t n = getArraySize(vm, outer->get(i), et);
+        for (size_t j = 0; j < n; j++) arrayPush(vm, result, et, getArrayElem(vm, outer->get(i), et, j));
     }
     vm.reg(dst).o = result;
 }
@@ -493,8 +489,8 @@ static void flattenArrayInto(VM& vm, Obj* arr, Obj* result, Type* leafType) {
     if (dynamic_cast<ArrayType*>(et)) {
         // Elements are sub-arrays — recurse
         auto* oa = static_cast<ObjArray*>(arr);
-        for (size_t i = 0; i < oa->v.size(); i++) {
-            if (oa->v[i]) flattenArrayInto(vm, oa->v[i], result, leafType);
+        for (size_t i = 0; i < oa->size(); i++) {
+            if (oa->get(i)) flattenArrayInto(vm, oa->get(i), result, leafType);
         }
     } else {
         // Leaf level — copy elements into result
@@ -719,7 +715,7 @@ void builtin_zip_array(VM& vm, u16 dst, u16, u16 ab) {
         auto* tup = Tuple::create(tt, 2);
         tup->v[0] = getArrayElem(vm, a, etA, i);
         tup->v[1] = getArrayElem(vm, b, etB, i);
-        result->v.push_back(tup);
+        result->push(tup);
     }
     vm.reg(dst).o = result;
 }
@@ -738,7 +734,7 @@ void builtin_enumerate_array(VM& vm, u16 dst, u16, u16 ab) {
         auto* tup = Tuple::create(tt, 2);
         tup->v[0] = Word((i64)i);
         tup->v[1] = getArrayElem(vm, src, et, i);
-        result->v.push_back(tup);
+        result->push(tup);
     }
     vm.reg(dst).o = result;
 }

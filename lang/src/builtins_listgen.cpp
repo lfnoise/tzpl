@@ -286,8 +286,8 @@ void AutoMapListGen::generate(VM& vm, ListNode* owner) {
                     elem.f = arr->v[arrayIndex_];
                 } else {
                     auto* arr = static_cast<ObjArray*>(broadcastVals_[bIdx].o);
-                    if (arrayIndex_ >= (u16)arr->v.size()) { owner->tail_ = nullptr; return; }
-                    elem.o = arr->v[arrayIndex_];
+                    if (arrayIndex_ >= (u16)arr->size()) { owner->tail_ = nullptr; return; }
+                    elem.o = arr->get(arrayIndex_);
                 }
                 // Runtime type promotion if needed
                 Type* paramType = ba.dstType;

@@ -186,18 +186,50 @@ public:
     }
 };
 
-// Object array
+// Object array -- elements are ARC-managed (retained on store, released on destroy).
 class ObjArray : public Obj {
+    Vec<Obj*> v_;
 public:
-    Vec<Obj*> v;
-
     ObjArray(Type* type);
+
+    // Element access (read-only)
+    Obj* get(size_t i) const { return v_[i]; }
+    Obj* operator[](size_t i) const { return v_[i]; }
+    size_t size() const { return v_.size(); }
+    bool empty() const { return v_.empty(); }
+    Obj* const* data() const { return v_.data(); }
+    auto begin() const { return v_.begin(); }
+    auto end() const { return v_.end(); }
+
+    // Mutating operations -- all handle retain/release
+    void set(size_t i, Obj* val) {
+        Obj* old = v_[i];
+        if (val) val->retain();
+        v_[i] = val;
+        if (old) old->release();
+    }
+    void push(Obj* val) {
+        if (val) val->retain();
+        v_.push_back(val);
+    }
+    void copyFrom(const ObjArray* src) {
+        for (auto* obj : v_) { if (obj) obj->release(); }
+        v_ = src->v_;
+        for (auto* obj : v_) { if (obj) obj->retain(); }
+    }
+    void resize(size_t n) { v_.resize(n, nullptr); }
+    void reserve(size_t n) { v_.reserve(n); }
+
+    // Low-level access for bulk operations (txArray, sort, etc.)
+    // Caller is responsible for retain/release.
+    Vec<Obj*>& rawVec() { return v_; }
+    const Vec<Obj*>& rawVec() const { return v_; }
 
     VMString str() const override {
         VMString s = rt::vmstr("[");
-        for (size_t i = 0; i < v.size(); ++i) {
+        for (size_t i = 0; i < v_.size(); ++i) {
             if (i > 0) s += ", ";
-            if (v[i]) s += v[i]->str();
+            if (v_[i]) s += v_[i]->str();
             else s += "nil";
         }
         s += "]";
@@ -205,7 +237,7 @@ public:
     }
 
     void releaseChildren() override {
-        for (auto* obj : v) { if (obj) obj->release(); }
+        for (auto* obj : v_) { if (obj) obj->release(); }
     }
 };
 
