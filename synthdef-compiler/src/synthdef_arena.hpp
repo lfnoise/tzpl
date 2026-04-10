@@ -24,6 +24,11 @@ namespace synthdef {
 
     struct ArenaObj {
         ArenaObj();
+        // Virtual so that `delete (ArenaObj*)derived` (in Arena::clear)
+        // runs the derived destructor and tears down members like
+        // vector<S>, unordered_set<>, ExprIdentityBag, etc. Without this
+        // every Arena destruction leaks the contents of every ArenaObj.
+        virtual ~ArenaObj() = default;
     };
 
     struct Arena {

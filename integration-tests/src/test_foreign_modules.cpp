@@ -415,6 +415,133 @@ static void test_merged_foreign_and_x_module() {
 }
 
 // ---------------------------------------------------------------------------
+// Regression: dynamic variables holding user-defined struct types must
+// survive a re-compile against the same Compiler. Each TypeChecker creates
+// fresh StructType pointers, so the Type* stored in Compiler::dynamicVars_
+// from the first compile becomes stale on the second compile. Without the
+// prescanDynVars refresh fix, the second compile produces a cascade of
+// "No matching overload for push" and "redeclared with different type"
+// errors against the same source.
+static void test_dynvar_recompile_no_stale_cascade() {
+    std::print("Test: Dynamic var with user struct type survives re-compile\n");
+
+    ts::TypeUniverse types;
+    ts::Compiler compiler(types);
+    auto target = compiler.createTarget();
+    ts::VM vm(64 * 1024 * 1024, types, target);
+
+    const char* source = R"(
+        struct Item { id Int }
+
+        fn addItem(it Item) Item {
+            `myItems = `myItems push(it);
+            it
+        }
+
+        fn build() [Item] {
+            var `myItems [Item] = [];
+            addItem(Item { id: 1 });
+            `myItems
+        }
+
+        println(build());
+    )";
+
+    auto result1 = compiler.compile(source, "dynvar_recompile_1.x", target);
+    check(result1.success, "First compile of source with dynamic var [Item] succeeds");
+    if (!result1.success) {
+        for (auto& err : result1.errors) std::print("    error: {}\n", err.message);
+    }
+
+    // Re-compile the same source with the same Compiler. The second TypeChecker
+    // creates a fresh StructType for Item, but compiler.dynamicVars_ still holds
+    // the ArrayType[Item_v1] from the first compile. The fix in prescanDynVars
+    // refreshes this stale pointer to ArrayType[Item_v2] so push() type-checks.
+    auto result2 = compiler.compile(source, "dynvar_recompile_2.x", target);
+    check(result2.success, "Re-compile of same source succeeds (no stale-pointer cascade)");
+    if (!result2.success) {
+        for (auto& err : result2.errors) std::print("    error: {}\n", err.message);
+    }
+}
+
+// Regression: editing a module that is a TRANSITIVE dependency (imported by a
+// module you are importing) must cascade-invalidate every cached module that
+// has stale declNode/type pointers into the destroyed AST. Without the cascade,
+// the cached intermediate module's allFunctions still references the destroyed
+// AST and a later use produces "Unknown type 'A'" errors or segfaults.
+static void test_cascade_invalidate_transitive_dependency() {
+    std::print("Test: Editing a transitive dependency cascade-invalidates dependents\n");
+
+    std::string tmpDir = std::filesystem::temp_directory_path().string() + "/tzpl_cascade_test";
+    std::filesystem::remove_all(tmpDir);
+    std::filesystem::create_directories(tmpDir);
+
+    auto writeFile = [](const std::string& path, const std::string& body) {
+        std::ofstream f(path);
+        f << body;
+    };
+
+    // A.x defines a struct and a helper. B.x imports A and uses both.
+    std::string pathA = tmpDir + "/A.x";
+    std::string pathB = tmpDir + "/B.x";
+    writeFile(pathA,
+        "struct Item { id Int }\n"
+        "fn makeItem(n Int) Item { Item { id: n } }\n"
+    );
+    writeFile(pathB,
+        "import A.*;\n"
+        "fn build() Item { makeItem(1) }\n"
+    );
+
+    ts::TypeUniverse types;
+    ts::Compiler compiler(types);
+    ts::ModuleCompiler moduleCompiler(compiler, {tmpDir});
+    auto target = compiler.createTarget();
+    ts::VM vm(64 * 1024 * 1024, types, target);
+
+    const char* source = R"(
+        import B.*;
+        let result = build();
+        println(result.id);
+    )";
+
+    FILE* memfile1 = tmpfile();
+    vm.setPrintOutput(memfile1);
+    bool ok1 = compileAndRun(compiler, vm, source, "top.x", &moduleCompiler);
+    check(ok1, "Initial compile of top-level importing B (which imports A) succeeds");
+
+    fseek(memfile1, 0, SEEK_SET);
+    char buf[256];
+    std::string out1;
+    while (fgets(buf, sizeof(buf), memfile1)) out1 += buf;
+    fclose(memfile1);
+    check(out1 == "1\n", "Initial run produces id = 1");
+
+    // "Edit" A.x by rewriting it with new (still-valid) content and bumping
+    // its mod time. The new TypeChecker will create a fresh StructType* for
+    // Item — without cascade invalidation, B's cached allFunctions still
+    // references the destroyed StructType from the previous compile.
+    writeFile(pathA,
+        "struct Item { id Int }\n"
+        "fn makeItem(n Int) Item { Item { id: n + 100 } }\n"
+    );
+    auto newTime = std::filesystem::last_write_time(pathA) + std::chrono::seconds(1);
+    std::filesystem::last_write_time(pathA, newTime);
+
+    FILE* memfile2 = tmpfile();
+    vm.setPrintOutput(memfile2);
+    bool ok2 = compileAndRun(compiler, vm, source, "top.x", &moduleCompiler);
+    check(ok2, "After editing A, re-compile of top-level importing B succeeds (cascade re-compiles B)");
+
+    fseek(memfile2, 0, SEEK_SET);
+    std::string out2;
+    while (fgets(buf, sizeof(buf), memfile2)) out2 += buf;
+    fclose(memfile2);
+    check(out2 == "101\n", "Re-run picks up the edited A.x (got: '" + out2 + "')");
+
+    std::filesystem::remove_all(tmpDir);
+}
+
 // Main
 // ---------------------------------------------------------------------------
 
@@ -429,6 +556,8 @@ int main() {
     test_foreign_module_alias();
     test_plain_module_control();
     test_merged_foreign_and_x_module();
+    test_dynvar_recompile_no_stale_cascade();
+    test_cascade_invalidate_transitive_dependency();
 
     std::print("\n=== Results: {} passed, {} failed ===\n",
                gTestsPassed, gTestsFailed);

@@ -30,6 +30,8 @@
 #include "vm.hpp"
 #include "compiler.hpp"
 #include <mutex>
+#include <atomic>
+#include <thread>
 #include <string>
 #include <unordered_map>
 #include <chrono>
@@ -67,11 +69,41 @@ struct NRTVM {
     // Associated NRT scheduler (set externally after construction)
     NRTScheduler* scheduler_ = nullptr;
 
+    // Background heartbeat thread: drains deferred-delete queue at a
+    // regular interval so dead objects are reclaimed even during long
+    // evals or idle periods.
+    std::thread heartbeatThread_;
+    std::atomic<bool> heartbeatRunning_{false};
+
     // Constructor: same args as VM
     explicit NRTVM(usize poolSize, TypeUniverse& typeUniverse,
                    const VMTarget& target = {})
         : vm(poolSize, typeUniverse, target)
     {}
+
+    ~NRTVM() {
+        stopHeartbeat();
+    }
+
+    void startHeartbeat(std::chrono::milliseconds interval = std::chrono::milliseconds(20)) {
+        if (heartbeatRunning_.load()) return;
+        heartbeatRunning_.store(true);
+        heartbeatThread_ = std::thread([this, interval] {
+            while (heartbeatRunning_.load(std::memory_order_relaxed)) {
+                {
+                    std::lock_guard lock(mtx);
+                    vm.makeCurrent();
+                    vm.gcHeartbeat();
+                }
+                std::this_thread::sleep_for(interval);
+            }
+        });
+    }
+
+    void stopHeartbeat() {
+        heartbeatRunning_.store(false);
+        if (heartbeatThread_.joinable()) heartbeatThread_.join();
+    }
 
     // Call a compiled function under the mutex. Any thread may call this.
     Word call(CodeBlock* block, const Word* args, u16 argc) {

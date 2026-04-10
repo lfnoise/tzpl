@@ -688,6 +688,7 @@ int main(int argc, const char* argv[]) {
         appCtx.moduleCompiler = &moduleCompiler;
 
         bridge::setAppContextOnVM(&nrtvm.vm, &appCtx);
+        nrtvm.startHeartbeat();  // drain deferred deletes at ~50Hz
         tempoScheduler.start();
 
         if (startAudio) {
@@ -783,6 +784,7 @@ int main(int argc, const char* argv[]) {
         // =================================================================
 
         tempoScheduler.stop();
+        nrtvm.stopHeartbeat();
 
 #if TZPL_HAS_NATS
         natsDispatcher.unsubscribeAll();

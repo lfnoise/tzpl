@@ -62,8 +62,16 @@ namespace synthdef {
         chans = ichans;
     }
  
-    Outlet::Outlet(S value, string name) 
+    Outlet::Outlet(S value, string name)
         : Expr(value->rate, {value}), serial(nextOutletSerialNo()), name(name)
+    {}
+
+    DebugExpr::DebugExpr(S input, string label, i64 period, i64 consecutive)
+        : Expr(input->rate, {input}),
+          label(std::move(label)),
+          period(period),
+          consecutive(consecutive),
+          serial(nextDebugSerialNo())
     {}
    
     URandExpr::URandExpr(usize ichans, SignalRate rate) 
@@ -293,6 +301,10 @@ namespace synthdef {
 
 
     void Outlet::update_type(ExprIdentitySet& worklist) {
+        type = in0()->type;
+    }
+
+    void DebugExpr::update_type(ExprIdentitySet& worklist) {
         type = in0()->type;
     }
 

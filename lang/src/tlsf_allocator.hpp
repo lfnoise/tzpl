@@ -106,6 +106,13 @@ struct BlockHeader {
 // the memory is reclaimed).
 typedef void* (*BackupAllocFn)(void* userData, usize* outSize);
 
+// Callback type for pressure relief.
+// Called when the TLSF pool is exhausted, BEFORE the backup allocator.
+// The callback should free dead objects back into this pool (e.g. drain
+// the VM's deferred-delete queue). Returns true if memory was freed
+// (caller should retry the allocation), false if nothing could be freed.
+typedef bool (*PressureReliefFn)(void* userData);
+
 class TLSFAllocator {
 private:
     // Free list bitmaps for O(1) lookup
@@ -124,6 +131,10 @@ private:
     static constexpr usize kMaxRegions = 64;
     MemoryRegion regions_[kMaxRegions];
     usize regionCount_;
+
+    // Pressure relief (called when pool is exhausted, before backup allocator)
+    PressureReliefFn pressureRelief_ = nullptr;
+    void* pressureReliefUserData_ = nullptr;
 
     // Backup allocator (called when pool is exhausted)
     BackupAllocFn backupAlloc_;
@@ -417,6 +428,11 @@ public:
     // should return a pointer to the new block and set *outSize to its size,
     // or return nullptr if no memory is available. The returned block will
     // be freed with ::free() when the allocator is destroyed.
+    void setPressureRelief(PressureReliefFn fn, void* userData) {
+        pressureRelief_ = fn;
+        pressureReliefUserData_ = userData;
+    }
+
     void setBackupAllocator(BackupAllocFn fn, void* userData) {
         backupAlloc_ = fn;
         backupUserData_ = userData;
@@ -434,6 +450,17 @@ public:
         u32 fl, sl;
         mappingSearch(size, fl, sl);
         BlockHeader* block = findSuitableBlock(fl, sl);
+
+        if (!block) {
+            // Try pressure relief first (drain deferred-delete queue to
+            // reclaim dead objects back into this pool).
+            if (pressureRelief_) {
+                if (pressureRelief_(pressureReliefUserData_)) {
+                    mappingSearch(size, fl, sl);
+                    block = findSuitableBlock(fl, sl);
+                }
+            }
+        }
 
         if (!block) {
             // Try backup allocator to grow the pool

@@ -73,5 +73,6 @@ void BufFixRead::accept(ExprVisitor& visitor) { visitor.visit(this); }
 void BufVarRead::accept(ExprVisitor& visitor) { visitor.visit(this); }
 void BufWrite::accept(ExprVisitor& visitor) { visitor.visit(this); }
 void BufLength::accept(ExprVisitor& visitor) { visitor.visit(this); }
+void DebugExpr::accept(ExprVisitor& visitor) { visitor.visit(this); }
 
 }

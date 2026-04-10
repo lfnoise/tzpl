@@ -92,6 +92,9 @@ struct SExprGraphBuilder {
     std::expected<S, std::string> parseBufWrite(sexpr::ItemVec const& list);
     std::expected<S, std::string> parseBufLength(sexpr::ItemVec const& list);
 
+    // Debug sink
+    std::expected<S, std::string> parseDebugExpr(sexpr::ItemVec const& list);
+
     // Helper to get or create delay buffer
     DelayBuf* getOrCreateDelayBuf(int64_t delayId);
     SampleBuf* getOrCreateSampleBuf(int64_t bufId);

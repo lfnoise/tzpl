@@ -99,6 +99,11 @@ struct Silo
     using TempoSchedFn = void (*)(void* scheduler, i64 sampleTime, void* vm);
     TempoSchedFn tempoSchedFn_ = nullptr;
 
+    // Per-buffer heartbeat callback for VM GC. Called once per audio buffer
+    // to drain the deferred-delete queue and reclaim dead objects.
+    using HeartbeatFn = void (*)(void* vm);
+    HeartbeatFn heartbeatFn_ = nullptr;
+
     Silo();
     ~Silo();
 

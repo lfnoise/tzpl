@@ -134,6 +134,11 @@ void Silo::processFrames() {
         outp += outChannels;
         ++sampleTime_;
     }
+    // Per-buffer GC heartbeat: drain deferred-delete queue for the attached VM.
+    if (heartbeatFn_ && vm_) {
+        heartbeatFn_(vm_);
+    }
+
     mixDown(numFrames, out);
     done_sem_.signal();
     sortNodes(); // Why is this needed? Without it, there are glitches.

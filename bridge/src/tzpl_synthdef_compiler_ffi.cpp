@@ -32,6 +32,7 @@
 #include "synthdef_cpp_codegen.hpp"
 #include "synthdef_synth.hpp"
 #include <dlfcn.h>
+#include <memory>
 #include <unordered_map>
 #include <functional>
 
@@ -91,15 +92,18 @@ static std::string compileSynthDefPipeline(std::string const& sexpr,
         return std::string("parse error: ") + result.error();
     }
 
-    synthdef::Synth* synth = result.value();
+    // Take ownership so the Synth (and its Arena, holding every Expr/Graph/
+    // ExprTree/GenLoop allocated during parse + analysis + codegen) is freed
+    // when this function returns. Without this every call leaks an arena.
+    std::unique_ptr<synthdef::Synth> synth(result.value());
     synthName = synth->name;
 
     // Graph analysis and code generation (need PushSynth scope)
     std::string cppCode;
     try {
-        synthdef::PushSynth ps(synth);
+        synthdef::PushSynth ps(synth.get());
         synth->graphAnalysis();
-        cppCode = synthdef::cppCodeGen(synth);
+        cppCode = synthdef::cppCodeGen(synth.get());
     } catch (std::exception const& e) {
         return std::string("codegen error: ") + e.what();
     }

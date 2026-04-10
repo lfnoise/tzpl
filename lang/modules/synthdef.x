@@ -435,6 +435,8 @@ enum SignalExprKind {
 	voicer(Int, SignalGraph),
 	spectralChain(Int, Int, SignalGraph),
 	spectralFrame Int,
+
+	debug(String, Int, Int),
 }
 
 ---------------------------------------------------------------------------
@@ -479,6 +481,16 @@ fn spectralChain(input S, fftSize Int, hopSize Int, bodyFn GraphFn1) S {
 	let frameExpr S = SignalExprKind.spectralFrame(fftSize) _newSignalExpr;
 	let bodyGraph SignalGraph = bodyFn _makeSubGraph1(frameExpr);
 	SignalExprKind.spectralChain(fftSize, hopSize, bodyGraph) _newSignalExpr([input])
+}
+
+-- Periodically prints the value of a signal to stderr.
+-- `period` is in samples; every `period` samples, the next `consecutive` samples
+-- of the signal (all channels) are dumped along with the absolute sample time
+-- and the supplied label. Returns the input signal unchanged so it can be
+-- inserted in a chain: `x debug("x", 1024, 4)`.
+fn debug(input S, label String = "debug", period Int = 4096, consecutive Int = 1) S {
+    SignalExprKind.debug(label, period, consecutive) _newSignalExpr([input]);
+    input
 }
 
 ---------------------------------------------------------------------------
@@ -657,6 +669,29 @@ fn copysign (a S, b S) S = BinaryOp.copysign _newBinaryOp(a, b);
 fn copysign (a S, b AsConstantSignal) S = BinaryOp.copysign _newBinaryOp(a, b asSignal);
 fn copysign (a AsConstantSignal, b S) S = BinaryOp.copysign _newBinaryOp(a asSignal, b);
 
+
+-- functions for using binary operators in space separated pipeline syntax.
+
+fn add (a S, b S) S = BinaryOp.add _newBinaryOp(a, b);
+fn add (a S, b AsConstantSignal) S = BinaryOp.add _newBinaryOp(a, b asSignal);
+fn add (a AsConstantSignal, b S) S = BinaryOp.add _newBinaryOp(a asSignal, b);
+
+fn sub (a S, b S) S = BinaryOp.sub _newBinaryOp(a, b);
+fn sub (a S, b AsConstantSignal) S = BinaryOp.sub _newBinaryOp(a, b asSignal);
+fn sub (a AsConstantSignal, b S) S = BinaryOp.sub _newBinaryOp(a asSignal, b);
+
+fn mul (a S, b S) S = BinaryOp.mul _newBinaryOp(a, b);
+fn mul (a S, b AsConstantSignal) S = BinaryOp.mul _newBinaryOp(a, b asSignal);
+fn mul (a AsConstantSignal, b S) S = BinaryOp.mul _newBinaryOp(a asSignal, b);
+
+fn div (a S, b S) S = BinaryOp.div _newBinaryOp(a, b);
+fn div (a S, b AsConstantSignal) S = BinaryOp.div _newBinaryOp(a, b asSignal);
+fn div (a AsConstantSignal, b S) S = BinaryOp.div _newBinaryOp(a asSignal, b);
+
+fn mod (a S, b S) S = BinaryOp.mod _newBinaryOp(a, b);
+fn mod (a S, b AsConstantSignal) S = BinaryOp.mod _newBinaryOp(a, b asSignal);
+fn mod (a AsConstantSignal, b S) S = BinaryOp.mod _newBinaryOp(a asSignal, b);
+
 ---------------------------------------------------------------------------
 -- Signal Comparison Operators
 
@@ -743,7 +778,10 @@ fn vread(b BufferVar, index AsSignal, interp Interpolation = Interpolation.cubic
 	SignalExprKind.buffer(b, BufferOp.vread(interp, chans, startChan)) _newSignalExpr([index asSignal])
 }
 
-fn write(b BufferVar, value AsSignal, index AsSignal, chans Int = 1, startChan Int = 0) S {
+fn write(b BufferVar, value AsSignal, index AsSignal, chans Int = 0, startChan Int = 0) S {
+	SignalExprKind.buffer(b, BufferOp.write(chans, startChan)) _newSignalExpr([value asSignal, index asSignal])
+}
+fn write(value AsSignal, b BufferVar, index AsSignal, chans Int = 0, startChan Int = 0) S {
 	SignalExprKind.buffer(b, BufferOp.write(chans, startChan)) _newSignalExpr([value asSignal, index asSignal])
 }
 
@@ -1042,7 +1080,10 @@ fn toLisp(o S) String {
 			var `indentLevel = `indentLevel + 1;
 			"(%^ SpectralChainExpr %^ %^ %^ %^)" fmt(o.id, o inputsToLisp, fftSize, hopSize, bodyGraph toLisp)
 		}
-	}
+
+		debug(label, period, consecutive) :
+			"(%^ DebugExpr \"%^\" %^ %^ %^)" fmt(o.id, label, period, consecutive, o inputsToLisp);
+    }
 }
 
 
@@ -1100,6 +1141,7 @@ coro fn playFor(defName String, seconds Float) Float {
 
 ---------------------------------------------------------------------------
 ---------------------------------------------------------------------------
+
 
 
 

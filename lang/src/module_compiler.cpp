@@ -29,6 +29,7 @@
 #include "parser.hpp"
 #include "type_checker.hpp"
 #include "codegen.hpp"
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -128,6 +129,23 @@ ModuleInfo* ModuleCompiler::compileModule(
     const std::string& importingFilePath,
     SourceRange loc, std::vector<CompileError>& errors)
 {
+    // Re-entrancy guard. compileModule() is called recursively while resolving
+    // imports; we only want to sweep stale modules at the OUTERMOST call so that
+    // the dependency cascade has a consistent view of the cache.
+    struct DepthGuard {
+        int& d;
+        DepthGuard(int& depth) : d(depth) { ++d; }
+        ~DepthGuard() { --d; }
+    } guard(compileDepth_);
+
+    // At the outermost call, walk every cached module and invalidate any whose
+    // source file has been edited on disk. Cascade invalidation ensures every
+    // dependent of an edited module is also dropped, so its stale declNode
+    // pointers into the destroyed AST cannot be used.
+    if (compileDepth_ == 1) {
+        sweepStaleModules();
+    }
+
     // Determine importing file's directory
     std::string importingDir;
     if (!importingFilePath.empty()) {
@@ -157,14 +175,17 @@ ModuleInfo* ModuleCompiler::compileModule(
         ? "<foreign:" + modName + ">"
         : resolvedPath;
 
-    // Invalidate cache if the source file has been modified
+    // Targeted invalidation for the requested module: covers nested compileModule
+    // calls (within an outermost call) where the sweep has already run but a
+    // recursive import might still race a freshly modified file.
     if (!resolvedPath.empty()) {
         auto it = modules_.find(cacheKey);
         if (it != modules_.end()) {
             std::error_code ec;
             auto currentModTime = std::filesystem::last_write_time(resolvedPath, ec);
-            if (!ec && currentModTime != it->second->fileModTime)
-                modules_.erase(it);
+            if (!ec && currentModTime != it->second->fileModTime) {
+                invalidateModule(cacheKey);
+            }
         }
     }
 
@@ -436,8 +457,57 @@ ModuleInfo* ModuleCompiler::compileModule(
     mod->allTypeAliases = typeChecker.typeAliases();
     mod->allConstraints = typeChecker.constraints();
 
+    // Record direct module dependencies so editing a transitive dependency can
+    // cascade-invalidate this module on a future compileModule call.
+    mod->dependencies.clear();
+    for (auto* dep : typeChecker.allImportedModules()) {
+        if (dep && !dep->canonicalPath.empty()) {
+            mod->dependencies.push_back(dep->canonicalPath);
+        }
+    }
+
     mod->compiling = false;
     return mod;
+}
+
+void ModuleCompiler::invalidateModule(const std::string& cacheKey) {
+    auto it = modules_.find(cacheKey);
+    if (it == modules_.end()) return;
+
+    // Erase first so the recursive walk below cannot see this entry.
+    // Destroying the unique_ptr drops the ModuleInfo and its AST/codegen state.
+    modules_.erase(it);
+
+    // Find every cached module that lists `cacheKey` in its dependencies and
+    // recursively invalidate it. Build the list before recursing so that map
+    // mutations from nested invalidate calls cannot invalidate iterators.
+    std::vector<std::string> dependents;
+    for (auto& [key, modPtr] : modules_) {
+        const auto& deps = modPtr->dependencies;
+        if (std::find(deps.begin(), deps.end(), cacheKey) != deps.end()) {
+            dependents.push_back(key);
+        }
+    }
+    for (auto& dep : dependents) {
+        invalidateModule(dep);
+    }
+}
+
+void ModuleCompiler::sweepStaleModules() {
+    // Snapshot the keys we need to check, since invalidateModule will mutate
+    // modules_ and we cannot iterate-and-erase concurrently.
+    std::vector<std::string> stale;
+    for (auto& [key, modPtr] : modules_) {
+        if (modPtr->canonicalPath.empty()) continue;  // foreign-only module
+        std::error_code ec;
+        auto currentModTime = std::filesystem::last_write_time(modPtr->canonicalPath, ec);
+        if (!ec && currentModTime != modPtr->fileModTime) {
+            stale.push_back(key);
+        }
+    }
+    for (auto& key : stale) {
+        invalidateModule(key);
+    }
 }
 
 ModuleInfo* ModuleCompiler::getModule(const std::string& canonicalPath) const {

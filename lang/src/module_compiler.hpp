@@ -89,6 +89,12 @@ struct ModuleInfo {
     std::unordered_map<std::string, EnumType*> allEnumTypes;
     std::unordered_map<std::string, Type*> allTypeAliases;
     std::unordered_map<std::string, TypeChecker::ConstraintInfo> allConstraints;
+
+    // Canonical paths of modules this module directly imports. Used for cascade
+    // invalidation: when a dependency is edited and re-compiled, every module
+    // that has stale declNode/type pointers into the old AST must also be
+    // invalidated. Populated after successful compilation.
+    std::vector<std::string> dependencies;
 };
 
 class ModuleCompiler {
@@ -107,10 +113,21 @@ public:
     Compiler& compiler() { return compiler_; }
     const std::vector<std::string>& includePaths() const { return includePaths_; }
 
+    // Invalidate a single module from the cache and recursively invalidate
+    // any other cached module that depends on it. Used by sweepStaleModules.
+    void invalidateModule(const std::string& cacheKey);
+
+    // Walk every cached module and invalidate (with cascade) any whose source
+    // file has been modified on disk since it was compiled. Called at the
+    // start of every outermost compileModule() call so that editing a
+    // transitive dependency forces a re-compile of all dependents.
+    void sweepStaleModules();
+
 private:
     Compiler& compiler_;
     std::vector<std::string> includePaths_;  // CLI + env paths
     std::unordered_map<std::string, std::unique_ptr<ModuleInfo>> modules_;
+    int compileDepth_ = 0;  // re-entrancy counter so we sweep only at outermost call
 
     // Resolve a module path to a filesystem path. Returns empty string on failure.
     std::string resolveModulePath(const std::vector<std::string>& modulePath,

@@ -642,6 +642,7 @@ ASTPtr Parser::parseConstDecl() {
 
 ASTPtr Parser::parseFnDecl() {
     SourceRange start = currentLoc();
+    size_t errorsBefore = errors_.size();
     advance(); // consume 'fn'
 
     // Allow operator tokens as function names for operator overloading
@@ -781,6 +782,7 @@ ASTPtr Parser::parseFnDecl() {
         auto fn = std::make_unique<FnDeclNode>(start, name.text, std::move(typeParams),
                                                 std::move(params), std::move(returnType), std::move(body));
         fn->whereConstraints = std::move(whereConstraints);
+        if (errors_.size() > errorsBefore) fn->hasParseError = true;
         return fn;
     }
 
@@ -790,6 +792,7 @@ ASTPtr Parser::parseFnDecl() {
     auto fn = std::make_unique<FnDeclNode>(start, name.text, std::move(typeParams),
                                             std::move(params), std::move(returnType), std::move(body));
     fn->whereConstraints = std::move(whereConstraints);
+    if (errors_.size() > errorsBefore) fn->hasParseError = true;
     return fn;
 }
 

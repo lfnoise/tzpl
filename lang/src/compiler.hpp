@@ -229,6 +229,10 @@ public:
     u32 numDynVars() const;
     bool registerDynVar(const std::string& name, Type* type, u32& outIndex);
     const DynVarInfo* lookupDynVar(const std::string& name) const;
+    // Replace the stored Type* for an existing dynamic variable. Used to refresh
+    // stale Type* pointers left over from a previous TypeChecker instance whose
+    // user-defined StructType/EnumType pointers have been replaced.
+    void refreshDynVarType(const std::string& name, Type* newType);
 
 private:
     TypeUniverse& typeUniverse_;

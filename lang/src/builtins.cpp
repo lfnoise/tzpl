@@ -1523,6 +1523,20 @@ static bool resolve_toAnyArray(Compiler& compiler, const std::vector<Type*>& arg
 }
 
 // ============================================================================
+// gc builtin -- drain the deferred-delete queue
+// ============================================================================
+
+static void builtin_gc(VM& vm, u16 dst, u16, u16) {
+    vm.foreignDeleteQueue().drainInto(vm.deferredDeleteQueue());
+    vm.autoReleasePool().drain();
+    while (!vm.deferredDeleteQueue().empty()) {
+        vm.foreignDeleteQueue().drainInto(vm.deferredDeleteQueue());
+        vm.deferredDeleteQueue().processN(4096);
+    }
+    vm.reg(dst).i = 0;
+}
+
+// ============================================================================
 // disassemble builtin
 // ============================================================================
 
@@ -1651,6 +1665,9 @@ void registerBuiltinFunctions(Compiler& compiler,
 
     // --- disassemble builtin (not RT-safe: writes to stdout) ---
     registerTemplate(compiler, functions, "disassemble",  resolve_disassemble, /*rtSafe=*/false);
+
+    // --- gc builtin: drain deferred-delete queue to reclaim dead objects ---
+    registerOne(compiler, functions, "gc", compiler.voidType(), {}, builtin_gc, /*pure=*/false, /*rtSafe=*/false);
 
     // --- Ref builtins ---
     registerTemplate(compiler, functions, "ref",          resolve_ref);

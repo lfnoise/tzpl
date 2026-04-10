@@ -3,6 +3,20 @@
 import synthdef.*;
 import common_ugens.*;
 
+fn init_urand_test() S {
+	let chans = 16;
+	let detune = [-1, 1] vec;
+	let freqs = exprand(100, 600, 8, Rate.init) + detune;
+	let ampPhases = urand(chans, Rate.init);
+	let ampFreqs = exprand(0.1, 0.5, chans, Rate.init);
+	let amps = ampFreqs fsinosc(ampPhases) uni;
+	let oscs = freqs fsinosc cb * amps;
+	oscs sum(2) * 0.1 |> outlet
+}
+
+init_urand_test defSynth("init_urand_test") println;
+
+
 fn bubbles() S =
 	0.4 lfsaw * 24
 	+ [8, 7.23] lfsaw * 3
@@ -12,21 +26,26 @@ fn bubbles() S =
 
 bubbles defSynth("bubbles") println;
 
+
+fn blipTest() S {
+	let h = 1/20 sinosc(0.75) bilin(1, 48);
+	[36, 36.13] blip(0, h) mul(0.2) fadein(0.1) outlet
+}
+
+blipTest defSynth("blipTest") println;
+
+
+fn smoothSawTest() S {
+	let s = 1/5 sinosc(0.75) bilin(1, 8);
+	[100, 100.13] smoothSaw(s) mul(0.2) fadein(0.1) outlet
+}
+
+smoothSawTest defSynth("smoothSawTest") println;
+
+
 fn dustone() = 0.2 * decay2(dust(4, 2), 0.04, 0.3) * 800 fsinxosc |> outlet;
 
 dustone defSynth("dustone") println;
-
-fn init_urand_test() S {
-	let detune = [-1, 1] vec;
-	let freqs = exprand(100, 600, 8, Rate.init) + detune;
-	let ampPhases = urand(16, Rate.init);
-	let ampFreqs = exprand(0.1, 0.5, 16, Rate.init);
-	let oscs = freqs fsinosc cb * ampFreqs fsinosc(ampPhases) uni;
-	oscs sum(2) * 0.1 |> outlet
-}
-
-init_urand_test defSynth("init_urand_test") println;
-
 
 fn pause_bubbles() S {
     let gate = 0.5 sinosc - 0.5;
@@ -176,6 +195,7 @@ fn bubbles_lite() S = 0.4 lfsaw * 24 + 8 lfsaw * 3 + 81 |> nnhz sinosc * 0.04 |>
 
 -- bubbles_lite defSynth("bubbles_lite")
 
+
 ---------------------------------------------------------------------------
 -- Play a demo
 
@@ -183,8 +203,14 @@ import audio_engine as ae;
 ae.listSynthDefs() println;
 
 go(coro fn() Float {
+	"start playing" println;
+	
+	"smoothSawTest" playFor(5.0) yieldAll;
+	
+	/*
 	"init_urand_test" playFor(5.0) yieldAll;
 	"bubbles" playFor(5.0) yieldAll;
+	"blipTest" playFor(20.0) yieldAll;
 	"dustone" playFor(5.0) yieldAll;
 	"pause_bubbles" playFor(5.0) yieldAll;
 	"tog_pause" playFor(5.0) yieldAll;
@@ -201,7 +227,14 @@ go(coro fn() Float {
 	"violet_test" playFor(5.0) yieldAll;
 	"blue_test" playFor(5.0) yieldAll;
 	"red_test" playFor(5.0) yieldAll;
+	*/
+	
+	"stop playing" println;
 }());
+
+
+
+
 
 
 

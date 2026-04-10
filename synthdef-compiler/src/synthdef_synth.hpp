@@ -130,6 +130,7 @@ namespace synthdef {
         u64 noteParamSerialNos = 1; // gate is 0
         u64 inletSerialNos = 0;
         u64 outletSerialNos = 0;
+        u64 debugSerialNos = 0;
 
         Synth(string name);
         
@@ -187,6 +188,9 @@ namespace synthdef {
     }
     inline u64 nextOutletSerialNo() {
         return gSynth->outletSerialNos++;
+    }
+    inline u64 nextDebugSerialNo() {
+        return gSynth->debugSerialNos++;
     }
 
     class PushGraph {

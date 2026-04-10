@@ -755,6 +755,56 @@ fn sinosc(fm AsSignal, pm AsSignal = 0) S = phasor(fm, pm) sin2pi;
 fn fsinosc(fm AsSignal, pm AsSignal = 0) S = phasor(fm, pm) fsin;
 fn fsinxosc(fm AsSignal, pm AsSignal = 0) S = phasor(fm, pm) fsinx;
 
+-- band limited impulse oscillator
+fn blip(fm AsSignal, pm AsSignal, numHarmonics AsSignal) S {
+	let phase = delayVar();
+	let p = phase(1);
+	phase <- frac(p + fm * T());
+	let pp = frac(p + pm);
+	
+	let nyq = fs() * 0.5;
+	let maxN = floor(nyq / fm abs max(16.0));
+	let n = numHarmonics clip(1, maxN);
+	let na = n floor;
+	let nb = na + 1;
+	
+	-- shaping the ramp with smoothStep mitigates a broadband click which would otherwise 
+	-- happen with simple linear interpolation.
+	let nfrac = smoothStep(n - na); 
+	
+	let naScale = 0.5 / na;
+	let nbScale = 0.5 / nb;
+	let na2 = 2 * na + 1;
+	let nb2 = na2 + 2;
+	let d = divz(1, pp sin2pi, 1);
+	
+	let a = naScale * (sin2pi(na2 * pp) * d - 1);
+	let b = nbScale * (sin2pi(nb2 * pp) * d - 1);
+    a + nfrac * (b - a)
+}
+
+-- variable sharpness sawtooth oscillator
+fn smoothSaw(fm AsSignal, sharpness AsSignal) S {
+	let phase = delayVar();
+	let phs = frac(phase(1) + fm * T()) write(phase);
+	phs println;
+	let p = bi(frac(phs - 0.5));
+	p println;
+	let w = 1 - p abs pow(sharpness exp2);
+	p * w
+}
+
+-- variable sharpness square wave oscillator
+fn smoothSquare(fm AsSignal, sharpness AsSignal) S {
+	let phase = delayVar();
+	let phs = frac(phase(1) + fm * T()) write(phase);
+	let p = bi(frac(phs - 0.5));
+	let q = bi(frac(2 * phs));
+	let c = (p < 0) bi;
+	let w = 1 - q abs pow(sharpness exp2);
+	c * w
+}
+
 fn comb(x S, delay_time AsSignal, decay_time AsSignal, interp Interpolation = Interpolation.lagrange) S {
 	let a = decay60dB(decay_time / delay_time);
 	let delay_samples = delay_time * fs();
@@ -784,6 +834,10 @@ fn pause(gate S, gatedFun fn()S) S = if_(gate > 0, fn(){ gate * gatedFun() });
 
 
 "DONE IMPORTING COMMON UGENS MODULE" println
+
+
+
+
 
 
 

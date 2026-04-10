@@ -275,6 +275,41 @@ namespace synthdef {
         void accept(ExprVisitor& visitor) override;
     };
 
+    // Periodically prints its input signal to stderr.
+    // Inserted by the user for debugging via `signal debug("label", period, consecutive)`.
+    // Acts as a sink: the input is consumed but no value is produced for downstream
+    // expressions. The original signal is returned by the front-end function so the
+    // chain is unaffected.
+    struct DebugExpr : Expr {
+        string label;
+        i64 period;       // print every `period` samples
+        i64 consecutive;  // number of consecutive samples to print each cycle
+        u64 serial;       // unique id for the per-instance counter
+
+        DebugExpr(S input, string label, i64 period, i64 consecutive);
+
+        string typeName() const override { return "DebugExpr"; }
+        string str() const override { return FMT("debug(\"{}\")", label); }
+
+        u64 hash() const override {
+            return hash_combine(Expr::hash(), serial, 0xD9B14E2C73615F08ull);
+        }
+        bool equals_(Expr const& that) const override {
+            auto& c = static_cast<DebugExpr const&>(that);
+            return serial == c.serial;
+        }
+        bool should_hash_cons() const override { return false; }
+        NumType initial_type() const override { return NumType::any; }
+        void update_type(ExprIdentitySet& worklist) override;
+        // The sink itself is single-channel — it produces one print per sample.
+        // The codegen reads each channel of the input separately into the
+        // generated printf line, so the surrounding loop is always 1-iteration.
+        void calcShape() override { chans = 1; }
+        bool is_sink() const override { return true; }
+
+        void accept(ExprVisitor& visitor) override;
+    };
+
     struct UnaryOpExpr : Expr {
         UnaryOp op;
         
@@ -1429,7 +1464,10 @@ namespace synthdef {
         }
         NumType initial_type() const override { return NumType::f64; }
         void update_type(ExprIdentitySet& worklist) override {}
-        void calcShape() override { chans = in0()->chans; }
+        void calcShape() override {
+            chans = in0()->chans;
+            if (writeChans == 0) writeChans = chans; // 0 = auto: match input channels
+        }
         bool is_sink() const override { return true; }
 
         void accept(ExprVisitor& visitor) override;

@@ -733,6 +733,7 @@ struct FnDeclNode : Decl {
     i32 resolvedFuncGlobalIndex = -1;  // Set by type checker for codegen
     bool isPrivate = false;  // Set by parser when 'private' keyword is used
     bool isCoroutine = false;  // Set by parser when 'coro' keyword is used
+    bool hasParseError = false;  // Set by parser if any error occurred while parsing this function
     LambdaType* localLambdaType = nullptr;  // Set for local fn declarations (codegen wraps in Lambda)
     std::vector<LambdaExprNode::CapturedVar> captures;  // captured vars for local functions
     std::vector<WhereConstraint> whereConstraints;  // type param constraints

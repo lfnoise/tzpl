@@ -329,7 +329,10 @@ VarIndex max(VarIndex a, VarIndex b) {
     }
 }
 
-struct CppCodeGen : ArenaObj {
+// Stack-allocated visitor; deliberately NOT an ArenaObj. Inheriting from
+// ArenaObj would register `this` (a stack address) with the current Arena,
+// causing a crash when the Arena later tries to `delete` it.
+struct CppCodeGen {
     Synth* synth;
     int indent = 1;
     int max_simd_width = 4; // zero or one means no simd
@@ -455,7 +458,8 @@ int CppCodeGen::simdWidth(GenLoop const& loop) {
                 expr.as<SpectralFrameInput>() ||
                 expr.as<URandExpr>() ||
                 expr.as<BiRandExpr>() ||
-                expr.as<Rand64Expr>())
+                expr.as<Rand64Expr>() ||
+                expr.as<DebugExpr>())
             {
                 return 0;
             }
@@ -654,7 +658,18 @@ string CppCodeGen::genVarRef(S expr, VarIndex cel) {
             // Same width: vector load from start of array
             return simdLoad(expr->type, currentSimdWidth, FMT("&{}[0]", s));
         } else if (expr->chans > (usize)currentSimdWidth) {
-            // Wider: vector load at stride offset
+            if (expr->chans < current_loop->chans) {
+                // Narrower than loop but wider than SIMD: cyclic broadcast.
+                // chans is a power of 2, so wrap the load offset with & (chans-1).
+                if (auto* cp = std::get_if<ptrdiff_t>(&cel)) {
+                    ptrdiff_t idx = *cp & (ptrdiff_t)(expr->chans - 1);
+                    return simdLoad(expr->type, currentSimdWidth,
+                        FMT("&{}[{}]", s, idx));
+                }
+                return simdLoad(expr->type, currentSimdWidth,
+                    FMT("&{}[{} & {}]", s, vxstr(cel), expr->chans - 1));
+            }
+            // Same width or wider than loop: simple vector load at stride offset
             return simdLoad(expr->type, currentSimdWidth, FMT("&{}[{}]", s, vxstr(cel)));
         } else if (expr->chans == 1) {
             // Scalar into SIMD (shouldn't reach here -- caught above)
@@ -1501,6 +1516,7 @@ struct ExprCodegenVisitor : ExprVisitor {
             s += scalar;
         }
     }
+    void visit(DebugExpr* p) override { shouldBeHandledAsTree(p); }
 };
 
 
@@ -1564,6 +1580,7 @@ struct GenTreeExprVisitor : ExprVisitor {
     void visit(BufVarRead* p) override {}
     void visit(BufWrite* p) override {}
     void visit(BufLength* p) override {}
+    void visit(DebugExpr* p) override {}
 };
 
 struct Rank1GenTreeExprVisitor : GenTreeExprVisitor {
@@ -1593,11 +1610,63 @@ struct Rank1GenTreeExprVisitor : GenTreeExprVisitor {
         string pindex = p->chans == loopChans ? genIndex1(cel) : "";
         s += FMT("(({0}**)p->outlets)[{1}]{2} = {3}; // {4} Sink {5}\n",
                 p->type.str(),
-                p->serial, 
+                p->serial,
                 pindex,
                 g.genExpr(p->in0(), cel),
                 tree.serial,
                 g.current_root->str());
+    }
+    void visit(DebugExpr* p) override {
+        handled = true;
+        // Periodically print the value of the input signal to stderr.
+        // The dbg counter wraps at `period` samples; while it is below
+        // `consecutive`, the sample is printed. Each line shows the absolute
+        // sample time, the user label, and one value per channel of the input.
+        // (No SIMD path: trees containing a DebugExpr are forced into the
+        // scalar loop by simdWidth() below.)
+        usize chans = p->in0()->chans;
+        string ser = std::to_string(p->serial);
+        bool isFloat = p->type.flags == NumTypeFlags::F32
+                    || p->type.flags == NumTypeFlags::F64;
+        const char* fmtSpec = isFloat ? "%g" : "%lld";
+
+        // Build the printf format string at codegen time.
+        // Output: "[<sampleTime> <label>] ch0 ch1 ... chN\n"
+        string fmtStr = FMT("[%llu {}]", p->label);
+        for (usize c = 0; c < chans; ++c) {
+            fmtStr += " ";
+            fmtStr += fmtSpec;
+        }
+        fmtStr += "\\n";
+
+        s += FMT("if (p->dbg{0}_count < {1}) {{ // {2} Debug {3}\n",
+            ser, p->consecutive, tree.serial, p->label);
+        ++g.indent;
+        tabIndent(s, g.indent);
+        s += FMT("fprintf(stderr, \"{0}\", (unsigned long long)p->dbg{1}_time",
+            fmtStr, ser);
+        for (usize c = 0; c < chans; ++c) {
+            string val;
+            if (chans == 1) {
+                val = g.genExpr(p->in0(), cel);
+            } else {
+                val = g.genExpr(p->in0(), vx(ptrdiff_t(c)));
+            }
+            if (isFloat) {
+                s += FMT(", (double)({})", val);
+            } else {
+                s += FMT(", (long long)({})", val);
+            }
+        }
+        s += ");\n";
+        --g.indent;
+        tabIndent(s, g.indent);
+        s += "}\n";
+        tabIndent(s, g.indent);
+        s += FMT("++p->dbg{0}_time;\n", ser);
+        tabIndent(s, g.indent);
+        s += FMT("p->dbg{0}_count = (p->dbg{0}_count + 1) % {1};\n",
+            ser, p->period);
     }
     void visit(PhiNodeExpr* p) override {
         handled = true;
@@ -2075,6 +2144,7 @@ struct GenLoopExprVisitor : ExprVisitor {
     void visit(BufVarRead* p) override {}
     void visit(BufWrite* p) override {}
     void visit(BufLength* p) override {}
+    void visit(DebugExpr* p) override {}
 };
 
 string CppCodeGen::genLoop(GenLoop const& loop) {
@@ -2995,6 +3065,21 @@ string CppCodeGen::genDeclInstVars() {
 
     // Sample buffer pointers
     s += genBufDecls();
+
+    // Per-DebugExpr counters: dbg<N>_count cycles 0..period-1, dbg<N>_time
+    // is the absolute sample count for diagnostic output.
+    bool anyDebug = false;
+    for (S expr : synth->sorted) {
+        if (auto d = expr.as<DebugExpr>(); d) {
+            if (!anyDebug) {
+                s += "\t// debug counters\n";
+                anyDebug = true;
+            }
+            s += FMT("\tu64 dbg{}_count;\n", d->serial);
+            s += FMT("\tu64 dbg{}_time;\n", d->serial);
+        }
+    }
+    if (anyDebug) s += "\n";
 
     return s;
 }

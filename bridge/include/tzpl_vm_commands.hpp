@@ -118,6 +118,13 @@ struct CodeInstallCmd : engine::Command {
     }
 };
 
+// Per-buffer GC heartbeat callback for the attached VM.
+// Called from the RT audio thread once per buffer.
+inline void rtVMHeartbeat(void* vm) {
+    auto* v = static_cast<ts::VM*>(vm);
+    v->gcHeartbeat();
+}
+
 // Attaches a VM to a Silo. The VM must be fully initialized before sending.
 struct AttachVMCmd : engine::Command {
     ts::VM* vm_;
@@ -126,6 +133,7 @@ struct AttachVMCmd : engine::Command {
 
     void doRT(engine::Silo* s) override {
         s->vm_ = vm_;
+        s->heartbeatFn_ = &rtVMHeartbeat;
     }
 };
 
@@ -133,6 +141,7 @@ struct AttachVMCmd : engine::Command {
 struct DetachVMCmd : engine::Command {
     void doRT(engine::Silo* s) override {
         s->vm_ = nullptr;
+        s->heartbeatFn_ = nullptr;
     }
 };
 

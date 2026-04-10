@@ -79,6 +79,16 @@ bool TypeChecker::typesEqual(Type* a, Type* b) const {
     return a == b;  // Types are interned, pointer comparison works
 }
 
+bool TypeChecker::typesNominallyEqual(Type* a, Type* b) const {
+    if (a == b) return true;
+    if (!a || !b) return false;
+    // Type::str() encodes the structural composition of composite types and
+    // returns the interned name for user-defined struct/enum. So two types from
+    // different TypeChecker instances representing the same logical type compare
+    // equal here even though their pointers differ.
+    return std::string(a->str()) == std::string(b->str());
+}
+
 int TypeChecker::numericRank(Type* t) const {
     if (t == compiler_.boolType()) return 0;
     if (t == compiler_.intType()) return 1;

@@ -26,7 +26,7 @@
 namespace synthdef {
 
     thread_local Arena* gArena = nullptr;
-    
+
     ArenaObj::ArenaObj() {
         gArena->objs.push_back(this);
     }

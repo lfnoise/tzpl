@@ -335,7 +335,7 @@ public:
         S read(i64 index, i64 readChans = 1, i64 startChan = 0) const;
         S vread(S index, Interpolation interp = Interpolation(0),
                 i64 readChans = 1, i64 startChan = 0) const;
-        S write(S value, S index, i64 writeChans = 1, i64 startChan = 0);
+        S write(S value, S index, i64 writeChans = 0, i64 startChan = 0);
         S length() const;
 
         u64 hash() const;

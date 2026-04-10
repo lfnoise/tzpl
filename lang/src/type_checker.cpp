@@ -485,6 +485,25 @@ void TypeChecker::checkREPLInput(Program& program) {
         builtinsRegistered_ = true;
     }
 
+    // Per-eval working state. allImportedModules_ is consumed by codegen
+    // (genImportDecl) for the current input only — clearing it prevents the
+    // codegen pass from following stale ModuleInfo* pointers from previous
+    // evaluations whose modules may have since been re-compiled.
+    allImportedModules_.clear();
+
+    // monoCache_ holds template monomorphizations whose declNode pointers may
+    // reference a now-destroyed AST after a dependent module re-compile.
+    // However, the REPL keeps all prior programs alive (programs vector), so
+    // declNode pointers remain valid across evaluations of the same session.
+    // Clearing the cache unconditionally causes 100+ addGlobal calls per eval
+    // (one per re-monomorphization), exhausting the rt pool within ~5 evals.
+    //
+    // Instead, the cache is kept across evaluations. Module recompilation is
+    // handled by checkImportDecl which drops and re-adds stale overloads.
+    // TODO: if a user redefines a template function body in the REPL, old
+    // monomorphizations may still reference the previous body until the cache
+    // is manually invalidated.
+
     // Phase 0: Process import declarations (before any other registration)
     for (auto& item : program.items) {
         if (item->kind == ASTNode::ImportDecl) {
@@ -718,7 +737,7 @@ void TypeChecker::prescanDynVars(ASTNode* node) {
     switch (node->kind) {
         case ASTNode::VarDecl: {
             auto* decl = static_cast<VarDeclNode*>(node);
-            if (decl->isDynamic && !compiler_.lookupDynVar(decl->name)) {
+            if (decl->isDynamic) {
                 Type* varType = nullptr;
                 if (decl->typeExpr) {
                     varType = resolveTypeExpr(decl->typeExpr.get());
@@ -736,8 +755,21 @@ void TypeChecker::prescanDynVars(ASTNode* node) {
                     }
                 }
                 if (varType) {
-                    u32 idx;
-                    compiler_.registerDynVar(decl->name, varType, idx);
+                    auto* existing = compiler_.lookupDynVar(decl->name);
+                    if (!existing) {
+                        u32 idx;
+                        compiler_.registerDynVar(decl->name, varType, idx);
+                    } else if (typesNominallyEqual(existing->type, varType)) {
+                        // Refresh the stored Type*. The existing entry may hold a
+                        // pointer from a previous TypeChecker whose user-defined
+                        // StructType pointers have been replaced. Without this,
+                        // builtin overload resolvers (which compare element types
+                        // by pointer) and checkVarDecl produce a cascade of false
+                        // type errors when a module is re-compiled.
+                        compiler_.refreshDynVarType(decl->name, varType);
+                    }
+                    // Else: leave the existing type alone — checkVarDecl will detect
+                    // the genuine type mismatch and report it at the offending decl.
                 }
             }
             break;
@@ -749,6 +781,8 @@ void TypeChecker::prescanDynVars(ASTNode* node) {
         }
         case ASTNode::FnDecl: {
             auto* fn = static_cast<FnDeclNode*>(node);
+            // Skip functions whose bodies failed to parse — their AST is unreliable.
+            if (fn->hasParseError) break;
             if (fn->body) prescanDynVars(fn->body.get());
             break;
         }

@@ -26,6 +26,7 @@
 #include "builtins.hpp"
 #include "value.hpp"
 #include "diagnostic.hpp"
+#include <algorithm>
 
 namespace ts {
 
@@ -58,12 +59,36 @@ void TypeChecker::checkImportDecl(ImportDeclNode* decl) {
             }
             for (const auto& [name, entry] : mod->exports) {
                 switch (entry.kind) {
-                    case ExportEntry::Func:
+                    case ExportEntry::Func: {
+                        // Drop any existing overloads previously imported from
+                        // this same module. They may hold declNode pointers
+                        // into a now-destroyed AST after a re-compile.
+                        auto& overloads = functions_[name];
+                        overloads.erase(
+                            std::remove_if(overloads.begin(), overloads.end(),
+                                [&](const FuncInfo& existing) {
+                                    return !existing.sourceModulePath.empty() &&
+                                           existing.sourceModulePath == mod->canonicalPath;
+                                }),
+                            overloads.end());
                         for (auto fi : entry.funcOverloads) {
-                            if (fi.isTemplate && !fi.sourceModule) fi.sourceModule = mod;
-                            functions_[name].push_back(fi);
+                            // sourceModule must point to the ORIGINAL definition
+                            // module (where the body lives and where its private
+                            // helpers are visible), so the template scope guard
+                            // merges the right allFunctions. Only set it if null;
+                            // re-exports must NOT overwrite a previously recorded
+                            // origin -- doing so would point the scope guard at
+                            // the re-exporter, whose allFunctions doesn't contain
+                            // the original module's underscore-prefixed helpers.
+                            if (!fi.sourceModule) fi.sourceModule = mod;
+                            // sourceModulePath, by contrast, tracks the IMMEDIATE
+                            // re-exporter so the cleanup above can drop this entry
+                            // when that re-exporter is recompiled.
+                            fi.sourceModulePath = mod->canonicalPath;
+                            overloads.push_back(fi);
                         }
                         break;
+                    }
                     case ExportEntry::Var: {
                         VarInfo vi;
                         vi.type = entry.type;
@@ -110,12 +135,28 @@ void TypeChecker::checkImportDecl(ImportDeclNode* decl) {
                 const std::string& localName = imp.alias.empty() ? imp.name : imp.alias;
                 const ExportEntry& entry = it->second;
                 switch (entry.kind) {
-                    case ExportEntry::Func:
+                    case ExportEntry::Func: {
+                        // Drop stale overloads from a previous compilation of
+                        // the same source module before appending fresh ones.
+                        auto& overloads = functions_[localName];
+                        overloads.erase(
+                            std::remove_if(overloads.begin(), overloads.end(),
+                                [&](const FuncInfo& existing) {
+                                    return !existing.sourceModulePath.empty() &&
+                                           existing.sourceModulePath == mod->canonicalPath;
+                                }),
+                            overloads.end());
                         for (auto fi : entry.funcOverloads) {
-                            if (fi.isTemplate && !fi.sourceModule) fi.sourceModule = mod;
-                            functions_[localName].push_back(fi);
+                            // See checkImportDecl Wildcard case above for the
+                            // sourceModule vs. sourceModulePath split rationale.
+                            // sourceModule = ORIGINAL definition module (set once);
+                            // sourceModulePath = IMMEDIATE re-exporter (always update).
+                            if (!fi.sourceModule) fi.sourceModule = mod;
+                            fi.sourceModulePath = mod->canonicalPath;
+                            overloads.push_back(fi);
                         }
                         break;
+                    }
                     case ExportEntry::Var: {
                         VarInfo vi;
                         vi.type = entry.type;
@@ -369,6 +410,14 @@ void TypeChecker::inferFunctionReturnType(FnDeclNode* fn, FuncInfo* fi, bool isL
         fn->resolvedType = fi->returnType;
         return;
     }
+    // If the function body failed to parse, we can't safely walk it.
+    // Fall back to void so callers have a concrete return type for overload resolution.
+    if (fn->hasParseError) {
+        fi->returnType = compiler_.voidType();
+        fi->bodyChecked = true;
+        fn->resolvedType = fi->returnType;
+        return;
+    }
     fi->inferring = true;
 
     // Save state for pointer-stability guard.
@@ -540,6 +589,26 @@ void TypeChecker::checkFnDecl(FnDeclNode* decl) {
     // the vector and invalidate funcPtr/func.
     std::vector<Type*> paramTypes = func.paramTypes;
     Type* returnType = func.returnType;
+
+    // If the function body failed to parse, leave the signature registered
+    // but skip walking the body. The parse error has already been reported,
+    // and walking a partially-parsed body produces meaningless cascading errors.
+    if (decl->hasParseError) {
+        if (returnType == nullptr) {
+            returnType = compiler_.voidType();
+            func.returnType = returnType;
+        }
+        func.bodyChecked = true;
+        decl->resolvedType = returnType;
+        if (isLocal) {
+            TypeVec argTV(rt::STLAllocator<Type*>(nullptr));
+            for (Type* pt : paramTypes) argTV.push_back(pt);
+            TypeVec emptyFV(rt::STLAllocator<Type*>(nullptr));
+            decl->localLambdaType = new LambdaType(TypeVec(argTV), returnType, std::move(emptyFV));
+            declareVar(decl->name, compiler_.functionType(argTV, returnType), false);
+        }
+        return;
+    }
 
     // Demand-driven inference: if return type is still nullptr, infer it now
     if (returnType == nullptr) {

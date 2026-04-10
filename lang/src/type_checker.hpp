@@ -97,6 +97,11 @@ struct FuncInfo {
 
     // Source module for imported template functions (needed for body re-checking)
     struct ModuleInfo* sourceModule = nullptr;
+    // Canonical path of the source module. Stable across re-compilations of
+    // the same module file (the ModuleInfo* may be replaced; the path is not).
+    // Used by checkImportDecl to remove stale overload entries from a previous
+    // compilation of the same module before appending the new ones.
+    std::string sourceModulePath;
 };
 
 class TypeChecker {
@@ -443,6 +448,11 @@ private:
     bool isBoolComposite(Type* t) const;
     bool isIntComposite(Type* t) const;
     bool typesEqual(Type* a, Type* b) const;
+    // Compare types by structural string representation. Used to recognise that
+    // a stale Type* in Compiler::dynamicVars_ refers to the same logical type as
+    // a freshly resolved one (e.g. after a module re-compile creates new
+    // StructType pointers for the same struct name).
+    bool typesNominallyEqual(Type* a, Type* b) const;
     int numericRank(Type* t) const;
     Type* commonNumericType(Type* a, Type* b, bool isDiv = false) const;
     Type* comparisonResultType(Type* a, Type* b) const;

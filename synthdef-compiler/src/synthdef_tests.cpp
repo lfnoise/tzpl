@@ -1434,7 +1434,7 @@ void test_buf_write() {
     B buf;
     S sig = fsinosc(S(440.0));
     S index = S(0.0);
-    buf.write(sig, index, 1, 0);
+    buf.write(sig, index);
     outlet(sig);
 
     gSynth->graphAnalysis();

@@ -254,6 +254,34 @@ std::expected<S, std::string> SExprGraphBuilder::parseOutlet(sexpr::ItemVec cons
     return expr;
 }
 
+std::expected<S, std::string> SExprGraphBuilder::parseDebugExpr(sexpr::ItemVec const& list) {
+    // Format: (id DebugExpr "label" period consecutive (input_id))
+    if (list.size() < 6) {
+        return std::unexpected("DebugExpr requires 6 elements");
+    }
+
+    if (!list[0].is<int64_t>()) return std::unexpected("ID must be integer");
+    int64_t id = list[0].get<int64_t>();
+
+    if (!list[2].is<std::string>()) return std::unexpected("Label must be string");
+    std::string label = list[2].get<std::string>();
+
+    if (!list[3].is<int64_t>()) return std::unexpected("Period must be integer");
+    int64_t period = list[3].get<int64_t>();
+
+    if (!list[4].is<int64_t>()) return std::unexpected("Consecutive must be integer");
+    int64_t consecutive = list[4].get<int64_t>();
+
+    if (!list[5].is<sexpr::ItemVec>()) return std::unexpected("Inputs must be a list");
+    auto inputsResult = resolveInputs(list[5].get<sexpr::ItemVec>());
+    if (!inputsResult) return std::unexpected(inputsResult.error());
+    if (inputsResult->size() != 1) return std::unexpected("DebugExpr requires exactly 1 input");
+
+    S expr = addExpr(new DebugExpr((*inputsResult)[0], label, period, consecutive));
+    exprMap[id] = expr;
+    return expr;
+}
+
 // Helper to parse operator symbols
 std::expected<UnaryOp, std::string> parseUnaryOp(sexpr::Symbol const& sym) {
     static std::unordered_map<std::string, UnaryOp> const opMap = {
@@ -1128,6 +1156,7 @@ std::expected<S, std::string> SExprGraphBuilder::parseExpr(sexpr::Item const& it
     else if (type == "SpectralChainExpr") return parseSpectralChainExpr(list);
     else if (type == "NoteParam") return parseNoteParam(list);
     else if (type == "Voicer") return parseVoicerExpr(list);
+    else if (type == "DebugExpr") return parseDebugExpr(list);
     else {
         return std::unexpected(std::format("Unknown expression type: {}", type));
     }

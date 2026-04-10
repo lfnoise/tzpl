@@ -164,6 +164,20 @@ VM::VM(usize poolSize, TypeUniverse& typeUniverse, const VMTarget& target)
     // cross-thread arcEnqueueForDeletion can find it from homeAllocator_.
     allocator_.setForeignDeleteQueue(&foreignDeleteQueue_);
 
+    // Register pressure relief: when the pool is exhausted, fully drain
+    // the deferred-delete queue to reclaim dead objects before giving up.
+    allocator_.setPressureRelief([](void* ud) -> bool {
+        VM* vm = static_cast<VM*>(ud);
+        vm->foreignDeleteQueue_.drainInto(vm->deferredDeleteQueue_);
+        vm->autoReleasePool_.drain();
+        u32 freed = 0;
+        while (!vm->deferredDeleteQueue_.empty()) {
+            vm->foreignDeleteQueue_.drainInto(vm->deferredDeleteQueue_);
+            freed += vm->deferredDeleteQueue_.processN(4096);
+        }
+        return freed > 0;
+    }, this);
+
     // Allocate register file from TLSF
     regs_ = static_cast<Word*>(allocator_.allocate(maxRegs_ * sizeof(Word)));
     if (!regs_) throw std::bad_alloc();

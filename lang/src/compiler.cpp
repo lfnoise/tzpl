@@ -155,6 +155,13 @@ const Compiler::DynVarInfo* Compiler::lookupDynVar(const std::string& name) cons
     return it != dynamicVars_.end() ? &it->second : nullptr;
 }
 
+void Compiler::refreshDynVarType(const std::string& name, Type* newType) {
+    auto it = dynamicVars_.find(name);
+    if (it != dynamicVars_.end()) {
+        it->second.type = newType;
+    }
+}
+
 // --- Foreign function registration ---
 
 void Compiler::registerForeignFunction(const std::string& name, Type* returnType,
