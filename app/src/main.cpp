@@ -673,7 +673,7 @@ int main(int argc, const char* argv[]) {
 
         // Use NRTVM for mutex-serialized access from multiple threads
         // (main thread for REPL/script, scheduler thread for timed events).
-        NRTVM nrtvm(64 * 1024 * 1024, types, target);
+        NRTVM nrtvm(256 * 1024 * 1024, types, target);
 
         // Create tempo-based NRT scheduler (60 BPM default, 50ms latency)
         ts::NRTTempoScheduler tempoScheduler(&nrtvm);
