@@ -688,10 +688,7 @@ int main(int argc, const char* argv[]) {
         appCtx.moduleCompiler = &moduleCompiler;
 
         bridge::setAppContextOnVM(&nrtvm.vm, &appCtx);
-        // NRT heartbeat disabled pending investigation of thread-safety
-        // issue in deferred delete processing. GC runs via gcHeartbeat()
-        // after each eval and scheduler handler, plus gc() builtin.
-        // nrtvm.startHeartbeat();
+        nrtvm.startHeartbeat();  // drain deferred deletes at ~50Hz
         tempoScheduler.start();
 
         if (startAudio) {

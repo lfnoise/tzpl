@@ -13,8 +13,8 @@
 #include <vector>
 #include <mutex>
 #include <atomic>
-#include <thread>
 #include <cstdio>
+#include <pthread.h>
 
 #include "repl_session.hpp"
 
@@ -96,7 +96,8 @@ struct EvalFlash {
 struct GuiState;  // forward
 
 struct AsyncEval {
-    std::thread thread;
+    pthread_t thread_{};
+    bool threadActive_ = false;
     std::atomic<bool> running{false};
 
     // Result (written by worker thread, read by main thread after running==false)

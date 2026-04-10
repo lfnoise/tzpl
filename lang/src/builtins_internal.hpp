@@ -34,7 +34,7 @@ namespace ts {
 // Registration helpers
 // ============================================================================
 
-using FuncMap = std::unordered_map<std::string, std::vector<FuncInfo>>;
+using FuncMap = std::unordered_map<std::string, std::deque<FuncInfo>>;
 
 inline void registerOne(Compiler& compiler, FuncMap& functions,
     const std::string& name, Type* returnType,
@@ -111,7 +111,11 @@ inline void txArray(VM& vm, u16 dst, Obj* src, ArrayType* at, F&& f) {
         auto* r = new PodArray<f64>(at); f(s->v, r->v); vm.reg(dst).o = r;
     } else {
         auto* s = static_cast<ObjArray*>(src);
-        auto* r = new ObjArray(at); f(s->v, r->v); vm.reg(dst).o = r;
+        auto* r = new ObjArray(at); f(s->v, r->v);
+        // Retain all Obj* elements copied into the new array.
+        // releaseChildren will release them when the array is destroyed.
+        for (auto* obj : r->v) { if (obj) obj->retain(); }
+        vm.reg(dst).o = r;
     }
 }
 

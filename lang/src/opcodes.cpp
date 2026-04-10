@@ -884,6 +884,7 @@ void op_concat_array(VM& vm, Code* pc) {
         result->v.reserve(arrA->v.size() + arrB->v.size());
         result->v.insert(result->v.end(), arrA->v.begin(), arrA->v.end());
         result->v.insert(result->v.end(), arrB->v.begin(), arrB->v.end());
+        for (auto* obj : result->v) { if (obj) obj->retain(); }
         vm.reg(dst).o = result;
     }
     DISPATCH(3);
@@ -982,6 +983,7 @@ void op_array_slice(VM& vm, Code* pc) {
         if (startIdx < arr->v.size()) {
             result->v.assign(arr->v.begin() + startIdx, arr->v.end());
         }
+        for (auto* obj : result->v) { if (obj) obj->retain(); }
         vm.reg(dst).o = result;
     }
     DISPATCH(3);
@@ -1114,8 +1116,10 @@ static void writeElem(Obj* arr, usize i, Word w, Type* elemType, VM& vm) {
         static_cast<PodArray<i64>*>(arr)->v[i] = w.i;
     else if (elemType == vm.floatType())
         static_cast<PodArray<f64>*>(arr)->v[i] = w.f;
-    else
+    else {
         static_cast<ObjArray*>(arr)->v[i] = w.o;
+        if (w.o) w.o->retain();
+    }
 }
 
 // --- Scalar conversion helpers ---
@@ -2107,7 +2111,12 @@ void op_array_set(VM& vm, Code* pc) {
         arr->v[cyclicIndex(idx, arr->v.size())] = vm.reg(valReg).f;
     } else {
         auto* arr = static_cast<ObjArray*>(vm.reg(arrReg).o);
-        arr->v[cyclicIndex(idx, arr->v.size())] = vm.reg(valReg).o;
+        auto ci = cyclicIndex(idx, arr->v.size());
+        Obj* oldVal = arr->v[ci];
+        Obj* newVal = vm.reg(valReg).o;
+        if (newVal) newVal->retain();
+        arr->v[ci] = newVal;
+        if (oldVal) oldVal->release();
     }
     DISPATCH(3);
 }

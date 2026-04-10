@@ -90,6 +90,13 @@ GCObj::GCObj() {
 }
 
 void* GCObj::operator new(usize size) {
+#if __has_feature(address_sanitizer)
+    // Under ASan, use system malloc so ASan can track each GCObj
+    // individually and detect use-after-free within the TLSF pool.
+    void* mem = ::malloc(size);
+    if (!mem) throw std::bad_alloc();
+    return mem;
+#else
     if (rt::gCurrentAllocator) {
         void* mem = rt::gCurrentAllocator->allocate(size);
         if (!mem) throw std::bad_alloc();
@@ -99,10 +106,14 @@ void* GCObj::operator new(usize size) {
     void* mem = ::malloc(size);
     if (!mem) throw std::bad_alloc();
     return mem;
+#endif
 }
 
 void GCObj::operator delete(void* ptr) noexcept {
     if (!ptr) return;
+#if __has_feature(address_sanitizer)
+    ::free(ptr);
+#else
     // Use the object's home allocator for deallocation. This is correct even
     // in cross-thread deletion scenarios: the object is always deleted by the
     // home VM's heartbeat, which has set gCurrentAllocator to the home
@@ -114,6 +125,7 @@ void GCObj::operator delete(void* ptr) noexcept {
     } else {
         ::free(ptr);
     }
+#endif
 }
 
 // Obj methods

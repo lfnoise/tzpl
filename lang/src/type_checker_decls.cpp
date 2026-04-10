@@ -420,17 +420,7 @@ void TypeChecker::inferFunctionReturnType(FnDeclNode* fn, FuncInfo* fi, bool isL
     }
     fi->inferring = true;
 
-    // Save state for pointer-stability guard.
-    // Body may contain a local fn with the same name, whose push_back on
-    // functions_[name] can reallocate the vector and invalidate fi.
-    // We only re-lookup if fi actually pointed into that vector.
-    u32 fiGlobalIndex = fi->globalIndex;
-    auto& overloads = functions_[fn->name];
-    FuncInfo* oldVecBegin = overloads.data();
-    size_t oldVecSize = overloads.size();
-    bool fiInVector = (fi >= oldVecBegin && fi < oldVecBegin + (ptrdiff_t)oldVecSize);
-
-    // Copy param types before body check (fi may be invalidated)
+    // Copy param types before body check (fi contents may be modified)
     std::vector<Type*> paramTypes = fi->paramTypes;
 
     // Set up capture tracking for local functions
@@ -469,16 +459,6 @@ void TypeChecker::inferFunctionReturnType(FnDeclNode* fn, FuncInfo* fi, bool isL
 
     // Check the body
     checkNode(fn->body.get());
-
-    // Re-lookup fi if the overloads vector reallocated and fi was in it
-    if (fiInVector && overloads.data() != oldVecBegin) {
-        for (auto& candidate : overloads) {
-            if (candidate.globalIndex == fiGlobalIndex) {
-                fi = &candidate;
-                break;
-            }
-        }
-    }
 
     // Extract trailing expression type from block
     Type* trailingType = getBlockTrailingType(fn->body.get());

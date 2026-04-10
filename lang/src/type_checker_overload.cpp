@@ -1001,7 +1001,7 @@ FuncInfo* TypeChecker::tryResolveTemplate(const std::string& name,
 
 FuncInfo* TypeChecker::tryResolveModuleTemplate(
     const std::string& name,
-    const std::vector<FuncInfo>& overloads,
+    const std::deque<FuncInfo>& overloads,
     const std::vector<Type*>& argTypes,
     CallExpr_* callExpr) {
 
@@ -1012,7 +1012,7 @@ FuncInfo* TypeChecker::tryResolveModuleTemplate(
     };
     std::vector<Match> matches;
 
-    for (auto& fi : const_cast<std::vector<FuncInfo>&>(overloads)) {
+    for (auto& fi : const_cast<std::deque<FuncInfo>&>(overloads)) {
         if (!fi.isTemplate) continue;
 
         // Built-in template: use the resolver callback

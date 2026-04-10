@@ -29,6 +29,7 @@
 #include "type_checker.hpp"
 #include <string>
 #include <vector>
+#include <deque>
 #include <unordered_map>
 #include <memory>
 #include <filesystem>
@@ -53,7 +54,7 @@ struct ExportEntry {
     std::string name;
     Type* type = nullptr;
     u32 globalIndex = 0;
-    std::vector<FuncInfo> funcOverloads;  // for overloaded functions
+    std::deque<FuncInfo> funcOverloads;  // for overloaded functions
     StructType* structType = nullptr;
     EnumType* enumType = nullptr;
     StructDeclNode* templateStructDecl = nullptr;
@@ -83,7 +84,7 @@ struct ModuleInfo {
     std::string sourceText;
 
     // All functions (including private) — needed for template body re-checking
-    std::unordered_map<std::string, std::vector<FuncInfo>> allFunctions;
+    std::unordered_map<std::string, std::deque<FuncInfo>> allFunctions;
     // All types from the module scope — needed for template body re-checking
     std::unordered_map<std::string, StructType*> allStructTypes;
     std::unordered_map<std::string, EnumType*> allEnumTypes;

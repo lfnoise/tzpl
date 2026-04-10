@@ -92,6 +92,11 @@ public:
     bool release() const {
         u32 rc = refcount_.load(std::memory_order_relaxed);
         if (rc >= kImmortalRefcount) return false;
+        if (rc == 0) {
+            // Already at zero -- caller is releasing an object that was
+            // already enqueued for deletion. Skip to avoid underflow.
+            return false;
+        }
         if (refcount_.fetch_sub(1, std::memory_order_acq_rel) == 1) {
             arcEnqueueForDeletion(const_cast<GCObj*>(this));
             return true;

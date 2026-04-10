@@ -53,7 +53,10 @@ void builtin_push_array(VM& vm, u16 dst, u16, u16 ab) {
     } else {
         auto* s = static_cast<ObjArray*>(src);
         auto* r = new ObjArray(at); r->v = s->v;
-        r->v.push_back(vm.reg(ab+1).o); vm.reg(dst).o = r;
+        for (auto* obj : r->v) { if (obj) obj->retain(); }
+        Obj* newElem = vm.reg(ab+1).o;
+        if (newElem) newElem->retain();
+        r->v.push_back(newElem); vm.reg(dst).o = r;
     }
 }
 
@@ -322,6 +325,7 @@ void builtin_sort_float_array(VM& vm, u16 dst, u16, u16 ab) {
 void builtin_sort_string_array(VM& vm, u16 dst, u16, u16 ab) {
     auto* s = static_cast<ObjArray*>(vm.reg(ab).o);
     auto* r = new ObjArray(static_cast<ArrayType*>(s->type_)); r->v = s->v;
+    for (auto* obj : r->v) { if (obj) obj->retain(); }
     std::sort(r->v.begin(), r->v.end(), [](Obj* a, Obj* b) {
         return static_cast<StringObj*>(a)->s < static_cast<StringObj*>(b)->s;
     });
@@ -436,6 +440,7 @@ void builtin_repeat_obj(VM& vm, u16 dst, u16, u16 ab) {
     auto* at = vm.arrayType(val->type_);
     auto* arr = new ObjArray(at);
     arr->v.resize((size_t)n, val);
+    for (auto* obj : arr->v) { if (obj) obj->retain(); }
     vm.reg(dst).o = arr;
 }
 
@@ -457,7 +462,9 @@ void builtin_cat_array(VM& vm, u16 dst, u16, u16 ab) {
         auto* r = new ObjArray(at);
         r->v = static_cast<ObjArray*>(a)->v;
         auto& bv = static_cast<ObjArray*>(b)->v;
-        for (auto& x : bv) r->v.push_back(x); vm.reg(dst).o = r;
+        for (auto& x : bv) r->v.push_back(x);
+        for (auto* obj : r->v) { if (obj) obj->retain(); }
+        vm.reg(dst).o = r;
     }
 }
 

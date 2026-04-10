@@ -1051,7 +1051,7 @@ Type* TypeChecker::inferCall(CallExpr_* expr) {
                     }
                     // First try concrete (non-template) overload match
                     FuncInfo* resolved = nullptr;
-                    for (auto& fi : const_cast<std::vector<FuncInfo>&>(entry.funcOverloads)) {
+                    for (auto& fi : const_cast<std::deque<FuncInfo>&>(entry.funcOverloads)) {
                         if (fi.isTemplate) continue;
                         if (fi.paramTypes.size() == argTypes.size()) {
                             bool match = true;
@@ -1076,7 +1076,7 @@ Type* TypeChecker::inferCall(CallExpr_* expr) {
                         // Fall back to first non-template overload if single
                         size_t concreteCount = 0;
                         FuncInfo* singleConcrete = nullptr;
-                        for (auto& fi : const_cast<std::vector<FuncInfo>&>(entry.funcOverloads)) {
+                        for (auto& fi : const_cast<std::deque<FuncInfo>&>(entry.funcOverloads)) {
                             if (!fi.isTemplate) {
                                 concreteCount++;
                                 singleConcrete = &fi;

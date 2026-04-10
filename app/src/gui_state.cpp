@@ -8,6 +8,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <cstring>
+#include <pthread.h>
 
 // ---------------------------------------------------------------------------
 // OutputBuffer
@@ -108,33 +109,52 @@ void EvalFlash::update(float deltaTime) {
 // ---------------------------------------------------------------------------
 
 AsyncEval::~AsyncEval() {
-    if (thread.joinable()) thread.join();
+    if (threadActive_) pthread_join(thread_, nullptr);
+}
+
+// Trampoline for pthread_create
+struct EvalArgs {
+    AsyncEval* self;
+    bridge::AppContext* ctx;
+    ts::REPLSession* session;
+};
+
+static void* evalThreadFunc(void* arg) {
+    auto* ea = static_cast<EvalArgs*>(arg);
+    {
+        std::lock_guard<std::mutex> lock(ea->ctx->nrtvm->mtx);
+        ea->ctx->nrtvm->vm.makeCurrent();
+        ea->self->result = ea->session->eval(ea->self->code);
+        ea->ctx->nrtvm->vm.gcHeartbeat();
+    }
+    ea->self->running.store(false);
+    delete ea;
+    return nullptr;
 }
 
 void AsyncEval::launch(const std::string& src, bridge::AppContext& ctx,
                        ts::REPLSession& session, int fs, int fe) {
     if (running.load()) return;
-    if (thread.joinable()) thread.join();
+    if (threadActive_) { pthread_join(thread_, nullptr); threadActive_ = false; }
 
     code = src;
     flashStart = fs;
     flashEnd = fe;
     running.store(true);
 
-    thread = std::thread([this, &ctx, &session] {
-        {
-            std::lock_guard<std::mutex> lock(ctx.nrtvm->mtx);
-            ctx.nrtvm->vm.makeCurrent();
-            result = session.eval(code);
-            ctx.nrtvm->vm.gcHeartbeat();
-        }
-        running.store(false);
-    });
+    auto* args = new EvalArgs{this, &ctx, &session};
+    pthread_attr_t attr;
+    pthread_attr_init(&attr);
+    pthread_attr_setstacksize(&attr, 8 * 1024 * 1024);  // 8MB stack
+    pthread_create(&thread_, &attr, evalThreadFunc, args);
+    pthread_attr_destroy(&attr);
+    threadActive_ = true;
 }
 
 bool AsyncEval::collect(GuiState& state) {
-    if (running.load() || !thread.joinable()) return false;
-    thread.join();
+    if (running.load() || !threadActive_) return false;
+    pthread_join(thread_, nullptr);
+    threadActive_ = false;
 
     // Separator between evaluations
     if (!state.output.lines().empty())

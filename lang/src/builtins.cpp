@@ -1527,8 +1527,11 @@ static bool resolve_toAnyArray(Compiler& compiler, const std::vector<Type*>& arg
 // ============================================================================
 
 static void builtin_gc(VM& vm, u16 dst, u16, u16) {
+    // Process ONLY the deferred delete queue. Do NOT drain the auto-release
+    // pool -- it keeps register-referenced objects alive during execution.
+    // processN skips objects with refcount > 0 (still pool-referenced),
+    // so only truly dead objects are deleted.
     vm.foreignDeleteQueue().drainInto(vm.deferredDeleteQueue());
-    vm.autoReleasePool().drain();
     while (!vm.deferredDeleteQueue().empty()) {
         vm.foreignDeleteQueue().drainInto(vm.deferredDeleteQueue());
         vm.deferredDeleteQueue().processN(4096);
@@ -1569,7 +1572,7 @@ static bool resolve_disassemble(Compiler& compiler, const std::vector<Type*>& ar
 // ============================================================================
 
 void registerBuiltinFunctions(Compiler& compiler,
-    std::unordered_map<std::string, std::vector<FuncInfo>>& functions)
+    std::unordered_map<std::string, std::deque<FuncInfo>>& functions)
 {
     // Register sub-module builtins
     registerMathBuiltins(compiler, functions);

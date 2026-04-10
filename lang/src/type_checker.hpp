@@ -29,6 +29,7 @@
 #include "type_system.hpp"
 #include <unordered_map>
 #include <vector>
+#include <deque>
 #include <functional>
 #include <set>
 
@@ -129,7 +130,7 @@ public:
     bool hasErrors() const { return !errors_.empty(); }
 
     // Access function table (for codegen to look up globals)
-    const std::unordered_map<std::string, std::vector<FuncInfo>>& functions() const { return functions_; }
+    const std::unordered_map<std::string, std::deque<FuncInfo>>& functions() const { return functions_; }
     const std::unordered_map<std::string, VarInfo>& globalVars() const { return globalVars_; }
 
     // Access dynamic variable registry (delegated to Compiler)
@@ -234,7 +235,7 @@ private:
     std::unordered_map<std::string, VarInfo> globalVars_;
 
     // Function table (supports overloading: multiple FuncInfos per name)
-    std::unordered_map<std::string, std::vector<FuncInfo>> functions_;
+    std::unordered_map<std::string, std::deque<FuncInfo>> functions_;
 
     // Synthetic std module (built from builtins, registered as importedModules_["std"])
     std::unique_ptr<ModuleInfo> stdModuleInfo_;
@@ -428,7 +429,7 @@ private:
                                  const std::vector<Type*>& argTypes,
                                  CallExpr_* callExpr);
     FuncInfo* tryResolveModuleTemplate(const std::string& name,
-                                       const std::vector<FuncInfo>& overloads,
+                                       const std::deque<FuncInfo>& overloads,
                                        const std::vector<Type*>& argTypes,
                                        CallExpr_* callExpr);
     FuncInfo* monomorphize(FuncInfo& templateFI,

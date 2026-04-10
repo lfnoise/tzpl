@@ -1100,7 +1100,6 @@ fn defSynth(synthFun GraphFn, synthName String) String {
 		println("ERROR compiling " $ synthName $ ": " $ err);
 	}
 
-	gc();
 	sexprString
 }
 

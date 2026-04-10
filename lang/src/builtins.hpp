@@ -30,7 +30,7 @@ namespace ts {
 
 // Register all built-in math functions into the function table
 void registerBuiltinFunctions(Compiler& compiler,
-    std::unordered_map<std::string, std::vector<FuncInfo>>& functions);
+    std::unordered_map<std::string, std::deque<FuncInfo>>& functions);
 
 } // namespace ts
 

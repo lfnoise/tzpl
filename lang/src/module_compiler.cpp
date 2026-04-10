@@ -101,7 +101,7 @@ static std::string readModuleFile(const std::string& path) {
 static void materializeForeignFunctions(
     Compiler& compiler,
     const std::vector<Compiler::ForeignFuncEntry>& entries,
-    std::unordered_map<std::string, std::vector<FuncInfo>>& functions)
+    std::unordered_map<std::string, std::deque<FuncInfo>>& functions)
 {
     for (const auto& entry : entries) {
         u32 idx = compiler.addGlobal(true);
@@ -220,7 +220,7 @@ ModuleInfo* ModuleCompiler::compileModule(
         modules_[cacheKey] = std::move(modPtr);
 
         // Materialize foreign functions into FuncInfo entries
-        std::unordered_map<std::string, std::vector<FuncInfo>> functions;
+        std::unordered_map<std::string, std::deque<FuncInfo>> functions;
         materializeForeignFunctions(compiler_, *foreignFuncs, functions);
 
         // Build exports (skip '_' prefixed — they are module-private)
@@ -332,7 +332,7 @@ ModuleInfo* ModuleCompiler::compileModule(
     for (const auto& [name, overloads] : typeChecker.functions()) {
         if (name.empty() || name[0] == '_') continue;
         bool allPrivate = true;
-        std::vector<FuncInfo> exportedOverloads;
+        std::deque<FuncInfo> exportedOverloads;
         for (const auto& fi : overloads) {
             if (fi.isBuiltin && !fi.isForeign) continue;
             bool isPriv = false;
