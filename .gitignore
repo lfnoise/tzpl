@@ -1,4 +1,5 @@
 build/
+build-asan/
 DerivedData/
 tzpl_dir/
 .DS_Store
