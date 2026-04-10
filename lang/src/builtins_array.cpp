@@ -308,6 +308,7 @@ void builtin_picks_array(VM& vm, u16 dst, u16, u16 ab) {
         auto* r = new ObjArray(at);
         r->v.resize((size_t)n);
         for (i64 i = 0; i < n; i++) r->v[i] = src->v[vm.rng().next() % len];
+        for (auto* obj : r->v) { if (obj) obj->retain(); }
         vm.reg(dst).o = r;
     }
 }

@@ -97,7 +97,7 @@ inline Obj* makeEmptyArray(ArrayType* at) {
 inline void arrayPush(VM& vm, Obj* a, Type* et, Word v) {
     if (et == vm.intType() || et == vm.boolType() || et == vm.symbolType()) static_cast<PodArray<i64>*>(a)->v.push_back(v.i);
     else if (et == vm.floatType()) static_cast<PodArray<f64>*>(a)->v.push_back(v.f);
-    else static_cast<ObjArray*>(a)->v.push_back(v.o);
+    else { if (v.o) v.o->retain(); static_cast<ObjArray*>(a)->v.push_back(v.o); }
 }
 
 template<typename F>
