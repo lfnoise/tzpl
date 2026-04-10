@@ -986,10 +986,14 @@ FuncInfo* TypeChecker::tryResolveTemplate(const std::string& name,
         }
     }
 
-    // For variadic templates, pass the inferArgTypes so monomorphize knows the variadic type
-    FuncInfo* result = monomorphize(*best->fi, best->bindings, best->typeArgs, callExpr);
-    if (result && best->fi->isVariadic && best->fi->fixedParamCount >= 0 && callExpr) {
-        callExpr->variadicPackStart = best->fi->fixedParamCount;
+    // Copy the FuncInfo fields we need BEFORE calling monomorphize, because
+    // monomorphize may push_back into functions_[name], reallocating the
+    // vector and invalidating the pointer best->fi.
+    FuncInfo bestFI = *best->fi;
+
+    FuncInfo* result = monomorphize(bestFI, best->bindings, best->typeArgs, callExpr);
+    if (result && bestFI.isVariadic && bestFI.fixedParamCount >= 0 && callExpr) {
+        callExpr->variadicPackStart = bestFI.fixedParamCount;
         callExpr->variadicPackType = result->paramTypes.back();
     }
     return result;
@@ -1085,7 +1089,10 @@ FuncInfo* TypeChecker::tryResolveModuleTemplate(
         }
     }
 
-    return monomorphize(*best->fi, best->bindings, best->typeArgs, callExpr);
+    // Copy before monomorphize -- it may push_back into the overloads
+    // vector, invalidating best->fi.
+    FuncInfo bestFI = *best->fi;
+    return monomorphize(bestFI, best->bindings, best->typeArgs, callExpr);
 }
 
 FuncInfo* TypeChecker::monomorphize(FuncInfo& templateFI,

@@ -281,7 +281,10 @@ public:
     void gcHeartbeat() {
         foreignDeleteQueue_.drainInto(deferredDeleteQueue_);
         autoReleasePool_.drain();
-        deferredDeleteQueue_.processN(256);
+        // Drain aggressively: 4096 items per heartbeat. With heartbeats
+        // running at ~50Hz (NRT) or per-buffer (RT), this is enough to
+        // keep up with heavy eval sessions like 21 defSynth calls.
+        deferredDeleteQueue_.processN(4096);
     }
 
     // ARC access

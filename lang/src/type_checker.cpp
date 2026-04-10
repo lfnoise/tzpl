@@ -233,6 +233,7 @@ void TypeChecker::registerBuiltins() {
         cases.push_back(UnionCase{"none", nullptr, noLoc});
         syntheticOptionDecl_ = std::make_unique<UnionDeclNode>(
             noLoc, "Option", std::vector<std::string>{"T"}, std::move(cases));
+        syntheticOptionDecl_->isPrivate = true;  // prevent export -- owned by TypeChecker, not module AST
         templateEnums_["Option"] = syntheticOptionDecl_.get();
     }
 
