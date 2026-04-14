@@ -122,6 +122,11 @@ u32 Compiler::numGlobals() const {
     return (u32)currentTarget_->allGlobals.size();
 }
 
+u32 Compiler::compileGlobalBase() const {
+    assert(currentTarget_ && "No current target set (call makeCurrent first)");
+    return currentTarget_->compileGlobalBase;
+}
+
 // --- RT restriction query ---
 
 bool Compiler::isRTRestricted() const {

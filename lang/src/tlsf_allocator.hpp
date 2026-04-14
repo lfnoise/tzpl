@@ -274,8 +274,13 @@ private:
     }
 
     BlockHeader* splitBlock(BlockHeader* block, usize size) {
+        // Guard against unsigned underflow: ensure there's room for both the
+        // requested payload AND a full remaining block (header + min payload).
+        if (block->size() < size + sizeof(BlockHeader) + kMinBlockSize) {
+            return nullptr;
+        }
         usize remaining = block->size() - size - sizeof(BlockHeader);
-        if (remaining >= kMinBlockSize) {
+        {
             // Split the block
             block->setSize(size);
 

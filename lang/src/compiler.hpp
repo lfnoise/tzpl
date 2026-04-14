@@ -181,6 +181,7 @@ public:
     Word& global(u32 idx);
     const Word& global(u32 idx) const;
     u32 numGlobals() const;
+    u32 compileGlobalBase() const;
 
     // Query whether the current VM target is RT-restricted
     bool isRTRestricted() const;

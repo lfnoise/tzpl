@@ -297,6 +297,20 @@ ModuleInfo* ModuleCompiler::compileModule(
     }
 
     typeChecker.check(program);
+
+    // Record dependencies even on failure so that cascade invalidation can
+    // reach this module when a dependency is fixed and recompiled. Without
+    // this, a failed module has empty dependencies and is invisible to the
+    // cascade, leaving it stuck as failed even after its deps are fixed.
+    // (sweepStaleModules also unconditionally drops failed modules as a
+    // safety net, but recording deps lets cascade work within a single sweep.)
+    mod->dependencies.clear();
+    for (auto* dep : typeChecker.allImportedModules()) {
+        if (dep && !dep->canonicalPath.empty()) {
+            mod->dependencies.push_back(dep->canonicalPath);
+        }
+    }
+
     if (typeChecker.hasErrors()) {
         mod->compilationErrors.insert(mod->compilationErrors.end(),
             typeChecker.errors().begin(), typeChecker.errors().end());
@@ -499,6 +513,15 @@ void ModuleCompiler::sweepStaleModules() {
     std::vector<std::string> stale;
     for (auto& [key, modPtr] : modules_) {
         if (modPtr->canonicalPath.empty()) continue;  // foreign-only module
+
+        // Always re-attempt previously-failed modules. Their dependency list
+        // is incomplete (only populated on success), so cascade invalidation
+        // from a fixed dependency cannot reach them.
+        if (modPtr->failed) {
+            stale.push_back(key);
+            continue;
+        }
+
         std::error_code ec;
         auto currentModTime = std::filesystem::last_write_time(modPtr->canonicalPath, ec);
         if (!ec && currentModTime != modPtr->fileModTime) {

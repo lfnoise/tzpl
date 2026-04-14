@@ -26,6 +26,7 @@
 #include "builtins.hpp"
 #include "value.hpp"
 #include "diagnostic.hpp"
+#include <unordered_set>
 
 namespace ts {
 
@@ -492,15 +493,19 @@ void TypeChecker::checkREPLInput(Program& program) {
     // evaluations whose modules may have since been re-compiled.
     allImportedModules_.clear();
 
+    // Snapshot mono instance count so codegen only processes instances created
+    // during this eval, avoiding dangling sourceModule pointers from previous
+    // evals whose modules may have been invalidated and freed.
+    snapshotMonoInstances();
+
     // monoCache_ holds template monomorphizations whose declNode pointers may
     // reference a now-destroyed AST after a dependent module re-compile.
-    // However, the REPL keeps all prior programs alive (programs vector), so
-    // declNode pointers remain valid across evaluations of the same session.
+    // REPL programs stay alive (programs vector), but MODULE ASTs are destroyed
+    // when the module is invalidated. checkImportDecl handles this by purging
+    // monoCache_ entries whose templateDecl matches stale module declNodes.
     // Clearing the cache unconditionally causes 100+ addGlobal calls per eval
     // (one per re-monomorphization), exhausting the rt pool within ~5 evals.
     //
-    // Instead, the cache is kept across evaluations. Module recompilation is
-    // handled by checkImportDecl which drops and re-adds stale overloads.
     // TODO: if a user redefines a template function body in the REPL, old
     // monomorphizations may still reference the previous body until the cache
     // is manually invalidated.
@@ -514,6 +519,44 @@ void TypeChecker::checkREPLInput(Program& program) {
 
     // If any import failed, stop here to avoid cascading errors
     if (hasErrors()) return;
+
+    // Purge stale function entries from modules that were invalidated during
+    // sweepStaleModules but not reimported in this eval. Their declNode and
+    // sourceModule pointers reference destroyed ASTs/ModuleInfos.
+    if (moduleCompiler_) {
+        // Collect stale template declNodes for mono cache cleanup
+        std::unordered_set<void*> staleDeclNodes;
+        for (auto& [name, overloads] : functions_) {
+            for (auto& fi : overloads) {
+                if (fi.sourceModulePath.empty() || fi.isBuiltin) continue;
+                if (!moduleCompiler_->getModule(fi.sourceModulePath)) {
+                    if (fi.isTemplate && fi.declNode) {
+                        staleDeclNodes.insert((void*)fi.declNode);
+                    }
+                }
+            }
+        }
+        // Remove all entries from invalidated modules
+        for (auto& [name, overloads] : functions_) {
+            overloads.erase(
+                std::remove_if(overloads.begin(), overloads.end(),
+                    [&](const FuncInfo& fi) {
+                        if (fi.sourceModulePath.empty() || fi.isBuiltin) return false;
+                        return !moduleCompiler_->getModule(fi.sourceModulePath);
+                    }),
+                overloads.end());
+        }
+        // Purge mono cache entries referencing stale templates
+        if (!staleDeclNodes.empty()) {
+            for (auto it = monoCache_.begin(); it != monoCache_.end(); ) {
+                if (staleDeclNodes.count(it->first.templateDecl)) {
+                    it = monoCache_.erase(it);
+                } else {
+                    ++it;
+                }
+            }
+        }
+    }
 
     // First pass: register all struct and enum type names (empty shells)
     for (auto& item : program.items) {

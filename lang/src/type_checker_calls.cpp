@@ -1239,7 +1239,7 @@ Type* TypeChecker::inferCall(CallExpr_* expr) {
         if (!isUntypedLambda && !isTemplateFuncRef && arg->kind == ASTNode::Identifier) {
             auto* argIdent = static_cast<IdentifierExpr*>(arg);
             VarInfo* vi = lookupVar(argIdent->name);
-            if (vi && dynamic_cast<TemplateLambdaType*>(vi->type)) {
+            if (vi && vi->type && dynamic_cast<TemplateLambdaType*>(vi->type)) {
                 isTemplateLambdaRef = true;
             }
         }
@@ -1304,7 +1304,7 @@ Type* TypeChecker::inferCall(CallExpr_* expr) {
             } else if (!lambda && arg->kind == ASTNode::Identifier) {
                 auto* argIdent = static_cast<IdentifierExpr*>(arg);
                 VarInfo* vi = lookupVar(argIdent->name);
-                if (vi) {
+                if (vi && vi->type) {
                     tmplLambdaType = dynamic_cast<TemplateLambdaType*>(vi->type);
                 }
             }

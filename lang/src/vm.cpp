@@ -273,7 +273,12 @@ void VM::install(const CompileResult& result) {
     // Validate target match when there are new globals to install
     if (!result.newGlobals.empty()) {
         assert(result.target == target_ && "CompileResult target does not match VM target");
-        assert(numGlobals() == result.globalBase && "VM globals out of sync — missed a prior install?");
+        if (numGlobals() != result.globalBase) {
+            throw std::runtime_error("VM globals out of sync: VM has "
+                + std::to_string(numGlobals()) + " globals but compiler expects base "
+                + std::to_string(result.globalBase) + " (delta "
+                + std::to_string((i64)numGlobals() - (i64)result.globalBase) + ")");
+        }
     }
 
     // Pre-allocate to avoid repeated TLSF reallocations during push_back,

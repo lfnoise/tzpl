@@ -832,6 +832,7 @@ namespace synthdef {
     void Synth::splitRates() {
         for (GenLoop* loop : loops) {
             switch (loop->rate.rate) {
+                case SignalRate::Const: initLoops.push_back(loop); break;
                 case SignalRate::Init: initLoops.push_back(loop); break;
                 case SignalRate::Reset: resetLoops.push_back(loop); break;
                 case SignalRate::Event: eventLoops.push_back(loop); break;
@@ -839,7 +840,7 @@ namespace synthdef {
                 default: break;
             }
         }
-        
+
     }
     
     string inputsString(S expr) {

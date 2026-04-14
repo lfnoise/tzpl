@@ -57,6 +57,48 @@ void TypeChecker::checkImportDecl(ImportDeclNode* decl) {
                 std::string moduleName = decl->modulePath.back();
                 importedModules_[moduleName] = mod;
             }
+            // Collect old template declNodes from this module before dropping
+            // them, so we can invalidate monoCache_ entries that reference
+            // now-destroyed AST nodes.
+            std::unordered_set<void*> staleDeclNodes;
+            for (const auto& [name, entry] : mod->exports) {
+                if (entry.kind != ExportEntry::Func) continue;
+                auto it = functions_.find(name);
+                if (it == functions_.end()) continue;
+                for (const auto& existing : it->second) {
+                    if (!existing.sourceModulePath.empty() &&
+                        existing.sourceModulePath == mod->canonicalPath &&
+                        existing.isTemplate && existing.declNode) {
+                        staleDeclNodes.insert((void*)existing.declNode);
+                    }
+                }
+            }
+
+            // If any templates were invalidated, purge stale monoCache_ entries
+            // and their resolved overloads in functions_. These hold declNode
+            // pointers into a now-destroyed module AST.
+            if (!staleDeclNodes.empty()) {
+                for (auto it = monoCache_.begin(); it != monoCache_.end(); ) {
+                    if (staleDeclNodes.count(it->first.templateDecl)) {
+                        it = monoCache_.erase(it);
+                    } else {
+                        ++it;
+                    }
+                }
+                // Also drop resolved mono overloads from functions_ whose
+                // declNode came from a stale module template.
+                for (auto& [fname, foverloads] : functions_) {
+                    foverloads.erase(
+                        std::remove_if(foverloads.begin(), foverloads.end(),
+                            [&](const FuncInfo& fi) {
+                                return !fi.isTemplate && !fi.isBuiltin &&
+                                       fi.declNode &&
+                                       staleDeclNodes.count((void*)fi.declNode);
+                            }),
+                        foverloads.end());
+                }
+            }
+
             for (const auto& [name, entry] : mod->exports) {
                 switch (entry.kind) {
                     case ExportEntry::Func: {

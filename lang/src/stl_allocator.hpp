@@ -75,6 +75,12 @@ public:
             throw std::bad_alloc();
         }
 
+#if __has_feature(address_sanitizer)
+        // Under ASan, always use system malloc so ASan can track allocations
+        void* p = ::malloc(n * sizeof(T));
+        if (!p) throw std::bad_alloc();
+        return static_cast<pointer>(p);
+#else
         if (!allocator_) {
             // Compile-thread path: use system allocator
             void* p = ::malloc(n * sizeof(T));
@@ -87,15 +93,20 @@ public:
             throw std::bad_alloc();
         }
         return static_cast<pointer>(p);
+#endif
     }
 
     void deallocate(pointer p, size_type n) noexcept {
         (void)n;  // n is not needed for deallocation
+#if __has_feature(address_sanitizer)
+        ::free(p);
+#else
         if (allocator_) {
             allocator_->deallocate(p);
         } else {
             ::free(p);
         }
+#endif
     }
 
     template <typename U, typename... Args>

@@ -120,6 +120,10 @@ void ListNode::force(VM& vm) {
         ListGenerator* gen = generator_;
         generator_ = nullptr;  // clear first to prevent re-entry
         gen->generate(vm, this);
+        // Release the old owner's retain on the generator.
+        // If the generator moved itself to a new tail node (retaining itself there),
+        // this just decrements; if not, it allows eventual deallocation.
+        reinterpret_cast<GCObj*>(gen)->release();
     }
 }
 

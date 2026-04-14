@@ -870,16 +870,46 @@ a[-<span class="num">2</span>]                    <span class="cmt">-- 20</span>
 <span class="str">"world"</span> greet println;  <span class="cmt">-- "hello world"</span></code></pre>
 
 <h3 id="operator-overloading">4.6 Operator Overloading</h3>
+<p>Define a function whose name is the operator symbol to overload it for custom types.
+The compiler tries built-in rules first; if none match, it looks up a user-defined function.</p>
+
+<h4>Overloadable Binary Operators</h4>
+<table>
+<tr><th>Category</th><th>Operators</th></tr>
+<tr><td>Arithmetic</td><td><code>+</code> &ensp; <code>-</code> &ensp; <code>*</code> &ensp; <code>/</code> &ensp; <code>%</code></td></tr>
+<tr><td>Comparison</td><td><code>==</code> &ensp; <code>!=</code> &ensp; <code>&lt;</code> &ensp; <code>&lt;=</code> &ensp; <code>&gt;</code> &ensp; <code>&gt;=</code></td></tr>
+<tr><td>Bitwise</td><td><code>&amp;</code> &ensp; <code>|</code> &ensp; <code>^</code> &ensp; <code>&lt;&lt;</code> &ensp; <code>&gt;&gt;</code> &ensp; <code>&gt;&gt;&gt;</code></td></tr>
+<tr><td>Concatenation / Cons</td><td><code>$</code> &ensp; <code>::</code></td></tr>
+<tr><td>Assignment</td><td><code>&lt;-</code> &ensp; <code>-&gt;</code></td></tr>
+</table>
+
+<h4>Overloadable Unary Operators</h4>
+<table>
+<tr><th>Operator</th><th>Meaning</th></tr>
+<tr><td><code>-</code></td><td>Negation</td></tr>
+<tr><td><code>!</code></td><td>Logical not</td></tr>
+<tr><td><code>~</code></td><td>Bitwise not</td></tr>
+</table>
+
+<h4>Not Overloadable</h4>
+<p><code>&&</code>, <code>||</code> (short-circuit logic), <code>//</code> (integer division), <code>|&gt;</code> (pipeline), and <code>[]</code> (indexing) cannot be overloaded.
+Use <code>call</code> (<a href="#callable-objects">4.11</a>) to make a type callable with <code>()</code>.</p>
+
+<h4>Example</h4>
 <pre><code><span class="kw">struct</span> Point { x <span class="kw">Float</span>, y <span class="kw">Float</span> }
 
 <span class="kw">fn</span> +(a Point, b Point) Point = Point { x: a.x + b.x, y: a.y + b.y };
 <span class="kw">fn</span> -(a Point, b Point) Point = Point { x: a.x - b.x, y: a.y - b.y };
 <span class="kw">fn</span> *(s <span class="kw">Float</span>, p Point) Point = Point { x: s * p.x, y: s * p.y };
+<span class="kw">fn</span> -(p Point) Point = Point { x: -p.x, y: -p.y };  <span class="cmt">-- unary negation</span>
+<span class="kw">fn</span> ==(a Point, b Point) <span class="kw">Bool</span> = a.x == b.x && a.y == b.y;
 
 <span class="kw">let</span> p1 = Point { x: <span class="num">1.0</span>, y: <span class="num">2.0</span> };
 <span class="kw">let</span> p2 = Point { x: <span class="num">3.0</span>, y: <span class="num">4.0</span> };
 println(p1 + p2);     <span class="cmt">-- Point { x: 4.0, y: 6.0 }</span>
-println(<span class="num">2.0</span> * p1);     <span class="cmt">-- Point { x: 2.0, y: 4.0 }</span></code></pre>
+println(<span class="num">2.0</span> * p1);     <span class="cmt">-- Point { x: 2.0, y: 4.0 }</span>
+println(-p1);          <span class="cmt">-- Point { x: -1.0, y: -2.0 }</span>
+println(p1 == p1);     <span class="cmt">-- true</span></code></pre>
 
 <h3 id="function-overloading">4.7 Function Overloading</h3>
 <pre><code><span class="kw">fn</span> describe(x <span class="kw">Int</span>) <span class="kw">String</span> = <span class="str">"an integer"</span>;

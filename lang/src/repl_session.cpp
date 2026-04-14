@@ -162,6 +162,22 @@ REPLSession::EvalResult REPLSession::eval(const std::string& input) {
             impl_->installPendingGlobals();
             return result;
         }
+
+        // Sync reused globals: when a REPL function is redefined, it reuses
+        // the old global index. genFnDecl stores the new CodeBlock in the
+        // compiler's globals, but installPendingGlobals only copies NEW globals
+        // (>= compileGlobalBase) to the VM. Manually update the VM for any
+        // pre-existing globals that were overwritten during codegen.
+        u32 base = impl_->compiler.compileGlobalBase();
+        for (auto& item : program.items) {
+            if (item->kind == ASTNode::FnDecl) {
+                auto* fn = static_cast<FnDeclNode*>(item.get());
+                u32 idx = (u32)fn->resolvedFuncGlobalIndex;
+                if (fn->resolvedFuncGlobalIndex >= 0 && idx < base) {
+                    impl_->vm.global(idx) = impl_->compiler.global(idx);
+                }
+            }
+        }
     }
 
     // Always harvest and install pending globals

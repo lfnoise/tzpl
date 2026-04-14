@@ -745,6 +745,7 @@ static void builtin_toList_range_int(VM& vm, u16 dst, u16, u16 argBase) {
     gen->isInfinite_ = range->isInfinite_;
     gen->listType_ = listType;
     node->generator_ = gen;
+    reinterpret_cast<GCObj*>(gen)->retain();
     vm.reg(dst).o = node;
 }
 
@@ -828,6 +829,11 @@ static void builtin_toList_range_fraction(VM& vm, u16 dst, u16, u16 argBase) {
     gen->isInfinite_ = range->isInfinite_;
     gen->listType_ = listType;
     node->generator_ = gen;
+    // Retain Obj* fields stored in the generator
+    if (gen->current_) gen->current_->retain();
+    if (gen->end_) gen->end_->retain();
+    if (gen->step_) gen->step_->retain();
+    reinterpret_cast<GCObj*>(gen)->retain();
     vm.reg(dst).o = node;
 }
 

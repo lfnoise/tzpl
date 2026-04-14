@@ -305,6 +305,14 @@ int TextEditor::InsertTextAt(Coordinates& /* inout */ aWhere, const char * aValu
 	return totalLines;
 }
 
+// Classify characters for word selection: 0=word (alnum/_), 1=whitespace, 2=punctuation
+static int CharClass(char c)
+{
+	if (c == '_' || isalnum((unsigned char)c)) return 0;
+	if (isspace((unsigned char)c)) return 1;
+	return 2;
+}
+
 static bool IsWordBoundary(char prev, char cur)
 {
 	// Break undo chunk at transitions between character classes
@@ -426,23 +434,17 @@ TextEditor::Coordinates TextEditor::FindWordStart(const Coordinates & aFrom) con
 	if (cindex >= (int)line.size())
 		return at;
 
-	while (cindex > 0 && isspace(line[cindex].mChar))
-		--cindex;
-
-	auto cstart = (PaletteIndex)line[cindex].mColorIndex;
+	auto cls = CharClass(line[cindex].mChar);
 	while (cindex > 0)
 	{
-		auto c = line[cindex].mChar;
-		if ((c & 0xC0) != 0x80)	// not UTF code sequence 10xxxxxx
+		auto c = line[cindex - 1].mChar;
+		if ((c & 0xC0) == 0x80)	// UTF-8 continuation byte
 		{
-			if (c <= 32 && isspace(c))
-			{
-				cindex++;
-				break;
-			}
-			if (cstart != (PaletteIndex)line[size_t(cindex - 1)].mColorIndex)
-				break;
+			--cindex;
+			continue;
 		}
+		if (CharClass(c) != cls)
+			break;
 		--cindex;
 	}
 	return Coordinates(at.mLine, GetCharacterColumn(at.mLine, cindex));
@@ -460,25 +462,176 @@ TextEditor::Coordinates TextEditor::FindWordEnd(const Coordinates & aFrom) const
 	if (cindex >= (int)line.size())
 		return at;
 
-	bool prevspace = isspace(line[cindex].mChar) != 0;
-	auto cstart = (PaletteIndex)line[cindex].mColorIndex;
+	auto cls = CharClass(line[cindex].mChar);
 	while (cindex < (int)line.size())
 	{
 		auto c = line[cindex].mChar;
 		auto d = UTF8CharLength(c);
-		if (cstart != (PaletteIndex)line[cindex].mColorIndex)
+		if (CharClass(c) != cls)
 			break;
-
-		if (prevspace != !!isspace(c))
-		{
-			if (isspace(c))
-				while (cindex < (int)line.size() && isspace(line[cindex].mChar))
-					++cindex;
-			break;
-		}
 		cindex += d;
 	}
 	return Coordinates(aFrom.mLine, GetCharacterColumn(aFrom.mLine, cindex));
+}
+
+bool TextEditor::TrySelectBetweenDelimiters(const Coordinates& aClick)
+{
+	if (aClick.mLine >= (int)mLines.size()) return false;
+	auto& clickLine = mLines[aClick.mLine];
+	auto cindex = GetCharacterIndex(aClick);
+	if (cindex >= (int)clickLine.size()) return false;
+
+	char c = clickLine[cindex].mChar;
+
+	// --- Paired bracket delimiters (with nesting) ---
+	struct BracketPair { char open; char close; };
+	static const BracketPair brackets[] = {{'(',')'}, {'{','}'}, {'[',']'}};
+
+	for (auto& bp : brackets)
+	{
+		bool isOpen = (c == bp.open);
+		bool isClose = (c == bp.close);
+		if (!isOpen && !isClose) continue;
+
+		// Scan for matching delimiter across lines
+		int depth = 1;
+		int scanLine = aClick.mLine;
+		int scanIdx = cindex;
+		int dir = isOpen ? 1 : -1;
+		scanIdx += dir; // move past the clicked delimiter
+
+		while (scanLine >= 0 && scanLine < (int)mLines.size())
+		{
+			auto& line = mLines[scanLine];
+			while (scanIdx >= 0 && scanIdx < (int)line.size())
+			{
+				char ch = line[scanIdx].mChar;
+				if (ch == bp.open) depth += dir;
+				else if (ch == bp.close) depth -= dir;
+				if (depth == 0)
+				{
+					// Found match. Select content between delimiters (exclusive).
+					Coordinates startCoord, endCoord;
+					if (isOpen)
+					{
+						startCoord = Coordinates(aClick.mLine, GetCharacterColumn(aClick.mLine, cindex + 1));
+						endCoord = Coordinates(scanLine, GetCharacterColumn(scanLine, scanIdx));
+					}
+					else
+					{
+						startCoord = Coordinates(scanLine, GetCharacterColumn(scanLine, scanIdx + 1));
+						endCoord = Coordinates(aClick.mLine, GetCharacterColumn(aClick.mLine, cindex));
+					}
+					SetSelection(startCoord, endCoord, SelectionMode::Normal);
+					return true;
+				}
+				scanIdx += dir;
+			}
+			scanLine += dir;
+			if (scanLine >= 0 && scanLine < (int)mLines.size())
+				scanIdx = dir > 0 ? 0 : (int)mLines[scanLine].size() - 1;
+		}
+		return false; // no match found
+	}
+
+	// --- Double quotes ---
+	if (c == '"')
+	{
+		// Scan right for matching quote on the same line
+		for (int i = cindex + 1; i < (int)clickLine.size(); ++i)
+		{
+			if (clickLine[i].mChar == '"')
+			{
+				auto startCoord = Coordinates(aClick.mLine, GetCharacterColumn(aClick.mLine, cindex + 1));
+				auto endCoord = Coordinates(aClick.mLine, GetCharacterColumn(aClick.mLine, i));
+				SetSelection(startCoord, endCoord, SelectionMode::Normal);
+				return true;
+			}
+		}
+		// Scan left for matching quote on the same line
+		for (int i = cindex - 1; i >= 0; --i)
+		{
+			if (clickLine[i].mChar == '"')
+			{
+				auto startCoord = Coordinates(aClick.mLine, GetCharacterColumn(aClick.mLine, i + 1));
+				auto endCoord = Coordinates(aClick.mLine, GetCharacterColumn(aClick.mLine, cindex));
+				SetSelection(startCoord, endCoord, SelectionMode::Normal);
+				return true;
+			}
+		}
+		return false;
+	}
+
+	// --- Block comment delimiters /* */ (with nesting) ---
+	bool isBlockOpen = false;
+	bool isBlockClose = false;
+
+	if (c == '/' && cindex + 1 < (int)clickLine.size() && clickLine[cindex + 1].mChar == '*')
+		isBlockOpen = true;
+	else if (c == '*' && cindex + 1 < (int)clickLine.size() && clickLine[cindex + 1].mChar == '/')
+		isBlockClose = true;
+	// Also handle clicking the second char of the delimiter
+	else if (c == '*' && cindex > 0 && clickLine[cindex - 1].mChar == '/')
+		{ isBlockOpen = true; cindex--; }  // adjust to start of /*
+	else if (c == '/' && cindex > 0 && clickLine[cindex - 1].mChar == '*')
+		{ isBlockClose = true; cindex--; } // adjust to start of */
+
+	if (isBlockOpen || isBlockClose)
+	{
+		int depth = 1;
+		int scanLine = aClick.mLine;
+		int scanIdx = cindex + (isBlockOpen ? 2 : -1); // skip past the 2-char delimiter
+		int dir = isBlockOpen ? 1 : -1;
+
+		while (scanLine >= 0 && scanLine < (int)mLines.size())
+		{
+			auto& line = mLines[scanLine];
+			while (scanIdx >= 0 && scanIdx < (int)line.size())
+			{
+				char ch = line[scanIdx].mChar;
+				// Check for /* (two-char lookahead)
+				if (ch == '/' && scanIdx + 1 < (int)line.size() && line[scanIdx + 1].mChar == '*')
+				{
+					if (dir > 0) depth++;
+					else { depth--; if (depth == 0) { goto block_found_open; } }
+					scanIdx += dir > 0 ? 2 : -2; // skip both chars of delimiter
+					continue;
+				}
+				// Check for */
+				if (ch == '*' && scanIdx + 1 < (int)line.size() && line[scanIdx + 1].mChar == '/')
+				{
+					if (dir < 0) depth++;
+					else { depth--; if (depth == 0) { goto block_found_close; } }
+					scanIdx += dir > 0 ? 2 : -2;
+					continue;
+				}
+				scanIdx += dir > 0 ? 1 : -1;
+			}
+			scanLine += dir;
+			if (scanLine >= 0 && scanLine < (int)mLines.size())
+				scanIdx = dir > 0 ? 0 : (int)mLines[scanLine].size() - 1;
+		}
+		return false;
+
+	block_found_open:
+		{
+			// Scanning backward found opening /*. Select from after /* to before */
+			auto startCoord = Coordinates(scanLine, GetCharacterColumn(scanLine, scanIdx + 2));
+			auto endCoord = Coordinates(aClick.mLine, GetCharacterColumn(aClick.mLine, cindex));
+			SetSelection(startCoord, endCoord, SelectionMode::Normal);
+			return true;
+		}
+	block_found_close:
+		{
+			// Scanning forward found closing */. Select from after /* to before */
+			auto startCoord = Coordinates(aClick.mLine, GetCharacterColumn(aClick.mLine, cindex + 2));
+			auto endCoord = Coordinates(scanLine, GetCharacterColumn(scanLine, scanIdx));
+			SetSelection(startCoord, endCoord, SelectionMode::Normal);
+			return true;
+		}
+	}
+
+	return false;
 }
 
 TextEditor::Coordinates TextEditor::FindNextWord(const Coordinates & aFrom) const
@@ -857,11 +1010,14 @@ void TextEditor::HandleMouseInputs()
 				if (!ctrl)
 				{
 					mState.mCursorPosition = mInteractiveStart = mInteractiveEnd = ScreenPosToCoordinates(ImGui::GetMousePos());
-					if (mSelectionMode == SelectionMode::Line)
-						mSelectionMode = SelectionMode::Normal;
-					else
-						mSelectionMode = SelectionMode::Word;
-					SetSelection(mInteractiveStart, mInteractiveEnd, mSelectionMode);
+					if (!TrySelectBetweenDelimiters(mState.mCursorPosition))
+					{
+						if (mSelectionMode == SelectionMode::Line)
+							mSelectionMode = SelectionMode::Normal;
+						else
+							mSelectionMode = SelectionMode::Word;
+						SetSelection(mInteractiveStart, mInteractiveEnd, mSelectionMode);
+					}
 				}
 
 				mLastClick = (float)ImGui::GetTime();
@@ -2357,6 +2513,7 @@ void TextEditor::ColorizeInternal()
 		auto endIndex = 0;
 		auto commentStartLine = endLine;
 		auto commentStartIndex = endIndex;
+		auto commentDepth = 0;
 		auto withinString = false;
 		auto withinSingleLineComment = false;
 		auto withinPreproc = false;
@@ -2438,11 +2595,15 @@ void TextEditor::ColorizeInternal()
 						else if (!withinSingleLineComment && currentIndex + startStr.size() <= line.size() &&
 							equals(startStr.begin(), startStr.end(), from, from + startStr.size(), pred))
 						{
-							commentStartLine = currentLine;
-							commentStartIndex = currentIndex;
+							if (commentDepth == 0)
+							{
+								commentStartLine = currentLine;
+								commentStartIndex = currentIndex;
+							}
+							commentDepth++;
 						}
 
-						inComment = inComment = (commentStartLine < currentLine || (commentStartLine == currentLine && commentStartIndex <= currentIndex));
+						inComment = (commentStartLine < currentLine || (commentStartLine == currentLine && commentStartIndex <= currentIndex));
 
 						line[currentIndex].mMultiLineComment = inComment;
 						line[currentIndex].mComment = withinSingleLineComment;
@@ -2451,8 +2612,13 @@ void TextEditor::ColorizeInternal()
 						if (currentIndex + 1 >= (int)endStr.size() &&
 							equals(endStr.begin(), endStr.end(), from + 1 - endStr.size(), from + 1, pred))
 						{
-							commentStartIndex = endIndex;
-							commentStartLine = endLine;
+							if (commentDepth > 0)
+								commentDepth--;
+							if (commentDepth == 0)
+							{
+								commentStartIndex = endIndex;
+								commentStartLine = endLine;
+							}
 						}
 					}
 				}

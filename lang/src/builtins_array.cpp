@@ -135,6 +135,7 @@ static void builtin_urands_list(VM& vm, u16 dst, u16, u16) {
     auto* gen = new UrandsListGen(vm.typeType());
     gen->listType_ = lt;
     node->generator_ = gen;
+    reinterpret_cast<GCObj*>(gen)->retain();
     vm.reg(dst).o = node;
 }
 
@@ -158,6 +159,7 @@ static void builtin_brands_list(VM& vm, u16 dst, u16, u16) {
     auto* gen = new BrandsListGen(vm.typeType());
     gen->listType_ = lt;
     node->generator_ = gen;
+    reinterpret_cast<GCObj*>(gen)->retain();
     vm.reg(dst).o = node;
 }
 
@@ -183,6 +185,7 @@ static void builtin_irands_list(VM& vm, u16 dst, u16, u16 ab) {
     gen->hi_ = vm.reg(ab+1).i;
     gen->listType_ = lt;
     node->generator_ = gen;
+    reinterpret_cast<GCObj*>(gen)->retain();
     vm.reg(dst).o = node;
 }
 
@@ -213,6 +216,7 @@ static void builtin_xrands_list(VM& vm, u16 dst, u16, u16 ab) {
     gen->hi_ = vm.reg(ab+1).f;
     gen->listType_ = lt;
     node->generator_ = gen;
+    reinterpret_cast<GCObj*>(gen)->retain();
     vm.reg(dst).o = node;
 }
 
@@ -248,6 +252,7 @@ static void builtin_rands_list(VM& vm, u16 dst, u16, u16 ab) {
     gen->hi_ = vm.reg(ab+1).f;
     gen->listType_ = lt;
     node->generator_ = gen;
+    reinterpret_cast<GCObj*>(gen)->retain();
     vm.reg(dst).o = node;
 }
 
@@ -277,6 +282,9 @@ void builtin_picks_list(VM& vm, u16 dst, u16, u16 ab) {
     gen->elemType_ = at->elemType_;
     gen->listType_ = lt;
     node->generator_ = gen;
+    // Retain the array held by the generator
+    gen->array_->retain();
+    reinterpret_cast<GCObj*>(gen)->retain();
     vm.reg(dst).o = node;
 }
 

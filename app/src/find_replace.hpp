@@ -59,6 +59,7 @@ private:
 
     bool needsResearch_ = false;
     bool focusFindField_ = false;
+    bool selectAllPending_ = false;
 };
 
 #endif

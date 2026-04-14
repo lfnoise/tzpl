@@ -240,8 +240,11 @@ void EditorPanel::draw(float width, float height, GuiState& state) {
         editor.Render(tabs_[activeTab_].editorTitle.c_str());
 
         // Track modifications (latch on; cleared by save)
-        if (editor.IsTextChanged())
+        if (editor.IsTextChanged()) {
             tabs_[activeTab_].modified = true;
+            // Refresh search highlights so they match the edited text
+            updateSearchHighlights();
+        }
     }
 
     ImGui::EndChild();
@@ -396,6 +399,7 @@ void EditorPanel::updateSearchHighlights() {
     auto* ed = activeEditor();
     if (!ed) return;
     if (findReplace_.visible && findReplace_.findBuf[0] != '\0') {
+        findReplace_.search(*ed);  // re-search against current text
         ed->SetSearchHighlights(findReplace_.buildHighlights());
     } else {
         ed->ClearSearchHighlights();

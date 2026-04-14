@@ -37,6 +37,7 @@ static std::string::size_type findCaseInsensitive(const std::string& haystack,
 void FindReplaceState::show() {
     visible = true;
     focusFindField_ = true;
+    selectAllPending_ = true;
 }
 
 void FindReplaceState::hide() {
@@ -160,23 +161,39 @@ void FindReplaceState::search(TextEditor& editor) {
 
 void FindReplaceState::findNext(TextEditor& editor) {
     if (findBuf[0] == '\0') return;
-    if (matches.empty()) {
-        search(editor);
-        if (matches.empty()) return;
-    }
 
-    currentMatchIndex = (currentMatchIndex + 1) % (int)matches.size();
+    // Always re-search so matches reflect the current text.
+    search(editor);
+    if (matches.empty()) return;
+
+    // Find the first match strictly after the cursor position.
+    auto cursor = editor.GetCursorPosition();
+    currentMatchIndex = 0; // wrap to first if nothing is after cursor
+    for (int i = 0; i < (int)matches.size(); ++i) {
+        if (matches[i].start > cursor) {
+            currentMatchIndex = i;
+            break;
+        }
+    }
     goToCurrentMatch(editor);
 }
 
 void FindReplaceState::findPrevious(TextEditor& editor) {
     if (findBuf[0] == '\0') return;
-    if (matches.empty()) {
-        search(editor);
-        if (matches.empty()) return;
-    }
 
-    currentMatchIndex = (currentMatchIndex - 1 + (int)matches.size()) % (int)matches.size();
+    // Always re-search so matches reflect the current text.
+    search(editor);
+    if (matches.empty()) return;
+
+    // Find the last match strictly before the cursor position.
+    auto cursor = editor.GetCursorPosition();
+    currentMatchIndex = (int)matches.size() - 1; // wrap to last if nothing is before cursor
+    for (int i = (int)matches.size() - 1; i >= 0; --i) {
+        if (matches[i].start < cursor) {
+            currentMatchIndex = i;
+            break;
+        }
+    }
     goToCurrentMatch(editor);
 }
 
@@ -248,9 +265,26 @@ float FindReplaceState::drawBar(float panelWidth, TextEditor& editor) {
         focusFindField_ = false;
     }
 
+    // While selectAllPending_, attach a callback that selects all text.
+    // The flag persists across frames until the widget is active and the
+    // callback actually fires, handling the one-frame delay from
+    // SetKeyboardFocusHere().
+    auto selectAllCallback = [](ImGuiInputTextCallbackData* data) -> int {
+        data->SelectAll();
+        // Signal that select-all fired by storing a flag in UserData.
+        *static_cast<bool*>(data->UserData) = true;
+        return 0;
+    };
+    bool selectAllFired = false;
+
     ImGui::SetNextItemWidth(fieldWidth);
     bool findEnter = ImGui::InputText("##find", findBuf, sizeof(findBuf),
-                                       ImGuiInputTextFlags_EnterReturnsTrue);
+                                       ImGuiInputTextFlags_EnterReturnsTrue
+                                       | (selectAllPending_ ? ImGuiInputTextFlags_CallbackAlways : 0),
+                                       selectAllPending_ ? +selectAllCallback : nullptr,
+                                       selectAllPending_ ? &selectAllFired : nullptr);
+    if (selectAllFired)
+        selectAllPending_ = false;
     if (ImGui::IsItemEdited()) {
         search(editor);
         highlightsChanged = true;

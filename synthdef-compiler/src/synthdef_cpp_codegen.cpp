@@ -385,6 +385,7 @@ struct CppCodeGen {
     string genDeclConstVars();
 
     string genDelayAlloc();
+    string genDelayInit();
     string genDelayDealloc();
     string genDelayAdvance(Graph* graph);
     string genBufDecls();
@@ -1385,7 +1386,7 @@ struct ExprCodegenVisitor : ExprVisitor {
         }
     }
     void visit(DelayWrite* p) override { fixme(p); }
-    void visit(DelayInit* p) override { fixme(p); }
+    void visit(DelayInit* p) override {}
     void visit(BufFixRead* p) override {
         int ser = p->sampleBuf->serial;
         string bufPtr = FMT("p->buf{}", ser);
@@ -2475,6 +2476,43 @@ string CppCodeGen::genDelayAlloc() {
     return s;
 }
 
+string CppCodeGen::genDelayInit() {
+    string s;
+    for (auto delay : synth->delayBufs) {
+        if (isVoicerSubgraph(delay->graph)) continue;
+        for (S expr : delay->initters) {
+            auto* init = expr.as<DelayInit>();
+            string value = genExpr(init->in0(), vx(0));
+            usize offset = init->offset;
+            int ser = delay->serial;
+            if (delay->chans == 1) {
+                if (delay->allocSize == 1) {
+                    s += FMT("\tp->d{} = {};\n", ser, value);
+                } else if (delay->allocSize > 1) {
+                    s += FMT("\tp->d{}[(0ull - {}ull) & {}] = {};\n",
+                        ser, offset, delay->allocSize - 1, value);
+                } else {
+                    s += FMT("\tp->d{}[(0ull - {}ull) & p->d{}_mask] = {};\n",
+                        ser, offset, ser, value);
+                }
+            } else {
+                for (int j = 0; j < delay->chans; ++j) {
+                    if (delay->allocSize == 1) {
+                        s += FMT("\tp->d{}[{}] = {};\n", ser, j, value);
+                    } else if (delay->allocSize > 1) {
+                        s += FMT("\tp->d{}[{}][(0ull - {}ull) & {}] = {};\n",
+                            ser, j, offset, delay->allocSize - 1, value);
+                    } else {
+                        s += FMT("\tp->d{}[{}][(0ull - {}ull) & p->d{}_mask] = {};\n",
+                            ser, j, offset, ser, value);
+                    }
+                }
+            }
+        }
+    }
+    return s;
+}
+
 string CppCodeGen::genDelayDealloc() {
     string s;
     // Top-level delays
@@ -2618,6 +2656,7 @@ string CppCodeGen::genInitFun() {
         inFlatVoiceMode = false;
     }
     s += genDelayAlloc();
+    s += genDelayInit();
 
     // Initialize buffer pointers to null
     for (B buf : synth->sampleBufs) {

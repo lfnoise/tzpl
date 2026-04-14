@@ -559,6 +559,7 @@ static void builtin_get_map(VM& vm, u16 dst, u16, u16 ab) {
         auto* e = new Enum(optType);
         e->which_ = 0;  // some
         e->word_ = it->second;
+        if (optType->gcCases_[0] && e->word_.o) e->word_.o->retain();
         vm.reg(dst).o = e;
     } else {
         auto* e = new Enum(optType);
@@ -586,6 +587,15 @@ static void builtin_put_map(VM& vm, u16 dst, u16, u16 ab) {
     auto* result = new MapObj(mt);
     result->entries_ = map->entries_;
     result->entries_[vm.reg(ab + 1)] = vm.reg(ab + 2);
+    // Retain all Obj* keys and values in the new map
+    bool keyIsObj = mt->keyType_->isObjType();
+    bool valIsObj = mt->valueType_->isObjType();
+    if (keyIsObj || valIsObj) {
+        for (auto& [k, v] : result->entries_) {
+            if (keyIsObj && k.o) k.o->retain();
+            if (valIsObj && v.o) v.o->retain();
+        }
+    }
     vm.reg(dst).o = result;
 }
 
@@ -596,6 +606,15 @@ static void builtin_remove_map(VM& vm, u16 dst, u16, u16 ab) {
     auto* result = new MapObj(mt);
     result->entries_ = map->entries_;
     result->entries_.erase(vm.reg(ab + 1));
+    // Retain all Obj* keys and values in the new map
+    bool keyIsObj = mt->keyType_->isObjType();
+    bool valIsObj = mt->valueType_->isObjType();
+    if (keyIsObj || valIsObj) {
+        for (auto& [k, v] : result->entries_) {
+            if (keyIsObj && k.o) k.o->retain();
+            if (valIsObj && v.o) v.o->retain();
+        }
+    }
     vm.reg(dst).o = result;
 }
 
@@ -656,6 +675,15 @@ static void builtin_merge_map(VM& vm, u16 dst, u16, u16 ab) {
     result->entries_ = a->entries_;
     for (auto& [k, v] : b->entries_) {
         result->entries_[k] = v;
+    }
+    // Retain all Obj* keys and values in the new map
+    bool keyIsObj = mt->keyType_->isObjType();
+    bool valIsObj = mt->valueType_->isObjType();
+    if (keyIsObj || valIsObj) {
+        for (auto& [k, v] : result->entries_) {
+            if (keyIsObj && k.o) k.o->retain();
+            if (valIsObj && v.o) v.o->retain();
+        }
     }
     vm.reg(dst).o = result;
 }
@@ -901,6 +929,7 @@ static void builtin_ref_symbol(VM& vm, u16 dst, u16, u16 ab) {
 static void builtin_ref_obj(VM& vm, u16 dst, u16, u16 ab) {
     auto* ref = new RefValue(vm.refType(vm.reg(ab).o->type_));
     ref->value_ = vm.reg(ab);
+    if (ref->value_.o) ref->value_.o->retain();
     vm.reg(dst).o = ref;
 }
 
@@ -913,8 +942,14 @@ static void builtin_deref(VM& vm, u16 dst, u16, u16 ab) {
 // setref(T, Ref<T>) -> T
 static void builtin_setref(VM& vm, u16 dst, u16, u16 ab) {
     auto* ref = static_cast<RefValue*>(vm.reg(ab + 1).o);
-    ref->value_ = vm.reg(ab);
-    vm.reg(dst) = vm.reg(ab);
+    auto* refType = static_cast<RefType*>(ref->type_);
+    Word newVal = vm.reg(ab);
+    if (refType->elemType_->isObjType()) {
+        if (newVal.o) newVal.o->retain();
+        if (ref->value_.o) ref->value_.o->release();
+    }
+    ref->value_ = newVal;
+    vm.reg(dst) = newVal;
 }
 
 // --- Ref template resolvers ---
@@ -1045,6 +1080,12 @@ static void builtin_add_set(VM& vm, u16 dst, u16, u16 ab) {
     auto* result = new SetObj(st);
     result->entries_ = src->entries_;
     result->entries_.insert(vm.reg(ab + 1));
+    // Retain all Obj* elements
+    if (st->elemType_->isObjType()) {
+        for (auto& elem : result->entries_) {
+            if (elem.o) elem.o->retain();
+        }
+    }
     vm.reg(dst).o = result;
 }
 
@@ -1055,6 +1096,12 @@ static void builtin_remove_set(VM& vm, u16 dst, u16, u16 ab) {
     auto* result = new SetObj(st);
     result->entries_ = src->entries_;
     result->entries_.erase(vm.reg(ab + 1));
+    // Retain all Obj* elements
+    if (st->elemType_->isObjType()) {
+        for (auto& elem : result->entries_) {
+            if (elem.o) elem.o->retain();
+        }
+    }
     vm.reg(dst).o = result;
 }
 
@@ -1072,6 +1119,12 @@ static void builtin_union_set(VM& vm, u16 dst, u16, u16 ab) {
     auto* result = new SetObj(st);
     result->entries_ = a->entries_;
     for (auto& elem : b->entries_) result->entries_.insert(elem);
+    // Retain all Obj* elements
+    if (st->elemType_->isObjType()) {
+        for (auto& elem : result->entries_) {
+            if (elem.o) elem.o->retain();
+        }
+    }
     vm.reg(dst).o = result;
 }
 
@@ -1084,6 +1137,12 @@ static void builtin_intersection_set(VM& vm, u16 dst, u16, u16 ab) {
     for (auto& elem : a->entries_) {
         if (b->entries_.count(elem)) result->entries_.insert(elem);
     }
+    // Retain all Obj* elements
+    if (st->elemType_->isObjType()) {
+        for (auto& elem : result->entries_) {
+            if (elem.o) elem.o->retain();
+        }
+    }
     vm.reg(dst).o = result;
 }
 
@@ -1095,6 +1154,12 @@ static void builtin_difference_set(VM& vm, u16 dst, u16, u16 ab) {
     auto* result = new SetObj(st);
     for (auto& elem : a->entries_) {
         if (!b->entries_.count(elem)) result->entries_.insert(elem);
+    }
+    // Retain all Obj* elements
+    if (st->elemType_->isObjType()) {
+        for (auto& elem : result->entries_) {
+            if (elem.o) elem.o->retain();
+        }
     }
     vm.reg(dst).o = result;
 }
@@ -1450,6 +1515,7 @@ static void builtin_any_single(VM& vm, u16 dst, u16, u16 argBase) {
     any->value_ = vm.reg(argBase);
     any->wrappedType_ = wrappedType;
     any->isObjType_ = wrappedType->isObjType();
+    if (any->isObjType_ && any->value_.o) any->value_.o->retain();
     vm.reg(dst).o = any;
 }
 
@@ -1475,6 +1541,7 @@ static void builtin_any_variadic(VM& vm, u16 dst, u16, u16 argBase) {
         any->value_ = tuple->v[i];
         any->wrappedType_ = tupleType->fields_[i];
         any->isObjType_ = tupleType->fields_[i]->isObjType();
+        if (any->isObjType_ && any->value_.o) any->value_.o->retain();
         arr->push(any);
     }
     vm.reg(dst).o = arr;
@@ -1506,6 +1573,7 @@ static void builtin_toAnyArray(VM& vm, u16 dst, u16, u16 argBase) {
         any->value_ = tuple->v[i];
         any->wrappedType_ = tupleType->fields_[i];
         any->isObjType_ = tupleType->fields_[i]->isObjType();
+        if (any->isObjType_ && any->value_.o) any->value_.o->retain();
         arr->push(any);
     }
     vm.reg(dst).o = arr;

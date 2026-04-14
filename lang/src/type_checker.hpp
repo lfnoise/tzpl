@@ -197,6 +197,8 @@ public:
 
     // Template function support
     const std::vector<FuncInfo*>& monoInstances() const { return monoInstances_; }
+    size_t monoInstancesWatermark() const { return monoInstancesWatermark_; }
+    void snapshotMonoInstances() { monoInstancesWatermark_ = monoInstances_.size(); }
     void recheckTemplateBody(FnDeclNode* decl, FuncInfo* fi,
                              const std::unordered_map<std::string, Type*>& bindings);
 
@@ -292,6 +294,7 @@ private:
     };
     std::unordered_map<MonoKey, FuncInfo*, MonoKeyHash> monoCache_;
     std::vector<FuncInfo*> monoInstances_;
+    size_t monoInstancesWatermark_ = 0;  // index of first new mono instance for current REPL eval
     std::vector<std::unique_ptr<FuncInfo>> monoStorage_;  // owns mono FuncInfos for pointer stability
 
     // Template struct/enum monomorphization caches

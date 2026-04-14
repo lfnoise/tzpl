@@ -381,9 +381,14 @@ CodeBlock* CodeGen::generate(Program& program, bool isModule) {
         }
     }
 
-    // Generate monomorphized template instances
-    for (FuncInfo* fi : typeChecker_.monoInstances()) {
-        genMonoInstance(*fi);
+    // Generate monomorphized template instances created during this eval only.
+    // In REPL mode, previous evals' instances may have stale declNode/sourceModule
+    // pointers if modules were invalidated between evals.
+    {
+        const auto& monoInsts = typeChecker_.monoInstances();
+        for (size_t i = typeChecker_.monoInstancesWatermark(); i < monoInsts.size(); ++i) {
+            genMonoInstance(*monoInsts[i]);
+        }
     }
 
     // Second pass: generate code for top-level statements (non-fn/struct-decl items)
@@ -435,9 +440,12 @@ CodeBlock* CodeGen::generateREPL(Program& program) {
         }
     }
 
-    // Generate monomorphized template instances
-    for (FuncInfo* fi : typeChecker_.monoInstances()) {
-        genMonoInstance(*fi);
+    // Generate monomorphized template instances created during this eval only.
+    // Previous evals' instances are already code-generated, and their sourceModule
+    // pointers may be dangling if modules were invalidated between evals.
+    const auto& monoInsts = typeChecker_.monoInstances();
+    for (size_t i = typeChecker_.monoInstancesWatermark(); i < monoInsts.size(); ++i) {
+        genMonoInstance(*monoInsts[i]);
     }
 
     // Second pass: generate all top-level statements except the last item

@@ -27,6 +27,8 @@
 #include "type_system.hpp"
 #include <cstdio>
 #include <algorithm>
+#include <stdexcept>
+#include <string>
 #include <type_traits>
 
 namespace ts {
@@ -648,7 +650,15 @@ void op_call(VM& vm, Code* pc) {
     u32 calleeIdx = (u32)pc[2].i;
 
     // Get the callee's CodeBlock from the global variable
+    if (calleeIdx >= vm.numGlobals()) {
+        throw std::runtime_error("op_call: global index " + std::to_string(calleeIdx)
+            + " out of range (VM has " + std::to_string(vm.numGlobals()) + " globals)");
+    }
     CodeBlock* callee = static_cast<CodeBlock*>(vm.global(calleeIdx).p);
+    if (!callee) {
+        throw std::runtime_error("op_call: null CodeBlock at global index " + std::to_string(calleeIdx)
+            + " (VM has " + std::to_string(vm.numGlobals()) + " globals)");
+    }
 
     // Use flat register file (even when inside a coroutine)
     u32 newBase = vm.baseReg() + argBase;
@@ -929,6 +939,9 @@ void op_concat_list(VM& vm, Code* pc) {
     gen->first_ = nodeA; gen->second_ = nodeB;
     gen->inSecond_ = false; gen->listType_ = listType;
     node->generator_ = gen;
+    gen->first_->retain();
+    gen->second_->retain();
+    reinterpret_cast<GCObj*>(gen)->retain();
     vm.reg(dst).o = node;
     DISPATCH(3);
 }
@@ -1378,6 +1391,10 @@ static Word dispatchListBinop(VM& vm, Op op, Word a, Word b,
     }
 
     node->generator_ = gen;
+    if (gen->leftList_) gen->leftList_->retain();
+    if (gen->rightList_) gen->rightList_->retain();
+    if (gen->broadcastValIsObj_ && gen->broadcastVal_.o) gen->broadcastVal_.o->retain();
+    reinterpret_cast<GCObj*>(gen)->retain();
     return Word(static_cast<Obj*>(node));
 }
 
@@ -1509,6 +1526,8 @@ static Word dispatchListUnaryOp(VM& vm, Op op, Word a, Type* aType, ListType* re
     gen->resultListType_ = resultLT;
 
     node->generator_ = gen;
+    gen->source_->retain();
+    reinterpret_cast<GCObj*>(gen)->retain();
     return Word(static_cast<Obj*>(node));
 }
 
@@ -1806,14 +1825,24 @@ void BinopListGen::generate(VM& vm, ListNode* owner) {
         atEnd = (nextRight == nullptr);
     }
 
+    if (resultElemType_->isObjType() && owner->head_.o) owner->head_.o->retain();
+
     if (atEnd) {
         owner->tail_ = nullptr;
     } else {
         auto* tailNode = new ListNode(resultListType_);
+        // Retain new, release old for field mutations
+        if (nextLeft) nextLeft->retain();
+        if (leftList_) leftList_->release();
         leftList_ = nextLeft;
+        if (nextRight) nextRight->retain();
+        if (rightList_) rightList_->release();
         rightList_ = nextRight;
+        // Retain generator and tail for owner
         tailNode->generator_ = this;
+        reinterpret_cast<GCObj*>(this)->retain();
         owner->tail_ = tailNode;
+        tailNode->retain();
     }
 }
 
@@ -1836,6 +1865,7 @@ void UnaryListGen::generate(VM& vm, ListNode* owner) {
                                             sourceElemType_, resultElemType_);
             break;
     }
+    if (resultElemType_->isObjType() && owner->head_.o) owner->head_.o->retain();
 
     // Create lazy tail
     ListNode* nextSource = source_->tail_;
@@ -1843,9 +1873,13 @@ void UnaryListGen::generate(VM& vm, ListNode* owner) {
         owner->tail_ = nullptr;
     } else {
         auto* tailNode = new ListNode(resultListType_);
+        if (nextSource) nextSource->retain();
+        if (source_) source_->release();
         source_ = nextSource;
         tailNode->generator_ = this;
+        reinterpret_cast<GCObj*>(this)->retain();
         owner->tail_ = tailNode;
+        tailNode->retain();
     }
 }
 
@@ -1884,7 +1918,9 @@ void RangeListGen::generate(VM& vm, ListNode* owner) {
         auto* tailNode = new ListNode(listType_);
         current_ = next;
         tailNode->generator_ = this;
+        reinterpret_cast<GCObj*>(this)->retain();
         owner->tail_ = tailNode;
+        tailNode->retain();
     }
 }
 
@@ -1909,6 +1945,7 @@ void FractionRangeListGen::generate(VM& vm, ListNode* owner) {
 
     // Set head to current value
     owner->head_.o = current_;
+    if (current_) current_->retain();
 
     // Compute next value and check if there will be more elements
     r64 next = cur + stp;
@@ -1924,9 +1961,14 @@ void FractionRangeListGen::generate(VM& vm, ListNode* owner) {
         owner->tail_ = nullptr;
     } else {
         auto* tailNode = new ListNode(listType_);
+        auto* oldCurrent = current_;
         current_ = new Fraction(next);
+        current_->retain();
+        if (oldCurrent) oldCurrent->release();
         tailNode->generator_ = this;
+        reinterpret_cast<GCObj*>(this)->retain();
         owner->tail_ = tailNode;
+        tailNode->retain();
     }
 }
 
@@ -2035,6 +2077,7 @@ void op_make_enum(VM& vm, Code* pc) {
     auto* e = new Enum(enumType);
     e->which_ = caseIdx;
     e->word_ = vm.reg(valSrc);
+    if (enumType->gcCases_[caseIdx] && e->word_.o) e->word_.o->retain();
     vm.reg(dst).o = e;
     DISPATCH(3);
 }
@@ -2144,6 +2187,9 @@ void op_cons(VM& vm, Code* pc) {
     auto* node = new ListNode(listType);
     node->head_ = vm.reg(head);
     node->tail_ = static_cast<ListNode*>(vm.reg(tail).o);
+    // Retain stored Obj* fields
+    if (listType->elemType_->isObjType() && node->head_.o) node->head_.o->retain();
+    if (node->tail_) node->tail_->retain();
     vm.reg(dst).o = node;
     DISPATCH(3);
 }
@@ -2154,11 +2200,14 @@ void op_make_list(VM& vm, Code* pc) {
     u16 dst = pc[1].regs[0], firstSrc = pc[1].regs[1], count = pc[1].regs[2];
     auto* listType = static_cast<ListType*>(pc[2].p);
 
+    bool elemIsObj = listType->elemType_->isObjType();
     ListNode* result = nullptr;
     for (int i = (int)count - 1; i >= 0; --i) {
         auto* node = new ListNode(listType);
         node->head_ = vm.reg(firstSrc + (u16)i);
         node->tail_ = result;
+        if (elemIsObj && node->head_.o) node->head_.o->retain();
+        if (node->tail_) node->tail_->retain();
         result = node;
     }
     vm.reg(dst).o = result;
@@ -2442,6 +2491,12 @@ void op_make_range(VM& vm, Code* pc) {
     if (!isInfinite) {
         range->end_ = vm.reg(endReg);
     }
+    // Retain Obj* fields for non-Int ranges (e.g. Fraction ranges)
+    if (!isInt) {
+        if (range->start_.o) range->start_.o->retain();
+        if (range->step_.o) range->step_.o->retain();
+        if (!isInfinite && range->end_.o) range->end_.o->retain();
+    }
     vm.reg(dst).o = range;
     DISPATCH(4);
 }
@@ -2490,6 +2545,14 @@ void op_make_lazy_automap(VM& vm, Code* pc) {
         gen->broadcastVals_[i] = vm.reg(broadcastBase + i);
     }
     node->generator_ = gen;
+    // Retain Obj* fields stored in generator
+    if (srcList) srcList->retain();
+    gen->info_->retain();
+    for (u16 i = 0; i < numBroadcast && i < AutoMapListGen::kMaxBroadcast; ++i) {
+        if (i < info->broadcastArgs.size() && info->broadcastArgs[i].isObj && gen->broadcastVals_[i].o)
+            gen->broadcastVals_[i].o->retain();
+    }
+    reinterpret_cast<GCObj*>(gen)->retain();
     vm.reg(dst).o = node;
     DISPATCH(3);
 }
@@ -2502,10 +2565,14 @@ void op_make_map(VM& vm, Code* pc) {
     auto* mapType = static_cast<MapType*>(pc[2].p);
 
     auto* map = new MapObj(mapType);
+    bool keyIsObj = mapType->keyType_->isObjType();
+    bool valIsObj = mapType->valueType_->isObjType();
     for (u16 i = 0; i < numPairs; ++i) {
         Word key = vm.reg(firstKV + i * 2);
         Word val = vm.reg(firstKV + i * 2 + 1);
         map->entries_[key] = val;
+        if (keyIsObj && key.o) key.o->retain();
+        if (valIsObj && val.o) val.o->retain();
     }
     vm.reg(dst).o = map;
     DISPATCH(3);
@@ -2536,6 +2603,7 @@ void op_map_get_option(VM& vm, Code* pc) {
     if (it != map->entries_.end()) {
         e->which_ = 0;  // some
         e->word_ = it->second;
+        if (optType->gcCases_[0] && e->word_.o) e->word_.o->retain();
     } else {
         e->which_ = 1;  // none
         e->word_.i = 0;
@@ -2552,8 +2620,11 @@ void op_make_set(VM& vm, Code* pc) {
     auto* setType = static_cast<SetType*>(pc[2].p);
 
     auto* set = new SetObj(setType);
+    bool elemIsObj = setType->elemType_->isObjType();
     for (u16 i = 0; i < numElems; ++i) {
-        set->entries_.insert(vm.reg(firstSrc + i));
+        Word w = vm.reg(firstSrc + i);
+        set->entries_.insert(w);
+        if (elemIsObj && w.o) w.o->retain();
     }
     vm.reg(dst).o = set;
     DISPATCH(3);
@@ -2568,6 +2639,7 @@ void op_make_ref(VM& vm, Code* pc) {
 
     auto* ref = new RefValue(refType);
     ref->value_ = vm.reg(valReg);
+    if (refType->elemType_->isObjType() && ref->value_.o) ref->value_.o->retain();
     vm.reg(dst).o = ref;
     DISPATCH(3);
 }
@@ -2585,9 +2657,14 @@ void op_ref_get(VM& vm, Code* pc) {
 void op_ref_set(VM& vm, Code* pc) {
     u16 dst = pc[1].regs[0], refReg = pc[1].regs[1], valReg = pc[1].regs[2];
     auto* ref = static_cast<RefValue*>(vm.reg(refReg).o);
-
-    ref->value_ = vm.reg(valReg);
-    vm.reg(dst) = vm.reg(valReg);
+    auto* refType = static_cast<RefType*>(ref->type_);
+    Word newVal = vm.reg(valReg);
+    if (refType->elemType_->isObjType()) {
+        if (newVal.o) newVal.o->retain();
+        if (ref->value_.o) ref->value_.o->release();
+    }
+    ref->value_ = newVal;
+    vm.reg(dst) = newVal;
 
     DISPATCH(3);
 }
@@ -2845,6 +2922,7 @@ void op_coro_wrap_option(VM& vm, Code* pc) {
     } else {
         e->which_ = 0;  // some
         e->word_ = vm.reg(valSrc);
+        if (optType->gcCases_[0] && e->word_.o) e->word_.o->retain();
     }
     vm.reg(dst).o = e;
     DISPATCH(3);
@@ -2861,6 +2939,7 @@ void op_make_any(VM& vm, Code* pc) {
     any->value_ = vm.reg(src);
     any->wrappedType_ = wrappedType;
     any->isObjType_ = isObj;
+    if (isObj && any->value_.o) any->value_.o->retain();
     vm.reg(dst).o = any;
     DISPATCH(3);
 }
