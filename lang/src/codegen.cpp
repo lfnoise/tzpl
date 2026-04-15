@@ -614,6 +614,7 @@ void CodeGen::genImportDecl(ImportDeclNode* decl) {
 }
 
 void CodeGen::genLetDecl(LetDeclNode* decl) {
+    u16 savedNextReg = nextReg_;
     u16 reg = genExpr(static_cast<Expr*>(decl->init.get()));
 
     // Pattern destructuring
@@ -626,6 +627,16 @@ void CodeGen::genLetDecl(LetDeclNode* decl) {
     // Handle numeric tower promotion if declared type differs from init type
     if (decl->resolvedType != decl->init->resolvedType) {
         reg = ensureType(reg, decl->init->resolvedType, decl->resolvedType);
+    }
+
+    // If the initializer returned an existing (borrowed) register -- e.g. a
+    // bare identifier reference -- copy into a fresh register so later
+    // mutations of the source don't silently change this binding's value.
+    if (reg < savedNextReg) {
+        u16 dst = allocReg();
+        emitOp(op_mov);
+        emitRegs(dst, reg);
+        reg = dst;
     }
 
     // Check if this is a global (no local scopes)
@@ -660,6 +671,7 @@ void CodeGen::genVarDecl(VarDeclNode* decl) {
         return;
     }
 
+    u16 savedNextReg = nextReg_;
     u16 reg = genExpr(static_cast<Expr*>(decl->init.get()));
 
     // Pattern destructuring
@@ -672,6 +684,16 @@ void CodeGen::genVarDecl(VarDeclNode* decl) {
     // Handle numeric tower promotion if declared type differs from init type
     if (decl->resolvedType != decl->init->resolvedType) {
         reg = ensureType(reg, decl->init->resolvedType, decl->resolvedType);
+    }
+
+    // Mutable binding must own its register. If the initializer returned an
+    // existing (borrowed) register, copy into a fresh one so assignments to
+    // this var don't mutate the source.
+    if (reg < savedNextReg) {
+        u16 dst = allocReg();
+        emitOp(op_mov);
+        emitRegs(dst, reg);
+        reg = dst;
     }
 
     auto it = typeChecker_.globalVars().find(decl->name);
