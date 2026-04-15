@@ -27,9 +27,11 @@
 
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace engine { struct Engine; }
 namespace ts {
+    class VM;
     struct NRTVM;
     struct VMTargetData;
     using VMTarget = std::shared_ptr<VMTargetData>;
@@ -51,6 +53,13 @@ class NatsDispatcher;
 
 namespace bridge {
 
+// Per-silo RT VM state. Created by attachVM(), destroyed by detachVM().
+struct SiloVMState {
+    ts::VM* vm = nullptr;
+    ts::VMTarget target;
+    std::unique_ptr<ts::ModuleCompiler> moduleCompiler;
+};
+
 struct AppContext {
     engine::Engine* engine = nullptr;
     ts::NRTVM* nrtvm = nullptr;
@@ -64,6 +73,7 @@ struct AppContext {
     nats::NatsClient* natsClient = nullptr;
     nats::NatsDispatcher* natsDispatcher = nullptr;
     std::string engineName;  // empty = single-instance mode
+    std::vector<SiloVMState> siloVMs;  // indexed by silo number
 };
 
 } // namespace bridge

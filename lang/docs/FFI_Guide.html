@@ -432,6 +432,15 @@ if (localStorage.getItem('tzpl-docs-theme') === 'light') document.documentElemen
         <li><a href="#synthdef-examples">Examples</a></li>
       </ol>
     </li>
+    <li><a href="#silo-vm">Silo VM</a>
+      <ol>
+        <li><a href="#silo-vm-overview">Overview</a></li>
+        <li><a href="#silo-vm-functions">Functions</a></li>
+        <li><a href="#silo-vm-lifecycle">Lifecycle</a></li>
+        <li><a href="#silo-vm-rt-restrictions">RT Restrictions</a></li>
+        <li><a href="#silo-vm-examples">Examples</a></li>
+      </ol>
+    </li>
   </ol>
 </nav>
 
@@ -1155,7 +1164,7 @@ args[<span class="num">1</span>].i = <span class="num">48000</span>;
   <li>Every function (built-in, foreign, or user-defined) has an <code>rtSafe</code> attribute.</li>
   <li><strong>User-defined functions</strong> default to <code>rtSafe = true</code>. This is safe because the type checker transitively prevents them from calling non-RT-safe functions&mdash;if any call site within the function body targets a non-RT-safe function, that call fails to compile.</li>
   <li><strong>Foreign functions</strong> default to <code>rtSafe = false</code>. The host must explicitly opt in by passing <code>rtSafe = true</code> at registration time.</li>
-  <li><strong>Built-in functions</strong> default to <code>rtSafe = true</code>, except for I/O functions like <code>print</code> and <code>println</code>.</li>
+  <li><strong>Built-in functions</strong> default to <code>rtSafe = true</code>, except for <code>gc</code> and <code>disassemble</code>.</li>
 </ul>
 
 <div class="warning">
@@ -1176,18 +1185,18 @@ ts::<span class="typ">VMTarget</span> target = compiler.<span class="fn">createT
 
 <p>With RT restriction enabled, compiling this code:</p>
 
-<pre><code><span class="fn">println</span>(<span class="str">"hello"</span>);   <span class="cmt">-- println is not RT-safe</span></code></pre>
+<pre><code><span class="fn">gc</span>();   <span class="cmt">-- gc is not RT-safe</span></code></pre>
 
 <p>Produces a compile error:</p>
 
 <pre><code>Type error [script.x:1:1]
   |
-1 | println("hello");
-  | ^-----^
-  Function 'println' is not real-time safe and cannot be called
+1 | gc();
+  | ^^
+  Function 'gc' is not real-time safe and cannot be called
   when compiling for a real-time VM</code></pre>
 
-<p>Meanwhile, math functions like <code>sin</code>, <code>cos</code>, <code>sqrt</code>, and all user-defined functions that don't transitively call non-RT-safe functions compile without error.</p>
+<p>Meanwhile, most built-in functions (including <code>print</code> and <code>println</code> for debugging) and all user-defined functions that don't transitively call non-RT-safe functions compile without error.</p>
 
 
 <!-- -------------------------------- -->
@@ -1225,7 +1234,12 @@ ts::<span class="typ">VMTarget</span> target = compiler.<span class="fn">createT
   </tr>
   <tr>
     <td>I/O</td>
-    <td><code>print</code>, <code>println</code></td>
+    <td><code>print</code>, <code>println</code>, <code>fmt</code></td>
+    <td>Yes</td>
+  </tr>
+  <tr>
+    <td>Debug / GC</td>
+    <td><code>gc</code>, <code>disassemble</code></td>
     <td><strong>No</strong></td>
   </tr>
 </table>
@@ -2534,6 +2548,125 @@ nats.<span class="fn">onMessageS</span>(<span class="str">"nodes.piano.chords"</
 } <span class="kw">else</span> {
     <span class="fn">println</span>(<span class="str">"Compiled successfully (not loaded into engine)"</span>);
 };</code></pre>
+
+<!-- ================================================================ -->
+<h2 id="silo-vm">13. Silo VM</h2>
+
+<!-- -------------------------------- -->
+<h3 id="silo-vm-overview">13.1 Overview</h3>
+
+<p>Each engine silo can optionally have a Tzopilotl VM attached for event-driven scripting on the real-time audio thread. The silo VM is separate from the main NRT VM&mdash;it has its own TLSF memory pool, its own global variables, and its own compilation target with <code>rtRestricted = true</code>.</p>
+
+<p>The silo VM is <strong>event-driven</strong>: it does not run per-sample or per-buffer. Code sent via <code>siloEval</code> is compiled on an NRT thread and then executed on the silo's RT thread. Between events, the VM is idle. A per-buffer GC heartbeat drains the deferred-delete queue to reclaim dead objects.</p>
+
+<p>All functions are registered under the <code>audio_engine</code> foreign module:</p>
+
+<pre><code><span class="kw">import</span> audio_engine.*;</code></pre>
+
+<!-- -------------------------------- -->
+<h3 id="silo-vm-functions">13.2 Functions</h3>
+
+<table>
+  <tr><th>Function</th><th>Description</th></tr>
+  <tr>
+    <td><code>attachVM(siloIndex Int) Int</code></td>
+    <td>Create a new VM (16 MB TLSF pool) and attach it to the specified silo. The VM is compiled with <code>rtRestricted = true</code>. Returns <code>0</code> on success, or an error code if the silo index is out of range or a VM is already attached.</td>
+  </tr>
+  <tr>
+    <td><code>detachVM(siloIndex Int) Int</code></td>
+    <td>Detach the VM from the specified silo and destroy it. The detach happens on the RT thread (the silo stops using the VM), and deletion happens on the engine's NRT command thread. Returns <code>0</code> on success.</td>
+  </tr>
+  <tr>
+    <td><code>siloEval(siloIndex Int, code String) Int</code></td>
+    <td>Compile <code>code</code> with the silo's RT-restricted target on the calling NRT thread, then send the compiled result to the silo for installation and execution on the RT thread. Module imports (e.g., <code>import audio_engine.*;</code>) are supported. Returns <code>0</code> on success; compile errors are printed to stderr.</td>
+  </tr>
+</table>
+
+<p>All three functions are <strong>NRT-only</strong>&mdash;they must be called from the main NRT VM (e.g., from the REPL, a script, or an OSC/NATS handler). They cannot be called from within RT code.</p>
+
+<!-- -------------------------------- -->
+<h3 id="silo-vm-lifecycle">13.3 Lifecycle</h3>
+
+<ol>
+  <li><strong>Attach</strong>: <code>attachVM(siloIndex)</code> creates a fresh VM with its own memory pool and an <code>rtRestricted</code> compilation target. A separate module compiler cache is created so that modules compiled for the RT target don't collide with the NRT target's cache.</li>
+  <li><strong>Evaluate</strong>: <code>siloEval(siloIndex, code)</code> compiles on the NRT thread, then sends two commands through the silo's lock-free FIFO:
+    <ul>
+      <li>A <strong>code install</strong> command that extends the VM's globals.</li>
+      <li>An <strong>execute</strong> command that runs the top-level block on the RT thread.</li>
+    </ul>
+    Multiple <code>siloEval</code> calls accumulate globals incrementally, like the REPL.
+  </li>
+  <li><strong>Detach</strong>: <code>detachVM(siloIndex)</code> nulls the silo's VM pointer on the RT thread, then deletes the VM on the NRT command thread. This two-phase approach ensures the RT thread never accesses a deleted VM.</li>
+</ol>
+
+<div class="note">
+  <strong>Note:</strong> <code>siloEval</code> bypasses the command bundling API (<code>begin</code>/<code>go</code>), so it can be called safely inside or outside of a command bundle without conflict.
+</div>
+
+<!-- -------------------------------- -->
+<h3 id="silo-vm-rt-restrictions">13.4 RT Restrictions</h3>
+
+<p>Code compiled for the silo VM uses <code>rtRestricted = true</code>. This means:</p>
+
+<ul>
+  <li><code>print</code> and <code>println</code> are allowed (for debugging).</li>
+  <li><code>gc</code> and <code>disassemble</code> are rejected at compile time.</li>
+  <li>Non-RT-safe foreign functions (e.g., <code>loadPlugins</code>, <code>compileSynthDef</code>) are rejected at compile time.</li>
+  <li>All user-defined functions that only call RT-safe functions are permitted.</li>
+  <li>Engine command functions (<code>begin</code>, <code>newNode</code>, <code>connect</code>, <code>setControl</code>, <code>noteOn</code>, etc.) are available.</li>
+</ul>
+
+<!-- -------------------------------- -->
+<h3 id="silo-vm-examples">13.5 Examples</h3>
+
+<h4>Basic: attach, evaluate, detach</h4>
+
+<pre><code><span class="kw">import</span> audio_engine.*;
+
+<span class="fn">attachVM</span>(<span class="num">0</span>);
+
+<span class="cmt">-- This runs on silo 0's RT thread</span>
+<span class="fn">siloEval</span>(<span class="num">0</span>, <span class="str">"
+    println(42);
+"</span>);
+
+<span class="fn">detachVM</span>(<span class="num">0</span>);</code></pre>
+
+<h4>Building an audio graph from the silo VM</h4>
+
+<pre><code><span class="kw">import</span> audio_engine.*;
+
+<span class="fn">engineStart</span>();
+<span class="fn">attachVM</span>(<span class="num">0</span>);
+
+<span class="cmt">-- Compile and execute RT code on silo 0</span>
+<span class="fn">siloEval</span>(<span class="num">0</span>, <span class="str">"
+    import audio_engine.*;
+    begin(0);
+    newNode(\"SinOsc\", 100);
+    connect(100, 0, 0, 0);
+    go();
+"</span>);
+
+<span class="cmt">-- Later: clean up</span>
+<span class="fn">detachVM</span>(<span class="num">0</span>);</code></pre>
+
+<h4>Incremental evaluation (globals persist)</h4>
+
+<pre><code><span class="kw">import</span> audio_engine.*;
+
+<span class="fn">attachVM</span>(<span class="num">0</span>);
+
+<span class="cmt">-- First eval: define a variable</span>
+<span class="fn">siloEval</span>(<span class="num">0</span>, <span class="str">"var counter = 0;"</span>);
+
+<span class="cmt">-- Second eval: use it (globals persist across evals)</span>
+<span class="fn">siloEval</span>(<span class="num">0</span>, <span class="str">"
+    counter = counter + 1;
+    println(counter);
+"</span>);
+
+<span class="fn">detachVM</span>(<span class="num">0</span>);</code></pre>
 
 </main>
 <script>

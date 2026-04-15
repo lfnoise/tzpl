@@ -43,6 +43,49 @@ fn smoothSawTest() S {
 smoothSawTest defSynth("smoothSawTest") println;
 
 
+fn smoothSquareTest() S {
+	let s = 1/5 sinosc(0.75) bilin(1, 8);
+	[100, 100.13] smoothSquare(s) mul(0.2) fadein(0.1) outlet
+}
+
+smoothSquareTest defSynth("smoothSquareTest") println;
+
+
+fn usinWinUsinTest() S {
+	let s = 1/5 sinosc(0.75) bilin(1, 16);
+	[100, 100.13] usinWinUsin(s) mul(0.2) fadein(0.1) outlet
+
+}
+
+usinWinUsinTest defSynth("usinWinUsinTest") println;
+
+fn usinWinSinTest() S {
+	let s = 1/5 sinosc(0.75) bilin(1, 16);
+	[100, 100.13] usinWinSin(s) mul(0.2) fadein(0.1) outlet
+
+}
+
+usinWinSinTest defSynth("usinWinSinTest") println;
+
+
+fn sawWinUsinTest() S {
+	let s = 1/5 sinosc(0.75) bilin(1, 16);
+	[100, 100.13] sawWinUsin(s) mul(0.2) fadein(0.1) outlet
+
+}
+
+sawWinUsinTest defSynth("sawWinUsinTest") println;
+
+
+fn sawWinSinTest() S {
+	let s = 1/5 sinosc(0.75) bilin(1, 16);
+	[100, 100.13] sawWinSin(s) mul(0.2) fadein(0.1) outlet
+
+}
+
+sawWinSinTest defSynth("sawWinSinTest") println;
+
+
 fn dustone() = 0.2 * decay2(dust(4, 2), 0.04, 0.3) * 800 fsinxosc |> outlet;
 
 dustone defSynth("dustone") println;
@@ -161,7 +204,7 @@ fn mod5_test() S {
 	let amp = lfimp(1 / 1.2) decay2(0.01, 0.2) * 0.6;
 	let in = [200, 251] lfzig([0, 0.25]);
 	let out = amp * in chain(4, fn(x S){x onepole(0.9)});
-	out combl(delayTimes * delayMod, delayMax, 4) outlet
+	out comb(delayTimes * delayMod, delayMax, 4) outlet
 }
 
 mod5_test defSynth("mod5_test") println;
@@ -204,13 +247,18 @@ ae.listSynthDefs() println;
 
 go(coro fn() Float {
 	"start playing" println;
-	
-	"smoothSawTest" playFor(5.0) yieldAll;
-	
-	/*
-	"init_urand_test" playFor(5.0) yieldAll;
+
 	"bubbles" playFor(5.0) yieldAll;
+	/*
+	"smoothSquareTest" playFor(5.0) yieldAll;
+	"smoothSawTest" playFor(5.0) yieldAll;	
 	"blipTest" playFor(20.0) yieldAll;
+	"usinWinUsinTest" playFor(5.0) yieldAll;
+	"usinWinSinTest" playFor(5.0) yieldAll;
+	"sawWinUsinTest" playFor(5.0) yieldAll;
+	"sawWinSinTest" playFor(5.0) yieldAll;
+	*/
+	"init_urand_test" playFor(5.0) yieldAll;
 	"dustone" playFor(5.0) yieldAll;
 	"pause_bubbles" playFor(5.0) yieldAll;
 	"tog_pause" playFor(5.0) yieldAll;
@@ -219,18 +267,27 @@ go(coro fn() Float {
 	"pch_seq" playFor(5.0) yieldAll;
 	"sahtone1" playFor(5.0) yieldAll;
 	"sahtone2" playFor(5.0) yieldAll;
+	/*
 	"mod1_test" playFor(5.0) yieldAll;
 	"mod4_test" playFor(5.0) yieldAll;
 	"mod5_test" playFor(5.0) yieldAll;
-	"white_test" playFor(5.0) yieldAll;
-	"pink_test" playFor(5.0) yieldAll;
 	"violet_test" playFor(5.0) yieldAll;
 	"blue_test" playFor(5.0) yieldAll;
+	"white_test" playFor(5.0) yieldAll;
+	"pink_test" playFor(5.0) yieldAll;
 	"red_test" playFor(5.0) yieldAll;
 	*/
 	
 	"stop playing" println;
 }());
+
+
+
+
+
+
+
+
 
 
 

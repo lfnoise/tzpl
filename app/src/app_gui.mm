@@ -44,6 +44,7 @@
 
 #import <Metal/Metal.h>
 #import <QuartzCore/QuartzCore.h>
+#import <objc/runtime.h>
 
 #include <cstdio>
 #include <csignal>
@@ -591,6 +592,21 @@ int runGui(bridge::AppContext& appCtx) {
     gGuiState = &guiState;
     gPrevKeyCallback = glfwSetKeyCallback(window, keyCallback);
 
+    // Swizzle the GLFW content view's flagsChanged: to suppress Caps Lock
+    // events that trigger a noisy macOS TUINSCursorUIController error.
+    // This catches all delivery paths including app-activation flag syncs.
+    {
+        NSView* contentView = [nswin contentView];
+        SEL sel = @selector(flagsChanged:);
+        Method method = class_getInstanceMethod([contentView class], sel);
+        IMP origImpl = method_getImplementation(method);
+        IMP newImpl = imp_implementationWithBlock(^(id self, NSEvent* event) {
+            if (event.keyCode == 0x39) return; // kVK_CapsLock
+            ((void(*)(id, SEL, NSEvent*))origImpl)(self, sel, event);
+        });
+        method_setImplementation(method, newImpl);
+    }
+
     // --- Native macOS menu bar ---------------------------------------------
     setupNativeMenuBar(fontSizes, numFontSizes);
 
@@ -599,7 +615,14 @@ int runGui(bridge::AppContext& appCtx) {
     // --- Main loop ---------------------------------------------------------
     while (!glfwWindowShouldClose(window) && !gShouldQuit) {
         @autoreleasepool {
-            glfwPollEvents();
+            // Throttle frame rate when idle to save CPU.
+            // Use short timeout when animations or async work are active.
+            bool needsActivity = guiState.flash.active()
+                              || guiState.asyncEval.busy();
+            if (needsActivity)
+                glfwWaitEventsTimeout(1.0 / 30.0);
+            else
+                glfwWaitEventsTimeout(0.5);
 
             // Drain captured print output and collect async eval results
             guiState.printCapture.drain(guiState.output);

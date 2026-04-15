@@ -39,6 +39,11 @@ fn sin2pi(x) = sinpi(2 * x);
 fn cos2pi(x) = cospi(2 * x);
 fn tan2pi(x) = tanpi(2 * x);
 
+-- unipolar sine wave
+fn usin(x) = 1 - x cos uni;
+fn usinpi(x) = 1 - x cospi uni;
+fn usin2pi(x) = 1 - x cos2pi uni;
+
 fn sinc(x) = divz(x sin, x, 1);
 fn sincpi(x) = divz(x sin2pi, x, 1);
 
@@ -382,6 +387,11 @@ fn z1(a S) S {
 	d <- a;
 	d(1)
 }
+fn z1(a S, i AsSignal) S {
+	let d = delayVar() init(1, i);
+	d <- a;
+	d(1)
+}
 
 fn z2(a S) S {
 	let d = delayVar();
@@ -429,27 +439,99 @@ fn setResetToggle(s S, r S, t S) S {
 	y <- select2(r > 0, 0, select2(s > 0, 1, select2(t > 0, 1 - y(1), y(1))))
 }
 
+-- trigger divider
+fn trDiv(x S, n, offset=0) {
+	let t = x > 0;
+	let c = delayVar();
+	let c1 = c(1);
+	c <- (c1 + t) i32 % n;
+	y <- t * (c1 == offset);
+}
+
+-- trigger counter with reset
+fn trCount(x S, reset AsSignal) S {
+	let y = delayVar();
+	y <- select2(reset > 0, 0, y(1) + (x > 0));
+}
+
+-- trigger counter
+fn trCount(x S) S {
+	let y = delayVar();
+	y <- y(1) + (x > 0);
+}
+
+-- when triggered, makes a line from 1 to 0 over duration. can be used as a timer or a phasor.
+fn oneshot1(trig S, dur) S { 
+	let dt = 1 / (fs() * dur);
+	let y = delayVar();
+	y <- select2(trig > 0, 1, max(0, y(1) - dt));
+}
+
+-- when triggered, makes a line from 0 to 1 over duration. can be used as a timer or a phasor.
+fn oneshot(trig S, dur) S { 
+	let x = oneshot1(trig, dur);
+	(x != 0) * (1 - x)
+}
+
+
+fn timedGate(trig S, dur) S = oneshot1(trig, dur) != 0;
+
+-- triggered burst of n impulses
+fn burst(trig S, dur, n) S = (n * oneshot(trig, dur)) frac eoc;
+
+
+-- triggered burst of n impulses with warped timing
+fn burst(trig S, dur, n, w) S = (n * oneshot(trig, dur) warp(w)) frac eoc;
+
+
 -- sequencer
 fn seq(trigger S, pattern AsSignal, length AsSignal) S {
-	let y = delayVar();
-	y <- if_(trigger > 0, fn(){
-		let index = delayVar();
-		let out = pattern at(index(1));
-		index <- ((index(1) + 1) % length) i32;
-		out
-	}, fn(){
-		y(1)
-	})
+	let index = delayVar() init(1, -1);
+	let oldIndex = index(1);
+	let newIndex = select2(trigger > 0, (oldIndex + 1) % length, oldIndex);
+	index <- newIndex;
+	pattern at(newIndex)
 }
 
 -- impulse sequencer
 fn iseq(trigger S, pattern AsSignal, length AsSignal) S {
-	if_(trigger > 0, fn(){
-		let index = delayVar();
-		let out = pattern at(index(1) % length);
-		index <- ((index(1) + 1) % length) i32;
-		out
-	})
+	let index = delayVar() init(1, -1);
+	let oldIndex = index(1);
+	let newIndex = select2(trigger > 0, (oldIndex + 1) % length, oldIndex);
+	index <- newIndex;
+	select2(trigger > 0, pattern at(newIndex), 0)
+}
+
+-- envelopes
+
+fn asr(gate S, a, s, r) S {
+	let (a, r) = (a, r) decay40dB;
+	let stage = delayVar();
+	let y = delayVar();
+
+	-- stages: 0: gate off (released + waiting for attack) 1: gate on (attack + sustain)
+
+	let y1 = y(1);
+	let stage = gate > 0;
+	let goal = select(stage, [0 asSignal, s asSignal]);
+	let coef = select(stage, [r asSignal, a asSignal]);
+	
+    y <- goal + coef * (y1 - goal)
+}
+
+fn adsr(gate S, a, d, s, r) S {
+	let (a, d, r) = (a, d, r) decay40dB;
+	let stage = delayVar();
+	let y = delayVar();
+
+	-- stages: 0: released + waiting for attack, 1: attack, 2: decay + sustain
+
+	let y1 = y(1);
+	stage <- select(stage, [gate > 0, (y1 > 0.99)+1, (gate > 0)*2]);
+	let goal = select(stage, [0 asSignal, 1 asSignal, s asSignal]);
+	let coef = select(stage, [r asSignal, a asSignal, d asSignal]);
+	
+    y <- goal + coef * (y1 - goal)
 }
 
 -- simple filters
@@ -580,12 +662,11 @@ fn nochange(x S) S = x == x z1;
 fn localmax(x S) S = (x < x z1) * (x z1 > x z2);
 fn localmin(x S) S = (x > x z1) * (x z1 < x z2);
 
-fn fadein(x, t) {
-    let dt = 1 / (t * fs());
+fn fadein(x, fadeinTime) S {
+    let dt = 1 / (fadeinTime * fs());
     let y = delayVar();
-    min(1, dt + y(1)) write(y) cb * x
+    min(1, dt + y(1)) f64 write(y) f32 cb * x
 }
-
 
 fn pinkingFilter(x S) S {
     -- from Paul Kellett
@@ -648,6 +729,11 @@ fn red(chans Int = 1, a=0.05) S {
 	y <- (y(1) + chans birand * a) bfold_cheaper
 }
 
+fn gray(chans Int = 1) S {
+	let r = delayVar() init(1, rand64());
+	(r <- r(1) ^ (1 << (rand64() & 63))) f64 * 1.084202172485504434e-19
+}
+
 fn coin(prob AsSignal, chans Int = 1) S = urand(chans) < prob;
 
 fn velvet(freq AsSignal, chans Int = 1) S = coin(freq * T(), chans);
@@ -690,7 +776,7 @@ fn upulse(x, pwm) = x < pwm;              -- unipolar pulse wave
 fn bpulse(x, pwm) = upulse(x,pwm) bi;     -- bipolar pulse wave
 fn zpulse(x, pwm) = frac(x - pwm) - x;    -- zero DC pulse wave
 
--- pulse waves. As in SuperCollider, these always output one value of the opposite polarity each cycle.
+-- pulse waves. As in SuperCollider, these always output at least one value of the opposite polarity each cycle.
 fn upulse1(x, pwm) = x eoc select2(pwm < 0.5, x < pwm);       -- unipolar
 fn bpulse1(x, pwm) = x upulse1(pwm) bi;                       -- bipolar
 fn zpulse1(x, pwm) = x eoc select2(pwm < 0.5, x zpulse(pwm)); -- zero DC
@@ -724,35 +810,77 @@ fn trapezwin(x) = min(1, 2 * x triwin);
 
 -- phasor generates a unipolar sawtooth. 
 -- It is the core of many oscillators.
-fn phasor(fm AsSignal, pm AsSignal) S {
+fn phasor(fm AsSignal, pm S) S {
 	let phase = delayVar();
-	let p = frac(phase(1) + fm * T()) write(phase);
-	frac(p + pm)
+	phase <- frac(phase(1) + fm f64 * T());
+	frac(phase(1) f32 + pm)
+}
+fn phasor(fm AsSignal, pm AsConstantSignal) S {
+	let phase = delayVar() init(1, pm);
+	phase <- frac(phase(1) + fm f64 * T());
+	phase(1) f32
 }
 fn phasor(fm AsSignal) S {
 	let phase = delayVar();
-	frac(phase(1) + fm * T()) write(phase);
+	phase <- frac(phase(1) + fm f64 * T());
+	phase(1) f32
 }
 
+-- low frequency oscillators
+
+-- sawtooth
 fn lfsaw(fm AsSignal, pm AsSignal = 0) S = phasor(fm, pm) bi;
-fn lfimp(fm AsSignal, pm AsSignal = 0) S = phasor(fm, pm) eoc;
+
+-- impulse
+fn lfimp(fm AsSignal, pm AsConstantSignal = 0.999999) S{
+	let phase = delayVar() init(1, pm);
+	let phase0 = frac(phase(1) + fm f64 * T()) write(phase);
+	abs((phase0 - phase(1)) f32) > 0.5
+}
+
+-- triangle
 fn lftri(fm AsSignal, pm AsSignal = 0) S = phasor(fm, pm) btri;
-fn lfpar(fm AsSignal, pm AsSignal = 0) S = phasor(fm, pm) par;
+
+-- unipolar parabola
+fn lfupar(fm AsSignal, pm AsSignal = 0) S = phasor(fm, pm) par;
+
+-- trapezoid
 fn lftrap(fm AsSignal, pm AsSignal = 0) S = phasor(fm, pm) trapez0;
+
+-- unipolar square
 fn lfusqr(fm AsSignal, pm AsSignal = 0) S = phasor(fm, pm) usquare;
+
+-- bipolar square
 fn lfsqr(fm AsSignal, pm AsSignal = 0) S = phasor(fm, pm) bsquare;
+
+-- zig zag wave inward towards zero
 fn lfzig(fm AsSignal, pm AsSignal = 0) S = phasor(fm, pm) izigzag;
+
+-- zig zag wave away from zero
 fn lfzag(fm AsSignal, pm AsSignal = 0) S = phasor(fm, pm) ozigzag;
+
+-- bipolar parabola
 fn lfpar(fm AsSignal, pm AsSignal = 0) S = phasor(fm, pm) par bi;
+
+-- variable sawtooth wave
 fn lfvsaw(fm AsSignal, pwm AsSignal, pm AsSignal = 0) S = phasor(fm, pm) varsaw(pwm);
+
+-- unipolar pulse wave
 fn lfupulse(fm AsSignal, pwm AsSignal, pm AsSignal = 0) S = phasor(fm, pm) upulse1(pwm);
+
+-- bipolar pulse wave
 fn lfbpulse(fm AsSignal, pwm AsSignal, pm AsSignal = 0) S = phasor(fm, pm) bpulse1(pwm);
+
+-- zero DC pulse wave
 fn lfzpulse(fm AsSignal, pwm AsSignal, pm AsSignal = 0) S = phasor(fm, pm) zpulse(pwm);
 
-
+-- sine oscillator
 fn sinosc(fm AsSignal, pm AsSignal = 0) S = phasor(fm, pm) sin2pi;
 
+-- fast sine approximation oscillator
 fn fsinosc(fm AsSignal, pm AsSignal = 0) S = phasor(fm, pm) fsin;
+
+-- fast sine approximation oscillator with extra precision
 fn fsinxosc(fm AsSignal, pm AsSignal = 0) S = phasor(fm, pm) fsinx;
 
 -- band limited impulse oscillator
@@ -783,46 +911,98 @@ fn blip(fm AsSignal, pm AsSignal, numHarmonics AsSignal) S {
     a + nfrac * (b - a)
 }
 
+
 -- variable sharpness sawtooth oscillator
 fn smoothSaw(fm AsSignal, sharpness AsSignal) S {
-	let phase = delayVar();
-	let phs = frac(phase(1) + fm * T()) write(phase);
-	phs println;
-	let p = bi(frac(phs - 0.5));
-	p println;
+	let p = phasor(fm) - 0.5 |> frac bi;
+	let w = 1 - p abs pow(sharpness exp2);
+	p * w
+}
+
+-- variable sharpness sawtooth oscillator with phase modulation
+fn smoothSaw(fm AsSignal, pm AsSignal, sharpness AsSignal) S {
+	let p = phasor(fm, pm) - 0.5 |> frac bi;
 	let w = 1 - p abs pow(sharpness exp2);
 	p * w
 }
 
 -- variable sharpness square wave oscillator
 fn smoothSquare(fm AsSignal, sharpness AsSignal) S {
-	let phase = delayVar();
-	let phs = frac(phase(1) + fm * T()) write(phase);
-	let p = bi(frac(phs - 0.5));
-	let q = bi(frac(2 * phs));
+	let phs = phasor(fm);
+	let p = phs - 0.5 |> frac bi;
+	let q = 2 * phs |> frac bi;
 	let c = (p < 0) bi;
 	let w = 1 - q abs pow(sharpness exp2);
 	c * w
 }
 
-fn comb(x S, delay_time AsSignal, decay_time AsSignal, interp Interpolation = Interpolation.lagrange) S {
-	let a = decay60dB(decay_time / delay_time);
-	let delay_samples = delay_time * fs();
-	let y = delayVar(delay_samples);
-	y <- x + a * y(delay_samples, interp)
+-- variable sharpness square wave oscillator with phase modulation
+fn smoothSquare(fm AsSignal, pm AsSignal, sharpness AsSignal) S {
+	let phs = phasor(fm, pm);
+	let p = phs - 0.5 |> frac bi;
+	let q = 2 * phs |> frac bi;
+	let c = (p < 0) bi;
+	let w = 1 - q abs pow(sharpness exp2);
+	c * w
 }
 
-fn combn(x S, delay_time AsSignal, decay_time AsSignal) S {
-	x comb(delay_time, decay_time, Interpolation.none)
+-- sawtooth windowed sine
+fn sawWinSin(fm AsSignal, freqScale AsSignal) S {
+	let p = phasor(fm);
+	let q = frac(p * freqScale);
+	q sin2pi * (1 - p)
 }
 
-fn combl(x S, delay_time AsSignal, max_delay_time AsSignal, decay_time AsSignal) S {
-	x comb(delay_time, decay_time, Interpolation.linear)
+-- sawtooth windowed unipolar sine
+fn sawWinUsin(fm AsSignal, freqScale AsSignal) S {
+	let p = phasor(fm);
+	let q = frac(p * freqScale);
+	q sin2pi sq * (1 - p)
 }
 
-fn combc(x S, delay_time AsSignal, max_delay_time AsSignal, decay_time AsSignal) S {
-	x comb(delay_time, decay_time, Interpolation.cubic)
+-- unipolar sine windowed sine
+fn usinWinSin(fm AsSignal, freqScale AsSignal) S {
+	let p = phasor(fm);
+	let q = frac(p * freqScale);
+	q sin2pi * usin2pi(1 - p)
 }
+
+-- unipolar sine windowed unipolar sine
+fn usinWinUsin(fm AsSignal, freqScale AsSignal) S {
+	let p = phasor(fm);
+	let q = frac(p * freqScale);
+	q usin2pi * usin2pi(1 - p)
+}
+
+
+
+-- comb delays
+
+-- interpolated comb delay
+fn comb(x S, delayTime AsSignal, maxDelayTime AsSignal, decayTime AsSignal, interp Interpolation = Interpolation.lagrange) S {
+	let a = decay60dB(decayTime / delayTime);
+	let delaySamples = delayTime * fs();
+	let maxDelaySamples = maxDelayTime * fs();
+	let y = delayVar(maxDelaySamples);
+	y <- x + a * y(delaySamples, interp)
+}
+
+-- no interpolation comb delay
+fn combn(x S, delayTime AsSignal, decayTime AsSignal) S {
+	x comb(delayTime, delayTime, decayTime, Interpolation.none)
+}
+
+-- linear interpolation comb delay
+fn combl(x S, delayTime AsSignal, maxDelayTime AsSignal, decayTime AsSignal) S {
+	x comb(delayTime, maxDelayTime, decayTime, Interpolation.linear)
+}
+
+-- cubic no interpolation comb delay
+fn combc(x S, delayTime AsSignal, maxDelayTime AsSignal, decayTime AsSignal) S {
+	x comb(delayTime, maxDelayTime, decayTime, Interpolation.cubic)
+}
+
+
 
 
 fn pull(gate S, initVal AsConstantSignal, gatedFun fn()S) S {
@@ -830,10 +1010,30 @@ fn pull(gate S, initVal AsConstantSignal, gatedFun fn()S) S {
 	d init(0, initVal);
 	if_(gate > 0, fn(){ gatedFun() write(d) }, fn(){ d(1) })
 }
+
+
 fn pause(gate S, gatedFun fn()S) S = if_(gate > 0, fn(){ gate * gatedFun() });
 
 
 "DONE IMPORTING COMMON UGENS MODULE" println
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

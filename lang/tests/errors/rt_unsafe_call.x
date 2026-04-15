@@ -1,2 +1,2 @@
 -- @rt
-println("hello");
+gc();

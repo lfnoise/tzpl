@@ -722,15 +722,15 @@ fn > (a AsConstantSignal, b S) S = CompareOp.gt _newCompareOp(a asSignal, b);
 ---------------------------------------------------------------------------
 -- Signal Cast Operators
 
-fn i32 (a S) S = CastOp.i32 _newCastOp(a);
-fn i64 (a S) S = CastOp.i64 _newCastOp(a);
-fn f32 (a S) S = CastOp.f32 _newCastOp(a);
-fn f64 (a S) S = CastOp.f64 _newCastOp(a);
+fn i32 (a AsSignal) S = CastOp.i32 _newCastOp(a asSignal);
+fn i64 (a AsSignal) S = CastOp.i64 _newCastOp(a asSignal);
+fn f32 (a AsSignal) S = CastOp.f32 _newCastOp(a asSignal);
+fn f64 (a AsSignal) S = CastOp.f64 _newCastOp(a asSignal);
 
 ---------------------------------------------------------------------------
 -- Delay Operators
 
-fn init(d DelayVar, index Int, s AsConstantSignal) DelayVar {
+fn init(d DelayVar, index Int, s AsSignal) DelayVar {
     SignalExprKind.delay(d, DelayOp.init(index)) _newSignalExpr([s asSignal]);
     d
 }
@@ -1141,6 +1141,8 @@ coro fn playFor(defName String, seconds Float) Float {
 
 ---------------------------------------------------------------------------
 ---------------------------------------------------------------------------
+
+
 
 
 

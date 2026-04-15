@@ -3,10 +3,12 @@
 import synthdef.*;
 import common_ugens.*;
 
+"start evaluating" println;
+
 -- take: first 4 of 8 channels
 fn test_take() S {
-	let sig = [1, 2, 3, 4, 5, 6, 7, 8] vec;
-	sig take(4) outlet
+	let freq = [1, 2, 3, 4, 5, 6, 7, 8] vec * 17.385 + [100, 100.171];
+	freq take(4) sinosc cb sum(2) mul(0.2) outlet
 }
 
 test_take defSynth("test_take") println;
@@ -149,8 +151,8 @@ fn test_detune_sum() S {
 
 test_detune_sum defSynth("test_detune_sum") println;
 
--- Audio example: stereo oscillators with reverse panning
-fn test_reverse_pan() S {
+-- Audio example: stereo oscillators with reversed channels
+fn test_reversed_channels() S {
 	let sig = [440, 550] fsinosc * 0.1;
 	let left = sig;
 	let right = sig reverse;
@@ -159,7 +161,17 @@ fn test_reverse_pan() S {
 
 test_reverse_pan defSynth("test_reverse_pan") println;
 
+go(coro fn() Float {
+	"start playing" println;
 
-"test_detune_sum" playFor(4);
-"test_reverse_pan" playFor(4);
+	"test_take" playFor(8) yieldAll;
+	"test_detune_sum" playFor(8) yieldAll;
+	"test_reverse_pan" playFor(8) yieldAll;
+
+	"done playing" println;
+}());
+
+"done evaluating" println;
+
+
 

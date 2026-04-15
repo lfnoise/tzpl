@@ -687,6 +687,9 @@ int main(int argc, const char* argv[]) {
         ModuleCompiler moduleCompiler(compiler, std::vector<std::string>(includePaths));
         appCtx.moduleCompiler = &moduleCompiler;
 
+        // Initialize per-silo VM slots (populated later by attachVM())
+        appCtx.siloVMs.resize(config.numSilos);
+
         bridge::setAppContextOnVM(&nrtvm.vm, &appCtx);
         nrtvm.startHeartbeat();  // drain deferred deletes at ~50Hz
         tempoScheduler.start();

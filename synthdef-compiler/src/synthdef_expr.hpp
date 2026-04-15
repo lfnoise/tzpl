@@ -405,6 +405,9 @@ namespace synthdef {
         NumType initial_type() const override {
             return cast_type;
         }
+        NumType inputTypeConstraint(int index) const override {
+            return NumType::any;
+        }
         void update_type(ExprIdentitySet& worklist) override {
 //            std::println("CastOpExpr::update_type {} type {} cast_type {} in {}", 
 //                (void*)this, type.str(), cast_type.str(), in0()->type.str());

@@ -2,13 +2,17 @@ import common_ugens.*;
 import synthdef.*;
 
 fn seqTest() S {
-	let pattern = [60, 63, 67, 70, 74, 77, 81, 84] nnhz;
+	-- let middleC = 261.6255653;
+	let middleC = 256;
+	let pattern = [1/1, 6/5, 3/2, 9/5, 2/1, 12/5, 3, 18/5] * middleC;
+	-- equivalently let pattern = [10, 12, 15, 18, 20, 24, 30, 36]/10 * middleC;
+	let detune = [-0.04, 0.04];
 	( 
-		1.5 lfimp seq(pattern * 0.25, 8) sinosc cb * 1.5 +
-		3.0 lfimp seq(pattern * 1.0, 8) sinosc cb 
-		+ 6.0 lfimp seq(pattern * 4.0, 8) sinosc * 0.25 
+		  (1 lfimp seq(pattern * 0.25, 8) + detune) smoothSaw(5) * 1.4
+		+ (2 lfimp seq(pattern * 1.0,  8) + detune) smoothSaw(4) 
+		+ (4 lfimp seq(pattern * 2.0,  8) + detune) smoothSaw(3) * 0.7 
 	)
-	* 0.25 |> combn(2/3, 4) outlet
+	* 0.2 |> combn(3/8, 4) outlet
 }
 
 seqTest defSynth("seqTest") println;
@@ -19,7 +23,13 @@ go(coro fn() Float {
 	"done playing" println;
 }());
 
-"done evaluating" println;
+
+
+
+
+
+
+
 
 
 

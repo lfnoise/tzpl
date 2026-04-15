@@ -1730,9 +1730,9 @@ void registerBuiltinFunctions(Compiler& compiler,
     // --- fmt builtin ---
     registerTemplate(compiler, functions, "fmt",          resolve_fmt);
 
-    // --- print/println builtins (not RT-safe: they write to stdout) ---
-    registerTemplate(compiler, functions, "print",        resolve_print,   /*rtSafe=*/false);
-    registerTemplate(compiler, functions, "println",      resolve_println, /*rtSafe=*/false);
+    // --- print/println builtins (allowed on RT for debugging) ---
+    registerTemplate(compiler, functions, "print",        resolve_print);
+    registerTemplate(compiler, functions, "println",      resolve_println);
 
     // --- disassemble builtin (not RT-safe: writes to stdout) ---
     registerTemplate(compiler, functions, "disassemble",  resolve_disassemble, /*rtSafe=*/false);

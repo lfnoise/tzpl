@@ -30,6 +30,8 @@
 #include "tzpl_engine.hpp"
 #include "tzpl_vm_commands.hpp"
 #include "nrt_vm.hpp"
+#include "module_compiler.hpp"
+#include "diagnostic.hpp"
 
 // Both tzpl and engine define i64/f64/etc. in different ways.
 // engine: namespace engine { using i64 = long; }
@@ -407,6 +409,175 @@ static void ffi_listSynthDefs(ts::VM& vm, u16 dst, u16, u16) {
 }
 
 // ---------------------------------------------------------------------------
+// Silo VM management
+// ---------------------------------------------------------------------------
+
+// Command that installs compiled code on the RT VM, owning the CompileResult.
+// doNRT deletes the CompileResult after the RT thread has processed it.
+struct SiloCodeInstallCmd : engine::Command {
+    ts::CompileResult* code_;
+    explicit SiloCodeInstallCmd(ts::CompileResult* code) : code_(code) {}
+    void doRT(engine::Silo* s) override {
+        auto* vm = static_cast<ts::VM*>(s->vm_);
+        if (vm && code_) {
+            vm->makeCurrent();
+            vm->install(*code_);
+        }
+    }
+    bool doNRT(engine::Silo* s) override {
+        delete code_;
+        return true;
+    }
+};
+
+// Command that detaches the VM from the silo and deletes it on the NRT thread.
+struct DetachAndDeleteVMCmd : engine::Command {
+    ts::VM* vm_;
+    explicit DetachAndDeleteVMCmd(ts::VM* vm) : vm_(vm) {}
+    void doRT(engine::Silo* s) override {
+        s->vm_ = nullptr;
+        s->heartbeatFn_ = nullptr;
+    }
+    bool doNRT(engine::Silo* s) override {
+        delete vm_;
+        return true;
+    }
+};
+
+// Send a linked list of commands directly to a silo, bypassing the bundle API.
+// When audio is not running, commands execute synchronously on the caller's thread.
+static void sendCmdListToSilo(engine::Engine* eng, int siloIndex,
+                              engine::Command* head) {
+    engine::Silo& silo = eng->silos_[siloIndex];
+    if (engine::isAudioRunning(eng)) {
+        silo.from_nrt_.push(head);
+    } else {
+        engine::Command* cmd = head;
+        while (cmd) {
+            engine::Command* next = cmd->next_;
+            while (!cmd->run(&silo)) {}
+            delete cmd;
+            cmd = next;
+        }
+    }
+}
+
+// Send a single command directly to a silo.
+static void sendCmdToSilo(engine::Engine* eng, int siloIndex,
+                          engine::Command* cmd) {
+    cmd->next_ = nullptr;
+    sendCmdListToSilo(eng, siloIndex, cmd);
+}
+
+// fn attachVM(siloIndex: Int) -> Int
+static void ffi_attachVM(ts::VM& vm, u16 dst, u16, u16 argBase) {
+    auto* ctx = getAppContext(vm);
+    auto* eng = ctx->engine;
+    int siloIndex = static_cast<int>(vm.reg(argBase).i);
+
+    if (siloIndex < 0 || siloIndex >= (int)ctx->siloVMs.size()) {
+        returnErr(vm, dst, tzpl_errSiloOutOfRange);
+        return;
+    }
+    auto& state = ctx->siloVMs[siloIndex];
+    if (state.vm) {
+        returnErr(vm, dst, tzpl_errAlreadyAdded);
+        return;
+    }
+
+    // Create rt_restricted target and VM (16 MB TLSF pool)
+    state.target = ctx->compiler->createTarget(/*rtRestricted=*/true);
+    ts::TypeUniverse& types = ctx->nrtvm->vm.typeUniverse();
+    state.vm = new ts::VM(16 * 1024 * 1024, types, state.target);
+    state.vm->setUserData(ctx);
+
+    // Create a separate module compiler so modules compiled for this
+    // target get their own cache (distinct from the NRT target's cache).
+    state.moduleCompiler = std::make_unique<ts::ModuleCompiler>(
+        *ctx->compiler,
+        std::vector<std::string>(ctx->moduleCompiler->includePaths()));
+
+    // Attach VM to silo (sets vm_ and heartbeatFn_ on the RT thread)
+    sendCmdToSilo(eng, siloIndex, new AttachVMCmd(state.vm));
+
+    returnErr(vm, dst, tzpl_errNone);
+}
+
+// fn detachVM(siloIndex: Int) -> Int
+static void ffi_detachVM(ts::VM& vm, u16 dst, u16, u16 argBase) {
+    auto* ctx = getAppContext(vm);
+    auto* eng = ctx->engine;
+    int siloIndex = static_cast<int>(vm.reg(argBase).i);
+
+    if (siloIndex < 0 || siloIndex >= (int)ctx->siloVMs.size()) {
+        returnErr(vm, dst, tzpl_errSiloOutOfRange);
+        return;
+    }
+    auto& state = ctx->siloVMs[siloIndex];
+    if (!state.vm) {
+        returnErr(vm, dst, tzpl_errNodeNotFound);
+        return;
+    }
+
+    // Transfer VM ownership to the command. doRT nulls silo->vm_,
+    // doNRT deletes the VM on the engine's NRT command thread.
+    sendCmdToSilo(eng, siloIndex, new DetachAndDeleteVMCmd(state.vm));
+
+    state.vm = nullptr;
+    state.target.reset();
+    state.moduleCompiler.reset();
+
+    returnErr(vm, dst, tzpl_errNone);
+}
+
+// fn siloEval(siloIndex: Int, code: String) -> Int
+static void ffi_siloEval(ts::VM& vm, u16 dst, u16, u16 argBase) {
+    auto* ctx = getAppContext(vm);
+    auto* eng = ctx->engine;
+    int siloIndex = static_cast<int>(vm.reg(argBase).i);
+    const char* code = regString(vm, argBase + 1);
+
+    if (siloIndex < 0 || siloIndex >= (int)ctx->siloVMs.size()) {
+        returnErr(vm, dst, tzpl_errSiloOutOfRange);
+        return;
+    }
+    auto& state = ctx->siloVMs[siloIndex];
+    if (!state.vm) {
+        returnErr(vm, dst, tzpl_errNodeNotFound);
+        return;
+    }
+
+    // Compile with the silo's rt_restricted target (on the calling NRT thread)
+    std::string source(code);
+    ts::CompileResult compiled = ctx->compiler->compile(
+        source, "<silo>", state.target, state.moduleCompiler.get());
+
+    if (!compiled.success) {
+        ts::printDiagnostics(compiled.errors, source, "<silo>", std::cerr, true);
+        returnErr(vm, dst, tzpl_errInternal);
+        return;
+    }
+
+    ts::CodeBlock* mainBlock = compiled.mainBlock;
+
+    // Heap-allocate for async transfer to RT thread
+    auto* result = new ts::CompileResult(std::move(compiled));
+    auto* installCmd = new SiloCodeInstallCmd(result);
+
+    if (mainBlock) {
+        auto* execCmd = new VMEventCmd(VMEventCmd::Custom, mainBlock);
+        installCmd->next_ = execCmd;
+        execCmd->next_ = nullptr;
+    } else {
+        installCmd->next_ = nullptr;
+    }
+
+    sendCmdListToSilo(eng, siloIndex, installCmd);
+
+    returnErr(vm, dst, tzpl_errNone);
+}
+
+// ---------------------------------------------------------------------------
 // Registration
 // ---------------------------------------------------------------------------
 
@@ -485,6 +656,11 @@ void registerAudioEngineFFI(ts::Compiler& compiler) {
     // Introspection
     ts::Type* StringArray = reinterpret_cast<ts::Type*>(compiler.arrayType(String));
     reg("listSynthDefs",    StringArray, {},  ffi_listSynthDefs);
+
+    // Silo VM management (NRT only)
+    reg("attachVM",         Int, {Int},            ffi_attachVM);
+    reg("detachVM",         Int, {Int},            ffi_detachVM);
+    reg("siloEval",         Int, {Int, String},    ffi_siloEval);
 
     // Enum constants (SchedPolicy, FadeCurve, Err, Enable) are defined
     // in the Tzopilotl module: bridge/modules/audio_engine.x

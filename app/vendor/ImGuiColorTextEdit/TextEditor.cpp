@@ -2574,7 +2574,7 @@ void TextEditor::ColorizeInternal()
 					if (firstChar && c == mLanguageDefinition.mPreprocChar)
 						withinPreproc = true;
 
-					if (c == '\"')
+					if (c == '\"' && !withinSingleLineComment && commentDepth == 0)
 					{
 						withinString = true;
 						line[currentIndex].mMultiLineComment = inComment;
