@@ -70,3 +70,51 @@ endif()
 if(TZPL_BUILD_BENCHMARKS AND TZPL_BUILD_SYNTHDEF_COMPILER AND EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/benchmarks/CMakeLists.txt)
     add_subdirectory(benchmarks)
 endif()
+
+# --- Install rules (cmake --install build --prefix dist/tzpl) ----------------
+
+include(GNUInstallDirs)
+
+# Modules: merge lang/modules and bridge/modules into a single modules/ dir
+install(DIRECTORY lang/modules/
+    DESTINATION modules
+    FILES_MATCHING PATTERN "*.x"
+)
+if(TZPL_BUILD_BRIDGE)
+    install(DIRECTORY bridge/modules/
+        DESTINATION modules
+        FILES_MATCHING PATTERN "*.x"
+    )
+endif()
+
+# Examples
+install(FILES lang/modules/example_synthdefs.x
+    DESTINATION examples
+)
+install(DIRECTORY integration-tests/scripts/
+    DESTINATION examples/integration
+    FILES_MATCHING PATTERN "*.x"
+)
+
+# Documentation (HTML user-facing docs only)
+install(FILES
+    lang/docs/Tzopilotl_by_Example.html
+    lang/docs/Builtin_Functions.html
+    lang/docs/FFI_Guide.html
+    lang/docs/Coroutines.html
+    DESTINATION docs
+)
+
+# Editor packages
+install(DIRECTORY lang/editors/vscode
+    DESTINATION editors
+    PATTERN ".DS_Store" EXCLUDE
+)
+install(DIRECTORY lang/editors/Tzopilotl.tmbundle
+    DESTINATION editors
+)
+install(DIRECTORY lang/editors/tree-sitter-tzpl
+    DESTINATION editors
+    PATTERN "node_modules" EXCLUDE
+    PATTERN ".gitignore"   EXCLUDE
+)

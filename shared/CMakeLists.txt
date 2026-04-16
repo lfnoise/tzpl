@@ -14,5 +14,6 @@ install(FILES
     tzpl_voicer.hpp
     tzpl_fft.hpp
     synthdef_plugin_interface.hpp
+    synthdef_types.hpp
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/tzpl
 )

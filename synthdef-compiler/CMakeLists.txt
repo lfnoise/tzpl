@@ -68,7 +68,6 @@ install(FILES
     src/synthdef_from_sexpr.hpp
     src/synthdef_expr.hpp
     src/synthdef_value.hpp
-    src/synthdef_types.hpp
     src/synthdef_types2.hpp
     src/synthdef_arena.hpp
     src/synthdef_builtin_ops.hpp
