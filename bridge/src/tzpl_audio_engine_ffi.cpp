@@ -84,6 +84,10 @@ static void ffi_engineStart(ts::VM& vm, u16 dst, u16, u16) {
 
 // fn engineStop() -> Void
 static void ffi_engineStop(ts::VM& vm, u16 dst, u16, u16) {
+    if (bridge::currentRenderContext()) {
+        bridge::requestEndCurrentRender();
+        return;
+    }
     engine::stopAudio(getEngine(vm));
 }
 
