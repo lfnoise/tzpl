@@ -249,7 +249,6 @@ go(coro fn() Float {
 	"start playing" println;
 
 	"bubbles" playFor(5.0) yieldAll;
-	/*
 	"smoothSquareTest" playFor(5.0) yieldAll;
 	"smoothSawTest" playFor(5.0) yieldAll;	
 	"blipTest" playFor(20.0) yieldAll;
@@ -257,7 +256,6 @@ go(coro fn() Float {
 	"usinWinSinTest" playFor(5.0) yieldAll;
 	"sawWinUsinTest" playFor(5.0) yieldAll;
 	"sawWinSinTest" playFor(5.0) yieldAll;
-	*/
 	"init_urand_test" playFor(5.0) yieldAll;
 	"dustone" playFor(5.0) yieldAll;
 	"pause_bubbles" playFor(5.0) yieldAll;
@@ -267,7 +265,6 @@ go(coro fn() Float {
 	"pch_seq" playFor(5.0) yieldAll;
 	"sahtone1" playFor(5.0) yieldAll;
 	"sahtone2" playFor(5.0) yieldAll;
-	/*
 	"mod1_test" playFor(5.0) yieldAll;
 	"mod4_test" playFor(5.0) yieldAll;
 	"mod5_test" playFor(5.0) yieldAll;
@@ -276,10 +273,10 @@ go(coro fn() Float {
 	"white_test" playFor(5.0) yieldAll;
 	"pink_test" playFor(5.0) yieldAll;
 	"red_test" playFor(5.0) yieldAll;
-	*/
 	
 	"stop playing" println;
 }());
+
 
 
 
