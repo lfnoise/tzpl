@@ -884,12 +884,11 @@ int runGui(bridge::AppContext& appCtx) {
             float totalH = ImGui::GetContentRegionAvail().y;
 
             bool hasSidebar = workspacePanel.hasWorkspaces();
-            float sidebarW = hasSidebar ? workspacePanel.sidebarWidth() : 0;
-            float vsplitterW = hasSidebar ? 6.0f : 0;
-            float rightW = totalW - sidebarW - vsplitterW;
+            float vsplitterW = 6.0f;
 
             // Sidebar (directory outlines)
             if (hasSidebar) {
+                float sidebarW = workspacePanel.sidebarWidth();
                 workspacePanel.drawSidebar(sidebarW, totalH);
                 ImGui::SameLine();
 
@@ -897,7 +896,7 @@ int runGui(bridge::AppContext& appCtx) {
                 ImGui::InvisibleButton("##vsplitter",
                                        ImVec2(vsplitterW, totalH));
                 if (ImGui::IsItemActive()) {
-                    float newW = workspacePanel.sidebarWidth() + io.MouseDelta.x;
+                    float newW = sidebarW + io.MouseDelta.x;
                     newW = std::max(100.0f, std::min(newW, totalW * 0.5f));
                     workspacePanel.setSidebarWidth(newW);
                 }
@@ -906,15 +905,17 @@ int runGui(bridge::AppContext& appCtx) {
                 ImGui::SameLine();
             }
 
-            // Right pane: editor on top, output on bottom
-            ImGui::BeginChild("##RightPane", ImVec2(rightW, totalH), false,
-                ImGuiWindowFlags_NoScrollbar
-                | ImGuiWindowFlags_NoScrollWithMouse);
+            // Use actual remaining width after sidebar + spacing
+            float rightW = ImGui::GetContentRegionAvail().x;
 
             float splitterH = 8.0f;
             float usableH = totalH - splitterH;
             float editorH = usableH * guiState.splitRatio;
             float outputH = usableH * (1.0f - guiState.splitRatio);
+
+            // Use a group (not a child window) so editor/output
+            // scrollbars are not affected by extra window nesting.
+            ImGui::BeginGroup();
 
             // Editor panel (from active workspace)
             editorPanel.draw(rightW, editorH, guiState);
@@ -933,7 +934,7 @@ int runGui(bridge::AppContext& appCtx) {
             // Output panel
             outputPanel.draw(rightW, outputH, guiState.output);
 
-            ImGui::EndChild();
+            ImGui::EndGroup();
 
             // ---------------------------------------------------------------
             // Process eval requests AFTER draw (activeTab_ is now current)
