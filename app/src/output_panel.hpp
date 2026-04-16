@@ -30,7 +30,7 @@ public:
 private:
     static int outputScrollCallback(struct ImGuiInputTextCallbackData* data);
 
-    bool scrollToBottom_ = false;
+    bool autoScroll_ = true;
     std::string outputText_;
     size_t lastLineCount_ = 0;
     bool outputActive_ = false;

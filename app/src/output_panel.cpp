@@ -3,6 +3,7 @@
 
 #include "output_panel.hpp"
 #include "imgui.h"
+#include "imgui_internal.h"
 
 // Callback to auto-scroll output and track selection state
 int OutputPanel::outputScrollCallback(ImGuiInputTextCallbackData* cbData) {
@@ -60,11 +61,6 @@ int OutputPanel::outputScrollCallback(ImGuiInputTextCallbackData* cbData) {
     self->selStart_ = cbData->SelectionStart;
     self->selEnd_ = cbData->SelectionEnd;
 
-    if (self->scrollToBottom_) {
-        cbData->CursorPos = cbData->BufTextLen;
-        cbData->SelectionStart = cbData->SelectionEnd = cbData->CursorPos;
-        self->scrollToBottom_ = false;
-    }
     return 0;
 }
 
@@ -89,6 +85,7 @@ void OutputPanel::clear(OutputBuffer& output) {
     output.clear();
     outputText_.clear();
     lastLineCount_ = 0;
+    autoScroll_ = true;
 }
 
 void OutputPanel::draw(float width, float height, OutputBuffer& output) {
@@ -116,7 +113,37 @@ void OutputPanel::draw(float width, float height, OutputBuffer& output) {
             outputText_ += line.text;
             outputText_ += '\n';
         }
-        scrollToBottom_ = true;
+    }
+
+    // Compute the child window name that InputTextMultiline will create
+    ImGuiWindow* parentWin = ImGui::GetCurrentWindow();
+    ImGuiID textId = parentWin->GetID("##output_text");
+    char childName[256];
+    snprintf(childName, sizeof(childName), "%s/##output_text_%08X", parentWin->Name, textId);
+
+    // Find the text child window (set up during a previous frame). Check if the
+    // user's mouse wheel scrolled it away from the bottom -- NewFrame()'s
+    // UpdateMouseWheel() sets ScrollTarget before draw() is called. We must detect
+    // this BEFORE calling SetNextWindowScroll, which would overwrite the user's
+    // scroll target.
+    ImGuiWindow* textWindow = ImGui::FindWindowByName(childName);
+    if (textWindow && textWindow->ScrollTarget.y < FLT_MAX
+        && textWindow->ScrollTarget.y < textWindow->Scroll.y) {
+        // User scrolled up (target is above current position)
+        autoScroll_ = false;
+    }
+
+    // When auto-scrolling, override content size and scroll BEFORE InputTextMultiline
+    // so the scroll is applied on the same frame with correct ScrollMax (avoiding
+    // one-frame lag that would otherwise show the scroll catching up on the next frame).
+    if (autoScroll_) {
+        int numLines = 0;
+        for (char c : outputText_) if (c == '\n') ++numLines;
+        float lineHeight = ImGui::GetTextLineHeight();
+        float expectedContentHeight = (numLines + 1) * lineHeight
+                                      + ImGui::GetStyle().FramePadding.y * 2.0f;
+        ImGui::SetNextWindowContentSize(ImVec2(0.0f, expectedContentHeight));
+        ImGui::SetNextWindowScroll(ImVec2(-1.0f, FLT_MAX / 2));
     }
 
     // Selectable, copyable read-only text area
@@ -127,6 +154,13 @@ void OutputPanel::draw(float width, float height, OutputBuffer& output) {
                               ImVec2(width, height),
                               outputFlags, outputScrollCallback, this);
     outputActive_ = ImGui::IsItemActive();
+
+    // Re-enable auto-scroll when user scrolls back to the bottom
+    textWindow = ImGui::FindWindowByName(childName);
+    if (textWindow && !autoScroll_ && textWindow->ScrollMax.y > 0.0f) {
+        if (textWindow->Scroll.y >= textWindow->ScrollMax.y - ImGui::GetTextLineHeight())
+            autoScroll_ = true;
+    }
 
     ImGui::EndChild();
 }
