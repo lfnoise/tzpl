@@ -112,7 +112,9 @@ namespace synthdef {
                 for (S in : inputs) {
                     s += std::format("#{} {} {}, ", in->userial, in->str(), in->type.str());
                 }
-                throw std::runtime_error(std::format("type error: #{} {} : {}", userial, str(), s));
+                throw std::runtime_error(std::format(
+                    "type error: #{} {} [type {}] intersected to empty with inputs: {}",
+                    userial, str(), type.str(), s));
             }
         }
         virtual void calcShape()  = 0;

@@ -105,6 +105,25 @@ public:
     f64 latency() const { return latencySeconds_; }
     void setLatency(f64 seconds) { latencySeconds_ = seconds; }
 
+    // --- Manual mode (for NRT/offline rendering) ---
+    // In manual mode the scheduler does NOT spawn a worker thread; the host
+    // drives it by calling tickTo(seconds) to advance the logical clock and
+    // fire any due handlers synchronously on the calling thread. Wall-clock
+    // queries (beats(), tempo()) return values relative to manualSeconds_
+    // instead of std::chrono::steady_clock.
+    //
+    // Must be called BEFORE start(). Once in manual mode, start() is a no-op.
+    void setManualMode(bool on) { manualMode_ = on; }
+    bool isManualMode() const { return manualMode_; }
+
+    // Advance the logical clock to `seconds` (since epoch) and fire any
+    // entries whose fire-time has come. Manual mode only; no-op otherwise.
+    void tickTo(f64 seconds);
+
+    // True iff the scheduler queue holds no pending entries. Useful for the
+    // NRT renderer to detect "no more work to drive" idle conditions.
+    bool isIdle() const;
+
 private:
     void run();
 
@@ -120,13 +139,19 @@ private:
     f64 latencySeconds_;
     f64 logicalBeat_ = -1.;   // current logical beat (-1 = not in a handler callback)
 
-    std::mutex schedMtx_;
+    mutable std::mutex schedMtx_;
     std::condition_variable cv_;
     std::priority_queue<Entry, std::vector<Entry>, std::greater<Entry>> queue_;
     std::thread thread_;
     std::atomic<bool> running_{false};
     std::atomic<bool> queueChanged_{false};  // wakes wait_until when new entries arrive
     std::atomic<i64> nextTimerID_{1};
+
+    // Manual-mode state (NRT rendering). When manualMode_ is true, the
+    // scheduler does not run its own thread; tickTo() drives it from the
+    // renderer thread.
+    bool manualMode_ = false;
+    f64 manualSeconds_ = 0.0;
 };
 
 } // namespace ts

@@ -26,6 +26,7 @@
 
 #include "tzpl_client_interface.hpp"
 #include "tzpl_silo.hpp"
+#include <atomic>
 #include <mutex>
 #include <vector>
 #include <thread>
@@ -182,15 +183,22 @@ struct Engine
 {
     std::mutex nrt_lock_;
 	std::atomic_int runSilos_ = 1;
-    
+
 	std::vector<Silo> silos_;
 	std::vector<NodeDef*> defs_;
 	std::unique_ptr<RtAudio> rtaudio_;
-		
+
 	AudioState audioState_ = AudioState::off;
-	
+
 	f64 anchorStreamTime_ = 0.;
 	i64 anchorSampleTime_ = 0;
+	// NRT (offline) rendering mode. When true: no RtAudio device is opened,
+	// background NRT/dead-node threads are no-ops, worker silos skip the
+	// SCHED_RR priority bump, and renderNRTBlock() drives processing.
+	// Each NRT render owns its own Engine instance (created via
+	// newEngineNRT). The live engine is a separate Engine instance with
+	// nrtMode_ = false.
+	bool nrtMode_ = false;
 	bool runBackgroundThreads_ = true;
 	std::thread nrt_cmd_thread_;
 	std::thread dead_node_thread_;
@@ -209,7 +217,14 @@ struct Engine
 	f32* inputStagingBuf_ = nullptr;          // intermediate buffer for separate input device
 
     Engine(EngineConfig const& config, AudioStreamParameters& streamParams);
+    Engine(EngineConfig const& config, AudioStreamParameters& streamParams, bool nrt);
     ~Engine();
+
+    // Internal helper: starts worker threads and runs initial setup. Called by both ctors.
+    void postInit();
+    // Internal helper: drains NRT command + dead-node queues. In NRT mode, the
+    // background threads are no-ops and the renderer calls this between blocks.
+    void drainNRTQueues();
 
 	void defOutputNode(int numChannels);
 	void defInputNode(int inputChannels);

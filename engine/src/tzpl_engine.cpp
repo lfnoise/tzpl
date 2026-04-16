@@ -53,23 +53,59 @@ Engine::Engine(EngineConfig const& config, AudioStreamParameters& asp)
     }}
 
     initAudio(this);
+    postInit();
+}
 
+// NRT (offline) constructor: skips RtAudio device setup. Allocates the same
+// per-silo buffers and safety limiter that initAudio() would. Background
+// NRT/dead-node threads are still spawned but exit immediately because
+// nrtMode_ is true (set in declaration order before the std::thread fields).
+Engine::Engine(EngineConfig const& config, AudioStreamParameters& asp, bool /*nrt*/)
+    :
+    silos_(config.numSilos),
+    defs_(kHashBins),
+    nrtMode_(true),
+    nrt_cmd_thread_(processNRTCommands, this),
+    dead_node_thread_(processDeadNodes, this),
+    streamParams_(asp)
+{
+    { int i = 0; for (Silo& s : silos_) {
+        s.engine_ = this;
+        s.index_ = i;
+        ++i;
+    }}
+
+    // Allocate the same per-silo state initAudio() would have set up.
+    int byteSize = streamParams_.bufferFrames * streamParams_.channels * sizeof(f32);
+
+    safetyLimiter_ = std::make_unique<SafetyLimiter>(
+        streamParams_.bufferFrames,
+        streamParams_.channels,
+        int((.25 * streamParams_.sampleRate) / streamParams_.bufferFrames));
+
+    for (Silo& s : silos_) {
+        s.sampleTime_ = 0;
+        if (s.index_ > 0) {
+            s.outbuf_ = (f32*)malloc(byteSize);
+        }
+    }
+    // Mark as running so sendCmds() routes commands through the FIFO instead
+    // of executing synchronously -- the renderer dispatches them sample-accurately.
+    audioState_ = AudioState::running;
+    muteGain_ = 1.f;
+
+    postInit();
+}
+
+void Engine::postInit() {
     defOutputNode(streamParams_.channels);
     defInputNode(streamParams_.inputChannels);
-    
+
     // start work loops
     for (int i = 1; i < silos_.size(); ++i) {
         auto& s = silos_[i];
         s.run_thread_ = std::thread(Silo::workLoop, &s);
     }
-    
-//    printf("Engine size %d\n", int(sizeof(Engine)));
-//    printf("Node size %d\n", int(sizeof(Node)));
-//    printf("InPort size %d\n", int(sizeof(InPort)));
-//    printf("OutPort size %d\n", int(sizeof(OutPort)));
-//    printf("Control size %d\n", int(sizeof(Control)));
-    
-    
 }
 
 Engine::~Engine() {
@@ -105,6 +141,9 @@ Engine::~Engine() {
 }
 
 f64 Engine::getStreamTime() {
+    if (nrtMode_) {
+        return (f64)anchorSampleTime_ / streamParams_.sampleRate;
+    }
     return rtaudio_->getStreamTime();
 }
 
@@ -255,11 +294,38 @@ i64 Engine::streamTimeToSampleTime(f64 streamTime) {
 }
 
 
+// Drain to_nrt_ and dead_nodes_ FIFOs for all silos. Used by both the
+// background polling threads and (in NRT mode) the renderer between blocks.
+void Engine::drainNRTQueues() {
+    std::lock_guard<std::mutex> lck(nrt_lock_);
+
+    for (Silo& s : silos_) {
+        Command* head;
+        while (s.to_nrt_.pop(head)) {
+            CommandList toNRTList;
+            Command* cmd = head;
+            while (cmd) {
+                Command* next = cmd->next_;
+                bool done = cmd->run(&s);
+                if (done) delete cmd;
+                else toNRTList.add(cmd);
+                cmd = next;
+            }
+            if (toNRTList.head) s.from_nrt_.push(toNRTList.head);
+        }
+        Node* node;
+        while (s.dead_nodes_.pop(node)) {
+            delete node;
+        }
+    }
+}
+
 void Engine::processNRTCommands(Engine* e) {
+    if (e->nrtMode_) return; // NRT mode: renderer drains inline.
     while (e->runBackgroundThreads_) {
         {
             std::lock_guard<std::mutex> lck(e->nrt_lock_);
-            
+
             for (Silo& s : e->silos_) {
                 Command* head;
                 while (s.to_nrt_.pop(head)) {
@@ -281,6 +347,7 @@ void Engine::processNRTCommands(Engine* e) {
 }
 
 void Engine::processDeadNodes(Engine* e) {
+    if (e->nrtMode_) return; // NRT mode: renderer drains inline.
     std::this_thread::sleep_for(std::chrono::microseconds(12500));
     while (e->runBackgroundThreads_) {
         {

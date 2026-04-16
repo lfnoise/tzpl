@@ -36,6 +36,7 @@ set(LIB_SOURCES
     src/tzpl_xfader.cpp
     src/tzpl_mixer.cpp
     src/tzpl_test_plugins.cpp
+    src/tzpl_audio_file_writer.cpp
 )
 
 add_library(audio_engine_lib STATIC ${LIB_SOURCES})
@@ -81,6 +82,7 @@ install(FILES
     src/tzpl_mixer.hpp
     src/tzpl_sexpr_binary_buffer.hpp
     src/tzpl_test_plugins.hpp
+    src/tzpl_audio_file_writer.hpp
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/tzpl
 )
 install(TARGETS engine

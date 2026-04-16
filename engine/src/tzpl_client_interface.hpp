@@ -77,6 +77,26 @@ struct EngineConfig {
 };
 
 Engine* newEngine(EngineConfig const& config, AudioStreamParameters& streamParams);
+
+// Construct an engine for non-real-time (offline) rendering. No audio device
+// is opened; the caller drives processing via renderNRTBlock(). The provided
+// AudioStreamParameters fields used are: sampleRate, bufferFrames, channels.
+// Other fields (deviceName, input*) are ignored.
+Engine* newEngineNRT(EngineConfig const& config, AudioStreamParameters& streamParams);
+
+// Render one block of NRT audio into outBuffer. Writes
+// streamParams.bufferFrames * streamParams.channels float32 samples (interleaved).
+// Drains NRT command and dead-node queues after the block.
+// The engine must have been created via newEngineNRT().
+void renderNRTBlock(Engine* e, f32* outBuffer);
+
+// Copy all non-superseded node defs from one engine to another. The new
+// engine gets its own NodeDef objects but shares the underlying PortInfo
+// arrays (which live for the process lifetime). Skips "Audio Out" / "Audio
+// In" since each engine creates its own. dlHandle is set to nullptr on the
+// copies so the per-render engine never dlcloses the shared libraries.
+void copyNodeDefs(Engine* from, Engine* to);
+
 void freeEngine(Engine* e);
 
 RtAudio* getRTAudio(Engine* e);

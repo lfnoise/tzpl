@@ -85,6 +85,7 @@ fn sawWinSinTest() S {
 
 sawWinSinTest defSynth("sawWinSinTest") println;
 
+fn() S { 0.3 sinosc biexp(100, 6000) velvet(2) * 0.2 |> outlet } defSynth("dust1") println;
 
 fn dustone() = 0.2 * decay2(dust(4, 2), 0.04, 0.3) * 800 fsinxosc |> outlet;
 
@@ -156,8 +157,6 @@ fn pch_seq() S {
 pch_seq defSynth("pch_seq") println;
 
 
-fn() S { 0.3 sinosc biexp(100, 6000) velvet(2) * 0.2 |> outlet } defSynth("dust1") println;
-
 
 fn sahtone1() S {
 	let freq = 2 white sampleAndHold(coin(3*T())) biexp(120, 800) lag(0.04);
@@ -215,7 +214,7 @@ fn white_test() S = outlet(2 white * 0.2);
 white_test defSynth("white_test") println;
 
 
-fn pink_test() S = outlet(2 pinkf * 0.2);
+fn pink_test() S = outlet(2 pinkf * 0.15);
 
 pink_test defSynth("pink_test") println;
 
@@ -245,6 +244,7 @@ fn bubbles_lite() S = 0.4 lfsaw * 24 + 8 lfsaw * 3 + 81 |> nnhz sinosc * 0.04 |>
 import audio_engine as ae;
 ae.listSynthDefs() println;
 
+fn playExamples() {
 go(coro fn() Float {
 	"start playing" println;
 
@@ -257,6 +257,7 @@ go(coro fn() Float {
 	"sawWinUsinTest" playFor(5.0) yieldAll;
 	"sawWinSinTest" playFor(5.0) yieldAll;
 	"init_urand_test" playFor(5.0) yieldAll;
+	"dust1" playFor(5.0) yieldAll;
 	"dustone" playFor(5.0) yieldAll;
 	"pause_bubbles" playFor(5.0) yieldAll;
 	"tog_pause" playFor(5.0) yieldAll;
@@ -273,17 +274,26 @@ go(coro fn() Float {
 	"white_test" playFor(5.0) yieldAll;
 	"pink_test" playFor(5.0) yieldAll;
 	"red_test" playFor(5.0) yieldAll;
-	
+
+	ae.endRender(0.1);
+
 	"stop playing" println;
 }());
 
+}
 
 
 
 
+fn renderExamples() {
+	let h = "/tmp/examples.wav" ae.renderNRT(180, playExamples);
+	ae.onRenderDone(h, fn(){ "render done" println });
+}
 
 
-
+-- do non-real-time rendering and real-time play back concurrently.
+renderExamples();
+playExamples();
 
 
 

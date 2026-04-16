@@ -162,8 +162,13 @@ void make_this_thread_realtime() {
 }
 
 void Silo::workLoop(Silo* s) {
-    make_this_thread_realtime();
     Engine* e = s->engine_;
+    // Skip the SCHED_RR priority bump on NRT engines: there is no audio
+    // device contending with us and an NRT render thread does not need
+    // realtime priority (it runs as fast as the host can compute).
+    if (!e->nrtMode_) {
+        make_this_thread_realtime();
+    }
     while (e->runSilos_) {
         s->start_sem_.wait();
         if (!e->runSilos_) break;

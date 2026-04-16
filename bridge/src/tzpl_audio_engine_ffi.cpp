@@ -24,6 +24,7 @@
 
 #include "tzpl_audio_engine_ffi.hpp"
 #include "tzpl_app_context.hpp"
+#include "tzpl_nrt_render.hpp"
 #include "tzpl.hpp"
 #include "value.hpp"
 #include "tzpl_client_interface.hpp"
@@ -49,8 +50,14 @@ static AppContext* getAppContext(ts::VM& vm) {
     return static_cast<AppContext*>(vm.userData());
 }
 
-// Retrieve the Engine* via AppContext.
+// Retrieve the Engine* to target. If a render context is active on this
+// thread (we're inside a render's setup closure or one of its scheduled
+// handlers), commands route to the render's engine. Otherwise they target
+// the live engine via the AppContext.
 static engine::Engine* getEngine(ts::VM& vm) {
+    if (auto* r = bridge::currentRenderContext()) {
+        return r->engine;
+    }
     auto* ctx = getAppContext(vm);
     return ctx ? ctx->engine : nullptr;
 }
@@ -612,6 +619,12 @@ void registerAudioEngineFFI(ts::Compiler& compiler) {
     reg("masterGain",       Void, {Float},         ffi_masterGain);
     reg("safetyLimiter",    Void, {Bool},          ffi_safetyLimiter);
     reg("inputChannels",    Int, {},               ffi_inputChannels);
+    // NRT-render FFI is registered separately by the bridge::registerNRTRenderFFI
+    // entry point (see bridge/include/tzpl_nrt_render.hpp). It defines:
+    //   renderNRT(path, setup), renderNRT(path, duration, setup),
+    //   isRenderDone(h), onRenderDone(h, cb),
+    //   stopRender(h), stopRender(h, tail),
+    //   endRender(), endRender(tail).
 
     // Plugin loading (NRT only)
     reg("loadPlugins",      Bool, {String},                ffi_loadPlugins);

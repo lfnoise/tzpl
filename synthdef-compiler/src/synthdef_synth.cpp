@@ -21,6 +21,7 @@
 #include <bit>
 #include <algorithm>
 #include <queue>
+#include <format>
 
 namespace synthdef {
     thread_local Synth* gSynth = nullptr;
@@ -852,115 +853,109 @@ namespace synthdef {
         return s;
     }
     
-    void printExpr(S u, u64 i) {
+    void printExpr(string& out, S u, u64 i) {
         u64 sn = u->userial;
-//        u64 h = u->hash();
         string inputs = inputsString(u);
-//        printf("   %4qd %16qX %4qd [%-16s] %2zu %2zu %-8s %-9s %-3s %3d %s\n",
-//            i, h, sn, 
-//            inputs.c_str(),
-//            u->inputs.size(), 
-//            u->fanOut,
-//            u->rate.str().c_str(), 
-//            to_string(u->cut).c_str(),
-//            u->type.str().c_str(), 
-//            u->chans.c_str(), 
-//            u->str().c_str());                        
-        printf("   %4qd %4qd [%-16s] %2zu %2zu %-8s %-9s %-3s %3zu %s\n",
-            i, sn, 
-            inputs.c_str(),
-            u->inputs.size(), 
+        out += std::format("   {:>4} {:>4} [{:<16}] {:>2} {:>2} {:<8} {:<9} {:<3} {:>3} {}\n",
+            i, sn,
+            inputs,
+            u->inputs.size(),
             u->consumers.total(),
-            u->rate.str().c_str(), 
-            to_string(u->cut).c_str(),
-            u->type.str().c_str(), 
-            u->chans, 
-            u->str().c_str());                        
+            u->rate.str(),
+            to_string(u->cut),
+            u->type.str(),
+            u->chans,
+            u->str());
     }
-    
-    void printTree(ExprTree* tree) {
+
+    void printTree(string& out, ExprTree* tree) {
         string antecedents_str;
         for (auto [antecedent, sepLoop] : tree->antecedents) {
             antecedents_str += std::to_string(antecedent->serial) + (sepLoop ? "* " : " ");
         }
         if (!antecedents_str.empty()) { antecedents_str.pop_back(); }
-        printf("    TREE %-4zu [%s] %-6s %-9s %-3s %4zu\n", 
-            tree->serial, antecedents_str.c_str(), tree->root->rate.str().c_str(), to_string(tree->root->cut).c_str(),
-            tree->root->type.str().c_str(), tree->root->chans);
+        out += std::format("    TREE {:<4} [{}] {:<6} {:<9} {:<3} {:>4}\n",
+            tree->serial, antecedents_str, tree->root->rate.str(), to_string(tree->root->cut),
+            tree->root->type.str(), tree->root->chans);
         for (u64 i = 0; S u : tree->exprs) {
-            printExpr(u, i);                        
+            printExpr(out, u, i);
             ++i;
         }
     }
-    
-    void printTrees(vector<ExprTree*> trees) {
+
+    void printTrees(string& out, vector<ExprTree*> trees) {
         for (ExprTree* tree : trees) {
-            printTree(tree);
+            printTree(out, tree);
         }
     }
-    
-    void printLoops(vector<GenLoop*>& loops) {
-        for (GenLoop* loop : loops) {
 
+    void printLoops(string& out, vector<GenLoop*>& loops) {
+        for (GenLoop* loop : loops) {
             string antecedents;
             for (GenLoop* antecedent : loop->loop_antecedents) {
                 antecedents += std::to_string(antecedent->serial) + " ";
             }
             if (!antecedents.empty()) { antecedents.pop_back(); }
-            printf("  LOOP %2lu [%s] %-6s %zu\n", 
-                loop->serial, antecedents.c_str(),
-                loop->rate.str().c_str(), loop->chans);
+            out += std::format("  LOOP {:>2} [{}] {:<6} {}\n",
+                loop->serial, antecedents,
+                loop->rate.str(), loop->chans);
             for (ExprTree* tree : loop->trees) {
-                printTree(tree);
+                printTree(out, tree);
             }
         }
     }
-    
-    void Synth::dump() {
-        printf("SYNTH %p\n", this);
-        printf("-- SORTED EXPRS\n");
+
+    string Synth::dumpToString() {
+        string out;
+        out += std::format("SYNTH {} {:p}\n", name, (void*)this);
+        out += "-- SORTED EXPRS\n";
         for (u64 i = 0; S u : sorted) {
-            printExpr(u, i);
+            printExpr(out, u, i);
             ++i;
         }
-        printf("-- TREES\n");
-        printTrees(sortedTrees);
-        printf("-- INIT\n");
-        printLoops(initLoops);
-        printf("-- RESET\n");
-        printLoops(resetLoops);
-        printf("-- EVENT\n");
-        printLoops(eventLoops);
-        printf("-- AUDIO\n");
+        out += "-- TREES\n";
+        printTrees(out, sortedTrees);
+        out += "-- INIT\n";
+        printLoops(out, initLoops);
+        out += "-- RESET\n";
+        printLoops(out, resetLoops);
+        out += "-- EVENT\n";
+        printLoops(out, eventLoops);
+        out += "-- AUDIO\n";
         for (Graph* graph : graphs) {
-            printf("GRAPH %p\n", graph);
-            printLoops(graph->loops);
+            out += std::format("GRAPH {:p}\n", (void*)graph);
+            printLoops(out, graph->loops);
         }
         for (D delay : delayBufs) {
-            printf("DELAY %p %llu %s %zu\n", delay.get(), delay->serial, delay->type.str().c_str(), delay->chans);
+            out += std::format("DELAY {:p} {} {} {}\n",
+                (void*)delay.get(), delay->serial, delay->type.str(), delay->chans);
             for (S expr : delay->initters) {
-                printf("  %4llu %3s %zu %s\n", 
-                    expr->userial, expr->type.str().c_str(), 
-                    expr->chans, expr->str().c_str());
+                out += std::format("  {:>4} {:<3} {} {}\n",
+                    expr->userial, expr->type.str(),
+                    expr->chans, expr->str());
             }
             for (S expr : delay->fixReaders) {
-                printf("  %4llu %3s %zu %s\n", 
-                    expr->userial, expr->type.str().c_str(), 
-                    expr->chans, expr->str().c_str());
+                out += std::format("  {:>4} {:<3} {} {}\n",
+                    expr->userial, expr->type.str(),
+                    expr->chans, expr->str());
             }
             for (S expr : delay->varReaders) {
-                printf("  %4llu %3s %zu %s\n", 
-                    expr->userial, expr->type.str().c_str(), 
-                    expr->chans, expr->str().c_str());
+                out += std::format("  {:>4} {:<3} {} {}\n",
+                    expr->userial, expr->type.str(),
+                    expr->chans, expr->str());
             }
-            {
+            if (delay->writer.notNull()) {
                 S expr = delay->writer;
-                printf("  %4llu %3s %zu %s\n", 
-                    expr->userial, expr->type.str().c_str(), 
-                    expr->chans, expr->str().c_str());
-
+                out += std::format("  {:>4} {:<3} {} {}\n",
+                    expr->userial, expr->type.str(),
+                    expr->chans, expr->str());
             }
         }
+        return out;
+    }
+
+    void Synth::dump() {
+        printf("%s", dumpToString().c_str());
     }
     
     void mergeFixReaders(vector<D>& delays, vector<S>& exprs) {
@@ -1083,45 +1078,38 @@ namespace synthdef {
     //void Synth::calcDelayLengths() {}
     
     void Synth::graphAnalysis() {
+        char const* pass = "(none)";
+        auto runPass = [&](char const* name, auto fn) {
+            pass = name;
+            printf("%s\n", name);
+            fn();
+        };
         try {
-            printf("MERGE DELAYS\n");
-            mergeDelays();
-            printf("TOPOLOGICAL SORT EXPRS\n");
-            topologicalSortExprs();
-            printf("COLLECT CONSUMERS\n");
-            collectConsumers();
-            printf("CALC DELAY LENGTHS\n");
-            calcDelayLengths();
-            printf("SHAPE INFERENCE\n");
-            shapeInference();
-            printf("TYPE INFERENCE\n");
-            typeInference();
-            printf("NON-CONCRETE TYPES TO DEFAULT\n");
-            setNonConcreteTypesToDefault();
-            printf("SET DELAY READER RATES\n");
-            setDelayReaderRates();
-            printf("FIND GRAPH CUTS\n");
-            findGraphCuts();
-            printf("CUT GRAPH TO TREES\n");
-            cutGraphToTrees();
-            printf("REMOVE DEAD CODE\n");
-            removeDeadCode();
-            printf("ADD DELAY ANTECEDENTS\n");
-            addDelayAntecedents();
-            printf("ADD LOOP ANTECEDENTS\n");
-            addSubgraphAntecedents();
-            printf("SORT TREES\n");
-            sortTrees();
-            printf("COMPUTE ISO GROUPS\n");
-            computeIsoGroups();
-            printf("TREES TO LOOPS\n");
-            treesToLoops();
-            printf("SPLIT RATES\n");
-            splitRates();
+            runPass("MERGE DELAYS",                 [&]{ mergeDelays(); });
+            runPass("TOPOLOGICAL SORT EXPRS",       [&]{ topologicalSortExprs(); });
+            runPass("COLLECT CONSUMERS",            [&]{ collectConsumers(); });
+            runPass("CALC DELAY LENGTHS",           [&]{ calcDelayLengths(); });
+            runPass("SHAPE INFERENCE",              [&]{ shapeInference(); });
+            runPass("TYPE INFERENCE",               [&]{ typeInference(); });
+            runPass("NON-CONCRETE TYPES TO DEFAULT",[&]{ setNonConcreteTypesToDefault(); });
+            runPass("SET DELAY READER RATES",       [&]{ setDelayReaderRates(); });
+            runPass("FIND GRAPH CUTS",              [&]{ findGraphCuts(); });
+            runPass("CUT GRAPH TO TREES",           [&]{ cutGraphToTrees(); });
+            runPass("REMOVE DEAD CODE",             [&]{ removeDeadCode(); });
+            runPass("ADD DELAY ANTECEDENTS",        [&]{ addDelayAntecedents(); });
+            runPass("ADD LOOP ANTECEDENTS",         [&]{ addSubgraphAntecedents(); });
+            runPass("SORT TREES",                   [&]{ sortTrees(); });
+            runPass("COMPUTE ISO GROUPS",           [&]{ computeIsoGroups(); });
+            runPass("TREES TO LOOPS",               [&]{ treesToLoops(); });
+            runPass("SPLIT RATES",                  [&]{ splitRates(); });
             printf("GRAPH ANALYSIS FINISHED\n");
-        } catch (...) {
-            dump();
-            throw;
+        } catch (std::exception const& e) {
+            // Build an augmented message that includes the synth name, the
+            // failing pass, and a full graph dump. This is returned up through
+            // the FFI so the app can display it in the output window.
+            throw std::runtime_error(std::format(
+                "synth '{}' failed in pass '{}': {}\n{}",
+                name, pass, e.what(), dumpToString()));
         }
     }
 }

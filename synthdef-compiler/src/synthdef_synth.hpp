@@ -158,8 +158,9 @@ namespace synthdef {
         void mergeDelays();
         
         void graphAnalysis();
-        
+
         void dump();
+        string dumpToString();
     };
 
     extern thread_local Synth* gSynth;

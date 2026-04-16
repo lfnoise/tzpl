@@ -722,7 +722,7 @@ fn pinkfe(chans Int = 1) S = 0.25 * white(chans) pinkingFilterEco;
 
 fn violet(chans Int = 1) S = 0.5 * white(chans) diff;
 
-fn blue(chans Int = 1) S = 0.5 * pinkf(chans) diff;
+fn blue(chans Int = 1) S = 2.0 * pinkf(chans) diff;
 
 fn red(chans Int = 1, a=0.05) S {
 	let y = delayVar();
@@ -734,13 +734,17 @@ fn gray(chans Int = 1) S {
 	(r <- r(1) ^ (1 << (rand64() & 63))) f64 * 1.084202172485504434e-19
 }
 
+-- 1 with probability `prob`, else zero, each sample.
 fn coin(prob AsSignal, chans Int = 1) S = urand(chans) < prob;
 
-fn velvet(freq AsSignal, chans Int = 1) S = coin(freq * T(), chans);
+-- velvet noise = `density` 1's each second (on average), otherwise zero.
+fn velvet(density AsSignal, chans Int = 1) S = coin(density * T(), chans);
 
-fn dust(freq AsSignal, chans Int = 1) S = urand(chans) * velvet(freq, chans);
+-- dust = `density` values of random unipolar values each second (on average), otherwise zero.
+fn dust(density AsSignal, chans Int = 1) S = urand(chans) * velvet(density, chans);
 
-fn dust2(freq AsSignal, chans Int = 1) S = birand(chans) * velvet(freq, chans);
+-- dust2 = `density` values of random bipolar values each second (on average), otherwise zero.
+fn dust2(density AsSignal, chans Int = 1) S = birand(chans) * velvet(density, chans);
 
 fn dustep(freq AsSignal, chans Int = 1) S = white(chans) sampleAndHold(velvet(freq, chans));
 
@@ -812,17 +816,17 @@ fn trapezwin(x) = min(1, 2 * x triwin);
 -- It is the core of many oscillators.
 fn phasor(fm AsSignal, pm S) S {
 	let phase = delayVar();
-	phase <- frac(phase(1) + fm f64 * T());
+	phase <- frac(phase(1) + fm f64 * T() f64);
 	frac(phase(1) f32 + pm)
 }
 fn phasor(fm AsSignal, pm AsConstantSignal) S {
 	let phase = delayVar() init(1, pm);
-	phase <- frac(phase(1) + fm f64 * T());
+	phase <- frac(phase(1) + fm f64 * T() f64);
 	phase(1) f32
 }
 fn phasor(fm AsSignal) S {
 	let phase = delayVar();
-	phase <- frac(phase(1) + fm f64 * T());
+	phase <- frac(phase(1) + fm f64 * T() f64);
 	phase(1) f32
 }
 
@@ -834,7 +838,7 @@ fn lfsaw(fm AsSignal, pm AsSignal = 0) S = phasor(fm, pm) bi;
 -- impulse
 fn lfimp(fm AsSignal, pm AsConstantSignal = 0.999999) S{
 	let phase = delayVar() init(1, pm);
-	let phase0 = frac(phase(1) + fm f64 * T()) write(phase);
+	let phase0 = frac(phase(1) + fm f64 * T() f64) write(phase);
 	abs((phase0 - phase(1)) f32) > 0.5
 }
 
@@ -887,8 +891,8 @@ fn fsinxosc(fm AsSignal, pm AsSignal = 0) S = phasor(fm, pm) fsinx;
 fn blip(fm AsSignal, pm AsSignal, numHarmonics AsSignal) S {
 	let phase = delayVar();
 	let p = phase(1);
-	phase <- frac(p + fm * T());
-	let pp = frac(p + pm);
+	phase <- frac(p + fm f64 * T() f64);
+	let pp = frac(p f32 + pm);
 	
 	let nyq = fs() * 0.5;
 	let maxN = floor(nyq / fm abs max(16.0));
@@ -1016,6 +1020,9 @@ fn pause(gate S, gatedFun fn()S) S = if_(gate > 0, fn(){ gate * gatedFun() });
 
 
 "DONE IMPORTING COMMON UGENS MODULE" println
+
+
+
 
 
 

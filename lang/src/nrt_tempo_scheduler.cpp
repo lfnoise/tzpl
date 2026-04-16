@@ -51,6 +51,12 @@ NRTTempoScheduler::~NRTTempoScheduler() {
 
 void NRTTempoScheduler::start() {
     if (running_.load(std::memory_order_relaxed)) return;
+    if (manualMode_) {
+        // Manual mode: no worker thread. Mark as running so stop()/destructor
+        // bookkeeping is consistent.
+        running_.store(true, std::memory_order_relaxed);
+        return;
+    }
     running_.store(true, std::memory_order_relaxed);
     thread_ = std::thread(&NRTTempoScheduler::run, this);
 }
@@ -65,6 +71,9 @@ void NRTTempoScheduler::stop() {
 }
 
 f64 NRTTempoScheduler::elapsedSeconds() const {
+    if (manualMode_) {
+        return manualSeconds_;
+    }
     auto now = Clock::now();
     return std::chrono::duration<f64>(now - epoch_).count();
 }
@@ -78,8 +87,7 @@ NRTTempoScheduler::TimePoint NRTTempoScheduler::beatToFireTime(f64 beat) const {
 }
 
 f64 NRTTempoScheduler::tempo() const {
-    return ramp_.secondsToTempo(
-        std::chrono::duration<f64>(Clock::now() - epoch_).count());
+    return ramp_.secondsToTempo(elapsedSeconds());
 }
 
 f64 NRTTempoScheduler::tempoBPM() const {
@@ -179,6 +187,69 @@ bool NRTTempoScheduler::cancel(i64 timerID) {
     }
     queue_ = std::move(newQueue);
     return found;
+}
+
+bool NRTTempoScheduler::isIdle() const {
+    std::lock_guard lock(schedMtx_);
+    return queue_.empty();
+}
+
+void NRTTempoScheduler::tickTo(f64 seconds) {
+    if (!manualMode_) return;
+
+    // Advance the logical clock first so handlers reading beats()/getStreamTime
+    // see the new "now" before they execute.
+    if (seconds > manualSeconds_) {
+        manualSeconds_ = seconds;
+    }
+
+    // Drain any entries whose fire-time has come. Loop because handlers can
+    // schedule new entries (e.g. SuperCollider-style reschedule via a positive
+    // return value) that may also be due immediately.
+    while (true) {
+        Entry next;
+        {
+            std::lock_guard lock(schedMtx_);
+            if (queue_.empty()) return;
+            next = queue_.top();
+            // beatToFireTime returns the wall-clock time in seconds at which
+            // this entry should fire (with latency compensation). In manual
+            // mode, "wall-clock" is manualSeconds_.
+            f64 fireSeconds = ramp_.beatsToSeconds(next.beatTime) - latencySeconds_;
+            if (fireSeconds > manualSeconds_) return;
+            queue_.pop();
+        }
+
+        logicalBeat_ = next.beatTime;
+
+        if (next.handler == nullptr) {
+            // Tempo-change event: install new ramp.
+            f64 epochSec = ramp_.beatsToSeconds(next.beatTime);
+            f64 currentTempo = ramp_.beatsToTempo(next.beatTime);
+            std::lock_guard lock2(schedMtx_);
+            ramp_ = TempoRamp(currentTempo, next.beatTime, epochSec,
+                              next.targetTempo, next.rampBeats);
+        } else {
+            Word result;
+            {
+                std::lock_guard vmLock(vm_->mtx);
+                vm_->vm.makeCurrent();
+                result = vm_->vm.callCallable(next.handler, nullptr, 0);
+                vm_->vm.gcHeartbeat();
+            }
+            if (result.f > 0. && std::isfinite(result.f)) {
+                next.beatTime += result.f;
+                std::lock_guard lock2(schedMtx_);
+                queue_.push(next);
+            } else {
+                std::lock_guard vmLock(vm_->mtx);
+                vm_->vm.makeCurrent();
+                next.handler->release();
+                vm_->vm.gcHeartbeat();
+            }
+        }
+        logicalBeat_ = -1.;
+    }
 }
 
 void NRTTempoScheduler::run() {

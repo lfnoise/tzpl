@@ -24,6 +24,7 @@
 
 #include "tzpl_clock_ffi.hpp"
 #include "tzpl_app_context.hpp"
+#include "tzpl_nrt_render.hpp"
 #include "tzpl.hpp"
 #include "value.hpp"
 
@@ -33,7 +34,13 @@ namespace bridge {
 // Helpers
 // ---------------------------------------------------------------------------
 
+// If we are inside an NRT render context (setup closure or one of its
+// scheduler handlers), route to that render's per-render tempo scheduler.
+// Otherwise route to the live AppContext scheduler.
 static ts::NRTTempoScheduler* getScheduler(ts::VM& vm) {
+    if (auto const* r = bridge::currentRenderContext()) {
+        return r->scheduler;
+    }
     auto* ctx = static_cast<AppContext*>(vm.userData());
     return ctx ? ctx->tempoScheduler : nullptr;
 }

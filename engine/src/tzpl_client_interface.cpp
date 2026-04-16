@@ -49,6 +49,34 @@ Engine* newEngine(EngineConfig const& config, AudioStreamParameters& asp) {
     return new Engine(config, asp);
 }
 
+Engine* newEngineNRT(EngineConfig const& config, AudioStreamParameters& asp) {
+#if DEBUG_NODES
+    printf(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>\n");
+    numNodesCreated = 0;
+    numNodesDeleted = 0;
+#endif
+    // NRT mode never uses input.
+    asp.inputChannels = 0;
+    asp.firstInputChannel = 0;
+    asp.inputDeviceName = nullptr;
+    return new Engine(config, asp, /*nrt=*/true);
+}
+
+void copyNodeDefs(Engine* from, Engine* to) {
+    std::lock_guard<std::mutex> lck(from->nrt_lock_);
+    for (u32 bin = 0; bin < kHashBins; ++bin) {
+        NodeDef* def = from->defs_[bin];
+        while (def) {
+            if (!def->superseded_
+                && strcmp(def->info_.name, "Audio Out") != 0
+                && strcmp(def->info_.name, "Audio In") != 0) {
+                addNodeDef(to, def->info_, /*dlHandle=*/nullptr);
+            }
+            def = def->next_;
+        }
+    }
+}
+
 void freeEngine(Engine* e) {
     uninitAudio(e);
 
@@ -141,6 +169,31 @@ void safetyLimiter(Engine* e, Enable onoff) {
     e->enableSafetyLimiter_ = onoff;
 }
 
+// Shared dispatch: signals worker silos, runs silo 0 on the calling thread,
+// applies the safety limiter, and advances anchorSampleTime_. Used by both
+// the RtAudio callback and the NRT renderer.
+static void dispatchSilos(Engine* e, f32 const* in, f32* out,
+                          unsigned int numFrames, double streamTime) {
+    e->in_ = in;
+    e->out_ = out;
+    e->anchorStreamTime_ = streamTime;
+
+    // Release worker silos.
+    int numSilos = int(e->silos_.size());
+    for (int i = 1; i < numSilos; ++i) {
+        e->silos_[i].start_sem_.signal();
+    }
+
+    int numSamples = numFrames * e->streamParams_.channels;
+    memset(out, 0, sizeof(f32) * numSamples);
+
+    e->silos_[0].processFrames(); // silo 0 runs on the calling (audio/render) thread.
+
+    f32 gain = e->masterGain_ * e->muteGain_;
+    e->safetyLimiter_->process(out, e->enableSafetyLimiter_, gain);
+    e->anchorSampleTime_ += numFrames;
+}
+
 int audioCallback( void *outputBuffer, void *inputBuffer,
                     unsigned int numFrames,
                     double streamTime,
@@ -148,37 +201,25 @@ int audioCallback( void *outputBuffer, void *inputBuffer,
                     void *userData )
 {
     Engine* e = (Engine*)userData;
-    
-    try {
-        f32* out = (f32*)outputBuffer;
 
+    try {
         // For duplex mode, inputBuffer comes from the callback.
         // For separate input device, use the staging buffer.
-        e->in_ = e->inputRtaudio_
+        f32 const* in = e->inputRtaudio_
             ? (f32 const*)e->inputStagingBuf_
             : (f32 const*)inputBuffer;
-        e->out_ = out;
-        e->anchorStreamTime_ = streamTime;
-        
-        // release silos to work, then .
-        // then mix all together.
-        int numSilos = int(e->silos_.size());
-        for (int i = 1; i < numSilos; ++i) {
-            e->silos_[i].start_sem_.signal();
-        }
-
-        int numSamples = numFrames * e->streamParams_.channels;
-        memset(out, 0, sizeof(f32) * numSamples);
-
-        e->silos_[0].processFrames(); // silo 0 is done on the audio callback thread.
-        //printf("%f %f\n", out[0], out[1]);
-        f32 gain = e->masterGain_ * e->muteGain_;
-        e->safetyLimiter_->process(out, e->enableSafetyLimiter_, gain);
-        e->anchorSampleTime_ += numFrames;
+        dispatchSilos(e, in, (f32*)outputBuffer, numFrames, streamTime);
     } catch (...) {
         fprintf(stderr, "exception on real time thread");
     }
     return 0;
+}
+
+void renderNRTBlock(Engine* e, f32* outBuffer) {
+    unsigned int numFrames = e->streamParams_.bufferFrames;
+    f64 streamTime = (f64)e->anchorSampleTime_ / e->streamParams_.sampleRate;
+    dispatchSilos(e, /*in=*/nullptr, outBuffer, numFrames, streamTime);
+    e->drainNRTQueues();
 }
 
 
@@ -355,6 +396,11 @@ void uninitAudio(Engine* e) {
 
     e->safetyLimiter_.reset();
 
+    if (e->nrtMode_) {
+        e->audioState_ = AudioState::off;
+        return;
+    }
+
     // Close separate input stream if present
     if (e->inputRtaudio_) {
         if (e->inputRtaudio_->isStreamOpen()) {
@@ -370,6 +416,7 @@ void uninitAudio(Engine* e) {
 }
 
 void startAudio(Engine* e) {
+    if (e->nrtMode_) return; // NRT mode: renderer drives processing.
     std::lock_guard<std::mutex> lck(e->nrt_lock_);
 
     if (e->audioState_ == AudioState::running) return;
@@ -385,6 +432,7 @@ void startAudio(Engine* e) {
 }
 
 void stopAudio(Engine* e) {
+    if (e->nrtMode_) return;
     std::lock_guard<std::mutex> lck(e->nrt_lock_);
     if (e->audioState_ != AudioState::running) return;
     e->muteGain_ = 0.f;
@@ -599,10 +647,10 @@ tzpl_SErr begin(Engine* e, int silo) {
     if (tBundle.head) {
         return tzpl_errCommandsQueuedButNotSent;
     }
-    if (silo < 0 || silo >= e->silos_.size()) {
+    if (!e || silo < 0 || silo >= (int)e->silos_.size()) {
         return tzpl_errSiloOutOfRange;
     }
-    
+
     tBundle.engine = e;
     tBundle.silo = &e->silos_[silo];
     return tzpl_errNone;
@@ -640,7 +688,7 @@ tzpl_SErr newNode(const char* name, i64 nodeID) {
     if (!def) return tzpl_errNodeDefNotFound;
 
     std::lock_guard<std::mutex> lck(e->nrt_lock_);
-    
+
     Node* test = tBundle.silo->nrt_getNode(nodeID);
     if (test) return tzpl_errNodeIDAlreadyTaken;
 
@@ -651,7 +699,7 @@ tzpl_SErr newNode(const char* name, i64 nodeID) {
         printf("newNode failed %d\n", err);
         return err;
     }
-    
+
     tBundle.add(new AddNodeCmd{node});
     return tzpl_errNone;
 }

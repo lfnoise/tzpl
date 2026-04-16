@@ -1135,12 +1135,14 @@ import clock.*;
 
 coro fn playFor(defName String, seconds Float) Float {
 	let id = play(defName);
+	"Now Playing: %^" fmt(defName) println;
 	yield seconds;
 	stop(id);
 }
 
 ---------------------------------------------------------------------------
 ---------------------------------------------------------------------------
+
 
 
 

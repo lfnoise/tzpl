@@ -32,6 +32,26 @@ Returns the number of active hardware input channels (`0` if audio input is disa
 ### `sleep(seconds: Float) -> Void`
 Block the calling thread for the given duration. **NRT only.** This is a temporary function that will be replaced by a proper event scheduler.
 
+### NRT render API
+
+All non-blocking. Each `renderNRT` call creates its own engine + scheduler + render thread, so multiple renders run concurrently and coexist with the live engine.
+
+#### `renderNRT(path: String, setup: Fn() -> Void) -> Int`
+#### `renderNRT(path: String, durationSeconds: Float, setup: Fn() -> Void) -> Int`
+Start a render. `setup` runs once on the render thread (under the NRTVM mutex) with the render's context installed: any `audio_engine.*` or `clock.*` FFI calls inside `setup` (and inside coroutine handlers it schedules) target this render's engine/scheduler instead of the live engine. Returns a handle (or `0` on failure). Without `durationSeconds`, the render is open-ended and stops on `endRender()`/`stopRender()` or scheduler-idle (with a tail).
+
+#### `isRenderDone(handle: Int) -> Bool`
+Non-blocking poll. Returns `true` if the render finished or the handle is invalid.
+
+#### `onRenderDone(handle: Int, callback: Fn() -> Void) -> Void`
+Register a one-shot completion callback. If the render already finished, the callback runs immediately. Otherwise it fires when the render completes.
+
+#### `stopRender(handle: Int) -> Void` &nbsp;&middot;&nbsp; `stopRender(handle: Int, tailSeconds: Float) -> Void`
+Ask the named render to stop. Render continues for the default tail (or the supplied `tailSeconds`) before closing the WAV file. First stop request wins.
+
+#### `endRender() -> Void` &nbsp;&middot;&nbsp; `endRender(tailSeconds: Float) -> Void`
+Same as `stopRender` but targets the render whose context is currently active on this thread. Only meaningful inside a render's setup or one of its scheduler handlers.
+
 ## Plugin Loading
 
 ### `loadPlugins(path: String) -> Bool`

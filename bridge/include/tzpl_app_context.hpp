@@ -25,6 +25,7 @@
 #ifndef tzpl_app_context_hpp
 #define tzpl_app_context_hpp
 
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -74,6 +75,12 @@ struct AppContext {
     nats::NatsDispatcher* natsDispatcher = nullptr;
     std::string engineName;  // empty = single-instance mode
     std::vector<SiloVMState> siloVMs;  // indexed by silo number
+
+    // Optional initializer invoked on every freshly created Engine. The app
+    // sets this to register built-in node defs (sinosc etc.) and to load any
+    // standard synthdef plugins so per-render NRT engines have the same
+    // definitions available as the live engine.
+    std::function<void(engine::Engine*)> initEngine;
 };
 
 } // namespace bridge

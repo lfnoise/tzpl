@@ -35,6 +35,7 @@
 #include "diagnostic.hpp"
 #include "tzpl_app_context.hpp"
 #include "tzpl_audio_engine_ffi.hpp"
+#include "tzpl_nrt_render.hpp"
 #include "tzpl_synthdef_compiler_ffi.hpp"
 #include "tzpl_clock_ffi.hpp"
 #include "nrt_tempo_scheduler.hpp"
@@ -160,6 +161,19 @@ static int runSource(VM& vm, Compiler& compiler, const VMTarget& target,
     vm.execute(result.mainBlock);
 
     return 0;
+}
+
+// Wrap runSource in the NRTVM mutex. Concurrent threads (live tempo
+// scheduler, per-render scheduler tickTo on render threads) take the same
+// mutex before re-entering the VM; if the script ran without it they would
+// race against each other and the script -- crashes follow.
+static int runSourceLocked(NRTVM& nrtvm, Compiler& compiler,
+                           const VMTarget& target,
+                           const std::string& source,
+                           const std::string& filename,
+                           ModuleCompiler* moduleCompiler = nullptr) {
+    std::lock_guard<std::mutex> lk(nrtvm.mtx);
+    return runSource(nrtvm.vm, compiler, target, source, filename, moduleCompiler);
 }
 
 static std::string readFile(const std::string& path) {
@@ -427,7 +441,16 @@ static void runREPL(VM& vm, Compiler& compiler, const VMTarget& target,
 // Audio engine setup
 // ---------------------------------------------------------------------------
 
-static engine::Engine* createEngine(const Config& config) {
+// Register built-in test plugins on an engine. Used both for the live engine
+// and for every per-render NRT engine (via AppContext::initEngine).
+static void registerBuiltinDefs(engine::Engine* e) {
+    engine::createSineNode(e);
+    engine::createAddOpNode(e);
+    engine::createMulOpNode(e);
+    engine::createVoicerTestNode(e);
+}
+
+static engine::Engine* createEngine(const Config& config, bool nrt = false) {
     engine::AudioStreamParameters params{};
     params.channels = config.channels;
     params.bufferFrames = config.bufferFrames;
@@ -442,13 +465,10 @@ static engine::Engine* createEngine(const Config& config) {
     engine::EngineConfig engineConfig;
     engineConfig.numSilos = config.numSilos;
 
-    engine::Engine* e = engine::newEngine(engineConfig, params);
+    engine::Engine* e = nrt ? engine::newEngineNRT(engineConfig, params)
+                            : engine::newEngine(engineConfig, params);
 
-    // Register built-in node definitions
-    engine::createSineNode(e);
-    engine::createAddOpNode(e);
-    engine::createMulOpNode(e);
-    engine::createVoicerTestNode(e);
+    registerBuiltinDefs(e);
 
     return e;
 }
@@ -470,6 +490,17 @@ static void printHelp() {
         "  -I <path>               Add module include path (colon-separated)\n"
         "  --no-audio              Don't start audio output\n"
         "  --wait                  Wait for Ctrl-C after running script\n"
+        "  --nrt <path>            Render to WAV (32-bit float) at <path> instead\n"
+        "                          of opening an audio device. Forces headless\n"
+        "                          mode. Without --duration, renders until the\n"
+        "                          script calls endRender() / engineStop() or the\n"
+        "                          tempo scheduler goes idle.\n"
+        "  --duration <seconds>    NRT hard cap in seconds. If absent, the render\n"
+        "                          runs open-ended (see --nrt).\n"
+        "  --tail <seconds>        Tail rendered after the script signals stop\n"
+        "                          (default 1.0). Increase for long reverbs/decays.\n"
+        "  --nrt-safety-cap <sec>  Upper-bound when no --duration is given\n"
+        "                          (default 3600s). Render aborts if exceeded.\n"
         "\n"
         "Audio options (override config file):\n"
         "  --silos <n>             Number of parallel audio threads (default: 4)\n"
@@ -521,6 +552,7 @@ int main(int argc, const char* argv[]) {
 
         // Register FFI bridges before any compilation
         bridge::registerAudioEngineFFI(compiler);
+        bridge::registerNRTRenderFFI(compiler);
         bridge::registerSynthdefCompilerFFI(compiler);
         bridge::registerClockFFI(compiler);
 #if TZPL_HAS_OSC
@@ -535,6 +567,15 @@ int main(int argc, const char* argv[]) {
         std::string filename;
         bool startAudio = true;
         bool waitAfterScript = false;
+
+        // Non-real-time render mode: when nrtOutputPath is set, the engine
+        // runs offline and writes audio to a WAV file. nrtDuration > 0 sets a
+        // hard cap; otherwise the renderer stops when the script calls
+        // endRender()/engineStop() or the tempo scheduler goes idle.
+        std::string nrtOutputPath;
+        double nrtDuration = 0.0;          // 0 = open-ended (until idle/endRender)
+        double nrtTailSeconds = 1.0;       // tail rendered after stop signal
+        double nrtSafetyCapSeconds = 3600; // upper bound when no --duration
 
 #if TZPL_HAS_GUI
         bool guiMode = true;
@@ -592,6 +633,14 @@ int main(int argc, const char* argv[]) {
                 cliNatsUrl = argv[++i];
             } else if (arg == "--engine-name" && i + 1 < argc) {
                 cliEngineName = argv[++i];
+            } else if (arg == "--nrt" && i + 1 < argc) {
+                nrtOutputPath = argv[++i];
+            } else if (arg == "--duration" && i + 1 < argc) {
+                nrtDuration = std::stod(argv[++i]);
+            } else if (arg == "--tail" && i + 1 < argc) {
+                nrtTailSeconds = std::stod(argv[++i]);
+            } else if (arg == "--nrt-safety-cap" && i + 1 < argc) {
+                nrtSafetyCapSeconds = std::stod(argv[++i]);
             } else {
                 filename = arg;
             }
@@ -627,8 +676,18 @@ int main(int argc, const char* argv[]) {
             }
         }
 
+        // --- NRT mode: force headless, never open an audio device ---
+        // The "live" engine is created in NRT-mode as a placeholder so the
+        // AppContext has a valid engine pointer; it's never used because the
+        // script runs inside a render context that creates its own engine.
+        bool nrtMode = !nrtOutputPath.empty();
+        if (nrtMode) {
+            guiMode = false;
+            startAudio = false;
+        }
+
         // --- Create engine and AppContext ---
-        engine::Engine* eng = createEngine(config);
+        engine::Engine* eng = createEngine(config, /*nrt=*/nrtMode);
 
         // Auto-load plugins from project directory
         if (!config.projectDir.empty()) {
@@ -640,6 +699,17 @@ int main(int argc, const char* argv[]) {
 
         bridge::AppContext appCtx;
         appCtx.engine = eng;
+        // Each per-render NRT engine spawned via renderNRT FFI / CLI gets the
+        // same built-in defs (and project-loaded plugins) as the live engine.
+        std::string projectDylibDir = config.projectDir.empty()
+            ? std::string{} : config.projectDir + "/synthdefs/dylib";
+        appCtx.initEngine = [projectDylibDir](engine::Engine* e) {
+            registerBuiltinDefs(e);
+            if (!projectDylibDir.empty()
+                && fs::is_directory(projectDylibDir)) {
+                engine::loadDefs(e, projectDylibDir.c_str());
+            }
+        };
 
 #if TZPL_HAS_OSC
         // Create OSC subsystem
@@ -675,7 +745,10 @@ int main(int argc, const char* argv[]) {
         // (main thread for REPL/script, scheduler thread for timed events).
         NRTVM nrtvm(256 * 1024 * 1024, types, target);
 
-        // Create tempo-based NRT scheduler (60 BPM default, 50ms latency)
+        // Live tempo scheduler (60 BPM default, 50ms latency). Wall-clock
+        // driven on its own thread. Each NRT render creates and drives its
+        // OWN tempo scheduler (in manual mode) so renders use logical audio
+        // time without disturbing the live scheduler.
         ts::NRTTempoScheduler tempoScheduler(&nrtvm);
         appCtx.tempoScheduler = &tempoScheduler;
 
@@ -741,8 +814,8 @@ int main(int argc, const char* argv[]) {
             if (!filename.empty()) {
                 std::string source = readFile(filename);
                 if (!source.empty()) {
-                    runSource(nrtvm.vm, compiler, target, source, filename,
-                              &moduleCompiler);
+                    runSourceLocked(nrtvm, compiler, target, source, filename,
+                                    &moduleCompiler);
                 }
             }
             exitCode = runGui(appCtx);
@@ -750,19 +823,91 @@ int main(int argc, const char* argv[]) {
 #endif
         {
             // --- Headless mode ---------------------------------------------
-            // Run file if given
-            if (!filename.empty()) {
-                std::string source = readFile(filename);
-                if (source.empty()) {
+            if (nrtMode) {
+                // --- NRT render path -------------------------------------
+                // Wrap the entire script in a render: the script's main
+                // execution is the render's setup callback. Per-render
+                // engine + manual-mode tempo scheduler + render thread are
+                // created by renderNRTAsync. The CLI then waits at the C++
+                // level (no language primitive blocks) for all in-flight
+                // renders to finish before exiting.
+                if (filename.empty()) {
+                    std::cerr << "--nrt requires a script file\n";
                     exitCode = 1;
                 } else {
-                    exitCode = runSource(nrtvm.vm, compiler, target, source,
-                                         filename, &moduleCompiler);
+                    std::string source = readFile(filename);
+                    if (source.empty()) {
+                        exitCode = 1;
+                    } else {
+                        bridge::RenderJobOpts opts;
+                        opts.path = nrtOutputPath;
+                        opts.sampleRate  = config.sampleRate;
+                        opts.channels    = config.channels;
+                        opts.bufferFrames = config.bufferFrames;
+                        opts.numSilos    = config.numSilos;
+                        opts.durationSeconds  = nrtDuration;
+                        opts.tailSeconds      = nrtTailSeconds;
+                        opts.safetyCapSeconds = nrtSafetyCapSeconds;
+
+                        if (nrtDuration > 0.0) {
+                            std::cerr << "Rendering " << nrtDuration << "s to "
+                                      << nrtOutputPath << " ...\n";
+                        } else {
+                            std::cerr << "Rendering to " << nrtOutputPath
+                                      << " until script signals stop or scheduler"
+                                         " goes idle (safety cap "
+                                      << nrtSafetyCapSeconds << "s) ...\n";
+                        }
+
+                        // Capture the script source & filename by value so the
+                        // render thread sees stable storage regardless of
+                        // when it dispatches.
+                        auto* compilerPtr = &compiler;
+                        auto* mc = &moduleCompiler;
+                        auto* vmPtr = &nrtvm.vm;
+                        std::string src = source;
+                        std::string fname = filename;
+                        VMTarget tgt = target;
+                        int* exitOut = &exitCode;
+
+                        // The setup runs on the calling (main) thread. Hold
+                        // the NRTVM mutex around it so the render thread's
+                        // per-block tickTo (which also takes the mutex)
+                        // serialises with VM access -- otherwise both
+                        // threads would touch the VM concurrently and crash.
+                        auto* nrtvmPtr = &nrtvm;
+                        bridge::renderNRTAsync(opts, &appCtx,
+                            [vmPtr, compilerPtr, tgt, src, fname, mc,
+                             exitOut, nrtvmPtr]() {
+                                std::lock_guard<std::mutex> lk(nrtvmPtr->mtx);
+                                int rc = runSource(*vmPtr, *compilerPtr, tgt,
+                                                   src, fname, mc);
+                                if (rc != 0) *exitOut = rc;
+                            });
+
+                        // Wait for the render thread to finish before exit.
+                        // This is a C++-level join, not a language block.
+                        bridge::joinAllRenders();
+                    }
+                }
+                std::cerr << "Done.\n";
+            } else {
+                // --- Live (RT) headless mode ------------------------------
+                if (!filename.empty()) {
+                    std::string source = readFile(filename);
+                    if (source.empty()) {
+                        exitCode = 1;
+                    } else {
+                        exitCode = runSourceLocked(nrtvm, compiler, target,
+                                                   source, filename,
+                                                   &moduleCompiler);
+                    }
                 }
             }
 
-            // After file execution (or with no file), decide what to do next
-            if (exitCode == 0 && !gShouldQuit) {
+            // After file execution (or with no file), decide what to do next.
+            // NRT mode never enters the REPL or wait-for-listeners loop.
+            if (!nrtMode && exitCode == 0 && !gShouldQuit) {
                 bool stayAlive = waitAfterScript || hasActiveListeners
                                  || filename.empty();
 
@@ -785,6 +930,11 @@ int main(int argc, const char* argv[]) {
         // =================================================================
         // Shutdown
         // =================================================================
+
+        // Tear down all in-flight NRT renders before destroying the live VM
+        // and tempo scheduler. Each render's per-render scheduler captures a
+        // pointer into the NRTVM's mutex; we must join their threads first.
+        bridge::shutdownRenderRegistry();
 
         tempoScheduler.stop();
         nrtvm.stopHeartbeat();

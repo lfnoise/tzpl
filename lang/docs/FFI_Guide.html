@@ -441,6 +441,16 @@ if (localStorage.getItem('tzpl-docs-theme') === 'light') document.documentElemen
         <li><a href="#silo-vm-examples">Examples</a></li>
       </ol>
     </li>
+    <li><a href="#nrt-render">Non-Real-Time Rendering</a>
+      <ol>
+        <li><a href="#nrt-render-overview">Overview</a></li>
+        <li><a href="#nrt-render-ffi">FFI Functions</a></li>
+        <li><a href="#nrt-render-cli">CLI Invocation</a></li>
+        <li><a href="#nrt-render-behavior">Behavior &amp; Determinism</a></li>
+        <li><a href="#nrt-render-cpp">C++ Embedding</a></li>
+        <li><a href="#nrt-render-examples">Examples</a></li>
+      </ol>
+    </li>
   </ol>
 </nav>
 
@@ -2667,6 +2677,292 @@ nats.<span class="fn">onMessageS</span>(<span class="str">"nodes.piano.chords"</
 "</span>);
 
 <span class="fn">detachVM</span>(<span class="num">0</span>);</code></pre>
+
+<!-- ================================================================ -->
+<h2 id="nrt-render">14. Non-Real-Time Rendering</h2>
+
+<h3 id="nrt-render-overview">14.1 Overview</h3>
+
+<p>Non-real-time (NRT) rendering runs the audio engine offline: no audio device is opened, the render loop runs as fast as the host can compute, and audio is written to a 32-bit float WAV file instead of the speakers. NRT mode is intended for bouncing/mixdown of long pieces, batch generation of audio assets, golden-file regression tests for synthdefs, and CI environments without a working audio device.</p>
+
+<p>Key properties of the NRT model:</p>
+<ul>
+  <li><strong>Async:</strong> <code>renderNRT</code> returns immediately with a handle. The language never blocks waiting for a render &mdash; poll with <code>isRenderDone(h)</code> or register a one-shot <code>onRenderDone(h, cb)</code> callback.</li>
+  <li><strong>Independent per render:</strong> each call creates its own Engine, tempo scheduler, and render thread. Multiple renders run concurrently without interfering.</li>
+  <li><strong>Live audio coexists:</strong> the live engine (if the script has called <code>engineStart()</code>) keeps playing while one or more NRT renders run in the background.</li>
+  <li><strong>Logical audio time:</strong> inside a render, all schedulers (engine per-sample <code>SchedulerQueue</code>, the RT tempo scheduler, and the per-render <code>NRTTempoScheduler</code> in its manual mode) advance with the sample clock. Scripts using <code>clock.go</code>, <code>playFor</code>, coroutine <code>yield</code>, and <code>sched(time)</code> produce identical timing in NRT and RT, up to floating-point determinism.</li>
+</ul>
+
+<h3 id="nrt-render-ffi">14.2 FFI Functions</h3>
+
+<p>All NRT-render FFI lives in the <code>audio_engine</code> module. Every call is non-blocking; the language never waits on a render. Multiple renders may be in flight simultaneously, and renders coexist with live audio.</p>
+
+<pre><code><span class="cmt">-- Start a render. setup runs once on the render's background thread under</span>
+<span class="cmt">-- the NRTVM lock. Inside setup, FFI calls (ae.begin/newNode/sched, clock.go,</span>
+<span class="cmt">-- etc.) are routed to this render's engine + scheduler rather than the live</span>
+<span class="cmt">-- engine. Returns a handle.</span>
+<span class="kw">fn</span> <span class="fn">renderNRT</span>(path String, setup Fn() Void) Int
+<span class="kw">fn</span> <span class="fn">renderNRT</span>(path String, durationSeconds Float, setup Fn() Void) Int
+
+<span class="cmt">-- Non-blocking status query. Returns true if the render has finished or if</span>
+<span class="cmt">-- the handle is invalid.</span>
+<span class="kw">fn</span> <span class="fn">isRenderDone</span>(handle Int) Bool
+
+<span class="cmt">-- One-shot completion callback. If the render has already finished, the</span>
+<span class="cmt">-- callback fires immediately. Otherwise it fires from the live tempo</span>
+<span class="cmt">-- scheduler thread when the render completes.</span>
+<span class="kw">fn</span> <span class="fn">onRenderDone</span>(handle Int, callback Fn() Void) Void
+
+<span class="cmt">-- Ask a specific render to stop. Runs the renderer's default tail</span>
+<span class="cmt">-- (or tailSeconds, if provided) before closing the WAV file.</span>
+<span class="kw">fn</span> <span class="fn">stopRender</span>(handle Int) Void
+<span class="kw">fn</span> <span class="fn">stopRender</span>(handle Int, tailSeconds Float) Void
+
+<span class="cmt">-- Ask THE CURRENT render to stop. Only meaningful when called from inside</span>
+<span class="cmt">-- a render's setup or from a handler running on that render's scheduler.</span>
+<span class="kw">fn</span> <span class="fn">endRender</span>() Void
+<span class="kw">fn</span> <span class="fn">endRender</span>(tailSeconds Float) Void</code></pre>
+
+<h4>Stop conditions</h4>
+
+<p>A render stops when any of these fires first:</p>
+<ul>
+  <li><code>endRender()</code> / <code>endRender(tail)</code> from inside the render.</li>
+  <li><code>stopRender(h)</code> / <code>stopRender(h, tail)</code> from outside the render.</li>
+  <li><code>durationSeconds</code> hard cap (from the two-arg <code>renderNRT</code> or CLI <code>--duration</code>).</li>
+  <li>The render's tempo scheduler goes idle &mdash; no pending coroutines, timers, or tempo changes. This is the natural termination for scripts whose setup schedules a top-level coroutine that completes.</li>
+  <li>A safety cap (default 1 hour) elapses with no other stop signal.</li>
+</ul>
+
+<p>After the stop signal, the renderer continues for a <em>tail</em> (default 1.0&nbsp;s) so reverbs, comb filters, release envelopes, and crossfades can decay naturally before truncation. Override per-render via <code>endRender(tail)</code> / <code>stopRender(h, tail)</code>, or globally via the CLI <code>--tail</code> flag.</p>
+
+<h4>Polling vs. callback</h4>
+
+<p>Polling via a coroutine:</p>
+<pre><code><span class="kw">import</span> clock.*;
+<span class="kw">import</span> audio_engine.*;
+
+<span class="kw">let</span> h = <span class="fn">renderNRT</span>(<span class="str">"out.wav"</span>, <span class="kw">fn</span>() { <span class="cmt">-- ... --</span> });
+
+<span class="fn">go</span>(<span class="kw">coro fn</span>() Float {
+    <span class="kw">while</span> (!<span class="fn">isRenderDone</span>(h)) {
+        <span class="kw">yield</span> <span class="num">0.1</span>;
+    }
+    <span class="fn">println</span>(<span class="str">"render done"</span>);
+}());</code></pre>
+
+<p>Callback:</p>
+<pre><code><span class="kw">let</span> h = <span class="fn">renderNRT</span>(<span class="str">"out.wav"</span>, <span class="kw">fn</span>() { <span class="cmt">-- ... --</span> });
+<span class="fn">onRenderDone</span>(h, <span class="kw">fn</span>() { <span class="fn">println</span>(<span class="str">"render done"</span>); });</code></pre>
+
+<h3 id="nrt-render-cli">14.3 CLI Invocation</h3>
+
+<p>The <code>--nrt</code> CLI flag is a convenience wrapper that runs a script as the setup of a single render:</p>
+
+<pre><code>tzpl --nrt out.wav script.x</code></pre>
+
+<p>Equivalent to calling <code>renderNRT(out.wav, ...)</code> with the entire script as the setup. Implies <code>--nogui</code>; no audio device is opened. Waits (at the C++ level, not in the language) for the render to complete before exiting.</p>
+
+<table>
+  <thead><tr><th>Flag</th><th>Argument</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td><code>--nrt</code></td><td><code>&lt;path&gt;</code></td><td>Output WAV path. Float32 IEEE WAV; sample rate and channel count come from the engine config (defaults: 44100&nbsp;Hz, 2 channels).</td></tr>
+    <tr><td><code>--duration</code></td><td><code>&lt;seconds&gt;</code></td><td>Optional hard cap. If absent, the render runs until script-driven stop or scheduler idle.</td></tr>
+    <tr><td><code>--tail</code></td><td><code>&lt;seconds&gt;</code></td><td>Default tail rendered after the stop signal (default <code>1.0</code>).</td></tr>
+    <tr><td><code>--nrt-safety-cap</code></td><td><code>&lt;seconds&gt;</code></td><td>Upper bound (default <code>3600</code>). Render aborts with a stderr warning if exceeded.</td></tr>
+    <tr><td><code>--sample-rate</code></td><td><code>&lt;hz&gt;</code></td><td>Engine sample rate.</td></tr>
+    <tr><td><code>--buffer-frames</code></td><td><code>&lt;n&gt;</code></td><td>Render block size.</td></tr>
+    <tr><td><code>--channels</code></td><td><code>&lt;n&gt;</code></td><td>Output channel count.</td></tr>
+  </tbody>
+</table>
+
+<div class="tip">
+  <strong>Wrapping an existing script:</strong> scripts that already use <code>go(coro fn() Float { ... }())</code> for sequencing work with <code>tzpl --nrt out.wav script.x</code> unchanged. The tempo scheduler detects when the top-level coroutine finishes and stops automatically. For patches with long reverb tails, add <code>--tail 5</code> (or call <code>endRender(5.0)</code> from the script) so the decay isn't truncated.
+</div>
+
+<h3 id="nrt-render-behavior">14.4 Behavior &amp; Determinism</h3>
+
+<ul>
+  <li><strong>Per-render isolation:</strong> each <code>renderNRT</code> call creates its own <code>Engine</code> (via the internal <code>newEngineNRT</code>) and its own <code>NRTTempoScheduler</code>, so concurrent renders cannot interfere with each other or with the live engine.</li>
+  <li><strong>Built-in defs + loaded plugins:</strong> each per-render engine is initialized with the same node defs the live engine has (through an app-supplied hook &mdash; see <a href="#nrt-render-cpp">C++ Embedding</a>), so <code>sinosc</code>, user synthdef plugins, and other built-ins are available inside renders.</li>
+  <li><strong>Thread-local routing:</strong> inside a render's setup closure and any handler running on that render's scheduler, FFI calls like <code>ae.newNode</code> and <code>clock.go</code> consult a thread-local &ldquo;current render&rdquo; context and target this render's engine / scheduler. Outside a render context, the same calls target the live engine.</li>
+  <li><strong>Concurrency:</strong> the script's main thread and render threads all share the one <code>NRTVM</code>; the NRTVM mutex serializes VM access across threads. Render setups and handlers run on render threads; the VM's bytecode execution is serialized so the language remains single-threaded as observed by the script.</li>
+  <li><strong>Time inside a render:</strong> <code>getStreamTime()</code> returns logical audio time, advancing with rendered samples. The render's tempo scheduler runs in manual mode: the render thread calls <code>tickTo(currentLogicalSeconds)</code> once per block, firing handlers synchronously. Latency is automatically zero.</li>
+  <li><strong>Sample-accurate commands:</strong> the engine's per-sample <code>SchedulerQueue</code> and the <code>RTTempoScheduler</code> fire at exact sample boundaries, just as in RT playback.</li>
+  <li><strong>Determinism:</strong> for a deterministic patch (no input-driven state, no PRNG seeding from clock, no wall-clock scheduling), repeated renders produce byte-identical WAV files.</li>
+  <li><strong>Multi-silo:</strong> worker silos still run on their own threads and are signalled per block, so multi-core machines render faster. The SCHED_RR priority bump applied to RT worker threads is skipped for NRT engines.</li>
+  <li><strong>Shutdown:</strong> the app's shutdown sequence joins all in-flight render threads before destroying the live VM, so no render can outlive the resources it captures.</li>
+</ul>
+
+<p class="note"><strong>Node IDs 0 and 1</strong> are reserved by each engine for the output and input nodes respectively. User synthdefs should use IDs of <code>2</code> or above (conventionally <code>100+</code>); attempting <code>newNode(&quot;...&quot;, 1)</code> returns <code>tzpl_errNodeIDAlreadyTaken</code>.</p>
+
+<h3 id="nrt-render-cpp">14.5 C++ Embedding</h3>
+
+<pre><code><span class="cmt">// bridge/include/tzpl_nrt_render.hpp</span>
+<span class="kw">namespace</span> bridge {
+    <span class="kw">struct</span> RenderJobOpts {
+        std::string path;
+        <span class="kw">double</span> sampleRate       = <span class="num">44100.0</span>;
+        <span class="kw">int</span>    channels         = <span class="num">2</span>;
+        <span class="kw">int</span>    bufferFrames     = <span class="num">512</span>;
+        <span class="kw">double</span> durationSeconds  = <span class="num">0.0</span>;   <span class="cmt">// 0 = open-ended</span>
+        <span class="kw">double</span> tailSeconds      = <span class="num">1.0</span>;
+        <span class="kw">double</span> safetyCapSeconds = <span class="num">3600.0</span>;
+        <span class="kw">int</span>    numSilos         = <span class="num">4</span>;
+    };
+
+    <span class="cmt">// Start a render. Returns a handle. setup runs on the render thread,</span>
+    <span class="cmt">// under the NRTVM mutex, with the render's context installed.</span>
+    <span class="kw">int64_t</span> <span class="fn">renderNRTAsync</span>(RenderJobOpts <span class="kw">const</span>&amp; opts,
+                              AppContext* appCtx,
+                              std::function&lt;<span class="kw">void</span>()&gt; setup);
+
+    <span class="kw">bool</span> <span class="fn">isRenderDone</span>(<span class="kw">int64_t</span> handle);
+    <span class="kw">void</span> <span class="fn">onRenderDone</span>(<span class="kw">int64_t</span> handle, std::function&lt;<span class="kw">void</span>()&gt; callback);
+    <span class="kw">void</span> <span class="fn">stopRender</span>(<span class="kw">int64_t</span> handle);
+    <span class="kw">void</span> <span class="fn">stopRender</span>(<span class="kw">int64_t</span> handle, <span class="kw">double</span> tailSeconds);
+
+    <span class="cmt">// Host shutdown: joins every render thread. Must be called BEFORE the</span>
+    <span class="cmt">// live NRTVM and AppContext are destroyed.</span>
+    <span class="kw">void</span> <span class="fn">shutdownRenderRegistry</span>();
+    <span class="cmt">// Polls until all renders are done; C++-only wait, never exposed to</span>
+    <span class="cmt">// Tzopilotl.</span>
+    <span class="kw">void</span> <span class="fn">joinAllRenders</span>(<span class="kw">int</span> pollMs = <span class="num">50</span>);
+
+    <span class="cmt">// Current thread's render context (nullptr when not inside a render).</span>
+    RenderContext <span class="kw">const</span>* <span class="fn">currentRenderContext</span>();
+}</code></pre>
+
+<p>The host (app) is responsible for populating <code>AppContext::initEngine</code>:</p>
+
+<pre><code>appCtx.initEngine = [](engine::Engine* e) {
+    <span class="cmt">// register built-in test plugins</span>
+    engine::<span class="fn">createSineNode</span>(e);
+    engine::<span class="fn">createAddOpNode</span>(e);
+    <span class="cmt">// ...</span>
+    <span class="cmt">// optionally load synthdef .dylibs from the project's dylib directory</span>
+    engine::<span class="fn">loadDefs</span>(e, projectDylibDir.<span class="fn">c_str</span>());
+};</code></pre>
+
+<p>The bridge invokes this hook on every per-render engine immediately after construction, so renders see the same defs as the live engine.</p>
+
+<p>Lower-level engine entry points (used internally by <code>renderNRTAsync</code>; hosts rarely need them directly):</p>
+
+<pre><code><span class="cmt">// engine/src/tzpl_client_interface.hpp</span>
+<span class="kw">namespace</span> engine {
+    Engine* <span class="fn">newEngineNRT</span>(EngineConfig <span class="kw">const</span>&amp; config,
+                          AudioStreamParameters&amp; streamParams);
+    <span class="kw">void</span>    <span class="fn">renderNRTBlock</span>(Engine* e, f32* outBuffer);
+}</code></pre>
+
+<h3 id="nrt-render-examples">14.6 Examples</h3>
+
+<h4>CLI: fixed-duration render</h4>
+
+<pre><code><span class="cmt">-- sine.x: define a synth and queue it for play</span>
+<span class="kw">import</span> audio_engine.*;
+
+<span class="fn">begin</span>(<span class="num">0</span>);
+<span class="fn">newNode</span>(<span class="str">"sinosc"</span>, <span class="num">100</span>);
+<span class="fn">setInput</span>(<span class="num">100</span>, <span class="num">0</span>, <span class="num">440.0</span>);  <span class="cmt">-- frequency</span>
+<span class="fn">setInput</span>(<span class="num">100</span>, <span class="num">1</span>, <span class="num">0.2</span>);    <span class="cmt">-- amplitude</span>
+<span class="fn">connect</span>(<span class="num">100</span>, <span class="num">0</span>, <span class="num">0</span>, <span class="num">0</span>);
+<span class="fn">sched</span>();</code></pre>
+
+<pre><code>tzpl --nrt sine.wav --duration 1 sine.x</code></pre>
+
+<h4>CLI: open-ended render of a coroutine-driven script</h4>
+
+<p>Scripts that already use <code>go(coro fn() Float { ... }())</code> for sequencing work as-is. The renderer stops automatically when the coroutine completes (plus the default 1&nbsp;s tail).</p>
+
+<pre><code><span class="cmt">-- sequence.x</span>
+<span class="kw">import</span> clock.*;
+<span class="kw">import</span> audio_engine.*;
+
+<span class="fn">go</span>(<span class="kw">coro fn</span>() Float {
+    <span class="fn">begin</span>(<span class="num">0</span>);
+    <span class="fn">newNode</span>(<span class="str">"sinosc"</span>, <span class="num">100</span>);
+    <span class="fn">setInput</span>(<span class="num">100</span>, <span class="num">0</span>, <span class="num">220.0</span>);
+    <span class="fn">setInput</span>(<span class="num">100</span>, <span class="num">1</span>, <span class="num">0.15</span>);
+    <span class="fn">connect</span>(<span class="num">100</span>, <span class="num">0</span>, <span class="num">0</span>, <span class="num">0</span>);
+    <span class="fn">sched</span>();
+    <span class="kw">yield</span> <span class="num">1.0</span>;
+    <span class="fn">begin</span>(<span class="num">0</span>);
+    <span class="fn">freeNode</span>(<span class="num">100</span>);
+    <span class="fn">sched</span>();
+}());</code></pre>
+
+<pre><code>tzpl --nrt sequence.wav sequence.x</code></pre>
+
+<h4>Script-driven async render with completion callback</h4>
+
+<pre><code><span class="kw">import</span> clock.*;
+<span class="kw">import</span> audio_engine.*;
+
+<span class="kw">let</span> h = <span class="fn">renderNRT</span>(<span class="str">"/tmp/take.wav"</span>, <span class="kw">fn</span>() Void {
+    <span class="fn">go</span>(<span class="kw">coro fn</span>() Float {
+        <span class="fn">begin</span>(<span class="num">0</span>);
+        <span class="fn">newNode</span>(<span class="str">"sinosc"</span>, <span class="num">100</span>);
+        <span class="fn">setInput</span>(<span class="num">100</span>, <span class="num">0</span>, <span class="num">220.0</span>);
+        <span class="fn">setInput</span>(<span class="num">100</span>, <span class="num">1</span>, <span class="num">0.15</span>);
+        <span class="fn">connect</span>(<span class="num">100</span>, <span class="num">0</span>, <span class="num">0</span>, <span class="num">0</span>);
+        <span class="fn">sched</span>();
+        <span class="kw">yield</span> <span class="num">2.0</span>;
+        <span class="fn">endRender</span>();
+    }());
+});
+
+<span class="fn">onRenderDone</span>(h, <span class="kw">fn</span>() Void { <span class="fn">println</span>(<span class="str">"render finished"</span>); });</code></pre>
+
+<h4>Multiple concurrent renders</h4>
+
+<pre><code><span class="kw">import</span> clock.*;
+<span class="kw">import</span> audio_engine.*;
+
+<span class="kw">let</span> a = <span class="fn">renderNRT</span>(<span class="str">"a.wav"</span>, <span class="kw">fn</span>() Void {
+    <span class="fn">go</span>(<span class="kw">coro fn</span>() Float {
+        <span class="fn">begin</span>(<span class="num">0</span>);
+        <span class="fn">newNode</span>(<span class="str">"sinosc"</span>, <span class="num">100</span>);
+        <span class="fn">setInput</span>(<span class="num">100</span>, <span class="num">0</span>, <span class="num">220.0</span>);
+        <span class="fn">setInput</span>(<span class="num">100</span>, <span class="num">1</span>, <span class="num">0.15</span>);
+        <span class="fn">connect</span>(<span class="num">100</span>, <span class="num">0</span>, <span class="num">0</span>, <span class="num">0</span>);
+        <span class="fn">sched</span>();
+        <span class="kw">yield</span> <span class="num">1.0</span>;
+        <span class="fn">endRender</span>();
+    }());
+});
+
+<span class="kw">let</span> b = <span class="fn">renderNRT</span>(<span class="str">"b.wav"</span>, <span class="kw">fn</span>() Void {
+    <span class="fn">go</span>(<span class="kw">coro fn</span>() Float {
+        <span class="fn">begin</span>(<span class="num">0</span>);
+        <span class="fn">newNode</span>(<span class="str">"sinosc"</span>, <span class="num">100</span>);
+        <span class="fn">setInput</span>(<span class="num">100</span>, <span class="num">0</span>, <span class="num">440.0</span>);
+        <span class="fn">setInput</span>(<span class="num">100</span>, <span class="num">1</span>, <span class="num">0.15</span>);
+        <span class="fn">connect</span>(<span class="num">100</span>, <span class="num">0</span>, <span class="num">0</span>, <span class="num">0</span>);
+        <span class="fn">sched</span>();
+        <span class="kw">yield</span> <span class="num">0.5</span>;
+        <span class="fn">endRender</span>();
+    }());
+});
+
+<span class="fn">onRenderDone</span>(a, <span class="kw">fn</span>() Void { <span class="fn">println</span>(<span class="str">"a done"</span>); });
+<span class="fn">onRenderDone</span>(b, <span class="kw">fn</span>() Void { <span class="fn">println</span>(<span class="str">"b done"</span>); });</code></pre>
+
+<h4>Live audio while rendering</h4>
+
+<pre><code><span class="kw">import</span> clock.*;
+<span class="kw">import</span> audio_engine.*;
+
+<span class="cmt">-- live audio</span>
+<span class="fn">engineStart</span>();
+<span class="fn">go</span>(<span class="kw">coro fn</span>() Float {
+    <span class="cmt">-- ... live pattern ...</span>
+}());
+
+<span class="cmt">-- a render running in the background; the live engine is unaffected</span>
+<span class="kw">let</span> h = <span class="fn">renderNRT</span>(<span class="str">"bounce.wav"</span>, <span class="kw">fn</span>() Void {
+    <span class="cmt">-- ... render setup ...</span>
+});</code></pre>
 
 </main>
 <script>

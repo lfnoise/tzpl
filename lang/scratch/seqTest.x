@@ -5,7 +5,7 @@ fn seqTest() S {
 	-- let middleC = 261.6255653;
 	let middleC = 256;
 	let pattern = [1/1, 6/5, 3/2, 9/5, 2/1, 12/5, 3, 18/5] * middleC;
-	-- equivalently let pattern = [10, 12, 15, 18, 20, 24, 30, 36]/10 * middleC;
+	-- equivalently: let pattern = [10, 12, 15, 18, 20, 24, 30, 36]/10 * middleC;
 	let detune = [-0.04, 0.04];
 	( 
 		  (1 lfimp seq(pattern * 0.25, 8) + detune) smoothSaw(5) * 1.4
@@ -22,6 +22,7 @@ go(coro fn() Float {
 	"seqTest" playFor(24.0) yieldAll;
 	"done playing" println;
 }());
+
 
 
 
