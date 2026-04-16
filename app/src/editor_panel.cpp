@@ -6,6 +6,9 @@
 #include <fstream>
 #include <sstream>
 #include <algorithm>
+#include <filesystem>
+
+namespace fs = std::filesystem;
 
 // ---------------------------------------------------------------------------
 // Tzopilotl language definition for syntax highlighting
@@ -81,6 +84,7 @@ void EditorPanel::newTab(const std::string& name) {
     tab.editorTitle = "##editor" + std::to_string(tab.id);
     tab.editor.SetLanguageDefinition(langDef_);
     tab.editor.SetShowWhitespaces(false);
+    tab.diskContent = tab.editor.GetText();
     tabs_.push_back(std::move(tab));
     activeTab_ = (int)tabs_.size() - 1;
     needsFocus_ = true;
@@ -105,8 +109,13 @@ void EditorPanel::openFile(const std::string& path) {
     tab.id = nextTabId_++;
     tab.editorTitle = "##editor" + std::to_string(tab.id);
     tab.editor.SetLanguageDefinition(langDef_);
-    tab.editor.SetText(ss.str());
+    tab.diskContent = ss.str();
+    tab.editor.SetText(tab.diskContent);
     tab.editor.SetShowWhitespaces(false);
+
+    std::error_code ec;
+    tab.diskWriteTime = fs::last_write_time(path, ec);
+
     tabs_.push_back(std::move(tab));
     activeTab_ = (int)tabs_.size() - 1;
     needsFocus_ = true;
@@ -132,10 +141,15 @@ bool EditorPanel::saveAs(const std::string& path) {
 
     auto& tab = tabs_[activeTab_];
     tab.filePath = path;
+    tab.diskContent = tab.editor.GetText();
     tab.modified = false;
     // Update tab name from path
     auto slash = path.find_last_of('/');
     tab.name = (slash != std::string::npos) ? path.substr(slash + 1) : path;
+
+    std::error_code ec;
+    tab.diskWriteTime = fs::last_write_time(path, ec);
+
     return true;
 }
 
@@ -145,6 +159,38 @@ bool EditorPanel::saveCopy(const std::string& path) {
     if (!file.is_open()) return false;
     file << tabs_[activeTab_].editor.GetText();
     return true;
+}
+
+bool EditorPanel::hasUnsavedChanges() const {
+    for (auto& tab : tabs_)
+        if (tab.modified) return true;
+    return false;
+}
+
+std::vector<std::string> EditorPanel::unsavedFileNames() const {
+    std::vector<std::string> names;
+    for (auto& tab : tabs_)
+        if (tab.modified) names.push_back(tab.name);
+    return names;
+}
+
+int EditorPanel::saveAll() {
+    int saved = 0;
+    for (auto& tab : tabs_) {
+        if (tab.modified && !tab.filePath.empty()) {
+            std::ofstream file(tab.filePath);
+            if (file.is_open()) {
+                file << tab.editor.GetText();
+                file.close();
+                tab.diskContent = tab.editor.GetText();
+                tab.modified = false;
+                std::error_code ec;
+                tab.diskWriteTime = fs::last_write_time(tab.filePath, ec);
+                ++saved;
+            }
+        }
+    }
+    return saved;
 }
 
 bool EditorPanel::hasFilePath() const {
@@ -162,6 +208,18 @@ std::string EditorPanel::activeTabName() const {
     return tabs_[activeTab_].name;
 }
 
+bool EditorPanel::switchToFile(const std::string& path) {
+    for (int i = 0; i < (int)tabs_.size(); ++i) {
+        if (tabs_[i].filePath == path) {
+            activeTab_ = i;
+            pendingSelectTab_ = i;
+            needsFocus_ = true;
+            return true;
+        }
+    }
+    return false;
+}
+
 void EditorPanel::closeTab(int index) {
     if (index < 0 || index >= (int)tabs_.size()) return;
     tabs_.erase(tabs_.begin() + index);
@@ -172,6 +230,8 @@ void EditorPanel::closeTab(int index) {
 }
 
 void EditorPanel::draw(float width, float height, GuiState& state) {
+    checkForExternalChanges();
+
     ImGui::BeginChild("EditorPanel", ImVec2(width, height), false,
                       ImGuiWindowFlags_NoScrollbar);
 
@@ -192,12 +252,17 @@ void EditorPanel::draw(float width, float height, GuiState& state) {
             if (tabs_[i].modified) label += " \xe2\x80\xa2";
             label += "###tab" + std::to_string(i);
 
-            if (ImGui::BeginTabItem(label.c_str(), &open)) {
+            ImGuiTabItemFlags tabFlags = 0;
+            if (i == pendingSelectTab_)
+                tabFlags |= ImGuiTabItemFlags_SetSelected;
+
+            if (ImGui::BeginTabItem(label.c_str(), &open, tabFlags)) {
                 activeTab_ = i;
                 ImGui::EndTabItem();
             }
             if (!open) closeIdx = i;
         }
+        pendingSelectTab_ = -1;
         ImGui::EndTabBar();
 
         if (closeIdx >= 0) closeTab(closeIdx);
@@ -239,9 +304,10 @@ void EditorPanel::draw(float width, float height, GuiState& state) {
 
         editor.Render(tabs_[activeTab_].editorTitle.c_str());
 
-        // Track modifications (latch on; cleared by save)
+        // Track modifications by comparing to on-disk content
         if (editor.IsTextChanged()) {
-            tabs_[activeTab_].modified = true;
+            tabs_[activeTab_].modified =
+                (editor.GetText() != tabs_[activeTab_].diskContent);
             // Refresh search highlights so they match the edited text
             updateSearchHighlights();
         }
@@ -393,6 +459,46 @@ void EditorPanel::clearErrorMarkers() {
 TextEditor* EditorPanel::activeEditor() {
     if (activeTab_ < 0 || activeTab_ >= (int)tabs_.size()) return nullptr;
     return &tabs_[activeTab_].editor;
+}
+
+// ---------------------------------------------------------------------------
+// External file change detection
+// ---------------------------------------------------------------------------
+
+void EditorPanel::checkForExternalChanges() {
+    using namespace std::chrono;
+    auto now = steady_clock::now();
+    if (now - lastDiskCheck_ < 1s)
+        return;
+    lastDiskCheck_ = now;
+
+    for (auto& tab : tabs_) {
+        if (tab.filePath.empty()) continue;
+
+        std::error_code ec;
+        auto diskTime = fs::last_write_time(tab.filePath, ec);
+        if (ec) continue; // file gone or unreadable -- ignore
+
+        if (diskTime != tab.diskWriteTime) {
+            tab.diskWriteTime = diskTime;
+
+            // If the user has unsaved edits, don't clobber them
+            if (tab.modified) continue;
+
+            std::ifstream file(tab.filePath);
+            if (!file.is_open()) continue;
+
+            std::stringstream ss;
+            ss << file.rdbuf();
+
+            // Preserve cursor position across reload
+            auto cursor = tab.editor.GetCursorPosition();
+            tab.diskContent = ss.str();
+            tab.editor.SetText(tab.diskContent);
+            tab.editor.SetCursorPosition(cursor);
+            tab.modified = false;
+        }
+    }
 }
 
 void EditorPanel::updateSearchHighlights() {

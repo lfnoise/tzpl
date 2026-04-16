@@ -15,6 +15,8 @@
 #include <string>
 #include <vector>
 #include <map>
+#include <filesystem>
+#include <chrono>
 
 class EditorPanel {
 public:
@@ -38,6 +40,9 @@ public:
     bool hasFilePath() const;                      // active tab has a file path
     std::string activeFilePath() const;
     std::string activeTabName() const;
+
+    // Switch to an already-open file by path. Returns true if found.
+    bool switchToFile(const std::string& path);
 
     // Text access for evaluation
     std::string getSelectedText() const;
@@ -66,6 +71,14 @@ public:
     void setErrorMarkers(const TextEditor::ErrorMarkers& markers);
     void clearErrorMarkers();
 
+    // Unsaved changes
+    bool hasUnsavedChanges() const;
+    std::vector<std::string> unsavedFileNames() const;
+    int saveAll();  // save all modified tabs that have paths; returns count saved
+
+    // External file change detection
+    void checkForExternalChanges();
+
     // Find/Replace
     FindReplaceState& findReplace() { return findReplace_; }
     TextEditor* activeEditor();
@@ -81,15 +94,19 @@ private:
         bool modified = false;
         unsigned id = 0;           // stable ID for ImGui child window (scroll state)
         std::string editorTitle;   // "##editorN" -- cached to avoid re-alloc
+        std::filesystem::file_time_type diskWriteTime{}; // last known mod time on disk
+        std::string diskContent;   // content at last save/load, for modified detection
     };
 
     std::vector<Tab> tabs_;
     int activeTab_ = 0;
     int prevActiveTab_ = -1;
     bool needsFocus_ = false;
+    int pendingSelectTab_ = -1;    // tab index to force-select on next draw
     unsigned nextTabId_ = 0;
     TextEditor::LanguageDefinition langDef_;
     FindReplaceState findReplace_;
+    std::chrono::steady_clock::time_point lastDiskCheck_{};
 };
 
 #endif /* editor_panel_hpp */

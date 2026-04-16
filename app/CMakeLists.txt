@@ -90,6 +90,7 @@ if(TZPL_BUILD_GUI)
     list(APPEND APP_SOURCES
         src/gui_state.cpp
         src/editor_panel.cpp
+        src/workspace_panel.cpp
         src/output_panel.cpp
         src/find_replace.cpp
     )
@@ -137,4 +138,12 @@ endif()
 
 target_compile_definitions(tzpl_app PRIVATE
     MODULES_DIR="${CMAKE_SOURCE_DIR}/bridge/modules"
+)
+
+# --- install targets ---
+
+include(GNUInstallDirs)
+
+install(TARGETS tzpl_app
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )

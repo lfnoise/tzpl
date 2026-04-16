@@ -1344,7 +1344,7 @@ void TextEditor::Render(const char* aTitle, const ImVec2& aSize, bool aBorder)
 	ImGui::PushStyleColor(ImGuiCol_ChildBg, ImGui::ColorConvertU32ToFloat4(mPalette[(int)PaletteIndex::Background]));
 	ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0.0f, 0.0f));
 	if (!mIgnoreImGuiChild)
-		ImGui::BeginChild(aTitle, aSize, aBorder, ImGuiWindowFlags_HorizontalScrollbar | ImGuiWindowFlags_AlwaysHorizontalScrollbar | ImGuiWindowFlags_NoMove);
+		ImGui::BeginChild(aTitle, aSize, aBorder, ImGuiWindowFlags_HorizontalScrollbar | ImGuiWindowFlags_AlwaysHorizontalScrollbar | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoNav);
 
 	if (mHandleKeyboardInputs)
 	{
@@ -2111,7 +2111,11 @@ void TextEditor::Backspace()
 					u.mRemoved += line[eraseStart].mChar;
 					line.erase(line.begin() + eraseStart);
 				}
-				mState.mCursorPosition.mColumn = targetCol;
+				auto newPos = Coordinates(pos.mLine, GetCharacterColumn(pos.mLine, eraseStart));
+				SetCursorPosition(newPos);
+				mInteractiveStart = mInteractiveEnd = newPos;
+				SetSelection(newPos, newPos);
+				mStartTime = 0;
 			}
 			else
 			{
@@ -2119,15 +2123,19 @@ void TextEditor::Backspace()
 				while (cindex > 0 && IsUTFSequence(line[cindex].mChar))
 					--cindex;
 
-				u.mRemovedStart = u.mRemovedEnd = GetActualCursorCoordinates();
-				--u.mRemovedStart.mColumn;
-				--mState.mCursorPosition.mColumn;
+				u.mRemovedEnd = GetActualCursorCoordinates();
 
 				while (cindex < line.size() && cend-- > cindex)
 				{
 					u.mRemoved += line[cindex].mChar;
 					line.erase(line.begin() + cindex);
 				}
+
+				// Compute cursor column from character index so that
+				// multi-column characters (tabs) move the cursor correctly.
+				auto newCol = GetCharacterColumn(pos.mLine, cindex);
+				u.mRemovedStart = Coordinates(pos.mLine, newCol);
+				mState.mCursorPosition.mColumn = newCol;
 			}
 		}
 
@@ -2695,26 +2703,28 @@ void TextEditor::EnsureCursorVisible()
 	float scrollX = ImGui::GetScrollX();
 	float scrollY = ImGui::GetScrollY();
 
-	auto height = ImGui::GetWindowHeight();
-	auto width = ImGui::GetWindowWidth();
-
-	auto top = 1 + (int)ceil(scrollY / mCharAdvance.y);
-	auto bottom = (int)ceil((scrollY + height) / mCharAdvance.y);
-
-	auto left = (int)ceil(scrollX / mCharAdvance.x);
-	auto right = (int)ceil((scrollX + width) / mCharAdvance.x);
+	auto contentMax = ImGui::GetWindowContentRegionMax();
+	auto contentMin = ImGui::GetWindowContentRegionMin();
+	auto height = contentMax.y - contentMin.y;
+	auto width = contentMax.x - contentMin.x;
 
 	auto pos = GetActualCursorCoordinates();
 	auto len = TextDistanceToLineStart(pos);
 
-	if (pos.mLine < top)
-		ImGui::SetScrollY(std::max(0.0f, (pos.mLine - 1) * mCharAdvance.y));
-	if (pos.mLine > bottom - 4)
-		ImGui::SetScrollY(std::max(0.0f, (pos.mLine + 4) * mCharAdvance.y - height));
-	if (len + mTextStart < left + 4)
-		ImGui::SetScrollX(std::max(0.0f, len + mTextStart - 4));
-	if (len + mTextStart > right - 4)
-		ImGui::SetScrollX(std::max(0.0f, len + mTextStart + 4 - width));
+	// Scroll vertically only when the cursor line would be off-screen
+	float cursorTop = pos.mLine * mCharAdvance.y;
+	float cursorBottom = cursorTop + mCharAdvance.y;
+	if (cursorTop < scrollY)
+		ImGui::SetScrollY(std::max(0.0f, cursorTop));
+	else if (cursorBottom > scrollY + height)
+		ImGui::SetScrollY(std::max(0.0f, cursorBottom - height));
+
+	// Scroll horizontally only when the cursor would be off-screen
+	float cursorX = len + mTextStart;
+	if (cursorX < scrollX)
+		ImGui::SetScrollX(std::max(0.0f, cursorX - mCharAdvance.x));
+	else if (cursorX > scrollX + width)
+		ImGui::SetScrollX(cursorX - width + mCharAdvance.x);
 }
 
 int TextEditor::GetPageSize() const

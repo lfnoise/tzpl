@@ -26,6 +26,7 @@
 #include "tzpl_app_context.hpp"
 #include "gui_state.hpp"
 #include "editor_panel.hpp"
+#include "workspace_panel.hpp"
 #include "output_panel.hpp"
 
 #include "repl_session.hpp"
@@ -50,6 +51,7 @@
 #include <csignal>
 #include <string>
 #include <mutex>
+#include <filesystem>
 #include <sys/stat.h>
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 
@@ -88,6 +90,9 @@ static bool gMoveEnd = false;
 static bool gMoveTop = false;
 static bool gMoveBottom = false;
 static bool gMoveShift = false;  // shift held during move
+
+// Quit request flag (from Cmd+Q or window close button)
+static bool gWantsToQuit = false;
 
 // Find operation flags
 static bool gFindShow = false;
@@ -144,6 +149,7 @@ static std::string findMonoFont() {
 // ---------------------------------------------------------------------------
 
 @interface TzplMenuHandler : NSObject
+- (void)requestQuit:(id)sender;
 - (void)fileNew:(id)sender;
 - (void)fileOpen:(id)sender;
 - (void)fileSave:(id)sender;
@@ -166,6 +172,7 @@ static std::string findMonoFont() {
 @end
 
 @implementation TzplMenuHandler
+- (void)requestQuit:(id)sender { gWantsToQuit = true; }
 - (void)fileNew:(id)sender     { gFileNew = true; }
 - (void)fileOpen:(id)sender    { gFileOpen = true; }
 - (void)fileSave:(id)sender    { gFileSave = true; }
@@ -217,8 +224,9 @@ static void setupNativeMenuBar(const float* fontSizes, int numFontSizes) {
     [appMenu addItemWithTitle:@"About Tzopilotl"
                        action:nil keyEquivalent:@""];
     [appMenu addItem:[NSMenuItem separatorItem]];
-    [appMenu addItemWithTitle:@"Quit Tzopilotl"
-                       action:@selector(terminate:) keyEquivalent:@"q"];
+    NSMenuItem* quitItem = [appMenu addItemWithTitle:@"Quit Tzopilotl"
+                       action:@selector(requestQuit:) keyEquivalent:@"q"];
+    quitItem.target = gMenuHandler;
     appMenuItem.submenu = appMenu;
     [mainMenu addItem:appMenuItem];
 
@@ -372,6 +380,7 @@ static std::string nativeOpenFileDialog() {
     UTType* tzplType = [UTType typeWithFilenameExtension:@"x"];
     panel.allowedContentTypes = tzplType ? @[tzplType] : @[];
     panel.allowsOtherFileTypes = YES;
+    panel.canChooseDirectories = YES;
     if ([panel runModal] == NSModalResponseOK) {
         return std::string([[panel URL] fileSystemRepresentation]);
     }
@@ -397,6 +406,49 @@ static std::string nativeSaveFileDialog(const std::string& suggestedName) {
 
 static void glfwErrorCallback(int error, const char* description) {
     fprintf(stderr, "GLFW error %d: %s\n", error, description);
+}
+
+// Intercept window close to check for unsaved changes
+static void windowCloseCallback(GLFWwindow* window) {
+    gWantsToQuit = true;
+    glfwSetWindowShouldClose(window, GLFW_FALSE);
+}
+
+// Native macOS alert for unsaved changes.
+// Returns 0 = Save All, 1 = Don't Save, 2 = Cancel.
+static int showUnsavedChangesAlert(const std::vector<std::string>& names) {
+    NSAlert* alert = [[NSAlert alloc] init];
+    alert.alertStyle = NSAlertStyleWarning;
+
+    if (names.size() == 1) {
+        alert.messageText = [NSString stringWithFormat:
+            @"Do you want to save changes to \"%s\"?",
+            names[0].c_str()];
+        alert.informativeText =
+            @"Your changes will be lost if you don't save them.";
+    } else {
+        alert.messageText = [NSString stringWithFormat:
+            @"You have %zu files with unsaved changes.",
+            names.size()];
+        NSMutableString* info = [NSMutableString
+            stringWithString:@"Your changes will be lost if you don't save them.\n"];
+        for (auto& n : names)
+            [info appendFormat:@"\n  \u2022 %s", n.c_str()];
+        alert.informativeText = info;
+    }
+
+    [alert addButtonWithTitle:@"Save All"];
+    [alert addButtonWithTitle:@"Don't Save"];
+    [alert addButtonWithTitle:@"Cancel"];
+
+    // Make "Don't Save" respond to Cmd+D as an accelerator
+    alert.buttons[1].keyEquivalent = @"d";
+    alert.buttons[1].keyEquivalentModifierMask = NSEventModifierFlagCommand;
+
+    NSModalResponse resp = [alert runModal];
+    if (resp == NSAlertFirstButtonReturn)  return 0; // Save All
+    if (resp == NSAlertSecondButtonReturn) return 1; // Don't Save
+    return 2; // Cancel
 }
 
 // Dampen trackpad scroll speed
@@ -576,7 +628,7 @@ int runGui(bridge::AppContext& appCtx) {
         session = ownedSession.get();
     }
 
-    EditorPanel editorPanel;
+    WorkspacePanel workspacePanel;
     OutputPanel outputPanel;
 
     guiState.output.append("Tzopilotl. Cmd+Enter: eval block, "
@@ -584,6 +636,7 @@ int runGui(bridge::AppContext& appCtx) {
                            "Cmd+Shift+Enter: eval file.", LineKind::Info);
 
     // --- Install GLFW callbacks --------------------------------------------
+    glfwSetWindowCloseCallback(window, windowCloseCallback);
     gPrevScrollCallback = glfwSetScrollCallback(window, scrollCallback);
     gFonts = fonts;
     gNumFontSizes = numFontSizes;
@@ -615,6 +668,21 @@ int runGui(bridge::AppContext& appCtx) {
     // --- Main loop ---------------------------------------------------------
     while (!glfwWindowShouldClose(window) && !gShouldQuit) {
         @autoreleasepool {
+            // Handle quit request (Cmd+Q or window close button)
+            if (gWantsToQuit) {
+                gWantsToQuit = false;
+                auto unsaved = workspacePanel.unsavedFileNames();
+                if (unsaved.empty()) break;
+                int choice = showUnsavedChangesAlert(unsaved);
+                if (choice == 0) { workspacePanel.saveAll(); break; } // Save All
+                if (choice == 1) break;                               // Don't Save
+                // Cancel -- clear stale flags from modal dialog
+                guiState.evalFile = guiState.evalSelection
+                                  = guiState.evalLine = false;
+                glfwFocusWindow(window);
+                [nswin makeFirstResponder:nswin.contentView];
+            }
+
             // Throttle frame rate when idle to save CPU.
             // Use short timeout when animations or async work are active.
             bool needsActivity = guiState.flash.active()
@@ -667,6 +735,9 @@ int runGui(bridge::AppContext& appCtx) {
             // ---------------------------------------------------------------
             // Process file operations (triggered by native menu or keyboard)
             // ---------------------------------------------------------------
+            // Get active editor for this frame
+            auto& editorPanel = workspacePanel.activeEditor();
+
             if (gFileNew) {
                 gFileNew = false;
                 editorPanel.newTab();
@@ -680,8 +751,12 @@ int runGui(bridge::AppContext& appCtx) {
                 guiState.evalFile = false;
                 guiState.evalSelection = false;
                 guiState.evalLine = false;
-                if (!path.empty())
-                    editorPanel.openFile(path);
+                if (!path.empty()) {
+                    if (std::filesystem::is_directory(path))
+                        workspacePanel.addWorkspace(path);
+                    else
+                        workspacePanel.activeEditor().openFile(path);
+                }
                 // Restore keyboard focus after native dialog
                 glfwFocusWindow(window);
                 [nswin makeFirstResponder:nswin.contentView];
@@ -791,7 +866,7 @@ int runGui(bridge::AppContext& appCtx) {
             }
 
             // ---------------------------------------------------------------
-            // Layout: editor on top, output on bottom, with splitter
+            // Layout: optional sidebar | editor + output with splitters
             // (Eval requests processed AFTER draw so ImGui tab bar has
             //  updated activeTab_ to match the visually selected tab.)
             // ---------------------------------------------------------------
@@ -807,16 +882,45 @@ int runGui(bridge::AppContext& appCtx) {
 
             float totalW = ImGui::GetContentRegionAvail().x;
             float totalH = ImGui::GetContentRegionAvail().y;
+
+            bool hasSidebar = workspacePanel.hasWorkspaces();
+            float sidebarW = hasSidebar ? workspacePanel.sidebarWidth() : 0;
+            float vsplitterW = hasSidebar ? 6.0f : 0;
+            float rightW = totalW - sidebarW - vsplitterW;
+
+            // Sidebar (directory outlines)
+            if (hasSidebar) {
+                workspacePanel.drawSidebar(sidebarW, totalH);
+                ImGui::SameLine();
+
+                // Vertical splitter between sidebar and editor
+                ImGui::InvisibleButton("##vsplitter",
+                                       ImVec2(vsplitterW, totalH));
+                if (ImGui::IsItemActive()) {
+                    float newW = workspacePanel.sidebarWidth() + io.MouseDelta.x;
+                    newW = std::max(100.0f, std::min(newW, totalW * 0.5f));
+                    workspacePanel.setSidebarWidth(newW);
+                }
+                if (ImGui::IsItemHovered())
+                    ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
+                ImGui::SameLine();
+            }
+
+            // Right pane: editor on top, output on bottom
+            ImGui::BeginChild("##RightPane", ImVec2(rightW, totalH), false,
+                ImGuiWindowFlags_NoScrollbar
+                | ImGuiWindowFlags_NoScrollWithMouse);
+
             float splitterH = 8.0f;
             float usableH = totalH - splitterH;
             float editorH = usableH * guiState.splitRatio;
             float outputH = usableH * (1.0f - guiState.splitRatio);
 
-            // Editor panel
-            editorPanel.draw(totalW, editorH, guiState);
+            // Editor panel (from active workspace)
+            editorPanel.draw(rightW, editorH, guiState);
 
             // Horizontal splitter
-            ImGui::InvisibleButton("##splitter", ImVec2(totalW, splitterH));
+            ImGui::InvisibleButton("##splitter", ImVec2(rightW, splitterH));
             if (ImGui::IsItemActive()) {
                 float delta = io.MouseDelta.y / usableH;
                 guiState.splitRatio += delta;
@@ -827,7 +931,9 @@ int runGui(bridge::AppContext& appCtx) {
                 ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNS);
 
             // Output panel
-            outputPanel.draw(totalW, outputH, guiState.output);
+            outputPanel.draw(rightW, outputH, guiState.output);
+
+            ImGui::EndChild();
 
             // ---------------------------------------------------------------
             // Process eval requests AFTER draw (activeTab_ is now current)
