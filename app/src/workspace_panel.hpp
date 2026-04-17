@@ -35,6 +35,10 @@ public:
     std::vector<std::string> unsavedFileNames() const;
     int saveAll();
 
+    // Returns the editor panel (across all workspaces) that is awaiting
+    // save/discard/cancel confirmation for a modified tab, or nullptr.
+    EditorPanel* editorWithPendingClose();
+
     float sidebarWidth() const { return sidebarWidth_; }
     void setSidebarWidth(float w) { sidebarWidth_ = w; }
 

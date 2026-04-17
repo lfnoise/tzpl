@@ -122,28 +122,37 @@ void EditorPanel::openFile(const std::string& path) {
 }
 
 void EditorPanel::closeActiveTab() {
+    if (activeTab_ >= 0 && activeTab_ < (int)tabs_.size()
+        && tabs_[activeTab_].modified) {
+        pendingCloseTab_ = activeTab_;
+        return;
+    }
     closeTab(activeTab_);
 }
 
-bool EditorPanel::save() {
-    if (activeTab_ < 0 || activeTab_ >= (int)tabs_.size()) return false;
-    auto& tab = tabs_[activeTab_];
-    if (tab.filePath.empty()) return false; // needs saveAs
-    return saveAs(tab.filePath);
-}
+bool EditorPanel::save() { return saveTab(activeTab_); }
 
 bool EditorPanel::saveAs(const std::string& path) {
-    if (activeTab_ < 0 || activeTab_ >= (int)tabs_.size()) return false;
+    return saveTabAs(activeTab_, path);
+}
+
+bool EditorPanel::saveTab(int idx) {
+    if (idx < 0 || idx >= (int)tabs_.size()) return false;
+    if (tabs_[idx].filePath.empty()) return false; // needs saveTabAs
+    return saveTabAs(idx, tabs_[idx].filePath);
+}
+
+bool EditorPanel::saveTabAs(int idx, const std::string& path) {
+    if (idx < 0 || idx >= (int)tabs_.size()) return false;
     std::ofstream file(path);
     if (!file.is_open()) return false;
-    file << tabs_[activeTab_].editor.GetText();
+    file << tabs_[idx].editor.GetText();
     file.close();
 
-    auto& tab = tabs_[activeTab_];
+    auto& tab = tabs_[idx];
     tab.filePath = path;
     tab.diskContent = tab.editor.GetText();
     tab.modified = false;
-    // Update tab name from path
     auto slash = path.find_last_of('/');
     tab.name = (slash != std::string::npos) ? path.substr(slash + 1) : path;
 
@@ -208,6 +217,16 @@ std::string EditorPanel::activeTabName() const {
     return tabs_[activeTab_].name;
 }
 
+std::string EditorPanel::pendingCloseName() const {
+    if (pendingCloseTab_ < 0 || pendingCloseTab_ >= (int)tabs_.size()) return "";
+    return tabs_[pendingCloseTab_].name;
+}
+
+bool EditorPanel::pendingCloseHasPath() const {
+    if (pendingCloseTab_ < 0 || pendingCloseTab_ >= (int)tabs_.size()) return false;
+    return !tabs_[pendingCloseTab_].filePath.empty();
+}
+
 bool EditorPanel::switchToFile(const std::string& path) {
     for (int i = 0; i < (int)tabs_.size(); ++i) {
         if (tabs_[i].filePath == path) {
@@ -260,7 +279,12 @@ void EditorPanel::draw(float width, float height, GuiState& state) {
                 activeTab_ = i;
                 ImGui::EndTabItem();
             }
-            if (!open) closeIdx = i;
+            if (!open) {
+                // Modified tabs need save/discard/cancel confirmation;
+                // defer to the app layer. Unmodified tabs close immediately.
+                if (tabs_[i].modified) pendingCloseTab_ = i;
+                else closeIdx = i;
+            }
         }
         pendingSelectTab_ = -1;
         ImGui::EndTabBar();

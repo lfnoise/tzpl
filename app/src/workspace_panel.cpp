@@ -60,6 +60,13 @@ int WorkspacePanel::saveAll() {
     return total;
 }
 
+EditorPanel* WorkspacePanel::editorWithPendingClose() {
+    if (defaultEditor_.pendingCloseIndex() >= 0) return &defaultEditor_;
+    for (auto& ws : workspaces_)
+        if (ws->editor.pendingCloseIndex() >= 0) return &ws->editor;
+    return nullptr;
+}
+
 EditorPanel& WorkspacePanel::activeEditor() {
     if (activeIdx_ >= 0 && activeIdx_ < (int)workspaces_.size())
         return workspaces_[activeIdx_]->editor;

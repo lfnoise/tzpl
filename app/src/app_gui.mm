@@ -87,6 +87,14 @@ static bool gEditToggleComment = false;
 static bool gEditIndent = false;
 static bool gEditOutdent = false;
 
+// Deferred key injection for text-field clipboard operations.
+// When the native Edit menu fires while an ImGui text input is focused,
+// we inject the shortcut key into ImGui's IO queue so the text field
+// handles cut/copy/paste/undo/redo/select-all instead of the editor.
+static ImGuiKey gDeferredEditKey = ImGuiKey_None;
+static bool gDeferredEditShift = false;
+static int gDeferredEditFrame = 0;  // 0=idle, 1=inject key-down, 2=inject key-up
+
 // Cursor movement flags (Cmd+Arrow, bypasses ImGui key routing)
 static bool gMoveHome = false;
 static bool gMoveEnd = false;
@@ -474,6 +482,29 @@ static int showUnsavedChangesAlert(const std::vector<std::string>& names) {
     return 2; // Cancel
 }
 
+// Native macOS alert for closing a single modified tab.
+// Returns 0 = Save, 1 = Don't Save (discard), 2 = Cancel.
+static int showCloseTabAlert(const std::string& name) {
+    NSAlert* alert = [[NSAlert alloc] init];
+    alert.alertStyle = NSAlertStyleWarning;
+    alert.messageText = [NSString stringWithFormat:
+        @"Do you want to save changes to \"%s\"?", name.c_str()];
+    alert.informativeText =
+        @"Your changes will be lost if you don't save them.";
+
+    [alert addButtonWithTitle:@"Save"];
+    [alert addButtonWithTitle:@"Don't Save"];
+    [alert addButtonWithTitle:@"Cancel"];
+
+    alert.buttons[1].keyEquivalent = @"d";
+    alert.buttons[1].keyEquivalentModifierMask = NSEventModifierFlagCommand;
+
+    NSModalResponse resp = [alert runModal];
+    if (resp == NSAlertFirstButtonReturn)  return 0; // Save
+    if (resp == NSAlertSecondButtonReturn) return 1; // Don't Save
+    return 2; // Cancel
+}
+
 // Dampen trackpad scroll speed
 static GLFWscrollfun gPrevScrollCallback = nullptr;
 static constexpr float kScrollScale = 0.25f;
@@ -693,6 +724,33 @@ int runGui(bridge::AppContext& appCtx) {
     // --- Main loop ---------------------------------------------------------
     while (!glfwWindowShouldClose(window) && !gShouldQuit) {
         @autoreleasepool {
+            // Handle pending close-tab confirmation. The editor panel defers
+            // closing a modified tab so we can show the native dialog here.
+            if (auto* editor = workspacePanel.editorWithPendingClose()) {
+                int idx = editor->pendingCloseIndex();
+                std::string name = editor->pendingCloseName();
+                bool hasPath = editor->pendingCloseHasPath();
+                int choice = showCloseTabAlert(name);
+                editor->clearPendingClose();
+                if (choice == 0) {
+                    bool saved = false;
+                    if (hasPath) {
+                        saved = editor->saveTab(idx);
+                    } else {
+                        std::string path = nativeSaveFileDialog(name);
+                        if (!path.empty()) saved = editor->saveTabAs(idx, path);
+                    }
+                    if (saved) editor->closeTab(idx);
+                } else if (choice == 1) {
+                    editor->closeTab(idx);
+                }
+                // Clear stale flags set during the modal
+                guiState.evalFile = guiState.evalSelection
+                                  = guiState.evalLine = false;
+                glfwFocusWindow(window);
+                [nswin makeFirstResponder:nswin.contentView];
+            }
+
             // Handle quit request (Cmd+Q or window close button)
             if (gWantsToQuit) {
                 gWantsToQuit = false;
@@ -748,6 +806,22 @@ int runGui(bridge::AppContext& appCtx) {
             // Start Dear ImGui frame
             ImGui_ImplMetal_NewFrame(rpd);
             ImGui_ImplGlfw_NewFrame();
+
+            // Inject deferred key events for text-field clipboard operations
+            if (gDeferredEditFrame == 1) {
+                io.AddKeyEvent(ImGuiMod_Super, true);
+                if (gDeferredEditShift) io.AddKeyEvent(ImGuiMod_Shift, true);
+                io.AddKeyEvent(gDeferredEditKey, true);
+                gDeferredEditFrame = 2;
+            } else if (gDeferredEditFrame == 2) {
+                io.AddKeyEvent(gDeferredEditKey, false);
+                if (gDeferredEditShift) io.AddKeyEvent(ImGuiMod_Shift, false);
+                io.AddKeyEvent(ImGuiMod_Super, false);
+                gDeferredEditKey = ImGuiKey_None;
+                gDeferredEditShift = false;
+                gDeferredEditFrame = 0;
+            }
+
             ImGui::NewFrame();
 
             // Apply font size change
@@ -823,12 +897,31 @@ int runGui(bridge::AppContext& appCtx) {
             // ---------------------------------------------------------------
             // Process edit operations (triggered by native Edit menu)
             // ---------------------------------------------------------------
-            if (gEditUndo)      { gEditUndo = false;      editorPanel.undo(); }
-            if (gEditRedo)      { gEditRedo = false;      editorPanel.redo(); }
-            if (gEditCut)       { gEditCut = false;       editorPanel.cut(); }
-            if (gEditCopy)      { gEditCopy = false;      if (!outputPanel.tryCopy()) editorPanel.copy(); }
-            if (gEditPaste)     { gEditPaste = false;     editorPanel.paste(); }
-            if (gEditSelectAll) { gEditSelectAll = false;  if (!outputPanel.trySelectAll()) editorPanel.selectAll(); }
+            if (io.WantTextInput) {
+                // An ImGui text field is focused (e.g. Find/Replace bar).
+                // Defer clipboard keys so ImGui handles them next frame.
+                auto deferKey = [](bool& flag, ImGuiKey key, bool shift = false) {
+                    if (flag) {
+                        flag = false;
+                        gDeferredEditKey = key;
+                        gDeferredEditShift = shift;
+                        gDeferredEditFrame = 1;
+                    }
+                };
+                deferKey(gEditUndo,      ImGuiKey_Z);
+                deferKey(gEditRedo,      ImGuiKey_Z, true);
+                deferKey(gEditCut,       ImGuiKey_X);
+                deferKey(gEditCopy,      ImGuiKey_C);
+                deferKey(gEditPaste,     ImGuiKey_V);
+                deferKey(gEditSelectAll, ImGuiKey_A);
+            } else {
+                if (gEditUndo)      { gEditUndo = false;      editorPanel.undo(); }
+                if (gEditRedo)      { gEditRedo = false;      editorPanel.redo(); }
+                if (gEditCut)       { gEditCut = false;       editorPanel.cut(); }
+                if (gEditCopy)      { gEditCopy = false;      if (!outputPanel.tryCopy()) editorPanel.copy(); }
+                if (gEditPaste)     { gEditPaste = false;     editorPanel.paste(); }
+                if (gEditSelectAll) { gEditSelectAll = false;  if (!outputPanel.trySelectAll()) editorPanel.selectAll(); }
+            }
             if (gEditClearOutput) { gEditClearOutput = false; outputPanel.clear(guiState.output); }
             if (gEditToggleComment) { gEditToggleComment = false; editorPanel.toggleComment(); }
             if (gEditIndent)    { gEditIndent = false;    editorPanel.indent(); }

@@ -37,9 +37,19 @@ public:
     bool save();                                   // save active tab
     bool saveAs(const std::string& path);          // save active tab to path
     bool saveCopy(const std::string& path);        // save copy without changing tab's path
+    bool saveTab(int idx);                         // save tab at idx to its own path
+    bool saveTabAs(int idx, const std::string& path);
     bool hasFilePath() const;                      // active tab has a file path
     std::string activeFilePath() const;
     std::string activeTabName() const;
+
+    // Pending close confirmation: closeActiveTab() or a click on the tab
+    // X button sets this when the tab is modified, instead of closing.
+    // The app layer resolves it by calling saveTab/closeTab/clearPendingClose.
+    int pendingCloseIndex() const { return pendingCloseTab_; }
+    std::string pendingCloseName() const;
+    bool pendingCloseHasPath() const;
+    void clearPendingClose() { pendingCloseTab_ = -1; }
 
     // Switch to an already-open file by path. Returns true if found.
     bool switchToFile(const std::string& path);
@@ -108,6 +118,7 @@ private:
     int pendingSelectTab_ = -1;    // tab index to force-select on next draw
     unsigned nextTabId_ = 0;
     bool pendingEdit_ = false;     // set by edit ops that run before Render()
+    int pendingCloseTab_ = -1;     // tab awaiting save/discard/cancel confirmation
     TextEditor::LanguageDefinition langDef_;
     FindReplaceState findReplace_;
     std::chrono::steady_clock::time_point lastDiskCheck_{};
