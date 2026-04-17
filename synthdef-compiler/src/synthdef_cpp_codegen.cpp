@@ -2116,13 +2116,20 @@ struct GenLoopExprVisitor : ExprVisitor {
 
     void visit(VecJoinExpr* p) override {
         handled = true;
-        // Concatenate all inputs into the output array
+        // Concatenate all inputs into the output array. Scalar inputs
+        // (chans == 1) are emitted as plain assignments since they are
+        // declared as values, not arrays; multi-channel inputs use memcpy.
         usize offset = 0;
         for (S in : p->inputs) {
             tabIndent(s, g.indent);
-            s += FMT("memcpy({0} + {1}, {2}, {3} * sizeof({4}));\n",
-                g.genVarName(p), offset, g.genVarName(in),
-                in->chans, p->type.str());
+            if (in->chans == 1) {
+                s += FMT("{0}[{1}] = {2};\n",
+                    g.genVarName(p), offset, g.genVarName(in));
+            } else {
+                s += FMT("memcpy({0} + {1}, {2}, {3} * sizeof({4}));\n",
+                    g.genVarName(p), offset, g.genVarName(in),
+                    in->chans, p->type.str());
+            }
             offset += in->chans;
         }
         // Zero-fill padding channels if total was rounded up to power of two
@@ -2151,7 +2158,10 @@ struct GenLoopExprVisitor : ExprVisitor {
 string CppCodeGen::genLoop(GenLoop const& loop) {
     string s;
     current_loop = &loop;
-    
+
+    // Skip loops with zero channels (e.g. DelayInit sinks handled by genDelayInit)
+    if (loop.chans == 0) return s;
+
     {
         // DEBUG {
             string antecedents_str;

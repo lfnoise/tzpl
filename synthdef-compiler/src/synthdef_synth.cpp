@@ -788,6 +788,16 @@ namespace synthdef {
                 loop->addTree(tree);
                 continue;
             }
+            // gets_own_loop() ops (e.g. VecJoinExpr, VecPutExpr) emit their body
+            // outside the per-element for-loop via GenLoopExprVisitor, so they
+            // cannot share a loop with element-indexed trees.
+            if (root->gets_own_loop()) {
+                GenLoop* loop = new GenLoop(root->graph, root->rate, root->chans);
+                loop->serial = loops.size();
+                loops.push_back(loop);
+                loop->addTree(tree);
+                continue;
+            }
             GenLoopKey key{root->graph, root->rate, root->chans, tree->isoGroup};
             if (loop_builder.contains(key)) {
                 bool found = false;
