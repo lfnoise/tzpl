@@ -24,10 +24,18 @@ public:
     // Whether the output text area currently has focus.
     bool hasFocus() const { return outputActive_; }
 
+    // Cursor movement (Cmd+Arrow, applied via pending flags in callback)
+    void moveHome(bool shift)   { pendingMove_ = Move::Home;   pendingMoveShift_ = shift; }
+    void moveEnd(bool shift)    { pendingMove_ = Move::End;    pendingMoveShift_ = shift; }
+    void moveTop(bool shift)    { pendingMove_ = Move::Top;    pendingMoveShift_ = shift; }
+    void moveBottom(bool shift) { pendingMove_ = Move::Bottom; pendingMoveShift_ = shift; }
+
     // Clear the output panel.
     void clear(OutputBuffer& output);
 
 private:
+    enum class Move : uint8_t { None, Home, End, Top, Bottom };
+
     static int outputScrollCallback(struct ImGuiInputTextCallbackData* data);
 
     bool autoScroll_ = true;
@@ -35,6 +43,8 @@ private:
     size_t lastLineCount_ = 0;
     bool outputActive_ = false;
     bool pendingSelectAll_ = false;
+    Move pendingMove_ = Move::None;
+    bool pendingMoveShift_ = false;
     int selStart_ = 0;
     int selEnd_ = 0;
 };

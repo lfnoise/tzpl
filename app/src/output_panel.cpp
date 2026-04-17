@@ -3,51 +3,31 @@
 
 #include "output_panel.hpp"
 #include "imgui.h"
-#include "imgui_internal.h"
 
-// Callback to auto-scroll output and track selection state
+// Callback to apply pending cursor moves and track selection state
 int OutputPanel::outputScrollCallback(ImGuiInputTextCallbackData* cbData) {
     auto* self = static_cast<OutputPanel*>(cbData->UserData);
-    ImGuiIO& io = ImGui::GetIO();
 
-    // macOS: Cmd+Arrow for line/text start/end
-    // ImGui's InputTextMultiline doesn't handle these correctly on macOS.
-    if (io.ConfigMacOSXBehaviors && io.KeySuper && !io.KeyCtrl && !io.KeyAlt) {
-        bool shift = io.KeyShift;
+    // Apply pending Cmd+Arrow cursor movement (set by moveTop/moveBottom/etc.)
+    if (self->pendingMove_ != Move::None) {
         int newPos = cbData->CursorPos;
-        bool handled = false;
-
-        if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow)) {
-            // Move to beginning of current line (undo ImGui's char-left first)
-            int origPos = cbData->CursorPos + 1;
-            if (origPos > cbData->BufTextLen) origPos = cbData->BufTextLen;
-            newPos = origPos;
-            while (newPos > 0 && cbData->Buf[newPos - 1] != '\n')
-                --newPos;
-            handled = true;
-        } else if (ImGui::IsKeyPressed(ImGuiKey_RightArrow)) {
-            // Move to end of current line (undo ImGui's char-right first)
-            int origPos = cbData->CursorPos > 0 ? cbData->CursorPos - 1 : 0;
-            newPos = origPos;
-            while (newPos < cbData->BufTextLen && cbData->Buf[newPos] != '\n')
-                ++newPos;
-            handled = true;
-        } else if (ImGui::IsKeyPressed(ImGuiKey_UpArrow)) {
-            newPos = 0;
-            handled = true;
-        } else if (ImGui::IsKeyPressed(ImGuiKey_DownArrow)) {
-            newPos = cbData->BufTextLen;
-            handled = true;
+        switch (self->pendingMove_) {
+            case Move::Top:    newPos = 0; break;
+            case Move::Bottom: newPos = cbData->BufTextLen; break;
+            case Move::Home:
+                while (newPos > 0 && cbData->Buf[newPos - 1] != '\n') --newPos;
+                break;
+            case Move::End:
+                while (newPos < cbData->BufTextLen && cbData->Buf[newPos] != '\n') ++newPos;
+                break;
+            default: break;
         }
-
-        if (handled) {
-            cbData->CursorPos = newPos;
-            if (shift) {
-                cbData->SelectionEnd = newPos;
-            } else {
-                cbData->SelectionStart = cbData->SelectionEnd = newPos;
-            }
-        }
+        cbData->CursorPos = newPos;
+        if (self->pendingMoveShift_)
+            cbData->SelectionEnd = newPos;
+        else
+            cbData->SelectionStart = cbData->SelectionEnd = newPos;
+        self->pendingMove_ = Move::None;
     }
 
     // Handle pending select-all from native menu Cmd+A
@@ -96,7 +76,8 @@ void OutputPanel::draw(float width, float height, OutputBuffer& output) {
 
     // Rebuild output text if line count changed
     size_t lineCount = output.lines().size();
-    if (lineCount != lastLineCount_) {
+    bool newOutput = (lineCount != lastLineCount_);
+    if (newOutput) {
         lastLineCount_ = lineCount;
         outputText_.clear();
         for (auto& line : output.lines()) {
@@ -115,28 +96,13 @@ void OutputPanel::draw(float width, float height, OutputBuffer& output) {
         }
     }
 
-    // Compute the child window name that InputTextMultiline will create
-    ImGuiWindow* parentWin = ImGui::GetCurrentWindow();
-    ImGuiID textId = parentWin->GetID("##output_text");
-    char childName[256];
-    snprintf(childName, sizeof(childName), "%s/##output_text_%08X", parentWin->Name, textId);
+    // Scroll to bottom only as a one-shot: when new output arrives or after
+    // clear().  Never force-scroll persistently -- that fights keyboard and
+    // mouse-wheel navigation away from the bottom.
+    bool scrollToBottom = newOutput || autoScroll_;
+    autoScroll_ = false;
 
-    // Find the text child window (set up during a previous frame). Check if the
-    // user's mouse wheel scrolled it away from the bottom -- NewFrame()'s
-    // UpdateMouseWheel() sets ScrollTarget before draw() is called. We must detect
-    // this BEFORE calling SetNextWindowScroll, which would overwrite the user's
-    // scroll target.
-    ImGuiWindow* textWindow = ImGui::FindWindowByName(childName);
-    if (textWindow && textWindow->ScrollTarget.y < FLT_MAX
-        && textWindow->ScrollTarget.y < textWindow->Scroll.y) {
-        // User scrolled up (target is above current position)
-        autoScroll_ = false;
-    }
-
-    // When auto-scrolling, override content size and scroll BEFORE InputTextMultiline
-    // so the scroll is applied on the same frame with correct ScrollMax (avoiding
-    // one-frame lag that would otherwise show the scroll catching up on the next frame).
-    if (autoScroll_) {
+    if (scrollToBottom) {
         int numLines = 0;
         for (char c : outputText_) if (c == '\n') ++numLines;
         float lineHeight = ImGui::GetTextLineHeight();
@@ -154,13 +120,6 @@ void OutputPanel::draw(float width, float height, OutputBuffer& output) {
                               ImVec2(width, height),
                               outputFlags, outputScrollCallback, this);
     outputActive_ = ImGui::IsItemActive();
-
-    // Re-enable auto-scroll when user scrolls back to the bottom
-    textWindow = ImGui::FindWindowByName(childName);
-    if (textWindow && !autoScroll_ && textWindow->ScrollMax.y > 0.0f) {
-        if (textWindow->Scroll.y >= textWindow->ScrollMax.y - ImGui::GetTextLineHeight())
-            autoScroll_ = true;
-    }
 
     ImGui::EndChild();
 }

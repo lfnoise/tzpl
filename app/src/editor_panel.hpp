@@ -60,6 +60,9 @@ public:
     void undo();
     void redo();
     void selectAll();
+    void toggleComment();
+    void indent();
+    void outdent();
 
     // Cursor movement (for shortcuts handled outside ImGui)
     void moveHome(bool select);
@@ -104,6 +107,7 @@ private:
     bool needsFocus_ = false;
     int pendingSelectTab_ = -1;    // tab index to force-select on next draw
     unsigned nextTabId_ = 0;
+    bool pendingEdit_ = false;     // set by edit ops that run before Render()
     TextEditor::LanguageDefinition langDef_;
     FindReplaceState findReplace_;
     std::chrono::steady_clock::time_point lastDiskCheck_{};

@@ -2149,6 +2149,178 @@ void TextEditor::Backspace()
 	AddUndo(u);
 }
 
+void TextEditor::ToggleLineComment()
+{
+	assert(!mReadOnly);
+	if (mLines.empty()) return;
+
+	// Determine affected line range
+	int firstLine, lastLine;
+	if (HasSelection()) {
+		firstLine = mState.mSelectionStart.mLine;
+		lastLine = mState.mSelectionEnd.mLine;
+		// If selection ends at column 0 of a line, don't include that line
+		if (mState.mSelectionEnd.mColumn == 0 && lastLine > firstLine)
+			--lastLine;
+	} else {
+		firstLine = lastLine = mState.mCursorPosition.mLine;
+	}
+
+	// Check if ANY selected line begins with "--"
+	bool anyCommented = false;
+	for (int i = firstLine; i <= lastLine; ++i) {
+		auto& line = mLines[i];
+		if (line.size() >= 2 && line[0].mChar == '-' && line[1].mChar == '-') {
+			anyCommented = true;
+			break;
+		}
+	}
+
+	// Capture original text for undo
+	UndoRecord u;
+	u.mBefore = mState;
+	Coordinates rangeStart(firstLine, 0);
+	Coordinates rangeEnd(lastLine, GetLineMaxColumn(lastLine));
+	u.mRemovedStart = rangeStart;
+	u.mRemovedEnd = rangeEnd;
+	u.mRemoved = GetText(rangeStart, rangeEnd);
+
+	if (anyCommented) {
+		// Remove "--" from lines that have it
+		for (int i = firstLine; i <= lastLine; ++i) {
+			auto& line = mLines[i];
+			if (line.size() >= 2 && line[0].mChar == '-' && line[1].mChar == '-')
+				line.erase(line.begin(), line.begin() + 2);
+		}
+	} else {
+		// Add "--" to all lines
+		for (int i = firstLine; i <= lastLine; ++i) {
+			auto& line = mLines[i];
+			line.insert(line.begin(), Glyph('-', PaletteIndex::Comment));
+			line.insert(line.begin() + 1, Glyph('-', PaletteIndex::Comment));
+		}
+	}
+
+	// Capture new text for undo
+	rangeEnd = Coordinates(lastLine, GetLineMaxColumn(lastLine));
+	u.mAddedStart = rangeStart;
+	u.mAddedEnd = rangeEnd;
+	u.mAdded = GetText(rangeStart, rangeEnd);
+
+	// Update selection to cover modified range
+	mState.mSelectionStart = rangeStart;
+	mState.mSelectionEnd = Coordinates(lastLine, GetLineMaxColumn(lastLine));
+	mState.mCursorPosition = mState.mSelectionEnd;
+
+	u.mAfter = mState;
+	AddUndo(u);
+	mTextChanged = true;
+	Colorize(firstLine, lastLine - firstLine + 2);
+}
+
+void TextEditor::IndentLines()
+{
+	assert(!mReadOnly);
+	if (mLines.empty()) return;
+
+	int firstLine, lastLine;
+	if (HasSelection()) {
+		firstLine = mState.mSelectionStart.mLine;
+		lastLine = mState.mSelectionEnd.mLine;
+		if (mState.mSelectionEnd.mColumn == 0 && lastLine > firstLine)
+			--lastLine;
+	} else {
+		firstLine = lastLine = mState.mCursorPosition.mLine;
+	}
+
+	UndoRecord u;
+	u.mBefore = mState;
+	Coordinates rangeStart(firstLine, 0);
+	Coordinates rangeEnd(lastLine, GetLineMaxColumn(lastLine));
+	u.mRemovedStart = rangeStart;
+	u.mRemovedEnd = rangeEnd;
+	u.mRemoved = GetText(rangeStart, rangeEnd);
+
+	for (int i = firstLine; i <= lastLine; ++i) {
+		auto& line = mLines[i];
+		// Count current leading spaces
+		int spaces = 0;
+		for (auto& g : line) {
+			if (g.mChar == ' ') ++spaces;
+			else break;
+		}
+		int target = ((spaces / 4) + 1) * 4;
+		int toAdd = target - spaces;
+		for (int j = 0; j < toAdd; ++j)
+			line.insert(line.begin() + spaces, Glyph(' ', PaletteIndex::Default));
+	}
+
+	rangeEnd = Coordinates(lastLine, GetLineMaxColumn(lastLine));
+	u.mAddedStart = rangeStart;
+	u.mAddedEnd = rangeEnd;
+	u.mAdded = GetText(rangeStart, rangeEnd);
+
+	mState.mSelectionStart = rangeStart;
+	mState.mSelectionEnd = Coordinates(lastLine, GetLineMaxColumn(lastLine));
+	mState.mCursorPosition = mState.mSelectionEnd;
+
+	u.mAfter = mState;
+	AddUndo(u);
+	mTextChanged = true;
+	Colorize(firstLine, lastLine - firstLine + 2);
+}
+
+void TextEditor::OutdentLines()
+{
+	assert(!mReadOnly);
+	if (mLines.empty()) return;
+
+	int firstLine, lastLine;
+	if (HasSelection()) {
+		firstLine = mState.mSelectionStart.mLine;
+		lastLine = mState.mSelectionEnd.mLine;
+		if (mState.mSelectionEnd.mColumn == 0 && lastLine > firstLine)
+			--lastLine;
+	} else {
+		firstLine = lastLine = mState.mCursorPosition.mLine;
+	}
+
+	UndoRecord u;
+	u.mBefore = mState;
+	Coordinates rangeStart(firstLine, 0);
+	Coordinates rangeEnd(lastLine, GetLineMaxColumn(lastLine));
+	u.mRemovedStart = rangeStart;
+	u.mRemovedEnd = rangeEnd;
+	u.mRemoved = GetText(rangeStart, rangeEnd);
+
+	for (int i = firstLine; i <= lastLine; ++i) {
+		auto& line = mLines[i];
+		int spaces = 0;
+		for (auto& g : line) {
+			if (g.mChar == ' ') ++spaces;
+			else break;
+		}
+		if (spaces == 0) continue;
+		int target = ((spaces - 1) / 4) * 4;
+		int toRemove = spaces - target;
+		line.erase(line.begin(), line.begin() + toRemove);
+	}
+
+	rangeEnd = Coordinates(lastLine, GetLineMaxColumn(lastLine));
+	u.mAddedStart = rangeStart;
+	u.mAddedEnd = rangeEnd;
+	u.mAdded = GetText(rangeStart, rangeEnd);
+
+	mState.mSelectionStart = rangeStart;
+	mState.mSelectionEnd = Coordinates(lastLine, GetLineMaxColumn(lastLine));
+	mState.mCursorPosition = mState.mSelectionEnd;
+
+	u.mAfter = mState;
+	AddUndo(u);
+	mTextChanged = true;
+	Colorize(firstLine, lastLine - firstLine + 2);
+}
+
 void TextEditor::SelectWordUnderCursor()
 {
 	auto c = GetCursorPosition();

@@ -269,6 +269,10 @@ public:
 	void Cut();
 	void Paste();
 	void Delete();
+
+	void ToggleLineComment();
+	void IndentLines();
+	void OutdentLines();
 	void DeleteSelection();
 
 	bool CanUndo() const;

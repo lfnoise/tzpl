@@ -109,8 +109,8 @@ void EditorPanel::openFile(const std::string& path) {
     tab.id = nextTabId_++;
     tab.editorTitle = "##editor" + std::to_string(tab.id);
     tab.editor.SetLanguageDefinition(langDef_);
-    tab.diskContent = ss.str();
-    tab.editor.SetText(tab.diskContent);
+    tab.editor.SetText(ss.str());
+    tab.diskContent = tab.editor.GetText();  // use editor's canonical form
     tab.editor.SetShowWhitespaces(false);
 
     std::error_code ec;
@@ -304,8 +304,13 @@ void EditorPanel::draw(float width, float height, GuiState& state) {
 
         editor.Render(tabs_[activeTab_].editorTitle.c_str());
 
+        // pendingEdit_ catches menu-driven ops (undo/paste/indent/etc.)
+        // that set mTextChanged before Render resets it.
+        bool changed = pendingEdit_ || editor.IsTextChanged();
+        pendingEdit_ = false;
+
         // Track modifications by comparing to on-disk content
-        if (editor.IsTextChanged()) {
+        if (changed) {
             tabs_[activeTab_].modified =
                 (editor.GetText() != tabs_[activeTab_].diskContent);
             // Refresh search highlights so they match the edited text
@@ -391,8 +396,10 @@ std::string EditorPanel::getCurrentBlockText(int& outStartLine, int& outEndLine)
 // ---------------------------------------------------------------------------
 
 void EditorPanel::cut() {
-    if (activeTab_ >= 0 && activeTab_ < (int)tabs_.size())
+    if (activeTab_ >= 0 && activeTab_ < (int)tabs_.size()) {
         tabs_[activeTab_].editor.Cut();
+        pendingEdit_ = true;
+    }
 }
 
 void EditorPanel::copy() {
@@ -401,23 +408,50 @@ void EditorPanel::copy() {
 }
 
 void EditorPanel::paste() {
-    if (activeTab_ >= 0 && activeTab_ < (int)tabs_.size())
+    if (activeTab_ >= 0 && activeTab_ < (int)tabs_.size()) {
         tabs_[activeTab_].editor.Paste();
+        pendingEdit_ = true;
+    }
 }
 
 void EditorPanel::undo() {
-    if (activeTab_ >= 0 && activeTab_ < (int)tabs_.size())
+    if (activeTab_ >= 0 && activeTab_ < (int)tabs_.size()) {
         tabs_[activeTab_].editor.Undo();
+        pendingEdit_ = true;
+    }
 }
 
 void EditorPanel::redo() {
-    if (activeTab_ >= 0 && activeTab_ < (int)tabs_.size())
+    if (activeTab_ >= 0 && activeTab_ < (int)tabs_.size()) {
         tabs_[activeTab_].editor.Redo();
+        pendingEdit_ = true;
+    }
 }
 
 void EditorPanel::selectAll() {
     if (activeTab_ >= 0 && activeTab_ < (int)tabs_.size())
         tabs_[activeTab_].editor.SelectAll();
+}
+
+void EditorPanel::toggleComment() {
+    if (activeTab_ >= 0 && activeTab_ < (int)tabs_.size()) {
+        tabs_[activeTab_].editor.ToggleLineComment();
+        pendingEdit_ = true;
+    }
+}
+
+void EditorPanel::indent() {
+    if (activeTab_ >= 0 && activeTab_ < (int)tabs_.size()) {
+        tabs_[activeTab_].editor.IndentLines();
+        pendingEdit_ = true;
+    }
+}
+
+void EditorPanel::outdent() {
+    if (activeTab_ >= 0 && activeTab_ < (int)tabs_.size()) {
+        tabs_[activeTab_].editor.OutdentLines();
+        pendingEdit_ = true;
+    }
 }
 
 void EditorPanel::moveHome(bool select) {
@@ -493,8 +527,8 @@ void EditorPanel::checkForExternalChanges() {
 
             // Preserve cursor position across reload
             auto cursor = tab.editor.GetCursorPosition();
-            tab.diskContent = ss.str();
-            tab.editor.SetText(tab.diskContent);
+            tab.editor.SetText(ss.str());
+            tab.diskContent = tab.editor.GetText();
             tab.editor.SetCursorPosition(cursor);
             tab.modified = false;
         }

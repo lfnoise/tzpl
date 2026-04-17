@@ -83,6 +83,9 @@ static bool gEditCopy = false;
 static bool gEditPaste = false;
 static bool gEditSelectAll = false;
 static bool gEditClearOutput = false;
+static bool gEditToggleComment = false;
+static bool gEditIndent = false;
+static bool gEditOutdent = false;
 
 // Cursor movement flags (Cmd+Arrow, bypasses ImGui key routing)
 static bool gMoveHome = false;
@@ -163,6 +166,9 @@ static std::string findMonoFont() {
 - (void)editPaste:(id)sender;
 - (void)editSelectAll:(id)sender;
 - (void)editClearOutput:(id)sender;
+- (void)editToggleComment:(id)sender;
+- (void)editIndent:(id)sender;
+- (void)editOutdent:(id)sender;
 - (void)findShow:(id)sender;
 - (void)findNext:(id)sender;
 - (void)findPrevious:(id)sender;
@@ -186,6 +192,9 @@ static std::string findMonoFont() {
 - (void)editPaste:(id)sender   { gEditPaste = true; }
 - (void)editSelectAll:(id)sender { gEditSelectAll = true; }
 - (void)editClearOutput:(id)sender { gEditClearOutput = true; }
+- (void)editToggleComment:(id)sender { gEditToggleComment = true; }
+- (void)editIndent:(id)sender { gEditIndent = true; }
+- (void)editOutdent:(id)sender { gEditOutdent = true; }
 - (void)findShow:(id)sender    { gFindShow = true; }
 - (void)findNext:(id)sender    { gFindNext = true; }
 - (void)findPrevious:(id)sender { gFindPrevious = true; }
@@ -302,6 +311,20 @@ static void setupNativeMenuBar(const float* fontSizes, int numFontSizes) {
     NSMenuItem* clearOutputItem = [editMenu addItemWithTitle:@"Clear Output"
         action:@selector(editClearOutput:) keyEquivalent:@"k"];
     clearOutputItem.target = gMenuHandler;
+
+    [editMenu addItem:[NSMenuItem separatorItem]];
+
+    NSMenuItem* toggleCommentItem = [editMenu addItemWithTitle:@"Toggle Line Comment"
+        action:@selector(editToggleComment:) keyEquivalent:@"/"];
+    toggleCommentItem.target = gMenuHandler;
+
+    NSMenuItem* indentItem = [editMenu addItemWithTitle:@"Indent"
+        action:@selector(editIndent:) keyEquivalent:@"]"];
+    indentItem.target = gMenuHandler;
+
+    NSMenuItem* outdentItem = [editMenu addItemWithTitle:@"Outdent"
+        action:@selector(editOutdent:) keyEquivalent:@"["];
+    outdentItem.target = gMenuHandler;
 
     editMenuItem.submenu = editMenu;
     [mainMenu addItem:editMenuItem];
@@ -491,7 +514,7 @@ static void keyCallback(GLFWwindow* window, int key, int scancode,
             if (key == GLFW_KEY_K && !shift) { gEditClearOutput = true; return; }
         }
 
-        // Cmd+Arrow: cursor movement (bypass ImGui nav system)
+        // Cmd+Arrow: cursor movement (bypass ImGui key routing)
         if (cmd) {
             if (key == GLFW_KEY_LEFT)  { gMoveHome = true; gMoveShift = shift; return; }
             if (key == GLFW_KEY_RIGHT) { gMoveEnd = true; gMoveShift = shift; return; }
@@ -565,7 +588,9 @@ int runGui(bridge::AppContext& appCtx) {
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO();
-    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+    // NOTE: NavEnableKeyboard intentionally omitted -- arrow keys are for
+    // text editing, not widget navigation.  Enabling it causes the nav
+    // system to consume arrow‑key presses and move focus between panes.
 
     // Load font at three sizes for runtime switching
     float xscale, yscale;
@@ -805,14 +830,27 @@ int runGui(bridge::AppContext& appCtx) {
             if (gEditPaste)     { gEditPaste = false;     editorPanel.paste(); }
             if (gEditSelectAll) { gEditSelectAll = false;  if (!outputPanel.trySelectAll()) editorPanel.selectAll(); }
             if (gEditClearOutput) { gEditClearOutput = false; outputPanel.clear(guiState.output); }
+            if (gEditToggleComment) { gEditToggleComment = false; editorPanel.toggleComment(); }
+            if (gEditIndent)    { gEditIndent = false;    editorPanel.indent(); }
+            if (gEditOutdent)   { gEditOutdent = false;   editorPanel.outdent(); }
 
             // ---------------------------------------------------------------
-            // Process cursor movement (Cmd+Arrow)
+            // Process cursor movement (Cmd+Arrow) -- route to focused pane
             // ---------------------------------------------------------------
-            if (gMoveHome)   { gMoveHome = false;   editorPanel.moveHome(gMoveShift); }
-            if (gMoveEnd)    { gMoveEnd = false;    editorPanel.moveEnd(gMoveShift); }
-            if (gMoveTop)    { gMoveTop = false;    editorPanel.moveTop(gMoveShift); }
-            if (gMoveBottom) { gMoveBottom = false;  editorPanel.moveBottom(gMoveShift); }
+            if (gMoveHome || gMoveEnd || gMoveTop || gMoveBottom) {
+                if (outputPanel.hasFocus()) {
+                    if (gMoveHome)   outputPanel.moveHome(gMoveShift);
+                    if (gMoveEnd)    outputPanel.moveEnd(gMoveShift);
+                    if (gMoveTop)    outputPanel.moveTop(gMoveShift);
+                    if (gMoveBottom) outputPanel.moveBottom(gMoveShift);
+                } else {
+                    if (gMoveHome)   editorPanel.moveHome(gMoveShift);
+                    if (gMoveEnd)    editorPanel.moveEnd(gMoveShift);
+                    if (gMoveTop)    editorPanel.moveTop(gMoveShift);
+                    if (gMoveBottom) editorPanel.moveBottom(gMoveShift);
+                }
+                gMoveHome = gMoveEnd = gMoveTop = gMoveBottom = false;
+            }
 
             // ---------------------------------------------------------------
             // Process find operations
