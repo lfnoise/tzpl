@@ -4,6 +4,7 @@ import audio_engine.*;
 
 println("--- test3 ---------------------------------");
 
+fn test3() {
 go(coro fn() Float {
     engineStart();
     println(isAudioRunning());
@@ -152,4 +153,14 @@ go(coro fn() Float {
     sched();
     engineStop();
 }());
+
+}
+
+fn render_test3() {
+	let h = "/tmp/test3.wav" renderNRT(200, test3);
+	onRenderDone(h, fn(){ "render done" println });
+}
+
+test3();
+--render_test3();
 
