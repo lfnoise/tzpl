@@ -92,9 +92,9 @@ void renderNRTBlock(Engine* e, f32* outBuffer);
 
 // Copy all non-superseded node defs from one engine to another. The new
 // engine gets its own NodeDef objects but shares the underlying PortInfo
-// arrays (which live for the process lifetime). Skips "Audio Out" / "Audio
-// In" since each engine creates its own. dlHandle is set to nullptr on the
-// copies so the per-render engine never dlcloses the shared libraries.
+// arrays. Skips "Audio Out" / "Audio In" since each engine creates its own.
+// Each copy retains its own dlopen refcount so the dylib stays loaded even
+// if the source engine hot-reloads (and dlcloses) the original.
 void copyNodeDefs(Engine* from, Engine* to);
 
 void freeEngine(Engine* e);

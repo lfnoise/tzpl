@@ -70,7 +70,18 @@ void copyNodeDefs(Engine* from, Engine* to) {
             if (!def->superseded_
                 && strcmp(def->info_.name, "Audio Out") != 0
                 && strcmp(def->info_.name, "Audio In") != 0) {
-                addNodeDef(to, def->info_, /*dlHandle=*/nullptr);
+                // Retain the dylib by bumping its dlopen refcount so it
+                // stays loaded even if the source engine hot-reloads (and
+                // dlcloses) the original during concurrent evaluation.
+                void* handle = nullptr;
+                if (def->dlHandle_) {
+                    Dl_info dl;
+                    if (dladdr((void*)def->info_.funs.processAudio, &dl)
+                        && dl.dli_fname) {
+                        handle = dlopen(dl.dli_fname, RTLD_NOW);
+                    }
+                }
+                addNodeDef(to, def->info_, handle);
             }
             def = def->next_;
         }
