@@ -4,7 +4,7 @@ This document describes the internal architecture of the Tzopilotl compiler and 
 
 ## Overview
 
-The system is a statically-typed, real-time-safe interpreter designed to run within an audio thread. It compiles source code through a four-phase pipeline — Lex, Parse, Type Check, Code Gen — producing register-based bytecode that executes on a direct-threaded virtual machine with an incremental garbage collector.
+The system is a statically-typed, real-time-safe interpreter designed to run within an audio thread. It compiles source code through a four-phase pipeline — Lex, Parse, Type Check, Code Gen — producing register-based bytecode that executes on a direct-threaded virtual machine with automatic reference counting (ARC).
 
 The pipeline is orchestrated by the `Compiler` class (`compiler.cpp`):
 
@@ -24,16 +24,17 @@ All runtime memory allocation (objects, types, register file, call stack) is per
 
 The `Lexer` is a hand-written scanner that converts source text into a stream of `Token` values. Each token carries:
 
-- `TokenKind` — one of ~75 kinds (literals, keywords, operators, delimiters)
+- `TokenKind` — one of ~80 kinds (literals, keywords, operators, delimiters)
 - `SourceRange` — line/column/offset for error reporting
 - `text` — the raw source text
-- Parsed literal values (`intValue`, `floatValue`) for numeric tokens
+- Parsed literal values (`intValue`, `floatValue`, `denominator`) for numeric tokens
 
 Key characteristics:
 
 - **Single-pass, forward-only** with one token of lookahead (`peek()`).
 - **Save/restore** state support for tentative parsing (used by the parser for disambiguating `<` as less-than vs. template argument list).
-- Lexes **symbol literals** (`'foo`), **imaginary literals** (`4i`, `3.14i`), **triple-quoted strings** (`"""..."""`), and **guillemet strings** (`«...»`).
+- Lexes **symbol literals** (`'foo`), **imaginary literals** (`4i`, `3.14i`), **fraction literals** (`1/2`, `3/4` — no whitespace around `/`), **triple-quoted strings** (`"""..."""`), and **guillemet strings** (`«...»`).
+- Lexes **dynamic variable references** (`` `varName ``) as `DynamicVar` tokens.
 - Handles `--` line comments and `/* */` block comments (nestable).
 - Splits compound tokens when needed: `>>` can be split into two `>` tokens for closing nested template argument lists, and `>=` can be split into `>` + `=`.
 
@@ -55,7 +56,8 @@ The following is the complete grammar of Tzopilotl as implemented by the parser.
 Program         = Declaration*
 
 Declaration     = 'private'? ( ImportDecl | FnDecl | LetDecl | VarDecl
-                              | ConstDecl | StructDecl | EnumDecl | TypeAliasDecl )
+                              | ConstDecl | StructDecl | EnumDecl
+                              | TypeAliasDecl | ConstraintDecl )
                 | Statement
 ```
 
@@ -77,8 +79,13 @@ ConstDecl       = 'const' ( Pattern '=' Expr ';'
                           | IDENT TypeExpr? '=' Expr ';' )
 
 FnDecl          = 'fn' FnName TypeParams? '(' ParamList? ')' TypeExpr?
-                  ( '=' Expr ';' | Block )
+                  WhereClause? ( '=' Expr ';' | Block )
+CoroDecl        = 'coro' FnName TypeParams? '(' ParamList? ')' TypeExpr?
+                  WhereClause? ( '=' Expr ';' | Block )
 FnName          = IDENT | OPERATOR
+WhereClause     = 'where' Constraint ( ',' Constraint )*
+Constraint      = IDENT ':' IDENT                -- T: Numeric
+                | IDENT ':' IDENT '<' TypeExpr '>' -- T: Comparable<U>
 TypeParams      = '<' IDENT ( ',' IDENT )* '>'
 ParamList       = Param ( ',' Param )*
 Param           = '...' IDENT TypeExpr?             -- variadic (must be last)
@@ -93,6 +100,11 @@ EnumDecl        = 'enum' IDENT TypeParams? '{' EnumCase* '}'
 EnumCase        = IDENT TypeExpr? ( ',' | ';' )?
 
 TypeAliasDecl   = 'type' IDENT TypeParams? '=' TypeExpr ';'
+
+ConstraintDecl  = 'constraint' IDENT TypeParams? '{' ConstraintBody '}'
+                | 'constraint' IDENT TypeParams? '=' ConstraintUnion ';'
+ConstraintBody  = ( 'requires' 'fn' FnName '(' TypeExprList? ')' TypeExpr? ';' )*
+ConstraintUnion = IDENT ( '|' IDENT )*              -- union of types or constraints
 ```
 
 **Notes on function declarations:**
@@ -111,6 +123,8 @@ Statement       = Block
                 | SwitchStmt
                 | MatchStmt
                 | ReturnStmt
+                | BreakStmt
+                | ContinueStmt
                 | ExprStmtOrAssign
 
 Block           = '{' Declaration* '}'
@@ -127,6 +141,9 @@ CaseArm         = Pattern Guard? ':' ( Block | Statement )
 Guard           = 'if' '(' Expr ')'
 
 ReturnStmt      = 'return' Expr? ';'
+
+BreakStmt       = 'break' ';'
+ContinueStmt    = 'continue' ';'
 
 ExprStmtOrAssign= Expr ( '=' Expr )? TermOpt
 TermOpt         = ';'           -- statement with explicit terminator
@@ -147,8 +164,9 @@ Expr            = Unary ( BinOp Expr )*         -- Pratt precedence climbing
 Unary           = ( '-' | '!' | '~' | '&' | '*' ) Primary TightPostfix*
                 | Primary Postfix*
 
-Primary         = INT_LIT | FLOAT_LIT | IMAGINARY_LIT | STRING_LIT
-                | SYMBOL_LIT | 'true' | 'false' | 'nil'
+Primary         = INT_LIT | FLOAT_LIT | IMAGINARY_LIT | FRACTION_LIT
+                | STRING_LIT | SYMBOL_LIT | 'true' | 'false' | 'nil'
+                | DYNAMIC_VAR                      -- `varName (dynamic scope reference)
                 | IDENT StructLiteralBody?       -- identifier or struct literal
                 | IDENT TypeArgs StructLiteralBody  -- template struct literal
                 | IDENT TypeArgs '.' IDENT CallArgs?  -- template enum constructor
@@ -166,8 +184,10 @@ Primary         = INT_LIT | FLOAT_LIT | IMAGINARY_LIT | STRING_LIT
                 | '[' ':' ']'                      -- empty map
                 | '[' Expr ':' Expr ( ',' Expr ':' Expr )* ']'  -- map literal
                 | '[' Expr ( ',' Expr )* ']'       -- array literal
-                | 'fn' '(' LambdaParams? ')' TypeExpr? ( '=' Expr | Block )  -- lambda
+                | 'fn' '(' LambdaParams? ')' TypeExpr? WhereClause? ( '=' Expr | Block )  -- lambda
+                | 'coro' '(' LambdaParams? ')' TypeExpr? ( '=' Expr | Block )  -- coroutine lambda
                 | 'if' '(' Expr ')' Block ( 'else' ( IfExpr | Block ) )?     -- if expression
+                | Expr 'as' TypeExpr               -- type cast/assertion
 
 StructLiteralBody = '{' NamedFields '}'          -- Point { x: 1, y: 2 }
                   | '{' PositionalFields '}'      -- Point { 1, 2 }
@@ -204,7 +224,7 @@ Postfix         = TightPostfix
 - `x f g` becomes `g(f(x))` (chained pipeline)
 - `x f(y) g(z)` becomes `g(f(x, y), z)` (chained multi-arg pipeline)
 
-Keywords (`let`, `var`, `fn`, `if`, `while`, `for`, `return`, `switch`, `match`, `else`, `const`) cannot be consumed by space-pipeline because they are lexed as distinct token kinds, not as `Identifier`. The postfix loop only enters space-pipeline handling when `current_` is `TokenKind::Identifier`.
+Keywords (`let`, `var`, `fn`, `if`, `else`, `while`, `for`, `break`, `continue`, `return`, `switch`, `match`, `const`, `coro`, `yield`, `constraint`, `requires`, `where`) cannot be consumed by space-pipeline because they are lexed as distinct token kinds, not as `Identifier`. The postfix loop only enters space-pipeline handling when `current_` is `TokenKind::Identifier`.
 
 **Chained tuple field access** (`expr.1.0`) requires special handling: the lexer produces `.` + `FloatLiteral("1.0")`, which the parser splits into two consecutive field accesses `.1` then `.0`.
 
@@ -252,12 +272,12 @@ TypeExpr        = '[' TypeExpr ']'                         -- Array[T]
                 | NamedType
 
 NamedType       = 'Int' | 'Float' | 'String' | 'Bool' | 'Symbol' | 'Void'
-                | 'Fraction' | 'Complex' | IDENT
+                | 'Fraction' | 'Complex' | 'Any' | IDENT
 ```
 
 **Ambiguity between tuple types and function types:** After parsing `(Type, ...)`, the parser checks whether a return type follows. If the next token can start a type expression (a type keyword, identifier, `[`, or `(`), the group is parsed as a function type `(ArgTypes) ReturnType`. Otherwise it is a tuple type. This means `(Int, Int)` alone is a tuple type, but `(Int, Int) Int` is a function type `(Int, Int) -> Int`. Similarly, `(Int)` alone is a parenthesized type (just `Int`), but `(Int) Int` is a single-argument function type.
 
-**Special-cased template types:** `List<T>`, `Ref<T>`, and `Set<T>` are parsed into dedicated AST nodes (`ListTypeNode`, `RefTypeNode`, `SetTypeNode`) rather than the generic `TemplateTypeNode`. This ensures backward compatibility with the type checker.
+**Special-cased template types:** `List<T>`, `Ref<T>`, `Set<T>`, and `Coroutine<T>` are parsed into dedicated AST nodes (`ListTypeNode`, `RefTypeNode`, `SetTypeNode`, `CoroutineTypeNode`) rather than the generic `TemplateTypeNode`. This ensures backward compatibility with the type checker.
 
 #### Patterns
 
@@ -295,9 +315,9 @@ The cons pattern `head :: tail` is right-associative and is used for list decomp
 
 The AST node hierarchy (`ast.hpp`) is organized into five categories:
 
-1. **Declarations** (`Decl`): `LetDecl`, `VarDecl`, `ConstDecl`, `FnDecl`, `StructDecl`, `UnionDecl`, `ImportDecl`, `TypeAliasDecl`
-2. **Statements** (`Stmt`): `Block`, `ExprStmt`, `IfStmt`, `WhileStmt`, `ForStmt`, `SwitchStmt`, `ReturnStmt`, `AssignStmt`
-3. **Expressions** (`Expr`): Literals, `Identifier`, `BinaryOp`, `UnaryOp`, `CallExpr`, `IndexExpr`, `FieldExpr`, `TupleLiteral`, `ArrayLiteral`, `ListLiteral`, `MapLiteral`, `SetLiteral`, `StructLiteral`, `EnumConstructor`, `LambdaExpr`, `IfExpr`, `AutoMap`, `RangeExpr`
+1. **Declarations** (`Decl`): `LetDecl`, `VarDecl`, `ConstDecl`, `FnDecl`, `StructDecl`, `UnionDecl`, `ImportDecl`, `TypeAliasDecl`, `ConstraintDecl`
+2. **Statements** (`Stmt`): `Block`, `ExprStmt`, `IfStmt`, `WhileStmt`, `ForStmt`, `SwitchStmt`, `ReturnStmt`, `AssignStmt`, `BreakStmt`, `ContinueStmt`
+3. **Expressions** (`Expr`): Literals, `Identifier`, `DynamicVarExpr`, `BinaryOp`, `UnaryOp`, `CallExpr`, `IndexExpr`, `FieldExpr`, `TupleLiteral`, `ArrayLiteral`, `ListLiteral`, `MapLiteral`, `SetLiteral`, `StructLiteral`, `EnumConstructor`, `LambdaExpr`, `IfExpr`, `BlockExpr`, `AutoMap`, `RangeExpr`, `AsTypeExpr`
 4. **Type expressions** (`TypeExpr`): `NamedType`, `ArrayType`, `ListType`, `MapType`, `SetType`, `TupleType`, `FunctionType`, `RefType`, `TemplateType`
 5. **Patterns** (`Pattern`): `LiteralPat`, `WildcardPat`, `BindingPat`, `EnumPat`, `StructPat`, `TuplePat`, `ArrayPat`, `ConsPat`, `GuardedPat`
 
@@ -353,45 +373,47 @@ The `@` token is lexed as a single token. `@@` is lexed as a two-character `@` t
 
 ## Phase 3: Type Checking
 
-**Files:** `type_checker.hpp`, `type_checker.cpp`, `type_system.hpp`, `type_system.cpp`
+**Files:** `type_checker.hpp`, `type_checker.cpp`, `type_checker_calls.cpp`, `type_checker_constraints.cpp`, `type_checker_decls.cpp`, `type_checker_exprs.cpp`, `type_checker_infer.cpp`, `type_checker_overload.cpp`, `type_checker_stmts.cpp`, `type_checker_types.cpp`, `type_system.hpp`, `type_system.cpp`, `type_universe.hpp`, `type_universe.cpp`
 
 The `TypeChecker` performs source-to-sink type inference, overload resolution, template instantiation, and auto-map analysis. It annotates every AST node with its resolved `Type*` and sets metadata needed by code generation (global indices, auto-map flags, resolved function references).
 
 ### Type Representation
 
-Types are runtime objects inheriting from `Type : Obj : GCObj`. This means types are garbage-collected objects that live in the TLSF heap, which is necessary because types created during execution (e.g., through template instantiation) must be managed by the GC.
+Types are runtime objects inheriting from `Type : Obj : GCObj`. This means types are reference-counted objects that live in the TLSF heap, which is necessary because types created during execution (e.g., through template instantiation) must be managed alongside other objects. In practice, types created at compile time are marked immortal (their refcount is never decremented).
 
 The type hierarchy:
 
 ```
 Type (abstract base)
+├── AliasedType            { name_, aliasedType_ }
 ├── AtomType (stored by value in a 64-bit Word)
 │   ├── BoolType
 │   ├── IntType
 │   ├── FloatType
 │   ├── SymbolType
 │   └── VoidType
-├── ObjType (stored by pointer to heap object)
-│   ├── StringType
-│   ├── FractionType
-│   ├── ComplexType
-│   ├── ArrayType          { elemType_ }
-│   ├── ListType           { elemType_ }
-│   ├── RangeType          { elemType_ }
-│   ├── RefType            { elemType_ }
-│   ├── MapType            { keyType_, valueType_ }
-│   ├── SetType            { elemType_ }
-│   ├── TupleType          { fields_: Vec<Type*> }
-│   ├── StructType         { name_, fields_: Vec<NameTypePair> }
-│   ├── EnumType           { name_, cases_: Vec<NameTypePair> }
-│   ├── FunctionType       { argTypes_, returnType_ }
-│   │   ├── LambdaType     { freeVarTypes_ }
-│   │   └── MethodType     { receiverType_ }
-│   └── AliasedType        { name_, aliasedType_ }
-└── (future extensions)
+└── ObjType (stored by pointer to heap object)
+    ├── StringType
+    ├── FractionType
+    ├── ComplexType
+    ├── ArrayType          { elemType_ }
+    ├── ListType           { elemType_ }
+    ├── RangeType          { elemType_ }
+    ├── RefType            { elemType_ }
+    ├── MapType            { keyType_, valueType_ }
+    ├── SetType            { elemType_ }
+    ├── TupleType          { fields_: Vec<Type*> }
+    ├── StructType         { name_, fields_: Vec<NameTypePair> }
+    ├── EnumType           { name_, cases_: Vec<NameTypePair> }
+    ├── FunctionType       { argTypes_, returnType_ }
+    │   ├── LambdaType     { freeVarTypes_ }
+    │   └── MethodType     { receiverType_ }
+    ├── TemplateLambdaType { typeParams_ }
+    ├── CoroutineType      { yieldType_ }
+    └── AnyType
 ```
 
-All `AtomType` values fit in a single 64-bit `Word` and are classified as non-object types (`isObjType() == false`). All `ObjType` values are accessed through `Obj*` pointers and need GC scanning. This distinction is fundamental: it determines whether a value occupies an `i64` slot or an `Obj*` slot in registers, arrays, struct fields, and lambda captures, and whether the GC needs to trace through a given field.
+All `AtomType` values fit in a single 64-bit `Word` and are classified as non-object types (`isObjType() == false`). All `ObjType` values are accessed through `Obj*` pointers and require reference counting. This distinction is fundamental: it determines whether a value occupies an `i64` slot or an `Obj*` slot in registers, arrays, struct fields, and lambda captures, and whether a store operation must emit retain/release calls.
 
 ### Type Interning
 
@@ -402,7 +424,7 @@ Composite types are interned (deduplicated) by the VM through caches:
 - `tupleTypeCache_`: `Vec<Type*> → TupleType*`
 - `functionTypeCache_`: `Vec<Type*> → FunctionType*` (key includes return type)
 - `mapTypeCache_`: `(Type*, Type*) → MapType*`
-- And similar for `RangeType`, `RefType`, `SetType`, `EnumType` (for `Option<T>`)
+- And similar for `RangeType`, `RefType`, `SetType`, `CoroutineType`, `EnumType` (for `Option<T>`)
 
 This ensures pointer identity is sufficient for type equality of structural types. Named types (`StructType`, `EnumType`) are unique because they're created once per declaration.
 
@@ -448,9 +470,10 @@ The `check()` method processes a program in multiple ordered passes:
 2. **Pass 1a — Struct Registration:** Register all struct types (resolve field types, create `StructType` objects). Template structs are registered without resolving fields.
 3. **Pass 1b — Enum Registration:** Register all enum/union types similarly.
 4. **Pass 1c — Type Aliases:** Register concrete aliases immediately; store generic aliases for on-demand resolution.
-5. **Pass 2 — Function Registration:** Register all function declarations. For each non-template function, resolve parameter types and return type (if annotated), allocate a global slot for the `CodeBlock`, and create a `FuncInfo` entry. Template functions are registered with `isTemplate = true` but no resolved types.
-6. **Pass 3 — Body Checking:** Check all function bodies (demand-driven: bodies are checked when first needed for return type inference).
-7. **Pass 4 — Top-level Statements:** Check all non-declaration top-level items in order.
+5. **Pass 1d — Constraints:** Register constraint declarations (type-set constraints, interface constraints with required function signatures).
+6. **Pass 2 — Function Registration:** Register all function declarations. For each non-template function, resolve parameter types and return type (if annotated), allocate a global slot for the `CodeBlock`, and create a `FuncInfo` entry. Template functions are registered with `isTemplate = true` but no resolved types. Functions with `where` clauses have their constraints recorded for checking during template instantiation.
+7. **Pass 3 — Body Checking:** Check all function bodies (demand-driven: bodies are checked when first needed for return type inference).
+8. **Pass 4 — Top-level Statements:** Check all non-declaration top-level items in order.
 
 ### Overload Resolution
 
@@ -476,6 +499,32 @@ Template structs and enums follow a similar pattern via `monomorphizeStruct()` a
 
 **Built-in templates** use a `BuiltinTemplateResolver` callback instead of an AST body — the resolver inspects argument types and returns the appropriate concrete parameter types, return type, and C function pointer.
 
+### Constraints
+
+**Files:** `type_checker_constraints.cpp`
+
+Constraints restrict which types may be bound to template parameters. Two forms exist:
+
+**Type-set constraints** enumerate allowed types directly or by union:
+
+```
+constraint Numeric = Int | Float | Fraction | Complex;
+constraint Ordered = Numeric | String;
+```
+
+**Interface constraints** require that a type implement specific function signatures:
+
+```
+constraint Comparable<T> {
+    requires fn <(a T, b T) Bool;
+    requires fn ==(a T, b T) Bool;
+}
+```
+
+Constraints are checked during template instantiation. When a function declares `fn sort<T>(arr [T]) [T] where T: Comparable<T>`, the type checker verifies that the concrete type bound to `T` satisfies the constraint before proceeding with monomorphization.
+
+Constraint names can also appear directly in parameter type position, desugaring into fresh type parameters with implicit where-clauses: `fn abs(x Numeric) Numeric` desugars to `fn abs<T>(x T) T where T: Numeric`.
+
 ### Auto-Mapping Analysis
 
 Auto-mapping is analyzed during type checking and annotated on AST nodes for code generation. Two forms exist:
@@ -495,7 +544,7 @@ Auto-mapping is analyzed during type checking and annotated on AST nodes for cod
 
 ### Lambda and Closure Analysis
 
-When the type checker enters a lambda body, it sets `lambdaBoundary_` to the current scope depth. Variable lookups that cross this boundary trigger **capture detection**: the variable is added to the lambda's `captures` list. The type checker builds a `LambdaType` that includes `freeVarTypes_` (types of captured variables) and `gcFreeVars_` (indices of captures that hold `Obj*` pointers, for GC scanning).
+When the type checker enters a lambda body, it sets `lambdaBoundary_` to the current scope depth. Variable lookups that cross this boundary trigger **capture detection**: the variable is added to the lambda's `captures` list. The type checker builds a `LambdaType` that includes `freeVarTypes_` (types of captured variables) and `gcFreeVars_` (indices of captures that hold `Obj*` pointers, needed for ARC — `releaseChildren()` releases these on destruction).
 
 ### Scope and Variable Management
 
@@ -547,7 +596,7 @@ Function arguments are placed in contiguous registers starting at the call site'
 
 ### Code Generation for Declarations
 
-**Let/Var/Const declarations:** Generate the initializer expression, then record the result register as the local variable's location. For global-scope variables, also emit `op_store_global` to persist the value.
+**Let/Var/Const declarations:** Generate the initializer expression, then record the result register as the local variable's location. For global-scope variables, also emit `op_store_global` (or `op_store_global_obj` / `op_init_global_obj` for object-typed values, which perform retain/release) to persist the value.
 
 **Function declarations:** Each function compiles to its own `CodeBlock`. The process:
 
@@ -637,9 +686,12 @@ Each pattern accumulates a list of "fail jumps." If any test fails, execution ju
 The VM is a **register-based, direct-threaded interpreter**. Key components:
 
 - **Register file:** A flat array of `Word` values, allocated from TLSF. Default capacity 4,096 registers. Each call frame occupies a window within this array.
-- **Call frame stack:** An array of `CallFrame` structs (return PC, code block, base register, result register). Default capacity 512 frames.
-- **Global variables:** A `Vec<Word>` indexed by global slot number. Each function's `CodeBlock*` is stored as a global, as are user-declared global variables.
+- **Call frame stack:** An array of `CallFrame` structs (return PC, code block, base register, number of registers, result register, dynamic scope stack mark). Default capacity 512 frames.
+- **Global variables:** A `Vec<Word>` indexed by global slot number. Each function's `CodeBlock*` is stored as a global, as are user-declared global variables. A parallel `globalIsObj_` array tracks which globals hold `Obj*` pointers for ARC.
+- **Dynamic scope variables:** A `Vec<Word>` of dynamic variables (accessed via `` `varName `` syntax) with a save stack for automatic restore on function return. The `dynStackMark` in each `CallFrame` records the save stack level at entry.
+- **Coroutine state:** Optional `currentCoroutine_` and `currentCoroFrame_` pointers tracking the active coroutine during `yield`/`resume` operations.
 - **Program counter:** A `Code*` pointer into the current `CodeBlock`'s instruction stream.
+- **ARC infrastructure:** An `AutoReleasePool`, `DeferredDeleteQueue`, and `ForeignDeleteQueue` (see Memory Management below).
 
 ### Word Representation
 
@@ -651,7 +703,7 @@ union Word {
     f64 f;         // Float
     SymbolPtr s;   // Interned symbol pointer
     void* p;       // Generic pointer
-    Obj* o;        // GC-managed object pointer
+    Obj* o;        // ARC-managed object pointer
 };
 ```
 
@@ -715,7 +767,7 @@ VM::execute(CodeBlock* block)
 
 **Files:** `value.hpp`, `value.cpp`
 
-All heap-allocated values inherit from `Obj : GCObj`. The `Obj` base class holds a `Type*` pointer used by the GC for scanning and by `str()` for display.
+All heap-allocated values inherit from `Obj : GCObj`. The `Obj` base class holds a `Type*` pointer used by `str()` for display and by the type system for runtime type checks.
 
 ### Object Types
 
@@ -737,6 +789,8 @@ All heap-allocated values inherit from `Obj : GCObj`. The `Obj` base class holds
 | `CodeBlock` | Compiled function | `Vec<Code> code`, `Vec<Obj*> objConstants` |
 | `Primitive` | Built-in function | `cfun_` (C function pointer) |
 | `Lambda` | Closure | `codeBlock_`, flexible array `Word freeVars_[]` |
+| `CoroutineObj` | Suspended coroutine | `frame_` (CoroutineFrame*), `done_` flag |
+| `CoroutineFrame` | Coroutine execution state | Saved registers, PC, caller frame chain |
 
 `Struct`, `Tuple`, and `Lambda` use **C flexible array members** (`Word v[]` / `Word freeVars_[]`) to store their fields inline within the allocation, avoiding a separate heap allocation for the field array. They are created via `create()` static methods that compute the allocation size and use placement new.
 
@@ -761,7 +815,7 @@ Arrays use a split representation based on element type:
 
 - `PodArray<i64>` — for `Array<Int>`, `Array<Bool>`, `Array<Symbol>` (values stored inline as 64-bit words)
 - `PodArray<f64>` — for `Array<Float>` (values stored inline as doubles)
-- `ObjArray` — for arrays of object-typed elements (values stored as `Obj*` pointers, requiring GC scanning)
+- `ObjArray` — for arrays of object-typed elements (values stored as `Obj*` pointers, with retain/release on element mutation)
 
 This avoids boxing overhead for numeric arrays.
 
@@ -777,42 +831,72 @@ All runtime memory (register file, call frames, objects, type caches, STL contai
 
 The `rt::STLAllocator<T>` adaptor allows standard containers (`std::vector`, `std::unordered_map`, `std::string`) to allocate from the TLSF pool instead of the system allocator.
 
-### Garbage Collector
+### Automatic Reference Counting (ARC)
 
-**Files:** `gc.hpp`
+**Files:** `gc.hpp`, `arc.hpp`
 
-The GC is a **one-pass incremental real-time collector** using a single flat table of `GCObj*` pointers. Objects are partitioned into five regions by their table index:
+Memory is managed by **automatic reference counting** with deferred deletion. Every heap object (`GCObj`) carries an atomic 32-bit reference count and a pointer to its home allocator:
 
-```
-[0 .. black_)       Immortal — never collected (built-in types)
-[black_ .. grey_)   Black — fully scanned, known reachable
-[grey_ .. white_)   Grey — marked reachable, not yet scanned
-[white_ .. sweep_)  White — not yet proven reachable
-[sweep_ .. free_)   Sweepable — unreachable, awaiting deletion
-[free_ .. max)      Free — empty table slots
+```cpp
+class GCObj {
+    mutable std::atomic<u32> refcount_{kImmortalRefcount};
+    rt::TLSFAllocator* homeAllocator_;
+};
 ```
 
-The collection cycle:
+**Core operations:**
 
-1. **Trigger:** When `obj_slots_currently_allocated_` exceeds `allocated_after_last_gc_ + gc_trigger_threshold_`, a collection is triggered.
-2. **Mark roots:** `markRoots()` scans global variables and type caches, marking reachable objects as grey.
-3. **Incremental marking:** Each `heartbeat()` call does a budgeted amount of work: scan grey objects (transitioning them to black) and mark their referents. The work budget is `obj_slots_currently_allocated_ / target_heartbeats_`, spreading the work across approximately 100 heartbeat calls.
-4. **Partial scanning:** Large objects (arrays, code blocks) support `gcPartialScan()` — the GC can scan a portion of the object per heartbeat, avoiding unbounded pauses.
-5. **Sweep:** When no grey objects remain, all white objects become sweepable. Each `addObj()` call opportunistically sweeps one object (`sweepOne()`), amortizing deletion across allocations.
-6. **Write barrier:** When the collector is active and a reference is stored into an already-scanned object, `writeBarrier()` re-marks the referent as grey.
+- `retain()` — atomically increments the refcount (no-op for immortal objects).
+- `release()` — atomically decrements the refcount. When it reaches zero, the object is enqueued for deferred deletion rather than deleted immediately.
+- `releaseChildren()` — virtual method overridden by each object type to release its child references before destruction. This prevents unbounded recursive destruction cascades.
+- `makeImmortal()` — sets the refcount to `kImmortalRefcount` (0xFFFF0000), which causes `retain()` and `release()` to become no-ops.
+
+**Three-queue deletion pipeline:**
+
+The VM maintains three cooperating queues that spread deletion work across heartbeats:
+
+1. **AutoReleasePool** — newly created objects enter this pool with refcount 1 (the pool's reference). Between events, `drain()` releases each object's pool reference. Objects that have been retained by heap references survive; temporaries whose refcount reaches zero are automatically enqueued for deletion.
+
+2. **DeferredDeleteQueue** — objects whose refcount has reached zero wait here. Each `gcHeartbeat()` call processes a bounded number of deletions (at least 256, or 2% of the queue, whichever is larger). Before deleting an object, `releaseChildren()` is called while the object is still intact. Children whose refcounts then reach zero are enqueued here as well, spreading cascading deletions across multiple heartbeats.
+
+3. **ForeignDeleteQueue** — a lock-free MPSC (Treiber stack) for cross-thread deletion. When an object's refcount reaches zero on a thread that does not own the object's home allocator, the object is pushed here instead of the local deferred queue. The home VM's `gcHeartbeat()` atomically drains this queue into its `DeferredDeleteQueue`, ensuring objects are always deleted by their owning thread with the correct allocator.
+
+**The heartbeat cycle:**
+
+```cpp
+void gcHeartbeat() {
+    foreignDeleteQueue_.drainInto(deferredDeleteQueue_);
+    autoReleasePool_.drain();
+    u32 budget = max(256, deferredDeleteQueue_.size() / 50);
+    deferredDeleteQueue_.processN(budget);
+}
+```
+
+`gcHeartbeat()` is called on a timed interval — between events in the REPL, after each scheduled callback in the NRT scheduler, and on a background heartbeat thread in the NRT VM.
+
+**ARC in generated code:**
+
+The code generator emits ARC-aware store instructions for object-typed values:
+
+- `op_store_global_obj` — retains the new value, stores it, then releases the old value.
+- `op_init_global_obj` — retains the new value (no old value to release during initialization).
+- `op_store_dynamic_obj` / `op_init_dynamic_obj` — same for dynamic scope variables.
+
+For local variables (registers), no retain/release is needed because registers are ephemeral within a call frame and the auto-release pool handles their lifetime.
 
 **Key real-time properties:**
 - No stop-the-world phase.
-- Work per heartbeat is bounded by the budget.
-- Large objects are scanned incrementally.
-- The event-driven execution model means the stack is empty between events, so no stack scanning is needed — only globals and type caches are roots.
+- Deletion work per heartbeat is bounded by the budget.
+- Cross-thread deletion is lock-free (CAS-based Treiber stack).
+- No root scanning or marking phases — reference counts track reachability incrementally.
+- Cascading deletions are bounded by processing `releaseChildren()` through the deferred queue.
 
 ### Object Registration
 
 New objects are registered via `registerNewObj()`:
 
-- **During compilation** (when `gCurrentCompiler` is set): the compiler tracks the object and adds it to the GC. These objects become **immortal** after VM initialization.
-- **During execution** (when only `gCurrentVM` is set): the object is added to the GC table in the white region.
+- **During compilation** (when `gCurrentCompiler` is set): the compiler tracks the object and marks it **immortal** (refcount is never decremented). These become constants in `CodeBlock::objConstants`.
+- **During execution** (when only `gCurrentVM` is set): the object's refcount is set to 1 and it is added to the VM's `AutoReleasePool`.
 
 ---
 
@@ -832,7 +916,57 @@ The `ModuleCompiler` handles multi-file compilation:
    - `import path.{name1, name2 as alias}` — selective import
 5. **Initialization:** Module init blocks are called once (guarded by a flag global) before the importing module's code runs.
 
-Exports include functions (with overloads), variables, struct types, enum types, template declarations, and type aliases. Template declarations are exported as AST nodes, enabling cross-module monomorphization.
+Exports include functions (with overloads), variables, struct types, enum types, template declarations, type aliases, and constraints. Template declarations are exported as AST nodes, enabling cross-module monomorphization. Constraint declarations are also exported for cross-module constraint checking during template instantiation.
+
+---
+
+## Coroutines
+
+Coroutines are declared with the `coro` keyword and use `yield` to suspend execution and produce values:
+
+```
+coro fibonacci() Int {
+    var a = 0;
+    var b = 1;
+    while (true) {
+        yield a;
+        let t = a + b;
+        a = b;
+        b = t;
+    }
+}
+```
+
+### Coroutine Lifecycle
+
+1. **Creation:** `op_coro_create` (or `op_coro_create_lambda` for coroutine lambdas) allocates a `CoroutineObj` containing a `CoroutineFrame` with its own register file.
+2. **Resumption:** `op_coro_resume` saves the caller's state and switches to the coroutine's frame, continuing from where it last yielded. The coroutine returns an `Option<T>` — `Some(value)` while it produces values.
+3. **Yielding:** `op_yield` saves the coroutine's registers and PC into its frame, then returns the yielded value (wrapped in `Option.Some`) to the caller.
+4. **Completion:** When a coroutine returns normally (falls off the end or executes `return`), subsequent resumes return `Option.None`, and `op_coro_is_done` returns `true`.
+
+Coroutines can be used as lazy list generators via `CoroutineListGen`, which wraps a coroutine in the `ListGenerator` interface for seamless integration with lazy list operations.
+
+### Coroutine Types
+
+A coroutine declaration `coro foo() Int` has type `() Coroutine<Int>`. The `CoroutineType` carries the yield type. Coroutine lambdas (`coro (params) body`) work identically.
+
+---
+
+## Dynamic Scope Variables
+
+Dynamic scope variables use backtick syntax (`` `varName ``) and are visible across the call stack without explicit parameter passing:
+
+```
+var `sampleRate = 44100;
+
+fn nyquist() Float { `sampleRate toFloat / 2.0; }
+```
+
+### Implementation
+
+Dynamic variables are stored in a flat `Vec<Word>` (`dynVars_`) on the VM, separate from globals. Each function call saves and restores dynamic bindings via a save stack (`dynStack_`), with the `CallFrame::dynStackMark` recording the stack level at entry. On function return, bindings are restored to their prior values.
+
+The code generator emits `op_load_dynamic` and `op_store_dynamic` (or `op_store_dynamic_obj` / `op_init_dynamic_obj` for object-typed values with retain/release) for dynamic variable access.
 
 ---
 
@@ -876,6 +1010,6 @@ Categories of built-ins include:
 | POD arrays | Runtime | `PodArray<i64>` and `PodArray<f64>` avoid boxing for numeric arrays |
 | Flexible array members | Runtime | `Struct`, `Tuple`, `Lambda` store fields inline, avoiding extra allocations |
 | Type interning | Compiler | Structural types are deduplicated, enabling pointer comparison |
-| Incremental GC | Runtime | Real-time-safe collection with bounded per-heartbeat work |
-| Partial scanning | Runtime | Large objects are scanned incrementally across heartbeats |
-| Immortal objects | Compiler | Built-in types and compile-time objects are never collected |
+| Deferred ARC deletion | Runtime | Bounded deletion work per heartbeat avoids unbounded cascades |
+| Lock-free cross-thread ARC | Runtime | Foreign delete queue uses CAS-based Treiber stack |
+| Immortal objects | Compiler | Built-in types and compile-time objects skip retain/release |
