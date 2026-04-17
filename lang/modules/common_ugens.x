@@ -376,8 +376,7 @@ fn bfold_cheaper(x) = select2(x < -1, -2 - x, select2(x > 1, 2 - x, x));
 
 -- chain
 
-fn _chain(x S, n Int, f fn(S)S) S = n == 0 ? x : chain(f(x), n-1, f);
-fn chain(x AsSignal, n Int, f fn(S)S) S = _chain(x asSignal, n, f);
+fn chain(x S, n Int, f fn(S)S) S = n <= 0 ? x : chain(f(x), n-1, f);
 
 
 -- common unit generator functions
@@ -591,7 +590,7 @@ fn onezero(x S, a AsSignal) S = x + a * (z1(x) - x);
 
 fn leakdc(x S, k AsSignal) S {
 	let y = delayVar();
-	y <- x - z1(x) + k * y(1)
+	y <- x - x z1 + k * y(1)
 }
 
 -- exponential decay
@@ -745,6 +744,9 @@ fn dust(density AsSignal, chans Int = 1) S = urand(chans) * velvet(density, chan
 
 -- dust2 = `density` values of random bipolar values each second (on average), otherwise zero.
 fn dust2(density AsSignal, chans Int = 1) S = birand(chans) * velvet(density, chans);
+
+-- randomly panned, randomly timed, ramdom amplitude impulses
+fn pandust(density AsSignal, chans Int = 1) S = urand(chans) panfuns join * velvet(density, chans);
 
 fn dustep(freq AsSignal, chans Int = 1) S = white(chans) sampleAndHold(velvet(freq, chans));
 
@@ -1007,6 +1009,42 @@ fn combc(x S, delayTime AsSignal, maxDelayTime AsSignal, decayTime AsSignal) S {
 }
 
 
+-- interpolated all pass delay
+fn alpas(x S, delayTime AsSignal, maxDelayTime AsSignal, decayTime AsSignal, interp Interpolation = Interpolation.lagrange) S {
+	let a = decay60dB(decayTime / delayTime);
+	let delaySamples = delayTime * fs();
+	let maxDelaySamples = maxDelayTime * fs();
+	let y = delayVar(maxDelaySamples);
+	let dread = y(delaySamples, interp);
+	let dwrite = dread * a + x;
+	y <- dwrite;
+	dread - a * dwrite
+}
+
+-- no interpolation all pass delay
+fn alpasn(x S, delayTime AsSignal, decayTime AsSignal) S {
+	x alpas(delayTime, delayTime, decayTime, Interpolation.none)
+}
+
+-- linear interpolation all pass delay
+fn alpasl(x S, delayTime AsSignal, maxDelayTime AsSignal, decayTime AsSignal) S {
+	x alpas(delayTime, maxDelayTime, decayTime, Interpolation.linear)
+}
+
+-- cubic no interpolation all pass delay
+fn alpasc(x S, delayTime AsSignal, maxDelayTime AsSignal, decayTime AsSignal) S {
+	x alpas(delayTime, maxDelayTime, decayTime, Interpolation.cubic)
+}
+
+-- random reverb made of chained all pass delays
+fn apverb(x S, delayTime Float, decayTime Float, n Int = 6) S {
+	let f = fn(x S) S {
+		let dly = rand(0.002, delayTime);
+		x alpasn(dly, decayTime)
+	};
+	x chain(n, f)
+}
+
 
 
 fn pull(gate S, initVal AsConstantSignal, gatedFun fn()S) S {
@@ -1020,6 +1058,8 @@ fn pause(gate S, gatedFun fn()S) S = if_(gate > 0, fn(){ gate * gatedFun() });
 
 
 "DONE IMPORTING COMMON UGENS MODULE" println
+
+
 
 
 

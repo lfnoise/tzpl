@@ -14,7 +14,7 @@ fn init_urand_test() S {
 	oscs sum(2) * 0.1 |> outlet
 }
 
-init_urand_test defSynth("init_urand_test") println;
+init_urand_test defSynth("init_urand_test");
 
 
 fn bubbles() S =
@@ -24,7 +24,7 @@ fn bubbles() S =
 	|> nnhz sinosc * 0.04
 	|> combn(0.2, 4) outlet;
 
-bubbles defSynth("bubbles") println;
+bubbles defSynth("bubbles");
 
 
 fn blipTest() S {
@@ -32,7 +32,7 @@ fn blipTest() S {
 	[36, 36.13] blip(0, h) mul(0.2) fadein(0.1) outlet
 }
 
-blipTest defSynth("blipTest") println;
+blipTest defSynth("blipTest");
 
 
 fn smoothSawTest() S {
@@ -40,7 +40,7 @@ fn smoothSawTest() S {
 	[100, 100.13] smoothSaw(s) mul(0.2) fadein(0.1) outlet
 }
 
-smoothSawTest defSynth("smoothSawTest") println;
+smoothSawTest defSynth("smoothSawTest");
 
 
 fn smoothSquareTest() S {
@@ -48,7 +48,7 @@ fn smoothSquareTest() S {
 	[100, 100.13] smoothSquare(s) mul(0.2) fadein(0.1) outlet
 }
 
-smoothSquareTest defSynth("smoothSquareTest") println;
+smoothSquareTest defSynth("smoothSquareTest");
 
 
 fn usinWinUsinTest() S {
@@ -57,7 +57,7 @@ fn usinWinUsinTest() S {
 
 }
 
-usinWinUsinTest defSynth("usinWinUsinTest") println;
+usinWinUsinTest defSynth("usinWinUsinTest");
 
 fn usinWinSinTest() S {
 	let s = 1/5 sinosc(0.75) bilin(1, 16);
@@ -65,7 +65,7 @@ fn usinWinSinTest() S {
 
 }
 
-usinWinSinTest defSynth("usinWinSinTest") println;
+usinWinSinTest defSynth("usinWinSinTest");
 
 
 fn sawWinUsinTest() S {
@@ -74,7 +74,7 @@ fn sawWinUsinTest() S {
 
 }
 
-sawWinUsinTest defSynth("sawWinUsinTest") println;
+sawWinUsinTest defSynth("sawWinUsinTest");
 
 
 fn sawWinSinTest() S {
@@ -83,13 +83,21 @@ fn sawWinSinTest() S {
 
 }
 
-sawWinSinTest defSynth("sawWinSinTest") println;
+sawWinSinTest defSynth("sawWinSinTest");
 
-fn() S { 0.3 sinosc biexp(100, 6000) velvet(2) * 0.2 |> outlet } defSynth("dust1") println;
+fn() S { 0.3 sinosc biexp(100, 6000) velvet(2) * 0.2 |> outlet } defSynth("dust1");
 
 fn dustone() = 0.2 * decay2(dust(4, 2), 0.04, 0.3) * 800 fsinxosc |> outlet;
 
-dustone defSynth("dustone") println;
+dustone defSynth("dustone");
+
+fn apverbTest() S {
+	let chans = 16;
+	let freqs = exprand(100, 5000, chans, Rate.init);
+	(3/chans) pandust(chans) decay2(0.004, 0.2) * freqs sinosc |> transpose(chans) sum(2) * 0.5 |> apverb(0.02, 6, 8) outlet
+}
+
+apverbTest defSynth("apverbTest");
 
 fn pause_bubbles() S {
     let gate = 0.5 sinosc - 0.5;
@@ -100,7 +108,7 @@ fn pause_bubbles() S {
     out fadein(0.1) combn(0.2, 4) outlet
 }
 
-pause_bubbles defSynth("pause_bubbles") println;
+pause_bubbles defSynth("pause_bubbles");
 
 fn tog_pause() S {
     let s0 = 1 lfusqr;
@@ -126,7 +134,7 @@ fn pull_nested() S {
     out outlet
 }
 
-pull_nested defSynth("pull_nested") println;
+pull_nested defSynth("pull_nested");
 
 
 fn pulltwo() S {
@@ -144,7 +152,7 @@ fn pulltwo() S {
     out outlet
 }
 
-pulltwo defSynth("pulltwo") println;
+pulltwo defSynth("pulltwo");
 
 
 fn pch_seq() S {
@@ -154,7 +162,7 @@ fn pch_seq() S {
 }
 
 
-pch_seq defSynth("pch_seq") println;
+pch_seq defSynth("pch_seq");
 
 
 
@@ -164,7 +172,7 @@ fn sahtone1() S {
 	in combn(0.2, 2) outlet
 }
 
-sahtone1 defSynth("sahtone1") println;
+sahtone1 defSynth("sahtone1");
 
 
 
@@ -174,7 +182,7 @@ fn sahtone2() S {
 	in combn(0.2, 2) outlet
 }
 
-sahtone2 defSynth("sahtone2") println;
+sahtone2 defSynth("sahtone2");
 
 
 fn mod1_test() S {
@@ -183,7 +191,7 @@ fn mod1_test() S {
 	in chain(4, fn(x S)S{x onepole(c)}) outlet
 }
 
-mod1_test defSynth("mod1_test") println;
+mod1_test defSynth("mod1_test");
 
 fn mod4_test() S {
 	let c S = 0.4 fsinosc bilin(0.1, 0.95);
@@ -193,7 +201,7 @@ fn mod4_test() S {
 	out combn([0.3,0.15], 4) outlet
 }
 
-mod4_test defSynth("mod4_test") println;
+mod4_test defSynth("mod4_test");
 
 fn mod5_test() S {
 	let dv = 0.2;
@@ -206,32 +214,32 @@ fn mod5_test() S {
 	out comb(delayTimes * delayMod, delayMax, 4) outlet
 }
 
-mod5_test defSynth("mod5_test") println;
+mod5_test defSynth("mod5_test");
 
 
 fn white_test() S = outlet(2 white * 0.2);
 
-white_test defSynth("white_test") println;
+white_test defSynth("white_test");
 
 
 fn pink_test() S = outlet(2 pinkf * 0.15);
 
-pink_test defSynth("pink_test") println;
+pink_test defSynth("pink_test");
 
 
 fn violet_test() S = outlet(2 violet * 0.2);
 
-violet_test defSynth("violet_test") println;
+violet_test defSynth("violet_test");
 
 
 fn blue_test() S = outlet(2 blue * 0.2);
 
-blue_test defSynth("blue_test") println;
+blue_test defSynth("blue_test");
 
 
 fn red_test() S = outlet(2 red * 0.2);
 
-red_test defSynth("red_test") println;
+red_test defSynth("red_test");
 
 fn bubbles_lite() S = 0.4 lfsaw * 24 + 8 lfsaw * 3 + 81 |> nnhz sinosc * 0.04 |> outlet;
 
@@ -245,41 +253,45 @@ import audio_engine as ae;
 ae.listSynthDefs() println;
 
 fn playExamples() {
-go(coro fn() Float {
-	"start playing" println;
-
-	"bubbles" playFor(5.0) yieldAll;
-	"smoothSquareTest" playFor(5.0) yieldAll;
-	"smoothSawTest" playFor(5.0) yieldAll;	
-	"blipTest" playFor(20.0) yieldAll;
-	"usinWinUsinTest" playFor(5.0) yieldAll;
-	"usinWinSinTest" playFor(5.0) yieldAll;
-	"sawWinUsinTest" playFor(5.0) yieldAll;
-	"sawWinSinTest" playFor(5.0) yieldAll;
-	"init_urand_test" playFor(5.0) yieldAll;
-	"dust1" playFor(5.0) yieldAll;
-	"dustone" playFor(5.0) yieldAll;
-	"pause_bubbles" playFor(5.0) yieldAll;
-	"tog_pause" playFor(5.0) yieldAll;
-	"pull_nested" playFor(5.0) yieldAll;
-	"pulltwo" playFor(5.0) yieldAll;
-	"pch_seq" playFor(5.0) yieldAll;
-	"sahtone1" playFor(5.0) yieldAll;
-	"sahtone2" playFor(5.0) yieldAll;
-	"mod1_test" playFor(5.0) yieldAll;
-	"mod4_test" playFor(5.0) yieldAll;
-	"mod5_test" playFor(5.0) yieldAll;
-	"violet_test" playFor(5.0) yieldAll;
-	"blue_test" playFor(5.0) yieldAll;
-	"white_test" playFor(5.0) yieldAll;
-	"pink_test" playFor(5.0) yieldAll;
-	"red_test" playFor(5.0) yieldAll;
-
-	ae.endRender(0.1);
-
-	"stop playing" println;
-}());
-
+    go(coro fn() Float {
+    	"start playing" println;
+    
+    	"apverbTest" playFor(10.0) yieldAll;
+    	"apverbTest" playFor(10.0) yieldAll;
+    	"apverbTest" playFor(10.0) yieldAll;
+    	"apverbTest" playFor(10.0) yieldAll;
+    	"bubbles" playFor(5.0) yieldAll;
+    	"smoothSquareTest" playFor(5.0) yieldAll;
+    	"smoothSawTest" playFor(5.0) yieldAll;	
+    	"blipTest" playFor(20.0) yieldAll;
+    	"usinWinUsinTest" playFor(5.0) yieldAll;
+    	"usinWinSinTest" playFor(5.0) yieldAll;
+    	"sawWinUsinTest" playFor(5.0) yieldAll;
+    	"sawWinSinTest" playFor(5.0) yieldAll;
+    	"init_urand_test" playFor(5.0) yieldAll;
+    	"dust1" playFor(5.0) yieldAll;
+    	"dustone" playFor(5.0) yieldAll;
+    	"apverbTest" playFor(10.0) yieldAll;
+    	"pause_bubbles" playFor(5.0) yieldAll;
+    	"tog_pause" playFor(5.0) yieldAll;
+    	"pull_nested" playFor(5.0) yieldAll;
+    	"pulltwo" playFor(5.0) yieldAll;
+    	"pch_seq" playFor(5.0) yieldAll;
+    	"sahtone1" playFor(5.0) yieldAll;
+    	"sahtone2" playFor(5.0) yieldAll;
+    	"mod1_test" playFor(5.0) yieldAll;
+    	"mod4_test" playFor(5.0) yieldAll;
+    	"mod5_test" playFor(5.0) yieldAll;
+    	"violet_test" playFor(5.0) yieldAll;
+    	"blue_test" playFor(5.0) yieldAll;
+    	"white_test" playFor(5.0) yieldAll;
+    	"pink_test" playFor(5.0) yieldAll;
+    	"red_test" playFor(5.0) yieldAll;
+    
+    	ae.endRender(0.1);
+    
+    	"stop playing" println;
+    }());
 }
 
 
@@ -292,8 +304,12 @@ fn renderExamples() {
 
 
 -- do non-real-time rendering and real-time play back concurrently.
-renderExamples();
+--renderExamples();
 playExamples();
+
+
+
+
 
 
 

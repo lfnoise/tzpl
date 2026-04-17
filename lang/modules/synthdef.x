@@ -1098,6 +1098,8 @@ fn defSynth(synthFun GraphFn, synthName String) String {
 	let err = sexprString compileSynthDefAndLoad;
 	if (err length > 0) {
 		println("ERROR compiling " $ synthName $ ": " $ err);
+	} else {
+		println(synthName $ " compiled successfully.");
 	}
 
 	sexprString
@@ -1142,6 +1144,7 @@ coro fn playFor(defName String, seconds Float) Float {
 
 ---------------------------------------------------------------------------
 ---------------------------------------------------------------------------
+
 
 
 
