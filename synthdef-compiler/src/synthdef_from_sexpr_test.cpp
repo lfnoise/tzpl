@@ -26,6 +26,15 @@
 #include <print>
 #include <fstream>
 
+// The test suite is built with NDEBUG, which makes TEST_ASSERT() a no-op.
+// TEST_ASSERT aborts on failure in release builds too, with a clear message.
+#define TEST_ASSERT(cond) do { \
+    if (!(cond)) { \
+        fprintf(stderr, "TEST FAILED: %s:%d: %s\n", __FILE__, __LINE__, #cond); \
+        abort(); \
+    } \
+} while (0)
+
 namespace synthdef {
 
 void test_sexpr_simple() {
@@ -161,10 +170,10 @@ void test_sexpr_synth_wrapper() {
     )";
 
     auto result = synthFromSExprText(sexprText);
-    assert(result.has_value());
+    TEST_ASSERT(result.has_value());
 
     Synth* synth = result.value();
-    assert(synth->name == "test_wrapped");
+    TEST_ASSERT(synth->name == "test_wrapped");
     std::println("SUCCESS: Synth name = {}, {} expressions", synth->name, synth->exprs.size());
 
     {
@@ -192,10 +201,10 @@ void test_sexpr_if_expr() {
     )";
 
     auto result = synthFromSExprText(sexprText);
-    assert(result.has_value());
+    TEST_ASSERT(result.has_value());
 
     Synth* synth = result.value();
-    assert(synth->name == "test_if");
+    TEST_ASSERT(synth->name == "test_if");
     std::println("SUCCESS: Synth name = {}, {} expressions, {} graphs",
         synth->name, synth->exprs.size(), synth->graphs.size());
 
@@ -217,7 +226,7 @@ void test_sexpr_vec_ops() {
              (2 Outlet "out" 1))
         )";
         auto result = synthFromSExprText(sexprText, "test_vec_take");
-        assert(result.has_value());
+        TEST_ASSERT(result.has_value());
         PushSynth ps(result.value());
         result.value()->graphAnalysis();
         std::println("  VecTake: OK");
@@ -231,7 +240,7 @@ void test_sexpr_vec_ops() {
              (2 Outlet "out" 1))
         )";
         auto result = synthFromSExprText(sexprText, "test_vec_drop");
-        assert(result.has_value());
+        TEST_ASSERT(result.has_value());
         PushSynth ps(result.value());
         result.value()->graphAnalysis();
         std::println("  VecDrop: OK");
@@ -245,7 +254,7 @@ void test_sexpr_vec_ops() {
              (2 Outlet "out" 1))
         )";
         auto result = synthFromSExprText(sexprText, "test_vec_reverse");
-        assert(result.has_value());
+        TEST_ASSERT(result.has_value());
         PushSynth ps(result.value());
         result.value()->graphAnalysis();
         std::println("  VecReverse: OK");
@@ -259,7 +268,7 @@ void test_sexpr_vec_ops() {
              (2 Outlet "out" 1))
         )";
         auto result = synthFromSExprText(sexprText, "test_vec_stride");
-        assert(result.has_value());
+        TEST_ASSERT(result.has_value());
         PushSynth ps(result.value());
         result.value()->graphAnalysis();
         std::println("  VecStride: OK");
@@ -273,7 +282,7 @@ void test_sexpr_vec_ops() {
              (2 Outlet "out" 1))
         )";
         auto result = synthFromSExprText(sexprText, "test_vec_stutter");
-        assert(result.has_value());
+        TEST_ASSERT(result.has_value());
         PushSynth ps(result.value());
         result.value()->graphAnalysis();
         std::println("  VecStutter: OK");
@@ -287,7 +296,7 @@ void test_sexpr_vec_ops() {
              (2 Outlet "out" 1))
         )";
         auto result = synthFromSExprText(sexprText, "test_vec_ncyc");
-        assert(result.has_value());
+        TEST_ASSERT(result.has_value());
         PushSynth ps(result.value());
         result.value()->graphAnalysis();
         std::println("  VecNCyc: OK");
@@ -301,7 +310,7 @@ void test_sexpr_vec_ops() {
              (2 Outlet "out" 1))
         )";
         auto result = synthFromSExprText(sexprText, "test_vec_transpose");
-        assert(result.has_value());
+        TEST_ASSERT(result.has_value());
         PushSynth ps(result.value());
         result.value()->graphAnalysis();
         std::println("  VecTranspose: OK");
@@ -316,10 +325,10 @@ void test_sexpr_vec_ops() {
              (3 Outlet "out" 2))
         )";
         auto result = synthFromSExprText(sexprText, "test_vec_join");
-        assert(result.has_value());
+        TEST_ASSERT(result.has_value());
         PushSynth ps(result.value());
         result.value()->graphAnalysis();
-        assert(result.value()->exprs[2]->chans == 4); // 2+2 = 4, already power of two
+        TEST_ASSERT(result.value()->exprs[2]->chans == 4); // 2+2 = 4, already power of two
         std::println("  VecJoin: OK");
     }
 
@@ -332,10 +341,10 @@ void test_sexpr_vec_ops() {
              (3 Outlet "out" 2))
         )";
         auto result = synthFromSExprText(sexprText, "test_vec_join_pad");
-        assert(result.has_value());
+        TEST_ASSERT(result.has_value());
         PushSynth ps(result.value());
         result.value()->graphAnalysis();
-        assert(result.value()->exprs[2]->chans == 4); // 2+1 = 3, rounds up to 4
+        TEST_ASSERT(result.value()->exprs[2]->chans == 4); // 2+1 = 3, rounds up to 4
         std::println("  VecJoin (non-pow2 padding): OK");
     }
 
