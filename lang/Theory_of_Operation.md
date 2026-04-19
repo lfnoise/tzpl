@@ -957,7 +957,7 @@ A coroutine declaration `coro foo() Int` has type `() Coroutine<Int>`. The `Coro
 Dynamic scope variables use backtick syntax (`` `varName ``) and are visible across the call stack without explicit parameter passing:
 
 ```
-var `sampleRate = 44100;
+var `sampleRate = 48000;
 
 fn nyquist() Float { `sampleRate toFloat / 2.0; }
 ```

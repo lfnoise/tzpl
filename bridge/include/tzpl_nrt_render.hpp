@@ -47,7 +47,7 @@ struct AppContext;
 // Options for an NRT render. All fields have sensible defaults.
 struct RenderJobOpts {
     std::string path;             // output WAV path
-    double sampleRate = 44100.0;
+    double sampleRate = 48000.0;
     int    channels = 2;
     int    bufferFrames = 512;
     // Hard cap. If <= 0, the render is open-ended; it stops when the script

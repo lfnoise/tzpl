@@ -2766,7 +2766,7 @@ nats.<span class="fn">onMessageS</span>(<span class="str">"nodes.piano.chords"</
 <table>
   <thead><tr><th>Flag</th><th>Argument</th><th>Description</th></tr></thead>
   <tbody>
-    <tr><td><code>--nrt</code></td><td><code>&lt;path&gt;</code></td><td>Output WAV path. Float32 IEEE WAV; sample rate and channel count come from the engine config (defaults: 44100&nbsp;Hz, 2 channels).</td></tr>
+    <tr><td><code>--nrt</code></td><td><code>&lt;path&gt;</code></td><td>Output WAV path. Float32 IEEE WAV; sample rate and channel count come from the engine config (defaults: 48000&nbsp;Hz, 2 channels).</td></tr>
     <tr><td><code>--duration</code></td><td><code>&lt;seconds&gt;</code></td><td>Optional hard cap. If absent, the render runs until script-driven stop or scheduler idle.</td></tr>
     <tr><td><code>--tail</code></td><td><code>&lt;seconds&gt;</code></td><td>Default tail rendered after the stop signal (default <code>1.0</code>).</td></tr>
     <tr><td><code>--nrt-safety-cap</code></td><td><code>&lt;seconds&gt;</code></td><td>Upper bound (default <code>3600</code>). Render aborts with a stderr warning if exceeded.</td></tr>
@@ -2802,7 +2802,7 @@ nats.<span class="fn">onMessageS</span>(<span class="str">"nodes.piano.chords"</
 <span class="kw">namespace</span> bridge {
     <span class="kw">struct</span> RenderJobOpts {
         std::string path;
-        <span class="kw">double</span> sampleRate       = <span class="num">44100.0</span>;
+        <span class="kw">double</span> sampleRate       = <span class="num">48000.0</span>;
         <span class="kw">int</span>    channels         = <span class="num">2</span>;
         <span class="kw">int</span>    bufferFrames     = <span class="num">512</span>;
         <span class="kw">double</span> durationSeconds  = <span class="num">0.0</span>;   <span class="cmt">// 0 = open-ended</span>

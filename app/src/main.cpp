@@ -72,7 +72,7 @@ struct Config {
     int inputChannels = 0;
     int firstInputChannel = 0;
     int bufferFrames = 512;
-    double sampleRate = 44100.0;
+    double sampleRate = 48000.0;
     int numSilos = 4;
     int oscPort = 0;  // 0 = disabled
     std::string natsUrl;  // empty = disabled
@@ -504,7 +504,7 @@ static void printHelp() {
         "\n"
         "Audio options (override config file):\n"
         "  --silos <n>             Number of parallel audio threads (default: 4)\n"
-        "  --sample-rate <hz>      Sample rate (default: 44100)\n"
+        "  --sample-rate <hz>      Sample rate (default: 48000)\n"
         "  --buffer-frames <n>     Audio buffer size in frames (default: 512)\n"
         "  --channels <n>          Output channels (default: 2)\n"
         "  --first-channel <n>     First output channel (default: 0)\n"
