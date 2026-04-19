@@ -85,12 +85,26 @@ void EditorPanel::newTab(const std::string& name) {
     tab.editor.SetLanguageDefinition(langDef_);
     tab.editor.SetShowWhitespaces(false);
     tab.diskContent = tab.editor.GetText();
+    tab.ownerIdx = activeOwner_;
     tabs_.push_back(std::move(tab));
     activeTab_ = (int)tabs_.size() - 1;
+    pendingSelectTab_ = activeTab_;
     needsFocus_ = true;
 }
 
-void EditorPanel::openFile(const std::string& path) {
+void EditorPanel::openFile(const std::string& path, int ownerIdx) {
+    // If already open under any owner, just focus it. Caller is expected to
+    // have called setActiveOwner() with the existing owner if they want it
+    // surfaced in the current view.
+    for (int i = 0; i < (int)tabs_.size(); ++i) {
+        if (tabs_[i].filePath == path) {
+            activeTab_ = i;
+            pendingSelectTab_ = i;
+            needsFocus_ = true;
+            return;
+        }
+    }
+
     std::ifstream file(path);
     if (!file.is_open()) return;
 
@@ -112,13 +126,73 @@ void EditorPanel::openFile(const std::string& path) {
     tab.editor.SetText(ss.str());
     tab.diskContent = tab.editor.GetText();  // use editor's canonical form
     tab.editor.SetShowWhitespaces(false);
+    tab.ownerIdx = ownerIdx;
 
     std::error_code ec;
     tab.diskWriteTime = fs::last_write_time(path, ec);
 
     tabs_.push_back(std::move(tab));
     activeTab_ = (int)tabs_.size() - 1;
+    pendingSelectTab_ = activeTab_;
     needsFocus_ = true;
+}
+
+int EditorPanel::findTabIdxById(unsigned id) const {
+    for (int i = 0; i < (int)tabs_.size(); ++i)
+        if (tabs_[i].id == id) return i;
+    return -1;
+}
+
+int EditorPanel::firstTabOfOwner(int owner) const {
+    for (int i = 0; i < (int)tabs_.size(); ++i)
+        if (tabs_[i].ownerIdx == owner) return i;
+    return -1;
+}
+
+void EditorPanel::setActiveOwner(int ownerIdx) {
+    if (ownerIdx == activeOwner_) return;
+
+    // Remember the active tab of the current owner so returning to it later
+    // restores the same selection.
+    if (activeTab_ >= 0 && activeTab_ < (int)tabs_.size())
+        lastActiveIdByOwner_[activeOwner_] = tabs_[activeTab_].id;
+
+    activeOwner_ = ownerIdx;
+
+    int newActive = -1;
+    auto it = lastActiveIdByOwner_.find(ownerIdx);
+    if (it != lastActiveIdByOwner_.end()) {
+        int idx = findTabIdxById(it->second);
+        if (idx >= 0 && tabs_[idx].ownerIdx == ownerIdx)
+            newActive = idx;
+    }
+    if (newActive < 0)
+        newActive = firstTabOfOwner(ownerIdx);
+
+    activeTab_ = newActive;
+    pendingSelectTab_ = newActive;
+    needsFocus_ = true;
+}
+
+void EditorPanel::reassignOwnership(
+    std::function<int(std::string const&)> computeOwner)
+{
+    for (auto& tab : tabs_) {
+        if (!tab.filePath.empty())
+            tab.ownerIdx = computeOwner(tab.filePath);
+    }
+    // If the active tab migrated out of the current view, select the first
+    // remaining tab of the active owner (or nothing).
+    if (activeTab_ >= 0 && activeTab_ < (int)tabs_.size()
+        && tabs_[activeTab_].ownerIdx != activeOwner_) {
+        activeTab_ = firstTabOfOwner(activeOwner_);
+    }
+}
+
+std::optional<int> EditorPanel::findTabOwner(const std::string& path) const {
+    for (auto const& tab : tabs_)
+        if (tab.filePath == path) return tab.ownerIdx;
+    return std::nullopt;
 }
 
 void EditorPanel::closeActiveTab() {
@@ -241,11 +315,31 @@ bool EditorPanel::switchToFile(const std::string& path) {
 
 void EditorPanel::closeTab(int index) {
     if (index < 0 || index >= (int)tabs_.size()) return;
+    int closedOwner = tabs_[index].ownerIdx;
     tabs_.erase(tabs_.begin() + index);
-    if (activeTab_ >= (int)tabs_.size())
-        activeTab_ = std::max(0, (int)tabs_.size() - 1);
-    if (tabs_.empty())
-        newTab("scratch.x");
+
+    // Adjust activeTab_: if we removed it, pick another tab in the active
+    // owner; otherwise just shift the index if we erased before it.
+    if (activeTab_ == index) {
+        activeTab_ = firstTabOfOwner(activeOwner_);
+    } else if (activeTab_ > index) {
+        --activeTab_;
+    }
+
+    // Ensure the Open Files view always has at least one tab (the scratch
+    // tab). Workspace views are allowed to be empty -- the "+" button lets
+    // the user add a new one.
+    if (closedOwner == -1) {
+        if (firstTabOfOwner(-1) < 0) {
+            int saved = activeOwner_;
+            activeOwner_ = -1;          // so newTab inherits -1 as owner
+            newTab("scratch.x");
+            activeOwner_ = saved;
+            // If the user is currently viewing Open Files, select the new tab.
+            if (activeOwner_ == -1)
+                activeTab_ = (int)tabs_.size() - 1;
+        }
+    }
 }
 
 void EditorPanel::draw(float width, float height, GuiState& state) {
@@ -263,8 +357,23 @@ void EditorPanel::draw(float width, float height, GuiState& state) {
             newTab();
         }
 
+        // ImGui's SetSelected flag takes effect on the next frame, so on the
+        // click frame BeginTabItem() may still return true for the
+        // previously-selected tab. If we let that branch overwrite
+        // activeTab_, the editor would render the stale tab for one frame
+        // (and, if that was the remembered last-active tab of this owner,
+        // the user sees the wrong file). Snapshot the pending request and
+        // use it as the authoritative selection for this frame.
+        int const pendingSelect = pendingSelectTab_;
+        pendingSelectTab_ = -1;
+
         int closeIdx = -1;
+        int selectedThisFrame = -1;
         for (int i = 0; i < (int)tabs_.size(); ++i) {
+            // Only tabs matching the current owner (workspace view) are
+            // drawn in the bar. Tabs in other owners remain live but hidden.
+            if (tabs_[i].ownerIdx != activeOwner_) continue;
+
             bool open = true;
             // Show modified indicator
             std::string label = tabs_[i].name;
@@ -272,11 +381,11 @@ void EditorPanel::draw(float width, float height, GuiState& state) {
             label += "###tab" + std::to_string(i);
 
             ImGuiTabItemFlags tabFlags = 0;
-            if (i == pendingSelectTab_)
+            if (i == pendingSelect)
                 tabFlags |= ImGuiTabItemFlags_SetSelected;
 
             if (ImGui::BeginTabItem(label.c_str(), &open, tabFlags)) {
-                activeTab_ = i;
+                selectedThisFrame = i;
                 ImGui::EndTabItem();
             }
             if (!open) {
@@ -286,8 +395,15 @@ void EditorPanel::draw(float width, float height, GuiState& state) {
                 else closeIdx = i;
             }
         }
-        pendingSelectTab_ = -1;
         ImGui::EndTabBar();
+
+        // Forced selection wins over whatever ImGui considered selected this
+        // frame -- otherwise a one-frame mismatch between tab highlight and
+        // rendered content occurs on cross-workspace file clicks.
+        if (pendingSelect >= 0)
+            activeTab_ = pendingSelect;
+        else if (selectedThisFrame >= 0)
+            activeTab_ = selectedThisFrame;
 
         if (closeIdx >= 0) closeTab(closeIdx);
     }

@@ -854,7 +854,7 @@ int runGui(bridge::AppContext& appCtx) {
                     if (std::filesystem::is_directory(path))
                         workspacePanel.addWorkspace(path);
                     else
-                        workspacePanel.activeEditor().openFile(path);
+                        workspacePanel.openFile(path);
                 }
                 // Restore keyboard focus after native dialog
                 glfwFocusWindow(window);

@@ -10,11 +10,37 @@ namespace fs = std::filesystem;
 
 WorkspacePanel::WorkspacePanel() = default;
 
+int WorkspacePanel::computeOwner(std::string const& path) const {
+    if (path.empty()) return -1;
+    int best = -1;
+    size_t bestLen = 0;
+    for (int i = 0; i < (int)workspaces_.size(); ++i) {
+        std::string const& root = workspaces_[i]->rootPath;
+        // Root directory must be followed by '/' to count as a prefix; we
+        // don't treat the root itself (with no trailing slash) as a match
+        // since workspace roots are directories, not files.
+        if (path.size() > root.size()
+            && path.compare(0, root.size(), root) == 0
+            && path[root.size()] == '/') {
+            if (root.size() > bestLen) {
+                best = i;
+                bestLen = root.size();
+            }
+        }
+    }
+    return best;
+}
+
+void WorkspacePanel::setActive(int ownerIdx) {
+    activeIdx_ = ownerIdx;
+    editor_.setActiveOwner(ownerIdx);
+}
+
 void WorkspacePanel::addWorkspace(const std::string& dirPath) {
     // Avoid duplicates -- if already open, just switch to it
     for (int i = 0; i < (int)workspaces_.size(); ++i) {
         if (workspaces_[i]->rootPath == dirPath) {
-            activeIdx_ = i;
+            setActive(i);
             return;
         }
     }
@@ -31,46 +57,29 @@ void WorkspacePanel::addWorkspace(const std::string& dirPath) {
     ws->root.isDirectory = true;
 
     workspaces_.push_back(std::move(ws));
-    activeIdx_ = (int)workspaces_.size() - 1;
+
+    // The new workspace may subsume files currently visible under "Open
+    // Files" or under a less-specific workspace: recompute ownership for
+    // every tab so each lands under the most-specific containing workspace.
+    editor_.reassignOwnership([this](std::string const& p) {
+        return computeOwner(p);
+    });
+
+    setActive((int)workspaces_.size() - 1);
 }
 
-bool WorkspacePanel::hasUnsavedChanges() const {
-    if (defaultEditor_.hasUnsavedChanges()) return true;
-    for (auto& ws : workspaces_)
-        if (ws->editor.hasUnsavedChanges()) return true;
-    return false;
-}
+void WorkspacePanel::openFile(const std::string& path) {
+    // If already open anywhere, switch to that tab's workspace view.
+    if (auto existing = editor_.findTabOwner(path)) {
+        setActive(*existing);
+        editor_.switchToFile(path);
+        return;
+    }
 
-std::vector<std::string> WorkspacePanel::unsavedFileNames() const {
-    std::vector<std::string> names;
-    auto add = [&](EditorPanel const& ep) {
-        auto n = ep.unsavedFileNames();
-        names.insert(names.end(), n.begin(), n.end());
-    };
-    add(defaultEditor_);
-    for (auto& ws : workspaces_)
-        add(ws->editor);
-    return names;
-}
-
-int WorkspacePanel::saveAll() {
-    int total = defaultEditor_.saveAll();
-    for (auto& ws : workspaces_)
-        total += ws->editor.saveAll();
-    return total;
-}
-
-EditorPanel* WorkspacePanel::editorWithPendingClose() {
-    if (defaultEditor_.pendingCloseIndex() >= 0) return &defaultEditor_;
-    for (auto& ws : workspaces_)
-        if (ws->editor.pendingCloseIndex() >= 0) return &ws->editor;
-    return nullptr;
-}
-
-EditorPanel& WorkspacePanel::activeEditor() {
-    if (activeIdx_ >= 0 && activeIdx_ < (int)workspaces_.size())
-        return workspaces_[activeIdx_]->editor;
-    return defaultEditor_;
+    // Otherwise route to the most-specific workspace containing the path.
+    int owner = computeOwner(path);
+    setActive(owner);
+    editor_.openFile(path, owner);
 }
 
 // ---------------------------------------------------------------------------
@@ -80,6 +89,24 @@ EditorPanel& WorkspacePanel::activeEditor() {
 void WorkspacePanel::drawSidebar(float width, float height) {
     ImGui::BeginChild("##Sidebar", ImVec2(width, height), ImGuiChildFlags_Border,
                       ImGuiWindowFlags_HorizontalScrollbar);
+
+    // "Open Files" entry for tabs not associated with any folder workspace
+    // (initial scratch tab, or files opened individually outside any root).
+    {
+        bool isActive = (activeIdx_ == -1);
+        if (isActive) {
+            ImVec4 activeColor = ImGui::GetStyleColorVec4(ImGuiCol_Header);
+            activeColor.w = 0.8f;
+            ImGui::PushStyleColor(ImGuiCol_Header, activeColor);
+        }
+        ImGui::CollapsingHeader("Open Files",
+                                ImGuiTreeNodeFlags_Leaf
+                              | ImGuiTreeNodeFlags_NoTreePushOnOpen);
+        if (isActive)
+            ImGui::PopStyleColor();
+        if (ImGui::IsItemClicked())
+            setActive(-1);
+    }
 
     for (int i = 0; i < (int)workspaces_.size(); ++i) {
         auto& ws = *workspaces_[i];
@@ -102,7 +129,7 @@ void WorkspacePanel::drawSidebar(float width, float height) {
 
         // Click header to make this workspace active
         if (ImGui::IsItemClicked())
-            activeIdx_ = i;
+            setActive(i);
 
         if (open) {
             loadChildren(ws.root);
@@ -142,10 +169,9 @@ void WorkspacePanel::drawTree(DirEntry& entry, int workspaceIdx) {
         ImGui::TreeNodeEx(entry.name.c_str(), flags);
 
         if (ImGui::IsItemClicked()) {
-            activeIdx_ = workspaceIdx;
-            auto& editor = workspaces_[workspaceIdx]->editor;
-            if (!editor.switchToFile(entry.fullPath))
-                editor.openFile(entry.fullPath);
+            // Route through the shared opener so duplicate-path detection
+            // and owner switching stay centralized.
+            openFile(entry.fullPath);
         }
     }
 }

@@ -3,6 +3,7 @@
 
 #include "output_panel.hpp"
 #include "imgui.h"
+#include "imgui_internal.h"
 
 // Callback to apply pending cursor moves and track selection state
 int OutputPanel::outputScrollCallback(ImGuiInputTextCallbackData* cbData) {
@@ -96,13 +97,25 @@ void OutputPanel::draw(float width, float height, OutputBuffer& output) {
         }
     }
 
-    // Scroll to bottom only as a one-shot: when new output arrives or after
-    // clear().  Never force-scroll persistently -- that fights keyboard and
-    // mouse-wheel navigation away from the bottom.
-    bool scrollToBottom = newOutput || autoScroll_;
-    autoScroll_ = false;
+    // Locate the text child window (created on a prior frame).  NewFrame's
+    // mouse-wheel handler has already set ScrollTarget by the time draw() runs,
+    // so we can detect a user scroll-up BEFORE calling SetNextWindowScroll
+    // (which would otherwise overwrite the user's intent).
+    ImGuiWindow* parentWin = ImGui::GetCurrentWindow();
+    ImGuiID textId = parentWin->GetID("##output_text");
+    char childName[256];
+    snprintf(childName, sizeof(childName), "%s/##output_text_%08X",
+             parentWin->Name, textId);
+    ImGuiWindow* textWindow = ImGui::FindWindowByName(childName);
+    if (textWindow && textWindow->ScrollTarget.y < FLT_MAX
+        && textWindow->ScrollTarget.y < textWindow->Scroll.y) {
+        autoScroll_ = false;
+    }
 
-    if (scrollToBottom) {
+    // Scroll to bottom only when new output arrives AND the user was at the
+    // bottom.  Never force-scroll persistently -- that fights keyboard and
+    // mouse-wheel navigation away from the bottom.
+    if (newOutput && autoScroll_) {
         int numLines = 0;
         for (char c : outputText_) if (c == '\n') ++numLines;
         float lineHeight = ImGui::GetTextLineHeight();
@@ -120,6 +133,15 @@ void OutputPanel::draw(float width, float height, OutputBuffer& output) {
                               ImVec2(width, height),
                               outputFlags, outputScrollCallback, this);
     outputActive_ = ImGui::IsItemActive();
+
+    // Re-enable auto-scroll when the user (or Cmd+Down) has returned the view
+    // to the bottom.  Measure after InputTextMultiline so we see the final
+    // post-scroll state for this frame.
+    textWindow = ImGui::FindWindowByName(childName);
+    if (textWindow && !autoScroll_ && textWindow->ScrollMax.y > 0.0f) {
+        if (textWindow->Scroll.y >= textWindow->ScrollMax.y - ImGui::GetTextLineHeight())
+            autoScroll_ = true;
+    }
 
     ImGui::EndChild();
 }
