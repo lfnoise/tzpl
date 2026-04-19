@@ -197,10 +197,14 @@ std::expected<S, std::string> SExprGraphBuilder::parseRand64(sexpr::ItemVec cons
     if (!list[0].is<int64_t>()) return std::unexpected("ID must be integer");
     int64_t id = list[0].get<int64_t>();
 
+    if (!list[2].is<int64_t>()) return std::unexpected("Rate must be integer");
+    int64_t rateIndex = list[2].get<int64_t>();
+    auto rate = SignalRate(static_cast<SignalRate::RateEnum>(rateIndex));
+
     if (!list[3].is<int64_t>()) return std::unexpected("Chans must be integer");
     int64_t chans = list[3].get<int64_t>();
 
-    S expr = addExpr(new Rand64Expr(chans));
+    S expr = addExpr(new Rand64Expr(chans, rate));
     exprMap[id] = expr;
     return expr;
 }
@@ -317,6 +321,9 @@ std::expected<BinaryOp, std::string> parseBinaryOp(sexpr::Symbol const& sym) {
         {"mod", BinaryOp::Mod},
         {"add", BinaryOp::Add}, {"sub", BinaryOp::Sub}, {"mul", BinaryOp::Mul}, {"div", BinaryOp::Div},
         {"rem", BinaryOp::Rem},
+        {"bitAnd", BinaryOp::BitAnd}, {"bitOr", BinaryOp::BitOr}, {"bitXor", BinaryOp::BitXor},
+        {"shiftLeft", BinaryOp::ShiftLeft}, {"shiftRight", BinaryOp::ShiftRight},
+        {"unsignedShiftRight", BinaryOp::UnsignedShiftRight},
     };
 
     auto it = opMap.find(sym.name);
