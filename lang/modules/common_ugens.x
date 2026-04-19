@@ -729,8 +729,8 @@ fn red(chans Int = 1, a=0.05) S {
 }
 
 fn gray(chans Int = 1) S {
-	let r = delayVar() init(1, rand64());
-	(r <- r(1) ^ (1 << (rand64() & 63))) f64 * 1.084202172485504434e-19
+	let r = delayVar() init(1, rand64(chans, Rate.init));
+	(r <- r(1) ^ (1 << (rand64(chans) & 63))) f64 * 1.084202172485504434e-19 |> f32
 }
 
 -- 1 with probability `prob`, else zero, each sample.
@@ -1058,6 +1058,8 @@ fn pause(gate S, gatedFun fn()S) S = if_(gate > 0, fn(){ gate * gatedFun() });
 
 
 "DONE IMPORTING COMMON UGENS MODULE" println
+
+
 
 
 

@@ -241,6 +241,12 @@ fn red_test() S = outlet(2 red * 0.2);
 
 red_test defSynth("red_test");
 
+
+fn gray_test() S = outlet(2 gray * 0.2);
+
+gray_test defSynth("gray_test");
+
+
 fn bubbles_lite() S = 0.4 lfsaw * 24 + 8 lfsaw * 3 + 81 |> nnhz sinosc * 0.04 |> outlet;
 
 -- bubbles_lite defSynth("bubbles_lite")
@@ -255,11 +261,7 @@ ae.listSynthDefs() println;
 fn playExamples() {
     go(coro fn() Float {
     	"start playing" println;
-    
-    	"apverbTest" playFor(10.0) yieldAll;
-    	"apverbTest" playFor(10.0) yieldAll;
-    	"apverbTest" playFor(10.0) yieldAll;
-    	"apverbTest" playFor(10.0) yieldAll;
+
     	"bubbles" playFor(5.0) yieldAll;
     	"smoothSquareTest" playFor(5.0) yieldAll;
     	"smoothSawTest" playFor(5.0) yieldAll;	
@@ -287,7 +289,8 @@ fn playExamples() {
     	"white_test" playFor(5.0) yieldAll;
     	"pink_test" playFor(5.0) yieldAll;
     	"red_test" playFor(5.0) yieldAll;
-    
+    	"gray_test" playFor(5.0) yieldAll;
+
     	ae.endRender(0.1);
     
     	"stop playing" println;
@@ -306,6 +309,9 @@ fn renderExamples() {
 -- do non-real-time rendering and real-time play back concurrently.
 --renderExamples();
 playExamples();
+
+
+
 
 
 
