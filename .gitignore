@@ -2,6 +2,8 @@ build/
 build-asan/
 DerivedData/
 tzpl_dir/
+sapf3_dir/
+imgui.ini
 .DS_Store
 *.o
 *.a
