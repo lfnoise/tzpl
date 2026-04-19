@@ -342,6 +342,20 @@ void Engine::processNRTCommands(Engine* e) {
                 }
             }
         }
+        // Handle externally-triggered sample rate change (macOS HAL listener).
+        // Done outside nrt_lock_ because stopAudio acquires it.
+        if (e->sampleRateChanged_.exchange(false, std::memory_order_relaxed)
+            && e->audioState_ == AudioState::running) {
+            fprintf(stderr,
+                "\n*** Audio device sample rate changed externally to a "
+                "value other than %.0f Hz.\n"
+                "*** The audio stream has been stopped to avoid "
+                "pitch-shifted output.\n"
+                "*** Restore the device's rate (e.g. via Audio MIDI Setup) "
+                "and restart audio.\n\n",
+                e->streamParams_.sampleRate);
+            stopAudio(e);
+        }
         std::this_thread::sleep_for(std::chrono::microseconds(25000));
     }
 }

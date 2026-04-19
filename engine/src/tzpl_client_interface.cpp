@@ -33,7 +33,123 @@
 #include <chrono>
 #include <thread>
 
+#ifdef __APPLE__
+#include <CoreAudio/CoreAudio.h>
+#include <CoreFoundation/CoreFoundation.h>
+#endif
+
 namespace engine {
+
+#ifdef __APPLE__
+
+#if defined(MAC_OS_VERSION_12_0) && (MAC_OS_X_VERSION_MIN_REQUIRED >= MAC_OS_VERSION_12_0)
+constexpr AudioObjectPropertyElement kElement = kAudioObjectPropertyElementMain;
+#else
+constexpr AudioObjectPropertyElement kElement = kAudioObjectPropertyElementMaster;
+#endif
+
+// Find the CoreAudio AudioDeviceID for the device RtAudio is using as the
+// engine's output. Matches "default" via kAudioHardwarePropertyDefaultOutputDevice
+// and named devices by enumerating and comparing kAudioObjectPropertyName.
+// Returns kAudioObjectUnknown if not found.
+static AudioDeviceID resolveOutputAudioDeviceID(const char* deviceName) {
+    bool isDefault = !deviceName || strlen(deviceName) == 0
+        || strcmp(deviceName, "default") == 0;
+
+    if (isDefault) {
+        AudioObjectPropertyAddress prop = {
+            kAudioHardwarePropertyDefaultOutputDevice,
+            kAudioObjectPropertyScopeGlobal,
+            kElement
+        };
+        AudioDeviceID devId = kAudioObjectUnknown;
+        UInt32 size = sizeof(devId);
+        if (AudioObjectGetPropertyData(kAudioObjectSystemObject, &prop, 0,
+                                       nullptr, &size, &devId) != noErr) {
+            return kAudioObjectUnknown;
+        }
+        return devId;
+    }
+
+    AudioObjectPropertyAddress listProp = {
+        kAudioHardwarePropertyDevices,
+        kAudioObjectPropertyScopeGlobal,
+        kElement
+    };
+    UInt32 dataSize = 0;
+    if (AudioObjectGetPropertyDataSize(kAudioObjectSystemObject, &listProp,
+                                       0, nullptr, &dataSize) != noErr) {
+        return kAudioObjectUnknown;
+    }
+    UInt32 nDevices = dataSize / sizeof(AudioDeviceID);
+    std::vector<AudioDeviceID> ids(nDevices);
+    if (AudioObjectGetPropertyData(kAudioObjectSystemObject, &listProp, 0,
+                                   nullptr, &dataSize, ids.data()) != noErr) {
+        return kAudioObjectUnknown;
+    }
+
+    AudioObjectPropertyAddress nameProp = {
+        kAudioObjectPropertyName,
+        kAudioObjectPropertyScopeGlobal,
+        kElement
+    };
+    for (AudioDeviceID id : ids) {
+        CFStringRef name = nullptr;
+        UInt32 nameSize = sizeof(name);
+        if (AudioObjectGetPropertyData(id, &nameProp, 0, nullptr,
+                                       &nameSize, &name) != noErr || !name) {
+            continue;
+        }
+        char buf[256];
+        bool match = CFStringGetCString(name, buf, sizeof(buf), kCFStringEncodingUTF8)
+                     && strcmp(buf, deviceName) == 0;
+        CFRelease(name);
+        if (match) return id;
+    }
+    return kAudioObjectUnknown;
+}
+
+// Called by CoreAudio on an internal HAL dispatch queue when the device's
+// nominal sample rate changes. Must do as little as possible. We just set
+// an atomic flag; processNRTCommands picks it up on the next tick.
+static OSStatus sampleRateChangeListener(AudioObjectID /*inObjectID*/,
+                                         UInt32 /*inNumAddresses*/,
+                                         const AudioObjectPropertyAddress* /*inAddresses*/,
+                                         void* inClientData) {
+    Engine* e = static_cast<Engine*>(inClientData);
+    e->sampleRateChanged_.store(true, std::memory_order_relaxed);
+    return noErr;
+}
+
+static void installSampleRateListener(Engine* e) {
+    AudioDeviceID devId = resolveOutputAudioDeviceID(e->streamParams_.deviceName);
+    if (devId == kAudioObjectUnknown) return;
+
+    AudioObjectPropertyAddress prop = {
+        kAudioDevicePropertyNominalSampleRate,
+        kAudioObjectPropertyScopeGlobal,
+        kElement
+    };
+    OSStatus result = AudioObjectAddPropertyListener(devId, &prop,
+                                                     sampleRateChangeListener, e);
+    if (result == noErr) {
+        e->monitoredOutputDeviceID_ = (u32)devId;
+    }
+}
+
+static void removeSampleRateListener(Engine* e) {
+    if (e->monitoredOutputDeviceID_ == 0) return;
+    AudioObjectPropertyAddress prop = {
+        kAudioDevicePropertyNominalSampleRate,
+        kAudioObjectPropertyScopeGlobal,
+        kElement
+    };
+    AudioObjectRemovePropertyListener((AudioDeviceID)e->monitoredOutputDeviceID_,
+                                      &prop, sampleRateChangeListener, e);
+    e->monitoredOutputDeviceID_ = 0;
+}
+
+#endif // __APPLE__
 
 //=============================================================================================
 #pragma mark CLIENT INTERFACE IMPLEMENTATION
@@ -390,6 +506,11 @@ void initAudio(Engine* e) {
             s.outbuf_ = (f32*)malloc(byteSize);
         }
     }
+
+#ifdef __APPLE__
+    installSampleRateListener(e);
+#endif
+
     e->audioState_ = AudioState::initted;
 }
 
@@ -397,6 +518,10 @@ void uninitAudio(Engine* e) {
     stopAudio(e); // in case it was running.
 
     if (e->audioState_ == AudioState::off) return;
+
+#ifdef __APPLE__
+    removeSampleRateListener(e);
+#endif
 
     for (Silo& s : e->silos_) {
         if (s.index_ > 0) {

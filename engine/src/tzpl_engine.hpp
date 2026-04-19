@@ -216,6 +216,17 @@ struct Engine
 	std::unique_ptr<RtAudio> inputRtaudio_;  // non-null when using a separate input device
 	f32* inputStagingBuf_ = nullptr;          // intermediate buffer for separate input device
 
+	// External sample-rate-change detection (macOS CoreAudio).
+	// Set by a HAL property listener when another process changes the
+	// device's nominal sample rate. processNRTCommands picks this up,
+	// stops the stream, and logs a message. The engine's internal rate
+	// is fixed at construction, so continuing would produce pitch-shifted
+	// output. monitoredOutputDeviceID_ is the AudioDeviceID we registered
+	// the listener on (stored as u32 to avoid pulling CoreAudio headers
+	// into this header). 0 means no listener installed.
+	std::atomic<bool> sampleRateChanged_{false};
+	u32 monitoredOutputDeviceID_ = 0;
+
     Engine(EngineConfig const& config, AudioStreamParameters& streamParams);
     Engine(EngineConfig const& config, AudioStreamParameters& streamParams, bool nrt);
     ~Engine();
