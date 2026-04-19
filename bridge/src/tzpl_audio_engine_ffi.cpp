@@ -62,8 +62,54 @@ static engine::Engine* getEngine(ts::VM& vm) {
     return ctx ? ctx->engine : nullptr;
 }
 
-// Convert a tzpl_SErr to an Int return value (0 = success).
-static void returnErr(ts::VM& vm, u16 dst, tzpl_SErr err) {
+// Map a tzpl_SErr to its enumerator name for diagnostic output.
+static char const* errName(tzpl_SErr err) {
+    switch (err) {
+        case tzpl_errNone:                   return "errNone";
+        case tzpl_errInternal:               return "errInternal";
+        case tzpl_errNodeIDAlreadyTaken:     return "errNodeIDAlreadyTaken";
+        case tzpl_errNodeDefNotFound:        return "errNodeDefNotFound";
+        case tzpl_errNodeNotFound:           return "errNodeNotFound";
+        case tzpl_errNoteNotFound:           return "errNoteNotFound";
+        case tzpl_errControlNotFound:        return "errControlNotFound";
+        case tzpl_errDeviceNotFound:         return "errDeviceNotFound";
+        case tzpl_errAlreadyAdded:           return "errAlreadyAdded";
+        case tzpl_errAlreadyRemoved:         return "errAlreadyRemoved";
+        case tzpl_errSiloOutOfRange:         return "errSiloOutOfRange";
+        case tzpl_errInputOutOfRange:        return "errInputOutOfRange";
+        case tzpl_errOutputOutOfRange:       return "errOutputOutOfRange";
+        case tzpl_errNoAudioDevices:         return "errNoAudioDevices";
+        case tzpl_errAudioNotInitialized:    return "errAudioNotInitialized";
+        case tzpl_errCommandsQueuedButNotSent: return "errCommandsQueuedButNotSent";
+        case tzpl_errNoActiveBundle:         return "errNoActiveBundle";
+        case tzpl_errEngineInUse:            return "errEngineInUse";
+        case tzpl_errCyclicConnection:       return "errCyclicConnection";
+        case tzpl_errTypeMismatch:           return "errTypeMismatch";
+        case tzpl_errRateMismatch:           return "errRateMismatch";
+        case tzpl_errChanMismatch:           return "errChanMismatch";
+        case tzpl_errNumPortsMismatch:       return "errNumPortsMismatch";
+        case tzpl_errNotImplemented:         return "errNotImplemented";
+        case tzpl_errTooLate:                return "errTooLate";
+    }
+    return "errUnknown";
+}
+
+// Strip the "ffi_" prefix compilers add to __func__ so the log message
+// matches the name callers see in Tzopilotl.
+static char const* stripFfiPrefix(char const* name) {
+    if (name && name[0] == 'f' && name[1] == 'f' && name[2] == 'i' && name[3] == '_') {
+        return name + 4;
+    }
+    return name;
+}
+
+// Convert a tzpl_SErr to an Int return value (0 = success). If the engine
+// returned an error, log it to stderr so the failure is not silent.
+static void returnErr(ts::VM& vm, u16 dst, tzpl_SErr err, char const* fnName) {
+    if (err != tzpl_errNone) {
+        std::fprintf(stderr, "audio_engine.%s: %s\n",
+                     stripFfiPrefix(fnName), errName(err));
+    }
     vm.reg(dst).i = static_cast<i64>(err);
 }
 
@@ -146,25 +192,25 @@ static void ffi_loadPlugin(ts::VM& vm, u16 dst, u16, u16 argBase) {
 // fn begin(silo: Int) -> Int   (returns error code, 0 = success)
 static void ffi_begin(ts::VM& vm, u16 dst, u16, u16 argBase) {
     int silo = static_cast<int>(vm.reg(argBase).i);
-    returnErr(vm, dst, engine::begin(getEngine(vm), silo));
+    returnErr(vm, dst, engine::begin(getEngine(vm), silo), __func__);
 }
 
 // fn sched() -> Int  (send bundle for immediate execution)
 static void ffi_sched_immediate(ts::VM& vm, u16 dst, u16, u16) {
-    returnErr(vm, dst, engine::go());
+    returnErr(vm, dst, engine::go(), __func__);
 }
 
 // fn sched(time: Float) -> Int
 static void ffi_sched(ts::VM& vm, u16 dst, u16, u16 argBase) {
     f64 time = vm.reg(argBase).f;
-    returnErr(vm, dst, engine::sched(time));
+    returnErr(vm, dst, engine::sched(time), __func__);
 }
 
 // fn schedPolicy(time: Float, policy: Int) -> Int
 static void ffi_schedPolicy(ts::VM& vm, u16 dst, u16, u16 argBase) {
     f64 time = vm.reg(argBase).f;
     auto policy = static_cast<engine::SchedPolicy>(vm.reg(argBase + 1).i);
-    returnErr(vm, dst, engine::sched(time, policy));
+    returnErr(vm, dst, engine::sched(time, policy), __func__);
 }
 
 // ---------------------------------------------------------------------------
@@ -175,24 +221,24 @@ static void ffi_schedPolicy(ts::VM& vm, u16 dst, u16, u16 argBase) {
 static void ffi_newNode(ts::VM& vm, u16 dst, u16, u16 argBase) {
     const char* defName = regString(vm, argBase);
     auto nodeID = static_cast<engine::i64>(vm.reg(argBase + 1).i);
-    returnErr(vm, dst, engine::newNode(defName, nodeID));
+    returnErr(vm, dst, engine::newNode(defName, nodeID), __func__);
 }
 
 // fn freeNode(nodeID: Int) -> Int
 static void ffi_freeNode(ts::VM& vm, u16 dst, u16, u16 argBase) {
     auto nodeID = static_cast<engine::i64>(vm.reg(argBase).i);
-    returnErr(vm, dst, engine::freeNode(nodeID));
+    returnErr(vm, dst, engine::freeNode(nodeID), __func__);
 }
 
 // fn freeAllNodes() -> Int
 static void ffi_freeAllNodes(ts::VM& vm, u16 dst, u16, u16) {
-    returnErr(vm, dst, engine::freeAllNodes());
+    returnErr(vm, dst, engine::freeAllNodes(), __func__);
 }
 
 // fn channelOffset(offset: Int) -> Int
 static void ffi_channelOffset(ts::VM& vm, u16 dst, u16, u16 argBase) {
     auto offset = static_cast<engine::i32>(vm.reg(argBase).i);
-    returnErr(vm, dst, engine::channelOffset(offset));
+    returnErr(vm, dst, engine::channelOffset(offset), __func__);
 }
 
 // ---------------------------------------------------------------------------
@@ -205,7 +251,7 @@ static void ffi_connect(ts::VM& vm, u16 dst, u16, u16 argBase) {
                          static_cast<int>(vm.reg(argBase + 1).i)};
     engine::PortAddr dst_port{static_cast<engine::i64>(vm.reg(argBase + 2).i),
                               static_cast<int>(vm.reg(argBase + 3).i)};
-    returnErr(vm, dst, engine::connect(src, dst_port));
+    returnErr(vm, dst, engine::connect(src, dst_port), __func__);
 }
 
 // fn connectX(srcNode: Int, srcPort: Int, dstNode: Int, dstPort: Int,
@@ -217,14 +263,14 @@ static void ffi_connectX(ts::VM& vm, u16 dst, u16, u16 argBase) {
                               static_cast<int>(vm.reg(argBase + 3).i)};
     f64 xfade = vm.reg(argBase + 4).f;
     auto curve = static_cast<engine::FadeCurve>(vm.reg(argBase + 5).i);
-    returnErr(vm, dst, engine::connect(src, dst_port, xfade, curve));
+    returnErr(vm, dst, engine::connect(src, dst_port, xfade, curve), __func__);
 }
 
 // fn disconnectInput(dstNode: Int, dstPort: Int) -> Int
 static void ffi_disconnectInput(ts::VM& vm, u16 dst, u16, u16 argBase) {
     engine::PortAddr dst_port{static_cast<engine::i64>(vm.reg(argBase).i),
                               static_cast<int>(vm.reg(argBase + 1).i)};
-    returnErr(vm, dst, engine::disconnectInput(dst_port));
+    returnErr(vm, dst, engine::disconnectInput(dst_port), __func__);
 }
 
 // fn disconnectInputX(dstNode: Int, dstPort: Int, xfade: Float, curve: Int) -> Int
@@ -233,7 +279,7 @@ static void ffi_disconnectInputX(ts::VM& vm, u16 dst, u16, u16 argBase) {
                               static_cast<int>(vm.reg(argBase + 1).i)};
     f64 xfade = vm.reg(argBase + 2).f;
     auto curve = static_cast<engine::FadeCurve>(vm.reg(argBase + 3).i);
-    returnErr(vm, dst, engine::disconnectInput(dst_port, xfade, curve));
+    returnErr(vm, dst, engine::disconnectInput(dst_port, xfade, curve), __func__);
 }
 
 // fn disconnectSource(srcNode: Int, srcPort: Int, dstNode: Int, dstPort: Int) -> Int
@@ -242,7 +288,7 @@ static void ffi_disconnectSource(ts::VM& vm, u16 dst, u16, u16 argBase) {
                          static_cast<int>(vm.reg(argBase + 1).i)};
     engine::PortAddr dst_port{static_cast<engine::i64>(vm.reg(argBase + 2).i),
                               static_cast<int>(vm.reg(argBase + 3).i)};
-    returnErr(vm, dst, engine::disconnectSource(src, dst_port));
+    returnErr(vm, dst, engine::disconnectSource(src, dst_port), __func__);
 }
 
 // fn disconnectSourceX(srcNode: Int, srcPort: Int, dstNode: Int, dstPort: Int,
@@ -254,20 +300,20 @@ static void ffi_disconnectSourceX(ts::VM& vm, u16 dst, u16, u16 argBase) {
                               static_cast<int>(vm.reg(argBase + 3).i)};
     f64 xfade = vm.reg(argBase + 4).f;
     auto curve = static_cast<engine::FadeCurve>(vm.reg(argBase + 5).i);
-    returnErr(vm, dst, engine::disconnectSource(src, dst_port, xfade, curve));
+    returnErr(vm, dst, engine::disconnectSource(src, dst_port, xfade, curve), __func__);
 }
 
 // fn disconnectOutput(srcNode: Int, srcPort: Int) -> Int
 static void ffi_disconnectOutput(ts::VM& vm, u16 dst, u16, u16 argBase) {
     engine::PortAddr src{static_cast<engine::i64>(vm.reg(argBase).i),
                          static_cast<int>(vm.reg(argBase + 1).i)};
-    returnErr(vm, dst, engine::disconnectOutput(src));
+    returnErr(vm, dst, engine::disconnectOutput(src), __func__);
 }
 
 // fn disconnectNode(nodeID: Int) -> Int
 static void ffi_disconnectNode(ts::VM& vm, u16 dst, u16, u16 argBase) {
     auto nodeID = static_cast<engine::i64>(vm.reg(argBase).i);
-    returnErr(vm, dst, engine::disconnectNode(nodeID));
+    returnErr(vm, dst, engine::disconnectNode(nodeID), __func__);
 }
 
 // fn reconnectOutput(oldSrcNode: Int, oldSrcPort: Int,
@@ -280,7 +326,7 @@ static void ffi_reconnectOutput(ts::VM& vm, u16 dst, u16, u16 argBase) {
                             static_cast<int>(vm.reg(argBase + 3).i)};
     f64 xfade = vm.reg(argBase + 4).f;
     auto curve = static_cast<engine::FadeCurve>(vm.reg(argBase + 5).i);
-    returnErr(vm, dst, engine::reconnectOutput(oldSrc, newSrc, xfade, curve));
+    returnErr(vm, dst, engine::reconnectOutput(oldSrc, newSrc, xfade, curve), __func__);
 }
 
 // fn replaceNode(oldNodeID: Int, newNodeID: Int, xfade: Float, curve: Int) -> Int
@@ -289,7 +335,7 @@ static void ffi_replaceNode(ts::VM& vm, u16 dst, u16, u16 argBase) {
     auto newID = static_cast<engine::i64>(vm.reg(argBase + 1).i);
     f64 xfade = vm.reg(argBase + 2).f;
     auto curve = static_cast<engine::FadeCurve>(vm.reg(argBase + 3).i);
-    returnErr(vm, dst, engine::replaceNode(oldID, newID, xfade, curve));
+    returnErr(vm, dst, engine::replaceNode(oldID, newID, xfade, curve), __func__);
 }
 
 // ---------------------------------------------------------------------------
@@ -303,7 +349,7 @@ static void ffi_setInput(ts::VM& vm, u16 dst, u16, u16 argBase) {
     engine::PortAddr port{static_cast<engine::i64>(vm.reg(argBase).i),
                           static_cast<int>(vm.reg(argBase + 1).i)};
     engine::f32 val = static_cast<engine::f32>(vm.reg(argBase + 2).f);
-    returnErr(vm, dst, engine::setInput(port, 1, &val));
+    returnErr(vm, dst, engine::setInput(port, 1, &val), __func__);
 }
 
 // fn setInputX(nodeID: Int, portIndex: Int, value: Float,
@@ -314,7 +360,7 @@ static void ffi_setInputX(ts::VM& vm, u16 dst, u16, u16 argBase) {
     engine::f32 val = static_cast<engine::f32>(vm.reg(argBase + 2).f);
     f64 xfade = vm.reg(argBase + 3).f;
     auto curve = static_cast<engine::FadeCurve>(vm.reg(argBase + 4).i);
-    returnErr(vm, dst, engine::setInput(port, 1, &val, xfade, curve));
+    returnErr(vm, dst, engine::setInput(port, 1, &val, xfade, curve), __func__);
 }
 
 // fn setControl(nodeID: Int, controlID: Int, value: Float) -> Int
@@ -323,7 +369,7 @@ static void ffi_setControl(ts::VM& vm, u16 dst, u16, u16 argBase) {
     auto nodeID = static_cast<engine::i64>(vm.reg(argBase).i);
     auto controlID = static_cast<engine::i64>(vm.reg(argBase + 1).i);
     engine::f32 val = static_cast<engine::f32>(vm.reg(argBase + 2).f);
-    returnErr(vm, dst, engine::setControl(nodeID, controlID, 1, &val));
+    returnErr(vm, dst, engine::setControl(nodeID, controlID, 1, &val), __func__);
 }
 
 // ---------------------------------------------------------------------------
@@ -353,20 +399,20 @@ static void ffi_noteOn(ts::VM& vm, u16 dst, u16, u16 argBase) {
         params[i] = static_cast<engine::f32>(ts::arrayGetFloat(arr, i));
     }
 
-    returnErr(vm, dst, engine::noteOn(nodeID, noteID, length, params));
+    returnErr(vm, dst, engine::noteOn(nodeID, noteID, length, params), __func__);
 }
 
 // fn noteOff(nodeID: Int, noteID: Int) -> Int
 static void ffi_noteOff(ts::VM& vm, u16 dst, u16, u16 argBase) {
     auto nodeID = static_cast<engine::i64>(vm.reg(argBase).i);
     int noteID = static_cast<int>(vm.reg(argBase + 1).i);
-    returnErr(vm, dst, engine::noteOff(nodeID, noteID));
+    returnErr(vm, dst, engine::noteOff(nodeID, noteID), __func__);
 }
 
 // fn allNotesOff(nodeID: Int) -> Int
 static void ffi_allNotesOff(ts::VM& vm, u16 dst, u16, u16 argBase) {
     auto nodeID = static_cast<engine::i64>(vm.reg(argBase).i);
-    returnErr(vm, dst, engine::allNotesOff(nodeID));
+    returnErr(vm, dst, engine::allNotesOff(nodeID), __func__);
 }
 
 // fn noteSetParams(nodeID: Int, noteID: Int, firstParam: Int,
@@ -391,7 +437,7 @@ static void ffi_noteSetParams(ts::VM& vm, u16 dst, u16, u16 argBase) {
         params[i] = static_cast<engine::f32>(ts::arrayGetFloat(arr, i));
     }
 
-    returnErr(vm, dst, engine::noteSetParamRange(nodeID, noteID, first, length, params));
+    returnErr(vm, dst, engine::noteSetParamRange(nodeID, noteID, first, length, params), __func__);
 }
 
 
@@ -487,12 +533,12 @@ static void ffi_attachVM(ts::VM& vm, u16 dst, u16, u16 argBase) {
     int siloIndex = static_cast<int>(vm.reg(argBase).i);
 
     if (siloIndex < 0 || siloIndex >= (int)ctx->siloVMs.size()) {
-        returnErr(vm, dst, tzpl_errSiloOutOfRange);
+        returnErr(vm, dst, tzpl_errSiloOutOfRange, __func__);
         return;
     }
     auto& state = ctx->siloVMs[siloIndex];
     if (state.vm) {
-        returnErr(vm, dst, tzpl_errAlreadyAdded);
+        returnErr(vm, dst, tzpl_errAlreadyAdded, __func__);
         return;
     }
 
@@ -511,7 +557,7 @@ static void ffi_attachVM(ts::VM& vm, u16 dst, u16, u16 argBase) {
     // Attach VM to silo (sets vm_ and heartbeatFn_ on the RT thread)
     sendCmdToSilo(eng, siloIndex, new AttachVMCmd(state.vm));
 
-    returnErr(vm, dst, tzpl_errNone);
+    returnErr(vm, dst, tzpl_errNone, __func__);
 }
 
 // fn detachVM(siloIndex: Int) -> Int
@@ -521,12 +567,12 @@ static void ffi_detachVM(ts::VM& vm, u16 dst, u16, u16 argBase) {
     int siloIndex = static_cast<int>(vm.reg(argBase).i);
 
     if (siloIndex < 0 || siloIndex >= (int)ctx->siloVMs.size()) {
-        returnErr(vm, dst, tzpl_errSiloOutOfRange);
+        returnErr(vm, dst, tzpl_errSiloOutOfRange, __func__);
         return;
     }
     auto& state = ctx->siloVMs[siloIndex];
     if (!state.vm) {
-        returnErr(vm, dst, tzpl_errNodeNotFound);
+        returnErr(vm, dst, tzpl_errNodeNotFound, __func__);
         return;
     }
 
@@ -538,7 +584,7 @@ static void ffi_detachVM(ts::VM& vm, u16 dst, u16, u16 argBase) {
     state.target.reset();
     state.moduleCompiler.reset();
 
-    returnErr(vm, dst, tzpl_errNone);
+    returnErr(vm, dst, tzpl_errNone, __func__);
 }
 
 // fn siloEval(siloIndex: Int, code: String) -> Int
@@ -549,12 +595,12 @@ static void ffi_siloEval(ts::VM& vm, u16 dst, u16, u16 argBase) {
     const char* code = regString(vm, argBase + 1);
 
     if (siloIndex < 0 || siloIndex >= (int)ctx->siloVMs.size()) {
-        returnErr(vm, dst, tzpl_errSiloOutOfRange);
+        returnErr(vm, dst, tzpl_errSiloOutOfRange, __func__);
         return;
     }
     auto& state = ctx->siloVMs[siloIndex];
     if (!state.vm) {
-        returnErr(vm, dst, tzpl_errNodeNotFound);
+        returnErr(vm, dst, tzpl_errNodeNotFound, __func__);
         return;
     }
 
@@ -565,7 +611,7 @@ static void ffi_siloEval(ts::VM& vm, u16 dst, u16, u16 argBase) {
 
     if (!compiled.success) {
         ts::printDiagnostics(compiled.errors, source, "<silo>", std::cerr, true);
-        returnErr(vm, dst, tzpl_errInternal);
+        returnErr(vm, dst, tzpl_errInternal, __func__);
         return;
     }
 
@@ -585,7 +631,7 @@ static void ffi_siloEval(ts::VM& vm, u16 dst, u16, u16 argBase) {
 
     sendCmdListToSilo(eng, siloIndex, installCmd);
 
-    returnErr(vm, dst, tzpl_errNone);
+    returnErr(vm, dst, tzpl_errNone, __func__);
 }
 
 // ---------------------------------------------------------------------------

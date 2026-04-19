@@ -57,6 +57,25 @@ static void returnString(ts::VM& vm, u16 dst, std::string const& str) {
     vm.reg(dst).o = result;
 }
 
+// Strip the "ffi_" prefix compilers add to __func__ so the log message
+// matches the name callers see in Tzopilotl.
+static char const* stripFfiPrefix(char const* name) {
+    if (name && name[0] == 'f' && name[1] == 'f' && name[2] == 'i' && name[3] == '_') {
+        return name + 4;
+    }
+    return name;
+}
+
+// Return an error string to the caller. If non-empty, also log it to stderr
+// so the failure is not silent even when the caller discards the return value.
+static void returnErrString(ts::VM& vm, u16 dst, std::string const& err,
+                            char const* fnName) {
+    if (!err.empty()) {
+        std::fprintf(stderr, "synthdef.%s: %s\n", stripFfiPrefix(fnName), err.c_str());
+    }
+    returnString(vm, dst, err);
+}
+
 // ---------------------------------------------------------------------------
 // Compilation cache
 // ---------------------------------------------------------------------------
@@ -144,7 +163,7 @@ static void ffi_compileSynthDef(ts::VM& vm, u16 dst, u16, u16 argBase) {
         compilationCache()[cacheKey(synthName, sexpr)] = CacheEntry{dylibPath};
     }
 
-    returnString(vm, dst, error);
+    returnErrString(vm, dst, error, __func__);
 }
 
 // fn compileSynthDefAndLoad(sexpr String) String
@@ -164,7 +183,7 @@ static void ffi_compileSynthDefAndLoad(ts::VM& vm, u16 dst, u16, u16 argBase) {
         // Compile
         std::string error = compileSynthDefPipeline(sexpr, synthName, dylibPath);
         if (!error.empty()) {
-            returnString(vm, dst, error);
+            returnErrString(vm, dst, error, __func__);
             return;
         }
         compilationCache()[key] = CacheEntry{dylibPath};
@@ -173,14 +192,15 @@ static void ffi_compileSynthDefAndLoad(ts::VM& vm, u16 dst, u16, u16 argBase) {
     // Load the .dylib
     auto optDef = synthdef::loadDef(dylibPath);
     if (!optDef.has_value()) {
-        returnString(vm, dst, std::string("failed to load plugin: ") + dylibPath);
+        returnErrString(vm, dst, std::string("failed to load plugin: ") + dylibPath,
+                        __func__);
         return;
     }
 
     // Register with the engine
     engine::Engine* eng = getEngine(vm);
     if (!eng) {
-        returnString(vm, dst, "no engine attached to VM");
+        returnErrString(vm, dst, "no engine attached to VM", __func__);
         return;
     }
 

@@ -315,26 +315,38 @@ void onRenderDone(int64_t handle, std::function<void()> callback) {
 
 void stopRender(int64_t handle) {
     auto* job = lookup(handle);
-    if (!job) return;
+    if (!job) {
+        std::cerr << "stopRender: unknown render handle " << handle << "\n";
+        return;
+    }
     job->stopRequested.store(true);
 }
 
 void stopRender(int64_t handle, double tailSeconds) {
     auto* job = lookup(handle);
-    if (!job) return;
+    if (!job) {
+        std::cerr << "stopRender: unknown render handle " << handle << "\n";
+        return;
+    }
     if (tailSeconds > 0.0) job->tailOverride.store(tailSeconds);
     job->stopRequested.store(true);
 }
 
 void requestEndCurrentRender() {
     auto const* ctx = currentRenderContext();
-    if (!ctx) return;
+    if (!ctx) {
+        std::cerr << "endRender: no active render context on this thread\n";
+        return;
+    }
     stopRender(ctx->handle);
 }
 
 void requestEndCurrentRender(double tailSeconds) {
     auto const* ctx = currentRenderContext();
-    if (!ctx) return;
+    if (!ctx) {
+        std::cerr << "endRender: no active render context on this thread\n";
+        return;
+    }
     stopRender(ctx->handle, tailSeconds);
 }
 
