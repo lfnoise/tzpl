@@ -1,6 +1,6 @@
 # TZPL — Audio Coding Platform
 
-A cross-platform audio coding platform for composing, experimenting with, and performing music, combining a statically typed programming language, an audio signal graph compiler, and a real-time audio engine.
+An audio coding platform for composing, experimenting with, and performing music, combining a statically typed programming language, an audio signal graph compiler, and a real-time audio engine. Currently macOS-only; cross-platform support is planned.
 
 ## Sub-Projects
 
@@ -13,7 +13,8 @@ A statically typed, real-time safe interpreted language designed for audio and s
 - `@` operator for explicit depth control, Cartesian products, and data construction
 - Immutable by default (`let`), mutable locals with `var`, mutable slots with `Ref`
 - Direct-threaded VM using `[[clang::musttail]]` tail-call dispatch
-- TLSF O(1) real-time allocator and incremental bounded-pause GC
+- TLSF O(1) real-time allocator
+- Automatic reference counting with a deferred, amortized deletion queue that spreads cascading drops across timed heartbeats to avoid CPU spikes
 - Rich type system: Bool, Int, Float, Symbol, String, Fraction, Complex, Array, List, Range, Tuple, Struct, Enum, Ref, Function, Lambda, Coroutine
 - Template monomorphization, function overloading, pattern matching
 - File-based module system with selective imports
@@ -39,7 +40,7 @@ A real-time audio engine that loads native synth plugins and supports dynamic pa
 - Crossfading system (7 curves) for glitch-free connection changes
 - Lock-free SPSC FIFOs for RT-safe inter-thread communication
 - Multi-silo parallel worker threads with binary-tree mixdown
-- Sample-accurate scheduling queue (hash wheel, 1021 bins)
+- Sample-accurate scheduling queue
 - Command bundling API and S-expression command parser
 - Polyphonic voice management (`Voicer` template)
 - Safety limiter on master output (lookahead, NaN zapping)
@@ -49,13 +50,17 @@ A real-time audio engine that loads native synth plugins and supports dynamic pa
 Common headers used by multiple sub-projects:
 
 - `tzpl_plugin_abi.h` — Pure C plugin ABI (the interface between engine and synthdef-compiler)
-- `tzpl_simd.hpp` — Cross-platform SIMD abstraction
+- `tzpl_simd.hpp` — SIMD abstraction
 - `tzpl_random.hpp` — xoroshiro128++ PRNG (scalar and SIMD)
 - `tzpl_matrix_transform.hpp` — Compile-time matrix operations
 
 ### FFI Bridge (`bridge/`)
 
 Connects Tzopilotl to the engine and synthdef-compiler via the language's foreign function interface. Includes Tzopilotl module files (e.g., `audio_engine.x`) that expose native functions to scripts.
+
+### Application (`app/`)
+
+A Dear ImGui desktop application integrating all the sub-projects: multi-tab code editor with syntax highlighting, output panel, and REPL.
 
 ## Directory Structure
 
@@ -64,23 +69,26 @@ A-new-project/
 ├── CMakeLists.txt              Top-level build configuration
 ├── build.sh                    Quick build script
 ├── shared/                     Shared headers (plugin ABI, SIMD, RNG)
-├── lang/              Tzopilotl interpreter
+├── lang/                       Tzopilotl interpreter
 │   ├── src/                    Compiler and VM source
-│   ├── tests/                  Test suite (226 tests)
+│   ├── tests/                  Test suite
 │   ├── modules/                Standard library modules
 │   ├── docs/                   Language documentation (HTML)
 │   └── editors/                Editor support packages
 ├── synthdef-compiler/          Signal graph → plugin compiler
 │   └── src/                    Compiler source
-├── engine/               Real-time audio engine
+├── engine/                     Real-time audio engine
 │   └── src/                    Engine source
 ├── bridge/                     FFI bridges between sub-projects
 │   ├── src/                    Bridge implementations
 │   ├── include/                Bridge headers
 │   └── modules/                Tzopilotl bridge modules
+├── app/                        Dear ImGui desktop application
 ├── integration-tests/          Cross-project integration tests
+├── benchmarks/                 Performance benchmarks
 ├── third_party/
-│   └── rtaudio/                Cross-platform audio I/O library
+│   ├── oscpack/                OSC message encoding/decoding
+│   └── rtaudio/                Audio I/O library
 └── IMPLEMENTATION_PLAN.md      Detailed integration roadmap
 ```
 
@@ -139,6 +147,7 @@ cmake --build build
 | `synthdef_compiler_lib` | Synthdef compiler as a static library |
 | `tzpl_audio_engine_bridge` | FFI bridge: Tzopilotl ↔ audio engine |
 | `tzpl_synthdef_compiler_bridge` | FFI bridge: Tzopilotl ↔ synthdef compiler |
+| `tzpl_app` | Dear ImGui desktop application (requires `-DTZPL_BUILD_APP=ON`) |
 | `test_audio_engine_ffi` | Audio engine FFI test executable |
 | `test_synthdef_compiler_ffi` | Synthdef compiler FFI test executable |
 
@@ -165,7 +174,7 @@ cmake --build build --target tzpl
 
 ### Tzopilotl Tests
 
-The language has a comprehensive test suite with 226 tests covering arithmetic, auto-mapping, builtins, control flow, coroutines, data structures, destructuring, errors, expressions, FFI, functions, modules, operators, type system, and more.
+The language has a comprehensive test suite covering arithmetic, auto-mapping, builtins, control flow, coroutines, data structures, destructuring, errors, expressions, FFI, functions, modules, operators, type system, and more.
 
 ```sh
 cd lang/tests && bash run_tests.sh
