@@ -910,12 +910,13 @@ fn blip(fm AsSignal, pm AsSignal, numHarmonics AsSignal) S {
 	let nbScale = 0.5 / nb;
 	let na2 = 2 * na + 1;
 	let nb2 = na2 + 2;
-	let d = divz(1, pp sin2pi, 1);
+	let d = pp sin2pi;
 	
-	let a = naScale * (sin2pi(na2 * pp) * d - 1);
-	let b = nbScale * (sin2pi(nb2 * pp) * d - 1);
+	let a = select2(d == 0, 1, naScale * (sin2pi(na2 * pp) / d - 1));
+	let b = select2(d == 0, 1, nbScale * (sin2pi(nb2 * pp) / d - 1));
     a + nfrac * (b - a)
 }
+
 
 
 -- variable sharpness sawtooth oscillator
@@ -1055,32 +1056,6 @@ fn pull(gate S, initVal AsConstantSignal, gatedFun fn()S) S {
 
 
 fn pause(gate S, gatedFun fn()S) S = if_(gate > 0, fn(){ gate * gatedFun() });
-
-
-"DONE IMPORTING COMMON UGENS MODULE" println
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
