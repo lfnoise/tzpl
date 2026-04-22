@@ -256,6 +256,8 @@ fn bubbles_lite() S = 0.4 lfsaw * 24 + 8 lfsaw * 3 + 81 |> nnhz sinosc * 0.04 |>
 -- Play a demo
 
 import audio_engine as ae;
+import clock.*;
+
 ae.listSynthDefs() println;
 
 fn playExamples() {
@@ -290,9 +292,9 @@ fn playExamples() {
     	"pink_test" playFor(5.0) yieldAll;
     	"red_test" playFor(5.0) yieldAll;
     	"gray_test" playFor(5.0) yieldAll;
-
+		
     	ae.endRender(0.1);
-    
+    	
     	"stop playing" println;
     }());
 }
@@ -309,18 +311,6 @@ fn renderExamples() {
 -- do non-real-time rendering and real-time play back concurrently.
 --renderExamples();
 playExamples();
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
