@@ -1,0 +1,5 @@
+Type error [tests/errors/private_import_hidden.x:7:3]
+  |
+7 | 5 square println;
+  |   ^----^
+  Undeclared function 'square'

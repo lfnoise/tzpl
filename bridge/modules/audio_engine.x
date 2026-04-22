@@ -1,6 +1,11 @@
 -- audio_engine.x
--- Enum definitions mirroring the C++ audio engine enums.
--- These must be kept in sync with tzpl_client_interface.hpp and tzpl_plugin_abi.h.
+-- Script wrapper for the audio engine FFI.
+-- Re-exports the `audio_engine_ffi` module (registered by the bridge) so
+-- users can write `import audio_engine.*;` and get both the FFI functions
+-- and the enum definitions below.
+-- Enums must be kept in sync with tzpl_client_interface.hpp and tzpl_plugin_abi.h.
+
+export audio_engine_ffi.*;
 
 enum Enable { kOff, kOn }
 

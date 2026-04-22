@@ -46,8 +46,13 @@ void TypeChecker::checkImportDecl(ImportDeclNode* decl) {
     switch (decl->importKind) {
         case ImportKind::Whole: {
             // import math or import std.math as m
+            // `export math;` also re-exports the alias so importers of this
+            // module see `math` as a qualified module reference.
             std::string alias = decl->alias.empty() ? decl->modulePath.back() : decl->alias;
             importedModules_[alias] = mod;
+            if (decl->isReExport) {
+                reExportedModuleAliases_.emplace_back(alias, mod);
+            }
             break;
         }
         case ImportKind::Wildcard: {
@@ -127,6 +132,7 @@ void TypeChecker::checkImportDecl(ImportDeclNode* decl) {
                             // re-exporter so the cleanup above can drop this entry
                             // when that re-exporter is recompiled.
                             fi.sourceModulePath = mod->canonicalPath;
+                            fi.reExported = decl->isReExport;
                             overloads.push_back(fi);
                         }
                         break;
@@ -137,29 +143,48 @@ void TypeChecker::checkImportDecl(ImportDeclNode* decl) {
                         vi.isMutable = false;
                         vi.isGlobal = true;
                         vi.globalIndex = entry.globalIndex;
+                        vi.sourceModulePath = mod->canonicalPath;
+                        vi.reExported = decl->isReExport;
                         globalVars_[name] = vi;
                         break;
                     }
                     case ExportEntry::StructT:
                         structTypes_[name] = entry.structType;
+                        importedTypeReExport_[name] = decl->isReExport;
                         break;
                     case ExportEntry::EnumT:
                         enumTypes_[name] = entry.enumType;
+                        importedTypeReExport_[name] = decl->isReExport;
                         break;
                     case ExportEntry::TemplateStructT:
                         templateStructs_[name] = entry.templateStructDecl;
+                        importedTypeReExport_[name] = decl->isReExport;
                         break;
                     case ExportEntry::TemplateEnumT:
                         templateEnums_[name] = entry.templateEnumDecl;
+                        importedTypeReExport_[name] = decl->isReExport;
                         break;
                     case ExportEntry::TypeAlias:
                         typeAliases_[name] = entry.aliasType;
+                        importedTypeReExport_[name] = decl->isReExport;
                         break;
                     case ExportEntry::TemplateTypeAlias:
                         templateTypeAliases_[name] = entry.templateTypeAliasDecl;
+                        importedTypeReExport_[name] = decl->isReExport;
                         break;
                     case ExportEntry::ConstraintT:
                         constraints_[name] = entry.constraintInfo;
+                        importedTypeReExport_[name] = decl->isReExport;
+                        break;
+                    case ExportEntry::ModuleAlias:
+                        // A re-exported whole-module alias. Register it so
+                        // qualified access (math.sin) resolves, and propagate
+                        // the re-export flag so this module can itself
+                        // re-export the alias if it was pulled in via `export`.
+                        importedModules_[name] = entry.moduleRef;
+                        if (decl->isReExport) {
+                            reExportedModuleAliases_.emplace_back(name, entry.moduleRef);
+                        }
                         break;
                 }
             }
@@ -195,6 +220,7 @@ void TypeChecker::checkImportDecl(ImportDeclNode* decl) {
                             // sourceModulePath = IMMEDIATE re-exporter (always update).
                             if (!fi.sourceModule) fi.sourceModule = mod;
                             fi.sourceModulePath = mod->canonicalPath;
+                            fi.reExported = decl->isReExport;
                             overloads.push_back(fi);
                         }
                         break;
@@ -205,29 +231,45 @@ void TypeChecker::checkImportDecl(ImportDeclNode* decl) {
                         vi.isMutable = false;
                         vi.isGlobal = true;
                         vi.globalIndex = entry.globalIndex;
+                        vi.sourceModulePath = mod->canonicalPath;
+                        vi.reExported = decl->isReExport;
                         globalVars_[localName] = vi;
                         break;
                     }
                     case ExportEntry::StructT:
                         structTypes_[localName] = entry.structType;
+                        importedTypeReExport_[localName] = decl->isReExport;
                         break;
                     case ExportEntry::EnumT:
                         enumTypes_[localName] = entry.enumType;
+                        importedTypeReExport_[localName] = decl->isReExport;
                         break;
                     case ExportEntry::TemplateStructT:
                         templateStructs_[localName] = entry.templateStructDecl;
+                        importedTypeReExport_[localName] = decl->isReExport;
                         break;
                     case ExportEntry::TemplateEnumT:
                         templateEnums_[localName] = entry.templateEnumDecl;
+                        importedTypeReExport_[localName] = decl->isReExport;
                         break;
                     case ExportEntry::TypeAlias:
                         typeAliases_[localName] = entry.aliasType;
+                        importedTypeReExport_[localName] = decl->isReExport;
                         break;
                     case ExportEntry::TemplateTypeAlias:
                         templateTypeAliases_[localName] = entry.templateTypeAliasDecl;
+                        importedTypeReExport_[localName] = decl->isReExport;
                         break;
                     case ExportEntry::ConstraintT:
                         constraints_[localName] = entry.constraintInfo;
+                        importedTypeReExport_[localName] = decl->isReExport;
+                        break;
+                    case ExportEntry::ModuleAlias:
+                        // See Wildcard case above for rationale.
+                        importedModules_[localName] = entry.moduleRef;
+                        if (decl->isReExport) {
+                            reExportedModuleAliases_.emplace_back(localName, entry.moduleRef);
+                        }
                         break;
                 }
             }

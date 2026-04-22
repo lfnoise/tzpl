@@ -423,7 +423,7 @@ void registerOscFFI(ts::Compiler& compiler) {
 
     auto reg = [&](const char* name, ts::Type* retType,
                    std::vector<ts::Type*> params, R fn) {
-        compiler.registerForeignModuleFunction("osc", name, retType,
+        compiler.registerForeignModuleFunction("osc_ffi", name, retType,
                                                std::move(params), fn,
                                                /*pure=*/false, /*rtSafe=*/false);
     };

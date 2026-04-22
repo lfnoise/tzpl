@@ -302,7 +302,7 @@ void registerNatsFFI(ts::Compiler& compiler) {
 
     auto reg = [&](const char* name, ts::Type* retType,
                    std::vector<ts::Type*> params, R fn) {
-        compiler.registerForeignModuleFunction("nats", name, retType,
+        compiler.registerForeignModuleFunction("nats_ffi", name, retType,
                                                std::move(params), fn,
                                                /*pure=*/false, /*rtSafe=*/false);
     };

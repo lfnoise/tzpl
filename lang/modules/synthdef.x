@@ -1,3 +1,10 @@
+-- synthdef.x
+-- Script wrapper for the synthdef compiler FFI. Re-exports
+-- `synthdef_ffi.*` (currently `compileSynthDef` and `compileSynthDefAndLoad`)
+-- so users can write `import synthdef.*;` and get both the FFI functions
+-- and the Tzopilotl-side graph construction API defined below.
+
+export synthdef_ffi.*;
 
 ---------------------------------------------------------------------------
 --- Rate

@@ -1,7 +1,6 @@
 -- nats.x
--- NATS messaging module for Tzopilotl.
--- Foreign functions are registered by the bridge; this module provides
--- any enum/constant definitions needed by the NATS subsystem.
---
--- Currently no enums are needed. The foreign functions registered under
--- the "nats" module namespace are accessible via: import nats.*;
+-- Script wrapper for the NATS messaging FFI.
+-- Re-exports `nats_ffi.*` so users can write `import nats.*;` and get the
+-- NATS functions in scope.
+
+export nats_ffi.*;

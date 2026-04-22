@@ -52,6 +52,11 @@ struct VarInfo {
     u32  globalIndex;    // index if global
     LambdaExprNode* deferredLambda = nullptr;  // Set when var holds an untyped lambda awaiting inference
     ASTNode* deferredDecl = nullptr;           // The declaration node to update after deferred inference
+    // Module provenance for import re-export control.
+    // sourceModulePath non-empty = imported from another module.
+    // reExported = true if brought in via `export import`; only such imports are re-exported.
+    std::string sourceModulePath;
+    bool reExported = false;
 };
 
 // Callback for built-in template functions: resolves concrete types from argument types.
@@ -103,6 +108,10 @@ struct FuncInfo {
     // Used by checkImportDecl to remove stale overload entries from a previous
     // compilation of the same module before appending the new ones.
     std::string sourceModulePath;
+    // True if this overload was brought in via `export import` and should be
+    // re-exported from the importing module. Meaningful only when
+    // sourceModulePath is non-empty (i.e. an imported overload).
+    bool reExported = false;
 };
 
 class TypeChecker {
@@ -118,11 +127,6 @@ public:
     // Set the source file path (for module resolution and error reporting)
     void setSourceFilePath(const std::string& path) { sourceFilePath_ = path; }
     void setSourceText(const std::string& src) { sourceText_ = src; }
-
-    // Set foreign functions to inject during registerBuiltins() (for foreign module support)
-    void setForeignModuleFunctions(const std::vector<Compiler::ForeignFuncEntry>* entries) {
-        foreignModuleFunctions_ = entries;
-    }
 
     // Error access
     void clearErrors() { errors_.clear(); }
@@ -191,6 +195,16 @@ public:
     // Constraint registry access (for module export)
     const std::unordered_map<std::string, ConstraintInfo>& constraints() const { return constraints_; }
 
+    // Re-export status for imported non-function types (for module export)
+    const std::unordered_map<std::string, bool>& importedTypeReExport() const { return importedTypeReExport_; }
+
+    // Whole-module imports that were marked for re-export via `export math;`.
+    // Each pair is (local alias, source module). Consumed by module_compiler
+    // when building the export table.
+    const std::vector<std::pair<std::string, ModuleInfo*>>& reExportedModuleAliases() const {
+        return reExportedModuleAliases_;
+    }
+
     // Module system access
     const std::unordered_map<std::string, ModuleInfo*>& importedModules() const { return importedModules_; }
     const std::vector<ModuleInfo*>& allImportedModules() const { return allImportedModules_; }
@@ -219,7 +233,6 @@ public:
 private:
     Compiler& compiler_;
     ModuleCompiler* moduleCompiler_ = nullptr;
-    const std::vector<Compiler::ForeignFuncEntry>* foreignModuleFunctions_ = nullptr;
     std::string sourceFilePath_;
     std::string sourceText_;
     bool builtinsRegistered_ = false;
@@ -326,6 +339,21 @@ private:
 
     // Constraint registry
     std::unordered_map<std::string, ConstraintInfo> constraints_;
+
+    // Module provenance for non-function, non-variable types (structs, enums,
+    // template structs/enums, type aliases, template type aliases, constraints).
+    // Maps name -> reExported flag for symbols that entered scope via `import`.
+    // - name present, value false: imported by plain `import`; must NOT be re-exported
+    // - name present, value true: imported by `export import`; MUST be re-exported
+    // - name absent: locally defined (or not declared) — export per the usual rules
+    // Entries are erased when a local declaration registers the same name, so
+    // local decls always win over imports for the purpose of building exports.
+    std::unordered_map<std::string, bool> importedTypeReExport_;
+
+    // Whole-module imports written as `export math;` — the alias is to be
+    // re-exported so that importers of this module can also use `math.foo`.
+    // Populated by checkImportDecl; consumed by module_compiler.cpp.
+    std::vector<std::pair<std::string, ModuleInfo*>> reExportedModuleAliases_;
 
     // Recursion guard for constraint checking
     std::set<std::pair<Type*, std::string>> constraintCheckStack_;

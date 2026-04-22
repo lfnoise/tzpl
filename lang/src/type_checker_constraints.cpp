@@ -180,6 +180,7 @@ void TypeChecker::checkConstraintDecl(ConstraintDeclNode* decl) {
     info.name = decl->name;
     info.typeParams = decl->typeParams;
     info.declNode = decl;
+    importedTypeReExport_.erase(decl->name);
     constraints_[decl->name] = std::move(info);
 
     ConstraintInfo& infoRef = constraints_[decl->name];

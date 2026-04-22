@@ -170,6 +170,18 @@ ModuleInfo* ModuleCompiler::compileModule(
         return nullptr;
     }
 
+    // A foreign (FFI) module and a script (.x) module must not share a name.
+    // The supported pattern is to register the FFI under `name_ffi` and have a
+    // script wrapper `name.x` re-export it with `export name_ffi.*;`.
+    if (!resolvedPath.empty() && foreignFuncs) {
+        errors.push_back(CompileError(CompileError::TypeError, loc,
+            "Module name collision: both a script module ('" + resolvedPath +
+            "') and a foreign (FFI) module are registered as '" + modName +
+            "'. Rename the FFI registration (e.g. '" + modName +
+            "_ffi') and have the script module re-export it."));
+        return nullptr;
+    }
+
     // Use a synthetic cache key for pure foreign modules (no .x file)
     std::string cacheKey = resolvedPath.empty()
         ? "<foreign:" + modName + ">"
@@ -290,12 +302,6 @@ ModuleInfo* ModuleCompiler::compileModule(
     typeChecker.setSourceFilePath(displayPath);
     typeChecker.setSourceText(source);
 
-    // Pass foreign module functions to the TypeChecker so they're materialized
-    // during registerBuiltins(), after standard builtins are registered
-    if (foreignFuncs) {
-        typeChecker.setForeignModuleFunctions(foreignFuncs);
-    }
-
     typeChecker.check(program);
 
     // Record dependencies even on failure so that cascade invalidation can
@@ -341,22 +347,33 @@ ModuleInfo* ModuleCompiler::compileModule(
     compiler_.global(mod->initBlockGlobalIndex).p = initBlock;
     mod->initFlagGlobalIndex = compiler_.addGlobal(false);   // flag is an integer
 
+    // Helper: decide whether an imported non-function, non-variable name
+    // should be re-exported from this module. For names not brought in via
+    // `import`, the map lookup misses and we return true (locally defined).
+    // For imported names, the stored flag tells us whether the user wrote
+    // `export import` (true) or plain `import` (false).
+    const auto& importedTypeReExport = typeChecker.importedTypeReExport();
+    auto shouldExportImportedType = [&](const std::string& name) -> bool {
+        auto it = importedTypeReExport.find(name);
+        if (it == importedTypeReExport.end()) return true;  // locally defined
+        return it->second;                                    // re-exported iff `export import`
+    };
+
     // Build export table
     // Export functions (skip private and underscore-prefixed)
+    // Imported overloads are only included if they were brought in via
+    // `export import`, as tracked per-overload on FuncInfo::reExported.
     for (const auto& [name, overloads] : typeChecker.functions()) {
         if (name.empty() || name[0] == '_') continue;
-        bool allPrivate = true;
         std::deque<FuncInfo> exportedOverloads;
         for (const auto& fi : overloads) {
             if (fi.isBuiltin && !fi.isForeign) continue;
-            bool isPriv = false;
-            if (fi.declNode && fi.declNode->isPrivate) isPriv = true;
-            if (!isPriv) {
-                exportedOverloads.push_back(fi);
-                allPrivate = false;
-            }
+            // Skip imported overloads that were NOT brought in via `export import`.
+            if (!fi.sourceModulePath.empty() && !fi.reExported) continue;
+            if (fi.declNode && fi.declNode->isPrivate) continue;
+            exportedOverloads.push_back(fi);
         }
-        if (!allPrivate && !exportedOverloads.empty()) {
+        if (!exportedOverloads.empty()) {
             ExportEntry entry;
             entry.kind = ExportEntry::Func;
             entry.name = name;
@@ -367,9 +384,10 @@ ModuleInfo* ModuleCompiler::compileModule(
         }
     }
 
-    // Export global variables
+    // Export global variables (imported vars require `export import` to re-export)
     for (const auto& [name, varInfo] : typeChecker.globalVars()) {
         if (name.empty() || name[0] == '_') continue;
+        if (!varInfo.sourceModulePath.empty() && !varInfo.reExported) continue;
         ExportEntry entry;
         entry.kind = ExportEntry::Var;
         entry.name = name;
@@ -381,6 +399,7 @@ ModuleInfo* ModuleCompiler::compileModule(
     // Export struct types
     for (const auto& [name, stype] : typeChecker.structTypes()) {
         if (name.empty() || name[0] == '_') continue;
+        if (!shouldExportImportedType(name)) continue;
         ExportEntry entry;
         entry.kind = ExportEntry::StructT;
         entry.name = name;
@@ -391,6 +410,7 @@ ModuleInfo* ModuleCompiler::compileModule(
     // Export enum types
     for (const auto& [name, etype] : typeChecker.enumTypes()) {
         if (name.empty() || name[0] == '_') continue;
+        if (!shouldExportImportedType(name)) continue;
         ExportEntry entry;
         entry.kind = ExportEntry::EnumT;
         entry.name = name;
@@ -402,6 +422,7 @@ ModuleInfo* ModuleCompiler::compileModule(
     for (const auto& [name, sdecl] : typeChecker.templateStructs()) {
         if (name.empty() || name[0] == '_') continue;
         if (sdecl->isPrivate) continue;
+        if (!shouldExportImportedType(name)) continue;
         ExportEntry entry;
         entry.kind = ExportEntry::TemplateStructT;
         entry.name = name;
@@ -413,6 +434,7 @@ ModuleInfo* ModuleCompiler::compileModule(
     for (const auto& [name, udecl] : typeChecker.templateEnums()) {
         if (name.empty() || name[0] == '_') continue;
         if (udecl->isPrivate) continue;
+        if (!shouldExportImportedType(name)) continue;
         ExportEntry entry;
         entry.kind = ExportEntry::TemplateEnumT;
         entry.name = name;
@@ -423,6 +445,7 @@ ModuleInfo* ModuleCompiler::compileModule(
     // Export concrete type aliases
     for (const auto& [name, type] : typeChecker.typeAliases()) {
         if (name.empty() || name[0] == '_') continue;
+        if (!shouldExportImportedType(name)) continue;
         // Check isPrivate by scanning program items
         bool isPriv = false;
         for (auto& item : program.items) {
@@ -443,6 +466,7 @@ ModuleInfo* ModuleCompiler::compileModule(
     for (const auto& [name, decl] : typeChecker.templateTypeAliases()) {
         if (name.empty() || name[0] == '_') continue;
         if (decl->isPrivate) continue;
+        if (!shouldExportImportedType(name)) continue;
         ExportEntry entry;
         entry.kind = ExportEntry::TemplateTypeAlias;
         entry.name = name;
@@ -453,10 +477,25 @@ ModuleInfo* ModuleCompiler::compileModule(
     // Export constraints
     for (const auto& [name, cinfo] : typeChecker.constraints()) {
         if (name.empty() || name[0] == '_') continue;
+        if (!shouldExportImportedType(name)) continue;
         ExportEntry entry;
         entry.kind = ExportEntry::ConstraintT;
         entry.name = name;
         entry.constraintInfo = cinfo;
+        mod->exports[name] = std::move(entry);
+    }
+
+    // Export whole-module aliases written as `export math;`. Importers of this
+    // module see `math` as a qualified module reference. An alias that
+    // collides with a locally-exported name is skipped: the local declaration
+    // wins, consistent with how `export import math.*` behaves when names clash.
+    for (const auto& [name, aliasedMod] : typeChecker.reExportedModuleAliases()) {
+        if (name.empty() || name[0] == '_') continue;
+        if (mod->exports.find(name) != mod->exports.end()) continue;
+        ExportEntry entry;
+        entry.kind = ExportEntry::ModuleAlias;
+        entry.name = name;
+        entry.moduleRef = aliasedMod;
         mod->exports[name] = std::move(entry);
     }
 

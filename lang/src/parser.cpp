@@ -217,6 +217,7 @@ ASTPtr Parser::parseDeclaration() {
 
     switch (current_.kind) {
         case TokenKind::Import:
+        case TokenKind::Export:
             return parseImportDecl();
         case TokenKind::Coro: {
             advance(); // consume 'coro'
@@ -251,11 +252,17 @@ ASTPtr Parser::parseDeclaration() {
 
 ASTPtr Parser::parseImportDecl() {
     SourceRange start = currentLoc();
-    advance(); // consume 'import'
+    // `import ...` brings symbols into the current module's scope without
+    // re-exporting them. `export ...` does the same and also re-exports them.
+    // The rest of the grammar is identical.
+    bool isReExport = (current_.kind == TokenKind::Export);
+    const char* kw = isReExport ? "export" : "import";
+    advance(); // consume 'import' or 'export'
 
     // Parse dotted path: import std.math.foo
     std::vector<std::string> modulePath;
-    Token first = expect(TokenKind::Identifier, "Expected module name after 'import'");
+    Token first = expect(TokenKind::Identifier,
+        std::string("Expected module name after '") + kw + "'");
     modulePath.push_back(first.text);
 
     while (check(TokenKind::Dot)) {
@@ -265,8 +272,10 @@ ASTPtr Parser::parseImportDecl() {
         if (check(TokenKind::Star)) {
             advance(); // consume '*'
             expectTerminator();
-            return std::make_unique<ImportDeclNode>(start, std::move(modulePath),
+            auto node = std::make_unique<ImportDeclNode>(start, std::move(modulePath),
                 ImportKind::Wildcard, "", std::vector<ImportName>{});
+            node->isReExport = isReExport;
+            return node;
         }
 
         // Check for named imports: import std.math.{sin, cos}
@@ -286,8 +295,10 @@ ASTPtr Parser::parseImportDecl() {
             } while (match(TokenKind::Comma));
             expectClosing(TokenKind::RBrace, "{", openLoc);
             expectTerminator();
-            return std::make_unique<ImportDeclNode>(start, std::move(modulePath),
+            auto node = std::make_unique<ImportDeclNode>(start, std::move(modulePath),
                 ImportKind::Named, "", std::move(names));
+            node->isReExport = isReExport;
+            return node;
         }
 
         // Otherwise another path component
@@ -303,8 +314,10 @@ ASTPtr Parser::parseImportDecl() {
     }
 
     expectTerminator();
-    return std::make_unique<ImportDeclNode>(start, std::move(modulePath),
+    auto node = std::make_unique<ImportDeclNode>(start, std::move(modulePath),
         ImportKind::Whole, std::move(alias), std::vector<ImportName>{});
+    node->isReExport = isReExport;
+    return node;
 }
 
 ASTPtr Parser::parseLetDecl() {

@@ -219,10 +219,12 @@ void registerSynthdefCompilerFFI(ts::Compiler& compiler) {
 
     using R = void (*)(ts::VM&, u16, u16, u16);
 
-    // All functions go into the "synthdef" module namespace.
+    // All functions go into the "synthdef_ffi" module namespace.
+    // The script wrapper `lang/modules/synthdef.x` re-exports these as
+    // `synthdef.*` so users can write `import synthdef.*;`.
     auto reg = [&](const char* name, ts::Type* retType,
                    std::vector<ts::Type*> params, R fn) {
-        compiler.registerForeignModuleFunction("synthdef", name, retType,
+        compiler.registerForeignModuleFunction("synthdef_ffi", name, retType,
                                                std::move(params), fn,
                                                /*pure=*/false, /*rtSafe=*/false);
     };

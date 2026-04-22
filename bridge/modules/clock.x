@@ -1,5 +1,8 @@
 -- clock.x
--- Extends the clock FFI module with coroutine scheduling.
+-- Script wrapper for the clock FFI. Re-exports `clock_ffi.*` and adds a
+-- coroutine scheduling helper on top.
+
+export clock_ffi.*;
 
 -- Run a coroutine on the tempo scheduler.
 -- The coroutine yields Float values (beat deltas).

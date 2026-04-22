@@ -810,6 +810,7 @@ struct ImportDeclNode : Decl {
     ImportKind importKind;
     std::string alias;                     // for "import X as Y" (Whole only)
     std::vector<ImportName> names;         // for Named imports
+    bool isReExport = false;               // true for "export import ..."
 
     ImportDeclNode(SourceRange l, std::vector<std::string> path,
                    ImportKind kind, std::string a, std::vector<ImportName> n)

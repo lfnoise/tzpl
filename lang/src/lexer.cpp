@@ -183,6 +183,7 @@ TokenKind Lexer::keywordKind(const std::string& text) const {
     if (text == "struct") return TokenKind::Struct;
     if (text == "enum") return TokenKind::Enum;
     if (text == "import") return TokenKind::Import;
+    if (text == "export") return TokenKind::Export;
     if (text == "as") return TokenKind::As;
     if (text == "where") return TokenKind::Where;
     if (text == "private") return TokenKind::Private;
@@ -700,6 +701,7 @@ const char* tokenKindString(TokenKind kind) {
         case TokenKind::Struct:          return "'struct'";
         case TokenKind::Enum:            return "'enum'";
         case TokenKind::Import:          return "'import'";
+        case TokenKind::Export:          return "'export'";
         case TokenKind::As:              return "'as'";
         case TokenKind::Where:           return "'where'";
         case TokenKind::Private:         return "'private'";

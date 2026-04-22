@@ -652,11 +652,13 @@ void registerAudioEngineFFI(ts::Compiler& compiler) {
     using R = void (*)(ts::VM&, u16, u16, u16);
 
     // Helper to reduce registration boilerplate.
-    // All functions go into the "audio_engine" module namespace.
+    // All functions go into the "audio_engine_ffi" module namespace.
+    // The script wrapper `bridge/modules/audio_engine.x` re-exports these as
+    // `audio_engine.*` so users can write `import audio_engine.*;`.
     // pure=false for all (side-effecting), rtSafe varies.
     auto reg = [&](const char* name, ts::Type* retType,
                    std::vector<ts::Type*> params, R fn, bool rtSafe = false) {
-        compiler.registerForeignModuleFunction("audio_engine", name, retType,
+        compiler.registerForeignModuleFunction("audio_engine_ffi", name, retType,
                                                std::move(params), fn,
                                                /*pure=*/false, rtSafe);
     };

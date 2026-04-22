@@ -18,8 +18,10 @@
 //  test_foreign_modules.cpp
 //  integration-tests
 //
-//  Tests for foreign module registration: pure foreign modules,
-//  merged foreign + .x modules, and '_' privacy convention.
+//  Tests for foreign module registration: pure foreign modules, script
+//  modules that re-export a same-suffixed FFI module via `export X_ffi.*;`,
+//  collision detection when an FFI and a script share a name, and the '_'
+//  privacy convention for FFI functions.
 //
 
 #include "compiler.hpp"
@@ -345,17 +347,25 @@ static void test_plain_module_control() {
     std::filesystem::remove_all(tmpDir);
 }
 
-static void test_merged_foreign_and_x_module() {
-    std::print("Test: Foreign functions merged with .x module file\n");
+// A script module `mathext.x` that re-exports the `mathext_ffi` FFI module
+// can expose the FFI functions to its callers alongside its own wrapper
+// functions. This is the replacement for the old "merge FFI + same-named .x"
+// mechanism -- the FFI and script must now have distinct names, and the
+// script explicitly re-exports the FFI via `export mathext_ffi.*;`.
+//
+// Note: underscore-prefixed FFI functions are module-private to the FFI
+// module itself. Under the split model they are NOT visible to the script
+// wrapper (which is a different module); they are also not re-exported to
+// callers via `export mathext_ffi.*;`.
+static void test_script_reexports_ffi() {
+    std::print("Test: Script module re-exports a renamed FFI module\n");
 
-    // Write a temporary .x module that wraps the foreign _internal_helper
     const char* moduleSource =
-        "-- mathext.x: wraps FFI functions with public functions\n"
-        "fn helper(x Int) Int { _internal_helper(x) }\n"
+        "-- mathext.x: re-exports mathext_ffi and adds wrapper functions.\n"
+        "export mathext_ffi.*;\n"
         "fn doubled(x Int) Int { add_values(x, x) }\n"
         "fn pure_fn(x Int) Int { x * 10 }\n";
 
-    // Write to a temp directory
     std::string tmpDir = std::filesystem::temp_directory_path().string() + "/tzpl_test_modules";
     std::filesystem::create_directories(tmpDir);
     std::string modulePath = tmpDir + "/mathext.x";
@@ -367,11 +377,9 @@ static void test_merged_foreign_and_x_module() {
     ts::TypeUniverse types;
     ts::Compiler compiler(types);
 
-    // Register private FFI function and a public one
-    compiler.registerForeignModuleFunction("mathext", "_internal_helper",
-        compiler.intType(), {compiler.intType()},
-        ffi_internal_helper, true, true);
-    compiler.registerForeignModuleFunction("mathext", "add_values",
+    // FFI registers under `mathext_ffi`, not `mathext` -- the script wrapper
+    // owns the `mathext` name.
+    compiler.registerForeignModuleFunction("mathext_ffi", "add_values",
         compiler.intType(), {compiler.intType(), compiler.intType()},
         ffi_add_values, true, true);
 
@@ -379,12 +387,11 @@ static void test_merged_foreign_and_x_module() {
     auto target = compiler.createTarget();
     ts::VM vm(64 * 1024 * 1024, types, target);
 
-    // User code imports the merged module — can use both the .x wrapper and
-    // the public FFI function, but NOT the private _internal_helper
+    // User imports the script module and gets both the wrapper functions
+    // (pure_fn, doubled) and the re-exported public FFI function (add_values).
     const char* source = R"(
         import mathext.*;
         println(pure_fn(5));
-        println(helper(5));
         println(doubled(5));
         println(add_values(1, 2));
     )";
@@ -392,8 +399,8 @@ static void test_merged_foreign_and_x_module() {
     FILE* memfile = tmpfile();
     vm.setPrintOutput(memfile);
 
-    bool ok = compileAndRun(compiler, vm, source, "merged_test.x", &moduleCompiler);
-    check(ok, "Merged foreign + .x module compiles");
+    bool ok = compileAndRun(compiler, vm, source, "reexport_test.x", &moduleCompiler);
+    check(ok, "Script module re-exporting FFI compiles");
 
     fseek(memfile, 0, SEEK_SET);
     char buf[256];
@@ -401,15 +408,51 @@ static void test_merged_foreign_and_x_module() {
     while (fgets(buf, sizeof(buf), memfile)) output += buf;
     fclose(memfile);
 
-    check(output == "50\n50\n10\n3\n", "Merged module produces correct output (got: '" + output + "')");
+    check(output == "50\n10\n3\n", "Re-export module produces correct output (got: '" + output + "')");
 
-    // Verify _internal_helper is NOT directly accessible
-    const char* source2 = R"(
-        import mathext.*;
-        println(_internal_helper(5));
+    std::filesystem::remove_all(tmpDir);
+}
+
+// Registering an FFI module with the same name as a resolvable script module
+// must now be rejected with a clear error. This prevents the silent-fallback
+// bug where a missing script file (or a typo in -I paths) would be masked by
+// a same-named FFI module being used instead.
+static void test_ffi_script_name_collision_is_error() {
+    std::print("Test: Same-named FFI + script module is rejected\n");
+
+    std::string tmpDir = std::filesystem::temp_directory_path().string() + "/tzpl_collision_test";
+    std::filesystem::remove_all(tmpDir);
+    std::filesystem::create_directories(tmpDir);
+    {
+        std::ofstream f(tmpDir + "/collide.x");
+        f << "fn hello() Int { 42 }\n";
+    }
+
+    ts::TypeUniverse types;
+    ts::Compiler compiler(types);
+    compiler.registerForeignModuleFunction("collide", "ffi_fn",
+        compiler.intType(), {compiler.intType()},
+        ffi_internal_helper, true, true);
+
+    ts::ModuleCompiler moduleCompiler(compiler, {tmpDir});
+    auto target = compiler.createTarget();
+
+    const char* source = R"(
+        import collide.*;
+        println(hello());
     )";
-    auto result = compiler.compile(source2, "merged_privacy.x", target, &moduleCompiler);
-    check(!result.success, "Private _internal_helper not accessible from merged module");
+
+    auto result = compiler.compile(source, "collision.x", target, &moduleCompiler);
+    check(!result.success, "Colliding FFI + script module is rejected");
+
+    bool foundCollisionMessage = false;
+    for (const auto& err : result.errors) {
+        if (err.message.find("Module name collision") != std::string::npos) {
+            foundCollisionMessage = true;
+            break;
+        }
+    }
+    check(foundCollisionMessage, "Error message names the collision");
 
     std::filesystem::remove_all(tmpDir);
 }
@@ -555,7 +598,8 @@ int main() {
     test_foreign_module_single_arg();
     test_foreign_module_alias();
     test_plain_module_control();
-    test_merged_foreign_and_x_module();
+    test_script_reexports_ffi();
+    test_ffi_script_name_collision_is_error();
     test_dynvar_recompile_no_stale_cascade();
     test_cascade_invalidate_transitive_dependency();
 

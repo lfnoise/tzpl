@@ -497,6 +497,7 @@ if (localStorage.getItem('tzpl-docs-theme') === 'light') document.documentElemen
         <li><a href="#dotted-paths">Dotted Paths</a></li>
         <li><a href="#file-resolution">File Resolution</a></li>
         <li><a href="#visibility-exporting">Visibility and Exporting</a></li>
+        <li><a href="#re-exporting">Re-exporting Imports with <code>export</code></a></li>
         <li><a href="#circular-import">Circular Import Detection</a></li>
       </ol>
     </li>
@@ -2598,11 +2599,66 @@ println(math.add(<span class="num">3</span>, <span class="num">4</span>));    <s
 <pre><code><span class="kw">import</span> utils.*;   _internal(<span class="num">5</span>);    <span class="cmt">-- compile error</span>
 <span class="kw">import</span> utils;     utils.helper(<span class="num">5</span>);  <span class="cmt">-- compile error</span></code></pre>
 
-<p>Imported names are NOT re-exported.
-If module A imports from module B, importers of A
-do not see B's names.</p>
+<p>Imported names are NOT re-exported by default.
+If module <code>A</code> imports from module <code>B</code>, importers of
+<code>A</code> do not see <code>B</code>'s names. Use <code>export</code>
+(section&nbsp;21.5) to opt in to re-exporting.</p>
 
-<h3 id="circular-import">21.5 Circular Import Detection</h3>
+<h3 id="re-exporting">21.5 Re-exporting Imports with <code>export</code></h3>
+<p><code>export</code> is a drop-in replacement for <code>import</code>:
+the grammar is identical, but every name pulled in by an
+<code>export</code> statement is also added to this module's export
+table. The two keywords can be mixed freely within a module.</p>
+
+<pre><code><span class="cmt">-- Plain `import`: symbols are local to this module only.</span>
+<span class="kw">import</span> math_utils.*;
+
+<span class="cmt">-- `export`: symbols are local AND visible to importers of this module.</span>
+<span class="kw">export</span> math_utils.*;
+
+<span class="cmt">-- Re-export only selected names.</span>
+<span class="kw">export</span> math_utils.{square, cube};
+
+<span class="cmt">-- Re-export with renaming.</span>
+<span class="kw">export</span> math_utils.{square <span class="kw">as</span> sq};
+
+<span class="cmt">-- Re-export the module alias so importers can use math_utils.square(...).</span>
+<span class="kw">export</span> math_utils;
+
+<span class="cmt">-- Re-export a dotted path or renamed alias.</span>
+<span class="kw">export</span> std.collections <span class="kw">as</span> cols;</code></pre>
+
+<p>A downstream module then sees the re-exported names as if they were
+declared locally in the re-exporter:</p>
+
+<pre><code><span class="cmt">-- File: math_bridge.x</span>
+<span class="kw">export</span> math_utils.*;                 <span class="cmt">-- re-exports square, cube, ...</span>
+<span class="kw">fn</span> quadruple(x <span class="kw">Int</span>) <span class="kw">Int</span> = x * <span class="num">4</span>;   <span class="cmt">-- local (and exported by default)</span>
+
+<span class="cmt">-- File: main.x</span>
+<span class="kw">import</span> math_bridge.*;
+<span class="num">5</span> square println;                    <span class="cmt">-- 25  (from math_utils, via math_bridge)</span>
+<span class="num">2</span> quadruple println;                 <span class="cmt">-- 8   (local to math_bridge)</span></code></pre>
+
+<h4>Shadowing</h4>
+<p>A local declaration with the same name as an imported one always wins.
+The re-export is silently dropped so the local definition is the sole
+exported binding:</p>
+
+<pre><code><span class="kw">export</span> math_utils.*;                 <span class="cmt">-- math_utils defines `square`</span>
+<span class="kw">fn</span> square(x <span class="kw">Float</span>) <span class="kw">Float</span> = x * x; <span class="cmt">-- local square shadows the import</span>
+<span class="cmt">-- Importers of this module see only the local `square`.</span></code></pre>
+
+<h4>Chained access through a re-exported alias</h4>
+<p>Given <code>export math_utils;</code> in module <code>A</code>, the
+alias <code>math_utils</code> is only reachable via a wildcard or named
+import of <code>A</code>. Writing <code>A.math_utils.square(5)</code>
+through a whole-module import (<code>import A;</code>) is rejected:</p>
+
+<pre><code><span class="kw">import</span> A;
+A.math_utils.square(<span class="num">5</span>);   <span class="cmt">-- compile error: use `import A.*` or `import A.{math_utils}`</span></code></pre>
+
+<h3 id="circular-import">21.6 Circular Import Detection</h3>
 <p>Circular imports are detected and reported as errors.
 If <code>a.x</code> imports <code>b.x</code> and <code>b.x</code> imports <code>a.x</code>, the compiler
 will report: <code>"Circular import detected: a"</code></p>

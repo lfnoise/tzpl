@@ -138,10 +138,16 @@ void TypeChecker::declareVar(const std::string& name, Type* type, bool isMutable
         } else {
             globalIdx = compiler_.addGlobal(type ? type->isObjType() : true);
         }
-        VarInfo info{type, isMutable, true, globalIdx};
+        VarInfo info{};
+        info.type = type;
+        info.isMutable = isMutable;
+        info.isGlobal = true;
+        info.globalIndex = globalIdx;
         globalVars_[name] = info;
     } else {
-        VarInfo info{type, isMutable, false, 0};
+        VarInfo info{};
+        info.type = type;
+        info.isMutable = isMutable;
         scopes_.back()[name] = info;
     }
 }
@@ -203,29 +209,6 @@ void TypeChecker::registerBuiltins() {
         functions_[entry.name].push_back(info);
     }
 
-    // Register foreign module functions (injected by ModuleCompiler for merged modules)
-    if (foreignModuleFunctions_) {
-        for (const auto& entry : *foreignModuleFunctions_) {
-            u32 idx = compiler_.addGlobal(true);
-            auto* prim = new Primitive(compiler_.voidType());
-            prim->cfun_ = entry.cfun;
-            prim->pure_ = entry.pure;
-            prim->rtSafe_ = entry.rtSafe;
-            prim->ffiData_ = entry.ffiData;
-            compiler_.global(idx).o = prim;
-
-            FuncInfo info;
-            info.returnType = entry.returnType;
-            info.paramTypes = entry.paramTypes;
-            info.globalIndex = idx;
-            info.bodyChecked = true;
-            info.isBuiltin = true;
-            info.isForeign = true;
-            info.rtSafe = entry.rtSafe;
-            functions_[entry.name].push_back(info);
-        }
-    }
-
     // Register built-in Option<T> template enum: enum Option<T> { some T, none }
     if (!syntheticOptionDecl_) {
         SourceRange noLoc{};
@@ -283,6 +266,7 @@ void TypeChecker::check(Program& program) {
     for (auto& item : program.items) {
         if (item->kind == ASTNode::StructDecl) {
             auto* sd = static_cast<StructDeclNode*>(item.get());
+            importedTypeReExport_.erase(sd->name);
             if (!sd->typeParams.empty()) {
                 templateStructs_[sd->name] = sd;
                 sd->resolvedType = nullptr;
@@ -297,6 +281,7 @@ void TypeChecker::check(Program& program) {
     for (auto& item : program.items) {
         if (item->kind == ASTNode::UnionDecl) {
             auto* ud = static_cast<UnionDeclNode*>(item.get());
+            importedTypeReExport_.erase(ud->name);
             if (!ud->typeParams.empty()) {
                 templateEnums_[ud->name] = ud;
                 ud->resolvedType = nullptr;
@@ -313,6 +298,7 @@ void TypeChecker::check(Program& program) {
     for (auto& item : program.items) {
         if (item->kind == ASTNode::TypeAliasDecl) {
             auto* ta = static_cast<TypeAliasDeclNode*>(item.get());
+            importedTypeReExport_.erase(ta->name);
             if (!ta->typeParams.empty()) {
                 // Generic alias: store unresolved (like template structs)
                 templateTypeAliases_[ta->name] = ta;
@@ -562,6 +548,7 @@ void TypeChecker::checkREPLInput(Program& program) {
     for (auto& item : program.items) {
         if (item->kind == ASTNode::StructDecl) {
             auto* sd = static_cast<StructDeclNode*>(item.get());
+            importedTypeReExport_.erase(sd->name);
             if (!sd->typeParams.empty()) {
                 templateStructs_[sd->name] = sd;
                 sd->resolvedType = nullptr;
@@ -576,6 +563,7 @@ void TypeChecker::checkREPLInput(Program& program) {
     for (auto& item : program.items) {
         if (item->kind == ASTNode::UnionDecl) {
             auto* ud = static_cast<UnionDeclNode*>(item.get());
+            importedTypeReExport_.erase(ud->name);
             if (!ud->typeParams.empty()) {
                 templateEnums_[ud->name] = ud;
                 ud->resolvedType = nullptr;
@@ -592,6 +580,7 @@ void TypeChecker::checkREPLInput(Program& program) {
     for (auto& item : program.items) {
         if (item->kind == ASTNode::TypeAliasDecl) {
             auto* ta = static_cast<TypeAliasDeclNode*>(item.get());
+            importedTypeReExport_.erase(ta->name);
             if (!ta->typeParams.empty()) {
                 templateTypeAliases_[ta->name] = ta;
             } else {

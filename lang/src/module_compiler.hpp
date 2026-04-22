@@ -49,7 +49,7 @@ struct TypeAliasDeclNode;
 
 // A single exported name from a module
 struct ExportEntry {
-    enum Kind { Func, Var, StructT, EnumT, TemplateStructT, TemplateEnumT, TypeAlias, TemplateTypeAlias, ConstraintT };
+    enum Kind { Func, Var, StructT, EnumT, TemplateStructT, TemplateEnumT, TypeAlias, TemplateTypeAlias, ConstraintT, ModuleAlias };
     Kind kind;
     std::string name;
     Type* type = nullptr;
@@ -62,6 +62,7 @@ struct ExportEntry {
     Type* aliasType = nullptr;
     TypeAliasDeclNode* templateTypeAliasDecl = nullptr;
     TypeChecker::ConstraintInfo constraintInfo;  // for constraint exports
+    struct ModuleInfo* moduleRef = nullptr;  // for ModuleAlias entries
 };
 
 // Information about a compiled module

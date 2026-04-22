@@ -175,7 +175,7 @@ void registerClockFFI(ts::Compiler& compiler) {
 
     auto reg = [&](const char* name, ts::Type* retType,
                    std::vector<ts::Type*> params, R fn) {
-        compiler.registerForeignModuleFunction("clock", name, retType,
+        compiler.registerForeignModuleFunction("clock_ffi", name, retType,
                                                std::move(params), fn,
                                                /*pure=*/false, /*rtSafe=*/false);
     };

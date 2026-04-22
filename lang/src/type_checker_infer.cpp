@@ -940,6 +940,16 @@ Type* TypeChecker::inferExpr(Expr* expr, Type* expectedType) {
                             error(expr->loc, "'" + fe->field + "' is a constraint, not a value");
                             result = compiler_.intType();
                             break;
+                        case ExportEntry::ModuleAlias:
+                            // Chained module access (A.math.sin) is not
+                            // supported. Users should wildcard- or
+                            // named-import the re-exporter instead.
+                            error(expr->loc, "Re-exported module '" + fe->field +
+                                  "' cannot be accessed through a whole-module import of '" +
+                                  ident->name + "'. Use 'import " + ident->name +
+                                  ".*' or 'import " + ident->name + ".{" + fe->field + "}'.");
+                            result = compiler_.intType();
+                            break;
                     }
                     break;
                 }
