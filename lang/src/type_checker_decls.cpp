@@ -30,6 +30,55 @@
 
 namespace ts {
 
+// Recursively scan a function body for any ReturnStmt. Does NOT descend into
+// nested function declarations or lambda bodies, since returns there target
+// their enclosing function.
+static bool bodyHasReturnStmt(ASTNode* node) {
+    if (!node) return false;
+    switch (node->kind) {
+        case ASTNode::ReturnStmt:
+            return true;
+        case ASTNode::Block: {
+            auto* block = static_cast<BlockStmt*>(node);
+            for (auto& s : block->stmts) {
+                if (bodyHasReturnStmt(s.get())) return true;
+            }
+            return false;
+        }
+        case ASTNode::ExprStmt: {
+            auto* es = static_cast<ExprStmtNode*>(node);
+            return bodyHasReturnStmt(es->expr.get());
+        }
+        case ASTNode::IfStmt: {
+            auto* is = static_cast<IfStmtNode*>(node);
+            return bodyHasReturnStmt(is->thenBranch.get()) ||
+                   bodyHasReturnStmt(is->elseBranch.get());
+        }
+        case ASTNode::WhileStmt: {
+            auto* ws = static_cast<WhileStmtNode*>(node);
+            return bodyHasReturnStmt(ws->body.get());
+        }
+        case ASTNode::ForStmt: {
+            auto* fs = static_cast<ForStmtNode*>(node);
+            return bodyHasReturnStmt(fs->body.get());
+        }
+        case ASTNode::SwitchStmt: {
+            auto* ss = static_cast<SwitchStmtNode*>(node);
+            for (auto& c : ss->cases) {
+                if (bodyHasReturnStmt(c.body.get())) return true;
+            }
+            return false;
+        }
+        case ASTNode::IfExpr: {
+            // IfExpr has then/else branches; reuse IfStmtNode layout via cast
+            // is not safe -- fall through to default (no return inside expr trees).
+            return false;
+        }
+        default:
+            return false;
+    }
+}
+
 void TypeChecker::checkImportDecl(ImportDeclNode* decl) {
     if (!moduleCompiler_) {
         error(decl->loc, "Import statements require module compilation support");
@@ -759,6 +808,24 @@ void TypeChecker::checkFnDecl(FnDeclNode* decl) {
 
     // Check body (may invalidate funcPtr/func via same-name local fn push_back)
     checkNode(decl->body.get());
+
+    // Validate body against declared return type (non-coroutine, non-void functions).
+    // Coroutines yield values rather than returning them through the block's trailing
+    // expression, so they're exempt. Void functions don't require a value either.
+    if (!decl->isCoroutine && returnType && returnType != compiler_.voidType()) {
+        Type* trailingType = getBlockTrailingType(decl->body.get());
+        if (trailingType) {
+            if (!isAssignable(trailingType, returnType)) {
+                error(decl->loc, "Function '" + decl->name + "' declared to return '" +
+                      std::string(returnType->str()) + "' but body yields '" +
+                      std::string(trailingType->str()) + "'");
+            }
+        } else if (!bodyHasReturnStmt(decl->body.get())) {
+            error(decl->loc, "Function '" + decl->name + "' declared to return '" +
+                  std::string(returnType->str()) +
+                  "' but body has no trailing expression or return statement");
+        }
+    }
 
     currentReturnType_ = savedReturnType;
     inCoroutineBody_ = savedInCoro;
