@@ -26,6 +26,7 @@
 #define arc_hpp
 
 #include "gc.hpp"
+#include "stl_allocator.hpp"
 
 namespace ts {
 
@@ -34,8 +35,14 @@ namespace ts {
 // events), it releases each object. Objects that have been retained by heap
 // references survive; temporaries with refcount 1 are enqueued for deletion.
 class AutoReleasePool {
-    std::vector<GCObj*> pool_;
+    rt::VMVector<GCObj*> pool_;
 public:
+    explicit AutoReleasePool(rt::TLSFAllocator* allocator)
+        : pool_(rt::STLAllocator<GCObj*>(allocator))
+    {
+        pool_.reserve(128);
+    }
+
     void add(GCObj* obj) {
         pool_.push_back(obj);
     }
@@ -59,8 +66,14 @@ public:
 // deleted, its destructor may release children whose refcounts then hit zero,
 // causing them to be enqueued here as well.
 class DeferredDeleteQueue {
-    std::vector<GCObj*> queue_;
+    rt::VMVector<GCObj*> queue_;
 public:
+    explicit DeferredDeleteQueue(rt::TLSFAllocator* allocator)
+        : queue_(rt::STLAllocator<GCObj*>(allocator))
+    {
+        queue_.reserve(128);
+    }
+
     void enqueue(GCObj* obj) {
         queue_.push_back(obj);
     }

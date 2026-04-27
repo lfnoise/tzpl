@@ -142,6 +142,8 @@ CodeBlock* VM::currentCodeBlock() const {
 
 VM::VM(usize poolSize, TypeUniverse& typeUniverse, const VMTarget& target)
     : allocator_(poolSize)
+    , autoReleasePool_(&allocator_)
+    , deferredDeleteQueue_(&allocator_)
     , regs_(nullptr)
     , maxRegs_(4096)
     , frames_(nullptr)
