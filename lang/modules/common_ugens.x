@@ -444,26 +444,26 @@ fn trDiv(x S, n, offset=0) {
 	let c = delayVar();
 	let c1 = c(1);
 	c <- (c1 + t) i32 % n;
-	y <- t * (c1 == offset);
+	y <- t * (c1 == offset)
 }
 
 -- trigger counter with reset
 fn trCount(x S, reset AsSignal) S {
 	let y = delayVar();
-	y <- select2(reset > 0, 0, y(1) + (x > 0));
+	y <- select2(reset > 0, 0, y(1) + (x > 0))
 }
 
 -- trigger counter
 fn trCount(x S) S {
 	let y = delayVar();
-	y <- y(1) + (x > 0);
+	y <- y(1) + (x > 0)
 }
 
 -- when triggered, makes a line from 1 to 0 over duration. can be used as a timer or a phasor.
 fn oneshot1(trig S, dur) S { 
 	let dt = 1 / (fs() * dur);
 	let y = delayVar();
-	y <- select2(trig > 0, 1, max(0, y(1) - dt));
+	y <- select2(trig > 0, 1, max(0, y(1) - dt))
 }
 
 -- when triggered, makes a line from 0 to 1 over duration. can be used as a timer or a phasor.
@@ -1056,6 +1056,7 @@ fn pull(gate S, initVal AsConstantSignal, gatedFun fn()S) S {
 
 
 fn pause(gate S, gatedFun fn()S) S = if_(gate > 0, fn(){ gate * gatedFun() });
+
 
 
 
