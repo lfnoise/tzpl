@@ -945,27 +945,14 @@ fn select2(test AsSignal, ifOne AsSignal, ifZero AsSignal) S {
 ---------------------------------------------------------------------------
 -- To S-Expressions
 
-fn parens(s String) String = "(%^)" fmt(s);
+fn parens(s String)   String = "(%^)" fmt(s);
 fn brackets(s String) String = "[%^]" fmt(s);
-fn braces(s String) String = "{%^}" fmt(s);
-fn quotes(s String) String = "\"%^\"" fmt(s);
+fn braces(s String)   String = "{%^}" fmt(s);
+fn quotes(s String)   String = "\"%^\"" fmt(s);
 
 fn indent(s String, n Int = 1) String = n <= 0 ? s : "    "  $ indent(s, n-1);
 
-fn separatedString(strings [String], separator String = " ") String {
-    var out = "";
-    var between = false;
-    for (s : strings) {
-        if (between) {
-            out = out $ separator;
-        } else {
-            between = true;
-        }
-        out = out $ s;
-    }
-    out
-}
-
+fn separatedString(strings [String], separator String = " ") String  = strings fold1(fn(z, s) { z $ separator $ s });
 fn separatedString<T>(values [T], separator String = " ") String = values @ toString separatedString(separator);
 
 
@@ -987,17 +974,16 @@ fn numTypeInt(op CastOp) Int {
 	}
 }
 
-fn toLisp(graph SignalGraph) String {
-	var `indentLevel Int = `indentLevel + 1;
-	let sexprLines = graph.exprs toLisp;
+fn toLisp(graph SignalGraph, indentLevel Int) String {
+	let sexprLines = graph.exprs toLisp(indentLevel);
 
 	-- Join with newlines and add indentation
-	let text = sexprLines indent(`indentLevel + 1) separatedString("\n");
+	let text = sexprLines indent(indentLevel + 1) separatedString("\n");
 
-	"\n" $ "(Graph %^ (\n%^))" fmt(graph.root.id, text) indent(`indentLevel)
+	"\n" $ "(Graph %^ (\n%^))" fmt(graph.root.id, text) indent(indentLevel)
 }
 
-fn toLisp(o S) String {
+fn toLisp(o S, indentLevel Int) String {
     match (o.kind) {
         sampleRate : "(%^ SampleRate)" fmt(o.id);
         sampleDur : "(%^ SampleDur)" fmt(o.id);
@@ -1063,29 +1049,26 @@ fn toLisp(o S) String {
         }
 
         if_(thenGraph, elseGraph) : {
-			var `indentLevel = `indentLevel + 1;
-            "(%^ IfExpr %^ %^ %^)" fmt(o.id, o inputsToLisp, thenGraph toLisp, elseGraph toLisp)
+            "(%^ IfExpr %^ %^ %^)" fmt(o.id, o inputsToLisp, thenGraph toLisp(indentLevel + 1), elseGraph toLisp(indentLevel + 1))
 		}
         for_(count, bodyGraph) :
-            "(%^ ForExpr %^ %^)" fmt(o.id, count, bodyGraph toLisp);
+            "(%^ ForExpr %^ %^)" fmt(o.id, count, bodyGraph toLisp(indentLevel + 1));
 
         switch_(cases) :
-            "(%^ SwitchExpr %^ %^)" fmt(o.id, o inputsToLisp, cases toLisp separatedString(" "));
+            "(%^ SwitchExpr %^ %^)" fmt(o.id, o inputsToLisp, cases toLisp(indentLevel + 1) separatedString(" "));
 
         select : "(%^ SelectExpr %^)" fmt(o.id, o inputsToLisp);
         select2 : "(%^ SelectExpr %^)" fmt(o.id, o inputsToLisp);
 		varexpr(name) : "()%^ VarExpr %^)" fmt(o.id, name);
 
         voicer(maxVoices, bodyGraph) : {
-			var `indentLevel = `indentLevel + 1;
-            "(%^ Voicer %^ %^)" fmt(o.id, maxVoices, bodyGraph toLisp)
+            "(%^ Voicer %^ %^)" fmt(o.id, maxVoices, bodyGraph toLisp(indentLevel + 1))
 		}
 
 		spectralFrame(fftSize) : "(%^ SpectralFrameInput %^)" fmt(o.id, fftSize);
 
 		spectralChain(fftSize, hopSize, bodyGraph) : {
-			var `indentLevel = `indentLevel + 1;
-			"(%^ SpectralChainExpr %^ %^ %^ %^)" fmt(o.id, o inputsToLisp, fftSize, hopSize, bodyGraph toLisp)
+			"(%^ SpectralChainExpr %^ %^ %^ %^)" fmt(o.id, o inputsToLisp, fftSize, hopSize, bodyGraph toLisp(indentLevel + 1))
 		}
 
 		debug(label, period, consecutive) :
@@ -1098,9 +1081,7 @@ fn defSynth(synthFun GraphFn, synthName String) String {
 
 	let graph SignalGraph = synthFun _makeTopGraph;
 
-	var `indentLevel Int = 0;
-
-	let sexprString = "(Synth %^ %^)" fmt(synthName, graph toLisp);
+	let sexprString = "(Synth %^ %^)" fmt(synthName, graph toLisp(0));
 
 	let err = sexprString compileSynthDefAndLoad;
 	if (err length > 0) {
@@ -1151,6 +1132,8 @@ coro fn playFor(defName String, seconds Float) Float {
 
 ---------------------------------------------------------------------------
 ---------------------------------------------------------------------------
+
+
 
 
 
