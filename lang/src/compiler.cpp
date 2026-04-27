@@ -31,6 +31,29 @@
 
 namespace ts {
 
+namespace {
+
+class CompilerCurrentScope {
+    Compiler& compiler_;
+    bool active_ = true;
+
+public:
+    CompilerCurrentScope(Compiler& compiler, const VMTarget& target)
+        : compiler_(compiler)
+    {
+        compiler_.makeCurrent(target);
+    }
+
+    ~CompilerCurrentScope() {
+        if (active_) compiler_.endCurrent();
+    }
+
+    CompilerCurrentScope(const CompilerCurrentScope&) = delete;
+    CompilerCurrentScope& operator=(const CompilerCurrentScope&) = delete;
+};
+
+} // namespace
+
 Compiler::Compiler(TypeUniverse& types)
     : typeUniverse_(types)
 {}
@@ -208,7 +231,7 @@ CompileResult Compiler::compile(const std::string& source, const std::string& fi
     CompileResult result;
 
     // Set up compilation context for this VM target
-    makeCurrent(target);
+    CompilerCurrentScope currentScope(*this, target);
 
     // Lex
     Lexer lexer(source, filename);
@@ -218,7 +241,6 @@ CompileResult Compiler::compile(const std::string& source, const std::string& fi
     Program program = parser.parseProgram();
     if (parser.hasErrors()) {
         result.errors = parser.errors();
-        endCurrent();
         return result;
     }
 
@@ -229,7 +251,6 @@ CompileResult Compiler::compile(const std::string& source, const std::string& fi
     typeChecker.check(program);
     if (typeChecker.hasErrors()) {
         result.errors = typeChecker.errors();
-        endCurrent();
         return result;
     }
 
@@ -243,7 +264,6 @@ CompileResult Compiler::compile(const std::string& source, const std::string& fi
     CodeBlock* mainBlock = codegen.generate(program);
     if (codegen.hasErrors()) {
         result.errors = codegen.errors();
-        endCurrent();
         return result;
     }
 
@@ -271,7 +291,6 @@ CompileResult Compiler::compile(const std::string& source, const std::string& fi
         }
     }
 
-    endCurrent();
     return result;
 }
 
