@@ -19,14 +19,14 @@ z1 imag println;
 z2 real println;
 z2 imag println;
 
--- mag (magnitude)
-Complex(3.0, 4.0) mag println;
-Complex(0.0, 1.0) mag println;
-Complex(1.0, 0.0) mag println;
+-- abs (magnitude)
+Complex(3.0, 4.0) abs println;
+Complex(0.0, 1.0) abs println;
+Complex(1.0, 0.0) abs println;
 
--- phase
-Complex(1.0, 0.0) phase println;
-Complex(0.0, 1.0) phase println;
+-- arg (phase)
+Complex(1.0, 0.0) arg println;
+Complex(0.0, 1.0) arg println;
 
 -- conj (conjugate)
 z1 conj println;

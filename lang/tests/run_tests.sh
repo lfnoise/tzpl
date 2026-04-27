@@ -173,6 +173,32 @@ for test_file in "${TEST_FILES[@]}"; do
         continue
     fi
 
+    if ! $is_error_test && [[ $exit_code -ne 0 ]]; then
+        echo -e "${RED}FAIL${RESET} $rel_path (exit code $exit_code)"
+        FAIL=$((FAIL + 1))
+        if $VERBOSE; then
+            echo -e "${BOLD}--- stderr ---${RESET}"
+            cat "$stderr_file"
+            echo ""
+        fi
+        rm -f "$stdout_file" "$stderr_file"
+        if $STOP_ON_FAIL; then break; fi
+        continue
+    fi
+
+    if ! $is_error_test && [[ -s "$stderr_file" ]]; then
+        echo -e "${RED}FAIL${RESET} $rel_path (unexpected stderr)"
+        FAIL=$((FAIL + 1))
+        if $VERBOSE; then
+            echo -e "${BOLD}--- stderr ---${RESET}"
+            cat "$stderr_file"
+            echo ""
+        fi
+        rm -f "$stdout_file" "$stderr_file"
+        if $STOP_ON_FAIL; then break; fi
+        continue
+    fi
+
     # Compare
     if $is_error_test; then
         actual_file="$stderr_file"
