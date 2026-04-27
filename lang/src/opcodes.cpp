@@ -39,10 +39,13 @@ namespace ts {
 
 // Cyclic index: wraps index modularly so it's always in [0, size).
 // Negative indices wrap around: -1 is the last element, etc.
-inline i64 cyclicIndex(i64 idx, i64 size) {
-    idx = idx % size;
-    if (idx < 0) idx += size;
-    return idx;
+inline size_t cyclicIndex(i64 idx, size_t size) {
+    if (size == 0) {
+        throw std::runtime_error("Cannot index an empty array");
+    }
+    idx = idx % static_cast<i64>(size);
+    if (idx < 0) idx += static_cast<i64>(size);
+    return static_cast<size_t>(idx);
 }
 
 // --- Load/Store ---
