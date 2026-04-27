@@ -211,7 +211,7 @@ See Phase 6 below. Implemented after templates were completed.
 **Files**: `type_checker.hpp/cpp`, `codegen.hpp/cpp`, `opcodes.hpp/cpp`
 
 **Tasks**:
-1. Type checker: When resolving a function call, if an argument's type is `Array[T]` but the parameter expects `T`, mark this argument for auto-mapping. The return type becomes `Array[ReturnType]`.
+1. Type checker: When resolving a function call, if an argument's type is `[T]` but the parameter expects `T`, mark this argument for auto-mapping. The return type becomes `[ReturnType]`.
 2. If multiple arguments are auto-mapped, they are zipped (element-wise, length = shortest).
 3. Codegen: When an auto-mapped call is detected, emit a loop:
    a. Allocate result array.
@@ -424,7 +424,7 @@ See Phase 6 below. Implemented after templates were completed.
 
 ### 10.3 Where Clauses / Type Constraints
 
-**Goal**: `fn sort[T](arr Array[T]) Array[T] where T: Comparable { ... }`.
+**Goal**: `fn sort<T>(arr [T]) [T] where T: Comparable { ... }`.
 
 **Tasks**:
 1. Parse `where` clauses with trait/interface constraints.

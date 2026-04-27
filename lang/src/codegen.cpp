@@ -2565,7 +2565,7 @@ u16 CodeGen::emitAutoMapDowncast(u16 subjReg, AsTypeExprNode* expr) {
     }
 
     // Build result type from inside out: targetType, then wrap in Array layers
-    // e.g. for depth=2, Array[Array[Float]] as(Int) -> Array[Array[Int]]
+    // e.g. for depth=2, [[Float]] as(Int) -> [[Int]]
     std::vector<Type*> resultTypes(depth + 1);
     resultTypes[0] = targetType;
     for (int i = 1; i <= depth; ++i) {
@@ -5526,7 +5526,7 @@ u16 CodeGen::genCartesianCall(CallExpr_* expr) {
 
     // --- Phase 3: Allocate result arrays and loop counters ---
     // We need maxCartesian nested loops.
-    // For @1/@2: result is Array[Array[R]]
+    // For @1/@2: result is [[R]]
     // Outer loop (@1): allocate outer array of len(@1)
     // Inner loop (@2): allocate inner array of len(@2)
 
@@ -5850,7 +5850,7 @@ u16 CodeGen::genDeepMapCall(CallExpr_* expr, int depth) {
     for (size_t i = 0; i < argc; ++i) {
         if (!expr->autoMapArgs[i]) continue;
 
-        // For deep args, we've peeled (depth-1) levels, so current is Array[T]
+        // For deep args, we've peeled (depth-1) levels, so current is [T]
         // For non-deep args with depth=1, they're still the original arrays
         Type* curArgType = expr->args[i]->resolvedType;
         if (expr->autoMapArgs[i].depth > 1) {
@@ -6599,7 +6599,7 @@ u16 CodeGen::genCartesianArrayLiteral(ArrayLiteralExpr* expr) {
     }
 
     // Peel array layers: outerResultType has maxCartesian+1 Array layers
-    // constructedArrayType is the type of each innermost array we construct (Array[elemType])
+    // constructedArrayType is the type of each innermost array we construct ([elemType])
     // innerResultType is the @2 loop result type (only for maxCartesian >= 2)
     Type* peeled = outerResultType;
     for (int i = 0; i < maxCartesian; ++i) {
@@ -6707,7 +6707,7 @@ u16 CodeGen::genCartesianArrayLiteral(ArrayLiteralExpr* expr) {
         }
     }
 
-    // Construct inner array (type = constructedArrayType = Array[elemType])
+    // Construct inner array (type = constructedArrayType = [elemType])
     u16 innerArrReg = allocReg();
     emitOp(op_make_array); emitRegs(innerArrReg, innerBase, (u16)count);
     emitPtr(constructedArrayType);

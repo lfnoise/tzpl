@@ -119,7 +119,7 @@ static void builtin_xrand(VM& vm, u16 dst, u16, u16 ab) {
     vm.reg(dst).f = lo * std::pow(hi / lo, u);
 }
 
-// pick(Array[T]) -> T  choose a random element
+// pick([T]) -> T  choose a random element
 void builtin_pick_array(VM& vm, u16 dst, u16, u16 ab) {
     auto* arr = vm.reg(ab).o;
     auto* at = static_cast<ArrayType*>(arr->type_);
@@ -139,7 +139,7 @@ static void builtin_urands_list(VM& vm, u16 dst, u16, u16) {
     vm.reg(dst).o = node;
 }
 
-// urands(n) -> Array<Float>: array of n uniform [0, 1) floats
+// urands(n) -> [Float]: array of n uniform [0, 1) floats
 static void builtin_urands_array(VM& vm, u16 dst, u16, u16 ab) {
     i64 n = vm.reg(ab).i;
     if (n < 0) n = 0;
@@ -163,7 +163,7 @@ static void builtin_brands_list(VM& vm, u16 dst, u16, u16) {
     vm.reg(dst).o = node;
 }
 
-// brands(n) -> Array<Float>: array of n bipolar [-1, 1) floats
+// brands(n) -> [Float]: array of n bipolar [-1, 1) floats
 static void builtin_brands_array(VM& vm, u16 dst, u16, u16 ab) {
     i64 n = vm.reg(ab).i;
     if (n < 0) n = 0;
@@ -189,7 +189,7 @@ static void builtin_irands_list(VM& vm, u16 dst, u16, u16 ab) {
     vm.reg(dst).o = node;
 }
 
-// irands(n, lo, hi) -> Array<Int>: array of n uniform random ints [lo, hi]
+// irands(n, lo, hi) -> [Int]: array of n uniform random ints [lo, hi]
 static void builtin_irands_array(VM& vm, u16 dst, u16, u16 ab) {
     i64 n = vm.reg(ab).i;
     i64 lo = vm.reg(ab+1).i, hi = vm.reg(ab+2).i;
@@ -220,7 +220,7 @@ static void builtin_xrands_list(VM& vm, u16 dst, u16, u16 ab) {
     vm.reg(dst).o = node;
 }
 
-// xrands(n, lo, hi) -> Array<Float>: array of n exponentially distributed floats [lo, hi)
+// xrands(n, lo, hi) -> [Float]: array of n exponentially distributed floats [lo, hi)
 static void builtin_xrands_array(VM& vm, u16 dst, u16, u16 ab) {
     i64 n = vm.reg(ab).i;
     f64 lo = vm.reg(ab+1).f, hi = vm.reg(ab+2).f;
@@ -256,7 +256,7 @@ static void builtin_rands_list(VM& vm, u16 dst, u16, u16 ab) {
     vm.reg(dst).o = node;
 }
 
-// rands(n, lo, hi) -> Array<Float>: array of n uniform floats [lo, hi)
+// rands(n, lo, hi) -> [Float]: array of n uniform floats [lo, hi)
 static void builtin_rands_array(VM& vm, u16 dst, u16, u16 ab) {
     i64 n = vm.reg(ab).i;
     f64 lo = vm.reg(ab+1).f, hi = vm.reg(ab+2).f;
@@ -271,7 +271,7 @@ static void builtin_rands_array(VM& vm, u16 dst, u16, u16 ab) {
     vm.reg(dst).o = r;
 }
 
-// picks(Array<T>) -> List<T>: infinite lazy list of random picks
+// picks([T]) -> List<T>: infinite lazy list of random picks
 void builtin_picks_list(VM& vm, u16 dst, u16, u16 ab) {
     auto* arr = vm.reg(ab).o;
     auto* at = static_cast<ArrayType*>(arr->type_);
@@ -288,7 +288,7 @@ void builtin_picks_list(VM& vm, u16 dst, u16, u16 ab) {
     vm.reg(dst).o = node;
 }
 
-// picks(Array<T>, Int) -> Array<T>: array of n random picks
+// picks([T], Int) -> [T]: array of n random picks
 void builtin_picks_array(VM& vm, u16 dst, u16, u16 ab) {
     auto* arr = vm.reg(ab).o;
     i64 n = vm.reg(ab+1).i;
@@ -336,7 +336,7 @@ void builtin_sort_string_array(VM& vm, u16 dst, u16, u16 ab) {
     vm.reg(dst).o = r;
 }
 
-// sort: (Array[T], (T,T)->Bool) -> Array[T]
+// sort: ([T], (T,T)->Bool) -> [T]
 void builtin_sort_by_array(VM& vm, u16 dst, u16, u16 ab) {
     auto* src = vm.reg(ab).o;
     auto* fn = static_cast<Callable*>(vm.reg(ab+1).o);
@@ -358,7 +358,7 @@ void builtin_sort_by_array(VM& vm, u16 dst, u16, u16 ab) {
     vm.reg(dst).o = result;
 }
 
-// grade: (Array[T], (T,T)->Bool) -> Array[Int]
+// grade: ([T], (T,T)->Bool) -> [Int]
 void builtin_grade_array(VM& vm, u16 dst, u16, u16 ab) {
     auto* src = vm.reg(ab).o;
     auto* fn = static_cast<Callable*>(vm.reg(ab+1).o);
@@ -747,7 +747,7 @@ void builtin_enumerate_array(VM& vm, u16 dst, u16, u16 ab) {
     vm.reg(dst).o = result;
 }
 
-// length: Array[T] -> Int
+// length: [T] -> Int
 void builtin_length_array(VM& vm, u16 dst, u16, u16 ab) {
     auto* src = vm.reg(ab).o;
     auto* at = static_cast<ArrayType*>(src->type_);

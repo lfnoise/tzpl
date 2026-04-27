@@ -143,8 +143,8 @@ struct SignalExpr {
 }
 
 
-var curGraphExprs Array<SignalExpr> = [];
-var curGraphDelays Array<DelayVar> = [];
+var curGraphExprs [SignalExpr] = [];
+var curGraphDelays [DelayVar] = [];
 var exprIds = 0;
 var delayVarIds = 0;
 

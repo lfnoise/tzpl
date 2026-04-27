@@ -2729,6 +2729,14 @@ TypeExprPtr Parser::parseTypeExpr() {
         if (tok.kind == TokenKind::Identifier && check(TokenKind::Less)) {
             SourceRange loc = tok.loc;
             advance(); // consume <
+            if (tok.text == "Array") {
+                auto elemType = parseTypeExpr();
+                if (!matchGreater()) {
+                    error("Expected '>' after Array element type");
+                }
+                error(loc, "Use [T] for array types, not Array<T>");
+                return std::make_unique<ArrayTypeNode>(loc, std::move(elemType));
+            }
             // Special case: List<T> -> ListTypeNode for backward compatibility
             if (tok.text == "List") {
                 auto elemType = parseTypeExpr();

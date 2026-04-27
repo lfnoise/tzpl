@@ -198,7 +198,7 @@ Type* TypeChecker::inferExpr(Expr* expr, Type* expectedType) {
                         if (am.cartesianIndex > maxCartesian) maxCartesian = am.cartesianIndex;
                     }
 
-                    // Inner type is Array[elemType] (each produced inner element is an array)
+                    // Inner type is [elemType] (each produced inner element is an array)
                     Type* innerArrayType = compiler_.arrayType(elemType);
                     // Wrap in Array levels: zip = 1 outer level, cartesian = maxCartesian outer levels
                     int wrapLevels = (maxCartesian > 0) ? maxCartesian : 1;
@@ -331,8 +331,8 @@ Type* TypeChecker::inferExpr(Expr* expr, Type* expectedType) {
 
                 // Wrap in Array levels: zip = 1 outer level, cartesian = maxCartesian outer levels
                 // tupleType is already the inner element type
-                // For zip @: result = Array[Array[tupleType]]... no, result = Array[tupleType]
-                // Actually for tuples: ([1,2,3]@, 'b, 'c) → [(1,'b,'c),...] = Array[(Int, Symbol, Symbol)]
+                // For zip @: result = [[tupleType]]... no, result = [tupleType]
+                // Actually for tuples: ([1,2,3]@, 'b, 'c) -> [(1,'b,'c),...] = [(Int, Symbol, Symbol)]
                 // So only wrap maxCartesian (or 1) times total, starting from tupleType
                 int wrapLevels = (maxCartesian > 0) ? maxCartesian : 1;
                 Type* wrapped = static_cast<Type*>(tupleType);
@@ -562,7 +562,7 @@ Type* TypeChecker::inferExpr(Expr* expr, Type* expectedType) {
                             if (declType == compiler_.floatType() && fieldType == compiler_.intType()) {
                                 // promotion OK
                             } else if (auto* arrT = dynamic_cast<ArrayType*>(fieldType)) {
-                                // Implicit auto-mapping: Array[T] provided where T expected
+                                // Implicit auto-mapping: [T] provided where T expected
                                 if (typesEqual(arrT->elemType_, declType) ||
                                     (declType == compiler_.floatType() && arrT->elemType_ == compiler_.intType())) {
                                     autoMap[i] = AutoMapArg{1, 0};

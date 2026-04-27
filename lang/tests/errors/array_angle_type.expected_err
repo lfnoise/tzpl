@@ -1,0 +1,5 @@
+Parse error [tests/errors/array_angle_type.x:1:8]
+  |
+1 | let xs Array<Int> = [];
+  |        ^---^
+  Use [T] for array types, not Array<T>

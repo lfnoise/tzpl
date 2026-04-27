@@ -69,7 +69,7 @@ Handles `StructName(arg1, arg2, ...)` for tuple structs.
 - Checks arity against field count
 - Infers arg types, detecting explicit `@` annotations
 - Checks each arg against its field type
-- Supports implicit auto-mapping: if an `Array[T]` or `List[T]` is passed where `T` is expected, auto-maps
+- Supports implicit auto-mapping: if a `[T]` or `List<T>` is passed where `T` is expected, auto-maps
 - If any auto-mapping: wraps the result type in Array/List layers
 
 **Template tuple structs (lines 521-653):**

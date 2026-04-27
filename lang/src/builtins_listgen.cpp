@@ -618,7 +618,7 @@ void StringCodePointsListGen::generate(VM& vm, ListNode* owner) {
     tail->generator_ = this; this->retain(); owner->tail_ = tail; tail->retain();
 }
 
-// codePoints(String) -> List[Int]  (lazy)
+// codePoints(String) -> List<Int>  (lazy)
 void builtin_codePoints(VM& vm, u16 dst, u16, u16 argBase) {
     auto* strObj = static_cast<StringObj*>(vm.reg(argBase).o);
     if (!strObj || strObj->s.empty()) { vm.reg(dst).o = nullptr; return; }
@@ -752,7 +752,7 @@ void CoroutineListGen::generate(VM& vm, ListNode* owner) {
 // List builtins (create generators)
 // ============================================================================
 
-// toList(Array[T]) -> List[T]  (lazy)
+// toList([T]) -> List<T>  (lazy)
 void builtin_toList_array(VM& vm, u16 dst, u16, u16 argBase) {
     auto* arr = vm.reg(argBase).o;
     auto* arrType = static_cast<ArrayType*>(arr->type_);
@@ -821,7 +821,7 @@ void builtin_toList_coroutine(VM& vm, u16 dst, u16, u16 argBase) {
     vm.reg(dst).o = node;
 }
 
-// collect(List[T], Int) -> Array[T]  -- collect at most n elements
+// collect(List<T>, Int) -> [T]  -- collect at most n elements
 void builtin_collect(VM& vm, u16 dst, u16, u16 ab) {
     auto* src = static_cast<ListNode*>(vm.reg(ab).o);
     i64 n = vm.reg(ab+1).i;
@@ -1242,7 +1242,7 @@ void builtin_flatten_list(VM& vm, u16 dst, u16, u16 ab) {
 // List/array utility functions (template-resolved)
 // ============================================================================
 
-// length: List[T] -> Int  (WARNING: forces entire list; infinite lists will hang)
+// length: List<T> -> Int  (WARNING: forces entire list; infinite lists will hang)
 void builtin_length_list(VM& vm, u16 dst, u16, u16 ab) {
     auto* node = static_cast<ListNode*>(vm.reg(ab).o);
     i64 count = 0;
@@ -1254,21 +1254,21 @@ void builtin_length_list(VM& vm, u16 dst, u16, u16 ab) {
     vm.reg(dst).i = count;
 }
 
-// head: List[T] -> T  (returns first element; undefined on nil list)
+// head: List<T> -> T  (returns first element; undefined on nil list)
 void builtin_head_list(VM& vm, u16 dst, u16, u16 ab) {
     auto* node = static_cast<ListNode*>(vm.reg(ab).o);
     node->force(vm);
     vm.reg(dst) = node->head_;
 }
 
-// tail: List[T] -> List[T]  (returns rest of list; undefined on nil list)
+// tail: List<T> -> List<T>  (returns rest of list; undefined on nil list)
 void builtin_tail_list(VM& vm, u16 dst, u16, u16 ab) {
     auto* node = static_cast<ListNode*>(vm.reg(ab).o);
     node->force(vm);
     vm.reg(dst).o = node->tail_;
 }
 
-// cons: (T, List[T]) -> List[T]  (prepend element to list)
+// cons: (T, List<T>) -> List<T>  (prepend element)
 // Per-value-type variants needed because nil lists have no runtime type info.
 #define CONS_LIST_VALUETYPE(suffix, typeGetter) \
 void builtin_cons_list_##suffix(VM& vm, u16 dst, u16, u16 ab) { \
@@ -1302,12 +1302,12 @@ void builtin_cons_list_obj(VM& vm, u16 dst, u16, u16 ab) {
     vm.reg(dst).o = node;
 }
 
-// isNil: List[T] -> Bool
+// isNil: List<T> -> Bool
 void builtin_isNil_list(VM& vm, u16 dst, u16, u16 ab) {
     vm.reg(dst).i = (vm.reg(ab).o == nullptr) ? 1 : 0;
 }
 
-// notNil: List[T] -> Bool
+// notNil: List<T> -> Bool
 void builtin_notNil_list(VM& vm, u16 dst, u16, u16 ab) {
     vm.reg(dst).i = (vm.reg(ab).o != nullptr) ? 1 : 0;
 }

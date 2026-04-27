@@ -377,7 +377,7 @@ FuncInfo* TypeChecker::tryResolveOverload(const std::string& name,
         }
         if (!match) continue;
 
-        // For typed variadic: last paramType is Array<ElemType>, verify excess args
+        // For typed variadic: last paramType is [ElemType], verify excess args
         auto* arrType = dynamic_cast<ArrayType*>(fi.paramTypes.back());
         if (arrType) {
             for (size_t i = fi.fixedParamCount; i < argTypes.size(); ++i) {

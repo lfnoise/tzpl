@@ -532,7 +532,7 @@ struct GuardedPattern : Pattern {
 
 struct TypeTestPattern : Pattern {
     std::string bindingName;
-    TypeExprPtr typeExpr;  // full type expression (e.g. Int, [Any], Array<Any>)
+    TypeExprPtr typeExpr;  // full type expression (e.g. Int, [Any])
     Type* resolvedTargetType = nullptr;  // filled by type checker
     TypeTestPattern(SourceRange l, std::string name, TypeExprPtr texpr)
         : Pattern(TypeTestPat, l), bindingName(std::move(name)),

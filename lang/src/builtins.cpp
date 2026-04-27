@@ -30,7 +30,7 @@ namespace ts {
 // Template resolvers for Array/List operations
 // ============================================================================
 
-// --- Resolvers for Array[T] -> Array[T] unary ops ---
+// --- Resolvers for [T] -> [T] unary ops ---
 #define RESOLVE_ARRAY_UNARY(fname, cfun) \
 static bool resolve_##fname(Compiler& compiler, const std::vector<Type*>& args, \
     std::vector<Type*>& pt, Type*& rt, CFun& cf) { \
@@ -45,7 +45,7 @@ RESOLVE_ARRAY_UNARY(pop_a, builtin_pop_array)
 RESOLVE_ARRAY_UNARY(muss_a, builtin_muss_array)
 #undef RESOLVE_ARRAY_UNARY
 
-// pick: Array[T] -> T  (choose a random element)
+// pick: [T] -> T  (choose a random element)
 static bool resolve_pick(Compiler& compiler, const std::vector<Type*>& args,
     std::vector<Type*>& pt, Type*& rt, CFun& cf) {
     if (args.size() != 1) return false;
@@ -54,7 +54,7 @@ static bool resolve_pick(Compiler& compiler, const std::vector<Type*>& args,
     pt = {at}; rt = at->elemType_; cf = builtin_pick_array; return true;
 }
 
-// picks: Array<T> -> List<T>  or  (Array<T>, Int) -> Array<T>
+// picks: [T] -> List<T>  or  ([T], Int) -> [T]
 static bool resolve_picks(Compiler& compiler, const std::vector<Type*>& args,
     std::vector<Type*>& pt, Type*& rt, CFun& cf) {
     if (args.size() == 1) {
@@ -70,7 +70,7 @@ static bool resolve_picks(Compiler& compiler, const std::vector<Type*>& args,
     return false;
 }
 
-// sort: (Array[Int|Float|String]) or (Array[T], (T,T)->Bool)
+// sort: ([Int|Float|String]) or ([T], (T,T)->Bool)
 static bool resolve_sort(Compiler& compiler, const std::vector<Type*>& args,
     std::vector<Type*>& pt, Type*& rt, CFun& cf) {
     if (args.size() == 1) {
@@ -96,7 +96,7 @@ static bool resolve_sort(Compiler& compiler, const std::vector<Type*>& args,
     return false;
 }
 
-// grade: (Array[T], (T,T)->Bool) -> Array[Int]
+// grade: ([T], (T,T)->Bool) -> [Int]
 static bool resolve_grade(Compiler& compiler, const std::vector<Type*>& args,
     std::vector<Type*>& pt, Type*& rt, CFun& cf) {
     if (args.size() != 2) return false;
@@ -111,7 +111,7 @@ static bool resolve_grade(Compiler& compiler, const std::vector<Type*>& args,
     cf = builtin_grade_array; return true;
 }
 
-// push: Array[T], T -> Array[T]
+// push: [T], T -> [T]
 static bool resolve_push(Compiler& compiler, const std::vector<Type*>& args,
     std::vector<Type*>& pt, Type*& rt, CFun& cf) {
     if (args.size() != 2) return false;
@@ -120,7 +120,7 @@ static bool resolve_push(Compiler& compiler, const std::vector<Type*>& args,
     pt = {at, at->elemType_}; rt = at; cf = builtin_push_array; return true;
 }
 
-// --- Array[T], Int -> Array[T] ---
+// --- [T], Int -> [T] ---
 #define RESOLVE_ARRAY_INT(fname, cfun_a, cfun_l) \
 static bool resolve_##fname(Compiler& compiler, const std::vector<Type*>& args, \
     std::vector<Type*>& pt, Type*& rt, CFun& cf) { \
@@ -140,7 +140,7 @@ RESOLVE_ARRAY_INT(stride, builtin_stride_array, builtin_stride_list)
 RESOLVE_ARRAY_INT(stutter, builtin_stutter_array, builtin_stutter_list)
 #undef RESOLVE_ARRAY_INT
 
-// repeat: (T, Int) -> Array[T]
+// repeat: (T, Int) -> [T]
 static bool resolve_repeat(Compiler& compiler, const std::vector<Type*>& args,
     std::vector<Type*>& pt, Type*& rt, CFun& cf) {
     if (args.size() != 2 || args[1] != compiler.intType()) return false;
@@ -155,7 +155,7 @@ static bool resolve_repeat(Compiler& compiler, const std::vector<Type*>& args,
     return true;
 }
 
-// cat: (Array[T], Array[T]) -> Array[T]  or  (List[T], List[T]) -> List[T]
+// cat: ([T], [T]) -> [T]  or  (List[T], List[T]) -> List[T]
 static bool resolve_cat(Compiler& compiler, const std::vector<Type*>& args,
     std::vector<Type*>& pt, Type*& rt, CFun& cf) {
     if (args.size() != 2) return false;
@@ -170,7 +170,7 @@ static bool resolve_cat(Compiler& compiler, const std::vector<Type*>& args,
     return false;
 }
 
-// join/flatten: Array[Array[T]] -> Array[T]  or  List[List[T]] -> List[T]
+// join/flatten: [[T]] -> [T]  or  List<List<T>> -> List<T>
 static bool resolve_join(Compiler& compiler, const std::vector<Type*>& args,
     std::vector<Type*>& pt, Type*& rt, CFun& cf) {
     if (args.size() != 1) return false;
@@ -217,7 +217,7 @@ static bool resolve_flatten(Compiler& compiler, const std::vector<Type*>& args,
     return false;
 }
 
-// toList: Array[T] -> List[T]
+// toList: [T] -> List<T>
 static bool resolve_toList_array(Compiler& compiler, const std::vector<Type*>& args,
     std::vector<Type*>& pt, Type*& rt, CFun& cf) {
     if (args.size() != 1) return false;
@@ -242,7 +242,7 @@ static bool resolve_codePoints(Compiler& compiler, const std::vector<Type*>& arg
     pt = {compiler.stringType()}; rt = compiler.listType(compiler.intType()); cf = builtin_codePoints; return true;
 }
 
-// collect: (List[T], Int) -> Array[T]
+// collect: (List<T>, Int) -> [T]
 static bool resolve_collect(Compiler& compiler, const std::vector<Type*>& args,
     std::vector<Type*>& pt, Type*& rt, CFun& cf) {
     if (args.size() != 2 || args[1] != compiler.intType()) return false;
@@ -253,7 +253,7 @@ static bool resolve_collect(Compiler& compiler, const std::vector<Type*>& args,
 
 // --- HOF resolvers ---
 
-// map: (Array[T], (T)->U) -> Array[U]  or  (List[T], (T)->U) -> List[U]
+// map: ([T], (T)->U) -> [U]  or  (List<T>, (T)->U) -> List<U>
 static bool resolve_map(Compiler& compiler, const std::vector<Type*>& args,
     std::vector<Type*>& pt, Type*& rt, CFun& cf) {
     if (args.size() != 2) return false;
@@ -272,7 +272,7 @@ static bool resolve_map(Compiler& compiler, const std::vector<Type*>& args,
     return false;
 }
 
-// filter: (Array[T], (T)->Bool) -> Array[T]  or  (List[T], (T)->Bool) -> List[T]
+// filter: ([T], (T)->Bool) -> [T]  or  (List<T>, (T)->Bool) -> List<T>
 static bool resolve_filter(Compiler& compiler, const std::vector<Type*>& args,
     std::vector<Type*>& pt, Type*& rt, CFun& cf) {
     if (args.size() != 2) return false;
@@ -289,7 +289,7 @@ static bool resolve_filter(Compiler& compiler, const std::vector<Type*>& args,
     return false;
 }
 
-// fold: (Array[T], U, (U,T)->U) -> U  or  (List[T], U, (U,T)->U) -> U
+// fold: ([T], U, (U,T)->U) -> U  or  (List<T>, U, (U,T)->U) -> U
 static bool resolve_fold(Compiler& compiler, const std::vector<Type*>& args,
     std::vector<Type*>& pt, Type*& rt, CFun& cf) {
     if (args.size() != 3) return false;
@@ -307,7 +307,7 @@ static bool resolve_fold(Compiler& compiler, const std::vector<Type*>& args,
     return false;
 }
 
-// scan: (Array[T], U, (U,T)->U) -> Array[U]  or  (List[T], U, (U,T)->U) -> List[U]
+// scan: ([T], U, (U,T)->U) -> [U]  or  (List<T>, U, (U,T)->U) -> List<U>
 static bool resolve_scan(Compiler& compiler, const std::vector<Type*>& args,
     std::vector<Type*>& pt, Type*& rt, CFun& cf) {
     if (args.size() != 3) return false;
@@ -327,7 +327,7 @@ static bool resolve_scan(Compiler& compiler, const std::vector<Type*>& args,
     return false;
 }
 
-// fold1: (Array[T], (T,T)->T) -> T  or  (List[T], (T,T)->T) -> T
+// fold1: ([T], (T,T)->T) -> T  or  (List<T>, (T,T)->T) -> T
 static bool resolve_fold1(Compiler& compiler, const std::vector<Type*>& args,
     std::vector<Type*>& pt, Type*& rt, CFun& cf) {
     if (args.size() != 2) return false;
@@ -346,7 +346,7 @@ static bool resolve_fold1(Compiler& compiler, const std::vector<Type*>& args,
     return false;
 }
 
-// scan1: (Array[T], (T,T)->T) -> Array[T]  or  (List[T], (T,T)->T) -> List[T]
+// scan1: ([T], (T,T)->T) -> [T]  or  (List<T>, (T,T)->T) -> List<T>
 static bool resolve_scan1(Compiler& compiler, const std::vector<Type*>& args,
     std::vector<Type*>& pt, Type*& rt, CFun& cf) {
     if (args.size() != 2) return false;
@@ -379,7 +379,7 @@ static bool resolve_iter(Compiler& compiler, const std::vector<Type*>& args,
     return true;
 }
 
-// find: (Array[T], (T)->Bool) -> Int  or  (List[T], (T)->Bool) -> Int
+// find: ([T], (T)->Bool) -> Int  or  (List<T>, (T)->Bool) -> Int
 static bool resolve_find(Compiler& compiler, const std::vector<Type*>& args,
     std::vector<Type*>& pt, Type*& rt, CFun& cf) {
     if (args.size() != 2) return false;
@@ -396,7 +396,7 @@ static bool resolve_find(Compiler& compiler, const std::vector<Type*>& args,
     return false;
 }
 
-// takeWhile/dropWhile: (Array[T], (T)->Bool) -> Array[T]  or  (List[T], (T)->Bool) -> List[T]
+// takeWhile/dropWhile: ([T], (T)->Bool) -> [T]  or  (List<T>, (T)->Bool) -> List<T>
 #define RESOLVE_PREDICATE_OP(fname, cfun_a, cfun_l) \
 static bool resolve_##fname(Compiler& compiler, const std::vector<Type*>& args, \
     std::vector<Type*>& pt, Type*& rt, CFun& cf) { \
@@ -417,7 +417,7 @@ RESOLVE_PREDICATE_OP(takeWhile, builtin_takeWhile_array, builtin_takeWhile_list)
 RESOLVE_PREDICATE_OP(dropWhile, builtin_dropWhile_array, builtin_dropWhile_list)
 #undef RESOLVE_PREDICATE_OP
 
-// zip: (Array[T], Array[U]) -> Array[(T,U)]  or  (List[T], List[U]) -> List[(T,U)]
+// zip: ([T], [U]) -> [(T,U)]  or  (List<T>, List<U>) -> List<(T,U)>
 static bool resolve_zip(Compiler& compiler, const std::vector<Type*>& args,
     std::vector<Type*>& pt, Type*& rt, CFun& cf) {
     if (args.size() != 2) return false;
@@ -440,7 +440,7 @@ static bool resolve_zip(Compiler& compiler, const std::vector<Type*>& args,
     return false;
 }
 
-// enumerate: Array[T] -> Array[(Int,T)]  or  List[T] -> List[(Int,T)]
+// enumerate: [T] -> [(Int,T)]  or  List<T> -> List<(Int,T)>
 static bool resolve_enumerate(Compiler& compiler, const std::vector<Type*>& args,
     std::vector<Type*>& pt, Type*& rt, CFun& cf) {
     if (args.size() != 1) return false;
@@ -624,7 +624,7 @@ static void builtin_contains_map(VM& vm, u16 dst, u16, u16 ab) {
     vm.reg(dst).i = map->entries_.count(vm.reg(ab + 1)) ? 1 : 0;
 }
 
-// keys: [K:V] -> Array[K]
+// keys: [K:V] -> [K]
 static void builtin_keys_map(VM& vm, u16 dst, u16, u16 ab) {
     auto* map = static_cast<MapObj*>(vm.reg(ab).o);
     auto* mt = static_cast<MapType*>(map->type_);
@@ -645,7 +645,7 @@ static void builtin_keys_map(VM& vm, u16 dst, u16, u16 ab) {
     }
 }
 
-// values: [K:V] -> Array[V]
+// values: [K:V] -> [V]
 static void builtin_values_map(VM& vm, u16 dst, u16, u16 ab) {
     auto* map = static_cast<MapObj*>(vm.reg(ab).o);
     auto* mt = static_cast<MapType*>(map->type_);
@@ -1164,7 +1164,7 @@ static void builtin_difference_set(VM& vm, u16 dst, u16, u16 ab) {
     vm.reg(dst).o = result;
 }
 
-// toArray: Set<T> -> Array[T]
+// toArray: Set<T> -> [T]
 static void builtin_toArray_set(VM& vm, u16 dst, u16, u16 ab) {
     auto* set = static_cast<SetObj*>(vm.reg(ab).o);
     auto* st = static_cast<SetType*>(set->type_);
@@ -1232,7 +1232,7 @@ static bool resolve_toArray_set(Compiler& compiler, const std::vector<Type*>& ar
 // length, ordinal, tag resolvers
 // ============================================================================
 
-// length resolver: Array[T] -> Int  or  List[T] -> Int  or  Map[K,V] -> Int  or  Set<T> -> Int
+// length resolver: [T] -> Int  or  List<T> -> Int  or  Map<K,V> -> Int  or  Set<T> -> Int
 static bool resolve_length(Compiler& compiler, const std::vector<Type*>& args,
     std::vector<Type*>& pt, Type*& rt, CFun& cf) {
     if (args.size() != 1) return false;
@@ -1528,7 +1528,7 @@ static bool resolve_any_single(Compiler& compiler, const std::vector<Type*>& arg
     return true;
 }
 
-// any(x, y, ...) -- wrap multiple values into Array<Any>
+// any(x, y, ...) -- wrap multiple values into [Any]
 static void builtin_any_variadic(VM& vm, u16 dst, u16, u16 argBase) {
     auto* tuple = static_cast<Tuple*>(vm.reg(argBase).o);
     auto* tupleType = static_cast<TupleType*>(tuple->type_);
@@ -1560,7 +1560,7 @@ static bool resolve_any_variadic(Compiler& compiler, const std::vector<Type*>& a
     return true;
 }
 
-// toAnyArray(tuple) -- convert a tuple to Array<Any>
+// toAnyArray(tuple) -- convert a tuple to [Any]
 static void builtin_toAnyArray(VM& vm, u16 dst, u16, u16 argBase) {
     auto* tuple = static_cast<Tuple*>(vm.reg(argBase).o);
     auto* tupleType = static_cast<TupleType*>(tuple->type_);

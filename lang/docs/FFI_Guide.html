@@ -1331,7 +1331,7 @@ $ tzpl --rt dsp_code.x</code></pre>
     <td><code>tzpl_complex_real(h)</code>, <code>tzpl_complex_imag(h)</code></td>
   </tr>
   <tr>
-    <td><code>Array[T]</code></td>
+    <td><code>[T]</code></td>
     <td><code>.o</code></td>
     <td><code>ts::arraySize(obj)</code>, <code>ts::arrayGetInt/Float/Obj(obj, i)</code></td>
     <td><code>tzpl_array_size(h)</code>, <code>tzpl_array_get_int/float/obj(h, i)</code></td>
@@ -1784,7 +1784,7 @@ Tzopilotl code calls foreign function
   <tr><td><code>oscSendI(host String, port Int, address String, value Int) Void</code></td><td>Send a message with one Int argument.</td></tr>
   <tr><td><code>oscSendF(host String, port Int, address String, value Float) Void</code></td><td>Send a message with one Float argument.</td></tr>
   <tr><td><code>oscSendS(host String, port Int, address String, value String) Void</code></td><td>Send a message with one String argument.</td></tr>
-  <tr><td><code>oscSendArgs(host String, port Int, address String, args Array[Float]) Void</code></td><td>Send a message with an array of Float arguments.</td></tr>
+  <tr><td><code>oscSendArgs(host String, port Int, address String, args [Float]) Void</code></td><td>Send a message with an array of Float arguments.</td></tr>
 </table>
 
 <h4>Example: sending to another application</h4>
@@ -1808,7 +1808,7 @@ Tzopilotl code calls foreign function
   <tr><td><code>oscSendLocalI(address String, value Int) Void</code></td><td>Dispatch a message with one Int argument.</td></tr>
   <tr><td><code>oscSendLocalF(address String, value Float) Void</code></td><td>Dispatch a message with one Float argument.</td></tr>
   <tr><td><code>oscSendLocalS(address String, value String) Void</code></td><td>Dispatch a message with one String argument.</td></tr>
-  <tr><td><code>oscSendLocalArgs(address String, args Array[Float]) Void</code></td><td>Dispatch a message with an array of Float arguments.</td></tr>
+  <tr><td><code>oscSendLocalArgs(address String, args [Float]) Void</code></td><td>Dispatch a message with an array of Float arguments.</td></tr>
 </table>
 
 <h4>Example: controlling the engine locally</h4>
@@ -1853,7 +1853,7 @@ Tzopilotl code calls foreign function
   <tr><td><code>onMessageI(address String, handler fn(Int) Void) Void</code></td><td>Register a handler that receives one integer argument.</td></tr>
   <tr><td><code>onMessageF(address String, handler fn(Float) Void) Void</code></td><td>Register a handler that receives one float argument.</td></tr>
   <tr><td><code>onMessageS(address String, handler fn(String) Void) Void</code></td><td>Register a handler that receives one string argument.</td></tr>
-  <tr><td><code>onMessageArgs(address String, handler fn(Array[Float]) Void) Void</code></td><td>Register a handler that receives all OSC arguments as a float array.</td></tr>
+  <tr><td><code>onMessageArgs(address String, handler fn([Float]) Void) Void</code></td><td>Register a handler that receives all OSC arguments as a float array.</td></tr>
   <tr><td><code>removeHandler(address String) Void</code></td><td>Remove a previously registered handler.</td></tr>
 </table>
 

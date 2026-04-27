@@ -581,7 +581,7 @@ static void builtin_endsWith_string(VM& vm, u16 dst, u16, u16 ab) {
                      s->s.compare(s->s.size() - suffix->s.size(), suffix->s.size(), suffix->s) == 0) ? 1 : 0;
 }
 
-// split(String, String) -> Array[String]
+// split(String, String) -> [String]
 static void builtin_split_string(VM& vm, u16 dst, u16, u16 ab) {
     auto* s = static_cast<StringObj*>(vm.reg(ab).o);
     auto* delim = static_cast<StringObj*>(vm.reg(ab + 1).o);
@@ -693,7 +693,7 @@ static void builtin_replace_string(VM& vm, u16 dst, u16, u16 ab) {
 // Range functions
 // ============================================================================
 
-// toArray(Range[Int]) -> Array[Int]
+// toArray(Range<Int>) -> [Int]
 static void builtin_toArray_range_int(VM& vm, u16 dst, u16, u16 argBase) {
     auto* range = static_cast<RangeObj*>(vm.reg(argBase).o);
     auto* rangeType = static_cast<RangeType*>(range->type_);
@@ -716,7 +716,7 @@ static void builtin_toArray_range_int(VM& vm, u16 dst, u16, u16 argBase) {
     vm.reg(dst).o = arr;
 }
 
-// toList(Range[Int]) -> List[Int]  (lazy)
+// toList(Range<Int>) -> List<Int>  (lazy)
 static void builtin_toList_range_int(VM& vm, u16 dst, u16, u16 argBase) {
     auto* range = static_cast<RangeObj*>(vm.reg(argBase).o);
     auto* rangeType = static_cast<RangeType*>(range->type_);
@@ -774,7 +774,7 @@ static void builtin_length_range_int(VM& vm, u16 dst, u16, u16 argBase) {
     }
 }
 
-// toArray(Range[Fraction]) -> Array[Fraction]
+// toArray(Range<Fraction>) -> [Fraction]
 static void builtin_toArray_range_fraction(VM& vm, u16 dst, u16, u16 argBase) {
     auto* range = static_cast<RangeObj*>(vm.reg(argBase).o);
     auto* rangeType = static_cast<RangeType*>(range->type_);
@@ -797,7 +797,7 @@ static void builtin_toArray_range_fraction(VM& vm, u16 dst, u16, u16 argBase) {
     vm.reg(dst).o = arr;
 }
 
-// toList(Range[Fraction]) -> List[Fraction]  (lazy)
+// toList(Range<Fraction>) -> List<Fraction>  (lazy)
 static void builtin_toList_range_fraction(VM& vm, u16 dst, u16, u16 argBase) {
     auto* range = static_cast<RangeObj*>(vm.reg(argBase).o);
     auto* rangeType = static_cast<RangeType*>(range->type_);

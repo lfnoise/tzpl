@@ -257,7 +257,7 @@ The ternary conditional `?:` has effective precedence 0 (it binds looser than al
 #### Type Expressions
 
 ```
-TypeExpr        = '[' TypeExpr ']'                         -- Array[T]
+TypeExpr        = '[' TypeExpr ']'                         -- [T] array
                 | '[' TypeExpr ':' TypeExpr ']'            -- Map[K, V]
                 | '(' ')'                                   -- unit type
                 | '(' ')' TypeExpr                          -- zero-arg function type
@@ -438,7 +438,7 @@ Bool (rank 0) → Int (rank 1) → Fraction (rank 2) → Float (rank 3) → Comp
 
 The function `isAssignable(from, to)` permits implicit promotion up this chain: an `Int` argument can be passed where a `Float` parameter is expected. The function `commonNumericType(a, b)` finds the least upper bound: `Int + Float → Float`. Division has a special case: `Int / Int → Fraction` (exact arithmetic).
 
-The numeric tower extends to containers: `Array<Int> + Array<Float> → Array<Float>`, and `List<Int> + Float → List<Float>` (broadcast).
+The numeric tower extends to containers: `[Int] + [Float] → [Float]`, and `List<Int> + Float → List<Float>` (broadcast).
 
 ### Type Inference Direction
 
@@ -490,7 +490,7 @@ Functions may be overloaded. The `resolveOverload()` algorithm:
 Template functions, structs, and enums are instantiated on demand. The process for functions:
 
 1. `tryResolveTemplate()` finds template `FuncInfo` entries and calls `inferTypeParams()` to unify the call's argument types against the template's parameter type expressions.
-2. `unifyTypeExpr()` recursively matches type expression AST nodes against concrete types, binding type parameters (e.g., matching `Array<T>` against `Array<Int>` binds `T = Int`).
+2. `unifyTypeExpr()` recursively matches type expression AST nodes against concrete types, binding type parameters (e.g., matching `[T]` against `[Int]` binds `T = Int`).
 3. A `MonoKey` (name + bound type args) is checked against `monoCache_` to avoid duplicate instantiation.
 4. `monomorphize()` creates a new `FuncInfo` with concrete parameter/return types and the type parameter bindings. The body is re-type-checked with those bindings via `recheckTemplateBody()`.
 5. The monomorphized instance is added to `monoInstances_` for code generation.
@@ -813,8 +813,8 @@ This design supports infinite lists with constant memory: only the nodes that ha
 
 Arrays use a split representation based on element type:
 
-- `PodArray<i64>` — for `Array<Int>`, `Array<Bool>`, `Array<Symbol>` (values stored inline as 64-bit words)
-- `PodArray<f64>` — for `Array<Float>` (values stored inline as doubles)
+- `PodArray<i64>` — for `[Int]`, `[Bool]`, `[Symbol]` (values stored inline as 64-bit words)
+- `PodArray<f64>` — for `[Float]` (values stored inline as doubles)
 - `ObjArray` — for arrays of object-typed elements (values stored as `Obj*` pointers, with retain/release on element mutation)
 
 This avoids boxing overhead for numeric arrays.
