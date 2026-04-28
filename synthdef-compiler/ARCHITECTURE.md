@@ -48,7 +48,7 @@ S-expression text          C++ DSL code
 
 ## Directory Structure
 
-All source files reside in `src/`. There is no build system file in the repository; compilation is currently managed through an Xcode project (`.xcodeproj`, now deleted from the working tree) or direct `clang` invocations.
+All source files reside in `src/`. The compiler is built by the repository-level CMake build through `synthdef-compiler/CMakeLists.txt`. Generated plugin code is still compiled and linked at runtime with direct `clang` invocations.
 
 ### Core Type System
 | File | Purpose |
@@ -107,7 +107,7 @@ All source files reside in `src/`. There is no build system file in the reposito
 |------|---------|
 | `synthdef_compile.hpp/.cpp` | End-to-end pipeline: `codegen()`, `writeCodeToFile()`, `compileAndLink()`, `loadDef()` (via `dlopen`), `runInternalAudioEngine()` |
 | `synthdef_audio_io.hpp/.cpp` | `AudioEngine` wrapper around RtAudio for real-time audio playback |
-| `synthdef_plugin_interface.hpp/.cpp` | References the shared `tzpl_plugin_abi.h` header (currently a stub) |
+| `synthdef_plugin_interface.hpp/.cpp` | References the shared `tzpl_plugin_abi.h` header used by generated plugins and the engine |
 | `main.cpp` | CLI entry point: reads `.sexpr` files, runs the full pipeline |
 
 ### Utilities
@@ -254,7 +254,10 @@ The algorithm converges when no more type changes occur.
 ### 7. Default Types
 Any expression whose type is still not concrete (i.e., has multiple flags set) is assigned a default type chosen from the expression's supported types in this order of preference: `f32`, `f64`, `i32`, `i64`.
 
-### 8. Find Graph Cuts
+### 8. Set Delay Reader Rates
+Promotes delay writers and readers when a delay is driven by event-rate input. Event-rate delay buffers are advanced from `processEvents()` instead of the audio tick, so readers that depend on those buffers must be scheduled at the event rate as well.
+
+### 9. Find Graph Cuts
 Analyzes the expression graph to determine where values must be materialized into named variables (rather than being inlined as subexpressions). An expression is cut if any of these conditions hold:
 
 | `GraphCut` | Reason |
@@ -269,29 +272,33 @@ Analyzes the expression graph to determine where values must be materialized int
 | `Input` | It's an inlet or control |
 | `Phi` | It's a phi node (control flow merge point) |
 
-### 9. Cut Graph to Trees
+### 10. Cut Graph to Trees
 Starting from each cut point, traces backward through the graph to form `ExprTree`s -- maximal sets of expressions that can be evaluated together as a single inline expression. Each tree has a root (the cut expression) and a list of member expressions.
 
-### 10. Remove Dead Code
+### 11. Remove Dead Code
 Eliminates trees whose roots are marked `GraphCut::Unused` (no consumers and not a sink).
 
-### 11. Add Delay/Subgraph Antecedents
+### 12. Add Delay/Subgraph Antecedents
 Establishes ordering constraints between trees:
 - Delay writes must happen after all delay reads in the same cycle
 - Subgraph results must be computed before they're consumed
 
-### 12. Sort Trees
+### 13. Sort Trees
 Topologically sorts trees by their antecedent relationships, ensuring correct evaluation order.
 
-### 13. Trees to Loops
+### 14. Compute Event Iso-Groups
+Computes `IsoGroup`s for event-rate trees. Each event-rate tree is labeled with the transitive set of `Control` expressions that can activate it. Trees with identical control dependency sets share an iso-group. The compiler then builds activation edges between iso-groups from tree antecedents and topologically sorts those groups so upstream event work runs before downstream work.
+
+### 15. Trees to Loops
 Groups trees into `GenLoop`s based on three criteria:
 - Same `Graph` (subgraph)
 - Same `SignalRate`
 - Same channel count
+- Same event iso-group for event-rate trees
 
 Trees that can share a loop are fused together. This minimizes loop overhead in the generated code.
 
-### 14. Split Rates
+### 16. Split Rates
 Partitions loops into four categories:
 - `initLoops` -- run once at initialization
 - `resetLoops` -- run on note-on/reset events
@@ -371,8 +378,8 @@ typedef struct synth_name {
 | `synth_name_init(p, fs)` | Sets sample rate, initializes constants, seeds RNG, allocates delay buffers, runs init-rate loops |
 | `synth_name_uninit(p)` | Frees dynamically allocated delay buffers |
 | `synth_name_reset(p)` | Runs reset-rate loops |
-| `synth_name_event(p, ...)` | Handles events (stub) |
-| `synth_name_processEvents(p)` | Runs event-rate loops |
+| `synth_name_event(p, ...)` | Copies incoming control payloads into `p->controls` and marks the corresponding `ctrlN_active` flag |
+| `synth_name_processEvents(p)` | Runs activated event-rate iso-groups, propagates activation to dependent groups, and advances event-rate delay buffers |
 | `synth_name_processAudio(p)` | Main per-sample processing: runs all audio-rate loops, advances delay write positions |
 | `load()` | Exported C function that returns a `tzpl_SynthDef` describing the plugin |
 
@@ -394,6 +401,26 @@ for (usize i = 0; i < 4; ++i) {
 ```
 
 The indexing uses `[i & (chans-1)]` for broadcasting when an inner expression has fewer channels than the loop.
+
+### SIMD Code Generation
+
+SIMD code generation is now implemented in `synthdef_cpp_codegen.cpp`. The generator selects an explicit Apple simd vector width per `GenLoop` and emits vector loads, stores, splats, and vector arithmetic where the loop shape and expression contents allow it. Generated source includes `using namespace simd;` and uses types such as `f32x4`, `f64x4`, `i32x2`, and `i64x2`.
+
+By default, codegen uses up to 4 lanes and skips 2-lane SIMD, because 2-channel code is often not worth vectorizing. The command-line tool accepts `--no-simd` to force scalar code and `--simd-2` to allow 2-lane SIMD. The public entry point is `cppCodeGen(synth, maxSimdWidth, minSimdWidth)`, with defaults of `4` and `4`.
+
+`CppCodeGen::simdWidth()` returns `4`, `2`, or `0`. A loop is vectorized when its total element count is divisible by the chosen width. Non-voiced loops use `loop.chans` as the count. Flat voice loops use `maxVoices * loop.chans`, except phi-node loops whose channel count is already voice-expanded. If the total count equals the vector width, codegen emits a single vector operation; otherwise it emits a stride loop such as `for (usize i = 0; i < chans; i += width)`.
+
+Some expression types deliberately force scalar code: control flow loops, vector reordering and construction operations (`VecTransposeExpr`, `VecRotateExpr`, `VecReverseExpr`, `VecStrideExpr`, `VecStutterExpr`, `VecAtExpr`, `VecPutExpr`, `VecJoinExpr`, `VecNCycExpr`), comparisons, selects, reductions, spectral expressions, random-number generators, and debug expressions. These nodes either need per-element indexing, scalar branch semantics, side effects, or operations that do not map cleanly to Apple simd operators.
+
+SIMD variable references handle the same broadcasting rules as scalar code. Scalars become vector splats, contiguous arrays are loaded with reinterpret-cast vector loads, and narrower vectors are expanded or cyclically gathered when a wider loop consumes them. Delay reads and writes have SIMD paths, including one-sample delay loads/stores, fixed and variable ring-buffer gathers, and interpolation kernels such as `tzpl_interp_cubic` for SIMD variable-delay interpolation.
+
+Voicer codegen has a flat voice mode for voice graphs without control-flow expressions. In this mode voice-local state is laid out as structure-of-arrays members such as `voice_vN[]` and `voice_dN[]`, and the generator can process multiple voices and channels in one SIMD vector. Per-voice note parameters are gathered from `voicer_params`; 1-channel voice-local buffers index by voice, while multi-channel buffers use the flattened voice/channel index.
+
+### Event-Rate Code Generation
+
+Event-rate codegen is driven by the iso-groups computed during graph analysis. Each generated control event copies the payload for a control into `p->controls[serial]` and sets `p->ctrlN_active = true`. `processEvents()` maps active controls to the iso-groups whose transitive control set contains that control, then clears the active flags.
+
+Iso-groups run in topological order. When a group runs, codegen emits only that group's event loops, marks downstream groups active according to the iso-group activation graph, and advances any non-scalar event-rate delay buffers written by expressions in the group. If no iso-groups exist, `processEvents()` falls back to running all event loops directly for compatibility.
 
 ### Control Flow
 
@@ -452,7 +479,7 @@ The s-expression format provides a serializable IR for external language front-e
 
 ### Supported Node Types in S-Expressions
 
-Constants, sample-rate, sample-dur, inlets, outlets, controls, all unary/binary/compare/cast operations, vector reductions, delay operations (max-delay, delay-init, delay-fix-read, delay-var-read, delay-write), and control flow (select, if, switch, for).
+Constants, sample-rate, sample-dur, inlets, outlets, controls, note parameters, all unary/binary/compare/cast operations, vector reductions and vector transforms, delay operations (max-delay, delay-init, delay-fix-read, delay-var-read, delay-write), sample-buffer operations, spectral chain operations, voicers, and control flow (select, if, switch, for).
 
 ---
 
@@ -553,19 +580,3 @@ The `synthdef_common_ops` module provides a comprehensive library of signal proc
 
 ### Control
 `toggle`, `setreset`, `srt`, `pause`, `pull`, `init`, ...
-
----
-
-## Future Direction: SIMD Code Generation
-
-The codebase contains several indicators of planned SIMD support:
-
-1. **`synthdef_types.hpp`** defines SIMD vector types (`f32x4`, `f64x4`, `i32x8`, etc.) using Apple's simd framework
-2. **`CppCodeGen`** has `max_simd_width` (currently 4) and `unroll_by` (currently 4) member variables, suggesting planned vectorized loop generation
-3. **Power-of-two channel counts** enable efficient SIMD lane masking and modular indexing
-4. The current scalar code is compiled with `-O3 -ffast-math`, which already enables auto-vectorization by `clang` in many cases
-
-A future SIMD code generation pass would likely:
-- Process multiple samples per iteration instead of one
-- Use explicit SIMD intrinsics or vector types for the inner loop
-- Require careful handling of delay buffer access patterns and control flow boundaries
