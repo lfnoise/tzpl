@@ -607,9 +607,18 @@ Type* TypeChecker::inferExpr(Expr* expr, Type* expectedType) {
         case ASTNode::EnumConstructor: {
             // This node may be a re-tagged CallExpr_ or FieldExpr_ from a previous
             // type-check pass (e.g., recheckTemplateBody).  In that case, the
-            // resolvedType is already set correctly — reuse it to avoid UB from
-            // static_cast<EnumConstructExpr*> on a node that isn't one.
+            // resolvedType is already set correctly, but we still must re-infer the
+            // inner argument so its overload-resolution state (e.g.
+            // resolvedFuncGlobalIndex) reflects the bindings of the *current*
+            // monomorphization.  Otherwise a different mono's resolution leaks in.
             if (auto* existingEnum = dynamic_cast<EnumType*>(expr->resolvedType)) {
+                Expr* argExpr = nullptr;
+                if (auto* ce = dynamic_cast<CallExpr_*>(expr)) {
+                    if (!ce->args.empty()) argExpr = static_cast<Expr*>(ce->args[0].get());
+                } else if (auto* ec = dynamic_cast<EnumConstructExpr*>(expr)) {
+                    if (ec->arg) argExpr = static_cast<Expr*>(ec->arg.get());
+                }
+                if (argExpr) inferExpr(argExpr);
                 result = existingEnum;
                 break;
             }

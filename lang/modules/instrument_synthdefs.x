@@ -151,13 +151,27 @@ fn pwmPad() S = voicer(kMaxVoices, pwmPadVoice) sum outlet;
 pwmPad defSynth("pwmPad");
 
 ---------------------------------------------------------------------------
--- 6. (Skipped) Karplus-Strong pluck.
---    A proper pluck wants a per-voice feedback delay whose tap position
---    is fs()/freq (variable read). On the current synthdef-compiler, a
---    DelayVarRead inside any synth that imports common_ugens.* causes a
---    segfault during graph analysis -- regardless of whether the synth
---    is wrapped in a voicer. Until that crash is resolved, this slot is
---    intentionally left empty.
+-- 6. Karplus-Strong pluck.
+--    Per-voice feedback delay with a variable read tap at fs()/freq,
+--    excited by a brief noise burst and damped by a one-pole lowpass.
+
+fn pluckVoice() S {
+	let f = pNoteFreq();
+	let a = pNoteAmp();
+	let g = gate();
+
+	let buf = delayVar(0.05);
+	let exc = decay2(g, 0.001, 0.01) * white();
+	let dlyTime = 1.0 / f;
+	let tap = buf vread(dlyTime);
+	let damp = tap lpf(2000.0) * 0.99;
+	(exc + damp) write(buf);
+	tap * a * 0.5
+}
+
+fn pluck() S = voicer(kMaxVoices, pluckVoice) sum outlet;
+
+pluck defSynth("pluck");
 
 ---------------------------------------------------------------------------
 -- 7. Modal bell.
@@ -258,6 +272,7 @@ let kInstrumentSynths = [
 	"fmBrass",
 	"sawLead",
 	"pwmPad",
+	"pluck",
 	"modalBell",
 	"kick",
 	"snare",

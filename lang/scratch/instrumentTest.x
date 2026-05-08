@@ -102,6 +102,7 @@ fn playAll() {
 
 		-- pitched, percussive (decay-driven) voicers: short gate, longer tail.
 		"fmBell"    arpeggio(72.0, 0.5, 0.05, 0.7, 2.5) yieldAll;
+		"pluck"     arpeggio(64.0, 0.5, 0.05, 0.5, 1.5) yieldAll;
 		"modalBell" arpeggio(67.0, 0.5, 0.05, 0.8, 3.5) yieldAll;
 
 		-- drums: fixed freq, just rhythmic triggers.
