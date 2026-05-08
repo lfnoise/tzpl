@@ -217,10 +217,29 @@ const std::vector<Compiler::ForeignFuncEntry>* Compiler::foreignModuleFunctions(
 // --- Constant folding ---
 
 bool Compiler::evalPrimitive(Primitive* prim, const Word* args, u16 argc, Word& outResult) {
+    // The VM constructor unconditionally sets rt::gCurrentAllocator to the new
+    // VM's TLSF pool, and VM::evalPrimitive needs gCurrentAllocator pointed at
+    // its own pool while the primitive runs.  Both leak the eval VM's allocator
+    // back to the caller's thread, so subsequent compilation-thread allocations
+    // (StringObj for string literals, AST helpers, etc.) end up in the eval
+    // VM's tiny 64K pool and exhaust it on any non-trivial codegen.  Save and
+    // restore around the call so the rest of compilation keeps using ::malloc.
+    auto savedVM = gCurrentVM;
+    auto savedAlloc = rt::gCurrentAllocator;
+    bool created = false;
     if (!evalVM_) {
         evalVM_ = std::make_unique<VM>(64 * 1024, typeUniverse_);
+        created = true;
+    }
+    if (!created) {
+        // VM ctor already set gCurrentAllocator; if we reused an existing VM
+        // we still need it pointing at the eval pool for the call itself.
+        gCurrentVM = evalVM_.get();
+        rt::gCurrentAllocator = &evalVM_->allocator();
     }
     outResult = evalVM_->evalPrimitive(prim, args, argc);
+    gCurrentVM = savedVM;
+    rt::gCurrentAllocator = savedAlloc;
     return true;
 }
 
