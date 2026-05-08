@@ -773,17 +773,24 @@ struct ExprCodegenVisitor : ExprVisitor {
         }
     }
     void visit(SampleRate* p) override {
+        // p->fs is stored as f64; cast to the expression's inferred type.
         if (g.inSimdMode) {
-            s += simdSplat(NumType::f64, g.currentSimdWidth, "p->fs");
-        } else {
+            s += simdSplat(p->type, g.currentSimdWidth,
+                FMT("({})(p->fs)", p->type.str()));
+        } else if (p->type == NumType::f64) {
             s += "p->fs";
+        } else {
+            s += FMT("({})(p->fs)", p->type.str());
         }
     }
     void visit(SampleDur* p) override {
         if (g.inSimdMode) {
-            s += simdSplat(NumType::f64, g.currentSimdWidth, "p->sd");
-        } else {
+            s += simdSplat(p->type, g.currentSimdWidth,
+                FMT("({})(p->sd)", p->type.str()));
+        } else if (p->type == NumType::f64) {
             s += "p->sd";
+        } else {
+            s += FMT("({})(p->sd)", p->type.str());
         }
     }
     void visit(Control* p) override {
@@ -953,13 +960,20 @@ struct ExprCodegenVisitor : ExprVisitor {
                 g.genExpr(p->in2(), cel),
                 g.genExpr(p->in1(), cel));
         } else {
-            s += FMT("sel({}, std::array<{},{}>{{\n", 
+            s += FMT("sel({}, std::array<{},{}>{{\n",
                 g.genExpr(p->in0(), cel), p->type.str(), p->inputs.size()-1);
             g.indent += 1;
             for (int i = 1; i < p->inputs.size(); ++i) {
                 if (i > 1) s += ",\n";
                 tabIndent(s, g.indent);
-                s += g.genExpr(p->inputs[i], cel);
+                // Wrap each element in a cast to the array's element type.
+                // The Tzopilotl front end can hand us a heterogeneous mix
+                // (e.g. `[gate > 0, (y > 0.99) + 1, ...]` where elements
+                // are bool/int/float). Without an explicit cast clang's
+                // -Wc++11-narrowing rejects bool-into-float in the
+                // std::array initializer list.
+                s += FMT("({})({})", p->type.str(),
+                    g.genExpr(p->inputs[i], cel));
             }
             s += FMT("}})\n");
             g.indent -= 1;

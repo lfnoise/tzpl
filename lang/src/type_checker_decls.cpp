@@ -30,6 +30,51 @@
 
 namespace ts {
 
+// Is this declared return type spelled "Void" (purely syntactically)?
+// Used by the trailing-expression check below, which runs before template
+// gating and so can't trust resolveTypeExpr (the type may reference unbound
+// type parameters).
+static bool isVoidReturnType(TypeExpr* expr) {
+    if (!expr || expr->kind != ASTNode::NamedType) return false;
+    return static_cast<NamedTypeNode*>(expr)->name == "Void";
+}
+
+// Does this AST node, used in tail position, evaluate to a value?  Pure
+// AST shape -- doesn't depend on type resolution -- so it can be asked
+// before template/monomorphization gating.
+static bool nodeYieldsValue(ASTNode* node);
+
+static bool blockHasTrailingExpression(ASTNode* node) {
+    if (!node || node->kind != ASTNode::Block) return false;
+    auto* block = static_cast<BlockStmt*>(node);
+    if (block->stmts.empty()) return false;
+    return nodeYieldsValue(block->stmts.back().get());
+}
+
+static bool nodeYieldsValue(ASTNode* node) {
+    if (!node) return false;
+    switch (node->kind) {
+        case ASTNode::ExprStmt:
+            return static_cast<ExprStmtNode*>(node)->isTrailing;
+        case ASTNode::Block:
+            return blockHasTrailingExpression(node);
+        case ASTNode::IfStmt: {
+            // An if-else evaluates to the value of the taken branch.
+            // Both arms must yield, and the else arm may itself be an
+            // `else if` chain (another IfStmt rather than a Block).
+            auto* is = static_cast<IfStmtNode*>(node);
+            return is->elseBranch
+                && nodeYieldsValue(is->thenBranch.get())
+                && nodeYieldsValue(is->elseBranch.get());
+        }
+        case ASTNode::SwitchStmt:
+            // match/switch yields a value via its case bodies.
+            return true;
+        default:
+            return false;
+    }
+}
+
 // Recursively scan a function body for any ReturnStmt. Does NOT descend into
 // nested function declarations or lambda bodies, since returns there target
 // their enclosing function.
@@ -650,6 +695,30 @@ void TypeChecker::checkFnDecl(FnDeclNode* decl) {
     // Desugar constraint-as-param-type for local functions (top-level already done)
     if (decl->resolvedFuncGlobalIndex == -1) {
         desugarConstraintParams(decl);
+    }
+
+    // Purely-syntactic check for the trailing-expression / return-statement
+    // requirement.  This is independent of type instantiation, so we run it
+    // before the early-return for templates -- otherwise constraint-typed
+    // params (e.g. `x AsSignal`) get desugared into a template, the body
+    // check below is skipped, and per-call-site monomorphization never
+    // revalidates the structural rule.  The result is silent acceptance of
+    // bodies like `fn ring(x AsSignal) S { y <- expr; }` that have no
+    // trailing expression and end up returning a stack-uninitialized
+    // SignalExpr at runtime.
+    //
+    // We compare the declared return type *syntactically* to "Void" rather
+    // than via resolveTypeExpr -- the return type may reference unbound
+    // template parameters at this point (e.g. `fn foo<T>(x T) T`).
+    if (decl->body && !decl->isCoroutine && decl->returnType
+        && !isVoidReturnType(decl->returnType.get())
+        && !blockHasTrailingExpression(decl->body.get())
+        && !bodyHasReturnStmt(decl->body.get())) {
+        std::string declared = decl->returnType->kind == ASTNode::NamedType
+            ? static_cast<NamedTypeNode*>(decl->returnType.get())->name
+            : std::string("non-Void");
+        error(decl->loc, "Function '" + decl->name + "' declared to return '"
+              + declared + "' but body has no trailing expression or return statement");
     }
 
     // Skip template function declarations; they are type-checked per monomorphization

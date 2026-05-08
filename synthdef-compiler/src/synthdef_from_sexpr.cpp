@@ -290,6 +290,9 @@ std::expected<S, std::string> SExprGraphBuilder::parseDebugExpr(sexpr::ItemVec c
 std::expected<UnaryOp, std::string> parseUnaryOp(sexpr::Symbol const& sym) {
     static std::unordered_map<std::string, UnaryOp> const opMap = {
         {"-", UnaryOp::Neg}, {"!", UnaryOp::Not}, {"~", UnaryOp::BitNot},
+        // Aliases matching the Tzopilotl enum-tag spelling emitted by
+        // synthdef.x's `toLisp` (uses `op tag toString`).
+        {"neg", UnaryOp::Neg}, {"not", UnaryOp::Not}, {"bitNot", UnaryOp::BitNot},
         {"abs", UnaryOp::Abs}, {"floor", UnaryOp::Floor}, {"ceil", UnaryOp::Ceil},
         {"trunc", UnaryOp::Trunc}, {"sqrt", UnaryOp::Sqrt}, {"cbrt", UnaryOp::Cbrt},
         {"exp", UnaryOp::Exp}, {"exp2", UnaryOp::Exp2}, {"exp10", UnaryOp::Exp10},

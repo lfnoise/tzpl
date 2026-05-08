@@ -207,7 +207,7 @@ fn ring(x S, freq AsSignal, ringTime AsSignal) S {
 	let a2 = -(R sq);
 	let b0 = 0.5;
 	let y = delayVar();
-	y <- b0 * (x - z2(x)) + a1 * y(1) + a2 * y(2);
+	y <- b0 * (x - z2(x)) + a1 * y(1) + a2 * y(2)
 }
 
 fn pling(x S, freq AsSignal, atkTime AsSignal, dcyTime AsSignal) S {

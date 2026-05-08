@@ -15,6 +15,7 @@
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "synthdef_str_util.hpp"
+#include <cstring>
 #include <iomanip>
 
 namespace synthdef {
@@ -156,13 +157,39 @@ namespace synthdef {
         return std::to_string(value) + "LL";
     }
 
+    // Detect Inf/NaN by inspecting the raw bit pattern. The synthdef
+    // compiler is built with -ffast-math, under which std::fpclassify /
+    // std::isinf / std::isnan are unreliable -- the optimizer assumes
+    // finite math and folds the checks to false. The `volatile` load
+    // forces the optimizer to actually read the value as bytes rather
+    // than reasoning about it as a finite floating-point number.
+    __attribute__((noinline, optnone))
+    inline bool isInfOrNan(float v) {
+        volatile u32 bits;
+        std::memcpy((void*)&bits, &v, sizeof(bits));
+        u32 b = bits;
+        return (b & 0x7F800000u) == 0x7F800000u;
+    }
+    __attribute__((noinline, optnone))
+    inline bool isInfOrNan(double v) {
+        volatile u64 bits;
+        std::memcpy((void*)&bits, &v, sizeof(bits));
+        u64 b = bits;
+        return (b & 0x7FF0000000000000ull) == 0x7FF0000000000000ull;
+    }
+
     template <typename T>
     string ftos_(T value) {
+        // Inf/NaN should not appear in well-formed synthdef expressions;
+        // they only arise from constant-folding the zero-padded SIMD
+        // lanes that the codegen pads multi-channel constants to. Those
+        // lanes are never read at runtime, so the safest thing is to
+        // emit a real zero rather than try to print Inf/NaN literals
+        // (which then have to compile through clang's -ffast-math).
+        if (isInfOrNan(value)) {
+            value = T(0);
+        }
         switch (std::fpclassify(value)) {
-            case FP_INFINITE:
-                return std::signbit(value) ? "-inf" : "inf";
-            case FP_NAN:
-                return "nan";
             case FP_SUBNORMAL:
                 // This has to be handled separately, because std::stod 
                 // throws an out of range exception for subnormal values.
