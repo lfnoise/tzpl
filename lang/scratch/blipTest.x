@@ -1,6 +1,7 @@
 
 import common_ugens.*;
 import synthdef.*;
+import clock.*;
 
 fn blipTest() S {
 	let h = 1/30 sinosc(0.75) bilin(1, 48);
@@ -17,6 +18,7 @@ go(coro fn() Float {
 }());
 
 "done evaluating" println;
+
 
 
 

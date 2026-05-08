@@ -504,7 +504,8 @@ fn iseq(trigger S, pattern AsSignal, length AsSignal) S {
 -- envelopes
 
 fn asr(gate S, a, s, r) S {
-	let (a, r) = (a, r) decay40dB;
+	let a = a decay40dB;
+	let r = r decay40dB;
 	let stage = delayVar();
 	let y = delayVar();
 
@@ -512,23 +513,25 @@ fn asr(gate S, a, s, r) S {
 
 	let y1 = y(1);
 	let stage = gate > 0;
-	let goal = select(stage, [0 asSignal, s asSignal]);
-	let coef = select(stage, [r asSignal, a asSignal]);
+	let goal = select(stage(0), [0 asSignal, s asSignal]);
+	let coef = select(stage(0), [r, a]);
 	
     y <- goal + coef * (y1 - goal)
 }
 
 fn adsr(gate S, a, d, s, r) S {
-	let (a, d, r) = (a, d, r) decay40dB;
+	let a = a decay40dB;
+	let d = d decay40dB;
+	let r = r decay40dB;
 	let stage = delayVar();
 	let y = delayVar();
 
-	-- stages: 0: released + waiting for attack, 1: attack, 2: decay + sustain
+	-- stages: 0: gate off (released + waiting for attack), 1: attack, 2: decay + sustain
 
 	let y1 = y(1);
-	stage <- select(stage, [gate > 0, (y1 > 0.99)+1, (gate > 0)*2]);
-	let goal = select(stage, [0 asSignal, 1 asSignal, s asSignal]);
-	let coef = select(stage, [r asSignal, a asSignal, d asSignal]);
+	stage <- select(stage(1), [gate > 0, (y1 > 0.99)+1, (gate > 0)*2]);
+	let goal = select(stage(0), [0 asSignal, 1 asSignal, s asSignal]);
+	let coef = select(stage(0), [r asSignal, a asSignal, d asSignal]);
 	
     y <- goal + coef * (y1 - goal)
 }
@@ -562,15 +565,18 @@ fn _lag(x S, u AsSignal, d AsSignal) S {
 }
 
 fn lag(x S, u AsSignal, d AsSignal) S {
-	let (u, d) = decay40dB((u, d));
+	let u = u decay40dB;
+	let d = d decay40dB;
 	x _lag(u, d)
 }
 fn lag2(x S, u AsSignal, d AsSignal) S {
-	let (u, d) = decay40dB((u, d)/2);
+	let u = decay40dB(u/2);
+	let d = decay40dB(d/2);
 	x _lag(u, d) _lag(u, d)
 }
 fn lag3(x S, u AsSignal, d AsSignal) S {
-	let (u, d) = decay40dB((u, d)/3);
+	let u = decay40dB(u/3);
+	let d = decay40dB(d/3);
 	x _lag(u, d) _lag(u, d) _lag(u, d)
 }
 
@@ -1056,6 +1062,8 @@ fn pull(gate S, initVal AsConstantSignal, gatedFun fn()S) S {
 
 
 fn pause(gate S, gatedFun fn()S) S = if_(gate > 0, fn(){ gate * gatedFun() });
+
+
 
 
 

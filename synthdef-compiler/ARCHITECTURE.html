@@ -609,16 +609,18 @@ result = p-&gt;d0[(p-&gt;d0_wrpos - u64(delay_time)) &amp; p-&gt;d0_mask];
 
 <h2>The S-Expression Front-End</h2>
 
-<p>The s-expression format provides a serializable IR for external language front-ends. Each expression is defined with an integer ID and can reference other expressions by their IDs.</p>
+<p>The s-expression format provides a serializable IR for external language front-ends. Each expression is defined with an integer ID and can reference other expressions by their IDs. Syntax is positional only: there are no keyword arguments or colon-prefixed field names.</p>
 
 <h3>S-Expression Format</h3>
 
 <pre><code>(
-  (constant :id 0 :rate const :type f64 :value 440.0)
-  (sample-rate :id 1 :rate init :type f64)
-  (binary-op :id 2 :op div :inputs (0 1))
-  (outlet :id 3 :inputs (2) :name "out")
+  (0 Constant 1 8 (440.0))
+  (1 SampleRate)
+  (2 BinaryOp div (0 1))
+  (3 Outlet "out" 2)
 )</code></pre>
+
+<p>In the constant form above, <code>1</code> is the channel count and <code>8</code> is the <code>NumType</code> flag value for <code>f64</code>.</p>
 
 <h3>Parsing Pipeline</h3>
 

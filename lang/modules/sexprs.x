@@ -15,16 +15,16 @@ fn toString(o SExpr) String {
         SExpr.int(i) : i toString;
         SExpr.float(i) : i toString;
         SExpr.symbol(s) : s toString;
-        SExpr.string(s) : s braces(Braces.quotes);
-        SExpr.vec(v) : v separatedString(", ") braces(Braces.square);
+        SExpr.string(s) : s quotes;
+        SExpr.vec(v) : v separatedString(", ") brackets;
     }
 }
 
 fn sxpr(b Bool) SExpr = SExpr.bool(b);
-fn sxpr(i Int) SExpr = SExpr.int(b);
-fn sxpr(f Float) SExpr = SExpr.float(b);
-fn sxpr(s Symbol) SExpr = SExpr.symbol(b);
-fn sxpr(s String) SExpr = SExpr.string(b);
+fn sxpr(i Int) SExpr = SExpr.int(i);
+fn sxpr(f Float) SExpr = SExpr.float(f);
+fn sxpr(s Symbol) SExpr = SExpr.symbol(s toString);
+fn sxpr(s String) SExpr = SExpr.string(s);
 fn sxpr(v [SExpr]) SExpr = SExpr.vec(v);
 
 
@@ -40,11 +40,11 @@ fn separatedString(strings [String], separator String = " ") String {
     var between = false;
     for (s : strings) {
         if (between) {
-            out = out + separator;
+            out = out $ separator;
         } else {
             between = true;
         }
-        out = out + s;
+        out = out $ s;
     }
     out
 }
@@ -69,7 +69,6 @@ fn toString(o Json) String {
 		Json.object(m): m pairs map(fn(p) { "\"%^\": %^" fmt(p.0, p.1) }) separatedString(", ") braces;
 	}
 }
-
 
 
 

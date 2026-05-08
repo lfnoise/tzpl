@@ -12,6 +12,7 @@ import common_ugens.*;
 type BiquadCoeffs = (S, S, S, S, S);  -- b0, b1, b2, a1, a2
 
 let kLog2o2 = 2.0 log / 2.0;  -- ln(2) / 2
+let kLog001 = 0.001 log;
 
 -- ============================================================
 -- Internal helpers
@@ -199,9 +200,9 @@ fn crossover(in S, freq AsSignal) (S, S) = (in lpf2(freq), in hpf2(freq));
 
 -- ringing filter
 fn ring(x S, freq AsSignal, ringTime AsSignal) S {
-	let K = log001 * T();
+	let K = kLog001 * T();
 	let R = 1 + K / ringTime;
-	let cs = freq hzw cos
+	let cs = freq hzw cos;
 	let a1 = 2 * R * cs;
 	let a2 = -(R sq);
 	let b0 = 0.5;
@@ -212,4 +213,6 @@ fn ring(x S, freq AsSignal, ringTime AsSignal) S {
 fn pling(x S, freq AsSignal, atkTime AsSignal, dcyTime AsSignal) S {
 	x ring(freq, dcyTime) - x ring(freq atkTime)
 }
+
+
 

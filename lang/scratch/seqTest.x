@@ -1,5 +1,6 @@
 import common_ugens.*;
 import synthdef.*;
+import clock.*;
 
 fn seqTest() S {
 	-- let middleC = 261.6255653;
@@ -22,6 +23,7 @@ go(coro fn() Float {
 	"seqTest" playFor(24.0) yieldAll;
 	"done playing" println;
 }());
+
 
 
 

@@ -459,18 +459,20 @@ One-sample delays are optimized to a single scalar variable (no ring buffer need
 
 ## The S-Expression Front-End
 
-The s-expression format provides a serializable IR for external language front-ends. Each expression is defined with an integer ID and can reference other expressions by their IDs.
+The s-expression format provides a serializable IR for external language front-ends. Each expression is defined with an integer ID and can reference other expressions by their IDs. Syntax is positional only: there are no keyword arguments or colon-prefixed field names.
 
 ### S-Expression Format
 
 ```lisp
 (
-  (constant :id 0 :rate const :type f64 :value 440.0)
-  (sample-rate :id 1 :rate init :type f64)
-  (binary-op :id 2 :op div :inputs (0 1))
-  (outlet :id 3 :inputs (2) :name "out")
+  (0 Constant 1 8 (440.0))
+  (1 SampleRate)
+  (2 BinaryOp div (0 1))
+  (3 Outlet "out" 2)
 )
 ```
+
+In the constant form above, `1` is the channel count and `8` is the `NumType` flag value for `f64`.
 
 ### Parsing Pipeline
 
