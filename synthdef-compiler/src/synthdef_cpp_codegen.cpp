@@ -344,6 +344,13 @@ struct CppCodeGen {
     bool inSimdMode = false;
     int currentSimdWidth = 0;
 
+    // True while emitting init-time scalar expressions (e.g. delay buffer
+    // size args). Bypasses the `is_root()` factoring in genExpr so that
+    // SampleRate / SampleDur / arithmetic over them lower inline to
+    // `p->fs` / `p->sd` rather than to per-sample struct refs that aren't
+    // populated yet (and may not have a struct member at all).
+    bool inInitMode = false;
+
     // Flat voice mode: when the voice body has no branching, all voices
     // can be computed as a single flat vector without a per-voice loop.
     bool flatVoiceMode = false;    // true if this synth uses flat voice layout
@@ -1537,13 +1544,13 @@ struct ExprCodegenVisitor : ExprVisitor {
 
 string CppCodeGen::genExpr(S u, VarIndex cel) {
     string s;
-    
-    if (u->is_root() && !u.identical(current_root)) {
+
+    if (!inInitMode && u->is_root() && !u.identical(current_root)) {
         s += genVarRef(u, cel);
     } else {
         ExprCodegenVisitor v(this, s, cel);
         u->accept(v);
-    } 
+    }
     return s;
 }
 
@@ -2374,6 +2381,7 @@ string CppCodeGen::genDefineFun() {
 
 string CppCodeGen::genDelayAlloc() {
     string s;
+    inInitMode = true;
 
     // Top-level delays
     for (auto delay : synth->delayBufs) {
@@ -2497,6 +2505,7 @@ string CppCodeGen::genDelayAlloc() {
         }
     }
 
+    inInitMode = false;
     return s;
 }
 
