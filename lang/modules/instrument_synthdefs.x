@@ -57,10 +57,11 @@ fn fmBellVoice() S {
 	let f = pNoteFreq();
 	let a = pNoteAmp();
 	let g = gate();
+	let trig = g tr;
 
 	-- Note-on triggers a tone that always rings out.
-	let amp = decay2(g, 0.005, 2.5);
-	let idx = decay2(g, 0.005, 0.6) * 6.0;
+	let amp = decay2(trig, 0.005, 2.5);
+	let idx = decay2(trig, 0.005, 0.6) * 6.0;
 
 	let modulator = (f * 3.5) sinosc * idx;
 	let car = f sinosc(modulator);
@@ -160,11 +161,18 @@ fn pluckVoice() S {
 	let a = pNoteAmp();
 	let g = gate();
 
-	let buf = delayVar(0.05);
-	let exc = decay2(g, 0.001, 0.01) * white();
-	let dlyTime = 1.0 / f;
+	-- Karplus-Strong pluck. The freq spec is 20..12000, so clamp f at 20
+	-- to keep dlyTime within the 0.05s buffer for inactive voices (where
+	-- voicer_params freq is 0, causing fs/f to be inf and NaN-propagate
+	-- under -ffast-math).
+	-- Damping is a one-zero average (classic K-S) -- a biquad lpf would
+	-- be resonant with Q=sqrt(2) and let harmonics near the lpf peak
+	-- exceed unity loop gain, causing the K-S to blow up.
+	let buf = delayVar(0.05 * fs());
+	let exc = white() * timedGate(g tr, 0.01);
+	let dlyTime = fs() / max(f, 20.0);
 	let tap = buf vread(dlyTime);
-	let damp = tap lpf(2000.0) * 0.99;
+	let damp = (tap + tap z1) * (0.5 * 0.99);
 	(exc + damp) write(buf);
 	tap * a * 0.5
 }
@@ -183,7 +191,7 @@ fn modalBellVoice() S {
 	let g = gate();
 
 	-- Impulse excitation right at note-on.
-	let strike = decay2(g, 0.0005, 0.005);
+	let strike = decay2(g tr, 0.0005, 0.005);
 
 	-- Inharmonic partials, loosely tubular-bell-like.
 	let ratios = [0.5, 1.0, 2.0, 2.76, 5.4, 8.93] vec;
@@ -206,13 +214,14 @@ modalBell defSynth("modalBell");
 fn kickVoice() S {
 	let a = pNoteAmp();
 	let g = gate();
+	let trig = g tr;
 
 	-- Pitch sweep from ~120 Hz down to ~45 Hz over ~60 ms.
-	let pEnv = decay2(g, 0.001, 0.06);
+	let pEnv = decay2(trig, 0.001, 0.06);
 	let f = 45.0 + 75.0 * pEnv;
 
-	let body = f sinosc * decay2(g, 0.001, 0.4);
-	let click = decay2(g, 0.0001, 0.005) * 2 white * 0.5;
+	let body = f sinosc * decay2(trig, 0.001, 0.4);
+	let click = decay2(trig, 0.0001, 0.005) * 2 white * 0.5;
 
 	(body + click) tanh * a * 0.7
 }
@@ -228,9 +237,10 @@ kick defSynth("kick");
 fn snareVoice() S {
 	let a = pNoteAmp();
 	let g = gate();
+	let trig = g tr;
 
-	let noiseEnv = decay2(g, 0.001, 0.18);
-	let toneEnv  = decay2(g, 0.001, 0.08);
+	let noiseEnv = decay2(trig, 0.001, 0.18);
+	let toneEnv  = decay2(trig, 0.001, 0.08);
 
 	let tones = [180.0, 330.0] vec sinosc * toneEnv * 0.6;
 	let noise = 2 white bpf(4500.0, 1.5) * noiseEnv;
@@ -278,3 +288,4 @@ let kInstrumentSynths = [
 	"snare",
 	"subBass",
 ];
+

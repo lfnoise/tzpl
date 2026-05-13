@@ -12,14 +12,12 @@
 import synthdef.*;
 import audio_engine as ae;
 import clock.*;
+import common_ugens.*;
 
 import instrument_synthdefs.*;
 
 ---------------------------------------------------------------------------
 -- helpers
-
--- MIDI note number to Hertz (using Float math throughout).
-fn mtof(midi Float) Float = 440.0 * exp2((midi - 69.0) / 12.0);
 
 -- Wrap a noteOn in a single-command bundle.
 fn note(nodeID Int, noteID Int, freq Float, amp Float) Int {
@@ -51,7 +49,7 @@ coro fn arpeggio(name String, root Float, amp Float,
 	var i = 0;
 	while (i < degrees length) {
 		let noteID = i + 1;
-		let freq = mtof(root + degrees[i]);
+		let freq = nnhz(root + degrees[i]);
 		note(nodeID, noteID, freq, amp);
 		yield gateTime;
 		release(nodeID, noteID);
@@ -116,3 +114,5 @@ fn playAll() {
 playAll();
 
 "done evaluating" println;
+
+
