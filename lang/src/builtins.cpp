@@ -588,8 +588,8 @@ static void builtin_put_map(VM& vm, u16 dst, u16, u16 ab) {
     result->entries_ = map->entries_;
     result->entries_[vm.reg(ab + 1)] = vm.reg(ab + 2);
     // Retain all Obj* keys and values in the new map
-    bool keyIsObj = mt->keyType_->isObjType();
-    bool valIsObj = mt->valueType_->isObjType();
+    bool keyIsObj = storesObjPtr(mt->keyType_);
+    bool valIsObj = storesObjPtr(mt->valueType_);
     if (keyIsObj || valIsObj) {
         for (auto& [k, v] : result->entries_) {
             if (keyIsObj && k.o) k.o->retain();
@@ -607,8 +607,8 @@ static void builtin_remove_map(VM& vm, u16 dst, u16, u16 ab) {
     result->entries_ = map->entries_;
     result->entries_.erase(vm.reg(ab + 1));
     // Retain all Obj* keys and values in the new map
-    bool keyIsObj = mt->keyType_->isObjType();
-    bool valIsObj = mt->valueType_->isObjType();
+    bool keyIsObj = storesObjPtr(mt->keyType_);
+    bool valIsObj = storesObjPtr(mt->valueType_);
     if (keyIsObj || valIsObj) {
         for (auto& [k, v] : result->entries_) {
             if (keyIsObj && k.o) k.o->retain();
@@ -630,11 +630,11 @@ static void builtin_keys_map(VM& vm, u16 dst, u16, u16 ab) {
     auto* mt = static_cast<MapType*>(map->type_);
     Type* kt = mt->keyType_;
     auto* arrType = vm.arrayType(kt);
-    if (kt == vm.intType() || kt == vm.boolType() || kt == vm.symbolType()) {
+    if (kt && !storesObjPtr(kt) && !storesF64(kt)) {
         auto* arr = new PodArray<i64>(arrType);
         for (auto& [k, v] : map->entries_) arr->v.push_back(k.i);
         vm.reg(dst).o = arr;
-    } else if (kt == vm.floatType()) {
+    } else if (storesF64(kt)) {
         auto* arr = new PodArray<f64>(arrType);
         for (auto& [k, v] : map->entries_) arr->v.push_back(k.f);
         vm.reg(dst).o = arr;
@@ -651,11 +651,11 @@ static void builtin_values_map(VM& vm, u16 dst, u16, u16 ab) {
     auto* mt = static_cast<MapType*>(map->type_);
     Type* vt = mt->valueType_;
     auto* arrType = vm.arrayType(vt);
-    if (vt == vm.intType() || vt == vm.boolType() || vt == vm.symbolType()) {
+    if (vt && !storesObjPtr(vt) && !storesF64(vt)) {
         auto* arr = new PodArray<i64>(arrType);
         for (auto& [k, v] : map->entries_) arr->v.push_back(v.i);
         vm.reg(dst).o = arr;
-    } else if (vt == vm.floatType()) {
+    } else if (storesF64(vt)) {
         auto* arr = new PodArray<f64>(arrType);
         for (auto& [k, v] : map->entries_) arr->v.push_back(v.f);
         vm.reg(dst).o = arr;
@@ -677,8 +677,8 @@ static void builtin_merge_map(VM& vm, u16 dst, u16, u16 ab) {
         result->entries_[k] = v;
     }
     // Retain all Obj* keys and values in the new map
-    bool keyIsObj = mt->keyType_->isObjType();
-    bool valIsObj = mt->valueType_->isObjType();
+    bool keyIsObj = storesObjPtr(mt->keyType_);
+    bool valIsObj = storesObjPtr(mt->valueType_);
     if (keyIsObj || valIsObj) {
         for (auto& [k, v] : result->entries_) {
             if (keyIsObj && k.o) k.o->retain();
@@ -826,11 +826,22 @@ static void builtin_unwrap(VM& vm, u16 dst, u16, u16 ab) {
         return;
     }
     auto* et = static_cast<EnumType*>(e->type_);
-    if (et->cases_[0].type->isObjType()) {
+    if (storesObjPtr(et->cases_[0].type)) {
         vm.reg(dst).o = e->word_.o;
     } else {
         vm.reg(dst) = e->word_;
     }
+}
+
+// Phase 3 NullablePtrEnum variant: Option<T> stored as nullable Obj*.
+// On null (None), halts; otherwise returns the pointer as the inner value.
+static void builtin_unwrap_nullableptr(VM& vm, u16 dst, u16, u16 ab) {
+    if (!vm.reg(ab).o) {
+        fprintf(vm.printOutput(), "Error: unwrap called on none\n");
+        vm.setHalted(true);
+        return;
+    }
+    vm.reg(dst).o = vm.reg(ab).o;
 }
 
 // unwrapOr: Option<T>, T -> T
@@ -838,11 +849,20 @@ static void builtin_unwrapOr(VM& vm, u16 dst, u16, u16 ab) {
     auto* e = static_cast<Enum*>(vm.reg(ab).o);
     if (e->which_ == 0) {
         auto* et = static_cast<EnumType*>(e->type_);
-        if (et->cases_[0].type->isObjType()) {
+        if (storesObjPtr(et->cases_[0].type)) {
             vm.reg(dst).o = e->word_.o;
         } else {
             vm.reg(dst) = e->word_;
         }
+    } else {
+        vm.reg(dst) = vm.reg(ab + 1);
+    }
+}
+
+// Phase 3 NullablePtrEnum variant.
+static void builtin_unwrapOr_nullableptr(VM& vm, u16 dst, u16, u16 ab) {
+    if (vm.reg(ab).o) {
+        vm.reg(dst).o = vm.reg(ab).o;
     } else {
         vm.reg(dst) = vm.reg(ab + 1);
     }
@@ -854,10 +874,20 @@ static void builtin_isSome(VM& vm, u16 dst, u16, u16 ab) {
     vm.reg(dst).i = (e->which_ == 0) ? 1 : 0;
 }
 
+// Phase 3 NullablePtrEnum variant: non-null pointer means Some.
+static void builtin_isSome_nullableptr(VM& vm, u16 dst, u16, u16 ab) {
+    vm.reg(dst).i = vm.reg(ab).o ? 1 : 0;
+}
+
 // isNone: Option<T> -> Bool
 static void builtin_isNone(VM& vm, u16 dst, u16, u16 ab) {
     auto* e = static_cast<Enum*>(vm.reg(ab).o);
     vm.reg(dst).i = (e->which_ == 1) ? 1 : 0;
+}
+
+// Phase 3 NullablePtrEnum variant.
+static void builtin_isNone_nullableptr(VM& vm, u16 dst, u16, u16 ab) {
+    vm.reg(dst).i = vm.reg(ab).o ? 0 : 1;
 }
 
 // Option resolvers
@@ -866,7 +896,9 @@ static bool resolve_unwrap(Compiler& compiler, const std::vector<Type*>& args,
     if (args.size() != 1) return false;
     auto* et = dynamic_cast<EnumType*>(args[0]);
     if (!et || !isOptionType(et)) return false;
-    pt = {et}; rt = et->cases_[0].type; cf = builtin_unwrap; return true;
+    pt = {et}; rt = et->cases_[0].type;
+    cf = (et->repr_ == Type::Repr::NullablePtrEnum) ? builtin_unwrap_nullableptr : builtin_unwrap;
+    return true;
 }
 
 static bool resolve_unwrapOr(Compiler& compiler, const std::vector<Type*>& args,
@@ -876,7 +908,9 @@ static bool resolve_unwrapOr(Compiler& compiler, const std::vector<Type*>& args,
     if (!et || !isOptionType(et)) return false;
     Type* innerType = et->cases_[0].type;
     if (args[1] != innerType) return false;
-    pt = {et, innerType}; rt = innerType; cf = builtin_unwrapOr; return true;
+    pt = {et, innerType}; rt = innerType;
+    cf = (et->repr_ == Type::Repr::NullablePtrEnum) ? builtin_unwrapOr_nullableptr : builtin_unwrapOr;
+    return true;
 }
 
 static bool resolve_isSome(Compiler& compiler, const std::vector<Type*>& args,
@@ -884,7 +918,9 @@ static bool resolve_isSome(Compiler& compiler, const std::vector<Type*>& args,
     if (args.size() != 1) return false;
     auto* et = dynamic_cast<EnumType*>(args[0]);
     if (!et || !isOptionType(et)) return false;
-    pt = {et}; rt = compiler.boolType(); cf = builtin_isSome; return true;
+    pt = {et}; rt = compiler.boolType();
+    cf = (et->repr_ == Type::Repr::NullablePtrEnum) ? builtin_isSome_nullableptr : builtin_isSome;
+    return true;
 }
 
 static bool resolve_isNone(Compiler& compiler, const std::vector<Type*>& args,
@@ -892,7 +928,9 @@ static bool resolve_isNone(Compiler& compiler, const std::vector<Type*>& args,
     if (args.size() != 1) return false;
     auto* et = dynamic_cast<EnumType*>(args[0]);
     if (!et || !isOptionType(et)) return false;
-    pt = {et}; rt = compiler.boolType(); cf = builtin_isNone; return true;
+    pt = {et}; rt = compiler.boolType();
+    cf = (et->repr_ == Type::Repr::NullablePtrEnum) ? builtin_isNone_nullableptr : builtin_isNone;
+    return true;
 }
 
 // ============================================================================
@@ -944,7 +982,7 @@ static void builtin_setref(VM& vm, u16 dst, u16, u16 ab) {
     auto* ref = static_cast<RefValue*>(vm.reg(ab + 1).o);
     auto* refType = static_cast<RefType*>(ref->type_);
     Word newVal = vm.reg(ab);
-    if (refType->elemType_->isObjType()) {
+    if (storesObjPtr(refType->elemType_)) {
         if (newVal.o) newVal.o->retain();
         if (ref->value_.o) ref->value_.o->release();
     }
@@ -962,6 +1000,7 @@ static bool resolve_ref(Compiler& compiler, const std::vector<Type*>& args,
     else if (t == compiler.floatType())  cf = builtin_ref_float;
     else if (t == compiler.boolType())   cf = builtin_ref_bool;
     else if (t == compiler.symbolType()) cf = builtin_ref_symbol;
+    else if (t && t->repr_ == Type::Repr::DiscriminantEnum) cf = builtin_ref_int;
     else if (t->isObjType())             cf = builtin_ref_obj;
     else return false;
     pt = {t};
@@ -1081,7 +1120,7 @@ static void builtin_add_set(VM& vm, u16 dst, u16, u16 ab) {
     result->entries_ = src->entries_;
     result->entries_.insert(vm.reg(ab + 1));
     // Retain all Obj* elements
-    if (st->elemType_->isObjType()) {
+    if (storesObjPtr(st->elemType_)) {
         for (auto& elem : result->entries_) {
             if (elem.o) elem.o->retain();
         }
@@ -1097,7 +1136,7 @@ static void builtin_remove_set(VM& vm, u16 dst, u16, u16 ab) {
     result->entries_ = src->entries_;
     result->entries_.erase(vm.reg(ab + 1));
     // Retain all Obj* elements
-    if (st->elemType_->isObjType()) {
+    if (storesObjPtr(st->elemType_)) {
         for (auto& elem : result->entries_) {
             if (elem.o) elem.o->retain();
         }
@@ -1120,7 +1159,7 @@ static void builtin_union_set(VM& vm, u16 dst, u16, u16 ab) {
     result->entries_ = a->entries_;
     for (auto& elem : b->entries_) result->entries_.insert(elem);
     // Retain all Obj* elements
-    if (st->elemType_->isObjType()) {
+    if (storesObjPtr(st->elemType_)) {
         for (auto& elem : result->entries_) {
             if (elem.o) elem.o->retain();
         }
@@ -1138,7 +1177,7 @@ static void builtin_intersection_set(VM& vm, u16 dst, u16, u16 ab) {
         if (b->entries_.count(elem)) result->entries_.insert(elem);
     }
     // Retain all Obj* elements
-    if (st->elemType_->isObjType()) {
+    if (storesObjPtr(st->elemType_)) {
         for (auto& elem : result->entries_) {
             if (elem.o) elem.o->retain();
         }
@@ -1156,7 +1195,7 @@ static void builtin_difference_set(VM& vm, u16 dst, u16, u16 ab) {
         if (!b->entries_.count(elem)) result->entries_.insert(elem);
     }
     // Retain all Obj* elements
-    if (st->elemType_->isObjType()) {
+    if (storesObjPtr(st->elemType_)) {
         for (auto& elem : result->entries_) {
             if (elem.o) elem.o->retain();
         }
@@ -1171,11 +1210,11 @@ static void builtin_toArray_set(VM& vm, u16 dst, u16, u16 ab) {
     Type* elemType = st->elemType_;
     auto* arrType = vm.arrayType(elemType);
 
-    if (elemType == vm.intType() || elemType == vm.boolType() || elemType == vm.symbolType()) {
+    if (elemType && !storesObjPtr(elemType) && !storesF64(elemType)) {
         auto* arr = new PodArray<i64>(arrType);
         for (auto& elem : set->entries_) arr->v.push_back(elem.i);
         vm.reg(dst).o = arr;
-    } else if (elemType == vm.floatType()) {
+    } else if (storesF64(elemType)) {
         auto* arr = new PodArray<f64>(arrType);
         for (auto& elem : set->entries_) arr->v.push_back(elem.f);
         vm.reg(dst).o = arr;
@@ -1258,11 +1297,32 @@ static void builtin_ordinal_enum(VM& vm, u16 dst, u16, u16 argBase) {
     vm.reg(dst).i = e->which_;
 }
 
+// Phase 2: DiscriminantEnum value IS the ordinal.
+static void builtin_ordinal_discenum(VM& vm, u16 dst, u16, u16 argBase) {
+    vm.reg(dst).i = vm.reg(argBase).i;
+}
+
+// Phase 3: NullablePtrEnum -- recover the void/data case index from the
+// static type, then map (null -> voidIdx, non-null -> dataIdx).
+static void builtin_ordinal_nullableptr(VM& vm, u16 dst, u16, u16 argBase) {
+    auto* prim = static_cast<Primitive*>(vm.currentPrimitive());
+    auto* tt = static_cast<TupleType*>(prim->type_);
+    auto* et = static_cast<EnumType*>(tt->fields_[0]);
+    int voidIdx = nullablePtrVoidCaseIndex(et);
+    int dataIdx = (voidIdx == 0) ? 1 : 0;
+    vm.reg(dst).i = vm.reg(argBase).o ? dataIdx : voidIdx;
+}
+
 static bool resolve_ordinal(Compiler& compiler, const std::vector<Type*>& args,
     std::vector<Type*>& pt, Type*& rt, CFun& cf) {
     if (args.size() != 1) return false;
     if (auto* et = dynamic_cast<EnumType*>(args[0])) {
-        pt = {et}; rt = compiler.intType(); cf = builtin_ordinal_enum; return true;
+        pt = {et};
+        rt = compiler.intType();
+        if (et->repr_ == Type::Repr::DiscriminantEnum)        cf = builtin_ordinal_discenum;
+        else if (et->repr_ == Type::Repr::NullablePtrEnum)    cf = builtin_ordinal_nullableptr;
+        else                                                   cf = builtin_ordinal_enum;
+        return true;
     }
     return false;
 }
@@ -1275,11 +1335,35 @@ static void builtin_tag_enum(VM& vm, u16 dst, u16, u16 argBase) {
     vm.reg(dst).s = const_cast<Symbol*>(et->cases_[e->which_].name);
 }
 
+// Phase 2: DiscriminantEnum -- value IS the case index, recover EnumType from primitive.
+static void builtin_tag_discenum(VM& vm, u16 dst, u16, u16 argBase) {
+    auto* prim = static_cast<Primitive*>(vm.currentPrimitive());
+    auto* tt = static_cast<TupleType*>(prim->type_);
+    auto* et = static_cast<EnumType*>(tt->fields_[0]);
+    vm.reg(dst).s = const_cast<Symbol*>(et->cases_[vm.reg(argBase).i].name);
+}
+
+// Phase 3: NullablePtrEnum -- look up case name based on null vs non-null.
+static void builtin_tag_nullableptr(VM& vm, u16 dst, u16, u16 argBase) {
+    auto* prim = static_cast<Primitive*>(vm.currentPrimitive());
+    auto* tt = static_cast<TupleType*>(prim->type_);
+    auto* et = static_cast<EnumType*>(tt->fields_[0]);
+    int voidIdx = nullablePtrVoidCaseIndex(et);
+    int dataIdx = (voidIdx == 0) ? 1 : 0;
+    int idx = vm.reg(argBase).o ? dataIdx : voidIdx;
+    vm.reg(dst).s = const_cast<Symbol*>(et->cases_[idx].name);
+}
+
 static bool resolve_tag(Compiler& compiler, const std::vector<Type*>& args,
     std::vector<Type*>& pt, Type*& rt, CFun& cf) {
     if (args.size() != 1) return false;
     if (auto* et = dynamic_cast<EnumType*>(args[0])) {
-        pt = {et}; rt = compiler.symbolType(); cf = builtin_tag_enum; return true;
+        pt = {et};
+        rt = compiler.symbolType();
+        if (et->repr_ == Type::Repr::DiscriminantEnum)        cf = builtin_tag_discenum;
+        else if (et->repr_ == Type::Repr::NullablePtrEnum)    cf = builtin_tag_nullableptr;
+        else                                                   cf = builtin_tag_enum;
+        return true;
     }
     return false;
 }
@@ -1324,6 +1408,19 @@ static void builtin_toString_obj(VM& vm, u16 dst, u16, u16 argBase) {
     vm.reg(dst).o = result;
 }
 
+// Generic toString that recovers the static arg type from currentPrimitive()
+// and dispatches through wordToString. Used for DiscriminantEnum (value is i64
+// but printed via the static EnumType's case table).
+static void builtin_toString_word(VM& vm, u16 dst, u16, u16 argBase) {
+    auto* prim = static_cast<Primitive*>(vm.currentPrimitive());
+    auto* tt = static_cast<TupleType*>(prim->type_);
+    Type* t = tt->fields_[0];
+    auto* result = new StringObj();
+    result->s = wordToString(vm.reg(argBase), t);
+    registerNewObj(result);
+    vm.reg(dst).o = result;
+}
+
 static bool resolve_toString(Compiler& compiler, const std::vector<Type*>& args,
     std::vector<Type*>& pt, Type*& rt, CFun& cf) {
     if (args.size() != 1) return false;
@@ -1341,6 +1438,9 @@ static bool resolve_toString(Compiler& compiler, const std::vector<Type*>& args,
     }
     if (t == compiler.symbolType()) {
         cf = builtin_toString_symbol; return true;
+    }
+    if (t && t->repr_ == Type::Repr::DiscriminantEnum) {
+        cf = builtin_toString_word; return true;
     }
     if (t->isObjType()) {
         cf = builtin_toString_obj; return true;
@@ -1496,6 +1596,9 @@ static bool resolve_hash(Compiler& compiler, const std::vector<Type*>& args,
     if (t == compiler.symbolType()) {
         cf = builtin_hash_symbol; return true;
     }
+    if (t && t->repr_ == Type::Repr::DiscriminantEnum) {
+        cf = builtin_hash_int; return true;
+    }
     if (t->isObjType()) {
         cf = builtin_hash_obj; return true;
     }
@@ -1514,7 +1617,7 @@ static void builtin_any_single(VM& vm, u16 dst, u16, u16 argBase) {
     auto* any = new AnyObj(vm.anyType());
     any->value_ = vm.reg(argBase);
     any->wrappedType_ = wrappedType;
-    any->isObjType_ = wrappedType->isObjType();
+    any->isObjType_ = storesObjPtr(wrappedType);
     if (any->isObjType_ && any->value_.o) any->value_.o->retain();
     vm.reg(dst).o = any;
 }
@@ -1540,7 +1643,7 @@ static void builtin_any_variadic(VM& vm, u16 dst, u16, u16 argBase) {
         auto* any = new AnyObj(vm.anyType());
         any->value_ = tuple->v[i];
         any->wrappedType_ = tupleType->fields_[i];
-        any->isObjType_ = tupleType->fields_[i]->isObjType();
+        any->isObjType_ = storesObjPtr(tupleType->fields_[i]);
         if (any->isObjType_ && any->value_.o) any->value_.o->retain();
         arr->push(any);
     }
@@ -1572,7 +1675,7 @@ static void builtin_toAnyArray(VM& vm, u16 dst, u16, u16 argBase) {
         auto* any = new AnyObj(vm.anyType());
         any->value_ = tuple->v[i];
         any->wrappedType_ = tupleType->fields_[i];
-        any->isObjType_ = tupleType->fields_[i]->isObjType();
+        any->isObjType_ = storesObjPtr(tupleType->fields_[i]);
         if (any->isObjType_ && any->value_.o) any->value_.o->retain();
         arr->push(any);
     }
@@ -1605,6 +1708,70 @@ static void builtin_gc(VM& vm, u16 dst, u16, u16) {
         vm.deferredDeleteQueue().processN(4096);
     }
     vm.reg(dst).i = 0;
+}
+
+// ============================================================================
+// typeRepr builtin (Phase 0 debug helper)
+// Prints the static type's representation classification.
+// Usage: typeRepr(value)
+// ============================================================================
+
+static const char* reprName(Type::Repr r) {
+    switch (r) {
+        case Type::Repr::Atom:                 return "Atom";
+        case Type::Repr::Pointer:              return "Pointer";
+        case Type::Repr::DiscriminantEnum:     return "DiscriminantEnum";
+        case Type::Repr::NullablePtrEnum:      return "NullablePtrEnum";
+        case Type::Repr::UnwrappedTupleStruct: return "UnwrappedTupleStruct";
+        case Type::Repr::Inline:               return "Inline";
+        case Type::Repr::Heap:                 return "Heap";
+    }
+    return "?";
+}
+
+static void builtin_typeRepr(VM& vm, u16 dst, u16, u16 argBase) {
+    auto* prim = static_cast<Primitive*>(vm.currentPrimitive());
+    auto* tt = static_cast<TupleType*>(prim->type_);
+    Type* t = tt->fields_[0];
+    FILE* out = vm.printOutput();
+    auto typeStr = t->str();
+    std::fprintf(out, "%.*s: repr=%s sizeWords=%u value=%d recursive=%d",
+        (int)typeStr.size(), typeStr.data(),
+        reprName(t->repr_),
+        (unsigned)t->sizeWords_,
+        t->isValueType_ ? 1 : 0,
+        t->isRecursive_ ? 1 : 0);
+
+    // Print layout if available
+    auto printLayout = [out](const Vec<FieldLayout>& layout) {
+        if (layout.empty()) return;
+        std::fprintf(out, " layout=[");
+        for (size_t i = 0; i < layout.size(); ++i) {
+            if (i > 0) std::fprintf(out, ",");
+            auto fs = layout[i].type ? layout[i].type->str() : rt::vmstr("?");
+            std::fprintf(out, "(@%u,%uw,%.*s)",
+                (unsigned)layout[i].wordOffset,
+                (unsigned)layout[i].sizeWords,
+                (int)fs.size(), fs.data());
+        }
+        std::fprintf(out, "]");
+    };
+    if (auto* st = dynamic_cast<StructType*>(t)) printLayout(st->layout_);
+    else if (auto* en = dynamic_cast<EnumType*>(t)) printLayout(en->layout_);
+    else if (auto* tu = dynamic_cast<TupleType*>(t)) printLayout(tu->layout_);
+
+    std::fputc('\n', out);
+    std::fflush(out);
+    vm.reg(dst).i = 0;
+}
+
+static bool resolve_typeRepr(Compiler& compiler, const std::vector<Type*>& args,
+    std::vector<Type*>& pt, Type*& rt, CFun& cf) {
+    if (args.size() != 1) return false;
+    pt = args;
+    rt = compiler.voidType();
+    cf = builtin_typeRepr;
+    return true;
 }
 
 // ============================================================================
@@ -1736,6 +1903,9 @@ void registerBuiltinFunctions(Compiler& compiler,
 
     // --- disassemble builtin (not RT-safe: writes to stdout) ---
     registerTemplate(compiler, functions, "disassemble",  resolve_disassemble, /*rtSafe=*/false);
+
+    // --- typeRepr builtin (Phase 0 debug helper, not RT-safe: writes to stdout) ---
+    registerTemplate(compiler, functions, "typeRepr",     resolve_typeRepr, /*rtSafe=*/false);
 
     // --- gc builtin: drain deferred-delete queue to reclaim dead objects ---
     registerOne(compiler, functions, "gc", compiler.voidType(), {}, builtin_gc, /*pure=*/false, /*rtSafe=*/false);

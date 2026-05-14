@@ -157,29 +157,20 @@ public:
     PodArray(Type* type);
 
     VMString str() const override {
-        bool isBool = false;
-        bool isSymbol = false;
-        if constexpr (std::is_same_v<T, i64>) {
-            if (type_ && dynamic_cast<ArrayType*>(type_)) {
-                auto* elemType = static_cast<ArrayType*>(type_)->elemType_;
-                isBool = elemType == gCurrentVM->boolType();
-                isSymbol = elemType == gCurrentVM->symbolType();
-            }
+        Type* elemType = nullptr;
+        if (type_ && dynamic_cast<ArrayType*>(type_)) {
+            elemType = static_cast<ArrayType*>(type_)->elemType_;
         }
         VMString s = rt::vmstr("[");
         for (size_t i = 0; i < v.size(); ++i) {
             if (i > 0) s += ", ";
-            if constexpr (std::is_same_v<T, f64>)
-                s += rt::fmtFloat(v[i]);
-            else if (isBool)
-                s += v[i] ? "true" : "false";
-            else if (isSymbol) {
-                Word w; w.i = v[i];
-                s += "'";
-                s += w.s->str();
+            Word w;
+            if constexpr (std::is_same_v<T, f64>) {
+                w.f = v[i];
+            } else {
+                w.i = (i64)v[i];
             }
-            else
-                s += rt::fmt("{}", v[i]);
+            s += wordToString(w, elemType);
         }
         s += "]";
         return s;
@@ -227,10 +218,19 @@ public:
 
     VMString str() const override {
         VMString s = rt::vmstr("[");
+        // Dispatch through wordToString so UnwrappedTupleStruct elements print
+        // with their wrapper-type formatting (Name(inner)).
+        Type* elemType = nullptr;
+        if (auto* at = dynamic_cast<ArrayType*>(type_)) elemType = at->elemType_;
         for (size_t i = 0; i < v_.size(); ++i) {
             if (i > 0) s += ", ";
-            if (v_[i]) s += v_[i]->str();
-            else s += "nil";
+            if (elemType && (elemType->repr_ == Type::Repr::UnwrappedTupleStruct
+                          || elemType->repr_ == Type::Repr::NullablePtrEnum)) {
+                Word w; w.o = v_[i];
+                s += wordToString(w, elemType);
+            } else if (v_[i]) {
+                s += v_[i]->str();
+            } else s += "nil";
         }
         s += "]";
         return s;
@@ -263,7 +263,7 @@ public:
             reinterpret_cast<GCObj*>(generator_)->release();
         } else {
             auto* lt = static_cast<ListType*>(type_);
-            if (lt->elemType_->isObjType() && head_.o) head_.o->release();
+            if (storesObjPtr(lt->elemType_) && head_.o) head_.o->release();
             if (tail_) tail_->release();
         }
     }
@@ -810,7 +810,7 @@ public:
 
     void releaseChildren() override {
         auto* rt = static_cast<RefType*>(type_);
-        if (rt->elemType_->isObjType() && value_.o) value_.o->release();
+        if (storesObjPtr(rt->elemType_) && value_.o) value_.o->release();
     }
 };
 
@@ -883,15 +883,7 @@ public:
                 s += word_.o->str();
             } else {
                 s += "(";
-                if (caseType->isObjType()) {
-                    s += word_.o ? word_.o->str() : rt::vmstr("nil");
-                } else if (caseType == gCurrentVM->boolType()) {
-                    s += word_.i ? "true" : "false";
-                } else if (caseType == gCurrentVM->floatType()) {
-                    s += rt::fmtFloat(word_.f);
-                } else {
-                    s += rt::fmt("{}", word_.i);
-                }
+                s += wordToString(word_, caseType);
                 s += ")";
             }
         }
@@ -1121,7 +1113,7 @@ public:
         if (callerCoroutine_) callerCoroutine_->release();
         if (funcType_) {
             for (u16 i = 0; i < numArgs_ && i < funcType_->argTypes_.size(); ++i) {
-                if (funcType_->argTypes_[i]->isObjType() && args_[i].o) args_[i].o->release();
+                if (storesObjPtr(funcType_->argTypes_[i]) && args_[i].o) args_[i].o->release();
             }
         }
     }

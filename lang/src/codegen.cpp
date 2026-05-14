@@ -200,6 +200,10 @@ u16 CodeGen::ensureComplex(u16 reg, Type* type) {
 
 u16 CodeGen::ensureInt(u16 reg, Type* type) {
     if (dynamic_cast<EnumType*>(type)) {
+        // Phase 2: DiscriminantEnum values ARE the case index i64 already.
+        if (type->repr_ == ts::Type::Repr::DiscriminantEnum) {
+            return reg;
+        }
         u16 dst = allocReg();
         emitOp(op_enum_get_which);
         emitRegs(dst, reg);
@@ -306,7 +310,7 @@ Operation CodeGen::getCmpOp(BinaryOpExpr::Op op, Type* type) {
             default: return op_cmp_eq_float;
         }
     }
-    if (type && type->isObjType()) {
+    if (type && storesObjPtr(type)) {
         switch (op) {
             case BinaryOpExpr::Eq: return op_cmp_eq_obj;
             case BinaryOpExpr::Ne: return op_cmp_ne_obj;
@@ -642,7 +646,7 @@ void CodeGen::genLetDecl(LetDeclNode* decl) {
     // Check if this is a global (no local scopes)
     auto it = typeChecker_.globalVars().find(decl->name);
     if (it != typeChecker_.globalVars().end() && localScopes_.size() <= 1) {
-        emitOp(decl->resolvedType->isObjType() ? op_init_global_obj : op_store_global);
+        emitOp(storesObjPtr(decl->resolvedType) ? op_init_global_obj : op_store_global);
         emitRegs(reg);
         emitInt(it->second.globalIndex);
     }
@@ -664,7 +668,7 @@ void CodeGen::genVarDecl(VarDeclNode* decl) {
             emitInt(dynIdx);
         } else {
             // At global scope: just set the initial value
-            emitOp(decl->resolvedType->isObjType() ? op_init_dynamic_obj : op_store_dynamic);
+            emitOp(storesObjPtr(decl->resolvedType) ? op_init_dynamic_obj : op_store_dynamic);
             emitRegs(reg);
             emitInt(dynIdx);
         }
@@ -698,7 +702,7 @@ void CodeGen::genVarDecl(VarDeclNode* decl) {
 
     auto it = typeChecker_.globalVars().find(decl->name);
     if (it != typeChecker_.globalVars().end() && localScopes_.size() <= 1) {
-        emitOp(decl->resolvedType->isObjType() ? op_init_global_obj : op_store_global);
+        emitOp(storesObjPtr(decl->resolvedType) ? op_init_global_obj : op_store_global);
         emitRegs(reg);
         emitInt(it->second.globalIndex);
     }
@@ -719,7 +723,7 @@ void CodeGen::genConstDecl(ConstDeclNode* decl) {
     // Check if this is a global (no local scopes, e.g. REPL top level)
     auto it = typeChecker_.globalVars().find(decl->name);
     if (it != typeChecker_.globalVars().end() && localScopes_.size() <= 1) {
-        emitOp(decl->resolvedType->isObjType() ? op_init_global_obj : op_store_global);
+        emitOp(storesObjPtr(decl->resolvedType) ? op_init_global_obj : op_store_global);
         emitRegs(reg);
         emitInt(it->second.globalIndex);
     }
@@ -1656,7 +1660,7 @@ void CodeGen::genSwitchStmt(SwitchStmtNode* stmt) {
 void CodeGen::emitGlobalStoreIfNeeded(const std::string& name, u16 reg) {
     auto it = typeChecker_.globalVars().find(name);
     if (it != typeChecker_.globalVars().end() && localScopes_.size() <= 1) {
-        emitOp(it->second.type->isObjType() ? op_init_global_obj : op_store_global);
+        emitOp(storesObjPtr(it->second.type) ? op_init_global_obj : op_store_global);
         emitRegs(reg);
         emitInt(it->second.globalIndex);
     }
@@ -1714,10 +1718,35 @@ void CodeGen::genPatternMatch(Pattern* pat, u16 subjReg, Type* subjType,
         case Pattern::BindingPat: {
             auto* bp = static_cast<BindingPattern*>(pat);
             if (pat->enumCaseIndex >= 0) {
-                // Unqualified no-data enum case match
-                u16 whichReg = allocReg();
-                emitOp(op_enum_get_which);
-                emitRegs(whichReg, subjReg);
+                // Phase 3: NullablePtrEnum -- compare subject against null.
+                if (subjType && subjType->repr_ == ts::Type::Repr::NullablePtrEnum) {
+                    auto* etype = dynamic_cast<EnumType*>(subjType);
+                    Type* caseType = (etype && (size_t)pat->enumCaseIndex < etype->cases_.size())
+                        ? etype->cases_[pat->enumCaseIndex].type
+                        : nullptr;
+                    bool isVoidCase = (caseType == compiler_.voidType());
+                    u16 nullReg = allocReg();
+                    emitOp(op_load_nil);
+                    emitRegs(nullReg);
+                    u16 cmpReg = allocReg();
+                    emitOp(op_cmp_eq_obj);
+                    emitRegs(cmpReg, subjReg, nullReg);
+                    u32 failJump = isVoidCase
+                        ? emitJump(op_jump_if_false, cmpReg)
+                        : emitJump(op_jump_if_true,  cmpReg);
+                    failJumps.push_back(failJump);
+                    break;
+                }
+                // Unqualified no-data enum case match.
+                // Phase 2: DiscriminantEnum -- subject IS the i64 tag; skip op_enum_get_which.
+                u16 whichReg;
+                if (subjType && subjType->repr_ == ts::Type::Repr::DiscriminantEnum) {
+                    whichReg = subjReg;
+                } else {
+                    whichReg = allocReg();
+                    emitOp(op_enum_get_which);
+                    emitRegs(whichReg, subjReg);
+                }
 
                 u16 expectedReg = allocReg();
                 emitOp(op_load_int_const);
@@ -1765,10 +1794,37 @@ void CodeGen::genPatternMatch(Pattern* pat, u16 subjReg, Type* subjType,
                 break;
             }
 
-            // Get which_ field from enum
-            u16 whichReg = allocReg();
-            emitOp(op_enum_get_which);
-            emitRegs(whichReg, subjReg);
+            // Phase 3: NullablePtrEnum -- compare subject against null pointer.
+            if (etype->repr_ == ts::Type::Repr::NullablePtrEnum) {
+                bool isVoidCase = (caseType == compiler_.voidType());
+                u16 nullReg = allocReg();
+                emitOp(op_load_nil);
+                emitRegs(nullReg);
+                u16 cmpReg = allocReg();
+                emitOp(op_cmp_eq_obj);
+                emitRegs(cmpReg, subjReg, nullReg);
+                // For the void (None) case, match when subj == null.
+                // For the data (Some) case, match when subj != null.
+                u32 failJump = isVoidCase
+                    ? emitJump(op_jump_if_false, cmpReg)
+                    : emitJump(op_jump_if_true,  cmpReg);
+                failJumps.push_back(failJump);
+                if (ep->innerPattern && caseType && caseType != compiler_.voidType()) {
+                    // The Some payload IS the subject register itself.
+                    genPatternMatch(ep->innerPattern.get(), subjReg, caseType, failJumps, isMutable);
+                }
+                break;
+            }
+
+            // Get which_ field from enum (or use the subject directly for DiscriminantEnum)
+            u16 whichReg;
+            if (etype->repr_ == ts::Type::Repr::DiscriminantEnum) {
+                whichReg = subjReg;
+            } else {
+                whichReg = allocReg();
+                emitOp(op_enum_get_which);
+                emitRegs(whichReg, subjReg);
+            }
 
             // Compare to expected case index
             u16 expectedReg = allocReg();
@@ -1831,9 +1887,38 @@ void CodeGen::genPatternMatch(Pattern* pat, u16 subjReg, Type* subjType,
 
             // Unqualified enum case pattern with data
             if (pat->enumCaseIndex >= 0) {
-                u16 whichReg = allocReg();
-                emitOp(op_enum_get_which);
-                emitRegs(whichReg, subjReg);
+                // Phase 3: NullablePtrEnum -- compare against null; payload IS the subject.
+                if (subjType && subjType->repr_ == ts::Type::Repr::NullablePtrEnum) {
+                    auto* etype = dynamic_cast<EnumType*>(subjType);
+                    Type* caseType = (etype && (size_t)pat->enumCaseIndex < etype->cases_.size())
+                        ? etype->cases_[pat->enumCaseIndex].type
+                        : nullptr;
+                    bool isVoidCase = (caseType == compiler_.voidType());
+                    u16 nullReg = allocReg();
+                    emitOp(op_load_nil);
+                    emitRegs(nullReg);
+                    u16 cmpReg = allocReg();
+                    emitOp(op_cmp_eq_obj);
+                    emitRegs(cmpReg, subjReg, nullReg);
+                    u32 failJump = isVoidCase
+                        ? emitJump(op_jump_if_false, cmpReg)
+                        : emitJump(op_jump_if_true,  cmpReg);
+                    failJumps.push_back(failJump);
+                    if (pat->enumCaseDataType && pat->enumCaseDataType != compiler_.voidType()
+                        && tp->elements.size() == 1) {
+                        genPatternMatch(tp->elements[0].get(), subjReg, pat->enumCaseDataType, failJumps, isMutable);
+                    }
+                    break;
+                }
+
+                u16 whichReg;
+                if (subjType && subjType->repr_ == ts::Type::Repr::DiscriminantEnum) {
+                    whichReg = subjReg;
+                } else {
+                    whichReg = allocReg();
+                    emitOp(op_enum_get_which);
+                    emitRegs(whichReg, subjReg);
+                }
 
                 u16 expectedReg = allocReg();
                 emitOp(op_load_int_const);
@@ -1875,6 +1960,13 @@ void CodeGen::genPatternMatch(Pattern* pat, u16 subjReg, Type* subjType,
                 auto* stype = dynamic_cast<StructType*>(subjType);
                 if (!stype) {
                     error(pat->loc, "Tuple struct pattern on non-struct type");
+                    break;
+                }
+                // Phase 1: UnwrappedTupleStruct -- subject IS the inner value;
+                // bind the single sub-pattern directly to it.
+                if (stype->repr_ == ts::Type::Repr::UnwrappedTupleStruct
+                    && stype->fields_.size() == 1 && tp->elements.size() == 1) {
+                    genPatternMatch(tp->elements[0].get(), subjReg, stype->fields_[0].type, failJumps, isMutable);
                     break;
                 }
                 for (size_t i = 0; i < tp->elements.size() && i < stype->fields_.size(); ++i) {
@@ -2086,7 +2178,7 @@ void CodeGen::genAssignStmt(AssignStmtNode* stmt) {
     // Dynamic scope variable assignment: `name = expr;
     if (stmt->isDynamic) {
         auto it = typeChecker_.dynamicVars().find(stmt->target);
-        emitOp(it->second.type->isObjType() ? op_store_dynamic_obj : op_store_dynamic);
+        emitOp(storesObjPtr(it->second.type) ? op_store_dynamic_obj : op_store_dynamic);
         emitRegs(valReg);
         emitInt(it->second.dynIndex);
         return;
@@ -2105,7 +2197,7 @@ void CodeGen::genAssignStmt(AssignStmtNode* stmt) {
     // Check global
     auto it = typeChecker_.globalVars().find(stmt->target);
     if (it != typeChecker_.globalVars().end()) {
-        emitOp(it->second.type->isObjType() ? op_store_global_obj : op_store_global);
+        emitOp(storesObjPtr(it->second.type) ? op_store_global_obj : op_store_global);
         emitRegs(valReg);
         emitInt(it->second.globalIndex);
         return;
@@ -2497,17 +2589,28 @@ u16 CodeGen::genAsTypeExpr(AsTypeExprNode* expr) {
     emitRegs(valReg, subjReg);
 
     u16 dstReg = allocReg();
-    emitOp(op_make_enum);
-    emitRegs(dstReg, valReg, 0);  // case 0 = some
-    emitPtr(optType);
+    if (optType->repr_ == ts::Type::Repr::NullablePtrEnum) {
+        // Phase 3: Some(p) is just the pointer.
+        emitOp(op_mov);
+        emitRegs(dstReg, valReg);
+    } else {
+        emitOp(op_make_enum);
+        emitRegs(dstReg, valReg, 0);  // case 0 = some
+        emitPtr(optType);
+    }
 
     u32 endJump = emitJump(op_jump);
 
     // None branch
     patchJump(noneJump);
-    emitOp(op_make_enum_nodata);
-    emitRegs(dstReg, 1);  // case 1 = none
-    emitPtr(optType);
+    if (optType->repr_ == ts::Type::Repr::NullablePtrEnum) {
+        emitOp(op_load_nil);
+        emitRegs(dstReg);
+    } else {
+        emitOp(op_make_enum_nodata);
+        emitRegs(dstReg, 1);  // case 1 = none
+        emitPtr(optType);
+    }
 
     patchJump(endJump);
     return dstReg;
@@ -3107,6 +3210,16 @@ u16 CodeGen::genCall(CallExpr_* expr) {
             error(expr->loc, "Tuple struct construction has non-struct resolved type");
             return allocReg();
         }
+        // Phase 1: single-field tuple struct over a Pointer-Repr inner is
+        // an UnwrappedTupleStruct -- skip the boxing Struct allocation and
+        // just return the inner value. Runtime treats both as a 1-word Obj*.
+        if (stype->repr_ == ts::Type::Repr::UnwrappedTupleStruct
+            && stype->fields_.size() == 1 && expr->args.size() == 1) {
+            u16 valReg = genExpr(static_cast<Expr*>(expr->args[0].get()));
+            Type* valType = expr->args[0]->resolvedType;
+            Type* declType = stype->fields_[0].type;
+            return ensureType(valReg, valType, declType);
+        }
         usize numFields = stype->fields_.size();
         u16 fieldBase = nextReg_;
         for (size_t i = 0; i < numFields; ++i) {
@@ -3560,7 +3673,7 @@ u16 CodeGen::genCall(CallExpr_* expr) {
         std::vector<u16> gcMap;
         for (auto& scope : localScopes_) {
             for (auto& entry : scope) {
-                if (entry.second.type && entry.second.type->isObjType()) {
+                if (entry.second.type && storesObjPtr(entry.second.type)) {
                     gcMap.push_back(entry.second.reg);
                 }
             }
@@ -3604,7 +3717,7 @@ u16 CodeGen::genCall(CallExpr_* expr) {
         std::vector<u16> gcMap;
         for (auto& scope : localScopes_) {
             for (auto& entry : scope) {
-                if (entry.second.type && entry.second.type->isObjType()) {
+                if (entry.second.type && storesObjPtr(entry.second.type)) {
                     gcMap.push_back(entry.second.reg);
                 }
             }
@@ -3612,7 +3725,7 @@ u16 CodeGen::genCall(CallExpr_* expr) {
         // coroReg always holds an Obj*
         gcMap.push_back(coroReg);
         // valueReg only holds an Obj* if the yield type is an object type
-        if (innerCoroType && innerCoroType->yieldType_->isObjType()) {
+        if (innerCoroType && storesObjPtr(innerCoroType->yieldType_)) {
             gcMap.push_back(valueReg);
         }
 
@@ -5062,7 +5175,7 @@ u16 CodeGen::genAutoMapCallList(CallExpr_* expr, const FuncInfo* funcInfo) {
         AutoMapCallInfo::BroadcastArg ba;
         ba.argIndex = i;
         ba.isArray  = isAutoMappedArray;
-        ba.isObj    = isAutoMappedArray ? true : paramType->isObjType();
+        ba.isObj    = isAutoMappedArray ? true : storesObjPtr(paramType);
         ba.srcType  = (argType != paramType) ? argType : nullptr;
         ba.dstType  = (argType != paramType) ? paramType : nullptr;
         ba.elemType = isAutoMappedArray ? static_cast<ArrayType*>(argType)->elemType_ : nullptr;
@@ -6450,11 +6563,16 @@ u16 CodeGen::genAutoMapTupleStruct(CallExpr_* expr) {
         }
     }
 
-    // --- Phase 7: Construct struct ---
-    u16 structReg = allocReg();
-    emitOp(op_make_struct);
-    emitRegs(structReg, structFieldBase, (u16)numFields);
-    emitPtr(stype);
+    // --- Phase 7: Construct struct (or skip allocation for UnwrappedTupleStruct) ---
+    u16 structReg;
+    if (stype->repr_ == ts::Type::Repr::UnwrappedTupleStruct && numFields == 1) {
+        structReg = structFieldBase;
+    } else {
+        structReg = allocReg();
+        emitOp(op_make_struct);
+        emitRegs(structReg, structFieldBase, (u16)numFields);
+        emitPtr(stype);
+    }
 
     // --- Phase 8: Store struct in result array ---
     emitOp(op_array_set);
@@ -7254,9 +7372,14 @@ u16 CodeGen::genCartesianTupleStruct(CallExpr_* expr) {
         }
     }
 
-    // Construct struct
-    u16 structReg = allocReg();
-    emitOp(op_make_struct); emitRegs(structReg, structFieldBase, (u16)numFields); emitPtr(stype);
+    // Construct struct (skip allocation for UnwrappedTupleStruct)
+    u16 structReg;
+    if (stype->repr_ == ts::Type::Repr::UnwrappedTupleStruct && numFields == 1) {
+        structReg = structFieldBase;
+    } else {
+        structReg = allocReg();
+        emitOp(op_make_struct); emitRegs(structReg, structFieldBase, (u16)numFields); emitPtr(stype);
+    }
 
     // --- Phase 6: Close loops (innermost to outermost) ---
     {
@@ -7829,6 +7952,12 @@ u16 CodeGen::genFieldExpr(FieldExpr_* expr) {
 
     // Handle struct field access
     if (auto* stype = dynamic_cast<StructType*>(objType)) {
+        // Phase 1: UnwrappedTupleStruct -- value already IS the inner; field
+        // index must be 0 and access is a no-op.
+        if (stype->repr_ == ts::Type::Repr::UnwrappedTupleStruct
+            && stype->isTupleStruct_ && stype->fields_.size() == 1) {
+            return objReg;
+        }
         // Find field index by name
         for (size_t i = 0; i < stype->fields_.size(); ++i) {
             if (stype->fields_[i].name->str() == expr->field) {
@@ -8275,14 +8404,31 @@ u16 CodeGen::genEnumConstruct(ASTNode* node) {
         Type* caseType = etype->cases_[caseIdx].type;
         valReg = ensureType(valReg, valType, caseType);
 
-        emitOp(op_make_enum);
-        emitRegs(dst, valReg, (u16)caseIdx);
-        emitPtr(etype);
+        // Phase 3: NullablePtrEnum -- Some(p) is just the inner pointer.
+        if (etype->repr_ == ts::Type::Repr::NullablePtrEnum) {
+            emitOp(op_mov);
+            emitRegs(dst, valReg);
+        } else {
+            emitOp(op_make_enum);
+            emitRegs(dst, valReg, (u16)caseIdx);
+            emitPtr(etype);
+        }
     } else {
-        // No-data case
-        emitOp(op_make_enum_nodata);
-        emitRegs(dst, (u16)caseIdx);
-        emitPtr(etype);
+        // No-data case. Phase 2: empty enums (DiscriminantEnum repr) are
+        // just the i64 case index. Phase 3: NullablePtrEnum's None case is
+        // a null pointer.
+        if (etype->repr_ == ts::Type::Repr::DiscriminantEnum) {
+            emitOp(op_load_int_const);
+            emitRegs(dst);
+            emitInt((i64)caseIdx);
+        } else if (etype->repr_ == ts::Type::Repr::NullablePtrEnum) {
+            emitOp(op_load_nil);
+            emitRegs(dst);
+        } else {
+            emitOp(op_make_enum_nodata);
+            emitRegs(dst, (u16)caseIdx);
+            emitPtr(etype);
+        }
     }
 
     return dst;

@@ -1,0 +1,15 @@
+Handle(alpha)
+alpha
+alpha
+alpha
+beta
+Handle(gamma)
+Handle(alpha)
+alpha
+true
+[Handle(one), Handle(two), Handle(three)]
+Handle(one)
+two
+Bag([10, 20, 30])
+[10, 20, 30]
+[10, 20, 30]

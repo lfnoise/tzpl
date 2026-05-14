@@ -1,0 +1,23 @@
+Int: repr=Atom sizeWords=1 value=1 recursive=0
+Float: repr=Atom sizeWords=1 value=1 recursive=0
+Bool: repr=Atom sizeWords=1 value=1 recursive=0
+Symbol: repr=Atom sizeWords=1 value=1 recursive=0
+String: repr=Pointer sizeWords=1 value=1 recursive=0
+[Int]: repr=Pointer sizeWords=1 value=1 recursive=0
+Fraction: repr=Pointer sizeWords=1 value=1 recursive=0
+Complex: repr=Pointer sizeWords=1 value=1 recursive=0
+Color: repr=DiscriminantEnum sizeWords=1 value=1 recursive=0
+One: repr=DiscriminantEnum sizeWords=1 value=1 recursive=0
+Option<String>: repr=NullablePtrEnum sizeWords=1 value=1 recursive=0 layout=[(@0,1w,String)]
+NodeId: repr=UnwrappedTupleStruct sizeWords=1 value=1 recursive=0 layout=[(@0,1w,Int)]
+Wgt: repr=UnwrappedTupleStruct sizeWords=1 value=1 recursive=0 layout=[(@0,1w,Float)]
+Handle: repr=UnwrappedTupleStruct sizeWords=1 value=1 recursive=0 layout=[(@0,1w,String)]
+Bag: repr=UnwrappedTupleStruct sizeWords=1 value=1 recursive=0 layout=[(@0,1w,[Int])]
+Pair: repr=Inline sizeWords=2 value=1 recursive=0 layout=[(@0,1w,Int),(@1,1w,Int)]
+Quad: repr=Inline sizeWords=4 value=1 recursive=0 layout=[(@0,1w,Int),(@1,1w,Int),(@2,1w,Int),(@3,1w,Int)]
+Five: repr=Heap sizeWords=1 value=0 recursive=0
+WithStr: repr=Inline sizeWords=2 value=1 recursive=0 layout=[(@0,1w,Int),(@1,1w,String)]
+(Int, Int): repr=Inline sizeWords=2 value=1 recursive=0 layout=[(@0,1w,Int),(@1,1w,Int)]
+(Int, Int, Int, Int): repr=Inline sizeWords=4 value=1 recursive=0 layout=[(@0,1w,Int),(@1,1w,Int),(@2,1w,Int),(@3,1w,Int)]
+(Int, Int, Int, Int, Int): repr=Heap sizeWords=1 value=0 recursive=0
+Shape: repr=Inline sizeWords=3 value=1 recursive=0 layout=[(@1,1w,Float),(@1,2w,(Float, Float)),(@1,0w,Void)]

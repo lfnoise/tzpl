@@ -373,16 +373,26 @@ void op_cmp_ne_complex(VM& vm, Code* pc) {
 
 void op_cmp_eq_obj(VM& vm, Code* pc) {
     u16 dst = pc[1].regs[0], a = pc[1].regs[1], b = pc[1].regs[2];
-    Type* type = vm.reg(a).o->type_;
-    WordEqual eq{type};
+    Obj* oa = vm.reg(a).o;
+    Obj* ob = vm.reg(b).o;
+    if (!oa || !ob) {
+        vm.reg(dst).i = (oa == ob) ? 1 : 0;
+        DISPATCH(2);
+    }
+    WordEqual eq{oa->type_};
     vm.reg(dst).i = eq(vm.reg(a), vm.reg(b)) ? 1 : 0;
     DISPATCH(2);
 }
 
 void op_cmp_ne_obj(VM& vm, Code* pc) {
     u16 dst = pc[1].regs[0], a = pc[1].regs[1], b = pc[1].regs[2];
-    Type* type = vm.reg(a).o->type_;
-    WordEqual eq{type};
+    Obj* oa = vm.reg(a).o;
+    Obj* ob = vm.reg(b).o;
+    if (!oa || !ob) {
+        vm.reg(dst).i = (oa == ob) ? 0 : 1;
+        DISPATCH(2);
+    }
+    WordEqual eq{oa->type_};
     vm.reg(dst).i = eq(vm.reg(a), vm.reg(b)) ? 0 : 1;
     DISPATCH(2);
 }
@@ -874,7 +884,7 @@ void op_concat_array(VM& vm, Code* pc) {
     auto* arrayType = static_cast<ArrayType*>(pc[2].p);
     Type* elemType = arrayType->elemType_;
 
-    if (elemType == vm.intType() || elemType == vm.boolType() || elemType == vm.symbolType()) {
+    if (elemType && !storesObjPtr(elemType) && !storesF64(elemType)) {
         auto* arrA = static_cast<PodArray<i64>*>(vm.reg(a).o);
         auto* arrB = static_cast<PodArray<i64>*>(vm.reg(b).o);
         auto* result = new PodArray<i64>(arrayType);
@@ -882,7 +892,7 @@ void op_concat_array(VM& vm, Code* pc) {
         result->v.insert(result->v.end(), arrA->v.begin(), arrA->v.end());
         result->v.insert(result->v.end(), arrB->v.begin(), arrB->v.end());
         vm.reg(dst).o = result;
-    } else if (elemType == vm.floatType()) {
+    } else if (storesF64(elemType)) {
         auto* arrA = static_cast<PodArray<f64>*>(vm.reg(a).o);
         auto* arrB = static_cast<PodArray<f64>*>(vm.reg(b).o);
         auto* result = new PodArray<f64>(arrayType);
@@ -958,10 +968,10 @@ void op_array_get(VM& vm, Code* pc) {
     auto* arrayType = static_cast<ArrayType*>(pc[2].p);
     Type* elemType = arrayType->elemType_;
 
-    if (elemType == vm.intType() || elemType == vm.boolType() || elemType == vm.symbolType()) {
+    if (elemType && !storesObjPtr(elemType) && !storesF64(elemType)) {
         auto* arr = static_cast<PodArray<i64>*>(vm.reg(src).o);
         vm.reg(dst).i = arr->v[cyclicIndex(idx, arr->v.size())];
-    } else if (elemType == vm.floatType()) {
+    } else if (storesF64(elemType)) {
         auto* arr = static_cast<PodArray<f64>*>(vm.reg(src).o);
         vm.reg(dst).f = arr->v[cyclicIndex(idx, arr->v.size())];
     } else {
@@ -978,14 +988,14 @@ void op_array_slice(VM& vm, Code* pc) {
     auto* arrayType = static_cast<ArrayType*>(pc[2].p);
     Type* elemType = arrayType->elemType_;
 
-    if (elemType == vm.intType() || elemType == vm.boolType() || elemType == vm.symbolType()) {
+    if (elemType && !storesObjPtr(elemType) && !storesF64(elemType)) {
         auto* arr = static_cast<PodArray<i64>*>(vm.reg(src).o);
         auto* result = new PodArray<i64>(arrayType);
         if (startIdx < arr->v.size()) {
             result->v.assign(arr->v.begin() + startIdx, arr->v.end());
         }
         vm.reg(dst).o = result;
-    } else if (elemType == vm.floatType()) {
+    } else if (storesF64(elemType)) {
         auto* arr = static_cast<PodArray<f64>*>(vm.reg(src).o);
         auto* result = new PodArray<f64>(arrayType);
         if (startIdx < arr->v.size()) {
@@ -1011,10 +1021,10 @@ void op_array_length(VM& vm, Code* pc) {
     auto* arrayType = static_cast<ArrayType*>(pc[2].p);
     Type* elemType = arrayType->elemType_;
 
-    if (elemType == vm.intType() || elemType == vm.boolType() || elemType == vm.symbolType()) {
+    if (elemType && !storesObjPtr(elemType) && !storesF64(elemType)) {
         auto* arr = static_cast<PodArray<i64>*>(vm.reg(src).o);
         vm.reg(dst).i = (i64)arr->v.size();
-    } else if (elemType == vm.floatType()) {
+    } else if (storesF64(elemType)) {
         auto* arr = static_cast<PodArray<f64>*>(vm.reg(src).o);
         vm.reg(dst).i = (i64)arr->v.size();
     } else {
@@ -1094,7 +1104,7 @@ struct OpBitNot {
 // --- Array helpers ---
 
 static usize arrayLen(Obj* arr, Type* elemType, VM& vm) {
-    if (elemType == vm.intType() || elemType == vm.boolType() || elemType == vm.symbolType())
+    if (elemType && !storesObjPtr(elemType) && !storesF64(elemType))
         return static_cast<PodArray<i64>*>(arr)->v.size();
     if (elemType == vm.floatType())
         return static_cast<PodArray<f64>*>(arr)->v.size();
@@ -1102,7 +1112,7 @@ static usize arrayLen(Obj* arr, Type* elemType, VM& vm) {
 }
 
 static Word readElem(Obj* arr, usize i, Type* elemType, VM& vm) {
-    if (elemType == vm.intType() || elemType == vm.boolType() || elemType == vm.symbolType())
+    if (elemType && !storesObjPtr(elemType) && !storesF64(elemType))
         return Word(static_cast<PodArray<i64>*>(arr)->v[i]);
     if (elemType == vm.floatType())
         return Word(static_cast<PodArray<f64>*>(arr)->v[i]);
@@ -1111,12 +1121,12 @@ static Word readElem(Obj* arr, usize i, Type* elemType, VM& vm) {
 
 static Obj* makeArray(VM& vm, ArrayType* type, usize len) {
     Type* elem = type->elemType_;
-    if (elem == vm.intType() || elem == vm.boolType() || elem == vm.symbolType()) {
+    if (elem && !storesObjPtr(elem) && !storesF64(elem)) {
         auto* arr = new PodArray<i64>(type);
         arr->v.resize(len);
         return arr;
     }
-    if (elem == vm.floatType()) {
+    if (storesF64(elem)) {
         auto* arr = new PodArray<f64>(type);
         arr->v.resize(len);
         return arr;
@@ -1127,7 +1137,7 @@ static Obj* makeArray(VM& vm, ArrayType* type, usize len) {
 }
 
 static void writeElem(Obj* arr, usize i, Word w, Type* elemType, VM& vm) {
-    if (elemType == vm.intType() || elemType == vm.boolType() || elemType == vm.symbolType())
+    if (elemType && !storesObjPtr(elemType) && !storesF64(elemType))
         static_cast<PodArray<i64>*>(arr)->v[i] = w.i;
     else if (elemType == vm.floatType())
         static_cast<PodArray<f64>*>(arr)->v[i] = w.f;
@@ -1381,7 +1391,7 @@ static Word dispatchListBinop(VM& vm, Op op, Word a, Word b,
         gen->rightElemType_ = bType;
         gen->broadcastVal_ = b;
         gen->broadcastIsLeft_ = false;  // scalar is on the right
-        gen->broadcastValIsObj_ = bType->isObjType();
+        gen->broadcastValIsObj_ = storesObjPtr(bType);
     } else {
         // Scalar op List
         gen->leftList_ = nullptr;
@@ -1390,7 +1400,7 @@ static Word dispatchListBinop(VM& vm, Op op, Word a, Word b,
         gen->rightElemType_ = listB->elemType_;
         gen->broadcastVal_ = a;
         gen->broadcastIsLeft_ = true;   // scalar is on the left
-        gen->broadcastValIsObj_ = aType->isObjType();
+        gen->broadcastValIsObj_ = storesObjPtr(aType);
     }
 
     node->generator_ = gen;
@@ -1828,7 +1838,7 @@ void BinopListGen::generate(VM& vm, ListNode* owner) {
         atEnd = (nextRight == nullptr);
     }
 
-    if (resultElemType_->isObjType() && owner->head_.o) owner->head_.o->retain();
+    if (storesObjPtr(resultElemType_) && owner->head_.o) owner->head_.o->retain();
 
     if (atEnd) {
         owner->tail_ = nullptr;
@@ -1868,7 +1878,7 @@ void UnaryListGen::generate(VM& vm, ListNode* owner) {
                                             sourceElemType_, resultElemType_);
             break;
     }
-    if (resultElemType_->isObjType() && owner->head_.o) owner->head_.o->retain();
+    if (storesObjPtr(resultElemType_) && owner->head_.o) owner->head_.o->retain();
 
     // Create lazy tail
     ListNode* nextSource = source_->tail_;
@@ -1983,13 +1993,13 @@ void op_make_array(VM& vm, Code* pc) {
     auto* arrayType = static_cast<ArrayType*>(pc[2].p);
     Type* elemType = arrayType->elemType_;
 
-    if (elemType == vm.intType() || elemType == vm.boolType() || elemType == vm.symbolType()) {
+    if (elemType && !storesObjPtr(elemType) && !storesF64(elemType)) {
         auto* arr = new PodArray<i64>(arrayType);
         arr->v.resize(numElems);
         for (u16 i = 0; i < numElems; ++i)
             arr->v[i] = vm.reg(firstSrc + i).i;
         vm.reg(dst).o = arr;
-    } else if (elemType == vm.floatType()) {
+    } else if (storesF64(elemType)) {
         auto* arr = new PodArray<f64>(arrayType);
         arr->v.resize(numElems);
         for (u16 i = 0; i < numElems; ++i)
@@ -2122,11 +2132,11 @@ void op_array_alloc(VM& vm, Code* pc) {
     Type* elemType = arrayType->elemType_;
     i64 len = vm.reg(lenReg).i;
 
-    if (elemType == vm.intType() || elemType == vm.boolType() || elemType == vm.symbolType()) {
+    if (elemType && !storesObjPtr(elemType) && !storesF64(elemType)) {
         auto* arr = new PodArray<i64>(arrayType);
         arr->v.resize(len);
         vm.reg(dst).o = arr;
-    } else if (elemType == vm.floatType()) {
+    } else if (storesF64(elemType)) {
         auto* arr = new PodArray<f64>(arrayType);
         arr->v.resize(len);
         vm.reg(dst).o = arr;
@@ -2146,10 +2156,10 @@ void op_array_set(VM& vm, Code* pc) {
     Type* elemType = arrayType->elemType_;
     i64 idx = vm.reg(idxReg).i;
 
-    if (elemType == vm.intType() || elemType == vm.boolType() || elemType == vm.symbolType()) {
+    if (elemType && !storesObjPtr(elemType) && !storesF64(elemType)) {
         auto* arr = static_cast<PodArray<i64>*>(vm.reg(arrReg).o);
         arr->v[cyclicIndex(idx, arr->v.size())] = vm.reg(valReg).i;
-    } else if (elemType == vm.floatType()) {
+    } else if (storesF64(elemType)) {
         auto* arr = static_cast<PodArray<f64>*>(vm.reg(arrReg).o);
         arr->v[cyclicIndex(idx, arr->v.size())] = vm.reg(valReg).f;
     } else {
@@ -2167,10 +2177,10 @@ void op_array_get_dyn(VM& vm, Code* pc) {
     Type* elemType = arrayType->elemType_;
     i64 idx = vm.reg(idxReg).i;
 
-    if (elemType == vm.intType() || elemType == vm.boolType() || elemType == vm.symbolType()) {
+    if (elemType && !storesObjPtr(elemType) && !storesF64(elemType)) {
         auto* arr = static_cast<PodArray<i64>*>(vm.reg(arrReg).o);
         vm.reg(dst).i = arr->v[cyclicIndex(idx, arr->v.size())];
-    } else if (elemType == vm.floatType()) {
+    } else if (storesF64(elemType)) {
         auto* arr = static_cast<PodArray<f64>*>(vm.reg(arrReg).o);
         vm.reg(dst).f = arr->v[cyclicIndex(idx, arr->v.size())];
     } else {
@@ -2191,7 +2201,7 @@ void op_cons(VM& vm, Code* pc) {
     node->head_ = vm.reg(head);
     node->tail_ = static_cast<ListNode*>(vm.reg(tail).o);
     // Retain stored Obj* fields
-    if (listType->elemType_->isObjType() && node->head_.o) node->head_.o->retain();
+    if (storesObjPtr(listType->elemType_) && node->head_.o) node->head_.o->retain();
     if (node->tail_) node->tail_->retain();
     vm.reg(dst).o = node;
     DISPATCH(3);
@@ -2203,7 +2213,7 @@ void op_make_list(VM& vm, Code* pc) {
     u16 dst = pc[1].regs[0], firstSrc = pc[1].regs[1], count = pc[1].regs[2];
     auto* listType = static_cast<ListType*>(pc[2].p);
 
-    bool elemIsObj = listType->elemType_->isObjType();
+    bool elemIsObj = storesObjPtr(listType->elemType_);
     ListNode* result = nullptr;
     for (int i = (int)count - 1; i >= 0; --i) {
         auto* node = new ListNode(listType);
@@ -2377,6 +2387,7 @@ void op_tail_call_template_lambda(VM& vm, Code* pc) {
     }
 
     vm.updateCurrentCodeBlock(callee);
+    vm.growCurrentFrameNumRegs(callee->numRegs);
 
     Code* entry;
     if (!callee->defaultEntryOffsets.empty()) {
@@ -2425,8 +2436,11 @@ void op_tail_call(VM& vm, Code* pc) {
         vm.reg(i) = vm.reg(argBase + i);
     }
 
-    // Update current frame's codeBlock (for GC reachability and op_load_obj)
+    // Update current frame's codeBlock (for GC reachability and op_load_obj).
+    // Also grow numRegs to fit the callee's needs -- otherwise calling a
+    // larger callee from a smaller caller writes into adjacent frame slots.
     vm.updateCurrentCodeBlock(callee);
+    vm.growCurrentFrameNumRegs(callee->numRegs);
 
     // Jump to the appropriate entry point (handle default arguments)
     Code* entry;
@@ -2460,8 +2474,9 @@ void op_tail_call_lambda(VM& vm, Code* pc) {
         vm.reg(callee->numArgs + i) = lambda->freeVars_[i];
     }
 
-    // Update current frame's codeBlock
+    // Update current frame's codeBlock and ensure its reg window fits the callee
     vm.updateCurrentCodeBlock(callee);
+    vm.growCurrentFrameNumRegs(callee->numRegs);
 
     // Jump to the appropriate entry point
     Code* entry;
@@ -2568,8 +2583,8 @@ void op_make_map(VM& vm, Code* pc) {
     auto* mapType = static_cast<MapType*>(pc[2].p);
 
     auto* map = new MapObj(mapType);
-    bool keyIsObj = mapType->keyType_->isObjType();
-    bool valIsObj = mapType->valueType_->isObjType();
+    bool keyIsObj = storesObjPtr(mapType->keyType_);
+    bool valIsObj = storesObjPtr(mapType->valueType_);
     for (u16 i = 0; i < numPairs; ++i) {
         Word key = vm.reg(firstKV + i * 2);
         Word val = vm.reg(firstKV + i * 2 + 1);
@@ -2601,8 +2616,21 @@ void op_map_get_option(VM& vm, Code* pc) {
     auto* map = static_cast<MapObj*>(vm.reg(mapReg).o);
     auto* optType = static_cast<EnumType*>(pc[2].p);
 
-    auto* e = new Enum(optType);
     auto it = map->entries_.find(vm.reg(keyReg));
+
+    // Phase 3: NullablePtrEnum -- store as nullable Obj* directly.
+    if (optType->repr_ == Type::Repr::NullablePtrEnum) {
+        if (it != map->entries_.end()) {
+            Word v = it->second;
+            if (v.o) v.o->retain();
+            vm.reg(dst).o = v.o;
+        } else {
+            vm.reg(dst).o = nullptr;
+        }
+        DISPATCH(3);
+    }
+
+    auto* e = new Enum(optType);
     if (it != map->entries_.end()) {
         e->which_ = 0;  // some
         e->word_ = it->second;
@@ -2623,7 +2651,7 @@ void op_make_set(VM& vm, Code* pc) {
     auto* setType = static_cast<SetType*>(pc[2].p);
 
     auto* set = new SetObj(setType);
-    bool elemIsObj = setType->elemType_->isObjType();
+    bool elemIsObj = storesObjPtr(setType->elemType_);
     for (u16 i = 0; i < numElems; ++i) {
         Word w = vm.reg(firstSrc + i);
         set->entries_.insert(w);
@@ -2642,7 +2670,7 @@ void op_make_ref(VM& vm, Code* pc) {
 
     auto* ref = new RefValue(refType);
     ref->value_ = vm.reg(valReg);
-    if (refType->elemType_->isObjType() && ref->value_.o) ref->value_.o->retain();
+    if (storesObjPtr(refType->elemType_) && ref->value_.o) ref->value_.o->retain();
     vm.reg(dst).o = ref;
     DISPATCH(3);
 }
@@ -2662,7 +2690,7 @@ void op_ref_set(VM& vm, Code* pc) {
     auto* ref = static_cast<RefValue*>(vm.reg(refReg).o);
     auto* refType = static_cast<RefType*>(ref->type_);
     Word newVal = vm.reg(valReg);
-    if (refType->elemType_->isObjType()) {
+    if (storesObjPtr(refType->elemType_)) {
         if (newVal.o) newVal.o->retain();
         if (ref->value_.o) ref->value_.o->release();
     }
@@ -2694,7 +2722,7 @@ void op_coro_create(VM& vm, Code* pc) {
     // Retain Obj* args so they survive the auto-release pool drain
     if (coro->funcType_) {
         for (u16 i = 0; i < coro->numArgs_ && i < coro->funcType_->argTypes_.size(); ++i) {
-            if (coro->funcType_->argTypes_[i]->isObjType() && coro->args_[i].o)
+            if (storesObjPtr(coro->funcType_->argTypes_[i]) && coro->args_[i].o)
                 coro->args_[i].o->retain();
         }
     }
@@ -2730,14 +2758,14 @@ void op_coro_create_lambda(VM& vm, Code* pc) {
     // Retain Obj* args and free vars
     if (funcType) {
         for (u16 i = 0; i < argc && i < funcType->argTypes_.size(); ++i) {
-            if (funcType->argTypes_[i]->isObjType() && coro->args_[i].o)
+            if (storesObjPtr(funcType->argTypes_[i]) && coro->args_[i].o)
                 coro->args_[i].o->retain();
         }
     }
     // Free vars are Obj types — retain them
     auto* lambdaType = static_cast<LambdaType*>(lambda->type_);
     for (u16 i = 0; i < lambda->numFreeVars_; ++i) {
-        if (lambdaType->freeVarTypes_[i]->isObjType() && coro->args_[argc + i].o)
+        if (storesObjPtr(lambdaType->freeVarTypes_[i]) && coro->args_[argc + i].o)
             coro->args_[argc + i].o->retain();
     }
 
@@ -2918,6 +2946,19 @@ void op_coro_wrap_option(VM& vm, Code* pc) {
     u16 dst = pc[1].regs[0], valSrc = pc[1].regs[1], coroReg = pc[1].regs[2];
     auto* optType = static_cast<EnumType*>(pc[2].p);
     auto* coro = static_cast<CoroutineObj*>(vm.reg(coroReg).o);
+
+    // Phase 3: NullablePtrEnum -- store as nullable Obj* directly.
+    if (optType->repr_ == Type::Repr::NullablePtrEnum) {
+        if (coro->state_ == CoroutineObj::Done) {
+            vm.reg(dst).o = nullptr;
+        } else {
+            Word v = vm.reg(valSrc);
+            if (v.o) v.o->retain();
+            vm.reg(dst).o = v.o;
+        }
+        DISPATCH(3);
+    }
+
     auto* e = new Enum(optType);
     if (coro->state_ == CoroutineObj::Done) {
         e->which_ = 1;  // none

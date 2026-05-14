@@ -1,0 +1,24 @@
+Color.red
+Color.green
+Color.blue
+0
+1
+2
+'red
+'blue
+red
+green
+blue
+true
+false
+[Color.red, Color.blue, Color.green, Color.red]
+Color.red
+Color.green
+Pixel { tag: Color.green, x: 3, y: 4 }
+green pixel
+Color.blue
+Only.sole
+0
+Option<Int>.some(100)
+Option<Int>.some(200)
+Any(Color.green, Color)

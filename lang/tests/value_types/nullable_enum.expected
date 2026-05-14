@@ -1,0 +1,27 @@
+Option<String>.some(hello)
+Option<String>.none
+true
+false
+false
+true
+hello
+dflt
+hello
+0
+1
+'some
+'none
+hello
+missing
+true
+false
+[Option<String>.some(hello), Option<String>.none, Option<String>.some(two), Option<String>.none]
+Option<String>.some(hello)
+Option<String>.none
+Box { name: first, opt: Option<String>.some(hello) }
+Box { name: second, opt: Option<String>.none }
+Option<String>.some(v1)
+Option<String>.none
+v1
+true
+Any(Option<String>.some(hello), Option<String>)

@@ -355,6 +355,10 @@ public:
 
     // Update current frame's codeBlock (used by tail call opcodes)
     void updateCurrentCodeBlock(CodeBlock* cb) { frames_[frameCount_ - 1].codeBlock = cb; }
+    void growCurrentFrameNumRegs(u32 n) {
+        auto& f = frames_[frameCount_ - 1];
+        if (n > f.numRegs) f.numRegs = n;
+    }
 
     // Current frame's register count (used by coro_resume to place registers after caller's window)
     u32 currentFrameNumRegs() const { return frames_[frameCount_ - 1].numRegs; }

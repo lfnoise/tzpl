@@ -31,7 +31,7 @@ void TakeListGen::generate(VM& vm, ListNode* owner) {
     if (remaining_ <= 0 || !source_) { owner->tail_ = nullptr; return; }
     source_->force(vm);
     owner->head_ = source_->head_;
-    if (listType_->elemType_->isObjType() && owner->head_.o) owner->head_.o->retain();
+    if (storesObjPtr(listType_->elemType_) && owner->head_.o) owner->head_.o->retain();
     if (remaining_ <= 1 || !source_->tail_) { owner->tail_ = nullptr; return; }
     auto* tail = new ListNode(listType_);
     auto* oldSource = source_;
@@ -52,7 +52,7 @@ void DropListGen::generate(VM& vm, ListNode* owner) {
     if (!cur) { owner->tail_ = nullptr; return; }
     cur->force(vm);
     owner->head_ = cur->head_;
-    if (static_cast<ListType*>(owner->type_)->elemType_->isObjType() && owner->head_.o) owner->head_.o->retain();
+    if (storesObjPtr(static_cast<ListType*>(owner->type_)->elemType_) && owner->head_.o) owner->head_.o->retain();
     owner->tail_ = cur->tail_;
     if (owner->tail_) owner->tail_->retain();
 }
@@ -61,7 +61,7 @@ void StrideListGen::generate(VM& vm, ListNode* owner) {
     if (!source_) { owner->tail_ = nullptr; return; }
     source_->force(vm);
     owner->head_ = source_->head_;
-    if (listType_->elemType_->isObjType() && owner->head_.o) owner->head_.o->retain();
+    if (storesObjPtr(listType_->elemType_) && owner->head_.o) owner->head_.o->retain();
     ListNode* cur = source_;
     for (i64 i = 0; i < stride_ && cur; i++) {
         cur = cur->tail_;
@@ -109,7 +109,7 @@ void StutterListGen::generate(VM& vm, ListNode* owner) {
 }
 
 void CatListGen::generate(VM& vm, ListNode* owner) {
-    bool elemIsObj = listType_->elemType_->isObjType();
+    bool elemIsObj = storesObjPtr(listType_->elemType_);
     if (!inSecond_) {
         if (!first_) { inSecond_ = true; }
         else {
@@ -184,7 +184,7 @@ void PicksListGen::generate(VM& vm, ListNode* owner) {
     size_t n = getArraySize(vm, array_, elemType_);
     size_t idx = vm.rng().next() % n;
     owner->head_ = getArrayElem(vm, array_, elemType_, idx);
-    if (elemType_->isObjType() && owner->head_.o) owner->head_.o->retain();
+    if (storesObjPtr(elemType_) && owner->head_.o) owner->head_.o->retain();
     auto* tail = new ListNode(listType_);
     tail->generator_ = this; this->retain();
     owner->tail_ = tail; tail->retain();
@@ -195,7 +195,7 @@ void CycleListGen::generate(VM& vm, ListNode* owner) {
     if (!current_) { owner->tail_ = nullptr; return; }
     current_->force(vm);
     owner->head_ = current_->head_;
-    if (listType_->elemType_->isObjType() && owner->head_.o) owner->head_.o->retain();
+    if (storesObjPtr(listType_->elemType_) && owner->head_.o) owner->head_.o->retain();
     auto* tail = new ListNode(listType_);
     auto* oldCurrent = current_;
     current_ = current_->tail_ ? current_->tail_ : head_;
@@ -213,7 +213,7 @@ void NCycleListGen::generate(VM& vm, ListNode* owner) {
     if (!current_) { owner->tail_ = nullptr; return; }
     current_->force(vm);
     owner->head_ = current_->head_;
-    if (listType_->elemType_->isObjType() && owner->head_.o) owner->head_.o->retain();
+    if (storesObjPtr(listType_->elemType_) && owner->head_.o) owner->head_.o->retain();
     ListNode* next = current_->tail_;
     if (!next && remaining_ > 0) { next = head_; remaining_--; }
     if (!next) { owner->tail_ = nullptr; return; }
@@ -257,7 +257,7 @@ void MapListGen::generate(VM& vm, ListNode* owner) {
     vm.reg(sb) = source_->head_;
     callOneArg(vm, fn_, sb);
     owner->head_ = vm.reg(sb);
-    if (resultElemType_->isObjType() && owner->head_.o) owner->head_.o->retain();
+    if (storesObjPtr(resultElemType_) && owner->head_.o) owner->head_.o->retain();
     if (!source_->tail_) { owner->tail_ = nullptr; return; }
     auto* tail = new ListNode(resultListType_);
     auto* oldSource = source_;
@@ -364,7 +364,7 @@ void AutoMapListGen::generate(VM& vm, ListNode* owner) {
         entry->op(vm, entry);
     }
     owner->head_ = vm.reg(sb);
-    if (info_->resultElemType->isObjType() && owner->head_.o) owner->head_.o->retain();
+    if (storesObjPtr(info_->resultElemType) && owner->head_.o) owner->head_.o->retain();
 
     // Create lazy tail
     if (!source_->tail_) { owner->tail_ = nullptr; return; }
@@ -382,7 +382,7 @@ void AutoMapListGen::generate(VM& vm, ListNode* owner) {
 void FilterListGen::generate(VM& vm, ListNode* owner) {
     ListNode* cur = source_;
     u16 sb = vm.currentCodeBlock()->numRegs;
-    bool elemIsObj = listType_->elemType_->isObjType();
+    bool elemIsObj = storesObjPtr(listType_->elemType_);
     while (cur) {
         cur->force(vm);
         vm.reg(sb) = cur->head_;
@@ -408,7 +408,7 @@ void FilterListGen::generate(VM& vm, ListNode* owner) {
 
 void PredicateListGen::generate(VM& vm, ListNode* owner) {
     u16 sb = vm.currentCodeBlock()->numRegs;
-    bool elemIsObj = listType_->elemType_->isObjType();
+    bool elemIsObj = storesObjPtr(listType_->elemType_);
     if (mode_ == TakeWhile) {
         // source_ is guaranteed to have passed the predicate (checked before
         // creating this generator).  Copy its head into owner.
@@ -542,7 +542,7 @@ void JoinListGen::generate(VM& vm, ListNode* owner) {
     }
     inner_->force(vm);
     owner->head_ = inner_->head_;
-    bool elemIsObj = resultListType_->elemType_->isObjType();
+    bool elemIsObj = storesObjPtr(resultListType_->elemType_);
     if (elemIsObj && owner->head_.o) owner->head_.o->retain();
     // Check if there's more data before creating a tail
     ListNode* nextInner = inner_->tail_;
@@ -574,7 +574,7 @@ void ArrayToListGen::generate(VM& vm, ListNode* owner) {
     size_t sz = getArraySize(vm, array_, elemType_);
     if (index_ >= sz) { owner->tail_ = nullptr; return; }
     owner->head_ = getArrayElem(vm, array_, elemType_, index_);
-    if (elemType_->isObjType() && owner->head_.o) owner->head_.o->retain();
+    if (storesObjPtr(elemType_) && owner->head_.o) owner->head_.o->retain();
     index_++;
     if (index_ >= sz) { owner->tail_ = nullptr; return; }
     auto* tail = new ListNode(listType_);
@@ -793,7 +793,7 @@ void builtin_toList_coroutine(VM& vm, u16 dst, u16, u16 argBase) {
     // Create the first list node with the first value set directly
     auto* node = new ListNode(listType);
     node->head_ = first;
-    if (elemType->isObjType() && first.o) first.o->retain();
+    if (storesObjPtr(elemType) && first.o) first.o->retain();
 
     // Peek ahead for the second value
     if (coro->state_ == CoroutineObj::Done) {
@@ -809,7 +809,7 @@ void builtin_toList_coroutine(VM& vm, u16 dst, u16, u16 argBase) {
             gen->coro_ = coro;
             gen->listType_ = listType;
             gen->bufferedValue_ = second;
-            gen->valueIsObj_ = elemType->isObjType();
+            gen->valueIsObj_ = storesObjPtr(elemType);
             reinterpret_cast<GCObj*>(gen->coro_)->retain();
             if (gen->valueIsObj_ && gen->bufferedValue_.o) gen->bufferedValue_.o->retain();
             auto* tail = new ListNode(listType);
@@ -886,7 +886,7 @@ void builtin_stutter_list(VM& vm, u16 dst, u16, u16 ab) {
     auto* node = new ListNode(lt);
     auto* gen = new StutterListGen(vm.typeType());
     gen->source_ = src; gen->repeatCount_ = n; gen->currentRepeat_ = 0;
-    gen->valueIsObj_ = lt->elemType_->isObjType(); gen->listType_ = lt;
+    gen->valueIsObj_ = storesObjPtr(lt->elemType_); gen->listType_ = lt;
     gen->source_->retain();
     node->generator_ = gen; reinterpret_cast<GCObj*>(gen)->retain();
     vm.reg(dst).o = node;
@@ -941,7 +941,7 @@ void builtin_hang_list(VM& vm, u16 dst, u16, u16 ab) {
     auto* node = new ListNode(lt);
     auto* gen = new HangListGen(vm.typeType());
     gen->source_ = src; gen->hasLast_ = false;
-    gen->valueIsObj_ = lt->elemType_->isObjType(); gen->listType_ = lt;
+    gen->valueIsObj_ = storesObjPtr(lt->elemType_); gen->listType_ = lt;
     gen->source_->retain();
     node->generator_ = gen; reinterpret_cast<GCObj*>(gen)->retain();
     vm.reg(dst).o = node;
@@ -983,7 +983,7 @@ void builtin_filter_list(VM& vm, u16 dst, u16, u16 ab) {
     // Build the first node eagerly with the found element
     auto* node = new ListNode(lt);
     node->head_ = cur->head_;
-    if (lt->elemType_->isObjType() && node->head_.o) node->head_.o->retain();
+    if (storesObjPtr(lt->elemType_) && node->head_.o) node->head_.o->retain();
     ListNode* rest = cur->tail_;
     if (!rest) { node->tail_ = nullptr; }
     else {
@@ -1023,7 +1023,7 @@ void builtin_scan_list(VM& vm, u16 dst, u16, u16 ab) {
     auto* node = new ListNode(resLT);
     auto* gen = new ScanListGen(vm.typeType());
     gen->source_ = src; gen->fn_ = fn; gen->accumulator_ = acc;
-    gen->accIsObj_ = accET->isObjType();
+    gen->accIsObj_ = storesObjPtr(accET);
     gen->accElemType_ = accET; gen->resultListType_ = resLT;
     gen->source_->retain();
     reinterpret_cast<GCObj*>(gen->fn_)->retain();
@@ -1059,7 +1059,7 @@ void builtin_scan1_list(VM& vm, u16 dst, u16, u16 ab) {
     auto* node = new ListNode(lt);
     auto* gen = new ScanListGen(vm.typeType());
     gen->source_ = src->tail_; gen->fn_ = fn; gen->accumulator_ = src->head_;
-    gen->accIsObj_ = et->isObjType();
+    gen->accIsObj_ = storesObjPtr(et);
     gen->accElemType_ = et; gen->resultListType_ = lt;
     if (gen->source_) gen->source_->retain();
     reinterpret_cast<GCObj*>(gen->fn_)->retain();
@@ -1077,7 +1077,7 @@ void builtin_iter(VM& vm, u16 dst, u16, u16 ab) {
     auto* node = new ListNode(lt);
     auto* gen = new IterListGen(vm.typeType());
     gen->current_ = init; gen->fn_ = fn;
-    gen->valueIsObj_ = et->isObjType(); gen->listType_ = lt;
+    gen->valueIsObj_ = storesObjPtr(et); gen->listType_ = lt;
     reinterpret_cast<GCObj*>(gen->fn_)->retain();
     if (gen->valueIsObj_ && gen->current_.o) gen->current_.o->retain();
     node->generator_ = gen; reinterpret_cast<GCObj*>(gen)->retain();

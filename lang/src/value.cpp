@@ -249,18 +249,7 @@ VMString ListNode::str() const {
 
         if (!first) s += ", ";
         first = false;
-        if (elemType == gCurrentVM->boolType()) {
-            s += node->head_.i ? "true" : "false";
-        } else if (!elemType->isObjType()) {
-            if (elemType == gCurrentVM->floatType())
-                s += rt::fmtFloat(node->head_.f);
-            else
-                s += rt::fmt("{}", node->head_.i);
-        } else if (node->head_.o) {
-            s += node->head_.o->str();
-        } else {
-            s += "nil";
-        }
+        s += wordToString(node->head_, elemType);
         ++count;
         node = node->tail_;
     }
@@ -279,20 +268,8 @@ RefValue::RefValue(Type* type)
 // RefValue::str()
 VMString RefValue::str() const {
     auto* rt = static_cast<RefType*>(type_);
-    Type* elemType = rt->elemType_;
     VMString s = rt::vmstr("Ref(");
-    if (elemType == gCurrentVM->boolType()) {
-        s += value_.i ? "true" : "false";
-    } else if (!elemType->isObjType()) {
-        if (elemType == gCurrentVM->floatType())
-            s += rt::fmt("{}", value_.f);
-        else
-            s += rt::fmt("{}", value_.i);
-    } else if (value_.o) {
-        s += value_.o->str();
-    } else {
-        s += "nil";
-    }
+    s += wordToString(value_, rt->elemType_);
     s += ")";
     return s;
 }
@@ -323,22 +300,7 @@ VMString Struct::str() const {
         s += "(";
         for (u32 i = 0; i < numFields_; ++i) {
             if (i > 0) s += ", ";
-            Type* ft = st->fields_[i].type;
-            if (ft == gCurrentVM->boolType()) {
-                s += v[i].i ? "true" : "false";
-            } else if (ft == gCurrentVM->symbolType()) {
-                s += "'";
-                s += v[i].s->str();
-            } else if (!ft->isObjType()) {
-                if (ft == gCurrentVM->floatType())
-                    s += rt::fmtFloat(v[i].f);
-                else
-                    s += rt::fmt("{}", v[i].i);
-            } else if (v[i].o) {
-                s += v[i].o->str();
-            } else {
-                s += "nil";
-            }
+            s += wordToString(v[i], st->fields_[i].type);
         }
         s += ")";
     } else {
@@ -347,22 +309,7 @@ VMString Struct::str() const {
             if (i > 0) s += ", ";
             s += rt::vmstr(st->fields_[i].name->str());
             s += ": ";
-            Type* ft = st->fields_[i].type;
-            if (ft == gCurrentVM->boolType()) {
-                s += v[i].i ? "true" : "false";
-            } else if (ft == gCurrentVM->symbolType()) {
-                s += "'";
-                s += v[i].s->str();
-            } else if (!ft->isObjType()) {
-                if (ft == gCurrentVM->floatType())
-                    s += rt::fmtFloat(v[i].f);
-                else
-                    s += rt::fmt("{}", v[i].i);
-            } else if (v[i].o) {
-                s += v[i].o->str();
-            } else {
-                s += "nil";
-            }
+            s += wordToString(v[i], st->fields_[i].type);
         }
         s += " }";
     }
@@ -391,23 +338,7 @@ VMString Tuple::str() const {
     VMString s = rt::vmstr("(");
     for (u32 i = 0; i < numFields_; ++i) {
         if (i > 0) s += ", ";
-        Type* ft = tt->fields_[i];
-        if (ft == gCurrentVM->boolType()) {
-            s += v[i].i ? "true" : "false";
-        } else if (ft == gCurrentVM->symbolType()) {
-            s += "'";
-            s += v[i].s->str();
-        } else if (!ft->isObjType()) {
-            // Int or Float stored as atom
-            if (ft == gCurrentVM->floatType())
-                s += rt::fmtFloat(v[i].f);
-            else
-                s += rt::fmt("{}", v[i].i);
-        } else if (v[i].o) {
-            s += v[i].o->str();
-        } else {
-            s += "nil";
-        }
+        s += wordToString(v[i], tt->fields_[i]);
     }
     if (numFields_ == 1) s += ",";
     s += ")";
@@ -601,8 +532,8 @@ VMString MapObj::str() const {
 
 void MapObj::releaseChildren() {
     auto* mt = static_cast<MapType*>(type_);
-    bool keyIsObj = mt->keyType_->isObjType();
-    bool valIsObj = mt->valueType_->isObjType();
+    bool keyIsObj = storesObjPtr(mt->keyType_);
+    bool valIsObj = storesObjPtr(mt->valueType_);
     if (!keyIsObj && !valIsObj) return;
     for (auto& [k, v] : entries_) {
         if (keyIsObj && k.o) k.o->release();
@@ -637,7 +568,7 @@ VMString SetObj::str() const {
 
 void SetObj::releaseChildren() {
     auto* st = static_cast<SetType*>(type_);
-    if (!st->elemType_->isObjType()) return;
+    if (!storesObjPtr(st->elemType_)) return;
     for (auto& elem : entries_) {
         if (elem.o) elem.o->release();
     }
@@ -650,6 +581,18 @@ static size_t hashCombine(size_t seed, size_t h) {
 }
 
 size_t WordHash::operator()(Word w) const {
+    if (type && type->repr_ == Type::Repr::DiscriminantEnum) {
+        return std::hash<i64>{}(w.i);
+    }
+    if (type && type->repr_ == Type::Repr::NullablePtrEnum) {
+        // null = none = 0; otherwise hash by inner type
+        if (!w.o) return 0;
+        auto* et = static_cast<EnumType*>(type);
+        int voidIdx = nullablePtrVoidCaseIndex(et);
+        int dataIdx = (voidIdx == 0) ? 1 : 0;
+        WordHash sub{et->cases_[dataIdx].type};
+        return hashCombine(1, sub(w));
+    }
     if (type == gCurrentVM->intType() || type == gCurrentVM->boolType()) {
         return std::hash<i64>{}(w.i);
     }
@@ -786,6 +729,17 @@ size_t WordHash::operator()(Word w) const {
 // --- WordEqual ---
 
 bool WordEqual::operator()(Word a, Word b) const {
+    if (type && type->repr_ == Type::Repr::DiscriminantEnum) {
+        return a.i == b.i;
+    }
+    if (type && type->repr_ == Type::Repr::NullablePtrEnum) {
+        if (!a.o || !b.o) return a.o == b.o;
+        auto* et = static_cast<EnumType*>(type);
+        int voidIdx = nullablePtrVoidCaseIndex(et);
+        int dataIdx = (voidIdx == 0) ? 1 : 0;
+        WordEqual sub{et->cases_[dataIdx].type};
+        return sub(a, b);
+    }
     if (type == gCurrentVM->intType() || type == gCurrentVM->boolType()) {
         return a.i == b.i;
     }
@@ -948,6 +902,54 @@ VMString wordToString(Word w, Type* type) {
         VMString s = rt::vmstr("'");
         s += w.s->str();
         return s;
+    }
+    // Phase 1: UnwrappedTupleStruct values aren't Struct objects -- the slot
+    // holds the inner value. Format as Name(innerStr) using the inner type.
+    if (type && type->repr_ == Type::Repr::UnwrappedTupleStruct) {
+        if (auto* st = dynamic_cast<StructType*>(type); st && !st->layout_.empty()) {
+            VMString s = rt::vmstr(st->name_->str());
+            s += "(";
+            s += wordToString(w, st->layout_[0].type);
+            s += ")";
+            return s;
+        }
+    }
+    // Phase 2: DiscriminantEnum values are just an i64 case index. Look up
+    // the case name from the static EnumType and format as EnumName.caseName.
+    if (type && type->repr_ == Type::Repr::DiscriminantEnum) {
+        if (auto* et = dynamic_cast<EnumType*>(type)) {
+            VMString s = rt::vmstr(et->name_->str());
+            s += ".";
+            i64 idx = w.i;
+            if (idx >= 0 && (size_t)idx < et->cases_.size()) {
+                s += et->cases_[idx].name->str();
+            } else {
+                s += "?";
+            }
+            return s;
+        }
+    }
+    // Phase 3: NullablePtrEnum values are nullable Obj*. Format as
+    // EnumName.someName(innerStr) when non-null, EnumName.noneName when null.
+    if (type && type->repr_ == Type::Repr::NullablePtrEnum) {
+        if (auto* et = dynamic_cast<EnumType*>(type)) {
+            int voidIdx = nullablePtrVoidCaseIndex(et);
+            int dataIdx = (voidIdx == 0) ? 1 : 0;
+            int idx = w.o ? dataIdx : voidIdx;
+            VMString s = rt::vmstr(et->name_->str());
+            s += ".";
+            if (idx >= 0 && (size_t)idx < et->cases_.size()) {
+                s += et->cases_[idx].name->str();
+                if (w.o && dataIdx >= 0 && (size_t)dataIdx < et->cases_.size()) {
+                    s += "(";
+                    s += wordToString(w, et->cases_[dataIdx].type);
+                    s += ")";
+                }
+            } else {
+                s += "?";
+            }
+            return s;
+        }
     }
     if (!type || type->isObjType()) {
         if (w.o) return w.o->str();

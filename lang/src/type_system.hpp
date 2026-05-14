@@ -30,10 +30,37 @@ namespace ts {
 
 class CodeBlock;  // forward declaration
 struct LambdaExprNode;  // forward declaration from ast.hpp
+class Type;
+
+// Phase 0 layout entry: one per struct/tuple field or one per enum case payload.
+// Word offsets are within the inline storage of the parent type.
+struct FieldLayout {
+    u8    wordOffset;   // first word of this field/payload within the parent
+    u8    sizeWords;    // 1..4 for inline value types; 1 for atoms/pointers
+    Type* type;         // child type (already classified)
+};
 
 // Base Type class
 class Type : public Obj {
 public:
+    // Phase 0 representation classification.
+    // Filled in by classifyType(); see plan
+    // (.claude/plans/i-would-like-you-flickering-nova.md) for rules.
+    enum class Repr : u8 {
+        Atom,                  // Bool/Int/Float/Symbol/Void -- 1 word, not a pointer
+        Pointer,               // Obj* reference (String, Array, Map, Fraction, ...) -- 1 word
+        DiscriminantEnum,      // Enum with all-Void cases -- value is i64 tag
+        NullablePtrEnum,       // 2-case enum (Void + single Pointer payload) -- nullable Obj*
+        UnwrappedTupleStruct,  // 1-field tuple struct over a value type -- carries inner repr
+        Inline,                // multi-word inline struct/tuple/enum (Phase 4)
+        Heap                   // boxed via Obj* (current default for user composites)
+    };
+
+    Repr repr_         = Repr::Heap;
+    u8   sizeWords_    = 1;
+    bool isValueType_  = false;
+    bool isRecursive_  = false;
+
     Type();
     Type(Type* typeType) : Obj(typeType) {}
 
@@ -41,6 +68,35 @@ public:
 };
 
 using TypeVec = Vec<Type*>;
+
+// Compute repr_/sizeWords_/isValueType_/isRecursive_ for `t` and (for struct/tuple/enum)
+// the layout_ vector. Recurses through struct fields, tuple fields, and enum case payloads;
+// pointer/array/map/etc. types are size-1 references and do not recurse into their
+// element types (which breaks structural cycles via collections). Safe to call multiple
+// times -- each call overwrites the previous classification.
+void classifyType(Type* t);
+
+// Phase 0+ runtime-storage predicate: does a Word holding a value of this type
+// contain an Obj* pointer at runtime? Distinct from isObjType(), which describes
+// the static type taxonomy. ARC, GC field marking, AnyObj boxing, and container
+// element dispatch should all use this -- isObjType() is reserved for type-system
+// logic (compatibility, generic constraints, etc.).
+//
+//   Atom, DiscriminantEnum             -> false
+//   Pointer, NullablePtrEnum, Inline
+//   (still boxed in Phase 1-3), Heap   -> true
+//   UnwrappedTupleStruct               -> delegates to its inner type (layout_[0])
+bool storesObjPtr(Type const* t);
+
+// True iff a value of this type is stored as f64 at runtime. Used for
+// PodArray<i64> / PodArray<f64> / ObjArray dispatch. UnwrappedTupleStruct
+// delegates to its inner type.
+bool storesF64(Type const* t);
+
+// For a NullablePtrEnum, returns the case index whose payload is Void
+// (the "none" side). The other case index is the data ("some") side.
+// Returns -1 if no Void case found.
+int nullablePtrVoidCaseIndex(EnumType const* et);
 
 // Type alias
 class AliasedType : public Type {
@@ -240,16 +296,11 @@ public:
     SymbolPtr name_;
     NameTypePairVec cases_;
     Vec<u8> gcCases_;
+    Vec<FieldLayout> layout_;   // one entry per case payload (Phase 0)
 
     EnumType(SymbolPtr name, NameTypePairVec cases);
 
-    void setCases(NameTypePairVec cases) {
-        cases_ = std::move(cases);
-        gcCases_.clear();
-        for (auto const& c : cases_) {
-            gcCases_.push_back(c.type->isObjType() ? 1 : 0);
-        }
-    }
+    void setCases(NameTypePairVec cases);
 
     VMString str() const override { return rt::vmstr(name_->str()); }
 
@@ -262,20 +313,11 @@ public:
     NameTypePairVec fields_;
     Vec<int> gcFields_;
     bool isTupleStruct_ = false;
+    Vec<FieldLayout> layout_;   // one entry per field (Phase 0)
 
     StructType(SymbolPtr name, NameTypePairVec fields, bool isTupleStruct = false);
 
-    void setFields(NameTypePairVec fields) {
-        fields_ = std::move(fields);
-        gcFields_.clear();
-        int i = 0;
-        for (auto const& field : fields_) {
-            if (field.type->isObjType()) {
-                gcFields_.push_back(i);
-            }
-            ++i;
-        }
-    }
+    void setFields(NameTypePairVec fields);
 
     VMString str() const override { return rt::vmstr(name_->str()); }
 
@@ -286,6 +328,7 @@ class TupleType : public ObjType {
 public:
     TypeVec fields_;
     Vec<int> gcFields_;
+    Vec<FieldLayout> layout_;   // one entry per field (Phase 0)
 
     TupleType(TypeVec fields);
 

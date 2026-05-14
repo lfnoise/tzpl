@@ -81,7 +81,7 @@ TypeUniverse::TypeUniverse() {
     types_.voidType = new VoidType();
     types_.anyType = new AnyType();
 
-    // Unit type (empty tuple)
+    // Unit type (empty tuple) -- also classifies it.
     types_.unitType = tupleType(nullptr, 0);
 
     if (!types_.boolType || !types_.intType || !types_.floatType || !types_.symbolType ||
@@ -89,6 +89,20 @@ TypeUniverse::TypeUniverse() {
         !types_.voidType || !types_.unitType) {
         throw std::bad_alloc();
     }
+
+    // Phase 0: classify all primitive built-in types.
+    // (Composite types call classifyType in their own constructors; the
+    // interned type creators below classify their results too.)
+    classifyType(types_.typeType);
+    classifyType(types_.boolType);
+    classifyType(types_.intType);
+    classifyType(types_.floatType);
+    classifyType(types_.symbolType);
+    classifyType(types_.stringType);
+    classifyType(types_.fractionType);
+    classifyType(types_.complexType);
+    classifyType(types_.voidType);
+    classifyType(types_.anyType);
 
     // Pre-intern commonly used symbols
     syms_.some = intern("some");
@@ -102,6 +116,7 @@ ArrayType* TypeUniverse::arrayType(Type* elemType) {
     if (it != arrayTypeCache_.end()) return it->second;
     TypeCreationScope scope(this);
     auto* t = new ArrayType(elemType);
+    classifyType(t);
     arrayTypeCache_[elemType] = t;
     return t;
 }
@@ -111,6 +126,7 @@ ListType* TypeUniverse::listType(Type* elemType) {
     if (it != listTypeCache_.end()) return it->second;
     TypeCreationScope scope(this);
     auto* t = new ListType(elemType);
+    classifyType(t);
     listTypeCache_[elemType] = t;
     return t;
 }
@@ -120,6 +136,7 @@ RangeType* TypeUniverse::rangeType(Type* elemType) {
     if (it != rangeTypeCache_.end()) return it->second;
     TypeCreationScope scope(this);
     auto* t = new RangeType(elemType);
+    classifyType(t);
     rangeTypeCache_[elemType] = t;
     return t;
 }
@@ -129,6 +146,7 @@ RefType* TypeUniverse::refType(Type* elemType) {
     if (it != refTypeCache_.end()) return it->second;
     TypeCreationScope scope(this);
     auto* t = new RefType(elemType);
+    classifyType(t);
     refTypeCache_[elemType] = t;
     return t;
 }
@@ -154,6 +172,7 @@ MapType* TypeUniverse::mapType(Type* keyType, Type* valueType) {
     if (it != mapTypeCache_.end()) return it->second;
     TypeCreationScope scope(this);
     auto* t = new MapType(keyType, valueType);
+    classifyType(t);
     mapTypeCache_[key] = t;
     return t;
 }
@@ -163,6 +182,7 @@ SetType* TypeUniverse::setType(Type* elemType) {
     if (it != setTypeCache_.end()) return it->second;
     TypeCreationScope scope(this);
     auto* t = new SetType(elemType);
+    classifyType(t);
     setTypeCache_[elemType] = t;
     return t;
 }
@@ -194,6 +214,7 @@ CoroutineType* TypeUniverse::coroutineType(Type* yieldType) {
     if (it != coroutineTypeCache_.end()) return it->second;
     TypeCreationScope scope(this);
     auto* t = new CoroutineType(yieldType);
+    classifyType(t);
     coroutineTypeCache_[yieldType] = t;
     return t;
 }
@@ -213,6 +234,7 @@ FunctionType* TypeUniverse::functionType(Type* const* argTypes, size_t argCount,
     TypeVec tv{alloc};
     for (size_t i = 0; i < argCount; ++i) tv.push_back(argTypes[i]);
     auto* t = new FunctionType(std::move(tv), returnType);
+    classifyType(t);
     functionTypeCache_.emplace(std::move(key), t);
     return t;
 }
