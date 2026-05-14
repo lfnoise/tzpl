@@ -559,7 +559,12 @@ static void builtin_get_map(VM& vm, u16 dst, u16, u16 ab) {
         auto* e = new Enum(optType);
         e->which_ = 0;  // some
         e->word_ = it->second;
-        if (optType->gcCases_[0] && e->word_.o) e->word_.o->retain();
+        // Phase 4c: case 0 = some; check layout_[0] for pointer storage.
+        if (!optType->layout_.empty()
+            && storesObjPtr(optType->layout_[0].type)
+            && e->word_.o) {
+            e->word_.o->retain();
+        }
         vm.reg(dst).o = e;
     } else {
         auto* e = new Enum(optType);

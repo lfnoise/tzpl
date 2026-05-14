@@ -295,8 +295,7 @@ class EnumType : public ObjType {
 public:
     SymbolPtr name_;
     NameTypePairVec cases_;
-    Vec<u8> gcCases_;
-    Vec<FieldLayout> layout_;   // one entry per case payload (Phase 0)
+    Vec<FieldLayout> layout_;   // one entry per case payload (Phase 0/4c)
 
     EnumType(SymbolPtr name, NameTypePairVec cases);
 
@@ -311,9 +310,8 @@ class StructType : public ObjType {
 public:
     SymbolPtr name_;
     NameTypePairVec fields_;
-    Vec<int> gcFields_;
     bool isTupleStruct_ = false;
-    Vec<FieldLayout> layout_;   // one entry per field (Phase 0)
+    Vec<FieldLayout> layout_;   // one entry per field (Phase 0/4c)
 
     StructType(SymbolPtr name, NameTypePairVec fields, bool isTupleStruct = false);
 

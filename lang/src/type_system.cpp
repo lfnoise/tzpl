@@ -34,7 +34,6 @@ Type::Type() : Obj(gCurrentTypeUniverse->types().typeType) {}
 // EnumType constructor
 EnumType::EnumType(SymbolPtr name, NameTypePairVec cases)
     : name_(name)
-    , gcCases_(rt::STLAllocator<u8>(rt::gCurrentAllocator))
     , layout_(rt::STLAllocator<FieldLayout>(rt::gCurrentAllocator))
 {
     registerNewObj(this);
@@ -43,20 +42,14 @@ EnumType::EnumType(SymbolPtr name, NameTypePairVec cases)
 
 void EnumType::setCases(NameTypePairVec cases) {
     cases_ = std::move(cases);
-    // Classify first so case-payload reprs are known, then mark gcCases_ based
-    // on what actually lives in the payload slot at runtime (storesObjPtr),
-    // not on the static isObjType() taxonomy.
+    // Phase 4c: classifyType populates layout_ with one entry per case;
+    // runtime walkers select layout_[which_] and dispatch on storesObjPtr().
     classifyType(this);
-    gcCases_.clear();
-    for (auto const& c : cases_) {
-        gcCases_.push_back(storesObjPtr(c.type) ? 1 : 0);
-    }
 }
 
 // StructType constructor
 StructType::StructType(SymbolPtr name, NameTypePairVec fields, bool isTupleStruct)
     : name_(name)
-    , gcFields_(rt::STLAllocator<int>(rt::gCurrentAllocator))
     , isTupleStruct_(isTupleStruct)
     , layout_(rt::STLAllocator<FieldLayout>(rt::gCurrentAllocator))
 {
@@ -66,32 +59,18 @@ StructType::StructType(SymbolPtr name, NameTypePairVec fields, bool isTupleStruc
 
 void StructType::setFields(NameTypePairVec fields) {
     fields_ = std::move(fields);
+    // Phase 4c: classifyType populates layout_ with one entry per field.
     classifyType(this);
-    gcFields_.clear();
-    int i = 0;
-    for (auto const& field : fields_) {
-        if (storesObjPtr(field.type)) {
-            gcFields_.push_back(i);
-        }
-        ++i;
-    }
 }
 
 // TupleType constructor
 TupleType::TupleType(TypeVec fields)
     : fields_(std::move(fields))
-    , gcFields_(rt::STLAllocator<int>(rt::gCurrentAllocator))
     , layout_(rt::STLAllocator<FieldLayout>(rt::gCurrentAllocator))
 {
     registerNewObj(this);
+    // Phase 4c: classifyType populates layout_ with one entry per field.
     classifyType(this);
-    int i = 0;
-    for (Type* field : fields_) {
-        if (field && storesObjPtr(field)) {
-            gcFields_.push_back(i);
-        }
-        ++i;
-    }
 }
 
 // FunctionType constructor
@@ -283,8 +262,16 @@ void classifyStructImpl(StructType* st, std::unordered_set<Type*>& visiting) {
     // Phase 4f: struct runtime is still heap (Struct*); the inline machinery
     // only supports Complex / Fraction so far. Defer struct inlining until
     // struct codegen / containers are wired up.
+    //
+    // Phase 4c: populate layout_ with one entry per field. Word offsets
+    // currently equal field indices because every field still occupies one
+    // Word in Struct::v[]. The runtime walker (Struct::releaseChildren,
+    // op_make_struct retain pass) uses layout_ to find Obj* fields.
+    u8 wordOffset = 0;
     for (auto const& field : st->fields_) {
         if (field.type) classifyImpl(field.type, visiting);
+        st->layout_.push_back(FieldLayout{wordOffset, 1, field.type});
+        ++wordOffset;
     }
     setHeap(st);
 }
@@ -294,8 +281,15 @@ void classifyTupleImpl(TupleType* tu, std::unordered_set<Type*>& visiting) {
     // Phase 4f: tuple runtime is still heap (Tuple*); the inline machinery
     // only supports Complex / Fraction so far. Defer tuple inlining until
     // tuple codegen / containers are wired up.
+    //
+    // Phase 4c: populate layout_ with one entry per field. Word offsets
+    // currently equal field indices because every field still occupies one
+    // Word in Tuple::v[].
+    u8 wordOffset = 0;
     for (Type* field : tu->fields_) {
         if (field) classifyImpl(field, visiting);
+        tu->layout_.push_back(FieldLayout{wordOffset, 1, field});
+        ++wordOffset;
     }
     setHeap(tu);
 }
@@ -350,6 +344,17 @@ void classifyEnumImpl(EnumType* en, std::unordered_set<Type*>& visiting) {
 
     // Phase 4f: enum runtime is still heap (Enum*); the inline machinery
     // only supports Complex / Fraction so far. Defer enum inlining.
+    //
+    // Phase 4c: populate layout_ with one entry per case payload, indexed by
+    // case index. wordOffset is 0 because the heap Enum has a single
+    // dedicated payload slot (Enum::word_); the offset is meaningful only
+    // once enums become inline. Type carries the case payload type --
+    // VoidType for no-data cases. Walkers select layout_[which_] then check
+    // storesObjPtr() on the type to decide whether to retain/release.
+    en->layout_.clear();
+    for (auto const& c : en->cases_) {
+        en->layout_.push_back(FieldLayout{0, 1, c.type});
+    }
     setHeap(en);
 }
 

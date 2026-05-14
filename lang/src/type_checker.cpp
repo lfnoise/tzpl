@@ -340,9 +340,9 @@ void TypeChecker::check(Program& program) {
     // Phase 0+: re-classify all named types now that all field/case types
     // are known. The first setFields/setCases call on a type may have happened
     // before its dependencies were classified (e.g. struct P { tag Color }
-    // where Color is an enum processed in a later loop). gcFields_/gcCases_
-    // are derived from storesObjPtr() which depends on the dependency's
-    // classification, so we recompute them here.
+    // where Color is an enum processed in a later loop). The layout_ vector
+    // is derived from storesObjPtr() which depends on the dependency's
+    // classification, so we recompute it here.
     for (auto& kv : structTypes_) {
         StructType* st = kv.second;
         st->setFields(NameTypePairVec(st->fields_));
@@ -635,9 +635,9 @@ void TypeChecker::checkREPLInput(Program& program) {
     // Phase 0+: re-classify all named types now that all field/case types
     // are known. The first setFields/setCases call on a type may have happened
     // before its dependencies were classified (e.g. struct P { tag Color }
-    // where Color is an enum processed in a later loop). gcFields_/gcCases_
-    // are derived from storesObjPtr() which depends on the dependency's
-    // classification, so we recompute them here.
+    // where Color is an enum processed in a later loop). The layout_ vector
+    // is derived from storesObjPtr() which depends on the dependency's
+    // classification, so we recompute it here.
     for (auto& kv : structTypes_) {
         StructType* st = kv.second;
         st->setFields(NameTypePairVec(st->fields_));

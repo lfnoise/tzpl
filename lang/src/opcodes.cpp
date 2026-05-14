@@ -1092,10 +1092,11 @@ void op_concat_tuple(VM& vm, Code* pc) {
     for (usize i = 0; i < rightLen; ++i) {
         result->v[leftLen + i] = tupB->v[i];
     }
-    // Retain Obj* fields
-    auto* st = static_cast<StructType*>(static_cast<Type*>(resultType));
-    for (auto idx : st->gcFields_) {
-        if (result->v[idx].o) result->v[idx].o->retain();
+    // Retain Obj* fields. Phase 4c: walk via layout_.
+    for (auto const& f : resultType->layout_) {
+        if (storesObjPtr(f.type) && result->v[f.wordOffset].o) {
+            result->v[f.wordOffset].o->retain();
+        }
     }
     vm.reg(dst).o = result;
     DISPATCH(4);
@@ -2197,9 +2198,11 @@ void op_tuple_slice(VM& vm, Code* pc) {
     for (size_t i = 0; i < count; ++i) {
         newTuple->v[i] = srcTuple->v[startIdx + i];
     }
-    // Retain Obj* fields
-    for (auto idx : resultType->gcFields_) {
-        if (newTuple->v[idx].o) newTuple->v[idx].o->retain();
+    // Retain Obj* fields. Phase 4c: layout_-driven walk.
+    for (auto const& f : resultType->layout_) {
+        if (storesObjPtr(f.type) && newTuple->v[f.wordOffset].o) {
+            newTuple->v[f.wordOffset].o->retain();
+        }
     }
     vm.reg(dst).o = newTuple;
     DISPATCH(3);
@@ -2213,9 +2216,11 @@ void op_make_tuple(VM& vm, Code* pc) {
     for (u16 i = 0; i < numFields; ++i) {
         tuple->v[i] = vm.reg(firstSrc + i);
     }
-    // Retain Obj* fields so they survive the auto-release pool drain
-    for (auto idx : tupleType->gcFields_) {
-        if (tuple->v[idx].o) tuple->v[idx].o->retain();
+    // Retain Obj* fields. Phase 4c: layout_-driven walk.
+    for (auto const& f : tupleType->layout_) {
+        if (storesObjPtr(f.type) && tuple->v[f.wordOffset].o) {
+            tuple->v[f.wordOffset].o->retain();
+        }
     }
     vm.reg(dst).o = tuple;
     DISPATCH(3);
@@ -2229,9 +2234,11 @@ void op_make_struct(VM& vm, Code* pc) {
     for (u16 i = 0; i < numFields; ++i) {
         s->v[i] = vm.reg(firstSrc + i);
     }
-    // Retain Obj* fields so they survive the auto-release pool drain
-    for (auto idx : structType->gcFields_) {
-        if (s->v[idx].o) s->v[idx].o->retain();
+    // Retain Obj* fields. Phase 4c: layout_-driven walk.
+    for (auto const& f : structType->layout_) {
+        if (storesObjPtr(f.type) && s->v[f.wordOffset].o) {
+            s->v[f.wordOffset].o->retain();
+        }
     }
     vm.reg(dst).o = s;
     DISPATCH(3);
@@ -2252,7 +2259,12 @@ void op_make_enum(VM& vm, Code* pc) {
     auto* e = new Enum(enumType);
     e->which_ = caseIdx;
     e->word_ = vm.reg(valSrc);
-    if (enumType->gcCases_[caseIdx] && e->word_.o) e->word_.o->retain();
+    // Phase 4c: layout_[caseIdx].type tells us what's in the payload word.
+    if ((size_t)caseIdx < enumType->layout_.size()
+        && storesObjPtr(enumType->layout_[caseIdx].type)
+        && e->word_.o) {
+        e->word_.o->retain();
+    }
     vm.reg(dst).o = e;
     DISPATCH(3);
 }
@@ -2796,7 +2808,12 @@ void op_map_get_option(VM& vm, Code* pc) {
     if (it != map->entries_.end()) {
         e->which_ = 0;  // some
         e->word_ = it->second;
-        if (optType->gcCases_[0] && e->word_.o) e->word_.o->retain();
+        // Phase 4c: case 0 = some; check layout_[0] for pointer storage.
+        if (!optType->layout_.empty()
+            && storesObjPtr(optType->layout_[0].type)
+            && e->word_.o) {
+            e->word_.o->retain();
+        }
     } else {
         e->which_ = 1;  // none
         e->word_.i = 0;
@@ -3128,7 +3145,12 @@ void op_coro_wrap_option(VM& vm, Code* pc) {
     } else {
         e->which_ = 0;  // some
         e->word_ = vm.reg(valSrc);
-        if (optType->gcCases_[0] && e->word_.o) e->word_.o->retain();
+        // Phase 4c: case 0 = some; check layout_[0] for pointer storage.
+        if (!optType->layout_.empty()
+            && storesObjPtr(optType->layout_[0].type)
+            && e->word_.o) {
+            e->word_.o->retain();
+        }
     }
     vm.reg(dst).o = e;
     DISPATCH(3);

@@ -13,11 +13,11 @@ NodeId: repr=UnwrappedTupleStruct sizeWords=1 value=1 recursive=0 layout=[(@0,1w
 Wgt: repr=UnwrappedTupleStruct sizeWords=1 value=1 recursive=0 layout=[(@0,1w,Float)]
 Handle: repr=UnwrappedTupleStruct sizeWords=1 value=1 recursive=0 layout=[(@0,1w,String)]
 Bag: repr=UnwrappedTupleStruct sizeWords=1 value=1 recursive=0 layout=[(@0,1w,[Int])]
-Pair: repr=Heap sizeWords=1 value=0 recursive=0
-Quad: repr=Heap sizeWords=1 value=0 recursive=0
-Five: repr=Heap sizeWords=1 value=0 recursive=0
-WithStr: repr=Heap sizeWords=1 value=0 recursive=0
-(Int, Int): repr=Heap sizeWords=1 value=0 recursive=0
-(Int, Int, Int, Int): repr=Heap sizeWords=1 value=0 recursive=0
-(Int, Int, Int, Int, Int): repr=Heap sizeWords=1 value=0 recursive=0
-Shape: repr=Heap sizeWords=1 value=0 recursive=0
+Pair: repr=Heap sizeWords=1 value=0 recursive=0 layout=[(@0,1w,Int),(@1,1w,Int)]
+Quad: repr=Heap sizeWords=1 value=0 recursive=0 layout=[(@0,1w,Int),(@1,1w,Int),(@2,1w,Int),(@3,1w,Int)]
+Five: repr=Heap sizeWords=1 value=0 recursive=0 layout=[(@0,1w,Int),(@1,1w,Int),(@2,1w,Int),(@3,1w,Int),(@4,1w,Int)]
+WithStr: repr=Heap sizeWords=1 value=0 recursive=0 layout=[(@0,1w,Int),(@1,1w,String)]
+(Int, Int): repr=Heap sizeWords=1 value=0 recursive=0 layout=[(@0,1w,Int),(@1,1w,Int)]
+(Int, Int, Int, Int): repr=Heap sizeWords=1 value=0 recursive=0 layout=[(@0,1w,Int),(@1,1w,Int),(@2,1w,Int),(@3,1w,Int)]
+(Int, Int, Int, Int, Int): repr=Heap sizeWords=1 value=0 recursive=0 layout=[(@0,1w,Int),(@1,1w,Int),(@2,1w,Int),(@3,1w,Int),(@4,1w,Int)]
+Shape: repr=Heap sizeWords=1 value=0 recursive=0 layout=[(@0,1w,Float),(@0,1w,(Float, Float)),(@0,1w,Void)]

@@ -493,8 +493,11 @@ void ZipListGen::generate(VM& vm, ListNode* owner) {
     right_->force(vm);
     auto* tup = Tuple::create(tupleType_, 2);
     tup->v[0] = left_->head_; tup->v[1] = right_->head_;
-    for (auto idx : tupleType_->gcFields_) {
-        if (tup->v[idx].o) tup->v[idx].o->retain();
+    // Phase 4c: layout_-driven retain walk.
+    for (auto const& f : tupleType_->layout_) {
+        if (storesObjPtr(f.type) && tup->v[f.wordOffset].o) {
+            tup->v[f.wordOffset].o->retain();
+        }
     }
     owner->head_.o = tup;
     tup->retain(); // head_ is always Obj (Tuple)
@@ -512,8 +515,11 @@ void EnumerateListGen::generate(VM& vm, ListNode* owner) {
     source_->force(vm);
     auto* tup = Tuple::create(tupleType_, 2);
     tup->v[0] = Word(index_); tup->v[1] = source_->head_;
-    for (auto idx : tupleType_->gcFields_) {
-        if (tup->v[idx].o) tup->v[idx].o->retain();
+    // Phase 4c: layout_-driven retain walk.
+    for (auto const& f : tupleType_->layout_) {
+        if (storesObjPtr(f.type) && tup->v[f.wordOffset].o) {
+            tup->v[f.wordOffset].o->retain();
+        }
     }
     owner->head_.o = tup;
     tup->retain(); // head_ is always Obj (Tuple)

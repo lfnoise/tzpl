@@ -827,9 +827,14 @@ public:
     VMString str() const override;
 
     void releaseChildren() override {
+        // Phase 4c: walk via layout_ rather than gcFields_. wordOffset == field
+        // index today; once struct fields become multi-word inline, the
+        // offsets will diverge and this walker keeps working unchanged.
         auto t = static_cast<StructType*>(type_);
-        for (auto idx : t->gcFields_) {
-            if (v[idx].o) v[idx].o->release();
+        for (auto const& f : t->layout_) {
+            if (storesObjPtr(f.type) && v[f.wordOffset].o) {
+                v[f.wordOffset].o->release();
+            }
         }
     }
 
@@ -851,9 +856,12 @@ public:
     VMString str() const override;
 
     void releaseChildren() override {
+        // Phase 4c: walk via layout_ (see Struct::releaseChildren).
         auto t = static_cast<TupleType*>(type_);
-        for (auto idx : t->gcFields_) {
-            if (v[idx].o) v[idx].o->release();
+        for (auto const& f : t->layout_) {
+            if (storesObjPtr(f.type) && v[f.wordOffset].o) {
+                v[f.wordOffset].o->release();
+            }
         }
     }
 
@@ -891,8 +899,14 @@ public:
     }
 
     void releaseChildren() override {
+        // Phase 4c: walk via per-case layout_. Each case's payload type is at
+        // layout_[caseIdx]; storesObjPtr() decides whether to release.
         auto t = static_cast<EnumType*>(type_);
-        if (t->gcCases_[which_] && word_.o) word_.o->release();
+        if ((size_t)which_ < t->layout_.size()
+            && storesObjPtr(t->layout_[which_].type)
+            && word_.o) {
+            word_.o->release();
+        }
     }
 };
 
