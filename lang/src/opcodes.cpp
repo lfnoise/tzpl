@@ -383,6 +383,78 @@ void op_cmp_ne_complex(VM& vm, Code* pc) {
     DISPATCH(2);
 }
 
+// --- Complex Inline Arithmetic (Phase 4f scaffolding) ---
+// Complex represented as 2 consecutive Words: word[0] = real (f64), word[1] = imag (f64).
+// Operand and dst regs name the FIRST word of each 2-word slot.
+// Not yet emitted by codegen — Complex is still classified as Pointer; these
+// handlers exist for the upcoming inline bring-up.
+
+void op_add_complex_inline(VM& vm, Code* pc) {
+    u16 dst = pc[1].regs[0], a = pc[1].regs[1], b = pc[1].regs[2];
+    f64 ar = vm.reg(a).f,     ai = vm.reg((u16)(a+1)).f;
+    f64 br = vm.reg(b).f,     bi = vm.reg((u16)(b+1)).f;
+    vm.reg(dst).f         = ar + br;
+    vm.reg((u16)(dst+1)).f = ai + bi;
+    DISPATCH(2);
+}
+
+void op_sub_complex_inline(VM& vm, Code* pc) {
+    u16 dst = pc[1].regs[0], a = pc[1].regs[1], b = pc[1].regs[2];
+    f64 ar = vm.reg(a).f,     ai = vm.reg((u16)(a+1)).f;
+    f64 br = vm.reg(b).f,     bi = vm.reg((u16)(b+1)).f;
+    vm.reg(dst).f         = ar - br;
+    vm.reg((u16)(dst+1)).f = ai - bi;
+    DISPATCH(2);
+}
+
+void op_mul_complex_inline(VM& vm, Code* pc) {
+    u16 dst = pc[1].regs[0], a = pc[1].regs[1], b = pc[1].regs[2];
+    f64 ar = vm.reg(a).f,     ai = vm.reg((u16)(a+1)).f;
+    f64 br = vm.reg(b).f,     bi = vm.reg((u16)(b+1)).f;
+    // (ar+ai*i)(br+bi*i) = (ar*br - ai*bi) + (ar*bi + ai*br)i
+    f64 rr = ar*br - ai*bi;
+    f64 ri = ar*bi + ai*br;
+    vm.reg(dst).f         = rr;
+    vm.reg((u16)(dst+1)).f = ri;
+    DISPATCH(2);
+}
+
+void op_div_complex_inline(VM& vm, Code* pc) {
+    u16 dst = pc[1].regs[0], a = pc[1].regs[1], b = pc[1].regs[2];
+    f64 ar = vm.reg(a).f,     ai = vm.reg((u16)(a+1)).f;
+    f64 br = vm.reg(b).f,     bi = vm.reg((u16)(b+1)).f;
+    // (ar+ai*i)/(br+bi*i) = ((ar*br + ai*bi) + (ai*br - ar*bi)i) / (br^2 + bi^2)
+    f64 denom = br*br + bi*bi;
+    f64 rr = (ar*br + ai*bi) / denom;
+    f64 ri = (ai*br - ar*bi) / denom;
+    vm.reg(dst).f         = rr;
+    vm.reg((u16)(dst+1)).f = ri;
+    DISPATCH(2);
+}
+
+void op_neg_complex_inline(VM& vm, Code* pc) {
+    u16 dst = pc[1].regs[0], a = pc[1].regs[1];
+    vm.reg(dst).f         = -vm.reg(a).f;
+    vm.reg((u16)(dst+1)).f = -vm.reg((u16)(a+1)).f;
+    DISPATCH(2);
+}
+
+void op_cmp_eq_complex_inline(VM& vm, Code* pc) {
+    u16 dst = pc[1].regs[0], a = pc[1].regs[1], b = pc[1].regs[2];
+    bool eq = (vm.reg(a).f == vm.reg(b).f)
+           && (vm.reg((u16)(a+1)).f == vm.reg((u16)(b+1)).f);
+    vm.reg(dst).i = eq ? 1 : 0;
+    DISPATCH(2);
+}
+
+void op_cmp_ne_complex_inline(VM& vm, Code* pc) {
+    u16 dst = pc[1].regs[0], a = pc[1].regs[1], b = pc[1].regs[2];
+    bool eq = (vm.reg(a).f == vm.reg(b).f)
+           && (vm.reg((u16)(a+1)).f == vm.reg((u16)(b+1)).f);
+    vm.reg(dst).i = eq ? 0 : 1;
+    DISPATCH(2);
+}
+
 // --- Generic Object Comparison ---
 
 void op_cmp_eq_obj(VM& vm, Code* pc) {

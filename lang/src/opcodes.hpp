@@ -84,6 +84,17 @@ void op_neg_complex(VM& vm, Code* pc);        // NEG_COMPLEX Rd, Ra (2 words)
 void op_cmp_eq_complex(VM& vm, Code* pc);     // CMP_EQ_COMPLEX Rd, Ra, Rb (2 words)
 void op_cmp_ne_complex(VM& vm, Code* pc);     // CMP_NE_COMPLEX Rd, Ra, Rb (2 words)
 
+// --- Complex Inline Arithmetic (Phase 4f scaffolding) ---
+// Operand and dst regs name the FIRST word of a 2-word slot:
+//   word[0] = real (f64), word[1] = imag (f64).
+void op_add_complex_inline(VM& vm, Code* pc);
+void op_sub_complex_inline(VM& vm, Code* pc);
+void op_mul_complex_inline(VM& vm, Code* pc);
+void op_div_complex_inline(VM& vm, Code* pc);
+void op_neg_complex_inline(VM& vm, Code* pc);
+void op_cmp_eq_complex_inline(VM& vm, Code* pc);
+void op_cmp_ne_complex_inline(VM& vm, Code* pc);
+
 // --- Conversion ---
 void op_int_to_float(VM& vm, Code* pc);       // INT_TO_FLOAT Rd, Ra (2 words)
 void op_float_to_int(VM& vm, Code* pc);       // FLOAT_TO_INT Rd, Ra (2 words)
