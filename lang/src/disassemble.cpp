@@ -110,6 +110,12 @@ static const std::unordered_map<Operation, OpInfo>& opInfoMap() {
         { op_cmp_eq_complex,    { "EQ_CMPLX",          2, OpFmt::Regs, 3 } },
         { op_cmp_ne_complex,    { "NE_CMPLX",          2, OpFmt::Regs, 3 } },
 
+        // --- Complex / Fraction Boxing (Phase 4f) ---
+        { op_box_complex,           { "BOX_CMPLX",         2, OpFmt::Regs, 2 } },
+        { op_unbox_complex,         { "UNBOX_CMPLX",       2, OpFmt::Regs, 2 } },
+        { op_box_fraction,          { "BOX_FRAC",          2, OpFmt::Regs, 2 } },
+        { op_unbox_fraction,        { "UNBOX_FRAC",        2, OpFmt::Regs, 2 } },
+
         // --- Complex Inline Arithmetic (Phase 4f scaffolding) ---
         { op_add_complex_inline,    { "ADD_CMPLX_I",       2, OpFmt::Regs, 3 } },
         { op_sub_complex_inline,    { "SUB_CMPLX_I",       2, OpFmt::Regs, 3 } },

@@ -1408,6 +1408,27 @@ static void builtin_toString_obj(VM& vm, u16 dst, u16, u16 argBase) {
     vm.reg(dst).o = result;
 }
 
+// Phase 4f: Inline Complex (2 words: real, imag).
+static void builtin_toString_complex_inline(VM& vm, u16 dst, u16, u16 argBase) {
+    f64 re = vm.reg(argBase).f;
+    f64 im = vm.reg((u16)(argBase + 1)).f;
+    auto* result = new StringObj();
+    if (std::signbit(im)) result->s = rt::fmt("{}{}i", re, im);
+    else                  result->s = rt::fmt("{}+{}i", re, im);
+    registerNewObj(result);
+    vm.reg(dst).o = result;
+}
+
+// Phase 4f: Inline Fraction (2 words: numer, denom).
+static void builtin_toString_fraction_inline(VM& vm, u16 dst, u16, u16 argBase) {
+    i64 n = vm.reg(argBase).i;
+    i64 d = vm.reg((u16)(argBase + 1)).i;
+    auto* result = new StringObj();
+    result->s = rt::fmt("{}/{}", n, d);
+    registerNewObj(result);
+    vm.reg(dst).o = result;
+}
+
 // Generic toString that recovers the static arg type from currentPrimitive()
 // and dispatches through wordToString. Used for DiscriminantEnum (value is i64
 // but printed via the static EnumType's case table).
@@ -1441,6 +1462,13 @@ static bool resolve_toString(Compiler& compiler, const std::vector<Type*>& args,
     }
     if (t && t->repr_ == Type::Repr::DiscriminantEnum) {
         cf = builtin_toString_word; return true;
+    }
+    // Phase 4f: Complex / Fraction are inline 2-word value types.
+    if (t == compiler.complexType()) {
+        cf = builtin_toString_complex_inline; return true;
+    }
+    if (t == compiler.fractionType()) {
+        cf = builtin_toString_fraction_inline; return true;
     }
     if (t->isObjType()) {
         cf = builtin_toString_obj; return true;
@@ -1522,10 +1550,28 @@ static void printArgs(VM& vm, u16 argc, u16 argBase) {
     auto* tt = static_cast<TupleType*>(prim->type_);
     FILE* out = vm.printOutput();
 
+    // Phase 4f: args may be multi-word (Inline Complex/Fraction = 2 words).
+    // Walk via cumulative offset, formatting inline value types specially.
+    u32 cumOffset = 0;
     for (u16 i = 0; i < argc; ++i) {
         if (i > 0) std::fputc(' ', out);
-        VMString s = wordToString(vm.reg(argBase + i), tt->fields_[i]);
+        Type* t = tt->fields_[i];
+        u32 sw = (t && t->sizeWords_ > 0) ? t->sizeWords_ : 1;
+        VMString s;
+        if (t == vm.complexType()) {
+            f64 re = vm.reg((u16)(argBase + cumOffset)).f;
+            f64 im = vm.reg((u16)(argBase + cumOffset + 1)).f;
+            s = std::signbit(im) ? rt::fmt("{}{}i", re, im)
+                                 : rt::fmt("{}+{}i", re, im);
+        } else if (t == vm.fractionType()) {
+            i64 n = vm.reg((u16)(argBase + cumOffset)).i;
+            i64 d = vm.reg((u16)(argBase + cumOffset + 1)).i;
+            s = rt::fmt("{}/{}", n, d);
+        } else {
+            s = wordToString(vm.reg((u16)(argBase + cumOffset)), t);
+        }
         std::fprintf(out, "%.*s", (int)s.size(), s.data());
+        cumOffset += sw;
     }
 }
 

@@ -84,6 +84,12 @@ void op_neg_complex(VM& vm, Code* pc);        // NEG_COMPLEX Rd, Ra (2 words)
 void op_cmp_eq_complex(VM& vm, Code* pc);     // CMP_EQ_COMPLEX Rd, Ra, Rb (2 words)
 void op_cmp_ne_complex(VM& vm, Code* pc);     // CMP_NE_COMPLEX Rd, Ra, Rb (2 words)
 
+// --- Complex / Fraction Boxing (Phase 4f) ---
+void op_box_complex(VM& vm, Code* pc);        // dst.o = new Complex(src[0].f, src[1].f)
+void op_unbox_complex(VM& vm, Code* pc);      // dst[0..1].f = ((Complex*)src.o)->x
+void op_box_fraction(VM& vm, Code* pc);       // dst.o = new Fraction(src[0].i, src[1].i)
+void op_unbox_fraction(VM& vm, Code* pc);     // dst[0..1].i = ((Fraction*)src.o)->r
+
 // --- Complex Inline Arithmetic (Phase 4f scaffolding) ---
 // Operand and dst regs name the FIRST word of a 2-word slot:
 //   word[0] = real (f64), word[1] = imag (f64).

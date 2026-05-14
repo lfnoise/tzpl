@@ -205,6 +205,65 @@ private:
         return (n == 1) ? allocReg() : allocRegs(n);
     }
 
+    // Copy `argReg` to `targetReg` as a multi-word slot for type `argType`.
+    // For 1-word types this emits op_mov; for inline value types it emits
+    // op_move_n. Advances nextReg_ past the copied region. (Phase 4f)
+    void emitArgPlacement(u16 targetReg, u16 argReg, Type* argType) {
+        u32 sw = (argType && argType->sizeWords_ > 0) ? argType->sizeWords_ : 1;
+        if (argReg != targetReg) {
+            emitMoveN(targetReg, argReg, sw);
+        }
+        u16 next = (u16)(targetReg + sw);
+        if (nextReg_ < next) { nextReg_ = next; if (nextReg_ > maxReg_) maxReg_ = nextReg_; }
+    }
+
+    // Number of slot words for type t (1 for atom/pointer, sizeWords_ for inline).
+    static u32 typeSlotWords(Type const* t) {
+        return (t && t->sizeWords_ > 0) ? t->sizeWords_ : 1;
+    }
+
+    // True iff t is an Inline value type that occupies more than one Word
+    // (Phase 4f: Complex and Fraction; later: tuples/structs/enums).
+    static bool isInlineMultiword(Type const* t) {
+        return t && t->repr_ == ts::Type::Repr::Inline && t->sizeWords_ > 1;
+    }
+
+    // BOX an inline value into a heap Obj* (returns reg holding the Obj*).
+    // For non-inline types, returns srcReg unchanged.
+    u16 emitBoxIfInline(u16 srcReg, Type* type) {
+        if (type == compiler_.complexType()) {
+            u16 dst = allocReg();
+            emitOp(op_box_complex);
+            emitRegs(dst, srcReg);
+            return dst;
+        }
+        if (type == compiler_.fractionType()) {
+            u16 dst = allocReg();
+            emitOp(op_box_fraction);
+            emitRegs(dst, srcReg);
+            return dst;
+        }
+        return srcReg;
+    }
+
+    // UNBOX a heap Obj* into an inline 2-word slot (returns base reg).
+    // For non-inline types, returns srcReg unchanged.
+    u16 emitUnboxIfInline(u16 srcReg, Type* type) {
+        if (type == compiler_.complexType()) {
+            u16 dst = allocSlot(type);
+            emitOp(op_unbox_complex);
+            emitRegs(dst, srcReg);
+            return dst;
+        }
+        if (type == compiler_.fractionType()) {
+            u16 dst = allocSlot(type);
+            emitOp(op_unbox_fraction);
+            emitRegs(dst, srcReg);
+            return dst;
+        }
+        return srcReg;
+    }
+
     // Jump helpers - store target indices, resolve to pointers after emission
     // jumpFixups_ tracks Code positions that contain jump target indices
     std::vector<u32> jumpFixups_;
@@ -282,6 +341,20 @@ private:
 
     // --- Coroutine codegen state ---
     bool inCoroutineFn_ = false;
+
+    // Phase 4f: return type of the function currently being compiled.
+    // Used to decide whether to box a multi-word inline value before op_return.
+    Type* currentReturnType_ = nullptr;
+
+    // Emit op_return after boxing a multi-word inline return value into the
+    // single-Word slot expected by the caller's resultReg.
+    void emitReturn(u16 reg) {
+        if (isInlineMultiword(currentReturnType_)) {
+            reg = emitBoxIfInline(reg, currentReturnType_);
+        }
+        emitOp(op_return);
+        emitRegs(reg);
+    }
     u16 currentYieldCount_ = 0;
 
     // --- Function body tracking (for dynamic scope push/pop) ---

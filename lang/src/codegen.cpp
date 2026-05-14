@@ -168,7 +168,7 @@ u16 CodeGen::ensureFloat(u16 reg, Type* type) {
 
 u16 CodeGen::ensureFraction(u16 reg, Type* type) {
     if (type == compiler_.intType() || type == compiler_.boolType()) {
-        u16 dst = allocReg();
+        u16 dst = allocSlot(compiler_.fractionType());
         emitOp(op_int_to_fraction);
         emitRegs(dst, reg);
         return dst;
@@ -178,19 +178,19 @@ u16 CodeGen::ensureFraction(u16 reg, Type* type) {
 
 u16 CodeGen::ensureComplex(u16 reg, Type* type) {
     if (type == compiler_.intType() || type == compiler_.boolType()) {
-        u16 dst = allocReg();
+        u16 dst = allocSlot(compiler_.complexType());
         emitOp(op_int_to_complex);
         emitRegs(dst, reg);
         return dst;
     }
     if (type == compiler_.fractionType()) {
-        u16 dst = allocReg();
+        u16 dst = allocSlot(compiler_.complexType());
         emitOp(op_fraction_to_complex);
         emitRegs(dst, reg);
         return dst;
     }
     if (type == compiler_.floatType()) {
-        u16 dst = allocReg();
+        u16 dst = allocSlot(compiler_.complexType());
         emitOp(op_float_to_complex);
         emitRegs(dst, reg);
         return dst;
@@ -637,17 +637,20 @@ void CodeGen::genLetDecl(LetDeclNode* decl) {
     // bare identifier reference -- copy into a fresh register so later
     // mutations of the source don't silently change this binding's value.
     if (reg < savedNextReg) {
-        u16 dst = allocReg();
-        emitOp(op_mov);
-        emitRegs(dst, reg);
+        u16 dst = allocSlot(decl->resolvedType);
+        emitMoveN(dst, reg, typeSlotWords(decl->resolvedType));
         reg = dst;
     }
 
     // Check if this is a global (no local scopes)
     auto it = typeChecker_.globalVars().find(decl->name);
     if (it != typeChecker_.globalVars().end() && localScopes_.size() <= 1) {
+        // Phase 4f: inline value types must be boxed before single-Word global storage.
+        u16 storeReg = isInlineMultiword(decl->resolvedType)
+                     ? emitBoxIfInline(reg, decl->resolvedType)
+                     : reg;
         emitOp(storesObjPtr(decl->resolvedType) ? op_init_global_obj : op_store_global);
-        emitRegs(reg);
+        emitRegs(storeReg);
         emitInt(it->second.globalIndex);
     }
 
@@ -694,16 +697,18 @@ void CodeGen::genVarDecl(VarDeclNode* decl) {
     // existing (borrowed) register, copy into a fresh one so assignments to
     // this var don't mutate the source.
     if (reg < savedNextReg) {
-        u16 dst = allocReg();
-        emitOp(op_mov);
-        emitRegs(dst, reg);
+        u16 dst = allocSlot(decl->resolvedType);
+        emitMoveN(dst, reg, typeSlotWords(decl->resolvedType));
         reg = dst;
     }
 
     auto it = typeChecker_.globalVars().find(decl->name);
     if (it != typeChecker_.globalVars().end() && localScopes_.size() <= 1) {
+        u16 storeReg = isInlineMultiword(decl->resolvedType)
+                     ? emitBoxIfInline(reg, decl->resolvedType)
+                     : reg;
         emitOp(storesObjPtr(decl->resolvedType) ? op_init_global_obj : op_store_global);
-        emitRegs(reg);
+        emitRegs(storeReg);
         emitInt(it->second.globalIndex);
     }
 
@@ -775,10 +780,12 @@ void CodeGen::genFnDecl(FnDeclNode* decl) {
     // Save coroutine codegen state
     bool savedInCoroFn = inCoroutineFn_;
     u16 savedYieldCount = currentYieldCount_;
+    Type* savedReturnType = currentReturnType_;
     if (decl->isCoroutine) {
         inCoroutineFn_ = true;
         currentYieldCount_ = 0;
     }
+    currentReturnType_ = funcInfo.returnType;
 
     // Create new CodeBlock for this function
     currentBlock_ = new CodeBlock();
@@ -800,7 +807,8 @@ void CodeGen::genFnDecl(FnDeclNode* decl) {
     localScopes_.clear();
     pushScope();
     for (size_t i = 0; i < decl->params.size(); ++i) {
-        u16 paramReg = allocReg();  // r0, r1, r2, ...
+        // Phase 4f: inline value-type params occupy sizeWords consecutive regs.
+        u16 paramReg = allocSlot(funcInfo.paramTypes[i]);
         declareLocal(decl->params[i].name, paramReg, funcInfo.paramTypes[i], false);
     }
 
@@ -812,24 +820,33 @@ void CodeGen::genFnDecl(FnDeclNode* decl) {
         }
     }
 
-    // Generate default argument preamble with multiple entry points
+    // Generate default argument preamble with multiple entry points.
+    // Phase 4f: param i lives at the cumulative word offset (inline params
+    // occupy sizeWords each), not at index i.
     if (funcInfo.numDefaults > 0) {
         int totalParams = (int)decl->params.size();
         int minArity = funcInfo.minArity;
         currentBlock_->minArity = (u16)minArity;
 
+        // Cumulative word offsets per param.
+        std::vector<u16> paramOffsets(totalParams + 1, 0);
+        for (int i = 0; i < totalParams; ++i) {
+            paramOffsets[i + 1] = paramOffsets[i]
+                + (u16)typeSlotWords(funcInfo.paramTypes[i]);
+        }
+        u16 totalParamWords = paramOffsets[totalParams];
+
         for (int arity = minArity; arity <= totalParams; ++arity) {
-            // Record entry offset for this arity
             currentBlock_->defaultEntryOffsets.push_back((u32)currentBlock_->code.size());
 
             if (arity < totalParams) {
-                // Generate code for the default expression of params[arity]
                 u16 savedNextReg2 = nextReg_;
-                nextReg_ = (u16)totalParams;  // temps start after all params
+                nextReg_ = totalParamWords;  // temps start after all params
                 u16 defReg = genExpr(static_cast<Expr*>(decl->params[arity].defaultExpr.get()));
-                if (defReg != (u16)arity) {
-                    emitOp(op_mov);
-                    emitRegs((u16)arity, defReg);
+                u16 paramSlot = paramOffsets[arity];
+                Type* pt = funcInfo.paramTypes[arity];
+                if (defReg != paramSlot) {
+                    emitMoveN(paramSlot, defReg, typeSlotWords(pt));
                 }
                 nextReg_ = savedNextReg2;
             }
@@ -848,8 +865,7 @@ void CodeGen::genFnDecl(FnDeclNode* decl) {
                     inTailPosition_ = true;
                     u16 resultReg = genExpr(static_cast<Expr*>(exprStmt->expr.get()));
                     inTailPosition_ = false;
-                    emitOp(op_return);
-                    emitRegs(resultReg);
+                    emitReturn(resultReg);
                     goto fn_body_done;
                 }
             }
@@ -859,8 +875,7 @@ void CodeGen::genFnDecl(FnDeclNode* decl) {
                 if (ifStmt->elseBranch) {
                     u16 resultReg = allocReg();
                     genIfStmtForValue(ifStmt, resultReg);
-                    emitOp(op_return);
-                    emitRegs(resultReg);
+                    emitReturn(resultReg);
                     goto fn_body_done;
                 }
             }
@@ -868,8 +883,7 @@ void CodeGen::genFnDecl(FnDeclNode* decl) {
             if (i == block->stmts.size() - 1 && stmt->kind == ASTNode::SwitchStmt) {
                 u16 resultReg = allocReg();
                 genSwitchStmtForValue(static_cast<SwitchStmtNode*>(stmt), resultReg);
-                emitOp(op_return);
-                emitRegs(resultReg);
+                emitReturn(resultReg);
                 goto fn_body_done;
             }
             genNode(stmt);
@@ -905,6 +919,7 @@ void CodeGen::genFnDecl(FnDeclNode* decl) {
     inFunctionBody_ = savedInFunctionBody;
     inCoroutineFn_ = savedInCoroFn;
     currentYieldCount_ = savedYieldCount;
+    currentReturnType_ = savedReturnType;
     localScopes_ = std::move(savedScopes);
     jumpFixups_ = std::move(savedFixups);
     constRegs_ = std::move(savedConsts);
@@ -948,10 +963,12 @@ void CodeGen::genMonoInstance(FuncInfo& monoInfo) {
     // Save coroutine codegen state
     bool savedInCoroFn = inCoroutineFn_;
     u16 savedYieldCount = currentYieldCount_;
+    Type* savedReturnType = currentReturnType_;
     if (decl->isCoroutine) {
         inCoroutineFn_ = true;
         currentYieldCount_ = 0;
     }
+    currentReturnType_ = monoInfo.returnType;
 
     // Create new CodeBlock for this monomorphized function
     currentBlock_ = new CodeBlock();
@@ -973,26 +990,36 @@ void CodeGen::genMonoInstance(FuncInfo& monoInfo) {
     localScopes_.clear();
     pushScope();
     for (size_t i = 0; i < decl->params.size(); ++i) {
-        u16 paramReg = allocReg();
+        // Phase 4f: inline value-type params occupy sizeWords consecutive regs.
+        u16 paramReg = allocSlot(monoInfo.paramTypes[i]);
         declareLocal(decl->params[i].name, paramReg, monoInfo.paramTypes[i], false);
     }
 
-    // Generate default argument preamble with multiple entry points
+    // Generate default argument preamble with multiple entry points.
+    // Phase 4f: param i lives at the cumulative word offset.
     if (monoInfo.numDefaults > 0) {
         int totalParams = (int)decl->params.size();
         int minArity = monoInfo.minArity;
         currentBlock_->minArity = (u16)minArity;
+
+        std::vector<u16> paramOffsets(totalParams + 1, 0);
+        for (int i = 0; i < totalParams; ++i) {
+            paramOffsets[i + 1] = paramOffsets[i]
+                + (u16)typeSlotWords(monoInfo.paramTypes[i]);
+        }
+        u16 totalParamWords = paramOffsets[totalParams];
 
         for (int arity = minArity; arity <= totalParams; ++arity) {
             currentBlock_->defaultEntryOffsets.push_back((u32)currentBlock_->code.size());
 
             if (arity < totalParams) {
                 u16 savedNextReg2 = nextReg_;
-                nextReg_ = (u16)totalParams;
+                nextReg_ = totalParamWords;
                 u16 defReg = genExpr(static_cast<Expr*>(decl->params[arity].defaultExpr.get()));
-                if (defReg != (u16)arity) {
-                    emitOp(op_mov);
-                    emitRegs((u16)arity, defReg);
+                u16 paramSlot = paramOffsets[arity];
+                Type* pt = monoInfo.paramTypes[arity];
+                if (defReg != paramSlot) {
+                    emitMoveN(paramSlot, defReg, typeSlotWords(pt));
                 }
                 nextReg_ = savedNextReg2;
             }
@@ -1010,8 +1037,7 @@ void CodeGen::genMonoInstance(FuncInfo& monoInfo) {
                     inTailPosition_ = true;
                     u16 resultReg = genExpr(static_cast<Expr*>(exprStmt->expr.get()));
                     inTailPosition_ = false;
-                    emitOp(op_return);
-                    emitRegs(resultReg);
+                    emitReturn(resultReg);
                     goto mono_body_done;
                 }
             }
@@ -1020,16 +1046,14 @@ void CodeGen::genMonoInstance(FuncInfo& monoInfo) {
                 if (ifStmt->elseBranch) {
                     u16 resultReg = allocReg();
                     genIfStmtForValue(ifStmt, resultReg);
-                    emitOp(op_return);
-                    emitRegs(resultReg);
+                    emitReturn(resultReg);
                     goto mono_body_done;
                 }
             }
             if (i == block->stmts.size() - 1 && stmt->kind == ASTNode::SwitchStmt) {
                 u16 resultReg = allocReg();
                 genSwitchStmtForValue(static_cast<SwitchStmtNode*>(stmt), resultReg);
-                emitOp(op_return);
-                emitRegs(resultReg);
+                emitReturn(resultReg);
                 goto mono_body_done;
             }
             genNode(stmt);
@@ -1060,6 +1084,7 @@ void CodeGen::genMonoInstance(FuncInfo& monoInfo) {
     inFunctionBody_ = savedInFunctionBody;
     inCoroutineFn_ = savedInCoroFn;
     currentYieldCount_ = savedYieldCount;
+    currentReturnType_ = savedReturnType;
     localScopes_ = std::move(savedScopes);
     jumpFixups_ = std::move(savedFixups);
     constRegs_ = std::move(savedConsts);
@@ -1289,7 +1314,10 @@ void CodeGen::genForStmt(ForStmtNode* stmt) {
             return;
         }
         if (rangeExpr && rangeType->elemType_ == compiler_.fractionType()) {
-            // Inline Fraction range loop — no RangeObj allocation
+            // Inline Fraction range loop — no RangeObj allocation.
+            // Phase 4f: Fraction is inline 2 words [numer, denom]; allocate
+            // 2-reg slots and use emitMoveN for copies.
+            Type* fracType = compiler_.fractionType();
             u16 startReg = genExpr(static_cast<Expr*>(rangeExpr->start.get()));
 
             // Compute end first (needed for step inference)
@@ -1302,7 +1330,7 @@ void CodeGen::genForStmt(ForStmtNode* stmt) {
             u16 stepReg;
             if (rangeExpr->next) {
                 u16 nextReg = genExpr(static_cast<Expr*>(rangeExpr->next.get()));
-                stepReg = allocReg();
+                stepReg = allocSlot(fracType);
                 emitOp(op_sub_fraction);
                 emitRegs(stepReg, nextReg, startReg);
             } else if (!rangeExpr->isInfinite) {
@@ -1329,29 +1357,34 @@ void CodeGen::genForStmt(ForStmtNode* stmt) {
                 emitOp(op_sub_int);
                 emitRegs(intStepReg, t, oneReg);
 
-                stepReg = allocReg();
+                stepReg = allocSlot(fracType);
                 emitOp(op_int_to_fraction);
                 emitRegs(stepReg, intStepReg);
             } else {
-                // Infinite range with no next: default step = 1/1
-                stepReg = allocReg();
-                auto* one = new Fraction(r64(1));
-                u16 constIdx = currentBlock_->addObjConstant(one);
-                emitOp(op_load_obj);
-                emitRegs(stepReg, constIdx);
+                // Infinite range with no next: default step = 1/1.
+                // Inline literal: numer=1, denom=1 in 2 consecutive words.
+                stepReg = allocSlot(fracType);
+                emitOp(op_load_int_const);
+                emitRegs(stepReg);
+                emitInt(1);
+                emitOp(op_load_int_const);
+                emitRegs((u16)(stepReg + 1));
+                emitInt(1);
             }
 
-            // iReg = copy of startReg
-            u16 iReg = allocReg();
-            emitOp(op_mov);
-            emitRegs(iReg, startReg);
+            // iReg = copy of startReg (2 words for inline Fraction)
+            u16 iReg = allocSlot(fracType);
+            emitMoveN(iReg, startReg, 2);
 
             // For direction check: stepNonNeg = step >= 0/1
-            u16 zeroReg = allocReg();
-            auto* zero = new Fraction(r64(0));
-            u16 zeroIdx = currentBlock_->addObjConstant(zero);
-            emitOp(op_load_obj);
-            emitRegs(zeroReg, zeroIdx);
+            // Inline zero = (numer=0, denom=1).
+            u16 zeroReg = allocSlot(fracType);
+            emitOp(op_load_int_const);
+            emitRegs(zeroReg);
+            emitInt(0);
+            emitOp(op_load_int_const);
+            emitRegs((u16)(zeroReg + 1));
+            emitInt(1);
 
             u16 stepNonNegReg = allocReg();
             emitOp(op_cmp_ge_fraction);
@@ -1660,8 +1693,11 @@ void CodeGen::genSwitchStmt(SwitchStmtNode* stmt) {
 void CodeGen::emitGlobalStoreIfNeeded(const std::string& name, u16 reg) {
     auto it = typeChecker_.globalVars().find(name);
     if (it != typeChecker_.globalVars().end() && localScopes_.size() <= 1) {
+        // Phase 4f: inline value types must be boxed before single-Word global storage.
+        u16 storeReg = isInlineMultiword(it->second.type)
+                     ? emitBoxIfInline(reg, it->second.type) : reg;
         emitOp(storesObjPtr(it->second.type) ? op_init_global_obj : op_store_global);
-        emitRegs(reg);
+        emitRegs(storeReg);
         emitInt(it->second.globalIndex);
     }
 }
@@ -1761,10 +1797,10 @@ void CodeGen::genPatternMatch(Pattern* pat, u16 subjReg, Type* subjType,
                 failJumps.push_back(failJump);
                 break;
             }
-            // Always matches — bind subject to a local variable
-            u16 bindReg = allocReg();
-            emitOp(op_mov);
-            emitRegs(bindReg, subjReg);
+            // Always matches — bind subject to a local variable.
+            // Phase 4f: inline value-type bindings need 2-word slots.
+            u16 bindReg = allocSlot(subjType);
+            emitMoveN(bindReg, subjReg, typeSlotWords(subjType));
             declareLocal(bp->name, bindReg, subjType, isMutable);
             emitGlobalStoreIfNeeded(bp->name, bindReg);
             break;
@@ -2008,7 +2044,10 @@ void CodeGen::genPatternMatch(Pattern* pat, u16 subjReg, Type* subjType,
                 u16 elemReg = allocReg();
                 emitOp(op_tuple_get);
                 emitRegs(elemReg, subjReg, (u16)i);
-                genPatternMatch(tp->elements[i].get(), elemReg, ttype->fields_[i], failJumps, isMutable);
+                // Phase 4f: tuple field stores boxed inline values; unbox.
+                Type* ft = ttype->fields_[i];
+                if (isInlineMultiword(ft)) elemReg = emitUnboxIfInline(elemReg, ft);
+                genPatternMatch(tp->elements[i].get(), elemReg, ft, failJumps, isMutable);
             }
 
             // Rest binding: create sub-tuple from remaining fields
@@ -2165,8 +2204,7 @@ void CodeGen::genReturnStmt(ReturnStmtNode* stmt) {
         inTailPosition_ = true;
         u16 resultReg = genExpr(static_cast<Expr*>(stmt->value.get()));
         inTailPosition_ = false;
-        emitOp(op_return);
-        emitRegs(resultReg);
+        emitReturn(resultReg);
     } else {
         emitOp(op_return_void);
     }
@@ -2174,12 +2212,16 @@ void CodeGen::genReturnStmt(ReturnStmtNode* stmt) {
 
 void CodeGen::genAssignStmt(AssignStmtNode* stmt) {
     u16 valReg = genExpr(static_cast<Expr*>(stmt->value.get()));
+    Type* valType = stmt->value->resolvedType;
 
     // Dynamic scope variable assignment: `name = expr;
     if (stmt->isDynamic) {
         auto it = typeChecker_.dynamicVars().find(stmt->target);
+        // Phase 4f: dynvar slot is a single Word; box inline value types.
+        u16 storeReg = isInlineMultiword(it->second.type)
+                     ? emitBoxIfInline(valReg, it->second.type) : valReg;
         emitOp(storesObjPtr(it->second.type) ? op_store_dynamic_obj : op_store_dynamic);
-        emitRegs(valReg);
+        emitRegs(storeReg);
         emitInt(it->second.dynIndex);
         return;
     }
@@ -2188,8 +2230,8 @@ void CodeGen::genAssignStmt(AssignStmtNode* stmt) {
     LocalVar* local = lookupLocal(stmt->target);
     if (local) {
         if (local->reg != valReg) {
-            emitOp(op_mov);
-            emitRegs(local->reg, valReg);
+            // Phase 4f: multi-word inline locals need MOV_N.
+            emitMoveN(local->reg, valReg, typeSlotWords(local->type));
         }
         return;
     }
@@ -2197,12 +2239,15 @@ void CodeGen::genAssignStmt(AssignStmtNode* stmt) {
     // Check global
     auto it = typeChecker_.globalVars().find(stmt->target);
     if (it != typeChecker_.globalVars().end()) {
+        u16 storeReg = isInlineMultiword(it->second.type)
+                     ? emitBoxIfInline(valReg, it->second.type) : valReg;
         emitOp(storesObjPtr(it->second.type) ? op_store_global_obj : op_store_global);
-        emitRegs(valReg);
+        emitRegs(storeReg);
         emitInt(it->second.globalIndex);
         return;
     }
 
+    (void)valType;  // unused for non-dyn/local/global paths
     error(stmt->loc, "Codegen: undeclared variable '" + stmt->target + "'");
 }
 
@@ -2322,22 +2367,28 @@ u16 CodeGen::genSymbolLiteral(SymbolLiteralExpr* expr) {
 }
 
 u16 CodeGen::genImaginaryLiteral(ImaginaryLiteralExpr* expr) {
-    // Create a Complex object with (0, value) and store as obj constant
-    auto* cObj = new Complex(x64(0.0, expr->value));
-    u16 constIdx = currentBlock_->addObjConstant(cObj);
-
-    u16 dst = allocReg();
-    emitOp(op_load_obj);
-    emitRegs(dst, constIdx);
+    // Phase 4f: Complex is inline 2 words [real=0.0, imag=value].
+    u16 dst = allocSlot(compiler_.complexType());
+    emitOp(op_load_float_const);
+    emitRegs(dst);
+    emitFloat(0.0);
+    emitOp(op_load_float_const);
+    emitRegs((u16)(dst + 1));
+    emitFloat(expr->value);
     return dst;
 }
 
 u16 CodeGen::genFractionLiteral(FractionLiteralExpr* expr) {
-    auto* fObj = new Fraction(r64(expr->numerator, expr->denominator));
-    u16 constIdx = currentBlock_->addObjConstant(fObj);
-    u16 dst = allocReg();
-    emitOp(op_load_obj);
-    emitRegs(dst, constIdx);
+    // Phase 4f: Fraction is inline 2 words [numer, denom].
+    // Reduce at compile time via r64 constructor for canonical form.
+    r64 r(expr->numerator, expr->denominator);
+    u16 dst = allocSlot(compiler_.fractionType());
+    emitOp(op_load_int_const);
+    emitRegs(dst);
+    emitInt(r.numer());
+    emitOp(op_load_int_const);
+    emitRegs((u16)(dst + 1));
+    emitInt(r.denom());
     return dst;
 }
 
@@ -2356,6 +2407,10 @@ u16 CodeGen::genListLiteral(ListLiteralExpr* expr) {
         // Promote element to list element type if needed
         Type* elemType = elem->resolvedType;
         u16 promoted = ensureType(elemReg, elemType, listType->elemType_);
+        // Phase 4f: ListNode head_ is a single Word; box inline value types.
+        if (isInlineMultiword(listType->elemType_)) {
+            promoted = emitBoxIfInline(promoted, listType->elemType_);
+        }
         // Ensure in consecutive registers starting at firstSrc
         u16 expectedReg = firstSrc + (u16)(&elem - &expr->elements[0]);
         if (promoted != expectedReg) {
@@ -2387,10 +2442,12 @@ u16 CodeGen::genMapLiteral(MapLiteralExpr* expr) {
     usize numPairs = expr->entries.size();
 
     // Generate all key-value pairs into consecutive registers: k0, v0, k1, v1, ...
+    // Phase 4f: MapObj stores 1 Word per key/value; box inline value types.
     u16 kvBase = nextReg_;
     for (size_t i = 0; i < numPairs; ++i) {
         u16 keyReg = genExpr(static_cast<Expr*>(expr->entries[i].key.get()));
         keyReg = ensureType(keyReg, expr->entries[i].key->resolvedType, keyType);
+        if (isInlineMultiword(keyType)) keyReg = emitBoxIfInline(keyReg, keyType);
         u16 keyPos = kvBase + (u16)(i * 2);
         if (keyReg != keyPos) {
             emitOp(op_mov);
@@ -2401,6 +2458,7 @@ u16 CodeGen::genMapLiteral(MapLiteralExpr* expr) {
 
         u16 valReg = genExpr(static_cast<Expr*>(expr->entries[i].value.get()));
         valReg = ensureType(valReg, expr->entries[i].value->resolvedType, valType);
+        if (isInlineMultiword(valType)) valReg = emitBoxIfInline(valReg, valType);
         u16 valPos = kvBase + (u16)(i * 2 + 1);
         if (valReg != valPos) {
             emitOp(op_mov);
@@ -2426,10 +2484,12 @@ u16 CodeGen::genSetLiteral(SetLiteralExpr* expr) {
     Type* elemType = setType->elemType_;
     usize count = expr->elements.size();
 
+    // Phase 4f: SetObj stores 1 Word per elem; box inline value types.
     u16 elemBase = nextReg_;
     for (size_t i = 0; i < count; ++i) {
         u16 elemReg = genExpr(static_cast<Expr*>(expr->elements[i].get()));
         elemReg = ensureType(elemReg, expr->elements[i]->resolvedType, elemType);
+        if (isInlineMultiword(elemType)) elemReg = emitBoxIfInline(elemReg, elemType);
         u16 pos = elemBase + (u16)i;
         if (elemReg != pos) {
             emitOp(op_mov);
@@ -2460,25 +2520,28 @@ u16 CodeGen::genRangeExpr(RangeExprNode* expr) {
     if (expr->next) {
         u16 nextReg = genExpr(static_cast<Expr*>(expr->next.get()));
         nextReg = ensureType(nextReg, expr->next->resolvedType, elemType);
-        stepReg = allocReg();
+        // Phase 4f: step slot must be sized for elemType (2 words for Fraction).
+        stepReg = allocSlot(elemType);
         emitOp(isInt ? op_sub_int : op_sub_fraction);
         emitRegs(stepReg, nextReg, startReg);
     } else if (!expr->isInfinite) {
         // Defer step computation until after end is generated (need endReg)
         stepReg = 0; // placeholder
     } else {
-        // Infinite range with no next: default step = 1
-        stepReg = allocReg();
+        // Infinite range with no next: default step = 1.
+        stepReg = allocSlot(elemType);
         if (isInt) {
             emitOp(op_load_int_const);
             emitRegs(stepReg);
             emitInt(1);
         } else {
-            // Load Fraction(1/1) as obj constant
-            auto* one = new Fraction(r64(1));
-            u16 constIdx = currentBlock_->addObjConstant(one);
-            emitOp(op_load_obj);
-            emitRegs(stepReg, constIdx);
+            // Phase 4f: Fraction inline = (numer=1, denom=1) in 2 words.
+            emitOp(op_load_int_const);
+            emitRegs(stepReg);
+            emitInt(1);
+            emitOp(op_load_int_const);
+            emitRegs((u16)(stepReg + 1));
+            emitInt(1);
         }
     }
 
@@ -2488,17 +2551,19 @@ u16 CodeGen::genRangeExpr(RangeExprNode* expr) {
         endReg = genExpr(static_cast<Expr*>(expr->end.get()));
         endReg = ensureType(endReg, expr->end->resolvedType, elemType);
     } else {
-        endReg = allocReg();
+        endReg = allocSlot(elemType);
         if (isInt) {
             emitOp(op_load_int_const);
             emitRegs(endReg);
             emitInt(0);
         } else {
-            // Load Fraction(0/1) as obj constant
-            auto* zero = new Fraction(r64(0));
-            u16 constIdx = currentBlock_->addObjConstant(zero);
-            emitOp(op_load_obj);
-            emitRegs(endReg, constIdx);
+            // Phase 4f: Fraction inline = (numer=0, denom=1) in 2 words.
+            emitOp(op_load_int_const);
+            emitRegs(endReg);
+            emitInt(0);
+            emitOp(op_load_int_const);
+            emitRegs((u16)(endReg + 1));
+            emitInt(1);
         }
     }
 
@@ -2529,13 +2594,20 @@ u16 CodeGen::genRangeExpr(RangeExprNode* expr) {
         emitOp(op_sub_int);
         emitRegs(stepReg, t, oneReg);
 
-        // For Fraction ranges, convert the Int step to Fraction
+        // For Fraction ranges, convert the Int step to Fraction (2-word slot).
         if (!isInt) {
-            u16 fracStepReg = allocReg();
+            u16 fracStepReg = allocSlot(compiler_.fractionType());
             emitOp(op_int_to_fraction);
             emitRegs(fracStepReg, stepReg);
             stepReg = fracStepReg;
         }
+    }
+
+    // Phase 4f: RangeObj stores 1 Word per field; Fraction values must be boxed.
+    if (!isInt && elemType == compiler_.fractionType()) {
+        startReg = emitBoxIfInline(startReg, elemType);
+        stepReg  = emitBoxIfInline(stepReg,  elemType);
+        if (!expr->isInfinite) endReg = emitBoxIfInline(endReg, elemType);
     }
 
     u16 dst = allocReg();
@@ -2617,7 +2689,8 @@ u16 CodeGen::genAsTypeExpr(AsTypeExprNode* expr) {
 }
 
 u16 CodeGen::emitNumericDowncast(u16 reg, Type* fromType, Type* toType) {
-    u16 dst = allocReg();
+    // Phase 4f: dst slot must be sized for toType (Fraction/Complex = 2 words).
+    u16 dst = allocSlot(toType);
 
     if (fromType == compiler_.complexType()) {
         if (toType == compiler_.floatType()) {
@@ -2637,12 +2710,11 @@ u16 CodeGen::emitNumericDowncast(u16 reg, Type* fromType, Type* toType) {
             emitRegs(dst, reg);
         } else {
             // Float -> Fraction: go through Int (truncation)
+            u16 intReg = allocReg();
             emitOp(op_float_to_int);
-            emitRegs(dst, reg);
-            u16 dst2 = allocReg();
+            emitRegs(intReg, reg);
             emitOp(op_int_to_fraction);
-            emitRegs(dst2, dst);
-            return dst2;
+            emitRegs(dst, intReg);
         }
     } else if (fromType == compiler_.fractionType()) {
         // Fraction -> Int
@@ -2742,7 +2814,18 @@ u16 CodeGen::emitAutoMapDowncastLoop(u16 arrReg, std::vector<Type*>& srcArrayTyp
         convertedReg = emitAutoMapDowncastLoop(elemReg, srcArrayTypes, resultTypes,
                                                 level + 1, depth, elemType, targetType);
     } else {
+        // Phase 4f: array elements are stored boxed; unbox before downcast.
+        Type* innerSrcElem = srcArrType->elemType_;
+        if (isInlineMultiword(innerSrcElem)) {
+            elemReg = emitUnboxIfInline(elemReg, innerSrcElem);
+        }
         convertedReg = emitNumericDowncast(elemReg, elemType, targetType);
+        // The destination array also stores boxed, so re-box if the converted
+        // value is itself an inline type.
+        Type* dstElem = resultArrType->elemType_;
+        if (isInlineMultiword(dstElem)) {
+            convertedReg = emitBoxIfInline(convertedReg, dstElem);
+        }
     }
 
     // Store in result array
@@ -2811,7 +2894,8 @@ u16 CodeGen::genIdentifier(IdentifierExpr* expr) {
         emitOp(op_load_global);
         emitRegs(dst);
         emitInt(it->second.globalIndex);
-        return dst;
+        // Phase 4f: globals store inline value types boxed; unbox into 2-word slot.
+        return emitUnboxIfInline(dst, it->second.type);
     }
 
     // Check function reference (set by type checker for function-as-value)
@@ -2930,7 +3014,8 @@ u16 CodeGen::genBinaryOp(BinaryOpExpr* expr) {
         }
     }
 
-    u16 dst = allocReg();
+    // Phase 4f: result slot must be sized for the type (Complex/Fraction = 2 words).
+    u16 dst = allocSlot(resultType);
 
     // Composite (Array/Tuple) arithmetic
     if (isCompositeNumeric(resultType)) {
@@ -3123,7 +3208,8 @@ u16 CodeGen::genUnaryOp(UnaryOpExpr* expr) {
     }
 
     u16 operandReg = genExpr(static_cast<Expr*>(expr->operand.get()));
-    u16 dst = allocReg();
+    // Phase 4f: result slot must be sized for the type (Complex/Fraction = 2 words).
+    u16 dst = allocSlot(expr->resolvedType);
 
     switch (expr->op) {
         case UnaryOpExpr::Neg:
@@ -3401,7 +3487,8 @@ u16 CodeGen::genCall(CallExpr_* expr) {
         realReg = ensureFloat(realReg, expr->args[0]->resolvedType);
         imagReg = ensureFloat(imagReg, expr->args[1]->resolvedType);
 
-        u16 dst = allocReg();
+        // Phase 4f: Complex is inline 2 words.
+        u16 dst = allocSlot(compiler_.complexType());
         emitOp(op_make_complex);
         emitRegs(dst, realReg, imagReg);
         return dst;
@@ -3586,37 +3673,52 @@ u16 CodeGen::genCall(CallExpr_* expr) {
         }
     }
 
-    // Generate arguments into consecutive registers
+    // Generate arguments into consecutive registers.
+    // Phase 4f: each arg occupies sizeWords_ regs (1 for atom/pointer; 2 for
+    // inline Complex/Fraction). cumOffset tracks the running word offset.
+    // Variadic args going into a Tuple/Array pack must be boxed to 1 Word
+    // each (the pack opcode stores 1 Word per field/element).
     u16 argBase = nextReg_;
+    u32 cumOffset = 0;
     for (size_t i = 0; i < expr->args.size(); ++i) {
         u16 argReg = genExpr(static_cast<Expr*>(expr->args[i].get()));
         // Promote argument type if needed (e.g. Int -> Float)
-        // For variadic args beyond the fixed params, promote to element type if typed variadic
-        if (funcInfo && i < funcInfo->paramTypes.size()) {
+        Type* targetType = expr->args[i]->resolvedType;
+        bool isVariadic = (expr->variadicPackStart >= 0 && (int)i >= expr->variadicPackStart);
+        if (!isVariadic && funcInfo && i < funcInfo->paramTypes.size()) {
             argReg = ensureType(argReg, expr->args[i]->resolvedType, funcInfo->paramTypes[i]);
-        } else if (expr->variadicPackStart >= 0 && (int)i >= expr->variadicPackStart) {
-            // For typed variadic (Array), promote each arg to the element type
+            targetType = funcInfo->paramTypes[i];
+        } else if (isVariadic) {
             if (auto* arrType = dynamic_cast<ArrayType*>(expr->variadicPackType)) {
                 argReg = ensureType(argReg, expr->args[i]->resolvedType, arrType->elemType_);
+                targetType = arrType->elemType_;
             }
+            // Tuple-pack variadics keep the arg's own type.
         }
-        // Move to consecutive position if needed
-        if (argReg != argBase + (u16)i) {
-            emitOp(op_mov);
-            emitRegs(argBase + (u16)i, argReg);
-            // Update constant tracking: propagate or clear const for destination
-            if (enableConstFold) {
+        // Variadic args are packed into a 1-Word-per-slot container; box
+        // inline value types first.
+        u32 placeSw = typeSlotWords(targetType);
+        if (isVariadic && isInlineMultiword(targetType)) {
+            argReg = emitBoxIfInline(argReg, targetType);
+            placeSw = 1;
+        }
+        u16 dstReg = (u16)(argBase + cumOffset);
+        if (argReg != dstReg) {
+            if (placeSw <= 1) {
+                emitOp(op_mov);
+                emitRegs(dstReg, argReg);
+            } else {
+                emitMoveN(dstReg, argReg, placeSw);
+            }
+            if (enableConstFold && placeSw == 1) {
                 auto* srcConst = getConst(argReg);
-                if (srcConst) {
-                    constRegs_[argBase + (u16)i] = *srcConst;
-                } else {
-                    constRegs_.erase(argBase + (u16)i);
-                }
+                if (srcConst) constRegs_[dstReg] = *srcConst;
+                else          constRegs_.erase(dstReg);
             }
         }
-        // Advance past this arg position so next genExpr won't clobber
-        u16 next = argBase + (u16)i + 1;
+        u16 next = (u16)(dstReg + placeSw);
         if (nextReg_ < next) { nextReg_ = next; if (nextReg_ > maxReg_) maxReg_ = nextReg_; }
+        cumOffset += placeSw;
     }
 
     // Variadic packing: pack excess args into a Tuple or Array
@@ -3764,14 +3866,25 @@ u16 CodeGen::genCall(CallExpr_* expr) {
         return allocReg();  // Dead register — caller emits dead op_return
     }
 
-    // Result register
-    u16 resultReg = allocReg();
+    // Result register. Phase 4f: builtins writing inline Complex/Fraction
+    // need a 2-word slot.
+    u16 resultReg = allocSlot(expr->resolvedType);
 
     // Emit CALL: op, regs{resultReg, argc, argBase}, callee_global_idx
     emitOp(expr->isBuiltinCall ? op_call_primitive : op_call);
     emitRegs(resultReg, callArgc, argBase);
     emitInt(expr->resolvedFuncGlobalIndex);
 
+    // Phase 4f: user-fn calls (op_call) write a single Word; if the return
+    // type is inline value, the cfun returned a boxed Obj* — unbox it. For
+    // builtins, the cfun writes inline directly so no unbox is needed.
+    if (!expr->isBuiltinCall && isInlineMultiword(expr->resolvedType)) {
+        u16 unboxed = allocSlot(expr->resolvedType);
+        emitOp(expr->resolvedType == compiler_.complexType()
+               ? op_unbox_complex : op_unbox_fraction);
+        emitRegs(unboxed, resultReg);
+        return unboxed;
+    }
     return resultReg;
 }
 
@@ -6130,13 +6243,18 @@ u16 CodeGen::genArrayLiteral(ArrayLiteralExpr* expr) {
     Type* elemType = arrType->elemType_;
     usize count = expr->elements.size();
 
-    // Generate all element values into consecutive registers
+    // Generate all element values into consecutive registers.
+    // Phase 4f: ObjArray stores 1 Word per element; box inline value types
+    // (Complex/Fraction) before placement.
     u16 elemBase = nextReg_;
     for (size_t i = 0; i < count; ++i) {
         u16 elemReg = genExpr(static_cast<Expr*>(expr->elements[i].get()));
         Type* elemExprType = expr->elements[i]->resolvedType;
         // Promote element to the array's element type if needed
         elemReg = ensureType(elemReg, elemExprType, elemType);
+        if (isInlineMultiword(elemType)) {
+            elemReg = emitBoxIfInline(elemReg, elemType);
+        }
         // Move to consecutive position if needed
         if (elemReg != elemBase + (u16)i) {
             emitOp(op_mov);
@@ -6145,19 +6263,6 @@ u16 CodeGen::genArrayLiteral(ArrayLiteralExpr* expr) {
         u16 next = elemBase + (u16)i + 1;
         if (nextReg_ < next) { nextReg_ = next; if (nextReg_ > maxReg_) maxReg_ = nextReg_; }
     }
-
-    // Determine which runtime array type to use
-    // For Int/Float elements, use PodArray via a construction opcode
-    // For now, use op_make_array which we need to create, or inline the construction
-    // via an object constant approach.
-    //
-    // Simplest approach: create the array at compile time if all elements are constants,
-    // or emit code to build it at runtime using a new opcode.
-    // For MVP: create a helper function that builds the array.
-
-    // We'll emit a special array construction sequence:
-    // 1. Load array type as an object constant
-    // 2. Emit op_make_array Rd, firstSrc, numElems, ArrayType*
 
     u16 dst = allocReg();
     emitOp(op_make_array);
@@ -6184,14 +6289,15 @@ u16 CodeGen::genTupleLiteral(TupleLiteralExpr* expr) {
     }
     usize count = expr->elements.size();
 
-    // Generate all element values into consecutive registers
+    // Generate all element values into consecutive registers.
+    // Phase 4f: tuple stores 1 Word per field; box inline value types.
     u16 elemBase = nextReg_;
     for (size_t i = 0; i < count; ++i) {
         u16 elemReg = genExpr(static_cast<Expr*>(expr->elements[i].get()));
-        // Coerce element if its inferred type differs from the tuple's target field type
         Type* elemType = expr->elements[i]->resolvedType;
         Type* fieldType = tupType->fields_[i];
         elemReg = ensureType(elemReg, elemType, fieldType);
+        if (isInlineMultiword(fieldType)) elemReg = emitBoxIfInline(elemReg, fieldType);
         // Move to consecutive position if needed
         if (elemReg != elemBase + (u16)i) {
             emitOp(op_mov);
@@ -6242,25 +6348,27 @@ u16 CodeGen::genStructLiteral(StructLiteralExpr* expr) {
         litFieldMap[expr->fields[i].name] = i;
     }
 
-    // Generate field values in declaration order into consecutive registers
+    // Generate field values in declaration order into consecutive registers.
+    // Phase 4f: struct stores 1 Word per field; box inline value types.
     u16 fieldBase = nextReg_;
     for (size_t i = 0; i < numFields; ++i) {
         std::string fieldName(stype->fields_[i].name->str());
         auto it = litFieldMap.find(fieldName);
+        Type* declType = stype->fields_[i].type;
         if (it != litFieldMap.end()) {
             size_t litIdx = it->second;
             u16 valReg = genExpr(static_cast<Expr*>(expr->fields[litIdx].value.get()));
             // Promote if needed
             Type* valType = expr->fields[litIdx].value->resolvedType;
-            Type* declType = stype->fields_[i].type;
             valReg = ensureType(valReg, valType, declType);
+            if (isInlineMultiword(declType)) valReg = emitBoxIfInline(valReg, declType);
             // Move to consecutive position if needed
             if (valReg != fieldBase + (u16)i) {
                 emitOp(op_mov);
                 emitRegs(fieldBase + (u16)i, valReg);
             }
         } else if (expr->spreadExpr) {
-            // Copy field from spread source struct
+            // Copy field from spread source struct (already boxed in storage).
             u16 reg = allocReg();
             emitOp(op_struct_get);
             emitRegs(reg, spreadReg, (u16)i);
@@ -7421,18 +7529,23 @@ u16 CodeGen::genIndexExpr(IndexExpr_* expr) {
         emitOp(op_map_get_option);
         emitRegs(dst, objReg, idxReg);
         emitPtr(compiler_.optionType(mapType->valueType_));
-    } else if (expr->object->resolvedType == compiler_.stringType()) {
+        return dst;
+    }
+    if (expr->object->resolvedType == compiler_.stringType()) {
         // String subscript: string[index] -> byte as Int
         emitOp(op_string_get_byte);
         emitRegs(dst, objReg, idxReg);
-    } else {
-        // Array subscript: array[index]
-        auto* arrType = dynamic_cast<ArrayType*>(expr->object->resolvedType);
-        emitOp(op_array_get_dyn);
-        emitRegs(dst, objReg, idxReg);
-        emitPtr(arrType);
+        return dst;
     }
-
+    // Array subscript: array[index]
+    auto* arrType = dynamic_cast<ArrayType*>(expr->object->resolvedType);
+    emitOp(op_array_get_dyn);
+    emitRegs(dst, objReg, idxReg);
+    emitPtr(arrType);
+    // Phase 4f: arrays store inline value types boxed; unbox into 2-word slot.
+    if (arrType && isInlineMultiword(arrType->elemType_)) {
+        return emitUnboxIfInline(dst, arrType->elemType_);
+    }
     return dst;
 }
 
@@ -7964,6 +8077,9 @@ u16 CodeGen::genFieldExpr(FieldExpr_* expr) {
                 u16 dst = allocReg();
                 emitOp(op_struct_get);
                 emitRegs(dst, objReg, (u16)i);
+                // Phase 4f: struct field stores boxed inline values; unbox.
+                Type* ft = stype->fields_[i].type;
+                if (isInlineMultiword(ft)) return emitUnboxIfInline(dst, ft);
                 return dst;
             }
         }
@@ -7973,6 +8089,10 @@ u16 CodeGen::genFieldExpr(FieldExpr_* expr) {
             u16 dst = allocReg();
             emitOp(op_struct_get);
             emitRegs(dst, objReg, (u16)idx);
+            if (idx < stype->fields_.size()) {
+                Type* ft = stype->fields_[idx].type;
+                if (isInlineMultiword(ft)) return emitUnboxIfInline(dst, ft);
+            }
             return dst;
         }
         error(expr->loc, "No field '" + expr->field + "' in struct");
@@ -7980,11 +8100,16 @@ u16 CodeGen::genFieldExpr(FieldExpr_* expr) {
     }
 
     // Handle tuple field access (by numeric index)
-    if (dynamic_cast<TupleType*>(objType)) {
+    if (auto* ttype = dynamic_cast<TupleType*>(objType)) {
         size_t idx = std::stoul(expr->field);
         u16 dst = allocReg();
         emitOp(op_tuple_get);
         emitRegs(dst, objReg, (u16)idx);
+        // Phase 4f: tuple field stores boxed inline values; unbox.
+        if (idx < ttype->fields_.size()) {
+            Type* ft = ttype->fields_[idx];
+            if (isInlineMultiword(ft)) return emitUnboxIfInline(dst, ft);
+        }
         return dst;
     }
 
@@ -8459,6 +8584,8 @@ u16 CodeGen::genLambdaExpr(LambdaExprNode* expr) {
     inFunctionBody_ = true;
     bool savedInCoroFn = inCoroutineFn_;
     u32 savedYieldCount = currentYieldCount_;
+    Type* savedReturnType = currentReturnType_;
+    currentReturnType_ = lambdaType ? lambdaType->returnType_ : nullptr;
 
     if (expr->isCoroutine) {
         inCoroutineFn_ = true;
@@ -8479,7 +8606,7 @@ u16 CodeGen::genLambdaExpr(LambdaExprNode* expr) {
     localScopes_.clear();
     pushScope();
     for (size_t i = 0; i < expr->params.size(); ++i) {
-        u16 paramReg = allocReg();
+        u16 paramReg = allocSlot(lambdaType->argTypes_[i]);
         declareLocal(expr->params[i].name, paramReg, lambdaType->argTypes_[i], false);
     }
 
@@ -8501,8 +8628,7 @@ u16 CodeGen::genLambdaExpr(LambdaExprNode* expr) {
                     inTailPosition_ = true;
                     u16 resultReg = genExpr(static_cast<Expr*>(exprStmt->expr.get()));
                     inTailPosition_ = false;
-                    emitOp(op_return);
-                    emitRegs(resultReg);
+                    emitReturn(resultReg);
                     emittedReturn = true;
                     break;
                 }
@@ -8513,8 +8639,7 @@ u16 CodeGen::genLambdaExpr(LambdaExprNode* expr) {
                 if (ifStmt->elseBranch) {
                     u16 resultReg = allocReg();
                     genIfStmtForValue(ifStmt, resultReg);
-                    emitOp(op_return);
-                    emitRegs(resultReg);
+                    emitReturn(resultReg);
                     emittedReturn = true;
                     break;
                 }
@@ -8523,8 +8648,7 @@ u16 CodeGen::genLambdaExpr(LambdaExprNode* expr) {
             if (i == block->stmts.size() - 1 && stmt->kind == ASTNode::SwitchStmt) {
                 u16 resultReg = allocReg();
                 genSwitchStmtForValue(static_cast<SwitchStmtNode*>(stmt), resultReg);
-                emitOp(op_return);
-                emitRegs(resultReg);
+                emitReturn(resultReg);
                 emittedReturn = true;
                 break;
             }
@@ -8564,6 +8688,7 @@ u16 CodeGen::genLambdaExpr(LambdaExprNode* expr) {
     inFunctionBody_ = savedInFunctionBody;
     inCoroutineFn_ = savedInCoroFn;
     currentYieldCount_ = savedYieldCount;
+    currentReturnType_ = savedReturnType;
     localScopes_ = std::move(savedScopes);
     jumpFixups_ = std::move(savedFixups);
     constRegs_ = std::move(savedConsts);
@@ -8661,7 +8786,7 @@ void CodeGen::compileTemplateLambdaBody(LambdaExprNode* expr, LambdaType* lambda
     localScopes_.clear();
     pushScope();
     for (size_t i = 0; i < expr->params.size(); ++i) {
-        u16 paramReg = allocReg();
+        u16 paramReg = allocSlot(lambdaType->argTypes_[i]);
         declareLocal(expr->params[i].name, paramReg, lambdaType->argTypes_[i], false);
     }
 
@@ -8683,8 +8808,7 @@ void CodeGen::compileTemplateLambdaBody(LambdaExprNode* expr, LambdaType* lambda
                     inTailPosition_ = true;
                     u16 resultReg = genExpr(static_cast<Expr*>(exprStmt->expr.get()));
                     inTailPosition_ = false;
-                    emitOp(op_return);
-                    emitRegs(resultReg);
+                    emitReturn(resultReg);
                     emittedReturn = true;
                     break;
                 }
@@ -8694,8 +8818,7 @@ void CodeGen::compileTemplateLambdaBody(LambdaExprNode* expr, LambdaType* lambda
                 if (ifStmt->elseBranch) {
                     u16 resultReg = allocReg();
                     genIfStmtForValue(ifStmt, resultReg);
-                    emitOp(op_return);
-                    emitRegs(resultReg);
+                    emitReturn(resultReg);
                     emittedReturn = true;
                     break;
                 }
@@ -8703,8 +8826,7 @@ void CodeGen::compileTemplateLambdaBody(LambdaExprNode* expr, LambdaType* lambda
             if (i == block->stmts.size() - 1 && stmt->kind == ASTNode::SwitchStmt) {
                 u16 resultReg = allocReg();
                 genSwitchStmtForValue(static_cast<SwitchStmtNode*>(stmt), resultReg);
-                emitOp(op_return);
-                emitRegs(resultReg);
+                emitReturn(resultReg);
                 emittedReturn = true;
                 break;
             }

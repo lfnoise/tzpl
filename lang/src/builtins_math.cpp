@@ -80,9 +80,13 @@ static void builtin_toInt_float(VM& vm, u16 dst, u16, u16 argBase) {
     vm.reg(dst).i = (i64)vm.reg(argBase).f;
 }
 
+// Phase 4f: Fraction is inline 2 words [numer, denom]; Complex is inline
+// 2 words [real, imag].
+
 static void builtin_toInt_fraction(VM& vm, u16 dst, u16, u16 argBase) {
-    auto* fr = static_cast<Fraction*>(vm.reg(argBase).o);
-    vm.reg(dst).i = (i64)(f64)fr->r;
+    i64 n = vm.reg(argBase).i;
+    i64 d = vm.reg((u16)(argBase + 1)).i;
+    vm.reg(dst).i = n / d;
 }
 
 // --- toFloat ---
@@ -95,40 +99,47 @@ static void builtin_toFloat_float(VM& vm, u16 dst, u16, u16 argBase) {
 }
 
 static void builtin_toFloat_fraction(VM& vm, u16 dst, u16, u16 argBase) {
-    auto* fr = static_cast<Fraction*>(vm.reg(argBase).o);
-    vm.reg(dst).f = (f64)fr->r;
+    i64 n = vm.reg(argBase).i;
+    i64 d = vm.reg((u16)(argBase + 1)).i;
+    vm.reg(dst).f = (f64)n / (f64)d;
 }
 
 static void builtin_toFloat_complex(VM& vm, u16 dst, u16, u16 argBase) {
-    auto* z = static_cast<Complex*>(vm.reg(argBase).o);
-    vm.reg(dst).f = z->x.real();
+    vm.reg(dst).f = vm.reg(argBase).f;  // real component
 }
 
 // --- toFraction ---
 static void builtin_toFraction_int(VM& vm, u16 dst, u16, u16 argBase) {
-    vm.reg(dst).o = new Fraction(r64(vm.reg(argBase).i));
+    vm.reg(dst).i         = vm.reg(argBase).i;  // numer
+    vm.reg((u16)(dst+1)).i = 1;                  // denom
 }
 
 static void builtin_toFraction_fraction(VM& vm, u16 dst, u16, u16 argBase) {
-    vm.reg(dst).o = vm.reg(argBase).o;
+    vm.reg(dst).i         = vm.reg(argBase).i;
+    vm.reg((u16)(dst+1)).i = vm.reg((u16)(argBase+1)).i;
 }
 
 // --- toComplex ---
 static void builtin_toComplex_int(VM& vm, u16 dst, u16, u16 argBase) {
-    vm.reg(dst).o = new Complex(x64((f64)vm.reg(argBase).i, 0.0));
+    vm.reg(dst).f         = (f64)vm.reg(argBase).i;
+    vm.reg((u16)(dst+1)).f = 0.0;
 }
 
 static void builtin_toComplex_float(VM& vm, u16 dst, u16, u16 argBase) {
-    vm.reg(dst).o = new Complex(x64(vm.reg(argBase).f, 0.0));
+    vm.reg(dst).f         = vm.reg(argBase).f;
+    vm.reg((u16)(dst+1)).f = 0.0;
 }
 
 static void builtin_toComplex_fraction(VM& vm, u16 dst, u16, u16 argBase) {
-    auto* fr = static_cast<Fraction*>(vm.reg(argBase).o);
-    vm.reg(dst).o = new Complex(x64((f64)fr->r, 0.0));
+    i64 n = vm.reg(argBase).i;
+    i64 d = vm.reg((u16)(argBase + 1)).i;
+    vm.reg(dst).f         = (f64)n / (f64)d;
+    vm.reg((u16)(dst+1)).f = 0.0;
 }
 
 static void builtin_toComplex_complex(VM& vm, u16 dst, u16, u16 argBase) {
-    vm.reg(dst).o = vm.reg(argBase).o;
+    vm.reg(dst).f         = vm.reg(argBase).f;
+    vm.reg((u16)(dst+1)).f = vm.reg((u16)(argBase+1)).f;
 }
 
 // frac(x) = x - floor(x)
@@ -371,124 +382,129 @@ static void builtin_hasSingleBit_int(VM& vm, u16 dst, u16, u16 argBase) {
 // Fraction functions
 // ============================================================================
 
-// abs(Fraction)
-static void builtin_abs_fraction(VM& vm, u16 dst, u16, u16 argBase) {
-    auto* fr = static_cast<Fraction*>(vm.reg(argBase).o);
-    auto* result = new Fraction(fr->r.abs());
-    vm.reg(dst).o = result;
+// Phase 4f: Fraction is inline 2 words [numer, denom]. argBase / dst name
+// the first word of the slot. Each Fraction arg occupies 2 consecutive regs.
+
+static inline r64 readFr(VM& vm, u16 base) {
+    return r64(vm.reg(base).i, vm.reg((u16)(base + 1)).i);
+}
+static inline void writeFr(VM& vm, u16 dst, r64 r) {
+    vm.reg(dst).i         = r.numer();
+    vm.reg((u16)(dst + 1)).i = r.denom();
 }
 
-// min(Fraction, Fraction)
+// abs(Fraction)
+static void builtin_abs_fraction(VM& vm, u16 dst, u16, u16 argBase) {
+    writeFr(vm, dst, readFr(vm, argBase).abs());
+}
+
+// min(Fraction, Fraction): args at argBase (2w) and argBase+2 (2w)
 static void builtin_min_fraction(VM& vm, u16 dst, u16, u16 argBase) {
-    auto* a = static_cast<Fraction*>(vm.reg(argBase).o);
-    auto* b = static_cast<Fraction*>(vm.reg(argBase + 1).o);
-    vm.reg(dst).o = a->r < b->r ? vm.reg(argBase).o : vm.reg(argBase + 1).o;
+    r64 a = readFr(vm, argBase);
+    r64 b = readFr(vm, (u16)(argBase + 2));
+    writeFr(vm, dst, (a < b) ? a : b);
 }
 
 // max(Fraction, Fraction)
 static void builtin_max_fraction(VM& vm, u16 dst, u16, u16 argBase) {
-    auto* a = static_cast<Fraction*>(vm.reg(argBase).o);
-    auto* b = static_cast<Fraction*>(vm.reg(argBase + 1).o);
-    vm.reg(dst).o = a->r > b->r ? vm.reg(argBase).o : vm.reg(argBase + 1).o;
+    r64 a = readFr(vm, argBase);
+    r64 b = readFr(vm, (u16)(argBase + 2));
+    writeFr(vm, dst, (a > b) ? a : b);
 }
 
 // clamp(Fraction, Fraction, Fraction)
 static void builtin_clamp_fraction(VM& vm, u16 dst, u16, u16 argBase) {
-    auto* x = static_cast<Fraction*>(vm.reg(argBase).o);
-    auto* lo = static_cast<Fraction*>(vm.reg(argBase + 1).o);
-    auto* hi = static_cast<Fraction*>(vm.reg(argBase + 2).o);
-    if (x->r < lo->r)
-        vm.reg(dst).o = vm.reg(argBase + 1).o;
-    else if (x->r > hi->r)
-        vm.reg(dst).o = vm.reg(argBase + 2).o;
-    else
-        vm.reg(dst).o = vm.reg(argBase).o;
+    r64 x  = readFr(vm, argBase);
+    r64 lo = readFr(vm, (u16)(argBase + 2));
+    r64 hi = readFr(vm, (u16)(argBase + 4));
+    r64 result = (x < lo) ? lo : (x > hi ? hi : x);
+    writeFr(vm, dst, result);
 }
 
 // cmp(Fraction, Fraction)
 static void builtin_cmp_fraction(VM& vm, u16 dst, u16, u16 argBase) {
-    auto* a = static_cast<Fraction*>(vm.reg(argBase).o);
-    auto* b = static_cast<Fraction*>(vm.reg(argBase + 1).o);
-    vm.reg(dst).i = (a->r > b->r) - (a->r < b->r);
+    r64 a = readFr(vm, argBase);
+    r64 b = readFr(vm, (u16)(argBase + 2));
+    vm.reg(dst).i = (a > b) - (a < b);
 }
 
 // sign(Fraction)
 static void builtin_sign_fraction(VM& vm, u16 dst, u16, u16 argBase) {
-    auto* fr = static_cast<Fraction*>(vm.reg(argBase).o);
-    i64 n = fr->r.numer();
+    i64 n = vm.reg(argBase).i;
     vm.reg(dst).i = (n > 0) - (n < 0);
 }
 
 // numer(Fraction) -> Int
 static void builtin_numer_fraction(VM& vm, u16 dst, u16, u16 argBase) {
-    auto* fr = static_cast<Fraction*>(vm.reg(argBase).o);
-    vm.reg(dst).i = fr->r.numer();
+    vm.reg(dst).i = vm.reg(argBase).i;
 }
 
 // denom(Fraction) -> Int
 static void builtin_denom_fraction(VM& vm, u16 dst, u16, u16 argBase) {
-    auto* fr = static_cast<Fraction*>(vm.reg(argBase).o);
-    vm.reg(dst).i = fr->r.denom();
+    vm.reg(dst).i = vm.reg((u16)(argBase + 1)).i;
 }
 
 // ============================================================================
 // Complex functions
 // ============================================================================
 
+// Phase 4f: Complex is inline 2 words [real, imag]. argBase / dst name the
+// FIRST word of the 2-word slot.
+
+static inline x64 readCx(VM& vm, u16 base) {
+    return x64(vm.reg(base).f, vm.reg((u16)(base + 1)).f);
+}
+static inline void writeCx(VM& vm, u16 dst, x64 z) {
+    vm.reg(dst).f         = z.real();
+    vm.reg((u16)(dst + 1)).f = z.imag();
+}
+
 // abs(Complex) -> Float
 static void builtin_abs_complex(VM& vm, u16 dst, u16, u16 argBase) {
-    auto* z = static_cast<Complex*>(vm.reg(argBase).o);
-    vm.reg(dst).f = std::abs(z->x);
+    vm.reg(dst).f = std::abs(readCx(vm, argBase));
 }
 
 // sqrt(Complex) -> Complex
 static void builtin_sqrt_complex(VM& vm, u16 dst, u16, u16 argBase) {
-    auto* z = static_cast<Complex*>(vm.reg(argBase).o);
-    vm.reg(dst).o = new Complex(std::sqrt(z->x));
+    writeCx(vm, dst, std::sqrt(readCx(vm, argBase)));
 }
 
 // real(Complex) -> Float
 static void builtin_real_complex(VM& vm, u16 dst, u16, u16 argBase) {
-    auto* z = static_cast<Complex*>(vm.reg(argBase).o);
-    vm.reg(dst).f = z->x.real();
+    vm.reg(dst).f = vm.reg(argBase).f;
 }
 
 // imag(Complex) -> Float
 static void builtin_imag_complex(VM& vm, u16 dst, u16, u16 argBase) {
-    auto* z = static_cast<Complex*>(vm.reg(argBase).o);
-    vm.reg(dst).f = z->x.imag();
+    vm.reg(dst).f = vm.reg((u16)(argBase + 1)).f;
 }
 
 // arg(Complex) -> Float
 static void builtin_arg_complex(VM& vm, u16 dst, u16, u16 argBase) {
-    auto* z = static_cast<Complex*>(vm.reg(argBase).o);
-    vm.reg(dst).f = std::arg(z->x);
+    vm.reg(dst).f = std::arg(readCx(vm, argBase));
 }
 
 // norm(Complex) -> Float
 static void builtin_norm_complex(VM& vm, u16 dst, u16, u16 argBase) {
-    auto* z = static_cast<Complex*>(vm.reg(argBase).o);
-    vm.reg(dst).f = std::norm(z->x);
+    vm.reg(dst).f = std::norm(readCx(vm, argBase));
 }
 
 // conj(Complex) -> Complex
 static void builtin_conj_complex(VM& vm, u16 dst, u16, u16 argBase) {
-    auto* z = static_cast<Complex*>(vm.reg(argBase).o);
-    vm.reg(dst).o = new Complex(std::conj(z->x));
+    writeCx(vm, dst, std::conj(readCx(vm, argBase)));
 }
 
 // polar(Float, Float) -> Complex
 static void builtin_polar_float(VM& vm, u16 dst, u16, u16 argBase) {
     f64 r = vm.reg(argBase).f;
     f64 theta = vm.reg(argBase + 1).f;
-    vm.reg(dst).o = new Complex(std::polar(r, theta));
+    writeCx(vm, dst, std::polar(r, theta));
 }
 
 // Complex unary functions that return Complex
 #define DEFINE_COMPLEX_UNARY(fname, cppfun) \
     static void builtin_##fname##_complex(VM& vm, u16 dst, u16, u16 argBase) { \
-        auto* z = static_cast<Complex*>(vm.reg(argBase).o); \
-        vm.reg(dst).o = new Complex(cppfun(z->x)); \
+        writeCx(vm, dst, cppfun(readCx(vm, argBase))); \
     }
 
 DEFINE_COMPLEX_UNARY(log, std::log)
@@ -509,10 +525,11 @@ DEFINE_COMPLEX_UNARY(atanh, std::atanh)
 #undef DEFINE_COMPLEX_UNARY
 
 // pow(Complex, Complex) -> Complex
+// Layout: arg0 = Complex (2 words at argBase..+1), arg1 = Complex (2 words at argBase+2..+3).
 static void builtin_pow_complex(VM& vm, u16 dst, u16, u16 argBase) {
-    auto* a = static_cast<Complex*>(vm.reg(argBase).o);
-    auto* b = static_cast<Complex*>(vm.reg(argBase + 1).o);
-    vm.reg(dst).o = new Complex(std::pow(a->x, b->x));
+    x64 a = readCx(vm, argBase);
+    x64 b = readCx(vm, (u16)(argBase + 2));
+    writeCx(vm, dst, std::pow(a, b));
 }
 
 // ============================================================================

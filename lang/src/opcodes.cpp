@@ -233,44 +233,68 @@ void op_neg_float(VM& vm, Code* pc) {
     DISPATCH(2);
 }
 
-// --- Fraction Arithmetic ---
+// --- Fraction Arithmetic (Phase 4f: inline 2 words [numer, denom]) ---
+
+// Helpers operating directly on i64 numer/denom pairs.
+static inline void norm_frac(i64& n, i64& d) {
+    if (d < 0) { n = -n; d = -d; }
+    i64 a = n < 0 ? -n : n, b = d;
+    while (b) { i64 t = a % b; a = b; b = t; }
+    if (a > 1) { n /= a; d /= a; }
+}
 
 void op_add_fraction(VM& vm, Code* pc) {
     u16 dst = pc[1].regs[0], a = pc[1].regs[1], b = pc[1].regs[2];
-    auto* fa = static_cast<Fraction*>(vm.reg(a).o);
-    auto* fb = static_cast<Fraction*>(vm.reg(b).o);
-    vm.reg(dst).o = new Fraction(fa->r + fb->r);
+    i64 an = vm.reg(a).i,     ad = vm.reg((u16)(a+1)).i;
+    i64 bn = vm.reg(b).i,     bd = vm.reg((u16)(b+1)).i;
+    i64 n = an * bd + bn * ad;
+    i64 d = ad * bd;
+    norm_frac(n, d);
+    vm.reg(dst).i         = n;
+    vm.reg((u16)(dst+1)).i = d;
     DISPATCH(2);
 }
 
 void op_sub_fraction(VM& vm, Code* pc) {
     u16 dst = pc[1].regs[0], a = pc[1].regs[1], b = pc[1].regs[2];
-    auto* fa = static_cast<Fraction*>(vm.reg(a).o);
-    auto* fb = static_cast<Fraction*>(vm.reg(b).o);
-    vm.reg(dst).o = new Fraction(fa->r - fb->r);
+    i64 an = vm.reg(a).i,     ad = vm.reg((u16)(a+1)).i;
+    i64 bn = vm.reg(b).i,     bd = vm.reg((u16)(b+1)).i;
+    i64 n = an * bd - bn * ad;
+    i64 d = ad * bd;
+    norm_frac(n, d);
+    vm.reg(dst).i         = n;
+    vm.reg((u16)(dst+1)).i = d;
     DISPATCH(2);
 }
 
 void op_mul_fraction(VM& vm, Code* pc) {
     u16 dst = pc[1].regs[0], a = pc[1].regs[1], b = pc[1].regs[2];
-    auto* fa = static_cast<Fraction*>(vm.reg(a).o);
-    auto* fb = static_cast<Fraction*>(vm.reg(b).o);
-    vm.reg(dst).o = new Fraction(fa->r * fb->r);
+    i64 an = vm.reg(a).i,     ad = vm.reg((u16)(a+1)).i;
+    i64 bn = vm.reg(b).i,     bd = vm.reg((u16)(b+1)).i;
+    i64 n = an * bn;
+    i64 d = ad * bd;
+    norm_frac(n, d);
+    vm.reg(dst).i         = n;
+    vm.reg((u16)(dst+1)).i = d;
     DISPATCH(2);
 }
 
 void op_div_fraction(VM& vm, Code* pc) {
     u16 dst = pc[1].regs[0], a = pc[1].regs[1], b = pc[1].regs[2];
-    auto* fa = static_cast<Fraction*>(vm.reg(a).o);
-    auto* fb = static_cast<Fraction*>(vm.reg(b).o);
-    vm.reg(dst).o = new Fraction(fa->r / fb->r);
+    i64 an = vm.reg(a).i,     ad = vm.reg((u16)(a+1)).i;
+    i64 bn = vm.reg(b).i,     bd = vm.reg((u16)(b+1)).i;
+    i64 n = an * bd;
+    i64 d = ad * bn;
+    norm_frac(n, d);
+    vm.reg(dst).i         = n;
+    vm.reg((u16)(dst+1)).i = d;
     DISPATCH(2);
 }
 
 void op_neg_fraction(VM& vm, Code* pc) {
     u16 dst = pc[1].regs[0], a = pc[1].regs[1];
-    auto* fa = static_cast<Fraction*>(vm.reg(a).o);
-    vm.reg(dst).o = new Fraction(-fa->r);
+    vm.reg(dst).i         = -vm.reg(a).i;
+    vm.reg((u16)(dst+1)).i = vm.reg((u16)(a+1)).i;
     DISPATCH(2);
 }
 
@@ -278,90 +302,99 @@ void op_neg_fraction(VM& vm, Code* pc) {
 
 void op_cmp_eq_fraction(VM& vm, Code* pc) {
     u16 dst = pc[1].regs[0], a = pc[1].regs[1], b = pc[1].regs[2];
-    auto* fa = static_cast<Fraction*>(vm.reg(a).o);
-    auto* fb = static_cast<Fraction*>(vm.reg(b).o);
-    vm.reg(dst).i = (fa->r == fb->r) ? 1 : 0;
+    // Fractions are stored canonically reduced, so direct equality works.
+    vm.reg(dst).i = (vm.reg(a).i == vm.reg(b).i
+                  && vm.reg((u16)(a+1)).i == vm.reg((u16)(b+1)).i) ? 1 : 0;
     DISPATCH(2);
 }
 
 void op_cmp_ne_fraction(VM& vm, Code* pc) {
     u16 dst = pc[1].regs[0], a = pc[1].regs[1], b = pc[1].regs[2];
-    auto* fa = static_cast<Fraction*>(vm.reg(a).o);
-    auto* fb = static_cast<Fraction*>(vm.reg(b).o);
-    vm.reg(dst).i = (fa->r != fb->r) ? 1 : 0;
+    vm.reg(dst).i = (vm.reg(a).i == vm.reg(b).i
+                  && vm.reg((u16)(a+1)).i == vm.reg((u16)(b+1)).i) ? 0 : 1;
     DISPATCH(2);
 }
 
 void op_cmp_lt_fraction(VM& vm, Code* pc) {
     u16 dst = pc[1].regs[0], a = pc[1].regs[1], b = pc[1].regs[2];
-    auto* fa = static_cast<Fraction*>(vm.reg(a).o);
-    auto* fb = static_cast<Fraction*>(vm.reg(b).o);
-    vm.reg(dst).i = (fa->r < fb->r) ? 1 : 0;
+    i64 an = vm.reg(a).i,     ad = vm.reg((u16)(a+1)).i;
+    i64 bn = vm.reg(b).i,     bd = vm.reg((u16)(b+1)).i;
+    // an/ad < bn/bd  iff  an*bd < bn*ad  (denoms positive after norm)
+    vm.reg(dst).i = (an * bd < bn * ad) ? 1 : 0;
     DISPATCH(2);
 }
 
 void op_cmp_le_fraction(VM& vm, Code* pc) {
     u16 dst = pc[1].regs[0], a = pc[1].regs[1], b = pc[1].regs[2];
-    auto* fa = static_cast<Fraction*>(vm.reg(a).o);
-    auto* fb = static_cast<Fraction*>(vm.reg(b).o);
-    vm.reg(dst).i = (fa->r <= fb->r) ? 1 : 0;
+    i64 an = vm.reg(a).i,     ad = vm.reg((u16)(a+1)).i;
+    i64 bn = vm.reg(b).i,     bd = vm.reg((u16)(b+1)).i;
+    vm.reg(dst).i = (an * bd <= bn * ad) ? 1 : 0;
     DISPATCH(2);
 }
 
 void op_cmp_gt_fraction(VM& vm, Code* pc) {
     u16 dst = pc[1].regs[0], a = pc[1].regs[1], b = pc[1].regs[2];
-    auto* fa = static_cast<Fraction*>(vm.reg(a).o);
-    auto* fb = static_cast<Fraction*>(vm.reg(b).o);
-    vm.reg(dst).i = (fa->r > fb->r) ? 1 : 0;
+    i64 an = vm.reg(a).i,     ad = vm.reg((u16)(a+1)).i;
+    i64 bn = vm.reg(b).i,     bd = vm.reg((u16)(b+1)).i;
+    vm.reg(dst).i = (an * bd > bn * ad) ? 1 : 0;
     DISPATCH(2);
 }
 
 void op_cmp_ge_fraction(VM& vm, Code* pc) {
     u16 dst = pc[1].regs[0], a = pc[1].regs[1], b = pc[1].regs[2];
-    auto* fa = static_cast<Fraction*>(vm.reg(a).o);
-    auto* fb = static_cast<Fraction*>(vm.reg(b).o);
-    vm.reg(dst).i = (fa->r >= fb->r) ? 1 : 0;
+    i64 an = vm.reg(a).i,     ad = vm.reg((u16)(a+1)).i;
+    i64 bn = vm.reg(b).i,     bd = vm.reg((u16)(b+1)).i;
+    vm.reg(dst).i = (an * bd >= bn * ad) ? 1 : 0;
     DISPATCH(2);
 }
 
-// --- Complex Arithmetic ---
+// --- Complex Arithmetic (Phase 4f: inline 2 words [real, imag]) ---
 
 void op_add_complex(VM& vm, Code* pc) {
     u16 dst = pc[1].regs[0], a = pc[1].regs[1], b = pc[1].regs[2];
-    auto* ca = static_cast<Complex*>(vm.reg(a).o);
-    auto* cb = static_cast<Complex*>(vm.reg(b).o);
-    vm.reg(dst).o = new Complex(ca->x + cb->x);
+    f64 ar = vm.reg(a).f,     ai = vm.reg((u16)(a+1)).f;
+    f64 br = vm.reg(b).f,     bi = vm.reg((u16)(b+1)).f;
+    vm.reg(dst).f         = ar + br;
+    vm.reg((u16)(dst+1)).f = ai + bi;
     DISPATCH(2);
 }
 
 void op_sub_complex(VM& vm, Code* pc) {
     u16 dst = pc[1].regs[0], a = pc[1].regs[1], b = pc[1].regs[2];
-    auto* ca = static_cast<Complex*>(vm.reg(a).o);
-    auto* cb = static_cast<Complex*>(vm.reg(b).o);
-    vm.reg(dst).o = new Complex(ca->x - cb->x);
+    f64 ar = vm.reg(a).f,     ai = vm.reg((u16)(a+1)).f;
+    f64 br = vm.reg(b).f,     bi = vm.reg((u16)(b+1)).f;
+    vm.reg(dst).f         = ar - br;
+    vm.reg((u16)(dst+1)).f = ai - bi;
     DISPATCH(2);
 }
 
 void op_mul_complex(VM& vm, Code* pc) {
     u16 dst = pc[1].regs[0], a = pc[1].regs[1], b = pc[1].regs[2];
-    auto* ca = static_cast<Complex*>(vm.reg(a).o);
-    auto* cb = static_cast<Complex*>(vm.reg(b).o);
-    vm.reg(dst).o = new Complex(ca->x * cb->x);
+    f64 ar = vm.reg(a).f,     ai = vm.reg((u16)(a+1)).f;
+    f64 br = vm.reg(b).f,     bi = vm.reg((u16)(b+1)).f;
+    f64 rr = ar*br - ai*bi;
+    f64 ri = ar*bi + ai*br;
+    vm.reg(dst).f         = rr;
+    vm.reg((u16)(dst+1)).f = ri;
     DISPATCH(2);
 }
 
 void op_div_complex(VM& vm, Code* pc) {
     u16 dst = pc[1].regs[0], a = pc[1].regs[1], b = pc[1].regs[2];
-    auto* ca = static_cast<Complex*>(vm.reg(a).o);
-    auto* cb = static_cast<Complex*>(vm.reg(b).o);
-    vm.reg(dst).o = new Complex(ca->x / cb->x);
+    f64 ar = vm.reg(a).f,     ai = vm.reg((u16)(a+1)).f;
+    f64 br = vm.reg(b).f,     bi = vm.reg((u16)(b+1)).f;
+    f64 denom = br*br + bi*bi;
+    f64 rr = (ar*br + ai*bi) / denom;
+    f64 ri = (ai*br - ar*bi) / denom;
+    vm.reg(dst).f         = rr;
+    vm.reg((u16)(dst+1)).f = ri;
     DISPATCH(2);
 }
 
 void op_neg_complex(VM& vm, Code* pc) {
     u16 dst = pc[1].regs[0], a = pc[1].regs[1];
-    auto* ca = static_cast<Complex*>(vm.reg(a).o);
-    vm.reg(dst).o = new Complex(-ca->x);
+    vm.reg(dst).f         = -vm.reg(a).f;
+    vm.reg((u16)(dst+1)).f = -vm.reg((u16)(a+1)).f;
     DISPATCH(2);
 }
 
@@ -369,17 +402,51 @@ void op_neg_complex(VM& vm, Code* pc) {
 
 void op_cmp_eq_complex(VM& vm, Code* pc) {
     u16 dst = pc[1].regs[0], a = pc[1].regs[1], b = pc[1].regs[2];
-    auto* ca = static_cast<Complex*>(vm.reg(a).o);
-    auto* cb = static_cast<Complex*>(vm.reg(b).o);
-    vm.reg(dst).i = (ca->x == cb->x) ? 1 : 0;
+    bool eq = (vm.reg(a).f == vm.reg(b).f)
+           && (vm.reg((u16)(a+1)).f == vm.reg((u16)(b+1)).f);
+    vm.reg(dst).i = eq ? 1 : 0;
     DISPATCH(2);
 }
 
 void op_cmp_ne_complex(VM& vm, Code* pc) {
     u16 dst = pc[1].regs[0], a = pc[1].regs[1], b = pc[1].regs[2];
-    auto* ca = static_cast<Complex*>(vm.reg(a).o);
-    auto* cb = static_cast<Complex*>(vm.reg(b).o);
-    vm.reg(dst).i = (ca->x != cb->x) ? 1 : 0;
+    bool eq = (vm.reg(a).f == vm.reg(b).f)
+           && (vm.reg((u16)(a+1)).f == vm.reg((u16)(b+1)).f);
+    vm.reg(dst).i = eq ? 0 : 1;
+    DISPATCH(2);
+}
+
+// --- Complex / Fraction Boxing (Phase 4f) ---
+// Box: take a 2-word inline slot and allocate a heap Obj.
+// Unbox: read a heap Obj and write 2 words to a slot.
+
+void op_box_complex(VM& vm, Code* pc) {
+    u16 dst = pc[1].regs[0], src = pc[1].regs[1];
+    f64 re = vm.reg(src).f, im = vm.reg((u16)(src+1)).f;
+    vm.reg(dst).o = new Complex(x64(re, im));
+    DISPATCH(2);
+}
+
+void op_unbox_complex(VM& vm, Code* pc) {
+    u16 dst = pc[1].regs[0], src = pc[1].regs[1];
+    auto* z = static_cast<Complex*>(vm.reg(src).o);
+    vm.reg(dst).f         = z->x.real();
+    vm.reg((u16)(dst+1)).f = z->x.imag();
+    DISPATCH(2);
+}
+
+void op_box_fraction(VM& vm, Code* pc) {
+    u16 dst = pc[1].regs[0], src = pc[1].regs[1];
+    i64 n = vm.reg(src).i, d = vm.reg((u16)(src+1)).i;
+    vm.reg(dst).o = new Fraction(r64(n, d));
+    DISPATCH(2);
+}
+
+void op_unbox_fraction(VM& vm, Code* pc) {
+    u16 dst = pc[1].regs[0], src = pc[1].regs[1];
+    auto* f = static_cast<Fraction*>(vm.reg(src).o);
+    vm.reg(dst).i         = f->r.numer();
+    vm.reg((u16)(dst+1)).i = f->r.denom();
     DISPATCH(2);
 }
 
@@ -497,71 +564,80 @@ void op_float_to_int(VM& vm, Code* pc) {
     DISPATCH(2);
 }
 
+// Phase 4f: Fraction is inline 2 words [numer, denom]; Complex is inline
+// 2 words [real, imag]. dst names the FIRST word; caller allocates the slot.
+
 void op_int_to_fraction(VM& vm, Code* pc) {
     u16 dst = pc[1].regs[0], a = pc[1].regs[1];
-    vm.reg(dst).o = new Fraction(r64(vm.reg(a).i));
+    vm.reg(dst).i         = vm.reg(a).i;  // numer = n
+    vm.reg((u16)(dst+1)).i = 1;            // denom = 1
     DISPATCH(2);
 }
 
 void op_int_to_complex(VM& vm, Code* pc) {
     u16 dst = pc[1].regs[0], a = pc[1].regs[1];
-    vm.reg(dst).o = new Complex(x64((f64)vm.reg(a).i, 0.0));
+    vm.reg(dst).f         = (f64)vm.reg(a).i;
+    vm.reg((u16)(dst+1)).f = 0.0;
     DISPATCH(2);
 }
 
 void op_fraction_to_float(VM& vm, Code* pc) {
     u16 dst = pc[1].regs[0], a = pc[1].regs[1];
-    auto* fa = static_cast<Fraction*>(vm.reg(a).o);
-    vm.reg(dst).f = (f64)fa->r;
+    i64 n = vm.reg(a).i, d = vm.reg((u16)(a+1)).i;
+    vm.reg(dst).f = (f64)n / (f64)d;
     DISPATCH(2);
 }
 
 void op_fraction_to_complex(VM& vm, Code* pc) {
     u16 dst = pc[1].regs[0], a = pc[1].regs[1];
-    auto* fa = static_cast<Fraction*>(vm.reg(a).o);
-    vm.reg(dst).o = new Complex(x64((f64)fa->r, 0.0));
+    i64 n = vm.reg(a).i, d = vm.reg((u16)(a+1)).i;
+    vm.reg(dst).f         = (f64)n / (f64)d;
+    vm.reg((u16)(dst+1)).f = 0.0;
     DISPATCH(2);
 }
 
 void op_float_to_complex(VM& vm, Code* pc) {
     u16 dst = pc[1].regs[0], a = pc[1].regs[1];
-    vm.reg(dst).o = new Complex(x64(vm.reg(a).f, 0.0));
+    vm.reg(dst).f         = vm.reg(a).f;
+    vm.reg((u16)(dst+1)).f = 0.0;
     DISPATCH(2);
 }
 
 void op_fraction_to_int(VM& vm, Code* pc) {
     u16 dst = pc[1].regs[0], a = pc[1].regs[1];
-    auto* fa = static_cast<Fraction*>(vm.reg(a).o);
-    vm.reg(dst).i = fa->r.numer() / fa->r.denom();
+    i64 n = vm.reg(a).i, d = vm.reg((u16)(a+1)).i;
+    vm.reg(dst).i = n / d;
     DISPATCH(2);
 }
 
 void op_complex_to_float(VM& vm, Code* pc) {
     u16 dst = pc[1].regs[0], a = pc[1].regs[1];
-    auto* ca = static_cast<Complex*>(vm.reg(a).o);
-    vm.reg(dst).f = ca->x.real();
+    vm.reg(dst).f = vm.reg(a).f;  // real
     DISPATCH(2);
 }
 
 void op_complex_to_int(VM& vm, Code* pc) {
     u16 dst = pc[1].regs[0], a = pc[1].regs[1];
-    auto* ca = static_cast<Complex*>(vm.reg(a).o);
-    vm.reg(dst).i = (i64)ca->x.real();
+    vm.reg(dst).i = (i64)vm.reg(a).f;  // (i64)real
     DISPATCH(2);
 }
 
 void op_complex_to_fraction(VM& vm, Code* pc) {
     u16 dst = pc[1].regs[0], a = pc[1].regs[1];
-    auto* ca = static_cast<Complex*>(vm.reg(a).o);
-    vm.reg(dst).o = new Fraction(r64((i64)ca->x.real()));
+    vm.reg(dst).i         = (i64)vm.reg(a).f;
+    vm.reg((u16)(dst+1)).i = 1;
     DISPATCH(2);
 }
 
 // --- Construction ---
 
+// op_make_complex Rd, Ra, Rb -- write inline Complex(real=Ra.f, imag=Rb.f)
+// to the 2-word slot starting at Rd. (Phase 4f: was heap-allocating; now inline.)
 void op_make_complex(VM& vm, Code* pc) {
     u16 dst = pc[1].regs[0], ra = pc[1].regs[1], rb = pc[1].regs[2];
-    vm.reg(dst).o = new Complex(x64(vm.reg(ra).f, vm.reg(rb).f));
+    f64 re = vm.reg(ra).f, im = vm.reg(rb).f;
+    vm.reg(dst).f         = re;
+    vm.reg((u16)(dst+1)).f = im;
     DISPATCH(2);
 }
 

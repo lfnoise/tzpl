@@ -280,76 +280,24 @@ void classifyStructImpl(StructType* st, std::unordered_set<Type*>& visiting) {
         // Inline / NullablePtrEnum / recursive: fall through to normal handling.
     }
 
-    // Inline value type: ≤ 4 fields, all fields are non-recursive value types,
-    // total size ≤ 4 words.
-    if (st->fields_.empty() || st->fields_.size() > 4) {
-        setHeap(st);
-        return;
-    }
-
-    u8 offset = 0;
-    bool allInline = true;
+    // Phase 4f: struct runtime is still heap (Struct*); the inline machinery
+    // only supports Complex / Fraction so far. Defer struct inlining until
+    // struct codegen / containers are wired up.
     for (auto const& field : st->fields_) {
-        if (!field.type) { allInline = false; break; }
-        classifyImpl(field.type, visiting);
-        if (!field.type->isValueType_ || field.type->isRecursive_) {
-            allInline = false;
-            break;
-        }
-        offset = static_cast<u8>(offset + field.type->sizeWords_);
-        if (offset > 4) { allInline = false; break; }
+        if (field.type) classifyImpl(field.type, visiting);
     }
-
-    if (!allInline) {
-        setHeap(st);
-        return;
-    }
-
-    // Build layout
-    u8 cur = 0;
-    for (auto const& field : st->fields_) {
-        st->layout_.push_back(FieldLayout{cur, field.type->sizeWords_, field.type});
-        cur = static_cast<u8>(cur + field.type->sizeWords_);
-    }
-    st->repr_ = Type::Repr::Inline;
-    st->sizeWords_ = offset;
-    st->isValueType_ = true;
+    setHeap(st);
 }
 
 void classifyTupleImpl(TupleType* tu, std::unordered_set<Type*>& visiting) {
     tu->layout_.clear();
-
-    if (tu->fields_.empty() || tu->fields_.size() > 4) {
-        setHeap(tu);
-        return;
-    }
-
-    u8 offset = 0;
-    bool allInline = true;
+    // Phase 4f: tuple runtime is still heap (Tuple*); the inline machinery
+    // only supports Complex / Fraction so far. Defer tuple inlining until
+    // tuple codegen / containers are wired up.
     for (Type* field : tu->fields_) {
-        if (!field) { allInline = false; break; }
-        classifyImpl(field, visiting);
-        if (!field->isValueType_ || field->isRecursive_) {
-            allInline = false;
-            break;
-        }
-        offset = static_cast<u8>(offset + field->sizeWords_);
-        if (offset > 4) { allInline = false; break; }
+        if (field) classifyImpl(field, visiting);
     }
-
-    if (!allInline) {
-        setHeap(tu);
-        return;
-    }
-
-    u8 cur = 0;
-    for (Type* field : tu->fields_) {
-        tu->layout_.push_back(FieldLayout{cur, field->sizeWords_, field});
-        cur = static_cast<u8>(cur + field->sizeWords_);
-    }
-    tu->repr_ = Type::Repr::Inline;
-    tu->sizeWords_ = offset;
-    tu->isValueType_ = true;
+    setHeap(tu);
 }
 
 void classifyEnumImpl(EnumType* en, std::unordered_set<Type*>& visiting) {
@@ -400,43 +348,9 @@ void classifyEnumImpl(EnumType* en, std::unordered_set<Type*>& visiting) {
         return;
     }
 
-    // Inline enum: ≤ 4 cases, every payload is a non-recursive value type,
-    // worst-case 1 + max(payload words) ≤ 4.
-    if (en->cases_.size() > 4) {
-        setHeap(en);
-        return;
-    }
-
-    u8 maxPayload = 0;
-    for (auto const& c : en->cases_) {
-        Type* pt = c.type;
-        bool isVoid = !pt->isObjType() && (dynamic_cast<VoidType*>(pt) != nullptr);
-        if (isVoid) continue;
-        if (!pt->isValueType_ || pt->isRecursive_) {
-            setHeap(en);
-            return;
-        }
-        if (pt->sizeWords_ > maxPayload) maxPayload = pt->sizeWords_;
-    }
-    u8 totalSize = static_cast<u8>(1 + maxPayload);
-    if (totalSize > 4) {
-        setHeap(en);
-        return;
-    }
-
-    en->repr_ = Type::Repr::Inline;
-    en->sizeWords_ = totalSize;
-    en->isValueType_ = true;
-    // One layout entry per case payload; payload always starts at word 1.
-    for (auto const& c : en->cases_) {
-        Type* pt = c.type;
-        bool isVoid = !pt->isObjType() && (dynamic_cast<VoidType*>(pt) != nullptr);
-        if (isVoid) {
-            en->layout_.push_back(FieldLayout{1, 0, pt});
-        } else {
-            en->layout_.push_back(FieldLayout{1, pt->sizeWords_, pt});
-        }
-    }
+    // Phase 4f: enum runtime is still heap (Enum*); the inline machinery
+    // only supports Complex / Fraction so far. Defer enum inlining.
+    setHeap(en);
 }
 
 void classifyImpl(Type* t, std::unordered_set<Type*>& visiting) {
@@ -477,12 +391,25 @@ void classifyImpl(Type* t, std::unordered_set<Type*>& visiting) {
         classifyTupleImpl(tu, visiting);
     }
     else if (t->isObjType()) {
-        // String, Array, List, Range, Ref, Map, Set, Function, Lambda,
-        // TemplateLambda, Coroutine, Any, Fraction, Complex.
-        // All represented as a single Obj* pointer; we do NOT recurse into
-        // their element types (collections break cycles via heap allocation).
-        // Phase 4 will reclassify Fraction/Complex as Inline.
-        setPointer(t);
+        // Phase 4f: Complex is a 2-word inline value (real, imag) in registers,
+        // boxed to a heap Complex* at storage boundaries. Same for Fraction.
+        if (dynamic_cast<ComplexType*>(t)) {
+            t->repr_ = Type::Repr::Inline;
+            t->sizeWords_ = 2;
+            t->isValueType_ = true;
+        }
+        else if (dynamic_cast<FractionType*>(t)) {
+            t->repr_ = Type::Repr::Inline;
+            t->sizeWords_ = 2;
+            t->isValueType_ = true;
+        }
+        else {
+            // String, Array, List, Range, Ref, Map, Set, Function, Lambda,
+            // TemplateLambda, Coroutine, Any.
+            // All represented as a single Obj* pointer; we do NOT recurse into
+            // their element types (collections break cycles via heap allocation).
+            setPointer(t);
+        }
     }
     else {
         setHeap(t);
