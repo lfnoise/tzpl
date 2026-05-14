@@ -102,6 +102,20 @@ void op_mov(VM& vm, Code* pc) {
     DISPATCH(2);
 }
 
+// MOV_N Rd, Ra, N  (3 words: op, regs, i64 nWords)
+// Multi-word block copy. Rd and Ra are the first words of the
+// destination/source slots; N consecutive Words are copied.
+// Used for inline value types (Phase 4) — sizes always multiple of 8 bytes.
+void op_move_n(VM& vm, Code* pc) {
+    u16 dst = pc[1].regs[0];
+    u16 src = pc[1].regs[1];
+    i64 n   = pc[2].i;
+    for (i64 i = 0; i < n; ++i) {
+        vm.reg((u16)(dst + i)) = vm.reg((u16)(src + i));
+    }
+    DISPATCH(3);
+}
+
 // LOAD_GLOBAL Rd, K  (3 words: op, regs, global_index)
 void op_load_global(VM& vm, Code* pc) {
     u16 dst = pc[1].regs[0];

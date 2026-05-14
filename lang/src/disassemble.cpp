@@ -63,6 +63,7 @@ static const std::unordered_map<Operation, OpInfo>& opInfoMap() {
         { op_load_nil,          { "LOAD_NIL",          2, OpFmt::Regs,       1 } },
         { op_load_obj,          { "LOAD_OBJ",          2, OpFmt::Regs,       2 } },
         { op_mov,               { "MOV",               2, OpFmt::Regs,       2 } },
+        { op_move_n,            { "MOV_N",             3, OpFmt::Regs_Int,   2 } },
         { op_load_global,       { "LOAD_GLOBAL",       3, OpFmt::Regs_Int,   1 } },
         { op_store_global,      { "STORE_GLOBAL",      3, OpFmt::Regs_Int,   1 } },
         { op_store_global_obj,  { "STORE_GLOBAL_OBJ",  3, OpFmt::Regs_Int,   1 } },

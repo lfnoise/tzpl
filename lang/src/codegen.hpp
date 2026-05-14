@@ -186,6 +186,25 @@ private:
     void emitFloat(f64 val) { currentBlock_->emitFloat(val); }
     void emitPtr(void* p) { currentBlock_->emitPtr(p); }
 
+    // Multi-word slot move (Phase 4): falls back to op_mov when nWords == 1.
+    void emitMoveN(u16 dst, u16 src, u32 nWords) {
+        if (nWords <= 1) {
+            emitOp(op_mov);
+            emitRegs(dst, src);
+        } else {
+            emitOp(op_move_n);
+            emitRegs(dst, src);
+            emitInt((i64)nWords);
+        }
+    }
+
+    // Allocate a slot sized for type t (Phase 4): atoms/pointers get 1 reg,
+    // inline value types get t->sizeWords_ consecutive regs.
+    u16 allocSlot(Type* t) {
+        u16 n = (t && t->sizeWords_ > 1) ? t->sizeWords_ : 1;
+        return (n == 1) ? allocReg() : allocRegs(n);
+    }
+
     // Jump helpers - store target indices, resolve to pointers after emission
     // jumpFixups_ tracks Code positions that contain jump target indices
     std::vector<u32> jumpFixups_;
