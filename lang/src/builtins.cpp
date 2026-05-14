@@ -1661,7 +1661,19 @@ static void builtin_any_single(VM& vm, u16 dst, u16, u16 argBase) {
     auto* ft = static_cast<FunctionType*>(prim->type_);
     Type* wrappedType = ft->argTypes_[0];
     auto* any = new AnyObj(vm.anyType());
-    any->value_ = vm.reg(argBase);
+    // Phase 4f: inline value types live as multi-word slots in registers; box
+    // them into a heap Obj before storing in AnyObj's single-Word value_ slot.
+    if (wrappedType == vm.complexType()) {
+        f64 re = vm.reg(argBase).f;
+        f64 im = vm.reg((u16)(argBase + 1)).f;
+        any->value_.o = new Complex(x64(re, im));
+    } else if (wrappedType == vm.fractionType()) {
+        i64 n = vm.reg(argBase).i;
+        i64 d = vm.reg((u16)(argBase + 1)).i;
+        any->value_.o = new Fraction(r64(n, d));
+    } else {
+        any->value_ = vm.reg(argBase);
+    }
     any->wrappedType_ = wrappedType;
     any->isObjType_ = storesObjPtr(wrappedType);
     if (any->isObjType_ && any->value_.o) any->value_.o->retain();

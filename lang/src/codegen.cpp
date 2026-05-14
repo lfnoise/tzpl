@@ -664,15 +664,19 @@ void CodeGen::genVarDecl(VarDeclNode* decl) {
         auto it = typeChecker_.dynamicVars().find(decl->name);
         u32 dynIdx = it->second.dynIndex;
 
+        // Phase 4f: dynvar slot is a single Word; box inline values first.
+        u16 storeReg = isInlineMultiword(decl->resolvedType)
+                     ? emitBoxIfInline(reg, decl->resolvedType) : reg;
+
         if (inFunctionBody_) {
             // Inside a function: save old value, set new (restored on function return)
             emitOp(op_dynscope_push);
-            emitRegs(reg);
+            emitRegs(storeReg);
             emitInt(dynIdx);
         } else {
             // At global scope: just set the initial value
             emitOp(storesObjPtr(decl->resolvedType) ? op_init_dynamic_obj : op_store_dynamic);
-            emitRegs(reg);
+            emitRegs(storeReg);
             emitInt(dynIdx);
         }
         return;
@@ -1880,11 +1884,15 @@ void CodeGen::genPatternMatch(Pattern* pat, u16 subjReg, Type* subjType,
             u32 failJump = emitJump(op_jump_if_false, matchReg);
             failJumps.push_back(failJump);
 
-            // If matched and inner pattern exists, extract value and recurse
+            // If matched and inner pattern exists, extract value and recurse.
+            // Phase 4f: enum payload stores boxed inline values; unbox after read.
             if (ep->innerPattern && caseType && caseType != compiler_.voidType()) {
                 u16 valReg = allocReg();
                 emitOp(op_enum_get_value);
                 emitRegs(valReg, subjReg);
+                if (isInlineMultiword(caseType)) {
+                    valReg = emitUnboxIfInline(valReg, caseType);
+                }
                 genPatternMatch(ep->innerPattern.get(), valReg, caseType, failJumps, isMutable);
             }
             break;
@@ -1918,6 +1926,10 @@ void CodeGen::genPatternMatch(Pattern* pat, u16 subjReg, Type* subjType,
                 u16 fieldReg = allocReg();
                 emitOp(op_struct_get);
                 emitRegs(fieldReg, subjReg, (u16)fieldIdx);
+                // Phase 4f: struct field stores boxed inline values; unbox.
+                if (isInlineMultiword(fieldType)) {
+                    fieldReg = emitUnboxIfInline(fieldReg, fieldType);
+                }
                 genPatternMatch(field.pattern.get(), fieldReg, fieldType, failJumps, isMutable);
             }
             break;
@@ -1973,11 +1985,15 @@ void CodeGen::genPatternMatch(Pattern* pat, u16 subjReg, Type* subjType,
                 u32 failJump = emitJump(op_jump_if_false, matchReg);
                 failJumps.push_back(failJump);
 
-                // Extract and match inner data
+                // Extract and match inner data.
+                // Phase 4f: enum payload stores boxed inline values; unbox.
                 if (pat->enumCaseDataType && pat->enumCaseDataType != compiler_.voidType()) {
                     u16 valReg = allocReg();
                     emitOp(op_enum_get_value);
                     emitRegs(valReg, subjReg);
+                    if (isInlineMultiword(pat->enumCaseDataType)) {
+                        valReg = emitUnboxIfInline(valReg, pat->enumCaseDataType);
+                    }
 
                     if (tp->elements.size() == 1) {
                         genPatternMatch(tp->elements[0].get(), valReg, pat->enumCaseDataType, failJumps, isMutable);
@@ -1988,7 +2004,11 @@ void CodeGen::genPatternMatch(Pattern* pat, u16 subjReg, Type* subjType,
                                 u16 elemReg = allocReg();
                                 emitOp(op_tuple_get);
                                 emitRegs(elemReg, valReg, (u16)i);
-                                genPatternMatch(tp->elements[i].get(), elemReg, ttype->fields_[i], failJumps, isMutable);
+                                Type* ft = ttype->fields_[i];
+                                if (isInlineMultiword(ft)) {
+                                    elemReg = emitUnboxIfInline(elemReg, ft);
+                                }
+                                genPatternMatch(tp->elements[i].get(), elemReg, ft, failJumps, isMutable);
                             }
                         }
                     }
@@ -2289,7 +2309,8 @@ u16 CodeGen::genExpr(Expr* expr) {
             emitOp(op_load_dynamic);
             emitRegs(dst);
             emitInt(it->second.dynIndex);
-            return dst;
+            // Phase 4f: dynvar slot stores boxed inline values; unbox.
+            return emitUnboxIfInline(dst, it->second.type);
         }
         case ASTNode::BinaryOp:        return genBinaryOp(static_cast<BinaryOpExpr*>(expr));
         case ASTNode::UnaryOp:         return genUnaryOp(static_cast<UnaryOpExpr*>(expr));
@@ -3153,8 +3174,12 @@ u16 CodeGen::genBinaryOp(BinaryOpExpr* expr) {
 
         case BinaryOpExpr::Cons: {
             auto* listT = dynamic_cast<ListType*>(resultType);
-            // Promote head to list element type if needed
+            // Promote head to list element type if needed.
             leftReg = ensureType(leftReg, leftType, listT->elemType_);
+            // Phase 4f: ListNode head_ is a single Word; box inline values.
+            if (isInlineMultiword(listT->elemType_)) {
+                leftReg = emitBoxIfInline(leftReg, listT->elemType_);
+            }
             emitOp(op_cons);
             emitRegs(dst, leftReg, rightReg);
             emitPtr(listT);
@@ -3162,9 +3187,13 @@ u16 CodeGen::genBinaryOp(BinaryOpExpr* expr) {
         }
 
         case BinaryOpExpr::LeftArrow: {
-            // ref <- value: set the ref's value with write barrier
+            // ref <- value: set the ref's value with write barrier.
+            // Phase 4f: Ref slot is single Word; box inline values first.
             auto* refType = static_cast<RefType*>(leftType);
             rightReg = ensureType(rightReg, rightType, refType->elemType_);
+            if (isInlineMultiword(refType->elemType_)) {
+                rightReg = emitBoxIfInline(rightReg, refType->elemType_);
+            }
             emitOp(op_ref_set);
             emitRegs(dst, leftReg, rightReg);
             emitPtr(refType);
@@ -3172,11 +3201,14 @@ u16 CodeGen::genBinaryOp(BinaryOpExpr* expr) {
         }
 
         case BinaryOpExpr::RightArrow: {
-            // value -> ref: set the ref's value with write barrier
+            // value -> ref: set the ref's value with write barrier.
             auto* refType = static_cast<RefType*>(rightType);
             leftReg = ensureType(leftReg, leftType, refType->elemType_);
+            if (isInlineMultiword(refType->elemType_)) {
+                leftReg = emitBoxIfInline(leftReg, refType->elemType_);
+            }
             emitOp(op_ref_set);
-            emitRegs(dst, rightReg, leftReg);  // ref is right, value is left
+            emitRegs(dst, rightReg, leftReg);
             emitPtr(refType);
             break;
         }
@@ -3262,19 +3294,30 @@ u16 CodeGen::genUnaryOp(UnaryOpExpr* expr) {
             break;
 
         case UnaryOpExpr::Ref: {
-            // &expr — create a Ref<T>
+            // &expr — create a Ref<T>.
+            // Phase 4f: Ref slot is a single Word; box inline value first.
             auto* refType = static_cast<RefType*>(expr->resolvedType);
+            u16 srcReg = operandReg;
+            if (isInlineMultiword(refType->elemType_)) {
+                srcReg = emitBoxIfInline(operandReg, refType->elemType_);
+            }
             emitOp(op_make_ref);
-            emitRegs(dst, operandReg);
+            emitRegs(dst, srcReg);
             emitPtr(refType);
             break;
         }
 
-        case UnaryOpExpr::Deref:
-            // *expr — dereference a Ref<T>
+        case UnaryOpExpr::Deref: {
+            // *expr — dereference a Ref<T>.
+            // Phase 4f: Ref stores boxed inline values; unbox after read.
             emitOp(op_ref_get);
             emitRegs(dst, operandReg);
+            auto* refType = dynamic_cast<RefType*>(expr->operand->resolvedType);
+            if (refType && isInlineMultiword(refType->elemType_)) {
+                return emitUnboxIfInline(dst, refType->elemType_);
+            }
             break;
+        }
     }
 
     return dst;
@@ -3834,7 +3877,12 @@ u16 CodeGen::genCall(CallExpr_* expr) {
         u16 gcMapIndex = currentYieldCount_++;
         currentBlock_->coroGCMaps_.push_back(std::move(gcMap));
 
+        // Phase 4f: yield writes 1 Word to caller; box inline values first.
         u16 srcReg = argBase;  // first (and only) argument is the yielded value
+        Type* yieldType = expr->args[0]->resolvedType;
+        if (isInlineMultiword(yieldType)) {
+            srcReg = emitBoxIfInline(srcReg, yieldType);
+        }
 
         // Emit yield: op, regs{src, gcMapIdx}
         emitOp(op_yield);
@@ -8587,6 +8635,10 @@ u16 CodeGen::genEnumConstruct(ASTNode* node) {
             emitOp(op_mov);
             emitRegs(dst, valReg);
         } else {
+            // Phase 4f: enum payload slot is single Word; box inline values.
+            if (isInlineMultiword(caseType)) {
+                valReg = emitBoxIfInline(valReg, caseType);
+            }
             emitOp(op_make_enum);
             emitRegs(dst, valReg, (u16)caseIdx);
             emitPtr(etype);
