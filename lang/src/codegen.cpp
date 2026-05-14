@@ -1508,6 +1508,11 @@ void CodeGen::genForStmt(ForStmtNode* stmt) {
         emitRegs(elemReg, arrReg, idxReg);
         emitPtr(arrayType);
 
+        // Phase 4f: array stores boxed inline values; unbox into 2-word slot.
+        if (isInlineMultiword(arrayType->elemType_)) {
+            elemReg = emitUnboxIfInline(elemReg, arrayType->elemType_);
+        }
+
         loopStack_.push_back({loopSavedReg, {}, {}});
         pushScope();
         declareLocal(stmt->varName, elemReg, arrayType->elemType_, false);
@@ -3306,6 +3311,7 @@ u16 CodeGen::genCall(CallExpr_* expr) {
             Type* declType = stype->fields_[0].type;
             return ensureType(valReg, valType, declType);
         }
+        // Phase 4f: tuple-struct stores 1 Word per field; box inline values.
         usize numFields = stype->fields_.size();
         u16 fieldBase = nextReg_;
         for (size_t i = 0; i < numFields; ++i) {
@@ -3313,6 +3319,7 @@ u16 CodeGen::genCall(CallExpr_* expr) {
             Type* valType = expr->args[i]->resolvedType;
             Type* declType = stype->fields_[i].type;
             valReg = ensureType(valReg, valType, declType);
+            if (isInlineMultiword(declType)) valReg = emitBoxIfInline(valReg, declType);
             if (valReg != fieldBase + (u16)i) {
                 emitOp(op_mov);
                 emitRegs(fieldBase + (u16)i, valReg);
@@ -3351,20 +3358,19 @@ u16 CodeGen::genCall(CallExpr_* expr) {
                         }
                     }
                 }
-                // Generate args into consecutive registers
+                // Generate args into consecutive registers (Phase 4f: multi-word).
                 u16 argBase = nextReg_;
+                u32 cumOffset = 0;
                 for (size_t i = 0; i < expr->args.size(); ++i) {
                     u16 argReg = genExpr(static_cast<Expr*>(expr->args[i].get()));
-                    // Promote argument type if needed (e.g. Int -> Float)
+                    Type* paramType = expr->args[i]->resolvedType;
                     if (paramTypes && i < paramTypes->size()) {
                         argReg = ensureType(argReg, expr->args[i]->resolvedType, (*paramTypes)[i]);
+                        paramType = (*paramTypes)[i];
                     }
-                    if (argReg != argBase + (u16)i) {
-                        emitOp(op_mov);
-                        emitRegs(argBase + (u16)i, argReg);
-                    }
-                    u16 next = argBase + (u16)i + 1;
-                    if (nextReg_ < next) { nextReg_ = next; if (nextReg_ > maxReg_) maxReg_ = nextReg_; }
+                    u16 dstReg = (u16)(argBase + cumOffset);
+                    emitArgPlacement(dstReg, argReg, paramType);
+                    cumOffset += typeSlotWords(paramType);
                 }
                 if (isTailCall && !expr->isBuiltinCall) {
                     emitOp(op_tail_call);
@@ -3372,10 +3378,17 @@ u16 CodeGen::genCall(CallExpr_* expr) {
                     emitInt(expr->resolvedFuncGlobalIndex);
                     return allocReg();
                 }
-                u16 resultReg = allocReg();
+                u16 resultReg = allocSlot(expr->resolvedType);
                 emitOp(expr->isBuiltinCall ? op_call_primitive : op_call);
                 emitRegs(resultReg, (u16)expr->args.size(), argBase);
                 emitInt(expr->resolvedFuncGlobalIndex);
+                if (!expr->isBuiltinCall && isInlineMultiword(expr->resolvedType)) {
+                    u16 unboxed = allocSlot(expr->resolvedType);
+                    emitOp(expr->resolvedType == compiler_.complexType()
+                           ? op_unbox_complex : op_unbox_fraction);
+                    emitRegs(unboxed, resultReg);
+                    return unboxed;
+                }
                 return resultReg;
             }
         }
@@ -3393,16 +3406,16 @@ u16 CodeGen::genCall(CallExpr_* expr) {
                 compileTemplateLambdaBody(tmplType->astNode_, concreteLT);
             }
 
-            // Generate args into consecutive registers
+            // Generate args into consecutive registers (Phase 4f: multi-word).
             u16 argBase = nextReg_;
+            u32 cumOffset = 0;
             for (size_t i = 0; i < expr->args.size(); ++i) {
                 u16 argReg = genExpr(static_cast<Expr*>(expr->args[i].get()));
-                if (argReg != argBase + (u16)i) {
-                    emitOp(op_mov);
-                    emitRegs(argBase + (u16)i, argReg);
-                }
-                u16 next = argBase + (u16)i + 1;
-                if (nextReg_ < next) { nextReg_ = next; if (nextReg_ > maxReg_) maxReg_ = nextReg_; }
+                Type* paramType = (i < concreteLT->argTypes_.size())
+                                ? concreteLT->argTypes_[i] : expr->args[i]->resolvedType;
+                u16 dstReg = (u16)(argBase + cumOffset);
+                emitArgPlacement(dstReg, argReg, paramType);
+                cumOffset += typeSlotWords(paramType);
             }
 
             if (isTailCall) {
@@ -3411,32 +3424,39 @@ u16 CodeGen::genCall(CallExpr_* expr) {
                 emitPtr(concreteLT->codeBlock_);
                 return allocReg();
             }
-            u16 resultReg = allocReg();
+            u16 resultReg = allocSlot(expr->resolvedType);
             emitOp(op_call_template_lambda);
             emitRegs(resultReg, (u16)expr->args.size(), argBase, calleeReg);
             emitPtr(concreteLT->codeBlock_);
+            if (isInlineMultiword(expr->resolvedType)) {
+                u16 unboxed = allocSlot(expr->resolvedType);
+                emitOp(expr->resolvedType == compiler_.complexType()
+                       ? op_unbox_complex : op_unbox_fraction);
+                emitRegs(unboxed, resultReg);
+                return unboxed;
+            }
             return resultReg;
         }
 
         // General expression callee (e.g., a[i](x, y))
         u16 calleeReg = genExpr(static_cast<Expr*>(expr->callee.get()));
+        auto* funcType = dynamic_cast<FunctionType*>(expr->callee->resolvedType);
 
         // Auto-mapped lambda call
         if (!expr->autoMapArgs.empty()) {
-            auto* funcType = dynamic_cast<FunctionType*>(expr->callee->resolvedType);
             if (funcType) return genAutoMapLambdaCall(expr, calleeReg, funcType);
         }
 
-        // Generate args into consecutive registers
+        // Generate args into consecutive registers (Phase 4f: multi-word).
         u16 argBase = nextReg_;
+        u32 cumOffset = 0;
         for (size_t i = 0; i < expr->args.size(); ++i) {
             u16 argReg = genExpr(static_cast<Expr*>(expr->args[i].get()));
-            if (argReg != argBase + (u16)i) {
-                emitOp(op_mov);
-                emitRegs(argBase + (u16)i, argReg);
-            }
-            u16 next = argBase + (u16)i + 1;
-            if (nextReg_ < next) { nextReg_ = next; if (nextReg_ > maxReg_) maxReg_ = nextReg_; }
+            Type* paramType = (funcType && i < funcType->argTypes_.size())
+                            ? funcType->argTypes_[i] : expr->args[i]->resolvedType;
+            u16 dstReg = (u16)(argBase + cumOffset);
+            emitArgPlacement(dstReg, argReg, paramType);
+            cumOffset += typeSlotWords(paramType);
         }
 
         // Coroutine lambda call
@@ -3454,9 +3474,16 @@ u16 CodeGen::genCall(CallExpr_* expr) {
             emitRegs(0, (u16)expr->args.size(), argBase, calleeReg);
             return allocReg();
         }
-        u16 resultReg = allocReg();
+        u16 resultReg = allocSlot(expr->resolvedType);
         emitOp(op_call_lambda);
         emitRegs(resultReg, (u16)expr->args.size(), argBase, calleeReg);
+        if (isInlineMultiword(expr->resolvedType)) {
+            u16 unboxed = allocSlot(expr->resolvedType);
+            emitOp(expr->resolvedType == compiler_.complexType()
+                   ? op_unbox_complex : op_unbox_fraction);
+            emitRegs(unboxed, resultReg);
+            return unboxed;
+        }
         return resultReg;
     }
 
@@ -3530,16 +3557,16 @@ u16 CodeGen::genCall(CallExpr_* expr) {
             compileTemplateLambdaBody(tmplExpr, concreteLT);
         }
 
-        // Generate args into consecutive registers
+        // Generate args into consecutive registers (Phase 4f: multi-word).
         u16 argBase = nextReg_;
+        u32 cumOffset = 0;
         for (size_t i = 0; i < expr->args.size(); ++i) {
             u16 argReg = genExpr(static_cast<Expr*>(expr->args[i].get()));
-            if (argReg != argBase + (u16)i) {
-                emitOp(op_mov);
-                emitRegs(argBase + (u16)i, argReg);
-            }
-            u16 next = argBase + (u16)i + 1;
-            if (nextReg_ < next) { nextReg_ = next; if (nextReg_ > maxReg_) maxReg_ = nextReg_; }
+            Type* paramType = (i < concreteLT->argTypes_.size())
+                            ? concreteLT->argTypes_[i] : expr->args[i]->resolvedType;
+            u16 dstReg = (u16)(argBase + cumOffset);
+            emitArgPlacement(dstReg, argReg, paramType);
+            cumOffset += typeSlotWords(paramType);
         }
 
         if (isTailCall) {
@@ -3548,10 +3575,17 @@ u16 CodeGen::genCall(CallExpr_* expr) {
             emitPtr(concreteLT->codeBlock_);
             return allocReg();
         }
-        u16 resultReg = allocReg();
+        u16 resultReg = allocSlot(expr->resolvedType);
         emitOp(op_call_template_lambda);
         emitRegs(resultReg, (u16)expr->args.size(), argBase, calleeReg);
         emitPtr(concreteLT->codeBlock_);
+        if (isInlineMultiword(expr->resolvedType)) {
+            u16 unboxed = allocSlot(expr->resolvedType);
+            emitOp(expr->resolvedType == compiler_.complexType()
+                   ? op_unbox_complex : op_unbox_fraction);
+            emitRegs(unboxed, resultReg);
+            return unboxed;
+        }
         return resultReg;
     }
 
@@ -3559,23 +3593,23 @@ u16 CodeGen::genCall(CallExpr_* expr) {
     LocalVar* calleeLocal = lookupLocal(ident->name);
     if (calleeLocal && dynamic_cast<FunctionType*>(calleeLocal->type)) {
         u16 calleeReg = calleeLocal->reg;
+        auto* funcType = static_cast<FunctionType*>(calleeLocal->type);
 
         // Auto-mapped lambda call
         if (!expr->autoMapArgs.empty()) {
-            return genAutoMapLambdaCall(expr, calleeReg, static_cast<FunctionType*>(calleeLocal->type));
+            return genAutoMapLambdaCall(expr, calleeReg, funcType);
         }
 
-        // Generate args into consecutive registers
+        // Generate args into consecutive registers (Phase 4f: multi-word aware).
         u16 argBase = nextReg_;
+        u32 cumOffset = 0;
         for (size_t i = 0; i < expr->args.size(); ++i) {
             u16 argReg = genExpr(static_cast<Expr*>(expr->args[i].get()));
-            if (argReg != argBase + (u16)i) {
-                emitOp(op_mov);
-                emitRegs(argBase + (u16)i, argReg);
-            }
-            // Advance past this arg position so next genExpr won't clobber
-            u16 next = argBase + (u16)i + 1;
-            if (nextReg_ < next) { nextReg_ = next; if (nextReg_ > maxReg_) maxReg_ = nextReg_; }
+            Type* paramType = (i < funcType->argTypes_.size())
+                            ? funcType->argTypes_[i] : expr->args[i]->resolvedType;
+            u16 dstReg = (u16)(argBase + cumOffset);
+            emitArgPlacement(dstReg, argReg, paramType);
+            cumOffset += typeSlotWords(paramType);
         }
 
         if (isTailCall) {
@@ -3583,9 +3617,17 @@ u16 CodeGen::genCall(CallExpr_* expr) {
             emitRegs(0, (u16)expr->args.size(), argBase, calleeReg);
             return allocReg();
         }
-        u16 resultReg = allocReg();
+        u16 resultReg = allocSlot(expr->resolvedType);
         emitOp(op_call_lambda);
         emitRegs(resultReg, (u16)expr->args.size(), argBase, calleeReg);
+        // Lambda returns box inline values; unbox.
+        if (isInlineMultiword(expr->resolvedType)) {
+            u16 unboxed = allocSlot(expr->resolvedType);
+            emitOp(expr->resolvedType == compiler_.complexType()
+                   ? op_unbox_complex : op_unbox_fraction);
+            emitRegs(unboxed, resultReg);
+            return unboxed;
+        }
         return resultReg;
     }
 
@@ -3606,16 +3648,16 @@ u16 CodeGen::genCall(CallExpr_* expr) {
                     return genAutoMapLambdaCall(expr, calleeReg, funcType);
                 }
 
-                // Generate args into consecutive registers
+                // Generate args into consecutive registers (Phase 4f: multi-word).
                 u16 argBase = nextReg_;
+                u32 cumOffset = 0;
                 for (size_t i = 0; i < expr->args.size(); ++i) {
                     u16 argReg = genExpr(static_cast<Expr*>(expr->args[i].get()));
-                    if (argReg != argBase + (u16)i) {
-                        emitOp(op_mov);
-                        emitRegs(argBase + (u16)i, argReg);
-                    }
-                    u16 next = argBase + (u16)i + 1;
-                    if (nextReg_ < next) { nextReg_ = next; if (nextReg_ > maxReg_) maxReg_ = nextReg_; }
+                    Type* paramType = (i < funcType->argTypes_.size())
+                                    ? funcType->argTypes_[i] : expr->args[i]->resolvedType;
+                    u16 dstReg = (u16)(argBase + cumOffset);
+                    emitArgPlacement(dstReg, argReg, paramType);
+                    cumOffset += typeSlotWords(paramType);
                 }
 
                 if (isTailCall) {
@@ -3623,9 +3665,16 @@ u16 CodeGen::genCall(CallExpr_* expr) {
                     emitRegs(0, (u16)expr->args.size(), argBase, calleeReg);
                     return allocReg();
                 }
-                u16 resultReg = allocReg();
+                u16 resultReg = allocSlot(expr->resolvedType);
                 emitOp(op_call_lambda);
                 emitRegs(resultReg, (u16)expr->args.size(), argBase, calleeReg);
+                if (isInlineMultiword(expr->resolvedType)) {
+                    u16 unboxed = allocSlot(expr->resolvedType);
+                    emitOp(expr->resolvedType == compiler_.complexType()
+                           ? op_unbox_complex : op_unbox_fraction);
+                    emitRegs(unboxed, resultReg);
+                    return unboxed;
+                }
                 return resultReg;
             }
         }
@@ -7524,8 +7573,12 @@ u16 CodeGen::genIndexExpr(IndexExpr_* expr) {
     u16 dst = allocReg();
 
     if (auto* mapType = dynamic_cast<MapType*>(expr->object->resolvedType)) {
-        // Map subscript: map[key] -> Option<V>
+        // Map subscript: map[key] -> Option<V>.
+        // Phase 4f: map keys are stored boxed; box inline key before lookup.
         idxReg = ensureType(idxReg, expr->index->resolvedType, mapType->keyType_);
+        if (isInlineMultiword(mapType->keyType_)) {
+            idxReg = emitBoxIfInline(idxReg, mapType->keyType_);
+        }
         emitOp(op_map_get_option);
         emitRegs(dst, objReg, idxReg);
         emitPtr(compiler_.optionType(mapType->valueType_));
