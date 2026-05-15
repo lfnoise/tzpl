@@ -2941,13 +2941,13 @@ u16 CodeGen::genBinaryOp(BinaryOpExpr* expr) {
         u16 leftReg = genExpr(static_cast<Expr*>(expr->left.get()));
         Type* leftT = expr->left->resolvedType;
         Type* rightT = expr->right->resolvedType;
-        u32 leftWords = emitArgPlacementForCall(argBase, leftReg, leftT, expr->isBuiltinCall);
+        u32 leftWords = emitArgPlacementForCall(argBase, leftReg, leftT, expr->isBuiltinCall, expr->builtinAcceptsInlineArgs);
         u16 rightDst = (u16)(argBase + leftWords);
         u16 rightReg = genExpr(static_cast<Expr*>(expr->right.get()));
-        u32 rightWords = emitArgPlacementForCall(rightDst, rightReg, rightT, expr->isBuiltinCall);
+        u32 rightWords = emitArgPlacementForCall(rightDst, rightReg, rightT, expr->isBuiltinCall, expr->builtinAcceptsInlineArgs);
         u16 next = (u16)(rightDst + rightWords);
         if (nextReg_ < next) { nextReg_ = next; if (nextReg_ > maxReg_) maxReg_ = nextReg_; }
-        bool builtinReturnsInlineComposite = expr->isBuiltinCall && expr->resolvedType
+        bool builtinReturnsInlineComposite = expr->isBuiltinCall && !expr->builtinAcceptsInlineArgs && expr->resolvedType
             && expr->resolvedType->repr_ == ts::Type::Repr::Inline
             && expr->resolvedType != compiler_.complexType()
             && expr->resolvedType != compiler_.fractionType();
@@ -3283,10 +3283,10 @@ u16 CodeGen::genUnaryOp(UnaryOpExpr* expr) {
         u16 argBase = nextReg_;
         u16 operandReg = genExpr(static_cast<Expr*>(expr->operand.get()));
         Type* opT = expr->operand->resolvedType;
-        u32 sw = emitArgPlacementForCall(argBase, operandReg, opT, expr->isBuiltinCall);
+        u32 sw = emitArgPlacementForCall(argBase, operandReg, opT, expr->isBuiltinCall, expr->builtinAcceptsInlineArgs);
         u16 next = (u16)(argBase + sw);
         if (nextReg_ < next) { nextReg_ = next; if (nextReg_ > maxReg_) maxReg_ = nextReg_; }
-        bool builtinReturnsInlineComposite = expr->isBuiltinCall && expr->resolvedType
+        bool builtinReturnsInlineComposite = expr->isBuiltinCall && !expr->builtinAcceptsInlineArgs && expr->resolvedType
             && expr->resolvedType->repr_ == ts::Type::Repr::Inline
             && expr->resolvedType != compiler_.complexType()
             && expr->resolvedType != compiler_.fractionType();
@@ -3541,7 +3541,7 @@ u16 CodeGen::genCall(CallExpr_* expr) {
                         paramType = (*paramTypes)[i];
                     }
                     u16 dstReg = (u16)(argBase + cumOffset);
-                    cumOffset += emitArgPlacementForCall(dstReg, argReg, paramType, expr->isBuiltinCall);
+                    cumOffset += emitArgPlacementForCall(dstReg, argReg, paramType, expr->isBuiltinCall, expr->builtinAcceptsInlineArgs);
                 }
                 if (isTailCall && !expr->isBuiltinCall) {
                     emitOp(op_tail_call);
@@ -3577,7 +3577,7 @@ u16 CodeGen::genCall(CallExpr_* expr) {
                 Type* paramType = (i < concreteLT->argTypes_.size())
                                 ? concreteLT->argTypes_[i] : expr->args[i]->resolvedType;
                 u16 dstReg = (u16)(argBase + cumOffset);
-                cumOffset += emitArgPlacementForCall(dstReg, argReg, paramType, expr->isBuiltinCall);
+                cumOffset += emitArgPlacementForCall(dstReg, argReg, paramType, expr->isBuiltinCall, expr->builtinAcceptsInlineArgs);
             }
 
             if (isTailCall) {
@@ -3609,7 +3609,7 @@ u16 CodeGen::genCall(CallExpr_* expr) {
             Type* paramType = (funcType && i < funcType->argTypes_.size())
                             ? funcType->argTypes_[i] : expr->args[i]->resolvedType;
             u16 dstReg = (u16)(argBase + cumOffset);
-            cumOffset += emitArgPlacementForCall(dstReg, argReg, paramType, expr->isBuiltinCall);
+            cumOffset += emitArgPlacementForCall(dstReg, argReg, paramType, expr->isBuiltinCall, expr->builtinAcceptsInlineArgs);
         }
 
         // Coroutine lambda call
@@ -3710,7 +3710,7 @@ u16 CodeGen::genCall(CallExpr_* expr) {
             Type* paramType = (i < concreteLT->argTypes_.size())
                             ? concreteLT->argTypes_[i] : expr->args[i]->resolvedType;
             u16 dstReg = (u16)(argBase + cumOffset);
-            cumOffset += emitArgPlacementForCall(dstReg, argReg, paramType, expr->isBuiltinCall);
+            cumOffset += emitArgPlacementForCall(dstReg, argReg, paramType, expr->isBuiltinCall, expr->builtinAcceptsInlineArgs);
         }
 
         if (isTailCall) {
@@ -3744,7 +3744,7 @@ u16 CodeGen::genCall(CallExpr_* expr) {
             Type* paramType = (i < funcType->argTypes_.size())
                             ? funcType->argTypes_[i] : expr->args[i]->resolvedType;
             u16 dstReg = (u16)(argBase + cumOffset);
-            cumOffset += emitArgPlacementForCall(dstReg, argReg, paramType, expr->isBuiltinCall);
+            cumOffset += emitArgPlacementForCall(dstReg, argReg, paramType, expr->isBuiltinCall, expr->builtinAcceptsInlineArgs);
         }
 
         if (isTailCall) {
@@ -3783,7 +3783,7 @@ u16 CodeGen::genCall(CallExpr_* expr) {
                     Type* paramType = (i < funcType->argTypes_.size())
                                     ? funcType->argTypes_[i] : expr->args[i]->resolvedType;
                     u16 dstReg = (u16)(argBase + cumOffset);
-                    cumOffset += emitArgPlacementForCall(dstReg, argReg, paramType, expr->isBuiltinCall);
+                    cumOffset += emitArgPlacementForCall(dstReg, argReg, paramType, expr->isBuiltinCall, expr->builtinAcceptsInlineArgs);
                 }
 
                 if (isTailCall) {
@@ -3869,15 +3869,17 @@ u16 CodeGen::genCall(CallExpr_* expr) {
             argReg = emitBoxIfInline(argReg, targetType);
             placeSw = 1;
         }
-        // Phase 4g.2: builtins (op_call_primitive) receive Inline structs/
-        // tuples as a 1-Word boxed Obj* (Complex/Fraction stay multi-word
-        // per Phase 4f). printArgs and other multi-word-aware builtins
-        // walk the arg array using the same rule (see builtinSlotWords).
-        // Skip for yield / coro_resume / coro_yieldAll which have their
-        // own specialized lowering further down in this function.
+        // Phase 4g.2 / 4g.6: legacy builtins (op_call_primitive) receive Inline
+        // structs/tuples as a 1-Word boxed Obj*; Complex/Fraction stay multi-
+        // word per Phase 4f. Builtins migrated under Phase 4g.6 set
+        // FuncInfo::acceptsInlineArgs (propagated to expr->builtinAcceptsInline
+        // Args) and receive multi-word inline slots directly. Skip for yield /
+        // coro_resume / coro_yieldAll which have their own specialized
+        // lowering further down in this function.
         bool specialCoroOp = expr->isCoroYield || expr->isCoroResume
                           || expr->isCoroYieldAll;
-        if (!isVariadic && expr->isBuiltinCall && !specialCoroOp && targetType
+        if (!isVariadic && expr->isBuiltinCall && !expr->builtinAcceptsInlineArgs
+            && !specialCoroOp && targetType
             && targetType->repr_ == ts::Type::Repr::Inline
             && targetType != compiler_.complexType()
             && targetType != compiler_.fractionType()) {
@@ -4081,7 +4083,7 @@ u16 CodeGen::genCall(CallExpr_* expr) {
     // need a 2-word slot. Phase 4g.2: builtins return Inline structs/
     // tuples as a 1-Word boxed pointer; allocate a 1-word target reg and
     // unbox after the call.
-    bool builtinReturnsInlineComposite = expr->isBuiltinCall && expr->resolvedType
+    bool builtinReturnsInlineComposite = expr->isBuiltinCall && !expr->builtinAcceptsInlineArgs && expr->resolvedType
         && expr->resolvedType->repr_ == ts::Type::Repr::Inline
         && expr->resolvedType != compiler_.complexType()
         && expr->resolvedType != compiler_.fractionType();
@@ -4258,9 +4260,9 @@ u16 CodeGen::genAutoMapBinaryOp(BinaryOpExpr* expr) {
         // operand at its multi-word slot offset for non-builtin calls; for
         // builtins box Inline composite operands first.
         u16 argBase = nextReg_;
-        u32 lWords = emitArgPlacementForCall(argBase, leftElemReg, leftElemType, expr->isBuiltinCall);
+        u32 lWords = emitArgPlacementForCall(argBase, leftElemReg, leftElemType, expr->isBuiltinCall, expr->builtinAcceptsInlineArgs);
         u16 rDst = (u16)(argBase + lWords);
-        u32 rWords = emitArgPlacementForCall(rDst, rightElemReg, rightElemType, expr->isBuiltinCall);
+        u32 rWords = emitArgPlacementForCall(rDst, rightElemReg, rightElemType, expr->isBuiltinCall, expr->builtinAcceptsInlineArgs);
         u16 next = (u16)(rDst + rWords);
         if (nextReg_ < next) { nextReg_ = next; if (nextReg_ > maxReg_) maxReg_ = nextReg_; }
         bool builtinReturnsInline = expr->isBuiltinCall && needsBoxAuto(scalarResultType);
@@ -5244,7 +5246,7 @@ u16 CodeGen::genAutoMapCall(CallExpr_* expr) {
     // resolved result-array's element type.
     Type* returnT = funcInfo->returnType;
     if (!returnT && resultArrayType) returnT = resultArrayType->elemType_;
-    bool builtinReturnsInlineComposite = expr->isBuiltinCall && returnT
+    bool builtinReturnsInlineComposite = expr->isBuiltinCall && !expr->builtinAcceptsInlineArgs && returnT
         && returnT->repr_ == ts::Type::Repr::Inline
         && returnT != compiler_.complexType()
         && returnT != compiler_.fractionType();

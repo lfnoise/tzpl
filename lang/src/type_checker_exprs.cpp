@@ -690,7 +690,7 @@ Type* TypeChecker::inferBinaryOp(BinaryOpExpr* expr) {
                         inferFunctionReturnType(func->declNode, func);
                     }
                     expr->resolvedFuncGlobalIndex = (i32)func->globalIndex;
-                    expr->isBuiltinCall = func->isBuiltin;
+                    expr->isBuiltinCall = func->isBuiltin; expr->builtinAcceptsInlineArgs = func->acceptsInlineArgs;
                     Type* scalarResult = func->returnType ? func->returnType : compiler_.intType();
                     return wrapAutoMapResult(scalarResult, leftAM, rightAM, anyList);
                 }
@@ -1028,7 +1028,7 @@ Type* TypeChecker::inferBinaryOp(BinaryOpExpr* expr) {
                     }
                 }
                 expr->resolvedFuncGlobalIndex = (i32)func->globalIndex;
-                expr->isBuiltinCall = func->isBuiltin;
+                expr->isBuiltinCall = func->isBuiltin; expr->builtinAcceptsInlineArgs = func->acceptsInlineArgs;
                 return func->returnType;
             }
             // No overload matched — fall through to structural equality check
@@ -1093,7 +1093,7 @@ Type* TypeChecker::inferBinaryOp(BinaryOpExpr* expr) {
                         inferFunctionReturnType(func->declNode, func);
                     }
                     expr->resolvedFuncGlobalIndex = (i32)func->globalIndex;
-                    expr->isBuiltinCall = func->isBuiltin;
+                    expr->isBuiltinCall = func->isBuiltin; expr->builtinAcceptsInlineArgs = func->acceptsInlineArgs;
                     expr->leftAutoMap = leftAM;
                     expr->rightAutoMap = rightAM;
                     Type* scalarResult = func->returnType ? func->returnType : compiler_.intType();
@@ -1222,7 +1222,7 @@ Type* TypeChecker::inferUnaryOp(UnaryOpExpr* expr) {
                     }
                 }
                 expr->resolvedFuncGlobalIndex = (i32)func->globalIndex;
-                expr->isBuiltinCall = func->isBuiltin;
+                expr->isBuiltinCall = func->isBuiltin; expr->builtinAcceptsInlineArgs = func->acceptsInlineArgs;
                 return func->returnType;
             }
         }

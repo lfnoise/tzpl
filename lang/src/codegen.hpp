@@ -217,14 +217,20 @@ private:
         if (nextReg_ < next) { nextReg_ = next; if (nextReg_ > maxReg_) maxReg_ = nextReg_; }
     }
 
-    // Phase 4g.2: builtins (op_call_primitive) still expect 1-word Obj* args
-    // for inline composites, since most haven't been updated to walk multi-
-    // word inline payloads. Returns the number of words placed at targetReg
-    // so the caller can advance its cumulative arg offset correctly.
-    // Complex/Fraction stay multi-word -- their builtins were updated in
-    // Phase 4f.
-    u32 emitArgPlacementForCall(u16 targetReg, u16 argReg, Type* paramType, bool isBuiltin) {
-        bool boxNeeded = isBuiltin && paramType
+    // Phase 4g.2 / 4g.6: at builtin-call boundaries, inline-composite args were
+    // historically boxed to a 1-Word Obj* because most builtins read args as
+    // single Words. Phase 4g.6 migrates builtins incrementally: each builtin's
+    // FuncInfo sets `acceptsInlineArgs=true` once it has been updated to read
+    // multi-word slots, and the type checker propagates that to the call
+    // expression's `builtinAcceptsInlineArgs`. When that flag is set, callers
+    // pass `acceptsInline=true` here and we skip the box. Complex/Fraction
+    // stay multi-word -- their builtins were updated in Phase 4f.
+    //
+    // Returns the number of words placed at targetReg so the caller can
+    // advance its cumulative arg offset correctly.
+    u32 emitArgPlacementForCall(u16 targetReg, u16 argReg, Type* paramType,
+                                bool isBuiltin, bool acceptsInline = false) {
+        bool boxNeeded = isBuiltin && !acceptsInline && paramType
             && paramType->repr_ == ts::Type::Repr::Inline
             && paramType != compiler_.complexType()
             && paramType != compiler_.fractionType();
@@ -239,10 +245,14 @@ private:
         return typeSlotWords(paramType);
     }
 
-    // Symmetric to the above: builtin returning an inline composite gives
-    // back a 1-word boxed pointer; unbox into a multi-word slot.
-    u16 emitBuiltinResultUnbox(u16 resultReg, Type* returnType) {
-        if (returnType
+    // Symmetric to the above: legacy builtin returning an inline composite
+    // gives back a 1-word boxed pointer; unbox into a multi-word slot. When
+    // the builtin has been migrated (acceptsInline=true), the result already
+    // arrives as a multi-word slot, so skip the unbox.
+    u16 emitBuiltinResultUnbox(u16 resultReg, Type* returnType,
+                               bool acceptsInline = false) {
+        if (!acceptsInline
+            && returnType
             && returnType->repr_ == ts::Type::Repr::Inline
             && returnType != compiler_.complexType()
             && returnType != compiler_.fractionType()) {

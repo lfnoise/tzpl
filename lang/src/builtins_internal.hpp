@@ -60,7 +60,7 @@ inline void registerOne(Compiler& compiler, FuncMap& functions,
 
 inline void registerTemplate(Compiler& compiler, FuncMap& functions,
     const std::string& name, BuiltinTemplateResolver resolver,
-    bool rtSafe = true)
+    bool rtSafe = true, bool acceptsInlineArgs = false)
 {
     FuncInfo info{};
     info.isTemplate = true;
@@ -68,6 +68,7 @@ inline void registerTemplate(Compiler& compiler, FuncMap& functions,
     info.bodyChecked = true;
     info.isBuiltin = true;
     info.rtSafe = rtSafe;
+    info.acceptsInlineArgs = acceptsInlineArgs;
     functions[name].push_back(info);
 }
 

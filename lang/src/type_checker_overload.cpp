@@ -810,7 +810,7 @@ FuncInfo* TypeChecker::tryResolveTemplate(const std::string& name,
                         if (match) {
                             if (callExpr) {
                                 callExpr->resolvedFuncGlobalIndex = (i32)fi2.globalIndex;
-                                callExpr->isBuiltinCall = fi2.isBuiltin;
+                                callExpr->isBuiltinCall = fi2.isBuiltin; callExpr->builtinAcceptsInlineArgs = fi2.acceptsInlineArgs;
                             }
                             return &fi2;
                         }
@@ -822,7 +822,7 @@ FuncInfo* TypeChecker::tryResolveTemplate(const std::string& name,
                     if (auto* existing = tryResolveOverload(name, paramTypes)) {
                         if (callExpr) {
                             callExpr->resolvedFuncGlobalIndex = (i32)existing->globalIndex;
-                            callExpr->isBuiltinCall = existing->isBuiltin;
+                            callExpr->isBuiltinCall = existing->isBuiltin; callExpr->builtinAcceptsInlineArgs = existing->acceptsInlineArgs;
                             // Set variadic packing info
                             int fixedCount = (int)paramTypes.size() - 1;
                             callExpr->variadicPackStart = fixedCount;
@@ -851,6 +851,7 @@ FuncInfo* TypeChecker::tryResolveTemplate(const std::string& name,
                 monoPtr->isBuiltin = true;
                 monoPtr->bodyChecked = true;
                 monoPtr->rtSafe = fi.rtSafe;
+                monoPtr->acceptsInlineArgs = fi.acceptsInlineArgs;
                 monoPtr->builtinVariadicPacked = builtinVariadic;
 
                 FuncInfo* result = monoPtr.get();
@@ -860,6 +861,7 @@ FuncInfo* TypeChecker::tryResolveTemplate(const std::string& name,
                 if (callExpr) {
                     callExpr->resolvedFuncGlobalIndex = (i32)globalIdx;
                     callExpr->isBuiltinCall = true;
+                    callExpr->builtinAcceptsInlineArgs = fi.acceptsInlineArgs;
                     // Set variadic packing info for builtins that pack
                     if (builtinVariadic) {
                         int fixedCount = (int)paramTypes.size() - 1;
@@ -1034,12 +1036,14 @@ FuncInfo* TypeChecker::tryResolveModuleTemplate(
                 monoPtr->isBuiltin = true;
                 monoPtr->bodyChecked = true;
                 monoPtr->rtSafe = fi.rtSafe;
+                monoPtr->acceptsInlineArgs = fi.acceptsInlineArgs;
 
                 FuncInfo* result = monoPtr.get();
                 monoStorage_.push_back(std::move(monoPtr));
 
                 callExpr->resolvedFuncGlobalIndex = (i32)globalIdx;
                 callExpr->isBuiltinCall = true;
+                callExpr->builtinAcceptsInlineArgs = fi.acceptsInlineArgs;
                 return result;
             }
             continue;

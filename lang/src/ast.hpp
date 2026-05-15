@@ -233,6 +233,7 @@ struct BinaryOpExpr : Expr {
     ExprPtr right;
     i32 resolvedFuncGlobalIndex = -1;  // Set by type checker for operator overloads
     bool isBuiltinCall = false;        // Set by type checker: true for primitive built-in functions
+    bool builtinAcceptsInlineArgs = false;  // Phase 4g.6: builtin reads inline-composite args natively
     AutoMapArg leftAutoMap;            // Set by type checker: auto-map annotation for left operand
     AutoMapArg rightAutoMap;           // Set by type checker: auto-map annotation for right operand
 
@@ -246,6 +247,7 @@ struct UnaryOpExpr : Expr {
     ExprPtr operand;
     i32 resolvedFuncGlobalIndex = -1;  // Set by type checker for operator overloads
     bool isBuiltinCall = false;        // Set by type checker
+    bool builtinAcceptsInlineArgs = false;  // Phase 4g.6
 
     UnaryOpExpr(SourceRange l, Op o, ExprPtr expr)
         : Expr(UnaryOp, l), op(o), operand(std::move(expr)) {}
@@ -256,6 +258,7 @@ struct CallExpr_ : Expr {
     ExprList args;
     i32 resolvedFuncGlobalIndex = -1;  // Set by type checker for overload resolution
     bool isBuiltinCall = false;        // Set by type checker: true for primitive built-in functions
+    bool builtinAcceptsInlineArgs = false;  // Phase 4g.6: builtin reads inline-composite args natively
     bool isCoroCall = false;           // Set by type checker: true when calling a coro fn
     bool isCoroResume = false;         // Set by type checker: true for next() on Coroutine
     bool isCoroYield = false;          // Set by type checker: true for yield() in coro fn

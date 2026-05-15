@@ -1768,19 +1768,19 @@ static void printArgs(VM& vm, u16 argc, u16 argBase) {
     auto* tt = static_cast<TupleType*>(prim->type_);
     FILE* out = vm.printOutput();
 
-    // Phase 4f/4g.2: walk via cumulative offset.
-    //   * Complex / Fraction: 2-word inline scalar; format from registers
-    //   * Inline structs / tuples: arrive as 1-Word boxed pointer (Phase 4g.2
-    //     builtin calling convention); format the boxed Obj* via wordToString
-    //   * everything else: 1 Word; wordToString
+    // Phase 4g.6: walk via cumulative offset. Every Inline-classified type
+    // arrives as a multi-word slot now (acceptsInlineArgs=true on the
+    // print/println FuncInfo) -- Complex/Fraction, inline structs, inline
+    // tuples, inline enums all share the same multi-word path via
+    // slotToString. Non-Inline types (atoms, Obj*) are a single Word.
     u32 cumOffset = 0;
     for (u16 i = 0; i < argc; ++i) {
         if (i > 0) std::fputc(' ', out);
         Type* t = tt->fields_[i];
-        bool isInlineScalar = t && t->repr_ == Type::Repr::Inline
-            && (t == vm.complexType() || t == vm.fractionType());
-        u32 sw = isInlineScalar ? (u32)t->sizeWords_ : 1;
-        VMString s = isInlineScalar
+        bool inlineMulti = t && t->repr_ == Type::Repr::Inline;
+        u32 sw = inlineMulti ? (u32)t->sizeWords_ : 1u;
+        if (sw == 0) sw = 1;
+        VMString s = inlineMulti
             ? slotToString(vm, (u16)(argBase + cumOffset), t)
             : wordToString(vm.reg((u16)(argBase + cumOffset)), t);
         std::fprintf(out, "%.*s", (int)s.size(), s.data());
@@ -2178,8 +2178,10 @@ void registerBuiltinFunctions(Compiler& compiler,
     registerTemplate(compiler, functions, "fmt",          resolve_fmt);
 
     // --- print/println builtins (allowed on RT for debugging) ---
-    registerTemplate(compiler, functions, "print",        resolve_print);
-    registerTemplate(compiler, functions, "println",      resolve_println);
+    // Phase 4g.6: opted in to inline-composite arg passing (printArgs reads
+    // multi-word inline slots directly via slotToString).
+    registerTemplate(compiler, functions, "print",        resolve_print,   /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "println",      resolve_println, /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
 
     // --- disassemble builtin (not RT-safe: writes to stdout) ---
     registerTemplate(compiler, functions, "disassemble",  resolve_disassemble, /*rtSafe=*/false);

@@ -70,6 +70,7 @@ Type* TypeChecker::finalizeResolvedCall(CallExpr_* expr, FuncInfo* func,
     // Store resolved global index on the AST node
     expr->resolvedFuncGlobalIndex = (i32)func->globalIndex;
     expr->isBuiltinCall = func->isBuiltin;
+    expr->builtinAcceptsInlineArgs = func->acceptsInlineArgs;
 
     // Mark coroutine calls
     if (func->returnType && dynamic_cast<CoroutineType*>(func->returnType)) {
@@ -1092,7 +1093,7 @@ Type* TypeChecker::inferCall(CallExpr_* expr) {
                     }
                     if (resolved) {
                         expr->resolvedFuncGlobalIndex = (i32)resolved->globalIndex;
-                        expr->isBuiltinCall = resolved->isBuiltin;
+                        expr->isBuiltinCall = resolved->isBuiltin; expr->builtinAcceptsInlineArgs = resolved->acceptsInlineArgs;
                         // Mark coroutine calls
                         if (resolved->returnType && dynamic_cast<CoroutineType*>(resolved->returnType)) {
                             expr->isCoroCall = true;

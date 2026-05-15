@@ -78,6 +78,12 @@ struct FuncInfo {
     FnDeclNode* declNode = nullptr; // AST node for demand-driven inference of _ return types
     bool isBuiltin = false;     // true for primitive built-in functions (e.g. math)
     bool isForeign = false;     // true for host-registered foreign functions
+    // Phase 4g.6: true if this builtin reads inline-composite args directly as
+    // multi-word slots out of vm.reg(...), so the codegen should skip the
+    // box-at-builtin-boundary that emitArgPlacementForCall performs for legacy
+    // builtins. Default false until each builtin is migrated. Mirrors the per-
+    // expression flag on CallExpr_ / BinaryOpExpr / UnaryOpExpr.
+    bool acceptsInlineArgs = false;
 
     // Template function support
     bool isTemplate = false;
