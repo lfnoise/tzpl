@@ -1840,6 +1840,18 @@ static void builtin_hash_obj(VM& vm, u16 dst, u16, u16 argBase) {
     vm.reg(dst).i = (i64)hasher(vm.reg(argBase));
 }
 
+// Phase 4g.6: hash an inline composite arg directly out of its multi-word
+// register slot, no box round-trip. Looks up the arg's type from the
+// monomorphized Primitive (TupleType of paramTypes) so the walk knows the
+// layout. Used for inline tuples/structs/enums, Complex, and Fraction --
+// any Inline-classified type.
+static void builtin_hash_inline(VM& vm, u16 dst, u16, u16 argBase) {
+    auto* prim = static_cast<Primitive*>(vm.currentPrimitive());
+    auto* tt = static_cast<TupleType*>(prim->type_);
+    Type* t = tt->fields_[0];
+    vm.reg(dst).i = (i64)hashWords(&vm.reg(argBase), t);
+}
+
 static bool resolve_hash(Compiler& compiler, const std::vector<Type*>& args,
     std::vector<Type*>& pt, Type*& rt, CFun& cf) {
     if (args.size() != 1) return false;
@@ -1857,6 +1869,13 @@ static bool resolve_hash(Compiler& compiler, const std::vector<Type*>& args,
     }
     if (t && t->repr_ == Type::Repr::DiscriminantEnum) {
         cf = builtin_hash_int; return true;
+    }
+    // Phase 4g.6: Inline-classified types (Tuple/Struct/Enum + Complex/Fraction)
+    // hash via hashWords on a multi-word slot. The resolver flags this overload
+    // for native-inline arg passing via acceptsInlineArgs on the FuncInfo (see
+    // registration block below).
+    if (t && t->repr_ == Type::Repr::Inline) {
+        cf = builtin_hash_inline; return true;
     }
     if (t->isObjType()) {
         cf = builtin_hash_obj; return true;
@@ -2169,7 +2188,9 @@ void registerBuiltinFunctions(Compiler& compiler,
     registerTemplate(compiler, functions, "toArray",      resolve_toArray_set);
 
     // --- hash builtin ---
-    registerTemplate(compiler, functions, "hash",         resolve_hash);
+    // Phase 4g.6: hash resolves builtin_hash_inline for Inline-classified
+    // types and reads its arg directly out of a multi-word slot.
+    registerTemplate(compiler, functions, "hash",         resolve_hash, /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
 
     // --- toString builtin ---
     registerTemplate(compiler, functions, "toString",     resolve_toString);

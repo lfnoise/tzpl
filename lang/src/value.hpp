@@ -57,6 +57,13 @@ VMString slotToString(VM& vm, u16 startReg, Type* type);
 // (InlineRef, etc.) to format their contents in str().
 VMString wordsToString(Word const* base, Type* type);
 
+// Phase 4g.6: hash an inline composite payload by walking its layout. For
+// inline tuples/structs/enums each field is hashed recursively, with Obj*
+// fields delegating to WordHash. For atomic and Obj* types this falls
+// through to a single-Word WordHash. Used by builtin_hash for inline-
+// composite args (no box round-trip).
+size_t hashWords(Word const* base, Type* type);
+
 // Phase 4g.2: walk the layout of an Inline composite at `base` and retain
 // (or release, with `release_=true`) every embedded Obj* pointer field.
 // Recurses into nested Inline composite fields rather than treating them

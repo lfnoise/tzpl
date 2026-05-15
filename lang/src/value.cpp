@@ -608,6 +608,54 @@ static size_t hashCombine(size_t seed, size_t h) {
     return seed ^ (h + 0x9e3779b9 + (seed << 6) + (seed >> 2));
 }
 
+// Phase 4g.6: walk an inline composite payload at `base` and combine the
+// per-field hashes. Mirrors wordsToString's traversal; for atomic/Obj*
+// fields falls through to WordHash on a single Word.
+size_t hashWords(Word const* base, Type* type) {
+    if (!type) return 0;
+    if (type->repr_ != Type::Repr::Inline) {
+        return WordHash{type}(base[0]);
+    }
+    if (type == gCurrentVM->complexType()) {
+        return hashCombine(std::hash<f64>{}(base[0].f),
+                           std::hash<f64>{}(base[1].f));
+    }
+    if (type == gCurrentVM->fractionType()) {
+        return hashCombine(std::hash<i64>{}(base[0].i),
+                           std::hash<i64>{}(base[1].i));
+    }
+    if (auto* tt = dynamic_cast<TupleType*>(type)) {
+        size_t h = tt->fields_.size();
+        for (size_t i = 0; i < tt->fields_.size(); ++i) {
+            auto const& f = tt->layout_[i];
+            h = hashCombine(h, hashWords(base + f.wordOffset, f.type));
+        }
+        return h;
+    }
+    if (auto* st = dynamic_cast<StructType*>(type)) {
+        size_t h = std::hash<const void*>{}(st->name_);
+        for (size_t i = 0; i < st->fields_.size(); ++i) {
+            auto const& f = st->layout_[i];
+            h = hashCombine(h, hashWords(base + f.wordOffset, f.type));
+        }
+        return h;
+    }
+    if (auto* en = dynamic_cast<EnumType*>(type)) {
+        int which = (int)base[0].i;
+        size_t h = std::hash<int>{}(which);
+        if (which >= 0 && (size_t)which < en->layout_.size()) {
+            auto const& f = en->layout_[which];
+            bool isVoid = f.type && !f.type->isObjType()
+                       && (dynamic_cast<VoidType*>(f.type) != nullptr);
+            if (f.type && !isVoid && f.sizeWords > 0) {
+                h = hashCombine(h, hashWords(base + f.wordOffset, f.type));
+            }
+        }
+        return h;
+    }
+    return WordHash{type}(base[0]);
+}
+
 size_t WordHash::operator()(Word w) const {
     if (type && type->repr_ == Type::Repr::DiscriminantEnum) {
         return std::hash<i64>{}(w.i);
