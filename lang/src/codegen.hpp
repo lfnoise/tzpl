@@ -256,6 +256,109 @@ private:
         return (t && t->sizeWords_ > 0) ? t->sizeWords_ : 1;
     }
 
+    // Phase 4g.5: emit a global store. For inline multi-word composites this
+    // emits an inline op that mem-copies the payload into the global's
+    // sizeWords_ slots and ARC-walks the layout. `init=true` skips releasing
+    // the old payload (declaration site). For everything else, falls back to
+    // the existing 1-word store path (and boxes Complex/Fraction first).
+    void emitGlobalStore(u16 srcReg, u32 globalIdx, Type* type, bool init) {
+        if (isInlineMultiword(type)
+            && type != compiler_.complexType()
+            && type != compiler_.fractionType()) {
+            emitOp(init ? op_init_global_inline : op_store_global_inline);
+            emitRegs(srcReg);
+            emitInt((i64)globalIdx);
+            emitPtr(type);
+            return;
+        }
+        u16 storeReg = (type && type->repr_ == ts::Type::Repr::Inline)
+                     ? emitBoxIfInline(srcReg, type) : srcReg;
+        emitOp(storesObjPtr(type)
+               ? (init ? op_init_global_obj : op_store_global_obj)
+               : op_store_global);
+        emitRegs(storeReg);
+        emitInt((i64)globalIdx);
+    }
+
+    // Phase 4g.5: emit a global load. For inline multi-word composites this
+    // emits an inline op that mem-copies sizeWords_ slots into a fresh multi-
+    // word reg slot and returns its base. For everything else, falls back to
+    // op_load_global (and unboxes Complex/Fraction).
+    u16 emitGlobalLoad(u32 globalIdx, Type* type) {
+        if (isInlineMultiword(type)
+            && type != compiler_.complexType()
+            && type != compiler_.fractionType()) {
+            u16 dst = allocSlot(type);
+            emitOp(op_load_global_inline);
+            emitRegs(dst);
+            emitInt((i64)globalIdx);
+            emitPtr(type);
+            return dst;
+        }
+        u16 dst = allocReg();
+        emitOp(op_load_global);
+        emitRegs(dst);
+        emitInt((i64)globalIdx);
+        return emitUnboxIfInline(dst, type);
+    }
+
+    // Phase 4g.5: emit a dynvar store. Mirrors emitGlobalStore but with
+    // a third mode (dynscope = save current + set new) for in-function
+    // declarations. For inline multi-word composites, routes through the new
+    // inline ops; Complex/Fraction keep going through the boxed 1-word path.
+    enum DynStoreMode { DynInit, DynStore, DynScopePush };
+    void emitDynStore(u16 srcReg, u32 dynIdx, Type* type, DynStoreMode mode) {
+        if (isInlineMultiword(type)
+            && type != compiler_.complexType()
+            && type != compiler_.fractionType()) {
+            switch (mode) {
+                case DynInit:      emitOp(op_init_dynamic_inline);  break;
+                case DynStore:     emitOp(op_store_dynamic_inline); break;
+                case DynScopePush: emitOp(op_dynscope_push_inline); break;
+            }
+            emitRegs(srcReg);
+            emitInt((i64)dynIdx);
+            emitPtr(type);
+            return;
+        }
+        u16 storeReg = (type && type->repr_ == ts::Type::Repr::Inline)
+                     ? emitBoxIfInline(srcReg, type) : srcReg;
+        switch (mode) {
+            case DynInit:
+                emitOp(storesObjPtr(type) ? op_init_dynamic_obj : op_store_dynamic);
+                break;
+            case DynStore:
+                emitOp(storesObjPtr(type) ? op_store_dynamic_obj : op_store_dynamic);
+                break;
+            case DynScopePush:
+                emitOp(op_dynscope_push);
+                break;
+        }
+        emitRegs(storeReg);
+        emitInt((i64)dynIdx);
+    }
+
+    // Phase 4g.5: emit a dynvar load. For inline multi-word composites,
+    // allocates a fresh multi-word slot. For everything else, falls back to
+    // op_load_dynamic (and unboxes Complex/Fraction).
+    u16 emitDynLoad(u32 dynIdx, Type* type) {
+        if (isInlineMultiword(type)
+            && type != compiler_.complexType()
+            && type != compiler_.fractionType()) {
+            u16 dst = allocSlot(type);
+            emitOp(op_load_dynamic_inline);
+            emitRegs(dst);
+            emitInt((i64)dynIdx);
+            emitPtr(type);
+            return dst;
+        }
+        u16 dst = allocReg();
+        emitOp(op_load_dynamic);
+        emitRegs(dst);
+        emitInt((i64)dynIdx);
+        return emitUnboxIfInline(dst, type);
+    }
+
     // True iff t is an Inline value type that occupies more than one Word
     // (Phase 4f: Complex and Fraction; later: tuples/structs/enums).
     static bool isInlineMultiword(Type const* t) {

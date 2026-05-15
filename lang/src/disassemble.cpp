@@ -68,6 +68,9 @@ static const std::unordered_map<Operation, OpInfo>& opInfoMap() {
         { op_store_global,      { "STORE_GLOBAL",      3, OpFmt::Regs_Int,   1 } },
         { op_store_global_obj,  { "STORE_GLOBAL_OBJ",  3, OpFmt::Regs_Int,   1 } },
         { op_init_global_obj,   { "INIT_GLOBAL_OBJ",   3, OpFmt::Regs_Int,   1 } },
+        { op_load_global_inline,  { "LOAD_GLOBAL_I",  4, OpFmt::Regs_Int_Ptr, 1 } },
+        { op_store_global_inline, { "STORE_GLOBAL_I", 4, OpFmt::Regs_Int_Ptr, 1 } },
+        { op_init_global_inline,  { "INIT_GLOBAL_I",  4, OpFmt::Regs_Int_Ptr, 1 } },
 
         // --- Integer Arithmetic ---
         { op_add_int,           { "ADD_INT",           2, OpFmt::Regs, 3 } },
@@ -327,6 +330,10 @@ static const std::unordered_map<Operation, OpInfo>& opInfoMap() {
         { op_store_dynamic_obj, { "STORE_DYN_OBJ",     3, OpFmt::Regs_Int, 1 } },
         { op_init_dynamic_obj,  { "INIT_DYN_OBJ",      3, OpFmt::Regs_Int, 1 } },
         { op_dynscope_push,     { "DYNSCOPE_PUSH",     3, OpFmt::Regs_Int, 1 } },
+        { op_load_dynamic_inline,  { "LOAD_DYN_I",       4, OpFmt::Regs_Int_Ptr, 1 } },
+        { op_store_dynamic_inline, { "STORE_DYN_I",      4, OpFmt::Regs_Int_Ptr, 1 } },
+        { op_init_dynamic_inline,  { "INIT_DYN_I",       4, OpFmt::Regs_Int_Ptr, 1 } },
+        { op_dynscope_push_inline, { "DYNSCOPE_PUSH_I",  4, OpFmt::Regs_Int_Ptr, 1 } },
 
         // --- Any ---
         { op_make_any,          { "MAKE_ANY",          3, OpFmt::Regs_Ptr, 3 } },

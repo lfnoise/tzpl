@@ -158,6 +158,9 @@ VM::VM(usize poolSize, TypeUniverse& typeUniverse, const VMTarget& target)
     , dynStack_(nullptr)
     , dynStackTop_(0)
     , maxDynStack_(256)
+    , dynStackPayload_(nullptr)
+    , dynStackPayloadTop_(0)
+    , maxDynStackPayload_(1024)
     , halted_(false)
     , typeUniverse_(typeUniverse)
     , currentPrimitive_(nullptr)
@@ -191,6 +194,11 @@ VM::VM(usize poolSize, TypeUniverse& typeUniverse, const VMTarget& target)
     dynStack_ = static_cast<DynSaveEntry*>(allocator_.allocate(maxDynStack_ * sizeof(DynSaveEntry)));
     if (!dynStack_) throw std::bad_alloc();
 
+    // Phase 4g.5: dynStackPayload_ is lazily allocated on first inline-
+    // composite dynvar save -- many programs never need it, and the
+    // compile-time evalVM_ in particular has a tiny 64KB pool that would
+    // not fit a pre-allocated payload buffer.
+
     // Types are already created by TypeUniverse — nothing to do here.
 
     // Initialize currentRegs_ to point at base of register file
@@ -216,6 +224,59 @@ VM::~VM() {
     if (regs_) allocator_.deallocate(regs_);
     if (frames_) allocator_.deallocate(frames_);
     if (dynStack_) allocator_.deallocate(dynStack_);
+    if (dynStackPayload_) allocator_.deallocate(dynStackPayload_);
+}
+
+// Phase 4g.5: implementations for inline-composite dynvar save/restore.
+void VM::dynScopePushInline(u32 varIdx, Word const* newPayload, Type* type) {
+    if (dynStackTop_ >= maxDynStack_) {
+        throw std::runtime_error("Dynamic scope stack overflow");
+    }
+    u32 n = type ? (u32)type->sizeWords_ : 1u;
+    if (n == 0) n = 1;
+    // Lazy first-use allocation of the side payload buffer.
+    if (!dynStackPayload_) {
+        dynStackPayload_ = static_cast<Word*>(
+            allocator_.allocate(maxDynStackPayload_ * sizeof(Word)));
+        if (!dynStackPayload_) throw std::bad_alloc();
+    }
+    if (dynStackPayloadTop_ + n > maxDynStackPayload_) {
+        throw std::runtime_error("Dynamic scope payload buffer overflow");
+    }
+    auto& entry = dynStack_[dynStackTop_++];
+    entry.varIndex = varIdx;
+    entry.sizeWords = n;
+    entry.type = type;
+    entry.savedValue.i = (i64)dynStackPayloadTop_;
+    entry.isObj = false;
+    // Transfer OLD payload (with its Obj* ownership) into the save buffer.
+    Word* save = dynStackPayload_ + dynStackPayloadTop_;
+    for (u32 i = 0; i < n; ++i) save[i] = dynVars_[varIdx + i];
+    dynStackPayloadTop_ += n;
+    // Overwrite dynvar with NEW payload; retain its Obj* fields since the
+    // source registers will be reclaimed by the caller after this op.
+    for (u32 i = 0; i < n; ++i) dynVars_[varIdx + i] = newPayload[i];
+    inlineWalkPointers(&dynVars_[varIdx], type, /*release_=*/false);
+}
+
+void VM::dynScopeRestore(u32 mark) {
+    while (dynStackTop_ > mark) {
+        --dynStackTop_;
+        auto& entry = dynStack_[dynStackTop_];
+        if (entry.sizeWords > 1 && entry.type) {
+            // Inline-composite: release current dynvar's Obj* fields (they are
+            // being replaced and we are NOT transferring them anywhere), then
+            // copy the saved payload back (transferring its Obj* ownership).
+            inlineWalkPointers(&dynVars_[entry.varIndex], entry.type, /*release_=*/true);
+            u32 n = entry.sizeWords;
+            u32 off = (u32)entry.savedValue.i;
+            Word* save = dynStackPayload_ + off;
+            for (u32 i = 0; i < n; ++i) dynVars_[entry.varIndex + i] = save[i];
+            dynStackPayloadTop_ = off; // pop payload words (saves are LIFO)
+        } else {
+            dynVars_[entry.varIndex] = entry.savedValue;
+        }
+    }
 }
 
 void VM::makeCurrent() {

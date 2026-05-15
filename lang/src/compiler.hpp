@@ -176,6 +176,10 @@ public:
     // --- Global variables (compiler-owned, deferred until install) ---
     // These operate on the current VMTarget's layout (set by makeCurrent or compile).
     u32 addGlobal(bool isObj = false);
+    // Phase 4g.5: allocate sizeWords consecutive slots for an inline-composite
+    // global so its payload is stored inline (no per-store box). Returns the
+    // first slot index. Continuation slots get isObj=false.
+    u32 addInlineGlobal(u32 sizeWords);
     void setGlobalIsObj(u32 idx, bool isObj);
     bool isGlobalObj(u32 idx) const;
     Word& global(u32 idx);

@@ -132,9 +132,16 @@ void TypeChecker::declareVar(const std::string& name, Type* type, bool isMutable
         // Global scope — reuse existing slot when shadowing (REPL re-declaration)
         auto it = globalVars_.find(name);
         u32 globalIdx;
+        // Phase 4g.5: inline-composite globals occupy sizeWords_ consecutive
+        // slots so their payload is stored inline; everything else is one slot.
+        bool inlineMulti = type
+            && type->repr_ == Type::Repr::Inline
+            && type->sizeWords_ > 1;
         if (it != globalVars_.end()) {
             globalIdx = it->second.globalIndex;
             compiler_.setGlobalIsObj(globalIdx, type ? type->isObjType() : true);
+        } else if (inlineMulti) {
+            globalIdx = compiler_.addInlineGlobal((u32)type->sizeWords_);
         } else {
             globalIdx = compiler_.addGlobal(type ? type->isObjType() : true);
         }

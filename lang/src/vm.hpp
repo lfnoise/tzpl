@@ -133,11 +133,18 @@ union Code {
     }
 };
 
-// Dynamic scope save entry: saved value before rebinding
+// Dynamic scope save entry: saved value before rebinding.
+//
+// Phase 4g.5: inline-composite dynvars occupy sizeWords_ consecutive slots.
+// For those, sizeWords > 1, type is non-null, and savedValue.i is a Word
+// offset into dynStackPayload_ where the saved payload starts. For 1-word
+// dynvars, sizeWords = 1, type may be null, and savedValue holds the Word.
 struct DynSaveEntry {
-    u32  varIndex;    // which dynamic variable was rebound
-    Word savedValue;  // value before rebinding
-    bool isObj;       // whether savedValue is an Obj* (for GC)
+    u32   varIndex;    // first slot index of the rebound dynvar
+    u32   sizeWords;   // 1 for single-word; >1 for inline composite
+    Type* type;        // layout for ARC walking on restore (multi-word only)
+    Word  savedValue;  // 1-word: saved value. Multi-word: payloadOffset.
+    bool  isObj;       // whether savedValue is an Obj* (1-word case only)
 };
 
 // Call frame for register-based VM
@@ -220,6 +227,13 @@ private:
     DynSaveEntry* dynStack_;
     u32           dynStackTop_;
     u32           maxDynStack_;
+
+    // Phase 4g.5: side buffer for saved payloads of inline-composite dynvars.
+    // Each multi-word DynSaveEntry holds a Word offset into this buffer; the
+    // next sizeWords Words there are the saved payload.
+    Word* dynStackPayload_;
+    u32   dynStackPayloadTop_;
+    u32   maxDynStackPayload_;
 
     // Flag set by HALT instruction
     bool halted_;
@@ -407,6 +421,19 @@ public:
         return idx;
     }
 
+    // Phase 4g.5: allocate sizeWords consecutive slots for an inline-composite
+    // dynvar. Continuation slots get isObj=false (per-Word isObj is unused for
+    // multi-word dynvars; ARC walks the layout instead).
+    u32 addInlineDynVar(u32 sizeWords) {
+        if (sizeWords == 0) sizeWords = 1;
+        u32 idx = (u32)dynVars_.size();
+        for (u32 i = 0; i < sizeWords; ++i) {
+            dynVars_.push_back(Word());
+            dynVarIsObj_.push_back(0);
+        }
+        return idx;
+    }
+
     void setDynVarIsObj(u32 idx, bool isObj) { dynVarIsObj_[idx] = isObj ? 1 : 0; }
 
     Word& dynVar(u32 idx) { return dynVars_[idx]; }
@@ -420,19 +447,22 @@ public:
         }
         auto& entry = dynStack_[dynStackTop_++];
         entry.varIndex = varIdx;
+        entry.sizeWords = 1;
+        entry.type = nullptr;
         entry.savedValue = dynVars_[varIdx];
         entry.isObj = dynVarIsObj_[varIdx];
         dynVars_[varIdx] = newValue;
     }
 
+    // Phase 4g.5: save the current inline-composite payload onto the side
+    // payload buffer, then overwrite the dynvar with the new payload read from
+    // `newPayload[0..sizeWords)`. ARC: Obj* fields in the OLD payload are
+    // transferred to the save buffer (no retain/release); Obj* fields in the
+    // NEW payload are retained.
+    void dynScopePushInline(u32 varIdx, Word const* newPayload, Type* type);
+
     // Restore dynamic variables back to a saved mark
-    void dynScopeRestore(u32 mark) {
-        while (dynStackTop_ > mark) {
-            --dynStackTop_;
-            auto& entry = dynStack_[dynStackTop_];
-            dynVars_[entry.varIndex] = entry.savedValue;
-        }
-    }
+    void dynScopeRestore(u32 mark);
 
     u32 dynStackTop() const { return dynStackTop_; }
 

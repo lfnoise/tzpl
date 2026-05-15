@@ -116,6 +116,17 @@ u32 Compiler::addGlobal(bool isObj) {
     return idx;
 }
 
+u32 Compiler::addInlineGlobal(u32 sizeWords) {
+    assert(currentTarget_ && "No current target set (call makeCurrent first)");
+    if (sizeWords == 0) sizeWords = 1;
+    u32 idx = (u32)currentTarget_->allGlobals.size();
+    for (u32 i = 0; i < sizeWords; ++i) {
+        currentTarget_->allGlobals.push_back({Word(), false});
+    }
+    currentTarget_->globalCount = (u32)currentTarget_->allGlobals.size();
+    return idx;
+}
+
 void Compiler::setGlobalIsObj(u32 idx, bool isObj) {
     assert(currentTarget_ && "No current target set (call makeCurrent first)");
     assert(idx < currentTarget_->allGlobals.size() && "Global index out of range");
@@ -173,7 +184,14 @@ bool Compiler::registerDynVar(const std::string& name, Type* type, u32& outIndex
         outIndex = it->second.dynIndex;
         return false;
     }
-    outIndex = nextDynIndex_++;
+    outIndex = nextDynIndex_;
+    // Phase 4g.5: inline-composite dynvars occupy sizeWords_ consecutive slots
+    // so their payload is stored inline; everything else is one slot.
+    u32 sizeWords = 1;
+    if (type && type->repr_ == Type::Repr::Inline && type->sizeWords_ > 1) {
+        sizeWords = (u32)type->sizeWords_;
+    }
+    nextDynIndex_ += sizeWords;
     dynamicVars_[name] = DynVarInfo{type, outIndex};
     return true;
 }

@@ -157,6 +157,49 @@ void op_init_global_obj(VM& vm, Code* pc) {
     DISPATCH(3);
 }
 
+// --- Inline-composite global ops (Phase 4g.5) ---
+// The global occupies sizeWords_ consecutive Word slots starting at K. Ops
+// mem-copy the payload between regs and globals_, and walk the layout for
+// ARC on writes (release embedded Obj* in old payload, retain in new).
+
+// LOAD_GLOBAL_I Rd, K (4 words: op, regs{dst}, global_index, Type*)
+void op_load_global_inline(VM& vm, Code* pc) {
+    u16 dst = pc[1].regs[0];
+    u32 idx = (u32)pc[2].i;
+    auto* type = static_cast<Type*>(pc[3].p);
+    u32 n = type ? (u32)type->sizeWords_ : 1u;
+    if (n == 0) n = 1;
+    for (u32 i = 0; i < n; ++i) vm.reg((u16)(dst + i)) = vm.global(idx + i);
+    DISPATCH(4);
+}
+
+// STORE_GLOBAL_I Ra, K (4 words: op, regs{src}, global_index, Type*)
+// Release embedded Obj* in the old payload, copy new payload in, retain new.
+void op_store_global_inline(VM& vm, Code* pc) {
+    u16 src = pc[1].regs[0];
+    u32 idx = (u32)pc[2].i;
+    auto* type = static_cast<Type*>(pc[3].p);
+    u32 n = type ? (u32)type->sizeWords_ : 1u;
+    if (n == 0) n = 1;
+    inlineWalkPointers(&vm.global(idx), type, /*release_=*/true);
+    for (u32 i = 0; i < n; ++i) vm.global(idx + i) = vm.reg((u16)(src + i));
+    inlineWalkPointers(&vm.global(idx), type, /*release_=*/false);
+    DISPATCH(4);
+}
+
+// INIT_GLOBAL_I Ra, K (4 words: op, regs{src}, global_index, Type*)
+// Like STORE_GLOBAL_I but no release of old payload (declaration site).
+void op_init_global_inline(VM& vm, Code* pc) {
+    u16 src = pc[1].regs[0];
+    u32 idx = (u32)pc[2].i;
+    auto* type = static_cast<Type*>(pc[3].p);
+    u32 n = type ? (u32)type->sizeWords_ : 1u;
+    if (n == 0) n = 1;
+    for (u32 i = 0; i < n; ++i) vm.global(idx + i) = vm.reg((u16)(src + i));
+    inlineWalkPointers(&vm.global(idx), type, /*release_=*/false);
+    DISPATCH(4);
+}
+
 // --- Integer Arithmetic ---
 
 // ADD_INT Rd, Ra, Rb  (2 words: op, regs)
@@ -3612,6 +3655,57 @@ void op_dynscope_push(VM& vm, Code* pc) {
     u32 idx = (u32)pc[2].i;
     vm.dynScopePush(idx, vm.reg(src));
     DISPATCH(3);
+}
+
+// --- Inline-composite dynvar ops (Phase 4g.5) ---
+// Each occupies sizeWords_ consecutive dynVars_ slots. ARC: writes walk the
+// type layout via inlineWalkPointers to release old Obj* fields and retain
+// new ones. DYNSCOPE_PUSH_I additionally saves the old payload onto the
+// side payload buffer for restoration on function return.
+
+// LOAD_DYNAMIC_I Rd, K (4 words: op, regs{dst}, dynvar_index, Type*)
+void op_load_dynamic_inline(VM& vm, Code* pc) {
+    u16 dst = pc[1].regs[0];
+    u32 idx = (u32)pc[2].i;
+    auto* type = static_cast<Type*>(pc[3].p);
+    u32 n = type ? (u32)type->sizeWords_ : 1u;
+    if (n == 0) n = 1;
+    for (u32 i = 0; i < n; ++i) vm.reg((u16)(dst + i)) = vm.dynVar(idx + i);
+    DISPATCH(4);
+}
+
+// STORE_DYNAMIC_I Ra, K (4 words: op, regs{src}, dynvar_index, Type*)
+void op_store_dynamic_inline(VM& vm, Code* pc) {
+    u16 src = pc[1].regs[0];
+    u32 idx = (u32)pc[2].i;
+    auto* type = static_cast<Type*>(pc[3].p);
+    u32 n = type ? (u32)type->sizeWords_ : 1u;
+    if (n == 0) n = 1;
+    inlineWalkPointers(&vm.dynVar(idx), type, /*release_=*/true);
+    for (u32 i = 0; i < n; ++i) vm.dynVar(idx + i) = vm.reg((u16)(src + i));
+    inlineWalkPointers(&vm.dynVar(idx), type, /*release_=*/false);
+    DISPATCH(4);
+}
+
+// INIT_DYNAMIC_I Ra, K (4 words: op, regs{src}, dynvar_index, Type*)
+void op_init_dynamic_inline(VM& vm, Code* pc) {
+    u16 src = pc[1].regs[0];
+    u32 idx = (u32)pc[2].i;
+    auto* type = static_cast<Type*>(pc[3].p);
+    u32 n = type ? (u32)type->sizeWords_ : 1u;
+    if (n == 0) n = 1;
+    for (u32 i = 0; i < n; ++i) vm.dynVar(idx + i) = vm.reg((u16)(src + i));
+    inlineWalkPointers(&vm.dynVar(idx), type, /*release_=*/false);
+    DISPATCH(4);
+}
+
+// DYNSCOPE_PUSH_I Ra, K (4 words: op, regs{src}, dynvar_index, Type*)
+void op_dynscope_push_inline(VM& vm, Code* pc) {
+    u16 src = pc[1].regs[0];
+    u32 idx = (u32)pc[2].i;
+    auto* type = static_cast<Type*>(pc[3].p);
+    vm.dynScopePushInline(idx, &vm.reg(src), type);
+    DISPATCH(4);
 }
 
 } // namespace ts

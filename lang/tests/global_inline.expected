@@ -1,0 +1,12 @@
+(1, 2, 3)
+Point { x: 10, y: 20 }
+Point { x: 100, y: 200 }
+Named { id: 1, name: alpha }
+Named { id: 2, name: beta }
+Named { id: 3, name: gamma }
+Shape.circle(1.5)
+Shape.rect(3, 4)
+Shape.nothing
+Shape.circle(2.71)
+Point { x: 100, y: 200 }
+Point { x: 7, y: 8 }

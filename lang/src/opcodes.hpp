@@ -43,6 +43,13 @@ void op_store_global(VM& vm, Code* pc);       // STORE_GLOBAL Ra, K (3 words, K 
 void op_store_global_obj(VM& vm, Code* pc);   // STORE_GLOBAL_OBJ Ra, K (3 words, retains new, releases old)
 void op_init_global_obj(VM& vm, Code* pc);    // INIT_GLOBAL_OBJ Ra, K (3 words, retains new only)
 
+// Phase 4g.5: inline-composite globals hold their payload inline across
+// sizeWords_ consecutive globals_ slots. Type* on the instruction stream
+// tells the handler the layout (for ARC) and the word count (for copy).
+void op_load_global_inline(VM& vm, Code* pc);  // LOAD_GLOBAL_I  Rd, K (4 words: op, regs, K, Type*)
+void op_store_global_inline(VM& vm, Code* pc); // STORE_GLOBAL_I Ra, K (4 words: op, regs, K, Type*) -- release old, retain new
+void op_init_global_inline(VM& vm, Code* pc);  // INIT_GLOBAL_I  Ra, K (4 words: op, regs, K, Type*) -- retain new only
+
 // --- Integer Arithmetic ---
 void op_add_int(VM& vm, Code* pc);            // ADD_INT Rd, Ra, Rb (2 words)
 void op_sub_int(VM& vm, Code* pc);            // SUB_INT Rd, Ra, Rb (2 words)
@@ -328,6 +335,14 @@ void op_store_dynamic(VM& vm, Code* pc);      // STORE_DYNAMIC Ra, K (3 words, K
 void op_store_dynamic_obj(VM& vm, Code* pc);  // STORE_DYNAMIC_OBJ Ra, K (3 words, retains new, releases old)
 void op_init_dynamic_obj(VM& vm, Code* pc);   // INIT_DYNAMIC_OBJ Ra, K (3 words, retains new only)
 void op_dynscope_push(VM& vm, Code* pc);      // DYNSCOPE_PUSH Ra, K (3 words: save current, set new)
+
+// Phase 4g.5: inline-composite dynvars hold their payload inline across
+// sizeWords_ consecutive dynVars_ slots. Type* on the instruction stream
+// gives the layout for ARC walking and the word count for copy.
+void op_load_dynamic_inline(VM& vm, Code* pc);  // LOAD_DYNAMIC_I  Rd, K (4 words: op, regs, K, Type*)
+void op_store_dynamic_inline(VM& vm, Code* pc); // STORE_DYNAMIC_I Ra, K (4 words: op, regs, K, Type*) -- release old, retain new
+void op_init_dynamic_inline(VM& vm, Code* pc);  // INIT_DYNAMIC_I  Ra, K (4 words: op, regs, K, Type*) -- retain new only
+void op_dynscope_push_inline(VM& vm, Code* pc); // DYNSCOPE_PUSH_I Ra, K (4 words: op, regs, K, Type*) -- save N words, set N words
 
 // --- Any ---
 void op_make_any(VM& vm, Code* pc);          // MAKE_ANY Rd, Rsrc, isObj (3 words: op, regs{dst, src, isObj}, Type*)

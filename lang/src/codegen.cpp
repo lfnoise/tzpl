@@ -649,13 +649,7 @@ void CodeGen::genLetDecl(LetDeclNode* decl) {
     // Check if this is a global (no local scopes)
     auto it = typeChecker_.globalVars().find(decl->name);
     if (it != typeChecker_.globalVars().end() && localScopes_.size() <= 1) {
-        // Phase 4f/4g.2: inline value types must be boxed before single-Word global storage.
-        u16 storeReg = (decl->resolvedType && decl->resolvedType->repr_ == ts::Type::Repr::Inline)
-                     ? emitBoxIfInline(reg, decl->resolvedType)
-                     : reg;
-        emitOp(storesObjPtr(decl->resolvedType) ? op_init_global_obj : op_store_global);
-        emitRegs(storeReg);
-        emitInt(it->second.globalIndex);
+        emitGlobalStore(reg, it->second.globalIndex, decl->resolvedType, /*init=*/true);
     }
 
     declareLocal(decl->name, reg, decl->resolvedType, false);
@@ -667,22 +661,8 @@ void CodeGen::genVarDecl(VarDeclNode* decl) {
         u16 reg = genExpr(static_cast<Expr*>(decl->init.get()));
         auto it = typeChecker_.dynamicVars().find(decl->name);
         u32 dynIdx = it->second.dynIndex;
-
-        // Phase 4f/4g.2: dynvar slot is a single Word; box inline values first.
-        u16 storeReg = (decl->resolvedType && decl->resolvedType->repr_ == ts::Type::Repr::Inline)
-                     ? emitBoxIfInline(reg, decl->resolvedType) : reg;
-
-        if (inFunctionBody_) {
-            // Inside a function: save old value, set new (restored on function return)
-            emitOp(op_dynscope_push);
-            emitRegs(storeReg);
-            emitInt(dynIdx);
-        } else {
-            // At global scope: just set the initial value
-            emitOp(storesObjPtr(decl->resolvedType) ? op_init_dynamic_obj : op_store_dynamic);
-            emitRegs(storeReg);
-            emitInt(dynIdx);
-        }
+        emitDynStore(reg, dynIdx, decl->resolvedType,
+                     inFunctionBody_ ? DynScopePush : DynInit);
         return;
     }
 
@@ -712,12 +692,7 @@ void CodeGen::genVarDecl(VarDeclNode* decl) {
 
     auto it = typeChecker_.globalVars().find(decl->name);
     if (it != typeChecker_.globalVars().end() && localScopes_.size() <= 1) {
-        u16 storeReg = (decl->resolvedType && decl->resolvedType->repr_ == ts::Type::Repr::Inline)
-                     ? emitBoxIfInline(reg, decl->resolvedType)
-                     : reg;
-        emitOp(storesObjPtr(decl->resolvedType) ? op_init_global_obj : op_store_global);
-        emitRegs(storeReg);
-        emitInt(it->second.globalIndex);
+        emitGlobalStore(reg, it->second.globalIndex, decl->resolvedType, /*init=*/true);
     }
 
     declareLocal(decl->name, reg, decl->resolvedType, true);
@@ -736,9 +711,7 @@ void CodeGen::genConstDecl(ConstDeclNode* decl) {
     // Check if this is a global (no local scopes, e.g. REPL top level)
     auto it = typeChecker_.globalVars().find(decl->name);
     if (it != typeChecker_.globalVars().end() && localScopes_.size() <= 1) {
-        emitOp(storesObjPtr(decl->resolvedType) ? op_init_global_obj : op_store_global);
-        emitRegs(reg);
-        emitInt(it->second.globalIndex);
+        emitGlobalStore(reg, it->second.globalIndex, decl->resolvedType, /*init=*/true);
     }
 
     declareLocal(decl->name, reg, decl->resolvedType, false);
@@ -1708,12 +1681,7 @@ void CodeGen::genSwitchStmt(SwitchStmtNode* stmt) {
 void CodeGen::emitGlobalStoreIfNeeded(const std::string& name, u16 reg) {
     auto it = typeChecker_.globalVars().find(name);
     if (it != typeChecker_.globalVars().end() && localScopes_.size() <= 1) {
-        // Phase 4f/4g.2: inline value types must be boxed before single-Word global storage.
-        u16 storeReg = (it->second.type && it->second.type->repr_ == ts::Type::Repr::Inline)
-                     ? emitBoxIfInline(reg, it->second.type) : reg;
-        emitOp(storesObjPtr(it->second.type) ? op_init_global_obj : op_store_global);
-        emitRegs(storeReg);
-        emitInt(it->second.globalIndex);
+        emitGlobalStore(reg, it->second.globalIndex, it->second.type, /*init=*/true);
     }
 }
 
@@ -2269,12 +2237,7 @@ void CodeGen::genAssignStmt(AssignStmtNode* stmt) {
     // Dynamic scope variable assignment: `name = expr;
     if (stmt->isDynamic) {
         auto it = typeChecker_.dynamicVars().find(stmt->target);
-        // Phase 4f: dynvar slot is a single Word; box inline value types.
-        u16 storeReg = isInlineMultiword(it->second.type)
-                     ? emitBoxIfInline(valReg, it->second.type) : valReg;
-        emitOp(storesObjPtr(it->second.type) ? op_store_dynamic_obj : op_store_dynamic);
-        emitRegs(storeReg);
-        emitInt(it->second.dynIndex);
+        emitDynStore(valReg, it->second.dynIndex, it->second.type, DynStore);
         return;
     }
 
@@ -2291,11 +2254,7 @@ void CodeGen::genAssignStmt(AssignStmtNode* stmt) {
     // Check global
     auto it = typeChecker_.globalVars().find(stmt->target);
     if (it != typeChecker_.globalVars().end()) {
-        u16 storeReg = isInlineMultiword(it->second.type)
-                     ? emitBoxIfInline(valReg, it->second.type) : valReg;
-        emitOp(storesObjPtr(it->second.type) ? op_store_global_obj : op_store_global);
-        emitRegs(storeReg);
-        emitInt(it->second.globalIndex);
+        emitGlobalStore(valReg, it->second.globalIndex, it->second.type, /*init=*/false);
         return;
     }
 
@@ -2332,12 +2291,7 @@ u16 CodeGen::genExpr(Expr* expr) {
         case ASTNode::DynamicVar: {
             auto* dv = static_cast<DynamicVarExpr*>(expr);
             auto it = typeChecker_.dynamicVars().find(dv->name);
-            u16 dst = allocReg();
-            emitOp(op_load_dynamic);
-            emitRegs(dst);
-            emitInt(it->second.dynIndex);
-            // Phase 4f: dynvar slot stores boxed inline values; unbox.
-            return emitUnboxIfInline(dst, it->second.type);
+            return emitDynLoad(it->second.dynIndex, it->second.type);
         }
         case ASTNode::BinaryOp:        return genBinaryOp(static_cast<BinaryOpExpr*>(expr));
         case ASTNode::UnaryOp:         return genUnaryOp(static_cast<UnaryOpExpr*>(expr));
@@ -2942,12 +2896,7 @@ u16 CodeGen::genIdentifier(IdentifierExpr* expr) {
     // Check global variable
     auto it = typeChecker_.globalVars().find(expr->name);
     if (it != typeChecker_.globalVars().end()) {
-        u16 dst = allocReg();
-        emitOp(op_load_global);
-        emitRegs(dst);
-        emitInt(it->second.globalIndex);
-        // Phase 4f: globals store inline value types boxed; unbox into 2-word slot.
-        return emitUnboxIfInline(dst, it->second.type);
+        return emitGlobalLoad(it->second.globalIndex, it->second.type);
     }
 
     // Check function reference (set by type checker for function-as-value)

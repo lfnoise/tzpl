@@ -1,0 +1,22 @@
+(1, 2, 3)
+(10, 20, 30)
+Point { x: 0, y: 0 }
+Point { x: 42, y: 99 }
+Named { id: 0, name: init }
+Named { id: 2, name: third }
+Shape.circle(1.0)
+Shape.rect(3, 4)
+Shape.nothing
+Point { x: 42, y: 99 }
+Point { x: 77, y: 88 }
+Point { x: 100, y: 200 }
+Point { x: 42, y: 99 }
+Point { x: 1, y: 1 }
+Point { x: 1, y: 1 }
+Point { x: 77, y: 88 }
+Point { x: 100, y: 200 }
+Point { x: 1, y: 1 }
+Point { x: 42, y: 99 }
+Named { id: 10, name: inner }
+Named { id: 11, name: inner2 }
+Named { id: 2, name: third }
