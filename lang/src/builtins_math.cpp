@@ -754,7 +754,7 @@ static void builtin_toList_range_int(VM& vm, u16 dst, u16, u16 argBase) {
     }
 
     // Create a lazy list node with a RangeListGen
-    auto* node = new ListNode(listType);
+    auto* node = ListNode::create(listType);
     auto* gen = new RangeListGen(vm.typeType());
     gen->current_ = start;
     gen->end_ = end;
@@ -838,7 +838,7 @@ static void builtin_toList_range_fraction(VM& vm, u16 dst, u16, u16 argBase) {
     }
 
     // Create a lazy list node with a FractionRangeListGen
-    auto* node = new ListNode(listType);
+    auto* node = ListNode::create(listType);
     auto* gen = new FractionRangeListGen(vm.typeType());
     gen->current_ = startFrac;
     gen->end_ = endFrac;

@@ -186,14 +186,34 @@ VMString InlineArray::str() const {
     return s;
 }
 
-// ListNode constructor
-ListNode::ListNode(Type* type)
+// ListNode constructor (Phase 4g.9: head storage spans head_..headTail_[stride-1])
+ListNode::ListNode(Type* type, u32 stride)
     : Obj(type)
-    , head_()
     , tail_(nullptr)
     , generator_(nullptr)
+    , stride_(stride)
+    , head_()
 {
+    // Zero the trailing payload words (if any) so releaseChildren never
+    // walks an uninitialised Obj*.
+    for (u32 i = 1; i < stride_; ++i) (&head_)[i].i = 0;
     registerNewObj(this);
+}
+
+// ListNode factory: sizes the allocation to fit `stride` head words.
+ListNode* ListNode::create(Type* type) {
+    auto* lt = dynamic_cast<ListType*>(type);
+    Type* et = lt ? lt->elemType_ : nullptr;
+    u32 stride = 1;
+    if (et && et->repr_ == Type::Repr::Inline
+        && et != gCurrentVM->complexType()
+        && et != gCurrentVM->fractionType()) {
+        stride = et->sizeWords_;
+        if (stride == 0) stride = 1;
+    }
+    usize size = sizeof(ListNode) + (stride > 1 ? (stride - 1) * sizeof(Word) : 0);
+    void* mem = GCObj::operator new(size);
+    return new(mem) ListNode(type, stride);
 }
 
 // ListNode::force() - invoke generator to fill head/tail
@@ -331,7 +351,11 @@ VMString ListNode::str() const {
 
         if (!first) s += ", ";
         first = false;
-        s += wordToString(node->head_, elemType);
+        if (node->stride_ > 1) {
+            s += wordsToString(node->headData(), elemType);
+        } else {
+            s += wordToString(node->head_, elemType);
+        }
         ++count;
         node = node->tail_;
     }
@@ -1414,6 +1438,18 @@ void unboxInlineDeepTo(VM& vm, Type* type, Obj* obj, Word* dst) {
                 }
             }
         }
+    }
+}
+
+void copyListHead(ListNode* dst, ListNode const* src, Type* elemType) {
+    if (dst->stride_ > 1) {
+        Word* dh = dst->headData();
+        Word const* sh = src->headData();
+        for (u32 i = 0; i < dst->stride_; ++i) dh[i] = sh[i];
+        inlineWalkPointers(dh, elemType, /*release_=*/false);
+    } else {
+        dst->head_ = src->head_;
+        if (storesObjPtr(elemType) && dst->head_.o) dst->head_.o->retain();
     }
 }
 

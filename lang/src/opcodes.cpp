@@ -1218,7 +1218,7 @@ void op_concat_list(VM& vm, Code* pc) {
     auto* nodeB = static_cast<ListNode*>(vm.reg(b).o);
     if (!nodeA) { vm.reg(dst).o = nodeB; DISPATCH(3); }
     if (!nodeB) { vm.reg(dst).o = nodeA; DISPATCH(3); }
-    auto* node = new ListNode(listType);
+    auto* node = ListNode::create(listType);
     auto* gen = new CatListGen(vm.typeType());
     gen->first_ = nodeA; gen->second_ = nodeB;
     gen->inSecond_ = false; gen->listType_ = listType;
@@ -1714,7 +1714,7 @@ static Word dispatchListBinop(VM& vm, Op op, Word a, Word b,
     else opKind = BinopListGen::Div;
 
     // Create lazy node with generator
-    auto* node = new ListNode(resultLT);
+    auto* node = ListNode::create(resultLT);
     auto* gen = new BinopListGen(gCurrentVM->typeType());
     gen->opKind_ = opKind;
     gen->resultListType_ = resultLT;
@@ -1885,7 +1885,7 @@ static Word dispatchListUnaryOp(VM& vm, Op op, Word a, Type* aType, ListType* re
     else opKind = UnaryListGen::Neg;
 
     // Create lazy node with generator
-    auto* node = new ListNode(resultLT);
+    auto* node = ListNode::create(resultLT);
     auto* gen = new UnaryListGen(gCurrentVM->typeType());
     gen->opKind_ = opKind;
     gen->source_ = srcA;
@@ -2374,9 +2374,17 @@ void BinopListGen::generate(VM& vm, ListNode* owner) {
         leftType = leftElemType_;
     }
 
-    // Compute the head value
-    owner->head_ = dispatchBinopByKind(vm, opKind_, leftVal, rightVal,
-                                        leftType, rightType, resultElemType_);
+    // Compute the head value. Phase 4g.9: when the result element is an
+    // Inline composite and the node has multi-word stride, unbox the
+    // dispatcher's freshly-boxed Tuple* into the flex head storage.
+    Word headResult = dispatchBinopByKind(vm, opKind_, leftVal, rightVal,
+                                          leftType, rightType, resultElemType_);
+    if (owner->stride_ > 1) {
+        unboxInlineDeepTo(vm, resultElemType_, headResult.o, owner->headData());
+    } else {
+        owner->head_ = headResult;
+        if (storesObjPtr(resultElemType_) && owner->head_.o) owner->head_.o->retain();
+    }
 
     // Compute the tail: advance list source(s)
     ListNode* nextLeft = leftList_ ? leftList_->tail_ : nullptr;
@@ -2393,12 +2401,10 @@ void BinopListGen::generate(VM& vm, ListNode* owner) {
         atEnd = (nextRight == nullptr);
     }
 
-    if (storesObjPtr(resultElemType_) && owner->head_.o) owner->head_.o->retain();
-
     if (atEnd) {
         owner->tail_ = nullptr;
     } else {
-        auto* tailNode = new ListNode(resultListType_);
+        auto* tailNode = ListNode::create(resultListType_);
         // Retain new, release old for field mutations
         if (nextLeft) nextLeft->retain();
         if (leftList_) leftList_->release();
@@ -2419,28 +2425,36 @@ void UnaryListGen::generate(VM& vm, ListNode* owner) {
     source_->force(vm);
 
     // Compute head via the appropriate unary operation
+    Word headResult;
     switch (opKind_) {
         case Neg:
-            owner->head_ = dispatchUnaryOp(vm, OpNeg{}, source_->head_,
-                                            sourceElemType_, resultElemType_);
+            headResult = dispatchUnaryOp(vm, OpNeg{}, source_->head_,
+                                         sourceElemType_, resultElemType_);
             break;
         case Not:
-            owner->head_ = dispatchUnaryOp(vm, OpNot{}, source_->head_,
-                                            sourceElemType_, resultElemType_);
+            headResult = dispatchUnaryOp(vm, OpNot{}, source_->head_,
+                                         sourceElemType_, resultElemType_);
             break;
         case BitNot:
-            owner->head_ = dispatchUnaryOp(vm, OpBitNot{}, source_->head_,
-                                            sourceElemType_, resultElemType_);
+            headResult = dispatchUnaryOp(vm, OpBitNot{}, source_->head_,
+                                         sourceElemType_, resultElemType_);
             break;
     }
-    if (storesObjPtr(resultElemType_) && owner->head_.o) owner->head_.o->retain();
+    // Phase 4g.9: store the freshly-computed head into the node, unboxing
+    // into multi-word head storage when the element type is Inline composite.
+    if (owner->stride_ > 1) {
+        unboxInlineDeepTo(vm, resultElemType_, headResult.o, owner->headData());
+    } else {
+        owner->head_ = headResult;
+        if (storesObjPtr(resultElemType_) && owner->head_.o) owner->head_.o->retain();
+    }
 
     // Create lazy tail
     ListNode* nextSource = source_->tail_;
     if (nextSource == nullptr) {
         owner->tail_ = nullptr;
     } else {
-        auto* tailNode = new ListNode(resultListType_);
+        auto* tailNode = ListNode::create(resultListType_);
         if (nextSource) nextSource->retain();
         if (source_) source_->release();
         source_ = nextSource;
@@ -2483,7 +2497,7 @@ void RangeListGen::generate(VM& vm, ListNode* owner) {
     if (nextPastEnd) {
         owner->tail_ = nullptr;
     } else {
-        auto* tailNode = new ListNode(listType_);
+        auto* tailNode = ListNode::create(listType_);
         current_ = next;
         tailNode->generator_ = this;
         reinterpret_cast<GCObj*>(this)->retain();
@@ -2528,7 +2542,7 @@ void FractionRangeListGen::generate(VM& vm, ListNode* owner) {
     if (nextPastEnd) {
         owner->tail_ = nullptr;
     } else {
-        auto* tailNode = new ListNode(listType_);
+        auto* tailNode = ListNode::create(listType_);
         auto* oldCurrent = current_;
         current_ = new Fraction(next);
         current_->retain();
@@ -3008,33 +3022,57 @@ void op_array_get_dyn(VM& vm, Code* pc) {
 // --- List ---
 
 // CONS Rd, Rhead, Rtail (3 words: op, regs{dst, head, tail}, ListType*)
+//
+// Phase 4g.9: for Inline composite element types, head spans stride_
+// consecutive words at vm.reg(head)..vm.reg(head+stride-1). Copy them into
+// the node's flex-array head storage and retain embedded Obj* fields via
+// inlineWalkPointers. Other element types use the legacy single-Word path.
 void op_cons(VM& vm, Code* pc) {
     u16 dst = pc[1].regs[0], head = pc[1].regs[1], tail = pc[1].regs[2];
     auto* listType = static_cast<ListType*>(pc[2].p);
+    Type* et = listType->elemType_;
 
-    auto* node = new ListNode(listType);
-    node->head_ = vm.reg(head);
+    auto* node = ListNode::create(listType);
     node->tail_ = static_cast<ListNode*>(vm.reg(tail).o);
-    // Retain stored Obj* fields
-    if (storesObjPtr(listType->elemType_) && node->head_.o) node->head_.o->retain();
+    if (node->stride_ > 1) {
+        Word* dstHead = node->headData();
+        for (u32 i = 0; i < node->stride_; ++i) dstHead[i] = vm.reg((u16)(head + i));
+        inlineWalkPointers(dstHead, et, /*release_=*/false);
+    } else {
+        node->head_ = vm.reg(head);
+        if (storesObjPtr(et) && node->head_.o) node->head_.o->retain();
+    }
     if (node->tail_) node->tail_->retain();
     vm.reg(dst).o = node;
     DISPATCH(3);
 }
 
 // MAKE_LIST Rd, firstSrc, count (3 words: op, regs{dst, firstSrc, count}, ListType*)
-// Builds list from N consecutive registers (cons from right to left)
+// Builds list from N consecutive elements (cons from right to left).
+// Phase 4g.9: per-element stride may exceed 1 for Inline composites.
 void op_make_list(VM& vm, Code* pc) {
     u16 dst = pc[1].regs[0], firstSrc = pc[1].regs[1], count = pc[1].regs[2];
     auto* listType = static_cast<ListType*>(pc[2].p);
+    Type* et = listType->elemType_;
+    bool elemInline = et && et->repr_ == Type::Repr::Inline
+        && et != gCurrentVM->complexType()
+        && et != gCurrentVM->fractionType();
+    u32 stride = elemInline ? et->sizeWords_ : 1;
+    bool elemIsObj = storesObjPtr(et);
 
-    bool elemIsObj = storesObjPtr(listType->elemType_);
     ListNode* result = nullptr;
     for (int i = (int)count - 1; i >= 0; --i) {
-        auto* node = new ListNode(listType);
-        node->head_ = vm.reg(firstSrc + (u16)i);
+        auto* node = ListNode::create(listType);
+        u16 src = (u16)(firstSrc + (u16)i * stride);
+        if (stride > 1) {
+            Word* dstHead = node->headData();
+            for (u32 k = 0; k < stride; ++k) dstHead[k] = vm.reg((u16)(src + k));
+            inlineWalkPointers(dstHead, et, /*release_=*/false);
+        } else {
+            node->head_ = vm.reg(src);
+            if (elemIsObj && node->head_.o) node->head_.o->retain();
+        }
         node->tail_ = result;
-        if (elemIsObj && node->head_.o) node->head_.o->retain();
         if (node->tail_) node->tail_->retain();
         result = node;
     }
@@ -3042,12 +3080,21 @@ void op_make_list(VM& vm, Code* pc) {
     DISPATCH(3);
 }
 
-// LIST_HEAD Rd, Ra (2 words)
+// LIST_HEAD Rd, Ra (2 words). Phase 4g.9: copies stride_ words for Inline
+// composite element types; legacy single-Word read for the rest.
 void op_list_head(VM& vm, Code* pc) {
     u16 dst = pc[1].regs[0], src = pc[1].regs[1];
     auto* node = static_cast<ListNode*>(vm.reg(src).o);
     node->force(vm);
-    vm.reg(dst) = node->head_;
+    if (node->stride_ > 1) {
+        Word const* h = node->headData();
+        for (u32 i = 0; i < node->stride_; ++i) vm.reg((u16)(dst + i)) = h[i];
+        // Retain embedded Obj* fields so the caller owns the copy.
+        auto* lt = static_cast<ListType*>(node->type_);
+        inlineWalkPointers(&vm.reg(dst), lt->elemType_, /*release_=*/false);
+    } else {
+        vm.reg(dst) = node->head_;
+    }
     DISPATCH(2);
 }
 
@@ -3381,7 +3428,7 @@ void op_make_lazy_automap(VM& vm, Code* pc) {
         DISPATCH(3);
     }
 
-    auto* node = new ListNode(info->resultListType);
+    auto* node = ListNode::create(info->resultListType);
     auto* gen  = new AutoMapListGen(info->resultListType);
     gen->source_       = srcList;
     gen->info_         = info;

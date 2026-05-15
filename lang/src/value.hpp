@@ -69,6 +69,12 @@ size_t hashWords(Word const* base, Type* type);
 // (atomic, Obj*) it delegates to WordEqual on a single Word.
 bool wordsEqual(Word const* a, Word const* b, Type* type);
 
+// Phase 4g.9: list-head helper. Copies one node's head into another's
+// head storage and retains the appropriate ARC references. Handles both
+// 1-word (Word head_) and multi-word (stride > 1, flex array) layouts.
+class ListNode;
+void copyListHead(ListNode* dst, ListNode const* src, Type* elemType);
+
 // Phase 4g.2: walk the layout of an Inline composite at `base` and retain
 // (or release, with `release_=true`) every embedded Obj* pointer field.
 // Recurses into nested Inline composite fields rather than treating them
@@ -389,13 +395,27 @@ public:
 class ListGenerator;
 
 // List node (singly-linked immutable list, optionally lazy)
+//
+// Phase 4g.9: head storage is now a contiguous Word* region starting at
+// head_. For 1-word element types head_ is the value (legacy access still
+// works). For Inline composite elements the payload spans head_ plus the
+// flex array headTail_ (stride_ words total), allocated via ListNode::
+// create() which sizes the object to sizeof(ListNode)+(stride-1)*sizeof(Word).
 class ListNode : public Obj {
 public:
-    Word head_;
     ListNode* tail_;        // nullptr = end of list
     ListGenerator* generator_;  // non-null = lazy, not yet forced
+    u32 stride_;            // elemType_->sizeWords_ at construction time
+    Word head_;             // word 0 of the head (always present)
+    Word headTail_[];       // words 1..stride_-1 for Inline composite heads
 
-    ListNode(Type* type);
+    // Factory: allocates with the correct trailing space for elemType's
+    // sizeWords_. Use this in place of `new ListNode(...)`.
+    static ListNode* create(Type* type);
+
+    // Pointer-base accessors for the multi-word head payload.
+    Word*       headData()       { return &head_; }
+    Word const* headData() const { return &head_; }
 
     // Force lazy evaluation: if generator_ is set, call it to fill head_/tail_
     void force(VM& vm);
@@ -407,10 +427,20 @@ public:
             reinterpret_cast<GCObj*>(generator_)->release();
         } else {
             auto* lt = static_cast<ListType*>(type_);
-            if (storesObjPtr(lt->elemType_) && head_.o) head_.o->release();
+            Type* et = lt->elemType_;
+            if (et && et->repr_ == Type::Repr::Inline
+                && et != gCurrentVM->complexType()
+                && et != gCurrentVM->fractionType()) {
+                inlineWalkPointers(headData(), et, /*release_=*/true);
+            } else if (storesObjPtr(et) && head_.o) {
+                head_.o->release();
+            }
             if (tail_) tail_->release();
         }
     }
+
+private:
+    ListNode(Type* type, u32 stride);
 };
 
 // Abstract base class for lazy list generators

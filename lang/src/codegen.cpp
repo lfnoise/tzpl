@@ -2430,27 +2430,37 @@ u16 CodeGen::genNilLiteral() {
 
 u16 CodeGen::genListLiteral(ListLiteralExpr* expr) {
     auto* listType = dynamic_cast<ListType*>(expr->resolvedType);
+    Type* elemType = listType->elemType_;
+    // Phase 4g.9: ListNode now stores Inline composite heads natively.
+    // Complex/Fraction stay boxed at the list-head boundary (1-word slot)
+    // since their dedicated ops handle the conversion; match runtime stride.
+    bool elemInline = elemType
+        && elemType->repr_ == ts::Type::Repr::Inline
+        && elemType != compiler_.complexType()
+        && elemType != compiler_.fractionType();
+    u32 stride = elemInline ? typeSlotWords(elemType) : 1;
     u16 firstSrc = nextReg_;
-    for (auto& elem : expr->elements) {
+    for (size_t i = 0; i < expr->elements.size(); ++i) {
+        auto& elem = expr->elements[i];
         u16 elemReg = genExpr(static_cast<Expr*>(elem.get()));
-        // Promote element to list element type if needed
-        Type* elemType = elem->resolvedType;
-        u16 promoted = ensureType(elemReg, elemType, listType->elemType_);
-        // Phase 4f: ListNode head_ is a single Word; box inline value types.
-        if (isInlineMultiword(listType->elemType_)) {
-            promoted = emitBoxIfInline(promoted, listType->elemType_);
+        u16 promoted = ensureType(elemReg, elem->resolvedType, elemType);
+        if (!elemInline && elemType
+            && elemType->repr_ == ts::Type::Repr::Inline) {
+            // Complex/Fraction: box into single-Word slot at the boundary.
+            promoted = emitBoxIfInline(promoted, elemType);
         }
-        // Ensure in consecutive registers starting at firstSrc
-        u16 expectedReg = firstSrc + (u16)(&elem - &expr->elements[0]);
-        if (promoted != expectedReg) {
+        u16 expectedReg = (u16)(firstSrc + (u16)i * stride);
+        if (elemInline) {
+            emitArgPlacement(expectedReg, promoted, elemType);
+        } else if (promoted != expectedReg) {
             emitOp(op_mov);
             emitRegs(expectedReg, promoted);
         }
     }
     u16 count = (u16)expr->elements.size();
-    // Ensure nextReg_ is past the element registers
-    if (nextReg_ < firstSrc + count) {
-        nextReg_ = firstSrc + count;
+    u16 endReg = (u16)(firstSrc + count * stride);
+    if (nextReg_ < endReg) {
+        nextReg_ = endReg;
         if (nextReg_ > maxReg_) maxReg_ = nextReg_;
     }
     u16 dst = allocReg();
@@ -3229,11 +3239,17 @@ u16 CodeGen::genBinaryOp(BinaryOpExpr* expr) {
 
         case BinaryOpExpr::Cons: {
             auto* listT = dynamic_cast<ListType*>(resultType);
+            Type* et = listT->elemType_;
             // Promote head to list element type if needed.
-            leftReg = ensureType(leftReg, leftType, listT->elemType_);
-            // Phase 4f: ListNode head_ is a single Word; box inline values.
-            if (isInlineMultiword(listT->elemType_)) {
-                leftReg = emitBoxIfInline(leftReg, listT->elemType_);
+            leftReg = ensureType(leftReg, leftType, et);
+            // Phase 4g.9: ListNode stores Inline composite heads natively
+            // (op_cons reads stride words). Complex/Fraction stay boxed at
+            // the head boundary (1-word slot); box first.
+            bool inlineMW = et && et->repr_ == ts::Type::Repr::Inline
+                && et != compiler_.complexType()
+                && et != compiler_.fractionType();
+            if (!inlineMW && et && et->repr_ == ts::Type::Repr::Inline) {
+                leftReg = emitBoxIfInline(leftReg, et);
             }
             emitOp(op_cons);
             emitRegs(dst, leftReg, rightReg);
@@ -8698,21 +8714,11 @@ u16 CodeGen::genAutoMapFieldList(FieldExpr_* expr) {
     emitRegs(nilCheckReg, curReg);
     u32 exitJump = emitJump(op_jump_if_true, nilCheckReg);
 
-    // Extract head (struct or tuple). Lists store the head as a 1-Word
-    // boxed pointer for Inline composite elements (list migration pending).
-    u16 headReg = allocReg();
+    // Extract head. Phase 4g.9: op_list_head copies stride words directly
+    // into a slot sized for elemType, including Inline composite heads.
+    u16 headReg = allocSlot(elemType);
     emitOp(op_list_head);
     emitRegs(headReg, curReg);
-
-    // For Inline composite elements, unbox head into a multi-word slot so
-    // emitFieldGet's inline-parent path works.
-    Type* parentT = elemType;
-    if (parentT && parentT->repr_ == ts::Type::Repr::Inline
-        && parentT != compiler_.complexType()
-        && parentT != compiler_.fractionType()
-        && (dynamic_cast<StructType*>(parentT) || dynamic_cast<TupleType*>(parentT))) {
-        headReg = emitUnboxIfInline(headReg, parentT);
-    }
 
     // Extract field from head
     u16 fieldReg = 0;
@@ -8876,20 +8882,13 @@ u16 CodeGen::genAutoMapFieldDeep(FieldExpr_* expr, int depth) {
             emitRegs(loop.nilCheckReg, loop.curReg);
             loop.exitJump = emitJump(op_jump_if_true, loop.nilCheckReg);
 
-            // Extract head. The list still stores Inline composite elements
-            // as boxed pointers (list migration pending); unbox so subsequent
-            // field-get / sub-array indexing can read multi-word slots.
-            u16 headReg = allocReg();
-            emitOp(op_list_head);
-            emitRegs(headReg, loop.curReg);
+            // Extract head. Phase 4g.9: op_list_head now copies stride words
+            // directly into the destination; reserve a slot sized to elemType.
             auto* curListT = dynamic_cast<ListType*>(levels[d].containerType);
             Type* peeled = curListT ? curListT->elemType_ : nullptr;
-            if (peeled && peeled->repr_ == ts::Type::Repr::Inline
-                && peeled != compiler_.complexType()
-                && peeled != compiler_.fractionType()
-                && (dynamic_cast<StructType*>(peeled) || dynamic_cast<TupleType*>(peeled))) {
-                headReg = emitUnboxIfInline(headReg, peeled);
-            }
+            u16 headReg = allocSlot(peeled);
+            emitOp(op_list_head);
+            emitRegs(headReg, loop.curReg);
             currentObjReg = headReg;
         }
     }

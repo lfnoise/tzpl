@@ -202,7 +202,7 @@ void builtin_pick_array(VM& vm, u16 dst, u16, u16 ab) {
 // urands() -> List<Float>: infinite lazy list of uniform [0, 1) floats
 static void builtin_urands_list(VM& vm, u16 dst, u16, u16) {
     auto* lt = vm.listType(vm.floatType());
-    auto* node = new ListNode(lt);
+    auto* node = ListNode::create(lt);
     auto* gen = new UrandsListGen(vm.typeType());
     gen->listType_ = lt;
     node->generator_ = gen;
@@ -226,7 +226,7 @@ static void builtin_urands_array(VM& vm, u16 dst, u16, u16 ab) {
 // brands() -> List<Float>: infinite lazy list of bipolar [-1, 1) floats
 static void builtin_brands_list(VM& vm, u16 dst, u16, u16) {
     auto* lt = vm.listType(vm.floatType());
-    auto* node = new ListNode(lt);
+    auto* node = ListNode::create(lt);
     auto* gen = new BrandsListGen(vm.typeType());
     gen->listType_ = lt;
     node->generator_ = gen;
@@ -250,7 +250,7 @@ static void builtin_brands_array(VM& vm, u16 dst, u16, u16 ab) {
 // irands(lo, hi) -> List<Int>: infinite lazy list of uniform random ints [lo, hi]
 static void builtin_irands_list(VM& vm, u16 dst, u16, u16 ab) {
     auto* lt = vm.listType(vm.intType());
-    auto* node = new ListNode(lt);
+    auto* node = ListNode::create(lt);
     auto* gen = new IrandsListGen(vm.typeType());
     gen->lo_ = vm.reg(ab).i;
     gen->hi_ = vm.reg(ab+1).i;
@@ -281,7 +281,7 @@ static void builtin_irands_array(VM& vm, u16 dst, u16, u16 ab) {
 // xrands(lo, hi) -> List<Float>: infinite lazy list of exponentially distributed floats [lo, hi)
 static void builtin_xrands_list(VM& vm, u16 dst, u16, u16 ab) {
     auto* lt = vm.listType(vm.floatType());
-    auto* node = new ListNode(lt);
+    auto* node = ListNode::create(lt);
     auto* gen = new XrandsListGen(vm.typeType());
     gen->lo_ = vm.reg(ab).f;
     gen->hi_ = vm.reg(ab+1).f;
@@ -317,7 +317,7 @@ static void builtin_rand(VM& vm, u16 dst, u16, u16 ab) {
 // rands(lo, hi) -> List<Float>: infinite lazy list of uniform floats [lo, hi)
 static void builtin_rands_list(VM& vm, u16 dst, u16, u16 ab) {
     auto* lt = vm.listType(vm.floatType());
-    auto* node = new ListNode(lt);
+    auto* node = ListNode::create(lt);
     auto* gen = new RandsListGen(vm.typeType());
     gen->lo_ = vm.reg(ab).f;
     gen->hi_ = vm.reg(ab+1).f;
@@ -347,7 +347,7 @@ void builtin_picks_list(VM& vm, u16 dst, u16, u16 ab) {
     auto* arr = vm.reg(ab).o;
     auto* at = static_cast<ArrayType*>(arr->type_);
     auto* lt = vm.listType(at->elemType_);
-    auto* node = new ListNode(lt);
+    auto* node = ListNode::create(lt);
     auto* gen = new PicksListGen(vm.typeType());
     gen->array_ = arr;
     gen->elemType_ = at->elemType_;
