@@ -1641,6 +1641,21 @@ static Word dispatchTupleBinop(VM& vm, Op op, Word a, Word b,
         Type* bet = bTT ? bTT->fields_[i] : bType;
         result->v[i] = dispatchBinop(vm, op, ae, be, aet, bet, resultTT->fields_[i]);
     }
+    // Phase 4g.5: retain Obj* fields. dispatchBinop may have returned freshly-
+    // allocated Tuples/Structs/etc. registered to the auto-release pool; without
+    // an extra retain here, the parent's reference depends on the pool's. Pool
+    // drain is FIFO (parent first since it registered first) but processN pops
+    // LIFO, so the child would be deleted before the parent's releaseChildren
+    // releases it -- use-after-free at VM teardown. Heap Tuple stores 1 Word
+    // per field; index v[] by field index, not by layout_'s wordOffset (which
+    // describes inline storage and may exceed numFields_ for inline-composite
+    // field types).
+    for (u32 i = 0; i < (u32)resultTT->fields_.size(); ++i) {
+        Type* ft = resultTT->fields_[i];
+        if (storesObjPtr(ft) && result->v[i].o) {
+            result->v[i].o->retain();
+        }
+    }
     return Word(static_cast<Obj*>(result));
 }
 
@@ -1809,6 +1824,16 @@ static Word dispatchTupleUnaryOp(VM& vm, Op op, Word a, Type* aType, TupleType* 
     for (usize i = 0; i < n; ++i) {
         Word ae = static_cast<Tuple*>(a.o)->v[i];
         result->v[i] = dispatchUnaryOp(vm, op, ae, aTT->fields_[i], resultTT->fields_[i]);
+    }
+    // Phase 4g.5: retain Obj* fields (see dispatchTupleBinop for rationale).
+    // Heap Tuple stores 1 Word per field; index v[] by field index, not by
+    // layout_'s wordOffset (which describes inline storage and may exceed
+    // numFields_ for inline-composite field types).
+    for (u32 i = 0; i < (u32)resultTT->fields_.size(); ++i) {
+        Type* ft = resultTT->fields_[i];
+        if (storesObjPtr(ft) && result->v[i].o) {
+            result->v[i].o->retain();
+        }
     }
     return Word(static_cast<Obj*>(result));
 }
@@ -1980,6 +2005,16 @@ static Word dispatchCmpTupleBinop(VM& vm, CmpOp op, Word a, Word b,
         Type* aet = aTT ? aTT->fields_[i] : aType;
         Type* bet = bTT ? bTT->fields_[i] : bType;
         result->v[i] = dispatchCmpBinop(vm, op, ae, be, aet, bet, resultTT->fields_[i]);
+    }
+    // Phase 4g.5: retain Obj* fields (see dispatchTupleBinop for rationale).
+    // Heap Tuple stores 1 Word per field; index v[] by field index, not by
+    // layout_'s wordOffset (which describes inline storage and may exceed
+    // numFields_ for inline-composite field types).
+    for (u32 i = 0; i < (u32)resultTT->fields_.size(); ++i) {
+        Type* ft = resultTT->fields_[i];
+        if (storesObjPtr(ft) && result->v[i].o) {
+            result->v[i].o->retain();
+        }
     }
     return Word(static_cast<Obj*>(result));
 }
