@@ -1077,85 +1077,26 @@ static void builtin_ref_obj(VM& vm, u16 dst, u16, u16 ab) {
     vm.reg(dst).o = ref;
 }
 
-// Phase 4g.5: ref for inline composite element types (Struct/Tuple/Enum
-// classified as Repr::Inline). The arg arrives as a 1-word boxed Obj*
-// because emitArgPlacementForCall boxes inline composites at builtin call
-// boundaries; we unbox it into a fresh InlineRef's flex-array payload so
-// later REF_GET_INLINE / REF_SET_INLINE can mutate in place.
-//
-// Internal: unbox a heap Tuple/Struct/Enum* directly into Word* dst (no VM
-// regs). Mirrors unboxInlineDeep but writes into raw memory. Matches the
-// boxField semantics used by boxInlineDeep.
-static void unboxInto(VM& vm, Type* type, Obj* obj, Word* dst) {
-    auto unboxField = [&](Type* ft, Word src, Word* fdst) {
-        if (!ft) { fdst->i = 0; return; }
-        if (ft->repr_ == Type::Repr::Inline
-            && ft != gCurrentVM->complexType() && ft != gCurrentVM->fractionType()
-            && (dynamic_cast<StructType*>(ft) || dynamic_cast<TupleType*>(ft)
-                || dynamic_cast<EnumType*>(ft))) {
-            unboxInto(vm, ft, src.o, fdst);
-        } else if (ft == gCurrentVM->complexType()) {
-            auto* c = static_cast<Complex*>(src.o);
-            fdst[0].f = c->x.real();
-            fdst[1].f = c->x.imag();
-        } else if (ft == gCurrentVM->fractionType()) {
-            auto* fr = static_cast<Fraction*>(src.o);
-            fdst[0].i = fr->r.numer();
-            fdst[1].i = fr->r.denom();
-        } else {
-            *fdst = src;
-            if (storesObjPtr(ft) && src.o) src.o->retain();
-        }
-    };
-    if (auto* st = dynamic_cast<StructType*>(type)) {
-        auto* s = static_cast<Struct*>(obj);
-        for (size_t i = 0; i < st->fields_.size(); ++i) {
-            auto const& f = st->layout_[i];
-            unboxField(f.type, s->v[i], dst + f.wordOffset);
-        }
-        return;
-    }
-    if (auto* tt = dynamic_cast<TupleType*>(type)) {
-        auto* t = static_cast<Tuple*>(obj);
-        for (size_t i = 0; i < tt->fields_.size(); ++i) {
-            auto const& f = tt->layout_[i];
-            unboxField(f.type, t->v[i], dst + f.wordOffset);
-        }
-        return;
-    }
-    if (auto* en = dynamic_cast<EnumType*>(type)) {
-        auto* e = static_cast<Enum*>(obj);
-        dst[0].i = e->which_;
-        for (u8 i = 1; i < en->sizeWords_; ++i) dst[i].i = 0;
-        if (e->which_ >= 0 && (size_t)e->which_ < en->layout_.size()) {
-            auto const& f = en->layout_[e->which_];
-            if (f.type) {
-                bool isVoid = !f.type->isObjType()
-                           && (dynamic_cast<VoidType*>(f.type) != nullptr);
-                if (!isVoid && f.sizeWords > 0) {
-                    unboxField(f.type, e->word_, dst + 1);
-                }
-            }
-        }
-        return;
-    }
-}
-
 // ref(InlineComposite) -> InlineRef
+// Phase 4g.6: ref(InlineComposite) now reads its arg as a multi-word slot
+// directly (no boxing). The elem type is recovered from the resolved
+// Primitive's TupleType so we can size the InlineRef and walk pointers.
 static void builtin_ref_inline(VM& vm, u16 dst, u16, u16 ab) {
-    Obj* boxed = vm.reg(ab).o;
-    if (!boxed) { vm.reg(dst).o = nullptr; return; }
-    auto* refType = static_cast<RefType*>(vm.refType(boxed->type_));
+    auto* prim = static_cast<Primitive*>(vm.currentPrimitive());
+    auto* primTT = static_cast<TupleType*>(prim->type_);
+    Type* et = primTT->fields_[0];
+    auto* refType = static_cast<RefType*>(vm.refType(et));
     auto* ref = InlineRef::create(refType);
-    unboxInto(vm, refType->elemType_, boxed, &ref->v[0]);
+    u32 n = ref->sizeWords_;
+    for (u32 i = 0; i < n; ++i) ref->v[i] = vm.reg((u16)(ab + i));
+    // Retain embedded Obj* fields in the new payload (the caller's regs are
+    // about to be reclaimed). Mirrors op_make_ref_inline's ARC walk.
+    inlineWalkPointers(&ref->v[0], et, /*release_=*/false);
     vm.reg(dst).o = ref;
 }
 
-// deref(Ref<T>) -> T
-// Phase 4g.5: when the ref is an InlineRef, allocate a fresh boxed
-// Tuple/Struct/Enum* and copy the payload through it -- the builtin caller
-// expects a 1-word boxed result that emitBuiltinResultUnbox will then unbox
-// into the multi-word slot. (The operator form `*r` skips this round-trip.)
+// deref(Ref<T>) -> T. Phase 4g.6: for InlineRef, copy the inline payload
+// directly into the multi-word dst slot -- no temp boxed Tuple/Struct/Enum.
 static void builtin_deref(VM& vm, u16 dst, u16, u16 ab) {
     auto* obj = vm.reg(ab).o;
     auto* refType = static_cast<RefType*>(obj->type_);
@@ -1165,37 +1106,40 @@ static void builtin_deref(VM& vm, u16 dst, u16, u16 ab) {
         && (dynamic_cast<StructType*>(et) || dynamic_cast<TupleType*>(et)
             || dynamic_cast<EnumType*>(et))) {
         auto* ref = static_cast<InlineRef*>(obj);
-        // Box the inline payload back through a temp register window.
-        u16 base = vm.currentCodeBlock()->numRegs;
-        for (u32 i = 0; i < ref->sizeWords_; ++i) vm.reg((u16)(base + i)) = ref->v[i];
-        vm.reg(dst).o = boxInlineDeep(vm, et, base);
+        u32 n = ref->sizeWords_;
+        for (u32 i = 0; i < n; ++i) vm.reg((u16)(dst + i)) = ref->v[i];
         return;
     }
     auto* ref = static_cast<RefValue*>(obj);
     vm.reg(dst) = ref->value_;
 }
 
-// setref(T, Ref<T>) -> T
+// setref(T, Ref<T>) -> T. Phase 4g.6: for InlineRef, mutate the payload
+// in place from the multi-word arg slot -- no temp box, no unboxInto.
 static void builtin_setref(VM& vm, u16 dst, u16, u16 ab) {
-    auto* obj = vm.reg(ab + 1).o;
-    auto* refType = static_cast<RefType*>(obj->type_);
-    Type* et = refType->elemType_;
-    if (et && et->repr_ == Type::Repr::Inline
+    auto* prim = static_cast<Primitive*>(vm.currentPrimitive());
+    auto* primTT = static_cast<TupleType*>(prim->type_);
+    Type* et = primTT->fields_[0];
+    bool inlineComposite = et && et->repr_ == Type::Repr::Inline
         && et != gCurrentVM->complexType() && et != gCurrentVM->fractionType()
         && (dynamic_cast<StructType*>(et) || dynamic_cast<TupleType*>(et)
-            || dynamic_cast<EnumType*>(et))) {
-        auto* ref = static_cast<InlineRef*>(obj);
-        Obj* boxed = vm.reg(ab).o;
-        // Release embedded Obj* in the old payload, overwrite, retain new.
+            || dynamic_cast<EnumType*>(et));
+    if (inlineComposite) {
+        u32 n = (u32)et->sizeWords_;
+        // Ref is the 2nd arg; it lives at ab + n (sizeWords of inline T).
+        u16 refReg = (u16)(ab + n);
+        auto* ref = static_cast<InlineRef*>(vm.reg(refReg).o);
         inlineWalkPointers(&ref->v[0], et, /*release_=*/true);
-        unboxInto(vm, et, boxed, &ref->v[0]);
-        // The new payload's Obj* fields are already retained by unboxInto
-        // (it calls retain on storesObjPtr leaves). The boxed source itself
-        // is borrowed -- the builtin call boundary handles its lifetime.
-        vm.reg(dst) = vm.reg(ab);  // result = the assigned (still boxed) value
+        for (u32 i = 0; i < n; ++i) ref->v[i] = vm.reg((u16)(ab + i));
+        inlineWalkPointers(&ref->v[0], et, /*release_=*/false);
+        // Result is the assigned value; copy back out if dst != ab.
+        if (dst != ab) {
+            for (u32 i = 0; i < n; ++i) vm.reg((u16)(dst + i)) = vm.reg((u16)(ab + i));
+        }
         return;
     }
-    auto* ref = static_cast<RefValue*>(obj);
+    auto* ref = static_cast<RefValue*>(vm.reg(ab + 1).o);
+    auto* refType = static_cast<RefType*>(ref->type_);
     Word newVal = vm.reg(ab);
     if (storesObjPtr(refType->elemType_)) {
         if (newVal.o) newVal.o->retain();
@@ -1268,7 +1212,8 @@ static bool resolve_setref(Compiler& compiler, const std::vector<Type*>& args,
     return true;
 }
 
-// setref(Ref<T>, T) -> T
+// setref(Ref<T>, T) -> T. Phase 4g.6: same migration as builtin_setref but
+// with the Ref first and the new value second.
 static void builtin_setref_rev(VM& vm, u16 dst, u16, u16 ab) {
     auto* obj = vm.reg(ab).o;
     auto* refType = static_cast<RefType*>(obj->type_);
@@ -1278,10 +1223,15 @@ static void builtin_setref_rev(VM& vm, u16 dst, u16, u16 ab) {
         && (dynamic_cast<StructType*>(et) || dynamic_cast<TupleType*>(et)
             || dynamic_cast<EnumType*>(et))) {
         auto* ref = static_cast<InlineRef*>(obj);
-        Obj* boxed = vm.reg(ab + 1).o;
+        // The new value is the 2nd arg; lives at ab + 1 (Ref is 1 word).
+        u32 n = (u32)et->sizeWords_;
+        u16 valReg = (u16)(ab + 1);
         inlineWalkPointers(&ref->v[0], et, /*release_=*/true);
-        unboxInto(vm, et, boxed, &ref->v[0]);
-        vm.reg(dst) = vm.reg(ab + 1);
+        for (u32 i = 0; i < n; ++i) ref->v[i] = vm.reg((u16)(valReg + i));
+        inlineWalkPointers(&ref->v[0], et, /*release_=*/false);
+        if (dst != valReg) {
+            for (u32 i = 0; i < n; ++i) vm.reg((u16)(dst + i)) = vm.reg((u16)(valReg + i));
+        }
         return;
     }
     auto* ref = static_cast<RefValue*>(obj);
@@ -2259,10 +2209,13 @@ void registerBuiltinFunctions(Compiler& compiler,
     registerOne(compiler, functions, "gc", compiler.voidType(), {}, builtin_gc, /*pure=*/false, /*rtSafe=*/false);
 
     // --- Ref builtins ---
-    registerTemplate(compiler, functions, "ref",          resolve_ref);
-    registerTemplate(compiler, functions, "deref",        resolve_deref);
-    registerTemplate(compiler, functions, "setref",       resolve_setref);
-    registerTemplate(compiler, functions, "setref",       resolve_setref_rev);
+    // Phase 4g.6: ref / deref / setref read inline-composite args directly
+    // out of the multi-word slot, eliminating the box-then-unbox round trip
+    // that the old builtin calling convention required.
+    registerTemplate(compiler, functions, "ref",          resolve_ref,       /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "deref",        resolve_deref,     /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "setref",       resolve_setref,    /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "setref",       resolve_setref_rev,/*rtSafe=*/true, /*acceptsInlineArgs=*/true);
 
     // --- Any builtins ---
     registerTemplate(compiler, functions, "any",          resolve_any_single);
