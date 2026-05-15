@@ -399,31 +399,49 @@ class ListGenerator;
 // Phase 4g.9: head storage is now a contiguous Word* region starting at
 // head_. For 1-word element types head_ is the value (legacy access still
 // works). For Inline composite elements the payload spans head_ plus the
-// flex array headTail_ (stride_ words total), allocated via ListNode::
-// create() which sizes the object to sizeof(ListNode)+(stride-1)*sizeof(Word).
+// flex array headTail_ (payloadWords_ words total), allocated via ListNode::
+// create() which sizes the object to sizeof(ListNode)+(payloadWords-1)*sizeof(Word).
+//
+// Phase 4g.10: generator_ and head_ share storage via a union, discriminated
+// by isLazy_. When isLazy_ is 1 the generator pointer occupies the first head
+// word; when isLazy_ is 0 (forced) the head payload occupies head_/headTail_.
 class ListNode : public Obj {
 public:
-    ListNode* tail_;        // nullptr = end of list
-    ListGenerator* generator_;  // non-null = lazy, not yet forced
-    u32 stride_;            // elemType_->sizeWords_ at construction time
-    Word head_;             // word 0 of the head (always present)
-    Word headTail_[];       // words 1..stride_-1 for Inline composite heads
+    ListNode* tail_;            // nullptr = end of list
+    u8 payloadWords_;           // elemType_->sizeWords_ at construction (1..N)
+    u8 isLazy_;                 // 1 = generator_ holds the pending generator
+    // 6 bytes padding before the union
+    union {
+        ListGenerator* generator_;  // active when isLazy_ == 1
+        Word head_;                 // active when isLazy_ == 0 (word 0 of head)
+    };
+    Word headTail_[];           // words 1..payloadWords_-1 for Inline heads
 
     // Factory: allocates with the correct trailing space for elemType's
     // sizeWords_. Use this in place of `new ListNode(...)`.
     static ListNode* create(Type* type);
 
-    // Pointer-base accessors for the multi-word head payload.
+    // Pointer-base accessors for the multi-word head payload. Valid once
+    // isLazy_ == 0; the union ensures &head_ aliases the same storage that
+    // would hold the generator pointer.
     Word*       headData()       { return &head_; }
     Word const* headData() const { return &head_; }
 
-    // Force lazy evaluation: if generator_ is set, call it to fill head_/tail_
+    // Install a lazy generator on this node: stashes the pointer in the
+    // union, marks the node lazy, and retains the generator.
+    void installGenerator(ListGenerator* gen) {
+        generator_ = gen;
+        isLazy_ = 1;
+        reinterpret_cast<GCObj*>(gen)->retain();
+    }
+
+    // Force lazy evaluation: if isLazy_, call the generator to fill head/tail.
     void force(VM& vm);
 
     VMString str() const override;
 
     void releaseChildren() override {
-        if (generator_) {
+        if (isLazy_) {
             reinterpret_cast<GCObj*>(generator_)->release();
         } else {
             auto* lt = static_cast<ListType*>(type_);
@@ -440,7 +458,7 @@ public:
     }
 
 private:
-    ListNode(Type* type, u32 stride);
+    ListNode(Type* type, u32 payloadWords);
 };
 
 // Abstract base class for lazy list generators

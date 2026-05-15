@@ -1222,10 +1222,9 @@ void op_concat_list(VM& vm, Code* pc) {
     auto* gen = new CatListGen(vm.typeType());
     gen->first_ = nodeA; gen->second_ = nodeB;
     gen->inSecond_ = false; gen->listType_ = listType;
-    node->generator_ = gen;
+    node->installGenerator(gen);
     gen->first_->retain();
     gen->second_->retain();
-    reinterpret_cast<GCObj*>(gen)->retain();
     vm.reg(dst).o = node;
     DISPATCH(3);
 }
@@ -1748,11 +1747,10 @@ static Word dispatchListBinop(VM& vm, Op op, Word a, Word b,
         gen->broadcastValIsObj_ = storesObjPtr(aType);
     }
 
-    node->generator_ = gen;
+    node->installGenerator(gen);
     if (gen->leftList_) gen->leftList_->retain();
     if (gen->rightList_) gen->rightList_->retain();
     if (gen->broadcastValIsObj_ && gen->broadcastVal_.o) gen->broadcastVal_.o->retain();
-    reinterpret_cast<GCObj*>(gen)->retain();
     return Word(static_cast<Obj*>(node));
 }
 
@@ -1893,9 +1891,8 @@ static Word dispatchListUnaryOp(VM& vm, Op op, Word a, Type* aType, ListType* re
     gen->resultElemType_ = resultLT->elemType_;
     gen->resultListType_ = resultLT;
 
-    node->generator_ = gen;
+    node->installGenerator(gen);
     gen->source_->retain();
-    reinterpret_cast<GCObj*>(gen)->retain();
     return Word(static_cast<Obj*>(node));
 }
 
@@ -2379,7 +2376,7 @@ void BinopListGen::generate(VM& vm, ListNode* owner) {
     // dispatcher's freshly-boxed Tuple* into the flex head storage.
     Word headResult = dispatchBinopByKind(vm, opKind_, leftVal, rightVal,
                                           leftType, rightType, resultElemType_);
-    if (owner->stride_ > 1) {
+    if (owner->payloadWords_ > 1) {
         unboxInlineDeepTo(vm, resultElemType_, headResult.o, owner->headData());
     } else {
         owner->head_ = headResult;
@@ -2413,8 +2410,7 @@ void BinopListGen::generate(VM& vm, ListNode* owner) {
         if (rightList_) rightList_->release();
         rightList_ = nextRight;
         // Retain generator and tail for owner
-        tailNode->generator_ = this;
-        reinterpret_cast<GCObj*>(this)->retain();
+        tailNode->installGenerator(this);
         owner->tail_ = tailNode;
         tailNode->retain();
     }
@@ -2442,7 +2438,7 @@ void UnaryListGen::generate(VM& vm, ListNode* owner) {
     }
     // Phase 4g.9: store the freshly-computed head into the node, unboxing
     // into multi-word head storage when the element type is Inline composite.
-    if (owner->stride_ > 1) {
+    if (owner->payloadWords_ > 1) {
         unboxInlineDeepTo(vm, resultElemType_, headResult.o, owner->headData());
     } else {
         owner->head_ = headResult;
@@ -2458,8 +2454,7 @@ void UnaryListGen::generate(VM& vm, ListNode* owner) {
         if (nextSource) nextSource->retain();
         if (source_) source_->release();
         source_ = nextSource;
-        tailNode->generator_ = this;
-        reinterpret_cast<GCObj*>(this)->retain();
+        tailNode->installGenerator(this);
         owner->tail_ = tailNode;
         tailNode->retain();
     }
@@ -2499,8 +2494,7 @@ void RangeListGen::generate(VM& vm, ListNode* owner) {
     } else {
         auto* tailNode = ListNode::create(listType_);
         current_ = next;
-        tailNode->generator_ = this;
-        reinterpret_cast<GCObj*>(this)->retain();
+        tailNode->installGenerator(this);
         owner->tail_ = tailNode;
         tailNode->retain();
     }
@@ -2547,8 +2541,7 @@ void FractionRangeListGen::generate(VM& vm, ListNode* owner) {
         current_ = new Fraction(next);
         current_->retain();
         if (oldCurrent) oldCurrent->release();
-        tailNode->generator_ = this;
-        reinterpret_cast<GCObj*>(this)->retain();
+        tailNode->installGenerator(this);
         owner->tail_ = tailNode;
         tailNode->retain();
     }
@@ -3034,9 +3027,9 @@ void op_cons(VM& vm, Code* pc) {
 
     auto* node = ListNode::create(listType);
     node->tail_ = static_cast<ListNode*>(vm.reg(tail).o);
-    if (node->stride_ > 1) {
+    if (node->payloadWords_ > 1) {
         Word* dstHead = node->headData();
-        for (u32 i = 0; i < node->stride_; ++i) dstHead[i] = vm.reg((u16)(head + i));
+        for (u32 i = 0; i < node->payloadWords_; ++i) dstHead[i] = vm.reg((u16)(head + i));
         inlineWalkPointers(dstHead, et, /*release_=*/false);
     } else {
         node->head_ = vm.reg(head);
@@ -3086,9 +3079,9 @@ void op_list_head(VM& vm, Code* pc) {
     u16 dst = pc[1].regs[0], src = pc[1].regs[1];
     auto* node = static_cast<ListNode*>(vm.reg(src).o);
     node->force(vm);
-    if (node->stride_ > 1) {
+    if (node->payloadWords_ > 1) {
         Word const* h = node->headData();
-        for (u32 i = 0; i < node->stride_; ++i) vm.reg((u16)(dst + i)) = h[i];
+        for (u32 i = 0; i < node->payloadWords_; ++i) vm.reg((u16)(dst + i)) = h[i];
         // Retain embedded Obj* fields so the caller owns the copy.
         auto* lt = static_cast<ListType*>(node->type_);
         inlineWalkPointers(&vm.reg(dst), lt->elemType_, /*release_=*/false);
@@ -3436,7 +3429,7 @@ void op_make_lazy_automap(VM& vm, Code* pc) {
     for (u16 i = 0; i < numBroadcast && i < AutoMapListGen::kMaxBroadcast; ++i) {
         gen->broadcastVals_[i] = vm.reg(broadcastBase + i);
     }
-    node->generator_ = gen;
+    node->installGenerator(gen);
     // Retain Obj* fields stored in generator
     if (srcList) srcList->retain();
     gen->info_->retain();
@@ -3444,7 +3437,6 @@ void op_make_lazy_automap(VM& vm, Code* pc) {
         if (i < info->broadcastArgs.size() && info->broadcastArgs[i].isObj && gen->broadcastVals_[i].o)
             gen->broadcastVals_[i].o->retain();
     }
-    reinterpret_cast<GCObj*>(gen)->retain();
     vm.reg(dst).o = node;
     DISPATCH(3);
 }

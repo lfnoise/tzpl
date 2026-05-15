@@ -186,41 +186,48 @@ VMString InlineArray::str() const {
     return s;
 }
 
-// ListNode constructor (Phase 4g.9: head storage spans head_..headTail_[stride-1])
-ListNode::ListNode(Type* type, u32 stride)
+// ListNode constructor (Phase 4g.10: union head/generator, payloadWords_ size tag)
+ListNode::ListNode(Type* type, u32 payloadWords)
     : Obj(type)
     , tail_(nullptr)
-    , generator_(nullptr)
-    , stride_(stride)
-    , head_()
+    , payloadWords_(static_cast<u8>(payloadWords))
+    , isLazy_(0)
 {
+    // Start as a non-lazy node with a zeroed head payload. installGenerator()
+    // is used afterwards to switch to lazy mode.
+    head_ = Word{};
     // Zero the trailing payload words (if any) so releaseChildren never
     // walks an uninitialised Obj*.
-    for (u32 i = 1; i < stride_; ++i) (&head_)[i].i = 0;
+    for (u32 i = 1; i < payloadWords_; ++i) (&head_)[i].i = 0;
     registerNewObj(this);
 }
 
-// ListNode factory: sizes the allocation to fit `stride` head words.
+// ListNode factory: sizes the allocation to fit `payloadWords` head words.
 ListNode* ListNode::create(Type* type) {
     auto* lt = dynamic_cast<ListType*>(type);
     Type* et = lt ? lt->elemType_ : nullptr;
-    u32 stride = 1;
+    u32 payloadWords = 1;
     if (et && et->repr_ == Type::Repr::Inline
         && et != gCurrentVM->complexType()
         && et != gCurrentVM->fractionType()) {
-        stride = et->sizeWords_;
-        if (stride == 0) stride = 1;
+        payloadWords = et->sizeWords_;
+        if (payloadWords == 0) payloadWords = 1;
     }
-    usize size = sizeof(ListNode) + (stride > 1 ? (stride - 1) * sizeof(Word) : 0);
+    usize size = sizeof(ListNode) + (payloadWords > 1 ? (payloadWords - 1) * sizeof(Word) : 0);
     void* mem = GCObj::operator new(size);
-    return new(mem) ListNode(type, stride);
+    return new(mem) ListNode(type, payloadWords);
 }
 
 // ListNode::force() - invoke generator to fill head/tail
 void ListNode::force(VM& vm) {
-    if (generator_) {
+    if (isLazy_) {
         ListGenerator* gen = generator_;
-        generator_ = nullptr;  // clear first to prevent re-entry
+        // Clear lazy state and zero the head payload before generate() runs.
+        // generate() will write into head_/headTail_ and/or tail_; clearing
+        // first prevents re-entry and ensures the union is in head_ mode.
+        isLazy_ = 0;
+        head_ = Word{};
+        for (u32 i = 1; i < payloadWords_; ++i) (&head_)[i].i = 0;
         gen->generate(vm, this);
         // Release the old owner's retain on the generator.
         // If the generator moved itself to a new tail node (retaining itself there),
@@ -351,7 +358,7 @@ VMString ListNode::str() const {
 
         if (!first) s += ", ";
         first = false;
-        if (node->stride_ > 1) {
+        if (node->payloadWords_ > 1) {
             s += wordsToString(node->headData(), elemType);
         } else {
             s += wordToString(node->head_, elemType);
@@ -1442,10 +1449,10 @@ void unboxInlineDeepTo(VM& vm, Type* type, Obj* obj, Word* dst) {
 }
 
 void copyListHead(ListNode* dst, ListNode const* src, Type* elemType) {
-    if (dst->stride_ > 1) {
+    if (dst->payloadWords_ > 1) {
         Word* dh = dst->headData();
         Word const* sh = src->headData();
-        for (u32 i = 0; i < dst->stride_; ++i) dh[i] = sh[i];
+        for (u32 i = 0; i < dst->payloadWords_; ++i) dh[i] = sh[i];
         inlineWalkPointers(dh, elemType, /*release_=*/false);
     } else {
         dst->head_ = src->head_;
