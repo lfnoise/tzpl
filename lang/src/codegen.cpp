@@ -3135,6 +3135,16 @@ u16 CodeGen::genBinaryOp(BinaryOpExpr* expr) {
                 leftReg = ensureType(leftReg, leftType, cmpType);
                 rightReg = ensureType(rightReg, rightType, cmpType);
             }
+            // Phase 4g.2: Inline composite operands need to be boxed before
+            // op_cmp_eq_obj / op_cmp_ne_obj read vm.reg(...).o.
+            if (isInlineMultiword(leftType) && leftType != compiler_.complexType()
+                && leftType != compiler_.fractionType()) {
+                leftReg = emitBoxIfInline(leftReg, leftType);
+            }
+            if (isInlineMultiword(rightType) && rightType != compiler_.complexType()
+                && rightType != compiler_.fractionType()) {
+                rightReg = emitBoxIfInline(rightReg, rightType);
+            }
             emitOp(getCmpOp(expr->op, cmpType));
             emitRegs(dst, leftReg, rightReg);
             break;
@@ -3846,7 +3856,13 @@ u16 CodeGen::genCall(CallExpr_* expr) {
         }
 
         if (auto* tupType = dynamic_cast<TupleType*>(expr->variadicPackType)) {
-            emitOp(op_make_tuple);
+            // Phase 4g.2: builtin variadic-pack tuples must always land as
+            // a heap Tuple* (the builtin reads tup->v[i] for each value),
+            // even when the TupleType was promoted to Inline. For non-
+            // builtin functions the callee expects the pack as a multi-word
+            // inline value, which op_make_tuple Inline produces directly.
+            emitOp((expr->isBuiltinCall && tupType->repr_ == ts::Type::Repr::Inline)
+                   ? op_make_tuple_heap : op_make_tuple);
             emitRegs(packBase, packBase, packCount);
             emitPtr(tupType);
         } else if (auto* arrType = dynamic_cast<ArrayType*>(expr->variadicPackType)) {
@@ -6736,14 +6752,18 @@ u16 CodeGen::genAutoMapStructLiteral(StructLiteralExpr* expr) {
     }
 
     // --- Phase 7: Construct struct ---
-    u16 structReg = allocReg();
+    // Phase 4g.2: Inline struct lands as multi-word; reserve sizeWords slot.
+    bool inlineStruct = stype->repr_ == ts::Type::Repr::Inline;
+    u16 structReg = inlineStruct ? allocSlot(stype) : allocReg();
     emitOp(op_make_struct);
     emitRegs(structReg, structFieldBase, (u16)numFields);
     emitPtr(stype);
 
     // --- Phase 8: Store struct in result array ---
+    // ObjArray expects a 1-Word boxed pointer; box Inline struct first.
+    u16 storeReg = inlineStruct ? emitBoxIfInline(structReg, stype) : structReg;
     emitOp(op_array_set);
-    emitRegs(resultArrReg, iReg, structReg);
+    emitRegs(resultArrReg, iReg, storeReg);
     emitPtr(resultArrayType);
 
     // --- Phase 9: Increment and loop ---
@@ -7234,14 +7254,16 @@ u16 CodeGen::genAutoMapTupleLiteral(TupleLiteralExpr* expr) {
     }
 
     // --- Phase 7: Construct tuple ---
-    u16 tupReg = allocReg();
+    bool inlineTuple = tupType->repr_ == ts::Type::Repr::Inline;
+    u16 tupReg = inlineTuple ? allocSlot(tupType) : allocReg();
     emitOp(op_make_tuple);
     emitRegs(tupReg, tupleFieldBase, (u16)count);
     emitPtr(tupType);
 
     // --- Phase 8: Store in result array ---
+    u16 storeReg = inlineTuple ? emitBoxIfInline(tupReg, tupType) : tupReg;
     emitOp(op_array_set);
-    emitRegs(resultArrReg, iReg, tupReg);
+    emitRegs(resultArrReg, iReg, storeReg);
     emitPtr(resultArrayType);
 
     // --- Phase 9: Increment and loop ---
@@ -7376,13 +7398,15 @@ u16 CodeGen::genCartesianTupleLiteral(TupleLiteralExpr* expr) {
         }
     }
 
-    // Construct tuple
-    u16 tupReg = allocReg();
+    // Construct tuple. Phase 4g.2: Inline tuple lands multi-word.
+    bool inlineTuple = tupType->repr_ == ts::Type::Repr::Inline;
+    u16 tupReg = inlineTuple ? allocSlot(tupType) : allocReg();
     emitOp(op_make_tuple); emitRegs(tupReg, tupleFieldBase, (u16)count); emitPtr(tupType);
 
     // --- Phase 6: Close loops (innermost to outermost) ---
     {
-        u16 prevReg = tupReg;
+        u16 storeReg = inlineTuple ? emitBoxIfInline(tupReg, tupType) : tupReg;
+        u16 prevReg = storeReg;
         for (int level = maxCartesian; level >= 1; --level) {
             emitOp(op_array_set); emitRegs(resultRegs[level], iRegs[level], prevReg); emitPtr(resultTypes[level]);
             emitOp(op_add_int); emitRegs(iRegs[level], iRegs[level], oneReg);
@@ -7538,13 +7562,16 @@ u16 CodeGen::genCartesianStructLiteral(StructLiteralExpr* expr) {
         }
     }
 
-    // Construct struct
-    u16 structReg = allocReg();
+    // Construct struct. Phase 4g.2: Inline struct lands multi-word.
+    bool inlineStruct = stype->repr_ == ts::Type::Repr::Inline;
+    u16 structReg = inlineStruct ? allocSlot(stype) : allocReg();
     emitOp(op_make_struct); emitRegs(structReg, structFieldBase, (u16)numFields); emitPtr(stype);
 
     // --- Phase 6: Close loops (innermost to outermost) ---
     {
-        u16 prevReg = structReg;
+        // ObjArray expects 1-Word per element; box Inline composite first.
+        u16 storeReg = inlineStruct ? emitBoxIfInline(structReg, stype) : structReg;
+        u16 prevReg = storeReg;
         for (int level = maxCartesian; level >= 1; --level) {
             emitOp(op_array_set); emitRegs(resultRegs[level], iRegs[level], prevReg); emitPtr(resultTypes[level]);
             emitOp(op_add_int); emitRegs(iRegs[level], iRegs[level], oneReg);

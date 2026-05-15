@@ -239,6 +239,7 @@ static const std::unordered_map<Operation, OpInfo>& opInfoMap() {
         { op_inline_tuple_get,  { "I_TUPLE_GET",       3, OpFmt::Regs_Ptr, 3 } },
         { op_tuple_slice,       { "TUPLE_SLICE",       3, OpFmt::Regs_Ptr, 3 } },
         { op_make_tuple,        { "MAKE_TUPLE",        3, OpFmt::Regs_Ptr, 3 } },
+        { op_make_tuple_heap,   { "MAKE_TUPLE_HEAP",   3, OpFmt::Regs_Ptr, 3 } },
         { op_make_struct,       { "MAKE_STRUCT",       3, OpFmt::Regs_Ptr, 3 } },
         { op_struct_get,        { "STRUCT_GET",        2, OpFmt::Regs,     3 } },
         { op_inline_struct_get, { "I_STRUCT_GET",      3, OpFmt::Regs_Ptr, 3 } },

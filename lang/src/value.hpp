@@ -888,11 +888,13 @@ public:
     VMString str() const override;
 
     void releaseChildren() override {
-        // Phase 4g.2: recurse into nested Inline composites so their
-        // embedded pointer fields get released too. For Heap classifications
-        // (1 word per field) this collapses to the original layout walk.
+        // Phase 4g.2: heap Struct stores 1 Word per field regardless of the
+        // type's repr_ (Inline composites get deep-boxed when stored on the
+        // heap). Walk fields_ and release Obj* fields.
         auto t = static_cast<StructType*>(type_);
-        inlineWalkPointers(v, t, /*release_=*/true);
+        for (u32 i = 0; i < numFields_ && i < t->fields_.size(); ++i) {
+            if (storesObjPtr(t->fields_[i].type) && v[i].o) v[i].o->release();
+        }
     }
 
 private:
@@ -913,8 +915,13 @@ public:
     VMString str() const override;
 
     void releaseChildren() override {
+        // Phase 4g.2: heap Tuple stores 1 Word per field regardless of the
+        // type's repr_ (Inline composites get deep-boxed when stored on the
+        // heap). Walk fields_ and release Obj* fields.
         auto t = static_cast<TupleType*>(type_);
-        inlineWalkPointers(v, t, /*release_=*/true);
+        for (u32 i = 0; i < numFields_ && i < t->fields_.size(); ++i) {
+            if (storesObjPtr(t->fields_[i]) && v[i].o) v[i].o->release();
+        }
     }
 
 private:

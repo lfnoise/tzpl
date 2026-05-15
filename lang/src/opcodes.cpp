@@ -2355,6 +2355,32 @@ void op_tuple_slice(VM& vm, Code* pc) {
 // Phase 4g.2: for Inline tuples the value lives directly in the dst slot
 // across sizeWords_ Words; just MOVE_N from firstSrc with no Tuple
 // allocation. Codegen lays the fields contiguously at multi-word stride.
+// Phase 4g.2: variadic-pack tuples must always land as a heap Tuple* even
+// when their TupleType has been classified Inline -- the caller (e.g. fmt)
+// reads tup->v[i] for each variadic value. The pack args were placed
+// 1-Word-each (multi-word inline ones already boxed via emitBoxIfInline),
+// so we just allocate Tuple(numFields) and copy 1 Word per field.
+void op_make_tuple_heap(VM& vm, Code* pc) {
+    u16 dst = pc[1].regs[0], firstSrc = pc[1].regs[1], numFields = pc[1].regs[2];
+    auto* tupleType = static_cast<TupleType*>(pc[2].p);
+    auto* tuple = Tuple::create(tupleType, numFields);
+    for (u16 i = 0; i < numFields; ++i) {
+        tuple->v[i] = vm.reg((u16)(firstSrc + i));
+    }
+    // Retain Obj* fields. We walk the type's gcCases-style layout: a field
+    // whose type stores an Obj* has been placed as an Obj* by the caller.
+    // For Inline composite fields (Repr::Inline non-Complex/Fraction) the
+    // caller boxed them via emitBoxIfInline, so storesObjPtr returns true
+    // and we treat the boxed Obj* uniformly.
+    for (u16 i = 0; i < numFields; ++i) {
+        if (storesObjPtr(tupleType->fields_[i]) && tuple->v[i].o) {
+            tuple->v[i].o->retain();
+        }
+    }
+    vm.reg(dst).o = tuple;
+    DISPATCH(3);
+}
+
 void op_make_tuple(VM& vm, Code* pc) {
     u16 dst = pc[1].regs[0], firstSrc = pc[1].regs[1], numFields = pc[1].regs[2];
     auto* tupleType = static_cast<TupleType*>(pc[2].p);
