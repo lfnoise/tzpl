@@ -3424,15 +3424,7 @@ u16 CodeGen::genCall(CallExpr_* expr) {
                 u16 resultReg = allocSlot(expr->resolvedType);
                 emitOp(expr->isBuiltinCall ? op_call_primitive : op_call);
                 emitRegs(resultReg, (u16)expr->args.size(), argBase);
-                emitInt(expr->resolvedFuncGlobalIndex);
-                if (!expr->isBuiltinCall && isInlineMultiword(expr->resolvedType)) {
-                    u16 unboxed = allocSlot(expr->resolvedType);
-                    emitOp(expr->resolvedType == compiler_.complexType()
-                           ? op_unbox_complex : op_unbox_fraction);
-                    emitRegs(unboxed, resultReg);
-                    return unboxed;
-                }
-                return resultReg;
+                emitInt(expr->resolvedFuncGlobalIndex);                return resultReg;
             }
         }
     }
@@ -3470,15 +3462,7 @@ u16 CodeGen::genCall(CallExpr_* expr) {
             u16 resultReg = allocSlot(expr->resolvedType);
             emitOp(op_call_template_lambda);
             emitRegs(resultReg, (u16)expr->args.size(), argBase, calleeReg);
-            emitPtr(concreteLT->codeBlock_);
-            if (isInlineMultiword(expr->resolvedType)) {
-                u16 unboxed = allocSlot(expr->resolvedType);
-                emitOp(expr->resolvedType == compiler_.complexType()
-                       ? op_unbox_complex : op_unbox_fraction);
-                emitRegs(unboxed, resultReg);
-                return unboxed;
-            }
-            return resultReg;
+            emitPtr(concreteLT->codeBlock_);            return resultReg;
         }
 
         // General expression callee (e.g., a[i](x, y))
@@ -3519,15 +3503,7 @@ u16 CodeGen::genCall(CallExpr_* expr) {
         }
         u16 resultReg = allocSlot(expr->resolvedType);
         emitOp(op_call_lambda);
-        emitRegs(resultReg, (u16)expr->args.size(), argBase, calleeReg);
-        if (isInlineMultiword(expr->resolvedType)) {
-            u16 unboxed = allocSlot(expr->resolvedType);
-            emitOp(expr->resolvedType == compiler_.complexType()
-                   ? op_unbox_complex : op_unbox_fraction);
-            emitRegs(unboxed, resultReg);
-            return unboxed;
-        }
-        return resultReg;
+        emitRegs(resultReg, (u16)expr->args.size(), argBase, calleeReg);        return resultReg;
     }
 
     auto* ident = static_cast<IdentifierExpr*>(expr->callee.get());
@@ -3621,15 +3597,7 @@ u16 CodeGen::genCall(CallExpr_* expr) {
         u16 resultReg = allocSlot(expr->resolvedType);
         emitOp(op_call_template_lambda);
         emitRegs(resultReg, (u16)expr->args.size(), argBase, calleeReg);
-        emitPtr(concreteLT->codeBlock_);
-        if (isInlineMultiword(expr->resolvedType)) {
-            u16 unboxed = allocSlot(expr->resolvedType);
-            emitOp(expr->resolvedType == compiler_.complexType()
-                   ? op_unbox_complex : op_unbox_fraction);
-            emitRegs(unboxed, resultReg);
-            return unboxed;
-        }
-        return resultReg;
+        emitPtr(concreteLT->codeBlock_);        return resultReg;
     }
 
     // Check if callee is a local variable holding a lambda/function type
@@ -3663,14 +3631,6 @@ u16 CodeGen::genCall(CallExpr_* expr) {
         u16 resultReg = allocSlot(expr->resolvedType);
         emitOp(op_call_lambda);
         emitRegs(resultReg, (u16)expr->args.size(), argBase, calleeReg);
-        // Lambda returns box inline values; unbox.
-        if (isInlineMultiword(expr->resolvedType)) {
-            u16 unboxed = allocSlot(expr->resolvedType);
-            emitOp(expr->resolvedType == compiler_.complexType()
-                   ? op_unbox_complex : op_unbox_fraction);
-            emitRegs(unboxed, resultReg);
-            return unboxed;
-        }
         return resultReg;
     }
 
@@ -3710,15 +3670,7 @@ u16 CodeGen::genCall(CallExpr_* expr) {
                 }
                 u16 resultReg = allocSlot(expr->resolvedType);
                 emitOp(op_call_lambda);
-                emitRegs(resultReg, (u16)expr->args.size(), argBase, calleeReg);
-                if (isInlineMultiword(expr->resolvedType)) {
-                    u16 unboxed = allocSlot(expr->resolvedType);
-                    emitOp(expr->resolvedType == compiler_.complexType()
-                           ? op_unbox_complex : op_unbox_fraction);
-                    emitRegs(unboxed, resultReg);
-                    return unboxed;
-                }
-                return resultReg;
+                emitRegs(resultReg, (u16)expr->args.size(), argBase, calleeReg);                return resultReg;
             }
         }
     }
@@ -3972,16 +3924,6 @@ u16 CodeGen::genCall(CallExpr_* expr) {
     emitRegs(resultReg, callArgc, argBase);
     emitInt(expr->resolvedFuncGlobalIndex);
 
-    // Phase 4f: user-fn calls (op_call) write a single Word; if the return
-    // type is inline value, the cfun returned a boxed Obj* — unbox it. For
-    // builtins, the cfun writes inline directly so no unbox is needed.
-    if (!expr->isBuiltinCall && isInlineMultiword(expr->resolvedType)) {
-        u16 unboxed = allocSlot(expr->resolvedType);
-        emitOp(expr->resolvedType == compiler_.complexType()
-               ? op_unbox_complex : op_unbox_fraction);
-        emitRegs(unboxed, resultReg);
-        return unboxed;
-    }
     return resultReg;
 }
 

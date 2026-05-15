@@ -346,14 +346,13 @@ private:
     // Used to decide whether to box a multi-word inline value before op_return.
     Type* currentReturnType_ = nullptr;
 
-    // Emit op_return after boxing a multi-word inline return value into the
-    // single-Word slot expected by the caller's resultReg.
+    // Phase 4d: op_return is natively multi-word. Encode source register and
+    // slot size; the handler copies nWords from src into the caller's result
+    // slot. No boxing involved.
     void emitReturn(u16 reg) {
-        if (isInlineMultiword(currentReturnType_)) {
-            reg = emitBoxIfInline(reg, currentReturnType_);
-        }
+        u32 nWords = typeSlotWords(currentReturnType_);
         emitOp(op_return);
-        emitRegs(reg);
+        emitRegs(reg, (u16)nWords);
     }
     u16 currentYieldCount_ = 0;
 

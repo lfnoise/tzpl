@@ -178,7 +178,7 @@ static const std::unordered_map<Operation, OpInfo>& opInfoMap() {
         { op_jump_if_false,     { "JUMP_IF_FALSE",     3, OpFmt::Regs_Jump, 1 } },
         { op_call,              { "CALL",              3, OpFmt::Regs_Int,  3 } },
         { op_call_primitive,    { "CALL_PRIM",         3, OpFmt::Regs_Int,  3 } },
-        { op_return,            { "RETURN",            2, OpFmt::Regs,      1 } },
+        { op_return,            { "RETURN",            2, OpFmt::Regs,      2 } },
         { op_return_void,       { "RETURN_VOID",       1, OpFmt::None,      0 } },
         { op_halt,              { "HALT",              1, OpFmt::None,      0 } },
 

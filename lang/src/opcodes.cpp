@@ -867,15 +867,24 @@ void op_call_primitive(VM& vm, Code* pc) {
     DISPATCH(3);
 }
 
-// RETURN Ra  (2 words: op, regs)
+// RETURN Ra, nWords  (2 words: op, regs{src, nWords})
+// Phase 4d: nWords carries the slot size of the return type so multi-word
+// inline value types (Complex / Fraction) flow back to the caller's slot
+// natively, without the box-on-return + unbox-after-call dance Phase 4f
+// originally needed.
 void op_return(VM& vm, Code* pc) {
     u16 src = pc[1].regs[0];
-    Word result = vm.reg(src);
+    u16 nWords = pc[1].regs[1];
 
-    // If this is the top-level frame, just halt
+    // Snapshot the return value words from the callee's frame before popping.
+    // Up to 4 words is the inline value-type ceiling per the plan.
+    Word tmp[4];
+    for (u16 i = 0; i < nWords; ++i) tmp[i] = vm.reg(src + i);
+
+    // If this is the top-level frame, just halt -- result lands in regs 0..n-1.
     if (vm.frameCount() == 1) {
         vm.popFrame();
-        vm.reg(0) = result;
+        for (u16 i = 0; i < nWords; ++i) vm.reg(i) = tmp[i];
         vm.setHalted(true);
         return;
     }
@@ -883,8 +892,8 @@ void op_return(VM& vm, Code* pc) {
     // Pop frame - returns the frame data (restores caller's baseReg)
     CallFrame frame = vm.popFrame();
 
-    // Write result to caller's result register (now using caller's baseReg)
-    vm.reg(frame.resultReg) = result;
+    // Write nWords to caller's result slot (resultReg is the first word).
+    for (u16 i = 0; i < nWords; ++i) vm.reg(frame.resultReg + i) = tmp[i];
 
     // Resume at the caller's return PC
     Code* returnPC = frame.returnPC;
