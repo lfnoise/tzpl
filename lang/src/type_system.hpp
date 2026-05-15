@@ -61,6 +61,19 @@ public:
     bool isValueType_  = false;
     bool isRecursive_  = false;
 
+    // Phase 4g.1: descriptive metadata for composites that are eligible for
+    // inline value-type runtime, computed by classifyType but NOT yet acted
+    // on by codegen/runtime. Future phases (4g.2+) flip repr_ to Inline and
+    // sizeWords_ to inlineLayoutWords_ once construction/access opcodes are
+    // wired to read/write multi-word slots for the type.
+    //
+    // Eligibility (struct/tuple/enum): non-recursive AND fields-or-cases <= 4
+    // AND every field/payload classifies as a value type (Atom, Pointer,
+    // DiscriminantEnum, NullablePtrEnum, UnwrappedTupleStruct, Inline) AND
+    // total slot footprint <= 4 words. Enums add a discriminant word.
+    bool couldBeInline_     = false;
+    u8   inlineLayoutWords_ = 0;     // total inline footprint when promoted
+
     Type();
     Type(Type* typeType) : Obj(typeType) {}
 

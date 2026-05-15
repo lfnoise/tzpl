@@ -1884,6 +1884,11 @@ static void builtin_typeRepr(VM& vm, u16 dst, u16, u16 argBase) {
         (unsigned)t->sizeWords_,
         t->isValueType_ ? 1 : 0,
         t->isRecursive_ ? 1 : 0);
+    // Phase 4g.1: surface inline-promotion eligibility for composites that
+    // qualify but haven't yet been runtime-promoted.
+    if (t->couldBeInline_) {
+        std::fprintf(out, " inline=%u", (unsigned)t->inlineLayoutWords_);
+    }
 
     // Print layout if available
     auto printLayout = [out](const Vec<FieldLayout>& layout) {

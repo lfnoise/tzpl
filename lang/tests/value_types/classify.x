@@ -87,3 +87,25 @@ enum Shape {
     point
 }
 typeRepr(Shape.point);
+
+-- Phase 4g.1 eligibility: nested inline composition. Outer { p Pair; q Int }
+-- has 2 fields; Pair contributes 2 inline words + Int contributes 1 = 3 words,
+-- 3 fields after flattening -- still under the 4-word/4-field limits.
+struct Outer { p Pair, q Int }
+let ot = Outer { p: Pair { x: 1, y: 2 }, q: 3 };
+typeRepr(ot);
+
+-- Composite that exceeds the 4-word footprint: tuple of 5 Ints already
+-- shown above. Here, a struct of (Pair, Pair, Int) would be 5 words which
+-- is over the limit and must NOT be marked inline.
+struct TooBig { a Pair, b Pair, c Int }
+let tb = TooBig { a: Pair { x: 1, y: 2 }, b: Pair { x: 3, y: 4 }, c: 5 };
+typeRepr(tb);
+
+-- Enum with all-Complex payloads (Complex is Inline 2 words). Enum with
+-- 2 such cases -> 1 disc + 2 payload words = 3 words. Under threshold.
+enum Mix {
+    asComplex Complex,
+    asInt Int
+}
+typeRepr(Mix.asInt(7));

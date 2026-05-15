@@ -251,8 +251,48 @@ void setHeap(Type* t) {
 
 void classifyImpl(Type* t, std::unordered_set<Type*>& visiting);
 
+// Phase 4g.1 eligibility helpers. A field/payload type counts as value-type-
+// eligible for inline composition if its current Repr is one of the value
+// reprs, OR it is itself a composite already flagged as couldBeInline_
+// (transitive eligibility).
+static bool isInlineEligibleField(Type const* t) {
+    if (!t) return false;
+    switch (t->repr_) {
+        case Type::Repr::Atom:
+        case Type::Repr::Pointer:
+        case Type::Repr::DiscriminantEnum:
+        case Type::Repr::NullablePtrEnum:
+        case Type::Repr::UnwrappedTupleStruct:
+        case Type::Repr::Inline:
+            return true;
+        case Type::Repr::Heap:
+            return t->couldBeInline_;
+    }
+    return false;
+}
+
+// Footprint a field/payload would occupy in an inline composite layout.
+// For atoms/pointers/etc this is sizeWords_. For composites already flagged
+// couldBeInline_, the inline footprint takes precedence -- nested layouts
+// compose using their would-be-inline sizes, not their current 1-word boxed
+// runtime size.
+static u8 inlineFootprintWords(Type const* t) {
+    if (!t) return 1;
+    if (t->couldBeInline_ && t->inlineLayoutWords_ > 0) {
+        return t->inlineLayoutWords_;
+    }
+    return t->sizeWords_ > 0 ? t->sizeWords_ : 1;
+}
+
+// Plan defaults: ≤ 4 fields/cases, ≤ 4 words total inline footprint.
+static constexpr unsigned kInlineMaxFields = 4;
+static constexpr unsigned kInlineMaxWords  = 4;
+
 void classifyStructImpl(StructType* st, std::unordered_set<Type*>& visiting) {
     st->layout_.clear();
+    // Phase 4g.1: reset eligibility -- recomputed below.
+    st->couldBeInline_     = false;
+    st->inlineLayoutWords_ = 0;
 
     // Tuple-struct unwrap: 1-field tuple struct over a value type
     // collapses to the inner type's representation.
@@ -295,10 +335,30 @@ void classifyStructImpl(StructType* st, std::unordered_set<Type*>& visiting) {
         ++wordOffset;
     }
     setHeap(st);
+
+    // Phase 4g.1: eligibility pre-flight for future inline promotion. We
+    // intentionally do NOT flip repr_ or sizeWords_ -- runtime stays Heap.
+    // Once 4g.2-4g.5 wire the runtime, those phases consult couldBeInline_
+    // and switch storage / opcodes accordingly.
+    if (!st->isRecursive_ && !st->fields_.empty()
+        && st->fields_.size() <= kInlineMaxFields) {
+        unsigned total = 0;
+        bool ok = true;
+        for (auto const& field : st->fields_) {
+            if (!isInlineEligibleField(field.type)) { ok = false; break; }
+            total += inlineFootprintWords(field.type);
+        }
+        if (ok && total <= kInlineMaxWords) {
+            st->couldBeInline_     = true;
+            st->inlineLayoutWords_ = (u8)total;
+        }
+    }
 }
 
 void classifyTupleImpl(TupleType* tu, std::unordered_set<Type*>& visiting) {
     tu->layout_.clear();
+    tu->couldBeInline_     = false;
+    tu->inlineLayoutWords_ = 0;
     // Phase 4f: tuple runtime is still heap (Tuple*); the inline machinery
     // only supports Complex / Fraction so far. Defer tuple inlining until
     // tuple codegen / containers are wired up.
@@ -313,10 +373,27 @@ void classifyTupleImpl(TupleType* tu, std::unordered_set<Type*>& visiting) {
         ++wordOffset;
     }
     setHeap(tu);
+
+    // Phase 4g.1: same eligibility pre-flight as for structs.
+    if (!tu->isRecursive_ && !tu->fields_.empty()
+        && tu->fields_.size() <= kInlineMaxFields) {
+        unsigned total = 0;
+        bool ok = true;
+        for (Type* field : tu->fields_) {
+            if (!isInlineEligibleField(field)) { ok = false; break; }
+            total += inlineFootprintWords(field);
+        }
+        if (ok && total <= kInlineMaxWords) {
+            tu->couldBeInline_     = true;
+            tu->inlineLayoutWords_ = (u8)total;
+        }
+    }
 }
 
 void classifyEnumImpl(EnumType* en, std::unordered_set<Type*>& visiting) {
     en->layout_.clear();
+    en->couldBeInline_     = false;
+    en->inlineLayoutWords_ = 0;
 
     if (en->cases_.empty()) {
         setHeap(en);
@@ -377,6 +454,28 @@ void classifyEnumImpl(EnumType* en, std::unordered_set<Type*>& visiting) {
         en->layout_.push_back(FieldLayout{0, 1, c.type});
     }
     setHeap(en);
+
+    // Phase 4g.1: eligibility pre-flight. Inline enum footprint = 1 word
+    // discriminant + max(case payload footprint). Each case payload is
+    // either Void (counts as 0) or a value-type-eligible type.
+    if (!en->isRecursive_ && !en->cases_.empty()
+        && en->cases_.size() <= kInlineMaxFields) {
+        unsigned maxPayload = 0;
+        bool ok = true;
+        for (auto const& c : en->cases_) {
+            Type* pt = c.type;
+            bool isVoid = pt && !pt->isObjType() && dynamic_cast<VoidType*>(pt);
+            if (isVoid) continue;
+            if (!isInlineEligibleField(pt)) { ok = false; break; }
+            unsigned w = inlineFootprintWords(pt);
+            if (w > maxPayload) maxPayload = w;
+        }
+        unsigned total = 1u + maxPayload;
+        if (ok && total <= kInlineMaxWords) {
+            en->couldBeInline_     = true;
+            en->inlineLayoutWords_ = (u8)total;
+        }
+    }
 }
 
 void classifyImpl(Type* t, std::unordered_set<Type*>& visiting) {
