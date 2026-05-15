@@ -948,14 +948,56 @@ static void builtin_isNone_nullableptr(VM& vm, u16 dst, u16, u16 ab) {
     vm.reg(dst).i = vm.reg(ab).o ? 0 : 1;
 }
 
-// Option resolvers
+// Phase 4g.6: Inline Option variants -- arg arrives as a multi-word slot
+// [discriminant, payload...]. Read the discriminant from word 0 without
+// going through a heap Enum*. The payload starts at word 1 (layout_[which]
+// .wordOffset = 1 for non-Void cases per classifyImpl). For non-void
+// payloads we copy `payloadSizeWords` consecutive words into dst.
+static void builtin_unwrap_inline(VM& vm, u16 dst, u16, u16 ab) {
+    if (vm.reg(ab).i != 0) {
+        fprintf(vm.printOutput(), "Error: unwrap called on none\n");
+        vm.setHalted(true);
+        return;
+    }
+    auto* prim = static_cast<Primitive*>(vm.currentPrimitive());
+    auto* primTT = static_cast<TupleType*>(prim->type_);
+    auto* et = static_cast<EnumType*>(primTT->fields_[0]);
+    u32 n = (u32)et->layout_[0].sizeWords;
+    for (u32 i = 0; i < n; ++i) vm.reg((u16)(dst + i)) = vm.reg((u16)(ab + 1 + i));
+}
+
+static void builtin_unwrapOr_inline(VM& vm, u16 dst, u16, u16 ab) {
+    auto* prim = static_cast<Primitive*>(vm.currentPrimitive());
+    auto* primTT = static_cast<TupleType*>(prim->type_);
+    auto* et = static_cast<EnumType*>(primTT->fields_[0]);
+    u32 n = (u32)et->layout_[0].sizeWords;
+    if (vm.reg(ab).i == 0) {
+        for (u32 i = 0; i < n; ++i) vm.reg((u16)(dst + i)) = vm.reg((u16)(ab + 1 + i));
+    } else {
+        u16 fallback = (u16)(ab + et->sizeWords_);
+        for (u32 i = 0; i < n; ++i) vm.reg((u16)(dst + i)) = vm.reg((u16)(fallback + i));
+    }
+}
+
+static void builtin_isSome_inline(VM& vm, u16 dst, u16, u16 ab) {
+    vm.reg(dst).i = (vm.reg(ab).i == 0) ? 1 : 0;
+}
+
+static void builtin_isNone_inline(VM& vm, u16 dst, u16, u16 ab) {
+    vm.reg(dst).i = (vm.reg(ab).i == 1) ? 1 : 0;
+}
+
+// Option resolvers. Phase 4g.6: route Inline Option through the inline-
+// arg variants (read discriminant/payload directly from multi-word slots).
 static bool resolve_unwrap(Compiler& compiler, const std::vector<Type*>& args,
     std::vector<Type*>& pt, Type*& rt, CFun& cf) {
     if (args.size() != 1) return false;
     auto* et = dynamic_cast<EnumType*>(args[0]);
     if (!et || !isOptionType(et)) return false;
     pt = {et}; rt = et->cases_[0].type;
-    cf = (et->repr_ == Type::Repr::NullablePtrEnum) ? builtin_unwrap_nullableptr : builtin_unwrap;
+    if (et->repr_ == Type::Repr::NullablePtrEnum) cf = builtin_unwrap_nullableptr;
+    else if (et->repr_ == Type::Repr::Inline)     cf = builtin_unwrap_inline;
+    else                                          cf = builtin_unwrap;
     return true;
 }
 
@@ -967,7 +1009,9 @@ static bool resolve_unwrapOr(Compiler& compiler, const std::vector<Type*>& args,
     Type* innerType = et->cases_[0].type;
     if (args[1] != innerType) return false;
     pt = {et, innerType}; rt = innerType;
-    cf = (et->repr_ == Type::Repr::NullablePtrEnum) ? builtin_unwrapOr_nullableptr : builtin_unwrapOr;
+    if (et->repr_ == Type::Repr::NullablePtrEnum) cf = builtin_unwrapOr_nullableptr;
+    else if (et->repr_ == Type::Repr::Inline)     cf = builtin_unwrapOr_inline;
+    else                                          cf = builtin_unwrapOr;
     return true;
 }
 
@@ -977,7 +1021,9 @@ static bool resolve_isSome(Compiler& compiler, const std::vector<Type*>& args,
     auto* et = dynamic_cast<EnumType*>(args[0]);
     if (!et || !isOptionType(et)) return false;
     pt = {et}; rt = compiler.boolType();
-    cf = (et->repr_ == Type::Repr::NullablePtrEnum) ? builtin_isSome_nullableptr : builtin_isSome;
+    if (et->repr_ == Type::Repr::NullablePtrEnum) cf = builtin_isSome_nullableptr;
+    else if (et->repr_ == Type::Repr::Inline)     cf = builtin_isSome_inline;
+    else                                          cf = builtin_isSome;
     return true;
 }
 
@@ -987,7 +1033,9 @@ static bool resolve_isNone(Compiler& compiler, const std::vector<Type*>& args,
     auto* et = dynamic_cast<EnumType*>(args[0]);
     if (!et || !isOptionType(et)) return false;
     pt = {et}; rt = compiler.boolType();
-    cf = (et->repr_ == Type::Repr::NullablePtrEnum) ? builtin_isNone_nullableptr : builtin_isNone;
+    if (et->repr_ == Type::Repr::NullablePtrEnum) cf = builtin_isNone_nullableptr;
+    else if (et->repr_ == Type::Repr::Inline)     cf = builtin_isNone_inline;
+    else                                          cf = builtin_isNone;
     return true;
 }
 
@@ -2162,10 +2210,14 @@ void registerBuiltinFunctions(Compiler& compiler,
     registerTemplate(compiler, functions, "merge",        resolve_merge);
 
     // --- Option builtins ---
-    registerTemplate(compiler, functions, "unwrap",       resolve_unwrap);
-    registerTemplate(compiler, functions, "unwrapOr",     resolve_unwrapOr);
-    registerTemplate(compiler, functions, "isSome",       resolve_isSome);
-    registerTemplate(compiler, functions, "isNone",       resolve_isNone);
+    // Phase 4g.6: Inline Option dispatches to *_inline variants that read
+    // discriminant + payload directly from the multi-word slot. Auto-map
+    // sites unbox container elements before the call (see genAutoMapCall),
+    // so `[Option<Int>] @ unwrap` works.
+    registerTemplate(compiler, functions, "unwrap",       resolve_unwrap,   /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "unwrapOr",     resolve_unwrapOr, /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "isSome",       resolve_isSome,   /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "isNone",       resolve_isNone,   /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
 
     // --- Coroutine builtins ---
     registerTemplate(compiler, functions, "next",         resolve_next);

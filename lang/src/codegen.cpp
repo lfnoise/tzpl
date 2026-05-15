@@ -5161,7 +5161,10 @@ u16 CodeGen::genAutoMapCall(CallExpr_* expr) {
         if (paramType->repr_ == ts::Type::Repr::Inline
             && paramType != compiler_.complexType()
             && paramType != compiler_.fractionType()) {
-            return expr->isBuiltinCall ? 1u : (u32)paramType->sizeWords_;
+            // Phase 4g.6: legacy builtins receive a 1-word boxed Obj* for
+            // inline composites; migrated ones receive multi-word inline.
+            bool boxedAtBoundary = expr->isBuiltinCall && !expr->builtinAcceptsInlineArgs;
+            return boxedAtBoundary ? 1u : (u32)paramType->sizeWords_;
         }
         return typeSlotWords(paramType);
     };
@@ -5192,12 +5195,17 @@ u16 CodeGen::genAutoMapCall(CallExpr_* expr) {
             // Extract element at runtime index. Inline composite elements are
             // stored boxed in ObjArray (1 word); other inline backends land
             // multi-word values straight into the slot.
+            // Phase 4g.6: when the callee is a builtin that accepts inline-
+            // composite args natively (or a non-builtin function, which always
+            // does), we must unbox the element into a multi-word slot. Legacy
+            // builtins still receive the 1-word boxed pointer.
             u16 elemReg = elemInlineComposite ? allocReg() : targetReg;
             emitOp(op_array_get_dyn);
             emitRegs(elemReg, argRegs[i], iReg);
             emitPtr(arrType);
             if (elemInlineComposite) {
-                if (expr->isBuiltinCall) {
+                bool boxedAtBoundary = expr->isBuiltinCall && !expr->builtinAcceptsInlineArgs;
+                if (boxedAtBoundary) {
                     if (elemReg != targetReg) { emitOp(op_mov); emitRegs(targetReg, elemReg); }
                 } else {
                     u16 unboxed = emitUnboxIfInline(elemReg, elemType);
@@ -5225,7 +5233,7 @@ u16 CodeGen::genAutoMapCall(CallExpr_* expr) {
                 && paramType->repr_ == ts::Type::Repr::Inline
                 && paramType != compiler_.complexType()
                 && paramType != compiler_.fractionType()
-                && expr->isBuiltinCall) {
+                && expr->isBuiltinCall && !expr->builtinAcceptsInlineArgs) {
                 srcReg = emitBoxIfInline(srcReg, paramType);
             }
             if (srcReg != targetReg) {
