@@ -298,6 +298,13 @@ private:
                 emitPtr(tt);
                 return dst;
             }
+            if (auto* en = dynamic_cast<ts::EnumType*>(type)) {
+                u16 dst = allocReg();
+                emitOp(op_box_enum);
+                emitRegs(dst, srcReg);
+                emitPtr(en);
+                return dst;
+            }
         }
         return srcReg;
     }
@@ -330,6 +337,13 @@ private:
                 emitOp(op_unbox_tuple);
                 emitRegs(dst, srcReg);
                 emitPtr(tt);
+                return dst;
+            }
+            if (auto* en = dynamic_cast<ts::EnumType*>(type)) {
+                u16 dst = allocSlot(type);
+                emitOp(op_unbox_enum);
+                emitRegs(dst, srcReg);
+                emitPtr(en);
                 return dst;
             }
         }

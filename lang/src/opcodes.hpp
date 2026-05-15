@@ -244,6 +244,17 @@ void op_make_enum_nodata(VM& vm, Code* pc);   // MAKE_ENUM_NODATA Rd, caseIdx (3
 void op_enum_get_which(VM& vm, Code* pc);     // ENUM_GET_WHICH Rd, Ra (2 words) - get case index as int
 void op_enum_get_value(VM& vm, Code* pc);     // ENUM_GET_VALUE Rd, Ra (2 words) - get case value
 
+// --- Inline Enum Construction/Access (Phase 4g.4) ---
+// Inline enum slot layout: word 0 = i64 discriminant; words 1..1+P = payload
+// where P = sizeWords of the active case payload (0 for Void cases).
+// Tag-read is just MOV from word 0; payload-read is MOVE_N from word 1.
+// Construction/box/unbox need dedicated handlers because the payload width
+// is per-case.
+void op_make_inline_enum(VM& vm, Code* pc);        // MAKE_INLINE_ENUM Rd, valSrc, caseIdx (3 words: op, regs, EnumType*)
+void op_make_inline_enum_nodata(VM& vm, Code* pc); // MAKE_INLINE_ENUM_NODATA Rd, caseIdx (3 words: op, regs, EnumType*)
+void op_box_enum(VM& vm, Code* pc);                // BOX_ENUM Rd, Ra (3 words: op, regs, EnumType*) - inline -> heap Enum*
+void op_unbox_enum(VM& vm, Code* pc);              // UNBOX_ENUM Rd, Ra (3 words: op, regs, EnumType*) - heap Enum* -> inline
+
 // --- Dynamic Array Operations (for auto-mapping) ---
 void op_array_alloc(VM& vm, Code* pc);        // ARRAY_ALLOC Rd, Rn (3 words: op, regs{dst, len_reg}, ArrayType*)
 void op_array_set(VM& vm, Code* pc);          // ARRAY_SET Ra, Rb_idx, Rc_val (3 words: op, regs{arr, idx_reg, val_reg}, ArrayType*)

@@ -172,7 +172,9 @@ inline bool isLambdaInlineComposite(Type* t) {
     if (!t) return false;
     if (t->repr_ != Type::Repr::Inline) return false;
     if (t == gCurrentVM->complexType() || t == gCurrentVM->fractionType()) return false;
-    return dynamic_cast<TupleType*>(t) || dynamic_cast<StructType*>(t);
+    return dynamic_cast<TupleType*>(t)
+        || dynamic_cast<StructType*>(t)
+        || dynamic_cast<EnumType*>(t);
 }
 
 inline void placeLambdaArg(VM& vm, u16 sb, Word w, Type* paramType) {
@@ -202,7 +204,8 @@ inline u16 lambdaParamSlotWords(Lambda* lam) {
         // args as multi-word (placeLambdaArg unboxes); other types as 1 word.
         if (t && t->repr_ == Type::Repr::Inline
             && t != gCurrentVM->complexType() && t != gCurrentVM->fractionType()
-            && (dynamic_cast<TupleType*>(t) || dynamic_cast<StructType*>(t))) {
+            && (dynamic_cast<TupleType*>(t) || dynamic_cast<StructType*>(t)
+                || dynamic_cast<EnumType*>(t))) {
             sum += sw;
         } else {
             sum += 1;

@@ -2494,6 +2494,60 @@ void op_enum_get_value(VM& vm, Code* pc) {
     DISPATCH(2);
 }
 
+// --- Inline Enum Construction (Phase 4g.4) ---
+// MAKE_INLINE_ENUM Rd, valSrc, caseIdx (3 words: op, regs, EnumType*)
+// Lay out an inline enum slot at dst:
+//   dst[0].i = caseIdx
+//   dst[1..1+P] = payload copied from valSrc (P = layout_[caseIdx].sizeWords)
+// Inline-composite payload fields are already inline at valSrc, so a flat
+// MOVE_N suffices (the layout's sizeWords is the total payload footprint).
+// Embedded Obj* fields are retained via inlineWalkPointers on the destination.
+void op_make_inline_enum(VM& vm, Code* pc) {
+    u16 dst = pc[1].regs[0], valSrc = pc[1].regs[1], caseIdx = pc[1].regs[2];
+    auto* en = static_cast<EnumType*>(pc[2].p);
+    vm.reg(dst).i = caseIdx;
+    // Zero-fill the payload region so unused tail words start clean.
+    for (u8 i = 1; i < en->sizeWords_; ++i) vm.reg((u16)(dst + i)).i = 0;
+    if (caseIdx < en->layout_.size()) {
+        auto const& f = en->layout_[caseIdx];
+        if (f.type && f.sizeWords > 0) {
+            for (u8 i = 0; i < f.sizeWords; ++i) {
+                vm.reg((u16)(dst + 1 + i)) = vm.reg((u16)(valSrc + i));
+            }
+            // Retain embedded Obj* fields: walk the active case via
+            // inlineWalkPointers, which inspects the discriminant we just
+            // wrote at dst[0].
+            inlineWalkPointers(&vm.reg(dst), en, /*release_=*/false);
+        }
+    }
+    DISPATCH(3);
+}
+
+// MAKE_INLINE_ENUM_NODATA Rd, caseIdx (3 words: op, regs, EnumType*)
+void op_make_inline_enum_nodata(VM& vm, Code* pc) {
+    u16 dst = pc[1].regs[0], caseIdx = pc[1].regs[1];
+    auto* en = static_cast<EnumType*>(pc[2].p);
+    vm.reg(dst).i = caseIdx;
+    for (u8 i = 1; i < en->sizeWords_; ++i) vm.reg((u16)(dst + i)).i = 0;
+    DISPATCH(3);
+}
+
+// BOX_ENUM Rd, Ra (3 words: op, regs, EnumType*) - inline -> heap Enum*
+void op_box_enum(VM& vm, Code* pc) {
+    u16 dst = pc[1].regs[0], src = pc[1].regs[1];
+    auto* en = static_cast<EnumType*>(pc[2].p);
+    vm.reg(dst).o = boxInlineDeep(vm, en, src);
+    DISPATCH(3);
+}
+
+// UNBOX_ENUM Rd, Ra (3 words: op, regs, EnumType*) - heap Enum* -> inline
+void op_unbox_enum(VM& vm, Code* pc) {
+    u16 dst = pc[1].regs[0], src = pc[1].regs[1];
+    auto* en = static_cast<EnumType*>(pc[2].p);
+    unboxInlineDeep(vm, en, vm.reg(src).o, dst);
+    DISPATCH(3);
+}
+
 // --- Dynamic Array Operations (for auto-mapping) ---
 
 // ARRAY_ALLOC Rd, Rn (3 words: op, regs{dst, len_reg}, ArrayType*)

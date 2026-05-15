@@ -204,6 +204,10 @@ u16 CodeGen::ensureInt(u16 reg, Type* type) {
         if (type->repr_ == ts::Type::Repr::DiscriminantEnum) {
             return reg;
         }
+        // Phase 4g.4: inline enum's word 0 IS the i64 discriminant.
+        if (type->repr_ == ts::Type::Repr::Inline) {
+            return reg;
+        }
         u16 dst = allocReg();
         emitOp(op_enum_get_which);
         emitRegs(dst, reg);
@@ -1785,9 +1789,12 @@ void CodeGen::genPatternMatch(Pattern* pat, u16 subjReg, Type* subjType,
                     break;
                 }
                 // Unqualified no-data enum case match.
-                // Phase 2: DiscriminantEnum -- subject IS the i64 tag; skip op_enum_get_which.
+                // Phase 2: DiscriminantEnum -- subject IS the i64 tag.
+                // Phase 4g.4: Inline enum -- subject's word 0 IS the i64 tag.
                 u16 whichReg;
-                if (subjType && subjType->repr_ == ts::Type::Repr::DiscriminantEnum) {
+                if (subjType
+                    && (subjType->repr_ == ts::Type::Repr::DiscriminantEnum
+                        || subjType->repr_ == ts::Type::Repr::Inline)) {
                     whichReg = subjReg;
                 } else {
                     whichReg = allocReg();
@@ -1863,9 +1870,12 @@ void CodeGen::genPatternMatch(Pattern* pat, u16 subjReg, Type* subjType,
                 break;
             }
 
-            // Get which_ field from enum (or use the subject directly for DiscriminantEnum)
+            // Get which_ field from enum.
+            // - DiscriminantEnum: subject IS the i64 tag.
+            // - Inline (Phase 4g.4): subject's word 0 IS the i64 tag.
             u16 whichReg;
-            if (etype->repr_ == ts::Type::Repr::DiscriminantEnum) {
+            if (etype->repr_ == ts::Type::Repr::DiscriminantEnum
+                || etype->repr_ == ts::Type::Repr::Inline) {
                 whichReg = subjReg;
             } else {
                 whichReg = allocReg();
@@ -1887,13 +1897,20 @@ void CodeGen::genPatternMatch(Pattern* pat, u16 subjReg, Type* subjType,
             failJumps.push_back(failJump);
 
             // If matched and inner pattern exists, extract value and recurse.
-            // Phase 4f: enum payload stores boxed inline values; unbox after read.
             if (ep->innerPattern && caseType && caseType != compiler_.voidType()) {
-                u16 valReg = allocReg();
-                emitOp(op_enum_get_value);
-                emitRegs(valReg, subjReg);
-                if (isInlineMultiword(caseType)) {
-                    valReg = emitUnboxIfInline(valReg, caseType);
+                u16 valReg;
+                if (etype->repr_ == ts::Type::Repr::Inline) {
+                    // Phase 4g.4: payload lives in-place at subjReg+1; bind
+                    // the alias directly so multi-word reads work.
+                    valReg = (u16)(subjReg + 1);
+                } else {
+                    // Phase 4f: enum payload stores boxed inline values; unbox.
+                    valReg = allocReg();
+                    emitOp(op_enum_get_value);
+                    emitRegs(valReg, subjReg);
+                    if (isInlineMultiword(caseType)) {
+                        valReg = emitUnboxIfInline(valReg, caseType);
+                    }
                 }
                 genPatternMatch(ep->innerPattern.get(), valReg, caseType, failJumps, isMutable);
             }
@@ -1961,7 +1978,9 @@ void CodeGen::genPatternMatch(Pattern* pat, u16 subjReg, Type* subjType,
                 }
 
                 u16 whichReg;
-                if (subjType && subjType->repr_ == ts::Type::Repr::DiscriminantEnum) {
+                if (subjType
+                    && (subjType->repr_ == ts::Type::Repr::DiscriminantEnum
+                        || subjType->repr_ == ts::Type::Repr::Inline)) {
                     whichReg = subjReg;
                 } else {
                     whichReg = allocReg();
@@ -1982,13 +2001,19 @@ void CodeGen::genPatternMatch(Pattern* pat, u16 subjReg, Type* subjType,
                 failJumps.push_back(failJump);
 
                 // Extract and match inner data.
-                // Phase 4f: enum payload stores boxed inline values; unbox.
                 if (pat->enumCaseDataType && pat->enumCaseDataType != compiler_.voidType()) {
-                    u16 valReg = allocReg();
-                    emitOp(op_enum_get_value);
-                    emitRegs(valReg, subjReg);
-                    if (isInlineMultiword(pat->enumCaseDataType)) {
-                        valReg = emitUnboxIfInline(valReg, pat->enumCaseDataType);
+                    u16 valReg;
+                    if (subjType && subjType->repr_ == ts::Type::Repr::Inline) {
+                        // Phase 4g.4: payload lives in-place at subjReg+1.
+                        valReg = (u16)(subjReg + 1);
+                    } else {
+                        // Phase 4f: enum payload stores boxed inline values; unbox.
+                        valReg = allocReg();
+                        emitOp(op_enum_get_value);
+                        emitRegs(valReg, subjReg);
+                        if (isInlineMultiword(pat->enumCaseDataType)) {
+                            valReg = emitUnboxIfInline(valReg, pat->enumCaseDataType);
+                        }
                     }
 
                     if (tp->elements.size() == 1) {
@@ -2688,11 +2713,16 @@ u16 CodeGen::genAsTypeExpr(AsTypeExprNode* expr) {
     emitOp(op_any_get_value);
     emitRegs(valReg, subjReg);
 
-    u16 dstReg = allocReg();
+    u16 dstReg = allocSlot(optType);
     if (optType->repr_ == ts::Type::Repr::NullablePtrEnum) {
         // Phase 3: Some(p) is just the pointer.
         emitOp(op_mov);
         emitRegs(dstReg, valReg);
+    } else if (optType->repr_ == ts::Type::Repr::Inline) {
+        // Phase 4g.4: inline enum -- write tag + payload directly into dst.
+        emitOp(op_make_inline_enum);
+        emitRegs(dstReg, valReg, 0);  // case 0 = some
+        emitPtr(optType);
     } else {
         emitOp(op_make_enum);
         emitRegs(dstReg, valReg, 0);  // case 0 = some
@@ -2706,6 +2736,10 @@ u16 CodeGen::genAsTypeExpr(AsTypeExprNode* expr) {
     if (optType->repr_ == ts::Type::Repr::NullablePtrEnum) {
         emitOp(op_load_nil);
         emitRegs(dstReg);
+    } else if (optType->repr_ == ts::Type::Repr::Inline) {
+        emitOp(op_make_inline_enum_nodata);
+        emitRegs(dstReg, 1);  // case 1 = none
+        emitPtr(optType);
     } else {
         emitOp(op_make_enum_nodata);
         emitRegs(dstReg, 1);  // case 1 = none
@@ -3946,21 +3980,35 @@ u16 CodeGen::genCall(CallExpr_* expr) {
         u16 valueReg = allocReg();
         emitOp(op_coro_resume);
         emitRegs(valueReg, coroReg);
-        // Wrap raw value in Option<T> based on coroutine state
+        // Wrap raw value in Option<T> based on coroutine state.
+        // Phase 4g.4: op_coro_wrap_option lands a heap Enum* in a 1-word
+        // dst; unbox into an inline slot when Option<T> is Inline.
         u16 resultReg = allocReg();
         emitOp(op_coro_wrap_option);
         emitRegs(resultReg, valueReg, coroReg);
         emitPtr(expr->resolvedType);  // Option<T> EnumType*
+        Type* optType = expr->resolvedType;
+        if (optType && optType->repr_ == ts::Type::Repr::Inline) {
+            return emitUnboxIfInline(resultReg, optType);
+        }
         return resultReg;
     }
 
     // Coroutine yield: emit op_yield (same logic as old genYieldStmt)
     if (expr->isCoroYield) {
-        // Build GC map: collect registers that hold Obj* values
+        // Build GC map: collect registers that hold Obj* values.
+        // Phase 4g.4: skip Inline composite locals -- their base word is
+        // a payload word (tag for enums, field 0 for structs/tuples), not
+        // an Obj*; treating it as one would crash the GC walker. Embedded
+        // Obj* fields inside inline composites that survive across a yield
+        // are not yet traced; revisit when we promote container backends.
         std::vector<u16> gcMap;
         for (auto& scope : localScopes_) {
             for (auto& entry : scope) {
-                if (entry.second.type && storesObjPtr(entry.second.type)) {
+                Type* t = entry.second.type;
+                if (!t) continue;
+                if (isInlineMultiword(t)) continue;
+                if (storesObjPtr(t)) {
                     gcMap.push_back(entry.second.reg);
                 }
             }
@@ -4005,11 +4053,15 @@ u16 CodeGen::genCall(CallExpr_* expr) {
         emitRegs(doneReg, coroReg);
         u32 exitJump = emitJump(op_jump_if_true, doneReg);
 
-        // Build GC map: collect registers that hold Obj* values
+        // Build GC map: collect registers that hold Obj* values.
+        // Phase 4g.4: skip Inline composite locals (see yield path comment).
         std::vector<u16> gcMap;
         for (auto& scope : localScopes_) {
             for (auto& entry : scope) {
-                if (entry.second.type && storesObjPtr(entry.second.type)) {
+                Type* t = entry.second.type;
+                if (!t) continue;
+                if (isInlineMultiword(t)) continue;
+                if (storesObjPtr(t)) {
                     gcMap.push_back(entry.second.reg);
                 }
             }
@@ -7930,14 +7982,20 @@ u16 CodeGen::genIndexExpr(IndexExpr_* expr) {
     if (auto* mapType = dynamic_cast<MapType*>(expr->object->resolvedType)) {
         // Map subscript: map[key] -> Option<V>.
         // Phase 4f: map keys are still stored boxed; box inline key before lookup.
+        // Phase 4g.4: op_map_get_option always lands a heap Enum* in a 1-word
+        // dst; unbox into an inline slot when the Option type is Inline.
         u16 dst = allocReg();
         idxReg = ensureType(idxReg, expr->index->resolvedType, mapType->keyType_);
         if (isInlineMultiword(mapType->keyType_)) {
             idxReg = emitBoxIfInline(idxReg, mapType->keyType_);
         }
+        Type* optType = compiler_.optionType(mapType->valueType_);
         emitOp(op_map_get_option);
         emitRegs(dst, objReg, idxReg);
-        emitPtr(compiler_.optionType(mapType->valueType_));
+        emitPtr(optType);
+        if (optType && optType->repr_ == ts::Type::Repr::Inline) {
+            return emitUnboxIfInline(dst, optType);
+        }
         return dst;
     }
     if (expr->object->resolvedType == compiler_.stringType()) {
@@ -8116,9 +8174,13 @@ u16 CodeGen::emitIndexLookup(u16 srcReg, Type* srcType, u16 idxReg, Type* idxTyp
     u16 dst = allocReg();
     if (auto* mapType = dynamic_cast<MapType*>(srcType)) {
         u16 convertedIdx = ensureType(idxReg, idxType, mapType->keyType_);
+        Type* optType = compiler_.optionType(mapType->valueType_);
         emitOp(op_map_get_option);
         emitRegs(dst, srcReg, convertedIdx);
-        emitPtr(compiler_.optionType(mapType->valueType_));
+        emitPtr(optType);
+        if (optType && optType->repr_ == ts::Type::Repr::Inline) {
+            return emitUnboxIfInline(dst, optType);
+        }
     } else if (srcType == compiler_.stringType()) {
         emitOp(op_string_get_byte);
         emitRegs(dst, srcReg, idxReg);
@@ -8178,6 +8240,13 @@ u16 CodeGen::genAutoMapIndexObjArray(IndexExpr_* expr) {
                                  expr->index->resolvedType,
                                  expr->indexAutoMap, innerResultType);
 
+    // Phase 4g.4: emitIndexLookup may return a multi-word inline value (e.g.
+    // Option<Int> from a map lookup); the ObjArray element slot needs the
+    // boxed 1-Word form.
+    if (isInlineMultiword(innerResultType)) {
+        valReg = emitBoxIfInline(valReg, innerResultType);
+    }
+
     emitOp(op_array_set);
     emitRegs(resultReg, iReg, valReg);
     emitPtr(resultArrayType);
@@ -8223,6 +8292,12 @@ u16 CodeGen::genAutoMapIndexObjList(IndexExpr_* expr) {
     u16 valReg = emitIndexLookup(headReg, elemType, idxReg,
                                  expr->index->resolvedType,
                                  expr->indexAutoMap, innerResultType);
+
+    // Phase 4g.4: same boxing concern as the array path -- list nodes hold
+    // 1-Word values, so an Inline composite result must be boxed first.
+    if (isInlineMultiword(innerResultType)) {
+        valReg = emitBoxIfInline(valReg, innerResultType);
+    }
 
     emitOp(op_cons);
     emitRegs(accReg, valReg, accReg);
@@ -8369,6 +8444,11 @@ u16 CodeGen::genAutoMapIndexObjDeep(IndexExpr_* expr, int depth) {
     u16 valReg = emitIndexLookup(currentObjReg, innerElemType, idxReg,
                                  expr->index->resolvedType,
                                  expr->indexAutoMap, rt);
+    // Phase 4g.4: store as boxed 1-Word in container slots (see Phase 4g.4
+    // notes in genAutoMapIndexObjArray).
+    if (isInlineMultiword(rt)) {
+        valReg = emitBoxIfInline(valReg, rt);
+    }
 
     // Close loops from innermost to outermost
     u16 prevResultReg = valReg;
@@ -8947,7 +9027,7 @@ u16 CodeGen::genEnumConstruct(ASTNode* node) {
         return allocReg();
     }
 
-    u16 dst = allocReg();
+    u16 dst = allocSlot(etype);
 
     if (argExpr) {
         // Data case
@@ -8961,6 +9041,13 @@ u16 CodeGen::genEnumConstruct(ASTNode* node) {
         if (etype->repr_ == ts::Type::Repr::NullablePtrEnum) {
             emitOp(op_mov);
             emitRegs(dst, valReg);
+        } else if (etype->repr_ == ts::Type::Repr::Inline) {
+            // Phase 4g.4: inline enum -- payload is laid out in-place at
+            // dst[1..1+P]. The payload may itself be an inline composite
+            // (multi-word) and needs no boxing.
+            emitOp(op_make_inline_enum);
+            emitRegs(dst, valReg, (u16)caseIdx);
+            emitPtr(etype);
         } else {
             // Phase 4f/4g.2: enum payload slot is single Word; box inline values.
             if (caseType && caseType->repr_ == ts::Type::Repr::Inline) {
@@ -8981,6 +9068,10 @@ u16 CodeGen::genEnumConstruct(ASTNode* node) {
         } else if (etype->repr_ == ts::Type::Repr::NullablePtrEnum) {
             emitOp(op_load_nil);
             emitRegs(dst);
+        } else if (etype->repr_ == ts::Type::Repr::Inline) {
+            emitOp(op_make_inline_enum_nodata);
+            emitRegs(dst, (u16)caseIdx);
+            emitPtr(etype);
         } else {
             emitOp(op_make_enum_nodata);
             emitRegs(dst, (u16)caseIdx);

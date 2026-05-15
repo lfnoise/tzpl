@@ -1047,6 +1047,27 @@ Obj* boxInlineDeep(VM& vm, Type* type, u16 srcSlot) {
         }
         return obj;
     }
+    // Phase 4g.4: inline enum -> heap Enum*. word 0 holds the i64 discriminant;
+    // words 1..1+P hold the active case's payload. The heap Enum's word_ holds
+    // either the unboxed payload (for atom/pointer cases) or a recursively-
+    // boxed Obj* (for inline-composite cases). Void cases get word_.i = 0.
+    if (auto* en = dynamic_cast<EnumType*>(type)) {
+        int which = (int)vm.reg(srcSlot).i;
+        auto* obj = new Enum(en);
+        obj->which_ = which;
+        obj->word_.i = 0;
+        if (which >= 0 && (size_t)which < en->layout_.size()) {
+            auto const& f = en->layout_[which];
+            if (f.type) {
+                bool isVoid = !f.type->isObjType()
+                           && (dynamic_cast<VoidType*>(f.type) != nullptr);
+                if (!isVoid && f.sizeWords > 0) {
+                    obj->word_ = boxField(f.type, (u16)(srcSlot + 1));
+                }
+            }
+        }
+        return obj;
+    }
     return nullptr;
 }
 
@@ -1086,6 +1107,26 @@ void unboxInlineDeep(VM& vm, Type* type, Obj* obj, u16 dstSlot) {
         }
         return;
     }
+    // Phase 4g.4: heap Enum* -> inline enum slot.
+    if (auto* en = dynamic_cast<EnumType*>(type)) {
+        auto* e = static_cast<Enum*>(obj);
+        vm.reg(dstSlot).i = e->which_;
+        // Zero-fill the payload region first so unused tail words are clean.
+        for (u8 i = 1; i < en->sizeWords_; ++i) {
+            vm.reg((u16)(dstSlot + i)).i = 0;
+        }
+        if (e->which_ >= 0 && (size_t)e->which_ < en->layout_.size()) {
+            auto const& f = en->layout_[e->which_];
+            if (f.type) {
+                bool isVoid = !f.type->isObjType()
+                           && (dynamic_cast<VoidType*>(f.type) != nullptr);
+                if (!isVoid && f.sizeWords > 0) {
+                    unboxField(f.type, e->word_, (u16)(dstSlot + 1));
+                }
+            }
+        }
+        return;
+    }
 }
 
 void inlineWalkPointers(Word* base, Type* type, bool release_) {
@@ -1107,6 +1148,24 @@ void inlineWalkPointers(Word* base, Type* type, bool release_) {
     };
     if (auto* st = dynamic_cast<StructType*>(type))      walk(st->layout_);
     else if (auto* tt = dynamic_cast<TupleType*>(type))  walk(tt->layout_);
+    else if (auto* en = dynamic_cast<EnumType*>(type)) {
+        // Phase 4g.4: only the active case's payload is alive. Look up the
+        // discriminant at word 0, then walk just that case's layout entry.
+        int which = (int)base[0].i;
+        if (which < 0 || (size_t)which >= en->layout_.size()) return;
+        auto const& f = en->layout_[which];
+        if (!f.type || f.sizeWords == 0) return;
+        if (f.type->repr_ == Type::Repr::Inline) {
+            if (f.type == gCurrentVM->complexType()
+             || f.type == gCurrentVM->fractionType()) return;
+            inlineWalkPointers(base + f.wordOffset, f.type, release_);
+        } else if (storesObjPtr(f.type)) {
+            if (Obj* o = base[f.wordOffset].o) {
+                if (release_) o->release();
+                else          o->retain();
+            }
+        }
+    }
 }
 
 // Phase 4g.2: format a multi-word value out of a register slot. For inline
@@ -1163,6 +1222,31 @@ VMString slotToString(VM& vm, u16 startReg, Type* type) {
         }
         if (tt->fields_.size() == 1) s += ",";
         s += ")";
+        return s;
+    }
+    if (auto* en = dynamic_cast<EnumType*>(type)) {
+        // Phase 4g.4: print "EnumName.CaseName" or "EnumName.CaseName(payload...)".
+        int which = (int)vm.reg(startReg).i;
+        VMString s = rt::vmstr(en->name_->str());
+        s += ".";
+        if (which < 0 || (size_t)which >= en->cases_.size()) {
+            s += "?";
+            return s;
+        }
+        s += en->cases_[which].name->str();
+        auto const& f = en->layout_[which];
+        if (!f.type || f.sizeWords == 0) return s;
+        bool isVoid = !f.type->isObjType()
+                   && (dynamic_cast<VoidType*>(f.type) != nullptr);
+        if (isVoid) return s;
+        u16 payloadReg = (u16)(startReg + f.wordOffset);
+        if (dynamic_cast<TupleType*>(f.type)) {
+            s += slotToString(vm, payloadReg, f.type);
+        } else {
+            s += "(";
+            s += slotToString(vm, payloadReg, f.type);
+            s += ")";
+        }
         return s;
     }
     return wordToString(vm.reg(startReg), type);

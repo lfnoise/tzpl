@@ -468,9 +468,6 @@ void classifyEnumImpl(EnumType* en, std::unordered_set<Type*>& visiting) {
         return;
     }
 
-    // Phase 4f: enum runtime is still heap (Enum*); the inline machinery
-    // only supports Complex / Fraction so far. Defer enum inlining.
-    //
     // Phase 4c: populate layout_ with one entry per case payload, indexed by
     // case index. wordOffset is 0 because the heap Enum has a single
     // dedicated payload slot (Enum::word_); the offset is meaningful only
@@ -502,6 +499,25 @@ void classifyEnumImpl(EnumType* en, std::unordered_set<Type*>& visiting) {
         if (ok && total <= kInlineMaxWords) {
             en->couldBeInline_     = true;
             en->inlineLayoutWords_ = (u8)total;
+            // Phase 4g.4: promote runtime classification. Slot layout:
+            //   word 0       = i64 discriminant (case index)
+            //   words 1..1+P = payload (P = caseSizeWords for the active case)
+            // Unused tail words are not written. Each layout_[i] entry now
+            // carries the per-case payload size with wordOffset = 1 (or 0
+            // for Void cases; offset is meaningless since sizeWords = 0).
+            // Box-at-boundary semantics mirror struct/tuple: a heap Enum*
+            // is built by op_box_enum with a recursively-boxed word_ payload.
+            en->repr_      = Type::Repr::Inline;
+            en->sizeWords_ = (u8)total;
+            en->isValueType_ = true;
+            en->layout_.clear();
+            for (auto const& c : en->cases_) {
+                Type* pt = c.type;
+                bool isVoid = pt && !pt->isObjType() && dynamic_cast<VoidType*>(pt);
+                u8 fw = isVoid ? 0 : (u8)inlineFootprintWords(pt);
+                u8 off = isVoid ? 0 : 1;
+                en->layout_.push_back(FieldLayout{off, fw, pt});
+            }
         }
     }
 }
