@@ -3135,11 +3135,23 @@ u16 CodeGen::genBinaryOp(BinaryOpExpr* expr) {
                 };
                 u16 lReg = needsBoxC(leftType) ? emitBoxIfInline(leftReg, leftType) : leftReg;
                 u16 rReg = needsBoxC(rightType) ? emitBoxIfInline(rightReg, rightType) : rightReg;
+                bool unboxResult = needsBoxC(resultType);
+                u16 outReg = unboxResult ? allocReg() : dst;
                 emitOp(getCompositeCmpOp(expr->op));
-                emitRegs(dst, lReg, rReg);
+                emitRegs(outReg, lReg, rReg);
                 emitPtr(resultType);
                 emitPtr(leftType);
                 emitPtr(rightType);
+                if (unboxResult) {
+                    u16 unboxed = emitUnboxIfInline(outReg, resultType);
+                    if (unboxed != dst) {
+                        u32 nw = typeSlotWords(resultType);
+                        for (u32 i = 0; i < nw; ++i) {
+                            emitOp(op_mov);
+                            emitRegs((u16)(dst + i), (u16)(unboxed + i));
+                        }
+                    }
+                }
                 return dst;
             }
             // For comparison, determine common type from operands (result is always bool)
