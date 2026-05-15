@@ -83,6 +83,14 @@ inline void registerTemplate(Compiler& compiler, FuncMap& functions,
 inline Word getArrayElem(VM& vm, Obj* a, Type* et, size_t i) {
     if (et == vm.intType() || et == vm.boolType() || et == vm.symbolType()) return Word(static_cast<PodArray<i64>*>(a)->v[i]);
     if (et == vm.floatType()) return Word(static_cast<PodArray<f64>*>(a)->v[i]);
+    // Phase 4g.8: InlineArray stores inline composites unboxed; box on read
+    // so 1-Word legacy helpers keep working. Caller owns the freshly-boxed
+    // Obj* (auto-release pool registers it).
+    if (et && et->repr_ == ts::Type::Repr::Inline
+        && et != vm.complexType() && et != vm.fractionType()) {
+        auto* arr = static_cast<InlineArray*>(a);
+        return Word(boxInlineDeepFrom(vm, et, arr->slot(i)));
+    }
     return Word(static_cast<ObjArray*>(a)->get(i));
 }
 
@@ -92,6 +100,7 @@ inline size_t getArraySize(VM& vm, Obj* a, Type* et) {
         case ArrayBackend::Fraction: return static_cast<PodArray<r64>*>(a)->v.size();
         case ArrayBackend::Float:    return static_cast<PodArray<f64>*>(a)->v.size();
         case ArrayBackend::Int:      return static_cast<PodArray<i64>*>(a)->v.size();
+        case ArrayBackend::Inline:   return static_cast<InlineArray*>(a)->size();
         case ArrayBackend::Obj:      return static_cast<ObjArray*>(a)->size();
     }
     return 0;
@@ -103,6 +112,7 @@ inline Obj* makeEmptyArray(ArrayType* at) {
         case ArrayBackend::Fraction: return new PodArray<r64>(at);
         case ArrayBackend::Float:    return new PodArray<f64>(at);
         case ArrayBackend::Int:      return new PodArray<i64>(at);
+        case ArrayBackend::Inline:   return new InlineArray(at);
         case ArrayBackend::Obj:      return new ObjArray(at);
     }
     return nullptr;
@@ -114,6 +124,16 @@ inline Obj* makeEmptyArray(ArrayType* at) {
 inline void arrayPush(VM& vm, Obj* a, Type* et, Word v) {
     if (et == vm.intType() || et == vm.boolType() || et == vm.symbolType()) static_cast<PodArray<i64>*>(a)->v.push_back(v.i);
     else if (et == vm.floatType()) static_cast<PodArray<f64>*>(a)->v.push_back(v.f);
+    else if (et && et->repr_ == ts::Type::Repr::Inline
+             && et != vm.complexType() && et != vm.fractionType()) {
+        // Phase 4g.8: caller produced a boxed Obj* (e.g. round-trip through
+        // a lambda); unbox into the InlineArray slot.
+        auto* arr = static_cast<InlineArray*>(a);
+        Word scratch[8] = {};
+        unboxInlineDeepTo(vm, et, v.o, scratch);
+        arr->pushSlot(scratch);
+        inlineWalkPointers(scratch, et, /*release_=*/true);
+    }
     else { static_cast<ObjArray*>(a)->push(v.o); }
 }
 
@@ -142,6 +162,16 @@ inline void txArray(VM& vm, u16 dst, Obj* src, ArrayType* at, F&& f) {
         case ArrayBackend::Int: {
             auto* s = static_cast<PodArray<i64>*>(src);
             auto* r = new PodArray<i64>(at); f(s->v, r->v); vm.reg(dst).o = r;
+            return;
+        }
+        case ArrayBackend::Inline: {
+            // txArray's PodArray-shaped lambda uses sv.size()/rv.resize() in
+            // element units, but InlineArray's backing Vec is in Words.
+            // Callers that need Inline support must call a separate path.
+            // Fall through to keep this case explicit -- assignment below
+            // catches the missing impl.
+            (void)src; (void)at; (void)f;
+            vm.reg(dst).o = nullptr;
             return;
         }
         case ArrayBackend::Obj: {

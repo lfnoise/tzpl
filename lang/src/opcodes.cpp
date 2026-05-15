@@ -1158,6 +1158,16 @@ void op_concat_array(VM& vm, Code* pc) {
             podArrayConcat(static_cast<PodArray<i64>*>(vm.reg(a).o),
                            static_cast<PodArray<i64>*>(vm.reg(b).o), arrayType, vm.reg(dst));
             break;
+        case ArrayBackend::Inline: {
+            auto* arrA = static_cast<InlineArray*>(vm.reg(a).o);
+            auto* arrB = static_cast<InlineArray*>(vm.reg(b).o);
+            auto* result = new InlineArray(arrayType);
+            result->reserve(arrA->size() + arrB->size());
+            for (size_t i = 0; i < arrA->size(); ++i) result->pushSlot(arrA->slot(i));
+            for (size_t i = 0; i < arrB->size(); ++i) result->pushSlot(arrB->slot(i));
+            vm.reg(dst).o = result;
+            break;
+        }
         case ArrayBackend::Obj: {
             auto* arrA = static_cast<ObjArray*>(vm.reg(a).o);
             auto* arrB = static_cast<ObjArray*>(vm.reg(b).o);
@@ -1255,6 +1265,12 @@ void op_array_get(VM& vm, Code* pc) {
             vm.reg(dst).i = arr->v[cyclicIndex(idx, arr->v.size())];
             break;
         }
+        case ArrayBackend::Inline: {
+            auto* arr = static_cast<InlineArray*>(vm.reg(src).o);
+            size_t i = cyclicIndex(idx, arr->size());
+            arr->getSlot(i, &vm.reg(dst));
+            break;
+        }
         case ArrayBackend::Obj: {
             auto* arr = static_cast<ObjArray*>(vm.reg(src).o);
             vm.reg(dst).o = arr->get(cyclicIndex(idx, arr->size()));
@@ -1293,6 +1309,17 @@ void op_array_slice(VM& vm, Code* pc) {
         case ArrayBackend::Int:
             podArraySliceFrom(static_cast<PodArray<i64>*>(vm.reg(src).o), arrayType, startIdx, vm.reg(dst));
             break;
+        case ArrayBackend::Inline: {
+            auto* arr = static_cast<InlineArray*>(vm.reg(src).o);
+            auto* result = new InlineArray(arrayType);
+            if (startIdx < arr->size()) {
+                result->reserve(arr->size() - startIdx);
+                for (size_t i = startIdx; i < arr->size(); ++i)
+                    result->pushSlot(arr->slot(i));
+            }
+            vm.reg(dst).o = result;
+            break;
+        }
         case ArrayBackend::Obj: {
             auto* arr = static_cast<ObjArray*>(vm.reg(src).o);
             auto* result = new ObjArray(arrayType);
@@ -1326,6 +1353,9 @@ void op_array_length(VM& vm, Code* pc) {
             break;
         case ArrayBackend::Int:
             vm.reg(dst).i = (i64)static_cast<PodArray<i64>*>(vm.reg(src).o)->v.size();
+            break;
+        case ArrayBackend::Inline:
+            vm.reg(dst).i = (i64)static_cast<InlineArray*>(vm.reg(src).o)->size();
             break;
         case ArrayBackend::Obj:
             vm.reg(dst).i = (i64)static_cast<ObjArray*>(vm.reg(src).o)->size();
@@ -2561,6 +2591,16 @@ void op_make_array(VM& vm, Code* pc) {
             vm.reg(dst).o = arr;
             DISPATCH(3);
         }
+        case ArrayBackend::Inline: {
+            auto* arr = new InlineArray(arrayType);
+            u32 sw = arr->stride();
+            arr->reserve(numElems);
+            for (u16 i = 0; i < numElems; ++i) {
+                arr->pushSlot(&vm.reg((u16)(firstSrc + i * sw)));
+            }
+            vm.reg(dst).o = arr;
+            DISPATCH(3);
+        }
         case ArrayBackend::Obj: {
             auto* arr = new ObjArray(arrayType);
             arr->reserve(numElems);
@@ -2851,6 +2891,12 @@ void op_array_alloc(VM& vm, Code* pc) {
             vm.reg(dst).o = arr;
             break;
         }
+        case ArrayBackend::Inline: {
+            auto* arr = new InlineArray(arrayType);
+            arr->resize(len);
+            vm.reg(dst).o = arr;
+            break;
+        }
         case ArrayBackend::Obj: {
             auto* arr = new ObjArray(arrayType);
             arr->resize(len);
@@ -2895,6 +2941,12 @@ void op_array_set(VM& vm, Code* pc) {
             arr->v[cyclicIndex(idx, arr->v.size())] = vm.reg(valReg).i;
             break;
         }
+        case ArrayBackend::Inline: {
+            auto* arr = static_cast<InlineArray*>(vm.reg(arrReg).o);
+            size_t i = cyclicIndex(idx, arr->size());
+            arr->setSlot(i, &vm.reg(valReg));
+            break;
+        }
         case ArrayBackend::Obj: {
             auto* arr = static_cast<ObjArray*>(vm.reg(arrReg).o);
             arr->set(cyclicIndex(idx, arr->size()), vm.reg(valReg).o);
@@ -2936,6 +2988,12 @@ void op_array_get_dyn(VM& vm, Code* pc) {
         case ArrayBackend::Int: {
             auto* arr = static_cast<PodArray<i64>*>(vm.reg(arrReg).o);
             vm.reg(dst).i = arr->v[cyclicIndex(idx, arr->v.size())];
+            break;
+        }
+        case ArrayBackend::Inline: {
+            auto* arr = static_cast<InlineArray*>(vm.reg(arrReg).o);
+            size_t i = cyclicIndex(idx, arr->size());
+            arr->getSlot(i, &vm.reg(dst));
             break;
         }
         case ArrayBackend::Obj: {

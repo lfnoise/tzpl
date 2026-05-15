@@ -32,6 +32,15 @@ namespace ts {
 void builtin_reverse_array(VM& vm, u16 dst, u16, u16 ab) {
     auto* src = vm.reg(ab).o;
     auto* at = static_cast<ArrayType*>(src->type_);
+    if (arrayBackendFor(at->elemType_) == ArrayBackend::Inline) {
+        auto* s = static_cast<InlineArray*>(src);
+        auto* r = new InlineArray(at);
+        size_t n = s->size();
+        r->reserve(n);
+        for (size_t i = n; i > 0; --i) r->pushSlot(s->slot(i-1));
+        vm.reg(dst).o = r;
+        return;
+    }
     txArray(vm, dst, src, at, [](auto& sv, auto& rv) {
         size_t n = sv.size(); rv.resize(n);
         for (size_t i = 0; i < n; i++) rv[i] = sv[n-1-i];
@@ -75,6 +84,13 @@ void builtin_push_array(VM& vm, u16 dst, u16, u16 ab) {
             vm.reg(dst).o = r;
             return;
         }
+        case ArrayBackend::Inline: {
+            auto* s = static_cast<InlineArray*>(src);
+            auto* r = new InlineArray(at); r->copyFrom(s);
+            r->pushSlot(&vm.reg(ab + 1));
+            vm.reg(dst).o = r;
+            return;
+        }
         case ArrayBackend::Obj: {
             auto* s = static_cast<ObjArray*>(src);
             auto* r = new ObjArray(at); r->copyFrom(s);
@@ -88,6 +104,17 @@ void builtin_push_array(VM& vm, u16 dst, u16, u16 ab) {
 void builtin_pop_array(VM& vm, u16 dst, u16, u16 ab) {
     auto* src = vm.reg(ab).o;
     auto* at = static_cast<ArrayType*>(src->type_);
+    if (arrayBackendFor(at->elemType_) == ArrayBackend::Inline) {
+        auto* s = static_cast<InlineArray*>(src);
+        auto* r = new InlineArray(at);
+        size_t n = s->size();
+        if (n) {
+            r->reserve(n - 1);
+            for (size_t i = 0; i < n - 1; ++i) r->pushSlot(s->slot(i));
+        }
+        vm.reg(dst).o = r;
+        return;
+    }
     txArray(vm, dst, src, at, [](auto& sv, auto& rv) {
         if (!sv.empty()) { rv.resize(sv.size()-1);
             for (size_t i = 0; i < rv.size(); i++) rv[i] = sv[i]; }
@@ -98,6 +125,22 @@ void builtin_muss_array(VM& vm, u16 dst, u16, u16 ab) {
     auto* src = vm.reg(ab).o;
     auto* at = static_cast<ArrayType*>(src->type_);
     auto& rng = vm.rng();
+    if (arrayBackendFor(at->elemType_) == ArrayBackend::Inline) {
+        auto* s = static_cast<InlineArray*>(src);
+        auto* r = new InlineArray(at);
+        r->copyFrom(s);
+        u32 sw = r->stride();
+        for (size_t i = r->size(); i > 1; --i) {
+            size_t j = rng.next() % i;
+            // Raw-word swap: both slots already hold properly-retained
+            // references, so swapping words preserves ARC invariants.
+            Word* a = r->slot(i - 1);
+            Word* b = r->slot(j);
+            for (u32 k = 0; k < sw; ++k) std::swap(a[k], b[k]);
+        }
+        vm.reg(dst).o = r;
+        return;
+    }
     txArray(vm, dst, src, at, [&rng](auto& sv, auto& rv) {
         rv = sv;
         for (size_t i = rv.size(); i > 1; i--) {
@@ -346,6 +389,14 @@ void builtin_picks_array(VM& vm, u16 dst, u16, u16 ab) {
         case ArrayBackend::Int:
             podArrayPicks(static_cast<PodArray<i64>*>(arr), at, n, len, vm.rng(), vm.reg(dst));
             return;
+        case ArrayBackend::Inline: {
+            auto* src = static_cast<InlineArray*>(arr);
+            auto* r = new InlineArray(at);
+            r->reserve((size_t)n);
+            for (i64 i = 0; i < n; ++i) r->pushSlot(src->slot(vm.rng().next() % len));
+            vm.reg(dst).o = r;
+            return;
+        }
         case ArrayBackend::Obj: {
             auto* src = static_cast<ObjArray*>(arr);
             auto* r = new ObjArray(at);
@@ -433,6 +484,15 @@ void builtin_grade_array(VM& vm, u16 dst, u16, u16 ab) {
 void builtin_take_array(VM& vm, u16 dst, u16, u16 ab) {
     auto* src = vm.reg(ab).o; i64 n = vm.reg(ab+1).i;
     auto* at = static_cast<ArrayType*>(src->type_);
+    if (arrayBackendFor(at->elemType_) == ArrayBackend::Inline) {
+        auto* s = static_cast<InlineArray*>(src);
+        auto* r = new InlineArray(at);
+        size_t take = n < 0 ? 0 : ((size_t)n > s->size() ? s->size() : (size_t)n);
+        r->reserve(take);
+        for (size_t i = 0; i < take; ++i) r->pushSlot(s->slot(i));
+        vm.reg(dst).o = r;
+        return;
+    }
     txArray(vm, dst, src, at, [n](auto& sv, auto& rv) {
         size_t take = n < 0 ? 0 : ((size_t)n > sv.size() ? sv.size() : (size_t)n);
         rv.resize(take);
@@ -443,6 +503,15 @@ void builtin_take_array(VM& vm, u16 dst, u16, u16 ab) {
 void builtin_drop_array(VM& vm, u16 dst, u16, u16 ab) {
     auto* src = vm.reg(ab).o; i64 n = vm.reg(ab+1).i;
     auto* at = static_cast<ArrayType*>(src->type_);
+    if (arrayBackendFor(at->elemType_) == ArrayBackend::Inline) {
+        auto* s = static_cast<InlineArray*>(src);
+        auto* r = new InlineArray(at);
+        size_t drop = n < 0 ? 0 : ((size_t)n > s->size() ? s->size() : (size_t)n);
+        r->reserve(s->size() - drop);
+        for (size_t i = drop; i < s->size(); ++i) r->pushSlot(s->slot(i));
+        vm.reg(dst).o = r;
+        return;
+    }
     txArray(vm, dst, src, at, [n](auto& sv, auto& rv) {
         size_t drop = n < 0 ? 0 : ((size_t)n > sv.size() ? sv.size() : (size_t)n);
         rv.resize(sv.size() - drop);
@@ -453,6 +522,15 @@ void builtin_drop_array(VM& vm, u16 dst, u16, u16 ab) {
 void builtin_stride_array(VM& vm, u16 dst, u16, u16 ab) {
     auto* src = vm.reg(ab).o; i64 n = vm.reg(ab+1).i;
     auto* at = static_cast<ArrayType*>(src->type_);
+    if (arrayBackendFor(at->elemType_) == ArrayBackend::Inline) {
+        auto* s = static_cast<InlineArray*>(src);
+        auto* r = new InlineArray(at);
+        if (n > 0) {
+            for (size_t i = 0; i < s->size(); i += (size_t)n) r->pushSlot(s->slot(i));
+        }
+        vm.reg(dst).o = r;
+        return;
+    }
     txArray(vm, dst, src, at, [n](auto& sv, auto& rv) {
         if (n <= 0) return;
         for (size_t i = 0; i < sv.size(); i += (size_t)n) rv.push_back(sv[i]);
@@ -462,6 +540,17 @@ void builtin_stride_array(VM& vm, u16 dst, u16, u16 ab) {
 void builtin_stutter_array(VM& vm, u16 dst, u16, u16 ab) {
     auto* src = vm.reg(ab).o; i64 n = vm.reg(ab+1).i;
     auto* at = static_cast<ArrayType*>(src->type_);
+    if (arrayBackendFor(at->elemType_) == ArrayBackend::Inline) {
+        auto* s = static_cast<InlineArray*>(src);
+        auto* r = new InlineArray(at);
+        if (n > 0) {
+            for (size_t i = 0; i < s->size(); ++i) {
+                for (i64 k = 0; k < n; ++k) r->pushSlot(s->slot(i));
+            }
+        }
+        vm.reg(dst).o = r;
+        return;
+    }
     txArray(vm, dst, src, at, [n](auto& sv, auto& rv) {
         if (n <= 0) return;
         for (size_t i = 0; i < sv.size(); i++)
@@ -519,6 +608,16 @@ void builtin_cat_array(VM& vm, u16 dst, u16, u16 ab) {
         case ArrayBackend::Int:
             podArrayCat(static_cast<PodArray<i64>*>(a), static_cast<PodArray<i64>*>(b), at, vm.reg(dst));
             return;
+        case ArrayBackend::Inline: {
+            auto* sa = static_cast<InlineArray*>(a);
+            auto* sb = static_cast<InlineArray*>(b);
+            auto* r = new InlineArray(at);
+            r->reserve(sa->size() + sb->size());
+            for (size_t i = 0; i < sa->size(); ++i) r->pushSlot(sa->slot(i));
+            for (size_t i = 0; i < sb->size(); ++i) r->pushSlot(sb->slot(i));
+            vm.reg(dst).o = r;
+            return;
+        }
         case ArrayBackend::Obj: {
             auto* sa = static_cast<ObjArray*>(a);
             auto* sb = static_cast<ObjArray*>(b);
@@ -537,9 +636,23 @@ void builtin_join_array(VM& vm, u16 dst, u16, u16 ab) {
     auto* outerType = static_cast<ArrayType*>(src->type_);
     auto* innerType = dynamic_cast<ArrayType*>(outerType->elemType_);
     if (!innerType) { vm.reg(dst).o = src; return; }
+    // Outer array is itself an Array[Array[_]]; outerType's elemType is
+    // ArrayType, which is always a Pointer backend, so the outer array is an
+    // ObjArray of inner array pointers.
     auto* outer = static_cast<ObjArray*>(src);
-    auto* result = makeEmptyArray(innerType);
     Type* et = innerType->elemType_;
+    if (arrayBackendFor(et) == ArrayBackend::Inline) {
+        auto* result = new InlineArray(innerType);
+        for (size_t i = 0; i < outer->size(); i++) {
+            auto* inner = static_cast<InlineArray*>(outer->get(i));
+            if (!inner) continue;
+            for (size_t j = 0; j < inner->size(); ++j)
+                result->pushSlot(inner->slot(j));
+        }
+        vm.reg(dst).o = result;
+        return;
+    }
+    auto* result = makeEmptyArray(innerType);
     for (size_t i = 0; i < outer->size(); i++) {
         if (!outer->get(i)) continue;
         size_t n = getArraySize(vm, outer->get(i), et);
@@ -559,6 +672,11 @@ static void flattenArrayInto(VM& vm, Obj* arr, Obj* result, Type* leafType) {
         for (size_t i = 0; i < oa->size(); i++) {
             if (oa->get(i)) flattenArrayInto(vm, oa->get(i), result, leafType);
         }
+    } else if (arrayBackendFor(leafType) == ArrayBackend::Inline) {
+        auto* inArr = static_cast<InlineArray*>(arr);
+        auto* outArr = static_cast<InlineArray*>(result);
+        for (size_t i = 0; i < inArr->size(); ++i)
+            outArr->pushSlot(inArr->slot(i));
     } else {
         // Leaf level — copy elements into result
         size_t n = getArraySize(vm, arr, et);
@@ -801,6 +919,40 @@ void builtin_zip_array(VM& vm, u16 dst, u16, u16 ab) {
     Vec<Type*> fields{alloc}; fields.push_back(etA); fields.push_back(etB);
     auto* tt = vm.tupleType(fields);
     auto* resAT = vm.arrayType(tt);
+    // Phase 4g.8: Array of Inline tuple lives in InlineArray, stride = the
+    // tuple's sizeWords (e.g. 2 for (Int, Int), 2 for (Int, String)).
+    if (tt->repr_ == ts::Type::Repr::Inline) {
+        auto* result = new InlineArray(resAT);
+        result->reserve(n);
+        Word scratch[8] = {};
+        for (size_t i = 0; i < n; i++) {
+            // Lay the tuple's two field payloads at their wordOffsets.
+            for (u32 k = 0; k < tt->sizeWords_; ++k) scratch[k].i = 0;
+            auto const& f0 = tt->layout_[0];
+            auto const& f1 = tt->layout_[1];
+            Word wa = getArrayElem(vm, a, etA, i);
+            Word wb = getArrayElem(vm, b, etB, i);
+            if (f0.type && f0.type->repr_ == ts::Type::Repr::Inline
+                && f0.type != vm.complexType() && f0.type != vm.fractionType()) {
+                unboxInlineDeepTo(vm, f0.type, wa.o, scratch + f0.wordOffset);
+            } else {
+                scratch[f0.wordOffset] = wa;
+                if (storesObjPtr(f0.type) && wa.o) wa.o->retain();
+            }
+            if (f1.type && f1.type->repr_ == ts::Type::Repr::Inline
+                && f1.type != vm.complexType() && f1.type != vm.fractionType()) {
+                unboxInlineDeepTo(vm, f1.type, wb.o, scratch + f1.wordOffset);
+            } else {
+                scratch[f1.wordOffset] = wb;
+                if (storesObjPtr(f1.type) && wb.o) wb.o->retain();
+            }
+            result->pushSlot(scratch);
+            // pushSlot retained again; balance by walking scratch with release.
+            inlineWalkPointers(scratch, tt, /*release_=*/true);
+        }
+        vm.reg(dst).o = result;
+        return;
+    }
     auto* result = new ObjArray(resAT);
     for (size_t i = 0; i < n; i++) {
         auto* tup = Tuple::create(tt, 2);
@@ -820,6 +972,30 @@ void builtin_enumerate_array(VM& vm, u16 dst, u16, u16 ab) {
     Vec<Type*> fields{alloc}; fields.push_back(vm.intType()); fields.push_back(et);
     auto* tt = vm.tupleType(fields);
     auto* resAT = vm.arrayType(tt);
+    // Phase 4g.8: Array of Inline tuple lives in InlineArray.
+    if (tt->repr_ == ts::Type::Repr::Inline) {
+        auto* result = new InlineArray(resAT);
+        result->reserve(n);
+        Word scratch[8] = {};
+        for (size_t i = 0; i < n; i++) {
+            for (u32 k = 0; k < tt->sizeWords_; ++k) scratch[k].i = 0;
+            auto const& f0 = tt->layout_[0];
+            auto const& f1 = tt->layout_[1];
+            scratch[f0.wordOffset].i = (i64)i;
+            Word elem = getArrayElem(vm, src, et, i);
+            if (f1.type && f1.type->repr_ == ts::Type::Repr::Inline
+                && f1.type != vm.complexType() && f1.type != vm.fractionType()) {
+                unboxInlineDeepTo(vm, f1.type, elem.o, scratch + f1.wordOffset);
+            } else {
+                scratch[f1.wordOffset] = elem;
+                if (storesObjPtr(f1.type) && elem.o) elem.o->retain();
+            }
+            result->pushSlot(scratch);
+            inlineWalkPointers(scratch, tt, /*release_=*/true);
+        }
+        vm.reg(dst).o = result;
+        return;
+    }
     auto* result = new ObjArray(resAT);
     for (size_t i = 0; i < n; i++) {
         auto* tup = Tuple::create(tt, 2);

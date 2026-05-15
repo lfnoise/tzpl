@@ -64,6 +64,11 @@ VMString wordsToString(Word const* base, Type* type);
 // composite args (no box round-trip).
 size_t hashWords(Word const* base, Type* type);
 
+// Phase 4g.8: structural equality for two multi-word inline payloads of
+// the same `type`. Mirrors hashWords' traversal. For non-inline types
+// (atomic, Obj*) it delegates to WordEqual on a single Word.
+bool wordsEqual(Word const* a, Word const* b, Type* type);
+
 // Phase 4g.2: walk the layout of an Inline composite at `base` and retain
 // (or release, with `release_=true`) every embedded Obj* pointer field.
 // Recurses into nested Inline composite fields rather than treating them
@@ -79,6 +84,18 @@ void inlineWalkPointers(Word* base, Type* type, bool release_);
 class Obj;
 Obj* boxInlineDeep(VM& vm, Type* type, u16 srcSlot);
 void unboxInlineDeep(VM& vm, Type* type, Obj* obj, u16 dstSlot);
+
+// Phase 4g.8: Word*-buffer variant of unboxInlineDeep for callers that own
+// the destination memory directly (e.g. InlineArray slots, scratch buffers).
+// Mirrors the register-based version field-for-field.
+void unboxInlineDeepTo(VM& vm, Type* type, Obj* obj, Word* dst);
+
+// Phase 4g.8: Word*-buffer variant of boxInlineDeep. Reads the inline
+// composite payload at `src` and returns a freshly-allocated heap Tuple/
+// Struct/Enum with embedded Obj* fields retained. Used by legacy 1-Word
+// builtin helpers (getArrayElem, etc.) to keep working when the source
+// container is an InlineArray.
+Obj* boxInlineDeepFrom(VM& vm, Type* type, Word const* src);
 
 // CodeBlock - compiled function holding register-based instructions
 // System-allocated during compilation, never garbage collected.
@@ -184,17 +201,18 @@ public:
 };
 
 // Phase 4e: array storage backend selector. The runtime instantiates one of
-// PodArray<i64>, PodArray<f64>, PodArray<x64>, PodArray<r64>, or ObjArray
-// based on the static element type. Every array opcode and array builtin
-// dispatches on this enum to pick the right concrete subclass; `Obj` keeps
-// the legacy boxed-pointer fallback for everything that is not a recognized
-// inline value type.
+// PodArray<i64>, PodArray<f64>, PodArray<x64>, PodArray<r64>, InlineArray,
+// or ObjArray based on the static element type. Every array opcode and
+// array builtin dispatches on this enum to pick the right concrete subclass;
+// `Obj` keeps the legacy boxed-pointer fallback for everything that is not
+// a recognized inline value type.
 enum class ArrayBackend : u8 {
     Int,        // PodArray<i64>
     Float,      // PodArray<f64>
-    Complex,    // PodArray<x64>  -- inline 2 f64s per element
-    Fraction,   // PodArray<r64>  -- inline 2 i64s per element
-    Obj         // ObjArray       -- one Obj* per element
+    Complex,    // PodArray<x64>     -- inline 2 f64s per element
+    Fraction,   // PodArray<r64>     -- inline 2 i64s per element
+    Inline,     // InlineArray       -- N consecutive Words per element (Phase 4g.8)
+    Obj         // ObjArray          -- one Obj* per element
 };
 
 inline ArrayBackend arrayBackendFor(Type const* elemType) {
@@ -202,6 +220,8 @@ inline ArrayBackend arrayBackendFor(Type const* elemType) {
     if (isInlineFractionElem(elemType)) return ArrayBackend::Fraction;
     if (storesF64(elemType))            return ArrayBackend::Float;
     if (!storesObjPtr(elemType))        return ArrayBackend::Int;
+    if (elemType && elemType->repr_ == Type::Repr::Inline)
+        return ArrayBackend::Inline;
     return ArrayBackend::Obj;
 }
 
@@ -312,6 +332,57 @@ public:
     void releaseChildren() override {
         for (auto* obj : v_) { if (obj) obj->release(); }
     }
+};
+
+// Phase 4g.8: Array of inline composite elements. Each element occupies
+// stride_ consecutive Words in the backing storage. Indexing produces a
+// pointer to the element's first Word, which the caller copies into/out of
+// a register slot. Embedded Obj* fields are ARC-walked via
+// inlineWalkPointers, so e.g. an Array[(String, Int)] retains/releases the
+// String slot when the array is destroyed.
+class InlineArray : public Obj {
+    Vec<Word> v_;
+    u32 stride_ = 1;      // elemType_->sizeWords_
+public:
+    InlineArray(ArrayType* type);
+
+    u32 stride() const { return stride_; }
+    size_t size() const { return v_.size() / stride_; }
+    bool empty() const { return v_.empty(); }
+
+    Word*       slot(size_t i)       { return &v_[i * stride_]; }
+    Word const* slot(size_t i) const { return &v_[i * stride_]; }
+
+    Type* elemType() const {
+        auto* at = static_cast<ArrayType*>(type_);
+        return at->elemType_;
+    }
+
+    void resize(size_t n) { v_.resize(n * stride_); }
+    void reserve(size_t n) { v_.reserve(n * stride_); }
+
+    // Append one element from src (stride_ consecutive Words). Retains any
+    // embedded Obj* fields.
+    void pushSlot(Word const* src);
+
+    // Overwrite element i with src (stride_ consecutive Words). Releases
+    // the old element's embedded Obj* fields then retains the new ones.
+    void setSlot(size_t i, Word const* src);
+
+    // Copy element i into dst (stride_ consecutive Words). Retains any
+    // embedded Obj* fields in dst so the caller owns the copy.
+    void getSlot(size_t i, Word* dst) const;
+
+    // Replace contents with another InlineArray's storage. Handles ARC for
+    // both old and new elements.
+    void copyFrom(InlineArray const* src);
+
+    Vec<Word>&       rawVec()       { return v_; }
+    Vec<Word> const& rawVec() const { return v_; }
+
+    VMString str() const override;
+
+    void releaseChildren() override;
 };
 
 // Forward declaration

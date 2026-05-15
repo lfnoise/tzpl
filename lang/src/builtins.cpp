@@ -669,6 +669,20 @@ static void builtin_keys_map(VM& vm, u16 dst, u16, u16 ab) {
             vm.reg(dst).o = arr;
             return;
         }
+        case ArrayBackend::Inline: {
+            // Map keys are still stored as boxed Obj* (Map migration not yet
+            // done); unbox each into the inline array slot.
+            auto* arr = new InlineArray(arrType);
+            arr->reserve(map->entries_.size());
+            Word scratch[8] = {};
+            for (auto const& [k, v] : map->entries_) {
+                unboxInlineDeepTo(vm, kt, k.o, scratch);
+                arr->pushSlot(scratch);
+                inlineWalkPointers(scratch, kt, /*release_=*/true);
+            }
+            vm.reg(dst).o = arr;
+            return;
+        }
         case ArrayBackend::Obj: {
             auto* arr = new ObjArray(arrType);
             for (auto const& [k, v] : map->entries_) arr->push(k.o);
@@ -712,6 +726,18 @@ static void builtin_values_map(VM& vm, u16 dst, u16, u16 ab) {
         case ArrayBackend::Int: {
             auto* arr = new PodArray<i64>(arrType);
             for (auto const& [k, v] : map->entries_) arr->v.push_back(v.i);
+            vm.reg(dst).o = arr;
+            return;
+        }
+        case ArrayBackend::Inline: {
+            auto* arr = new InlineArray(arrType);
+            arr->reserve(map->entries_.size());
+            Word scratch[8] = {};
+            for (auto const& [k, v] : map->entries_) {
+                unboxInlineDeepTo(vm, vt, v.o, scratch);
+                arr->pushSlot(scratch);
+                inlineWalkPointers(scratch, vt, /*release_=*/true);
+            }
             vm.reg(dst).o = arr;
             return;
         }
@@ -1429,6 +1455,18 @@ static void builtin_toArray_set(VM& vm, u16 dst, u16, u16 ab) {
         case ArrayBackend::Int: {
             auto* arr = new PodArray<i64>(arrType);
             for (auto const& elem : set->entries_) arr->v.push_back(elem.i);
+            vm.reg(dst).o = arr;
+            return;
+        }
+        case ArrayBackend::Inline: {
+            auto* arr = new InlineArray(arrType);
+            arr->reserve(set->entries_.size());
+            Word scratch[8] = {};
+            for (auto const& elem : set->entries_) {
+                unboxInlineDeepTo(vm, elemType, elem.o, scratch);
+                arr->pushSlot(scratch);
+                inlineWalkPointers(scratch, elemType, /*release_=*/true);
+            }
             vm.reg(dst).o = arr;
             return;
         }

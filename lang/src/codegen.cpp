@@ -4227,29 +4227,31 @@ u16 CodeGen::genAutoMapBinaryOp(BinaryOpExpr* expr) {
             && t != compiler_.complexType()
             && t != compiler_.fractionType();
     };
+    // Phase 4g.8: InlineArray returns multi-word inline slots directly via
+    // op_array_get_dyn -- no unboxing needed.
+    auto allocElemSlot = [&](Type* t) {
+        u16 nw = typeSlotWords(t);
+        u16 r = nextReg_;
+        nextReg_ = (u16)(nextReg_ + nw);
+        if (nextReg_ > maxReg_) maxReg_ = nextReg_;
+        return r;
+    };
     u16 leftElemReg = leftReg;
     if (expr->leftAutoMap) {
         auto* arrType = dynamic_cast<ArrayType*>(leftType);
-        leftElemReg = allocReg();
+        leftElemReg = allocElemSlot(leftElemType);
         emitOp(op_array_get_dyn);
         emitRegs(leftElemReg, leftReg, iReg);
         emitPtr(arrType);
-        // Phase 4g.2: Inline composite elements live boxed in ObjArray; unbox.
-        if (needsBoxAuto(leftElemType)) {
-            leftElemReg = emitUnboxIfInline(leftElemReg, leftElemType);
-        }
     }
 
     u16 rightElemReg = rightReg;
     if (expr->rightAutoMap) {
         auto* arrType = dynamic_cast<ArrayType*>(rightType);
-        rightElemReg = allocReg();
+        rightElemReg = allocElemSlot(rightElemType);
         emitOp(op_array_get_dyn);
         emitRegs(rightElemReg, rightReg, iReg);
         emitPtr(arrType);
-        if (needsBoxAuto(rightElemType)) {
-            rightElemReg = emitUnboxIfInline(rightElemReg, rightElemType);
-        }
     }
 
     // --- Phase 7: Compute per-element result ---
@@ -4275,21 +4277,27 @@ u16 CodeGen::genAutoMapBinaryOp(BinaryOpExpr* expr) {
             elemResultReg = emitUnboxIfInline(elemResultReg, scalarResultType);
         }
     } else if (isCompositeNumeric(scalarResultType)) {
-        // Composite numeric (e.g. Tuple + Scalar). Phase 4g.2: box Inline
-        // tuple operands; the dispatch handler walks heap Tuple* fields.
-        // Result of dispatchTupleBinop is already a heap Tuple*, which is
-        // also the right shape to store into an ObjArray slot -- so we do
-        // NOT need the Phase 8 inline-box step for composite-arith results.
-        u16 lElem = needsBoxAuto(leftElemType) ? emitBoxIfInline(leftElemReg, leftElemType) : leftElemReg;
-        u16 rElem = needsBoxAuto(rightElemType) ? emitBoxIfInline(rightElemReg, rightElemType) : rightElemReg;
-        elemResultReg = allocReg();
-        emitOp(getCompositeArithOp(expr->op));
-        emitRegs(elemResultReg, lElem, rElem);
-        emitPtr(scalarResultType);
-        emitPtr(leftElemType);
-        emitPtr(rightElemType);
-        // Composite arith returns a heap Tuple*; store directly without
-        // the Phase 8 inline-box step.
+        // Composite numeric per-element (e.g. Tuple + Scalar). Phase 4g.8:
+        // when the result is Inline, use the inline composite arith op so
+        // the multi-word result lives in the destination slot and can be
+        // copied straight into the InlineArray.
+        if (needsBoxAuto(scalarResultType)) {
+            elemResultReg = allocSlot(scalarResultType);
+            emitOp(getCompositeArithOpInline(expr->op));
+            emitRegs(elemResultReg, leftElemReg, rightElemReg);
+            emitPtr(scalarResultType);
+            emitPtr(leftElemType);
+            emitPtr(rightElemType);
+        } else {
+            u16 lElem = needsBoxAuto(leftElemType) ? emitBoxIfInline(leftElemReg, leftElemType) : leftElemReg;
+            u16 rElem = needsBoxAuto(rightElemType) ? emitBoxIfInline(rightElemReg, rightElemType) : rightElemReg;
+            elemResultReg = allocReg();
+            emitOp(getCompositeArithOp(expr->op));
+            emitRegs(elemResultReg, lElem, rElem);
+            emitPtr(scalarResultType);
+            emitPtr(leftElemType);
+            emitPtr(rightElemType);
+        }
         emitOp(op_array_set);
         emitRegs(resultArrReg, iReg, elemResultReg);
         emitPtr(resultArrayType);
@@ -4324,13 +4332,9 @@ u16 CodeGen::genAutoMapBinaryOp(BinaryOpExpr* expr) {
     }
 
     // --- Phase 8: Store in result array ---
-    // Phase 4g.2: ObjArray expects 1-Word boxed pointer for Inline composite
-    // element types; box the multi-word inline result back before storing.
-    u16 storeReg = needsBoxAuto(scalarResultType)
-        ? emitBoxIfInline(elemResultReg, scalarResultType)
-        : elemResultReg;
+    // Phase 4g.8: InlineArray takes the multi-word inline element directly.
     emitOp(op_array_set);
-    emitRegs(resultArrReg, iReg, storeReg);
+    emitRegs(resultArrReg, iReg, elemResultReg);
     emitPtr(resultArrayType);
 
     // --- Phase 9: Increment and loop ---
@@ -5193,25 +5197,21 @@ u16 CodeGen::genAutoMapCall(CallExpr_* expr) {
                 && elemType->repr_ == ts::Type::Repr::Inline
                 && elemType != compiler_.complexType()
                 && elemType != compiler_.fractionType();
-            // Extract element at runtime index. Inline composite elements are
-            // stored boxed in ObjArray (1 word); other inline backends land
-            // multi-word values straight into the slot.
-            // Phase 4g.6: when the callee is a builtin that accepts inline-
-            // composite args natively (or a non-builtin function, which always
-            // does), we must unbox the element into a multi-word slot. Legacy
-            // builtins still receive the 1-word boxed pointer.
-            u16 elemReg = elemInlineComposite ? allocReg() : targetReg;
+            // Phase 4g.8: InlineArray returns the inline element multi-word
+            // directly into a sizeWords_-wide slot. For legacy builtins that
+            // still take a 1-word boxed pointer, box the unboxed element.
+            u16 elemReg = elemInlineComposite ? allocSlot(elemType) : targetReg;
             emitOp(op_array_get_dyn);
             emitRegs(elemReg, argRegs[i], iReg);
             emitPtr(arrType);
             if (elemInlineComposite) {
                 bool boxedAtBoundary = expr->isBuiltinCall && !expr->builtinAcceptsInlineArgs;
                 if (boxedAtBoundary) {
-                    if (elemReg != targetReg) { emitOp(op_mov); emitRegs(targetReg, elemReg); }
+                    u16 boxed = emitBoxIfInline(elemReg, elemType);
+                    if (boxed != targetReg) { emitOp(op_mov); emitRegs(targetReg, boxed); }
                 } else {
-                    u16 unboxed = emitUnboxIfInline(elemReg, elemType);
-                    if (unboxed != targetReg) {
-                        emitMoveN(targetReg, unboxed, slotW);
+                    if (elemReg != targetReg) {
+                        emitMoveN(targetReg, elemReg, slotW);
                     }
                 }
             }
@@ -5268,17 +5268,10 @@ u16 CodeGen::genAutoMapCall(CallExpr_* expr) {
     }
 
     // --- Phase 8: Store result in result array (skip for Void) ---
+    // Phase 4g.8: InlineArray takes the multi-word inline result directly.
     if (!isVoidReturn) {
-        // For Inline composite element types, ObjArray expects 1-Word boxed;
-        // box the multi-word inline result back before storing.
-        bool resInlineComposite = returnT
-            && returnT->repr_ == ts::Type::Repr::Inline
-            && returnT != compiler_.complexType()
-            && returnT != compiler_.fractionType();
-        u16 storeReg = (resInlineComposite && !builtinReturnsInlineComposite)
-            ? emitBoxIfInline(callResultReg, returnT) : callResultReg;
         emitOp(op_array_set);
-        emitRegs(resultArrReg, iReg, storeReg);
+        emitRegs(resultArrReg, iReg, callResultReg);
         emitPtr(resultArrayType);
     }
 
@@ -5874,7 +5867,8 @@ u16 CodeGen::genExplicitImplicitAutoMapCall(CallExpr_* expr) {
         emitRegs(loop.condReg, loop.iReg, loop.lenReg);
         loop.exitJump = emitJump(op_jump_if_false, loop.condReg);
 
-        // Extract sub-arrays/elements from each explicit @ arg
+        // Extract sub-arrays/elements from each explicit @ arg. Phase 4g.8:
+        // peeled elements may be multi-word inline composites.
         for (size_t i = 0; i < argc; ++i) {
             if (expr->autoMapArgs[i].depth == 0) continue;
 
@@ -5883,8 +5877,9 @@ u16 CodeGen::genExplicitImplicitAutoMapCall(CallExpr_* expr) {
                 argType = dynamic_cast<ArrayType*>(argType)->elemType_;
             }
             auto* argArrType = dynamic_cast<ArrayType*>(argType);
+            Type* peeledElem = argArrType->elemType_;
 
-            u16 subReg = allocReg();
+            u16 subReg = allocSlot(peeledElem);
             emitOp(op_array_get_dyn);
             emitRegs(subReg, currentExplicitRegs[i], loop.iReg);
             emitPtr(argArrType);
@@ -5959,41 +5954,41 @@ u16 CodeGen::genExplicitImplicitAutoMapCall(CallExpr_* expr) {
         }
 
         if (expr->autoMapArgs[i].depth > 0) {
-            // Explicit @ arg: already peeled to scalar by outer loops
+            // Explicit @ arg: already peeled to scalar by outer loops.
+            // Phase 4g.8: peeled element from InlineArray is multi-word.
             u16 srcReg = currentExplicitRegs[i];
             Type* elemType = expr->args[i]->resolvedType;
             for (int d = 0; d < expr->autoMapArgs[i].depth; ++d) {
                 elemType = dynamic_cast<ArrayType*>(elemType)->elemType_;
             }
-            // Inline composite element peeled from ObjArray is a boxed pointer;
-            // unbox into multi-word call slot for non-builtin calls.
-            if (inlineCompositeT(elemType) && !expr->isBuiltinCall) {
-                u16 unboxed = emitUnboxIfInline(srcReg, elemType);
-                if (unboxed != targetReg) emitMoveN(targetReg, unboxed, slotW);
+            if (inlineCompositeT(elemType) && expr->isBuiltinCall) {
+                srcReg = emitBoxIfInline(srcReg, elemType);
+                if (srcReg != targetReg) { emitOp(op_mov); emitRegs(targetReg, srcReg); }
             } else {
                 if (paramType && elemType != paramType) {
                     srcReg = ensureType(srcReg, elemType, paramType);
                 }
                 if (srcReg != targetReg) {
-                    emitOp(op_mov);
-                    emitRegs(targetReg, srcReg);
+                    if (slotW <= 1) { emitOp(op_mov); emitRegs(targetReg, srcReg); }
+                    else { emitMoveN(targetReg, srcReg, slotW); }
                 }
             }
         } else if (i < expr->innerAutoMapArgs.size() && expr->innerAutoMapArgs[i].depth > 0) {
-            // Implicit auto-map arg: extract from inner loop
+            // Implicit auto-map arg: extract from inner loop. Phase 4g.8:
+            // InlineArray returns multi-word inline element direct.
             auto* arrType = dynamic_cast<ArrayType*>(expr->args[i]->resolvedType);
             Type* elemType = arrType->elemType_;
             bool elemInlineComposite = inlineCompositeT(elemType);
-            u16 elemReg = elemInlineComposite ? allocReg() : targetReg;
+            u16 elemReg = elemInlineComposite ? allocSlot(elemType) : targetReg;
             emitOp(op_array_get_dyn);
             emitRegs(elemReg, argRegs[i], innerIReg);
             emitPtr(arrType);
             if (elemInlineComposite) {
                 if (expr->isBuiltinCall) {
-                    if (elemReg != targetReg) { emitOp(op_mov); emitRegs(targetReg, elemReg); }
+                    u16 boxed = emitBoxIfInline(elemReg, elemType);
+                    if (boxed != targetReg) { emitOp(op_mov); emitRegs(targetReg, boxed); }
                 } else {
-                    u16 unboxed = emitUnboxIfInline(elemReg, elemType);
-                    if (unboxed != targetReg) emitMoveN(targetReg, unboxed, slotW);
+                    if (elemReg != targetReg) emitMoveN(targetReg, elemReg, slotW);
                 }
             } else if (paramType && elemType != paramType) {
                 u16 promoted = ensureType(targetReg, elemType, paramType);
@@ -6036,9 +6031,9 @@ u16 CodeGen::genExplicitImplicitAutoMapCall(CallExpr_* expr) {
     if (builtinReturnsInline) {
         callResultReg = emitUnboxIfInline(callResultReg, returnT);
     }
-    // Box the multi-word inline result back into a 1-Word pointer for
-    // op_array_set into the inner ObjArray storage.
-    u16 storeReg = retInlineComposite ? emitBoxIfInline(callResultReg, returnT) : callResultReg;
+    // Phase 4g.8: InlineArray takes the multi-word inline result directly.
+    (void)retInlineComposite;
+    u16 storeReg = callResultReg;
 
     // Store in inner result array (skip for Void)
     if (!isVoidReturn) {
@@ -6237,16 +6232,17 @@ u16 CodeGen::genCartesianCall(CallExpr_* expr) {
             auto* arrType = dynamic_cast<ArrayType*>(expr->args[i]->resolvedType);
             Type* elemType = arrType->elemType_;
             bool elemInlineComposite = inlineCompositeT(elemType);
-            u16 elemReg = elemInlineComposite ? allocReg() : targetReg;
+            // Phase 4g.8: InlineArray returns multi-word inline element direct.
+            u16 elemReg = elemInlineComposite ? allocSlot(elemType) : targetReg;
             emitOp(op_array_get_dyn);
             emitRegs(elemReg, argRegs[i], (ci > 0 ? iRegs[ci] : iRegs[1]));
             emitPtr(arrType);
             if (elemInlineComposite) {
                 if (expr->isBuiltinCall) {
-                    if (elemReg != targetReg) { emitOp(op_mov); emitRegs(targetReg, elemReg); }
+                    u16 boxed = emitBoxIfInline(elemReg, elemType);
+                    if (boxed != targetReg) { emitOp(op_mov); emitRegs(targetReg, boxed); }
                 } else {
-                    u16 unboxed = emitUnboxIfInline(elemReg, elemType);
-                    if (unboxed != targetReg) emitMoveN(targetReg, unboxed, slotW);
+                    if (elemReg != targetReg) emitMoveN(targetReg, elemReg, slotW);
                 }
             }
             if (paramType && elemType != paramType) {
@@ -6286,9 +6282,9 @@ u16 CodeGen::genCartesianCall(CallExpr_* expr) {
     if (builtinReturnsInline) {
         callResultReg = emitUnboxIfInline(callResultReg, returnT);
     }
-    // Box the multi-word inline result back into a 1-Word pointer for
-    // op_array_set into the ObjArray storage.
-    u16 storeReg = retInlineComposite ? emitBoxIfInline(callResultReg, returnT) : callResultReg;
+    // Phase 4g.8: InlineArray takes the multi-word inline result directly.
+    u16 storeReg = callResultReg;
+    (void)retInlineComposite;
 
     // --- Phase 7: Store result and close loops ---
     if (maxCartesian >= 2) {
@@ -6652,32 +6648,19 @@ u16 CodeGen::genArrayLiteral(ArrayLiteralExpr* expr) {
     // Generate all element values into consecutive registers.
     // Phase 4e: inline-element arrays (Array[Complex] / Array[Fraction])
     // use PodArray<x64>/<r64> backends and read 2 consecutive Words per
-    // element; lay them out at multi-word stride. Other element types
-    // stride by 1 Word. Phase 4g.2: Inline structs/tuples ride the ObjArray
-    // backend (1 Word boxed pointer per element); box each element.
-    bool inlineCompositeElem = elemType
-        && elemType->repr_ == ts::Type::Repr::Inline
-        && elemType != compiler_.complexType()
-        && elemType != compiler_.fractionType();
-    u32 sw = inlineCompositeElem ? 1u : typeSlotWords(elemType);
+    // element; lay them out at multi-word stride. Phase 4g.8: Inline
+    // structs/tuples/enums now ride the InlineArray backend and live as
+    // sizeWords_ consecutive Words per element -- no boxing.
+    u32 sw = typeSlotWords(elemType);
     u16 elemBase = nextReg_;
     for (size_t i = 0; i < count; ++i) {
         u16 elemReg = genExpr(static_cast<Expr*>(expr->elements[i].get()));
         Type* elemExprType = expr->elements[i]->resolvedType;
         elemReg = ensureType(elemReg, elemExprType, elemType);
-        if (inlineCompositeElem) {
-            elemReg = emitBoxIfInline(elemReg, elemType);
-        }
         u16 dstSlot = (u16)(elemBase + (u16)i * sw);
-        if (inlineCompositeElem) {
-            if (elemReg != dstSlot) { emitOp(op_mov); emitRegs(dstSlot, elemReg); }
-            u16 next = (u16)(dstSlot + 1);
-            if (nextReg_ < next) { nextReg_ = next; if (nextReg_ > maxReg_) maxReg_ = nextReg_; }
-        } else {
-            emitArgPlacement(dstSlot, elemReg, elemType);
-            u16 next = (u16)(dstSlot + sw);
-            if (nextReg_ < next) { nextReg_ = next; if (nextReg_ > maxReg_) maxReg_ = nextReg_; }
-        }
+        emitArgPlacement(dstSlot, elemReg, elemType);
+        u16 next = (u16)(dstSlot + sw);
+        if (nextReg_ < next) { nextReg_ = next; if (nextReg_ > maxReg_) maxReg_ = nextReg_; }
     }
 
     u16 dst = allocReg();
@@ -6965,10 +6948,9 @@ u16 CodeGen::genAutoMapStructLiteral(StructLiteralExpr* expr) {
     emitPtr(stype);
 
     // --- Phase 8: Store struct in result array ---
-    // ObjArray expects a 1-Word boxed pointer; box Inline struct first.
-    u16 storeReg = inlineStruct ? emitBoxIfInline(structReg, stype) : structReg;
+    // Phase 4g.8: InlineArray takes the multi-word inline struct directly.
     emitOp(op_array_set);
-    emitRegs(resultArrReg, iReg, storeReg);
+    emitRegs(resultArrReg, iReg, structReg);
     emitPtr(resultArrayType);
 
     // --- Phase 9: Increment and loop ---
@@ -7109,9 +7091,10 @@ u16 CodeGen::genAutoMapTupleStruct(CallExpr_* expr) {
     }
 
     // --- Phase 8: Store struct in result array ---
-    u16 storeReg = inlineStruct ? emitBoxIfInline(structReg, stype) : structReg;
+    // Phase 4g.8: InlineArray takes the multi-word inline struct directly.
+    (void)inlineStruct;
     emitOp(op_array_set);
-    emitRegs(resultArrReg, iReg, storeReg);
+    emitRegs(resultArrReg, iReg, structReg);
     emitPtr(resultArrayType);
 
     // --- Phase 9: Increment and loop ---
@@ -7468,9 +7451,10 @@ u16 CodeGen::genAutoMapTupleLiteral(TupleLiteralExpr* expr) {
     emitPtr(tupType);
 
     // --- Phase 8: Store in result array ---
-    u16 storeReg = inlineTuple ? emitBoxIfInline(tupReg, tupType) : tupReg;
+    // Phase 4g.8: InlineArray takes the multi-word inline tuple directly.
+    (void)inlineTuple;
     emitOp(op_array_set);
-    emitRegs(resultArrReg, iReg, storeReg);
+    emitRegs(resultArrReg, iReg, tupReg);
     emitPtr(resultArrayType);
 
     // --- Phase 9: Increment and loop ---
@@ -7612,8 +7596,9 @@ u16 CodeGen::genCartesianTupleLiteral(TupleLiteralExpr* expr) {
 
     // --- Phase 6: Close loops (innermost to outermost) ---
     {
-        u16 storeReg = inlineTuple ? emitBoxIfInline(tupReg, tupType) : tupReg;
-        u16 prevReg = storeReg;
+        // Phase 4g.8: InlineArray takes the multi-word inline tuple directly.
+        (void)inlineTuple;
+        u16 prevReg = tupReg;
         for (int level = maxCartesian; level >= 1; --level) {
             emitOp(op_array_set); emitRegs(resultRegs[level], iRegs[level], prevReg); emitPtr(resultTypes[level]);
             emitOp(op_add_int); emitRegs(iRegs[level], iRegs[level], oneReg);
@@ -7777,7 +7762,8 @@ u16 CodeGen::genCartesianStructLiteral(StructLiteralExpr* expr) {
     // --- Phase 6: Close loops (innermost to outermost) ---
     {
         // ObjArray expects 1-Word per element; box Inline composite first.
-        u16 storeReg = inlineStruct ? emitBoxIfInline(structReg, stype) : structReg;
+        // Phase 4g.8: InlineArray takes the multi-word inline struct directly.
+        u16 storeReg = structReg;
         u16 prevReg = storeReg;
         for (int level = maxCartesian; level >= 1; --level) {
             emitOp(op_array_set); emitRegs(resultRegs[level], iRegs[level], prevReg); emitPtr(resultTypes[level]);
@@ -7927,7 +7913,8 @@ u16 CodeGen::genCartesianTupleStruct(CallExpr_* expr) {
 
     // --- Phase 6: Close loops (innermost to outermost) ---
     {
-        u16 storeReg = inlineStruct ? emitBoxIfInline(structReg, stype) : structReg;
+        // Phase 4g.8: InlineArray takes the multi-word inline struct directly.
+        u16 storeReg = structReg;
         u16 prevReg = storeReg;
         for (int level = maxCartesian; level >= 1; --level) {
             emitOp(op_array_set); emitRegs(resultRegs[level], iRegs[level], prevReg); emitPtr(resultTypes[level]);
@@ -7985,21 +7972,15 @@ u16 CodeGen::genIndexExpr(IndexExpr_* expr) {
         emitRegs(dst, objReg, idxReg);
         return dst;
     }
-    // Array subscript: array[index]. Phase 4e: inline element types land
-    // as multi-word inline values straight into a 2-word slot for Complex/
-    // Fraction. Phase 4g.2: Inline structs/tuples ride the ObjArray backend
-    // (boxed 1-Word pointer) and must be unboxed after read.
+    // Array subscript: array[index]. Phase 4g.8: Inline structs/tuples/enums
+    // ride the InlineArray backend and land as multi-word inline values
+    // straight into a sizeWords_ register slot.
     auto* arrType = dynamic_cast<ArrayType*>(expr->object->resolvedType);
     Type* elemT = arrType ? arrType->elemType_ : nullptr;
-    bool inlineCompositeElem = elemT && elemT->repr_ == ts::Type::Repr::Inline
-        && elemT != compiler_.complexType() && elemT != compiler_.fractionType();
-    u16 dst = inlineCompositeElem ? allocReg() : allocSlot(elemT);
+    u16 dst = allocSlot(elemT);
     emitOp(op_array_get_dyn);
     emitRegs(dst, objReg, idxReg);
     emitPtr(arrType);
-    if (inlineCompositeElem) {
-        return emitUnboxIfInline(dst, elemT);
-    }
     return dst;
 }
 
@@ -8047,18 +8028,30 @@ u16 CodeGen::emitIndexLookup(u16 srcReg, Type* srcType, u16 idxReg, Type* idxTyp
         emitRegs(idxValReg, idxReg, jReg);
         emitPtr(idxArrType);
 
-        // Scalar lookup
-        u16 valReg = allocReg();
+        // Scalar lookup. Phase 4g.8: map_get_option produces a boxed Enum*;
+        // when the result Option is Inline, unbox into a multi-word slot
+        // so InlineArray's setSlot reads correct stride words.
+        u16 valReg;
+        Type* elemResT = resultArrayType->elemType_;
         if (auto* mapType = dynamic_cast<MapType*>(srcType)) {
+            Type* optType = compiler_.optionType(mapType->valueType_);
+            valReg = allocReg();
             idxValReg = ensureType(idxValReg, idxArrType->elemType_, mapType->keyType_);
             emitOp(op_map_get_option);
             emitRegs(valReg, srcReg, idxValReg);
-            emitPtr(compiler_.optionType(mapType->valueType_));
+            emitPtr(optType);
+            if (optType && optType->repr_ == ts::Type::Repr::Inline
+                && optType != compiler_.complexType()
+                && optType != compiler_.fractionType()) {
+                valReg = emitUnboxIfInline(valReg, optType);
+            }
         } else if (srcType == compiler_.stringType()) {
+            valReg = allocReg();
             emitOp(op_string_get_byte);
             emitRegs(valReg, srcReg, idxValReg);
         } else {
             auto* arrType = dynamic_cast<ArrayType*>(srcType);
+            valReg = allocSlot(elemResT);
             emitOp(op_array_get_dyn);
             emitRegs(valReg, srcReg, idxValReg);
             emitPtr(arrType);
@@ -8208,7 +8201,7 @@ u16 CodeGen::genAutoMapIndexObjArray(IndexExpr_* expr) {
     emitRegs(condReg, iReg, lenReg);
     u32 exitJump = emitJump(op_jump_if_false, condReg);
 
-    u16 elemReg = allocReg();
+    u16 elemReg = allocSlot(elemType);
     emitOp(op_array_get_dyn);
     emitRegs(elemReg, objReg, iReg);
     emitPtr(arrType);
@@ -8220,13 +8213,7 @@ u16 CodeGen::genAutoMapIndexObjArray(IndexExpr_* expr) {
                                  expr->index->resolvedType,
                                  expr->indexAutoMap, innerResultType);
 
-    // Phase 4g.4: emitIndexLookup may return a multi-word inline value (e.g.
-    // Option<Int> from a map lookup); the ObjArray element slot needs the
-    // boxed 1-Word form.
-    if (isInlineMultiword(innerResultType)) {
-        valReg = emitBoxIfInline(valReg, innerResultType);
-    }
-
+    // Phase 4g.8: InlineArray accepts multi-word inline directly.
     emitOp(op_array_set);
     emitRegs(resultReg, iReg, valReg);
     emitPtr(resultArrayType);
@@ -8646,27 +8633,25 @@ u16 CodeGen::genAutoMapFieldArray(FieldExpr_* expr) {
     emitRegs(condReg, iReg, lenReg);
     u32 exitJump = emitJump(op_jump_if_false, condReg);
 
-    // Extract element from array
-    u16 elemReg = allocReg();
+    // Extract element from array. Phase 4g.8: Inline elements occupy
+    // sizeWords_ consecutive register slots.
+    u16 elemReg = allocSlot(elemType);
     emitOp(op_array_get_dyn);
     emitRegs(elemReg, objReg, iReg);
     emitPtr(arrType);
 
-    // Extract field from element
-    u16 fieldReg = allocReg();
+    // Extract field from element via emitFieldGet (handles inline parents).
+    u16 fieldReg = 0;
     if (auto* stype = dynamic_cast<StructType*>(elemType)) {
         for (size_t i = 0; i < stype->fields_.size(); ++i) {
             if (stype->fields_[i].name->str() == expr->field) {
-                emitOp(op_struct_get);
-                emitRegs(fieldReg, elemReg, (u16)i);
+                fieldReg = emitFieldGet(elemType, elemReg, (u16)i, stype->fields_[i].type);
                 break;
             }
         }
-    } else {
-        // Tuple
+    } else if (auto* ttype = dynamic_cast<TupleType*>(elemType)) {
         size_t idx = std::stoul(expr->field);
-        emitOp(op_tuple_get);
-        emitRegs(fieldReg, elemReg, (u16)idx);
+        fieldReg = emitFieldGet(elemType, elemReg, (u16)idx, ttype->fields_[idx]);
     }
 
     // Store in result array
@@ -8713,26 +8698,34 @@ u16 CodeGen::genAutoMapFieldList(FieldExpr_* expr) {
     emitRegs(nilCheckReg, curReg);
     u32 exitJump = emitJump(op_jump_if_true, nilCheckReg);
 
-    // Extract head (struct or tuple)
+    // Extract head (struct or tuple). Lists store the head as a 1-Word
+    // boxed pointer for Inline composite elements (list migration pending).
     u16 headReg = allocReg();
     emitOp(op_list_head);
     emitRegs(headReg, curReg);
 
+    // For Inline composite elements, unbox head into a multi-word slot so
+    // emitFieldGet's inline-parent path works.
+    Type* parentT = elemType;
+    if (parentT && parentT->repr_ == ts::Type::Repr::Inline
+        && parentT != compiler_.complexType()
+        && parentT != compiler_.fractionType()
+        && (dynamic_cast<StructType*>(parentT) || dynamic_cast<TupleType*>(parentT))) {
+        headReg = emitUnboxIfInline(headReg, parentT);
+    }
+
     // Extract field from head
-    u16 fieldReg = allocReg();
+    u16 fieldReg = 0;
     if (auto* stype = dynamic_cast<StructType*>(elemType)) {
         for (size_t i = 0; i < stype->fields_.size(); ++i) {
             if (stype->fields_[i].name->str() == expr->field) {
-                emitOp(op_struct_get);
-                emitRegs(fieldReg, headReg, (u16)i);
+                fieldReg = emitFieldGet(elemType, headReg, (u16)i, stype->fields_[i].type);
                 break;
             }
         }
-    } else {
-        // Tuple
+    } else if (auto* ttype = dynamic_cast<TupleType*>(elemType)) {
         size_t idx = std::stoul(expr->field);
-        emitOp(op_tuple_get);
-        emitRegs(fieldReg, headReg, (u16)idx);
+        fieldReg = emitFieldGet(elemType, headReg, (u16)idx, ttype->fields_[idx]);
     }
 
     // Cons onto accumulator (builds reversed)
@@ -8858,8 +8851,10 @@ u16 CodeGen::genAutoMapFieldDeep(FieldExpr_* expr, int depth) {
             emitRegs(loop.condReg, loop.iReg, loop.lenReg);
             loop.exitJump = emitJump(op_jump_if_false, loop.condReg);
 
-            // Extract sub-element
-            u16 subReg = allocReg();
+            // Extract sub-element. Phase 4g.8: peeled elements may be
+            // multi-word inline composites.
+            Type* peeled = arrType->elemType_;
+            u16 subReg = allocSlot(peeled);
             emitOp(op_array_get_dyn);
             emitRegs(subReg, currentObjReg, loop.iReg);
             emitPtr(arrType);
@@ -8881,29 +8876,37 @@ u16 CodeGen::genAutoMapFieldDeep(FieldExpr_* expr, int depth) {
             emitRegs(loop.nilCheckReg, loop.curReg);
             loop.exitJump = emitJump(op_jump_if_true, loop.nilCheckReg);
 
-            // Extract head
+            // Extract head. The list still stores Inline composite elements
+            // as boxed pointers (list migration pending); unbox so subsequent
+            // field-get / sub-array indexing can read multi-word slots.
             u16 headReg = allocReg();
             emitOp(op_list_head);
             emitRegs(headReg, loop.curReg);
+            auto* curListT = dynamic_cast<ListType*>(levels[d].containerType);
+            Type* peeled = curListT ? curListT->elemType_ : nullptr;
+            if (peeled && peeled->repr_ == ts::Type::Repr::Inline
+                && peeled != compiler_.complexType()
+                && peeled != compiler_.fractionType()
+                && (dynamic_cast<StructType*>(peeled) || dynamic_cast<TupleType*>(peeled))) {
+                headReg = emitUnboxIfInline(headReg, peeled);
+            }
             currentObjReg = headReg;
         }
     }
 
-    // Innermost: extract field from the struct/tuple element
-    u16 fieldReg = allocReg();
+    // Innermost: extract field from the struct/tuple element.
+    // Phase 4g.8: emitFieldGet handles inline parent types.
+    u16 fieldReg = 0;
     if (auto* stype = dynamic_cast<StructType*>(innerElemType)) {
         for (size_t i = 0; i < stype->fields_.size(); ++i) {
             if (stype->fields_[i].name->str() == expr->field) {
-                emitOp(op_struct_get);
-                emitRegs(fieldReg, currentObjReg, (u16)i);
+                fieldReg = emitFieldGet(innerElemType, currentObjReg, (u16)i, stype->fields_[i].type);
                 break;
             }
         }
-    } else {
-        // Tuple
+    } else if (auto* ttype = dynamic_cast<TupleType*>(innerElemType)) {
         size_t idx = std::stoul(expr->field);
-        emitOp(op_tuple_get);
-        emitRegs(fieldReg, currentObjReg, (u16)idx);
+        fieldReg = emitFieldGet(innerElemType, currentObjReg, (u16)idx, ttype->fields_[idx]);
     }
 
     // Close loops from innermost to outermost

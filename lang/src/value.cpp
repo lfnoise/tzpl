@@ -107,6 +107,85 @@ ObjArray::ObjArray(Type* type)
     registerNewObj(this);
 }
 
+// InlineArray (Phase 4g.8): array storage that packs an Inline composite
+// element directly into the backing Vec<Word>, stride_ words per element.
+InlineArray::InlineArray(ArrayType* type)
+    : Obj(type)
+    , v_(rt::STLAllocator<Word>(rt::gCurrentAllocator))
+{
+    stride_ = type->elemType_ ? type->elemType_->sizeWords_ : 1;
+    if (stride_ == 0) stride_ = 1;
+    registerNewObj(this);
+}
+
+void InlineArray::pushSlot(Word const* src) {
+    size_t old = v_.size();
+    v_.resize(old + stride_);
+    for (u32 k = 0; k < stride_; ++k) v_[old + k] = src[k];
+    inlineWalkPointers(&v_[old], elemType(), /*release_=*/false);
+}
+
+void InlineArray::setSlot(size_t i, Word const* src) {
+    Word* dst = &v_[i * stride_];
+    // Retain new BEFORE releasing old, in case they alias (src == dst).
+    Word saved[8];
+    if (stride_ <= 8) {
+        for (u32 k = 0; k < stride_; ++k) saved[k] = src[k];
+        inlineWalkPointers(saved, elemType(), /*release_=*/false);
+        inlineWalkPointers(dst,  elemType(), /*release_=*/true);
+        for (u32 k = 0; k < stride_; ++k) dst[k] = saved[k];
+    } else {
+        // Inline composites are <= 4 words per the classifier's eligibility,
+        // so this branch should be unreachable; keep a safe path anyway.
+        inlineWalkPointers(const_cast<Word*>(src), elemType(), /*release_=*/false);
+        inlineWalkPointers(dst,                  elemType(), /*release_=*/true);
+        for (u32 k = 0; k < stride_; ++k) dst[k] = src[k];
+    }
+}
+
+void InlineArray::getSlot(size_t i, Word* dst) const {
+    Word const* src = &v_[i * stride_];
+    for (u32 k = 0; k < stride_; ++k) dst[k] = src[k];
+    inlineWalkPointers(dst, const_cast<InlineArray*>(this)->elemType(),
+                       /*release_=*/false);
+}
+
+void InlineArray::copyFrom(InlineArray const* src) {
+    // Release old elements
+    Type* et = elemType();
+    size_t n = size();
+    for (size_t i = 0; i < n; ++i) {
+        inlineWalkPointers(&v_[i * stride_], et, /*release_=*/true);
+    }
+    v_ = src->v_;
+    stride_ = src->stride_;
+    // Retain new elements
+    n = size();
+    for (size_t i = 0; i < n; ++i) {
+        inlineWalkPointers(&v_[i * stride_], elemType(), /*release_=*/false);
+    }
+}
+
+void InlineArray::releaseChildren() {
+    Type* et = elemType();
+    size_t n = size();
+    for (size_t i = 0; i < n; ++i) {
+        inlineWalkPointers(&v_[i * stride_], et, /*release_=*/true);
+    }
+}
+
+VMString InlineArray::str() const {
+    VMString s = rt::vmstr("[");
+    Type* et = const_cast<InlineArray*>(this)->elemType();
+    size_t n = size();
+    for (size_t i = 0; i < n; ++i) {
+        if (i > 0) s += ", ";
+        s += wordsToString(&v_[i * stride_], et);
+    }
+    s += "]";
+    return s;
+}
+
 // ListNode constructor
 ListNode::ListNode(Type* type)
     : Obj(type)
@@ -773,6 +852,14 @@ size_t WordHash::operator()(Word w) const {
                 for (auto val : a->v) h = hashCombine(h, std::hash<i64>{}(val));
                 return h;
             }
+            case ArrayBackend::Inline: {
+                auto* a = static_cast<InlineArray*>(w.o);
+                size_t h = a->size();
+                for (size_t i = 0; i < a->size(); ++i) {
+                    h = hashCombine(h, hashWords(a->slot(i), et));
+                }
+                return h;
+            }
             case ArrayBackend::Obj: {
                 auto* a = static_cast<ObjArray*>(w.o);
                 WordHash sub{et};
@@ -944,6 +1031,15 @@ bool WordEqual::operator()(Word a, Word b) const {
                 auto* aa = static_cast<PodArray<i64>*>(a.o);
                 auto* ab = static_cast<PodArray<i64>*>(b.o);
                 return aa->v == ab->v;
+            }
+            case ArrayBackend::Inline: {
+                auto* aa = static_cast<InlineArray*>(a.o);
+                auto* ab = static_cast<InlineArray*>(b.o);
+                if (aa->size() != ab->size()) return false;
+                for (size_t i = 0; i < aa->size(); ++i) {
+                    if (!wordsEqual(aa->slot(i), ab->slot(i), et)) return false;
+                }
+                return true;
             }
             case ArrayBackend::Obj: {
                 auto* aa = static_cast<ObjArray*>(a.o);
@@ -1209,6 +1305,148 @@ void unboxInlineDeep(VM& vm, Type* type, Obj* obj, u16 dstSlot) {
         }
         return;
     }
+}
+
+Obj* boxInlineDeepFrom(VM& vm, Type* type, Word const* src) {
+    auto boxField = [&](Type* ft, Word const* sp) -> Word {
+        Word w;
+        if (!ft) { w.i = 0; return w; }
+        if (ft->repr_ == Type::Repr::Inline
+            && ft != gCurrentVM->complexType() && ft != gCurrentVM->fractionType()
+            && (dynamic_cast<StructType*>(ft) || dynamic_cast<TupleType*>(ft))) {
+            w.o = boxInlineDeepFrom(vm, ft, sp);
+            if (w.o) w.o->retain();
+        } else if (ft == gCurrentVM->complexType()) {
+            w.o = static_cast<Obj*>(new Complex(x64(sp[0].f, sp[1].f)));
+            if (w.o) w.o->retain();
+        } else if (ft == gCurrentVM->fractionType()) {
+            w.o = static_cast<Obj*>(new Fraction(r64(sp[0].i, sp[1].i)));
+            if (w.o) w.o->retain();
+        } else {
+            w = sp[0];
+            if (storesObjPtr(ft) && w.o) w.o->retain();
+        }
+        return w;
+    };
+    if (auto* st = dynamic_cast<StructType*>(type)) {
+        auto* obj = Struct::create(st, (u32)st->fields_.size());
+        for (size_t i = 0; i < st->fields_.size(); ++i) {
+            auto const& f = st->layout_[i];
+            obj->v[i] = boxField(f.type, src + f.wordOffset);
+        }
+        return obj;
+    }
+    if (auto* tt = dynamic_cast<TupleType*>(type)) {
+        auto* obj = Tuple::create(tt, (u32)tt->fields_.size());
+        for (size_t i = 0; i < tt->fields_.size(); ++i) {
+            auto const& f = tt->layout_[i];
+            obj->v[i] = boxField(f.type, src + f.wordOffset);
+        }
+        return obj;
+    }
+    if (auto* en = dynamic_cast<EnumType*>(type)) {
+        int which = (int)src[0].i;
+        auto* obj = new Enum(en);
+        obj->which_ = which;
+        obj->word_.i = 0;
+        if (which >= 0 && (size_t)which < en->layout_.size()) {
+            auto const& f = en->layout_[which];
+            if (f.type) {
+                bool isVoid = !f.type->isObjType()
+                           && (dynamic_cast<VoidType*>(f.type) != nullptr);
+                if (!isVoid && f.sizeWords > 0) {
+                    obj->word_ = boxField(f.type, src + 1);
+                }
+            }
+        }
+        return obj;
+    }
+    return nullptr;
+}
+
+void unboxInlineDeepTo(VM& vm, Type* type, Obj* obj, Word* dst) {
+    auto unboxField = [&](Type* ft, Word src, Word* d) {
+        if (!ft) { d[0].i = 0; return; }
+        if (ft->repr_ == Type::Repr::Inline
+            && ft != gCurrentVM->complexType() && ft != gCurrentVM->fractionType()
+            && (dynamic_cast<StructType*>(ft) || dynamic_cast<TupleType*>(ft))) {
+            unboxInlineDeepTo(vm, ft, src.o, d);
+        } else if (ft == gCurrentVM->complexType()) {
+            auto* c = static_cast<Complex*>(src.o);
+            d[0].f = c->x.real();
+            d[1].f = c->x.imag();
+        } else if (ft == gCurrentVM->fractionType()) {
+            auto* fr = static_cast<Fraction*>(src.o);
+            d[0].i = fr->r.numer();
+            d[1].i = fr->r.denom();
+        } else {
+            d[0] = src;
+            if (storesObjPtr(ft) && src.o) src.o->retain();
+        }
+    };
+    if (auto* st = dynamic_cast<StructType*>(type)) {
+        auto* s = static_cast<Struct*>(obj);
+        for (size_t i = 0; i < st->fields_.size(); ++i) {
+            auto const& f = st->layout_[i];
+            unboxField(f.type, s->v[i], dst + f.wordOffset);
+        }
+        return;
+    }
+    if (auto* tt = dynamic_cast<TupleType*>(type)) {
+        auto* t = static_cast<Tuple*>(obj);
+        for (size_t i = 0; i < tt->fields_.size(); ++i) {
+            auto const& f = tt->layout_[i];
+            unboxField(f.type, t->v[i], dst + f.wordOffset);
+        }
+        return;
+    }
+    if (auto* en = dynamic_cast<EnumType*>(type)) {
+        auto* e = static_cast<Enum*>(obj);
+        dst[0].i = e->which_;
+        for (u8 i = 1; i < en->sizeWords_; ++i) dst[i].i = 0;
+        if (e->which_ >= 0 && (size_t)e->which_ < en->layout_.size()) {
+            auto const& f = en->layout_[e->which_];
+            if (f.type) {
+                bool isVoid = !f.type->isObjType()
+                           && (dynamic_cast<VoidType*>(f.type) != nullptr);
+                if (!isVoid && f.sizeWords > 0) {
+                    unboxField(f.type, e->word_, dst + 1);
+                }
+            }
+        }
+    }
+}
+
+bool wordsEqual(Word const* a, Word const* b, Type* type) {
+    if (!type) return a[0].i == b[0].i;
+    if (type->repr_ != Type::Repr::Inline) {
+        return WordEqual{type}(a[0], b[0]);
+    }
+    if (type == gCurrentVM->complexType()) {
+        return a[0].f == b[0].f && a[1].f == b[1].f;
+    }
+    if (type == gCurrentVM->fractionType()) {
+        return a[0].i == b[0].i && a[1].i == b[1].i;
+    }
+    auto cmpFields = [&](auto const& layout) {
+        for (auto const& f : layout) {
+            if (!f.type) continue;
+            if (!wordsEqual(a + f.wordOffset, b + f.wordOffset, f.type))
+                return false;
+        }
+        return true;
+    };
+    if (auto* tt = dynamic_cast<TupleType*>(type))   return cmpFields(tt->layout_);
+    if (auto* st = dynamic_cast<StructType*>(type))  return cmpFields(st->layout_);
+    if (auto* en = dynamic_cast<EnumType*>(type)) {
+        if (a[0].i != b[0].i) return false;
+        int which = (int)a[0].i;
+        if (which < 0 || (size_t)which >= en->layout_.size()) return true;
+        auto const& f = en->layout_[which];
+        if (!f.type || f.sizeWords == 0) return true;
+        return wordsEqual(a + f.wordOffset, b + f.wordOffset, f.type);
+    }
+    return WordEqual{type}(a[0], b[0]);
 }
 
 void inlineWalkPointers(Word* base, Type* type, bool release_) {
