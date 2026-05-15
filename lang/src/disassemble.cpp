@@ -231,6 +231,21 @@ static const std::unordered_map<Operation, OpInfo>& opInfoMap() {
         { op_cmp_gt_composite,  { "GT_COMP",           5, OpFmt::Regs_Ptr3,    3 } },
         { op_cmp_ge_composite,  { "GE_COMP",           5, OpFmt::Regs_Ptr3,    3 } },
 
+        // --- Inline composite arithmetic (Phase 4g.7) ---
+        { op_add_composite_inline,    { "ADD_COMP_I",     5, OpFmt::Regs_Ptr3,    3 } },
+        { op_sub_composite_inline,    { "SUB_COMP_I",     5, OpFmt::Regs_Ptr3,    3 } },
+        { op_mul_composite_inline,    { "MUL_COMP_I",     5, OpFmt::Regs_Ptr3,    3 } },
+        { op_div_composite_inline,    { "DIV_COMP_I",     5, OpFmt::Regs_Ptr3,    3 } },
+        { op_neg_composite_inline,    { "NEG_COMP_I",     4, OpFmt::Regs_Ptr_Ptr, 2 } },
+        { op_not_composite_inline,    { "NOT_COMP_I",     4, OpFmt::Regs_Ptr_Ptr, 2 } },
+        { op_bitnot_composite_inline, { "BITNOT_COMP_I",  4, OpFmt::Regs_Ptr_Ptr, 2 } },
+        { op_cmp_eq_composite_inline, { "EQ_COMP_I",      5, OpFmt::Regs_Ptr3,    3 } },
+        { op_cmp_ne_composite_inline, { "NE_COMP_I",      5, OpFmt::Regs_Ptr3,    3 } },
+        { op_cmp_lt_composite_inline, { "LT_COMP_I",      5, OpFmt::Regs_Ptr3,    3 } },
+        { op_cmp_le_composite_inline, { "LE_COMP_I",      5, OpFmt::Regs_Ptr3,    3 } },
+        { op_cmp_gt_composite_inline, { "GT_COMP_I",      5, OpFmt::Regs_Ptr3,    3 } },
+        { op_cmp_ge_composite_inline, { "GE_COMP_I",      5, OpFmt::Regs_Ptr3,    3 } },
+
         // --- Array/Tuple/List Concatenation ---
         { op_concat_array,      { "CONCAT_ARRAY",      3, OpFmt::Regs_Ptr, 3 } },
         { op_concat_tuple,      { "CONCAT_TUPLE",      4, OpFmt::Regs_Ptr_Ptr, 3 } },

@@ -350,6 +350,16 @@ Operation CodeGen::getCompositeArithOp(BinaryOpExpr::Op op) {
     }
 }
 
+Operation CodeGen::getCompositeArithOpInline(BinaryOpExpr::Op op) {
+    switch (op) {
+        case BinaryOpExpr::Add: return op_add_composite_inline;
+        case BinaryOpExpr::Sub: return op_sub_composite_inline;
+        case BinaryOpExpr::Mul: return op_mul_composite_inline;
+        case BinaryOpExpr::Div: return op_div_composite_inline;
+        default: return op_add_composite_inline;
+    }
+}
+
 Operation CodeGen::getCompositeCmpOp(BinaryOpExpr::Op op) {
     switch (op) {
         case BinaryOpExpr::Eq: return op_cmp_eq_composite;
@@ -359,6 +369,18 @@ Operation CodeGen::getCompositeCmpOp(BinaryOpExpr::Op op) {
         case BinaryOpExpr::Gt: return op_cmp_gt_composite;
         case BinaryOpExpr::Ge: return op_cmp_ge_composite;
         default: return op_cmp_eq_composite;
+    }
+}
+
+Operation CodeGen::getCompositeCmpOpInline(BinaryOpExpr::Op op) {
+    switch (op) {
+        case BinaryOpExpr::Eq: return op_cmp_eq_composite_inline;
+        case BinaryOpExpr::Ne: return op_cmp_ne_composite_inline;
+        case BinaryOpExpr::Lt: return op_cmp_lt_composite_inline;
+        case BinaryOpExpr::Le: return op_cmp_le_composite_inline;
+        case BinaryOpExpr::Gt: return op_cmp_gt_composite_inline;
+        case BinaryOpExpr::Ge: return op_cmp_ge_composite_inline;
+        default: return op_cmp_eq_composite_inline;
     }
 }
 
@@ -3038,33 +3060,30 @@ u16 CodeGen::genBinaryOp(BinaryOpExpr* expr) {
             case BinaryOpExpr::Sub:
             case BinaryOpExpr::Mul:
             case BinaryOpExpr::Div: {
-                // Phase 4g.2: Inline tuples must be boxed at the composite-arith
-                // boundary; the dispatch handler reads heap Tuple* fields.
-                auto needsBox = [&](Type* t) {
+                auto isInlineComposite = [&](Type* t) {
                     return t && t->repr_ == ts::Type::Repr::Inline
                         && t != compiler_.complexType()
                         && t != compiler_.fractionType();
                 };
-                u16 lReg = needsBox(leftType) ? emitBoxIfInline(leftReg, leftType) : leftReg;
-                u16 rReg = needsBox(rightType) ? emitBoxIfInline(rightReg, rightType) : rightReg;
-                bool unboxResult = needsBox(resultType);
-                u16 outReg = unboxResult ? allocReg() : dst;
+                // Phase 4g.7: emit inline variant when the result is an Inline
+                // composite; operands stay in their multi-word slots (or scalar).
+                if (isInlineComposite(resultType)) {
+                    emitOp(getCompositeArithOpInline(expr->op));
+                    emitRegs(dst, leftReg, rightReg);
+                    emitPtr(resultType);
+                    emitPtr(leftType);
+                    emitPtr(rightType);
+                    return dst;
+                }
+                // Heap-result path: dispatch handler reads heap Tuple* fields,
+                // so any Inline operand must be boxed first.
+                u16 lReg = isInlineComposite(leftType) ? emitBoxIfInline(leftReg, leftType) : leftReg;
+                u16 rReg = isInlineComposite(rightType) ? emitBoxIfInline(rightReg, rightType) : rightReg;
                 emitOp(getCompositeArithOp(expr->op));
-                emitRegs(outReg, lReg, rReg);
+                emitRegs(dst, lReg, rReg);
                 emitPtr(resultType);
                 emitPtr(leftType);
                 emitPtr(rightType);
-                if (unboxResult) {
-                    u16 unboxed = emitUnboxIfInline(outReg, resultType);
-                    if (unboxed != dst) {
-                        // Copy unboxed multi-word value into dst
-                        u32 nw = typeSlotWords(resultType);
-                        for (u32 i = 0; i < nw; ++i) {
-                            emitOp(op_mov);
-                            emitRegs((u16)(dst + i), (u16)(unboxed + i));
-                        }
-                    }
-                }
                 return dst;
             }
             default:
@@ -3112,30 +3131,27 @@ u16 CodeGen::genBinaryOp(BinaryOpExpr* expr) {
         case BinaryOpExpr::Ge: {
             // Composite comparison (e.g. Tuple > Scalar)
             if (isCompositeNumeric(resultType)) {
-                auto needsBoxC = [&](Type* t) {
+                auto isInlineComposite = [&](Type* t) {
                     return t && t->repr_ == ts::Type::Repr::Inline
                         && t != compiler_.complexType()
                         && t != compiler_.fractionType();
                 };
-                u16 lReg = needsBoxC(leftType) ? emitBoxIfInline(leftReg, leftType) : leftReg;
-                u16 rReg = needsBoxC(rightType) ? emitBoxIfInline(rightReg, rightType) : rightReg;
-                bool unboxResult = needsBoxC(resultType);
-                u16 outReg = unboxResult ? allocReg() : dst;
+                // Phase 4g.7: emit inline variant when result is Inline composite.
+                if (isInlineComposite(resultType)) {
+                    emitOp(getCompositeCmpOpInline(expr->op));
+                    emitRegs(dst, leftReg, rightReg);
+                    emitPtr(resultType);
+                    emitPtr(leftType);
+                    emitPtr(rightType);
+                    return dst;
+                }
+                u16 lReg = isInlineComposite(leftType) ? emitBoxIfInline(leftReg, leftType) : leftReg;
+                u16 rReg = isInlineComposite(rightType) ? emitBoxIfInline(rightReg, rightType) : rightReg;
                 emitOp(getCompositeCmpOp(expr->op));
-                emitRegs(outReg, lReg, rReg);
+                emitRegs(dst, lReg, rReg);
                 emitPtr(resultType);
                 emitPtr(leftType);
                 emitPtr(rightType);
-                if (unboxResult) {
-                    u16 unboxed = emitUnboxIfInline(outReg, resultType);
-                    if (unboxed != dst) {
-                        u32 nw = typeSlotWords(resultType);
-                        for (u32 i = 0; i < nw; ++i) {
-                            emitOp(op_mov);
-                            emitRegs((u16)(dst + i), (u16)(unboxed + i));
-                        }
-                    }
-                }
                 return dst;
             }
             // For comparison, determine common type from operands (result is always bool)
@@ -3309,28 +3325,23 @@ u16 CodeGen::genUnaryOp(UnaryOpExpr* expr) {
             if (isCompositeNumeric(expr->resolvedType)) {
                 Type* opT = expr->operand->resolvedType;
                 Type* rT  = expr->resolvedType;
-                auto needsBoxU = [&](Type* t) {
+                auto isInlineComposite = [&](Type* t) {
                     return t && t->repr_ == ts::Type::Repr::Inline
                         && t != compiler_.complexType()
                         && t != compiler_.fractionType();
                 };
-                u16 inReg = needsBoxU(opT) ? emitBoxIfInline(operandReg, opT) : operandReg;
-                bool unboxResult = needsBoxU(rT);
-                u16 outReg = unboxResult ? allocReg() : dst;
+                if (isInlineComposite(rT)) {
+                    emitOp(op_neg_composite_inline);
+                    emitRegs(dst, operandReg);
+                    emitPtr(rT);
+                    emitPtr(opT);
+                    return dst;
+                }
+                u16 inReg = isInlineComposite(opT) ? emitBoxIfInline(operandReg, opT) : operandReg;
                 emitOp(op_neg_composite);
-                emitRegs(outReg, inReg);
+                emitRegs(dst, inReg);
                 emitPtr(rT);
                 emitPtr(opT);
-                if (unboxResult) {
-                    u16 unboxed = emitUnboxIfInline(outReg, rT);
-                    if (unboxed != dst) {
-                        u32 nw = typeSlotWords(rT);
-                        for (u32 i = 0; i < nw; ++i) {
-                            emitOp(op_mov);
-                            emitRegs((u16)(dst + i), (u16)(unboxed + i));
-                        }
-                    }
-                }
                 return dst;
             }
             if (expr->resolvedType == compiler_.complexType()) {
@@ -3349,28 +3360,23 @@ u16 CodeGen::genUnaryOp(UnaryOpExpr* expr) {
             if (isCompositeNumeric(expr->resolvedType)) {
                 Type* opT = expr->operand->resolvedType;
                 Type* rT  = expr->resolvedType;
-                auto needsBoxU = [&](Type* t) {
+                auto isInlineComposite = [&](Type* t) {
                     return t && t->repr_ == ts::Type::Repr::Inline
                         && t != compiler_.complexType()
                         && t != compiler_.fractionType();
                 };
-                u16 inReg = needsBoxU(opT) ? emitBoxIfInline(operandReg, opT) : operandReg;
-                bool unboxResult = needsBoxU(rT);
-                u16 outReg = unboxResult ? allocReg() : dst;
+                if (isInlineComposite(rT)) {
+                    emitOp(op_not_composite_inline);
+                    emitRegs(dst, operandReg);
+                    emitPtr(rT);
+                    emitPtr(opT);
+                    return dst;
+                }
+                u16 inReg = isInlineComposite(opT) ? emitBoxIfInline(operandReg, opT) : operandReg;
                 emitOp(op_not_composite);
-                emitRegs(outReg, inReg);
+                emitRegs(dst, inReg);
                 emitPtr(rT);
                 emitPtr(opT);
-                if (unboxResult) {
-                    u16 unboxed = emitUnboxIfInline(outReg, rT);
-                    if (unboxed != dst) {
-                        u32 nw = typeSlotWords(rT);
-                        for (u32 i = 0; i < nw; ++i) {
-                            emitOp(op_mov);
-                            emitRegs((u16)(dst + i), (u16)(unboxed + i));
-                        }
-                    }
-                }
                 return dst;
             }
             emitOp(op_not_bool);
@@ -3381,28 +3387,23 @@ u16 CodeGen::genUnaryOp(UnaryOpExpr* expr) {
             if (isCompositeNumeric(expr->resolvedType)) {
                 Type* opT = expr->operand->resolvedType;
                 Type* rT  = expr->resolvedType;
-                auto needsBoxU = [&](Type* t) {
+                auto isInlineComposite = [&](Type* t) {
                     return t && t->repr_ == ts::Type::Repr::Inline
                         && t != compiler_.complexType()
                         && t != compiler_.fractionType();
                 };
-                u16 inReg = needsBoxU(opT) ? emitBoxIfInline(operandReg, opT) : operandReg;
-                bool unboxResult = needsBoxU(rT);
-                u16 outReg = unboxResult ? allocReg() : dst;
+                if (isInlineComposite(rT)) {
+                    emitOp(op_bitnot_composite_inline);
+                    emitRegs(dst, operandReg);
+                    emitPtr(rT);
+                    emitPtr(opT);
+                    return dst;
+                }
+                u16 inReg = isInlineComposite(opT) ? emitBoxIfInline(operandReg, opT) : operandReg;
                 emitOp(op_bitnot_composite);
-                emitRegs(outReg, inReg);
+                emitRegs(dst, inReg);
                 emitPtr(rT);
                 emitPtr(opT);
-                if (unboxResult) {
-                    u16 unboxed = emitUnboxIfInline(outReg, rT);
-                    if (unboxed != dst) {
-                        u32 nw = typeSlotWords(rT);
-                        for (u32 i = 0; i < nw; ++i) {
-                            emitOp(op_mov);
-                            emitRegs((u16)(dst + i), (u16)(unboxed + i));
-                        }
-                    }
-                }
                 return dst;
             }
             emitOp(op_bitnot_int);

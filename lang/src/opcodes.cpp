@@ -2114,6 +2114,196 @@ void op_cmp_ge_composite(VM& vm, Code* pc) {
     DISPATCH(5);
 }
 
+// --- Inline-storage composite arithmetic (Phase 4g.7) ---
+// Walk an Inline result type's layout, dispatching scalar ops directly into
+// the destination register slot. Operands may be Inline (read at layout
+// offsets), heap Tuples (read via .o->v[i]), or scalars (broadcast).
+template<typename Op>
+static void dispatchInlineBinopWalk(VM& vm, Op op,
+    Word* dst, Word const* aSlot, Word const* bSlot,
+    Type* resultType, Type* aType, Type* bType)
+{
+    auto* rTT = dynamic_cast<TupleType*>(resultType);
+    if (rTT && rTT->repr_ == ts::Type::Repr::Inline) {
+        auto* aTT = dynamic_cast<TupleType*>(aType);
+        auto* bTT = dynamic_cast<TupleType*>(bType);
+        u32 n = (u32)rTT->fields_.size();
+        for (u32 i = 0; i < n; ++i) {
+            Type* rft = rTT->fields_[i];
+            u32 rOff = rTT->layout_[i].wordOffset;
+
+            Type* aft; Word const* aSub;
+            if (aTT && aTT->repr_ == ts::Type::Repr::Inline) {
+                aft = aTT->fields_[i];
+                aSub = aSlot + aTT->layout_[i].wordOffset;
+            } else if (aTT) {
+                aft = aTT->fields_[i];
+                aSub = &static_cast<Tuple*>(aSlot[0].o)->v[i];
+            } else {
+                aft = aType;
+                aSub = aSlot;
+            }
+            Type* bft; Word const* bSub;
+            if (bTT && bTT->repr_ == ts::Type::Repr::Inline) {
+                bft = bTT->fields_[i];
+                bSub = bSlot + bTT->layout_[i].wordOffset;
+            } else if (bTT) {
+                bft = bTT->fields_[i];
+                bSub = &static_cast<Tuple*>(bSlot[0].o)->v[i];
+            } else {
+                bft = bType;
+                bSub = bSlot;
+            }
+            dispatchInlineBinopWalk(vm, op, dst + rOff, aSub, bSub, rft, aft, bft);
+        }
+        return;
+    }
+    // Leaf: scalar dispatch. dispatchBinop handles Int/Float/Bool/Fraction/Complex.
+    Word r = dispatchBinop(vm, op, *aSlot, *bSlot, aType, bType, resultType);
+    dst[0] = r;
+    // Retain newly-allocated Obj* leaves (Fraction/Complex) to cancel the
+    // auto-release pool's pending release -- mirrors dispatchTupleBinop's
+    // postprocess (Phase 4g.5).
+    if (storesObjPtr(resultType) && r.o) {
+        r.o->retain();
+    }
+}
+
+template<typename Op>
+static void dispatchInlineUnaryWalk(VM& vm, Op op,
+    Word* dst, Word const* aSlot,
+    Type* resultType, Type* aType)
+{
+    auto* rTT = dynamic_cast<TupleType*>(resultType);
+    if (rTT && rTT->repr_ == ts::Type::Repr::Inline) {
+        auto* aTT = dynamic_cast<TupleType*>(aType);
+        u32 n = (u32)rTT->fields_.size();
+        for (u32 i = 0; i < n; ++i) {
+            Type* rft = rTT->fields_[i];
+            u32 rOff = rTT->layout_[i].wordOffset;
+            Type* aft; Word const* aSub;
+            if (aTT && aTT->repr_ == ts::Type::Repr::Inline) {
+                aft = aTT->fields_[i];
+                aSub = aSlot + aTT->layout_[i].wordOffset;
+            } else if (aTT) {
+                aft = aTT->fields_[i];
+                aSub = &static_cast<Tuple*>(aSlot[0].o)->v[i];
+            } else {
+                aft = aType;
+                aSub = aSlot;
+            }
+            dispatchInlineUnaryWalk(vm, op, dst + rOff, aSub, rft, aft);
+        }
+        return;
+    }
+    Word r = dispatchUnaryOp(vm, op, *aSlot, aType, resultType);
+    dst[0] = r;
+    if (storesObjPtr(resultType) && r.o) {
+        r.o->retain();
+    }
+}
+
+template<typename CmpOp>
+static void dispatchInlineCmpBinopWalk(VM& vm, CmpOp op,
+    Word* dst, Word const* aSlot, Word const* bSlot,
+    Type* resultType, Type* aType, Type* bType)
+{
+    auto* rTT = dynamic_cast<TupleType*>(resultType);
+    if (rTT && rTT->repr_ == ts::Type::Repr::Inline) {
+        auto* aTT = dynamic_cast<TupleType*>(aType);
+        auto* bTT = dynamic_cast<TupleType*>(bType);
+        u32 n = (u32)rTT->fields_.size();
+        for (u32 i = 0; i < n; ++i) {
+            Type* rft = rTT->fields_[i];
+            u32 rOff = rTT->layout_[i].wordOffset;
+
+            Type* aft; Word const* aSub;
+            if (aTT && aTT->repr_ == ts::Type::Repr::Inline) {
+                aft = aTT->fields_[i];
+                aSub = aSlot + aTT->layout_[i].wordOffset;
+            } else if (aTT) {
+                aft = aTT->fields_[i];
+                aSub = &static_cast<Tuple*>(aSlot[0].o)->v[i];
+            } else {
+                aft = aType;
+                aSub = aSlot;
+            }
+            Type* bft; Word const* bSub;
+            if (bTT && bTT->repr_ == ts::Type::Repr::Inline) {
+                bft = bTT->fields_[i];
+                bSub = bSlot + bTT->layout_[i].wordOffset;
+            } else if (bTT) {
+                bft = bTT->fields_[i];
+                bSub = &static_cast<Tuple*>(bSlot[0].o)->v[i];
+            } else {
+                bft = bType;
+                bSub = bSlot;
+            }
+            dispatchInlineCmpBinopWalk(vm, op, dst + rOff, aSub, bSub, rft, aft, bft);
+        }
+        return;
+    }
+    Word r = dispatchCmpBinop(vm, op, *aSlot, *bSlot, aType, bType, resultType);
+    dst[0] = r;
+    if (storesObjPtr(resultType) && r.o) {
+        r.o->retain();
+    }
+}
+
+#define INLINE_BINOP_OP(NAME, OP)                                                   \
+    void NAME(VM& vm, Code* pc) {                                                   \
+        u16 dst = pc[1].regs[0], a = pc[1].regs[1], b = pc[1].regs[2];              \
+        Type* resultType = static_cast<Type*>(pc[2].p);                             \
+        Type* aType = static_cast<Type*>(pc[3].p);                                  \
+        Type* bType = static_cast<Type*>(pc[4].p);                                  \
+        dispatchInlineBinopWalk(vm, OP{}, &vm.reg(dst), &vm.reg(a), &vm.reg(b),     \
+                                resultType, aType, bType);                          \
+        DISPATCH(5);                                                                \
+    }
+
+INLINE_BINOP_OP(op_add_composite_inline, OpAdd)
+INLINE_BINOP_OP(op_sub_composite_inline, OpSub)
+INLINE_BINOP_OP(op_mul_composite_inline, OpMul)
+INLINE_BINOP_OP(op_div_composite_inline, OpDiv)
+
+#undef INLINE_BINOP_OP
+
+#define INLINE_UNARY_OP(NAME, OP)                                                   \
+    void NAME(VM& vm, Code* pc) {                                                   \
+        u16 dst = pc[1].regs[0], a = pc[1].regs[1];                                 \
+        Type* resultType = static_cast<Type*>(pc[2].p);                             \
+        Type* aType = static_cast<Type*>(pc[3].p);                                  \
+        dispatchInlineUnaryWalk(vm, OP{}, &vm.reg(dst), &vm.reg(a),                 \
+                                resultType, aType);                                 \
+        DISPATCH(4);                                                                \
+    }
+
+INLINE_UNARY_OP(op_neg_composite_inline, OpNeg)
+INLINE_UNARY_OP(op_not_composite_inline, OpNot)
+INLINE_UNARY_OP(op_bitnot_composite_inline, OpBitNot)
+
+#undef INLINE_UNARY_OP
+
+#define INLINE_CMP_OP(NAME, OP)                                                     \
+    void NAME(VM& vm, Code* pc) {                                                   \
+        u16 dst = pc[1].regs[0], a = pc[1].regs[1], b = pc[1].regs[2];              \
+        Type* resultType = static_cast<Type*>(pc[2].p);                             \
+        Type* aType = static_cast<Type*>(pc[3].p);                                  \
+        Type* bType = static_cast<Type*>(pc[4].p);                                  \
+        dispatchInlineCmpBinopWalk(vm, OP{}, &vm.reg(dst), &vm.reg(a), &vm.reg(b),  \
+                                   resultType, aType, bType);                       \
+        DISPATCH(5);                                                                \
+    }
+
+INLINE_CMP_OP(op_cmp_eq_composite_inline, OpCmpEq)
+INLINE_CMP_OP(op_cmp_ne_composite_inline, OpCmpNe)
+INLINE_CMP_OP(op_cmp_lt_composite_inline, OpCmpLt)
+INLINE_CMP_OP(op_cmp_le_composite_inline, OpCmpLe)
+INLINE_CMP_OP(op_cmp_gt_composite_inline, OpCmpGt)
+INLINE_CMP_OP(op_cmp_ge_composite_inline, OpCmpGe)
+
+#undef INLINE_CMP_OP
+
 // --- List Generator Implementations ---
 
 // Helper: dispatch a binary op by OpKind enum at runtime

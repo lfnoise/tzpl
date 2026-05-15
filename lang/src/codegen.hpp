@@ -489,7 +489,9 @@ private:
     Operation getArithOp(BinaryOpExpr::Op op, Type* type);
     Operation getCmpOp(BinaryOpExpr::Op op, Type* type);
     Operation getCompositeArithOp(BinaryOpExpr::Op op);
+    Operation getCompositeArithOpInline(BinaryOpExpr::Op op);
     Operation getCompositeCmpOp(BinaryOpExpr::Op op);
+    Operation getCompositeCmpOpInline(BinaryOpExpr::Op op);
 
     // Check if type is a composite numeric (array or tuple)
     bool isCompositeNumeric(Type* type) const;

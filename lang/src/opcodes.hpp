@@ -224,6 +224,25 @@ void op_cmp_le_composite(VM& vm, Code* pc);
 void op_cmp_gt_composite(VM& vm, Code* pc);
 void op_cmp_ge_composite(VM& vm, Code* pc);
 
+// --- Inline-storage variants (Phase 4g.7) ---
+// Operate directly on multi-word inline tuple/struct register slots
+// without boxing/unboxing. Result type must be Repr::Inline (not Complex/
+// Fraction). Operands may be Inline composites, heap Tuples, or scalars
+// (broadcast). Same encoding as the heap variants.
+void op_add_composite_inline(VM& vm, Code* pc);
+void op_sub_composite_inline(VM& vm, Code* pc);
+void op_mul_composite_inline(VM& vm, Code* pc);
+void op_div_composite_inline(VM& vm, Code* pc);
+void op_neg_composite_inline(VM& vm, Code* pc);
+void op_not_composite_inline(VM& vm, Code* pc);
+void op_bitnot_composite_inline(VM& vm, Code* pc);
+void op_cmp_eq_composite_inline(VM& vm, Code* pc);
+void op_cmp_ne_composite_inline(VM& vm, Code* pc);
+void op_cmp_lt_composite_inline(VM& vm, Code* pc);
+void op_cmp_le_composite_inline(VM& vm, Code* pc);
+void op_cmp_gt_composite_inline(VM& vm, Code* pc);
+void op_cmp_ge_composite_inline(VM& vm, Code* pc);
+
 // --- Array/Tuple/List Concatenation ---
 void op_concat_array(VM& vm, Code* pc);    // CONCAT_ARRAY Rd, Ra, Rb (3 words: op, regs, ArrayType*)
 void op_concat_tuple(VM& vm, Code* pc);    // CONCAT_TUPLE Rd, Ra, Rb (4 words: op, regs, resultTupleType*, leftTupleType*)
