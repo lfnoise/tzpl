@@ -4185,6 +4185,11 @@ u16 CodeGen::genAutoMapBinaryOp(BinaryOpExpr* expr) {
     u32 exitJump = emitJump(op_jump_if_false, condReg);
 
     // --- Phase 6: Extract elements ---
+    auto needsBoxAuto = [&](Type* t) {
+        return t && t->repr_ == ts::Type::Repr::Inline
+            && t != compiler_.complexType()
+            && t != compiler_.fractionType();
+    };
     u16 leftElemReg = leftReg;
     if (expr->leftAutoMap) {
         auto* arrType = dynamic_cast<ArrayType*>(leftType);
@@ -4192,6 +4197,10 @@ u16 CodeGen::genAutoMapBinaryOp(BinaryOpExpr* expr) {
         emitOp(op_array_get_dyn);
         emitRegs(leftElemReg, leftReg, iReg);
         emitPtr(arrType);
+        // Phase 4g.2: Inline composite elements live boxed in ObjArray; unbox.
+        if (needsBoxAuto(leftElemType)) {
+            leftElemReg = emitUnboxIfInline(leftElemReg, leftElemType);
+        }
     }
 
     u16 rightElemReg = rightReg;
@@ -4201,6 +4210,9 @@ u16 CodeGen::genAutoMapBinaryOp(BinaryOpExpr* expr) {
         emitOp(op_array_get_dyn);
         emitRegs(rightElemReg, rightReg, iReg);
         emitPtr(arrType);
+        if (needsBoxAuto(rightElemType)) {
+            rightElemReg = emitUnboxIfInline(rightElemReg, rightElemType);
+        }
     }
 
     // --- Phase 7: Compute per-element result ---
@@ -4208,35 +4220,47 @@ u16 CodeGen::genAutoMapBinaryOp(BinaryOpExpr* expr) {
     u16 elemResultReg;
 
     if (expr->resolvedFuncGlobalIndex >= 0) {
-        // Operator overload: call the function
+        // Operator overload: call the function. Phase 4g.2: place each
+        // operand at its multi-word slot offset for non-builtin calls; for
+        // builtins box Inline composite operands first.
         u16 argBase = nextReg_;
-        if (leftElemReg != argBase) {
-            emitOp(op_mov);
-            emitRegs(argBase, leftElemReg);
-        }
-        if (nextReg_ <= argBase) { nextReg_ = argBase + 1; if (nextReg_ > maxReg_) maxReg_ = nextReg_; }
-        if (rightElemReg != argBase + 1) {
-            emitOp(op_mov);
-            emitRegs(argBase + 1, rightElemReg);
-        }
-        if (nextReg_ <= argBase + 1) { nextReg_ = argBase + 2; if (nextReg_ > maxReg_) maxReg_ = nextReg_; }
-        elemResultReg = allocReg();
+        u32 lWords = emitArgPlacementForCall(argBase, leftElemReg, leftElemType, expr->isBuiltinCall);
+        u16 rDst = (u16)(argBase + lWords);
+        u32 rWords = emitArgPlacementForCall(rDst, rightElemReg, rightElemType, expr->isBuiltinCall);
+        u16 next = (u16)(rDst + rWords);
+        if (nextReg_ < next) { nextReg_ = next; if (nextReg_ > maxReg_) maxReg_ = nextReg_; }
+        bool builtinReturnsInline = expr->isBuiltinCall && needsBoxAuto(scalarResultType);
+        elemResultReg = builtinReturnsInline ? allocReg() : allocSlot(scalarResultType);
         emitOp(expr->isBuiltinCall ? op_call_primitive : op_call);
         emitRegs(elemResultReg, 2, argBase);
         emitInt(expr->resolvedFuncGlobalIndex);
+        if (builtinReturnsInline) {
+            elemResultReg = emitUnboxIfInline(elemResultReg, scalarResultType);
+        }
     } else if (isCompositeNumeric(scalarResultType)) {
         // Composite numeric (e.g. Tuple + Scalar). Phase 4g.2: box Inline
         // tuple operands; the dispatch handler walks heap Tuple* fields.
         // Result of dispatchTupleBinop is already a heap Tuple*, which is
-        // also the right shape to store into an ObjArray slot.
-        u16 lElem = isInlineMultiword(leftElemType) ? emitBoxIfInline(leftElemReg, leftElemType) : leftElemReg;
-        u16 rElem = isInlineMultiword(rightElemType) ? emitBoxIfInline(rightElemReg, rightElemType) : rightElemReg;
+        // also the right shape to store into an ObjArray slot -- so we do
+        // NOT need the Phase 8 inline-box step for composite-arith results.
+        u16 lElem = needsBoxAuto(leftElemType) ? emitBoxIfInline(leftElemReg, leftElemType) : leftElemReg;
+        u16 rElem = needsBoxAuto(rightElemType) ? emitBoxIfInline(rightElemReg, rightElemType) : rightElemReg;
         elemResultReg = allocReg();
         emitOp(getCompositeArithOp(expr->op));
         emitRegs(elemResultReg, lElem, rElem);
         emitPtr(scalarResultType);
         emitPtr(leftElemType);
         emitPtr(rightElemType);
+        // Composite arith returns a heap Tuple*; store directly without
+        // the Phase 8 inline-box step.
+        emitOp(op_array_set);
+        emitRegs(resultArrReg, iReg, elemResultReg);
+        emitPtr(resultArrayType);
+        emitOp(op_add_int);
+        emitRegs(iReg, iReg, oneReg);
+        emitJumpTo(loopStartIdx);
+        patchJump(exitJump);
+        return resultArrReg;
     } else {
         // Scalar numeric op
         bool isCmp = (expr->op >= BinaryOpExpr::Eq && expr->op <= BinaryOpExpr::Ge);
@@ -4263,8 +4287,13 @@ u16 CodeGen::genAutoMapBinaryOp(BinaryOpExpr* expr) {
     }
 
     // --- Phase 8: Store in result array ---
+    // Phase 4g.2: ObjArray expects 1-Word boxed pointer for Inline composite
+    // element types; box the multi-word inline result back before storing.
+    u16 storeReg = needsBoxAuto(scalarResultType)
+        ? emitBoxIfInline(elemResultReg, scalarResultType)
+        : elemResultReg;
     emitOp(op_array_set);
-    emitRegs(resultArrReg, iReg, elemResultReg);
+    emitRegs(resultArrReg, iReg, storeReg);
     emitPtr(resultArrayType);
 
     // --- Phase 9: Increment and loop ---
@@ -6937,18 +6966,20 @@ u16 CodeGen::genAutoMapTupleStruct(CallExpr_* expr) {
 
     // --- Phase 7: Construct struct (or skip allocation for UnwrappedTupleStruct) ---
     u16 structReg;
+    bool inlineStruct = stype->repr_ == ts::Type::Repr::Inline;
     if (stype->repr_ == ts::Type::Repr::UnwrappedTupleStruct && numFields == 1) {
         structReg = structFieldBase;
     } else {
-        structReg = allocReg();
+        structReg = inlineStruct ? allocSlot(stype) : allocReg();
         emitOp(op_make_struct);
         emitRegs(structReg, structFieldBase, (u16)numFields);
         emitPtr(stype);
     }
 
     // --- Phase 8: Store struct in result array ---
+    u16 storeReg = inlineStruct ? emitBoxIfInline(structReg, stype) : structReg;
     emitOp(op_array_set);
-    emitRegs(resultArrReg, iReg, structReg);
+    emitRegs(resultArrReg, iReg, storeReg);
     emitPtr(resultArrayType);
 
     // --- Phase 9: Increment and loop ---
@@ -7751,18 +7782,21 @@ u16 CodeGen::genCartesianTupleStruct(CallExpr_* expr) {
         }
     }
 
-    // Construct struct (skip allocation for UnwrappedTupleStruct)
+    // Construct struct (skip allocation for UnwrappedTupleStruct).
+    // Phase 4g.2: Inline struct lands multi-word.
     u16 structReg;
+    bool inlineStruct = stype->repr_ == ts::Type::Repr::Inline;
     if (stype->repr_ == ts::Type::Repr::UnwrappedTupleStruct && numFields == 1) {
         structReg = structFieldBase;
     } else {
-        structReg = allocReg();
+        structReg = inlineStruct ? allocSlot(stype) : allocReg();
         emitOp(op_make_struct); emitRegs(structReg, structFieldBase, (u16)numFields); emitPtr(stype);
     }
 
     // --- Phase 6: Close loops (innermost to outermost) ---
     {
-        u16 prevReg = structReg;
+        u16 storeReg = inlineStruct ? emitBoxIfInline(structReg, stype) : structReg;
+        u16 prevReg = storeReg;
         for (int level = maxCartesian; level >= 1; --level) {
             emitOp(op_array_set); emitRegs(resultRegs[level], iRegs[level], prevReg); emitPtr(resultTypes[level]);
             emitOp(op_add_int); emitRegs(iRegs[level], iRegs[level], oneReg);
@@ -8828,8 +8862,8 @@ u16 CodeGen::genEnumConstruct(ASTNode* node) {
             emitOp(op_mov);
             emitRegs(dst, valReg);
         } else {
-            // Phase 4f: enum payload slot is single Word; box inline values.
-            if (isInlineMultiword(caseType)) {
+            // Phase 4f/4g.2: enum payload slot is single Word; box inline values.
+            if (caseType && caseType->repr_ == ts::Type::Repr::Inline) {
                 valReg = emitBoxIfInline(valReg, caseType);
             }
             emitOp(op_make_enum);
