@@ -862,10 +862,13 @@ void CodeGen::genFnDecl(FnDeclNode* decl) {
         auto* block = static_cast<BlockStmt*>(decl->body.get());
         for (size_t i = 0; i < block->stmts.size(); ++i) {
             auto* stmt = block->stmts[i].get();
-            // Check for trailing expression (implicit return)
+            // Check for trailing expression (implicit return). For coroutine
+            // functions the "return type" is actually the yield type; a
+            // trailing expression cannot be used as a yield, so just lower it
+            // as a normal statement and let op_coro_done close the function.
             if (stmt->kind == ASTNode::ExprStmt) {
                 auto* exprStmt = static_cast<ExprStmtNode*>(stmt);
-                if (exprStmt->isTrailing) {
+                if (exprStmt->isTrailing && !inCoroutineFn_) {
                     inTailPosition_ = true;
                     u16 resultReg = genExpr(static_cast<Expr*>(exprStmt->expr.get()));
                     inTailPosition_ = false;
@@ -874,7 +877,8 @@ void CodeGen::genFnDecl(FnDeclNode* decl) {
                 }
             }
             // Check for trailing IfStmtNode with else (value-producing if-else)
-            if (i == block->stmts.size() - 1 && stmt->kind == ASTNode::IfStmt) {
+            if (i == block->stmts.size() - 1 && stmt->kind == ASTNode::IfStmt
+                && !inCoroutineFn_) {
                 auto* ifStmt = static_cast<IfStmtNode*>(stmt);
                 if (ifStmt->elseBranch) {
                     u16 resultReg = allocReg();
@@ -884,7 +888,8 @@ void CodeGen::genFnDecl(FnDeclNode* decl) {
                 }
             }
             // Check for trailing SwitchStmt (value-producing match)
-            if (i == block->stmts.size() - 1 && stmt->kind == ASTNode::SwitchStmt) {
+            if (i == block->stmts.size() - 1 && stmt->kind == ASTNode::SwitchStmt
+                && !inCoroutineFn_) {
                 u16 resultReg = allocReg();
                 genSwitchStmtForValue(static_cast<SwitchStmtNode*>(stmt), resultReg);
                 emitReturn(resultReg);
@@ -3020,12 +3025,22 @@ u16 CodeGen::genBinaryOp(BinaryOpExpr* expr) {
         }
         if (auto* tupType = dynamic_cast<TupleType*>(resultType)) {
             auto* leftTupType = dynamic_cast<TupleType*>(leftType);
-            u16 dst = allocReg();
+            auto* rightTupType = dynamic_cast<TupleType*>(rightType);
+            // Phase 4g.2: op_concat_tuple expects heap Tuple* operands; box
+            // any Inline operand. Result is also a heap Tuple*; unbox if the
+            // resulting type is Inline.
+            u16 lReg = (leftTupType && leftTupType->repr_ == ts::Type::Repr::Inline)
+                ? emitBoxIfInline(leftReg, leftTupType) : leftReg;
+            u16 rReg = (rightTupType && rightTupType->repr_ == ts::Type::Repr::Inline)
+                ? emitBoxIfInline(rightReg, rightTupType) : rightReg;
+            bool resInline = tupType->repr_ == ts::Type::Repr::Inline;
+            u16 outReg = resInline ? allocReg() : allocReg();
             emitOp(op_concat_tuple);
-            emitRegs(dst, leftReg, rightReg);
+            emitRegs(outReg, lReg, rReg);
             emitPtr(tupType);
             emitPtr(leftTupType);
-            return dst;
+            if (resInline) return emitUnboxIfInline(outReg, tupType);
+            return outReg;
         }
     }
 
@@ -3041,9 +3056,14 @@ u16 CodeGen::genBinaryOp(BinaryOpExpr* expr) {
             case BinaryOpExpr::Div: {
                 // Phase 4g.2: Inline tuples must be boxed at the composite-arith
                 // boundary; the dispatch handler reads heap Tuple* fields.
-                u16 lReg = isInlineMultiword(leftType) ? emitBoxIfInline(leftReg, leftType) : leftReg;
-                u16 rReg = isInlineMultiword(rightType) ? emitBoxIfInline(rightReg, rightType) : rightReg;
-                bool unboxResult = isInlineMultiword(resultType);
+                auto needsBox = [&](Type* t) {
+                    return t && t->repr_ == ts::Type::Repr::Inline
+                        && t != compiler_.complexType()
+                        && t != compiler_.fractionType();
+                };
+                u16 lReg = needsBox(leftType) ? emitBoxIfInline(leftReg, leftType) : leftReg;
+                u16 rReg = needsBox(rightType) ? emitBoxIfInline(rightReg, rightType) : rightReg;
+                bool unboxResult = needsBox(resultType);
                 u16 outReg = unboxResult ? allocReg() : dst;
                 emitOp(getCompositeArithOp(expr->op));
                 emitRegs(outReg, lReg, rReg);
@@ -3108,8 +3128,13 @@ u16 CodeGen::genBinaryOp(BinaryOpExpr* expr) {
         case BinaryOpExpr::Ge: {
             // Composite comparison (e.g. Tuple > Scalar)
             if (isCompositeNumeric(resultType)) {
-                u16 lReg = isInlineMultiword(leftType) ? emitBoxIfInline(leftReg, leftType) : leftReg;
-                u16 rReg = isInlineMultiword(rightType) ? emitBoxIfInline(rightReg, rightType) : rightReg;
+                auto needsBoxC = [&](Type* t) {
+                    return t && t->repr_ == ts::Type::Repr::Inline
+                        && t != compiler_.complexType()
+                        && t != compiler_.fractionType();
+                };
+                u16 lReg = needsBoxC(leftType) ? emitBoxIfInline(leftReg, leftType) : leftReg;
+                u16 rReg = needsBoxC(rightType) ? emitBoxIfInline(rightReg, rightType) : rightReg;
                 emitOp(getCompositeCmpOp(expr->op));
                 emitRegs(dst, lReg, rReg);
                 emitPtr(resultType);
@@ -3277,8 +3302,13 @@ u16 CodeGen::genUnaryOp(UnaryOpExpr* expr) {
             if (isCompositeNumeric(expr->resolvedType)) {
                 Type* opT = expr->operand->resolvedType;
                 Type* rT  = expr->resolvedType;
-                u16 inReg = isInlineMultiword(opT) ? emitBoxIfInline(operandReg, opT) : operandReg;
-                bool unboxResult = isInlineMultiword(rT);
+                auto needsBoxU = [&](Type* t) {
+                    return t && t->repr_ == ts::Type::Repr::Inline
+                        && t != compiler_.complexType()
+                        && t != compiler_.fractionType();
+                };
+                u16 inReg = needsBoxU(opT) ? emitBoxIfInline(operandReg, opT) : operandReg;
+                bool unboxResult = needsBoxU(rT);
                 u16 outReg = unboxResult ? allocReg() : dst;
                 emitOp(op_neg_composite);
                 emitRegs(outReg, inReg);
@@ -3312,8 +3342,13 @@ u16 CodeGen::genUnaryOp(UnaryOpExpr* expr) {
             if (isCompositeNumeric(expr->resolvedType)) {
                 Type* opT = expr->operand->resolvedType;
                 Type* rT  = expr->resolvedType;
-                u16 inReg = isInlineMultiword(opT) ? emitBoxIfInline(operandReg, opT) : operandReg;
-                bool unboxResult = isInlineMultiword(rT);
+                auto needsBoxU = [&](Type* t) {
+                    return t && t->repr_ == ts::Type::Repr::Inline
+                        && t != compiler_.complexType()
+                        && t != compiler_.fractionType();
+                };
+                u16 inReg = needsBoxU(opT) ? emitBoxIfInline(operandReg, opT) : operandReg;
+                bool unboxResult = needsBoxU(rT);
                 u16 outReg = unboxResult ? allocReg() : dst;
                 emitOp(op_not_composite);
                 emitRegs(outReg, inReg);
@@ -3339,8 +3374,13 @@ u16 CodeGen::genUnaryOp(UnaryOpExpr* expr) {
             if (isCompositeNumeric(expr->resolvedType)) {
                 Type* opT = expr->operand->resolvedType;
                 Type* rT  = expr->resolvedType;
-                u16 inReg = isInlineMultiword(opT) ? emitBoxIfInline(operandReg, opT) : operandReg;
-                bool unboxResult = isInlineMultiword(rT);
+                auto needsBoxU = [&](Type* t) {
+                    return t && t->repr_ == ts::Type::Repr::Inline
+                        && t != compiler_.complexType()
+                        && t != compiler_.fractionType();
+                };
+                u16 inReg = needsBoxU(opT) ? emitBoxIfInline(operandReg, opT) : operandReg;
+                bool unboxResult = needsBoxU(rT);
                 u16 outReg = unboxResult ? allocReg() : dst;
                 emitOp(op_bitnot_composite);
                 emitRegs(outReg, inReg);
@@ -3817,7 +3857,11 @@ u16 CodeGen::genCall(CallExpr_* expr) {
         // tuples as a 1-Word boxed Obj* (Complex/Fraction stay multi-word
         // per Phase 4f). printArgs and other multi-word-aware builtins
         // walk the arg array using the same rule (see builtinSlotWords).
-        if (!isVariadic && expr->isBuiltinCall && targetType
+        // Skip for yield / coro_resume / coro_yieldAll which have their
+        // own specialized lowering further down in this function.
+        bool specialCoroOp = expr->isCoroYield || expr->isCoroResume
+                          || expr->isCoroYieldAll;
+        if (!isVariadic && expr->isBuiltinCall && !specialCoroOp && targetType
             && targetType->repr_ == ts::Type::Repr::Inline
             && targetType != compiler_.complexType()
             && targetType != compiler_.fractionType()) {
