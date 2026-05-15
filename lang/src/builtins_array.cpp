@@ -382,13 +382,16 @@ void builtin_sort_by_array(VM& vm, u16 dst, u16, u16 ab) {
     auto* fn = static_cast<Callable*>(vm.reg(ab+1).o);
     auto* at = static_cast<ArrayType*>(src->type_);
     Type* et = at->elemType_;
+    auto* fnType = static_cast<FunctionType*>(fn->type_);
+    Type* paramT = fnType->argTypes_.empty() ? nullptr : fnType->argTypes_[0];
+    u16 elemWords = isLambdaInlineComposite(paramT) ? paramT->sizeWords_ : 1;
     size_t n = getArraySize(vm, src, et);
     std::vector<size_t> idx(n);
     std::iota(idx.begin(), idx.end(), 0);
     u16 sb = vm.currentCodeBlock()->numRegs;
     std::sort(idx.begin(), idx.end(), [&](size_t a, size_t b) {
-        vm.reg(sb) = getArrayElem(vm, src, et, a);
-        vm.reg(sb+1) = getArrayElem(vm, src, et, b);
+        placeLambdaArg(vm, sb, getArrayElem(vm, src, et, a), paramT);
+        placeLambdaArg(vm, (u16)(sb + elemWords), getArrayElem(vm, src, et, b), paramT);
         callTwoArgs(vm, fn, sb);
         return vm.reg(sb).i != 0;
     });
@@ -404,13 +407,16 @@ void builtin_grade_array(VM& vm, u16 dst, u16, u16 ab) {
     auto* fn = static_cast<Callable*>(vm.reg(ab+1).o);
     auto* at = static_cast<ArrayType*>(src->type_);
     Type* et = at->elemType_;
+    auto* fnType = static_cast<FunctionType*>(fn->type_);
+    Type* paramT = fnType->argTypes_.empty() ? nullptr : fnType->argTypes_[0];
+    u16 elemWords = isLambdaInlineComposite(paramT) ? paramT->sizeWords_ : 1;
     size_t n = getArraySize(vm, src, et);
     std::vector<size_t> idx(n);
     std::iota(idx.begin(), idx.end(), 0);
     u16 sb = vm.currentCodeBlock()->numRegs;
     std::sort(idx.begin(), idx.end(), [&](size_t a, size_t b) {
-        vm.reg(sb) = getArrayElem(vm, src, et, a);
-        vm.reg(sb+1) = getArrayElem(vm, src, et, b);
+        placeLambdaArg(vm, sb, getArrayElem(vm, src, et, a), paramT);
+        placeLambdaArg(vm, (u16)(sb + elemWords), getArrayElem(vm, src, et, b), paramT);
         callTwoArgs(vm, fn, sb);
         return vm.reg(sb).i != 0;
     });
@@ -591,15 +597,17 @@ void builtin_map_array(VM& vm, u16 dst, u16, u16 ab) {
     auto* srcType = static_cast<ArrayType*>(src->type_);
     Type* srcET = srcType->elemType_;
     size_t n = getArraySize(vm, src, srcET);
-    // Determine result type from fn's type
     auto* fnType = static_cast<FunctionType*>(fn->type_);
+    Type* paramT = fnType->argTypes_.empty() ? nullptr : fnType->argTypes_[0];
     Type* resET = fnType->returnType_;
     auto* resAT = vm.arrayType(resET);
     auto* result = makeEmptyArray(resAT);
     u16 sb = vm.currentCodeBlock()->numRegs;
     for (size_t i = 0; i < n; i++) {
-        vm.reg(sb) = getArrayElem(vm, src, srcET, i);
+        Word elem = getArrayElem(vm, src, srcET, i);
+        placeLambdaArg(vm, sb, elem, paramT);
         callOneArg(vm, fn, sb);
+        readLambdaResult(vm, sb, resET);
         arrayPush(vm, result, resET, vm.reg(sb));
     }
     vm.reg(dst).o = result;
@@ -610,12 +618,14 @@ void builtin_filter_array(VM& vm, u16 dst, u16, u16 ab) {
     auto* fn = static_cast<Callable*>(vm.reg(ab+1).o);
     auto* at = static_cast<ArrayType*>(src->type_);
     Type* et = at->elemType_;
+    auto* fnType = static_cast<FunctionType*>(fn->type_);
+    Type* paramT = fnType->argTypes_.empty() ? nullptr : fnType->argTypes_[0];
     size_t n = getArraySize(vm, src, et);
     auto* result = makeEmptyArray(at);
     u16 sb = vm.currentCodeBlock()->numRegs;
     for (size_t i = 0; i < n; i++) {
         Word elem = getArrayElem(vm, src, et, i);
-        vm.reg(sb) = elem;
+        placeLambdaArg(vm, sb, elem, paramT);
         callOneArg(vm, fn, sb);
         if (vm.reg(sb).i) arrayPush(vm, result, et, elem);
     }
@@ -628,12 +638,32 @@ void builtin_fold_array(VM& vm, u16 dst, u16, u16 ab) {
     auto* fn = static_cast<Callable*>(vm.reg(ab+2).o);
     auto* at = static_cast<ArrayType*>(src->type_);
     Type* et = at->elemType_;
+    auto* fnType = static_cast<FunctionType*>(fn->type_);
+    Type* accT = fnType->argTypes_.size() > 0 ? fnType->argTypes_[0] : nullptr;
+    Type* elT  = fnType->argTypes_.size() > 1 ? fnType->argTypes_[1] : nullptr;
+    Type* retT = fnType->returnType_;
     size_t n = getArraySize(vm, src, et);
     u16 sb = vm.currentCodeBlock()->numRegs;
+    // Fold-state of inline composite type: accumulator slot at sb is multi-
+    // word inline; box back to 1-Word for the next iteration's caller view.
     for (size_t i = 0; i < n; i++) {
-        vm.reg(sb) = acc;
-        vm.reg(sb+1) = getArrayElem(vm, src, et, i);
-        callTwoArgs(vm, fn, sb);
+        placeLambdaArg(vm, sb, acc, accT);
+        Word elem = getArrayElem(vm, src, et, i);
+        u16 elemSb = (u16)(sb + (isLambdaInlineComposite(accT) ? accT->sizeWords_ : 1));
+        placeLambdaArg(vm, elemSb, elem, elT);
+        if (fn->cfun_) {
+            fn->cfun_(vm, sb, 2, sb);
+        } else {
+            auto* lam = static_cast<Lambda*>(fn);
+            CodeBlock* cb = lam->codeBlock_;
+            u32 callBase = vm.baseReg() + sb;
+            for (u16 k = 0; k < lam->numFreeVars_; k++)
+                vm.reg(sb + cb->numArgs + k) = lam->freeVars_[k];
+            vm.pushFrame(&syncReturnCode(), cb, callBase, cb->numRegs, sb);
+            Code* entry = cb->code.data();
+            entry->op(vm, entry);
+        }
+        readLambdaResult(vm, sb, retT);
         acc = vm.reg(sb);
     }
     vm.reg(dst) = acc;

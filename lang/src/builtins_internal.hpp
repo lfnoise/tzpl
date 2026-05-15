@@ -164,6 +164,53 @@ inline Code& syncReturnCode() {
     return code;
 }
 
+// Phase 4g.2: lambda call args/results may be Inline composites that travel
+// through the VM as multi-word values, but builtins read them as 1-Word
+// boxed pointers from container backends. Unbox before placing into the
+// lambda's arg slot, and re-box after reading back.
+inline bool isLambdaInlineComposite(Type* t) {
+    if (!t) return false;
+    if (t->repr_ != Type::Repr::Inline) return false;
+    if (t == gCurrentVM->complexType() || t == gCurrentVM->fractionType()) return false;
+    return dynamic_cast<TupleType*>(t) || dynamic_cast<StructType*>(t);
+}
+
+inline void placeLambdaArg(VM& vm, u16 sb, Word w, Type* paramType) {
+    if (isLambdaInlineComposite(paramType)) {
+        unboxInlineDeep(vm, paramType, w.o, sb);
+    } else {
+        vm.reg(sb) = w;
+    }
+}
+
+inline void readLambdaResult(VM& vm, u16 sb, Type* returnType) {
+    if (isLambdaInlineComposite(returnType)) {
+        Obj* boxed = boxInlineDeep(vm, returnType, sb);
+        vm.reg(sb).o = boxed;
+    }
+}
+
+// Sum of slot words for the first `numArgs` parameter types (Phase 4g.2:
+// inline composite params occupy multiple slots, so free vars must be placed
+// after the cumulative arg-words, not after numArgs).
+inline u16 lambdaParamSlotWords(Lambda* lam) {
+    auto* fnType = static_cast<FunctionType*>(lam->type_);
+    u16 sum = 0;
+    for (Type* t : fnType->argTypes_) {
+        u16 sw = (t && t->sizeWords_ > 0) ? t->sizeWords_ : 1;
+        // Phase 4g.2: builtin lambda calling convention places Inline composite
+        // args as multi-word (placeLambdaArg unboxes); other types as 1 word.
+        if (t && t->repr_ == Type::Repr::Inline
+            && t != gCurrentVM->complexType() && t != gCurrentVM->fractionType()
+            && (dynamic_cast<TupleType*>(t) || dynamic_cast<StructType*>(t))) {
+            sum += sw;
+        } else {
+            sum += 1;
+        }
+    }
+    return sum;
+}
+
 inline void callOneArg(VM& vm, Callable* fn, u16 sb) {
     if (fn->cfun_) {
         fn->cfun_(vm, sb, 1, sb);
@@ -171,8 +218,9 @@ inline void callOneArg(VM& vm, Callable* fn, u16 sb) {
         auto* lam = static_cast<Lambda*>(fn);
         CodeBlock* cb = lam->codeBlock_;
         u32 callBase = vm.baseReg() + sb;
+        u16 paramWords = lambdaParamSlotWords(lam);
         for (u16 i = 0; i < lam->numFreeVars_; i++)
-            vm.reg(sb + cb->numArgs + i) = lam->freeVars_[i];
+            vm.reg(sb + paramWords + i) = lam->freeVars_[i];
         vm.pushFrame(&syncReturnCode(), cb, callBase, cb->numRegs, sb);
         Code* entry = cb->code.data();
         entry->op(vm, entry);
@@ -186,8 +234,9 @@ inline void callTwoArgs(VM& vm, Callable* fn, u16 sb) {
         auto* lam = static_cast<Lambda*>(fn);
         CodeBlock* cb = lam->codeBlock_;
         u32 callBase = vm.baseReg() + sb;
+        u16 paramWords = lambdaParamSlotWords(lam);
         for (u16 i = 0; i < lam->numFreeVars_; i++)
-            vm.reg(sb + cb->numArgs + i) = lam->freeVars_[i];
+            vm.reg(sb + paramWords + i) = lam->freeVars_[i];
         vm.pushFrame(&syncReturnCode(), cb, callBase, cb->numRegs, sb);
         Code* entry = cb->code.data();
         entry->op(vm, entry);
