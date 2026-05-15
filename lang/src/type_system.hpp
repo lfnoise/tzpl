@@ -93,6 +93,14 @@ bool storesObjPtr(Type const* t);
 // delegates to its inner type.
 bool storesF64(Type const* t);
 
+// Phase 4e: array element classification beyond the original 3-way dispatch.
+// For Array[Complex] / Array[Fraction] we want inline 16-byte slots
+// (PodArray<x64> / PodArray<r64>) instead of one boxed Obj* per element.
+// Both predicates are false for everything else, so the existing
+// Pod/Obj dispatch falls through unchanged.
+bool isInlineComplexElem(Type const* t);
+bool isInlineFractionElem(Type const* t);
+
 // For a NullablePtrEnum, returns the case index whose payload is Void
 // (the "none" side). The other case index is the data ("some") side.
 // Returns -1 if no Void case found.

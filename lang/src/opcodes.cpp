@@ -1134,54 +1134,86 @@ void op_concat_list(VM& vm, Code* pc) {
 // --- Array Destructuring ---
 
 // ARRAY_GET Rd, Ra, idx  (3 words: op, regs{dst, src, idx}, ArrayType*)
-// Gets element at compile-time constant index from array
+// Gets element at compile-time constant index from array.
+// Phase 4e: Complex and Fraction land as 2-word inline values in dst..dst+1.
 void op_array_get(VM& vm, Code* pc) {
     u16 dst = pc[1].regs[0], src = pc[1].regs[1], idx = pc[1].regs[2];
     auto* arrayType = static_cast<ArrayType*>(pc[2].p);
     Type* elemType = arrayType->elemType_;
 
-    if (elemType && !storesObjPtr(elemType) && !storesF64(elemType)) {
-        auto* arr = static_cast<PodArray<i64>*>(vm.reg(src).o);
-        vm.reg(dst).i = arr->v[cyclicIndex(idx, arr->v.size())];
-    } else if (storesF64(elemType)) {
-        auto* arr = static_cast<PodArray<f64>*>(vm.reg(src).o);
-        vm.reg(dst).f = arr->v[cyclicIndex(idx, arr->v.size())];
-    } else {
-        auto* arr = static_cast<ObjArray*>(vm.reg(src).o);
-        vm.reg(dst).o = arr->get(cyclicIndex(idx, arr->size()));
+    switch (arrayBackendFor(elemType)) {
+        case ArrayBackend::Complex: {
+            auto* arr = static_cast<PodArray<x64>*>(vm.reg(src).o);
+            x64 const& v = arr->v[cyclicIndex(idx, arr->v.size())];
+            vm.reg(dst).f = v.real();
+            vm.reg((u16)(dst + 1)).f = v.imag();
+            break;
+        }
+        case ArrayBackend::Fraction: {
+            auto* arr = static_cast<PodArray<r64>*>(vm.reg(src).o);
+            r64 const& v = arr->v[cyclicIndex(idx, arr->v.size())];
+            vm.reg(dst).i = v.numer();
+            vm.reg((u16)(dst + 1)).i = v.denom();
+            break;
+        }
+        case ArrayBackend::Float: {
+            auto* arr = static_cast<PodArray<f64>*>(vm.reg(src).o);
+            vm.reg(dst).f = arr->v[cyclicIndex(idx, arr->v.size())];
+            break;
+        }
+        case ArrayBackend::Int: {
+            auto* arr = static_cast<PodArray<i64>*>(vm.reg(src).o);
+            vm.reg(dst).i = arr->v[cyclicIndex(idx, arr->v.size())];
+            break;
+        }
+        case ArrayBackend::Obj: {
+            auto* arr = static_cast<ObjArray*>(vm.reg(src).o);
+            vm.reg(dst).o = arr->get(cyclicIndex(idx, arr->size()));
+            break;
+        }
     }
     DISPATCH(3);
 }
 
 // ARRAY_SLICE Rd, Ra, startIdx  (3 words: op, regs{dst, src, startIdx}, ArrayType*)
 // Creates new array from arr[startIdx:]
+template <typename T>
+static void podArraySliceFrom(PodArray<T>* arr, ArrayType* arrayType, u16 startIdx, Word& out) {
+    auto* result = new PodArray<T>(arrayType);
+    if (startIdx < arr->v.size()) {
+        result->v.assign(arr->v.begin() + startIdx, arr->v.end());
+    }
+    out.o = result;
+}
+
 void op_array_slice(VM& vm, Code* pc) {
     u16 dst = pc[1].regs[0], src = pc[1].regs[1], startIdx = pc[1].regs[2];
     auto* arrayType = static_cast<ArrayType*>(pc[2].p);
     Type* elemType = arrayType->elemType_;
 
-    if (elemType && !storesObjPtr(elemType) && !storesF64(elemType)) {
-        auto* arr = static_cast<PodArray<i64>*>(vm.reg(src).o);
-        auto* result = new PodArray<i64>(arrayType);
-        if (startIdx < arr->v.size()) {
-            result->v.assign(arr->v.begin() + startIdx, arr->v.end());
+    switch (arrayBackendFor(elemType)) {
+        case ArrayBackend::Complex:
+            podArraySliceFrom(static_cast<PodArray<x64>*>(vm.reg(src).o), arrayType, startIdx, vm.reg(dst));
+            break;
+        case ArrayBackend::Fraction:
+            podArraySliceFrom(static_cast<PodArray<r64>*>(vm.reg(src).o), arrayType, startIdx, vm.reg(dst));
+            break;
+        case ArrayBackend::Float:
+            podArraySliceFrom(static_cast<PodArray<f64>*>(vm.reg(src).o), arrayType, startIdx, vm.reg(dst));
+            break;
+        case ArrayBackend::Int:
+            podArraySliceFrom(static_cast<PodArray<i64>*>(vm.reg(src).o), arrayType, startIdx, vm.reg(dst));
+            break;
+        case ArrayBackend::Obj: {
+            auto* arr = static_cast<ObjArray*>(vm.reg(src).o);
+            auto* result = new ObjArray(arrayType);
+            if (startIdx < arr->size()) {
+                for (size_t i = startIdx; i < arr->size(); ++i)
+                    result->push(arr->get(i));
+            }
+            vm.reg(dst).o = result;
+            break;
         }
-        vm.reg(dst).o = result;
-    } else if (storesF64(elemType)) {
-        auto* arr = static_cast<PodArray<f64>*>(vm.reg(src).o);
-        auto* result = new PodArray<f64>(arrayType);
-        if (startIdx < arr->v.size()) {
-            result->v.assign(arr->v.begin() + startIdx, arr->v.end());
-        }
-        vm.reg(dst).o = result;
-    } else {
-        auto* arr = static_cast<ObjArray*>(vm.reg(src).o);
-        auto* result = new ObjArray(arrayType);
-        if (startIdx < arr->size()) {
-            for (size_t i = startIdx; i < arr->size(); ++i)
-                result->push(arr->get(i));
-        }
-        vm.reg(dst).o = result;
     }
     DISPATCH(3);
 }
@@ -1193,15 +1225,22 @@ void op_array_length(VM& vm, Code* pc) {
     auto* arrayType = static_cast<ArrayType*>(pc[2].p);
     Type* elemType = arrayType->elemType_;
 
-    if (elemType && !storesObjPtr(elemType) && !storesF64(elemType)) {
-        auto* arr = static_cast<PodArray<i64>*>(vm.reg(src).o);
-        vm.reg(dst).i = (i64)arr->v.size();
-    } else if (storesF64(elemType)) {
-        auto* arr = static_cast<PodArray<f64>*>(vm.reg(src).o);
-        vm.reg(dst).i = (i64)arr->v.size();
-    } else {
-        auto* arr = static_cast<ObjArray*>(vm.reg(src).o);
-        vm.reg(dst).i = (i64)arr->size();
+    switch (arrayBackendFor(elemType)) {
+        case ArrayBackend::Complex:
+            vm.reg(dst).i = (i64)static_cast<PodArray<x64>*>(vm.reg(src).o)->v.size();
+            break;
+        case ArrayBackend::Fraction:
+            vm.reg(dst).i = (i64)static_cast<PodArray<r64>*>(vm.reg(src).o)->v.size();
+            break;
+        case ArrayBackend::Float:
+            vm.reg(dst).i = (i64)static_cast<PodArray<f64>*>(vm.reg(src).o)->v.size();
+            break;
+        case ArrayBackend::Int:
+            vm.reg(dst).i = (i64)static_cast<PodArray<i64>*>(vm.reg(src).o)->v.size();
+            break;
+        case ArrayBackend::Obj:
+            vm.reg(dst).i = (i64)static_cast<ObjArray*>(vm.reg(src).o)->size();
+            break;
     }
     DISPATCH(3);
 }
@@ -2160,30 +2199,63 @@ void FractionRangeListGen::generate(VM& vm, ListNode* owner) {
 // --- Tuple Access/Construction ---
 
 // MAKE_ARRAY Rd, firstSrc, numElems (3 words: op, regs{dst, firstSrc, numElems}, ArrayType*)
+//
+// Phase 4e: Complex / Fraction elements are read as 2 consecutive Words per
+// element from firstSrc, so each i strides by sizeWords (2 for those types).
+// Codegen lays the elements out in the same multi-word stride.
 void op_make_array(VM& vm, Code* pc) {
     u16 dst = pc[1].regs[0], firstSrc = pc[1].regs[1], numElems = pc[1].regs[2];
     auto* arrayType = static_cast<ArrayType*>(pc[2].p);
     Type* elemType = arrayType->elemType_;
 
-    if (elemType && !storesObjPtr(elemType) && !storesF64(elemType)) {
-        auto* arr = new PodArray<i64>(arrayType);
-        arr->v.resize(numElems);
-        for (u16 i = 0; i < numElems; ++i)
-            arr->v[i] = vm.reg(firstSrc + i).i;
-        vm.reg(dst).o = arr;
-    } else if (storesF64(elemType)) {
-        auto* arr = new PodArray<f64>(arrayType);
-        arr->v.resize(numElems);
-        for (u16 i = 0; i < numElems; ++i)
-            arr->v[i] = vm.reg(firstSrc + i).f;
-        vm.reg(dst).o = arr;
-    } else {
-        auto* arr = new ObjArray(arrayType);
-        arr->reserve(numElems);
-        for (u16 i = 0; i < numElems; ++i) {
-            arr->push(vm.reg(firstSrc + i).o);
+    switch (arrayBackendFor(elemType)) {
+        case ArrayBackend::Complex: {
+            auto* arr = new PodArray<x64>(arrayType);
+            arr->v.resize(numElems);
+            for (u16 i = 0; i < numElems; ++i) {
+                f64 re = vm.reg((u16)(firstSrc + i * 2)).f;
+                f64 im = vm.reg((u16)(firstSrc + i * 2 + 1)).f;
+                arr->v[i] = x64(re, im);
+            }
+            vm.reg(dst).o = arr;
+            DISPATCH(3);
         }
-        vm.reg(dst).o = arr;
+        case ArrayBackend::Fraction: {
+            auto* arr = new PodArray<r64>(arrayType);
+            arr->v.resize(numElems);
+            for (u16 i = 0; i < numElems; ++i) {
+                i64 n = vm.reg((u16)(firstSrc + i * 2)).i;
+                i64 d = vm.reg((u16)(firstSrc + i * 2 + 1)).i;
+                arr->v[i] = r64(n, d, true);  // already-canonical from inline rep
+            }
+            vm.reg(dst).o = arr;
+            DISPATCH(3);
+        }
+        case ArrayBackend::Int: {
+            auto* arr = new PodArray<i64>(arrayType);
+            arr->v.resize(numElems);
+            for (u16 i = 0; i < numElems; ++i)
+                arr->v[i] = vm.reg(firstSrc + i).i;
+            vm.reg(dst).o = arr;
+            DISPATCH(3);
+        }
+        case ArrayBackend::Float: {
+            auto* arr = new PodArray<f64>(arrayType);
+            arr->v.resize(numElems);
+            for (u16 i = 0; i < numElems; ++i)
+                arr->v[i] = vm.reg(firstSrc + i).f;
+            vm.reg(dst).o = arr;
+            DISPATCH(3);
+        }
+        case ArrayBackend::Obj: {
+            auto* arr = new ObjArray(arrayType);
+            arr->reserve(numElems);
+            for (u16 i = 0; i < numElems; ++i) {
+                arr->push(vm.reg(firstSrc + i).o);
+            }
+            vm.reg(dst).o = arr;
+            DISPATCH(3);
+        }
     }
     DISPATCH(3);
 }
@@ -2315,60 +2387,123 @@ void op_array_alloc(VM& vm, Code* pc) {
     Type* elemType = arrayType->elemType_;
     i64 len = vm.reg(lenReg).i;
 
-    if (elemType && !storesObjPtr(elemType) && !storesF64(elemType)) {
-        auto* arr = new PodArray<i64>(arrayType);
-        arr->v.resize(len);
-        vm.reg(dst).o = arr;
-    } else if (storesF64(elemType)) {
-        auto* arr = new PodArray<f64>(arrayType);
-        arr->v.resize(len);
-        vm.reg(dst).o = arr;
-    } else {
-        auto* arr = new ObjArray(arrayType);
-        arr->resize(len);
-        vm.reg(dst).o = arr;
+    switch (arrayBackendFor(elemType)) {
+        case ArrayBackend::Complex: {
+            auto* arr = new PodArray<x64>(arrayType);
+            arr->v.resize(len);  // value-initialised: 0+0i
+            vm.reg(dst).o = arr;
+            break;
+        }
+        case ArrayBackend::Fraction: {
+            auto* arr = new PodArray<r64>(arrayType);
+            arr->v.resize(len);  // value-initialised: 0/1
+            vm.reg(dst).o = arr;
+            break;
+        }
+        case ArrayBackend::Float: {
+            auto* arr = new PodArray<f64>(arrayType);
+            arr->v.resize(len);
+            vm.reg(dst).o = arr;
+            break;
+        }
+        case ArrayBackend::Int: {
+            auto* arr = new PodArray<i64>(arrayType);
+            arr->v.resize(len);
+            vm.reg(dst).o = arr;
+            break;
+        }
+        case ArrayBackend::Obj: {
+            auto* arr = new ObjArray(arrayType);
+            arr->resize(len);
+            vm.reg(dst).o = arr;
+            break;
+        }
     }
     DISPATCH(3);
 }
 
 // ARRAY_SET Ra, Rb_idx, Rc_val (3 words: op, regs{arr, idx_reg, val_reg}, ArrayType*)
-// Set array element at runtime index
+// Set array element at runtime index. Phase 4e: Complex/Fraction values are
+// read as 2 consecutive Words at valReg.
 void op_array_set(VM& vm, Code* pc) {
     u16 arrReg = pc[1].regs[0], idxReg = pc[1].regs[1], valReg = pc[1].regs[2];
     auto* arrayType = static_cast<ArrayType*>(pc[2].p);
     Type* elemType = arrayType->elemType_;
     i64 idx = vm.reg(idxReg).i;
 
-    if (elemType && !storesObjPtr(elemType) && !storesF64(elemType)) {
-        auto* arr = static_cast<PodArray<i64>*>(vm.reg(arrReg).o);
-        arr->v[cyclicIndex(idx, arr->v.size())] = vm.reg(valReg).i;
-    } else if (storesF64(elemType)) {
-        auto* arr = static_cast<PodArray<f64>*>(vm.reg(arrReg).o);
-        arr->v[cyclicIndex(idx, arr->v.size())] = vm.reg(valReg).f;
-    } else {
-        auto* arr = static_cast<ObjArray*>(vm.reg(arrReg).o);
-        arr->set(cyclicIndex(idx, arr->size()), vm.reg(valReg).o);
+    switch (arrayBackendFor(elemType)) {
+        case ArrayBackend::Complex: {
+            auto* arr = static_cast<PodArray<x64>*>(vm.reg(arrReg).o);
+            f64 re = vm.reg(valReg).f;
+            f64 im = vm.reg((u16)(valReg + 1)).f;
+            arr->v[cyclicIndex(idx, arr->v.size())] = x64(re, im);
+            break;
+        }
+        case ArrayBackend::Fraction: {
+            auto* arr = static_cast<PodArray<r64>*>(vm.reg(arrReg).o);
+            i64 n = vm.reg(valReg).i;
+            i64 d = vm.reg((u16)(valReg + 1)).i;
+            arr->v[cyclicIndex(idx, arr->v.size())] = r64(n, d, true);
+            break;
+        }
+        case ArrayBackend::Float: {
+            auto* arr = static_cast<PodArray<f64>*>(vm.reg(arrReg).o);
+            arr->v[cyclicIndex(idx, arr->v.size())] = vm.reg(valReg).f;
+            break;
+        }
+        case ArrayBackend::Int: {
+            auto* arr = static_cast<PodArray<i64>*>(vm.reg(arrReg).o);
+            arr->v[cyclicIndex(idx, arr->v.size())] = vm.reg(valReg).i;
+            break;
+        }
+        case ArrayBackend::Obj: {
+            auto* arr = static_cast<ObjArray*>(vm.reg(arrReg).o);
+            arr->set(cyclicIndex(idx, arr->size()), vm.reg(valReg).o);
+            break;
+        }
     }
     DISPATCH(3);
 }
 
 // ARRAY_GET_DYN Rd, Ra, Rb_idx (3 words: op, regs{dst, arr, idx_reg}, ArrayType*)
-// Get array element at runtime index (index from register, not immediate)
+// Get array element at runtime index (index from register, not immediate).
+// Phase 4e: Complex/Fraction land as 2-word inline values in dst..dst+1.
 void op_array_get_dyn(VM& vm, Code* pc) {
     u16 dst = pc[1].regs[0], arrReg = pc[1].regs[1], idxReg = pc[1].regs[2];
     auto* arrayType = static_cast<ArrayType*>(pc[2].p);
     Type* elemType = arrayType->elemType_;
     i64 idx = vm.reg(idxReg).i;
 
-    if (elemType && !storesObjPtr(elemType) && !storesF64(elemType)) {
-        auto* arr = static_cast<PodArray<i64>*>(vm.reg(arrReg).o);
-        vm.reg(dst).i = arr->v[cyclicIndex(idx, arr->v.size())];
-    } else if (storesF64(elemType)) {
-        auto* arr = static_cast<PodArray<f64>*>(vm.reg(arrReg).o);
-        vm.reg(dst).f = arr->v[cyclicIndex(idx, arr->v.size())];
-    } else {
-        auto* arr = static_cast<ObjArray*>(vm.reg(arrReg).o);
-        vm.reg(dst).o = arr->get(cyclicIndex(idx, arr->size()));
+    switch (arrayBackendFor(elemType)) {
+        case ArrayBackend::Complex: {
+            auto* arr = static_cast<PodArray<x64>*>(vm.reg(arrReg).o);
+            x64 const& v = arr->v[cyclicIndex(idx, arr->v.size())];
+            vm.reg(dst).f = v.real();
+            vm.reg((u16)(dst + 1)).f = v.imag();
+            break;
+        }
+        case ArrayBackend::Fraction: {
+            auto* arr = static_cast<PodArray<r64>*>(vm.reg(arrReg).o);
+            r64 const& v = arr->v[cyclicIndex(idx, arr->v.size())];
+            vm.reg(dst).i = v.numer();
+            vm.reg((u16)(dst + 1)).i = v.denom();
+            break;
+        }
+        case ArrayBackend::Float: {
+            auto* arr = static_cast<PodArray<f64>*>(vm.reg(arrReg).o);
+            vm.reg(dst).f = arr->v[cyclicIndex(idx, arr->v.size())];
+            break;
+        }
+        case ArrayBackend::Int: {
+            auto* arr = static_cast<PodArray<i64>*>(vm.reg(arrReg).o);
+            vm.reg(dst).i = arr->v[cyclicIndex(idx, arr->v.size())];
+            break;
+        }
+        case ArrayBackend::Obj: {
+            auto* arr = static_cast<ObjArray*>(vm.reg(arrReg).o);
+            vm.reg(dst).o = arr->get(cyclicIndex(idx, arr->size()));
+            break;
+        }
     }
     DISPATCH(3);
 }

@@ -148,7 +148,36 @@ public:
     }
 };
 
+// Phase 4e: array storage backend selector. The runtime instantiates one of
+// PodArray<i64>, PodArray<f64>, PodArray<x64>, PodArray<r64>, or ObjArray
+// based on the static element type. Every array opcode and array builtin
+// dispatches on this enum to pick the right concrete subclass; `Obj` keeps
+// the legacy boxed-pointer fallback for everything that is not a recognized
+// inline value type.
+enum class ArrayBackend : u8 {
+    Int,        // PodArray<i64>
+    Float,      // PodArray<f64>
+    Complex,    // PodArray<x64>  -- inline 2 f64s per element
+    Fraction,   // PodArray<r64>  -- inline 2 i64s per element
+    Obj         // ObjArray       -- one Obj* per element
+};
+
+inline ArrayBackend arrayBackendFor(Type const* elemType) {
+    if (isInlineComplexElem(elemType))  return ArrayBackend::Complex;
+    if (isInlineFractionElem(elemType)) return ArrayBackend::Fraction;
+    if (storesF64(elemType))            return ArrayBackend::Float;
+    if (!storesObjPtr(elemType))        return ArrayBackend::Int;
+    return ArrayBackend::Obj;
+}
+
 // POD array (Int, Float, etc.)
+//
+// Phase 4e: also instantiated as PodArray<x64> for Array[Complex] and
+// PodArray<r64> for Array[Fraction], where x64 = std::complex<f64> and
+// r64 = rational<i64> are 16-byte trivially-copyable types matching the
+// inline value-type layouts. Element access is one read/write of two
+// f64 / i64 words. ARC is a no-op for these element types because
+// neither Complex nor Fraction holds any embedded Obj* fields.
 template <typename T>
 class PodArray : public Obj {
 public:
@@ -164,13 +193,22 @@ public:
         VMString s = rt::vmstr("[");
         for (size_t i = 0; i < v.size(); ++i) {
             if (i > 0) s += ", ";
-            Word w;
-            if constexpr (std::is_same_v<T, f64>) {
-                w.f = v[i];
+            if constexpr (std::is_same_v<T, x64>) {
+                f64 re = v[i].real();
+                f64 im = v[i].imag();
+                s += std::signbit(im) ? rt::fmt("{}{}i", re, im)
+                                      : rt::fmt("{}+{}i", re, im);
+            } else if constexpr (std::is_same_v<T, r64>) {
+                s += rt::fmt("{}/{}", v[i].numer(), v[i].denom());
             } else {
-                w.i = (i64)v[i];
+                Word w;
+                if constexpr (std::is_same_v<T, f64>) {
+                    w.f = v[i];
+                } else {
+                    w.i = (i64)v[i];
+                }
+                s += wordToString(w, elemType);
             }
-            s += wordToString(w, elemType);
         }
         s += "]";
         return s;

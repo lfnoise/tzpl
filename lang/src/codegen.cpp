@@ -1507,15 +1507,11 @@ void CodeGen::genForStmt(ForStmtNode* stmt) {
 
         u32 exitJump = emitJump(op_jump_if_false, condReg);
 
-        u16 elemReg = allocReg();
+        // Phase 4e: inline-element arrays land 2-word values directly.
+        u16 elemReg = allocSlot(arrayType->elemType_);
         emitOp(op_array_get_dyn);
         emitRegs(elemReg, arrReg, idxReg);
         emitPtr(arrayType);
-
-        // Phase 4f: array stores boxed inline values; unbox into 2-word slot.
-        if (isInlineMultiword(arrayType->elemType_)) {
-            elemReg = emitUnboxIfInline(elemReg, arrayType->elemType_);
-        }
 
         loopStack_.push_back({loopSavedReg, {}, {}});
         pushScope();
@@ -2828,8 +2824,9 @@ u16 CodeGen::emitAutoMapDowncastLoop(u16 arrReg, std::vector<Type*>& srcArrayTyp
     emitRegs(condReg, iReg, lenReg);
     u32 exitJump = emitJump(op_jump_if_false, condReg);
 
-    // Extract element
-    u16 elemReg = allocReg();
+    // Extract element. Phase 4e: inline-element arrays land 2-word values
+    // straight into a 2-word slot; no per-element box/unbox.
+    u16 elemReg = allocSlot(srcArrType->elemType_);
     emitOp(op_array_get_dyn);
     emitRegs(elemReg, arrReg, iReg);
     emitPtr(srcArrType);
@@ -2840,18 +2837,7 @@ u16 CodeGen::emitAutoMapDowncastLoop(u16 arrReg, std::vector<Type*>& srcArrayTyp
         convertedReg = emitAutoMapDowncastLoop(elemReg, srcArrayTypes, resultTypes,
                                                 level + 1, depth, elemType, targetType);
     } else {
-        // Phase 4f: array elements are stored boxed; unbox before downcast.
-        Type* innerSrcElem = srcArrType->elemType_;
-        if (isInlineMultiword(innerSrcElem)) {
-            elemReg = emitUnboxIfInline(elemReg, innerSrcElem);
-        }
         convertedReg = emitNumericDowncast(elemReg, elemType, targetType);
-        // The destination array also stores boxed, so re-box if the converted
-        // value is itself an inline type.
-        Type* dstElem = resultArrType->elemType_;
-        if (isInlineMultiword(dstElem)) {
-            convertedReg = emitBoxIfInline(convertedReg, dstElem);
-        }
     }
 
     // Store in result array
@@ -6283,23 +6269,19 @@ u16 CodeGen::genArrayLiteral(ArrayLiteralExpr* expr) {
     usize count = expr->elements.size();
 
     // Generate all element values into consecutive registers.
-    // Phase 4f: ObjArray stores 1 Word per element; box inline value types
-    // (Complex/Fraction) before placement.
+    // Phase 4e: inline-element arrays (Array[Complex] / Array[Fraction])
+    // use PodArray<x64>/<r64> backends and read 2 consecutive Words per
+    // element; lay them out at multi-word stride. All other element types
+    // stride by 1 Word.
+    u32 sw = typeSlotWords(elemType);
     u16 elemBase = nextReg_;
     for (size_t i = 0; i < count; ++i) {
         u16 elemReg = genExpr(static_cast<Expr*>(expr->elements[i].get()));
         Type* elemExprType = expr->elements[i]->resolvedType;
-        // Promote element to the array's element type if needed
         elemReg = ensureType(elemReg, elemExprType, elemType);
-        if (isInlineMultiword(elemType)) {
-            elemReg = emitBoxIfInline(elemReg, elemType);
-        }
-        // Move to consecutive position if needed
-        if (elemReg != elemBase + (u16)i) {
-            emitOp(op_mov);
-            emitRegs(elemBase + (u16)i, elemReg);
-        }
-        u16 next = elemBase + (u16)i + 1;
+        u16 dstSlot = (u16)(elemBase + (u16)i * sw);
+        emitArgPlacement(dstSlot, elemReg, elemType);
+        u16 next = (u16)(dstSlot + sw);
         if (nextReg_ < next) { nextReg_ = next; if (nextReg_ > maxReg_) maxReg_ = nextReg_; }
     }
 
@@ -7560,11 +7542,11 @@ u16 CodeGen::genIndexExpr(IndexExpr_* expr) {
 
     u16 objReg = genExpr(static_cast<Expr*>(expr->object.get()));
     u16 idxReg = genExpr(static_cast<Expr*>(expr->index.get()));
-    u16 dst = allocReg();
 
     if (auto* mapType = dynamic_cast<MapType*>(expr->object->resolvedType)) {
         // Map subscript: map[key] -> Option<V>.
-        // Phase 4f: map keys are stored boxed; box inline key before lookup.
+        // Phase 4f: map keys are still stored boxed; box inline key before lookup.
+        u16 dst = allocReg();
         idxReg = ensureType(idxReg, expr->index->resolvedType, mapType->keyType_);
         if (isInlineMultiword(mapType->keyType_)) {
             idxReg = emitBoxIfInline(idxReg, mapType->keyType_);
@@ -7576,19 +7558,18 @@ u16 CodeGen::genIndexExpr(IndexExpr_* expr) {
     }
     if (expr->object->resolvedType == compiler_.stringType()) {
         // String subscript: string[index] -> byte as Int
+        u16 dst = allocReg();
         emitOp(op_string_get_byte);
         emitRegs(dst, objReg, idxReg);
         return dst;
     }
-    // Array subscript: array[index]
+    // Array subscript: array[index]. Phase 4e: inline element types land
+    // as multi-word inline values straight into a 2-word slot.
     auto* arrType = dynamic_cast<ArrayType*>(expr->object->resolvedType);
+    u16 dst = allocSlot(arrType ? arrType->elemType_ : nullptr);
     emitOp(op_array_get_dyn);
     emitRegs(dst, objReg, idxReg);
     emitPtr(arrType);
-    // Phase 4f: arrays store inline value types boxed; unbox into 2-word slot.
-    if (arrType && isInlineMultiword(arrType->elemType_)) {
-        return emitUnboxIfInline(dst, arrType->elemType_);
-    }
     return dst;
 }
 

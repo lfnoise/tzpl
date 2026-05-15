@@ -95,6 +95,9 @@ PodArray<T>::PodArray(Type* type)
 // Explicit PodArray instantiations
 template class PodArray<i64>;
 template class PodArray<f64>;
+// Phase 4e: inline element backends for Array[Complex] / Array[Fraction].
+template class PodArray<x64>;
+template class PodArray<r64>;
 
 // ObjArray constructor
 ObjArray::ObjArray(Type* type)

@@ -197,6 +197,27 @@ bool storesF64(Type const* t) {
     return false;
 }
 
+// Phase 4e: array-element predicates. Match by Type* identity against the
+// universe-cached Complex / Fraction types, recursing through aliases. Tuple
+// structs that wrap a Complex/Fraction (UnwrappedTupleStruct) currently keep
+// the boxed array path -- the wrapper gives a different concrete identity, so
+// we'd need its layout_[0] to point at Complex/Fraction. Defer that.
+bool isInlineComplexElem(Type const* t) {
+    if (!t) return false;
+    if (auto* al = dynamic_cast<AliasedType const*>(t)) {
+        return isInlineComplexElem(al->aliasedType_);
+    }
+    return dynamic_cast<ComplexType const*>(t) != nullptr;
+}
+
+bool isInlineFractionElem(Type const* t) {
+    if (!t) return false;
+    if (auto* al = dynamic_cast<AliasedType const*>(t)) {
+        return isInlineFractionElem(al->aliasedType_);
+    }
+    return dynamic_cast<FractionType const*>(t) != nullptr;
+}
+
 int nullablePtrVoidCaseIndex(EnumType const* et) {
     if (!et) return -1;
     for (size_t i = 0; i < et->cases_.size(); ++i) {
