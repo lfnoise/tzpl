@@ -667,26 +667,50 @@ size_t WordHash::operator()(Word w) const {
     }
     if (auto* arrT = dynamic_cast<ArrayType*>(type)) {
         Type* et = arrT->elemType_;
-        if (et == gCurrentVM->intType() || et == gCurrentVM->boolType()) {
-            auto* a = static_cast<PodArray<i64>*>(w.o);
-            size_t h = a->v.size();
-            for (auto val : a->v) h = hashCombine(h, std::hash<i64>{}(val));
-            return h;
+        // Phase 4e: dispatch through arrayBackendFor so Complex/Fraction
+        // arrays hash via their inline backend.
+        switch (arrayBackendFor(et)) {
+            case ArrayBackend::Complex: {
+                auto* a = static_cast<PodArray<x64>*>(w.o);
+                size_t h = a->v.size();
+                for (auto const& v : a->v) {
+                    h = hashCombine(h, hashCombine(std::hash<f64>{}(v.real()),
+                                                   std::hash<f64>{}(v.imag())));
+                }
+                return h;
+            }
+            case ArrayBackend::Fraction: {
+                auto* a = static_cast<PodArray<r64>*>(w.o);
+                size_t h = a->v.size();
+                for (auto const& v : a->v) {
+                    h = hashCombine(h, hashCombine(std::hash<i64>{}(v.numer()),
+                                                   std::hash<i64>{}(v.denom())));
+                }
+                return h;
+            }
+            case ArrayBackend::Float: {
+                auto* a = static_cast<PodArray<f64>*>(w.o);
+                size_t h = a->v.size();
+                for (auto val : a->v) h = hashCombine(h, std::hash<f64>{}(val));
+                return h;
+            }
+            case ArrayBackend::Int: {
+                auto* a = static_cast<PodArray<i64>*>(w.o);
+                size_t h = a->v.size();
+                for (auto val : a->v) h = hashCombine(h, std::hash<i64>{}(val));
+                return h;
+            }
+            case ArrayBackend::Obj: {
+                auto* a = static_cast<ObjArray*>(w.o);
+                WordHash sub{et};
+                size_t h = a->size();
+                for (auto* obj : *a) {
+                    Word ew; ew.o = obj;
+                    h = hashCombine(h, sub(ew));
+                }
+                return h;
+            }
         }
-        if (et == gCurrentVM->floatType()) {
-            auto* a = static_cast<PodArray<f64>*>(w.o);
-            size_t h = a->v.size();
-            for (auto val : a->v) h = hashCombine(h, std::hash<f64>{}(val));
-            return h;
-        }
-        auto* a = static_cast<ObjArray*>(w.o);
-        WordHash sub{et};
-        size_t h = a->size();
-        for (auto* obj : *a) {
-            Word ew; ew.o = obj;
-            h = hashCombine(h, sub(ew));
-        }
-        return h;
     }
     if (auto* listT = dynamic_cast<ListType*>(type)) {
         Type* et = listT->elemType_;
@@ -821,26 +845,46 @@ bool WordEqual::operator()(Word a, Word b) const {
     }
     if (auto* arrT = dynamic_cast<ArrayType*>(type)) {
         Type* et = arrT->elemType_;
-        if (et == gCurrentVM->intType() || et == gCurrentVM->boolType()) {
-            auto* aa = static_cast<PodArray<i64>*>(a.o);
-            auto* ab = static_cast<PodArray<i64>*>(b.o);
-            return aa->v == ab->v;
+        // Phase 4e: dispatch via arrayBackendFor.
+        switch (arrayBackendFor(et)) {
+            case ArrayBackend::Complex: {
+                auto* aa = static_cast<PodArray<x64>*>(a.o);
+                auto* ab = static_cast<PodArray<x64>*>(b.o);
+                return aa->v == ab->v;
+            }
+            case ArrayBackend::Fraction: {
+                auto* aa = static_cast<PodArray<r64>*>(a.o);
+                auto* ab = static_cast<PodArray<r64>*>(b.o);
+                if (aa->v.size() != ab->v.size()) return false;
+                for (size_t i = 0; i < aa->v.size(); ++i) {
+                    if (aa->v[i].numer() != ab->v[i].numer()) return false;
+                    if (aa->v[i].denom() != ab->v[i].denom()) return false;
+                }
+                return true;
+            }
+            case ArrayBackend::Float: {
+                auto* aa = static_cast<PodArray<f64>*>(a.o);
+                auto* ab = static_cast<PodArray<f64>*>(b.o);
+                return aa->v == ab->v;
+            }
+            case ArrayBackend::Int: {
+                auto* aa = static_cast<PodArray<i64>*>(a.o);
+                auto* ab = static_cast<PodArray<i64>*>(b.o);
+                return aa->v == ab->v;
+            }
+            case ArrayBackend::Obj: {
+                auto* aa = static_cast<ObjArray*>(a.o);
+                auto* ab = static_cast<ObjArray*>(b.o);
+                if (aa->size() != ab->size()) return false;
+                WordEqual sub{et};
+                for (size_t i = 0; i < aa->size(); ++i) {
+                    Word wa; wa.o = aa->get(i);
+                    Word wb; wb.o = ab->get(i);
+                    if (!sub(wa, wb)) return false;
+                }
+                return true;
+            }
         }
-        if (et == gCurrentVM->floatType()) {
-            auto* aa = static_cast<PodArray<f64>*>(a.o);
-            auto* ab = static_cast<PodArray<f64>*>(b.o);
-            return aa->v == ab->v;
-        }
-        auto* aa = static_cast<ObjArray*>(a.o);
-        auto* ab = static_cast<ObjArray*>(b.o);
-        if (aa->size() != ab->size()) return false;
-        WordEqual sub{et};
-        for (size_t i = 0; i < aa->size(); ++i) {
-            Word wa; wa.o = aa->get(i);
-            Word wb; wb.o = ab->get(i);
-            if (!sub(wa, wb)) return false;
-        }
-        return true;
     }
     if (auto* listT = dynamic_cast<ListType*>(type)) {
         Type* et = listT->elemType_;

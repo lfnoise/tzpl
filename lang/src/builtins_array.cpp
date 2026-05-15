@@ -38,22 +38,50 @@ void builtin_reverse_array(VM& vm, u16 dst, u16, u16 ab) {
     });
 }
 
+// Phase 4e: append takes Complex/Fraction as 2 consecutive Words at ab+1.
 void builtin_push_array(VM& vm, u16 dst, u16, u16 ab) {
     auto* src = vm.reg(ab).o;
     auto* at = static_cast<ArrayType*>(src->type_);
-    Type* et = at->elemType_;
-    if (et == vm.intType() || et == vm.boolType() || et == vm.symbolType()) {
-        auto* s = static_cast<PodArray<i64>*>(src);
-        auto* r = new PodArray<i64>(at); r->v = s->v;
-        r->v.push_back(vm.reg(ab+1).i); vm.reg(dst).o = r;
-    } else if (et == vm.floatType()) {
-        auto* s = static_cast<PodArray<f64>*>(src);
-        auto* r = new PodArray<f64>(at); r->v = s->v;
-        r->v.push_back(vm.reg(ab+1).f); vm.reg(dst).o = r;
-    } else {
-        auto* s = static_cast<ObjArray*>(src);
-        auto* r = new ObjArray(at); r->copyFrom(s);
-        r->push(vm.reg(ab+1).o); vm.reg(dst).o = r;
+    switch (arrayBackendFor(at->elemType_)) {
+        case ArrayBackend::Complex: {
+            auto* s = static_cast<PodArray<x64>*>(src);
+            auto* r = new PodArray<x64>(at); r->v = s->v;
+            f64 re = vm.reg(ab + 1).f;
+            f64 im = vm.reg(ab + 2).f;
+            r->v.push_back(x64(re, im));
+            vm.reg(dst).o = r;
+            return;
+        }
+        case ArrayBackend::Fraction: {
+            auto* s = static_cast<PodArray<r64>*>(src);
+            auto* r = new PodArray<r64>(at); r->v = s->v;
+            i64 n = vm.reg(ab + 1).i;
+            i64 d = vm.reg(ab + 2).i;
+            r->v.push_back(r64(n, d, true));
+            vm.reg(dst).o = r;
+            return;
+        }
+        case ArrayBackend::Float: {
+            auto* s = static_cast<PodArray<f64>*>(src);
+            auto* r = new PodArray<f64>(at); r->v = s->v;
+            r->v.push_back(vm.reg(ab + 1).f);
+            vm.reg(dst).o = r;
+            return;
+        }
+        case ArrayBackend::Int: {
+            auto* s = static_cast<PodArray<i64>*>(src);
+            auto* r = new PodArray<i64>(at); r->v = s->v;
+            r->v.push_back(vm.reg(ab + 1).i);
+            vm.reg(dst).o = r;
+            return;
+        }
+        case ArrayBackend::Obj: {
+            auto* s = static_cast<ObjArray*>(src);
+            auto* r = new ObjArray(at); r->copyFrom(s);
+            r->push(vm.reg(ab + 1).o);
+            vm.reg(dst).o = r;
+            return;
+        }
     }
 }
 
@@ -289,6 +317,15 @@ void builtin_picks_list(VM& vm, u16 dst, u16, u16 ab) {
 }
 
 // picks([T], Int) -> [T]: array of n random picks
+template <typename T>
+static void podArrayPicks(PodArray<T>* src, ArrayType* at, i64 n, size_t len,
+                          Xoshiro256& rng, Word& out) {
+    auto* r = new PodArray<T>(at);
+    r->v.resize((size_t)n);
+    for (i64 i = 0; i < n; i++) r->v[i] = src->v[rng.next() % len];
+    out.o = r;
+}
+
 void builtin_picks_array(VM& vm, u16 dst, u16, u16 ab) {
     auto* arr = vm.reg(ab).o;
     i64 n = vm.reg(ab+1).i;
@@ -296,24 +333,27 @@ void builtin_picks_array(VM& vm, u16 dst, u16, u16 ab) {
     Type* et = at->elemType_;
     size_t len = getArraySize(vm, arr, et);
     if (n < 0) n = 0;
-    if (et == vm.intType() || et == vm.boolType() || et == vm.symbolType()) {
-        auto* src = static_cast<PodArray<i64>*>(arr);
-        auto* r = new PodArray<i64>(at);
-        r->v.resize((size_t)n);
-        for (i64 i = 0; i < n; i++) r->v[i] = src->v[vm.rng().next() % len];
-        vm.reg(dst).o = r;
-    } else if (et == vm.floatType()) {
-        auto* src = static_cast<PodArray<f64>*>(arr);
-        auto* r = new PodArray<f64>(at);
-        r->v.resize((size_t)n);
-        for (i64 i = 0; i < n; i++) r->v[i] = src->v[vm.rng().next() % len];
-        vm.reg(dst).o = r;
-    } else {
-        auto* src = static_cast<ObjArray*>(arr);
-        auto* r = new ObjArray(at);
-        r->reserve((size_t)n);
-        for (i64 i = 0; i < n; i++) r->push(src->get(vm.rng().next() % len));
-        vm.reg(dst).o = r;
+    switch (arrayBackendFor(et)) {
+        case ArrayBackend::Complex:
+            podArrayPicks(static_cast<PodArray<x64>*>(arr), at, n, len, vm.rng(), vm.reg(dst));
+            return;
+        case ArrayBackend::Fraction:
+            podArrayPicks(static_cast<PodArray<r64>*>(arr), at, n, len, vm.rng(), vm.reg(dst));
+            return;
+        case ArrayBackend::Float:
+            podArrayPicks(static_cast<PodArray<f64>*>(arr), at, n, len, vm.rng(), vm.reg(dst));
+            return;
+        case ArrayBackend::Int:
+            podArrayPicks(static_cast<PodArray<i64>*>(arr), at, n, len, vm.rng(), vm.reg(dst));
+            return;
+        case ArrayBackend::Obj: {
+            auto* src = static_cast<ObjArray*>(arr);
+            auto* r = new ObjArray(at);
+            r->reserve((size_t)n);
+            for (i64 i = 0; i < n; i++) r->push(src->get(vm.rng().next() % len));
+            vm.reg(dst).o = r;
+            return;
+        }
     }
 }
 
@@ -448,28 +488,41 @@ void builtin_repeat_obj(VM& vm, u16 dst, u16, u16 ab) {
     vm.reg(dst).o = arr;
 }
 
+// Phase 4e: dispatch via arrayBackendFor.
+template <typename T>
+static void podArrayCat(PodArray<T>* a, PodArray<T>* b, ArrayType* at, Word& out) {
+    auto* r = new PodArray<T>(at);
+    r->v = a->v;
+    for (auto const& x : b->v) r->v.push_back(x);
+    out.o = r;
+}
+
 void builtin_cat_array(VM& vm, u16 dst, u16, u16 ab) {
     auto* a = vm.reg(ab).o; auto* b = vm.reg(ab+1).o;
     auto* at = static_cast<ArrayType*>(a->type_);
-    Type* et = at->elemType_;
-    if (et == vm.intType() || et == vm.boolType() || et == vm.symbolType()) {
-        auto* r = new PodArray<i64>(at);
-        r->v = static_cast<PodArray<i64>*>(a)->v;
-        auto& bv = static_cast<PodArray<i64>*>(b)->v;
-        for (auto& x : bv) r->v.push_back(x); vm.reg(dst).o = r;
-    } else if (et == vm.floatType()) {
-        auto* r = new PodArray<f64>(at);
-        r->v = static_cast<PodArray<f64>*>(a)->v;
-        auto& bv = static_cast<PodArray<f64>*>(b)->v;
-        for (auto& x : bv) r->v.push_back(x); vm.reg(dst).o = r;
-    } else {
-        auto* sa = static_cast<ObjArray*>(a);
-        auto* sb = static_cast<ObjArray*>(b);
-        auto* r = new ObjArray(at);
-        r->reserve(sa->size() + sb->size());
-        for (auto* obj : *sa) r->push(obj);
-        for (auto* obj : *sb) r->push(obj);
-        vm.reg(dst).o = r;
+    switch (arrayBackendFor(at->elemType_)) {
+        case ArrayBackend::Complex:
+            podArrayCat(static_cast<PodArray<x64>*>(a), static_cast<PodArray<x64>*>(b), at, vm.reg(dst));
+            return;
+        case ArrayBackend::Fraction:
+            podArrayCat(static_cast<PodArray<r64>*>(a), static_cast<PodArray<r64>*>(b), at, vm.reg(dst));
+            return;
+        case ArrayBackend::Float:
+            podArrayCat(static_cast<PodArray<f64>*>(a), static_cast<PodArray<f64>*>(b), at, vm.reg(dst));
+            return;
+        case ArrayBackend::Int:
+            podArrayCat(static_cast<PodArray<i64>*>(a), static_cast<PodArray<i64>*>(b), at, vm.reg(dst));
+            return;
+        case ArrayBackend::Obj: {
+            auto* sa = static_cast<ObjArray*>(a);
+            auto* sb = static_cast<ObjArray*>(b);
+            auto* r = new ObjArray(at);
+            r->reserve(sa->size() + sb->size());
+            for (auto* obj : *sa) r->push(obj);
+            for (auto* obj : *sb) r->push(obj);
+            vm.reg(dst).o = r;
+            return;
+        }
     }
 }
 

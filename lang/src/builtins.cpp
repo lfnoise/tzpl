@@ -630,23 +630,51 @@ static void builtin_contains_map(VM& vm, u16 dst, u16, u16 ab) {
 }
 
 // keys: [K:V] -> [K]
+// Phase 4e: dispatch via arrayBackendFor so Map[Complex,_].keys() and
+// Map[Fraction,_].keys() unbox the still-boxed map keys into the inline
+// array backend.
 static void builtin_keys_map(VM& vm, u16 dst, u16, u16 ab) {
     auto* map = static_cast<MapObj*>(vm.reg(ab).o);
     auto* mt = static_cast<MapType*>(map->type_);
     Type* kt = mt->keyType_;
     auto* arrType = vm.arrayType(kt);
-    if (kt && !storesObjPtr(kt) && !storesF64(kt)) {
-        auto* arr = new PodArray<i64>(arrType);
-        for (auto& [k, v] : map->entries_) arr->v.push_back(k.i);
-        vm.reg(dst).o = arr;
-    } else if (storesF64(kt)) {
-        auto* arr = new PodArray<f64>(arrType);
-        for (auto& [k, v] : map->entries_) arr->v.push_back(k.f);
-        vm.reg(dst).o = arr;
-    } else {
-        auto* arr = new ObjArray(arrType);
-        for (auto& [k, v] : map->entries_) arr->push(k.o);
-        vm.reg(dst).o = arr;
+    switch (arrayBackendFor(kt)) {
+        case ArrayBackend::Complex: {
+            auto* arr = new PodArray<x64>(arrType);
+            for (auto const& [k, v] : map->entries_) {
+                auto* c = static_cast<Complex*>(k.o);
+                arr->v.push_back(c->x);
+            }
+            vm.reg(dst).o = arr;
+            return;
+        }
+        case ArrayBackend::Fraction: {
+            auto* arr = new PodArray<r64>(arrType);
+            for (auto const& [k, v] : map->entries_) {
+                auto* f = static_cast<Fraction*>(k.o);
+                arr->v.push_back(f->r);
+            }
+            vm.reg(dst).o = arr;
+            return;
+        }
+        case ArrayBackend::Float: {
+            auto* arr = new PodArray<f64>(arrType);
+            for (auto const& [k, v] : map->entries_) arr->v.push_back(k.f);
+            vm.reg(dst).o = arr;
+            return;
+        }
+        case ArrayBackend::Int: {
+            auto* arr = new PodArray<i64>(arrType);
+            for (auto const& [k, v] : map->entries_) arr->v.push_back(k.i);
+            vm.reg(dst).o = arr;
+            return;
+        }
+        case ArrayBackend::Obj: {
+            auto* arr = new ObjArray(arrType);
+            for (auto const& [k, v] : map->entries_) arr->push(k.o);
+            vm.reg(dst).o = arr;
+            return;
+        }
     }
 }
 
@@ -656,18 +684,43 @@ static void builtin_values_map(VM& vm, u16 dst, u16, u16 ab) {
     auto* mt = static_cast<MapType*>(map->type_);
     Type* vt = mt->valueType_;
     auto* arrType = vm.arrayType(vt);
-    if (vt && !storesObjPtr(vt) && !storesF64(vt)) {
-        auto* arr = new PodArray<i64>(arrType);
-        for (auto& [k, v] : map->entries_) arr->v.push_back(v.i);
-        vm.reg(dst).o = arr;
-    } else if (storesF64(vt)) {
-        auto* arr = new PodArray<f64>(arrType);
-        for (auto& [k, v] : map->entries_) arr->v.push_back(v.f);
-        vm.reg(dst).o = arr;
-    } else {
-        auto* arr = new ObjArray(arrType);
-        for (auto& [k, v] : map->entries_) arr->push(v.o);
-        vm.reg(dst).o = arr;
+    switch (arrayBackendFor(vt)) {
+        case ArrayBackend::Complex: {
+            auto* arr = new PodArray<x64>(arrType);
+            for (auto const& [k, v] : map->entries_) {
+                auto* c = static_cast<Complex*>(v.o);
+                arr->v.push_back(c->x);
+            }
+            vm.reg(dst).o = arr;
+            return;
+        }
+        case ArrayBackend::Fraction: {
+            auto* arr = new PodArray<r64>(arrType);
+            for (auto const& [k, v] : map->entries_) {
+                auto* f = static_cast<Fraction*>(v.o);
+                arr->v.push_back(f->r);
+            }
+            vm.reg(dst).o = arr;
+            return;
+        }
+        case ArrayBackend::Float: {
+            auto* arr = new PodArray<f64>(arrType);
+            for (auto const& [k, v] : map->entries_) arr->v.push_back(v.f);
+            vm.reg(dst).o = arr;
+            return;
+        }
+        case ArrayBackend::Int: {
+            auto* arr = new PodArray<i64>(arrType);
+            for (auto const& [k, v] : map->entries_) arr->v.push_back(v.i);
+            vm.reg(dst).o = arr;
+            return;
+        }
+        case ArrayBackend::Obj: {
+            auto* arr = new ObjArray(arrType);
+            for (auto const& [k, v] : map->entries_) arr->push(v.o);
+            vm.reg(dst).o = arr;
+            return;
+        }
     }
 }
 
@@ -1209,24 +1262,51 @@ static void builtin_difference_set(VM& vm, u16 dst, u16, u16 ab) {
 }
 
 // toArray: Set<T> -> [T]
+// Phase 4e: dispatch via arrayBackendFor; Set still stores boxed
+// Complex/Fraction so we unbox on extraction.
 static void builtin_toArray_set(VM& vm, u16 dst, u16, u16 ab) {
     auto* set = static_cast<SetObj*>(vm.reg(ab).o);
     auto* st = static_cast<SetType*>(set->type_);
     Type* elemType = st->elemType_;
     auto* arrType = vm.arrayType(elemType);
 
-    if (elemType && !storesObjPtr(elemType) && !storesF64(elemType)) {
-        auto* arr = new PodArray<i64>(arrType);
-        for (auto& elem : set->entries_) arr->v.push_back(elem.i);
-        vm.reg(dst).o = arr;
-    } else if (storesF64(elemType)) {
-        auto* arr = new PodArray<f64>(arrType);
-        for (auto& elem : set->entries_) arr->v.push_back(elem.f);
-        vm.reg(dst).o = arr;
-    } else {
-        auto* arr = new ObjArray(arrType);
-        for (auto& elem : set->entries_) arr->push(elem.o);
-        vm.reg(dst).o = arr;
+    switch (arrayBackendFor(elemType)) {
+        case ArrayBackend::Complex: {
+            auto* arr = new PodArray<x64>(arrType);
+            for (auto const& elem : set->entries_) {
+                auto* c = static_cast<Complex*>(elem.o);
+                arr->v.push_back(c->x);
+            }
+            vm.reg(dst).o = arr;
+            return;
+        }
+        case ArrayBackend::Fraction: {
+            auto* arr = new PodArray<r64>(arrType);
+            for (auto const& elem : set->entries_) {
+                auto* f = static_cast<Fraction*>(elem.o);
+                arr->v.push_back(f->r);
+            }
+            vm.reg(dst).o = arr;
+            return;
+        }
+        case ArrayBackend::Float: {
+            auto* arr = new PodArray<f64>(arrType);
+            for (auto const& elem : set->entries_) arr->v.push_back(elem.f);
+            vm.reg(dst).o = arr;
+            return;
+        }
+        case ArrayBackend::Int: {
+            auto* arr = new PodArray<i64>(arrType);
+            for (auto const& elem : set->entries_) arr->v.push_back(elem.i);
+            vm.reg(dst).o = arr;
+            return;
+        }
+        case ArrayBackend::Obj: {
+            auto* arr = new ObjArray(arrType);
+            for (auto const& elem : set->entries_) arr->push(elem.o);
+            vm.reg(dst).o = arr;
+            return;
+        }
     }
 }
 

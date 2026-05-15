@@ -75,6 +75,10 @@ inline void registerTemplate(Compiler& compiler, FuncMap& functions,
 // Array helpers
 // ============================================================================
 
+// Phase 4e: getArrayElem still returns a single Word, so the Complex/Fraction
+// fast paths can't go through it (their values are 2 words). Callers that
+// need to read inline elements should use the array opcodes instead. We
+// fall through to ObjArray here so it's a clear runtime mistake if hit.
 inline Word getArrayElem(VM& vm, Obj* a, Type* et, size_t i) {
     if (et == vm.intType() || et == vm.boolType() || et == vm.symbolType()) return Word(static_cast<PodArray<i64>*>(a)->v[i]);
     if (et == vm.floatType()) return Word(static_cast<PodArray<f64>*>(a)->v[i]);
@@ -82,40 +86,70 @@ inline Word getArrayElem(VM& vm, Obj* a, Type* et, size_t i) {
 }
 
 inline size_t getArraySize(VM& vm, Obj* a, Type* et) {
-    if (et == vm.intType() || et == vm.boolType() || et == vm.symbolType()) return static_cast<PodArray<i64>*>(a)->v.size();
-    if (et == vm.floatType()) return static_cast<PodArray<f64>*>(a)->v.size();
-    return static_cast<ObjArray*>(a)->size();
+    switch (arrayBackendFor(et)) {
+        case ArrayBackend::Complex:  return static_cast<PodArray<x64>*>(a)->v.size();
+        case ArrayBackend::Fraction: return static_cast<PodArray<r64>*>(a)->v.size();
+        case ArrayBackend::Float:    return static_cast<PodArray<f64>*>(a)->v.size();
+        case ArrayBackend::Int:      return static_cast<PodArray<i64>*>(a)->v.size();
+        case ArrayBackend::Obj:      return static_cast<ObjArray*>(a)->size();
+    }
+    return 0;
 }
 
 inline Obj* makeEmptyArray(ArrayType* at) {
-    Type* et = at->elemType_;
-    if (et == gCurrentVM->intType() || et == gCurrentVM->boolType() || et == gCurrentVM->symbolType()) return new PodArray<i64>(at);
-    if (et == gCurrentVM->floatType()) return new PodArray<f64>(at);
-    return new ObjArray(at);
+    switch (arrayBackendFor(at->elemType_)) {
+        case ArrayBackend::Complex:  return new PodArray<x64>(at);
+        case ArrayBackend::Fraction: return new PodArray<r64>(at);
+        case ArrayBackend::Float:    return new PodArray<f64>(at);
+        case ArrayBackend::Int:      return new PodArray<i64>(at);
+        case ArrayBackend::Obj:      return new ObjArray(at);
+    }
+    return nullptr;
 }
 
+// arrayPush takes a single Word source. Inline Complex/Fraction values
+// need 2 words, so callers append via the typed PodArray<x64>/<r64>
+// backends directly. Here we accept only the boxed Obj* form for them.
 inline void arrayPush(VM& vm, Obj* a, Type* et, Word v) {
     if (et == vm.intType() || et == vm.boolType() || et == vm.symbolType()) static_cast<PodArray<i64>*>(a)->v.push_back(v.i);
     else if (et == vm.floatType()) static_cast<PodArray<f64>*>(a)->v.push_back(v.f);
     else { static_cast<ObjArray*>(a)->push(v.o); }
 }
 
+// txArray: per-element transformation. Phase 4e dispatches on
+// arrayBackendFor so Complex / Fraction backends are visited too. The
+// lambda is invoked with the source value-vector and destination
+// value-vector, both already typed correctly (Vec<x64>, Vec<r64>, etc).
 template<typename F>
 inline void txArray(VM& vm, u16 dst, Obj* src, ArrayType* at, F&& f) {
-    Type* et = at->elemType_;
-    if (et == vm.intType() || et == vm.boolType() || et == vm.symbolType()) {
-        auto* s = static_cast<PodArray<i64>*>(src);
-        auto* r = new PodArray<i64>(at); f(s->v, r->v); vm.reg(dst).o = r;
-    } else if (et == vm.floatType()) {
-        auto* s = static_cast<PodArray<f64>*>(src);
-        auto* r = new PodArray<f64>(at); f(s->v, r->v); vm.reg(dst).o = r;
-    } else {
-        auto* s = static_cast<ObjArray*>(src);
-        auto* r = new ObjArray(at); f(s->rawVec(), r->rawVec());
-        // Retain all Obj* elements copied into the new array.
-        // releaseChildren will release them when the array is destroyed.
-        for (auto* obj : *r) { if (obj) obj->retain(); }
-        vm.reg(dst).o = r;
+    switch (arrayBackendFor(at->elemType_)) {
+        case ArrayBackend::Complex: {
+            auto* s = static_cast<PodArray<x64>*>(src);
+            auto* r = new PodArray<x64>(at); f(s->v, r->v); vm.reg(dst).o = r;
+            return;
+        }
+        case ArrayBackend::Fraction: {
+            auto* s = static_cast<PodArray<r64>*>(src);
+            auto* r = new PodArray<r64>(at); f(s->v, r->v); vm.reg(dst).o = r;
+            return;
+        }
+        case ArrayBackend::Float: {
+            auto* s = static_cast<PodArray<f64>*>(src);
+            auto* r = new PodArray<f64>(at); f(s->v, r->v); vm.reg(dst).o = r;
+            return;
+        }
+        case ArrayBackend::Int: {
+            auto* s = static_cast<PodArray<i64>*>(src);
+            auto* r = new PodArray<i64>(at); f(s->v, r->v); vm.reg(dst).o = r;
+            return;
+        }
+        case ArrayBackend::Obj: {
+            auto* s = static_cast<ObjArray*>(src);
+            auto* r = new ObjArray(at); f(s->rawVec(), r->rawVec());
+            for (auto* obj : *r) { if (obj) obj->retain(); }
+            vm.reg(dst).o = r;
+            return;
+        }
     }
 }
 

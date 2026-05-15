@@ -1050,35 +1050,47 @@ void op_string_get_byte(VM& vm, Code* pc) {
 // --- Array/Tuple Concatenation ---
 
 // CONCAT_ARRAY Rd, Ra, Rb (3 words: op, regs{dst, a, b}, ArrayType*)
+template <typename T>
+static void podArrayConcat(PodArray<T>* a, PodArray<T>* b, ArrayType* arrayType, Word& out) {
+    auto* result = new PodArray<T>(arrayType);
+    result->v.reserve(a->v.size() + b->v.size());
+    result->v.insert(result->v.end(), a->v.begin(), a->v.end());
+    result->v.insert(result->v.end(), b->v.begin(), b->v.end());
+    out.o = result;
+}
+
 void op_concat_array(VM& vm, Code* pc) {
     u16 dst = pc[1].regs[0], a = pc[1].regs[1], b = pc[1].regs[2];
     auto* arrayType = static_cast<ArrayType*>(pc[2].p);
     Type* elemType = arrayType->elemType_;
 
-    if (elemType && !storesObjPtr(elemType) && !storesF64(elemType)) {
-        auto* arrA = static_cast<PodArray<i64>*>(vm.reg(a).o);
-        auto* arrB = static_cast<PodArray<i64>*>(vm.reg(b).o);
-        auto* result = new PodArray<i64>(arrayType);
-        result->v.reserve(arrA->v.size() + arrB->v.size());
-        result->v.insert(result->v.end(), arrA->v.begin(), arrA->v.end());
-        result->v.insert(result->v.end(), arrB->v.begin(), arrB->v.end());
-        vm.reg(dst).o = result;
-    } else if (storesF64(elemType)) {
-        auto* arrA = static_cast<PodArray<f64>*>(vm.reg(a).o);
-        auto* arrB = static_cast<PodArray<f64>*>(vm.reg(b).o);
-        auto* result = new PodArray<f64>(arrayType);
-        result->v.reserve(arrA->v.size() + arrB->v.size());
-        result->v.insert(result->v.end(), arrA->v.begin(), arrA->v.end());
-        result->v.insert(result->v.end(), arrB->v.begin(), arrB->v.end());
-        vm.reg(dst).o = result;
-    } else {
-        auto* arrA = static_cast<ObjArray*>(vm.reg(a).o);
-        auto* arrB = static_cast<ObjArray*>(vm.reg(b).o);
-        auto* result = new ObjArray(arrayType);
-        result->reserve(arrA->size() + arrB->size());
-        for (auto* obj : *arrA) result->push(obj);
-        for (auto* obj : *arrB) result->push(obj);
-        vm.reg(dst).o = result;
+    switch (arrayBackendFor(elemType)) {
+        case ArrayBackend::Complex:
+            podArrayConcat(static_cast<PodArray<x64>*>(vm.reg(a).o),
+                           static_cast<PodArray<x64>*>(vm.reg(b).o), arrayType, vm.reg(dst));
+            break;
+        case ArrayBackend::Fraction:
+            podArrayConcat(static_cast<PodArray<r64>*>(vm.reg(a).o),
+                           static_cast<PodArray<r64>*>(vm.reg(b).o), arrayType, vm.reg(dst));
+            break;
+        case ArrayBackend::Float:
+            podArrayConcat(static_cast<PodArray<f64>*>(vm.reg(a).o),
+                           static_cast<PodArray<f64>*>(vm.reg(b).o), arrayType, vm.reg(dst));
+            break;
+        case ArrayBackend::Int:
+            podArrayConcat(static_cast<PodArray<i64>*>(vm.reg(a).o),
+                           static_cast<PodArray<i64>*>(vm.reg(b).o), arrayType, vm.reg(dst));
+            break;
+        case ArrayBackend::Obj: {
+            auto* arrA = static_cast<ObjArray*>(vm.reg(a).o);
+            auto* arrB = static_cast<ObjArray*>(vm.reg(b).o);
+            auto* result = new ObjArray(arrayType);
+            result->reserve(arrA->size() + arrB->size());
+            for (auto* obj : *arrA) result->push(obj);
+            for (auto* obj : *arrB) result->push(obj);
+            vm.reg(dst).o = result;
+            break;
+        }
     }
     DISPATCH(3);
 }
