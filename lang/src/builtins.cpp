@@ -1529,6 +1529,11 @@ static void builtin_ordinal_nullableptr(VM& vm, u16 dst, u16, u16 argBase) {
     vm.reg(dst).i = vm.reg(argBase).o ? dataIdx : voidIdx;
 }
 
+// Phase 4g.6: Inline enum -- word 0 IS the discriminant.
+static void builtin_ordinal_inline(VM& vm, u16 dst, u16, u16 argBase) {
+    vm.reg(dst).i = vm.reg(argBase).i;
+}
+
 static bool resolve_ordinal(Compiler& compiler, const std::vector<Type*>& args,
     std::vector<Type*>& pt, Type*& rt, CFun& cf) {
     if (args.size() != 1) return false;
@@ -1537,6 +1542,7 @@ static bool resolve_ordinal(Compiler& compiler, const std::vector<Type*>& args,
         rt = compiler.intType();
         if (et->repr_ == Type::Repr::DiscriminantEnum)        cf = builtin_ordinal_discenum;
         else if (et->repr_ == Type::Repr::NullablePtrEnum)    cf = builtin_ordinal_nullableptr;
+        else if (et->repr_ == Type::Repr::Inline)             cf = builtin_ordinal_inline;
         else                                                   cf = builtin_ordinal_enum;
         return true;
     }
@@ -1570,6 +1576,14 @@ static void builtin_tag_nullableptr(VM& vm, u16 dst, u16, u16 argBase) {
     vm.reg(dst).s = const_cast<Symbol*>(et->cases_[idx].name);
 }
 
+// Phase 4g.6: Inline enum -- word 0 IS the discriminant.
+static void builtin_tag_inline(VM& vm, u16 dst, u16, u16 argBase) {
+    auto* prim = static_cast<Primitive*>(vm.currentPrimitive());
+    auto* tt = static_cast<TupleType*>(prim->type_);
+    auto* et = static_cast<EnumType*>(tt->fields_[0]);
+    vm.reg(dst).s = const_cast<Symbol*>(et->cases_[vm.reg(argBase).i].name);
+}
+
 static bool resolve_tag(Compiler& compiler, const std::vector<Type*>& args,
     std::vector<Type*>& pt, Type*& rt, CFun& cf) {
     if (args.size() != 1) return false;
@@ -1578,6 +1592,7 @@ static bool resolve_tag(Compiler& compiler, const std::vector<Type*>& args,
         rt = compiler.symbolType();
         if (et->repr_ == Type::Repr::DiscriminantEnum)        cf = builtin_tag_discenum;
         else if (et->repr_ == Type::Repr::NullablePtrEnum)    cf = builtin_tag_nullableptr;
+        else if (et->repr_ == Type::Repr::Inline)             cf = builtin_tag_inline;
         else                                                   cf = builtin_tag_enum;
         return true;
     }
@@ -2139,8 +2154,10 @@ void registerBuiltinFunctions(Compiler& compiler,
     registerTemplate(compiler, functions, "isNil",     resolve_isNil);
     registerTemplate(compiler, functions, "notNil",    resolve_notNil);
     registerTemplate(compiler, functions, "length",    resolve_length);
-    registerTemplate(compiler, functions, "ordinal",   resolve_ordinal);
-    registerTemplate(compiler, functions, "tag",       resolve_tag);
+    // Phase 4g.6: ordinal/tag only read the discriminant (word 0); for
+    // Inline enums that lets us skip the per-call box-then-read.
+    registerTemplate(compiler, functions, "ordinal",   resolve_ordinal, /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "tag",       resolve_tag,     /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
 
     registerTemplate(compiler, functions, "toList",    resolve_toList_array);
     registerTemplate(compiler, functions, "toList",    resolve_toList_coroutine);
@@ -2203,7 +2220,9 @@ void registerBuiltinFunctions(Compiler& compiler,
     registerTemplate(compiler, functions, "disassemble",  resolve_disassemble, /*rtSafe=*/false);
 
     // --- typeRepr builtin (Phase 0 debug helper, not RT-safe: writes to stdout) ---
-    registerTemplate(compiler, functions, "typeRepr",     resolve_typeRepr, /*rtSafe=*/false);
+    // Phase 4g.6: typeRepr only looks at the static type, never reads the
+    // arg's value. Skip the boxing for inline composites.
+    registerTemplate(compiler, functions, "typeRepr",     resolve_typeRepr, /*rtSafe=*/false, /*acceptsInlineArgs=*/true);
 
     // --- gc builtin: drain deferred-delete queue to reclaim dead objects ---
     registerOne(compiler, functions, "gc", compiler.voidType(), {}, builtin_gc, /*pure=*/false, /*rtSafe=*/false);
