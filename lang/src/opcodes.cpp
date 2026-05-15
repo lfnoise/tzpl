@@ -2866,8 +2866,20 @@ void op_tail_call(VM& vm, Code* pc) {
 
     CodeBlock* callee = static_cast<CodeBlock*>(vm.global(calleeIdx).p);
 
-    // Copy args to r0..r(argc-1) — forward copy is safe since argBase >= argc
-    for (u16 i = 0; i < argc; i++) {
+    // Phase 4g.2: total slot words may exceed argc when params are multi-
+    // word inline composites; read funcType to compute the true word span.
+    u16 wordCount = argc;
+    if (callee->funcType) {
+        auto* ft = static_cast<FunctionType*>(callee->funcType);
+        u16 sum = 0;
+        for (size_t i = 0; i < ft->argTypes_.size() && i < argc; ++i) {
+            Type* t = ft->argTypes_[i];
+            sum += (t && t->sizeWords_ > 0) ? t->sizeWords_ : 1;
+        }
+        if (sum > argc) wordCount = sum;
+    }
+    // Copy args to r0..r(wordCount-1) — forward copy is safe since argBase >= wordCount
+    for (u16 i = 0; i < wordCount; i++) {
         vm.reg(i) = vm.reg(argBase + i);
     }
 

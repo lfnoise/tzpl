@@ -796,8 +796,9 @@ void CodeGen::genFnDecl(FnDeclNode* decl) {
     currentBlock_->name = compiler_.intern(decl->name);
     currentBlock_->numArgs = (u16)decl->params.size();
 
-    // For coroutine functions, set funcType on CodeBlock (for op_coro_create)
-    if (decl->isCoroutine) {
+    // Phase 4g.2: set funcType on every CodeBlock (not just coroutines) so
+    // op_tail_call can read param slot widths to copy multi-word inline args.
+    {
         TypeVec argTV(rt::STLAllocator<Type*>(nullptr));
         for (auto& pt : funcInfo.paramTypes) argTV.push_back(pt);
         currentBlock_->funcType = compiler_.functionType(argTV, funcInfo.returnType);
@@ -6109,73 +6110,96 @@ u16 CodeGen::genCartesianCall(CallExpr_* expr) {
     // --- Phase 5: Set up call arguments ---
     u16 callArgBase = nextReg_;
 
+    auto inlineCompositeT = [&](Type* t) {
+        return t && t->repr_ == ts::Type::Repr::Inline
+            && t != compiler_.complexType()
+            && t != compiler_.fractionType();
+    };
+    auto callerSlotW = [&](Type* paramType) -> u32 {
+        if (!paramType) return 1;
+        if (inlineCompositeT(paramType))
+            return expr->isBuiltinCall ? 1u : (u32)paramType->sizeWords_;
+        return typeSlotWords(paramType);
+    };
+    u32 cumOffset = 0;
+    std::vector<u32> argOffsets(argc, 0);
     for (u16 i = 0; i < argc; ++i) {
-        u16 targetReg = callArgBase + i;
-        if (nextReg_ <= targetReg) {
-            nextReg_ = targetReg + 1;
+        argOffsets[i] = cumOffset;
+        cumOffset += callerSlotW(getParamType(funcInfo, expr, i));
+    }
+    for (u16 i = 0; i < argc; ++i) {
+        u16 targetReg = (u16)(callArgBase + argOffsets[i]);
+        Type* paramType = getParamType(funcInfo, expr, i);
+        u32 slotW = callerSlotW(paramType);
+        if (nextReg_ <= (u16)(targetReg + slotW)) {
+            nextReg_ = (u16)(targetReg + slotW);
             if (nextReg_ > maxReg_) maxReg_ = nextReg_;
         }
 
         int ci = expr->autoMapArgs[i].cartesianIndex;
-        if (ci > 0) {
+        if (ci > 0 || expr->autoMapArgs[i].depth > 0) {
             auto* arrType = dynamic_cast<ArrayType*>(expr->args[i]->resolvedType);
-            emitOp(op_array_get_dyn);
-            emitRegs(targetReg, argRegs[i], iRegs[ci]);
-            emitPtr(arrType);
-
             Type* elemType = arrType->elemType_;
-            Type* paramType = getParamType(funcInfo, expr, i);
-            if (paramType && elemType != paramType) {
-                u16 promoted = ensureType(targetReg, elemType, paramType);
-                if (promoted != targetReg) {
-                    emitOp(op_mov);
-                    emitRegs(targetReg, promoted);
+            bool elemInlineComposite = inlineCompositeT(elemType);
+            u16 elemReg = elemInlineComposite ? allocReg() : targetReg;
+            emitOp(op_array_get_dyn);
+            emitRegs(elemReg, argRegs[i], (ci > 0 ? iRegs[ci] : iRegs[1]));
+            emitPtr(arrType);
+            if (elemInlineComposite) {
+                if (expr->isBuiltinCall) {
+                    if (elemReg != targetReg) { emitOp(op_mov); emitRegs(targetReg, elemReg); }
+                } else {
+                    u16 unboxed = emitUnboxIfInline(elemReg, elemType);
+                    if (unboxed != targetReg) emitMoveN(targetReg, unboxed, slotW);
                 }
             }
-        } else if (expr->autoMapArgs[i].depth > 0) {
-            // Plain @ with cartesian context — zip semantics
-            auto* arrType = dynamic_cast<ArrayType*>(expr->args[i]->resolvedType);
-            emitOp(op_array_get_dyn);
-            emitRegs(targetReg, argRegs[i], iRegs[1]); // zip with level 1
-            emitPtr(arrType);
-
-            Type* elemType = arrType->elemType_;
-            Type* paramType = getParamType(funcInfo, expr, i);
             if (paramType && elemType != paramType) {
                 u16 promoted = ensureType(targetReg, elemType, paramType);
-                if (promoted != targetReg) {
-                    emitOp(op_mov);
-                    emitRegs(targetReg, promoted);
-                }
+                if (promoted != targetReg) emitMoveN(targetReg, promoted, slotW);
             }
         } else {
-            // Promote scalar type to parameter type if needed (e.g. Int -> Float)
             Type* argType = expr->args[i]->resolvedType;
-            Type* paramType = getParamType(funcInfo, expr, i);
             u16 srcReg = argRegs[i];
             if (paramType && argType != paramType) {
                 srcReg = ensureType(srcReg, argType, paramType);
             }
+            if (inlineCompositeT(paramType) && expr->isBuiltinCall) {
+                srcReg = emitBoxIfInline(srcReg, paramType);
+            }
             if (srcReg != targetReg) {
-                emitOp(op_mov);
-                emitRegs(targetReg, srcReg);
+                if (slotW <= 1) { emitOp(op_mov); emitRegs(targetReg, srcReg); }
+                else { emitMoveN(targetReg, srcReg, slotW); }
             }
         }
     }
 
     // --- Phase 6: Variadic packing + Call function ---
     u16 callArgc = emitVariadicPack(expr, callArgBase, argc);
-    u16 callResultReg = allocReg();
+    Type* returnT = funcInfo->returnType;
+    bool retInlineComposite = returnT
+        && returnT->repr_ == ts::Type::Repr::Inline
+        && returnT != compiler_.complexType()
+        && returnT != compiler_.fractionType();
+    bool builtinReturnsInline = expr->isBuiltinCall && retInlineComposite;
+    u16 callResultReg = builtinReturnsInline
+        ? allocReg()
+        : (retInlineComposite ? allocSlot(returnT) : allocReg());
     emitOp(expr->isBuiltinCall ? op_call_primitive : op_call);
     emitRegs(callResultReg, callArgc, callArgBase);
     emitInt(expr->resolvedFuncGlobalIndex);
+    if (builtinReturnsInline) {
+        callResultReg = emitUnboxIfInline(callResultReg, returnT);
+    }
+    // Box the multi-word inline result back into a 1-Word pointer for
+    // op_array_set into the ObjArray storage.
+    u16 storeReg = retInlineComposite ? emitBoxIfInline(callResultReg, returnT) : callResultReg;
 
     // --- Phase 7: Store result and close loops ---
     if (maxCartesian >= 2) {
         // Store in inner array (skip for Void)
         if (!isVoidReturn) {
             emitOp(op_array_set);
-            emitRegs(innerResultReg, iRegs[2], callResultReg);
+            emitRegs(innerResultReg, iRegs[2], storeReg);
             emitPtr(innerResultType);
         }
 
@@ -6195,7 +6219,7 @@ u16 CodeGen::genCartesianCall(CallExpr_* expr) {
         // maxCartesian == 1: store directly in outer array (skip for Void)
         if (!isVoidReturn) {
             emitOp(op_array_set);
-            emitRegs(outerResultReg, iRegs[1], callResultReg);
+            emitRegs(outerResultReg, iRegs[1], storeReg);
             emitPtr(outerResultType);
         }
     }
