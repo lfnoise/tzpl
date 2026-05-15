@@ -217,6 +217,40 @@ private:
         if (nextReg_ < next) { nextReg_ = next; if (nextReg_ > maxReg_) maxReg_ = nextReg_; }
     }
 
+    // Phase 4g.2: builtins (op_call_primitive) still expect 1-word Obj* args
+    // for inline composites, since most haven't been updated to walk multi-
+    // word inline payloads. Returns the number of words placed at targetReg
+    // so the caller can advance its cumulative arg offset correctly.
+    // Complex/Fraction stay multi-word -- their builtins were updated in
+    // Phase 4f.
+    u32 emitArgPlacementForCall(u16 targetReg, u16 argReg, Type* paramType, bool isBuiltin) {
+        bool boxNeeded = isBuiltin && paramType
+            && paramType->repr_ == ts::Type::Repr::Inline
+            && paramType != compiler_.complexType()
+            && paramType != compiler_.fractionType();
+        if (boxNeeded) {
+            argReg = emitBoxIfInline(argReg, paramType);
+            if (argReg != targetReg) { emitOp(op_mov); emitRegs(targetReg, argReg); }
+            u16 next = (u16)(targetReg + 1);
+            if (nextReg_ < next) { nextReg_ = next; if (nextReg_ > maxReg_) maxReg_ = nextReg_; }
+            return 1;
+        }
+        emitArgPlacement(targetReg, argReg, paramType);
+        return typeSlotWords(paramType);
+    }
+
+    // Symmetric to the above: builtin returning an inline composite gives
+    // back a 1-word boxed pointer; unbox into a multi-word slot.
+    u16 emitBuiltinResultUnbox(u16 resultReg, Type* returnType) {
+        if (returnType
+            && returnType->repr_ == ts::Type::Repr::Inline
+            && returnType != compiler_.complexType()
+            && returnType != compiler_.fractionType()) {
+            return emitUnboxIfInline(resultReg, returnType);
+        }
+        return resultReg;
+    }
+
     // Number of slot words for type t (1 for atom/pointer, sizeWords_ for inline).
     static u32 typeSlotWords(Type const* t) {
         return (t && t->sizeWords_ > 0) ? t->sizeWords_ : 1;
@@ -230,6 +264,12 @@ private:
 
     // BOX an inline value into a heap Obj* (returns reg holding the Obj*).
     // For non-inline types, returns srcReg unchanged.
+    //
+    // Phase 4g.2: extends Phase 4f boxing to generic inline structs/tuples.
+    // Storage boundaries (globals, container elements, Map/Set keys/values)
+    // continue to expect a 1-word Obj* slot; the inline payload travels
+    // through op_box_struct / op_box_tuple into a heap Struct/Tuple whose
+    // v[] memory is laid out exactly the same way as the inline form.
     u16 emitBoxIfInline(u16 srcReg, Type* type) {
         if (type == compiler_.complexType()) {
             u16 dst = allocReg();
@@ -243,10 +283,26 @@ private:
             emitRegs(dst, srcReg);
             return dst;
         }
+        if (type && type->repr_ == ts::Type::Repr::Inline) {
+            if (auto* st = dynamic_cast<ts::StructType*>(type)) {
+                u16 dst = allocReg();
+                emitOp(op_box_struct);
+                emitRegs(dst, srcReg);
+                emitPtr(st);
+                return dst;
+            }
+            if (auto* tt = dynamic_cast<ts::TupleType*>(type)) {
+                u16 dst = allocReg();
+                emitOp(op_box_tuple);
+                emitRegs(dst, srcReg);
+                emitPtr(tt);
+                return dst;
+            }
+        }
         return srcReg;
     }
 
-    // UNBOX a heap Obj* into an inline 2-word slot (returns base reg).
+    // UNBOX a heap Obj* into an inline multi-word slot (returns base reg).
     // For non-inline types, returns srcReg unchanged.
     u16 emitUnboxIfInline(u16 srcReg, Type* type) {
         if (type == compiler_.complexType()) {
@@ -260,6 +316,22 @@ private:
             emitOp(op_unbox_fraction);
             emitRegs(dst, srcReg);
             return dst;
+        }
+        if (type && type->repr_ == ts::Type::Repr::Inline) {
+            if (auto* st = dynamic_cast<ts::StructType*>(type)) {
+                u16 dst = allocSlot(type);
+                emitOp(op_unbox_struct);
+                emitRegs(dst, srcReg);
+                emitPtr(st);
+                return dst;
+            }
+            if (auto* tt = dynamic_cast<ts::TupleType*>(type)) {
+                u16 dst = allocSlot(type);
+                emitOp(op_unbox_tuple);
+                emitRegs(dst, srcReg);
+                emitPtr(tt);
+                return dst;
+            }
         }
         return srcReg;
     }
@@ -294,6 +366,36 @@ private:
 
     // Check if type is a composite numeric (array or tuple)
     bool isCompositeNumeric(Type* type) const;
+
+    // Phase 4g.2: emit a field-get for a struct/tuple parent. If the parent
+    // is Inline, uses op_inline_struct_get / op_inline_tuple_get with multi-
+    // word dst. If the parent is Heap, uses op_struct_get / op_tuple_get and
+    // unboxes the field if it is itself an Inline composite.
+    u16 emitFieldGet(Type* parentType, u16 parentReg, u16 fieldIdx, Type* fieldType) {
+        bool inlineParent = parentType && parentType->repr_ == ts::Type::Repr::Inline;
+        if (inlineParent) {
+            u16 dst = allocSlot(fieldType);
+            if (dynamic_cast<ts::TupleType*>(parentType)) {
+                emitOp(op_inline_tuple_get);
+            } else {
+                emitOp(op_inline_struct_get);
+            }
+            emitRegs(dst, parentReg, fieldIdx);
+            emitPtr(parentType);
+            return dst;
+        }
+        u16 dst = allocReg();
+        if (dynamic_cast<ts::TupleType*>(parentType)) {
+            emitOp(op_tuple_get);
+        } else {
+            emitOp(op_struct_get);
+        }
+        emitRegs(dst, parentReg, fieldIdx);
+        if (fieldType && fieldType->repr_ == ts::Type::Repr::Inline) {
+            return emitUnboxIfInline(dst, fieldType);
+        }
+        return dst;
+    }
 
     // Pattern match code generation
     void genPatternMatch(Pattern* pat, u16 subjReg, Type* subjType,

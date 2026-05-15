@@ -351,6 +351,23 @@ void classifyStructImpl(StructType* st, std::unordered_set<Type*>& visiting) {
         if (ok && total <= kInlineMaxWords) {
             st->couldBeInline_     = true;
             st->inlineLayoutWords_ = (u8)total;
+            // Phase 4g.2: promote runtime classification. Mirror Phase 4f's
+            // model for Complex/Fraction: multi-word inline in registers,
+            // calling convention, locals, and returns; box-at-boundary
+            // (op_box_struct / op_unbox_struct) at globals, container
+            // elements, and other 1-word storage slots. This update also
+            // recomputes the per-field word offsets in layout_ since fields
+            // may now occupy more than one slot each.
+            st->repr_      = Type::Repr::Inline;
+            st->sizeWords_ = (u8)total;
+            st->isValueType_ = true;
+            st->layout_.clear();
+            u8 off = 0;
+            for (auto const& field : st->fields_) {
+                u8 fw = (u8)inlineFootprintWords(field.type);
+                st->layout_.push_back(FieldLayout{off, fw, field.type});
+                off = (u8)(off + fw);
+            }
         }
     }
 }
@@ -386,6 +403,17 @@ void classifyTupleImpl(TupleType* tu, std::unordered_set<Type*>& visiting) {
         if (ok && total <= kInlineMaxWords) {
             tu->couldBeInline_     = true;
             tu->inlineLayoutWords_ = (u8)total;
+            // Phase 4g.2: promote (see classifyStructImpl for rationale).
+            tu->repr_      = Type::Repr::Inline;
+            tu->sizeWords_ = (u8)total;
+            tu->isValueType_ = true;
+            tu->layout_.clear();
+            u8 off = 0;
+            for (Type* field : tu->fields_) {
+                u8 fw = (u8)inlineFootprintWords(field);
+                tu->layout_.push_back(FieldLayout{off, fw, field});
+                off = (u8)(off + fw);
+            }
         }
     }
 }

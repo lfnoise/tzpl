@@ -645,8 +645,8 @@ void CodeGen::genLetDecl(LetDeclNode* decl) {
     // Check if this is a global (no local scopes)
     auto it = typeChecker_.globalVars().find(decl->name);
     if (it != typeChecker_.globalVars().end() && localScopes_.size() <= 1) {
-        // Phase 4f: inline value types must be boxed before single-Word global storage.
-        u16 storeReg = isInlineMultiword(decl->resolvedType)
+        // Phase 4f/4g.2: inline value types must be boxed before single-Word global storage.
+        u16 storeReg = (decl->resolvedType && decl->resolvedType->repr_ == ts::Type::Repr::Inline)
                      ? emitBoxIfInline(reg, decl->resolvedType)
                      : reg;
         emitOp(storesObjPtr(decl->resolvedType) ? op_init_global_obj : op_store_global);
@@ -664,8 +664,8 @@ void CodeGen::genVarDecl(VarDeclNode* decl) {
         auto it = typeChecker_.dynamicVars().find(decl->name);
         u32 dynIdx = it->second.dynIndex;
 
-        // Phase 4f: dynvar slot is a single Word; box inline values first.
-        u16 storeReg = isInlineMultiword(decl->resolvedType)
+        // Phase 4f/4g.2: dynvar slot is a single Word; box inline values first.
+        u16 storeReg = (decl->resolvedType && decl->resolvedType->repr_ == ts::Type::Repr::Inline)
                      ? emitBoxIfInline(reg, decl->resolvedType) : reg;
 
         if (inFunctionBody_) {
@@ -708,7 +708,7 @@ void CodeGen::genVarDecl(VarDeclNode* decl) {
 
     auto it = typeChecker_.globalVars().find(decl->name);
     if (it != typeChecker_.globalVars().end() && localScopes_.size() <= 1) {
-        u16 storeReg = isInlineMultiword(decl->resolvedType)
+        u16 storeReg = (decl->resolvedType && decl->resolvedType->repr_ == ts::Type::Repr::Inline)
                      ? emitBoxIfInline(reg, decl->resolvedType)
                      : reg;
         emitOp(storesObjPtr(decl->resolvedType) ? op_init_global_obj : op_store_global);
@@ -1698,8 +1698,8 @@ void CodeGen::genSwitchStmt(SwitchStmtNode* stmt) {
 void CodeGen::emitGlobalStoreIfNeeded(const std::string& name, u16 reg) {
     auto it = typeChecker_.globalVars().find(name);
     if (it != typeChecker_.globalVars().end() && localScopes_.size() <= 1) {
-        // Phase 4f: inline value types must be boxed before single-Word global storage.
-        u16 storeReg = isInlineMultiword(it->second.type)
+        // Phase 4f/4g.2: inline value types must be boxed before single-Word global storage.
+        u16 storeReg = (it->second.type && it->second.type->repr_ == ts::Type::Repr::Inline)
                      ? emitBoxIfInline(reg, it->second.type) : reg;
         emitOp(storesObjPtr(it->second.type) ? op_init_global_obj : op_store_global);
         emitRegs(storeReg);
@@ -1919,13 +1919,7 @@ void CodeGen::genPatternMatch(Pattern* pat, u16 subjReg, Type* subjType,
                     continue;
                 }
 
-                u16 fieldReg = allocReg();
-                emitOp(op_struct_get);
-                emitRegs(fieldReg, subjReg, (u16)fieldIdx);
-                // Phase 4f: struct field stores boxed inline values; unbox.
-                if (isInlineMultiword(fieldType)) {
-                    fieldReg = emitUnboxIfInline(fieldReg, fieldType);
-                }
+                u16 fieldReg = emitFieldGet(stype, subjReg, (u16)fieldIdx, fieldType);
                 genPatternMatch(field.pattern.get(), fieldReg, fieldType, failJumps, isMutable);
             }
             break;
@@ -1997,13 +1991,8 @@ void CodeGen::genPatternMatch(Pattern* pat, u16 subjReg, Type* subjType,
                         auto* ttype = dynamic_cast<TupleType*>(pat->enumCaseDataType);
                         if (ttype) {
                             for (size_t i = 0; i < tp->elements.size() && i < ttype->fields_.size(); ++i) {
-                                u16 elemReg = allocReg();
-                                emitOp(op_tuple_get);
-                                emitRegs(elemReg, valReg, (u16)i);
                                 Type* ft = ttype->fields_[i];
-                                if (isInlineMultiword(ft)) {
-                                    elemReg = emitUnboxIfInline(elemReg, ft);
-                                }
+                                u16 elemReg = emitFieldGet(ttype, valReg, (u16)i, ft);
                                 genPatternMatch(tp->elements[i].get(), elemReg, ft, failJumps, isMutable);
                             }
                         }
@@ -2027,9 +2016,7 @@ void CodeGen::genPatternMatch(Pattern* pat, u16 subjReg, Type* subjType,
                     break;
                 }
                 for (size_t i = 0; i < tp->elements.size() && i < stype->fields_.size(); ++i) {
-                    u16 fieldReg = allocReg();
-                    emitOp(op_struct_get);
-                    emitRegs(fieldReg, subjReg, (u16)i);
+                    u16 fieldReg = emitFieldGet(stype, subjReg, (u16)i, stype->fields_[i].type);
                     genPatternMatch(tp->elements[i].get(), fieldReg, stype->fields_[i].type, failJumps, isMutable);
                 }
                 if (tp->hasRest && !tp->restName.empty()) {
@@ -2038,16 +2025,20 @@ void CodeGen::genPatternMatch(Pattern* pat, u16 subjReg, Type* subjType,
                         restFields.push_back(stype->fields_[i].type);
                     }
                     TupleType* restType = compiler_.tupleType(restFields);
-                    // Extract remaining fields individually and make a tuple
-                    u16 restBase = nextReg_;
+                    bool inlineRest = restType->repr_ == ts::Type::Repr::Inline;
+                    u16 elemBase = nextReg_;
+                    u16 cursor = elemBase;
                     for (size_t i = tp->elements.size(); i < stype->fields_.size(); ++i) {
-                        u16 fieldReg = allocReg();
-                        emitOp(op_struct_get);
-                        emitRegs(fieldReg, subjReg, (u16)i);
+                        Type* ft = stype->fields_[i].type;
+                        u16 fieldReg = emitFieldGet(stype, subjReg, (u16)i, ft);
+                        u16 fieldSlotWords = inlineRest ? (u16)typeSlotWords(ft) : 1;
+                        emitArgPlacement(cursor, fieldReg, inlineRest ? ft : nullptr);
+                        cursor = (u16)(cursor + fieldSlotWords);
+                        if (nextReg_ < cursor) { nextReg_ = cursor; if (nextReg_ > maxReg_) maxReg_ = nextReg_; }
                     }
-                    u16 restReg = allocReg();
+                    u16 restReg = inlineRest ? allocSlot(restType) : allocReg();
                     emitOp(op_make_tuple);
-                    emitRegs(restReg, restBase, (u16)(stype->fields_.size() - tp->elements.size()));
+                    emitRegs(restReg, elemBase, (u16)(stype->fields_.size() - tp->elements.size()));
                     emitPtr(restType);
                     declareLocal(tp->restName, restReg, restType, isMutable);
                     emitGlobalStoreIfNeeded(tp->restName, restReg);
@@ -2062,12 +2053,8 @@ void CodeGen::genPatternMatch(Pattern* pat, u16 subjReg, Type* subjType,
             }
 
             for (size_t i = 0; i < tp->elements.size() && i < ttype->fields_.size(); ++i) {
-                u16 elemReg = allocReg();
-                emitOp(op_tuple_get);
-                emitRegs(elemReg, subjReg, (u16)i);
-                // Phase 4f: tuple field stores boxed inline values; unbox.
                 Type* ft = ttype->fields_[i];
-                if (isInlineMultiword(ft)) elemReg = emitUnboxIfInline(elemReg, ft);
+                u16 elemReg = emitFieldGet(ttype, subjReg, (u16)i, ft);
                 genPatternMatch(tp->elements[i].get(), elemReg, ft, failJumps, isMutable);
             }
 
@@ -2078,9 +2065,22 @@ void CodeGen::genPatternMatch(Pattern* pat, u16 subjReg, Type* subjType,
                     restFields.push_back(ttype->fields_[i]);
                 }
                 TupleType* restType = compiler_.tupleType(restFields);
-                u16 restReg = allocReg();
-                emitOp(op_tuple_slice);
-                emitRegs(restReg, subjReg, (u16)tp->elements.size());
+                // Phase 4g.2: build the rest tuple from individual field reads
+                // so we transparently handle Inline parents and Inline results.
+                bool inlineRest = restType->repr_ == ts::Type::Repr::Inline;
+                u16 elemBase = nextReg_;
+                u16 cursor = elemBase;
+                for (size_t i = tp->elements.size(); i < ttype->fields_.size(); ++i) {
+                    Type* ft = ttype->fields_[i];
+                    u16 fieldReg = emitFieldGet(ttype, subjReg, (u16)i, ft);
+                    u16 fieldSlotWords = inlineRest ? (u16)typeSlotWords(ft) : 1;
+                    emitArgPlacement(cursor, fieldReg, inlineRest ? ft : nullptr);
+                    cursor = (u16)(cursor + fieldSlotWords);
+                    if (nextReg_ < cursor) { nextReg_ = cursor; if (nextReg_ > maxReg_) maxReg_ = nextReg_; }
+                }
+                u16 restReg = inlineRest ? allocSlot(restType) : allocReg();
+                emitOp(op_make_tuple);
+                emitRegs(restReg, elemBase, (u16)(ttype->fields_.size() - tp->elements.size()));
                 emitPtr(restType);
                 declareLocal(tp->restName, restReg, restType, isMutable);
                 emitGlobalStoreIfNeeded(tp->restName, restReg);
@@ -2950,22 +2950,25 @@ u16 CodeGen::genBinaryOp(BinaryOpExpr* expr) {
         // Emit as a function call to the overloaded operator
         u16 argBase = nextReg_;
         u16 leftReg = genExpr(static_cast<Expr*>(expr->left.get()));
-        if (leftReg != argBase) {
-            emitOp(op_mov);
-            emitRegs(argBase, leftReg);
-        }
-        // Ensure nextReg_ advances past argBase so right operand doesn't clobber
-        if (nextReg_ <= argBase) { nextReg_ = argBase + 1; if (nextReg_ > maxReg_) maxReg_ = nextReg_; }
+        Type* leftT = expr->left->resolvedType;
+        Type* rightT = expr->right->resolvedType;
+        u32 leftWords = emitArgPlacementForCall(argBase, leftReg, leftT, expr->isBuiltinCall);
+        u16 rightDst = (u16)(argBase + leftWords);
         u16 rightReg = genExpr(static_cast<Expr*>(expr->right.get()));
-        if (rightReg != argBase + 1) {
-            emitOp(op_mov);
-            emitRegs(argBase + 1, rightReg);
-        }
-        if (nextReg_ <= argBase + 1) { nextReg_ = argBase + 2; if (nextReg_ > maxReg_) maxReg_ = nextReg_; }
-        u16 resultReg = allocReg();
+        u32 rightWords = emitArgPlacementForCall(rightDst, rightReg, rightT, expr->isBuiltinCall);
+        u16 next = (u16)(rightDst + rightWords);
+        if (nextReg_ < next) { nextReg_ = next; if (nextReg_ > maxReg_) maxReg_ = nextReg_; }
+        bool builtinReturnsInlineComposite = expr->isBuiltinCall && expr->resolvedType
+            && expr->resolvedType->repr_ == ts::Type::Repr::Inline
+            && expr->resolvedType != compiler_.complexType()
+            && expr->resolvedType != compiler_.fractionType();
+        u16 resultReg = builtinReturnsInlineComposite ? allocReg() : allocSlot(expr->resolvedType);
         emitOp(expr->isBuiltinCall ? op_call_primitive : op_call);
         emitRegs(resultReg, 2, argBase);
         emitInt(expr->resolvedFuncGlobalIndex);
+        if (builtinReturnsInlineComposite) {
+            return emitUnboxIfInline(resultReg, expr->resolvedType);
+        }
         return resultReg;
     }
 
@@ -3036,11 +3039,28 @@ u16 CodeGen::genBinaryOp(BinaryOpExpr* expr) {
             case BinaryOpExpr::Sub:
             case BinaryOpExpr::Mul:
             case BinaryOpExpr::Div: {
+                // Phase 4g.2: Inline tuples must be boxed at the composite-arith
+                // boundary; the dispatch handler reads heap Tuple* fields.
+                u16 lReg = isInlineMultiword(leftType) ? emitBoxIfInline(leftReg, leftType) : leftReg;
+                u16 rReg = isInlineMultiword(rightType) ? emitBoxIfInline(rightReg, rightType) : rightReg;
+                bool unboxResult = isInlineMultiword(resultType);
+                u16 outReg = unboxResult ? allocReg() : dst;
                 emitOp(getCompositeArithOp(expr->op));
-                emitRegs(dst, leftReg, rightReg);
+                emitRegs(outReg, lReg, rReg);
                 emitPtr(resultType);
                 emitPtr(leftType);
                 emitPtr(rightType);
+                if (unboxResult) {
+                    u16 unboxed = emitUnboxIfInline(outReg, resultType);
+                    if (unboxed != dst) {
+                        // Copy unboxed multi-word value into dst
+                        u32 nw = typeSlotWords(resultType);
+                        for (u32 i = 0; i < nw; ++i) {
+                            emitOp(op_mov);
+                            emitRegs((u16)(dst + i), (u16)(unboxed + i));
+                        }
+                    }
+                }
                 return dst;
             }
             default:
@@ -3088,8 +3108,10 @@ u16 CodeGen::genBinaryOp(BinaryOpExpr* expr) {
         case BinaryOpExpr::Ge: {
             // Composite comparison (e.g. Tuple > Scalar)
             if (isCompositeNumeric(resultType)) {
+                u16 lReg = isInlineMultiword(leftType) ? emitBoxIfInline(leftReg, leftType) : leftReg;
+                u16 rReg = isInlineMultiword(rightType) ? emitBoxIfInline(rightReg, rightType) : rightReg;
                 emitOp(getCompositeCmpOp(expr->op));
-                emitRegs(dst, leftReg, rightReg);
+                emitRegs(dst, lReg, rReg);
                 emitPtr(resultType);
                 emitPtr(leftType);
                 emitPtr(rightType);
@@ -3218,15 +3240,21 @@ u16 CodeGen::genUnaryOp(UnaryOpExpr* expr) {
     if (expr->resolvedFuncGlobalIndex >= 0) {
         u16 argBase = nextReg_;
         u16 operandReg = genExpr(static_cast<Expr*>(expr->operand.get()));
-        if (operandReg != argBase) {
-            emitOp(op_mov);
-            emitRegs(argBase, operandReg);
-        }
-        if (nextReg_ <= argBase) { nextReg_ = argBase + 1; if (nextReg_ > maxReg_) maxReg_ = nextReg_; }
-        u16 resultReg = allocReg();
+        Type* opT = expr->operand->resolvedType;
+        u32 sw = emitArgPlacementForCall(argBase, operandReg, opT, expr->isBuiltinCall);
+        u16 next = (u16)(argBase + sw);
+        if (nextReg_ < next) { nextReg_ = next; if (nextReg_ > maxReg_) maxReg_ = nextReg_; }
+        bool builtinReturnsInlineComposite = expr->isBuiltinCall && expr->resolvedType
+            && expr->resolvedType->repr_ == ts::Type::Repr::Inline
+            && expr->resolvedType != compiler_.complexType()
+            && expr->resolvedType != compiler_.fractionType();
+        u16 resultReg = builtinReturnsInlineComposite ? allocReg() : allocSlot(expr->resolvedType);
         emitOp(expr->isBuiltinCall ? op_call_primitive : op_call);
         emitRegs(resultReg, 1, argBase);
         emitInt(expr->resolvedFuncGlobalIndex);
+        if (builtinReturnsInlineComposite) {
+            return emitUnboxIfInline(resultReg, expr->resolvedType);
+        }
         return resultReg;
     }
 
@@ -3237,10 +3265,25 @@ u16 CodeGen::genUnaryOp(UnaryOpExpr* expr) {
     switch (expr->op) {
         case UnaryOpExpr::Neg:
             if (isCompositeNumeric(expr->resolvedType)) {
+                Type* opT = expr->operand->resolvedType;
+                Type* rT  = expr->resolvedType;
+                u16 inReg = isInlineMultiword(opT) ? emitBoxIfInline(operandReg, opT) : operandReg;
+                bool unboxResult = isInlineMultiword(rT);
+                u16 outReg = unboxResult ? allocReg() : dst;
                 emitOp(op_neg_composite);
-                emitRegs(dst, operandReg);
-                emitPtr(expr->resolvedType);
-                emitPtr(expr->operand->resolvedType);
+                emitRegs(outReg, inReg);
+                emitPtr(rT);
+                emitPtr(opT);
+                if (unboxResult) {
+                    u16 unboxed = emitUnboxIfInline(outReg, rT);
+                    if (unboxed != dst) {
+                        u32 nw = typeSlotWords(rT);
+                        for (u32 i = 0; i < nw; ++i) {
+                            emitOp(op_mov);
+                            emitRegs((u16)(dst + i), (u16)(unboxed + i));
+                        }
+                    }
+                }
                 return dst;
             }
             if (expr->resolvedType == compiler_.complexType()) {
@@ -3257,10 +3300,25 @@ u16 CodeGen::genUnaryOp(UnaryOpExpr* expr) {
 
         case UnaryOpExpr::Not:
             if (isCompositeNumeric(expr->resolvedType)) {
+                Type* opT = expr->operand->resolvedType;
+                Type* rT  = expr->resolvedType;
+                u16 inReg = isInlineMultiword(opT) ? emitBoxIfInline(operandReg, opT) : operandReg;
+                bool unboxResult = isInlineMultiword(rT);
+                u16 outReg = unboxResult ? allocReg() : dst;
                 emitOp(op_not_composite);
-                emitRegs(dst, operandReg);
-                emitPtr(expr->resolvedType);
-                emitPtr(expr->operand->resolvedType);
+                emitRegs(outReg, inReg);
+                emitPtr(rT);
+                emitPtr(opT);
+                if (unboxResult) {
+                    u16 unboxed = emitUnboxIfInline(outReg, rT);
+                    if (unboxed != dst) {
+                        u32 nw = typeSlotWords(rT);
+                        for (u32 i = 0; i < nw; ++i) {
+                            emitOp(op_mov);
+                            emitRegs((u16)(dst + i), (u16)(unboxed + i));
+                        }
+                    }
+                }
                 return dst;
             }
             emitOp(op_not_bool);
@@ -3269,10 +3327,25 @@ u16 CodeGen::genUnaryOp(UnaryOpExpr* expr) {
 
         case UnaryOpExpr::BitNot:
             if (isCompositeNumeric(expr->resolvedType)) {
+                Type* opT = expr->operand->resolvedType;
+                Type* rT  = expr->resolvedType;
+                u16 inReg = isInlineMultiword(opT) ? emitBoxIfInline(operandReg, opT) : operandReg;
+                bool unboxResult = isInlineMultiword(rT);
+                u16 outReg = unboxResult ? allocReg() : dst;
                 emitOp(op_bitnot_composite);
-                emitRegs(dst, operandReg);
-                emitPtr(expr->resolvedType);
-                emitPtr(expr->operand->resolvedType);
+                emitRegs(outReg, inReg);
+                emitPtr(rT);
+                emitPtr(opT);
+                if (unboxResult) {
+                    u16 unboxed = emitUnboxIfInline(outReg, rT);
+                    if (unboxed != dst) {
+                        u32 nw = typeSlotWords(rT);
+                        for (u32 i = 0; i < nw; ++i) {
+                            emitOp(op_mov);
+                            emitRegs((u16)(dst + i), (u16)(unboxed + i));
+                        }
+                    }
+                }
                 return dst;
             }
             emitOp(op_bitnot_int);
@@ -3340,23 +3413,27 @@ u16 CodeGen::genCall(CallExpr_* expr) {
             Type* declType = stype->fields_[0].type;
             return ensureType(valReg, valType, declType);
         }
-        // Phase 4f: tuple-struct stores 1 Word per field; box inline values.
+        // Phase 4f/4g.2: Inline tuple-structs lay out fields at multi-word
+        // stride and land directly in a multi-word dst. Heap tuple-structs
+        // use 1 Word per field with box-at-boundary for Inline-typed fields.
         usize numFields = stype->fields_.size();
+        bool inlineStruct = stype->repr_ == ts::Type::Repr::Inline;
         u16 fieldBase = nextReg_;
+        u16 cursor = fieldBase;
         for (size_t i = 0; i < numFields; ++i) {
             u16 valReg = genExpr(static_cast<Expr*>(expr->args[i].get()));
             Type* valType = expr->args[i]->resolvedType;
             Type* declType = stype->fields_[i].type;
             valReg = ensureType(valReg, valType, declType);
-            if (isInlineMultiword(declType)) valReg = emitBoxIfInline(valReg, declType);
-            if (valReg != fieldBase + (u16)i) {
-                emitOp(op_mov);
-                emitRegs(fieldBase + (u16)i, valReg);
+            if (!inlineStruct && isInlineMultiword(declType)) {
+                valReg = emitBoxIfInline(valReg, declType);
             }
-            u16 next = fieldBase + (u16)i + 1;
-            if (nextReg_ < next) { nextReg_ = next; if (nextReg_ > maxReg_) maxReg_ = nextReg_; }
+            u16 fieldSlotWords = inlineStruct ? (u16)typeSlotWords(declType) : 1;
+            emitArgPlacement(cursor, valReg, inlineStruct ? declType : nullptr);
+            cursor = (u16)(cursor + fieldSlotWords);
+            if (nextReg_ < cursor) { nextReg_ = cursor; if (nextReg_ > maxReg_) maxReg_ = nextReg_; }
         }
-        u16 dst = allocReg();
+        u16 dst = inlineStruct ? allocSlot(stype) : allocReg();
         emitOp(op_make_struct);
         emitRegs(dst, fieldBase, (u16)numFields);
         emitPtr(stype);
@@ -3398,8 +3475,7 @@ u16 CodeGen::genCall(CallExpr_* expr) {
                         paramType = (*paramTypes)[i];
                     }
                     u16 dstReg = (u16)(argBase + cumOffset);
-                    emitArgPlacement(dstReg, argReg, paramType);
-                    cumOffset += typeSlotWords(paramType);
+                    cumOffset += emitArgPlacementForCall(dstReg, argReg, paramType, expr->isBuiltinCall);
                 }
                 if (isTailCall && !expr->isBuiltinCall) {
                     emitOp(op_tail_call);
@@ -3435,8 +3511,7 @@ u16 CodeGen::genCall(CallExpr_* expr) {
                 Type* paramType = (i < concreteLT->argTypes_.size())
                                 ? concreteLT->argTypes_[i] : expr->args[i]->resolvedType;
                 u16 dstReg = (u16)(argBase + cumOffset);
-                emitArgPlacement(dstReg, argReg, paramType);
-                cumOffset += typeSlotWords(paramType);
+                cumOffset += emitArgPlacementForCall(dstReg, argReg, paramType, expr->isBuiltinCall);
             }
 
             if (isTailCall) {
@@ -3468,8 +3543,7 @@ u16 CodeGen::genCall(CallExpr_* expr) {
             Type* paramType = (funcType && i < funcType->argTypes_.size())
                             ? funcType->argTypes_[i] : expr->args[i]->resolvedType;
             u16 dstReg = (u16)(argBase + cumOffset);
-            emitArgPlacement(dstReg, argReg, paramType);
-            cumOffset += typeSlotWords(paramType);
+            cumOffset += emitArgPlacementForCall(dstReg, argReg, paramType, expr->isBuiltinCall);
         }
 
         // Coroutine lambda call
@@ -3570,8 +3644,7 @@ u16 CodeGen::genCall(CallExpr_* expr) {
             Type* paramType = (i < concreteLT->argTypes_.size())
                             ? concreteLT->argTypes_[i] : expr->args[i]->resolvedType;
             u16 dstReg = (u16)(argBase + cumOffset);
-            emitArgPlacement(dstReg, argReg, paramType);
-            cumOffset += typeSlotWords(paramType);
+            cumOffset += emitArgPlacementForCall(dstReg, argReg, paramType, expr->isBuiltinCall);
         }
 
         if (isTailCall) {
@@ -3605,8 +3678,7 @@ u16 CodeGen::genCall(CallExpr_* expr) {
             Type* paramType = (i < funcType->argTypes_.size())
                             ? funcType->argTypes_[i] : expr->args[i]->resolvedType;
             u16 dstReg = (u16)(argBase + cumOffset);
-            emitArgPlacement(dstReg, argReg, paramType);
-            cumOffset += typeSlotWords(paramType);
+            cumOffset += emitArgPlacementForCall(dstReg, argReg, paramType, expr->isBuiltinCall);
         }
 
         if (isTailCall) {
@@ -3645,8 +3717,7 @@ u16 CodeGen::genCall(CallExpr_* expr) {
                     Type* paramType = (i < funcType->argTypes_.size())
                                     ? funcType->argTypes_[i] : expr->args[i]->resolvedType;
                     u16 dstReg = (u16)(argBase + cumOffset);
-                    emitArgPlacement(dstReg, argReg, paramType);
-                    cumOffset += typeSlotWords(paramType);
+                    cumOffset += emitArgPlacementForCall(dstReg, argReg, paramType, expr->isBuiltinCall);
                 }
 
                 if (isTailCall) {
@@ -3729,6 +3800,17 @@ u16 CodeGen::genCall(CallExpr_* expr) {
         // inline value types first.
         u32 placeSw = typeSlotWords(targetType);
         if (isVariadic && isInlineMultiword(targetType)) {
+            argReg = emitBoxIfInline(argReg, targetType);
+            placeSw = 1;
+        }
+        // Phase 4g.2: builtins (op_call_primitive) receive Inline structs/
+        // tuples as a 1-Word boxed Obj* (Complex/Fraction stay multi-word
+        // per Phase 4f). printArgs and other multi-word-aware builtins
+        // walk the arg array using the same rule (see builtinSlotWords).
+        if (!isVariadic && expr->isBuiltinCall && targetType
+            && targetType->repr_ == ts::Type::Repr::Inline
+            && targetType != compiler_.complexType()
+            && targetType != compiler_.fractionType()) {
             argReg = emitBoxIfInline(argReg, targetType);
             placeSw = 1;
         }
@@ -3902,15 +3984,24 @@ u16 CodeGen::genCall(CallExpr_* expr) {
     }
 
     // Result register. Phase 4f: builtins writing inline Complex/Fraction
-    // need a 2-word slot.
-    u16 resultReg = allocSlot(expr->resolvedType);
+    // need a 2-word slot. Phase 4g.2: builtins return Inline structs/
+    // tuples as a 1-Word boxed pointer; allocate a 1-word target reg and
+    // unbox after the call.
+    bool builtinReturnsInlineComposite = expr->isBuiltinCall && expr->resolvedType
+        && expr->resolvedType->repr_ == ts::Type::Repr::Inline
+        && expr->resolvedType != compiler_.complexType()
+        && expr->resolvedType != compiler_.fractionType();
+    u16 callDst = builtinReturnsInlineComposite ? allocReg() : allocSlot(expr->resolvedType);
 
     // Emit CALL: op, regs{resultReg, argc, argBase}, callee_global_idx
     emitOp(expr->isBuiltinCall ? op_call_primitive : op_call);
-    emitRegs(resultReg, callArgc, argBase);
+    emitRegs(callDst, callArgc, argBase);
     emitInt(expr->resolvedFuncGlobalIndex);
 
-    return resultReg;
+    if (builtinReturnsInlineComposite) {
+        return emitUnboxIfInline(callDst, expr->resolvedType);
+    }
+    return callDst;
 }
 
 // Helper: get the parameter type for argument i, handling variadic functions
@@ -4074,10 +4165,15 @@ u16 CodeGen::genAutoMapBinaryOp(BinaryOpExpr* expr) {
         emitRegs(elemResultReg, 2, argBase);
         emitInt(expr->resolvedFuncGlobalIndex);
     } else if (isCompositeNumeric(scalarResultType)) {
-        // Composite numeric (e.g. Tuple + Scalar)
+        // Composite numeric (e.g. Tuple + Scalar). Phase 4g.2: box Inline
+        // tuple operands; the dispatch handler walks heap Tuple* fields.
+        // Result of dispatchTupleBinop is already a heap Tuple*, which is
+        // also the right shape to store into an ObjArray slot.
+        u16 lElem = isInlineMultiword(leftElemType) ? emitBoxIfInline(leftElemReg, leftElemType) : leftElemReg;
+        u16 rElem = isInlineMultiword(rightElemType) ? emitBoxIfInline(rightElemReg, rightElemType) : rightElemReg;
         elemResultReg = allocReg();
         emitOp(getCompositeArithOp(expr->op));
-        emitRegs(elemResultReg, leftElemReg, rightElemReg);
+        emitRegs(elemResultReg, lElem, rElem);
         emitPtr(scalarResultType);
         emitPtr(leftElemType);
         emitPtr(rightElemType);
@@ -4924,58 +5020,122 @@ u16 CodeGen::genAutoMapCall(CallExpr_* expr) {
     // callArgBase starts at nextReg_ — callee's frame begins here
     u16 callArgBase = nextReg_;
 
+    // Phase 4g.2: track per-arg slot widths so multi-word inline args don't
+    // collide with following args. For builtin calls, Inline composites are
+    // boxed (1 word) per the builtin calling convention; for non-builtin
+    // calls Inline composites pass multi-word inline.
+    std::vector<u32> argSlotWords;
+    argSlotWords.reserve(argc);
+    auto callerSlotWords = [&](Type* paramType) -> u32 {
+        if (!paramType) return 1;
+        if (paramType->repr_ == ts::Type::Repr::Inline
+            && paramType != compiler_.complexType()
+            && paramType != compiler_.fractionType()) {
+            return expr->isBuiltinCall ? 1u : (u32)paramType->sizeWords_;
+        }
+        return typeSlotWords(paramType);
+    };
+    u32 cumOffset = 0;
+    std::vector<u32> argOffsets;
+    argOffsets.reserve(argc);
     for (u16 i = 0; i < argc; ++i) {
-        u16 targetReg = callArgBase + i;
-        // Ensure register is tracked
-        if (nextReg_ <= targetReg) {
-            nextReg_ = targetReg + 1;
+        argOffsets.push_back(cumOffset);
+        cumOffset += callerSlotWords(getParamType(funcInfo, expr, i));
+    }
+    for (u16 i = 0; i < argc; ++i) {
+        u16 targetReg = (u16)(callArgBase + argOffsets[i]);
+        Type* paramType = getParamType(funcInfo, expr, i);
+        u32 slotW = callerSlotWords(paramType);
+        // Ensure registers are tracked
+        if (nextReg_ <= (u16)(targetReg + slotW)) {
+            nextReg_ = (u16)(targetReg + slotW);
             if (nextReg_ > maxReg_) maxReg_ = nextReg_;
         }
 
         if (expr->autoMapArgs[i]) {
             auto* arrType = dynamic_cast<ArrayType*>(expr->args[i]->resolvedType);
-            // Extract element at runtime index
+            Type* elemType = arrType->elemType_;
+            bool elemInlineComposite = elemType
+                && elemType->repr_ == ts::Type::Repr::Inline
+                && elemType != compiler_.complexType()
+                && elemType != compiler_.fractionType();
+            // Extract element at runtime index. Inline composite elements are
+            // stored boxed in ObjArray (1 word); other inline backends land
+            // multi-word values straight into the slot.
+            u16 elemReg = elemInlineComposite ? allocReg() : targetReg;
             emitOp(op_array_get_dyn);
-            emitRegs(targetReg, argRegs[i], iReg);
+            emitRegs(elemReg, argRegs[i], iReg);
             emitPtr(arrType);
+            if (elemInlineComposite) {
+                if (expr->isBuiltinCall) {
+                    if (elemReg != targetReg) { emitOp(op_mov); emitRegs(targetReg, elemReg); }
+                } else {
+                    u16 unboxed = emitUnboxIfInline(elemReg, elemType);
+                    if (unboxed != targetReg) {
+                        emitMoveN(targetReg, unboxed, slotW);
+                    }
+                }
+            }
 
             // Promote element type to parameter type if needed
-            Type* elemType = arrType->elemType_;
-            Type* paramType = getParamType(funcInfo, expr, i);
             if (paramType && elemType != paramType) {
                 u16 promoted = ensureType(targetReg, elemType, paramType);
                 if (promoted != targetReg) {
-                    emitOp(op_mov);
-                    emitRegs(targetReg, promoted);
+                    emitMoveN(targetReg, promoted, slotW);
                 }
             }
         } else {
-            // Non-auto-mapped: copy scalar value to call arg position
-            // Promote scalar type to parameter type if needed (e.g. Int -> Float)
+            // Non-auto-mapped: copy scalar/inline value to call arg position
             Type* argType = expr->args[i]->resolvedType;
-            Type* paramType = getParamType(funcInfo, expr, i);
             u16 srcReg = argRegs[i];
             if (paramType && argType != paramType) {
                 srcReg = ensureType(srcReg, argType, paramType);
             }
+            if (paramType
+                && paramType->repr_ == ts::Type::Repr::Inline
+                && paramType != compiler_.complexType()
+                && paramType != compiler_.fractionType()
+                && expr->isBuiltinCall) {
+                srcReg = emitBoxIfInline(srcReg, paramType);
+            }
             if (srcReg != targetReg) {
-                emitOp(op_mov);
-                emitRegs(targetReg, srcReg);
+                if (slotW <= 1) {
+                    emitOp(op_mov);
+                    emitRegs(targetReg, srcReg);
+                } else {
+                    emitMoveN(targetReg, srcReg, slotW);
+                }
             }
         }
     }
 
     // --- Phase 7: Variadic packing + Call function ---
     u16 callArgc = emitVariadicPack(expr, callArgBase, argc);
-    u16 callResultReg = allocReg();
+    bool builtinReturnsInlineComposite = expr->isBuiltinCall && funcInfo->returnType
+        && funcInfo->returnType->repr_ == ts::Type::Repr::Inline
+        && funcInfo->returnType != compiler_.complexType()
+        && funcInfo->returnType != compiler_.fractionType();
+    Type* returnT = funcInfo->returnType;
+    u16 callResultReg = builtinReturnsInlineComposite ? allocReg() : allocSlot(returnT);
     emitOp(expr->isBuiltinCall ? op_call_primitive : op_call);
     emitRegs(callResultReg, callArgc, callArgBase);
     emitInt(expr->resolvedFuncGlobalIndex);
+    if (builtinReturnsInlineComposite) {
+        callResultReg = emitUnboxIfInline(callResultReg, returnT);
+    }
 
     // --- Phase 8: Store result in result array (skip for Void) ---
     if (!isVoidReturn) {
+        // For Inline composite element types, ObjArray expects 1-Word boxed;
+        // box the multi-word inline result back before storing.
+        bool resInlineComposite = returnT
+            && returnT->repr_ == ts::Type::Repr::Inline
+            && returnT != compiler_.complexType()
+            && returnT != compiler_.fractionType();
+        u16 storeReg = (resInlineComposite && !builtinReturnsInlineComposite)
+            ? emitBoxIfInline(callResultReg, returnT) : callResultReg;
         emitOp(op_array_set);
-        emitRegs(resultArrReg, iReg, callResultReg);
+        emitRegs(resultArrReg, iReg, storeReg);
         emitPtr(resultArrayType);
     }
 
@@ -6271,18 +6431,32 @@ u16 CodeGen::genArrayLiteral(ArrayLiteralExpr* expr) {
     // Generate all element values into consecutive registers.
     // Phase 4e: inline-element arrays (Array[Complex] / Array[Fraction])
     // use PodArray<x64>/<r64> backends and read 2 consecutive Words per
-    // element; lay them out at multi-word stride. All other element types
-    // stride by 1 Word.
-    u32 sw = typeSlotWords(elemType);
+    // element; lay them out at multi-word stride. Other element types
+    // stride by 1 Word. Phase 4g.2: Inline structs/tuples ride the ObjArray
+    // backend (1 Word boxed pointer per element); box each element.
+    bool inlineCompositeElem = elemType
+        && elemType->repr_ == ts::Type::Repr::Inline
+        && elemType != compiler_.complexType()
+        && elemType != compiler_.fractionType();
+    u32 sw = inlineCompositeElem ? 1u : typeSlotWords(elemType);
     u16 elemBase = nextReg_;
     for (size_t i = 0; i < count; ++i) {
         u16 elemReg = genExpr(static_cast<Expr*>(expr->elements[i].get()));
         Type* elemExprType = expr->elements[i]->resolvedType;
         elemReg = ensureType(elemReg, elemExprType, elemType);
+        if (inlineCompositeElem) {
+            elemReg = emitBoxIfInline(elemReg, elemType);
+        }
         u16 dstSlot = (u16)(elemBase + (u16)i * sw);
-        emitArgPlacement(dstSlot, elemReg, elemType);
-        u16 next = (u16)(dstSlot + sw);
-        if (nextReg_ < next) { nextReg_ = next; if (nextReg_ > maxReg_) maxReg_ = nextReg_; }
+        if (inlineCompositeElem) {
+            if (elemReg != dstSlot) { emitOp(op_mov); emitRegs(dstSlot, elemReg); }
+            u16 next = (u16)(dstSlot + 1);
+            if (nextReg_ < next) { nextReg_ = next; if (nextReg_ > maxReg_) maxReg_ = nextReg_; }
+        } else {
+            emitArgPlacement(dstSlot, elemReg, elemType);
+            u16 next = (u16)(dstSlot + sw);
+            if (nextReg_ < next) { nextReg_ = next; if (nextReg_ > maxReg_) maxReg_ = nextReg_; }
+        }
     }
 
     u16 dst = allocReg();
@@ -6310,25 +6484,25 @@ u16 CodeGen::genTupleLiteral(TupleLiteralExpr* expr) {
     }
     usize count = expr->elements.size();
 
-    // Generate all element values into consecutive registers.
-    // Phase 4f: tuple stores 1 Word per field; box inline value types.
+    // Phase 4g.2: Inline tuples place each field at its own slotWords offset.
+    bool inlineTuple = tupType->repr_ == ts::Type::Repr::Inline;
     u16 elemBase = nextReg_;
+    u16 cursor = elemBase;
     for (size_t i = 0; i < count; ++i) {
         u16 elemReg = genExpr(static_cast<Expr*>(expr->elements[i].get()));
         Type* elemType = expr->elements[i]->resolvedType;
         Type* fieldType = tupType->fields_[i];
         elemReg = ensureType(elemReg, elemType, fieldType);
-        if (isInlineMultiword(fieldType)) elemReg = emitBoxIfInline(elemReg, fieldType);
-        // Move to consecutive position if needed
-        if (elemReg != elemBase + (u16)i) {
-            emitOp(op_mov);
-            emitRegs(elemBase + (u16)i, elemReg);
+        if (!inlineTuple && isInlineMultiword(fieldType)) {
+            elemReg = emitBoxIfInline(elemReg, fieldType);
         }
-        u16 next = elemBase + (u16)i + 1;
-        if (nextReg_ < next) { nextReg_ = next; if (nextReg_ > maxReg_) maxReg_ = nextReg_; }
+        u16 fieldSlotWords = inlineTuple ? (u16)typeSlotWords(fieldType) : 1;
+        emitArgPlacement(cursor, elemReg, inlineTuple ? fieldType : nullptr);
+        cursor = (u16)(cursor + fieldSlotWords);
+        if (nextReg_ < cursor) { nextReg_ = cursor; if (nextReg_ > maxReg_) maxReg_ = nextReg_; }
     }
 
-    u16 dst = allocReg();
+    u16 dst = inlineTuple ? allocSlot(tupType) : allocReg();
     emitOp(op_make_tuple);
     emitRegs(dst, elemBase, (u16)count);
     emitPtr(tupType);
@@ -6369,45 +6543,50 @@ u16 CodeGen::genStructLiteral(StructLiteralExpr* expr) {
         litFieldMap[expr->fields[i].name] = i;
     }
 
-    // Generate field values in declaration order into consecutive registers.
-    // Phase 4f: struct stores 1 Word per field; box inline value types.
+    // Phase 4g.2: for Inline structs each field occupies its own slotWords,
+    // so the field-base layout strides at the field's typeSlotWords. Heap
+    // structs continue to use 1 Word per field (with Phase 4f box-at-
+    // boundary for Complex/Fraction-typed fields).
+    bool inlineStruct = stype->repr_ == ts::Type::Repr::Inline;
     u16 fieldBase = nextReg_;
+    u16 cursor = fieldBase;
     for (size_t i = 0; i < numFields; ++i) {
         std::string fieldName(stype->fields_[i].name->str());
         auto it = litFieldMap.find(fieldName);
         Type* declType = stype->fields_[i].type;
+        u16 fieldSlotWords = inlineStruct ? (u16)typeSlotWords(declType) : 1;
         if (it != litFieldMap.end()) {
             size_t litIdx = it->second;
             u16 valReg = genExpr(static_cast<Expr*>(expr->fields[litIdx].value.get()));
-            // Promote if needed
             Type* valType = expr->fields[litIdx].value->resolvedType;
             valReg = ensureType(valReg, valType, declType);
-            if (isInlineMultiword(declType)) valReg = emitBoxIfInline(valReg, declType);
-            // Move to consecutive position if needed
-            if (valReg != fieldBase + (u16)i) {
-                emitOp(op_mov);
-                emitRegs(fieldBase + (u16)i, valReg);
+            if (!inlineStruct && isInlineMultiword(declType)) {
+                valReg = emitBoxIfInline(valReg, declType);
             }
+            emitArgPlacement(cursor, valReg, inlineStruct ? declType : nullptr);
         } else if (expr->spreadExpr) {
-            // Copy field from spread source struct (already boxed in storage).
-            u16 reg = allocReg();
-            emitOp(op_struct_get);
-            emitRegs(reg, spreadReg, (u16)i);
-            if (reg != fieldBase + (u16)i) {
-                emitOp(op_mov);
-                emitRegs(fieldBase + (u16)i, reg);
+            // Copy field from spread source struct.
+            if (inlineStruct) {
+                emitOp(op_inline_struct_get);
+                emitRegs(cursor, spreadReg, (u16)i);
+                emitPtr(stype);
+            } else {
+                u16 reg = allocReg();
+                emitOp(op_struct_get);
+                emitRegs(reg, spreadReg, (u16)i);
+                if (reg != cursor) { emitOp(op_mov); emitRegs(cursor, reg); }
             }
         } else {
-            // Missing field - allocate a zero register
             u16 reg = allocReg();
             emitOp(op_load_nil);
             emitRegs(reg);
+            if (reg != cursor) { emitOp(op_mov); emitRegs(cursor, reg); }
         }
-        u16 next = fieldBase + (u16)i + 1;
-        if (nextReg_ < next) { nextReg_ = next; if (nextReg_ > maxReg_) maxReg_ = nextReg_; }
+        cursor = (u16)(cursor + fieldSlotWords);
+        if (nextReg_ < cursor) { nextReg_ = cursor; if (nextReg_ > maxReg_) maxReg_ = nextReg_; }
     }
 
-    u16 dst = allocReg();
+    u16 dst = inlineStruct ? allocSlot(stype) : allocReg();
     emitOp(op_make_struct);
     emitRegs(dst, fieldBase, (u16)numFields);
     emitPtr(stype);
@@ -7564,12 +7743,20 @@ u16 CodeGen::genIndexExpr(IndexExpr_* expr) {
         return dst;
     }
     // Array subscript: array[index]. Phase 4e: inline element types land
-    // as multi-word inline values straight into a 2-word slot.
+    // as multi-word inline values straight into a 2-word slot for Complex/
+    // Fraction. Phase 4g.2: Inline structs/tuples ride the ObjArray backend
+    // (boxed 1-Word pointer) and must be unboxed after read.
     auto* arrType = dynamic_cast<ArrayType*>(expr->object->resolvedType);
-    u16 dst = allocSlot(arrType ? arrType->elemType_ : nullptr);
+    Type* elemT = arrType ? arrType->elemType_ : nullptr;
+    bool inlineCompositeElem = elemT && elemT->repr_ == ts::Type::Repr::Inline
+        && elemT != compiler_.complexType() && elemT != compiler_.fractionType();
+    u16 dst = inlineCompositeElem ? allocReg() : allocSlot(elemT);
     emitOp(op_array_get_dyn);
     emitRegs(dst, objReg, idxReg);
     emitPtr(arrType);
+    if (inlineCompositeElem) {
+        return emitUnboxIfInline(dst, elemT);
+    }
     return dst;
 }
 
@@ -8095,29 +8282,36 @@ u16 CodeGen::genFieldExpr(FieldExpr_* expr) {
             && stype->isTupleStruct_ && stype->fields_.size() == 1) {
             return objReg;
         }
+        bool inlineParent = stype->repr_ == ts::Type::Repr::Inline;
+        auto emitGet = [&](size_t i, Type* ft) -> u16 {
+            // Phase 4g.2: parent dispatch -- inline parents read fields
+            // directly out of the multi-word slot via op_inline_struct_get;
+            // Heap parents read out of the boxed Struct's v[] then unbox
+            // any inline-typed field (Phase 4f).
+            if (inlineParent) {
+                u16 dst = allocSlot(ft);
+                emitOp(op_inline_struct_get);
+                emitRegs(dst, objReg, (u16)i);
+                emitPtr(stype);
+                return dst;
+            }
+            u16 dst = allocReg();
+            emitOp(op_struct_get);
+            emitRegs(dst, objReg, (u16)i);
+            if (isInlineMultiword(ft)) return emitUnboxIfInline(dst, ft);
+            return dst;
+        };
         // Find field index by name
         for (size_t i = 0; i < stype->fields_.size(); ++i) {
             if (stype->fields_[i].name->str() == expr->field) {
-                u16 dst = allocReg();
-                emitOp(op_struct_get);
-                emitRegs(dst, objReg, (u16)i);
-                // Phase 4f: struct field stores boxed inline values; unbox.
-                Type* ft = stype->fields_[i].type;
-                if (isInlineMultiword(ft)) return emitUnboxIfInline(dst, ft);
-                return dst;
+                return emitGet(i, stype->fields_[i].type);
             }
         }
         // For tuple structs, allow numeric field access
         if (stype->isTupleStruct_) {
             size_t idx = std::stoul(expr->field);
-            u16 dst = allocReg();
-            emitOp(op_struct_get);
-            emitRegs(dst, objReg, (u16)idx);
-            if (idx < stype->fields_.size()) {
-                Type* ft = stype->fields_[idx].type;
-                if (isInlineMultiword(ft)) return emitUnboxIfInline(dst, ft);
-            }
-            return dst;
+            Type* ft = (idx < stype->fields_.size()) ? stype->fields_[idx].type : nullptr;
+            return emitGet(idx, ft);
         }
         error(expr->loc, "No field '" + expr->field + "' in struct");
         return allocReg();
@@ -8126,14 +8320,19 @@ u16 CodeGen::genFieldExpr(FieldExpr_* expr) {
     // Handle tuple field access (by numeric index)
     if (auto* ttype = dynamic_cast<TupleType*>(objType)) {
         size_t idx = std::stoul(expr->field);
+        Type* ft = (idx < ttype->fields_.size()) ? ttype->fields_[idx] : nullptr;
+        bool inlineParent = ttype->repr_ == ts::Type::Repr::Inline;
+        if (inlineParent) {
+            u16 dst = allocSlot(ft);
+            emitOp(op_inline_tuple_get);
+            emitRegs(dst, objReg, (u16)idx);
+            emitPtr(ttype);
+            return dst;
+        }
         u16 dst = allocReg();
         emitOp(op_tuple_get);
         emitRegs(dst, objReg, (u16)idx);
-        // Phase 4f: tuple field stores boxed inline values; unbox.
-        if (idx < ttype->fields_.size()) {
-            Type* ft = ttype->fields_[idx];
-            if (isInlineMultiword(ft)) return emitUnboxIfInline(dst, ft);
-        }
+        if (ft && isInlineMultiword(ft)) return emitUnboxIfInline(dst, ft);
         return dst;
     }
 

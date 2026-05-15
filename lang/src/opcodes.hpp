@@ -90,6 +90,18 @@ void op_unbox_complex(VM& vm, Code* pc);      // dst[0..1].f = ((Complex*)src.o)
 void op_box_fraction(VM& vm, Code* pc);       // dst.o = new Fraction(src[0].i, src[1].i)
 void op_unbox_fraction(VM& vm, Code* pc);     // dst[0..1].i = ((Fraction*)src.o)->r
 
+// --- Generic boxing for inline structs / tuples (Phase 4g.2) ---
+// Same shape as the Complex/Fraction box ops but parameterised by the
+// composite's StructType* / TupleType* on the instruction stream so the
+// handler knows the slot's sizeWords. Storage boundaries (globals, ObjArray
+// elements, Map/Set keys/values) keep using a 1-word Obj* slot containing
+// the boxed Struct*/Tuple*; codegen unboxes back into the multi-word
+// inline slot on read.
+void op_box_struct(VM& vm, Code* pc);         // dst.o = boxed Struct of N inline words
+void op_unbox_struct(VM& vm, Code* pc);       // dst[0..N-1] = ((Struct*)src.o)->v[0..N-1]
+void op_box_tuple(VM& vm, Code* pc);          // dst.o = boxed Tuple of N inline words
+void op_unbox_tuple(VM& vm, Code* pc);        // dst[0..N-1] = ((Tuple*)src.o)->v[0..N-1]
+
 // --- Complex Inline Arithmetic (Phase 4f scaffolding) ---
 // Operand and dst regs name the FIRST word of a 2-word slot:
 //   word[0] = real (f64), word[1] = imag (f64).
@@ -217,6 +229,8 @@ void op_tuple_slice(VM& vm, Code* pc);        // TUPLE_SLICE Rd, Ra, startIdx (3
 void op_make_tuple(VM& vm, Code* pc);         // MAKE_TUPLE Rd, firstSrc, numFields (3 words: op, regs, TupleType*)
 void op_make_struct(VM& vm, Code* pc);        // MAKE_STRUCT Rd, firstSrc, numFields (3 words: op, regs, StructType*)
 void op_struct_get(VM& vm, Code* pc);         // STRUCT_GET Rd, Ra, fieldIdx (2 words)
+void op_inline_tuple_get(VM& vm, Code* pc);   // I_TUPLE_GET Rd, Ra, fieldIdx (3 words: op, regs, TupleType*)
+void op_inline_struct_get(VM& vm, Code* pc);  // I_STRUCT_GET Rd, Ra, fieldIdx (3 words: op, regs, StructType*)
 
 // --- Array Destructuring ---
 void op_array_get(VM& vm, Code* pc);          // ARRAY_GET Rd, Ra, idx (3 words: op, regs, ArrayType*)

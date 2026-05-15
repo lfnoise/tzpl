@@ -45,6 +45,29 @@ struct WordEqual {
 // Format a Word as a string given its static type
 VMString wordToString(Word w, Type* type);
 
+// Phase 4g.2: format a multi-word value living in vm.reg(startReg)..(+sw-1)
+// given its static type. For Inline structs/tuples, walks the layout and
+// recursively formats each field directly out of the register slot. For
+// 1-word types, falls through to wordToString.
+class VM;
+VMString slotToString(VM& vm, u16 startReg, Type* type);
+
+// Phase 4g.2: walk the layout of an Inline composite at `base` and retain
+// (or release, with `release_=true`) every embedded Obj* pointer field.
+// Recurses into nested Inline composite fields rather than treating them
+// as a single boxed pointer -- their words ARE the inline payload.
+// Complex/Fraction count as Inline but contain no nested pointers, so
+// they short-circuit the recursion.
+void inlineWalkPointers(Word* base, Type* type, bool release_);
+
+// Phase 4g.2: deep box/unbox between an Inline composite (multi-word slot
+// per layout_) and a heap Tuple*/Struct* (1 Word per field, with Inline
+// composite fields recursively boxed). Used at builtin call/return
+// boundaries -- existing 1-Word-per-field builtins continue to work.
+class Obj;
+Obj* boxInlineDeep(VM& vm, Type* type, u16 srcSlot);
+void unboxInlineDeep(VM& vm, Type* type, Obj* obj, u16 dstSlot);
+
 // CodeBlock - compiled function holding register-based instructions
 // System-allocated during compilation, never garbage collected.
 class CodeBlock {
@@ -865,15 +888,11 @@ public:
     VMString str() const override;
 
     void releaseChildren() override {
-        // Phase 4c: walk via layout_ rather than gcFields_. wordOffset == field
-        // index today; once struct fields become multi-word inline, the
-        // offsets will diverge and this walker keeps working unchanged.
+        // Phase 4g.2: recurse into nested Inline composites so their
+        // embedded pointer fields get released too. For Heap classifications
+        // (1 word per field) this collapses to the original layout walk.
         auto t = static_cast<StructType*>(type_);
-        for (auto const& f : t->layout_) {
-            if (storesObjPtr(f.type) && v[f.wordOffset].o) {
-                v[f.wordOffset].o->release();
-            }
-        }
+        inlineWalkPointers(v, t, /*release_=*/true);
     }
 
 private:
@@ -894,13 +913,8 @@ public:
     VMString str() const override;
 
     void releaseChildren() override {
-        // Phase 4c: walk via layout_ (see Struct::releaseChildren).
         auto t = static_cast<TupleType*>(type_);
-        for (auto const& f : t->layout_) {
-            if (storesObjPtr(f.type) && v[f.wordOffset].o) {
-                v[f.wordOffset].o->release();
-            }
-        }
+        inlineWalkPointers(v, t, /*release_=*/true);
     }
 
 private:

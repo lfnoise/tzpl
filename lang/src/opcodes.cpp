@@ -450,6 +450,40 @@ void op_unbox_fraction(VM& vm, Code* pc) {
     DISPATCH(2);
 }
 
+// Phase 4g.2: generic boxing for inline structs / tuples. Storage boundaries
+// (globals, ObjArray elements, Map/Set keys/values, etc.) still expect a
+// 1-word Obj* slot. These ops allocate a Struct/Tuple whose v[] memory is
+// sized to fit the inline footprint (sizeWords_ Words) and copy the inline
+// payload across so a layout_-driven retain walk works the same as for a
+// natively-built Heap composite.
+void op_box_struct(VM& vm, Code* pc) {
+    u16 dst = pc[1].regs[0], src = pc[1].regs[1];
+    auto* st = static_cast<StructType*>(pc[2].p);
+    vm.reg(dst).o = boxInlineDeep(vm, st, src);
+    DISPATCH(3);
+}
+
+void op_unbox_struct(VM& vm, Code* pc) {
+    u16 dst = pc[1].regs[0], src = pc[1].regs[1];
+    auto* st = static_cast<StructType*>(pc[2].p);
+    unboxInlineDeep(vm, st, vm.reg(src).o, dst);
+    DISPATCH(3);
+}
+
+void op_box_tuple(VM& vm, Code* pc) {
+    u16 dst = pc[1].regs[0], src = pc[1].regs[1];
+    auto* tt = static_cast<TupleType*>(pc[2].p);
+    vm.reg(dst).o = boxInlineDeep(vm, tt, src);
+    DISPATCH(3);
+}
+
+void op_unbox_tuple(VM& vm, Code* pc) {
+    u16 dst = pc[1].regs[0], src = pc[1].regs[1];
+    auto* tt = static_cast<TupleType*>(pc[2].p);
+    unboxInlineDeep(vm, tt, vm.reg(src).o, dst);
+    DISPATCH(3);
+}
+
 // --- Complex Inline Arithmetic (Phase 4f scaffolding) ---
 // Complex represented as 2 consecutive Words: word[0] = real (f64), word[1] = imag (f64).
 // Operand and dst regs name the FIRST word of each 2-word slot.
@@ -2280,6 +2314,21 @@ void op_tuple_get(VM& vm, Code* pc) {
     DISPATCH(2);
 }
 
+// INLINE_TUPLE_GET Rd, Ra, fieldIdx (3 words: op, regs, TupleType*)
+//
+// Phase 4g.2: parent slot src..src+sizeWords-1 holds the inline tuple value;
+// copy the field's payload (sizeWords words from layout_[fieldIdx]) into
+// dst..dst+fieldSizeWords-1.
+void op_inline_tuple_get(VM& vm, Code* pc) {
+    u16 dst = pc[1].regs[0], src = pc[1].regs[1], fieldIdx = pc[1].regs[2];
+    auto* tupleType = static_cast<TupleType*>(pc[2].p);
+    auto const& f = tupleType->layout_[fieldIdx];
+    for (u8 i = 0; i < f.sizeWords; ++i) {
+        vm.reg((u16)(dst + i)) = vm.reg((u16)(src + f.wordOffset + i));
+    }
+    DISPATCH(3);
+}
+
 // TUPLE_SLICE Rd, Ra, startIdx (3 words: op, regs{dst, src, startIdx}, TupleType*)
 // Creates a new tuple from elements [startIdx..end) of the source tuple
 void op_tuple_slice(VM& vm, Code* pc) {
@@ -2302,9 +2351,18 @@ void op_tuple_slice(VM& vm, Code* pc) {
 }
 
 // MAKE_TUPLE Rd, firstSrc, numFields (3 words: op, regs{dst, firstSrc, numFields}, TupleType*)
+//
+// Phase 4g.2: for Inline tuples the value lives directly in the dst slot
+// across sizeWords_ Words; just MOVE_N from firstSrc with no Tuple
+// allocation. Codegen lays the fields contiguously at multi-word stride.
 void op_make_tuple(VM& vm, Code* pc) {
     u16 dst = pc[1].regs[0], firstSrc = pc[1].regs[1], numFields = pc[1].regs[2];
     auto* tupleType = static_cast<TupleType*>(pc[2].p);
+    if (tupleType->repr_ == Type::Repr::Inline) {
+        u16 n = tupleType->sizeWords_;
+        for (u16 i = 0; i < n; ++i) vm.reg((u16)(dst + i)) = vm.reg((u16)(firstSrc + i));
+        DISPATCH(3);
+    }
     auto* tuple = Tuple::create(tupleType, numFields);
     for (u16 i = 0; i < numFields; ++i) {
         tuple->v[i] = vm.reg(firstSrc + i);
@@ -2320,9 +2378,16 @@ void op_make_tuple(VM& vm, Code* pc) {
 }
 
 // MAKE_STRUCT Rd, firstSrc, numFields (3 words: op, regs{dst, firstSrc, numFields}, StructType*)
+//
+// Phase 4g.2: Inline structs land directly in the dst slot.
 void op_make_struct(VM& vm, Code* pc) {
     u16 dst = pc[1].regs[0], firstSrc = pc[1].regs[1], numFields = pc[1].regs[2];
     auto* structType = static_cast<StructType*>(pc[2].p);
+    if (structType->repr_ == Type::Repr::Inline) {
+        u16 n = structType->sizeWords_;
+        for (u16 i = 0; i < n; ++i) vm.reg((u16)(dst + i)) = vm.reg((u16)(firstSrc + i));
+        DISPATCH(3);
+    }
     auto* s = Struct::create(structType, numFields);
     for (u16 i = 0; i < numFields; ++i) {
         s->v[i] = vm.reg(firstSrc + i);
@@ -2343,6 +2408,20 @@ void op_struct_get(VM& vm, Code* pc) {
     auto* s = static_cast<Struct*>(vm.reg(src).o);
     vm.reg(dst) = s->v[fieldIdx];
     DISPATCH(2);
+}
+
+// INLINE_STRUCT_GET Rd, Ra, fieldIdx (3 words: op, regs, StructType*)
+//
+// Phase 4g.2: parent slot src..src+sizeWords-1 holds the inline struct;
+// copy the field's payload from layout_[fieldIdx] into dst.
+void op_inline_struct_get(VM& vm, Code* pc) {
+    u16 dst = pc[1].regs[0], src = pc[1].regs[1], fieldIdx = pc[1].regs[2];
+    auto* structType = static_cast<StructType*>(pc[2].p);
+    auto const& f = structType->layout_[fieldIdx];
+    for (u8 i = 0; i < f.sizeWords; ++i) {
+        vm.reg((u16)(dst + i)) = vm.reg((u16)(src + f.wordOffset + i));
+    }
+    DISPATCH(3);
 }
 
 // MAKE_ENUM Rd, valSrc, caseIdx (3 words: op, regs{dst, valSrc, caseIdx}, EnumType*)

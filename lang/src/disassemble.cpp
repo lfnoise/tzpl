@@ -115,6 +115,11 @@ static const std::unordered_map<Operation, OpInfo>& opInfoMap() {
         { op_unbox_complex,         { "UNBOX_CMPLX",       2, OpFmt::Regs, 2 } },
         { op_box_fraction,          { "BOX_FRAC",          2, OpFmt::Regs, 2 } },
         { op_unbox_fraction,        { "UNBOX_FRAC",        2, OpFmt::Regs, 2 } },
+        // --- Generic boxing for inline composites (Phase 4g.2) ---
+        { op_box_struct,            { "BOX_STRUCT",        3, OpFmt::Regs_Ptr, 2 } },
+        { op_unbox_struct,          { "UNBOX_STRUCT",      3, OpFmt::Regs_Ptr, 2 } },
+        { op_box_tuple,             { "BOX_TUPLE",         3, OpFmt::Regs_Ptr, 2 } },
+        { op_unbox_tuple,           { "UNBOX_TUPLE",       3, OpFmt::Regs_Ptr, 2 } },
 
         // --- Complex Inline Arithmetic (Phase 4f scaffolding) ---
         { op_add_complex_inline,    { "ADD_CMPLX_I",       2, OpFmt::Regs, 3 } },
@@ -231,10 +236,12 @@ static const std::unordered_map<Operation, OpInfo>& opInfoMap() {
         // --- Array/Tuple/Struct Access/Construction ---
         { op_make_array,        { "MAKE_ARRAY",        3, OpFmt::Regs_Ptr, 3 } },
         { op_tuple_get,         { "TUPLE_GET",         2, OpFmt::Regs,     3 } },
+        { op_inline_tuple_get,  { "I_TUPLE_GET",       3, OpFmt::Regs_Ptr, 3 } },
         { op_tuple_slice,       { "TUPLE_SLICE",       3, OpFmt::Regs_Ptr, 3 } },
         { op_make_tuple,        { "MAKE_TUPLE",        3, OpFmt::Regs_Ptr, 3 } },
         { op_make_struct,       { "MAKE_STRUCT",       3, OpFmt::Regs_Ptr, 3 } },
         { op_struct_get,        { "STRUCT_GET",        2, OpFmt::Regs,     3 } },
+        { op_inline_struct_get, { "I_STRUCT_GET",      3, OpFmt::Regs_Ptr, 3 } },
 
         // --- Array Destructuring ---
         { op_array_get,         { "ARRAY_GET",         3, OpFmt::Regs_Ptr, 3 } },
