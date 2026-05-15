@@ -5128,7 +5128,12 @@ u16 CodeGen::genAutoMapCall(CallExpr_* expr) {
     // calls Inline composites pass multi-word inline.
     std::vector<u32> argSlotWords;
     argSlotWords.reserve(argc);
-    auto callerSlotWords = [&](Type* paramType) -> u32 {
+    auto callerSlotWords = [&](Type* paramType, u16 i) -> u32 {
+        // Variadic-packed args are placed 1-word per arg pre-pack;
+        // op_make_tuple/op_make_array bundles them.
+        if (expr->variadicPackStart >= 0 && i >= (u16)expr->variadicPackStart) {
+            return 1;
+        }
         if (!paramType) return 1;
         if (paramType->repr_ == ts::Type::Repr::Inline
             && paramType != compiler_.complexType()
@@ -5142,12 +5147,12 @@ u16 CodeGen::genAutoMapCall(CallExpr_* expr) {
     argOffsets.reserve(argc);
     for (u16 i = 0; i < argc; ++i) {
         argOffsets.push_back(cumOffset);
-        cumOffset += callerSlotWords(getParamType(funcInfo, expr, i));
+        cumOffset += callerSlotWords(getParamType(funcInfo, expr, i), i);
     }
     for (u16 i = 0; i < argc; ++i) {
         u16 targetReg = (u16)(callArgBase + argOffsets[i]);
         Type* paramType = getParamType(funcInfo, expr, i);
-        u32 slotW = callerSlotWords(paramType);
+        u32 slotW = callerSlotWords(paramType, i);
         // Ensure registers are tracked
         if (nextReg_ <= (u16)(targetReg + slotW)) {
             nextReg_ = (u16)(targetReg + slotW);
@@ -5213,11 +5218,15 @@ u16 CodeGen::genAutoMapCall(CallExpr_* expr) {
 
     // --- Phase 7: Variadic packing + Call function ---
     u16 callArgc = emitVariadicPack(expr, callArgBase, argc);
-    bool builtinReturnsInlineComposite = expr->isBuiltinCall && funcInfo->returnType
-        && funcInfo->returnType->repr_ == ts::Type::Repr::Inline
-        && funcInfo->returnType != compiler_.complexType()
-        && funcInfo->returnType != compiler_.fractionType();
+    // The per-call return type. funcInfo->returnType may be null for some
+    // untyped-variadic monomorphizations; in that case fall back to the
+    // resolved result-array's element type.
     Type* returnT = funcInfo->returnType;
+    if (!returnT && resultArrayType) returnT = resultArrayType->elemType_;
+    bool builtinReturnsInlineComposite = expr->isBuiltinCall && returnT
+        && returnT->repr_ == ts::Type::Repr::Inline
+        && returnT != compiler_.complexType()
+        && returnT != compiler_.fractionType();
     u16 callResultReg = builtinReturnsInlineComposite ? allocReg() : allocSlot(returnT);
     emitOp(expr->isBuiltinCall ? op_call_primitive : op_call);
     emitRegs(callResultReg, callArgc, callArgBase);
@@ -5887,10 +5896,33 @@ u16 CodeGen::genExplicitImplicitAutoMapCall(CallExpr_* expr) {
     // --- Phase 4: Set up call arguments ---
     u16 callArgBase = nextReg_;
 
+    auto inlineCompositeT = [&](Type* t) {
+        return t && t->repr_ == ts::Type::Repr::Inline
+            && t != compiler_.complexType()
+            && t != compiler_.fractionType();
+    };
+    auto callerSlotW = [&](Type* paramType, u16 i) -> u32 {
+        if (expr->variadicPackStart >= 0 && i >= (u16)expr->variadicPackStart) {
+            return 1;
+        }
+        if (!paramType) return 1;
+        if (inlineCompositeT(paramType))
+            return expr->isBuiltinCall ? 1u : (u32)paramType->sizeWords_;
+        return typeSlotWords(paramType);
+    };
+    u32 cumOffset = 0;
+    std::vector<u32> argOffsets(argc, 0);
     for (u16 i = 0; i < argc; ++i) {
-        u16 targetReg = callArgBase + i;
-        if (nextReg_ <= targetReg) {
-            nextReg_ = targetReg + 1;
+        argOffsets[i] = cumOffset;
+        cumOffset += callerSlotW(getParamType(funcInfo, expr, i), i);
+    }
+
+    for (u16 i = 0; i < argc; ++i) {
+        u16 targetReg = (u16)(callArgBase + argOffsets[i]);
+        Type* paramType = getParamType(funcInfo, expr, i);
+        u32 slotW = callerSlotW(paramType, i);
+        if (nextReg_ <= (u16)(targetReg + slotW)) {
+            nextReg_ = (u16)(targetReg + slotW);
             if (nextReg_ > maxReg_) maxReg_ = nextReg_;
         }
 
@@ -5901,24 +5933,37 @@ u16 CodeGen::genExplicitImplicitAutoMapCall(CallExpr_* expr) {
             for (int d = 0; d < expr->autoMapArgs[i].depth; ++d) {
                 elemType = dynamic_cast<ArrayType*>(elemType)->elemType_;
             }
-            Type* paramType = getParamType(funcInfo, expr, i);
-            if (paramType && elemType != paramType) {
-                srcReg = ensureType(srcReg, elemType, paramType);
-            }
-            if (srcReg != targetReg) {
-                emitOp(op_mov);
-                emitRegs(targetReg, srcReg);
+            // Inline composite element peeled from ObjArray is a boxed pointer;
+            // unbox into multi-word call slot for non-builtin calls.
+            if (inlineCompositeT(elemType) && !expr->isBuiltinCall) {
+                u16 unboxed = emitUnboxIfInline(srcReg, elemType);
+                if (unboxed != targetReg) emitMoveN(targetReg, unboxed, slotW);
+            } else {
+                if (paramType && elemType != paramType) {
+                    srcReg = ensureType(srcReg, elemType, paramType);
+                }
+                if (srcReg != targetReg) {
+                    emitOp(op_mov);
+                    emitRegs(targetReg, srcReg);
+                }
             }
         } else if (i < expr->innerAutoMapArgs.size() && expr->innerAutoMapArgs[i].depth > 0) {
             // Implicit auto-map arg: extract from inner loop
             auto* arrType = dynamic_cast<ArrayType*>(expr->args[i]->resolvedType);
-            emitOp(op_array_get_dyn);
-            emitRegs(targetReg, argRegs[i], innerIReg);
-            emitPtr(arrType);
-
             Type* elemType = arrType->elemType_;
-            Type* paramType = getParamType(funcInfo, expr, i);
-            if (paramType && elemType != paramType) {
+            bool elemInlineComposite = inlineCompositeT(elemType);
+            u16 elemReg = elemInlineComposite ? allocReg() : targetReg;
+            emitOp(op_array_get_dyn);
+            emitRegs(elemReg, argRegs[i], innerIReg);
+            emitPtr(arrType);
+            if (elemInlineComposite) {
+                if (expr->isBuiltinCall) {
+                    if (elemReg != targetReg) { emitOp(op_mov); emitRegs(targetReg, elemReg); }
+                } else {
+                    u16 unboxed = emitUnboxIfInline(elemReg, elemType);
+                    if (unboxed != targetReg) emitMoveN(targetReg, unboxed, slotW);
+                }
+            } else if (paramType && elemType != paramType) {
                 u16 promoted = ensureType(targetReg, elemType, paramType);
                 if (promoted != targetReg) {
                     emitOp(op_mov);
@@ -5928,29 +5973,45 @@ u16 CodeGen::genExplicitImplicitAutoMapCall(CallExpr_* expr) {
         } else {
             // Non-auto-mapped: copy scalar value
             Type* argType = expr->args[i]->resolvedType;
-            Type* paramType = getParamType(funcInfo, expr, i);
             u16 srcReg = argRegs[i];
             if (paramType && argType != paramType) {
                 srcReg = ensureType(srcReg, argType, paramType);
             }
+            if (inlineCompositeT(paramType) && expr->isBuiltinCall) {
+                srcReg = emitBoxIfInline(srcReg, paramType);
+            }
             if (srcReg != targetReg) {
-                emitOp(op_mov);
-                emitRegs(targetReg, srcReg);
+                if (slotW <= 1) { emitOp(op_mov); emitRegs(targetReg, srcReg); }
+                else { emitMoveN(targetReg, srcReg, slotW); }
             }
         }
     }
 
     // --- Phase 5: Variadic packing + Call function ---
     u16 callArgc = emitVariadicPack(expr, callArgBase, argc);
-    u16 callResultReg = allocReg();
+    Type* returnT = funcInfo->returnType;
+    bool retInlineComposite = returnT
+        && returnT->repr_ == ts::Type::Repr::Inline
+        && returnT != compiler_.complexType()
+        && returnT != compiler_.fractionType();
+    bool builtinReturnsInline = expr->isBuiltinCall && retInlineComposite;
+    u16 callResultReg = builtinReturnsInline
+        ? allocReg()
+        : (retInlineComposite ? allocSlot(returnT) : allocReg());
     emitOp(expr->isBuiltinCall ? op_call_primitive : op_call);
     emitRegs(callResultReg, callArgc, callArgBase);
     emitInt(expr->resolvedFuncGlobalIndex);
+    if (builtinReturnsInline) {
+        callResultReg = emitUnboxIfInline(callResultReg, returnT);
+    }
+    // Box the multi-word inline result back into a 1-Word pointer for
+    // op_array_set into the inner ObjArray storage.
+    u16 storeReg = retInlineComposite ? emitBoxIfInline(callResultReg, returnT) : callResultReg;
 
     // Store in inner result array (skip for Void)
     if (!isVoidReturn) {
         emitOp(op_array_set);
-        emitRegs(innerResultReg, innerIReg, callResultReg);
+        emitRegs(innerResultReg, innerIReg, storeReg);
         emitPtr(innerResultType);
     }
 
@@ -6115,7 +6176,10 @@ u16 CodeGen::genCartesianCall(CallExpr_* expr) {
             && t != compiler_.complexType()
             && t != compiler_.fractionType();
     };
-    auto callerSlotW = [&](Type* paramType) -> u32 {
+    auto callerSlotW = [&](Type* paramType, u16 i) -> u32 {
+        if (expr->variadicPackStart >= 0 && i >= (u16)expr->variadicPackStart) {
+            return 1;
+        }
         if (!paramType) return 1;
         if (inlineCompositeT(paramType))
             return expr->isBuiltinCall ? 1u : (u32)paramType->sizeWords_;
@@ -6125,12 +6189,12 @@ u16 CodeGen::genCartesianCall(CallExpr_* expr) {
     std::vector<u32> argOffsets(argc, 0);
     for (u16 i = 0; i < argc; ++i) {
         argOffsets[i] = cumOffset;
-        cumOffset += callerSlotW(getParamType(funcInfo, expr, i));
+        cumOffset += callerSlotW(getParamType(funcInfo, expr, i), i);
     }
     for (u16 i = 0; i < argc; ++i) {
         u16 targetReg = (u16)(callArgBase + argOffsets[i]);
         Type* paramType = getParamType(funcInfo, expr, i);
-        u32 slotW = callerSlotW(paramType);
+        u32 slotW = callerSlotW(paramType, i);
         if (nextReg_ <= (u16)(targetReg + slotW)) {
             nextReg_ = (u16)(targetReg + slotW);
             if (nextReg_ > maxReg_) maxReg_ = nextReg_;
