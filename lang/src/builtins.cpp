@@ -1626,23 +1626,16 @@ static void builtin_toString_obj(VM& vm, u16 dst, u16, u16 argBase) {
     vm.reg(dst).o = result;
 }
 
-// Phase 4f: Inline Complex (2 words: real, imag).
-static void builtin_toString_complex_inline(VM& vm, u16 dst, u16, u16 argBase) {
-    f64 re = vm.reg(argBase).f;
-    f64 im = vm.reg((u16)(argBase + 1)).f;
+// Phase 4f / 4g.6: handle all Inline-classified types -- Complex, Fraction,
+// inline tuples/structs/enums -- with one handler that delegates to
+// slotToString (which itself routes to wordsToString for the multi-word
+// walk). Replaces the per-type Complex/Fraction inline handlers.
+static void builtin_toString_inline(VM& vm, u16 dst, u16, u16 argBase) {
+    auto* prim = static_cast<Primitive*>(vm.currentPrimitive());
+    auto* tt = static_cast<TupleType*>(prim->type_);
+    Type* t = tt->fields_[0];
     auto* result = new StringObj();
-    if (std::signbit(im)) result->s = rt::fmt("{}{}i", re, im);
-    else                  result->s = rt::fmt("{}+{}i", re, im);
-    registerNewObj(result);
-    vm.reg(dst).o = result;
-}
-
-// Phase 4f: Inline Fraction (2 words: numer, denom).
-static void builtin_toString_fraction_inline(VM& vm, u16 dst, u16, u16 argBase) {
-    i64 n = vm.reg(argBase).i;
-    i64 d = vm.reg((u16)(argBase + 1)).i;
-    auto* result = new StringObj();
-    result->s = rt::fmt("{}/{}", n, d);
+    result->s = slotToString(vm, argBase, t);
     registerNewObj(result);
     vm.reg(dst).o = result;
 }
@@ -1681,12 +1674,11 @@ static bool resolve_toString(Compiler& compiler, const std::vector<Type*>& args,
     if (t && t->repr_ == Type::Repr::DiscriminantEnum) {
         cf = builtin_toString_word; return true;
     }
-    // Phase 4f: Complex / Fraction are inline 2-word value types.
-    if (t == compiler.complexType()) {
-        cf = builtin_toString_complex_inline; return true;
-    }
-    if (t == compiler.fractionType()) {
-        cf = builtin_toString_fraction_inline; return true;
+    // Phase 4g.6: Complex, Fraction, inline tuples/structs/enums all flow
+    // through builtin_toString_inline (slotToString reads multi-word
+    // payloads directly).
+    if (t && t->repr_ == Type::Repr::Inline) {
+        cf = builtin_toString_inline; return true;
     }
     if (t->isObjType()) {
         cf = builtin_toString_obj; return true;
@@ -2193,7 +2185,8 @@ void registerBuiltinFunctions(Compiler& compiler,
     registerTemplate(compiler, functions, "hash",         resolve_hash, /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
 
     // --- toString builtin ---
-    registerTemplate(compiler, functions, "toString",     resolve_toString);
+    // Phase 4g.6: toString reads inline composites natively via slotToString.
+    registerTemplate(compiler, functions, "toString",     resolve_toString, /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
 
     // --- fmt builtin ---
     registerTemplate(compiler, functions, "fmt",          resolve_fmt);
