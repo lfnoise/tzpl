@@ -254,8 +254,11 @@ void MapListGen::generate(VM& vm, ListNode* owner) {
     if (!source_) { owner->tail_ = nullptr; return; }
     source_->force(vm);
     u16 sb = vm.currentCodeBlock()->numRegs;
-    vm.reg(sb) = source_->head_;
+    auto* fnType = static_cast<FunctionType*>(fn_->type_);
+    Type* paramT = fnType->argTypes_.empty() ? nullptr : fnType->argTypes_[0];
+    placeLambdaArg(vm, sb, source_->head_, paramT);
     callOneArg(vm, fn_, sb);
+    readLambdaResult(vm, sb, resultElemType_);
     owner->head_ = vm.reg(sb);
     if (storesObjPtr(resultElemType_) && owner->head_.o) owner->head_.o->retain();
     if (!source_->tail_) { owner->tail_ = nullptr; return; }
@@ -477,8 +480,12 @@ void IterListGen::generate(VM& vm, ListNode* owner) {
     owner->head_ = current_;
     if (valueIsObj_ && owner->head_.o) owner->head_.o->retain();
     u16 sb = vm.currentCodeBlock()->numRegs;
-    vm.reg(sb) = current_;
+    auto* fnType = static_cast<FunctionType*>(fn_->type_);
+    Type* paramT = fnType->argTypes_.empty() ? nullptr : fnType->argTypes_[0];
+    Type* retT = fnType->returnType_;
+    placeLambdaArg(vm, sb, current_, paramT);
     callOneArg(vm, fn_, sb);
+    readLambdaResult(vm, sb, retT);
     auto* tail = new ListNode(listType_);
     Word oldCurrent = current_;
     current_ = vm.reg(sb);
