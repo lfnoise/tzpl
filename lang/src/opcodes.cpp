@@ -3206,6 +3206,54 @@ void op_ref_set(VM& vm, Code* pc) {
     DISPATCH(3);
 }
 
+// --- Inline-composite Ref ops (Phase 4g.5) ---
+// Allocate an InlineRef whose flex array holds elemType_->sizeWords_ Words,
+// then copy the inline payload from valReg in. ARC: walk the layout to
+// retain embedded Obj* fields.
+void op_make_ref_inline(VM& vm, Code* pc) {
+    u16 dst = pc[1].regs[0], valReg = pc[1].regs[1];
+    auto* refType = static_cast<RefType*>(pc[2].p);
+    Type* et = refType->elemType_;
+    auto* ref = InlineRef::create(refType);
+    u32 n = ref->sizeWords_;
+    for (u32 i = 0; i < n; ++i) ref->v[i] = vm.reg((u16)(valReg + i));
+    inlineWalkPointers(&ref->v[0], et, /*release_=*/false);
+    vm.reg(dst).o = ref;
+    DISPATCH(3);
+}
+
+// REF_GET_INLINE Rd, Ra (3 words: op, regs{dst, ref}, RefType*)
+// Copy the inline payload out into the dst slot.
+void op_ref_get_inline(VM& vm, Code* pc) {
+    u16 dst = pc[1].regs[0], refReg = pc[1].regs[1];
+    auto* ref = static_cast<InlineRef*>(vm.reg(refReg).o);
+    u32 n = ref->sizeWords_;
+    for (u32 i = 0; i < n; ++i) vm.reg((u16)(dst + i)) = ref->v[i];
+    DISPATCH(3);
+}
+
+// REF_SET_INLINE Rd, Ra, Rb (3 words: op, regs{dst, ref, val}, RefType*)
+// Mutate the InlineRef's payload in place; also copy the new value into dst
+// (so `r <- v` evaluates to v).
+void op_ref_set_inline(VM& vm, Code* pc) {
+    u16 dst = pc[1].regs[0], refReg = pc[1].regs[1], valReg = pc[1].regs[2];
+    auto* ref = static_cast<InlineRef*>(vm.reg(refReg).o);
+    auto* refType = static_cast<RefType*>(ref->type_);
+    Type* et = refType->elemType_;
+    u32 n = ref->sizeWords_;
+    // Release embedded Obj* in the old payload.
+    inlineWalkPointers(&ref->v[0], et, /*release_=*/true);
+    // Copy in the new payload.
+    for (u32 i = 0; i < n; ++i) ref->v[i] = vm.reg((u16)(valReg + i));
+    // Retain embedded Obj* in the new payload.
+    inlineWalkPointers(&ref->v[0], et, /*release_=*/false);
+    // Result of the assignment expression is the assigned value.
+    if (dst != valReg) {
+        for (u32 i = 0; i < n; ++i) vm.reg((u16)(dst + i)) = vm.reg((u16)(valReg + i));
+    }
+    DISPATCH(3);
+}
+
 // --- Coroutines ---
 
 // CORO_CREATE Rd, argBase, argc (4 words: op, regs{dst, argBase, argc}, global_idx, CoroutineType*)

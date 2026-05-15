@@ -1,0 +1,16 @@
+(1, 2, 3)
+(10, 20, 30)
+(100, 200, 300)
+Point { x: 1, y: 2 }
+Point { x: 10, y: 20 }
+Point { x: 5, y: 7 }
+Point { x: 50, y: 70 }
+Point { x: 1, y: 1 }
+Point { x: 2, y: 2 }
+(42, 99)
+(7, 8)
+Named { id: 3, name: d }
+Shape.circle(1.5)
+Shape.rect(3, 4)
+Shape.nothing
+Shape.circle(2.71)

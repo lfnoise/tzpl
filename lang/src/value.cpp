@@ -277,6 +277,31 @@ VMString RefValue::str() const {
     return s;
 }
 
+// Phase 4g.5: InlineRef constructor (private; use create()).
+InlineRef::InlineRef(RefType* type, u32 sw)
+    : Obj(type)
+    , sizeWords_(sw)
+{
+    for (u32 i = 0; i < sw; ++i) v[i] = Word();
+    registerNewObj(this);
+}
+
+InlineRef* InlineRef::create(RefType* type) {
+    u32 sw = type->elemType_ ? (u32)type->elemType_->sizeWords_ : 1u;
+    if (sw == 0) sw = 1;
+    usize size = sizeof(InlineRef) + sw * sizeof(Word);
+    void* mem = GCObj::operator new(size);
+    return new (mem) InlineRef(type, sw);
+}
+
+VMString InlineRef::str() const {
+    auto* rt = static_cast<RefType*>(type_);
+    VMString s = rt::vmstr("Ref(");
+    s += wordsToString(&v[0], rt->elemType_);
+    s += ")";
+    return s;
+}
+
 // Struct constructor (private — use Struct::create())
 Struct::Struct(Type* type, u32 numFields)
     : Obj(type)
@@ -1010,6 +1035,12 @@ VMString wordToString(Word w, Type* type) {
 // Inline-composite fields recursively boxed). Used at builtin call/return
 // boundaries so existing 1-Word-per-field builtins keep working unchanged.
 Obj* boxInlineDeep(VM& vm, Type* type, u16 srcSlot) {
+    // Phase 4g.5: every branch ends up with `w.o` retained. Freshly-boxed
+    // children (Complex, Fraction, recursive boxInlineDeep) start with the
+    // auto-release pool's refcount=1; we add an extra retain so the parent's
+    // reference is independent of the pool. Without this, the pool drains
+    // children before the parent's releaseChildren runs (pool drain is FIFO,
+    // deferred delete is LIFO), causing use-after-free in releaseChildren.
     auto boxField = [&](Type* ft, u16 srcOff) -> Word {
         Word w;
         if (!ft) { w.i = 0; return w; }
@@ -1017,14 +1048,17 @@ Obj* boxInlineDeep(VM& vm, Type* type, u16 srcSlot) {
             && ft != gCurrentVM->complexType() && ft != gCurrentVM->fractionType()
             && (dynamic_cast<StructType*>(ft) || dynamic_cast<TupleType*>(ft))) {
             w.o = boxInlineDeep(vm, ft, srcOff);
+            if (w.o) w.o->retain();
         } else if (ft == gCurrentVM->complexType()) {
             f64 re = vm.reg(srcOff).f;
             f64 im = vm.reg((u16)(srcOff + 1)).f;
             w.o = static_cast<Obj*>(new Complex(x64(re, im)));
+            if (w.o) w.o->retain();
         } else if (ft == gCurrentVM->fractionType()) {
             i64 n = vm.reg(srcOff).i;
             i64 d = vm.reg((u16)(srcOff + 1)).i;
             w.o = static_cast<Obj*>(new Fraction(r64(n, d)));
+            if (w.o) w.o->retain();
         } else {
             w = vm.reg(srcOff);
             if (storesObjPtr(ft) && w.o) w.o->retain();
@@ -1168,26 +1202,26 @@ void inlineWalkPointers(Word* base, Type* type, bool release_) {
     }
 }
 
-// Phase 4g.2: format a multi-word value out of a register slot. For inline
+// Phase 4g.2: format a multi-word value out of consecutive Words. For inline
 // structs/tuples this walks layout_ and recursively formats each field
 // directly out of the slot's words. For 1-word types it falls through to
 // wordToString.
-VMString slotToString(VM& vm, u16 startReg, Type* type) {
+VMString wordsToString(Word const* base, Type* type) {
     if (!type) return rt::vmstr("nil");
     if (type->repr_ != Type::Repr::Inline) {
-        return wordToString(vm.reg(startReg), type);
+        return wordToString(base[0], type);
     }
     // Complex / Fraction stay as scalar inline value types and have their
     // own dedicated str() shape.
     if (type == gCurrentVM->complexType()) {
-        f64 re = vm.reg(startReg).f;
-        f64 im = vm.reg((u16)(startReg + 1)).f;
+        f64 re = base[0].f;
+        f64 im = base[1].f;
         return std::signbit(im) ? rt::fmt("{}{}i", re, im)
                                 : rt::fmt("{}+{}i", re, im);
     }
     if (type == gCurrentVM->fractionType()) {
-        i64 n = vm.reg(startReg).i;
-        i64 d = vm.reg((u16)(startReg + 1)).i;
+        i64 n = base[0].i;
+        i64 d = base[1].i;
         return rt::fmt("{}/{}", n, d);
     }
     if (auto* st = dynamic_cast<StructType*>(type)) {
@@ -1197,7 +1231,7 @@ VMString slotToString(VM& vm, u16 startReg, Type* type) {
             for (size_t i = 0; i < st->fields_.size(); ++i) {
                 if (i > 0) s += ", ";
                 auto const& f = st->layout_[i];
-                s += slotToString(vm, (u16)(startReg + f.wordOffset), f.type);
+                s += wordsToString(base + f.wordOffset, f.type);
             }
             s += ")";
         } else {
@@ -1207,7 +1241,7 @@ VMString slotToString(VM& vm, u16 startReg, Type* type) {
                 s += st->fields_[i].name->str();
                 s += ": ";
                 auto const& f = st->layout_[i];
-                s += slotToString(vm, (u16)(startReg + f.wordOffset), f.type);
+                s += wordsToString(base + f.wordOffset, f.type);
             }
             s += " }";
         }
@@ -1218,7 +1252,7 @@ VMString slotToString(VM& vm, u16 startReg, Type* type) {
         for (size_t i = 0; i < tt->fields_.size(); ++i) {
             if (i > 0) s += ", ";
             auto const& f = tt->layout_[i];
-            s += slotToString(vm, (u16)(startReg + f.wordOffset), f.type);
+            s += wordsToString(base + f.wordOffset, f.type);
         }
         if (tt->fields_.size() == 1) s += ",";
         s += ")";
@@ -1226,7 +1260,7 @@ VMString slotToString(VM& vm, u16 startReg, Type* type) {
     }
     if (auto* en = dynamic_cast<EnumType*>(type)) {
         // Phase 4g.4: print "EnumName.CaseName" or "EnumName.CaseName(payload...)".
-        int which = (int)vm.reg(startReg).i;
+        int which = (int)base[0].i;
         VMString s = rt::vmstr(en->name_->str());
         s += ".";
         if (which < 0 || (size_t)which >= en->cases_.size()) {
@@ -1239,17 +1273,21 @@ VMString slotToString(VM& vm, u16 startReg, Type* type) {
         bool isVoid = !f.type->isObjType()
                    && (dynamic_cast<VoidType*>(f.type) != nullptr);
         if (isVoid) return s;
-        u16 payloadReg = (u16)(startReg + f.wordOffset);
+        Word const* payload = base + f.wordOffset;
         if (dynamic_cast<TupleType*>(f.type)) {
-            s += slotToString(vm, payloadReg, f.type);
+            s += wordsToString(payload, f.type);
         } else {
             s += "(";
-            s += slotToString(vm, payloadReg, f.type);
+            s += wordsToString(payload, f.type);
             s += ")";
         }
         return s;
     }
-    return wordToString(vm.reg(startReg), type);
+    return wordToString(base[0], type);
+}
+
+VMString slotToString(VM& vm, u16 startReg, Type* type) {
+    return wordsToString(&vm.reg(startReg), type);
 }
 
 } // namespace ts

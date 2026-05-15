@@ -52,6 +52,11 @@ VMString wordToString(Word w, Type* type);
 class VM;
 VMString slotToString(VM& vm, u16 startReg, Type* type);
 
+// Phase 4g.5: same idea but reads raw consecutive Words instead of VM regs.
+// Used by Obj subclasses that store inline payloads in flex arrays
+// (InlineRef, etc.) to format their contents in str().
+VMString wordsToString(Word const* base, Type* type);
+
 // Phase 4g.2: walk the layout of an Inline composite at `base` and retain
 // (or release, with `release_=true`) every embedded Obj* pointer field.
 // Recurses into nested Inline composite fields rather than treating them
@@ -874,6 +879,32 @@ public:
         if (storesObjPtr(rt->elemType_) && value_.o) value_.o->release();
     }
 };
+
+// Phase 4g.5: Ref to an inline composite (Struct/Tuple/Enum classified as
+// Repr::Inline). Stores the payload in a flex array sized to elemType_->
+// sizeWords_, so REF_GET / REF_SET copy words directly with no heap-Obj
+// allocation per store. Embedded Obj* fields are walked layout-aware via
+// inlineWalkPointers for ARC.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wc99-extensions"
+class InlineRef : public Obj {
+public:
+    u32  sizeWords_;
+    Word v[];   // flex array
+
+    static InlineRef* create(RefType* type);
+
+    VMString str() const override;
+
+    void releaseChildren() override {
+        auto* rt = static_cast<RefType*>(type_);
+        inlineWalkPointers(&v[0], rt->elemType_, /*release_=*/true);
+    }
+
+private:
+    InlineRef(RefType* type, u32 sw);
+};
+#pragma clang diagnostic pop
 
 // Struct instance (uses flexible array member for inline field storage)
 #pragma clang diagnostic push

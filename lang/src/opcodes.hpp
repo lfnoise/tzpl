@@ -305,6 +305,14 @@ void op_make_ref(VM& vm, Code* pc);           // MAKE_REF Rd, Rval (3 words: op,
 void op_ref_get(VM& vm, Code* pc);            // REF_GET Rd, Ra (2 words: op, regs{dst, ref})
 void op_ref_set(VM& vm, Code* pc);            // REF_SET Rd, Ra, Rb (3 words: op, regs{dst, ref, val}, RefType*)
 
+// Phase 4g.5: Ref to an inline composite. The payload lives inline in
+// InlineRef::v[]; ops copy multi-word slots in/out without per-store
+// heap allocation. Same operand shape as the 1-word ops; the RefType*
+// on the instruction stream tells the handler the slot's sizeWords.
+void op_make_ref_inline(VM& vm, Code* pc);    // MAKE_REF_INLINE Rd, Rval (3 words: op, regs, RefType*)
+void op_ref_get_inline(VM& vm, Code* pc);     // REF_GET_INLINE Rd, Ra (3 words: op, regs, RefType*)
+void op_ref_set_inline(VM& vm, Code* pc);     // REF_SET_INLINE Rd, Ra, Rb (3 words: op, regs, RefType*)
+
 // --- Coroutines ---
 void op_coro_create(VM& vm, Code* pc);        // CORO_CREATE Rd, argBase, argc (4 words: op, regs, global_idx, CoroutineType*)
 void op_coro_create_lambda(VM& vm, Code* pc); // CORO_CREATE_LAMBDA Rd, argBase, argc, lambdaReg (3 words: op, regs, CoroutineType*)

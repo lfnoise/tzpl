@@ -3278,11 +3278,17 @@ u16 CodeGen::genBinaryOp(BinaryOpExpr* expr) {
 
         case BinaryOpExpr::LeftArrow: {
             // ref <- value: set the ref's value with write barrier.
-            // Phase 4f: Ref slot is single Word; box inline values first.
+            // Phase 4g.5: inline-composite Refs hold the payload in an
+            // InlineRef flex array; mutate in place via op_ref_set_inline.
             auto* refType = static_cast<RefType*>(leftType);
             rightReg = ensureType(rightReg, rightType, refType->elemType_);
             if (isInlineMultiword(refType->elemType_)) {
-                rightReg = emitBoxIfInline(rightReg, refType->elemType_);
+                u16 sz = (u16)typeSlotWords(refType->elemType_);
+                u16 dstSlot = allocRegs(sz);
+                emitOp(op_ref_set_inline);
+                emitRegs(dstSlot, leftReg, rightReg);
+                emitPtr(refType);
+                return dstSlot;
             }
             emitOp(op_ref_set);
             emitRegs(dst, leftReg, rightReg);
@@ -3295,7 +3301,12 @@ u16 CodeGen::genBinaryOp(BinaryOpExpr* expr) {
             auto* refType = static_cast<RefType*>(rightType);
             leftReg = ensureType(leftReg, leftType, refType->elemType_);
             if (isInlineMultiword(refType->elemType_)) {
-                leftReg = emitBoxIfInline(leftReg, refType->elemType_);
+                u16 sz = (u16)typeSlotWords(refType->elemType_);
+                u16 dstSlot = allocRegs(sz);
+                emitOp(op_ref_set_inline);
+                emitRegs(dstSlot, rightReg, leftReg);
+                emitPtr(refType);
+                return dstSlot;
             }
             emitOp(op_ref_set);
             emitRegs(dst, rightReg, leftReg);
@@ -3451,27 +3462,36 @@ u16 CodeGen::genUnaryOp(UnaryOpExpr* expr) {
 
         case UnaryOpExpr::Ref: {
             // &expr — create a Ref<T>.
-            // Phase 4f: Ref slot is a single Word; box inline value first.
+            // Phase 4g.5: inline composites travel inline through InlineRef::v[].
             auto* refType = static_cast<RefType*>(expr->resolvedType);
-            u16 srcReg = operandReg;
             if (isInlineMultiword(refType->elemType_)) {
-                srcReg = emitBoxIfInline(operandReg, refType->elemType_);
+                emitOp(op_make_ref_inline);
+                emitRegs(dst, operandReg);
+                emitPtr(refType);
+                break;
             }
             emitOp(op_make_ref);
-            emitRegs(dst, srcReg);
+            emitRegs(dst, operandReg);
             emitPtr(refType);
             break;
         }
 
         case UnaryOpExpr::Deref: {
             // *expr — dereference a Ref<T>.
-            // Phase 4f: Ref stores boxed inline values; unbox after read.
-            emitOp(op_ref_get);
-            emitRegs(dst, operandReg);
             auto* refType = dynamic_cast<RefType*>(expr->operand->resolvedType);
             if (refType && isInlineMultiword(refType->elemType_)) {
-                return emitUnboxIfInline(dst, refType->elemType_);
+                // Phase 4g.5: read the inline payload into a fresh multi-word
+                // slot. `dst` was sized 1-word by the unary op preamble; alloc
+                // the right-sized slot here instead.
+                u16 sz = (u16)typeSlotWords(refType->elemType_);
+                u16 dstSlot = allocRegs(sz);
+                emitOp(op_ref_get_inline);
+                emitRegs(dstSlot, operandReg);
+                emitPtr(refType);
+                return dstSlot;
             }
+            emitOp(op_ref_get);
+            emitRegs(dst, operandReg);
             break;
         }
     }

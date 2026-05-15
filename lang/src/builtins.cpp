@@ -1029,16 +1029,125 @@ static void builtin_ref_obj(VM& vm, u16 dst, u16, u16 ab) {
     vm.reg(dst).o = ref;
 }
 
+// Phase 4g.5: ref for inline composite element types (Struct/Tuple/Enum
+// classified as Repr::Inline). The arg arrives as a 1-word boxed Obj*
+// because emitArgPlacementForCall boxes inline composites at builtin call
+// boundaries; we unbox it into a fresh InlineRef's flex-array payload so
+// later REF_GET_INLINE / REF_SET_INLINE can mutate in place.
+//
+// Internal: unbox a heap Tuple/Struct/Enum* directly into Word* dst (no VM
+// regs). Mirrors unboxInlineDeep but writes into raw memory. Matches the
+// boxField semantics used by boxInlineDeep.
+static void unboxInto(VM& vm, Type* type, Obj* obj, Word* dst) {
+    auto unboxField = [&](Type* ft, Word src, Word* fdst) {
+        if (!ft) { fdst->i = 0; return; }
+        if (ft->repr_ == Type::Repr::Inline
+            && ft != gCurrentVM->complexType() && ft != gCurrentVM->fractionType()
+            && (dynamic_cast<StructType*>(ft) || dynamic_cast<TupleType*>(ft)
+                || dynamic_cast<EnumType*>(ft))) {
+            unboxInto(vm, ft, src.o, fdst);
+        } else if (ft == gCurrentVM->complexType()) {
+            auto* c = static_cast<Complex*>(src.o);
+            fdst[0].f = c->x.real();
+            fdst[1].f = c->x.imag();
+        } else if (ft == gCurrentVM->fractionType()) {
+            auto* fr = static_cast<Fraction*>(src.o);
+            fdst[0].i = fr->r.numer();
+            fdst[1].i = fr->r.denom();
+        } else {
+            *fdst = src;
+            if (storesObjPtr(ft) && src.o) src.o->retain();
+        }
+    };
+    if (auto* st = dynamic_cast<StructType*>(type)) {
+        auto* s = static_cast<Struct*>(obj);
+        for (size_t i = 0; i < st->fields_.size(); ++i) {
+            auto const& f = st->layout_[i];
+            unboxField(f.type, s->v[i], dst + f.wordOffset);
+        }
+        return;
+    }
+    if (auto* tt = dynamic_cast<TupleType*>(type)) {
+        auto* t = static_cast<Tuple*>(obj);
+        for (size_t i = 0; i < tt->fields_.size(); ++i) {
+            auto const& f = tt->layout_[i];
+            unboxField(f.type, t->v[i], dst + f.wordOffset);
+        }
+        return;
+    }
+    if (auto* en = dynamic_cast<EnumType*>(type)) {
+        auto* e = static_cast<Enum*>(obj);
+        dst[0].i = e->which_;
+        for (u8 i = 1; i < en->sizeWords_; ++i) dst[i].i = 0;
+        if (e->which_ >= 0 && (size_t)e->which_ < en->layout_.size()) {
+            auto const& f = en->layout_[e->which_];
+            if (f.type) {
+                bool isVoid = !f.type->isObjType()
+                           && (dynamic_cast<VoidType*>(f.type) != nullptr);
+                if (!isVoid && f.sizeWords > 0) {
+                    unboxField(f.type, e->word_, dst + 1);
+                }
+            }
+        }
+        return;
+    }
+}
+
+// ref(InlineComposite) -> InlineRef
+static void builtin_ref_inline(VM& vm, u16 dst, u16, u16 ab) {
+    Obj* boxed = vm.reg(ab).o;
+    if (!boxed) { vm.reg(dst).o = nullptr; return; }
+    auto* refType = static_cast<RefType*>(vm.refType(boxed->type_));
+    auto* ref = InlineRef::create(refType);
+    unboxInto(vm, refType->elemType_, boxed, &ref->v[0]);
+    vm.reg(dst).o = ref;
+}
+
 // deref(Ref<T>) -> T
+// Phase 4g.5: when the ref is an InlineRef, allocate a fresh boxed
+// Tuple/Struct/Enum* and copy the payload through it -- the builtin caller
+// expects a 1-word boxed result that emitBuiltinResultUnbox will then unbox
+// into the multi-word slot. (The operator form `*r` skips this round-trip.)
 static void builtin_deref(VM& vm, u16 dst, u16, u16 ab) {
-    auto* ref = static_cast<RefValue*>(vm.reg(ab).o);
+    auto* obj = vm.reg(ab).o;
+    auto* refType = static_cast<RefType*>(obj->type_);
+    Type* et = refType->elemType_;
+    if (et && et->repr_ == Type::Repr::Inline
+        && et != gCurrentVM->complexType() && et != gCurrentVM->fractionType()
+        && (dynamic_cast<StructType*>(et) || dynamic_cast<TupleType*>(et)
+            || dynamic_cast<EnumType*>(et))) {
+        auto* ref = static_cast<InlineRef*>(obj);
+        // Box the inline payload back through a temp register window.
+        u16 base = vm.currentCodeBlock()->numRegs;
+        for (u32 i = 0; i < ref->sizeWords_; ++i) vm.reg((u16)(base + i)) = ref->v[i];
+        vm.reg(dst).o = boxInlineDeep(vm, et, base);
+        return;
+    }
+    auto* ref = static_cast<RefValue*>(obj);
     vm.reg(dst) = ref->value_;
 }
 
 // setref(T, Ref<T>) -> T
 static void builtin_setref(VM& vm, u16 dst, u16, u16 ab) {
-    auto* ref = static_cast<RefValue*>(vm.reg(ab + 1).o);
-    auto* refType = static_cast<RefType*>(ref->type_);
+    auto* obj = vm.reg(ab + 1).o;
+    auto* refType = static_cast<RefType*>(obj->type_);
+    Type* et = refType->elemType_;
+    if (et && et->repr_ == Type::Repr::Inline
+        && et != gCurrentVM->complexType() && et != gCurrentVM->fractionType()
+        && (dynamic_cast<StructType*>(et) || dynamic_cast<TupleType*>(et)
+            || dynamic_cast<EnumType*>(et))) {
+        auto* ref = static_cast<InlineRef*>(obj);
+        Obj* boxed = vm.reg(ab).o;
+        // Release embedded Obj* in the old payload, overwrite, retain new.
+        inlineWalkPointers(&ref->v[0], et, /*release_=*/true);
+        unboxInto(vm, et, boxed, &ref->v[0]);
+        // The new payload's Obj* fields are already retained by unboxInto
+        // (it calls retain on storesObjPtr leaves). The boxed source itself
+        // is borrowed -- the builtin call boundary handles its lifetime.
+        vm.reg(dst) = vm.reg(ab);  // result = the assigned (still boxed) value
+        return;
+    }
+    auto* ref = static_cast<RefValue*>(obj);
     Word newVal = vm.reg(ab);
     if (storesObjPtr(refType->elemType_)) {
         if (newVal.o) newVal.o->retain();
@@ -1054,11 +1163,16 @@ static bool resolve_ref(Compiler& compiler, const std::vector<Type*>& args,
     std::vector<Type*>& pt, Type*& rt, CFun& cf) {
     if (args.size() != 1) return false;
     Type* t = args[0];
+    bool inlineComposite = t && t->repr_ == Type::Repr::Inline
+        && t != compiler.complexType() && t != compiler.fractionType()
+        && (dynamic_cast<StructType*>(t) || dynamic_cast<TupleType*>(t)
+            || dynamic_cast<EnumType*>(t));
     if (t == compiler.intType())         cf = builtin_ref_int;
     else if (t == compiler.floatType())  cf = builtin_ref_float;
     else if (t == compiler.boolType())   cf = builtin_ref_bool;
     else if (t == compiler.symbolType()) cf = builtin_ref_symbol;
     else if (t && t->repr_ == Type::Repr::DiscriminantEnum) cf = builtin_ref_int;
+    else if (inlineComposite)            cf = builtin_ref_inline;
     else if (t->isObjType())             cf = builtin_ref_obj;
     else return false;
     pt = {t};
@@ -1108,9 +1222,28 @@ static bool resolve_setref(Compiler& compiler, const std::vector<Type*>& args,
 
 // setref(Ref<T>, T) -> T
 static void builtin_setref_rev(VM& vm, u16 dst, u16, u16 ab) {
-    auto* ref = static_cast<RefValue*>(vm.reg(ab).o);
-    ref->value_ = vm.reg(ab + 1);
-    vm.reg(dst) = vm.reg(ab + 1);
+    auto* obj = vm.reg(ab).o;
+    auto* refType = static_cast<RefType*>(obj->type_);
+    Type* et = refType->elemType_;
+    if (et && et->repr_ == Type::Repr::Inline
+        && et != gCurrentVM->complexType() && et != gCurrentVM->fractionType()
+        && (dynamic_cast<StructType*>(et) || dynamic_cast<TupleType*>(et)
+            || dynamic_cast<EnumType*>(et))) {
+        auto* ref = static_cast<InlineRef*>(obj);
+        Obj* boxed = vm.reg(ab + 1).o;
+        inlineWalkPointers(&ref->v[0], et, /*release_=*/true);
+        unboxInto(vm, et, boxed, &ref->v[0]);
+        vm.reg(dst) = vm.reg(ab + 1);
+        return;
+    }
+    auto* ref = static_cast<RefValue*>(obj);
+    Word newVal = vm.reg(ab + 1);
+    if (storesObjPtr(refType->elemType_)) {
+        if (newVal.o) newVal.o->retain();
+        if (ref->value_.o) ref->value_.o->release();
+    }
+    ref->value_ = newVal;
+    vm.reg(dst) = newVal;
 }
 
 static bool resolve_setref_rev(Compiler& compiler, const std::vector<Type*>& args,

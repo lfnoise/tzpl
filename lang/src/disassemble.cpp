@@ -308,6 +308,9 @@ static const std::unordered_map<Operation, OpInfo>& opInfoMap() {
         { op_make_ref,          { "MAKE_REF",          3, OpFmt::Regs_Ptr, 2 } },
         { op_ref_get,           { "REF_GET",           2, OpFmt::Regs,     2 } },
         { op_ref_set,           { "REF_SET",           3, OpFmt::Regs_Ptr, 3 } },
+        { op_make_ref_inline,   { "MAKE_REF_I",        3, OpFmt::Regs_Ptr, 2 } },
+        { op_ref_get_inline,    { "REF_GET_I",         3, OpFmt::Regs_Ptr, 2 } },
+        { op_ref_set_inline,    { "REF_SET_I",         3, OpFmt::Regs_Ptr, 3 } },
 
         // --- Coroutines ---
         { op_coro_create,       { "CORO_CREATE",       4, OpFmt::Regs_Int_Ptr,  3 } },
