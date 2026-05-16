@@ -3734,10 +3734,18 @@ void op_map_get(VM& vm, Code* pc) {
 }
 
 // MAP_GET_OPTION Rd, Ra(map), Rb(key) (3 words: op, regs{dst, map, key}, EnumType*)
-// Phase 4g.11: key spans keyStride registers starting at Rb. Returns a heap
-// Enum* in dst; for Inline Option types the caller (codegen) emits a
-// subsequent unbox into a multi-word inline slot. Multi-word value payloads
-// are deep-boxed into the heap Enum's single word_ slot.
+// Phase 4g.11: key spans keyStride registers starting at Rb.
+//
+// Phase 4g.24: write the Option result in its destination representation
+// directly:
+//   * Inline Option -- dst spans sizeWords_ registers; word 0 is the
+//     discriminant, words 1.. are the V payload (copied natively from the
+//     map slot).
+//   * NullablePtrEnum -- dst holds a nullable Obj*.
+//   * heap Enum -- dst holds Enum*; multi-word V payloads land natively in
+//     the heap Enum's flex array (since Phase 4g.15).
+// This drops the box/unbox round-trip on the Inline path that the four
+// codegen sites used to emit explicitly with emitUnboxIfInline.
 void op_map_get_option(VM& vm, Code* pc) {
     u16 dst = pc[1].regs[0], mapReg = pc[1].regs[1], keyReg = pc[1].regs[2];
     auto* map = static_cast<MapObj*>(vm.reg(mapReg).o);
@@ -3747,10 +3755,11 @@ void op_map_get_option(VM& vm, Code* pc) {
 
     Word const* keyPtr = &vm.reg(keyReg);
     u32 slot = map->findSlot(keyPtr);
+    bool found = (slot != map->capacity());
 
     // Phase 3: NullablePtrEnum -- store as nullable Obj* directly.
     if (optType->repr_ == Type::Repr::NullablePtrEnum) {
-        if (slot != map->capacity()) {
+        if (found) {
             Obj* o = map->slotVal(slot)[0].o;
             if (o) o->retain();
             vm.reg(dst).o = o;
@@ -3760,10 +3769,26 @@ void op_map_get_option(VM& vm, Code* pc) {
         DISPATCH(3);
     }
 
+    // Phase 4g.24: Inline Option -- write discriminant + native payload
+    // straight into the dst register window. No heap Enum allocation.
+    if (optType->repr_ == Type::Repr::Inline) {
+        u32 vs = map->valueStride_;
+        if (found) {
+            vm.reg(dst).i = 0;  // which_ = some
+            Word const* src = map->slotVal(slot);
+            for (u32 i = 0; i < vs; ++i) vm.reg((u16)(dst + 1 + i)) = src[i];
+            payloadRetain(&vm.reg((u16)(dst + 1)), vt);
+        } else {
+            vm.reg(dst).i = 1;  // which_ = none
+            for (u32 i = 0; i < vs; ++i) vm.reg((u16)(dst + 1 + i)).i = 0;
+        }
+        DISPATCH(3);
+    }
+
     // Phase 4g.15: heap Enum stores payload natively in v[]. Copy the map
     // slot's value words directly into the Enum's payload.
-    auto* e = Enum::create(optType, slot != map->capacity() ? 0 : 1);
-    if (slot != map->capacity()) {
+    auto* e = Enum::create(optType, found ? 0 : 1);
+    if (found) {
         Word const* src = map->slotVal(slot);
         u32 sw = (vt && vt->sizeWords_ > 0) ? vt->sizeWords_ : 1;
         for (u32 i = 0; i < sw; ++i) e->v[i] = src[i];

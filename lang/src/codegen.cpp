@@ -8218,18 +8218,16 @@ u16 CodeGen::genIndexExpr(IndexExpr_* expr) {
 
     if (auto* mapType = dynamic_cast<MapType*>(expr->object->resolvedType)) {
         // Map subscript: map[key] -> Option<V>.
-        // Phase 4g.11: keys are stored natively in the map. Pass multi-word
-        // inline keys without boxing; op_map_get_option produces a heap Enum*
-        // that emitUnboxIfInline subsequently unboxes for Inline Option types.
-        u16 dst = allocReg();
-        idxReg = ensureType(idxReg, expr->index->resolvedType, mapType->keyType_);
+        // Phase 4g.11: keys are stored natively in the map.
+        // Phase 4g.24: op_map_get_option writes Inline Option results
+        // directly into a multi-word dst slot, so allocSlot sizes the dst
+        // for the Option's footprint and no follow-up unbox is needed.
         Type* optType = compiler_.optionType(mapType->valueType_);
+        u16 dst = allocSlot(optType);
+        idxReg = ensureType(idxReg, expr->index->resolvedType, mapType->keyType_);
         emitOp(op_map_get_option);
         emitRegs(dst, objReg, idxReg);
         emitPtr(optType);
-        if (optType && optType->repr_ == ts::Type::Repr::Inline) {
-            return emitUnboxIfInline(dst, optType);
-        }
         return dst;
     }
     if (expr->object->resolvedType == compiler_.stringType()) {
@@ -8295,21 +8293,19 @@ u16 CodeGen::emitIndexLookup(u16 srcReg, Type* srcType, u16 idxReg, Type* idxTyp
         emitRegs(idxValReg, idxReg, jReg);
         emitPtr(idxArrType);
 
-        // Scalar lookup. Phase 4g.8: map_get_option produces a boxed Enum*;
-        // when the result Option is Inline, unbox into a multi-word slot
-        // so InlineArray's setSlot reads correct stride words.
+        // Scalar lookup. Phase 4g.24: op_map_get_option writes the Option
+        // result natively into the multi-word valReg slot, so we just size
+        // the slot to the result element type and op_array_set picks up the
+        // stride words directly.
         u16 valReg;
         Type* elemResT = resultArrayType->elemType_;
         if (auto* mapType = dynamic_cast<MapType*>(srcType)) {
             Type* optType = compiler_.optionType(mapType->valueType_);
-            valReg = allocReg();
+            valReg = allocSlot(optType);
             idxValReg = ensureType(idxValReg, idxArrType->elemType_, mapType->keyType_);
             emitOp(op_map_get_option);
             emitRegs(valReg, srcReg, idxValReg);
             emitPtr(optType);
-            if (optType && optType->repr_ == ts::Type::Repr::Inline) {
-                valReg = emitUnboxIfInline(valReg, optType);
-            }
         } else if (srcType == compiler_.stringType()) {
             valReg = allocReg();
             emitOp(op_string_get_byte);
@@ -8357,8 +8353,11 @@ u16 CodeGen::emitIndexLookup(u16 srcReg, Type* srcType, u16 idxReg, Type* idxTyp
         emitOp(op_list_head);
         emitRegs(idxValReg, curReg);
 
-        // Scalar lookup
-        u16 valReg = allocReg();
+        // Scalar lookup. Phase 4g.24: op_map_get_option writes Inline Option
+        // results natively into a multi-word slot; allocSlot sizes valReg so
+        // op_cons reads the right stride.
+        Type* elemResT = resultListType->elemType_;
+        u16 valReg = allocSlot(elemResT);
         if (auto* mapType = dynamic_cast<MapType*>(srcType)) {
             idxValReg = ensureType(idxValReg, idxListType->elemType_, mapType->keyType_);
             emitOp(op_map_get_option);
@@ -8394,7 +8393,9 @@ u16 CodeGen::emitIndexLookup(u16 srcReg, Type* srcType, u16 idxReg, Type* idxTyp
         emitRegs(revNilCheck, accReg);
         u32 revExitJump = emitJump(op_jump_if_true, revNilCheck);
 
-        u16 revHead = allocReg();
+        // revHead spans the result element's words so op_list_head can
+        // write a multi-word Inline head into a contiguous slot window.
+        u16 revHead = allocSlot(elemResT);
         emitOp(op_list_head);
         emitRegs(revHead, accReg);
         emitOp(op_cons);
@@ -8408,22 +8409,23 @@ u16 CodeGen::emitIndexLookup(u16 srcReg, Type* srcType, u16 idxReg, Type* idxTyp
         return resReg;
     }
 
-    // Scalar index lookup
-    u16 dst = allocReg();
+    // Scalar index lookup. Phase 4g.24: Inline Option results land natively
+    // in a sizeWords_-wide dst window, no follow-up unbox needed.
+    u16 dst;
     if (auto* mapType = dynamic_cast<MapType*>(srcType)) {
         u16 convertedIdx = ensureType(idxReg, idxType, mapType->keyType_);
         Type* optType = compiler_.optionType(mapType->valueType_);
+        dst = allocSlot(optType);
         emitOp(op_map_get_option);
         emitRegs(dst, srcReg, convertedIdx);
         emitPtr(optType);
-        if (optType && optType->repr_ == ts::Type::Repr::Inline) {
-            return emitUnboxIfInline(dst, optType);
-        }
     } else if (srcType == compiler_.stringType()) {
+        dst = allocReg();
         emitOp(op_string_get_byte);
         emitRegs(dst, srcReg, idxReg);
     } else {
         auto* arrType = dynamic_cast<ArrayType*>(srcType);
+        dst = allocReg();
         emitOp(op_array_get_dyn);
         emitRegs(dst, srcReg, idxReg);
         emitPtr(arrType);
