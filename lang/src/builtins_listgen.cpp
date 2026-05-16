@@ -29,9 +29,10 @@ namespace ts {
 
 // Phase 4g.9: helpers to bridge multi-word list heads through the existing
 // 1-Word lambda argument/result interface and through head-copy patterns.
+// Phase 4g.20: also handles Complex/Fraction (now stored native 2-word).
 static Word boxListHeadIfInline(VM& vm, ListNode* src, Type* elemType) {
     if (src->payloadWords_ > 1) {
-        return Word(boxInlineDeepFrom(vm, elemType, src->headData()));
+        return boxPayload(vm, elemType, src->headData());
     }
     return src->head_;
 }
@@ -314,8 +315,11 @@ void AutoMapListGen::generate(VM& vm, ListNode* owner) {
     // Place arguments into scratch regs sb..sb+argc-1
     for (u16 i = 0; i < argc; ++i) {
         if (i == info_->listArgIndex) {
-            // List element -- possibly with type promotion
-            Word elem = source_->head_;
+            // List element -- possibly with type promotion. Phase 4g.20: list
+            // heads are multi-word native for Inline composites (including
+            // Complex/Fraction), so use headData()[0]/[1] for those reads.
+            Word const* hd = source_->headData();
+            Word elem = hd[0];
             if (info_->listElemType != info_->listParamType) {
                 // Runtime promotion: Int->Float, Int->Fraction, etc.
                 if (info_->listParamType == vm.floatType() &&
@@ -323,23 +327,38 @@ void AutoMapListGen::generate(VM& vm, ListNode* owner) {
                     elem.f = (f64)elem.i;
                 } else if (info_->listParamType == vm.fractionType() &&
                            (info_->listElemType == vm.intType() || info_->listElemType == vm.boolType())) {
-                    auto* frac = new Fraction(r64(elem.i));
-                    elem.o = frac;
+                    // Promoted Fraction: write native 2-word.
+                    vm.reg(sb + i).i = elem.i;
+                    vm.reg(sb + i + 1).i = 1;
+                    continue;
                 } else if (info_->listParamType == vm.floatType() &&
                            info_->listElemType == vm.fractionType()) {
-                    auto* frac = static_cast<Fraction*>(elem.o);
-                    elem.f = (f64)frac->r;
+                    r64 r(hd[0].i, hd[1].i, true);
+                    elem.f = (f64)r;
                 } else if (info_->listParamType == vm.complexType()) {
                     f64 re = 0.0;
                     if (info_->listElemType == vm.intType() || info_->listElemType == vm.boolType())
                         re = (f64)elem.i;
                     else if (info_->listElemType == vm.floatType())
                         re = elem.f;
-                    else if (info_->listElemType == vm.fractionType())
-                        re = (f64)(static_cast<Fraction*>(elem.o)->r);
-                    auto* cx = new Complex(x64(re, 0.0));
-                    elem.o = cx;
+                    else if (info_->listElemType == vm.fractionType()) {
+                        r64 r(hd[0].i, hd[1].i, true);
+                        re = (f64)r;
+                    }
+                    // Promoted Complex: write native 2-word (re, im=0).
+                    vm.reg(sb + i).f = re;
+                    vm.reg(sb + i + 1).f = 0.0;
+                    continue;
                 }
+            } else if (info_->listElemType
+                && info_->listElemType->repr_ == ts::Type::Repr::Inline
+                && source_->payloadWords_ > 1) {
+                // Non-promoted Inline composite element: copy multi-word
+                // native head into the lambda's multi-word param slot.
+                for (u32 k = 0; k < source_->payloadWords_; ++k) {
+                    vm.reg(sb + i + (u16)k) = hd[k];
+                }
+                continue;
             }
             vm.reg(sb + i) = elem;
         } else {

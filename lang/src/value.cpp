@@ -203,13 +203,14 @@ ListNode::ListNode(Type* type, u32 payloadWords)
 }
 
 // ListNode factory: sizes the allocation to fit `payloadWords` head words.
+// Phase 4g.20: Complex/Fraction list heads now store natively (2 words) the
+// same way PodArray<x64>/<r64> hold their elements -- no more single-Word
+// heap-boxed head_ for those types.
 ListNode* ListNode::create(Type* type) {
     auto* lt = dynamic_cast<ListType*>(type);
     Type* et = lt ? lt->elemType_ : nullptr;
     u32 payloadWords = 1;
-    if (et && et->repr_ == Type::Repr::Inline
-        && et != gCurrentVM->complexType()
-        && et != gCurrentVM->fractionType()) {
+    if (et && et->repr_ == Type::Repr::Inline) {
         payloadWords = et->sizeWords_;
         if (payloadWords == 0) payloadWords = 1;
     }
@@ -1727,6 +1728,21 @@ Obj* boxInlineDeepFrom(VM& vm, Type* type, Word const* src) {
 
 void unboxInlineDeepTo(VM& vm, Type* type, Obj* obj, Word* dst) {
     // Phase 4g.13: heap Struct/Tuple store fields natively per layout.
+    // Phase 4g.20: Complex/Fraction also unbox into their 2-word native form
+    // so generic multi-word storage (e.g. ListNode head_ + headTail_) works
+    // uniformly for them as for Struct/Tuple/Enum.
+    if (type == gCurrentVM->complexType()) {
+        auto* c = static_cast<Complex*>(obj);
+        dst[0].f = c->x.real();
+        dst[1].f = c->x.imag();
+        return;
+    }
+    if (type == gCurrentVM->fractionType()) {
+        auto* fr = static_cast<Fraction*>(obj);
+        dst[0].i = fr->r.numer();
+        dst[1].i = fr->r.denom();
+        return;
+    }
     auto copyToBuf = [&](Word const* src, Type* parent) {
         u32 total = 0;
         if (auto* st = dynamic_cast<StructType*>(parent)) {

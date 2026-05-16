@@ -463,9 +463,9 @@ public:
         } else {
             auto* lt = static_cast<ListType*>(type_);
             Type* et = lt->elemType_;
-            if (et && et->repr_ == Type::Repr::Inline
-                && et != gCurrentVM->complexType()
-                && et != gCurrentVM->fractionType()) {
+            // Phase 4g.20: Complex/Fraction now store natively (2 words) and
+            // have no Obj* children, so inlineWalkPointers is a no-op for them.
+            if (et && et->repr_ == Type::Repr::Inline) {
                 inlineWalkPointers(headData(), et, /*release_=*/true);
             } else if (storesObjPtr(et) && head_.o) {
                 head_.o->release();

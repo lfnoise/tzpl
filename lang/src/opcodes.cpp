@@ -2090,20 +2090,23 @@ static inline Word compositeBinopTopLevel(VM& vm, Op op, u16 a, u16 b,
     auto* aTT = dynamic_cast<TupleType*>(aType);
     auto* bTT = dynamic_cast<TupleType*>(bType);
     auto* rTT = dynamic_cast<TupleType*>(resultType);
-    bool aInline = aTT && aType->repr_ == Type::Repr::Inline;
-    bool bInline = bTT && bType->repr_ == Type::Repr::Inline;
-    if (rTT && (aInline || bInline)) {
-        Word const* aBase = aTT ? (aInline ? &vm.reg(a)
-                                           : &static_cast<Tuple*>(vm.reg(a).o)->v[0])
+    bool aTupleInline = aTT && aType->repr_ == Type::Repr::Inline;
+    bool bTupleInline = bTT && bType->repr_ == Type::Repr::Inline;
+    if (rTT && (aTupleInline || bTupleInline)) {
+        Word const* aBase = aTT ? (aTupleInline ? &vm.reg(a)
+                                                : &static_cast<Tuple*>(vm.reg(a).o)->v[0])
                                 : nullptr;
-        Word const* bBase = bTT ? (bInline ? &vm.reg(b)
-                                           : &static_cast<Tuple*>(vm.reg(b).o)->v[0])
+        Word const* bBase = bTT ? (bTupleInline ? &vm.reg(b)
+                                                : &static_cast<Tuple*>(vm.reg(b).o)->v[0])
                                 : nullptr;
         return dispatchTupleBinopBase(vm, op, aBase, bBase, vm.reg(a), vm.reg(b),
                                       aType, bType, rTT);
     }
-    // Array/List result -- box any Inline tuple operand into a heap Tuple
-    // so dispatchBinop's Word-based path can broadcast it field-wise.
+    // Array/List result -- box any Inline operand (Tuple/Struct/Enum or
+    // Complex/Fraction; Phase 4g.20) into a heap object so dispatchBinop's
+    // single-Word path can broadcast/zip it scalar-style.
+    bool aInline = aType && aType->repr_ == Type::Repr::Inline;
+    bool bInline = bType && bType->repr_ == Type::Repr::Inline;
     Word aw = vm.reg(a), bw = vm.reg(b);
     if (aInline) aw = boxPayload(vm, aType, &vm.reg(a));
     if (bInline) bw = boxPayload(vm, bType, &vm.reg(b));
@@ -2566,24 +2569,34 @@ void BinopListGen::generate(VM& vm, ListNode* owner) {
     if (leftList_) leftList_->force(vm);
     if (rightList_) rightList_->force(vm);
 
-    // Determine head operands
+    // Determine head operands. Phase 4g.20: list heads of Inline composite
+    // element types (Tuple/Struct/Enum and Complex/Fraction) are stored as
+    // multi-word native data; box them into a 1-Word heap Obj* before
+    // calling the scalar dispatcher.
     Word leftVal, rightVal;
     Type* leftType = leftElemType_;
     Type* rightType = rightElemType_;
 
+    auto readListHead = [&](ListNode* node, Type* elemType) -> Word {
+        if (node->payloadWords_ > 1) {
+            return boxPayload(vm, elemType, node->headData());
+        }
+        return node->head_;
+    };
+
     if (leftList_ && rightList_) {
         // Zip: both are lists
-        leftVal = leftList_->head_;
-        rightVal = rightList_->head_;
+        leftVal = readListHead(leftList_, leftElemType_);
+        rightVal = readListHead(rightList_, rightElemType_);
     } else if (leftList_) {
         // List op Scalar: list is left, scalar is broadcast (right)
-        leftVal = leftList_->head_;
+        leftVal = readListHead(leftList_, leftElemType_);
         rightVal = broadcastVal_;
         rightType = rightElemType_;
     } else {
         // Scalar op List: scalar is broadcast (left), list is right
         leftVal = broadcastVal_;
-        rightVal = rightList_->head_;
+        rightVal = readListHead(rightList_, rightElemType_);
         leftType = leftElemType_;
     }
 
@@ -2636,19 +2649,25 @@ void UnaryListGen::generate(VM& vm, ListNode* owner) {
     // Force source node if lazy
     source_->force(vm);
 
+    // Phase 4g.20: box the multi-word native head into a 1-Word heap Obj*
+    // for the scalar dispatcher.
+    Word sourceHead = (source_->payloadWords_ > 1)
+        ? boxPayload(vm, sourceElemType_, source_->headData())
+        : source_->head_;
+
     // Compute head via the appropriate unary operation
     Word headResult;
     switch (opKind_) {
         case Neg:
-            headResult = dispatchUnaryOp(vm, OpNeg{}, source_->head_,
+            headResult = dispatchUnaryOp(vm, OpNeg{}, sourceHead,
                                          sourceElemType_, resultElemType_);
             break;
         case Not:
-            headResult = dispatchUnaryOp(vm, OpNot{}, source_->head_,
+            headResult = dispatchUnaryOp(vm, OpNot{}, sourceHead,
                                          sourceElemType_, resultElemType_);
             break;
         case BitNot:
-            headResult = dispatchUnaryOp(vm, OpBitNot{}, source_->head_,
+            headResult = dispatchUnaryOp(vm, OpBitNot{}, sourceHead,
                                          sourceElemType_, resultElemType_);
             break;
     }
@@ -2730,14 +2749,17 @@ void FractionRangeListGen::generate(VM& vm, ListNode* owner) {
     }
 
     if (pastEnd) {
-        owner->head_.o = nullptr;
+        // Phase 4g.20: Fraction list head is now native 2-word; zero both.
+        Word* h = owner->headData();
+        h[0].i = 0; h[1].i = 0;
         owner->tail_ = nullptr;
         return;
     }
 
-    // Set head to current value
-    owner->head_.o = current_;
-    if (current_) current_->retain();
+    // Set head to current value (native 2-word: numer, denom).
+    Word* h = owner->headData();
+    h[0].i = cur.numer();
+    h[1].i = cur.denom();
 
     // Compute next value and check if there will be more elements
     r64 next = cur + stp;
@@ -3272,9 +3294,9 @@ void op_make_list(VM& vm, Code* pc) {
     u16 dst = pc[1].regs[0], firstSrc = pc[1].regs[1], count = pc[1].regs[2];
     auto* listType = static_cast<ListType*>(pc[2].p);
     Type* et = listType->elemType_;
-    bool elemInline = et && et->repr_ == Type::Repr::Inline
-        && et != gCurrentVM->complexType()
-        && et != gCurrentVM->fractionType();
+    // Phase 4g.20: all Inline composites (Complex/Fraction included) read
+    // their sizeWords_ words natively from consecutive source slots.
+    bool elemInline = et && et->repr_ == Type::Repr::Inline;
     u32 stride = elemInline ? et->sizeWords_ : 1;
     bool elemIsObj = storesObjPtr(et);
 

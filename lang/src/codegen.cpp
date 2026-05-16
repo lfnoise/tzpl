@@ -2433,24 +2433,17 @@ u16 CodeGen::genNilLiteral() {
 u16 CodeGen::genListLiteral(ListLiteralExpr* expr) {
     auto* listType = dynamic_cast<ListType*>(expr->resolvedType);
     Type* elemType = listType->elemType_;
-    // Phase 4g.9: ListNode now stores Inline composite heads natively.
-    // Complex/Fraction stay boxed at the list-head boundary (1-word slot)
-    // since their dedicated ops handle the conversion; match runtime stride.
+    // Phase 4g.20: ListNode stores all Inline composite heads natively,
+    // including Complex/Fraction (2-word x64/r64) -- no more 1-word boxed
+    // boundary for those.
     bool elemInline = elemType
-        && elemType->repr_ == ts::Type::Repr::Inline
-        && elemType != compiler_.complexType()
-        && elemType != compiler_.fractionType();
+        && elemType->repr_ == ts::Type::Repr::Inline;
     u32 stride = elemInline ? typeSlotWords(elemType) : 1;
     u16 firstSrc = nextReg_;
     for (size_t i = 0; i < expr->elements.size(); ++i) {
         auto& elem = expr->elements[i];
         u16 elemReg = genExpr(static_cast<Expr*>(elem.get()));
         u16 promoted = ensureType(elemReg, elem->resolvedType, elemType);
-        if (!elemInline && elemType
-            && elemType->repr_ == ts::Type::Repr::Inline) {
-            // Complex/Fraction: box into single-Word slot at the boundary.
-            promoted = emitBoxIfInline(promoted, elemType);
-        }
         u16 expectedReg = (u16)(firstSrc + (u16)i * stride);
         if (elemInline) {
             emitArgPlacement(expectedReg, promoted, elemType);
