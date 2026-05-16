@@ -4678,16 +4678,32 @@ u16 CodeGen::genCartesianBinaryOp(BinaryOpExpr* expr) {
         loop2ExitJump = emitJump(op_jump_if_false, condRegs[2]);
     }
 
+    // Phase 4g.19: Inline composite elements (e.g. Tuple(Int,Int)) occupy
+    // multiple register words. allocReg() reserves only one Word and would
+    // overlap left/right slots, so use allocElemSlot for inline composites.
+    auto needsBoxAuto = [&](Type* t) {
+        return t && t->repr_ == ts::Type::Repr::Inline
+            && t != compiler_.complexType()
+            && t != compiler_.fractionType();
+    };
+    auto allocElemSlot = [&](Type* t) {
+        u16 nw = typeSlotWords(t);
+        u16 r = nextReg_;
+        nextReg_ = (u16)(nextReg_ + nw);
+        if (nextReg_ > maxReg_) maxReg_ = nextReg_;
+        return r;
+    };
+
     // Extract elements
     u16 leftElemReg = leftReg;
     if (expr->leftAutoMap.cartesianIndex > 0) {
-        leftElemReg = allocReg();
+        leftElemReg = allocElemSlot(leftElemType);
         emitOp(op_array_get_dyn);
         emitRegs(leftElemReg, leftReg, iRegs[expr->leftAutoMap.cartesianIndex]);
         emitPtr(dynamic_cast<ArrayType*>(leftType));
     } else if (expr->leftAutoMap.depth > 0) {
         // Plain @ with cartesian context — zip with level 1
-        leftElemReg = allocReg();
+        leftElemReg = allocElemSlot(leftElemType);
         emitOp(op_array_get_dyn);
         emitRegs(leftElemReg, leftReg, iRegs[1]);
         emitPtr(dynamic_cast<ArrayType*>(leftType));
@@ -4695,12 +4711,12 @@ u16 CodeGen::genCartesianBinaryOp(BinaryOpExpr* expr) {
 
     u16 rightElemReg = rightReg;
     if (expr->rightAutoMap.cartesianIndex > 0) {
-        rightElemReg = allocReg();
+        rightElemReg = allocElemSlot(rightElemType);
         emitOp(op_array_get_dyn);
         emitRegs(rightElemReg, rightReg, iRegs[expr->rightAutoMap.cartesianIndex]);
         emitPtr(dynamic_cast<ArrayType*>(rightType));
     } else if (expr->rightAutoMap.depth > 0) {
-        rightElemReg = allocReg();
+        rightElemReg = allocElemSlot(rightElemType);
         emitOp(op_array_get_dyn);
         emitRegs(rightElemReg, rightReg, iRegs[1]);
         emitPtr(dynamic_cast<ArrayType*>(rightType));
@@ -4713,15 +4729,26 @@ u16 CodeGen::genCartesianBinaryOp(BinaryOpExpr* expr) {
     u16 elemResultReg;
 
     if (expr->resolvedFuncGlobalIndex >= 0) {
+        // Operator overload call. Place each operand at its multi-word slot
+        // offset for non-builtin calls; for builtins box Inline composite
+        // operands first so the legacy 1-Word ABI sees a heap pointer.
         u16 argBase = nextReg_;
-        if (leftElemReg != argBase) { emitOp(op_mov); emitRegs(argBase, leftElemReg); }
-        if (nextReg_ <= argBase) { nextReg_ = argBase + 1; if (nextReg_ > maxReg_) maxReg_ = nextReg_; }
-        if (rightElemReg != argBase + 1) { emitOp(op_mov); emitRegs(argBase + 1, rightElemReg); }
-        if (nextReg_ <= argBase + 1) { nextReg_ = argBase + 2; if (nextReg_ > maxReg_) maxReg_ = nextReg_; }
-        elemResultReg = allocReg();
+        u32 lWords = emitArgPlacementForCall(argBase, leftElemReg, leftElemType,
+                                             expr->isBuiltinCall, expr->builtinAcceptsInlineArgs);
+        u16 rDst = (u16)(argBase + lWords);
+        u32 rWords = emitArgPlacementForCall(rDst, rightElemReg, rightElemType,
+                                             expr->isBuiltinCall, expr->builtinAcceptsInlineArgs);
+        u16 next = (u16)(rDst + rWords);
+        if (nextReg_ < next) { nextReg_ = next; if (nextReg_ > maxReg_) maxReg_ = nextReg_; }
+        bool builtinReturnsInline = expr->isBuiltinCall && !expr->builtinAcceptsInlineArgs
+                                     && needsBoxAuto(scalarResultType);
+        elemResultReg = builtinReturnsInline ? allocReg() : allocSlot(scalarResultType);
         emitOp(expr->isBuiltinCall ? op_call_primitive : op_call);
         emitRegs(elemResultReg, 2, argBase);
         emitInt(expr->resolvedFuncGlobalIndex);
+        if (builtinReturnsInline) {
+            elemResultReg = emitUnboxIfInline(elemResultReg, scalarResultType);
+        }
     } else {
         bool isCmp = (expr->op >= BinaryOpExpr::Eq && expr->op <= BinaryOpExpr::Ge);
         if (isCmp) {
@@ -4738,12 +4765,23 @@ u16 CodeGen::genCartesianBinaryOp(BinaryOpExpr* expr) {
             emitOp(getCmpOp(expr->op, cmpType));
             emitRegs(elemResultReg, leftElemReg, rightElemReg);
         } else if (isCompositeNumeric(scalarResultType)) {
-            elemResultReg = allocReg();
-            emitOp(getCompositeArithOp(expr->op));
-            emitRegs(elemResultReg, leftElemReg, rightElemReg);
-            emitPtr(scalarResultType);
-            emitPtr(leftElemType);
-            emitPtr(rightElemType);
+            if (needsBoxAuto(scalarResultType)) {
+                // Inline-result composite arith writes directly into the
+                // multi-word destination slot (no heap allocation per elem).
+                elemResultReg = allocSlot(scalarResultType);
+                emitOp(getCompositeArithOpInline(expr->op));
+                emitRegs(elemResultReg, leftElemReg, rightElemReg);
+                emitPtr(scalarResultType);
+                emitPtr(leftElemType);
+                emitPtr(rightElemType);
+            } else {
+                elemResultReg = allocReg();
+                emitOp(getCompositeArithOp(expr->op));
+                emitRegs(elemResultReg, leftElemReg, rightElemReg);
+                emitPtr(scalarResultType);
+                emitPtr(leftElemType);
+                emitPtr(rightElemType);
+            }
         } else {
             leftElemReg = ensureType(leftElemReg, leftElemType, scalarResultType);
             rightElemReg = ensureType(rightElemReg, rightElemType, scalarResultType);
