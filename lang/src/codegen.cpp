@@ -2480,31 +2480,23 @@ u16 CodeGen::genMapLiteral(MapLiteralExpr* expr) {
     Type* valType = mapType->valueType_;
     usize numPairs = expr->entries.size();
 
-    // Generate all key-value pairs into consecutive registers: k0, v0, k1, v1, ...
-    // Phase 4f: MapObj stores 1 Word per key/value; box inline value types.
+    // Phase 4g.11: MapObj stores keys/values natively. Each pair occupies
+    // (keyStride + valueStride) consecutive registers; multi-word inline
+    // composites are written directly without boxing.
+    u32 keyStride = typeSlotWords(keyType);
+    u32 valStride = typeSlotWords(valType);
+    u32 pairStride = keyStride + valStride;
     u16 kvBase = nextReg_;
     for (size_t i = 0; i < numPairs; ++i) {
         u16 keyReg = genExpr(static_cast<Expr*>(expr->entries[i].key.get()));
         keyReg = ensureType(keyReg, expr->entries[i].key->resolvedType, keyType);
-        if (isInlineMultiword(keyType)) keyReg = emitBoxIfInline(keyReg, keyType);
-        u16 keyPos = kvBase + (u16)(i * 2);
-        if (keyReg != keyPos) {
-            emitOp(op_mov);
-            emitRegs(keyPos, keyReg);
-        }
-        u16 next = keyPos + 1;
-        if (nextReg_ < next) { nextReg_ = next; if (nextReg_ > maxReg_) maxReg_ = nextReg_; }
+        u16 keyPos = (u16)(kvBase + i * pairStride);
+        emitArgPlacement(keyPos, keyReg, keyType);
 
         u16 valReg = genExpr(static_cast<Expr*>(expr->entries[i].value.get()));
         valReg = ensureType(valReg, expr->entries[i].value->resolvedType, valType);
-        if (isInlineMultiword(valType)) valReg = emitBoxIfInline(valReg, valType);
-        u16 valPos = kvBase + (u16)(i * 2 + 1);
-        if (valReg != valPos) {
-            emitOp(op_mov);
-            emitRegs(valPos, valReg);
-        }
-        next = valPos + 1;
-        if (nextReg_ < next) { nextReg_ = next; if (nextReg_ > maxReg_) maxReg_ = nextReg_; }
+        u16 valPos = (u16)(keyPos + keyStride);
+        emitArgPlacement(valPos, valReg, valType);
     }
 
     u16 dst = allocReg();
@@ -2523,19 +2515,16 @@ u16 CodeGen::genSetLiteral(SetLiteralExpr* expr) {
     Type* elemType = setType->elemType_;
     usize count = expr->elements.size();
 
-    // Phase 4f: SetObj stores 1 Word per elem; box inline value types.
+    // Phase 4g.11: SetObj stores elements natively. Each element occupies
+    // elemStride consecutive registers; multi-word inline composites are
+    // written directly without boxing.
+    u32 elemStride = typeSlotWords(elemType);
     u16 elemBase = nextReg_;
     for (size_t i = 0; i < count; ++i) {
         u16 elemReg = genExpr(static_cast<Expr*>(expr->elements[i].get()));
         elemReg = ensureType(elemReg, expr->elements[i]->resolvedType, elemType);
-        if (isInlineMultiword(elemType)) elemReg = emitBoxIfInline(elemReg, elemType);
-        u16 pos = elemBase + (u16)i;
-        if (elemReg != pos) {
-            emitOp(op_mov);
-            emitRegs(pos, elemReg);
-        }
-        u16 next = pos + 1;
-        if (nextReg_ < next) { nextReg_ = next; if (nextReg_ > maxReg_) maxReg_ = nextReg_; }
+        u16 pos = (u16)(elemBase + i * elemStride);
+        emitArgPlacement(pos, elemReg, elemType);
     }
 
     u16 dst = allocReg();
@@ -7964,14 +7953,11 @@ u16 CodeGen::genIndexExpr(IndexExpr_* expr) {
 
     if (auto* mapType = dynamic_cast<MapType*>(expr->object->resolvedType)) {
         // Map subscript: map[key] -> Option<V>.
-        // Phase 4f: map keys are still stored boxed; box inline key before lookup.
-        // Phase 4g.4: op_map_get_option always lands a heap Enum* in a 1-word
-        // dst; unbox into an inline slot when the Option type is Inline.
+        // Phase 4g.11: keys are stored natively in the map. Pass multi-word
+        // inline keys without boxing; op_map_get_option produces a heap Enum*
+        // that emitUnboxIfInline subsequently unboxes for Inline Option types.
         u16 dst = allocReg();
         idxReg = ensureType(idxReg, expr->index->resolvedType, mapType->keyType_);
-        if (isInlineMultiword(mapType->keyType_)) {
-            idxReg = emitBoxIfInline(idxReg, mapType->keyType_);
-        }
         Type* optType = compiler_.optionType(mapType->valueType_);
         emitOp(op_map_get_option);
         emitRegs(dst, objReg, idxReg);

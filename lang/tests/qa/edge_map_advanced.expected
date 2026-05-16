@@ -1,4 +1,4 @@
-[b: 2, c: 3, a: 1]
+[c: 3, a: 1, b: 2]
 Option<Int>.some(1)
 Option<Int>.none
 1
@@ -6,8 +6,8 @@ Option<Int>.none
 Option<Int>.some(4)
 Option<Int>.none
 2
-[b, c, a]
-[2, 3, 1]
+[c, a, b]
+[3, 1, 2]
 3
 [c: 30, a: 1, b: 20]
 true

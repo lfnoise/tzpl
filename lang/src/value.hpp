@@ -83,6 +83,18 @@ void copyListHead(ListNode* dst, ListNode const* src, Type* elemType);
 // they short-circuit the recursion.
 void inlineWalkPointers(Word* base, Type* type, bool release_);
 
+// Retain / release Obj* children inside an arbitrary payload of `type`.
+// Phase 4g.11: used by inline-composite containers (Map/Set) so the same
+// call works for stride=1 Obj-pointer types and stride=N Inline composites.
+void payloadRetain(Word const* base, Type* type);
+void payloadRelease(Word* base, Type* type);
+
+// Box a multi-Word inline-composite payload (Complex / Fraction / Struct /
+// Tuple / Enum) into a single Word. Used by Map/Set get paths where the
+// caller expects a 1-word Obj* (heap-allocated) result. Caller owns the
+// retained Word.
+Word boxPayload(VM& vm, Type* type, Word const* src);
+
 // Phase 4g.2: deep box/unbox between an Inline composite (multi-word slot
 // per layout_) and a heap Tuple*/Struct* (1 Word per field, with Inline
 // composite fields recursively boxed). Used at builtin call/return
@@ -1174,32 +1186,126 @@ public:
     }
 };
 
-// Map object (immutable hash map)
+// Phase 4g.11: MapObj and SetObj are open-addressing hash tables with linear
+// probing that store keys/values (and set elements) as multi-Word slots --
+// inline composite keys/values are written directly into the slot's stride
+// without being boxed into an Obj*. Hashing and equality use hashWords /
+// wordsEqual on the type, mirroring the inline-composite-aware comparisons
+// used for Array and List.
+//
+// Slot layout for MapObj:
+//     entries_[i*slotStride()..i*slotStride()+keyStride_-1]   = key payload
+//     entries_[i*slotStride()+keyStride_..i*slotStride()+slotStride()-1] = value
+// meta_[i] is 0 (empty), 1 (occupied), or 2 (tombstone).
+//
+// Capacity is always a power of two (or zero). The load factor target is
+// 0.75 of capacity; tombstones count against the load factor and the table
+// rehashes when (size_ + tombstones_) >= capacity_ * 3/4.
+
 class MapObj : public Obj {
 public:
-    using Storage = std::unordered_map<Word, Word, WordHash, WordEqual,
-                                        rt::STLAllocator<std::pair<const Word, Word>>>;
-    Storage entries_;
+    static constexpr u8 SlotEmpty     = 0;
+    static constexpr u8 SlotOccupied  = 1;
+    static constexpr u8 SlotTombstone = 2;
+
+    Vec<Word> entries_;   // capacity() * slotStride() words
+    Vec<u8>   meta_;      // capacity() bytes
+    u32 keyStride_;       // words per key (>=1)
+    u32 valueStride_;     // words per value (>=1)
+    u32 size_;            // count of occupied slots
+    u32 tombstones_;      // count of tombstone slots
 
     MapObj(MapType* type);
 
-    VMString str() const override;
+    u32 slotStride() const { return keyStride_ + valueStride_; }
+    u32 capacity() const { return (u32)meta_.size(); }
+    u32 size() const { return size_; }
+    bool empty() const { return size_ == 0; }
 
+    Type* keyType() const   { return static_cast<MapType*>(type_)->keyType_; }
+    Type* valueType() const { return static_cast<MapType*>(type_)->valueType_; }
+
+    Word*       slotKey(u32 i)       { return &entries_[(size_t)i * slotStride()]; }
+    Word const* slotKey(u32 i) const { return &entries_[(size_t)i * slotStride()]; }
+    Word*       slotVal(u32 i)       { return slotKey(i) + keyStride_; }
+    Word const* slotVal(u32 i) const { return slotKey(i) + keyStride_; }
+    u8 slotState(u32 i) const { return meta_[i]; }
+
+    // Returns slot index for key, or capacity() if not present.
+    u32 findSlot(Word const* key) const;
+
+    // Insert a new entry (asserts key not already present). Caller is
+    // responsible for retaining Obj* fields in both key and val.
+    void insertNew(Word const* key, Word const* val);
+
+    // Insert or update. On update, releases the old value's Obj* fields and
+    // discards the supplied key's Obj* retains (key is already present).
+    // Caller is responsible for retaining Obj* fields in key and val before
+    // calling. Returns true if newly inserted.
+    bool insertOrUpdate(Word const* key, Word const* val);
+
+    // Erase entry. Releases the slot's key+value Obj* fields. Returns true
+    // if erased.
+    bool eraseEntry(Word const* key);
+
+    // Internal: grow to a new capacity (must be power of 2, >= size_*2).
+    void rehash(u32 newCapacity);
+
+    // Deep copy: assumes *this is empty. Retains all Obj* fields in src.
+    void copyFrom(MapObj const& src);
+
+    VMString str() const override;
     void releaseChildren() override;
+
+private:
+    void maybeGrow();
 };
 
-// Set object (immutable hash set)
 class SetObj : public Obj {
 public:
-    using Storage = std::unordered_set<Word, WordHash, WordEqual,
-                                        rt::STLAllocator<Word>>;
-    Storage entries_;
+    static constexpr u8 SlotEmpty     = 0;
+    static constexpr u8 SlotOccupied  = 1;
+    static constexpr u8 SlotTombstone = 2;
+
+    Vec<Word> entries_;   // capacity() * elemStride_ words
+    Vec<u8>   meta_;      // capacity() bytes
+    u32 elemStride_;
+    u32 size_;
+    u32 tombstones_;
 
     SetObj(SetType* type);
 
-    VMString str() const override;
+    Type* elemType() const { return static_cast<SetType*>(type_)->elemType_; }
 
+    u32 capacity() const { return (u32)meta_.size(); }
+    u32 size() const { return size_; }
+    bool empty() const { return size_ == 0; }
+
+    Word*       slotElem(u32 i)       { return &entries_[(size_t)i * elemStride_]; }
+    Word const* slotElem(u32 i) const { return &entries_[(size_t)i * elemStride_]; }
+    u8 slotState(u32 i) const { return meta_[i]; }
+
+    u32 findSlot(Word const* elem) const;
+
+    // Insert new (assumes not present). Caller retains Obj* fields beforehand.
+    void insertNew(Word const* elem);
+
+    // Insert if not present. Caller retains Obj* fields. Returns true if new.
+    // If the element is already present, releases the caller's Obj* retains.
+    bool insertElem(Word const* elem);
+
+    // Erase, releasing the slot's Obj* fields. Returns true if erased.
+    bool eraseElem(Word const* elem);
+
+    void rehash(u32 newCapacity);
+
+    void copyFrom(SetObj const& src);
+
+    VMString str() const override;
     void releaseChildren() override;
+
+private:
+    void maybeGrow();
 };
 
 // Function pointer type for built-in functions

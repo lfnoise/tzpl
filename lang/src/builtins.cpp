@@ -542,46 +542,86 @@ static bool resolve_notNil(Compiler& compiler, const std::vector<Type*>& args,
 // Map builtins
 // ============================================================================
 
+// Phase 4g.11: Map/Set builtins use the new flat-hash-table API and accept
+// inline-composite keys/values as multi-Word slots (acceptsInlineArgs=true).
+// Arg register layout: [map, key0..key{ks-1}, val0..val{vs-1}] etc.
+
 // length: [K:V] -> Int
 static void builtin_length_map(VM& vm, u16 dst, u16, u16 ab) {
     auto* map = static_cast<MapObj*>(vm.reg(ab).o);
-    vm.reg(dst).i = (i64)map->entries_.size();
+    vm.reg(dst).i = (i64)map->size();
 }
 
 // get: [K:V], K -> Option<V>
+//
+// Phase 4g.11: with acceptsInlineArgs=true, the Option<V> return slot is
+// either Inline (multi-word: discriminant + payload) or NullablePtrEnum
+// (single nullable Obj*). Write directly into the multi-word slot instead
+// of materializing a heap Enum*.
 static void builtin_get_map(VM& vm, u16 dst, u16, u16 ab) {
     auto* map = static_cast<MapObj*>(vm.reg(ab).o);
     auto* mt = static_cast<MapType*>(map->type_);
-    Word key = vm.reg(ab + 1);
-    auto it = map->entries_.find(key);
-    auto* optType = vm.optionType(mt->valueType_);
-    if (it != map->entries_.end()) {
-        auto* e = new Enum(optType);
-        e->which_ = 0;  // some
-        e->word_ = it->second;
-        // Phase 4c: case 0 = some; check layout_[0] for pointer storage.
-        if (!optType->layout_.empty()
-            && storesObjPtr(optType->layout_[0].type)
-            && e->word_.o) {
-            e->word_.o->retain();
+    Type* vt = mt->valueType_;
+    auto* optType = vm.optionType(vt);
+    Word const* keyPtr = &vm.reg((u16)(ab + 1));
+    u32 slot = map->findSlot(keyPtr);
+    bool found = (slot != map->capacity());
+
+    if (optType->repr_ == Type::Repr::NullablePtrEnum) {
+        if (found) {
+            Obj* o = map->slotVal(slot)[0].o;
+            if (o) o->retain();
+            vm.reg(dst).o = o;
+        } else {
+            vm.reg(dst).o = nullptr;
         }
-        vm.reg(dst).o = e;
-    } else {
-        auto* e = new Enum(optType);
-        e->which_ = 1;  // none
-        vm.reg(dst).o = e;
+        return;
     }
+    if (optType->repr_ == Type::Repr::Inline) {
+        if (found) {
+            vm.reg(dst).i = 0;  // which_ = some
+            Word const* v = map->slotVal(slot);
+            for (u32 i = 0; i < map->valueStride_; ++i) {
+                vm.reg((u16)(dst + 1 + i)) = v[i];
+            }
+            payloadRetain(&vm.reg((u16)(dst + 1)), vt);
+        } else {
+            vm.reg(dst).i = 1;  // which_ = none
+            for (u32 i = 0; i < map->valueStride_; ++i) {
+                vm.reg((u16)(dst + 1 + i)).i = 0;
+            }
+        }
+        return;
+    }
+    // Fallback: heap Enum* (legacy 1-word return). Shouldn't hit for valid
+    // Option<V> types but kept for safety.
+    auto* e = new Enum(optType);
+    if (found) {
+        e->which_ = 0;
+        e->word_ = boxPayload(vm, vt, map->slotVal(slot));
+    } else {
+        e->which_ = 1;
+        e->word_.i = 0;
+    }
+    vm.reg(dst).o = e;
 }
 
 // get: [K:V], K, V -> V  (with default)
 static void builtin_get_map_default(VM& vm, u16 dst, u16, u16 ab) {
     auto* map = static_cast<MapObj*>(vm.reg(ab).o);
-    Word key = vm.reg(ab + 1);
-    auto it = map->entries_.find(key);
-    if (it != map->entries_.end()) {
-        vm.reg(dst) = it->second;
+    u32 kS = map->keyStride_;
+    u32 vS = map->valueStride_;
+    Word const* keyPtr = &vm.reg((u16)(ab + 1));
+    u32 slot = map->findSlot(keyPtr);
+    if (slot != map->capacity()) {
+        Word const* v = map->slotVal(slot);
+        for (u32 i = 0; i < vS; ++i) vm.reg((u16)(dst + i)) = v[i];
+        payloadRetain(&vm.reg(dst), map->valueType());
     } else {
-        vm.reg(dst) = vm.reg(ab + 2);
+        // Default value sits at args (ab + 1 + kS .. ab + 1 + kS + vS - 1).
+        Word const* dflt = &vm.reg((u16)(ab + 1 + kS));
+        for (u32 i = 0; i < vS; ++i) vm.reg((u16)(dst + i)) = dflt[i];
+        payloadRetain(&vm.reg(dst), map->valueType());
     }
 }
 
@@ -589,18 +629,14 @@ static void builtin_get_map_default(VM& vm, u16 dst, u16, u16 ab) {
 static void builtin_put_map(VM& vm, u16 dst, u16, u16 ab) {
     auto* map = static_cast<MapObj*>(vm.reg(ab).o);
     auto* mt = static_cast<MapType*>(map->type_);
+    u32 kS = map->keyStride_;
     auto* result = new MapObj(mt);
-    result->entries_ = map->entries_;
-    result->entries_[vm.reg(ab + 1)] = vm.reg(ab + 2);
-    // Retain all Obj* keys and values in the new map
-    bool keyIsObj = storesObjPtr(mt->keyType_);
-    bool valIsObj = storesObjPtr(mt->valueType_);
-    if (keyIsObj || valIsObj) {
-        for (auto& [k, v] : result->entries_) {
-            if (keyIsObj && k.o) k.o->retain();
-            if (valIsObj && v.o) v.o->retain();
-        }
-    }
+    result->copyFrom(*map);
+    Word const* key = &vm.reg((u16)(ab + 1));
+    Word const* val = &vm.reg((u16)(ab + 1 + kS));
+    payloadRetain(key, mt->keyType_);
+    payloadRetain(val, mt->valueType_);
+    result->insertOrUpdate(key, val);
     vm.reg(dst).o = result;
 }
 
@@ -609,83 +645,83 @@ static void builtin_remove_map(VM& vm, u16 dst, u16, u16 ab) {
     auto* map = static_cast<MapObj*>(vm.reg(ab).o);
     auto* mt = static_cast<MapType*>(map->type_);
     auto* result = new MapObj(mt);
-    result->entries_ = map->entries_;
-    result->entries_.erase(vm.reg(ab + 1));
-    // Retain all Obj* keys and values in the new map
-    bool keyIsObj = storesObjPtr(mt->keyType_);
-    bool valIsObj = storesObjPtr(mt->valueType_);
-    if (keyIsObj || valIsObj) {
-        for (auto& [k, v] : result->entries_) {
-            if (keyIsObj && k.o) k.o->retain();
-            if (valIsObj && v.o) v.o->retain();
-        }
-    }
+    result->copyFrom(*map);
+    Word const* key = &vm.reg((u16)(ab + 1));
+    result->eraseEntry(key);
     vm.reg(dst).o = result;
 }
 
 // contains: [K:V], K -> Bool
 static void builtin_contains_map(VM& vm, u16 dst, u16, u16 ab) {
     auto* map = static_cast<MapObj*>(vm.reg(ab).o);
-    vm.reg(dst).i = map->entries_.count(vm.reg(ab + 1)) ? 1 : 0;
+    Word const* keyPtr = &vm.reg((u16)(ab + 1));
+    vm.reg(dst).i = (map->findSlot(keyPtr) != map->capacity()) ? 1 : 0;
 }
 
 // keys: [K:V] -> [K]
-// Phase 4e: dispatch via arrayBackendFor so Map[Complex,_].keys() and
-// Map[Fraction,_].keys() unbox the still-boxed map keys into the inline
-// array backend.
+// Phase 4g.11: Map stores inline-composite keys natively, so we copy them
+// directly into the array backend.
 static void builtin_keys_map(VM& vm, u16 dst, u16, u16 ab) {
     auto* map = static_cast<MapObj*>(vm.reg(ab).o);
     auto* mt = static_cast<MapType*>(map->type_);
     Type* kt = mt->keyType_;
     auto* arrType = vm.arrayType(kt);
+    u32 cap = map->capacity();
     switch (arrayBackendFor(kt)) {
         case ArrayBackend::Complex: {
             auto* arr = new PodArray<x64>(arrType);
-            for (auto const& [k, v] : map->entries_) {
-                auto* c = static_cast<Complex*>(k.o);
-                arr->v.push_back(c->x);
+            for (u32 i = 0; i < cap; ++i) {
+                if (map->slotState(i) != MapObj::SlotOccupied) continue;
+                Word const* k = map->slotKey(i);
+                arr->v.push_back(x64(k[0].f, k[1].f));
             }
             vm.reg(dst).o = arr;
             return;
         }
         case ArrayBackend::Fraction: {
             auto* arr = new PodArray<r64>(arrType);
-            for (auto const& [k, v] : map->entries_) {
-                auto* f = static_cast<Fraction*>(k.o);
-                arr->v.push_back(f->r);
+            for (u32 i = 0; i < cap; ++i) {
+                if (map->slotState(i) != MapObj::SlotOccupied) continue;
+                Word const* k = map->slotKey(i);
+                arr->v.push_back(r64(k[0].i, k[1].i));
             }
             vm.reg(dst).o = arr;
             return;
         }
         case ArrayBackend::Float: {
             auto* arr = new PodArray<f64>(arrType);
-            for (auto const& [k, v] : map->entries_) arr->v.push_back(k.f);
+            for (u32 i = 0; i < cap; ++i) {
+                if (map->slotState(i) != MapObj::SlotOccupied) continue;
+                arr->v.push_back(map->slotKey(i)[0].f);
+            }
             vm.reg(dst).o = arr;
             return;
         }
         case ArrayBackend::Int: {
             auto* arr = new PodArray<i64>(arrType);
-            for (auto const& [k, v] : map->entries_) arr->v.push_back(k.i);
+            for (u32 i = 0; i < cap; ++i) {
+                if (map->slotState(i) != MapObj::SlotOccupied) continue;
+                arr->v.push_back(map->slotKey(i)[0].i);
+            }
             vm.reg(dst).o = arr;
             return;
         }
         case ArrayBackend::Inline: {
-            // Map keys are still stored as boxed Obj* (Map migration not yet
-            // done); unbox each into the inline array slot.
             auto* arr = new InlineArray(arrType);
-            arr->reserve(map->entries_.size());
-            Word scratch[8] = {};
-            for (auto const& [k, v] : map->entries_) {
-                unboxInlineDeepTo(vm, kt, k.o, scratch);
-                arr->pushSlot(scratch);
-                inlineWalkPointers(scratch, kt, /*release_=*/true);
+            arr->reserve(map->size());
+            for (u32 i = 0; i < cap; ++i) {
+                if (map->slotState(i) != MapObj::SlotOccupied) continue;
+                arr->pushSlot(map->slotKey(i));
             }
             vm.reg(dst).o = arr;
             return;
         }
         case ArrayBackend::Obj: {
             auto* arr = new ObjArray(arrType);
-            for (auto const& [k, v] : map->entries_) arr->push(k.o);
+            for (u32 i = 0; i < cap; ++i) {
+                if (map->slotState(i) != MapObj::SlotOccupied) continue;
+                arr->push(map->slotKey(i)[0].o);
+            }
             vm.reg(dst).o = arr;
             return;
         }
@@ -698,52 +734,62 @@ static void builtin_values_map(VM& vm, u16 dst, u16, u16 ab) {
     auto* mt = static_cast<MapType*>(map->type_);
     Type* vt = mt->valueType_;
     auto* arrType = vm.arrayType(vt);
+    u32 cap = map->capacity();
     switch (arrayBackendFor(vt)) {
         case ArrayBackend::Complex: {
             auto* arr = new PodArray<x64>(arrType);
-            for (auto const& [k, v] : map->entries_) {
-                auto* c = static_cast<Complex*>(v.o);
-                arr->v.push_back(c->x);
+            for (u32 i = 0; i < cap; ++i) {
+                if (map->slotState(i) != MapObj::SlotOccupied) continue;
+                Word const* v = map->slotVal(i);
+                arr->v.push_back(x64(v[0].f, v[1].f));
             }
             vm.reg(dst).o = arr;
             return;
         }
         case ArrayBackend::Fraction: {
             auto* arr = new PodArray<r64>(arrType);
-            for (auto const& [k, v] : map->entries_) {
-                auto* f = static_cast<Fraction*>(v.o);
-                arr->v.push_back(f->r);
+            for (u32 i = 0; i < cap; ++i) {
+                if (map->slotState(i) != MapObj::SlotOccupied) continue;
+                Word const* v = map->slotVal(i);
+                arr->v.push_back(r64(v[0].i, v[1].i));
             }
             vm.reg(dst).o = arr;
             return;
         }
         case ArrayBackend::Float: {
             auto* arr = new PodArray<f64>(arrType);
-            for (auto const& [k, v] : map->entries_) arr->v.push_back(v.f);
+            for (u32 i = 0; i < cap; ++i) {
+                if (map->slotState(i) != MapObj::SlotOccupied) continue;
+                arr->v.push_back(map->slotVal(i)[0].f);
+            }
             vm.reg(dst).o = arr;
             return;
         }
         case ArrayBackend::Int: {
             auto* arr = new PodArray<i64>(arrType);
-            for (auto const& [k, v] : map->entries_) arr->v.push_back(v.i);
+            for (u32 i = 0; i < cap; ++i) {
+                if (map->slotState(i) != MapObj::SlotOccupied) continue;
+                arr->v.push_back(map->slotVal(i)[0].i);
+            }
             vm.reg(dst).o = arr;
             return;
         }
         case ArrayBackend::Inline: {
             auto* arr = new InlineArray(arrType);
-            arr->reserve(map->entries_.size());
-            Word scratch[8] = {};
-            for (auto const& [k, v] : map->entries_) {
-                unboxInlineDeepTo(vm, vt, v.o, scratch);
-                arr->pushSlot(scratch);
-                inlineWalkPointers(scratch, vt, /*release_=*/true);
+            arr->reserve(map->size());
+            for (u32 i = 0; i < cap; ++i) {
+                if (map->slotState(i) != MapObj::SlotOccupied) continue;
+                arr->pushSlot(map->slotVal(i));
             }
             vm.reg(dst).o = arr;
             return;
         }
         case ArrayBackend::Obj: {
             auto* arr = new ObjArray(arrType);
-            for (auto const& [k, v] : map->entries_) arr->push(v.o);
+            for (u32 i = 0; i < cap; ++i) {
+                if (map->slotState(i) != MapObj::SlotOccupied) continue;
+                arr->push(map->slotVal(i)[0].o);
+            }
             vm.reg(dst).o = arr;
             return;
         }
@@ -756,18 +802,17 @@ static void builtin_merge_map(VM& vm, u16 dst, u16, u16 ab) {
     auto* b = static_cast<MapObj*>(vm.reg(ab + 1).o);
     auto* mt = static_cast<MapType*>(a->type_);
     auto* result = new MapObj(mt);
-    result->entries_ = a->entries_;
-    for (auto& [k, v] : b->entries_) {
-        result->entries_[k] = v;
-    }
-    // Retain all Obj* keys and values in the new map
-    bool keyIsObj = storesObjPtr(mt->keyType_);
-    bool valIsObj = storesObjPtr(mt->valueType_);
-    if (keyIsObj || valIsObj) {
-        for (auto& [k, v] : result->entries_) {
-            if (keyIsObj && k.o) k.o->retain();
-            if (valIsObj && v.o) v.o->retain();
-        }
+    result->copyFrom(*a);
+    Type* kt = mt->keyType_;
+    Type* vt = mt->valueType_;
+    u32 bCap = b->capacity();
+    for (u32 i = 0; i < bCap; ++i) {
+        if (b->slotState(i) != MapObj::SlotOccupied) continue;
+        Word const* k = b->slotKey(i);
+        Word const* v = b->slotVal(i);
+        payloadRetain(k, kt);
+        payloadRetain(v, vt);
+        result->insertOrUpdate(k, v);
     }
     vm.reg(dst).o = result;
 }
@@ -858,6 +903,10 @@ static bool resolve_merge(Compiler& compiler, const std::vector<Type*>& args,
 }
 
 // pairs: [K:V] -> Array[(K, V)]
+//
+// The heap Tuple* stores 1 Word per field. Multi-word inline keys/values get
+// boxed before being placed in the tuple so the existing 1-Word-per-field
+// tuple ABI continues to work for downstream consumers.
 static void builtin_pairs_map(VM& vm, u16 dst, u16, u16 ab) {
     auto* map = static_cast<MapObj*>(vm.reg(ab).o);
     auto* mt = static_cast<MapType*>(map->type_);
@@ -868,10 +917,16 @@ static void builtin_pairs_map(VM& vm, u16 dst, u16, u16 ab) {
     auto* tt = vm.tupleType(fields);
     auto* resAT = vm.arrayType(tt);
     auto* result = new ObjArray(resAT);
-    for (auto& [k, v] : map->entries_) {
+    Type* kt = mt->keyType_;
+    Type* vt = mt->valueType_;
+    u32 cap = map->capacity();
+    for (u32 i = 0; i < cap; ++i) {
+        if (map->slotState(i) != MapObj::SlotOccupied) continue;
         auto* tup = Tuple::create(tt, 2);
-        tup->v[0] = k;
-        tup->v[1] = v;
+        Word const* k = map->slotKey(i);
+        Word const* v = map->slotVal(i);
+        tup->v[0] = boxPayload(vm, kt, k);
+        tup->v[1] = boxPayload(vm, vt, v);
         result->push(tup);
     }
     vm.reg(dst).o = result;
@@ -1324,7 +1379,7 @@ static bool resolve_yieldAll(Compiler& compiler, const std::vector<Type*>& args,
 // length: Set<T> -> Int
 static void builtin_length_set(VM& vm, u16 dst, u16, u16 ab) {
     auto* set = static_cast<SetObj*>(vm.reg(ab).o);
-    vm.reg(dst).i = (i64)set->entries_.size();
+    vm.reg(dst).i = (i64)set->size();
 }
 
 // add: Set<T>, T -> Set<T>
@@ -1332,14 +1387,10 @@ static void builtin_add_set(VM& vm, u16 dst, u16, u16 ab) {
     auto* src = static_cast<SetObj*>(vm.reg(ab).o);
     auto* st = static_cast<SetType*>(src->type_);
     auto* result = new SetObj(st);
-    result->entries_ = src->entries_;
-    result->entries_.insert(vm.reg(ab + 1));
-    // Retain all Obj* elements
-    if (storesObjPtr(st->elemType_)) {
-        for (auto& elem : result->entries_) {
-            if (elem.o) elem.o->retain();
-        }
-    }
+    result->copyFrom(*src);
+    Word const* elem = &vm.reg((u16)(ab + 1));
+    payloadRetain(elem, st->elemType_);
+    result->insertElem(elem);
     vm.reg(dst).o = result;
 }
 
@@ -1348,21 +1399,17 @@ static void builtin_remove_set(VM& vm, u16 dst, u16, u16 ab) {
     auto* src = static_cast<SetObj*>(vm.reg(ab).o);
     auto* st = static_cast<SetType*>(src->type_);
     auto* result = new SetObj(st);
-    result->entries_ = src->entries_;
-    result->entries_.erase(vm.reg(ab + 1));
-    // Retain all Obj* elements
-    if (storesObjPtr(st->elemType_)) {
-        for (auto& elem : result->entries_) {
-            if (elem.o) elem.o->retain();
-        }
-    }
+    result->copyFrom(*src);
+    Word const* elem = &vm.reg((u16)(ab + 1));
+    result->eraseElem(elem);
     vm.reg(dst).o = result;
 }
 
 // contains: Set<T>, T -> Bool
 static void builtin_contains_set(VM& vm, u16 dst, u16, u16 ab) {
     auto* set = static_cast<SetObj*>(vm.reg(ab).o);
-    vm.reg(dst).i = set->entries_.count(vm.reg(ab + 1)) ? 1 : 0;
+    Word const* elem = &vm.reg((u16)(ab + 1));
+    vm.reg(dst).i = (set->findSlot(elem) != set->capacity()) ? 1 : 0;
 }
 
 // union: Set<T>, Set<T> -> Set<T>
@@ -1371,13 +1418,14 @@ static void builtin_union_set(VM& vm, u16 dst, u16, u16 ab) {
     auto* b = static_cast<SetObj*>(vm.reg(ab + 1).o);
     auto* st = static_cast<SetType*>(a->type_);
     auto* result = new SetObj(st);
-    result->entries_ = a->entries_;
-    for (auto& elem : b->entries_) result->entries_.insert(elem);
-    // Retain all Obj* elements
-    if (storesObjPtr(st->elemType_)) {
-        for (auto& elem : result->entries_) {
-            if (elem.o) elem.o->retain();
-        }
+    result->copyFrom(*a);
+    Type* et = st->elemType_;
+    u32 bCap = b->capacity();
+    for (u32 i = 0; i < bCap; ++i) {
+        if (b->slotState(i) != SetObj::SlotOccupied) continue;
+        Word const* e = b->slotElem(i);
+        payloadRetain(e, et);
+        result->insertElem(e);
     }
     vm.reg(dst).o = result;
 }
@@ -1388,14 +1436,14 @@ static void builtin_intersection_set(VM& vm, u16 dst, u16, u16 ab) {
     auto* b = static_cast<SetObj*>(vm.reg(ab + 1).o);
     auto* st = static_cast<SetType*>(a->type_);
     auto* result = new SetObj(st);
-    for (auto& elem : a->entries_) {
-        if (b->entries_.count(elem)) result->entries_.insert(elem);
-    }
-    // Retain all Obj* elements
-    if (storesObjPtr(st->elemType_)) {
-        for (auto& elem : result->entries_) {
-            if (elem.o) elem.o->retain();
-        }
+    Type* et = st->elemType_;
+    u32 aCap = a->capacity();
+    for (u32 i = 0; i < aCap; ++i) {
+        if (a->slotState(i) != SetObj::SlotOccupied) continue;
+        Word const* e = a->slotElem(i);
+        if (b->findSlot(e) == b->capacity()) continue;
+        payloadRetain(e, et);
+        result->insertElem(e);
     }
     vm.reg(dst).o = result;
 }
@@ -1406,73 +1454,83 @@ static void builtin_difference_set(VM& vm, u16 dst, u16, u16 ab) {
     auto* b = static_cast<SetObj*>(vm.reg(ab + 1).o);
     auto* st = static_cast<SetType*>(a->type_);
     auto* result = new SetObj(st);
-    for (auto& elem : a->entries_) {
-        if (!b->entries_.count(elem)) result->entries_.insert(elem);
-    }
-    // Retain all Obj* elements
-    if (storesObjPtr(st->elemType_)) {
-        for (auto& elem : result->entries_) {
-            if (elem.o) elem.o->retain();
-        }
+    Type* et = st->elemType_;
+    u32 aCap = a->capacity();
+    for (u32 i = 0; i < aCap; ++i) {
+        if (a->slotState(i) != SetObj::SlotOccupied) continue;
+        Word const* e = a->slotElem(i);
+        if (b->findSlot(e) != b->capacity()) continue;
+        payloadRetain(e, et);
+        result->insertElem(e);
     }
     vm.reg(dst).o = result;
 }
 
 // toArray: Set<T> -> [T]
-// Phase 4e: dispatch via arrayBackendFor; Set still stores boxed
-// Complex/Fraction so we unbox on extraction.
+// Phase 4g.11: inline-composite elements are stored natively in the set, so
+// we copy them directly into the inline array backend.
 static void builtin_toArray_set(VM& vm, u16 dst, u16, u16 ab) {
     auto* set = static_cast<SetObj*>(vm.reg(ab).o);
     auto* st = static_cast<SetType*>(set->type_);
     Type* elemType = st->elemType_;
     auto* arrType = vm.arrayType(elemType);
+    u32 cap = set->capacity();
 
     switch (arrayBackendFor(elemType)) {
         case ArrayBackend::Complex: {
             auto* arr = new PodArray<x64>(arrType);
-            for (auto const& elem : set->entries_) {
-                auto* c = static_cast<Complex*>(elem.o);
-                arr->v.push_back(c->x);
+            for (u32 i = 0; i < cap; ++i) {
+                if (set->slotState(i) != SetObj::SlotOccupied) continue;
+                Word const* e = set->slotElem(i);
+                arr->v.push_back(x64(e[0].f, e[1].f));
             }
             vm.reg(dst).o = arr;
             return;
         }
         case ArrayBackend::Fraction: {
             auto* arr = new PodArray<r64>(arrType);
-            for (auto const& elem : set->entries_) {
-                auto* f = static_cast<Fraction*>(elem.o);
-                arr->v.push_back(f->r);
+            for (u32 i = 0; i < cap; ++i) {
+                if (set->slotState(i) != SetObj::SlotOccupied) continue;
+                Word const* e = set->slotElem(i);
+                arr->v.push_back(r64(e[0].i, e[1].i));
             }
             vm.reg(dst).o = arr;
             return;
         }
         case ArrayBackend::Float: {
             auto* arr = new PodArray<f64>(arrType);
-            for (auto const& elem : set->entries_) arr->v.push_back(elem.f);
+            for (u32 i = 0; i < cap; ++i) {
+                if (set->slotState(i) != SetObj::SlotOccupied) continue;
+                arr->v.push_back(set->slotElem(i)[0].f);
+            }
             vm.reg(dst).o = arr;
             return;
         }
         case ArrayBackend::Int: {
             auto* arr = new PodArray<i64>(arrType);
-            for (auto const& elem : set->entries_) arr->v.push_back(elem.i);
+            for (u32 i = 0; i < cap; ++i) {
+                if (set->slotState(i) != SetObj::SlotOccupied) continue;
+                arr->v.push_back(set->slotElem(i)[0].i);
+            }
             vm.reg(dst).o = arr;
             return;
         }
         case ArrayBackend::Inline: {
             auto* arr = new InlineArray(arrType);
-            arr->reserve(set->entries_.size());
-            Word scratch[8] = {};
-            for (auto const& elem : set->entries_) {
-                unboxInlineDeepTo(vm, elemType, elem.o, scratch);
-                arr->pushSlot(scratch);
-                inlineWalkPointers(scratch, elemType, /*release_=*/true);
+            arr->reserve(set->size());
+            for (u32 i = 0; i < cap; ++i) {
+                if (set->slotState(i) != SetObj::SlotOccupied) continue;
+                arr->pushSlot(set->slotElem(i));
             }
             vm.reg(dst).o = arr;
             return;
         }
         case ArrayBackend::Obj: {
             auto* arr = new ObjArray(arrType);
-            for (auto const& elem : set->entries_) arr->push(elem.o);
+            for (u32 i = 0; i < cap; ++i) {
+                if (set->slotState(i) != SetObj::SlotOccupied) continue;
+                arr->push(set->slotElem(i)[0].o);
+            }
             vm.reg(dst).o = arr;
             return;
         }
@@ -2205,14 +2263,16 @@ void registerBuiltinFunctions(Compiler& compiler,
     registerTemplate(compiler, functions, "picks",     resolve_picks);
 
     // --- Map builtins ---
-    registerTemplate(compiler, functions, "get",          resolve_get_map);
-    registerTemplate(compiler, functions, "put",          resolve_put);
-    registerTemplate(compiler, functions, "remove",       resolve_remove);
-    registerTemplate(compiler, functions, "contains",     resolve_contains);
-    registerTemplate(compiler, functions, "keys",         resolve_keys);
-    registerTemplate(compiler, functions, "values",       resolve_values);
-    registerTemplate(compiler, functions, "pairs",        resolve_pairs);
-    registerTemplate(compiler, functions, "merge",        resolve_merge);
+    // Phase 4g.11: Map keys/values are stored natively (multi-word for inline
+    // composites) so the builtins read args as multi-word slots.
+    registerTemplate(compiler, functions, "get",          resolve_get_map,    /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "put",          resolve_put,        /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "remove",       resolve_remove,     /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "contains",     resolve_contains,   /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "keys",         resolve_keys,       /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "values",       resolve_values,     /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "pairs",        resolve_pairs,      /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "merge",        resolve_merge,      /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
 
     // --- Option builtins ---
     // Phase 4g.6: Inline Option dispatches to *_inline variants that read
@@ -2230,11 +2290,14 @@ void registerBuiltinFunctions(Compiler& compiler,
     registerTemplate(compiler, functions, "yieldAll",     resolve_yieldAll);
 
     // --- Set builtins ---
-    registerTemplate(compiler, functions, "add",          resolve_add_set);
-    registerTemplate(compiler, functions, "union",        resolve_union);
-    registerTemplate(compiler, functions, "intersection", resolve_intersection);
-    registerTemplate(compiler, functions, "difference",   resolve_difference);
-    registerTemplate(compiler, functions, "toArray",      resolve_toArray_set);
+    // Phase 4g.11: Set elements are stored natively (multi-word for inline
+    // composites). The Map "remove"/"contains" templates above also handle
+    // Set arguments through the shared resolvers.
+    registerTemplate(compiler, functions, "add",          resolve_add_set,         /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "union",        resolve_union,           /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "intersection", resolve_intersection,    /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "difference",   resolve_difference,      /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "toArray",      resolve_toArray_set,     /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
 
     // --- hash builtin ---
     // Phase 4g.6: hash resolves builtin_hash_inline for Inline-classified

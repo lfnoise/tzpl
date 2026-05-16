@@ -32,8 +32,8 @@ Option.some(42)
 Option.none
 Shape.circle(5.0)
 Shape.rect(3.0, 4.0)
-[b: 2, a: 1]
-Set(30, 20, 10)
+[a: 1, b: 2]
+Set(10, 20, 30)
 [Point { x: 1.0, y: 2.0 }, Point { x: 3.0, y: 4.0 }]
 [Option.some(1), Option.none, Option.some(3)]
 [(Point { x: 0.0, y: 0.0 }, origin), (Point { x: 1.0, y: 1.0 }, unit)]

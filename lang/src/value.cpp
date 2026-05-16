@@ -638,77 +638,415 @@ Method::Method(Type* type)
 {
 }
 
+// Phase 4g.11: open-addressing hash tables for MapObj / SetObj.
+//
+// Stride helpers: compute the words/element width for `type`. Inline value
+// types are stored natively in their sizeWords_ words; all other types
+// (Obj* pointers, primitives) occupy a single Word.
+static u32 strideForType(Type* type) {
+    if (!type) return 1;
+    if (type->repr_ != Type::Repr::Inline) return 1;
+    u32 sw = type->sizeWords_;
+    return sw == 0 ? 1 : sw;
+}
+
+// Retain Obj* children inside an arbitrary payload of `type`. For Inline
+// composites this walks the layout (skipping Complex/Fraction, which have
+// no Obj* children). For non-Inline types this retains base[0].o when the
+// type stores an Obj*.
+void payloadRetain(Word const* base, Type* type) {
+    if (!type) return;
+    if (type->repr_ == Type::Repr::Inline) {
+        inlineWalkPointers(const_cast<Word*>(base), type, /*release_=*/false);
+    } else if (storesObjPtr(type) && base[0].o) {
+        base[0].o->retain();
+    }
+}
+
+void payloadRelease(Word* base, Type* type) {
+    if (!type) return;
+    if (type->repr_ == Type::Repr::Inline) {
+        inlineWalkPointers(base, type, /*release_=*/true);
+    } else if (storesObjPtr(type) && base[0].o) {
+        base[0].o->release();
+    }
+}
+
+// Box an arbitrary payload of `type` into a single Word. For Inline composite
+// types this creates a heap representation (Complex / Fraction / Struct /
+// Tuple / Enum) and returns w.o pointing to it (already retained). For 1-Word
+// types this just copies the source word.
+Word boxPayload(VM& vm, Type* type, Word const* src) {
+    Word w; w.i = 0;
+    if (!type) return w;
+    if (type == gCurrentVM->complexType()) {
+        w.o = static_cast<Obj*>(new Complex(x64(src[0].f, src[1].f)));
+        if (w.o) w.o->retain();
+        return w;
+    }
+    if (type == gCurrentVM->fractionType()) {
+        w.o = static_cast<Obj*>(new Fraction(r64(src[0].i, src[1].i)));
+        if (w.o) w.o->retain();
+        return w;
+    }
+    if (type->repr_ == Type::Repr::Inline && type->sizeWords_ > 1) {
+        Obj* boxed = boxInlineDeepFrom(vm, type, src);
+        if (boxed) boxed->retain();
+        w.o = boxed;
+        return w;
+    }
+    w = src[0];
+    if (storesObjPtr(type) && w.o) w.o->retain();
+    return w;
+}
+
+// Smallest non-zero power-of-two capacity. Keeps cap small to avoid wasting
+// TLSF memory for typically-tiny user maps but big enough for a few entries
+// before the first rehash.
+static constexpr u32 kHashTableMinCapacity = 8;
+
+// Triggers a rehash when (size + tombstones) crosses 3/4 capacity.
+static bool needsGrow(u32 size, u32 tombstones, u32 capacity) {
+    if (capacity == 0) return true;
+    return (size + tombstones) * 4 >= capacity * 3;
+}
+
 // MapObj constructor
 MapObj::MapObj(MapType* type)
     : Obj(type)
-    , entries_(0,
-               WordHash{type->keyType_},
-               WordEqual{type->keyType_},
-               rt::STLAllocator<std::pair<const Word, Word>>(rt::gCurrentAllocator))
+    , entries_(rt::STLAllocator<Word>(rt::gCurrentAllocator))
+    , meta_(rt::STLAllocator<u8>(rt::gCurrentAllocator))
+    , keyStride_(strideForType(type->keyType_))
+    , valueStride_(strideForType(type->valueType_))
+    , size_(0)
+    , tombstones_(0)
 {
     registerNewObj(this);
 }
 
-// MapObj::str()
-VMString MapObj::str() const {
-    auto* mt = static_cast<MapType*>(type_);
-    if (entries_.empty()) {
-        return rt::vmstr("[:]");
+u32 MapObj::findSlot(Word const* key) const {
+    if (capacity() == 0) return 0;
+    u32 cap = capacity();
+    u32 mask = cap - 1;
+    size_t h = hashWords(key, keyType());
+    u32 i = (u32)(h & mask);
+    Type* kt = keyType();
+    for (u32 step = 0; step < cap; ++step) {
+        u8 st = meta_[i];
+        if (st == SlotEmpty) return cap;
+        if (st == SlotOccupied && wordsEqual(slotKey(i), key, kt)) return i;
+        i = (i + 1) & mask;
     }
+    return cap;
+}
+
+void MapObj::rehash(u32 newCapacity) {
+    Vec<Word> oldEntries = std::move(entries_);
+    Vec<u8>   oldMeta    = std::move(meta_);
+    u32 oldCap = (u32)oldMeta.size();
+
+    entries_.assign((size_t)newCapacity * slotStride(), Word{});
+    meta_.assign(newCapacity, SlotEmpty);
+    size_ = 0;
+    tombstones_ = 0;
+
+    Type* kt = keyType();
+    u32 mask = newCapacity - 1;
+    u32 kS = keyStride_;
+    u32 sS = slotStride();
+    for (u32 i = 0; i < oldCap; ++i) {
+        if (oldMeta[i] != SlotOccupied) continue;
+        Word const* k = &oldEntries[(size_t)i * sS];
+        size_t h = hashWords(k, kt);
+        u32 j = (u32)(h & mask);
+        while (meta_[j] != SlotEmpty) j = (j + 1) & mask;
+        Word* dstKey = slotKey(j);
+        for (u32 w = 0; w < sS; ++w) dstKey[w] = oldEntries[(size_t)i * sS + w];
+        meta_[j] = SlotOccupied;
+        ++size_;
+    }
+}
+
+void MapObj::maybeGrow() {
+    if (needsGrow(size_, tombstones_, capacity())) {
+        u32 newCap = capacity() ? capacity() * 2 : kHashTableMinCapacity;
+        rehash(newCap);
+    }
+}
+
+void MapObj::insertNew(Word const* key, Word const* val) {
+    maybeGrow();
+    u32 cap = capacity();
+    u32 mask = cap - 1;
+    size_t h = hashWords(key, keyType());
+    u32 i = (u32)(h & mask);
+    while (meta_[i] == SlotOccupied) i = (i + 1) & mask;
+    if (meta_[i] == SlotTombstone) --tombstones_;
+    Word* dstK = slotKey(i);
+    Word* dstV = slotVal(i);
+    for (u32 w = 0; w < keyStride_; ++w) dstK[w] = key[w];
+    for (u32 w = 0; w < valueStride_; ++w) dstV[w] = val[w];
+    meta_[i] = SlotOccupied;
+    ++size_;
+}
+
+bool MapObj::insertOrUpdate(Word const* key, Word const* val) {
+    if (capacity() == 0) maybeGrow();
+    u32 cap = capacity();
+    u32 mask = cap - 1;
+    Type* kt = keyType();
+    Type* vt = valueType();
+    size_t h = hashWords(key, kt);
+    u32 i = (u32)(h & mask);
+    u32 firstTomb = cap;
+    while (true) {
+        u8 st = meta_[i];
+        if (st == SlotEmpty) break;
+        if (st == SlotTombstone) {
+            if (firstTomb == cap) firstTomb = i;
+        } else if (wordsEqual(slotKey(i), key, kt)) {
+            // Update: release the existing value's Obj* fields, then overwrite.
+            Word* dstV = slotVal(i);
+            payloadRelease(dstV, vt);
+            for (u32 w = 0; w < valueStride_; ++w) dstV[w] = val[w];
+            // The caller's retain on the key is now redundant; release it.
+            payloadRelease(const_cast<Word*>(key), kt);
+            return false;
+        }
+        i = (i + 1) & mask;
+    }
+    u32 slot = (firstTomb != cap) ? firstTomb : i;
+    if (meta_[slot] == SlotTombstone) --tombstones_;
+    Word* dstK = slotKey(slot);
+    Word* dstV = slotVal(slot);
+    for (u32 w = 0; w < keyStride_; ++w) dstK[w] = key[w];
+    for (u32 w = 0; w < valueStride_; ++w) dstV[w] = val[w];
+    meta_[slot] = SlotOccupied;
+    ++size_;
+    maybeGrow();
+    return true;
+}
+
+bool MapObj::eraseEntry(Word const* key) {
+    u32 slot = findSlot(key);
+    if (slot == capacity()) return false;
+    payloadRelease(slotKey(slot), keyType());
+    payloadRelease(slotVal(slot), valueType());
+    meta_[slot] = SlotTombstone;
+    --size_;
+    ++tombstones_;
+    return true;
+}
+
+void MapObj::copyFrom(MapObj const& src) {
+    keyStride_   = src.keyStride_;
+    valueStride_ = src.valueStride_;
+    u32 cap = src.capacity();
+    entries_.assign((size_t)cap * slotStride(), Word{});
+    meta_.assign(cap, SlotEmpty);
+    size_       = 0;
+    tombstones_ = 0;
+    Type* kt = keyType();
+    Type* vt = valueType();
+    u32 sS = slotStride();
+    for (u32 i = 0; i < cap; ++i) {
+        if (src.meta_[i] != SlotOccupied) continue;
+        Word const* srcSlot = &src.entries_[(size_t)i * sS];
+        Word* dstSlot = &entries_[(size_t)i * sS];
+        for (u32 w = 0; w < sS; ++w) dstSlot[w] = srcSlot[w];
+        payloadRetain(dstSlot, kt);
+        payloadRetain(dstSlot + keyStride_, vt);
+        meta_[i] = SlotOccupied;
+        ++size_;
+    }
+}
+
+VMString MapObj::str() const {
+    Type* kt = keyType();
+    Type* vt = valueType();
+    if (empty()) return rt::vmstr("[:]");
     VMString s = rt::vmstr("[");
     bool first = true;
-    for (auto& [k, v] : entries_) {
+    u32 cap = capacity();
+    for (u32 i = 0; i < cap; ++i) {
+        if (meta_[i] != SlotOccupied) continue;
         if (!first) s += ", ";
         first = false;
-        s += wordToString(k, mt->keyType_);
+        s += wordsToString(slotKey(i), kt);
         s += ": ";
-        s += wordToString(v, mt->valueType_);
+        s += wordsToString(slotVal(i), vt);
     }
     s += "]";
     return s;
 }
 
 void MapObj::releaseChildren() {
-    auto* mt = static_cast<MapType*>(type_);
-    bool keyIsObj = storesObjPtr(mt->keyType_);
-    bool valIsObj = storesObjPtr(mt->valueType_);
-    if (!keyIsObj && !valIsObj) return;
-    for (auto& [k, v] : entries_) {
-        if (keyIsObj && k.o) k.o->release();
-        if (valIsObj && v.o) v.o->release();
+    Type* kt = keyType();
+    Type* vt = valueType();
+    u32 cap = capacity();
+    for (u32 i = 0; i < cap; ++i) {
+        if (meta_[i] != SlotOccupied) continue;
+        payloadRelease(slotKey(i), kt);
+        payloadRelease(slotVal(i), vt);
     }
 }
 
 // SetObj constructor
 SetObj::SetObj(SetType* type)
     : Obj(type)
-    , entries_(0,
-               WordHash{type->elemType_},
-               WordEqual{type->elemType_},
-               rt::STLAllocator<Word>(rt::gCurrentAllocator))
+    , entries_(rt::STLAllocator<Word>(rt::gCurrentAllocator))
+    , meta_(rt::STLAllocator<u8>(rt::gCurrentAllocator))
+    , elemStride_(strideForType(type->elemType_))
+    , size_(0)
+    , tombstones_(0)
 {
     registerNewObj(this);
 }
 
-// SetObj::str()
+u32 SetObj::findSlot(Word const* elem) const {
+    if (capacity() == 0) return 0;
+    u32 cap = capacity();
+    u32 mask = cap - 1;
+    size_t h = hashWords(elem, elemType());
+    u32 i = (u32)(h & mask);
+    Type* et = elemType();
+    for (u32 step = 0; step < cap; ++step) {
+        u8 st = meta_[i];
+        if (st == SlotEmpty) return cap;
+        if (st == SlotOccupied && wordsEqual(slotElem(i), elem, et)) return i;
+        i = (i + 1) & mask;
+    }
+    return cap;
+}
+
+void SetObj::rehash(u32 newCapacity) {
+    Vec<Word> oldEntries = std::move(entries_);
+    Vec<u8>   oldMeta    = std::move(meta_);
+    u32 oldCap = (u32)oldMeta.size();
+
+    entries_.assign((size_t)newCapacity * elemStride_, Word{});
+    meta_.assign(newCapacity, SlotEmpty);
+    size_ = 0;
+    tombstones_ = 0;
+
+    Type* et = elemType();
+    u32 mask = newCapacity - 1;
+    u32 eS = elemStride_;
+    for (u32 i = 0; i < oldCap; ++i) {
+        if (oldMeta[i] != SlotOccupied) continue;
+        Word const* k = &oldEntries[(size_t)i * eS];
+        size_t h = hashWords(k, et);
+        u32 j = (u32)(h & mask);
+        while (meta_[j] != SlotEmpty) j = (j + 1) & mask;
+        Word* dst = slotElem(j);
+        for (u32 w = 0; w < eS; ++w) dst[w] = oldEntries[(size_t)i * eS + w];
+        meta_[j] = SlotOccupied;
+        ++size_;
+    }
+}
+
+void SetObj::maybeGrow() {
+    if (needsGrow(size_, tombstones_, capacity())) {
+        u32 newCap = capacity() ? capacity() * 2 : kHashTableMinCapacity;
+        rehash(newCap);
+    }
+}
+
+void SetObj::insertNew(Word const* elem) {
+    maybeGrow();
+    u32 cap = capacity();
+    u32 mask = cap - 1;
+    size_t h = hashWords(elem, elemType());
+    u32 i = (u32)(h & mask);
+    while (meta_[i] == SlotOccupied) i = (i + 1) & mask;
+    if (meta_[i] == SlotTombstone) --tombstones_;
+    Word* dst = slotElem(i);
+    for (u32 w = 0; w < elemStride_; ++w) dst[w] = elem[w];
+    meta_[i] = SlotOccupied;
+    ++size_;
+}
+
+bool SetObj::insertElem(Word const* elem) {
+    if (capacity() == 0) maybeGrow();
+    u32 cap = capacity();
+    u32 mask = cap - 1;
+    Type* et = elemType();
+    size_t h = hashWords(elem, et);
+    u32 i = (u32)(h & mask);
+    u32 firstTomb = cap;
+    while (true) {
+        u8 st = meta_[i];
+        if (st == SlotEmpty) break;
+        if (st == SlotTombstone) {
+            if (firstTomb == cap) firstTomb = i;
+        } else if (wordsEqual(slotElem(i), elem, et)) {
+            // Already present: release the caller's retain.
+            payloadRelease(const_cast<Word*>(elem), et);
+            return false;
+        }
+        i = (i + 1) & mask;
+    }
+    u32 slot = (firstTomb != cap) ? firstTomb : i;
+    if (meta_[slot] == SlotTombstone) --tombstones_;
+    Word* dst = slotElem(slot);
+    for (u32 w = 0; w < elemStride_; ++w) dst[w] = elem[w];
+    meta_[slot] = SlotOccupied;
+    ++size_;
+    maybeGrow();
+    return true;
+}
+
+bool SetObj::eraseElem(Word const* elem) {
+    u32 slot = findSlot(elem);
+    if (slot == capacity()) return false;
+    payloadRelease(slotElem(slot), elemType());
+    meta_[slot] = SlotTombstone;
+    --size_;
+    ++tombstones_;
+    return true;
+}
+
+void SetObj::copyFrom(SetObj const& src) {
+    elemStride_ = src.elemStride_;
+    u32 cap = src.capacity();
+    entries_.assign((size_t)cap * elemStride_, Word{});
+    meta_.assign(cap, SlotEmpty);
+    size_ = 0;
+    tombstones_ = 0;
+    Type* et = elemType();
+    u32 eS = elemStride_;
+    for (u32 i = 0; i < cap; ++i) {
+        if (src.meta_[i] != SlotOccupied) continue;
+        Word const* srcSlot = &src.entries_[(size_t)i * eS];
+        Word* dstSlot = &entries_[(size_t)i * eS];
+        for (u32 w = 0; w < eS; ++w) dstSlot[w] = srcSlot[w];
+        payloadRetain(dstSlot, et);
+        meta_[i] = SlotOccupied;
+        ++size_;
+    }
+}
+
 VMString SetObj::str() const {
-    auto* st = static_cast<SetType*>(type_);
+    Type* et = elemType();
     VMString s = rt::vmstr("Set(");
     bool first = true;
-    for (auto& elem : entries_) {
+    u32 cap = capacity();
+    for (u32 i = 0; i < cap; ++i) {
+        if (meta_[i] != SlotOccupied) continue;
         if (!first) s += ", ";
         first = false;
-        s += wordToString(elem, st->elemType_);
+        s += wordsToString(slotElem(i), et);
     }
     s += ")";
     return s;
 }
 
 void SetObj::releaseChildren() {
-    auto* st = static_cast<SetType*>(type_);
-    if (!storesObjPtr(st->elemType_)) return;
-    for (auto& elem : entries_) {
-        if (elem.o) elem.o->release();
+    Type* et = elemType();
+    u32 cap = capacity();
+    for (u32 i = 0; i < cap; ++i) {
+        if (meta_[i] != SlotOccupied) continue;
+        payloadRelease(slotElem(i), et);
     }
 }
 
@@ -825,22 +1163,27 @@ size_t WordHash::operator()(Word w) const {
         }
         return h;
     }
-    if (auto* setT = dynamic_cast<SetType*>(type)) {
+    if (dynamic_cast<SetType*>(type)) {
         auto* s = static_cast<SetObj*>(w.o);
-        WordHash sub{setT->elemType_};
-        size_t h = s->entries_.size();
-        for (auto& elem : s->entries_) {
-            h ^= sub(elem);  // XOR is commutative — order-independent
+        Type* et = s->elemType();
+        size_t h = s->size();
+        u32 cap = s->capacity();
+        for (u32 i = 0; i < cap; ++i) {
+            if (s->slotState(i) != SetObj::SlotOccupied) continue;
+            h ^= hashWords(s->slotElem(i), et);  // XOR -> order-independent
         }
         return h;
     }
-    if (auto* mapT = dynamic_cast<MapType*>(type)) {
+    if (dynamic_cast<MapType*>(type)) {
         auto* m = static_cast<MapObj*>(w.o);
-        WordHash keyHash{mapT->keyType_};
-        WordHash valHash{mapT->valueType_};
-        size_t h = m->entries_.size();
-        for (auto& [k, v] : m->entries_) {
-            h ^= hashCombine(keyHash(k), valHash(v));  // XOR for order-independence
+        Type* kt = m->keyType();
+        Type* vt = m->valueType();
+        size_t h = m->size();
+        u32 cap = m->capacity();
+        for (u32 i = 0; i < cap; ++i) {
+            if (m->slotState(i) != MapObj::SlotOccupied) continue;
+            h ^= hashCombine(hashWords(m->slotKey(i), kt),
+                             hashWords(m->slotVal(i), vt));
         }
         return h;
     }
@@ -1009,23 +1352,26 @@ bool WordEqual::operator()(Word a, Word b) const {
     if (dynamic_cast<SetType*>(type)) {
         auto* sa = static_cast<SetObj*>(a.o);
         auto* sb = static_cast<SetObj*>(b.o);
-        if (sa->entries_.size() != sb->entries_.size()) return false;
-        // Check that every element in sa exists in sb
-        for (auto& elem : sa->entries_) {
-            if (sb->entries_.find(elem) == sb->entries_.end()) return false;
+        if (sa->size() != sb->size()) return false;
+        Type* et = sa->elemType();
+        u32 cap = sa->capacity();
+        for (u32 i = 0; i < cap; ++i) {
+            if (sa->slotState(i) != SetObj::SlotOccupied) continue;
+            if (sb->findSlot(sa->slotElem(i)) == sb->capacity()) return false;
         }
         return true;
     }
-    if (auto* mapT = dynamic_cast<MapType*>(type)) {
+    if (dynamic_cast<MapType*>(type)) {
         auto* ma = static_cast<MapObj*>(a.o);
         auto* mb = static_cast<MapObj*>(b.o);
-        if (ma->entries_.size() != mb->entries_.size()) return false;
-        // Check that every entry in ma exists in mb with same value
-        WordEqual valEq{mapT->valueType_};
-        for (auto& [k, v] : ma->entries_) {
-            auto it = mb->entries_.find(k);
-            if (it == mb->entries_.end()) return false;
-            if (!valEq(v, it->second)) return false;
+        if (ma->size() != mb->size()) return false;
+        Type* vt = ma->valueType();
+        u32 cap = ma->capacity();
+        for (u32 i = 0; i < cap; ++i) {
+            if (ma->slotState(i) != MapObj::SlotOccupied) continue;
+            u32 bs = mb->findSlot(ma->slotKey(i));
+            if (bs == mb->capacity()) return false;
+            if (!wordsEqual(ma->slotVal(i), mb->slotVal(bs), vt)) return false;
         }
         return true;
     }

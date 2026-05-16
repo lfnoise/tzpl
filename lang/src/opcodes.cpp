@@ -3444,52 +3444,69 @@ void op_make_lazy_automap(VM& vm, Code* pc) {
 // --- Map ---
 
 // MAKE_MAP Rd, firstKeyReg, numPairs (3 words: op, regs{dst, firstKeyReg, numPairs}, MapType*)
+// Phase 4g.11: each pair occupies (keyStride + valueStride) consecutive
+// registers; inline composite keys/values are stored natively without
+// boxing.
 void op_make_map(VM& vm, Code* pc) {
     u16 dst = pc[1].regs[0], firstKV = pc[1].regs[1], numPairs = pc[1].regs[2];
     auto* mapType = static_cast<MapType*>(pc[2].p);
 
     auto* map = new MapObj(mapType);
-    bool keyIsObj = storesObjPtr(mapType->keyType_);
-    bool valIsObj = storesObjPtr(mapType->valueType_);
+    u32 kS = map->keyStride_;
+    u32 vS = map->valueStride_;
+    u32 pairStride = kS + vS;
     for (u16 i = 0; i < numPairs; ++i) {
-        Word key = vm.reg(firstKV + i * 2);
-        Word val = vm.reg(firstKV + i * 2 + 1);
-        map->entries_[key] = val;
-        if (keyIsObj && key.o) key.o->retain();
-        if (valIsObj && val.o) val.o->retain();
+        Word const* kSrc = &vm.reg((u16)(firstKV + i * pairStride));
+        Word const* vSrc = kSrc + kS;
+        // Retain Obj* children before handing payload to the map. insertOrUpdate
+        // releases the redundant retain on duplicate key.
+        payloadRetain(kSrc, mapType->keyType_);
+        payloadRetain(vSrc, mapType->valueType_);
+        map->insertOrUpdate(kSrc, vSrc);
     }
     vm.reg(dst).o = map;
     DISPATCH(3);
 }
 
 // MAP_GET Rd, Ra(map), Rb(key) (3 words: op, regs{dst, map, key}, MapType*)
+// Phase 4g.11: dst spans valueStride words; key spans keyStride words.
 void op_map_get(VM& vm, Code* pc) {
     u16 dst = pc[1].regs[0], mapReg = pc[1].regs[1], keyReg = pc[1].regs[2];
     auto* map = static_cast<MapObj*>(vm.reg(mapReg).o);
 
-    auto it = map->entries_.find(vm.reg(keyReg));
-    if (it != map->entries_.end()) {
-        vm.reg(dst) = it->second;
+    Word const* keyPtr = &vm.reg(keyReg);
+    u32 slot = map->findSlot(keyPtr);
+    if (slot != map->capacity()) {
+        Word const* v = map->slotVal(slot);
+        for (u32 i = 0; i < map->valueStride_; ++i) vm.reg((u16)(dst + i)) = v[i];
+        payloadRetain(&vm.reg(dst), map->valueType());
     } else {
-        vm.reg(dst).i = 0;  // default zero
+        for (u32 i = 0; i < map->valueStride_; ++i) vm.reg((u16)(dst + i)).i = 0;
     }
     DISPATCH(3);
 }
 
 // MAP_GET_OPTION Rd, Ra(map), Rb(key) (3 words: op, regs{dst, map, key}, EnumType*)
+// Phase 4g.11: key spans keyStride registers starting at Rb. Returns a heap
+// Enum* in dst; for Inline Option types the caller (codegen) emits a
+// subsequent unbox into a multi-word inline slot. Multi-word value payloads
+// are deep-boxed into the heap Enum's single word_ slot.
 void op_map_get_option(VM& vm, Code* pc) {
     u16 dst = pc[1].regs[0], mapReg = pc[1].regs[1], keyReg = pc[1].regs[2];
     auto* map = static_cast<MapObj*>(vm.reg(mapReg).o);
     auto* optType = static_cast<EnumType*>(pc[2].p);
+    auto* mt = static_cast<MapType*>(map->type_);
+    Type* vt = mt->valueType_;
 
-    auto it = map->entries_.find(vm.reg(keyReg));
+    Word const* keyPtr = &vm.reg(keyReg);
+    u32 slot = map->findSlot(keyPtr);
 
     // Phase 3: NullablePtrEnum -- store as nullable Obj* directly.
     if (optType->repr_ == Type::Repr::NullablePtrEnum) {
-        if (it != map->entries_.end()) {
-            Word v = it->second;
-            if (v.o) v.o->retain();
-            vm.reg(dst).o = v.o;
+        if (slot != map->capacity()) {
+            Obj* o = map->slotVal(slot)[0].o;
+            if (o) o->retain();
+            vm.reg(dst).o = o;
         } else {
             vm.reg(dst).o = nullptr;
         }
@@ -3497,15 +3514,9 @@ void op_map_get_option(VM& vm, Code* pc) {
     }
 
     auto* e = new Enum(optType);
-    if (it != map->entries_.end()) {
+    if (slot != map->capacity()) {
         e->which_ = 0;  // some
-        e->word_ = it->second;
-        // Phase 4c: case 0 = some; check layout_[0] for pointer storage.
-        if (!optType->layout_.empty()
-            && storesObjPtr(optType->layout_[0].type)
-            && e->word_.o) {
-            e->word_.o->retain();
-        }
+        e->word_ = boxPayload(vm, vt, map->slotVal(slot));
     } else {
         e->which_ = 1;  // none
         e->word_.i = 0;
@@ -3517,16 +3528,18 @@ void op_map_get_option(VM& vm, Code* pc) {
 // --- Set ---
 
 // MAKE_SET Rd, firstSrc, numElems (3 words: op, regs{dst, firstSrc, numElems}, SetType*)
+// Phase 4g.11: each element occupies elemStride consecutive registers.
 void op_make_set(VM& vm, Code* pc) {
     u16 dst = pc[1].regs[0], firstSrc = pc[1].regs[1], numElems = pc[1].regs[2];
     auto* setType = static_cast<SetType*>(pc[2].p);
 
     auto* set = new SetObj(setType);
-    bool elemIsObj = storesObjPtr(setType->elemType_);
+    u32 eS = set->elemStride_;
     for (u16 i = 0; i < numElems; ++i) {
-        Word w = vm.reg(firstSrc + i);
-        set->entries_.insert(w);
-        if (elemIsObj && w.o) w.o->retain();
+        Word const* src = &vm.reg((u16)(firstSrc + i * eS));
+        payloadRetain(src, setType->elemType_);
+        // insertElem releases the retain if the element is already present.
+        set->insertElem(src);
     }
     vm.reg(dst).o = set;
     DISPATCH(3);
