@@ -4295,11 +4295,11 @@ u16 CodeGen::genAutoMapBinaryOp(BinaryOpExpr* expr) {
             emitPtr(leftElemType);
             emitPtr(rightElemType);
         } else {
-            u16 lElem = needsBoxAuto(leftElemType) ? emitBoxIfInline(leftElemReg, leftElemType) : leftElemReg;
-            u16 rElem = needsBoxAuto(rightElemType) ? emitBoxIfInline(rightElemReg, rightElemType) : rightElemReg;
+            // Phase 4g.16: heap-result composite arith reads Inline operands
+            // natively via base pointers; no operand boxing needed here.
             elemResultReg = allocReg();
             emitOp(getCompositeArithOp(expr->op));
-            emitRegs(elemResultReg, lElem, rElem);
+            emitRegs(elemResultReg, leftElemReg, rightElemReg);
             emitPtr(scalarResultType);
             emitPtr(leftElemType);
             emitPtr(rightElemType);

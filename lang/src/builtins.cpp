@@ -2239,7 +2239,6 @@ void registerBuiltinFunctions(Compiler& compiler,
 
     // --- Collection builtins (template-resolved) ---
     registerTemplate(compiler, functions, "reverse",   resolve_reverse_a);
-    registerTemplate(compiler, functions, "push",      resolve_push);
     registerTemplate(compiler, functions, "pop",       resolve_pop_a);
     registerTemplate(compiler, functions, "muss",      resolve_muss_a);
     registerTemplate(compiler, functions, "sort",      resolve_sort);
@@ -2267,9 +2266,19 @@ void registerBuiltinFunctions(Compiler& compiler,
     registerTemplate(compiler, functions, "cyc",       resolve_cyc);
     registerTemplate(compiler, functions, "ncyc",      resolve_ncyc);
     registerTemplate(compiler, functions, "hang",      resolve_hang);
-    registerTemplate(compiler, functions, "head",      resolve_head);
-    registerTemplate(compiler, functions, "tail",      resolve_tail);
+    // Phase 4g.17: builtins migrated to acceptsInlineArgs=true.
+    //   head: writes multi-word Inline composite head into dst slot.
+    //   tail/length/isNil/notNil: take a List (1-word Obj*); the flag is
+    //     a no-op but set for consistency on list-API builtins.
+    //   push: builtin_push_array reads multi-word slot for Inline-backend
+    //     arrays; this drops codegen's boundary boxing.
+    // cons is NOT migrated: its 2-arg layout (elem, tail) places tail at
+    // ab+1 today, but Inline composite elem would push tail to ab+sw with
+    // sw unknown to the builtin. Keep legacy boxing for now.
+    registerTemplate(compiler, functions, "head",      resolve_head,      /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "tail",      resolve_tail,      /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
     registerTemplate(compiler, functions, "cons",      resolve_cons);
+    registerTemplate(compiler, functions, "push",      resolve_push,      /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
     registerTemplate(compiler, functions, "isNil",     resolve_isNil);
     registerTemplate(compiler, functions, "notNil",    resolve_notNil);
     registerTemplate(compiler, functions, "length",    resolve_length);

@@ -1408,10 +1408,17 @@ void builtin_length_list(VM& vm, u16 dst, u16, u16 ab) {
 }
 
 // head: List<T> -> T  (returns first element; undefined on nil list)
+//
+// Phase 4g.17: copy multi-word head natively into dst..dst+payloadWords so
+// Inline composite element types land as a multi-word slot. payloadWords_
+// is 1 for scalar/pointer/Complex/Fraction elements and N for Inline
+// composites; the loop handles both uniformly.
 void builtin_head_list(VM& vm, u16 dst, u16, u16 ab) {
     auto* node = static_cast<ListNode*>(vm.reg(ab).o);
     node->force(vm);
-    vm.reg(dst) = node->head_;
+    Word const* src = node->headData();
+    u32 sw = node->payloadWords_ ? node->payloadWords_ : 1;
+    for (u32 i = 0; i < sw; ++i) vm.reg((u16)(dst + i)) = src[i];
 }
 
 // tail: List<T> -> List<T>  (returns rest of list; undefined on nil list)
@@ -1423,6 +1430,7 @@ void builtin_tail_list(VM& vm, u16 dst, u16, u16 ab) {
 
 // cons: (T, List<T>) -> List<T>  (prepend element)
 // Per-value-type variants needed because nil lists have no runtime type info.
+// Atom elements occupy 1 word at ab; the tail list lives at ab+1.
 #define CONS_LIST_VALUETYPE(suffix, typeGetter) \
 void builtin_cons_list_##suffix(VM& vm, u16 dst, u16, u16 ab) { \
     Word elem = vm.reg(ab); \
