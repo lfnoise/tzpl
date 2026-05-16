@@ -188,8 +188,8 @@ void op_print_obj(VM& vm, Code* pc);          // PRINT_OBJ Ra (2 words)
 void op_println(VM& vm, Code* pc);            // PRINTLN (1 word) - prints newline
 
 // --- Generic Object Comparison ---
-void op_cmp_eq_obj(VM& vm, Code* pc);         // CMP_EQ_OBJ Rd, Ra, Rb (2 words)
-void op_cmp_ne_obj(VM& vm, Code* pc);         // CMP_NE_OBJ Rd, Ra, Rb (2 words)
+void op_cmp_eq_obj(VM& vm, Code* pc);         // CMP_EQ_OBJ Rd, Ra, Rb (3 words: op, regs, operandType*)
+void op_cmp_ne_obj(VM& vm, Code* pc);         // CMP_NE_OBJ Rd, Ra, Rb (3 words: op, regs, operandType*)
 
 // --- Symbol Print ---
 void op_print_symbol(VM& vm, Code* pc);       // PRINT_SYMBOL Ra (2 words)
@@ -245,7 +245,7 @@ void op_cmp_ge_composite_inline(VM& vm, Code* pc);
 
 // --- Array/Tuple/List Concatenation ---
 void op_concat_array(VM& vm, Code* pc);    // CONCAT_ARRAY Rd, Ra, Rb (3 words: op, regs, ArrayType*)
-void op_concat_tuple(VM& vm, Code* pc);    // CONCAT_TUPLE Rd, Ra, Rb (4 words: op, regs, resultTupleType*, leftTupleType*)
+void op_concat_tuple(VM& vm, Code* pc);    // CONCAT_TUPLE Rd, Ra, Rb (5 words: op, regs, resultType*, leftType*, rightType*)
 void op_concat_list(VM& vm, Code* pc);     // CONCAT_LIST Rd, Ra, Rb (3 words: op, regs, ListType*)
 
 // --- Array/Tuple/Struct Access/Construction ---

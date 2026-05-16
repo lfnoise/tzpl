@@ -601,30 +601,35 @@ void op_cmp_ne_complex_inline(VM& vm, Code* pc) {
 
 // --- Generic Object Comparison ---
 
+// CMP_EQ_OBJ / CMP_NE_OBJ Rd, Ra, Rb (3 words: op, regs, operandType*)
+//
+// Phase 4g.16: operand type is now passed explicitly so the handler can
+// compare Inline composite operands natively via wordsEqual on the multi-
+// word slot data -- no boxing required. For single-Word operands (heap
+// Obj* or atom), the slot's [0] word is the value; wordsEqual handles
+// both uniformly. Null Obj* operands are short-circuited by pointer
+// identity since WordEqual derefs Obj* for Pointer/Heap types.
+static inline bool cmpEqObjImpl(VM& vm, u16 a, u16 b, Type* t) {
+    if (t && t->isObjType() && t->repr_ != Type::Repr::Inline) {
+        Obj* oa = vm.reg(a).o;
+        Obj* ob = vm.reg(b).o;
+        if (!oa || !ob) return oa == ob;
+    }
+    return wordsEqual(&vm.reg(a), &vm.reg(b), t);
+}
+
 void op_cmp_eq_obj(VM& vm, Code* pc) {
     u16 dst = pc[1].regs[0], a = pc[1].regs[1], b = pc[1].regs[2];
-    Obj* oa = vm.reg(a).o;
-    Obj* ob = vm.reg(b).o;
-    if (!oa || !ob) {
-        vm.reg(dst).i = (oa == ob) ? 1 : 0;
-        DISPATCH(2);
-    }
-    WordEqual eq{oa->type_};
-    vm.reg(dst).i = eq(vm.reg(a), vm.reg(b)) ? 1 : 0;
-    DISPATCH(2);
+    Type* t = static_cast<Type*>(pc[2].p);
+    vm.reg(dst).i = cmpEqObjImpl(vm, a, b, t) ? 1 : 0;
+    DISPATCH(3);
 }
 
 void op_cmp_ne_obj(VM& vm, Code* pc) {
     u16 dst = pc[1].regs[0], a = pc[1].regs[1], b = pc[1].regs[2];
-    Obj* oa = vm.reg(a).o;
-    Obj* ob = vm.reg(b).o;
-    if (!oa || !ob) {
-        vm.reg(dst).i = (oa == ob) ? 0 : 1;
-        DISPATCH(2);
-    }
-    WordEqual eq{oa->type_};
-    vm.reg(dst).i = eq(vm.reg(a), vm.reg(b)) ? 0 : 1;
-    DISPATCH(2);
+    Type* t = static_cast<Type*>(pc[2].p);
+    vm.reg(dst).i = cmpEqObjImpl(vm, a, b, t) ? 0 : 1;
+    DISPATCH(3);
 }
 
 // --- Conversion ---
@@ -1182,36 +1187,46 @@ void op_concat_array(VM& vm, Code* pc) {
     DISPATCH(3);
 }
 
-// CONCAT_TUPLE Rd, Ra, Rb (4 words: op, regs{dst, a, b}, resultTupleType*, leftTupleType*)
+// CONCAT_TUPLE Rd, Ra, Rb (5 words: op, regs{dst, a, b}, resultType*, leftType*, rightType*)
 //
 // Phase 4g.13: layout-aware multi-word copy. Source A's full layout footprint
 // starts at v[0]; source B fills the remaining tail of the result layout.
+// Phase 4g.16: accept Inline operands natively -- the operand base is either
+// &vm.reg(slot) (Inline) or &tup->v[0] (heap). Result is built into either
+// the multi-word dst slot (Inline) or a heap Tuple (Heap).
 void op_concat_tuple(VM& vm, Code* pc) {
     u16 dst = pc[1].regs[0], a = pc[1].regs[1], b = pc[1].regs[2];
     auto* resultType = static_cast<TupleType*>(pc[2].p);
-    auto* leftType = static_cast<TupleType*>(pc[3].p);
+    auto* leftType   = static_cast<TupleType*>(pc[3].p);
+    auto* rightType  = static_cast<TupleType*>(pc[4].p);
 
-    auto* tupA = static_cast<Tuple*>(vm.reg(a).o);
-    auto* tupB = static_cast<Tuple*>(vm.reg(b).o);
+    auto baseOf = [&](u16 slot, TupleType* t) -> Word const* {
+        if (t->repr_ == Type::Repr::Inline) return &vm.reg(slot);
+        return &static_cast<Tuple*>(vm.reg(slot).o)->v[0];
+    };
+    Word const* aBase = baseOf(a, leftType);
+    Word const* bBase = baseOf(b, rightType);
 
-    usize leftLen = leftType->fields_.size();
-    usize totalLen = resultType->fields_.size();
-    auto* result = Tuple::create(resultType, (u32)totalLen);
     u32 aWords = 0;
     for (auto const& f : leftType->layout_) aWords += f.sizeWords;
-    for (u32 i = 0; i < aWords; ++i) result->v[i] = tupA->v[i];
-    u32 dstOff = aWords;
-    auto* rightType = static_cast<TupleType*>(tupB->type_);
-    for (size_t i = 0; i < totalLen - leftLen; ++i) {
-        auto const& f = rightType->layout_[i];
-        for (u8 j = 0; j < f.sizeWords; ++j) {
-            result->v[dstOff + j] = tupB->v[f.wordOffset + j];
-        }
-        dstOff += f.sizeWords;
+    u32 bWords = 0;
+    for (auto const& f : rightType->layout_) bWords += f.sizeWords;
+    u32 totalWords = aWords + bWords;
+
+    Word* outBase;
+    Tuple* heapResult = nullptr;
+    if (resultType->repr_ == Type::Repr::Inline) {
+        outBase = &vm.reg(dst);
+    } else {
+        heapResult = Tuple::create(resultType, (u32)resultType->fields_.size());
+        outBase = &heapResult->v[0];
     }
-    inlineWalkPointers(&result->v[0], resultType, /*release_=*/false);
-    vm.reg(dst).o = result;
-    DISPATCH(4);
+    for (u32 i = 0; i < aWords; ++i) outBase[i] = aBase[i];
+    for (u32 i = 0; i < bWords; ++i) outBase[aWords + i] = bBase[i];
+    inlineWalkPointers(outBase, resultType, /*release_=*/false);
+    if (heapResult) vm.reg(dst).o = heapResult;
+    (void)totalWords;
+    DISPATCH(5);
 }
 
 // CONCAT_LIST Rd, Ra, Rb (3 words: op, regs{dst, a, b}, ListType*)
@@ -1659,14 +1674,34 @@ static Word dispatchArrayBinop(VM& vm, Op op, Word a, Word b,
     return Word(result);
 }
 
-// Phase 4g.13: helpers for tuple binop/cmp/unary, which read/write fields
-// of heap Tuples whose storage is now layout-native (multi-word for Inline
-// composite fields). Inputs are boxed back to single Word for dispatchBinop;
-// outputs are unboxed back into native multi-word storage.
-static Word readTupleField(VM& vm, Tuple* tup, TupleType* tt, size_t i) {
+// Phase 4g.13/4g.16: helpers for tuple binop/cmp/unary. Read fields from a
+// Word const* base, which is &tup->v[0] for heap-Tuple operands or
+// &vm.reg(slot) for native Inline composite operands (same field layout
+// either way, by Phase 4g.13 design). Multi-word inline composite fields
+// are boxed into a single Word for the scalar dispatchBinop call; outputs
+// are unboxed back into native multi-word storage by writeTupleField.
+static Word readTupleField(VM& vm, Word const* base, TupleType* tt, size_t i) {
     auto const& f = tt->layout_[i];
-    if (f.sizeWords > 1) return boxPayload(vm, f.type, &tup->v[f.wordOffset]);
-    return tup->v[f.wordOffset];
+    if (f.sizeWords > 1) return boxPayload(vm, f.type, &base[f.wordOffset]);
+    return base[f.wordOffset];
+}
+
+// Compute the field-read base pointer for a composite operand.
+//   - If aType is Inline composite at the top level, the operand is the
+//     multi-word slot starting at vm.reg(aSlot).
+//   - Otherwise the operand is a heap Tuple/Struct held in vm.reg(aSlot).o;
+//     use &obj->v[0]. Tuple and Struct share the v[] layout offset.
+//   - Scalar/non-composite operands return null (caller falls back to scalar).
+static Word const* compositeOperandBase(VM& vm, u16 aSlot, Type* aType) {
+    if (!aType) return nullptr;
+    auto* aTT = dynamic_cast<TupleType*>(aType);
+    auto* aST = dynamic_cast<StructType*>(aType);
+    if (!aTT && !aST) return nullptr;
+    if (aType->repr_ == Type::Repr::Inline) return &vm.reg(aSlot);
+    Obj* o = vm.reg(aSlot).o;
+    if (!o) return nullptr;
+    if (aTT) return &static_cast<Tuple*>(o)->v[0];
+    return &static_cast<Struct*>(o)->v[0];
 }
 
 static void writeTupleField(VM& vm, Tuple* result, TupleType* rtt, size_t i, Word src) {
@@ -1690,25 +1725,39 @@ static void writeTupleField(VM& vm, Tuple* result, TupleType* rtt, size_t i, Wor
     }
 }
 
+// Phase 4g.16: dispatch tuple binop given precomputed field-read bases.
+// aBase/bBase are non-null when the operand is a Tuple (either heap or
+// Inline); aScalar/bScalar provide the broadcast value for non-tuple
+// operands. aType/bType carry the operand type for scalar broadcasts.
 template<typename Op>
-static Word dispatchTupleBinop(VM& vm, Op op, Word a, Word b,
-                               Type* aType, Type* bType, TupleType* resultTT) {
+static Word dispatchTupleBinopBase(VM& vm, Op op,
+                                   Word const* aBase, Word const* bBase,
+                                   Word aScalar, Word bScalar,
+                                   Type* aType, Type* bType, TupleType* resultTT) {
     auto* aTT = dynamic_cast<TupleType*>(aType);
     auto* bTT = dynamic_cast<TupleType*>(bType);
     usize n = resultTT->fields_.size();
-
     auto* result = Tuple::create(resultTT, (u32)n);
     for (usize i = 0; i < n; ++i) {
-        Word ae = aTT ? readTupleField(vm, static_cast<Tuple*>(a.o), aTT, i) : a;
-        Word be = bTT ? readTupleField(vm, static_cast<Tuple*>(b.o), bTT, i) : b;
+        Word ae = aTT ? readTupleField(vm, aBase, aTT, i) : aScalar;
+        Word be = bTT ? readTupleField(vm, bBase, bTT, i) : bScalar;
         Type* aet = aTT ? aTT->fields_[i] : aType;
         Type* bet = bTT ? bTT->fields_[i] : bType;
         Word r = dispatchBinop(vm, op, ae, be, aet, bet, resultTT->fields_[i]);
         writeTupleField(vm, result, resultTT, i, r);
     }
-    // Retain Obj* pointers landed in result, walking by layout.
     inlineWalkPointers(&result->v[0], resultTT, /*release_=*/false);
     return Word(static_cast<Obj*>(result));
+}
+
+template<typename Op>
+static Word dispatchTupleBinop(VM& vm, Op op, Word a, Word b,
+                               Type* aType, Type* bType, TupleType* resultTT) {
+    auto* aTT = dynamic_cast<TupleType*>(aType);
+    auto* bTT = dynamic_cast<TupleType*>(bType);
+    Word const* aBase = aTT ? &static_cast<Tuple*>(a.o)->v[0] : nullptr;
+    Word const* bBase = bTT ? &static_cast<Tuple*>(b.o)->v[0] : nullptr;
+    return dispatchTupleBinopBase(vm, op, aBase, bBase, a, b, aType, bType, resultTT);
 }
 
 // --- List dispatch ---
@@ -1868,17 +1917,23 @@ static Word dispatchArrayUnaryOp(VM& vm, Op op, Word a, Type* aType, ArrayType* 
 }
 
 template<typename Op>
-static Word dispatchTupleUnaryOp(VM& vm, Op op, Word a, Type* aType, TupleType* resultTT) {
+static Word dispatchTupleUnaryOpBase(VM& vm, Op op, Word const* aBase,
+                                     Type* aType, TupleType* resultTT) {
     auto* aTT = static_cast<TupleType*>(aType);
     usize n = resultTT->fields_.size();
     auto* result = Tuple::create(resultTT, (u32)n);
     for (usize i = 0; i < n; ++i) {
-        Word ae = readTupleField(vm, static_cast<Tuple*>(a.o), aTT, i);
+        Word ae = readTupleField(vm, aBase, aTT, i);
         Word r = dispatchUnaryOp(vm, op, ae, aTT->fields_[i], resultTT->fields_[i]);
         writeTupleField(vm, result, resultTT, i, r);
     }
     inlineWalkPointers(&result->v[0], resultTT, /*release_=*/false);
     return Word(static_cast<Obj*>(result));
+}
+
+template<typename Op>
+static Word dispatchTupleUnaryOp(VM& vm, Op op, Word a, Type* aType, TupleType* resultTT) {
+    return dispatchTupleUnaryOpBase(vm, op, &static_cast<Tuple*>(a.o)->v[0], aType, resultTT);
 }
 
 template<typename Op>
@@ -1955,13 +2010,61 @@ static Word dispatchUnaryOp(VM& vm, Op op, Word a, Type* aType, Type* resultType
 // Each opcode instantiates the dispatch template with the specific operator struct.
 // The compiler generates separate, optimized code for each operator.
 
+// Phase 4g.16: top-level entry for heap-result composite binop.
+//   - Tuple result + Inline-Tuple operand(s): use base-pointer dispatcher
+//     to read operand fields natively from the register slot (zero boxing).
+//   - Array/List result + Inline-Tuple operand: the inner dispatchers
+//     (dispatchArrayBinop, dispatchListBinop) expect single-Word operands
+//     and broadcast/zip element-wise; box the Inline operand once on entry
+//     so the operand looks like a heap Tuple* to those paths.
+//   - Otherwise: fall through to dispatchBinop unchanged.
+template<typename Op>
+static inline Word compositeBinopTopLevel(VM& vm, Op op, u16 a, u16 b,
+                                          Type* aType, Type* bType, Type* resultType) {
+    auto* aTT = dynamic_cast<TupleType*>(aType);
+    auto* bTT = dynamic_cast<TupleType*>(bType);
+    auto* rTT = dynamic_cast<TupleType*>(resultType);
+    bool aInline = aTT && aType->repr_ == Type::Repr::Inline;
+    bool bInline = bTT && bType->repr_ == Type::Repr::Inline;
+    if (rTT && (aInline || bInline)) {
+        Word const* aBase = aTT ? (aInline ? &vm.reg(a)
+                                           : &static_cast<Tuple*>(vm.reg(a).o)->v[0])
+                                : nullptr;
+        Word const* bBase = bTT ? (bInline ? &vm.reg(b)
+                                           : &static_cast<Tuple*>(vm.reg(b).o)->v[0])
+                                : nullptr;
+        return dispatchTupleBinopBase(vm, op, aBase, bBase, vm.reg(a), vm.reg(b),
+                                      aType, bType, rTT);
+    }
+    // Array/List result -- box any Inline tuple operand into a heap Tuple
+    // so dispatchBinop's Word-based path can broadcast it field-wise.
+    Word aw = vm.reg(a), bw = vm.reg(b);
+    if (aInline) aw = boxPayload(vm, aType, &vm.reg(a));
+    if (bInline) bw = boxPayload(vm, bType, &vm.reg(b));
+    return dispatchBinop(vm, op, aw, bw, aType, bType, resultType);
+}
+
+template<typename Op>
+static inline Word compositeUnaryOpTopLevel(VM& vm, Op op, u16 a,
+                                            Type* aType, Type* resultType) {
+    auto* aTT = dynamic_cast<TupleType*>(aType);
+    auto* rTT = dynamic_cast<TupleType*>(resultType);
+    bool aInline = aTT && aType->repr_ == Type::Repr::Inline;
+    if (rTT && aInline) {
+        return dispatchTupleUnaryOpBase(vm, op, &vm.reg(a), aType, rTT);
+    }
+    Word aw = vm.reg(a);
+    if (aInline) aw = boxPayload(vm, aType, &vm.reg(a));
+    return dispatchUnaryOp(vm, op, aw, aType, resultType);
+}
+
 // ADD_COMPOSITE Rd, Ra, Rb (5 words: op, regs, resultType*, aType*, bType*)
 void op_add_composite(VM& vm, Code* pc) {
     u16 dst = pc[1].regs[0], a = pc[1].regs[1], b = pc[1].regs[2];
     Type* resultType = static_cast<Type*>(pc[2].p);
     Type* aType = static_cast<Type*>(pc[3].p);
     Type* bType = static_cast<Type*>(pc[4].p);
-    vm.reg(dst) = dispatchBinop(vm, OpAdd{}, vm.reg(a), vm.reg(b), aType, bType, resultType);
+    vm.reg(dst) = compositeBinopTopLevel(vm, OpAdd{}, a, b, aType, bType, resultType);
     DISPATCH(5);
 }
 
@@ -1970,7 +2073,7 @@ void op_sub_composite(VM& vm, Code* pc) {
     Type* resultType = static_cast<Type*>(pc[2].p);
     Type* aType = static_cast<Type*>(pc[3].p);
     Type* bType = static_cast<Type*>(pc[4].p);
-    vm.reg(dst) = dispatchBinop(vm, OpSub{}, vm.reg(a), vm.reg(b), aType, bType, resultType);
+    vm.reg(dst) = compositeBinopTopLevel(vm, OpSub{}, a, b, aType, bType, resultType);
     DISPATCH(5);
 }
 
@@ -1979,7 +2082,7 @@ void op_mul_composite(VM& vm, Code* pc) {
     Type* resultType = static_cast<Type*>(pc[2].p);
     Type* aType = static_cast<Type*>(pc[3].p);
     Type* bType = static_cast<Type*>(pc[4].p);
-    vm.reg(dst) = dispatchBinop(vm, OpMul{}, vm.reg(a), vm.reg(b), aType, bType, resultType);
+    vm.reg(dst) = compositeBinopTopLevel(vm, OpMul{}, a, b, aType, bType, resultType);
     DISPATCH(5);
 }
 
@@ -1988,7 +2091,7 @@ void op_div_composite(VM& vm, Code* pc) {
     Type* resultType = static_cast<Type*>(pc[2].p);
     Type* aType = static_cast<Type*>(pc[3].p);
     Type* bType = static_cast<Type*>(pc[4].p);
-    vm.reg(dst) = dispatchBinop(vm, OpDiv{}, vm.reg(a), vm.reg(b), aType, bType, resultType);
+    vm.reg(dst) = compositeBinopTopLevel(vm, OpDiv{}, a, b, aType, bType, resultType);
     DISPATCH(5);
 }
 
@@ -1997,7 +2100,7 @@ void op_neg_composite(VM& vm, Code* pc) {
     u16 dst = pc[1].regs[0], a = pc[1].regs[1];
     Type* resultType = static_cast<Type*>(pc[2].p);
     Type* aType = static_cast<Type*>(pc[3].p);
-    vm.reg(dst) = dispatchUnaryOp(vm, OpNeg{}, vm.reg(a), aType, resultType);
+    vm.reg(dst) = compositeUnaryOpTopLevel(vm, OpNeg{}, a, aType, resultType);
     DISPATCH(4);
 }
 
@@ -2006,7 +2109,7 @@ void op_not_composite(VM& vm, Code* pc) {
     u16 dst = pc[1].regs[0], a = pc[1].regs[1];
     Type* resultType = static_cast<Type*>(pc[2].p);
     Type* aType = static_cast<Type*>(pc[3].p);
-    vm.reg(dst) = dispatchUnaryOp(vm, OpNot{}, vm.reg(a), aType, resultType);
+    vm.reg(dst) = compositeUnaryOpTopLevel(vm, OpNot{}, a, aType, resultType);
     DISPATCH(4);
 }
 
@@ -2015,7 +2118,7 @@ void op_bitnot_composite(VM& vm, Code* pc) {
     u16 dst = pc[1].regs[0], a = pc[1].regs[1];
     Type* resultType = static_cast<Type*>(pc[2].p);
     Type* aType = static_cast<Type*>(pc[3].p);
-    vm.reg(dst) = dispatchUnaryOp(vm, OpBitNot{}, vm.reg(a), aType, resultType);
+    vm.reg(dst) = compositeUnaryOpTopLevel(vm, OpBitNot{}, a, aType, resultType);
     DISPATCH(4);
 }
 
@@ -2039,11 +2142,23 @@ static Word dispatchCmpTupleBinop(VM& vm, CmpOp op, Word a, Word b,
                                   Type* aType, Type* bType, TupleType* resultTT) {
     auto* aTT = dynamic_cast<TupleType*>(aType);
     auto* bTT = dynamic_cast<TupleType*>(bType);
+    Word const* aBase = aTT ? &static_cast<Tuple*>(a.o)->v[0] : nullptr;
+    Word const* bBase = bTT ? &static_cast<Tuple*>(b.o)->v[0] : nullptr;
+    return dispatchCmpTupleBinopBase(vm, op, aBase, bBase, a, b, aType, bType, resultTT);
+}
+
+template<typename CmpOp>
+static Word dispatchCmpTupleBinopBase(VM& vm, CmpOp op,
+                                      Word const* aBase, Word const* bBase,
+                                      Word aScalar, Word bScalar,
+                                      Type* aType, Type* bType, TupleType* resultTT) {
+    auto* aTT = dynamic_cast<TupleType*>(aType);
+    auto* bTT = dynamic_cast<TupleType*>(bType);
     usize n = resultTT->fields_.size();
     auto* result = Tuple::create(resultTT, (u32)n);
     for (usize i = 0; i < n; ++i) {
-        Word ae = aTT ? readTupleField(vm, static_cast<Tuple*>(a.o), aTT, i) : a;
-        Word be = bTT ? readTupleField(vm, static_cast<Tuple*>(b.o), bTT, i) : b;
+        Word ae = aTT ? readTupleField(vm, aBase, aTT, i) : aScalar;
+        Word be = bTT ? readTupleField(vm, bBase, bTT, i) : bScalar;
         Type* aet = aTT ? aTT->fields_[i] : aType;
         Type* bet = bTT ? bTT->fields_[i] : bType;
         Word r = dispatchCmpBinop(vm, op, ae, be, aet, bet, resultTT->fields_[i]);
@@ -2110,40 +2225,68 @@ static Word dispatchCmpBinop(VM& vm, CmpOp op, Word a, Word b,
     }
 }
 
+// Phase 4g.16: top-level entry for heap-result composite cmp. Routes
+// Inline-Tuple operands to the base-pointer dispatcher; non-Tuple operands
+// fall through to dispatchCmpBinop (which handles Array/scalar paths).
+template<typename CmpOp>
+static inline Word compositeCmpTopLevel(VM& vm, CmpOp op, u16 a, u16 b,
+                                        Type* aType, Type* bType, Type* resultType) {
+    auto* aTT = dynamic_cast<TupleType*>(aType);
+    auto* bTT = dynamic_cast<TupleType*>(bType);
+    auto* rTT = dynamic_cast<TupleType*>(resultType);
+    bool aInline = aTT && aType->repr_ == Type::Repr::Inline;
+    bool bInline = bTT && bType->repr_ == Type::Repr::Inline;
+    if (rTT && (aInline || bInline)) {
+        Word const* aBase = aTT ? (aInline ? &vm.reg(a)
+                                           : &static_cast<Tuple*>(vm.reg(a).o)->v[0])
+                                : nullptr;
+        Word const* bBase = bTT ? (bInline ? &vm.reg(b)
+                                           : &static_cast<Tuple*>(vm.reg(b).o)->v[0])
+                                : nullptr;
+        return dispatchCmpTupleBinopBase(vm, op, aBase, bBase, vm.reg(a), vm.reg(b),
+                                         aType, bType, rTT);
+    }
+    // Array result -- box any Inline tuple operand for the Word-based path.
+    Word aw = vm.reg(a), bw = vm.reg(b);
+    if (aInline) aw = boxPayload(vm, aType, &vm.reg(a));
+    if (bInline) bw = boxPayload(vm, bType, &vm.reg(b));
+    return dispatchCmpBinop(vm, op, aw, bw, aType, bType, resultType);
+}
+
 // CMP_XX_COMPOSITE Rd, Ra, Rb (5 words: op, regs, resultType*, aType*, bType*)
 void op_cmp_eq_composite(VM& vm, Code* pc) {
     u16 dst = pc[1].regs[0], a = pc[1].regs[1], b = pc[1].regs[2];
-    vm.reg(dst) = dispatchCmpBinop(vm, OpCmpEq{}, vm.reg(a), vm.reg(b),
+    vm.reg(dst) = compositeCmpTopLevel(vm, OpCmpEq{}, a, b,
         static_cast<Type*>(pc[3].p), static_cast<Type*>(pc[4].p), static_cast<Type*>(pc[2].p));
     DISPATCH(5);
 }
 void op_cmp_ne_composite(VM& vm, Code* pc) {
     u16 dst = pc[1].regs[0], a = pc[1].regs[1], b = pc[1].regs[2];
-    vm.reg(dst) = dispatchCmpBinop(vm, OpCmpNe{}, vm.reg(a), vm.reg(b),
+    vm.reg(dst) = compositeCmpTopLevel(vm, OpCmpNe{}, a, b,
         static_cast<Type*>(pc[3].p), static_cast<Type*>(pc[4].p), static_cast<Type*>(pc[2].p));
     DISPATCH(5);
 }
 void op_cmp_lt_composite(VM& vm, Code* pc) {
     u16 dst = pc[1].regs[0], a = pc[1].regs[1], b = pc[1].regs[2];
-    vm.reg(dst) = dispatchCmpBinop(vm, OpCmpLt{}, vm.reg(a), vm.reg(b),
+    vm.reg(dst) = compositeCmpTopLevel(vm, OpCmpLt{}, a, b,
         static_cast<Type*>(pc[3].p), static_cast<Type*>(pc[4].p), static_cast<Type*>(pc[2].p));
     DISPATCH(5);
 }
 void op_cmp_le_composite(VM& vm, Code* pc) {
     u16 dst = pc[1].regs[0], a = pc[1].regs[1], b = pc[1].regs[2];
-    vm.reg(dst) = dispatchCmpBinop(vm, OpCmpLe{}, vm.reg(a), vm.reg(b),
+    vm.reg(dst) = compositeCmpTopLevel(vm, OpCmpLe{}, a, b,
         static_cast<Type*>(pc[3].p), static_cast<Type*>(pc[4].p), static_cast<Type*>(pc[2].p));
     DISPATCH(5);
 }
 void op_cmp_gt_composite(VM& vm, Code* pc) {
     u16 dst = pc[1].regs[0], a = pc[1].regs[1], b = pc[1].regs[2];
-    vm.reg(dst) = dispatchCmpBinop(vm, OpCmpGt{}, vm.reg(a), vm.reg(b),
+    vm.reg(dst) = compositeCmpTopLevel(vm, OpCmpGt{}, a, b,
         static_cast<Type*>(pc[3].p), static_cast<Type*>(pc[4].p), static_cast<Type*>(pc[2].p));
     DISPATCH(5);
 }
 void op_cmp_ge_composite(VM& vm, Code* pc) {
     u16 dst = pc[1].regs[0], a = pc[1].regs[1], b = pc[1].regs[2];
-    vm.reg(dst) = dispatchCmpBinop(vm, OpCmpGe{}, vm.reg(a), vm.reg(b),
+    vm.reg(dst) = compositeCmpTopLevel(vm, OpCmpGe{}, a, b,
         static_cast<Type*>(pc[3].p), static_cast<Type*>(pc[4].p), static_cast<Type*>(pc[2].p));
     DISPATCH(5);
 }

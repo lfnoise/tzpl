@@ -1774,6 +1774,7 @@ void CodeGen::genPatternMatch(Pattern* pat, u16 subjReg, Type* subjType,
                     u16 cmpReg = allocReg();
                     emitOp(op_cmp_eq_obj);
                     emitRegs(cmpReg, subjReg, nullReg);
+                    emitPtr(etype);
                     u32 failJump = isVoidCase
                         ? emitJump(op_jump_if_false, cmpReg)
                         : emitJump(op_jump_if_true,  cmpReg);
@@ -1849,6 +1850,7 @@ void CodeGen::genPatternMatch(Pattern* pat, u16 subjReg, Type* subjType,
                 u16 cmpReg = allocReg();
                 emitOp(op_cmp_eq_obj);
                 emitRegs(cmpReg, subjReg, nullReg);
+                emitPtr(etype);
                 // For the void (None) case, match when subj == null.
                 // For the data (Some) case, match when subj != null.
                 u32 failJump = isVoidCase
@@ -1957,6 +1959,7 @@ void CodeGen::genPatternMatch(Pattern* pat, u16 subjReg, Type* subjType,
                     u16 cmpReg = allocReg();
                     emitOp(op_cmp_eq_obj);
                     emitRegs(cmpReg, subjReg, nullReg);
+                    emitPtr(etype);
                     u32 failJump = isVoidCase
                         ? emitJump(op_jump_if_false, cmpReg)
                         : emitJump(op_jump_if_true,  cmpReg);
@@ -3034,20 +3037,15 @@ u16 CodeGen::genBinaryOp(BinaryOpExpr* expr) {
         if (auto* tupType = dynamic_cast<TupleType*>(resultType)) {
             auto* leftTupType = dynamic_cast<TupleType*>(leftType);
             auto* rightTupType = dynamic_cast<TupleType*>(rightType);
-            // Phase 4g.2: op_concat_tuple expects heap Tuple* operands; box
-            // any Inline operand. Result is also a heap Tuple*; unbox if the
-            // resulting type is Inline.
-            u16 lReg = (leftTupType && leftTupType->repr_ == ts::Type::Repr::Inline)
-                ? emitBoxIfInline(leftReg, leftTupType) : leftReg;
-            u16 rReg = (rightTupType && rightTupType->repr_ == ts::Type::Repr::Inline)
-                ? emitBoxIfInline(rightReg, rightTupType) : rightReg;
-            bool resInline = tupType->repr_ == ts::Type::Repr::Inline;
-            u16 outReg = resInline ? allocReg() : allocReg();
+            // Phase 4g.16: op_concat_tuple accepts Inline operands natively
+            // (no boxing). Result is built directly into the multi-word dst
+            // slot when resultType is Inline, or a heap Tuple* otherwise.
+            u16 outReg = allocSlot(tupType);
             emitOp(op_concat_tuple);
-            emitRegs(outReg, lReg, rReg);
+            emitRegs(outReg, leftReg, rightReg);
             emitPtr(tupType);
             emitPtr(leftTupType);
-            if (resInline) return emitUnboxIfInline(outReg, tupType);
+            emitPtr(rightTupType);
             return outReg;
         }
     }
@@ -3077,12 +3075,10 @@ u16 CodeGen::genBinaryOp(BinaryOpExpr* expr) {
                     emitPtr(rightType);
                     return dst;
                 }
-                // Heap-result path: dispatch handler reads heap Tuple* fields,
-                // so any Inline operand must be boxed first.
-                u16 lReg = isInlineComposite(leftType) ? emitBoxIfInline(leftReg, leftType) : leftReg;
-                u16 rReg = isInlineComposite(rightType) ? emitBoxIfInline(rightReg, rightType) : rightReg;
+                // Phase 4g.16: heap-result composite arith now reads operand
+                // fields natively via base pointers; no operand boxing.
                 emitOp(getCompositeArithOp(expr->op));
-                emitRegs(dst, lReg, rReg);
+                emitRegs(dst, leftReg, rightReg);
                 emitPtr(resultType);
                 emitPtr(leftType);
                 emitPtr(rightType);
@@ -3147,10 +3143,10 @@ u16 CodeGen::genBinaryOp(BinaryOpExpr* expr) {
                     emitPtr(rightType);
                     return dst;
                 }
-                u16 lReg = isInlineComposite(leftType) ? emitBoxIfInline(leftReg, leftType) : leftReg;
-                u16 rReg = isInlineComposite(rightType) ? emitBoxIfInline(rightReg, rightType) : rightReg;
+                // Phase 4g.16: heap-result composite cmp now reads operand
+                // fields natively via base pointers; no operand boxing.
                 emitOp(getCompositeCmpOp(expr->op));
-                emitRegs(dst, lReg, rReg);
+                emitRegs(dst, leftReg, rightReg);
                 emitPtr(resultType);
                 emitPtr(leftType);
                 emitPtr(rightType);
@@ -3174,18 +3170,15 @@ u16 CodeGen::genBinaryOp(BinaryOpExpr* expr) {
                 leftReg = ensureType(leftReg, leftType, cmpType);
                 rightReg = ensureType(rightReg, rightType, cmpType);
             }
-            // Phase 4g.2: Inline composite operands need to be boxed before
-            // op_cmp_eq_obj / op_cmp_ne_obj read vm.reg(...).o.
-            if (isInlineMultiword(leftType) && leftType != compiler_.complexType()
-                && leftType != compiler_.fractionType()) {
-                leftReg = emitBoxIfInline(leftReg, leftType);
-            }
-            if (isInlineMultiword(rightType) && rightType != compiler_.complexType()
-                && rightType != compiler_.fractionType()) {
-                rightReg = emitBoxIfInline(rightReg, rightType);
-            }
-            emitOp(getCmpOp(expr->op, cmpType));
+            // Phase 4g.16: op_cmp_eq_obj / op_cmp_ne_obj now take an operand
+            // type ptr and compare via wordsEqual natively; no boxing needed
+            // for Inline composite operands.
+            Operation cmpOp = getCmpOp(expr->op, cmpType);
+            emitOp(cmpOp);
             emitRegs(dst, leftReg, rightReg);
+            if (cmpOp == op_cmp_eq_obj || cmpOp == op_cmp_ne_obj) {
+                emitPtr(cmpType);
+            }
             break;
         }
 
@@ -3345,9 +3338,10 @@ u16 CodeGen::genUnaryOp(UnaryOpExpr* expr) {
                     emitPtr(opT);
                     return dst;
                 }
-                u16 inReg = isInlineComposite(opT) ? emitBoxIfInline(operandReg, opT) : operandReg;
+                // Phase 4g.16: heap-result composite unop reads operand
+                // natively; no boxing.
                 emitOp(op_neg_composite);
-                emitRegs(dst, inReg);
+                emitRegs(dst, operandReg);
                 emitPtr(rT);
                 emitPtr(opT);
                 return dst;
@@ -3380,9 +3374,10 @@ u16 CodeGen::genUnaryOp(UnaryOpExpr* expr) {
                     emitPtr(opT);
                     return dst;
                 }
-                u16 inReg = isInlineComposite(opT) ? emitBoxIfInline(operandReg, opT) : operandReg;
+                // Phase 4g.16: heap-result composite unop reads operand
+                // natively; no boxing.
                 emitOp(op_not_composite);
-                emitRegs(dst, inReg);
+                emitRegs(dst, operandReg);
                 emitPtr(rT);
                 emitPtr(opT);
                 return dst;
@@ -3407,9 +3402,10 @@ u16 CodeGen::genUnaryOp(UnaryOpExpr* expr) {
                     emitPtr(opT);
                     return dst;
                 }
-                u16 inReg = isInlineComposite(opT) ? emitBoxIfInline(operandReg, opT) : operandReg;
+                // Phase 4g.16: heap-result composite unop reads operand
+                // natively; no boxing.
                 emitOp(op_bitnot_composite);
-                emitRegs(dst, inReg);
+                emitRegs(dst, operandReg);
                 emitPtr(rT);
                 emitPtr(opT);
                 return dst;

@@ -199,8 +199,8 @@ static const std::unordered_map<Operation, OpInfo>& opInfoMap() {
         { op_print_symbol,      { "PRINT_SYMBOL",      2, OpFmt::Regs, 1 } },
 
         // --- Object Comparison ---
-        { op_cmp_eq_obj,        { "EQ_OBJ",            2, OpFmt::Regs, 3 } },
-        { op_cmp_ne_obj,        { "NE_OBJ",            2, OpFmt::Regs, 3 } },
+        { op_cmp_eq_obj,        { "EQ_OBJ",            3, OpFmt::Regs_Ptr, 3 } },
+        { op_cmp_ne_obj,        { "NE_OBJ",            3, OpFmt::Regs_Ptr, 3 } },
 
         // --- String Operations ---
         { op_concat_str,        { "CONCAT_STR",        2, OpFmt::Regs, 3 } },
@@ -248,7 +248,7 @@ static const std::unordered_map<Operation, OpInfo>& opInfoMap() {
 
         // --- Array/Tuple/List Concatenation ---
         { op_concat_array,      { "CONCAT_ARRAY",      3, OpFmt::Regs_Ptr, 3 } },
-        { op_concat_tuple,      { "CONCAT_TUPLE",      4, OpFmt::Regs_Ptr_Ptr, 3 } },
+        { op_concat_tuple,      { "CONCAT_TUPLE",      5, OpFmt::Regs_Ptr3, 3 } },
         { op_concat_list,       { "CONCAT_LIST",       3, OpFmt::Regs_Ptr, 3 } },
 
         // --- Array/Tuple/Struct Access/Construction ---
