@@ -146,3 +146,63 @@ var rp = ref(Pt{x:1, y:2});
 rp deref println;
 rp setref(Pt{x:3, y:4});
 rp deref println;
+
+-- Phase 4g.24: Map subscript with Inline Option result.
+-- The opcode used to produce a heap Enum* and rely on emitUnboxIfInline
+-- at each call site to unbox into the multi-word slot. The list-index
+-- auto-map path (m[idxList]) didn't unbox at all -- the consed value was
+-- a heap Enum* stuffed into a 1-word list head slot that the consumer
+-- read as a (broken) Inline Option, printing 'Option<Complex>.?' with a
+-- garbage discriminant.
+
+-- --- m[idxList] now writes Inline Option natively into the list head ---
+let mc = [1: 1.0+2.0i, 2: 3.0+4.0i];
+let idxL = List(1, 2, 99);
+mc[idxL] println;
+mc[idxL] length println;
+mc[idxL] @ println;
+
+let mf = [1: 1/2, 2: 3/4];
+mf[idxL] println;
+mf[idxL] @ println;
+
+let mt = [1: (10, 20), 2: (30, 40)];
+mt[idxL] println;
+mt[idxL] @ println;
+
+let mp = [1: Pt{x:1, y:2}, 2: Pt{x:3, y:4}];
+mp[idxL] println;
+mp[idxL] @ println;
+
+-- --- m[idxArr] (array index path) ---
+let idxA = [1, 2, 99];
+mc[idxA] println;
+mf[idxA] println;
+mt[idxA] println;
+mp[idxA] println;
+
+-- --- match on m[k] directly (Inline Option path) ---
+match (mc[1]) {
+    Option.some(c): c println;
+    Option.none: "none" println;
+}
+match (mc[99]) {
+    Option.some(c): c println;
+    Option.none: "none" println;
+}
+match (mt[1]) {
+    Option.some(t): t println;
+    Option.none: "none" println;
+}
+match (mp[1]) {
+    Option.some(p): p println;
+    Option.none: "none" println;
+}
+
+-- --- Heap Option (V too big for Inline) still works ---
+struct Big { a Int; b Int; c Int; d Int; e Int }
+let mbig = [1: Big{a:1, b:2, c:3, d:4, e:5}];
+mbig[1] println;
+mbig[99] println;
+mbig[idxL] println;
+mbig[idxA] println;
