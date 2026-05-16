@@ -746,18 +746,20 @@ void builtin_filter_array(VM& vm, u16 dst, u16, u16 ab) {
 
 void builtin_fold_array(VM& vm, u16 dst, u16, u16 ab) {
     auto* src = vm.reg(ab).o;
-    Word acc = vm.reg(ab+1);
-    auto* fn = static_cast<Callable*>(vm.reg(ab+2).o);
+    auto* prim = vm.currentPrimitive();
+    auto* primTT = static_cast<TupleType*>(prim->type_);
+    Type* accT = primTT->fields_[1];
+    u16 accBoundarySW = legacyBoundarySlotW(vm, accT);
+
+    Word acc = readBoundaryArg(vm, &vm.reg((u16)(ab + 1)), accT);
+    auto* fn = static_cast<Callable*>(vm.reg((u16)(ab + 1 + accBoundarySW)).o);
     auto* at = static_cast<ArrayType*>(src->type_);
     Type* et = at->elemType_;
     auto* fnType = static_cast<FunctionType*>(fn->type_);
-    Type* accT = fnType->argTypes_.size() > 0 ? fnType->argTypes_[0] : nullptr;
     Type* elT  = fnType->argTypes_.size() > 1 ? fnType->argTypes_[1] : nullptr;
     Type* retT = fnType->returnType_;
     size_t n = getArraySize(vm, src, et);
     u16 sb = vm.currentCodeBlock()->numRegs;
-    // Fold-state of inline composite type: accumulator slot at sb is multi-
-    // word inline; box back to 1-Word for the next iteration's caller view.
     for (size_t i = 0; i < n; i++) {
         placeLambdaArg(vm, sb, acc, accT);
         Word elem = getArrayElem(vm, src, et, i);
@@ -778,26 +780,35 @@ void builtin_fold_array(VM& vm, u16 dst, u16, u16 ab) {
         readLambdaResult(vm, sb, retT);
         acc = vm.reg(sb);
     }
-    vm.reg(dst) = acc;
+    writeBoundaryResult(vm, dst, acc, accT);
 }
 
 void builtin_scan_array(VM& vm, u16 dst, u16, u16 ab) {
     auto* src = vm.reg(ab).o;
-    Word acc = vm.reg(ab+1);
-    auto* fn = static_cast<Callable*>(vm.reg(ab+2).o);
+    auto* prim = vm.currentPrimitive();
+    auto* primTT = static_cast<TupleType*>(prim->type_);
+    Type* accT = primTT->fields_[1];
+    u16 accBoundarySW = legacyBoundarySlotW(vm, accT);
+
+    Word acc = readBoundaryArg(vm, &vm.reg((u16)(ab + 1)), accT);
+    auto* fn = static_cast<Callable*>(vm.reg((u16)(ab + 1 + accBoundarySW)).o);
     auto* at = static_cast<ArrayType*>(src->type_);
     Type* et = at->elemType_;
     auto* fnType = static_cast<FunctionType*>(fn->type_);
     Type* accET = fnType->returnType_;
+    Type* elT  = fnType->argTypes_.size() > 1 ? fnType->argTypes_[1] : nullptr;
     auto* resAT = vm.arrayType(accET);
     size_t n = getArraySize(vm, src, et);
     auto* result = makeEmptyArray(resAT);
     arrayPush(vm, result, accET, acc);
     u16 sb = vm.currentCodeBlock()->numRegs;
     for (size_t i = 0; i < n; i++) {
-        vm.reg(sb) = acc;
-        vm.reg(sb+1) = getArrayElem(vm, src, et, i);
+        placeLambdaArg(vm, sb, acc, accT);
+        u16 elemSb = (u16)(sb + (isLambdaInlineComposite(accT) ? accT->sizeWords_ : 1));
+        Word elem = getArrayElem(vm, src, et, i);
+        placeLambdaArg(vm, elemSb, elem, elT);
         callTwoArgs(vm, fn, sb);
+        readLambdaResult(vm, sb, accET);
         acc = vm.reg(sb);
         arrayPush(vm, result, accET, acc);
     }
@@ -812,14 +823,19 @@ void builtin_fold1_array(VM& vm, u16 dst, u16, u16 ab) {
     size_t n = getArraySize(vm, src, et);
     if (n == 0) { vm.reg(dst).i = 0; return; }
     Word acc = getArrayElem(vm, src, et, 0);
+    auto* fnType = static_cast<FunctionType*>(fn->type_);
+    Type* retT = fnType->returnType_;
     u16 sb = vm.currentCodeBlock()->numRegs;
     for (size_t i = 1; i < n; i++) {
-        vm.reg(sb) = acc;
-        vm.reg(sb+1) = getArrayElem(vm, src, et, i);
+        placeLambdaArg(vm, sb, acc, et);
+        u16 elemSb = (u16)(sb + (isLambdaInlineComposite(et) ? et->sizeWords_ : 1));
+        Word elem = getArrayElem(vm, src, et, i);
+        placeLambdaArg(vm, elemSb, elem, et);
         callTwoArgs(vm, fn, sb);
+        readLambdaResult(vm, sb, retT);
         acc = vm.reg(sb);
     }
-    vm.reg(dst) = acc;
+    writeBoundaryResult(vm, dst, acc, et);
 }
 
 void builtin_scan1_array(VM& vm, u16 dst, u16, u16 ab) {
@@ -832,11 +848,16 @@ void builtin_scan1_array(VM& vm, u16 dst, u16, u16 ab) {
     if (n == 0) { vm.reg(dst).o = result; return; }
     Word acc = getArrayElem(vm, src, et, 0);
     arrayPush(vm, result, et, acc);
+    auto* fnType = static_cast<FunctionType*>(fn->type_);
+    Type* retT = fnType->returnType_;
     u16 sb = vm.currentCodeBlock()->numRegs;
     for (size_t i = 1; i < n; i++) {
-        vm.reg(sb) = acc;
-        vm.reg(sb+1) = getArrayElem(vm, src, et, i);
+        placeLambdaArg(vm, sb, acc, et);
+        u16 elemSb = (u16)(sb + (isLambdaInlineComposite(et) ? et->sizeWords_ : 1));
+        Word elem = getArrayElem(vm, src, et, i);
+        placeLambdaArg(vm, elemSb, elem, et);
         callTwoArgs(vm, fn, sb);
+        readLambdaResult(vm, sb, retT);
         acc = vm.reg(sb);
         arrayPush(vm, result, et, acc);
     }
@@ -851,7 +872,8 @@ void builtin_find_array(VM& vm, u16 dst, u16, u16 ab) {
     size_t n = getArraySize(vm, src, et);
     u16 sb = vm.currentCodeBlock()->numRegs;
     for (size_t i = 0; i < n; i++) {
-        vm.reg(sb) = getArrayElem(vm, src, et, i);
+        Word elem = getArrayElem(vm, src, et, i);
+        placeLambdaArg(vm, sb, elem, et);
         callOneArg(vm, fn, sb);
         if (vm.reg(sb).i) { vm.reg(dst).i = (i64)i; return; }
     }
@@ -868,7 +890,7 @@ void builtin_takeWhile_array(VM& vm, u16 dst, u16, u16 ab) {
     u16 sb = vm.currentCodeBlock()->numRegs;
     for (size_t i = 0; i < n; i++) {
         Word elem = getArrayElem(vm, src, et, i);
-        vm.reg(sb) = elem;
+        placeLambdaArg(vm, sb, elem, et);
         callOneArg(vm, fn, sb);
         if (!vm.reg(sb).i) break;
         arrayPush(vm, result, et, elem);
@@ -888,7 +910,7 @@ void builtin_dropWhile_array(VM& vm, u16 dst, u16, u16 ab) {
     for (size_t i = 0; i < n; i++) {
         Word elem = getArrayElem(vm, src, et, i);
         if (dropping) {
-            vm.reg(sb) = elem;
+            placeLambdaArg(vm, sb, elem, et);
             callOneArg(vm, fn, sb);
             if (vm.reg(sb).i) continue;
             dropping = false;

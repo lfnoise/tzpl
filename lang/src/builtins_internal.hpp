@@ -223,13 +223,18 @@ inline Code& syncReturnCode() {
 // through the VM as multi-word values, but builtins read them as 1-Word
 // boxed pointers from container backends. Unbox before placing into the
 // lambda's arg slot, and re-box after reading back.
+//
+// Phase 4g.22: include Complex/Fraction. Their lambda param ABI is the same
+// as Tuple/Struct/Enum: 2-Word native (sizeWords_ slots). The boxInlineDeep
+// /unboxInlineDeep helpers handle them since Phase 4g.21.
 inline bool isLambdaInlineComposite(Type* t) {
     if (!t) return false;
     if (t->repr_ != Type::Repr::Inline) return false;
-    if (t == gCurrentVM->complexType() || t == gCurrentVM->fractionType()) return false;
     return dynamic_cast<TupleType*>(t)
         || dynamic_cast<StructType*>(t)
-        || dynamic_cast<EnumType*>(t);
+        || dynamic_cast<EnumType*>(t)
+        || dynamic_cast<ComplexType*>(t)
+        || dynamic_cast<FractionType*>(t);
 }
 
 inline void placeLambdaArg(VM& vm, u16 sb, Word w, Type* paramType) {
@@ -255,12 +260,10 @@ inline u16 lambdaParamSlotWords(Lambda* lam) {
     u16 sum = 0;
     for (Type* t : fnType->argTypes_) {
         u16 sw = (t && t->sizeWords_ > 0) ? t->sizeWords_ : 1;
-        // Phase 4g.2: builtin lambda calling convention places Inline composite
-        // args as multi-word (placeLambdaArg unboxes); other types as 1 word.
-        if (t && t->repr_ == Type::Repr::Inline
-            && t != gCurrentVM->complexType() && t != gCurrentVM->fractionType()
-            && (dynamic_cast<TupleType*>(t) || dynamic_cast<StructType*>(t)
-                || dynamic_cast<EnumType*>(t))) {
+        // Phase 4g.2/4g.22: builtin lambda calling convention places Inline
+        // composite args (including Complex/Fraction) as multi-word native;
+        // other types as 1 word.
+        if (isLambdaInlineComposite(t)) {
             sum += sw;
         } else {
             sum += 1;
@@ -282,6 +285,42 @@ inline void callOneArg(VM& vm, Callable* fn, u16 sb) {
         vm.pushFrame(&syncReturnCode(), cb, callBase, cb->numRegs, sb);
         Code* entry = cb->code.data();
         entry->op(vm, entry);
+    }
+}
+
+// Phase 4g.22: helpers to read the call-site arg layout for legacy
+// (acceptsInlineArgs=false) builtins. Phase 4f keeps Complex/Fraction as
+// multi-word native at the boundary; Tuple/Struct/Enum are boxed to a
+// 1-Word Obj* slot. These helpers paper over that asymmetry so reducer
+// builtins like fold can iterate the call frame correctly.
+inline u16 legacyBoundarySlotW(VM& vm, Type* t) {
+    if (!t) return 1;
+    if (t->repr_ != Type::Repr::Inline) return 1;
+    if (t == vm.complexType() || t == vm.fractionType()) {
+        return (u16)t->sizeWords_;
+    }
+    return 1;  // Tuple/Struct/Enum boxed to a single Obj*.
+}
+
+// Read a boundary arg into a single Word. For multi-word native types
+// (Complex/Fraction), this boxes into a heap Obj*.
+inline Word readBoundaryArg(VM& vm, Word const* slot, Type* t) {
+    if (t && t->repr_ == Type::Repr::Inline
+        && (t == vm.complexType() || t == vm.fractionType())) {
+        return boxPayload(vm, t, slot);
+    }
+    return *slot;
+}
+
+// Write a Word result into the caller's dst slot. For multi-word inline
+// types (Complex/Fraction), unbox a heap Obj* into the native multi-Word
+// dst slot. For 1-Word types just copies the Word.
+inline void writeBoundaryResult(VM& vm, u16 dst, Word w, Type* t) {
+    if (t && t->repr_ == Type::Repr::Inline
+        && (t == vm.complexType() || t == vm.fractionType())) {
+        unboxInlineDeepTo(vm, t, w.o, &vm.reg(dst));
+    } else {
+        vm.reg(dst) = w;
     }
 }
 

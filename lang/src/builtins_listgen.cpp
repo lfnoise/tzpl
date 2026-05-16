@@ -1160,10 +1160,14 @@ void builtin_filter_list(VM& vm, u16 dst, u16, u16 ab) {
 
 void builtin_fold_list(VM& vm, u16 dst, u16, u16 ab) {
     auto* src = static_cast<ListNode*>(vm.reg(ab).o);
-    Word acc = vm.reg(ab+1);
-    auto* fn = static_cast<Callable*>(vm.reg(ab+2).o);
+    auto* prim = vm.currentPrimitive();
+    auto* primTT = static_cast<TupleType*>(prim->type_);
+    Type* accT = primTT->fields_[1];
+    u16 accBoundarySW = legacyBoundarySlotW(vm, accT);
+
+    Word acc = readBoundaryArg(vm, &vm.reg((u16)(ab + 1)), accT);
+    auto* fn = static_cast<Callable*>(vm.reg((u16)(ab + 1 + accBoundarySW)).o);
     auto* fnType = static_cast<FunctionType*>(fn->type_);
-    Type* accT = fnType->argTypes_.size() > 0 ? fnType->argTypes_[0] : nullptr;
     Type* elT  = fnType->argTypes_.size() > 1 ? fnType->argTypes_[1] : nullptr;
     Type* retT = fnType->returnType_;
     u16 sb = vm.currentCodeBlock()->numRegs;
@@ -1180,13 +1184,18 @@ void builtin_fold_list(VM& vm, u16 dst, u16, u16 ab) {
         acc = vm.reg(sb);
         cur = cur->tail_;
     }
-    vm.reg(dst) = acc;
+    writeBoundaryResult(vm, dst, acc, accT);
 }
 
 void builtin_scan_list(VM& vm, u16 dst, u16, u16 ab) {
     auto* src = static_cast<ListNode*>(vm.reg(ab).o);
-    Word acc = vm.reg(ab+1);
-    auto* fn = static_cast<Callable*>(vm.reg(ab+2).o);
+    auto* prim = vm.currentPrimitive();
+    auto* primTT = static_cast<TupleType*>(prim->type_);
+    Type* accT = primTT->fields_[1];
+    u16 accBoundarySW = legacyBoundarySlotW(vm, accT);
+
+    Word acc = readBoundaryArg(vm, &vm.reg((u16)(ab + 1)), accT);
+    auto* fn = static_cast<Callable*>(vm.reg((u16)(ab + 1 + accBoundarySW)).o);
     auto* fnType = static_cast<FunctionType*>(fn->type_);
     Type* accET = fnType->returnType_;
     auto* resLT = vm.listType(accET);
@@ -1207,16 +1216,25 @@ void builtin_fold1_list(VM& vm, u16 dst, u16, u16 ab) {
     auto* fn = static_cast<Callable*>(vm.reg(ab+1).o);
     if (!src) { vm.reg(dst).i = 0; return; }
     src->force(vm);
-    Word acc = src->head_;
+    auto* lt = static_cast<ListType*>(src->type_);
+    Type* et = lt->elemType_;
+    Word acc = boxListHeadIfInline(vm, src, et);
+    auto* fnType = static_cast<FunctionType*>(fn->type_);
+    Type* retT = fnType->returnType_;
     u16 sb = vm.currentCodeBlock()->numRegs;
     ListNode* cur = src->tail_;
     while (cur) {
         cur->force(vm);
-        vm.reg(sb) = acc; vm.reg(sb+1) = cur->head_;
-        callTwoArgs(vm, fn, sb); acc = vm.reg(sb);
+        placeLambdaArg(vm, sb, acc, et);
+        u16 elemSb = (u16)(sb + (isLambdaInlineComposite(et) ? et->sizeWords_ : 1));
+        Word elem = boxListHeadIfInline(vm, cur, et);
+        placeLambdaArg(vm, elemSb, elem, et);
+        callTwoArgs(vm, fn, sb);
+        readLambdaResult(vm, sb, retT);
+        acc = vm.reg(sb);
         cur = cur->tail_;
     }
-    vm.reg(dst) = acc;
+    writeBoundaryResult(vm, dst, acc, et);
 }
 
 void builtin_scan1_list(VM& vm, u16 dst, u16, u16 ab) {
