@@ -1450,47 +1450,113 @@ struct OpBitNot {
 };
 
 // --- Array helpers ---
+//
+// Backend-aware accessors used by the generic array dispatch paths. Element
+// reads return a single Word: PodArray<x64>/PodArray<r64>/InlineArray slots
+// are boxed into heap Complex/Fraction/Tuple/Struct so the rest of
+// dispatchBinop can broadcast them as ordinary scalars; element writes unbox
+// the heap result back into the native slot.
 
 static usize arrayLen(Obj* arr, Type* elemType, VM& vm) {
-    if (elemType && !storesObjPtr(elemType) && !storesF64(elemType))
-        return static_cast<PodArray<i64>*>(arr)->v.size();
-    if (elemType == vm.floatType())
-        return static_cast<PodArray<f64>*>(arr)->v.size();
-    return static_cast<ObjArray*>(arr)->size();
+    switch (arrayBackendFor(elemType)) {
+        case ArrayBackend::Int:      return static_cast<PodArray<i64>*>(arr)->v.size();
+        case ArrayBackend::Float:    return static_cast<PodArray<f64>*>(arr)->v.size();
+        case ArrayBackend::Complex:  return static_cast<PodArray<x64>*>(arr)->v.size();
+        case ArrayBackend::Fraction: return static_cast<PodArray<r64>*>(arr)->v.size();
+        case ArrayBackend::Inline:   return static_cast<InlineArray*>(arr)->size();
+        case ArrayBackend::Obj:      return static_cast<ObjArray*>(arr)->size();
+    }
+    return 0;
 }
 
 static Word readElem(Obj* arr, usize i, Type* elemType, VM& vm) {
-    if (elemType && !storesObjPtr(elemType) && !storesF64(elemType))
-        return Word(static_cast<PodArray<i64>*>(arr)->v[i]);
-    if (elemType == vm.floatType())
-        return Word(static_cast<PodArray<f64>*>(arr)->v[i]);
-    return Word(static_cast<ObjArray*>(arr)->get(i));
+    switch (arrayBackendFor(elemType)) {
+        case ArrayBackend::Int:
+            return Word(static_cast<PodArray<i64>*>(arr)->v[i]);
+        case ArrayBackend::Float:
+            return Word(static_cast<PodArray<f64>*>(arr)->v[i]);
+        case ArrayBackend::Complex: {
+            x64 const& x = static_cast<PodArray<x64>*>(arr)->v[i];
+            auto* c = new Complex(x);
+            c->retain();
+            return Word(static_cast<Obj*>(c));
+        }
+        case ArrayBackend::Fraction: {
+            r64 const& r = static_cast<PodArray<r64>*>(arr)->v[i];
+            auto* fr = new Fraction(r);
+            fr->retain();
+            return Word(static_cast<Obj*>(fr));
+        }
+        case ArrayBackend::Inline: {
+            Word const* slot = static_cast<InlineArray*>(arr)->slot(i);
+            return boxPayload(vm, elemType, slot);
+        }
+        case ArrayBackend::Obj:
+            return Word(static_cast<ObjArray*>(arr)->get(i));
+    }
+    return Word{};
 }
 
 static Obj* makeArray(VM& vm, ArrayType* type, usize len) {
     Type* elem = type->elemType_;
-    if (elem && !storesObjPtr(elem) && !storesF64(elem)) {
-        auto* arr = new PodArray<i64>(type);
-        arr->v.resize(len);
-        return arr;
+    switch (arrayBackendFor(elem)) {
+        case ArrayBackend::Int: {
+            auto* arr = new PodArray<i64>(type);
+            arr->v.resize(len);
+            return arr;
+        }
+        case ArrayBackend::Float: {
+            auto* arr = new PodArray<f64>(type);
+            arr->v.resize(len);
+            return arr;
+        }
+        case ArrayBackend::Complex: {
+            auto* arr = new PodArray<x64>(type);
+            arr->v.resize(len);
+            return arr;
+        }
+        case ArrayBackend::Fraction: {
+            auto* arr = new PodArray<r64>(type);
+            arr->v.resize(len);
+            return arr;
+        }
+        case ArrayBackend::Inline: {
+            auto* arr = new InlineArray(type);
+            arr->resize(len);
+            return arr;
+        }
+        case ArrayBackend::Obj: {
+            auto* arr = new ObjArray(type);
+            arr->resize(len);
+            return arr;
+        }
     }
-    if (storesF64(elem)) {
-        auto* arr = new PodArray<f64>(type);
-        arr->v.resize(len);
-        return arr;
-    }
-    auto* arr = new ObjArray(type);
-    arr->resize(len);
-    return arr;
+    return nullptr;
 }
 
 static void writeElem(Obj* arr, usize i, Word w, Type* elemType, VM& vm) {
-    if (elemType && !storesObjPtr(elemType) && !storesF64(elemType))
-        static_cast<PodArray<i64>*>(arr)->v[i] = w.i;
-    else if (elemType == vm.floatType())
-        static_cast<PodArray<f64>*>(arr)->v[i] = w.f;
-    else {
-        static_cast<ObjArray*>(arr)->set(i, w.o);
+    switch (arrayBackendFor(elemType)) {
+        case ArrayBackend::Int:
+            static_cast<PodArray<i64>*>(arr)->v[i] = w.i;
+            return;
+        case ArrayBackend::Float:
+            static_cast<PodArray<f64>*>(arr)->v[i] = w.f;
+            return;
+        case ArrayBackend::Complex:
+            static_cast<PodArray<x64>*>(arr)->v[i] = static_cast<Complex*>(w.o)->x;
+            return;
+        case ArrayBackend::Fraction:
+            static_cast<PodArray<r64>*>(arr)->v[i] = static_cast<Fraction*>(w.o)->r;
+            return;
+        case ArrayBackend::Inline: {
+            // Unbox the heap result into the native multi-word slot.
+            Word* dst = static_cast<InlineArray*>(arr)->slot(i);
+            unboxInlineDeepTo(vm, elemType, w.o, dst);
+            return;
+        }
+        case ArrayBackend::Obj:
+            static_cast<ObjArray*>(arr)->set(i, w.o);
+            return;
     }
 }
 
