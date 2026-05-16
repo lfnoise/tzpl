@@ -5934,13 +5934,16 @@ u16 CodeGen::genExplicitImplicitAutoMapCall(CallExpr_* expr) {
             && t != compiler_.complexType()
             && t != compiler_.fractionType();
     };
+    // Legacy (unmigrated) builtins still expect 1-Word boxed args; migrated
+    // builtins (`acceptsInlineArgs=true`) take inline-composite args natively.
+    bool boxAtBoundary = expr->isBuiltinCall && !expr->builtinAcceptsInlineArgs;
     auto callerSlotW = [&](Type* paramType, u16 i) -> u32 {
         if (expr->variadicPackStart >= 0 && i >= (u16)expr->variadicPackStart) {
             return 1;
         }
         if (!paramType) return 1;
         if (inlineCompositeT(paramType))
-            return expr->isBuiltinCall ? 1u : (u32)paramType->sizeWords_;
+            return boxAtBoundary ? 1u : (u32)paramType->sizeWords_;
         return typeSlotWords(paramType);
     };
     u32 cumOffset = 0;
@@ -5967,7 +5970,7 @@ u16 CodeGen::genExplicitImplicitAutoMapCall(CallExpr_* expr) {
             for (int d = 0; d < expr->autoMapArgs[i].depth; ++d) {
                 elemType = dynamic_cast<ArrayType*>(elemType)->elemType_;
             }
-            if (inlineCompositeT(elemType) && expr->isBuiltinCall) {
+            if (inlineCompositeT(elemType) && boxAtBoundary) {
                 srcReg = emitBoxIfInline(srcReg, elemType);
                 if (srcReg != targetReg) { emitOp(op_mov); emitRegs(targetReg, srcReg); }
             } else {
@@ -5990,7 +5993,7 @@ u16 CodeGen::genExplicitImplicitAutoMapCall(CallExpr_* expr) {
             emitRegs(elemReg, argRegs[i], innerIReg);
             emitPtr(arrType);
             if (elemInlineComposite) {
-                if (expr->isBuiltinCall) {
+                if (boxAtBoundary) {
                     u16 boxed = emitBoxIfInline(elemReg, elemType);
                     if (boxed != targetReg) { emitOp(op_mov); emitRegs(targetReg, boxed); }
                 } else {
@@ -6010,7 +6013,7 @@ u16 CodeGen::genExplicitImplicitAutoMapCall(CallExpr_* expr) {
             if (paramType && argType != paramType) {
                 srcReg = ensureType(srcReg, argType, paramType);
             }
-            if (inlineCompositeT(paramType) && expr->isBuiltinCall) {
+            if (inlineCompositeT(paramType) && boxAtBoundary) {
                 srcReg = emitBoxIfInline(srcReg, paramType);
             }
             if (srcReg != targetReg) {
@@ -6027,7 +6030,7 @@ u16 CodeGen::genExplicitImplicitAutoMapCall(CallExpr_* expr) {
         && returnT->repr_ == ts::Type::Repr::Inline
         && returnT != compiler_.complexType()
         && returnT != compiler_.fractionType();
-    bool builtinReturnsInline = expr->isBuiltinCall && retInlineComposite;
+    bool builtinReturnsInline = boxAtBoundary && retInlineComposite;
     u16 callResultReg = builtinReturnsInline
         ? allocReg()
         : (retInlineComposite ? allocSlot(returnT) : allocReg());
@@ -6209,13 +6212,15 @@ u16 CodeGen::genCartesianCall(CallExpr_* expr) {
             && t != compiler_.complexType()
             && t != compiler_.fractionType();
     };
+    // Legacy (unmigrated) builtins still expect 1-Word boxed args.
+    bool boxAtBoundary = expr->isBuiltinCall && !expr->builtinAcceptsInlineArgs;
     auto callerSlotW = [&](Type* paramType, u16 i) -> u32 {
         if (expr->variadicPackStart >= 0 && i >= (u16)expr->variadicPackStart) {
             return 1;
         }
         if (!paramType) return 1;
         if (inlineCompositeT(paramType))
-            return expr->isBuiltinCall ? 1u : (u32)paramType->sizeWords_;
+            return boxAtBoundary ? 1u : (u32)paramType->sizeWords_;
         return typeSlotWords(paramType);
     };
     u32 cumOffset = 0;
@@ -6244,7 +6249,7 @@ u16 CodeGen::genCartesianCall(CallExpr_* expr) {
             emitRegs(elemReg, argRegs[i], (ci > 0 ? iRegs[ci] : iRegs[1]));
             emitPtr(arrType);
             if (elemInlineComposite) {
-                if (expr->isBuiltinCall) {
+                if (boxAtBoundary) {
                     u16 boxed = emitBoxIfInline(elemReg, elemType);
                     if (boxed != targetReg) { emitOp(op_mov); emitRegs(targetReg, boxed); }
                 } else {
@@ -6261,7 +6266,7 @@ u16 CodeGen::genCartesianCall(CallExpr_* expr) {
             if (paramType && argType != paramType) {
                 srcReg = ensureType(srcReg, argType, paramType);
             }
-            if (inlineCompositeT(paramType) && expr->isBuiltinCall) {
+            if (inlineCompositeT(paramType) && boxAtBoundary) {
                 srcReg = emitBoxIfInline(srcReg, paramType);
             }
             if (srcReg != targetReg) {
@@ -6278,7 +6283,7 @@ u16 CodeGen::genCartesianCall(CallExpr_* expr) {
         && returnT->repr_ == ts::Type::Repr::Inline
         && returnT != compiler_.complexType()
         && returnT != compiler_.fractionType();
-    bool builtinReturnsInline = expr->isBuiltinCall && retInlineComposite;
+    bool builtinReturnsInline = boxAtBoundary && retInlineComposite;
     u16 callResultReg = builtinReturnsInline
         ? allocReg()
         : (retInlineComposite ? allocSlot(returnT) : allocReg());
