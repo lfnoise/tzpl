@@ -3870,12 +3870,16 @@ u16 CodeGen::genCall(CallExpr_* expr) {
             }
             // Tuple-pack variadics keep the arg's own type.
         }
-        // Variadic args are packed into a 1-Word-per-slot container; box
-        // inline value types first.
+        // Phase 4g.13: variadic args are packed into a heap Tuple/Array
+        // whose storage is layout-aware (multi-word per Inline composite
+        // field). Place at the arg's natural footprint; no boundary box.
         u32 placeSw = typeSlotWords(targetType);
-        if (isVariadic && isInlineMultiword(targetType)) {
-            argReg = emitBoxIfInline(argReg, targetType);
-            placeSw = 1;
+        if (isVariadic && dynamic_cast<ArrayType*>(expr->variadicPackType)) {
+            // Array-pack variadics still want a 1-word Obj* per element.
+            if (isInlineMultiword(targetType)) {
+                argReg = emitBoxIfInline(argReg, targetType);
+                placeSw = 1;
+            }
         }
         // Phase 4g.2 / 4g.6: legacy builtins (op_call_primitive) receive Inline
         // structs/tuples as a 1-Word boxed Obj*; Complex/Fraction stay multi-
@@ -6693,7 +6697,9 @@ u16 CodeGen::genTupleLiteral(TupleLiteralExpr* expr) {
     }
     usize count = expr->elements.size();
 
-    // Phase 4g.2: Inline tuples place each field at its own slotWords offset.
+    // Phase 4g.13: place each field at its natural footprint (multi-word
+    // for Inline composite fields). Heap tuples now store fields natively
+    // just like Inline tuples -- no boundary box.
     bool inlineTuple = tupType->repr_ == ts::Type::Repr::Inline;
     u16 elemBase = nextReg_;
     u16 cursor = elemBase;
@@ -6702,11 +6708,8 @@ u16 CodeGen::genTupleLiteral(TupleLiteralExpr* expr) {
         Type* elemType = expr->elements[i]->resolvedType;
         Type* fieldType = tupType->fields_[i];
         elemReg = ensureType(elemReg, elemType, fieldType);
-        if (!inlineTuple && isInlineMultiword(fieldType)) {
-            elemReg = emitBoxIfInline(elemReg, fieldType);
-        }
-        u16 fieldSlotWords = inlineTuple ? (u16)typeSlotWords(fieldType) : 1;
-        emitArgPlacement(cursor, elemReg, inlineTuple ? fieldType : nullptr);
+        u16 fieldSlotWords = (u16)typeSlotWords(fieldType);
+        emitArgPlacement(cursor, elemReg, fieldType);
         cursor = (u16)(cursor + fieldSlotWords);
         if (nextReg_ < cursor) { nextReg_ = cursor; if (nextReg_ > maxReg_) maxReg_ = nextReg_; }
     }
@@ -6752,10 +6755,9 @@ u16 CodeGen::genStructLiteral(StructLiteralExpr* expr) {
         litFieldMap[expr->fields[i].name] = i;
     }
 
-    // Phase 4g.2: for Inline structs each field occupies its own slotWords,
-    // so the field-base layout strides at the field's typeSlotWords. Heap
-    // structs continue to use 1 Word per field (with Phase 4f box-at-
-    // boundary for Complex/Fraction-typed fields).
+    // Phase 4g.13: each field occupies its natural footprint (multi-word
+    // for Inline composite fields). Heap structs now also store fields
+    // natively per layout -- no boundary box.
     bool inlineStruct = stype->repr_ == ts::Type::Repr::Inline;
     u16 fieldBase = nextReg_;
     u16 cursor = fieldBase;
@@ -6763,28 +6765,23 @@ u16 CodeGen::genStructLiteral(StructLiteralExpr* expr) {
         std::string fieldName(stype->fields_[i].name->str());
         auto it = litFieldMap.find(fieldName);
         Type* declType = stype->fields_[i].type;
-        u16 fieldSlotWords = inlineStruct ? (u16)typeSlotWords(declType) : 1;
+        u16 fieldSlotWords = (u16)typeSlotWords(declType);
         if (it != litFieldMap.end()) {
             size_t litIdx = it->second;
             u16 valReg = genExpr(static_cast<Expr*>(expr->fields[litIdx].value.get()));
             Type* valType = expr->fields[litIdx].value->resolvedType;
             valReg = ensureType(valReg, valType, declType);
-            if (!inlineStruct && isInlineMultiword(declType)) {
-                valReg = emitBoxIfInline(valReg, declType);
-            }
-            emitArgPlacement(cursor, valReg, inlineStruct ? declType : nullptr);
+            emitArgPlacement(cursor, valReg, declType);
         } else if (expr->spreadExpr) {
-            // Copy field from spread source struct.
+            // Copy field from spread source struct (multi-word for Inline
+            // composite fields; Phase 4g.13).
             if (inlineStruct) {
                 emitOp(op_inline_struct_get);
-                emitRegs(cursor, spreadReg, (u16)i);
-                emitPtr(stype);
             } else {
-                u16 reg = allocReg();
                 emitOp(op_struct_get);
-                emitRegs(reg, spreadReg, (u16)i);
-                if (reg != cursor) { emitOp(op_mov); emitRegs(cursor, reg); }
             }
+            emitRegs(cursor, spreadReg, (u16)i);
+            emitPtr(stype);
         } else {
             u16 reg = allocReg();
             emitOp(op_load_nil);
@@ -6916,6 +6913,7 @@ u16 CodeGen::genAutoMapStructLiteral(StructLiteralExpr* expr) {
             // Field from spread source
             emitOp(op_struct_get);
             emitRegs(targetReg, spreadReg, (u16)i);
+            emitPtr(stype);
         } else if (expr->autoMapFields[litIdx]) {
             auto* arrType = dynamic_cast<ArrayType*>(expr->fields[litIdx].value->resolvedType);
             // Extract element at runtime index
@@ -8549,10 +8547,12 @@ u16 CodeGen::genFieldExpr(FieldExpr_* expr) {
                 emitPtr(stype);
                 return dst;
             }
-            u16 dst = allocReg();
+            // Phase 4g.13: heap Struct stores fields natively, so the field
+            // value lands directly in a multi-word slot -- no unbox needed.
+            u16 dst = allocSlot(ft);
             emitOp(op_struct_get);
             emitRegs(dst, objReg, (u16)i);
-            if (isInlineMultiword(ft)) return emitUnboxIfInline(dst, ft);
+            emitPtr(stype);
             return dst;
         };
         // Find field index by name
@@ -8583,10 +8583,11 @@ u16 CodeGen::genFieldExpr(FieldExpr_* expr) {
             emitPtr(ttype);
             return dst;
         }
-        u16 dst = allocReg();
+        // Phase 4g.13: heap Tuple stores fields natively.
+        u16 dst = allocSlot(ft);
         emitOp(op_tuple_get);
         emitRegs(dst, objReg, (u16)idx);
-        if (ft && isInlineMultiword(ft)) return emitUnboxIfInline(dst, ft);
+        emitPtr(ttype);
         return dst;
     }
 

@@ -320,26 +320,24 @@ void classifyStructImpl(StructType* st, std::unordered_set<Type*>& visiting) {
         // Inline / NullablePtrEnum / recursive: fall through to normal handling.
     }
 
-    // Phase 4f: struct runtime is still heap (Struct*); the inline machinery
-    // only supports Complex / Fraction so far. Defer struct inlining until
-    // struct codegen / containers are wired up.
-    //
-    // Phase 4c: populate layout_ with one entry per field. Word offsets
-    // currently equal field indices because every field still occupies one
-    // Word in Struct::v[]. The runtime walker (Struct::releaseChildren,
-    // op_make_struct retain pass) uses layout_ to find Obj* fields.
-    u8 wordOffset = 0;
+    // Phase 4c/4g.13: populate layout_ with one entry per field, using each
+    // field's natural footprint (1 word for atoms/pointers, multi-word for
+    // Inline composites like Fraction/Complex/Struct/Tuple). Heap-classified
+    // structs now also use multi-word native storage for Inline composite
+    // fields -- they are no longer recursively boxed at field-storage time.
+    u32 wordOffset = 0;
     for (auto const& field : st->fields_) {
         if (field.type) classifyImpl(field.type, visiting);
-        st->layout_.push_back(FieldLayout{wordOffset, 1, field.type});
-        ++wordOffset;
+        u8 fw = field.type ? (u8)inlineFootprintWords(field.type) : 1;
+        st->layout_.push_back(FieldLayout{(u8)wordOffset, fw, field.type});
+        wordOffset += fw;
     }
     setHeap(st);
 
-    // Phase 4g.1: eligibility pre-flight for future inline promotion. We
-    // intentionally do NOT flip repr_ or sizeWords_ -- runtime stays Heap.
-    // Once 4g.2-4g.5 wire the runtime, those phases consult couldBeInline_
-    // and switch storage / opcodes accordingly.
+    // Phase 4g.1: eligibility pre-flight for inline promotion. The layout
+    // above is already multi-word for Inline composite fields, so the Inline
+    // promotion path here only flips repr_/sizeWords_/isValueType_; the
+    // layout itself is unchanged.
     if (!st->isRecursive_ && !st->fields_.empty()
         && st->fields_.size() <= kInlineMaxFields) {
         unsigned total = 0;
@@ -351,23 +349,9 @@ void classifyStructImpl(StructType* st, std::unordered_set<Type*>& visiting) {
         if (ok && total <= kInlineMaxWords) {
             st->couldBeInline_     = true;
             st->inlineLayoutWords_ = (u8)total;
-            // Phase 4g.2: promote runtime classification. Mirror Phase 4f's
-            // model for Complex/Fraction: multi-word inline in registers,
-            // calling convention, locals, and returns; box-at-boundary
-            // (op_box_struct / op_unbox_struct) at globals, container
-            // elements, and other 1-word storage slots. This update also
-            // recomputes the per-field word offsets in layout_ since fields
-            // may now occupy more than one slot each.
             st->repr_      = Type::Repr::Inline;
             st->sizeWords_ = (u8)total;
             st->isValueType_ = true;
-            st->layout_.clear();
-            u8 off = 0;
-            for (auto const& field : st->fields_) {
-                u8 fw = (u8)inlineFootprintWords(field.type);
-                st->layout_.push_back(FieldLayout{off, fw, field.type});
-                off = (u8)(off + fw);
-            }
         }
     }
 }
@@ -376,22 +360,17 @@ void classifyTupleImpl(TupleType* tu, std::unordered_set<Type*>& visiting) {
     tu->layout_.clear();
     tu->couldBeInline_     = false;
     tu->inlineLayoutWords_ = 0;
-    // Phase 4f: tuple runtime is still heap (Tuple*); the inline machinery
-    // only supports Complex / Fraction so far. Defer tuple inlining until
-    // tuple codegen / containers are wired up.
-    //
-    // Phase 4c: populate layout_ with one entry per field. Word offsets
-    // currently equal field indices because every field still occupies one
-    // Word in Tuple::v[].
-    u8 wordOffset = 0;
+    // Phase 4c/4g.13: populate layout_ with one entry per field, using each
+    // field's natural footprint. See classifyStructImpl for details.
+    u32 wordOffset = 0;
     for (Type* field : tu->fields_) {
         if (field) classifyImpl(field, visiting);
-        tu->layout_.push_back(FieldLayout{wordOffset, 1, field});
-        ++wordOffset;
+        u8 fw = field ? (u8)inlineFootprintWords(field) : 1;
+        tu->layout_.push_back(FieldLayout{(u8)wordOffset, fw, field});
+        wordOffset += fw;
     }
     setHeap(tu);
 
-    // Phase 4g.1: same eligibility pre-flight as for structs.
     if (!tu->isRecursive_ && !tu->fields_.empty()
         && tu->fields_.size() <= kInlineMaxFields) {
         unsigned total = 0;
@@ -403,17 +382,9 @@ void classifyTupleImpl(TupleType* tu, std::unordered_set<Type*>& visiting) {
         if (ok && total <= kInlineMaxWords) {
             tu->couldBeInline_     = true;
             tu->inlineLayoutWords_ = (u8)total;
-            // Phase 4g.2: promote (see classifyStructImpl for rationale).
             tu->repr_      = Type::Repr::Inline;
             tu->sizeWords_ = (u8)total;
             tu->isValueType_ = true;
-            tu->layout_.clear();
-            u8 off = 0;
-            for (Type* field : tu->fields_) {
-                u8 fw = (u8)inlineFootprintWords(field);
-                tu->layout_.push_back(FieldLayout{off, fw, field});
-                off = (u8)(off + fw);
-            }
         }
     }
 }

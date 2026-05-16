@@ -69,6 +69,11 @@ size_t hashWords(Word const* base, Type* type);
 // (atomic, Obj*) it delegates to WordEqual on a single Word.
 bool wordsEqual(Word const* a, Word const* b, Type* type);
 
+// Hash a multi-word value at `a` of `type`. For 1-word types this delegates
+// to WordHash. For Inline composites it walks layout_ and combines child
+// hashes the same way WordHash does for 1-word inline boxed values.
+size_t wordsHash(Word const* a, Type* type);
+
 // Phase 4g.9: list-head helper. Copies one node's head into another's
 // head storage and retains the appropriate ARC references. Handles both
 // 1-word (Word head_) and multi-word (stride > 1, flex array) layouts.
@@ -1050,6 +1055,11 @@ private:
 #pragma clang diagnostic pop
 
 // Struct instance (uses flexible array member for inline field storage)
+//
+// Phase 4g.13: heap Struct stores fields natively using the type's layout_:
+// field i lives at v[layout_[i].wordOffset] and spans layout_[i].sizeWords
+// words. Inline composite fields (Fraction, Complex, nested Inline structs/
+// tuples) are stored multi-word in place rather than as a sub-heap Obj*.
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wc99-extensions"
 class Struct : public Obj {
@@ -1062,13 +1072,7 @@ public:
     VMString str() const override;
 
     void releaseChildren() override {
-        // Phase 4g.2: heap Struct stores 1 Word per field regardless of the
-        // type's repr_ (Inline composites get deep-boxed when stored on the
-        // heap). Walk fields_ and release Obj* fields.
-        auto t = static_cast<StructType*>(type_);
-        for (u32 i = 0; i < numFields_ && i < t->fields_.size(); ++i) {
-            if (storesObjPtr(t->fields_[i].type) && v[i].o) v[i].o->release();
-        }
+        inlineWalkPointers(&v[0], type_, /*release_=*/true);
     }
 
 private:
@@ -1077,6 +1081,9 @@ private:
 #pragma clang diagnostic pop
 
 // Tuple instance (uses flexible array member for inline field storage)
+//
+// Phase 4g.13: heap Tuple stores fields natively using the type's layout_.
+// See Struct for details.
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wc99-extensions"
 class Tuple : public Obj {
@@ -1089,13 +1096,7 @@ public:
     VMString str() const override;
 
     void releaseChildren() override {
-        // Phase 4g.2: heap Tuple stores 1 Word per field regardless of the
-        // type's repr_ (Inline composites get deep-boxed when stored on the
-        // heap). Walk fields_ and release Obj* fields.
-        auto t = static_cast<TupleType*>(type_);
-        for (u32 i = 0; i < numFields_ && i < t->fields_.size(); ++i) {
-            if (storesObjPtr(t->fields_[i]) && v[i].o) v[i].o->release();
-        }
+        inlineWalkPointers(&v[0], type_, /*release_=*/true);
     }
 
 private:

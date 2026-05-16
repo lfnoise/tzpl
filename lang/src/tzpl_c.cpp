@@ -417,7 +417,12 @@ tzpl_word tzpl_tuple_get(tzpl_obj_handle obj, size_t index) {
     auto* t = static_cast<ts::Tuple*>(static_cast<ts::Obj*>(obj.ptr));
     tzpl_word out;
     if (index >= t->numFields_) { out.i = 0; return out; }
-    std::memcpy(&out, &t->v[index], sizeof(tzpl_word));
+    // Phase 4g.13: heap Tuple stores fields at layout-aware offsets. Return
+    // the first word of the field; multi-word Inline composite fields are
+    // not fully representable through this 1-word C API and would require
+    // a separate accessor.
+    auto* tt = static_cast<ts::TupleType*>(t->type_);
+    std::memcpy(&out, &t->v[tt->layout_[index].wordOffset], sizeof(tzpl_word));
     return out;
 }
 
@@ -430,7 +435,9 @@ tzpl_word tzpl_struct_get_field(tzpl_obj_handle obj, size_t index) {
     auto* s = static_cast<ts::Struct*>(static_cast<ts::Obj*>(obj.ptr));
     tzpl_word out;
     if (index >= s->numFields_) { out.i = 0; return out; }
-    std::memcpy(&out, &s->v[index], sizeof(tzpl_word));
+    // Phase 4g.13: heap Struct stores fields at layout-aware offsets.
+    auto* st = static_cast<ts::StructType*>(s->type_);
+    std::memcpy(&out, &s->v[st->layout_[index].wordOffset], sizeof(tzpl_word));
     return out;
 }
 

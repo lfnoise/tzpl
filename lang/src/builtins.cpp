@@ -920,13 +920,20 @@ static void builtin_pairs_map(VM& vm, u16 dst, u16, u16 ab) {
     Type* kt = mt->keyType_;
     Type* vt = mt->valueType_;
     u32 cap = map->capacity();
+    auto const& kf = tt->layout_[0];
+    auto const& vf = tt->layout_[1];
     for (u32 i = 0; i < cap; ++i) {
         if (map->slotState(i) != MapObj::SlotOccupied) continue;
         auto* tup = Tuple::create(tt, 2);
         Word const* k = map->slotKey(i);
         Word const* v = map->slotVal(i);
-        tup->v[0] = boxPayload(vm, kt, k);
-        tup->v[1] = boxPayload(vm, vt, v);
+        // Phase 4g.13: tuple stores fields natively per layout. Copy words
+        // directly from Map slots (which are already native) and use
+        // payloadRetain for ARC across both 1-word and multi-word shapes.
+        for (u8 j = 0; j < kf.sizeWords; ++j) tup->v[kf.wordOffset + j] = k[j];
+        for (u8 j = 0; j < vf.sizeWords; ++j) tup->v[vf.wordOffset + j] = v[j];
+        payloadRetain(&tup->v[kf.wordOffset], kt);
+        payloadRetain(&tup->v[vf.wordOffset], vt);
         result->push(tup);
     }
     vm.reg(dst).o = result;
@@ -1820,14 +1827,18 @@ static void builtin_fmt(VM& vm, u16 dst, u16, u16 argBase) {
                 ++i;
             } else if (next == '^') {
                 if (nextPos < numFields) {
-                    result += wordToString(tup->v[nextPos], tt->fields_[nextPos]);
+                    auto const& f = tt->layout_[nextPos];
+                    if (f.sizeWords > 1) result += wordsToString(&tup->v[f.wordOffset], f.type);
+                    else                 result += wordToString(tup->v[f.wordOffset], f.type);
                     ++nextPos;
                 }
                 ++i;
             } else if (next >= '0' && next <= '9') {
                 u32 idx = (u32)(next - '0');
                 if (idx < numFields) {
-                    result += wordToString(tup->v[idx], tt->fields_[idx]);
+                    auto const& f = tt->layout_[idx];
+                    if (f.sizeWords > 1) result += wordsToString(&tup->v[f.wordOffset], f.type);
+                    else                 result += wordToString(tup->v[f.wordOffset], f.type);
                 }
                 ++i;
             } else {
@@ -2023,6 +2034,10 @@ static bool resolve_any_single(Compiler& compiler, const std::vector<Type*>& arg
 }
 
 // any(x, y, ...) -- wrap multiple values into [Any]
+//
+// Phase 4g.13: heap Tuple now stores fields natively per layout. For Inline
+// composite fields (multi-word) we re-box via boxPayload so each AnyObj's
+// single-Word value_ slot can hold them.
 static void builtin_any_variadic(VM& vm, u16 dst, u16, u16 argBase) {
     auto* tuple = static_cast<Tuple*>(vm.reg(argBase).o);
     auto* tupleType = static_cast<TupleType*>(tuple->type_);
@@ -2031,11 +2046,16 @@ static void builtin_any_variadic(VM& vm, u16 dst, u16, u16 argBase) {
     size_t n = tuple->numFields_;
     arr->reserve(n);
     for (size_t i = 0; i < n; ++i) {
+        auto const& f = tupleType->layout_[i];
         auto* any = new AnyObj(vm.anyType());
-        any->value_ = tuple->v[i];
-        any->wrappedType_ = tupleType->fields_[i];
-        any->isObjType_ = storesObjPtr(tupleType->fields_[i]);
-        if (any->isObjType_ && any->value_.o) any->value_.o->retain();
+        any->wrappedType_ = f.type;
+        any->isObjType_ = storesObjPtr(f.type) || (f.type && f.type->repr_ == Type::Repr::Inline);
+        if (f.sizeWords > 1) {
+            any->value_ = boxPayload(vm, f.type, &tuple->v[f.wordOffset]);
+        } else {
+            any->value_ = tuple->v[f.wordOffset];
+            if (any->isObjType_ && any->value_.o) any->value_.o->retain();
+        }
         arr->push(any);
     }
     vm.reg(dst).o = arr;
@@ -2056,9 +2076,8 @@ static bool resolve_any_variadic(Compiler& compiler, const std::vector<Type*>& a
 
 // toAnyArray(tuple) -- convert a tuple to [Any]
 //
-// Phase 4g.2: tuple param arrives as a 1-Word boxed Tuple* (the codegen
-// box-at-builtin-boundary applies even when the source-language tuple type
-// is classified Inline). We can keep the original heap-Tuple* logic.
+// Phase 4g.13: heap Tuple stores fields natively. Re-box Inline composite
+// fields when stuffing into AnyObj's single-Word value_ slot.
 static void builtin_toAnyArray(VM& vm, u16 dst, u16, u16 argBase) {
     auto* tuple = static_cast<Tuple*>(vm.reg(argBase).o);
     auto* tupleType = static_cast<TupleType*>(tuple->type_);
@@ -2067,11 +2086,16 @@ static void builtin_toAnyArray(VM& vm, u16 dst, u16, u16 argBase) {
     size_t n = tuple->numFields_;
     arr->reserve(n);
     for (size_t i = 0; i < n; ++i) {
+        auto const& f = tupleType->layout_[i];
         auto* any = new AnyObj(vm.anyType());
-        any->value_ = tuple->v[i];
-        any->wrappedType_ = tupleType->fields_[i];
-        any->isObjType_ = storesObjPtr(tupleType->fields_[i]);
-        if (any->isObjType_ && any->value_.o) any->value_.o->retain();
+        any->wrappedType_ = f.type;
+        any->isObjType_ = storesObjPtr(f.type) || (f.type && f.type->repr_ == Type::Repr::Inline);
+        if (f.sizeWords > 1) {
+            any->value_ = boxPayload(vm, f.type, &tuple->v[f.wordOffset]);
+        } else {
+            any->value_ = tuple->v[f.wordOffset];
+            if (any->isObjType_ && any->value_.o) any->value_.o->retain();
+        }
         arr->push(any);
     }
     vm.reg(dst).o = arr;

@@ -1183,6 +1183,9 @@ void op_concat_array(VM& vm, Code* pc) {
 }
 
 // CONCAT_TUPLE Rd, Ra, Rb (4 words: op, regs{dst, a, b}, resultTupleType*, leftTupleType*)
+//
+// Phase 4g.13: layout-aware multi-word copy. Source A's full layout footprint
+// starts at v[0]; source B fills the remaining tail of the result layout.
 void op_concat_tuple(VM& vm, Code* pc) {
     u16 dst = pc[1].regs[0], a = pc[1].regs[1], b = pc[1].regs[2];
     auto* resultType = static_cast<TupleType*>(pc[2].p);
@@ -1192,20 +1195,21 @@ void op_concat_tuple(VM& vm, Code* pc) {
     auto* tupB = static_cast<Tuple*>(vm.reg(b).o);
 
     usize leftLen = leftType->fields_.size();
-    usize rightLen = resultType->fields_.size() - leftLen;
-    auto* result = Tuple::create(resultType, (u32)(leftLen + rightLen));
-    for (usize i = 0; i < leftLen; ++i) {
-        result->v[i] = tupA->v[i];
-    }
-    for (usize i = 0; i < rightLen; ++i) {
-        result->v[leftLen + i] = tupB->v[i];
-    }
-    // Retain Obj* fields. Phase 4c: walk via layout_.
-    for (auto const& f : resultType->layout_) {
-        if (storesObjPtr(f.type) && result->v[f.wordOffset].o) {
-            result->v[f.wordOffset].o->retain();
+    usize totalLen = resultType->fields_.size();
+    auto* result = Tuple::create(resultType, (u32)totalLen);
+    u32 aWords = 0;
+    for (auto const& f : leftType->layout_) aWords += f.sizeWords;
+    for (u32 i = 0; i < aWords; ++i) result->v[i] = tupA->v[i];
+    u32 dstOff = aWords;
+    auto* rightType = static_cast<TupleType*>(tupB->type_);
+    for (size_t i = 0; i < totalLen - leftLen; ++i) {
+        auto const& f = rightType->layout_[i];
+        for (u8 j = 0; j < f.sizeWords; ++j) {
+            result->v[dstOff + j] = tupB->v[f.wordOffset + j];
         }
+        dstOff += f.sizeWords;
     }
+    inlineWalkPointers(&result->v[0], resultType, /*release_=*/false);
     vm.reg(dst).o = result;
     DISPATCH(4);
 }
@@ -1655,6 +1659,37 @@ static Word dispatchArrayBinop(VM& vm, Op op, Word a, Word b,
     return Word(result);
 }
 
+// Phase 4g.13: helpers for tuple binop/cmp/unary, which read/write fields
+// of heap Tuples whose storage is now layout-native (multi-word for Inline
+// composite fields). Inputs are boxed back to single Word for dispatchBinop;
+// outputs are unboxed back into native multi-word storage.
+static Word readTupleField(VM& vm, Tuple* tup, TupleType* tt, size_t i) {
+    auto const& f = tt->layout_[i];
+    if (f.sizeWords > 1) return boxPayload(vm, f.type, &tup->v[f.wordOffset]);
+    return tup->v[f.wordOffset];
+}
+
+static void writeTupleField(VM& vm, Tuple* result, TupleType* rtt, size_t i, Word src) {
+    auto const& f = rtt->layout_[i];
+    Type* ft = f.type;
+    if (f.sizeWords > 1) {
+        // Unbox the returned heap Obj* into native multi-word storage.
+        if (ft == gCurrentVM->complexType()) {
+            auto* c = static_cast<Complex*>(src.o);
+            result->v[f.wordOffset].f     = c->x.real();
+            result->v[f.wordOffset + 1].f = c->x.imag();
+        } else if (ft == gCurrentVM->fractionType()) {
+            auto* fr = static_cast<Fraction*>(src.o);
+            result->v[f.wordOffset].i     = fr->r.numer();
+            result->v[f.wordOffset + 1].i = fr->r.denom();
+        } else {
+            unboxInlineDeepTo(vm, ft, src.o, &result->v[f.wordOffset]);
+        }
+    } else {
+        result->v[f.wordOffset] = src;
+    }
+}
+
 template<typename Op>
 static Word dispatchTupleBinop(VM& vm, Op op, Word a, Word b,
                                Type* aType, Type* bType, TupleType* resultTT) {
@@ -1664,27 +1699,15 @@ static Word dispatchTupleBinop(VM& vm, Op op, Word a, Word b,
 
     auto* result = Tuple::create(resultTT, (u32)n);
     for (usize i = 0; i < n; ++i) {
-        Word ae = aTT ? static_cast<Tuple*>(a.o)->v[i] : a;
-        Word be = bTT ? static_cast<Tuple*>(b.o)->v[i] : b;
+        Word ae = aTT ? readTupleField(vm, static_cast<Tuple*>(a.o), aTT, i) : a;
+        Word be = bTT ? readTupleField(vm, static_cast<Tuple*>(b.o), bTT, i) : b;
         Type* aet = aTT ? aTT->fields_[i] : aType;
         Type* bet = bTT ? bTT->fields_[i] : bType;
-        result->v[i] = dispatchBinop(vm, op, ae, be, aet, bet, resultTT->fields_[i]);
+        Word r = dispatchBinop(vm, op, ae, be, aet, bet, resultTT->fields_[i]);
+        writeTupleField(vm, result, resultTT, i, r);
     }
-    // Phase 4g.5: retain Obj* fields. dispatchBinop may have returned freshly-
-    // allocated Tuples/Structs/etc. registered to the auto-release pool; without
-    // an extra retain here, the parent's reference depends on the pool's. Pool
-    // drain is FIFO (parent first since it registered first) but processN pops
-    // LIFO, so the child would be deleted before the parent's releaseChildren
-    // releases it -- use-after-free at VM teardown. Heap Tuple stores 1 Word
-    // per field; index v[] by field index, not by layout_'s wordOffset (which
-    // describes inline storage and may exceed numFields_ for inline-composite
-    // field types).
-    for (u32 i = 0; i < (u32)resultTT->fields_.size(); ++i) {
-        Type* ft = resultTT->fields_[i];
-        if (storesObjPtr(ft) && result->v[i].o) {
-            result->v[i].o->retain();
-        }
-    }
+    // Retain Obj* pointers landed in result, walking by layout.
+    inlineWalkPointers(&result->v[0], resultTT, /*release_=*/false);
     return Word(static_cast<Obj*>(result));
 }
 
@@ -1850,19 +1873,11 @@ static Word dispatchTupleUnaryOp(VM& vm, Op op, Word a, Type* aType, TupleType* 
     usize n = resultTT->fields_.size();
     auto* result = Tuple::create(resultTT, (u32)n);
     for (usize i = 0; i < n; ++i) {
-        Word ae = static_cast<Tuple*>(a.o)->v[i];
-        result->v[i] = dispatchUnaryOp(vm, op, ae, aTT->fields_[i], resultTT->fields_[i]);
+        Word ae = readTupleField(vm, static_cast<Tuple*>(a.o), aTT, i);
+        Word r = dispatchUnaryOp(vm, op, ae, aTT->fields_[i], resultTT->fields_[i]);
+        writeTupleField(vm, result, resultTT, i, r);
     }
-    // Phase 4g.5: retain Obj* fields (see dispatchTupleBinop for rationale).
-    // Heap Tuple stores 1 Word per field; index v[] by field index, not by
-    // layout_'s wordOffset (which describes inline storage and may exceed
-    // numFields_ for inline-composite field types).
-    for (u32 i = 0; i < (u32)resultTT->fields_.size(); ++i) {
-        Type* ft = resultTT->fields_[i];
-        if (storesObjPtr(ft) && result->v[i].o) {
-            result->v[i].o->retain();
-        }
-    }
+    inlineWalkPointers(&result->v[0], resultTT, /*release_=*/false);
     return Word(static_cast<Obj*>(result));
 }
 
@@ -2027,22 +2042,14 @@ static Word dispatchCmpTupleBinop(VM& vm, CmpOp op, Word a, Word b,
     usize n = resultTT->fields_.size();
     auto* result = Tuple::create(resultTT, (u32)n);
     for (usize i = 0; i < n; ++i) {
-        Word ae = aTT ? static_cast<Tuple*>(a.o)->v[i] : a;
-        Word be = bTT ? static_cast<Tuple*>(b.o)->v[i] : b;
+        Word ae = aTT ? readTupleField(vm, static_cast<Tuple*>(a.o), aTT, i) : a;
+        Word be = bTT ? readTupleField(vm, static_cast<Tuple*>(b.o), bTT, i) : b;
         Type* aet = aTT ? aTT->fields_[i] : aType;
         Type* bet = bTT ? bTT->fields_[i] : bType;
-        result->v[i] = dispatchCmpBinop(vm, op, ae, be, aet, bet, resultTT->fields_[i]);
+        Word r = dispatchCmpBinop(vm, op, ae, be, aet, bet, resultTT->fields_[i]);
+        writeTupleField(vm, result, resultTT, i, r);
     }
-    // Phase 4g.5: retain Obj* fields (see dispatchTupleBinop for rationale).
-    // Heap Tuple stores 1 Word per field; index v[] by field index, not by
-    // layout_'s wordOffset (which describes inline storage and may exceed
-    // numFields_ for inline-composite field types).
-    for (u32 i = 0; i < (u32)resultTT->fields_.size(); ++i) {
-        Type* ft = resultTT->fields_[i];
-        if (storesObjPtr(ft) && result->v[i].o) {
-            result->v[i].o->retain();
-        }
-    }
+    inlineWalkPointers(&result->v[0], resultTT, /*release_=*/false);
     return Word(static_cast<Obj*>(result));
 }
 
@@ -2165,7 +2172,7 @@ static void dispatchInlineBinopWalk(VM& vm, Op op,
                 aSub = aSlot + aTT->layout_[i].wordOffset;
             } else if (aTT) {
                 aft = aTT->fields_[i];
-                aSub = &static_cast<Tuple*>(aSlot[0].o)->v[i];
+                aSub = &static_cast<Tuple*>(aSlot[0].o)->v[aTT->layout_[i].wordOffset];
             } else {
                 aft = aType;
                 aSub = aSlot;
@@ -2176,7 +2183,7 @@ static void dispatchInlineBinopWalk(VM& vm, Op op,
                 bSub = bSlot + bTT->layout_[i].wordOffset;
             } else if (bTT) {
                 bft = bTT->fields_[i];
-                bSub = &static_cast<Tuple*>(bSlot[0].o)->v[i];
+                bSub = &static_cast<Tuple*>(bSlot[0].o)->v[bTT->layout_[i].wordOffset];
             } else {
                 bft = bType;
                 bSub = bSlot;
@@ -2214,7 +2221,7 @@ static void dispatchInlineUnaryWalk(VM& vm, Op op,
                 aSub = aSlot + aTT->layout_[i].wordOffset;
             } else if (aTT) {
                 aft = aTT->fields_[i];
-                aSub = &static_cast<Tuple*>(aSlot[0].o)->v[i];
+                aSub = &static_cast<Tuple*>(aSlot[0].o)->v[aTT->layout_[i].wordOffset];
             } else {
                 aft = aType;
                 aSub = aSlot;
@@ -2250,7 +2257,7 @@ static void dispatchInlineCmpBinopWalk(VM& vm, CmpOp op,
                 aSub = aSlot + aTT->layout_[i].wordOffset;
             } else if (aTT) {
                 aft = aTT->fields_[i];
-                aSub = &static_cast<Tuple*>(aSlot[0].o)->v[i];
+                aSub = &static_cast<Tuple*>(aSlot[0].o)->v[aTT->layout_[i].wordOffset];
             } else {
                 aft = aType;
                 aSub = aSlot;
@@ -2261,7 +2268,7 @@ static void dispatchInlineCmpBinopWalk(VM& vm, CmpOp op,
                 bSub = bSlot + bTT->layout_[i].wordOffset;
             } else if (bTT) {
                 bft = bTT->fields_[i];
-                bSub = &static_cast<Tuple*>(bSlot[0].o)->v[i];
+                bSub = &static_cast<Tuple*>(bSlot[0].o)->v[bTT->layout_[i].wordOffset];
             } else {
                 bft = bType;
                 bSub = bSlot;
@@ -2621,12 +2628,20 @@ void op_make_array(VM& vm, Code* pc) {
     DISPATCH(3);
 }
 
-// TUPLE_GET Rd, Ra, fieldIdx (2 words: op, regs{dst, src, fieldIdx})
+// TUPLE_GET Rd, Ra, fieldIdx (3 words: op, regs{dst, src, fieldIdx}, TupleType*)
+//
+// Phase 4g.13: heap Tuple stores fields at layout-aware offsets. Copy
+// layout_[fieldIdx].sizeWords words from tuple->v[layout.wordOffset..]
+// into dst..dst+sizeWords-1.
 void op_tuple_get(VM& vm, Code* pc) {
     u16 dst = pc[1].regs[0], src = pc[1].regs[1], fieldIdx = pc[1].regs[2];
+    auto* tupleType = static_cast<TupleType*>(pc[2].p);
     auto* tuple = static_cast<Tuple*>(vm.reg(src).o);
-    vm.reg(dst) = tuple->v[fieldIdx];
-    DISPATCH(2);
+    auto const& f = tupleType->layout_[fieldIdx];
+    for (u8 i = 0; i < f.sizeWords; ++i) {
+        vm.reg((u16)(dst + i)) = tuple->v[f.wordOffset + i];
+    }
+    DISPATCH(3);
 }
 
 // INLINE_TUPLE_GET Rd, Ra, fieldIdx (3 words: op, regs, TupleType*)
@@ -2645,53 +2660,44 @@ void op_inline_tuple_get(VM& vm, Code* pc) {
 }
 
 // TUPLE_SLICE Rd, Ra, startIdx (3 words: op, regs{dst, src, startIdx}, TupleType*)
-// Creates a new tuple from elements [startIdx..end) of the source tuple
+// Creates a new tuple from elements [startIdx..end) of the source tuple.
+//
+// Phase 4g.13: copy fields by layout-aware multi-word stride so inline
+// composite fields are preserved natively.
 void op_tuple_slice(VM& vm, Code* pc) {
     u16 dst = pc[1].regs[0], src = pc[1].regs[1], startIdx = pc[1].regs[2];
     auto* resultType = static_cast<TupleType*>(pc[2].p);
     auto* srcTuple = static_cast<Tuple*>(vm.reg(src).o);
+    auto* srcType = static_cast<TupleType*>(srcTuple->type_);
     u32 count = srcTuple->numFields_ - startIdx;
     auto* newTuple = Tuple::create(resultType, count);
     for (size_t i = 0; i < count; ++i) {
-        newTuple->v[i] = srcTuple->v[startIdx + i];
-    }
-    // Retain Obj* fields. Phase 4c: layout_-driven walk.
-    for (auto const& f : resultType->layout_) {
-        if (storesObjPtr(f.type) && newTuple->v[f.wordOffset].o) {
-            newTuple->v[f.wordOffset].o->retain();
+        auto const& fSrc = srcType->layout_[startIdx + i];
+        auto const& fDst = resultType->layout_[i];
+        for (u8 j = 0; j < fDst.sizeWords; ++j) {
+            newTuple->v[fDst.wordOffset + j] = srcTuple->v[fSrc.wordOffset + j];
         }
     }
+    inlineWalkPointers(&newTuple->v[0], resultType, /*release_=*/false);
     vm.reg(dst).o = newTuple;
     DISPATCH(3);
 }
 
-// MAKE_TUPLE Rd, firstSrc, numFields (3 words: op, regs{dst, firstSrc, numFields}, TupleType*)
+// MAKE_TUPLE_HEAP Rd, firstSrc, numFields (3 words: op, regs, TupleType*)
 //
-// Phase 4g.2: for Inline tuples the value lives directly in the dst slot
-// across sizeWords_ Words; just MOVE_N from firstSrc with no Tuple
-// allocation. Codegen lays the fields contiguously at multi-word stride.
-// Phase 4g.2: variadic-pack tuples must always land as a heap Tuple* even
-// when their TupleType has been classified Inline -- the caller (e.g. fmt)
-// reads tup->v[i] for each variadic value. The pack args were placed
-// 1-Word-each (multi-word inline ones already boxed via emitBoxIfInline),
-// so we just allocate Tuple(numFields) and copy 1 Word per field.
+// Phase 4g.13: caller places fields contiguously at multi-word stride per
+// layout_. Copy total layout words natively into the new heap Tuple. Used
+// for variadic packs and any heap-Tuple construction site.
 void op_make_tuple_heap(VM& vm, Code* pc) {
     u16 dst = pc[1].regs[0], firstSrc = pc[1].regs[1], numFields = pc[1].regs[2];
     auto* tupleType = static_cast<TupleType*>(pc[2].p);
     auto* tuple = Tuple::create(tupleType, numFields);
-    for (u16 i = 0; i < numFields; ++i) {
+    u32 total = 0;
+    for (auto const& f : tupleType->layout_) total += f.sizeWords;
+    for (u32 i = 0; i < total; ++i) {
         tuple->v[i] = vm.reg((u16)(firstSrc + i));
     }
-    // Retain Obj* fields. We walk the type's gcCases-style layout: a field
-    // whose type stores an Obj* has been placed as an Obj* by the caller.
-    // For Inline composite fields (Repr::Inline non-Complex/Fraction) the
-    // caller boxed them via emitBoxIfInline, so storesObjPtr returns true
-    // and we treat the boxed Obj* uniformly.
-    for (u16 i = 0; i < numFields; ++i) {
-        if (storesObjPtr(tupleType->fields_[i]) && tuple->v[i].o) {
-            tuple->v[i].o->retain();
-        }
-    }
+    inlineWalkPointers(&tuple->v[0], tupleType, /*release_=*/false);
     vm.reg(dst).o = tuple;
     DISPATCH(3);
 }
@@ -2705,22 +2711,20 @@ void op_make_tuple(VM& vm, Code* pc) {
         DISPATCH(3);
     }
     auto* tuple = Tuple::create(tupleType, numFields);
-    for (u16 i = 0; i < numFields; ++i) {
-        tuple->v[i] = vm.reg(firstSrc + i);
+    u32 total = 0;
+    for (auto const& f : tupleType->layout_) total += f.sizeWords;
+    for (u32 i = 0; i < total; ++i) {
+        tuple->v[i] = vm.reg((u16)(firstSrc + i));
     }
-    // Retain Obj* fields. Phase 4c: layout_-driven walk.
-    for (auto const& f : tupleType->layout_) {
-        if (storesObjPtr(f.type) && tuple->v[f.wordOffset].o) {
-            tuple->v[f.wordOffset].o->retain();
-        }
-    }
+    inlineWalkPointers(&tuple->v[0], tupleType, /*release_=*/false);
     vm.reg(dst).o = tuple;
     DISPATCH(3);
 }
 
-// MAKE_STRUCT Rd, firstSrc, numFields (3 words: op, regs{dst, firstSrc, numFields}, StructType*)
+// MAKE_STRUCT Rd, firstSrc, numFields (3 words: op, regs, StructType*)
 //
-// Phase 4g.2: Inline structs land directly in the dst slot.
+// Phase 4g.13: caller places fields contiguously at multi-word stride per
+// layout_; Heap structs store fields natively just like Inline structs.
 void op_make_struct(VM& vm, Code* pc) {
     u16 dst = pc[1].regs[0], firstSrc = pc[1].regs[1], numFields = pc[1].regs[2];
     auto* structType = static_cast<StructType*>(pc[2].p);
@@ -2730,25 +2734,29 @@ void op_make_struct(VM& vm, Code* pc) {
         DISPATCH(3);
     }
     auto* s = Struct::create(structType, numFields);
-    for (u16 i = 0; i < numFields; ++i) {
-        s->v[i] = vm.reg(firstSrc + i);
+    u32 total = 0;
+    for (auto const& f : structType->layout_) total += f.sizeWords;
+    for (u32 i = 0; i < total; ++i) {
+        s->v[i] = vm.reg((u16)(firstSrc + i));
     }
-    // Retain Obj* fields. Phase 4c: layout_-driven walk.
-    for (auto const& f : structType->layout_) {
-        if (storesObjPtr(f.type) && s->v[f.wordOffset].o) {
-            s->v[f.wordOffset].o->retain();
-        }
-    }
+    inlineWalkPointers(&s->v[0], structType, /*release_=*/false);
     vm.reg(dst).o = s;
     DISPATCH(3);
 }
 
-// STRUCT_GET Rd, Ra, fieldIdx (2 words: op, regs{dst, src, fieldIdx})
+// STRUCT_GET Rd, Ra, fieldIdx (3 words: op, regs{dst, src, fieldIdx}, StructType*)
+//
+// Phase 4g.13: heap Struct stores fields at layout-aware offsets. Copy
+// layout_[fieldIdx].sizeWords words natively into dst.
 void op_struct_get(VM& vm, Code* pc) {
     u16 dst = pc[1].regs[0], src = pc[1].regs[1], fieldIdx = pc[1].regs[2];
+    auto* structType = static_cast<StructType*>(pc[2].p);
     auto* s = static_cast<Struct*>(vm.reg(src).o);
-    vm.reg(dst) = s->v[fieldIdx];
-    DISPATCH(2);
+    auto const& f = structType->layout_[fieldIdx];
+    for (u8 i = 0; i < f.sizeWords; ++i) {
+        vm.reg((u16)(dst + i)) = s->v[f.wordOffset + i];
+    }
+    DISPATCH(3);
 }
 
 // INLINE_STRUCT_GET Rd, Ra, fieldIdx (3 words: op, regs, StructType*)

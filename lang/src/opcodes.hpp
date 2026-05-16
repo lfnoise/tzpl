@@ -250,12 +250,12 @@ void op_concat_list(VM& vm, Code* pc);     // CONCAT_LIST Rd, Ra, Rb (3 words: o
 
 // --- Array/Tuple/Struct Access/Construction ---
 void op_make_array(VM& vm, Code* pc);         // MAKE_ARRAY Rd, firstSrc, numElems (3 words: op, regs, ArrayType*)
-void op_tuple_get(VM& vm, Code* pc);          // TUPLE_GET Rd, Ra, fieldIdx (2 words)
+void op_tuple_get(VM& vm, Code* pc);          // TUPLE_GET Rd, Ra, fieldIdx (3 words: op, regs, TupleType*)
 void op_tuple_slice(VM& vm, Code* pc);        // TUPLE_SLICE Rd, Ra, startIdx (3 words: op, regs, TupleType*)
 void op_make_tuple(VM& vm, Code* pc);         // MAKE_TUPLE Rd, firstSrc, numFields (3 words: op, regs, TupleType*)
 void op_make_tuple_heap(VM& vm, Code* pc);    // MAKE_TUPLE_HEAP Rd, firstSrc, numFields (3 words) -- always heap, ignores Inline classification (for variadic packs)
 void op_make_struct(VM& vm, Code* pc);        // MAKE_STRUCT Rd, firstSrc, numFields (3 words: op, regs, StructType*)
-void op_struct_get(VM& vm, Code* pc);         // STRUCT_GET Rd, Ra, fieldIdx (2 words)
+void op_struct_get(VM& vm, Code* pc);         // STRUCT_GET Rd, Ra, fieldIdx (3 words: op, regs, StructType*)
 void op_inline_tuple_get(VM& vm, Code* pc);   // I_TUPLE_GET Rd, Ra, fieldIdx (3 words: op, regs, TupleType*)
 void op_inline_struct_get(VM& vm, Code* pc);  // I_STRUCT_GET Rd, Ra, fieldIdx (3 words: op, regs, StructType*)
 

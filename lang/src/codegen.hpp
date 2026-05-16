@@ -496,33 +496,28 @@ private:
     // Check if type is a composite numeric (array or tuple)
     bool isCompositeNumeric(Type* type) const;
 
-    // Phase 4g.2: emit a field-get for a struct/tuple parent. If the parent
-    // is Inline, uses op_inline_struct_get / op_inline_tuple_get with multi-
-    // word dst. If the parent is Heap, uses op_struct_get / op_tuple_get and
-    // unboxes the field if it is itself an Inline composite.
+    // Phase 4g.2/4g.13: emit a field-get for a struct/tuple parent. Inline
+    // parents use op_inline_struct_get / op_inline_tuple_get; Heap parents
+    // use op_struct_get / op_tuple_get. Both now copy multi-word natively
+    // for Inline composite fields -- no boundary box/unbox is needed.
     u16 emitFieldGet(Type* parentType, u16 parentReg, u16 fieldIdx, Type* fieldType) {
         bool inlineParent = parentType && parentType->repr_ == ts::Type::Repr::Inline;
+        u16 dst = allocSlot(fieldType);
         if (inlineParent) {
-            u16 dst = allocSlot(fieldType);
             if (dynamic_cast<ts::TupleType*>(parentType)) {
                 emitOp(op_inline_tuple_get);
             } else {
                 emitOp(op_inline_struct_get);
             }
-            emitRegs(dst, parentReg, fieldIdx);
-            emitPtr(parentType);
-            return dst;
-        }
-        u16 dst = allocReg();
-        if (dynamic_cast<ts::TupleType*>(parentType)) {
-            emitOp(op_tuple_get);
         } else {
-            emitOp(op_struct_get);
+            if (dynamic_cast<ts::TupleType*>(parentType)) {
+                emitOp(op_tuple_get);
+            } else {
+                emitOp(op_struct_get);
+            }
         }
         emitRegs(dst, parentReg, fieldIdx);
-        if (fieldType && fieldType->repr_ == ts::Type::Repr::Inline) {
-            return emitUnboxIfInline(dst, fieldType);
-        }
+        emitPtr(parentType);
         return dst;
     }
 

@@ -947,11 +947,35 @@ void builtin_zip_array(VM& vm, u16 dst, u16, u16 ab) {
         vm.reg(dst).o = result;
         return;
     }
+    // Phase 4g.13: write each field natively per layout. getArrayElem may
+    // return a 1-Word boxed Inline composite; unbox into the field's
+    // multi-word slot in that case.
+    auto writeTupleField = [&](Tuple* t, ts::FieldLayout const& f, Word src) {
+        Type* ft = f.type;
+        if (f.sizeWords > 1) {
+            if (ft == vm.complexType()) {
+                auto* c = static_cast<Complex*>(src.o);
+                t->v[f.wordOffset].f     = c->x.real();
+                t->v[f.wordOffset + 1].f = c->x.imag();
+            } else if (ft == vm.fractionType()) {
+                auto* fr = static_cast<Fraction*>(src.o);
+                t->v[f.wordOffset].i     = fr->r.numer();
+                t->v[f.wordOffset + 1].i = fr->r.denom();
+            } else {
+                unboxInlineDeepTo(vm, ft, src.o, &t->v[f.wordOffset]);
+            }
+        } else {
+            t->v[f.wordOffset] = src;
+            if (storesObjPtr(ft) && src.o) src.o->retain();
+        }
+    };
+    auto const& f0 = tt->layout_[0];
+    auto const& f1 = tt->layout_[1];
     auto* result = new ObjArray(resAT);
     for (size_t i = 0; i < n; i++) {
         auto* tup = Tuple::create(tt, 2);
-        tup->v[0] = getArrayElem(vm, a, etA, i);
-        tup->v[1] = getArrayElem(vm, b, etB, i);
+        writeTupleField(tup, f0, getArrayElem(vm, a, etA, i));
+        writeTupleField(tup, f1, getArrayElem(vm, b, etB, i));
         result->push(tup);
     }
     vm.reg(dst).o = result;
@@ -990,11 +1014,33 @@ void builtin_enumerate_array(VM& vm, u16 dst, u16, u16 ab) {
         vm.reg(dst).o = result;
         return;
     }
+    // Phase 4g.13: same layout-aware write as zip's ObjArray branch.
+    auto writeTupleField = [&](Tuple* t, ts::FieldLayout const& f, Word src) {
+        Type* ft = f.type;
+        if (f.sizeWords > 1) {
+            if (ft == vm.complexType()) {
+                auto* c = static_cast<Complex*>(src.o);
+                t->v[f.wordOffset].f     = c->x.real();
+                t->v[f.wordOffset + 1].f = c->x.imag();
+            } else if (ft == vm.fractionType()) {
+                auto* fr = static_cast<Fraction*>(src.o);
+                t->v[f.wordOffset].i     = fr->r.numer();
+                t->v[f.wordOffset + 1].i = fr->r.denom();
+            } else {
+                unboxInlineDeepTo(vm, ft, src.o, &t->v[f.wordOffset]);
+            }
+        } else {
+            t->v[f.wordOffset] = src;
+            if (storesObjPtr(ft) && src.o) src.o->retain();
+        }
+    };
+    auto const& f0 = tt->layout_[0];
+    auto const& f1 = tt->layout_[1];
     auto* result = new ObjArray(resAT);
     for (size_t i = 0; i < n; i++) {
         auto* tup = Tuple::create(tt, 2);
-        tup->v[0] = Word((i64)i);
-        tup->v[1] = getArrayElem(vm, src, et, i);
+        writeTupleField(tup, f0, Word((i64)i));
+        writeTupleField(tup, f1, getArrayElem(vm, src, et, i));
         result->push(tup);
     }
     vm.reg(dst).o = result;

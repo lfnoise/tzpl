@@ -101,7 +101,8 @@ size_t tupleSize(Obj* obj) {
 Word tupleGet(Obj* obj, size_t index) {
     auto* t = static_cast<Tuple*>(obj);
     if (index >= t->numFields_) return Word{};
-    return t->v[index];
+    auto* tt = static_cast<TupleType*>(t->type_);
+    return t->v[tt->layout_[index].wordOffset];
 }
 
 // --- Struct ---
@@ -114,7 +115,8 @@ size_t structFieldCount(Obj* obj) {
 Word structGetField(Obj* obj, size_t index) {
     auto* s = static_cast<Struct*>(obj);
     if (index >= s->numFields_) return Word{};
-    return s->v[index];
+    auto* st = static_cast<StructType*>(s->type_);
+    return s->v[st->layout_[index].wordOffset];
 }
 
 } // namespace ts

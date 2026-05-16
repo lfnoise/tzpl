@@ -417,18 +417,32 @@ VMString InlineRef::str() const {
     return s;
 }
 
+// Phase 4g.13: sum sizeWords across the layout to determine the total
+// flexible-array storage Struct/Tuple need. For 1-word-per-field types this
+// equals numFields; for parents containing Inline composite fields the total
+// is larger. Falls back to numFields when the layout hasn't been computed
+// (defensive; classifyType always populates it for declared types).
+static u32 totalLayoutWords(ts::FieldLayout const* layout, size_t n, u32 numFields) {
+    u32 total = 0;
+    for (size_t i = 0; i < n; ++i) total += layout[i].sizeWords;
+    return total > 0 ? total : numFields;
+}
+
 // Struct constructor (private — use Struct::create())
 Struct::Struct(Type* type, u32 numFields)
     : Obj(type)
     , numFields_(numFields)
 {
-    for (u32 i = 0; i < numFields; ++i) v[i] = Word();
+    auto* st = static_cast<StructType*>(type);
+    u32 total = totalLayoutWords(st->layout_.data(), st->layout_.size(), numFields);
+    for (u32 i = 0; i < total; ++i) v[i] = Word();
     registerNewObj(this);
 }
 
 // Struct factory
 Struct* Struct::create(StructType* type, u32 numFields) {
-    usize size = sizeof(Struct) + numFields * sizeof(Word);
+    u32 total = totalLayoutWords(type->layout_.data(), type->layout_.size(), numFields);
+    usize size = sizeof(Struct) + total * sizeof(Word);
     void* mem = GCObj::operator new(size);
     return new(mem) Struct(type, numFields);
 }
@@ -438,12 +452,18 @@ VMString Struct::str() const {
     auto* st = static_cast<StructType*>(type_);
     VMString s = rt::vmstr(st->name_->str());
 
+    auto fieldStr = [&](u32 i) -> VMString {
+        auto const& f = st->layout_[i];
+        if (f.sizeWords > 1) return wordsToString(&v[f.wordOffset], f.type);
+        return wordToString(v[f.wordOffset], f.type);
+    };
+
     if (st->isTupleStruct_) {
         // Tuple struct format: Name(val1, val2)
         s += "(";
         for (u32 i = 0; i < numFields_; ++i) {
             if (i > 0) s += ", ";
-            s += wordToString(v[i], st->fields_[i].type);
+            s += fieldStr(i);
         }
         s += ")";
     } else {
@@ -452,7 +472,7 @@ VMString Struct::str() const {
             if (i > 0) s += ", ";
             s += rt::vmstr(st->fields_[i].name->str());
             s += ": ";
-            s += wordToString(v[i], st->fields_[i].type);
+            s += fieldStr(i);
         }
         s += " }";
     }
@@ -464,13 +484,16 @@ Tuple::Tuple(Type* type, u32 numFields)
     : Obj(type)
     , numFields_(numFields)
 {
-    for (u32 i = 0; i < numFields; ++i) v[i] = Word();
+    auto* tt = static_cast<TupleType*>(type);
+    u32 total = totalLayoutWords(tt->layout_.data(), tt->layout_.size(), numFields);
+    for (u32 i = 0; i < total; ++i) v[i] = Word();
     registerNewObj(this);
 }
 
 // Tuple factory
 Tuple* Tuple::create(TupleType* type, u32 numFields) {
-    usize size = sizeof(Tuple) + numFields * sizeof(Word);
+    u32 total = totalLayoutWords(type->layout_.data(), type->layout_.size(), numFields);
+    usize size = sizeof(Tuple) + total * sizeof(Word);
     void* mem = GCObj::operator new(size);
     return new(mem) Tuple(type, numFields);
 }
@@ -481,7 +504,9 @@ VMString Tuple::str() const {
     VMString s = rt::vmstr("(");
     for (u32 i = 0; i < numFields_; ++i) {
         if (i > 0) s += ", ";
-        s += wordToString(v[i], tt->fields_[i]);
+        auto const& f = tt->layout_[i];
+        if (f.sizeWords > 1) s += wordsToString(&v[f.wordOffset], f.type);
+        else                 s += wordToString(v[f.wordOffset], f.type);
     }
     if (numFields_ == 1) s += ",";
     s += ")";
@@ -1143,11 +1168,13 @@ size_t WordHash::operator()(Word w) const {
                            std::hash<i64>{}(frac->r.denom()));
     }
     if (auto* tt = dynamic_cast<TupleType*>(type)) {
+        // Phase 4g.13: heap Tuple stores fields natively per layout; hash
+        // via wordsHash so multi-word Inline composite fields are walked.
         auto* tup = static_cast<Tuple*>(w.o);
         size_t h = tt->fields_.size();
         for (u32 i = 0; i < tup->numFields_; ++i) {
-            WordHash sub{tt->fields_[i]};
-            h = hashCombine(h, sub(tup->v[i]));
+            auto const& f = tt->layout_[i];
+            h = hashCombine(h, wordsHash(&tup->v[f.wordOffset], f.type));
         }
         return h;
     }
@@ -1155,8 +1182,8 @@ size_t WordHash::operator()(Word w) const {
         auto* s = static_cast<Struct*>(w.o);
         size_t h = std::hash<const void*>{}(st->name_);
         for (u32 i = 0; i < s->numFields_; ++i) {
-            WordHash sub{st->fields_[i].type};
-            h = hashCombine(h, sub(s->v[i]));
+            auto const& f = st->layout_[i];
+            h = hashCombine(h, wordsHash(&s->v[f.wordOffset], f.type));
         }
         return h;
     }
@@ -1328,12 +1355,13 @@ bool WordEqual::operator()(Word a, Word b) const {
         return fa->r == fb->r;
     }
     if (auto* tt = dynamic_cast<TupleType*>(type)) {
+        // Phase 4g.13: layout-aware multi-word equality.
         auto* ta = static_cast<Tuple*>(a.o);
         auto* tb = static_cast<Tuple*>(b.o);
         if (ta->numFields_ != tb->numFields_) return false;
         for (u32 i = 0; i < ta->numFields_; ++i) {
-            WordEqual sub{tt->fields_[i]};
-            if (!sub(ta->v[i], tb->v[i])) return false;
+            auto const& f = tt->layout_[i];
+            if (!wordsEqual(&ta->v[f.wordOffset], &tb->v[f.wordOffset], f.type)) return false;
         }
         return true;
     }
@@ -1342,8 +1370,8 @@ bool WordEqual::operator()(Word a, Word b) const {
         auto* sb = static_cast<Struct*>(b.o);
         if (sa->numFields_ != sb->numFields_) return false;
         for (u32 i = 0; i < sa->numFields_; ++i) {
-            WordEqual sub{st->fields_[i].type};
-            if (!sub(sa->v[i], sb->v[i])) return false;
+            auto const& f = st->layout_[i];
+            if (!wordsEqual(&sa->v[f.wordOffset], &sb->v[f.wordOffset], f.type)) return false;
         }
         return true;
     }
@@ -1558,61 +1586,36 @@ VMString wordToString(Word w, Type* type) {
     return rt::fmt("{}", w.i);
 }
 
-// Phase 4g.2: deep box/unbox between an Inline composite (multi-word slot
-// laid out per layout_) and a heap Tuple*/Struct* (1-Word per field with
-// Inline-composite fields recursively boxed). Used at builtin call/return
-// boundaries so existing 1-Word-per-field builtins keep working unchanged.
+// Phase 4g.2/4g.13: deep box/unbox between an Inline composite (multi-word
+// slot per layout_) and a heap Tuple*/Struct*. Heap Struct/Tuple now store
+// fields natively per layout (multi-word for Inline composite fields), so
+// this is just a multi-word copy plus a pointer-retain walk.
 Obj* boxInlineDeep(VM& vm, Type* type, u16 srcSlot) {
-    // Phase 4g.5: every branch ends up with `w.o` retained. Freshly-boxed
-    // children (Complex, Fraction, recursive boxInlineDeep) start with the
-    // auto-release pool's refcount=1; we add an extra retain so the parent's
-    // reference is independent of the pool. Without this, the pool drains
-    // children before the parent's releaseChildren runs (pool drain is FIFO,
-    // deferred delete is LIFO), causing use-after-free in releaseChildren.
-    auto boxField = [&](Type* ft, u16 srcOff) -> Word {
-        Word w;
-        if (!ft) { w.i = 0; return w; }
-        if (ft->repr_ == Type::Repr::Inline
-            && ft != gCurrentVM->complexType() && ft != gCurrentVM->fractionType()
-            && (dynamic_cast<StructType*>(ft) || dynamic_cast<TupleType*>(ft))) {
-            w.o = boxInlineDeep(vm, ft, srcOff);
-            if (w.o) w.o->retain();
-        } else if (ft == gCurrentVM->complexType()) {
-            f64 re = vm.reg(srcOff).f;
-            f64 im = vm.reg((u16)(srcOff + 1)).f;
-            w.o = static_cast<Obj*>(new Complex(x64(re, im)));
-            if (w.o) w.o->retain();
-        } else if (ft == gCurrentVM->fractionType()) {
-            i64 n = vm.reg(srcOff).i;
-            i64 d = vm.reg((u16)(srcOff + 1)).i;
-            w.o = static_cast<Obj*>(new Fraction(r64(n, d)));
-            if (w.o) w.o->retain();
-        } else {
-            w = vm.reg(srcOff);
-            if (storesObjPtr(ft) && w.o) w.o->retain();
+    auto copyRegsToObj = [&](Word* dst, Type* parent) {
+        u32 total = 0;
+        if (auto* st = dynamic_cast<StructType*>(parent)) {
+            for (auto const& f : st->layout_) total += f.sizeWords;
+        } else if (auto* tt = dynamic_cast<TupleType*>(parent)) {
+            for (auto const& f : tt->layout_) total += f.sizeWords;
         }
-        return w;
+        for (u32 i = 0; i < total; ++i) dst[i] = vm.reg((u16)(srcSlot + i));
+        inlineWalkPointers(dst, parent, /*release_=*/false);
     };
     if (auto* st = dynamic_cast<StructType*>(type)) {
         auto* obj = Struct::create(st, (u32)st->fields_.size());
-        for (size_t i = 0; i < st->fields_.size(); ++i) {
-            auto const& f = st->layout_[i];
-            obj->v[i] = boxField(f.type, (u16)(srcSlot + f.wordOffset));
-        }
+        copyRegsToObj(&obj->v[0], st);
         return obj;
     }
     if (auto* tt = dynamic_cast<TupleType*>(type)) {
         auto* obj = Tuple::create(tt, (u32)tt->fields_.size());
-        for (size_t i = 0; i < tt->fields_.size(); ++i) {
-            auto const& f = tt->layout_[i];
-            obj->v[i] = boxField(f.type, (u16)(srcSlot + f.wordOffset));
-        }
+        copyRegsToObj(&obj->v[0], tt);
         return obj;
     }
     // Phase 4g.4: inline enum -> heap Enum*. word 0 holds the i64 discriminant;
     // words 1..1+P hold the active case's payload. The heap Enum's word_ holds
     // either the unboxed payload (for atom/pointer cases) or a recursively-
-    // boxed Obj* (for inline-composite cases). Void cases get word_.i = 0.
+    // boxed Obj* (for inline-composite cases) -- the heap Enum's single Word
+    // slot can't hold a multi-word inline value natively, so we still box it.
     if (auto* en = dynamic_cast<EnumType*>(type)) {
         int which = (int)vm.reg(srcSlot).i;
         auto* obj = new Enum(en);
@@ -1624,7 +1627,29 @@ Obj* boxInlineDeep(VM& vm, Type* type, u16 srcSlot) {
                 bool isVoid = !f.type->isObjType()
                            && (dynamic_cast<VoidType*>(f.type) != nullptr);
                 if (!isVoid && f.sizeWords > 0) {
-                    obj->word_ = boxField(f.type, (u16)(srcSlot + 1));
+                    Type* ft = f.type;
+                    u16 srcOff = (u16)(srcSlot + 1);
+                    Word w;
+                    if (ft->repr_ == Type::Repr::Inline
+                        && ft != gCurrentVM->complexType() && ft != gCurrentVM->fractionType()
+                        && (dynamic_cast<StructType*>(ft) || dynamic_cast<TupleType*>(ft))) {
+                        w.o = boxInlineDeep(vm, ft, srcOff);
+                        if (w.o) w.o->retain();
+                    } else if (ft == gCurrentVM->complexType()) {
+                        f64 re = vm.reg(srcOff).f;
+                        f64 im = vm.reg((u16)(srcOff + 1)).f;
+                        w.o = static_cast<Obj*>(new Complex(x64(re, im)));
+                        if (w.o) w.o->retain();
+                    } else if (ft == gCurrentVM->fractionType()) {
+                        i64 n = vm.reg(srcOff).i;
+                        i64 d = vm.reg((u16)(srcOff + 1)).i;
+                        w.o = static_cast<Obj*>(new Fraction(r64(n, d)));
+                        if (w.o) w.o->retain();
+                    } else {
+                        w = vm.reg(srcOff);
+                        if (storesObjPtr(ft) && w.o) w.o->retain();
+                    }
+                    obj->word_ = w;
                 }
             }
         }
@@ -1634,6 +1659,32 @@ Obj* boxInlineDeep(VM& vm, Type* type, u16 srcSlot) {
 }
 
 void unboxInlineDeep(VM& vm, Type* type, Obj* obj, u16 dstSlot) {
+    // Phase 4g.13: heap Struct/Tuple store fields natively per layout, so
+    // unboxing is a flat multi-word copy + ARC retain via inlineWalkPointers.
+    auto copyObjToRegs = [&](Word const* src, Type* parent) {
+        u32 total = 0;
+        if (auto* st = dynamic_cast<StructType*>(parent)) {
+            for (auto const& f : st->layout_) total += f.sizeWords;
+        } else if (auto* tt = dynamic_cast<TupleType*>(parent)) {
+            for (auto const& f : tt->layout_) total += f.sizeWords;
+        }
+        for (u32 i = 0; i < total; ++i) vm.reg((u16)(dstSlot + i)) = src[i];
+        // Retain pointers landed in the destination registers.
+        inlineWalkPointers(&vm.reg(dstSlot), parent, /*release_=*/false);
+    };
+    if (auto* st = dynamic_cast<StructType*>(type)) {
+        auto* s = static_cast<Struct*>(obj);
+        copyObjToRegs(&s->v[0], st);
+        return;
+    }
+    if (auto* tt = dynamic_cast<TupleType*>(type)) {
+        auto* t = static_cast<Tuple*>(obj);
+        copyObjToRegs(&t->v[0], tt);
+        return;
+    }
+    // Enum payload: heap Enum's single word_ slot still holds either a
+    // boxed Inline composite payload (Complex/Fraction/sub-Struct/Tuple) or
+    // the direct atom/pointer value. The lambda below handles all cases.
     auto unboxField = [&](Type* ft, Word src, u16 dstOff) {
         if (!ft) { vm.reg(dstOff).i = 0; return; }
         if (ft->repr_ == Type::Repr::Inline
@@ -1653,22 +1704,6 @@ void unboxInlineDeep(VM& vm, Type* type, Obj* obj, u16 dstSlot) {
             if (storesObjPtr(ft) && src.o) src.o->retain();
         }
     };
-    if (auto* st = dynamic_cast<StructType*>(type)) {
-        auto* s = static_cast<Struct*>(obj);
-        for (size_t i = 0; i < st->fields_.size(); ++i) {
-            auto const& f = st->layout_[i];
-            unboxField(f.type, s->v[i], (u16)(dstSlot + f.wordOffset));
-        }
-        return;
-    }
-    if (auto* tt = dynamic_cast<TupleType*>(type)) {
-        auto* t = static_cast<Tuple*>(obj);
-        for (size_t i = 0; i < tt->fields_.size(); ++i) {
-            auto const& f = tt->layout_[i];
-            unboxField(f.type, t->v[i], (u16)(dstSlot + f.wordOffset));
-        }
-        return;
-    }
     // Phase 4g.4: heap Enum* -> inline enum slot.
     if (auto* en = dynamic_cast<EnumType*>(type)) {
         auto* e = static_cast<Enum*>(obj);
@@ -1692,40 +1727,25 @@ void unboxInlineDeep(VM& vm, Type* type, Obj* obj, u16 dstSlot) {
 }
 
 Obj* boxInlineDeepFrom(VM& vm, Type* type, Word const* src) {
-    auto boxField = [&](Type* ft, Word const* sp) -> Word {
-        Word w;
-        if (!ft) { w.i = 0; return w; }
-        if (ft->repr_ == Type::Repr::Inline
-            && ft != gCurrentVM->complexType() && ft != gCurrentVM->fractionType()
-            && (dynamic_cast<StructType*>(ft) || dynamic_cast<TupleType*>(ft))) {
-            w.o = boxInlineDeepFrom(vm, ft, sp);
-            if (w.o) w.o->retain();
-        } else if (ft == gCurrentVM->complexType()) {
-            w.o = static_cast<Obj*>(new Complex(x64(sp[0].f, sp[1].f)));
-            if (w.o) w.o->retain();
-        } else if (ft == gCurrentVM->fractionType()) {
-            w.o = static_cast<Obj*>(new Fraction(r64(sp[0].i, sp[1].i)));
-            if (w.o) w.o->retain();
-        } else {
-            w = sp[0];
-            if (storesObjPtr(ft) && w.o) w.o->retain();
+    // Phase 4g.13: native multi-word field storage. See boxInlineDeep.
+    auto copyToObj = [&](Word* dst, Type* parent) {
+        u32 total = 0;
+        if (auto* st = dynamic_cast<StructType*>(parent)) {
+            for (auto const& f : st->layout_) total += f.sizeWords;
+        } else if (auto* tt = dynamic_cast<TupleType*>(parent)) {
+            for (auto const& f : tt->layout_) total += f.sizeWords;
         }
-        return w;
+        for (u32 i = 0; i < total; ++i) dst[i] = src[i];
+        inlineWalkPointers(dst, parent, /*release_=*/false);
     };
     if (auto* st = dynamic_cast<StructType*>(type)) {
         auto* obj = Struct::create(st, (u32)st->fields_.size());
-        for (size_t i = 0; i < st->fields_.size(); ++i) {
-            auto const& f = st->layout_[i];
-            obj->v[i] = boxField(f.type, src + f.wordOffset);
-        }
+        copyToObj(&obj->v[0], st);
         return obj;
     }
     if (auto* tt = dynamic_cast<TupleType*>(type)) {
         auto* obj = Tuple::create(tt, (u32)tt->fields_.size());
-        for (size_t i = 0; i < tt->fields_.size(); ++i) {
-            auto const& f = tt->layout_[i];
-            obj->v[i] = boxField(f.type, src + f.wordOffset);
-        }
+        copyToObj(&obj->v[0], tt);
         return obj;
     }
     if (auto* en = dynamic_cast<EnumType*>(type)) {
@@ -1739,7 +1759,25 @@ Obj* boxInlineDeepFrom(VM& vm, Type* type, Word const* src) {
                 bool isVoid = !f.type->isObjType()
                            && (dynamic_cast<VoidType*>(f.type) != nullptr);
                 if (!isVoid && f.sizeWords > 0) {
-                    obj->word_ = boxField(f.type, src + 1);
+                    Type* ft = f.type;
+                    Word const* sp = src + 1;
+                    Word w;
+                    if (ft->repr_ == Type::Repr::Inline
+                        && ft != gCurrentVM->complexType() && ft != gCurrentVM->fractionType()
+                        && (dynamic_cast<StructType*>(ft) || dynamic_cast<TupleType*>(ft))) {
+                        w.o = boxInlineDeepFrom(vm, ft, sp);
+                        if (w.o) w.o->retain();
+                    } else if (ft == gCurrentVM->complexType()) {
+                        w.o = static_cast<Obj*>(new Complex(x64(sp[0].f, sp[1].f)));
+                        if (w.o) w.o->retain();
+                    } else if (ft == gCurrentVM->fractionType()) {
+                        w.o = static_cast<Obj*>(new Fraction(r64(sp[0].i, sp[1].i)));
+                        if (w.o) w.o->retain();
+                    } else {
+                        w = sp[0];
+                        if (storesObjPtr(ft) && w.o) w.o->retain();
+                    }
+                    obj->word_ = w;
                 }
             }
         }
@@ -1749,6 +1787,27 @@ Obj* boxInlineDeepFrom(VM& vm, Type* type, Word const* src) {
 }
 
 void unboxInlineDeepTo(VM& vm, Type* type, Obj* obj, Word* dst) {
+    // Phase 4g.13: heap Struct/Tuple store fields natively per layout.
+    auto copyToBuf = [&](Word const* src, Type* parent) {
+        u32 total = 0;
+        if (auto* st = dynamic_cast<StructType*>(parent)) {
+            for (auto const& f : st->layout_) total += f.sizeWords;
+        } else if (auto* tt = dynamic_cast<TupleType*>(parent)) {
+            for (auto const& f : tt->layout_) total += f.sizeWords;
+        }
+        for (u32 i = 0; i < total; ++i) dst[i] = src[i];
+        inlineWalkPointers(dst, parent, /*release_=*/false);
+    };
+    if (auto* st = dynamic_cast<StructType*>(type)) {
+        auto* s = static_cast<Struct*>(obj);
+        copyToBuf(&s->v[0], st);
+        return;
+    }
+    if (auto* tt = dynamic_cast<TupleType*>(type)) {
+        auto* t = static_cast<Tuple*>(obj);
+        copyToBuf(&t->v[0], tt);
+        return;
+    }
     auto unboxField = [&](Type* ft, Word src, Word* d) {
         if (!ft) { d[0].i = 0; return; }
         if (ft->repr_ == Type::Repr::Inline
@@ -1768,22 +1827,6 @@ void unboxInlineDeepTo(VM& vm, Type* type, Obj* obj, Word* dst) {
             if (storesObjPtr(ft) && src.o) src.o->retain();
         }
     };
-    if (auto* st = dynamic_cast<StructType*>(type)) {
-        auto* s = static_cast<Struct*>(obj);
-        for (size_t i = 0; i < st->fields_.size(); ++i) {
-            auto const& f = st->layout_[i];
-            unboxField(f.type, s->v[i], dst + f.wordOffset);
-        }
-        return;
-    }
-    if (auto* tt = dynamic_cast<TupleType*>(type)) {
-        auto* t = static_cast<Tuple*>(obj);
-        for (size_t i = 0; i < tt->fields_.size(); ++i) {
-            auto const& f = tt->layout_[i];
-            unboxField(f.type, t->v[i], dst + f.wordOffset);
-        }
-        return;
-    }
     if (auto* en = dynamic_cast<EnumType*>(type)) {
         auto* e = static_cast<Enum*>(obj);
         dst[0].i = e->which_;
@@ -1811,6 +1854,41 @@ void copyListHead(ListNode* dst, ListNode const* src, Type* elemType) {
         dst->head_ = src->head_;
         if (storesObjPtr(elemType) && dst->head_.o) dst->head_.o->retain();
     }
+}
+
+size_t wordsHash(Word const* a, Type* type) {
+    if (!type) return std::hash<i64>{}(a[0].i);
+    if (type->repr_ != Type::Repr::Inline) {
+        return WordHash{type}(a[0]);
+    }
+    if (type == gCurrentVM->complexType()) {
+        return hashCombine(std::hash<f64>{}(a[0].f), std::hash<f64>{}(a[1].f));
+    }
+    if (type == gCurrentVM->fractionType()) {
+        return hashCombine(std::hash<i64>{}(a[0].i), std::hash<i64>{}(a[1].i));
+    }
+    auto hashFields = [&](auto const& layout, size_t seed) {
+        size_t h = seed;
+        for (auto const& f : layout) {
+            if (!f.type) continue;
+            h = hashCombine(h, wordsHash(a + f.wordOffset, f.type));
+        }
+        return h;
+    };
+    if (auto* tt = dynamic_cast<TupleType*>(type))   return hashFields(tt->layout_, tt->fields_.size());
+    if (auto* st = dynamic_cast<StructType*>(type))  return hashFields(st->layout_, std::hash<const void*>{}(st->name_));
+    if (auto* en = dynamic_cast<EnumType*>(type)) {
+        size_t h = std::hash<i64>{}(a[0].i);
+        int which = (int)a[0].i;
+        if (which >= 0 && (size_t)which < en->layout_.size()) {
+            auto const& f = en->layout_[which];
+            if (f.type && f.sizeWords > 0) {
+                h = hashCombine(h, wordsHash(a + f.wordOffset, f.type));
+            }
+        }
+        return h;
+    }
+    return WordHash{type}(a[0]);
 }
 
 bool wordsEqual(Word const* a, Word const* b, Type* type) {

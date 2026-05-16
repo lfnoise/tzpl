@@ -571,13 +571,14 @@ static void setListHeadTuple2(VM& vm, ListNode* owner, TupleType* tt,
         writeListHeadField(vm, dst + l0.wordOffset, f0t, f0src);
         writeListHeadField(vm, dst + l1.wordOffset, f1t, f1src);
     } else {
+        // Phase 4g.13: heap Tuple stores fields natively per layout. Copy
+        // each field's words from its source into the field's slot.
         auto* tup = Tuple::create(tt, 2);
-        tup->v[0] = f0src[0]; tup->v[1] = f1src[0];
-        for (auto const& f : tt->layout_) {
-            if (storesObjPtr(f.type) && tup->v[f.wordOffset].o) {
-                tup->v[f.wordOffset].o->retain();
-            }
-        }
+        auto const& l0 = tt->layout_[0];
+        auto const& l1 = tt->layout_[1];
+        for (u8 j = 0; j < l0.sizeWords; ++j) tup->v[l0.wordOffset + j] = f0src[j];
+        for (u8 j = 0; j < l1.sizeWords; ++j) tup->v[l1.wordOffset + j] = f1src[j];
+        inlineWalkPointers(&tup->v[0], tt, /*release_=*/false);
         owner->head_.o = tup;
         tup->retain();
     }
