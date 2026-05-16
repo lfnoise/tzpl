@@ -1105,12 +1105,21 @@ private:
 #pragma clang diagnostic pop
 
 // Enum instance
+//
+// Phase 4g.15: payload stored natively in v[] sized to the maximum case
+// payload footprint. Atoms/pointers occupy 1 word; Inline composites
+// (Fraction/Complex/inline structs/tuples) occupy their natural width.
+// The active case is indicated by which_; layout_[which_].sizeWords gives
+// the payload footprint at v[0..sizeWords).
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wc99-extensions"
 class Enum : public Obj {
 public:
-    int which_;
-    Word word_;
+    int  which_;
+    u8   payloadSizeWords_;  // capacity of v[] (= max case payload footprint)
+    Word v[];
 
-    Enum(Type* type);
+    static Enum* create(EnumType* type, int which);
 
     VMString str() const override {
         auto t = static_cast<EnumType*>(type_);
@@ -1120,12 +1129,12 @@ public:
         s += t->cases_[which_].name->str();
         auto* voidT = gCurrentVM->voidType();
         if (caseType != voidT) {
-            if (dynamic_cast<TupleType*>(caseType) && word_.o) {
-                // Tuple case: inline tuple contents to avoid double parens
-                s += word_.o->str();
+            if (dynamic_cast<TupleType*>(caseType)) {
+                // Tuple case: inline tuple contents to avoid double parens.
+                s += wordsToString(&v[0], caseType);
             } else {
                 s += "(";
-                s += wordToString(word_, caseType);
+                s += wordsToString(&v[0], caseType);
                 s += ")";
             }
         }
@@ -1133,16 +1142,17 @@ public:
     }
 
     void releaseChildren() override {
-        // Phase 4c: walk via per-case layout_. Each case's payload type is at
-        // layout_[caseIdx]; storesObjPtr() decides whether to release.
         auto t = static_cast<EnumType*>(type_);
-        if ((size_t)which_ < t->layout_.size()
-            && storesObjPtr(t->layout_[which_].type)
-            && word_.o) {
-            word_.o->release();
+        if ((size_t)which_ < t->layout_.size()) {
+            Type* ct = t->layout_[which_].type;
+            if (ct) payloadRelease(&v[0], ct);
         }
     }
+
+private:
+    Enum(Type* type, u8 payloadSizeWords);
 };
+#pragma clang diagnostic pop
 
 // Any object — wraps a value of any type into a uniform object
 class AnyObj : public Obj {

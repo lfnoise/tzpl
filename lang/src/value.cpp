@@ -513,13 +513,36 @@ VMString Tuple::str() const {
     return s;
 }
 
-// Enum constructor
-Enum::Enum(Type* type)
+// Enum constructor (private — use Enum::create())
+Enum::Enum(Type* type, u8 payloadSizeWords)
     : Obj(type)
     , which_(0)
-    , word_()
+    , payloadSizeWords_(payloadSizeWords)
 {
+    for (u8 i = 0; i < payloadSizeWords_; ++i) v[i] = Word();
     registerNewObj(this);
+}
+
+// Compute the payload capacity for a heap Enum -- the max sizeWords across
+// all case payloads (each layout_[i].sizeWords gives the natural footprint
+// of case i's payload, or 0 for Void cases). Returns at least 1 so v[] is
+// never a zero-sized array.
+static u8 enumMaxPayloadWords(EnumType* type) {
+    u8 maxW = 0;
+    for (auto const& f : type->layout_) {
+        if (f.sizeWords > maxW) maxW = f.sizeWords;
+    }
+    return maxW == 0 ? 1 : maxW;
+}
+
+// Enum factory
+Enum* Enum::create(EnumType* type, int which) {
+    u8 sw = enumMaxPayloadWords(type);
+    usize size = sizeof(Enum) + (usize)sw * sizeof(Word);
+    void* mem = GCObj::operator new(size);
+    auto* e = new(mem) Enum(type, sw);
+    e->which_ = which;
+    return e;
 }
 
 // RangeObj constructor (private — use RangeObj::create())
@@ -1201,8 +1224,8 @@ size_t WordHash::operator()(Word w) const {
         size_t h = std::hash<int>{}(e->which_);
         Type* caseType = et->cases_[e->which_].type;
         if (caseType != gCurrentVM->voidType()) {
-            WordHash sub{caseType};
-            h = hashCombine(h, sub(e->word_));
+            // Phase 4g.15: payload lives natively in e->v[]; hash multi-word.
+            h = hashCombine(h, wordsHash(&e->v[0], caseType));
         }
         return h;
     }
@@ -1382,8 +1405,8 @@ bool WordEqual::operator()(Word a, Word b) const {
         if (ea->which_ != eb->which_) return false;
         Type* caseType = et->cases_[ea->which_].type;
         if (caseType == gCurrentVM->voidType()) return true;
-        WordEqual sub{caseType};
-        return sub(ea->word_, eb->word_);
+        // Phase 4g.15: native multi-word payload comparison.
+        return wordsEqual(&ea->v[0], &eb->v[0], caseType);
     }
     if (dynamic_cast<SetType*>(type)) {
         auto* sa = static_cast<SetObj*>(a.o);
@@ -1599,46 +1622,19 @@ Obj* boxInlineDeep(VM& vm, Type* type, u16 srcSlot) {
         copyRegsToObj(&obj->v[0], tt);
         return obj;
     }
-    // Phase 4g.4: inline enum -> heap Enum*. word 0 holds the i64 discriminant;
-    // words 1..1+P hold the active case's payload. The heap Enum's word_ holds
-    // either the unboxed payload (for atom/pointer cases) or a recursively-
-    // boxed Obj* (for inline-composite cases) -- the heap Enum's single Word
-    // slot can't hold a multi-word inline value natively, so we still box it.
+    // Phase 4g.15: inline enum -> heap Enum*. Source slot is
+    //   srcSlot[0].i = discriminant, srcSlot[1..1+P] = payload.
+    // The heap Enum stores the payload natively in v[0..sizeWords) -- no
+    // recursive boxing of Inline composite payloads.
     if (auto* en = dynamic_cast<EnumType*>(type)) {
         int which = (int)vm.reg(srcSlot).i;
-        auto* obj = new Enum(en);
-        obj->which_ = which;
-        obj->word_.i = 0;
+        auto* obj = Enum::create(en, which);
         if (which >= 0 && (size_t)which < en->layout_.size()) {
             auto const& f = en->layout_[which];
-            if (f.type) {
-                bool isVoid = !f.type->isObjType()
-                           && (dynamic_cast<VoidType*>(f.type) != nullptr);
-                if (!isVoid && f.sizeWords > 0) {
-                    Type* ft = f.type;
-                    u16 srcOff = (u16)(srcSlot + 1);
-                    Word w;
-                    if (ft->repr_ == Type::Repr::Inline
-                        && ft != gCurrentVM->complexType() && ft != gCurrentVM->fractionType()
-                        && (dynamic_cast<StructType*>(ft) || dynamic_cast<TupleType*>(ft))) {
-                        w.o = boxInlineDeep(vm, ft, srcOff);
-                        if (w.o) w.o->retain();
-                    } else if (ft == gCurrentVM->complexType()) {
-                        f64 re = vm.reg(srcOff).f;
-                        f64 im = vm.reg((u16)(srcOff + 1)).f;
-                        w.o = static_cast<Obj*>(new Complex(x64(re, im)));
-                        if (w.o) w.o->retain();
-                    } else if (ft == gCurrentVM->fractionType()) {
-                        i64 n = vm.reg(srcOff).i;
-                        i64 d = vm.reg((u16)(srcOff + 1)).i;
-                        w.o = static_cast<Obj*>(new Fraction(r64(n, d)));
-                        if (w.o) w.o->retain();
-                    } else {
-                        w = vm.reg(srcOff);
-                        if (storesObjPtr(ft) && w.o) w.o->retain();
-                    }
-                    obj->word_ = w;
-                }
+            if (f.type && f.sizeWords > 0) {
+                u16 srcOff = (u16)(srcSlot + 1);
+                for (u8 i = 0; i < f.sizeWords; ++i) obj->v[i] = vm.reg((u16)(srcOff + i));
+                payloadRetain(&obj->v[0], f.type);
             }
         }
         return obj;
@@ -1670,44 +1666,21 @@ void unboxInlineDeep(VM& vm, Type* type, Obj* obj, u16 dstSlot) {
         copyObjToRegs(&t->v[0], tt);
         return;
     }
-    // Enum payload: heap Enum's single word_ slot still holds either a
-    // boxed Inline composite payload (Complex/Fraction/sub-Struct/Tuple) or
-    // the direct atom/pointer value. The lambda below handles all cases.
-    auto unboxField = [&](Type* ft, Word src, u16 dstOff) {
-        if (!ft) { vm.reg(dstOff).i = 0; return; }
-        if (ft->repr_ == Type::Repr::Inline
-            && ft != gCurrentVM->complexType() && ft != gCurrentVM->fractionType()
-            && (dynamic_cast<StructType*>(ft) || dynamic_cast<TupleType*>(ft))) {
-            unboxInlineDeep(vm, ft, src.o, dstOff);
-        } else if (ft == gCurrentVM->complexType()) {
-            auto* c = static_cast<Complex*>(src.o);
-            vm.reg(dstOff).f = c->x.real();
-            vm.reg((u16)(dstOff + 1)).f = c->x.imag();
-        } else if (ft == gCurrentVM->fractionType()) {
-            auto* fr = static_cast<Fraction*>(src.o);
-            vm.reg(dstOff).i = fr->r.numer();
-            vm.reg((u16)(dstOff + 1)).i = fr->r.denom();
-        } else {
-            vm.reg(dstOff) = src;
-            if (storesObjPtr(ft) && src.o) src.o->retain();
-        }
-    };
-    // Phase 4g.4: heap Enum* -> inline enum slot.
+    // Phase 4g.15: heap Enum* -> inline enum slot. Payload now lives natively
+    // in e->v[]; just copy multi-word into the destination slot.
     if (auto* en = dynamic_cast<EnumType*>(type)) {
         auto* e = static_cast<Enum*>(obj);
         vm.reg(dstSlot).i = e->which_;
-        // Zero-fill the payload region first so unused tail words are clean.
         for (u8 i = 1; i < en->sizeWords_; ++i) {
             vm.reg((u16)(dstSlot + i)).i = 0;
         }
         if (e->which_ >= 0 && (size_t)e->which_ < en->layout_.size()) {
             auto const& f = en->layout_[e->which_];
-            if (f.type) {
-                bool isVoid = !f.type->isObjType()
-                           && (dynamic_cast<VoidType*>(f.type) != nullptr);
-                if (!isVoid && f.sizeWords > 0) {
-                    unboxField(f.type, e->word_, (u16)(dstSlot + 1));
+            if (f.type && f.sizeWords > 0) {
+                for (u8 i = 0; i < f.sizeWords; ++i) {
+                    vm.reg((u16)(dstSlot + 1 + i)) = e->v[i];
                 }
+                payloadRetain(&vm.reg((u16)(dstSlot + 1)), f.type);
             }
         }
         return;
@@ -1738,35 +1711,13 @@ Obj* boxInlineDeepFrom(VM& vm, Type* type, Word const* src) {
     }
     if (auto* en = dynamic_cast<EnumType*>(type)) {
         int which = (int)src[0].i;
-        auto* obj = new Enum(en);
-        obj->which_ = which;
-        obj->word_.i = 0;
+        auto* obj = Enum::create(en, which);
         if (which >= 0 && (size_t)which < en->layout_.size()) {
             auto const& f = en->layout_[which];
-            if (f.type) {
-                bool isVoid = !f.type->isObjType()
-                           && (dynamic_cast<VoidType*>(f.type) != nullptr);
-                if (!isVoid && f.sizeWords > 0) {
-                    Type* ft = f.type;
-                    Word const* sp = src + 1;
-                    Word w;
-                    if (ft->repr_ == Type::Repr::Inline
-                        && ft != gCurrentVM->complexType() && ft != gCurrentVM->fractionType()
-                        && (dynamic_cast<StructType*>(ft) || dynamic_cast<TupleType*>(ft))) {
-                        w.o = boxInlineDeepFrom(vm, ft, sp);
-                        if (w.o) w.o->retain();
-                    } else if (ft == gCurrentVM->complexType()) {
-                        w.o = static_cast<Obj*>(new Complex(x64(sp[0].f, sp[1].f)));
-                        if (w.o) w.o->retain();
-                    } else if (ft == gCurrentVM->fractionType()) {
-                        w.o = static_cast<Obj*>(new Fraction(r64(sp[0].i, sp[1].i)));
-                        if (w.o) w.o->retain();
-                    } else {
-                        w = sp[0];
-                        if (storesObjPtr(ft) && w.o) w.o->retain();
-                    }
-                    obj->word_ = w;
-                }
+            if (f.type && f.sizeWords > 0) {
+                Word const* sp = src + 1;
+                for (u8 i = 0; i < f.sizeWords; ++i) obj->v[i] = sp[i];
+                payloadRetain(&obj->v[0], f.type);
             }
         }
         return obj;
@@ -1796,37 +1747,15 @@ void unboxInlineDeepTo(VM& vm, Type* type, Obj* obj, Word* dst) {
         copyToBuf(&t->v[0], tt);
         return;
     }
-    auto unboxField = [&](Type* ft, Word src, Word* d) {
-        if (!ft) { d[0].i = 0; return; }
-        if (ft->repr_ == Type::Repr::Inline
-            && ft != gCurrentVM->complexType() && ft != gCurrentVM->fractionType()
-            && (dynamic_cast<StructType*>(ft) || dynamic_cast<TupleType*>(ft))) {
-            unboxInlineDeepTo(vm, ft, src.o, d);
-        } else if (ft == gCurrentVM->complexType()) {
-            auto* c = static_cast<Complex*>(src.o);
-            d[0].f = c->x.real();
-            d[1].f = c->x.imag();
-        } else if (ft == gCurrentVM->fractionType()) {
-            auto* fr = static_cast<Fraction*>(src.o);
-            d[0].i = fr->r.numer();
-            d[1].i = fr->r.denom();
-        } else {
-            d[0] = src;
-            if (storesObjPtr(ft) && src.o) src.o->retain();
-        }
-    };
     if (auto* en = dynamic_cast<EnumType*>(type)) {
         auto* e = static_cast<Enum*>(obj);
         dst[0].i = e->which_;
         for (u8 i = 1; i < en->sizeWords_; ++i) dst[i].i = 0;
         if (e->which_ >= 0 && (size_t)e->which_ < en->layout_.size()) {
             auto const& f = en->layout_[e->which_];
-            if (f.type) {
-                bool isVoid = !f.type->isObjType()
-                           && (dynamic_cast<VoidType*>(f.type) != nullptr);
-                if (!isVoid && f.sizeWords > 0) {
-                    unboxField(f.type, e->word_, dst + 1);
-                }
+            if (f.type && f.sizeWords > 0) {
+                for (u8 i = 0; i < f.sizeWords; ++i) dst[1 + i] = e->v[i];
+                payloadRetain(dst + 1, f.type);
             }
         }
     }

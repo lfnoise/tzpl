@@ -593,15 +593,13 @@ static void builtin_get_map(VM& vm, u16 dst, u16, u16 ab) {
         }
         return;
     }
-    // Fallback: heap Enum* (legacy 1-word return). Shouldn't hit for valid
-    // Option<V> types but kept for safety.
-    auto* e = new Enum(optType);
+    // Fallback: heap Enum* with native multi-word payload.
+    auto* e = Enum::create(optType, found ? 0 : 1);
     if (found) {
-        e->which_ = 0;
-        e->word_ = boxPayload(vm, vt, map->slotVal(slot));
-    } else {
-        e->which_ = 1;
-        e->word_.i = 0;
+        Word const* src = map->slotVal(slot);
+        u32 sw = (vt && vt->sizeWords_ > 0) ? vt->sizeWords_ : 1;
+        for (u32 i = 0; i < sw; ++i) e->v[i] = src[i];
+        payloadRetain(&e->v[0], vt);
     }
     vm.reg(dst).o = e;
 }
@@ -964,6 +962,9 @@ static bool isOptionType(Type* t) {
 }
 
 // unwrap: Option<T> -> T
+//
+// Phase 4g.15: heap Enum payload stored natively in v[]. Copy the case's
+// payload words into the multi-word dst slot.
 static void builtin_unwrap(VM& vm, u16 dst, u16, u16 ab) {
     auto* e = static_cast<Enum*>(vm.reg(ab).o);
     if (e->which_ != 0) {
@@ -972,11 +973,9 @@ static void builtin_unwrap(VM& vm, u16 dst, u16, u16 ab) {
         return;
     }
     auto* et = static_cast<EnumType*>(e->type_);
-    if (storesObjPtr(et->cases_[0].type)) {
-        vm.reg(dst).o = e->word_.o;
-    } else {
-        vm.reg(dst) = e->word_;
-    }
+    Type* ct = et->cases_[0].type;
+    u32 sw = (ct && ct->sizeWords_ > 0) ? ct->sizeWords_ : 1;
+    for (u32 i = 0; i < sw; ++i) vm.reg((u16)(dst + i)) = e->v[i];
 }
 
 // Phase 3 NullablePtrEnum variant: Option<T> stored as nullable Obj*.
@@ -993,15 +992,15 @@ static void builtin_unwrap_nullableptr(VM& vm, u16 dst, u16, u16 ab) {
 // unwrapOr: Option<T>, T -> T
 static void builtin_unwrapOr(VM& vm, u16 dst, u16, u16 ab) {
     auto* e = static_cast<Enum*>(vm.reg(ab).o);
+    auto* et = static_cast<EnumType*>(e->type_);
+    Type* ct = et->cases_[0].type;
+    u32 sw = (ct && ct->sizeWords_ > 0) ? ct->sizeWords_ : 1;
     if (e->which_ == 0) {
-        auto* et = static_cast<EnumType*>(e->type_);
-        if (storesObjPtr(et->cases_[0].type)) {
-            vm.reg(dst).o = e->word_.o;
-        } else {
-            vm.reg(dst) = e->word_;
-        }
+        // Phase 4g.15: native multi-word payload copy from heap Enum's v[].
+        for (u32 i = 0; i < sw; ++i) vm.reg((u16)(dst + i)) = e->v[i];
     } else {
-        vm.reg(dst) = vm.reg(ab + 1);
+        u16 fallback = (u16)(ab + 1);
+        for (u32 i = 0; i < sw; ++i) vm.reg((u16)(dst + i)) = vm.reg((u16)(fallback + i));
     }
 }
 

@@ -1896,13 +1896,12 @@ void CodeGen::genPatternMatch(Pattern* pat, u16 subjReg, Type* subjType,
                     // the alias directly so multi-word reads work.
                     valReg = (u16)(subjReg + 1);
                 } else {
-                    // Phase 4f: enum payload stores boxed inline values; unbox.
-                    valReg = allocReg();
+                    // Phase 4g.15: heap Enum payload is native multi-word.
+                    // Allocate a slot sized for caseType and copy directly.
+                    valReg = allocSlot(caseType);
                     emitOp(op_enum_get_value);
                     emitRegs(valReg, subjReg);
-                    if (isInlineMultiword(caseType)) {
-                        valReg = emitUnboxIfInline(valReg, caseType);
-                    }
+                    emitPtr(caseType);
                 }
                 genPatternMatch(ep->innerPattern.get(), valReg, caseType, failJumps, isMutable);
             }
@@ -1999,13 +1998,11 @@ void CodeGen::genPatternMatch(Pattern* pat, u16 subjReg, Type* subjType,
                         // Phase 4g.4: payload lives in-place at subjReg+1.
                         valReg = (u16)(subjReg + 1);
                     } else {
-                        // Phase 4f: enum payload stores boxed inline values; unbox.
-                        valReg = allocReg();
+                        // Phase 4g.15: heap Enum payload is native multi-word.
+                        valReg = allocSlot(pat->enumCaseDataType);
                         emitOp(op_enum_get_value);
                         emitRegs(valReg, subjReg);
-                        if (isInlineMultiword(pat->enumCaseDataType)) {
-                            valReg = emitUnboxIfInline(valReg, pat->enumCaseDataType);
-                        }
+                        emitPtr(pat->enumCaseDataType);
                     }
 
                     if (tp->elements.size() == 1) {
@@ -2684,6 +2681,15 @@ u16 CodeGen::genAsTypeExpr(AsTypeExprNode* expr) {
     u16 valReg = allocReg();
     emitOp(op_any_get_value);
     emitRegs(valReg, subjReg);
+
+    // Phase 4g.15: AnyObj stores its value as a single Word (boxed for Inline
+    // composites). op_make_enum / op_make_inline_enum now expect a native
+    // multi-word source slot for Inline payloads, so unbox into the right
+    // sized slot here.
+    if (targetType && targetType->repr_ == ts::Type::Repr::Inline
+        && optType->repr_ != ts::Type::Repr::NullablePtrEnum) {
+        valReg = emitUnboxIfInline(valReg, targetType);
+    }
 
     u16 dstReg = allocSlot(optType);
     if (optType->repr_ == ts::Type::Repr::NullablePtrEnum) {
@@ -9013,10 +9019,10 @@ u16 CodeGen::genEnumConstruct(ASTNode* node) {
             emitRegs(dst, valReg, (u16)caseIdx);
             emitPtr(etype);
         } else {
-            // Phase 4f/4g.2: enum payload slot is single Word; box inline values.
-            if (caseType && caseType->repr_ == ts::Type::Repr::Inline) {
-                valReg = emitBoxIfInline(valReg, caseType);
-            }
+            // Phase 4g.15: heap Enum payload stored natively in v[]. The
+            // source slot is already multi-word for Inline composite payloads
+            // (allocSlot/ensureType keeps it that way), so just hand the
+            // (multi-word) valReg to op_make_enum.
             emitOp(op_make_enum);
             emitRegs(dst, valReg, (u16)caseIdx);
             emitPtr(etype);

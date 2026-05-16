@@ -271,7 +271,7 @@ static const std::unordered_map<Operation, OpInfo>& opInfoMap() {
         { op_make_enum,         { "MAKE_ENUM",         3, OpFmt::Regs_Ptr, 3 } },
         { op_make_enum_nodata,  { "MAKE_ENUM_NODATA",  3, OpFmt::Regs_Ptr, 2 } },
         { op_enum_get_which,    { "ENUM_GET_WHICH",    2, OpFmt::Regs,     2 } },
-        { op_enum_get_value,    { "ENUM_GET_VALUE",    2, OpFmt::Regs,     2 } },
+        { op_enum_get_value,    { "ENUM_GET_VALUE",    3, OpFmt::Regs_Ptr, 2 } },
         { op_make_inline_enum,        { "MAKE_I_ENUM",        3, OpFmt::Regs_Ptr, 3 } },
         { op_make_inline_enum_nodata, { "MAKE_I_ENUM_NODATA", 3, OpFmt::Regs_Ptr, 2 } },
         { op_box_enum,                { "BOX_ENUM",           3, OpFmt::Regs_Ptr, 2 } },

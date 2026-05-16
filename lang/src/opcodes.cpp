@@ -2774,17 +2774,22 @@ void op_inline_struct_get(VM& vm, Code* pc) {
 }
 
 // MAKE_ENUM Rd, valSrc, caseIdx (3 words: op, regs{dst, valSrc, caseIdx}, EnumType*)
+//
+// Phase 4g.15: valSrc points to a register range holding the case payload
+// natively (layout_[caseIdx].sizeWords consecutive Words). Copy into the
+// heap Enum's v[] and ARC-retain embedded Obj* fields.
 void op_make_enum(VM& vm, Code* pc) {
     u16 dst = pc[1].regs[0], valSrc = pc[1].regs[1], caseIdx = pc[1].regs[2];
     auto* enumType = static_cast<EnumType*>(pc[2].p);
-    auto* e = new Enum(enumType);
-    e->which_ = caseIdx;
-    e->word_ = vm.reg(valSrc);
-    // Phase 4c: layout_[caseIdx].type tells us what's in the payload word.
-    if ((size_t)caseIdx < enumType->layout_.size()
-        && storesObjPtr(enumType->layout_[caseIdx].type)
-        && e->word_.o) {
-        e->word_.o->retain();
+    auto* e = Enum::create(enumType, caseIdx);
+    if ((size_t)caseIdx < enumType->layout_.size()) {
+        auto const& f = enumType->layout_[caseIdx];
+        if (f.type && f.sizeWords > 0) {
+            for (u8 i = 0; i < f.sizeWords; ++i) {
+                e->v[i] = vm.reg((u16)(valSrc + i));
+            }
+            payloadRetain(&e->v[0], f.type);
+        }
     }
     vm.reg(dst).o = e;
     DISPATCH(3);
@@ -2794,9 +2799,7 @@ void op_make_enum(VM& vm, Code* pc) {
 void op_make_enum_nodata(VM& vm, Code* pc) {
     u16 dst = pc[1].regs[0], caseIdx = pc[1].regs[1];
     auto* enumType = static_cast<EnumType*>(pc[2].p);
-    auto* e = new Enum(enumType);
-    e->which_ = caseIdx;
-    e->word_.i = 0;
+    auto* e = Enum::create(enumType, caseIdx);
     vm.reg(dst).o = e;
     DISPATCH(3);
 }
@@ -2809,12 +2812,17 @@ void op_enum_get_which(VM& vm, Code* pc) {
     DISPATCH(2);
 }
 
-// ENUM_GET_VALUE Rd, Ra (2 words: op, regs{dst, src})
+// ENUM_GET_VALUE Rd, Ra (3 words: op, regs{dst, src}, caseType*)
+//
+// Phase 4g.15: heap Enum payload is stored natively in e->v[]. Copy the
+// case's payload (caseType->sizeWords_ words) into dst[0..sizeWords).
 void op_enum_get_value(VM& vm, Code* pc) {
     u16 dst = pc[1].regs[0], src = pc[1].regs[1];
+    auto* caseType = static_cast<Type*>(pc[2].p);
     auto* e = static_cast<Enum*>(vm.reg(src).o);
-    vm.reg(dst) = e->word_;
-    DISPATCH(2);
+    u32 sw = (caseType && caseType->sizeWords_ > 0) ? caseType->sizeWords_ : 1;
+    for (u32 i = 0; i < sw; ++i) vm.reg((u16)(dst + i)) = e->v[i];
+    DISPATCH(3);
 }
 
 // --- Inline Enum Construction (Phase 4g.4) ---
@@ -3521,13 +3529,14 @@ void op_map_get_option(VM& vm, Code* pc) {
         DISPATCH(3);
     }
 
-    auto* e = new Enum(optType);
+    // Phase 4g.15: heap Enum stores payload natively in v[]. Copy the map
+    // slot's value words directly into the Enum's payload.
+    auto* e = Enum::create(optType, slot != map->capacity() ? 0 : 1);
     if (slot != map->capacity()) {
-        e->which_ = 0;  // some
-        e->word_ = boxPayload(vm, vt, map->slotVal(slot));
-    } else {
-        e->which_ = 1;  // none
-        e->word_.i = 0;
+        Word const* src = map->slotVal(slot);
+        u32 sw = (vt && vt->sizeWords_ > 0) ? vt->sizeWords_ : 1;
+        for (u32 i = 0; i < sw; ++i) e->v[i] = src[i];
+        payloadRetain(&e->v[0], vt);
     }
     vm.reg(dst).o = e;
     DISPATCH(3);
@@ -3945,14 +3954,12 @@ void op_coro_wrap_option(VM& vm, Code* pc) {
         DISPATCH(3);
     }
 
-    // Fallback: heap Enum* (legacy 1-word return for unusual Option reprs).
-    auto* e = new Enum(optType);
-    if (done) {
-        e->which_ = 1;
-        e->word_.i = 0;
-    } else {
-        e->which_ = 0;
-        e->word_ = boxPayload(vm, yieldType, &vm.reg(valSrc));
+    // Fallback: heap Enum* with native multi-word payload.
+    auto* e = Enum::create(optType, done ? 1 : 0);
+    if (!done) {
+        u32 sw = (yieldType && yieldType->sizeWords_ > 0) ? yieldType->sizeWords_ : 1;
+        for (u32 i = 0; i < sw; ++i) e->v[i] = vm.reg((u16)(valSrc + i));
+        payloadRetain(&e->v[0], yieldType);
     }
     vm.reg(dst).o = e;
     DISPATCH(3);

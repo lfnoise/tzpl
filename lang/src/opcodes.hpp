@@ -268,7 +268,7 @@ void op_array_length(VM& vm, Code* pc);       // ARRAY_LENGTH Rd, Ra (3 words: o
 void op_make_enum(VM& vm, Code* pc);          // MAKE_ENUM Rd, valSrc, caseIdx (3 words: op, regs, EnumType*)
 void op_make_enum_nodata(VM& vm, Code* pc);   // MAKE_ENUM_NODATA Rd, caseIdx (3 words: op, regs, EnumType*)
 void op_enum_get_which(VM& vm, Code* pc);     // ENUM_GET_WHICH Rd, Ra (2 words) - get case index as int
-void op_enum_get_value(VM& vm, Code* pc);     // ENUM_GET_VALUE Rd, Ra (2 words) - get case value
+void op_enum_get_value(VM& vm, Code* pc);     // ENUM_GET_VALUE Rd, Ra (3 words: op, regs, caseType*)
 
 // --- Inline Enum Construction/Access (Phase 4g.4) ---
 // Inline enum slot layout: word 0 = i64 discriminant; words 1..1+P = payload

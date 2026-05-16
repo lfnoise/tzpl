@@ -439,15 +439,19 @@ void classifyEnumImpl(EnumType* en, std::unordered_set<Type*>& visiting) {
         return;
     }
 
-    // Phase 4c: populate layout_ with one entry per case payload, indexed by
-    // case index. wordOffset is 0 because the heap Enum has a single
-    // dedicated payload slot (Enum::word_); the offset is meaningful only
-    // once enums become inline. Type carries the case payload type --
-    // VoidType for no-data cases. Walkers select layout_[which_] then check
-    // storesObjPtr() on the type to decide whether to retain/release.
+    // Phase 4c/4g.15: populate layout_ with one entry per case payload,
+    // indexed by case index. wordOffset is 0 because the heap Enum stores
+    // the payload natively in its v[] flex array starting at v[0]; the
+    // discriminant is held in the separate Enum::which_ field. sizeWords
+    // is the actual payload footprint (1 for atoms/pointers, multi-word
+    // for Inline composites like Fraction/Complex/sub-structs).
     en->layout_.clear();
     for (auto const& c : en->cases_) {
-        en->layout_.push_back(FieldLayout{0, 1, c.type});
+        Type* pt = c.type;
+        bool isVoid = pt && !pt->isObjType()
+                   && (dynamic_cast<VoidType*>(pt) != nullptr);
+        u8 fw = isVoid ? 0 : (pt ? (u8)inlineFootprintWords(pt) : 1);
+        en->layout_.push_back(FieldLayout{0, fw, pt});
     }
     setHeap(en);
 
