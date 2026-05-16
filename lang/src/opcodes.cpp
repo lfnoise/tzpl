@@ -3367,29 +3367,29 @@ void op_tail_call_lambda(VM& vm, Code* pc) {
 // --- Range ---
 
 // MAKE_RANGE Rd, Rstart, Rend, Rstep (4 words: op, regs, RangeType*, flags)
-// flags.i: bit 0 = isInfinite, bit 1 = isInt
+// flags.i: bit 0 = isInfinite
+//
+// Phase 4g.14: start/end/step are stored natively per the element type's
+// footprint (1 word for Int, 2 for Fraction). The caller places each
+// endpoint contiguously at its natural sizeWords.
 void op_make_range(VM& vm, Code* pc) {
     u16 dst = pc[1].regs[0], startReg = pc[1].regs[1];
     u16 endReg = pc[1].regs[2], stepReg = pc[1].regs[3];
     auto* rangeType = static_cast<RangeType*>(pc[2].p);
     i64 flags = pc[3].i;
     bool isInfinite = (flags & 1) != 0;
-    bool isInt = (flags & 2) != 0;
 
-    auto* range = new RangeObj(rangeType);
-    range->isInfinite_ = isInfinite;
-    range->isInt_ = isInt;
-    range->start_ = vm.reg(startReg);
-    range->step_ = vm.reg(stepReg);
+    auto* range = RangeObj::create(rangeType, isInfinite);
+    Type* et = rangeType->elemType_;
+    u8 sw = range->elemSizeWords_;
+    for (u8 i = 0; i < sw; ++i) range->startData()[i] = vm.reg((u16)(startReg + i));
+    for (u8 i = 0; i < sw; ++i) range->stepData()[i]  = vm.reg((u16)(stepReg + i));
     if (!isInfinite) {
-        range->end_ = vm.reg(endReg);
+        for (u8 i = 0; i < sw; ++i) range->endData()[i] = vm.reg((u16)(endReg + i));
     }
-    // Retain Obj* fields for non-Int ranges (e.g. Fraction ranges)
-    if (!isInt) {
-        if (range->start_.o) range->start_.o->retain();
-        if (range->step_.o) range->step_.o->retain();
-        if (!isInfinite && range->end_.o) range->end_.o->retain();
-    }
+    payloadRetain(range->startData(), et);
+    payloadRetain(range->stepData(),  et);
+    if (!isInfinite) payloadRetain(range->endData(), et);
     vm.reg(dst).o = range;
     DISPATCH(4);
 }

@@ -2633,18 +2633,13 @@ u16 CodeGen::genRangeExpr(RangeExprNode* expr) {
         }
     }
 
-    // Phase 4f: RangeObj stores 1 Word per field; Fraction values must be boxed.
-    if (!isInt && elemType == compiler_.fractionType()) {
-        startReg = emitBoxIfInline(startReg, elemType);
-        stepReg  = emitBoxIfInline(stepReg,  elemType);
-        if (!expr->isInfinite) endReg = emitBoxIfInline(endReg, elemType);
-    }
-
+    // Phase 4g.14: RangeObj stores endpoints natively per the element type's
+    // footprint (1 word for Int, 2 for Fraction). No boundary box needed.
     u16 dst = allocReg();
     emitOp(op_make_range);
     emitRegs(dst, startReg, endReg, stepReg);
     emitPtr(rangeType);
-    i64 flags = (expr->isInfinite ? 1 : 0) | (isInt ? 2 : 0);
+    i64 flags = (expr->isInfinite ? 1 : 0);
     emitInt(flags);
     return dst;
 }

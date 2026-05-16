@@ -716,9 +716,9 @@ static void builtin_toArray_range_int(VM& vm, u16 dst, u16, u16 argBase) {
     auto* rangeType = static_cast<RangeType*>(range->type_);
     auto* arrayType = vm.arrayType(rangeType->elemType_);
 
-    i64 start = range->start_.i;
-    i64 step = range->step_.i;
-    i64 end = range->end_.i;
+    i64 start = range->startData()[0].i;
+    i64 step  = range->stepData()[0].i;
+    i64 end   = range->endData()[0].i;
 
     auto* arr = new PodArray<i64>(arrayType);
     if (step > 0) {
@@ -739,9 +739,9 @@ static void builtin_toList_range_int(VM& vm, u16 dst, u16, u16 argBase) {
     auto* rangeType = static_cast<RangeType*>(range->type_);
     auto* listType = vm.listType(rangeType->elemType_);
 
-    i64 start = range->start_.i;
-    i64 step = range->step_.i;
-    i64 end = range->end_.i;
+    i64 start = range->startData()[0].i;
+    i64 step  = range->stepData()[0].i;
+    i64 end   = range->endData()[0].i;
 
     // Check for empty range (direction mismatch)
     if (!range->isInfinite_) {
@@ -768,9 +768,9 @@ static void builtin_toList_range_int(VM& vm, u16 dst, u16, u16 argBase) {
 // length(Range[Int]) -> Int
 static void builtin_length_range_int(VM& vm, u16 dst, u16, u16 argBase) {
     auto* range = static_cast<RangeObj*>(vm.reg(argBase).o);
-    i64 start = range->start_.i;
-    i64 step = range->step_.i;
-    i64 end = range->end_.i;
+    i64 start = range->startData()[0].i;
+    i64 step  = range->stepData()[0].i;
+    i64 end   = range->endData()[0].i;
 
     if (range->isInfinite_) {
         vm.reg(dst).i = -1;  // sentinel for infinite
@@ -790,15 +790,20 @@ static void builtin_length_range_int(VM& vm, u16 dst, u16, u16 argBase) {
     }
 }
 
+// Helper: decode an r64 endpoint from a 2-word native Fraction slot.
+static inline r64 rangeFractionAt(Word const* data) {
+    return r64(data[0].i, data[1].i);
+}
+
 // toArray(Range<Fraction>) -> [Fraction]
 static void builtin_toArray_range_fraction(VM& vm, u16 dst, u16, u16 argBase) {
     auto* range = static_cast<RangeObj*>(vm.reg(argBase).o);
     auto* rangeType = static_cast<RangeType*>(range->type_);
     auto* arrayType = vm.arrayType(rangeType->elemType_);
 
-    r64 start = static_cast<Fraction*>(range->start_.o)->r;
-    r64 step = static_cast<Fraction*>(range->step_.o)->r;
-    r64 end = range->isInfinite_ ? r64(0) : static_cast<Fraction*>(range->end_.o)->r;
+    r64 start = rangeFractionAt(range->startData());
+    r64 step  = rangeFractionAt(range->stepData());
+    r64 end   = range->isInfinite_ ? r64(0) : rangeFractionAt(range->endData());
 
     auto* arr = new ObjArray(arrayType);
     if (step > r64(0)) {
@@ -819,15 +824,12 @@ static void builtin_toList_range_fraction(VM& vm, u16 dst, u16, u16 argBase) {
     auto* rangeType = static_cast<RangeType*>(range->type_);
     auto* listType = vm.listType(rangeType->elemType_);
 
-    auto* startFrac = static_cast<Fraction*>(range->start_.o);
-    auto* stepFrac = static_cast<Fraction*>(range->step_.o);
-    auto* endFrac = range->isInfinite_ ? nullptr : static_cast<Fraction*>(range->end_.o);
+    r64 s = rangeFractionAt(range->startData());
+    r64 stp = rangeFractionAt(range->stepData());
+    r64 e = range->isInfinite_ ? r64(0) : rangeFractionAt(range->endData());
 
     // Check for empty range (direction mismatch)
     if (!range->isInfinite_) {
-        r64 stp = stepFrac->r;
-        r64 s = startFrac->r;
-        r64 e = endFrac->r;
         if (stp == r64(0) ||
             (stp > r64(0) && s > e) ||
             (stp < r64(0) && s < e)) {
@@ -836,19 +838,19 @@ static void builtin_toList_range_fraction(VM& vm, u16 dst, u16, u16 argBase) {
         }
     }
 
-    // Create a lazy list node with a FractionRangeListGen
+    // Create a lazy list node with a FractionRangeListGen. The generator
+    // owns heap Fraction objects materialized from the range's native words.
     auto* node = ListNode::create(listType);
     auto* gen = new FractionRangeListGen(vm.typeType());
-    gen->current_ = startFrac;
-    gen->end_ = endFrac;
-    gen->step_ = stepFrac;
+    gen->current_ = new Fraction(s);
+    gen->end_     = range->isInfinite_ ? nullptr : new Fraction(e);
+    gen->step_    = new Fraction(stp);
     gen->isInfinite_ = range->isInfinite_;
     gen->listType_ = listType;
     node->installGenerator(gen);
-    // Retain Obj* fields stored in the generator
     if (gen->current_) gen->current_->retain();
-    if (gen->end_) gen->end_->retain();
-    if (gen->step_) gen->step_->retain();
+    if (gen->end_)     gen->end_->retain();
+    if (gen->step_)    gen->step_->retain();
     vm.reg(dst).o = node;
 }
 
@@ -861,9 +863,9 @@ static void builtin_length_range_fraction(VM& vm, u16 dst, u16, u16 argBase) {
         return;
     }
 
-    r64 start = static_cast<Fraction*>(range->start_.o)->r;
-    r64 step = static_cast<Fraction*>(range->step_.o)->r;
-    r64 end = static_cast<Fraction*>(range->end_.o)->r;
+    r64 start = rangeFractionAt(range->startData());
+    r64 step  = rangeFractionAt(range->stepData());
+    r64 end   = rangeFractionAt(range->endData());
 
     if (step == r64(0)) {
         vm.reg(dst).i = 0;

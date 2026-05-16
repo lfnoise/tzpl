@@ -522,47 +522,56 @@ Enum::Enum(Type* type)
     registerNewObj(this);
 }
 
-// RangeObj constructor
-RangeObj::RangeObj(Type* type)
+// RangeObj constructor (private — use RangeObj::create())
+RangeObj::RangeObj(Type* type, bool isInfinite, u8 elemSizeWords)
     : Obj(type)
-    , start_()
-    , end_()
-    , step_()
-    , isInfinite_(false)
-    , isInt_(true)
+    , isInfinite_(isInfinite)
+    , elemSizeWords_(elemSizeWords)
 {
+    u32 total = (u32)elemSizeWords * 3u;
+    for (u32 i = 0; i < total; ++i) v[i] = Word();
     registerNewObj(this);
+}
+
+RangeObj* RangeObj::create(RangeType* type, bool isInfinite) {
+    u8 sw = type->elemType_ ? (u8)(type->elemType_->sizeWords_ > 0 ? type->elemType_->sizeWords_ : 1) : 1;
+    usize size = sizeof(RangeObj) + (usize)sw * 3u * sizeof(Word);
+    void* mem = GCObj::operator new(size);
+    return new(mem) RangeObj(type, isInfinite, sw);
 }
 
 // RangeObj::str()
 VMString RangeObj::str() const {
+    auto* rt = static_cast<RangeType*>(type_);
+    Type* et = rt->elemType_;
     VMString s = rt::vmstr("(");
-    if (isInt_) {
-        s += rt::fmt("{}", start_.i);
-        // Show step if not default (1 or -1)
-        if (step_.i != 1 && step_.i != -1) {
+    if (et == gCurrentVM->intType()) {
+        i64 startI = startData()[0].i;
+        i64 stepI  = stepData()[0].i;
+        s += rt::fmt("{}", startI);
+        if (stepI != 1 && stepI != -1) {
             s += ", ";
-            s += rt::fmt("{}", start_.i + step_.i);
+            s += rt::fmt("{}", startI + stepI);
         }
         s += "..";
         if (!isInfinite_) {
-            s += rt::fmt("{}", end_.i);
+            s += rt::fmt("{}", endData()[0].i);
         }
     } else {
-        // Fraction ranges
-        if (start_.o) s += start_.o->str();
-        // Show step if not default (1/1 or -1/1)
-        if (step_.o) {
-            r64 stp = static_cast<Fraction*>(step_.o)->r;
-            if (stp != r64(1) && stp != r64(-1)) {
-                s += ", ";
-                auto* startFrac = static_cast<Fraction*>(start_.o);
-                auto* nextFrac = new Fraction(startFrac->r + stp);
-                s += nextFrac->str();
-            }
+        // Fraction range -- start/end/step are stored natively as 2 words each.
+        r64 startR(startData()[0].i, startData()[1].i);
+        r64 stepR (stepData()[0].i,  stepData()[1].i);
+        s += rt::fmt("{}/{}", startR.numer(), startR.denom());
+        if (stepR != r64(1) && stepR != r64(-1)) {
+            s += ", ";
+            r64 next = startR + stepR;
+            s += rt::fmt("{}/{}", next.numer(), next.denom());
         }
         s += "..";
-        if (!isInfinite_ && end_.o) s += end_.o->str();
+        if (!isInfinite_) {
+            r64 endR(endData()[0].i, endData()[1].i);
+            s += rt::fmt("{}/{}", endR.numer(), endR.denom());
+        }
     }
     s += ")";
     return s;
@@ -1293,23 +1302,15 @@ size_t WordHash::operator()(Word w) const {
         return h;
     }
     if (dynamic_cast<RangeType*>(type)) {
+        // Phase 4g.14: hash endpoints natively via wordsHash so multi-word
+        // element types (Fraction) walk both words.
         auto* r = static_cast<RangeObj*>(w.o);
+        auto* rt = static_cast<RangeType*>(r->type_);
+        Type* et = rt->elemType_;
         size_t h = std::hash<bool>{}(r->isInfinite_);
-        h = hashCombine(h, std::hash<bool>{}(r->isInt_));
-        if (r->isInt_) {
-            h = hashCombine(h, std::hash<i64>{}(r->start_.i));
-            h = hashCombine(h, std::hash<i64>{}(r->step_.i));
-            if (!r->isInfinite_) h = hashCombine(h, std::hash<i64>{}(r->end_.i));
-        } else {
-            auto* sf = static_cast<Fraction*>(r->start_.o);
-            auto* stf = static_cast<Fraction*>(r->step_.o);
-            h = hashCombine(h, hashCombine(std::hash<i64>{}(sf->r.numer()), std::hash<i64>{}(sf->r.denom())));
-            h = hashCombine(h, hashCombine(std::hash<i64>{}(stf->r.numer()), std::hash<i64>{}(stf->r.denom())));
-            if (!r->isInfinite_) {
-                auto* ef = static_cast<Fraction*>(r->end_.o);
-                h = hashCombine(h, hashCombine(std::hash<i64>{}(ef->r.numer()), std::hash<i64>{}(ef->r.denom())));
-            }
-        }
+        h = hashCombine(h, wordsHash(r->startData(), et));
+        h = hashCombine(h, wordsHash(r->stepData(),  et));
+        if (!r->isInfinite_) h = hashCombine(h, wordsHash(r->endData(), et));
         return h;
     }
     if (auto* refT = dynamic_cast<RefType*>(type)) {
@@ -1481,28 +1482,15 @@ bool WordEqual::operator()(Word a, Word b) const {
         }
         return na == nb;  // both must be null
     }
-    if (dynamic_cast<RangeType*>(type)) {
+    if (auto* rt = dynamic_cast<RangeType*>(type)) {
+        // Phase 4g.14: compare endpoints natively via wordsEqual.
         auto* ra = static_cast<RangeObj*>(a.o);
         auto* rb = static_cast<RangeObj*>(b.o);
         if (ra->isInfinite_ != rb->isInfinite_) return false;
-        if (ra->isInt_ != rb->isInt_) return false;
-        if (ra->isInt_) {
-            if (ra->start_.i != rb->start_.i) return false;
-            if (ra->step_.i != rb->step_.i) return false;
-            if (!ra->isInfinite_ && ra->end_.i != rb->end_.i) return false;
-        } else {
-            auto* sa = static_cast<Fraction*>(ra->start_.o);
-            auto* sb = static_cast<Fraction*>(rb->start_.o);
-            if (sa->r != sb->r) return false;
-            auto* sta = static_cast<Fraction*>(ra->step_.o);
-            auto* stb = static_cast<Fraction*>(rb->step_.o);
-            if (sta->r != stb->r) return false;
-            if (!ra->isInfinite_) {
-                auto* ea = static_cast<Fraction*>(ra->end_.o);
-                auto* eb = static_cast<Fraction*>(rb->end_.o);
-                if (ea->r != eb->r) return false;
-            }
-        }
+        Type* et = rt->elemType_;
+        if (!wordsEqual(ra->startData(), rb->startData(), et)) return false;
+        if (!wordsEqual(ra->stepData(),  rb->stepData(),  et)) return false;
+        if (!ra->isInfinite_ && !wordsEqual(ra->endData(), rb->endData(), et)) return false;
         return true;
     }
     if (auto* refT = dynamic_cast<RefType*>(type)) {

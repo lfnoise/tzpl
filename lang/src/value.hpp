@@ -1170,27 +1170,43 @@ public:
     }
 };
 
-// Range object — lightweight representation of (start..end) with step
+// Range object — (start..end) with step.
+//
+// Phase 4g.14: start/end/step are stored natively per the element type's
+// footprint (1 word for Int, 2 words for Fraction). The flex array v[] is
+// sized to 3 * elemSizeWords_; endpoint i lives at v[i * elemSizeWords_].
+// Only Range[Int] and Range[Fraction] are constructible from source.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wc99-extensions"
 class RangeObj : public Obj {
 public:
-    Word start_;
-    Word end_;
-    Word step_;
     bool isInfinite_;
-    bool isInt_;  // true for Int ranges, false for Fraction
+    u8   elemSizeWords_;   // 1 for Int, 2 for Fraction (mirror of elemType->sizeWords_)
+    Word v[];
 
-    RangeObj(Type* type);
+    static RangeObj* create(RangeType* type, bool isInfinite);
+
+    Word*       startData()       { return &v[0]; }
+    Word const* startData() const { return &v[0]; }
+    Word*       endData()         { return &v[elemSizeWords_]; }
+    Word const* endData()   const { return &v[elemSizeWords_]; }
+    Word*       stepData()        { return &v[elemSizeWords_ * 2u]; }
+    Word const* stepData()  const { return &v[elemSizeWords_ * 2u]; }
 
     VMString str() const override;
 
     void releaseChildren() override {
-        if (!isInt_) {
-            if (start_.o) start_.o->release();
-            if (!isInfinite_ && end_.o) end_.o->release();
-            if (step_.o) step_.o->release();
-        }
+        auto* rt = static_cast<RangeType*>(type_);
+        Type* et = rt->elemType_;
+        payloadRelease(startData(), et);
+        if (!isInfinite_) payloadRelease(endData(), et);
+        payloadRelease(stepData(), et);
     }
+
+private:
+    RangeObj(Type* type, bool isInfinite, u8 elemSizeWords);
 };
+#pragma clang diagnostic pop
 
 // Phase 4g.11: MapObj and SetObj are open-addressing hash tables with linear
 // probing that store keys/values (and set elements) as multi-Word slots --
