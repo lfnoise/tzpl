@@ -89,3 +89,10 @@ fs half println;
 let n = 10;
 let addn = fn(x Int) Int { x + n };
 int_xs addn println;
+
+-- --- filter over Array[Complex/Fraction] (getArrayElem PodArray<x64>/<r64>) ---
+-- These used to segfault because getArrayElem treated the PodArray as ObjArray.
+let arr_c = [1.0+2.0i, 3.0+4.0i];
+let arr_f = [1/2, 3/4];
+filter(arr_c, fn(c Complex) Bool { true }) println;
+filter(arr_f, fn(f Fraction) Bool { true }) println;
