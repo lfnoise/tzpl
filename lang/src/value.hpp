@@ -978,14 +978,19 @@ class CoroutineListGen : public ListGenerator {
 public:
     CoroutineObj* coro_;
     ListType* listType_;
-    Word bufferedValue_;    // pre-fetched value for this node's head_
-    bool valueIsObj_;       // whether elemType is an Obj type (for GC)
+    // Phase 4g.12: bufferedValue_ holds the pre-fetched yield value as
+    // yieldStride() consecutive Words. For 1-word yield types only index 0
+    // is used; for Inline composite yield types the whole inline payload
+    // sits here.
+    Vec<Word> bufferedValue_;
 
     CoroutineListGen(Type* type);
     void generate(VM& vm, ListNode* owner) override;
     void releaseChildren() override {
         if (coro_) reinterpret_cast<GCObj*>(coro_)->release();
-        if (valueIsObj_ && bufferedValue_.o) bufferedValue_.o->release();
+        if (!bufferedValue_.empty()) {
+            payloadRelease(bufferedValue_.data(), listType_->elemType_);
+        }
     }
 };
 

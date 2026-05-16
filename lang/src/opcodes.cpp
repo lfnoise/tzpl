@@ -3787,13 +3787,23 @@ void op_coro_resume(VM& vm, Code* pc) {
 }
 
 // YIELD Rsrc, gcMapIndex (2 words: op, regs{src, gcMapIdx})
+//
+// Phase 4g.12: the yielded value may span sizeWords_ words for an Inline
+// composite yield type. Snapshot all of them out of the source slot before
+// switching contexts (the caller's register file replaces this one).
 void op_yield(VM& vm, Code* pc) {
     u16 src = pc[1].regs[0], gcMapIdx = pc[1].regs[1];
 
-    Word yieldedValue = vm.reg(src);
-
     auto* coro = vm.currentCoroutine();
     auto* frame = vm.currentCoroFrame();
+    auto* coroType = static_cast<CoroutineType*>(coro->type_);
+    Type* yieldType = coroType->yieldType_;
+    u16 yieldStride = (u16)((yieldType && yieldType->sizeWords_ > 0)
+                            ? yieldType->sizeWords_ : 1);
+
+    // Snapshot the yielded value before switching register files.
+    Word yieldedValue[8];
+    for (u16 i = 0; i < yieldStride; ++i) yieldedValue[i] = vm.reg((u16)(src + i));
 
     // Copy registers from flat register file to CoroutineFrame save slot
     Word* flatRegs = vm.regsBase() + vm.baseReg();
@@ -3828,8 +3838,10 @@ void op_yield(VM& vm, Code* pc) {
     vm.setCurrentCoroutine(coro->callerCoroutine_);
     vm.setCurrentRegs(vm.regsBase() + vm.baseReg());
 
-    // Write yielded value directly to caller's destination register (no Enum wrapper)
-    vm.reg(coro->callerResultReg_) = yieldedValue;
+    // Write yielded value(s) directly to caller's destination register slot.
+    for (u16 i = 0; i < yieldStride; ++i) {
+        vm.reg((u16)(coro->callerResultReg_ + i)) = yieldedValue[i];
+    }
 
     // Clear stale caller refs
     coro->callerCoroFrame_ = nullptr;
@@ -3842,6 +3854,10 @@ void op_yield(VM& vm, Code* pc) {
 // CORO_DONE (1 word: op)
 void op_coro_done(VM& vm, Code* pc) {
     auto* coro = vm.currentCoroutine();
+    auto* coroType = static_cast<CoroutineType*>(coro->type_);
+    Type* yieldType = coroType->yieldType_;
+    u16 yieldStride = (u16)((yieldType && yieldType->sizeWords_ > 0)
+                            ? yieldType->sizeWords_ : 1);
 
     // Mark as done
     coro->topFrame_ = nullptr;
@@ -3854,8 +3870,10 @@ void op_coro_done(VM& vm, Code* pc) {
     vm.setCurrentCoroutine(coro->callerCoroutine_);
     vm.setCurrentRegs(vm.regsBase() + vm.baseReg());
 
-    // Write zero to caller's destination register (caller checks state, not this value)
-    vm.reg(coro->callerResultReg_).i = 0;
+    // Zero the caller's destination slot (caller checks state, not the bytes).
+    for (u16 i = 0; i < yieldStride; ++i) {
+        vm.reg((u16)(coro->callerResultReg_ + i)).i = 0;
+    }
 
     // Clear stale caller refs
     coro->callerCoroFrame_ = nullptr;
@@ -3874,14 +3892,25 @@ void op_coro_is_done(VM& vm, Code* pc) {
 }
 
 // CORO_WRAP_OPTION Rd, Rval, Rcoro (3 words: op, regs{dst, val, coro}, optionType*)
+//
+// Phase 4g.12: when Option<T> is Inline (the common case for primitive and
+// inline-composite yield types), write the discriminant + payload directly
+// into the dst slot's sizeWords_ consecutive registers -- no intermediate
+// heap Enum*. NullablePtrEnum (Option<Obj*Type>) stays a single nullable
+// pointer. The legacy heap-Enum* path remains for any odd repr.
 void op_coro_wrap_option(VM& vm, Code* pc) {
     u16 dst = pc[1].regs[0], valSrc = pc[1].regs[1], coroReg = pc[1].regs[2];
     auto* optType = static_cast<EnumType*>(pc[2].p);
     auto* coro = static_cast<CoroutineObj*>(vm.reg(coroReg).o);
+    auto* coroType = static_cast<CoroutineType*>(coro->type_);
+    Type* yieldType = coroType->yieldType_;
+    u16 yieldStride = (u16)((yieldType && yieldType->sizeWords_ > 0)
+                            ? yieldType->sizeWords_ : 1);
+    bool done = (coro->state_ == CoroutineObj::Done);
 
     // Phase 3: NullablePtrEnum -- store as nullable Obj* directly.
     if (optType->repr_ == Type::Repr::NullablePtrEnum) {
-        if (coro->state_ == CoroutineObj::Done) {
+        if (done) {
             vm.reg(dst).o = nullptr;
         } else {
             Word v = vm.reg(valSrc);
@@ -3891,19 +3920,31 @@ void op_coro_wrap_option(VM& vm, Code* pc) {
         DISPATCH(3);
     }
 
+    // Inline Option: write [discriminant, payload...] directly into dst slot.
+    if (optType->repr_ == Type::Repr::Inline) {
+        if (done) {
+            vm.reg(dst).i = 1;  // none
+            for (u16 i = 0; i < yieldStride; ++i) {
+                vm.reg((u16)(dst + 1 + i)).i = 0;
+            }
+        } else {
+            vm.reg(dst).i = 0;  // some
+            for (u16 i = 0; i < yieldStride; ++i) {
+                vm.reg((u16)(dst + 1 + i)) = vm.reg((u16)(valSrc + i));
+            }
+            payloadRetain(&vm.reg((u16)(dst + 1)), yieldType);
+        }
+        DISPATCH(3);
+    }
+
+    // Fallback: heap Enum* (legacy 1-word return for unusual Option reprs).
     auto* e = new Enum(optType);
-    if (coro->state_ == CoroutineObj::Done) {
-        e->which_ = 1;  // none
+    if (done) {
+        e->which_ = 1;
         e->word_.i = 0;
     } else {
-        e->which_ = 0;  // some
-        e->word_ = vm.reg(valSrc);
-        // Phase 4c: case 0 = some; check layout_[0] for pointer storage.
-        if (!optType->layout_.empty()
-            && storesObjPtr(optType->layout_[0].type)
-            && e->word_.o) {
-            e->word_.o->retain();
-        }
+        e->which_ = 0;
+        e->word_ = boxPayload(vm, yieldType, &vm.reg(valSrc));
     }
     vm.reg(dst).o = e;
     DISPATCH(3);

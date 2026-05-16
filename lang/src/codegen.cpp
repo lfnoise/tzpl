@@ -1600,8 +1600,10 @@ void CodeGen::genForStmt(ForStmtNode* stmt) {
         u16 loopSavedReg = nextReg_;
         u32 loopStartIdx = (u32)currentBlock_->code.size();
 
-        // op_coro_resume -> value directly (no Enum wrapper)
-        u16 elemReg = allocReg();
+        // op_coro_resume -> value directly (no Enum wrapper).
+        // Phase 4g.12: yield type may be multi-word (inline composite); allocate
+        // a slot wide enough to hold it.
+        u16 elemReg = allocSlot(coroType->yieldType_);
         emitOp(op_coro_resume);
         emitRegs(elemReg, coroReg);
 
@@ -3954,20 +3956,19 @@ u16 CodeGen::genCall(CallExpr_* expr) {
     // Coroutine resume: emit op_coro_resume + op_coro_wrap_option for next() calls
     if (expr->isCoroResume) {
         u16 coroReg = argBase;  // first (and only) argument is the coroutine
-        u16 valueReg = allocReg();
+        // Phase 4g.12: yield value lands in a slot wide enough for the yield
+        // type; op_coro_wrap_option writes the Inline Option directly into a
+        // multi-word dst (no heap Enum* round-trip).
+        auto* coroType = dynamic_cast<CoroutineType*>(expr->args[0]->resolvedType);
+        Type* yieldType = coroType ? coroType->yieldType_ : nullptr;
+        Type* optType = expr->resolvedType;
+        u16 valueReg = allocSlot(yieldType);
         emitOp(op_coro_resume);
         emitRegs(valueReg, coroReg);
-        // Wrap raw value in Option<T> based on coroutine state.
-        // Phase 4g.4: op_coro_wrap_option lands a heap Enum* in a 1-word
-        // dst; unbox into an inline slot when Option<T> is Inline.
-        u16 resultReg = allocReg();
+        u16 resultReg = allocSlot(optType);
         emitOp(op_coro_wrap_option);
         emitRegs(resultReg, valueReg, coroReg);
-        emitPtr(expr->resolvedType);  // Option<T> EnumType*
-        Type* optType = expr->resolvedType;
-        if (optType && optType->repr_ == ts::Type::Repr::Inline) {
-            return emitUnboxIfInline(resultReg, optType);
-        }
+        emitPtr(optType);  // Option<T> EnumType*
         return resultReg;
     }
 
@@ -3995,12 +3996,9 @@ u16 CodeGen::genCall(CallExpr_* expr) {
         u16 gcMapIndex = currentYieldCount_++;
         currentBlock_->coroGCMaps_.push_back(std::move(gcMap));
 
-        // Phase 4f: yield writes 1 Word to caller; box inline values first.
+        // Phase 4g.12: yield transfers sizeWords_ words from src to the caller
+        // -- no boxing of inline composites at the yield boundary.
         u16 srcReg = argBase;  // first (and only) argument is the yielded value
-        Type* yieldType = expr->args[0]->resolvedType;
-        if (isInlineMultiword(yieldType)) {
-            srcReg = emitBoxIfInline(srcReg, yieldType);
-        }
 
         // Emit yield: op, regs{src, gcMapIdx}
         emitOp(op_yield);
@@ -4019,8 +4017,10 @@ u16 CodeGen::genCall(CallExpr_* expr) {
         // Loop top
         u32 loopStart = (u32)currentBlock_->code.size();
 
-        // op_coro_resume -> value directly (no Enum wrapper)
-        u16 valueReg = allocReg();
+        // op_coro_resume -> value directly (no Enum wrapper).
+        // Phase 4g.12: value slot is sized for the yield type (multi-word for
+        // Inline composites).
+        u16 valueReg = allocSlot(innerCoroType ? innerCoroType->yieldType_ : nullptr);
         emitOp(op_coro_resume);
         emitRegs(valueReg, coroReg);
 

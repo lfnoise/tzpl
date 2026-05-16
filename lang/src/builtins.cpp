@@ -2285,9 +2285,10 @@ void registerBuiltinFunctions(Compiler& compiler,
     registerTemplate(compiler, functions, "isNone",       resolve_isNone,   /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
 
     // --- Coroutine builtins ---
-    registerTemplate(compiler, functions, "next",         resolve_next);
-    registerTemplate(compiler, functions, "yield",        resolve_yield);
-    registerTemplate(compiler, functions, "yieldAll",     resolve_yieldAll);
+    // Phase 4g.12: yield/next handle inline composite yield types natively.
+    registerTemplate(compiler, functions, "next",         resolve_next,     /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "yield",        resolve_yield,    /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "yieldAll",     resolve_yieldAll, /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
 
     // --- Set builtins ---
     // Phase 4g.11: Set elements are stored natively (multi-word for inline

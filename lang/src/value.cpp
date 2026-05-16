@@ -335,7 +335,12 @@ EnumerateListGen::EnumerateListGen(Type* type) : ListGenerator(type), source_(nu
 JoinListGen::JoinListGen(Type* type) : ListGenerator(type), outer_(nullptr), inner_(nullptr), resultListType_(nullptr) {}
 IterListGen::IterListGen(Type* type) : ListGenerator(type), current_(), fn_(nullptr), valueIsObj_(false), listType_(nullptr) {}
 ArrayToListGen::ArrayToListGen(Type* type) : ListGenerator(type), array_(nullptr), index_(0), elemType_(nullptr), listType_(nullptr) {}
-CoroutineListGen::CoroutineListGen(Type* type) : ListGenerator(type), coro_(nullptr), listType_(nullptr), bufferedValue_(), valueIsObj_(false) {}
+CoroutineListGen::CoroutineListGen(Type* type)
+    : ListGenerator(type)
+    , coro_(nullptr)
+    , listType_(nullptr)
+    , bufferedValue_(rt::STLAllocator<Word>(rt::gCurrentAllocator))
+{}
 StringCodePointsListGen::StringCodePointsListGen(Type* type) : ListGenerator(type), str_(nullptr), byteIndex_(0), listType_(nullptr) {}
 
 // ListNode::str()
@@ -1124,7 +1129,9 @@ size_t WordHash::operator()(Word w) const {
         return std::hash<f64>{}(w.f);
     }
     if (type == gCurrentVM->symbolType()) {
-        return std::hash<const void*>{}(w.s);
+        // Use the symbol's precomputed string-based hash so iteration order
+        // is stable across runs (Symbol pointers vary under ASLR).
+        return w.s ? w.s->hash() : 0;
     }
     if (type == gCurrentVM->stringType()) {
         auto* s = static_cast<StringObj*>(w.o);

@@ -732,23 +732,26 @@ void builtin_codePoints(VM& vm, u16 dst, u16, u16 argBase) {
 // Coroutine resume helper
 // ============================================================================
 
-// Synchronously resume a coroutine from C++ code.
-// Returns the Option<T> enum (some(value) or none).
-// Uses a static halt instruction as the return PC so that when
-// yield/done tail-calls it, control returns to the caller.
-// Synchronously resume a coroutine from C++ code.
-// Returns the yielded value directly (no Enum wrapper).
-// Caller must check coro->state_ to determine if a value was yielded
-// (Suspended) or if the coroutine finished (Done).
-static Word syncResumeCoroutine(VM& vm, CoroutineObj* coro) {
+// Synchronously resume a coroutine from C++ code, writing the yielded value
+// (if any) into `out` -- which must be at least yieldStride Words wide. After
+// the call, the caller inspects coro->state_: Suspended means `out` holds a
+// fresh yield; Done means the coroutine finished and `out` was zeroed.
+//
+// Phase 4g.12: handles multi-word inline-composite yield types by routing
+// through a saved register scratch area sized to the yield stride.
+static void syncResumeCoroutineInto(VM& vm, CoroutineObj* coro, Word* out) {
     auto* coroType = static_cast<CoroutineType*>(coro->type_);
+    Type* yieldType = coroType->yieldType_;
+    u16 yieldStride = (u16)((yieldType && yieldType->sizeWords_ > 0)
+                            ? yieldType->sizeWords_ : 1);
 
     // Save current VM state (yield/done will restore these)
     u32 savedBaseReg = vm.baseReg();
     u32 savedFrameCount = vm.frameCount();
     auto* savedCoroFrame = vm.currentCoroFrame();
     auto* savedCoroutine = vm.currentCoroutine();
-    Word savedReg0 = vm.reg(0);
+    Word savedRegs[8];
+    for (u16 i = 0; i < yieldStride; ++i) savedRegs[i] = vm.reg(i);
 
     // Static halt instruction - yield/done will tail-call this to return here
     static Code haltCode(op_halt);
@@ -804,50 +807,58 @@ static Word syncResumeCoroutine(VM& vm, CoroutineObj* coro) {
     // Enter dispatch loop - returns when yield/done tail-calls op_halt
     entry->op(vm, entry);
 
-    // VM state has been restored by yield/done.
-    // Yielded value (or 0 if done) is in reg(0).
-    Word result = vm.reg(0);
-
-    // Restore reg(0)
-    vm.reg(0) = savedReg0;
-
-    return result;
+    // VM state has been restored by yield/done. Yielded value (or zeros if
+    // done) is in reg(0)..reg(yieldStride-1). Copy out, then restore.
+    for (u16 i = 0; i < yieldStride; ++i) out[i] = vm.reg(i);
+    for (u16 i = 0; i < yieldStride; ++i) vm.reg(i) = savedRegs[i];
+    return;
 }
 
 // CoroutineListGen::generate - emit the buffered head value and peek ahead
 // for the tail. The bufferedValue_ was set by the previous generate() call
 // or by builtin_toList_coroutine.
+//
+// Phase 4g.12: bufferedValue_ is a Vec<Word> sized to the yield type's
+// payload width (yieldStride). The ListNode stores Struct/Tuple/InlineEnum
+// heads natively (payloadWords_ == yieldStride), but Complex/Fraction lists
+// keep heads boxed (payloadWords_ == 1) -- in that case we box the buffered
+// payload into a 1-word Obj* before placing it in the head slot.
 void CoroutineListGen::generate(VM& vm, ListNode* owner) {
-    // Use the pre-fetched value as this node's head.
-    // Phase 4g.9: for Inline composite element lists the head is multi-word;
-    // unbox the buffered (boxed) yield value into the flex storage.
+    Type* et = listType_->elemType_;
+    u32 yieldStride = (u32)bufferedValue_.size();
     if (owner->payloadWords_ > 1) {
-        unboxInlineDeepTo(vm, listType_->elemType_, bufferedValue_.o,
-                          owner->headData());
+        // Inline composite stored natively. Transfer ownership of the buffered
+        // Obj* fields rather than retain/release.
+        Word* dstHead = owner->headData();
+        for (u32 i = 0; i < owner->payloadWords_; ++i) dstHead[i] = bufferedValue_[i];
+    } else if (yieldStride > 1) {
+        // List node holds a 1-word boxed Obj* (Complex/Fraction). Box the
+        // buffered payload, then release the now-redundant inline retains.
+        owner->head_ = boxPayload(vm, et, bufferedValue_.data());
+        payloadRelease(bufferedValue_.data(), et);
     } else {
-        owner->head_ = bufferedValue_;
-        if (valueIsObj_ && owner->head_.o) owner->head_.o->retain();
+        owner->head_ = bufferedValue_[0];
+        if (storesObjPtr(et) && bufferedValue_[0].o) bufferedValue_[0].o->retain();
     }
 
-    // Peek ahead: resume the coroutine to see if there's a next value
+    // Peek ahead: resume the coroutine to see if there's a next value.
     if (coro_->state_ == CoroutineObj::Done) {
+        for (u32 i = 0; i < yieldStride; ++i) bufferedValue_[i].i = 0;
         owner->tail_ = nullptr;
         return;
     }
 
-    Word peek = syncResumeCoroutine(vm, coro_);
+    Word peek[8] = {};
+    syncResumeCoroutineInto(vm, coro_, peek);
 
     if (coro_->state_ != CoroutineObj::Done) {
-        // Yielded nextValue - buffer it and create a lazy tail
-        Word oldBuffered = bufferedValue_;
-        bufferedValue_ = peek;
-        if (valueIsObj_ && bufferedValue_.o) bufferedValue_.o->retain();
-        if (valueIsObj_ && oldBuffered.o) oldBuffered.o->release();
+        for (u32 i = 0; i < yieldStride; ++i) bufferedValue_[i] = peek[i];
+        payloadRetain(bufferedValue_.data(), et);
         auto* tail = ListNode::create(listType_);
         tail->installGenerator(this);
         owner->tail_ = tail; tail->retain();
     } else {
-        // Done - no more values
+        for (u32 i = 0; i < yieldStride; ++i) bufferedValue_[i].i = 0;
         owner->tail_ = nullptr;
     }
 }
@@ -874,11 +885,16 @@ void builtin_toList_array(VM& vm, u16 dst, u16, u16 argBase) {
 }
 
 // toList(Coroutine[T]) -> List[T]  (lazy)
+//
+// Phase 4g.12: yield type may be Inline (multi-word). The first value goes
+// directly into the head node's flex-storage; the second is buffered in the
+// generator for the lazy tail.
 void builtin_toList_coroutine(VM& vm, u16 dst, u16, u16 argBase) {
     auto* coro = static_cast<CoroutineObj*>(vm.reg(argBase).o);
     auto* coroType = static_cast<CoroutineType*>(coro->type_);
     Type* elemType = coroType->yieldType_;
     auto* listType = vm.listType(elemType);
+    u32 stride = (elemType && elemType->sizeWords_ > 0) ? elemType->sizeWords_ : 1;
 
     if (coro->state_ == CoroutineObj::Done) {
         vm.reg(dst).o = nullptr;
@@ -886,7 +902,8 @@ void builtin_toList_coroutine(VM& vm, u16 dst, u16, u16 argBase) {
     }
 
     // Eagerly resume once to get the first value (and handle empty coroutines)
-    Word first = syncResumeCoroutine(vm, coro);
+    Word firstBuf[8] = {};
+    syncResumeCoroutineInto(vm, coro, firstBuf);
 
     if (coro->state_ == CoroutineObj::Done) {
         // Coroutine yielded nothing
@@ -894,22 +911,27 @@ void builtin_toList_coroutine(VM& vm, u16 dst, u16, u16 argBase) {
         return;
     }
 
-    // Create the first list node with the first value set directly.
-    // Phase 4g.9: when elem is Inline composite, the head is multi-word;
-    // unbox the (boxed) yield value into the flex storage.
+    // Create the first list node and place the first value in its head.
+    // Native multi-word storage for Struct/Tuple/InlineEnum; boxed for
+    // Complex/Fraction (ListNode keeps payloadWords_==1 for those).
     auto* node = ListNode::create(listType);
     if (node->payloadWords_ > 1) {
-        unboxInlineDeepTo(vm, elemType, first.o, node->headData());
+        Word* head = node->headData();
+        for (u32 i = 0; i < stride; ++i) head[i] = firstBuf[i];
+        payloadRetain(head, elemType);
+    } else if (stride > 1) {
+        node->head_ = boxPayload(vm, elemType, firstBuf);
     } else {
-        node->head_ = first;
-        if (storesObjPtr(elemType) && first.o) first.o->retain();
+        node->head_ = firstBuf[0];
+        if (storesObjPtr(elemType) && firstBuf[0].o) firstBuf[0].o->retain();
     }
 
     // Peek ahead for the second value
     if (coro->state_ == CoroutineObj::Done) {
         node->tail_ = nullptr;
     } else {
-        Word second = syncResumeCoroutine(vm, coro);
+        Word secondBuf[8] = {};
+        syncResumeCoroutineInto(vm, coro, secondBuf);
         if (coro->state_ == CoroutineObj::Done) {
             // Only one value
             node->tail_ = nullptr;
@@ -918,10 +940,10 @@ void builtin_toList_coroutine(VM& vm, u16 dst, u16, u16 argBase) {
             auto* gen = new CoroutineListGen(vm.typeType());
             gen->coro_ = coro;
             gen->listType_ = listType;
-            gen->bufferedValue_ = second;
-            gen->valueIsObj_ = storesObjPtr(elemType);
+            gen->bufferedValue_.assign(stride, Word{});
+            for (u32 i = 0; i < stride; ++i) gen->bufferedValue_[i] = secondBuf[i];
+            payloadRetain(gen->bufferedValue_.data(), elemType);
             reinterpret_cast<GCObj*>(gen->coro_)->retain();
-            if (gen->valueIsObj_ && gen->bufferedValue_.o) gen->bufferedValue_.o->retain();
             auto* tail = ListNode::create(listType);
             tail->installGenerator(gen);
             node->tail_ = tail; tail->retain();
