@@ -127,6 +127,7 @@ private:
     u16 genCall(CallExpr_* expr);
     u16 genAutoMapCall(CallExpr_* expr);
     u16 genAutoMapLambdaCall(CallExpr_* expr, u16 calleeReg, FunctionType* funcType);
+    u16 genAutoMapLambdaCallList(CallExpr_* expr, u16 calleeReg, FunctionType* funcType);
     u16 genAutoMapCallList(CallExpr_* expr, const FuncInfo* funcInfo);
     u16 genAutoMapCallListVoid(CallExpr_* expr, const FuncInfo* funcInfo);
     u16 genExplicitImplicitAutoMapCall(CallExpr_* expr);

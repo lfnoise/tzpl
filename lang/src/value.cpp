@@ -1603,6 +1603,16 @@ VMString wordToString(Word w, Type* type) {
 // fields natively per layout (multi-word for Inline composite fields), so
 // this is just a multi-word copy plus a pointer-retain walk.
 Obj* boxInlineDeep(VM& vm, Type* type, u16 srcSlot) {
+    // Phase 4g.21: Complex/Fraction box from their 2-word native register
+    // slot the same way they do in PodArray<x64>/<r64> backends.
+    if (type == gCurrentVM->complexType()) {
+        auto* c = new Complex(x64(vm.reg(srcSlot).f, vm.reg((u16)(srcSlot+1)).f));
+        return c;
+    }
+    if (type == gCurrentVM->fractionType()) {
+        auto* fr = new Fraction(r64(vm.reg(srcSlot).i, vm.reg((u16)(srcSlot+1)).i, true));
+        return fr;
+    }
     auto copyRegsToObj = [&](Word* dst, Type* parent) {
         u32 total = 0;
         if (auto* st = dynamic_cast<StructType*>(parent)) {
@@ -1646,6 +1656,20 @@ Obj* boxInlineDeep(VM& vm, Type* type, u16 srcSlot) {
 void unboxInlineDeep(VM& vm, Type* type, Obj* obj, u16 dstSlot) {
     // Phase 4g.13: heap Struct/Tuple store fields natively per layout, so
     // unboxing is a flat multi-word copy + ARC retain via inlineWalkPointers.
+    // Phase 4g.21: Complex/Fraction unbox into their 2-word native register
+    // slot.
+    if (type == gCurrentVM->complexType()) {
+        auto* c = static_cast<Complex*>(obj);
+        vm.reg(dstSlot).f = c->x.real();
+        vm.reg((u16)(dstSlot+1)).f = c->x.imag();
+        return;
+    }
+    if (type == gCurrentVM->fractionType()) {
+        auto* fr = static_cast<Fraction*>(obj);
+        vm.reg(dstSlot).i = fr->r.numer();
+        vm.reg((u16)(dstSlot+1)).i = fr->r.denom();
+        return;
+    }
     auto copyObjToRegs = [&](Word const* src, Type* parent) {
         u32 total = 0;
         if (auto* st = dynamic_cast<StructType*>(parent)) {

@@ -5327,6 +5327,21 @@ u16 CodeGen::genAutoMapLambdaCall(CallExpr_* expr, u16 calleeReg, FunctionType* 
     u16 argc = (u16)expr->args.size();
     bool isVoidReturn = (funcType->returnType_ == compiler_.voidType());
 
+    // Phase 4g.21: if any auto-mapped arg is a List, the rest of this function
+    // (which only handles Array auto-map) would crash at codegen. Route to a
+    // list-aware eager loop instead. Multi-arg lambdas with List args fall
+    // back to this path too.
+    bool anyListArg = false;
+    for (size_t i = 0; i < argc; ++i) {
+        if (expr->autoMapArgs[i] && expr->autoMapArgs[i].isList) {
+            anyListArg = true;
+            break;
+        }
+    }
+    if (anyListArg) {
+        return genAutoMapLambdaCallList(expr, calleeReg, funcType);
+    }
+
     // Determine the max auto-map depth
     int depth = 0;
     for (auto& am : expr->autoMapArgs) {
@@ -5571,6 +5586,181 @@ u16 CodeGen::genAutoMapLambdaCall(CallExpr_* expr, u16 calleeReg, FunctionType* 
     }
 
     return prevResultReg;
+}
+
+// Phase 4g.21: eager List auto-map for lambda values (locals/captures).
+// Mirrors the structure of genAutoMapCallListVoid but uses op_call_lambda and
+// collects into a result List (via cons-from-right-to-left) for non-Void
+// returns.
+u16 CodeGen::genAutoMapLambdaCallList(CallExpr_* expr, u16 calleeReg, FunctionType* funcType) {
+    u16 argc = (u16)expr->args.size();
+    bool isVoidReturn = (funcType->returnType_ == compiler_.voidType());
+
+    // --- Phase 1: Evaluate all argument expressions ---
+    std::vector<u16> argRegs;
+    for (auto& arg : expr->args) {
+        argRegs.push_back(genExpr(static_cast<Expr*>(arg.get())));
+    }
+
+    // --- Phase 2: Find the list arg (assumes a single one, like the
+    // genAutoMapCallListVoid path). ---
+    u16 listArgIndex = 0;
+    for (size_t i = 0; i < argc; ++i) {
+        if (expr->autoMapArgs[i] && expr->autoMapArgs[i].isList) {
+            listArgIndex = (u16)i;
+            break;
+        }
+    }
+
+    auto* srcListType = dynamic_cast<ListType*>(expr->args[listArgIndex]->resolvedType);
+    Type* listElemType = srcListType->elemType_;
+    bool elemInlineComposite = listElemType
+        && listElemType->repr_ == ts::Type::Repr::Inline;
+    u32 elemSlotW = elemInlineComposite ? typeSlotWords(listElemType) : 1;
+
+    // For non-Void return: build the result as a reversed accumulator
+    // (cons-from-the-right), then reverse it at the end -- same pattern as
+    // genAutoMapBinaryOpList.
+    auto* resultListType = isVoidReturn
+        ? static_cast<ListType*>(nullptr)
+        : dynamic_cast<ListType*>(expr->resolvedType);
+    Type* resultElemType = resultListType ? resultListType->elemType_ : nullptr;
+
+    u16 oneReg = allocReg();
+    emitOp(op_load_int_const);
+    emitRegs(oneReg);
+    emitInt(1);
+
+    // --- Phase 3: Iterate the list eagerly ---
+    u16 curListReg = allocReg();
+    emitOp(op_mov);
+    emitRegs(curListReg, argRegs[listArgIndex]);
+
+    u16 accReg = 0;
+    if (!isVoidReturn) {
+        accReg = allocReg();
+        emitOp(op_load_nil);
+        emitRegs(accReg);
+    }
+
+    u32 loopStart = (u32)currentBlock_->code.size();
+    u16 nilCheckReg = allocReg();
+    emitOp(op_list_is_nil);
+    emitRegs(nilCheckReg, curListReg);
+    u32 exitJump = emitJump(op_jump_if_true, nilCheckReg);
+
+    // Extract head element (multi-word for Inline composites).
+    u16 headReg = nextReg_;
+    nextReg_ = (u16)(nextReg_ + elemSlotW);
+    if (nextReg_ > maxReg_) maxReg_ = nextReg_;
+    emitOp(op_list_head);
+    emitRegs(headReg, curListReg);
+
+    // --- Phase 4: Set up call arguments ---
+    u16 callArgBase = nextReg_;
+
+    auto perArgSlotW = [&](Type* paramType) -> u32 {
+        if (!paramType) return 1;
+        if (paramType->repr_ == ts::Type::Repr::Inline)
+            return (u32)paramType->sizeWords_;
+        return typeSlotWords(paramType);
+    };
+    u32 cumOffset = 0;
+    std::vector<u32> argOffsets(argc, 0);
+    for (u16 i = 0; i < argc; ++i) {
+        argOffsets[i] = cumOffset;
+        Type* pT = (i < funcType->argTypes_.size()) ? funcType->argTypes_[i] : nullptr;
+        cumOffset += perArgSlotW(pT);
+    }
+
+    for (u16 i = 0; i < argc; ++i) {
+        u16 targetReg = (u16)(callArgBase + argOffsets[i]);
+        Type* paramType = (i < funcType->argTypes_.size()) ? funcType->argTypes_[i] : nullptr;
+        u32 slotW = perArgSlotW(paramType);
+        if (nextReg_ <= (u16)(targetReg + slotW)) {
+            nextReg_ = (u16)(targetReg + slotW);
+            if (nextReg_ > maxReg_) maxReg_ = nextReg_;
+        }
+
+        if (i == listArgIndex) {
+            u16 srcReg = headReg;
+            if (elemInlineComposite) {
+                if (srcReg != targetReg) emitMoveN(targetReg, srcReg, slotW);
+            } else {
+                if (paramType && listElemType != paramType) {
+                    srcReg = ensureType(srcReg, listElemType, paramType);
+                }
+                if (srcReg != targetReg) {
+                    emitOp(op_mov);
+                    emitRegs(targetReg, srcReg);
+                }
+            }
+        } else {
+            Type* argType = expr->args[i]->resolvedType;
+            u16 srcReg = argRegs[i];
+            if (paramType && argType != paramType) {
+                srcReg = ensureType(srcReg, argType, paramType);
+            }
+            if (srcReg != targetReg) {
+                if (slotW <= 1) { emitOp(op_mov); emitRegs(targetReg, srcReg); }
+                else { emitMoveN(targetReg, srcReg, slotW); }
+            }
+        }
+    }
+
+    // --- Phase 5: Call the lambda ---
+    u16 callResultReg = isVoidReturn ? allocReg() : allocSlot(resultElemType);
+    emitOp(op_call_lambda);
+    emitRegs(callResultReg, argc, callArgBase, calleeReg);
+
+    // Cons the result onto the accumulator (reversed result list).
+    if (!isVoidReturn) {
+        u16 newAcc = allocReg();
+        emitOp(op_cons);
+        emitRegs(newAcc, callResultReg, accReg);
+        emitPtr(resultListType);
+        emitOp(op_mov);
+        emitRegs(accReg, newAcc);
+    }
+
+    // --- Phase 6: Advance to tail and loop ---
+    emitOp(op_list_tail);
+    emitRegs(curListReg, curListReg);
+    emitJumpTo(loopStart);
+    patchJump(exitJump);
+
+    if (isVoidReturn) {
+        return callResultReg;
+    }
+
+    // Reverse the accumulator to produce the result in source order.
+    u16 resultReg = allocReg();
+    emitOp(op_load_nil);
+    emitRegs(resultReg);
+
+    u32 revLoopStart = (u32)currentBlock_->code.size();
+    u16 revNilReg = allocReg();
+    emitOp(op_list_is_nil);
+    emitRegs(revNilReg, accReg);
+    u32 revExitJump = emitJump(op_jump_if_true, revNilReg);
+
+    u16 revHeadReg = allocSlot(resultElemType);
+    emitOp(op_list_head);
+    emitRegs(revHeadReg, accReg);
+
+    u16 newResult = allocReg();
+    emitOp(op_cons);
+    emitRegs(newResult, revHeadReg, resultReg);
+    emitPtr(resultListType);
+    emitOp(op_mov);
+    emitRegs(resultReg, newResult);
+
+    emitOp(op_list_tail);
+    emitRegs(accReg, accReg);
+    emitJumpTo(revLoopStart);
+    patchJump(revExitJump);
+
+    return resultReg;
 }
 
 u16 CodeGen::genAutoMapCallList(CallExpr_* expr, const FuncInfo* funcInfo) {

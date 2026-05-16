@@ -71,3 +71,21 @@ let b = [(10, 20), (30, 40)];
 cs length println;
 fs length println;
 ts length println;
+
+-- --- Lambda auto-map over a List (genAutoMapLambdaCallList) ---
+-- This used to crash unconditionally because genAutoMapLambdaCall only
+-- handled Array auto-map.
+let int_xs = List(1, 2, 3);
+let dbl = fn(x Int) Int { x * 2 };
+int_xs dbl println;
+
+let addone = fn(c Complex) Complex { c + (1.0+0.0i) };
+cs addone println;
+
+let half = fn(f Fraction) Fraction { f * 1/2 };
+fs half println;
+
+-- Closure capturing a local
+let n = 10;
+let addn = fn(x Int) Int { x + n };
+int_xs addn println;
