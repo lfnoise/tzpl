@@ -81,17 +81,33 @@ inline void registerTemplate(Compiler& compiler, FuncMap& functions,
 // need to read inline elements should use the array opcodes instead. We
 // fall through to ObjArray here so it's a clear runtime mistake if hit.
 inline Word getArrayElem(VM& vm, Obj* a, Type* et, size_t i) {
-    if (et == vm.intType() || et == vm.boolType() || et == vm.symbolType()) return Word(static_cast<PodArray<i64>*>(a)->v[i]);
-    if (et == vm.floatType()) return Word(static_cast<PodArray<f64>*>(a)->v[i]);
-    // Phase 4g.8: InlineArray stores inline composites unboxed; box on read
-    // so 1-Word legacy helpers keep working. Caller owns the freshly-boxed
-    // Obj* (auto-release pool registers it).
-    if (et && et->repr_ == ts::Type::Repr::Inline
-        && et != vm.complexType() && et != vm.fractionType()) {
-        auto* arr = static_cast<InlineArray*>(a);
-        return Word(boxInlineDeepFrom(vm, et, arr->slot(i)));
+    // Phase 4g.21: dispatch through arrayBackendFor so Complex/Fraction
+    // PodArray<x64>/<r64> backends are handled. Box on read (Inline
+    // composites and Complex/Fraction) so legacy 1-Word helpers keep
+    // working. Caller owns the freshly-boxed Obj*.
+    switch (arrayBackendFor(et)) {
+        case ArrayBackend::Int:
+            return Word(static_cast<PodArray<i64>*>(a)->v[i]);
+        case ArrayBackend::Float:
+            return Word(static_cast<PodArray<f64>*>(a)->v[i]);
+        case ArrayBackend::Complex: {
+            x64 const& x = static_cast<PodArray<x64>*>(a)->v[i];
+            auto* c = new ts::Complex(x);
+            return Word(static_cast<Obj*>(c));
+        }
+        case ArrayBackend::Fraction: {
+            r64 const& r = static_cast<PodArray<r64>*>(a)->v[i];
+            auto* fr = new ts::Fraction(r);
+            return Word(static_cast<Obj*>(fr));
+        }
+        case ArrayBackend::Inline: {
+            auto* arr = static_cast<InlineArray*>(a);
+            return Word(boxInlineDeepFrom(vm, et, arr->slot(i)));
+        }
+        case ArrayBackend::Obj:
+            return Word(static_cast<ObjArray*>(a)->get(i));
     }
-    return Word(static_cast<ObjArray*>(a)->get(i));
+    return Word();
 }
 
 inline size_t getArraySize(VM& vm, Obj* a, Type* et) {
