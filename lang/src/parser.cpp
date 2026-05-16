@@ -133,29 +133,43 @@ void Parser::error(SourceRange loc, const std::string& msg) {
 }
 
 void Parser::synchronize() {
+    // synchronize() is always invoked from a no-progress error-recovery guard,
+    // so it must consume at least one token before honoring its stop conditions.
+    // Without this, a sequence like `case A; case B;` inside an enum body
+    // leaves previous_ pinned at Semicolon after the first recovery pass;
+    // subsequent calls would early-return and the outer loop would spin.
+    //
+    // Stop conditions (only after we have advanced at least once):
+    //   - current_ is a statement-starter sync token (stop AT, do not consume)
+    //   - previous_ is a Semicolon (stop just AFTER a statement terminator)
+    bool advanced = false;
     while (current_.kind != TokenKind::Eof) {
-        if (previous_.kind == TokenKind::Semicolon) return;
-        switch (current_.kind) {
-            case TokenKind::Fn:
-            case TokenKind::Let:
-            case TokenKind::Var:
-            case TokenKind::Const:
-            case TokenKind::Struct:
-            case TokenKind::Enum:
-            case TokenKind::Import:
-            case TokenKind::If:
-            case TokenKind::While:
-            case TokenKind::For:
-            case TokenKind::Return:
-            case TokenKind::Match:
-            case TokenKind::KwType:
-            case TokenKind::Private:
-            case TokenKind::Coro:
-            case TokenKind::RBrace:
-                return;
-            default:
-                advance();
+        if (advanced) {
+            if (previous_.kind == TokenKind::Semicolon) return;
+            switch (current_.kind) {
+                case TokenKind::Fn:
+                case TokenKind::Let:
+                case TokenKind::Var:
+                case TokenKind::Const:
+                case TokenKind::Struct:
+                case TokenKind::Enum:
+                case TokenKind::Import:
+                case TokenKind::If:
+                case TokenKind::While:
+                case TokenKind::For:
+                case TokenKind::Return:
+                case TokenKind::Match:
+                case TokenKind::KwType:
+                case TokenKind::Private:
+                case TokenKind::Coro:
+                case TokenKind::RBrace:
+                    return;
+                default:
+                    break;
+            }
         }
+        advance();
+        advanced = true;
     }
 }
 
