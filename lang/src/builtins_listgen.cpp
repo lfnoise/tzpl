@@ -561,11 +561,11 @@ void IterListGen::generate(VM& vm, ListNode* owner) {
 
 // Phase 4g.9: write field f at slot offset (1 word for non-inline; multi-word
 // payload copy for inline composite). Retains embedded Obj* fields.
+//
+// Phase 4g.23: Complex/Fraction list heads are stored natively (2-word) since
+// 4g.20, so they take the multi-word path here just like Tuple/Struct/Enum.
 static void writeListHeadField(VM& vm, Word* dst, Type* ft, Word const* src) {
-    if (ft && ft->repr_ == Type::Repr::Inline
-        && ft != vm.complexType() && ft != vm.fractionType()
-        && (dynamic_cast<TupleType*>(ft) || dynamic_cast<StructType*>(ft)
-            || dynamic_cast<EnumType*>(ft))) {
+    if (ft && ft->repr_ == Type::Repr::Inline && ft->sizeWords_ > 1) {
         u32 sw = ft->sizeWords_;
         for (u32 i = 0; i < sw; ++i) dst[i] = src[i];
         inlineWalkPointers(dst, ft, /*release_=*/false);

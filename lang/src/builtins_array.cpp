@@ -948,15 +948,15 @@ void builtin_zip_array(VM& vm, u16 dst, u16, u16 ab) {
             auto const& f1 = tt->layout_[1];
             Word wa = getArrayElem(vm, a, etA, i);
             Word wb = getArrayElem(vm, b, etB, i);
-            if (f0.type && f0.type->repr_ == ts::Type::Repr::Inline
-                && f0.type != vm.complexType() && f0.type != vm.fractionType()) {
+            // Phase 4g.23: unboxInlineDeepTo handles Complex/Fraction since
+            // 4g.20, so the only single-Word case left is atom/pointer fields.
+            if (f0.type && f0.type->repr_ == ts::Type::Repr::Inline) {
                 unboxInlineDeepTo(vm, f0.type, wa.o, scratch + f0.wordOffset);
             } else {
                 scratch[f0.wordOffset] = wa;
                 if (storesObjPtr(f0.type) && wa.o) wa.o->retain();
             }
-            if (f1.type && f1.type->repr_ == ts::Type::Repr::Inline
-                && f1.type != vm.complexType() && f1.type != vm.fractionType()) {
+            if (f1.type && f1.type->repr_ == ts::Type::Repr::Inline) {
                 unboxInlineDeepTo(vm, f1.type, wb.o, scratch + f1.wordOffset);
             } else {
                 scratch[f1.wordOffset] = wb;
@@ -1023,8 +1023,8 @@ void builtin_enumerate_array(VM& vm, u16 dst, u16, u16 ab) {
             auto const& f1 = tt->layout_[1];
             scratch[f0.wordOffset].i = (i64)i;
             Word elem = getArrayElem(vm, src, et, i);
-            if (f1.type && f1.type->repr_ == ts::Type::Repr::Inline
-                && f1.type != vm.complexType() && f1.type != vm.fractionType()) {
+            // Phase 4g.23: unboxInlineDeepTo handles Complex/Fraction.
+            if (f1.type && f1.type->repr_ == ts::Type::Repr::Inline) {
                 unboxInlineDeepTo(vm, f1.type, elem.o, scratch + f1.wordOffset);
             } else {
                 scratch[f1.wordOffset] = elem;

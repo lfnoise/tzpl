@@ -8307,9 +8307,7 @@ u16 CodeGen::emitIndexLookup(u16 srcReg, Type* srcType, u16 idxReg, Type* idxTyp
             emitOp(op_map_get_option);
             emitRegs(valReg, srcReg, idxValReg);
             emitPtr(optType);
-            if (optType && optType->repr_ == ts::Type::Repr::Inline
-                && optType != compiler_.complexType()
-                && optType != compiler_.fractionType()) {
+            if (optType && optType->repr_ == ts::Type::Repr::Inline) {
                 valReg = emitUnboxIfInline(valReg, optType);
             }
         } else if (srcType == compiler_.stringType()) {

@@ -902,9 +902,13 @@ static bool resolve_merge(Compiler& compiler, const std::vector<Type*>& args,
 
 // pairs: [K:V] -> Array[(K, V)]
 //
-// The heap Tuple* stores 1 Word per field. Multi-word inline keys/values get
-// boxed before being placed in the tuple so the existing 1-Word-per-field
-// tuple ABI continues to work for downstream consumers.
+// Phase 4g.23: dispatch on the result tuple's array backend so that
+// Inline-repr tuples (small enough to fit in <= 4 words) land in an
+// InlineArray with native stride storage. The previous always-ObjArray
+// implementation produced an array whose `length` / index / `@` paths
+// were misinterpreted by callers that asked arrayBackendFor(tt) and got
+// `Inline` -- arrayLen would static_cast to InlineArray and divide
+// numTuples by stride, returning 0.
 static void builtin_pairs_map(VM& vm, u16 dst, u16, u16 ab) {
     auto* map = static_cast<MapObj*>(vm.reg(ab).o);
     auto* mt = static_cast<MapType*>(map->type_);
@@ -914,12 +918,30 @@ static void builtin_pairs_map(VM& vm, u16 dst, u16, u16 ab) {
     fields.push_back(mt->valueType_);
     auto* tt = vm.tupleType(fields);
     auto* resAT = vm.arrayType(tt);
-    auto* result = new ObjArray(resAT);
     Type* kt = mt->keyType_;
     Type* vt = mt->valueType_;
     u32 cap = map->capacity();
     auto const& kf = tt->layout_[0];
     auto const& vf = tt->layout_[1];
+
+    if (arrayBackendFor(tt) == ArrayBackend::Inline) {
+        auto* arr = new InlineArray(resAT);
+        arr->reserve(map->size());
+        u32 stride = tt->sizeWords_;
+        Vec<Word> scratch(stride, Word{}, rt::STLAllocator<Word>{&vm.allocator()});
+        for (u32 i = 0; i < cap; ++i) {
+            if (map->slotState(i) != MapObj::SlotOccupied) continue;
+            Word const* k = map->slotKey(i);
+            Word const* v = map->slotVal(i);
+            for (u8 j = 0; j < kf.sizeWords; ++j) scratch[kf.wordOffset + j] = k[j];
+            for (u8 j = 0; j < vf.sizeWords; ++j) scratch[vf.wordOffset + j] = v[j];
+            arr->pushSlot(scratch.data());
+        }
+        vm.reg(dst).o = arr;
+        return;
+    }
+
+    auto* result = new ObjArray(resAT);
     for (u32 i = 0; i < cap; ++i) {
         if (map->slotState(i) != MapObj::SlotOccupied) continue;
         auto* tup = Tuple::create(tt, 2);
@@ -1184,14 +1206,13 @@ static void builtin_ref_inline(VM& vm, u16 dst, u16, u16 ab) {
 
 // deref(Ref<T>) -> T. Phase 4g.6: for InlineRef, copy the inline payload
 // directly into the multi-word dst slot -- no temp boxed Tuple/Struct/Enum.
+// Phase 4g.23: Complex/Fraction are 2-word native at builtin boundaries, so
+// they use InlineRef too.
 static void builtin_deref(VM& vm, u16 dst, u16, u16 ab) {
     auto* obj = vm.reg(ab).o;
     auto* refType = static_cast<RefType*>(obj->type_);
     Type* et = refType->elemType_;
-    if (et && et->repr_ == Type::Repr::Inline
-        && et != gCurrentVM->complexType() && et != gCurrentVM->fractionType()
-        && (dynamic_cast<StructType*>(et) || dynamic_cast<TupleType*>(et)
-            || dynamic_cast<EnumType*>(et))) {
+    if (et && et->repr_ == Type::Repr::Inline && et->sizeWords_ > 1) {
         auto* ref = static_cast<InlineRef*>(obj);
         u32 n = ref->sizeWords_;
         for (u32 i = 0; i < n; ++i) vm.reg((u16)(dst + i)) = ref->v[i];
@@ -1207,10 +1228,10 @@ static void builtin_setref(VM& vm, u16 dst, u16, u16 ab) {
     auto* prim = static_cast<Primitive*>(vm.currentPrimitive());
     auto* primTT = static_cast<TupleType*>(prim->type_);
     Type* et = primTT->fields_[0];
+    // Phase 4g.23: Complex/Fraction (Inline, 2 words) also route through
+    // InlineRef -- they are 2-word native at builtin boundaries since 4f.
     bool inlineComposite = et && et->repr_ == Type::Repr::Inline
-        && et != gCurrentVM->complexType() && et != gCurrentVM->fractionType()
-        && (dynamic_cast<StructType*>(et) || dynamic_cast<TupleType*>(et)
-            || dynamic_cast<EnumType*>(et));
+        && et->sizeWords_ > 1;
     if (inlineComposite) {
         u32 n = (u32)et->sizeWords_;
         // Ref is the 2nd arg; it lives at ab + n (sizeWords of inline T).
@@ -1242,10 +1263,12 @@ static bool resolve_ref(Compiler& compiler, const std::vector<Type*>& args,
     std::vector<Type*>& pt, Type*& rt, CFun& cf) {
     if (args.size() != 1) return false;
     Type* t = args[0];
+    // Phase 4g.23: Complex/Fraction (Inline, 2 words) also route through
+    // builtin_ref_inline since their values are 2-word native at the call
+    // boundary; the previous resolve_ref path sent them to builtin_ref_obj
+    // and tried to read a 1-Word Obj* that doesn't exist.
     bool inlineComposite = t && t->repr_ == Type::Repr::Inline
-        && t != compiler.complexType() && t != compiler.fractionType()
-        && (dynamic_cast<StructType*>(t) || dynamic_cast<TupleType*>(t)
-            || dynamic_cast<EnumType*>(t));
+        && t->sizeWords_ > 1;
     if (t == compiler.intType())         cf = builtin_ref_int;
     else if (t == compiler.floatType())  cf = builtin_ref_float;
     else if (t == compiler.boolType())   cf = builtin_ref_bool;
@@ -1305,10 +1328,7 @@ static void builtin_setref_rev(VM& vm, u16 dst, u16, u16 ab) {
     auto* obj = vm.reg(ab).o;
     auto* refType = static_cast<RefType*>(obj->type_);
     Type* et = refType->elemType_;
-    if (et && et->repr_ == Type::Repr::Inline
-        && et != gCurrentVM->complexType() && et != gCurrentVM->fractionType()
-        && (dynamic_cast<StructType*>(et) || dynamic_cast<TupleType*>(et)
-            || dynamic_cast<EnumType*>(et))) {
+    if (et && et->repr_ == Type::Repr::Inline && et->sizeWords_ > 1) {
         auto* ref = static_cast<InlineRef*>(obj);
         // The new value is the 2nd arg; lives at ab + 1 (Ref is 1 word).
         u32 n = (u32)et->sizeWords_;
