@@ -984,7 +984,12 @@ void builtin_collect(VM& vm, u16 dst, u16, u16 ab) {
     ListNode* cur = src;
     for (i64 i = 0; i < n && cur; i++) {
         cur->force(vm);
-        arrayPush(vm, arr, elemType, cur->head_);
+        // Phase 4g.21: Inline composite heads are stored multi-word native;
+        // box to a 1-Word heap Obj* for the arrayPush ABI.
+        Word elem = (cur->payloadWords_ > 1)
+            ? boxPayload(vm, elemType, cur->headData())
+            : cur->head_;
+        arrayPush(vm, arr, elemType, elem);
         cur = cur->tail_;
     }
     vm.reg(dst).o = arr;

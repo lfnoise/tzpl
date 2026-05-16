@@ -5688,6 +5688,11 @@ u16 CodeGen::genAutoMapCallListVoid(CallExpr_* expr, const FuncInfo* funcInfo) {
     }
 
     auto* srcListType = dynamic_cast<ListType*>(expr->args[listArgIndex]->resolvedType);
+    Type* listElemType = srcListType->elemType_;
+    bool elemInlineComposite = listElemType
+        && listElemType->repr_ == ts::Type::Repr::Inline;
+    u32 elemSlotW = elemInlineComposite ? typeSlotWords(listElemType) : 1;
+    bool boxAtBoundary = expr->isBuiltinCall && !expr->builtinAcceptsInlineArgs;
 
     // --- Phase 3: Iterate the list eagerly ---
     u16 curListReg = allocReg();
@@ -5700,44 +5705,83 @@ u16 CodeGen::genAutoMapCallListVoid(CallExpr_* expr, const FuncInfo* funcInfo) {
     emitRegs(nilCheckReg, curListReg);
     u32 exitJump = emitJump(op_jump_if_true, nilCheckReg);
 
-    // Extract head element
-    u16 headReg = allocReg();
+    // Extract head element. Phase 4g.21: op_list_head writes payloadWords_
+    // words, so reserve a slot wide enough for Inline composite elements
+    // (Tuple/Struct/Enum and Complex/Fraction).
+    u16 headReg = nextReg_;
+    nextReg_ = (u16)(nextReg_ + elemSlotW);
+    if (nextReg_ > maxReg_) maxReg_ = nextReg_;
     emitOp(op_list_head);
     emitRegs(headReg, curListReg);
 
     // --- Phase 4: Set up call arguments ---
     u16 callArgBase = nextReg_;
 
+    auto perArgSlotW = [&](Type* paramType, u16 i) -> u32 {
+        if (expr->variadicPackStart >= 0 && i >= (u16)expr->variadicPackStart) {
+            return 1;
+        }
+        if (!paramType) return 1;
+        if (paramType->repr_ == ts::Type::Repr::Inline)
+            return boxAtBoundary ? 1u : (u32)paramType->sizeWords_;
+        return typeSlotWords(paramType);
+    };
+    u32 cumOffset = 0;
+    std::vector<u32> argOffsets(argc, 0);
     for (u16 i = 0; i < argc; ++i) {
-        u16 targetReg = callArgBase + i;
-        if (nextReg_ <= targetReg) {
-            nextReg_ = targetReg + 1;
+        argOffsets[i] = cumOffset;
+        cumOffset += perArgSlotW(getParamType(funcInfo, expr, i), i);
+    }
+
+    for (u16 i = 0; i < argc; ++i) {
+        u16 targetReg = (u16)(callArgBase + argOffsets[i]);
+        Type* paramType = getParamType(funcInfo, expr, i);
+        u32 slotW = perArgSlotW(paramType, i);
+        if (nextReg_ <= (u16)(targetReg + slotW)) {
+            nextReg_ = (u16)(targetReg + slotW);
             if (nextReg_ > maxReg_) maxReg_ = nextReg_;
         }
 
         if (i == listArgIndex) {
-            // Use the head element for the list argument
-            Type* elemType = srcListType->elemType_;
-            Type* paramType = getParamType(funcInfo, expr, i);
+            // List element. For Inline composite elements the head is a
+            // multi-word slot at headReg..headReg+elemSlotW.
             u16 srcReg = headReg;
-            if (paramType && elemType != paramType) {
-                srcReg = ensureType(srcReg, elemType, paramType);
-            }
-            if (srcReg != targetReg) {
-                emitOp(op_mov);
-                emitRegs(targetReg, srcReg);
+            if (elemInlineComposite) {
+                if (boxAtBoundary) {
+                    srcReg = emitBoxIfInline(headReg, listElemType);
+                    if (srcReg != targetReg) {
+                        emitOp(op_mov);
+                        emitRegs(targetReg, srcReg);
+                    }
+                } else {
+                    if (srcReg != targetReg) {
+                        emitMoveN(targetReg, srcReg, slotW);
+                    }
+                }
+            } else {
+                if (paramType && listElemType != paramType) {
+                    srcReg = ensureType(srcReg, listElemType, paramType);
+                }
+                if (srcReg != targetReg) {
+                    emitOp(op_mov);
+                    emitRegs(targetReg, srcReg);
+                }
             }
         } else {
             // Broadcast scalar argument
             Type* argType = expr->args[i]->resolvedType;
-            Type* paramType = getParamType(funcInfo, expr, i);
             u16 srcReg = argRegs[i];
             if (paramType && argType != paramType) {
                 srcReg = ensureType(srcReg, argType, paramType);
             }
+            if (paramType
+                && paramType->repr_ == ts::Type::Repr::Inline
+                && boxAtBoundary) {
+                srcReg = emitBoxIfInline(srcReg, paramType);
+            }
             if (srcReg != targetReg) {
-                emitOp(op_mov);
-                emitRegs(targetReg, srcReg);
+                if (slotW <= 1) { emitOp(op_mov); emitRegs(targetReg, srcReg); }
+                else { emitMoveN(targetReg, srcReg, slotW); }
             }
         }
     }

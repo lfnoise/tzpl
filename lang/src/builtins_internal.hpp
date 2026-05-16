@@ -118,14 +118,22 @@ inline Obj* makeEmptyArray(ArrayType* at) {
     return nullptr;
 }
 
-// arrayPush takes a single Word source. Inline Complex/Fraction values
-// need 2 words, so callers append via the typed PodArray<x64>/<r64>
-// backends directly. Here we accept only the boxed Obj* form for them.
+// arrayPush takes a single Word source. Phase 4g.21: Complex/Fraction Word
+// sources are expected to be heap Obj* pointers (the caller boxes if
+// necessary) -- we read the value and store it natively into the
+// PodArray<x64>/<r64> backend.
 inline void arrayPush(VM& vm, Obj* a, Type* et, Word v) {
     if (et == vm.intType() || et == vm.boolType() || et == vm.symbolType()) static_cast<PodArray<i64>*>(a)->v.push_back(v.i);
     else if (et == vm.floatType()) static_cast<PodArray<f64>*>(a)->v.push_back(v.f);
-    else if (et && et->repr_ == ts::Type::Repr::Inline
-             && et != vm.complexType() && et != vm.fractionType()) {
+    else if (et == vm.complexType()) {
+        auto* c = static_cast<ts::Complex*>(v.o);
+        static_cast<PodArray<x64>*>(a)->v.push_back(c->x);
+    }
+    else if (et == vm.fractionType()) {
+        auto* fr = static_cast<ts::Fraction*>(v.o);
+        static_cast<PodArray<r64>*>(a)->v.push_back(fr->r);
+    }
+    else if (et && et->repr_ == ts::Type::Repr::Inline) {
         // Phase 4g.8: caller produced a boxed Obj* (e.g. round-trip through
         // a lambda); unbox into the InlineArray slot.
         auto* arr = static_cast<InlineArray*>(a);
