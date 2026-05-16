@@ -96,3 +96,30 @@ let arr_c = [1.0+2.0i, 3.0+4.0i];
 let arr_f = [1/2, 3/4];
 filter(arr_c, fn(c Complex) Bool { true }) println;
 filter(arr_f, fn(f Fraction) Bool { true }) println;
+
+-- --- Phase 4g.22: reducer lambdas (fold/scan/fold1/scan1/find) with
+--     Complex/Fraction accumulators / list elements. Previously fold crashed
+--     reading `fn = vm.reg(ab+2)` when acc was 2-word native at ab+1..ab+2,
+--     and find returned -1 because the lambda received the Fraction as a
+--     1-word boxed pointer where its body expected 2-word native.
+fold(List(1/2, 1/2, 1/2), 0/1, fn(a Fraction, x Fraction) Fraction { a + x }) println;
+fold([1/2, 1/4, 1/8], 0/1, fn(a Fraction, x Fraction) Fraction { a + x }) println;
+fold(List(1.0+2.0i, 3.0+4.0i), 0.0+0.0i, fn(a Complex, x Complex) Complex { a + x }) println;
+fold([1.0+2.0i, 3.0+4.0i], 0.0+0.0i, fn(a Complex, x Complex) Complex { a + x }) println;
+
+scan(List(1/2, 1/4), 0/1, fn(a Fraction, x Fraction) Fraction { a + x }) println;
+scan([1/2, 1/4], 0/1, fn(a Fraction, x Fraction) Fraction { a + x }) println;
+scan(List(1.0+2.0i, 3.0+4.0i), 0.0+0.0i, fn(a Complex, x Complex) Complex { a + x }) println;
+
+fold1(List(1/2, 1/4, 1/8), fn(a Fraction, x Fraction) Fraction { a + x }) println;
+fold1([1/2, 1/4, 1/8], fn(a Fraction, x Fraction) Fraction { a + x }) println;
+fold1([1.0+2.0i, 3.0+4.0i], fn(a Complex, x Complex) Complex { a + x }) println;
+
+scan1([1/2, 1/4], fn(a Fraction, x Fraction) Fraction { a + x }) println;
+
+find([1/2, 1/4], fn(f Fraction) Bool { f == 1/4 }) println;
+find(List(1/2, 1/4), fn(f Fraction) Bool { f == 1/4 }) println;
+find([1.0+2.0i, 3.0+4.0i], fn(c Complex) Bool { c == (3.0+4.0i) }) println;
+
+takeWhile([1/2, 1/4, 3/4], fn(f Fraction) Bool { f < 1/1 }) println;
+dropWhile([1/2, 1/4, 3/4], fn(f Fraction) Bool { f < 1/1 }) println;
