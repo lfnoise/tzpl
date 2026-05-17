@@ -2019,27 +2019,20 @@ static bool resolve_hash(Compiler& compiler, const std::vector<Type*>& args,
 // ============================================================================
 
 // any(x) -- wrap a single value of any type into Any
+//
+// Phase 4g.27: with acceptsInlineArgs=true, Inline composite args arrive
+// natively at argBase..argBase+sw-1; boxPayload turns them into a single
+// heap Obj* that fits in AnyObj's 1-Word value_ slot.
 static void builtin_any_single(VM& vm, u16 dst, u16, u16 argBase) {
     auto* prim = vm.currentPrimitive();
     auto* ft = static_cast<FunctionType*>(prim->type_);
     Type* wrappedType = ft->argTypes_[0];
     auto* any = new AnyObj(vm.anyType());
-    // Phase 4f: inline value types live as multi-word slots in registers; box
-    // them into a heap Obj before storing in AnyObj's single-Word value_ slot.
-    if (wrappedType == vm.complexType()) {
-        f64 re = vm.reg(argBase).f;
-        f64 im = vm.reg((u16)(argBase + 1)).f;
-        any->value_.o = new Complex(x64(re, im));
-    } else if (wrappedType == vm.fractionType()) {
-        i64 n = vm.reg(argBase).i;
-        i64 d = vm.reg((u16)(argBase + 1)).i;
-        any->value_.o = new Fraction(r64(n, d));
-    } else {
-        any->value_ = vm.reg(argBase);
-    }
+    any->value_ = boxPayload(vm, wrappedType, &vm.reg(argBase));
     any->wrappedType_ = wrappedType;
     any->isObjType_ = storesObjPtr(wrappedType);
-    if (any->isObjType_ && any->value_.o) any->value_.o->retain();
+    // boxPayload already retained for caller ownership; transfer to any
+    // without an extra retain.
     vm.reg(dst).o = any;
 }
 
@@ -2095,26 +2088,30 @@ static bool resolve_any_variadic(Compiler& compiler, const std::vector<Type*>& a
 
 // toAnyArray(tuple) -- convert a tuple to [Any]
 //
-// Phase 4g.13: heap Tuple stores fields natively. Re-box Inline composite
-// fields when stuffing into AnyObj's single-Word value_ slot.
+// Phase 4g.27: with acceptsInlineArgs=true, Inline tuples arrive as a
+// multi-word native slot at argBase.., heap tuples as a 1-Word Tuple*.
+// Read the field words from whichever storage the static type indicates.
 static void builtin_toAnyArray(VM& vm, u16 dst, u16, u16 argBase) {
-    auto* tuple = static_cast<Tuple*>(vm.reg(argBase).o);
-    auto* tupleType = static_cast<TupleType*>(tuple->type_);
+    auto* prim = vm.currentPrimitive();
+    auto* primTT = static_cast<TupleType*>(prim->type_);
+    auto* tupleType = static_cast<TupleType*>(primTT->fields_[0]);
+    Word const* base = nullptr;
+    if (tupleType->repr_ == Type::Repr::Inline) {
+        base = &vm.reg(argBase);
+    } else {
+        auto* tuple = static_cast<Tuple*>(vm.reg(argBase).o);
+        base = &tuple->v[0];
+    }
     auto* anyArrayType = vm.arrayType(vm.anyType());
     auto* arr = new ObjArray(anyArrayType);
-    size_t n = tuple->numFields_;
+    size_t n = tupleType->fields_.size();
     arr->reserve(n);
     for (size_t i = 0; i < n; ++i) {
         auto const& f = tupleType->layout_[i];
         auto* any = new AnyObj(vm.anyType());
         any->wrappedType_ = f.type;
-        any->isObjType_ = storesObjPtr(f.type) || (f.type && f.type->repr_ == Type::Repr::Inline);
-        if (f.sizeWords > 1) {
-            any->value_ = boxPayload(vm, f.type, &tuple->v[f.wordOffset]);
-        } else {
-            any->value_ = tuple->v[f.wordOffset];
-            if (any->isObjType_ && any->value_.o) any->value_.o->retain();
-        }
+        any->isObjType_ = storesObjPtr(f.type);
+        any->value_ = boxPayload(vm, f.type, &base[f.wordOffset]);
         arr->push(any);
     }
     vm.reg(dst).o = arr;
@@ -2258,61 +2255,56 @@ void registerBuiltinFunctions(Compiler& compiler,
     registerListGenBuiltins(compiler, functions);
 
     // --- Collection builtins (template-resolved) ---
-    registerTemplate(compiler, functions, "reverse",   resolve_reverse_a);
-    registerTemplate(compiler, functions, "pop",       resolve_pop_a);
-    registerTemplate(compiler, functions, "muss",      resolve_muss_a);
-    registerTemplate(compiler, functions, "sort",      resolve_sort);
-    registerTemplate(compiler, functions, "grade",     resolve_grade);
-    registerTemplate(compiler, functions, "take",      resolve_take);
-    registerTemplate(compiler, functions, "drop",      resolve_drop);
-    registerTemplate(compiler, functions, "stride",    resolve_stride);
-    registerTemplate(compiler, functions, "stutter",   resolve_stutter);
-    registerTemplate(compiler, functions, "repeat",    resolve_repeat);
-    registerTemplate(compiler, functions, "cat",       resolve_cat);
-    registerTemplate(compiler, functions, "join",      resolve_join);
-    registerTemplate(compiler, functions, "flatten",   resolve_flatten);
-    registerTemplate(compiler, functions, "map",       resolve_map);
-    registerTemplate(compiler, functions, "filter",    resolve_filter);
-    registerTemplate(compiler, functions, "fold",      resolve_fold);
-    registerTemplate(compiler, functions, "scan",      resolve_scan);
-    registerTemplate(compiler, functions, "fold1",     resolve_fold1);
-    registerTemplate(compiler, functions, "scan1",     resolve_scan1);
-    registerTemplate(compiler, functions, "find",      resolve_find);
-    registerTemplate(compiler, functions, "iter",      resolve_iter);
-    registerTemplate(compiler, functions, "takeWhile", resolve_takeWhile);
-    registerTemplate(compiler, functions, "dropWhile", resolve_dropWhile);
-    registerTemplate(compiler, functions, "zip",       resolve_zip);
-    registerTemplate(compiler, functions, "enumerate", resolve_enumerate);
-    registerTemplate(compiler, functions, "cyc",       resolve_cyc);
-    registerTemplate(compiler, functions, "ncyc",      resolve_ncyc);
-    registerTemplate(compiler, functions, "hang",      resolve_hang);
-    // Phase 4g.17: builtins migrated to acceptsInlineArgs=true.
-    //   head: writes multi-word Inline composite head into dst slot.
-    //   tail/length/isNil/notNil: take a List (1-word Obj*); the flag is
-    //     a no-op but set for consistency on list-API builtins.
-    //   push: builtin_push_array reads multi-word slot for Inline-backend
-    //     arrays; this drops codegen's boundary boxing.
-    // cons is NOT migrated: its 2-arg layout (elem, tail) places tail at
-    // ab+1 today, but Inline composite elem would push tail to ab+sw with
-    // sw unknown to the builtin. Keep legacy boxing for now.
+    // Phase 4g.27: all higher-order builtins now use the native multi-word
+    // ABI at the call boundary. Args/returns that are Inline composites
+    // (Complex/Fraction/Tuple/Struct/Enum) travel as sizeWords_-wide
+    // register windows -- no box-then-unbox round-trip at the boundary.
+    registerTemplate(compiler, functions, "reverse",   resolve_reverse_a, /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "pop",       resolve_pop_a,     /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "muss",      resolve_muss_a,    /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "sort",      resolve_sort,      /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "grade",     resolve_grade,     /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "take",      resolve_take,      /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "drop",      resolve_drop,      /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "stride",    resolve_stride,    /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "stutter",   resolve_stutter,   /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "repeat",    resolve_repeat,    /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "cat",       resolve_cat,       /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "join",      resolve_join,      /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "flatten",   resolve_flatten,   /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "map",       resolve_map,       /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "filter",    resolve_filter,    /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "fold",      resolve_fold,      /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "scan",      resolve_scan,      /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "fold1",     resolve_fold1,     /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "scan1",     resolve_scan1,     /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "find",      resolve_find,      /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "iter",      resolve_iter,      /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "takeWhile", resolve_takeWhile, /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "dropWhile", resolve_dropWhile, /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "zip",       resolve_zip,       /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "enumerate", resolve_enumerate, /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "cyc",       resolve_cyc,       /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "ncyc",      resolve_ncyc,      /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "hang",      resolve_hang,      /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
     registerTemplate(compiler, functions, "head",      resolve_head,      /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
     registerTemplate(compiler, functions, "tail",      resolve_tail,      /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
-    registerTemplate(compiler, functions, "cons",      resolve_cons);
+    registerTemplate(compiler, functions, "cons",      resolve_cons,      /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
     registerTemplate(compiler, functions, "push",      resolve_push,      /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
-    registerTemplate(compiler, functions, "isNil",     resolve_isNil);
-    registerTemplate(compiler, functions, "notNil",    resolve_notNil);
-    registerTemplate(compiler, functions, "length",    resolve_length);
+    registerTemplate(compiler, functions, "isNil",     resolve_isNil,     /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "notNil",    resolve_notNil,    /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "length",    resolve_length,    /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
     // Phase 4g.6: ordinal/tag only read the discriminant (word 0); for
     // Inline enums that lets us skip the per-call box-then-read.
     registerTemplate(compiler, functions, "ordinal",   resolve_ordinal, /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
     registerTemplate(compiler, functions, "tag",       resolve_tag,     /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
 
-    registerTemplate(compiler, functions, "toList",    resolve_toList_array);
-    registerTemplate(compiler, functions, "toList",    resolve_toList_coroutine);
-    registerTemplate(compiler, functions, "codePoints", resolve_codePoints);
-    registerTemplate(compiler, functions, "collect",   resolve_collect);
-    registerTemplate(compiler, functions, "pick",      resolve_pick);
-    registerTemplate(compiler, functions, "picks",     resolve_picks);
+    registerTemplate(compiler, functions, "toList",    resolve_toList_array,     /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "toList",    resolve_toList_coroutine, /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "codePoints", resolve_codePoints,      /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "collect",   resolve_collect,          /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "pick",      resolve_pick,             /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "picks",     resolve_picks,            /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
 
     // --- Map builtins ---
     // Phase 4g.11: Map keys/values are stored natively (multi-word for inline
@@ -2362,7 +2354,7 @@ void registerBuiltinFunctions(Compiler& compiler,
     registerTemplate(compiler, functions, "toString",     resolve_toString, /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
 
     // --- fmt builtin ---
-    registerTemplate(compiler, functions, "fmt",          resolve_fmt);
+    registerTemplate(compiler, functions, "fmt",          resolve_fmt,         /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
 
     // --- print/println builtins (allowed on RT for debugging) ---
     // Phase 4g.6: opted in to inline-composite arg passing (printArgs reads
@@ -2371,7 +2363,7 @@ void registerBuiltinFunctions(Compiler& compiler,
     registerTemplate(compiler, functions, "println",      resolve_println, /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
 
     // --- disassemble builtin (not RT-safe: writes to stdout) ---
-    registerTemplate(compiler, functions, "disassemble",  resolve_disassemble, /*rtSafe=*/false);
+    registerTemplate(compiler, functions, "disassemble",  resolve_disassemble, /*rtSafe=*/false, /*acceptsInlineArgs=*/true);
 
     // --- typeRepr builtin (Phase 0 debug helper, not RT-safe: writes to stdout) ---
     // Phase 4g.6: typeRepr only looks at the static type, never reads the
@@ -2391,9 +2383,9 @@ void registerBuiltinFunctions(Compiler& compiler,
     registerTemplate(compiler, functions, "setref",       resolve_setref_rev,/*rtSafe=*/true, /*acceptsInlineArgs=*/true);
 
     // --- Any builtins ---
-    registerTemplate(compiler, functions, "any",          resolve_any_single);
-    registerTemplate(compiler, functions, "any",          resolve_any_variadic);
-    registerTemplate(compiler, functions, "toAnyArray",   resolve_toAnyArray);
+    registerTemplate(compiler, functions, "any",          resolve_any_single,   /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "any",          resolve_any_variadic, /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "toAnyArray",   resolve_toAnyArray,   /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
 }
 
 } // namespace ts

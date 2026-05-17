@@ -1183,27 +1183,25 @@ void builtin_fold_list(VM& vm, u16 dst, u16, u16 ab) {
     auto* prim = vm.currentPrimitive();
     auto* primTT = static_cast<TupleType*>(prim->type_);
     Type* accT = primTT->fields_[1];
-    u16 accBoundarySW = legacyBoundarySlotW(vm, accT);
-
-    Word acc = readBoundaryArg(vm, &vm.reg((u16)(ab + 1)), accT);
-    auto* fn = static_cast<Callable*>(vm.reg((u16)(ab + 1 + accBoundarySW)).o);
+    // Phase 4g.27: native ABI; acc spans accSW words at sb across iters.
+    u32 accSW = (accT && accT->sizeWords_ > 0) ? accT->sizeWords_ : 1;
+    auto* fn = static_cast<Callable*>(vm.reg((u16)(ab + 1 + accSW)).o);
     auto* fnType = static_cast<FunctionType*>(fn->type_);
     Type* elT  = fnType->argTypes_.size() > 1 ? fnType->argTypes_[1] : nullptr;
-    Type* retT = fnType->returnType_;
     u16 sb = vm.currentCodeBlock()->numRegs;
+
+    Word const* accSrc = &vm.reg((u16)(ab + 1));
+    for (u32 i = 0; i < accSW; ++i) vm.reg(sb + i) = accSrc[i];
+    u16 elemSb = (u16)(sb + accSW);
+
     ListNode* cur = src;
     while (cur) {
         cur->force(vm);
-        placeLambdaArg(vm, sb, acc, accT);
-        u16 elemSb = (u16)(sb + (isLambdaInlineComposite(accT) ? accT->sizeWords_ : 1));
-        // Phase 4g.26: native head -> lambda arg slot, no box.
         placeLambdaArgSlot(vm, elemSb, cur->headData(), elT);
         callTwoArgs(vm, fn, sb);
-        readLambdaResult(vm, sb, retT);
-        acc = vm.reg(sb);
         cur = cur->tail_;
     }
-    writeBoundaryResult(vm, dst, acc, accT);
+    for (u32 i = 0; i < accSW; ++i) vm.reg(dst + i) = vm.reg(sb + i);
 }
 
 void builtin_scan_list(VM& vm, u16 dst, u16, u16 ab) {
@@ -1211,10 +1209,11 @@ void builtin_scan_list(VM& vm, u16 dst, u16, u16 ab) {
     auto* prim = vm.currentPrimitive();
     auto* primTT = static_cast<TupleType*>(prim->type_);
     Type* accT = primTT->fields_[1];
-    u16 accBoundarySW = legacyBoundarySlotW(vm, accT);
-
-    Word acc = readBoundaryArg(vm, &vm.reg((u16)(ab + 1)), accT);
-    auto* fn = static_cast<Callable*>(vm.reg((u16)(ab + 1 + accBoundarySW)).o);
+    // Phase 4g.27: native ABI in. ScanListGen still holds acc as a 1-Word
+    // boxed Obj* across resumes, so box at the boundary.
+    u32 accSW = (accT && accT->sizeWords_ > 0) ? accT->sizeWords_ : 1;
+    Word acc = boxPayload(vm, accT, &vm.reg((u16)(ab + 1)));
+    auto* fn = static_cast<Callable*>(vm.reg((u16)(ab + 1 + accSW)).o);
     auto* fnType = static_cast<FunctionType*>(fn->type_);
     Type* accET = fnType->returnType_;
     auto* resLT = vm.listType(accET);
@@ -1225,7 +1224,9 @@ void builtin_scan_list(VM& vm, u16 dst, u16, u16 ab) {
     gen->accElemType_ = accET; gen->resultListType_ = resLT;
     gen->source_->retain();
     reinterpret_cast<GCObj*>(gen->fn_)->retain();
-    if (gen->accIsObj_ && gen->accumulator_.o) gen->accumulator_.o->retain();
+    // boxPayload already retained the Obj* (including newly-boxed Complex/
+    // Fraction/Inline composites) for the caller; transfer that to the
+    // generator without an extra retain.
     node->installGenerator(gen);
     vm.reg(dst).o = node;
 }
@@ -1237,23 +1238,20 @@ void builtin_fold1_list(VM& vm, u16 dst, u16, u16 ab) {
     src->force(vm);
     auto* lt = static_cast<ListType*>(src->type_);
     Type* et = lt->elemType_;
-    Word acc = boxListHeadIfInline(vm, src, et);
-    auto* fnType = static_cast<FunctionType*>(fn->type_);
-    Type* retT = fnType->returnType_;
+    // Phase 4g.27: native ABI; acc spans accSW words at sb across iters.
+    u32 accSW = (et && et->sizeWords_ > 0) ? et->sizeWords_ : 1;
     u16 sb = vm.currentCodeBlock()->numRegs;
+    // Seed acc = src->headData() (first list element).
+    placeLambdaArgSlot(vm, sb, src->headData(), et);
+    u16 elemSb = (u16)(sb + accSW);
     ListNode* cur = src->tail_;
     while (cur) {
         cur->force(vm);
-        placeLambdaArg(vm, sb, acc, et);
-        u16 elemSb = (u16)(sb + (isLambdaInlineComposite(et) ? et->sizeWords_ : 1));
-        // Phase 4g.26: native head -> lambda arg slot.
         placeLambdaArgSlot(vm, elemSb, cur->headData(), et);
         callTwoArgs(vm, fn, sb);
-        readLambdaResult(vm, sb, retT);
-        acc = vm.reg(sb);
         cur = cur->tail_;
     }
-    writeBoundaryResult(vm, dst, acc, et);
+    for (u32 i = 0; i < accSW; ++i) vm.reg(dst + i) = vm.reg(sb + i);
 }
 
 void builtin_scan1_list(VM& vm, u16 dst, u16, u16 ab) {
@@ -1265,28 +1263,41 @@ void builtin_scan1_list(VM& vm, u16 dst, u16, u16 ab) {
     Type* et = lt->elemType_;
     auto* node = ListNode::create(lt);
     auto* gen = new ScanListGen(vm.typeType());
-    gen->source_ = src->tail_; gen->fn_ = fn; gen->accumulator_ = src->head_;
+    // Phase 4g.27: read the first list element as a boxed Word so the
+    // generator's 1-Word accumulator field can hold multi-word Inline
+    // composites. headData() points at the full multi-word head slot.
+    gen->source_ = src->tail_; gen->fn_ = fn;
+    gen->accumulator_ = boxPayload(vm, et, src->headData());
     gen->accIsObj_ = storesObjPtr(et);
     gen->accElemType_ = et; gen->resultListType_ = lt;
     if (gen->source_) gen->source_->retain();
     reinterpret_cast<GCObj*>(gen->fn_)->retain();
-    if (gen->accIsObj_ && gen->accumulator_.o) gen->accumulator_.o->retain();
+    // boxPayload already retained; don't retain again.
     node->installGenerator(gen);
     vm.reg(dst).o = node;
 }
 
 void builtin_iter(VM& vm, u16 dst, u16, u16 ab) {
-    Word init = vm.reg(ab);
-    auto* fn = static_cast<Callable*>(vm.reg(ab+1).o);
-    auto* fnType = static_cast<FunctionType*>(fn->type_);
-    Type* et = fnType->returnType_;
+    // Phase 4g.27: with acceptsInlineArgs=true, init occupies sizeWords_
+    // slots at ab.. and fn lives at ab+initSW. Inspect the resolved primitive
+    // type for init's slot width since at the time we read `fn`, we haven't
+    // read its type yet.
+    auto* prim = vm.currentPrimitive();
+    auto* primTT = static_cast<TupleType*>(prim->type_);
+    Type* initT = primTT->fields_[0];
+    u32 initSW = (initT && initT->sizeWords_ > 0) ? initT->sizeWords_ : 1;
+    auto* fn = static_cast<Callable*>(vm.reg((u16)(ab + initSW)).o);
+    Type* et = initT;
+    // Box the init into the generator's 1-Word current_ field.
+    Word init = boxPayload(vm, et, &vm.reg(ab));
     auto* lt = vm.listType(et);
     auto* node = ListNode::create(lt);
     auto* gen = new IterListGen(vm.typeType());
     gen->current_ = init; gen->fn_ = fn;
     gen->valueIsObj_ = storesObjPtr(et); gen->listType_ = lt;
     reinterpret_cast<GCObj*>(gen->fn_)->retain();
-    if (gen->valueIsObj_ && gen->current_.o) gen->current_.o->retain();
+    // boxPayload retained; skip the explicit retain that the legacy 1-Word
+    // ABI required.
     node->installGenerator(gen);
     vm.reg(dst).o = node;
 }
@@ -1508,15 +1519,28 @@ CONS_LIST_VALUETYPE(bool,   boolType)
 CONS_LIST_VALUETYPE(symbol, symbolType)
 #undef CONS_LIST_VALUETYPE
 
-// cons for Obj element types -- derive ListType from the element's type
+// cons for Obj element types.
+// Phase 4g.27: with acceptsInlineArgs=true the element arrives as a multi-
+// word native slot at ab..ab+etSW-1 for Inline composites; the tail list
+// lives at ab+etSW. Use the resolved primitive's TupleType to find etSW
+// rather than reading vm.reg(ab).o->type_ (which would treat the first
+// word of a Complex/Fraction as a heap pointer).
 void builtin_cons_list_obj(VM& vm, u16 dst, u16, u16 ab) {
-    Word elem = vm.reg(ab);
-    auto* tail = static_cast<ListNode*>(vm.reg(ab+1).o);
-    auto* lt = tail ? static_cast<ListType*>(tail->type_)
-                    : vm.listType(elem.o->type_);
+    auto* prim = vm.currentPrimitive();
+    auto* primTT = static_cast<TupleType*>(prim->type_);
+    Type* et = primTT->fields_[0];
+    u32 etSW = (et && et->sizeWords_ > 0) ? et->sizeWords_ : 1;
+    auto* tail = static_cast<ListNode*>(vm.reg((u16)(ab + etSW)).o);
+    auto* lt = tail ? static_cast<ListType*>(tail->type_) : vm.listType(et);
     auto* node = ListNode::create(lt);
-    node->head_ = elem;
-    if (node->head_.o) node->head_.o->retain();
+    if (node->payloadWords_ > 1) {
+        Word* dstHead = node->headData();
+        for (u32 i = 0; i < node->payloadWords_; ++i) dstHead[i] = vm.reg(ab + i);
+        inlineWalkPointers(dstHead, et, /*release_=*/false);
+    } else {
+        node->head_ = vm.reg(ab);
+        if (storesObjPtr(et) && node->head_.o) node->head_.o->retain();
+    }
     node->tail_ = tail;
     if (tail) tail->retain();
     vm.reg(dst).o = node;

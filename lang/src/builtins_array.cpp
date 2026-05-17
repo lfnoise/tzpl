@@ -190,13 +190,17 @@ static void builtin_xrand(VM& vm, u16 dst, u16, u16 ab) {
     vm.reg(dst).f = lo * std::pow(hi / lo, u);
 }
 
-// pick([T]) -> T  choose a random element
+// pick([T]) -> T  choose a random element.
+// Phase 4g.27: write the result natively into dst.. so Inline composite
+// elements (Complex/Fraction/Tuple/Struct) land as multi-word data, not
+// a 1-Word boxed pointer that the caller would have to unbox.
 void builtin_pick_array(VM& vm, u16 dst, u16, u16 ab) {
     auto* arr = vm.reg(ab).o;
     auto* at = static_cast<ArrayType*>(arr->type_);
-    size_t n = getArraySize(vm, arr, at->elemType_);
+    Type* et = at->elemType_;
+    size_t n = getArraySize(vm, arr, et);
     size_t idx = vm.rng().next() % n;
-    vm.reg(dst) = getArrayElem(vm, arr, at->elemType_, idx);
+    placeLambdaArgFromArrayElem(vm, dst, arr, et, idx);
 }
 
 // urands() -> List<Float>: infinite lazy list of uniform [0, 1) floats
@@ -570,14 +574,51 @@ REPEAT_VALUETYPE(bool,   boolType,   i, i64)
 REPEAT_VALUETYPE(symbol, symbolType, i, i64)
 #undef REPEAT_VALUETYPE
 
+// Phase 4g.27: dispatch on element type's array backend so Inline composite
+// repeat lands in an InlineArray with the right stride. Reads the element
+// natively from ab.. (multi-word for Inline composite, 1 word otherwise).
 void builtin_repeat_obj(VM& vm, u16 dst, u16, u16 ab) {
-    Obj* val = vm.reg(ab).o; i64 n = vm.reg(ab+1).i;
+    auto* prim = vm.currentPrimitive();
+    auto* primTT = static_cast<TupleType*>(prim->type_);
+    Type* et = primTT->fields_[0];
+    u32 etSW = (et && et->sizeWords_ > 0) ? et->sizeWords_ : 1;
+    i64 n = vm.reg((u16)(ab + etSW)).i;
     if (n < 0) n = 0;
-    auto* at = vm.arrayType(val->type_);
-    auto* arr = new ObjArray(at);
-    arr->reserve((size_t)n);
-    for (i64 i = 0; i < n; i++) arr->push(val);
-    vm.reg(dst).o = arr;
+    auto* at = vm.arrayType(et);
+    Word const* src = &vm.reg(ab);
+    switch (arrayBackendFor(et)) {
+        case ArrayBackend::Complex: {
+            auto* arr = new PodArray<x64>(at);
+            arr->v.resize((size_t)n, x64(src[0].f, src[1].f));
+            vm.reg(dst).o = arr;
+            return;
+        }
+        case ArrayBackend::Fraction: {
+            auto* arr = new PodArray<r64>(at);
+            arr->v.resize((size_t)n, r64(src[0].i, src[1].i, true));
+            vm.reg(dst).o = arr;
+            return;
+        }
+        case ArrayBackend::Inline: {
+            auto* arr = new InlineArray(at);
+            arr->reserve((size_t)n);
+            for (i64 i = 0; i < n; ++i) arr->pushSlot(src);
+            vm.reg(dst).o = arr;
+            return;
+        }
+        case ArrayBackend::Obj: {
+            auto* arr = new ObjArray(at);
+            arr->reserve((size_t)n);
+            for (i64 i = 0; i < n; ++i) arr->push(src[0].o);
+            vm.reg(dst).o = arr;
+            return;
+        }
+        case ArrayBackend::Int:
+        case ArrayBackend::Float:
+            // _int/_float/_bool/_symbol resolve to dedicated implementations
+            // above; we never reach here for those.
+            break;
+    }
 }
 
 // Phase 4e: dispatch via arrayBackendFor.
@@ -751,39 +792,27 @@ void builtin_fold_array(VM& vm, u16 dst, u16, u16 ab) {
     auto* prim = vm.currentPrimitive();
     auto* primTT = static_cast<TupleType*>(prim->type_);
     Type* accT = primTT->fields_[1];
-    u16 accBoundarySW = legacyBoundarySlotW(vm, accT);
-
-    Word acc = readBoundaryArg(vm, &vm.reg((u16)(ab + 1)), accT);
-    auto* fn = static_cast<Callable*>(vm.reg((u16)(ab + 1 + accBoundarySW)).o);
+    // Phase 4g.27: native ABI at the builtin boundary. acc spans accSW
+    // words at ab+1..; fn lives just after. The acc stays in registers
+    // sb..sb+accSW-1 across iterations -- the lambda reads its first arg
+    // there and op_return writes the new acc back to the same slot.
+    u32 accSW = (accT && accT->sizeWords_ > 0) ? accT->sizeWords_ : 1;
+    auto* fn = static_cast<Callable*>(vm.reg((u16)(ab + 1 + accSW)).o);
     auto* at = static_cast<ArrayType*>(src->type_);
     Type* et = at->elemType_;
-    auto* fnType = static_cast<FunctionType*>(fn->type_);
-    Type* elT  = fnType->argTypes_.size() > 1 ? fnType->argTypes_[1] : nullptr;
-    Type* retT = fnType->returnType_;
     size_t n = getArraySize(vm, src, et);
     u16 sb = vm.currentCodeBlock()->numRegs;
-    (void)elT;
+
+    Word const* accSrc = &vm.reg((u16)(ab + 1));
+    for (u32 i = 0; i < accSW; ++i) vm.reg(sb + i) = accSrc[i];
+    u16 elemSb = (u16)(sb + accSW);
+
     for (size_t i = 0; i < n; i++) {
-        placeLambdaArg(vm, sb, acc, accT);
-        u16 elemSb = (u16)(sb + (isLambdaInlineComposite(accT) ? accT->sizeWords_ : 1));
-        // Phase 4g.26: native slot read into the second arg slot.
         placeLambdaArgFromArrayElem(vm, elemSb, src, et, i);
-        if (fn->cfun_) {
-            fn->cfun_(vm, sb, 2, sb);
-        } else {
-            auto* lam = static_cast<Lambda*>(fn);
-            CodeBlock* cb = lam->codeBlock_;
-            u32 callBase = vm.baseReg() + sb;
-            for (u16 k = 0; k < lam->numFreeVars_; k++)
-                vm.reg(sb + cb->numArgs + k) = lam->freeVars_[k];
-            vm.pushFrame(&syncReturnCode(), cb, callBase, cb->numRegs, sb);
-            Code* entry = cb->code.data();
-            entry->op(vm, entry);
-        }
-        readLambdaResult(vm, sb, retT);
-        acc = vm.reg(sb);
+        callTwoArgs(vm, fn, sb);
     }
-    writeBoundaryResult(vm, dst, acc, accT);
+
+    for (u32 i = 0; i < accSW; ++i) vm.reg(dst + i) = vm.reg(sb + i);
 }
 
 void builtin_scan_array(VM& vm, u16 dst, u16, u16 ab) {
@@ -791,30 +820,27 @@ void builtin_scan_array(VM& vm, u16 dst, u16, u16 ab) {
     auto* prim = vm.currentPrimitive();
     auto* primTT = static_cast<TupleType*>(prim->type_);
     Type* accT = primTT->fields_[1];
-    u16 accBoundarySW = legacyBoundarySlotW(vm, accT);
-
-    Word acc = readBoundaryArg(vm, &vm.reg((u16)(ab + 1)), accT);
-    auto* fn = static_cast<Callable*>(vm.reg((u16)(ab + 1 + accBoundarySW)).o);
+    // Phase 4g.27: native ABI; see fold_array.
+    u32 accSW = (accT && accT->sizeWords_ > 0) ? accT->sizeWords_ : 1;
+    auto* fn = static_cast<Callable*>(vm.reg((u16)(ab + 1 + accSW)).o);
     auto* at = static_cast<ArrayType*>(src->type_);
     Type* et = at->elemType_;
     auto* fnType = static_cast<FunctionType*>(fn->type_);
     Type* accET = fnType->returnType_;
-    Type* elT  = fnType->argTypes_.size() > 1 ? fnType->argTypes_[1] : nullptr;
     auto* resAT = vm.arrayType(accET);
     size_t n = getArraySize(vm, src, et);
     auto* result = makeEmptyArray(resAT);
-    arrayPush(vm, result, accET, acc);
     u16 sb = vm.currentCodeBlock()->numRegs;
-    (void)elT;
+
+    Word const* accSrc = &vm.reg((u16)(ab + 1));
+    for (u32 i = 0; i < accSW; ++i) vm.reg(sb + i) = accSrc[i];
+    arrayPushFromSlot(vm, result, accET, &vm.reg(sb));
+    u16 elemSb = (u16)(sb + accSW);
+
     for (size_t i = 0; i < n; i++) {
-        placeLambdaArg(vm, sb, acc, accT);
-        u16 elemSb = (u16)(sb + (isLambdaInlineComposite(accT) ? accT->sizeWords_ : 1));
-        // Phase 4g.26: native slot read into the second arg slot.
         placeLambdaArgFromArrayElem(vm, elemSb, src, et, i);
         callTwoArgs(vm, fn, sb);
-        readLambdaResult(vm, sb, accET);
-        acc = vm.reg(sb);
-        arrayPush(vm, result, accET, acc);
+        arrayPushFromSlot(vm, result, accET, &vm.reg(sb));
     }
     vm.reg(dst).o = result;
 }
@@ -826,20 +852,16 @@ void builtin_fold1_array(VM& vm, u16 dst, u16, u16 ab) {
     Type* et = at->elemType_;
     size_t n = getArraySize(vm, src, et);
     if (n == 0) { vm.reg(dst).i = 0; return; }
-    Word acc = getArrayElem(vm, src, et, 0);
-    auto* fnType = static_cast<FunctionType*>(fn->type_);
-    Type* retT = fnType->returnType_;
+    // Phase 4g.27: native ABI; acc spans accSW words at sb.
+    u32 accSW = (et && et->sizeWords_ > 0) ? et->sizeWords_ : 1;
     u16 sb = vm.currentCodeBlock()->numRegs;
+    placeLambdaArgFromArrayElem(vm, sb, src, et, 0);  // acc = src[0]
+    u16 elemSb = (u16)(sb + accSW);
     for (size_t i = 1; i < n; i++) {
-        placeLambdaArg(vm, sb, acc, et);
-        u16 elemSb = (u16)(sb + (isLambdaInlineComposite(et) ? et->sizeWords_ : 1));
-        // Phase 4g.26: native slot read.
         placeLambdaArgFromArrayElem(vm, elemSb, src, et, i);
         callTwoArgs(vm, fn, sb);
-        readLambdaResult(vm, sb, retT);
-        acc = vm.reg(sb);
     }
-    writeBoundaryResult(vm, dst, acc, et);
+    for (u32 i = 0; i < accSW; ++i) vm.reg(dst + i) = vm.reg(sb + i);
 }
 
 void builtin_scan1_array(VM& vm, u16 dst, u16, u16 ab) {
@@ -850,20 +872,16 @@ void builtin_scan1_array(VM& vm, u16 dst, u16, u16 ab) {
     size_t n = getArraySize(vm, src, et);
     auto* result = makeEmptyArray(at);
     if (n == 0) { vm.reg(dst).o = result; return; }
-    Word acc = getArrayElem(vm, src, et, 0);
-    arrayPush(vm, result, et, acc);
-    auto* fnType = static_cast<FunctionType*>(fn->type_);
-    Type* retT = fnType->returnType_;
+    // Phase 4g.27: native ABI; acc spans accSW words at sb.
+    u32 accSW = (et && et->sizeWords_ > 0) ? et->sizeWords_ : 1;
     u16 sb = vm.currentCodeBlock()->numRegs;
+    placeLambdaArgFromArrayElem(vm, sb, src, et, 0);
+    arrayPushFromSlot(vm, result, et, &vm.reg(sb));
+    u16 elemSb = (u16)(sb + accSW);
     for (size_t i = 1; i < n; i++) {
-        placeLambdaArg(vm, sb, acc, et);
-        u16 elemSb = (u16)(sb + (isLambdaInlineComposite(et) ? et->sizeWords_ : 1));
-        // Phase 4g.26: native slot read.
         placeLambdaArgFromArrayElem(vm, elemSb, src, et, i);
         callTwoArgs(vm, fn, sb);
-        readLambdaResult(vm, sb, retT);
-        acc = vm.reg(sb);
-        arrayPush(vm, result, et, acc);
+        arrayPushFromSlot(vm, result, et, &vm.reg(sb));
     }
     vm.reg(dst).o = result;
 }

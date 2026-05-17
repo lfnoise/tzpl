@@ -134,6 +134,33 @@ inline Obj* makeEmptyArray(ArrayType* at) {
     return nullptr;
 }
 
+// Phase 4g.27: push from a caller-owned native multi-word slot. Mirrors
+// arrayPush but skips the boxing round-trip that the Word-shaped API
+// forces for Inline composites / Complex / Fraction.
+inline void arrayPushFromSlot(VM& vm, Obj* a, Type* et, Word const* src) {
+    (void)vm;
+    switch (arrayBackendFor(et)) {
+        case ArrayBackend::Int:
+            static_cast<PodArray<i64>*>(a)->v.push_back(src[0].i);
+            return;
+        case ArrayBackend::Float:
+            static_cast<PodArray<f64>*>(a)->v.push_back(src[0].f);
+            return;
+        case ArrayBackend::Complex:
+            static_cast<PodArray<x64>*>(a)->v.push_back(x64(src[0].f, src[1].f));
+            return;
+        case ArrayBackend::Fraction:
+            static_cast<PodArray<r64>*>(a)->v.push_back(r64(src[0].i, src[1].i, true));
+            return;
+        case ArrayBackend::Inline:
+            static_cast<InlineArray*>(a)->pushSlot(src);
+            return;
+        case ArrayBackend::Obj:
+            static_cast<ObjArray*>(a)->push(src[0].o);
+            return;
+    }
+}
+
 // arrayPush takes a single Word source. Phase 4g.21: Complex/Fraction Word
 // sources are expected to be heap Obj* pointers (the caller boxes if
 // necessary) -- we read the value and store it natively into the
@@ -343,41 +370,10 @@ inline void callOneArg(VM& vm, Callable* fn, u16 sb) {
     }
 }
 
-// Phase 4g.22: helpers to read the call-site arg layout for legacy
-// (acceptsInlineArgs=false) builtins. Phase 4f keeps Complex/Fraction as
-// multi-word native at the boundary; Tuple/Struct/Enum are boxed to a
-// 1-Word Obj* slot. These helpers paper over that asymmetry so reducer
-// builtins like fold can iterate the call frame correctly.
-inline u16 legacyBoundarySlotW(VM& vm, Type* t) {
-    if (!t) return 1;
-    if (t->repr_ != Type::Repr::Inline) return 1;
-    if (t == vm.complexType() || t == vm.fractionType()) {
-        return (u16)t->sizeWords_;
-    }
-    return 1;  // Tuple/Struct/Enum boxed to a single Obj*.
-}
-
-// Read a boundary arg into a single Word. For multi-word native types
-// (Complex/Fraction), this boxes into a heap Obj*.
-inline Word readBoundaryArg(VM& vm, Word const* slot, Type* t) {
-    if (t && t->repr_ == Type::Repr::Inline
-        && (t == vm.complexType() || t == vm.fractionType())) {
-        return boxPayload(vm, t, slot);
-    }
-    return *slot;
-}
-
-// Write a Word result into the caller's dst slot. For multi-word inline
-// types (Complex/Fraction), unbox a heap Obj* into the native multi-Word
-// dst slot. For 1-Word types just copies the Word.
-inline void writeBoundaryResult(VM& vm, u16 dst, Word w, Type* t) {
-    if (t && t->repr_ == Type::Repr::Inline
-        && (t == vm.complexType() || t == vm.fractionType())) {
-        unboxInlineDeepTo(vm, t, w.o, &vm.reg(dst));
-    } else {
-        vm.reg(dst) = w;
-    }
-}
+// Phase 4g.27: legacyBoundarySlotW / readBoundaryArg / writeBoundaryResult
+// removed -- every builtin now uses the native multi-word ABI at its call
+// boundary (acceptsInlineArgs=true), so the Complex/Fraction-vs-Inline
+// asymmetry that motivated those helpers no longer exists.
 
 inline void callTwoArgs(VM& vm, Callable* fn, u16 sb) {
     if (fn->cfun_) {
