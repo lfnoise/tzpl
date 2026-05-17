@@ -881,7 +881,7 @@ void CodeGen::genFnDecl(FnDeclNode* decl) {
                 && !inCoroutineFn_) {
                 auto* ifStmt = static_cast<IfStmtNode*>(stmt);
                 if (ifStmt->elseBranch) {
-                    u16 resultReg = allocReg();
+                    u16 resultReg = allocSlot(currentReturnType_);
                     genIfStmtForValue(ifStmt, resultReg);
                     emitReturn(resultReg);
                     goto fn_body_done;
@@ -890,7 +890,7 @@ void CodeGen::genFnDecl(FnDeclNode* decl) {
             // Check for trailing SwitchStmt (value-producing match)
             if (i == block->stmts.size() - 1 && stmt->kind == ASTNode::SwitchStmt
                 && !inCoroutineFn_) {
-                u16 resultReg = allocReg();
+                u16 resultReg = allocSlot(currentReturnType_);
                 genSwitchStmtForValue(static_cast<SwitchStmtNode*>(stmt), resultReg);
                 emitReturn(resultReg);
                 goto fn_body_done;
@@ -1053,14 +1053,14 @@ void CodeGen::genMonoInstance(FuncInfo& monoInfo) {
             if (i == block->stmts.size() - 1 && stmt->kind == ASTNode::IfStmt) {
                 auto* ifStmt = static_cast<IfStmtNode*>(stmt);
                 if (ifStmt->elseBranch) {
-                    u16 resultReg = allocReg();
+                    u16 resultReg = allocSlot(currentReturnType_);
                     genIfStmtForValue(ifStmt, resultReg);
                     emitReturn(resultReg);
                     goto mono_body_done;
                 }
             }
             if (i == block->stmts.size() - 1 && stmt->kind == ASTNode::SwitchStmt) {
-                u16 resultReg = allocReg();
+                u16 resultReg = allocSlot(currentReturnType_);
                 genSwitchStmtForValue(static_cast<SwitchStmtNode*>(stmt), resultReg);
                 emitReturn(resultReg);
                 goto mono_body_done;
@@ -2330,7 +2330,8 @@ u16 CodeGen::genExpr(Expr* expr) {
         case ASTNode::IfExpr:          return genIfExpr(static_cast<IfExprNode*>(expr));
         case ASTNode::BlockExpr: {
             auto* be = static_cast<BlockExprNode*>(expr);
-            u16 resultReg = allocReg();
+            // Phase 4g.25: size resultReg to the block's result type.
+            u16 resultReg = allocSlot(be->resolvedType);
             genBlockForValue(static_cast<BlockStmt*>(be->body.get()), resultReg);
             return resultReg;
         }
@@ -9396,7 +9397,7 @@ u16 CodeGen::genLambdaExpr(LambdaExprNode* expr) {
             if (i == block->stmts.size() - 1 && stmt->kind == ASTNode::IfStmt) {
                 auto* ifStmt = static_cast<IfStmtNode*>(stmt);
                 if (ifStmt->elseBranch) {
-                    u16 resultReg = allocReg();
+                    u16 resultReg = allocSlot(currentReturnType_);
                     genIfStmtForValue(ifStmt, resultReg);
                     emitReturn(resultReg);
                     emittedReturn = true;
@@ -9405,7 +9406,7 @@ u16 CodeGen::genLambdaExpr(LambdaExprNode* expr) {
             }
             // Check for trailing SwitchStmt (value-producing match)
             if (i == block->stmts.size() - 1 && stmt->kind == ASTNode::SwitchStmt) {
-                u16 resultReg = allocReg();
+                u16 resultReg = allocSlot(currentReturnType_);
                 genSwitchStmtForValue(static_cast<SwitchStmtNode*>(stmt), resultReg);
                 emitReturn(resultReg);
                 emittedReturn = true;
@@ -9575,7 +9576,7 @@ void CodeGen::compileTemplateLambdaBody(LambdaExprNode* expr, LambdaType* lambda
             if (i == block->stmts.size() - 1 && stmt->kind == ASTNode::IfStmt) {
                 auto* ifStmt = static_cast<IfStmtNode*>(stmt);
                 if (ifStmt->elseBranch) {
-                    u16 resultReg = allocReg();
+                    u16 resultReg = allocSlot(currentReturnType_);
                     genIfStmtForValue(ifStmt, resultReg);
                     emitReturn(resultReg);
                     emittedReturn = true;
@@ -9583,7 +9584,7 @@ void CodeGen::compileTemplateLambdaBody(LambdaExprNode* expr, LambdaType* lambda
                 }
             }
             if (i == block->stmts.size() - 1 && stmt->kind == ASTNode::SwitchStmt) {
-                u16 resultReg = allocReg();
+                u16 resultReg = allocSlot(currentReturnType_);
                 genSwitchStmtForValue(static_cast<SwitchStmtNode*>(stmt), resultReg);
                 emitReturn(resultReg);
                 emittedReturn = true;
@@ -9631,8 +9632,12 @@ bool CodeGen::genBlockForValue(BlockStmt* block, u16 resultReg) {
             auto* exprStmt = static_cast<ExprStmtNode*>(stmt);
             if (exprStmt->isTrailing) {
                 u16 valReg = genExpr(static_cast<Expr*>(exprStmt->expr.get()));
-                emitOp(op_mov);
-                emitRegs(resultReg, valReg);
+                // Phase 4g.25: copy all sizeWords words of the trailing
+                // expression's value, not just word 0. Otherwise multi-word
+                // types (Complex/Fraction/Inline composites) lose their
+                // upper words when used as the value of a block.
+                emitMoveN(resultReg, valReg,
+                          typeSlotWords(exprStmt->expr->resolvedType));
                 popScope();
                 if (enableRegReclaim) freeRegsTo(savedReg);
                 return true;
@@ -9717,8 +9722,9 @@ void CodeGen::genSwitchStmtForValue(SwitchStmtNode* stmt, u16 resultReg) {
         } else if (body->kind == ASTNode::ExprStmt) {
             auto* exprStmt = static_cast<ExprStmtNode*>(body);
             u16 valReg = genExpr(static_cast<Expr*>(exprStmt->expr.get()));
-            emitOp(op_mov);
-            emitRegs(resultReg, valReg);
+            // Phase 4g.25: multi-word case bodies copy all sizeWords words.
+            emitMoveN(resultReg, valReg,
+                      typeSlotWords(exprStmt->expr->resolvedType));
         } else if (body->kind == ASTNode::IfStmt) {
             auto* ifStmt = static_cast<IfStmtNode*>(body);
             if (ifStmt->elseBranch) {
@@ -9751,7 +9757,10 @@ void CodeGen::genSwitchStmtForValue(SwitchStmtNode* stmt, u16 resultReg) {
 
 u16 CodeGen::genIfExpr(IfExprNode* expr) {
     u16 condReg = genExpr(static_cast<Expr*>(expr->condition.get()));
-    u16 resultReg = allocReg();
+    // Phase 4g.25: size resultReg to the expression's result type so
+    // multi-word values (Complex/Fraction/Inline composites) get all
+    // their words preserved across both branches.
+    u16 resultReg = allocSlot(expr->resolvedType);
 
     u32 elseJump = emitJump(op_jump_if_false, condReg);
 
