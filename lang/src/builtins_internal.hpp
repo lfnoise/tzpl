@@ -252,6 +252,61 @@ inline void readLambdaResult(VM& vm, u16 sb, Type* returnType) {
     }
 }
 
+// Phase 4g.26: slot-based lambda ABI -- avoid the box-then-unbox round-trip
+// that placeLambdaArg(Word, paramType) requires for Inline composite args.
+// Callers used to call boxPayload/boxInlineDeepFrom to produce a 1-Word
+// Obj* just so placeLambdaArg could turn it back into a multi-word native
+// slot via unboxInlineDeep. The slot-based path copies the words directly.
+
+// Place a lambda arg by reading sizeWords_ Words directly from a
+// caller-owned multi-word slot. Non-Inline-composite paramTypes copy a
+// single Word as before.
+inline void placeLambdaArgSlot(VM& vm, u16 sb, Word const* src, Type* paramType) {
+    if (isLambdaInlineComposite(paramType)) {
+        u32 sw = paramType->sizeWords_;
+        for (u32 i = 0; i < sw; ++i) vm.reg(sb + i) = src[i];
+    } else {
+        vm.reg(sb) = src[0];
+    }
+}
+
+// Place a lambda arg by reading array element i directly into the lambda's
+// arg slot window at sb. Works across all array backends; for
+// PodArray<x64>/PodArray<r64>/InlineArray the read is multi-word native.
+inline void placeLambdaArgFromArrayElem(VM& vm, u16 sb, Obj* a, Type* et,
+                                        size_t i) {
+    switch (arrayBackendFor(et)) {
+        case ArrayBackend::Int:
+            vm.reg(sb).i = static_cast<PodArray<i64>*>(a)->v[i];
+            return;
+        case ArrayBackend::Float:
+            vm.reg(sb).f = static_cast<PodArray<f64>*>(a)->v[i];
+            return;
+        case ArrayBackend::Complex: {
+            x64 const& x = static_cast<PodArray<x64>*>(a)->v[i];
+            vm.reg(sb).f     = x.real();
+            vm.reg(sb + 1).f = x.imag();
+            return;
+        }
+        case ArrayBackend::Fraction: {
+            r64 const& r = static_cast<PodArray<r64>*>(a)->v[i];
+            vm.reg(sb).i     = r.numer();
+            vm.reg(sb + 1).i = r.denom();
+            return;
+        }
+        case ArrayBackend::Inline: {
+            auto* arr = static_cast<InlineArray*>(a);
+            Word const* src = arr->slot(i);
+            u32 sw = (et && et->sizeWords_ > 0) ? et->sizeWords_ : 1;
+            for (u32 k = 0; k < sw; ++k) vm.reg(sb + k) = src[k];
+            return;
+        }
+        case ArrayBackend::Obj:
+            vm.reg(sb).o = static_cast<ObjArray*>(a)->get(i);
+            return;
+    }
+}
+
 // Sum of slot words for the first `numArgs` parameter types (Phase 4g.2:
 // inline composite params occupy multiple slots, so free vars must be placed
 // after the cumulative arg-words, not after numArgs).

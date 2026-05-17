@@ -435,8 +435,10 @@ void builtin_sort_by_array(VM& vm, u16 dst, u16, u16 ab) {
     std::iota(idx.begin(), idx.end(), 0);
     u16 sb = vm.currentCodeBlock()->numRegs;
     std::sort(idx.begin(), idx.end(), [&](size_t a, size_t b) {
-        placeLambdaArg(vm, sb, getArrayElem(vm, src, et, a), paramT);
-        placeLambdaArg(vm, (u16)(sb + elemWords), getArrayElem(vm, src, et, b), paramT);
+        // Phase 4g.26: read array elements directly into the lambda's two
+        // arg slots without boxing through getArrayElem.
+        placeLambdaArgFromArrayElem(vm, sb, src, et, a);
+        placeLambdaArgFromArrayElem(vm, (u16)(sb + elemWords), src, et, b);
         callTwoArgs(vm, fn, sb);
         return vm.reg(sb).i != 0;
     });
@@ -460,8 +462,9 @@ void builtin_grade_array(VM& vm, u16 dst, u16, u16 ab) {
     std::iota(idx.begin(), idx.end(), 0);
     u16 sb = vm.currentCodeBlock()->numRegs;
     std::sort(idx.begin(), idx.end(), [&](size_t a, size_t b) {
-        placeLambdaArg(vm, sb, getArrayElem(vm, src, et, a), paramT);
-        placeLambdaArg(vm, (u16)(sb + elemWords), getArrayElem(vm, src, et, b), paramT);
+        // Phase 4g.26: slot-based reads, no boxing through getArrayElem.
+        placeLambdaArgFromArrayElem(vm, sb, src, et, a);
+        placeLambdaArgFromArrayElem(vm, (u16)(sb + elemWords), src, et, b);
         callTwoArgs(vm, fn, sb);
         return vm.reg(sb).i != 0;
     });
@@ -710,14 +713,15 @@ void builtin_map_array(VM& vm, u16 dst, u16, u16 ab) {
     Type* srcET = srcType->elemType_;
     size_t n = getArraySize(vm, src, srcET);
     auto* fnType = static_cast<FunctionType*>(fn->type_);
-    Type* paramT = fnType->argTypes_.empty() ? nullptr : fnType->argTypes_[0];
+    (void)fnType;
     Type* resET = fnType->returnType_;
     auto* resAT = vm.arrayType(resET);
     auto* result = makeEmptyArray(resAT);
     u16 sb = vm.currentCodeBlock()->numRegs;
     for (size_t i = 0; i < n; i++) {
-        Word elem = getArrayElem(vm, src, srcET, i);
-        placeLambdaArg(vm, sb, elem, paramT);
+        // Phase 4g.26: read array element directly into the lambda's arg
+        // slot, no boxing.
+        placeLambdaArgFromArrayElem(vm, sb, src, srcET, i);
         callOneArg(vm, fn, sb);
         readLambdaResult(vm, sb, resET);
         arrayPush(vm, result, resET, vm.reg(sb));
@@ -730,16 +734,14 @@ void builtin_filter_array(VM& vm, u16 dst, u16, u16 ab) {
     auto* fn = static_cast<Callable*>(vm.reg(ab+1).o);
     auto* at = static_cast<ArrayType*>(src->type_);
     Type* et = at->elemType_;
-    auto* fnType = static_cast<FunctionType*>(fn->type_);
-    Type* paramT = fnType->argTypes_.empty() ? nullptr : fnType->argTypes_[0];
     size_t n = getArraySize(vm, src, et);
     auto* result = makeEmptyArray(at);
     u16 sb = vm.currentCodeBlock()->numRegs;
     for (size_t i = 0; i < n; i++) {
-        Word elem = getArrayElem(vm, src, et, i);
-        placeLambdaArg(vm, sb, elem, paramT);
+        // Phase 4g.26: native slot read for the predicate arg.
+        placeLambdaArgFromArrayElem(vm, sb, src, et, i);
         callOneArg(vm, fn, sb);
-        if (vm.reg(sb).i) arrayPush(vm, result, et, elem);
+        if (vm.reg(sb).i) arrayPush(vm, result, et, getArrayElem(vm, src, et, i));
     }
     vm.reg(dst).o = result;
 }
@@ -760,11 +762,12 @@ void builtin_fold_array(VM& vm, u16 dst, u16, u16 ab) {
     Type* retT = fnType->returnType_;
     size_t n = getArraySize(vm, src, et);
     u16 sb = vm.currentCodeBlock()->numRegs;
+    (void)elT;
     for (size_t i = 0; i < n; i++) {
         placeLambdaArg(vm, sb, acc, accT);
-        Word elem = getArrayElem(vm, src, et, i);
         u16 elemSb = (u16)(sb + (isLambdaInlineComposite(accT) ? accT->sizeWords_ : 1));
-        placeLambdaArg(vm, elemSb, elem, elT);
+        // Phase 4g.26: native slot read into the second arg slot.
+        placeLambdaArgFromArrayElem(vm, elemSb, src, et, i);
         if (fn->cfun_) {
             fn->cfun_(vm, sb, 2, sb);
         } else {
@@ -802,11 +805,12 @@ void builtin_scan_array(VM& vm, u16 dst, u16, u16 ab) {
     auto* result = makeEmptyArray(resAT);
     arrayPush(vm, result, accET, acc);
     u16 sb = vm.currentCodeBlock()->numRegs;
+    (void)elT;
     for (size_t i = 0; i < n; i++) {
         placeLambdaArg(vm, sb, acc, accT);
         u16 elemSb = (u16)(sb + (isLambdaInlineComposite(accT) ? accT->sizeWords_ : 1));
-        Word elem = getArrayElem(vm, src, et, i);
-        placeLambdaArg(vm, elemSb, elem, elT);
+        // Phase 4g.26: native slot read into the second arg slot.
+        placeLambdaArgFromArrayElem(vm, elemSb, src, et, i);
         callTwoArgs(vm, fn, sb);
         readLambdaResult(vm, sb, accET);
         acc = vm.reg(sb);
@@ -829,8 +833,8 @@ void builtin_fold1_array(VM& vm, u16 dst, u16, u16 ab) {
     for (size_t i = 1; i < n; i++) {
         placeLambdaArg(vm, sb, acc, et);
         u16 elemSb = (u16)(sb + (isLambdaInlineComposite(et) ? et->sizeWords_ : 1));
-        Word elem = getArrayElem(vm, src, et, i);
-        placeLambdaArg(vm, elemSb, elem, et);
+        // Phase 4g.26: native slot read.
+        placeLambdaArgFromArrayElem(vm, elemSb, src, et, i);
         callTwoArgs(vm, fn, sb);
         readLambdaResult(vm, sb, retT);
         acc = vm.reg(sb);
@@ -854,8 +858,8 @@ void builtin_scan1_array(VM& vm, u16 dst, u16, u16 ab) {
     for (size_t i = 1; i < n; i++) {
         placeLambdaArg(vm, sb, acc, et);
         u16 elemSb = (u16)(sb + (isLambdaInlineComposite(et) ? et->sizeWords_ : 1));
-        Word elem = getArrayElem(vm, src, et, i);
-        placeLambdaArg(vm, elemSb, elem, et);
+        // Phase 4g.26: native slot read.
+        placeLambdaArgFromArrayElem(vm, elemSb, src, et, i);
         callTwoArgs(vm, fn, sb);
         readLambdaResult(vm, sb, retT);
         acc = vm.reg(sb);
@@ -872,8 +876,8 @@ void builtin_find_array(VM& vm, u16 dst, u16, u16 ab) {
     size_t n = getArraySize(vm, src, et);
     u16 sb = vm.currentCodeBlock()->numRegs;
     for (size_t i = 0; i < n; i++) {
-        Word elem = getArrayElem(vm, src, et, i);
-        placeLambdaArg(vm, sb, elem, et);
+        // Phase 4g.26: native slot read into the predicate's arg slot.
+        placeLambdaArgFromArrayElem(vm, sb, src, et, i);
         callOneArg(vm, fn, sb);
         if (vm.reg(sb).i) { vm.reg(dst).i = (i64)i; return; }
     }
@@ -889,11 +893,10 @@ void builtin_takeWhile_array(VM& vm, u16 dst, u16, u16 ab) {
     auto* result = makeEmptyArray(at);
     u16 sb = vm.currentCodeBlock()->numRegs;
     for (size_t i = 0; i < n; i++) {
-        Word elem = getArrayElem(vm, src, et, i);
-        placeLambdaArg(vm, sb, elem, et);
+        placeLambdaArgFromArrayElem(vm, sb, src, et, i);
         callOneArg(vm, fn, sb);
         if (!vm.reg(sb).i) break;
-        arrayPush(vm, result, et, elem);
+        arrayPush(vm, result, et, getArrayElem(vm, src, et, i));
     }
     vm.reg(dst).o = result;
 }
@@ -908,14 +911,13 @@ void builtin_dropWhile_array(VM& vm, u16 dst, u16, u16 ab) {
     u16 sb = vm.currentCodeBlock()->numRegs;
     bool dropping = true;
     for (size_t i = 0; i < n; i++) {
-        Word elem = getArrayElem(vm, src, et, i);
         if (dropping) {
-            placeLambdaArg(vm, sb, elem, et);
+            placeLambdaArgFromArrayElem(vm, sb, src, et, i);
             callOneArg(vm, fn, sb);
             if (vm.reg(sb).i) continue;
             dropping = false;
         }
-        arrayPush(vm, result, et, elem);
+        arrayPush(vm, result, et, getArrayElem(vm, src, et, i));
     }
     vm.reg(dst).o = result;
 }

@@ -30,6 +30,10 @@ namespace ts {
 // Phase 4g.9: helpers to bridge multi-word list heads through the existing
 // 1-Word lambda argument/result interface and through head-copy patterns.
 // Phase 4g.20: also handles Complex/Fraction (now stored native 2-word).
+// Phase 4g.26: kept only for the generator-state-snapshot callers (Stutter,
+// CoroutineListGen, accumulator stores) that still serialize multi-word
+// values through a 1-Word field. Direct list-head -> lambda flows now use
+// placeLambdaArgSlot/writeListHeadFromSlot instead.
 static Word boxListHeadIfInline(VM& vm, ListNode* src, Type* elemType) {
     if (src->payloadWords_ > 1) {
         return boxPayload(vm, elemType, src->headData());
@@ -43,6 +47,24 @@ static void writeListHeadFromBoxed(VM& vm, ListNode* dst, Word boxed, Type* elem
     } else {
         dst->head_ = boxed;
         if (storesObjPtr(elemType) && boxed.o) boxed.o->retain();
+    }
+}
+
+// Phase 4g.26: write a list-node head from a caller-owned multi-word slot.
+// Mirror image of placeLambdaArgSlot for the result-write side: read the
+// lambda's result slot at sb (multi-word native for Inline composites) and
+// drop it straight into the owner's head_/headTail_ storage. Avoids the
+// box+unbox round-trip that readLambdaResult+writeListHeadFromBoxed used to
+// emit.
+static void writeListHeadFromSlot(VM& vm, ListNode* dst, Word const* src,
+                                  Type* elemType) {
+    if (dst->payloadWords_ > 1) {
+        Word* dh = dst->headData();
+        for (u32 i = 0; i < dst->payloadWords_; ++i) dh[i] = src[i];
+        inlineWalkPointers(dh, elemType, /*release_=*/false);
+    } else {
+        dst->head_ = src[0];
+        if (storesObjPtr(elemType) && dst->head_.o) dst->head_.o->retain();
     }
 }
 
@@ -289,12 +311,11 @@ void MapListGen::generate(VM& vm, ListNode* owner) {
     u16 sb = vm.currentCodeBlock()->numRegs;
     auto* fnType = static_cast<FunctionType*>(fn_->type_);
     Type* paramT = fnType->argTypes_.empty() ? nullptr : fnType->argTypes_[0];
-    auto* srcLT = static_cast<ListType*>(source_->type_);
-    Word elem = boxListHeadIfInline(vm, source_, srcLT->elemType_);
-    placeLambdaArg(vm, sb, elem, paramT);
+    // Phase 4g.26: read source head directly into the lambda's arg slot,
+    // and write the lambda's result slot directly into the owner's head.
+    placeLambdaArgSlot(vm, sb, source_->headData(), paramT);
     callOneArg(vm, fn_, sb);
-    readLambdaResult(vm, sb, resultElemType_);
-    writeListHeadFromBoxed(vm, owner, vm.reg(sb), resultElemType_);
+    writeListHeadFromSlot(vm, owner, &vm.reg(sb), resultElemType_);
     if (!source_->tail_) { owner->tail_ = nullptr; return; }
     auto* tail = ListNode::create(resultListType_);
     auto* oldSource = source_;
@@ -442,8 +463,8 @@ void FilterListGen::generate(VM& vm, ListNode* owner) {
     Type* paramT = fnType->argTypes_.empty() ? nullptr : fnType->argTypes_[0];
     while (cur) {
         cur->force(vm);
-        Word elem = boxListHeadIfInline(vm, cur, et);
-        placeLambdaArg(vm, sb, elem, paramT);
+        // Phase 4g.26: read source head directly into the lambda's arg slot.
+        placeLambdaArgSlot(vm, sb, cur->headData(), paramT);
         callOneArg(vm, fn_, sb);
         if (vm.reg(sb).i) {
             copyListHead(owner, cur, et);
@@ -477,8 +498,8 @@ void PredicateListGen::generate(VM& vm, ListNode* owner) {
         ListNode* next = source_->tail_;
         if (!next) { owner->tail_ = nullptr; return; }
         next->force(vm);
-        Word nextElem = boxListHeadIfInline(vm, next, et);
-        placeLambdaArg(vm, sb, nextElem, paramT);
+        // Phase 4g.26: native head -> lambda arg slot, no box.
+        placeLambdaArgSlot(vm, sb, next->headData(), paramT);
         callOneArg(vm, fn_, sb);
         if (!vm.reg(sb).i) { owner->tail_ = nullptr; return; }
         auto* tail = ListNode::create(listType_);
@@ -493,8 +514,7 @@ void PredicateListGen::generate(VM& vm, ListNode* owner) {
         if (dropping_) {
             while (cur) {
                 cur->force(vm);
-                Word elem = boxListHeadIfInline(vm, cur, et);
-                placeLambdaArg(vm, sb, elem, paramT);
+                placeLambdaArgSlot(vm, sb, cur->headData(), paramT);
                 callOneArg(vm, fn_, sb);
                 if (!vm.reg(sb).i) break;
                 cur = cur->tail_;
@@ -520,9 +540,9 @@ void ScanListGen::generate(VM& vm, ListNode* owner) {
     Type* elT  = fnType->argTypes_.size() > 1 ? fnType->argTypes_[1] : nullptr;
     placeLambdaArg(vm, sb, accumulator_, accT);
     u16 elemSb = (u16)(sb + (isLambdaInlineComposite(accT) ? accT->sizeWords_ : 1));
-    auto* srcLT = static_cast<ListType*>(source_->type_);
-    Word elem = boxListHeadIfInline(vm, source_, srcLT->elemType_);
-    placeLambdaArg(vm, elemSb, elem, elT);
+    // Phase 4g.26: source element comes from list head storage natively;
+    // place into the second arg slot directly without boxing.
+    placeLambdaArgSlot(vm, elemSb, source_->headData(), elT);
     callTwoArgs(vm, fn_, sb);
     readLambdaResult(vm, sb, accElemType_);
     Word newAcc = vm.reg(sb);
@@ -1134,8 +1154,8 @@ void builtin_filter_list(VM& vm, u16 dst, u16, u16 ab) {
     ListNode* cur = src;
     while (cur) {
         cur->force(vm);
-        Word elem = boxListHeadIfInline(vm, cur, et);
-        placeLambdaArg(vm, sb, elem, paramT);
+        // Phase 4g.26: native head -> lambda arg, no intermediate box.
+        placeLambdaArgSlot(vm, sb, cur->headData(), paramT);
         callOneArg(vm, fn, sb);
         if (vm.reg(sb).i) break;
         cur = cur->tail_;
@@ -1176,9 +1196,8 @@ void builtin_fold_list(VM& vm, u16 dst, u16, u16 ab) {
         cur->force(vm);
         placeLambdaArg(vm, sb, acc, accT);
         u16 elemSb = (u16)(sb + (isLambdaInlineComposite(accT) ? accT->sizeWords_ : 1));
-        auto* curLT = static_cast<ListType*>(cur->type_);
-        Word elem = boxListHeadIfInline(vm, cur, curLT->elemType_);
-        placeLambdaArg(vm, elemSb, elem, elT);
+        // Phase 4g.26: native head -> lambda arg slot, no box.
+        placeLambdaArgSlot(vm, elemSb, cur->headData(), elT);
         callTwoArgs(vm, fn, sb);
         readLambdaResult(vm, sb, retT);
         acc = vm.reg(sb);
@@ -1227,8 +1246,8 @@ void builtin_fold1_list(VM& vm, u16 dst, u16, u16 ab) {
         cur->force(vm);
         placeLambdaArg(vm, sb, acc, et);
         u16 elemSb = (u16)(sb + (isLambdaInlineComposite(et) ? et->sizeWords_ : 1));
-        Word elem = boxListHeadIfInline(vm, cur, et);
-        placeLambdaArg(vm, elemSb, elem, et);
+        // Phase 4g.26: native head -> lambda arg slot.
+        placeLambdaArgSlot(vm, elemSb, cur->headData(), et);
         callTwoArgs(vm, fn, sb);
         readLambdaResult(vm, sb, retT);
         acc = vm.reg(sb);
@@ -1282,9 +1301,8 @@ void builtin_find_list(VM& vm, u16 dst, u16, u16 ab) {
     ListNode* cur = src;
     while (cur) {
         cur->force(vm);
-        auto* lt = static_cast<ListType*>(cur->type_);
-        Word elem = boxListHeadIfInline(vm, cur, lt->elemType_);
-        placeLambdaArg(vm, sb, elem, paramT);
+        // Phase 4g.26: native head -> lambda arg slot.
+        placeLambdaArgSlot(vm, sb, cur->headData(), paramT);
         callOneArg(vm, fn, sb);
         if (vm.reg(sb).i) { vm.reg(dst).i = idx; return; }
         cur = cur->tail_; idx++;
@@ -1298,11 +1316,10 @@ void builtin_takeWhile_list(VM& vm, u16 dst, u16, u16 ab) {
     if (!src) { vm.reg(dst).o = nullptr; return; }
     src->force(vm);
     u16 sb = vm.currentCodeBlock()->numRegs;
-    auto* srcLT = static_cast<ListType*>(src->type_);
     auto* fnType = static_cast<FunctionType*>(fn->type_);
     Type* paramT = fnType->argTypes_.empty() ? nullptr : fnType->argTypes_[0];
-    Word elem = boxListHeadIfInline(vm, src, srcLT->elemType_);
-    placeLambdaArg(vm, sb, elem, paramT);
+    // Phase 4g.26: native head -> lambda arg slot.
+    placeLambdaArgSlot(vm, sb, src->headData(), paramT);
     callOneArg(vm, fn, sb);
     if (!vm.reg(sb).i) { vm.reg(dst).o = nullptr; return; }
     // First element passes -- create a node with a generator that will copy
