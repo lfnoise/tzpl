@@ -2217,46 +2217,129 @@ static inline Word compositeBinopTopLevel(VM& vm, Op op, u16 a, u16 b,
                                       aType, bType, rTT);
     }
 
-    // Phase 4g.33: bypass the heap-Complex/Fraction operand mirror for the
-    // common Array<C>/<F> +/-/*// cases. The Inline operand is already at
-    // &vm.reg(a)/&vm.reg(b) as a 2-word native value; read it directly.
+    // Phase 4g.33/4g.34: bypass the heap-Complex/Fraction operand mirror
+    // for Array result + Complex/Fraction broadcast. The Inline operand is
+    // already at &vm.reg(a)/&vm.reg(b) as a 2-word native value; read it
+    // directly, convert each source array element to x64/r64 in the loop,
+    // and write straight to PodArray<x64>/<r64>. Covers both same-type
+    // (Array<Complex>+Complex) and mixed-type (Array<Int|Float|Fraction>
+    // +Complex -> Array<Complex>) cases without any heap allocations
+    // beyond the result PodArray itself.
     auto* rAT = dynamic_cast<ArrayType*>(resultType);
     if (rAT) {
         Type* resultElem = rAT->elemType_;
         auto* aAT = dynamic_cast<ArrayType*>(aType);
         auto* bAT = dynamic_cast<ArrayType*>(bType);
+
+        // Helper: read scalar x64 / r64 directly from register slot.
+        auto readComplexFromReg = [&](u16 r) -> x64 {
+            return x64(vm.reg(r).f, vm.reg(r+1).f);
+        };
+        auto readFractionFromReg = [&](u16 r) -> r64 {
+            return r64(vm.reg(r).i, vm.reg(r+1).i, true);
+        };
+
+        // ----- Array<X> +/-/*// Complex scalar -> Array<Complex> -----
         if constexpr (bool(Op::flags & mathOpComplexArgs)) {
             if (resultElem == vm.complexType()) {
-                if (aAT && bType == vm.complexType()
-                    && aAT->elemType_ == vm.complexType()) {
-                    x64 bx(vm.reg(b).f, vm.reg(b+1).f);
-                    return Word(static_cast<Obj*>(podArrayScalarLoop(op,
-                        static_cast<PodArray<x64>*>(vm.reg(a).o), bx, rAT)));
+                if (aAT && bType == vm.complexType()) {
+                    x64 bx = readComplexFromReg(b);
+                    Type* elemA = aAT->elemType_;
+                    Obj* arrA = vm.reg(a).o;
+                    auto* r = new PodArray<x64>(rAT);
+                    if (elemA == vm.complexType()) {
+                        auto* pa = static_cast<PodArray<x64>*>(arrA);
+                        r->v.resize(pa->v.size());
+                        for (usize i = 0; i < pa->v.size(); ++i) r->v[i] = op(pa->v[i], bx);
+                    } else if (elemA == vm.intType() || elemA == vm.boolType()) {
+                        auto* pa = static_cast<PodArray<i64>*>(arrA);
+                        r->v.resize(pa->v.size());
+                        for (usize i = 0; i < pa->v.size(); ++i) r->v[i] = op(x64((f64)pa->v[i], 0.0), bx);
+                    } else if (elemA == vm.floatType()) {
+                        auto* pa = static_cast<PodArray<f64>*>(arrA);
+                        r->v.resize(pa->v.size());
+                        for (usize i = 0; i < pa->v.size(); ++i) r->v[i] = op(x64(pa->v[i], 0.0), bx);
+                    } else if (elemA == vm.fractionType()) {
+                        auto* pa = static_cast<PodArray<r64>*>(arrA);
+                        r->v.resize(pa->v.size());
+                        for (usize i = 0; i < pa->v.size(); ++i) r->v[i] = op(x64((f64)pa->v[i], 0.0), bx);
+                    } else {
+                        delete r; goto complexScalarFallthrough;
+                    }
+                    return Word(static_cast<Obj*>(r));
                 }
-                if (aType == vm.complexType() && bAT
-                    && bAT->elemType_ == vm.complexType()) {
-                    x64 ax(vm.reg(a).f, vm.reg(a+1).f);
-                    return Word(static_cast<Obj*>(podScalarArrayLoop(op,
-                        ax, static_cast<PodArray<x64>*>(vm.reg(b).o), rAT)));
+                if (aType == vm.complexType() && bAT) {
+                    x64 ax = readComplexFromReg(a);
+                    Type* elemB = bAT->elemType_;
+                    Obj* arrB = vm.reg(b).o;
+                    auto* r = new PodArray<x64>(rAT);
+                    if (elemB == vm.complexType()) {
+                        auto* pb = static_cast<PodArray<x64>*>(arrB);
+                        r->v.resize(pb->v.size());
+                        for (usize i = 0; i < pb->v.size(); ++i) r->v[i] = op(ax, pb->v[i]);
+                    } else if (elemB == vm.intType() || elemB == vm.boolType()) {
+                        auto* pb = static_cast<PodArray<i64>*>(arrB);
+                        r->v.resize(pb->v.size());
+                        for (usize i = 0; i < pb->v.size(); ++i) r->v[i] = op(ax, x64((f64)pb->v[i], 0.0));
+                    } else if (elemB == vm.floatType()) {
+                        auto* pb = static_cast<PodArray<f64>*>(arrB);
+                        r->v.resize(pb->v.size());
+                        for (usize i = 0; i < pb->v.size(); ++i) r->v[i] = op(ax, x64(pb->v[i], 0.0));
+                    } else if (elemB == vm.fractionType()) {
+                        auto* pb = static_cast<PodArray<r64>*>(arrB);
+                        r->v.resize(pb->v.size());
+                        for (usize i = 0; i < pb->v.size(); ++i) r->v[i] = op(ax, x64((f64)pb->v[i], 0.0));
+                    } else {
+                        delete r; goto complexScalarFallthrough;
+                    }
+                    return Word(static_cast<Obj*>(r));
                 }
             }
         }
+        complexScalarFallthrough:;
+
+        // ----- Array<X> +/-/*// Fraction scalar -> Array<Fraction> -----
         if constexpr (bool(Op::flags & mathOpFractionArgs)) {
             if (resultElem == vm.fractionType()) {
-                if (aAT && bType == vm.fractionType()
-                    && aAT->elemType_ == vm.fractionType()) {
-                    r64 br(vm.reg(b).i, vm.reg(b+1).i, true);
-                    return Word(static_cast<Obj*>(podArrayScalarLoop(op,
-                        static_cast<PodArray<r64>*>(vm.reg(a).o), br, rAT)));
+                if (aAT && bType == vm.fractionType()) {
+                    r64 br = readFractionFromReg(b);
+                    Type* elemA = aAT->elemType_;
+                    Obj* arrA = vm.reg(a).o;
+                    auto* r = new PodArray<r64>(rAT);
+                    if (elemA == vm.fractionType()) {
+                        auto* pa = static_cast<PodArray<r64>*>(arrA);
+                        r->v.resize(pa->v.size());
+                        for (usize i = 0; i < pa->v.size(); ++i) r->v[i] = op(pa->v[i], br);
+                    } else if (elemA == vm.intType() || elemA == vm.boolType()) {
+                        auto* pa = static_cast<PodArray<i64>*>(arrA);
+                        r->v.resize(pa->v.size());
+                        for (usize i = 0; i < pa->v.size(); ++i) r->v[i] = op(r64(pa->v[i]), br);
+                    } else {
+                        delete r; goto fractionScalarFallthrough;
+                    }
+                    return Word(static_cast<Obj*>(r));
                 }
-                if (aType == vm.fractionType() && bAT
-                    && bAT->elemType_ == vm.fractionType()) {
-                    r64 ar(vm.reg(a).i, vm.reg(a+1).i, true);
-                    return Word(static_cast<Obj*>(podScalarArrayLoop(op,
-                        ar, static_cast<PodArray<r64>*>(vm.reg(b).o), rAT)));
+                if (aType == vm.fractionType() && bAT) {
+                    r64 ar = readFractionFromReg(a);
+                    Type* elemB = bAT->elemType_;
+                    Obj* arrB = vm.reg(b).o;
+                    auto* r = new PodArray<r64>(rAT);
+                    if (elemB == vm.fractionType()) {
+                        auto* pb = static_cast<PodArray<r64>*>(arrB);
+                        r->v.resize(pb->v.size());
+                        for (usize i = 0; i < pb->v.size(); ++i) r->v[i] = op(ar, pb->v[i]);
+                    } else if (elemB == vm.intType() || elemB == vm.boolType()) {
+                        auto* pb = static_cast<PodArray<i64>*>(arrB);
+                        r->v.resize(pb->v.size());
+                        for (usize i = 0; i < pb->v.size(); ++i) r->v[i] = op(ar, r64(pb->v[i]));
+                    } else {
+                        delete r; goto fractionScalarFallthrough;
+                    }
+                    return Word(static_cast<Obj*>(r));
                 }
             }
         }
+        fractionScalarFallthrough:;
     }
 
     // Array/List result -- box any remaining Inline operand (Tuple/Struct/
