@@ -104,7 +104,7 @@ struct BlockHeader {
 // size of the returned block. The returned memory must be freeable with
 // ::free() (or the caller must ensure the TLSFAllocator is destroyed before
 // the memory is reclaimed).
-typedef void* (*BackupAllocFn)(void* userData, usize* outSize);
+typedef void* (*BackupAllocFn)(void* userData, usize* outSize, usize needed);
 
 // Callback type for pressure relief.
 // Called when the TLSF pool is exhausted, BEFORE the backup allocator.
@@ -261,10 +261,12 @@ private:
     }
 
     // Attempt to grow the pool by calling the backup allocator.
-    // The backup allocator determines the block size.
-    bool tryGrow(usize /*needed*/) {
+    // `needed` is the size of the allocation that just failed; the callback
+    // is responsible for returning a region at least that large (plus its own
+    // overhead). Callers typically pad the chunk to amortize future growths.
+    bool tryGrow(usize needed) {
         usize blockSize = 0;
-        void* mem = backupAlloc_(backupUserData_, &blockSize);
+        void* mem = backupAlloc_(backupUserData_, &blockSize, needed);
         if (!mem) return false;
         if (!addPool(mem, blockSize, true)) {
             ::free(mem);

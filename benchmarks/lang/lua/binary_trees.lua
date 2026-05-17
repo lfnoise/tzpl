@@ -1,6 +1,6 @@
 -- Binary trees. Same shape as the Tzopilotl port.
 local MIN_DEPTH = 4
-local MAX_DEPTH = 11
+local MAX_DEPTH = 16
 
 local function build(depth)
     if depth <= 0 then return { nil, nil }

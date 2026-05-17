@@ -181,6 +181,30 @@ VM::VM(usize poolSize, TypeUniverse& typeUniverse, const VMTarget& target)
     // cross-thread arcEnqueueForDeletion can find it from homeAllocator_.
     allocator_.setForeignDeleteQueue(&foreignDeleteQueue_);
 
+    // Install a backup allocator so a pool exhaustion grows the heap by
+    // mallocing a fresh chunk instead of hard-failing. On the audio thread
+    // this trades a one-time glitch for a hard crash; in offline/REPL
+    // contexts it just keeps long-running scripts (binary_trees and other
+    // allocation-heavy workloads) from aborting when the initial pool is
+    // too small. The new chunk is owned by TLSFAllocator and freed in its
+    // destructor.
+    allocator_.setBackupAllocator(
+        [](void* /*ud*/, usize* outSize, usize needed) -> void* {
+            // Grow by at least the requested size plus headroom. The default
+            // 64 MB chunk amortizes small-object growth; large allocations
+            // (vector resizes) bump the chunk up to a power of two big enough
+            // to satisfy them.
+            constexpr usize kMinChunk = 64 * 1024 * 1024;
+            usize chunk = kMinChunk;
+            usize wanted = needed + 4096;
+            while (chunk < wanted) chunk *= 2;
+            void* p = std::malloc(chunk);
+            if (p) *outSize = chunk;
+            return p;
+        },
+        nullptr
+    );
+
     // Allocate register file from TLSF
     regs_ = static_cast<Word*>(allocator_.allocate(maxRegs_ * sizeof(Word)));
     if (!regs_) throw std::bad_alloc();

@@ -1,16 +1,16 @@
 -- Binary trees. Allocation/GC stress test from the Computer Language Benchmarks Game.
 -- Builds many short-lived trees plus one long-lived tree and totals up node counts.
 --
--- Tzopilotl's GC heartbeat is time-based and only collects when the stack has
--- been collapsed (stack-live registers aren't GC roots), so an explicit gc()
--- call from inside a tight allocation loop is unsafe. As a result the
--- benchmark runs at a depth that fits the cumulative allocation in the
--- default 64 MB TLSF pool without needing an intermediate sweep -- smaller
--- than the canonical benchmarksgame N=21, but matched against Lua at the
--- same depth.
+-- Tzopilotl's GC only collects when the stack has been collapsed (register-file
+-- contents aren't roots), so dead short-lived trees accumulate inside the inner
+-- loop. The TLSF backup allocator transparently grows the pool by malloc when
+-- it exhausts, so the benchmark runs at depths much higher than the initial
+-- 64 MB pool would otherwise allow -- but the peak working set still grows
+-- proportional to the total tree alloc per depth-pass, which on this machine
+-- caps practical N at ~16 (about 1.5 GB resident).
 
 const MIN_DEPTH = 4;
-const MAX_DEPTH = 11;
+const MAX_DEPTH = 16;
 
 enum Tree {
     leaf,
