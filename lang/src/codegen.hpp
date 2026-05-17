@@ -538,6 +538,14 @@ private:
     void genIfStmtForValue(IfStmtNode* stmt, u16 resultReg);
     void genSwitchStmtForValue(SwitchStmtNode* stmt, u16 resultReg);
 
+    // Tail-position-as-return helpers. Used when a function's body ends in a
+    // value-producing if-else or match: instead of writing each branch's value
+    // into a shared resultReg and then RETURN'ing that reg, each branch emits
+    // its own op_return directly. Eliminates the intermediate MOV.
+    void genBlockAsReturn(BlockStmt* block);
+    void genIfStmtAsReturn(IfStmtNode* stmt);
+    void genSwitchStmtAsReturn(SwitchStmtNode* stmt);
+
     void error(SourceRange loc, const std::string& msg);
 
     // --- Constant folding ---

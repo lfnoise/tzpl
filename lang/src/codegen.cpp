@@ -900,23 +900,23 @@ void CodeGen::genFnDecl(FnDeclNode* decl) {
                     goto fn_body_done;
                 }
             }
-            // Check for trailing IfStmtNode with else (value-producing if-else)
+            // Check for trailing IfStmtNode with else (value-producing if-else).
+            // Skip for Void return: some branches may not produce a value, and
+            // there's no value to return anyway -- fall through to genNode.
             if (i == block->stmts.size() - 1 && stmt->kind == ASTNode::IfStmt
-                && !inCoroutineFn_) {
+                && !inCoroutineFn_
+                && currentReturnType_ != compiler_.voidType()) {
                 auto* ifStmt = static_cast<IfStmtNode*>(stmt);
                 if (ifStmt->elseBranch) {
-                    u16 resultReg = allocSlot(currentReturnType_);
-                    genIfStmtForValue(ifStmt, resultReg);
-                    emitReturn(resultReg);
+                    genIfStmtAsReturn(ifStmt);
                     goto fn_body_done;
                 }
             }
-            // Check for trailing SwitchStmt (value-producing match)
+            // Check for trailing SwitchStmt (value-producing match).
             if (i == block->stmts.size() - 1 && stmt->kind == ASTNode::SwitchStmt
-                && !inCoroutineFn_) {
-                u16 resultReg = allocSlot(currentReturnType_);
-                genSwitchStmtForValue(static_cast<SwitchStmtNode*>(stmt), resultReg);
-                emitReturn(resultReg);
+                && !inCoroutineFn_
+                && currentReturnType_ != compiler_.voidType()) {
+                genSwitchStmtAsReturn(static_cast<SwitchStmtNode*>(stmt));
                 goto fn_body_done;
             }
             genNode(stmt);
@@ -1074,19 +1074,17 @@ void CodeGen::genMonoInstance(FuncInfo& monoInfo) {
                     goto mono_body_done;
                 }
             }
-            if (i == block->stmts.size() - 1 && stmt->kind == ASTNode::IfStmt) {
+            if (i == block->stmts.size() - 1 && stmt->kind == ASTNode::IfStmt
+                && currentReturnType_ != compiler_.voidType()) {
                 auto* ifStmt = static_cast<IfStmtNode*>(stmt);
                 if (ifStmt->elseBranch) {
-                    u16 resultReg = allocSlot(currentReturnType_);
-                    genIfStmtForValue(ifStmt, resultReg);
-                    emitReturn(resultReg);
+                    genIfStmtAsReturn(ifStmt);
                     goto mono_body_done;
                 }
             }
-            if (i == block->stmts.size() - 1 && stmt->kind == ASTNode::SwitchStmt) {
-                u16 resultReg = allocSlot(currentReturnType_);
-                genSwitchStmtForValue(static_cast<SwitchStmtNode*>(stmt), resultReg);
-                emitReturn(resultReg);
+            if (i == block->stmts.size() - 1 && stmt->kind == ASTNode::SwitchStmt
+                && currentReturnType_ != compiler_.voidType()) {
+                genSwitchStmtAsReturn(static_cast<SwitchStmtNode*>(stmt));
                 goto mono_body_done;
             }
             genNode(stmt);
@@ -9509,21 +9507,19 @@ u16 CodeGen::genLambdaExpr(LambdaExprNode* expr) {
                 }
             }
             // Check for trailing IfStmtNode with else (value-producing if-else)
-            if (i == block->stmts.size() - 1 && stmt->kind == ASTNode::IfStmt) {
+            if (i == block->stmts.size() - 1 && stmt->kind == ASTNode::IfStmt
+                && currentReturnType_ != compiler_.voidType()) {
                 auto* ifStmt = static_cast<IfStmtNode*>(stmt);
                 if (ifStmt->elseBranch) {
-                    u16 resultReg = allocSlot(currentReturnType_);
-                    genIfStmtForValue(ifStmt, resultReg);
-                    emitReturn(resultReg);
+                    genIfStmtAsReturn(ifStmt);
                     emittedReturn = true;
                     break;
                 }
             }
             // Check for trailing SwitchStmt (value-producing match)
-            if (i == block->stmts.size() - 1 && stmt->kind == ASTNode::SwitchStmt) {
-                u16 resultReg = allocSlot(currentReturnType_);
-                genSwitchStmtForValue(static_cast<SwitchStmtNode*>(stmt), resultReg);
-                emitReturn(resultReg);
+            if (i == block->stmts.size() - 1 && stmt->kind == ASTNode::SwitchStmt
+                && currentReturnType_ != compiler_.voidType()) {
+                genSwitchStmtAsReturn(static_cast<SwitchStmtNode*>(stmt));
                 emittedReturn = true;
                 break;
             }
@@ -9688,20 +9684,18 @@ void CodeGen::compileTemplateLambdaBody(LambdaExprNode* expr, LambdaType* lambda
                     break;
                 }
             }
-            if (i == block->stmts.size() - 1 && stmt->kind == ASTNode::IfStmt) {
+            if (i == block->stmts.size() - 1 && stmt->kind == ASTNode::IfStmt
+                && currentReturnType_ != compiler_.voidType()) {
                 auto* ifStmt = static_cast<IfStmtNode*>(stmt);
                 if (ifStmt->elseBranch) {
-                    u16 resultReg = allocSlot(currentReturnType_);
-                    genIfStmtForValue(ifStmt, resultReg);
-                    emitReturn(resultReg);
+                    genIfStmtAsReturn(ifStmt);
                     emittedReturn = true;
                     break;
                 }
             }
-            if (i == block->stmts.size() - 1 && stmt->kind == ASTNode::SwitchStmt) {
-                u16 resultReg = allocSlot(currentReturnType_);
-                genSwitchStmtForValue(static_cast<SwitchStmtNode*>(stmt), resultReg);
-                emitReturn(resultReg);
+            if (i == block->stmts.size() - 1 && stmt->kind == ASTNode::SwitchStmt
+                && currentReturnType_ != compiler_.voidType()) {
+                genSwitchStmtAsReturn(static_cast<SwitchStmtNode*>(stmt));
                 emittedReturn = true;
                 break;
             }
@@ -9868,6 +9862,134 @@ void CodeGen::genSwitchStmtForValue(SwitchStmtNode* stmt, u16 resultReg) {
     for (u32 ej : endJumps) {
         patchJump(ej);
     }
+}
+
+// --- Tail-position-as-return variants ---
+//
+// When a function body ends with a value-producing if-else / match, the
+// canonical lowering is to allocate a fresh slot, write each branch's value
+// into it, and emit op_return at the end. That produces one extra MOV per
+// branch. These helpers instead push the return into each branch directly,
+// so the producer of the value writes into the result register and op_return
+// reads from there with no intermediate copy. There is also no end-jump out
+// of each branch: emitReturn is terminal.
+
+void CodeGen::genBlockAsReturn(BlockStmt* block) {
+    u16 savedReg = nextReg_;
+    pushScope();
+    for (size_t i = 0; i < block->stmts.size(); ++i) {
+        auto* stmt = block->stmts[i].get();
+
+        // Trailing expression: compute and return.
+        if (stmt->kind == ASTNode::ExprStmt) {
+            auto* exprStmt = static_cast<ExprStmtNode*>(stmt);
+            if (exprStmt->isTrailing) {
+                inTailPosition_ = true;
+                u16 valReg = genExpr(static_cast<Expr*>(exprStmt->expr.get()));
+                inTailPosition_ = false;
+                emitReturn(valReg);
+                popScope();
+                if (enableRegReclaim) freeRegsTo(savedReg);
+                return;
+            }
+        }
+
+        // Trailing if-else: descend recursively so each leaf returns.
+        if (i == block->stmts.size() - 1 && stmt->kind == ASTNode::IfStmt) {
+            auto* ifStmt = static_cast<IfStmtNode*>(stmt);
+            if (ifStmt->elseBranch) {
+                genIfStmtAsReturn(ifStmt);
+                popScope();
+                if (enableRegReclaim) freeRegsTo(savedReg);
+                return;
+            }
+        }
+
+        // Trailing match: same idea.
+        if (i == block->stmts.size() - 1 && stmt->kind == ASTNode::SwitchStmt) {
+            genSwitchStmtAsReturn(static_cast<SwitchStmtNode*>(stmt));
+            popScope();
+            if (enableRegReclaim) freeRegsTo(savedReg);
+            return;
+        }
+
+        genNode(stmt);
+    }
+    popScope();
+    if (enableRegReclaim) freeRegsTo(savedReg);
+}
+
+void CodeGen::genIfStmtAsReturn(IfStmtNode* stmt) {
+    u16 savedReg = nextReg_;
+    u16 condReg = genExpr(static_cast<Expr*>(stmt->condition.get()));
+    u32 elseJump = emitJump(op_jump_if_false, condReg);
+
+    // Then branch: emits its own op_return, no end-jump needed.
+    if (enableRegReclaim) freeRegsTo(savedReg);
+    if (stmt->thenBranch->kind == ASTNode::Block) {
+        genBlockAsReturn(static_cast<BlockStmt*>(stmt->thenBranch.get()));
+    }
+
+    patchJump(elseJump);
+
+    // Else branch (block or else-if chain).
+    if (enableRegReclaim) freeRegsTo(savedReg);
+    if (stmt->elseBranch) {
+        if (stmt->elseBranch->kind == ASTNode::Block) {
+            genBlockAsReturn(static_cast<BlockStmt*>(stmt->elseBranch.get()));
+        } else if (stmt->elseBranch->kind == ASTNode::IfStmt) {
+            genIfStmtAsReturn(static_cast<IfStmtNode*>(stmt->elseBranch.get()));
+        }
+    }
+    if (enableRegReclaim) freeRegsTo(savedReg);
+}
+
+void CodeGen::genSwitchStmtAsReturn(SwitchStmtNode* stmt) {
+    u16 subjReg = genExpr(static_cast<Expr*>(stmt->subject.get()));
+    Type* subjType = stmt->subject->resolvedType;
+    u16 caseSavedReg = nextReg_;
+
+    for (size_t i = 0; i < stmt->cases.size(); ++i) {
+        auto& clause = stmt->cases[i];
+
+        if (enableRegReclaim) freeRegsTo(caseSavedReg);
+        pushScope();
+
+        std::vector<u32> failJumps;
+        genPatternMatch(clause.pattern.get(), subjReg, subjType, failJumps);
+
+        auto* body = clause.body.get();
+        if (body->kind == ASTNode::Block) {
+            genBlockAsReturn(static_cast<BlockStmt*>(body));
+        } else if (body->kind == ASTNode::ExprStmt) {
+            auto* exprStmt = static_cast<ExprStmtNode*>(body);
+            inTailPosition_ = true;
+            u16 valReg = genExpr(static_cast<Expr*>(exprStmt->expr.get()));
+            inTailPosition_ = false;
+            emitReturn(valReg);
+        } else if (body->kind == ASTNode::IfStmt) {
+            auto* ifStmt = static_cast<IfStmtNode*>(body);
+            if (ifStmt->elseBranch) {
+                genIfStmtAsReturn(ifStmt);
+            } else {
+                genNode(body);
+            }
+        } else if (body->kind == ASTNode::SwitchStmt) {
+            genSwitchStmtAsReturn(static_cast<SwitchStmtNode*>(body));
+        } else {
+            genNode(body);
+        }
+
+        // No endJump: each case body terminates via emitReturn.
+
+        popScope();
+
+        for (u32 fj : failJumps) {
+            patchJump(fj);
+        }
+    }
+
+    if (enableRegReclaim) freeRegsTo(caseSavedReg);
 }
 
 u16 CodeGen::genIfExpr(IfExprNode* expr) {
