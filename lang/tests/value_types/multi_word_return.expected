@@ -1,0 +1,38 @@
+1+2i
+3/7
+Pt { x: 1, y: 2 }
+(1, 2)
+1+2i
+3+4i
+1/2
+3/4
+Pt { x: 1, y: 2 }
+Pt { x: 3, y: 4 }
+(1, 2)
+(3, 4)
+1+2i
+99+99i
+Pt { x: 1, y: 2 }
+Pt { x: 9, y: 9 }
+1+2i
+0+0i
+4+4i
+1+2i
+3+4i
+1+2i
+3+4i
+1/2
+3/4
+Pt { x: 1, y: 2 }
+Pt { x: 3, y: 4 }
+Pt { x: 0, y: 0 }
+Pt { x: 1, y: 1 }
+Pt { x: 99, y: 99 }
+Option<Complex>.some(1+2i)
+Option<Complex>.none
+Option<Complex>.some(1+2i)
+Option<Complex>.none
+Option<Fraction>.some(7/8)
+Option<Fraction>.none
+Option<Complex>.none
+Option<Complex>.some(99+99i)
