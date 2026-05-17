@@ -1463,42 +1463,69 @@ struct OpBitNot {
 // dispatchBinop can broadcast them as ordinary scalars; element writes unbox
 // the heap result back into the native slot.
 
-static usize arrayLen(Obj* arr, Type* elemType, VM& vm) {
-    switch (arrayBackendFor(elemType)) {
-        case ArrayBackend::Int:      return static_cast<PodArray<i64>*>(arr)->v.size();
-        case ArrayBackend::Float:    return static_cast<PodArray<f64>*>(arr)->v.size();
-        case ArrayBackend::Complex:  return static_cast<PodArray<x64>*>(arr)->v.size();
-        case ArrayBackend::Fraction: return static_cast<PodArray<r64>*>(arr)->v.size();
-        case ArrayBackend::Inline:   return static_cast<InlineArray*>(arr)->size();
-        case ArrayBackend::Obj:      return static_cast<ObjArray*>(arr)->size();
+// Backend-templated element accessors. The `if constexpr` chain collapses
+// to a single backend's body when called with a constant ArrayBackend, so
+// loops that hoist `arrayBackendFor` outside and pass the result in get
+// fully-specialized read/write paths with no per-iteration dispatch.
+
+template<ArrayBackend B>
+inline usize arrayLen_t(Obj* arr) {
+    if constexpr (B == ArrayBackend::Int)      return static_cast<PodArray<i64>*>(arr)->v.size();
+    else if constexpr (B == ArrayBackend::Float)    return static_cast<PodArray<f64>*>(arr)->v.size();
+    else if constexpr (B == ArrayBackend::Complex)  return static_cast<PodArray<x64>*>(arr)->v.size();
+    else if constexpr (B == ArrayBackend::Fraction) return static_cast<PodArray<r64>*>(arr)->v.size();
+    else if constexpr (B == ArrayBackend::Inline)   return static_cast<InlineArray*>(arr)->size();
+    else if constexpr (B == ArrayBackend::Obj)      return static_cast<ObjArray*>(arr)->size();
+}
+
+template<ArrayBackend B>
+inline Word readElem_t(Obj* arr, usize i, Type* elemType, VM& vm) {
+    if constexpr (B == ArrayBackend::Int) {
+        return Word(static_cast<PodArray<i64>*>(arr)->v[i]);
+    } else if constexpr (B == ArrayBackend::Float) {
+        return Word(static_cast<PodArray<f64>*>(arr)->v[i]);
+    } else if constexpr (B == ArrayBackend::Complex) {
+        x64 const& x = static_cast<PodArray<x64>*>(arr)->v[i];
+        auto* c = new Complex(x);
+        c->retain();
+        return Word(static_cast<Obj*>(c));
+    } else if constexpr (B == ArrayBackend::Fraction) {
+        r64 const& r = static_cast<PodArray<r64>*>(arr)->v[i];
+        auto* fr = new Fraction(r);
+        fr->retain();
+        return Word(static_cast<Obj*>(fr));
+    } else if constexpr (B == ArrayBackend::Inline) {
+        Word const* slot = static_cast<InlineArray*>(arr)->slot(i);
+        return boxPayload(vm, elemType, slot);
+    } else if constexpr (B == ArrayBackend::Obj) {
+        return Word(static_cast<ObjArray*>(arr)->get(i));
+    }
+}
+
+// Runtime-dispatched wrappers used when the backend isn't statically
+// known at the call site. Switch is on the small ArrayBackend enum, not
+// on Type* identity — compilers turn this into a jump table.
+
+inline usize arrayLen(Obj* arr, ArrayBackend b) {
+    switch (b) {
+        case ArrayBackend::Int:      return arrayLen_t<ArrayBackend::Int>(arr);
+        case ArrayBackend::Float:    return arrayLen_t<ArrayBackend::Float>(arr);
+        case ArrayBackend::Complex:  return arrayLen_t<ArrayBackend::Complex>(arr);
+        case ArrayBackend::Fraction: return arrayLen_t<ArrayBackend::Fraction>(arr);
+        case ArrayBackend::Inline:   return arrayLen_t<ArrayBackend::Inline>(arr);
+        case ArrayBackend::Obj:      return arrayLen_t<ArrayBackend::Obj>(arr);
     }
     return 0;
 }
 
-static Word readElem(Obj* arr, usize i, Type* elemType, VM& vm) {
-    switch (arrayBackendFor(elemType)) {
-        case ArrayBackend::Int:
-            return Word(static_cast<PodArray<i64>*>(arr)->v[i]);
-        case ArrayBackend::Float:
-            return Word(static_cast<PodArray<f64>*>(arr)->v[i]);
-        case ArrayBackend::Complex: {
-            x64 const& x = static_cast<PodArray<x64>*>(arr)->v[i];
-            auto* c = new Complex(x);
-            c->retain();
-            return Word(static_cast<Obj*>(c));
-        }
-        case ArrayBackend::Fraction: {
-            r64 const& r = static_cast<PodArray<r64>*>(arr)->v[i];
-            auto* fr = new Fraction(r);
-            fr->retain();
-            return Word(static_cast<Obj*>(fr));
-        }
-        case ArrayBackend::Inline: {
-            Word const* slot = static_cast<InlineArray*>(arr)->slot(i);
-            return boxPayload(vm, elemType, slot);
-        }
-        case ArrayBackend::Obj:
-            return Word(static_cast<ObjArray*>(arr)->get(i));
+inline Word readElem(Obj* arr, usize i, ArrayBackend b, Type* elemType, VM& vm) {
+    switch (b) {
+        case ArrayBackend::Int:      return readElem_t<ArrayBackend::Int>(arr, i, elemType, vm);
+        case ArrayBackend::Float:    return readElem_t<ArrayBackend::Float>(arr, i, elemType, vm);
+        case ArrayBackend::Complex:  return readElem_t<ArrayBackend::Complex>(arr, i, elemType, vm);
+        case ArrayBackend::Fraction: return readElem_t<ArrayBackend::Fraction>(arr, i, elemType, vm);
+        case ArrayBackend::Inline:   return readElem_t<ArrayBackend::Inline>(arr, i, elemType, vm);
+        case ArrayBackend::Obj:      return readElem_t<ArrayBackend::Obj>(arr, i, elemType, vm);
     }
     return Word{};
 }
@@ -1540,29 +1567,32 @@ static Obj* makeArray(VM& vm, ArrayType* type, usize len) {
     return nullptr;
 }
 
-static void writeElem(Obj* arr, usize i, Word w, Type* elemType, VM& vm) {
-    switch (arrayBackendFor(elemType)) {
-        case ArrayBackend::Int:
-            static_cast<PodArray<i64>*>(arr)->v[i] = w.i;
-            return;
-        case ArrayBackend::Float:
-            static_cast<PodArray<f64>*>(arr)->v[i] = w.f;
-            return;
-        case ArrayBackend::Complex:
-            static_cast<PodArray<x64>*>(arr)->v[i] = static_cast<Complex*>(w.o)->x;
-            return;
-        case ArrayBackend::Fraction:
-            static_cast<PodArray<r64>*>(arr)->v[i] = static_cast<Fraction*>(w.o)->r;
-            return;
-        case ArrayBackend::Inline: {
-            // Unbox the heap result into the native multi-word slot.
-            Word* dst = static_cast<InlineArray*>(arr)->slot(i);
-            unboxInlineDeepTo(vm, elemType, w.o, dst);
-            return;
-        }
-        case ArrayBackend::Obj:
-            static_cast<ObjArray*>(arr)->set(i, w.o);
-            return;
+template<ArrayBackend B>
+inline void writeElem_t(Obj* arr, usize i, Word w, Type* elemType, VM& vm) {
+    if constexpr (B == ArrayBackend::Int) {
+        static_cast<PodArray<i64>*>(arr)->v[i] = w.i;
+    } else if constexpr (B == ArrayBackend::Float) {
+        static_cast<PodArray<f64>*>(arr)->v[i] = w.f;
+    } else if constexpr (B == ArrayBackend::Complex) {
+        static_cast<PodArray<x64>*>(arr)->v[i] = static_cast<Complex*>(w.o)->x;
+    } else if constexpr (B == ArrayBackend::Fraction) {
+        static_cast<PodArray<r64>*>(arr)->v[i] = static_cast<Fraction*>(w.o)->r;
+    } else if constexpr (B == ArrayBackend::Inline) {
+        Word* dst = static_cast<InlineArray*>(arr)->slot(i);
+        unboxInlineDeepTo(vm, elemType, w.o, dst);
+    } else if constexpr (B == ArrayBackend::Obj) {
+        static_cast<ObjArray*>(arr)->set(i, w.o);
+    }
+}
+
+inline void writeElem(Obj* arr, usize i, Word w, ArrayBackend b, Type* elemType, VM& vm) {
+    switch (b) {
+        case ArrayBackend::Int:      writeElem_t<ArrayBackend::Int>(arr, i, w, elemType, vm); return;
+        case ArrayBackend::Float:    writeElem_t<ArrayBackend::Float>(arr, i, w, elemType, vm); return;
+        case ArrayBackend::Complex:  writeElem_t<ArrayBackend::Complex>(arr, i, w, elemType, vm); return;
+        case ArrayBackend::Fraction: writeElem_t<ArrayBackend::Fraction>(arr, i, w, elemType, vm); return;
+        case ArrayBackend::Inline:   writeElem_t<ArrayBackend::Inline>(arr, i, w, elemType, vm); return;
+        case ArrayBackend::Obj:      writeElem_t<ArrayBackend::Obj>(arr, i, w, elemType, vm); return;
     }
 }
 
@@ -1675,16 +1705,21 @@ static Word dispatchArrayBinop(VM& vm, Op op, Word a, Word b,
             }
         }
 
-        // Generic path: per-element recursive dispatch
-        usize lenA = arrayLen(a.o, elemA, vm);
-        usize lenB = arrayLen(b.o, elemB, vm);
+        // Generic path: per-element recursive dispatch. Hoist backend
+        // lookups out of the loop so readElem/writeElem dispatch on a
+        // small enum instead of recomputing arrayBackendFor each iter.
+        ArrayBackend ba = arrayBackendFor(elemA);
+        ArrayBackend bb = arrayBackendFor(elemB);
+        ArrayBackend br = arrayBackendFor(resultElem);
+        usize lenA = arrayLen(a.o, ba);
+        usize lenB = arrayLen(b.o, bb);
         usize len = std::min(lenA, lenB);
         Obj* result = makeArray(vm, resultAT, len);
         for (usize i = 0; i < len; ++i) {
-            Word ae = readElem(a.o, i, elemA, vm);
-            Word be = readElem(b.o, i, elemB, vm);
+            Word ae = readElem(a.o, i, ba, elemA, vm);
+            Word be = readElem(b.o, i, bb, elemB, vm);
             Word re = dispatchBinop(vm, op, ae, be, elemA, elemB, resultElem);
-            writeElem(result, i, re, resultElem, vm);
+            writeElem(result, i, re, br, resultElem, vm);
         }
         return Word(result);
     }
@@ -1708,12 +1743,14 @@ static Word dispatchArrayBinop(VM& vm, Op op, Word a, Word b,
         }
 
         // Generic path
-        usize len = arrayLen(a.o, elemA, vm);
+        ArrayBackend ba = arrayBackendFor(elemA);
+        ArrayBackend br = arrayBackendFor(resultElem);
+        usize len = arrayLen(a.o, ba);
         Obj* result = makeArray(vm, resultAT, len);
         for (usize i = 0; i < len; ++i) {
-            Word ae = readElem(a.o, i, elemA, vm);
+            Word ae = readElem(a.o, i, ba, elemA, vm);
             Word re = dispatchBinop(vm, op, ae, b, elemA, bType, resultElem);
-            writeElem(result, i, re, resultElem, vm);
+            writeElem(result, i, re, br, resultElem, vm);
         }
         return Word(result);
     }
@@ -1736,12 +1773,14 @@ static Word dispatchArrayBinop(VM& vm, Op op, Word a, Word b,
     }
 
     // Generic path
-    usize len = arrayLen(b.o, elemB, vm);
+    ArrayBackend bb = arrayBackendFor(elemB);
+    ArrayBackend br = arrayBackendFor(resultElem);
+    usize len = arrayLen(b.o, bb);
     Obj* result = makeArray(vm, resultAT, len);
     for (usize i = 0; i < len; ++i) {
-        Word be = readElem(b.o, i, elemB, vm);
+        Word be = readElem(b.o, i, bb, elemB, vm);
         Word re = dispatchBinop(vm, op, a, be, aType, elemB, resultElem);
-        writeElem(result, i, re, resultElem, vm);
+        writeElem(result, i, re, br, resultElem, vm);
     }
     return Word(result);
 }
@@ -1952,7 +1991,8 @@ static Word dispatchArrayUnaryOp(VM& vm, Op op, Word a, Type* aType, ArrayType* 
     Type* resultElem = resultAT->elemType_;
     auto* aAT = static_cast<ArrayType*>(aType);
     Type* elemA = aAT->elemType_;
-    usize len = arrayLen(a.o, elemA, vm);
+    ArrayBackend ba = arrayBackendFor(elemA);
+    usize len = arrayLen(a.o, ba);
 
     // Fast path: same POD element type (tight loop, op inlined)
     if (elemA == resultElem) {
@@ -1979,11 +2019,12 @@ static Word dispatchArrayUnaryOp(VM& vm, Op op, Word a, Type* aType, ArrayType* 
     }
 
     // Generic path: per-element recursive dispatch
+    ArrayBackend br = arrayBackendFor(resultElem);
     Obj* result = makeArray(vm, resultAT, len);
     for (usize i = 0; i < len; ++i) {
-        Word ae = readElem(a.o, i, elemA, vm);
+        Word ae = readElem(a.o, i, ba, elemA, vm);
         Word re = dispatchUnaryOp(vm, op, ae, elemA, resultElem);
-        writeElem(result, i, re, resultElem, vm);
+        writeElem(result, i, re, br, resultElem, vm);
     }
     return Word(result);
 }
@@ -2251,30 +2292,41 @@ static Word dispatchCmpArrayBinop(VM& vm, CmpOp op, Word a, Word b,
     auto* bAT = dynamic_cast<ArrayType*>(bType);
 
     if (aAT && bAT) {
-        usize len = std::min(arrayLen(a.o, aAT->elemType_, vm), arrayLen(b.o, bAT->elemType_, vm));
+        Type* elemA = aAT->elemType_;
+        Type* elemB = bAT->elemType_;
+        ArrayBackend ba = arrayBackendFor(elemA);
+        ArrayBackend bb = arrayBackendFor(elemB);
+        ArrayBackend br = arrayBackendFor(resultElem);
+        usize len = std::min(arrayLen(a.o, ba), arrayLen(b.o, bb));
         Obj* result = makeArray(vm, resultAT, len);
         for (usize i = 0; i < len; ++i) {
-            Word ae = readElem(a.o, i, aAT->elemType_, vm);
-            Word be = readElem(b.o, i, bAT->elemType_, vm);
-            writeElem(result, i, dispatchCmpBinop(vm, op, ae, be, aAT->elemType_, bAT->elemType_, resultElem), resultElem, vm);
+            Word ae = readElem(a.o, i, ba, elemA, vm);
+            Word be = readElem(b.o, i, bb, elemB, vm);
+            writeElem(result, i, dispatchCmpBinop(vm, op, ae, be, elemA, elemB, resultElem), br, resultElem, vm);
         }
         return Word(result);
     }
     if (aAT) {
-        usize len = arrayLen(a.o, aAT->elemType_, vm);
+        Type* elemA = aAT->elemType_;
+        ArrayBackend ba = arrayBackendFor(elemA);
+        ArrayBackend br = arrayBackendFor(resultElem);
+        usize len = arrayLen(a.o, ba);
         Obj* result = makeArray(vm, resultAT, len);
         for (usize i = 0; i < len; ++i) {
-            Word ae = readElem(a.o, i, aAT->elemType_, vm);
-            writeElem(result, i, dispatchCmpBinop(vm, op, ae, b, aAT->elemType_, bType, resultElem), resultElem, vm);
+            Word ae = readElem(a.o, i, ba, elemA, vm);
+            writeElem(result, i, dispatchCmpBinop(vm, op, ae, b, elemA, bType, resultElem), br, resultElem, vm);
         }
         return Word(result);
     }
     if (bAT) {
-        usize len = arrayLen(b.o, bAT->elemType_, vm);
+        Type* elemB = bAT->elemType_;
+        ArrayBackend bb = arrayBackendFor(elemB);
+        ArrayBackend br = arrayBackendFor(resultElem);
+        usize len = arrayLen(b.o, bb);
         Obj* result = makeArray(vm, resultAT, len);
         for (usize i = 0; i < len; ++i) {
-            Word be = readElem(b.o, i, bAT->elemType_, vm);
-            writeElem(result, i, dispatchCmpBinop(vm, op, a, be, aType, bAT->elemType_, resultElem), resultElem, vm);
+            Word be = readElem(b.o, i, bb, elemB, vm);
+            writeElem(result, i, dispatchCmpBinop(vm, op, a, be, aType, elemB, resultElem), br, resultElem, vm);
         }
         return Word(result);
     }
