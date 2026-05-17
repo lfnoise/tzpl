@@ -110,6 +110,31 @@ inline Word getArrayElem(VM& vm, Obj* a, Type* et, size_t i) {
     return Word();
 }
 
+// Backend dispatch: switch ONCE on a runtime ArrayBackend and call a
+// templated lambda specialized for that backend. The loop body inside
+// the lambda is fully compile-time specialized (no per-iteration
+// switch), so each backend gets its own straight-line code path.
+//
+// Usage:
+//   dispatchBackend(ba, [&]<ArrayBackend B>() {
+//       for (size_t i = 0; i < getArraySize_t<B>(src); ++i) {
+//           placeLambdaArgFromArrayElem_t<B>(vm, sb, src, et, i);
+//           ...
+//       }
+//   });
+template<typename F>
+inline auto dispatchBackend(ArrayBackend b, F&& f) {
+    switch (b) {
+        case ArrayBackend::Int:      return f.template operator()<ArrayBackend::Int>();
+        case ArrayBackend::Float:    return f.template operator()<ArrayBackend::Float>();
+        case ArrayBackend::Complex:  return f.template operator()<ArrayBackend::Complex>();
+        case ArrayBackend::Fraction: return f.template operator()<ArrayBackend::Fraction>();
+        case ArrayBackend::Inline:   return f.template operator()<ArrayBackend::Inline>();
+        case ArrayBackend::Obj:      return f.template operator()<ArrayBackend::Obj>();
+    }
+    return f.template operator()<ArrayBackend::Obj>();  // unreachable
+}
+
 // Backend-templated size accessor: `if constexpr` collapses to the right
 // branch when called with a constant ArrayBackend.
 template<ArrayBackend B>

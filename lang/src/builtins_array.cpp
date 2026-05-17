@@ -198,10 +198,11 @@ void builtin_pick_array(VM& vm, u16 dst, u16, u16 ab) {
     auto* arr = vm.reg(ab).o;
     auto* at = static_cast<ArrayType*>(arr->type_);
     Type* et = at->elemType_;
-    ArrayBackend ba = arrayBackendFor(et);
-    size_t n = getArraySize(arr, ba);
-    size_t idx = vm.rng().next() % n;
-    placeLambdaArgFromArrayElem(vm, dst, arr, ba, et, idx);
+    dispatchBackend(arrayBackendFor(et), [&]<ArrayBackend B>() {
+        size_t n = getArraySize_t<B>(arr);
+        size_t idx = vm.rng().next() % n;
+        placeLambdaArgFromArrayElem_t<B>(vm, dst, arr, et, idx);
+    });
 }
 
 // urands() -> List<Float>: infinite lazy list of uniform [0, 1) floats
@@ -436,22 +437,21 @@ void builtin_sort_by_array(VM& vm, u16 dst, u16, u16 ab) {
     auto* fnType = static_cast<FunctionType*>(fn->type_);
     Type* paramT = fnType->argTypes_.empty() ? nullptr : fnType->argTypes_[0];
     u16 elemWords = isLambdaInlineComposite(paramT) ? paramT->sizeWords_ : 1;
-    ArrayBackend ba = arrayBackendFor(et);
-    size_t n = getArraySize(src, ba);
-    std::vector<size_t> idx(n);
-    std::iota(idx.begin(), idx.end(), 0);
     u16 sb = vm.currentCodeBlock()->numRegs;
-    std::sort(idx.begin(), idx.end(), [&](size_t a, size_t b) {
-        // Phase 4g.26: read array elements directly into the lambda's two
-        // arg slots without boxing through getArrayElem.
-        placeLambdaArgFromArrayElem(vm, sb, src, ba, et, a);
-        placeLambdaArgFromArrayElem(vm, (u16)(sb + elemWords), src, ba, et, b);
-        callTwoArgs(vm, fn, sb);
-        return vm.reg(sb).i != 0;
-    });
     auto* result = makeEmptyArray(at);
-    for (size_t i = 0; i < n; i++)
-        arrayPush(vm, result, et, getArrayElem(vm, src, et, idx[i]));
+    dispatchBackend(arrayBackendFor(et), [&]<ArrayBackend B>() {
+        size_t n = getArraySize_t<B>(src);
+        std::vector<size_t> idx(n);
+        std::iota(idx.begin(), idx.end(), 0);
+        std::sort(idx.begin(), idx.end(), [&](size_t a, size_t b) {
+            placeLambdaArgFromArrayElem_t<B>(vm, sb, src, et, a);
+            placeLambdaArgFromArrayElem_t<B>(vm, (u16)(sb + elemWords), src, et, b);
+            callTwoArgs(vm, fn, sb);
+            return vm.reg(sb).i != 0;
+        });
+        for (size_t i = 0; i < n; i++)
+            arrayPush(vm, result, et, getArrayElem(vm, src, et, idx[i]));
+    });
     vm.reg(dst).o = result;
 }
 
@@ -464,21 +464,21 @@ void builtin_grade_array(VM& vm, u16 dst, u16, u16 ab) {
     auto* fnType = static_cast<FunctionType*>(fn->type_);
     Type* paramT = fnType->argTypes_.empty() ? nullptr : fnType->argTypes_[0];
     u16 elemWords = isLambdaInlineComposite(paramT) ? paramT->sizeWords_ : 1;
-    ArrayBackend ba = arrayBackendFor(et);
-    size_t n = getArraySize(src, ba);
-    std::vector<size_t> idx(n);
-    std::iota(idx.begin(), idx.end(), 0);
     u16 sb = vm.currentCodeBlock()->numRegs;
-    std::sort(idx.begin(), idx.end(), [&](size_t a, size_t b) {
-        // Phase 4g.26: slot-based reads, no boxing through getArrayElem.
-        placeLambdaArgFromArrayElem(vm, sb, src, ba, et, a);
-        placeLambdaArgFromArrayElem(vm, (u16)(sb + elemWords), src, ba, et, b);
-        callTwoArgs(vm, fn, sb);
-        return vm.reg(sb).i != 0;
-    });
     auto* result = new PodArray<i64>(vm.arrayType(vm.intType()));
-    result->v.resize(n);
-    for (size_t i = 0; i < n; i++) result->v[i] = (i64)idx[i];
+    dispatchBackend(arrayBackendFor(et), [&]<ArrayBackend B>() {
+        size_t n = getArraySize_t<B>(src);
+        std::vector<size_t> idx(n);
+        std::iota(idx.begin(), idx.end(), 0);
+        std::sort(idx.begin(), idx.end(), [&](size_t a, size_t b) {
+            placeLambdaArgFromArrayElem_t<B>(vm, sb, src, et, a);
+            placeLambdaArgFromArrayElem_t<B>(vm, (u16)(sb + elemWords), src, et, b);
+            callTwoArgs(vm, fn, sb);
+            return vm.reg(sb).i != 0;
+        });
+        result->v.resize(n);
+        for (size_t i = 0; i < n; i++) result->v[i] = (i64)idx[i];
+    });
     vm.reg(dst).o = result;
 }
 
@@ -757,22 +757,20 @@ void builtin_map_array(VM& vm, u16 dst, u16, u16 ab) {
     auto* fn = static_cast<Callable*>(vm.reg(ab+1).o);
     auto* srcType = static_cast<ArrayType*>(src->type_);
     Type* srcET = srcType->elemType_;
-    ArrayBackend srcBA = arrayBackendFor(srcET);
-    size_t n = getArraySize(src, srcBA);
     auto* fnType = static_cast<FunctionType*>(fn->type_);
-    (void)fnType;
     Type* resET = fnType->returnType_;
     auto* resAT = vm.arrayType(resET);
     auto* result = makeEmptyArray(resAT);
     u16 sb = vm.currentCodeBlock()->numRegs;
-    for (size_t i = 0; i < n; i++) {
-        // Phase 4g.26: read array element directly into the lambda's arg
-        // slot, no boxing.
-        placeLambdaArgFromArrayElem(vm, sb, src, srcBA, srcET, i);
-        callOneArg(vm, fn, sb);
-        readLambdaResult(vm, sb, resET);
-        arrayPush(vm, result, resET, vm.reg(sb));
-    }
+    dispatchBackend(arrayBackendFor(srcET), [&]<ArrayBackend B>() {
+        size_t n = getArraySize_t<B>(src);
+        for (size_t i = 0; i < n; i++) {
+            placeLambdaArgFromArrayElem_t<B>(vm, sb, src, srcET, i);
+            callOneArg(vm, fn, sb);
+            readLambdaResult(vm, sb, resET);
+            arrayPush(vm, result, resET, vm.reg(sb));
+        }
+    });
     vm.reg(dst).o = result;
 }
 
@@ -781,16 +779,16 @@ void builtin_filter_array(VM& vm, u16 dst, u16, u16 ab) {
     auto* fn = static_cast<Callable*>(vm.reg(ab+1).o);
     auto* at = static_cast<ArrayType*>(src->type_);
     Type* et = at->elemType_;
-    ArrayBackend ba = arrayBackendFor(et);
-    size_t n = getArraySize(src, ba);
     auto* result = makeEmptyArray(at);
     u16 sb = vm.currentCodeBlock()->numRegs;
-    for (size_t i = 0; i < n; i++) {
-        // Phase 4g.26: native slot read for the predicate arg.
-        placeLambdaArgFromArrayElem(vm, sb, src, ba, et, i);
-        callOneArg(vm, fn, sb);
-        if (vm.reg(sb).i) arrayPush(vm, result, et, getArrayElem(vm, src, et, i));
-    }
+    dispatchBackend(arrayBackendFor(et), [&]<ArrayBackend B>() {
+        size_t n = getArraySize_t<B>(src);
+        for (size_t i = 0; i < n; i++) {
+            placeLambdaArgFromArrayElem_t<B>(vm, sb, src, et, i);
+            callOneArg(vm, fn, sb);
+            if (vm.reg(sb).i) arrayPush(vm, result, et, getArrayElem(vm, src, et, i));
+        }
+    });
     vm.reg(dst).o = result;
 }
 
@@ -807,18 +805,19 @@ void builtin_fold_array(VM& vm, u16 dst, u16, u16 ab) {
     auto* fn = static_cast<Callable*>(vm.reg((u16)(ab + 1 + accSW)).o);
     auto* at = static_cast<ArrayType*>(src->type_);
     Type* et = at->elemType_;
-    ArrayBackend ba = arrayBackendFor(et);
-    size_t n = getArraySize(src, ba);
     u16 sb = vm.currentCodeBlock()->numRegs;
 
     Word const* accSrc = &vm.reg((u16)(ab + 1));
     for (u32 i = 0; i < accSW; ++i) vm.reg(sb + i) = accSrc[i];
     u16 elemSb = (u16)(sb + accSW);
 
-    for (size_t i = 0; i < n; i++) {
-        placeLambdaArgFromArrayElem(vm, elemSb, src, ba, et, i);
-        callTwoArgs(vm, fn, sb);
-    }
+    dispatchBackend(arrayBackendFor(et), [&]<ArrayBackend B>() {
+        size_t n = getArraySize_t<B>(src);
+        for (size_t i = 0; i < n; i++) {
+            placeLambdaArgFromArrayElem_t<B>(vm, elemSb, src, et, i);
+            callTwoArgs(vm, fn, sb);
+        }
+    });
 
     for (u32 i = 0; i < accSW; ++i) vm.reg(dst + i) = vm.reg(sb + i);
 }
@@ -836,8 +835,6 @@ void builtin_scan_array(VM& vm, u16 dst, u16, u16 ab) {
     auto* fnType = static_cast<FunctionType*>(fn->type_);
     Type* accET = fnType->returnType_;
     auto* resAT = vm.arrayType(accET);
-    ArrayBackend ba = arrayBackendFor(et);
-    size_t n = getArraySize(src, ba);
     auto* result = makeEmptyArray(resAT);
     u16 sb = vm.currentCodeBlock()->numRegs;
 
@@ -846,11 +843,14 @@ void builtin_scan_array(VM& vm, u16 dst, u16, u16 ab) {
     arrayPushFromSlot(vm, result, accET, &vm.reg(sb));
     u16 elemSb = (u16)(sb + accSW);
 
-    for (size_t i = 0; i < n; i++) {
-        placeLambdaArgFromArrayElem(vm, elemSb, src, ba, et, i);
-        callTwoArgs(vm, fn, sb);
-        arrayPushFromSlot(vm, result, accET, &vm.reg(sb));
-    }
+    dispatchBackend(arrayBackendFor(et), [&]<ArrayBackend B>() {
+        size_t n = getArraySize_t<B>(src);
+        for (size_t i = 0; i < n; i++) {
+            placeLambdaArgFromArrayElem_t<B>(vm, elemSb, src, et, i);
+            callTwoArgs(vm, fn, sb);
+            arrayPushFromSlot(vm, result, accET, &vm.reg(sb));
+        }
+    });
     vm.reg(dst).o = result;
 }
 
@@ -859,19 +859,20 @@ void builtin_fold1_array(VM& vm, u16 dst, u16, u16 ab) {
     auto* fn = static_cast<Callable*>(vm.reg(ab+1).o);
     auto* at = static_cast<ArrayType*>(src->type_);
     Type* et = at->elemType_;
-    ArrayBackend ba = arrayBackendFor(et);
-    size_t n = getArraySize(src, ba);
-    if (n == 0) { vm.reg(dst).i = 0; return; }
     // Phase 4g.27: native ABI; acc spans accSW words at sb.
     u32 accSW = (et && et->sizeWords_ > 0) ? et->sizeWords_ : 1;
     u16 sb = vm.currentCodeBlock()->numRegs;
-    placeLambdaArgFromArrayElem(vm, sb, src, ba, et, 0);  // acc = src[0]
     u16 elemSb = (u16)(sb + accSW);
-    for (size_t i = 1; i < n; i++) {
-        placeLambdaArgFromArrayElem(vm, elemSb, src, ba, et, i);
-        callTwoArgs(vm, fn, sb);
-    }
-    for (u32 i = 0; i < accSW; ++i) vm.reg(dst + i) = vm.reg(sb + i);
+    dispatchBackend(arrayBackendFor(et), [&]<ArrayBackend B>() {
+        size_t n = getArraySize_t<B>(src);
+        if (n == 0) { vm.reg(dst).i = 0; return; }
+        placeLambdaArgFromArrayElem_t<B>(vm, sb, src, et, 0);  // acc = src[0]
+        for (size_t i = 1; i < n; i++) {
+            placeLambdaArgFromArrayElem_t<B>(vm, elemSb, src, et, i);
+            callTwoArgs(vm, fn, sb);
+        }
+        for (u32 i = 0; i < accSW; ++i) vm.reg(dst + i) = vm.reg(sb + i);
+    });
 }
 
 void builtin_scan1_array(VM& vm, u16 dst, u16, u16 ab) {
@@ -879,21 +880,22 @@ void builtin_scan1_array(VM& vm, u16 dst, u16, u16 ab) {
     auto* fn = static_cast<Callable*>(vm.reg(ab+1).o);
     auto* at = static_cast<ArrayType*>(src->type_);
     Type* et = at->elemType_;
-    ArrayBackend ba = arrayBackendFor(et);
-    size_t n = getArraySize(src, ba);
     auto* result = makeEmptyArray(at);
-    if (n == 0) { vm.reg(dst).o = result; return; }
     // Phase 4g.27: native ABI; acc spans accSW words at sb.
     u32 accSW = (et && et->sizeWords_ > 0) ? et->sizeWords_ : 1;
     u16 sb = vm.currentCodeBlock()->numRegs;
-    placeLambdaArgFromArrayElem(vm, sb, src, ba, et, 0);
-    arrayPushFromSlot(vm, result, et, &vm.reg(sb));
     u16 elemSb = (u16)(sb + accSW);
-    for (size_t i = 1; i < n; i++) {
-        placeLambdaArgFromArrayElem(vm, elemSb, src, ba, et, i);
-        callTwoArgs(vm, fn, sb);
+    dispatchBackend(arrayBackendFor(et), [&]<ArrayBackend B>() {
+        size_t n = getArraySize_t<B>(src);
+        if (n == 0) return;
+        placeLambdaArgFromArrayElem_t<B>(vm, sb, src, et, 0);
         arrayPushFromSlot(vm, result, et, &vm.reg(sb));
-    }
+        for (size_t i = 1; i < n; i++) {
+            placeLambdaArgFromArrayElem_t<B>(vm, elemSb, src, et, i);
+            callTwoArgs(vm, fn, sb);
+            arrayPushFromSlot(vm, result, et, &vm.reg(sb));
+        }
+    });
     vm.reg(dst).o = result;
 }
 
@@ -902,16 +904,17 @@ void builtin_find_array(VM& vm, u16 dst, u16, u16 ab) {
     auto* fn = static_cast<Callable*>(vm.reg(ab+1).o);
     auto* at = static_cast<ArrayType*>(src->type_);
     Type* et = at->elemType_;
-    ArrayBackend ba = arrayBackendFor(et);
-    size_t n = getArraySize(src, ba);
     u16 sb = vm.currentCodeBlock()->numRegs;
-    for (size_t i = 0; i < n; i++) {
-        // Phase 4g.26: native slot read into the predicate's arg slot.
-        placeLambdaArgFromArrayElem(vm, sb, src, ba, et, i);
-        callOneArg(vm, fn, sb);
-        if (vm.reg(sb).i) { vm.reg(dst).i = (i64)i; return; }
-    }
-    vm.reg(dst).i = -1;
+    i64 found = -1;
+    dispatchBackend(arrayBackendFor(et), [&]<ArrayBackend B>() {
+        size_t n = getArraySize_t<B>(src);
+        for (size_t i = 0; i < n; i++) {
+            placeLambdaArgFromArrayElem_t<B>(vm, sb, src, et, i);
+            callOneArg(vm, fn, sb);
+            if (vm.reg(sb).i) { found = (i64)i; return; }
+        }
+    });
+    vm.reg(dst).i = found;
 }
 
 void builtin_takeWhile_array(VM& vm, u16 dst, u16, u16 ab) {
@@ -919,16 +922,17 @@ void builtin_takeWhile_array(VM& vm, u16 dst, u16, u16 ab) {
     auto* fn = static_cast<Callable*>(vm.reg(ab+1).o);
     auto* at = static_cast<ArrayType*>(src->type_);
     Type* et = at->elemType_;
-    ArrayBackend ba = arrayBackendFor(et);
-    size_t n = getArraySize(src, ba);
     auto* result = makeEmptyArray(at);
     u16 sb = vm.currentCodeBlock()->numRegs;
-    for (size_t i = 0; i < n; i++) {
-        placeLambdaArgFromArrayElem(vm, sb, src, ba, et, i);
-        callOneArg(vm, fn, sb);
-        if (!vm.reg(sb).i) break;
-        arrayPush(vm, result, et, getArrayElem(vm, src, et, i));
-    }
+    dispatchBackend(arrayBackendFor(et), [&]<ArrayBackend B>() {
+        size_t n = getArraySize_t<B>(src);
+        for (size_t i = 0; i < n; i++) {
+            placeLambdaArgFromArrayElem_t<B>(vm, sb, src, et, i);
+            callOneArg(vm, fn, sb);
+            if (!vm.reg(sb).i) return;
+            arrayPush(vm, result, et, getArrayElem(vm, src, et, i));
+        }
+    });
     vm.reg(dst).o = result;
 }
 
@@ -937,20 +941,21 @@ void builtin_dropWhile_array(VM& vm, u16 dst, u16, u16 ab) {
     auto* fn = static_cast<Callable*>(vm.reg(ab+1).o);
     auto* at = static_cast<ArrayType*>(src->type_);
     Type* et = at->elemType_;
-    ArrayBackend ba = arrayBackendFor(et);
-    size_t n = getArraySize(src, ba);
     auto* result = makeEmptyArray(at);
     u16 sb = vm.currentCodeBlock()->numRegs;
     bool dropping = true;
-    for (size_t i = 0; i < n; i++) {
-        if (dropping) {
-            placeLambdaArgFromArrayElem(vm, sb, src, ba, et, i);
-            callOneArg(vm, fn, sb);
-            if (vm.reg(sb).i) continue;
-            dropping = false;
+    dispatchBackend(arrayBackendFor(et), [&]<ArrayBackend B>() {
+        size_t n = getArraySize_t<B>(src);
+        for (size_t i = 0; i < n; i++) {
+            if (dropping) {
+                placeLambdaArgFromArrayElem_t<B>(vm, sb, src, et, i);
+                callOneArg(vm, fn, sb);
+                if (vm.reg(sb).i) continue;
+                dropping = false;
+            }
+            arrayPush(vm, result, et, getArrayElem(vm, src, et, i));
         }
-        arrayPush(vm, result, et, getArrayElem(vm, src, et, i));
-    }
+    });
     vm.reg(dst).o = result;
 }
 
