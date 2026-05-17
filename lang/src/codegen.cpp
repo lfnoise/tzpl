@@ -86,6 +86,54 @@ void CodeGen::clearConst(u16 reg) {
     constRegs_.erase(reg);
 }
 
+// Whitelist of ops whose regs[0] is a write-once destination and whose
+// implementation reads its source operands before writing the destination
+// (so it is safe to redirect dst to a register that aliases one of the
+// sources, e.g. `j = j + 1` after redirecting becomes `ADDI_INT j, j, 1`).
+// Ops where regs[0] is a *source* (op_return, op_store_global, op_jump_if_*)
+// are excluded.
+static bool isRedirectableProducer(Operation op) {
+    return op == op_mov
+        || op == op_load_int_const
+        || op == op_load_float_const
+        || op == op_load_bool_true
+        || op == op_load_bool_false
+        || op == op_load_nil
+        || op == op_load_obj
+        || op == op_load_global
+        || op == op_load_global_inline
+        || op == op_add_int      || op == op_sub_int      || op == op_mul_int
+        || op == op_div_int      || op == op_mod_int      || op == op_neg_int
+        || op == op_add_int_imm  || op == op_sub_int_imm  || op == op_mul_int_imm
+        || op == op_add_float    || op == op_sub_float    || op == op_mul_float
+        || op == op_div_float    || op == op_neg_float
+        || op == op_cmp_eq_int   || op == op_cmp_ne_int
+        || op == op_cmp_lt_int   || op == op_cmp_le_int
+        || op == op_cmp_gt_int   || op == op_cmp_ge_int
+        || op == op_cmp_eq_int_imm || op == op_cmp_ne_int_imm
+        || op == op_cmp_lt_int_imm || op == op_cmp_le_int_imm
+        || op == op_cmp_gt_int_imm || op == op_cmp_ge_int_imm
+        || op == op_cmp_eq_float || op == op_cmp_ne_float
+        || op == op_cmp_lt_float || op == op_cmp_le_float
+        || op == op_cmp_gt_float || op == op_cmp_ge_float;
+}
+
+bool CodeGen::tryFuseRedirect(u16 from, u16 to, u32 nWords, u32 producerEmittedAt) {
+    if (!enableConstFold) return false;     // Same gate as other peepholes.
+    if (nWords != 1) return false;          // Multi-word slots span > 1 reg.
+    if (from == to) return true;            // Already in place; caller can skip MOV.
+    if (lastProducerSlot_ < 0) return false;
+    if ((u32)lastProducerSlot_ < producerEmittedAt) return false; // Producer is from an earlier statement.
+    if (lastProducerDst_ != from) return false;
+    Code& slot = currentBlock_->code[lastProducerSlot_];
+    if (slot.regs[0] != from) return false; // Defensive: tracking is consistent.
+    Operation op = currentBlock_->code[lastProducerSlot_ - 1].op;
+    if (!isRedirectableProducer(op)) return false;
+    slot.regs[0] = to;
+    lastProducerDst_ = to;
+    return true;
+}
+
 void CodeGen::clearConstsForMutableLocals() {
     // Mutable locals are reassigned imperatively; their const tracking from the
     // initializer is only valid until the first reassignment. Inside a loop body
@@ -143,6 +191,9 @@ u32 CodeGen::emitJump(Operation jumpOp, u16 condReg) {
     u32 patchPos = (u32)currentBlock_->code.size();
     emitInt(0);  // Placeholder for jump target index (will be patched)
     jumpFixups_.push_back(patchPos);
+    // After a jump, anything we tracked as the last producer is no longer
+    // adjacent in straight-line code.
+    invalidateLastProducer();
     return patchPos;
 }
 
@@ -150,6 +201,9 @@ void CodeGen::patchJump(u32 jumpPos) {
     // Store the current code position as the jump target index
     u32 targetIdx = (u32)currentBlock_->code.size();
     currentBlock_->code[jumpPos].i = (i64)targetIdx;
+    // The current position is now a jump landing site. Producer info from the
+    // fall-through path is not valid for the joined control flow.
+    invalidateLastProducer();
 }
 
 void CodeGen::emitJumpTo(u32 targetIdx) {
@@ -157,6 +211,7 @@ void CodeGen::emitJumpTo(u32 targetIdx) {
     u32 pos = (u32)currentBlock_->code.size();
     emitInt((i64)targetIdx);
     jumpFixups_.push_back(pos);
+    invalidateLastProducer();
 }
 
 void CodeGen::resolveJumps(CodeBlock* block) {
@@ -2288,6 +2343,7 @@ void CodeGen::genReturnStmt(ReturnStmtNode* stmt) {
 }
 
 void CodeGen::genAssignStmt(AssignStmtNode* stmt) {
+    u32 sizeBeforeRhs = (u32)currentBlock_->code.size();
     u16 valReg = genExpr(static_cast<Expr*>(stmt->value.get()));
     Type* valType = stmt->value->resolvedType;
 
@@ -2301,9 +2357,16 @@ void CodeGen::genAssignStmt(AssignStmtNode* stmt) {
     // Check local first
     LocalVar* local = lookupLocal(stmt->target);
     if (local) {
-        if (local->reg != valReg) {
-            // Phase 4f: multi-word inline locals need MOV_N.
-            emitMoveN(local->reg, valReg, typeSlotWords(local->type));
+        u32 nWords = typeSlotWords(local->type);
+        // Fuse: if the RHS's last emission wrote into a fresh temp `valReg`,
+        // patch its destination to be `local->reg` directly and drop the MOV.
+        // Falls back to MOV when the RHS produced a borrowed reg (identifier)
+        // or its producer isn't safely redirectable.
+        if (local->reg != valReg
+            && tryFuseRedirect(valReg, local->reg, nWords, sizeBeforeRhs)) {
+            // Producer now writes into local->reg directly; no MOV needed.
+        } else if (local->reg != valReg) {
+            emitMoveN(local->reg, valReg, nWords);
         }
         // Reassignment invalidates any const tracking on the target. The const
         // folder's view is built from the initializer's RHS and is only valid

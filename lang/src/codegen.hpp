@@ -186,10 +186,31 @@ private:
     void emitOp(Operation op) { currentBlock_->emitOp(op); }
     void emitRegs(u16 r0, u16 r1 = 0, u16 r2 = 0, u16 r3 = 0) {
         currentBlock_->emitRegs(r0, r1, r2, r3);
+        // Track the position of the regs slot just emitted so a subsequent
+        // arith->MOV pattern can redirect the previous instruction's destination
+        // instead of emitting the MOV. Whether redirection is safe is decided
+        // at the redirection site by inspecting the opcode at slot-1.
+        lastProducerSlot_ = (i32)(currentBlock_->code.size() - 1);
+        lastProducerDst_  = r0;
     }
     void emitInt(i64 val) { currentBlock_->emitInt(val); }
     void emitFloat(f64 val) { currentBlock_->emitFloat(val); }
     void emitPtr(void* p) { currentBlock_->emitPtr(p); }
+
+    // Producer tracking for arith->MOV fusion in genAssignStmt. Reset whenever
+    // control flow can join (patchJump) or branch away (after emitJump).
+    i32 lastProducerSlot_ = -1;
+    u16 lastProducerDst_ = 0;
+    void invalidateLastProducer() {
+        lastProducerSlot_ = -1;
+    }
+    // If the last emitted instruction wrote a single-word value to `from`
+    // and is in the redirectable-producer whitelist, patch its destination to
+    // `to` and return true. The `producerEmittedAt` parameter is the code size
+    // saved BEFORE the expression that yielded `from` was generated; this guards
+    // against fusing with a producer emitted by an unrelated earlier statement
+    // when the expression itself was a bare identifier (no emission).
+    bool tryFuseRedirect(u16 from, u16 to, u32 nWords, u32 producerEmittedAt);
 
     // Multi-word slot move (Phase 4): falls back to op_mov when nWords == 1.
     void emitMoveN(u16 dst, u16 src, u32 nWords) {
