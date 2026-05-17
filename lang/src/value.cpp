@@ -241,9 +241,11 @@ void ListNode::force(VM& vm) {
 BinopListGen::BinopListGen(Type* type)
     : ListGenerator(type)
     , opKind_(Add)
+    , broadcastForm_(BFWord)
     , leftList_(nullptr)
     , rightList_(nullptr)
     , broadcastVal_()
+    , broadcastSlots_{}
     , broadcastIsLeft_(false)
     , broadcastValIsObj_(false)
     , leftElemType_(nullptr)

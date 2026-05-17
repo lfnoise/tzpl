@@ -498,10 +498,19 @@ class BinopListGen : public ListGenerator {
 public:
     enum OpKind { Add = 0, Sub, Mul, Div };
 
+    // How the broadcast scalar is stored. BFWord uses broadcastVal_ as a
+    // single Word (legacy path, including heap-boxed Inline operands).
+    // BFComplex/BFFraction store the native 2-word value in
+    // broadcastSlots_, with no heap mirror. Phase 4g.35: lets
+    // List<X> +/-/*// Complex/Fraction skip the operand boxing.
+    enum BroadcastForm : u8 { BFWord = 0, BFComplex = 1, BFFraction = 2 };
+
     OpKind opKind_;
+    BroadcastForm broadcastForm_;
     ListNode* leftList_;      // non-null if left operand is a list
     ListNode* rightList_;     // non-null if right operand is a list
-    Word broadcastVal_;       // scalar broadcast value (used when one side is not a list)
+    Word broadcastVal_;       // scalar broadcast value (BFWord only)
+    Word broadcastSlots_[2];  // native x64 / r64 bits (BFComplex/BFFraction)
     bool broadcastIsLeft_;    // true: scalar is left operand, list is right
     bool broadcastValIsObj_;  // true if broadcastVal_ is an Obj* that needs GC scanning
     Type* leftElemType_;      // element type of left operand

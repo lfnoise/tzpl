@@ -2342,6 +2342,93 @@ static inline Word compositeBinopTopLevel(VM& vm, Op op, u16 a, u16 b,
         fractionScalarFallthrough:;
     }
 
+    // Phase 4g.35: List + Inline Complex/Fraction broadcast -- construct
+    // BinopListGen directly with the native scalar in broadcastSlots_, no
+    // heap mirror. Per-cell math also bypasses dispatchBinop and writes
+    // x64/r64 straight into the list cell's payload.
+    auto* rLT = dynamic_cast<ListType*>(resultType);
+    if (rLT) {
+        Type* resultElem = rLT->elemType_;
+        auto* aLT = dynamic_cast<ListType*>(aType);
+        auto* bLT = dynamic_cast<ListType*>(bType);
+
+        auto buildInlineBcast = [&](BinopListGen::BroadcastForm form,
+                                    Word w0, Word w1) -> Word {
+            BinopListGen::OpKind opKind;
+            if constexpr (std::is_same<Op, OpAdd>::value) opKind = BinopListGen::Add;
+            else if constexpr (std::is_same<Op, OpSub>::value) opKind = BinopListGen::Sub;
+            else if constexpr (std::is_same<Op, OpMul>::value) opKind = BinopListGen::Mul;
+            else opKind = BinopListGen::Div;
+
+            ListNode* listSrc;
+            Type* listElemType;
+            Type* scalarType;
+            bool scalarOnLeft;
+            if (aLT) {
+                listSrc = static_cast<ListNode*>(vm.reg(a).o);
+                listElemType = aLT->elemType_;
+                scalarType = bType;
+                scalarOnLeft = false;
+            } else {
+                listSrc = static_cast<ListNode*>(vm.reg(b).o);
+                listElemType = bLT->elemType_;
+                scalarType = aType;
+                scalarOnLeft = true;
+            }
+            if (listSrc == nullptr) return Word(static_cast<Obj*>(nullptr));
+
+            auto* node = ListNode::create(rLT);
+            auto* gen = new BinopListGen(vm.typeType());
+            gen->opKind_ = opKind;
+            gen->broadcastForm_ = form;
+            gen->resultListType_ = rLT;
+            gen->resultElemType_ = resultElem;
+            gen->broadcastSlots_[0] = w0;
+            gen->broadcastSlots_[1] = w1;
+            gen->broadcastIsLeft_ = scalarOnLeft;
+            gen->broadcastValIsObj_ = false;
+            if (scalarOnLeft) {
+                gen->leftList_ = nullptr;
+                gen->rightList_ = listSrc;
+                gen->leftElemType_ = scalarType;
+                gen->rightElemType_ = listElemType;
+            } else {
+                gen->leftList_ = listSrc;
+                gen->rightList_ = nullptr;
+                gen->leftElemType_ = listElemType;
+                gen->rightElemType_ = scalarType;
+            }
+            listSrc->retain();
+            node->installGenerator(gen);
+            return Word(static_cast<Obj*>(node));
+        };
+
+        if constexpr (bool(Op::flags & mathOpComplexArgs)) {
+            if (resultElem == vm.complexType()) {
+                if (aLT && bType == vm.complexType()) {
+                    return buildInlineBcast(BinopListGen::BFComplex,
+                                            vm.reg(b), vm.reg(b+1));
+                }
+                if (aType == vm.complexType() && bLT) {
+                    return buildInlineBcast(BinopListGen::BFComplex,
+                                            vm.reg(a), vm.reg(a+1));
+                }
+            }
+        }
+        if constexpr (bool(Op::flags & mathOpFractionArgs)) {
+            if (resultElem == vm.fractionType()) {
+                if (aLT && bType == vm.fractionType()) {
+                    return buildInlineBcast(BinopListGen::BFFraction,
+                                            vm.reg(b), vm.reg(b+1));
+                }
+                if (aType == vm.fractionType() && bLT) {
+                    return buildInlineBcast(BinopListGen::BFFraction,
+                                            vm.reg(a), vm.reg(a+1));
+                }
+            }
+        }
+    }
+
     // Array/List result -- box any remaining Inline operand (Tuple/Struct/
     // Enum, or mixed-type Complex/Fraction cases not caught above) so
     // dispatchBinop's single-Word path can broadcast/zip it scalar-style.
@@ -2816,10 +2903,113 @@ static Word dispatchBinopByKind(VM& vm, BinopListGen::OpKind kind,
     return Word((i64)0);
 }
 
+// Phase 4g.35: read a list head as a native x64, converting from the cell's
+// natural element representation. The list cell stores the element either
+// inline at headData()[0..payloadWords_-1] (multi-word: Complex/Fraction)
+// or in head_ (single-word: Int/Float/Fraction-as-r64-in-2-words/Complex-
+// as-x64-in-2-words). Caller guarantees elemType is a numeric scalar so
+// the conversion is well-defined.
+static x64 readListHeadAsX64(VM& vm, ListNode* node, Type* elemType) {
+    if (elemType == vm.complexType()) {
+        Word const* dh = node->headData();
+        return x64(dh[0].f, dh[1].f);
+    }
+    if (elemType == vm.fractionType()) {
+        Word const* dh = node->headData();
+        return x64((f64)r64(dh[0].i, dh[1].i, true), 0.0);
+    }
+    if (elemType == vm.floatType()) return x64(node->head_.f, 0.0);
+    return x64((f64)node->head_.i, 0.0);
+}
+
+static r64 readListHeadAsR64(VM& vm, ListNode* node, Type* elemType) {
+    if (elemType == vm.fractionType()) {
+        Word const* dh = node->headData();
+        return r64(dh[0].i, dh[1].i, true);
+    }
+    return r64(node->head_.i);
+}
+
+static x64 applyOpX64(BinopListGen::OpKind kind, x64 a, x64 b) {
+    switch (kind) {
+        case BinopListGen::Add: return a + b;
+        case BinopListGen::Sub: return a - b;
+        case BinopListGen::Mul: return a * b;
+        case BinopListGen::Div: return a / b;
+    }
+    return x64();
+}
+
+static r64 applyOpR64(BinopListGen::OpKind kind, r64 a, r64 b) {
+    switch (kind) {
+        case BinopListGen::Add: return a + b;
+        case BinopListGen::Sub: return a - b;
+        case BinopListGen::Mul: return a * b;
+        case BinopListGen::Div: return a / b;
+    }
+    return r64(0);
+}
+
 void BinopListGen::generate(VM& vm, ListNode* owner) {
     // Force source nodes if they are lazy
     if (leftList_) leftList_->force(vm);
     if (rightList_) rightList_->force(vm);
+
+    // Phase 4g.35: fast path for Inline Complex/Fraction broadcast. The
+    // broadcast value lives natively in broadcastSlots_, no heap mirror.
+    // Read the list head as a native scalar, apply the op natively, write
+    // the result directly into owner->headData() -- no per-cell heap
+    // Complex/Fraction allocated.
+    if (broadcastForm_ == BFComplex) {
+        ListNode* listSrc = leftList_ ? leftList_ : rightList_;
+        Type* listElemType = leftList_ ? leftElemType_ : rightElemType_;
+        x64 bx(broadcastSlots_[0].f, broadcastSlots_[1].f);
+        x64 lx = readListHeadAsX64(vm, listSrc, listElemType);
+        x64 r = broadcastIsLeft_ ? applyOpX64(opKind_, bx, lx)
+                                 : applyOpX64(opKind_, lx, bx);
+        Word* dh = owner->headData();
+        dh[0].f = r.real();
+        dh[1].f = r.imag();
+
+        ListNode* nextSrc = listSrc->tail_;
+        if (nextSrc == nullptr) {
+            owner->tail_ = nullptr;
+        } else {
+            auto* tailNode = ListNode::create(resultListType_);
+            nextSrc->retain();
+            listSrc->release();
+            if (leftList_) leftList_ = nextSrc; else rightList_ = nextSrc;
+            tailNode->installGenerator(this);
+            owner->tail_ = tailNode;
+            tailNode->retain();
+        }
+        return;
+    }
+    if (broadcastForm_ == BFFraction) {
+        ListNode* listSrc = leftList_ ? leftList_ : rightList_;
+        Type* listElemType = leftList_ ? leftElemType_ : rightElemType_;
+        r64 br(broadcastSlots_[0].i, broadcastSlots_[1].i, true);
+        r64 lr = readListHeadAsR64(vm, listSrc, listElemType);
+        r64 r = broadcastIsLeft_ ? applyOpR64(opKind_, br, lr)
+                                 : applyOpR64(opKind_, lr, br);
+        Word* dh = owner->headData();
+        dh[0].i = r.numer();
+        dh[1].i = r.denom();
+
+        ListNode* nextSrc = listSrc->tail_;
+        if (nextSrc == nullptr) {
+            owner->tail_ = nullptr;
+        } else {
+            auto* tailNode = ListNode::create(resultListType_);
+            nextSrc->retain();
+            listSrc->release();
+            if (leftList_) leftList_ = nextSrc; else rightList_ = nextSrc;
+            tailNode->installGenerator(this);
+            owner->tail_ = tailNode;
+            tailNode->retain();
+        }
+        return;
+    }
 
     // Determine head operands. Phase 4g.20: list heads of Inline composite
     // element types (Tuple/Struct/Enum and Complex/Fraction) are stored as
