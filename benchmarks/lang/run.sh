@@ -23,6 +23,8 @@ BENCHES=(
     "spectral_norm        spectral_norm        spectral_norm"
     "binary_trees         binary_trees         binary_trees"
     "fannkuch_redux       fannkuch_redux       fannkuch_redux"
+    "fasta                fasta                fasta"
+    "matmul               matmul               matmul"
 )
 
 time_one() {
