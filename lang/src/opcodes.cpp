@@ -1703,6 +1703,20 @@ static Word dispatchArrayBinop(VM& vm, Op op, Word a, Word b,
                         static_cast<PodArray<f64>*>(a.o),
                         static_cast<PodArray<f64>*>(b.o), resultAT)));
             }
+            // Phase 4g.32: Complex/Fraction fast paths -- avoid the per-element
+            // heap Complex/Fraction allocation the generic loop would do.
+            if constexpr (bool(Op::flags & mathOpComplexArgs)) {
+                if (resultElem == vm.complexType())
+                    return Word(static_cast<Obj*>(podArrayLoop(op,
+                        static_cast<PodArray<x64>*>(a.o),
+                        static_cast<PodArray<x64>*>(b.o), resultAT)));
+            }
+            if constexpr (bool(Op::flags & mathOpFractionArgs)) {
+                if (resultElem == vm.fractionType())
+                    return Word(static_cast<Obj*>(podArrayLoop(op,
+                        static_cast<PodArray<r64>*>(a.o),
+                        static_cast<PodArray<r64>*>(b.o), resultAT)));
+            }
         }
 
         // Generic path: per-element recursive dispatch. Hoist backend
@@ -1740,6 +1754,22 @@ static Word dispatchArrayBinop(VM& vm, Op op, Word a, Word b,
                     return Word(static_cast<Obj*>(podArrayScalarLoop(op,
                         static_cast<PodArray<f64>*>(a.o), b.f, resultAT)));
             }
+            // Phase 4g.32: Complex/Fraction array-scalar fast paths. The
+            // boxed scalar b carries the value as a heap Complex*/Fraction*;
+            // extract once into x64/r64 and run a tight POD loop instead of
+            // allocating a fresh heap Complex/Fraction per element.
+            if constexpr (bool(Op::flags & mathOpComplexArgs)) {
+                if (resultElem == vm.complexType())
+                    return Word(static_cast<Obj*>(podArrayScalarLoop(op,
+                        static_cast<PodArray<x64>*>(a.o),
+                        static_cast<Complex*>(b.o)->x, resultAT)));
+            }
+            if constexpr (bool(Op::flags & mathOpFractionArgs)) {
+                if (resultElem == vm.fractionType())
+                    return Word(static_cast<Obj*>(podArrayScalarLoop(op,
+                        static_cast<PodArray<r64>*>(a.o),
+                        static_cast<Fraction*>(b.o)->r, resultAT)));
+            }
         }
 
         // Generic path
@@ -1769,6 +1799,19 @@ static Word dispatchArrayBinop(VM& vm, Op op, Word a, Word b,
             if (resultElem == vm.floatType())
                 return Word(static_cast<Obj*>(podScalarArrayLoop(op,
                     a.f, static_cast<PodArray<f64>*>(b.o), resultAT)));
+        }
+        // Phase 4g.32: Complex/Fraction scalar-array fast paths.
+        if constexpr (bool(Op::flags & mathOpComplexArgs)) {
+            if (resultElem == vm.complexType())
+                return Word(static_cast<Obj*>(podScalarArrayLoop(op,
+                    static_cast<Complex*>(a.o)->x,
+                    static_cast<PodArray<x64>*>(b.o), resultAT)));
+        }
+        if constexpr (bool(Op::flags & mathOpFractionArgs)) {
+            if (resultElem == vm.fractionType())
+                return Word(static_cast<Obj*>(podScalarArrayLoop(op,
+                    static_cast<Fraction*>(a.o)->r,
+                    static_cast<PodArray<r64>*>(b.o), resultAT)));
         }
     }
 
@@ -2010,6 +2053,27 @@ static Word dispatchArrayUnaryOp(VM& vm, Op op, Word a, Type* aType, ArrayType* 
             if (resultElem == vm.floatType()) {
                 auto* pa = static_cast<PodArray<f64>*>(a.o);
                 auto* r = new PodArray<f64>(resultAT);
+                r->v.resize(len);
+                for (usize i = 0; i < len; ++i)
+                    r->v[i] = op(pa->v[i]);
+                return Word(static_cast<Obj*>(r));
+            }
+        }
+        // Phase 4g.32: Complex/Fraction unary fast paths.
+        if constexpr (bool(Op::flags & mathOpComplexArgs)) {
+            if (resultElem == vm.complexType()) {
+                auto* pa = static_cast<PodArray<x64>*>(a.o);
+                auto* r = new PodArray<x64>(resultAT);
+                r->v.resize(len);
+                for (usize i = 0; i < len; ++i)
+                    r->v[i] = op(pa->v[i]);
+                return Word(static_cast<Obj*>(r));
+            }
+        }
+        if constexpr (bool(Op::flags & mathOpFractionArgs)) {
+            if (resultElem == vm.fractionType()) {
+                auto* pa = static_cast<PodArray<r64>*>(a.o);
+                auto* r = new PodArray<r64>(resultAT);
                 r->v.resize(len);
                 for (usize i = 0; i < len; ++i)
                     r->v[i] = op(pa->v[i]);
