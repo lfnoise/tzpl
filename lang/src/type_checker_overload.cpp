@@ -47,6 +47,21 @@ bool TypeChecker::isNumeric(Type* t) const {
     return false;
 }
 
+bool TypeChecker::containsComplex(Type* t) const {
+    if (!t) return false;
+    if (t == compiler_.complexType()) return true;
+    if (auto* at = dynamic_cast<ArrayType*>(t))
+        return containsComplex(at->elemType_);
+    if (auto* lt = dynamic_cast<ListType*>(t))
+        return containsComplex(lt->elemType_);
+    if (auto* tt = dynamic_cast<TupleType*>(t)) {
+        for (Type* f : tt->fields_)
+            if (containsComplex(f)) return true;
+        return false;
+    }
+    return false;
+}
+
 bool TypeChecker::isBoolComposite(Type* t) const {
     if (t == compiler_.boolType()) return true;
     if (auto* at = dynamic_cast<ArrayType*>(t))

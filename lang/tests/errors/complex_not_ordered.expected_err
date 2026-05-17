@@ -1,0 +1,29 @@
+Type error [tests/errors/complex_not_ordered.x:6:12]
+  |
+6 | println(c1 < c2);
+  |            ^
+  Complex numbers are not ordered
+
+Type error [tests/errors/complex_not_ordered.x:7:13]
+  |
+7 | println(arr < c1);
+  |             ^
+  Complex numbers are not ordered
+
+Type error [tests/errors/complex_not_ordered.x:8:13]
+  |
+8 | println(arr <= c1);
+  |             ^^
+  Complex numbers are not ordered
+
+Type error [tests/errors/complex_not_ordered.x:9:13]
+  |
+9 | println(arr > c1);
+  |             ^
+  Complex numbers are not ordered
+
+Type error [tests/errors/complex_not_ordered.x:10:13]
+   |
+10 | println(arr >= c1);
+   |             ^^
+   Complex numbers are not ordered

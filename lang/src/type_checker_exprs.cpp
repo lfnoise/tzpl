@@ -910,6 +910,16 @@ Type* TypeChecker::inferBinaryOp(BinaryOpExpr* expr) {
                 return compiler_.boolType();
             }
             if (isNumeric(leftType) && isNumeric(rightType)) {
+                // Complex numbers have no total order. Reject ordering ops on
+                // any operand whose type contains Complex (scalar Complex,
+                // Array[Complex], List[Complex], Tuple containing Complex,
+                // etc.). Has to fire before the auto-map / tuple branches,
+                // since those would otherwise wrap Array/Tuple<Complex> and
+                // return a composite Bool result, hiding the error.
+                if (containsComplex(leftType) || containsComplex(rightType)) {
+                    error(expr->loc, "Complex numbers are not ordered");
+                    return compiler_.boolType();
+                }
                 // Check for implicit auto-mapping with Array/List
                 auto* leftArr = dynamic_cast<ArrayType*>(leftType);
                 auto* leftList = dynamic_cast<ListType*>(leftType);
@@ -928,10 +938,6 @@ Type* TypeChecker::inferBinaryOp(BinaryOpExpr* expr) {
                 auto* rightTup = dynamic_cast<TupleType*>(rightType);
                 if ((leftTup || rightTup) && leftType != rightType) {
                     return comparisonResultType(leftType, rightType);
-                }
-                if (leftType == compiler_.complexType() || rightType == compiler_.complexType()) {
-                    error(expr->loc, "Complex numbers are not ordered");
-                    return compiler_.boolType();
                 }
                 return compiler_.boolType();
             }

@@ -485,6 +485,11 @@ private:
     bool isNumeric(Type* t) const;
     bool isBoolComposite(Type* t) const;
     bool isIntComposite(Type* t) const;
+    // Returns true if t is Complex, or recursively an Array/List/Tuple whose
+    // element or field type contains Complex. Used to reject ordering
+    // operators (<, <=, >, >=) on values that contain a Complex anywhere --
+    // complex numbers have no total order.
+    bool containsComplex(Type* t) const;
     bool typesEqual(Type* a, Type* b) const;
     // Compare types by structural string representation. Used to recognise that
     // a stale Type* in Compiler::dynamicVars_ refers to the same logical type as

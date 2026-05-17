@@ -282,7 +282,11 @@ Operation CodeGen::getCmpOp(BinaryOpExpr::Op op, Type* type) {
         switch (op) {
             case BinaryOpExpr::Eq: return op_cmp_eq_complex;
             case BinaryOpExpr::Ne: return op_cmp_ne_complex;
-            default: return op_cmp_eq_complex;
+            // Ordering ops on Complex are rejected by the type checker
+            // (containsComplex check). Reaching here is a type-checker bug.
+            default:
+                assert(false && "ordering operator emitted for Complex operand");
+                return op_cmp_eq_complex;
         }
     }
     if (type == compiler_.fractionType()) {
