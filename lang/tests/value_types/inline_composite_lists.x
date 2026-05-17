@@ -123,3 +123,24 @@ find([1.0+2.0i, 3.0+4.0i], fn(c Complex) Bool { c == (3.0+4.0i) }) println;
 
 takeWhile([1/2, 1/4, 3/4], fn(f Fraction) Bool { f < 1/1 }) println;
 dropWhile([1/2, 1/4, 3/4], fn(f Fraction) Bool { f < 1/1 }) println;
+
+-- Phase 4g.26: widened lambda ABI -- list-head / array-elem reads flow
+-- directly into the lambda's arg slot window without the intermediate
+-- box-then-unbox round-trip. Same ops as before; verifying nothing
+-- regressed for Complex/Fraction/Inline composite lambdas now that the
+-- box helpers are no longer in the hot path.
+struct Pq { a Int; b Int }
+let csW = List(1.0+2.0i, 3.0+4.0i, 5.0+6.0i);
+let fsW = List(1/2, 3/4, 5/6);
+let psW = List(Pq{a:1, b:2}, Pq{a:3, b:4}, Pq{a:5, b:6});
+map(csW, fn(c Complex) Complex { c * (2.0+0.0i) }) println;
+map(fsW, fn(f Fraction) Fraction { f + 1/4 }) println;
+map(psW, fn(p Pq) Pq { Pq{a: p.a*10, b: p.b*10} }) println;
+filter(csW, fn(c Complex) Bool { c == (3.0+4.0i) }) length println;
+find(fsW, fn(f Fraction) Bool { f == 3/4 }) println;
+find(psW, fn(p Pq) Bool { p.a == 3 }) println;
+takeWhile(fsW, fn(f Fraction) Bool { f < 4/5 }) println;
+sort([3.0+4.0i, 1.0+2.0i, 5.0+6.0i], fn(a Complex, b Complex) Bool {
+    (a)real < (b)real
+}) println;
+sort([3/4, 1/2, 5/6], fn(a Fraction, b Fraction) Bool { a < b }) println;
