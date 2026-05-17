@@ -26,6 +26,7 @@
 #define opcodes_hpp
 
 #include "vm.hpp"
+#include "value.hpp"  // ArrayBackend / arrayBackendFor for inline helpers below
 
 namespace ts {
 
@@ -262,7 +263,13 @@ void op_inline_struct_get(VM& vm, Code* pc);  // I_STRUCT_GET Rd, Ra, fieldIdx (
 // --- Array Destructuring ---
 void op_array_get(VM& vm, Code* pc);          // ARRAY_GET Rd, Ra, idx (3 words: op, regs, ArrayType*)
 void op_array_slice(VM& vm, Code* pc);        // ARRAY_SLICE Rd, Ra, startIdx (3 words: op, regs, ArrayType*)
-void op_array_length(VM& vm, Code* pc);       // ARRAY_LENGTH Rd, Ra (3 words: op, regs, ArrayType*)
+// Phase 4g.28: backend-specialized array length (one per arrayBackendFor).
+void op_array_length_int(VM& vm, Code* pc);
+void op_array_length_float(VM& vm, Code* pc);
+void op_array_length_complex(VM& vm, Code* pc);
+void op_array_length_fraction(VM& vm, Code* pc);
+void op_array_length_inline(VM& vm, Code* pc);
+void op_array_length_obj(VM& vm, Code* pc);
 
 // --- Enum Construction/Access ---
 void op_make_enum(VM& vm, Code* pc);          // MAKE_ENUM Rd, valSrc, caseIdx (3 words: op, regs, EnumType*)
@@ -283,8 +290,56 @@ void op_unbox_enum(VM& vm, Code* pc);              // UNBOX_ENUM Rd, Ra (3 words
 
 // --- Dynamic Array Operations (for auto-mapping) ---
 void op_array_alloc(VM& vm, Code* pc);        // ARRAY_ALLOC Rd, Rn (3 words: op, regs{dst, len_reg}, ArrayType*)
-void op_array_set(VM& vm, Code* pc);          // ARRAY_SET Ra, Rb_idx, Rc_val (3 words: op, regs{arr, idx_reg, val_reg}, ArrayType*)
-void op_array_get_dyn(VM& vm, Code* pc);      // ARRAY_GET_DYN Rd, Ra, Rb_idx (3 words: op, regs{dst, arr, idx_reg}, ArrayType*)
+// Phase 4g.28: backend-specialized array store/load (one per array backend).
+void op_array_set_int(VM& vm, Code* pc);
+void op_array_set_float(VM& vm, Code* pc);
+void op_array_set_complex(VM& vm, Code* pc);
+void op_array_set_fraction(VM& vm, Code* pc);
+void op_array_set_inline(VM& vm, Code* pc);
+void op_array_set_obj(VM& vm, Code* pc);
+
+void op_array_get_dyn_int(VM& vm, Code* pc);
+void op_array_get_dyn_float(VM& vm, Code* pc);
+void op_array_get_dyn_complex(VM& vm, Code* pc);
+void op_array_get_dyn_fraction(VM& vm, Code* pc);
+void op_array_get_dyn_inline(VM& vm, Code* pc);
+void op_array_get_dyn_obj(VM& vm, Code* pc);
+
+// Codegen-side helpers: pick the backend-specialized op for a given
+// element type. Compile-time dispatch, no runtime cost.
+inline Operation opArrayLengthFor(Type const* elemType) {
+    switch (arrayBackendFor(elemType)) {
+        case ArrayBackend::Int:      return op_array_length_int;
+        case ArrayBackend::Float:    return op_array_length_float;
+        case ArrayBackend::Complex:  return op_array_length_complex;
+        case ArrayBackend::Fraction: return op_array_length_fraction;
+        case ArrayBackend::Inline:   return op_array_length_inline;
+        case ArrayBackend::Obj:      return op_array_length_obj;
+    }
+    return op_array_length_obj;
+}
+inline Operation opArraySetFor(Type const* elemType) {
+    switch (arrayBackendFor(elemType)) {
+        case ArrayBackend::Int:      return op_array_set_int;
+        case ArrayBackend::Float:    return op_array_set_float;
+        case ArrayBackend::Complex:  return op_array_set_complex;
+        case ArrayBackend::Fraction: return op_array_set_fraction;
+        case ArrayBackend::Inline:   return op_array_set_inline;
+        case ArrayBackend::Obj:      return op_array_set_obj;
+    }
+    return op_array_set_obj;
+}
+inline Operation opArrayGetDynFor(Type const* elemType) {
+    switch (arrayBackendFor(elemType)) {
+        case ArrayBackend::Int:      return op_array_get_dyn_int;
+        case ArrayBackend::Float:    return op_array_get_dyn_float;
+        case ArrayBackend::Complex:  return op_array_get_dyn_complex;
+        case ArrayBackend::Fraction: return op_array_get_dyn_fraction;
+        case ArrayBackend::Inline:   return op_array_get_dyn_inline;
+        case ArrayBackend::Obj:      return op_array_get_dyn_obj;
+    }
+    return op_array_get_dyn_obj;
+}
 
 // --- List ---
 void op_cons(VM& vm, Code* pc);            // CONS Rd, Rhead, Rtail (3 words: op, regs{dst, head, tail}, ListType*)

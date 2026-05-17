@@ -1353,32 +1353,38 @@ void op_array_slice(VM& vm, Code* pc) {
 }
 
 // ARRAY_LENGTH Rd, Ra  (3 words: op, regs{dst, src}, ArrayType*)
-// Gets length of array as integer
-void op_array_length(VM& vm, Code* pc) {
+//
+// Phase 4g.28: one specialization per array backend. The element type is
+// statically known at codegen time, so the codegen emits the right variant
+// directly and the runtime path is branch-free.
+void op_array_length_int(VM& vm, Code* pc) {
     u16 dst = pc[1].regs[0], src = pc[1].regs[1];
-    auto* arrayType = static_cast<ArrayType*>(pc[2].p);
-    Type* elemType = arrayType->elemType_;
-
-    switch (arrayBackendFor(elemType)) {
-        case ArrayBackend::Complex:
-            vm.reg(dst).i = (i64)static_cast<PodArray<x64>*>(vm.reg(src).o)->v.size();
-            break;
-        case ArrayBackend::Fraction:
-            vm.reg(dst).i = (i64)static_cast<PodArray<r64>*>(vm.reg(src).o)->v.size();
-            break;
-        case ArrayBackend::Float:
-            vm.reg(dst).i = (i64)static_cast<PodArray<f64>*>(vm.reg(src).o)->v.size();
-            break;
-        case ArrayBackend::Int:
-            vm.reg(dst).i = (i64)static_cast<PodArray<i64>*>(vm.reg(src).o)->v.size();
-            break;
-        case ArrayBackend::Inline:
-            vm.reg(dst).i = (i64)static_cast<InlineArray*>(vm.reg(src).o)->size();
-            break;
-        case ArrayBackend::Obj:
-            vm.reg(dst).i = (i64)static_cast<ObjArray*>(vm.reg(src).o)->size();
-            break;
-    }
+    vm.reg(dst).i = (i64)static_cast<PodArray<i64>*>(vm.reg(src).o)->v.size();
+    DISPATCH(3);
+}
+void op_array_length_float(VM& vm, Code* pc) {
+    u16 dst = pc[1].regs[0], src = pc[1].regs[1];
+    vm.reg(dst).i = (i64)static_cast<PodArray<f64>*>(vm.reg(src).o)->v.size();
+    DISPATCH(3);
+}
+void op_array_length_complex(VM& vm, Code* pc) {
+    u16 dst = pc[1].regs[0], src = pc[1].regs[1];
+    vm.reg(dst).i = (i64)static_cast<PodArray<x64>*>(vm.reg(src).o)->v.size();
+    DISPATCH(3);
+}
+void op_array_length_fraction(VM& vm, Code* pc) {
+    u16 dst = pc[1].regs[0], src = pc[1].regs[1];
+    vm.reg(dst).i = (i64)static_cast<PodArray<r64>*>(vm.reg(src).o)->v.size();
+    DISPATCH(3);
+}
+void op_array_length_inline(VM& vm, Code* pc) {
+    u16 dst = pc[1].regs[0], src = pc[1].regs[1];
+    vm.reg(dst).i = (i64)static_cast<InlineArray*>(vm.reg(src).o)->size();
+    DISPATCH(3);
+}
+void op_array_length_obj(VM& vm, Code* pc) {
+    u16 dst = pc[1].regs[0], src = pc[1].regs[1];
+    vm.reg(dst).i = (i64)static_cast<ObjArray*>(vm.reg(src).o)->size();
     DISPATCH(3);
 }
 
@@ -3162,100 +3168,108 @@ void op_array_alloc(VM& vm, Code* pc) {
 }
 
 // ARRAY_SET Ra, Rb_idx, Rc_val (3 words: op, regs{arr, idx_reg, val_reg}, ArrayType*)
-// Set array element at runtime index. Phase 4e: Complex/Fraction values are
-// read as 2 consecutive Words at valReg.
-void op_array_set(VM& vm, Code* pc) {
+//
+// Phase 4g.28: one specialization per array backend. Codegen emits the
+// variant matching the array's element type so per-element dispatch is a
+// direct call -- no runtime switch on arrayBackendFor. The InlineArray
+// variant still reads stride at runtime from the InlineArray itself.
+void op_array_set_int(VM& vm, Code* pc) {
     u16 arrReg = pc[1].regs[0], idxReg = pc[1].regs[1], valReg = pc[1].regs[2];
-    auto* arrayType = static_cast<ArrayType*>(pc[2].p);
-    Type* elemType = arrayType->elemType_;
     i64 idx = vm.reg(idxReg).i;
-
-    switch (arrayBackendFor(elemType)) {
-        case ArrayBackend::Complex: {
-            auto* arr = static_cast<PodArray<x64>*>(vm.reg(arrReg).o);
-            f64 re = vm.reg(valReg).f;
-            f64 im = vm.reg((u16)(valReg + 1)).f;
-            arr->v[cyclicIndex(idx, arr->v.size())] = x64(re, im);
-            break;
-        }
-        case ArrayBackend::Fraction: {
-            auto* arr = static_cast<PodArray<r64>*>(vm.reg(arrReg).o);
-            i64 n = vm.reg(valReg).i;
-            i64 d = vm.reg((u16)(valReg + 1)).i;
-            arr->v[cyclicIndex(idx, arr->v.size())] = r64(n, d, true);
-            break;
-        }
-        case ArrayBackend::Float: {
-            auto* arr = static_cast<PodArray<f64>*>(vm.reg(arrReg).o);
-            arr->v[cyclicIndex(idx, arr->v.size())] = vm.reg(valReg).f;
-            break;
-        }
-        case ArrayBackend::Int: {
-            auto* arr = static_cast<PodArray<i64>*>(vm.reg(arrReg).o);
-            arr->v[cyclicIndex(idx, arr->v.size())] = vm.reg(valReg).i;
-            break;
-        }
-        case ArrayBackend::Inline: {
-            auto* arr = static_cast<InlineArray*>(vm.reg(arrReg).o);
-            size_t i = cyclicIndex(idx, arr->size());
-            arr->setSlot(i, &vm.reg(valReg));
-            break;
-        }
-        case ArrayBackend::Obj: {
-            auto* arr = static_cast<ObjArray*>(vm.reg(arrReg).o);
-            arr->set(cyclicIndex(idx, arr->size()), vm.reg(valReg).o);
-            break;
-        }
-    }
+    auto* arr = static_cast<PodArray<i64>*>(vm.reg(arrReg).o);
+    arr->v[cyclicIndex(idx, arr->v.size())] = vm.reg(valReg).i;
+    DISPATCH(3);
+}
+void op_array_set_float(VM& vm, Code* pc) {
+    u16 arrReg = pc[1].regs[0], idxReg = pc[1].regs[1], valReg = pc[1].regs[2];
+    i64 idx = vm.reg(idxReg).i;
+    auto* arr = static_cast<PodArray<f64>*>(vm.reg(arrReg).o);
+    arr->v[cyclicIndex(idx, arr->v.size())] = vm.reg(valReg).f;
+    DISPATCH(3);
+}
+void op_array_set_complex(VM& vm, Code* pc) {
+    u16 arrReg = pc[1].regs[0], idxReg = pc[1].regs[1], valReg = pc[1].regs[2];
+    i64 idx = vm.reg(idxReg).i;
+    auto* arr = static_cast<PodArray<x64>*>(vm.reg(arrReg).o);
+    f64 re = vm.reg(valReg).f;
+    f64 im = vm.reg((u16)(valReg + 1)).f;
+    arr->v[cyclicIndex(idx, arr->v.size())] = x64(re, im);
+    DISPATCH(3);
+}
+void op_array_set_fraction(VM& vm, Code* pc) {
+    u16 arrReg = pc[1].regs[0], idxReg = pc[1].regs[1], valReg = pc[1].regs[2];
+    i64 idx = vm.reg(idxReg).i;
+    auto* arr = static_cast<PodArray<r64>*>(vm.reg(arrReg).o);
+    i64 n = vm.reg(valReg).i;
+    i64 d = vm.reg((u16)(valReg + 1)).i;
+    arr->v[cyclicIndex(idx, arr->v.size())] = r64(n, d, true);
+    DISPATCH(3);
+}
+void op_array_set_inline(VM& vm, Code* pc) {
+    u16 arrReg = pc[1].regs[0], idxReg = pc[1].regs[1], valReg = pc[1].regs[2];
+    i64 idx = vm.reg(idxReg).i;
+    auto* arr = static_cast<InlineArray*>(vm.reg(arrReg).o);
+    arr->setSlot(cyclicIndex(idx, arr->size()), &vm.reg(valReg));
+    DISPATCH(3);
+}
+void op_array_set_obj(VM& vm, Code* pc) {
+    u16 arrReg = pc[1].regs[0], idxReg = pc[1].regs[1], valReg = pc[1].regs[2];
+    i64 idx = vm.reg(idxReg).i;
+    auto* arr = static_cast<ObjArray*>(vm.reg(arrReg).o);
+    arr->set(cyclicIndex(idx, arr->size()), vm.reg(valReg).o);
     DISPATCH(3);
 }
 
 // ARRAY_GET_DYN Rd, Ra, Rb_idx (3 words: op, regs{dst, arr, idx_reg}, ArrayType*)
-// Get array element at runtime index (index from register, not immediate).
-// Phase 4e: Complex/Fraction land as 2-word inline values in dst..dst+1.
-void op_array_get_dyn(VM& vm, Code* pc) {
+//
+// Phase 4g.28: backend-specialized; one variant per array backend. The
+// ArrayType* operand is still emitted so the disassembler can label the
+// element type and so InlineArray reads the right stride from the array
+// header, but the dispatch case selection is at codegen time.
+void op_array_get_dyn_int(VM& vm, Code* pc) {
     u16 dst = pc[1].regs[0], arrReg = pc[1].regs[1], idxReg = pc[1].regs[2];
-    auto* arrayType = static_cast<ArrayType*>(pc[2].p);
-    Type* elemType = arrayType->elemType_;
     i64 idx = vm.reg(idxReg).i;
-
-    switch (arrayBackendFor(elemType)) {
-        case ArrayBackend::Complex: {
-            auto* arr = static_cast<PodArray<x64>*>(vm.reg(arrReg).o);
-            x64 const& v = arr->v[cyclicIndex(idx, arr->v.size())];
-            vm.reg(dst).f = v.real();
-            vm.reg((u16)(dst + 1)).f = v.imag();
-            break;
-        }
-        case ArrayBackend::Fraction: {
-            auto* arr = static_cast<PodArray<r64>*>(vm.reg(arrReg).o);
-            r64 const& v = arr->v[cyclicIndex(idx, arr->v.size())];
-            vm.reg(dst).i = v.numer();
-            vm.reg((u16)(dst + 1)).i = v.denom();
-            break;
-        }
-        case ArrayBackend::Float: {
-            auto* arr = static_cast<PodArray<f64>*>(vm.reg(arrReg).o);
-            vm.reg(dst).f = arr->v[cyclicIndex(idx, arr->v.size())];
-            break;
-        }
-        case ArrayBackend::Int: {
-            auto* arr = static_cast<PodArray<i64>*>(vm.reg(arrReg).o);
-            vm.reg(dst).i = arr->v[cyclicIndex(idx, arr->v.size())];
-            break;
-        }
-        case ArrayBackend::Inline: {
-            auto* arr = static_cast<InlineArray*>(vm.reg(arrReg).o);
-            size_t i = cyclicIndex(idx, arr->size());
-            arr->getSlot(i, &vm.reg(dst));
-            break;
-        }
-        case ArrayBackend::Obj: {
-            auto* arr = static_cast<ObjArray*>(vm.reg(arrReg).o);
-            vm.reg(dst).o = arr->get(cyclicIndex(idx, arr->size()));
-            break;
-        }
-    }
+    auto* arr = static_cast<PodArray<i64>*>(vm.reg(arrReg).o);
+    vm.reg(dst).i = arr->v[cyclicIndex(idx, arr->v.size())];
+    DISPATCH(3);
+}
+void op_array_get_dyn_float(VM& vm, Code* pc) {
+    u16 dst = pc[1].regs[0], arrReg = pc[1].regs[1], idxReg = pc[1].regs[2];
+    i64 idx = vm.reg(idxReg).i;
+    auto* arr = static_cast<PodArray<f64>*>(vm.reg(arrReg).o);
+    vm.reg(dst).f = arr->v[cyclicIndex(idx, arr->v.size())];
+    DISPATCH(3);
+}
+void op_array_get_dyn_complex(VM& vm, Code* pc) {
+    u16 dst = pc[1].regs[0], arrReg = pc[1].regs[1], idxReg = pc[1].regs[2];
+    i64 idx = vm.reg(idxReg).i;
+    auto* arr = static_cast<PodArray<x64>*>(vm.reg(arrReg).o);
+    x64 const& v = arr->v[cyclicIndex(idx, arr->v.size())];
+    vm.reg(dst).f = v.real();
+    vm.reg((u16)(dst + 1)).f = v.imag();
+    DISPATCH(3);
+}
+void op_array_get_dyn_fraction(VM& vm, Code* pc) {
+    u16 dst = pc[1].regs[0], arrReg = pc[1].regs[1], idxReg = pc[1].regs[2];
+    i64 idx = vm.reg(idxReg).i;
+    auto* arr = static_cast<PodArray<r64>*>(vm.reg(arrReg).o);
+    r64 const& v = arr->v[cyclicIndex(idx, arr->v.size())];
+    vm.reg(dst).i = v.numer();
+    vm.reg((u16)(dst + 1)).i = v.denom();
+    DISPATCH(3);
+}
+void op_array_get_dyn_inline(VM& vm, Code* pc) {
+    u16 dst = pc[1].regs[0], arrReg = pc[1].regs[1], idxReg = pc[1].regs[2];
+    i64 idx = vm.reg(idxReg).i;
+    auto* arr = static_cast<InlineArray*>(vm.reg(arrReg).o);
+    arr->getSlot(cyclicIndex(idx, arr->size()), &vm.reg(dst));
+    DISPATCH(3);
+}
+void op_array_get_dyn_obj(VM& vm, Code* pc) {
+    u16 dst = pc[1].regs[0], arrReg = pc[1].regs[1], idxReg = pc[1].regs[2];
+    i64 idx = vm.reg(idxReg).i;
+    auto* arr = static_cast<ObjArray*>(vm.reg(arrReg).o);
+    vm.reg(dst).o = arr->get(cyclicIndex(idx, arr->size()));
     DISPATCH(3);
 }
 

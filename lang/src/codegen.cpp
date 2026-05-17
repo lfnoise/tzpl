@@ -1493,7 +1493,7 @@ void CodeGen::genForStmt(ForStmtNode* stmt) {
         u16 arrReg = genExpr(static_cast<Expr*>(stmt->iterable.get()));
 
         u16 lenReg = allocReg();
-        emitOp(op_array_length);
+        emitOp(opArrayLengthFor(arrayType->elemType_));
         emitRegs(lenReg, arrReg);
         emitPtr(arrayType);
 
@@ -1514,7 +1514,7 @@ void CodeGen::genForStmt(ForStmtNode* stmt) {
 
         // Phase 4e: inline-element arrays land 2-word values directly.
         u16 elemReg = allocSlot(arrayType->elemType_);
-        emitOp(op_array_get_dyn);
+        emitOp(opArrayGetDynFor(arrayType->elemType_));
         emitRegs(elemReg, arrReg, idxReg);
         emitPtr(arrayType);
 
@@ -2123,7 +2123,7 @@ void CodeGen::genPatternMatch(Pattern* pat, u16 subjReg, Type* subjType,
             // check that array has enough elements
             if (!ap->elements.empty()) {
                 u16 lenReg = allocReg();
-                emitOp(op_array_length);
+                emitOp(opArrayLengthFor(atype->elemType_));
                 emitRegs(lenReg, subjReg);
                 emitPtr(atype);
 
@@ -2809,7 +2809,7 @@ u16 CodeGen::emitAutoMapDowncastLoop(u16 arrReg, std::vector<Type*>& srcArrayTyp
 
     // Get length
     u16 lenReg = allocReg();
-    emitOp(op_array_length);
+    emitOp(opArrayLengthFor(srcArrType->elemType_));
     emitRegs(lenReg, arrReg);
     emitPtr(srcArrType);
 
@@ -2842,7 +2842,7 @@ u16 CodeGen::emitAutoMapDowncastLoop(u16 arrReg, std::vector<Type*>& srcArrayTyp
     // Extract element. Phase 4e: inline-element arrays land 2-word values
     // straight into a 2-word slot; no per-element box/unbox.
     u16 elemReg = allocSlot(srcArrType->elemType_);
-    emitOp(op_array_get_dyn);
+    emitOp(opArrayGetDynFor(srcArrType->elemType_));
     emitRegs(elemReg, arrReg, iReg);
     emitPtr(srcArrType);
 
@@ -2856,7 +2856,7 @@ u16 CodeGen::emitAutoMapDowncastLoop(u16 arrReg, std::vector<Type*>& srcArrayTyp
     }
 
     // Store in result array
-    emitOp(op_array_set);
+    emitOp(opArraySetFor(resultArrType->elemType_));
     emitRegs(resultArrReg, iReg, convertedReg);
     emitPtr(resultArrType);
 
@@ -4175,7 +4175,7 @@ u16 CodeGen::genAutoMapBinaryOp(BinaryOpExpr* expr) {
     auto computeLen = [&](u16 arrReg, Type* arrType) {
         auto* at = dynamic_cast<ArrayType*>(arrType);
         u16 lenReg = allocReg();
-        emitOp(op_array_length);
+        emitOp(opArrayLengthFor(at->elemType_));
         emitRegs(lenReg, arrReg);
         emitPtr(at);
         if (firstAutoMap) {
@@ -4240,7 +4240,7 @@ u16 CodeGen::genAutoMapBinaryOp(BinaryOpExpr* expr) {
     if (expr->leftAutoMap) {
         auto* arrType = dynamic_cast<ArrayType*>(leftType);
         leftElemReg = allocElemSlot(leftElemType);
-        emitOp(op_array_get_dyn);
+        emitOp(opArrayGetDynFor(arrType->elemType_));
         emitRegs(leftElemReg, leftReg, iReg);
         emitPtr(arrType);
     }
@@ -4249,7 +4249,7 @@ u16 CodeGen::genAutoMapBinaryOp(BinaryOpExpr* expr) {
     if (expr->rightAutoMap) {
         auto* arrType = dynamic_cast<ArrayType*>(rightType);
         rightElemReg = allocElemSlot(rightElemType);
-        emitOp(op_array_get_dyn);
+        emitOp(opArrayGetDynFor(arrType->elemType_));
         emitRegs(rightElemReg, rightReg, iReg);
         emitPtr(arrType);
     }
@@ -4298,7 +4298,7 @@ u16 CodeGen::genAutoMapBinaryOp(BinaryOpExpr* expr) {
             emitPtr(leftElemType);
             emitPtr(rightElemType);
         }
-        emitOp(op_array_set);
+        emitOp(opArraySetFor(resultArrayType->elemType_));
         emitRegs(resultArrReg, iReg, elemResultReg);
         emitPtr(resultArrayType);
         emitOp(op_add_int);
@@ -4333,7 +4333,7 @@ u16 CodeGen::genAutoMapBinaryOp(BinaryOpExpr* expr) {
 
     // --- Phase 8: Store in result array ---
     // Phase 4g.8: InlineArray takes the multi-word inline element directly.
-    emitOp(op_array_set);
+    emitOp(opArraySetFor(resultArrayType->elemType_));
     emitRegs(resultArrReg, iReg, elemResultReg);
     emitPtr(resultArrayType);
 
@@ -4397,7 +4397,7 @@ u16 CodeGen::genAutoMapBinaryOpList(BinaryOpExpr* expr) {
             emitRegs(leftIdxReg);
             emitInt(0);
             leftLenReg = allocReg();
-            emitOp(op_array_length);
+            emitOp(opArrayLengthFor(dynamic_cast<ArrayType*>(leftType)->elemType_));
             emitRegs(leftLenReg, leftReg);
             emitPtr(dynamic_cast<ArrayType*>(leftType));
         }
@@ -4413,7 +4413,7 @@ u16 CodeGen::genAutoMapBinaryOpList(BinaryOpExpr* expr) {
             emitRegs(rightIdxReg);
             emitInt(0);
             rightLenReg = allocReg();
-            emitOp(op_array_length);
+            emitOp(opArrayLengthFor(dynamic_cast<ArrayType*>(rightType)->elemType_));
             emitRegs(rightLenReg, rightReg);
             emitPtr(dynamic_cast<ArrayType*>(rightType));
         }
@@ -4466,7 +4466,7 @@ u16 CodeGen::genAutoMapBinaryOpList(BinaryOpExpr* expr) {
             emitOp(op_list_head);
             emitRegs(leftElemReg, leftCurReg);
         } else {
-            emitOp(op_array_get_dyn);
+            emitOp(opArrayGetDynFor(dynamic_cast<ArrayType*>(leftType)->elemType_));
             emitRegs(leftElemReg, leftReg, leftIdxReg);
             emitPtr(dynamic_cast<ArrayType*>(leftType));
         }
@@ -4479,7 +4479,7 @@ u16 CodeGen::genAutoMapBinaryOpList(BinaryOpExpr* expr) {
             emitOp(op_list_head);
             emitRegs(rightElemReg, rightCurReg);
         } else {
-            emitOp(op_array_get_dyn);
+            emitOp(opArrayGetDynFor(dynamic_cast<ArrayType*>(rightType)->elemType_));
             emitRegs(rightElemReg, rightReg, rightIdxReg);
             emitPtr(dynamic_cast<ArrayType*>(rightType));
         }
@@ -4610,7 +4610,7 @@ u16 CodeGen::genCartesianBinaryOp(BinaryOpExpr* expr) {
         if (ci > 0 && lenRegs[ci] == 0) {
             auto* at = dynamic_cast<ArrayType*>(arrType);
             u16 lenReg = allocReg();
-            emitOp(op_array_length);
+            emitOp(opArrayLengthFor(at->elemType_));
             emitRegs(lenReg, arrReg);
             emitPtr(at);
             lenRegs[ci] = lenReg;
@@ -4692,13 +4692,13 @@ u16 CodeGen::genCartesianBinaryOp(BinaryOpExpr* expr) {
     u16 leftElemReg = leftReg;
     if (expr->leftAutoMap.cartesianIndex > 0) {
         leftElemReg = allocElemSlot(leftElemType);
-        emitOp(op_array_get_dyn);
+        emitOp(opArrayGetDynFor(dynamic_cast<ArrayType*>(leftType)->elemType_));
         emitRegs(leftElemReg, leftReg, iRegs[expr->leftAutoMap.cartesianIndex]);
         emitPtr(dynamic_cast<ArrayType*>(leftType));
     } else if (expr->leftAutoMap.depth > 0) {
         // Plain @ with cartesian context — zip with level 1
         leftElemReg = allocElemSlot(leftElemType);
-        emitOp(op_array_get_dyn);
+        emitOp(opArrayGetDynFor(dynamic_cast<ArrayType*>(leftType)->elemType_));
         emitRegs(leftElemReg, leftReg, iRegs[1]);
         emitPtr(dynamic_cast<ArrayType*>(leftType));
     }
@@ -4706,12 +4706,12 @@ u16 CodeGen::genCartesianBinaryOp(BinaryOpExpr* expr) {
     u16 rightElemReg = rightReg;
     if (expr->rightAutoMap.cartesianIndex > 0) {
         rightElemReg = allocElemSlot(rightElemType);
-        emitOp(op_array_get_dyn);
+        emitOp(opArrayGetDynFor(dynamic_cast<ArrayType*>(rightType)->elemType_));
         emitRegs(rightElemReg, rightReg, iRegs[expr->rightAutoMap.cartesianIndex]);
         emitPtr(dynamic_cast<ArrayType*>(rightType));
     } else if (expr->rightAutoMap.depth > 0) {
         rightElemReg = allocElemSlot(rightElemType);
-        emitOp(op_array_get_dyn);
+        emitOp(opArrayGetDynFor(dynamic_cast<ArrayType*>(rightType)->elemType_));
         emitRegs(rightElemReg, rightReg, iRegs[1]);
         emitPtr(dynamic_cast<ArrayType*>(rightType));
     }
@@ -4787,7 +4787,7 @@ u16 CodeGen::genCartesianBinaryOp(BinaryOpExpr* expr) {
 
     // Store and close loops
     if (maxCartesian >= 2) {
-        emitOp(op_array_set);
+        emitOp(opArraySetFor(innerResultType->elemType_));
         emitRegs(innerResultReg, iRegs[2], elemResultReg);
         emitPtr(innerResultType);
 
@@ -4796,11 +4796,11 @@ u16 CodeGen::genCartesianBinaryOp(BinaryOpExpr* expr) {
         emitJumpTo(loop2StartIdx);
         patchJump(loop2ExitJump);
 
-        emitOp(op_array_set);
+        emitOp(opArraySetFor(outerResultType->elemType_));
         emitRegs(outerResultReg, iRegs[1], innerResultReg);
         emitPtr(outerResultType);
     } else {
-        emitOp(op_array_set);
+        emitOp(opArraySetFor(outerResultType->elemType_));
         emitRegs(outerResultReg, iRegs[1], elemResultReg);
         emitPtr(outerResultType);
     }
@@ -4876,7 +4876,7 @@ u16 CodeGen::genDeepMapBinaryOp(BinaryOpExpr* expr, int depth) {
         u16 primaryReg = primaryIsLeft ? currentLeftReg : currentRightReg;
 
         loop.lenReg = allocReg();
-        emitOp(op_array_length);
+        emitOp(opArrayLengthFor(curArrType->elemType_));
         emitRegs(loop.lenReg, primaryReg);
         emitPtr(curArrType);
 
@@ -4904,7 +4904,7 @@ u16 CodeGen::genDeepMapBinaryOp(BinaryOpExpr* expr, int depth) {
             for (int level = 0; level < d; ++level) lt = dynamic_cast<ArrayType*>(lt)->elemType_;
             auto* lArrT = dynamic_cast<ArrayType*>(lt);
             u16 subReg = allocReg();
-            emitOp(op_array_get_dyn);
+            emitOp(opArrayGetDynFor(lArrT->elemType_));
             emitRegs(subReg, currentLeftReg, loop.iReg);
             emitPtr(lArrT);
             currentLeftReg = subReg;
@@ -4914,7 +4914,7 @@ u16 CodeGen::genDeepMapBinaryOp(BinaryOpExpr* expr, int depth) {
             for (int level = 0; level < d; ++level) rt = dynamic_cast<ArrayType*>(rt)->elemType_;
             auto* rArrT = dynamic_cast<ArrayType*>(rt);
             u16 subReg = allocReg();
-            emitOp(op_array_get_dyn);
+            emitOp(opArrayGetDynFor(rArrT->elemType_));
             emitRegs(subReg, currentRightReg, loop.iReg);
             emitPtr(rArrT);
             currentRightReg = subReg;
@@ -4939,7 +4939,7 @@ u16 CodeGen::genDeepMapBinaryOp(BinaryOpExpr* expr, int depth) {
         auto* arrType = dynamic_cast<ArrayType*>(curArgType);
         if (!arrType) return;
         u16 lenReg = allocReg();
-        emitOp(op_array_length);
+        emitOp(opArrayLengthFor(arrType->elemType_));
         emitRegs(lenReg, arrReg);
         emitPtr(arrType);
         if (firstAutoMap) {
@@ -4986,7 +4986,7 @@ u16 CodeGen::genDeepMapBinaryOp(BinaryOpExpr* expr, int depth) {
         }
         auto* arrType = dynamic_cast<ArrayType*>(curArgType);
         leftElemReg = allocReg();
-        emitOp(op_array_get_dyn);
+        emitOp(opArrayGetDynFor(arrType->elemType_));
         emitRegs(leftElemReg, currentLeftReg, innerIReg);
         emitPtr(arrType);
     }
@@ -5000,7 +5000,7 @@ u16 CodeGen::genDeepMapBinaryOp(BinaryOpExpr* expr, int depth) {
         }
         auto* arrType = dynamic_cast<ArrayType*>(curArgType);
         rightElemReg = allocReg();
-        emitOp(op_array_get_dyn);
+        emitOp(opArrayGetDynFor(arrType->elemType_));
         emitRegs(rightElemReg, currentRightReg, innerIReg);
         emitPtr(arrType);
     }
@@ -5051,7 +5051,7 @@ u16 CodeGen::genDeepMapBinaryOp(BinaryOpExpr* expr, int depth) {
     }
 
     // Store in innermost result
-    emitOp(op_array_set);
+    emitOp(opArraySetFor(innerResultArrayType->elemType_));
     emitRegs(innerResultReg, innerIReg, elemResultReg);
     emitPtr(innerResultArrayType);
 
@@ -5064,7 +5064,7 @@ u16 CodeGen::genDeepMapBinaryOp(BinaryOpExpr* expr, int depth) {
     u16 prevResultReg = innerResultReg;
     for (int d = depth - 2; d >= 0; --d) {
         auto& loop = loops[d];
-        emitOp(op_array_set);
+        emitOp(opArraySetFor(loop.resultType->elemType_));
         emitRegs(loop.resultReg, loop.iReg, prevResultReg);
         emitPtr(loop.resultType);
 
@@ -5129,7 +5129,7 @@ u16 CodeGen::genAutoMapCall(CallExpr_* expr) {
         auto* arrType = dynamic_cast<ArrayType*>(expr->args[i]->resolvedType);
 
         u16 lenReg = allocReg();
-        emitOp(op_array_length);
+        emitOp(opArrayLengthFor(arrType->elemType_));
         emitRegs(lenReg, argRegs[i]);
         emitPtr(arrType);
 
@@ -5239,7 +5239,7 @@ u16 CodeGen::genAutoMapCall(CallExpr_* expr) {
             // directly into a sizeWords_-wide slot. For legacy builtins that
             // still take a 1-word boxed pointer, box the unboxed element.
             u16 elemReg = elemInlineComposite ? allocSlot(elemType) : targetReg;
-            emitOp(op_array_get_dyn);
+            emitOp(opArrayGetDynFor(arrType->elemType_));
             emitRegs(elemReg, argRegs[i], iReg);
             emitPtr(arrType);
             if (elemInlineComposite) {
@@ -5308,7 +5308,7 @@ u16 CodeGen::genAutoMapCall(CallExpr_* expr) {
     // --- Phase 8: Store result in result array (skip for Void) ---
     // Phase 4g.8: InlineArray takes the multi-word inline result directly.
     if (!isVoidReturn) {
-        emitOp(op_array_set);
+        emitOp(opArraySetFor(resultArrayType->elemType_));
         emitRegs(resultArrReg, iReg, callResultReg);
         emitPtr(resultArrayType);
     }
@@ -5392,7 +5392,7 @@ u16 CodeGen::genAutoMapLambdaCall(CallExpr_* expr, u16 calleeReg, FunctionType* 
         auto* curArrType = dynamic_cast<ArrayType*>(curArgType);
 
         loop.lenReg = allocReg();
-        emitOp(op_array_length);
+        emitOp(opArrayLengthFor(curArrType->elemType_));
         emitRegs(loop.lenReg, currentArgRegs[primaryArg]);
         emitPtr(curArrType);
 
@@ -5426,7 +5426,7 @@ u16 CodeGen::genAutoMapLambdaCall(CallExpr_* expr, u16 calleeReg, FunctionType* 
             auto* argArrType = dynamic_cast<ArrayType*>(argType);
 
             u16 subReg = allocReg();
-            emitOp(op_array_get_dyn);
+            emitOp(opArrayGetDynFor(argArrType->elemType_));
             emitRegs(subReg, currentArgRegs[ai], loop.iReg);
             emitPtr(argArrType);
             currentArgRegs[ai] = subReg;
@@ -5457,7 +5457,7 @@ u16 CodeGen::genAutoMapLambdaCall(CallExpr_* expr, u16 calleeReg, FunctionType* 
         if (!arrType) continue;
 
         u16 lenReg = allocReg();
-        emitOp(op_array_length);
+        emitOp(opArrayLengthFor(arrType->elemType_));
         emitRegs(lenReg, currentArgRegs[i]);
         emitPtr(arrType);
 
@@ -5518,7 +5518,7 @@ u16 CodeGen::genAutoMapLambdaCall(CallExpr_* expr, u16 calleeReg, FunctionType* 
             }
             auto* arrType = dynamic_cast<ArrayType*>(curArgType);
 
-            emitOp(op_array_get_dyn);
+            emitOp(opArrayGetDynFor(arrType->elemType_));
             emitRegs(targetReg, currentArgRegs[i], iReg);
             emitPtr(arrType);
 
@@ -5553,7 +5553,7 @@ u16 CodeGen::genAutoMapLambdaCall(CallExpr_* expr, u16 calleeReg, FunctionType* 
 
     // Store result (skip for Void)
     if (!isVoidReturn) {
-        emitOp(op_array_set);
+        emitOp(opArraySetFor(innerResultArrayType->elemType_));
         emitRegs(innerResultReg, iReg, callResultReg);
         emitPtr(innerResultArrayType);
     }
@@ -5571,7 +5571,7 @@ u16 CodeGen::genAutoMapLambdaCall(CallExpr_* expr, u16 calleeReg, FunctionType* 
         auto& loop = outerLoops[d];
 
         if (!isVoidReturn) {
-            emitOp(op_array_set);
+            emitOp(opArraySetFor(loop.resultType->elemType_));
             emitRegs(loop.resultReg, loop.iReg, prevResultReg);
             emitPtr(loop.resultType);
         }
@@ -6053,7 +6053,7 @@ u16 CodeGen::genExplicitImplicitAutoMapCall(CallExpr_* expr) {
         auto* arrType = dynamic_cast<ArrayType*>(expr->args[i]->resolvedType);
 
         u16 lenReg = allocReg();
-        emitOp(op_array_length);
+        emitOp(opArrayLengthFor(arrType->elemType_));
         emitRegs(lenReg, argRegs[i]);
         emitPtr(arrType);
 
@@ -6112,7 +6112,7 @@ u16 CodeGen::genExplicitImplicitAutoMapCall(CallExpr_* expr) {
 
         // Get length
         loop.lenReg = allocReg();
-        emitOp(op_array_length);
+        emitOp(opArrayLengthFor(curArrType->elemType_));
         emitRegs(loop.lenReg, currentExplicitRegs[primaryExplicit]);
         emitPtr(curArrType);
 
@@ -6152,7 +6152,7 @@ u16 CodeGen::genExplicitImplicitAutoMapCall(CallExpr_* expr) {
             Type* peeledElem = argArrType->elemType_;
 
             u16 subReg = allocSlot(peeledElem);
-            emitOp(op_array_get_dyn);
+            emitOp(opArrayGetDynFor(argArrType->elemType_));
             emitRegs(subReg, currentExplicitRegs[i], loop.iReg);
             emitPtr(argArrType);
             currentExplicitRegs[i] = subReg;
@@ -6255,7 +6255,7 @@ u16 CodeGen::genExplicitImplicitAutoMapCall(CallExpr_* expr) {
             Type* elemType = arrType->elemType_;
             bool elemInlineComposite = inlineCompositeT(elemType);
             u16 elemReg = elemInlineComposite ? allocSlot(elemType) : targetReg;
-            emitOp(op_array_get_dyn);
+            emitOp(opArrayGetDynFor(arrType->elemType_));
             emitRegs(elemReg, argRegs[i], innerIReg);
             emitPtr(arrType);
             if (elemInlineComposite) {
@@ -6312,7 +6312,7 @@ u16 CodeGen::genExplicitImplicitAutoMapCall(CallExpr_* expr) {
 
     // Store in inner result array (skip for Void)
     if (!isVoidReturn) {
-        emitOp(op_array_set);
+        emitOp(opArraySetFor(innerResultType->elemType_));
         emitRegs(innerResultReg, innerIReg, storeReg);
         emitPtr(innerResultType);
     }
@@ -6331,7 +6331,7 @@ u16 CodeGen::genExplicitImplicitAutoMapCall(CallExpr_* expr) {
 
         // Store result in current level's result array (skip for Void)
         if (!isVoidReturn) {
-            emitOp(op_array_set);
+            emitOp(opArraySetFor(loop.resultType->elemType_));
             emitRegs(loop.resultReg, loop.iReg, prevResultReg);
             emitPtr(loop.resultType);
         }
@@ -6393,7 +6393,7 @@ u16 CodeGen::genCartesianCall(CallExpr_* expr) {
         if (ci > 0 && lenRegs[ci] == 0) {
             auto* arrType = dynamic_cast<ArrayType*>(expr->args[i]->resolvedType);
             u16 lenReg = allocReg();
-            emitOp(op_array_length);
+            emitOp(opArrayLengthFor(arrType->elemType_));
             emitRegs(lenReg, argRegs[i]);
             emitPtr(arrType);
             lenRegs[ci] = lenReg;
@@ -6511,7 +6511,7 @@ u16 CodeGen::genCartesianCall(CallExpr_* expr) {
             bool elemInlineComposite = inlineCompositeT(elemType);
             // Phase 4g.8: InlineArray returns multi-word inline element direct.
             u16 elemReg = elemInlineComposite ? allocSlot(elemType) : targetReg;
-            emitOp(op_array_get_dyn);
+            emitOp(opArrayGetDynFor(arrType->elemType_));
             emitRegs(elemReg, argRegs[i], (ci > 0 ? iRegs[ci] : iRegs[1]));
             emitPtr(arrType);
             if (elemInlineComposite) {
@@ -6567,7 +6567,7 @@ u16 CodeGen::genCartesianCall(CallExpr_* expr) {
     if (maxCartesian >= 2) {
         // Store in inner array (skip for Void)
         if (!isVoidReturn) {
-            emitOp(op_array_set);
+            emitOp(opArraySetFor(innerResultType->elemType_));
             emitRegs(innerResultReg, iRegs[2], storeReg);
             emitPtr(innerResultType);
         }
@@ -6580,14 +6580,14 @@ u16 CodeGen::genCartesianCall(CallExpr_* expr) {
 
         // Store inner array in outer array (skip for Void)
         if (!isVoidReturn) {
-            emitOp(op_array_set);
+            emitOp(opArraySetFor(outerResultType->elemType_));
             emitRegs(outerResultReg, iRegs[1], innerResultReg);
             emitPtr(outerResultType);
         }
     } else {
         // maxCartesian == 1: store directly in outer array (skip for Void)
         if (!isVoidReturn) {
-            emitOp(op_array_set);
+            emitOp(opArraySetFor(outerResultType->elemType_));
             emitRegs(outerResultReg, iRegs[1], storeReg);
             emitPtr(outerResultType);
         }
@@ -6693,7 +6693,7 @@ u16 CodeGen::genDeepMapCall(CallExpr_* expr, int depth) {
 
         loop.arrReg = currentArgRegs[primaryArg];
         loop.lenReg = allocReg();
-        emitOp(op_array_length);
+        emitOp(opArrayLengthFor(curArrType->elemType_));
         emitRegs(loop.lenReg, loop.arrReg);
         emitPtr(curArrType);
 
@@ -6729,7 +6729,7 @@ u16 CodeGen::genDeepMapCall(CallExpr_* expr, int depth) {
             auto* argArrType = dynamic_cast<ArrayType*>(argType);
 
             u16 subReg = allocReg();
-            emitOp(op_array_get_dyn);
+            emitOp(opArrayGetDynFor(argArrType->elemType_));
             emitRegs(subReg, currentArgRegs[ai], loop.iReg);
             emitPtr(argArrType);
             currentArgRegs[ai] = subReg;
@@ -6767,7 +6767,7 @@ u16 CodeGen::genDeepMapCall(CallExpr_* expr, int depth) {
         if (!arrType) continue;
 
         u16 lenReg = allocReg();
-        emitOp(op_array_length);
+        emitOp(opArrayLengthFor(arrType->elemType_));
         emitRegs(lenReg, currentArgRegs[i]);
         emitPtr(arrType);
 
@@ -6827,7 +6827,7 @@ u16 CodeGen::genDeepMapCall(CallExpr_* expr, int depth) {
             }
             auto* arrType = dynamic_cast<ArrayType*>(curArgType);
 
-            emitOp(op_array_get_dyn);
+            emitOp(opArrayGetDynFor(arrType->elemType_));
             emitRegs(targetReg, currentArgRegs[i], innerIReg);
             emitPtr(arrType);
 
@@ -6864,7 +6864,7 @@ u16 CodeGen::genDeepMapCall(CallExpr_* expr, int depth) {
 
     // Store in innermost result array (skip for Void)
     if (!isVoidReturn) {
-        emitOp(op_array_set);
+        emitOp(opArraySetFor(innerResultArrayType->elemType_));
         emitRegs(innerResultReg, innerIReg, callResultReg);
         emitPtr(innerResultArrayType);
     }
@@ -6883,7 +6883,7 @@ u16 CodeGen::genDeepMapCall(CallExpr_* expr, int depth) {
 
         // Store previous result in current level's result array (skip for Void)
         if (!isVoidReturn) {
-            emitOp(op_array_set);
+            emitOp(opArraySetFor(loop.resultType->elemType_));
             emitRegs(loop.resultReg, loop.iReg, prevResultReg);
             emitPtr(loop.resultType);
         }
@@ -7120,7 +7120,7 @@ u16 CodeGen::genAutoMapStructLiteral(StructLiteralExpr* expr) {
         auto* arrType = dynamic_cast<ArrayType*>(expr->fields[i].value->resolvedType);
 
         u16 lenReg = allocReg();
-        emitOp(op_array_length);
+        emitOp(opArrayLengthFor(arrType->elemType_));
         emitRegs(lenReg, fieldRegs[i]);
         emitPtr(arrType);
 
@@ -7185,7 +7185,7 @@ u16 CodeGen::genAutoMapStructLiteral(StructLiteralExpr* expr) {
         } else if (expr->autoMapFields[litIdx]) {
             auto* arrType = dynamic_cast<ArrayType*>(expr->fields[litIdx].value->resolvedType);
             // Extract element at runtime index
-            emitOp(op_array_get_dyn);
+            emitOp(opArrayGetDynFor(arrType->elemType_));
             emitRegs(targetReg, fieldRegs[litIdx], iReg);
             emitPtr(arrType);
 
@@ -7220,7 +7220,7 @@ u16 CodeGen::genAutoMapStructLiteral(StructLiteralExpr* expr) {
 
     // --- Phase 8: Store struct in result array ---
     // Phase 4g.8: InlineArray takes the multi-word inline struct directly.
-    emitOp(op_array_set);
+    emitOp(opArraySetFor(resultArrayType->elemType_));
     emitRegs(resultArrReg, iReg, structReg);
     emitPtr(resultArrayType);
 
@@ -7265,7 +7265,7 @@ u16 CodeGen::genAutoMapTupleStruct(CallExpr_* expr) {
         auto* arrType = dynamic_cast<ArrayType*>(expr->args[i]->resolvedType);
 
         u16 lenReg = allocReg();
-        emitOp(op_array_length);
+        emitOp(opArrayLengthFor(arrType->elemType_));
         emitRegs(lenReg, argRegs[i]);
         emitPtr(arrType);
 
@@ -7324,7 +7324,7 @@ u16 CodeGen::genAutoMapTupleStruct(CallExpr_* expr) {
         if (expr->autoMapArgs[i]) {
             auto* arrType = dynamic_cast<ArrayType*>(expr->args[i]->resolvedType);
             // Extract element at runtime index
-            emitOp(op_array_get_dyn);
+            emitOp(opArrayGetDynFor(arrType->elemType_));
             emitRegs(targetReg, argRegs[i], iReg);
             emitPtr(arrType);
 
@@ -7364,7 +7364,7 @@ u16 CodeGen::genAutoMapTupleStruct(CallExpr_* expr) {
     // --- Phase 8: Store struct in result array ---
     // Phase 4g.8: InlineArray takes the multi-word inline struct directly.
     (void)inlineStruct;
-    emitOp(op_array_set);
+    emitOp(opArraySetFor(resultArrayType->elemType_));
     emitRegs(resultArrReg, iReg, structReg);
     emitPtr(resultArrayType);
 
@@ -7409,7 +7409,7 @@ u16 CodeGen::genAutoMapArrayLiteral(ArrayLiteralExpr* expr) {
         if (!expr->autoMapElements[i]) continue;
         auto* arrT = dynamic_cast<ArrayType*>(expr->elements[i]->resolvedType);
         u16 lenReg = allocReg();
-        emitOp(op_array_length);
+        emitOp(opArrayLengthFor(arrT->elemType_));
         emitRegs(lenReg, elemRegs[i]);
         emitPtr(arrT);
         if (firstAM) { minLenReg = lenReg; firstAM = false; }
@@ -7452,7 +7452,7 @@ u16 CodeGen::genAutoMapArrayLiteral(ArrayLiteralExpr* expr) {
         }
         if (expr->autoMapElements[i]) {
             auto* arrT = dynamic_cast<ArrayType*>(expr->elements[i]->resolvedType);
-            emitOp(op_array_get_dyn);
+            emitOp(opArrayGetDynFor(arrT->elemType_));
             emitRegs(targetReg, elemRegs[i], iReg);
             emitPtr(arrT);
             Type* srcElemType = arrT->elemType_;
@@ -7476,7 +7476,7 @@ u16 CodeGen::genAutoMapArrayLiteral(ArrayLiteralExpr* expr) {
     emitPtr(innerArrayType);
 
     // --- Phase 8: Store in result array ---
-    emitOp(op_array_set);
+    emitOp(opArraySetFor(resultArrayType->elemType_));
     emitRegs(resultArrReg, iReg, innerArrReg);
     emitPtr(resultArrayType);
 
@@ -7542,7 +7542,7 @@ u16 CodeGen::genCartesianArrayLiteral(ArrayLiteralExpr* expr) {
         if (ci > 0 && lenRegs[ci] == 0) {
             auto* arrT = dynamic_cast<ArrayType*>(expr->elements[i]->resolvedType);
             u16 lenReg = allocReg();
-            emitOp(op_array_length); emitRegs(lenReg, elemRegs[i]); emitPtr(arrT);
+            emitOp(opArrayLengthFor(arrT->elemType_)); emitRegs(lenReg, elemRegs[i]); emitPtr(arrT);
             lenRegs[ci] = lenReg;
         }
     }
@@ -7591,7 +7591,7 @@ u16 CodeGen::genCartesianArrayLiteral(ArrayLiteralExpr* expr) {
         int ci = expr->autoMapElements[i].cartesianIndex;
         if (ci > 0) {
             auto* arrT = dynamic_cast<ArrayType*>(expr->elements[i]->resolvedType);
-            emitOp(op_array_get_dyn); emitRegs(targetReg, elemRegs[i], iRegs[ci]); emitPtr(arrT);
+            emitOp(opArrayGetDynFor(arrT->elemType_)); emitRegs(targetReg, elemRegs[i], iRegs[ci]); emitPtr(arrT);
             Type* srcElem = arrT->elemType_;
             if (srcElem != elemType) {
                 u16 promoted = ensureType(targetReg, srcElem, elemType);
@@ -7600,7 +7600,7 @@ u16 CodeGen::genCartesianArrayLiteral(ArrayLiteralExpr* expr) {
         } else if (expr->autoMapElements[i].depth > 0) {
             // Plain @ in cartesian context — zip with level 1
             auto* arrT = dynamic_cast<ArrayType*>(expr->elements[i]->resolvedType);
-            emitOp(op_array_get_dyn); emitRegs(targetReg, elemRegs[i], iRegs[1]); emitPtr(arrT);
+            emitOp(opArrayGetDynFor(arrT->elemType_)); emitRegs(targetReg, elemRegs[i], iRegs[1]); emitPtr(arrT);
             Type* srcElem = arrT->elemType_;
             if (srcElem != elemType) {
                 u16 promoted = ensureType(targetReg, srcElem, elemType);
@@ -7623,7 +7623,7 @@ u16 CodeGen::genCartesianArrayLiteral(ArrayLiteralExpr* expr) {
     {
         u16 prevReg = innerArrReg;
         for (int level = maxCartesian; level >= 1; --level) {
-            emitOp(op_array_set); emitRegs(resultRegs[level], iRegs[level], prevReg); emitPtr(resultTypes[level]);
+            emitOp(opArraySetFor(resultTypes[level]->elemType_)); emitRegs(resultRegs[level], iRegs[level], prevReg); emitPtr(resultTypes[level]);
             emitOp(op_add_int); emitRegs(iRegs[level], iRegs[level], oneReg);
             emitJumpTo(loopStarts[level]);
             patchJump(loopExits[level]);
@@ -7663,7 +7663,7 @@ u16 CodeGen::genAutoMapTupleLiteral(TupleLiteralExpr* expr) {
         if (!expr->autoMapElements[i]) continue;
         auto* arrT = dynamic_cast<ArrayType*>(expr->elements[i]->resolvedType);
         u16 lenReg = allocReg();
-        emitOp(op_array_length); emitRegs(lenReg, elemRegs[i]); emitPtr(arrT);
+        emitOp(opArrayLengthFor(arrT->elemType_)); emitRegs(lenReg, elemRegs[i]); emitPtr(arrT);
         if (firstAM) { minLenReg = lenReg; firstAM = false; }
         else {
             u16 cmpReg = allocReg();
@@ -7701,7 +7701,7 @@ u16 CodeGen::genAutoMapTupleLiteral(TupleLiteralExpr* expr) {
         Type* fieldType = tupType->fields_[i];
         if (expr->autoMapElements[i]) {
             auto* arrT = dynamic_cast<ArrayType*>(expr->elements[i]->resolvedType);
-            emitOp(op_array_get_dyn); emitRegs(targetReg, elemRegs[i], iReg); emitPtr(arrT);
+            emitOp(opArrayGetDynFor(arrT->elemType_)); emitRegs(targetReg, elemRegs[i], iReg); emitPtr(arrT);
             Type* srcElemType = arrT->elemType_;
             if (srcElemType != fieldType) {
                 u16 promoted = ensureType(targetReg, srcElemType, fieldType);
@@ -7724,7 +7724,7 @@ u16 CodeGen::genAutoMapTupleLiteral(TupleLiteralExpr* expr) {
     // --- Phase 8: Store in result array ---
     // Phase 4g.8: InlineArray takes the multi-word inline tuple directly.
     (void)inlineTuple;
-    emitOp(op_array_set);
+    emitOp(opArraySetFor(resultArrayType->elemType_));
     emitRegs(resultArrReg, iReg, tupReg);
     emitPtr(resultArrayType);
 
@@ -7789,7 +7789,7 @@ u16 CodeGen::genCartesianTupleLiteral(TupleLiteralExpr* expr) {
         if (ci > 0 && lenRegs[ci] == 0) {
             auto* arrT = dynamic_cast<ArrayType*>(expr->elements[i]->resolvedType);
             u16 lenReg = allocReg();
-            emitOp(op_array_length); emitRegs(lenReg, elemRegs[i]); emitPtr(arrT);
+            emitOp(opArrayLengthFor(arrT->elemType_)); emitRegs(lenReg, elemRegs[i]); emitPtr(arrT);
             lenRegs[ci] = lenReg;
         }
     }
@@ -7839,7 +7839,7 @@ u16 CodeGen::genCartesianTupleLiteral(TupleLiteralExpr* expr) {
         int ci = expr->autoMapElements[i].cartesianIndex;
         if (ci > 0) {
             auto* arrT = dynamic_cast<ArrayType*>(expr->elements[i]->resolvedType);
-            emitOp(op_array_get_dyn); emitRegs(targetReg, elemRegs[i], iRegs[ci]); emitPtr(arrT);
+            emitOp(opArrayGetDynFor(arrT->elemType_)); emitRegs(targetReg, elemRegs[i], iRegs[ci]); emitPtr(arrT);
             Type* srcElem = arrT->elemType_;
             if (srcElem != fieldType) {
                 u16 promoted = ensureType(targetReg, srcElem, fieldType);
@@ -7847,7 +7847,7 @@ u16 CodeGen::genCartesianTupleLiteral(TupleLiteralExpr* expr) {
             }
         } else if (expr->autoMapElements[i].depth > 0) {
             auto* arrT = dynamic_cast<ArrayType*>(expr->elements[i]->resolvedType);
-            emitOp(op_array_get_dyn); emitRegs(targetReg, elemRegs[i], iRegs[1]); emitPtr(arrT);
+            emitOp(opArrayGetDynFor(arrT->elemType_)); emitRegs(targetReg, elemRegs[i], iRegs[1]); emitPtr(arrT);
             Type* srcElem = arrT->elemType_;
             if (srcElem != fieldType) {
                 u16 promoted = ensureType(targetReg, srcElem, fieldType);
@@ -7871,7 +7871,7 @@ u16 CodeGen::genCartesianTupleLiteral(TupleLiteralExpr* expr) {
         (void)inlineTuple;
         u16 prevReg = tupReg;
         for (int level = maxCartesian; level >= 1; --level) {
-            emitOp(op_array_set); emitRegs(resultRegs[level], iRegs[level], prevReg); emitPtr(resultTypes[level]);
+            emitOp(opArraySetFor(resultTypes[level]->elemType_)); emitRegs(resultRegs[level], iRegs[level], prevReg); emitPtr(resultTypes[level]);
             emitOp(op_add_int); emitRegs(iRegs[level], iRegs[level], oneReg);
             emitJumpTo(loopStarts[level]);
             patchJump(loopExits[level]);
@@ -7947,7 +7947,7 @@ u16 CodeGen::genCartesianStructLiteral(StructLiteralExpr* expr) {
         if (ci > 0 && lenRegs[ci] == 0) {
             auto* arrT = dynamic_cast<ArrayType*>(expr->fields[i].value->resolvedType);
             u16 lenReg = allocReg();
-            emitOp(op_array_length); emitRegs(lenReg, fieldRegs[i]); emitPtr(arrT);
+            emitOp(opArrayLengthFor(arrT->elemType_)); emitRegs(lenReg, fieldRegs[i]); emitPtr(arrT);
             lenRegs[ci] = lenReg;
         }
     }
@@ -8002,7 +8002,7 @@ u16 CodeGen::genCartesianStructLiteral(StructLiteralExpr* expr) {
             int ci = expr->autoMapFields[litIdx].cartesianIndex;
             if (ci > 0) {
                 auto* arrT = dynamic_cast<ArrayType*>(expr->fields[litIdx].value->resolvedType);
-                emitOp(op_array_get_dyn); emitRegs(targetReg, fieldRegs[litIdx], iRegs[ci]); emitPtr(arrT);
+                emitOp(opArrayGetDynFor(arrT->elemType_)); emitRegs(targetReg, fieldRegs[litIdx], iRegs[ci]); emitPtr(arrT);
                 Type* srcElem = arrT->elemType_;
                 if (srcElem != declType) {
                     u16 promoted = ensureType(targetReg, srcElem, declType);
@@ -8011,7 +8011,7 @@ u16 CodeGen::genCartesianStructLiteral(StructLiteralExpr* expr) {
             } else if (expr->autoMapFields[litIdx].depth > 0) {
                 // Plain @ in cartesian context — zip with level 1
                 auto* arrT = dynamic_cast<ArrayType*>(expr->fields[litIdx].value->resolvedType);
-                emitOp(op_array_get_dyn); emitRegs(targetReg, fieldRegs[litIdx], iRegs[1]); emitPtr(arrT);
+                emitOp(opArrayGetDynFor(arrT->elemType_)); emitRegs(targetReg, fieldRegs[litIdx], iRegs[1]); emitPtr(arrT);
                 Type* srcElem = arrT->elemType_;
                 if (srcElem != declType) {
                     u16 promoted = ensureType(targetReg, srcElem, declType);
@@ -8037,7 +8037,7 @@ u16 CodeGen::genCartesianStructLiteral(StructLiteralExpr* expr) {
         u16 storeReg = structReg;
         u16 prevReg = storeReg;
         for (int level = maxCartesian; level >= 1; --level) {
-            emitOp(op_array_set); emitRegs(resultRegs[level], iRegs[level], prevReg); emitPtr(resultTypes[level]);
+            emitOp(opArraySetFor(resultTypes[level]->elemType_)); emitRegs(resultRegs[level], iRegs[level], prevReg); emitPtr(resultTypes[level]);
             emitOp(op_add_int); emitRegs(iRegs[level], iRegs[level], oneReg);
             emitJumpTo(loopStarts[level]);
             patchJump(loopExits[level]);
@@ -8101,7 +8101,7 @@ u16 CodeGen::genCartesianTupleStruct(CallExpr_* expr) {
         if (ci > 0 && lenRegs[ci] == 0) {
             auto* arrT = dynamic_cast<ArrayType*>(expr->args[i]->resolvedType);
             u16 lenReg = allocReg();
-            emitOp(op_array_length); emitRegs(lenReg, argRegs[i]); emitPtr(arrT);
+            emitOp(opArrayLengthFor(arrT->elemType_)); emitRegs(lenReg, argRegs[i]); emitPtr(arrT);
             lenRegs[ci] = lenReg;
         }
     }
@@ -8151,7 +8151,7 @@ u16 CodeGen::genCartesianTupleStruct(CallExpr_* expr) {
         int ci = expr->autoMapArgs[i].cartesianIndex;
         if (ci > 0) {
             auto* arrT = dynamic_cast<ArrayType*>(expr->args[i]->resolvedType);
-            emitOp(op_array_get_dyn); emitRegs(targetReg, argRegs[i], iRegs[ci]); emitPtr(arrT);
+            emitOp(opArrayGetDynFor(arrT->elemType_)); emitRegs(targetReg, argRegs[i], iRegs[ci]); emitPtr(arrT);
             Type* srcElem = arrT->elemType_;
             if (srcElem != declType) {
                 u16 promoted = ensureType(targetReg, srcElem, declType);
@@ -8159,7 +8159,7 @@ u16 CodeGen::genCartesianTupleStruct(CallExpr_* expr) {
             }
         } else if (expr->autoMapArgs[i].depth > 0) {
             auto* arrT = dynamic_cast<ArrayType*>(expr->args[i]->resolvedType);
-            emitOp(op_array_get_dyn); emitRegs(targetReg, argRegs[i], iRegs[1]); emitPtr(arrT);
+            emitOp(opArrayGetDynFor(arrT->elemType_)); emitRegs(targetReg, argRegs[i], iRegs[1]); emitPtr(arrT);
             Type* srcElem = arrT->elemType_;
             if (srcElem != declType) {
                 u16 promoted = ensureType(targetReg, srcElem, declType);
@@ -8188,7 +8188,7 @@ u16 CodeGen::genCartesianTupleStruct(CallExpr_* expr) {
         u16 storeReg = structReg;
         u16 prevReg = storeReg;
         for (int level = maxCartesian; level >= 1; --level) {
-            emitOp(op_array_set); emitRegs(resultRegs[level], iRegs[level], prevReg); emitPtr(resultTypes[level]);
+            emitOp(opArraySetFor(resultTypes[level]->elemType_)); emitRegs(resultRegs[level], iRegs[level], prevReg); emitPtr(resultTypes[level]);
             emitOp(op_add_int); emitRegs(iRegs[level], iRegs[level], oneReg);
             emitJumpTo(loopStarts[level]);
             patchJump(loopExits[level]);
@@ -8244,7 +8244,7 @@ u16 CodeGen::genIndexExpr(IndexExpr_* expr) {
     auto* arrType = dynamic_cast<ArrayType*>(expr->object->resolvedType);
     Type* elemT = arrType ? arrType->elemType_ : nullptr;
     u16 dst = allocSlot(elemT);
-    emitOp(op_array_get_dyn);
+    emitOp(opArrayGetDynFor(arrType->elemType_));
     emitRegs(dst, objReg, idxReg);
     emitPtr(arrType);
     return dst;
@@ -8262,7 +8262,7 @@ u16 CodeGen::emitIndexLookup(u16 srcReg, Type* srcType, u16 idxReg, Type* idxTyp
         auto* idxArrType = dynamic_cast<ArrayType*>(idxType);
 
         u16 idxLenReg = allocReg();
-        emitOp(op_array_length);
+        emitOp(opArrayLengthFor(idxArrType->elemType_));
         emitRegs(idxLenReg, idxReg);
         emitPtr(idxArrType);
 
@@ -8290,7 +8290,7 @@ u16 CodeGen::emitIndexLookup(u16 srcReg, Type* srcType, u16 idxReg, Type* idxTyp
         u32 exitJump = emitJump(op_jump_if_false, jCondReg);
 
         u16 idxValReg = allocReg();
-        emitOp(op_array_get_dyn);
+        emitOp(opArrayGetDynFor(idxArrType->elemType_));
         emitRegs(idxValReg, idxReg, jReg);
         emitPtr(idxArrType);
 
@@ -8314,12 +8314,12 @@ u16 CodeGen::emitIndexLookup(u16 srcReg, Type* srcType, u16 idxReg, Type* idxTyp
         } else {
             auto* arrType = dynamic_cast<ArrayType*>(srcType);
             valReg = allocSlot(elemResT);
-            emitOp(op_array_get_dyn);
+            emitOp(opArrayGetDynFor(arrType->elemType_));
             emitRegs(valReg, srcReg, idxValReg);
             emitPtr(arrType);
         }
 
-        emitOp(op_array_set);
+        emitOp(opArraySetFor(resultArrayType->elemType_));
         emitRegs(resReg, jReg, valReg);
         emitPtr(resultArrayType);
 
@@ -8369,7 +8369,7 @@ u16 CodeGen::emitIndexLookup(u16 srcReg, Type* srcType, u16 idxReg, Type* idxTyp
             emitRegs(valReg, srcReg, idxValReg);
         } else {
             auto* arrType = dynamic_cast<ArrayType*>(srcType);
-            emitOp(op_array_get_dyn);
+            emitOp(opArrayGetDynFor(arrType->elemType_));
             emitRegs(valReg, srcReg, idxValReg);
             emitPtr(arrType);
         }
@@ -8427,7 +8427,7 @@ u16 CodeGen::emitIndexLookup(u16 srcReg, Type* srcType, u16 idxReg, Type* idxTyp
     } else {
         auto* arrType = dynamic_cast<ArrayType*>(srcType);
         dst = allocReg();
-        emitOp(op_array_get_dyn);
+        emitOp(opArrayGetDynFor(arrType->elemType_));
         emitRegs(dst, srcReg, idxReg);
         emitPtr(arrType);
     }
@@ -8442,7 +8442,7 @@ u16 CodeGen::genAutoMapIndexObjArray(IndexExpr_* expr) {
     Type* elemType = arrType->elemType_;
 
     u16 lenReg = allocReg();
-    emitOp(op_array_length);
+    emitOp(opArrayLengthFor(arrType->elemType_));
     emitRegs(lenReg, objReg);
     emitPtr(arrType);
 
@@ -8470,7 +8470,7 @@ u16 CodeGen::genAutoMapIndexObjArray(IndexExpr_* expr) {
     u32 exitJump = emitJump(op_jump_if_false, condReg);
 
     u16 elemReg = allocSlot(elemType);
-    emitOp(op_array_get_dyn);
+    emitOp(opArrayGetDynFor(arrType->elemType_));
     emitRegs(elemReg, objReg, iReg);
     emitPtr(arrType);
 
@@ -8482,7 +8482,7 @@ u16 CodeGen::genAutoMapIndexObjArray(IndexExpr_* expr) {
                                  expr->indexAutoMap, innerResultType);
 
     // Phase 4g.8: InlineArray accepts multi-word inline directly.
-    emitOp(op_array_set);
+    emitOp(opArraySetFor(resultArrayType->elemType_));
     emitRegs(resultReg, iReg, valReg);
     emitPtr(resultArrayType);
 
@@ -8625,7 +8625,7 @@ u16 CodeGen::genAutoMapIndexObjDeep(IndexExpr_* expr, int depth) {
         if (!loop.isList) {
             auto* arrType = dynamic_cast<ArrayType*>(levels[d].containerType);
             loop.lenReg = allocReg();
-            emitOp(op_array_length);
+            emitOp(opArrayLengthFor(arrType->elemType_));
             emitRegs(loop.lenReg, currentObjReg);
             emitPtr(arrType);
 
@@ -8648,7 +8648,7 @@ u16 CodeGen::genAutoMapIndexObjDeep(IndexExpr_* expr, int depth) {
             loop.exitJump = emitJump(op_jump_if_false, loop.condReg);
 
             u16 subReg = allocReg();
-            emitOp(op_array_get_dyn);
+            emitOp(opArrayGetDynFor(arrType->elemType_));
             emitRegs(subReg, currentObjReg, loop.iReg);
             emitPtr(arrType);
             currentObjReg = subReg;
@@ -8691,7 +8691,7 @@ u16 CodeGen::genAutoMapIndexObjDeep(IndexExpr_* expr, int depth) {
         auto& loop = loops[d];
         if (!loop.isList) {
             auto* resArrType = dynamic_cast<ArrayType*>(resultTypes[d]);
-            emitOp(op_array_set);
+            emitOp(opArraySetFor(resArrType->elemType_));
             emitRegs(loop.resultReg, loop.iReg, prevResultReg);
             emitPtr(resArrType);
 
@@ -8874,7 +8874,7 @@ u16 CodeGen::genAutoMapFieldArray(FieldExpr_* expr) {
 
     // Get array length
     u16 lenReg = allocReg();
-    emitOp(op_array_length);
+    emitOp(opArrayLengthFor(arrType->elemType_));
     emitRegs(lenReg, objReg);
     emitPtr(arrType);
 
@@ -8907,7 +8907,7 @@ u16 CodeGen::genAutoMapFieldArray(FieldExpr_* expr) {
     // Extract element from array. Phase 4g.8: Inline elements occupy
     // sizeWords_ consecutive register slots.
     u16 elemReg = allocSlot(elemType);
-    emitOp(op_array_get_dyn);
+    emitOp(opArrayGetDynFor(arrType->elemType_));
     emitRegs(elemReg, objReg, iReg);
     emitPtr(arrType);
 
@@ -8926,7 +8926,7 @@ u16 CodeGen::genAutoMapFieldArray(FieldExpr_* expr) {
     }
 
     // Store in result array
-    emitOp(op_array_set);
+    emitOp(opArraySetFor(resultArrayType->elemType_));
     emitRegs(resultReg, iReg, fieldReg);
     emitPtr(resultArrayType);
 
@@ -9090,7 +9090,7 @@ u16 CodeGen::genAutoMapFieldDeep(FieldExpr_* expr, int depth) {
             // Array loop
             auto* arrType = dynamic_cast<ArrayType*>(levels[d].containerType);
             loop.lenReg = allocReg();
-            emitOp(op_array_length);
+            emitOp(opArrayLengthFor(arrType->elemType_));
             emitRegs(loop.lenReg, currentObjReg);
             emitPtr(arrType);
 
@@ -9116,7 +9116,7 @@ u16 CodeGen::genAutoMapFieldDeep(FieldExpr_* expr, int depth) {
             // multi-word inline composites.
             Type* peeled = arrType->elemType_;
             u16 subReg = allocSlot(peeled);
-            emitOp(op_array_get_dyn);
+            emitOp(opArrayGetDynFor(arrType->elemType_));
             emitRegs(subReg, currentObjReg, loop.iReg);
             emitPtr(arrType);
             currentObjReg = subReg;
@@ -9170,7 +9170,7 @@ u16 CodeGen::genAutoMapFieldDeep(FieldExpr_* expr, int depth) {
         if (!loop.isList) {
             // Array: store result, increment, loop back
             auto* resArrType = dynamic_cast<ArrayType*>(resultTypes[d]);
-            emitOp(op_array_set);
+            emitOp(opArraySetFor(resArrType->elemType_));
             emitRegs(loop.resultReg, loop.iReg, prevResultReg);
             emitPtr(resArrType);
 

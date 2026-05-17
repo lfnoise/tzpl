@@ -265,7 +265,12 @@ static const std::unordered_map<Operation, OpInfo>& opInfoMap() {
         // --- Array Destructuring ---
         { op_array_get,         { "ARRAY_GET",         3, OpFmt::Regs_Ptr, 3 } },
         { op_array_slice,       { "ARRAY_SLICE",       3, OpFmt::Regs_Ptr, 3 } },
-        { op_array_length,      { "ARRAY_LENGTH",      3, OpFmt::Regs_Ptr, 2 } },
+        { op_array_length_int,      { "ARRAY_LENGTH_INT",      3, OpFmt::Regs_Ptr, 2 } },
+        { op_array_length_float,    { "ARRAY_LENGTH_FLOAT",    3, OpFmt::Regs_Ptr, 2 } },
+        { op_array_length_complex,  { "ARRAY_LENGTH_COMPLEX",  3, OpFmt::Regs_Ptr, 2 } },
+        { op_array_length_fraction, { "ARRAY_LENGTH_FRACTION", 3, OpFmt::Regs_Ptr, 2 } },
+        { op_array_length_inline,   { "ARRAY_LENGTH_INLINE",   3, OpFmt::Regs_Ptr, 2 } },
+        { op_array_length_obj,      { "ARRAY_LENGTH_OBJ",      3, OpFmt::Regs_Ptr, 2 } },
 
         // --- Enum Construction/Access ---
         { op_make_enum,         { "MAKE_ENUM",         3, OpFmt::Regs_Ptr, 3 } },
@@ -279,8 +284,18 @@ static const std::unordered_map<Operation, OpInfo>& opInfoMap() {
 
         // --- Dynamic Array Operations ---
         { op_array_alloc,       { "ARRAY_ALLOC",       3, OpFmt::Regs_Ptr, 2 } },
-        { op_array_set,         { "ARRAY_SET",         3, OpFmt::Regs_Ptr, 3 } },
-        { op_array_get_dyn,     { "ARRAY_GET_DYN",     3, OpFmt::Regs_Ptr, 3 } },
+        { op_array_set_int,         { "ARRAY_SET_INT",         3, OpFmt::Regs_Ptr, 3 } },
+        { op_array_set_float,       { "ARRAY_SET_FLOAT",       3, OpFmt::Regs_Ptr, 3 } },
+        { op_array_set_complex,     { "ARRAY_SET_COMPLEX",     3, OpFmt::Regs_Ptr, 3 } },
+        { op_array_set_fraction,    { "ARRAY_SET_FRACTION",    3, OpFmt::Regs_Ptr, 3 } },
+        { op_array_set_inline,      { "ARRAY_SET_INLINE",      3, OpFmt::Regs_Ptr, 3 } },
+        { op_array_set_obj,         { "ARRAY_SET_OBJ",         3, OpFmt::Regs_Ptr, 3 } },
+        { op_array_get_dyn_int,     { "ARRAY_GET_DYN_INT",     3, OpFmt::Regs_Ptr, 3 } },
+        { op_array_get_dyn_float,   { "ARRAY_GET_DYN_FLOAT",   3, OpFmt::Regs_Ptr, 3 } },
+        { op_array_get_dyn_complex, { "ARRAY_GET_DYN_COMPLEX", 3, OpFmt::Regs_Ptr, 3 } },
+        { op_array_get_dyn_fraction,{ "ARRAY_GET_DYN_FRACTION",3, OpFmt::Regs_Ptr, 3 } },
+        { op_array_get_dyn_inline,  { "ARRAY_GET_DYN_INLINE",  3, OpFmt::Regs_Ptr, 3 } },
+        { op_array_get_dyn_obj,     { "ARRAY_GET_DYN_OBJ",     3, OpFmt::Regs_Ptr, 3 } },
 
         // --- List ---
         { op_cons,              { "CONS",              3, OpFmt::Regs_Ptr, 3 } },
