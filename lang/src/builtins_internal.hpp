@@ -110,16 +110,36 @@ inline Word getArrayElem(VM& vm, Obj* a, Type* et, size_t i) {
     return Word();
 }
 
-inline size_t getArraySize(VM& vm, Obj* a, Type* et) {
-    switch (arrayBackendFor(et)) {
-        case ArrayBackend::Complex:  return static_cast<PodArray<x64>*>(a)->v.size();
-        case ArrayBackend::Fraction: return static_cast<PodArray<r64>*>(a)->v.size();
-        case ArrayBackend::Float:    return static_cast<PodArray<f64>*>(a)->v.size();
-        case ArrayBackend::Int:      return static_cast<PodArray<i64>*>(a)->v.size();
-        case ArrayBackend::Inline:   return static_cast<InlineArray*>(a)->size();
-        case ArrayBackend::Obj:      return static_cast<ObjArray*>(a)->size();
+// Backend-templated size accessor: `if constexpr` collapses to the right
+// branch when called with a constant ArrayBackend.
+template<ArrayBackend B>
+inline size_t getArraySize_t(Obj* a) {
+    if constexpr (B == ArrayBackend::Complex)       return static_cast<PodArray<x64>*>(a)->v.size();
+    else if constexpr (B == ArrayBackend::Fraction) return static_cast<PodArray<r64>*>(a)->v.size();
+    else if constexpr (B == ArrayBackend::Float)    return static_cast<PodArray<f64>*>(a)->v.size();
+    else if constexpr (B == ArrayBackend::Int)      return static_cast<PodArray<i64>*>(a)->v.size();
+    else if constexpr (B == ArrayBackend::Inline)   return static_cast<InlineArray*>(a)->size();
+    else if constexpr (B == ArrayBackend::Obj)      return static_cast<ObjArray*>(a)->size();
+}
+
+inline size_t getArraySize(Obj* a, ArrayBackend b) {
+    switch (b) {
+        case ArrayBackend::Complex:  return getArraySize_t<ArrayBackend::Complex>(a);
+        case ArrayBackend::Fraction: return getArraySize_t<ArrayBackend::Fraction>(a);
+        case ArrayBackend::Float:    return getArraySize_t<ArrayBackend::Float>(a);
+        case ArrayBackend::Int:      return getArraySize_t<ArrayBackend::Int>(a);
+        case ArrayBackend::Inline:   return getArraySize_t<ArrayBackend::Inline>(a);
+        case ArrayBackend::Obj:      return getArraySize_t<ArrayBackend::Obj>(a);
     }
     return 0;
+}
+
+// Compatibility wrapper for sites that still pass Type*. Callers in
+// hot loops should hoist arrayBackendFor outside and use the
+// ArrayBackend overload above.
+inline size_t getArraySize(VM& vm, Obj* a, Type* et) {
+    (void)vm;
+    return getArraySize(a, arrayBackendFor(et));
 }
 
 inline Obj* makeEmptyArray(ArrayType* at) {
@@ -297,41 +317,54 @@ inline void placeLambdaArgSlot(VM& vm, u16 sb, Word const* src, Type* paramType)
     }
 }
 
+// Backend-templated lambda-arg placer. `if constexpr` collapses to the
+// right branch when called with a constant ArrayBackend.
+template<ArrayBackend B>
+inline void placeLambdaArgFromArrayElem_t(VM& vm, u16 sb, Obj* a, Type* et,
+                                          size_t i) {
+    if constexpr (B == ArrayBackend::Int) {
+        vm.reg(sb).i = static_cast<PodArray<i64>*>(a)->v[i];
+    } else if constexpr (B == ArrayBackend::Float) {
+        vm.reg(sb).f = static_cast<PodArray<f64>*>(a)->v[i];
+    } else if constexpr (B == ArrayBackend::Complex) {
+        x64 const& x = static_cast<PodArray<x64>*>(a)->v[i];
+        vm.reg(sb).f     = x.real();
+        vm.reg(sb + 1).f = x.imag();
+    } else if constexpr (B == ArrayBackend::Fraction) {
+        r64 const& r = static_cast<PodArray<r64>*>(a)->v[i];
+        vm.reg(sb).i     = r.numer();
+        vm.reg(sb + 1).i = r.denom();
+    } else if constexpr (B == ArrayBackend::Inline) {
+        auto* arr = static_cast<InlineArray*>(a);
+        Word const* src = arr->slot(i);
+        u32 sw = (et && et->sizeWords_ > 0) ? et->sizeWords_ : 1;
+        for (u32 k = 0; k < sw; ++k) vm.reg(sb + k) = src[k];
+    } else if constexpr (B == ArrayBackend::Obj) {
+        vm.reg(sb).o = static_cast<ObjArray*>(a)->get(i);
+    }
+}
+
 // Place a lambda arg by reading array element i directly into the lambda's
 // arg slot window at sb. Works across all array backends; for
 // PodArray<x64>/PodArray<r64>/InlineArray the read is multi-word native.
+// Hot-loop callers should hoist arrayBackendFor outside and pass the
+// resulting enum so the switch becomes a jump table on 6 cases.
+inline void placeLambdaArgFromArrayElem(VM& vm, u16 sb, Obj* a, ArrayBackend b,
+                                        Type* et, size_t i) {
+    switch (b) {
+        case ArrayBackend::Int:      placeLambdaArgFromArrayElem_t<ArrayBackend::Int>(vm, sb, a, et, i); return;
+        case ArrayBackend::Float:    placeLambdaArgFromArrayElem_t<ArrayBackend::Float>(vm, sb, a, et, i); return;
+        case ArrayBackend::Complex:  placeLambdaArgFromArrayElem_t<ArrayBackend::Complex>(vm, sb, a, et, i); return;
+        case ArrayBackend::Fraction: placeLambdaArgFromArrayElem_t<ArrayBackend::Fraction>(vm, sb, a, et, i); return;
+        case ArrayBackend::Inline:   placeLambdaArgFromArrayElem_t<ArrayBackend::Inline>(vm, sb, a, et, i); return;
+        case ArrayBackend::Obj:      placeLambdaArgFromArrayElem_t<ArrayBackend::Obj>(vm, sb, a, et, i); return;
+    }
+}
+
+// Compatibility wrapper for sites that still pass Type*.
 inline void placeLambdaArgFromArrayElem(VM& vm, u16 sb, Obj* a, Type* et,
                                         size_t i) {
-    switch (arrayBackendFor(et)) {
-        case ArrayBackend::Int:
-            vm.reg(sb).i = static_cast<PodArray<i64>*>(a)->v[i];
-            return;
-        case ArrayBackend::Float:
-            vm.reg(sb).f = static_cast<PodArray<f64>*>(a)->v[i];
-            return;
-        case ArrayBackend::Complex: {
-            x64 const& x = static_cast<PodArray<x64>*>(a)->v[i];
-            vm.reg(sb).f     = x.real();
-            vm.reg(sb + 1).f = x.imag();
-            return;
-        }
-        case ArrayBackend::Fraction: {
-            r64 const& r = static_cast<PodArray<r64>*>(a)->v[i];
-            vm.reg(sb).i     = r.numer();
-            vm.reg(sb + 1).i = r.denom();
-            return;
-        }
-        case ArrayBackend::Inline: {
-            auto* arr = static_cast<InlineArray*>(a);
-            Word const* src = arr->slot(i);
-            u32 sw = (et && et->sizeWords_ > 0) ? et->sizeWords_ : 1;
-            for (u32 k = 0; k < sw; ++k) vm.reg(sb + k) = src[k];
-            return;
-        }
-        case ArrayBackend::Obj:
-            vm.reg(sb).o = static_cast<ObjArray*>(a)->get(i);
-            return;
-    }
+    placeLambdaArgFromArrayElem(vm, sb, a, arrayBackendFor(et), et, i);
 }
 
 // Sum of slot words for the first `numArgs` parameter types (Phase 4g.2:
