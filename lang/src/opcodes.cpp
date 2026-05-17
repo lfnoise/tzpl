@@ -2194,6 +2194,9 @@ static Word dispatchUnaryOp(VM& vm, Op op, Word a, Type* aType, Type* resultType
 //     (dispatchArrayBinop, dispatchListBinop) expect single-Word operands
 //     and broadcast/zip element-wise; box the Inline operand once on entry
 //     so the operand looks like a heap Tuple* to those paths.
+//   - Phase 4g.33: Array/List result with Inline Complex/Fraction operand
+//     -- extract the native x64/r64 from the register slot and route
+//     directly to the POD fast paths, no heap mirror.
 //   - Otherwise: fall through to dispatchBinop unchanged.
 template<typename Op>
 static inline Word compositeBinopTopLevel(VM& vm, Op op, u16 a, u16 b,
@@ -2213,9 +2216,52 @@ static inline Word compositeBinopTopLevel(VM& vm, Op op, u16 a, u16 b,
         return dispatchTupleBinopBase(vm, op, aBase, bBase, vm.reg(a), vm.reg(b),
                                       aType, bType, rTT);
     }
-    // Array/List result -- box any Inline operand (Tuple/Struct/Enum or
-    // Complex/Fraction; Phase 4g.20) into a heap object so dispatchBinop's
-    // single-Word path can broadcast/zip it scalar-style.
+
+    // Phase 4g.33: bypass the heap-Complex/Fraction operand mirror for the
+    // common Array<C>/<F> +/-/*// cases. The Inline operand is already at
+    // &vm.reg(a)/&vm.reg(b) as a 2-word native value; read it directly.
+    auto* rAT = dynamic_cast<ArrayType*>(resultType);
+    if (rAT) {
+        Type* resultElem = rAT->elemType_;
+        auto* aAT = dynamic_cast<ArrayType*>(aType);
+        auto* bAT = dynamic_cast<ArrayType*>(bType);
+        if constexpr (bool(Op::flags & mathOpComplexArgs)) {
+            if (resultElem == vm.complexType()) {
+                if (aAT && bType == vm.complexType()
+                    && aAT->elemType_ == vm.complexType()) {
+                    x64 bx(vm.reg(b).f, vm.reg(b+1).f);
+                    return Word(static_cast<Obj*>(podArrayScalarLoop(op,
+                        static_cast<PodArray<x64>*>(vm.reg(a).o), bx, rAT)));
+                }
+                if (aType == vm.complexType() && bAT
+                    && bAT->elemType_ == vm.complexType()) {
+                    x64 ax(vm.reg(a).f, vm.reg(a+1).f);
+                    return Word(static_cast<Obj*>(podScalarArrayLoop(op,
+                        ax, static_cast<PodArray<x64>*>(vm.reg(b).o), rAT)));
+                }
+            }
+        }
+        if constexpr (bool(Op::flags & mathOpFractionArgs)) {
+            if (resultElem == vm.fractionType()) {
+                if (aAT && bType == vm.fractionType()
+                    && aAT->elemType_ == vm.fractionType()) {
+                    r64 br(vm.reg(b).i, vm.reg(b+1).i, true);
+                    return Word(static_cast<Obj*>(podArrayScalarLoop(op,
+                        static_cast<PodArray<r64>*>(vm.reg(a).o), br, rAT)));
+                }
+                if (aType == vm.fractionType() && bAT
+                    && bAT->elemType_ == vm.fractionType()) {
+                    r64 ar(vm.reg(a).i, vm.reg(a+1).i, true);
+                    return Word(static_cast<Obj*>(podScalarArrayLoop(op,
+                        ar, static_cast<PodArray<r64>*>(vm.reg(b).o), rAT)));
+                }
+            }
+        }
+    }
+
+    // Array/List result -- box any remaining Inline operand (Tuple/Struct/
+    // Enum, or mixed-type Complex/Fraction cases not caught above) so
+    // dispatchBinop's single-Word path can broadcast/zip it scalar-style.
     bool aInline = aType && aType->repr_ == Type::Repr::Inline;
     bool bInline = bType && bType->repr_ == Type::Repr::Inline;
     Word aw = vm.reg(a), bw = vm.reg(b);
@@ -2234,7 +2280,8 @@ static inline Word compositeUnaryOpTopLevel(VM& vm, Op op, u16 a,
         return dispatchTupleUnaryOpBase(vm, op, &vm.reg(a), aType, rTT);
     }
     Word aw = vm.reg(a);
-    if (aInline) aw = boxPayload(vm, aType, &vm.reg(a));
+    bool aFullInline = aType && aType->repr_ == Type::Repr::Inline;
+    if (aFullInline) aw = boxPayload(vm, aType, &vm.reg(a));
     return dispatchUnaryOp(vm, op, aw, aType, resultType);
 }
 
