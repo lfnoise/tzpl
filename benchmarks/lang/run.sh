@@ -21,6 +21,8 @@ BENCHES=(
     "mandelbrot_complex   mandelbrot_complex   mandelbrot"
     "nbody                nbody                nbody"
     "spectral_norm        spectral_norm        spectral_norm"
+    "binary_trees         binary_trees         binary_trees"
+    "fannkuch_redux       fannkuch_redux       fannkuch_redux"
 )
 
 time_one() {
