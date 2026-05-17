@@ -81,6 +81,26 @@ void CodeGen::clearConsts(u16 fromReg) {
     }
 }
 
+void CodeGen::clearConst(u16 reg) {
+    if (!enableConstFold) return;
+    constRegs_.erase(reg);
+}
+
+void CodeGen::clearConstsForMutableLocals() {
+    // Mutable locals are reassigned imperatively; their const tracking from the
+    // initializer is only valid until the first reassignment. Inside a loop body
+    // the emitted code runs many times, so we must clear const tracking before
+    // entering the body even if no reassignment is visible yet.
+    if (!enableConstFold) return;
+    for (auto const& scope : localScopes_) {
+        for (auto const& entry : scope) {
+            if (entry.second.isMutable) {
+                constRegs_.erase(entry.second.reg);
+            }
+        }
+    }
+}
+
 const CodeGen::ConstVal* CodeGen::getConst(u16 reg) const {
     auto it = constRegs_.find(reg);
     return it != constRegs_.end() ? &it->second : nullptr;
@@ -1138,6 +1158,10 @@ void CodeGen::genIfStmt(IfStmtNode* stmt) {
 
 void CodeGen::genWhileStmt(WhileStmtNode* stmt) {
     u16 savedReg = nextReg_;
+    // Mutable locals from before the loop may be reassigned by the body or
+    // before the condition is re-evaluated; their initializer-time const
+    // tracking does not hold across iterations.
+    clearConstsForMutableLocals();
     // Loop header - capture index (not pointer, since vector may reallocate)
     u32 loopStartIdx = (u32)currentBlock_->code.size();
 
@@ -1280,6 +1304,7 @@ void CodeGen::genForStmt(ForStmtNode* stmt) {
                 loopStack_.push_back({loopSavedReg, {}, {}});
                 pushScope();
                 declareLocal(stmt->varName, iReg, rangeType->elemType_, false);
+                clearConstsForMutableLocals();
                 genNode(stmt->body.get());
                 popScope();
 
@@ -1305,6 +1330,7 @@ void CodeGen::genForStmt(ForStmtNode* stmt) {
                 loopStack_.push_back({loopSavedReg, {}, {}});
                 pushScope();
                 declareLocal(stmt->varName, iReg, rangeType->elemType_, false);
+                clearConstsForMutableLocals();
                 genNode(stmt->body.get());
                 popScope();
 
@@ -1443,6 +1469,7 @@ void CodeGen::genForStmt(ForStmtNode* stmt) {
                 loopStack_.push_back({loopSavedReg2, {}, {}});
                 pushScope();
                 declareLocal(stmt->varName, iReg, rangeType->elemType_, false);
+                clearConstsForMutableLocals();
                 genNode(stmt->body.get());
                 popScope();
 
@@ -1468,6 +1495,7 @@ void CodeGen::genForStmt(ForStmtNode* stmt) {
                 loopStack_.push_back({loopSavedReg2, {}, {}});
                 pushScope();
                 declareLocal(stmt->varName, iReg, rangeType->elemType_, false);
+                clearConstsForMutableLocals();
                 genNode(stmt->body.get());
                 popScope();
 
@@ -1525,6 +1553,7 @@ void CodeGen::genForStmt(ForStmtNode* stmt) {
         loopStack_.push_back({loopSavedReg, {}, {}});
         pushScope();
         declareLocal(stmt->varName, elemReg, arrayType->elemType_, false);
+        clearConstsForMutableLocals();
         genNode(stmt->body.get());
         popScope();
 
@@ -1573,6 +1602,7 @@ void CodeGen::genForStmt(ForStmtNode* stmt) {
         loopStack_.push_back({loopSavedReg, {}, {}});
         pushScope();
         declareLocal(stmt->varName, headReg, listType->elemType_, false);
+        clearConstsForMutableLocals();
         genNode(stmt->body.get());
         popScope();
 
@@ -1620,6 +1650,7 @@ void CodeGen::genForStmt(ForStmtNode* stmt) {
         loopStack_.push_back({loopSavedReg, {}, {}});
         pushScope();
         declareLocal(stmt->varName, elemReg, coroType->yieldType_, false);
+        clearConstsForMutableLocals();
         genNode(stmt->body.get());
         popScope();
 
@@ -2276,6 +2307,10 @@ void CodeGen::genAssignStmt(AssignStmtNode* stmt) {
             // Phase 4f: multi-word inline locals need MOV_N.
             emitMoveN(local->reg, valReg, typeSlotWords(local->type));
         }
+        // Reassignment invalidates any const tracking on the target. The const
+        // folder's view is built from the initializer's RHS and is only valid
+        // until the next write.
+        clearConst(local->reg);
         return;
     }
 

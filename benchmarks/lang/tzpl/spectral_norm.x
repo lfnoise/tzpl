@@ -1,22 +1,18 @@
 -- Spectral norm. Iterative power method on an implicit matrix.
 -- Tzopilotl arrays are immutable, so each pass rebuilds the vector with `map`.
--- Float loop counters avoid a const-folder bug with toFloat(int_loop_var).
 
 const N = 1000;
-const FN = 1000.0;
 
 fn aij(i Float, j Float) Float = 1.0 / ((i + j) * (i + j + 1.0) * 0.5 + i + 1.0);
 
 fn mul_av(v [Float], n Int) [Float] {
     let idx = (0..n-1) toArray;
-    idx enumerate map(fn(p (Int, Int)) Float {
-        let fi = toFloat(p.0);
+    idx map(fn(i Int) Float {
+        let fi = toFloat(i);
         var s = 0.0;
-        var fj = 0.0;
         var j = 0;
         while (j < n) {
-            s = s + aij(fi, fj) * v[j];
-            fj = fj + 1.0;
+            s = s + aij(fi, toFloat(j)) * v[j];
             j = j + 1;
         }
         s
@@ -25,14 +21,12 @@ fn mul_av(v [Float], n Int) [Float] {
 
 fn mul_atv(v [Float], n Int) [Float] {
     let idx = (0..n-1) toArray;
-    idx enumerate map(fn(p (Int, Int)) Float {
-        let fi = toFloat(p.0);
+    idx map(fn(i Int) Float {
+        let fi = toFloat(i);
         var s = 0.0;
-        var fj = 0.0;
         var j = 0;
         while (j < n) {
-            s = s + aij(fj, fi) * v[j];
-            fj = fj + 1.0;
+            s = s + aij(toFloat(j), fi) * v[j];
             j = j + 1;
         }
         s

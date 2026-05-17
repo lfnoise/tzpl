@@ -93,6 +93,10 @@ private:
     void declareLocal(const std::string& name, u16 reg, Type* type, bool isMutable);
     LocalVar* lookupLocal(const std::string& name);
 
+    // Const tracking helpers for mutation barriers.
+    void clearConst(u16 reg);
+    void clearConstsForMutableLocals();
+
     // Code generation for nodes
     void genNode(ASTNode* node);
     void genBlock(BlockStmt* block);
