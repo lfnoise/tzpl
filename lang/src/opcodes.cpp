@@ -244,6 +244,32 @@ void op_neg_int(VM& vm, Code* pc) {
     DISPATCH(2);
 }
 
+// --- Integer arithmetic with i16 immediate in regs[2] ---
+// The immediate is sign-extended from the u16 slot. Emitted by the codegen
+// peephole when a binary op has an IntLiteral on the RHS that fits in i16
+// (and, for commutative ops, also when it appears on the LHS).
+
+void op_add_int_imm(VM& vm, Code* pc) {
+    u16 dst = pc[1].regs[0], a = pc[1].regs[1];
+    i64 imm = (i16)pc[1].regs[2];
+    vm.reg(dst).i = vm.reg(a).i + imm;
+    DISPATCH(2);
+}
+
+void op_sub_int_imm(VM& vm, Code* pc) {
+    u16 dst = pc[1].regs[0], a = pc[1].regs[1];
+    i64 imm = (i16)pc[1].regs[2];
+    vm.reg(dst).i = vm.reg(a).i - imm;
+    DISPATCH(2);
+}
+
+void op_mul_int_imm(VM& vm, Code* pc) {
+    u16 dst = pc[1].regs[0], a = pc[1].regs[1];
+    i64 imm = (i16)pc[1].regs[2];
+    vm.reg(dst).i = vm.reg(a).i * imm;
+    DISPATCH(2);
+}
+
 // --- Float Arithmetic ---
 
 void op_add_float(VM& vm, Code* pc) {
@@ -740,6 +766,52 @@ void op_cmp_eq_int(VM& vm, Code* pc) {
 void op_cmp_ne_int(VM& vm, Code* pc) {
     u16 dst = pc[1].regs[0], a = pc[1].regs[1], b = pc[1].regs[2];
     vm.reg(dst).i = (vm.reg(a).i != vm.reg(b).i) ? 1 : 0;
+    DISPATCH(2);
+}
+
+// --- Integer comparisons with i16 immediate in regs[2] ---
+// Form is always `Ra OP imm`. When the literal appeared on the LHS the codegen
+// canonicalizes by flipping the comparison (e.g. `5 < n` -> `n > 5`).
+
+void op_cmp_eq_int_imm(VM& vm, Code* pc) {
+    u16 dst = pc[1].regs[0], a = pc[1].regs[1];
+    i64 imm = (i16)pc[1].regs[2];
+    vm.reg(dst).i = (vm.reg(a).i == imm) ? 1 : 0;
+    DISPATCH(2);
+}
+
+void op_cmp_ne_int_imm(VM& vm, Code* pc) {
+    u16 dst = pc[1].regs[0], a = pc[1].regs[1];
+    i64 imm = (i16)pc[1].regs[2];
+    vm.reg(dst).i = (vm.reg(a).i != imm) ? 1 : 0;
+    DISPATCH(2);
+}
+
+void op_cmp_lt_int_imm(VM& vm, Code* pc) {
+    u16 dst = pc[1].regs[0], a = pc[1].regs[1];
+    i64 imm = (i16)pc[1].regs[2];
+    vm.reg(dst).i = (vm.reg(a).i < imm) ? 1 : 0;
+    DISPATCH(2);
+}
+
+void op_cmp_le_int_imm(VM& vm, Code* pc) {
+    u16 dst = pc[1].regs[0], a = pc[1].regs[1];
+    i64 imm = (i16)pc[1].regs[2];
+    vm.reg(dst).i = (vm.reg(a).i <= imm) ? 1 : 0;
+    DISPATCH(2);
+}
+
+void op_cmp_gt_int_imm(VM& vm, Code* pc) {
+    u16 dst = pc[1].regs[0], a = pc[1].regs[1];
+    i64 imm = (i16)pc[1].regs[2];
+    vm.reg(dst).i = (vm.reg(a).i > imm) ? 1 : 0;
+    DISPATCH(2);
+}
+
+void op_cmp_ge_int_imm(VM& vm, Code* pc) {
+    u16 dst = pc[1].regs[0], a = pc[1].regs[1];
+    i64 imm = (i16)pc[1].regs[2];
+    vm.reg(dst).i = (vm.reg(a).i >= imm) ? 1 : 0;
     DISPATCH(2);
 }
 

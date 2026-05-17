@@ -3021,6 +3021,82 @@ u16 CodeGen::genBinaryOp(BinaryOpExpr* expr) {
         return resultReg;
     }
 
+    // Peephole: Int binary op where one side is an IntLiteral that fits in
+    // a 16-bit signed immediate. Skip emitting the literal into a register and
+    // use the immediate-form opcode. Saves one dispatch per such op and shrinks
+    // the bytecode. Disabled when --no-const-fold is off (the optimization is
+    // semantically transparent but parallels other folder-driven rewrites).
+    if (enableConstFold) {
+        bool intArith = expr->resolvedType == compiler_.intType()
+                     && expr->left->resolvedType == compiler_.intType()
+                     && expr->right->resolvedType == compiler_.intType();
+        bool intCmp   = expr->resolvedType == compiler_.boolType()
+                     && expr->left->resolvedType == compiler_.intType()
+                     && expr->right->resolvedType == compiler_.intType();
+        if (intArith || intCmp) {
+            auto fitsImm16 = [](i64 v) { return v >= -32768 && v <= 32767; };
+            ASTNode* L = expr->left.get();
+            ASTNode* R = expr->right.get();
+            bool leftIsLit  = L->kind == ASTNode::IntLiteral &&
+                              fitsImm16(static_cast<IntLiteralExpr*>(L)->value);
+            bool rightIsLit = R->kind == ASTNode::IntLiteral &&
+                              fitsImm16(static_cast<IntLiteralExpr*>(R)->value);
+
+            // Pick which side holds the literal and which operation form to emit.
+            // For commutative ops, prefer RHS-literal but fall back to LHS.
+            // For ordering compares, flipping operands also flips the relation.
+            Operation immOp = nullptr;
+            i64 imm = 0;
+            Expr* nonLit = nullptr;
+            switch (expr->op) {
+                case BinaryOpExpr::Add:
+                    if (rightIsLit) { immOp = op_add_int_imm; imm = static_cast<IntLiteralExpr*>(R)->value; nonLit = static_cast<Expr*>(L); }
+                    else if (leftIsLit) { immOp = op_add_int_imm; imm = static_cast<IntLiteralExpr*>(L)->value; nonLit = static_cast<Expr*>(R); }
+                    break;
+                case BinaryOpExpr::Sub:
+                    if (rightIsLit) { immOp = op_sub_int_imm; imm = static_cast<IntLiteralExpr*>(R)->value; nonLit = static_cast<Expr*>(L); }
+                    // (lit - reg) is rare; skip for v1.
+                    break;
+                case BinaryOpExpr::Mul:
+                    if (rightIsLit) { immOp = op_mul_int_imm; imm = static_cast<IntLiteralExpr*>(R)->value; nonLit = static_cast<Expr*>(L); }
+                    else if (leftIsLit) { immOp = op_mul_int_imm; imm = static_cast<IntLiteralExpr*>(L)->value; nonLit = static_cast<Expr*>(R); }
+                    break;
+                case BinaryOpExpr::Eq:
+                    if (rightIsLit) { immOp = op_cmp_eq_int_imm; imm = static_cast<IntLiteralExpr*>(R)->value; nonLit = static_cast<Expr*>(L); }
+                    else if (leftIsLit) { immOp = op_cmp_eq_int_imm; imm = static_cast<IntLiteralExpr*>(L)->value; nonLit = static_cast<Expr*>(R); }
+                    break;
+                case BinaryOpExpr::Ne:
+                    if (rightIsLit) { immOp = op_cmp_ne_int_imm; imm = static_cast<IntLiteralExpr*>(R)->value; nonLit = static_cast<Expr*>(L); }
+                    else if (leftIsLit) { immOp = op_cmp_ne_int_imm; imm = static_cast<IntLiteralExpr*>(L)->value; nonLit = static_cast<Expr*>(R); }
+                    break;
+                case BinaryOpExpr::Lt:
+                    if (rightIsLit) { immOp = op_cmp_lt_int_imm; imm = static_cast<IntLiteralExpr*>(R)->value; nonLit = static_cast<Expr*>(L); }
+                    else if (leftIsLit) { immOp = op_cmp_gt_int_imm; imm = static_cast<IntLiteralExpr*>(L)->value; nonLit = static_cast<Expr*>(R); }
+                    break;
+                case BinaryOpExpr::Le:
+                    if (rightIsLit) { immOp = op_cmp_le_int_imm; imm = static_cast<IntLiteralExpr*>(R)->value; nonLit = static_cast<Expr*>(L); }
+                    else if (leftIsLit) { immOp = op_cmp_ge_int_imm; imm = static_cast<IntLiteralExpr*>(L)->value; nonLit = static_cast<Expr*>(R); }
+                    break;
+                case BinaryOpExpr::Gt:
+                    if (rightIsLit) { immOp = op_cmp_gt_int_imm; imm = static_cast<IntLiteralExpr*>(R)->value; nonLit = static_cast<Expr*>(L); }
+                    else if (leftIsLit) { immOp = op_cmp_lt_int_imm; imm = static_cast<IntLiteralExpr*>(L)->value; nonLit = static_cast<Expr*>(R); }
+                    break;
+                case BinaryOpExpr::Ge:
+                    if (rightIsLit) { immOp = op_cmp_ge_int_imm; imm = static_cast<IntLiteralExpr*>(R)->value; nonLit = static_cast<Expr*>(L); }
+                    else if (leftIsLit) { immOp = op_cmp_le_int_imm; imm = static_cast<IntLiteralExpr*>(L)->value; nonLit = static_cast<Expr*>(R); }
+                    break;
+                default: break;
+            }
+            if (immOp) {
+                u16 srcReg = genExpr(nonLit);
+                u16 dst = allocReg();
+                emitOp(immOp);
+                emitRegs(dst, srcReg, (u16)(i16)imm);
+                return dst;
+            }
+        }
+    }
+
     u16 leftReg = genExpr(static_cast<Expr*>(expr->left.get()));
     u16 rightReg = genExpr(static_cast<Expr*>(expr->right.get()));
 

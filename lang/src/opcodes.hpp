@@ -59,6 +59,11 @@ void op_div_int(VM& vm, Code* pc);            // DIV_INT Rd, Ra, Rb (2 words)
 void op_mod_int(VM& vm, Code* pc);            // MOD_INT Rd, Ra, Rb (2 words)
 void op_neg_int(VM& vm, Code* pc);            // NEG_INT Rd, Ra (2 words)
 
+// --- Integer Arithmetic, i16 immediate in regs[2] ---
+void op_add_int_imm(VM& vm, Code* pc);        // ADD_INT_IMM Rd, Ra, imm (2 words)
+void op_sub_int_imm(VM& vm, Code* pc);        // SUB_INT_IMM Rd, Ra, imm — computes Ra - imm
+void op_mul_int_imm(VM& vm, Code* pc);        // MUL_INT_IMM Rd, Ra, imm
+
 // --- Float Arithmetic ---
 void op_add_float(VM& vm, Code* pc);          // ADD_FLOAT Rd, Ra, Rb (2 words)
 void op_sub_float(VM& vm, Code* pc);          // SUB_FLOAT Rd, Ra, Rb (2 words)
@@ -145,6 +150,14 @@ void op_cmp_lt_int(VM& vm, Code* pc);         // CMP_LT_INT Rd, Ra, Rb (2 words)
 void op_cmp_le_int(VM& vm, Code* pc);         // CMP_LE_INT Rd, Ra, Rb (2 words)
 void op_cmp_gt_int(VM& vm, Code* pc);         // CMP_GT_INT Rd, Ra, Rb (2 words)
 void op_cmp_ge_int(VM& vm, Code* pc);         // CMP_GE_INT Rd, Ra, Rb (2 words)
+
+// --- Integer Comparison, i16 immediate in regs[2] (always 'Ra OP imm') ---
+void op_cmp_eq_int_imm(VM& vm, Code* pc);     // CMP_EQ_INT_IMM Rd, Ra, imm
+void op_cmp_ne_int_imm(VM& vm, Code* pc);     // CMP_NE_INT_IMM Rd, Ra, imm
+void op_cmp_lt_int_imm(VM& vm, Code* pc);     // CMP_LT_INT_IMM Rd, Ra, imm
+void op_cmp_le_int_imm(VM& vm, Code* pc);     // CMP_LE_INT_IMM Rd, Ra, imm
+void op_cmp_gt_int_imm(VM& vm, Code* pc);     // CMP_GT_INT_IMM Rd, Ra, imm
+void op_cmp_ge_int_imm(VM& vm, Code* pc);     // CMP_GE_INT_IMM Rd, Ra, imm
 
 // --- Float Comparison ---
 void op_cmp_eq_float(VM& vm, Code* pc);       // CMP_EQ_FLOAT Rd, Ra, Rb (2 words)

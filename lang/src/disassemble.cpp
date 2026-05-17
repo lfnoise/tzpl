@@ -35,6 +35,7 @@ namespace ts {
 enum class OpFmt {
     None,           // 1 word: just opcode
     Regs,           // 2 words: op + regs
+    Regs_Imm16,     // 2 words: op + regs{dst, src, (u16)(i16)imm} -- imm printed as signed
     Regs_Int,       // 3 words: op + regs + i64 (global index, constant, etc.)
     Regs_Float,     // 3 words: op + regs + f64
     Regs_Ptr,       // 3 words: op + regs + pointer (type, CodeBlock, etc.)
@@ -79,6 +80,17 @@ static const std::unordered_map<Operation, OpInfo>& opInfoMap() {
         { op_div_int,           { "DIV_INT",           2, OpFmt::Regs, 3 } },
         { op_mod_int,           { "MOD_INT",           2, OpFmt::Regs, 3 } },
         { op_neg_int,           { "NEG_INT",           2, OpFmt::Regs, 2 } },
+
+        // --- Integer arithmetic, i16 immediate ---
+        { op_add_int_imm,       { "ADDI_INT",          2, OpFmt::Regs_Imm16, 2 } },
+        { op_sub_int_imm,       { "SUBI_INT",          2, OpFmt::Regs_Imm16, 2 } },
+        { op_mul_int_imm,       { "MULI_INT",          2, OpFmt::Regs_Imm16, 2 } },
+        { op_cmp_eq_int_imm,    { "EQI_INT",           2, OpFmt::Regs_Imm16, 2 } },
+        { op_cmp_ne_int_imm,    { "NEI_INT",           2, OpFmt::Regs_Imm16, 2 } },
+        { op_cmp_lt_int_imm,    { "LTI_INT",           2, OpFmt::Regs_Imm16, 2 } },
+        { op_cmp_le_int_imm,    { "LEI_INT",           2, OpFmt::Regs_Imm16, 2 } },
+        { op_cmp_gt_int_imm,    { "GTI_INT",           2, OpFmt::Regs_Imm16, 2 } },
+        { op_cmp_ge_int_imm,    { "GEI_INT",           2, OpFmt::Regs_Imm16, 2 } },
 
         // --- Float Arithmetic ---
         { op_add_float,         { "ADD_FLOAT",         2, OpFmt::Regs, 3 } },
@@ -471,6 +483,11 @@ void disassembleCodeBlock(CodeBlock* block, FILE* out) {
 
         case OpFmt::Regs:
             printRegs(out, pc[1], info.nregs);
+            break;
+
+        case OpFmt::Regs_Imm16:
+            printRegs(out, pc[1], info.nregs);
+            std::fprintf(out, ", %d", (int)(i16)pc[1].regs[2]);
             break;
 
         case OpFmt::Regs_Int:
