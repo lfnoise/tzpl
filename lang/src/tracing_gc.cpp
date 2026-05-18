@@ -202,12 +202,12 @@ u32 TracingGC::step_sweep(u64 deadlineNanos) {
     return done;
 }
 
-u32 TracingGC::step(u64 deadlineNanos) {
+u32 TracingGC::step(u64 deadlineNanos, GCStepSource source) {
     // step_mark may transition to Sweep when the gray worklist drains; do
     // both phases in one call so a slack deadline gets used fully rather
     // than burning a host tick on the phase boundary. Wrap the dispatch in
-    // wall-clock measurement so the worst-case pause can be queried via
-    // __gc_step_max_ns -- this is the headline RT-safety signal.
+    // wall-clock measurement; per-source split lets RT-callback max pause
+    // be observed separately from the looser NRT heartbeat numbers.
     u64 start = gcMonoNanos();
     u32 done = 0;
     if (phase_ == Phase::Mark) {
@@ -222,6 +222,12 @@ u32 TracingGC::step(u64 deadlineNanos) {
     ++stepCount_;
     stepSumNanos_ += elapsed;
     if (elapsed > stepMaxNanos_) stepMaxNanos_ = elapsed;
+    u8 si = (u8)source;
+    if (si < (u8)GCStepSource::kCount) {
+        ++stepCountBySource_[si];
+        stepSumNanosBySource_[si] += elapsed;
+        if (elapsed > stepMaxNanosBySource_[si]) stepMaxNanosBySource_[si] = elapsed;
+    }
     return done;
 }
 
@@ -242,7 +248,7 @@ void TracingGC::requestCycle() {
 void TracingGC::runFullCycle() {
     requestCycle();
     while (phase_ != Phase::Idle) {
-        step(kGCNoDeadline);  // unbounded
+        step(kGCNoDeadline, GCStepSource::Sync);  // unbounded
     }
 }
 

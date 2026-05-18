@@ -2198,6 +2198,36 @@ static void builtin_gc_reset_step_stats(VM& vm, u16 dst, u16, u16) {
     vm.reg(dst).i = 0;
 }
 
+// Driver-split variants: source = 0 Safepoint, 1 NrtTick, 2 RtTick, 3 Sync.
+// Audio-thread max pause is __gc_step_max_ns_by_source(2) -- the single
+// number that determines RT safety for a music app.
+static void builtin_gc_step_count_by_source(VM& vm, u16 dst, u16, u16 argBase) {
+    i64 src = vm.reg(argBase).i;
+    if (src < 0 || src >= (i64)GCStepSource::kCount) { vm.reg(dst).i = 0; return; }
+    vm.reg(dst).i = (i64)vm.tracingGC().stepCountBySource((GCStepSource)src);
+}
+static void builtin_gc_step_max_ns_by_source(VM& vm, u16 dst, u16, u16 argBase) {
+    i64 src = vm.reg(argBase).i;
+    if (src < 0 || src >= (i64)GCStepSource::kCount) { vm.reg(dst).i = 0; return; }
+    vm.reg(dst).i = (i64)vm.tracingGC().stepMaxNanosBySource((GCStepSource)src);
+}
+static void builtin_gc_step_sum_ns_by_source(VM& vm, u16 dst, u16, u16 argBase) {
+    i64 src = vm.reg(argBase).i;
+    if (src < 0 || src >= (i64)GCStepSource::kCount) { vm.reg(dst).i = 0; return; }
+    vm.reg(dst).i = (i64)vm.tracingGC().stepSumNanosBySource((GCStepSource)src);
+}
+
+// Read/write the per-VM step budget (used by all three drivers).
+static void builtin_gc_get_step_budget_ns(VM& vm, u16 dst, u16, u16) {
+    vm.reg(dst).i = (i64)vm.gcStepBudgetNanos();
+}
+static void builtin_gc_set_step_budget_ns(VM& vm, u16 dst, u16, u16 argBase) {
+    i64 ns = vm.reg(argBase).i;
+    if (ns < 0) ns = 0;
+    vm.setGCStepBudgetNanos((u64)ns);
+    vm.reg(dst).i = 0;
+}
+
 // Phase 3e validation: drain the auto-release pool unconditionally so a
 // subsequent tracing cycle sees only what is reachable from globals,
 // dynvars, and the heap graph. In normal file-mode execution the pool
@@ -2457,6 +2487,16 @@ void registerBuiltinFunctions(Compiler& compiler,
     registerOne(compiler, functions, "__gc_step_sum_ns",      compiler.intType(), {}, builtin_gc_step_sum_ns,      /*pure=*/false, /*rtSafe=*/false);
     registerOne(compiler, functions, "__gc_cycles_completed", compiler.intType(), {}, builtin_gc_cycles_completed, /*pure=*/false, /*rtSafe=*/false);
     registerOne(compiler, functions, "__gc_reset_step_stats", compiler.intType(), {}, builtin_gc_reset_step_stats, /*pure=*/false, /*rtSafe=*/false);
+
+    // Phase 6 driver-split telemetry. Argument is the GCStepSource enum
+    // value (0 Safepoint, 1 NrtTick, 2 RtTick, 3 Sync).
+    registerOne(compiler, functions, "__gc_step_count_by_source",  compiler.intType(), {compiler.intType()}, builtin_gc_step_count_by_source,  /*pure=*/false, /*rtSafe=*/false);
+    registerOne(compiler, functions, "__gc_step_max_ns_by_source", compiler.intType(), {compiler.intType()}, builtin_gc_step_max_ns_by_source, /*pure=*/false, /*rtSafe=*/false);
+    registerOne(compiler, functions, "__gc_step_sum_ns_by_source", compiler.intType(), {compiler.intType()}, builtin_gc_step_sum_ns_by_source, /*pure=*/false, /*rtSafe=*/false);
+
+    // Per-VM step-budget knob.
+    registerOne(compiler, functions, "__gc_get_step_budget_ns", compiler.intType(),  {},                       builtin_gc_get_step_budget_ns, /*pure=*/false, /*rtSafe=*/false);
+    registerOne(compiler, functions, "__gc_set_step_budget_ns", compiler.intType(),  {compiler.intType()},     builtin_gc_set_step_budget_ns, /*pure=*/false, /*rtSafe=*/false);
 
     // --- Ref builtins ---
     // Phase 4g.6: ref / deref / setref read inline-composite args directly

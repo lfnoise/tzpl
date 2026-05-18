@@ -129,22 +129,28 @@ void arcEnqueueForDeletion(GCObj* obj) {
 
 TracingGC& VM::tracingGC() { return *tracingGC_; }
 
-// Shared by safepointPoll, rtTick, and nrtTick. Checks the proportional
-// trigger and advances any in-flight cycle until deadlineNanos.
-void VM::hostTick_(u64 deadlineNanos) {
-    auto& gc = *tracingGC_;
+// Shared by rtTick / nrtTick. The source is forwarded into step() so the
+// driver-split telemetry can distinguish audio-callback pauses from looser
+// NRT-thread pauses.
+static void hostTickImpl(VM& vm, u64 deadlineNanos, GCStepSource source) {
+    auto& gc = vm.tracingGC();
     if (gc.phase() == TracingGC::Phase::Idle) {
         if (gc.allocsSinceLastCycle() >= gc.cycleTriggerAllocs()) {
             gc.requestCycle();
         }
     }
     if (gc.phase() != TracingGC::Phase::Idle) {
-        gc.step(deadlineNanos);
+        gc.step(deadlineNanos, source);
     }
 }
 
-void VM::rtTick(u64 deadlineNanos) { hostTick_(deadlineNanos); }
-void VM::nrtTick(u64 deadlineNanos) { hostTick_(deadlineNanos); }
+void VM::hostTick_(u64 deadlineNanos) {
+    // Internal helper retained for callers that don't have a specific
+    // source -- routes through nrtTick to keep semantics conservative.
+    hostTickImpl(*this, deadlineNanos, GCStepSource::NrtTick);
+}
+void VM::rtTick(u64 deadlineNanos)  { hostTickImpl(*this, deadlineNanos, GCStepSource::RtTick); }
+void VM::nrtTick(u64 deadlineNanos) { hostTickImpl(*this, deadlineNanos, GCStepSource::NrtTick); }
 
 void VM::safepointPoll() {
     // Clear flag first so concurrent enqueuers can re-trip it during drain.
@@ -162,7 +168,7 @@ void VM::safepointPoll() {
         }
     }
     if (gc.phase() != TracingGC::Phase::Idle) {
-        gc.step(deadline);
+        gc.step(deadline, GCStepSource::Safepoint);
     }
 
     // Deferred-delete queue (vestigial under Phase 5 -- release is a no-op

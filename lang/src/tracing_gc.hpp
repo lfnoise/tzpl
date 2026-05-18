@@ -50,6 +50,19 @@ inline u64 gcMonoNanos() {
 // Sentinel for "no deadline" (used by runFullCycle and tests).
 inline constexpr u64 kGCNoDeadline = ~u64{0};
 
+// Phase 6: who called step()? Used to split telemetry buckets so the
+// audio-thread max-pause (the one the user cares about) doesn't get
+// hidden in an aggregate with NRT heartbeats that intentionally use a
+// larger budget. Passed in by the caller; the VM helpers (rtTick /
+// nrtTick / safepointPoll) wire the right value through.
+enum class GCStepSource : u8 {
+    Safepoint = 0,   // inside the interpreter, from op_safepoint
+    NrtTick   = 1,   // host NRT heartbeat (scheduler / REPL / gcHeartbeat)
+    RtTick    = 2,   // host RT heartbeat (audio callback)
+    Sync      = 3,   // synchronous __gc_trace_cycle (unbounded)
+    kCount    = 4,
+};
+
 class VM;
 class GCObj;
 
@@ -82,7 +95,12 @@ public:
     // call cannot stall the mutator for more than (kCheckEvery * worstStep).
     // Phase 6 bounds worstStep by splitting fan-out-heavy gcScanChildren
     // overrides into push-and-return units.
-    u32 step(u64 deadlineNanos);
+    //
+    // The source parameter classifies the caller for per-driver telemetry.
+    // Default GCStepSource::Safepoint keeps the existing in-VM call site
+    // (vm.cpp safepointPoll) ergonomically a one-arg call; rtTick / nrtTick
+    // pass the appropriate source explicitly.
+    u32 step(u64 deadlineNanos, GCStepSource source = GCStepSource::Safepoint);
 
     // Run a full cycle synchronously. Useful for tests and for the
     // between-events heartbeat path.
@@ -105,8 +123,21 @@ public:
     u64 stepMaxNanos()    const { return stepMaxNanos_; }
     u64 stepSumNanos()    const { return stepSumNanos_; }
     u64 cyclesCompleted() const { return cyclesCompleted_; }
+
+    // Driver-split breakdown of the same counters. Index with GCStepSource.
+    // Audio-thread max pause is bySource[RtTick].max -- this is the single
+    // number a music-app developer should be watching to confirm RT safety.
+    u64 stepCountBySource(GCStepSource s) const { return stepCountBySource_[(u8)s]; }
+    u64 stepMaxNanosBySource(GCStepSource s) const { return stepMaxNanosBySource_[(u8)s]; }
+    u64 stepSumNanosBySource(GCStepSource s) const { return stepSumNanosBySource_[(u8)s]; }
+
     void resetStepStats() {
         stepCount_ = 0; stepMaxNanos_ = 0; stepSumNanos_ = 0;
+        for (u8 i = 0; i < (u8)GCStepSource::kCount; ++i) {
+            stepCountBySource_[i] = 0;
+            stepMaxNanosBySource_[i] = 0;
+            stepSumNanosBySource_[i] = 0;
+        }
     }
 
     // Mark an object: if currently white, transition to gray and push to
@@ -162,6 +193,9 @@ private:
     u64 stepMaxNanos_ = 0;
     u64 stepSumNanos_ = 0;
     u64 cyclesCompleted_ = 0;
+    u64 stepCountBySource_[(u8)GCStepSource::kCount]    = {};
+    u64 stepMaxNanosBySource_[(u8)GCStepSource::kCount] = {};
+    u64 stepSumNanosBySource_[(u8)GCStepSource::kCount] = {};
 
     void resetColors();
     void markRoots();
