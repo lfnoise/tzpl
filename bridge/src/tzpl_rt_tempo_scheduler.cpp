@@ -100,7 +100,6 @@ i64 RTTempoScheduler::addEntry(f64 beatTime, ts::Obj* handler) {
 
     entry->beatTime = beatTime;
     entry->handler = handler;
-    if (handler) handler->retain();
     entry->timerID = nextTimerID_++;
 
     insertSorted(entry);
@@ -126,7 +125,6 @@ bool RTTempoScheduler::cancel(i64 timerID) {
     for (auto* e = head_; e; e = e->next_) {
         if (e->timerID == timerID) {
             removeFromList(e);
-            if (e->handler) e->handler->release();
             freeEntry(e);
             return true;
         }
@@ -160,7 +158,6 @@ void RTTempoScheduler::processSample(i64 sampleTime, ts::VM* vm) {
                 entry->beatTime += result.f;
                 insertSorted(entry);
             } else {
-                entry->handler->release();
                 freeEntry(entry);
             }
         }

@@ -406,14 +406,12 @@ namespace {
 static std::function<void()> makeAsyncCallable(ts::VM& vm, ts::Obj* handler) {
     auto* ctx = static_cast<AppContext*>(vm.userData());
     if (!ctx || !ctx->nrtvm || !handler) return {};
-    handler->retain();
     auto* nrtvm = ctx->nrtvm;
     return [nrtvm, handler]() {
         std::lock_guard<std::mutex> lk(nrtvm->mtx);
         nrtvm->vm.makeCurrent();
         nrtvm->vm.callCallable(handler, nullptr, 0);
         nrtvm->vm.gcHeartbeat();
-        handler->release();
     };
 }
 
@@ -425,11 +423,9 @@ static std::function<void()> makeAsyncCallable(ts::VM& vm, ts::Obj* handler) {
 // triggering a deadlock or an "already locked" abort from std::mutex.
 static std::function<void()> makeSyncCallable(ts::VM& vm, ts::Obj* handler) {
     if (!handler) return {};
-    handler->retain();
     ts::VM* vmPtr = &vm;
     return [vmPtr, handler]() {
         vmPtr->callCallable(handler, nullptr, 0);
-        handler->release();
     };
 }
 

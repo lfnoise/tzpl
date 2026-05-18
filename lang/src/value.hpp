@@ -81,25 +81,14 @@ size_t wordsHash(Word const* a, Type* type);
 class ListNode;
 void copyListHead(ListNode* dst, ListNode const* src, Type* elemType);
 
-// Phase 4g.2: walk the layout of an Inline composite at `base` and retain
-// (or release, with `release_=true`) every embedded Obj* pointer field.
-// Recurses into nested Inline composite fields rather than treating them
-// as a single boxed pointer -- their words ARE the inline payload.
-// Complex/Fraction count as Inline but contain no nested pointers, so
-// they short-circuit the recursion.
-void inlineWalkPointers(Word* base, Type* type, bool release_);
-
-// Phase 3 of tracing-GC project: same layout walk as inlineWalkPointers,
-// but instead of retain/release each Obj* found is fed to gc.mark().
+// Phase 3 of tracing-GC project: layout walk over an Inline composite that
+// feeds every embedded Obj* into gc.mark(). Recurses into nested Inline
+// composite fields rather than treating them as a single boxed pointer --
+// their words ARE the inline payload. Complex/Fraction count as Inline but
+// contain no nested pointers, so they short-circuit the recursion.
 class TracingGC;
 void gcScanInlinePointers(Word const* base, Type* type, TracingGC& gc);
 void gcScanPayload(Word const* base, Type* type, TracingGC& gc);
-
-// Retain / release Obj* children inside an arbitrary payload of `type`.
-// Phase 4g.11: used by inline-composite containers (Map/Set) so the same
-// call works for stride=1 Obj-pointer types and stride=N Inline composites.
-void payloadRetain(Word const* base, Type* type);
-void payloadRelease(Word* base, Type* type);
 
 // Box a multi-Word inline-composite payload (Complex / Fraction / Struct /
 // Tuple / Enum) into a single Word. Used by Map/Set get paths where the
@@ -332,14 +321,11 @@ public:
     // Mutating operations -- all handle retain/release
     void set(size_t i, Obj* val) {
         Obj* old = v_[i];
-        if (val) val->retain();
         // Phase 3 SATB: snapshot the old element before it is overwritten.
         if (old) gCurrentVM->tracingGC().writeBarrier(old);
         v_[i] = val;
-        if (old) old->release();
     }
     void push(Obj* val) {
-        if (val) val->retain();
         v_.push_back(val);
     }
     void copyFrom(const ObjArray* src) {
@@ -373,10 +359,6 @@ public:
         }
         s += "]";
         return s;
-    }
-
-    void releaseChildren() override {
-        for (auto* obj : v_) { if (obj) obj->release(); }
     }
 
     void gcScanChildren(TracingGC& gc) override {
@@ -446,8 +428,6 @@ public:
     Vec<Word> const& rawVec() const { return v_; }
 
     VMString str() const override;
-
-    void releaseChildren() override;
     void gcScanChildren(TracingGC& gc) override;
     u32  gcScanChunk(TracingGC& gc, u32 cursor) override;
 };
@@ -500,23 +480,6 @@ public:
     void force(VM& vm);
 
     VMString str() const override;
-
-    void releaseChildren() override {
-        if (isLazy_) {
-            reinterpret_cast<GCObj*>(generator_)->release();
-        } else {
-            auto* lt = static_cast<ListType*>(type_);
-            Type* et = lt->elemType_;
-            // Phase 4g.20: Complex/Fraction now store natively (2 words) and
-            // have no Obj* children, so inlineWalkPointers is a no-op for them.
-            if (et && et->repr_ == Type::Repr::Inline) {
-                inlineWalkPointers(headData(), et, /*release_=*/true);
-            } else if (storesObjPtr(et) && head_.o) {
-                head_.o->release();
-            }
-            if (tail_) tail_->release();
-        }
-    }
 
     void gcScanChildren(TracingGC& gc) override {
         if (isLazy_) {
@@ -576,12 +539,6 @@ public:
 
     void generate(VM& vm, ListNode* owner) override;
 
-    void releaseChildren() override {
-        if (leftList_) leftList_->release();
-        if (rightList_) rightList_->release();
-        if (broadcastValIsObj_ && broadcastVal_.o) broadcastVal_.o->release();
-    }
-
     void gcScanChildren(TracingGC& gc) override {
         if (leftList_) gc.mark(leftList_);
         if (rightList_) gc.mark(rightList_);
@@ -604,10 +561,6 @@ public:
 
     void generate(VM& vm, ListNode* owner) override;
 
-    void releaseChildren() override {
-        if (source_) source_->release();
-    }
-
     void gcScanChildren(TracingGC& gc) override {
         if (source_) gc.mark(source_);
     }
@@ -625,8 +578,6 @@ public:
     RangeListGen(Type* type);
 
     void generate(VM& vm, ListNode* owner) override;
-
-    void releaseChildren() override {}
 };
 
 // Generator for lazily converting a Range<Fraction> to a List<Fraction>
@@ -641,12 +592,6 @@ public:
     FractionRangeListGen(Type* type);
 
     void generate(VM& vm, ListNode* owner) override;
-
-    void releaseChildren() override {
-        if (current_) current_->release();
-        if (end_) end_->release();
-        if (step_) step_->release();
-    }
 
     void gcScanChildren(TracingGC& gc) override {
         if (current_) gc.mark(current_);
@@ -670,11 +615,7 @@ public:
     ListType* listType_;
 
     TakeListGen(Type* type);
-    void generate(VM& vm, ListNode* owner) override;
-    void releaseChildren() override {
-        if (source_) source_->release();
-    }
-    void gcScanChildren(TracingGC& gc) override {
+    void generate(VM& vm, ListNode* owner) override;    void gcScanChildren(TracingGC& gc) override {
         if (source_) gc.mark(source_);
     }
 };
@@ -687,11 +628,7 @@ public:
     ListType* listType_;
 
     DropListGen(Type* type);
-    void generate(VM& vm, ListNode* owner) override;
-    void releaseChildren() override {
-        if (source_) source_->release();
-    }
-    void gcScanChildren(TracingGC& gc) override {
+    void generate(VM& vm, ListNode* owner) override;    void gcScanChildren(TracingGC& gc) override {
         if (source_) gc.mark(source_);
     }
 };
@@ -704,11 +641,7 @@ public:
     ListType* listType_;
 
     StrideListGen(Type* type);
-    void generate(VM& vm, ListNode* owner) override;
-    void releaseChildren() override {
-        if (source_) source_->release();
-    }
-    void gcScanChildren(TracingGC& gc) override {
+    void generate(VM& vm, ListNode* owner) override;    void gcScanChildren(TracingGC& gc) override {
         if (source_) gc.mark(source_);
     }
 };
@@ -724,12 +657,7 @@ public:
     ListType* listType_;
 
     StutterListGen(Type* type);
-    void generate(VM& vm, ListNode* owner) override;
-    void releaseChildren() override {
-        if (source_) source_->release();
-        if (valueIsObj_ && currentValue_.o) currentValue_.o->release();
-    }
-    void gcScanChildren(TracingGC& gc) override {
+    void generate(VM& vm, ListNode* owner) override;    void gcScanChildren(TracingGC& gc) override {
         if (source_) gc.mark(source_);
         if (valueIsObj_ && currentValue_.o) gc.mark(currentValue_.o);
     }
@@ -744,12 +672,7 @@ public:
     ListType* listType_;
 
     CatListGen(Type* type);
-    void generate(VM& vm, ListNode* owner) override;
-    void releaseChildren() override {
-        if (first_) first_->release();
-        if (second_) second_->release();
-    }
-    void gcScanChildren(TracingGC& gc) override {
+    void generate(VM& vm, ListNode* owner) override;    void gcScanChildren(TracingGC& gc) override {
         if (first_) gc.mark(first_);
         if (second_) gc.mark(second_);
     }
@@ -760,18 +683,14 @@ class UrandsListGen : public ListGenerator {
 public:
     ListType* listType_;
     UrandsListGen(Type* type);
-    void generate(VM& vm, ListNode* owner) override;
-    void releaseChildren() override {}
-};
+    void generate(VM& vm, ListNode* owner) override;};
 
 // Generator for brands() - infinite bipolar [-1, 1) floats
 class BrandsListGen : public ListGenerator {
 public:
     ListType* listType_;
     BrandsListGen(Type* type);
-    void generate(VM& vm, ListNode* owner) override;
-    void releaseChildren() override {}
-};
+    void generate(VM& vm, ListNode* owner) override;};
 
 // Generator for irands(lo, hi) - infinite uniform random ints [lo, hi]
 class IrandsListGen : public ListGenerator {
@@ -779,9 +698,7 @@ public:
     i64 lo_, hi_;
     ListType* listType_;
     IrandsListGen(Type* type);
-    void generate(VM& vm, ListNode* owner) override;
-    void releaseChildren() override {}
-};
+    void generate(VM& vm, ListNode* owner) override;};
 
 // Generator for xrands(lo, hi) - infinite exponentially distributed floats [lo, hi)
 class XrandsListGen : public ListGenerator {
@@ -789,9 +706,7 @@ public:
     f64 lo_, hi_;
     ListType* listType_;
     XrandsListGen(Type* type);
-    void generate(VM& vm, ListNode* owner) override;
-    void releaseChildren() override {}
-};
+    void generate(VM& vm, ListNode* owner) override;};
 
 // Generator for rands(lo, hi) - infinite uniform random floats [lo, hi)
 class RandsListGen : public ListGenerator {
@@ -799,9 +714,7 @@ public:
     f64 lo_, hi_;
     ListType* listType_;
     RandsListGen(Type* type);
-    void generate(VM& vm, ListNode* owner) override;
-    void releaseChildren() override {}
-};
+    void generate(VM& vm, ListNode* owner) override;};
 
 // Generator for picks(array) - infinite random picks from an array
 class PicksListGen : public ListGenerator {
@@ -811,11 +724,7 @@ public:
     ListType* listType_;
 
     PicksListGen(Type* type);
-    void generate(VM& vm, ListNode* owner) override;
-    void releaseChildren() override {
-        if (array_) array_->release();
-    }
-    void gcScanChildren(TracingGC& gc) override {
+    void generate(VM& vm, ListNode* owner) override;    void gcScanChildren(TracingGC& gc) override {
         if (array_) gc.mark(array_);
     }
 };
@@ -828,12 +737,7 @@ public:
     ListType* listType_;
 
     CycleListGen(Type* type);
-    void generate(VM& vm, ListNode* owner) override;
-    void releaseChildren() override {
-        if (current_) current_->release();
-        if (head_) head_->release();
-    }
-    void gcScanChildren(TracingGC& gc) override {
+    void generate(VM& vm, ListNode* owner) override;    void gcScanChildren(TracingGC& gc) override {
         if (current_) gc.mark(current_);
         if (head_) gc.mark(head_);
     }
@@ -848,12 +752,7 @@ public:
     ListType* listType_;
 
     NCycleListGen(Type* type);
-    void generate(VM& vm, ListNode* owner) override;
-    void releaseChildren() override {
-        if (current_) current_->release();
-        if (head_) head_->release();
-    }
-    void gcScanChildren(TracingGC& gc) override {
+    void generate(VM& vm, ListNode* owner) override;    void gcScanChildren(TracingGC& gc) override {
         if (current_) gc.mark(current_);
         if (head_) gc.mark(head_);
     }
@@ -869,12 +768,7 @@ public:
     ListType* listType_;
 
     HangListGen(Type* type);
-    void generate(VM& vm, ListNode* owner) override;
-    void releaseChildren() override {
-        if (source_) source_->release();
-        if (valueIsObj_ && lastValue_.o) lastValue_.o->release();
-    }
-    void gcScanChildren(TracingGC& gc) override {
+    void generate(VM& vm, ListNode* owner) override;    void gcScanChildren(TracingGC& gc) override {
         if (source_) gc.mark(source_);
         if (valueIsObj_ && lastValue_.o) gc.mark(lastValue_.o);
     }
@@ -890,12 +784,7 @@ public:
     ListType* resultListType_;
 
     MapListGen(Type* type);
-    void generate(VM& vm, ListNode* owner) override;
-    void releaseChildren() override {
-        if (source_) source_->release();
-        if (fn_) reinterpret_cast<GCObj*>(fn_)->release();
-    }
-    void gcScanChildren(TracingGC& gc) override {
+    void generate(VM& vm, ListNode* owner) override;    void gcScanChildren(TracingGC& gc) override {
         if (source_) gc.mark(source_);
         if (fn_) gc.mark(reinterpret_cast<GCObj*>(fn_));
     }
@@ -929,9 +818,7 @@ public:
 
     AutoMapCallInfo();
 
-    VMString str() const override { return rt::vmstr("[AutoMapCallInfo]"); }
-    void releaseChildren() override {}
-};
+    VMString str() const override { return rt::vmstr("[AutoMapCallInfo]"); }};
 
 // Generator for lazy auto-map of a function call over a list.
 // Each generate() forces one element, calls the function, and creates a lazy tail.
@@ -945,16 +832,7 @@ public:
     u16   arrayIndex_;                // current index for parallel array iteration
 
     AutoMapListGen(Type* type);
-    void generate(VM& vm, ListNode* owner) override;
-    void releaseChildren() override {
-        if (source_) source_->release();
-        if (info_) info_->release();
-        for (u16 i = 0; i < numBroadcast_; ++i) {
-            if (i < info_->broadcastArgs.size() && info_->broadcastArgs[i].isObj && broadcastVals_[i].o)
-                broadcastVals_[i].o->release();
-        }
-    }
-    void gcScanChildren(TracingGC& gc) override {
+    void generate(VM& vm, ListNode* owner) override;    void gcScanChildren(TracingGC& gc) override {
         if (source_) gc.mark(source_);
         if (info_) gc.mark(info_);
         if (info_) {
@@ -975,12 +853,7 @@ public:
     ListType* listType_;
 
     FilterListGen(Type* type);
-    void generate(VM& vm, ListNode* owner) override;
-    void releaseChildren() override {
-        if (source_) source_->release();
-        if (fn_) reinterpret_cast<GCObj*>(fn_)->release();
-    }
-    void gcScanChildren(TracingGC& gc) override {
+    void generate(VM& vm, ListNode* owner) override;    void gcScanChildren(TracingGC& gc) override {
         if (source_) gc.mark(source_);
         if (fn_) gc.mark(reinterpret_cast<GCObj*>(fn_));
     }
@@ -998,12 +871,7 @@ public:
     ListType* listType_;
 
     PredicateListGen(Type* type);
-    void generate(VM& vm, ListNode* owner) override;
-    void releaseChildren() override {
-        if (source_) source_->release();
-        if (fn_) reinterpret_cast<GCObj*>(fn_)->release();
-    }
-    void gcScanChildren(TracingGC& gc) override {
+    void generate(VM& vm, ListNode* owner) override;    void gcScanChildren(TracingGC& gc) override {
         if (source_) gc.mark(source_);
         if (fn_) gc.mark(reinterpret_cast<GCObj*>(fn_));
     }
@@ -1021,13 +889,7 @@ public:
     ListType* resultListType_;
 
     ScanListGen(Type* type);
-    void generate(VM& vm, ListNode* owner) override;
-    void releaseChildren() override {
-        if (source_) source_->release();
-        if (fn_) reinterpret_cast<GCObj*>(fn_)->release();
-        if (accIsObj_ && accumulator_.o) accumulator_.o->release();
-    }
-    void gcScanChildren(TracingGC& gc) override {
+    void generate(VM& vm, ListNode* owner) override;    void gcScanChildren(TracingGC& gc) override {
         if (source_) gc.mark(source_);
         if (fn_) gc.mark(reinterpret_cast<GCObj*>(fn_));
         if (accIsObj_ && accumulator_.o) gc.mark(accumulator_.o);
@@ -1045,12 +907,7 @@ public:
     TupleType* tupleType_;
 
     ZipListGen(Type* type);
-    void generate(VM& vm, ListNode* owner) override;
-    void releaseChildren() override {
-        if (left_) left_->release();
-        if (right_) right_->release();
-    }
-    void gcScanChildren(TracingGC& gc) override {
+    void generate(VM& vm, ListNode* owner) override;    void gcScanChildren(TracingGC& gc) override {
         if (left_) gc.mark(left_);
         if (right_) gc.mark(right_);
     }
@@ -1066,11 +923,7 @@ public:
     TupleType* tupleType_;
 
     EnumerateListGen(Type* type);
-    void generate(VM& vm, ListNode* owner) override;
-    void releaseChildren() override {
-        if (source_) source_->release();
-    }
-    void gcScanChildren(TracingGC& gc) override {
+    void generate(VM& vm, ListNode* owner) override;    void gcScanChildren(TracingGC& gc) override {
         if (source_) gc.mark(source_);
     }
 };
@@ -1084,12 +937,7 @@ public:
     ListType* listType_;
 
     IterListGen(Type* type);
-    void generate(VM& vm, ListNode* owner) override;
-    void releaseChildren() override {
-        if (fn_) reinterpret_cast<GCObj*>(fn_)->release();
-        if (valueIsObj_ && current_.o) current_.o->release();
-    }
-    void gcScanChildren(TracingGC& gc) override {
+    void generate(VM& vm, ListNode* owner) override;    void gcScanChildren(TracingGC& gc) override {
         if (fn_) gc.mark(reinterpret_cast<GCObj*>(fn_));
         if (valueIsObj_ && current_.o) gc.mark(current_.o);
     }
@@ -1103,12 +951,7 @@ public:
     ListType* resultListType_;
 
     JoinListGen(Type* type);
-    void generate(VM& vm, ListNode* owner) override;
-    void releaseChildren() override {
-        if (outer_) outer_->release();
-        if (inner_) inner_->release();
-    }
-    void gcScanChildren(TracingGC& gc) override {
+    void generate(VM& vm, ListNode* owner) override;    void gcScanChildren(TracingGC& gc) override {
         if (outer_) gc.mark(outer_);
         if (inner_) gc.mark(inner_);
     }
@@ -1123,11 +966,7 @@ public:
     ListType* listType_;
 
     ArrayToListGen(Type* type);
-    void generate(VM& vm, ListNode* owner) override;
-    void releaseChildren() override {
-        if (array_) array_->release();
-    }
-    void gcScanChildren(TracingGC& gc) override {
+    void generate(VM& vm, ListNode* owner) override;    void gcScanChildren(TracingGC& gc) override {
         if (array_) gc.mark(array_);
     }
 };
@@ -1146,14 +985,7 @@ public:
     Vec<Word> bufferedValue_;
 
     CoroutineListGen(Type* type);
-    void generate(VM& vm, ListNode* owner) override;
-    void releaseChildren() override {
-        if (coro_) reinterpret_cast<GCObj*>(coro_)->release();
-        if (!bufferedValue_.empty()) {
-            payloadRelease(bufferedValue_.data(), listType_->elemType_);
-        }
-    }
-    void gcScanChildren(TracingGC& gc) override {
+    void generate(VM& vm, ListNode* owner) override;    void gcScanChildren(TracingGC& gc) override {
         if (coro_) gc.mark(reinterpret_cast<GCObj*>(coro_));
         if (!bufferedValue_.empty()) {
             gcScanPayload(bufferedValue_.data(), listType_->elemType_, gc);
@@ -1169,11 +1001,7 @@ public:
     ListType* listType_;
 
     StringCodePointsListGen(Type* type);
-    void generate(VM& vm, ListNode* owner) override;
-    void releaseChildren() override {
-        if (str_) str_->release();
-    }
-    void gcScanChildren(TracingGC& gc) override {
+    void generate(VM& vm, ListNode* owner) override;    void gcScanChildren(TracingGC& gc) override {
         if (str_) gc.mark(str_);
     }
 };
@@ -1186,11 +1014,6 @@ public:
     RefValue(Type* type);
 
     VMString str() const override;
-
-    void releaseChildren() override {
-        auto* rt = static_cast<RefType*>(type_);
-        if (storesObjPtr(rt->elemType_) && value_.o) value_.o->release();
-    }
 
     void gcScanChildren(TracingGC& gc) override {
         auto* rt = static_cast<RefType*>(type_);
@@ -1213,11 +1036,6 @@ public:
     static InlineRef* create(RefType* type);
 
     VMString str() const override;
-
-    void releaseChildren() override {
-        auto* rt = static_cast<RefType*>(type_);
-        inlineWalkPointers(&v[0], rt->elemType_, /*release_=*/true);
-    }
 
     void gcScanChildren(TracingGC& gc) override {
         auto* rt = static_cast<RefType*>(type_);
@@ -1246,10 +1064,6 @@ public:
 
     VMString str() const override;
 
-    void releaseChildren() override {
-        inlineWalkPointers(&v[0], type_, /*release_=*/true);
-    }
-
     void gcScanChildren(TracingGC& gc) override {
         gcScanInlinePointers(&v[0], type_, gc);
     }
@@ -1273,10 +1087,6 @@ public:
     static Tuple* create(TupleType* type, u32 numFields);
 
     VMString str() const override;
-
-    void releaseChildren() override {
-        inlineWalkPointers(&v[0], type_, /*release_=*/true);
-    }
 
     void gcScanChildren(TracingGC& gc) override {
         gcScanInlinePointers(&v[0], type_, gc);
@@ -1324,14 +1134,6 @@ public:
         return s;
     }
 
-    void releaseChildren() override {
-        auto t = static_cast<EnumType*>(type_);
-        if ((size_t)which_ < t->layout_.size()) {
-            Type* ct = t->layout_[which_].type;
-            if (ct) payloadRelease(&v[0], ct);
-        }
-    }
-
     void gcScanChildren(TracingGC& gc) override {
         auto t = static_cast<EnumType*>(type_);
         if ((size_t)which_ < t->layout_.size()) {
@@ -1366,10 +1168,6 @@ public:
         return s;
     }
 
-    void releaseChildren() override {
-        if (isObjType_ && value_.o) value_.o->release();
-    }
-
     void gcScanChildren(TracingGC& gc) override {
         if (isObjType_ && value_.o) gc.mark(value_.o);
     }
@@ -1399,14 +1197,6 @@ public:
     Word const* stepData()  const { return &v[elemSizeWords_ * 2u]; }
 
     VMString str() const override;
-
-    void releaseChildren() override {
-        auto* rt = static_cast<RangeType*>(type_);
-        Type* et = rt->elemType_;
-        payloadRelease(startData(), et);
-        if (!isInfinite_) payloadRelease(endData(), et);
-        payloadRelease(stepData(), et);
-    }
 
     void gcScanChildren(TracingGC& gc) override {
         auto* rt = static_cast<RangeType*>(type_);
@@ -1489,9 +1279,7 @@ public:
     // Deep copy: assumes *this is empty. Retains all Obj* fields in src.
     void copyFrom(MapObj const& src);
 
-    VMString str() const override;
-    void releaseChildren() override;
-    void gcScanChildren(TracingGC& gc) override;
+    VMString str() const override;    void gcScanChildren(TracingGC& gc) override;
     u32  gcScanChunk(TracingGC& gc, u32 cursor) override;
 
 private:
@@ -1538,9 +1326,7 @@ public:
 
     void copyFrom(SetObj const& src);
 
-    VMString str() const override;
-    void releaseChildren() override;
-    void gcScanChildren(TracingGC& gc) override;
+    VMString str() const override;    void gcScanChildren(TracingGC& gc) override;
     u32  gcScanChunk(TracingGC& gc, u32 cursor) override;
 
 private:
@@ -1595,13 +1381,6 @@ public:
     // Helper to get gcFreeVars from either LambdaType or TemplateLambdaType
     const Vec<int>& getGCFreeVars() const;
 
-    void releaseChildren() override {
-        const auto& gcFreeVars = getGCFreeVars();
-        for (auto idx : gcFreeVars) {
-            if (freeVars_[idx].o) freeVars_[idx].o->release();
-        }
-    }
-
     void gcScanChildren(TracingGC& gc) override {
         const auto& gcFreeVars = getGCFreeVars();
         for (auto idx : gcFreeVars) {
@@ -1632,16 +1411,6 @@ public:
 
     VMString str() const override {
         return rt::vmstr("[CoroutineFrame]");
-    }
-
-    void releaseChildren() override {
-        if (caller_) caller_->release();
-        if (codeBlock_ && gcMapIndex_ < codeBlock_->coroGCMaps_.size()) {
-            auto& map = codeBlock_->coroGCMaps_[gcMapIndex_];
-            for (u16 idx : map) {
-                if (idx < numRegs_ && regs_[idx].o) regs_[idx].o->release();
-            }
-        }
     }
 
     void gcScanChildren(TracingGC& gc) override {
@@ -1697,17 +1466,6 @@ public:
         }
         s += ")";
         return s;
-    }
-
-    void releaseChildren() override {
-        if (topFrame_) topFrame_->release();
-        if (callerCoroFrame_) callerCoroFrame_->release();
-        if (callerCoroutine_) callerCoroutine_->release();
-        if (funcType_) {
-            for (u16 i = 0; i < numArgs_ && i < funcType_->argTypes_.size(); ++i) {
-                if (storesObjPtr(funcType_->argTypes_[i]) && args_[i].o) args_[i].o->release();
-            }
-        }
     }
 
     void gcScanChildren(TracingGC& gc) override {

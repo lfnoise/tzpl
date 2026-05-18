@@ -61,7 +61,6 @@ static void writeListHeadFromSlot(VM& vm, ListNode* dst, Word const* src,
     if (dst->payloadWords_ > 1) {
         Word* dh = dst->headData();
         for (u32 i = 0; i < dst->payloadWords_; ++i) dh[i] = src[i];
-        inlineWalkPointers(dh, elemType, /*release_=*/false);
     } else {
         dst->head_ = src[0];
         if (storesObjPtr(elemType) && dst->head_.o) dst->head_.o->retain();
@@ -76,8 +75,6 @@ void TakeListGen::generate(VM& vm, ListNode* owner) {
     auto* tail = ListNode::create(listType_);
     auto* oldSource = source_;
     source_ = source_->tail_; remaining_--;
-    source_->retain();
-    oldSource->release();
 
     tail->installGenerator(this); owner->tail_ = tail; tail->retain();
 }
@@ -93,7 +90,6 @@ void DropListGen::generate(VM& vm, ListNode* owner) {
     cur->force(vm);
     copyListHead(owner, cur, static_cast<ListType*>(owner->type_)->elemType_);
     owner->tail_ = cur->tail_;
-    if (owner->tail_) owner->tail_->retain();
 }
 
 void StrideListGen::generate(VM& vm, ListNode* owner) {
@@ -109,8 +105,6 @@ void StrideListGen::generate(VM& vm, ListNode* owner) {
     auto* tail = ListNode::create(listType_);
     auto* oldSource = source_;
     source_ = cur;
-    source_->retain();
-    oldSource->release();
 
     tail->installGenerator(this); owner->tail_ = tail; tail->retain();
 }
@@ -124,7 +118,6 @@ void StutterListGen::generate(VM& vm, ListNode* owner) {
             unboxInlineDeepTo(vm, et, currentValue_.o, owner->headData());
         } else {
             owner->head_ = currentValue_;
-            if (valueIsObj_ && owner->head_.o) owner->head_.o->retain();
         }
         currentRepeat_--;
         if (currentRepeat_ > 0 || source_) {
@@ -144,12 +137,8 @@ void StutterListGen::generate(VM& vm, ListNode* owner) {
         // Save a boxed snapshot of the source head so subsequent reps can
         // unbox it into multi-word dest slots.
         currentValue_ = boxListHeadIfInline(vm, source_, listType_->elemType_);
-        if (valueIsObj_ && currentValue_.o) currentValue_.o->retain();
-        if (valueIsObj_ && oldValue.o) oldValue.o->release();
         auto* oldSource = source_;
         source_ = source_->tail_;
-        if (source_) source_->retain();
-        oldSource->release();
         tail->installGenerator(this); owner->tail_ = tail; tail->retain();
     } else { owner->tail_ = nullptr; }
 }
@@ -164,8 +153,6 @@ void CatListGen::generate(VM& vm, ListNode* owner) {
             auto* tail = ListNode::create(listType_);
             auto* oldFirst = first_;
             first_ = first_->tail_;
-            if (first_) first_->retain();
-            oldFirst->release();
             tail->installGenerator(this); owner->tail_ = tail; tail->retain();
             return;
         }
@@ -174,7 +161,6 @@ void CatListGen::generate(VM& vm, ListNode* owner) {
     second_->force(vm);
     copyListHead(owner, second_, et);
     owner->tail_ = second_->tail_;
-    if (owner->tail_) owner->tail_->retain();
 }
 
 void UrandsListGen::generate(VM& vm, ListNode* owner) {
@@ -232,7 +218,6 @@ void PicksListGen::generate(VM& vm, ListNode* owner) {
         Word* dh = owner->headData();
         Word const* sh = arr->slot(idx);
         for (u32 i = 0; i < owner->payloadWords_; ++i) dh[i] = sh[i];
-        inlineWalkPointers(dh, elemType_, /*release_=*/false);
     } else {
         owner->head_ = getArrayElem(vm, array_, elemType_, idx);
         if (storesObjPtr(elemType_) && owner->head_.o) owner->head_.o->retain();
@@ -250,8 +235,6 @@ void CycleListGen::generate(VM& vm, ListNode* owner) {
     auto* tail = ListNode::create(listType_);
     auto* oldCurrent = current_;
     current_ = current_->tail_ ? current_->tail_ : head_;
-    current_->retain();
-    oldCurrent->release();
 
     tail->installGenerator(this); owner->tail_ = tail; tail->retain();
 }
@@ -270,8 +253,6 @@ void NCycleListGen::generate(VM& vm, ListNode* owner) {
     auto* tail = ListNode::create(listType_);
     auto* oldCurrent = current_;
     current_ = next;
-    current_->retain();
-    oldCurrent->release();
 
     tail->installGenerator(this); owner->tail_ = tail; tail->retain();
 }
@@ -283,7 +264,6 @@ void HangListGen::generate(VM& vm, ListNode* owner) {
             unboxInlineDeepTo(vm, et, lastValue_.o, owner->headData());
         } else {
             owner->head_ = lastValue_;
-            if (valueIsObj_ && owner->head_.o) owner->head_.o->retain();
         }
         auto* tail = ListNode::create(listType_);
         tail->installGenerator(this); owner->tail_ = tail; tail->retain();
@@ -296,12 +276,8 @@ void HangListGen::generate(VM& vm, ListNode* owner) {
     Word oldLast = lastValue_;
     lastValue_ = boxListHeadIfInline(vm, source_, et);
     hasLast_ = true;
-    if (valueIsObj_ && lastValue_.o) lastValue_.o->retain();
-    if (valueIsObj_ && oldLast.o) oldLast.o->release();
     auto* oldSource = source_;
     source_ = source_->tail_;
-    if (source_) source_->retain();
-    oldSource->release();
     tail->installGenerator(this); owner->tail_ = tail; tail->retain();
 }
 
@@ -320,8 +296,6 @@ void MapListGen::generate(VM& vm, ListNode* owner) {
     auto* tail = ListNode::create(resultListType_);
     auto* oldSource = source_;
     source_ = source_->tail_;
-    source_->retain();
-    oldSource->release();
 
     tail->installGenerator(this); owner->tail_ = tail; tail->retain();
 }
@@ -447,8 +421,6 @@ void AutoMapListGen::generate(VM& vm, ListNode* owner) {
     auto* tail = ListNode::create(info_->resultListType);
     auto* oldSource = source_;
     source_ = source_->tail_;
-    source_->retain();
-    oldSource->release();
 
     arrayIndex_++;
     tail->installGenerator(this);
@@ -473,8 +445,6 @@ void FilterListGen::generate(VM& vm, ListNode* owner) {
             auto* tail = ListNode::create(listType_);
             auto* oldSource = source_;
             source_ = rest;
-            source_->retain();
-            oldSource->release();
 
             tail->installGenerator(this); owner->tail_ = tail; tail->retain();
             return;
@@ -505,8 +475,6 @@ void PredicateListGen::generate(VM& vm, ListNode* owner) {
         auto* tail = ListNode::create(listType_);
         auto* oldSource = source_;
         source_ = next;
-        source_->retain();
-        oldSource->release();
 
         tail->installGenerator(this); owner->tail_ = tail; tail->retain();
     } else { // DropWhile
@@ -524,7 +492,6 @@ void PredicateListGen::generate(VM& vm, ListNode* owner) {
         cur->force(vm);
         copyListHead(owner, cur, et);
         owner->tail_ = cur->tail_;
-        if (owner->tail_) owner->tail_->retain();
     }
 }
 
@@ -549,12 +516,8 @@ void ScanListGen::generate(VM& vm, ListNode* owner) {
     auto* tail = ListNode::create(resultListType_);
     Word oldAcc = accumulator_;
     accumulator_ = newAcc;
-    if (accIsObj_ && accumulator_.o) accumulator_.o->retain();
-    if (accIsObj_ && oldAcc.o) oldAcc.o->release();
     auto* oldSource = source_;
     source_ = source_->tail_;
-    if (source_) source_->retain();
-    oldSource->release();
     tail->installGenerator(this); owner->tail_ = tail; tail->retain();
 }
 
@@ -574,8 +537,6 @@ void IterListGen::generate(VM& vm, ListNode* owner) {
     auto* tail = ListNode::create(listType_);
     Word oldCurrent = current_;
     current_ = vm.reg(sb);
-    if (valueIsObj_ && current_.o) current_.o->retain();
-    if (valueIsObj_ && oldCurrent.o) oldCurrent.o->release();
     tail->installGenerator(this); owner->tail_ = tail; tail->retain();
 }
 
@@ -588,7 +549,6 @@ static void writeListHeadField(VM& vm, Word* dst, Type* ft, Word const* src) {
     if (ft && ft->repr_ == Type::Repr::Inline && ft->sizeWords_ > 1) {
         u32 sw = ft->sizeWords_;
         for (u32 i = 0; i < sw; ++i) dst[i] = src[i];
-        inlineWalkPointers(dst, ft, /*release_=*/false);
     } else {
         dst[0] = src[0];
         if (storesObjPtr(ft) && src[0].o) src[0].o->retain();
@@ -617,9 +577,7 @@ static void setListHeadTuple2(VM& vm, ListNode* owner, TupleType* tt,
         auto const& l1 = tt->layout_[1];
         for (u8 j = 0; j < l0.sizeWords; ++j) tup->v[l0.wordOffset + j] = f0src[j];
         for (u8 j = 0; j < l1.sizeWords; ++j) tup->v[l1.wordOffset + j] = f1src[j];
-        inlineWalkPointers(&tup->v[0], tt, /*release_=*/false);
         owner->head_.o = tup;
-        tup->retain();
     }
 }
 
@@ -650,8 +608,6 @@ void EnumerateListGen::generate(VM& vm, ListNode* owner) {
     auto* tail = ListNode::create(resultListType_);
     auto* oldSource = source_;
     source_ = source_->tail_; index_++;
-    source_->retain();
-    oldSource->release();
     tail->installGenerator(this); owner->tail_ = tail; tail->retain();
 }
 
@@ -662,12 +618,8 @@ void JoinListGen::generate(VM& vm, ListNode* owner) {
         outer_->force(vm);
         auto* oldInner = inner_;
         inner_ = static_cast<ListNode*>(outer_->head_.o);
-        if (inner_) inner_->retain();
-        if (oldInner) oldInner->release();
         auto* oldOuter = outer_;
         outer_ = outer_->tail_;
-        if (outer_) outer_->retain();
-        oldOuter->release();
     }
     inner_->force(vm);
     copyListHead(owner, inner_, resultListType_->elemType_);
@@ -690,10 +642,6 @@ void JoinListGen::generate(VM& vm, ListNode* owner) {
     auto* tail = ListNode::create(resultListType_);
     auto* oldOuter = outer_; auto* oldInner = inner_;
     outer_ = nextOuter; inner_ = nextInner;
-    if (outer_) outer_->retain();
-    if (inner_) inner_->retain();
-    if (oldOuter) oldOuter->release();
-    if (oldInner) oldInner->release();
     tail->installGenerator(this); owner->tail_ = tail; tail->retain();
 }
 
@@ -707,7 +655,6 @@ void ArrayToListGen::generate(VM& vm, ListNode* owner) {
         Word* dh = owner->headData();
         Word const* sh = arr->slot(index_);
         for (u32 i = 0; i < owner->payloadWords_; ++i) dh[i] = sh[i];
-        inlineWalkPointers(dh, elemType_, /*release_=*/false);
     } else {
         owner->head_ = getArrayElem(vm, array_, elemType_, index_);
         if (storesObjPtr(elemType_) && owner->head_.o) owner->head_.o->retain();
@@ -763,7 +710,6 @@ void builtin_codePoints(VM& vm, u16 dst, u16, u16 argBase) {
     auto* node = ListNode::create(listType);
     auto* gen = new StringCodePointsListGen(vm.typeType());
     gen->str_ = strObj; gen->byteIndex_ = 0; gen->listType_ = listType;
-    gen->str_->retain();
     node->installGenerator(gen);
     vm.reg(dst).o = node;
 }
@@ -875,7 +821,6 @@ void CoroutineListGen::generate(VM& vm, ListNode* owner) {
         // List node holds a 1-word boxed Obj* (Complex/Fraction). Box the
         // buffered payload, then release the now-redundant inline retains.
         owner->head_ = boxPayload(vm, et, bufferedValue_.data());
-        payloadRelease(bufferedValue_.data(), et);
     } else {
         owner->head_ = bufferedValue_[0];
         if (storesObjPtr(et) && bufferedValue_[0].o) bufferedValue_[0].o->retain();
@@ -893,7 +838,6 @@ void CoroutineListGen::generate(VM& vm, ListNode* owner) {
 
     if (coro_->state_ != CoroutineObj::Done) {
         for (u32 i = 0; i < yieldStride; ++i) bufferedValue_[i] = peek[i];
-        payloadRetain(bufferedValue_.data(), et);
         auto* tail = ListNode::create(listType_);
         tail->installGenerator(this);
         owner->tail_ = tail; tail->retain();
@@ -919,7 +863,6 @@ void builtin_toList_array(VM& vm, u16 dst, u16, u16 argBase) {
     auto* gen = new ArrayToListGen(vm.typeType());
     gen->array_ = arr; gen->index_ = 0;
     gen->elemType_ = elemType; gen->listType_ = listType;
-    gen->array_->retain();
     node->installGenerator(gen);
     vm.reg(dst).o = node;
 }
@@ -958,7 +901,6 @@ void builtin_toList_coroutine(VM& vm, u16 dst, u16, u16 argBase) {
     if (node->payloadWords_ > 1) {
         Word* head = node->headData();
         for (u32 i = 0; i < stride; ++i) head[i] = firstBuf[i];
-        payloadRetain(head, elemType);
     } else if (stride > 1) {
         node->head_ = boxPayload(vm, elemType, firstBuf);
     } else {
@@ -982,7 +924,6 @@ void builtin_toList_coroutine(VM& vm, u16 dst, u16, u16 argBase) {
             gen->listType_ = listType;
             gen->bufferedValue_.assign(stride, Word{});
             for (u32 i = 0; i < stride; ++i) gen->bufferedValue_[i] = secondBuf[i];
-            payloadRetain(gen->bufferedValue_.data(), elemType);
             reinterpret_cast<GCObj*>(gen->coro_)->retain();
             auto* tail = ListNode::create(listType);
             tail->installGenerator(gen);
@@ -1023,7 +964,6 @@ void builtin_take_list(VM& vm, u16 dst, u16, u16 ab) {
     auto* node = ListNode::create(lt);
     auto* gen = new TakeListGen(vm.typeType());
     gen->source_ = src; gen->remaining_ = n; gen->listType_ = lt;
-    gen->source_->retain();
     node->installGenerator(gen);
     vm.reg(dst).o = node;
 }
@@ -1050,7 +990,6 @@ void builtin_stride_list(VM& vm, u16 dst, u16, u16 ab) {
     auto* node = ListNode::create(lt);
     auto* gen = new StrideListGen(vm.typeType());
     gen->source_ = src; gen->stride_ = n; gen->listType_ = lt;
-    gen->source_->retain();
     node->installGenerator(gen);
     vm.reg(dst).o = node;
 }
@@ -1064,7 +1003,6 @@ void builtin_stutter_list(VM& vm, u16 dst, u16, u16 ab) {
     auto* gen = new StutterListGen(vm.typeType());
     gen->source_ = src; gen->repeatCount_ = n; gen->currentRepeat_ = 0;
     gen->valueIsObj_ = storesObjPtr(lt->elemType_); gen->listType_ = lt;
-    gen->source_->retain();
     node->installGenerator(gen);
     vm.reg(dst).o = node;
 }
@@ -1078,8 +1016,6 @@ void builtin_cat_list(VM& vm, u16 dst, u16, u16 ab) {
     auto* node = ListNode::create(lt);
     auto* gen = new CatListGen(vm.typeType());
     gen->first_ = a; gen->second_ = b; gen->inSecond_ = false; gen->listType_ = lt;
-    gen->first_->retain();
-    gen->second_->retain();
     node->installGenerator(gen);
     vm.reg(dst).o = node;
 }
@@ -1091,8 +1027,6 @@ void builtin_cyc_list(VM& vm, u16 dst, u16, u16 ab) {
     auto* node = ListNode::create(lt);
     auto* gen = new CycleListGen(vm.typeType());
     gen->current_ = src; gen->head_ = src; gen->listType_ = lt;
-    gen->current_->retain();
-    gen->head_->retain();
     node->installGenerator(gen);
     vm.reg(dst).o = node;
 }
@@ -1105,8 +1039,6 @@ void builtin_ncyc_list(VM& vm, u16 dst, u16, u16 ab) {
     auto* node = ListNode::create(lt);
     auto* gen = new NCycleListGen(vm.typeType());
     gen->current_ = src; gen->head_ = src; gen->remaining_ = n - 1; gen->listType_ = lt;
-    gen->current_->retain();
-    gen->head_->retain();
     node->installGenerator(gen);
     vm.reg(dst).o = node;
 }
@@ -1119,7 +1051,6 @@ void builtin_hang_list(VM& vm, u16 dst, u16, u16 ab) {
     auto* gen = new HangListGen(vm.typeType());
     gen->source_ = src; gen->hasLast_ = false;
     gen->valueIsObj_ = storesObjPtr(lt->elemType_); gen->listType_ = lt;
-    gen->source_->retain();
     node->installGenerator(gen);
     vm.reg(dst).o = node;
 }
@@ -1135,7 +1066,6 @@ void builtin_map_list(VM& vm, u16 dst, u16, u16 ab) {
     auto* gen = new MapListGen(vm.typeType());
     gen->source_ = src; gen->fn_ = fn;
     gen->resultElemType_ = resET; gen->resultListType_ = resLT;
-    gen->source_->retain();
     reinterpret_cast<GCObj*>(gen->fn_)->retain();
     node->installGenerator(gen);
     vm.reg(dst).o = node;
@@ -1170,7 +1100,6 @@ void builtin_filter_list(VM& vm, u16 dst, u16, u16 ab) {
         auto* tail = ListNode::create(lt);
         auto* gen = new FilterListGen(vm.typeType());
         gen->source_ = rest; gen->fn_ = fn; gen->listType_ = lt;
-        gen->source_->retain();
         reinterpret_cast<GCObj*>(gen->fn_)->retain();
         tail->installGenerator(gen);
         node->tail_ = tail; tail->retain();
@@ -1222,7 +1151,6 @@ void builtin_scan_list(VM& vm, u16 dst, u16, u16 ab) {
     gen->source_ = src; gen->fn_ = fn; gen->accumulator_ = acc;
     gen->accIsObj_ = storesObjPtr(accET);
     gen->accElemType_ = accET; gen->resultListType_ = resLT;
-    gen->source_->retain();
     reinterpret_cast<GCObj*>(gen->fn_)->retain();
     // boxPayload already retained the Obj* (including newly-boxed Complex/
     // Fraction/Inline composites) for the caller; transfer that to the
@@ -1270,7 +1198,6 @@ void builtin_scan1_list(VM& vm, u16 dst, u16, u16 ab) {
     gen->accumulator_ = boxPayload(vm, et, src->headData());
     gen->accIsObj_ = storesObjPtr(et);
     gen->accElemType_ = et; gen->resultListType_ = lt;
-    if (gen->source_) gen->source_->retain();
     reinterpret_cast<GCObj*>(gen->fn_)->retain();
     // boxPayload already retained; don't retain again.
     node->installGenerator(gen);
@@ -1340,7 +1267,6 @@ void builtin_takeWhile_list(VM& vm, u16 dst, u16, u16 ab) {
     auto* gen = new PredicateListGen(vm.typeType());
     gen->mode_ = PredicateListGen::TakeWhile;
     gen->source_ = src; gen->fn_ = fn; gen->listType_ = lt;
-    gen->source_->retain();
     reinterpret_cast<GCObj*>(gen->fn_)->retain();
     node->installGenerator(gen);
     vm.reg(dst).o = node;
@@ -1355,7 +1281,6 @@ void builtin_dropWhile_list(VM& vm, u16 dst, u16, u16 ab) {
     auto* gen = new PredicateListGen(vm.typeType());
     gen->mode_ = PredicateListGen::DropWhile; gen->dropping_ = true;
     gen->source_ = src; gen->fn_ = fn; gen->listType_ = lt;
-    gen->source_->retain();
     reinterpret_cast<GCObj*>(gen->fn_)->retain();
     node->installGenerator(gen);
     vm.reg(dst).o = node;
@@ -1376,8 +1301,6 @@ void builtin_zip_list(VM& vm, u16 dst, u16, u16 ab) {
     gen->left_ = a; gen->right_ = b;
     gen->leftElemType_ = ltA->elemType_; gen->rightElemType_ = ltB->elemType_;
     gen->resultListType_ = resLT; gen->tupleType_ = tt;
-    gen->left_->retain();
-    gen->right_->retain();
     node->installGenerator(gen);
     vm.reg(dst).o = node;
 }
@@ -1394,7 +1317,6 @@ void builtin_enumerate_list(VM& vm, u16 dst, u16, u16 ab) {
     auto* gen = new EnumerateListGen(vm.typeType());
     gen->source_ = src; gen->index_ = 0;
     gen->elemType_ = lt->elemType_; gen->resultListType_ = resLT; gen->tupleType_ = tt;
-    gen->source_->retain();
     node->installGenerator(gen);
     vm.reg(dst).o = node;
 }
@@ -1418,8 +1340,6 @@ void builtin_join_list(VM& vm, u16 dst, u16, u16 ab) {
     auto* node = ListNode::create(innerLT);
     auto* gen = new JoinListGen(vm.typeType());
     gen->outer_ = outer; gen->inner_ = inner; gen->resultListType_ = innerLT;
-    if (gen->outer_) gen->outer_->retain();
-    gen->inner_->retain();
     node->installGenerator(gen);
     vm.reg(dst).o = node;
 }
@@ -1453,8 +1373,6 @@ void builtin_flatten_list(VM& vm, u16 dst, u16, u16 ab) {
         auto* node = ListNode::create(innerLT);
         auto* gen = new JoinListGen(vm.typeType());
         gen->outer_ = outer; gen->inner_ = inner; gen->resultListType_ = innerLT;
-        if (gen->outer_) gen->outer_->retain();
-        gen->inner_->retain();
         node->installGenerator(gen);
         result = node;
     }
@@ -1536,13 +1454,11 @@ void builtin_cons_list_obj(VM& vm, u16 dst, u16, u16 ab) {
     if (node->payloadWords_ > 1) {
         Word* dstHead = node->headData();
         for (u32 i = 0; i < node->payloadWords_; ++i) dstHead[i] = vm.reg(ab + i);
-        inlineWalkPointers(dstHead, et, /*release_=*/false);
     } else {
         node->head_ = vm.reg(ab);
         if (storesObjPtr(et) && node->head_.o) node->head_.o->retain();
     }
     node->tail_ = tail;
-    if (tail) tail->retain();
     vm.reg(dst).o = node;
 }
 

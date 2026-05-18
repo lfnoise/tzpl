@@ -123,7 +123,6 @@ void InlineArray::pushSlot(Word const* src) {
     size_t old = v_.size();
     v_.resize(old + stride_);
     for (u32 k = 0; k < stride_; ++k) v_[old + k] = src[k];
-    inlineWalkPointers(&v_[old], elemType(), /*release_=*/false);
 }
 
 void InlineArray::setSlot(size_t i, Word const* src) {
@@ -132,14 +131,10 @@ void InlineArray::setSlot(size_t i, Word const* src) {
     Word saved[8];
     if (stride_ <= 8) {
         for (u32 k = 0; k < stride_; ++k) saved[k] = src[k];
-        inlineWalkPointers(saved, elemType(), /*release_=*/false);
-        inlineWalkPointers(dst,  elemType(), /*release_=*/true);
         for (u32 k = 0; k < stride_; ++k) dst[k] = saved[k];
     } else {
         // Inline composites are <= 4 words per the classifier's eligibility,
         // so this branch should be unreachable; keep a safe path anyway.
-        inlineWalkPointers(const_cast<Word*>(src), elemType(), /*release_=*/false);
-        inlineWalkPointers(dst,                  elemType(), /*release_=*/true);
         for (u32 k = 0; k < stride_; ++k) dst[k] = src[k];
     }
 }
@@ -147,32 +142,11 @@ void InlineArray::setSlot(size_t i, Word const* src) {
 void InlineArray::getSlot(size_t i, Word* dst) const {
     Word const* src = &v_[i * stride_];
     for (u32 k = 0; k < stride_; ++k) dst[k] = src[k];
-    inlineWalkPointers(dst, const_cast<InlineArray*>(this)->elemType(),
-                       /*release_=*/false);
 }
 
 void InlineArray::copyFrom(InlineArray const* src) {
-    // Release old elements
-    Type* et = elemType();
-    size_t n = size();
-    for (size_t i = 0; i < n; ++i) {
-        inlineWalkPointers(&v_[i * stride_], et, /*release_=*/true);
-    }
     v_ = src->v_;
     stride_ = src->stride_;
-    // Retain new elements
-    n = size();
-    for (size_t i = 0; i < n; ++i) {
-        inlineWalkPointers(&v_[i * stride_], elemType(), /*release_=*/false);
-    }
-}
-
-void InlineArray::releaseChildren() {
-    Type* et = elemType();
-    size_t n = size();
-    for (size_t i = 0; i < n; ++i) {
-        inlineWalkPointers(&v_[i * stride_], et, /*release_=*/true);
-    }
 }
 
 void InlineArray::gcScanChildren(TracingGC& gc) {
@@ -743,15 +717,6 @@ static u32 strideForType(Type* type) {
 // payloadRelease. Same traversal rules, but the action is gc.mark() on every
 // Obj* found. Implemented at the bottom of this file once TracingGC is included.
 
-// Phase 5: ARC is retired -- retain/release are no-ops, so the inline
-// layout walk these helpers used to drive is pure overhead. Tracing now
-// owns liveness via gcScanInlinePointers / gcScanPayload. These wrappers
-// stay as no-op shims for the (many) call sites pending cleanup in
-// Phase 5.4; mark them [[gnu::always_inline]] so an optimizer-released
-// build erases the calls entirely.
-void payloadRetain(Word const* /*base*/, Type* /*type*/) {}
-void payloadRelease(Word* /*base*/, Type* /*type*/) {}
-
 // Box an arbitrary payload of `type` into a single Word. For Inline composite
 // types this creates a heap representation (Complex / Fraction / Struct /
 // Tuple / Enum) and returns w.o pointing to it (already retained). For 1-Word
@@ -761,17 +726,14 @@ Word boxPayload(VM& vm, Type* type, Word const* src) {
     if (!type) return w;
     if (type == gCurrentVM->complexType()) {
         w.o = static_cast<Obj*>(new Complex(x64(src[0].f, src[1].f)));
-        if (w.o) w.o->retain();
         return w;
     }
     if (type == gCurrentVM->fractionType()) {
         w.o = static_cast<Obj*>(new Fraction(r64(src[0].i, src[1].i)));
-        if (w.o) w.o->retain();
         return w;
     }
     if (type->repr_ == Type::Repr::Inline && type->sizeWords_ > 1) {
         Obj* boxed = boxInlineDeepFrom(vm, type, src);
-        if (boxed) boxed->retain();
         w.o = boxed;
         return w;
     }
@@ -887,10 +849,8 @@ bool MapObj::insertOrUpdate(Word const* key, Word const* val) {
         } else if (wordsEqual(slotKey(i), key, kt)) {
             // Update: release the existing value's Obj* fields, then overwrite.
             Word* dstV = slotVal(i);
-            payloadRelease(dstV, vt);
             for (u32 w = 0; w < valueStride_; ++w) dstV[w] = val[w];
             // The caller's retain on the key is now redundant; release it.
-            payloadRelease(const_cast<Word*>(key), kt);
             return false;
         }
         i = (i + 1) & mask;
@@ -910,8 +870,6 @@ bool MapObj::insertOrUpdate(Word const* key, Word const* val) {
 bool MapObj::eraseEntry(Word const* key) {
     u32 slot = findSlot(key);
     if (slot == capacity()) return false;
-    payloadRelease(slotKey(slot), keyType());
-    payloadRelease(slotVal(slot), valueType());
     meta_[slot] = SlotTombstone;
     --size_;
     ++tombstones_;
@@ -934,8 +892,6 @@ void MapObj::copyFrom(MapObj const& src) {
         Word const* srcSlot = &src.entries_[(size_t)i * sS];
         Word* dstSlot = &entries_[(size_t)i * sS];
         for (u32 w = 0; w < sS; ++w) dstSlot[w] = srcSlot[w];
-        payloadRetain(dstSlot, kt);
-        payloadRetain(dstSlot + keyStride_, vt);
         meta_[i] = SlotOccupied;
         ++size_;
     }
@@ -958,17 +914,6 @@ VMString MapObj::str() const {
     }
     s += "]";
     return s;
-}
-
-void MapObj::releaseChildren() {
-    Type* kt = keyType();
-    Type* vt = valueType();
-    u32 cap = capacity();
-    for (u32 i = 0; i < cap; ++i) {
-        if (meta_[i] != SlotOccupied) continue;
-        payloadRelease(slotKey(i), kt);
-        payloadRelease(slotVal(i), vt);
-    }
 }
 
 void MapObj::gcScanChildren(TracingGC& gc) {
@@ -1093,7 +1038,6 @@ bool SetObj::insertElem(Word const* elem) {
             if (firstTomb == cap) firstTomb = i;
         } else if (wordsEqual(slotElem(i), elem, et)) {
             // Already present: release the caller's retain.
-            payloadRelease(const_cast<Word*>(elem), et);
             return false;
         }
         i = (i + 1) & mask;
@@ -1111,7 +1055,6 @@ bool SetObj::insertElem(Word const* elem) {
 bool SetObj::eraseElem(Word const* elem) {
     u32 slot = findSlot(elem);
     if (slot == capacity()) return false;
-    payloadRelease(slotElem(slot), elemType());
     meta_[slot] = SlotTombstone;
     --size_;
     ++tombstones_;
@@ -1132,7 +1075,6 @@ void SetObj::copyFrom(SetObj const& src) {
         Word const* srcSlot = &src.entries_[(size_t)i * eS];
         Word* dstSlot = &entries_[(size_t)i * eS];
         for (u32 w = 0; w < eS; ++w) dstSlot[w] = srcSlot[w];
-        payloadRetain(dstSlot, et);
         meta_[i] = SlotOccupied;
         ++size_;
     }
@@ -1151,15 +1093,6 @@ VMString SetObj::str() const {
     }
     s += ")";
     return s;
-}
-
-void SetObj::releaseChildren() {
-    Type* et = elemType();
-    u32 cap = capacity();
-    for (u32 i = 0; i < cap; ++i) {
-        if (meta_[i] != SlotOccupied) continue;
-        payloadRelease(slotElem(i), et);
-    }
 }
 
 void SetObj::gcScanChildren(TracingGC& gc) {
@@ -1695,7 +1628,6 @@ Obj* boxInlineDeep(VM& vm, Type* type, u16 srcSlot) {
             for (auto const& f : tt->layout_) total += f.sizeWords;
         }
         for (u32 i = 0; i < total; ++i) dst[i] = vm.reg((u16)(srcSlot + i));
-        inlineWalkPointers(dst, parent, /*release_=*/false);
     };
     if (auto* st = dynamic_cast<StructType*>(type)) {
         auto* obj = Struct::create(st, (u32)st->fields_.size());
@@ -1719,7 +1651,6 @@ Obj* boxInlineDeep(VM& vm, Type* type, u16 srcSlot) {
             if (f.type && f.sizeWords > 0) {
                 u16 srcOff = (u16)(srcSlot + 1);
                 for (u8 i = 0; i < f.sizeWords; ++i) obj->v[i] = vm.reg((u16)(srcOff + i));
-                payloadRetain(&obj->v[0], f.type);
             }
         }
         return obj;
@@ -1753,7 +1684,6 @@ void unboxInlineDeep(VM& vm, Type* type, Obj* obj, u16 dstSlot) {
         }
         for (u32 i = 0; i < total; ++i) vm.reg((u16)(dstSlot + i)) = src[i];
         // Retain pointers landed in the destination registers.
-        inlineWalkPointers(&vm.reg(dstSlot), parent, /*release_=*/false);
     };
     if (auto* st = dynamic_cast<StructType*>(type)) {
         auto* s = static_cast<Struct*>(obj);
@@ -1779,7 +1709,6 @@ void unboxInlineDeep(VM& vm, Type* type, Obj* obj, u16 dstSlot) {
                 for (u8 i = 0; i < f.sizeWords; ++i) {
                     vm.reg((u16)(dstSlot + 1 + i)) = e->v[i];
                 }
-                payloadRetain(&vm.reg((u16)(dstSlot + 1)), f.type);
             }
         }
         return;
@@ -1796,7 +1725,6 @@ Obj* boxInlineDeepFrom(VM& vm, Type* type, Word const* src) {
             for (auto const& f : tt->layout_) total += f.sizeWords;
         }
         for (u32 i = 0; i < total; ++i) dst[i] = src[i];
-        inlineWalkPointers(dst, parent, /*release_=*/false);
     };
     if (auto* st = dynamic_cast<StructType*>(type)) {
         auto* obj = Struct::create(st, (u32)st->fields_.size());
@@ -1816,7 +1744,6 @@ Obj* boxInlineDeepFrom(VM& vm, Type* type, Word const* src) {
             if (f.type && f.sizeWords > 0) {
                 Word const* sp = src + 1;
                 for (u8 i = 0; i < f.sizeWords; ++i) obj->v[i] = sp[i];
-                payloadRetain(&obj->v[0], f.type);
             }
         }
         return obj;
@@ -1849,7 +1776,6 @@ void unboxInlineDeepTo(VM& vm, Type* type, Obj* obj, Word* dst) {
             for (auto const& f : tt->layout_) total += f.sizeWords;
         }
         for (u32 i = 0; i < total; ++i) dst[i] = src[i];
-        inlineWalkPointers(dst, parent, /*release_=*/false);
     };
     if (auto* st = dynamic_cast<StructType*>(type)) {
         auto* s = static_cast<Struct*>(obj);
@@ -1869,7 +1795,6 @@ void unboxInlineDeepTo(VM& vm, Type* type, Obj* obj, Word* dst) {
             auto const& f = en->layout_[e->which_];
             if (f.type && f.sizeWords > 0) {
                 for (u8 i = 0; i < f.sizeWords; ++i) dst[1 + i] = e->v[i];
-                payloadRetain(dst + 1, f.type);
             }
         }
     }
@@ -1880,7 +1805,6 @@ void copyListHead(ListNode* dst, ListNode const* src, Type* elemType) {
         Word* dh = dst->headData();
         Word const* sh = src->headData();
         for (u32 i = 0; i < dst->payloadWords_; ++i) dh[i] = sh[i];
-        inlineWalkPointers(dh, elemType, /*release_=*/false);
     } else {
         dst->head_ = src->head_;
         if (storesObjPtr(elemType) && dst->head_.o) dst->head_.o->retain();
@@ -1952,45 +1876,6 @@ bool wordsEqual(Word const* a, Word const* b, Type* type) {
         return wordsEqual(a + f.wordOffset, b + f.wordOffset, f.type);
     }
     return WordEqual{type}(a[0], b[0]);
-}
-
-void inlineWalkPointers(Word* base, Type* type, bool release_) {
-    if (!type) return;
-    auto walk = [&](auto const& layout) {
-        for (auto const& f : layout) {
-            if (!f.type) continue;
-            if (f.type->repr_ == Type::Repr::Inline) {
-                if (f.type == gCurrentVM->complexType()
-                 || f.type == gCurrentVM->fractionType()) continue;
-                inlineWalkPointers(base + f.wordOffset, f.type, release_);
-            } else if (storesObjPtr(f.type)) {
-                if (Obj* o = base[f.wordOffset].o) {
-                    if (release_) o->release();
-                    else          o->retain();
-                }
-            }
-        }
-    };
-    if (auto* st = dynamic_cast<StructType*>(type))      walk(st->layout_);
-    else if (auto* tt = dynamic_cast<TupleType*>(type))  walk(tt->layout_);
-    else if (auto* en = dynamic_cast<EnumType*>(type)) {
-        // Phase 4g.4: only the active case's payload is alive. Look up the
-        // discriminant at word 0, then walk just that case's layout entry.
-        int which = (int)base[0].i;
-        if (which < 0 || (size_t)which >= en->layout_.size()) return;
-        auto const& f = en->layout_[which];
-        if (!f.type || f.sizeWords == 0) return;
-        if (f.type->repr_ == Type::Repr::Inline) {
-            if (f.type == gCurrentVM->complexType()
-             || f.type == gCurrentVM->fractionType()) return;
-            inlineWalkPointers(base + f.wordOffset, f.type, release_);
-        } else if (storesObjPtr(f.type)) {
-            if (Obj* o = base[f.wordOffset].o) {
-                if (release_) o->release();
-                else          o->retain();
-            }
-        }
-    }
 }
 
 // Phase 4g.2: format a multi-word value out of consecutive Words. For inline

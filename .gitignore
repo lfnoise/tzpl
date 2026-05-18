@@ -8,3 +8,4 @@ imgui.ini
 *.o
 *.a
 *.dylib
+.claude/scheduled_tasks.lock

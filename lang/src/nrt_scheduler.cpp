@@ -38,7 +38,6 @@ NRTScheduler::~NRTScheduler() {
     while (!queue_.empty()) {
         auto entry = queue_.top();
         queue_.pop();
-        entry.handler->release();
     }
     vm_->vm.gcHeartbeat();
 }
@@ -69,7 +68,6 @@ i64 NRTScheduler::scheduleEvery(Duration interval, Obj* handler) {
     i64 id = nextTimerID_.fetch_add(1, std::memory_order_relaxed);
 
     // Retain the handler -- the scheduler owns a reference.
-    handler->retain();
 
     Entry entry;
     TimePoint base = vm_->logicalTime();
@@ -92,7 +90,6 @@ i64 NRTScheduler::scheduleAt(TimePoint time, Obj* handler) {
     i64 id = nextTimerID_.fetch_add(1, std::memory_order_relaxed);
 
     // Retain the handler -- the scheduler owns a reference.
-    handler->retain();
 
     Entry entry;
     entry.logicalTime = time;
@@ -123,7 +120,6 @@ bool NRTScheduler::cancel(i64 timerID) {
             // Release under the VM lock
             std::lock_guard vmLock(vm_->mtx);
             vm_->vm.makeCurrent();
-            entry.handler->release();
             vm_->vm.gcHeartbeat();
         } else {
             newQueue.push(entry);
@@ -178,7 +174,6 @@ void NRTScheduler::run() {
             // One-shot: release the handler reference under the VM lock
             std::lock_guard vmLock(vm_->mtx);
             vm_->vm.makeCurrent();
-            next.handler->release();
             vm_->vm.gcHeartbeat();
         }
     }

@@ -43,7 +43,6 @@ NRTTempoScheduler::~NRTTempoScheduler() {
         auto entry = queue_.top();
         queue_.pop();
         if (entry.handler) {
-            entry.handler->release();
         }
     }
     vm_->vm.gcHeartbeat();
@@ -105,7 +104,6 @@ f64 NRTTempoScheduler::beatDur() const {
 i64 NRTTempoScheduler::schedAbs(f64 beat, Obj* handler) {
     i64 id = nextTimerID_.fetch_add(1, std::memory_order_relaxed);
 
-    handler->retain();
 
     Entry entry{};
     entry.beatTime = beat;
@@ -178,7 +176,6 @@ bool NRTTempoScheduler::cancel(i64 timerID) {
             if (entry.handler) {
                 std::lock_guard vmLock(vm_->mtx);
                 vm_->vm.makeCurrent();
-                entry.handler->release();
                 vm_->vm.gcHeartbeat();
             }
         } else {
@@ -244,7 +241,6 @@ void NRTTempoScheduler::tickTo(f64 seconds) {
             } else {
                 std::lock_guard vmLock(vm_->mtx);
                 vm_->vm.makeCurrent();
-                next.handler->release();
                 vm_->vm.gcHeartbeat();
             }
         }
@@ -312,7 +308,6 @@ void NRTTempoScheduler::run() {
                 // One-shot: release the handler
                 std::lock_guard vmLock(vm_->mtx);
                 vm_->vm.makeCurrent();
-                next.handler->release();
                 vm_->vm.gcHeartbeat();
             }
         }

@@ -412,7 +412,6 @@ void VM::dynScopePushInline(u32 varIdx, Word const* newPayload, Type* type) {
     // Overwrite dynvar with NEW payload; retain its Obj* fields since the
     // source registers will be reclaimed by the caller after this op.
     for (u32 i = 0; i < n; ++i) dynVars_[varIdx + i] = newPayload[i];
-    inlineWalkPointers(&dynVars_[varIdx], type, /*release_=*/false);
 }
 
 void VM::dynScopeRestore(u32 mark) {
@@ -423,7 +422,6 @@ void VM::dynScopeRestore(u32 mark) {
             // Inline-composite: release current dynvar's Obj* fields (they are
             // being replaced and we are NOT transferring them anywhere), then
             // copy the saved payload back (transferring its Obj* ownership).
-            inlineWalkPointers(&dynVars_[entry.varIndex], entry.type, /*release_=*/true);
             u32 n = entry.sizeWords;
             u32 off = (u32)entry.savedValue.i;
             Word* save = dynStackPayload_ + off;

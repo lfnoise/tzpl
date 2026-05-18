@@ -571,7 +571,6 @@ static void builtin_get_map(VM& vm, u16 dst, u16, u16 ab) {
     if (optType->repr_ == Type::Repr::NullablePtrEnum) {
         if (found) {
             Obj* o = map->slotVal(slot)[0].o;
-            if (o) o->retain();
             vm.reg(dst).o = o;
         } else {
             vm.reg(dst).o = nullptr;
@@ -585,7 +584,6 @@ static void builtin_get_map(VM& vm, u16 dst, u16, u16 ab) {
             for (u32 i = 0; i < map->valueStride_; ++i) {
                 vm.reg((u16)(dst + 1 + i)) = v[i];
             }
-            payloadRetain(&vm.reg((u16)(dst + 1)), vt);
         } else {
             vm.reg(dst).i = 1;  // which_ = none
             for (u32 i = 0; i < map->valueStride_; ++i) {
@@ -600,7 +598,6 @@ static void builtin_get_map(VM& vm, u16 dst, u16, u16 ab) {
         Word const* src = map->slotVal(slot);
         u32 sw = (vt && vt->sizeWords_ > 0) ? vt->sizeWords_ : 1;
         for (u32 i = 0; i < sw; ++i) e->v[i] = src[i];
-        payloadRetain(&e->v[0], vt);
     }
     vm.reg(dst).o = e;
 }
@@ -615,12 +612,10 @@ static void builtin_get_map_default(VM& vm, u16 dst, u16, u16 ab) {
     if (slot != map->capacity()) {
         Word const* v = map->slotVal(slot);
         for (u32 i = 0; i < vS; ++i) vm.reg((u16)(dst + i)) = v[i];
-        payloadRetain(&vm.reg(dst), map->valueType());
     } else {
         // Default value sits at args (ab + 1 + kS .. ab + 1 + kS + vS - 1).
         Word const* dflt = &vm.reg((u16)(ab + 1 + kS));
         for (u32 i = 0; i < vS; ++i) vm.reg((u16)(dst + i)) = dflt[i];
-        payloadRetain(&vm.reg(dst), map->valueType());
     }
 }
 
@@ -633,8 +628,6 @@ static void builtin_put_map(VM& vm, u16 dst, u16, u16 ab) {
     result->copyFrom(*map);
     Word const* key = &vm.reg((u16)(ab + 1));
     Word const* val = &vm.reg((u16)(ab + 1 + kS));
-    payloadRetain(key, mt->keyType_);
-    payloadRetain(val, mt->valueType_);
     result->insertOrUpdate(key, val);
     vm.reg(dst).o = result;
 }
@@ -809,8 +802,6 @@ static void builtin_merge_map(VM& vm, u16 dst, u16, u16 ab) {
         if (b->slotState(i) != MapObj::SlotOccupied) continue;
         Word const* k = b->slotKey(i);
         Word const* v = b->slotVal(i);
-        payloadRetain(k, kt);
-        payloadRetain(v, vt);
         result->insertOrUpdate(k, v);
     }
     vm.reg(dst).o = result;
@@ -953,8 +944,6 @@ static void builtin_pairs_map(VM& vm, u16 dst, u16, u16 ab) {
         // payloadRetain for ARC across both 1-word and multi-word shapes.
         for (u8 j = 0; j < kf.sizeWords; ++j) tup->v[kf.wordOffset + j] = k[j];
         for (u8 j = 0; j < vf.sizeWords; ++j) tup->v[vf.wordOffset + j] = v[j];
-        payloadRetain(&tup->v[kf.wordOffset], kt);
-        payloadRetain(&tup->v[vf.wordOffset], vt);
         result->push(tup);
     }
     vm.reg(dst).o = result;
@@ -1183,7 +1172,6 @@ static void builtin_ref_symbol(VM& vm, u16 dst, u16, u16 ab) {
 static void builtin_ref_obj(VM& vm, u16 dst, u16, u16 ab) {
     auto* ref = new RefValue(vm.refType(vm.reg(ab).o->type_));
     ref->value_ = vm.reg(ab);
-    if (ref->value_.o) ref->value_.o->retain();
     vm.reg(dst).o = ref;
 }
 
@@ -1201,7 +1189,6 @@ static void builtin_ref_inline(VM& vm, u16 dst, u16, u16 ab) {
     for (u32 i = 0; i < n; ++i) ref->v[i] = vm.reg((u16)(ab + i));
     // Retain embedded Obj* fields in the new payload (the caller's regs are
     // about to be reclaimed). Mirrors op_make_ref_inline's ARC walk.
-    inlineWalkPointers(&ref->v[0], et, /*release_=*/false);
     vm.reg(dst).o = ref;
 }
 
@@ -1238,9 +1225,7 @@ static void builtin_setref(VM& vm, u16 dst, u16, u16 ab) {
         // Ref is the 2nd arg; it lives at ab + n (sizeWords of inline T).
         u16 refReg = (u16)(ab + n);
         auto* ref = static_cast<InlineRef*>(vm.reg(refReg).o);
-        inlineWalkPointers(&ref->v[0], et, /*release_=*/true);
         for (u32 i = 0; i < n; ++i) ref->v[i] = vm.reg((u16)(ab + i));
-        inlineWalkPointers(&ref->v[0], et, /*release_=*/false);
         // Result is the assigned value; copy back out if dst != ab.
         if (dst != ab) {
             for (u32 i = 0; i < n; ++i) vm.reg((u16)(dst + i)) = vm.reg((u16)(ab + i));
@@ -1251,8 +1236,6 @@ static void builtin_setref(VM& vm, u16 dst, u16, u16 ab) {
     auto* refType = static_cast<RefType*>(ref->type_);
     Word newVal = vm.reg(ab);
     if (storesObjPtr(refType->elemType_)) {
-        if (newVal.o) newVal.o->retain();
-        if (ref->value_.o) ref->value_.o->release();
     }
     ref->value_ = newVal;
     vm.reg(dst) = newVal;
@@ -1334,9 +1317,7 @@ static void builtin_setref_rev(VM& vm, u16 dst, u16, u16 ab) {
         // The new value is the 2nd arg; lives at ab + 1 (Ref is 1 word).
         u32 n = (u32)et->sizeWords_;
         u16 valReg = (u16)(ab + 1);
-        inlineWalkPointers(&ref->v[0], et, /*release_=*/true);
         for (u32 i = 0; i < n; ++i) ref->v[i] = vm.reg((u16)(valReg + i));
-        inlineWalkPointers(&ref->v[0], et, /*release_=*/false);
         if (dst != valReg) {
             for (u32 i = 0; i < n; ++i) vm.reg((u16)(dst + i)) = vm.reg((u16)(valReg + i));
         }
@@ -1345,8 +1326,6 @@ static void builtin_setref_rev(VM& vm, u16 dst, u16, u16 ab) {
     auto* ref = static_cast<RefValue*>(obj);
     Word newVal = vm.reg(ab + 1);
     if (storesObjPtr(refType->elemType_)) {
-        if (newVal.o) newVal.o->retain();
-        if (ref->value_.o) ref->value_.o->release();
     }
     ref->value_ = newVal;
     vm.reg(dst) = newVal;
@@ -1416,7 +1395,6 @@ static void builtin_add_set(VM& vm, u16 dst, u16, u16 ab) {
     auto* result = new SetObj(st);
     result->copyFrom(*src);
     Word const* elem = &vm.reg((u16)(ab + 1));
-    payloadRetain(elem, st->elemType_);
     result->insertElem(elem);
     vm.reg(dst).o = result;
 }
@@ -1451,7 +1429,6 @@ static void builtin_union_set(VM& vm, u16 dst, u16, u16 ab) {
     for (u32 i = 0; i < bCap; ++i) {
         if (b->slotState(i) != SetObj::SlotOccupied) continue;
         Word const* e = b->slotElem(i);
-        payloadRetain(e, et);
         result->insertElem(e);
     }
     vm.reg(dst).o = result;
@@ -1469,7 +1446,6 @@ static void builtin_intersection_set(VM& vm, u16 dst, u16, u16 ab) {
         if (a->slotState(i) != SetObj::SlotOccupied) continue;
         Word const* e = a->slotElem(i);
         if (b->findSlot(e) == b->capacity()) continue;
-        payloadRetain(e, et);
         result->insertElem(e);
     }
     vm.reg(dst).o = result;
@@ -1487,7 +1463,6 @@ static void builtin_difference_set(VM& vm, u16 dst, u16, u16 ab) {
         if (a->slotState(i) != SetObj::SlotOccupied) continue;
         Word const* e = a->slotElem(i);
         if (b->findSlot(e) != b->capacity()) continue;
-        payloadRetain(e, et);
         result->insertElem(e);
     }
     vm.reg(dst).o = result;
@@ -2067,7 +2042,6 @@ static void builtin_any_variadic(VM& vm, u16 dst, u16, u16 argBase) {
             any->value_ = boxPayload(vm, f.type, &tuple->v[f.wordOffset]);
         } else {
             any->value_ = tuple->v[f.wordOffset];
-            if (any->isObjType_ && any->value_.o) any->value_.o->retain();
         }
         arr->push(any);
     }

@@ -228,7 +228,6 @@ inline void arrayPush(VM& vm, Obj* a, Type* et, Word v) {
         Word scratch[8] = {};
         unboxInlineDeepTo(vm, et, v.o, scratch);
         arr->pushSlot(scratch);
-        inlineWalkPointers(scratch, et, /*release_=*/true);
     }
     else { static_cast<ObjArray*>(a)->push(v.o); }
 }

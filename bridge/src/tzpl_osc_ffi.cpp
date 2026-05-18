@@ -253,13 +253,11 @@ static void registerUserHandler(ts::VM& vm, const char* address, ts::Obj* handle
     auto* ctx = getAppContext(vm);
     if (!ctx || !ctx->oscDispatcher || !ctx->nrtvm) return;
 
-    handler->retain();
 
     // Release any previous handler for this address
     auto& table = ctx->nrtvm->handlers.oscHandlers;
     auto it = table.find(address);
     if (it != table.end()) {
-        it->second->release();
     }
     table[address] = handler;
 }
@@ -402,7 +400,6 @@ static void ffi_removeHandler(ts::VM& vm, u16, u16, u16 argBase) {
     auto& table = ctx->nrtvm->handlers.oscHandlers;
     auto it = table.find(address);
     if (it != table.end()) {
-        it->second->release();
         table.erase(it);
     }
 }

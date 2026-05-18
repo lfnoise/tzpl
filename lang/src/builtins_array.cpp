@@ -355,7 +355,6 @@ void builtin_picks_list(VM& vm, u16 dst, u16, u16 ab) {
     gen->listType_ = lt;
     node->installGenerator(gen);
     // Retain the array held by the generator
-    gen->array_->retain();
     vm.reg(dst).o = node;
 }
 
@@ -1005,7 +1004,6 @@ void builtin_zip_array(VM& vm, u16 dst, u16, u16 ab) {
             }
             result->pushSlot(scratch);
             // pushSlot retained again; balance by walking scratch with release.
-            inlineWalkPointers(scratch, tt, /*release_=*/true);
         }
         vm.reg(dst).o = result;
         return;
@@ -1073,7 +1071,6 @@ void builtin_enumerate_array(VM& vm, u16 dst, u16, u16 ab) {
                 if (storesObjPtr(f1.type) && elem.o) elem.o->retain();
             }
             result->pushSlot(scratch);
-            inlineWalkPointers(scratch, tt, /*release_=*/true);
         }
         vm.reg(dst).o = result;
         return;

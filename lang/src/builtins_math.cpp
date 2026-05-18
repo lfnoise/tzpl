@@ -848,9 +848,6 @@ static void builtin_toList_range_fraction(VM& vm, u16 dst, u16, u16 argBase) {
     gen->isInfinite_ = range->isInfinite_;
     gen->listType_ = listType;
     node->installGenerator(gen);
-    if (gen->current_) gen->current_->retain();
-    if (gen->end_)     gen->end_->retain();
-    if (gen->step_)    gen->step_->retain();
     vm.reg(dst).o = node;
 }
 

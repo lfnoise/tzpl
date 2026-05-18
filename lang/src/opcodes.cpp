@@ -139,13 +139,11 @@ void op_store_global_obj(VM& vm, Code* pc) {
     u32 idx = (u32)pc[2].i;
     Obj* newVal = vm.reg(src).o;
     Obj* oldVal = vm.global(idx).o;
-    if (newVal) newVal->retain();
     // Phase 3 SATB: snapshot the slot's old value before overwriting it so
     // a concurrent mark cycle still sees everything reachable when the
     // cycle started. No-op when no cycle is in flight.
     if (oldVal) vm.tracingGC().writeBarrier(oldVal);
     vm.global(idx) = vm.reg(src);
-    if (oldVal) oldVal->release();
     DISPATCH(3);
 }
 
@@ -156,7 +154,6 @@ void op_init_global_obj(VM& vm, Code* pc) {
     u16 src = pc[1].regs[0];
     u32 idx = (u32)pc[2].i;
     Obj* newVal = vm.reg(src).o;
-    if (newVal) newVal->retain();
     vm.global(idx) = vm.reg(src);
     DISPATCH(3);
 }
@@ -185,9 +182,7 @@ void op_store_global_inline(VM& vm, Code* pc) {
     auto* type = static_cast<Type*>(pc[3].p);
     u32 n = type ? (u32)type->sizeWords_ : 1u;
     if (n == 0) n = 1;
-    inlineWalkPointers(&vm.global(idx), type, /*release_=*/true);
     for (u32 i = 0; i < n; ++i) vm.global(idx + i) = vm.reg((u16)(src + i));
-    inlineWalkPointers(&vm.global(idx), type, /*release_=*/false);
     DISPATCH(4);
 }
 
@@ -200,7 +195,6 @@ void op_init_global_inline(VM& vm, Code* pc) {
     u32 n = type ? (u32)type->sizeWords_ : 1u;
     if (n == 0) n = 1;
     for (u32 i = 0; i < n; ++i) vm.global(idx + i) = vm.reg((u16)(src + i));
-    inlineWalkPointers(&vm.global(idx), type, /*release_=*/false);
     DISPATCH(4);
 }
 
@@ -1310,7 +1304,6 @@ void op_concat_tuple(VM& vm, Code* pc) {
     }
     for (u32 i = 0; i < aWords; ++i) outBase[i] = aBase[i];
     for (u32 i = 0; i < bWords; ++i) outBase[aWords + i] = bBase[i];
-    inlineWalkPointers(outBase, resultType, /*release_=*/false);
     if (heapResult) vm.reg(dst).o = heapResult;
     (void)totalWords;
     DISPATCH(5);
@@ -1329,8 +1322,6 @@ void op_concat_list(VM& vm, Code* pc) {
     gen->first_ = nodeA; gen->second_ = nodeB;
     gen->inSecond_ = false; gen->listType_ = listType;
     node->installGenerator(gen);
-    gen->first_->retain();
-    gen->second_->retain();
     vm.reg(dst).o = node;
     DISPATCH(3);
 }
@@ -1574,12 +1565,10 @@ inline Word readElem_t(Obj* arr, usize i, Type* elemType, VM& vm) {
     } else if constexpr (B == ArrayBackend::Complex) {
         x64 const& x = static_cast<PodArray<x64>*>(arr)->v[i];
         auto* c = new Complex(x);
-        c->retain();
         return Word(static_cast<Obj*>(c));
     } else if constexpr (B == ArrayBackend::Fraction) {
         r64 const& r = static_cast<PodArray<r64>*>(arr)->v[i];
         auto* fr = new Fraction(r);
-        fr->retain();
         return Word(static_cast<Obj*>(fr));
     } else if constexpr (B == ArrayBackend::Inline) {
         Word const* slot = static_cast<InlineArray*>(arr)->slot(i);
@@ -1987,7 +1976,6 @@ static Word dispatchTupleBinopBase(VM& vm, Op op,
         Word r = dispatchBinop(vm, op, ae, be, aet, bet, resultTT->fields_[i]);
         writeTupleField(vm, result, resultTT, i, r);
     }
-    inlineWalkPointers(&result->v[0], resultTT, /*release_=*/false);
     return Word(static_cast<Obj*>(result));
 }
 
@@ -2061,9 +2049,6 @@ static Word dispatchListBinop(VM& vm, Op op, Word a, Word b,
     }
 
     node->installGenerator(gen);
-    if (gen->leftList_) gen->leftList_->retain();
-    if (gen->rightList_) gen->rightList_->retain();
-    if (gen->broadcastValIsObj_ && gen->broadcastVal_.o) gen->broadcastVal_.o->retain();
     return Word(static_cast<Obj*>(node));
 }
 
@@ -2191,7 +2176,6 @@ static Word dispatchTupleUnaryOpBase(VM& vm, Op op, Word const* aBase,
         Word r = dispatchUnaryOp(vm, op, ae, aTT->fields_[i], resultTT->fields_[i]);
         writeTupleField(vm, result, resultTT, i, r);
     }
-    inlineWalkPointers(&result->v[0], resultTT, /*release_=*/false);
     return Word(static_cast<Obj*>(result));
 }
 
@@ -2226,7 +2210,6 @@ static Word dispatchListUnaryOp(VM& vm, Op op, Word a, Type* aType, ListType* re
     gen->resultListType_ = resultLT;
 
     node->installGenerator(gen);
-    gen->source_->retain();
     return Word(static_cast<Obj*>(node));
 }
 
@@ -2485,7 +2468,6 @@ static inline Word compositeBinopTopLevel(VM& vm, Op op, u16 a, u16 b,
                 gen->leftElemType_ = listElemType;
                 gen->rightElemType_ = scalarType;
             }
-            listSrc->retain();
             node->installGenerator(gen);
             return Word(static_cast<Obj*>(node));
         };
@@ -2648,7 +2630,6 @@ static Word dispatchCmpTupleBinopBase(VM& vm, CmpOp op,
         Word r = dispatchCmpBinop(vm, op, ae, be, aet, bet, resultTT->fields_[i]);
         writeTupleField(vm, result, resultTT, i, r);
     }
-    inlineWalkPointers(&result->v[0], resultTT, /*release_=*/false);
     return Word(static_cast<Obj*>(result));
 }
 
@@ -2837,7 +2818,6 @@ static void dispatchInlineBinopWalk(VM& vm, Op op,
     // auto-release pool's pending release -- mirrors dispatchTupleBinop's
     // postprocess (Phase 4g.5).
     if (storesObjPtr(resultType) && r.o) {
-        r.o->retain();
     }
 }
 
@@ -2871,7 +2851,6 @@ static void dispatchInlineUnaryWalk(VM& vm, Op op,
     Word r = dispatchUnaryOp(vm, op, *aSlot, aType, resultType);
     dst[0] = r;
     if (storesObjPtr(resultType) && r.o) {
-        r.o->retain();
     }
 }
 
@@ -2918,7 +2897,6 @@ static void dispatchInlineCmpBinopWalk(VM& vm, CmpOp op,
     Word r = dispatchCmpBinop(vm, op, *aSlot, *bSlot, aType, bType, resultType);
     dst[0] = r;
     if (storesObjPtr(resultType) && r.o) {
-        r.o->retain();
     }
 }
 
@@ -3063,12 +3041,9 @@ void BinopListGen::generate(VM& vm, ListNode* owner) {
             owner->tail_ = nullptr;
         } else {
             auto* tailNode = ListNode::create(resultListType_);
-            nextSrc->retain();
-            listSrc->release();
             if (leftList_) leftList_ = nextSrc; else rightList_ = nextSrc;
             tailNode->installGenerator(this);
             owner->tail_ = tailNode;
-            tailNode->retain();
         }
         return;
     }
@@ -3088,12 +3063,9 @@ void BinopListGen::generate(VM& vm, ListNode* owner) {
             owner->tail_ = nullptr;
         } else {
             auto* tailNode = ListNode::create(resultListType_);
-            nextSrc->retain();
-            listSrc->release();
             if (leftList_) leftList_ = nextSrc; else rightList_ = nextSrc;
             tailNode->installGenerator(this);
             owner->tail_ = tailNode;
-            tailNode->retain();
         }
         return;
     }
@@ -3161,16 +3133,11 @@ void BinopListGen::generate(VM& vm, ListNode* owner) {
     } else {
         auto* tailNode = ListNode::create(resultListType_);
         // Retain new, release old for field mutations
-        if (nextLeft) nextLeft->retain();
-        if (leftList_) leftList_->release();
         leftList_ = nextLeft;
-        if (nextRight) nextRight->retain();
-        if (rightList_) rightList_->release();
         rightList_ = nextRight;
         // Retain generator and tail for owner
         tailNode->installGenerator(this);
         owner->tail_ = tailNode;
-        tailNode->retain();
     }
 }
 
@@ -3215,12 +3182,9 @@ void UnaryListGen::generate(VM& vm, ListNode* owner) {
         owner->tail_ = nullptr;
     } else {
         auto* tailNode = ListNode::create(resultListType_);
-        if (nextSource) nextSource->retain();
-        if (source_) source_->release();
         source_ = nextSource;
         tailNode->installGenerator(this);
         owner->tail_ = tailNode;
-        tailNode->retain();
     }
 }
 
@@ -3260,7 +3224,6 @@ void RangeListGen::generate(VM& vm, ListNode* owner) {
         current_ = next;
         tailNode->installGenerator(this);
         owner->tail_ = tailNode;
-        tailNode->retain();
     }
 }
 
@@ -3306,11 +3269,8 @@ void FractionRangeListGen::generate(VM& vm, ListNode* owner) {
         auto* tailNode = ListNode::create(listType_);
         auto* oldCurrent = current_;
         current_ = new Fraction(next);
-        current_->retain();
-        if (oldCurrent) oldCurrent->release();
         tailNode->installGenerator(this);
         owner->tail_ = tailNode;
-        tailNode->retain();
     }
 }
 
@@ -3438,7 +3398,6 @@ void op_tuple_slice(VM& vm, Code* pc) {
             newTuple->v[fDst.wordOffset + j] = srcTuple->v[fSrc.wordOffset + j];
         }
     }
-    inlineWalkPointers(&newTuple->v[0], resultType, /*release_=*/false);
     vm.reg(dst).o = newTuple;
     DISPATCH(3);
 }
@@ -3457,7 +3416,6 @@ void op_make_tuple_heap(VM& vm, Code* pc) {
     for (u32 i = 0; i < total; ++i) {
         tuple->v[i] = vm.reg((u16)(firstSrc + i));
     }
-    inlineWalkPointers(&tuple->v[0], tupleType, /*release_=*/false);
     vm.reg(dst).o = tuple;
     DISPATCH(3);
 }
@@ -3476,7 +3434,6 @@ void op_make_tuple(VM& vm, Code* pc) {
     for (u32 i = 0; i < total; ++i) {
         tuple->v[i] = vm.reg((u16)(firstSrc + i));
     }
-    inlineWalkPointers(&tuple->v[0], tupleType, /*release_=*/false);
     vm.reg(dst).o = tuple;
     DISPATCH(3);
 }
@@ -3499,7 +3456,6 @@ void op_make_struct(VM& vm, Code* pc) {
     for (u32 i = 0; i < total; ++i) {
         s->v[i] = vm.reg((u16)(firstSrc + i));
     }
-    inlineWalkPointers(&s->v[0], structType, /*release_=*/false);
     vm.reg(dst).o = s;
     DISPATCH(3);
 }
@@ -3548,7 +3504,6 @@ void op_make_enum(VM& vm, Code* pc) {
             for (u8 i = 0; i < f.sizeWords; ++i) {
                 e->v[i] = vm.reg((u16)(valSrc + i));
             }
-            payloadRetain(&e->v[0], f.type);
         }
     }
     vm.reg(dst).o = e;
@@ -3608,7 +3563,6 @@ void op_make_inline_enum(VM& vm, Code* pc) {
             // Retain embedded Obj* fields: walk the active case via
             // inlineWalkPointers, which inspects the discriminant we just
             // wrote at dst[0].
-            inlineWalkPointers(&vm.reg(dst), en, /*release_=*/false);
         }
     }
     DISPATCH(3);
@@ -3814,12 +3768,10 @@ void op_cons(VM& vm, Code* pc) {
     if (node->payloadWords_ > 1) {
         Word* dstHead = node->headData();
         for (u32 i = 0; i < node->payloadWords_; ++i) dstHead[i] = vm.reg((u16)(head + i));
-        inlineWalkPointers(dstHead, et, /*release_=*/false);
     } else {
         node->head_ = vm.reg(head);
         if (storesObjPtr(et) && node->head_.o) node->head_.o->retain();
     }
-    if (node->tail_) node->tail_->retain();
     vm.reg(dst).o = node;
     DISPATCH(3);
 }
@@ -3844,13 +3796,10 @@ void op_make_list(VM& vm, Code* pc) {
         if (stride > 1) {
             Word* dstHead = node->headData();
             for (u32 k = 0; k < stride; ++k) dstHead[k] = vm.reg((u16)(src + k));
-            inlineWalkPointers(dstHead, et, /*release_=*/false);
         } else {
             node->head_ = vm.reg(src);
-            if (elemIsObj && node->head_.o) node->head_.o->retain();
         }
         node->tail_ = result;
-        if (node->tail_) node->tail_->retain();
         result = node;
     }
     vm.reg(dst).o = result;
@@ -3868,7 +3817,6 @@ void op_list_head(VM& vm, Code* pc) {
         for (u32 i = 0; i < node->payloadWords_; ++i) vm.reg((u16)(dst + i)) = h[i];
         // Retain embedded Obj* fields so the caller owns the copy.
         auto* lt = static_cast<ListType*>(node->type_);
-        inlineWalkPointers(&vm.reg(dst), lt->elemType_, /*release_=*/false);
     } else {
         vm.reg(dst) = node->head_;
     }
@@ -3906,7 +3854,6 @@ void op_make_lambda(VM& vm, Code* pc) {
     // Retain Obj* free variables so they survive the auto-release pool drain
     const auto& gcFreeVars = lambda->getGCFreeVars();
     for (auto idx : gcFreeVars) {
-        if (lambda->freeVars_[idx].o) lambda->freeVars_[idx].o->retain();
     }
     vm.reg(dst).o = lambda;
     DISPATCH(3);
@@ -3972,7 +3919,6 @@ void op_make_template_lambda(VM& vm, Code* pc) {
     // Retain Obj* free variables so they survive the auto-release pool drain
     const auto& gcFreeVars = lambda->getGCFreeVars();
     for (auto idx : gcFreeVars) {
-        if (lambda->freeVars_[idx].o) lambda->freeVars_[idx].o->retain();
     }
     vm.reg(dst).o = lambda;
     DISPATCH(3);
@@ -4053,7 +3999,6 @@ void op_specialize_lambda(VM& vm, Code* pc) {
     // Retain Obj* free variables so they survive the auto-release pool drain
     const auto& gcFreeVars = newLambda->getGCFreeVars();
     for (auto idx : gcFreeVars) {
-        if (newLambda->freeVars_[idx].o) newLambda->freeVars_[idx].o->retain();
     }
     vm.reg(dst).o = newLambda;
     DISPATCH(3);
@@ -4163,9 +4108,6 @@ void op_make_range(VM& vm, Code* pc) {
     if (!isInfinite) {
         for (u8 i = 0; i < sw; ++i) range->endData()[i] = vm.reg((u16)(endReg + i));
     }
-    payloadRetain(range->startData(), et);
-    payloadRetain(range->stepData(),  et);
-    if (!isInfinite) payloadRetain(range->endData(), et);
     vm.reg(dst).o = range;
     DISPATCH(4);
 }
@@ -4214,13 +4156,6 @@ void op_make_lazy_automap(VM& vm, Code* pc) {
         gen->broadcastVals_[i] = vm.reg(broadcastBase + i);
     }
     node->installGenerator(gen);
-    // Retain Obj* fields stored in generator
-    if (srcList) srcList->retain();
-    gen->info_->retain();
-    for (u16 i = 0; i < numBroadcast && i < AutoMapListGen::kMaxBroadcast; ++i) {
-        if (i < info->broadcastArgs.size() && info->broadcastArgs[i].isObj && gen->broadcastVals_[i].o)
-            gen->broadcastVals_[i].o->retain();
-    }
     vm.reg(dst).o = node;
     DISPATCH(3);
 }
@@ -4244,8 +4179,6 @@ void op_make_map(VM& vm, Code* pc) {
         Word const* vSrc = kSrc + kS;
         // Retain Obj* children before handing payload to the map. insertOrUpdate
         // releases the redundant retain on duplicate key.
-        payloadRetain(kSrc, mapType->keyType_);
-        payloadRetain(vSrc, mapType->valueType_);
         map->insertOrUpdate(kSrc, vSrc);
     }
     vm.reg(dst).o = map;
@@ -4263,7 +4196,6 @@ void op_map_get(VM& vm, Code* pc) {
     if (slot != map->capacity()) {
         Word const* v = map->slotVal(slot);
         for (u32 i = 0; i < map->valueStride_; ++i) vm.reg((u16)(dst + i)) = v[i];
-        payloadRetain(&vm.reg(dst), map->valueType());
     } else {
         for (u32 i = 0; i < map->valueStride_; ++i) vm.reg((u16)(dst + i)).i = 0;
     }
@@ -4298,7 +4230,6 @@ void op_map_get_option(VM& vm, Code* pc) {
     if (optType->repr_ == Type::Repr::NullablePtrEnum) {
         if (found) {
             Obj* o = map->slotVal(slot)[0].o;
-            if (o) o->retain();
             vm.reg(dst).o = o;
         } else {
             vm.reg(dst).o = nullptr;
@@ -4314,7 +4245,6 @@ void op_map_get_option(VM& vm, Code* pc) {
             vm.reg(dst).i = 0;  // which_ = some
             Word const* src = map->slotVal(slot);
             for (u32 i = 0; i < vs; ++i) vm.reg((u16)(dst + 1 + i)) = src[i];
-            payloadRetain(&vm.reg((u16)(dst + 1)), vt);
         } else {
             vm.reg(dst).i = 1;  // which_ = none
             for (u32 i = 0; i < vs; ++i) vm.reg((u16)(dst + 1 + i)).i = 0;
@@ -4329,7 +4259,6 @@ void op_map_get_option(VM& vm, Code* pc) {
         Word const* src = map->slotVal(slot);
         u32 sw = (vt && vt->sizeWords_ > 0) ? vt->sizeWords_ : 1;
         for (u32 i = 0; i < sw; ++i) e->v[i] = src[i];
-        payloadRetain(&e->v[0], vt);
     }
     vm.reg(dst).o = e;
     DISPATCH(3);
@@ -4347,7 +4276,6 @@ void op_make_set(VM& vm, Code* pc) {
     u32 eS = set->elemStride_;
     for (u16 i = 0; i < numElems; ++i) {
         Word const* src = &vm.reg((u16)(firstSrc + i * eS));
-        payloadRetain(src, setType->elemType_);
         // insertElem releases the retain if the element is already present.
         set->insertElem(src);
     }
@@ -4385,10 +4313,8 @@ void op_ref_set(VM& vm, Code* pc) {
     auto* refType = static_cast<RefType*>(ref->type_);
     Word newVal = vm.reg(valReg);
     if (storesObjPtr(refType->elemType_)) {
-        if (newVal.o) newVal.o->retain();
         // Phase 3 SATB: snapshot the old value before it disappears.
         if (ref->value_.o) vm.tracingGC().writeBarrier(ref->value_.o);
-        if (ref->value_.o) ref->value_.o->release();
     }
     ref->value_ = newVal;
     vm.reg(dst) = newVal;
@@ -4407,7 +4333,6 @@ void op_make_ref_inline(VM& vm, Code* pc) {
     auto* ref = InlineRef::create(refType);
     u32 n = ref->sizeWords_;
     for (u32 i = 0; i < n; ++i) ref->v[i] = vm.reg((u16)(valReg + i));
-    inlineWalkPointers(&ref->v[0], et, /*release_=*/false);
     vm.reg(dst).o = ref;
     DISPATCH(3);
 }
@@ -4432,11 +4357,9 @@ void op_ref_set_inline(VM& vm, Code* pc) {
     Type* et = refType->elemType_;
     u32 n = ref->sizeWords_;
     // Release embedded Obj* in the old payload.
-    inlineWalkPointers(&ref->v[0], et, /*release_=*/true);
     // Copy in the new payload.
     for (u32 i = 0; i < n; ++i) ref->v[i] = vm.reg((u16)(valReg + i));
     // Retain embedded Obj* in the new payload.
-    inlineWalkPointers(&ref->v[0], et, /*release_=*/false);
     // Result of the assignment expression is the assigned value.
     if (dst != valReg) {
         for (u32 i = 0; i < n; ++i) vm.reg((u16)(dst + i)) = vm.reg((u16)(valReg + i));
@@ -4463,14 +4386,6 @@ void op_coro_create(VM& vm, Code* pc) {
     for (u16 i = 0; i < argc; ++i) {
         coro->args_[i] = vm.reg(argBase + i);
     }
-    // Retain Obj* args so they survive the auto-release pool drain
-    if (coro->funcType_) {
-        for (u16 i = 0; i < coro->numArgs_ && i < coro->funcType_->argTypes_.size(); ++i) {
-            if (storesObjPtr(coro->funcType_->argTypes_[i]) && coro->args_[i].o)
-                coro->args_[i].o->retain();
-        }
-    }
-
     vm.reg(dst).o = coro;
     DISPATCH(4);
 }
@@ -4497,20 +4412,6 @@ void op_coro_create_lambda(VM& vm, Code* pc) {
     // Copy free variables from Lambda
     for (u16 i = 0; i < lambda->numFreeVars_; ++i) {
         coro->args_[argc + i] = lambda->freeVars_[i];
-    }
-
-    // Retain Obj* args and free vars
-    if (funcType) {
-        for (u16 i = 0; i < argc && i < funcType->argTypes_.size(); ++i) {
-            if (storesObjPtr(funcType->argTypes_[i]) && coro->args_[i].o)
-                coro->args_[i].o->retain();
-        }
-    }
-    // Free vars are Obj types — retain them
-    auto* lambdaType = static_cast<LambdaType*>(lambda->type_);
-    for (u16 i = 0; i < lambda->numFreeVars_; ++i) {
-        if (storesObjPtr(lambdaType->freeVarTypes_[i]) && coro->args_[argc + i].o)
-            coro->args_[argc + i].o->retain();
     }
 
     vm.reg(dst).o = coro;
@@ -4577,17 +4478,6 @@ void op_coro_resume(VM& vm, Code* pc) {
             vm.regsBase()[newBase + i] = frame->regs_[i];
         }
 
-        // Release the yield-retained Obj* refs now that they're back in the
-        // live register file.  No pool drain can happen between here and the
-        // next yield (we're mid-execution), so the objects stay alive.
-        CodeBlock* cb = frame->codeBlock_;
-        u16 gmi = frame->gcMapIndex_;
-        if (cb && gmi < cb->coroGCMaps_.size()) {
-            for (u16 idx : cb->coroGCMaps_[gmi]) {
-                if (idx < frame->numRegs_ && frame->regs_[idx].o)
-                    frame->regs_[idx].o->release();
-            }
-        }
         frame->gcMapIndex_ = UINT16_MAX;  // nothing retained until next yield
 
         // Push flat frame for coro body
@@ -4626,22 +4516,8 @@ void op_yield(VM& vm, Code* pc) {
     // Save coroutine state
     coro->resumePC_ = pc + 2;  // resume after yield
     frame->gcMapIndex_ = gcMapIdx;
-    if (!coro->topFrame_) frame->retain();  // first yield: retain for coro ownership
     coro->topFrame_ = frame;
     coro->state_ = CoroutineObj::Suspended;
-
-    // Retain Obj* values in saved registers so they survive auto-release pool
-    // draining between scheduler invocations.  The matching release happens in
-    // op_coro_resume (Suspended path) and CoroutineFrame::releaseChildren().
-    // DeferredDeleteQueue::processN() skips objects whose refcount was bumped
-    // back above 0 after enqueue, making retain-after-release-to-zero safe.
-    CodeBlock* cb = frame->codeBlock_;
-    if (cb && gcMapIdx < cb->coroGCMaps_.size()) {
-        for (u16 idx : cb->coroGCMaps_[gcMapIdx]) {
-            if (idx < frame->numRegs_ && frame->regs_[idx].o)
-                frame->regs_[idx].o->retain();
-        }
-    }
 
     // Restore caller context
     vm.setBaseReg(coro->callerBaseReg_);
@@ -4726,7 +4602,6 @@ void op_coro_wrap_option(VM& vm, Code* pc) {
             vm.reg(dst).o = nullptr;
         } else {
             Word v = vm.reg(valSrc);
-            if (v.o) v.o->retain();
             vm.reg(dst).o = v.o;
         }
         DISPATCH(3);
@@ -4744,7 +4619,6 @@ void op_coro_wrap_option(VM& vm, Code* pc) {
             for (u16 i = 0; i < yieldStride; ++i) {
                 vm.reg((u16)(dst + 1 + i)) = vm.reg((u16)(valSrc + i));
             }
-            payloadRetain(&vm.reg((u16)(dst + 1)), yieldType);
         }
         DISPATCH(3);
     }
@@ -4754,7 +4628,6 @@ void op_coro_wrap_option(VM& vm, Code* pc) {
     if (!done) {
         u32 sw = (yieldType && yieldType->sizeWords_ > 0) ? yieldType->sizeWords_ : 1;
         for (u32 i = 0; i < sw; ++i) e->v[i] = vm.reg((u16)(valSrc + i));
-        payloadRetain(&e->v[0], yieldType);
     }
     vm.reg(dst).o = e;
     DISPATCH(3);
@@ -4771,7 +4644,6 @@ void op_make_any(VM& vm, Code* pc) {
     any->value_ = vm.reg(src);
     any->wrappedType_ = wrappedType;
     any->isObjType_ = isObj;
-    if (isObj && any->value_.o) any->value_.o->retain();
     vm.reg(dst).o = any;
     DISPATCH(3);
 }
@@ -4817,11 +4689,9 @@ void op_store_dynamic_obj(VM& vm, Code* pc) {
     u32 idx = (u32)pc[2].i;
     Obj* newVal = vm.reg(src).o;
     Obj* oldVal = vm.dynVar(idx).o;
-    if (newVal) newVal->retain();
     // Phase 3 SATB: snapshot the old value.
     if (oldVal) vm.tracingGC().writeBarrier(oldVal);
     vm.dynVar(idx) = vm.reg(src);
-    if (oldVal) oldVal->release();
     DISPATCH(3);
 }
 
@@ -4831,7 +4701,6 @@ void op_init_dynamic_obj(VM& vm, Code* pc) {
     u16 src = pc[1].regs[0];
     u32 idx = (u32)pc[2].i;
     Obj* newVal = vm.reg(src).o;
-    if (newVal) newVal->retain();
     vm.dynVar(idx) = vm.reg(src);
     DISPATCH(3);
 }
@@ -4869,9 +4738,7 @@ void op_store_dynamic_inline(VM& vm, Code* pc) {
     auto* type = static_cast<Type*>(pc[3].p);
     u32 n = type ? (u32)type->sizeWords_ : 1u;
     if (n == 0) n = 1;
-    inlineWalkPointers(&vm.dynVar(idx), type, /*release_=*/true);
     for (u32 i = 0; i < n; ++i) vm.dynVar(idx + i) = vm.reg((u16)(src + i));
-    inlineWalkPointers(&vm.dynVar(idx), type, /*release_=*/false);
     DISPATCH(4);
 }
 
@@ -4883,7 +4750,6 @@ void op_init_dynamic_inline(VM& vm, Code* pc) {
     u32 n = type ? (u32)type->sizeWords_ : 1u;
     if (n == 0) n = 1;
     for (u32 i = 0; i < n; ++i) vm.dynVar(idx + i) = vm.reg((u16)(src + i));
-    inlineWalkPointers(&vm.dynVar(idx), type, /*release_=*/false);
     DISPATCH(4);
 }
 

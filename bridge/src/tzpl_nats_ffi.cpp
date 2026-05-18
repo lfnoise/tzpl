@@ -145,7 +145,6 @@ static void ffi_natsRequest(ts::VM& vm, u16, u16, u16 argBase) {
     const char* data = regString(vm, argBase + 1);
     int timeoutMs = static_cast<int>(vm.reg(argBase + 2).i);
     ts::Obj* handler = vm.reg(argBase + 3).o;
-    handler->retain();
 
     auto* nrtvm = ctx->nrtvm;
 
@@ -159,7 +158,6 @@ static void ffi_natsRequest(ts::VM& vm, u16, u16, u16 argBase) {
             args[0].o = new ts::StringObj(payload.c_str());
             nrtvm->vm.callCallable(handler, args, 1);
             nrtvm->vm.gcHeartbeat();
-            handler->release();
         });
 }
 
@@ -171,13 +169,11 @@ static void registerUserHandler(ts::VM& vm, const char* subject, ts::Obj* handle
     auto* ctx = getAppContext(vm);
     if (!ctx || !ctx->natsDispatcher || !ctx->nrtvm) return;
 
-    handler->retain();
 
     // Release any previous handler for this subject
     auto& table = ctx->nrtvm->handlers.natsHandlers;
     auto it = table.find(subject);
     if (it != table.end()) {
-        it->second->release();
     }
     table[subject] = handler;
 }
@@ -282,7 +278,6 @@ static void ffi_removeHandler(ts::VM& vm, u16, u16, u16 argBase) {
     auto& table = ctx->nrtvm->handlers.natsHandlers;
     auto it = table.find(subject);
     if (it != table.end()) {
-        it->second->release();
         table.erase(it);
     }
 }

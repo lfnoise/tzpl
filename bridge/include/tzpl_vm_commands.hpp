@@ -68,7 +68,6 @@ struct VMCallableCmd : engine::Command {
     ts::Obj* callable_;           // retained Callable (Lambda or Primitive)
 
     explicit VMCallableCmd(ts::Obj* callable) : callable_(callable) {
-        if (callable_) callable_->retain();
     }
 
     void doRT(engine::Silo* s) override {
@@ -87,7 +86,6 @@ struct VMCallableCmd : engine::Command {
             auto* vm = static_cast<ts::VM*>(s->vm_);
             if (vm) {
                 vm->makeCurrent();
-                callable_->release();
                 vm->gcHeartbeat();
             }
         }
@@ -190,7 +188,6 @@ struct RTTempoSchedCmd : engine::Command {
     RTTempoSchedCmd(f64 beatTime, ts::Obj* handler)
         : beatTime_(beatTime), handler_(handler)
     {
-        if (handler_) handler_->retain();
     }
 
     void doRT(engine::Silo* s) override {
@@ -198,7 +195,6 @@ struct RTTempoSchedCmd : engine::Command {
         if (sched && handler_) {
             sched->addEntry(beatTime_, handler_);
             // Scheduler took ownership (retained again), release our ref
-            handler_->release();
             handler_ = nullptr;
         }
     }
@@ -206,7 +202,6 @@ struct RTTempoSchedCmd : engine::Command {
     bool doNRT(engine::Silo* s) override {
         // If doRT didn't fire (no scheduler), release on NRT
         if (handler_) {
-            handler_->release();
             handler_ = nullptr;
         }
         return true;
