@@ -769,9 +769,11 @@ void CodeGen::genImportDecl(ImportDeclNode* decl) {
     // Call the module init block (0 args)
     u16 argBase = nextReg_;
     u16 resultReg = allocReg();
+    clearArgRegTypes(argBase, resultReg);
     emitOp(op_call);
     emitRegs(resultReg, 0, argBase);
     emitInt(mod->initBlockGlobalIndex);
+    emitReturnPcStackMap();
 
     // Store flag = true (1)
     u16 trueReg = allocReg();
@@ -1768,6 +1770,7 @@ void CodeGen::genForStmt(ForStmtNode* stmt) {
         u16 elemReg = allocSlot(coroType->yieldType_);
         emitOp(op_coro_resume);
         emitRegs(elemReg, coroReg);
+        emitReturnPcStackMap();
 
         // Check if coroutine is done
         u16 doneReg = allocReg();
@@ -3568,9 +3571,11 @@ u16 CodeGen::genUnaryOp(UnaryOpExpr* expr) {
             && expr->resolvedType != compiler_.complexType()
             && expr->resolvedType != compiler_.fractionType();
         u16 resultReg = builtinReturnsInlineComposite ? allocReg() : allocSlot(expr->resolvedType);
+        clearArgRegTypes(argBase, resultReg);
         emitOp(expr->isBuiltinCall ? op_call_primitive : op_call);
         emitRegs(resultReg, 1, argBase);
         emitInt(expr->resolvedFuncGlobalIndex);
+        emitReturnPcStackMap();
         if (builtinReturnsInlineComposite) {
             return emitUnboxIfInline(resultReg, expr->resolvedType);
         }
@@ -3815,9 +3820,12 @@ u16 CodeGen::genCall(CallExpr_* expr) {
                     return allocReg();
                 }
                 u16 resultReg = allocSlot(expr->resolvedType);
+                clearArgRegTypes(argBase, resultReg);
                 emitOp(expr->isBuiltinCall ? op_call_primitive : op_call);
                 emitRegs(resultReg, (u16)expr->args.size(), argBase);
-                emitInt(expr->resolvedFuncGlobalIndex);                return resultReg;
+                emitInt(expr->resolvedFuncGlobalIndex);
+                emitReturnPcStackMap();
+                return resultReg;
             }
         }
     }
@@ -3852,9 +3860,12 @@ u16 CodeGen::genCall(CallExpr_* expr) {
                 return allocReg();
             }
             u16 resultReg = allocSlot(expr->resolvedType);
+            clearArgRegTypes(argBase, resultReg);
             emitOp(op_call_template_lambda);
             emitRegs(resultReg, (u16)expr->args.size(), argBase, calleeReg);
-            emitPtr(concreteLT->codeBlock_);            return resultReg;
+            emitPtr(concreteLT->codeBlock_);
+            emitReturnPcStackMap();
+            return resultReg;
         }
 
         // General expression callee (e.g., a[i](x, y))
@@ -3893,8 +3904,11 @@ u16 CodeGen::genCall(CallExpr_* expr) {
             return allocReg();
         }
         u16 resultReg = allocSlot(expr->resolvedType);
+        clearArgRegTypes(argBase, resultReg);
         emitOp(op_call_lambda);
-        emitRegs(resultReg, (u16)expr->args.size(), argBase, calleeReg);        return resultReg;
+        emitRegs(resultReg, (u16)expr->args.size(), argBase, calleeReg);
+        emitReturnPcStackMap();
+        return resultReg;
     }
 
     auto* ident = static_cast<IdentifierExpr*>(expr->callee.get());
@@ -3985,9 +3999,12 @@ u16 CodeGen::genCall(CallExpr_* expr) {
             return allocReg();
         }
         u16 resultReg = allocSlot(expr->resolvedType);
+        clearArgRegTypes(argBase, resultReg);
         emitOp(op_call_template_lambda);
         emitRegs(resultReg, (u16)expr->args.size(), argBase, calleeReg);
-        emitPtr(concreteLT->codeBlock_);        return resultReg;
+        emitPtr(concreteLT->codeBlock_);
+        emitReturnPcStackMap();
+        return resultReg;
     }
 
     // Check if callee is a local variable holding a lambda/function type
@@ -4018,8 +4035,10 @@ u16 CodeGen::genCall(CallExpr_* expr) {
             return allocReg();
         }
         u16 resultReg = allocSlot(expr->resolvedType);
+        clearArgRegTypes(argBase, resultReg);
         emitOp(op_call_lambda);
         emitRegs(resultReg, (u16)expr->args.size(), argBase, calleeReg);
+        emitReturnPcStackMap();
         return resultReg;
     }
 
@@ -4057,8 +4076,11 @@ u16 CodeGen::genCall(CallExpr_* expr) {
                     return allocReg();
                 }
                 u16 resultReg = allocSlot(expr->resolvedType);
+                clearArgRegTypes(argBase, resultReg);
                 emitOp(op_call_lambda);
-                emitRegs(resultReg, (u16)expr->args.size(), argBase, calleeReg);                return resultReg;
+                emitRegs(resultReg, (u16)expr->args.size(), argBase, calleeReg);
+                emitReturnPcStackMap();
+                return resultReg;
             }
         }
     }
@@ -4226,6 +4248,7 @@ u16 CodeGen::genCall(CallExpr_* expr) {
         u16 valueReg = allocSlot(yieldType);
         emitOp(op_coro_resume);
         emitRegs(valueReg, coroReg);
+        emitReturnPcStackMap();
         u16 resultReg = allocSlot(optType);
         emitOp(op_coro_wrap_option);
         emitRegs(resultReg, valueReg, coroReg);
@@ -4284,6 +4307,7 @@ u16 CodeGen::genCall(CallExpr_* expr) {
         u16 valueReg = allocSlot(innerCoroType ? innerCoroType->yieldType_ : nullptr);
         emitOp(op_coro_resume);
         emitRegs(valueReg, coroReg);
+        emitReturnPcStackMap();
 
         // Check if coroutine is done
         u16 doneReg = allocReg();
@@ -4548,9 +4572,11 @@ u16 CodeGen::genAutoMapBinaryOp(BinaryOpExpr* expr) {
         if (nextReg_ < next) { nextReg_ = next; if (nextReg_ > maxReg_) maxReg_ = nextReg_; }
         bool builtinReturnsInline = expr->isBuiltinCall && needsBoxAuto(scalarResultType);
         elemResultReg = builtinReturnsInline ? allocReg() : allocSlot(scalarResultType);
+        clearArgRegTypes(argBase, elemResultReg);
         emitOp(expr->isBuiltinCall ? op_call_primitive : op_call);
         emitRegs(elemResultReg, 2, argBase);
         emitInt(expr->resolvedFuncGlobalIndex);
+        emitReturnPcStackMap();
         if (builtinReturnsInline) {
             elemResultReg = emitUnboxIfInline(elemResultReg, scalarResultType);
         }
@@ -4772,9 +4798,11 @@ u16 CodeGen::genAutoMapBinaryOpList(BinaryOpExpr* expr) {
         if (rightElemReg != argBase + 1) { emitOp(op_mov); emitRegs(argBase + 1, rightElemReg); }
         if (nextReg_ <= argBase + 1) { nextReg_ = argBase + 2; if (nextReg_ > maxReg_) maxReg_ = nextReg_; }
         elemResultReg = allocReg();
+        clearArgRegTypes(argBase, elemResultReg);
         emitOp(expr->isBuiltinCall ? op_call_primitive : op_call);
         emitRegs(elemResultReg, 2, argBase);
         emitInt(expr->resolvedFuncGlobalIndex);
+        emitReturnPcStackMap();
     } else if (isCompositeNumeric(scalarResultType)) {
         elemResultReg = allocReg();
         emitOp(getCompositeArithOp(expr->op));
@@ -5015,9 +5043,11 @@ u16 CodeGen::genCartesianBinaryOp(BinaryOpExpr* expr) {
         bool builtinReturnsInline = expr->isBuiltinCall && !expr->builtinAcceptsInlineArgs
                                      && needsBoxAuto(scalarResultType);
         elemResultReg = builtinReturnsInline ? allocReg() : allocSlot(scalarResultType);
+        clearArgRegTypes(argBase, elemResultReg);
         emitOp(expr->isBuiltinCall ? op_call_primitive : op_call);
         emitRegs(elemResultReg, 2, argBase);
         emitInt(expr->resolvedFuncGlobalIndex);
+        emitReturnPcStackMap();
         if (builtinReturnsInline) {
             elemResultReg = emitUnboxIfInline(elemResultReg, scalarResultType);
         }
@@ -5294,9 +5324,11 @@ u16 CodeGen::genDeepMapBinaryOp(BinaryOpExpr* expr, int depth) {
         if (rightElemReg != argBase + 1) { emitOp(op_mov); emitRegs(argBase + 1, rightElemReg); }
         if (nextReg_ <= argBase + 1) { nextReg_ = argBase + 2; if (nextReg_ > maxReg_) maxReg_ = nextReg_; }
         elemResultReg = allocReg();
+        clearArgRegTypes(argBase, elemResultReg);
         emitOp(expr->isBuiltinCall ? op_call_primitive : op_call);
         emitRegs(elemResultReg, 2, argBase);
         emitInt(expr->resolvedFuncGlobalIndex);
+        emitReturnPcStackMap();
     } else {
         bool isCmp = (expr->op >= BinaryOpExpr::Eq && expr->op <= BinaryOpExpr::Ge);
         if (isCmp) {
@@ -5576,9 +5608,11 @@ u16 CodeGen::genAutoMapCall(CallExpr_* expr) {
         && returnT != compiler_.complexType()
         && returnT != compiler_.fractionType();
     u16 callResultReg = builtinReturnsInlineComposite ? allocReg() : allocSlot(returnT);
+    clearArgRegTypes(callArgBase, callResultReg);
     emitOp(expr->isBuiltinCall ? op_call_primitive : op_call);
     emitRegs(callResultReg, callArgc, callArgBase);
     emitInt(expr->resolvedFuncGlobalIndex);
+    emitReturnPcStackMap();
     if (builtinReturnsInlineComposite) {
         callResultReg = emitUnboxIfInline(callResultReg, returnT);
     }
@@ -5826,8 +5860,10 @@ u16 CodeGen::genAutoMapLambdaCall(CallExpr_* expr, u16 calleeReg, FunctionType* 
 
     // Call lambda
     u16 callResultReg = allocReg();
+    clearArgRegTypes(callArgBase, callResultReg);
     emitOp(op_call_lambda);
     emitRegs(callResultReg, argc, callArgBase, calleeReg);
+    emitReturnPcStackMap();
 
     // Store result (skip for Void)
     if (!isVoidReturn) {
@@ -5989,8 +6025,10 @@ u16 CodeGen::genAutoMapLambdaCallList(CallExpr_* expr, u16 calleeReg, FunctionTy
 
     // --- Phase 5: Call the lambda ---
     u16 callResultReg = isVoidReturn ? allocReg() : allocSlot(resultElemType);
+    clearArgRegTypes(callArgBase, callResultReg);
     emitOp(op_call_lambda);
     emitRegs(callResultReg, argc, callArgBase, calleeReg);
+    emitReturnPcStackMap();
 
     // Cons the result onto the accumulator (reversed result list).
     if (!isVoidReturn) {
@@ -6258,9 +6296,11 @@ u16 CodeGen::genAutoMapCallListVoid(CallExpr_* expr, const FuncInfo* funcInfo) {
     // --- Phase 5: Variadic packing + Call function (discard result) ---
     u16 callArgc = emitVariadicPack(expr, callArgBase, argc);
     u16 callResultReg = allocReg();
+    clearArgRegTypes(callArgBase, callResultReg);
     emitOp(expr->isBuiltinCall ? op_call_primitive : op_call);
     emitRegs(callResultReg, callArgc, callArgBase);
     emitInt(expr->resolvedFuncGlobalIndex);
+    emitReturnPcStackMap();
 
     // --- Phase 6: Advance to tail and loop ---
     emitOp(op_list_tail);
@@ -6578,9 +6618,11 @@ u16 CodeGen::genExplicitImplicitAutoMapCall(CallExpr_* expr) {
     u16 callResultReg = builtinReturnsInline
         ? allocReg()
         : (retInlineComposite ? allocSlot(returnT) : allocReg());
+    clearArgRegTypes(callArgBase, callResultReg);
     emitOp(expr->isBuiltinCall ? op_call_primitive : op_call);
     emitRegs(callResultReg, callArgc, callArgBase);
     emitInt(expr->resolvedFuncGlobalIndex);
+    emitReturnPcStackMap();
     if (builtinReturnsInline) {
         callResultReg = emitUnboxIfInline(callResultReg, returnT);
     }
@@ -6831,9 +6873,11 @@ u16 CodeGen::genCartesianCall(CallExpr_* expr) {
     u16 callResultReg = builtinReturnsInline
         ? allocReg()
         : (retInlineComposite ? allocSlot(returnT) : allocReg());
+    clearArgRegTypes(callArgBase, callResultReg);
     emitOp(expr->isBuiltinCall ? op_call_primitive : op_call);
     emitRegs(callResultReg, callArgc, callArgBase);
     emitInt(expr->resolvedFuncGlobalIndex);
+    emitReturnPcStackMap();
     if (builtinReturnsInline) {
         callResultReg = emitUnboxIfInline(callResultReg, returnT);
     }
@@ -7136,9 +7180,11 @@ u16 CodeGen::genDeepMapCall(CallExpr_* expr, int depth) {
     // Variadic packing + Call function
     u16 callArgc = emitVariadicPack(expr, callArgBase, argc);
     u16 callResultReg = allocReg();
+    clearArgRegTypes(callArgBase, callResultReg);
     emitOp(expr->isBuiltinCall ? op_call_primitive : op_call);
     emitRegs(callResultReg, callArgc, callArgBase);
     emitInt(expr->resolvedFuncGlobalIndex);
+    emitReturnPcStackMap();
 
     // Store in innermost result array (skip for Void)
     if (!isVoidReturn) {
