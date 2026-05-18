@@ -129,15 +129,9 @@ void arcEnqueueForDeletion(GCObj* obj) {
 
 TracingGC& VM::tracingGC() { return *tracingGC_; }
 
-void VM::safepointPoll() {
-    // Clear flag first so concurrent enqueuers can re-trip it during drain.
-    gcRequested_.store(false, std::memory_order_relaxed);
-    foreignDeleteQueue_.drainInto(deferredDeleteQueue_);
-
-    // Phase 5: tracing is the sole liveness mechanism. Auto-trigger a new
-    // cycle when alloc pressure crosses the threshold and no cycle is in
-    // flight; otherwise advance the in-flight cycle one bounded step. The
-    // bounded step is what keeps pauses real-time.
+// Shared by safepointPoll, rtTick, and nrtTick. Checks the proportional
+// trigger and advances any in-flight cycle until deadlineNanos.
+void VM::hostTick_(u64 deadlineNanos) {
     auto& gc = *tracingGC_;
     if (gc.phase() == TracingGC::Phase::Idle) {
         if (gc.allocsSinceLastCycle() >= gc.cycleTriggerAllocs()) {
@@ -145,24 +139,42 @@ void VM::safepointPoll() {
         }
     }
     if (gc.phase() != TracingGC::Phase::Idle) {
-        gc.step(kSafepointBudget);
+        gc.step(deadlineNanos);
     }
+}
 
-    // ARC's deferred-delete queue is only drained when no tracing cycle is
-    // in flight. Reason: an SATB barrier may have pinned a still-Gray Obj*
-    // on the tracer's worklist. If we delete that Obj before the marker
-    // gets to it, the worklist would hold a dangling pointer. Suspending
-    // ARC reclamation for the duration of a cycle (bounded by the mark/
-    // sweep budgets summed over its safepoints) guarantees gray pointers
-    // stay valid. New deletes added during the cycle just queue up and
-    // catch up in the next Idle window.
+void VM::rtTick(u64 deadlineNanos) { hostTick_(deadlineNanos); }
+void VM::nrtTick(u64 deadlineNanos) { hostTick_(deadlineNanos); }
+
+void VM::safepointPoll() {
+    // Clear flag first so concurrent enqueuers can re-trip it during drain.
+    gcRequested_.store(false, std::memory_order_relaxed);
+    foreignDeleteQueue_.drainInto(deferredDeleteQueue_);
+
+    // Phase 6: time-based budget. The deadline is sampled inside step() every
+    // kCheckEvery work units so a single safepoint cannot stall the mutator
+    // for longer than (kCheckEvery * worstUnitCost) past the budget.
+    auto& gc = *tracingGC_;
+    u64 deadline = gcMonoNanos() + gcStepBudgetNanos_;
     if (gc.phase() == TracingGC::Phase::Idle) {
-        deferredDeleteQueue_.processN(kSafepointBudget);
+        if (gc.allocsSinceLastCycle() >= gc.cycleTriggerAllocs()) {
+            gc.requestCycle();
+        }
+    }
+    if (gc.phase() != TracingGC::Phase::Idle) {
+        gc.step(deadline);
     }
 
-    // If the queue is still large, re-arm the flag so the next safepoint
-    // continues draining. Also re-arm while a cycle is in progress so the
-    // tracer keeps stepping every safepoint until it completes.
+    // Deferred-delete queue (vestigial under Phase 5 -- release is a no-op
+    // so nothing is ever enqueued). Drain only when no tracing cycle is in
+    // flight; an SATB barrier could otherwise pin a still-Gray Obj* on the
+    // tracer's worklist that we'd then delete out from under it.
+    if (gc.phase() == TracingGC::Phase::Idle) {
+        deferredDeleteQueue_.processN(1024);
+    }
+
+    // If the queue is still large or a cycle is in progress, re-arm the
+    // flag so the next safepoint continues the work.
     if (deferredDeleteQueue_.size() >= kSafepointTriggerSize ||
         gc.phase() != TracingGC::Phase::Idle) {
         gcRequested_.store(true, std::memory_order_relaxed);

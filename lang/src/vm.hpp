@@ -275,12 +275,44 @@ public:
     // may set the flag from off-thread.
     std::atomic<bool> gcRequested_{false};
     static constexpr u32 kSafepointTriggerSize = 1024;
-    static constexpr u32 kSafepointBudget = 512;
+    // Phase 6: time-based budgets. The safepoint default is the NRT preset
+    // (REPL / file execution); audio-thread VMs override via setGCConfig.
+    // kAudioRT preset shrinks this to ~200 us to fit alongside DSP work in
+    // a single audio callback.
+    static constexpr u64 kSafepointStepNanos = 2'000'000;     // 2 ms
+    u64 gcStepBudgetNanos_ = kSafepointStepNanos;
 
     // Drain the deferred-delete queue under a bounded budget. Safe to call
     // from any safepoint inside execution -- it does not touch the register
     // file, just consumes already-released objects.
     void safepointPoll();
+
+    // Phase 6: host-driven heartbeat hooks. Both call shared hostTick_ which
+    // checks the proportional cycle trigger and advances any in-flight cycle
+    // until the deadline is reached. The split exists so future per-context
+    // divergence (different telemetry buckets, different scheduling policy)
+    // doesn't need API churn -- they go through gcStepBudgetNanos_ today.
+    //
+    // rtTick: called from the audio thread that owns this VM, typically once
+    //         per block, at the start of the callback. Must use a deadline
+    //         that leaves enough block time for DSP.
+    // nrtTick: called from the scheduler / REPL / GUI idle path that owns
+    //         this VM. Idempotent and safe to call from idle handlers.
+    //
+    // Both are safe (and required) to call regardless of whether any language
+    // code is currently running on this VM -- they exist precisely so that
+    // an in-flight cycle keeps making progress when the mutator is idle.
+    void rtTick(u64 deadlineNanos);
+    void nrtTick(u64 deadlineNanos);
+
+    // Per-VM GC budget knob. Phase 6 ships with NRT defaults; engines that
+    // create RT VMs call this with a tighter budget before execution begins.
+    void setGCStepBudgetNanos(u64 ns) { gcStepBudgetNanos_ = ns; }
+    u64  gcStepBudgetNanos() const { return gcStepBudgetNanos_; }
+
+private:
+    void hostTick_(u64 deadlineNanos);
+public:
 
     // Phase 3 of tracing-GC project: head of an intrusive doubly-linked list
     // of every GCObj owned by this VM. Sweep walks this list to find whites.

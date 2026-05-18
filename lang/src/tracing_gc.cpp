@@ -124,47 +124,58 @@ void TracingGC::markRoots() {
     }
 }
 
-u32 TracingGC::step_mark(u32 budget) {
+u32 TracingGC::step_mark(u64 deadlineNanos) {
     u32 done = 0;
-    while (done < budget && !grayWorklist_.empty()) {
+    u32 sinceCheck = 0;
+    while (!grayWorklist_.empty()) {
         GCObj* obj = grayWorklist_.back();
         grayWorklist_.pop_back();
-        if (obj->color_ != GCColor::Gray) { ++done; continue; }
-        obj->color_ = GCColor::Black;
-        ++currentBlackCount_;
-        // Phase 3 transitive scan: walk every Obj* child via the virtual
-        // gcScanChildren. Default no-op for classes without GC children;
-        // overridden mirror of releaseChildren for the rest (Ref, Tuple,
-        // Struct, Enum, ObjArray, MapObj, SetObj, ListNode, ListGenerator
-        // subclasses, Lambda, CoroutineFrame, CoroutineObj, AnyObj, ...).
-        obj->gcScanChildren(*this);
-        ++done;
+        if (obj->color_ != GCColor::Gray) { ++done; }
+        else {
+            obj->color_ = GCColor::Black;
+            ++currentBlackCount_;
+            // Transitive scan via the virtual gcScanChildren. Default no-op
+            // for classes without GC children; overridden for Ref, Tuple,
+            // Struct, Enum, ObjArray, MapObj, SetObj, ListNode, ListGenerator
+            // subclasses, Lambda, CoroutineFrame, CoroutineObj, AnyObj, ...
+            // A single call may push many grays (fan-out); the deadline check
+            // below catches the overshoot at the next batch boundary.
+            obj->gcScanChildren(*this);
+            ++done;
+        }
+        if (++sinceCheck >= kCheckEvery) {
+            sinceCheck = 0;
+            if (gcMonoNanos() >= deadlineNanos) return done;
+        }
     }
-    if (grayWorklist_.empty()) {
-        phase_ = Phase::Sweep;
-        sweepCursor_ = vm_.allObjsHead_;
-    }
+    // Worklist drained: advance to Sweep.
+    phase_ = Phase::Sweep;
+    sweepCursor_ = vm_.allObjsHead_;
     return done;
 }
 
-u32 TracingGC::step_sweep(u32 budget) {
+u32 TracingGC::step_sweep(u64 deadlineNanos) {
     u32 done = 0;
-    while (done < budget && sweepCursor_) {
+    u32 sinceCheck = 0;
+    while (sweepCursor_) {
         GCObj* obj = sweepCursor_;
         sweepCursor_ = obj->allObjsNext_;
-        if (obj->isImmortal()) { ++done; continue; }
-        if (obj->color_ == GCColor::White) {
+        if (!obj->isImmortal() && obj->color_ == GCColor::White) {
             ++currentWhiteCount_;
-            // Phase 5: tracing is now the sole liveness mechanism. White
-            // objects are unreachable; delete them. Their destructor unlinks
-            // from allObjsList (so sweepCursor_, already advanced, stays
-            // valid) and calls releaseChildren() -- which is a no-op under
-            // ARC retirement, so destruction is non-recursive: each child
-            // either was already white (and will be visited by this same
-            // sweep) or stays referenced and survives.
+            // Tracing is now the sole liveness mechanism. White objects are
+            // unreachable; delete them. Their destructor unlinks from
+            // allObjsList (sweepCursor_ is already advanced past obj, so
+            // unlink doesn't invalidate it) and calls releaseChildren() --
+            // a no-op under ARC retirement, so destruction is non-recursive:
+            // each child either was already white (and will be visited by
+            // this same sweep) or stays referenced elsewhere and survives.
             delete obj;
         }
         ++done;
+        if (++sinceCheck >= kCheckEvery) {
+            sinceCheck = 0;
+            if (gcMonoNanos() >= deadlineNanos) return done;
+        }
     }
     if (!sweepCursor_) {
         lastWhiteCount_ = currentWhiteCount_;
@@ -190,13 +201,20 @@ u32 TracingGC::step_sweep(u32 budget) {
     return done;
 }
 
-u32 TracingGC::step(u32 budget) {
-    switch (phase_) {
-    case Phase::Idle:  return 0;
-    case Phase::Mark:  return step_mark(budget);
-    case Phase::Sweep: return step_sweep(budget);
+u32 TracingGC::step(u64 deadlineNanos) {
+    // step_mark may transition to Sweep when the gray worklist drains; do
+    // both phases in one call so a slack deadline gets used fully rather
+    // than burning a host tick on the phase boundary.
+    u32 done = 0;
+    if (phase_ == Phase::Mark) {
+        done += step_mark(deadlineNanos);
+        if (phase_ != Phase::Sweep) return done;
+        if (gcMonoNanos() >= deadlineNanos) return done;
     }
-    return 0;
+    if (phase_ == Phase::Sweep) {
+        done += step_sweep(deadlineNanos);
+    }
+    return done;
 }
 
 void TracingGC::requestCycle() {
@@ -216,7 +234,7 @@ void TracingGC::requestCycle() {
 void TracingGC::runFullCycle() {
     requestCycle();
     while (phase_ != Phase::Idle) {
-        step(1u << 20);  // effectively unbounded
+        step(kGCNoDeadline);  // unbounded
     }
 }
 

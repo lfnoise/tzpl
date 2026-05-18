@@ -30,8 +30,25 @@
 #include "base_types.hpp"
 #include "gc.hpp"
 #include <vector>
+#include <time.h>
 
 namespace ts {
+
+// Monotonic wall-clock in nanoseconds. RT-safe on macOS (vDSO, no syscall),
+// invariant across CPU migrations, unaffected by NTP adjustments. Linux gets
+// CLOCK_MONOTONIC for the same guarantees.
+inline u64 gcMonoNanos() {
+#if defined(__APPLE__)
+    return ::clock_gettime_nsec_np(CLOCK_UPTIME_RAW);
+#else
+    struct timespec ts;
+    ::clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (u64)ts.tv_sec * 1'000'000'000ull + (u64)ts.tv_nsec;
+#endif
+}
+
+// Sentinel for "no deadline" (used by runFullCycle and tests).
+inline constexpr u64 kGCNoDeadline = ~u64{0};
 
 class VM;
 class GCObj;
@@ -52,11 +69,20 @@ public:
     // dynVars, deferredDeleteQueue), and transitions to Mark.
     void requestCycle();
 
-    // Do bounded work toward completing the current cycle. Returns the
-    // number of operations consumed (gray-drains or sweep-steps). Called
-    // from VM::safepointPoll() under a budget. Phase change is automatic:
-    // Mark -> Sweep when worklist empty; Sweep -> Idle when list walked.
-    u32 step(u32 budget);
+    // Advance the in-flight cycle until gcMonoNanos() reaches deadlineNanos.
+    // Returns the number of work units consumed (gray-drains + sweep-steps),
+    // useful for telemetry. Called from VM::safepointPoll (deadline derived
+    // from GCConfig::stepBudgetNanos) and from VM::rtTick / VM::nrtTick (host
+    // picks the deadline). Phase changes are automatic: Mark -> Sweep when
+    // the gray worklist empties; Sweep -> Idle once the all-objs list is
+    // walked. To run a cycle to completion, pass kGCNoDeadline (used by
+    // runFullCycle and the __gc_trace_cycle builtin).
+    //
+    // The deadline is sampled every kCheckEvery work units (~64) so a single
+    // call cannot stall the mutator for more than (kCheckEvery * worstStep).
+    // Phase 6 bounds worstStep by splitting fan-out-heavy gcScanChildren
+    // overrides into push-and-return units.
+    u32 step(u64 deadlineNanos);
 
     // Run a full cycle synchronously. Useful for tests and for the
     // between-events heartbeat path.
@@ -118,8 +144,15 @@ private:
 
     void resetColors();
     void markRoots();
-    u32 step_mark(u32 budget);
-    u32 step_sweep(u32 budget);
+    u32 step_mark(u64 deadlineNanos);
+    u32 step_sweep(u64 deadlineNanos);
+
+    // Sample the clock every kCheckEvery work units rather than after every
+    // pop. With ~30 ns per unit (a gray-pop + null-check + flag-test path)
+    // the overshoot bound is kCheckEvery * worstUnitCost ~ 2 us. The largest
+    // single object's gcScanChildren is the remaining variance source until
+    // the fan-out refactor lands.
+    static constexpr u32 kCheckEvery = 64;
 };
 
 } // namespace ts
