@@ -140,6 +140,10 @@ void op_store_global_obj(VM& vm, Code* pc) {
     Obj* newVal = vm.reg(src).o;
     Obj* oldVal = vm.global(idx).o;
     if (newVal) newVal->retain();
+    // Phase 3 SATB: snapshot the slot's old value before overwriting it so
+    // a concurrent mark cycle still sees everything reachable when the
+    // cycle started. No-op when no cycle is in flight.
+    if (oldVal) vm.tracingGC().writeBarrier(oldVal);
     vm.global(idx) = vm.reg(src);
     if (oldVal) oldVal->release();
     DISPATCH(3);
@@ -4382,6 +4386,8 @@ void op_ref_set(VM& vm, Code* pc) {
     Word newVal = vm.reg(valReg);
     if (storesObjPtr(refType->elemType_)) {
         if (newVal.o) newVal.o->retain();
+        // Phase 3 SATB: snapshot the old value before it disappears.
+        if (ref->value_.o) vm.tracingGC().writeBarrier(ref->value_.o);
         if (ref->value_.o) ref->value_.o->release();
     }
     ref->value_ = newVal;
@@ -4812,6 +4818,8 @@ void op_store_dynamic_obj(VM& vm, Code* pc) {
     Obj* newVal = vm.reg(src).o;
     Obj* oldVal = vm.dynVar(idx).o;
     if (newVal) newVal->retain();
+    // Phase 3 SATB: snapshot the old value.
+    if (oldVal) vm.tracingGC().writeBarrier(oldVal);
     vm.dynVar(idx) = vm.reg(src);
     if (oldVal) oldVal->release();
     DISPATCH(3);

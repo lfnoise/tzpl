@@ -74,6 +74,28 @@ public:
     // root walker and by future write barriers.
     void mark(GCObj* obj);
 
+    // SATB write barrier. Insert before any store that overwrites an Obj*
+    // slot; oldVal is the slot's current contents. Hot path: one comparison
+    // (phase != Mark) + early return. Only when a mark cycle is in flight
+    // do we touch the gray worklist, preserving the "snapshot at the
+    // beginning" invariant -- objects reachable when the cycle started stay
+    // marked, even if the mutator overwrites the path that led to them.
+    inline void writeBarrier(GCObj* oldVal) {
+        if (phase_ != Phase::Mark) return;
+        if (!oldVal) return;
+        if (oldVal->isImmortal()) return;
+        if (oldVal->color_ != GCColor::White) return;
+        oldVal->color_ = GCColor::Gray;
+        grayWorklist_.push_back(oldVal);
+    }
+
+    // Phase 3 incremental scheduling: count allocations since last cycle so
+    // safepointPoll can auto-trigger a new cycle once the heap grows by a
+    // configurable threshold.
+    void recordAllocation() { ++allocsSinceLastCycle_; }
+    u32  allocsSinceLastCycle() const { return allocsSinceLastCycle_; }
+    static constexpr u32 kCycleTriggerAllocs = 4096;
+
 private:
     VM& vm_;
     Phase phase_ = Phase::Idle;
@@ -84,6 +106,7 @@ private:
     u32 lastRootCount_ = 0;
     u32 currentWhiteCount_ = 0;
     u32 currentBlackCount_ = 0;
+    u32 allocsSinceLastCycle_ = 0;
 
     void resetColors();
     void markRoots();

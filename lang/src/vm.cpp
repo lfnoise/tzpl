@@ -47,6 +47,24 @@ void linkObjToAllList(GCObj* obj) {
     obj->allObjsNext_ = gCurrentVM->allObjsHead_;
     if (gCurrentVM->allObjsHead_) gCurrentVM->allObjsHead_->allObjsPrev_ = obj;
     gCurrentVM->allObjsHead_ = obj;
+    // Phase 3 incremental: if a tracing cycle is in flight, color this new
+    // object Black so it is conservatively considered reachable for the
+    // remainder of the cycle. Otherwise sweep could classify it as garbage
+    // before any reference has had a chance to reach it. The next cycle
+    // resets colors back to White.
+    auto& gc = gCurrentVM->tracingGC();
+    if (gc.phase() != TracingGC::Phase::Idle) {
+        obj->setColor(GCColor::Black);
+    }
+    gc.recordAllocation();
+    // Phase 3 keeps tracing OPT-IN. Auto-triggering on allocation pressure
+    // in shadow mode would force the collector to walk the entire object
+    // graph repeatedly while ARC's autoReleasePool keeps everything alive
+    // -- pure overhead with no reclamation. Phase 5 (when tracing becomes
+    // the sole liveness mechanism and the pool stops being a root) is
+    // where this trigger turns on automatically. Until then, callers
+    // request cycles explicitly via __gc_trace_cycle() or the incremental
+    // step path below (used when a cycle is already in flight).
 }
 
 void unlinkObjFromAllList(GCObj* obj) {
@@ -112,13 +130,34 @@ void VM::safepointPoll() {
     // Clear flag first so concurrent enqueuers can re-trip it during drain.
     gcRequested_.store(false, std::memory_order_relaxed);
     foreignDeleteQueue_.drainInto(deferredDeleteQueue_);
-    // Bounded drain: at most kSafepointBudget deletions per poll. Cascading
-    // child releases that re-fill the queue will be picked up by subsequent
-    // polls. This bounds the worst-case pause per safepoint.
-    deferredDeleteQueue_.processN(kSafepointBudget);
+
+    // Phase 3 incremental tracing: advance any in-flight cycle one bounded
+    // step. Cycles are started explicitly today (see __gc_trace_cycle());
+    // once started they progress across safepoints under a bounded budget,
+    // which is what makes the collector real-time safe. Phase 5 will add
+    // automatic triggering once tracing actually reclaims memory.
+    auto& gc = *tracingGC_;
+    if (gc.phase() != TracingGC::Phase::Idle) {
+        gc.step(kSafepointBudget);
+    }
+
+    // ARC's deferred-delete queue is only drained when no tracing cycle is
+    // in flight. Reason: an SATB barrier may have pinned a still-Gray Obj*
+    // on the tracer's worklist. If we delete that Obj before the marker
+    // gets to it, the worklist would hold a dangling pointer. Suspending
+    // ARC reclamation for the duration of a cycle (bounded by the mark/
+    // sweep budgets summed over its safepoints) guarantees gray pointers
+    // stay valid. New deletes added during the cycle just queue up and
+    // catch up in the next Idle window.
+    if (gc.phase() == TracingGC::Phase::Idle) {
+        deferredDeleteQueue_.processN(kSafepointBudget);
+    }
+
     // If the queue is still large, re-arm the flag so the next safepoint
-    // continues draining.
-    if (deferredDeleteQueue_.size() >= kSafepointTriggerSize) {
+    // continues draining. Also re-arm while a cycle is in progress so the
+    // tracer keeps stepping every safepoint until it completes.
+    if (deferredDeleteQueue_.size() >= kSafepointTriggerSize ||
+        gc.phase() != TracingGC::Phase::Idle) {
         gcRequested_.store(true, std::memory_order_relaxed);
     }
 }

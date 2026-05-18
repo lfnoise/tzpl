@@ -333,6 +333,8 @@ public:
     void set(size_t i, Obj* val) {
         Obj* old = v_[i];
         if (val) val->retain();
+        // Phase 3 SATB: snapshot the old element before it is overwritten.
+        if (old) gCurrentVM->tracingGC().writeBarrier(old);
         v_[i] = val;
         if (old) old->release();
     }

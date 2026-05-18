@@ -120,6 +120,9 @@ u32 TracingGC::step_sweep(u32 budget) {
         currentWhiteCount_ = 0;
         currentBlackCount_ = 0;
         phase_ = Phase::Idle;
+        // Reset the alloc counter so the next cycle is triggered by fresh
+        // allocation pressure, not the alloc history before this cycle.
+        allocsSinceLastCycle_ = 0;
     }
     return done;
 }
