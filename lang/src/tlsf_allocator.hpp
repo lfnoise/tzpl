@@ -140,12 +140,6 @@ private:
     BackupAllocFn backupAlloc_;
     void* backupUserData_;
 
-    // Foreign delete queue (for cross-thread ARC deletion).
-    // When an object allocated from this pool has its last reference dropped
-    // on a foreign thread, it is enqueued here for deferred deletion by
-    // the owning VM's heartbeat. Opaque pointer to avoid circular includes.
-    void* foreignDeleteQueue_ = nullptr;
-
     // Statistics
     usize allocated_;
     usize free_;
@@ -533,10 +527,6 @@ public:
         // Insert into free list
         insertFreeBlock(block);
     }
-
-    // Foreign delete queue (cross-thread ARC deletion)
-    void setForeignDeleteQueue(void* queue) { foreignDeleteQueue_ = queue; }
-    void* getForeignDeleteQueue() const { return foreignDeleteQueue_; }
 
     // Statistics
     usize getAllocated() const { return allocated_; }

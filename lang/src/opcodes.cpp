@@ -3110,7 +3110,6 @@ void BinopListGen::generate(VM& vm, ListNode* owner) {
         unboxInlineDeepTo(vm, resultElemType_, headResult.o, owner->headData());
     } else {
         owner->head_ = headResult;
-        if (storesObjPtr(resultElemType_) && owner->head_.o) owner->head_.o->retain();
     }
 
     // Compute the tail: advance list source(s)
@@ -3173,7 +3172,6 @@ void UnaryListGen::generate(VM& vm, ListNode* owner) {
         unboxInlineDeepTo(vm, resultElemType_, headResult.o, owner->headData());
     } else {
         owner->head_ = headResult;
-        if (storesObjPtr(resultElemType_) && owner->head_.o) owner->head_.o->retain();
     }
 
     // Create lazy tail
@@ -3770,7 +3768,6 @@ void op_cons(VM& vm, Code* pc) {
         for (u32 i = 0; i < node->payloadWords_; ++i) dstHead[i] = vm.reg((u16)(head + i));
     } else {
         node->head_ = vm.reg(head);
-        if (storesObjPtr(et) && node->head_.o) node->head_.o->retain();
     }
     vm.reg(dst).o = node;
     DISPATCH(3);
@@ -4292,7 +4289,6 @@ void op_make_ref(VM& vm, Code* pc) {
 
     auto* ref = new RefValue(refType);
     ref->value_ = vm.reg(valReg);
-    if (storesObjPtr(refType->elemType_) && ref->value_.o) ref->value_.o->retain();
     vm.reg(dst).o = ref;
     DISPATCH(3);
 }

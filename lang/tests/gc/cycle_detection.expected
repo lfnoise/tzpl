@@ -1,4 +1,4 @@
 baseline whites: 0
-post-leak whites: 5
-leaked objects detected: 5
-tracing finds leaks ARC misses: true
+post-cycle whites: 5
+cycle objects reclaimed: 5
+tracing reclaims cycles: true

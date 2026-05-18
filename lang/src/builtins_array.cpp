@@ -994,13 +994,11 @@ void builtin_zip_array(VM& vm, u16 dst, u16, u16 ab) {
                 unboxInlineDeepTo(vm, f0.type, wa.o, scratch + f0.wordOffset);
             } else {
                 scratch[f0.wordOffset] = wa;
-                if (storesObjPtr(f0.type) && wa.o) wa.o->retain();
             }
             if (f1.type && f1.type->repr_ == ts::Type::Repr::Inline) {
                 unboxInlineDeepTo(vm, f1.type, wb.o, scratch + f1.wordOffset);
             } else {
                 scratch[f1.wordOffset] = wb;
-                if (storesObjPtr(f1.type) && wb.o) wb.o->retain();
             }
             result->pushSlot(scratch);
             // pushSlot retained again; balance by walking scratch with release.
@@ -1027,7 +1025,6 @@ void builtin_zip_array(VM& vm, u16 dst, u16, u16 ab) {
             }
         } else {
             t->v[f.wordOffset] = src;
-            if (storesObjPtr(ft) && src.o) src.o->retain();
         }
     };
     auto const& f0 = tt->layout_[0];
@@ -1068,7 +1065,6 @@ void builtin_enumerate_array(VM& vm, u16 dst, u16, u16 ab) {
                 unboxInlineDeepTo(vm, f1.type, elem.o, scratch + f1.wordOffset);
             } else {
                 scratch[f1.wordOffset] = elem;
-                if (storesObjPtr(f1.type) && elem.o) elem.o->retain();
             }
             result->pushSlot(scratch);
         }
@@ -1092,7 +1088,6 @@ void builtin_enumerate_array(VM& vm, u16 dst, u16, u16 ab) {
             }
         } else {
             t->v[f.wordOffset] = src;
-            if (storesObjPtr(ft) && src.o) src.o->retain();
         }
     };
     auto const& f0 = tt->layout_[0];

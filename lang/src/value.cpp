@@ -230,8 +230,7 @@ void ListNode::force(VM& vm) {
         gen->generate(vm, this);
         // Release the old owner's retain on the generator.
         // If the generator moved itself to a new tail node (retaining itself there),
-        // this just decrements; if not, it allows eventual deallocation.
-        reinterpret_cast<GCObj*>(gen)->release();
+        // this just decrements; 
     }
 }
 
@@ -738,7 +737,6 @@ Word boxPayload(VM& vm, Type* type, Word const* src) {
         return w;
     }
     w = src[0];
-    if (storesObjPtr(type) && w.o) w.o->retain();
     return w;
 }
 
@@ -1807,7 +1805,6 @@ void copyListHead(ListNode* dst, ListNode const* src, Type* elemType) {
         for (u32 i = 0; i < dst->payloadWords_; ++i) dh[i] = sh[i];
     } else {
         dst->head_ = src->head_;
-        if (storesObjPtr(elemType) && dst->head_.o) dst->head_.o->retain();
     }
 }
 

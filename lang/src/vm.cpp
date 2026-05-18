@@ -84,46 +84,12 @@ void unlinkObjFromAllList(GCObj* obj) {
 void registerNewObj(GCObj* obj) {
     if (gCurrentCompiler) {
         gCurrentCompiler->trackObject(obj);
-        // Compiler objects are immortal -- refcount stays at kImmortalRefcount.
-        // They are not added to any VM's all-objects list; they live for the
-        // lifetime of the compile.
+        // Compiler objects are immortal -- they stay outside the VM's all-
+        // objects list and the tracer never visits them (mark() short-circuits
+        // on isImmortal()). They live for the lifetime of the compile.
     } else if (gCurrentVM) {
-        // Set initial refcount for VM-allocated objects and add to auto-release pool
-        obj->setInitialRefcount();
-        gCurrentVM->autoReleasePool().add(obj);
-        // Phase 3: link onto the VM's all-objects list so sweep can find it.
+        obj->setMortal();
         linkObjToAllList(obj);
-    }
-}
-
-void arcEnqueueForDeletion(GCObj* obj) {
-    rt::TLSFAllocator* home = obj->homeAllocator();
-
-    if (home && home != rt::gCurrentAllocator) {
-        // Cross-thread deletion: object belongs to a different VM's allocator.
-        // Enqueue on the home allocator's foreign delete queue so the owning
-        // VM can delete it on its own thread during gcHeartbeat().
-        auto* queue = static_cast<ForeignDeleteQueue*>(home->getForeignDeleteQueue());
-        if (queue) {
-            queue->enqueue(obj);
-            return;
-        }
-        // Fallthrough: no foreign queue registered (shouldn't happen in normal
-        // multi-VM operation, but handle gracefully).
-    }
-
-    if (gCurrentVM) {
-        auto& q = gCurrentVM->deferredDeleteQueue();
-        q.enqueue(obj);
-        // Phase 1: trip the safepoint flag when the queue grows past the
-        // trigger size. Next backward jump's op_safepoint will drain it.
-        if (q.size() >= VM::kSafepointTriggerSize) {
-            gCurrentVM->gcRequested_.store(true, std::memory_order_relaxed);
-        }
-    } else {
-        // Fallback: immediate delete (should not happen in normal operation)
-        obj->releaseChildren();
-        delete obj;
     }
 }
 
@@ -153,11 +119,10 @@ void VM::rtTick(u64 deadlineNanos)  { hostTickImpl(*this, deadlineNanos, GCStepS
 void VM::nrtTick(u64 deadlineNanos) { hostTickImpl(*this, deadlineNanos, GCStepSource::NrtTick); }
 
 void VM::safepointPoll() {
-    // Clear flag first so concurrent enqueuers can re-trip it during drain.
+    // Clear flag first so concurrent setters can re-trip it during the step.
     gcRequested_.store(false, std::memory_order_relaxed);
-    foreignDeleteQueue_.drainInto(deferredDeleteQueue_);
 
-    // Phase 6: time-based budget. The deadline is sampled inside step() every
+    // Time-based budget. The deadline is sampled inside step() every
     // kCheckEvery work units so a single safepoint cannot stall the mutator
     // for longer than (kCheckEvery * worstUnitCost) past the budget.
     auto& gc = *tracingGC_;
@@ -169,21 +134,10 @@ void VM::safepointPoll() {
     }
     if (gc.phase() != TracingGC::Phase::Idle) {
         gc.step(deadline, GCStepSource::Safepoint);
-    }
-
-    // Deferred-delete queue (vestigial under Phase 5 -- release is a no-op
-    // so nothing is ever enqueued). Drain only when no tracing cycle is in
-    // flight; an SATB barrier could otherwise pin a still-Gray Obj* on the
-    // tracer's worklist that we'd then delete out from under it.
-    if (gc.phase() == TracingGC::Phase::Idle) {
-        deferredDeleteQueue_.processN(1024);
-    }
-
-    // If the queue is still large or a cycle is in progress, re-arm the
-    // flag so the next safepoint continues the work.
-    if (deferredDeleteQueue_.size() >= kSafepointTriggerSize ||
-        gc.phase() != TracingGC::Phase::Idle) {
-        gcRequested_.store(true, std::memory_order_relaxed);
+        // Cycle still in flight: re-arm so the next safepoint continues.
+        if (gc.phase() != TracingGC::Phase::Idle) {
+            gcRequested_.store(true, std::memory_order_relaxed);
+        }
     }
 }
 
@@ -259,8 +213,6 @@ CodeBlock* VM::currentCodeBlock() const {
 
 VM::VM(usize poolSize, TypeUniverse& typeUniverse, const VMTarget& target)
     : allocator_(poolSize)
-    , autoReleasePool_(&allocator_)
-    , deferredDeleteQueue_(&allocator_)
     , regs_(nullptr)
     , maxRegs_(4096)
     , frames_(nullptr)
@@ -293,10 +245,6 @@ VM::VM(usize poolSize, TypeUniverse& typeUniverse, const VMTarget& target)
     gCurrentVM = this;
     rt::gCurrentAllocator = &allocator_;
     gCurrentTypeUniverse = &typeUniverse_;
-
-    // Register this VM's foreign delete queue with the allocator so that
-    // cross-thread arcEnqueueForDeletion can find it from homeAllocator_.
-    allocator_.setForeignDeleteQueue(&foreignDeleteQueue_);
 
     // Install a backup allocator so a pool exhaustion grows the heap by
     // mallocing a fresh chunk instead of hard-failing. On the audio thread
@@ -363,18 +311,6 @@ VM::VM(usize poolSize, TypeUniverse& typeUniverse, const VMTarget& target)
 
 VM::~VM() {
     makeCurrent();
-
-    // Unregister the foreign delete queue so no new objects are enqueued
-    // after we start tearing down.
-    allocator_.setForeignDeleteQueue(nullptr);
-
-    // Drain foreign deletes, auto-release pool, and deferred deletions
-    foreignDeleteQueue_.drainInto(deferredDeleteQueue_);
-    autoReleasePool_.drain();
-    while (!deferredDeleteQueue_.empty()) {
-        foreignDeleteQueue_.drainInto(deferredDeleteQueue_);
-        deferredDeleteQueue_.processN(1024);
-    }
 
     // Deallocate register file, frame stack, and dynamic scope stack
     if (regs_) allocator_.deallocate(regs_);

@@ -272,7 +272,7 @@ inline void txArray(VM& vm, u16 dst, Obj* src, ArrayType* at, F&& f) {
         case ArrayBackend::Obj: {
             auto* s = static_cast<ObjArray*>(src);
             auto* r = new ObjArray(at); f(s->rawVec(), r->rawVec());
-            for (auto* obj : *r) { if (obj) obj->retain(); }
+            for (auto* obj : *r) {  }
             vm.reg(dst).o = r;
             return;
         }

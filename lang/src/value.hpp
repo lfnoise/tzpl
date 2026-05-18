@@ -329,9 +329,9 @@ public:
         v_.push_back(val);
     }
     void copyFrom(const ObjArray* src) {
-        for (auto* obj : v_) { if (obj) obj->release(); }
+        for (auto* obj : v_) {  }
         v_ = src->v_;
-        for (auto* obj : v_) { if (obj) obj->retain(); }
+        for (auto* obj : v_) {  }
     }
     void resize(size_t n) { v_.resize(n, nullptr); }
     void reserve(size_t n) { v_.reserve(n); }
@@ -473,7 +473,6 @@ public:
     void installGenerator(ListGenerator* gen) {
         generator_ = gen;
         isLazy_ = 1;
-        reinterpret_cast<GCObj*>(gen)->retain();
     }
 
     // Force lazy evaluation: if isLazy_, call the generator to fill head/tail.

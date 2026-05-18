@@ -29,7 +29,6 @@
 #include "stl_allocator.hpp"
 #include "symbol.hpp"
 #include "gc.hpp"
-#include "arc.hpp"
 #include "tracing_gc.hpp"   // for gcMonoNanos() used by gcHeartbeat()
 #include "type_universe.hpp"
 #include <atomic>
@@ -200,11 +199,6 @@ private:
     // Memory allocator
     rt::TLSFAllocator allocator_;
 
-    // ARC infrastructure
-    AutoReleasePool autoReleasePool_;
-    DeferredDeleteQueue deferredDeleteQueue_;
-    ForeignDeleteQueue foreignDeleteQueue_;
-
     // Register file (TLSF-allocated flat array)
     Word* regs_;
     u32   maxRegs_;
@@ -269,13 +263,11 @@ private:
 
 public:
     // Phase 1 of tracing-GC project: safepoint poll flag. Read on the hot path
-    // by op_safepoint (relaxed load + branch). Set by arcEnqueueForDeletion
-    // when the deferred-delete queue crosses kSafepointTriggerSize so that the
-    // queue gets drained inside hot loops, not only between events. Atomic
-    // because future phases (audio-thread VM, foreign-delete-queue producers)
-    // may set the flag from off-thread.
+    // by op_safepoint (relaxed load + branch). Set by the tracing GC when
+    // mutator work needs attention (in-flight cycle, allocation pressure past
+    // the next trigger threshold). Atomic because future phases (audio-thread
+    // VM, foreign-allocation producers) may set the flag from off-thread.
     std::atomic<bool> gcRequested_{false};
-    static constexpr u32 kSafepointTriggerSize = 1024;
     // Phase 6: time-based budgets. The safepoint default is the NRT preset
     // (REPL / file execution); audio-thread VMs override via setGCConfig.
     // kAudioRT preset shrinks this to ~200 us to fit alongside DSP work in
@@ -349,23 +341,13 @@ public:
     rt::TLSFAllocator& allocator() { return allocator_; }
     const rt::TLSFAllocator& allocator() const { return allocator_; }
 
-    // NRT heartbeat. Historically drove ARC reclamation; under Phase 5+
-    // ARC is retired so the pool/queue drains are vestigial cheap no-ops.
-    // Phase 6: also call nrtTick so the existing 20 ms heartbeat thread
-    // (see nrt_vm.hpp) and between-event call sites automatically drive
-    // tracing-GC progress. Without this, in-flight cycles stall whenever
-    // the language stops executing.
+    // NRT heartbeat. Drives tracing-GC progress between events so an
+    // in-flight cycle keeps advancing whenever the language is idle.
+    // Invoked from the existing ~20 ms host idle thread (nrt_vm.hpp) and
+    // from between-event call sites in the bridges and scheduler.
     void gcHeartbeat() {
-        foreignDeleteQueue_.drainInto(deferredDeleteQueue_);
-        autoReleasePool_.drain();
-        deferredDeleteQueue_.processN(256);
         nrtTick(gcMonoNanos() + gcStepBudgetNanos_);
     }
-
-    // ARC access
-    AutoReleasePool& autoReleasePool() { return autoReleasePool_; }
-    DeferredDeleteQueue& deferredDeleteQueue() { return deferredDeleteQueue_; }
-    ForeignDeleteQueue& foreignDeleteQueue() { return foreignDeleteQueue_; }
 
     // Type universe access
     TypeUniverse& typeUniverse() { return typeUniverse_; }

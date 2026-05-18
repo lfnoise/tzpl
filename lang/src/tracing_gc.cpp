@@ -17,7 +17,6 @@
 #include "tracing_gc.hpp"
 #include "vm.hpp"
 #include "value.hpp"   // CodeBlock, StackMap
-#include "arc.hpp"
 
 namespace ts {
 

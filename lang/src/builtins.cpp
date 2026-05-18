@@ -2108,15 +2108,10 @@ static bool resolve_toAnyArray(Compiler& compiler, const std::vector<Type*>& arg
 // ============================================================================
 
 static void builtin_gc(VM& vm, u16 dst, u16, u16) {
-    // Process ONLY the deferred delete queue. Do NOT drain the auto-release
-    // pool -- it keeps register-referenced objects alive during execution.
-    // processN skips objects with refcount > 0 (still pool-referenced),
-    // so only truly dead objects are deleted.
-    vm.foreignDeleteQueue().drainInto(vm.deferredDeleteQueue());
-    while (!vm.deferredDeleteQueue().empty()) {
-        vm.foreignDeleteQueue().drainInto(vm.deferredDeleteQueue());
-        vm.deferredDeleteQueue().processN(4096);
-    }
+    // Force a full synchronous tracing cycle. Under the post-ARC tracing GC
+    // there is no separate deferred-delete queue to drain -- the cycle's
+    // sweep phase is what frees garbage.
+    vm.tracingGC().runFullCycle();
     vm.reg(dst).i = 0;
 }
 
@@ -2202,21 +2197,10 @@ static void builtin_gc_set_step_budget_ns(VM& vm, u16 dst, u16, u16 argBase) {
     vm.reg(dst).i = 0;
 }
 
-// Phase 3e validation: drain the auto-release pool unconditionally so a
-// subsequent tracing cycle sees only what is reachable from globals,
-// dynvars, and the heap graph. In normal file-mode execution the pool
-// only drains at script end; this exposes the operation to .x tests
-// that want to verify cycle detection. The follow-up gc() / queue drain
-// is also run so the deferred queue's contribution to the white set is
-// flushed.
+// Legacy name retained for .x tests written against the ARC era. Under the
+// tracing GC there is no auto-release pool; just run a full cycle.
 static void builtin_gc_drain_pool(VM& vm, u16 dst, u16, u16) {
-    vm.autoReleasePool().drain();
-    vm.foreignDeleteQueue().drainInto(vm.deferredDeleteQueue());
-    // Drain to fixed-point: process until no further deletions queue up.
-    while (!vm.deferredDeleteQueue().empty()) {
-        vm.foreignDeleteQueue().drainInto(vm.deferredDeleteQueue());
-        vm.deferredDeleteQueue().processN(4096);
-    }
+    vm.tracingGC().runFullCycle();
     vm.reg(dst).i = 0;
 }
 

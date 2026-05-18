@@ -25,7 +25,6 @@
 #define gc_hpp
 
 #include "base_types.hpp"
-#include <atomic>
 
 namespace rt {
 class TLSFAllocator;
@@ -36,10 +35,6 @@ namespace ts {
 
 // Forward declarations
 class VM;
-
-// ARC constants
-static constexpr u32 kImmortalRefcount = 0xFFFF0000;
-static constexpr u32 kInitialRefcount = 1;
 
 // Phase 3 of tracing-GC project: tri-color marking state. Stored in
 // GCObj::color_. White = unmarked (potential garbage); Gray = marked but
@@ -54,9 +49,6 @@ enum class GCColor : u8 {
 // Forward declaration
 class GCObj;
 
-// Enqueue an object for deferred deletion (defined in vm.cpp)
-void arcEnqueueForDeletion(GCObj* obj);
-
 // Link an object onto the owning VM's all-objects list (defined in vm.cpp).
 // Called from registerNewObj() right after construction.
 void linkObjToAllList(GCObj* obj);
@@ -67,18 +59,18 @@ void unlinkObjFromAllList(GCObj* obj);
 
 // Base class for all garbage-collected objects
 class GCObj {
-    mutable std::atomic<u32> refcount_{kImmortalRefcount};
     rt::TLSFAllocator* homeAllocator_ = nullptr;
-    GCObj* foreignDeleteNext_ = nullptr;  // intrusive link for cross-thread deletion
 
-    // Phase 3 tracing-GC state. All accesses are single-threaded: the owning
-    // VM's mutator (color reads), and the same VM's safepoint-driven collector
-    // (color writes). Cross-thread releases go through ForeignDeleteQueue and
-    // are routed back to the home thread before any color/list access.
+    // Tracing-GC state. All accesses are single-threaded: the owning VM's
+    // mutator (color reads) and the same VM's safepoint-driven collector
+    // (color writes).
     GCColor color_ = GCColor::White;
+    // Immortal objects (compiler-owned constants: types, symbols, immortal
+    // strings) live outside any VM's all-objects list; mark() short-circuits
+    // on them so the tracer never recurses through them.
+    bool    immortal_ = true;
     GCObj*  allObjsPrev_ = nullptr;  // intrusive doubly-linked list of all
-    GCObj*  allObjsNext_ = nullptr;  // objects alive in the owning VM
-    friend class ForeignDeleteQueue;
+    GCObj*  allObjsNext_ = nullptr;  // mortal objects alive in the owning VM
     friend class TracingGC;
     friend void linkObjToAllList(GCObj*);
     friend void unlinkObjFromAllList(GCObj*);
@@ -99,16 +91,9 @@ public:
     static void operator delete(void* ptr) noexcept;
     static void operator delete(void* ptr, void*) noexcept {}  // placement delete
 
-    // Release all Obj* children (ARC counterpart of gcScan).
-    // Called before destruction. Each child's refcount is decremented.
-    // If a child's refcount reaches zero, it is enqueued for deferred deletion.
-    virtual void releaseChildren() {}
-
-    // Phase 3 of tracing-GC project: enumerate every direct Obj* child and
-    // call gc.mark(child) on it. The tracing collector uses this to walk
-    // the live object graph transitively. Mirror of releaseChildren -- same
-    // set of children, different action. Default no-op; subclasses with
-    // GC-managed fields override.
+    // Enumerate every direct Obj* child and call gc.mark() on each. The
+    // tracing collector uses this to walk the live object graph transitively.
+    // Default no-op; subclasses with GC-managed fields override.
     //
     // For containers with > TracingGC::kFanoutThreshold entries, the override
     // should call gc.pushPartial(this) and return immediately; the actual
@@ -116,37 +101,17 @@ public:
     // a single scan can't overshoot the step-budget deadline.
     virtual void gcScanChildren(class TracingGC& /*gc*/) {}
 
-    // Phase 6 step 3: scan up to TracingGC::kFanoutChunk children starting
-    // at `cursor`. Return the next cursor; UINT32_MAX signals "fully done"
-    // and removes the object from the partial queue. The default
-    // implementation just signals done -- only large containers override.
+    // Scan up to TracingGC::kFanoutChunk children starting at `cursor`.
+    // Return the next cursor; UINT32_MAX signals "fully done" and removes
+    // the object from the partial queue. Default implementation just signals
+    // done -- only large containers override.
     virtual u32 gcScanChunk(class TracingGC& /*gc*/, u32 /*cursor*/) {
         return ~u32{0};
     }
 
-    // ARC methods
-    bool isImmortal() const {
-        return refcount_.load(std::memory_order_relaxed) >= kImmortalRefcount;
-    }
-
-    void makeImmortal() const {
-        refcount_.store(kImmortalRefcount, std::memory_order_relaxed);
-    }
-
-    // Phase 5: ARC is retired. retain/release are no-ops left in place so the
-    // many call sites compile during the cleanup transition; tracing is now
-    // the sole liveness mechanism. The refcount field stays as a decorative
-    // header word for one more cleanup pass; isImmortal() still consults it.
-    void retain() const {}
-    bool release() const { return false; }
-
-    u32 refcount() const {
-        return refcount_.load(std::memory_order_relaxed);
-    }
-
-    void setInitialRefcount() const {
-        refcount_.store(kInitialRefcount, std::memory_order_relaxed);
-    }
+    bool isImmortal() const { return immortal_; }
+    void makeImmortal()     { immortal_ = true; }
+    void setMortal()        { immortal_ = false; }
 
     rt::TLSFAllocator* homeAllocator() const { return homeAllocator_; }
 };

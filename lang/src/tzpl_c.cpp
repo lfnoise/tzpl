@@ -171,11 +171,13 @@ size_t tzpl_vm_pool_size(const tzpl_vm* vm) {
 }
 
 uint32_t tzpl_vm_num_live_objects(const tzpl_vm* vm) {
-    return const_cast<ts::VM&>(vm->impl).autoReleasePool().size();
+    // Last completed cycle's live-set size. Zero if no cycle has run yet.
+    return const_cast<ts::VM&>(vm->impl).tracingGC().lastBlackCount();
 }
 
 uint32_t tzpl_vm_num_live_words(const tzpl_vm* vm) {
-    return const_cast<ts::VM&>(vm->impl).deferredDeleteQueue().size();
+    // Last completed cycle's reclaimed-set size. Zero if no cycle has run yet.
+    return const_cast<ts::VM&>(vm->impl).tracingGC().lastWhiteCount();
 }
 
 // --- Type handles ---
