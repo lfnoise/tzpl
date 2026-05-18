@@ -30,6 +30,7 @@
 #include "symbol.hpp"
 #include "gc.hpp"
 #include "arc.hpp"
+#include "tracing_gc.hpp"   // for gcMonoNanos() used by gcHeartbeat()
 #include "type_universe.hpp"
 #include <atomic>
 #include <cstdio>
@@ -348,18 +349,17 @@ public:
     rt::TLSFAllocator& allocator() { return allocator_; }
     const rt::TLSFAllocator& allocator() const { return allocator_; }
 
-    // ARC heartbeat - drain auto-release pool and process deferred deletions.
-    // Also drains the foreign delete queue (objects whose last reference was
-    // dropped on a different thread).
+    // NRT heartbeat. Historically drove ARC reclamation; under Phase 5+
+    // ARC is retired so the pool/queue drains are vestigial cheap no-ops.
+    // Phase 6: also call nrtTick so the existing 20 ms heartbeat thread
+    // (see nrt_vm.hpp) and between-event call sites automatically drive
+    // tracing-GC progress. Without this, in-flight cycles stall whenever
+    // the language stops executing.
     void gcHeartbeat() {
         foreignDeleteQueue_.drainInto(deferredDeleteQueue_);
         autoReleasePool_.drain();
-        // Process at least 256 items, or 2% of the queue, whichever is larger.
-        // This scales with pressure while keeping idle heartbeats cheap.
-        u32 qsz = deferredDeleteQueue_.size();
-        u32 budget = (qsz + 49) / 50;
-        if (budget < 256) budget = 256;
-        deferredDeleteQueue_.processN(budget);
+        deferredDeleteQueue_.processN(256);
+        nrtTick(gcMonoNanos() + gcStepBudgetNanos_);
     }
 
     // ARC access

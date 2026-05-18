@@ -118,11 +118,26 @@ struct CodeInstallCmd : engine::Command {
     }
 };
 
-// Per-buffer GC heartbeat callback for the attached VM.
-// Called from the RT audio thread once per buffer.
+// Per-buffer GC tick for the attached VM. Called from the RT audio thread
+// once per audio buffer. Phase 6: this drives time-bounded tracing GC
+// progress regardless of whether any language code ran on this callback --
+// without it, an in-flight cycle would stall while DSP runs without firing
+// language events. The deadline is tight (200 us) so DSP keeps most of the
+// block; tune via per-VM setGCStepBudgetNanos before attach.
+//
+// kRTGCBudgetNanos is the fallback if the VM hasn't had its budget set
+// explicitly. For a 5.8 ms audio block (256 frames @ 44.1 kHz), 200 us
+// is ~3% of the block -- generous for DSP, still meaningful GC progress.
+inline constexpr u64 kRTGCBudgetNanos = 200'000;
 inline void rtVMHeartbeat(void* vm) {
     auto* v = static_cast<ts::VM*>(vm);
-    v->gcHeartbeat();
+    // Prefer the VM's configured budget if it has been set tighter than
+    // the NRT default; otherwise use the conservative RT default. Picking
+    // min() lets per-VM setGCStepBudgetNanos override the default downward
+    // without the engine knowing about per-VM config.
+    u64 budget = v->gcStepBudgetNanos();
+    if (budget > kRTGCBudgetNanos) budget = kRTGCBudgetNanos;
+    v->rtTick(ts::gcMonoNanos() + budget);
 }
 
 // Attaches a VM to a Silo. The VM must be fully initialized before sending.
