@@ -2170,6 +2170,24 @@ static void builtin_gc_trace_whites(VM& vm, u16 dst, u16, u16) {
     vm.reg(dst).i = (i64)vm.tracingGC().lastWhiteCount();
 }
 
+// Phase 3e validation: drain the auto-release pool unconditionally so a
+// subsequent tracing cycle sees only what is reachable from globals,
+// dynvars, and the heap graph. In normal file-mode execution the pool
+// only drains at script end; this exposes the operation to .x tests
+// that want to verify cycle detection. The follow-up gc() / queue drain
+// is also run so the deferred queue's contribution to the white set is
+// flushed.
+static void builtin_gc_drain_pool(VM& vm, u16 dst, u16, u16) {
+    vm.autoReleasePool().drain();
+    vm.foreignDeleteQueue().drainInto(vm.deferredDeleteQueue());
+    // Drain to fixed-point: process until no further deletions queue up.
+    while (!vm.deferredDeleteQueue().empty()) {
+        vm.foreignDeleteQueue().drainInto(vm.deferredDeleteQueue());
+        vm.deferredDeleteQueue().processN(4096);
+    }
+    vm.reg(dst).i = 0;
+}
+
 // ============================================================================
 // typeRepr builtin (Phase 0 debug helper)
 // Prints the static type's representation classification.
@@ -2403,6 +2421,7 @@ void registerBuiltinFunctions(Compiler& compiler,
     registerOne(compiler, functions, "__gc_trace_cycle",  compiler.intType(), {}, builtin_gc_trace_cycle,  /*pure=*/false, /*rtSafe=*/false);
     registerOne(compiler, functions, "__gc_trace_blacks", compiler.intType(), {}, builtin_gc_trace_blacks, /*pure=*/false, /*rtSafe=*/false);
     registerOne(compiler, functions, "__gc_trace_whites", compiler.intType(), {}, builtin_gc_trace_whites, /*pure=*/false, /*rtSafe=*/false);
+    registerOne(compiler, functions, "__gc_drain_pool",   compiler.voidType(), {}, builtin_gc_drain_pool,   /*pure=*/false, /*rtSafe=*/false);
 
     // --- Ref builtins ---
     // Phase 4g.6: ref / deref / setref read inline-composite args directly

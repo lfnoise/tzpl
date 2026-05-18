@@ -1,0 +1,4 @@
+baseline whites: 0
+post-leak whites: 5
+leaked objects detected: 5
+tracing finds leaks ARC misses: true
