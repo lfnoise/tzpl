@@ -66,12 +66,12 @@ void TracingGC::markRoots() {
     // multiple Word slots; for Phase 3b we use the same conservative
     // policy as the rest of the codebase -- globalIsObj_ is set per
     // base slot, and that slot's Word::o is the boxed pointer.
+    // Obj derives from GCObj, so passing an Obj* directly to mark() works
+    // via implicit upcast -- no dynamic_cast / RTTI lookup.
     for (u32 i = 0; i < vm_.numGlobals(); ++i) {
         if (vm_.globalIsObj(i)) {
             if (Obj* o = vm_.global(i).o) {
-                if (auto* g = dynamic_cast<GCObj*>(o)) {
-                    mark(g); ++lastRootCount_;
-                }
+                mark(o); ++lastRootCount_;
             }
         }
     }
@@ -80,9 +80,7 @@ void TracingGC::markRoots() {
     for (u32 i = 0; i < vm_.numDynVars(); ++i) {
         if (vm_.dynVarIsObj(i)) {
             if (Obj* o = vm_.dynVar(i).o) {
-                if (auto* g = dynamic_cast<GCObj*>(o)) {
-                    mark(g); ++lastRootCount_;
-                }
+                mark(o); ++lastRootCount_;
             }
         }
     }
@@ -120,9 +118,7 @@ void TracingGC::markRoots() {
         Word const* base = vm_.regs_ + activeBase;
         for (u16 reg : sm->liveRefRegs) {
             if (Obj* o = base[reg].o) {
-                if (auto* g = dynamic_cast<GCObj*>(o)) {
-                    mark(g); ++lastRootCount_;
-                }
+                mark(o); ++lastRootCount_;
             }
         }
     }

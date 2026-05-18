@@ -380,9 +380,8 @@ public:
     }
 
     void gcScanChildren(TracingGC& gc) override {
-        for (auto* obj : v_) {
-            if (auto* g = dynamic_cast<GCObj*>(obj)) gc.mark(g);
-        }
+        // Obj derives from GCObj, so the upcast is implicit and free.
+        for (auto* obj : v_) gc.mark(obj);
     }
 };
 

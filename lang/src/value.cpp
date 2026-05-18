@@ -2043,9 +2043,8 @@ void gcScanInlinePointers(Word const* base, Type* type, TracingGC& gc) {
                  || f.type == gCurrentVM->fractionType()) continue;
                 gcScanInlinePointers(base + f.wordOffset, f.type, gc);
             } else if (storesObjPtr(f.type)) {
-                if (Obj* o = base[f.wordOffset].o) {
-                    if (auto* g = dynamic_cast<GCObj*>(o)) gc.mark(g);
-                }
+                // Obj derives from GCObj, so the upcast is implicit/free.
+                gc.mark(base[f.wordOffset].o);
             }
         }
     };
@@ -2061,9 +2060,7 @@ void gcScanInlinePointers(Word const* base, Type* type, TracingGC& gc) {
              || f.type == gCurrentVM->fractionType()) return;
             gcScanInlinePointers(base + f.wordOffset, f.type, gc);
         } else if (storesObjPtr(f.type)) {
-            if (Obj* o = base[f.wordOffset].o) {
-                if (auto* g = dynamic_cast<GCObj*>(o)) gc.mark(g);
-            }
+            gc.mark(base[f.wordOffset].o);
         }
     }
 }
@@ -2073,9 +2070,7 @@ void gcScanPayload(Word const* base, Type* type, TracingGC& gc) {
     if (type->repr_ == Type::Repr::Inline) {
         gcScanInlinePointers(base, type, gc);
     } else if (storesObjPtr(type)) {
-        if (Obj* o = base[0].o) {
-            if (auto* g = dynamic_cast<GCObj*>(o)) gc.mark(g);
-        }
+        gc.mark(base[0].o);
     }
 }
 
