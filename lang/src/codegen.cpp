@@ -207,6 +207,12 @@ void CodeGen::patchJump(u32 jumpPos) {
 }
 
 void CodeGen::emitJumpTo(u32 targetIdx) {
+    // Every emitJumpTo call sites a backward jump to a previously-captured
+    // loop start. Emit a safepoint poll just before the jump so the deferred-
+    // delete queue (and, in later phases, mark/sweep work) gets drained
+    // inside hot loops, not only between events. The poll's hot path is one
+    // relaxed load + branch.
+    emitOp(op_safepoint);
     emitOp(op_jump);
     u32 pos = (u32)currentBlock_->code.size();
     emitInt((i64)targetIdx);
@@ -935,6 +941,13 @@ void CodeGen::genFnDecl(FnDeclNode* decl) {
             }
         }
     }
+
+    // Phase 1 of tracing-GC project: every function-entry path polls a
+    // safepoint. Recursive functions (e.g., binary_trees' build()) contain no
+    // backward jumps, so without this they'd never drain the deferred-delete
+    // queue during the recursion. The poll's hot path is one relaxed load +
+    // branch. All default-arg entry points fall through to here.
+    emitOp(op_safepoint);
 
     // Generate body
     if (decl->body->kind == ASTNode::Block) {

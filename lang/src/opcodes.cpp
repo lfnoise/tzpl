@@ -949,6 +949,17 @@ void op_jump(VM& vm, Code* pc) {
     [[clang::musttail]] return target->op(vm, target);
 }
 
+// SAFEPOINT  (1 word: op)
+// Polled before every backward jump. Hot path: one relaxed load + one branch.
+// When vm.gcRequested() is set, drain the deferred-delete queue under a
+// bounded budget. Future phases will run mark/sweep work here too.
+void op_safepoint(VM& vm, Code* pc) {
+    if (vm.gcRequested_.load(std::memory_order_relaxed)) [[unlikely]] {
+        vm.safepointPoll();
+    }
+    DISPATCH(1);
+}
+
 // JUMP_IF_TRUE Ra, L  (3 words: op, regs, Code* target)
 void op_jump_if_true(VM& vm, Code* pc) {
     u16 cond = pc[1].regs[0];

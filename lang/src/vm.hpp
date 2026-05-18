@@ -31,6 +31,7 @@
 #include "gc.hpp"
 #include "arc.hpp"
 #include "type_universe.hpp"
+#include <atomic>
 #include <cstdio>
 #include <memory>
 
@@ -265,6 +266,20 @@ private:
     VMTarget target_;
 
 public:
+    // Phase 1 of tracing-GC project: safepoint poll flag. Read on the hot path
+    // by op_safepoint (relaxed load + branch). Set by arcEnqueueForDeletion
+    // when the deferred-delete queue crosses kSafepointTriggerSize so that the
+    // queue gets drained inside hot loops, not only between events. Atomic
+    // because future phases (audio-thread VM, foreign-delete-queue producers)
+    // may set the flag from off-thread.
+    std::atomic<bool> gcRequested_{false};
+    static constexpr u32 kSafepointTriggerSize = 1024;
+    static constexpr u32 kSafepointBudget = 512;
+
+    // Drain the deferred-delete queue under a bounded budget. Safe to call
+    // from any safepoint inside execution -- it does not touch the register
+    // file, just consumes already-released objects.
+    void safepointPoll();
 
     // Constructor with pool size, shared type universe, and optional target
     explicit VM(usize poolSize, TypeUniverse& typeUniverse, const VMTarget& target = {});

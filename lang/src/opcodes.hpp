@@ -186,6 +186,14 @@ void op_jump(VM& vm, Code* pc);               // JUMP L (2 words, L is Code*)
 void op_jump_if_true(VM& vm, Code* pc);       // JUMP_IF_TRUE Ra, L (3 words)
 void op_jump_if_false(VM& vm, Code* pc);      // JUMP_IF_FALSE Ra, L (3 words)
 
+// --- Safepoint (Phase 1 of tracing-GC project) ---
+// Hot path: one relaxed load + one branch. Emitted before every backward
+// jump so loops poll once per iteration. When the VM's gcRequested_ flag is
+// set, the handler calls vm.safepointPoll() to drain the deferred-delete
+// queue under a bounded budget. Future phases drive mark/sweep work from the
+// same poll.
+void op_safepoint(VM& vm, Code* pc);          // SAFEPOINT (1 word)
+
 // CALL Rd, callee_global, argc (4 words: op, regs{Rd,argc,argBase}, callee_global_idx, unused)
 void op_call(VM& vm, Code* pc);
 // CALL_PRIMITIVE Rd, argc, argBase, global_idx (3 words: op, regs{Rd,argc,argBase}, global_idx)

@@ -68,11 +68,32 @@ void arcEnqueueForDeletion(GCObj* obj) {
     }
 
     if (gCurrentVM) {
-        gCurrentVM->deferredDeleteQueue().enqueue(obj);
+        auto& q = gCurrentVM->deferredDeleteQueue();
+        q.enqueue(obj);
+        // Phase 1: trip the safepoint flag when the queue grows past the
+        // trigger size. Next backward jump's op_safepoint will drain it.
+        if (q.size() >= VM::kSafepointTriggerSize) {
+            gCurrentVM->gcRequested_.store(true, std::memory_order_relaxed);
+        }
     } else {
         // Fallback: immediate delete (should not happen in normal operation)
         obj->releaseChildren();
         delete obj;
+    }
+}
+
+void VM::safepointPoll() {
+    // Clear flag first so concurrent enqueuers can re-trip it during drain.
+    gcRequested_.store(false, std::memory_order_relaxed);
+    foreignDeleteQueue_.drainInto(deferredDeleteQueue_);
+    // Bounded drain: at most kSafepointBudget deletions per poll. Cascading
+    // child releases that re-fill the queue will be picked up by subsequent
+    // polls. This bounds the worst-case pause per safepoint.
+    deferredDeleteQueue_.processN(kSafepointBudget);
+    // If the queue is still large, re-arm the flag so the next safepoint
+    // continues draining.
+    if (deferredDeleteQueue_.size() >= kSafepointTriggerSize) {
+        gcRequested_.store(true, std::memory_order_relaxed);
     }
 }
 
