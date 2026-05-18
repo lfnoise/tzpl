@@ -286,6 +286,12 @@ public:
     // linkObjToAllList()/unlinkObjFromAllList() (in vm.cpp) maintain it.
     GCObj* allObjsHead_ = nullptr;
 
+    // Tracing GC instance (defined in tracing_gc.hpp). Pimpl-ed via
+    // unique_ptr so vm.hpp doesn't need to include the full class definition
+    // (and so the GC's data can be reset/replaced in tests).
+    std::unique_ptr<class TracingGC> tracingGC_;
+    class TracingGC& tracingGC();
+
     // Constructor with pool size, shared type universe, and optional target
     explicit VM(usize poolSize, TypeUniverse& typeUniverse, const VMTarget& target = {});
 
@@ -427,6 +433,7 @@ public:
     }
 
     void setGlobalIsObj(u32 idx, bool isObj) { globalIsObj_[idx] = isObj ? 1 : 0; }
+    bool globalIsObj(u32 idx) const { return globalIsObj_[idx] != 0; }
 
     Word& global(u32 idx) { return globals_[idx]; }
     const Word& global(u32 idx) const { return globals_[idx]; }
@@ -455,6 +462,7 @@ public:
     }
 
     void setDynVarIsObj(u32 idx, bool isObj) { dynVarIsObj_[idx] = isObj ? 1 : 0; }
+    bool dynVarIsObj(u32 idx) const { return dynVarIsObj_[idx] != 0; }
 
     Word& dynVar(u32 idx) { return dynVars_[idx]; }
     const Word& dynVar(u32 idx) const { return dynVars_[idx]; }

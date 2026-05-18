@@ -24,6 +24,7 @@
 #include "vm.hpp"
 #include "compiler.hpp"
 #include "type_system.hpp"
+#include "tracing_gc.hpp"
 #include "value.hpp"
 #include <algorithm>
 #include <cstdlib>
@@ -104,6 +105,8 @@ void arcEnqueueForDeletion(GCObj* obj) {
         delete obj;
     }
 }
+
+TracingGC& VM::tracingGC() { return *tracingGC_; }
 
 void VM::safepointPoll() {
     // Clear flag first so concurrent enqueuers can re-trip it during drain.
@@ -270,6 +273,9 @@ VM::VM(usize poolSize, TypeUniverse& typeUniverse, const VMTarget& target)
     // Allocate register file from TLSF
     regs_ = static_cast<Word*>(allocator_.allocate(maxRegs_ * sizeof(Word)));
     if (!regs_) throw std::bad_alloc();
+
+    // Phase 3b: lazy-init the tracing GC. unique_ptr keeps the header light.
+    tracingGC_ = std::make_unique<TracingGC>(*this);
     std::memset(regs_, 0, maxRegs_ * sizeof(Word));
 
     // Allocate frame stack from TLSF

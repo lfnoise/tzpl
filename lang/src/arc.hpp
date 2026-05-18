@@ -59,6 +59,11 @@ public:
 
     u32 size() const { return (u32)pool_.size(); }
     void clear() { pool_.clear(); }
+
+    // Iteration for the tracing GC: pool entries are roots (each contributes
+    // +1 to its target's refcount), so the collector treats them as such.
+    GCObj* const* begin() const { return pool_.data(); }
+    GCObj* const* end()   const { return pool_.data() + pool_.size(); }
 };
 
 // Queue of objects awaiting destruction. Processes a bounded number of
@@ -100,6 +105,12 @@ public:
 
     bool empty() const { return queue_.empty(); }
     u32 size() const { return (u32)queue_.size(); }
+
+    // Iteration for the tracing GC: queue entries have refcount 0 and are
+    // awaiting deletion. They are NOT roots; the tracer marks them white and
+    // expects ARC to free them. Exposed so the collector can validate.
+    GCObj* const* begin() const { return queue_.data(); }
+    GCObj* const* end()   const { return queue_.data() + queue_.size(); }
 };
 
 // Lock-free MPSC (multi-producer, single-consumer) queue for cross-thread

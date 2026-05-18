@@ -28,6 +28,7 @@ set(TZPL_COMPILE_OPTIONS
 
 set(LIB_SOURCES
     src/vm.cpp
+    src/tracing_gc.cpp
     src/symbol.cpp
     src/compiler.cpp
     src/value.cpp

@@ -23,6 +23,7 @@
 
 #include "builtins_internal.hpp"
 #include "disassemble.hpp"
+#include "tracing_gc.hpp"
 
 namespace ts {
 
@@ -2146,6 +2147,19 @@ static void builtin_gc(VM& vm, u16 dst, u16, u16) {
 }
 
 // ============================================================================
+// __gc_trace_cycle builtin -- run one tracing-GC cycle (shadow mode)
+// Returns the number of objects rooted by the cycle (lastRootCount). Useful
+// for Phase 3b smoke tests: verifies the collector walks roots without
+// crashing and produces a plausible count. Phase 3 keeps ARC as the actual
+// reclaimer; the cycle here observes but does not free.
+// ============================================================================
+
+static void builtin_gc_trace_cycle(VM& vm, u16 dst, u16, u16) {
+    vm.tracingGC().runFullCycle();
+    vm.reg(dst).i = (i64)vm.tracingGC().lastRootCount();
+}
+
+// ============================================================================
 // typeRepr builtin (Phase 0 debug helper)
 // Prints the static type's representation classification.
 // Usage: typeRepr(value)
@@ -2372,6 +2386,10 @@ void registerBuiltinFunctions(Compiler& compiler,
 
     // --- gc builtin: drain deferred-delete queue to reclaim dead objects ---
     registerOne(compiler, functions, "gc", compiler.voidType(), {}, builtin_gc, /*pure=*/false, /*rtSafe=*/false);
+
+    // --- __gc_trace_cycle builtin: run one Phase 3 tracing cycle (shadow mode) ---
+    // Returns Int (root count). Underscored to discourage normal-program use.
+    registerOne(compiler, functions, "__gc_trace_cycle", compiler.intType(), {}, builtin_gc_trace_cycle, /*pure=*/false, /*rtSafe=*/false);
 
     // --- Ref builtins ---
     // Phase 4g.6: ref / deref / setref read inline-composite args directly
