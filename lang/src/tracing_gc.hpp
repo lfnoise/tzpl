@@ -233,6 +233,28 @@ private:
     // single object's gcScanChildren is the remaining variance source until
     // the fan-out refactor lands.
     static constexpr u32 kCheckEvery = 64;
+
+    // Phase 6 step 5: incremental root scan substate. While phase_ == Mark,
+    // rootPhase_ tracks which root subset is currently being scanned. Each
+    // substate keeps a cursor so the scan can pause and resume across step()
+    // calls under the same deadline budget. SATB barrier is active during
+    // every Mark substate, so heap stores that overwrite roots-not-yet-
+    // visited still preserve reachable objects.
+    enum class RootPhase : u8 {
+        Done    = 0,
+        Globals = 1,
+        DynVars = 2,
+        Frames  = 3,
+    };
+    RootPhase rootPhase_ = RootPhase::Done;
+    u32 rootGlobalCursor_ = 0;
+    u32 rootDynVarCursor_ = 0;
+    u32 rootFrameCursor_  = 0;  // walks 0..frameCount_; new frames at the top
+                                // are picked up as cursor catches up.
+
+    void step_root_globals(u64 deadlineNanos, u32& sinceCheck, u32& done);
+    void step_root_dynvars(u64 deadlineNanos, u32& sinceCheck, u32& done);
+    void step_root_frames(u64 deadlineNanos, u32& sinceCheck, u32& done);
 };
 
 } // namespace ts

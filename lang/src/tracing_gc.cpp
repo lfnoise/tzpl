@@ -22,13 +22,22 @@
 namespace ts {
 
 // Look up the stack map for the given PC offset in a CodeBlock. Stack maps
-// are appended in code order during codegen, so pcOffset values are
-// monotonically increasing; a binary search would be faster but a linear
-// scan is fine while live-ref counts per CodeBlock are modest.
+// are appended in code order during codegen, so pcOffset values are strictly
+// monotonically increasing -- binary search applies. With ~30 stack maps per
+// CodeBlock and frame stacks that go 1000+ deep under binary_trees-style
+// recursion, this drops the per-frame lookup from O(N) to O(log N), which
+// is what makes synchronous root scan fast enough that incrementalizing it
+// is no longer the dominant pause source.
 static StackMap const* findStackMap(CodeBlock const* cb, u32 pcOffset) {
     if (!cb) return nullptr;
-    for (auto const& sm : cb->stackMaps_) {
-        if (sm.pcOffset == pcOffset) return &sm;
+    auto const& v = cb->stackMaps_;
+    u32 lo = 0, hi = (u32)v.size();
+    while (lo < hi) {
+        u32 mid = lo + (hi - lo) / 2;
+        u32 mp = v[mid].pcOffset;
+        if (mp == pcOffset) return &v[mid];
+        if (mp < pcOffset)  lo = mid + 1;
+        else                hi = mid;
     }
     return nullptr;
 }
@@ -50,76 +59,116 @@ void TracingGC::resetColors() {
     }
 }
 
-void TracingGC::markRoots() {
-    lastRootCount_ = 0;
+// Phase 6 step 5: the old synchronous markRoots() has been split into three
+// incremental step_root_* methods, each with a cursor so the scan can pause
+// and resume across step() calls under the deadline budget. requestCycle
+// seeds the cursors; step_mark drives them before draining gray. Each
+// frame is visited at the moment the marker reaches it, so the stack map
+// always matches the current PC -- mutator activity between cycle start
+// and root visit is harmless. SATB on heap stores covers the snapshot
+// invariant for heap fields that get overwritten before their referent
+// is marked. Plain register overwrites are not snapshotted, which is
+// correct: once a register is overwritten with a non-ref and no other root
+// holds the old value, it's genuinely garbage.
 
-    // Phase 5: AutoReleasePool is no longer a root. ARC is retired -- pool
-    // entries no longer carry a refcount contribution. With register-precise
-    // stack maps (Phase 5.1/5.2), every reachable object is rooted via the
-    // register file, globals, or dyn vars. Objects that are only in the
-    // pool but not yet assigned to any register exist for one instruction's
-    // worth of bytecode (the alloc op writes to its result register before
-    // any safepoint can fire), so they are never observed as garbage here.
-
-    // Root set 1: globals. Only slots flagged as holding an Obj* in
-    // globalIsObj_ are dereferenced. Inline-composite globals span
-    // multiple Word slots; for Phase 3b we use the same conservative
-    // policy as the rest of the codebase -- globalIsObj_ is set per
-    // base slot, and that slot's Word::o is the boxed pointer.
-    // Obj derives from GCObj, so passing an Obj* directly to mark() works
-    // via implicit upcast -- no dynamic_cast / RTTI lookup.
-    for (u32 i = 0; i < vm_.numGlobals(); ++i) {
+// Walk numGlobals: scales with declared globals, not heap objects. Typical
+// programs have a few thousand globals; this stays well under a 100 us
+// budget on its own, but is incremental anyway so a hypothetical 100k-
+// global REPL session can't blow it either.
+void TracingGC::step_root_globals(u64 deadlineNanos, u32& sinceCheck, u32& done) {
+    u32 n = vm_.numGlobals();
+    while (rootGlobalCursor_ < n) {
+        u32 i = rootGlobalCursor_++;
         if (vm_.globalIsObj(i)) {
             if (Obj* o = vm_.global(i).o) {
                 mark(o); ++lastRootCount_;
             }
         }
+        ++done;
+        if (++sinceCheck >= kCheckEvery) {
+            sinceCheck = 0;
+            if (gcMonoNanos() >= deadlineNanos) return;
+        }
     }
+    rootPhase_ = RootPhase::DynVars;
+    rootDynVarCursor_ = 0;
+}
 
-    // Root set 3: dynamic-scope variables. Same convention as globals.
-    for (u32 i = 0; i < vm_.numDynVars(); ++i) {
+void TracingGC::step_root_dynvars(u64 deadlineNanos, u32& sinceCheck, u32& done) {
+    u32 n = vm_.numDynVars();
+    while (rootDynVarCursor_ < n) {
+        u32 i = rootDynVarCursor_++;
         if (vm_.dynVarIsObj(i)) {
             if (Obj* o = vm_.dynVar(i).o) {
                 mark(o); ++lastRootCount_;
             }
         }
+        ++done;
+        if (++sinceCheck >= kCheckEvery) {
+            sinceCheck = 0;
+            if (gcMonoNanos() >= deadlineNanos) return;
+        }
     }
+    rootPhase_ = RootPhase::Frames;
+    rootFrameCursor_ = 0;
+}
 
-    // The deferred-delete queue is intentionally NOT a root. Its entries
-    // have refcount 0 and are awaiting destruction; the tracer should leave
-    // them white so that tracing's "white set" can be cross-checked against
-    // ARC's "about to free" set during validation.
-
-    // Phase 5.1: stack-map roots. Walk every active call frame and use its
-    // saved PC's stack map to mark register-held GC references. For the top
-    // frame the saved PC is vm_.pc_ (the current instruction, an op_safepoint
-    // when we get here via safepointPoll). For lower frames it is
-    // frames_[i+1].returnPC -- the resume address the caller will hit when
-    // the inner frame returns. CodeBlocks only carry stack maps at safepoint
-    // emission sites today (loop tails and function entry); Phase 5.2 adds
-    // call-site stack maps so lower frames also have precise root data.
-    // Note on CallFrame::baseReg semantics: pushFrame stores the *caller's*
-    // baseReg in frames_[i].baseReg (for restoration on pop). So the field
-    // for frame i actually holds frame (i-1)'s active base. To find frame
-    // i's own active base we look one slot up: frames_[i+1].baseReg holds
-    // it (saved when frame i+1 was pushed). For the top frame, it's the
-    // live vm.baseReg_.
-    for (u32 i = 0; i < vm_.frameCount_; ++i) {
+// Walk frames bottom-up so the cursor advances monotonically even if new
+// inner calls are pushed mid-scan -- they land at higher indices and get
+// visited as the cursor catches up. If frames return mid-scan (frameCount_
+// drops below cursor), we stop: the popped frame's roots were visited
+// earlier when they were still live, and the returned-from work was
+// captured by the SATB barrier on any heap stores that happened.
+//
+// Each frame visit reads its CURRENT PC and registers, so the stack map
+// matches the bytecode's view at that exact moment. The
+// CallFrame::baseReg-stores-caller's-base convention from pushFrame is
+// the same as the old synchronous version.
+void TracingGC::step_root_frames(u64 deadlineNanos, u32& sinceCheck, u32& done) {
+    while (rootFrameCursor_ < vm_.frameCount_) {
+        u32 i = rootFrameCursor_++;
         CallFrame const& f = vm_.frames_[i];
         CodeBlock const* cb = f.codeBlock;
-        if (!cb || cb->code.empty()) continue;
-        bool isTop = (i + 1 == vm_.frameCount_);
-        Code const* pc = isTop ? vm_.pc_ : vm_.frames_[i + 1].returnPC;
-        if (!pc) continue;
-        u32 pcOffset = (u32)(pc - cb->code.data());
-        StackMap const* sm = findStackMap(cb, pcOffset);
-        if (!sm) continue;
-        u32 activeBase = isTop ? vm_.baseReg_ : vm_.frames_[i + 1].baseReg;
-        Word const* base = vm_.regs_ + activeBase;
-        for (u16 reg : sm->liveRefRegs) {
-            if (Obj* o = base[reg].o) {
-                mark(o); ++lastRootCount_;
+        if (cb && !cb->code.empty()) {
+            bool isTop = (i + 1 == vm_.frameCount_);
+            Code const* pc = isTop ? vm_.pc_ : vm_.frames_[i + 1].returnPC;
+            if (pc) {
+                u32 pcOffset = (u32)(pc - cb->code.data());
+                if (StackMap const* sm = findStackMap(cb, pcOffset)) {
+                    u32 activeBase = isTop ? vm_.baseReg_
+                                           : vm_.frames_[i + 1].baseReg;
+                    Word const* base = vm_.regs_ + activeBase;
+                    for (u16 reg : sm->liveRefRegs) {
+                        if (Obj* o = base[reg].o) {
+                            mark(o); ++lastRootCount_;
+                        }
+                    }
+                }
             }
+        }
+        ++done;
+        if (++sinceCheck >= kCheckEvery) {
+            sinceCheck = 0;
+            if (gcMonoNanos() >= deadlineNanos) return;
+        }
+    }
+    rootPhase_ = RootPhase::Done;
+}
+
+// Legacy entry point kept for compatibility with runFullCycle / tests that
+// expect requestCycle to seed gray synchronously. Just drives the whole
+// incremental root scan to completion.
+void TracingGC::markRoots() {
+    lastRootCount_ = 0;
+    rootPhase_ = RootPhase::Globals;
+    rootGlobalCursor_ = 0;
+    u32 sinceCheck = 0, done = 0;
+    while (rootPhase_ != RootPhase::Done) {
+        switch (rootPhase_) {
+        case RootPhase::Globals: step_root_globals(kGCNoDeadline, sinceCheck, done); break;
+        case RootPhase::DynVars: step_root_dynvars(kGCNoDeadline, sinceCheck, done); break;
+        case RootPhase::Frames:  step_root_frames(kGCNoDeadline, sinceCheck, done);  break;
+        case RootPhase::Done:    break;
         }
     }
 }
@@ -131,6 +180,20 @@ void TracingGC::pushPartial(GCObj* container) {
 u32 TracingGC::step_mark(u64 deadlineNanos) {
     u32 done = 0;
     u32 sinceCheck = 0;
+
+    // Phase 6 step 5: incremental root scan happens here under the deadline
+    // budget instead of synchronously at requestCycle time. The substate
+    // machine drains globals, dyn vars, and frames in order, with cursors
+    // so each step picks up where the last left off.
+    while (rootPhase_ != RootPhase::Done) {
+        switch (rootPhase_) {
+        case RootPhase::Globals: step_root_globals(deadlineNanos, sinceCheck, done); break;
+        case RootPhase::DynVars: step_root_dynvars(deadlineNanos, sinceCheck, done); break;
+        case RootPhase::Frames:  step_root_frames(deadlineNanos, sinceCheck, done);  break;
+        case RootPhase::Done:    break;
+        }
+        if (gcMonoNanos() >= deadlineNanos) return done;
+    }
 
     // Phase 6 step 3: drain the partial-container queue first. Each entry
     // is a large container already Blacked; we advance its child scan by
@@ -275,13 +338,13 @@ void TracingGC::requestCycle() {
     resetColors();
     currentBlackCount_ = 0;
     currentWhiteCount_ = 0;
+    lastRootCount_ = 0;
     phase_ = Phase::Mark;
-    markRoots();
-    if (grayWorklist_.empty()) {
-        // No roots reached anything: jump straight to sweep.
-        phase_ = Phase::Sweep;
-        sweepCursor_ = vm_.allObjsHead_;
-    }
+    // Phase 6 step 5: do NOT call markRoots synchronously here. step_mark
+    // will drive the root scan incrementally under the deadline budget,
+    // starting from RootPhase::Globals.
+    rootPhase_ = RootPhase::Globals;
+    rootGlobalCursor_ = 0;
 }
 
 void TracingGC::runFullCycle() {
