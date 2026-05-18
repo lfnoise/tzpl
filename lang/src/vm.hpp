@@ -281,6 +281,11 @@ public:
     // file, just consumes already-released objects.
     void safepointPoll();
 
+    // Phase 3 of tracing-GC project: head of an intrusive doubly-linked list
+    // of every GCObj owned by this VM. Sweep walks this list to find whites.
+    // linkObjToAllList()/unlinkObjFromAllList() (in vm.cpp) maintain it.
+    GCObj* allObjsHead_ = nullptr;
+
     // Constructor with pool size, shared type universe, and optional target
     explicit VM(usize poolSize, TypeUniverse& typeUniverse, const VMTarget& target = {});
 

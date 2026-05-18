@@ -41,19 +41,51 @@ class VM;
 static constexpr u32 kImmortalRefcount = 0xFFFF0000;
 static constexpr u32 kInitialRefcount = 1;
 
+// Phase 3 of tracing-GC project: tri-color marking state. Stored in
+// GCObj::color_. White = unmarked (potential garbage); Gray = marked but
+// children not yet scanned (on worklist); Black = marked and children
+// scanned (live). Sweep frees whites; mark transitions white -> gray -> black.
+enum class GCColor : u8 {
+    White = 0,
+    Gray  = 1,
+    Black = 2,
+};
+
 // Forward declaration
 class GCObj;
 
 // Enqueue an object for deferred deletion (defined in vm.cpp)
 void arcEnqueueForDeletion(GCObj* obj);
 
+// Link an object onto the owning VM's all-objects list (defined in vm.cpp).
+// Called from registerNewObj() right after construction.
+void linkObjToAllList(GCObj* obj);
+
+// Unlink an object from the owning VM's all-objects list (defined in vm.cpp).
+// Called from GCObj::operator delete just before memory is released.
+void unlinkObjFromAllList(GCObj* obj);
+
 // Base class for all garbage-collected objects
 class GCObj {
     mutable std::atomic<u32> refcount_{kImmortalRefcount};
     rt::TLSFAllocator* homeAllocator_ = nullptr;
     GCObj* foreignDeleteNext_ = nullptr;  // intrusive link for cross-thread deletion
+
+    // Phase 3 tracing-GC state. All accesses are single-threaded: the owning
+    // VM's mutator (color reads), and the same VM's safepoint-driven collector
+    // (color writes). Cross-thread releases go through ForeignDeleteQueue and
+    // are routed back to the home thread before any color/list access.
+    GCColor color_ = GCColor::White;
+    GCObj*  allObjsPrev_ = nullptr;  // intrusive doubly-linked list of all
+    GCObj*  allObjsNext_ = nullptr;  // objects alive in the owning VM
     friend class ForeignDeleteQueue;
+    friend class TracingGC;
+    friend void linkObjToAllList(GCObj*);
+    friend void unlinkObjFromAllList(GCObj*);
 public:
+    GCColor color() const { return color_; }
+    void setColor(GCColor c) { color_ = c; }
+    GCObj* allObjsNext() const { return allObjsNext_; }
 
     static constexpr uintptr_t kPtrMask = ~(uintptr_t)1;
 
