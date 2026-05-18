@@ -14,7 +14,7 @@ A statically typed, real-time safe interpreted language designed for audio and s
 - Immutable by default (`let`), mutable locals with `var`, mutable slots with `Ref`
 - Direct-threaded VM using `[[clang::musttail]]` tail-call dispatch
 - TLSF O(1) real-time allocator
-- Automatic reference counting with a deferred, amortized deletion queue that spreads cascading drops across timed heartbeats to avoid CPU spikes
+- Incremental tri-color SATB tracing garbage collector with stack-map-based precise roots and a bounded per-step budget (sub-millisecond pauses suitable for audio-rate workloads)
 - Rich type system: Bool, Int, Float, Symbol, String, Fraction, Complex, Array, List, Range, Tuple, Struct, Enum, Ref, Function, Lambda, Coroutine
 - Template monomorphization, function overloading, pattern matching
 - File-based module system with selective imports

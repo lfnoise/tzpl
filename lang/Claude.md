@@ -78,8 +78,8 @@ cd lang/tests && bash run_tests.sh
 | File | Role |
 |------|------|
 | `value.cpp/hpp` | Object representation, CodeBlock, Word union, type-aware printing |
-| `arc.hpp` | Automatic reference counting |
-| `gc.hpp` | Incremental garbage collector |
+| `gc.hpp` | `GCObj` base class: color bits, gcTag, immortal flag, all-objects-list link |
+| `tracing_gc.hpp/cpp` | Incremental tri-color SATB tracing GC; bounded mark/sweep budget driven by `op_safepoint` polls and host rtTick/nrtTick |
 | `tlsf_allocator.hpp` | TLSF O(1) real-time allocator |
 | `stl_allocator.hpp` | STL-compatible allocator wrapper for TLSF |
 | `vm_allocator.hpp` | VM-specific allocator configuration |

@@ -1139,33 +1139,22 @@ vm.gc().writeBarrier(frame);</code></pre>
 
 <div class="note">
 <strong>Why this is correct:</strong>
-After write-barriering, the save slot is at most grey. During execution (within an event), no <code>gcHeartbeat()</code> runs. The coroutine body executes using the flat register file (which the GC does not scan &mdash; the stack collapses between events). When the coroutine yields, registers are copied into the save slot, and a future heartbeat re-scans the grey save slot to see the latest values.
+After write-barriering, the save slot is at most grey, so the next time the marker visits it (either via an in-event <code>op_safepoint</code> poll or via a between-event <code>nrtTick</code>) it will re-scan whatever object pointers the resumed body has written. Active call frames &mdash; including the coroutine's resumed frame &mdash; are scanned precisely via stack maps, so any new references created in the body are visible to the collector even before the next yield.
 </div>
 
 <!-- -------------------------------- -->
 <h3 id="gc-roots">6.4 Root Marking</h3>
 
-<p><code>GC::markRoots()</code> scans the VM's global variables and the active coroutine state:</p>
+<p>The tracing collector's root set has four substates, each with its own cursor so the scan can pause and resume across <code>op_safepoint</code> polls under a deadline budget:</p>
 
-<pre><code><span class="kw">void</span> GC::<span class="fn">markRoots</span>() {
-    <span class="cmt">// Scan global variables that hold Obj pointers</span>
-    <span class="kw">for</span> (<span class="typ">u32</span> i = <span class="num">0</span>; i &lt; gCurrentVM-&gt;numGlobals(); ++i) {
-        <span class="kw">if</span> (gCurrentVM-&gt;globalIsObj_[i]) {
-            <span class="typ">Obj*</span> obj = gCurrentVM-&gt;globals_[i].o;
-            <span class="kw">if</span> (obj) mark(obj);
-        }
-    }
+<ul>
+  <li><strong>Globals</strong> &mdash; every slot for which <code>globalIsObj_[i]</code> is set.</li>
+  <li><strong>Dynamic-scope variables</strong> &mdash; every slot for which <code>dynVarIsObj_[i]</code> is set.</li>
+  <li><strong>Active call frames</strong> &mdash; for each frame, the codegen-emitted per-PC stack map says which registers in the frame currently hold live <code>Obj*</code> references.</li>
+  <li><strong>Extras</strong> &mdash; host-registered callbacks (e.g. the NRTVM <code>HandlerTable</code> that stores OSC and NATS handlers). Each callback walks its own table and calls <code>mark()</code> on every live pointer it owns.</li>
+</ul>
 
-    <span class="cmt">// Scan active coroutine save slot (safety — should be null between events)</span>
-    <span class="kw">if</span> (gCurrentVM-&gt;currentCoroutine_)
-        mark(gCurrentVM-&gt;currentCoroutine_);
-    <span class="kw">if</span> (gCurrentVM-&gt;currentCoroFrame_) {
-        <span class="typ">CoroutineFrame*</span> f = gCurrentVM-&gt;currentCoroFrame_;
-        <span class="kw">while</span> (f) { mark(f); f = f-&gt;caller_; }
-    }
-}</code></pre>
-
-<p>Suspended coroutines that are stored in global variables are reachable through the global scan. The <code>gcScan</code> methods on <code>CoroutineObj</code> and <code>CoroutineFrame</code> then transitively mark all reachable objects within the coroutine's state.</p>
+<p>Suspended coroutines are reachable either through a global slot that holds them or through the active-frame walk if the running mutator is mid-resume. Once the <code>CoroutineObj</code> is gray, <code>gcScanByTag</code> (tag-dispatched, non-virtual) transitively marks the <code>topFrame_</code>, the caller chain, and every <code>Obj*</code> argument and saved register, using the function's type info and the per-yield stack map.</p>
 
 
 <!-- ================================================================ -->

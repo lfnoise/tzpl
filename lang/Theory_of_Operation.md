@@ -4,7 +4,7 @@ This document describes the internal architecture of the Tzopilotl compiler and 
 
 ## Overview
 
-The system is a statically-typed, real-time-safe interpreter designed to run within an audio thread. It compiles source code through a four-phase pipeline — Lex, Parse, Type Check, Code Gen — producing register-based bytecode that executes on a direct-threaded virtual machine with automatic reference counting (ARC).
+The system is a statically-typed, real-time-safe interpreter designed to run within an audio thread. It compiles source code through a four-phase pipeline — Lex, Parse, Type Check, Code Gen — producing register-based bytecode that executes on a direct-threaded virtual machine. Memory is reclaimed by an incremental tri-color SATB tracing garbage collector driven by per-PC stack maps; mark and sweep are interleaved with execution under a per-step deadline budget so audio-thread pauses stay bounded.
 
 The pipeline is orchestrated by the `Compiler` class (`compiler.cpp`):
 
@@ -379,7 +379,7 @@ The `TypeChecker` performs source-to-sink type inference, overload resolution, t
 
 ### Type Representation
 
-Types are runtime objects inheriting from `Type : Obj : GCObj`. This means types are reference-counted objects that live in the TLSF heap, which is necessary because types created during execution (e.g., through template instantiation) must be managed alongside other objects. In practice, types created at compile time are marked immortal (their refcount is never decremented).
+Types are runtime objects inheriting from `Type : Obj : GCObj`. They live in the TLSF heap because types created during execution (e.g., through template instantiation) must be managed alongside other objects. Types created at compile time are marked immortal and are invisible to the tracing GC for the rest of the program's life.
 
 The type hierarchy:
 
@@ -413,7 +413,7 @@ Type (abstract base)
     └── AnyType
 ```
 
-All `AtomType` values fit in a single 64-bit `Word` and are classified as non-object types (`isObjType() == false`). All `ObjType` values are accessed through `Obj*` pointers and require reference counting. This distinction is fundamental: it determines whether a value occupies an `i64` slot or an `Obj*` slot in registers, arrays, struct fields, and lambda captures, and whether a store operation must emit retain/release calls.
+All `AtomType` values fit in a single 64-bit `Word` and are classified as non-object types (`isObjType() == false`). All `ObjType` values are accessed through `Obj*` pointers and are GC-managed. This distinction is fundamental: it determines whether a value occupies an `i64` slot or an `Obj*` slot in registers, arrays, struct fields, and lambda captures; whether a global slot is added to the precise root set; and whether stores into the slot need an SATB write barrier.
 
 ### Type Interning
 
@@ -544,7 +544,7 @@ Auto-mapping is analyzed during type checking and annotated on AST nodes for cod
 
 ### Lambda and Closure Analysis
 
-When the type checker enters a lambda body, it sets `lambdaBoundary_` to the current scope depth. Variable lookups that cross this boundary trigger **capture detection**: the variable is added to the lambda's `captures` list. The type checker builds a `LambdaType` that includes `freeVarTypes_` (types of captured variables) and `gcFreeVars_` (indices of captures that hold `Obj*` pointers, needed for ARC — `releaseChildren()` releases these on destruction).
+When the type checker enters a lambda body, it sets `lambdaBoundary_` to the current scope depth. Variable lookups that cross this boundary trigger **capture detection**: the variable is added to the lambda's `captures` list. The type checker builds a `LambdaType` that includes `freeVarTypes_` (types of captured variables) and `gcFreeVars_` (indices of captures that hold `Obj*` pointers, so the tracing GC's `Lambda::gcScanChildren` knows which free-var slots to mark).
 
 ### Scope and Variable Management
 
@@ -596,7 +596,7 @@ Function arguments are placed in contiguous registers starting at the call site'
 
 ### Code Generation for Declarations
 
-**Let/Var/Const declarations:** Generate the initializer expression, then record the result register as the local variable's location. For global-scope variables, also emit `op_store_global` (or `op_store_global_obj` / `op_init_global_obj` for object-typed values, which perform retain/release) to persist the value.
+**Let/Var/Const declarations:** Generate the initializer expression, then record the result register as the local variable's location. For global-scope variables, also emit `op_store_global` (or `op_store_global_obj` / `op_init_global_obj` for object-typed values, which run the SATB write barrier before overwriting the slot) to persist the value.
 
 **Function declarations:** Each function compiles to its own `CodeBlock`. The process:
 
@@ -687,11 +687,11 @@ The VM is a **register-based, direct-threaded interpreter**. Key components:
 
 - **Register file:** A flat array of `Word` values, allocated from TLSF. Default capacity 4,096 registers. Each call frame occupies a window within this array.
 - **Call frame stack:** An array of `CallFrame` structs (return PC, code block, base register, number of registers, result register, dynamic scope stack mark). Default capacity 512 frames.
-- **Global variables:** A `Vec<Word>` indexed by global slot number. Each function's `CodeBlock*` is stored as a global, as are user-declared global variables. A parallel `globalIsObj_` array tracks which globals hold `Obj*` pointers for ARC.
+- **Global variables:** A `Vec<Word>` indexed by global slot number. Each function's `CodeBlock*` is stored as a global, as are user-declared global variables. A parallel `globalIsObj_` array tracks which globals hold `Obj*` pointers, both to drive the GC's global-root scan and to gate the write barrier on stores.
 - **Dynamic scope variables:** A `Vec<Word>` of dynamic variables (accessed via `` `varName `` syntax) with a save stack for automatic restore on function return. The `dynStackMark` in each `CallFrame` records the save stack level at entry.
 - **Coroutine state:** Optional `currentCoroutine_` and `currentCoroFrame_` pointers tracking the active coroutine during `yield`/`resume` operations.
 - **Program counter:** A `Code*` pointer into the current `CodeBlock`'s instruction stream.
-- **ARC infrastructure:** An `AutoReleasePool`, `DeferredDeleteQueue`, and `ForeignDeleteQueue` (see Memory Management below).
+- **Tracing GC:** A `TracingGC` driven by `op_safepoint` polls plus `rtTick` / `nrtTick` from host idle paths. Roots are precise (globals, dyn vars, frames via stack maps, plus host-registered extra-root scanners). See Memory Management below.
 
 ### Word Representation
 
@@ -703,7 +703,7 @@ union Word {
     f64 f;         // Float
     SymbolPtr s;   // Interned symbol pointer
     void* p;       // Generic pointer
-    Obj* o;        // ARC-managed object pointer
+    Obj* o;        // GC-managed object pointer
 };
 ```
 
@@ -815,7 +815,7 @@ Arrays use a split representation based on element type:
 
 - `PodArray<i64>` — for `[Int]`, `[Bool]`, `[Symbol]` (values stored inline as 64-bit words)
 - `PodArray<f64>` — for `[Float]` (values stored inline as doubles)
-- `ObjArray` — for arrays of object-typed elements (values stored as `Obj*` pointers, with retain/release on element mutation)
+- `ObjArray` — for arrays of object-typed elements (values stored as `Obj*` pointers, with an SATB write barrier on element stores)
 
 This avoids boxing overhead for numeric arrays.
 
@@ -831,72 +831,57 @@ All runtime memory (register file, call frames, objects, type caches, STL contai
 
 The `rt::STLAllocator<T>` adaptor allows standard containers (`std::vector`, `std::unordered_map`, `std::string`) to allocate from the TLSF pool instead of the system allocator.
 
-### Automatic Reference Counting (ARC)
+### Incremental Tracing Garbage Collector
 
-**Files:** `gc.hpp`, `arc.hpp`
+**Files:** `gc.hpp`, `tracing_gc.hpp`, `tracing_gc.cpp`
 
-Memory is managed by **automatic reference counting** with deferred deletion. Every heap object (`GCObj`) carries an atomic 32-bit reference count and a pointer to its home allocator:
+Memory is managed by an **incremental tri-color SATB tracing collector** with precise roots derived from per-PC stack maps. The collector runs on the same thread as the mutator, interleaved at safepoints; a single mark or sweep step is budgeted in wall-clock nanoseconds so the worst-case pause stays bounded (sub-millisecond on the audio thread).
 
 ```cpp
 class GCObj {
-    mutable std::atomic<u32> refcount_{kImmortalRefcount};
     rt::TLSFAllocator* homeAllocator_;
+    GCColor color_;     // White / Gray / Black
+    bool    immortal_;
+    GCTag   gcTag_;     // tag-dispatched child scan
+    GCObj*  allObjsNext_;  // singly-linked all-objects list
 };
 ```
 
-**Core operations:**
+The header is 32 bytes including the vtable pointer. Compile-time constants (types, immortal strings, the global symbol table) are flagged `immortal_ = true` and are never visited or freed.
 
-- `retain()` — atomically increments the refcount (no-op for immortal objects).
-- `release()` — atomically decrements the refcount. When it reaches zero, the object is enqueued for deferred deletion rather than deleted immediately.
-- `releaseChildren()` — virtual method overridden by each object type to release its child references before destruction. This prevents unbounded recursive destruction cascades.
-- `makeImmortal()` — sets the refcount to `kImmortalRefcount` (0xFFFF0000), which causes `retain()` and `release()` to become no-ops.
+**Tri-color invariant.** Each non-immortal object is exactly one of White (unmarked, candidate for sweep), Gray (marked, children not yet scanned), or Black (marked, children scanned). The collector preserves the snapshot-at-the-beginning (SATB) invariant: any object that was reachable when the cycle started survives the cycle, even if the mutator overwrites the only reference to it before the marker visits it.
 
-**Three-queue deletion pipeline:**
+**Phases.**
 
-The VM maintains three cooperating queues that spread deletion work across heartbeats:
+1. **Idle.** No cycle in progress. A new cycle is requested when `allocsSinceLastCycle` exceeds a proportional threshold (`max(kMinTriggerAllocs, lastBlackCount * kGrowthFactor)`). The trigger keeps mark cost amortized O(1) per allocation regardless of live-set size.
 
-1. **AutoReleasePool** — newly created objects enter this pool with refcount 1 (the pool's reference). Between events, `drain()` releases each object's pool reference. Objects that have been retained by heap references survive; temporaries whose refcount reaches zero are automatically enqueued for deletion.
+2. **Mark.** The marker drains a worklist of Gray objects in chunks. Roots are scanned incrementally across four substates — globals, dynamic-scope vars, active call frames (via per-PC stack maps), and host-registered extra roots (NRTVM handler tables) — each with a cursor so a single step can pause and resume under the deadline. Very large containers (>64 entries) split their child scan into per-step chunks via a partial-container queue so a 100k-element Map can never overrun the budget.
 
-2. **DeferredDeleteQueue** — objects whose refcount has reached zero wait here. Each `gcHeartbeat()` call processes a bounded number of deletions (at least 256, or 2% of the queue, whichever is larger). Before deleting an object, `releaseChildren()` is called while the object is still intact. Children whose refcounts then reach zero are enqueued here as well, spreading cascading deletions across multiple heartbeats.
+3. **Sweep.** Walks the all-objects list via a slot-pointer (`GCObj**`) so freed Whites are unlinked inline without a back pointer. Sweep is budgeted the same way as mark.
 
-3. **ForeignDeleteQueue** — a lock-free MPSC (Treiber stack) for cross-thread deletion. When an object's refcount reaches zero on a thread that does not own the object's home allocator, the object is pushed here instead of the local deferred queue. The home VM's `gcHeartbeat()` atomically drains this queue into its `DeferredDeleteQueue`, ensuring objects are always deleted by their owning thread with the correct allocator.
+**SATB write barrier.** The code generator emits a write barrier before any heap store that overwrites an `Obj*` slot. The barrier hot path is one comparison: if `phase_ != Mark`, return. During Mark, if the slot's previous value was White and non-immortal, it is colored Gray and pushed onto the worklist. This guarantees that even if the mutator rewires the heap mid-cycle, the snapshot is preserved. Write-barrier sites: `op_store_global_obj`, `op_store_dynamic_obj`, `op_ref_set`, and the array/struct/tuple/enum field setters (`storesObjPtr(Type*)` in `type_system.hpp` is the single source of truth for which slots need it).
 
-**The heartbeat cycle:**
+**Tag-dispatched child scan.** `GCObj::gcTag_` lets the marker bypass virtual dispatch for the highest-frequency subclasses (Tuple, Struct, Enum, ObjArray, ListNode, RefValue, MapObj, SetObj, Lambda, …). `gcScanByTag` is a switch keyed on the tag that issues a qualified non-virtual call to the right subclass's scanner. Untagged objects (`GCTag::Default`) fall back to the virtual `gcScanChildren`.
 
-```cpp
-void gcHeartbeat() {
-    foreignDeleteQueue_.drainInto(deferredDeleteQueue_);
-    autoReleasePool_.drain();
-    u32 budget = max(256, deferredDeleteQueue_.size() / 50);
-    deferredDeleteQueue_.processN(budget);
-}
-```
+**Driver model.** Three call sites advance the collector:
 
-`gcHeartbeat()` is called on a timed interval — between events in the REPL, after each scheduled callback in the NRT scheduler, and on a background heartbeat thread in the NRT VM.
+- **`op_safepoint`** — emitted at backward jumps, function entries, and call sites by codegen. Each safepoint poll runs `step(deadline)` with the configured per-poll budget. This is the path that bounds the worst-case mutator pause.
+- **`vm.rtTick(deadline)`** — called from the audio callback to use whatever budget is available between blocks.
+- **`vm.nrtTick(deadline)`** / **`vm.gcHeartbeat()`** — called by host idle paths (NRT scheduler, REPL between commands, the NRT VM's background heartbeat thread). Uses a more generous budget than the audio thread.
 
-**ARC in generated code:**
+Per-driver telemetry (`stepCountBySource`, `stepMaxNanosBySource`, …) lets you confirm that worst-case audio-thread pauses stay under budget without that statistic getting diluted by less-time-sensitive callers.
 
-The code generator emits ARC-aware store instructions for object-typed values:
+**Object registration.** New objects are registered via `registerNewObj(obj, tag)`:
 
-- `op_store_global_obj` — retains the new value, stores it, then releases the old value.
-- `op_init_global_obj` — retains the new value (no old value to release during initialization).
-- `op_store_dynamic_obj` / `op_init_dynamic_obj` — same for dynamic scope variables.
+- **During compilation** (`gCurrentCompiler` is set): the compiler tracks the object and marks it immortal. It becomes a constant in `CodeBlock::objConstants` and is invisible to the collector forever after.
+- **During execution** (`gCurrentVM` is set): the object is flagged mortal, given its tag, and prepended onto the VM's singly-linked all-objects list in O(1). It starts White; the next cycle either marks it Black or sweeps it.
 
-For local variables (registers), no retain/release is needed because registers are ephemeral within a call frame and the auto-release pool handles their lifetime.
-
-**Key real-time properties:**
-- No stop-the-world phase.
-- Deletion work per heartbeat is bounded by the budget.
-- Cross-thread deletion is lock-free (CAS-based Treiber stack).
-- No root scanning or marking phases — reference counts track reachability incrementally.
-- Cascading deletions are bounded by processing `releaseChildren()` through the deferred queue.
-
-### Object Registration
-
-New objects are registered via `registerNewObj()`:
-
-- **During compilation** (when `gCurrentCompiler` is set): the compiler tracks the object and marks it **immortal** (refcount is never decremented). These become constants in `CodeBlock::objConstants`.
-- **During execution** (when only `gCurrentVM` is set): the object's refcount is set to 1 and it is added to the VM's `AutoReleasePool`.
+**Key real-time properties.**
+- No stop-the-world phase; mutator pauses are bounded by the per-step deadline.
+- Roots are precise (stack maps, not conservative stack scanning), so the collector never has to scan native stack frames.
+- Allocator is TLSF: O(1) allocate, O(1) free.
+- Cycles are collected (the old refcount-based scheme leaked them).
+- No locks or atomics on the GC path; the VM is single-threaded by construction, and cross-thread interaction goes through explicit message queues outside the heap.
 
 ---
 
@@ -966,7 +951,7 @@ fn nyquist() Float { `sampleRate toFloat / 2.0; }
 
 Dynamic variables are stored in a flat `Vec<Word>` (`dynVars_`) on the VM, separate from globals. Each function call saves and restores dynamic bindings via a save stack (`dynStack_`), with the `CallFrame::dynStackMark` recording the stack level at entry. On function return, bindings are restored to their prior values.
 
-The code generator emits `op_load_dynamic` and `op_store_dynamic` (or `op_store_dynamic_obj` / `op_init_dynamic_obj` for object-typed values with retain/release) for dynamic variable access.
+The code generator emits `op_load_dynamic` and `op_store_dynamic` (or `op_store_dynamic_obj` / `op_init_dynamic_obj` for object-typed values, which run the SATB write barrier before overwriting the slot) for dynamic variable access.
 
 ---
 
@@ -1010,6 +995,7 @@ Categories of built-ins include:
 | POD arrays | Runtime | `PodArray<i64>` and `PodArray<f64>` avoid boxing for numeric arrays |
 | Flexible array members | Runtime | `Struct`, `Tuple`, `Lambda` store fields inline, avoiding extra allocations |
 | Type interning | Compiler | Structural types are deduplicated, enabling pointer comparison |
-| Deferred ARC deletion | Runtime | Bounded deletion work per heartbeat avoids unbounded cascades |
-| Lock-free cross-thread ARC | Runtime | Foreign delete queue uses CAS-based Treiber stack |
-| Immortal objects | Compiler | Built-in types and compile-time objects skip retain/release |
+| Incremental tracing GC | Runtime | Mark and sweep are budgeted per safepoint; worst-case pauses stay sub-millisecond |
+| Precise roots from stack maps | CodeGen + Runtime | No conservative stack scanning; root set is exact at every safepoint PC |
+| Tag-dispatched child scan | Runtime | High-frequency Obj subclasses skip virtual dispatch via a switch on `gcTag` |
+| Immortal objects | Compiler | Built-in types and compile-time objects are invisible to the collector |

@@ -1878,7 +1878,7 @@ osc.<span class="fn">onMessageI</span>(<span class="str">"/note"</span>, <span c
 osc.<span class="fn">removeHandler</span>(<span class="str">"/trigger"</span>);</code></pre>
 
 <div class="note">
-  <strong>Note:</strong> Handlers are retained by the runtime and released when removed or replaced. Registering a new handler for the same address automatically replaces the previous one. All handler invocations are serialized through the NRTVM mutex, so handlers never run concurrently.
+  <strong>Note:</strong> Handlers stay alive as long as they are in the runtime's handler table &mdash; the table is a GC root, so a handler with no other reference (e.g. a top-level lambda passed straight to <code>osc.onMessage</code>) is kept reachable for the collector. Registering a new handler for the same address replaces the previous one; <code>removeHandler</code> drops the entry, after which the prior handler becomes collectable if nothing else holds it. All handler invocations are serialized through the NRTVM mutex, so handlers never run concurrently.
 </div>
 
 <!-- -------------------------------- -->
@@ -2297,7 +2297,7 @@ nats.<span class="fn">onMessageF</span>(<span class="str">"volume"</span>, <span
 nats.<span class="fn">removeHandler</span>(<span class="str">"trigger"</span>);</code></pre>
 
 <div class="note">
-  <strong>Note:</strong> Handlers are retained by the runtime and released when removed or replaced. Registering a new handler for the same subject automatically replaces the previous one. All handler invocations are serialized through the NRTVM mutex. If the client is already connected when a handler is registered, the subscription is created immediately.
+  <strong>Note:</strong> Handlers stay alive as long as they are in the runtime's handler table &mdash; the table is a GC root, so a handler with no other reference (e.g. a top-level lambda passed straight to <code>nats.onMessage</code>) is kept reachable for the collector. Registering a new handler for the same subject replaces the previous one; <code>removeHandler</code> drops the entry, after which the prior handler becomes collectable if nothing else holds it. All handler invocations are serialized through the NRTVM mutex. If the client is already connected when a handler is registered, the subscription is created immediately.
 </div>
 
 <!-- -------------------------------- -->
