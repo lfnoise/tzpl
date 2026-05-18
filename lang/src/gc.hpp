@@ -104,6 +104,13 @@ public:
     // If a child's refcount reaches zero, it is enqueued for deferred deletion.
     virtual void releaseChildren() {}
 
+    // Phase 3 of tracing-GC project: enumerate every direct Obj* child and
+    // call gc.mark(child) on it. The tracing collector uses this to walk
+    // the live object graph transitively. Mirror of releaseChildren -- same
+    // set of children, different action. Default no-op; subclasses with
+    // GC-managed fields override.
+    virtual void gcScanChildren(class TracingGC& /*gc*/) {}
+
     // ARC methods
     bool isImmortal() const {
         return refcount_.load(std::memory_order_relaxed) >= kImmortalRefcount;

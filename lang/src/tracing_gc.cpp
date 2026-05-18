@@ -86,11 +86,12 @@ u32 TracingGC::step_mark(u32 budget) {
         if (obj->color_ != GCColor::Gray) { ++done; continue; }
         obj->color_ = GCColor::Black;
         ++currentBlackCount_;
-        // Phase 3b stub: transitive child scanning is added incrementally
-        // per subclass in a follow-up commit. For now objects are reachable
-        // only via the root set above, which is sufficient to validate
-        // mark plumbing and to count immediate roots vs. unreachable
-        // objects in shadow mode.
+        // Phase 3 transitive scan: walk every Obj* child via the virtual
+        // gcScanChildren. Default no-op for classes without GC children;
+        // overridden mirror of releaseChildren for the rest (Ref, Tuple,
+        // Struct, Enum, ObjArray, MapObj, SetObj, ListNode, ListGenerator
+        // subclasses, Lambda, CoroutineFrame, CoroutineObj, AnyObj, ...).
+        obj->gcScanChildren(*this);
         ++done;
     }
     if (grayWorklist_.empty()) {

@@ -23,6 +23,7 @@
 
 #include "value.hpp"
 #include "vm.hpp"
+#include "tracing_gc.hpp"
 
 namespace ts {
 
@@ -171,6 +172,14 @@ void InlineArray::releaseChildren() {
     size_t n = size();
     for (size_t i = 0; i < n; ++i) {
         inlineWalkPointers(&v_[i * stride_], et, /*release_=*/true);
+    }
+}
+
+void InlineArray::gcScanChildren(TracingGC& gc) {
+    Type* et = elemType();
+    size_t n = size();
+    for (size_t i = 0; i < n; ++i) {
+        gcScanInlinePointers(&v_[i * stride_], et, gc);
     }
 }
 
@@ -715,6 +724,10 @@ static u32 strideForType(Type* type) {
     return sw == 0 ? 1 : sw;
 }
 
+// Phase 3 of tracing-GC project: mark-mode equivalents of inlineWalkPointers /
+// payloadRelease. Same traversal rules, but the action is gc.mark() on every
+// Obj* found. Implemented at the bottom of this file once TracingGC is included.
+
 // Retain Obj* children inside an arbitrary payload of `type`. For Inline
 // composites this walks the layout (skipping Complex/Fraction, which have
 // no Obj* children). For non-Inline types this retains base[0].o when the
@@ -956,6 +969,17 @@ void MapObj::releaseChildren() {
     }
 }
 
+void MapObj::gcScanChildren(TracingGC& gc) {
+    Type* kt = keyType();
+    Type* vt = valueType();
+    u32 cap = capacity();
+    for (u32 i = 0; i < cap; ++i) {
+        if (meta_[i] != SlotOccupied) continue;
+        gcScanPayload(slotKey(i), kt, gc);
+        gcScanPayload(slotVal(i), vt, gc);
+    }
+}
+
 // SetObj constructor
 SetObj::SetObj(SetType* type)
     : Obj(type)
@@ -1112,6 +1136,15 @@ void SetObj::releaseChildren() {
     for (u32 i = 0; i < cap; ++i) {
         if (meta_[i] != SlotOccupied) continue;
         payloadRelease(slotElem(i), et);
+    }
+}
+
+void SetObj::gcScanChildren(TracingGC& gc) {
+    Type* et = elemType();
+    u32 cap = capacity();
+    for (u32 i = 0; i < cap; ++i) {
+        if (meta_[i] != SlotOccupied) continue;
+        gcScanPayload(slotElem(i), et, gc);
     }
 }
 
@@ -2007,6 +2040,56 @@ VMString wordsToString(Word const* base, Type* type) {
 
 VMString slotToString(VM& vm, u16 startReg, Type* type) {
     return wordsToString(&vm.reg(startReg), type);
+}
+
+// Phase 3 of tracing-GC project: mark every Obj* inside an Inline composite
+// layout at `base`. Same shape as inlineWalkPointers; the difference is the
+// action -- gc.mark() instead of retain/release. Skips Complex/Fraction
+// (Inline but no children).
+void gcScanInlinePointers(Word const* base, Type* type, TracingGC& gc) {
+    if (!type) return;
+    auto walk = [&](auto const& layout) {
+        for (auto const& f : layout) {
+            if (!f.type) continue;
+            if (f.type->repr_ == Type::Repr::Inline) {
+                if (f.type == gCurrentVM->complexType()
+                 || f.type == gCurrentVM->fractionType()) continue;
+                gcScanInlinePointers(base + f.wordOffset, f.type, gc);
+            } else if (storesObjPtr(f.type)) {
+                if (Obj* o = base[f.wordOffset].o) {
+                    if (auto* g = dynamic_cast<GCObj*>(o)) gc.mark(g);
+                }
+            }
+        }
+    };
+    if (auto* st = dynamic_cast<StructType*>(type))      walk(st->layout_);
+    else if (auto* tt = dynamic_cast<TupleType*>(type))  walk(tt->layout_);
+    else if (auto* en = dynamic_cast<EnumType*>(type)) {
+        int which = (int)base[0].i;
+        if (which < 0 || (size_t)which >= en->layout_.size()) return;
+        auto const& f = en->layout_[which];
+        if (!f.type || f.sizeWords == 0) return;
+        if (f.type->repr_ == Type::Repr::Inline) {
+            if (f.type == gCurrentVM->complexType()
+             || f.type == gCurrentVM->fractionType()) return;
+            gcScanInlinePointers(base + f.wordOffset, f.type, gc);
+        } else if (storesObjPtr(f.type)) {
+            if (Obj* o = base[f.wordOffset].o) {
+                if (auto* g = dynamic_cast<GCObj*>(o)) gc.mark(g);
+            }
+        }
+    }
+}
+
+void gcScanPayload(Word const* base, Type* type, TracingGC& gc) {
+    if (!type) return;
+    if (type->repr_ == Type::Repr::Inline) {
+        gcScanInlinePointers(base, type, gc);
+    } else if (storesObjPtr(type)) {
+        if (Obj* o = base[0].o) {
+            if (auto* g = dynamic_cast<GCObj*>(o)) gc.mark(g);
+        }
+    }
 }
 
 } // namespace ts

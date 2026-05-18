@@ -2159,6 +2159,17 @@ static void builtin_gc_trace_cycle(VM& vm, u16 dst, u16, u16) {
     vm.reg(dst).i = (i64)vm.tracingGC().lastRootCount();
 }
 
+// Returns lastBlackCount: total objects reached transitively from the roots.
+static void builtin_gc_trace_blacks(VM& vm, u16 dst, u16, u16) {
+    vm.reg(dst).i = (i64)vm.tracingGC().lastBlackCount();
+}
+
+// Returns lastWhiteCount: objects on the all-objects list that were not
+// reached by the last cycle (potential garbage from tracing's POV).
+static void builtin_gc_trace_whites(VM& vm, u16 dst, u16, u16) {
+    vm.reg(dst).i = (i64)vm.tracingGC().lastWhiteCount();
+}
+
 // ============================================================================
 // typeRepr builtin (Phase 0 debug helper)
 // Prints the static type's representation classification.
@@ -2389,7 +2400,9 @@ void registerBuiltinFunctions(Compiler& compiler,
 
     // --- __gc_trace_cycle builtin: run one Phase 3 tracing cycle (shadow mode) ---
     // Returns Int (root count). Underscored to discourage normal-program use.
-    registerOne(compiler, functions, "__gc_trace_cycle", compiler.intType(), {}, builtin_gc_trace_cycle, /*pure=*/false, /*rtSafe=*/false);
+    registerOne(compiler, functions, "__gc_trace_cycle",  compiler.intType(), {}, builtin_gc_trace_cycle,  /*pure=*/false, /*rtSafe=*/false);
+    registerOne(compiler, functions, "__gc_trace_blacks", compiler.intType(), {}, builtin_gc_trace_blacks, /*pure=*/false, /*rtSafe=*/false);
+    registerOne(compiler, functions, "__gc_trace_whites", compiler.intType(), {}, builtin_gc_trace_whites, /*pure=*/false, /*rtSafe=*/false);
 
     // --- Ref builtins ---
     // Phase 4g.6: ref / deref / setref read inline-composite args directly

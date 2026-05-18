@@ -26,6 +26,7 @@
 
 #include "vm.hpp"
 #include "type_system.hpp"
+#include "tracing_gc.hpp"
 #include "rational.hpp"
 
 namespace ts {
@@ -87,6 +88,12 @@ void copyListHead(ListNode* dst, ListNode const* src, Type* elemType);
 // Complex/Fraction count as Inline but contain no nested pointers, so
 // they short-circuit the recursion.
 void inlineWalkPointers(Word* base, Type* type, bool release_);
+
+// Phase 3 of tracing-GC project: same layout walk as inlineWalkPointers,
+// but instead of retain/release each Obj* found is fed to gc.mark().
+class TracingGC;
+void gcScanInlinePointers(Word const* base, Type* type, TracingGC& gc);
+void gcScanPayload(Word const* base, Type* type, TracingGC& gc);
 
 // Retain / release Obj* children inside an arbitrary payload of `type`.
 // Phase 4g.11: used by inline-composite containers (Map/Set) so the same
@@ -369,6 +376,12 @@ public:
     void releaseChildren() override {
         for (auto* obj : v_) { if (obj) obj->release(); }
     }
+
+    void gcScanChildren(TracingGC& gc) override {
+        for (auto* obj : v_) {
+            if (auto* g = dynamic_cast<GCObj*>(obj)) gc.mark(g);
+        }
+    }
 };
 
 // Phase 4g.8: Array of inline composite elements. Each element occupies
@@ -420,6 +433,7 @@ public:
     VMString str() const override;
 
     void releaseChildren() override;
+    void gcScanChildren(TracingGC& gc) override;
 };
 
 // Forward declaration
@@ -488,6 +502,16 @@ public:
         }
     }
 
+    void gcScanChildren(TracingGC& gc) override {
+        if (isLazy_) {
+            if (generator_) gc.mark(reinterpret_cast<GCObj*>(generator_));
+        } else {
+            auto* lt = static_cast<ListType*>(type_);
+            gcScanPayload(headData(), lt->elemType_, gc);
+            if (tail_) gc.mark(tail_);
+        }
+    }
+
 private:
     ListNode(Type* type, u32 payloadWords);
 };
@@ -541,6 +565,12 @@ public:
         if (rightList_) rightList_->release();
         if (broadcastValIsObj_ && broadcastVal_.o) broadcastVal_.o->release();
     }
+
+    void gcScanChildren(TracingGC& gc) override {
+        if (leftList_) gc.mark(leftList_);
+        if (rightList_) gc.mark(rightList_);
+        if (broadcastValIsObj_ && broadcastVal_.o) gc.mark(broadcastVal_.o);
+    }
 };
 
 // Generator for lazy unary arithmetic on lists (e.g., negation)
@@ -560,6 +590,10 @@ public:
 
     void releaseChildren() override {
         if (source_) source_->release();
+    }
+
+    void gcScanChildren(TracingGC& gc) override {
+        if (source_) gc.mark(source_);
     }
 };
 
@@ -597,6 +631,12 @@ public:
         if (end_) end_->release();
         if (step_) step_->release();
     }
+
+    void gcScanChildren(TracingGC& gc) override {
+        if (current_) gc.mark(current_);
+        if (end_) gc.mark(end_);
+        if (step_) gc.mark(step_);
+    }
 };
 
 // ============================================================================
@@ -618,6 +658,9 @@ public:
     void releaseChildren() override {
         if (source_) source_->release();
     }
+    void gcScanChildren(TracingGC& gc) override {
+        if (source_) gc.mark(source_);
+    }
 };
 
 // Generator for drop(list, n) - skip first n elements
@@ -632,6 +675,9 @@ public:
     void releaseChildren() override {
         if (source_) source_->release();
     }
+    void gcScanChildren(TracingGC& gc) override {
+        if (source_) gc.mark(source_);
+    }
 };
 
 // Generator for stride(list, n) - every nth element
@@ -645,6 +691,9 @@ public:
     void generate(VM& vm, ListNode* owner) override;
     void releaseChildren() override {
         if (source_) source_->release();
+    }
+    void gcScanChildren(TracingGC& gc) override {
+        if (source_) gc.mark(source_);
     }
 };
 
@@ -664,6 +713,10 @@ public:
         if (source_) source_->release();
         if (valueIsObj_ && currentValue_.o) currentValue_.o->release();
     }
+    void gcScanChildren(TracingGC& gc) override {
+        if (source_) gc.mark(source_);
+        if (valueIsObj_ && currentValue_.o) gc.mark(currentValue_.o);
+    }
 };
 
 // Generator for cat(list1, list2) - concatenate two lists
@@ -679,6 +732,10 @@ public:
     void releaseChildren() override {
         if (first_) first_->release();
         if (second_) second_->release();
+    }
+    void gcScanChildren(TracingGC& gc) override {
+        if (first_) gc.mark(first_);
+        if (second_) gc.mark(second_);
     }
 };
 
@@ -742,6 +799,9 @@ public:
     void releaseChildren() override {
         if (array_) array_->release();
     }
+    void gcScanChildren(TracingGC& gc) override {
+        if (array_) gc.mark(array_);
+    }
 };
 
 // Generator for cyc(list) - infinitely cycle through a list
@@ -756,6 +816,10 @@ public:
     void releaseChildren() override {
         if (current_) current_->release();
         if (head_) head_->release();
+    }
+    void gcScanChildren(TracingGC& gc) override {
+        if (current_) gc.mark(current_);
+        if (head_) gc.mark(head_);
     }
 };
 
@@ -772,6 +836,10 @@ public:
     void releaseChildren() override {
         if (current_) current_->release();
         if (head_) head_->release();
+    }
+    void gcScanChildren(TracingGC& gc) override {
+        if (current_) gc.mark(current_);
+        if (head_) gc.mark(head_);
     }
 };
 
@@ -790,6 +858,10 @@ public:
         if (source_) source_->release();
         if (valueIsObj_ && lastValue_.o) lastValue_.o->release();
     }
+    void gcScanChildren(TracingGC& gc) override {
+        if (source_) gc.mark(source_);
+        if (valueIsObj_ && lastValue_.o) gc.mark(lastValue_.o);
+    }
 };
 
 // Generator for map(list, fn) - apply function to each element
@@ -806,6 +878,10 @@ public:
     void releaseChildren() override {
         if (source_) source_->release();
         if (fn_) reinterpret_cast<GCObj*>(fn_)->release();
+    }
+    void gcScanChildren(TracingGC& gc) override {
+        if (source_) gc.mark(source_);
+        if (fn_) gc.mark(reinterpret_cast<GCObj*>(fn_));
     }
 };
 
@@ -862,6 +938,16 @@ public:
                 broadcastVals_[i].o->release();
         }
     }
+    void gcScanChildren(TracingGC& gc) override {
+        if (source_) gc.mark(source_);
+        if (info_) gc.mark(info_);
+        if (info_) {
+            for (u16 i = 0; i < numBroadcast_; ++i) {
+                if (i < info_->broadcastArgs.size() && info_->broadcastArgs[i].isObj && broadcastVals_[i].o)
+                    gc.mark(broadcastVals_[i].o);
+            }
+        }
+    }
 };
 
 // Generator for filter(list, fn) - keep elements where fn returns true
@@ -877,6 +963,10 @@ public:
     void releaseChildren() override {
         if (source_) source_->release();
         if (fn_) reinterpret_cast<GCObj*>(fn_)->release();
+    }
+    void gcScanChildren(TracingGC& gc) override {
+        if (source_) gc.mark(source_);
+        if (fn_) gc.mark(reinterpret_cast<GCObj*>(fn_));
     }
 };
 
@@ -896,6 +986,10 @@ public:
     void releaseChildren() override {
         if (source_) source_->release();
         if (fn_) reinterpret_cast<GCObj*>(fn_)->release();
+    }
+    void gcScanChildren(TracingGC& gc) override {
+        if (source_) gc.mark(source_);
+        if (fn_) gc.mark(reinterpret_cast<GCObj*>(fn_));
     }
 };
 
@@ -917,6 +1011,11 @@ public:
         if (fn_) reinterpret_cast<GCObj*>(fn_)->release();
         if (accIsObj_ && accumulator_.o) accumulator_.o->release();
     }
+    void gcScanChildren(TracingGC& gc) override {
+        if (source_) gc.mark(source_);
+        if (fn_) gc.mark(reinterpret_cast<GCObj*>(fn_));
+        if (accIsObj_ && accumulator_.o) gc.mark(accumulator_.o);
+    }
 };
 
 // Generator for zip(list1, list2) - zip into tuples
@@ -935,6 +1034,10 @@ public:
         if (left_) left_->release();
         if (right_) right_->release();
     }
+    void gcScanChildren(TracingGC& gc) override {
+        if (left_) gc.mark(left_);
+        if (right_) gc.mark(right_);
+    }
 };
 
 // Generator for enumerate(list) - pairs (index, element)
@@ -950,6 +1053,9 @@ public:
     void generate(VM& vm, ListNode* owner) override;
     void releaseChildren() override {
         if (source_) source_->release();
+    }
+    void gcScanChildren(TracingGC& gc) override {
+        if (source_) gc.mark(source_);
     }
 };
 
@@ -967,6 +1073,10 @@ public:
         if (fn_) reinterpret_cast<GCObj*>(fn_)->release();
         if (valueIsObj_ && current_.o) current_.o->release();
     }
+    void gcScanChildren(TracingGC& gc) override {
+        if (fn_) gc.mark(reinterpret_cast<GCObj*>(fn_));
+        if (valueIsObj_ && current_.o) gc.mark(current_.o);
+    }
 };
 
 // Generator for join(list of lists) - flatten one level
@@ -982,6 +1092,10 @@ public:
         if (outer_) outer_->release();
         if (inner_) inner_->release();
     }
+    void gcScanChildren(TracingGC& gc) override {
+        if (outer_) gc.mark(outer_);
+        if (inner_) gc.mark(inner_);
+    }
 };
 
 // Generator for toList(array) - lazily iterate over array elements
@@ -996,6 +1110,9 @@ public:
     void generate(VM& vm, ListNode* owner) override;
     void releaseChildren() override {
         if (array_) array_->release();
+    }
+    void gcScanChildren(TracingGC& gc) override {
+        if (array_) gc.mark(array_);
     }
 };
 
@@ -1020,6 +1137,12 @@ public:
             payloadRelease(bufferedValue_.data(), listType_->elemType_);
         }
     }
+    void gcScanChildren(TracingGC& gc) override {
+        if (coro_) gc.mark(reinterpret_cast<GCObj*>(coro_));
+        if (!bufferedValue_.empty()) {
+            gcScanPayload(bufferedValue_.data(), listType_->elemType_, gc);
+        }
+    }
 };
 
 // Generator for codePoints(String) - lazily iterate Unicode code points.
@@ -1033,6 +1156,9 @@ public:
     void generate(VM& vm, ListNode* owner) override;
     void releaseChildren() override {
         if (str_) str_->release();
+    }
+    void gcScanChildren(TracingGC& gc) override {
+        if (str_) gc.mark(str_);
     }
 };
 
@@ -1048,6 +1174,11 @@ public:
     void releaseChildren() override {
         auto* rt = static_cast<RefType*>(type_);
         if (storesObjPtr(rt->elemType_) && value_.o) value_.o->release();
+    }
+
+    void gcScanChildren(TracingGC& gc) override {
+        auto* rt = static_cast<RefType*>(type_);
+        gcScanPayload(&value_, rt->elemType_, gc);
     }
 };
 
@@ -1070,6 +1201,11 @@ public:
     void releaseChildren() override {
         auto* rt = static_cast<RefType*>(type_);
         inlineWalkPointers(&v[0], rt->elemType_, /*release_=*/true);
+    }
+
+    void gcScanChildren(TracingGC& gc) override {
+        auto* rt = static_cast<RefType*>(type_);
+        gcScanInlinePointers(&v[0], rt->elemType_, gc);
     }
 
 private:
@@ -1098,6 +1234,10 @@ public:
         inlineWalkPointers(&v[0], type_, /*release_=*/true);
     }
 
+    void gcScanChildren(TracingGC& gc) override {
+        gcScanInlinePointers(&v[0], type_, gc);
+    }
+
 private:
     Struct(Type* type, u32 numFields);
 };
@@ -1120,6 +1260,10 @@ public:
 
     void releaseChildren() override {
         inlineWalkPointers(&v[0], type_, /*release_=*/true);
+    }
+
+    void gcScanChildren(TracingGC& gc) override {
+        gcScanInlinePointers(&v[0], type_, gc);
     }
 
 private:
@@ -1172,6 +1316,14 @@ public:
         }
     }
 
+    void gcScanChildren(TracingGC& gc) override {
+        auto t = static_cast<EnumType*>(type_);
+        if ((size_t)which_ < t->layout_.size()) {
+            Type* ct = t->layout_[which_].type;
+            if (ct) gcScanPayload(&v[0], ct, gc);
+        }
+    }
+
 private:
     Enum(Type* type, u8 payloadSizeWords);
 };
@@ -1200,6 +1352,10 @@ public:
 
     void releaseChildren() override {
         if (isObjType_ && value_.o) value_.o->release();
+    }
+
+    void gcScanChildren(TracingGC& gc) override {
+        if (isObjType_ && value_.o) gc.mark(value_.o);
     }
 };
 
@@ -1234,6 +1390,14 @@ public:
         payloadRelease(startData(), et);
         if (!isInfinite_) payloadRelease(endData(), et);
         payloadRelease(stepData(), et);
+    }
+
+    void gcScanChildren(TracingGC& gc) override {
+        auto* rt = static_cast<RangeType*>(type_);
+        Type* et = rt->elemType_;
+        gcScanPayload(startData(), et, gc);
+        if (!isInfinite_) gcScanPayload(endData(), et, gc);
+        gcScanPayload(stepData(), et, gc);
     }
 
 private:
@@ -1311,6 +1475,7 @@ public:
 
     VMString str() const override;
     void releaseChildren() override;
+    void gcScanChildren(TracingGC& gc) override;
 
 private:
     void maybeGrow();
@@ -1358,6 +1523,7 @@ public:
 
     VMString str() const override;
     void releaseChildren() override;
+    void gcScanChildren(TracingGC& gc) override;
 
 private:
     void maybeGrow();
@@ -1418,6 +1584,13 @@ public:
         }
     }
 
+    void gcScanChildren(TracingGC& gc) override {
+        const auto& gcFreeVars = getGCFreeVars();
+        for (auto idx : gcFreeVars) {
+            if (freeVars_[idx].o) gc.mark(freeVars_[idx].o);
+        }
+    }
+
 private:
     Lambda(Type* type, u16 numFreeVars);
 };
@@ -1449,6 +1622,16 @@ public:
             auto& map = codeBlock_->coroGCMaps_[gcMapIndex_];
             for (u16 idx : map) {
                 if (idx < numRegs_ && regs_[idx].o) regs_[idx].o->release();
+            }
+        }
+    }
+
+    void gcScanChildren(TracingGC& gc) override {
+        if (caller_) gc.mark(caller_);
+        if (codeBlock_ && gcMapIndex_ < codeBlock_->coroGCMaps_.size()) {
+            auto& map = codeBlock_->coroGCMaps_[gcMapIndex_];
+            for (u16 idx : map) {
+                if (idx < numRegs_ && regs_[idx].o) gc.mark(regs_[idx].o);
             }
         }
     }
@@ -1505,6 +1688,17 @@ public:
         if (funcType_) {
             for (u16 i = 0; i < numArgs_ && i < funcType_->argTypes_.size(); ++i) {
                 if (storesObjPtr(funcType_->argTypes_[i]) && args_[i].o) args_[i].o->release();
+            }
+        }
+    }
+
+    void gcScanChildren(TracingGC& gc) override {
+        if (topFrame_) gc.mark(topFrame_);
+        if (callerCoroFrame_) gc.mark(callerCoroFrame_);
+        if (callerCoroutine_) gc.mark(callerCoroutine_);
+        if (funcType_) {
+            for (u16 i = 0; i < numArgs_ && i < funcType_->argTypes_.size(); ++i) {
+                if (storesObjPtr(funcType_->argTypes_[i]) && args_[i].o) gc.mark(args_[i].o);
             }
         }
     }
