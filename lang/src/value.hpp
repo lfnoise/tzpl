@@ -120,6 +120,15 @@ void unboxInlineDeepTo(VM& vm, Type* type, Obj* obj, Word* dst);
 // container is an InlineArray.
 Obj* boxInlineDeepFrom(VM& vm, Type* type, Word const* src);
 
+// Per-safepoint stack map. Records which register slots hold GC references
+// at this PC. Populated by codegen at every op_safepoint emission so that a
+// future tracing GC can walk roots precisely. Sorted by pcOffset to allow
+// binary-search lookup at runtime.
+struct StackMap {
+    u32 pcOffset;                  // Offset into CodeBlock::code where op_safepoint lives
+    std::vector<u16> liveRefRegs;  // Register indices holding Obj* at this PC
+};
+
 // CodeBlock - compiled function holding register-based instructions
 // System-allocated during compilation, never garbage collected.
 class CodeBlock {
@@ -133,6 +142,11 @@ public:
     SymbolPtr  name;           // Function name (debug)
     Type*      funcType;       // FunctionType* (nullable for top-level blocks)
     std::vector<std::vector<u16>> coroGCMaps_;  // per yield point: Obj* register indices
+
+    // Phase 2 of tracing-GC project: per-safepoint live-reference register
+    // bitmaps, emitted alongside op_safepoint. Phase 3 will use these as the
+    // root set for tracing; for now they validate the encoding.
+    std::vector<StackMap> stackMaps_;
 
     CodeBlock();
 

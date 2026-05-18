@@ -401,6 +401,15 @@ private:
         return t && t->repr_ == ts::Type::Repr::Inline && t->sizeWords_ > 1;
     }
 
+    // Phase 2 of tracing-GC project: emit op_safepoint and record a
+    // CodeBlock::StackMap entry naming every live-reference register slot
+    // at this PC. Mirrors the existing coroGCMaps_ pattern but applies to
+    // every safepoint, not just yield points. Conservative: skips inline
+    // multiword locals (their base word is a payload word, not an Obj*;
+    // tracing through it would crash). Phase 3 will refine to walk inline
+    // composite layouts precisely.
+    void emitSafepointWithStackMap();
+
     // BOX an inline value into a heap Obj* (returns reg holding the Obj*).
     // For non-inline types, returns srcReg unchanged.
     //

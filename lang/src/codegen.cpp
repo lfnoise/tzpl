@@ -212,12 +212,36 @@ void CodeGen::emitJumpTo(u32 targetIdx) {
     // delete queue (and, in later phases, mark/sweep work) gets drained
     // inside hot loops, not only between events. The poll's hot path is one
     // relaxed load + branch.
-    emitOp(op_safepoint);
+    emitSafepointWithStackMap();
     emitOp(op_jump);
     u32 pos = (u32)currentBlock_->code.size();
     emitInt((i64)targetIdx);
     jumpFixups_.push_back(pos);
     invalidateLastProducer();
+}
+
+void CodeGen::emitSafepointWithStackMap() {
+    // Record stack map BEFORE emitting the op so pcOffset matches the
+    // op_safepoint Code word position. Walk every local in scope; report
+    // its register if its static type holds an Obj*. Conservative: inline
+    // multiword composites are skipped (their base word is a payload word,
+    // tag for enums / field 0 for structs/tuples -- treating it as Obj*
+    // would mis-trace). Refining that is a Phase 3 task.
+    u32 pcOffset = (u32)currentBlock_->code.size();
+    StackMap sm;
+    sm.pcOffset = pcOffset;
+    for (auto const& scope : localScopes_) {
+        for (auto const& entry : scope) {
+            Type* t = entry.second.type;
+            if (!t) continue;
+            if (isInlineMultiword(t)) continue;
+            if (storesObjPtr(t)) {
+                sm.liveRefRegs.push_back(entry.second.reg);
+            }
+        }
+    }
+    currentBlock_->stackMaps_.push_back(std::move(sm));
+    emitOp(op_safepoint);
 }
 
 void CodeGen::resolveJumps(CodeBlock* block) {
@@ -946,8 +970,9 @@ void CodeGen::genFnDecl(FnDeclNode* decl) {
     // safepoint. Recursive functions (e.g., binary_trees' build()) contain no
     // backward jumps, so without this they'd never drain the deferred-delete
     // queue during the recursion. The poll's hot path is one relaxed load +
-    // branch. All default-arg entry points fall through to here.
-    emitOp(op_safepoint);
+    // branch. All default-arg entry points fall through to here. Phase 2
+    // attaches a stack map covering parameter registers.
+    emitSafepointWithStackMap();
 
     // Generate body
     if (decl->body->kind == ASTNode::Block) {

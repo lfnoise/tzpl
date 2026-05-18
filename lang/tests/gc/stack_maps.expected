@@ -1,0 +1,24 @@
+-- scalar_only  (3 regs, 2 args, type fn(Int, Int) Int)
+     0  SAFEPOINT                 ; refs: []
+     1  ADD_INT                 r2, r0, r1
+     3  RETURN                  r2, r1
+-- obj_param  (3 regs, 1 args, type fn(String) Int)
+     0  SAFEPOINT                 ; refs: [r0]
+     1  MOV                     r1, r0
+     3  CALL_PRIM               r2, r1, r1  ;  101
+     6  RETURN                  r2, r1
+-- loop_with_obj  (7 regs, 1 args, type fn(Int) Int)
+     0  SAFEPOINT                 ; refs: []
+     1  LOAD_OBJ                r1, r0
+     3  LOAD_INT                r2  ;  0
+     6  LT_INT                  r3, r2, r0
+     8  JUMP_IF_FALSE           r3  -> 22
+    11  LOAD_OBJ                r4, r1
+    13  CONCAT_STR              r5, r1, r4
+    15  MOV                     r1, r5
+    17  ADDI_INT                r2, r2, 1
+    19  SAFEPOINT                 ; refs: [r1]
+    20  JUMP                    -> 6
+    22  MOV                     r3, r1
+    24  CALL_PRIM               r4, r1, r3  ;  101
+    27  RETURN                  r4, r1
