@@ -194,7 +194,11 @@ private:
     VM& vm_;
     Phase phase_ = Phase::Idle;
     std::vector<GCObj*> grayWorklist_;
-    GCObj* sweepCursor_ = nullptr;
+    // Singly-linked sweep cursor: pointer to the slot that holds the
+    // current candidate. Lets sweep unlink freed objects inline without
+    // a per-object prev pointer. Initialized to &vm_.allObjsHead_ on
+    // sweep start; advanced by `&obj->allObjsNext_` after a keep.
+    GCObj** sweepSlot_ = nullptr;
 
     // Phase 6 step 3: bounded-fan-out partial-scan queue. Each entry is a
     // container that has already been Blacked (so it can't be swept) and

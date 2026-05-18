@@ -498,7 +498,10 @@ private:
 class ListGenerator : public Obj {
 public:
     ListGenerator(Type* type) : Obj(type) {
-        registerNewObj(this);
+        // ListGen subclasses don't pass a tag yet -- they fall back to virtual
+        // gcScanChildren via GCTag::Default. Migrate the hot ones (e.g.,
+        // MapListGen, FilterListGen) to specific tags in a follow-up.
+        registerNewObj(this, GCTag::Default);
     }
 
     virtual void generate(VM& vm, ListNode* owner) = 0;

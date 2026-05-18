@@ -36,14 +36,42 @@ namespace ts {
 // Forward declarations
 class VM;
 
-// Phase 3 of tracing-GC project: tri-color marking state. Stored in
-// GCObj::color_. White = unmarked (potential garbage); Gray = marked but
-// children not yet scanned (on worklist); Black = marked and children
-// scanned (live). Sweep frees whites; mark transitions white -> gray -> black.
+// Tri-color marking state. White = unmarked (potential garbage);
+// Gray = marked but children not yet scanned (on worklist);
+// Black = marked and children scanned (live). Sweep frees whites;
+// mark transitions white -> gray -> black.
 enum class GCColor : u8 {
     White = 0,
     Gray  = 1,
     Black = 2,
+};
+
+// Tag for tag-dispatched gcScan. Stored in GCObj's header padding
+// (a free byte; no size cost). The marker uses it to skip indirect-call
+// dispatch for tagged types, going through a switch in gcScanByTag
+// instead. Untagged objects (Default) fall through to the existing
+// virtual gcScanChildren, so this is a strict optimization -- subclasses
+// can opt in incrementally.
+//
+// Specific tags exist for the highest-allocation-frequency Obj subclasses
+// (Tuple, Struct, Enum, ObjArray, ListNode, RefValue, MapObj, SetObj,
+// Lambda). For these, the scan path is a non-virtual qualified call.
+enum class GCTag : u8 {
+    Default = 0,      // fall back to virtual gcScanChildren
+    None,             // leaf: no GC children to scan (short-circuit)
+    ObjArray,
+    InlineArray,
+    ListNode,
+    RefValue,
+    InlineRef,
+    Struct,
+    Tuple,
+    Enum,
+    MapObj,
+    SetObj,
+    Lambda,
+    CoroutineObj,
+    CoroutineFrame,
 };
 
 // Forward declaration
@@ -53,35 +81,48 @@ class GCObj;
 // Called from registerNewObj() right after construction.
 void linkObjToAllList(GCObj* obj);
 
-// Unlink an object from the owning VM's all-objects list (defined in vm.cpp).
-// Called from GCObj::operator delete just before memory is released.
-void unlinkObjFromAllList(GCObj* obj);
+// Tag-dispatched scan. Implemented in tracing_gc.cpp; declared here so
+// GCObj remains a clean header.
+class TracingGC;
+void gcScanByTag(GCObj* obj, TracingGC& gc);
+u32  gcScanChunkByTag(GCObj* obj, TracingGC& gc, u32 cursor);
 
-// Base class for all garbage-collected objects
+// Base class for all garbage-collected objects.
+//
+// Layout (with virtual destructor for subclass cleanup):
+//     vptr               : 8 bytes
+//     homeAllocator_     : 8 bytes
+//     color_             : 1 byte
+//     immortal_          : 1 byte
+//     gcTag_             : 1 byte
+//     padding            : 5 bytes
+//     allObjsNext_       : 8 bytes  (singly-linked list head -> tail)
+//                          = 32 bytes total
+//
+// The all-objects list is singly-linked. The collector sweep walks it
+// forward and unlinks freed objects inline via the slot-pointer idiom
+// (no per-node prev pointer needed). New allocations prepend to the head
+// in O(1); registerNewObj is the only writer outside of sweep.
 class GCObj {
     rt::TLSFAllocator* homeAllocator_ = nullptr;
-
-    // Tracing-GC state. All accesses are single-threaded: the owning VM's
-    // mutator (color reads) and the same VM's safepoint-driven collector
-    // (color writes).
     GCColor color_ = GCColor::White;
     // Immortal objects (compiler-owned constants: types, symbols, immortal
     // strings) live outside any VM's all-objects list; mark() short-circuits
     // on them so the tracer never recurses through them.
     bool    immortal_ = true;
-    GCObj*  allObjsPrev_ = nullptr;  // intrusive doubly-linked list of all
-    GCObj*  allObjsNext_ = nullptr;  // mortal objects alive in the owning VM
+    GCTag   gcTag_ = GCTag::None;
+    GCObj*  allObjsNext_ = nullptr;
     friend class TracingGC;
     friend void linkObjToAllList(GCObj*);
-    friend void unlinkObjFromAllList(GCObj*);
 public:
     GCColor color() const { return color_; }
     void setColor(GCColor c) { color_ = c; }
+    GCTag gcTag() const { return gcTag_; }
+    void setGCTag(GCTag t) { gcTag_ = t; }
     GCObj* allObjsNext() const { return allObjsNext_; }
 
     static constexpr uintptr_t kPtrMask = ~(uintptr_t)1;
 
-    // Constructor
     GCObj();
     virtual ~GCObj() {}
 
@@ -91,29 +132,21 @@ public:
     static void operator delete(void* ptr) noexcept;
     static void operator delete(void* ptr, void*) noexcept {}  // placement delete
 
-    // Enumerate every direct Obj* child and call gc.mark() on each. The
-    // tracing collector uses this to walk the live object graph transitively.
-    // Default no-op; subclasses with GC-managed fields override.
-    //
-    // For containers with > TracingGC::kFanoutThreshold entries, the override
-    // should call gc.pushPartial(this) and return immediately; the actual
-    // child walk happens via gcScanChunk under a bounded per-call window so
-    // a single scan can't overshoot the step-budget deadline.
-    virtual void gcScanChildren(class TracingGC& /*gc*/) {}
-
-    // Scan up to TracingGC::kFanoutChunk children starting at `cursor`.
-    // Return the next cursor; UINT32_MAX signals "fully done" and removes
-    // the object from the partial queue. Default implementation just signals
-    // done -- only large containers override.
-    virtual u32 gcScanChunk(class TracingGC& /*gc*/, u32 /*cursor*/) {
-        return ~u32{0};
-    }
-
     bool isImmortal() const { return immortal_; }
     void makeImmortal()     { immortal_ = true; }
     void setMortal()        { immortal_ = false; }
 
     rt::TLSFAllocator* homeAllocator() const { return homeAllocator_; }
+
+    // Virtuals retained for `override` compatibility in 40+ subclasses.
+    // The marker no longer calls these directly -- it dispatches through
+    // gcScanByTag / gcScanChunkByTag, which use qualified non-virtual
+    // calls keyed on gcTag_. The virtuals stay as a documented fallback
+    // and so the override keyword keeps compiling.
+    virtual void gcScanChildren(class TracingGC& /*gc*/) {}
+    virtual u32 gcScanChunk(class TracingGC& /*gc*/, u32 /*cursor*/) {
+        return ~u32{0};
+    }
 };
 
 } // ts

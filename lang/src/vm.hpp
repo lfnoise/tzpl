@@ -557,8 +557,11 @@ extern thread_local Compiler* gCurrentCompiler;
 
 // Register a newly constructed GCObj.
 // During compilation: tracked by the Compiler (immortal, system-allocated).
-// During runtime: added to auto-release pool with initial refcount.
-void registerNewObj(GCObj* obj);
+// During runtime: linked into the VM's all-objs list as mortal.
+// `tag` controls how the tracer dispatches gcScan. Default keeps the legacy
+// virtual fallback so untagged subclasses still work; tagged subclasses get
+// a non-virtual qualified call in the marker's switch (faster, no vtable hit).
+void registerNewObj(GCObj* obj, GCTag tag = GCTag::Default);
 
 } // namespace ts
 

@@ -43,9 +43,9 @@ thread_local Compiler* gCurrentCompiler = nullptr;
 
 void linkObjToAllList(GCObj* obj) {
     if (!gCurrentVM) return;
-    obj->allObjsPrev_ = nullptr;
+    // Singly-linked: prepend obj to head. O(1). Sweep unlinks inline via
+    // its slot-pointer walk so no per-object prev pointer is needed.
     obj->allObjsNext_ = gCurrentVM->allObjsHead_;
-    if (gCurrentVM->allObjsHead_) gCurrentVM->allObjsHead_->allObjsPrev_ = obj;
     gCurrentVM->allObjsHead_ = obj;
     // Phase 3 incremental: if a tracing cycle is in flight, color this new
     // object Black so it is conservatively considered reachable for the
@@ -70,18 +70,8 @@ void linkObjToAllList(GCObj* obj) {
     }
 }
 
-void unlinkObjFromAllList(GCObj* obj) {
-    if (!gCurrentVM) return;
-    GCObj* p = obj->allObjsPrev_;
-    GCObj* n = obj->allObjsNext_;
-    if (p) p->allObjsNext_ = n;
-    else if (gCurrentVM->allObjsHead_ == obj) gCurrentVM->allObjsHead_ = n;
-    if (n) n->allObjsPrev_ = p;
-    obj->allObjsPrev_ = nullptr;
-    obj->allObjsNext_ = nullptr;
-}
-
-void registerNewObj(GCObj* obj) {
+void registerNewObj(GCObj* obj, GCTag tag) {
+    obj->setGCTag(tag);
     if (gCurrentCompiler) {
         gCurrentCompiler->trackObject(obj);
         // Compiler objects are immortal -- they stay outside the VM's all-
@@ -179,17 +169,12 @@ void* GCObj::operator new(usize size) {
 void GCObj::operator delete(void* ptr) noexcept {
     if (!ptr) return;
     auto* obj = static_cast<GCObj*>(ptr);
-    // Phase 3: take the object out of the VM's all-objects list before we
-    // release its memory. Safe to call when the list is empty / obj isn't
-    // linked (e.g., compiler-tracked immortal objects).
-    unlinkObjFromAllList(obj);
+    // Singly-linked sweep unlinks before it calls delete, so operator delete
+    // no longer touches the all-objects list. The only writers of that list
+    // are linkObjToAllList (on alloc) and the sweep itself.
 #if __has_feature(address_sanitizer)
     ::free(ptr);
 #else
-    // Use the object's home allocator for deallocation. This is correct even
-    // in cross-thread deletion scenarios: the object is always deleted by the
-    // home VM's heartbeat, which has set gCurrentAllocator to the home
-    // allocator. Using homeAllocator_ directly is belt-and-suspenders.
     rt::TLSFAllocator* alloc = obj->homeAllocator_;
     if (alloc) {
         alloc->deallocate(ptr);

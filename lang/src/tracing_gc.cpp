@@ -16,9 +16,84 @@
 
 #include "tracing_gc.hpp"
 #include "vm.hpp"
-#include "value.hpp"   // CodeBlock, StackMap
+#include "value.hpp"   // CodeBlock, StackMap, all Obj subclasses
 
 namespace ts {
+
+// Tag-dispatched scan. Replaces a virtual call (vtable lookup + indirect
+// branch) with a switch over the 1-byte gcTag_ field, calling the specific
+// subclass's gcScanChildren via qualified non-virtual syntax. The qualified
+// form `static_cast<T*>(obj)->T::gcScanChildren(gc)` bypasses the vtable
+// even though gcScanChildren is virtual -- the compiler emits a direct call.
+//
+// GCTag::Default keeps the virtual fallback so untagged subclasses still
+// work; this is a strict optimization. Untagged subclasses can opt in
+// incrementally without breaking anything in the meantime.
+void gcScanByTag(GCObj* obj, TracingGC& gc) {
+    switch (obj->gcTag()) {
+    case GCTag::None:
+        return;  // leaf: no children to scan
+    case GCTag::ObjArray:
+        static_cast<ObjArray*>(obj)->ObjArray::gcScanChildren(gc);
+        return;
+    case GCTag::InlineArray:
+        static_cast<InlineArray*>(obj)->InlineArray::gcScanChildren(gc);
+        return;
+    case GCTag::ListNode:
+        static_cast<ListNode*>(obj)->ListNode::gcScanChildren(gc);
+        return;
+    case GCTag::RefValue:
+        static_cast<RefValue*>(obj)->RefValue::gcScanChildren(gc);
+        return;
+    case GCTag::InlineRef:
+        static_cast<InlineRef*>(obj)->InlineRef::gcScanChildren(gc);
+        return;
+    case GCTag::Struct:
+        static_cast<Struct*>(obj)->Struct::gcScanChildren(gc);
+        return;
+    case GCTag::Tuple:
+        static_cast<Tuple*>(obj)->Tuple::gcScanChildren(gc);
+        return;
+    case GCTag::Enum:
+        static_cast<Enum*>(obj)->Enum::gcScanChildren(gc);
+        return;
+    case GCTag::MapObj:
+        static_cast<MapObj*>(obj)->MapObj::gcScanChildren(gc);
+        return;
+    case GCTag::SetObj:
+        static_cast<SetObj*>(obj)->SetObj::gcScanChildren(gc);
+        return;
+    case GCTag::Lambda:
+        static_cast<Lambda*>(obj)->Lambda::gcScanChildren(gc);
+        return;
+    case GCTag::CoroutineObj:
+        static_cast<CoroutineObj*>(obj)->CoroutineObj::gcScanChildren(gc);
+        return;
+    case GCTag::CoroutineFrame:
+        static_cast<CoroutineFrame*>(obj)->CoroutineFrame::gcScanChildren(gc);
+        return;
+    case GCTag::Default:
+    default:
+        obj->gcScanChildren(gc);  // virtual fallback for untagged subclasses
+        return;
+    }
+}
+
+u32 gcScanChunkByTag(GCObj* obj, TracingGC& gc, u32 cursor) {
+    // Only container types push partials; restrict the fast paths to those.
+    switch (obj->gcTag()) {
+    case GCTag::ObjArray:
+        return static_cast<ObjArray*>(obj)->ObjArray::gcScanChunk(gc, cursor);
+    case GCTag::InlineArray:
+        return static_cast<InlineArray*>(obj)->InlineArray::gcScanChunk(gc, cursor);
+    case GCTag::MapObj:
+        return static_cast<MapObj*>(obj)->MapObj::gcScanChunk(gc, cursor);
+    case GCTag::SetObj:
+        return static_cast<SetObj*>(obj)->SetObj::gcScanChunk(gc, cursor);
+    default:
+        return obj->gcScanChunk(gc, cursor);
+    }
+}
 
 // Look up the stack map for the given PC offset in a CodeBlock. Stack maps
 // are appended in code order during codegen, so pcOffset values are strictly
@@ -200,7 +275,7 @@ u32 TracingGC::step_mark(u64 deadlineNanos) {
     // case mark step for programs holding 100k-entry Maps / Arrays / etc.
     while (!pendingContainers_.empty()) {
         PartialEntry& e = pendingContainers_.back();
-        u32 next = e.obj->gcScanChunk(*this, e.cursor);
+        u32 next = gcScanChunkByTag(e.obj, *this, e.cursor);
         if (next == ~u32{0}) {
             pendingContainers_.pop_back();
         } else {
@@ -220,25 +295,26 @@ u32 TracingGC::step_mark(u64 deadlineNanos) {
         else {
             obj->color_ = GCColor::Black;
             ++currentBlackCount_;
-            // Transitive scan via the virtual gcScanChildren. Containers
-            // with > kFanoutThreshold entries push themselves to the
-            // partial queue and return immediately; bounded-fan-out types
-            // (Ref, Tuple, Struct, Enum, ListNode, lambdas, coroutines)
-            // walk inline since their fan-out is statically small.
-            obj->gcScanChildren(*this);
+            // Transitive scan via tag-dispatched gcScanByTag. Tagged subclasses
+            // (Tuple, Struct, ObjArray, ListNode, RefValue, MapObj, SetObj,
+            // Lambda, CoroutineObj, ...) get a direct non-virtual call;
+            // untagged ones (GCTag::Default) fall back to the virtual.
+            // Containers with > kFanoutThreshold entries push themselves to
+            // the partial queue and return immediately.
+            gcScanByTag(obj, *this);
             ++done;
         }
         if (++sinceCheck >= kCheckEvery) {
             sinceCheck = 0;
             if (gcMonoNanos() >= deadlineNanos) return done;
         }
-        // A gcScanChildren call may have enqueued a partial container.
-        // Service that before grabbing the next gray, to keep the partial
-        // queue from growing unboundedly while gray drains.
+        // A gcScan call may have enqueued a partial container. Service
+        // that before grabbing the next gray, to keep the partial queue
+        // from growing unboundedly while gray drains.
         if (!pendingContainers_.empty()) {
             while (!pendingContainers_.empty()) {
                 PartialEntry& e = pendingContainers_.back();
-                u32 next = e.obj->gcScanChunk(*this, e.cursor);
+                u32 next = gcScanChunkByTag(e.obj, *this, e.cursor);
                 if (next == ~u32{0}) pendingContainers_.pop_back();
                 else e.cursor = next;
                 ++done;
@@ -251,26 +327,28 @@ u32 TracingGC::step_mark(u64 deadlineNanos) {
     }
     // Both worklists drained: advance to Sweep.
     phase_ = Phase::Sweep;
-    sweepCursor_ = vm_.allObjsHead_;
+    sweepSlot_ = &vm_.allObjsHead_;
     return done;
 }
 
 u32 TracingGC::step_sweep(u64 deadlineNanos) {
     u32 done = 0;
     u32 sinceCheck = 0;
-    while (sweepCursor_) {
-        GCObj* obj = sweepCursor_;
-        sweepCursor_ = obj->allObjsNext_;
+    // Singly-linked sweep. `sweepSlot_` is the slot in the previous node
+    // (or the head pointer itself) that points at the current candidate.
+    // Unlinking a freed object is just `*sweepSlot_ = obj->next_`; sweep
+    // doesn't need a prev pointer per object.
+    while (*sweepSlot_) {
+        GCObj* obj = *sweepSlot_;
         if (!obj->isImmortal() && obj->color_ == GCColor::White) {
             ++currentWhiteCount_;
-            // Tracing is now the sole liveness mechanism. White objects are
-            // unreachable; delete them. Their destructor unlinks from
-            // allObjsList (sweepCursor_ is already advanced past obj, so
-            // unlink doesn't invalidate it) and calls releaseChildren() --
-            // a no-op under ARC retirement, so destruction is non-recursive:
-            // each child either was already white (and will be visited by
-            // this same sweep) or stays referenced elsewhere and survives.
+            // Unlink before delete so subclass destructors that allocate
+            // (rare, but defensible) can't accidentally re-enter sweep
+            // with a half-detached node visible from the list.
+            *sweepSlot_ = obj->allObjsNext_;
             delete obj;
+        } else {
+            sweepSlot_ = &obj->allObjsNext_;
         }
         ++done;
         if (++sinceCheck >= kCheckEvery) {
@@ -278,7 +356,7 @@ u32 TracingGC::step_sweep(u64 deadlineNanos) {
             if (gcMonoNanos() >= deadlineNanos) return done;
         }
     }
-    if (!sweepCursor_) {
+    if (sweepSlot_ && !*sweepSlot_) {
         lastWhiteCount_ = currentWhiteCount_;
         lastBlackCount_ = currentBlackCount_;
         currentWhiteCount_ = 0;

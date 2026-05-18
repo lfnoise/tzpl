@@ -40,28 +40,28 @@ CodeBlock::CodeBlock()
 Fraction::Fraction()
     : Obj(gCurrentTypeUniverse->types().fractionType)
 {
-    registerNewObj(this);
+    registerNewObj(this, GCTag::None);
 }
 
 Fraction::Fraction(r64 value)
     : Obj(gCurrentTypeUniverse->types().fractionType)
     , r(value)
 {
-    registerNewObj(this);
+    registerNewObj(this, GCTag::None);
 }
 
 // Complex constructors
 Complex::Complex()
     : Obj(gCurrentTypeUniverse->types().complexType)
 {
-    registerNewObj(this);
+    registerNewObj(this, GCTag::None);
 }
 
 Complex::Complex(x64 value)
     : Obj(gCurrentTypeUniverse->types().complexType)
     , x(value)
 {
-    registerNewObj(this);
+    registerNewObj(this, GCTag::None);
 }
 
 // StringObj constructors
@@ -74,14 +74,14 @@ StringObj::StringObj(const char* str)
     : Obj(gCurrentTypeUniverse->types().stringType)
     , s(str, rt::STLAllocator<char>(rt::gCurrentAllocator))
 {
-    registerNewObj(this);
+    registerNewObj(this, GCTag::None);
 }
 
 StringObj::StringObj(const std::string& str)
     : Obj(gCurrentTypeUniverse->types().stringType)
     , s(str.c_str(), str.size(), rt::STLAllocator<char>(rt::gCurrentAllocator))
 {
-    registerNewObj(this);
+    registerNewObj(this, GCTag::None);
 }
 
 // PodArray constructors
@@ -90,7 +90,7 @@ PodArray<T>::PodArray(Type* type)
     : Obj(type)
     , v(rt::STLAllocator<T>(rt::gCurrentAllocator))
 {
-    registerNewObj(this);
+    registerNewObj(this, GCTag::None);
 }
 
 // Explicit PodArray instantiations
@@ -105,7 +105,7 @@ ObjArray::ObjArray(Type* type)
     : Obj(type)
     , v_(rt::STLAllocator<Obj*>(rt::gCurrentAllocator))
 {
-    registerNewObj(this);
+    registerNewObj(this, GCTag::ObjArray);
 }
 
 // InlineArray (Phase 4g.8): array storage that packs an Inline composite
@@ -116,7 +116,7 @@ InlineArray::InlineArray(ArrayType* type)
 {
     stride_ = type->elemType_ ? type->elemType_->sizeWords_ : 1;
     if (stride_ == 0) stride_ = 1;
-    registerNewObj(this);
+    registerNewObj(this, GCTag::InlineArray);
 }
 
 void InlineArray::pushSlot(Word const* src) {
@@ -197,7 +197,7 @@ ListNode::ListNode(Type* type, u32 payloadWords)
     // Zero the trailing payload words (if any) so releaseChildren never
     // walks an uninitialised Obj*.
     for (u32 i = 1; i < payloadWords_; ++i) (&head_)[i].i = 0;
-    registerNewObj(this);
+    registerNewObj(this, GCTag::ListNode);
 }
 
 // ListNode factory: sizes the allocation to fit `payloadWords` head words.
@@ -316,7 +316,7 @@ AutoMapCallInfo::AutoMapCallInfo()
     , resultListType(nullptr)
     , broadcastArgs(rt::STLAllocator<AutoMapCallInfo::BroadcastArg>(rt::gCurrentAllocator))
 {
-    registerNewObj(this);
+    registerNewObj(this, GCTag::Default);
 }
 AutoMapListGen::AutoMapListGen(Type* type)
     : ListGenerator(type)
@@ -380,7 +380,7 @@ RefValue::RefValue(Type* type)
     : Obj(type)
     , value_()
 {
-    registerNewObj(this);
+    registerNewObj(this, GCTag::RefValue);
 }
 
 // RefValue::str()
@@ -398,7 +398,7 @@ InlineRef::InlineRef(RefType* type, u32 sw)
     , sizeWords_(sw)
 {
     for (u32 i = 0; i < sw; ++i) v[i] = Word();
-    registerNewObj(this);
+    registerNewObj(this, GCTag::InlineRef);
 }
 
 InlineRef* InlineRef::create(RefType* type) {
@@ -436,7 +436,7 @@ Struct::Struct(Type* type, u32 numFields)
     auto* st = static_cast<StructType*>(type);
     u32 total = totalLayoutWords(st->layout_.data(), st->layout_.size(), numFields);
     for (u32 i = 0; i < total; ++i) v[i] = Word();
-    registerNewObj(this);
+    registerNewObj(this, GCTag::Struct);
 }
 
 // Struct factory
@@ -487,7 +487,7 @@ Tuple::Tuple(Type* type, u32 numFields)
     auto* tt = static_cast<TupleType*>(type);
     u32 total = totalLayoutWords(tt->layout_.data(), tt->layout_.size(), numFields);
     for (u32 i = 0; i < total; ++i) v[i] = Word();
-    registerNewObj(this);
+    registerNewObj(this, GCTag::Tuple);
 }
 
 // Tuple factory
@@ -520,7 +520,7 @@ Enum::Enum(Type* type, u8 payloadSizeWords)
     , payloadSizeWords_(payloadSizeWords)
 {
     for (u8 i = 0; i < payloadSizeWords_; ++i) v[i] = Word();
-    registerNewObj(this);
+    registerNewObj(this, GCTag::Enum);
 }
 
 // Compute the payload capacity for a heap Enum -- the max sizeWords across
@@ -553,7 +553,7 @@ RangeObj::RangeObj(Type* type, bool isInfinite, u8 elemSizeWords)
 {
     u32 total = (u32)elemSizeWords * 3u;
     for (u32 i = 0; i < total; ++i) v[i] = Word();
-    registerNewObj(this);
+    registerNewObj(this, GCTag::Default);
 }
 
 RangeObj* RangeObj::create(RangeType* type, bool isInfinite) {
@@ -605,7 +605,7 @@ Callable::Callable(Type* type)
     : Obj(type)
     , cfun_(nullptr)
 {
-    registerNewObj(this);
+    registerNewObj(this, GCTag::Default);
 }
 
 // Primitive constructor
@@ -761,7 +761,7 @@ MapObj::MapObj(MapType* type)
     , size_(0)
     , tombstones_(0)
 {
-    registerNewObj(this);
+    registerNewObj(this, GCTag::MapObj);
 }
 
 u32 MapObj::findSlot(Word const* key) const {
@@ -955,7 +955,7 @@ SetObj::SetObj(SetType* type)
     , size_(0)
     , tombstones_(0)
 {
-    registerNewObj(this);
+    registerNewObj(this, GCTag::SetObj);
 }
 
 u32 SetObj::findSlot(Word const* elem) const {
