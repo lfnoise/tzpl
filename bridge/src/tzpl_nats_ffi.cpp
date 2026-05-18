@@ -165,17 +165,12 @@ static void ffi_natsRequest(ts::VM& vm, u16, u16, u16 argBase) {
 // Subscription handlers -- nats.onMessage / nats.removeHandler
 // ---------------------------------------------------------------------------
 
+// The handler is stored in the NRTVM's handler table; that table is a
+// GC root, so the handler stays alive as long as the entry exists.
 static void registerUserHandler(ts::VM& vm, const char* subject, ts::Obj* handler) {
     auto* ctx = getAppContext(vm);
     if (!ctx || !ctx->natsDispatcher || !ctx->nrtvm) return;
-
-
-    // Release any previous handler for this subject
-    auto& table = ctx->nrtvm->handlers.natsHandlers;
-    auto it = table.find(subject);
-    if (it != table.end()) {
-    }
-    table[subject] = handler;
+    ctx->nrtvm->handlers.natsHandlers[subject] = handler;
 }
 
 // fn onMessage(subject String, handler fn() Void) Void

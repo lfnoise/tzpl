@@ -33,6 +33,7 @@
 #include "type_universe.hpp"
 #include <atomic>
 #include <cstdio>
+#include <functional>
 #include <memory>
 
 namespace ts {
@@ -219,6 +220,13 @@ private:
     // Dynamic scope variables
     Vec<Word> dynVars_;
     Vec<u8>   dynVarIsObj_;  // Track which dynvars hold Obj* for GC
+
+    // Extra GC root scanners registered by host wrappers (e.g. NRTVM's
+    // HandlerTable holds Obj* pointers that aren't reachable from globals
+    // or any live frame). Each callback is invoked once per mark cycle
+    // from the GC's root-scanning substate; the callback walks its own
+    // table and calls gc.mark() on every live Obj* it owns.
+    Vec<std::function<void(class TracingGC&)>> extraRootScanners_;
 
     // Dynamic scope save stack (for save/restore on function return)
     DynSaveEntry* dynStack_;
@@ -453,6 +461,17 @@ public:
     Word& global(u32 idx) { return globals_[idx]; }
     const Word& global(u32 idx) const { return globals_[idx]; }
     u32 numGlobals() const { return (u32)globals_.size(); }
+
+    // Register an extra GC root scanner. The callback is invoked once per
+    // mark cycle from the tracing GC's root-scan substate; the callback
+    // walks its own table and calls gc.mark() on every Obj* it owns alive.
+    void addExtraRootScanner(std::function<void(class TracingGC&)> fn) {
+        extraRootScanners_.push_back(std::move(fn));
+    }
+    u32 numExtraRootScanners() const { return (u32)extraRootScanners_.size(); }
+    void invokeExtraRootScanner(u32 i, class TracingGC& gc) {
+        extraRootScanners_[i](gc);
+    }
 
     // --- Dynamic scope variables ---
 

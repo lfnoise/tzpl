@@ -246,20 +246,14 @@ static void ffi_oscServerPort(ts::VM& vm, u16 dst, u16, u16) {
 // ---------------------------------------------------------------------------
 
 // Helper: register an OSC handler that invokes a Tzopilotl callable.
-// The callable is retained and stored in the NRTVM's handler table.
-// A dispatcher handler is registered that, on receipt, parses OSC args,
-// acquires the NRTVM mutex, and calls the callable.
+// The callable is stored in the NRTVM's handler table; that table is a
+// GC root, so the handler stays alive as long as the entry exists.
+// A dispatcher is registered that, on receipt, parses OSC args, acquires
+// the NRTVM mutex, and calls the callable.
 static void registerUserHandler(ts::VM& vm, const char* address, ts::Obj* handler) {
     auto* ctx = getAppContext(vm);
     if (!ctx || !ctx->oscDispatcher || !ctx->nrtvm) return;
-
-
-    // Release any previous handler for this address
-    auto& table = ctx->nrtvm->handlers.oscHandlers;
-    auto it = table.find(address);
-    if (it != table.end()) {
-    }
-    table[address] = handler;
+    ctx->nrtvm->handlers.oscHandlers[address] = handler;
 }
 
 // fn onMessage(address String, handler fn() Void) Void
@@ -396,7 +390,8 @@ static void ffi_removeHandler(ts::VM& vm, u16, u16, u16 argBase) {
     // Remove from dispatcher
     ctx->oscDispatcher->removeHandler(address);
 
-    // Release from handler table
+    // Drop the entry from the handler table. Once erased, the handler is
+    // no longer a GC root via this scanner and may be collected.
     auto& table = ctx->nrtvm->handlers.oscHandlers;
     auto it = table.find(address);
     if (it != table.end()) {

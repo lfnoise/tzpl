@@ -226,6 +226,26 @@ void TracingGC::step_root_frames(u64 deadlineNanos, u32& sinceCheck, u32& done) 
             if (gcMonoNanos() >= deadlineNanos) return;
         }
     }
+    rootPhase_ = RootPhase::Extras;
+    rootExtraCursor_ = 0;
+}
+
+// Host wrappers (e.g. NRTVM) register tables of Obj* that aren't reachable
+// from globals/dynvars/frames. Each scanner runs to completion; we treat the
+// whole scanner as one work unit for the deadline budget because scanners
+// typically iterate small tables. If a scanner ever needs chunked progress,
+// it can call gc.mark() on a per-entry basis and still finish quickly.
+void TracingGC::step_root_extras(u64 deadlineNanos, u32& sinceCheck, u32& done) {
+    u32 n = vm_.numExtraRootScanners();
+    while (rootExtraCursor_ < n) {
+        u32 i = rootExtraCursor_++;
+        vm_.invokeExtraRootScanner(i, *this);
+        ++done;
+        if (++sinceCheck >= kCheckEvery) {
+            sinceCheck = 0;
+            if (gcMonoNanos() >= deadlineNanos) return;
+        }
+    }
     rootPhase_ = RootPhase::Done;
 }
 
@@ -242,6 +262,7 @@ void TracingGC::markRoots() {
         case RootPhase::Globals: step_root_globals(kGCNoDeadline, sinceCheck, done); break;
         case RootPhase::DynVars: step_root_dynvars(kGCNoDeadline, sinceCheck, done); break;
         case RootPhase::Frames:  step_root_frames(kGCNoDeadline, sinceCheck, done);  break;
+        case RootPhase::Extras:  step_root_extras(kGCNoDeadline, sinceCheck, done);  break;
         case RootPhase::Done:    break;
         }
     }
@@ -264,6 +285,7 @@ u32 TracingGC::step_mark(u64 deadlineNanos) {
         case RootPhase::Globals: step_root_globals(deadlineNanos, sinceCheck, done); break;
         case RootPhase::DynVars: step_root_dynvars(deadlineNanos, sinceCheck, done); break;
         case RootPhase::Frames:  step_root_frames(deadlineNanos, sinceCheck, done);  break;
+        case RootPhase::Extras:  step_root_extras(deadlineNanos, sinceCheck, done);  break;
         case RootPhase::Done:    break;
         }
         if (gcMonoNanos() >= deadlineNanos) return done;

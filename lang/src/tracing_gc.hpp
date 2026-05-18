@@ -249,16 +249,19 @@ private:
         Globals = 1,
         DynVars = 2,
         Frames  = 3,
+        Extras  = 4,  // host-registered scanners (e.g. NRTVM HandlerTable)
     };
     RootPhase rootPhase_ = RootPhase::Done;
     u32 rootGlobalCursor_ = 0;
     u32 rootDynVarCursor_ = 0;
     u32 rootFrameCursor_  = 0;  // walks 0..frameCount_; new frames at the top
                                 // are picked up as cursor catches up.
+    u32 rootExtraCursor_  = 0;
 
     void step_root_globals(u64 deadlineNanos, u32& sinceCheck, u32& done);
     void step_root_dynvars(u64 deadlineNanos, u32& sinceCheck, u32& done);
     void step_root_frames(u64 deadlineNanos, u32& sinceCheck, u32& done);
+    void step_root_extras(u64 deadlineNanos, u32& sinceCheck, u32& done);
 };
 
 } // namespace ts

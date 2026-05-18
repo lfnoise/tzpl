@@ -42,12 +42,15 @@ namespace ts {
 class NRTScheduler;
 
 // Handler table mapping event types to callable Obj* pointers.
-// Handlers are retained by the table and released when removed/replaced.
+// The pointers stored here are GC roots: NRTVM registers a scanner with
+// the VM that marks every live entry on each tracing-GC cycle, so a
+// handler with no other reference (e.g. a top-level lambda passed to
+// osc.onMessage) stays alive as long as it's in the table.
 struct HandlerTable {
-    // OSC address -> handler (Callable Obj*, retained)
+    // OSC address -> handler (Callable Obj*)
     std::unordered_map<std::string, Obj*> oscHandlers;
 
-    // NATS subject -> handler (Callable Obj*, retained)
+    // NATS subject -> handler (Callable Obj*)
     std::unordered_map<std::string, Obj*> natsHandlers;
 };
 
@@ -69,17 +72,28 @@ struct NRTVM {
     // Associated NRT scheduler (set externally after construction)
     NRTScheduler* scheduler_ = nullptr;
 
-    // Background heartbeat thread: drains deferred-delete queue at a
-    // regular interval so dead objects are reclaimed even during long
-    // evals or idle periods.
+    // Background heartbeat thread: drives the tracing GC at a regular
+    // interval so an in-flight mark or sweep keeps advancing even while
+    // the language is idle (no events, no REPL input).
     std::thread heartbeatThread_;
     std::atomic<bool> heartbeatRunning_{false};
 
-    // Constructor: same args as VM
+    // Constructor: same args as VM. Registers the HandlerTable as a GC
+    // root scanner so Obj* pointers stored in oscHandlers / natsHandlers
+    // stay alive across cycles.
     explicit NRTVM(usize poolSize, TypeUniverse& typeUniverse,
                    const VMTarget& target = {})
         : vm(poolSize, typeUniverse, target)
-    {}
+    {
+        vm.addExtraRootScanner([this](TracingGC& gc) {
+            for (auto& kv : handlers.oscHandlers) {
+                if (kv.second) gc.mark(static_cast<GCObj*>(kv.second));
+            }
+            for (auto& kv : handlers.natsHandlers) {
+                if (kv.second) gc.mark(static_cast<GCObj*>(kv.second));
+            }
+        });
+    }
 
     ~NRTVM() {
         stopHeartbeat();
