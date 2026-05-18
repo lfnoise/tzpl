@@ -193,6 +193,7 @@ struct Xoshiro256 {
 // Virtual Machine
 class VM {
     friend class GCObj;
+    friend class TracingGC;  // needs frame walk + register file for root scan
 
 private:
     // Memory allocator

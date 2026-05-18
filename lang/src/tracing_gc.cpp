@@ -16,9 +16,22 @@
 
 #include "tracing_gc.hpp"
 #include "vm.hpp"
+#include "value.hpp"   // CodeBlock, StackMap
 #include "arc.hpp"
 
 namespace ts {
+
+// Look up the stack map for the given PC offset in a CodeBlock. Stack maps
+// are appended in code order during codegen, so pcOffset values are
+// monotonically increasing; a binary search would be faster but a linear
+// scan is fine while live-ref counts per CodeBlock are modest.
+static StackMap const* findStackMap(CodeBlock const* cb, u32 pcOffset) {
+    if (!cb) return nullptr;
+    for (auto const& sm : cb->stackMaps_) {
+        if (sm.pcOffset == pcOffset) return &sm;
+    }
+    return nullptr;
+}
 
 void TracingGC::mark(GCObj* obj) {
     if (!obj) return;
@@ -76,6 +89,33 @@ void TracingGC::markRoots() {
     // have refcount 0 and are awaiting destruction; the tracer should leave
     // them white so that tracing's "white set" can be cross-checked against
     // ARC's "about to free" set during validation.
+
+    // Phase 5.1: stack-map roots. Walk every active call frame and use its
+    // saved PC's stack map to mark register-held GC references. For the top
+    // frame the saved PC is vm_.pc_ (the current instruction, an op_safepoint
+    // when we get here via safepointPoll). For lower frames it is
+    // frames_[i+1].returnPC -- the resume address the caller will hit when
+    // the inner frame returns. CodeBlocks only carry stack maps at safepoint
+    // emission sites today (loop tails and function entry); Phase 5.2 adds
+    // call-site stack maps so lower frames also have precise root data.
+    for (u32 i = 0; i < vm_.frameCount_; ++i) {
+        CallFrame const& f = vm_.frames_[i];
+        CodeBlock const* cb = f.codeBlock;
+        if (!cb || cb->code.empty()) continue;
+        Code const* pc = (i + 1 == vm_.frameCount_) ? vm_.pc_ : vm_.frames_[i + 1].returnPC;
+        if (!pc) continue;
+        u32 pcOffset = (u32)(pc - cb->code.data());
+        StackMap const* sm = findStackMap(cb, pcOffset);
+        if (!sm) continue;
+        Word const* base = vm_.regs_ + f.baseReg;
+        for (u16 reg : sm->liveRefRegs) {
+            if (Obj* o = base[reg].o) {
+                if (auto* g = dynamic_cast<GCObj*>(o)) {
+                    mark(g); ++lastRootCount_;
+                }
+            }
+        }
+    }
 }
 
 u32 TracingGC::step_mark(u32 budget) {
