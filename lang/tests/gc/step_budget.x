@@ -19,11 +19,13 @@ fn check(t Tree) Int {
 }
 
 -- 1 ms budget. Overshoot bound is kCheckEvery * worstUnitCost; under
--- the current scan code the worst case is around a few hundred us, so
--- accept up to 2 ms total (2x budget) -- a soft tolerance that still
--- catches a regression that breaks budget enforcement entirely.
+-- the current scan code (after the Phase 6 step 3 bounded-fan-out
+-- refactor) the worst case at a 1 ms budget hovers around 1.05-1.2 ms;
+-- accept up to 1.5x as a soft tolerance that still catches a regression
+-- that breaks budget enforcement entirely (e.g. an unbounded gcScanChildren
+-- override creeping back in for a new container type).
 const BUDGET_NS = 1000000;
-const TOLERANCE_NS = 2 * BUDGET_NS;
+const TOLERANCE_NS = (BUDGET_NS * 3) / 2;
 __gc_set_step_budget_ns(BUDGET_NS);
 
 -- Reset stats AFTER setting budget so the measurement is clean.

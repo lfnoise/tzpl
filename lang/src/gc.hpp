@@ -109,7 +109,20 @@ public:
     // the live object graph transitively. Mirror of releaseChildren -- same
     // set of children, different action. Default no-op; subclasses with
     // GC-managed fields override.
+    //
+    // For containers with > TracingGC::kFanoutThreshold entries, the override
+    // should call gc.pushPartial(this) and return immediately; the actual
+    // child walk happens via gcScanChunk under a bounded per-call window so
+    // a single scan can't overshoot the step-budget deadline.
     virtual void gcScanChildren(class TracingGC& /*gc*/) {}
+
+    // Phase 6 step 3: scan up to TracingGC::kFanoutChunk children starting
+    // at `cursor`. Return the next cursor; UINT32_MAX signals "fully done"
+    // and removes the object from the partial queue. The default
+    // implementation just signals done -- only large containers override.
+    virtual u32 gcScanChunk(class TracingGC& /*gc*/, u32 /*cursor*/) {
+        return ~u32{0};
+    }
 
     // ARC methods
     bool isImmortal() const {

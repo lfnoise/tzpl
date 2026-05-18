@@ -124,9 +124,33 @@ void TracingGC::markRoots() {
     }
 }
 
+void TracingGC::pushPartial(GCObj* container) {
+    pendingContainers_.push_back({container, 0});
+}
+
 u32 TracingGC::step_mark(u64 deadlineNanos) {
     u32 done = 0;
     u32 sinceCheck = 0;
+
+    // Phase 6 step 3: drain the partial-container queue first. Each entry
+    // is a large container already Blacked; we advance its child scan by
+    // kFanoutChunk per work unit. Bounding this is what caps the worst-
+    // case mark step for programs holding 100k-entry Maps / Arrays / etc.
+    while (!pendingContainers_.empty()) {
+        PartialEntry& e = pendingContainers_.back();
+        u32 next = e.obj->gcScanChunk(*this, e.cursor);
+        if (next == ~u32{0}) {
+            pendingContainers_.pop_back();
+        } else {
+            e.cursor = next;
+        }
+        ++done;
+        if (++sinceCheck >= kCheckEvery) {
+            sinceCheck = 0;
+            if (gcMonoNanos() >= deadlineNanos) return done;
+        }
+    }
+
     while (!grayWorklist_.empty()) {
         GCObj* obj = grayWorklist_.back();
         grayWorklist_.pop_back();
@@ -134,12 +158,11 @@ u32 TracingGC::step_mark(u64 deadlineNanos) {
         else {
             obj->color_ = GCColor::Black;
             ++currentBlackCount_;
-            // Transitive scan via the virtual gcScanChildren. Default no-op
-            // for classes without GC children; overridden for Ref, Tuple,
-            // Struct, Enum, ObjArray, MapObj, SetObj, ListNode, ListGenerator
-            // subclasses, Lambda, CoroutineFrame, CoroutineObj, AnyObj, ...
-            // A single call may push many grays (fan-out); the deadline check
-            // below catches the overshoot at the next batch boundary.
+            // Transitive scan via the virtual gcScanChildren. Containers
+            // with > kFanoutThreshold entries push themselves to the
+            // partial queue and return immediately; bounded-fan-out types
+            // (Ref, Tuple, Struct, Enum, ListNode, lambdas, coroutines)
+            // walk inline since their fan-out is statically small.
             obj->gcScanChildren(*this);
             ++done;
         }
@@ -147,8 +170,24 @@ u32 TracingGC::step_mark(u64 deadlineNanos) {
             sinceCheck = 0;
             if (gcMonoNanos() >= deadlineNanos) return done;
         }
+        // A gcScanChildren call may have enqueued a partial container.
+        // Service that before grabbing the next gray, to keep the partial
+        // queue from growing unboundedly while gray drains.
+        if (!pendingContainers_.empty()) {
+            while (!pendingContainers_.empty()) {
+                PartialEntry& e = pendingContainers_.back();
+                u32 next = e.obj->gcScanChunk(*this, e.cursor);
+                if (next == ~u32{0}) pendingContainers_.pop_back();
+                else e.cursor = next;
+                ++done;
+                if (++sinceCheck >= kCheckEvery) {
+                    sinceCheck = 0;
+                    if (gcMonoNanos() >= deadlineNanos) return done;
+                }
+            }
+        }
     }
-    // Worklist drained: advance to Sweep.
+    // Both worklists drained: advance to Sweep.
     phase_ = Phase::Sweep;
     sweepCursor_ = vm_.allObjsHead_;
     return done;

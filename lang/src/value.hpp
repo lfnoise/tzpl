@@ -380,8 +380,22 @@ public:
     }
 
     void gcScanChildren(TracingGC& gc) override {
-        // Obj derives from GCObj, so the upcast is implicit and free.
-        for (auto* obj : v_) gc.mark(obj);
+        // Bounded fan-out: tiny arrays scan inline; large ones defer to
+        // the partial-container queue so a 100k-element scan can't blow
+        // a single GC step's deadline.
+        if (v_.size() <= TracingGC::kFanoutThreshold) {
+            for (auto* obj : v_) gc.mark(obj);
+        } else {
+            gc.pushPartial(this);
+        }
+    }
+
+    u32 gcScanChunk(TracingGC& gc, u32 cursor) override {
+        u32 n = (u32)v_.size();
+        u32 end = cursor + TracingGC::kFanoutChunk;
+        if (end > n) end = n;
+        for (u32 i = cursor; i < end; ++i) gc.mark(v_[i]);
+        return (end == n) ? ~u32{0} : end;
     }
 };
 
@@ -435,6 +449,7 @@ public:
 
     void releaseChildren() override;
     void gcScanChildren(TracingGC& gc) override;
+    u32  gcScanChunk(TracingGC& gc, u32 cursor) override;
 };
 
 // Forward declaration
@@ -1477,6 +1492,7 @@ public:
     VMString str() const override;
     void releaseChildren() override;
     void gcScanChildren(TracingGC& gc) override;
+    u32  gcScanChunk(TracingGC& gc, u32 cursor) override;
 
 private:
     void maybeGrow();
@@ -1525,6 +1541,7 @@ public:
     VMString str() const override;
     void releaseChildren() override;
     void gcScanChildren(TracingGC& gc) override;
+    u32  gcScanChunk(TracingGC& gc, u32 cursor) override;
 
 private:
     void maybeGrow();

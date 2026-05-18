@@ -145,6 +145,22 @@ public:
     // root walker and by future write barriers.
     void mark(GCObj* obj);
 
+    // Phase 6 step 3: bounded-fan-out scan. Large containers (Map, Set,
+    // ObjArray, InlineArray with > kFanoutThreshold entries) defer their
+    // child scan to a partial-container queue instead of looping inline.
+    // step_mark services the partial queue in chunks of kFanoutChunk so a
+    // single 100k-element container can no longer overshoot the deadline.
+    //
+    // The container's gcScanChildren override calls pushPartial(this);
+    // it must transition itself to Black before doing so (the partial
+    // queue does not re-color, only walks children). Pending partials
+    // hold a Gray-allocated dst register reference so the container's
+    // own liveness is unaffected by being on the queue.
+    void pushPartial(GCObj* container);
+
+    static constexpr u32 kFanoutThreshold = 64;  // <= this: inline-scan
+    static constexpr u32 kFanoutChunk     = 64;  // scanChunk window
+
     // SATB write barrier. Insert before any store that overwrites an Obj*
     // slot; oldVal is the slot's current contents. Hot path: one comparison
     // (phase != Mark) + early return. Only when a mark cycle is in flight
@@ -179,6 +195,15 @@ private:
     Phase phase_ = Phase::Idle;
     std::vector<GCObj*> grayWorklist_;
     GCObj* sweepCursor_ = nullptr;
+
+    // Phase 6 step 3: bounded-fan-out partial-scan queue. Each entry is a
+    // container that has already been Blacked (so it can't be swept) and
+    // whose children are being walked incrementally. step_mark processes
+    // one chunk of kFanoutChunk children per work unit; if more remain,
+    // the entry stays on the queue. Cycle finishes only when this queue
+    // AND the gray worklist are both empty.
+    struct PartialEntry { GCObj* obj; u32 cursor; };
+    std::vector<PartialEntry> pendingContainers_;
     u32 lastWhiteCount_ = 0;
     u32 lastBlackCount_ = 0;
     u32 lastRootCount_ = 0;

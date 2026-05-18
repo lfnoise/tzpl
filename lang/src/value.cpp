@@ -176,11 +176,26 @@ void InlineArray::releaseChildren() {
 }
 
 void InlineArray::gcScanChildren(TracingGC& gc) {
-    Type* et = elemType();
-    size_t n = size();
-    for (size_t i = 0; i < n; ++i) {
-        gcScanInlinePointers(&v_[i * stride_], et, gc);
+    if (size() <= TracingGC::kFanoutThreshold) {
+        Type* et = elemType();
+        size_t n = size();
+        for (size_t i = 0; i < n; ++i) {
+            gcScanInlinePointers(&v_[i * stride_], et, gc);
+        }
+    } else {
+        gc.pushPartial(this);
     }
+}
+
+u32 InlineArray::gcScanChunk(TracingGC& gc, u32 cursor) {
+    Type* et = elemType();
+    u32 n = (u32)size();
+    u32 end = cursor + TracingGC::kFanoutChunk;
+    if (end > n) end = n;
+    for (u32 i = cursor; i < end; ++i) {
+        gcScanInlinePointers(&v_[(size_t)i * stride_], et, gc);
+    }
+    return (end == n) ? ~u32{0} : end;
 }
 
 VMString InlineArray::str() const {
@@ -957,14 +972,35 @@ void MapObj::releaseChildren() {
 }
 
 void MapObj::gcScanChildren(TracingGC& gc) {
+    // capacity() is the slot count -- always >= 2 * size, so the threshold
+    // here gates on capacity rather than live entries (live can be 0 while
+    // capacity is 1024, but we still need to walk the whole meta_ array).
+    if (capacity() <= TracingGC::kFanoutThreshold) {
+        Type* kt = keyType();
+        Type* vt = valueType();
+        u32 cap = capacity();
+        for (u32 i = 0; i < cap; ++i) {
+            if (meta_[i] != SlotOccupied) continue;
+            gcScanPayload(slotKey(i), kt, gc);
+            gcScanPayload(slotVal(i), vt, gc);
+        }
+    } else {
+        gc.pushPartial(this);
+    }
+}
+
+u32 MapObj::gcScanChunk(TracingGC& gc, u32 cursor) {
     Type* kt = keyType();
     Type* vt = valueType();
     u32 cap = capacity();
-    for (u32 i = 0; i < cap; ++i) {
+    u32 end = cursor + TracingGC::kFanoutChunk;
+    if (end > cap) end = cap;
+    for (u32 i = cursor; i < end; ++i) {
         if (meta_[i] != SlotOccupied) continue;
         gcScanPayload(slotKey(i), kt, gc);
         gcScanPayload(slotVal(i), vt, gc);
     }
+    return (end == cap) ? ~u32{0} : end;
 }
 
 // SetObj constructor
@@ -1127,12 +1163,28 @@ void SetObj::releaseChildren() {
 }
 
 void SetObj::gcScanChildren(TracingGC& gc) {
+    if (capacity() <= TracingGC::kFanoutThreshold) {
+        Type* et = elemType();
+        u32 cap = capacity();
+        for (u32 i = 0; i < cap; ++i) {
+            if (meta_[i] != SlotOccupied) continue;
+            gcScanPayload(slotElem(i), et, gc);
+        }
+    } else {
+        gc.pushPartial(this);
+    }
+}
+
+u32 SetObj::gcScanChunk(TracingGC& gc, u32 cursor) {
     Type* et = elemType();
     u32 cap = capacity();
-    for (u32 i = 0; i < cap; ++i) {
+    u32 end = cursor + TracingGC::kFanoutChunk;
+    if (end > cap) end = cap;
+    for (u32 i = cursor; i < end; ++i) {
         if (meta_[i] != SlotOccupied) continue;
         gcScanPayload(slotElem(i), et, gc);
     }
+    return (end == cap) ? ~u32{0} : end;
 }
 
 // --- WordHash ---
