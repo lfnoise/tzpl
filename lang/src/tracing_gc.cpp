@@ -53,13 +53,15 @@ void TracingGC::resetColors() {
 void TracingGC::markRoots() {
     lastRootCount_ = 0;
 
-    // Root set 1: AutoReleasePool. Every entry contributes +1 to its
-    // target's refcount, so it is a real root under the current ARC.
-    for (GCObj* obj : vm_.autoReleasePool()) {
-        if (obj) { mark(obj); ++lastRootCount_; }
-    }
+    // Phase 5: AutoReleasePool is no longer a root. ARC is retired -- pool
+    // entries no longer carry a refcount contribution. With register-precise
+    // stack maps (Phase 5.1/5.2), every reachable object is rooted via the
+    // register file, globals, or dyn vars. Objects that are only in the
+    // pool but not yet assigned to any register exist for one instruction's
+    // worth of bytecode (the alloc op writes to its result register before
+    // any safepoint can fire), so they are never observed as garbage here.
 
-    // Root set 2: globals. Only slots flagged as holding an Obj* in
+    // Root set 1: globals. Only slots flagged as holding an Obj* in
     // globalIsObj_ are dereferenced. Inline-composite globals span
     // multiple Word slots; for Phase 3b we use the same conservative
     // policy as the rest of the codebase -- globalIsObj_ is set per
@@ -98,16 +100,24 @@ void TracingGC::markRoots() {
     // the inner frame returns. CodeBlocks only carry stack maps at safepoint
     // emission sites today (loop tails and function entry); Phase 5.2 adds
     // call-site stack maps so lower frames also have precise root data.
+    // Note on CallFrame::baseReg semantics: pushFrame stores the *caller's*
+    // baseReg in frames_[i].baseReg (for restoration on pop). So the field
+    // for frame i actually holds frame (i-1)'s active base. To find frame
+    // i's own active base we look one slot up: frames_[i+1].baseReg holds
+    // it (saved when frame i+1 was pushed). For the top frame, it's the
+    // live vm.baseReg_.
     for (u32 i = 0; i < vm_.frameCount_; ++i) {
         CallFrame const& f = vm_.frames_[i];
         CodeBlock const* cb = f.codeBlock;
         if (!cb || cb->code.empty()) continue;
-        Code const* pc = (i + 1 == vm_.frameCount_) ? vm_.pc_ : vm_.frames_[i + 1].returnPC;
+        bool isTop = (i + 1 == vm_.frameCount_);
+        Code const* pc = isTop ? vm_.pc_ : vm_.frames_[i + 1].returnPC;
         if (!pc) continue;
         u32 pcOffset = (u32)(pc - cb->code.data());
         StackMap const* sm = findStackMap(cb, pcOffset);
         if (!sm) continue;
-        Word const* base = vm_.regs_ + f.baseReg;
+        u32 activeBase = isTop ? vm_.baseReg_ : vm_.frames_[i + 1].baseReg;
+        Word const* base = vm_.regs_ + activeBase;
         for (u16 reg : sm->liveRefRegs) {
             if (Obj* o = base[reg].o) {
                 if (auto* g = dynamic_cast<GCObj*>(o)) {
@@ -149,8 +159,14 @@ u32 TracingGC::step_sweep(u32 budget) {
         if (obj->isImmortal()) { ++done; continue; }
         if (obj->color_ == GCColor::White) {
             ++currentWhiteCount_;
-            // Shadow mode (Phase 3): do not free here. ARC owns reclamation
-            // until Phase 5. The white count is exposed for validation.
+            // Phase 5: tracing is now the sole liveness mechanism. White
+            // objects are unreachable; delete them. Their destructor unlinks
+            // from allObjsList (so sweepCursor_, already advanced, stays
+            // valid) and calls releaseChildren() -- which is a no-op under
+            // ARC retirement, so destruction is non-recursive: each child
+            // either was already white (and will be visited by this same
+            // sweep) or stays referenced and survives.
+            delete obj;
         }
         ++done;
     }

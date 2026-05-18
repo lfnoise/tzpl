@@ -57,14 +57,17 @@ void linkObjToAllList(GCObj* obj) {
         obj->setColor(GCColor::Black);
     }
     gc.recordAllocation();
-    // Phase 3 keeps tracing OPT-IN. Auto-triggering on allocation pressure
-    // in shadow mode would force the collector to walk the entire object
-    // graph repeatedly while ARC's autoReleasePool keeps everything alive
-    // -- pure overhead with no reclamation. Phase 5 (when tracing becomes
-    // the sole liveness mechanism and the pool stops being a root) is
-    // where this trigger turns on automatically. Until then, callers
-    // request cycles explicitly via __gc_trace_cycle() or the incremental
-    // step path below (used when a cycle is already in flight).
+    // Phase 5: with tracing as the sole liveness mechanism, alloc pressure
+    // is the trigger for the next cycle. Set the safepoint flag once the
+    // threshold is exceeded so the next backjump's op_safepoint kicks off
+    // (or advances) a cycle. We don't requestCycle() here directly because
+    // the new object is not yet visible to any root -- the bytecode op
+    // that allocated it will write the result register on its very next
+    // instruction, before any safepoint can fire.
+    if (gc.phase() == TracingGC::Phase::Idle &&
+        gc.allocsSinceLastCycle() >= TracingGC::kCycleTriggerAllocs) {
+        gCurrentVM->gcRequested_.store(true, std::memory_order_relaxed);
+    }
 }
 
 void unlinkObjFromAllList(GCObj* obj) {
@@ -131,12 +134,16 @@ void VM::safepointPoll() {
     gcRequested_.store(false, std::memory_order_relaxed);
     foreignDeleteQueue_.drainInto(deferredDeleteQueue_);
 
-    // Phase 3 incremental tracing: advance any in-flight cycle one bounded
-    // step. Cycles are started explicitly today (see __gc_trace_cycle());
-    // once started they progress across safepoints under a bounded budget,
-    // which is what makes the collector real-time safe. Phase 5 will add
-    // automatic triggering once tracing actually reclaims memory.
+    // Phase 5: tracing is the sole liveness mechanism. Auto-trigger a new
+    // cycle when alloc pressure crosses the threshold and no cycle is in
+    // flight; otherwise advance the in-flight cycle one bounded step. The
+    // bounded step is what keeps pauses real-time.
     auto& gc = *tracingGC_;
+    if (gc.phase() == TracingGC::Phase::Idle) {
+        if (gc.allocsSinceLastCycle() >= TracingGC::kCycleTriggerAllocs) {
+            gc.requestCycle();
+        }
+    }
     if (gc.phase() != TracingGC::Phase::Idle) {
         gc.step(kSafepointBudget);
     }

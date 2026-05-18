@@ -225,6 +225,12 @@ private:
     bool tryFuseRedirect(u16 from, u16 to, u32 nWords, u32 producerEmittedAt);
 
     // Multi-word slot move (Phase 4): falls back to op_mov when nWords == 1.
+    // Phase 5.3: propagate per-register types from src to dst so stack maps
+    // emitted at a later returnPC / safepoint see the destination as a live
+    // ref when the source held one. Without this, a result-relocation MOV
+    // (post-CALL "stash to lower reg") would leave regTypes_[dst] holding
+    // its previous type, and the marker would either miss a live Obj* (UAF
+    // on sweep) or read garbage as a pointer (SEGV in markRoots).
     void emitMoveN(u16 dst, u16 src, u32 nWords) {
         if (nWords <= 1) {
             emitOp(op_mov);
@@ -234,6 +240,21 @@ private:
             emitRegs(dst, src);
             emitInt((i64)nWords);
         }
+        u32 n = nWords ? nWords : 1;
+        for (u32 i = 0; i < n; ++i) {
+            Type* t = ((src + i) < regTypes_.size()) ? regTypes_[src + i] : nullptr;
+            setRegType((u16)(dst + i), t);
+        }
+    }
+
+    // Phase 5.3: canonical 1-word op_mov emitter that also propagates the
+    // per-register type. Call this instead of emitOp(op_mov)+emitRegs(...)
+    // at every reg-to-reg copy site so the stack-map walker stays sound.
+    void emitMov(u16 dst, u16 src) {
+        emitOp(op_mov);
+        emitRegs(dst, src);
+        Type* t = (src < regTypes_.size()) ? regTypes_[src] : nullptr;
+        setRegType(dst, t);
     }
 
     // Allocate a slot sized for type t (Phase 4): atoms/pointers get 1 reg,
@@ -427,7 +448,7 @@ private:
     // non-tail CALL has been emitted, so the offset equals the call's
     // returnPC. When a GC cycle fires inside a callee, the marker walks
     // the caller's frame at this PC and roots every named live register.
-    void emitReturnPcStackMap();
+    void emitReturnPcStackMap(u16 resultReg = UINT16_MAX, Type* resultType = nullptr);
 
     // Phase 5.2: drop the per-register types for argument slots immediately
     // before emitting a call. Once the call dispatches, those register

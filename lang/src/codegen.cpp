@@ -236,7 +236,17 @@ void CodeGen::emitJumpTo(u32 targetIdx) {
     invalidateLastProducer();
 }
 
-void CodeGen::emitReturnPcStackMap() {
+void CodeGen::emitReturnPcStackMap(u16 /*unusedResultReg*/, Type* /*unusedResultType*/) {
+    // The returnPC stack map is consulted ONLY while the callee is still
+    // executing (the marker walks the caller via frames_[i+1].returnPC).
+    // During that window the caller's resultReg slot is OVERLAPPED with
+    // callee frame storage: when argBase=R, the callee's r0 == caller's
+    // rR, callee's r1 == caller's r(R+1), ..., and the result reg sits
+    // inside that callee range. So the caller's resultReg slot is not
+    // "live ref" while we're mid-call -- it's callee scratch -- and the
+    // stack map must NOT include it. (After the call returns, the genExpr
+    // wrapper sets regTypes_[resultReg] for future stack maps downstream
+    // in the caller, which is the correct moment to consider it live.)
     u32 pcOffset = (u32)currentBlock_->code.size();
     StackMap sm;
     sm.pcOffset = pcOffset;
@@ -646,8 +656,7 @@ CodeBlock* CodeGen::generateREPL(Program& program) {
         if (lastIsExpr && i == program.items.size() - 1) {
             u16 resultReg = genExpr(static_cast<ExprStmtNode*>(item)->expr.get());
             if (resultReg != 0) {
-                emitOp(op_mov);
-                emitRegs(0, resultReg);
+                emitMov(0, resultReg);
             }
         } else {
             genNode(item);
@@ -696,8 +705,7 @@ void CodeGen::genNode(ASTNode* node) {
                         if (local) {
                             u16 captureReg = allocReg();
                             if (local->reg != captureReg) {
-                                emitOp(op_mov);
-                                emitRegs(captureReg, local->reg);
+                                emitMov(captureReg, local->reg);
                             }
                         } else {
                             error(decl->loc, "Cannot find captured variable '" + decl->captures[i].name + "'");
@@ -773,7 +781,7 @@ void CodeGen::genImportDecl(ImportDeclNode* decl) {
     emitOp(op_call);
     emitRegs(resultReg, 0, argBase);
     emitInt(mod->initBlockGlobalIndex);
-    emitReturnPcStackMap();
+    emitReturnPcStackMap();  // module init returns Void -- no result reg to seed
 
     // Store flag = true (1)
     u16 trueReg = allocReg();
@@ -1381,8 +1389,7 @@ void CodeGen::genForStmt(ForStmtNode* stmt) {
 
             // iReg = copy of startReg
             u16 iReg = allocReg();
-            emitOp(op_mov);
-            emitRegs(iReg, startReg);
+            emitMov(iReg, startReg);
 
             // For direction check: condReg for step >= 0
             u16 zeroReg = allocReg();
@@ -1770,7 +1777,7 @@ void CodeGen::genForStmt(ForStmtNode* stmt) {
         u16 elemReg = allocSlot(coroType->yieldType_);
         emitOp(op_coro_resume);
         emitRegs(elemReg, coroReg);
-        emitReturnPcStackMap();
+        emitReturnPcStackMap(elemReg, coroType->yieldType_);
 
         // Check if coroutine is done
         u16 doneReg = allocReg();
@@ -2638,8 +2645,7 @@ u16 CodeGen::genListLiteral(ListLiteralExpr* expr) {
         if (elemInline) {
             emitArgPlacement(expectedReg, promoted, elemType);
         } else if (promoted != expectedReg) {
-            emitOp(op_mov);
-            emitRegs(expectedReg, promoted);
+            emitMov(expectedReg, promoted);
         }
     }
     u16 count = (u16)expr->elements.size();
@@ -2880,8 +2886,7 @@ u16 CodeGen::genAsTypeExpr(AsTypeExprNode* expr) {
     u16 dstReg = allocSlot(optType);
     if (optType->repr_ == ts::Type::Repr::NullablePtrEnum) {
         // Phase 3: Some(p) is just the pointer.
-        emitOp(op_mov);
-        emitRegs(dstReg, valReg);
+        emitMov(dstReg, valReg);
     } else if (optType->repr_ == ts::Type::Repr::Inline) {
         // Phase 4g.4: inline enum -- write tag + payload directly into dst.
         emitOp(op_make_inline_enum);
@@ -3168,7 +3173,7 @@ u16 CodeGen::genBinaryOp(BinaryOpExpr* expr) {
         emitOp(expr->isBuiltinCall ? op_call_primitive : op_call);
         emitRegs(resultReg, 2, argBase);
         emitInt(expr->resolvedFuncGlobalIndex);
-        emitReturnPcStackMap();
+        emitReturnPcStackMap(resultReg, expr->resolvedType);
         if (builtinReturnsInlineComposite) {
             return emitUnboxIfInline(resultReg, expr->resolvedType);
         }
@@ -3575,7 +3580,7 @@ u16 CodeGen::genUnaryOp(UnaryOpExpr* expr) {
         emitOp(expr->isBuiltinCall ? op_call_primitive : op_call);
         emitRegs(resultReg, 1, argBase);
         emitInt(expr->resolvedFuncGlobalIndex);
-        emitReturnPcStackMap();
+        emitReturnPcStackMap(resultReg, expr->resolvedType);
         if (builtinReturnsInlineComposite) {
             return emitUnboxIfInline(resultReg, expr->resolvedType);
         }
@@ -3824,7 +3829,7 @@ u16 CodeGen::genCall(CallExpr_* expr) {
                 emitOp(expr->isBuiltinCall ? op_call_primitive : op_call);
                 emitRegs(resultReg, (u16)expr->args.size(), argBase);
                 emitInt(expr->resolvedFuncGlobalIndex);
-                emitReturnPcStackMap();
+                emitReturnPcStackMap(resultReg, expr->resolvedType);
                 return resultReg;
             }
         }
@@ -3864,7 +3869,7 @@ u16 CodeGen::genCall(CallExpr_* expr) {
             emitOp(op_call_template_lambda);
             emitRegs(resultReg, (u16)expr->args.size(), argBase, calleeReg);
             emitPtr(concreteLT->codeBlock_);
-            emitReturnPcStackMap();
+            emitReturnPcStackMap(resultReg, expr->resolvedType);
             return resultReg;
         }
 
@@ -3907,7 +3912,7 @@ u16 CodeGen::genCall(CallExpr_* expr) {
         clearArgRegTypes(argBase, resultReg);
         emitOp(op_call_lambda);
         emitRegs(resultReg, (u16)expr->args.size(), argBase, calleeReg);
-        emitReturnPcStackMap();
+        emitReturnPcStackMap(resultReg, expr->resolvedType);
         return resultReg;
     }
 
@@ -4003,7 +4008,7 @@ u16 CodeGen::genCall(CallExpr_* expr) {
         emitOp(op_call_template_lambda);
         emitRegs(resultReg, (u16)expr->args.size(), argBase, calleeReg);
         emitPtr(concreteLT->codeBlock_);
-        emitReturnPcStackMap();
+        emitReturnPcStackMap(resultReg, expr->resolvedType);
         return resultReg;
     }
 
@@ -4038,7 +4043,7 @@ u16 CodeGen::genCall(CallExpr_* expr) {
         clearArgRegTypes(argBase, resultReg);
         emitOp(op_call_lambda);
         emitRegs(resultReg, (u16)expr->args.size(), argBase, calleeReg);
-        emitReturnPcStackMap();
+        emitReturnPcStackMap(resultReg, expr->resolvedType);
         return resultReg;
     }
 
@@ -4079,7 +4084,7 @@ u16 CodeGen::genCall(CallExpr_* expr) {
                 clearArgRegTypes(argBase, resultReg);
                 emitOp(op_call_lambda);
                 emitRegs(resultReg, (u16)expr->args.size(), argBase, calleeReg);
-                emitReturnPcStackMap();
+                emitReturnPcStackMap(resultReg, expr->resolvedType);
                 return resultReg;
             }
         }
@@ -4180,8 +4185,7 @@ u16 CodeGen::genCall(CallExpr_* expr) {
         u16 dstReg = (u16)(argBase + cumOffset);
         if (argReg != dstReg) {
             if (placeSw <= 1) {
-                emitOp(op_mov);
-                emitRegs(dstReg, argReg);
+                emitMov(dstReg, argReg);
             } else {
                 emitMoveN(dstReg, argReg, placeSw);
             }
@@ -4248,7 +4252,7 @@ u16 CodeGen::genCall(CallExpr_* expr) {
         u16 valueReg = allocSlot(yieldType);
         emitOp(op_coro_resume);
         emitRegs(valueReg, coroReg);
-        emitReturnPcStackMap();
+        emitReturnPcStackMap(valueReg, yieldType);
         u16 resultReg = allocSlot(optType);
         emitOp(op_coro_wrap_option);
         emitRegs(resultReg, valueReg, coroReg);
@@ -4307,7 +4311,7 @@ u16 CodeGen::genCall(CallExpr_* expr) {
         u16 valueReg = allocSlot(innerCoroType ? innerCoroType->yieldType_ : nullptr);
         emitOp(op_coro_resume);
         emitRegs(valueReg, coroReg);
-        emitReturnPcStackMap();
+        emitReturnPcStackMap(valueReg, innerCoroType ? innerCoroType->yieldType_ : nullptr);
 
         // Check if coroutine is done
         u16 doneReg = allocReg();
@@ -4392,10 +4396,11 @@ u16 CodeGen::genCall(CallExpr_* expr) {
     emitInt(expr->resolvedFuncGlobalIndex);
 
     // Phase 5.2: record live refs at the returnPC so an in-callee GC
-    // cycle can root the caller's frame precisely. callDst is NOT in
-    // regTypes_ yet (genExpr's wrapper sets it after this returns), so
-    // the marker won't read an uninitialized slot mid-call.
-    emitReturnPcStackMap();
+    // cycle can root the caller's frame precisely. callDst is delivered
+    // by op_return BEFORE the caller resumes here, so it IS a live Obj*
+    // slot at this PC if the result type stores one -- we seed it here
+    // because genExpr's wrapper only setRegType-s it after we return.
+    emitReturnPcStackMap(callDst, expr->resolvedType);
 
     if (builtinReturnsInlineComposite) {
         return emitUnboxIfInline(callDst, expr->resolvedType);
@@ -4488,8 +4493,7 @@ u16 CodeGen::genAutoMapBinaryOp(BinaryOpExpr* expr) {
             emitOp(op_cmp_lt_int);
             emitRegs(cmpReg, lenReg, minLenReg);
             u32 skipJump = emitJump(op_jump_if_false, cmpReg);
-            emitOp(op_mov);
-            emitRegs(minLenReg, lenReg);
+            emitMov(minLenReg, lenReg);
             patchJump(skipJump);
         }
     };
@@ -4576,7 +4580,7 @@ u16 CodeGen::genAutoMapBinaryOp(BinaryOpExpr* expr) {
         emitOp(expr->isBuiltinCall ? op_call_primitive : op_call);
         emitRegs(elemResultReg, 2, argBase);
         emitInt(expr->resolvedFuncGlobalIndex);
-        emitReturnPcStackMap();
+        emitReturnPcStackMap(elemResultReg, scalarResultType);
         if (builtinReturnsInline) {
             elemResultReg = emitUnboxIfInline(elemResultReg, scalarResultType);
         }
@@ -4693,8 +4697,7 @@ u16 CodeGen::genAutoMapBinaryOpList(BinaryOpExpr* expr) {
     if (expr->leftAutoMap) {
         if (leftIsList) {
             leftCurReg = allocReg();
-            emitOp(op_mov);
-            emitRegs(leftCurReg, leftReg);
+            emitMov(leftCurReg, leftReg);
         } else {
             leftIdxReg = allocReg();
             emitOp(op_load_int_const);
@@ -4709,8 +4712,7 @@ u16 CodeGen::genAutoMapBinaryOpList(BinaryOpExpr* expr) {
     if (expr->rightAutoMap) {
         if (rightIsList) {
             rightCurReg = allocReg();
-            emitOp(op_mov);
-            emitRegs(rightCurReg, rightReg);
+            emitMov(rightCurReg, rightReg);
         } else {
             rightIdxReg = allocReg();
             emitOp(op_load_int_const);
@@ -4748,8 +4750,7 @@ u16 CodeGen::genAutoMapBinaryOpList(BinaryOpExpr* expr) {
             emitRegs(nilCheckReg, nilCheckReg);
         }
         if (firstCheck) {
-            emitOp(op_mov);
-            emitRegs(anyDoneReg, nilCheckReg);
+            emitMov(anyDoneReg, nilCheckReg);
             firstCheck = false;
         } else {
             emitOp(op_or_bool);
@@ -4793,16 +4794,16 @@ u16 CodeGen::genAutoMapBinaryOpList(BinaryOpExpr* expr) {
     u16 elemResultReg;
     if (expr->resolvedFuncGlobalIndex >= 0) {
         u16 argBase = nextReg_;
-        if (leftElemReg != argBase) { emitOp(op_mov); emitRegs(argBase, leftElemReg); }
+        if (leftElemReg != argBase) { emitMov(argBase, leftElemReg); }
         if (nextReg_ <= argBase) { nextReg_ = argBase + 1; if (nextReg_ > maxReg_) maxReg_ = nextReg_; }
-        if (rightElemReg != argBase + 1) { emitOp(op_mov); emitRegs(argBase + 1, rightElemReg); }
+        if (rightElemReg != argBase + 1) { emitMov(argBase + 1, rightElemReg); }
         if (nextReg_ <= argBase + 1) { nextReg_ = argBase + 2; if (nextReg_ > maxReg_) maxReg_ = nextReg_; }
         elemResultReg = allocReg();
         clearArgRegTypes(argBase, elemResultReg);
         emitOp(expr->isBuiltinCall ? op_call_primitive : op_call);
         emitRegs(elemResultReg, 2, argBase);
         emitInt(expr->resolvedFuncGlobalIndex);
-        emitReturnPcStackMap();
+        emitReturnPcStackMap(elemResultReg, scalarResultType);
     } else if (isCompositeNumeric(scalarResultType)) {
         elemResultReg = allocReg();
         emitOp(getCompositeArithOp(expr->op));
@@ -5047,7 +5048,7 @@ u16 CodeGen::genCartesianBinaryOp(BinaryOpExpr* expr) {
         emitOp(expr->isBuiltinCall ? op_call_primitive : op_call);
         emitRegs(elemResultReg, 2, argBase);
         emitInt(expr->resolvedFuncGlobalIndex);
-        emitReturnPcStackMap();
+        emitReturnPcStackMap(elemResultReg, scalarResultType);
         if (builtinReturnsInline) {
             elemResultReg = emitUnboxIfInline(elemResultReg, scalarResultType);
         }
@@ -5258,8 +5259,7 @@ u16 CodeGen::genDeepMapBinaryOp(BinaryOpExpr* expr, int depth) {
             emitOp(op_cmp_lt_int);
             emitRegs(cmpReg, lenReg, minLenReg);
             u32 skipJump = emitJump(op_jump_if_false, cmpReg);
-            emitOp(op_mov);
-            emitRegs(minLenReg, lenReg);
+            emitMov(minLenReg, lenReg);
             patchJump(skipJump);
         }
     };
@@ -5319,16 +5319,16 @@ u16 CodeGen::genDeepMapBinaryOp(BinaryOpExpr* expr, int depth) {
 
     if (expr->resolvedFuncGlobalIndex >= 0) {
         u16 argBase = nextReg_;
-        if (leftElemReg != argBase) { emitOp(op_mov); emitRegs(argBase, leftElemReg); }
+        if (leftElemReg != argBase) { emitMov(argBase, leftElemReg); }
         if (nextReg_ <= argBase) { nextReg_ = argBase + 1; if (nextReg_ > maxReg_) maxReg_ = nextReg_; }
-        if (rightElemReg != argBase + 1) { emitOp(op_mov); emitRegs(argBase + 1, rightElemReg); }
+        if (rightElemReg != argBase + 1) { emitMov(argBase + 1, rightElemReg); }
         if (nextReg_ <= argBase + 1) { nextReg_ = argBase + 2; if (nextReg_ > maxReg_) maxReg_ = nextReg_; }
         elemResultReg = allocReg();
         clearArgRegTypes(argBase, elemResultReg);
         emitOp(expr->isBuiltinCall ? op_call_primitive : op_call);
         emitRegs(elemResultReg, 2, argBase);
         emitInt(expr->resolvedFuncGlobalIndex);
-        emitReturnPcStackMap();
+        emitReturnPcStackMap(elemResultReg, scalarResultType);
     } else {
         bool isCmp = (expr->op >= BinaryOpExpr::Eq && expr->op <= BinaryOpExpr::Ge);
         if (isCmp) {
@@ -5452,8 +5452,7 @@ u16 CodeGen::genAutoMapCall(CallExpr_* expr) {
             emitOp(op_cmp_lt_int);
             emitRegs(cmpReg, lenReg, minLenReg);
             u32 skipJump = emitJump(op_jump_if_false, cmpReg);
-            emitOp(op_mov);
-            emitRegs(minLenReg, lenReg);
+            emitMov(minLenReg, lenReg);
             patchJump(skipJump);
         }
     }
@@ -5556,7 +5555,7 @@ u16 CodeGen::genAutoMapCall(CallExpr_* expr) {
                 bool boxedAtBoundary = expr->isBuiltinCall && !expr->builtinAcceptsInlineArgs;
                 if (boxedAtBoundary) {
                     u16 boxed = emitBoxIfInline(elemReg, elemType);
-                    if (boxed != targetReg) { emitOp(op_mov); emitRegs(targetReg, boxed); }
+                    if (boxed != targetReg) { emitMov(targetReg, boxed); }
                 } else {
                     if (elemReg != targetReg) {
                         emitMoveN(targetReg, elemReg, slotW);
@@ -5587,8 +5586,7 @@ u16 CodeGen::genAutoMapCall(CallExpr_* expr) {
             }
             if (srcReg != targetReg) {
                 if (slotW <= 1) {
-                    emitOp(op_mov);
-                    emitRegs(targetReg, srcReg);
+                    emitMov(targetReg, srcReg);
                 } else {
                     emitMoveN(targetReg, srcReg, slotW);
                 }
@@ -5612,7 +5610,7 @@ u16 CodeGen::genAutoMapCall(CallExpr_* expr) {
     emitOp(expr->isBuiltinCall ? op_call_primitive : op_call);
     emitRegs(callResultReg, callArgc, callArgBase);
     emitInt(expr->resolvedFuncGlobalIndex);
-    emitReturnPcStackMap();
+    emitReturnPcStackMap(callResultReg, returnT);
     if (builtinReturnsInlineComposite) {
         callResultReg = emitUnboxIfInline(callResultReg, returnT);
     }
@@ -5781,8 +5779,7 @@ u16 CodeGen::genAutoMapLambdaCall(CallExpr_* expr, u16 calleeReg, FunctionType* 
             emitOp(op_cmp_lt_int);
             emitRegs(cmpReg, lenReg, minLenReg);
             u32 skipJump = emitJump(op_jump_if_false, cmpReg);
-            emitOp(op_mov);
-            emitRegs(minLenReg, lenReg);
+            emitMov(minLenReg, lenReg);
             patchJump(skipJump);
         }
     }
@@ -5840,8 +5837,7 @@ u16 CodeGen::genAutoMapLambdaCall(CallExpr_* expr, u16 calleeReg, FunctionType* 
             if (paramType && elemType != paramType) {
                 u16 promoted = ensureType(targetReg, elemType, paramType);
                 if (promoted != targetReg) {
-                    emitOp(op_mov);
-                    emitRegs(targetReg, promoted);
+                    emitMov(targetReg, promoted);
                 }
             }
         } else {
@@ -5852,8 +5848,7 @@ u16 CodeGen::genAutoMapLambdaCall(CallExpr_* expr, u16 calleeReg, FunctionType* 
                 srcReg = ensureType(srcReg, argType, paramType);
             }
             if (srcReg != targetReg) {
-                emitOp(op_mov);
-                emitRegs(targetReg, srcReg);
+                emitMov(targetReg, srcReg);
             }
         }
     }
@@ -5863,7 +5858,8 @@ u16 CodeGen::genAutoMapLambdaCall(CallExpr_* expr, u16 calleeReg, FunctionType* 
     clearArgRegTypes(callArgBase, callResultReg);
     emitOp(op_call_lambda);
     emitRegs(callResultReg, argc, callArgBase, calleeReg);
-    emitReturnPcStackMap();
+    emitReturnPcStackMap(callResultReg,
+                        innerResultArrayType ? innerResultArrayType->elemType_ : nullptr);
 
     // Store result (skip for Void)
     if (!isVoidReturn) {
@@ -5948,8 +5944,7 @@ u16 CodeGen::genAutoMapLambdaCallList(CallExpr_* expr, u16 calleeReg, FunctionTy
 
     // --- Phase 3: Iterate the list eagerly ---
     u16 curListReg = allocReg();
-    emitOp(op_mov);
-    emitRegs(curListReg, argRegs[listArgIndex]);
+    emitMov(curListReg, argRegs[listArgIndex]);
 
     u16 accReg = 0;
     if (!isVoidReturn) {
@@ -6006,8 +6001,7 @@ u16 CodeGen::genAutoMapLambdaCallList(CallExpr_* expr, u16 calleeReg, FunctionTy
                     srcReg = ensureType(srcReg, listElemType, paramType);
                 }
                 if (srcReg != targetReg) {
-                    emitOp(op_mov);
-                    emitRegs(targetReg, srcReg);
+                    emitMov(targetReg, srcReg);
                 }
             }
         } else {
@@ -6017,7 +6011,7 @@ u16 CodeGen::genAutoMapLambdaCallList(CallExpr_* expr, u16 calleeReg, FunctionTy
                 srcReg = ensureType(srcReg, argType, paramType);
             }
             if (srcReg != targetReg) {
-                if (slotW <= 1) { emitOp(op_mov); emitRegs(targetReg, srcReg); }
+                if (slotW <= 1) { emitMov(targetReg, srcReg); }
                 else { emitMoveN(targetReg, srcReg, slotW); }
             }
         }
@@ -6028,7 +6022,7 @@ u16 CodeGen::genAutoMapLambdaCallList(CallExpr_* expr, u16 calleeReg, FunctionTy
     clearArgRegTypes(callArgBase, callResultReg);
     emitOp(op_call_lambda);
     emitRegs(callResultReg, argc, callArgBase, calleeReg);
-    emitReturnPcStackMap();
+    emitReturnPcStackMap(callResultReg, isVoidReturn ? nullptr : resultElemType);
 
     // Cons the result onto the accumulator (reversed result list).
     if (!isVoidReturn) {
@@ -6036,8 +6030,7 @@ u16 CodeGen::genAutoMapLambdaCallList(CallExpr_* expr, u16 calleeReg, FunctionTy
         emitOp(op_cons);
         emitRegs(newAcc, callResultReg, accReg);
         emitPtr(resultListType);
-        emitOp(op_mov);
-        emitRegs(accReg, newAcc);
+        emitMov(accReg, newAcc);
     }
 
     // --- Phase 6: Advance to tail and loop ---
@@ -6069,8 +6062,7 @@ u16 CodeGen::genAutoMapLambdaCallList(CallExpr_* expr, u16 calleeReg, FunctionTy
     emitOp(op_cons);
     emitRegs(newResult, revHeadReg, resultReg);
     emitPtr(resultListType);
-    emitOp(op_mov);
-    emitRegs(resultReg, newResult);
+    emitMov(resultReg, newResult);
 
     emitOp(op_list_tail);
     emitRegs(accReg, accReg);
@@ -6146,8 +6138,7 @@ u16 CodeGen::genAutoMapCallList(CallExpr_* expr, const FuncInfo* funcInfo) {
 
         u16 bcastReg = allocReg();
         if (srcReg != bcastReg) {
-            emitOp(op_mov);
-            emitRegs(bcastReg, srcReg);
+            emitMov(bcastReg, srcReg);
         }
 
         AutoMapCallInfo::BroadcastArg ba;
@@ -6203,8 +6194,7 @@ u16 CodeGen::genAutoMapCallListVoid(CallExpr_* expr, const FuncInfo* funcInfo) {
 
     // --- Phase 3: Iterate the list eagerly ---
     u16 curListReg = allocReg();
-    emitOp(op_mov);
-    emitRegs(curListReg, argRegs[listArgIndex]);
+    emitMov(curListReg, argRegs[listArgIndex]);
 
     u32 loopStart = (u32)currentBlock_->code.size();
     u16 nilCheckReg = allocReg();
@@ -6257,8 +6247,7 @@ u16 CodeGen::genAutoMapCallListVoid(CallExpr_* expr, const FuncInfo* funcInfo) {
                 if (boxAtBoundary) {
                     srcReg = emitBoxIfInline(headReg, listElemType);
                     if (srcReg != targetReg) {
-                        emitOp(op_mov);
-                        emitRegs(targetReg, srcReg);
+                        emitMov(targetReg, srcReg);
                     }
                 } else {
                     if (srcReg != targetReg) {
@@ -6270,8 +6259,7 @@ u16 CodeGen::genAutoMapCallListVoid(CallExpr_* expr, const FuncInfo* funcInfo) {
                     srcReg = ensureType(srcReg, listElemType, paramType);
                 }
                 if (srcReg != targetReg) {
-                    emitOp(op_mov);
-                    emitRegs(targetReg, srcReg);
+                    emitMov(targetReg, srcReg);
                 }
             }
         } else {
@@ -6287,7 +6275,7 @@ u16 CodeGen::genAutoMapCallListVoid(CallExpr_* expr, const FuncInfo* funcInfo) {
                 srcReg = emitBoxIfInline(srcReg, paramType);
             }
             if (srcReg != targetReg) {
-                if (slotW <= 1) { emitOp(op_mov); emitRegs(targetReg, srcReg); }
+                if (slotW <= 1) { emitMov(targetReg, srcReg); }
                 else { emitMoveN(targetReg, srcReg, slotW); }
             }
         }
@@ -6300,7 +6288,7 @@ u16 CodeGen::genAutoMapCallListVoid(CallExpr_* expr, const FuncInfo* funcInfo) {
     emitOp(expr->isBuiltinCall ? op_call_primitive : op_call);
     emitRegs(callResultReg, callArgc, callArgBase);
     emitInt(expr->resolvedFuncGlobalIndex);
-    emitReturnPcStackMap();
+    emitReturnPcStackMap();  // result discarded -- no result reg to seed
 
     // --- Phase 6: Advance to tail and loop ---
     emitOp(op_list_tail);
@@ -6383,8 +6371,7 @@ u16 CodeGen::genExplicitImplicitAutoMapCall(CallExpr_* expr) {
             emitOp(op_cmp_lt_int);
             emitRegs(cmpReg, lenReg, implicitMinLenReg);
             u32 skipJump = emitJump(op_jump_if_false, cmpReg);
-            emitOp(op_mov);
-            emitRegs(implicitMinLenReg, lenReg);
+            emitMov(implicitMinLenReg, lenReg);
             patchJump(skipJump);
         }
     }
@@ -6556,13 +6543,13 @@ u16 CodeGen::genExplicitImplicitAutoMapCall(CallExpr_* expr) {
             }
             if (inlineCompositeT(elemType) && boxAtBoundary) {
                 srcReg = emitBoxIfInline(srcReg, elemType);
-                if (srcReg != targetReg) { emitOp(op_mov); emitRegs(targetReg, srcReg); }
+                if (srcReg != targetReg) { emitMov(targetReg, srcReg); }
             } else {
                 if (paramType && elemType != paramType) {
                     srcReg = ensureType(srcReg, elemType, paramType);
                 }
                 if (srcReg != targetReg) {
-                    if (slotW <= 1) { emitOp(op_mov); emitRegs(targetReg, srcReg); }
+                    if (slotW <= 1) { emitMov(targetReg, srcReg); }
                     else { emitMoveN(targetReg, srcReg, slotW); }
                 }
             }
@@ -6579,15 +6566,14 @@ u16 CodeGen::genExplicitImplicitAutoMapCall(CallExpr_* expr) {
             if (elemInlineComposite) {
                 if (boxAtBoundary) {
                     u16 boxed = emitBoxIfInline(elemReg, elemType);
-                    if (boxed != targetReg) { emitOp(op_mov); emitRegs(targetReg, boxed); }
+                    if (boxed != targetReg) { emitMov(targetReg, boxed); }
                 } else {
                     if (elemReg != targetReg) emitMoveN(targetReg, elemReg, slotW);
                 }
             } else if (paramType && elemType != paramType) {
                 u16 promoted = ensureType(targetReg, elemType, paramType);
                 if (promoted != targetReg) {
-                    emitOp(op_mov);
-                    emitRegs(targetReg, promoted);
+                    emitMov(targetReg, promoted);
                 }
             }
         } else {
@@ -6601,7 +6587,7 @@ u16 CodeGen::genExplicitImplicitAutoMapCall(CallExpr_* expr) {
                 srcReg = emitBoxIfInline(srcReg, paramType);
             }
             if (srcReg != targetReg) {
-                if (slotW <= 1) { emitOp(op_mov); emitRegs(targetReg, srcReg); }
+                if (slotW <= 1) { emitMov(targetReg, srcReg); }
                 else { emitMoveN(targetReg, srcReg, slotW); }
             }
         }
@@ -6622,7 +6608,7 @@ u16 CodeGen::genExplicitImplicitAutoMapCall(CallExpr_* expr) {
     emitOp(expr->isBuiltinCall ? op_call_primitive : op_call);
     emitRegs(callResultReg, callArgc, callArgBase);
     emitInt(expr->resolvedFuncGlobalIndex);
-    emitReturnPcStackMap();
+    emitReturnPcStackMap(callResultReg, returnT);
     if (builtinReturnsInline) {
         callResultReg = emitUnboxIfInline(callResultReg, returnT);
     }
@@ -6837,7 +6823,7 @@ u16 CodeGen::genCartesianCall(CallExpr_* expr) {
             if (elemInlineComposite) {
                 if (boxAtBoundary) {
                     u16 boxed = emitBoxIfInline(elemReg, elemType);
-                    if (boxed != targetReg) { emitOp(op_mov); emitRegs(targetReg, boxed); }
+                    if (boxed != targetReg) { emitMov(targetReg, boxed); }
                 } else {
                     if (elemReg != targetReg) emitMoveN(targetReg, elemReg, slotW);
                 }
@@ -6856,7 +6842,7 @@ u16 CodeGen::genCartesianCall(CallExpr_* expr) {
                 srcReg = emitBoxIfInline(srcReg, paramType);
             }
             if (srcReg != targetReg) {
-                if (slotW <= 1) { emitOp(op_mov); emitRegs(targetReg, srcReg); }
+                if (slotW <= 1) { emitMov(targetReg, srcReg); }
                 else { emitMoveN(targetReg, srcReg, slotW); }
             }
         }
@@ -6877,7 +6863,7 @@ u16 CodeGen::genCartesianCall(CallExpr_* expr) {
     emitOp(expr->isBuiltinCall ? op_call_primitive : op_call);
     emitRegs(callResultReg, callArgc, callArgBase);
     emitInt(expr->resolvedFuncGlobalIndex);
-    emitReturnPcStackMap();
+    emitReturnPcStackMap(callResultReg, returnT);
     if (builtinReturnsInline) {
         callResultReg = emitUnboxIfInline(callResultReg, returnT);
     }
@@ -7101,8 +7087,7 @@ u16 CodeGen::genDeepMapCall(CallExpr_* expr, int depth) {
             emitOp(op_cmp_lt_int);
             emitRegs(cmpReg, lenReg, minLenReg);
             u32 skipJump = emitJump(op_jump_if_false, cmpReg);
-            emitOp(op_mov);
-            emitRegs(minLenReg, lenReg);
+            emitMov(minLenReg, lenReg);
             patchJump(skipJump);
         }
     }
@@ -7158,8 +7143,7 @@ u16 CodeGen::genDeepMapCall(CallExpr_* expr, int depth) {
             if (paramType && elemType != paramType) {
                 u16 promoted = ensureType(targetReg, elemType, paramType);
                 if (promoted != targetReg) {
-                    emitOp(op_mov);
-                    emitRegs(targetReg, promoted);
+                    emitMov(targetReg, promoted);
                 }
             }
         } else {
@@ -7171,8 +7155,7 @@ u16 CodeGen::genDeepMapCall(CallExpr_* expr, int depth) {
                 srcReg = ensureType(srcReg, argType, paramType);
             }
             if (srcReg != targetReg) {
-                emitOp(op_mov);
-                emitRegs(targetReg, srcReg);
+                emitMov(targetReg, srcReg);
             }
         }
     }
@@ -7184,7 +7167,9 @@ u16 CodeGen::genDeepMapCall(CallExpr_* expr, int depth) {
     emitOp(expr->isBuiltinCall ? op_call_primitive : op_call);
     emitRegs(callResultReg, callArgc, callArgBase);
     emitInt(expr->resolvedFuncGlobalIndex);
-    emitReturnPcStackMap();
+    emitReturnPcStackMap(callResultReg,
+                        isVoidReturn ? nullptr :
+                            (innerResultArrayType ? innerResultArrayType->elemType_ : nullptr));
 
     // Store in innermost result array (skip for Void)
     if (!isVoidReturn) {
@@ -7378,7 +7363,7 @@ u16 CodeGen::genStructLiteral(StructLiteralExpr* expr) {
             u16 reg = allocReg();
             emitOp(op_load_nil);
             emitRegs(reg);
-            if (reg != cursor) { emitOp(op_mov); emitRegs(cursor, reg); }
+            if (reg != cursor) { emitMov(cursor, reg); }
         }
         cursor = (u16)(cursor + fieldSlotWords);
         if (nextReg_ < cursor) { nextReg_ = cursor; if (nextReg_ > maxReg_) maxReg_ = nextReg_; }
@@ -7456,8 +7441,7 @@ u16 CodeGen::genAutoMapStructLiteral(StructLiteralExpr* expr) {
             emitOp(op_cmp_lt_int);
             emitRegs(cmpReg, lenReg, minLenReg);
             u32 skipJump = emitJump(op_jump_if_false, cmpReg);
-            emitOp(op_mov);
-            emitRegs(minLenReg, lenReg);
+            emitMov(minLenReg, lenReg);
             patchJump(skipJump);
         }
     }
@@ -7518,8 +7502,7 @@ u16 CodeGen::genAutoMapStructLiteral(StructLiteralExpr* expr) {
             if (elemType != declType) {
                 u16 promoted = ensureType(targetReg, elemType, declType);
                 if (promoted != targetReg) {
-                    emitOp(op_mov);
-                    emitRegs(targetReg, promoted);
+                    emitMov(targetReg, promoted);
                 }
             }
         } else {
@@ -7528,8 +7511,7 @@ u16 CodeGen::genAutoMapStructLiteral(StructLiteralExpr* expr) {
             Type* valType = expr->fields[litIdx].value->resolvedType;
             valReg = ensureType(valReg, valType, declType);
             if (valReg != targetReg) {
-                emitOp(op_mov);
-                emitRegs(targetReg, valReg);
+                emitMov(targetReg, valReg);
             }
         }
     }
@@ -7601,8 +7583,7 @@ u16 CodeGen::genAutoMapTupleStruct(CallExpr_* expr) {
             emitOp(op_cmp_lt_int);
             emitRegs(cmpReg, lenReg, minLenReg);
             u32 skipJump = emitJump(op_jump_if_false, cmpReg);
-            emitOp(op_mov);
-            emitRegs(minLenReg, lenReg);
+            emitMov(minLenReg, lenReg);
             patchJump(skipJump);
         }
     }
@@ -7657,8 +7638,7 @@ u16 CodeGen::genAutoMapTupleStruct(CallExpr_* expr) {
             if (elemType != declType) {
                 u16 promoted = ensureType(targetReg, elemType, declType);
                 if (promoted != targetReg) {
-                    emitOp(op_mov);
-                    emitRegs(targetReg, promoted);
+                    emitMov(targetReg, promoted);
                 }
             }
         } else {
@@ -7667,8 +7647,7 @@ u16 CodeGen::genAutoMapTupleStruct(CallExpr_* expr) {
             Type* valType = expr->args[i]->resolvedType;
             valReg = ensureType(valReg, valType, declType);
             if (valReg != targetReg) {
-                emitOp(op_mov);
-                emitRegs(targetReg, valReg);
+                emitMov(targetReg, valReg);
             }
         }
     }
@@ -7742,8 +7721,7 @@ u16 CodeGen::genAutoMapArrayLiteral(ArrayLiteralExpr* expr) {
             emitOp(op_cmp_lt_int);
             emitRegs(cmpReg, lenReg, minLenReg);
             u32 skip = emitJump(op_jump_if_false, cmpReg);
-            emitOp(op_mov);
-            emitRegs(minLenReg, lenReg);
+            emitMov(minLenReg, lenReg);
             patchJump(skip);
         }
     }
@@ -7782,14 +7760,14 @@ u16 CodeGen::genAutoMapArrayLiteral(ArrayLiteralExpr* expr) {
             Type* srcElemType = arrT->elemType_;
             if (srcElemType != elemType) {
                 u16 promoted = ensureType(targetReg, srcElemType, elemType);
-                if (promoted != targetReg) { emitOp(op_mov); emitRegs(targetReg, promoted); }
+                if (promoted != targetReg) { emitMov(targetReg, promoted); }
             }
         } else {
             // Scalar element — copy and promote if needed
             Type* valType = expr->elements[i]->resolvedType;
             u16 srcReg = elemRegs[i];
             srcReg = ensureType(srcReg, valType, elemType);
-            if (srcReg != targetReg) { emitOp(op_mov); emitRegs(targetReg, srcReg); }
+            if (srcReg != targetReg) { emitMov(targetReg, srcReg); }
         }
     }
 
@@ -7919,7 +7897,7 @@ u16 CodeGen::genCartesianArrayLiteral(ArrayLiteralExpr* expr) {
             Type* srcElem = arrT->elemType_;
             if (srcElem != elemType) {
                 u16 promoted = ensureType(targetReg, srcElem, elemType);
-                if (promoted != targetReg) { emitOp(op_mov); emitRegs(targetReg, promoted); }
+                if (promoted != targetReg) { emitMov(targetReg, promoted); }
             }
         } else if (expr->autoMapElements[i].depth > 0) {
             // Plain @ in cartesian context — zip with level 1
@@ -7928,13 +7906,13 @@ u16 CodeGen::genCartesianArrayLiteral(ArrayLiteralExpr* expr) {
             Type* srcElem = arrT->elemType_;
             if (srcElem != elemType) {
                 u16 promoted = ensureType(targetReg, srcElem, elemType);
-                if (promoted != targetReg) { emitOp(op_mov); emitRegs(targetReg, promoted); }
+                if (promoted != targetReg) { emitMov(targetReg, promoted); }
             }
         } else {
             // Scalar
             Type* valType = expr->elements[i]->resolvedType;
             u16 srcReg = ensureType(elemRegs[i], valType, elemType);
-            if (srcReg != targetReg) { emitOp(op_mov); emitRegs(targetReg, srcReg); }
+            if (srcReg != targetReg) { emitMov(targetReg, srcReg); }
         }
     }
 
@@ -7993,7 +7971,7 @@ u16 CodeGen::genAutoMapTupleLiteral(TupleLiteralExpr* expr) {
             u16 cmpReg = allocReg();
             emitOp(op_cmp_lt_int); emitRegs(cmpReg, lenReg, minLenReg);
             u32 skip = emitJump(op_jump_if_false, cmpReg);
-            emitOp(op_mov); emitRegs(minLenReg, lenReg);
+            emitMov(minLenReg, lenReg);
             patchJump(skip);
         }
     }
@@ -8029,12 +8007,12 @@ u16 CodeGen::genAutoMapTupleLiteral(TupleLiteralExpr* expr) {
             Type* srcElemType = arrT->elemType_;
             if (srcElemType != fieldType) {
                 u16 promoted = ensureType(targetReg, srcElemType, fieldType);
-                if (promoted != targetReg) { emitOp(op_mov); emitRegs(targetReg, promoted); }
+                if (promoted != targetReg) { emitMov(targetReg, promoted); }
             }
         } else {
             Type* valType = expr->elements[i]->resolvedType;
             u16 srcReg = ensureType(elemRegs[i], valType, fieldType);
-            if (srcReg != targetReg) { emitOp(op_mov); emitRegs(targetReg, srcReg); }
+            if (srcReg != targetReg) { emitMov(targetReg, srcReg); }
         }
     }
 
@@ -8167,7 +8145,7 @@ u16 CodeGen::genCartesianTupleLiteral(TupleLiteralExpr* expr) {
             Type* srcElem = arrT->elemType_;
             if (srcElem != fieldType) {
                 u16 promoted = ensureType(targetReg, srcElem, fieldType);
-                if (promoted != targetReg) { emitOp(op_mov); emitRegs(targetReg, promoted); }
+                if (promoted != targetReg) { emitMov(targetReg, promoted); }
             }
         } else if (expr->autoMapElements[i].depth > 0) {
             auto* arrT = dynamic_cast<ArrayType*>(expr->elements[i]->resolvedType);
@@ -8175,12 +8153,12 @@ u16 CodeGen::genCartesianTupleLiteral(TupleLiteralExpr* expr) {
             Type* srcElem = arrT->elemType_;
             if (srcElem != fieldType) {
                 u16 promoted = ensureType(targetReg, srcElem, fieldType);
-                if (promoted != targetReg) { emitOp(op_mov); emitRegs(targetReg, promoted); }
+                if (promoted != targetReg) { emitMov(targetReg, promoted); }
             }
         } else {
             Type* valType = expr->elements[i]->resolvedType;
             u16 srcReg = ensureType(elemRegs[i], valType, fieldType);
-            if (srcReg != targetReg) { emitOp(op_mov); emitRegs(targetReg, srcReg); }
+            if (srcReg != targetReg) { emitMov(targetReg, srcReg); }
         }
     }
 
@@ -8330,7 +8308,7 @@ u16 CodeGen::genCartesianStructLiteral(StructLiteralExpr* expr) {
                 Type* srcElem = arrT->elemType_;
                 if (srcElem != declType) {
                     u16 promoted = ensureType(targetReg, srcElem, declType);
-                    if (promoted != targetReg) { emitOp(op_mov); emitRegs(targetReg, promoted); }
+                    if (promoted != targetReg) { emitMov(targetReg, promoted); }
                 }
             } else if (expr->autoMapFields[litIdx].depth > 0) {
                 // Plain @ in cartesian context — zip with level 1
@@ -8339,12 +8317,12 @@ u16 CodeGen::genCartesianStructLiteral(StructLiteralExpr* expr) {
                 Type* srcElem = arrT->elemType_;
                 if (srcElem != declType) {
                     u16 promoted = ensureType(targetReg, srcElem, declType);
-                    if (promoted != targetReg) { emitOp(op_mov); emitRegs(targetReg, promoted); }
+                    if (promoted != targetReg) { emitMov(targetReg, promoted); }
                 }
             } else {
                 // Scalar
                 u16 srcReg = ensureType(fieldRegs[litIdx], expr->fields[litIdx].value->resolvedType, declType);
-                if (srcReg != targetReg) { emitOp(op_mov); emitRegs(targetReg, srcReg); }
+                if (srcReg != targetReg) { emitMov(targetReg, srcReg); }
             }
         }
     }
@@ -8479,7 +8457,7 @@ u16 CodeGen::genCartesianTupleStruct(CallExpr_* expr) {
             Type* srcElem = arrT->elemType_;
             if (srcElem != declType) {
                 u16 promoted = ensureType(targetReg, srcElem, declType);
-                if (promoted != targetReg) { emitOp(op_mov); emitRegs(targetReg, promoted); }
+                if (promoted != targetReg) { emitMov(targetReg, promoted); }
             }
         } else if (expr->autoMapArgs[i].depth > 0) {
             auto* arrT = dynamic_cast<ArrayType*>(expr->args[i]->resolvedType);
@@ -8487,11 +8465,11 @@ u16 CodeGen::genCartesianTupleStruct(CallExpr_* expr) {
             Type* srcElem = arrT->elemType_;
             if (srcElem != declType) {
                 u16 promoted = ensureType(targetReg, srcElem, declType);
-                if (promoted != targetReg) { emitOp(op_mov); emitRegs(targetReg, promoted); }
+                if (promoted != targetReg) { emitMov(targetReg, promoted); }
             }
         } else {
             u16 srcReg = ensureType(argRegs[i], expr->args[i]->resolvedType, declType);
-            if (srcReg != targetReg) { emitOp(op_mov); emitRegs(targetReg, srcReg); }
+            if (srcReg != targetReg) { emitMov(targetReg, srcReg); }
         }
     }
 
@@ -8661,8 +8639,7 @@ u16 CodeGen::emitIndexLookup(u16 srcReg, Type* srcType, u16 idxReg, Type* idxTyp
         auto* resultListType = dynamic_cast<ListType*>(resultType);
 
         u16 curReg = allocReg();
-        emitOp(op_mov);
-        emitRegs(curReg, idxReg);
+        emitMov(curReg, idxReg);
 
         u16 accReg = allocReg();
         emitOp(op_load_nil);
@@ -8828,8 +8805,7 @@ u16 CodeGen::genAutoMapIndexObjList(IndexExpr_* expr) {
     auto* resultListType = dynamic_cast<ListType*>(expr->resolvedType);
 
     u16 curReg = allocReg();
-    emitOp(op_mov);
-    emitRegs(curReg, objReg);
+    emitMov(curReg, objReg);
 
     u16 accReg = allocReg();
     emitOp(op_load_nil);
@@ -8978,8 +8954,7 @@ u16 CodeGen::genAutoMapIndexObjDeep(IndexExpr_* expr, int depth) {
             currentObjReg = subReg;
         } else {
             loop.curReg = allocReg();
-            emitOp(op_mov);
-            emitRegs(loop.curReg, currentObjReg);
+            emitMov(loop.curReg, currentObjReg);
 
             loop.accReg = allocReg();
             emitOp(op_load_nil);
@@ -9276,8 +9251,7 @@ u16 CodeGen::genAutoMapFieldList(FieldExpr_* expr) {
 
     // Current list pointer
     u16 curReg = allocReg();
-    emitOp(op_mov);
-    emitRegs(curReg, objReg);
+    emitMov(curReg, objReg);
 
     // Accumulator (reversed result)
     u16 accReg = allocReg();
@@ -9447,8 +9421,7 @@ u16 CodeGen::genAutoMapFieldDeep(FieldExpr_* expr, int depth) {
         } else {
             // List loop
             loop.curReg = allocReg();
-            emitOp(op_mov);
-            emitRegs(loop.curReg, currentObjReg);
+            emitMov(loop.curReg, currentObjReg);
 
             loop.accReg = allocReg();
             emitOp(op_load_nil);
@@ -9600,8 +9573,7 @@ u16 CodeGen::genEnumConstruct(ASTNode* node) {
 
         // Phase 3: NullablePtrEnum -- Some(p) is just the inner pointer.
         if (etype->repr_ == ts::Type::Repr::NullablePtrEnum) {
-            emitOp(op_mov);
-            emitRegs(dst, valReg);
+            emitMov(dst, valReg);
         } else if (etype->repr_ == ts::Type::Repr::Inline) {
             // Phase 4g.4: inline enum -- payload is laid out in-place at
             // dst[1..1+P]. The payload may itself be an inline composite
@@ -9786,8 +9758,7 @@ u16 CodeGen::genLambdaExpr(LambdaExprNode* expr) {
         if (local) {
             u16 captureReg = allocReg();
             if (local->reg != captureReg) {
-                emitOp(op_mov);
-                emitRegs(captureReg, local->reg);
+                emitMov(captureReg, local->reg);
             }
         } else {
             // Should not happen (globals are not captured), but handle gracefully
@@ -9816,8 +9787,7 @@ u16 CodeGen::genTemplateLambdaDef(LambdaExprNode* expr) {
         if (local) {
             u16 captureReg = allocReg();
             if (local->reg != captureReg) {
-                emitOp(op_mov);
-                emitRegs(captureReg, local->reg);
+                emitMov(captureReg, local->reg);
             }
         } else {
             error(expr->loc, "Cannot find captured variable '" + expr->captures[i].name + "'");

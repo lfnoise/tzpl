@@ -120,28 +120,12 @@ public:
         refcount_.store(kImmortalRefcount, std::memory_order_relaxed);
     }
 
-    void retain() const {
-        u32 rc = refcount_.load(std::memory_order_relaxed);
-        if (rc >= kImmortalRefcount) return;
-        refcount_.fetch_add(1, std::memory_order_relaxed);
-    }
-
-    // Returns true if refcount reached zero.
-    // When refcount reaches zero, the object is auto-enqueued for deferred deletion.
-    bool release() const {
-        u32 rc = refcount_.load(std::memory_order_relaxed);
-        if (rc >= kImmortalRefcount) return false;
-        if (rc == 0) {
-            // Already at zero -- caller is releasing an object that was
-            // already enqueued for deletion. Skip to avoid underflow.
-            return false;
-        }
-        if (refcount_.fetch_sub(1, std::memory_order_acq_rel) == 1) {
-            arcEnqueueForDeletion(const_cast<GCObj*>(this));
-            return true;
-        }
-        return false;
-    }
+    // Phase 5: ARC is retired. retain/release are no-ops left in place so the
+    // many call sites compile during the cleanup transition; tracing is now
+    // the sole liveness mechanism. The refcount field stays as a decorative
+    // header word for one more cleanup pass; isImmortal() still consults it.
+    void retain() const {}
+    bool release() const { return false; }
 
     u32 refcount() const {
         return refcount_.load(std::memory_order_relaxed);

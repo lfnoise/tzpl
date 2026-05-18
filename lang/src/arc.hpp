@@ -47,13 +47,12 @@ public:
         pool_.push_back(obj);
     }
 
-    // Drain the pool, releasing each object's pool reference.
-    // Objects whose refcount reaches zero are auto-enqueued for deferred deletion
-    // by release() itself.
+    // Phase 5: ARC is retired -- tracing is the sole liveness mechanism.
+    // drain() no longer releases; it just empties the bookkeeping list. The
+    // pool stays as a vestigial cache of "objects allocated this event" but
+    // no longer carries a refcount contribution. Cleanup pass after Phase 5.5
+    // will delete this class entirely.
     void drain() {
-        for (GCObj* obj : pool_) {
-            obj->release();
-        }
         pool_.clear();
     }
 
