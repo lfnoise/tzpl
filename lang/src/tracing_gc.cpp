@@ -183,6 +183,7 @@ u32 TracingGC::step_sweep(u64 deadlineNanos) {
         currentWhiteCount_ = 0;
         currentBlackCount_ = 0;
         phase_ = Phase::Idle;
+        ++cyclesCompleted_;
         // Reset the alloc counter so the next cycle is triggered by fresh
         // allocation pressure, not the alloc history before this cycle.
         allocsSinceLastCycle_ = 0;
@@ -204,16 +205,23 @@ u32 TracingGC::step_sweep(u64 deadlineNanos) {
 u32 TracingGC::step(u64 deadlineNanos) {
     // step_mark may transition to Sweep when the gray worklist drains; do
     // both phases in one call so a slack deadline gets used fully rather
-    // than burning a host tick on the phase boundary.
+    // than burning a host tick on the phase boundary. Wrap the dispatch in
+    // wall-clock measurement so the worst-case pause can be queried via
+    // __gc_step_max_ns -- this is the headline RT-safety signal.
+    u64 start = gcMonoNanos();
     u32 done = 0;
     if (phase_ == Phase::Mark) {
         done += step_mark(deadlineNanos);
-        if (phase_ != Phase::Sweep) return done;
-        if (gcMonoNanos() >= deadlineNanos) return done;
-    }
-    if (phase_ == Phase::Sweep) {
+        if (phase_ == Phase::Sweep && gcMonoNanos() < deadlineNanos) {
+            done += step_sweep(deadlineNanos);
+        }
+    } else if (phase_ == Phase::Sweep) {
         done += step_sweep(deadlineNanos);
     }
+    u64 elapsed = gcMonoNanos() - start;
+    ++stepCount_;
+    stepSumNanos_ += elapsed;
+    if (elapsed > stepMaxNanos_) stepMaxNanos_ = elapsed;
     return done;
 }
 

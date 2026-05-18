@@ -2170,6 +2170,34 @@ static void builtin_gc_trace_whites(VM& vm, u16 dst, u16, u16) {
     vm.reg(dst).i = (i64)vm.tracingGC().lastWhiteCount();
 }
 
+// Phase 6 telemetry: each step() call measures its own wall-clock
+// duration and accumulates into TracingGC counters. These builtins
+// expose the counters so tests / dev tooling can verify that
+// step-budget enforcement is actually working in practice.
+//
+// __gc_step_max_ns is the headline number: the longest single step
+// observed since process start (or since the last reset). For an RT
+// VM with stepBudgetNanos = 200 us, this should stay close to 200 us
+// plus the overshoot bound (kCheckEvery * worstUnitCost ~ 2 us); a
+// number orders-of-magnitude larger signals a fan-out-heavy
+// gcScanChildren that should be made bounded in a follow-up.
+static void builtin_gc_step_count(VM& vm, u16 dst, u16, u16) {
+    vm.reg(dst).i = (i64)vm.tracingGC().stepCount();
+}
+static void builtin_gc_step_max_ns(VM& vm, u16 dst, u16, u16) {
+    vm.reg(dst).i = (i64)vm.tracingGC().stepMaxNanos();
+}
+static void builtin_gc_step_sum_ns(VM& vm, u16 dst, u16, u16) {
+    vm.reg(dst).i = (i64)vm.tracingGC().stepSumNanos();
+}
+static void builtin_gc_cycles_completed(VM& vm, u16 dst, u16, u16) {
+    vm.reg(dst).i = (i64)vm.tracingGC().cyclesCompleted();
+}
+static void builtin_gc_reset_step_stats(VM& vm, u16 dst, u16, u16) {
+    vm.tracingGC().resetStepStats();
+    vm.reg(dst).i = 0;
+}
+
 // Phase 3e validation: drain the auto-release pool unconditionally so a
 // subsequent tracing cycle sees only what is reachable from globals,
 // dynvars, and the heap graph. In normal file-mode execution the pool
@@ -2422,6 +2450,13 @@ void registerBuiltinFunctions(Compiler& compiler,
     registerOne(compiler, functions, "__gc_trace_blacks", compiler.intType(), {}, builtin_gc_trace_blacks, /*pure=*/false, /*rtSafe=*/false);
     registerOne(compiler, functions, "__gc_trace_whites", compiler.intType(), {}, builtin_gc_trace_whites, /*pure=*/false, /*rtSafe=*/false);
     registerOne(compiler, functions, "__gc_drain_pool",   compiler.voidType(), {}, builtin_gc_drain_pool,   /*pure=*/false, /*rtSafe=*/false);
+
+    // Phase 6 telemetry: step-budget verification.
+    registerOne(compiler, functions, "__gc_step_count",       compiler.intType(), {}, builtin_gc_step_count,       /*pure=*/false, /*rtSafe=*/false);
+    registerOne(compiler, functions, "__gc_step_max_ns",      compiler.intType(), {}, builtin_gc_step_max_ns,      /*pure=*/false, /*rtSafe=*/false);
+    registerOne(compiler, functions, "__gc_step_sum_ns",      compiler.intType(), {}, builtin_gc_step_sum_ns,      /*pure=*/false, /*rtSafe=*/false);
+    registerOne(compiler, functions, "__gc_cycles_completed", compiler.intType(), {}, builtin_gc_cycles_completed, /*pure=*/false, /*rtSafe=*/false);
+    registerOne(compiler, functions, "__gc_reset_step_stats", compiler.intType(), {}, builtin_gc_reset_step_stats, /*pure=*/false, /*rtSafe=*/false);
 
     // --- Ref builtins ---
     // Phase 4g.6: ref / deref / setref read inline-composite args directly

@@ -95,6 +95,20 @@ public:
     u32 lastBlackCount() const { return lastBlackCount_; }
     u32 lastRootCount() const { return lastRootCount_; }
 
+    // Phase 6 step() telemetry. step() measures its own elapsed wall time
+    // and accumulates into these counters. stepMaxNanos is the worst-case
+    // pause observed; it should stay close to the configured budget plus
+    // (kCheckEvery * worstUnitCost). A step that exceeds budget by orders
+    // of magnitude usually means a single gcScanChildren ran with very high
+    // fan-out -- a signal to add a bounded-fan-out override for that type.
+    u64 stepCount()       const { return stepCount_; }
+    u64 stepMaxNanos()    const { return stepMaxNanos_; }
+    u64 stepSumNanos()    const { return stepSumNanos_; }
+    u64 cyclesCompleted() const { return cyclesCompleted_; }
+    void resetStepStats() {
+        stepCount_ = 0; stepMaxNanos_ = 0; stepSumNanos_ = 0;
+    }
+
     // Mark an object: if currently white, transition to gray and push to
     // worklist. No-op for immortals, blacks, and grays. Called by the
     // root walker and by future write barriers.
@@ -141,6 +155,13 @@ private:
     u32 currentBlackCount_ = 0;
     u32 allocsSinceLastCycle_ = 0;
     u32 nextTriggerAllocs_ = kMinTriggerAllocs;
+
+    // Phase 6 telemetry counters; written only inside step(). Cheap to
+    // maintain (single add + max each call) so we leave them always-on.
+    u64 stepCount_ = 0;
+    u64 stepMaxNanos_ = 0;
+    u64 stepSumNanos_ = 0;
+    u64 cyclesCompleted_ = 0;
 
     void resetColors();
     void markRoots();
