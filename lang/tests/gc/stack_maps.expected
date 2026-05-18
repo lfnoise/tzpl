@@ -6,7 +6,7 @@
      0  SAFEPOINT                 ; refs: [r0]
      1  MOV                     r1, r0
      3  CALL_PRIM               r2, r1, r1  ;  101
-     6  RETURN                  r2, r1
+     6  RETURN                  r2, r1  ; refs: [r0]
 -- loop_with_obj  (7 regs, 1 args, type fn(Int) Int)
      0  SAFEPOINT                 ; refs: []
      1  LOAD_OBJ                r1, r0
@@ -21,4 +21,4 @@
     20  JUMP                    -> 6
     22  MOV                     r3, r1
     24  CALL_PRIM               r4, r1, r3  ;  101
-    27  RETURN                  r4, r1
+    27  RETURN                  r4, r1  ; refs: [r1]

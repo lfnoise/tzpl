@@ -422,6 +422,20 @@ private:
     // composite layouts precisely.
     void emitSafepointWithStackMap();
 
+    // Phase 5.2: record a stack map at the current PC offset *without*
+    // emitting an op_safepoint. Used right after the last operand of a
+    // non-tail CALL has been emitted, so the offset equals the call's
+    // returnPC. When a GC cycle fires inside a callee, the marker walks
+    // the caller's frame at this PC and roots every named live register.
+    void emitReturnPcStackMap();
+
+    // Phase 5.2: drop the per-register types for argument slots immediately
+    // before emitting a call. Once the call dispatches, those register
+    // slots are owned by the callee's frame -- the caller's stack map at
+    // the returnPC must NOT root them, or a GC walker visiting mid-call
+    // would read callee data as Obj* pointers.
+    void clearArgRegTypes(u16 argBase, u16 argEnd);
+
     // BOX an inline value into a heap Obj* (returns reg holding the Obj*).
     // For non-inline types, returns srcReg unchanged.
     //

@@ -236,6 +236,25 @@ void CodeGen::emitJumpTo(u32 targetIdx) {
     invalidateLastProducer();
 }
 
+void CodeGen::emitReturnPcStackMap() {
+    u32 pcOffset = (u32)currentBlock_->code.size();
+    StackMap sm;
+    sm.pcOffset = pcOffset;
+    u16 limit = (u16)std::min<size_t>(nextReg_, regTypes_.size());
+    for (u16 r = 0; r < limit; ++r) {
+        Type* t = regTypes_[r];
+        if (!t) continue;
+        if (isInlineMultiword(t)) continue;
+        if (storesObjPtr(t)) sm.liveRefRegs.push_back(r);
+    }
+    currentBlock_->stackMaps_.push_back(std::move(sm));
+}
+
+void CodeGen::clearArgRegTypes(u16 argBase, u16 argEnd) {
+    u16 lim = (u16)std::min<size_t>(argEnd, regTypes_.size());
+    for (u16 r = argBase; r < lim; ++r) regTypes_[r] = nullptr;
+}
+
 void CodeGen::emitSafepointWithStackMap() {
     // Record stack map BEFORE emitting the op so pcOffset matches the
     // op_safepoint Code word position. Phase 5.2: walk the per-register
@@ -3140,9 +3159,13 @@ u16 CodeGen::genBinaryOp(BinaryOpExpr* expr) {
             && expr->resolvedType != compiler_.complexType()
             && expr->resolvedType != compiler_.fractionType();
         u16 resultReg = builtinReturnsInlineComposite ? allocReg() : allocSlot(expr->resolvedType);
+        // Phase 5.2: see the comment in genCall's main path -- arg slots
+        // become callee-owned and a stack map at returnPC roots the rest.
+        clearArgRegTypes(argBase, resultReg);
         emitOp(expr->isBuiltinCall ? op_call_primitive : op_call);
         emitRegs(resultReg, 2, argBase);
         emitInt(expr->resolvedFuncGlobalIndex);
+        emitReturnPcStackMap();
         if (builtinReturnsInlineComposite) {
             return emitUnboxIfInline(resultReg, expr->resolvedType);
         }
@@ -4333,10 +4356,22 @@ u16 CodeGen::genCall(CallExpr_* expr) {
         && expr->resolvedType != compiler_.fractionType();
     u16 callDst = builtinReturnsInlineComposite ? allocReg() : allocSlot(expr->resolvedType);
 
+    // Phase 5.2: arg slots become callee-owned the moment the call
+    // dispatches; the caller's stack map at the returnPC must NOT name
+    // them as live refs (a GC walker visiting mid-call would otherwise
+    // read callee data as Obj* pointers).
+    clearArgRegTypes(argBase, callDst);
+
     // Emit CALL: op, regs{resultReg, argc, argBase}, callee_global_idx
     emitOp(expr->isBuiltinCall ? op_call_primitive : op_call);
     emitRegs(callDst, callArgc, argBase);
     emitInt(expr->resolvedFuncGlobalIndex);
+
+    // Phase 5.2: record live refs at the returnPC so an in-callee GC
+    // cycle can root the caller's frame precisely. callDst is NOT in
+    // regTypes_ yet (genExpr's wrapper sets it after this returns), so
+    // the marker won't read an uninitialized slot mid-call.
+    emitReturnPcStackMap();
 
     if (builtinReturnsInlineComposite) {
         return emitUnboxIfInline(callDst, expr->resolvedType);

@@ -551,20 +551,18 @@ void disassembleCodeBlock(CodeBlock* block, FILE* out) {
             break;
         }
 
-        // Phase 2 of tracing-GC project: when disassembling a safepoint,
-        // annotate the line with the live-reference register set from the
-        // attached stack map (if present). Useful for validating Phase 2
-        // emission and debugging Phase 3 tracing.
-        if (pc->op == op_safepoint) {
-            for (auto const& sm : block->stackMaps_) {
-                if (sm.pcOffset == offset) {
-                    std::fprintf(out, "  ; refs: [");
-                    for (size_t i = 0; i < sm.liveRefRegs.size(); ++i) {
-                        std::fprintf(out, "%sr%u", i ? ", " : "", (unsigned)sm.liveRefRegs[i]);
-                    }
-                    std::fprintf(out, "]");
-                    break;
+        // Phase 2/5.2 of tracing-GC project: annotate any instruction whose
+        // pcOffset matches a stack map. Safepoints emit one inline; CALL
+        // sites emit one at the post-call returnPC (which is the offset
+        // of the *next* instruction, so its annotation surfaces there).
+        for (auto const& sm : block->stackMaps_) {
+            if (sm.pcOffset == offset) {
+                std::fprintf(out, "  ; refs: [");
+                for (size_t i = 0; i < sm.liveRefRegs.size(); ++i) {
+                    std::fprintf(out, "%sr%u", i ? ", " : "", (unsigned)sm.liveRefRegs[i]);
                 }
+                std::fprintf(out, "]");
+                break;
             }
         }
 
