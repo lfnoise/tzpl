@@ -494,8 +494,10 @@ void disassembleCodeBlock(CodeBlock* block, FILE* out) {
         case OpFmt::Regs_Int:
             printRegs(out, pc[1], info.nregs);
             std::fprintf(out, "  ;  %lld", (long long)pc[2].i);
-            // Try to show function name for CALL/CALL_PRIM/TAIL_CALL
-            if (vm && (pc->op == op_call || pc->op == op_call_primitive || pc->op == op_tail_call)) {
+            // Try to show function name for CALL/TAIL_CALL (op_call_primitive
+            // stores a Primitive* in the global slot, not a CodeBlock*, so the
+            // cast in globalName would read garbage).
+            if (vm && (pc->op == op_call || pc->op == op_tail_call)) {
                 const char* name = globalName(vm, (u32)pc[2].i);
                 if (name) std::fprintf(out, "  (%s)", name);
             }
