@@ -74,6 +74,17 @@ private:
     u16 nextReg_;
     u16 maxReg_;
 
+    // Phase 5.2 of tracing-GC project: per-register type table.
+    // Indexed by register number, indexed up to nextReg_. Tracks the static
+    // type stored in each register at the current emission point, so stack
+    // map emitters can find every live Obj* slot in a function (named local
+    // OR in-flight temp) without relying on localScopes_ alone. The base
+    // register of a multi-word inline composite gets the type; continuation
+    // registers stay null (the marker skips them via isInlineMultiword).
+    // Slots that have been freed by freeRegsTo are reset to null.
+    std::vector<Type*> regTypes_;
+    void setRegType(u16 reg, Type* t);  // tracks type, sizes regTypes_ as needed
+
     // Local variable -> register mapping
     struct LocalVar {
         u16 reg;
@@ -118,6 +129,7 @@ private:
 
     // Expression codegen - returns register holding result
     u16 genExpr(Expr* expr);
+    u16 genExprDispatch(Expr* expr);  // raw dispatch; genExpr wraps to record the destination's type
     u16 genIntLiteral(IntLiteralExpr* expr);
     u16 genFloatLiteral(FloatLiteralExpr* expr);
     u16 genBoolLiteral(BoolLiteralExpr* expr);

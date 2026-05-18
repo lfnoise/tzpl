@@ -49,7 +49,20 @@ u16 CodeGen::allocRegs(u16 count) {
 
 void CodeGen::freeRegsTo(u16 reg) {
     if (enableConstFold) clearConsts(reg);
+    // Phase 5.2: drop the per-register type info for regs that are now
+    // free. Stack-map emitters scan [0..nextReg_), so anything beyond
+    // the new nextReg_ is implicitly invisible -- but a future allocReg
+    // could reuse a slot before its type is written, so we still null
+    // the entries to keep the table honest.
+    if (reg < regTypes_.size()) {
+        for (size_t i = reg; i < regTypes_.size(); ++i) regTypes_[i] = nullptr;
+    }
     nextReg_ = reg;
+}
+
+void CodeGen::setRegType(u16 reg, Type* t) {
+    if (regTypes_.size() <= reg) regTypes_.resize((size_t)reg + 1, nullptr);
+    regTypes_[reg] = t;
 }
 
 // --- Constant tracking for folding ---
@@ -164,6 +177,9 @@ void CodeGen::popScope() {
 
 void CodeGen::declareLocal(const std::string& name, u16 reg, Type* type, bool isMutable) {
     localScopes_.back()[name] = LocalVar{reg, type, isMutable};
+    // Phase 5.2: mirror the type into the per-register table so stack-map
+    // emission can find this local without separately walking localScopes_.
+    setRegType(reg, type);
 }
 
 CodeGen::LocalVar* CodeGen::lookupLocal(const std::string& name) {
@@ -222,23 +238,21 @@ void CodeGen::emitJumpTo(u32 targetIdx) {
 
 void CodeGen::emitSafepointWithStackMap() {
     // Record stack map BEFORE emitting the op so pcOffset matches the
-    // op_safepoint Code word position. Walk every local in scope; report
-    // its register if its static type holds an Obj*. Conservative: inline
-    // multiword composites are skipped (their base word is a payload word,
-    // tag for enums / field 0 for structs/tuples -- treating it as Obj*
-    // would mis-trace). Refining that is a Phase 3 task.
+    // op_safepoint Code word position. Phase 5.2: walk the per-register
+    // type table over [0..nextReg_) instead of just localScopes_, so
+    // in-flight temporaries (e.g., the first build(d-1) result inside
+    // Tree.node((build(d-1), build(d-1)))) are rooted too. Inline
+    // multiword composites stay skipped -- their base word is a payload
+    // word, not an Obj* slot.
     u32 pcOffset = (u32)currentBlock_->code.size();
     StackMap sm;
     sm.pcOffset = pcOffset;
-    for (auto const& scope : localScopes_) {
-        for (auto const& entry : scope) {
-            Type* t = entry.second.type;
-            if (!t) continue;
-            if (isInlineMultiword(t)) continue;
-            if (storesObjPtr(t)) {
-                sm.liveRefRegs.push_back(entry.second.reg);
-            }
-        }
+    u16 limit = (u16)std::min<size_t>(nextReg_, regTypes_.size());
+    for (u16 r = 0; r < limit; ++r) {
+        Type* t = regTypes_[r];
+        if (!t) continue;
+        if (isInlineMultiword(t)) continue;
+        if (storesObjPtr(t)) sm.liveRefRegs.push_back(r);
     }
     currentBlock_->stackMaps_.push_back(std::move(sm));
     emitOp(op_safepoint);
@@ -501,6 +515,7 @@ CodeBlock* CodeGen::generate(Program& program, bool isModule) {
     currentBlock_->name = compiler_.intern("<main>");
     nextReg_ = 0;
     maxReg_ = 0;
+    regTypes_.clear();
 
     pushScope();
 
@@ -560,6 +575,7 @@ CodeBlock* CodeGen::generateREPL(Program& program) {
     currentBlock_->name = compiler_.intern("<repl>");
     nextReg_ = 0;
     maxReg_ = 0;
+    regTypes_.clear();
 
     pushScope();
 
@@ -913,6 +929,7 @@ void CodeGen::genFnDecl(FnDeclNode* decl) {
     }
     nextReg_ = 0;
     maxReg_ = 0;
+    regTypes_.clear();
     jumpFixups_.clear();
     constRegs_.clear();
 
@@ -1109,6 +1126,7 @@ void CodeGen::genMonoInstance(FuncInfo& monoInfo) {
     }
     nextReg_ = 0;
     maxReg_ = 0;
+    regTypes_.clear();
     jumpFixups_.clear();
     constRegs_.clear();
 
@@ -2437,6 +2455,17 @@ void CodeGen::genExprStmt(ExprStmtNode* stmt) {
 // --- Generate expressions ---
 
 u16 CodeGen::genExpr(Expr* expr) {
+    u16 reg = genExprDispatch(expr);
+    // Phase 5.2: every value computed by codegen has a static type. Recording
+    // it against its destination register lets stack-map emitters (function
+    // entry, backward jumps, call-site returns) find every live Obj* slot
+    // without separately walking localScopes_ or tracking an in-flight-temp
+    // stack. The marker skips non-Obj and inline-multiword types itself.
+    if (expr && expr->resolvedType) setRegType(reg, expr->resolvedType);
+    return reg;
+}
+
+u16 CodeGen::genExprDispatch(Expr* expr) {
     // Only CallExpr can consume the tail position flag; clear for all others
     if (expr->kind != ASTNode::CallExpr) {
         inTailPosition_ = false;
@@ -9573,6 +9602,7 @@ u16 CodeGen::genLambdaExpr(LambdaExprNode* expr) {
     currentBlock_->funcType = lambdaType;
     nextReg_ = 0;
     maxReg_ = 0;
+    regTypes_.clear();
     jumpFixups_.clear();
     constRegs_.clear();
 
@@ -9751,6 +9781,7 @@ void CodeGen::compileTemplateLambdaBody(LambdaExprNode* expr, LambdaType* lambda
     currentBlock_->funcType = lambdaType;
     nextReg_ = 0;
     maxReg_ = 0;
+    regTypes_.clear();
     jumpFixups_.clear();
     constRegs_.clear();
 
