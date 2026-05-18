@@ -25,6 +25,8 @@
 #include "compiler.hpp"
 #include "type_system.hpp"
 #include "value.hpp"
+#include <algorithm>
+#include <cstdlib>
 #include <random>
 
 namespace ts {
@@ -189,20 +191,32 @@ VM::VM(usize poolSize, TypeUniverse& typeUniverse, const VMTarget& target)
     // too small. The new chunk is owned by TLSFAllocator and freed in its
     // destructor.
     allocator_.setBackupAllocator(
-        [](void* /*ud*/, usize* outSize, usize needed) -> void* {
-            // Grow by at least the requested size plus headroom. The default
-            // 64 MB chunk amortizes small-object growth; large allocations
-            // (vector resizes) bump the chunk up to a power of two big enough
-            // to satisfy them.
-            constexpr usize kMinChunk = 64 * 1024 * 1024;
-            usize chunk = kMinChunk;
+        [](void* userData, usize* outSize, usize needed) -> void* {
+            // Doubling growth: each new chunk is at least as large as the
+            // current pool. Otherwise long-running allocation-heavy programs
+            // accumulate dozens of 64 MB chunks and hit the per-allocator
+            // region-count cap (kMaxRegions) before they hit real OOM. With
+            // doubling, the chunk count stays log(total) and the cap is
+            // unreachable in practice.
+            constexpr usize kMinChunk = 64ULL * 1024 * 1024;
+            constexpr usize kMaxChunk = 4ULL * 1024 * 1024 * 1024;
+            auto* alloc = static_cast<rt::TLSFAllocator*>(userData);
+            usize current = alloc->getPoolSize();
             usize wanted = needed + 4096;
-            while (chunk < wanted) chunk *= 2;
+            usize chunk = std::max(kMinChunk, std::max(current, wanted));
+            if (chunk > kMaxChunk && wanted <= kMaxChunk) chunk = kMaxChunk;
             void* p = std::malloc(chunk);
+            // If the optimistic chunk failed, fall back halving until we can
+            // at least satisfy `wanted`.
+            while (!p && chunk > wanted) {
+                chunk /= 2;
+                if (chunk < wanted) chunk = wanted;
+                p = std::malloc(chunk);
+            }
             if (p) *outSize = chunk;
             return p;
         },
-        nullptr
+        &allocator_
     );
 
     // Allocate register file from TLSF

@@ -4,10 +4,10 @@
 -- Tzopilotl's GC only collects when the stack has been collapsed (register-file
 -- contents aren't roots), so dead short-lived trees accumulate inside the inner
 -- loop. The TLSF backup allocator transparently grows the pool by malloc when
--- it exhausts, so the benchmark runs at depths much higher than the initial
--- 64 MB pool would otherwise allow -- but the peak working set still grows
--- proportional to the total tree alloc per depth-pass, which on this machine
--- caps practical N at ~16 (about 1.5 GB resident).
+-- it exhausts, so depth is not capped by the initial 64 MB pool -- the
+-- canonical benchmarksgame N=21 completes in about 2 minutes with peak
+-- working set around 14 GB. The suite runs at N=16 (~3 s) to keep routine
+-- bench runs short.
 
 const MIN_DEPTH = 4;
 const MAX_DEPTH = 16;
