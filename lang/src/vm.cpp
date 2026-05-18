@@ -65,7 +65,7 @@ void linkObjToAllList(GCObj* obj) {
     // that allocated it will write the result register on its very next
     // instruction, before any safepoint can fire.
     if (gc.phase() == TracingGC::Phase::Idle &&
-        gc.allocsSinceLastCycle() >= TracingGC::kCycleTriggerAllocs) {
+        gc.allocsSinceLastCycle() >= gc.cycleTriggerAllocs()) {
         gCurrentVM->gcRequested_.store(true, std::memory_order_relaxed);
     }
 }
@@ -140,7 +140,7 @@ void VM::safepointPoll() {
     // bounded step is what keeps pauses real-time.
     auto& gc = *tracingGC_;
     if (gc.phase() == TracingGC::Phase::Idle) {
-        if (gc.allocsSinceLastCycle() >= TracingGC::kCycleTriggerAllocs) {
+        if (gc.allocsSinceLastCycle() >= gc.cycleTriggerAllocs()) {
             gc.requestCycle();
         }
     }

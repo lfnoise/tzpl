@@ -728,27 +728,14 @@ static u32 strideForType(Type* type) {
 // payloadRelease. Same traversal rules, but the action is gc.mark() on every
 // Obj* found. Implemented at the bottom of this file once TracingGC is included.
 
-// Retain Obj* children inside an arbitrary payload of `type`. For Inline
-// composites this walks the layout (skipping Complex/Fraction, which have
-// no Obj* children). For non-Inline types this retains base[0].o when the
-// type stores an Obj*.
-void payloadRetain(Word const* base, Type* type) {
-    if (!type) return;
-    if (type->repr_ == Type::Repr::Inline) {
-        inlineWalkPointers(const_cast<Word*>(base), type, /*release_=*/false);
-    } else if (storesObjPtr(type) && base[0].o) {
-        base[0].o->retain();
-    }
-}
-
-void payloadRelease(Word* base, Type* type) {
-    if (!type) return;
-    if (type->repr_ == Type::Repr::Inline) {
-        inlineWalkPointers(base, type, /*release_=*/true);
-    } else if (storesObjPtr(type) && base[0].o) {
-        base[0].o->release();
-    }
-}
+// Phase 5: ARC is retired -- retain/release are no-ops, so the inline
+// layout walk these helpers used to drive is pure overhead. Tracing now
+// owns liveness via gcScanInlinePointers / gcScanPayload. These wrappers
+// stay as no-op shims for the (many) call sites pending cleanup in
+// Phase 5.4; mark them [[gnu::always_inline]] so an optimizer-released
+// build erases the calls entirely.
+void payloadRetain(Word const* /*base*/, Type* /*type*/) {}
+void payloadRelease(Word* /*base*/, Type* /*type*/) {}
 
 // Box an arbitrary payload of `type` into a single Word. For Inline composite
 // types this creates a heap representation (Complex / Fraction / Struct /

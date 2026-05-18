@@ -89,12 +89,19 @@ public:
         grayWorklist_.push_back(oldVal);
     }
 
-    // Phase 3 incremental scheduling: count allocations since last cycle so
-    // safepointPoll can auto-trigger a new cycle once the heap grows by a
-    // configurable threshold.
+    // Phase 5.4: proportional auto-trigger. After each completed cycle the
+    // next trigger threshold is set to max(kMinTrigger, lastBlackCount *
+    // growthFactor) -- i.e., let the heap grow some multiple of the post-
+    // cycle live set before cycling again. This keeps mark cost amortized
+    // O(1) per allocation rather than O(liveSet) per kCycleTriggerAllocs
+    // window. Programs whose live set is tiny still cycle frequently (good
+    // for latency); programs with large stable live sets cycle rarely (good
+    // for throughput).
     void recordAllocation() { ++allocsSinceLastCycle_; }
     u32  allocsSinceLastCycle() const { return allocsSinceLastCycle_; }
-    static constexpr u32 kCycleTriggerAllocs = 4096;
+    u32  cycleTriggerAllocs() const { return nextTriggerAllocs_; }
+    static constexpr u32 kMinTriggerAllocs = 4096;
+    static constexpr u32 kGrowthFactor = 4;  // trigger at 5x post-cycle live
 
 private:
     VM& vm_;
@@ -107,6 +114,7 @@ private:
     u32 currentWhiteCount_ = 0;
     u32 currentBlackCount_ = 0;
     u32 allocsSinceLastCycle_ = 0;
+    u32 nextTriggerAllocs_ = kMinTriggerAllocs;
 
     void resetColors();
     void markRoots();

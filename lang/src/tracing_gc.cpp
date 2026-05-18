@@ -179,6 +179,17 @@ u32 TracingGC::step_sweep(u32 budget) {
         // Reset the alloc counter so the next cycle is triggered by fresh
         // allocation pressure, not the alloc history before this cycle.
         allocsSinceLastCycle_ = 0;
+        // Phase 5.4: set the next-cycle trigger proportional to the live
+        // set we just observed. Doing this here (after a real measurement)
+        // adapts the GC rate to the program: a tight inner loop that
+        // builds many short-lived nodes will see lastBlackCount stay low
+        // and cycle frequently; a program holding a large stable tree
+        // will see lastBlackCount large and cycle rarely. Bottom-bounded
+        // by kMinTriggerAllocs so we don't churn on very small heaps.
+        u64 want = (u64)lastBlackCount_ * (u64)kGrowthFactor;
+        if (want < kMinTriggerAllocs) want = kMinTriggerAllocs;
+        if (want > UINT32_MAX) want = UINT32_MAX;
+        nextTriggerAllocs_ = (u32)want;
     }
     return done;
 }
