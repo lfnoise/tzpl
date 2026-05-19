@@ -121,6 +121,36 @@ static bool resolve_push(Compiler& compiler, const std::vector<Type*>& args,
     pt = {at, at->elemType_}; rt = at; cf = builtin_push_array; return true;
 }
 
+// push!: [T], T -> [T]  -- mutating; returns the same array
+static bool resolve_push_bang(Compiler& compiler, const std::vector<Type*>& args,
+    std::vector<Type*>& pt, Type*& rt, CFun& cf) {
+    if (args.size() != 2) return false;
+    auto* at = dynamic_cast<ArrayType*>(args[0]);
+    if (!at || args[1] != at->elemType_) return false;
+    pt = {at, at->elemType_}; rt = at; cf = builtin_push_bang_array; return true;
+}
+
+// pop!: [T] -> T  -- mutating; returns popped element
+static bool resolve_pop_bang(Compiler& compiler, const std::vector<Type*>& args,
+    std::vector<Type*>& pt, Type*& rt, CFun& cf) {
+    if (args.size() != 1) return false;
+    auto* at = dynamic_cast<ArrayType*>(args[0]);
+    if (!at) return false;
+    pt = {at}; rt = at->elemType_; cf = builtin_pop_bang_array; return true;
+}
+
+// insert!: Set<T>, T -> Set<T>  -- mutating; returns same set
+static bool resolve_insert_bang_set(Compiler& compiler, const std::vector<Type*>& args,
+    std::vector<Type*>& pt, Type*& rt, CFun& cf);
+
+// pop!: Set<T> -> T  -- mutating; returns popped element
+static bool resolve_pop_bang_set(Compiler& compiler, const std::vector<Type*>& args,
+    std::vector<Type*>& pt, Type*& rt, CFun& cf);
+
+// copy: container -> container  -- shallow copy
+static bool resolve_copy(Compiler& compiler, const std::vector<Type*>& args,
+    std::vector<Type*>& pt, Type*& rt, CFun& cf);
+
 // --- [T], Int -> [T] ---
 #define RESOLVE_ARRAY_INT(fname, cfun_a, cfun_l) \
 static bool resolve_##fname(Compiler& compiler, const std::vector<Type*>& args, \
@@ -1388,6 +1418,50 @@ static void builtin_length_set(VM& vm, u16 dst, u16, u16 ab) {
     vm.reg(dst).i = (i64)set->size();
 }
 
+// insert!: Set<T>, T -> Set<T>  -- mutating; returns the same set for chaining
+static void builtin_insert_bang_set(VM& vm, u16 dst, u16, u16 ab) {
+    auto* set = static_cast<SetObj*>(vm.reg(ab).o);
+    Word const* elem = &vm.reg((u16)(ab + 1));
+    set->insertElem(elem);
+    vm.reg(dst).o = set;
+}
+
+// pop!: Set<T> -> T  -- mutating; pops and returns an arbitrary element.
+// Pops from the first occupied slot encountered. Caller is responsible for
+// ensuring the set is non-empty; on an empty set, dst is left untouched.
+static void builtin_pop_bang_set(VM& vm, u16 dst, u16, u16 ab) {
+    auto* set = static_cast<SetObj*>(vm.reg(ab).o);
+    u32 cap = set->capacity();
+    for (u32 i = 0; i < cap; ++i) {
+        if (set->slotState(i) != SetObj::SlotOccupied) continue;
+        Word const* e = set->slotElem(i);
+        u32 stride = set->elemStride_;
+        // Copy element words to dst before erasing the slot (eraseElem may
+        // release Obj* fields embedded in the slot).
+        for (u32 k = 0; k < stride; ++k) vm.reg((u16)(dst + k)) = e[k];
+        set->eraseElem(e);
+        return;
+    }
+}
+
+// copy: Set<T> -> Set<T>  -- shallow copy
+static void builtin_copy_set(VM& vm, u16 dst, u16, u16 ab) {
+    auto* src = static_cast<SetObj*>(vm.reg(ab).o);
+    auto* st = static_cast<SetType*>(src->type_);
+    auto* result = new SetObj(st);
+    result->copyFrom(*src);
+    vm.reg(dst).o = result;
+}
+
+// copy: Map<K,V> -> Map<K,V>  -- shallow copy
+static void builtin_copy_map(VM& vm, u16 dst, u16, u16 ab) {
+    auto* src = static_cast<MapObj*>(vm.reg(ab).o);
+    auto* mt = static_cast<MapType*>(src->type_);
+    auto* result = new MapObj(mt);
+    result->copyFrom(*src);
+    vm.reg(dst).o = result;
+}
+
 // add: Set<T>, T -> Set<T>
 static void builtin_add_set(VM& vm, u16 dst, u16, u16 ab) {
     auto* src = static_cast<SetObj*>(vm.reg(ab).o);
@@ -1579,6 +1653,43 @@ static bool resolve_toArray_set(Compiler& compiler, const std::vector<Type*>& ar
     auto* st = dynamic_cast<SetType*>(args[0]);
     if (!st) return false;
     pt = {st}; rt = compiler.arrayType(st->elemType_); cf = builtin_toArray_set; return true;
+}
+
+// insert!: Set<T>, T -> Set<T>
+static bool resolve_insert_bang_set(Compiler& compiler, const std::vector<Type*>& args,
+    std::vector<Type*>& pt, Type*& rt, CFun& cf) {
+    (void)compiler;
+    if (args.size() != 2) return false;
+    auto* st = dynamic_cast<SetType*>(args[0]);
+    if (!st || args[1] != st->elemType_) return false;
+    pt = {st, st->elemType_}; rt = st; cf = builtin_insert_bang_set; return true;
+}
+
+// pop!: Set<T> -> T
+static bool resolve_pop_bang_set(Compiler& compiler, const std::vector<Type*>& args,
+    std::vector<Type*>& pt, Type*& rt, CFun& cf) {
+    (void)compiler;
+    if (args.size() != 1) return false;
+    auto* st = dynamic_cast<SetType*>(args[0]);
+    if (!st) return false;
+    pt = {st}; rt = st->elemType_; cf = builtin_pop_bang_set; return true;
+}
+
+// copy: Array | Map | Set -> same type (shallow copy)
+static bool resolve_copy(Compiler& compiler, const std::vector<Type*>& args,
+    std::vector<Type*>& pt, Type*& rt, CFun& cf) {
+    (void)compiler;
+    if (args.size() != 1) return false;
+    if (auto* at = dynamic_cast<ArrayType*>(args[0])) {
+        pt = {at}; rt = at; cf = builtin_copy_array; return true;
+    }
+    if (auto* mt = dynamic_cast<MapType*>(args[0])) {
+        pt = {mt}; rt = mt; cf = builtin_copy_map; return true;
+    }
+    if (auto* st = dynamic_cast<SetType*>(args[0])) {
+        pt = {st}; rt = st; cf = builtin_copy_set; return true;
+    }
+    return false;
 }
 
 // ============================================================================
@@ -2350,6 +2461,9 @@ void registerBuiltinFunctions(Compiler& compiler,
     registerTemplate(compiler, functions, "tail",      resolve_tail,      /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
     registerTemplate(compiler, functions, "cons",      resolve_cons,      /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
     registerTemplate(compiler, functions, "push",      resolve_push,      /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    // Mutating array variants (replace `push`/`pop` with `push!`/`pop!`).
+    registerTemplate(compiler, functions, "push!",     resolve_push_bang, /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "pop!",      resolve_pop_bang,  /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
     registerTemplate(compiler, functions, "isNil",     resolve_isNil,     /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
     registerTemplate(compiler, functions, "notNil",    resolve_notNil,    /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
     registerTemplate(compiler, functions, "length",    resolve_length,    /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
@@ -2398,6 +2512,9 @@ void registerBuiltinFunctions(Compiler& compiler,
     // composites). The Map "remove"/"contains" templates above also handle
     // Set arguments through the shared resolvers.
     registerTemplate(compiler, functions, "add",          resolve_add_set,         /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    // Mutating set variants.
+    registerTemplate(compiler, functions, "insert!",      resolve_insert_bang_set, /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "pop!",         resolve_pop_bang_set,    /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
     registerTemplate(compiler, functions, "union",        resolve_union,           /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
     registerTemplate(compiler, functions, "intersection", resolve_intersection,    /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
     registerTemplate(compiler, functions, "difference",   resolve_difference,      /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
@@ -2411,6 +2528,9 @@ void registerBuiltinFunctions(Compiler& compiler,
     // --- toString builtin ---
     // Phase 4g.6: toString reads inline composites natively via slotToString.
     registerTemplate(compiler, functions, "toString",     resolve_toString, /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+
+    // --- copy: shallow copy of Array, Map, or Set ---
+    registerTemplate(compiler, functions, "copy",         resolve_copy,     /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
 
     // --- fmt builtin ---
     registerTemplate(compiler, functions, "fmt",          resolve_fmt,         /*rtSafe=*/true, /*acceptsInlineArgs=*/true);

@@ -797,6 +797,7 @@ void CodeGen::genNode(ASTNode* node) {
         case ASTNode::BreakStmt:    genBreakStmt(static_cast<BreakStmtNode*>(node)); break;
         case ASTNode::ContinueStmt: genContinueStmt(static_cast<ContinueStmtNode*>(node)); break;
         case ASTNode::AssignStmt:   genAssignStmt(static_cast<AssignStmtNode*>(node)); break;
+        case ASTNode::IndexAssignStmt: genIndexAssignStmt(static_cast<IndexAssignStmtNode*>(node)); break;
         case ASTNode::ExprStmt:     genExprStmt(static_cast<ExprStmtNode*>(node)); break;
         default:
             error(node->loc, "Codegen: unsupported node type");
@@ -2564,6 +2565,35 @@ void CodeGen::genAssignStmt(AssignStmtNode* stmt) {
 
     (void)valType;  // unused for non-dyn/local/global paths
     error(stmt->loc, "Codegen: undeclared variable '" + stmt->target + "'");
+}
+
+void CodeGen::genIndexAssignStmt(IndexAssignStmtNode* stmt) {
+    // Evaluate object first, then index, then value.
+    u16 objReg = genExpr(static_cast<Expr*>(stmt->object.get()));
+    u16 idxReg = genExpr(static_cast<Expr*>(stmt->index.get()));
+    u16 valReg = genExpr(static_cast<Expr*>(stmt->value.get()));
+
+    if (auto* mt = dynamic_cast<MapType*>(stmt->containerType)) {
+        idxReg = ensureType(idxReg, stmt->index->resolvedType, mt->keyType_);
+        valReg = ensureType(valReg, stmt->value->resolvedType, mt->valueType_);
+        emitOp(op_map_set);
+        emitRegs(objReg, idxReg, valReg);
+        emitPtr(mt);
+        return;
+    }
+
+    auto* at = dynamic_cast<ArrayType*>(stmt->containerType);
+    if (!at) {
+        error(stmt->loc, "Codegen: indexed assignment target is not Array or Map");
+        return;
+    }
+    // Reuse the existing op_array_set_* family used by literal/auto-mapped
+    // construction. They already use cyclicIndex and apply SATB barriers
+    // through ObjArray::set on Obj-backed arrays.
+    valReg = ensureType(valReg, stmt->value->resolvedType, at->elemType_);
+    emitOp(opArraySetFor(at->elemType_));
+    emitRegs(objReg, idxReg, valReg);
+    emitPtr(at);
 }
 
 void CodeGen::genExprStmt(ExprStmtNode* stmt) {

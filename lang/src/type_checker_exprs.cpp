@@ -412,6 +412,13 @@ void TypeChecker::discoverCaptures(LambdaExprNode* expr) {
                 walk(as->value.get());
                 break;
             }
+            case ASTNode::IndexAssignStmt: {
+                auto* ia = static_cast<IndexAssignStmtNode*>(node);
+                walk(ia->object.get());
+                walk(ia->index.get());
+                walk(ia->value.get());
+                break;
+            }
             case ASTNode::AutoMap: {
                 auto* am = static_cast<AutoMapExpr*>(node);
                 walk(am->inner.get());

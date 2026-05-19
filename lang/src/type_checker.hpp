@@ -399,6 +399,7 @@ private:
     void checkBreakStmt(BreakStmtNode* stmt);
     void checkContinueStmt(ContinueStmtNode* stmt);
     void checkAssignStmt(AssignStmtNode* stmt);
+    void checkIndexAssignStmt(IndexAssignStmtNode* stmt);
     void checkExprStmt(ExprStmtNode* stmt);
 
     // Pattern checking (validates and introduces bindings)

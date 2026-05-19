@@ -948,6 +948,9 @@ void TypeChecker::checkNode(ASTNode* node) {
         case ASTNode::AssignStmt:
             checkAssignStmt(static_cast<AssignStmtNode*>(node));
             break;
+        case ASTNode::IndexAssignStmt:
+            checkIndexAssignStmt(static_cast<IndexAssignStmtNode*>(node));
+            break;
         case ASTNode::BreakStmt:
             checkBreakStmt(static_cast<BreakStmtNode*>(node));
             break;

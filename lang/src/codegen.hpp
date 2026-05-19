@@ -145,6 +145,7 @@ private:
     void genBreakStmt(BreakStmtNode* stmt);
     void genContinueStmt(ContinueStmtNode* stmt);
     void genAssignStmt(AssignStmtNode* stmt);
+    void genIndexAssignStmt(IndexAssignStmtNode* stmt);
     void genExprStmt(ExprStmtNode* stmt);
 
     // Expression codegen - returns register holding result

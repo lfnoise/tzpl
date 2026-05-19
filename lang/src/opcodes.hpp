@@ -416,6 +416,7 @@ void op_make_lazy_automap(VM& vm, Code* pc);  // MAKE_LAZY_AUTOMAP Rd, RsrcList,
 void op_make_map(VM& vm, Code* pc);       // MAKE_MAP Rd, firstKeyReg, numPairs (3 words: op, regs, MapType*)
 void op_map_get(VM& vm, Code* pc);        // MAP_GET Rd, Ra(map), Rb(key) (3 words: op, regs, MapType*)
 void op_map_get_option(VM& vm, Code* pc); // MAP_GET_OPTION Rd, Ra(map), Rb(key) (3 words: op, regs, EnumType*)
+void op_map_set(VM& vm, Code* pc);        // MAP_SET Ra(map), Rb(key), Rc(val) (3 words: op, regs, MapType*) -- insert-or-update
 
 // --- Set ---
 void op_make_set(VM& vm, Code* pc);       // MAKE_SET Rd, firstSrc, numElems (3 words: op, regs, SetType*)

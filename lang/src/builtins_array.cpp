@@ -121,6 +121,144 @@ void builtin_pop_array(VM& vm, u16 dst, u16, u16 ab) {
     });
 }
 
+// --- Mutating variants registered as `push!` and `pop!` ---
+//
+// These mutate in place and return the array (push) or the popped element
+// (pop). They are distinct registrations from the non-mutating `push`/`pop`
+// above, so existing code referring to `push`/`pop` is unaffected.
+
+void builtin_push_bang_array(VM& vm, u16 dst, u16, u16 ab) {
+    auto* arr = vm.reg(ab).o;
+    auto* at = static_cast<ArrayType*>(arr->type_);
+    switch (arrayBackendFor(at->elemType_)) {
+        case ArrayBackend::Complex: {
+            auto* a = static_cast<PodArray<x64>*>(arr);
+            f64 re = vm.reg(ab + 1).f;
+            f64 im = vm.reg(ab + 2).f;
+            a->v.push_back(x64(re, im));
+            break;
+        }
+        case ArrayBackend::Fraction: {
+            auto* a = static_cast<PodArray<r64>*>(arr);
+            i64 n = vm.reg(ab + 1).i;
+            i64 d = vm.reg(ab + 2).i;
+            a->v.push_back(r64(n, d, true));
+            break;
+        }
+        case ArrayBackend::Float: {
+            auto* a = static_cast<PodArray<f64>*>(arr);
+            a->v.push_back(vm.reg(ab + 1).f);
+            break;
+        }
+        case ArrayBackend::Int: {
+            auto* a = static_cast<PodArray<i64>*>(arr);
+            a->v.push_back(vm.reg(ab + 1).i);
+            break;
+        }
+        case ArrayBackend::Inline: {
+            auto* a = static_cast<InlineArray*>(arr);
+            a->pushSlot(&vm.reg(ab + 1));
+            break;
+        }
+        case ArrayBackend::Obj: {
+            auto* a = static_cast<ObjArray*>(arr);
+            a->push(vm.reg(ab + 1).o);
+            break;
+        }
+    }
+    vm.reg(dst).o = arr;
+}
+
+void builtin_pop_bang_array(VM& vm, u16 dst, u16, u16 ab) {
+    auto* arr = vm.reg(ab).o;
+    auto* at = static_cast<ArrayType*>(arr->type_);
+    switch (arrayBackendFor(at->elemType_)) {
+        case ArrayBackend::Complex: {
+            auto* a = static_cast<PodArray<x64>*>(arr);
+            x64 v = a->v.back();
+            a->v.pop_back();
+            vm.reg(dst).f = v.real();
+            vm.reg((u16)(dst + 1)).f = v.imag();
+            return;
+        }
+        case ArrayBackend::Fraction: {
+            auto* a = static_cast<PodArray<r64>*>(arr);
+            r64 v = a->v.back();
+            a->v.pop_back();
+            vm.reg(dst).i = v.numer();
+            vm.reg((u16)(dst + 1)).i = v.denom();
+            return;
+        }
+        case ArrayBackend::Float: {
+            auto* a = static_cast<PodArray<f64>*>(arr);
+            f64 v = a->v.back();
+            a->v.pop_back();
+            vm.reg(dst).f = v;
+            return;
+        }
+        case ArrayBackend::Int: {
+            auto* a = static_cast<PodArray<i64>*>(arr);
+            i64 v = a->v.back();
+            a->v.pop_back();
+            vm.reg(dst).i = v;
+            return;
+        }
+        case ArrayBackend::Inline: {
+            auto* a = static_cast<InlineArray*>(arr);
+            size_t n = a->size();
+            a->getSlot(n - 1, &vm.reg(dst));
+            a->resize(n - 1);
+            return;
+        }
+        case ArrayBackend::Obj: {
+            auto* a = static_cast<ObjArray*>(arr);
+            auto& v = a->rawVec();
+            Obj* o = v.back();
+            v.pop_back();
+            vm.reg(dst).o = o;
+            return;
+        }
+    }
+}
+
+// --- copy: shallow copy of an Array, preserving backend & element types ---
+void builtin_copy_array(VM& vm, u16 dst, u16, u16 ab) {
+    auto* src = vm.reg(ab).o;
+    auto* at = static_cast<ArrayType*>(src->type_);
+    switch (arrayBackendFor(at->elemType_)) {
+        case ArrayBackend::Complex: {
+            auto* s = static_cast<PodArray<x64>*>(src);
+            auto* r = new PodArray<x64>(at); r->v = s->v;
+            vm.reg(dst).o = r; return;
+        }
+        case ArrayBackend::Fraction: {
+            auto* s = static_cast<PodArray<r64>*>(src);
+            auto* r = new PodArray<r64>(at); r->v = s->v;
+            vm.reg(dst).o = r; return;
+        }
+        case ArrayBackend::Float: {
+            auto* s = static_cast<PodArray<f64>*>(src);
+            auto* r = new PodArray<f64>(at); r->v = s->v;
+            vm.reg(dst).o = r; return;
+        }
+        case ArrayBackend::Int: {
+            auto* s = static_cast<PodArray<i64>*>(src);
+            auto* r = new PodArray<i64>(at); r->v = s->v;
+            vm.reg(dst).o = r; return;
+        }
+        case ArrayBackend::Inline: {
+            auto* s = static_cast<InlineArray*>(src);
+            auto* r = new InlineArray(at); r->copyFrom(s);
+            vm.reg(dst).o = r; return;
+        }
+        case ArrayBackend::Obj: {
+            auto* s = static_cast<ObjArray*>(src);
+            auto* r = new ObjArray(at); r->copyFrom(s);
+            vm.reg(dst).o = r; return;
+        }
+    }
+}
+
 void builtin_muss_array(VM& vm, u16 dst, u16, u16 ab) {
     auto* src = vm.reg(ab).o;
     auto* at = static_cast<ArrayType*>(src->type_);

@@ -422,8 +422,19 @@ Token Lexer::scanIdentifierOrKeyword() {
         advance();
     }
 
+    // Look up keyword on the base identifier (without any trailing '!').
     std::string text = source_.substr(startPos, pos_ - startPos);
     TokenKind kind = keywordKind(text);
+
+    // Allow a single trailing '!' on identifiers (but not on keywords) for
+    // mutating-function naming convention. The '!' is part of the identifier:
+    // `foo` and `foo!` are distinct names. Refuse to consume the '!' if it
+    // starts a `!=` token.
+    if (kind == TokenKind::Identifier
+        && !atEnd() && current() == '!' && peekChar() != '=') {
+        advance();
+        text = source_.substr(startPos, pos_ - startPos);
+    }
     return makeToken(kind, start, text);
 }
 

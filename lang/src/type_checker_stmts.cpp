@@ -546,6 +546,49 @@ void TypeChecker::checkAssignStmt(AssignStmtNode* stmt) {
     }
 }
 
+void TypeChecker::checkIndexAssignStmt(IndexAssignStmtNode* stmt) {
+    Type* objType = inferExpr(static_cast<Expr*>(stmt->object.get()));
+    if (!objType) return;
+
+    if (auto* at = dynamic_cast<ArrayType*>(objType)) {
+        // Array: index must be Int (Phase 1: only scalar Int indices; auto-mapping
+        // and array-of-indices writes are not supported yet for index-assign).
+        Type* idxType = inferExpr(static_cast<Expr*>(stmt->index.get()), compiler_.intType());
+        if (idxType && idxType != compiler_.intType()) {
+            error(stmt->loc, "Array index in assignment must be Int");
+        }
+        Type* valType = inferExpr(static_cast<Expr*>(stmt->value.get()), at->elemType_);
+        if (at->elemType_ && valType && !typesEqual(at->elemType_, valType)) {
+            if (at->elemType_ == compiler_.floatType() && valType == compiler_.intType()) {
+                // Int -> Float promotion OK
+            } else {
+                error(stmt->loc, "Type mismatch: cannot assign value to array element");
+            }
+        }
+        stmt->containerType = at;
+        return;
+    }
+
+    if (auto* mt = dynamic_cast<MapType*>(objType)) {
+        Type* idxType = inferExpr(static_cast<Expr*>(stmt->index.get()), mt->keyType_);
+        if (mt->keyType_ && idxType && !typesEqual(mt->keyType_, idxType)) {
+            error(stmt->loc, "Type mismatch: map key in assignment");
+        }
+        Type* valType = inferExpr(static_cast<Expr*>(stmt->value.get()), mt->valueType_);
+        if (mt->valueType_ && valType && !typesEqual(mt->valueType_, valType)) {
+            if (mt->valueType_ == compiler_.floatType() && valType == compiler_.intType()) {
+                // promotion OK
+            } else {
+                error(stmt->loc, "Type mismatch: map value in assignment");
+            }
+        }
+        stmt->containerType = mt;
+        return;
+    }
+
+    error(stmt->loc, "Left side of indexed assignment must be an Array or Map");
+}
+
 void TypeChecker::checkExprStmt(ExprStmtNode* stmt) {
     Type* ctx = (stmt->isTrailing && currentReturnType_) ? currentReturnType_ : nullptr;
     inferExpr(static_cast<Expr*>(stmt->expr.get()), ctx);

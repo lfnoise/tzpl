@@ -346,6 +346,7 @@ static const std::unordered_map<Operation, OpInfo>& opInfoMap() {
         { op_make_map,          { "MAKE_MAP",          3, OpFmt::Regs_Ptr, 3 } },
         { op_map_get,           { "MAP_GET",           3, OpFmt::Regs_Ptr, 3 } },
         { op_map_get_option,    { "MAP_GET_OPTION",    3, OpFmt::Regs_Ptr, 3 } },
+        { op_map_set,           { "MAP_SET",           3, OpFmt::Regs_Ptr, 3 } },
 
         // --- Set ---
         { op_make_set,          { "MAKE_SET",          3, OpFmt::Regs_Ptr, 3 } },

@@ -1292,7 +1292,7 @@ ASTPtr Parser::parseExprStmtOrAssign() {
 
     ExprPtr expr = parseExpression();
 
-    // Check for assignment: identifier = expr  or  `dynVar = expr
+    // Check for assignment: identifier = expr  or  `dynVar = expr  or  expr[index] = value
     if (match(TokenKind::Equals)) {
         if (expr->kind == ASTNode::Identifier) {
             auto* ident = static_cast<IdentifierExpr*>(expr.get());
@@ -1308,8 +1308,14 @@ ASTPtr Parser::parseExprStmtOrAssign() {
             auto stmt = std::make_unique<AssignStmtNode>(start, std::move(name), std::move(value));
             stmt->isDynamic = true;
             return stmt;
+        } else if (expr->kind == ASTNode::IndexExpr) {
+            auto* idx = static_cast<IndexExpr_*>(expr.get());
+            ExprPtr value = parseExpression();
+            expectTerminator();
+            return std::make_unique<IndexAssignStmtNode>(
+                start, std::move(idx->object), std::move(idx->index), std::move(value));
         } else {
-            error("Left side of assignment must be a variable");
+            error("Left side of assignment must be a variable or indexed container");
         }
     }
 

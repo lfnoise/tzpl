@@ -4342,6 +4342,20 @@ void op_map_get_option(VM& vm, Code* pc) {
     DISPATCH(3);
 }
 
+// MAP_SET Ra(map), Rb(key), Rc(val) (3 words: op, regs{map, key, val}, MapType*)
+//
+// In-place insert-or-update. If the key exists, the slot's value is replaced;
+// otherwise a new entry is inserted. Multi-word keys/values span keyStride /
+// valueStride consecutive registers.
+void op_map_set(VM& vm, Code* pc) {
+    u16 mapReg = pc[1].regs[0], keyReg = pc[1].regs[1], valReg = pc[1].regs[2];
+    auto* map = static_cast<MapObj*>(vm.reg(mapReg).o);
+    Word const* kSrc = &vm.reg(keyReg);
+    Word const* vSrc = &vm.reg(valReg);
+    map->insertOrUpdate(kSrc, vSrc);
+    DISPATCH(3);
+}
+
 // --- Set ---
 
 // MAKE_SET Rd, firstSrc, numElems (3 words: op, regs{dst, firstSrc, numElems}, SetType*)
