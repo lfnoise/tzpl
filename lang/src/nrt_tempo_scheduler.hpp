@@ -32,6 +32,7 @@
 
 #include "vm.hpp"
 #include "tempo_ramp.hpp"
+#include "tracing_gc.hpp"
 #include <mutex>
 #include <condition_variable>
 #include <queue>
@@ -50,7 +51,8 @@ public:
 
     struct Entry {
         f64 beatTime;            // when this event fires (in beats)
-        Obj* handler;            // Callable (Lambda or Primitive), retained.
+        Obj* handler;            // Callable (Lambda or Primitive); kept
+                                 // reachable by markRoots() while queued.
                                  // nullptr for internal tempo-change events.
         i64 timerID;
 
@@ -71,7 +73,10 @@ public:
     void start();
     void stop();
 
-    // Schedule a handler at an absolute beat. Handler is retained.
+    // GC root scanner; registered with the VM at construction.
+    void markRoots(TracingGC& gc);
+
+    // Schedule a handler at an absolute beat.
     i64 schedAbs(f64 beat, Obj* handler);
 
     // Schedule a handler relative to the current logical beat.
@@ -142,6 +147,10 @@ private:
     mutable std::mutex schedMtx_;
     std::condition_variable cv_;
     std::priority_queue<Entry, std::vector<Entry>, std::greater<Entry>> queue_;
+    // Handler popped from the queue but not yet fired (or currently firing).
+    // Guarded by schedMtx_; the run loop sets this before releasing schedMtx_
+    // and clears it after firing returns.
+    Obj* inFlightHandler_ = nullptr;
     std::thread thread_;
     std::atomic<bool> running_{false};
     std::atomic<bool> queueChanged_{false};  // wakes wait_until when new entries arrive

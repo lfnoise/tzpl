@@ -39,6 +39,17 @@ RTTempoScheduler::RTTempoScheduler(f64 bpm, f64 sampleRate, i64 startSample)
     freeList_ = &pool_[0];
 }
 
+void RTTempoScheduler::attachVM(ts::VM& vm) {
+    vm.addExtraRootScanner([this](ts::TracingGC& gc) { markRoots(gc); });
+}
+
+void RTTempoScheduler::markRoots(ts::TracingGC& gc) {
+    for (auto* e = head_; e; e = e->next_) {
+        if (e->handler) gc.mark(static_cast<ts::GCObj*>(e->handler));
+    }
+    if (inFlightHandler_) gc.mark(static_cast<ts::GCObj*>(inFlightHandler_));
+}
+
 RTSchedEntry* RTTempoScheduler::allocEntry() {
     if (!freeList_) return nullptr;
     auto* e = freeList_;
@@ -139,6 +150,10 @@ void RTTempoScheduler::processSample(i64 sampleTime, ts::VM* vm) {
     while (head_ && head_->beatTime <= currentBeat) {
         RTSchedEntry* entry = head_;
         removeFromList(entry);
+        // The entry is no longer in the list; park its handler in
+        // inFlightHandler_ so a safepoint poll inside callCallable can
+        // still find it via markRoots.
+        inFlightHandler_ = entry->handler;
 
         if (entry->handler == nullptr) {
             // Tempo change event
@@ -161,6 +176,7 @@ void RTTempoScheduler::processSample(i64 sampleTime, ts::VM* vm) {
                 freeEntry(entry);
             }
         }
+        inFlightHandler_ = nullptr;
     }
 }
 

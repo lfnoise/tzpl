@@ -31,6 +31,7 @@
 
 #include "tempo_ramp.hpp"
 #include "vm.hpp"
+#include "tracing_gc.hpp"
 
 namespace bridge {
 
@@ -39,7 +40,8 @@ struct RTSchedEntry {
     RTSchedEntry* next_ = nullptr;
     RTSchedEntry* prev_ = nullptr;
     f64 beatTime;
-    ts::Obj* handler = nullptr;   // retained Callable (nullptr = tempo change)
+    ts::Obj* handler = nullptr;   // Callable (nullptr = tempo change). Kept
+                                  // reachable by RTTempoScheduler::markRoots.
     i64 timerID = 0;
 
     // Tempo change fields (used when handler == nullptr)
@@ -52,6 +54,16 @@ public:
     static constexpr int kMaxEntries = 1024;
 
     RTTempoScheduler(f64 bpm, f64 sampleRate, i64 startSample);
+
+    // Register this scheduler's list as a GC root scanner on the given VM.
+    // Call once after the scheduler is wired up to its owning Silo/VM. The
+    // RT thread is single-threaded (scheduler and GC both run there), so no
+    // locking is required during the scan.
+    void attachVM(ts::VM& vm);
+
+    // Walk the sorted list and the in-flight slot, marking every live
+    // handler. Called by the extra-root scanner registered via attachVM.
+    void markRoots(ts::TracingGC& gc);
 
     // Add a scheduled entry (called from doRT() of a command, on RT thread).
     // Returns the entry's timer ID, or -1 if the pool is exhausted.
@@ -102,6 +114,11 @@ private:
     // Sorted doubly-linked list of pending entries (earliest beat first)
     RTSchedEntry* head_ = nullptr;
     RTSchedEntry* tail_ = nullptr;
+
+    // Handler popped from the list but not yet returned from callCallable.
+    // The RT thread is single-threaded so no atomic is needed; the GC scan
+    // and the list mutations all run on the RT thread.
+    ts::Obj* inFlightHandler_ = nullptr;
 
     // Pre-allocated entry pool (free list)
     RTSchedEntry pool_[kMaxEntries];

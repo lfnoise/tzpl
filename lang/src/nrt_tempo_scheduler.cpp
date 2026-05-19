@@ -26,26 +26,42 @@
 
 namespace ts {
 
+namespace {
+// Walk the protected `c` member of std::priority_queue without changing the
+// queue's type. See identical helper in nrt_scheduler.cpp.
+template <class T, class S, class C>
+struct PQContainerAccess : private std::priority_queue<T, S, C> {
+    static S const& get(std::priority_queue<T, S, C> const& q) {
+        return q.*&PQContainerAccess::c;
+    }
+};
+} // anon
+
 NRTTempoScheduler::NRTTempoScheduler(NRTVM* vm, f64 bpm, f64 latencySeconds)
     : vm_(vm)
     , ramp_(bpm / 60.0, 0., 0.)  // convert BPM to beats per second
     , epoch_(Clock::now())
     , latencySeconds_(latencySeconds)
-{}
+{
+    vm_->vm.addExtraRootScanner([this](TracingGC& gc) { markRoots(gc); });
+}
+
+void NRTTempoScheduler::markRoots(TracingGC& gc) {
+    std::lock_guard lock(schedMtx_);
+    auto const& vec = PQContainerAccess<Entry,
+                                        std::vector<Entry>,
+                                        std::greater<Entry>>::get(queue_);
+    for (auto const& e : vec) {
+        if (e.handler) gc.mark(static_cast<GCObj*>(e.handler));
+    }
+    if (inFlightHandler_) gc.mark(static_cast<GCObj*>(inFlightHandler_));
+}
 
 NRTTempoScheduler::~NRTTempoScheduler() {
     stop();
-
-    // Release all remaining handler references under the VM lock.
-    std::lock_guard lock(vm_->mtx);
-    vm_->vm.makeCurrent();
-    while (!queue_.empty()) {
-        auto entry = queue_.top();
-        queue_.pop();
-        if (entry.handler) {
-        }
-    }
-    vm_->vm.gcHeartbeat();
+    std::lock_guard lock(schedMtx_);
+    while (!queue_.empty()) queue_.pop();
+    inFlightHandler_ = nullptr;
 }
 
 void NRTTempoScheduler::start() {
@@ -173,11 +189,6 @@ bool NRTTempoScheduler::cancel(i64 timerID) {
         queue_.pop();
         if (entry.timerID == timerID) {
             found = true;
-            if (entry.handler) {
-                std::lock_guard vmLock(vm_->mtx);
-                vm_->vm.makeCurrent();
-                vm_->vm.gcHeartbeat();
-            }
         } else {
             newQueue.push(entry);
         }
@@ -215,6 +226,7 @@ void NRTTempoScheduler::tickTo(f64 seconds) {
             f64 fireSeconds = ramp_.beatsToSeconds(next.beatTime) - latencySeconds_;
             if (fireSeconds > manualSeconds_) return;
             queue_.pop();
+            inFlightHandler_ = next.handler;
         }
 
         logicalBeat_ = next.beatTime;
@@ -226,6 +238,7 @@ void NRTTempoScheduler::tickTo(f64 seconds) {
             std::lock_guard lock2(schedMtx_);
             ramp_ = TempoRamp(currentTempo, next.beatTime, epochSec,
                               next.targetTempo, next.rampBeats);
+            inFlightHandler_ = nullptr;
         } else {
             Word result;
             {
@@ -238,10 +251,10 @@ void NRTTempoScheduler::tickTo(f64 seconds) {
                 next.beatTime += result.f;
                 std::lock_guard lock2(schedMtx_);
                 queue_.push(next);
+                inFlightHandler_ = nullptr;
             } else {
-                std::lock_guard vmLock(vm_->mtx);
-                vm_->vm.makeCurrent();
-                vm_->vm.gcHeartbeat();
+                std::lock_guard lock2(schedMtx_);
+                inFlightHandler_ = nullptr;
             }
         }
         logicalBeat_ = -1.;
@@ -275,6 +288,8 @@ void NRTTempoScheduler::run() {
         }
 
         queue_.pop();
+        // Keep the popped handler reachable for GC across the call.
+        inFlightHandler_ = next.handler;
         lock.unlock();
 
         // Set logical beat for relative scheduling from within handlers.
@@ -288,6 +303,7 @@ void NRTTempoScheduler::run() {
             std::lock_guard lock2(schedMtx_);
             ramp_ = TempoRamp(currentTempo, next.beatTime, seconds,
                                next.targetTempo, next.rampBeats);
+            inFlightHandler_ = nullptr;
         } else {
             // User handler: call under VM mutex
             Word result;
@@ -304,11 +320,10 @@ void NRTTempoScheduler::run() {
                 next.beatTime += result.f;
                 std::lock_guard lock2(schedMtx_);
                 queue_.push(next);
+                inFlightHandler_ = nullptr;
             } else {
-                // One-shot: release the handler
-                std::lock_guard vmLock(vm_->mtx);
-                vm_->vm.makeCurrent();
-                vm_->vm.gcHeartbeat();
+                std::lock_guard lock2(schedMtx_);
+                inFlightHandler_ = nullptr;
             }
         }
 

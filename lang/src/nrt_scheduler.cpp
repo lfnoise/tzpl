@@ -26,20 +26,43 @@
 
 namespace ts {
 
-NRTScheduler::NRTScheduler(NRTVM* vm) : vm_(vm) {}
+namespace {
+// Hack to walk the underlying container of a std::priority_queue without
+// switching it to a manually-managed heap-vector. Subclassing exposes the
+// protected `c` member via a pointer-to-member; we only ever read it.
+template <class T, class S, class C>
+struct PQContainerAccess : private std::priority_queue<T, S, C> {
+    static S const& get(std::priority_queue<T, S, C> const& q) {
+        return q.*&PQContainerAccess::c;
+    }
+};
+} // anon
+
+NRTScheduler::NRTScheduler(NRTVM* vm) : vm_(vm) {
+    // Register as a GC root scanner so handlers sitting in the queue (or
+    // popped-and-in-flight) stay reachable for the tracing collector.
+    vm_->vm.addExtraRootScanner([this](TracingGC& gc) { markRoots(gc); });
+}
+
+void NRTScheduler::markRoots(TracingGC& gc) {
+    std::lock_guard lock(schedMtx_);
+    auto const& vec = PQContainerAccess<Entry,
+                                        std::vector<Entry>,
+                                        std::greater<Entry>>::get(queue_);
+    for (auto const& e : vec) {
+        if (e.handler) gc.mark(static_cast<GCObj*>(e.handler));
+    }
+    if (inFlightHandler_) gc.mark(static_cast<GCObj*>(inFlightHandler_));
+}
 
 NRTScheduler::~NRTScheduler() {
     stop();
 
-    // Release all remaining handler references under the VM lock.
-    // The handlers were retained when scheduled.
-    std::lock_guard lock(vm_->mtx);
-    vm_->vm.makeCurrent();
-    while (!queue_.empty()) {
-        auto entry = queue_.top();
-        queue_.pop();
-    }
-    vm_->vm.gcHeartbeat();
+    // Drop remaining entries. Handlers become collectable once the queue is
+    // gone and nothing else holds them.
+    std::lock_guard lock(schedMtx_);
+    while (!queue_.empty()) queue_.pop();
+    inFlightHandler_ = nullptr;
 }
 
 void NRTScheduler::start() {
@@ -67,8 +90,6 @@ i64 NRTScheduler::scheduleAfter(Duration dt, Obj* handler) {
 i64 NRTScheduler::scheduleEvery(Duration interval, Obj* handler) {
     i64 id = nextTimerID_.fetch_add(1, std::memory_order_relaxed);
 
-    // Retain the handler -- the scheduler owns a reference.
-
     Entry entry;
     TimePoint base = vm_->logicalTime();
     if (base == TimePoint{}) base = Clock::now();
@@ -88,8 +109,6 @@ i64 NRTScheduler::scheduleEvery(Duration interval, Obj* handler) {
 
 i64 NRTScheduler::scheduleAt(TimePoint time, Obj* handler) {
     i64 id = nextTimerID_.fetch_add(1, std::memory_order_relaxed);
-
-    // Retain the handler -- the scheduler owns a reference.
 
     Entry entry;
     entry.logicalTime = time;
@@ -117,10 +136,6 @@ bool NRTScheduler::cancel(i64 timerID) {
         queue_.pop();
         if (entry.timerID == timerID) {
             found = true;
-            // Release under the VM lock
-            std::lock_guard vmLock(vm_->mtx);
-            vm_->vm.makeCurrent();
-            vm_->vm.gcHeartbeat();
         } else {
             newQueue.push(entry);
         }
@@ -153,6 +168,9 @@ void NRTScheduler::run() {
         }
 
         queue_.pop();
+        // Park the popped handler in inFlightHandler_ so it stays a GC root
+        // for the brief window between the queue pop and the call.
+        inFlightHandler_ = next.handler;
         lock.unlock();
 
         // Set logical time so that after()/every() schedule relative to it
@@ -170,11 +188,12 @@ void NRTScheduler::run() {
             next.logicalTime += std::chrono::duration_cast<Clock::duration>(next.interval);
             std::lock_guard lock2(schedMtx_);
             queue_.push(next);
+            inFlightHandler_ = nullptr;
         } else {
-            // One-shot: release the handler reference under the VM lock
-            std::lock_guard vmLock(vm_->mtx);
-            vm_->vm.makeCurrent();
-            vm_->vm.gcHeartbeat();
+            // One-shot: the handler is done; drop the in-flight reference so
+            // it can be collected if nothing else references it.
+            std::lock_guard lock2(schedMtx_);
+            inFlightHandler_ = nullptr;
         }
     }
 }
