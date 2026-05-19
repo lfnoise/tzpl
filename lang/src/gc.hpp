@@ -91,20 +91,24 @@ u32  gcScanChunkByTag(GCObj* obj, TracingGC& gc, u32 cursor);
 //
 // Layout (with virtual destructor for subclass cleanup):
 //     vptr               : 8 bytes
-//     homeAllocator_     : 8 bytes
 //     color_             : 1 byte
 //     immortal_          : 1 byte
 //     gcTag_             : 1 byte
 //     padding            : 5 bytes
 //     allObjsNext_       : 8 bytes  (singly-linked list head -> tail)
-//                          = 32 bytes total
+//                          = 24 bytes total
 //
 // The all-objects list is singly-linked. The collector sweep walks it
 // forward and unlinks freed objects inline via the slot-pointer idiom
 // (no per-node prev pointer needed). New allocations prepend to the head
 // in O(1); registerNewObj is the only writer outside of sweep.
+//
+// No homeAllocator_ field: there is exactly one VM heap per thread, the
+// thread-local rt::gCurrentAllocator names it at every alloc and dealloc
+// site, and sweep only deletes objects from the VM-owned all-objects
+// list (so the deleting thread's gCurrentAllocator matches the
+// allocating thread's). Cross-VM Obj sharing is no longer supported.
 class GCObj {
-    rt::TLSFAllocator* homeAllocator_ = nullptr;
     GCColor color_ = GCColor::White;
     // Immortal objects (compiler-owned constants: types, symbols, immortal
     // strings) live outside any VM's all-objects list; mark() short-circuits
@@ -123,7 +127,7 @@ public:
 
     static constexpr uintptr_t kPtrMask = ~(uintptr_t)1;
 
-    GCObj();
+    GCObj() = default;
     virtual ~GCObj() {}
 
     // Override new/delete to use VM's allocator
@@ -135,8 +139,6 @@ public:
     bool isImmortal() const { return immortal_; }
     void makeImmortal()     { immortal_ = true; }
     void setMortal()        { immortal_ = false; }
-
-    rt::TLSFAllocator* homeAllocator() const { return homeAllocator_; }
 
     // Virtuals retained for `override` compatibility in 40+ subclasses.
     // The marker no longer calls these directly -- it dispatches through

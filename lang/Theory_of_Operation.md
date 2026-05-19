@@ -839,15 +839,14 @@ Memory is managed by an **incremental tri-color SATB tracing collector** with pr
 
 ```cpp
 class GCObj {
-    rt::TLSFAllocator* homeAllocator_;
-    GCColor color_;     // White / Gray / Black
+    GCColor color_;        // White / Gray / Black
     bool    immortal_;
-    GCTag   gcTag_;     // tag-dispatched child scan
+    GCTag   gcTag_;        // tag-dispatched child scan
     GCObj*  allObjsNext_;  // singly-linked all-objects list
 };
 ```
 
-The header is 32 bytes including the vtable pointer. Compile-time constants (types, immortal strings, the global symbol table) are flagged `immortal_ = true` and are never visited or freed.
+The header is 24 bytes including the vtable pointer. Compile-time constants (types, immortal strings, the global symbol table) are flagged `immortal_ = true` and are never visited or freed. There is no per-object home-allocator pointer: each VM owns exactly one TLSF pool, the thread-local `rt::gCurrentAllocator` names it at every allocation and deallocation site, and sweep (the only deletion path) always runs on the VM thread, so the deleting and allocating thread's allocator pointers always agree.
 
 **Tri-color invariant.** Each non-immortal object is exactly one of White (unmarked, candidate for sweep), Gray (marked, children not yet scanned), or Black (marked, children scanned). The collector preserves the snapshot-at-the-beginning (SATB) invariant: any object that was reachable when the cycle started survives the cycle, even if the mutator overwrites the only reference to it before the marker visits it.
 

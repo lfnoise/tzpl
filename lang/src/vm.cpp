@@ -142,10 +142,6 @@ namespace ts { // re-open
 
 // GCObj implementation
 
-GCObj::GCObj() {
-    homeAllocator_ = rt::gCurrentAllocator;
-}
-
 void* GCObj::operator new(usize size) {
 #if __has_feature(address_sanitizer)
     // Under ASan, use system malloc so ASan can track each GCObj
@@ -159,7 +155,8 @@ void* GCObj::operator new(usize size) {
         if (!mem) throw std::bad_alloc();
         return mem;
     }
-    // Compile-thread path: use system allocator
+    // Compile-thread path: use system allocator. These allocations are
+    // marked immortal and never reach operator delete.
     void* mem = ::malloc(size);
     if (!mem) throw std::bad_alloc();
     return mem;
@@ -168,19 +165,18 @@ void* GCObj::operator new(usize size) {
 
 void GCObj::operator delete(void* ptr) noexcept {
     if (!ptr) return;
-    auto* obj = static_cast<GCObj*>(ptr);
     // Singly-linked sweep unlinks before it calls delete, so operator delete
     // no longer touches the all-objects list. The only writers of that list
     // are linkObjToAllList (on alloc) and the sweep itself.
+    //
+    // Sweep is the only path that ever deletes a GCObj, and it runs on the
+    // VM thread with rt::gCurrentAllocator pointing at the same allocator
+    // that served the original `new`. Compile-thread immortals never reach
+    // here (they're never deleted; CodeBlock::objConstants has no dtor).
 #if __has_feature(address_sanitizer)
     ::free(ptr);
 #else
-    rt::TLSFAllocator* alloc = obj->homeAllocator_;
-    if (alloc) {
-        alloc->deallocate(ptr);
-    } else {
-        ::free(ptr);
-    }
+    rt::gCurrentAllocator->deallocate(ptr);
 #endif
 }
 
