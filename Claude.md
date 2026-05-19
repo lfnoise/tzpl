@@ -61,6 +61,21 @@ Syntax essentials for reading and writing `.x` files:
     --        Array[T], List[T], Range[T], Set[T], Map[K,V],
     --        Tuple(T1, T2, ...), Struct, Enum, Ref[T], Function, Coroutine[T]
 
+    -- Mutable containers (Array, Map, Set): heap objects passed by reference.
+    -- Mutating builtins idiomatically end in `!`; non-mutating ones return new
+    -- values. `!` is part of the identifier -- `push` and `push!` are distinct.
+    var a = [1, 2, 3];
+    a[0] = 100;                    -- indexed assignment (cyclic, like reads)
+    a push!(4);                    -- mutating builtin
+    let b = a copy;                -- shallow copy for independent alias
+
+    var m = ["x": 1];
+    m["y"] = 2;                    -- insert-or-update
+
+    var s = Set(1, 2);
+    s insert!(3);
+    let popped = s pop!;           -- mutating; returns one element
+
     -- Auto-mapping: functions automatically apply over arrays/lists
     let xs = [1, 2, 3];
     let ys = xs add(10);           -- [11, 12, 13]
