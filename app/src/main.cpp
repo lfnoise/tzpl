@@ -347,7 +347,7 @@ static bool handleREPLCommand(const std::string& input, REPLSession& session,
                   << "  :globals        List global variables\n"
                   << "  :functions      List user-defined functions\n"
                   << "  :memory         Show memory usage\n"
-                  << "  :gc             Run ARC heartbeat\n";
+                  << "  :gc             Run a full tracing-GC cycle\n";
         return false;
     }
 
@@ -368,20 +368,15 @@ static bool handleREPLCommand(const std::string& input, REPLSession& session,
     if (cmd == ":memory") {
         std::printf("  Allocated: %zu bytes\n", vm.allocator().getAllocated());
         std::printf("  Pool size: %zu bytes\n", vm.allocator().getPoolSize());
-        std::printf("  Auto-release pool: %u objects\n",
-                    vm.autoReleasePool().size());
-        std::printf("  Deferred delete queue: %u objects\n",
-                    vm.deferredDeleteQueue().size());
         return false;
     }
 
     if (cmd == ":gc" || cmd == ":collect") {
-        vm.gcHeartbeat();
-        std::printf("  ARC heartbeat complete.\n");
-        std::printf("  Auto-release pool: %u objects\n",
-                    vm.autoReleasePool().size());
-        std::printf("  Deferred delete queue: %u objects\n",
-                    vm.deferredDeleteQueue().size());
+        vm.tracingGC().runFullCycle();
+        std::printf("  Tracing GC cycle complete.\n");
+        std::printf("  Live (black): %u  Reclaimed (white): %u\n",
+                    vm.tracingGC().lastBlackCount(),
+                    vm.tracingGC().lastWhiteCount());
         return false;
     }
 
