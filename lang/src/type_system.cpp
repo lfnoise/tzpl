@@ -87,16 +87,55 @@ LambdaType::LambdaType(TypeVec argTypes, Type* returnType, TypeVec freeVarTypes)
     : FunctionType(std::move(argTypes), returnType)
     , freeVarTypes_(std::move(freeVarTypes))
     , gcFreeVars_(rt::STLAllocator<int>(rt::gCurrentAllocator))
+    , freeVarIsUpvar_(rt::STLAllocator<u8>(rt::gCurrentAllocator))
+    , freeVarOffsets_(rt::STLAllocator<u16>(rt::gCurrentAllocator))
 {
     registerNewObj(this);
     classifyType(this);
-    int i = 0;
-    for (Type* t : freeVarTypes_) {
-        if (storesObjPtr(t)) {
-            gcFreeVars_.push_back(i);
+    // Default: every capture is byValue (legacy single-word-per-capture
+    // layout). setCaptureLayout() overrides this once the codegen knows
+    // which captures are upvars.
+    setCaptureLayout({});
+}
+
+// Recompute capture layout (offsets, total word count, GC mask of Obj*-
+// holding word offsets) for the current freeVarTypes_ and a parallel list
+// of byReference flags. byReference captures take 1 word (an UpVar* Obj*);
+// byValue captures take type->sizeWords_ words and contribute Obj* offsets
+// for every object-bearing word in their inline layout (currently: 1-word
+// Obj* types, and inline composite types that happen to be Obj*-free like
+// Complex / Fraction; deeper inline layouts walk via gcScanInlinePointers
+// at runtime instead of being statically enumerated here).
+void LambdaType::setCaptureLayout(const std::vector<bool>& isUpvar) {
+    freeVarIsUpvar_.clear();
+    freeVarOffsets_.clear();
+    gcFreeVars_.clear();
+    u16 offset = 0;
+    for (size_t i = 0; i < freeVarTypes_.size(); ++i) {
+        bool byRef = (i < isUpvar.size()) && isUpvar[i];
+        freeVarIsUpvar_.push_back(byRef ? (u8)1 : (u8)0);
+        freeVarOffsets_.push_back(offset);
+        Type* t = freeVarTypes_[i];
+        if (byRef) {
+            // UpVar* is always an Obj pointer; trace its single word.
+            gcFreeVars_.push_back((int)offset);
+            offset += 1;
+        } else {
+            u16 sw = (t && t->sizeWords_ > 0) ? (u16)t->sizeWords_ : (u16)1;
+            // For 1-word captures, defer to storesObjPtr. For multi-word
+            // inline captures (Complex / Fraction etc.) the embedded words
+            // are primitive (no Obj*); nested Tuple/Struct/Enum captures
+            // with object fields are not yet enumerated here -- the open
+            // path keeps them reachable via stack maps and the closed path
+            // would need a layout walk to be precise. This matches the
+            // pre-upvar behavior for non-trivial inline captures.
+            if (sw == 1 && storesObjPtr(t)) {
+                gcFreeVars_.push_back((int)offset);
+            }
+            offset += sw;
         }
-        ++i;
     }
+    totalFreeVarWords_ = offset;
 }
 
 // TemplateLambdaType constructor
@@ -106,18 +145,51 @@ TemplateLambdaType::TemplateLambdaType(LambdaExprNode* node, TypeVec freeVarType
     : astNode_(node)
     , freeVarTypes_(std::move(freeVarTypes))
     , gcFreeVars_(rt::STLAllocator<int>(rt::gCurrentAllocator))
+    , freeVarIsUpvar_(rt::STLAllocator<u8>(rt::gCurrentAllocator))
+    , freeVarOffsets_(rt::STLAllocator<u16>(rt::gCurrentAllocator))
     , typeParams_(std::move(typeParams))
     , constraints_(std::move(constraints))
 {
     registerNewObj(this);
     classifyType(this);
-    int i = 0;
-    for (Type* t : freeVarTypes_) {
-        if (storesObjPtr(t)) {
-            gcFreeVars_.push_back(i);
+    // Default: legacy single-word-per-capture layout. Codegen overrides
+    // via the per-LambdaExprNode captures vector at definition time.
+    u16 offset = 0;
+    for (size_t i = 0; i < freeVarTypes_.size(); ++i) {
+        freeVarIsUpvar_.push_back((u8)0);
+        freeVarOffsets_.push_back(offset);
+        Type* t = freeVarTypes_[i];
+        u16 sw = (t && t->sizeWords_ > 0) ? (u16)t->sizeWords_ : (u16)1;
+        if (sw == 1 && storesObjPtr(t)) {
+            gcFreeVars_.push_back((int)offset);
         }
-        ++i;
+        offset += sw;
     }
+    totalFreeVarWords_ = offset;
+}
+
+void TemplateLambdaType::setCaptureLayout(const std::vector<bool>& isUpvar) {
+    freeVarIsUpvar_.clear();
+    freeVarOffsets_.clear();
+    gcFreeVars_.clear();
+    u16 offset = 0;
+    for (size_t i = 0; i < freeVarTypes_.size(); ++i) {
+        bool byRef = (i < isUpvar.size()) && isUpvar[i];
+        freeVarIsUpvar_.push_back(byRef ? (u8)1 : (u8)0);
+        freeVarOffsets_.push_back(offset);
+        Type* t = freeVarTypes_[i];
+        if (byRef) {
+            gcFreeVars_.push_back((int)offset);
+            offset += 1;
+        } else {
+            u16 sw = (t && t->sizeWords_ > 0) ? (u16)t->sizeWords_ : (u16)1;
+            if (sw == 1 && storesObjPtr(t)) {
+                gcFreeVars_.push_back((int)offset);
+            }
+            offset += sw;
+        }
+    }
+    totalFreeVarWords_ = offset;
 }
 
 VMString TemplateLambdaType::str() const {

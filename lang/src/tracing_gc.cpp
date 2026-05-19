@@ -226,6 +226,17 @@ void TracingGC::step_root_frames(u64 deadlineNanos, u32& sinceCheck, u32& done) 
             if (gcMonoNanos() >= deadlineNanos) return;
         }
     }
+    // Mark all open upvalues as roots. Each open UpVar is referenced from
+    // vm_.openUpVars_ (and possibly from closures we'll reach via the frame
+    // scan above), but until a closure picks it up it is reachable only via
+    // that head pointer. Walking the list here guarantees a GC fired
+    // between op_capture_upvar and op_make_lambda still keeps the cell.
+    // The contained value (location_[0..sizeWords)) lives in the register
+    // file -- already scanned via stack maps above -- so we don't need to
+    // re-trace it; we just need to keep the UpVar object alive.
+    for (UpVar* uv = vm_.openUpVars_; uv != nullptr; uv = uv->next_) {
+        mark(uv); ++lastRootCount_;
+    }
     rootPhase_ = RootPhase::Extras;
     rootExtraCursor_ = 0;
 }

@@ -41,6 +41,7 @@ namespace ts {
 // Forward declarations
 class Type;
 class Obj;
+class UpVar;
 class CodeBlock;
 class ArrayType;
 class ListType;
@@ -319,6 +320,33 @@ public:
     // of every GCObj owned by this VM. Sweep walks this list to find whites.
     // linkObjToAllList()/unlinkObjFromAllList() (in vm.cpp) maintain it.
     GCObj* allObjsHead_ = nullptr;
+
+    // Lua-style open upvalues list. Single singly-linked list per VM, kept
+    // sorted by descending location_ via the stack discipline below: every
+    // new UpVar points into a deeper (higher-address) register slot than
+    // any older open UpVar (because deeper frames live at higher regs_
+    // offsets), so cons-to-head naturally maintains the order. That lets:
+    //   - capture get-or-create do a single short walk from the head and
+    //     either reuse the existing UpVar for `location` or push a new
+    //     one (so sibling/nested closures over the same `var` share the
+    //     same cell);
+    //   - frame-exit close walk from the head while location_ >= base of
+    //     the frame's register window and stop at the first cell that
+    //     belongs to an outer frame.
+    UpVar* openUpVars_ = nullptr;
+
+    // Get-or-create an UpVar pointing to `location`. Returns the existing
+    // open UpVar if one already references that slot; otherwise allocates
+    // a fresh UpVar with `sizeWords` payload, masks Obj* words via
+    // `gcMaskBits`, conses it onto openUpVars_, and returns it. `valueType`
+    // is stashed as the UpVar's Obj::type_ (debug / introspection only).
+    UpVar* newUpVar(Type* valueType, Word* location, u16 sizeWords, u16 gcMaskBits);
+
+    // Close every open UpVar whose location_ is at or above `pos`. Called
+    // from popFrame (with pos = regs_ + baseReg of the frame being popped)
+    // and from tail-call opcodes that reuse the current frame (with pos =
+    // currentRegs_, the base of the about-to-be-overwritten window).
+    void closeUpVarsAtOrAbove(Word* pos);
 
     // Tracing GC instance (defined in tracing_gc.hpp). Pimpl-ed via
     // unique_ptr so vm.hpp doesn't need to include the full class definition

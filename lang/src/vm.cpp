@@ -384,12 +384,41 @@ CallFrame VM::popFrame() {
     --frameCount_;
     CallFrame frame = frames_[frameCount_];
 
+    // Close any open upvalues pointing into this frame's register window.
+    // The frame's regs span [regs_ + baseReg_, regs_ + baseReg_ + numRegs).
+    // closeUpVarsAtOrAbove walks the head of openUpVars_ (sorted descending
+    // by location_) and stops at the first cell that belongs to an outer
+    // frame, so callers' upvars are left untouched.
+    closeUpVarsAtOrAbove(regs_ + baseReg_);
+
     // Restore dynamic scope bindings pushed during this frame
     dynScopeRestore(frame.dynStackMark);
 
     baseReg_ = frame.baseReg;
     currentRegs_ = regs_ + baseReg_;
     return frame;
+}
+
+UpVar* VM::newUpVar(Type* valueType, Word* location, u16 sizeWords, u16 gcMaskBits) {
+    // Search the open list for an existing UpVar at this exact stack
+    // location. Reusing it is what makes sibling closures over the same
+    // `var` see each other's mutations.
+    for (UpVar* uv = openUpVars_; uv != nullptr; uv = uv->next_) {
+        if (uv->location_ == location) return uv;
+    }
+    UpVar* uv = UpVar::create(valueType, location, openUpVars_, sizeWords, gcMaskBits);
+    openUpVars_ = uv;  // cons to head; stack discipline keeps list sorted
+                       // by descending location_ as deeper frames push
+                       // captures into the register file at higher offsets.
+    return uv;
+}
+
+void VM::closeUpVarsAtOrAbove(Word* pos) {
+    while (openUpVars_ && openUpVars_->location_ >= pos) {
+        UpVar* uv = openUpVars_;
+        openUpVars_ = uv->next_;
+        uv->close();  // snapshot live words into uv->value_, retarget location_
+    }
 }
 
 void VM::dumpCallStack() const {

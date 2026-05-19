@@ -636,6 +636,29 @@ Lambda* Lambda::create(TemplateLambdaType* type, u16 numFreeVars) {
     return new(mem) Lambda(type, numFreeVars);
 }
 
+// UpVar constructor (private — use UpVar::create()).
+UpVar::UpVar(Type* type, Word* location, UpVar* next, u16 sizeWords, u16 gcMaskBits)
+    : Obj(type)
+    , location_(location)
+    , next_(next)
+    , sizeWords_(sizeWords ? sizeWords : (u16)1)
+    , gcMaskBits_(gcMaskBits)
+{
+    // Initialize the payload to zero so a premature GC walk before close()
+    // (which only inspects the payload once location_ == &value_[0]) is
+    // still well-defined.
+    for (u16 i = 0; i < sizeWords_; ++i) value_[i] = Word();
+    registerNewObj(this, GCTag::Default);
+}
+
+UpVar* UpVar::create(Type* type, Word* location, UpVar* next,
+                     u16 sizeWords, u16 gcMaskBits) {
+    if (sizeWords == 0) sizeWords = 1;
+    usize size = sizeof(UpVar) + sizeWords * sizeof(Word);
+    void* mem = GCObj::operator new(size);
+    return new(mem) UpVar(type, location, next, sizeWords, gcMaskBits);
+}
+
 const Vec<int>& Lambda::getGCFreeVars() const {
     if (auto* lt = dynamic_cast<LambdaType*>(type_)) {
         return lt->gcFreeVars_;

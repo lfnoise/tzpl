@@ -226,12 +226,25 @@ Type* TypeChecker::inferLambdaExpr(LambdaExprNode* expr) {
                 if (it != scopes_[i].end()) {
                     if (i < lambdaBoundary_) {
                         // Variable is from beyond parent's boundary — parent must capture it too
-                        bool found = false;
+                        LambdaExprNode::CapturedVar* existing = nullptr;
                         for (auto& pcap : *currentCaptures_) {
-                            if (pcap.name == cap.name) { found = true; break; }
+                            if (pcap.name == cap.name) { existing = &pcap; break; }
                         }
-                        if (!found) {
-                            currentCaptures_->push_back({cap.name, cap.type});
+                        bool byRef = it->second.isMutable;
+                        if (!existing) {
+                            LambdaExprNode::CapturedVar cv;
+                            cv.name = cap.name;
+                            cv.type = cap.type;
+                            cv.byReference = byRef;
+                            currentCaptures_->push_back(cv);
+                        } else if (byRef && !existing->byReference) {
+                            existing->byReference = true;
+                        }
+                        if (byRef) {
+                            it->second.isCapturedMutably = true;
+                            if (it->second.varDeclNode) {
+                                it->second.varDeclNode->capturedByClosure = true;
+                            }
                         }
                     }
                     break;

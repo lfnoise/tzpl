@@ -1395,6 +1395,76 @@ private:
 };
 #pragma clang diagnostic pop
 
+// UpVar — Lua-style mutable upvalue cell for closures that capture a `var`
+// from an enclosing scope.
+//
+// While the declaring function frame is live, the upvar is "open":
+// location_ points into that frame's register window so every read/write
+// from the closure goes through the actual register slot. On op_return the
+// frame's openUpVars list is walked and each UpVar's words are copied from
+// the register file into the flex-array payload, with location_ retargeted
+// at value_[0] -- the upvar is now "closed" and outlives the frame.
+//
+// Sibling closures over the same variable share the same UpVar because
+// op_capture_upvar does a get-or-create scan against the frame's open list,
+// keyed on location_. Inline multi-word value types (Complex, Fraction,
+// inline Tuple/Struct) get sizeWords_ > 1 and the flex payload sized to
+// match; the gcMaskBits_ bitmap marks which words in value_ hold Obj*.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wc99-extensions"
+class UpVar : public Obj {
+public:
+    Word*  location_;     // open: into a frame's register window.
+                          // closed: == &value_[0]
+    UpVar* next_;         // open-list link in CallFrame.openUpVars; null once closed
+    u16    sizeWords_;    // width of the captured value (1 for atoms/pointers/upvar refs;
+                          // type->sizeWords_ for inline composites)
+    u16    gcMaskBits_;   // bit i set => value_[i] holds an Obj* and must be GC-traced
+    Word   value_[];      // flexible payload; meaningful only when closed
+
+    bool closed() const noexcept { return location_ == &value_[0]; }
+
+    // Snapshot the live words from the open location into the embedded
+    // payload and retarget location_ at value_. Idempotent (a re-close is a
+    // no-op). Called from op_return for every UpVar on the frame's open list
+    // before the frame is popped.
+    void close() noexcept {
+        if (closed()) return;
+        for (u16 i = 0; i < sizeWords_; ++i) {
+            value_[i] = location_[i];
+        }
+        location_ = &value_[0];
+        next_ = nullptr;
+    }
+
+    static UpVar* create(Type* type, Word* location, UpVar* next,
+                         u16 sizeWords, u16 gcMaskBits);
+
+    VMString str() const override {
+        return rt::vmstr("[UpVar]");
+    }
+
+    void gcScanChildren(TracingGC& gc) override {
+        // When still open, the live words sit in the register file (already
+        // a GC root via the frame chain) and value_ is empty -- nothing to
+        // scan here. Once closed, walk the gc mask and mark each Obj* word.
+        if (!closed()) return;
+        u16 mask = gcMaskBits_;
+        u16 i = 0;
+        while (mask) {
+            if (mask & 1u) {
+                if (i < sizeWords_ && value_[i].o) gc.mark(value_[i].o);
+            }
+            mask >>= 1;
+            ++i;
+        }
+    }
+
+private:
+    UpVar(Type* type, Word* location, UpVar* next, u16 sizeWords, u16 gcMaskBits);
+};
+#pragma clang diagnostic pop
+
 // Coroutine frame - heap-allocated call frame for coroutine execution
 // Uses flexible array member for inline register storage
 #pragma clang diagnostic push

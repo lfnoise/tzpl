@@ -381,6 +381,24 @@ void op_make_lambda(VM& vm, Code* pc);        // MAKE_LAMBDA Rd, captureBase, nu
 void op_call_lambda(VM& vm, Code* pc);        // CALL_LAMBDA Rd, argc, argBase, calleeReg (2 words: op, regs)
 void op_func_ref(VM& vm, Code* pc);           // FUNC_REF Rd (3 words: op, regs, globalIndex as i64, LambdaType*)
 
+// --- Upvalues (Lua-style open/closed cells for mutable captures) ---
+// CAPTURE_UPVAR_LOCAL Rd, RsrcLoc, sizeWords  (4 words: op, regs, gcMaskBits i64, Type*)
+// Get-or-create an UpVar pointing into the current frame's reg(RsrcLoc).
+// Result (Obj* UpVar) lands in reg(Rd). gcMaskBits is a bitmap over the
+// sizeWords payload words: bit i set => value_[i] holds an Obj*.
+void op_capture_upvar_local(VM& vm, Code* pc);
+// LOAD_UPVAR_N Rd, RupvarReg, sizeWords  (2 words: op, regs)
+// Copy sizeWords words from *upvar->location_ into reg(Rd..Rd+sizeWords-1).
+// Works the same whether the upvar is open (location_ points into a frame)
+// or closed (location_ points into upvar's own flex payload).
+void op_load_upvar_n(VM& vm, Code* pc);
+// STORE_UPVAR_N RupvarReg, Rsrc, sizeWords  (3 words: op, regs, gcMaskBits i64)
+// Copy sizeWords words from reg(Rsrc..) into *upvar->location_.
+// Applies a tracing-GC writeBarrier on every Obj*-typed word (by mask)
+// only when the upvar is closed -- open upvars store back into the
+// register file, which is a GC root and needs no SATB barrier.
+void op_store_upvar_n(VM& vm, Code* pc);
+
 // --- Template Lambda ---
 void op_make_template_lambda(VM& vm, Code* pc);        // MAKE_TEMPLATE_LAMBDA Rd, captureBase, numFreeVars (3 words: op, regs, TemplateLambdaType*)
 void op_call_template_lambda(VM& vm, Code* pc);        // CALL_TEMPLATE_LAMBDA Rd, argc, argBase, calleeReg (3 words: op, regs, CodeBlock*)

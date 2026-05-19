@@ -52,6 +52,14 @@ struct VarInfo {
     u32  globalIndex;    // index if global
     LambdaExprNode* deferredLambda = nullptr;  // Set when var holds an untyped lambda awaiting inference
     ASTNode* deferredDecl = nullptr;           // The declaration node to update after deferred inference
+    // Set by lookupVar when a nested lambda captures this mutable `var` across
+    // a lambda boundary. Codegen uses the corresponding VarDeclNode flag
+    // (set when this becomes true) to allocate the slot as an open upvalue.
+    bool isCapturedMutably = false;
+    // Back-pointer to the declaring AST node (if any). Lets the capture
+    // detection in lookupVar mark the declaration as captured-by-closure
+    // without losing track of which `var` introduced this VarInfo.
+    VarDeclNode* varDeclNode = nullptr;
     // Module provenance for import re-export control.
     // sourceModulePath non-empty = imported from another module.
     // reExported = true if brought in via `export import`; only such imports are re-exported.

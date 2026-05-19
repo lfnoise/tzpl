@@ -391,11 +391,26 @@ public:
 class LambdaType : public FunctionType {
 public:
     TypeVec freeVarTypes_;
-    Vec<int> gcFreeVars_;
+    Vec<int> gcFreeVars_;            // word offsets in freeVars_ that hold Obj*
+    // Per-capture layout. Indexed by capture number, parallel to freeVarTypes_.
+    // - freeVarIsUpvar_[i]: true if capture i is byReference (UpVar*, 1 word).
+    // - freeVarOffsets_[i]: starting word offset of capture i within the
+    //   lambda's freeVars_ block. Width is 1 for upvar captures, otherwise
+    //   the captured type's sizeWords_.
+    // - totalFreeVarWords_: sum of all capture widths (== Lambda.numFreeVars_).
+    Vec<u8>  freeVarIsUpvar_;
+    Vec<u16> freeVarOffsets_;
+    u16      totalFreeVarWords_ = 0;
     CodeBlock* codeBlock_ = nullptr;   // compiled body for this lambda
 
     LambdaType(TypeVec argTypes, Type* returnType, TypeVec freeVarTypes);
 
+    // Phase: upvars. Re-derive freeVarOffsets_, totalFreeVarWords_, and
+    // gcFreeVars_ now that we know which captures are byReference (UpVar*,
+    // 1 word) vs byValue (sizeWords words). When called with an empty
+    // isUpvar vector, treats every capture as byValue and matches the
+    // legacy single-word-per-capture layout exactly.
+    void setCaptureLayout(const std::vector<bool>& isUpvar);
 };
 
 // Template lambda type — a generic lambda awaiting monomorphization
@@ -403,7 +418,10 @@ class TemplateLambdaType : public ObjType {
 public:
     LambdaExprNode* astNode_;                     // for re-checking per instantiation
     TypeVec freeVarTypes_;                         // capture types (always concrete)
-    Vec<int> gcFreeVars_;                          // GC indices for obj-typed captures
+    Vec<int> gcFreeVars_;                          // word offsets in freeVars_ that hold Obj*
+    Vec<u8>  freeVarIsUpvar_;                      // parallel to freeVarTypes_
+    Vec<u16> freeVarOffsets_;                      // start word of each capture in freeVars_
+    u16      totalFreeVarWords_ = 0;
     std::vector<std::string> typeParams_;           // ["T", "U"]
 
     // Constraint info stored as pairs to avoid ast.hpp dependency
@@ -423,6 +441,11 @@ public:
     TemplateLambdaType(LambdaExprNode* node, TypeVec freeVarTypes,
                        std::vector<std::string> typeParams,
                        std::vector<ConstraintEntry> constraints);
+
+    // See LambdaType::setCaptureLayout. Mirrors the same offset / GC mask
+    // computation onto the template-side LambdaType so the Lambda objects
+    // built via op_make_template_lambda trace their UpVar captures.
+    void setCaptureLayout(const std::vector<bool>& isUpvar);
 
     bool isObjType() const override { return true; }
 

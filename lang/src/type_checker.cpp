@@ -167,12 +167,32 @@ VarInfo* TypeChecker::lookupVar(const std::string& name) {
             // Detect cross-lambda-boundary capture
             if (lambdaBoundary_ >= 0 && i < lambdaBoundary_ && currentCaptures_) {
                 // Deduplicate by name
-                bool found = false;
+                LambdaExprNode::CapturedVar* existing = nullptr;
                 for (auto& cap : *currentCaptures_) {
-                    if (cap.name == name) { found = true; break; }
+                    if (cap.name == name) { existing = &cap; break; }
                 }
-                if (!found) {
-                    currentCaptures_->push_back({name, it->second.type});
+                bool byRef = it->second.isMutable;
+                if (!existing) {
+                    LambdaExprNode::CapturedVar cv;
+                    cv.name = name;
+                    cv.type = it->second.type;
+                    cv.byReference = byRef;
+                    currentCaptures_->push_back(cv);
+                } else if (byRef && !existing->byReference) {
+                    // First reference was a propagated one that didn't know
+                    // the var is mutable; promote it. (Shouldn't happen given
+                    // the propagation path also reads isMutable, but harmless.)
+                    existing->byReference = true;
+                }
+                // Mark the declaring var as captured-by-closure so codegen
+                // can allocate its slot as an open-upvalue location. Only
+                // mutable captures need this; immutable captures stay
+                // value-snapshot.
+                if (byRef) {
+                    it->second.isCapturedMutably = true;
+                    if (it->second.varDeclNode) {
+                        it->second.varDeclNode->capturedByClosure = true;
+                    }
                 }
             }
             return &it->second;

@@ -361,6 +361,10 @@ struct LambdaExprNode : Expr {
     struct CapturedVar {
         std::string name;
         Type* type = nullptr;    // filled by type checker
+        // True iff the captured variable is a mutable `var` — captured by
+        // reference through an UpVar cell (Lua-style upvalue). False for
+        // `let`/`const` captures, which are snapshot copies of the value.
+        bool byReference = false;
     };
     std::vector<Param> params;
     TypeExprPtr returnType;
@@ -661,6 +665,11 @@ struct VarDeclNode : Decl {
     PatternPtr pattern;    // nullable; when set, name is empty and pattern provides bindings
     bool isPrivate = false;
     bool isDynamic = false;  // true for dynamic scope variables: var `name = expr;
+    // Set by the type checker when this `var` is captured by any nested
+    // closure. Triggers codegen to mark the local as an open upvalue slot
+    // so reads/writes inside the closure go through op_load/store_upvar_n
+    // and on function return the slot's words are closed into the UpVar.
+    bool capturedByClosure = false;
 
     VarDeclNode(SourceRange l, std::string n, TypeExprPtr t, ExprPtr i)
         : Decl(VarDecl, l), name(std::move(n)),

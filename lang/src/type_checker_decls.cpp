@@ -497,6 +497,16 @@ void TypeChecker::checkVarDecl(VarDeclNode* decl) {
 
     decl->resolvedType = varType;
     declareVar(decl->name, varType, true);
+    // Stash the back-pointer to this VarDeclNode in the VarInfo so that any
+    // later lambda that captures this mutable `var` can mark
+    // capturedByClosure on the declaration site. Skipped for globals: their
+    // VarInfo lives in globalVars_ where lookups for nested-scope captures
+    // bypass the capture-detection code path anyway.
+    if (!scopes_.empty()) {
+        if (VarInfo* vi = lookupVar(decl->name)) {
+            vi->varDeclNode = decl;
+        }
+    }
 }
 
 void TypeChecker::checkConstDecl(ConstDeclNode* decl) {

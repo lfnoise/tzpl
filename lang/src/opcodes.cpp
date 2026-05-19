@@ -3902,6 +3902,75 @@ void op_func_ref(VM& vm, Code* pc) {
     DISPATCH(3);
 }
 
+// --- Upvalues (open/closed cells for mutable captures) ---
+
+// CAPTURE_UPVAR_LOCAL Rd, RsrcLoc, sizeWords  (4 words: op, regs, gcMaskBits i64, Type*)
+//
+// Get-or-create an UpVar pointing to vm.reg(RsrcLoc). The VM's openUpVars_
+// list is searched for an existing cell with the same location_; if found
+// it is reused (so sibling closures over the same `var` share the same
+// cell). Otherwise a fresh UpVar is allocated and consed onto the list.
+void op_capture_upvar_local(VM& vm, Code* pc) {
+    u16 dst       = pc[1].regs[0];
+    u16 srcLoc    = pc[1].regs[1];
+    u16 sizeWords = pc[1].regs[2];
+    u16 gcMask    = (u16)pc[2].i;
+    auto* valueType = static_cast<Type*>(pc[3].p);
+
+    Word* loc = &vm.reg(srcLoc);
+    UpVar* uv = vm.newUpVar(valueType, loc, sizeWords, gcMask);
+    vm.reg(dst).o = uv;
+    DISPATCH(4);
+}
+
+// LOAD_UPVAR_N Rd, RupvarReg, sizeWords  (2 words: op, regs)
+//
+// Copy sizeWords consecutive words from *upvar->location_ into the
+// destination slot. Works for both open (location_ points into a frame)
+// and closed (location_ points into upvar's own payload) cells.
+void op_load_upvar_n(VM& vm, Code* pc) {
+    u16 dst       = pc[1].regs[0];
+    u16 upvarReg  = pc[1].regs[1];
+    u16 sizeWords = pc[1].regs[2];
+
+    auto* uv = static_cast<UpVar*>(vm.reg(upvarReg).o);
+    Word const* loc = uv->location_;
+    for (u16 i = 0; i < sizeWords; ++i) {
+        vm.reg(dst + i) = loc[i];
+    }
+    DISPATCH(2);
+}
+
+// STORE_UPVAR_N RupvarReg, Rsrc, sizeWords  (3 words: op, regs, gcMaskBits i64)
+//
+// Write sizeWords consecutive words from the source slot into the upvar's
+// location. SATB write barrier fires only when the upvar is closed and the
+// word being overwritten is marked as an Obj* in gcMaskBits: open stores
+// land in the register file (which is a GC root) and never need a barrier.
+void op_store_upvar_n(VM& vm, Code* pc) {
+    u16 upvarReg  = pc[1].regs[0];
+    u16 src       = pc[1].regs[1];
+    u16 sizeWords = pc[1].regs[2];
+    u16 gcMask    = (u16)pc[2].i;
+
+    auto* uv = static_cast<UpVar*>(vm.reg(upvarReg).o);
+    Word* loc = uv->location_;
+    bool isClosed = uv->closed();
+    u16 mask = gcMask;
+    for (u16 i = 0; i < sizeWords; ++i) {
+        if (isClosed && (mask & (1u << i))) {
+            // SATB: snapshot the old Obj* in the slot before overwriting so
+            // an in-flight mark cycle still sees what was reachable when
+            // the cycle started.
+            if (Obj* oldVal = loc[i].o) {
+                vm.tracingGC().writeBarrier(oldVal);
+            }
+        }
+        loc[i] = vm.reg(src + i);
+    }
+    DISPATCH(3);
+}
+
 // --- Template Lambda ---
 
 // MAKE_TEMPLATE_LAMBDA Rd, captureBase, numFreeVars (3 words: op, regs, TemplateLambdaType*)
@@ -3959,6 +4028,12 @@ void op_tail_call_template_lambda(VM& vm, Code* pc) {
 
     auto* lambda = static_cast<Lambda*>(vm.reg(calleeReg).o);
     CodeBlock* callee = static_cast<CodeBlock*>(pc[2].p);
+
+    // The current frame's register window is about to be overwritten with
+    // the callee's args + free vars. Close any open upvalues that point
+    // into it so escaping closures see the snapshotted values, not the
+    // callee's data.
+    vm.closeUpVarsAtOrAbove(&vm.reg(0));
 
     for (u16 i = 0; i < argc; i++) {
         vm.reg(i) = vm.reg(argBase + i);
@@ -4024,6 +4099,9 @@ void op_tail_call(VM& vm, Code* pc) {
         }
         if (sum > argc) wordCount = sum;
     }
+    // Close upvalues pointing into the current frame's register window
+    // before the args overwrite those slots (see op_tail_call_template_lambda).
+    vm.closeUpVarsAtOrAbove(&vm.reg(0));
     // Copy args to r0..r(wordCount-1) — forward copy is safe since argBase >= wordCount
     for (u16 i = 0; i < wordCount; i++) {
         vm.reg(i) = vm.reg(argBase + i);
@@ -4057,6 +4135,9 @@ void op_tail_call_lambda(VM& vm, Code* pc) {
     auto* lambda = static_cast<Lambda*>(vm.reg(calleeReg).o);
     CodeBlock* callee = lambda->codeBlock_;
 
+    // Close upvalues pointing into the current frame's register window
+    // before the args overwrite those slots.
+    vm.closeUpVarsAtOrAbove(&vm.reg(0));
     // Copy args to r0..r(argc-1)
     for (u16 i = 0; i < argc; i++) {
         vm.reg(i) = vm.reg(argBase + i);

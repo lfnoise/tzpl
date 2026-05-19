@@ -48,16 +48,33 @@ u16 CodeGen::allocRegs(u16 count) {
 }
 
 void CodeGen::freeRegsTo(u16 reg) {
-    if (enableConstFold) clearConsts(reg);
+    // Captured-by-closure slots are pinned for the whole function: any
+    // pinned slot at or above `reg` must stay allocated so the open
+    // UpVar that points into it keeps reading the live value. Find the
+    // highest pinned slot in [reg, nextReg_) and keep everything up to
+    // and including it.
+    u16 keep = reg;
+    if (!regPinned_.empty()) {
+        u16 end = (u16)std::min<size_t>(regPinned_.size(), (size_t)nextReg_);
+        for (u16 i = reg; i < end; ++i) {
+            if (regPinned_[i]) keep = (u16)(i + 1);
+        }
+    }
+    if (enableConstFold) clearConsts(keep);
     // Phase 5.2: drop the per-register type info for regs that are now
     // free. Stack-map emitters scan [0..nextReg_), so anything beyond
     // the new nextReg_ is implicitly invisible -- but a future allocReg
     // could reuse a slot before its type is written, so we still null
     // the entries to keep the table honest.
-    if (reg < regTypes_.size()) {
-        for (size_t i = reg; i < regTypes_.size(); ++i) regTypes_[i] = nullptr;
+    if (keep < regTypes_.size()) {
+        for (size_t i = keep; i < regTypes_.size(); ++i) regTypes_[i] = nullptr;
     }
-    nextReg_ = reg;
+    nextReg_ = keep;
+}
+
+void CodeGen::pinReg(u16 reg) {
+    if (regPinned_.size() <= reg) regPinned_.resize((size_t)reg + 1, 0);
+    regPinned_[reg] = 1;
 }
 
 void CodeGen::setRegType(u16 reg, Type* t) {
@@ -176,10 +193,20 @@ void CodeGen::popScope() {
 }
 
 void CodeGen::declareLocal(const std::string& name, u16 reg, Type* type, bool isMutable) {
-    localScopes_.back()[name] = LocalVar{reg, type, isMutable};
+    localScopes_.back()[name] = LocalVar{reg, type, isMutable, /*isUpvar=*/false};
     // Phase 5.2: mirror the type into the per-register table so stack-map
     // emission can find this local without separately walking localScopes_.
     setRegType(reg, type);
+}
+
+void CodeGen::declareLocalUpvar(const std::string& name, u16 reg, Type* type) {
+    // The register holds an UpVar* (an Obj*). Record it as such so the
+    // stack-map walker treats it as a live reference. The captured value's
+    // type is preserved in LocalVar.type for read/write emission, but the
+    // *register* type at this slot is "some Obj*" -- anyType works because
+    // storesObjPtr returns true for it, which is all the marker checks.
+    localScopes_.back()[name] = LocalVar{reg, type, /*isMutable=*/true, /*isUpvar=*/true};
+    setRegType(reg, compiler_.anyType());
 }
 
 CodeGen::LocalVar* CodeGen::lookupLocal(const std::string& name) {
@@ -545,6 +572,7 @@ CodeBlock* CodeGen::generate(Program& program, bool isModule) {
     nextReg_ = 0;
     maxReg_ = 0;
     regTypes_.clear();
+    regPinned_.clear();
 
     pushScope();
 
@@ -605,6 +633,7 @@ CodeBlock* CodeGen::generateREPL(Program& program) {
     nextReg_ = 0;
     maxReg_ = 0;
     regTypes_.clear();
+    regPinned_.clear();
 
     pushScope();
 
@@ -699,23 +728,55 @@ void CodeGen::genNode(ASTNode* node) {
                     // Has captures: load captured values, then use op_make_lambda
                     // codeBlock_ already set on localLambdaType in genFnDecl
 
+                    // Apply byRef-aware capture layout. Same contract as
+                    // genLambdaExpr.
+                    {
+                        std::vector<bool> isUpvarFlags;
+                        isUpvarFlags.reserve(decl->captures.size());
+                        for (auto& cap : decl->captures) isUpvarFlags.push_back(cap.byReference);
+                        decl->localLambdaType->setCaptureLayout(isUpvarFlags);
+                    }
+
                     u16 captureBase = nextReg_;
+                    u16 totalCaptureWords = 0;
                     for (size_t i = 0; i < decl->captures.size(); ++i) {
-                        LocalVar* local = lookupLocal(decl->captures[i].name);
-                        if (local) {
-                            u16 captureReg = allocReg();
-                            if (local->reg != captureReg) {
-                                emitMov(captureReg, local->reg);
-                            }
-                        } else {
-                            error(decl->loc, "Cannot find captured variable '" + decl->captures[i].name + "'");
+                        auto& cap = decl->captures[i];
+                        LocalVar* local = lookupLocal(cap.name);
+                        if (!local) {
+                            error(decl->loc, "Cannot find captured variable '" + cap.name + "'");
                             allocReg();
+                            totalCaptureWords += 1;
+                            continue;
+                        }
+                        if (cap.byReference) {
+                            u16 captureReg = allocReg();
+                            if (local->isUpvar) {
+                                if (local->reg != captureReg) emitMov(captureReg, local->reg);
+                            } else {
+                                u16 sw = (u16)typeSlotWords(cap.type);
+                                u16 mask = computeWordGCMask(cap.type);
+                                emitOp(op_capture_upvar_local);
+                                emitRegs(captureReg, local->reg, sw);
+                                emitInt((i64)mask);
+                                emitPtr(cap.type);
+                            }
+                            totalCaptureWords += 1;
+                        } else {
+                            u16 sw = (u16)typeSlotWords(cap.type);
+                            u16 captureReg = allocRegs(sw);
+                            if (local->isUpvar) {
+                                emitOp(op_load_upvar_n);
+                                emitRegs(captureReg, local->reg, sw);
+                            } else if (local->reg != captureReg) {
+                                emitMoveN(captureReg, local->reg, sw);
+                            }
+                            totalCaptureWords += sw;
                         }
                     }
 
                     u16 dst = allocReg();
                     emitOp(op_make_lambda);
-                    emitRegs(dst, captureBase, (u16)decl->captures.size());
+                    emitRegs(dst, captureBase, totalCaptureWords);
                     emitPtr(decl->localLambdaType);
                     declareLocal(decl->name, dst, decl->localLambdaType, false);
                 }
@@ -872,6 +933,15 @@ void CodeGen::genVarDecl(VarDeclNode* decl) {
     }
 
     declareLocal(decl->name, reg, decl->resolvedType, true);
+
+    // If this `var` is captured by any nested closure, pin its slot for
+    // the whole function so freeRegsTo (called at end of every block
+    // scope) doesn't reuse it for unrelated temps. The pinning is what
+    // keeps the open UpVar's location_ valid until the function returns.
+    if (decl->capturedByClosure) {
+        u32 sw = typeSlotWords(decl->resolvedType);
+        for (u32 k = 0; k < sw; ++k) pinReg((u16)(reg + k));
+    }
 }
 
 void CodeGen::genConstDecl(ConstDeclNode* decl) {
@@ -930,6 +1000,7 @@ void CodeGen::genFnDecl(FnDeclNode* decl) {
     auto savedScopes = std::move(localScopes_);
     auto savedFixups = std::move(jumpFixups_);
     auto savedConsts = std::move(constRegs_);
+    auto savedPinned = std::move(regPinned_);
     inTailPosition_ = false;
     bool savedInFunctionBody = inFunctionBody_;
     inFunctionBody_ = true;
@@ -959,6 +1030,7 @@ void CodeGen::genFnDecl(FnDeclNode* decl) {
     nextReg_ = 0;
     maxReg_ = 0;
     regTypes_.clear();
+    regPinned_.clear();
     jumpFixups_.clear();
     constRegs_.clear();
 
@@ -971,11 +1043,19 @@ void CodeGen::genFnDecl(FnDeclNode* decl) {
         declareLocal(decl->params[i].name, paramReg, funcInfo.paramTypes[i], false);
     }
 
-    // Allocate registers for captured free variables (right after params, like lambdas)
+    // Allocate registers for captured free variables (right after params, like lambdas).
+    // Layout matches the outer capture-loading site above: byRef captures
+    // take 1 word (UpVar*); byValue captures take sizeWords words inline.
     if (decl->localLambdaType) {
         for (size_t i = 0; i < decl->captures.size(); ++i) {
-            u16 freeVarReg = allocReg();
-            declareLocal(decl->captures[i].name, freeVarReg, decl->captures[i].type, false);
+            auto& cap = decl->captures[i];
+            if (cap.byReference) {
+                u16 freeVarReg = allocReg();
+                declareLocalUpvar(cap.name, freeVarReg, cap.type);
+            } else {
+                u16 freeVarReg = allocSlot(cap.type);
+                declareLocal(cap.name, freeVarReg, cap.type, false);
+            }
         }
     }
 
@@ -1095,6 +1175,7 @@ void CodeGen::genFnDecl(FnDeclNode* decl) {
     localScopes_ = std::move(savedScopes);
     jumpFixups_ = std::move(savedFixups);
     constRegs_ = std::move(savedConsts);
+    regPinned_ = std::move(savedPinned);
 
     // Store the function's CodeBlock in the VM's globals
     compiler_.global(funcInfo.globalIndex).p = fnBlock;
@@ -1128,6 +1209,7 @@ void CodeGen::genMonoInstance(FuncInfo& monoInfo) {
     auto savedScopes = std::move(localScopes_);
     auto savedFixups = std::move(jumpFixups_);
     auto savedConsts = std::move(constRegs_);
+    auto savedPinned = std::move(regPinned_);
     inTailPosition_ = false;
     bool savedInFunctionBody = inFunctionBody_;
     inFunctionBody_ = true;
@@ -1156,6 +1238,7 @@ void CodeGen::genMonoInstance(FuncInfo& monoInfo) {
     nextReg_ = 0;
     maxReg_ = 0;
     regTypes_.clear();
+    regPinned_.clear();
     jumpFixups_.clear();
     constRegs_.clear();
 
@@ -1259,6 +1342,7 @@ void CodeGen::genMonoInstance(FuncInfo& monoInfo) {
     localScopes_ = std::move(savedScopes);
     jumpFixups_ = std::move(savedFixups);
     constRegs_ = std::move(savedConsts);
+    regPinned_ = std::move(savedPinned);
 
     // Restore source context
     sourceFilePath_ = savedFilePath;
@@ -2443,6 +2527,17 @@ void CodeGen::genAssignStmt(AssignStmtNode* stmt) {
     LocalVar* local = lookupLocal(stmt->target);
     if (local) {
         u32 nWords = typeSlotWords(local->type);
+        if (local->isUpvar) {
+            // Store through the UpVar's location_ pointer. Cannot use the
+            // arith->mov fuse path here -- the producer wrote into a real
+            // register slot, but the target slot is whatever location_
+            // points at, which the codegen has no static handle on.
+            u16 mask = computeWordGCMask(local->type);
+            emitOp(op_store_upvar_n);
+            emitRegs(local->reg, valReg, (u16)nWords);
+            emitInt((i64)mask);
+            return;
+        }
         // Fuse: if the RHS's last emission wrote into a fresh temp `valReg`,
         // patch its destination to be `local->reg` directly and drop the MOV.
         // Falls back to MOV when the RHS produced a borrowed reg (identifier)
@@ -3105,6 +3200,16 @@ u16 CodeGen::genIdentifier(IdentifierExpr* expr) {
     // Check local
     LocalVar* local = lookupLocal(expr->name);
     if (local) {
+        if (local->isUpvar) {
+            // The register holds an UpVar*. Emit op_load_upvar_n to copy
+            // sizeWords words from *upvar->location_ into a fresh slot
+            // sized to the captured value's type.
+            u16 sw = (u16)typeSlotWords(local->type);
+            u16 dst = allocSlot(local->type);
+            emitOp(op_load_upvar_n);
+            emitRegs(dst, local->reg, sw);
+            return dst;
+        }
         return local->reg;
     }
 
@@ -9635,6 +9740,7 @@ u16 CodeGen::genLambdaExpr(LambdaExprNode* expr) {
     auto savedScopes = std::move(localScopes_);
     auto savedFixups = std::move(jumpFixups_);
     auto savedConsts = std::move(constRegs_);
+    auto savedPinned = std::move(regPinned_);
     inTailPosition_ = false;
     bool savedInFunctionBody = inFunctionBody_;
     inFunctionBody_ = true;
@@ -9656,6 +9762,7 @@ u16 CodeGen::genLambdaExpr(LambdaExprNode* expr) {
     nextReg_ = 0;
     maxReg_ = 0;
     regTypes_.clear();
+    regPinned_.clear();
     jumpFixups_.clear();
     constRegs_.clear();
 
@@ -9667,10 +9774,20 @@ u16 CodeGen::genLambdaExpr(LambdaExprNode* expr) {
         declareLocal(expr->params[i].name, paramReg, lambdaType->argTypes_[i], false);
     }
 
-    // Allocate registers for free variables (right after params)
+    // Allocate registers for free variables (right after params). Layout:
+    //   byReference captures occupy 1 word (an UpVar* pointer);
+    //   byValue captures occupy sizeWords words inline.
+    // The order and widths must match the outer capture-loading sequence
+    // below so op_call_lambda's word-by-word free-var copy lines up.
     for (size_t i = 0; i < expr->captures.size(); ++i) {
-        u16 freeVarReg = allocReg();
-        declareLocal(expr->captures[i].name, freeVarReg, expr->captures[i].type, false);
+        auto& cap = expr->captures[i];
+        if (cap.byReference) {
+            u16 freeVarReg = allocReg();
+            declareLocalUpvar(cap.name, freeVarReg, cap.type);
+        } else {
+            u16 freeVarReg = allocSlot(cap.type);
+            declareLocal(cap.name, freeVarReg, cap.type, false);
+        }
     }
 
     // Generate body
@@ -9747,30 +9864,74 @@ u16 CodeGen::genLambdaExpr(LambdaExprNode* expr) {
     localScopes_ = std::move(savedScopes);
     jumpFixups_ = std::move(savedFixups);
     constRegs_ = std::move(savedConsts);
+    regPinned_ = std::move(savedPinned);
 
     // Set codeBlock_ on LambdaType so Lambda constructor can read it
     lambdaType->codeBlock_ = lambdaBlock;
 
-    // Load captured variable values into consecutive registers
+    // Load captured variable values into consecutive registers. Layout
+    // mirrors the inner body's free-var area: each byRef capture takes
+    // 1 word (an UpVar*); each byValue capture takes sizeWords words.
+    // The total word count goes into op_make_lambda so the Lambda's flex
+    // freeVars_ array is sized correctly. For byRef captures we synthesize
+    // an UpVar via op_capture_upvar_local (or, when the source local is
+    // itself an upvar inherited from an enclosing lambda, just copy its
+    // pointer with a 1-word MOV).
+    {
+        std::vector<bool> isUpvarFlags;
+        isUpvarFlags.reserve(expr->captures.size());
+        for (auto& cap : expr->captures) isUpvarFlags.push_back(cap.byReference);
+        lambdaType->setCaptureLayout(isUpvarFlags);
+    }
     u16 captureBase = nextReg_;
+    u16 totalCaptureWords = 0;
     for (size_t i = 0; i < expr->captures.size(); ++i) {
-        LocalVar* local = lookupLocal(expr->captures[i].name);
-        if (local) {
-            u16 captureReg = allocReg();
-            if (local->reg != captureReg) {
-                emitMov(captureReg, local->reg);
-            }
-        } else {
-            // Should not happen (globals are not captured), but handle gracefully
-            error(expr->loc, "Cannot find captured variable '" + expr->captures[i].name + "'");
+        auto& cap = expr->captures[i];
+        LocalVar* local = lookupLocal(cap.name);
+        if (!local) {
+            error(expr->loc, "Cannot find captured variable '" + cap.name + "'");
             allocReg();
+            totalCaptureWords += 1;
+            continue;
+        }
+        if (cap.byReference) {
+            u16 captureReg = allocReg();
+            if (local->isUpvar) {
+                // The captured variable is already an UpVar in the
+                // enclosing closure's free-var slot -- just copy the
+                // UpVar* pointer so all closures share the same cell.
+                if (local->reg != captureReg) emitMov(captureReg, local->reg);
+            } else {
+                // Fresh local capture: synthesize/get an UpVar pointing
+                // to the local's register slot.
+                u16 sw = (u16)typeSlotWords(cap.type);
+                u16 mask = computeWordGCMask(cap.type);
+                emitOp(op_capture_upvar_local);
+                emitRegs(captureReg, local->reg, sw);
+                emitInt((i64)mask);
+                emitPtr(cap.type);
+            }
+            totalCaptureWords += 1;
+        } else {
+            u16 sw = (u16)typeSlotWords(cap.type);
+            u16 captureReg = allocRegs(sw);
+            if (local->isUpvar) {
+                // Capturing the value of an enclosing upvar by snapshot
+                // (immutable inner reference to a mutable outer var).
+                // Read through the UpVar into the capture slot.
+                emitOp(op_load_upvar_n);
+                emitRegs(captureReg, local->reg, sw);
+            } else if (local->reg != captureReg) {
+                emitMoveN(captureReg, local->reg, sw);
+            }
+            totalCaptureWords += sw;
         }
     }
 
-    // Emit op_make_lambda: [op] [regs: Rd, captureBase, numFreeVars] [LambdaType*]
+    // Emit op_make_lambda: [op] [regs: Rd, captureBase, totalCaptureWords] [LambdaType*]
     u16 dst = allocReg();
     emitOp(op_make_lambda);
-    emitRegs(dst, captureBase, (u16)expr->captures.size());
+    emitRegs(dst, captureBase, totalCaptureWords);
     emitPtr(lambdaType);
 
     return dst;
@@ -9780,25 +9941,59 @@ u16 CodeGen::genLambdaExpr(LambdaExprNode* expr) {
 u16 CodeGen::genTemplateLambdaDef(LambdaExprNode* expr) {
     auto* tmplType = expr->templateLambdaType;
 
-    // Load captured variable values into consecutive registers
+    // Lock in the byRef-aware capture layout on the TemplateLambdaType so
+    // Lambda objects built from this template trace UpVar captures and
+    // multi-word value captures correctly.
+    {
+        std::vector<bool> isUpvarFlags;
+        isUpvarFlags.reserve(expr->captures.size());
+        for (auto& cap : expr->captures) isUpvarFlags.push_back(cap.byReference);
+        tmplType->setCaptureLayout(isUpvarFlags);
+    }
+
+    // Load captured variable values into consecutive registers (see the
+    // matching loop in genLambdaExpr for the layout contract).
     u16 captureBase = nextReg_;
+    u16 totalCaptureWords = 0;
     for (size_t i = 0; i < expr->captures.size(); ++i) {
-        LocalVar* local = lookupLocal(expr->captures[i].name);
-        if (local) {
-            u16 captureReg = allocReg();
-            if (local->reg != captureReg) {
-                emitMov(captureReg, local->reg);
-            }
-        } else {
-            error(expr->loc, "Cannot find captured variable '" + expr->captures[i].name + "'");
+        auto& cap = expr->captures[i];
+        LocalVar* local = lookupLocal(cap.name);
+        if (!local) {
+            error(expr->loc, "Cannot find captured variable '" + cap.name + "'");
             allocReg();
+            totalCaptureWords += 1;
+            continue;
+        }
+        if (cap.byReference) {
+            u16 captureReg = allocReg();
+            if (local->isUpvar) {
+                if (local->reg != captureReg) emitMov(captureReg, local->reg);
+            } else {
+                u16 sw = (u16)typeSlotWords(cap.type);
+                u16 mask = computeWordGCMask(cap.type);
+                emitOp(op_capture_upvar_local);
+                emitRegs(captureReg, local->reg, sw);
+                emitInt((i64)mask);
+                emitPtr(cap.type);
+            }
+            totalCaptureWords += 1;
+        } else {
+            u16 sw = (u16)typeSlotWords(cap.type);
+            u16 captureReg = allocRegs(sw);
+            if (local->isUpvar) {
+                emitOp(op_load_upvar_n);
+                emitRegs(captureReg, local->reg, sw);
+            } else if (local->reg != captureReg) {
+                emitMoveN(captureReg, local->reg, sw);
+            }
+            totalCaptureWords += sw;
         }
     }
 
     // Emit op_make_template_lambda with TemplateLambdaType (codeBlock_ will be null on Lambda)
     u16 dst = allocReg();
     emitOp(op_make_template_lambda);
-    emitRegs(dst, captureBase, (u16)expr->captures.size());
+    emitRegs(dst, captureBase, totalCaptureWords);
     emitPtr(tmplType);
 
     return dst;
@@ -9823,6 +10018,7 @@ void CodeGen::compileTemplateLambdaBody(LambdaExprNode* expr, LambdaType* lambda
     auto savedScopes = std::move(localScopes_);
     auto savedFixups = std::move(jumpFixups_);
     auto savedConsts = std::move(constRegs_);
+    auto savedPinned = std::move(regPinned_);
     inTailPosition_ = false;
 
     // Create new CodeBlock for this instantiation
@@ -9833,6 +10029,7 @@ void CodeGen::compileTemplateLambdaBody(LambdaExprNode* expr, LambdaType* lambda
     nextReg_ = 0;
     maxReg_ = 0;
     regTypes_.clear();
+    regPinned_.clear();
     jumpFixups_.clear();
     constRegs_.clear();
 
@@ -9844,10 +10041,20 @@ void CodeGen::compileTemplateLambdaBody(LambdaExprNode* expr, LambdaType* lambda
         declareLocal(expr->params[i].name, paramReg, lambdaType->argTypes_[i], false);
     }
 
-    // Allocate registers for free variables (right after params)
+    // Allocate registers for free variables (right after params). Layout:
+    //   byReference captures occupy 1 word (an UpVar* pointer);
+    //   byValue captures occupy sizeWords words inline.
+    // The order and widths must match the outer capture-loading sequence
+    // below so op_call_lambda's word-by-word free-var copy lines up.
     for (size_t i = 0; i < expr->captures.size(); ++i) {
-        u16 freeVarReg = allocReg();
-        declareLocal(expr->captures[i].name, freeVarReg, expr->captures[i].type, false);
+        auto& cap = expr->captures[i];
+        if (cap.byReference) {
+            u16 freeVarReg = allocReg();
+            declareLocalUpvar(cap.name, freeVarReg, cap.type);
+        } else {
+            u16 freeVarReg = allocSlot(cap.type);
+            declareLocal(cap.name, freeVarReg, cap.type, false);
+        }
     }
 
     // Generate body (same pattern as genLambdaExpr)
@@ -9908,6 +10115,7 @@ void CodeGen::compileTemplateLambdaBody(LambdaExprNode* expr, LambdaType* lambda
     localScopes_ = std::move(savedScopes);
     jumpFixups_ = std::move(savedFixups);
     constRegs_ = std::move(savedConsts);
+    regPinned_ = std::move(savedPinned);
 
     // Set codeBlock_ on the LambdaType
     lambdaType->codeBlock_ = lambdaBlock;

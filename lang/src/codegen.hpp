@@ -74,6 +74,14 @@ private:
     u16 nextReg_;
     u16 maxReg_;
 
+    // Per-register pin flag. Slots that hold a `var` captured by some
+    // closure must stay alive for the entire function lifetime so the
+    // closure's open UpVar (which points into the slot) keeps reading the
+    // live value, even after the enclosing block scope ends. freeRegsTo
+    // skips over pinned slots when reclaiming temps.
+    std::vector<u8> regPinned_;
+    void pinReg(u16 reg);  // sizes regPinned_ as needed
+
     // Phase 5.2 of tracing-GC project: per-register type table.
     // Indexed by register number, indexed up to nextReg_. Tracks the static
     // type stored in each register at the current emission point, so stack
@@ -90,6 +98,14 @@ private:
         u16 reg;
         Type* type;
         bool isMutable;
+        // True when this local refers to a Lua-style open upvalue: the
+        // register holds an UpVar* (1 word) and reads/writes against it
+        // must go through op_load_upvar_n / op_store_upvar_n instead of
+        // plain register access. Set only inside a closure body for a
+        // captured-by-reference `var`; never set in the declaring frame
+        // (where the var lives natively in its register block and reads/
+        // writes are plain ops).
+        bool isUpvar = false;
     };
     std::vector<std::unordered_map<std::string, LocalVar>> localScopes_;
 
@@ -102,6 +118,10 @@ private:
     void pushScope();
     void popScope();
     void declareLocal(const std::string& name, u16 reg, Type* type, bool isMutable);
+    // Variant that also marks the local as an open upvalue: the register
+    // holds an UpVar* and reads/writes against the local must go through
+    // op_load_upvar_n / op_store_upvar_n.
+    void declareLocalUpvar(const std::string& name, u16 reg, Type* type);
     LocalVar* lookupLocal(const std::string& name);
 
     // Const tracking helpers for mutation barriers.
@@ -323,6 +343,22 @@ private:
     // Number of slot words for type t (1 for atom/pointer, sizeWords_ for inline).
     static u32 typeSlotWords(Type const* t) {
         return (t && t->sizeWords_ > 0) ? t->sizeWords_ : 1;
+    }
+
+    // Compute the GC-mask bitmap (bit i set <=> word i of an inline value
+    // of `t` holds an Obj*). Used for UpVar payload tracing. Conservative
+    // for inline composites we haven't enumerated word-by-word yet: those
+    // are reported as all-zero (no Obj* words), which matches today's
+    // 1-word capture semantics. Atomic and 1-word object types both work
+    // exactly; Complex and Fraction return 0 (their two inline words are
+    // f64/i64 primitives, never Obj*).
+    static u16 computeWordGCMask(Type const* t) {
+        if (!t) return 0;
+        u16 sw = (u16)((t->sizeWords_ > 0) ? t->sizeWords_ : 1);
+        if (sw <= 1) {
+            return storesObjPtr(t) ? (u16)1 : (u16)0;
+        }
+        return 0;
     }
 
     // Phase 4g.5: emit a global store. For inline multi-word composites this
