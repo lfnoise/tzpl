@@ -45,7 +45,7 @@ time_one() {
     echo "$last_out"
 }
 
-printf "%-22s %12s %12s %10s %12s\n" "benchmark" "tzpl (s)" "lua (s)" "tzpl/lua" "match"
+printf "%-22s %12s %12s %10s %12s\n" "benchmark" "tzpl (s)" "lua (s)" "lua/tzpl" "match"
 printf "%-22s %12s %12s %10s %12s\n" "---------" "--------" "-------" "--------" "-----"
 for row in "${BENCHES[@]}"; do
     name=$(echo "$row" | awk '{print $1}')
@@ -81,6 +81,6 @@ for x, y in zip(a, b):
 print('yes' if ok else 'NO')
 ")
 
-    ratio=$(awk -v a="$tz_time" -v b="$lua_time" 'BEGIN { if (b == 0) print "inf"; else printf "%.2fx", a/b }')
+    ratio=$(awk -v a="$tz_time" -v b="$lua_time" 'BEGIN { if (a == 0) print "inf"; else printf "%.2fx", b/a }')
     printf "%-22s %12s %12s %10s %12s\n" "$name" "$tz_time" "$lua_time" "$ratio" "$matches"
 done
