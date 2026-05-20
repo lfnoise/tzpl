@@ -338,7 +338,12 @@ static bool isInlineEligibleField(Type const* t) {
         case Type::Repr::Inline:
             return true;
         case Type::Repr::Heap:
-            return t->couldBeInline_;
+            // A Heap-repr value is stored at runtime as a single Obj* pointer,
+            // exactly like Pointer-repr. So it is always inline-eligible as a
+            // 1-word field -- inlineFootprintWords returns its sizeWords_ (1).
+            // (couldBeInline_ stays relevant only for picking a flattened
+            // multi-word footprint, which is handled by inlineFootprintWords.)
+            return true;
     }
     return false;
 }
@@ -575,6 +580,16 @@ void classifyImpl(Type* t, std::unordered_set<Type*>& visiting) {
     // Cycle guard: if we're already classifying t, mark recursive and return.
     if (!visiting.insert(t).second) {
         t->isRecursive_ = true;
+        // A recursive type is always Heap-classified -- the NullablePtrEnum,
+        // Inline, and DiscriminantEnum paths all refuse recursion, so the
+        // final classification below will land on Heap regardless. Set it now
+        // so a parent composite whose inline-eligibility check runs mid-cycle
+        // sees the same single-Obj* footprint (1 word) this type ends up with,
+        // instead of the default-but-unfinalized state.
+        if (t->repr_ != Type::Repr::Heap) {
+            t->repr_ = Type::Repr::Heap;
+            t->sizeWords_ = 1;
+        }
         return;
     }
 

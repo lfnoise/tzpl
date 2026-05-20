@@ -3509,11 +3509,23 @@ void op_make_enum(VM& vm, Code* pc) {
 }
 
 // MAKE_ENUM_NODATA Rd, caseIdx (3 words: op, regs{dst, caseIdx}, EnumType*)
+//
+// A no-data (Void-payload) enum case is a constant: same type, same which_,
+// no mutable fields. Allocate one immortal Enum per (type, case) and return
+// it on every reference, instead of allocating a fresh object each time.
 void op_make_enum_nodata(VM& vm, Code* pc) {
     u16 dst = pc[1].regs[0], caseIdx = pc[1].regs[1];
     auto* enumType = static_cast<EnumType*>(pc[2].p);
-    auto* e = Enum::create(enumType, caseIdx);
-    vm.reg(dst).o = e;
+    if ((size_t)caseIdx >= enumType->noDataSingletons_.size()) {
+        enumType->noDataSingletons_.resize(enumType->cases_.size(), nullptr);
+    }
+    Obj*& slot = enumType->noDataSingletons_[caseIdx];
+    if (!slot) {
+        auto* e = Enum::create(enumType, caseIdx);
+        e->makeImmortal();  // shared constant; never collected
+        slot = e;
+    }
+    vm.reg(dst).o = slot;
     DISPATCH(3);
 }
 

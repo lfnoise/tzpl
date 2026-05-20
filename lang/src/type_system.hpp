@@ -317,6 +317,11 @@ public:
     SymbolPtr name_;
     NameTypePairVec cases_;
     Vec<FieldLayout> layout_;   // one entry per case payload (Phase 0/4c)
+    // Lazily-filled immortal singletons for no-data (Void-payload) cases of a
+    // Heap-repr enum. Indexed by case index; nullptr until first construction.
+    // Lets every reference to e.g. `Tree.leaf` share one heap object instead
+    // of allocating a fresh Enum per use.
+    Vec<Obj*> noDataSingletons_;
 
     EnumType(SymbolPtr name, NameTypePairVec cases);
 
