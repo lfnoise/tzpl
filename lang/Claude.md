@@ -112,7 +112,7 @@ cd lang/tests && bash run_tests.sh
 ## Language Design Principles
 
 - **Immutable by default**: `let` bindings are immutable. Use `var` for mutable locals, `Ref[T]` for mutable scalar/struct slots.
-- **Mutable containers**: `Array`, `Map`, and `Set` are heap objects passed by reference. They support in-place writes via `a[i] = x`, `m[k] = v`, and the bang-suffixed builtins `push!` / `pop!` (arrays) and `insert!` / `pop!` (sets). The plain `push` / `pop` / `add` / `put` etc. remain non-mutating and return new containers. Use `copy` for an independent shallow copy.
+- **Mutable containers**: `Array`, `Map`, and `Set` are heap objects passed by reference. They support in-place writes via `a[i] = x`, `m[k] = v`, and the bang-suffixed builtins `push!` / `pop!` (arrays), `put!` / `remove!` (maps), and `insert!` / `remove!` / `pop!` (sets). The plain `push` / `pop` / `add` / `put` / `remove` etc. remain non-mutating and return new containers. Use `copy` for an independent shallow copy.
 - **Trailing `!` on identifiers**: the `!` is part of the identifier &mdash; `foo` and `foo!` resolve to different functions. Idiomatically the `!` marks a mutating function, but the convention is not enforced.
 - **Source-to-sink inference**: Types propagate forward, not bidirectionally.
 - **Untagged values**: 64-bit `Word` union; types are statically known at compile time.

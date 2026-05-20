@@ -350,12 +350,12 @@
                 <li><a href="#collections">Collection Functions (Arrays &amp; Lists)</a> &mdash; length, map, filter, fold, scan, fold1, scan1, find, zip, enumerate, take, drop, takeWhile, dropWhile, stride, stutter, repeat, cat, join, flatten</li>
                 <li><a href="#array-only">Array-only Functions</a> &mdash; reverse, push, pop, push!, pop!, sort, muss, copy</li>
                 <li><a href="#list-only">List-only Functions</a> &mdash; head, tail, cons, isNil, notNil, cyc, ncyc, hang, iter</li>
-                <li><a href="#map-functions">Map Functions</a> &mdash; get, put, remove, contains, keys, values, pairs, merge, length, copy, <code>m[k] = v</code></li>
+                <li><a href="#map-functions">Map Functions</a> &mdash; get, put, put!, remove, remove!, contains, keys, values, pairs, merge, mergeIfAbsent, mergeIfPresent, length, copy, <code>m[k] = v</code></li>
                 <li><a href="#option-functions">Option Functions</a> &mdash; unwrap, unwrapOr, isSome, isNone</li>
                 <li><a href="#ref-functions">Reference Functions</a> &mdash; ref, deref, setref</li>
                 <li><a href="#any-functions">Any Functions</a> &mdash; any, toAnyArray, as(Type)</li>
                 <li><a href="#coroutine-functions">Coroutine Functions</a> &mdash; next, yield, yieldAll, toList</li>
-                <li><a href="#set-functions">Set Functions</a> &mdash; add, remove, insert!, pop!, contains, union, intersection, difference, toArray, length, copy</li>
+                <li><a href="#set-functions">Set Functions</a> &mdash; add, remove, remove!, insert!, pop!, contains, union, intersection, difference, toArray, length, copy</li>
                 <li><a href="#hashing">Hashing &amp; Equality</a> &mdash; hash, ==, !=</li>
                 <li><a href="#enum-functions">Enum Functions</a> &mdash; ordinal, tag</li>
                 <li><a href="#operators">Built-in Operators</a> &mdash; arithmetic, comparison, bitwise, logical, string</li>
@@ -1448,7 +1448,7 @@ iter(0, fn(x Int) Int { x + 1 }) take(5)
         <!-- ============================================================ -->
         <div class="section" id="map-functions">
             <h2>Map Functions</h2>
-            <p>Functions that operate on <code>[K: V]</code> values. Maps are heap-allocated hash maps passed by reference. The functions documented here (<code>put</code>, <code>remove</code>, <code>merge</code>, &hellip;) all return new maps and leave their inputs untouched. For in-place writes use <code>m[key] = value</code> &mdash; this inserts the entry if missing, or updates it if present. Map literals use <code>[key: value]</code> syntax.</p>
+            <p>Functions that operate on <code>[K: V]</code> values. Maps are heap-allocated hash maps passed by reference. The functions without a trailing <code>!</code> (<code>put</code>, <code>remove</code>, <code>merge</code>, &hellip;) return new maps and leave their inputs untouched. The bang-suffixed variants <code>put!</code> and <code>remove!</code> mutate in place; <code>m[key] = value</code> is equivalent to <code>put!</code>. Map literals use <code>[key: value]</code> syntax.</p>
 
             <h3><code>get(map, key)</code> / <code>get(map, key, default)</code></h3>
             <p>Retrieves the value for a key. The two-argument form returns <code>Option&lt;V&gt;</code> &mdash; <code>Option.some(value)</code> if found, <code>Option.none</code> if missing. The three-argument form returns the value directly, using the provided default if the key is missing.</p>
@@ -1485,11 +1485,29 @@ m println;                       <span class="cmt">-- [a: 99, b: 2]</span></code
 let m2 = m put("b", 2);
 m2 println;                      <span class="cmt">-- [a: 1, b: 2]</span></code></pre>
 
+            <h3><code>put!(map, key, value)</code></h3>
+            <p>Adds or updates the key-value pair <em>in place</em> and returns the same map (for chaining). Equivalent to <code>m[key] = value</code>.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>put!([K: V], K, V) &rarr; [K: V]</code></td><td>Add or update a key-value pair in place. Returns the same map.</td></tr>
+            </table>
+            <pre><code>var m = ["a": 1];
+m put!("b", 2);
+m put!("a", 99) put!("c", 3);    <span class="cmt">-- chains; mutates m each time</span>
+m length println;                <span class="cmt">-- 3</span></code></pre>
+
             <h3><code>remove(map, key)</code></h3>
             <p>Returns a new map with the given key removed.</p>
             <table>
                 <tr><th>Signature</th><th>Description</th></tr>
                 <tr><td><code>remove([K: V], K) &rarr; [K: V]</code></td><td>Remove a key from the map.</td></tr>
+            </table>
+
+            <h3><code>remove!(map, key)</code></h3>
+            <p>Removes the given key <em>in place</em> and returns the same map (for chaining). Removing an absent key is a no-op.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>remove!([K: V], K) &rarr; [K: V]</code></td><td>Remove a key in place. Returns the same map.</td></tr>
             </table>
 
             <h3><code>contains(map, key)</code></h3>
@@ -1537,6 +1555,26 @@ m pairs println;                 <span class="cmt">-- [(a, 1), (b, 2), (c, 3)]</
             <pre><code>let a = ["x": 1, "y": 2];
 let b = ["y": 99, "z": 3];
 merge(a, b) println;             <span class="cmt">-- [x: 1, y: 99, z: 3]</span></code></pre>
+
+            <h3><code>mergeIfAbsent(map1, map2)</code></h3>
+            <p>Returns a new map: a copy of <code>map1</code> with entries from <code>map2</code> added only for keys that are <em>not</em> already in <code>map1</code>. Existing keys keep <code>map1</code>'s values. Both inputs are unchanged.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>mergeIfAbsent([K: V], [K: V]) &rarr; [K: V]</code></td><td>Add only the keys missing from the first map.</td></tr>
+            </table>
+            <pre><code>let a = ["x": 1, "y": 2];
+let b = ["y": 99, "z": 3];
+mergeIfAbsent(a, b) println;     <span class="cmt">-- [x: 1, y: 2, z: 3]</span></code></pre>
+
+            <h3><code>mergeIfPresent(map1, map2)</code></h3>
+            <p>Returns a new map: a copy of <code>map1</code> with values overwritten from <code>map2</code> only for keys that <em>already</em> exist in <code>map1</code>. Keys unique to <code>map2</code> are ignored. Both inputs are unchanged.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>mergeIfPresent([K: V], [K: V]) &rarr; [K: V]</code></td><td>Overwrite only the keys shared with the first map.</td></tr>
+            </table>
+            <pre><code>let a = ["x": 1, "y": 2];
+let b = ["y": 99, "z": 3];
+mergeIfPresent(a, b) println;    <span class="cmt">-- [x: 1, y: 99]</span></code></pre>
 
             <h3><code>length(map)</code></h3>
             <p>Returns the number of key-value pairs in the map.</p>
@@ -1799,7 +1837,7 @@ fibs() toList collect(6) println;   <span class="cmt">-- [0, 1, 1, 2, 3, 5]</spa
         <!-- ============================================================ -->
         <div class="section" id="set-functions">
             <h2>Set Functions</h2>
-            <p>Functions that operate on <code>Set&lt;T&gt;</code> values. Sets are heap-allocated hash sets passed by reference. The functions without a trailing <code>!</code> (<code>add</code>, <code>remove</code>, <code>union</code>, &hellip;) return new sets and leave their inputs untouched. <code>insert!</code> and <code>pop!</code> mutate in place. Sets are constructed with <code>Set(elem1, elem2, ...)</code>.</p>
+            <p>Functions that operate on <code>Set&lt;T&gt;</code> values. Sets are heap-allocated hash sets passed by reference. The functions without a trailing <code>!</code> (<code>add</code>, <code>remove</code>, <code>union</code>, &hellip;) return new sets and leave their inputs untouched. <code>insert!</code>, <code>remove!</code>, and <code>pop!</code> mutate in place. Sets are constructed with <code>Set(elem1, elem2, ...)</code>.</p>
 
             <h3><code>add(set, element)</code></h3>
             <p>Returns a new set with the element added. The input set is unchanged.</p>
@@ -1813,6 +1851,13 @@ fibs() toList collect(6) println;   <span class="cmt">-- [0, 1, 1, 2, 3, 5]</spa
             <table>
                 <tr><th>Signature</th><th>Description</th></tr>
                 <tr><td><code>remove(Set&lt;T&gt;, T) &rarr; Set&lt;T&gt;</code></td><td>Remove an element from the set (returns a new set).</td></tr>
+            </table>
+
+            <h3><code>remove!(set, element)</code></h3>
+            <p>Mutating remove. Removes the element from <em>this</em> set in place; a no-op if it was not present. Returns the same set, allowing chained calls.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>remove!(Set&lt;T&gt;, T) &rarr; Set&lt;T&gt;</code></td><td>Remove an element in place. Returns the same set.</td></tr>
             </table>
 
             <h3><code>insert!(set, element)</code></h3>

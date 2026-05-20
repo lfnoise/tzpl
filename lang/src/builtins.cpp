@@ -662,6 +662,16 @@ static void builtin_put_map(VM& vm, u16 dst, u16, u16 ab) {
     vm.reg(dst).o = result;
 }
 
+// put!: [K:V], K, V -> [K:V]  -- mutating; returns the same map for chaining
+static void builtin_put_bang_map(VM& vm, u16 dst, u16, u16 ab) {
+    auto* map = static_cast<MapObj*>(vm.reg(ab).o);
+    u32 kS = map->keyStride_;
+    Word const* key = &vm.reg((u16)(ab + 1));
+    Word const* val = &vm.reg((u16)(ab + 1 + kS));
+    map->insertOrUpdate(key, val);
+    vm.reg(dst).o = map;
+}
+
 // remove: [K:V], K -> [K:V]
 static void builtin_remove_map(VM& vm, u16 dst, u16, u16 ab) {
     auto* map = static_cast<MapObj*>(vm.reg(ab).o);
@@ -671,6 +681,14 @@ static void builtin_remove_map(VM& vm, u16 dst, u16, u16 ab) {
     Word const* key = &vm.reg((u16)(ab + 1));
     result->eraseEntry(key);
     vm.reg(dst).o = result;
+}
+
+// remove!: [K:V], K -> [K:V]  -- mutating; returns the same map for chaining
+static void builtin_remove_bang_map(VM& vm, u16 dst, u16, u16 ab) {
+    auto* map = static_cast<MapObj*>(vm.reg(ab).o);
+    Word const* key = &vm.reg((u16)(ab + 1));
+    map->eraseEntry(key);
+    vm.reg(dst).o = map;
 }
 
 // contains: [K:V], K -> Bool
@@ -837,8 +855,45 @@ static void builtin_merge_map(VM& vm, u16 dst, u16, u16 ab) {
     vm.reg(dst).o = result;
 }
 
+// mergeIfAbsent: [K:V], [K:V] -> [K:V]  -- add b's entries to a copy of a only
+// for keys not already in a; existing keys keep a's values.
+static void builtin_merge_if_absent_map(VM& vm, u16 dst, u16, u16 ab) {
+    auto* a = static_cast<MapObj*>(vm.reg(ab).o);
+    auto* b = static_cast<MapObj*>(vm.reg(ab + 1).o);
+    auto* mt = static_cast<MapType*>(a->type_);
+    auto* result = new MapObj(mt);
+    result->copyFrom(*a);
+    u32 bCap = b->capacity();
+    for (u32 i = 0; i < bCap; ++i) {
+        if (b->slotState(i) != MapObj::SlotOccupied) continue;
+        Word const* k = b->slotKey(i);
+        if (result->findSlot(k) != result->capacity()) continue;
+        result->insertOrUpdate(k, b->slotVal(i));
+    }
+    vm.reg(dst).o = result;
+}
+
+// mergeIfPresent: [K:V], [K:V] -> [K:V]  -- overwrite values in a copy of a only
+// for keys that already exist in a; keys unique to b are ignored.
+static void builtin_merge_if_present_map(VM& vm, u16 dst, u16, u16 ab) {
+    auto* a = static_cast<MapObj*>(vm.reg(ab).o);
+    auto* b = static_cast<MapObj*>(vm.reg(ab + 1).o);
+    auto* mt = static_cast<MapType*>(a->type_);
+    auto* result = new MapObj(mt);
+    result->copyFrom(*a);
+    u32 bCap = b->capacity();
+    for (u32 i = 0; i < bCap; ++i) {
+        if (b->slotState(i) != MapObj::SlotOccupied) continue;
+        Word const* k = b->slotKey(i);
+        if (result->findSlot(k) == result->capacity()) continue;
+        result->insertOrUpdate(k, b->slotVal(i));
+    }
+    vm.reg(dst).o = result;
+}
+
 // Forward declarations for set builtins used in shared resolvers
 static void builtin_remove_set(VM& vm, u16 dst, u16, u16 ab);
+static void builtin_remove_bang_set(VM& vm, u16 dst, u16, u16 ab);
 static void builtin_contains_set(VM& vm, u16 dst, u16, u16 ab);
 
 // Map resolvers
@@ -869,6 +924,16 @@ static bool resolve_put(Compiler& compiler, const std::vector<Type*>& args,
     pt = {mt, mt->keyType_, mt->valueType_}; rt = mt; cf = builtin_put_map; return true;
 }
 
+static bool resolve_put_bang(Compiler& compiler, const std::vector<Type*>& args,
+    std::vector<Type*>& pt, Type*& rt, CFun& cf) {
+    (void)compiler;
+    if (args.size() != 3) return false;
+    auto* mt = dynamic_cast<MapType*>(args[0]);
+    if (!mt) return false;
+    if (args[1] != mt->keyType_ || args[2] != mt->valueType_) return false;
+    pt = {mt, mt->keyType_, mt->valueType_}; rt = mt; cf = builtin_put_bang_map; return true;
+}
+
 static bool resolve_remove(Compiler& compiler, const std::vector<Type*>& args,
     std::vector<Type*>& pt, Type*& rt, CFun& cf) {
     if (args.size() != 2) return false;
@@ -879,6 +944,21 @@ static bool resolve_remove(Compiler& compiler, const std::vector<Type*>& args,
     if (auto* st = dynamic_cast<SetType*>(args[0])) {
         if (args[1] != st->elemType_) return false;
         pt = {st, st->elemType_}; rt = st; cf = builtin_remove_set; return true;
+    }
+    return false;
+}
+
+static bool resolve_remove_bang(Compiler& compiler, const std::vector<Type*>& args,
+    std::vector<Type*>& pt, Type*& rt, CFun& cf) {
+    (void)compiler;
+    if (args.size() != 2) return false;
+    if (auto* mt = dynamic_cast<MapType*>(args[0])) {
+        if (args[1] != mt->keyType_) return false;
+        pt = {mt, mt->keyType_}; rt = mt; cf = builtin_remove_bang_map; return true;
+    }
+    if (auto* st = dynamic_cast<SetType*>(args[0])) {
+        if (args[1] != st->elemType_) return false;
+        pt = {st, st->elemType_}; rt = st; cf = builtin_remove_bang_set; return true;
     }
     return false;
 }
@@ -920,6 +1000,26 @@ static bool resolve_merge(Compiler& compiler, const std::vector<Type*>& args,
     if (!mt) return false;
     if (args[1] != mt) return false;
     pt = {mt, mt}; rt = mt; cf = builtin_merge_map; return true;
+}
+
+static bool resolve_merge_if_absent(Compiler& compiler, const std::vector<Type*>& args,
+    std::vector<Type*>& pt, Type*& rt, CFun& cf) {
+    (void)compiler;
+    if (args.size() != 2) return false;
+    auto* mt = dynamic_cast<MapType*>(args[0]);
+    if (!mt) return false;
+    if (args[1] != mt) return false;
+    pt = {mt, mt}; rt = mt; cf = builtin_merge_if_absent_map; return true;
+}
+
+static bool resolve_merge_if_present(Compiler& compiler, const std::vector<Type*>& args,
+    std::vector<Type*>& pt, Type*& rt, CFun& cf) {
+    (void)compiler;
+    if (args.size() != 2) return false;
+    auto* mt = dynamic_cast<MapType*>(args[0]);
+    if (!mt) return false;
+    if (args[1] != mt) return false;
+    pt = {mt, mt}; rt = mt; cf = builtin_merge_if_present_map; return true;
 }
 
 // pairs: [K:V] -> Array[(K, V)]
@@ -1482,6 +1582,14 @@ static void builtin_remove_set(VM& vm, u16 dst, u16, u16 ab) {
     Word const* elem = &vm.reg((u16)(ab + 1));
     result->eraseElem(elem);
     vm.reg(dst).o = result;
+}
+
+// remove!: Set<T>, T -> Set<T>  -- mutating; returns the same set for chaining
+static void builtin_remove_bang_set(VM& vm, u16 dst, u16, u16 ab) {
+    auto* set = static_cast<SetObj*>(vm.reg(ab).o);
+    Word const* elem = &vm.reg((u16)(ab + 1));
+    set->eraseElem(elem);
+    vm.reg(dst).o = set;
 }
 
 // contains: Set<T>, T -> Bool
@@ -2484,12 +2592,16 @@ void registerBuiltinFunctions(Compiler& compiler,
     // composites) so the builtins read args as multi-word slots.
     registerTemplate(compiler, functions, "get",          resolve_get_map,    /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
     registerTemplate(compiler, functions, "put",          resolve_put,        /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "put!",         resolve_put_bang,   /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
     registerTemplate(compiler, functions, "remove",       resolve_remove,     /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "remove!",      resolve_remove_bang, /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
     registerTemplate(compiler, functions, "contains",     resolve_contains,   /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
     registerTemplate(compiler, functions, "keys",         resolve_keys,       /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
     registerTemplate(compiler, functions, "values",       resolve_values,     /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
     registerTemplate(compiler, functions, "pairs",        resolve_pairs,      /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
     registerTemplate(compiler, functions, "merge",        resolve_merge,      /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "mergeIfAbsent",  resolve_merge_if_absent,  /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "mergeIfPresent", resolve_merge_if_present, /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
 
     // --- Option builtins ---
     // Phase 4g.6: Inline Option dispatches to *_inline variants that read
