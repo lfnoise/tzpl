@@ -4,7 +4,7 @@ This document describes the internal architecture of the Tzopilotl compiler and 
 
 ## Overview
 
-The system is a statically-typed, real-time-safe interpreter designed to run within an audio thread. It compiles source code through a four-phase pipeline — Lex, Parse, Type Check, Code Gen — producing register-based bytecode that executes on a direct-threaded virtual machine. Memory is reclaimed by an incremental tri-color SATB tracing garbage collector driven by per-PC stack maps; mark and sweep are interleaved with execution under a per-step deadline budget so audio-thread pauses stay bounded.
+The system is a statically-typed, real-time-safe interpreter designed to run within an audio thread. It compiles source code through a four-phase pipeline — Lex, Parse, Type Check, Code Gen — producing register-based bytecode that executes on a direct-threaded virtual machine. Memory is reclaimed by an incremental tri-color snapshot-at-the-beginning (SATB) tracing garbage collector driven by per-PC stack maps; mark and sweep are interleaved with execution under a per-step deadline budget so audio-thread pauses stay bounded.
 
 The pipeline is orchestrated by the `Compiler` class (`compiler.cpp`):
 
@@ -848,7 +848,7 @@ class GCObj {
 
 The header is 24 bytes including the vtable pointer. Compile-time constants (types, immortal strings, the global symbol table) are flagged `immortal_ = true` and are never visited or freed. There is no per-object home-allocator pointer: each VM owns exactly one TLSF pool, the thread-local `rt::gCurrentAllocator` names it at every allocation and deallocation site, and sweep (the only deletion path) always runs on the VM thread, so the deleting and allocating thread's allocator pointers always agree.
 
-**Tri-color invariant.** Each non-immortal object is exactly one of White (unmarked, candidate for sweep), Gray (marked, children not yet scanned), or Black (marked, children scanned). The collector preserves the snapshot-at-the-beginning (SATB) invariant: any object that was reachable when the cycle started survives the cycle, even if the mutator overwrites the only reference to it before the marker visits it.
+**Tri-color invariant.** Each non-immortal object is exactly one of White (unmarked, candidate for sweep), Gray (marked, children not yet scanned), or Black (marked, children scanned). The collector preserves the SATB (snapshot-at-the-beginning) invariant: any object that was reachable when the cycle started survives the cycle, even if the mutator overwrites the only reference to it before the marker visits it.
 
 **Phases.**
 
