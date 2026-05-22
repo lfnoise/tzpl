@@ -350,7 +350,7 @@
                 <li><a href="#collections">Collection Functions (Arrays &amp; Lists)</a> &mdash; length, map, filter, fold, scan, fold1, scan1, find, zip, enumerate, take, drop, takeWhile, dropWhile, stride, stutter, repeat, cat, join, flatten</li>
                 <li><a href="#array-only">Array-only Functions</a> &mdash; reverse, push, pop, push!, pop!, sort, muss, copy</li>
                 <li><a href="#list-only">List-only Functions</a> &mdash; head, tail, cons, isNil, notNil, cyc, ncyc, hang, iter</li>
-                <li><a href="#map-functions">Map Functions</a> &mdash; get, put, put!, remove, remove!, contains, keys, values, pairs, merge, mergeIfAbsent, mergeIfPresent, length, copy, <code>m[k] = v</code></li>
+                <li><a href="#map-functions">Map Functions</a> &mdash; get, getOrDefault, getOrElse, put, put!, remove, remove!, contains, keys, values, pairs, merge, mergeIfAbsent, mergeIfPresent, length, copy, <code>m[k] = v</code></li>
                 <li><a href="#option-functions">Option Functions</a> &mdash; unwrap, unwrapOr, isSome, isNone</li>
                 <li><a href="#ref-functions">Reference Functions</a> &mdash; ref, deref, setref</li>
                 <li><a href="#any-functions">Any Functions</a> &mdash; any, toAnyArray, as(Type)</li>
@@ -1467,6 +1467,26 @@ m get("z", 99) println;          <span class="cmt">-- 99 (not found, returns def
 m["z"] println;                   <span class="cmt">-- Option&lt;Int&gt;.none</span>
 m["b"] unwrap println;            <span class="cmt">-- 2</span>
 m["z"] unwrapOr(99) println;      <span class="cmt">-- 99</span></code></pre>
+
+            <h3><code>getOrDefault(map, key, default)</code></h3>
+            <p>Returns the value for the key, or <code>default</code> if the key is missing. Identical in behavior to the three-argument <code>get</code>; provided as a more descriptive name. The default is evaluated eagerly &mdash; if computing it is expensive or should only happen on a miss, use <code>getOrElse</code> instead.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>getOrDefault([K: V], K, V) &rarr; V</code></td><td>Value for key, or the given default if missing.</td></tr>
+            </table>
+            <pre><code>let m = ["a": 1, "b": 2];
+m getOrDefault("a", 0) println;  <span class="cmt">-- 1</span>
+m getOrDefault("z", 0) println;  <span class="cmt">-- 0</span></code></pre>
+
+            <h3><code>getOrElse(map, key, fallback)</code></h3>
+            <p>Returns the value for the key, or the result of calling <code>fallback</code> with the key if it is missing. The fallback is a function <code>(K) &rarr; V</code> and runs <em>only on a miss</em> (lazy), so use it when the default depends on the key or is costly to compute.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>getOrElse([K: V], K, (K) &rarr; V) &rarr; V</code></td><td>Value for key, or <code>fallback(key)</code> if missing (fallback called lazily).</td></tr>
+            </table>
+            <pre><code>let m = ["a": 1, "b": 2];
+m getOrElse("b", fn(k String) Int { 0 }) println;        <span class="cmt">-- 2 (fallback not called)</span>
+m getOrElse("missing", fn(k String) Int { k length }) println;  <span class="cmt">-- 7</span></code></pre>
 
             <h3>Indexed assignment <code>m[key] = value</code></h3>
             <p>Insert-or-update on a map in place. If the key already exists, its value is replaced; otherwise a new entry is added.</p>

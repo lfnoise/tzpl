@@ -649,6 +649,31 @@ static void builtin_get_map_default(VM& vm, u16 dst, u16, u16 ab) {
     }
 }
 
+// getOrElse: [K:V], K, (K) -> V  ->  V
+// Returns the mapped value if the key is present; otherwise calls the fallback
+// with the key and returns its result. The fallback runs only on a miss (lazy),
+// unlike getOrDefault which always evaluates its default argument.
+static void builtin_get_or_else_map(VM& vm, u16 dst, u16, u16 ab) {
+    auto* map = static_cast<MapObj*>(vm.reg(ab).o);
+    auto* mt = static_cast<MapType*>(map->type_);
+    u32 kS = map->keyStride_;
+    u32 vS = map->valueStride_;
+    Word const* keyPtr = &vm.reg((u16)(ab + 1));
+    u32 slot = map->findSlot(keyPtr);
+    if (slot != map->capacity()) {
+        Word const* v = map->slotVal(slot);
+        for (u32 i = 0; i < vS; ++i) vm.reg((u16)(dst + i)) = v[i];
+        return;
+    }
+    // Miss: invoke the fallback lambda with the key. The result lands native
+    // (multi-word) at sb, mirroring fold's accumulator handling.
+    auto* fn = static_cast<Callable*>(vm.reg((u16)(ab + 1 + kS)).o);
+    u16 sb = vm.currentCodeBlock()->numRegs;
+    placeLambdaArgSlot(vm, sb, keyPtr, mt->keyType_);
+    callOneArg(vm, fn, sb);
+    for (u32 i = 0; i < vS; ++i) vm.reg((u16)(dst + i)) = vm.reg((u16)(sb + i));
+}
+
 // put: [K:V], K, V -> [K:V]
 static void builtin_put_map(VM& vm, u16 dst, u16, u16 ab) {
     auto* map = static_cast<MapObj*>(vm.reg(ab).o);
@@ -913,6 +938,34 @@ static bool resolve_get_map(Compiler& compiler, const std::vector<Type*>& args,
         pt = {mt, mt->keyType_, mt->valueType_}; rt = mt->valueType_; cf = builtin_get_map_default; return true;
     }
     return false;
+}
+
+// getOrDefault: [K:V], K, V -> V  -- eager default; same behavior as get/3.
+static bool resolve_get_or_default(Compiler& compiler, const std::vector<Type*>& args,
+    std::vector<Type*>& pt, Type*& rt, CFun& cf) {
+    (void)compiler;
+    if (args.size() != 3) return false;
+    auto* mt = dynamic_cast<MapType*>(args[0]);
+    if (!mt) return false;
+    if (args[1] != mt->keyType_ || args[2] != mt->valueType_) return false;
+    pt = {mt, mt->keyType_, mt->valueType_}; rt = mt->valueType_;
+    cf = builtin_get_map_default; return true;
+}
+
+// getOrElse: [K:V], K, (K) -> V  ->  V  -- lazy fallback computed from the key.
+static bool resolve_get_or_else(Compiler& compiler, const std::vector<Type*>& args,
+    std::vector<Type*>& pt, Type*& rt, CFun& cf) {
+    (void)compiler;
+    if (args.size() != 3) return false;
+    auto* mt = dynamic_cast<MapType*>(args[0]);
+    if (!mt) return false;
+    if (args[1] != mt->keyType_) return false;
+    auto* ft = dynamic_cast<FunctionType*>(args[2]);
+    if (!ft) return false;
+    if (ft->argTypes_.size() != 1 || ft->argTypes_[0] != mt->keyType_) return false;
+    if (ft->returnType_ != mt->valueType_) return false;
+    pt = {mt, mt->keyType_, ft}; rt = mt->valueType_;
+    cf = builtin_get_or_else_map; return true;
 }
 
 static bool resolve_put(Compiler& compiler, const std::vector<Type*>& args,
@@ -2591,6 +2644,8 @@ void registerBuiltinFunctions(Compiler& compiler,
     // Phase 4g.11: Map keys/values are stored natively (multi-word for inline
     // composites) so the builtins read args as multi-word slots.
     registerTemplate(compiler, functions, "get",          resolve_get_map,    /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "getOrDefault", resolve_get_or_default, /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "getOrElse",    resolve_get_or_else,    /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
     registerTemplate(compiler, functions, "put",          resolve_put,        /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
     registerTemplate(compiler, functions, "put!",         resolve_put_bang,   /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
     registerTemplate(compiler, functions, "remove",       resolve_remove,     /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
