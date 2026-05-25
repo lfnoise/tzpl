@@ -525,6 +525,30 @@ Constraints are checked during template instantiation. When a function declares 
 
 Constraint names can also appear directly in parameter type position, desugaring into fresh type parameters with implicit where-clauses: `fn abs(x Numeric) Numeric` desugars to `fn abs<T>(x T) T where T: Numeric`.
 
+**Resolution semantics and coherence.** Constraints are *predicate-based*, not
+*dictionary-based*: a constraint is a yes/no test used to accept or reject a template during
+overload resolution, never a vtable threaded through generic code. This is the C++-concepts /
+Go-interface model rather than the Rust-trait / Haskell-typeclass model, so Tzopilotl needs no
+orphan rule or global coherence rule. Concretely:
+
+- A constrained generic's body is **re-type-checked at each instantiation** by
+  `recheckTemplateBody` (`type_checker_overload.cpp`), which activates `ImportedModuleScopeGuard`
+  (`type_checker.cpp`) to merge the *defining* module's functions on top of the importer's scope.
+  Overloaded calls inside the body (e.g. `+` in `fn double<T: Addable>(x T) T = x + x`) therefore
+  resolve against *definition-module ∪ importer* scope.
+- If that merged scope makes two conflicting same-signature overloads visible, `resolveOverload`
+  reports an **"Ambiguous overload"** error. The conflict is *detected*, never silently resolved
+  one way or the other.
+- Monomorphizations are cached per `TypeChecker` (i.e. per module) under the key
+  `{name, typeArgs, declNode}`, so there is no single shared instance that two modules could
+  disagree about. Combined with untagged values (which carry no implementation pointer), the
+  Rust-style failure where a value built with one instance is later used with a different,
+  incompatible one cannot arise.
+
+Two same-named constraints declared in *different* modules are a hard error when both are imported
+into one program — see `mergeImportedConstraint` (`type_checker_decls.cpp`). Diamond re-imports of
+a single constraint (which share one `declNode`) are allowed.
+
 ### Auto-Mapping Analysis
 
 Auto-mapping is analyzed during type checking and annotated on AST nodes for code generation. Two forms exist:

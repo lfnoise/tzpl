@@ -1,0 +1,5 @@
+Type error [tests/errors/constraint_conflict.x:4:1]
+  |
+4 | import constraint_conflict_b.*;
+  | ^----^
+  Conflicting definitions of constraint 'Foo' imported from different modules

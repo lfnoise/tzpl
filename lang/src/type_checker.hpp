@@ -385,6 +385,12 @@ private:
     void checkNode(ASTNode* node);
     void checkBlock(BlockStmt* block);
     void checkImportDecl(ImportDeclNode* decl);
+    // Register an imported constraint, erroring on a cross-module name clash.
+    // Diamond re-imports of one constraint share a declNode and are allowed;
+    // two distinct declarations of the same name are a hard error.
+    void mergeImportedConstraint(std::string const& localName,
+                                 ConstraintInfo const& cinfo,
+                                 SourceRange loc, bool isReExport);
     void checkLetDecl(LetDeclNode* decl);
     void checkVarDecl(VarDeclNode* decl);
     void checkConstDecl(ConstDeclNode* decl);

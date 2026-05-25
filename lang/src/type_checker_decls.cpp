@@ -124,6 +124,25 @@ static bool bodyHasReturnStmt(ASTNode* node) {
     }
 }
 
+void TypeChecker::mergeImportedConstraint(std::string const& localName,
+                                          ConstraintInfo const& cinfo,
+                                          SourceRange loc, bool isReExport) {
+    // A constraint imported via two different declarations (distinct declNodes)
+    // would otherwise silently clobber the first. Diamond re-imports of the
+    // same origin constraint share one declNode and are allowed through.
+    auto it = constraints_.find(localName);
+    if (it != constraints_.end()
+        && it->second.declNode != nullptr
+        && cinfo.declNode != nullptr
+        && it->second.declNode != cinfo.declNode) {
+        error(loc, "Conflicting definitions of constraint '" + localName +
+                   "' imported from different modules");
+        return;  // keep the first definition; do not overwrite
+    }
+    constraints_[localName] = cinfo;
+    importedTypeReExport_[localName] = isReExport;
+}
+
 void TypeChecker::checkImportDecl(ImportDeclNode* decl) {
     if (!moduleCompiler_) {
         error(decl->loc, "Import statements require module compilation support");
@@ -267,8 +286,8 @@ void TypeChecker::checkImportDecl(ImportDeclNode* decl) {
                         importedTypeReExport_[name] = decl->isReExport;
                         break;
                     case ExportEntry::ConstraintT:
-                        constraints_[name] = entry.constraintInfo;
-                        importedTypeReExport_[name] = decl->isReExport;
+                        mergeImportedConstraint(name, entry.constraintInfo,
+                                                decl->loc, decl->isReExport);
                         break;
                     case ExportEntry::ModuleAlias:
                         // A re-exported whole-module alias. Register it so
@@ -355,8 +374,8 @@ void TypeChecker::checkImportDecl(ImportDeclNode* decl) {
                         importedTypeReExport_[localName] = decl->isReExport;
                         break;
                     case ExportEntry::ConstraintT:
-                        constraints_[localName] = entry.constraintInfo;
-                        importedTypeReExport_[localName] = decl->isReExport;
+                        mergeImportedConstraint(localName, entry.constraintInfo,
+                                                decl->loc, decl->isReExport);
                         break;
                     case ExportEntry::ModuleAlias:
                         // See Wildcard case above for rationale.
