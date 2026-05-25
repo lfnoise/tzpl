@@ -29,6 +29,7 @@
 #include "value.hpp"
 #include "type_checker.hpp"
 #include "opcodes.hpp"
+#include "function_ref.hpp"
 #include <unordered_map>
 
 namespace ts {
@@ -170,10 +171,35 @@ private:
     u16 genExplicitImplicitAutoMapCall(CallExpr_* expr);
     u16 genCartesianCall(CallExpr_* expr);
     u16 genDeepMapCall(CallExpr_* expr, int depth);
+    // Per-argument descriptor for emitMappedCallElem: either extract element
+    // `srcReg[idxReg]` of array `arrType` (mapped), or broadcast the scalar/value
+    // in `srcReg` (mapped == false).
+    struct MappedCallArg {
+        bool mapped = false;
+        u16 srcReg = 0;
+        u16 idxReg = 0;
+        ArrayType* arrType = nullptr;
+    };
+    // Emit one call of an auto-mapped function: populate the callee arg window at
+    // nextReg_ from `args` (handling inline-composite slot widths, boxing at the
+    // builtin boundary, and parameter-type promotion), pack variadics, emit the
+    // call, and return the result register. Shared by the plain, deep, and
+    // Cartesian array-call loops; `returnT` is the call's return type.
+    u16 emitMappedCallElem(CallExpr_* expr, const FuncInfo* funcInfo, Type* returnT,
+                           std::vector<MappedCallArg> const& args);
     u16 genAutoMapBinaryOp(BinaryOpExpr* expr);
     u16 genAutoMapBinaryOpList(BinaryOpExpr* expr);
     u16 genCartesianBinaryOp(BinaryOpExpr* expr);
     u16 genDeepMapBinaryOp(BinaryOpExpr* expr, int depth);
+    // Emit the per-element computation of an auto-mapped binary op given the two
+    // operand element registers/types and the result element type: dispatches to
+    // an operator-overload call, composite-numeric op, comparison, or scalar
+    // arith, returning the register holding the result. Shared by the plain,
+    // deep, and Cartesian binary-op auto-map loops.
+    u16 emitBinaryOpElem(BinaryOpExpr* expr,
+                         u16 leftElemReg, Type* leftElemType,
+                         u16 rightElemReg, Type* rightElemType,
+                         Type* scalarResultType);
     u16 genArrayLiteral(ArrayLiteralExpr* expr);
     u16 genAutoMapArrayLiteral(ArrayLiteralExpr* expr);
     u16 genCartesianArrayLiteral(ArrayLiteralExpr* expr);
@@ -197,6 +223,34 @@ private:
     u16 genAutoMapFieldArray(FieldExpr_* expr);
     u16 genAutoMapFieldList(FieldExpr_* expr);
     u16 genAutoMapFieldDeep(FieldExpr_* expr, int depth);
+
+    // Auto-map loop scaffolds. Each emits the standard per-element loop and
+    // calls `body` once to emit the body that maps one source element (in
+    // `elemReg`, sized for `elemType`) to one result element, returning the
+    // register holding it. The array form builds a counted loop into a freshly
+    // allocated result array; the list form traverses, conses (boxing inline
+    // multiword results, which list nodes cannot hold inline), then reverses.
+    u16 emitArrayMapLoop(u16 srcReg, ArrayType* srcType, ArrayType* dstType,
+                         function_ref<u16(u16 elemReg, Type* elemType)> body);
+    // Emit the length of `arrays[0]`, or the running min when several arrays are
+    // mapped in parallel, returning the register that holds it.
+    u16 emitMinArrayLength(std::vector<std::pair<u16, ArrayType*>> const& arrays);
+    // Emit a bare counted loop `for i in 0..lenReg`, calling `body(i)` each
+    // iteration for its side effects only (no result array). Used by the Void
+    // auto-map paths. `body` owns any call/element register window above
+    // nextReg_, which already sits past the loop's bookkeeping registers.
+    void emitCountedLoop(u16 lenReg, function_ref<void(u16 iReg)> body);
+    // Like emitCountedLoop, but allocates a fresh result array of `dstType` and
+    // stores `body(i)` into element i, returning the result array register.
+    u16 emitArrayBuildLoop(u16 lenReg, ArrayType* dstType,
+                           function_ref<u16(u16 iReg)> body);
+    u16 emitListMapLoop(u16 srcReg, ListType* srcType, ListType* dstType,
+                        function_ref<u16(u16 elemReg, Type* elemType)> body);
+    // Emit the in-place reversal of an accumulated list, returning a new list reg.
+    u16 emitListReverse(u16 listReg, ListType* listType);
+    // Extract the field named by `expr` from one element (struct or tuple) held
+    // in `elemReg`, returning the register holding it (0 if not found).
+    u16 emitMapFieldGet(FieldExpr_* expr, u16 elemReg, Type* elemType);
     u16 genEnumConstruct(ASTNode* node);
     u16 genLambdaExpr(LambdaExprNode* expr);
     u16 genTemplateLambdaDef(LambdaExprNode* expr);

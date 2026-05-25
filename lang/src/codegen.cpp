@@ -4586,6 +4586,92 @@ u16 CodeGen::emitVariadicPack(CallExpr_* expr, u16 callArgBase, u16 argc) {
     return (u16)expr->variadicPackStart + 1;
 }
 
+u16 CodeGen::emitBinaryOpElem(BinaryOpExpr* expr,
+                              u16 leftElemReg, Type* leftElemType,
+                              u16 rightElemReg, Type* rightElemType,
+                              Type* scalarResultType) {
+    auto needsBoxAuto = [&](Type* t) {
+        return t && t->repr_ == ts::Type::Repr::Inline
+            && t != compiler_.complexType()
+            && t != compiler_.fractionType();
+    };
+
+    if (expr->resolvedFuncGlobalIndex >= 0) {
+        // Operator overload: place each operand at its multi-word slot offset for
+        // non-builtin calls; for builtins box Inline composite operands first so
+        // the legacy 1-Word ABI sees a heap pointer.
+        u16 argBase = nextReg_;
+        u32 lWords = emitArgPlacementForCall(argBase, leftElemReg, leftElemType,
+                                             expr->isBuiltinCall, expr->builtinAcceptsInlineArgs);
+        u16 rDst = (u16)(argBase + lWords);
+        u32 rWords = emitArgPlacementForCall(rDst, rightElemReg, rightElemType,
+                                             expr->isBuiltinCall, expr->builtinAcceptsInlineArgs);
+        u16 next = (u16)(rDst + rWords);
+        if (nextReg_ < next) { nextReg_ = next; if (nextReg_ > maxReg_) maxReg_ = nextReg_; }
+        bool builtinReturnsInline = expr->isBuiltinCall && !expr->builtinAcceptsInlineArgs
+                                     && needsBoxAuto(scalarResultType);
+        u16 elemResultReg = builtinReturnsInline ? allocReg() : allocSlot(scalarResultType);
+        clearArgRegTypes(argBase, elemResultReg);
+        emitOp(expr->isBuiltinCall ? op_call_primitive : op_call);
+        emitRegs(elemResultReg, 2, argBase);
+        emitInt(expr->resolvedFuncGlobalIndex);
+        emitReturnPcStackMap(elemResultReg, scalarResultType);
+        if (builtinReturnsInline) {
+            elemResultReg = emitUnboxIfInline(elemResultReg, scalarResultType);
+        }
+        return elemResultReg;
+    }
+
+    bool isCmp = (expr->op >= BinaryOpExpr::Eq && expr->op <= BinaryOpExpr::Ge);
+    if (isCmp) {
+        Type* cmpType = compiler_.intType();
+        if (leftElemType == compiler_.complexType() || rightElemType == compiler_.complexType())
+            cmpType = compiler_.complexType();
+        else if (leftElemType == compiler_.floatType() || rightElemType == compiler_.floatType())
+            cmpType = compiler_.floatType();
+        else if (leftElemType == compiler_.fractionType() || rightElemType == compiler_.fractionType())
+            cmpType = compiler_.fractionType();
+        leftElemReg = ensureType(leftElemReg, leftElemType, cmpType);
+        rightElemReg = ensureType(rightElemReg, rightElemType, cmpType);
+        u16 elemResultReg = allocReg();
+        emitOp(getCmpOp(expr->op, cmpType));
+        emitRegs(elemResultReg, leftElemReg, rightElemReg);
+        return elemResultReg;
+    }
+
+    if (isCompositeNumeric(scalarResultType)) {
+        // Composite numeric per-element (e.g. Tuple + Scalar). Phase 4g.8: when
+        // the result is Inline, use the inline composite arith op so the
+        // multi-word result lives in the destination slot and can be copied
+        // straight into the InlineArray. Phase 4g.16: heap-result composite arith
+        // reads Inline operands natively via base pointers; no boxing needed.
+        if (needsBoxAuto(scalarResultType)) {
+            u16 elemResultReg = allocSlot(scalarResultType);
+            emitOp(getCompositeArithOpInline(expr->op));
+            emitRegs(elemResultReg, leftElemReg, rightElemReg);
+            emitPtr(scalarResultType);
+            emitPtr(leftElemType);
+            emitPtr(rightElemType);
+            return elemResultReg;
+        }
+        u16 elemResultReg = allocReg();
+        emitOp(getCompositeArithOp(expr->op));
+        emitRegs(elemResultReg, leftElemReg, rightElemReg);
+        emitPtr(scalarResultType);
+        emitPtr(leftElemType);
+        emitPtr(rightElemType);
+        return elemResultReg;
+    }
+
+    // Scalar numeric op
+    leftElemReg = ensureType(leftElemReg, leftElemType, scalarResultType);
+    rightElemReg = ensureType(rightElemReg, rightElemType, scalarResultType);
+    u16 elemResultReg = allocReg();
+    emitOp(getArithOp(expr->op, scalarResultType));
+    emitRegs(elemResultReg, leftElemReg, rightElemReg);
+    return elemResultReg;
+}
+
 u16 CodeGen::genAutoMapBinaryOp(BinaryOpExpr* expr) {
     // --- Phase 1: Evaluate both operands ---
     u16 leftReg = genExpr(static_cast<Expr*>(expr->left.get()));
@@ -4611,182 +4697,50 @@ u16 CodeGen::genAutoMapBinaryOp(BinaryOpExpr* expr) {
     }
 
     // --- Phase 2: Compute min length of @-tagged arrays ---
-    u16 minLenReg = 0;
-    bool firstAutoMap = true;
+    std::vector<std::pair<u16, ArrayType*>> mappedArrays;
+    if (expr->leftAutoMap)
+        mappedArrays.push_back({leftReg, dynamic_cast<ArrayType*>(leftType)});
+    if (expr->rightAutoMap)
+        mappedArrays.push_back({rightReg, dynamic_cast<ArrayType*>(rightType)});
+    u16 minLenReg = emitMinArrayLength(mappedArrays);
 
-    auto computeLen = [&](u16 arrReg, Type* arrType) {
-        auto* at = dynamic_cast<ArrayType*>(arrType);
-        u16 lenReg = allocReg();
-        emitOp(opArrayLengthFor(at->elemType_));
-        emitRegs(lenReg, arrReg);
-        emitPtr(at);
-        if (firstAutoMap) {
-            minLenReg = lenReg;
-            firstAutoMap = false;
-        } else {
-            u16 cmpReg = allocReg();
-            emitOp(op_cmp_lt_int);
-            emitRegs(cmpReg, lenReg, minLenReg);
-            u32 skipJump = emitJump(op_jump_if_false, cmpReg);
-            emitMov(minLenReg, lenReg);
-            patchJump(skipJump);
-        }
-    };
-
-    if (expr->leftAutoMap) computeLen(leftReg, leftType);
-    if (expr->rightAutoMap) computeLen(rightReg, rightType);
-
-    // --- Phase 3: Allocate result array ---
+    // --- Phase 3: Build the result array, one element per source index ---
     auto* resultArrayType = dynamic_cast<ArrayType*>(expr->resolvedType);
-    u16 resultArrReg = allocReg();
-    emitOp(op_array_alloc);
-    emitRegs(resultArrReg, minLenReg);
-    emitPtr(resultArrayType);
 
-    // --- Phase 4: Loop counter setup ---
-    u16 iReg = allocReg();
-    emitOp(op_load_int_const);
-    emitRegs(iReg);
-    emitInt(0);
+    return emitArrayBuildLoop(minLenReg, resultArrayType, [&](u16 iReg) -> u16 {
+        // Phase 4g.8: Inline elements occupy sizeWords_ consecutive slots, so
+        // op_array_get_dyn writes into a slot wide enough for them.
+        auto allocElemSlot = [&](Type* t) {
+            u16 nw = typeSlotWords(t);
+            u16 r = nextReg_;
+            nextReg_ = (u16)(nextReg_ + nw);
+            if (nextReg_ > maxReg_) maxReg_ = nextReg_;
+            return r;
+        };
 
-    u16 oneReg = allocReg();
-    emitOp(op_load_int_const);
-    emitRegs(oneReg);
-    emitInt(1);
-
-    u16 condReg = allocReg();
-
-    // --- Phase 5: Loop start ---
-    u32 loopStartIdx = (u32)currentBlock_->code.size();
-    emitOp(op_cmp_lt_int);
-    emitRegs(condReg, iReg, minLenReg);
-    u32 exitJump = emitJump(op_jump_if_false, condReg);
-
-    // --- Phase 6: Extract elements ---
-    auto needsBoxAuto = [&](Type* t) {
-        return t && t->repr_ == ts::Type::Repr::Inline
-            && t != compiler_.complexType()
-            && t != compiler_.fractionType();
-    };
-    // Phase 4g.8: InlineArray returns multi-word inline slots directly via
-    // op_array_get_dyn -- no unboxing needed.
-    auto allocElemSlot = [&](Type* t) {
-        u16 nw = typeSlotWords(t);
-        u16 r = nextReg_;
-        nextReg_ = (u16)(nextReg_ + nw);
-        if (nextReg_ > maxReg_) maxReg_ = nextReg_;
-        return r;
-    };
-    u16 leftElemReg = leftReg;
-    if (expr->leftAutoMap) {
-        auto* arrType = dynamic_cast<ArrayType*>(leftType);
-        leftElemReg = allocElemSlot(leftElemType);
-        emitOp(opArrayGetDynFor(arrType->elemType_));
-        emitRegs(leftElemReg, leftReg, iReg);
-        emitPtr(arrType);
-    }
-
-    u16 rightElemReg = rightReg;
-    if (expr->rightAutoMap) {
-        auto* arrType = dynamic_cast<ArrayType*>(rightType);
-        rightElemReg = allocElemSlot(rightElemType);
-        emitOp(opArrayGetDynFor(arrType->elemType_));
-        emitRegs(rightElemReg, rightReg, iReg);
-        emitPtr(arrType);
-    }
-
-    // --- Phase 7: Compute per-element result ---
-    Type* scalarResultType = resultArrayType->elemType_;
-    u16 elemResultReg;
-
-    if (expr->resolvedFuncGlobalIndex >= 0) {
-        // Operator overload: call the function. Phase 4g.2: place each
-        // operand at its multi-word slot offset for non-builtin calls; for
-        // builtins box Inline composite operands first.
-        u16 argBase = nextReg_;
-        u32 lWords = emitArgPlacementForCall(argBase, leftElemReg, leftElemType, expr->isBuiltinCall, expr->builtinAcceptsInlineArgs);
-        u16 rDst = (u16)(argBase + lWords);
-        u32 rWords = emitArgPlacementForCall(rDst, rightElemReg, rightElemType, expr->isBuiltinCall, expr->builtinAcceptsInlineArgs);
-        u16 next = (u16)(rDst + rWords);
-        if (nextReg_ < next) { nextReg_ = next; if (nextReg_ > maxReg_) maxReg_ = nextReg_; }
-        bool builtinReturnsInline = expr->isBuiltinCall && needsBoxAuto(scalarResultType);
-        elemResultReg = builtinReturnsInline ? allocReg() : allocSlot(scalarResultType);
-        clearArgRegTypes(argBase, elemResultReg);
-        emitOp(expr->isBuiltinCall ? op_call_primitive : op_call);
-        emitRegs(elemResultReg, 2, argBase);
-        emitInt(expr->resolvedFuncGlobalIndex);
-        emitReturnPcStackMap(elemResultReg, scalarResultType);
-        if (builtinReturnsInline) {
-            elemResultReg = emitUnboxIfInline(elemResultReg, scalarResultType);
+        // Extract elements from each auto-mapped operand.
+        u16 leftElemReg = leftReg;
+        if (expr->leftAutoMap) {
+            auto* arrType = dynamic_cast<ArrayType*>(leftType);
+            leftElemReg = allocElemSlot(leftElemType);
+            emitOp(opArrayGetDynFor(arrType->elemType_));
+            emitRegs(leftElemReg, leftReg, iReg);
+            emitPtr(arrType);
         }
-    } else if (isCompositeNumeric(scalarResultType)) {
-        // Composite numeric per-element (e.g. Tuple + Scalar). Phase 4g.8:
-        // when the result is Inline, use the inline composite arith op so
-        // the multi-word result lives in the destination slot and can be
-        // copied straight into the InlineArray.
-        if (needsBoxAuto(scalarResultType)) {
-            elemResultReg = allocSlot(scalarResultType);
-            emitOp(getCompositeArithOpInline(expr->op));
-            emitRegs(elemResultReg, leftElemReg, rightElemReg);
-            emitPtr(scalarResultType);
-            emitPtr(leftElemType);
-            emitPtr(rightElemType);
-        } else {
-            // Phase 4g.16: heap-result composite arith reads Inline operands
-            // natively via base pointers; no operand boxing needed here.
-            elemResultReg = allocReg();
-            emitOp(getCompositeArithOp(expr->op));
-            emitRegs(elemResultReg, leftElemReg, rightElemReg);
-            emitPtr(scalarResultType);
-            emitPtr(leftElemType);
-            emitPtr(rightElemType);
+
+        u16 rightElemReg = rightReg;
+        if (expr->rightAutoMap) {
+            auto* arrType = dynamic_cast<ArrayType*>(rightType);
+            rightElemReg = allocElemSlot(rightElemType);
+            emitOp(opArrayGetDynFor(arrType->elemType_));
+            emitRegs(rightElemReg, rightReg, iReg);
+            emitPtr(arrType);
         }
-        emitOp(opArraySetFor(resultArrayType->elemType_));
-        emitRegs(resultArrReg, iReg, elemResultReg);
-        emitPtr(resultArrayType);
-        emitOp(op_add_int);
-        emitRegs(iReg, iReg, oneReg);
-        emitJumpTo(loopStartIdx);
-        patchJump(exitJump);
-        return resultArrReg;
-    } else {
-        // Scalar numeric op
-        bool isCmp = (expr->op >= BinaryOpExpr::Eq && expr->op <= BinaryOpExpr::Ge);
-        if (isCmp) {
-            Type* cmpType = compiler_.intType();
-            if (leftElemType == compiler_.complexType() || rightElemType == compiler_.complexType())
-                cmpType = compiler_.complexType();
-            else if (leftElemType == compiler_.floatType() || rightElemType == compiler_.floatType())
-                cmpType = compiler_.floatType();
-            else if (leftElemType == compiler_.fractionType() || rightElemType == compiler_.fractionType())
-                cmpType = compiler_.fractionType();
-            leftElemReg = ensureType(leftElemReg, leftElemType, cmpType);
-            rightElemReg = ensureType(rightElemReg, rightElemType, cmpType);
-            elemResultReg = allocReg();
-            emitOp(getCmpOp(expr->op, cmpType));
-            emitRegs(elemResultReg, leftElemReg, rightElemReg);
-        } else {
-            leftElemReg = ensureType(leftElemReg, leftElemType, scalarResultType);
-            rightElemReg = ensureType(rightElemReg, rightElemType, scalarResultType);
-            elemResultReg = allocReg();
-            emitOp(getArithOp(expr->op, scalarResultType));
-            emitRegs(elemResultReg, leftElemReg, rightElemReg);
-        }
-    }
 
-    // --- Phase 8: Store in result array ---
-    // Phase 4g.8: InlineArray takes the multi-word inline element directly.
-    emitOp(opArraySetFor(resultArrayType->elemType_));
-    emitRegs(resultArrReg, iReg, elemResultReg);
-    emitPtr(resultArrayType);
-
-    // --- Phase 9: Increment and loop ---
-    emitOp(op_add_int);
-    emitRegs(iReg, iReg, oneReg);
-    emitJumpTo(loopStartIdx);
-    patchJump(exitJump);
-
-    return resultArrReg;
+        return emitBinaryOpElem(expr, leftElemReg, leftElemType,
+                                rightElemReg, rightElemType,
+                                resultArrayType->elemType_);
+    });
 }
 
 u16 CodeGen::genAutoMapBinaryOpList(BinaryOpExpr* expr) {
@@ -5117,11 +5071,6 @@ u16 CodeGen::genCartesianBinaryOp(BinaryOpExpr* expr) {
     // Phase 4g.19: Inline composite elements (e.g. Tuple(Int,Int)) occupy
     // multiple register words. allocReg() reserves only one Word and would
     // overlap left/right slots, so use allocElemSlot for inline composites.
-    auto needsBoxAuto = [&](Type* t) {
-        return t && t->repr_ == ts::Type::Repr::Inline
-            && t != compiler_.complexType()
-            && t != compiler_.fractionType();
-    };
     auto allocElemSlot = [&](Type* t) {
         u16 nw = typeSlotWords(t);
         u16 r = nextReg_;
@@ -5162,72 +5111,8 @@ u16 CodeGen::genCartesianBinaryOp(BinaryOpExpr* expr) {
     Type* scalarResultType = (maxCartesian >= 2 && innerResultType)
         ? innerResultType->elemType_
         : outerResultType->elemType_;
-    u16 elemResultReg;
-
-    if (expr->resolvedFuncGlobalIndex >= 0) {
-        // Operator overload call. Place each operand at its multi-word slot
-        // offset for non-builtin calls; for builtins box Inline composite
-        // operands first so the legacy 1-Word ABI sees a heap pointer.
-        u16 argBase = nextReg_;
-        u32 lWords = emitArgPlacementForCall(argBase, leftElemReg, leftElemType,
-                                             expr->isBuiltinCall, expr->builtinAcceptsInlineArgs);
-        u16 rDst = (u16)(argBase + lWords);
-        u32 rWords = emitArgPlacementForCall(rDst, rightElemReg, rightElemType,
-                                             expr->isBuiltinCall, expr->builtinAcceptsInlineArgs);
-        u16 next = (u16)(rDst + rWords);
-        if (nextReg_ < next) { nextReg_ = next; if (nextReg_ > maxReg_) maxReg_ = nextReg_; }
-        bool builtinReturnsInline = expr->isBuiltinCall && !expr->builtinAcceptsInlineArgs
-                                     && needsBoxAuto(scalarResultType);
-        elemResultReg = builtinReturnsInline ? allocReg() : allocSlot(scalarResultType);
-        clearArgRegTypes(argBase, elemResultReg);
-        emitOp(expr->isBuiltinCall ? op_call_primitive : op_call);
-        emitRegs(elemResultReg, 2, argBase);
-        emitInt(expr->resolvedFuncGlobalIndex);
-        emitReturnPcStackMap(elemResultReg, scalarResultType);
-        if (builtinReturnsInline) {
-            elemResultReg = emitUnboxIfInline(elemResultReg, scalarResultType);
-        }
-    } else {
-        bool isCmp = (expr->op >= BinaryOpExpr::Eq && expr->op <= BinaryOpExpr::Ge);
-        if (isCmp) {
-            Type* cmpType = compiler_.intType();
-            if (leftElemType == compiler_.complexType() || rightElemType == compiler_.complexType())
-                cmpType = compiler_.complexType();
-            else if (leftElemType == compiler_.floatType() || rightElemType == compiler_.floatType())
-                cmpType = compiler_.floatType();
-            else if (leftElemType == compiler_.fractionType() || rightElemType == compiler_.fractionType())
-                cmpType = compiler_.fractionType();
-            leftElemReg = ensureType(leftElemReg, leftElemType, cmpType);
-            rightElemReg = ensureType(rightElemReg, rightElemType, cmpType);
-            elemResultReg = allocReg();
-            emitOp(getCmpOp(expr->op, cmpType));
-            emitRegs(elemResultReg, leftElemReg, rightElemReg);
-        } else if (isCompositeNumeric(scalarResultType)) {
-            if (needsBoxAuto(scalarResultType)) {
-                // Inline-result composite arith writes directly into the
-                // multi-word destination slot (no heap allocation per elem).
-                elemResultReg = allocSlot(scalarResultType);
-                emitOp(getCompositeArithOpInline(expr->op));
-                emitRegs(elemResultReg, leftElemReg, rightElemReg);
-                emitPtr(scalarResultType);
-                emitPtr(leftElemType);
-                emitPtr(rightElemType);
-            } else {
-                elemResultReg = allocReg();
-                emitOp(getCompositeArithOp(expr->op));
-                emitRegs(elemResultReg, leftElemReg, rightElemReg);
-                emitPtr(scalarResultType);
-                emitPtr(leftElemType);
-                emitPtr(rightElemType);
-            }
-        } else {
-            leftElemReg = ensureType(leftElemReg, leftElemType, scalarResultType);
-            rightElemReg = ensureType(rightElemReg, rightElemType, scalarResultType);
-            elemResultReg = allocReg();
-            emitOp(getArithOp(expr->op, scalarResultType));
-            emitRegs(elemResultReg, leftElemReg, rightElemReg);
-        }
-    }
+    u16 elemResultReg = emitBinaryOpElem(expr, leftElemReg, leftElemType,
+                                         rightElemReg, rightElemType, scalarResultType);
 
     // Store and close loops
     if (maxCartesian >= 2) {
@@ -5428,7 +5313,9 @@ u16 CodeGen::genDeepMapBinaryOp(BinaryOpExpr* expr, int depth) {
                 curArgType = dynamic_cast<ArrayType*>(curArgType)->elemType_;
         }
         auto* arrType = dynamic_cast<ArrayType*>(curArgType);
-        leftElemReg = allocReg();
+        // Inline composite elements span sizeWords_ slots; allocSlot reserves a
+        // wide enough region (allocReg would alias the next register).
+        leftElemReg = allocSlot(leftElemType);
         emitOp(opArrayGetDynFor(arrType->elemType_));
         emitRegs(leftElemReg, currentLeftReg, innerIReg);
         emitPtr(arrType);
@@ -5442,7 +5329,7 @@ u16 CodeGen::genDeepMapBinaryOp(BinaryOpExpr* expr, int depth) {
                 curArgType = dynamic_cast<ArrayType*>(curArgType)->elemType_;
         }
         auto* arrType = dynamic_cast<ArrayType*>(curArgType);
-        rightElemReg = allocReg();
+        rightElemReg = allocSlot(rightElemType);
         emitOp(opArrayGetDynFor(arrType->elemType_));
         emitRegs(rightElemReg, currentRightReg, innerIReg);
         emitPtr(arrType);
@@ -5450,50 +5337,8 @@ u16 CodeGen::genDeepMapBinaryOp(BinaryOpExpr* expr, int depth) {
 
     // Per-element op
     Type* scalarResultType = innerResultArrayType->elemType_;
-    u16 elemResultReg;
-
-    if (expr->resolvedFuncGlobalIndex >= 0) {
-        u16 argBase = nextReg_;
-        if (leftElemReg != argBase) { emitMov(argBase, leftElemReg); }
-        if (nextReg_ <= argBase) { nextReg_ = argBase + 1; if (nextReg_ > maxReg_) maxReg_ = nextReg_; }
-        if (rightElemReg != argBase + 1) { emitMov(argBase + 1, rightElemReg); }
-        if (nextReg_ <= argBase + 1) { nextReg_ = argBase + 2; if (nextReg_ > maxReg_) maxReg_ = nextReg_; }
-        elemResultReg = allocReg();
-        clearArgRegTypes(argBase, elemResultReg);
-        emitOp(expr->isBuiltinCall ? op_call_primitive : op_call);
-        emitRegs(elemResultReg, 2, argBase);
-        emitInt(expr->resolvedFuncGlobalIndex);
-        emitReturnPcStackMap(elemResultReg, scalarResultType);
-    } else {
-        bool isCmp = (expr->op >= BinaryOpExpr::Eq && expr->op <= BinaryOpExpr::Ge);
-        if (isCmp) {
-            Type* cmpType = compiler_.intType();
-            if (leftElemType == compiler_.complexType() || rightElemType == compiler_.complexType())
-                cmpType = compiler_.complexType();
-            else if (leftElemType == compiler_.floatType() || rightElemType == compiler_.floatType())
-                cmpType = compiler_.floatType();
-            else if (leftElemType == compiler_.fractionType() || rightElemType == compiler_.fractionType())
-                cmpType = compiler_.fractionType();
-            leftElemReg = ensureType(leftElemReg, leftElemType, cmpType);
-            rightElemReg = ensureType(rightElemReg, rightElemType, cmpType);
-            elemResultReg = allocReg();
-            emitOp(getCmpOp(expr->op, cmpType));
-            emitRegs(elemResultReg, leftElemReg, rightElemReg);
-        } else if (isCompositeNumeric(scalarResultType)) {
-            elemResultReg = allocReg();
-            emitOp(getCompositeArithOp(expr->op));
-            emitRegs(elemResultReg, leftElemReg, rightElemReg);
-            emitPtr(scalarResultType);
-            emitPtr(leftElemType);
-            emitPtr(rightElemType);
-        } else {
-            leftElemReg = ensureType(leftElemReg, leftElemType, scalarResultType);
-            rightElemReg = ensureType(rightElemReg, rightElemType, scalarResultType);
-            elemResultReg = allocReg();
-            emitOp(getArithOp(expr->op, scalarResultType));
-            emitRegs(elemResultReg, leftElemReg, rightElemReg);
-        }
-    }
+    u16 elemResultReg = emitBinaryOpElem(expr, leftElemReg, leftElemType,
+                                         rightElemReg, rightElemType, scalarResultType);
 
     // Store in innermost result
     emitOp(opArraySetFor(innerResultArrayType->elemType_));
@@ -5522,6 +5367,100 @@ u16 CodeGen::genDeepMapBinaryOp(BinaryOpExpr* expr, int depth) {
     }
 
     return prevResultReg;
+}
+
+u16 CodeGen::emitMappedCallElem(CallExpr_* expr, const FuncInfo* funcInfo, Type* returnT,
+                                std::vector<MappedCallArg> const& args) {
+    u16 argc = (u16)expr->args.size();
+    // Legacy (unmigrated) builtins still expect 1-Word boxed args/results.
+    bool boxAtBoundary = expr->isBuiltinCall && !expr->builtinAcceptsInlineArgs;
+    auto inlineCompositeT = [&](Type* t) {
+        return t && t->repr_ == ts::Type::Repr::Inline
+            && t != compiler_.complexType()
+            && t != compiler_.fractionType();
+    };
+    auto callerSlotW = [&](Type* paramType, u16 i) -> u32 {
+        // Variadic-packed args are placed 1-word per arg pre-pack.
+        if (expr->variadicPackStart >= 0 && i >= (u16)expr->variadicPackStart) return 1;
+        if (!paramType) return 1;
+        if (inlineCompositeT(paramType))
+            return boxAtBoundary ? 1u : (u32)paramType->sizeWords_;
+        return typeSlotWords(paramType);
+    };
+
+    // callArgBase starts at nextReg_: the callee's frame begins here, past all
+    // loop bookkeeping registers.
+    u16 callArgBase = nextReg_;
+    u32 cumOffset = 0;
+    std::vector<u32> argOffsets(argc, 0);
+    for (u16 i = 0; i < argc; ++i) {
+        argOffsets[i] = cumOffset;
+        cumOffset += callerSlotW(getParamType(funcInfo, expr, i), i);
+    }
+    for (u16 i = 0; i < argc; ++i) {
+        u16 targetReg = (u16)(callArgBase + argOffsets[i]);
+        Type* paramType = getParamType(funcInfo, expr, i);
+        u32 slotW = callerSlotW(paramType, i);
+        if (nextReg_ <= (u16)(targetReg + slotW)) {
+            nextReg_ = (u16)(targetReg + slotW);
+            if (nextReg_ > maxReg_) maxReg_ = nextReg_;
+        }
+
+        MappedCallArg const& ma = args[i];
+        if (ma.mapped) {
+            Type* elemType = ma.arrType->elemType_;
+            bool elemInlineComposite = inlineCompositeT(elemType);
+            // Phase 4g.8: InlineArray returns the inline element multi-word into a
+            // sizeWords_-wide slot; legacy builtins instead want a 1-Word box.
+            u16 elemReg = elemInlineComposite ? allocSlot(elemType) : targetReg;
+            emitOp(opArrayGetDynFor(ma.arrType->elemType_));
+            emitRegs(elemReg, ma.srcReg, ma.idxReg);
+            emitPtr(ma.arrType);
+            if (elemInlineComposite) {
+                if (boxAtBoundary) {
+                    u16 boxed = emitBoxIfInline(elemReg, elemType);
+                    if (boxed != targetReg) { emitMov(targetReg, boxed); }
+                } else if (elemReg != targetReg) {
+                    emitMoveN(targetReg, elemReg, slotW);
+                }
+            }
+            if (paramType && elemType != paramType) {
+                u16 promoted = ensureType(targetReg, elemType, paramType);
+                if (promoted != targetReg) emitMoveN(targetReg, promoted, slotW);
+            }
+        } else {
+            Type* argType = expr->args[i]->resolvedType;
+            u16 srcReg = ma.srcReg;
+            if (paramType && argType != paramType) {
+                srcReg = ensureType(srcReg, argType, paramType);
+            }
+            if (inlineCompositeT(paramType) && boxAtBoundary) {
+                srcReg = emitBoxIfInline(srcReg, paramType);
+            }
+            if (srcReg != targetReg) {
+                if (slotW <= 1) emitMov(targetReg, srcReg);
+                else emitMoveN(targetReg, srcReg, slotW);
+            }
+        }
+    }
+
+    // Variadic packing + call.
+    u16 callArgc = emitVariadicPack(expr, callArgBase, argc);
+    bool retInlineComposite = returnT
+        && returnT->repr_ == ts::Type::Repr::Inline
+        && returnT != compiler_.complexType()
+        && returnT != compiler_.fractionType();
+    bool builtinReturnsInline = boxAtBoundary && retInlineComposite;
+    u16 callResultReg = (retInlineComposite && !boxAtBoundary) ? allocSlot(returnT) : allocReg();
+    clearArgRegTypes(callArgBase, callResultReg);
+    emitOp(expr->isBuiltinCall ? op_call_primitive : op_call);
+    emitRegs(callResultReg, callArgc, callArgBase);
+    emitInt(expr->resolvedFuncGlobalIndex);
+    emitReturnPcStackMap(callResultReg, returnT);
+    if (builtinReturnsInline) {
+        callResultReg = emitUnboxIfInline(callResultReg, returnT);
+    }
+    return callResultReg;
 }
 
 u16 CodeGen::genAutoMapCall(CallExpr_* expr) {
@@ -5563,210 +5502,48 @@ u16 CodeGen::genAutoMapCall(CallExpr_* expr) {
     }
 
     // --- Phase 2: Compute min length of auto-mapped arrays ---
-    u16 minLenReg = 0;
-    bool firstAutoMap = true;
-
+    // For explicit @, the arg may be an AutoMapExpr wrapping the real
+    // expression; the actual array is already generated in argRegs[i].
+    std::vector<std::pair<u16, ArrayType*>> mappedArrays;
     for (size_t i = 0; i < argc; ++i) {
         if (!expr->autoMapArgs[i]) continue;
-
-        // For explicit @, the arg may be an AutoMapExpr wrapping the real expression.
-        // The actual array is already generated in argRegs[i].
-        auto* arrType = dynamic_cast<ArrayType*>(expr->args[i]->resolvedType);
-
-        u16 lenReg = allocReg();
-        emitOp(opArrayLengthFor(arrType->elemType_));
-        emitRegs(lenReg, argRegs[i]);
-        emitPtr(arrType);
-
-        if (firstAutoMap) {
-            minLenReg = lenReg;
-            firstAutoMap = false;
-        } else {
-            // minLenReg = min(minLenReg, lenReg)
-            u16 cmpReg = allocReg();
-            emitOp(op_cmp_lt_int);
-            emitRegs(cmpReg, lenReg, minLenReg);
-            u32 skipJump = emitJump(op_jump_if_false, cmpReg);
-            emitMov(minLenReg, lenReg);
-            patchJump(skipJump);
-        }
+        mappedArrays.push_back({argRegs[i],
+                                dynamic_cast<ArrayType*>(expr->args[i]->resolvedType)});
     }
+    u16 minLenReg = emitMinArrayLength(mappedArrays);
 
     // Check if the function returns Void (side-effects only, no result collection)
     bool isVoidReturn = (funcInfo->returnType == compiler_.voidType());
 
-    // --- Phase 3: Allocate result array (skip for Void) ---
+    // --- Emit the call once per source index, building the result array (or
+    // just iterating, for Void). The body opens the callee's register window at
+    // nextReg_ -- past all loop bookkeeping -- and returns the call result. ---
     auto* resultArrayType = isVoidReturn ? nullptr : dynamic_cast<ArrayType*>(expr->resolvedType);
-    u16 resultArrReg = 0;
-    if (!isVoidReturn) {
-        resultArrReg = allocReg();
-        emitOp(op_array_alloc);
-        emitRegs(resultArrReg, minLenReg);
-        emitPtr(resultArrayType);
-    }
 
-    // --- Phase 4: Loop counter setup ---
-    u16 iReg = allocReg();
-    emitOp(op_load_int_const);
-    emitRegs(iReg);
-    emitInt(0);
-
-    u16 oneReg = allocReg();
-    emitOp(op_load_int_const);
-    emitRegs(oneReg);
-    emitInt(1);
-
-    u16 condReg = allocReg();
-
-    // --- Phase 5: Loop start ---
-    // All registers allocated above (argRegs, minLenReg, resultArrReg, iReg,
-    // oneReg, condReg) are BEFORE callArgBase, so they are safe from being
-    // clobbered by the callee's register window.
-    u32 loopStartIdx = (u32)currentBlock_->code.size();
-
-    emitOp(op_cmp_lt_int);
-    emitRegs(condReg, iReg, minLenReg);
-    u32 exitJump = emitJump(op_jump_if_false, condReg);
-
-    // --- Phase 6: Set up call arguments ---
-    // callArgBase starts at nextReg_ — callee's frame begins here
-    u16 callArgBase = nextReg_;
-
-    // Phase 4g.2: track per-arg slot widths so multi-word inline args don't
-    // collide with following args. For builtin calls, Inline composites are
-    // boxed (1 word) per the builtin calling convention; for non-builtin
-    // calls Inline composites pass multi-word inline.
-    std::vector<u32> argSlotWords;
-    argSlotWords.reserve(argc);
-    auto callerSlotWords = [&](Type* paramType, u16 i) -> u32 {
-        // Variadic-packed args are placed 1-word per arg pre-pack;
-        // op_make_tuple/op_make_array bundles them.
-        if (expr->variadicPackStart >= 0 && i >= (u16)expr->variadicPackStart) {
-            return 1;
-        }
-        if (!paramType) return 1;
-        if (paramType->repr_ == ts::Type::Repr::Inline
-            && paramType != compiler_.complexType()
-            && paramType != compiler_.fractionType()) {
-            // Phase 4g.6: legacy builtins receive a 1-word boxed Obj* for
-            // inline composites; migrated ones receive multi-word inline.
-            bool boxedAtBoundary = expr->isBuiltinCall && !expr->builtinAcceptsInlineArgs;
-            return boxedAtBoundary ? 1u : (u32)paramType->sizeWords_;
-        }
-        return typeSlotWords(paramType);
-    };
-    u32 cumOffset = 0;
-    std::vector<u32> argOffsets;
-    argOffsets.reserve(argc);
-    for (u16 i = 0; i < argc; ++i) {
-        argOffsets.push_back(cumOffset);
-        cumOffset += callerSlotWords(getParamType(funcInfo, expr, i), i);
-    }
-    for (u16 i = 0; i < argc; ++i) {
-        u16 targetReg = (u16)(callArgBase + argOffsets[i]);
-        Type* paramType = getParamType(funcInfo, expr, i);
-        u32 slotW = callerSlotWords(paramType, i);
-        // Ensure registers are tracked
-        if (nextReg_ <= (u16)(targetReg + slotW)) {
-            nextReg_ = (u16)(targetReg + slotW);
-            if (nextReg_ > maxReg_) maxReg_ = nextReg_;
-        }
-
-        if (expr->autoMapArgs[i]) {
-            auto* arrType = dynamic_cast<ArrayType*>(expr->args[i]->resolvedType);
-            Type* elemType = arrType->elemType_;
-            bool elemInlineComposite = elemType
-                && elemType->repr_ == ts::Type::Repr::Inline
-                && elemType != compiler_.complexType()
-                && elemType != compiler_.fractionType();
-            // Phase 4g.8: InlineArray returns the inline element multi-word
-            // directly into a sizeWords_-wide slot. For legacy builtins that
-            // still take a 1-word boxed pointer, box the unboxed element.
-            u16 elemReg = elemInlineComposite ? allocSlot(elemType) : targetReg;
-            emitOp(opArrayGetDynFor(arrType->elemType_));
-            emitRegs(elemReg, argRegs[i], iReg);
-            emitPtr(arrType);
-            if (elemInlineComposite) {
-                bool boxedAtBoundary = expr->isBuiltinCall && !expr->builtinAcceptsInlineArgs;
-                if (boxedAtBoundary) {
-                    u16 boxed = emitBoxIfInline(elemReg, elemType);
-                    if (boxed != targetReg) { emitMov(targetReg, boxed); }
-                } else {
-                    if (elemReg != targetReg) {
-                        emitMoveN(targetReg, elemReg, slotW);
-                    }
-                }
-            }
-
-            // Promote element type to parameter type if needed
-            if (paramType && elemType != paramType) {
-                u16 promoted = ensureType(targetReg, elemType, paramType);
-                if (promoted != targetReg) {
-                    emitMoveN(targetReg, promoted, slotW);
-                }
-            }
-        } else {
-            // Non-auto-mapped: copy scalar/inline value to call arg position
-            Type* argType = expr->args[i]->resolvedType;
-            u16 srcReg = argRegs[i];
-            if (paramType && argType != paramType) {
-                srcReg = ensureType(srcReg, argType, paramType);
-            }
-            if (paramType
-                && paramType->repr_ == ts::Type::Repr::Inline
-                && paramType != compiler_.complexType()
-                && paramType != compiler_.fractionType()
-                && expr->isBuiltinCall && !expr->builtinAcceptsInlineArgs) {
-                srcReg = emitBoxIfInline(srcReg, paramType);
-            }
-            if (srcReg != targetReg) {
-                if (slotW <= 1) {
-                    emitMov(targetReg, srcReg);
-                } else {
-                    emitMoveN(targetReg, srcReg, slotW);
-                }
-            }
-        }
-    }
-
-    // --- Phase 7: Variadic packing + Call function ---
-    u16 callArgc = emitVariadicPack(expr, callArgBase, argc);
-    // The per-call return type. funcInfo->returnType may be null for some
-    // untyped-variadic monomorphizations; in that case fall back to the
-    // resolved result-array's element type.
+    // funcInfo->returnType may be null for some untyped-variadic
+    // monomorphizations; fall back to the result element type.
     Type* returnT = funcInfo->returnType;
     if (!returnT && resultArrayType) returnT = resultArrayType->elemType_;
-    bool builtinReturnsInlineComposite = expr->isBuiltinCall && !expr->builtinAcceptsInlineArgs && returnT
-        && returnT->repr_ == ts::Type::Repr::Inline
-        && returnT != compiler_.complexType()
-        && returnT != compiler_.fractionType();
-    u16 callResultReg = builtinReturnsInlineComposite ? allocReg() : allocSlot(returnT);
-    clearArgRegTypes(callArgBase, callResultReg);
-    emitOp(expr->isBuiltinCall ? op_call_primitive : op_call);
-    emitRegs(callResultReg, callArgc, callArgBase);
-    emitInt(expr->resolvedFuncGlobalIndex);
-    emitReturnPcStackMap(callResultReg, returnT);
-    if (builtinReturnsInlineComposite) {
-        callResultReg = emitUnboxIfInline(callResultReg, returnT);
+
+    auto emitCallElem = [&](u16 iReg) -> u16 {
+        std::vector<MappedCallArg> args(argc);
+        for (u16 i = 0; i < argc; ++i) {
+            if (expr->autoMapArgs[i]) {
+                args[i] = { true, argRegs[i], iReg,
+                            dynamic_cast<ArrayType*>(expr->args[i]->resolvedType) };
+            } else {
+                args[i] = { false, argRegs[i], 0, nullptr };
+            }
+        }
+        return emitMappedCallElem(expr, funcInfo, returnT, args);
+    };
+
+    if (isVoidReturn) {
+        u16 lastResult = 0;
+        emitCountedLoop(minLenReg, [&](u16 iReg) { lastResult = emitCallElem(iReg); });
+        return lastResult;
     }
-
-    // --- Phase 8: Store result in result array (skip for Void) ---
-    // Phase 4g.8: InlineArray takes the multi-word inline result directly.
-    if (!isVoidReturn) {
-        emitOp(opArraySetFor(resultArrayType->elemType_));
-        emitRegs(resultArrReg, iReg, callResultReg);
-        emitPtr(resultArrayType);
-    }
-
-    // --- Phase 9: Increment and loop ---
-    emitOp(op_add_int);
-    emitRegs(iReg, iReg, oneReg);
-
-    emitJumpTo(loopStartIdx);
-
-    patchJump(exitJump);
-
-    return isVoidReturn ? callResultReg : resultArrReg;
+    return emitArrayBuildLoop(minLenReg, resultArrayType, emitCallElem);
 }
 
 u16 CodeGen::genAutoMapLambdaCall(CallExpr_* expr, u16 calleeReg, FunctionType* funcType) {
@@ -5800,11 +5577,16 @@ u16 CodeGen::genAutoMapLambdaCall(CallExpr_* expr, u16 calleeReg, FunctionType* 
         argRegs.push_back(genExpr(static_cast<Expr*>(arg.get())));
     }
 
-    // Shared constant for incrementing loop counters
-    u16 oneReg = allocReg();
-    emitOp(op_load_int_const);
-    emitRegs(oneReg);
-    emitInt(1);
+    // Shared constant for incrementing the outer deep-map loop counters. Inner
+    // loops allocate their own one-constant via emitCountedLoop, so this is only
+    // needed when there are outer loops (depth > 1).
+    u16 oneReg = 0;
+    if (depth > 1) {
+        oneReg = allocReg();
+        emitOp(op_load_int_const);
+        emitRegs(oneReg);
+        emitInt(1);
+    }
 
     // --- Outer loops: peel (depth - 1) array layers ---
     // Find which args are deep-mapped (depth > 1)
@@ -5884,14 +5666,11 @@ u16 CodeGen::genAutoMapLambdaCall(CallExpr_* expr, u16 calleeReg, FunctionType* 
 
     // --- Innermost loop: standard auto-map with op_call_lambda ---
 
-    // Compute min length of innermost auto-mapped arrays
-    u16 minLenReg = 0;
-    bool firstAutoMap = true;
-
+    // Compute min length of innermost auto-mapped arrays (at the innermost
+    // depth level for deep-mapped args).
+    std::vector<std::pair<u16, ArrayType*>> mappedArrays;
     for (size_t i = 0; i < argc; ++i) {
         if (!expr->autoMapArgs[i]) continue;
-
-        // Determine the array type at the innermost level
         Type* curArgType = expr->args[i]->resolvedType;
         if (expr->autoMapArgs[i].depth > 1) {
             for (int level = 0; level < depth - 1; ++level) {
@@ -5900,117 +5679,77 @@ u16 CodeGen::genAutoMapLambdaCall(CallExpr_* expr, u16 calleeReg, FunctionType* 
         }
         auto* arrType = dynamic_cast<ArrayType*>(curArgType);
         if (!arrType) continue;
-
-        u16 lenReg = allocReg();
-        emitOp(opArrayLengthFor(arrType->elemType_));
-        emitRegs(lenReg, currentArgRegs[i]);
-        emitPtr(arrType);
-
-        if (firstAutoMap) {
-            minLenReg = lenReg;
-            firstAutoMap = false;
-        } else {
-            u16 cmpReg = allocReg();
-            emitOp(op_cmp_lt_int);
-            emitRegs(cmpReg, lenReg, minLenReg);
-            u32 skipJump = emitJump(op_jump_if_false, cmpReg);
-            emitMov(minLenReg, lenReg);
-            patchJump(skipJump);
-        }
+        mappedArrays.push_back({currentArgRegs[i], arrType});
     }
+    u16 minLenReg = emitMinArrayLength(mappedArrays);
 
-    // Allocate innermost result array (skip for Void)
+    // --- Innermost loop body: extract one element per arg, call the lambda. ---
     auto* innerResultArrayType = isVoidReturn ? nullptr : dynamic_cast<ArrayType*>(curResultType);
-    u16 innerResultReg = 0;
-    if (!isVoidReturn) {
-        innerResultReg = allocReg();
-        emitOp(op_array_alloc);
-        emitRegs(innerResultReg, minLenReg);
-        emitPtr(innerResultArrayType);
-    }
 
-    // Inner loop counter
-    u16 iReg = allocReg();
-    emitOp(op_load_int_const);
-    emitRegs(iReg);
-    emitInt(0);
+    auto emitLambdaCallElem = [&](u16 iReg) -> u16 {
+        // callArgBase starts at nextReg_: the callee's frame begins here.
+        u16 callArgBase = nextReg_;
+        for (u16 i = 0; i < argc; ++i) {
+            u16 targetReg = callArgBase + i;
+            if (nextReg_ <= targetReg) {
+                nextReg_ = targetReg + 1;
+                if (nextReg_ > maxReg_) maxReg_ = nextReg_;
+            }
 
-    u16 condReg = allocReg();
+            if (expr->autoMapArgs[i]) {
+                Type* curArgType = expr->args[i]->resolvedType;
+                if (expr->autoMapArgs[i].depth > 1) {
+                    for (int level = 0; level < depth - 1; ++level) {
+                        curArgType = dynamic_cast<ArrayType*>(curArgType)->elemType_;
+                    }
+                }
+                auto* arrType = dynamic_cast<ArrayType*>(curArgType);
 
-    // Inner loop start
-    u32 loopStartIdx = (u32)currentBlock_->code.size();
-    emitOp(op_cmp_lt_int);
-    emitRegs(condReg, iReg, minLenReg);
-    u32 exitJump = emitJump(op_jump_if_false, condReg);
+                emitOp(opArrayGetDynFor(arrType->elemType_));
+                emitRegs(targetReg, currentArgRegs[i], iReg);
+                emitPtr(arrType);
 
-    // Set up call arguments
-    u16 callArgBase = nextReg_;
-
-    for (u16 i = 0; i < argc; ++i) {
-        u16 targetReg = callArgBase + i;
-        if (nextReg_ <= targetReg) {
-            nextReg_ = targetReg + 1;
-            if (nextReg_ > maxReg_) maxReg_ = nextReg_;
-        }
-
-        if (expr->autoMapArgs[i]) {
-            Type* curArgType = expr->args[i]->resolvedType;
-            if (expr->autoMapArgs[i].depth > 1) {
-                for (int level = 0; level < depth - 1; ++level) {
-                    curArgType = dynamic_cast<ArrayType*>(curArgType)->elemType_;
+                // Promote element type to parameter type if needed
+                Type* elemType = arrType->elemType_;
+                Type* paramType = (i < funcType->argTypes_.size()) ? funcType->argTypes_[i] : nullptr;
+                if (paramType && elemType != paramType) {
+                    u16 promoted = ensureType(targetReg, elemType, paramType);
+                    if (promoted != targetReg) {
+                        emitMov(targetReg, promoted);
+                    }
+                }
+            } else {
+                Type* argType = expr->args[i]->resolvedType;
+                Type* paramType = (i < funcType->argTypes_.size()) ? funcType->argTypes_[i] : nullptr;
+                u16 srcReg = currentArgRegs[i];
+                if (paramType && argType != paramType) {
+                    srcReg = ensureType(srcReg, argType, paramType);
+                }
+                if (srcReg != targetReg) {
+                    emitMov(targetReg, srcReg);
                 }
             }
-            auto* arrType = dynamic_cast<ArrayType*>(curArgType);
-
-            emitOp(opArrayGetDynFor(arrType->elemType_));
-            emitRegs(targetReg, currentArgRegs[i], iReg);
-            emitPtr(arrType);
-
-            // Promote element type to parameter type if needed
-            Type* elemType = arrType->elemType_;
-            Type* paramType = (i < funcType->argTypes_.size()) ? funcType->argTypes_[i] : nullptr;
-            if (paramType && elemType != paramType) {
-                u16 promoted = ensureType(targetReg, elemType, paramType);
-                if (promoted != targetReg) {
-                    emitMov(targetReg, promoted);
-                }
-            }
-        } else {
-            Type* argType = expr->args[i]->resolvedType;
-            Type* paramType = (i < funcType->argTypes_.size()) ? funcType->argTypes_[i] : nullptr;
-            u16 srcReg = currentArgRegs[i];
-            if (paramType && argType != paramType) {
-                srcReg = ensureType(srcReg, argType, paramType);
-            }
-            if (srcReg != targetReg) {
-                emitMov(targetReg, srcReg);
-            }
         }
+
+        u16 callResultReg = allocReg();
+        clearArgRegTypes(callArgBase, callResultReg);
+        emitOp(op_call_lambda);
+        emitRegs(callResultReg, argc, callArgBase, calleeReg);
+        emitReturnPcStackMap(callResultReg,
+                            innerResultArrayType ? innerResultArrayType->elemType_ : nullptr);
+        return callResultReg;
+    };
+
+    u16 prevResultReg;
+    if (isVoidReturn) {
+        u16 lastCall = 0;
+        emitCountedLoop(minLenReg, [&](u16 iReg) { lastCall = emitLambdaCallElem(iReg); });
+        prevResultReg = lastCall;
+    } else {
+        prevResultReg = emitArrayBuildLoop(minLenReg, innerResultArrayType, emitLambdaCallElem);
     }
-
-    // Call lambda
-    u16 callResultReg = allocReg();
-    clearArgRegTypes(callArgBase, callResultReg);
-    emitOp(op_call_lambda);
-    emitRegs(callResultReg, argc, callArgBase, calleeReg);
-    emitReturnPcStackMap(callResultReg,
-                        innerResultArrayType ? innerResultArrayType->elemType_ : nullptr);
-
-    // Store result (skip for Void)
-    if (!isVoidReturn) {
-        emitOp(opArraySetFor(innerResultArrayType->elemType_));
-        emitRegs(innerResultReg, iReg, callResultReg);
-        emitPtr(innerResultArrayType);
-    }
-
-    // Increment inner loop counter and loop back
-    emitOp(op_add_int);
-    emitRegs(iReg, iReg, oneReg);
-    emitJumpTo(loopStartIdx);
-    patchJump(exitJump);
 
     // --- Close outer loops (innermost to outermost) ---
-    u16 prevResultReg = isVoidReturn ? callResultReg : innerResultReg;
 
     for (int d = depth - 2; d >= 0; --d) {
         auto& loop = outerLoops[d];
@@ -6911,100 +6650,18 @@ u16 CodeGen::genCartesianCall(CallExpr_* expr) {
         loop2ExitJump = emitJump(op_jump_if_false, condRegs[2]);
     }
 
-    // --- Phase 5: Set up call arguments ---
-    u16 callArgBase = nextReg_;
-
-    auto inlineCompositeT = [&](Type* t) {
-        return t && t->repr_ == ts::Type::Repr::Inline
-            && t != compiler_.complexType()
-            && t != compiler_.fractionType();
-    };
-    // Legacy (unmigrated) builtins still expect 1-Word boxed args.
-    bool boxAtBoundary = expr->isBuiltinCall && !expr->builtinAcceptsInlineArgs;
-    auto callerSlotW = [&](Type* paramType, u16 i) -> u32 {
-        if (expr->variadicPackStart >= 0 && i >= (u16)expr->variadicPackStart) {
-            return 1;
-        }
-        if (!paramType) return 1;
-        if (inlineCompositeT(paramType))
-            return boxAtBoundary ? 1u : (u32)paramType->sizeWords_;
-        return typeSlotWords(paramType);
-    };
-    u32 cumOffset = 0;
-    std::vector<u32> argOffsets(argc, 0);
+    // --- Phase 5+6: Set up call args (per cartesian level), pack, call ---
+    std::vector<MappedCallArg> args(argc);
     for (u16 i = 0; i < argc; ++i) {
-        argOffsets[i] = cumOffset;
-        cumOffset += callerSlotW(getParamType(funcInfo, expr, i), i);
-    }
-    for (u16 i = 0; i < argc; ++i) {
-        u16 targetReg = (u16)(callArgBase + argOffsets[i]);
-        Type* paramType = getParamType(funcInfo, expr, i);
-        u32 slotW = callerSlotW(paramType, i);
-        if (nextReg_ <= (u16)(targetReg + slotW)) {
-            nextReg_ = (u16)(targetReg + slotW);
-            if (nextReg_ > maxReg_) maxReg_ = nextReg_;
-        }
-
         int ci = expr->autoMapArgs[i].cartesianIndex;
         if (ci > 0 || expr->autoMapArgs[i].depth > 0) {
-            auto* arrType = dynamic_cast<ArrayType*>(expr->args[i]->resolvedType);
-            Type* elemType = arrType->elemType_;
-            bool elemInlineComposite = inlineCompositeT(elemType);
-            // Phase 4g.8: InlineArray returns multi-word inline element direct.
-            u16 elemReg = elemInlineComposite ? allocSlot(elemType) : targetReg;
-            emitOp(opArrayGetDynFor(arrType->elemType_));
-            emitRegs(elemReg, argRegs[i], (ci > 0 ? iRegs[ci] : iRegs[1]));
-            emitPtr(arrType);
-            if (elemInlineComposite) {
-                if (boxAtBoundary) {
-                    u16 boxed = emitBoxIfInline(elemReg, elemType);
-                    if (boxed != targetReg) { emitMov(targetReg, boxed); }
-                } else {
-                    if (elemReg != targetReg) emitMoveN(targetReg, elemReg, slotW);
-                }
-            }
-            if (paramType && elemType != paramType) {
-                u16 promoted = ensureType(targetReg, elemType, paramType);
-                if (promoted != targetReg) emitMoveN(targetReg, promoted, slotW);
-            }
+            args[i] = { true, argRegs[i], (ci > 0 ? iRegs[ci] : iRegs[1]),
+                        dynamic_cast<ArrayType*>(expr->args[i]->resolvedType) };
         } else {
-            Type* argType = expr->args[i]->resolvedType;
-            u16 srcReg = argRegs[i];
-            if (paramType && argType != paramType) {
-                srcReg = ensureType(srcReg, argType, paramType);
-            }
-            if (inlineCompositeT(paramType) && boxAtBoundary) {
-                srcReg = emitBoxIfInline(srcReg, paramType);
-            }
-            if (srcReg != targetReg) {
-                if (slotW <= 1) { emitMov(targetReg, srcReg); }
-                else { emitMoveN(targetReg, srcReg, slotW); }
-            }
+            args[i] = { false, argRegs[i], 0, nullptr };
         }
     }
-
-    // --- Phase 6: Variadic packing + Call function ---
-    u16 callArgc = emitVariadicPack(expr, callArgBase, argc);
-    Type* returnT = funcInfo->returnType;
-    bool retInlineComposite = returnT
-        && returnT->repr_ == ts::Type::Repr::Inline
-        && returnT != compiler_.complexType()
-        && returnT != compiler_.fractionType();
-    bool builtinReturnsInline = boxAtBoundary && retInlineComposite;
-    u16 callResultReg = builtinReturnsInline
-        ? allocReg()
-        : (retInlineComposite ? allocSlot(returnT) : allocReg());
-    clearArgRegTypes(callArgBase, callResultReg);
-    emitOp(expr->isBuiltinCall ? op_call_primitive : op_call);
-    emitRegs(callResultReg, callArgc, callArgBase);
-    emitInt(expr->resolvedFuncGlobalIndex);
-    emitReturnPcStackMap(callResultReg, returnT);
-    if (builtinReturnsInline) {
-        callResultReg = emitUnboxIfInline(callResultReg, returnT);
-    }
-    // Phase 4g.8: InlineArray takes the multi-word inline result directly.
-    u16 storeReg = callResultReg;
-    (void)retInlineComposite;
+    u16 storeReg = emitMappedCallElem(expr, funcInfo, funcInfo->returnType, args);
 
     // --- Phase 7: Store result and close loops ---
     if (maxCartesian >= 2) {
@@ -7042,7 +6699,7 @@ u16 CodeGen::genCartesianCall(CallExpr_* expr) {
     emitJumpTo(loop1StartIdx);
     patchJump(loop1ExitJump);
 
-    return isVoidReturn ? callResultReg : outerResultReg;
+    return isVoidReturn ? storeReg : outerResultReg;
 }
 
 u16 CodeGen::genDeepMapCall(CallExpr_* expr, int depth) {
@@ -7250,16 +6907,10 @@ u16 CodeGen::genDeepMapCall(CallExpr_* expr, int depth) {
     emitRegs(innerCondReg, innerIReg, minLenReg);
     u32 innerExitJump = emitJump(op_jump_if_false, innerCondReg);
 
-    // Set up call arguments
-    u16 callArgBase = nextReg_;
-
+    // Set up call args (extracted from the (depth-1)-peeled arrays), pack
+    // variadics, call -- shared with the plain and Cartesian call paths.
+    std::vector<MappedCallArg> args(argc);
     for (u16 i = 0; i < argc; ++i) {
-        u16 targetReg = callArgBase + i;
-        if (nextReg_ <= targetReg) {
-            nextReg_ = targetReg + 1;
-            if (nextReg_ > maxReg_) maxReg_ = nextReg_;
-        }
-
         if (expr->autoMapArgs[i]) {
             Type* curArgType = expr->args[i]->resolvedType;
             if (expr->autoMapArgs[i].depth > 1) {
@@ -7267,44 +6918,13 @@ u16 CodeGen::genDeepMapCall(CallExpr_* expr, int depth) {
                     curArgType = dynamic_cast<ArrayType*>(curArgType)->elemType_;
                 }
             }
-            auto* arrType = dynamic_cast<ArrayType*>(curArgType);
-
-            emitOp(opArrayGetDynFor(arrType->elemType_));
-            emitRegs(targetReg, currentArgRegs[i], innerIReg);
-            emitPtr(arrType);
-
-            Type* elemType = arrType->elemType_;
-            Type* paramType = getParamType(funcInfo, expr, i);
-            if (paramType && elemType != paramType) {
-                u16 promoted = ensureType(targetReg, elemType, paramType);
-                if (promoted != targetReg) {
-                    emitMov(targetReg, promoted);
-                }
-            }
+            args[i] = { true, currentArgRegs[i], innerIReg,
+                        dynamic_cast<ArrayType*>(curArgType) };
         } else {
-            // Promote scalar type to parameter type if needed (e.g. Int -> Float)
-            Type* argType = expr->args[i]->resolvedType;
-            Type* paramType = getParamType(funcInfo, expr, i);
-            u16 srcReg = currentArgRegs[i];
-            if (paramType && argType != paramType) {
-                srcReg = ensureType(srcReg, argType, paramType);
-            }
-            if (srcReg != targetReg) {
-                emitMov(targetReg, srcReg);
-            }
+            args[i] = { false, currentArgRegs[i], 0, nullptr };
         }
     }
-
-    // Variadic packing + Call function
-    u16 callArgc = emitVariadicPack(expr, callArgBase, argc);
-    u16 callResultReg = allocReg();
-    clearArgRegTypes(callArgBase, callResultReg);
-    emitOp(expr->isBuiltinCall ? op_call_primitive : op_call);
-    emitRegs(callResultReg, callArgc, callArgBase);
-    emitInt(expr->resolvedFuncGlobalIndex);
-    emitReturnPcStackMap(callResultReg,
-                        isVoidReturn ? nullptr :
-                            (innerResultArrayType ? innerResultArrayType->elemType_ : nullptr));
+    u16 callResultReg = emitMappedCallElem(expr, funcInfo, funcInfo->returnType, args);
 
     // Store in innermost result array (skip for Void)
     if (!isVoidReturn) {
@@ -7834,95 +7454,54 @@ u16 CodeGen::genAutoMapArrayLiteral(ArrayLiteralExpr* expr) {
     Type* elemType = innerArrayType->elemType_;
     usize count = expr->elements.size();
 
-    // --- Phase 1: Evaluate all element expressions ---
+    // --- Evaluate all element expressions ---
     std::vector<u16> elemRegs(count);
     for (size_t i = 0; i < count; ++i) {
         elemRegs[i] = genExpr(static_cast<Expr*>(expr->elements[i].get()));
     }
 
-    // --- Phase 2: Compute min length of @-tagged arrays ---
-    u16 minLenReg = 0;
-    bool firstAM = true;
+    // --- Min length over the @-tagged element arrays ---
+    std::vector<std::pair<u16, ArrayType*>> mapped;
     for (size_t i = 0; i < count; ++i) {
         if (!expr->autoMapElements[i]) continue;
-        auto* arrT = dynamic_cast<ArrayType*>(expr->elements[i]->resolvedType);
-        u16 lenReg = allocReg();
-        emitOp(opArrayLengthFor(arrT->elemType_));
-        emitRegs(lenReg, elemRegs[i]);
-        emitPtr(arrT);
-        if (firstAM) { minLenReg = lenReg; firstAM = false; }
-        else {
-            u16 cmpReg = allocReg();
-            emitOp(op_cmp_lt_int);
-            emitRegs(cmpReg, lenReg, minLenReg);
-            u32 skip = emitJump(op_jump_if_false, cmpReg);
-            emitMov(minLenReg, lenReg);
-            patchJump(skip);
-        }
+        mapped.push_back({elemRegs[i],
+                          dynamic_cast<ArrayType*>(expr->elements[i]->resolvedType)});
     }
+    u16 minLenReg = emitMinArrayLength(mapped);
 
-    // --- Phase 3: Allocate result array ---
-    u16 resultArrReg = allocReg();
-    emitOp(op_array_alloc);
-    emitRegs(resultArrReg, minLenReg);
-    emitPtr(resultArrayType);
-
-    // --- Phase 4: Loop counter ---
-    u16 iReg = allocReg();
-    emitOp(op_load_int_const); emitRegs(iReg); emitInt(0);
-    u16 oneReg = allocReg();
-    emitOp(op_load_int_const); emitRegs(oneReg); emitInt(1);
-    u16 condReg = allocReg();
-
-    // --- Phase 5: Loop start ---
-    u32 loopStart = (u32)currentBlock_->code.size();
-    emitOp(op_cmp_lt_int); emitRegs(condReg, iReg, minLenReg);
-    u32 exitJump = emitJump(op_jump_if_false, condReg);
-
-    // --- Phase 6: Build inner array elements ---
-    u16 innerBase = nextReg_;
-    for (size_t i = 0; i < count; ++i) {
-        u16 targetReg = innerBase + (u16)i;
-        if (nextReg_ <= targetReg) {
-            nextReg_ = targetReg + 1;
-            if (nextReg_ > maxReg_) maxReg_ = nextReg_;
-        }
-        if (expr->autoMapElements[i]) {
-            auto* arrT = dynamic_cast<ArrayType*>(expr->elements[i]->resolvedType);
-            emitOp(opArrayGetDynFor(arrT->elemType_));
-            emitRegs(targetReg, elemRegs[i], iReg);
-            emitPtr(arrT);
-            Type* srcElemType = arrT->elemType_;
-            if (srcElemType != elemType) {
-                u16 promoted = ensureType(targetReg, srcElemType, elemType);
-                if (promoted != targetReg) { emitMov(targetReg, promoted); }
+    // --- For each i, build the inner array [e0_i, e1_i, ...] ---
+    return emitArrayBuildLoop(minLenReg, resultArrayType, [&](u16 iReg) {
+        u16 innerBase = nextReg_;
+        for (size_t i = 0; i < count; ++i) {
+            u16 targetReg = innerBase + (u16)i;
+            if (nextReg_ <= targetReg) {
+                nextReg_ = targetReg + 1;
+                if (nextReg_ > maxReg_) maxReg_ = nextReg_;
             }
-        } else {
-            // Scalar element — copy and promote if needed
-            Type* valType = expr->elements[i]->resolvedType;
-            u16 srcReg = elemRegs[i];
-            srcReg = ensureType(srcReg, valType, elemType);
-            if (srcReg != targetReg) { emitMov(targetReg, srcReg); }
+            if (expr->autoMapElements[i]) {
+                auto* arrT = dynamic_cast<ArrayType*>(expr->elements[i]->resolvedType);
+                emitOp(opArrayGetDynFor(arrT->elemType_));
+                emitRegs(targetReg, elemRegs[i], iReg);
+                emitPtr(arrT);
+                Type* srcElemType = arrT->elemType_;
+                if (srcElemType != elemType) {
+                    u16 promoted = ensureType(targetReg, srcElemType, elemType);
+                    if (promoted != targetReg) { emitMov(targetReg, promoted); }
+                }
+            } else {
+                // Scalar element -- copy and promote if needed
+                Type* valType = expr->elements[i]->resolvedType;
+                u16 srcReg = elemRegs[i];
+                srcReg = ensureType(srcReg, valType, elemType);
+                if (srcReg != targetReg) { emitMov(targetReg, srcReg); }
+            }
         }
-    }
-
-    // --- Phase 7: Construct inner array ---
-    u16 innerArrReg = allocReg();
-    emitOp(op_make_array);
-    emitRegs(innerArrReg, innerBase, (u16)count);
-    emitPtr(innerArrayType);
-
-    // --- Phase 8: Store in result array ---
-    emitOp(opArraySetFor(resultArrayType->elemType_));
-    emitRegs(resultArrReg, iReg, innerArrReg);
-    emitPtr(resultArrayType);
-
-    // --- Phase 9: Increment and loop ---
-    emitOp(op_add_int); emitRegs(iReg, iReg, oneReg);
-    emitJumpTo(loopStart);
-    patchJump(exitJump);
-
-    return resultArrReg;
+        u16 innerArrReg = allocReg();
+        emitOp(op_make_array);
+        emitRegs(innerArrReg, innerBase, (u16)count);
+        emitPtr(innerArrayType);
+        return innerArrReg;
+    });
 }
 
 // ============================================================
@@ -8870,24 +8449,30 @@ u16 CodeGen::emitIndexLookup(u16 srcReg, Type* srcType, u16 idxReg, Type* idxTyp
     return dst;
 }
 
-u16 CodeGen::genAutoMapIndexObjArray(IndexExpr_* expr) {
-    // @ on object (Array): map indexing over each element
-    u16 objReg = genExpr(static_cast<Expr*>(expr->object.get()));
-    u16 idxReg = genExpr(static_cast<Expr*>(expr->index.get()));
-    auto* arrType = dynamic_cast<ArrayType*>(expr->object->resolvedType);
-    Type* elemType = arrType->elemType_;
+u16 CodeGen::emitMinArrayLength(std::vector<std::pair<u16, ArrayType*>> const& arrays) {
+    u16 minLenReg = 0;
+    bool first = true;
+    for (auto const& [arrReg, arrType] : arrays) {
+        u16 lenReg = allocReg();
+        emitOp(opArrayLengthFor(arrType->elemType_));
+        emitRegs(lenReg, arrReg);
+        emitPtr(arrType);
+        if (first) {
+            minLenReg = lenReg;
+            first = false;
+        } else {
+            u16 cmpReg = allocReg();
+            emitOp(op_cmp_lt_int);
+            emitRegs(cmpReg, lenReg, minLenReg);
+            u32 skipJump = emitJump(op_jump_if_false, cmpReg);
+            emitMov(minLenReg, lenReg);
+            patchJump(skipJump);
+        }
+    }
+    return minLenReg;
+}
 
-    u16 lenReg = allocReg();
-    emitOp(opArrayLengthFor(arrType->elemType_));
-    emitRegs(lenReg, objReg);
-    emitPtr(arrType);
-
-    auto* resultArrayType = dynamic_cast<ArrayType*>(expr->resolvedType);
-    u16 resultReg = allocReg();
-    emitOp(op_array_alloc);
-    emitRegs(resultReg, lenReg);
-    emitPtr(resultArrayType);
-
+void CodeGen::emitCountedLoop(u16 lenReg, function_ref<void(u16)> body) {
     u16 iReg = allocReg();
     emitOp(op_load_int_const);
     emitRegs(iReg);
@@ -8900,47 +8485,60 @@ u16 CodeGen::genAutoMapIndexObjArray(IndexExpr_* expr) {
 
     u16 condReg = allocReg();
 
+    // Bookkeeping registers above are allocated before the body runs, so they
+    // sit below any call/element window the body opens and cannot be clobbered.
     u32 loopStartIdx = (u32)currentBlock_->code.size();
     emitOp(op_cmp_lt_int);
     emitRegs(condReg, iReg, lenReg);
     u32 exitJump = emitJump(op_jump_if_false, condReg);
 
-    u16 elemReg = allocSlot(elemType);
-    emitOp(opArrayGetDynFor(arrType->elemType_));
-    emitRegs(elemReg, objReg, iReg);
-    emitPtr(arrType);
-
-    // Compositional: delegate inner indexing to emitIndexLookup,
-    // which handles scalar, array-of-indices, or list-of-indices.
-    Type* innerResultType = resultArrayType->elemType_;
-    u16 valReg = emitIndexLookup(elemReg, elemType, idxReg,
-                                 expr->index->resolvedType,
-                                 expr->indexAutoMap, innerResultType);
-
-    // Phase 4g.8: InlineArray accepts multi-word inline directly.
-    emitOp(opArraySetFor(resultArrayType->elemType_));
-    emitRegs(resultReg, iReg, valReg);
-    emitPtr(resultArrayType);
+    body(iReg);
 
     emitOp(op_add_int);
     emitRegs(iReg, iReg, oneReg);
     emitJumpTo(loopStartIdx);
     patchJump(exitJump);
+}
+
+u16 CodeGen::emitArrayBuildLoop(u16 lenReg, ArrayType* dstType,
+                                function_ref<u16(u16)> body) {
+    u16 resultReg = allocReg();
+    emitOp(op_array_alloc);
+    emitRegs(resultReg, lenReg);
+    emitPtr(dstType);
+
+    emitCountedLoop(lenReg, [&](u16 iReg) {
+        u16 valReg = body(iReg);
+        // Phase 4g.8: InlineArray accepts multi-word inline directly (no boxing).
+        emitOp(opArraySetFor(dstType->elemType_));
+        emitRegs(resultReg, iReg, valReg);
+        emitPtr(dstType);
+    });
 
     return resultReg;
 }
 
-u16 CodeGen::genAutoMapIndexObjList(IndexExpr_* expr) {
-    // @ on object (List): map indexing over each element
-    u16 objReg = genExpr(static_cast<Expr*>(expr->object.get()));
-    u16 idxReg = genExpr(static_cast<Expr*>(expr->index.get()));
-    auto* listType = dynamic_cast<ListType*>(expr->object->resolvedType);
-    Type* elemType = listType->elemType_;
+u16 CodeGen::emitArrayMapLoop(u16 srcReg, ArrayType* srcType, ArrayType* dstType,
+                              function_ref<u16(u16, Type*)> body) {
+    Type* srcElemType = srcType->elemType_;
+    u16 lenReg = emitMinArrayLength({{srcReg, srcType}});
+    return emitArrayBuildLoop(lenReg, dstType, [&](u16 iReg) {
+        // Phase 4g.8: Inline elements occupy sizeWords_ consecutive register slots.
+        u16 elemReg = allocSlot(srcElemType);
+        emitOp(opArrayGetDynFor(srcElemType));
+        emitRegs(elemReg, srcReg, iReg);
+        emitPtr(srcType);
+        return body(elemReg, srcElemType);
+    });
+}
 
-    auto* resultListType = dynamic_cast<ListType*>(expr->resolvedType);
+u16 CodeGen::emitListMapLoop(u16 srcReg, ListType* srcType, ListType* dstType,
+                             function_ref<u16(u16, Type*)> body) {
+    Type* srcElemType = srcType->elemType_;
+    Type* dstElemType = dstType->elemType_;
 
     u16 curReg = allocReg();
-    emitMov(curReg, objReg);
+    emitMov(curReg, srcReg);
 
     u16 accReg = allocReg();
     emitOp(op_load_nil);
@@ -8953,25 +8551,23 @@ u16 CodeGen::genAutoMapIndexObjList(IndexExpr_* expr) {
     emitRegs(nilCheckReg, curReg);
     u32 exitJump = emitJump(op_jump_if_true, nilCheckReg);
 
-    u16 headReg = allocReg();
+    // Phase 4g.9: op_list_head copies stride words into a slot sized for the
+    // element type, including Inline composite heads.
+    u16 headReg = allocSlot(srcElemType);
     emitOp(op_list_head);
     emitRegs(headReg, curReg);
 
-    // Compositional: delegate inner indexing to emitIndexLookup
-    Type* innerResultType = resultListType->elemType_;
-    u16 valReg = emitIndexLookup(headReg, elemType, idxReg,
-                                 expr->index->resolvedType,
-                                 expr->indexAutoMap, innerResultType);
+    u16 valReg = body(headReg, srcElemType);
 
-    // Phase 4g.4: same boxing concern as the array path -- list nodes hold
-    // 1-Word values, so an Inline composite result must be boxed first.
-    if (isInlineMultiword(innerResultType)) {
-        valReg = emitBoxIfInline(valReg, innerResultType);
+    // Phase 4g.4: list nodes hold 1-Word values, so an Inline composite result
+    // must be boxed before it is consed.
+    if (isInlineMultiword(dstElemType)) {
+        valReg = emitBoxIfInline(valReg, dstElemType);
     }
 
     emitOp(op_cons);
     emitRegs(accReg, valReg, accReg);
-    emitPtr(resultListType);
+    emitPtr(dstType);
 
     emitOp(op_list_tail);
     emitRegs(curReg, curReg);
@@ -8979,7 +8575,10 @@ u16 CodeGen::genAutoMapIndexObjList(IndexExpr_* expr) {
     emitJumpTo(loopStartIdx);
     patchJump(exitJump);
 
-    // Reverse the accumulated list
+    return emitListReverse(accReg, dstType);
+}
+
+u16 CodeGen::emitListReverse(u16 listReg, ListType* listType) {
     u16 resultReg = allocReg();
     emitOp(op_load_nil);
     emitRegs(resultReg);
@@ -8987,21 +8586,52 @@ u16 CodeGen::genAutoMapIndexObjList(IndexExpr_* expr) {
     u32 revLoopStart = (u32)currentBlock_->code.size();
     u16 revNilCheck = allocReg();
     emitOp(op_list_is_nil);
-    emitRegs(revNilCheck, accReg);
+    emitRegs(revNilCheck, listReg);
     u32 revExitJump = emitJump(op_jump_if_true, revNilCheck);
 
     u16 revHead = allocReg();
     emitOp(op_list_head);
-    emitRegs(revHead, accReg);
+    emitRegs(revHead, listReg);
     emitOp(op_cons);
     emitRegs(resultReg, revHead, resultReg);
-    emitPtr(resultListType);
+    emitPtr(listType);
     emitOp(op_list_tail);
-    emitRegs(accReg, accReg);
+    emitRegs(listReg, listReg);
     emitJumpTo(revLoopStart);
     patchJump(revExitJump);
 
     return resultReg;
+}
+
+u16 CodeGen::genAutoMapIndexObjArray(IndexExpr_* expr) {
+    // @ on object (Array): map indexing over each element. Inner indexing is
+    // delegated to emitIndexLookup (scalar / array-of-indices / list-of-indices).
+    u16 objReg = genExpr(static_cast<Expr*>(expr->object.get()));
+    u16 idxReg = genExpr(static_cast<Expr*>(expr->index.get()));
+    auto* arrType = dynamic_cast<ArrayType*>(expr->object->resolvedType);
+    auto* resultArrayType = dynamic_cast<ArrayType*>(expr->resolvedType);
+
+    return emitArrayMapLoop(objReg, arrType, resultArrayType,
+        [&](u16 elemReg, Type* elemType) {
+            return emitIndexLookup(elemReg, elemType, idxReg,
+                                   expr->index->resolvedType,
+                                   expr->indexAutoMap, resultArrayType->elemType_);
+        });
+}
+
+u16 CodeGen::genAutoMapIndexObjList(IndexExpr_* expr) {
+    // @ on object (List): map indexing over each element.
+    u16 objReg = genExpr(static_cast<Expr*>(expr->object.get()));
+    u16 idxReg = genExpr(static_cast<Expr*>(expr->index.get()));
+    auto* listType = dynamic_cast<ListType*>(expr->object->resolvedType);
+    auto* resultListType = dynamic_cast<ListType*>(expr->resolvedType);
+
+    return emitListMapLoop(objReg, listType, resultListType,
+        [&](u16 headReg, Type* elemType) {
+            return emitIndexLookup(headReg, elemType, idxReg,
+                                   expr->index->resolvedType,
+                                   expr->indexAutoMap, resultListType->elemType_);
+        });
 }
 
 u16 CodeGen::genAutoMapIndexObjDeep(IndexExpr_* expr, int depth) {
@@ -9297,167 +8927,43 @@ u16 CodeGen::genFieldExpr(FieldExpr_* expr) {
     return allocReg();
 }
 
-u16 CodeGen::genAutoMapFieldArray(FieldExpr_* expr) {
-    // Auto-map field access over an Array: [struct1, struct2, ...].field -> [f1, f2, ...]
-    u16 objReg = genExpr(static_cast<Expr*>(expr->object.get()));
-    Type* objType = expr->object->resolvedType;
-    auto* arrType = dynamic_cast<ArrayType*>(objType);
-
-    // Get element type (struct or tuple)
-    Type* elemType = arrType->elemType_;
-
-    // Get array length
-    u16 lenReg = allocReg();
-    emitOp(opArrayLengthFor(arrType->elemType_));
-    emitRegs(lenReg, objReg);
-    emitPtr(arrType);
-
-    // Allocate result array
-    auto* resultArrayType = dynamic_cast<ArrayType*>(expr->resolvedType);
-    u16 resultReg = allocReg();
-    emitOp(op_array_alloc);
-    emitRegs(resultReg, lenReg);
-    emitPtr(resultArrayType);
-
-    // Loop counter
-    u16 iReg = allocReg();
-    emitOp(op_load_int_const);
-    emitRegs(iReg);
-    emitInt(0);
-
-    u16 oneReg = allocReg();
-    emitOp(op_load_int_const);
-    emitRegs(oneReg);
-    emitInt(1);
-
-    u16 condReg = allocReg();
-
-    // Loop start
-    u32 loopStartIdx = (u32)currentBlock_->code.size();
-    emitOp(op_cmp_lt_int);
-    emitRegs(condReg, iReg, lenReg);
-    u32 exitJump = emitJump(op_jump_if_false, condReg);
-
-    // Extract element from array. Phase 4g.8: Inline elements occupy
-    // sizeWords_ consecutive register slots.
-    u16 elemReg = allocSlot(elemType);
-    emitOp(opArrayGetDynFor(arrType->elemType_));
-    emitRegs(elemReg, objReg, iReg);
-    emitPtr(arrType);
-
-    // Extract field from element via emitFieldGet (handles inline parents).
-    u16 fieldReg = 0;
+u16 CodeGen::emitMapFieldGet(FieldExpr_* expr, u16 elemReg, Type* elemType) {
+    // emitFieldGet handles inline parents.
     if (auto* stype = dynamic_cast<StructType*>(elemType)) {
         for (size_t i = 0; i < stype->fields_.size(); ++i) {
             if (stype->fields_[i].name->str() == expr->field) {
-                fieldReg = emitFieldGet(elemType, elemReg, (u16)i, stype->fields_[i].type);
-                break;
+                return emitFieldGet(elemType, elemReg, (u16)i, stype->fields_[i].type);
             }
         }
     } else if (auto* ttype = dynamic_cast<TupleType*>(elemType)) {
         size_t idx = std::stoul(expr->field);
-        fieldReg = emitFieldGet(elemType, elemReg, (u16)idx, ttype->fields_[idx]);
+        return emitFieldGet(elemType, elemReg, (u16)idx, ttype->fields_[idx]);
     }
+    return 0;
+}
 
-    // Store in result array
-    emitOp(opArraySetFor(resultArrayType->elemType_));
-    emitRegs(resultReg, iReg, fieldReg);
-    emitPtr(resultArrayType);
+u16 CodeGen::genAutoMapFieldArray(FieldExpr_* expr) {
+    // Auto-map field access over an Array: [s1, s2, ...].field -> [f1, f2, ...]
+    u16 objReg = genExpr(static_cast<Expr*>(expr->object.get()));
+    auto* arrType = dynamic_cast<ArrayType*>(expr->object->resolvedType);
+    auto* resultArrayType = dynamic_cast<ArrayType*>(expr->resolvedType);
 
-    // Increment and loop
-    emitOp(op_add_int);
-    emitRegs(iReg, iReg, oneReg);
-    emitJumpTo(loopStartIdx);
-    patchJump(exitJump);
-
-    return resultReg;
+    return emitArrayMapLoop(objReg, arrType, resultArrayType,
+        [&](u16 elemReg, Type* elemType) {
+            return emitMapFieldGet(expr, elemReg, elemType);
+        });
 }
 
 u16 CodeGen::genAutoMapFieldList(FieldExpr_* expr) {
     // Auto-map field access over a List: List(s1, s2, ...).field -> List(f1, f2, ...)
     u16 objReg = genExpr(static_cast<Expr*>(expr->object.get()));
-    Type* objType = expr->object->resolvedType;
-    auto* listType = dynamic_cast<ListType*>(objType);
-
-    // Get element type (struct or tuple)
-    Type* elemType = listType->elemType_;
-
+    auto* listType = dynamic_cast<ListType*>(expr->object->resolvedType);
     auto* resultListType = dynamic_cast<ListType*>(expr->resolvedType);
 
-    // Current list pointer
-    u16 curReg = allocReg();
-    emitMov(curReg, objReg);
-
-    // Accumulator (reversed result)
-    u16 accReg = allocReg();
-    emitOp(op_load_nil);
-    emitRegs(accReg);
-
-    // Loop start
-    u32 loopStartIdx = (u32)currentBlock_->code.size();
-
-    // Check if list is nil
-    u16 nilCheckReg = allocReg();
-    emitOp(op_list_is_nil);
-    emitRegs(nilCheckReg, curReg);
-    u32 exitJump = emitJump(op_jump_if_true, nilCheckReg);
-
-    // Extract head. Phase 4g.9: op_list_head copies stride words directly
-    // into a slot sized for elemType, including Inline composite heads.
-    u16 headReg = allocSlot(elemType);
-    emitOp(op_list_head);
-    emitRegs(headReg, curReg);
-
-    // Extract field from head
-    u16 fieldReg = 0;
-    if (auto* stype = dynamic_cast<StructType*>(elemType)) {
-        for (size_t i = 0; i < stype->fields_.size(); ++i) {
-            if (stype->fields_[i].name->str() == expr->field) {
-                fieldReg = emitFieldGet(elemType, headReg, (u16)i, stype->fields_[i].type);
-                break;
-            }
-        }
-    } else if (auto* ttype = dynamic_cast<TupleType*>(elemType)) {
-        size_t idx = std::stoul(expr->field);
-        fieldReg = emitFieldGet(elemType, headReg, (u16)idx, ttype->fields_[idx]);
-    }
-
-    // Cons onto accumulator (builds reversed)
-    emitOp(op_cons);
-    emitRegs(accReg, fieldReg, accReg);
-    emitPtr(resultListType);
-
-    // Advance to tail
-    emitOp(op_list_tail);
-    emitRegs(curReg, curReg);
-
-    // Loop back
-    emitJumpTo(loopStartIdx);
-    patchJump(exitJump);
-
-    // Reverse the accumulated list
-    u16 resultReg = allocReg();
-    emitOp(op_load_nil);
-    emitRegs(resultReg);
-
-    u32 revLoopStart = (u32)currentBlock_->code.size();
-    u16 revNilCheck = allocReg();
-    emitOp(op_list_is_nil);
-    emitRegs(revNilCheck, accReg);
-    u32 revExitJump = emitJump(op_jump_if_true, revNilCheck);
-
-    u16 revHead = allocReg();
-    emitOp(op_list_head);
-    emitRegs(revHead, accReg);
-    emitOp(op_cons);
-    emitRegs(resultReg, revHead, resultReg);
-    emitPtr(resultListType);
-    emitOp(op_list_tail);
-    emitRegs(accReg, accReg);
-    emitJumpTo(revLoopStart);
-    patchJump(revExitJump);
-
-    return resultReg;
+    return emitListMapLoop(objReg, listType, resultListType,
+        [&](u16 elemReg, Type* elemType) {
+            return emitMapFieldGet(expr, elemReg, elemType);
+        });
 }
 
 u16 CodeGen::genAutoMapFieldDeep(FieldExpr_* expr, int depth) {
