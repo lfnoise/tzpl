@@ -187,6 +187,27 @@ SetType* TypeUniverse::setType(Type* elemType) {
     return t;
 }
 
+PersistentVectorType* TypeUniverse::persistentVectorType(Type* elemType) {
+    auto it = persistentVectorTypeCache_.find(elemType);
+    if (it != persistentVectorTypeCache_.end()) return it->second;
+    TypeCreationScope scope(this);
+    auto* t = new PersistentVectorType(elemType);
+    classifyType(t);
+    persistentVectorTypeCache_[elemType] = t;
+    return t;
+}
+
+PersistentMapType* TypeUniverse::persistentMapType(Type* keyType, Type* valueType) {
+    auto key = std::make_pair(keyType, valueType);
+    auto it = persistentMapTypeCache_.find(key);
+    if (it != persistentMapTypeCache_.end()) return it->second;
+    TypeCreationScope scope(this);
+    auto* t = new PersistentMapType(keyType, valueType);
+    classifyType(t);
+    persistentMapTypeCache_[key] = t;
+    return t;
+}
+
 EnumType* TypeUniverse::optionType(Type* elemType) {
     auto it = optionTypeCache_.find(elemType);
     if (it != optionTypeCache_.end()) return it->second;

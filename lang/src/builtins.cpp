@@ -24,8 +24,33 @@
 #include "builtins_internal.hpp"
 #include "disassemble.hpp"
 #include "tracing_gc.hpp"
+#include "persistent_vector.hpp"
+#include "persistent_map.hpp"
 
 namespace ts {
+
+// Forward declarations for persistent-collection runtime builtins (defined
+// further down). The Array/List/Map resolvers above reference these when an
+// argument is a persistent vector (#[T]) or persistent map (#[K:V]).
+static void builtin_length_pvec(VM& vm, u16 dst, u16, u16 ab);
+static void builtin_length_pmap(VM& vm, u16 dst, u16, u16 ab);
+static void builtin_push_pvec(VM& vm, u16 dst, u16, u16 ab);
+static void builtin_put_at_pvec(VM& vm, u16 dst, u16, u16 ab);
+static void builtin_get_pmap(VM& vm, u16 dst, u16, u16 ab);
+static void builtin_get_pmap_default(VM& vm, u16 dst, u16, u16 ab);
+static void builtin_put_pmap(VM& vm, u16 dst, u16, u16 ab);
+static void builtin_remove_pmap(VM& vm, u16 dst, u16, u16 ab);
+static void builtin_contains_pmap(VM& vm, u16 dst, u16, u16 ab);
+static void builtin_keys_pmap(VM& vm, u16 dst, u16, u16 ab);
+static void builtin_values_pmap(VM& vm, u16 dst, u16, u16 ab);
+static void builtin_merge_pmap(VM& vm, u16 dst, u16, u16 ab);
+static void builtin_to_pvec(VM& vm, u16 dst, u16, u16 ab);
+static void builtin_pvec_to_array(VM& vm, u16 dst, u16, u16 ab);
+static void builtin_to_pmap(VM& vm, u16 dst, u16, u16 ab);
+static void builtin_pmap_to_map(VM& vm, u16 dst, u16, u16 ab);
+static void builtin_map_pvec(VM& vm, u16 dst, u16, u16 ab);
+static void builtin_filter_pvec(VM& vm, u16 dst, u16, u16 ab);
+static void builtin_fold_pvec(VM& vm, u16 dst, u16, u16 ab);
 
 // ============================================================================
 // Template resolvers for Array/List operations
@@ -116,6 +141,10 @@ static bool resolve_grade(Compiler& compiler, const std::vector<Type*>& args,
 static bool resolve_push(Compiler& compiler, const std::vector<Type*>& args,
     std::vector<Type*>& pt, Type*& rt, CFun& cf) {
     if (args.size() != 2) return false;
+    if (auto* pv = dynamic_cast<PersistentVectorType*>(args[0])) {
+        if (args[1] != pv->elemType_) return false;
+        pt = {pv, pv->elemType_}; rt = pv; cf = builtin_push_pvec; return true;
+    }
     auto* at = dynamic_cast<ArrayType*>(args[0]);
     if (!at || args[1] != at->elemType_) return false;
     pt = {at, at->elemType_}; rt = at; cf = builtin_push_array; return true;
@@ -300,6 +329,11 @@ static bool resolve_map(Compiler& compiler, const std::vector<Type*>& args,
         pt = {lt, args[1]}; rt = compiler.listType(ft->returnType_);
         cf = builtin_map_list; return true;
     }
+    if (auto* pv = dynamic_cast<PersistentVectorType*>(args[0])) {
+        if (ft->argTypes_[0] != pv->elemType_) return false;
+        pt = {pv, args[1]}; rt = compiler.persistentVectorType(ft->returnType_);
+        cf = builtin_map_pvec; return true;
+    }
     return false;
 }
 
@@ -316,6 +350,10 @@ static bool resolve_filter(Compiler& compiler, const std::vector<Type*>& args,
     if (auto* lt = dynamic_cast<ListType*>(args[0])) {
         if (ft->argTypes_[0] != lt->elemType_) return false;
         pt = {lt, args[1]}; rt = lt; cf = builtin_filter_list; return true;
+    }
+    if (auto* pv = dynamic_cast<PersistentVectorType*>(args[0])) {
+        if (ft->argTypes_[0] != pv->elemType_) return false;
+        pt = {pv, args[1]}; rt = pv; cf = builtin_filter_pvec; return true;
     }
     return false;
 }
@@ -334,6 +372,10 @@ static bool resolve_fold(Compiler& compiler, const std::vector<Type*>& args,
     if (auto* lt = dynamic_cast<ListType*>(args[0])) {
         if (ft->argTypes_[1] != lt->elemType_) return false;
         pt = {lt, args[1], args[2]}; rt = args[1]; cf = builtin_fold_list; return true;
+    }
+    if (auto* pv = dynamic_cast<PersistentVectorType*>(args[0])) {
+        if (ft->argTypes_[1] != pv->elemType_) return false;
+        pt = {pv, args[1], args[2]}; rt = args[1]; cf = builtin_fold_pvec; return true;
     }
     return false;
 }
@@ -925,12 +967,20 @@ static void builtin_contains_set(VM& vm, u16 dst, u16, u16 ab);
 static bool resolve_get_map(Compiler& compiler, const std::vector<Type*>& args,
     std::vector<Type*>& pt, Type*& rt, CFun& cf) {
     if (args.size() == 2) {
+        if (auto* pm = dynamic_cast<PersistentMapType*>(args[0])) {
+            if (args[1] != pm->keyType_) return false;
+            pt = {pm, pm->keyType_}; rt = compiler.optionType(pm->valueType_); cf = builtin_get_pmap; return true;
+        }
         auto* mt = dynamic_cast<MapType*>(args[0]);
         if (!mt) return false;
         if (args[1] != mt->keyType_) return false;
         pt = {mt, mt->keyType_}; rt = compiler.optionType(mt->valueType_); cf = builtin_get_map; return true;
     }
     if (args.size() == 3) {
+        if (auto* pm = dynamic_cast<PersistentMapType*>(args[0])) {
+            if (args[1] != pm->keyType_ || args[2] != pm->valueType_) return false;
+            pt = {pm, pm->keyType_, pm->valueType_}; rt = pm->valueType_; cf = builtin_get_pmap_default; return true;
+        }
         auto* mt = dynamic_cast<MapType*>(args[0]);
         if (!mt) return false;
         if (args[1] != mt->keyType_) return false;
@@ -971,6 +1021,15 @@ static bool resolve_get_or_else(Compiler& compiler, const std::vector<Type*>& ar
 static bool resolve_put(Compiler& compiler, const std::vector<Type*>& args,
     std::vector<Type*>& pt, Type*& rt, CFun& cf) {
     if (args.size() != 3) return false;
+    if (auto* pm = dynamic_cast<PersistentMapType*>(args[0])) {
+        if (args[1] != pm->keyType_ || args[2] != pm->valueType_) return false;
+        pt = {pm, pm->keyType_, pm->valueType_}; rt = pm; cf = builtin_put_pmap; return true;
+    }
+    if (auto* pv = dynamic_cast<PersistentVectorType*>(args[0])) {
+        // put: #[T], Int, T -> #[T]  (returns a new vector with element i replaced)
+        if (args[1] != compiler.intType() || args[2] != pv->elemType_) return false;
+        pt = {pv, compiler.intType(), pv->elemType_}; rt = pv; cf = builtin_put_at_pvec; return true;
+    }
     auto* mt = dynamic_cast<MapType*>(args[0]);
     if (!mt) return false;
     if (args[1] != mt->keyType_ || args[2] != mt->valueType_) return false;
@@ -990,6 +1049,10 @@ static bool resolve_put_bang(Compiler& compiler, const std::vector<Type*>& args,
 static bool resolve_remove(Compiler& compiler, const std::vector<Type*>& args,
     std::vector<Type*>& pt, Type*& rt, CFun& cf) {
     if (args.size() != 2) return false;
+    if (auto* pm = dynamic_cast<PersistentMapType*>(args[0])) {
+        if (args[1] != pm->keyType_) return false;
+        pt = {pm, pm->keyType_}; rt = pm; cf = builtin_remove_pmap; return true;
+    }
     if (auto* mt = dynamic_cast<MapType*>(args[0])) {
         if (args[1] != mt->keyType_) return false;
         pt = {mt, mt->keyType_}; rt = mt; cf = builtin_remove_map; return true;
@@ -1019,6 +1082,10 @@ static bool resolve_remove_bang(Compiler& compiler, const std::vector<Type*>& ar
 static bool resolve_contains(Compiler& compiler, const std::vector<Type*>& args,
     std::vector<Type*>& pt, Type*& rt, CFun& cf) {
     if (args.size() != 2) return false;
+    if (auto* pm = dynamic_cast<PersistentMapType*>(args[0])) {
+        if (args[1] != pm->keyType_) return false;
+        pt = {pm, pm->keyType_}; rt = compiler.boolType(); cf = builtin_contains_pmap; return true;
+    }
     if (auto* mt = dynamic_cast<MapType*>(args[0])) {
         if (args[1] != mt->keyType_) return false;
         pt = {mt, mt->keyType_}; rt = compiler.boolType(); cf = builtin_contains_map; return true;
@@ -1033,6 +1100,9 @@ static bool resolve_contains(Compiler& compiler, const std::vector<Type*>& args,
 static bool resolve_keys(Compiler& compiler, const std::vector<Type*>& args,
     std::vector<Type*>& pt, Type*& rt, CFun& cf) {
     if (args.size() != 1) return false;
+    if (auto* pm = dynamic_cast<PersistentMapType*>(args[0])) {
+        pt = {pm}; rt = compiler.persistentVectorType(pm->keyType_); cf = builtin_keys_pmap; return true;
+    }
     auto* mt = dynamic_cast<MapType*>(args[0]);
     if (!mt) return false;
     pt = {mt}; rt = compiler.arrayType(mt->keyType_); cf = builtin_keys_map; return true;
@@ -1041,6 +1111,9 @@ static bool resolve_keys(Compiler& compiler, const std::vector<Type*>& args,
 static bool resolve_values(Compiler& compiler, const std::vector<Type*>& args,
     std::vector<Type*>& pt, Type*& rt, CFun& cf) {
     if (args.size() != 1) return false;
+    if (auto* pm = dynamic_cast<PersistentMapType*>(args[0])) {
+        pt = {pm}; rt = compiler.persistentVectorType(pm->valueType_); cf = builtin_values_pmap; return true;
+    }
     auto* mt = dynamic_cast<MapType*>(args[0]);
     if (!mt) return false;
     pt = {mt}; rt = compiler.arrayType(mt->valueType_); cf = builtin_values_map; return true;
@@ -1049,6 +1122,10 @@ static bool resolve_values(Compiler& compiler, const std::vector<Type*>& args,
 static bool resolve_merge(Compiler& compiler, const std::vector<Type*>& args,
     std::vector<Type*>& pt, Type*& rt, CFun& cf) {
     if (args.size() != 2) return false;
+    if (auto* pm = dynamic_cast<PersistentMapType*>(args[0])) {
+        if (args[1] != pm) return false;
+        pt = {pm, pm}; rt = pm; cf = builtin_merge_pmap; return true;
+    }
     auto* mt = dynamic_cast<MapType*>(args[0]);
     if (!mt) return false;
     if (args[1] != mt) return false;
@@ -1873,6 +1950,12 @@ static bool resolve_length(Compiler& compiler, const std::vector<Type*>& args,
     if (auto* st = dynamic_cast<SetType*>(args[0])) {
         pt = {st}; rt = compiler.intType(); cf = builtin_length_set; return true;
     }
+    if (auto* pv = dynamic_cast<PersistentVectorType*>(args[0])) {
+        pt = {pv}; rt = compiler.intType(); cf = builtin_length_pvec; return true;
+    }
+    if (auto* pm = dynamic_cast<PersistentMapType*>(args[0])) {
+        pt = {pm}; rt = compiler.intType(); cf = builtin_length_pmap; return true;
+    }
     return false;
 }
 
@@ -2574,6 +2657,311 @@ static bool resolve_disassemble(Compiler& compiler, const std::vector<Type*>& ar
 }
 
 // ============================================================================
+// Persistent collection runtime builtins
+// ============================================================================
+
+// Copy one element of mutable array `a` (element type `et`) into the
+// stride-packed slot `dst` (stride words). Mirrors arrayPushFromSlot in
+// reverse, reading natively without boxing.
+static void readArrayElemSlot(Obj* a, Type* et, size_t i, Word* dst) {
+    switch (arrayBackendFor(et)) {
+        case ArrayBackend::Int:   dst[0].i = static_cast<PodArray<i64>*>(a)->v[i]; return;
+        case ArrayBackend::Float: dst[0].f = static_cast<PodArray<f64>*>(a)->v[i]; return;
+        case ArrayBackend::Complex: {
+            x64 const& x = static_cast<PodArray<x64>*>(a)->v[i];
+            dst[0].f = x.real(); dst[1].f = x.imag(); return;
+        }
+        case ArrayBackend::Fraction: {
+            r64 const& r = static_cast<PodArray<r64>*>(a)->v[i];
+            dst[0].i = r.numer(); dst[1].i = r.denom(); return;
+        }
+        case ArrayBackend::Inline: {
+            Word const* s = static_cast<InlineArray*>(a)->slot(i);
+            u32 sw = strideForType(et);
+            for (u32 w = 0; w < sw; ++w) dst[w] = s[w];
+            return;
+        }
+        case ArrayBackend::Obj: dst[0].o = static_cast<ObjArray*>(a)->get(i); return;
+    }
+}
+
+static void builtin_length_pvec(VM& vm, u16 dst, u16, u16 ab) {
+    vm.reg(dst).i = (i64)static_cast<PVec*>(vm.reg(ab).o)->count_;
+}
+
+static void builtin_length_pmap(VM& vm, u16 dst, u16, u16 ab) {
+    vm.reg(dst).i = (i64)static_cast<PMap*>(vm.reg(ab).o)->count_;
+}
+
+// push: #[T], T -> #[T]  (returns a NEW persistent vector)
+static void builtin_push_pvec(VM& vm, u16 dst, u16, u16 ab) {
+    auto* v = static_cast<PVec*>(vm.reg(ab).o);
+    vm.reg(dst).o = v->push(&vm.reg((u16)(ab + 1)));
+}
+
+// put: #[T], Int, T -> #[T]  (returns a NEW vector with element i replaced)
+static void builtin_put_at_pvec(VM& vm, u16 dst, u16, u16 ab) {
+    auto* v = static_cast<PVec*>(vm.reg(ab).o);
+    i64 raw = vm.reg((u16)(ab + 1)).i;
+    if (v->count_ == 0) { vm.reg(dst).o = v; return; }
+    u32 idx = (u32)((raw % (i64)v->count_ + (i64)v->count_) % (i64)v->count_);
+    Word const* elem = &vm.reg((u16)(ab + 2));
+    vm.reg(dst).o = v->assocN(idx, elem);
+}
+
+// get: #[K:V], K -> Option<V>
+static void builtin_get_pmap(VM& vm, u16 dst, u16, u16 ab) {
+    auto* m = static_cast<PMap*>(vm.reg(ab).o);
+    auto* pmt = static_cast<PersistentMapType*>(m->type_);
+    Type* vt = pmt->valueType_;
+    auto* optType = vm.optionType(vt);
+    Word const* val = m->get(&vm.reg((u16)(ab + 1)));
+    bool found = (val != nullptr);
+    u32 vS = strideForType(vt);
+    if (optType->repr_ == Type::Repr::NullablePtrEnum) {
+        vm.reg(dst).o = found ? val[0].o : nullptr;
+        return;
+    }
+    if (optType->repr_ == Type::Repr::Inline) {
+        if (found) {
+            vm.reg(dst).i = 0;
+            for (u32 i = 0; i < vS; ++i) vm.reg((u16)(dst + 1 + i)) = val[i];
+        } else {
+            vm.reg(dst).i = 1;
+            for (u32 i = 0; i < vS; ++i) vm.reg((u16)(dst + 1 + i)).i = 0;
+        }
+        return;
+    }
+    auto* e = Enum::create(optType, found ? 0 : 1);
+    if (found) {
+        u32 sw = (vt && vt->sizeWords_ > 0) ? vt->sizeWords_ : 1;
+        for (u32 i = 0; i < sw; ++i) e->v[i] = val[i];
+    }
+    vm.reg(dst).o = e;
+}
+
+// get: #[K:V], K, V -> V  (with default)
+static void builtin_get_pmap_default(VM& vm, u16 dst, u16, u16 ab) {
+    auto* m = static_cast<PMap*>(vm.reg(ab).o);
+    auto* pmt = static_cast<PersistentMapType*>(m->type_);
+    u32 kS = strideForType(pmt->keyType_);
+    u32 vS = strideForType(pmt->valueType_);
+    Word const* val = m->get(&vm.reg((u16)(ab + 1)));
+    if (val) {
+        for (u32 i = 0; i < vS; ++i) vm.reg((u16)(dst + i)) = val[i];
+    } else {
+        Word const* dflt = &vm.reg((u16)(ab + 1 + kS));
+        for (u32 i = 0; i < vS; ++i) vm.reg((u16)(dst + i)) = dflt[i];
+    }
+}
+
+// put: #[K:V], K, V -> #[K:V]  (returns a NEW persistent map)
+static void builtin_put_pmap(VM& vm, u16 dst, u16, u16 ab) {
+    auto* m = static_cast<PMap*>(vm.reg(ab).o);
+    auto* pmt = static_cast<PersistentMapType*>(m->type_);
+    u32 kS = strideForType(pmt->keyType_);
+    Word const* key = &vm.reg((u16)(ab + 1));
+    Word const* val = &vm.reg((u16)(ab + 1 + kS));
+    vm.reg(dst).o = m->assoc(key, val);
+}
+
+// remove: #[K:V], K -> #[K:V]
+static void builtin_remove_pmap(VM& vm, u16 dst, u16, u16 ab) {
+    auto* m = static_cast<PMap*>(vm.reg(ab).o);
+    vm.reg(dst).o = m->dissoc(&vm.reg((u16)(ab + 1)));
+}
+
+// contains: #[K:V], K -> Bool
+static void builtin_contains_pmap(VM& vm, u16 dst, u16, u16 ab) {
+    auto* m = static_cast<PMap*>(vm.reg(ab).o);
+    vm.reg(dst).i = m->contains(&vm.reg((u16)(ab + 1))) ? 1 : 0;
+}
+
+// keys: #[K:V] -> #[K]   (values: -> #[V])
+static void buildPVecFromPMap(VM& vm, u16 dst, PMap* m, bool wantValues) {
+    auto* pmt = static_cast<PersistentMapType*>(m->type_);
+    Type* kt = pmt->keyType_;
+    Type* vt = pmt->valueType_;
+    Type* elemT = wantValues ? vt : kt;
+    u32 kS = strideForType(kt);
+    u32 eS = strideForType(elemT);
+    Vec<Word> buf((rt::STLAllocator<Word>(rt::gCurrentAllocator)));
+    buf.reserve((size_t)m->count_ * eS);
+    PMapIter it(m);
+    while (Word const* pair = it.next()) {
+        Word const* src = wantValues ? (pair + kS) : pair;
+        for (u32 w = 0; w < eS; ++w) buf.push_back(src[w]);
+    }
+    auto* pvType = vm.persistentVectorType(elemT);
+    vm.reg(dst).o = PVec::fromWords(pvType, buf.empty() ? nullptr : &buf[0], m->count_);
+}
+
+static void builtin_keys_pmap(VM& vm, u16 dst, u16, u16 ab) {
+    buildPVecFromPMap(vm, dst, static_cast<PMap*>(vm.reg(ab).o), /*wantValues=*/false);
+}
+
+static void builtin_values_pmap(VM& vm, u16 dst, u16, u16 ab) {
+    buildPVecFromPMap(vm, dst, static_cast<PMap*>(vm.reg(ab).o), /*wantValues=*/true);
+}
+
+// merge: #[K:V], #[K:V] -> #[K:V]  (right operand's keys win)
+static void builtin_merge_pmap(VM& vm, u16 dst, u16, u16 ab) {
+    auto* a = static_cast<PMap*>(vm.reg(ab).o);
+    auto* b = static_cast<PMap*>(vm.reg((u16)(ab + 1)).o);
+    auto* pmt = static_cast<PersistentMapType*>(a->type_);
+    u32 kS = strideForType(pmt->keyType_);
+    PMap* result = a;
+    PMapIter it(b);
+    while (Word const* pair = it.next()) {
+        result = result->assoc(pair, pair + kS);
+    }
+    vm.reg(dst).o = result;
+}
+
+// toPersistentVector: [T] -> #[T]
+static void builtin_to_pvec(VM& vm, u16 dst, u16, u16 ab) {
+    auto* arr = vm.reg(ab).o;
+    auto* at = static_cast<ArrayType*>(arr->type_);
+    Type* et = at->elemType_;
+    u32 eS = strideForType(et);
+    size_t n = getArraySize(vm, arr, et);
+    Vec<Word> buf((rt::STLAllocator<Word>(rt::gCurrentAllocator)));
+    buf.assign(n * eS, Word{});
+    for (size_t i = 0; i < n; ++i) readArrayElemSlot(arr, et, i, &buf[i * eS]);
+    auto* pvType = vm.persistentVectorType(et);
+    vm.reg(dst).o = PVec::fromWords(pvType, n ? &buf[0] : nullptr, (u32)n);
+}
+
+// toArray: #[T] -> [T]
+static void builtin_pvec_to_array(VM& vm, u16 dst, u16, u16 ab) {
+    auto* v = static_cast<PVec*>(vm.reg(ab).o);
+    Type* et = v->elemType();
+    auto* at = vm.arrayType(et);
+    auto* result = makeEmptyArray(at);
+    for (u32 i = 0; i < v->count_; ++i) {
+        arrayPushFromSlot(vm, result, et, v->elemAt(i));
+    }
+    vm.reg(dst).o = result;
+}
+
+// toPersistentMap: [K:V] -> #[K:V]
+static void builtin_to_pmap(VM& vm, u16 dst, u16, u16 ab) {
+    auto* map = static_cast<MapObj*>(vm.reg(ab).o);
+    auto* mt = static_cast<MapType*>(map->type_);
+    auto* pmType = vm.persistentMapType(mt->keyType_, mt->valueType_);
+    PMap* result = new PMap(pmType);
+    u32 cap = map->capacity();
+    for (u32 i = 0; i < cap; ++i) {
+        if (map->slotState(i) != MapObj::SlotOccupied) continue;
+        result = result->assoc(map->slotKey(i), map->slotVal(i));
+    }
+    vm.reg(dst).o = result;
+}
+
+// toMap: #[K:V] -> [K:V]
+static void builtin_pmap_to_map(VM& vm, u16 dst, u16, u16 ab) {
+    auto* m = static_cast<PMap*>(vm.reg(ab).o);
+    auto* pmt = static_cast<PersistentMapType*>(m->type_);
+    u32 kS = strideForType(pmt->keyType_);
+    auto* mapType = vm.mapType(pmt->keyType_, pmt->valueType_);
+    auto* result = new MapObj(mapType);
+    PMapIter it(m);
+    while (Word const* pair = it.next()) {
+        result->insertOrUpdate(pair, pair + kS);
+    }
+    vm.reg(dst).o = result;
+}
+
+// map: #[T], (T)->U -> #[U]
+static void builtin_map_pvec(VM& vm, u16 dst, u16, u16 ab) {
+    auto* v = static_cast<PVec*>(vm.reg(ab).o);
+    auto* fn = static_cast<Callable*>(vm.reg((u16)(ab + 1)).o);
+    Type* srcET = v->elemType();
+    auto* fnType = static_cast<FunctionType*>(fn->type_);
+    Type* resET = fnType->returnType_;
+    auto* resType = vm.persistentVectorType(resET);
+    PVec* result = new PVec(resType);
+    u16 sb = vm.currentCodeBlock()->numRegs;
+    for (u32 i = 0; i < v->count_; ++i) {
+        placeLambdaArgSlot(vm, sb, v->elemAt(i), srcET);
+        callOneArg(vm, fn, sb);
+        result = result->push(&vm.reg(sb));
+    }
+    vm.reg(dst).o = result;
+}
+
+// filter: #[T], (T)->Bool -> #[T]
+static void builtin_filter_pvec(VM& vm, u16 dst, u16, u16 ab) {
+    auto* v = static_cast<PVec*>(vm.reg(ab).o);
+    auto* fn = static_cast<Callable*>(vm.reg((u16)(ab + 1)).o);
+    Type* et = v->elemType();
+    auto* resType = static_cast<PersistentVectorType*>(v->type_);
+    PVec* result = new PVec(resType);
+    u16 sb = vm.currentCodeBlock()->numRegs;
+    for (u32 i = 0; i < v->count_; ++i) {
+        Word const* elem = v->elemAt(i);
+        placeLambdaArgSlot(vm, sb, elem, et);
+        callOneArg(vm, fn, sb);
+        if (vm.reg(sb).i) result = result->push(elem);
+    }
+    vm.reg(dst).o = result;
+}
+
+// fold: #[T], U, (U,T)->U -> U
+static void builtin_fold_pvec(VM& vm, u16 dst, u16, u16 ab) {
+    auto* v = static_cast<PVec*>(vm.reg(ab).o);
+    auto* prim = vm.currentPrimitive();
+    auto* primTT = static_cast<TupleType*>(prim->type_);
+    Type* accT = primTT->fields_[1];
+    u32 accSW = (accT && accT->sizeWords_ > 0) ? accT->sizeWords_ : 1;
+    auto* fn = static_cast<Callable*>(vm.reg((u16)(ab + 1 + accSW)).o);
+    Type* et = v->elemType();
+    u16 sb = vm.currentCodeBlock()->numRegs;
+    Word const* accSrc = &vm.reg((u16)(ab + 1));
+    for (u32 i = 0; i < accSW; ++i) vm.reg((u16)(sb + i)) = accSrc[i];
+    u16 elemSb = (u16)(sb + accSW);
+    for (u32 i = 0; i < v->count_; ++i) {
+        placeLambdaArgSlot(vm, elemSb, v->elemAt(i), et);
+        callTwoArgs(vm, fn, sb);
+    }
+    for (u32 i = 0; i < accSW; ++i) vm.reg((u16)(dst + i)) = vm.reg((u16)(sb + i));
+}
+
+// --- conversion resolvers ---
+
+static bool resolve_to_pvec(Compiler& compiler, const std::vector<Type*>& args,
+    std::vector<Type*>& pt, Type*& rt, CFun& cf) {
+    if (args.size() != 1) return false;
+    auto* at = dynamic_cast<ArrayType*>(args[0]);
+    if (!at) return false;
+    pt = {at}; rt = compiler.persistentVectorType(at->elemType_); cf = builtin_to_pvec; return true;
+}
+
+static bool resolve_pvec_to_array(Compiler& compiler, const std::vector<Type*>& args,
+    std::vector<Type*>& pt, Type*& rt, CFun& cf) {
+    if (args.size() != 1) return false;
+    auto* pv = dynamic_cast<PersistentVectorType*>(args[0]);
+    if (!pv) return false;
+    pt = {pv}; rt = compiler.arrayType(pv->elemType_); cf = builtin_pvec_to_array; return true;
+}
+
+static bool resolve_to_pmap(Compiler& compiler, const std::vector<Type*>& args,
+    std::vector<Type*>& pt, Type*& rt, CFun& cf) {
+    if (args.size() != 1) return false;
+    auto* mt = dynamic_cast<MapType*>(args[0]);
+    if (!mt) return false;
+    pt = {mt}; rt = compiler.persistentMapType(mt->keyType_, mt->valueType_); cf = builtin_to_pmap; return true;
+}
+
+static bool resolve_pmap_to_map(Compiler& compiler, const std::vector<Type*>& args,
+    std::vector<Type*>& pt, Type*& rt, CFun& cf) {
+    if (args.size() != 1) return false;
+    auto* pm = dynamic_cast<PersistentMapType*>(args[0]);
+    if (!pm) return false;
+    pt = {pm}; rt = compiler.mapType(pm->keyType_, pm->valueType_); cf = builtin_pmap_to_map; return true;
+}
+
+// ============================================================================
 // Registration
 // ============================================================================
 
@@ -2686,6 +3074,12 @@ void registerBuiltinFunctions(Compiler& compiler,
     registerTemplate(compiler, functions, "intersection", resolve_intersection,    /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
     registerTemplate(compiler, functions, "difference",   resolve_difference,      /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
     registerTemplate(compiler, functions, "toArray",      resolve_toArray_set,     /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+
+    // --- persistent collection conversions ---
+    registerTemplate(compiler, functions, "toPersistentVector", resolve_to_pvec,      /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "toArray",            resolve_pvec_to_array, /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "toPersistentMap",    resolve_to_pmap,      /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "toMap",              resolve_pmap_to_map,  /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
 
     // --- hash builtin ---
     // Phase 4g.6: hash resolves builtin_hash_inline for Inline-classified

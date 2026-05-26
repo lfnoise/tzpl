@@ -32,6 +32,8 @@ set(LIB_SOURCES
     src/symbol.cpp
     src/compiler.cpp
     src/value.cpp
+    src/persistent_vector.cpp
+    src/persistent_map.cpp
     src/type_system.cpp
     src/type_universe.cpp
     src/opcodes.cpp

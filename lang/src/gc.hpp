@@ -69,6 +69,11 @@ enum class GCTag : u8 {
     Enum,
     MapObj,
     SetObj,
+    PVec,        // persistent vector handle (root + tail)
+    PVecNode,    // persistent vector interior node (Obj* children)
+    PVecLeaf,    // persistent vector leaf (stride-packed Word elements)
+    PMap,        // persistent map handle (root)
+    PMapNode,    // persistent map HAMT node (inline K/V pairs + child nodes)
     Lambda,
     CoroutineObj,
     CoroutineFrame,

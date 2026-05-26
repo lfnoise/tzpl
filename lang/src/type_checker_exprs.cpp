@@ -853,6 +853,15 @@ Type* TypeChecker::inferBinaryOp(BinaryOpExpr* expr) {
                     return leftType;
                 }
             }
+            if (auto* pvL = dynamic_cast<PersistentVectorType*>(leftType)) {
+                if (auto* pvR = dynamic_cast<PersistentVectorType*>(rightType)) {
+                    if (typesEqual(pvL->elemType_, pvR->elemType_)) {
+                        return leftType;
+                    }
+                    error(expr->loc, "'$' requires persistent vectors with the same element type");
+                    return leftType;
+                }
+            }
             if (auto* tupL = dynamic_cast<TupleType*>(leftType)) {
                 if (auto* tupR = dynamic_cast<TupleType*>(rightType)) {
                     Vec<Type*> fields(rt::STLAllocator<Type*>(nullptr));

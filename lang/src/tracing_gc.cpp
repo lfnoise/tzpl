@@ -17,6 +17,8 @@
 #include "tracing_gc.hpp"
 #include "vm.hpp"
 #include "value.hpp"   // CodeBlock, StackMap, all Obj subclasses
+#include "persistent_vector.hpp"
+#include "persistent_map.hpp"
 
 namespace ts {
 
@@ -62,6 +64,21 @@ void gcScanByTag(GCObj* obj, TracingGC& gc) {
         return;
     case GCTag::SetObj:
         static_cast<SetObj*>(obj)->SetObj::gcScanChildren(gc);
+        return;
+    case GCTag::PVec:
+        static_cast<PVec*>(obj)->PVec::gcScanChildren(gc);
+        return;
+    case GCTag::PVecNode:
+        static_cast<PVecNode*>(obj)->PVecNode::gcScanChildren(gc);
+        return;
+    case GCTag::PVecLeaf:
+        static_cast<PVecLeaf*>(obj)->PVecLeaf::gcScanChildren(gc);
+        return;
+    case GCTag::PMap:
+        static_cast<PMap*>(obj)->PMap::gcScanChildren(gc);
+        return;
+    case GCTag::PMapNode:
+        static_cast<PMapNode*>(obj)->PMapNode::gcScanChildren(gc);
         return;
     case GCTag::Lambda:
         static_cast<Lambda*>(obj)->Lambda::gcScanChildren(gc);

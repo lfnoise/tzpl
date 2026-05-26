@@ -554,6 +554,7 @@ Token Lexer::nextToken() {
             return makeToken(TokenKind::At, start, "@");
         }
         case '$': return makeToken(TokenKind::Dollar, start, "$");
+        case '#': return makeToken(TokenKind::Hash, start, "#");
         case ',': return makeToken(TokenKind::Comma, start, ",");
         case ';': return makeToken(TokenKind::Semicolon, start, ";");
 
@@ -755,6 +756,7 @@ const char* tokenKindString(TokenKind kind) {
         case TokenKind::FatArrow:        return "'=>'";
         case TokenKind::At:              return "'@'";
         case TokenKind::Dollar:          return "'$'";
+        case TokenKind::Hash:            return "'#'";
         case TokenKind::Dot:             return "'.'";
         case TokenKind::DotDot:          return "'..'";
         case TokenKind::Ellipsis:        return "'...'";

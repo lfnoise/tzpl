@@ -39,6 +39,8 @@ class RangeType;
 class RefType;
 class MapType;
 class SetType;
+class PersistentVectorType;
+class PersistentMapType;
 class TupleType;
 class FunctionType;
 class EnumType;
@@ -110,6 +112,8 @@ public:
     FunctionType* functionType(Type* const* argTypes, size_t argCount, Type* returnType);
     MapType* mapType(Type* keyType, Type* valueType);
     SetType* setType(Type* elemType);
+    PersistentVectorType* persistentVectorType(Type* elemType);
+    PersistentMapType* persistentMapType(Type* keyType, Type* valueType);
     EnumType* optionType(Type* elemType);
     CoroutineType* coroutineType(Type* yieldType);
 
@@ -137,6 +141,8 @@ private:
     std::unordered_map<std::vector<Type*>, FunctionType*, TypeVecHash> functionTypeCache_;
     std::unordered_map<std::pair<Type*, Type*>, MapType*, TypePairHash> mapTypeCache_;
     std::unordered_map<Type*, SetType*> setTypeCache_;
+    std::unordered_map<Type*, PersistentVectorType*> persistentVectorTypeCache_;
+    std::unordered_map<std::pair<Type*, Type*>, PersistentMapType*, TypePairHash> persistentMapTypeCache_;
     std::unordered_map<Type*, EnumType*> optionTypeCache_;
     std::unordered_map<Type*, CoroutineType*> coroutineTypeCache_;
 };

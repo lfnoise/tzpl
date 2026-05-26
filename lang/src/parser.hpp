@@ -90,6 +90,10 @@ private:
     // Expressions (Pratt parsing)
     ExprPtr parseExpression(int minPrec = 0);
     ExprPtr parsePrimary();
+    // Parses a bracketed array/map literal body. Assumes the opening '[' has
+    // already been consumed. When isImmutable is true the result is a
+    // persistent vector/map literal (#[...]).
+    ExprPtr parseBracketLiteral(SourceRange loc, bool isImmutable);
     ExprPtr parsePostfix(ExprPtr left);
     ExprPtr parseTightPostfix(ExprPtr left);
     ExprPtr parseStructLiteral(const Token& nameTok);

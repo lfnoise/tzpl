@@ -1893,6 +1893,62 @@ void CodeGen::genForStmt(ForStmtNode* stmt) {
         return;
     }
 
+    // Strategy 5: For-loop over persistent vector
+    if (auto* pvType = dynamic_cast<PersistentVectorType*>(iterType)) {
+        u16 pvReg = genExpr(static_cast<Expr*>(stmt->iterable.get()));
+
+        u16 lenReg = allocReg();
+        emitOp(op_pvec_len);
+        emitRegs(lenReg, pvReg);
+
+        u16 idxReg = allocReg();
+        emitOp(op_load_int_const);
+        emitRegs(idxReg);
+        emitInt(0);
+
+        // loopStart:
+        u16 loopSavedReg = nextReg_;
+        u32 loopStartIdx = (u32)currentBlock_->code.size();
+
+        u16 condReg = allocReg();
+        emitOp(op_cmp_lt_int);
+        emitRegs(condReg, idxReg, lenReg);
+
+        u32 exitJump = emitJump(op_jump_if_false, condReg);
+
+        u16 elemReg = allocSlot(pvType->elemType_);
+        emitOp(op_pvec_get);
+        emitRegs(elemReg, pvReg, idxReg);
+        emitPtr(pvType);
+
+        loopStack_.push_back({loopSavedReg, {}, {}});
+        pushScope();
+        declareLocal(stmt->varName, elemReg, pvType->elemType_, false);
+        clearConstsForMutableLocals();
+        genNode(stmt->body.get());
+        popScope();
+
+        for (u32 cj : loopStack_.back().continueJumps) {
+            patchJump(cj);
+        }
+
+        u16 oneReg = allocReg();
+        emitOp(op_load_int_const);
+        emitRegs(oneReg);
+        emitInt(1);
+        emitOp(op_add_int);
+        emitRegs(idxReg, idxReg, oneReg);
+
+        if (enableRegReclaim) freeRegsTo(loopSavedReg);
+        emitJumpTo(loopStartIdx);
+        patchJump(exitJump);
+        for (u32 bj : loopStack_.back().breakJumps) {
+            patchJump(bj);
+        }
+        loopStack_.pop_back();
+        return;
+    }
+
     error(stmt->loc, "For-loop over unsupported iterable type");
 }
 
@@ -2787,13 +2843,14 @@ u16 CodeGen::genListLiteral(ListLiteralExpr* expr) {
 }
 
 u16 CodeGen::genMapLiteral(MapLiteralExpr* expr) {
+    auto* pmType = dynamic_cast<PersistentMapType*>(expr->resolvedType);
     auto* mapType = dynamic_cast<MapType*>(expr->resolvedType);
-    if (!mapType) {
+    if (!mapType && !pmType) {
         error(expr->loc, "Map literal has non-map resolved type");
         return allocReg();
     }
-    Type* keyType = mapType->keyType_;
-    Type* valType = mapType->valueType_;
+    Type* keyType = pmType ? pmType->keyType_ : mapType->keyType_;
+    Type* valType = pmType ? pmType->valueType_ : mapType->valueType_;
     usize numPairs = expr->entries.size();
 
     // Phase 4g.11: MapObj stores keys/values natively. Each pair occupies
@@ -2816,9 +2873,15 @@ u16 CodeGen::genMapLiteral(MapLiteralExpr* expr) {
     }
 
     u16 dst = allocReg();
-    emitOp(op_make_map);
-    emitRegs(dst, kvBase, (u16)numPairs);
-    emitPtr(mapType);
+    if (pmType) {
+        emitOp(op_make_pmap);
+        emitRegs(dst, kvBase, (u16)numPairs);
+        emitPtr(pmType);
+    } else {
+        emitOp(op_make_map);
+        emitRegs(dst, kvBase, (u16)numPairs);
+        emitPtr(mapType);
+    }
     return dst;
 }
 
@@ -3435,6 +3498,13 @@ u16 CodeGen::genBinaryOp(BinaryOpExpr* expr) {
             emitOp(op_concat_list);
             emitRegs(dst, leftReg, rightReg);
             emitPtr(listType);
+            return dst;
+        }
+        if (auto* pvType = dynamic_cast<PersistentVectorType*>(resultType)) {
+            u16 dst = allocReg();
+            emitOp(op_concat_pvec);
+            emitRegs(dst, leftReg, rightReg);
+            emitPtr(pvType);
             return dst;
         }
         if (auto* tupType = dynamic_cast<TupleType*>(resultType)) {
@@ -6969,6 +7039,10 @@ u16 CodeGen::genDeepMapCall(CallExpr_* expr, int depth) {
 u16 CodeGen::genArrayLiteral(ArrayLiteralExpr* expr) {
     // Dispatch to auto-map variants if any elements have @ annotation
     if (!expr->autoMapElements.empty()) {
+        if (expr->isImmutable) {
+            error(expr->loc, "auto-mapped elements (@) inside a persistent vector literal #[...] are not yet supported");
+            return allocReg();
+        }
         // Check for cartesian (@1/@2) vs zip (@)
         int maxCartesian = 0;
         for (auto& am : expr->autoMapElements) {
@@ -6978,12 +7052,13 @@ u16 CodeGen::genArrayLiteral(ArrayLiteralExpr* expr) {
         return genAutoMapArrayLiteral(expr);
     }
 
+    auto* pvType = dynamic_cast<PersistentVectorType*>(expr->resolvedType);
     auto* arrType = dynamic_cast<ArrayType*>(expr->resolvedType);
-    if (!arrType) {
+    if (!arrType && !pvType) {
         error(expr->loc, "Array literal has non-array resolved type");
         return allocReg();
     }
-    Type* elemType = arrType->elemType_;
+    Type* elemType = pvType ? pvType->elemType_ : arrType->elemType_;
     usize count = expr->elements.size();
 
     // Generate all element values into consecutive registers.
@@ -7005,9 +7080,15 @@ u16 CodeGen::genArrayLiteral(ArrayLiteralExpr* expr) {
     }
 
     u16 dst = allocReg();
-    emitOp(op_make_array);
-    emitRegs(dst, elemBase, (u16)count);
-    emitPtr(arrType);
+    if (pvType) {
+        emitOp(op_make_pvec);
+        emitRegs(dst, elemBase, (u16)count);
+        emitPtr(pvType);
+    } else {
+        emitOp(op_make_array);
+        emitRegs(dst, elemBase, (u16)count);
+        emitPtr(arrType);
+    }
     return dst;
 }
 
@@ -8243,6 +8324,25 @@ u16 CodeGen::genIndexExpr(IndexExpr_* expr) {
         u16 dst = allocSlot(optType);
         idxReg = ensureType(idxReg, expr->index->resolvedType, mapType->keyType_);
         emitOp(op_map_get_option);
+        emitRegs(dst, objReg, idxReg);
+        emitPtr(optType);
+        return dst;
+    }
+    if (auto* pvType = dynamic_cast<PersistentVectorType*>(expr->object->resolvedType)) {
+        // Persistent vector subscript: pv[index] -> elem.
+        u16 dst = allocSlot(pvType->elemType_);
+        idxReg = ensureType(idxReg, expr->index->resolvedType, compiler_.intType());
+        emitOp(op_pvec_get);
+        emitRegs(dst, objReg, idxReg);
+        emitPtr(pvType);
+        return dst;
+    }
+    if (auto* pmType = dynamic_cast<PersistentMapType*>(expr->object->resolvedType)) {
+        // Persistent map subscript: pm[key] -> Option<V>.
+        Type* optType = compiler_.optionType(pmType->valueType_);
+        u16 dst = allocSlot(optType);
+        idxReg = ensureType(idxReg, expr->index->resolvedType, pmType->keyType_);
+        emitOp(op_pmap_get_option);
         emitRegs(dst, objReg, idxReg);
         emitPtr(optType);
         return dst;

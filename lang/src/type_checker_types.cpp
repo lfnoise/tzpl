@@ -78,6 +78,7 @@ Type* TypeChecker::resolveTypeExpr(TypeExpr* typeExpr) {
     if (typeExpr->kind == ASTNode::ArrayType) {
         auto* arrayNode = static_cast<ArrayTypeNode*>(typeExpr);
         Type* elemType = resolveTypeExpr(arrayNode->elemType.get());
+        if (arrayNode->isImmutable) return compiler_.persistentVectorType(elemType);
         return compiler_.arrayType(elemType);
     }
 
@@ -97,6 +98,7 @@ Type* TypeChecker::resolveTypeExpr(TypeExpr* typeExpr) {
         auto* mapNode = static_cast<MapTypeNode*>(typeExpr);
         Type* keyType = resolveTypeExpr(mapNode->keyType.get());
         Type* valueType = resolveTypeExpr(mapNode->valueType.get());
+        if (mapNode->isImmutable) return compiler_.persistentMapType(keyType, valueType);
         return compiler_.mapType(keyType, valueType);
     }
 

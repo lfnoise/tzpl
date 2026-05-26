@@ -1,0 +1,5 @@
+Type error [tests/errors/persistent_no_implicit_convert.x:2:1]
+  |
+2 | let v #[Int] = [1, 2, 3];
+  | ^^^
+  Type mismatch in let declaration: expected '#[Int]', got '[Int]'

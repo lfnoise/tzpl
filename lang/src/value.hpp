@@ -96,6 +96,11 @@ void gcScanPayload(Word const* base, Type* type, TracingGC& gc);
 // retained Word.
 Word boxPayload(VM& vm, Type* type, Word const* src);
 
+// Words occupied per value of `type` in stride-packed storage (1 for atoms
+// and Obj* pointers; sizeWords_ for Inline composites like Complex/Fraction/
+// inline structs). Used by Map/Set and the persistent collections.
+u32 strideForType(Type* type);
+
 // Phase 4g.2: deep box/unbox between an Inline composite (multi-word slot
 // per layout_) and a heap Tuple*/Struct* (1 Word per field, with Inline
 // composite fields recursively boxed). Used at builtin call/return

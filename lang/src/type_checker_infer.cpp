@@ -123,6 +123,11 @@ Type* TypeChecker::inferExpr(Expr* expr, Type* expectedType) {
 
         case ASTNode::ArrayLiteral: {
             auto* lit = static_cast<ArrayLiteralExpr*>(expr);
+            // #[...] produces a persistent vector type; [...] a mutable array.
+            auto vecType = [&](Type* et) -> Type* {
+                return lit->isImmutable ? static_cast<Type*>(compiler_.persistentVectorType(et))
+                                        : static_cast<Type*>(compiler_.arrayType(et));
+            };
             if (lit->elemTypeExpr) {
                 // Typed array constructor: [Type](...)
                 Type* elemType = resolveTypeExpr(lit->elemTypeExpr.get());
@@ -139,7 +144,14 @@ Type* TypeChecker::inferExpr(Expr* expr, Type* expectedType) {
                 }
                 result = compiler_.arrayType(elemType);
             } else if (lit->elements.empty()) {
-                if (auto* at = dynamic_cast<ArrayType*>(expectedType)) {
+                if (lit->isImmutable) {
+                    if (auto* pv = dynamic_cast<PersistentVectorType*>(expectedType)) {
+                        result = pv;
+                    } else {
+                        error(expr->loc, "Cannot infer element type of empty persistent vector literal #[]");
+                        result = compiler_.persistentVectorType(compiler_.intType());
+                    }
+                } else if (auto* at = dynamic_cast<ArrayType*>(expectedType)) {
                     result = at;
                 } else {
                     error(expr->loc, "Cannot infer type of empty array literal");
@@ -199,12 +211,12 @@ Type* TypeChecker::inferExpr(Expr* expr, Type* expectedType) {
                     }
 
                     // Inner type is [elemType] (each produced inner element is an array)
-                    Type* innerArrayType = compiler_.arrayType(elemType);
+                    Type* innerArrayType = vecType(elemType);
                     // Wrap in Array levels: zip = 1 outer level, cartesian = maxCartesian outer levels
                     int wrapLevels = (maxCartesian > 0) ? maxCartesian : 1;
                     Type* wrapped = innerArrayType;
                     for (int level = 0; level < wrapLevels; ++level) {
-                        wrapped = compiler_.arrayType(wrapped);
+                        wrapped = vecType(wrapped);
                     }
                     result = wrapped;
                 } else {
@@ -220,7 +232,7 @@ Type* TypeChecker::inferExpr(Expr* expr, Type* expectedType) {
                                   "', got '" + std::string(elemTypes[i]->str().data(), elemTypes[i]->str().size()) + "'");
                         }
                     }
-                    result = compiler_.arrayType(elemType);
+                    result = vecType(elemType);
                 }
             }
             break;
@@ -228,8 +240,20 @@ Type* TypeChecker::inferExpr(Expr* expr, Type* expectedType) {
 
         case ASTNode::MapLiteral: {
             auto* lit = static_cast<MapLiteralExpr*>(expr);
+            // #[k:v] produces a persistent map type; [k:v] a mutable map.
+            auto mkMapType = [&](Type* kt, Type* vt) -> Type* {
+                return lit->isImmutable ? static_cast<Type*>(compiler_.persistentMapType(kt, vt))
+                                        : static_cast<Type*>(compiler_.mapType(kt, vt));
+            };
             if (lit->entries.empty()) {
-                if (auto* mt = dynamic_cast<MapType*>(expectedType)) {
+                if (lit->isImmutable) {
+                    if (auto* pm = dynamic_cast<PersistentMapType*>(expectedType)) {
+                        result = pm;
+                    } else {
+                        error(expr->loc, "Cannot infer type of empty persistent map literal #[:]");
+                        result = compiler_.persistentMapType(compiler_.intType(), compiler_.intType());
+                    }
+                } else if (auto* mt = dynamic_cast<MapType*>(expectedType)) {
                     result = mt;
                 } else {
                     error(expr->loc, "Cannot infer type of empty map literal [:]");
@@ -252,7 +276,7 @@ Type* TypeChecker::inferExpr(Expr* expr, Type* expectedType) {
                         error(lit->entries[i].value->loc, "Map value type mismatch");
                     }
                 }
-                result = compiler_.mapType(keyType, valType);
+                result = mkMapType(keyType, valType);
             }
             break;
         }
@@ -1357,6 +1381,20 @@ Type* TypeChecker::inferExpr(Expr* expr, Type* expectedType) {
                     }
                 }
                 result = compiler_.optionType(mapType->valueType_);
+            } else if (auto* pvType = dynamic_cast<PersistentVectorType*>(objType)) {
+                if (idxType && idxType != compiler_.intType()) {
+                    error(ie->index->loc, "Persistent vector index must be Int");
+                }
+                result = pvType->elemType_;
+            } else if (auto* pmType = dynamic_cast<PersistentMapType*>(objType)) {
+                if (idxType && idxType != pmType->keyType_) {
+                    if (isNumeric(idxType) && isNumeric(pmType->keyType_)) {
+                        // numeric promotion is ok
+                    } else {
+                        error(ie->index->loc, "Persistent map index type mismatch");
+                    }
+                }
+                result = compiler_.optionType(pmType->valueType_);
             } else if (objType == compiler_.stringType()) {
                 if (idxType && idxType != compiler_.intType()) {
                     error(ie->index->loc, "String index must be Int");

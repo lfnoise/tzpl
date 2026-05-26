@@ -163,6 +163,8 @@ public:
     RefType* refType(Type* elemType) { return typeUniverse_.refType(elemType); }
     MapType* mapType(Type* keyType, Type* valueType) { return typeUniverse_.mapType(keyType, valueType); }
     SetType* setType(Type* elemType) { return typeUniverse_.setType(elemType); }
+    PersistentVectorType* persistentVectorType(Type* elemType) { return typeUniverse_.persistentVectorType(elemType); }
+    PersistentMapType* persistentMapType(Type* keyType, Type* valueType) { return typeUniverse_.persistentMapType(keyType, valueType); }
     EnumType* optionType(Type* elemType) { return typeUniverse_.optionType(elemType); }
     CoroutineType* coroutineType(Type* yieldType) { return typeUniverse_.coroutineType(yieldType); }
     TupleType* tupleType(const Vec<Type*>& fields) { return typeUniverse_.tupleType(fields); }

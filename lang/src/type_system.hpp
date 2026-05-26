@@ -303,6 +303,41 @@ public:
 
 };
 
+// Persistent vector type (immutable, array-mapped-trie backed): #[T]
+class PersistentVectorType : public ObjType {
+public:
+    Type* elemType_;
+
+    PersistentVectorType(Type* elemType)
+        : elemType_(elemType)
+    {
+        registerNewObj(this);
+    }
+
+    VMString str() const override {
+        return rt::fmt("#[{}]", elemType_->str());
+    }
+
+};
+
+// Persistent map type (immutable, HAMT backed): #[K:V]
+class PersistentMapType : public ObjType {
+public:
+    Type* keyType_;
+    Type* valueType_;
+
+    PersistentMapType(Type* keyType, Type* valueType)
+        : keyType_(keyType), valueType_(valueType)
+    {
+        registerNewObj(this);
+    }
+
+    VMString str() const override {
+        return rt::fmt("#[{}:{}]", keyType_->str(), valueType_->str());
+    }
+
+};
+
 // Struct/Enum field
 struct NameTypePair {
     SymbolPtr name;

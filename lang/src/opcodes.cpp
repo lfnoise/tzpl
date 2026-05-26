@@ -24,6 +24,8 @@
 
 #include "opcodes.hpp"
 #include "value.hpp"
+#include "persistent_vector.hpp"
+#include "persistent_map.hpp"
 #include "type_system.hpp"
 #include <cstdio>
 #include <algorithm>
@@ -4372,6 +4374,108 @@ void op_map_set(VM& vm, Code* pc) {
     Word const* vSrc = &vm.reg(valReg);
     map->insertOrUpdate(kSrc, vSrc);
     DISPATCH(3);
+}
+
+// --- Persistent vector ---
+
+// MAKE_PVEC Rd, firstSrc, numElems (3 words: op, regs, PersistentVectorType*)
+// Each element occupies strideForType(elemType) consecutive registers.
+void op_make_pvec(VM& vm, Code* pc) {
+    u16 dst = pc[1].regs[0], firstSrc = pc[1].regs[1], numElems = pc[1].regs[2];
+    auto* pvType = static_cast<PersistentVectorType*>(pc[2].p);
+    PVec* v = PVec::fromWords(pvType, &vm.reg(firstSrc), numElems);
+    vm.reg(dst).o = v;
+    DISPATCH(3);
+}
+
+// PVEC_GET Rd, Ra(pvec), Rb(idx) (3 words: op, regs, PersistentVectorType*)
+// dst spans strideForType(elemType) registers. Negative indices wrap cyclically.
+void op_pvec_get(VM& vm, Code* pc) {
+    u16 dst = pc[1].regs[0], pvReg = pc[1].regs[1], idxReg = pc[1].regs[2];
+    auto* v = static_cast<PVec*>(vm.reg(pvReg).o);
+    i64 raw = vm.reg(idxReg).i;
+    u32 n = v->count_;
+    u32 idx = (u32)cyclicIndex(raw, n);
+    Word const* src = v->elemAt(idx);
+    for (u32 i = 0; i < v->stride_; ++i) vm.reg((u16)(dst + i)) = src[i];
+    DISPATCH(3);
+}
+
+// PVEC_LEN Rd, Ra(pvec) (2 words: op, regs)
+void op_pvec_len(VM& vm, Code* pc) {
+    u16 dst = pc[1].regs[0], pvReg = pc[1].regs[1];
+    auto* v = static_cast<PVec*>(vm.reg(pvReg).o);
+    vm.reg(dst).i = (i64)v->count_;
+    DISPATCH(2);
+}
+
+// CONCAT_PVEC Rd, Ra, Rb (3 words: op, regs, PersistentVectorType*)
+void op_concat_pvec(VM& vm, Code* pc) {
+    u16 dst = pc[1].regs[0], aReg = pc[1].regs[1], bReg = pc[1].regs[2];
+    auto* a = static_cast<PVec*>(vm.reg(aReg).o);
+    auto* b = static_cast<PVec*>(vm.reg(bReg).o);
+    PVec* result = a;
+    for (u32 i = 0; i < b->count_; ++i) {
+        result = result->push(b->elemAt(i));
+    }
+    vm.reg(dst).o = result;
+    DISPATCH(3);
+}
+
+// --- Persistent map ---
+
+// MAKE_PMAP Rd, firstKeyReg, numPairs (3 words: op, regs, PersistentMapType*)
+// Each pair occupies (keyStride + valStride) consecutive registers.
+void op_make_pmap(VM& vm, Code* pc) {
+    u16 dst = pc[1].regs[0], firstKV = pc[1].regs[1], numPairs = pc[1].regs[2];
+    auto* pmType = static_cast<PersistentMapType*>(pc[2].p);
+    PMap* m = PMap::fromPairs(pmType, &vm.reg(firstKV), numPairs);
+    vm.reg(dst).o = m;
+    DISPATCH(3);
+}
+
+// PMAP_GET_OPTION Rd, Ra(pmap), Rb(key) (3 words: op, regs, EnumType* Option<V>)
+// Mirrors op_map_get_option's three result representations.
+void op_pmap_get_option(VM& vm, Code* pc) {
+    u16 dst = pc[1].regs[0], pmReg = pc[1].regs[1], keyReg = pc[1].regs[2];
+    auto* m = static_cast<PMap*>(vm.reg(pmReg).o);
+    auto* optType = static_cast<EnumType*>(pc[2].p);
+    auto* pmt = static_cast<PersistentMapType*>(m->type_);
+    Type* vt = pmt->valueType_;
+    u32 vs = strideForType(vt);
+
+    Word const* val = m->get(&vm.reg(keyReg));
+    bool found = (val != nullptr);
+
+    if (optType->repr_ == Type::Repr::NullablePtrEnum) {
+        vm.reg(dst).o = found ? val[0].o : nullptr;
+        DISPATCH(3);
+    }
+    if (optType->repr_ == Type::Repr::Inline) {
+        if (found) {
+            vm.reg(dst).i = 0;  // which_ = some
+            for (u32 i = 0; i < vs; ++i) vm.reg((u16)(dst + 1 + i)) = val[i];
+        } else {
+            vm.reg(dst).i = 1;  // which_ = none
+            for (u32 i = 0; i < vs; ++i) vm.reg((u16)(dst + 1 + i)).i = 0;
+        }
+        DISPATCH(3);
+    }
+    auto* e = Enum::create(optType, found ? 0 : 1);
+    if (found) {
+        u32 sw = (vt && vt->sizeWords_ > 0) ? vt->sizeWords_ : 1;
+        for (u32 i = 0; i < sw; ++i) e->v[i] = val[i];
+    }
+    vm.reg(dst).o = e;
+    DISPATCH(3);
+}
+
+// PMAP_LEN Rd, Ra(pmap) (2 words: op, regs)
+void op_pmap_len(VM& vm, Code* pc) {
+    u16 dst = pc[1].regs[0], pmReg = pc[1].regs[1];
+    auto* m = static_cast<PMap*>(vm.reg(pmReg).o);
+    vm.reg(dst).i = (i64)m->count_;
+    DISPATCH(2);
 }
 
 // --- Set ---

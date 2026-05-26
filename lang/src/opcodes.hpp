@@ -418,6 +418,17 @@ void op_map_get(VM& vm, Code* pc);        // MAP_GET Rd, Ra(map), Rb(key) (3 wor
 void op_map_get_option(VM& vm, Code* pc); // MAP_GET_OPTION Rd, Ra(map), Rb(key) (3 words: op, regs, EnumType*)
 void op_map_set(VM& vm, Code* pc);        // MAP_SET Ra(map), Rb(key), Rc(val) (3 words: op, regs, MapType*) -- insert-or-update
 
+// --- Persistent vector (#[...]) ---
+void op_make_pvec(VM& vm, Code* pc);      // MAKE_PVEC Rd, firstSrc, numElems (3 words: op, regs, PersistentVectorType*)
+void op_pvec_get(VM& vm, Code* pc);       // PVEC_GET Rd, Ra(pvec), Rb(idx) (3 words: op, regs, PersistentVectorType*)
+void op_pvec_len(VM& vm, Code* pc);       // PVEC_LEN Rd, Ra(pvec) (2 words: op, regs)
+void op_concat_pvec(VM& vm, Code* pc);    // CONCAT_PVEC Rd, Ra, Rb (3 words: op, regs, PersistentVectorType*)
+
+// --- Persistent map (#[K:V]) ---
+void op_make_pmap(VM& vm, Code* pc);       // MAKE_PMAP Rd, firstKeyReg, numPairs (3 words: op, regs, PersistentMapType*)
+void op_pmap_get_option(VM& vm, Code* pc); // PMAP_GET_OPTION Rd, Ra(pmap), Rb(key) (3 words: op, regs, EnumType*)
+void op_pmap_len(VM& vm, Code* pc);        // PMAP_LEN Rd, Ra(pmap) (2 words: op, regs)
+
 // --- Set ---
 void op_make_set(VM& vm, Code* pc);       // MAKE_SET Rd, firstSrc, numElems (3 words: op, regs, SetType*)
 

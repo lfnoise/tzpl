@@ -69,8 +69,15 @@ void TypeChecker::checkForStmt(ForStmtNode* stmt) {
         elemType = rt->elemType_;
     } else if (auto* ct = dynamic_cast<CoroutineType*>(iterType)) {
         elemType = ct->yieldType_;
+    } else if (auto* pv = dynamic_cast<PersistentVectorType*>(iterType)) {
+        elemType = pv->elemType_;
+    } else if (dynamic_cast<PersistentMapType*>(iterType)) {
+        // Like mutable Map, a persistent map is not directly for-iterable;
+        // iterate `pm keys`, `pm values`, or `pm pairs` instead.
+        error(stmt->iterable->loc, "Cannot iterate a persistent map directly; use keys, values, or pairs");
+        return;
     } else {
-        error(stmt->iterable->loc, "For-loop iterable must be an Array, List, Range, or Coroutine");
+        error(stmt->iterable->loc, "For-loop iterable must be an Array, List, Range, Coroutine, or persistent vector");
         return;
     }
 
@@ -583,6 +590,13 @@ void TypeChecker::checkIndexAssignStmt(IndexAssignStmtNode* stmt) {
             }
         }
         stmt->containerType = mt;
+        return;
+    }
+
+    if (dynamic_cast<PersistentVectorType*>(objType) || dynamic_cast<PersistentMapType*>(objType)) {
+        error(stmt->loc, "Cannot assign into an immutable persistent collection (" +
+              std::string(objType->str().data(), objType->str().size()) +
+              "); use put/push to produce a new collection");
         return;
     }
 

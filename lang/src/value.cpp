@@ -24,6 +24,8 @@
 #include "value.hpp"
 #include "vm.hpp"
 #include "tracing_gc.hpp"
+#include "persistent_vector.hpp"
+#include "persistent_map.hpp"
 
 namespace ts {
 
@@ -728,7 +730,7 @@ Method::Method(Type* type)
 // Stride helpers: compute the words/element width for `type`. Inline value
 // types are stored natively in their sizeWords_ words; all other types
 // (Obj* pointers, primitives) occupy a single Word.
-static u32 strideForType(Type* type) {
+u32 strideForType(Type* type) {
     if (!type) return 1;
     if (type->repr_ != Type::Repr::Inline) return 1;
     u32 sw = type->sizeWords_;
@@ -1550,6 +1552,32 @@ bool WordEqual::operator()(Word a, Word b) const {
         auto* rb = static_cast<RefValue*>(b.o);
         WordEqual sub{refT->elemType_};
         return sub(ra->value_, rb->value_);
+    }
+    if (auto* pvT = dynamic_cast<PersistentVectorType*>(type)) {
+        auto* va = static_cast<PVec*>(a.o);
+        auto* vb = static_cast<PVec*>(b.o);
+        if (va == vb) return true;
+        if (va->count_ != vb->count_) return false;
+        Type* et = pvT->elemType_;
+        for (u32 i = 0; i < va->count_; ++i) {
+            if (!wordsEqual(va->elemAt(i), vb->elemAt(i), et)) return false;
+        }
+        return true;
+    }
+    if (auto* pmT = dynamic_cast<PersistentMapType*>(type)) {
+        auto* ma = static_cast<PMap*>(a.o);
+        auto* mb = static_cast<PMap*>(b.o);
+        if (ma == mb) return true;
+        if (ma->count_ != mb->count_) return false;
+        Type* vt = pmT->valueType_;
+        PMapIter it(ma);
+        u32 kS = strideForType(pmT->keyType_);
+        while (Word const* pair = it.next()) {
+            Word const* bv = mb->get(pair);
+            if (!bv) return false;
+            if (!wordsEqual(pair + kS, bv, vt)) return false;
+        }
+        return true;
     }
     return a.p == b.p;
 }

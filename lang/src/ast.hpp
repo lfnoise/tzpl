@@ -90,6 +90,7 @@ struct NamedTypeNode : TypeExpr {
 
 struct ArrayTypeNode : TypeExpr {
     TypeExprPtr elemType;
+    bool isImmutable = false;  // true for #[T] (persistent vector type)
     ArrayTypeNode(SourceRange l, TypeExprPtr elem)
         : TypeExpr(ArrayType, l), elemType(std::move(elem)) {}
 };
@@ -103,6 +104,7 @@ struct ListTypeNode : TypeExpr {
 struct MapTypeNode : TypeExpr {
     TypeExprPtr keyType;
     TypeExprPtr valueType;
+    bool isImmutable = false;  // true for #[K:V] (persistent map type)
     MapTypeNode(SourceRange l, TypeExprPtr k, TypeExprPtr v)
         : TypeExpr(MapType, l), keyType(std::move(k)), valueType(std::move(v)) {}
 };
@@ -303,6 +305,7 @@ struct ArrayLiteralExpr : Expr {
     ExprList elements;
     TypeExprPtr elemTypeExpr;  // non-null when using [Type](...) syntax
     std::vector<AutoMapArg> autoMapElements;  // Set by type checker: auto-map info for each element
+    bool isImmutable = false;  // true for #[...] (persistent vector literal)
     ArrayLiteralExpr(SourceRange l, ExprList elems)
         : Expr(ArrayLiteral, l), elements(std::move(elems)) {}
 };
@@ -319,6 +322,7 @@ struct MapLiteralExpr : Expr {
         ExprPtr value;
     };
     std::vector<Entry> entries;
+    bool isImmutable = false;  // true for #[...] (persistent map literal)
     MapLiteralExpr(SourceRange l, std::vector<Entry> e)
         : Expr(MapLiteral, l), entries(std::move(e)) {}
 };

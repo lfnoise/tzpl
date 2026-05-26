@@ -427,6 +427,7 @@ ASTPtr Parser::parseLetDecl() {
             current_.kind == TokenKind::KwAny ||
             current_.kind == TokenKind::Identifier ||
             current_.kind == TokenKind::LBracket ||
+            current_.kind == TokenKind::Hash ||
             current_.kind == TokenKind::LParen) {
             typeExpr = parseTypeExpr();
         }
@@ -553,6 +554,7 @@ ASTPtr Parser::parseVarDecl() {
             current_.kind == TokenKind::KwAny ||
             current_.kind == TokenKind::Identifier ||
             current_.kind == TokenKind::LBracket ||
+            current_.kind == TokenKind::Hash ||
             current_.kind == TokenKind::LParen) {
             typeExpr = parseTypeExpr();
         }
@@ -654,6 +656,7 @@ ASTPtr Parser::parseConstDecl() {
             current_.kind == TokenKind::KwAny ||
             current_.kind == TokenKind::Identifier ||
             current_.kind == TokenKind::LBracket ||
+            current_.kind == TokenKind::Hash ||
             current_.kind == TokenKind::LParen) {
             typeExpr = parseTypeExpr();
         }
@@ -1496,6 +1499,110 @@ ExprPtr Parser::parseExpression(int minPrec) {
     return left;
 }
 
+ExprPtr Parser::parseBracketLiteral(SourceRange loc, bool isImmutable) {
+    // The opening '[' has already been consumed by the caller.
+
+    // Typed array constructor [Type](...) applies only to the mutable form.
+    // In the immutable position, #[...] is always a literal.
+    if (!isImmutable) {
+        // Detect typed array constructor: [Type](...)
+        // Type keywords are unambiguous (never valid expressions).
+        // For '[', '(', 'fn', and capitalized Identifiers, use tentative parsing.
+        bool tryTypedConstructor = isTypeKeyword(current_.kind);
+        if (!tryTypedConstructor &&
+            (current_.kind == TokenKind::LBracket ||
+             current_.kind == TokenKind::LParen ||
+             current_.kind == TokenKind::Fn ||
+             (current_.kind == TokenKind::Identifier && !current_.text.empty() && std::isupper(current_.text[0])))) {
+            // Tentative parse: save state, try type + ]( , restore if it fails
+            Token savedCurrent = current_;
+            Token savedPrevious = previous_;
+            auto lexerState = lexer_.save();
+            size_t savedErrors = errors_.size();
+
+            parseTypeExpr();
+            if (check(TokenKind::RBracket) && lexer_.peek().kind == TokenKind::LParen) {
+                tryTypedConstructor = true;
+            }
+            // Restore state regardless — we'll re-parse cleanly below
+            current_ = savedCurrent;
+            previous_ = savedPrevious;
+            lexer_.restore(lexerState);
+            while (errors_.size() > savedErrors) errors_.pop_back();
+        }
+
+        if (tryTypedConstructor) {
+            auto typeExpr = parseTypeExpr();
+            expectClosing(TokenKind::RBracket, "[", loc);
+            SourceRange typedParenLoc = currentLoc();
+            expect(TokenKind::LParen, "Expected '(' after typed array constructor [Type]");
+            ExprList elements;
+            if (!check(TokenKind::RParen)) {
+                do {
+                    elements.push_back(parseExpression());
+                } while (match(TokenKind::Comma));
+            }
+            expectClosing(TokenKind::RParen, "(", typedParenLoc);
+            auto arr = std::make_unique<ArrayLiteralExpr>(loc, std::move(elements));
+            arr->elemTypeExpr = std::move(typeExpr);
+            return arr;
+        }
+    }
+
+    // Empty map: [:] / #[:]
+    if (check(TokenKind::Colon)) {
+        advance(); // consume :
+        expectClosing(TokenKind::RBracket, "[", loc);
+        std::vector<MapLiteralExpr::Entry> entries;
+        auto m = std::make_unique<MapLiteralExpr>(loc, std::move(entries));
+        m->isImmutable = isImmutable;
+        return m;
+    }
+
+    // Empty array: [] / #[]
+    if (check(TokenKind::RBracket)) {
+        advance(); // consume ]
+        ExprList elements;
+        auto arr = std::make_unique<ArrayLiteralExpr>(loc, std::move(elements));
+        arr->isImmutable = isImmutable;
+        return arr;
+    }
+
+    // Parse first expression, then check if map or array
+    ExprPtr first = parseExpression();
+
+    if (check(TokenKind::Colon)) {
+        // Map literal: [key: value, ...]
+        advance(); // consume :
+        ExprPtr firstValue = parseExpression();
+        std::vector<MapLiteralExpr::Entry> entries;
+        entries.push_back({std::move(first), std::move(firstValue)});
+        while (match(TokenKind::Comma)) {
+            if (check(TokenKind::RBracket)) break; // trailing comma
+            ExprPtr key = parseExpression();
+            expect(TokenKind::Colon, "Expected ':' in map literal entry");
+            ExprPtr value = parseExpression();
+            entries.push_back({std::move(key), std::move(value)});
+        }
+        expectClosing(TokenKind::RBracket, "[", loc);
+        auto m = std::make_unique<MapLiteralExpr>(loc, std::move(entries));
+        m->isImmutable = isImmutable;
+        return m;
+    }
+
+    // Array literal: [expr, expr, ...]
+    ExprList elements;
+    elements.push_back(std::move(first));
+    while (match(TokenKind::Comma)) {
+        if (check(TokenKind::RBracket)) break; // trailing comma
+        elements.push_back(parseExpression());
+    }
+    expectClosing(TokenKind::RBracket, "[", loc);
+    auto arr = std::make_unique<ArrayLiteralExpr>(loc, std::move(elements));
+    arr->isImmutable = isImmutable;
+    return arr;
+}
+
 ExprPtr Parser::parsePrimary() {
     switch (current_.kind) {
         case TokenKind::IntLiteral: {
@@ -1726,100 +1833,18 @@ ExprPtr Parser::parsePrimary() {
             ExprPtr operand = parseTightPostfix(parsePrimary());
             return std::make_unique<UnaryOpExpr>(loc, UnaryOpExpr::Deref, std::move(operand));
         }
+        case TokenKind::Hash: {
+            // Immutable persistent collection literal: #[...] / #[:]
+            SourceRange loc = currentLoc();
+            advance(); // consume #
+            expect(TokenKind::LBracket, "Expected '[' after '#' for a persistent collection literal");
+            return parseBracketLiteral(loc, /*isImmutable=*/true);
+        }
         case TokenKind::LBracket: {
             // Array or Map literal, or typed array constructor [Type](...)
             SourceRange loc = currentLoc();
             advance(); // consume [
-
-            // Detect typed array constructor: [Type](...)
-            // Type keywords are unambiguous (never valid expressions).
-            // For '[', '(', 'fn', and capitalized Identifiers, use tentative parsing.
-            {
-                bool tryTypedConstructor = isTypeKeyword(current_.kind);
-                if (!tryTypedConstructor &&
-                    (current_.kind == TokenKind::LBracket ||
-                     current_.kind == TokenKind::LParen ||
-                     current_.kind == TokenKind::Fn ||
-                     (current_.kind == TokenKind::Identifier && !current_.text.empty() && std::isupper(current_.text[0])))) {
-                    // Tentative parse: save state, try type + ]( , restore if it fails
-                    Token savedCurrent = current_;
-                    Token savedPrevious = previous_;
-                    auto lexerState = lexer_.save();
-                    size_t savedErrors = errors_.size();
-
-                    parseTypeExpr();
-                    if (check(TokenKind::RBracket) && lexer_.peek().kind == TokenKind::LParen) {
-                        tryTypedConstructor = true;
-                    }
-                    // Restore state regardless — we'll re-parse cleanly below
-                    current_ = savedCurrent;
-                    previous_ = savedPrevious;
-                    lexer_.restore(lexerState);
-                    while (errors_.size() > savedErrors) errors_.pop_back();
-                }
-
-                if (tryTypedConstructor) {
-                    auto typeExpr = parseTypeExpr();
-                    expectClosing(TokenKind::RBracket, "[", loc);
-                    SourceRange typedParenLoc = currentLoc();
-                    expect(TokenKind::LParen, "Expected '(' after typed array constructor [Type]");
-                    ExprList elements;
-                    if (!check(TokenKind::RParen)) {
-                        do {
-                            elements.push_back(parseExpression());
-                        } while (match(TokenKind::Comma));
-                    }
-                    expectClosing(TokenKind::RParen, "(", typedParenLoc);
-                    auto arr = std::make_unique<ArrayLiteralExpr>(loc, std::move(elements));
-                    arr->elemTypeExpr = std::move(typeExpr);
-                    return arr;
-                }
-            }
-
-            // Empty map: [:]
-            if (check(TokenKind::Colon)) {
-                advance(); // consume :
-                expectClosing(TokenKind::RBracket, "[", loc);
-                std::vector<MapLiteralExpr::Entry> entries;
-                return std::make_unique<MapLiteralExpr>(loc, std::move(entries));
-            }
-
-            // Empty array: []
-            if (check(TokenKind::RBracket)) {
-                advance(); // consume ]
-                ExprList elements;
-                return std::make_unique<ArrayLiteralExpr>(loc, std::move(elements));
-            }
-
-            // Parse first expression, then check if map or array
-            ExprPtr first = parseExpression();
-
-            if (check(TokenKind::Colon)) {
-                // Map literal: [key: value, ...]
-                advance(); // consume :
-                ExprPtr firstValue = parseExpression();
-                std::vector<MapLiteralExpr::Entry> entries;
-                entries.push_back({std::move(first), std::move(firstValue)});
-                while (match(TokenKind::Comma)) {
-                    if (check(TokenKind::RBracket)) break; // trailing comma
-                    ExprPtr key = parseExpression();
-                    expect(TokenKind::Colon, "Expected ':' in map literal entry");
-                    ExprPtr value = parseExpression();
-                    entries.push_back({std::move(key), std::move(value)});
-                }
-                expectClosing(TokenKind::RBracket, "[", loc);
-                return std::make_unique<MapLiteralExpr>(loc, std::move(entries));
-            }
-
-            // Array literal: [expr, expr, ...]
-            ExprList elements;
-            elements.push_back(std::move(first));
-            while (match(TokenKind::Comma)) {
-                if (check(TokenKind::RBracket)) break; // trailing comma
-                elements.push_back(parseExpression());
-            }
-            expectClosing(TokenKind::RBracket, "[", loc);
-            return std::make_unique<ArrayLiteralExpr>(loc, std::move(elements));
+            return parseBracketLiteral(loc, /*isImmutable=*/false);
         }
         case TokenKind::Coro:
         case TokenKind::Fn: {
@@ -2618,10 +2643,18 @@ bool Parser::tryParseTypeArgs(std::vector<TypeExprPtr>& typeArgs) {
 // --- Type expressions ---
 
 TypeExprPtr Parser::parseTypeExpr() {
-    // Array type: [Type] or Map type: [KeyType: ValueType]
-    if (current_.kind == TokenKind::LBracket) {
+    // Persistent collection type: #[Type] or #[KeyType: ValueType]
+    // Mutable collection type:    [Type]  or  [KeyType: ValueType]
+    if (current_.kind == TokenKind::Hash || current_.kind == TokenKind::LBracket) {
         SourceRange loc = currentLoc();
-        advance();
+        bool isImmutable = false;
+        if (current_.kind == TokenKind::Hash) {
+            isImmutable = true;
+            advance(); // consume #
+            expect(TokenKind::LBracket, "Expected '[' after '#' in a persistent collection type");
+        } else {
+            advance(); // consume [
+        }
         // Empty map type: [:] is not valid as a type (need [K: V])
         auto keyOrElemType = parseTypeExpr();
         if (check(TokenKind::Colon)) {
@@ -2629,10 +2662,14 @@ TypeExprPtr Parser::parseTypeExpr() {
             advance(); // consume :
             auto valueType = parseTypeExpr();
             expectClosing(TokenKind::RBracket, "[", loc);
-            return std::make_unique<MapTypeNode>(loc, std::move(keyOrElemType), std::move(valueType));
+            auto m = std::make_unique<MapTypeNode>(loc, std::move(keyOrElemType), std::move(valueType));
+            m->isImmutable = isImmutable;
+            return m;
         }
         expectClosing(TokenKind::RBracket, "[", loc);
-        return std::make_unique<ArrayTypeNode>(loc, std::move(keyOrElemType));
+        auto a = std::make_unique<ArrayTypeNode>(loc, std::move(keyOrElemType));
+        a->isImmutable = isImmutable;
+        return a;
     }
 
     // Tuple type: (Type, Type, ...) or parenthesized type: (Type)

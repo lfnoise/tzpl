@@ -77,6 +77,7 @@ enum class TokenKind {
     FatArrow,   // =>
     At,         // @
     Dollar,     // $
+    Hash,       // # (prefix for immutable persistent collections: #[...])
     Dot,        // .
     DotDot,     // ..
     Ellipsis,   // ...
