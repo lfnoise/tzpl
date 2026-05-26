@@ -681,16 +681,18 @@ Type* TypeChecker::inferBinaryOp(BinaryOpExpr* expr) {
         if (!leftType || !rightType) return compiler_.intType();
 
         // Unwrap @-tagged operand types
-        bool anyList = false;
+        bool anyList = false, anyPVec = false;
         Type* unwrappedLeft = leftType;
         Type* unwrappedRight = rightType;
         if (leftAM) {
-            unwrappedLeft = unwrapAutoMapLayers(leftType, leftAM.depth, leftAM.isList, expr->left->loc);
+            unwrappedLeft = unwrapAutoMapLayers(leftType, leftAM.depth, leftAM.isList, expr->left->loc, &leftAM.isPVec);
             if (leftAM.isList) anyList = true;
+            if (leftAM.isPVec) anyPVec = true;
         }
         if (rightAM) {
-            unwrappedRight = unwrapAutoMapLayers(rightType, rightAM.depth, rightAM.isList, expr->right->loc);
+            unwrappedRight = unwrapAutoMapLayers(rightType, rightAM.depth, rightAM.isList, expr->right->loc, &rightAM.isPVec);
             if (rightAM.isList) anyList = true;
+            if (rightAM.isPVec) anyPVec = true;
         }
 
         // Store annotations on the AST node
@@ -712,7 +714,7 @@ Type* TypeChecker::inferBinaryOp(BinaryOpExpr* expr) {
                     expr->resolvedFuncGlobalIndex = (i32)func->globalIndex;
                     expr->isBuiltinCall = func->isBuiltin; expr->builtinAcceptsInlineArgs = func->acceptsInlineArgs;
                     Type* scalarResult = func->returnType ? func->returnType : compiler_.intType();
-                    return wrapAutoMapResult(scalarResult, leftAM, rightAM, anyList);
+                    return wrapAutoMapResult(scalarResult, leftAM, rightAM, anyList, anyPVec);
                 }
             }
         }
@@ -751,7 +753,7 @@ Type* TypeChecker::inferBinaryOp(BinaryOpExpr* expr) {
                     scalarResult = commonNumericType(unwrappedLeft, unwrappedRight, isDiv);
                     break;
             }
-            return wrapAutoMapResult(scalarResult, leftAM, rightAM, anyList);
+            return wrapAutoMapResult(scalarResult, leftAM, rightAM, anyList, anyPVec);
         }
 
         // Non-numeric unwrapped types with @ — try generic binary op rules

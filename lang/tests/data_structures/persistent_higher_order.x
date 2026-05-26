@@ -63,3 +63,16 @@ let addk = fn(x Int, k Int) Int { x + k };
 u addk(100) println;             -- extra scalar arg, #[101, 102, 103]
 #[-1, -2, 3] abs println;        -- builtin auto-map
 #[1.5, 2.5, 3.5] floor println;  -- builtin auto-map, #[1.0, 2.0, 3.0]
+
+-- --- explicit @ ---
+(u@ + 10) println;               -- #[11, 12, 13]
+(u@ * u@) println;               -- #[1, 4, 9]
+dbl(u@) println;                 -- #[2, 4, 6]
+u@ dbl println;                  -- #[2, 4, 6]
+addk(u@, 100) println;           -- #[101, 102, 103]
+
+-- --- deep (@@) binary-op auto-mapping over nested persistent vectors ---
+(#[#[1, 2], #[3, 4]] + 1) println;                       -- #[#[2,3],#[4,5]]
+(#[#[1, 2], #[3, 4]] * #[#[10, 20], #[30, 40]]) println; -- #[#[10,40],#[90,160]]
+(#[#[#[1]], #[#[2]]] + 100) println;                     -- depth 3
+(#[#[1, 2], #[3, 4]] @@ + 1) println;                    -- explicit @@

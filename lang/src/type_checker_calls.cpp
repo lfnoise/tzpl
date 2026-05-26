@@ -337,30 +337,35 @@ Type* TypeChecker::computeAutoMapReturnType(Type* scalarReturn,
                                              const std::vector<AutoMapArg>& autoMapArgs,
                                              const std::vector<AutoMapArg>& innerAutoMapArgs,
                                              bool hasCartesian, int maxCartesianIndex,
-                                             bool anyListArg) {
+                                             bool anyListArg, bool anyPVecArg) {
     if (scalarReturn == compiler_.voidType()) return scalarReturn;
 
     Type* retType = scalarReturn;
+    // Container precedence when kinds mix: List > PVec > Array.
+    auto wrap = [&](Type* t, bool list, bool pvec) -> Type* {
+        if (list) return compiler_.listType(t);
+        if (pvec) return compiler_.persistentVectorType(t);
+        return compiler_.arrayType(t);
+    };
 
     // First wrap for inner (implicit) auto-mapping
     if (!innerAutoMapArgs.empty()) {
         int innerDepth = 0;
-        bool innerList = false;
+        bool innerList = false, innerPVec = false;
         for (auto& iam : innerAutoMapArgs) {
             if (iam.depth > innerDepth) innerDepth = iam.depth;
             if (iam.isList) innerList = true;
+            if (iam.isPVec) innerPVec = true;
         }
         for (int level = 0; level < innerDepth; ++level) {
-            retType = innerList ? static_cast<Type*>(compiler_.listType(retType))
-                                : static_cast<Type*>(compiler_.arrayType(retType));
+            retType = wrap(retType, innerList, innerPVec);
         }
     }
 
     // Then wrap for outer auto-mapping
     if (hasCartesian) {
         for (int level = maxCartesianIndex; level >= 1; --level) {
-            retType = anyListArg ? static_cast<Type*>(compiler_.listType(retType))
-                                 : static_cast<Type*>(compiler_.arrayType(retType));
+            retType = wrap(retType, anyListArg, anyPVecArg);
         }
     } else {
         int maxDepth = 0;
@@ -368,8 +373,7 @@ Type* TypeChecker::computeAutoMapReturnType(Type* scalarReturn,
             if (am.depth > maxDepth) maxDepth = am.depth;
         }
         for (int level = 0; level < maxDepth; ++level) {
-            retType = anyListArg ? static_cast<Type*>(compiler_.listType(retType))
-                                 : static_cast<Type*>(compiler_.arrayType(retType));
+            retType = wrap(retType, anyListArg, anyPVecArg);
         }
     }
 
@@ -870,7 +874,7 @@ Type* TypeChecker::tryInferVariableCall(CallExpr_* expr, IdentifierExpr* ident) 
 
         // Handle explicit @ auto-mapping on lambda calls
         if (hasExplicitAutoMap) {
-            bool anyListArg = false;
+            bool anyListArg = false, anyPVecArg = false;
             std::vector<Type*> unwrappedTypes;
             for (size_t i = 0; i < argTypes.size(); ++i) {
                 if (explicitAutoMap[i].depth > 0) {
@@ -883,9 +887,18 @@ Type* TypeChecker::tryInferVariableCall(CallExpr_* expr, IdentifierExpr* ident) 
                             t = listT->elemType_;
                             explicitAutoMap[i].isList = true;
                             anyListArg = true;
+                        } else if (auto* pvT = dynamic_cast<PersistentVectorType*>(t)) {
+                            if (d > 1) {
+                                error(expr->args[i]->loc,
+                                      "Deep '@' over a persistent vector is not supported; use map");
+                                t = nullptr; break;
+                            }
+                            t = pvT->elemType_;
+                            explicitAutoMap[i].isPVec = true;
+                            anyPVecArg = true;
                         } else {
                             error(expr->args[i]->loc,
-                                  "Explicit '@' requires Array or List type");
+                                  "Explicit '@' requires Array, List, or persistent vector type");
                             t = nullptr;
                             break;
                         }
@@ -911,8 +924,9 @@ Type* TypeChecker::tryInferVariableCall(CallExpr_* expr, IdentifierExpr* ident) 
                     if (am.depth > maxDepth) maxDepth = am.depth;
                 }
                 for (int d = 0; d < maxDepth; ++d) {
-                    retType = anyListArg ? static_cast<Type*>(compiler_.listType(retType))
-                                         : static_cast<Type*>(compiler_.arrayType(retType));
+                    if (anyListArg)      retType = compiler_.listType(retType);
+                    else if (anyPVecArg) retType = compiler_.persistentVectorType(retType);
+                    else                 retType = compiler_.arrayType(retType);
                 }
             }
             return retType;
@@ -1497,11 +1511,11 @@ Type* TypeChecker::inferCall(CallExpr_* expr) {
     // If explicit auto-map is used, unwrap array types at the appropriate depth
     // for overload resolution, then set the autoMapArgs.
     if (hasExplicitAutoMap) {
-        bool anyListArg = false;
+        bool anyListArg = false, anyPVecArg = false;
         std::vector<Type*> unwrappedTypes;
         for (size_t i = 0; i < argTypes.size(); ++i) {
             if (explicitAutoMap[i].depth > 0) {
-                // Unwrap 'depth' levels of Array or List
+                // Unwrap 'depth' levels of Array / List / persistent vector
                 Type* t = argTypes[i];
                 int d = explicitAutoMap[i].depth;
                 for (int level = 0; level < d; ++level) {
@@ -1511,9 +1525,18 @@ Type* TypeChecker::inferCall(CallExpr_* expr) {
                         t = listT->elemType_;
                         explicitAutoMap[i].isList = true;
                         anyListArg = true;
+                    } else if (auto* pvT = dynamic_cast<PersistentVectorType*>(t)) {
+                        if (d > 1) {
+                            error(expr->args[i]->loc,
+                                  "Deep '@' over a persistent vector is not supported; use map");
+                            t = nullptr; break;
+                        }
+                        t = pvT->elemType_;
+                        explicitAutoMap[i].isPVec = true;
+                        anyPVecArg = true;
                     } else {
                         error(expr->args[i]->loc,
-                              "Explicit '@' requires Array or List type (need " +
+                              "Explicit '@' requires Array, List, or persistent vector type (need " +
                               std::to_string(d) + " levels, found " +
                               std::to_string(level) + ")");
                         t = nullptr;
@@ -1559,7 +1582,7 @@ Type* TypeChecker::inferCall(CallExpr_* expr) {
 
         // Compute auto-mapped result type
         return computeAutoMapReturnType(retType, expr->autoMapArgs, expr->innerAutoMapArgs,
-                                         hasCartesian, maxCartesianIndex, anyListArg);
+                                         hasCartesian, maxCartesianIndex, anyListArg, anyPVecArg);
     }
 
     // Resolution order: (1) exact overload match, (2) template resolution,

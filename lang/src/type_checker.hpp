@@ -433,7 +433,7 @@ private:
                                     const std::vector<AutoMapArg>& autoMapArgs,
                                     const std::vector<AutoMapArg>& innerAutoMapArgs,
                                     bool hasCartesian, int maxCartesianIndex,
-                                    bool anyListArg);
+                                    bool anyListArg, bool anyPVecArg = false);
     Type* tryInferEnumConstruct(CallExpr_* expr, FieldExpr_* fe, IdentifierExpr* ident);
     Type* tryInferTupleStructConstruct(CallExpr_* expr, IdentifierExpr* ident);
     Type* tryInferVariableCall(CallExpr_* expr, IdentifierExpr* ident);
@@ -529,7 +529,8 @@ private:
 
     // Auto-map helpers (shared between inferCall and inferBinaryOp)
     AutoMapArg extractAutoMapAnnotation(Expr* expr) const;
-    Type* unwrapAutoMapLayers(Type* type, int depth, bool& isList, SourceRange loc);
+    Type* unwrapAutoMapLayers(Type* type, int depth, bool& isList, SourceRange loc,
+                              bool* isPVec = nullptr);
     Type* wrapAutoMapResult(Type* scalarResult, const AutoMapArg& leftAM,
                             const AutoMapArg& rightAM, bool anyList, bool anyPVec = false);
 

@@ -280,7 +280,8 @@ AutoMapArg TypeChecker::extractAutoMapAnnotation(Expr* expr) const {
     return result;
 }
 
-Type* TypeChecker::unwrapAutoMapLayers(Type* type, int depth, bool& isList, SourceRange loc) {
+Type* TypeChecker::unwrapAutoMapLayers(Type* type, int depth, bool& isList, SourceRange loc,
+                                       bool* isPVec) {
     Type* t = type;
     for (int level = 0; level < depth; ++level) {
         if (auto* arrT = dynamic_cast<ArrayType*>(t)) {
@@ -288,8 +289,11 @@ Type* TypeChecker::unwrapAutoMapLayers(Type* type, int depth, bool& isList, Sour
         } else if (auto* listT = dynamic_cast<ListType*>(t)) {
             t = listT->elemType_;
             isList = true;
+        } else if (auto* pvT = dynamic_cast<PersistentVectorType*>(t)) {
+            t = pvT->elemType_;
+            if (isPVec) *isPVec = true;
         } else {
-            error(loc, "Explicit '@' requires Array or List type (need " +
+            error(loc, "Explicit '@' requires Array, List, or persistent vector type (need " +
                   std::to_string(depth) + " levels, found " +
                   std::to_string(level) + ")");
             return type;
