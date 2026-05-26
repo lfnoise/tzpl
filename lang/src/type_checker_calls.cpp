@@ -161,10 +161,6 @@ FuncInfo* TypeChecker::tryImplicitAutoMap(const std::string& name,
                     t = listT->elemType_;
                     thisList = true;
                 } else if (auto* pvT = dynamic_cast<PersistentVectorType*>(t)) {
-                    // Deep (@@) function-call auto-map over persistent vectors
-                    // is unsupported (the deep-call codegen is array/list only);
-                    // allow only one level. Deeper nesting yields "no overload".
-                    if (depth > 1) { canUnwrap = false; break; }
                     t = pvT->elemType_;
                     thisPVec = true;
                 } else {
@@ -888,11 +884,6 @@ Type* TypeChecker::tryInferVariableCall(CallExpr_* expr, IdentifierExpr* ident) 
                             explicitAutoMap[i].isList = true;
                             anyListArg = true;
                         } else if (auto* pvT = dynamic_cast<PersistentVectorType*>(t)) {
-                            if (d > 1) {
-                                error(expr->args[i]->loc,
-                                      "Deep '@' over a persistent vector is not supported; use map");
-                                t = nullptr; break;
-                            }
                             t = pvT->elemType_;
                             explicitAutoMap[i].isPVec = true;
                             anyPVecArg = true;
@@ -985,8 +976,6 @@ Type* TypeChecker::tryInferVariableCall(CallExpr_* expr, IdentifierExpr* ident) 
                         t = listT->elemType_;
                         thisList = true;
                     } else if (auto* pvT = dynamic_cast<PersistentVectorType*>(t)) {
-                        // Deep (@@) PVec call auto-map is unsupported; one level only.
-                        if (depth > 1) { canUnwrap = false; break; }
                         t = pvT->elemType_;
                         thisPVec = true;
                     } else {
@@ -1526,11 +1515,6 @@ Type* TypeChecker::inferCall(CallExpr_* expr) {
                         explicitAutoMap[i].isList = true;
                         anyListArg = true;
                     } else if (auto* pvT = dynamic_cast<PersistentVectorType*>(t)) {
-                        if (d > 1) {
-                            error(expr->args[i]->loc,
-                                  "Deep '@' over a persistent vector is not supported; use map");
-                            t = nullptr; break;
-                        }
                         t = pvT->elemType_;
                         explicitAutoMap[i].isPVec = true;
                         anyPVecArg = true;

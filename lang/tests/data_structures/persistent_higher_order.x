@@ -76,3 +76,11 @@ addk(u@, 100) println;           -- #[101, 102, 103]
 (#[#[1, 2], #[3, 4]] * #[#[10, 20], #[30, 40]]) println; -- #[#[10,40],#[90,160]]
 (#[#[#[1]], #[#[2]]] + 100) println;                     -- depth 3
 (#[#[1, 2], #[3, 4]] @@ + 1) println;                    -- explicit @@
+
+-- --- deep (@@) function-call auto-mapping (any depth) ---
+#[#[1, 2], #[3, 4]] dbl println;            -- #[#[2,4],#[6,8]]
+dbl(#[#[1, 2], #[3, 4]]) println;           -- prefix
+#[#[#[1]], #[#[2]]] dbl println;            -- depth 3
+#[#[1, 2], #[3, 4]] addk(100) println;      -- deep with broadcast scalar arg
+#[#[1, 2], #[3, 4]] @@ dbl println;         -- explicit @@ call
+#[#[-1, -2], #[3, -4]] abs println;         -- deep builtin

@@ -164,11 +164,21 @@ private:
     u16 genUnaryOp(UnaryOpExpr* expr);
     u16 genCall(CallExpr_* expr);
     u16 genAutoMapCall(CallExpr_* expr);
+    // Recursive auto-map of a named/builtin call over persistent-vector arg(s)
+    // to arbitrary depth. Outer levels peel a persistent-vector level and
+    // recurse; the base level runs a single-level mapped call.
+    u16 emitPVecCallLevel(CallExpr_* expr, const FuncInfo* funcInfo, Type* returnT,
+                          std::vector<u16> argRegs, std::vector<Type*> argTypes,
+                          const std::vector<bool>& argMapped, PersistentVectorType* resPV);
     u16 genAutoMapLambdaCall(CallExpr_* expr, u16 calleeReg, FunctionType* funcType);
     u16 genAutoMapLambdaCallList(CallExpr_* expr, u16 calleeReg, FunctionType* funcType);
-    // Depth-1 auto-map of a lambda-value call over persistent-vector arg(s).
+    // Auto-map of a lambda-value call over persistent-vector arg(s) to arbitrary
+    // depth (recurses via emitPVecLambdaCallLevel).
     u16 genAutoMapLambdaCallPVec(CallExpr_* expr, u16 calleeReg, FunctionType* funcType,
                                  PersistentVectorType* resultPVType);
+    u16 emitPVecLambdaCallLevel(CallExpr_* expr, u16 calleeReg, FunctionType* funcType, Type* returnT,
+                                std::vector<u16> argRegs, std::vector<Type*> argTypes,
+                                const std::vector<bool>& argMapped, PersistentVectorType* resPV);
     u16 genAutoMapCallList(CallExpr_* expr, const FuncInfo* funcInfo);
     u16 genAutoMapCallListVoid(CallExpr_* expr, const FuncInfo* funcInfo);
     u16 genExplicitImplicitAutoMapCall(CallExpr_* expr);

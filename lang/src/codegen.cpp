@@ -4322,9 +4322,17 @@ u16 CodeGen::genCall(CallExpr_* expr) {
         // Check if any arg has cartesian index > 0
         bool hasCartesian = false;
         int maxDepth = 0;
+        bool anyPVec = false;
         for (auto& am : expr->autoMapArgs) {
             if (am.cartesianIndex > 0) hasCartesian = true;
             if (am.depth > maxDepth) maxDepth = am.depth;
+            if (am.isPVec) anyPVec = true;
+        }
+
+        // Non-cartesian persistent-vector calls (any depth) go through
+        // genAutoMapCall, which recurses via emitPVecCallLevel.
+        if (anyPVec && !hasCartesian) {
+            return genAutoMapCall(expr);
         }
 
         if (hasCartesian) {
@@ -5624,6 +5632,83 @@ u16 CodeGen::emitMappedCallElem(CallExpr_* expr, const FuncInfo* funcInfo, Type*
     return callResultReg;
 }
 
+u16 CodeGen::emitPVecCallLevel(CallExpr_* expr, const FuncInfo* funcInfo, Type* returnT,
+                               std::vector<u16> argRegs, std::vector<Type*> argTypes,
+                               const std::vector<bool>& argMapped, PersistentVectorType* resPV) {
+    u16 argc = (u16)argRegs.size();
+    Type* resElem = resPV->elemType_;
+    auto* resElemPV = dynamic_cast<PersistentVectorType*>(resElem);
+
+    // Min length over the mapped persistent-vector args at this level.
+    u16 lenReg = 0; bool first = true;
+    for (u16 i = 0; i < argc; ++i) {
+        if (!argMapped[i]) continue;
+        u16 lr = allocReg();
+        emitOp(op_pvec_len);
+        emitRegs(lr, argRegs[i]);
+        if (first) { lenReg = lr; first = false; }
+        else {
+            u16 c = allocReg(); emitOp(op_cmp_lt_int); emitRegs(c, lr, lenReg);
+            u32 skip = emitJump(op_jump_if_false, c); emitMov(lenReg, lr); patchJump(skip);
+        }
+    }
+
+    if (resElemPV) {
+        // Outer level: build a persistent vector of inner persistent vectors,
+        // peeling one persistent-vector level off each mapped arg and recursing.
+        auto* tmpArrT = compiler_.arrayType(resElem);
+        u16 arrReg = emitArrayBuildLoop(lenReg, tmpArrT, [&](u16 iReg) -> u16 {
+            std::vector<u16> subRegs = argRegs;
+            std::vector<Type*> subTypes = argTypes;
+            for (u16 i = 0; i < argc; ++i) {
+                if (!argMapped[i]) continue;
+                auto* pv = static_cast<PersistentVectorType*>(argTypes[i]);
+                u16 s = allocSlot(pv->elemType_);
+                emitOp(op_pvec_get);
+                emitRegs(s, argRegs[i], iReg);
+                emitPtr(pv);
+                subRegs[i] = s;
+                subTypes[i] = pv->elemType_;
+            }
+            return emitPVecCallLevel(expr, funcInfo, returnT, subRegs, subTypes, argMapped, resElemPV);
+        });
+        u16 dst = allocReg();
+        emitOp(op_pvec_from_array);
+        emitRegs(dst, arrReg);
+        emitPtr(resPV);
+        return dst;
+    }
+
+    // Base level: each mapped arg is a persistent vector of scalars. Materialize
+    // them to temporary arrays and run one mapped call per index, then freeze.
+    std::vector<ArrayType*> mappedArrType(argc, nullptr);
+    for (u16 i = 0; i < argc; ++i) {
+        if (!argMapped[i]) continue;
+        auto* pv = static_cast<PersistentVectorType*>(argTypes[i]);
+        auto* aT = compiler_.arrayType(pv->elemType_);
+        u16 conv = allocReg();
+        emitOp(op_pvec_to_array);
+        emitRegs(conv, argRegs[i]);
+        emitPtr(aT);
+        argRegs[i] = conv;
+        mappedArrType[i] = aT;
+    }
+    auto* tmpArrT = compiler_.arrayType(returnT);
+    u16 arrReg = emitArrayBuildLoop(lenReg, tmpArrT, [&](u16 iReg) -> u16 {
+        std::vector<MappedCallArg> margs(argc);
+        for (u16 i = 0; i < argc; ++i) {
+            if (argMapped[i]) margs[i] = { true, argRegs[i], iReg, mappedArrType[i] };
+            else margs[i] = { false, argRegs[i], 0, nullptr };
+        }
+        return emitMappedCallElem(expr, funcInfo, returnT, margs);
+    });
+    u16 dst = allocReg();
+    emitOp(op_pvec_from_array);
+    emitRegs(dst, arrReg);
+    emitPtr(resPV);
+    return dst;
+}
+
 u16 CodeGen::genAutoMapCall(CallExpr_* expr) {
     auto* ident = static_cast<IdentifierExpr*>(expr->callee.get());
 
@@ -5660,6 +5745,32 @@ u16 CodeGen::genAutoMapCall(CallExpr_* expr) {
     std::vector<u16> argRegs;
     for (auto& arg : expr->args) {
         argRegs.push_back(genExpr(static_cast<Expr*>(arg.get())));
+    }
+
+    // Persistent-vector result (non-Void): map through emitPVecCallLevel, which
+    // handles arbitrary nesting depth. Mapped mutable-array args (shallow mixed
+    // kinds) are first frozen to persistent vectors so the recursion is uniform.
+    if (funcInfo->returnType != compiler_.voidType()) {
+        if (auto* resPV = dynamic_cast<PersistentVectorType*>(expr->resolvedType)) {
+            std::vector<Type*> argTypes(argc);
+            std::vector<bool> argMapped(argc);
+            for (u16 i = 0; i < argc; ++i) {
+                argMapped[i] = (bool)expr->autoMapArgs[i];
+                argTypes[i] = expr->args[i]->resolvedType;
+                if (argMapped[i]) {
+                    if (auto* arrT = dynamic_cast<ArrayType*>(argTypes[i])) {
+                        auto* pvT = compiler_.persistentVectorType(arrT->elemType_);
+                        u16 conv = allocReg();
+                        emitOp(op_pvec_from_array);
+                        emitRegs(conv, argRegs[i]);
+                        emitPtr(pvT);
+                        argRegs[i] = conv;
+                        argTypes[i] = pvT;
+                    }
+                }
+            }
+            return emitPVecCallLevel(expr, funcInfo, funcInfo->returnType, argRegs, argTypes, argMapped, resPV);
+        }
     }
 
     // The element loop reads mapped args via the array opcodes. A mapped arg
@@ -5977,45 +6088,94 @@ u16 CodeGen::genAutoMapLambdaCall(CallExpr_* expr, u16 calleeReg, FunctionType* 
 u16 CodeGen::genAutoMapLambdaCallPVec(CallExpr_* expr, u16 calleeReg, FunctionType* funcType,
                                       PersistentVectorType* resultPVType) {
     u16 argc = (u16)expr->args.size();
-
-    // Evaluate args, then materialize each mapped persistent-vector arg into a
-    // temporary array so the element loop can index it.
     std::vector<u16> argRegs;
     for (auto& arg : expr->args) argRegs.push_back(genExpr(static_cast<Expr*>(arg.get())));
 
-    std::vector<ArrayType*> mappedArrType(argc, nullptr);
+    std::vector<Type*> argTypes(argc);
+    std::vector<bool> argMapped(argc);
     for (u16 i = 0; i < argc; ++i) {
-        if (!expr->autoMapArgs[i]) continue;
-        Type* at = expr->args[i]->resolvedType;
-        if (auto* arrT = dynamic_cast<ArrayType*>(at)) {
-            mappedArrType[i] = arrT;
-        } else if (auto* pvT = dynamic_cast<PersistentVectorType*>(at)) {
-            auto* tmpArrT = compiler_.arrayType(pvT->elemType_);
-            u16 conv = allocReg();
-            emitOp(op_pvec_to_array);
-            emitRegs(conv, argRegs[i]);
-            emitPtr(tmpArrT);
-            argRegs[i] = conv;
-            mappedArrType[i] = tmpArrT;
+        argMapped[i] = (bool)expr->autoMapArgs[i];
+        argTypes[i] = expr->args[i]->resolvedType;
+        // Normalize a mapped mutable-array arg to a persistent vector.
+        if (argMapped[i]) {
+            if (auto* arrT = dynamic_cast<ArrayType*>(argTypes[i])) {
+                auto* pvT = compiler_.persistentVectorType(arrT->elemType_);
+                u16 conv = allocReg();
+                emitOp(op_pvec_from_array);
+                emitRegs(conv, argRegs[i]);
+                emitPtr(pvT);
+                argRegs[i] = conv;
+                argTypes[i] = pvT;
+            }
+        }
+    }
+    return emitPVecLambdaCallLevel(expr, calleeReg, funcType, funcType->returnType_,
+                                   argRegs, argTypes, argMapped, resultPVType);
+}
+
+u16 CodeGen::emitPVecLambdaCallLevel(CallExpr_* expr, u16 calleeReg, FunctionType* funcType, Type* returnT,
+                                     std::vector<u16> argRegs, std::vector<Type*> argTypes,
+                                     const std::vector<bool>& argMapped, PersistentVectorType* resPV) {
+    u16 argc = (u16)argRegs.size();
+    Type* resElem = resPV->elemType_;
+    auto* resElemPV = dynamic_cast<PersistentVectorType*>(resElem);
+
+    u16 lenReg = 0; bool first = true;
+    for (u16 i = 0; i < argc; ++i) {
+        if (!argMapped[i]) continue;
+        u16 lr = allocReg();
+        emitOp(op_pvec_len);
+        emitRegs(lr, argRegs[i]);
+        if (first) { lenReg = lr; first = false; }
+        else {
+            u16 c = allocReg(); emitOp(op_cmp_lt_int); emitRegs(c, lr, lenReg);
+            u32 skip = emitJump(op_jump_if_false, c); emitMov(lenReg, lr); patchJump(skip);
         }
     }
 
-    std::vector<std::pair<u16, ArrayType*>> mappedArrays;
-    for (u16 i = 0; i < argc; ++i) {
-        if (expr->autoMapArgs[i]) mappedArrays.push_back({argRegs[i], mappedArrType[i]});
+    if (resElemPV) {
+        auto* tmpArrT = compiler_.arrayType(resElem);
+        u16 arrReg = emitArrayBuildLoop(lenReg, tmpArrT, [&](u16 iReg) -> u16 {
+            std::vector<u16> subRegs = argRegs;
+            std::vector<Type*> subTypes = argTypes;
+            for (u16 i = 0; i < argc; ++i) {
+                if (!argMapped[i]) continue;
+                auto* pv = static_cast<PersistentVectorType*>(argTypes[i]);
+                u16 s = allocSlot(pv->elemType_);
+                emitOp(op_pvec_get);
+                emitRegs(s, argRegs[i], iReg);
+                emitPtr(pv);
+                subRegs[i] = s;
+                subTypes[i] = pv->elemType_;
+            }
+            return emitPVecLambdaCallLevel(expr, calleeReg, funcType, returnT, subRegs, subTypes, argMapped, resElemPV);
+        });
+        u16 dst = allocReg(); emitOp(op_pvec_from_array); emitRegs(dst, arrReg); emitPtr(resPV);
+        return dst;
     }
-    u16 minLenReg = emitMinArrayLength(mappedArrays);
 
-    Type* returnT = funcType->returnType_;
+    // Base level: materialize mapped persistent vectors to arrays, then map the
+    // lambda call over the index.
+    std::vector<ArrayType*> mappedArrType(argc, nullptr);
+    for (u16 i = 0; i < argc; ++i) {
+        if (!argMapped[i]) continue;
+        auto* pv = static_cast<PersistentVectorType*>(argTypes[i]);
+        auto* aT = compiler_.arrayType(pv->elemType_);
+        u16 conv = allocReg();
+        emitOp(op_pvec_to_array);
+        emitRegs(conv, argRegs[i]);
+        emitPtr(aT);
+        argRegs[i] = conv;
+        mappedArrType[i] = aT;
+    }
     auto* tmpArrT = compiler_.arrayType(returnT);
-
-    u16 arrReg = emitArrayBuildLoop(minLenReg, tmpArrT, [&](u16 iReg) -> u16 {
+    u16 arrReg = emitArrayBuildLoop(lenReg, tmpArrT, [&](u16 iReg) -> u16 {
         u16 callArgBase = nextReg_;
         for (u16 i = 0; i < argc; ++i) {
             u16 targetReg = (u16)(callArgBase + i);
             if (nextReg_ <= targetReg) { nextReg_ = (u16)(targetReg + 1); if (nextReg_ > maxReg_) maxReg_ = nextReg_; }
             Type* paramType = (i < funcType->argTypes_.size()) ? funcType->argTypes_[i] : nullptr;
-            if (expr->autoMapArgs[i]) {
+            if (argMapped[i]) {
                 auto* arrType = mappedArrType[i];
                 emitOp(opArrayGetDynFor(arrType->elemType_));
                 emitRegs(targetReg, argRegs[i], iReg);
@@ -6038,11 +6198,7 @@ u16 CodeGen::genAutoMapLambdaCallPVec(CallExpr_* expr, u16 calleeReg, FunctionTy
         emitReturnPcStackMap(callResultReg, returnT);
         return callResultReg;
     });
-
-    u16 dst = allocReg();
-    emitOp(op_pvec_from_array);
-    emitRegs(dst, arrReg);
-    emitPtr(resultPVType);
+    u16 dst = allocReg(); emitOp(op_pvec_from_array); emitRegs(dst, arrReg); emitPtr(resPV);
     return dst;
 }
 
