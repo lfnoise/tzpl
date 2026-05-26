@@ -356,6 +356,7 @@
                 <li><a href="#any-functions">Any Functions</a> &mdash; any, toAnyArray, as(Type)</li>
                 <li><a href="#coroutine-functions">Coroutine Functions</a> &mdash; next, yield, yieldAll, toList</li>
                 <li><a href="#set-functions">Set Functions</a> &mdash; add, remove, remove!, insert!, pop!, contains, union, intersection, difference, toArray, length, copy</li>
+                <li><a href="#persistent-functions">Persistent Collection Functions</a> &mdash; <code>#[&hellip;]</code> vectors &amp; maps: length, push, put, get, remove, contains, keys, values, merge, toPersistentVector, toArray, toPersistentMap, toMap</li>
                 <li><a href="#hashing">Hashing &amp; Equality</a> &mdash; hash, ==, !=</li>
                 <li><a href="#enum-functions">Enum Functions</a> &mdash; ordinal, tag</li>
                 <li><a href="#operators">Built-in Operators</a> &mdash; arithmetic, comparison, bitwise, logical, string</li>
@@ -1960,6 +1961,160 @@ s toArray println;               <span class="cmt">-- [1, 2, 3]</span></code></p
                 <tr><th>Signature</th><th>Description</th></tr>
                 <tr><td><code>copy(Set&lt;T&gt;) &rarr; Set&lt;T&gt;</code></td><td>Shallow copy of a set.</td></tr>
             </table>
+
+            <a href="#top" class="back-to-top">&uarr; Back to top</a>
+        </div>
+
+        <!-- ============================================================ -->
+        <div class="section" id="persistent-functions">
+            <h2>Persistent Collection Functions</h2>
+            <p>Functions that operate on the two <em>immutable persistent</em> collection types, written with a leading <code>#</code>. A <strong>persistent vector</strong> has type <code>#[T]</code> and is written <code>#[1, 2, 3]</code> &mdash; an immutable indexed sequence backed by a 32-way array-mapped trie. A <strong>persistent map</strong> has type <code>#[K: V]</code> and is written <code>#["a": 1, "b": 2]</code> (empty: <code>#[:]</code>) &mdash; an immutable keyed collection backed by a HAMT.</p>
+            <p>These are <strong>distinct types</strong> from the mutable <code>Array</code> / <code>Map</code> (just as <code>List</code> is distinct from <code>Array</code>); there is <em>no</em> implicit conversion between them. Because nothing is ever mutated, the update functions reuse the plain non-mutating names &mdash; there are <strong>no</strong> <code>!</code> (bang) variants. Every &ldquo;update&rdquo; returns a <em>new</em> collection that shares structure with the original, which is left untouched.</p>
+
+            <h3>Persistent Vector</h3>
+            <p>An immutable indexed sequence. Indexing is <em>cyclic</em> like arrays: negative and out-of-range indices wrap. In addition to the functions below, persistent vectors support structural <code>==</code> / <code>!=</code>, concatenation with <code>$</code>, and use as a for-loop iterable (<code>for (x : v) { &hellip; }</code> yields elements).</p>
+
+            <h3><code>length(pvec)</code></h3>
+            <p>Returns the number of elements in the persistent vector.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>length(#[T]) &rarr; Int</code></td><td>Number of elements.</td></tr>
+            </table>
+
+            <h3>Subscript <code>v[i]</code></h3>
+            <p>Returns the element at index <code>i</code>. Indexing is cyclic, like arrays &mdash; negative and out-of-range indices wrap around.</p>
+            <pre><code>let v = #[1, 2, 3];
+v[0] println;                    <span class="cmt">-- 1</span>
+v[-1] println;                   <span class="cmt">-- 3</span>
+v length println;                <span class="cmt">-- 3</span></code></pre>
+
+            <h3><code>push(pvec, element)</code></h3>
+            <p>Returns a new persistent vector with <code>element</code> appended. The input is unchanged.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>push(#[T], T) &rarr; #[T]</code></td><td>Append an element (returns a new persistent vector).</td></tr>
+            </table>
+            <pre><code>let v = #[1, 2, 3];
+v push(4) println;               <span class="cmt">-- #[1, 2, 3, 4]</span>
+v println;                       <span class="cmt">-- #[1, 2, 3]   (unchanged)</span></code></pre>
+
+            <h3><code>put(pvec, index, element)</code></h3>
+            <p>Returns a new persistent vector with the element at <code>index</code> replaced. The input is unchanged.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>put(#[T], Int, T) &rarr; #[T]</code></td><td>Replace the element at an index (returns a new persistent vector).</td></tr>
+            </table>
+            <pre><code>let v = #[1, 2, 3];
+v put(1, 99) println;            <span class="cmt">-- #[1, 99, 3]</span></code></pre>
+
+            <h3>Concatenation <code>v1 $ v2</code></h3>
+            <p>The <code>$</code> operator concatenates two persistent vectors, returning a new persistent vector.</p>
+            <pre><code>(#[1, 2] $ #[3, 4, 5]) println;  <span class="cmt">-- #[1, 2, 3, 4, 5]</span></code></pre>
+
+            <h3>Equality <code>==</code> / <code>!=</code></h3>
+            <p>Persistent vectors compare by structure: equal if they have the same elements in the same order.</p>
+            <pre><code>(#[1, 2, 3] == #[1, 2, 3]) println;  <span class="cmt">-- true</span></code></pre>
+
+            <div class="highlight">
+                <strong>Collection Functions apply.</strong> Persistent vectors also support the full higher-order / sequence suite documented under <a href="#collections">Collection Functions (Arrays &amp; Lists)</a> &mdash; <code>map</code>, <code>filter</code>, <code>fold</code>, <code>scan</code>, <code>fold1</code>, <code>scan1</code>, <code>find</code>, <code>take</code>, <code>drop</code>, <code>takeWhile</code>, <code>dropWhile</code>, <code>stride</code>, <code>stutter</code>, <code>reverse</code>, <code>sort</code>, <code>sort(cmp)</code>, <code>grade</code>, <code>zip</code>, <code>enumerate</code>, <code>cat</code>, <code>join</code>, <code>flatten</code> &mdash; each returning a new persistent vector (or a scalar, for reductions). <strong>Auto-mapping</strong> also applies: a function expecting a scalar maps over a persistent vector, and <code>@</code>, <code>@@</code>, and cartesian <code>@n</code> all work.
+            </div>
+            <pre><code>let v = #[1, 2, 3];
+v map(fn(x Int) { x * 10 }) println;  <span class="cmt">-- #[10, 20, 30]</span></code></pre>
+
+            <h3>Persistent Map</h3>
+            <p>An immutable keyed collection. Any hashable key type works (<code>String</code>, <code>Symbol</code>, <code>Int</code>, &hellip;). Persistent maps support structural <code>==</code> / <code>!=</code> (independent of insertion or hash order) and use as a for-loop iterable, which yields <code>(key, value)</code> tuples in hash order (not insertion order).</p>
+
+            <h3>Subscript <code>m[k]</code></h3>
+            <p>Returns <code>Option&lt;V&gt;</code> &mdash; safe for missing keys. Use <code>unwrap</code> / <code>unwrapOr</code> to extract the value.</p>
+            <pre><code>let m = #["x": 1, "y": 2, "z": 3];
+m["x"] unwrap println;           <span class="cmt">-- 1</span>
+let im = #[1: "one", 2: "two"];
+im[2] unwrap println;            <span class="cmt">-- "two"</span></code></pre>
+
+            <h3><code>get(pmap, key)</code> / <code>get(pmap, key, default)</code></h3>
+            <p>Retrieves the value for a key. The two-argument form returns <code>Option&lt;V&gt;</code>; the three-argument form returns the value directly, using the provided default when the key is absent.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>get(#[K: V], K) &rarr; Option&lt;V&gt;</code></td><td>Get value for key; returns <code>Option.some(v)</code> or <code>Option.none</code>.</td></tr>
+                <tr><td><code>get(#[K: V], K, V) &rarr; V</code></td><td>Get value for key; returns default if missing.</td></tr>
+            </table>
+            <pre><code>let m = #["x": 1, "y": 2, "z": 3];
+m get("z") unwrap println;       <span class="cmt">-- 3</span>
+m get("w", 0) println;           <span class="cmt">-- 0  (absent, returns default)</span></code></pre>
+
+            <h3><code>contains(pmap, key)</code></h3>
+            <p>Returns <code>true</code> if the key exists in the persistent map.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>contains(#[K: V], K) &rarr; Bool</code></td><td>Check if key exists.</td></tr>
+            </table>
+            <pre><code>let m = #["x": 1, "y": 2];
+m contains("x") println;         <span class="cmt">-- true</span></code></pre>
+
+            <h3><code>length(pmap)</code></h3>
+            <p>Returns the number of key-value pairs in the persistent map.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>length(#[K: V]) &rarr; Int</code></td><td>Number of entries.</td></tr>
+            </table>
+
+            <h3><code>put(pmap, key, value)</code></h3>
+            <p>Returns a new persistent map with the key-value pair inserted or updated. The input is unchanged.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>put(#[K: V], K, V) &rarr; #[K: V]</code></td><td>Insert-or-update a key-value pair (returns a new persistent map).</td></tr>
+            </table>
+            <pre><code>let m = #["x": 1, "y": 2, "z": 3];
+m put("w", 4) length println;    <span class="cmt">-- 4</span>
+m length println;                <span class="cmt">-- 3   (m unchanged)</span></code></pre>
+
+            <h3><code>remove(pmap, key)</code></h3>
+            <p>Returns a new persistent map without the given key. The input is unchanged.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>remove(#[K: V], K) &rarr; #[K: V]</code></td><td>Remove a key (returns a new persistent map).</td></tr>
+            </table>
+            <pre><code>let m = #["x": 1, "y": 2];
+m remove("x") contains("x") println;  <span class="cmt">-- false</span></code></pre>
+
+            <h3><code>keys(pmap)</code> / <code>values(pmap)</code></h3>
+            <p>Return the keys (resp. values) of the persistent map as a persistent vector.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>keys(#[K: V]) &rarr; #[K]</code></td><td>All keys, as a persistent vector.</td></tr>
+                <tr><td><code>values(#[K: V]) &rarr; #[V]</code></td><td>All values, as a persistent vector.</td></tr>
+            </table>
+
+            <h3><code>merge(pmap1, pmap2)</code></h3>
+            <p>Returns a new persistent map containing all entries from both. On a key conflict, the right operand (<code>pmap2</code>) wins. Both inputs are unchanged.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>merge(#[K: V], #[K: V]) &rarr; #[K: V]</code></td><td>Merge two persistent maps (second wins on conflicts).</td></tr>
+            </table>
+            <pre><code>(#["a": 1, "b": 2] merge(#["b": 20, "c": 30]))["b"] unwrap println;  <span class="cmt">-- 20</span></code></pre>
+
+            <h3>Equality <code>==</code> / <code>!=</code></h3>
+            <p>Persistent maps compare by structure &mdash; equal if they contain the same key-value pairs, independent of insertion or hash order.</p>
+            <pre><code>(#["a": 1, "b": 2] == #["b": 2, "a": 1]) println;  <span class="cmt">-- true</span></code></pre>
+
+            <h3>Conversions</h3>
+            <p>Four functions convert between the mutable and persistent collection types. These are real <strong>O(n)</strong> builds, not cheap freeze/thaw views &mdash; the converted result is fully independent of any later mutation of the source.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>toPersistentVector([T]) &rarr; #[T]</code></td><td>Build a persistent vector from an array.</td></tr>
+                <tr><td><code>toArray(#[T]) &rarr; [T]</code></td><td>Build a mutable array from a persistent vector. (<code>toArray</code> also accepts arrays, sets, etc.)</td></tr>
+                <tr><td><code>toPersistentMap([K: V]) &rarr; #[K: V]</code></td><td>Build a persistent map from a mutable map.</td></tr>
+                <tr><td><code>toMap(#[K: V]) &rarr; [K: V]</code></td><td>Build a mutable map from a persistent map.</td></tr>
+            </table>
+            <pre><code>[5, 6, 7] toPersistentVector toArray println;   <span class="cmt">-- [5, 6, 7]</span>
+["x": 1, "y": 2] toPersistentMap toMap length println;  <span class="cmt">-- 2</span>
+
+<span class="cmt">-- The persistent copy is independent of later mutation:</span>
+var src = [1, 2, 3];
+let f = src toPersistentVector;
+src push!(4);
+src length println;              <span class="cmt">-- 4</span>
+f length println;                <span class="cmt">-- 3   (f unaffected)</span></code></pre>
 
             <a href="#top" class="back-to-top">&uarr; Back to top</a>
         </div>

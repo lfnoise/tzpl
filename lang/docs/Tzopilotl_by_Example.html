@@ -466,6 +466,14 @@ if (localStorage.getItem('tzpl-docs-theme') === 'light') document.documentElemen
         <li><a href="#set-conversion">Conversion and Size</a></li>
       </ol>
     </li>
+    <li><a href="#persistent-collections">Persistent Collections</a>
+      <ol>
+        <li><a href="#persistent-vectors">Persistent Vectors</a></li>
+        <li><a href="#persistent-maps">Persistent Maps</a></li>
+        <li><a href="#persistent-conversions">Conversions</a></li>
+        <li><a href="#persistent-higher-order">Higher-Order Functions and Auto-mapping</a></li>
+      </ol>
+    </li>
     <li><a href="#hashing">Hashing</a></li>
     <li><a href="#refs">Refs</a>
       <ol>
@@ -784,6 +792,10 @@ u println;               <span class="cmt">-- ()</span>
 <span class="cmt">-- Set construction</span>
 <span class="kw">let</span> unique = Set(<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>);
 
+<span class="cmt">-- Persistent (immutable) collections: a leading # on the type and literal</span>
+<span class="kw">let</span> pv #[<span class="kw">Int</span>] = #[<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>];        <span class="cmt">-- persistent vector</span>
+<span class="kw">let</span> pm #[<span class="kw">String</span>:<span class="kw">Int</span>] = #[<span class="str">"a"</span>: <span class="num">1</span>];   <span class="cmt">-- persistent map</span>
+
 <span class="cmt">-- Access by index</span>
 <span class="kw">let</span> first = nums[<span class="num">0</span>];     <span class="cmt">-- array index</span>
 <span class="kw">let</span> x = point.<span class="num">0</span>;        <span class="cmt">-- tuple field access</span>
@@ -823,6 +835,11 @@ d println;               <span class="cmt">-- [1, 2, 3]</span></code></pre>
 <div class="note">
 <h4>Mutating-function names: the trailing <code>!</code></h4>
 <p>Names ending in <code>!</code> (<code>push!</code>, <code>pop!</code>, <code>insert!</code>, &hellip;) mutate their first argument in place; names without <code>!</code> return new values and leave their inputs untouched. The <code>!</code> is part of the identifier &mdash; <code>foo</code> and <code>foo!</code> are different functions. The convention is idiomatic but not enforced; a user-defined mutating function can be named with or without <code>!</code> as you choose.</p>
+</div>
+
+<div class="tip">
+<h4>Mutable vs. persistent collections</h4>
+<p><code>Array</code>, <code>Map</code>, and <code>Set</code> are mutable heap objects passed by reference. The <code>#[&hellip;]</code> forms are <em>persistent</em> (immutable) collections &mdash; a persistent vector and a persistent map &mdash; that never change in place: every update returns a new value sharing structure with the old one. They are distinct types with no implicit conversion to or from the mutable kinds. See <a href="#persistent-collections">Persistent Collections</a>.</p>
 </div>
 
 
@@ -1812,7 +1829,8 @@ println([[<span class="num">1</span>, <span class="num">2</span>, <span class="n
 <span class="cmt">-- Tuple + array @</span>
 println((<span class="num">10</span>, <span class="num">20</span>) + [<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>] @);  <span class="cmt">-- [(11, 21), (12, 22), (13, 23)]</span></code></pre>
 
-<h3 id="cartesian-product">12.5 Cartesian Product with <code>@1</code>, <code>@2</code></h3>
+<h3 id="cartesian-product">12.5 Cartesian Products with <code>@1</code>, <code>@2</code>, &hellip;</h3>
+<p>A numbered <code>@n</code> assigns its operand to cartesian dimension <code>n</code>. Distinct dimensions produce nested loops (an outer product); operands sharing a dimension are zipped. Dimension <code>n</code> becomes the <code>n</code>-th nesting level of the result.</p>
 <pre><code><span class="cmt">-- Ordered @ operators produce nested loops (outer product)</span>
 <span class="kw">fn</span> add(a <span class="kw">Int</span>, b <span class="kw">Int</span>) <span class="kw">Int</span> = a + b;
 
@@ -1826,6 +1844,23 @@ println([<span class="num">1</span>, <span class="num">2</span>] @1 + [<span cla
 <span class="kw">fn</span> mul(a <span class="kw">Int</span>, b <span class="kw">Int</span>) <span class="kw">Int</span> = a * b;
 println(mul([<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>] @1, [<span class="num">10</span>, <span class="num">100</span>] @2));
 <span class="cmt">-- [[10, 100], [20, 200], [30, 300]]</span></code></pre>
+
+<p>The depth is not limited to two: any number of dimensions (<code>@1</code> through <code>@9</code>) nest to the corresponding depth.</p>
+<pre><code><span class="cmt">-- Three dimensions -> a 2x2x2 nested result</span>
+<span class="kw">fn</span> add3(x <span class="kw">Int</span>, y <span class="kw">Int</span>, z <span class="kw">Int</span>) <span class="kw">Int</span> = x + y + z;
+println(add3([<span class="num">1</span>, <span class="num">2</span>] @1, [<span class="num">10</span>, <span class="num">20</span>] @2, [<span class="num">100</span>, <span class="num">200</span>] @3));
+<span class="cmt">-- [[[111, 211], [121, 221]], [[112, 212], [122, 222]]]</span>
+
+<span class="cmt">-- A non-mapped argument is broadcast across every combination</span>
+println(add3([<span class="num">1</span>, <span class="num">2</span>] @1, [<span class="num">10</span>, <span class="num">20</span>] @2, <span class="num">1000</span>));
+<span class="cmt">-- [[1011, 1021], [1012, 1022]]</span></code></pre>
+
+<div class="note">
+<h4>Cartesian mapping over persistent vectors</h4>
+<p>Cartesian mapping applies uniformly to persistent vectors (and mixtures of arrays and persistent vectors). When any operand is a persistent vector the nested result is built from persistent vectors:</p>
+<pre><code>println(add3(#[<span class="num">1</span>, <span class="num">2</span>] @1, #[<span class="num">10</span>, <span class="num">20</span>] @2, #[<span class="num">100</span>, <span class="num">200</span>] @3));
+<span class="cmt">-- #[#[#[111, 211], #[121, 221]], #[#[112, 212], #[122, 222]]]</span></code></pre>
+</div>
 
 <h3 id="auto-map-field-access">12.6 Auto-map Field Access</h3>
 <p>Field access on an array or list of structs/tuples automatically maps, extracting that field from each element.</p>
@@ -2068,7 +2103,135 @@ s toArray println;               <span class="cmt">-- [3, 1, 2]</span></code></p
 </div>
 
 <!-- ================================================================ -->
-<h2 id="hashing">16. Hashing</h2>
+<h2 id="persistent-collections">16. Persistent Collections</h2>
+
+<p>Persistent collections are immutable counterparts to <code>Array</code> and <code>Map</code>, written with a leading <code>#</code>. A <strong>persistent vector</strong> <code>#[&hellip;]</code> is an indexed sequence; a <strong>persistent map</strong> <code>#[k: v, &hellip;]</code> is a keyed collection. They never change in place: an &ldquo;update&rdquo; returns a new collection that shares most of its structure with the original, so copies are cheap and the original is always left intact.</p>
+
+<p>They are <em>distinct types</em> from the mutable kinds &mdash; just as <code>List</code> is distinct from <code>Array</code> &mdash; with no implicit conversion in either direction. The element-update builtins reuse the non-mutating names (<code>push</code>, <code>put</code>, <code>get</code>, <code>remove</code>); there are no <code>!</code> variants, because there is nothing to mutate.</p>
+
+<h3 id="persistent-vectors">16.1 Persistent Vectors</h3>
+<pre><code><span class="cmt">-- Literal and type annotation: #[T]</span>
+<span class="kw">let</span> v = #[<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>];
+v println;                       <span class="cmt">-- #[1, 2, 3]</span>
+
+<span class="cmt">-- Indexing is cyclic, like arrays</span>
+v[<span class="num">0</span>] println;                    <span class="cmt">-- 1</span>
+v[-<span class="num">1</span>] println;                   <span class="cmt">-- 3 (last element)</span>
+v length println;                <span class="cmt">-- 3</span>
+
+<span class="cmt">-- push returns a NEW vector; the original is unchanged</span>
+<span class="kw">let</span> v2 = v push(<span class="num">4</span>);
+v2 println;                      <span class="cmt">-- #[1, 2, 3, 4]</span>
+v println;                       <span class="cmt">-- #[1, 2, 3]  (untouched)</span>
+
+<span class="cmt">-- put replaces the element at an index, returning a new vector</span>
+<span class="kw">let</span> v3 = v put(<span class="num">1</span>, <span class="num">99</span>);
+v3 println;                      <span class="cmt">-- #[1, 99, 3]</span>
+
+<span class="cmt">-- Numeric promotion in a literal, like arrays</span>
+#[<span class="num">1</span>, <span class="num">2.0</span>, <span class="num">3</span>] println;          <span class="cmt">-- #[1.0, 2.0, 3.0]  (type #[Float])</span>
+
+<span class="cmt">-- An empty literal takes its element type from the annotation</span>
+<span class="kw">let</span> e #[<span class="kw">Int</span>] = #[];
+e length println;                <span class="cmt">-- 0</span>
+
+<span class="cmt">-- Equality is structural; $ concatenates</span>
+(#[<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>] == #[<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>]) println;   <span class="cmt">-- true</span>
+(#[<span class="num">1</span>, <span class="num">2</span>] $ #[<span class="num">3</span>, <span class="num">4</span>, <span class="num">5</span>]) println;        <span class="cmt">-- #[1, 2, 3, 4, 5]</span>
+
+<span class="cmt">-- For-loop iteration yields elements</span>
+<span class="kw">var</span> total = <span class="num">0</span>;
+<span class="kw">for</span> (x : v2) { total = total + x; }
+total println;                   <span class="cmt">-- 10</span></code></pre>
+
+<h3 id="persistent-maps">16.2 Persistent Maps</h3>
+<pre><code><span class="cmt">-- Literal and type annotation: #[K:V]</span>
+<span class="kw">let</span> m = #[<span class="str">"x"</span>: <span class="num">1</span>, <span class="str">"y"</span>: <span class="num">2</span>, <span class="str">"z"</span>: <span class="num">3</span>];
+m length println;                <span class="cmt">-- 3</span>
+
+<span class="cmt">-- Subscript returns Option&lt;V&gt;</span>
+m[<span class="str">"x"</span>] unwrap println;          <span class="cmt">-- 1</span>
+
+<span class="cmt">-- get returns Option&lt;V&gt;; get(key, default) returns V</span>
+m get(<span class="str">"z"</span>) unwrap println;      <span class="cmt">-- 3</span>
+m get(<span class="str">"w"</span>, <span class="num">0</span>) println;          <span class="cmt">-- 0</span>
+m contains(<span class="str">"x"</span>) println;        <span class="cmt">-- true</span>
+
+<span class="cmt">-- put and remove return NEW maps; the original is unchanged</span>
+<span class="kw">let</span> m2 = m put(<span class="str">"w"</span>, <span class="num">4</span>);
+m2 length println;               <span class="cmt">-- 4</span>
+m contains(<span class="str">"w"</span>) println;        <span class="cmt">-- false  (untouched)</span>
+
+<span class="kw">let</span> m3 = m2 remove(<span class="str">"x"</span>);
+m3 contains(<span class="str">"x"</span>) println;       <span class="cmt">-- false</span>
+
+<span class="cmt">-- keys and values are persistent vectors</span>
+m keys length println;           <span class="cmt">-- 3</span>
+m values length println;         <span class="cmt">-- 3</span>
+
+<span class="cmt">-- merge: the right operand's keys win on conflict</span>
+<span class="kw">let</span> merged = #[<span class="str">"a"</span>: <span class="num">1</span>, <span class="str">"b"</span>: <span class="num">2</span>] merge(#[<span class="str">"b"</span>: <span class="num">20</span>, <span class="str">"c"</span>: <span class="num">30</span>]);
+merged[<span class="str">"b"</span>] unwrap println;     <span class="cmt">-- 20</span>
+
+<span class="cmt">-- Empty persistent map: #[:]  (element types from the annotation)</span>
+<span class="kw">let</span> empty #[<span class="kw">String</span>:<span class="kw">Int</span>] = #[:];
+empty length println;            <span class="cmt">-- 0</span>
+
+<span class="cmt">-- Equality is structural and order-independent</span>
+(#[<span class="str">"a"</span>: <span class="num">1</span>, <span class="str">"b"</span>: <span class="num">2</span>] == #[<span class="str">"b"</span>: <span class="num">2</span>, <span class="str">"a"</span>: <span class="num">1</span>]) println;  <span class="cmt">-- true</span>
+
+<span class="cmt">-- Any hashable key type works (e.g. Int keys)</span>
+<span class="kw">let</span> im = #[<span class="num">1</span>: <span class="str">"one"</span>, <span class="num">2</span>: <span class="str">"two"</span>];
+im[<span class="num">2</span>] unwrap println;            <span class="cmt">-- "two"</span></code></pre>
+
+<div class="note">
+<h4>Iteration order</h4>
+<p>A persistent map is for-iterable, yielding <code>(key, value)</code> tuples in hash order (not insertion order). Equality compares contents, so it is independent of order.</p>
+</div>
+
+<h3 id="persistent-conversions">16.3 Conversions</h3>
+<p>Because the persistent and mutable kinds are distinct types, conversion is explicit and performs a real <em>O(n)</em> build (there is no in-place &ldquo;freeze&rdquo;). The four builtins are target-typed:</p>
+<pre><code><span class="cmt">-- Array &lt;-&gt; persistent vector</span>
+<span class="kw">let</span> pv = [<span class="num">5</span>, <span class="num">6</span>, <span class="num">7</span>] toPersistentVector;
+pv toArray println;              <span class="cmt">-- [5, 6, 7]</span>
+
+<span class="cmt">-- Map &lt;-&gt; persistent map</span>
+<span class="kw">let</span> pm = [<span class="str">"x"</span>: <span class="num">1</span>, <span class="str">"y"</span>: <span class="num">2</span>] toPersistentMap;
+pm toMap length println;         <span class="cmt">-- 2</span>
+
+<span class="cmt">-- The result is independent of later mutation of the source</span>
+<span class="kw">var</span> src = [<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>];
+<span class="kw">let</span> frozen = src toPersistentVector;
+src push!(<span class="num">4</span>);
+src length println;              <span class="cmt">-- 4</span>
+frozen length println;           <span class="cmt">-- 3  (unaffected)</span></code></pre>
+
+<h3 id="persistent-higher-order">16.4 Higher-Order Functions and Auto-mapping</h3>
+<p>Persistent vectors support the same higher-order and sequence builtins as arrays &mdash; <code>map</code>, <code>filter</code>, <code>fold</code>, <code>scan</code>, <code>reverse</code>, <code>take</code>, <code>drop</code>, <code>sort</code>, <code>zip</code>, <code>flatten</code>, and so on &mdash; each returning a new persistent vector (or a scalar, for reductions).</p>
+<pre><code><span class="kw">let</span> v = #[<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>, <span class="num">4</span>];
+v map(<span class="kw">fn</span>(x <span class="kw">Int</span>) { x * <span class="num">10</span> }) println;   <span class="cmt">-- #[10, 20, 30, 40]</span>
+v filter(<span class="kw">fn</span>(x <span class="kw">Int</span>) { x &gt; <span class="num">2</span> }) println;  <span class="cmt">-- #[3, 4]</span>
+v fold(<span class="num">0</span>, <span class="kw">fn</span>(a <span class="kw">Int</span>, x <span class="kw">Int</span>) { a + x }) println;  <span class="cmt">-- 10</span>
+v reverse println;                       <span class="cmt">-- #[4, 3, 2, 1]</span></code></pre>
+
+<p>Auto-mapping works exactly as it does for arrays: functions expecting a scalar map over a persistent vector, binary operators broadcast and zip, and the <code>@</code>, <code>@@</code>, and cartesian <code>@n</code> forms all apply. The result preserves the persistent-vector kind.</p>
+<pre><code><span class="kw">let</span> u = #[<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>];
+(u + <span class="num">1</span>) println;                     <span class="cmt">-- #[2, 3, 4]</span>
+(u * #[<span class="num">10</span>, <span class="num">20</span>, <span class="num">30</span>]) println;          <span class="cmt">-- #[10, 40, 90]</span>
+
+<span class="kw">let</span> dbl = <span class="kw">fn</span>(x <span class="kw">Int</span>) <span class="kw">Int</span> { x * <span class="num">2</span> };
+u dbl println;                            <span class="cmt">-- #[2, 4, 6]</span>
+
+<span class="cmt">-- Deep (@@) auto-mapping over nested persistent vectors, any depth</span>
+(#[#[<span class="num">1</span>, <span class="num">2</span>], #[<span class="num">3</span>, <span class="num">4</span>]] + <span class="num">1</span>) println;     <span class="cmt">-- #[#[2, 3], #[4, 5]]</span></code></pre>
+
+<div class="tip">
+<h4>See also</h4>
+<p>Cartesian (<code>@n</code>) mapping over persistent vectors and arbitrary-depth nesting are covered in <a href="#cartesian-product">Cartesian Products</a>.</p>
+</div>
+
+<!-- ================================================================ -->
+<h2 id="hashing">17. Hashing</h2>
 
 <p>The <code>hash</code> function returns an integer hash for any value. Equal values always produce equal hashes. User-defined <code>hash</code> overloads take priority over the built-in structural hashing.</p>
 <pre><code><span class="cmt">-- Hash works on all types</span>
@@ -2092,11 +2255,11 @@ println(hash(Key{<span class="num">1</span>, <span class="num">2</span>}) == has
 </div>
 
 <!-- ================================================================ -->
-<h2 id="refs">17. Refs (Mutable References)</h2>
+<h2 id="refs">18. Refs (Mutable References)</h2>
 
 <p>A <code>Ref</code> is a mutable container for a value. Create with <code>&amp;</code>, dereference with <code>*</code>, and assign with <code>&lt;-</code>.</p>
 
-<h3 id="creating-refs">17.1 Creating and Using Refs</h3>
+<h3 id="creating-refs">18.1 Creating and Using Refs</h3>
 <pre><code><span class="cmt">-- Create a ref with &amp;</span>
 <span class="kw">let</span> x = &amp;<span class="num">42</span>;
 *x println;         <span class="cmt">-- 42 (dereference with *)</span>
@@ -2117,7 +2280,7 @@ s &lt;- <span class="str">"world"</span>;
 <span class="kw">let</span> v = (x &lt;- <span class="num">77</span>);
 v println;          <span class="cmt">-- 77</span></code></pre>
 
-<h3 id="refs-as-args">17.2 Refs as Function Arguments</h3>
+<h3 id="refs-as-args">18.2 Refs as Function Arguments</h3>
 <pre><code><span class="kw">fn</span> increment(r Ref&lt;<span class="kw">Int</span>&gt;) <span class="kw">Int</span> {
     <span class="kw">let</span> old = *r;
     r &lt;- *r + <span class="num">1</span>;
@@ -2129,7 +2292,7 @@ counter increment println;   <span class="cmt">-- 0</span>
 counter increment println;   <span class="cmt">-- 1</span>
 *counter println;             <span class="cmt">-- 2</span></code></pre>
 
-<h3 id="overloading-assign">17.3 Overloading <code>&lt;-</code></h3>
+<h3 id="overloading-assign">18.3 Overloading <code>&lt;-</code></h3>
 <pre><code><span class="kw">struct</span> Accumulator { total Ref&lt;<span class="kw">Int</span>&gt;, count Ref&lt;<span class="kw">Int</span>&gt; }
 
 <span class="kw">fn</span> &lt;-(acc Accumulator, val <span class="kw">Int</span>) <span class="kw">Int</span> {
@@ -2146,7 +2309,7 @@ acc &lt;- <span class="num">30</span>;
 *(acc.count) println;    <span class="cmt">-- 3</span></code></pre>
 
 <!-- ================================================================ -->
-<h2 id="function-types">18. Function Type Annotations</h2>
+<h2 id="function-types">19. Function Type Annotations</h2>
 
 <p>Function types are written as <code>(ArgTypes) ReturnType</code>.</p>
 
@@ -2182,9 +2345,9 @@ apply(double, <span class="num">5</span>) println;  <span class="cmt">-- 10</spa
 <span class="num">3</span> inc_then_dbl println;  <span class="cmt">-- 8  (dbl(inc(3)) = (3+1)*2)</span></code></pre>
 
 <!-- ================================================================ -->
-<h2 id="templates">19. Templates</h2>
+<h2 id="templates">20. Templates</h2>
 
-<h3 id="template-functions">19.1 Template Functions</h3>
+<h3 id="template-functions">20.1 Template Functions</h3>
 <p>A function becomes a template when any of its parameters have an unspecified type.
    The compiler introduces a type parameter for each untyped argument and monomorphizes
    the function at each call site. You can also declare type parameters explicitly with
@@ -2225,7 +2388,7 @@ apply(double, <span class="num">5</span>) println;  <span class="cmt">-- 10</spa
 <span class="num">5</span> wrap println;            <span class="cmt">-- [5]</span>
 println(pair(<span class="num">1</span>, <span class="str">"hi"</span>));     <span class="cmt">-- (1, "hi")</span></code></pre>
 
-<h3 id="template-structs">19.2 Template Structs</h3>
+<h3 id="template-structs">20.2 Template Structs</h3>
 <pre><code><span class="kw">struct</span> Pair&lt;T, U&gt; {
     first T,
     second U
@@ -2255,7 +2418,7 @@ w.<span class="num">0</span> println;                  <span class="cmt">-- 42</
 <span class="kw">let</span> ws = Wrapper(<span class="str">"hello"</span>);     <span class="cmt">-- T inferred as String</span>
 ws println;                    <span class="cmt">-- Wrapper&lt;String&gt;(hello)</span></code></pre>
 
-<h3 id="template-enums">19.3 Template Enums</h3>
+<h3 id="template-enums">20.3 Template Enums</h3>
 <pre><code><span class="cmt">-- Option&lt;T&gt; is a built-in template enum (see below)</span>
 
 <span class="cmt">-- User-defined template enums</span>
@@ -2297,7 +2460,7 @@ y isNone println;              <span class="cmt">-- true</span>
     Option.none: <span class="str">"nothing"</span> println;
 }</code></pre>
 
-<h3 id="template-constraints">19.4 Template Constraints</h3>
+<h3 id="template-constraints">20.4 Template Constraints</h3>
 <p>Template constraints restrict what types can be used for a type parameter.
    When a concrete type does not satisfy the constraint, the template is
    silently skipped during overload resolution, allowing other overloads to
@@ -2470,7 +2633,7 @@ triple(<span class="num">5</span>) println;      <span class="cmt">-- 15</span>
 triple(<span class="num">1.0</span>) println;    <span class="cmt">-- 3.0</span>
 <span class="cmt">-- triple("hi");       -- error: String does not satisfy NumericAddable</span></code></pre>
 
-<h3 id="template-lambdas">19.5 Template Lambdas</h3>
+<h3 id="template-lambdas">20.5 Template Lambdas</h3>
 <p>Lambda expressions can have type parameters, creating generic lambdas that
    are monomorphized at each call site. Just like template functions, leaving a
    parameter's type unspecified makes the lambda generic. You can also declare
@@ -2537,9 +2700,9 @@ pair(<span class="num">1</span>, <span class="str">"hello"</span>) println;    <
 pair(<span class="num">3.14</span>, <span class="kw">true</span>) println;    <span class="cmt">-- (3.14, true)</span></code></pre>
 
 <!-- ================================================================ -->
-<h2 id="type-aliases">20. Type Aliases</h2>
+<h2 id="type-aliases">21. Type Aliases</h2>
 
-<h3 id="concrete-type-aliases">20.1 Concrete Type Aliases</h3>
+<h3 id="concrete-type-aliases">21.1 Concrete Type Aliases</h3>
 <p>Use <code>type</code> to create a transparent alias for an existing type. The alias and the original type are fully interchangeable.</p>
 <pre><code><span class="cmt">-- Alias for a primitive type</span>
 <span class="kw">type</span> Natural = Int;
@@ -2568,7 +2731,7 @@ pair(<span class="num">3.14</span>, <span class="kw">true</span>) println;    <s
 <span class="kw">let</span> b IntBox = Box { <span class="num">42</span> };
 <span class="kw">let</span> b2 Box&lt;Int&gt; = b;   <span class="cmt">-- alias is transparent</span></code></pre>
 
-<h3 id="generic-type-aliases">20.2 Generic Type Aliases</h3>
+<h3 id="generic-type-aliases">21.2 Generic Type Aliases</h3>
 <p>Type aliases can have type parameters. They are expanded when type arguments are provided.</p>
 <pre><code><span class="cmt">-- Generic alias for a tuple</span>
 <span class="kw">type</span> Pair&lt;T&gt; = (T, T);
@@ -2587,15 +2750,15 @@ pair(<span class="num">3.14</span>, <span class="kw">true</span>) println;    <s
 <span class="kw">type</span> Wrapper&lt;T&gt; = Box&lt;T&gt;;
 <span class="kw">fn</span> unwrap&lt;T&gt;(w Wrapper&lt;T&gt;) T = w.value;</code></pre>
 
-<h3 id="type-alias-visibility">20.3 Visibility</h3>
+<h3 id="type-alias-visibility">21.3 Visibility</h3>
 <p>Type aliases can be marked <code>private</code> in modules to prevent them from being exported.</p>
 <pre><code><span class="kw">private</span> <span class="kw">type</span> InternalId = Int;
 <span class="kw">type</span> PublicId = Int;   <span class="cmt">-- exported by default</span></code></pre>
 
 <!-- ================================================================ -->
-<h2 id="modules">21. Modules and Visibility</h2>
+<h2 id="modules">22. Modules and Visibility</h2>
 
-<h3 id="import-syntax">21.1 Import Syntax</h3>
+<h3 id="import-syntax">22.1 Import Syntax</h3>
 <pre><code><span class="cmt">-- Import entire module (qualified access)</span>
 <span class="kw">import</span> math;
 println(math.square(<span class="num">5</span>));    <span class="cmt">-- 25</span>
@@ -2616,7 +2779,7 @@ cols.get(mymap, <span class="str">"key"</span>);
 <span class="kw">import</span> std.math.{sin <span class="kw">as</span> sine, cos <span class="kw">as</span> cosine};
 <span class="num">1.0</span> sine println;</code></pre>
 
-<h3 id="dotted-paths">21.2 Dotted Paths</h3>
+<h3 id="dotted-paths">22.2 Dotted Paths</h3>
 <pre><code><span class="cmt">-- Dotted paths map to directories:</span>
 <span class="cmt">--   std.math  →  std/math.x</span>
 <span class="cmt">--   utils     →  utils.x</span>
@@ -2624,7 +2787,7 @@ cols.get(mymap, <span class="str">"key"</span>);
 <span class="kw">import</span> std.math;            <span class="cmt">-- loads std/math.x</span>
 println(math.add(<span class="num">3</span>, <span class="num">4</span>));    <span class="cmt">-- qualified by last path component</span></code></pre>
 
-<h3 id="file-resolution">21.3 File Resolution</h3>
+<h3 id="file-resolution">22.3 File Resolution</h3>
 <div class="note">
     <h4>Module Search Order</h4>
     <p>When resolving an import, the compiler searches in this order:</p>
@@ -2639,7 +2802,7 @@ println(math.add(<span class="num">3</span>, <span class="num">4</span>));    <s
 <p>Or set the environment variable:</p>
 <pre><code>export TZPL_PATH=/usr/local/lib/tzpl:/home/user/libs</code></pre>
 
-<h3 id="visibility-exporting">21.4 Visibility and Exporting</h3>
+<h3 id="visibility-exporting">22.4 Visibility and Exporting</h3>
 <pre><code><span class="cmt">-- By default, all top-level declarations are exported</span>
 <span class="kw">fn</span> add(a <span class="kw">Int</span>, b <span class="kw">Int</span>) <span class="kw">Int</span> = a + b;     <span class="cmt">-- exported</span>
 <span class="kw">const</span> PI = <span class="num">3.14159</span>;                       <span class="cmt">-- exported</span>
@@ -2662,7 +2825,7 @@ If module <code>A</code> imports from module <code>B</code>, importers of
 <code>A</code> do not see <code>B</code>'s names. Use <code>export</code>
 (section&nbsp;21.5) to opt in to re-exporting.</p>
 
-<h3 id="re-exporting">21.5 Re-exporting Imports with <code>export</code></h3>
+<h3 id="re-exporting">22.5 Re-exporting Imports with <code>export</code></h3>
 <p><code>export</code> is a drop-in replacement for <code>import</code>:
 the grammar is identical, but every name pulled in by an
 <code>export</code> statement is also added to this module's export
@@ -2716,18 +2879,18 @@ through a whole-module import (<code>import A;</code>) is rejected:</p>
 <pre><code><span class="kw">import</span> A;
 A.math_utils.square(<span class="num">5</span>);   <span class="cmt">-- compile error: use `import A.*` or `import A.{math_utils}`</span></code></pre>
 
-<h3 id="circular-import">21.6 Circular Import Detection</h3>
+<h3 id="circular-import">22.6 Circular Import Detection</h3>
 <p>Circular imports are detected and reported as errors.
 If <code>a.x</code> imports <code>b.x</code> and <code>b.x</code> imports <code>a.x</code>, the compiler
 will report: <code>"Circular import detected: a"</code></p>
 
 <!-- ================================================================ -->
-<h2 id="any-type">22. The Any Type</h2>
+<h2 id="any-type">23. The Any Type</h2>
 
 <p>The <code>Any</code> type wraps a value of any type into a uniform runtime object, enabling heterogeneous collections
 and dynamic type dispatch. The wrapped value retains its original type, which can be tested at runtime.</p>
 
-<h3 id="wrapping-values">22.1 Wrapping Values</h3>
+<h3 id="wrapping-values">23.1 Wrapping Values</h3>
 <p>Use the <code>any()</code> function to wrap a value. The result prints as <code>Any(value, Type)</code>.</p>
 <pre><code><span class="kw">let</span> a = any(<span class="num">5</span>);
 a println;              <span class="cmt">-- Any(5, Int)</span>
@@ -2743,7 +2906,7 @@ d println;              <span class="cmt">-- Any('foo, Symbol)</span>
 
 any(<span class="kw">true</span>) println;      <span class="cmt">-- Any(true, Bool)</span></code></pre>
 
-<h3 id="as-type-cast">22.2 Type Testing with <code>as(Type)</code></h3>
+<h3 id="as-type-cast">23.2 Type Testing with <code>as(Type)</code></h3>
 <p>The postfix <code>as(Type)</code> operator tests whether an <code>Any</code> value wraps the given type.
 It returns <code>Option&lt;T&gt;</code> &mdash; <code>some(value)</code> if the type matches, <code>none</code> otherwise.</p>
 <pre><code><span class="kw">let</span> a = any(<span class="num">5</span>);
@@ -2754,7 +2917,7 @@ a as(<span class="kw">String</span>) println;   <span class="cmt">-- Option&lt;S
 <span class="kw">let</span> b = any(<span class="str">"hello"</span>);
 b as(<span class="kw">String</span>) println;   <span class="cmt">-- Option&lt;String&gt;.some(hello)</span></code></pre>
 
-<h3 id="any-match">22.3 Pattern Matching on Any</h3>
+<h3 id="any-match">23.3 Pattern Matching on Any</h3>
 <p>In a <code>match</code> expression, use <code>name Type</code> patterns to test the wrapped type and bind
 the unwrapped value to a name. Use <code>_</code> as a catch-all for unmatched types.</p>
 <pre><code><span class="kw">fn</span> describe(x Any) <span class="kw">String</span> {
@@ -2771,7 +2934,7 @@ describe(any(<span class="str">"hi"</span>)) println;     <span class="cmt">-- s
 describe(any(<span class="num">2.7</span>)) println;      <span class="cmt">-- float: 2.7</span>
 describe(any(<span class="sym">'x</span>)) println;       <span class="cmt">-- other</span></code></pre>
 
-<h3 id="any-arrays">22.4 Heterogeneous Arrays</h3>
+<h3 id="any-arrays">23.4 Heterogeneous Arrays</h3>
 <p>Use <code>any()</code> with multiple arguments or <code>toAnyArray</code> on a tuple to create an <code>[Any]</code>
 &mdash; an array where each element can be a different type.</p>
 <pre><code><span class="cmt">-- Variadic any() wraps each arg and returns [Any]</span>
@@ -2787,13 +2950,13 @@ any(<span class="num">1</span>, any(<span class="num">2</span>, <span class="num
 <span class="cmt">-- [Any(1, Int), Any([Any(2, Int), Any(3, Int)], [Any])]</span></code></pre>
 
 <!-- ================================================================ -->
-<h2 id="coroutines">23. Coroutines</h2>
+<h2 id="coroutines">24. Coroutines</h2>
 
 <p>Coroutines are functions that can suspend execution and yield values one at a time.
 They are useful for lazy sequences, generators, and any scenario where you want to
 produce a stream of values on demand without computing them all up front.</p>
 
-<h3 id="defining-coroutines">23.1 Defining Coroutines</h3>
+<h3 id="defining-coroutines">24.1 Defining Coroutines</h3>
 <p>A coroutine is declared with <code>coro fn</code>. The return type is the type of
 values it yields. Use <code>yield</code> to produce values.</p>
 <pre><code><span class="cmt">-- A coroutine that yields integers 0..n-1</span>
@@ -2818,7 +2981,7 @@ values it yields. Use <code>yield</code> to produce values.</p>
 the coroutine's behalf. Use <code>yieldAll</code> to delegate to an inner coroutine.
 </div>
 
-<h3 id="resuming-with-next">23.2 Resuming with <code>next</code></h3>
+<h3 id="resuming-with-next">24.2 Resuming with <code>next</code></h3>
 <p>Calling a coroutine function creates a <code>Coroutine&lt;T&gt;</code> object.
 Use <code>next</code> to resume it and get the next yielded value wrapped in
 <code>Option&lt;T&gt;</code>. When the coroutine is exhausted, <code>next</code>
@@ -2829,7 +2992,7 @@ c next println;   <span class="cmt">-- Option.some(1)</span>
 c next println;   <span class="cmt">-- Option.some(2)</span>
 c next println;   <span class="cmt">-- Option.none</span></code></pre>
 
-<h3 id="yield-forms">23.3 Yield Forms</h3>
+<h3 id="yield-forms">24.3 Yield Forms</h3>
 <p>There are three equivalent ways to yield a value.</p>
 <pre><code><span class="kw">coro fn</span> mixed_yield() <span class="kw">String</span> {
     yield <span class="str">"prefix"</span>;          <span class="cmt">-- expression form</span>
@@ -2842,7 +3005,7 @@ m next println;   <span class="cmt">-- Option.some(prefix)</span>
 m next println;   <span class="cmt">-- Option.some(pipeline)</span>
 m next println;   <span class="cmt">-- Option.some(explicit)</span></code></pre>
 
-<h3 id="coroutine-state">23.4 Coroutine State and Exhaustion</h3>
+<h3 id="coroutine-state">24.4 Coroutine State and Exhaustion</h3>
 <p>Each coroutine maintains its own local state across suspensions.
 Once finished, every subsequent call to <code>next</code> returns <code>none</code>.</p>
 <pre><code><span class="cmt">-- State is preserved between yields</span>
@@ -2868,7 +3031,7 @@ rs next println;   <span class="cmt">-- Option.none (stays exhausted)</span>
 <span class="kw">coro fn</span> empty() <span class="kw">Int</span> {}
 empty() next println;   <span class="cmt">-- Option.none</span></code></pre>
 
-<h3 id="for-loops-coroutines">23.5 For Loops over Coroutines</h3>
+<h3 id="for-loops-coroutines">24.5 For Loops over Coroutines</h3>
 <p>Coroutines work directly with <code>for</code> loops. The loop variable
 receives unwrapped values (not <code>Option</code>), and the loop ends when
 the coroutine is exhausted.</p>
@@ -2889,7 +3052,7 @@ the coroutine is exhausted.</p>
 }
 <span class="cmt">-- Output: red green blue</span></code></pre>
 
-<h3 id="infinite-coroutines">23.6 Infinite Coroutines</h3>
+<h3 id="infinite-coroutines">24.6 Infinite Coroutines</h3>
 <p>Coroutines can yield indefinitely. Use <code>break</code> in a
 <code>for</code> loop to stop early.</p>
 <pre><code><span class="cmt">-- Infinite Fibonacci sequence</span>
@@ -2921,7 +3084,7 @@ the coroutine is exhausted.</p>
 }
 <span class="cmt">-- Output: 0 1 1 2 3 5 8</span></code></pre>
 
-<h3 id="yield-delegation">23.7 Yield Delegation with <code>yieldAll</code></h3>
+<h3 id="yield-delegation">24.7 Yield Delegation with <code>yieldAll</code></h3>
 <p><code>yieldAll</code> drains an inner coroutine, forwarding each of its values
 as a yield from the outer coroutine. The inner coroutine's yield type must match
 the outer's.</p>
@@ -2949,7 +3112,7 @@ the outer's.</p>
     yield <span class="num">99</span>;
 }</code></pre>
 
-<h3 id="coroutine-to-list">23.8 Converting to Lists with <code>toList</code></h3>
+<h3 id="coroutine-to-list">24.8 Converting to Lists with <code>toList</code></h3>
 <p><code>toList</code> converts a coroutine into a (lazy) list, enabling all list
 operations. For infinite coroutines, use <code>take</code> or <code>collect</code>
 to bound the result.</p>
@@ -2974,7 +3137,7 @@ fibs() toList take(<span class="num">8</span>) println;
 fibs() toList collect(<span class="num">6</span>) println;
 <span class="cmt">-- [0, 1, 1, 2, 3, 5]</span></code></pre>
 
-<h3 id="coroutine-types">23.9 The Coroutine Type</h3>
+<h3 id="coroutine-types">24.9 The Coroutine Type</h3>
 <p>The type of a coroutine object is <code>Coroutine&lt;T&gt;</code>, where <code>T</code>
 is the yield type. This can be used in type annotations and as function parameter types.</p>
 <pre><code><span class="cmt">-- Explicit type annotation</span>
@@ -2992,7 +3155,7 @@ is the yield type. This can be used in type annotations and as function paramete
 <span class="num">4</span> count drain;
 <span class="cmt">-- Option.some(0) Option.some(1) Option.some(2) Option.some(3)</span></code></pre>
 
-<h3 id="coroutine-composition">23.10 Composition Patterns</h3>
+<h3 id="coroutine-composition">24.10 Composition Patterns</h3>
 <p>Coroutines can yield any type including tuples, arrays, structs, and enums.
 They also compose well: a coroutine can create and drive other coroutines.</p>
 <pre><code><span class="cmt">-- Yielding tuples</span>
@@ -3047,9 +3210,9 @@ They also compose well: a coroutine can create and drive other coroutines.</p>
 <span class="cmt">-- List(0, 2, 4, 6)</span></code></pre>
 
 <!-- ================================================================ -->
-<h2 id="advanced-examples">24. Advanced Examples</h2>
+<h2 id="advanced-examples">25. Advanced Examples</h2>
 
-<h3 id="fibonacci">24.1 Fibonacci (Recursive and Iterative)</h3>
+<h3 id="fibonacci">25.1 Fibonacci (Recursive and Iterative)</h3>
 <pre><code><span class="kw">fn</span> fib(n <span class="kw">Int</span>) <span class="kw">Int</span> {
     <span class="kw">if</span> (n <= <span class="num">1</span>) { <span class="kw">return</span> n; }
     fib(n - <span class="num">1</span>) + fib(n - <span class="num">2</span>)
@@ -3069,7 +3232,7 @@ They also compose well: a coroutine can create and drive other coroutines.</p>
     b
 }</code></pre>
 
-<h3 id="fizzbuzz">24.2 FizzBuzz</h3>
+<h3 id="fizzbuzz">25.2 FizzBuzz</h3>
 <pre><code><span class="kw">fn</span> fizzbuzz(n <span class="kw">Int</span>) <span class="kw">String</span> {
     <span class="kw">if</span> (n % <span class="num">15</span> == <span class="num">0</span>) { <span class="kw">return</span> <span class="str">"FizzBuzz"</span>; }
     <span class="kw">if</span> (n % <span class="num">3</span> == <span class="num">0</span>) { <span class="kw">return</span> <span class="str">"Fizz"</span>; }
@@ -3084,7 +3247,7 @@ They also compose well: a coroutine can create and drive other coroutines.</p>
     i = i + <span class="num">1</span>;
 }</code></pre>
 
-<h3 id="euler9">24.3 Euler Problem 9: Pythagorean Triplet</h3>
+<h3 id="euler9">25.3 Euler Problem 9: Pythagorean Triplet</h3>
 <pre><code><span class="cmt">-- Find a*b*c where a+b+c=1000, a^2+b^2=c^2</span>
 <span class="kw">fn</span> euler9() <span class="kw">Int</span> {
     <span class="kw">var</span> a = <span class="num">1</span>;
@@ -3104,14 +3267,14 @@ They also compose well: a coroutine can create and drive other coroutines.</p>
     <span class="num">0</span>
 }</code></pre>
 
-<h3 id="complex-powers">24.4 Complex Number Powers of i</h3>
+<h3 id="complex-powers">25.4 Complex Number Powers of i</h3>
 <pre><code><span class="cmt">-- i^1=i, i^2=-1, i^3=-i, i^4=1</span>
 <span class="kw">let</span> i_1 = <span class="num">1i</span>;
 <span class="kw">let</span> i_2 = i_1 * i_1;      <span class="cmt">-- -1+0i</span>
 <span class="kw">let</span> i_3 = i_2 * i_1;      <span class="cmt">-- 0-1i</span>
 <span class="kw">let</span> i_4 = i_3 * i_1;      <span class="cmt">-- 1+0i</span></code></pre>
 
-<h3 id="bitwise-overloading">24.5 Bitwise Operator Overloading</h3>
+<h3 id="bitwise-overloading">25.5 Bitwise Operator Overloading</h3>
 <pre><code><span class="kw">struct</span> Mask { bits <span class="kw">Int</span> }
 
 <span class="kw">fn</span> &(a Mask, b Mask) Mask = Mask { bits: a.bits & b.bits };

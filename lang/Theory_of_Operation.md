@@ -184,6 +184,10 @@ Primary         = INT_LIT | FLOAT_LIT | IMAGINARY_LIT | FRACTION_LIT
                 | '[' ':' ']'                      -- empty map
                 | '[' Expr ':' Expr ( ',' Expr ':' Expr )* ']'  -- map literal
                 | '[' Expr ( ',' Expr )* ']'       -- array literal
+                | '#' '[' ']'                      -- empty persistent vector
+                | '#' '[' ':' ']'                  -- empty persistent map
+                | '#' '[' Expr ':' Expr ( ',' Expr ':' Expr )* ']'  -- persistent map literal
+                | '#' '[' Expr ( ',' Expr )* ']'   -- persistent vector literal
                 | 'fn' '(' LambdaParams? ')' TypeExpr? WhereClause? ( '=' Expr | Block )  -- lambda
                 | 'coro' '(' LambdaParams? ')' TypeExpr? ( '=' Expr | Block )  -- coroutine lambda
                 | 'if' '(' Expr ')' Block ( 'else' ( IfExpr | Block ) )?     -- if expression
@@ -259,6 +263,8 @@ The ternary conditional `?:` has effective precedence 0 (it binds looser than al
 ```
 TypeExpr        = '[' TypeExpr ']'                         -- [T] array
                 | '[' TypeExpr ':' TypeExpr ']'            -- Map[K, V]
+                | '#' '[' TypeExpr ']'                     -- #[T] persistent vector
+                | '#' '[' TypeExpr ':' TypeExpr ']'        -- #[K:V] persistent map
                 | '(' ')'                                   -- unit type
                 | '(' ')' TypeExpr                          -- zero-arg function type
                 | '(' TypeExpr ')'                          -- parenthesized type
@@ -278,6 +284,8 @@ NamedType       = 'Int' | 'Float' | 'String' | 'Bool' | 'Symbol' | 'Void'
 **Ambiguity between tuple types and function types:** After parsing `(Type, ...)`, the parser checks whether a return type follows. If the next token can start a type expression (a type keyword, identifier, `[`, or `(`), the group is parsed as a function type `(ArgTypes) ReturnType`. Otherwise it is a tuple type. This means `(Int, Int)` alone is a tuple type, but `(Int, Int) Int` is a function type `(Int, Int) -> Int`. Similarly, `(Int)` alone is a parenthesized type (just `Int`), but `(Int) Int` is a single-argument function type.
 
 **Special-cased template types:** `List<T>`, `Ref<T>`, `Set<T>`, and `Coroutine<T>` are parsed into dedicated AST nodes (`ListTypeNode`, `RefTypeNode`, `SetTypeNode`, `CoroutineTypeNode`) rather than the generic `TemplateTypeNode`. This ensures backward compatibility with the type checker.
+
+**Persistent (immutable) collection types and literals:** A leading `#` marks the immutable form of a bracket type or literal. `#[T]` is a persistent vector and `#[K: V]` a persistent map, parsed by the same routines as their mutable `[...]` counterparts with an `isImmutable` flag set on the resulting `ArrayTypeNode` / `MapTypeNode` (and on `ArrayLiteralExpr` / `MapLiteralExpr` for the literal forms). The flag is what later distinguishes `PersistentVectorType` from `ArrayType` and `PersistentMapType` from `MapType`; the surface syntax is otherwise identical. In type position the disambiguation is unambiguous (`#[K: V]` always parses as a map when a `:` follows the first type); in expression position `#[...]` is always a literal — the typed-constructor form `[Type](...)` applies only to the mutable bracket.
 
 #### Patterns
 
@@ -367,6 +375,8 @@ The `@` token is lexed as a single token. `@@` is lexed as a two-character `@` t
 - `@1` → depth=1, cartesianIndex=1 (Cartesian, first dimension)
 - `@2` → depth=1, cartesianIndex=2 (Cartesian, second dimension)
 
+The lexer accepts `@1` through `@9` (a single `@` followed by one non-zero digit not adjacent to further alphanumerics), so up to nine Cartesian dimensions can be named. There is no longer a fixed two-dimension cap on the codegen side (see Auto-Mapping Analysis).
+
 `@` appears in both tight postfix and full postfix positions, meaning it can be used after any expression: `arr @ reverse`, `[1,2,3] @ + 10`, `arr @1`.
 
 ---
@@ -402,6 +412,8 @@ Type (abstract base)
     ├── RefType            { elemType_ }
     ├── MapType            { keyType_, valueType_ }
     ├── SetType            { elemType_ }
+    ├── PersistentVectorType { elemType_ }        -- displays as #[T]
+    ├── PersistentMapType  { keyType_, valueType_ } -- displays as #[K:V]
     ├── TupleType          { fields_: Vec<Type*> }
     ├── StructType         { name_, fields_: Vec<NameTypePair> }
     ├── EnumType           { name_, cases_: Vec<NameTypePair> }
@@ -415,6 +427,8 @@ Type (abstract base)
 
 All `AtomType` values fit in a single 64-bit `Word` and are classified as non-object types (`isObjType() == false`). All `ObjType` values are accessed through `Obj*` pointers and are GC-managed. This distinction is fundamental: it determines whether a value occupies an `i64` slot or an `Obj*` slot in registers, arrays, struct fields, and lambda captures; whether a global slot is added to the precise root set; and whether stores into the slot need an SATB write barrier.
 
+`PersistentVectorType` (`#[T]`) and `PersistentMapType` (`#[K:V]`) are the immutable counterparts of `ArrayType` (`[T]`) and `MapType` (`[K:V]`). Both are `ObjType`s (heap, `Repr::Pointer`). They are deliberately **distinct types with no implicit conversion** to or from their mutable counterparts — exactly the relationship `List<T>` has to `[T]`. A `#[T]` is never accepted where a `[T]` is expected (and vice versa); moving between the representations requires an explicit conversion. This keeps the mutability discipline visible in the type and avoids accidental aliasing of a shared persistent structure as if it were a mutable array.
+
 ### Type Interning
 
 Composite types are interned (deduplicated) by the VM through caches:
@@ -424,7 +438,7 @@ Composite types are interned (deduplicated) by the VM through caches:
 - `tupleTypeCache_`: `Vec<Type*> → TupleType*`
 - `functionTypeCache_`: `Vec<Type*> → FunctionType*` (key includes return type)
 - `mapTypeCache_`: `(Type*, Type*) → MapType*`
-- And similar for `RangeType`, `RefType`, `SetType`, `CoroutineType`, `EnumType` (for `Option<T>`)
+- And similar for `RangeType`, `RefType`, `SetType`, `PersistentVectorType`, `PersistentMapType`, `CoroutineType`, `EnumType` (for `Option<T>`)
 
 This ensures pointer identity is sufficient for type equality of structural types. Named types (`StructType`, `EnumType`) are unique because they're created once per declaration.
 
@@ -553,7 +567,7 @@ a single constraint (which share one `declNode`) are allowed.
 
 Auto-mapping is analyzed during type checking and annotated on AST nodes for code generation. Two forms exist:
 
-**Implicit auto-mapping:** When a function expects a scalar but receives an `Array` or `List`, the type checker automatically wraps the call in a mapping operation. Binary operators also auto-map: `[1,2,3] + 1 → [2,3,4]`.
+**Implicit auto-mapping:** When a function expects a scalar but receives an `Array`, `List`, or persistent vector `#[...]`, the type checker automatically wraps the call in a mapping operation. Binary operators also auto-map: `[1,2,3] + 1 → [2,3,4]`.
 
 **Explicit auto-mapping (`@`):** The `@` operator (parsed as `AutoMapExpr`) is extracted by `extractAutoMapAnnotation()` and stored as `AutoMapArg` on the relevant AST node. The type checker then:
 
@@ -561,10 +575,15 @@ Auto-mapping is analyzed during type checking and annotated on AST nodes for cod
 2. Performs normal type checking on the scalar types.
 3. Calls `wrapAutoMapResult()` to re-wrap the scalar result type in the appropriate container layers.
 
-`AutoMapArg` carries three fields:
+`AutoMapArg` carries four fields:
 - `depth`: number of nesting levels (1 for `@`, 2 for `@@`, etc.)
-- `cartesianIndex`: 0 for zip-style mapping, 1+ for Cartesian product (`@1`, `@2`)
+- `cartesianIndex`: 0 for zip-style mapping, 1+ for Cartesian product (`@1`, `@2`, …)
 - `isList`: whether the source container is a `List` (result will be lazy `List` instead of `Array`)
+- `isPVec`: whether the source container is a persistent vector `#[...]` (result will be a persistent vector instead of `Array`)
+
+**Persistent-vector auto-mapping.** Auto-mapping applies to persistent vectors exactly as it does to arrays. A function expecting a scalar maps over a `#[...]`; binary operators broadcast a scalar over a vector and zip two vectors elementwise; and the explicit `@`, deep `@@`, and Cartesian `@n` forms all work over persistent vectors. When the layer-unwrapping loop (`type_checker_calls.cpp`) peels a `PersistentVectorType` it sets `thisPVec`, propagated into `AutoMapArg::isPVec`. When the operand kinds of a mapped expression mix (e.g. an `Array` operand against a `#[...]` operand, or either against a `List`), the **result-kind precedence is List > persistent vector > Array**: the wrap logic checks `anyList` first, then `anyPVec`, otherwise falls back to `Array` (`wrapAutoMapResult` and the per-expression wrap sites in `type_checker_calls.cpp`). So mixing a list anywhere yields a (lazy) list result, mixing a persistent vector without any list yields a persistent vector, and only all-array operands yield an array.
+
+**N-dimensional Cartesian mapping.** Cartesian mapping (`@n`) is now N-dimensional with no small fixed limit — the lexer accepts `@1` through `@9`, naming up to nine independent dimensions. (Previously the Cartesian codegen was hardcoded to a maximum of two dimensions; that cap is removed.) Codegen is a **single recursive, result-type-driven nest**: `genCartesianCall` / `genCartesianBinaryOp` compute `maxCart` (the largest cartesian dimension present, with a plain `@` acting as dimension 1) and then call `emitCartesianNest(level, maxCart, resultType, …)`. Dimension `n` becomes the n-th nesting level of the result. At each level the per-level container kind — `Array` vs. persistent vector — is read directly from the result `Type*` (an `ArrayType` builds an array; a `PersistentVectorType` materializes via a temporary array and then freezes it with `op_pvec_from_array`), and the function recurses on the level's element type until the innermost dimension (`level == maxCart`), where the leaf emits the scalar call or binary op. Because the container kind comes from the result type rather than the source operands, arrays, persistent vectors, and arbitrary mixtures all flow through one code path (mapped persistent-vector arguments are normalized to a temporary array via `op_pvec_to_array` for uniform indexed reads).
 
 ### Lambda and Closure Analysis
 
@@ -807,8 +826,10 @@ All heap-allocated values inherit from `Obj : GCObj`. The `Obj` base class holds
 | `Struct` | Named product type instance | Flexible array member `Word v[]` |
 | `Enum` | Sum type instance | `which_` (case index), `word_` (payload) |
 | `RangeObj` | Range (start..end by step) | `start_`, `end_`, `step_`, `isInfinite_` |
-| `MapObj` | Immutable hash map | `unordered_map<Word, Word>` with custom hash/equal |
-| `SetObj` | Immutable hash set | `unordered_set<Word>` with custom hash/equal |
+| `MapObj` | Mutable hash map | `unordered_map<Word, Word>` with custom hash/equal |
+| `SetObj` | Mutable hash set | `unordered_set<Word>` with custom hash/equal |
+| `PVec` / `PVecNode` / `PVecLeaf` | Persistent vector (`#[T]`): AMT handle, interior node, stride-packed leaf | see Persistent Collections |
+| `PMap` / `PMapNode` | Persistent map (`#[K:V]`): HAMT handle, bitmap/collision node | see Persistent Collections |
 | `RefValue` | Mutable reference | `value_` (Word) |
 | `CodeBlock` | Compiled function | `Vec<Code> code`, `Vec<Obj*> objConstants` |
 | `Primitive` | Built-in function | `cfun_` (C function pointer) |
@@ -842,6 +863,18 @@ Arrays use a split representation based on element type:
 - `ObjArray` — for arrays of object-typed elements (values stored as `Obj*` pointers, with an SATB write barrier on element stores)
 
 This avoids boxing overhead for numeric arrays.
+
+### Persistent Collections
+
+**Files:** `persistent_vector.hpp`, `persistent_vector.cpp`, `persistent_map.hpp`, `persistent_map.cpp`
+
+Tzopilotl provides two **immutable, structurally-shared** heap collections that are distinct from the mutable `Array`/`Map` (they stand in the same relation to `Array`/`Map` that `List` does to `Array`): the persistent vector `#[T]` and the persistent map `#[K:V]`. Every operation that would mutate returns a *new* value; the original is never modified in place. Because updates copy only the path from the root to the changed node and share everything else, an update allocates O(log₃₂ n) new nodes rather than copying the whole collection.
+
+A deliberate design choice unifies their element storage with the mutable collections: rather than maintaining separate typed backends, both store their payloads in **uniform stride-packed `Vec<Word>`** storage and reuse the same `strideForType` / `hashWords` / `wordsEqual` / `gcScanPayload` primitives that `Array`, `Map`, and `Set` already use. `strideForType` gives the number of `Word`s per element, so inline composites (`Complex`, `Fraction`, small structs/tuples) live unboxed in the trie leaves exactly as they do in `MapObj`/`SetObj`.
+
+**Persistent vector (`#[T]`) — array-mapped trie with a tail.** `PVec` is the handle (`count_`, `shift_`, `stride_`, `root_`, `tail_`); it implements a 32-way bit-partitioned **array-mapped trie (AMT)** in the Clojure `PersistentVector` style. Interior nodes (`PVecNode`) hold up to 32 child `Obj*` pointers; leaves (`PVecLeaf`) hold up to 32 stride-packed elements in a `Vec<Word>`. A small **tail buffer** (`tail_`, itself a `PVecLeaf`) absorbs appends so that `push` is amortized O(1) in allocations — only when the 32-slot tail fills is it pushed into the trie. The trie gives O(log₃₂ n) indexed reads (`elemAt`) and updates (`assocN`). `tailoff()` is the first index held by the tail; the tree covers `[0, tailoff)`. Both `push` and `assocN` use **pure path-copying** (`PVecNode::copyOf` shallow-copies a node, then the one changed child slot is overwritten in the fresh copy) and return a new `PVec`; no existing node is ever mutated.
+
+**Persistent map (`#[K:V]`) — hash array-mapped trie.** `PMap` is the handle (`count_`, `root_`); `PMapNode` is a **HAMT** node consuming 5 bits of the key hash per level (branching factor 32). A bitmap node carries two popcount-compacted bitmaps over the current 5-bit hash slice: `dataBitmap_` marks the slots holding an inline (key, value) pair (stored stride-packed in `data_`), and `nodeBitmap_` marks the slots holding a child node (`nodes_`). Two distinct keys whose hashes collide all the way down fall back to a flat **collision node** (`kind_ == Collision`) that stores the colliding pairs linearly and compares them with `wordsEqual`. `assoc` and `dissoc` path-copy the affected nodes and share the rest, returning a new `PMap`. `PMapIter` is a stack-based, C++-stack-only iterator (not a GC object) used to walk a map's pairs in traversal order.
 
 ---
 
@@ -880,11 +913,15 @@ The header is 24 bytes including the vtable pointer. Compile-time constants (typ
 
 2. **Mark.** The marker drains a worklist of Gray objects in chunks. Roots are scanned incrementally across four substates — globals, dynamic-scope vars, active call frames (via per-PC stack maps), and host-registered extra roots (NRTVM handler tables) — each with a cursor so a single step can pause and resume under the deadline. Very large containers (>64 entries) split their child scan into per-step chunks via a partial-container queue so a 100k-element Map can never overrun the budget.
 
+   **Top-frame root-scan correctness fix.** Precise root scanning of a call frame relies on the frame's program counter to select the correct per-PC stack map. A pre-existing bug was that the VM's `vm.pc_` was not kept synchronized during execution — handlers thread the live `pc` along as a function argument and only write it back to the VM at specific points — so when the GC scanned roots, the *currently-executing top frame* had a stale (or null) `pc_`, no matching stack map was found, and live `Obj*` registers in that frame could be missed and swept while still in use (e.g. a loop accumulator being built across an incrementally-collected cycle). The fix synchronizes `vm.pc_` at every safepoint poll: `op_safepoint` now calls `vm.setPc(pc)` immediately before `vm.safepointPoll()` (`opcodes.cpp`; `setPc` in `vm.hpp`). Since the GC only ever advances at a safepoint poll, publishing the current `pc` there guarantees the top frame's stack map is exact whenever the root scan runs. This was committed independently as `dbad513`.
+
 3. **Sweep.** Walks the all-objects list via a slot-pointer (`GCObj**`) so freed Whites are unlinked inline without a back pointer. Sweep is budgeted the same way as mark.
 
 **SATB write barrier.** The code generator emits a write barrier before any heap store that overwrites an `Obj*` slot. The barrier hot path is one comparison: if `phase_ != Mark`, return. During Mark, if the slot's previous value was White and non-immortal, it is colored Gray and pushed onto the worklist. This guarantees that even if the mutator rewires the heap mid-cycle, the snapshot is preserved. Write-barrier sites: `op_store_global_obj`, `op_store_dynamic_obj`, `op_ref_set`, and the array/struct/tuple/enum field setters (`storesObjPtr(Type*)` in `type_system.hpp` is the single source of truth for which slots need it).
 
-**Tag-dispatched child scan.** `GCObj::gcTag_` lets the marker bypass virtual dispatch for the highest-frequency subclasses (Tuple, Struct, Enum, ObjArray, ListNode, RefValue, MapObj, SetObj, Lambda, …). `gcScanByTag` is a switch keyed on the tag that issues a qualified non-virtual call to the right subclass's scanner. Untagged objects (`GCTag::Default`) fall back to the virtual `gcScanChildren`.
+**Tag-dispatched child scan.** `GCObj::gcTag_` lets the marker bypass virtual dispatch for the highest-frequency subclasses (Tuple, Struct, Enum, ObjArray, ListNode, RefValue, MapObj, SetObj, Lambda, the persistent-collection nodes, …). `gcScanByTag` is a switch keyed on the tag that issues a qualified non-virtual call to the right subclass's scanner. Untagged objects (`GCTag::Default`) fall back to the virtual `gcScanChildren`.
+
+**Persistent collections under SATB: pure path-copying needs no construction write barrier.** The persistent vector and persistent map (see Persistent Collections, above) introduce the new tags `PVec`, `PVecNode`, `PVecLeaf`, `PMap`, and `PMapNode`, all handled in `gcScanByTag`. The *node* scans mark inline `Obj*` children (`PVecNode::gcScanChildren` marks its child pointers; `PMapNode::gcScanChildren` marks the child nodes in `nodes_`), while the *leaf/data* scans call `gcScanPayload` per stride-packed slot (`PVecLeaf` over its elements; `PMapNode` over each inline key and value), so unboxed composite elements are traced through the same payload-scanning machinery as `Array`/`Map`/`Set`. Crucially, these collections need **no write barrier at all on construction**. The SATB invariant guarantees that any object reachable when the cycle started survives the cycle, and new trie nodes built mid-cycle are black-allocated. Every child a freshly-built node references is therefore either (a) a pre-existing node, which was reachable at the snapshot and is kept live by SATB, or (b) another node created during the same operation, which is itself black. Because persistence *never mutates an existing node in place* — `assoc`/`assocN`/`push`/`dissoc` only ever write into freshly-allocated copies — the mutator never overwrites a slot that the barrier would have to catch, so the tri-color invariant holds without one. (The SATB barrier is still required for the genuinely mutable slots enumerated below.)
 
 **Driver model.** Three call sites advance the collector:
 
@@ -1017,6 +1054,7 @@ Categories of built-ins include:
 | Lazy auto-map | Runtime | Auto-mapping over lists creates generators instead of materializing arrays |
 | POD arrays | Runtime | `PodArray<i64>` and `PodArray<f64>` avoid boxing for numeric arrays |
 | Flexible array members | Runtime | `Struct`, `Tuple`, `Lambda` store fields inline, avoiding extra allocations |
+| Structural sharing | Runtime | Persistent vector (AMT+tail) and map (HAMT) updates path-copy O(log₃₂ n) nodes and share the rest; no construction write barrier needed under SATB |
 | Type interning | Compiler | Structural types are deduplicated, enabling pointer comparison |
 | Incremental tracing GC | Runtime | Mark and sweep are budgeted per safepoint; worst-case pauses stay sub-millisecond |
 | Precise roots from stack maps | CodeGen + Runtime | No conservative stack scanning; root set is exact at every safepoint PC |
