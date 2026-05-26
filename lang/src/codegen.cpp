@@ -3343,10 +3343,7 @@ u16 CodeGen::genBinaryOp(BinaryOpExpr* expr) {
         // genBinaryOpMapPVec recurses on the result type, so it handles deep
         // (@@) persistent-vector binops as well as depth-1. Cartesian (@n) over
         // persistent vectors is not supported.
-        if (anyPVec && hasCartesian) {
-            error(expr->loc, "Cartesian '@n' over a persistent vector is not supported");
-            return allocReg();
-        }
+        if (anyPVec && hasCartesian) return genCartesianBinaryOpPVec(expr);
         if (anyPVec) return genBinaryOpMapPVec(expr);
         if (hasCartesian)          return genCartesianBinaryOp(expr);
         else if (maxDepth > 1)     return genDeepMapBinaryOp(expr, maxDepth);
@@ -4329,10 +4326,10 @@ u16 CodeGen::genCall(CallExpr_* expr) {
             if (am.isPVec) anyPVec = true;
         }
 
-        // Non-cartesian persistent-vector calls (any depth) go through
-        // genAutoMapCall, which recurses via emitPVecCallLevel.
-        if (anyPVec && !hasCartesian) {
-            return genAutoMapCall(expr);
+        // Persistent-vector calls: non-cartesian (any depth) recurse through
+        // genAutoMapCall/emitPVecCallLevel; cartesian go to genCartesianCallPVec.
+        if (anyPVec) {
+            return hasCartesian ? genCartesianCallPVec(expr) : genAutoMapCall(expr);
         }
 
         if (hasCartesian) {
@@ -5309,6 +5306,100 @@ u16 CodeGen::genCartesianBinaryOp(BinaryOpExpr* expr) {
     patchJump(loop1ExitJump);
 
     return outerResultReg;
+}
+
+u16 CodeGen::genCartesianBinaryOpPVec(BinaryOpExpr* expr) {
+    u16 leftReg = genExpr(static_cast<Expr*>(expr->left.get()));
+    u16 rightReg = genExpr(static_cast<Expr*>(expr->right.get()));
+    Type* leftType = expr->left->resolvedType;
+    Type* rightType = expr->right->resolvedType;
+
+    // Materialize each mapped persistent-vector operand to a temporary array.
+    auto toArr = [&](u16& reg, Type* type) -> ArrayType* {
+        if (auto* pv = dynamic_cast<PersistentVectorType*>(type)) {
+            auto* aT = compiler_.arrayType(pv->elemType_);
+            u16 conv = allocReg();
+            emitOp(op_pvec_to_array);
+            emitRegs(conv, reg);
+            emitPtr(aT);
+            reg = conv;
+            return aT;
+        }
+        return dynamic_cast<ArrayType*>(type);
+    };
+    ArrayType* leftArrT = expr->leftAutoMap ? toArr(leftReg, leftType) : nullptr;
+    ArrayType* rightArrT = expr->rightAutoMap ? toArr(rightReg, rightType) : nullptr;
+    Type* leftElemType = leftArrT ? leftArrT->elemType_ : leftType;
+    Type* rightElemType = rightArrT ? rightArrT->elemType_ : rightType;
+
+    int maxCart = std::max(expr->leftAutoMap.cartesianIndex, expr->rightAutoMap.cartesianIndex);
+    auto* outerPV = dynamic_cast<PersistentVectorType*>(expr->resolvedType);
+    Type* outerElem = outerPV->elemType_;
+    auto* innerPV = (maxCart >= 2) ? dynamic_cast<PersistentVectorType*>(outerElem) : nullptr;
+    Type* scalarRes = innerPV ? innerPV->elemType_ : outerElem;
+
+    // Length of the operand assigned to cartesian dimension `ci` (1 or 2);
+    // a plain `@` (cartesianIndex 0, depth > 0) participates as dimension 1.
+    auto dimLen = [&](int ci) -> u16 {
+        u16 reg = 0; ArrayType* aT = nullptr;
+        if (expr->leftAutoMap.cartesianIndex == ci) { reg = leftReg; aT = leftArrT; }
+        else if (expr->rightAutoMap.cartesianIndex == ci) { reg = rightReg; aT = rightArrT; }
+        else if (ci == 1 && expr->leftAutoMap && expr->leftAutoMap.cartesianIndex == 0) { reg = leftReg; aT = leftArrT; }
+        else if (ci == 1 && expr->rightAutoMap && expr->rightAutoMap.cartesianIndex == 0) { reg = rightReg; aT = rightArrT; }
+        u16 lr = allocReg();
+        emitOp(opArrayLengthFor(aT->elemType_));
+        emitRegs(lr, reg);
+        emitPtr(aT);
+        return lr;
+    };
+
+    // Extract an operand's element at the appropriate loop index, or broadcast.
+    auto extractElem = [&](bool isLeft, u16 i1, u16 i2) -> u16 {
+        AutoMapArg am = isLeft ? expr->leftAutoMap : expr->rightAutoMap;
+        u16 reg = isLeft ? leftReg : rightReg;
+        if (!am) return reg;  // broadcast scalar
+        ArrayType* aT = isLeft ? leftArrT : rightArrT;
+        Type* elemT = isLeft ? leftElemType : rightElemType;
+        u16 idx = (am.cartesianIndex == 2) ? i2 : i1;
+        u16 elemReg = allocSlot(elemT);
+        emitOp(opArrayGetDynFor(aT->elemType_));
+        emitRegs(elemReg, reg, idx);
+        emitPtr(aT);
+        return elemReg;
+    };
+
+    u16 len1 = dimLen(1);
+    if (maxCart >= 2) {
+        u16 len2 = dimLen(2);
+        u16 outerArr = emitArrayBuildLoop(len1, compiler_.arrayType(outerElem), [&](u16 i1) -> u16 {
+            u16 innerArr = emitArrayBuildLoop(len2, compiler_.arrayType(scalarRes), [&](u16 i2) -> u16 {
+                u16 l = extractElem(true, i1, i2);
+                u16 r = extractElem(false, i1, i2);
+                return emitBinaryOpElem(expr, l, leftElemType, r, rightElemType, scalarRes);
+            });
+            u16 innerPv = allocReg();
+            emitOp(op_pvec_from_array);
+            emitRegs(innerPv, innerArr);
+            emitPtr(innerPV);
+            return innerPv;
+        });
+        u16 dst = allocReg();
+        emitOp(op_pvec_from_array);
+        emitRegs(dst, outerArr);
+        emitPtr(outerPV);
+        return dst;
+    }
+    // Single cartesian dimension: a plain 1-D map.
+    u16 outerArr = emitArrayBuildLoop(len1, compiler_.arrayType(scalarRes), [&](u16 i1) -> u16 {
+        u16 l = extractElem(true, i1, 0);
+        u16 r = extractElem(false, i1, 0);
+        return emitBinaryOpElem(expr, l, leftElemType, r, rightElemType, scalarRes);
+    });
+    u16 dst = allocReg();
+    emitOp(op_pvec_from_array);
+    emitRegs(dst, outerArr);
+    emitPtr(outerPV);
+    return dst;
 }
 
 u16 CodeGen::genDeepMapBinaryOp(BinaryOpExpr* expr, int depth) {
@@ -7129,6 +7220,105 @@ u16 CodeGen::genCartesianCall(CallExpr_* expr) {
     patchJump(loop1ExitJump);
 
     return isVoidReturn ? storeReg : outerResultReg;
+}
+
+u16 CodeGen::genCartesianCallPVec(CallExpr_* expr) {
+    auto* ident = static_cast<IdentifierExpr*>(expr->callee.get());
+    const FuncInfo* funcInfo = nullptr;
+    auto funcIt = typeChecker_.functions().find(ident->name);
+    if (funcIt != typeChecker_.functions().end()) {
+        for (const auto& fi : funcIt->second) {
+            if ((i32)fi.globalIndex == expr->resolvedFuncGlobalIndex) { funcInfo = &fi; break; }
+        }
+    }
+    if (!funcInfo) { error(expr->loc, "Codegen: cartesian function not found"); return allocReg(); }
+
+    u16 argc = (u16)expr->args.size();
+    std::vector<u16> argRegs;
+    for (auto& arg : expr->args) argRegs.push_back(genExpr(static_cast<Expr*>(arg.get())));
+
+    // Materialize each mapped persistent-vector arg to a temporary array.
+    std::vector<ArrayType*> mappedArrType(argc, nullptr);
+    for (u16 i = 0; i < argc; ++i) {
+        if (!expr->autoMapArgs[i]) continue;
+        Type* at = expr->args[i]->resolvedType;
+        if (auto* arrT = dynamic_cast<ArrayType*>(at)) {
+            mappedArrType[i] = arrT;
+        } else if (auto* pvT = dynamic_cast<PersistentVectorType*>(at)) {
+            auto* aT = compiler_.arrayType(pvT->elemType_);
+            u16 conv = allocReg();
+            emitOp(op_pvec_to_array);
+            emitRegs(conv, argRegs[i]);
+            emitPtr(aT);
+            argRegs[i] = conv;
+            mappedArrType[i] = aT;
+        }
+    }
+
+    int maxCart = 0;
+    for (auto& am : expr->autoMapArgs) if (am.cartesianIndex > maxCart) maxCart = am.cartesianIndex;
+
+    // Length per cartesian dimension; a plain `@` participates as dimension 1.
+    std::vector<u16> lenRegs(maxCart + 1, 0);
+    auto setLen = [&](int ci, u16 reg, ArrayType* aT) {
+        if (ci > 0 && lenRegs[ci] == 0) {
+            u16 lr = allocReg();
+            emitOp(opArrayLengthFor(aT->elemType_));
+            emitRegs(lr, reg);
+            emitPtr(aT);
+            lenRegs[ci] = lr;
+        }
+    };
+    for (u16 i = 0; i < argc; ++i)
+        if (expr->autoMapArgs[i].cartesianIndex > 0)
+            setLen(expr->autoMapArgs[i].cartesianIndex, argRegs[i], mappedArrType[i]);
+    for (u16 i = 0; i < argc; ++i)
+        if (lenRegs[1] == 0 && expr->autoMapArgs[i] && expr->autoMapArgs[i].cartesianIndex == 0)
+            setLen(1, argRegs[i], mappedArrType[i]);
+
+    Type* returnT = funcInfo->returnType;
+    auto* outerPV = dynamic_cast<PersistentVectorType*>(expr->resolvedType);
+    Type* outerElem = outerPV->elemType_;
+    auto* innerPV = (maxCart >= 2) ? dynamic_cast<PersistentVectorType*>(outerElem) : nullptr;
+    Type* scalarRes = innerPV ? innerPV->elemType_ : outerElem;
+
+    auto callAt = [&](u16 i1, u16 i2) -> u16 {
+        std::vector<MappedCallArg> margs(argc);
+        for (u16 i = 0; i < argc; ++i) {
+            AutoMapArg am = expr->autoMapArgs[i];
+            if (am.cartesianIndex > 0 || am.depth > 0) {
+                u16 idx = (am.cartesianIndex == 2) ? i2 : i1;
+                margs[i] = { true, argRegs[i], idx, mappedArrType[i] };
+            } else {
+                margs[i] = { false, argRegs[i], 0, nullptr };
+            }
+        }
+        return emitMappedCallElem(expr, funcInfo, returnT, margs);
+    };
+
+    if (maxCart >= 2) {
+        u16 outerArr = emitArrayBuildLoop(lenRegs[1], compiler_.arrayType(outerElem), [&](u16 i1) -> u16 {
+            u16 innerArr = emitArrayBuildLoop(lenRegs[2], compiler_.arrayType(scalarRes),
+                                              [&](u16 i2) -> u16 { return callAt(i1, i2); });
+            u16 ipv = allocReg();
+            emitOp(op_pvec_from_array);
+            emitRegs(ipv, innerArr);
+            emitPtr(innerPV);
+            return ipv;
+        });
+        u16 dst = allocReg();
+        emitOp(op_pvec_from_array);
+        emitRegs(dst, outerArr);
+        emitPtr(outerPV);
+        return dst;
+    }
+    u16 outerArr = emitArrayBuildLoop(lenRegs[1], compiler_.arrayType(scalarRes),
+                                      [&](u16 i1) -> u16 { return callAt(i1, 0); });
+    u16 dst = allocReg();
+    emitOp(op_pvec_from_array);
+    emitRegs(dst, outerArr);
+    emitPtr(outerPV);
+    return dst;
 }
 
 u16 CodeGen::genDeepMapCall(CallExpr_* expr, int depth) {

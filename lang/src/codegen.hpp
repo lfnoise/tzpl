@@ -170,6 +170,8 @@ private:
     u16 emitPVecCallLevel(CallExpr_* expr, const FuncInfo* funcInfo, Type* returnT,
                           std::vector<u16> argRegs, std::vector<Type*> argTypes,
                           const std::vector<bool>& argMapped, PersistentVectorType* resPV);
+    // Cartesian-product (@1/@2) call producing a (possibly nested) persistent vector.
+    u16 genCartesianCallPVec(CallExpr_* expr);
     u16 genAutoMapLambdaCall(CallExpr_* expr, u16 calleeReg, FunctionType* funcType);
     u16 genAutoMapLambdaCallList(CallExpr_* expr, u16 calleeReg, FunctionType* funcType);
     // Auto-map of a lambda-value call over persistent-vector arg(s) to arbitrary
@@ -208,6 +210,10 @@ private:
     u16 emitPVecBinopLevel(BinaryOpExpr* expr, u16 leftReg, Type* leftType,
                            u16 rightReg, Type* rightType, PersistentVectorType* resPV);
     u16 genCartesianBinaryOp(BinaryOpExpr* expr);
+    // Cartesian-product (@1/@2) binary op producing a (possibly nested)
+    // persistent vector. Mapped persistent-vector operands are read via a
+    // temporary array; each output level is frozen with op_pvec_from_array.
+    u16 genCartesianBinaryOpPVec(BinaryOpExpr* expr);
     u16 genDeepMapBinaryOp(BinaryOpExpr* expr, int depth);
     // Emit the per-element computation of an auto-mapped binary op given the two
     // operand element registers/types and the result element type: dispatches to

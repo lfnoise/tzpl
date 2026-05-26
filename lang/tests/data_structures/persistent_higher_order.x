@@ -1,5 +1,7 @@
 -- Higher-order operations on persistent vectors
 
+fn add2(x Int, y Int) Int { x + y }
+
 let v = #[1, 2, 3, 4];
 
 -- map returns a new persistent vector
@@ -84,3 +86,11 @@ dbl(#[#[1, 2], #[3, 4]]) println;           -- prefix
 #[#[1, 2], #[3, 4]] addk(100) println;      -- deep with broadcast scalar arg
 #[#[1, 2], #[3, 4]] @@ dbl println;         -- explicit @@ call
 #[#[-1, -2], #[3, -4]] abs println;         -- deep builtin
+
+-- --- cartesian (@n) auto-mapping over persistent vectors ---
+let c1 = #[1, 2, 3];
+let c2 = #[10, 20];
+(c1@1 + c2@2) println;                      -- #[#[11,21],#[12,22],#[13,23]]
+(c1@2 + c2@1) println;                      -- transposed dims
+add2(c1@1, c2@2) println;                   -- cartesian named call
+add2(c1@2, c2@1) println;
