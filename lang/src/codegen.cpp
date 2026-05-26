@@ -3341,11 +3341,11 @@ u16 CodeGen::genBinaryOp(BinaryOpExpr* expr) {
         int maxDepth = std::max(expr->leftAutoMap.depth, expr->rightAutoMap.depth);
         bool anyPVec = expr->leftAutoMap.isPVec || expr->rightAutoMap.isPVec;
         // genBinaryOpMapPVec recurses on the result type, so it handles deep
-        // (@@) persistent-vector binops as well as depth-1. Cartesian (@n) over
-        // persistent vectors is not supported.
-        if (anyPVec && hasCartesian) return genCartesianBinaryOpPVec(expr);
-        if (anyPVec) return genBinaryOpMapPVec(expr);
+        // (@@) persistent-vector binops as well as depth-1. genCartesianBinaryOp
+        // is result-type-driven and handles arbitrary cartesian depth over
+        // arrays, persistent vectors, and mixtures alike.
         if (hasCartesian)          return genCartesianBinaryOp(expr);
+        if (anyPVec) return genBinaryOpMapPVec(expr);
         else if (maxDepth > 1)     return genDeepMapBinaryOp(expr, maxDepth);
         else {
             bool anyList = expr->leftAutoMap.isList || expr->rightAutoMap.isList;
@@ -4326,15 +4326,19 @@ u16 CodeGen::genCall(CallExpr_* expr) {
             if (am.isPVec) anyPVec = true;
         }
 
-        // Persistent-vector calls: non-cartesian (any depth) recurse through
-        // genAutoMapCall/emitPVecCallLevel; cartesian go to genCartesianCallPVec.
-        if (anyPVec) {
-            return hasCartesian ? genCartesianCallPVec(expr) : genAutoMapCall(expr);
-        }
-
+        // genCartesianCall is result-type-driven and handles arbitrary cartesian
+        // depth over arrays, persistent vectors, and mixtures alike.
         if (hasCartesian) {
             return genCartesianCall(expr);
-        } else if (maxDepth > 1) {
+        }
+
+        // Persistent-vector calls: non-cartesian (any depth) recurse through
+        // genAutoMapCall/emitPVecCallLevel.
+        if (anyPVec) {
+            return genAutoMapCall(expr);
+        }
+
+        if (maxDepth > 1) {
             return genDeepMapCall(expr, maxDepth);
         } else {
             return genAutoMapCall(expr);
@@ -5144,177 +5148,49 @@ u16 CodeGen::genAutoMapBinaryOpList(BinaryOpExpr* expr) {
     return resultReg;
 }
 
-u16 CodeGen::genCartesianBinaryOp(BinaryOpExpr* expr) {
-    // Cartesian product: @1 and @2 on operands create nested loops
-    u16 leftReg = genExpr(static_cast<Expr*>(expr->left.get()));
-    u16 rightReg = genExpr(static_cast<Expr*>(expr->right.get()));
+u16 CodeGen::emitCartesianNest(int level, int maxCart, Type* containerType,
+                               std::vector<u16>& iRegs,
+                               function_ref<u16(std::vector<u16> const&)> emitLeaf,
+                               function_ref<u16(int)> dimLen) {
+    // Build the container for output dimension `level`. `containerType` is
+    // either an ArrayType or a PersistentVectorType; we always materialize via
+    // a temporary array (emitArrayBuildLoop) and freeze persistent-vector
+    // dimensions with op_pvec_from_array. Recurse one dimension deeper until the
+    // innermost dimension (level == maxCart), where emitLeaf yields the scalar.
+    auto* pvType = dynamic_cast<PersistentVectorType*>(containerType);
+    Type* elemType = pvType ? pvType->elemType_
+                            : dynamic_cast<ArrayType*>(containerType)->elemType_;
+    ArrayType* buildType = pvType ? compiler_.arrayType(elemType)
+                                  : dynamic_cast<ArrayType*>(containerType);
 
-    Type* leftType = expr->left->resolvedType;
-    Type* rightType = expr->right->resolvedType;
-
-    // Determine element types
-    Type* leftElemType = leftType;
-    Type* rightElemType = rightType;
-    if (expr->leftAutoMap) {
-        if (auto* arrT = dynamic_cast<ArrayType*>(leftElemType))
-            leftElemType = arrT->elemType_;
-    }
-    if (expr->rightAutoMap) {
-        if (auto* arrT = dynamic_cast<ArrayType*>(rightElemType))
-            rightElemType = arrT->elemType_;
-    }
-
-    int maxCartesian = std::max(expr->leftAutoMap.cartesianIndex, expr->rightAutoMap.cartesianIndex);
-
-    // Get lengths for each cartesian level
-    std::vector<u16> lenRegs(maxCartesian + 1, 0);
-    auto assignLen = [&](int ci, u16 arrReg, Type* arrType) {
-        if (ci > 0 && lenRegs[ci] == 0) {
-            auto* at = dynamic_cast<ArrayType*>(arrType);
-            u16 lenReg = allocReg();
-            emitOp(opArrayLengthFor(at->elemType_));
-            emitRegs(lenReg, arrReg);
-            emitPtr(at);
-            lenRegs[ci] = lenReg;
-        }
-    };
-    if (expr->leftAutoMap.cartesianIndex > 0) assignLen(expr->leftAutoMap.cartesianIndex, leftReg, leftType);
-    if (expr->rightAutoMap.cartesianIndex > 0) assignLen(expr->rightAutoMap.cartesianIndex, rightReg, rightType);
-
-    // Loop counters
-    std::vector<u16> iRegs(maxCartesian + 1);
-    u16 oneReg = allocReg();
-    emitOp(op_load_int_const);
-    emitRegs(oneReg);
-    emitInt(1);
-
-    for (int level = 1; level <= maxCartesian; ++level) {
-        iRegs[level] = allocReg();
-        emitOp(op_load_int_const);
-        emitRegs(iRegs[level]);
-        emitInt(0);
-    }
-
-    std::vector<u16> condRegs(maxCartesian + 1);
-    for (int level = 1; level <= maxCartesian; ++level) {
-        condRegs[level] = allocReg();
-    }
-
-    // Allocate outer result array
-    auto* outerResultType = dynamic_cast<ArrayType*>(expr->resolvedType);
-    u16 outerResultReg = allocReg();
-    emitOp(op_array_alloc);
-    emitRegs(outerResultReg, lenRegs[1]);
-    emitPtr(outerResultType);
-
-    // Level 1 (outer) loop
-    u32 loop1StartIdx = (u32)currentBlock_->code.size();
-    emitOp(op_cmp_lt_int);
-    emitRegs(condRegs[1], iRegs[1], lenRegs[1]);
-    u32 loop1ExitJump = emitJump(op_jump_if_false, condRegs[1]);
-
-    u16 innerResultReg = 0;
-    ArrayType* innerResultType = nullptr;
-    u32 loop2StartIdx = 0, loop2ExitJump = 0;
-
-    if (maxCartesian >= 2) {
-        innerResultType = dynamic_cast<ArrayType*>(outerResultType->elemType_);
-        innerResultReg = allocReg();
-        emitOp(op_array_alloc);
-        emitRegs(innerResultReg, lenRegs[2]);
-        emitPtr(innerResultType);
-
-        emitOp(op_load_int_const);
-        emitRegs(iRegs[2]);
-        emitInt(0);
-
-        loop2StartIdx = (u32)currentBlock_->code.size();
-        emitOp(op_cmp_lt_int);
-        emitRegs(condRegs[2], iRegs[2], lenRegs[2]);
-        loop2ExitJump = emitJump(op_jump_if_false, condRegs[2]);
-    }
-
-    // Phase 4g.19: Inline composite elements (e.g. Tuple(Int,Int)) occupy
-    // multiple register words. allocReg() reserves only one Word and would
-    // overlap left/right slots, so use allocElemSlot for inline composites.
-    auto allocElemSlot = [&](Type* t) {
-        u16 nw = typeSlotWords(t);
-        u16 r = nextReg_;
-        nextReg_ = (u16)(nextReg_ + nw);
-        if (nextReg_ > maxReg_) maxReg_ = nextReg_;
-        return r;
-    };
-
-    // Extract elements
-    u16 leftElemReg = leftReg;
-    if (expr->leftAutoMap.cartesianIndex > 0) {
-        leftElemReg = allocElemSlot(leftElemType);
-        emitOp(opArrayGetDynFor(dynamic_cast<ArrayType*>(leftType)->elemType_));
-        emitRegs(leftElemReg, leftReg, iRegs[expr->leftAutoMap.cartesianIndex]);
-        emitPtr(dynamic_cast<ArrayType*>(leftType));
-    } else if (expr->leftAutoMap.depth > 0) {
-        // Plain @ with cartesian context — zip with level 1
-        leftElemReg = allocElemSlot(leftElemType);
-        emitOp(opArrayGetDynFor(dynamic_cast<ArrayType*>(leftType)->elemType_));
-        emitRegs(leftElemReg, leftReg, iRegs[1]);
-        emitPtr(dynamic_cast<ArrayType*>(leftType));
-    }
-
-    u16 rightElemReg = rightReg;
-    if (expr->rightAutoMap.cartesianIndex > 0) {
-        rightElemReg = allocElemSlot(rightElemType);
-        emitOp(opArrayGetDynFor(dynamic_cast<ArrayType*>(rightType)->elemType_));
-        emitRegs(rightElemReg, rightReg, iRegs[expr->rightAutoMap.cartesianIndex]);
-        emitPtr(dynamic_cast<ArrayType*>(rightType));
-    } else if (expr->rightAutoMap.depth > 0) {
-        rightElemReg = allocElemSlot(rightElemType);
-        emitOp(opArrayGetDynFor(dynamic_cast<ArrayType*>(rightType)->elemType_));
-        emitRegs(rightElemReg, rightReg, iRegs[1]);
-        emitPtr(dynamic_cast<ArrayType*>(rightType));
-    }
-
-    // Compute per-element result
-    Type* scalarResultType = (maxCartesian >= 2 && innerResultType)
-        ? innerResultType->elemType_
-        : outerResultType->elemType_;
-    u16 elemResultReg = emitBinaryOpElem(expr, leftElemReg, leftElemType,
-                                         rightElemReg, rightElemType, scalarResultType);
-
-    // Store and close loops
-    if (maxCartesian >= 2) {
-        emitOp(opArraySetFor(innerResultType->elemType_));
-        emitRegs(innerResultReg, iRegs[2], elemResultReg);
-        emitPtr(innerResultType);
-
-        emitOp(op_add_int);
-        emitRegs(iRegs[2], iRegs[2], oneReg);
-        emitJumpTo(loop2StartIdx);
-        patchJump(loop2ExitJump);
-
-        emitOp(opArraySetFor(outerResultType->elemType_));
-        emitRegs(outerResultReg, iRegs[1], innerResultReg);
-        emitPtr(outerResultType);
-    } else {
-        emitOp(opArraySetFor(outerResultType->elemType_));
-        emitRegs(outerResultReg, iRegs[1], elemResultReg);
-        emitPtr(outerResultType);
-    }
-
-    emitOp(op_add_int);
-    emitRegs(iRegs[1], iRegs[1], oneReg);
-    emitJumpTo(loop1StartIdx);
-    patchJump(loop1ExitJump);
-
-    return outerResultReg;
+    u16 arr = emitArrayBuildLoop(dimLen(level), buildType, [&](u16 iReg) -> u16 {
+        iRegs[level] = iReg;
+        if (level == maxCart) return emitLeaf(iRegs);
+        return emitCartesianNest(level + 1, maxCart, elemType, iRegs, emitLeaf, dimLen);
+    });
+    if (!pvType) return arr;
+    u16 pv = allocReg();
+    emitOp(op_pvec_from_array);
+    emitRegs(pv, arr);
+    emitPtr(pvType);
+    return pv;
 }
 
-u16 CodeGen::genCartesianBinaryOpPVec(BinaryOpExpr* expr) {
+u16 CodeGen::genCartesianBinaryOp(BinaryOpExpr* expr) {
+    // Cartesian product: each operand carries a cartesian dimension (@1, @2,
+    // @3, ...). Dimension `k` becomes the k-th nested output level; a plain `@`
+    // (cartesianIndex 0) participates as dimension 1. The nest depth equals the
+    // largest dimension and is not bounded -- it generalizes to arrays,
+    // persistent vectors, and mixtures, with the result type driving the
+    // container kind at each level.
     u16 leftReg = genExpr(static_cast<Expr*>(expr->left.get()));
     u16 rightReg = genExpr(static_cast<Expr*>(expr->right.get()));
     Type* leftType = expr->left->resolvedType;
     Type* rightType = expr->right->resolvedType;
 
-    // Materialize each mapped persistent-vector operand to a temporary array.
+    // Normalize each mapped operand to a temporary array for uniform indexed
+    // reads. Persistent-vector operands are converted via op_pvec_to_array;
+    // array operands are read directly.
     auto toArr = [&](u16& reg, Type* type) -> ArrayType* {
         if (auto* pv = dynamic_cast<PersistentVectorType*>(type)) {
             auto* aT = compiler_.arrayType(pv->elemType_);
@@ -5333,73 +5209,59 @@ u16 CodeGen::genCartesianBinaryOpPVec(BinaryOpExpr* expr) {
     Type* rightElemType = rightArrT ? rightArrT->elemType_ : rightType;
 
     int maxCart = std::max(expr->leftAutoMap.cartesianIndex, expr->rightAutoMap.cartesianIndex);
-    auto* outerPV = dynamic_cast<PersistentVectorType*>(expr->resolvedType);
-    Type* outerElem = outerPV->elemType_;
-    auto* innerPV = (maxCart >= 2) ? dynamic_cast<PersistentVectorType*>(outerElem) : nullptr;
-    Type* scalarRes = innerPV ? innerPV->elemType_ : outerElem;
+    if (maxCart < 1) maxCart = 1;  // a plain @ on one operand acts as dimension 1
 
-    // Length of the operand assigned to cartesian dimension `ci` (1 or 2);
-    // a plain `@` (cartesianIndex 0, depth > 0) participates as dimension 1.
-    auto dimLen = [&](int ci) -> u16 {
+    // The scalar (innermost) result element type: unwrap the result container
+    // maxCart levels.
+    Type* scalarRes = expr->resolvedType;
+    for (int i = 0; i < maxCart; ++i) {
+        if (auto* pv = dynamic_cast<PersistentVectorType*>(scalarRes)) scalarRes = pv->elemType_;
+        else if (auto* at = dynamic_cast<ArrayType*>(scalarRes)) scalarRes = at->elemType_;
+    }
+
+    // The operand supplying dimension `level`: cartesianIndex == level, or a
+    // plain `@` (cartesianIndex 0) for dimension 1.
+    auto dimOperand = [&](int level, u16& reg, ArrayType*& aT) {
+        if (expr->leftAutoMap.cartesianIndex == level) { reg = leftReg; aT = leftArrT; return; }
+        if (expr->rightAutoMap.cartesianIndex == level) { reg = rightReg; aT = rightArrT; return; }
+        if (level == 1 && expr->leftAutoMap && expr->leftAutoMap.cartesianIndex == 0) { reg = leftReg; aT = leftArrT; return; }
+        if (level == 1 && expr->rightAutoMap && expr->rightAutoMap.cartesianIndex == 0) { reg = rightReg; aT = rightArrT; return; }
+    };
+
+    // Precompute each dimension's length (operands are loop-invariant).
+    std::vector<u16> lenRegs(maxCart + 1, 0);
+    for (int level = 1; level <= maxCart; ++level) {
         u16 reg = 0; ArrayType* aT = nullptr;
-        if (expr->leftAutoMap.cartesianIndex == ci) { reg = leftReg; aT = leftArrT; }
-        else if (expr->rightAutoMap.cartesianIndex == ci) { reg = rightReg; aT = rightArrT; }
-        else if (ci == 1 && expr->leftAutoMap && expr->leftAutoMap.cartesianIndex == 0) { reg = leftReg; aT = leftArrT; }
-        else if (ci == 1 && expr->rightAutoMap && expr->rightAutoMap.cartesianIndex == 0) { reg = rightReg; aT = rightArrT; }
+        dimOperand(level, reg, aT);
         u16 lr = allocReg();
         emitOp(opArrayLengthFor(aT->elemType_));
         emitRegs(lr, reg);
         emitPtr(aT);
-        return lr;
-    };
+        lenRegs[level] = lr;
+    }
 
-    // Extract an operand's element at the appropriate loop index, or broadcast.
-    auto extractElem = [&](bool isLeft, u16 i1, u16 i2) -> u16 {
+    auto extractElem = [&](bool isLeft, std::vector<u16> const& iRegs) -> u16 {
         AutoMapArg am = isLeft ? expr->leftAutoMap : expr->rightAutoMap;
         u16 reg = isLeft ? leftReg : rightReg;
         if (!am) return reg;  // broadcast scalar
         ArrayType* aT = isLeft ? leftArrT : rightArrT;
         Type* elemT = isLeft ? leftElemType : rightElemType;
-        u16 idx = (am.cartesianIndex == 2) ? i2 : i1;
+        int dim = am.cartesianIndex > 0 ? am.cartesianIndex : 1;  // plain @ => dim 1
         u16 elemReg = allocSlot(elemT);
         emitOp(opArrayGetDynFor(aT->elemType_));
-        emitRegs(elemReg, reg, idx);
+        emitRegs(elemReg, reg, iRegs[dim]);
         emitPtr(aT);
         return elemReg;
     };
 
-    u16 len1 = dimLen(1);
-    if (maxCart >= 2) {
-        u16 len2 = dimLen(2);
-        u16 outerArr = emitArrayBuildLoop(len1, compiler_.arrayType(outerElem), [&](u16 i1) -> u16 {
-            u16 innerArr = emitArrayBuildLoop(len2, compiler_.arrayType(scalarRes), [&](u16 i2) -> u16 {
-                u16 l = extractElem(true, i1, i2);
-                u16 r = extractElem(false, i1, i2);
-                return emitBinaryOpElem(expr, l, leftElemType, r, rightElemType, scalarRes);
-            });
-            u16 innerPv = allocReg();
-            emitOp(op_pvec_from_array);
-            emitRegs(innerPv, innerArr);
-            emitPtr(innerPV);
-            return innerPv;
-        });
-        u16 dst = allocReg();
-        emitOp(op_pvec_from_array);
-        emitRegs(dst, outerArr);
-        emitPtr(outerPV);
-        return dst;
-    }
-    // Single cartesian dimension: a plain 1-D map.
-    u16 outerArr = emitArrayBuildLoop(len1, compiler_.arrayType(scalarRes), [&](u16 i1) -> u16 {
-        u16 l = extractElem(true, i1, 0);
-        u16 r = extractElem(false, i1, 0);
-        return emitBinaryOpElem(expr, l, leftElemType, r, rightElemType, scalarRes);
-    });
-    u16 dst = allocReg();
-    emitOp(op_pvec_from_array);
-    emitRegs(dst, outerArr);
-    emitPtr(outerPV);
-    return dst;
+    std::vector<u16> iRegs(maxCart + 1, 0);
+    return emitCartesianNest(1, maxCart, expr->resolvedType, iRegs,
+        [&](std::vector<u16> const& ir) -> u16 {
+            u16 l = extractElem(true, ir);
+            u16 r = extractElem(false, ir);
+            return emitBinaryOpElem(expr, l, leftElemType, r, rightElemType, scalarRes);
+        },
+        [&](int level) -> u16 { return lenRegs[level]; });
 }
 
 u16 CodeGen::genDeepMapBinaryOp(BinaryOpExpr* expr, int depth) {
@@ -7071,179 +6933,21 @@ u16 CodeGen::genCartesianCall(CallExpr_* expr) {
 
     u16 argc = (u16)expr->args.size();
 
-    // Determine max cartesian index
-    int maxCartesian = 0;
-    for (auto& am : expr->autoMapArgs) {
-        if (am.cartesianIndex > maxCartesian) maxCartesian = am.cartesianIndex;
-    }
-
-    // --- Phase 1: Evaluate all argument expressions ---
+    // --- Evaluate all argument expressions ---
     std::vector<u16> argRegs;
     for (auto& arg : expr->args) {
         argRegs.push_back(genExpr(static_cast<Expr*>(arg.get())));
     }
 
-    bool isVoidReturn = (funcInfo->returnType == compiler_.voidType());
-
-    // --- Phase 2: Get lengths for each cartesian level ---
-    // lenRegs[level] = length of the array for @level (1-based)
-    std::vector<u16> lenRegs(maxCartesian + 1, 0);
-    for (size_t i = 0; i < argc; ++i) {
-        int ci = expr->autoMapArgs[i].cartesianIndex;
-        if (ci > 0 && lenRegs[ci] == 0) {
-            auto* arrType = dynamic_cast<ArrayType*>(expr->args[i]->resolvedType);
-            u16 lenReg = allocReg();
-            emitOp(opArrayLengthFor(arrType->elemType_));
-            emitRegs(lenReg, argRegs[i]);
-            emitPtr(arrType);
-            lenRegs[ci] = lenReg;
-        }
-    }
-
-    // --- Phase 3: Allocate result arrays and loop counters ---
-    // We need maxCartesian nested loops.
-    // For @1/@2: result is [[R]]
-    // Outer loop (@1): allocate outer array of len(@1)
-    // Inner loop (@2): allocate inner array of len(@2)
-
-    // Loop counter registers
-    std::vector<u16> iRegs(maxCartesian + 1);
-    u16 oneReg = allocReg();
-    emitOp(op_load_int_const);
-    emitRegs(oneReg);
-    emitInt(1);
-
-    for (int level = 1; level <= maxCartesian; ++level) {
-        iRegs[level] = allocReg();
-        emitOp(op_load_int_const);
-        emitRegs(iRegs[level]);
-        emitInt(0);
-    }
-
-    // Condition registers for each level
-    std::vector<u16> condRegs(maxCartesian + 1);
-    for (int level = 1; level <= maxCartesian; ++level) {
-        condRegs[level] = allocReg();
-    }
-
-    // Allocate outer result array (for @1 level) - skip for Void
-    auto* outerResultType = isVoidReturn ? nullptr : dynamic_cast<ArrayType*>(expr->resolvedType);
-    u16 outerResultReg = 0;
-    if (!isVoidReturn) {
-        outerResultReg = allocReg();
-        emitOp(op_array_alloc);
-        emitRegs(outerResultReg, lenRegs[1]);
-        emitPtr(outerResultType);
-    }
-
-    // --- Phase 4: Generate nested loops ---
-    // Level 1 (outer) loop
-    u32 loop1StartIdx = (u32)currentBlock_->code.size();
-    emitOp(op_cmp_lt_int);
-    emitRegs(condRegs[1], iRegs[1], lenRegs[1]);
-    u32 loop1ExitJump = emitJump(op_jump_if_false, condRegs[1]);
-
-    // Allocate inner result array (for @2 level) inside outer loop
-    u16 innerResultReg = 0;
-    ArrayType* innerResultType = nullptr;
-    u32 loop2StartIdx = 0;
-    u32 loop2ExitJump = 0;
-
-    if (maxCartesian >= 2) {
-        if (!isVoidReturn) {
-            innerResultType = dynamic_cast<ArrayType*>(outerResultType->elemType_);
-            innerResultReg = allocReg();
-            emitOp(op_array_alloc);
-            emitRegs(innerResultReg, lenRegs[2]);
-            emitPtr(innerResultType);
-        }
-
-        // Reset inner counter
-        emitOp(op_load_int_const);
-        emitRegs(iRegs[2]);
-        emitInt(0);
-
-        // Level 2 (inner) loop
-        loop2StartIdx = (u32)currentBlock_->code.size();
-        emitOp(op_cmp_lt_int);
-        emitRegs(condRegs[2], iRegs[2], lenRegs[2]);
-        loop2ExitJump = emitJump(op_jump_if_false, condRegs[2]);
-    }
-
-    // --- Phase 5+6: Set up call args (per cartesian level), pack, call ---
-    std::vector<MappedCallArg> args(argc);
-    for (u16 i = 0; i < argc; ++i) {
-        int ci = expr->autoMapArgs[i].cartesianIndex;
-        if (ci > 0 || expr->autoMapArgs[i].depth > 0) {
-            args[i] = { true, argRegs[i], (ci > 0 ? iRegs[ci] : iRegs[1]),
-                        dynamic_cast<ArrayType*>(expr->args[i]->resolvedType) };
-        } else {
-            args[i] = { false, argRegs[i], 0, nullptr };
-        }
-    }
-    u16 storeReg = emitMappedCallElem(expr, funcInfo, funcInfo->returnType, args);
-
-    // --- Phase 7: Store result and close loops ---
-    if (maxCartesian >= 2) {
-        // Store in inner array (skip for Void)
-        if (!isVoidReturn) {
-            emitOp(opArraySetFor(innerResultType->elemType_));
-            emitRegs(innerResultReg, iRegs[2], storeReg);
-            emitPtr(innerResultType);
-        }
-
-        // Increment inner counter
-        emitOp(op_add_int);
-        emitRegs(iRegs[2], iRegs[2], oneReg);
-        emitJumpTo(loop2StartIdx);
-        patchJump(loop2ExitJump);
-
-        // Store inner array in outer array (skip for Void)
-        if (!isVoidReturn) {
-            emitOp(opArraySetFor(outerResultType->elemType_));
-            emitRegs(outerResultReg, iRegs[1], innerResultReg);
-            emitPtr(outerResultType);
-        }
-    } else {
-        // maxCartesian == 1: store directly in outer array (skip for Void)
-        if (!isVoidReturn) {
-            emitOp(opArraySetFor(outerResultType->elemType_));
-            emitRegs(outerResultReg, iRegs[1], storeReg);
-            emitPtr(outerResultType);
-        }
-    }
-
-    // Increment outer counter
-    emitOp(op_add_int);
-    emitRegs(iRegs[1], iRegs[1], oneReg);
-    emitJumpTo(loop1StartIdx);
-    patchJump(loop1ExitJump);
-
-    return isVoidReturn ? storeReg : outerResultReg;
-}
-
-u16 CodeGen::genCartesianCallPVec(CallExpr_* expr) {
-    auto* ident = static_cast<IdentifierExpr*>(expr->callee.get());
-    const FuncInfo* funcInfo = nullptr;
-    auto funcIt = typeChecker_.functions().find(ident->name);
-    if (funcIt != typeChecker_.functions().end()) {
-        for (const auto& fi : funcIt->second) {
-            if ((i32)fi.globalIndex == expr->resolvedFuncGlobalIndex) { funcInfo = &fi; break; }
-        }
-    }
-    if (!funcInfo) { error(expr->loc, "Codegen: cartesian function not found"); return allocReg(); }
-
-    u16 argc = (u16)expr->args.size();
-    std::vector<u16> argRegs;
-    for (auto& arg : expr->args) argRegs.push_back(genExpr(static_cast<Expr*>(arg.get())));
-
-    // Materialize each mapped persistent-vector arg to a temporary array.
-    std::vector<ArrayType*> mappedArrType(argc, nullptr);
+    // Normalize each mapped persistent-vector arg to a temporary array for
+    // uniform indexed reads; array args are used directly. argArrType[i] is the
+    // (possibly synthesized) array type used to index argument i.
+    std::vector<ArrayType*> argArrType(argc, nullptr);
     for (u16 i = 0; i < argc; ++i) {
         if (!expr->autoMapArgs[i]) continue;
         Type* at = expr->args[i]->resolvedType;
         if (auto* arrT = dynamic_cast<ArrayType*>(at)) {
-            mappedArrType[i] = arrT;
+            argArrType[i] = arrT;
         } else if (auto* pvT = dynamic_cast<PersistentVectorType*>(at)) {
             auto* aT = compiler_.arrayType(pvT->elemType_);
             u16 conv = allocReg();
@@ -7251,74 +6955,71 @@ u16 CodeGen::genCartesianCallPVec(CallExpr_* expr) {
             emitRegs(conv, argRegs[i]);
             emitPtr(aT);
             argRegs[i] = conv;
-            mappedArrType[i] = aT;
+            argArrType[i] = aT;
         }
     }
 
+    // Nest depth = largest cartesian dimension; a plain `@` acts as dimension 1.
     int maxCart = 0;
-    for (auto& am : expr->autoMapArgs) if (am.cartesianIndex > maxCart) maxCart = am.cartesianIndex;
+    for (auto& am : expr->autoMapArgs)
+        if (am.cartesianIndex > maxCart) maxCart = am.cartesianIndex;
+    if (maxCart < 1) maxCart = 1;
 
-    // Length per cartesian dimension; a plain `@` participates as dimension 1.
+    bool isVoidReturn = (funcInfo->returnType == compiler_.voidType());
+
+    // Precompute each dimension's length from the arg supplying it.
     std::vector<u16> lenRegs(maxCart + 1, 0);
-    auto setLen = [&](int ci, u16 reg, ArrayType* aT) {
-        if (ci > 0 && lenRegs[ci] == 0) {
-            u16 lr = allocReg();
-            emitOp(opArrayLengthFor(aT->elemType_));
-            emitRegs(lr, reg);
-            emitPtr(aT);
-            lenRegs[ci] = lr;
+    for (int level = 1; level <= maxCart; ++level) {
+        for (u16 i = 0; i < argc; ++i) {
+            int ci = expr->autoMapArgs[i].cartesianIndex;
+            bool match = (ci == level) ||
+                         (level == 1 && expr->autoMapArgs[i] && ci == 0);
+            if (match) {
+                u16 lr = allocReg();
+                emitOp(opArrayLengthFor(argArrType[i]->elemType_));
+                emitRegs(lr, argRegs[i]);
+                emitPtr(argArrType[i]);
+                lenRegs[level] = lr;
+                break;
+            }
         }
-    };
-    for (u16 i = 0; i < argc; ++i)
-        if (expr->autoMapArgs[i].cartesianIndex > 0)
-            setLen(expr->autoMapArgs[i].cartesianIndex, argRegs[i], mappedArrType[i]);
-    for (u16 i = 0; i < argc; ++i)
-        if (lenRegs[1] == 0 && expr->autoMapArgs[i] && expr->autoMapArgs[i].cartesianIndex == 0)
-            setLen(1, argRegs[i], mappedArrType[i]);
+    }
 
-    Type* returnT = funcInfo->returnType;
-    auto* outerPV = dynamic_cast<PersistentVectorType*>(expr->resolvedType);
-    Type* outerElem = outerPV->elemType_;
-    auto* innerPV = (maxCart >= 2) ? dynamic_cast<PersistentVectorType*>(outerElem) : nullptr;
-    Type* scalarRes = innerPV ? innerPV->elemType_ : outerElem;
-
-    auto callAt = [&](u16 i1, u16 i2) -> u16 {
+    // Emit the call at one combination of loop indices. A mapped arg reads its
+    // element at iRegs[its dimension] (plain `@` => dimension 1); a non-mapped
+    // arg is broadcast.
+    auto callAt = [&](std::vector<u16> const& iRegs) -> u16 {
         std::vector<MappedCallArg> margs(argc);
         for (u16 i = 0; i < argc; ++i) {
             AutoMapArg am = expr->autoMapArgs[i];
-            if (am.cartesianIndex > 0 || am.depth > 0) {
-                u16 idx = (am.cartesianIndex == 2) ? i2 : i1;
-                margs[i] = { true, argRegs[i], idx, mappedArrType[i] };
+            if (am) {
+                int dim = am.cartesianIndex > 0 ? am.cartesianIndex : 1;
+                margs[i] = { true, argRegs[i], iRegs[dim], argArrType[i] };
             } else {
                 margs[i] = { false, argRegs[i], 0, nullptr };
             }
         }
-        return emitMappedCallElem(expr, funcInfo, returnT, margs);
+        return emitMappedCallElem(expr, funcInfo, funcInfo->returnType, margs);
     };
 
-    if (maxCart >= 2) {
-        u16 outerArr = emitArrayBuildLoop(lenRegs[1], compiler_.arrayType(outerElem), [&](u16 i1) -> u16 {
-            u16 innerArr = emitArrayBuildLoop(lenRegs[2], compiler_.arrayType(scalarRes),
-                                              [&](u16 i2) -> u16 { return callAt(i1, i2); });
-            u16 ipv = allocReg();
-            emitOp(op_pvec_from_array);
-            emitRegs(ipv, innerArr);
-            emitPtr(innerPV);
-            return ipv;
-        });
-        u16 dst = allocReg();
-        emitOp(op_pvec_from_array);
-        emitRegs(dst, outerArr);
-        emitPtr(outerPV);
-        return dst;
+    if (isVoidReturn) {
+        // No result container: nest counted loops and call for side effects.
+        std::vector<u16> iRegs(maxCart + 1, 0);
+        u16 lastReg = 0;
+        auto nest = [&](this auto&& self, int level) -> void {
+            emitCountedLoop(lenRegs[level], [&](u16 iReg) {
+                iRegs[level] = iReg;
+                if (level == maxCart) lastReg = callAt(iRegs);
+                else self(level + 1);
+            });
+        };
+        nest(1);
+        return lastReg;
     }
-    u16 outerArr = emitArrayBuildLoop(lenRegs[1], compiler_.arrayType(scalarRes),
-                                      [&](u16 i1) -> u16 { return callAt(i1, 0); });
-    u16 dst = allocReg();
-    emitOp(op_pvec_from_array);
-    emitRegs(dst, outerArr);
-    emitPtr(outerPV);
-    return dst;
+
+    std::vector<u16> iRegs(maxCart + 1, 0);
+    return emitCartesianNest(1, maxCart, expr->resolvedType, iRegs, callAt,
+                             [&](int level) -> u16 { return lenRegs[level]; });
 }
 
 u16 CodeGen::genDeepMapCall(CallExpr_* expr, int depth) {
