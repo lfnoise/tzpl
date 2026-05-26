@@ -953,6 +953,12 @@ void op_jump(VM& vm, Code* pc) {
 // bounded budget. Future phases will run mark/sweep work here too.
 void op_safepoint(VM& vm, Code* pc) {
     if (vm.gcRequested_.load(std::memory_order_relaxed)) [[unlikely]] {
+        // Publish the current pc so the GC root scanner finds this (top)
+        // frame's stack map. Without this, vm.pc_ stays null and the top
+        // frame's live Obj* registers are never marked -- they get swept
+        // while still in use (e.g. a loop accumulator built across an
+        // incrementally-collected cycle).
+        vm.setPc(pc);
         vm.safepointPoll();
     }
     DISPATCH(1);

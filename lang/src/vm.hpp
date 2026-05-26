@@ -442,6 +442,11 @@ public:
     u32 baseReg() const { return baseReg_; }
     u32 frameCount() const { return frameCount_; }
     Code* pc() const { return pc_; }
+    // Publish the executing instruction pointer so the incremental GC's
+    // root scanner can locate the top frame's stack map. The direct-threaded
+    // dispatch keeps pc in a local register, so it must be synced here before
+    // any operation that can drive a GC step (op_safepoint).
+    void setPc(Code* pc) { pc_ = pc; }
     CodeBlock* currentCodeBlock() const;
 
     // Update current frame's codeBlock (used by tail call opcodes)
