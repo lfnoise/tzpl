@@ -2962,6 +2962,457 @@ static bool resolve_pmap_to_map(Compiler& compiler, const std::vector<Type*>& ar
 }
 
 // ============================================================================
+// Persistent vector: higher-order / sequence builtins
+//
+// These are registered as additional overloads alongside the Array/List
+// resolvers (resolution tries each), so the mutable resolvers are untouched.
+// All build their result via PVec::fromWords from a stride-packed buffer, so
+// one code path covers every element backend (atoms, Obj*, inline composites).
+// ============================================================================
+
+// Append element i of `v` (stride_ words) to `buf`.
+static inline void pvecAppendElem(PVec* v, u32 i, Vec<Word>& buf) {
+    Word const* e = v->elemAt(i);
+    for (u32 w = 0; w < v->stride_; ++w) buf.push_back(e[w]);
+}
+
+// Build a persistent vector of element type `et` from a stride-packed buffer.
+static inline PVec* pvecFromBuf(VM& vm, Type* et, Vec<Word>& buf, u32 count) {
+    auto* pvType = vm.persistentVectorType(et);
+    return PVec::fromWords(pvType, count ? &buf[0] : nullptr, count);
+}
+
+static void builtin_reverse_pvec(VM& vm, u16 dst, u16, u16 ab) {
+    auto* v = static_cast<PVec*>(vm.reg(ab).o);
+    Vec<Word> buf((rt::STLAllocator<Word>(rt::gCurrentAllocator)));
+    for (u32 i = v->count_; i-- > 0; ) pvecAppendElem(v, i, buf);
+    vm.reg(dst).o = pvecFromBuf(vm, v->elemType(), buf, v->count_);
+}
+
+static void builtin_take_pvec(VM& vm, u16 dst, u16, u16 ab) {
+    auto* v = static_cast<PVec*>(vm.reg(ab).o);
+    i64 n = vm.reg((u16)(ab + 1)).i;
+    u32 take = n < 0 ? 0 : ((u32)n > v->count_ ? v->count_ : (u32)n);
+    Vec<Word> buf((rt::STLAllocator<Word>(rt::gCurrentAllocator)));
+    for (u32 i = 0; i < take; ++i) pvecAppendElem(v, i, buf);
+    vm.reg(dst).o = pvecFromBuf(vm, v->elemType(), buf, take);
+}
+
+static void builtin_drop_pvec(VM& vm, u16 dst, u16, u16 ab) {
+    auto* v = static_cast<PVec*>(vm.reg(ab).o);
+    i64 n = vm.reg((u16)(ab + 1)).i;
+    u32 drop = n < 0 ? 0 : ((u32)n > v->count_ ? v->count_ : (u32)n);
+    Vec<Word> buf((rt::STLAllocator<Word>(rt::gCurrentAllocator)));
+    for (u32 i = drop; i < v->count_; ++i) pvecAppendElem(v, i, buf);
+    vm.reg(dst).o = pvecFromBuf(vm, v->elemType(), buf, v->count_ - drop);
+}
+
+static void builtin_stride_pvec(VM& vm, u16 dst, u16, u16 ab) {
+    auto* v = static_cast<PVec*>(vm.reg(ab).o);
+    i64 n = vm.reg((u16)(ab + 1)).i;
+    Vec<Word> buf((rt::STLAllocator<Word>(rt::gCurrentAllocator)));
+    u32 count = 0;
+    if (n > 0) for (u32 i = 0; i < v->count_; i += (u32)n) { pvecAppendElem(v, i, buf); ++count; }
+    vm.reg(dst).o = pvecFromBuf(vm, v->elemType(), buf, count);
+}
+
+static void builtin_stutter_pvec(VM& vm, u16 dst, u16, u16 ab) {
+    auto* v = static_cast<PVec*>(vm.reg(ab).o);
+    i64 n = vm.reg((u16)(ab + 1)).i;
+    Vec<Word> buf((rt::STLAllocator<Word>(rt::gCurrentAllocator)));
+    u32 count = 0;
+    if (n > 0) for (u32 i = 0; i < v->count_; ++i) for (i64 k = 0; k < n; ++k) { pvecAppendElem(v, i, buf); ++count; }
+    vm.reg(dst).o = pvecFromBuf(vm, v->elemType(), buf, count);
+}
+
+static void builtin_cat_pvec(VM& vm, u16 dst, u16, u16 ab) {
+    auto* a = static_cast<PVec*>(vm.reg(ab).o);
+    auto* b = static_cast<PVec*>(vm.reg((u16)(ab + 1)).o);
+    Vec<Word> buf((rt::STLAllocator<Word>(rt::gCurrentAllocator)));
+    for (u32 i = 0; i < a->count_; ++i) pvecAppendElem(a, i, buf);
+    for (u32 i = 0; i < b->count_; ++i) pvecAppendElem(b, i, buf);
+    vm.reg(dst).o = pvecFromBuf(vm, a->elemType(), buf, a->count_ + b->count_);
+}
+
+// join: #[#[T]] -> #[T]  (flatten one level)
+static void builtin_join_pvec(VM& vm, u16 dst, u16, u16 ab) {
+    auto* outer = static_cast<PVec*>(vm.reg(ab).o);
+    auto* innerType = static_cast<PersistentVectorType*>(outer->elemType())->elemType_;
+    Vec<Word> buf((rt::STLAllocator<Word>(rt::gCurrentAllocator)));
+    u32 count = 0;
+    for (u32 i = 0; i < outer->count_; ++i) {
+        auto* inner = static_cast<PVec*>(outer->elemAt(i)[0].o);
+        for (u32 j = 0; j < inner->count_; ++j) { pvecAppendElem(inner, j, buf); ++count; }
+    }
+    vm.reg(dst).o = pvecFromBuf(vm, innerType, buf, count);
+}
+
+// flatten: #[#[...#[T]]] -> #[T]  (flatten all nesting levels)
+static void flattenPVecInto(PVec* v, Type* leaf, Vec<Word>& buf, u32& count) {
+    if (dynamic_cast<PersistentVectorType*>(v->elemType())) {
+        for (u32 i = 0; i < v->count_; ++i)
+            flattenPVecInto(static_cast<PVec*>(v->elemAt(i)[0].o), leaf, buf, count);
+    } else {
+        for (u32 i = 0; i < v->count_; ++i) { pvecAppendElem(v, i, buf); ++count; }
+    }
+}
+static void builtin_flatten_pvec(VM& vm, u16 dst, u16, u16 ab) {
+    auto* v = static_cast<PVec*>(vm.reg(ab).o);
+    auto* prim = vm.currentPrimitive();
+    Type* leaf = static_cast<PersistentVectorType*>(static_cast<TupleType*>(prim->type_)->fields_[0])->elemType_;
+    while (auto* inner = dynamic_cast<PersistentVectorType*>(leaf)) leaf = inner->elemType_;
+    Vec<Word> buf((rt::STLAllocator<Word>(rt::gCurrentAllocator)));
+    u32 count = 0;
+    flattenPVecInto(v, leaf, buf, count);
+    vm.reg(dst).o = pvecFromBuf(vm, leaf, buf, count);
+}
+
+// scan: #[T], U, (U,T)->U -> #[U]  (running accumulation incl. seed)
+static void builtin_scan_pvec(VM& vm, u16 dst, u16, u16 ab) {
+    auto* v = static_cast<PVec*>(vm.reg(ab).o);
+    auto* prim = vm.currentPrimitive();
+    Type* accT = static_cast<TupleType*>(prim->type_)->fields_[1];
+    u32 accSW = (accT && accT->sizeWords_ > 0) ? accT->sizeWords_ : 1;
+    auto* fn = static_cast<Callable*>(vm.reg((u16)(ab + 1 + accSW)).o);
+    Type* accET = static_cast<FunctionType*>(fn->type_)->returnType_;
+    Type* et = v->elemType();
+    u16 sb = vm.currentCodeBlock()->numRegs;
+    Word const* accSrc = &vm.reg((u16)(ab + 1));
+    for (u32 i = 0; i < accSW; ++i) vm.reg((u16)(sb + i)) = accSrc[i];
+    u16 elemSb = (u16)(sb + accSW);
+    Vec<Word> buf((rt::STLAllocator<Word>(rt::gCurrentAllocator)));
+    u32 accRSW = strideForType(accET);
+    for (u32 w = 0; w < accRSW; ++w) buf.push_back(vm.reg((u16)(sb + w)));
+    for (u32 i = 0; i < v->count_; ++i) {
+        placeLambdaArgSlot(vm, elemSb, v->elemAt(i), et);
+        callTwoArgs(vm, fn, sb);
+        for (u32 w = 0; w < accRSW; ++w) buf.push_back(vm.reg((u16)(sb + w)));
+    }
+    vm.reg(dst).o = pvecFromBuf(vm, accET, buf, v->count_ + 1);
+}
+
+// scan1: #[T], (T,T)->T -> #[T]
+static void builtin_scan1_pvec(VM& vm, u16 dst, u16, u16 ab) {
+    auto* v = static_cast<PVec*>(vm.reg(ab).o);
+    auto* fn = static_cast<Callable*>(vm.reg((u16)(ab + 1)).o);
+    Type* et = v->elemType();
+    u32 sw = strideForType(et);
+    Vec<Word> buf((rt::STLAllocator<Word>(rt::gCurrentAllocator)));
+    if (v->count_ == 0) { vm.reg(dst).o = pvecFromBuf(vm, et, buf, 0); return; }
+    u16 sb = vm.currentCodeBlock()->numRegs;
+    u16 elemSb = (u16)(sb + sw);
+    Word const* e0 = v->elemAt(0);
+    for (u32 w = 0; w < sw; ++w) { vm.reg((u16)(sb + w)) = e0[w]; buf.push_back(e0[w]); }
+    for (u32 i = 1; i < v->count_; ++i) {
+        placeLambdaArgSlot(vm, elemSb, v->elemAt(i), et);
+        callTwoArgs(vm, fn, sb);
+        for (u32 w = 0; w < sw; ++w) buf.push_back(vm.reg((u16)(sb + w)));
+    }
+    vm.reg(dst).o = pvecFromBuf(vm, et, buf, v->count_);
+}
+
+// fold1: #[T], (T,T)->T -> T
+static void builtin_fold1_pvec(VM& vm, u16 dst, u16, u16 ab) {
+    auto* v = static_cast<PVec*>(vm.reg(ab).o);
+    auto* fn = static_cast<Callable*>(vm.reg((u16)(ab + 1)).o);
+    Type* et = v->elemType();
+    u32 sw = strideForType(et);
+    u16 sb = vm.currentCodeBlock()->numRegs;
+    u16 elemSb = (u16)(sb + sw);
+    if (v->count_ == 0) { vm.reg(dst).i = 0; return; }
+    Word const* e0 = v->elemAt(0);
+    for (u32 w = 0; w < sw; ++w) vm.reg((u16)(sb + w)) = e0[w];
+    for (u32 i = 1; i < v->count_; ++i) {
+        placeLambdaArgSlot(vm, elemSb, v->elemAt(i), et);
+        callTwoArgs(vm, fn, sb);
+    }
+    for (u32 w = 0; w < sw; ++w) vm.reg((u16)(dst + w)) = vm.reg((u16)(sb + w));
+}
+
+// find: #[T], (T)->Bool -> Int  (index of first match, or -1)
+static void builtin_find_pvec(VM& vm, u16 dst, u16, u16 ab) {
+    auto* v = static_cast<PVec*>(vm.reg(ab).o);
+    auto* fn = static_cast<Callable*>(vm.reg((u16)(ab + 1)).o);
+    Type* et = v->elemType();
+    u16 sb = vm.currentCodeBlock()->numRegs;
+    i64 found = -1;
+    for (u32 i = 0; i < v->count_; ++i) {
+        placeLambdaArgSlot(vm, sb, v->elemAt(i), et);
+        callOneArg(vm, fn, sb);
+        if (vm.reg(sb).i) { found = (i64)i; break; }
+    }
+    vm.reg(dst).i = found;
+}
+
+// takeWhile / dropWhile: #[T], (T)->Bool -> #[T]
+static void builtin_takeWhile_pvec(VM& vm, u16 dst, u16, u16 ab) {
+    auto* v = static_cast<PVec*>(vm.reg(ab).o);
+    auto* fn = static_cast<Callable*>(vm.reg((u16)(ab + 1)).o);
+    Type* et = v->elemType();
+    u16 sb = vm.currentCodeBlock()->numRegs;
+    Vec<Word> buf((rt::STLAllocator<Word>(rt::gCurrentAllocator)));
+    u32 count = 0;
+    for (u32 i = 0; i < v->count_; ++i) {
+        placeLambdaArgSlot(vm, sb, v->elemAt(i), et);
+        callOneArg(vm, fn, sb);
+        if (!vm.reg(sb).i) break;
+        pvecAppendElem(v, i, buf); ++count;
+    }
+    vm.reg(dst).o = pvecFromBuf(vm, et, buf, count);
+}
+
+static void builtin_dropWhile_pvec(VM& vm, u16 dst, u16, u16 ab) {
+    auto* v = static_cast<PVec*>(vm.reg(ab).o);
+    auto* fn = static_cast<Callable*>(vm.reg((u16)(ab + 1)).o);
+    Type* et = v->elemType();
+    u16 sb = vm.currentCodeBlock()->numRegs;
+    Vec<Word> buf((rt::STLAllocator<Word>(rt::gCurrentAllocator)));
+    u32 count = 0;
+    bool dropping = true;
+    for (u32 i = 0; i < v->count_; ++i) {
+        if (dropping) {
+            placeLambdaArgSlot(vm, sb, v->elemAt(i), et);
+            callOneArg(vm, fn, sb);
+            if (vm.reg(sb).i) continue;
+            dropping = false;
+        }
+        pvecAppendElem(v, i, buf); ++count;
+    }
+    vm.reg(dst).o = pvecFromBuf(vm, et, buf, count);
+}
+
+// Write a 2-field tuple into the stride slot `dst` (strideForType(tt) words),
+// copying field payloads natively from stride-packed sources.
+static void writePVecTupleSlot(TupleType* tt, Word const* fa, Word const* fb, Word* dst) {
+    auto const& f0 = tt->layout_[0];
+    auto const& f1 = tt->layout_[1];
+    if (tt->repr_ == Type::Repr::Inline) {
+        for (u32 k = 0; k < tt->sizeWords_; ++k) dst[k].i = 0;
+        for (u32 w = 0; w < f0.sizeWords; ++w) dst[f0.wordOffset + w] = fa[w];
+        for (u32 w = 0; w < f1.sizeWords; ++w) dst[f1.wordOffset + w] = fb[w];
+    } else {
+        auto* tup = Tuple::create(tt, 2);
+        for (u32 w = 0; w < f0.sizeWords; ++w) tup->v[f0.wordOffset + w] = fa[w];
+        for (u32 w = 0; w < f1.sizeWords; ++w) tup->v[f1.wordOffset + w] = fb[w];
+        dst[0].o = tup;
+    }
+}
+
+// zip: #[T], #[U] -> #[(T,U)]
+static void builtin_zip_pvec(VM& vm, u16 dst, u16, u16 ab) {
+    auto* a = static_cast<PVec*>(vm.reg(ab).o);
+    auto* b = static_cast<PVec*>(vm.reg((u16)(ab + 1)).o);
+    Type* etA = a->elemType(); Type* etB = b->elemType();
+    Vec<Type*> fields((rt::STLAllocator<Type*>(nullptr)));
+    fields.push_back(etA); fields.push_back(etB);
+    auto* tt = vm.tupleType(fields);
+    u32 ts = strideForType(tt);
+    u32 n = a->count_ < b->count_ ? a->count_ : b->count_;
+    Vec<Word> buf((rt::STLAllocator<Word>(rt::gCurrentAllocator)));
+    buf.assign((size_t)n * ts, Word{});
+    for (u32 i = 0; i < n; ++i) writePVecTupleSlot(tt, a->elemAt(i), b->elemAt(i), &buf[(size_t)i * ts]);
+    vm.reg(dst).o = pvecFromBuf(vm, tt, buf, n);
+}
+
+// enumerate: #[T] -> #[(Int,T)]
+static void builtin_enumerate_pvec(VM& vm, u16 dst, u16, u16 ab) {
+    auto* v = static_cast<PVec*>(vm.reg(ab).o);
+    Type* et = v->elemType();
+    Vec<Type*> fields((rt::STLAllocator<Type*>(nullptr)));
+    fields.push_back(vm.intType()); fields.push_back(et);
+    auto* tt = vm.tupleType(fields);
+    u32 ts = strideForType(tt);
+    Vec<Word> buf((rt::STLAllocator<Word>(rt::gCurrentAllocator)));
+    buf.assign((size_t)v->count_ * ts, Word{});
+    for (u32 i = 0; i < v->count_; ++i) {
+        Word idx; idx.i = (i64)i;
+        writePVecTupleSlot(tt, &idx, v->elemAt(i), &buf[(size_t)i * ts]);
+    }
+    vm.reg(dst).o = pvecFromBuf(vm, tt, buf, v->count_);
+}
+
+// Gather elements at the given indices into a new persistent vector.
+static PVec* pvecGather(VM& vm, PVec* v, std::vector<u32> const& idx) {
+    Vec<Word> buf((rt::STLAllocator<Word>(rt::gCurrentAllocator)));
+    for (u32 i : idx) pvecAppendElem(v, i, buf);
+    return pvecFromBuf(vm, v->elemType(), buf, (u32)idx.size());
+}
+
+// Natural-order comparison of two 1-word elements (Int/Float/String).
+static bool pvecNatLess(Word a, Word b, Type* et, VM& vm) {
+    if (et == vm.floatType()) return a.f < b.f;
+    if (et == vm.stringType()) return static_cast<StringObj*>(a.o)->s < static_cast<StringObj*>(b.o)->s;
+    return a.i < b.i;  // Int / Bool / Symbol-by-id
+}
+
+// sort: #[T] -> #[T] (natural) ; #[T], (T,T)->Bool -> #[T] (by comparator)
+static void builtin_sort_pvec(VM& vm, u16 dst, u16, u16 ab) {
+    auto* v = static_cast<PVec*>(vm.reg(ab).o);
+    Type* et = v->elemType();
+    std::vector<u32> idx(v->count_);
+    for (u32 i = 0; i < v->count_; ++i) idx[i] = i;
+    std::stable_sort(idx.begin(), idx.end(), [&](u32 x, u32 y) {
+        return pvecNatLess(v->elemAt(x)[0], v->elemAt(y)[0], et, vm);
+    });
+    vm.reg(dst).o = pvecGather(vm, v, idx);
+}
+
+// sort by comparator and grade (indices) share the lambda-driven comparison.
+static void sortByComparator(VM& vm, PVec* v, Callable* fn, std::vector<u32>& idx) {
+    Type* et = v->elemType();
+    u32 sw = strideForType(et);
+    u16 sb = vm.currentCodeBlock()->numRegs;
+    std::stable_sort(idx.begin(), idx.end(), [&](u32 x, u32 y) {
+        placeLambdaArgSlot(vm, sb, v->elemAt(x), et);
+        placeLambdaArgSlot(vm, (u16)(sb + sw), v->elemAt(y), et);
+        callTwoArgs(vm, fn, sb);
+        return vm.reg(sb).i != 0;
+    });
+}
+
+static void builtin_sort_by_pvec(VM& vm, u16 dst, u16, u16 ab) {
+    auto* v = static_cast<PVec*>(vm.reg(ab).o);
+    auto* fn = static_cast<Callable*>(vm.reg((u16)(ab + 1)).o);
+    std::vector<u32> idx(v->count_);
+    for (u32 i = 0; i < v->count_; ++i) idx[i] = i;
+    sortByComparator(vm, v, fn, idx);
+    vm.reg(dst).o = pvecGather(vm, v, idx);
+}
+
+// grade: #[T], (T,T)->Bool -> [Int]  (permutation that sorts; mutable array)
+static void builtin_grade_pvec(VM& vm, u16 dst, u16, u16 ab) {
+    auto* v = static_cast<PVec*>(vm.reg(ab).o);
+    auto* fn = static_cast<Callable*>(vm.reg((u16)(ab + 1)).o);
+    std::vector<u32> idx(v->count_);
+    for (u32 i = 0; i < v->count_; ++i) idx[i] = i;
+    sortByComparator(vm, v, fn, idx);
+    auto* arr = new PodArray<i64>(vm.arrayType(vm.intType()));
+    arr->v.resize(idx.size());
+    for (size_t i = 0; i < idx.size(); ++i) arr->v[i] = (i64)idx[i];
+    vm.reg(dst).o = arr;
+}
+
+// --- resolvers (registered as extra overloads alongside Array/List) ---
+
+static bool resolve_reverse_pvec(Compiler& c, const std::vector<Type*>& a, std::vector<Type*>& pt, Type*& rt, CFun& cf) {
+    if (a.size() != 1) return false;
+    auto* pv = dynamic_cast<PersistentVectorType*>(a[0]); if (!pv) return false;
+    pt = {pv}; rt = pv; cf = builtin_reverse_pvec; return true;
+}
+// take/drop/stride/stutter: #[T], Int -> #[T]
+static bool resolve_pvec_int(const std::vector<Type*>& a, Compiler& c, std::vector<Type*>& pt, Type*& rt, CFun& cf, CFun fn) {
+    if (a.size() != 2 || a[1] != c.intType()) return false;
+    auto* pv = dynamic_cast<PersistentVectorType*>(a[0]); if (!pv) return false;
+    pt = {pv, c.intType()}; rt = pv; cf = fn; return true;
+}
+static bool resolve_take_pvec(Compiler& c, const std::vector<Type*>& a, std::vector<Type*>& pt, Type*& rt, CFun& cf) { return resolve_pvec_int(a, c, pt, rt, cf, builtin_take_pvec); }
+static bool resolve_drop_pvec(Compiler& c, const std::vector<Type*>& a, std::vector<Type*>& pt, Type*& rt, CFun& cf) { return resolve_pvec_int(a, c, pt, rt, cf, builtin_drop_pvec); }
+static bool resolve_stride_pvec(Compiler& c, const std::vector<Type*>& a, std::vector<Type*>& pt, Type*& rt, CFun& cf) { return resolve_pvec_int(a, c, pt, rt, cf, builtin_stride_pvec); }
+static bool resolve_stutter_pvec(Compiler& c, const std::vector<Type*>& a, std::vector<Type*>& pt, Type*& rt, CFun& cf) { return resolve_pvec_int(a, c, pt, rt, cf, builtin_stutter_pvec); }
+
+static bool resolve_cat_pvec(Compiler& c, const std::vector<Type*>& a, std::vector<Type*>& pt, Type*& rt, CFun& cf) {
+    if (a.size() != 2) return false;
+    auto* pv = dynamic_cast<PersistentVectorType*>(a[0]); if (!pv || a[1] != pv) return false;
+    pt = {pv, pv}; rt = pv; cf = builtin_cat_pvec; return true;
+}
+static bool resolve_join_pvec(Compiler& c, const std::vector<Type*>& a, std::vector<Type*>& pt, Type*& rt, CFun& cf) {
+    if (a.size() != 1) return false;
+    auto* pv = dynamic_cast<PersistentVectorType*>(a[0]); if (!pv) return false;
+    auto* inner = dynamic_cast<PersistentVectorType*>(pv->elemType_); if (!inner) return false;
+    pt = {pv}; rt = c.persistentVectorType(inner->elemType_); cf = builtin_join_pvec; return true;
+}
+static bool resolve_flatten_pvec(Compiler& c, const std::vector<Type*>& a, std::vector<Type*>& pt, Type*& rt, CFun& cf) {
+    if (a.size() != 1) return false;
+    auto* pv = dynamic_cast<PersistentVectorType*>(a[0]); if (!pv) return false;
+    Type* leaf = pv->elemType_; bool nested = false;
+    while (auto* in = dynamic_cast<PersistentVectorType*>(leaf)) { leaf = in->elemType_; nested = true; }
+    if (!nested) return false;
+    pt = {pv}; rt = c.persistentVectorType(leaf); cf = builtin_flatten_pvec; return true;
+}
+static bool resolve_scan_pvec(Compiler& c, const std::vector<Type*>& a, std::vector<Type*>& pt, Type*& rt, CFun& cf) {
+    if (a.size() != 3) return false;
+    auto* pv = dynamic_cast<PersistentVectorType*>(a[0]); if (!pv) return false;
+    auto* ft = dynamic_cast<FunctionType*>(a[2]);
+    if (!ft || ft->argTypes_.size() != 2 || ft->argTypes_[0] != a[1] || ft->returnType_ != a[1] || ft->argTypes_[1] != pv->elemType_) return false;
+    pt = {pv, a[1], a[2]}; rt = c.persistentVectorType(a[1]); cf = builtin_scan_pvec; return true;
+}
+static bool resolve_scan1_pvec(Compiler& c, const std::vector<Type*>& a, std::vector<Type*>& pt, Type*& rt, CFun& cf) {
+    if (a.size() != 2) return false;
+    auto* pv = dynamic_cast<PersistentVectorType*>(a[0]); if (!pv) return false;
+    auto* ft = dynamic_cast<FunctionType*>(a[1]); Type* et = pv->elemType_;
+    if (!ft || ft->argTypes_.size() != 2 || ft->argTypes_[0] != et || ft->argTypes_[1] != et || ft->returnType_ != et) return false;
+    pt = {pv, a[1]}; rt = pv; cf = builtin_scan1_pvec; return true;
+}
+static bool resolve_fold1_pvec(Compiler& c, const std::vector<Type*>& a, std::vector<Type*>& pt, Type*& rt, CFun& cf) {
+    if (a.size() != 2) return false;
+    auto* pv = dynamic_cast<PersistentVectorType*>(a[0]); if (!pv) return false;
+    auto* ft = dynamic_cast<FunctionType*>(a[1]); Type* et = pv->elemType_;
+    if (!ft || ft->argTypes_.size() != 2 || ft->argTypes_[0] != et || ft->argTypes_[1] != et || ft->returnType_ != et) return false;
+    pt = {pv, a[1]}; rt = et; cf = builtin_fold1_pvec; return true;
+}
+static bool resolve_find_pvec(Compiler& c, const std::vector<Type*>& a, std::vector<Type*>& pt, Type*& rt, CFun& cf) {
+    if (a.size() != 2) return false;
+    auto* pv = dynamic_cast<PersistentVectorType*>(a[0]); if (!pv) return false;
+    auto* ft = dynamic_cast<FunctionType*>(a[1]);
+    if (!ft || ft->argTypes_.size() != 1 || ft->returnType_ != c.boolType() || ft->argTypes_[0] != pv->elemType_) return false;
+    pt = {pv, a[1]}; rt = c.intType(); cf = builtin_find_pvec; return true;
+}
+static bool resolve_takeWhile_pvec(Compiler& c, const std::vector<Type*>& a, std::vector<Type*>& pt, Type*& rt, CFun& cf) {
+    if (a.size() != 2) return false;
+    auto* pv = dynamic_cast<PersistentVectorType*>(a[0]); if (!pv) return false;
+    auto* ft = dynamic_cast<FunctionType*>(a[1]);
+    if (!ft || ft->argTypes_.size() != 1 || ft->returnType_ != c.boolType() || ft->argTypes_[0] != pv->elemType_) return false;
+    pt = {pv, a[1]}; rt = pv; cf = builtin_takeWhile_pvec; return true;
+}
+static bool resolve_dropWhile_pvec(Compiler& c, const std::vector<Type*>& a, std::vector<Type*>& pt, Type*& rt, CFun& cf) {
+    if (a.size() != 2) return false;
+    auto* pv = dynamic_cast<PersistentVectorType*>(a[0]); if (!pv) return false;
+    auto* ft = dynamic_cast<FunctionType*>(a[1]);
+    if (!ft || ft->argTypes_.size() != 1 || ft->returnType_ != c.boolType() || ft->argTypes_[0] != pv->elemType_) return false;
+    pt = {pv, a[1]}; rt = pv; cf = builtin_dropWhile_pvec; return true;
+}
+static bool resolve_zip_pvec(Compiler& c, const std::vector<Type*>& a, std::vector<Type*>& pt, Type*& rt, CFun& cf) {
+    if (a.size() != 2) return false;
+    auto* pa = dynamic_cast<PersistentVectorType*>(a[0]);
+    auto* pb = dynamic_cast<PersistentVectorType*>(a[1]);
+    if (!pa || !pb) return false;
+    Vec<Type*> fields((rt::STLAllocator<Type*>(nullptr)));
+    fields.push_back(pa->elemType_); fields.push_back(pb->elemType_);
+    auto* tt = c.tupleType(fields);
+    pt = {pa, pb}; rt = c.persistentVectorType(tt); cf = builtin_zip_pvec; return true;
+}
+static bool resolve_enumerate_pvec(Compiler& c, const std::vector<Type*>& a, std::vector<Type*>& pt, Type*& rt, CFun& cf) {
+    if (a.size() != 1) return false;
+    auto* pv = dynamic_cast<PersistentVectorType*>(a[0]); if (!pv) return false;
+    Vec<Type*> fields((rt::STLAllocator<Type*>(nullptr)));
+    fields.push_back(c.intType()); fields.push_back(pv->elemType_);
+    auto* tt = c.tupleType(fields);
+    pt = {pv}; rt = c.persistentVectorType(tt); cf = builtin_enumerate_pvec; return true;
+}
+static bool resolve_sort_pvec(Compiler& c, const std::vector<Type*>& a, std::vector<Type*>& pt, Type*& rt, CFun& cf) {
+    if (a.size() == 1) {
+        auto* pv = dynamic_cast<PersistentVectorType*>(a[0]); if (!pv) return false;
+        Type* et = pv->elemType_;
+        if (et != c.intType() && et != c.floatType() && et != c.stringType()) return false;
+        pt = {pv}; rt = pv; cf = builtin_sort_pvec; return true;
+    }
+    if (a.size() == 2) {
+        auto* pv = dynamic_cast<PersistentVectorType*>(a[0]); if (!pv) return false;
+        auto* ft = dynamic_cast<FunctionType*>(a[1]); Type* et = pv->elemType_;
+        if (!ft || ft->argTypes_.size() != 2 || ft->argTypes_[0] != et || ft->argTypes_[1] != et || ft->returnType_ != c.boolType()) return false;
+        pt = {pv, a[1]}; rt = pv; cf = builtin_sort_by_pvec; return true;
+    }
+    return false;
+}
+static bool resolve_grade_pvec(Compiler& c, const std::vector<Type*>& a, std::vector<Type*>& pt, Type*& rt, CFun& cf) {
+    if (a.size() != 2) return false;
+    auto* pv = dynamic_cast<PersistentVectorType*>(a[0]); if (!pv) return false;
+    auto* ft = dynamic_cast<FunctionType*>(a[1]); Type* et = pv->elemType_;
+    if (!ft || ft->argTypes_.size() != 2 || ft->argTypes_[0] != et || ft->argTypes_[1] != et || ft->returnType_ != c.boolType()) return false;
+    pt = {pv, a[1]}; rt = c.arrayType(c.intType()); cf = builtin_grade_pvec; return true;
+}
+
+// ============================================================================
 // Registration
 // ============================================================================
 
@@ -3080,6 +3531,26 @@ void registerBuiltinFunctions(Compiler& compiler,
     registerTemplate(compiler, functions, "toArray",            resolve_pvec_to_array, /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
     registerTemplate(compiler, functions, "toPersistentMap",    resolve_to_pmap,      /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
     registerTemplate(compiler, functions, "toMap",              resolve_pmap_to_map,  /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+
+    // --- persistent vector higher-order / sequence builtins (extra overloads) ---
+    registerTemplate(compiler, functions, "reverse",   resolve_reverse_pvec,   /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "take",      resolve_take_pvec,      /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "drop",      resolve_drop_pvec,      /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "stride",    resolve_stride_pvec,    /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "stutter",   resolve_stutter_pvec,   /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "cat",       resolve_cat_pvec,       /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "join",      resolve_join_pvec,      /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "flatten",   resolve_flatten_pvec,   /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "scan",      resolve_scan_pvec,      /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "scan1",     resolve_scan1_pvec,     /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "fold1",     resolve_fold1_pvec,     /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "find",      resolve_find_pvec,      /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "takeWhile", resolve_takeWhile_pvec, /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "dropWhile", resolve_dropWhile_pvec, /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "zip",       resolve_zip_pvec,       /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "enumerate", resolve_enumerate_pvec, /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "sort",      resolve_sort_pvec,      /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "grade",     resolve_grade_pvec,     /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
 
     // --- hash builtin ---
     // Phase 4g.6: hash resolves builtin_hash_inline for Inline-classified

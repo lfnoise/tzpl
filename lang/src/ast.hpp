@@ -213,6 +213,7 @@ struct AutoMapArg {
     int depth = 0;          // 0=not mapped, 1=@, 2=@@, 3=@@@, etc.
     int cartesianIndex = 0; // 0=zip, 1+=cartesian (@1, @2, ...)
     bool isList = false;    // true when auto-mapping over a List (result is lazy List, not Array)
+    bool isPVec = false;    // true when auto-mapping over a persistent vector (result is #[...])
 
     // Convenience: true if any auto-mapping is active
     explicit operator bool() const { return depth > 0; }

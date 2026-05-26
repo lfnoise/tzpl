@@ -3339,12 +3339,22 @@ u16 CodeGen::genBinaryOp(BinaryOpExpr* expr) {
         bool hasCartesian = (expr->leftAutoMap.cartesianIndex > 0) ||
                             (expr->rightAutoMap.cartesianIndex > 0);
         int maxDepth = std::max(expr->leftAutoMap.depth, expr->rightAutoMap.depth);
+        bool anyPVec = expr->leftAutoMap.isPVec || expr->rightAutoMap.isPVec;
+        if (anyPVec && !hasCartesian && maxDepth <= 1) return genBinaryOpMapPVec(expr);
         if (hasCartesian)          return genCartesianBinaryOp(expr);
         else if (maxDepth > 1)     return genDeepMapBinaryOp(expr, maxDepth);
         else {
             bool anyList = expr->leftAutoMap.isList || expr->rightAutoMap.isList;
             return anyList ? genAutoMapBinaryOpList(expr) : genAutoMapBinaryOp(expr);
         }
+    }
+
+    // Elementwise arithmetic producing a persistent vector (no @ flags: the
+    // type checker resolved this via commonNumericType). Concat ($) is a
+    // separate, true concatenation handled by op_concat_pvec below.
+    if (expr->resolvedFuncGlobalIndex < 0 && expr->op != BinaryOpExpr::Concat
+        && dynamic_cast<PersistentVectorType*>(expr->resolvedType)) {
+        return genBinaryOpMapPVec(expr);
     }
 
     // Check for operator overload (resolved by type checker)
@@ -4811,6 +4821,71 @@ u16 CodeGen::genAutoMapBinaryOp(BinaryOpExpr* expr) {
                                 rightElemReg, rightElemType,
                                 resultArrayType->elemType_);
     });
+}
+
+u16 CodeGen::genBinaryOpMapPVec(BinaryOpExpr* expr) {
+    // Elementwise op over persistent vector operand(s), producing #[...].
+    // Each operand is either a persistent vector (read via op_pvec_get) or a
+    // scalar (broadcast). The result is built into a temporary mutable array
+    // via the shared array build-loop, then frozen with op_pvec_from_array.
+    u16 leftReg = genExpr(static_cast<Expr*>(expr->left.get()));
+    u16 rightReg = genExpr(static_cast<Expr*>(expr->right.get()));
+
+    Type* leftType = expr->left->resolvedType;
+    Type* rightType = expr->right->resolvedType;
+    auto* leftPV = dynamic_cast<PersistentVectorType*>(leftType);
+    auto* rightPV = dynamic_cast<PersistentVectorType*>(rightType);
+    Type* leftElem = leftPV ? leftPV->elemType_ : leftType;
+    Type* rightElem = rightPV ? rightPV->elemType_ : rightType;
+
+    auto* resultPVType = dynamic_cast<PersistentVectorType*>(expr->resolvedType);
+    Type* resElem = resultPVType->elemType_;
+
+    // Length = min over the mapped (persistent vector) operands.
+    u16 lenReg = 0;
+    bool first = true;
+    auto takeLen = [&](u16 pvReg) {
+        u16 lr = allocReg();
+        emitOp(op_pvec_len);
+        emitRegs(lr, pvReg);
+        if (first) { lenReg = lr; first = false; }
+        else {
+            u16 cmpReg = allocReg();
+            emitOp(op_cmp_lt_int);
+            emitRegs(cmpReg, lr, lenReg);
+            u32 skip = emitJump(op_jump_if_false, cmpReg);
+            emitMov(lenReg, lr);
+            patchJump(skip);
+        }
+    };
+    if (leftPV) takeLen(leftReg);
+    if (rightPV) takeLen(rightReg);
+
+    // Build into a mutable array of resElem, then freeze to a persistent vector.
+    auto* tmpArrType = compiler_.arrayType(resElem);
+    u16 arrReg = emitArrayBuildLoop(lenReg, tmpArrType, [&](u16 iReg) -> u16 {
+        u16 leftElemReg = leftReg;
+        if (leftPV) {
+            leftElemReg = allocSlot(leftElem);
+            emitOp(op_pvec_get);
+            emitRegs(leftElemReg, leftReg, iReg);
+            emitPtr(leftPV);
+        }
+        u16 rightElemReg = rightReg;
+        if (rightPV) {
+            rightElemReg = allocSlot(rightElem);
+            emitOp(op_pvec_get);
+            emitRegs(rightElemReg, rightReg, iReg);
+            emitPtr(rightPV);
+        }
+        return emitBinaryOpElem(expr, leftElemReg, leftElem, rightElemReg, rightElem, resElem);
+    });
+
+    u16 dst = allocReg();
+    emitOp(op_pvec_from_array);
+    emitRegs(dst, arrReg);
+    emitPtr(resultPVType);
+    return dst;
 }
 
 u16 CodeGen::genAutoMapBinaryOpList(BinaryOpExpr* expr) {

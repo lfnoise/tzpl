@@ -4422,6 +4422,57 @@ void op_concat_pvec(VM& vm, Code* pc) {
     DISPATCH(3);
 }
 
+// PVEC_FROM_ARRAY Rd, Ra(array) (3 words: op, regs, PersistentVectorType*)
+// Builds a persistent vector from a mutable array. Used by auto-mapped
+// arithmetic/comparison over persistent vectors, which build the result into a
+// temporary array (reusing the array build-loop) and then freeze it here.
+void op_pvec_from_array(VM& vm, Code* pc) {
+    u16 dst = pc[1].regs[0], arrReg = pc[1].regs[1];
+    auto* pvType = static_cast<PersistentVectorType*>(pc[2].p);
+    Type* et = pvType->elemType_;
+    Obj* arr = vm.reg(arrReg).o;
+    u32 stride = strideForType(et);
+    // Scope `buf` so its destructor runs before the musttail DISPATCH below.
+    {
+        Vec<Word> buf((rt::STLAllocator<Word>(rt::gCurrentAllocator)));
+        u32 n = 0;
+        switch (arrayBackendFor(et)) {
+            case ArrayBackend::Int: {
+                auto* a = static_cast<PodArray<i64>*>(arr); n = (u32)a->v.size();
+                for (u32 i = 0; i < n; ++i) { Word w; w.i = a->v[i]; buf.push_back(w); }
+                break;
+            }
+            case ArrayBackend::Float: {
+                auto* a = static_cast<PodArray<f64>*>(arr); n = (u32)a->v.size();
+                for (u32 i = 0; i < n; ++i) { Word w; w.f = a->v[i]; buf.push_back(w); }
+                break;
+            }
+            case ArrayBackend::Complex: {
+                auto* a = static_cast<PodArray<x64>*>(arr); n = (u32)a->v.size();
+                for (u32 i = 0; i < n; ++i) { Word re; re.f = a->v[i].real(); Word im; im.f = a->v[i].imag(); buf.push_back(re); buf.push_back(im); }
+                break;
+            }
+            case ArrayBackend::Fraction: {
+                auto* a = static_cast<PodArray<r64>*>(arr); n = (u32)a->v.size();
+                for (u32 i = 0; i < n; ++i) { Word nu; nu.i = a->v[i].numer(); Word de; de.i = a->v[i].denom(); buf.push_back(nu); buf.push_back(de); }
+                break;
+            }
+            case ArrayBackend::Inline: {
+                auto* a = static_cast<InlineArray*>(arr); n = (u32)a->size();
+                for (u32 i = 0; i < n; ++i) { Word const* s = a->slot(i); for (u32 w = 0; w < stride; ++w) buf.push_back(s[w]); }
+                break;
+            }
+            case ArrayBackend::Obj: {
+                auto* a = static_cast<ObjArray*>(arr); n = (u32)a->size();
+                for (u32 i = 0; i < n; ++i) { Word w; w.o = a->get(i); buf.push_back(w); }
+                break;
+            }
+        }
+        vm.reg(dst).o = PVec::fromWords(pvType, n ? &buf[0] : nullptr, n);
+    }
+    DISPATCH(3);
+}
+
 // --- Persistent map ---
 
 // MAKE_PMAP Rd, firstKeyReg, numPairs (3 words: op, regs, PersistentMapType*)

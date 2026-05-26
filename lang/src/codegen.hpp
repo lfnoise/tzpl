@@ -189,6 +189,9 @@ private:
                            std::vector<MappedCallArg> const& args);
     u16 genAutoMapBinaryOp(BinaryOpExpr* expr);
     u16 genAutoMapBinaryOpList(BinaryOpExpr* expr);
+    // Elementwise binary op producing a persistent vector (#[...]). Operands
+    // may each be a persistent vector (mapped) or a scalar (broadcast).
+    u16 genBinaryOpMapPVec(BinaryOpExpr* expr);
     u16 genCartesianBinaryOp(BinaryOpExpr* expr);
     u16 genDeepMapBinaryOp(BinaryOpExpr* expr, int depth);
     // Emit the per-element computation of an auto-mapped binary op given the two

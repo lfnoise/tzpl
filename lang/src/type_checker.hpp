@@ -531,7 +531,7 @@ private:
     AutoMapArg extractAutoMapAnnotation(Expr* expr) const;
     Type* unwrapAutoMapLayers(Type* type, int depth, bool& isList, SourceRange loc);
     Type* wrapAutoMapResult(Type* scalarResult, const AutoMapArg& leftAM,
-                            const AutoMapArg& rightAM, bool anyList);
+                            const AutoMapArg& rightAM, bool anyList, bool anyPVec = false);
 
     void error(SourceRange loc, const std::string& msg);
 

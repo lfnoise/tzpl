@@ -353,6 +353,7 @@ static const std::unordered_map<Operation, OpInfo>& opInfoMap() {
         { op_pvec_get,          { "PVEC_GET",          3, OpFmt::Regs_Ptr, 3 } },
         { op_pvec_len,          { "PVEC_LEN",          2, OpFmt::Regs,     2 } },
         { op_concat_pvec,       { "CONCAT_PVEC",       3, OpFmt::Regs_Ptr, 3 } },
+        { op_pvec_from_array,   { "PVEC_FROM_ARRAY",   3, OpFmt::Regs_Ptr, 3 } },
         { op_make_pmap,         { "MAKE_PMAP",         3, OpFmt::Regs_Ptr, 3 } },
         { op_pmap_get_option,   { "PMAP_GET_OPTION",   3, OpFmt::Regs_Ptr, 3 } },
         { op_pmap_len,          { "PMAP_LEN",          2, OpFmt::Regs,     2 } },

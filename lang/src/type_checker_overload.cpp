@@ -39,6 +39,8 @@ bool TypeChecker::isNumeric(Type* t) const {
         return isNumeric(at->elemType_);
     if (auto* lt = dynamic_cast<ListType*>(t))
         return isNumeric(lt->elemType_);
+    if (auto* pv = dynamic_cast<PersistentVectorType*>(t))
+        return isNumeric(pv->elemType_);
     if (auto* tt = dynamic_cast<TupleType*>(t)) {
         for (Type* f : tt->fields_)
             if (!isNumeric(f)) return false;
@@ -111,6 +113,7 @@ int TypeChecker::numericRank(Type* t) const {
     if (t == compiler_.floatType()) return 3;
     if (t == compiler_.complexType()) return 4;
     if (dynamic_cast<ArrayType*>(t)) return 5;
+    if (dynamic_cast<PersistentVectorType*>(t)) return 5;
     if (dynamic_cast<TupleType*>(t)) return 6;
     if (dynamic_cast<ListType*>(t)) return 7;
     return -1;
@@ -149,6 +152,16 @@ Type* TypeChecker::commonNumericType(Type* a, Type* b, bool isDiv) const {
     // anything + List → map over list, broadcast other
     if (listB)
         return compiler_.listType(commonNumericType(a, listB->elemType_, isDiv));
+
+    // Persistent vector broadcasts elementwise like Array, producing #[...].
+    auto* pvA = dynamic_cast<PersistentVectorType*>(a);
+    auto* pvB = dynamic_cast<PersistentVectorType*>(b);
+    if (pvA && pvB)
+        return compiler_.persistentVectorType(commonNumericType(pvA->elemType_, pvB->elemType_, isDiv));
+    if (pvA && !dynamic_cast<ArrayType*>(b) && !dynamic_cast<TupleType*>(b))
+        return compiler_.persistentVectorType(commonNumericType(pvA->elemType_, b, isDiv));
+    if (pvB && !dynamic_cast<ArrayType*>(a) && !dynamic_cast<TupleType*>(a))
+        return compiler_.persistentVectorType(commonNumericType(a, pvB->elemType_, isDiv));
 
     auto* arrA = dynamic_cast<ArrayType*>(a);
     auto* arrB = dynamic_cast<ArrayType*>(b);
@@ -286,21 +299,21 @@ Type* TypeChecker::unwrapAutoMapLayers(Type* type, int depth, bool& isList, Sour
 }
 
 Type* TypeChecker::wrapAutoMapResult(Type* scalarResult, const AutoMapArg& leftAM,
-                                     const AutoMapArg& rightAM, bool anyList) {
+                                     const AutoMapArg& rightAM, bool anyList, bool anyPVec) {
+    // Container precedence when operands mix kinds: List > PVec > Array.
+    auto wrap = [&](Type* t) -> Type* {
+        if (anyList) return compiler_.listType(t);
+        if (anyPVec) return compiler_.persistentVectorType(t);
+        return compiler_.arrayType(t);
+    };
     Type* retType = scalarResult;
     bool hasCartesian = (leftAM.cartesianIndex > 0) || (rightAM.cartesianIndex > 0);
     if (hasCartesian) {
         int maxIdx = std::max(leftAM.cartesianIndex, rightAM.cartesianIndex);
-        for (int level = maxIdx; level >= 1; --level) {
-            retType = anyList ? static_cast<Type*>(compiler_.listType(retType))
-                              : static_cast<Type*>(compiler_.arrayType(retType));
-        }
+        for (int level = maxIdx; level >= 1; --level) retType = wrap(retType);
     } else {
         int maxDepth = std::max(leftAM.depth, rightAM.depth);
-        for (int level = 0; level < maxDepth; ++level) {
-            retType = anyList ? static_cast<Type*>(compiler_.listType(retType))
-                              : static_cast<Type*>(compiler_.arrayType(retType));
-        }
+        for (int level = 0; level < maxDepth; ++level) retType = wrap(retType);
     }
     return retType;
 }

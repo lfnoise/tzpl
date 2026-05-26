@@ -906,20 +906,24 @@ Type* TypeChecker::inferBinaryOp(BinaryOpExpr* expr) {
                 return compiler_.boolType();
             }
             if (isNumeric(leftType) && isNumeric(rightType)) {
-                // Check for implicit auto-mapping with Array/List
+                // Check for implicit auto-mapping with Array/List/PVec
                 auto* leftArr = dynamic_cast<ArrayType*>(leftType);
                 auto* leftList = dynamic_cast<ListType*>(leftType);
+                auto* leftPV = dynamic_cast<PersistentVectorType*>(leftType);
                 auto* rightArr = dynamic_cast<ArrayType*>(rightType);
                 auto* rightList = dynamic_cast<ListType*>(rightType);
-                // Auto-map when at least one is Array/List and types differ
-                // (same-type arrays use structural equality via op_cmp_eq_obj)
-                if ((leftArr || leftList || rightArr || rightList) && leftType != rightType) {
-                    bool anyList = false;
+                auto* rightPV = dynamic_cast<PersistentVectorType*>(rightType);
+                // Auto-map when at least one is Array/List/PVec and types differ
+                // (same-type collections use structural equality via op_cmp_eq_obj)
+                if ((leftArr || leftList || leftPV || rightArr || rightList || rightPV) && leftType != rightType) {
+                    bool anyList = false, anyPVec = false;
                     if (leftArr) expr->leftAutoMap = AutoMapArg{1, 0, false};
                     else if (leftList) { expr->leftAutoMap = AutoMapArg{1, 0, true}; anyList = true; }
+                    else if (leftPV) { expr->leftAutoMap = AutoMapArg{1, 0, false, true}; anyPVec = true; }
                     if (rightArr) expr->rightAutoMap = AutoMapArg{1, 0, false};
                     else if (rightList) { expr->rightAutoMap = AutoMapArg{1, 0, true}; anyList = true; }
-                    return wrapAutoMapResult(compiler_.boolType(), expr->leftAutoMap, expr->rightAutoMap, anyList);
+                    else if (rightPV) { expr->rightAutoMap = AutoMapArg{1, 0, false, true}; anyPVec = true; }
+                    return wrapAutoMapResult(compiler_.boolType(), expr->leftAutoMap, expr->rightAutoMap, anyList, anyPVec);
                 }
                 // Composite comparison for tuples (element-wise, different types)
                 auto* leftTup = dynamic_cast<TupleType*>(leftType);
@@ -949,18 +953,22 @@ Type* TypeChecker::inferBinaryOp(BinaryOpExpr* expr) {
                     error(expr->loc, "Complex numbers are not ordered");
                     return compiler_.boolType();
                 }
-                // Check for implicit auto-mapping with Array/List
+                // Check for implicit auto-mapping with Array/List/PVec
                 auto* leftArr = dynamic_cast<ArrayType*>(leftType);
                 auto* leftList = dynamic_cast<ListType*>(leftType);
+                auto* leftPV = dynamic_cast<PersistentVectorType*>(leftType);
                 auto* rightArr = dynamic_cast<ArrayType*>(rightType);
                 auto* rightList = dynamic_cast<ListType*>(rightType);
-                if (leftArr || leftList || rightArr || rightList) {
-                    bool anyList = false;
+                auto* rightPV = dynamic_cast<PersistentVectorType*>(rightType);
+                if (leftArr || leftList || leftPV || rightArr || rightList || rightPV) {
+                    bool anyList = false, anyPVec = false;
                     if (leftArr) expr->leftAutoMap = AutoMapArg{1, 0, false};
                     else if (leftList) { expr->leftAutoMap = AutoMapArg{1, 0, true}; anyList = true; }
+                    else if (leftPV) { expr->leftAutoMap = AutoMapArg{1, 0, false, true}; anyPVec = true; }
                     if (rightArr) expr->rightAutoMap = AutoMapArg{1, 0, false};
                     else if (rightList) { expr->rightAutoMap = AutoMapArg{1, 0, true}; anyList = true; }
-                    return wrapAutoMapResult(compiler_.boolType(), expr->leftAutoMap, expr->rightAutoMap, anyList);
+                    else if (rightPV) { expr->rightAutoMap = AutoMapArg{1, 0, false, true}; anyPVec = true; }
+                    return wrapAutoMapResult(compiler_.boolType(), expr->leftAutoMap, expr->rightAutoMap, anyList, anyPVec);
                 }
                 // Composite comparison for tuples (element-wise)
                 auto* leftTup = dynamic_cast<TupleType*>(leftType);
@@ -1081,17 +1089,21 @@ Type* TypeChecker::inferBinaryOp(BinaryOpExpr* expr) {
     {
         auto* leftArr  = dynamic_cast<ArrayType*>(leftType);
         auto* leftList = dynamic_cast<ListType*>(leftType);
+        auto* leftPV   = dynamic_cast<PersistentVectorType*>(leftType);
         auto* rightArr  = dynamic_cast<ArrayType*>(rightType);
         auto* rightList = dynamic_cast<ListType*>(rightType);
-        if (leftArr || leftList || rightArr || rightList) {
-            bool anyList = false;
+        auto* rightPV   = dynamic_cast<PersistentVectorType*>(rightType);
+        if (leftArr || leftList || leftPV || rightArr || rightList || rightPV) {
+            bool anyList = false, anyPVec = false;
             Type* unwrappedLeft = leftType;
             Type* unwrappedRight = rightType;
             AutoMapArg leftAM{}, rightAM{};
             if (leftArr) { unwrappedLeft = leftArr->elemType_; leftAM = {1, 0, false}; }
             else if (leftList) { unwrappedLeft = leftList->elemType_; leftAM = {1, 0, true}; anyList = true; }
+            else if (leftPV) { unwrappedLeft = leftPV->elemType_; leftAM = {1, 0, false, true}; anyPVec = true; }
             if (rightArr) { unwrappedRight = rightArr->elemType_; rightAM = {1, 0, false}; }
             else if (rightList) { unwrappedRight = rightList->elemType_; rightAM = {1, 0, true}; anyList = true; }
+            else if (rightPV) { unwrappedRight = rightPV->elemType_; rightAM = {1, 0, false, true}; anyPVec = true; }
 
             const char* opN = opToFuncName(expr->op);
             if (opN) {
@@ -1119,7 +1131,7 @@ Type* TypeChecker::inferBinaryOp(BinaryOpExpr* expr) {
                     Type* scalarResult;
                     bool isDiv = (expr->op == BinaryOpExpr::Div);
                     scalarResult = commonNumericType(unwrappedLeft, unwrappedRight, isDiv);
-                    return wrapAutoMapResult(scalarResult, leftAM, rightAM, anyList);
+                    return wrapAutoMapResult(scalarResult, leftAM, rightAM, anyList, anyPVec);
                 }
 
                 if (func) {
@@ -1132,7 +1144,7 @@ Type* TypeChecker::inferBinaryOp(BinaryOpExpr* expr) {
                     expr->leftAutoMap = leftAM;
                     expr->rightAutoMap = rightAM;
                     Type* scalarResult = func->returnType ? func->returnType : compiler_.intType();
-                    return wrapAutoMapResult(scalarResult, leftAM, rightAM, anyList);
+                    return wrapAutoMapResult(scalarResult, leftAM, rightAM, anyList, anyPVec);
                 }
             }
         }
