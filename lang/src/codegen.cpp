@@ -5646,24 +5646,46 @@ u16 CodeGen::genAutoMapCall(CallExpr_* expr) {
         argRegs.push_back(genExpr(static_cast<Expr*>(arg.get())));
     }
 
+    // The element loop reads mapped args via the array opcodes. A mapped arg
+    // that is a persistent vector is materialized to a temporary array once,
+    // here, and the loop reads that array; if the call's result is itself a
+    // persistent vector, it is built into a temporary array and frozen at the
+    // end. mappedArrType[i] is the array type the loop should use for arg i.
+    std::vector<ArrayType*> mappedArrType(argc, nullptr);
+    for (u16 i = 0; i < argc; ++i) {
+        if (!expr->autoMapArgs[i]) continue;
+        Type* at = expr->args[i]->resolvedType;
+        if (auto* arrT = dynamic_cast<ArrayType*>(at)) {
+            mappedArrType[i] = arrT;
+        } else if (auto* pvT = dynamic_cast<PersistentVectorType*>(at)) {
+            auto* tmpArrT = compiler_.arrayType(pvT->elemType_);
+            u16 conv = allocReg();
+            emitOp(op_pvec_to_array);
+            emitRegs(conv, argRegs[i]);
+            emitPtr(tmpArrT);
+            argRegs[i] = conv;
+            mappedArrType[i] = tmpArrT;
+        }
+    }
+
     // --- Phase 2: Compute min length of auto-mapped arrays ---
-    // For explicit @, the arg may be an AutoMapExpr wrapping the real
-    // expression; the actual array is already generated in argRegs[i].
     std::vector<std::pair<u16, ArrayType*>> mappedArrays;
     for (size_t i = 0; i < argc; ++i) {
         if (!expr->autoMapArgs[i]) continue;
-        mappedArrays.push_back({argRegs[i],
-                                dynamic_cast<ArrayType*>(expr->args[i]->resolvedType)});
+        mappedArrays.push_back({argRegs[i], mappedArrType[i]});
     }
     u16 minLenReg = emitMinArrayLength(mappedArrays);
 
     // Check if the function returns Void (side-effects only, no result collection)
     bool isVoidReturn = (funcInfo->returnType == compiler_.voidType());
+    auto* resultPVType = isVoidReturn ? nullptr
+                                      : dynamic_cast<PersistentVectorType*>(expr->resolvedType);
 
     // --- Emit the call once per source index, building the result array (or
     // just iterating, for Void). The body opens the callee's register window at
     // nextReg_ -- past all loop bookkeeping -- and returns the call result. ---
-    auto* resultArrayType = isVoidReturn ? nullptr : dynamic_cast<ArrayType*>(expr->resolvedType);
+    auto* resultArrayType = (isVoidReturn || resultPVType)
+        ? nullptr : dynamic_cast<ArrayType*>(expr->resolvedType);
 
     // funcInfo->returnType may be null for some untyped-variadic
     // monomorphizations; fall back to the result element type.
@@ -5674,8 +5696,7 @@ u16 CodeGen::genAutoMapCall(CallExpr_* expr) {
         std::vector<MappedCallArg> args(argc);
         for (u16 i = 0; i < argc; ++i) {
             if (expr->autoMapArgs[i]) {
-                args[i] = { true, argRegs[i], iReg,
-                            dynamic_cast<ArrayType*>(expr->args[i]->resolvedType) };
+                args[i] = { true, argRegs[i], iReg, mappedArrType[i] };
             } else {
                 args[i] = { false, argRegs[i], 0, nullptr };
             }
@@ -5687,6 +5708,16 @@ u16 CodeGen::genAutoMapCall(CallExpr_* expr) {
         u16 lastResult = 0;
         emitCountedLoop(minLenReg, [&](u16 iReg) { lastResult = emitCallElem(iReg); });
         return lastResult;
+    }
+    if (resultPVType) {
+        // Build into a temporary array of the scalar return type, then freeze.
+        auto* tmpArrT = compiler_.arrayType(returnT);
+        u16 arrReg = emitArrayBuildLoop(minLenReg, tmpArrT, emitCallElem);
+        u16 dst = allocReg();
+        emitOp(op_pvec_from_array);
+        emitRegs(dst, arrReg);
+        emitPtr(resultPVType);
+        return dst;
     }
     return emitArrayBuildLoop(minLenReg, resultArrayType, emitCallElem);
 }
@@ -5708,6 +5739,15 @@ u16 CodeGen::genAutoMapLambdaCall(CallExpr_* expr, u16 calleeReg, FunctionType* 
     }
     if (anyListArg) {
         return genAutoMapLambdaCallList(expr, calleeReg, funcType);
+    }
+
+    // Persistent-vector result (always depth 1 -- the type checker restricts
+    // PVec call auto-map to one level). Handled by a focused helper that maps
+    // through temporary arrays; the deep-loop machinery below is array/list only.
+    if (!isVoidReturn) {
+        if (auto* resPV = dynamic_cast<PersistentVectorType*>(expr->resolvedType)) {
+            return genAutoMapLambdaCallPVec(expr, calleeReg, funcType, resPV);
+        }
     }
 
     // Determine the max auto-map depth
@@ -5916,6 +5956,78 @@ u16 CodeGen::genAutoMapLambdaCall(CallExpr_* expr, u16 calleeReg, FunctionType* 
     }
 
     return prevResultReg;
+}
+
+u16 CodeGen::genAutoMapLambdaCallPVec(CallExpr_* expr, u16 calleeReg, FunctionType* funcType,
+                                      PersistentVectorType* resultPVType) {
+    u16 argc = (u16)expr->args.size();
+
+    // Evaluate args, then materialize each mapped persistent-vector arg into a
+    // temporary array so the element loop can index it.
+    std::vector<u16> argRegs;
+    for (auto& arg : expr->args) argRegs.push_back(genExpr(static_cast<Expr*>(arg.get())));
+
+    std::vector<ArrayType*> mappedArrType(argc, nullptr);
+    for (u16 i = 0; i < argc; ++i) {
+        if (!expr->autoMapArgs[i]) continue;
+        Type* at = expr->args[i]->resolvedType;
+        if (auto* arrT = dynamic_cast<ArrayType*>(at)) {
+            mappedArrType[i] = arrT;
+        } else if (auto* pvT = dynamic_cast<PersistentVectorType*>(at)) {
+            auto* tmpArrT = compiler_.arrayType(pvT->elemType_);
+            u16 conv = allocReg();
+            emitOp(op_pvec_to_array);
+            emitRegs(conv, argRegs[i]);
+            emitPtr(tmpArrT);
+            argRegs[i] = conv;
+            mappedArrType[i] = tmpArrT;
+        }
+    }
+
+    std::vector<std::pair<u16, ArrayType*>> mappedArrays;
+    for (u16 i = 0; i < argc; ++i) {
+        if (expr->autoMapArgs[i]) mappedArrays.push_back({argRegs[i], mappedArrType[i]});
+    }
+    u16 minLenReg = emitMinArrayLength(mappedArrays);
+
+    Type* returnT = funcType->returnType_;
+    auto* tmpArrT = compiler_.arrayType(returnT);
+
+    u16 arrReg = emitArrayBuildLoop(minLenReg, tmpArrT, [&](u16 iReg) -> u16 {
+        u16 callArgBase = nextReg_;
+        for (u16 i = 0; i < argc; ++i) {
+            u16 targetReg = (u16)(callArgBase + i);
+            if (nextReg_ <= targetReg) { nextReg_ = (u16)(targetReg + 1); if (nextReg_ > maxReg_) maxReg_ = nextReg_; }
+            Type* paramType = (i < funcType->argTypes_.size()) ? funcType->argTypes_[i] : nullptr;
+            if (expr->autoMapArgs[i]) {
+                auto* arrType = mappedArrType[i];
+                emitOp(opArrayGetDynFor(arrType->elemType_));
+                emitRegs(targetReg, argRegs[i], iReg);
+                emitPtr(arrType);
+                if (paramType && arrType->elemType_ != paramType) {
+                    u16 promoted = ensureType(targetReg, arrType->elemType_, paramType);
+                    if (promoted != targetReg) emitMov(targetReg, promoted);
+                }
+            } else {
+                Type* argType = expr->args[i]->resolvedType;
+                u16 srcReg = argRegs[i];
+                if (paramType && argType != paramType) srcReg = ensureType(srcReg, argType, paramType);
+                if (srcReg != targetReg) emitMov(targetReg, srcReg);
+            }
+        }
+        u16 callResultReg = allocReg();
+        clearArgRegTypes(callArgBase, callResultReg);
+        emitOp(op_call_lambda);
+        emitRegs(callResultReg, argc, callArgBase, calleeReg);
+        emitReturnPcStackMap(callResultReg, returnT);
+        return callResultReg;
+    });
+
+    u16 dst = allocReg();
+    emitOp(op_pvec_from_array);
+    emitRegs(dst, arrReg);
+    emitPtr(resultPVType);
+    return dst;
 }
 
 // Phase 4g.21: eager List auto-map for lambda values (locals/captures).

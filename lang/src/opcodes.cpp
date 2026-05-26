@@ -4473,6 +4473,51 @@ void op_pvec_from_array(VM& vm, Code* pc) {
     DISPATCH(3);
 }
 
+// PVEC_TO_ARRAY Rd, Ra(pvec) (3 words: op, regs, ArrayType*)
+// Materializes a persistent vector into a fresh mutable array. Used by
+// auto-mapped function calls over persistent vectors, which convert mapped
+// args to arrays, run the array call loop, and freeze the result back.
+void op_pvec_to_array(VM& vm, Code* pc) {
+    u16 dst = pc[1].regs[0], pvReg = pc[1].regs[1];
+    auto* arrType = static_cast<ArrayType*>(pc[2].p);
+    Type* et = arrType->elemType_;
+    auto* v = static_cast<PVec*>(vm.reg(pvReg).o);
+    u32 n = v->count_;
+    switch (arrayBackendFor(et)) {
+        case ArrayBackend::Int: {
+            auto* arr = new PodArray<i64>(arrType); arr->v.resize(n);
+            for (u32 i = 0; i < n; ++i) arr->v[i] = v->elemAt(i)[0].i;
+            vm.reg(dst).o = arr; break;
+        }
+        case ArrayBackend::Float: {
+            auto* arr = new PodArray<f64>(arrType); arr->v.resize(n);
+            for (u32 i = 0; i < n; ++i) arr->v[i] = v->elemAt(i)[0].f;
+            vm.reg(dst).o = arr; break;
+        }
+        case ArrayBackend::Complex: {
+            auto* arr = new PodArray<x64>(arrType); arr->v.resize(n);
+            for (u32 i = 0; i < n; ++i) { Word const* e = v->elemAt(i); arr->v[i] = x64(e[0].f, e[1].f); }
+            vm.reg(dst).o = arr; break;
+        }
+        case ArrayBackend::Fraction: {
+            auto* arr = new PodArray<r64>(arrType); arr->v.resize(n);
+            for (u32 i = 0; i < n; ++i) { Word const* e = v->elemAt(i); arr->v[i] = r64(e[0].i, e[1].i, true); }
+            vm.reg(dst).o = arr; break;
+        }
+        case ArrayBackend::Inline: {
+            auto* arr = new InlineArray(arrType); arr->reserve(n);
+            for (u32 i = 0; i < n; ++i) arr->pushSlot(v->elemAt(i));
+            vm.reg(dst).o = arr; break;
+        }
+        case ArrayBackend::Obj: {
+            auto* arr = new ObjArray(arrType);
+            for (u32 i = 0; i < n; ++i) arr->push(v->elemAt(i)[0].o);
+            vm.reg(dst).o = arr; break;
+        }
+    }
+    DISPATCH(3);
+}
+
 // --- Persistent map ---
 
 // MAKE_PMAP Rd, firstKeyReg, numPairs (3 words: op, regs, PersistentMapType*)

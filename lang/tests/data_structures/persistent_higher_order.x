@@ -54,3 +54,12 @@ let u = #[1, 2, 3];
 (u < #[2, 2, 2]) println;        -- elementwise compare -> #[Bool]
 (u == #[1, 2, 3]) println;       -- whole-vector structural equality -> Bool
 ((u + 1) * (u - 1)) println;     -- composition
+
+-- --- function-call auto-mapping ---
+let dbl = fn(x Int) Int { x * 2 };
+u dbl println;                   -- postfix call, #[2, 4, 6]
+dbl(u) println;                  -- prefix call, #[2, 4, 6]
+let addk = fn(x Int, k Int) Int { x + k };
+u addk(100) println;             -- extra scalar arg, #[101, 102, 103]
+#[-1, -2, 3] abs println;        -- builtin auto-map
+#[1.5, 2.5, 3.5] floor println;  -- builtin auto-map, #[1.0, 2.0, 3.0]

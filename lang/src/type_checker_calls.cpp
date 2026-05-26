@@ -123,8 +123,8 @@ Type* TypeChecker::finalizeResolvedCall(CallExpr_* expr, FuncInfo* func,
 FuncInfo* TypeChecker::tryImplicitAutoMap(const std::string& name,
                                            const std::vector<Type*>& argTypes,
                                            CallExpr_* expr,
-                                           bool& isAutoMapped, bool& hasListArg) {
-    // Find the maximum array/list nesting depth across all arguments
+                                           bool& isAutoMapped, bool& hasListArg, bool& hasPVecArg) {
+    // Find the maximum array/list/pvec nesting depth across all arguments
     int maxNesting = 0;
     for (size_t i = 0; i < argTypes.size(); ++i) {
         int d = 0;
@@ -134,6 +134,8 @@ FuncInfo* TypeChecker::tryImplicitAutoMap(const std::string& name,
                 d++; t = arrT->elemType_;
             } else if (auto* listT = dynamic_cast<ListType*>(t)) {
                 d++; t = listT->elemType_;
+            } else if (auto* pvT = dynamic_cast<PersistentVectorType*>(t)) {
+                d++; t = pvT->elemType_;
             } else break;
         }
         if (d > maxNesting) maxNesting = d;
@@ -144,32 +146,41 @@ FuncInfo* TypeChecker::tryImplicitAutoMap(const std::string& name,
     // Try unwrapping all array/list args at depth 1, 2, 3, ... until a match is found
     for (int depth = 1; depth <= maxNesting && !func; ++depth) {
         bool anyUnwrapped = false;
-        bool anyList = false;
+        bool anyList = false, anyPVec = false;
         std::vector<Type*> unwrappedTypes;
         std::vector<AutoMapArg> autoMap(argTypes.size());
 
         for (size_t i = 0; i < argTypes.size(); ++i) {
             Type* t = argTypes[i];
             bool canUnwrap = true;
-            bool thisList = false;
+            bool thisList = false, thisPVec = false;
             for (int d = 0; d < depth; ++d) {
                 if (auto* arrT = dynamic_cast<ArrayType*>(t)) {
                     t = arrT->elemType_;
                 } else if (auto* listT = dynamic_cast<ListType*>(t)) {
                     t = listT->elemType_;
                     thisList = true;
+                } else if (auto* pvT = dynamic_cast<PersistentVectorType*>(t)) {
+                    // Deep (@@) function-call auto-map over persistent vectors
+                    // is unsupported (the deep-call codegen is array/list only);
+                    // allow only one level. Deeper nesting yields "no overload".
+                    if (depth > 1) { canUnwrap = false; break; }
+                    t = pvT->elemType_;
+                    thisPVec = true;
                 } else {
                     canUnwrap = false;
                     break;
                 }
             }
             bool isComposite = dynamic_cast<ArrayType*>(argTypes[i]) ||
-                               dynamic_cast<ListType*>(argTypes[i]);
+                               dynamic_cast<ListType*>(argTypes[i]) ||
+                               dynamic_cast<PersistentVectorType*>(argTypes[i]);
             if (canUnwrap && isComposite) {
                 unwrappedTypes.push_back(t);
-                autoMap[i] = AutoMapArg{depth, 0, thisList};
+                autoMap[i] = AutoMapArg{depth, 0, thisList, thisPVec};
                 anyUnwrapped = true;
                 if (thisList) anyList = true;
+                if (thisPVec) anyPVec = true;
             } else {
                 unwrappedTypes.push_back(argTypes[i]);
             }
@@ -182,6 +193,7 @@ FuncInfo* TypeChecker::tryImplicitAutoMap(const std::string& name,
             expr->autoMapArgs = std::move(autoMap);
             isAutoMapped = true;
             hasListArg = anyList;
+            hasPVecArg = anyPVec;
         }
     }
 
@@ -189,32 +201,37 @@ FuncInfo* TypeChecker::tryImplicitAutoMap(const std::string& name,
     if (!func) {
         for (int depth = 1; depth <= maxNesting && !func; ++depth) {
             bool anyUnwrapped = false;
-            bool anyList = false;
+            bool anyList = false, anyPVec = false;
             std::vector<Type*> unwrappedTypes;
             std::vector<AutoMapArg> autoMap(argTypes.size());
 
             for (size_t i = 0; i < argTypes.size(); ++i) {
                 Type* t = argTypes[i];
                 bool canUnwrap = true;
-                bool thisList = false;
+                bool thisList = false, thisPVec = false;
                 for (int d = 0; d < depth; ++d) {
                     if (auto* arrT = dynamic_cast<ArrayType*>(t)) {
                         t = arrT->elemType_;
                     } else if (auto* listT = dynamic_cast<ListType*>(t)) {
                         t = listT->elemType_;
                         thisList = true;
+                    } else if (auto* pvT = dynamic_cast<PersistentVectorType*>(t)) {
+                        t = pvT->elemType_;
+                        thisPVec = true;
                     } else {
                         canUnwrap = false;
                         break;
                     }
                 }
                 bool isComposite = dynamic_cast<ArrayType*>(argTypes[i]) ||
-                                   dynamic_cast<ListType*>(argTypes[i]);
+                                   dynamic_cast<ListType*>(argTypes[i]) ||
+                                   dynamic_cast<PersistentVectorType*>(argTypes[i]);
                 if (canUnwrap && isComposite) {
                     unwrappedTypes.push_back(t);
-                    autoMap[i] = AutoMapArg{depth, 0, thisList};
+                    autoMap[i] = AutoMapArg{depth, 0, thisList, thisPVec};
                     anyUnwrapped = true;
                     if (thisList) anyList = true;
+                    if (thisPVec) anyPVec = true;
                 } else {
                     unwrappedTypes.push_back(argTypes[i]);
                 }
@@ -227,6 +244,7 @@ FuncInfo* TypeChecker::tryImplicitAutoMap(const std::string& name,
                 expr->autoMapArgs = std::move(autoMap);
                 isAutoMapped = true;
                 hasListArg = anyList;
+                hasPVecArg = anyPVec;
             }
         }
     }
@@ -919,7 +937,7 @@ Type* TypeChecker::tryInferVariableCall(CallExpr_* expr, IdentifierExpr* ident) 
             return funcType->returnType_;
         }
 
-        // Try implicit auto-mapping: unwrap Array/List args at increasing depths
+        // Try implicit auto-mapping: unwrap Array/List/PVec args at increasing depths
         int maxNesting = 0;
         for (size_t i = 0; i < argTypes.size(); ++i) {
             int d = 0;
@@ -929,6 +947,8 @@ Type* TypeChecker::tryInferVariableCall(CallExpr_* expr, IdentifierExpr* ident) 
                     d++; t = arrT->elemType_;
                 } else if (auto* listT = dynamic_cast<ListType*>(t)) {
                     d++; t = listT->elemType_;
+                } else if (auto* pvT = dynamic_cast<PersistentVectorType*>(t)) {
+                    d++; t = pvT->elemType_;
                 } else break;
             }
             if (d > maxNesting) maxNesting = d;
@@ -936,32 +956,39 @@ Type* TypeChecker::tryInferVariableCall(CallExpr_* expr, IdentifierExpr* ident) 
 
         for (int depth = 1; depth <= maxNesting; ++depth) {
             bool anyUnwrapped = false;
-            bool anyList = false;
+            bool anyList = false, anyPVec = false;
             std::vector<Type*> unwrappedTypes;
             std::vector<AutoMapArg> autoMap(argTypes.size());
 
             for (size_t i = 0; i < argTypes.size(); ++i) {
                 Type* t = argTypes[i];
                 bool canUnwrap = true;
-                bool thisList = false;
+                bool thisList = false, thisPVec = false;
                 for (int d = 0; d < depth; ++d) {
                     if (auto* arrT = dynamic_cast<ArrayType*>(t)) {
                         t = arrT->elemType_;
                     } else if (auto* listT = dynamic_cast<ListType*>(t)) {
                         t = listT->elemType_;
                         thisList = true;
+                    } else if (auto* pvT = dynamic_cast<PersistentVectorType*>(t)) {
+                        // Deep (@@) PVec call auto-map is unsupported; one level only.
+                        if (depth > 1) { canUnwrap = false; break; }
+                        t = pvT->elemType_;
+                        thisPVec = true;
                     } else {
                         canUnwrap = false;
                         break;
                     }
                 }
                 bool isComposite = dynamic_cast<ArrayType*>(argTypes[i]) ||
-                                   dynamic_cast<ListType*>(argTypes[i]);
+                                   dynamic_cast<ListType*>(argTypes[i]) ||
+                                   dynamic_cast<PersistentVectorType*>(argTypes[i]);
                 if (canUnwrap && isComposite) {
                     unwrappedTypes.push_back(t);
-                    autoMap[i] = AutoMapArg{depth, 0, thisList};
+                    autoMap[i] = AutoMapArg{depth, 0, thisList, thisPVec};
                     anyUnwrapped = true;
                     if (thisList) anyList = true;
+                    if (thisPVec) anyPVec = true;
                 } else {
                     unwrappedTypes.push_back(argTypes[i]);
                 }
@@ -987,8 +1014,10 @@ Type* TypeChecker::tryInferVariableCall(CallExpr_* expr, IdentifierExpr* ident) 
                 Type* retType = funcType->returnType_;
                 if (retType != compiler_.voidType()) {
                     for (int d = 0; d < depth; ++d) {
-                        retType = anyList ? static_cast<Type*>(compiler_.listType(retType))
-                                          : static_cast<Type*>(compiler_.arrayType(retType));
+                        // Container precedence: List > PVec > Array.
+                        if (anyList)      retType = compiler_.listType(retType);
+                        else if (anyPVec) retType = compiler_.persistentVectorType(retType);
+                        else              retType = compiler_.arrayType(retType);
                     }
                 }
                 return retType;
@@ -1560,8 +1589,9 @@ Type* TypeChecker::inferCall(CallExpr_* expr) {
     // If no direct match, try implicit auto-mapping at increasing depths.
     bool isAutoMapped = false;
     bool hasListArg = false;
+    bool hasPVecArg = false;
     if (!func) {
-        func = tryImplicitAutoMap(ident->name, argTypes, expr, isAutoMapped, hasListArg);
+        func = tryImplicitAutoMap(ident->name, argTypes, expr, isAutoMapped, hasListArg, hasPVecArg);
 
         // If still no match, use the error-reporting version for diagnostics
         if (!func) {
@@ -1584,7 +1614,10 @@ Type* TypeChecker::inferCall(CallExpr_* expr) {
             if (am.depth > maxDepth) maxDepth = am.depth;
         }
         for (int d = 0; d < maxDepth; ++d) {
-            retType = hasListArg ? static_cast<Type*>(compiler_.listType(retType)) : static_cast<Type*>(compiler_.arrayType(retType));
+            // Container precedence when args mix kinds: List > PVec > Array.
+            if (hasListArg)      retType = compiler_.listType(retType);
+            else if (hasPVecArg) retType = compiler_.persistentVectorType(retType);
+            else                 retType = compiler_.arrayType(retType);
         }
         return retType;
     }

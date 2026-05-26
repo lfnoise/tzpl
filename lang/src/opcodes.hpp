@@ -424,6 +424,7 @@ void op_pvec_get(VM& vm, Code* pc);       // PVEC_GET Rd, Ra(pvec), Rb(idx) (3 w
 void op_pvec_len(VM& vm, Code* pc);       // PVEC_LEN Rd, Ra(pvec) (2 words: op, regs)
 void op_concat_pvec(VM& vm, Code* pc);    // CONCAT_PVEC Rd, Ra, Rb (3 words: op, regs, PersistentVectorType*)
 void op_pvec_from_array(VM& vm, Code* pc); // PVEC_FROM_ARRAY Rd, Ra(array) (3 words: op, regs, PersistentVectorType*)
+void op_pvec_to_array(VM& vm, Code* pc);   // PVEC_TO_ARRAY Rd, Ra(pvec) (3 words: op, regs, ArrayType*)
 
 // --- Persistent map (#[K:V]) ---
 void op_make_pmap(VM& vm, Code* pc);       // MAKE_PMAP Rd, firstKeyReg, numPairs (3 words: op, regs, PersistentMapType*)

@@ -424,7 +424,7 @@ private:
     FuncInfo* tryImplicitAutoMap(const std::string& name,
                                  const std::vector<Type*>& argTypes,
                                  CallExpr_* expr,
-                                 bool& isAutoMapped, bool& hasListArg);
+                                 bool& isAutoMapped, bool& hasListArg, bool& hasPVecArg);
     FuncInfo* tryImplicitAutoMapInner(const std::string& name,
                                       const std::vector<Type*>& unwrappedTypes,
                                       const std::vector<AutoMapArg>& explicitAutoMap,
