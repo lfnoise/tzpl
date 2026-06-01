@@ -2711,9 +2711,10 @@ pair(<span class="num">3.14</span>, <span class="kw">true</span>) println;    <s
    erased. Different <code>some C</code> values may wrap different types, yet all
    can be used through <code>C</code>'s methods.</p>
 
-<p>A concrete value is packed into <code>some C</code> automatically wherever it
+<p>A concrete value is wrapped in <code>some C</code> automatically wherever it
    flows into a <code>some C</code> slot &mdash; a function argument, a binding, or a
-   collection element. Calling one of <code>C</code>'s required functions on a
+   collection element. (In the type-theory literature this operation is called
+   <em>pack</em>.) Calling one of <code>C</code>'s required functions on a
    <code>some C</code> value dispatches to the wrapped type's implementation:</p>
 <pre><code><span class="kw">constraint</span> Drawable&lt;T&gt; = <span class="kw">requires</span> { draw(T) <span class="kw">String</span> };
 
@@ -2722,7 +2723,7 @@ pair(<span class="num">3.14</span>, <span class="kw">true</span>) println;    <s
 <span class="kw">fn</span> draw(c Circle) <span class="kw">String</span> = <span class="str">"circle"</span>;
 <span class="kw">fn</span> draw(s Square) <span class="kw">String</span> = <span class="str">"square"</span>;
 
-<span class="cmt">-- One function, many hidden types. The argument is packed; draw(x) dispatches.</span>
+<span class="cmt">-- One function, many hidden types. The argument is wrapped; draw(x) dispatches.</span>
 <span class="kw">fn</span> render(x <span class="kw">some</span> Drawable) <span class="kw">String</span> = draw(x);
 
 render(Circle { r: <span class="num">2.0</span> }) println;   <span class="cmt">-- circle</span>
@@ -2770,7 +2771,7 @@ describe(Square { side: <span class="num">9</span> }) println;   <span class="cm
 <h4>Heterogeneous Collections</h4>
 <p>This is where existentials differ most from plain constraints: an array, list,
    or persistent vector of <code>some C</code> may hold values of different concrete
-   types together. Each element is packed as it is added:</p>
+   types together. Each element is wrapped as it is added:</p>
 <pre><code><span class="kw">let</span> shapes [<span class="kw">some</span> Drawable] = [Circle { r: <span class="num">1.0</span> }, Square { side: <span class="num">3</span> }];
 draw(shapes[<span class="num">0</span>]) println;          <span class="cmt">-- circle</span>
 draw(shapes[<span class="num">1</span>]) println;          <span class="cmt">-- square</span>
