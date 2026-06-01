@@ -61,6 +61,7 @@ struct ASTNode {
 
         // Type expressions
         NamedType, ArrayType, ListType, MapType, SetType, TupleType, FunctionType, RefType, TemplateType,
+        ExistentialType,
     };
 
     Kind kind;
@@ -139,6 +140,15 @@ struct TemplateTypeNode : TypeExpr {
     std::vector<TypeExprPtr> typeArgs;
     TemplateTypeNode(SourceRange l, std::string n, std::vector<TypeExprPtr> args)
         : TypeExpr(TemplateType, l), name(std::move(n)), typeArgs(std::move(args)) {}
+};
+
+// Existential type: `some C` -- a value of some hidden type satisfying the
+// structural constraint C. `constraintName` is the bare constraint name
+// (composition / parameterized forms are handled in later phases).
+struct ExistentialTypeNode : TypeExpr {
+    std::string constraintName;
+    ExistentialTypeNode(SourceRange l, std::string cn)
+        : TypeExpr(ExistentialType, l), constraintName(std::move(cn)) {}
 };
 
 // --- Expression nodes ---
@@ -271,6 +281,9 @@ struct CallExpr_ : Expr {
     i32 variadicPackStart = -1;       // Set by type checker: arg index where variadic packing begins (-1 = none)
     Type* variadicPackType = nullptr;  // Set by type checker: TupleType* or ArrayType* for packed arg
     LambdaType* resolvedTemplateLambdaType = nullptr;  // Set by type checker: monomorphized type for template lambda calls
+    bool isWitnessDispatch = false;    // Set by type checker: dispatch a constraint method through an existential's witness dict
+    i32 witnessMethodSlot = -1;        // Set by type checker: witness dictionary slot of the dispatched method
+    i32 witnessAutoMapKind = 0;        // Set by type checker: 0=scalar receiver, 1=array, 2=list, 3=persistent vector
 
     CallExpr_(SourceRange l, ExprPtr c, ExprList a)
         : Expr(CallExpr, l), callee(std::move(c)), args(std::move(a)) {}

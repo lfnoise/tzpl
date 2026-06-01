@@ -1600,6 +1600,13 @@ Type* TypeChecker::inferCall(CallExpr_* expr) {
     if (!func) {
         func = tryImplicitAutoMap(ident->name, argTypes, expr, isAutoMapped, hasListArg, hasPVecArg);
 
+        // Witness dispatch: a constraint method called on a `some C` receiver.
+        if (!func) {
+            if (Type* wt = tryInferWitnessDispatch(expr, ident->name, argTypes)) {
+                return wt;
+            }
+        }
+
         // If still no match, use the error-reporting version for diagnostics
         if (!func) {
             func = resolveOverload(ident->name, argTypes, expr->loc);

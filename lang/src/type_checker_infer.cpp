@@ -29,6 +29,18 @@
 
 namespace ts {
 
+// If `t` is a collection of an existential element (`[some C]`, `#[some C]`, or
+// `List[some C]`), return that existential element type; otherwise nullptr.
+// Used to pack heterogeneous collection literals element-by-element.
+static Type* existentialElemOf(Type* t) {
+    if (!t) return nullptr;
+    Type* elem = nullptr;
+    if (auto* at = dynamic_cast<ArrayType*>(t)) elem = at->elemType_;
+    else if (auto* pv = dynamic_cast<PersistentVectorType*>(t)) elem = pv->elemType_;
+    else if (auto* lt = dynamic_cast<ListType*>(t)) elem = lt->elemType_;
+    return (elem && dynamic_cast<ExistentialType*>(elem)) ? elem : nullptr;
+}
+
 // --- Infer expression types ---
 
 Type* TypeChecker::inferExpr(Expr* expr, Type* expectedType) {
@@ -106,6 +118,18 @@ Type* TypeChecker::inferExpr(Expr* expr, Type* expectedType) {
                     error(expr->loc, "Cannot infer type of empty List() literal; use 'let x List<T> = nil' instead");
                     result = compiler_.intType();
                 }
+            } else if (Type* exElem = existentialElemOf(expectedType)) {
+                // Heterogeneous existential list: pack each element into `some C`.
+                auto* ex = static_cast<ExistentialType*>(exElem);
+                for (auto& el : lit->elements) {
+                    Type* t = inferExpr(static_cast<Expr*>(el.get()));
+                    if (t && !isAssignable(t, exElem)) {
+                        error(el->loc, "List element type '" +
+                              std::string(t->str().data(), t->str().size()) +
+                              "' does not satisfy constraint '" + ex->constraintName_ + "'");
+                    }
+                }
+                result = compiler_.listType(exElem);
             } else {
                 Type* elemType = inferExpr(static_cast<Expr*>(lit->elements[0].get()));
                 for (size_t i = 1; i < lit->elements.size(); ++i) {
@@ -219,6 +243,20 @@ Type* TypeChecker::inferExpr(Expr* expr, Type* expectedType) {
                         wrapped = vecType(wrapped);
                     }
                     result = wrapped;
+                } else if (Type* exElem = existentialElemOf(expectedType)) {
+                    // Heterogeneous existential array: the sink expects [some C]
+                    // (or #[some C]); pack each element whose concrete type
+                    // satisfies C. The codegen coerces each element via
+                    // ensureType against the existential element type.
+                    auto* ex = static_cast<ExistentialType*>(exElem);
+                    for (size_t i = 0; i < elemTypes.size(); ++i) {
+                        if (elemTypes[i] && !isAssignable(elemTypes[i], exElem)) {
+                            error(lit->elements[i]->loc, "Array element type '" +
+                                  std::string(elemTypes[i]->str().data(), elemTypes[i]->str().size()) +
+                                  "' does not satisfy constraint '" + ex->constraintName_ + "'");
+                        }
+                    }
+                    result = vecType(exElem);
                 } else {
                     Type* elemType = elemTypes[0];
                     for (size_t i = 1; i < elemTypes.size(); ++i) {

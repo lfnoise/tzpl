@@ -547,6 +547,28 @@ Enum* Enum::create(EnumType* type, int which) {
     return e;
 }
 
+// Existential constructor (private — use Existential::create())
+Existential::Existential(ExistentialType* type, Type* concreteType,
+                         u8 payloadWords, u16 numMethods)
+    : Obj(type)
+    , concreteType_(concreteType)
+    , payloadWords_(payloadWords)
+    , numMethods_(numMethods)
+{
+    u32 total = (u32)payloadWords_ + numMethods_;
+    for (u32 i = 0; i < total; ++i) slots_[i] = Word();
+    registerNewObj(this, GCTag::Default);  // GC via virtual gcScanChildren
+}
+
+// Existential factory
+Existential* Existential::create(ExistentialType* type, Type* concreteType,
+                                 u8 payloadWords, u16 numMethods) {
+    u8 pw = payloadWords ? payloadWords : 1;
+    usize size = sizeof(Existential) + ((usize)pw + numMethods) * sizeof(Word);
+    void* mem = GCObj::operator new(size);
+    return new(mem) Existential(type, concreteType, pw, numMethods);
+}
+
 // RangeObj constructor (private — use RangeObj::create())
 RangeObj::RangeObj(Type* type, bool isInfinite, u8 elemSizeWords)
     : Obj(type)

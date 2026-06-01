@@ -630,6 +630,170 @@ bool TypeChecker::checkConstraint(Type* concreteType, const std::string& constra
     return true;
 }
 
+// --- Existential ("some C") object-safety analysis (Phase 0) ---
+//
+// Decides whether a constraint can back an existential type `some C`. See the
+// header for the rule. This is a pure analysis over the AST type expressions
+// captured in ConstraintInfo: it resolves no overloads and allocates nothing in
+// the VM, so it is safe to run at type-check time wherever a `some C` is seen.
+
+namespace {
+
+// Does `expr` reference the type-parameter name `tv` anywhere (possibly nested)?
+bool typeExprMentions(TypeExpr* expr, const std::string& tv) {
+    if (!expr || tv.empty()) return false;
+    switch (expr->kind) {
+    case ASTNode::NamedType:
+        return static_cast<NamedTypeNode*>(expr)->name == tv;
+    case ASTNode::ArrayType:
+        return typeExprMentions(static_cast<ArrayTypeNode*>(expr)->elemType.get(), tv);
+    case ASTNode::ListType:
+        return typeExprMentions(static_cast<ListTypeNode*>(expr)->elemType.get(), tv);
+    case ASTNode::SetType:
+        return typeExprMentions(static_cast<SetTypeNode*>(expr)->elemType.get(), tv);
+    case ASTNode::RefType:
+        return typeExprMentions(static_cast<RefTypeNode*>(expr)->elemType.get(), tv);
+    case ASTNode::MapType: {
+        auto* m = static_cast<MapTypeNode*>(expr);
+        return typeExprMentions(m->keyType.get(), tv) ||
+               typeExprMentions(m->valueType.get(), tv);
+    }
+    case ASTNode::TupleType:
+        for (auto& e : static_cast<TupleTypeNode*>(expr)->elemTypes)
+            if (typeExprMentions(e.get(), tv)) return true;
+        return false;
+    case ASTNode::FunctionType: {
+        auto* f = static_cast<FunctionTypeNode*>(expr);
+        for (auto& p : f->paramTypes)
+            if (typeExprMentions(p.get(), tv)) return true;
+        return typeExprMentions(f->returnType.get(), tv);
+    }
+    case ASTNode::TemplateType:
+        for (auto& a : static_cast<TemplateTypeNode*>(expr)->typeArgs)
+            if (typeExprMentions(a.get(), tv)) return true;
+        return false;
+    default:
+        return false;
+    }
+}
+
+// Is `expr` exactly the type parameter `tv` at the top level (directly
+// dispatchable -- the slot the erased value occupies)?
+bool typeExprIsExactly(TypeExpr* expr, const std::string& tv) {
+    return expr && !tv.empty() && expr->kind == ASTNode::NamedType
+        && static_cast<NamedTypeNode*>(expr)->name == tv;
+}
+
+} // namespace
+
+TypeChecker::ExistentialSafety
+TypeChecker::isExistentialSafe(const std::string& constraintName) {
+    std::set<std::string> visited;
+    return isExistentialSafeRec(constraintName, visited);
+}
+
+TypeChecker::ExistentialSafety
+TypeChecker::isExistentialSafeRec(const std::string& constraintName,
+                                  std::set<std::string>& visited) {
+    ExistentialSafety result;
+
+    auto it = constraints_.find(constraintName);
+    if (it == constraints_.end()) {
+        result.reason = "unknown constraint '" + constraintName + "'";
+        return result;
+    }
+
+    // Path-based cycle guard: insert on entry, erase on exit so that a diamond
+    // (two components sharing a sub-constraint) is not misreported as a cycle.
+    if (!visited.insert(constraintName).second) {
+        result.reason = "constraint '" + constraintName + "' is cyclic";
+        return result;
+    }
+    struct PathGuard {
+        std::set<std::string>& v;
+        std::string key;
+        ~PathGuard() { v.erase(key); }
+    } guard{visited, constraintName};
+
+    const ConstraintInfo& info = it->second;
+
+    // Type-set / union constraints have no method set to dispatch through, so
+    // they cannot back a witness-dictionary existential (deferred to a later
+    // phase as a discriminated box).
+    if (!info.patterns.empty()) {
+        result.reason = "type-set constraint '" + constraintName +
+            "' cannot be used as an existential (`some " + constraintName +
+            "`); only structural constraints are supported";
+        return result;
+    }
+
+    // Composition: existential-safe iff every component is.
+    if (!info.components.empty()) {
+        for (auto& comp : info.components) {
+            ExistentialSafety sub = isExistentialSafeRec(comp.name, visited);
+            if (!sub.ok) {
+                result.reason = "component constraint '" + comp.name +
+                    "' is not existential-safe: " + sub.reason;
+                return result;
+            }
+        }
+        result.ok = true;
+        return result;
+    }
+
+    // Structural: every required function must be dispatchable on a single
+    // hidden value -- exactly one parameter is the type variable, no other
+    // parameter mentions it, and the return omits it or is exactly it.
+    if (!info.requiredFns.empty()) {
+        std::string tv = info.typeParams.empty() ? std::string() : info.typeParams[0];
+        if (tv.empty()) {
+            result.reason = "constraint '" + constraintName +
+                "' has no type parameter to dispatch on";
+            return result;
+        }
+        for (auto& reqFn : info.requiredFns) {
+            int mentioning = 0;     // params that reference tv at all (nested or not)
+            int dispatchSlots = 0;  // params whose type is exactly tv
+            for (auto* ptExpr : reqFn.paramTypeExprs) {
+                TypeExpr* pt = ptExpr->get();
+                if (typeExprMentions(pt, tv)) {
+                    ++mentioning;
+                    if (typeExprIsExactly(pt, tv)) ++dispatchSlots;
+                }
+            }
+            if (mentioning == 0) {
+                result.reason = "required fn '" + reqFn.name + "' has no parameter of type " +
+                    tv + " to dispatch on";
+                return result;
+            }
+            if (mentioning > 1) {
+                result.reason = "required fn '" + reqFn.name + "' uses the type variable " +
+                    tv + " in more than one argument position (binary-method problem); "
+                    "such a constraint cannot be existentially quantified";
+                return result;
+            }
+            if (dispatchSlots != 1) {
+                result.reason = "required fn '" + reqFn.name + "' uses the type variable " +
+                    tv + " nested inside a parameter rather than as the parameter itself; "
+                    "not directly dispatchable";
+                return result;
+            }
+            TypeExpr* ret = reqFn.returnTypeExpr->get();
+            if (typeExprMentions(ret, tv) && !typeExprIsExactly(ret, tv)) {
+                result.reason = "required fn '" + reqFn.name + "' returns the type variable " +
+                    tv + " nested inside another type; not supported for existentials";
+                return result;
+            }
+        }
+        result.ok = true;
+        return result;
+    }
+
+    // Empty constraint: nothing to dispatch.
+    result.reason = "constraint '" + constraintName + "' has no required functions";
+    return result;
+}
+
 bool TypeChecker::checkWhereConstraints(const std::vector<WhereConstraint>& constraints,
                                          const std::unordered_map<std::string, Type*>& bindings,
                                          const std::string& contextName, bool emitError) {
@@ -649,6 +813,109 @@ bool TypeChecker::checkWhereConstraints(const std::vector<WhereConstraint>& cons
         }
     }
     return allOk;
+}
+
+bool TypeChecker::collectWitnessMethods(const std::string& constraintName,
+                                        std::vector<WitnessMethod>& out,
+                                        std::set<std::string>& visited) {
+    auto it = constraints_.find(constraintName);
+    if (it == constraints_.end()) return false;
+    if (!visited.insert(constraintName).second) return false;  // cycle guard
+
+    const ConstraintInfo& info = it->second;
+    std::string tv = info.typeParams.empty() ? std::string() : info.typeParams[0];
+
+    // Structural: one method per required function, in declaration order.
+    if (!info.requiredFns.empty()) {
+        for (auto& rf : info.requiredFns) {
+            out.push_back(WitnessMethod{rf.name, &rf, tv});
+        }
+        return true;
+    }
+    // Composition: concatenate component methods in component order.
+    if (!info.components.empty()) {
+        for (auto& comp : info.components) {
+            if (!collectWitnessMethods(comp.name, out, visited)) return false;
+        }
+        return true;
+    }
+    return false;  // type-set / empty: nothing to witness
+}
+
+bool TypeChecker::materializeWitness(Type* concreteType, const std::string& constraintName,
+                                     std::vector<u32>& outIndices, std::string& err) {
+    std::vector<WitnessMethod> methods;
+    std::set<std::string> visited;
+    if (!collectWitnessMethods(constraintName, methods, visited)) {
+        err = "constraint '" + constraintName + "' has no witnessable methods";
+        return false;
+    }
+    for (auto& m : methods) {
+        auto savedBindings = typeParamBindings_;
+        if (!m.typeParam.empty()) typeParamBindings_[m.typeParam] = concreteType;
+        std::vector<Type*> paramTypes;
+        for (auto* ptExpr : m.reqFn->paramTypeExprs) {
+            paramTypes.push_back(resolveTypeExpr(ptExpr->get()));
+        }
+        FuncInfo* func = tryResolveOverload(m.name, paramTypes);
+        if (!func) func = tryResolveTemplate(m.name, paramTypes, nullptr);
+        typeParamBindings_ = savedBindings;
+        if (!func) {
+            auto ts = concreteType->str();
+            err = "constraint method '" + m.name + "' for type '" +
+                  std::string(ts.data(), ts.size()) +
+                  "' is not a user function (builtin-satisfied methods are not "
+                  "yet supported as existential witnesses)";
+            return false;
+        }
+        outIndices.push_back(func->globalIndex);
+    }
+    return true;
+}
+
+Type* TypeChecker::tryInferWitnessDispatch(CallExpr_* expr, const std::string& name,
+                                           const std::vector<Type*>& argTypes) {
+    // The dispatching argument is the sole argument (the receiver). The receiver
+    // is either the existential itself, or a collection of existentials -- in
+    // which case the method is auto-mapped over the elements (witnessAutoMapKind).
+    if (argTypes.size() != 1 || !argTypes[0]) return nullptr;
+    Type* recv = argTypes[0];
+    int mapKind = 0;
+    Type* elem = recv;
+    if (auto* at = dynamic_cast<ArrayType*>(recv)) { elem = at->elemType_; mapKind = 1; }
+    else if (auto* lt = dynamic_cast<ListType*>(recv)) { elem = lt->elemType_; mapKind = 2; }
+    else if (auto* pv = dynamic_cast<PersistentVectorType*>(recv)) { elem = pv->elemType_; mapKind = 3; }
+    auto* ex = dynamic_cast<ExistentialType*>(elem);
+    if (!ex) return nullptr;
+
+    std::vector<WitnessMethod> methods;
+    std::set<std::string> visited;
+    if (!collectWitnessMethods(ex->constraintName_, methods, visited)) return nullptr;
+
+    for (size_t i = 0; i < methods.size(); ++i) {
+        const WitnessMethod& m = methods[i];
+        if (m.name != name) continue;
+        if (m.reqFn->paramTypeExprs.size() != 1) continue;  // single-arg only
+
+        // A method that returns the hidden type (return-T) needs re-packing,
+        // which is deferred; let normal resolution report the mismatch instead.
+        TypeExpr* ret = m.reqFn->returnTypeExpr->get();
+        if (ret->kind == ASTNode::NamedType &&
+            static_cast<NamedTypeNode*>(ret)->name == m.typeParam) {
+            continue;
+        }
+        Type* retType = resolveTypeExpr(ret);  // T-free return type
+
+        expr->isWitnessDispatch = true;
+        expr->witnessMethodSlot = (i32)i;
+        expr->witnessAutoMapKind = mapKind;
+        if (mapKind == 0) return retType;
+        // Auto-mapped: result is a collection (of the same kind) of the return type.
+        if (mapKind == 1) return compiler_.arrayType(retType);
+        if (mapKind == 2) return compiler_.listType(retType);
+        return compiler_.persistentVectorType(retType);
+    }
+    return nullptr;
 }
 
 } // namespace ts

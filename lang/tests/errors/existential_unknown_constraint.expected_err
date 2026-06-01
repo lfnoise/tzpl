@@ -1,0 +1,5 @@
+Type error [tests/errors/existential_unknown_constraint.x:2:13]
+  |
+2 | fn render(x some Ghost) Void { "unused" println; }
+  |             ^--^
+  Unknown constraint 'Ghost' in existential type `some Ghost'

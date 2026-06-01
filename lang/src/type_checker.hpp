@@ -275,6 +275,10 @@ private:
     // Enum type registry
     std::unordered_map<std::string, EnumType*> enumTypes_;
 
+    // Existential type registry: one interned `some C` type per constraint name,
+    // so type identity (pointer comparison) holds within a compilation.
+    std::unordered_map<std::string, ExistentialType*> existentialTypes_;
+
     // Template struct/enum declarations (unresolved)
     std::unordered_map<std::string, StructDeclNode*> templateStructs_;
     std::unordered_map<std::string, UnionDeclNode*> templateEnums_;
@@ -526,6 +530,59 @@ private:
                                const std::unordered_map<std::string, Type*>& bindings,
                                const std::string& contextName, bool emitError = true);
     bool hasBuiltinOperator(const std::string& opName, Type* lhs, Type* rhs);
+
+    // Existential ("some C") object-safety analysis (Phase 0).
+    //
+    // Determines whether a constraint may be used as an existential type. A
+    // structural constraint is existential-safe iff every required function has
+    // exactly one parameter that is *exactly* the constraint's type variable
+    // (the dispatching argument), no other parameter mentions that type
+    // variable, and the return type either omits it or is exactly it (re-packed
+    // on the way out). A composition is safe iff all of its components are.
+    // Type-set/union and empty constraints are not existential-safe.
+    //
+    // Pure compile-time analysis: it never resolves overloads or touches the VM.
+    // The Phase 1 `some C` checker calls this at the use site and emits `reason`
+    // as a diagnostic when !ok.
+    struct ExistentialSafety {
+        bool ok = false;
+        std::string reason;   // explanation when !ok (shown at the use site)
+    };
+    ExistentialSafety isExistentialSafe(const std::string& constraintName);
+    // Path-based recursive worker; `visited` is the current composition path
+    // (entries erased on the way out) so DAG reuse isn't mistaken for a cycle.
+    ExistentialSafety isExistentialSafeRec(const std::string& constraintName,
+                                           std::set<std::string>& visited);
+    // Intern (and classify, on first use) the `some C` existential type.
+    ExistentialType* existentialTypeFor(const std::string& constraintName);
+public:
+    // Resolve the witness dictionary for packing a `concreteType` value into
+    // `some constraintName`: appends, in canonical method order, the global code
+    // index of each required function resolved for concreteType. Returns false
+    // (with `err`) if a required function is not a user/template function (e.g.
+    // satisfied only by a builtin). Callers must have validated satisfaction.
+    // Public: invoked by codegen at pack sites.
+    bool materializeWitness(Type* concreteType, const std::string& constraintName,
+                            std::vector<u32>& outIndices, std::string& err);
+private:
+
+    // One entry per witnessable method of a constraint, in canonical order --
+    // the SAME order used by materializeWitness (pack) and witness dispatch.
+    // reqFn points into the owning ConstraintInfo; typeParam is that
+    // constraint's dispatching type variable.
+    struct WitnessMethod {
+        std::string name;
+        const ConstraintInfo::ReqFn* reqFn;
+        std::string typeParam;
+    };
+    bool collectWitnessMethods(const std::string& constraintName,
+                               std::vector<WitnessMethod>& out,
+                               std::set<std::string>& visited);
+    // If `name(argTypes)` is a witness dispatch on an existential receiver
+    // (Phase 3: single argument, T-free return), mark the call node with the
+    // method slot and return its result type; otherwise return nullptr.
+    Type* tryInferWitnessDispatch(CallExpr_* expr, const std::string& name,
+                                  const std::vector<Type*>& argTypes);
 
     // Auto-map helpers (shared between inferCall and inferBinaryOp)
     AutoMapArg extractAutoMapAnnotation(Expr* expr) const;

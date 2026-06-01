@@ -1,0 +1,5 @@
+Type error [tests/errors/existential_typeset.x:5:13]
+  |
+5 | fn render(x some Numeric) Void { "unused" println; }
+  |             ^--^
+  Constraint 'Numeric' cannot be used as an existential type `some Numeric': type-set constraint 'Numeric' cannot be used as an existential (`some Numeric`); only structural constraints are supported

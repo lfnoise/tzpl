@@ -1,0 +1,5 @@
+Type error [tests/errors/existential_binary_method.x:5:13]
+  |
+5 | fn render(x some Addable) Void { "unused" println; }
+  |             ^--^
+  Constraint 'Addable' cannot be used as an existential type `some Addable': required fn '+' uses the type variable T in more than one argument position (binary-method problem); such a constraint cannot be existentially quantified

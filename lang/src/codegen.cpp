@@ -263,6 +263,32 @@ void CodeGen::emitJumpTo(u32 targetIdx) {
     invalidateLastProducer();
 }
 
+namespace {
+// The type stored in the single value word of a 1-word inline composite.
+Type* inlineSingleWordType(Type const* t) {
+    if (auto* st = dynamic_cast<StructType const*>(t)) return st->layout_.empty() ? nullptr : st->layout_[0].type;
+    if (auto* tu = dynamic_cast<TupleType const*>(t))  return tu->layout_.empty() ? nullptr : tu->layout_[0].type;
+    if (auto* en = dynamic_cast<EnumType const*>(t))   return en->layout_.empty() ? nullptr : en->layout_[0].type;
+    return nullptr;
+}
+
+// Does a register holding a value of type `t` contain a traceable Obj* root?
+// `storesObjPtr` answers this for container/boxing slots, where inline values
+// get boxed -- but in a *register* a 1-word inline value is stored unboxed (its
+// single field's raw word), so we must recurse into that field instead of
+// blindly treating the word as an Obj* (which would scan e.g. a Float as a
+// pointer). Multi-word inline values aren't traced per-word (a known
+// limitation also reflected in the coroutine GC maps).
+bool regHoldsObjRoot(Type const* t) {
+    if (!t) return false;
+    if (t->repr_ == ts::Type::Repr::Inline) {
+        if (t->sizeWords_ != 1) return false;
+        return regHoldsObjRoot(inlineSingleWordType(t));
+    }
+    return storesObjPtr(t);
+}
+} // namespace
+
 void CodeGen::emitReturnPcStackMap(u16 /*unusedResultReg*/, Type* /*unusedResultType*/) {
     // The returnPC stack map is consulted ONLY while the callee is still
     // executing (the marker walks the caller via frames_[i+1].returnPC).
@@ -281,8 +307,7 @@ void CodeGen::emitReturnPcStackMap(u16 /*unusedResultReg*/, Type* /*unusedResult
     for (u16 r = 0; r < limit; ++r) {
         Type* t = regTypes_[r];
         if (!t) continue;
-        if (isInlineMultiword(t)) continue;
-        if (storesObjPtr(t)) sm.liveRefRegs.push_back(r);
+        if (regHoldsObjRoot(t)) sm.liveRefRegs.push_back(r);
     }
     currentBlock_->stackMaps_.push_back(std::move(sm));
 }
@@ -307,8 +332,7 @@ void CodeGen::emitSafepointWithStackMap() {
     for (u16 r = 0; r < limit; ++r) {
         Type* t = regTypes_[r];
         if (!t) continue;
-        if (isInlineMultiword(t)) continue;
-        if (storesObjPtr(t)) sm.liveRefRegs.push_back(r);
+        if (regHoldsObjRoot(t)) sm.liveRefRegs.push_back(r);
     }
     currentBlock_->stackMaps_.push_back(std::move(sm));
     emitOp(op_safepoint);
@@ -393,11 +417,32 @@ u16 CodeGen::ensureInt(u16 reg, Type* type) {
 
 u16 CodeGen::ensureType(u16 reg, Type* fromType, Type* toType) {
     if (fromType == toType) return reg;
+    if (dynamic_cast<ExistentialType*>(toType)) return ensureExistential(reg, fromType, toType);
     if (toType == compiler_.intType()) return ensureInt(reg, fromType);
     if (toType == compiler_.fractionType()) return ensureFraction(reg, fromType);
     if (toType == compiler_.floatType()) return ensureFloat(reg, fromType);
     if (toType == compiler_.complexType()) return ensureComplex(reg, fromType);
     return reg;
+}
+
+u16 CodeGen::ensureExistential(u16 reg, Type* fromType, Type* exType) {
+    auto* ex = static_cast<ExistentialType*>(exType);
+    // Already an existential of the same constraint -> no repacking.
+    if (fromType == exType) return reg;
+    std::vector<u32> indices;
+    std::string err;
+    if (!typeChecker_.materializeWitness(fromType, ex->constraintName_, indices, err)) {
+        error({}, "cannot pack into `some " + ex->constraintName_ + "': " + err);
+        return reg;
+    }
+    u16 dst = allocReg();
+    emitOp(op_pack_existential);
+    emitRegs(dst, reg);
+    emitPtr(ex);
+    emitPtr(fromType);
+    emitInt((i64)indices.size());
+    for (u32 idx : indices) emitInt((i64)idx);
+    return dst;
 }
 
 // --- Get appropriate opcodes for types ---
@@ -3942,10 +3987,84 @@ u16 CodeGen::genUnaryOp(UnaryOpExpr* expr) {
     return dst;
 }
 
+// Lower a constraint-method call on a `some C` receiver. The receiver
+// existential carries both the callee (a witness-dictionary slot) and the
+// boxed concrete value; op_call_witness unwraps the value into the callee's
+// parameter slots at runtime, so codegen only stages the receiver + result.
+// Emit one op_call_witness instruction.
+u16 CodeGen::emitWitnessDispatch(u16 exReg, i32 slot, Type* retType) {
+    // Reserve a staging window for the unwrapped concrete value. The width is a
+    // runtime property of the erased type (op_call_witness copies the value into
+    // the callee's leading param slots = caller [argBase, argBase+pw)), so we
+    // reserve the inline-composite cap. clearArgRegTypes marks the window as
+    // callee scratch, not live refs -- otherwise GC could scan a leftover
+    // non-pointer value word as an Obj* (the value bits alias an untracked reg).
+    static constexpr u16 kMaxPayloadWords = 4;  // == kInlineMaxWords cap
+    u16 argBase = nextReg_;
+    allocRegs(kMaxPayloadWords);
+    u16 callDst = allocSlot(retType);
+    clearArgRegTypes(argBase, callDst);
+    emitOp(op_call_witness);
+    emitRegs(callDst, argBase, exReg);
+    emitInt(slot);
+    emitReturnPcStackMap(callDst, retType);
+    return callDst;
+}
+
+u16 CodeGen::genWitnessCall(CallExpr_* expr) {
+    Expr* recv = static_cast<Expr*>(expr->args[0].get());
+    i32 slot = expr->witnessMethodSlot;
+
+    // Scalar receiver: a single existential.
+    if (expr->witnessAutoMapKind == 0) {
+        u16 exReg = genExpr(recv);   // existential Obj* (1 word)
+        return emitWitnessDispatch(exReg, slot, expr->resolvedType);
+    }
+
+    // Auto-mapped receiver: a collection of existentials. Map the witness
+    // dispatch over each element, producing a collection of the return type.
+    u16 srcReg = genExpr(recv);
+
+    if (expr->witnessAutoMapKind == 1) {  // array
+        auto* srcT = dynamic_cast<ArrayType*>(recv->resolvedType);
+        auto* dstT = dynamic_cast<ArrayType*>(expr->resolvedType);
+        return emitArrayMapLoop(srcReg, srcT, dstT, [&](u16 elemReg, Type*) -> u16 {
+            return emitWitnessDispatch(elemReg, slot, dstT->elemType_);
+        });
+    }
+    if (expr->witnessAutoMapKind == 2) {  // list
+        auto* srcT = dynamic_cast<ListType*>(recv->resolvedType);
+        auto* dstT = dynamic_cast<ListType*>(expr->resolvedType);
+        return emitListMapLoop(srcReg, srcT, dstT, [&](u16 elemReg, Type*) -> u16 {
+            return emitWitnessDispatch(elemReg, slot, dstT->elemType_);
+        });
+    }
+    // persistent vector: map via a temporary array, then freeze.
+    auto* srcPV = dynamic_cast<PersistentVectorType*>(recv->resolvedType);
+    auto* dstPV = dynamic_cast<PersistentVectorType*>(expr->resolvedType);
+    auto* srcArrT = compiler_.arrayType(srcPV->elemType_);
+    auto* dstArrT = compiler_.arrayType(dstPV->elemType_);
+    u16 srcArr = allocReg();
+    emitOp(op_pvec_to_array);
+    emitRegs(srcArr, srcReg);
+    emitPtr(srcArrT);
+    u16 resArr = emitArrayMapLoop(srcArr, srcArrT, dstArrT, [&](u16 elemReg, Type*) -> u16 {
+        return emitWitnessDispatch(elemReg, slot, dstArrT->elemType_);
+    });
+    u16 dst = allocReg();
+    emitOp(op_pvec_from_array);
+    emitRegs(dst, resArr);
+    emitPtr(dstPV);
+    return dst;
+}
+
 u16 CodeGen::genCall(CallExpr_* expr) {
     // Consume tail position flag — only this top-level call can use it
     bool isTailCall = inTailPosition_ && enableTailCalls;
     inTailPosition_ = false;  // Clear for sub-expression generation
+
+    // Witness dispatch: route to the existential dispatch path.
+    if (expr->isWitnessDispatch) return genWitnessCall(expr);
 
     // Tuple struct construction: resolvedFuncGlobalIndex == -3
     if (expr->resolvedFuncGlobalIndex == -3) {
@@ -8856,6 +8975,10 @@ u16 CodeGen::emitArrayBuildLoop(u16 lenReg, ArrayType* dstType,
     emitOp(op_array_alloc);
     emitRegs(resultReg, lenReg);
     emitPtr(dstType);
+    // Root the partially-built result array: if the per-element body makes a
+    // call, a safepoint there can fire GC mid-loop, and without a live-ref entry
+    // the in-progress array would be collected (use-after-free).
+    setRegType(resultReg, dstType);
 
     emitCountedLoop(lenReg, [&](u16 iReg) {
         u16 valReg = body(iReg);
@@ -8893,6 +9016,8 @@ u16 CodeGen::emitListMapLoop(u16 srcReg, ListType* srcType, ListType* dstType,
     u16 accReg = allocReg();
     emitOp(op_load_nil);
     emitRegs(accReg);
+    // Root the growing result list across per-element calls (see emitArrayBuildLoop).
+    setRegType(accReg, dstType);
 
     u32 loopStartIdx = (u32)currentBlock_->code.size();
 
@@ -8932,6 +9057,8 @@ u16 CodeGen::emitListReverse(u16 listReg, ListType* listType) {
     u16 resultReg = allocReg();
     emitOp(op_load_nil);
     emitRegs(resultReg);
+    // Root the growing reversed list: the back-edge safepoint can fire GC.
+    setRegType(resultReg, listType);
 
     u32 revLoopStart = (u32)currentBlock_->code.size();
     u16 revNilCheck = allocReg();

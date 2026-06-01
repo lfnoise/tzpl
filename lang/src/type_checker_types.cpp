@@ -29,6 +29,18 @@
 
 namespace ts {
 
+// Intern the `some C` existential type for a constraint, creating and
+// classifying it on first use. Callers must have already validated that the
+// constraint exists and is object-safe (see resolveTypeExpr).
+ExistentialType* TypeChecker::existentialTypeFor(const std::string& constraintName) {
+    auto it = existentialTypes_.find(constraintName);
+    if (it != existentialTypes_.end()) return it->second;
+    auto* et = new ExistentialType(constraintName);
+    classifyType(et);   // ObjType -> Repr::Pointer (single Obj*)
+    existentialTypes_[constraintName] = et;
+    return et;
+}
+
 // --- Resolve type expressions ---
 
 Type* TypeChecker::resolveTypeExpr(TypeExpr* typeExpr) {
@@ -73,6 +85,24 @@ Type* TypeChecker::resolveTypeExpr(TypeExpr* typeExpr) {
         }
         error(typeExpr->loc, "Unknown type '" + named->name + "'");
         return compiler_.intType();
+    }
+
+    if (typeExpr->kind == ASTNode::ExistentialType) {
+        auto* ex = static_cast<ExistentialTypeNode*>(typeExpr);
+        if (constraints_.count(ex->constraintName) == 0) {
+            error(typeExpr->loc, "Unknown constraint '" + ex->constraintName +
+                  "' in existential type `some " + ex->constraintName + "'");
+            return compiler_.intType();
+        }
+        // Only constraints that are object-safe can be existentially quantified.
+        ExistentialSafety safety = isExistentialSafe(ex->constraintName);
+        if (!safety.ok) {
+            error(typeExpr->loc, "Constraint '" + ex->constraintName +
+                  "' cannot be used as an existential type `some " + ex->constraintName +
+                  "': " + safety.reason);
+            return compiler_.intType();
+        }
+        return existentialTypeFor(ex->constraintName);
     }
 
     if (typeExpr->kind == ASTNode::ArrayType) {
