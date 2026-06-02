@@ -427,7 +427,7 @@ compile-time component, so no resolution work needs to happen at runtime.</p>
     <tr><td>Inline small payloads</td><td><strong>Yes</strong></td><td>No</td><td>No</td><td>Yes</td><td>No</td></tr>
     <tr><td>Object safety</td><td><strong>Explicit, rejects unsafe</strong></td><td>Not enforced (legal but unusable)</td><td><strong>Explicit, strict</strong></td><td>"Self/assoc-type" restriction</td><td>Sidestepped by structure</td></tr>
     <tr><td>Binary methods <code>+(T,T)</code></td><td>Rejected at use</td><td>Compiles, unusable across boxes</td><td>Not object-safe</td><td>Not usable as existential</td><td>Interface-typed args + runtime assert</td></tr>
-    <tr><td>World</td><td>Closed (per module)</td><td>Open (orphan instances)</td><td>Open (coherence-checked)</td><td>Open (retroactive)</td><td>Open (structural)</td></tr>
+    <tr><td>World</td><td>Open (scope-based)</td><td>Open (orphan instances)</td><td>Open (coherence-checked)</td><td>Open (retroactive)</td><td>Open (structural)</td></tr>
   </tbody>
 </table>
 
@@ -741,12 +741,19 @@ that borrows the best-fitting piece from each neighbour.</p>
 
 <h3>Trade-offs Tzopilotl accepts</h3>
 <ul>
-  <li><strong>Closed-per-module world.</strong> Because witnesses resolve at the
-    pack site from the functions visible there, you cannot retroactively make a
-    foreign type satisfy a constraint from a third module the way Haskell orphan
-    instances or Swift retroactive <code>extension</code>s allow. This follows
-    from <em>static pack-site resolution</em>; a lazier resolver could reopen it,
-    but that has not been needed.</li>
+  <li><strong>Conformance is resolved at the pack site, not registered on the
+    type.</strong> To use a value as <code>some C</code>, the functions
+    <code>C</code> requires need only be <em>in scope</em> where the value is
+    packed &mdash; the same condition as calling those functions directly. So
+    conformance is never a global fact stamped on a type (as a Haskell
+    <code>instance</code> or Swift <code>extension</code> is): it does not travel
+    with the value, but is recomputed at each pack site from the visible
+    functions. You <em>can</em> retroactively conform a foreign type, even from a
+    third module &mdash; you just import that module's functions. What is absent
+    is authoritative, program-wide registration (and the coherence rule that
+    would force two modules to supply the same witness). In practice this is
+    barely a restriction: needing an interface's methods in scope to use it is
+    unsurprising.</li>
   <li><strong>Single dispatching argument (today).</strong> Multi-argument
     witness dispatch and return-<code>T</code> re-packing are deferred. Rust/Swift
     handle return-<code>Self</code> (it re-wraps); Tzopilotl will need the

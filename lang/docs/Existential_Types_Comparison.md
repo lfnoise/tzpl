@@ -58,7 +58,7 @@ runtime.
 | Inline small payloads | **Yes** (inline value words) | No | No | Yes | No |
 | Object safety | **Explicit analysis, rejects unsafe** | Not enforced (unusable but legal) | **Explicit, strict** | "Self/assoc-type requirement" restriction | Sidestepped by structure |
 | Binary methods (`+(T,T)`) | Rejected at constraint use | Compiles, can't be used across boxes | Not object-safe | Not usable as existential | Expressed via interface-typed args + runtime assert |
-| World | Closed (per module) | Open (orphan instances) | Open (coherence-checked) | Open (retroactive conformance) | Open (structural) |
+| World | Open (scope-based) | Open (orphan instances) | Open (coherence-checked) | Open (retroactive conformance) | Open (structural) |
 
 ---
 
@@ -341,11 +341,18 @@ each neighbour.
 
 ### Trade-offs Tzopilotl accepts
 
-- **Closed-per-module world.** Because witnesses resolve at the pack site from
-  the functions visible there, you cannot retroactively make a foreign type
-  satisfy a constraint from a third module the way Haskell orphan instances or
-  Swift retroactive `extension`s allow. This follows from *static pack-site
-  resolution*; a lazier resolver could reopen it, but that has not been needed.
+- **Conformance is resolved at the pack site, not registered on the type.** To
+  use a value as `some C`, the functions `C` requires need only be *in scope*
+  where the value is packed — the same condition as calling those functions
+  directly. So conformance is never a global fact stamped on a type (as a
+  Haskell `instance` or Swift `extension` is): it does not travel with the
+  value, but is recomputed at each pack site from the visible functions. You
+  *can* retroactively conform a foreign type, even from a third module — you
+  just import that module's functions. What is absent is authoritative,
+  program-wide registration (and the coherence rule that would force two
+  modules to supply the same witness). In practice this is barely a
+  restriction: needing an interface's methods in scope to use it is
+  unsurprising.
 - **Single dispatching argument (today).** Multi-argument witness dispatch and
   return-`T` re-packing are deferred. Rust/Swift handle return-`Self` (it
   re-wraps); Tzopilotl will need the re-pack path to match. Genuine binary
