@@ -361,12 +361,8 @@ if (localStorage.getItem('tzpl-docs-theme') === 'light') document.documentElemen
 <p>This document compares Tzopilotl's <code>some C</code> existential types with
 the analogous features in four other statically typed languages. The goal is to
 locate Tzopilotl's design in the broader landscape and to explain <em>why</em>
-it made the choices it did. Real-time safety is part of that story &mdash; but a
-narrower part than it first appears: Tzopilotl's substrate (a TLSF O(1)
-allocator and a bounded-pause incremental GC) <em>permits</em> runtime
-allocation, so several design choices are driven by static typing and
-simplicity rather than by RT-safety, and the document is careful to keep the two
-apart.</p>
+it made the choices it did &mdash; choices driven, for the most part, by static
+typing and a preference for simple, deterministic machinery.</p>
 
 <p>All five languages solve the same core problem: <em>erase a concrete type
 behind an interface so that values of different underlying types can be stored
@@ -406,28 +402,13 @@ bounded polymorphism:</p>
   </tbody>
 </table>
 
-<div class="tip">
-  <strong>Real-time safety, precisely</strong>
-  It is easy to over-attribute Tzopilotl's design to real-time concerns.
-  <em>Allocation is permitted.</em> The VM uses a TLSF allocator (O(1)
-  <code>malloc</code>/<code>free</code>) and an incremental GC with bounded
-  pause times, so creating heap objects during execution &mdash; including on
-  the audio thread &mdash; is fine. What real-time safety actually forbids is
-  the <strong>system allocator</strong>, other <strong>potentially blocking
-  syscalls</strong>, and any GC pause without an upper bound. So the naive
-  inference "building a dictionary at runtime allocates, therefore it is unsafe"
-  is <em>false</em> for Tzopilotl.
-</div>
-
-<p>That distinction matters for the comparisons below. Tzopilotl could build
-witness dictionaries lazily through TLSF and remain real-time safe; it resolves
-witnesses at the <strong>pack site</strong> for a different reason &mdash; the
+<p>The most consequential of these axes is <strong>when the dictionary is
+built</strong>. It splits the five languages into those that resolve the
+dictionary statically &mdash; Tzopilotl, Rust, Swift &mdash; and those that
+build or capture it at runtime: Go lazily on first use, Haskell at box
+construction. Tzopilotl resolves at the <strong>pack site</strong> &mdash; the
 concrete type is statically known there and the overload resolver is a
-compile-time component, so a runtime resolution mechanism would be redundant
-machinery, not a safety violation. Where real-time safety <em>does</em> decide
-the comparison is in which other languages' runtimes qualify at all: Go and
-Haskell fall out not because they "allocate" but because they lean on the
-<em>system</em> allocator and on GCs not designed around a bounded pause.</p>
+compile-time component, so no resolution work needs to happen at runtime.</p>
 
 <h2 id="at-a-glance">3. At a Glance</h2>
 
@@ -447,7 +428,6 @@ Haskell fall out not because they "allocate" but because they lean on the
     <tr><td>Object safety</td><td><strong>Explicit, rejects unsafe</strong></td><td>Not enforced (legal but unusable)</td><td><strong>Explicit, strict</strong></td><td>"Self/assoc-type" restriction</td><td>Sidestepped by structure</td></tr>
     <tr><td>Binary methods <code>+(T,T)</code></td><td>Rejected at use</td><td>Compiles, unusable across boxes</td><td>Not object-safe</td><td>Not usable as existential</td><td>Interface-typed args + runtime assert</td></tr>
     <tr><td>World</td><td>Closed (per module)</td><td>Open (orphan instances)</td><td>Open (coherence-checked)</td><td>Open (retroactive)</td><td>Open (structural)</td></tr>
-    <tr><td>Real-time safe</td><td><strong>Yes</strong> (TLSF + bounded GC)</td><td>No (lazy GC, thunks)</td><td>Yes (no GC)</td><td>Mostly (sys-malloc box for large)</td><td>No (sys-malloc itab + GC)</td></tr>
   </tbody>
 </table>
 
@@ -479,14 +459,13 @@ callee's parameter slots, and runs.</p>
 coerced to <code>some C</code> (a <code>let</code>, an argument, a collection
 literal element). The concrete type is statically known there, so the type
 checker's <code>materializeWitness</code> resolves each required function to a
-fixed global index via ordinary overload resolution. The pack itself allocates
-one <code>Existential</code> object (through TLSF &mdash; fine for real-time
-use); what it <em>avoids</em> is any <strong>resolution</strong> work at runtime
-&mdash; no runtime monomorphization, no lazy dictionary build, no resolver
-reified into the VM. This keeps dispatch deterministic and the runtime small,
-and it falls out of static typing rather than being forced by real-time safety
-(lazy, TLSF-backed resolution would also be RT-safe; it is simply unnecessary
-when the type is already known).</p>
+fixed global index via ordinary overload resolution. The pack allocates one
+<code>Existential</code> object and stores those indices in it; what it
+<em>avoids</em> is any <strong>resolution</strong> work at runtime &mdash; no
+runtime monomorphization, no lazy dictionary build, no resolver reified into the
+VM. Dispatch is therefore a constant-time array lookup, and the whole mechanism
+falls out of static typing: because the type is known at the pack site, there is
+nothing left to decide later.</p>
 
 <h4>Structural, not nominal</h4>
 <p>A type satisfies <code>Drawable</code> simply by having a
@@ -554,8 +533,9 @@ flat array of <em>integer global indices</em>, fully resolved, no thunks.</p>
 <h4>Naming</h4>
 <p>Nominal: a type participates only via an <code>instance Draw T where
 &hellip;</code> declaration. Orphan instances make the world genuinely open
-&mdash; an instance can live in a third module &mdash; which is exactly the kind
-of late, non-local resolution a real-time system cannot tolerate.</p>
+&mdash; an instance can live in a third module &mdash; exactly the kind of late,
+non-local resolution that Tzopilotl's pack-site model forgoes, since it binds
+witnesses from the functions visible where the value is packed.</p>
 
 <h4>Object safety</h4>
 <p>Haskell does <em>not</em> reject "object-unsafe" classes. You can
@@ -567,11 +547,6 @@ own type with itself. The restriction is enforced by the type checker at the
 <em>use site</em>, not by forbidding the class. Tzopilotl instead rejects the
 <em>constraint</em> when used existentially, up front, with a targeted message
 &mdash; a more ergonomic failure mode for the same underlying limitation.</p>
-
-<h4>Not real-time safe</h4>
-<p>Lazy evaluation, thunk allocation, and a tracing GC with no upper bound on
-pause make Haskell's model unsuitable for the audio thread regardless of the
-elegance of dictionary passing.</p>
 
 <h2 id="rust">6. Rust: <code>dyn Trait</code> Trait Objects</h2>
 
@@ -618,13 +593,13 @@ picks, erased from the <em>caller</em>"), whereas <code>dyn Trait</code> is the
 of this duality. (Confusingly, Swift names them the opposite way around &mdash;
 see below.)</p>
 
-<h4>Real-time safe</h4>
-<p>Yes &mdash; static vtables, predictable dispatch. Rust reaches RT-safety by
-having <em>no</em> GC at all and manual ownership; Tzopilotl reaches it
-differently, with a TLSF allocator and a bounded-pause incremental GC, so it can
-allocate freely where Rust manages memory by hand. On the dispatch mechanism
-itself they are close peers; the divergences are nominal-vs-structural and
-heap-pointer-vs-inline payload.</p>
+<h4>Compared to Tzopilotl</h4>
+<p>On the dispatch mechanism the two are close peers &mdash; a statically built
+table attached at the coercion/pack site. The divergences are
+nominal-vs-structural and heap-pointer-vs-inline payload: a
+<code>dyn Trait</code> always reaches its data through a pointer, whereas
+Tzopilotl copies a small payload inline into the <code>Existential</code>
+object.</p>
 
 <h2 id="swift">7. Swift: <code>any P</code> Existentials and Witness Tables</h2>
 
@@ -680,16 +655,6 @@ requirements.</p>
 <p>Nominal, with retroactive conformance via <code>extension</code> &mdash; an
 open world like Rust's, coherence-checked.</p>
 
-<h4>Real-time safety</h4>
-<p>Mostly &mdash; static PWTs and inline small payloads are RT-friendly. A
-payload larger than the inline buffer triggers a heap allocation through the
-<em>system</em> allocator on boxing, and ARC retain/release plus Swift's runtime
-are not built around a bounded pause; <em>that</em> &mdash; the system allocator
-and unbounded runtime work, not the act of allocating &mdash; is what a
-hard-real-time context must avoid. Tzopilotl boxes too (its
-<code>Existential</code> is always a heap object), but through its TLSF allocator
-and bounded-pause GC, which is why the same operation stays RT-safe for it.</p>
-
 <h2 id="go">8. Go: Interfaces</h2>
 
 <pre><code><span class="kw">type</span> <span class="typ">Draw</span> <span class="kw">interface</span> { draw() <span class="kw">string</span> }
@@ -718,16 +683,15 @@ shape" idea. This is the axis on which Tzopilotl departs furthest from
 Haskell/Rust/Swift and aligns with Go.</p>
 
 <h4>But the opposite choice on dictionary timing</h4>
-<p>Go builds itabs <em>lazily at runtime</em> &mdash; allocating via the system
-allocator and inserting into a global, lock-protected hash table on first use;
-Tzopilotl resolves every witness to a global index <em>at the
-compile-time-known pack site</em>. It is tempting to call Go's laziness the
-real-time disqualifier, but laziness and allocation are not themselves the
-problem (Tzopilotl could build a dictionary lazily through TLSF and stay safe).
-What Go actually does that an audio thread cannot is the <em>system-allocator</em>
-call and the <em>lock</em> on the shared itab table. Tzopilotl's pack-site
-resolution avoids both &mdash; not as its primary purpose, but as a side effect
-of the concrete type already being known at compile time.</p>
+<p>Go builds itabs <em>lazily at runtime</em> &mdash; on first use of a given
+<code>(interface, concrete)</code> pair it assembles the method table and caches
+it in a global hash table; Tzopilotl resolves every witness to a global index
+<em>at the compile-time-known pack site</em>. This is the one axis where the two
+otherwise-similar structural systems diverge sharply: Go defers the dictionary
+to runtime because, with no compile step that specializes per concrete type, it
+has no earlier moment at which to build it; Tzopilotl has exactly that moment
+&mdash; the point where the value is packed, where the concrete type is
+known.</p>
 
 <h4>Object safety</h4>
 <p>Go has no <code>Self</code> type, so the binary-method problem doesn't arise
@@ -739,20 +703,12 @@ pushes the "are these the same hidden type?" question to a <em>dynamic</em>
 check, trading Tzopilotl's static rejection for runtime flexibility (and a
 possible runtime failure).</p>
 
-<h4>Real-time safety</h4>
-<p>No &mdash; but, precisely: it is the <em>system-allocator</em> itab and
-interface-conversion boxing, the <em>lock</em> on the shared itab table, and a
-concurrent GC not built around a hard pause bound that make Go unsuitable
-&mdash; not the mere fact that it allocates. Tzopilotl allocates too; it just
-does so through machinery with O(1) and bounded-pause guarantees.</p>
-
 <h2 id="synthesis">9. Where Tzopilotl Sits</h2>
 
 <p>Tzopilotl's existentials are best understood as <strong>Go's structural
 interfaces with Rust's compile-time resolution discipline and Swift's inline
-payload storage, gated by an explicit object-safety analysis like Rust's</strong>
-&mdash; running on a real-time-safe substrate (TLSF + bounded-pause GC) that
-<em>permits</em> allocation rather than forbidding it.</p>
+payload storage, gated by an explicit object-safety analysis like
+Rust's</strong>.</p>
 
 <ul>
   <li><strong>From Go:</strong> structural conformance. No
@@ -773,32 +729,24 @@ payload storage, gated by an explicit object-safety analysis like Rust's</strong
     assertion."</li>
 </ul>
 
-<p>The one property <strong>only Tzopilotl</strong> carries through the whole
-design is <strong>hard real-time safety</strong> &mdash; but its source must be
-stated precisely, because it is easy to mis-locate. RT-safety comes from the
-<em>runtime substrate</em>: the TLSF allocator (O(1)) and the bounded-pause
-incremental GC. Allocation is allowed; what is forbidden is the system
-allocator, blocking syscalls, and unbounded pauses. So pack-site resolution is
-<strong>not</strong> forced by RT-safety &mdash; Tzopilotl could resolve lazily
-through TLSF and remain safe. It packs at the pack site because the concrete
-type is statically known there and the resolver is a compile-time component, so
-runtime resolution would be redundant machinery. Where RT-safety <em>does</em>
-decide the comparison is which peers' runtimes qualify at all: Go and Haskell
-fall out because they lean on the system allocator and on GCs without a bounded
-pause &mdash; again, not because they allocate. The genuine novelty is
-orthogonal to RT-safety: taking Go's structural ergonomics <em>and</em>
-Rust/Swift's fully-static resolution at once, which static typing at the pack
-site makes free.</p>
+<p>The genuine novelty is the combination itself: Go-style
+<strong>structural</strong> conformance <em>and</em> Rust/Swift-style
+<strong>fully-static</strong> resolution at once. Those two are usually traded
+against each other &mdash; structural systems (Go) tend to resolve dictionaries
+at runtime, while statically-resolved systems (Rust, Swift) tend to be nominal.
+Tzopilotl gets both because it packs at a site where the concrete type is always
+known, so a structural match can still be turned into a fixed table at compile
+time. The inline payload and the explicit object-safety gate round out a design
+that borrows the best-fitting piece from each neighbour.</p>
 
 <h3>Trade-offs Tzopilotl accepts</h3>
 <ul>
   <li><strong>Closed-per-module world.</strong> Because witnesses resolve at the
     pack site from the functions visible there, you cannot retroactively make a
     foreign type satisfy a constraint from a third module the way Haskell orphan
-    instances or Swift retroactive <code>extension</code>s allow. Note this
-    follows from <em>static pack-site resolution</em>, not from real-time safety
-    &mdash; a lazier, TLSF-backed resolver could reopen it without sacrificing
-    RT-safety; it simply has not been needed.</li>
+    instances or Swift retroactive <code>extension</code>s allow. This follows
+    from <em>static pack-site resolution</em>; a lazier resolver could reopen it,
+    but that has not been needed.</li>
   <li><strong>Single dispatching argument (today).</strong> Multi-argument
     witness dispatch and return-<code>T</code> re-packing are deferred. Rust/Swift
     handle return-<code>Self</code> (it re-wraps); Tzopilotl will need the
@@ -811,16 +759,14 @@ site makes free.</p>
 <ul>
   <li><strong>Tzopilotl</strong> &mdash; structural constraints, witness
     dictionary resolved to global indices <strong>at the pack site</strong>
-    (enabled by static typing, not forced by RT-safety), inline payload,
-    explicit object-safety rejection of binary methods; real-time safety comes
-    from the TLSF allocator and bounded-pause GC, which <em>permit</em>
-    allocation rather than forbidding it.</li>
+    (enabled by static typing), inline payload, explicit object-safety rejection
+    of binary methods.</li>
   <li><strong>Haskell</strong> &mdash; nominal classes compiled by dictionary
     passing; existential <code>data</code> captures the dictionary at the box;
-    object-unsafe classes are <em>legal but unusable</em>; not RT-safe.</li>
+    object-unsafe classes are <em>legal but unusable</em>.</li>
   <li><strong>Rust</strong> &mdash; nominal traits; <code>dyn Trait</code> fat
     pointer with a <strong>static vtable</strong>; strict, explicit
-    object-safety rules; RT-safe; payload always behind a pointer.</li>
+    object-safety rules; payload always behind a pointer.</li>
   <li><strong>Swift</strong> &mdash; nominal protocols; <code>any P</code>
     existential container (inline buffer or box) + static <strong>protocol
     witness table</strong>; <code>some P</code> means the <em>opposite</em>
@@ -829,7 +775,7 @@ site makes free.</p>
   <li><strong>Go</strong> &mdash; structural interfaces;
     <code>iface{itab, data}</code> with <strong>lazily-built, cached
     itabs</strong>; no <code>Self</code>, so binary-method-like APIs go through
-    runtime type assertions; not RT-safe.</li>
+    runtime type assertions.</li>
 </ul>
 
 </main>
