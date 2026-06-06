@@ -1,0 +1,35 @@
+name: tests
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+# Cancel superseded runs on the same ref.
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lang-tests:
+    # macOS: the project targets darwin (CoreAudio) and uses [[clang::musttail]],
+    # which Apple Clang on the runner supports.
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure (Release)
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+
+      # Only the interpreter is needed to run the lang golden suite.
+      - name: Build tzpl
+        run: cmake --build build --target tzpl -j$(sysctl -n hw.ncpu)
+
+      # Runs every *.x golden test (existentials included). The runner exits
+      # non-zero on any failure; the grep guards against the filter/runner
+      # silently matching zero tests (which would otherwise exit 0).
+      - name: Run lang tests
+        working-directory: lang/tests
+        run: |
+          bash run_tests.sh | tee result.txt
+          grep -Eq '[1-9][0-9]* passed' result.txt
