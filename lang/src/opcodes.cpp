@@ -4957,6 +4957,47 @@ void op_make_any(VM& vm, Code* pc) {
     DISPATCH(3);
 }
 
+// PACK_EXISTENTIAL Rd, valSrc
+//   (op, regs{dst,valSrc}, ExistentialType*, concreteType*, numMethods, idx...)
+void op_pack_existential(VM& vm, Code* pc) {
+    u16 dst    = pc[1].regs[0];
+    u16 valSrc = pc[1].regs[1];
+    auto* exType       = static_cast<ExistentialType*>(pc[2].p);
+    auto* concreteType = static_cast<Type*>(pc[3].p);
+    u32 numMethods     = (u32)pc[4].i;
+    u8  pw = concreteType->sizeWords_ ? concreteType->sizeWords_ : (u8)1;
+    auto* e = Existential::create(exType, concreteType, pw, (u16)numMethods);
+    // Copy the boxed value (pw consecutive words) then the witness indices.
+    for (u8 i = 0; i < pw; ++i) e->slots_[i] = vm.reg((u16)(valSrc + i));
+    for (u32 i = 0; i < numMethods; ++i) e->slots_[(u32)pw + i].i = pc[5 + i].i;
+    vm.reg(dst).o = e;
+    DISPATCH(5 + numMethods);
+}
+
+// CALL_WITNESS Rd, argBase, exReg  (3 words: op, regs, slotIdx)
+void op_call_witness(VM& vm, Code* pc) {
+    u16 resultReg = pc[1].regs[0];
+    u16 argBase   = pc[1].regs[1];
+    u16 exReg     = pc[1].regs[2];
+    u32 slot      = (u32)pc[2].i;
+
+    // Read the existential (and its callee) before pushFrame changes the base.
+    auto* ex = static_cast<Existential*>(vm.reg(exReg).o);
+    u32 calleeIdx = ex->methodIndex((u16)slot);
+    CodeBlock* callee = static_cast<CodeBlock*>(vm.global(calleeIdx).p);
+    u8 pw = ex->payloadWords_;
+
+    u32 newBase = vm.baseReg() + argBase;
+    Code* returnPC = pc + 3;
+    vm.pushFrame(returnPC, callee, newBase, callee->numRegs, resultReg);
+
+    // Unwrap the concrete value into the callee's leading parameter slots.
+    for (u8 i = 0; i < pw; ++i) vm.reg(i) = ex->slots_[i];
+
+    Code* entry = callee->code.data();
+    [[clang::musttail]] return entry->op(vm, entry);
+}
+
 // ANY_GET_VALUE Rd, Ra (2 words)
 void op_any_get_value(VM& vm, Code* pc) {
     u16 dst = pc[1].regs[0], src = pc[1].regs[1];

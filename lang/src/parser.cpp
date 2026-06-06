@@ -2643,6 +2643,20 @@ bool Parser::tryParseTypeArgs(std::vector<TypeExprPtr>& typeArgs) {
 // --- Type expressions ---
 
 TypeExprPtr Parser::parseTypeExpr() {
+    // Existential type: `some C`. `some` is a contextual keyword (it stays a
+    // valid identifier elsewhere, e.g. enum case names), so we only treat it as
+    // the existential introducer when it is immediately followed by a
+    // constraint name. Otherwise it is an ordinary named type.
+    if (current_.kind == TokenKind::Identifier && current_.text == "some") {
+        Token someTok = advance();  // consume 'some'
+        if (current_.kind == TokenKind::Identifier) {
+            Token cname = advance();
+            return std::make_unique<ExistentialTypeNode>(someTok.loc, cname.text);
+        }
+        // Not `some C`: treat the consumed token as a plain type named "some".
+        return std::make_unique<NamedTypeNode>(someTok.loc, someTok.text);
+    }
+
     // Persistent collection type: #[Type] or #[KeyType: ValueType]
     // Mutable collection type:    [Type]  or  [KeyType: ValueType]
     if (current_.kind == TokenKind::Hash || current_.kind == TokenKind::LBracket) {

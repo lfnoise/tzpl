@@ -1180,6 +1180,48 @@ public:
     }
 };
 
+// Existential instance — `some C`. Holds a value of some statically-hidden
+// concrete type together with a witness dictionary: the global code indices of
+// the constraint's required functions resolved for that concrete type, in
+// declaration order. The boxed value occupies payloadWords_ words (the concrete
+// type's natural footprint); the method indices follow it.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wc99-extensions"
+class Existential : public Obj {
+public:
+    Type* concreteType_;   // the hidden (erased) type
+    u8    payloadWords_;   // = concreteType_->sizeWords_ (>= 1)
+    u16   numMethods_;     // witness dictionary size
+    Word  slots_[];        // [0, payloadWords_) value; [payloadWords_, +numMethods_) method indices (.i)
+
+    static Existential* create(ExistentialType* type, Type* concreteType,
+                               u8 payloadWords, u16 numMethods);
+
+    Word*       valueData()       { return &slots_[0]; }
+    Word const* valueData() const { return &slots_[0]; }
+    u32 methodIndex(u16 i) const  { return (u32)slots_[(u32)payloadWords_ + i].i; }
+
+    VMString str() const override {
+        auto* et = static_cast<ExistentialType*>(type_);
+        VMString s = rt::vmstr("some ");
+        s += et->constraintName_.c_str();
+        s += "(";
+        s += wordsToString(&slots_[0], concreteType_);
+        s += ")";
+        return s;
+    }
+
+    void gcScanChildren(TracingGC& gc) override {
+        // Mark Obj* embedded in the boxed value; method indices are plain ints
+        // and concreteType_/type_ are immortal Type*s (never GC'd).
+        gcScanPayload(&slots_[0], concreteType_, gc);
+    }
+
+private:
+    Existential(ExistentialType* type, Type* concreteType, u8 payloadWords, u16 numMethods);
+};
+#pragma clang diagnostic pop
+
 // Range object — (start..end) with step.
 //
 // Phase 4g.14: start/end/step are stored natively per the element type's

@@ -520,6 +520,26 @@ public:
     VMString str() const override { return rt::vmstr("Any"); }
 };
 
+// Existential type — `some C`: a value of some statically-hidden type that
+// satisfies the structural constraint named by constraintName_, erased behind a
+// witness dictionary. Represented at runtime as a single Obj* (Repr::Pointer).
+// Phase 1: the type exists and type-checks; packing and dispatch arrive in
+// later phases.
+class ExistentialType : public ObjType {
+public:
+    std::string constraintName_;
+
+    explicit ExistentialType(std::string constraintName)
+        : constraintName_(std::move(constraintName))
+    {
+        registerNewObj(this);
+    }
+
+    VMString str() const override {
+        return rt::fmt("some {}", constraintName_);
+    }
+};
+
 // Method type
 class MethodType : public FunctionType {
 public:

@@ -427,6 +427,9 @@ void TypeChecker::checkLetDecl(LetDeclNode* decl) {
         // Allow int-to-float promotion
         if (declaredType == compiler_.floatType() && initType == compiler_.intType()) {
             // OK: promotion
+        } else if (dynamic_cast<ExistentialType*>(declaredType) &&
+                   isAssignable(initType, declaredType)) {
+            // OK: pack a concrete value into `some C` (codegen emits the pack).
         } else {
             error(decl->loc, "Type mismatch in let declaration: expected '" +
                   std::string(declaredType->str()) + "', got '" +

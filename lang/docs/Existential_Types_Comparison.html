@@ -1,0 +1,807 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Existential Types: Tzopilotl vs. Haskell, Rust, Swift, Go</title>
+<style>
+  :root {
+    --bg: #1a1b26;
+    --fg: #c9d1d9;
+    --accent: #58a6ff;
+    --accent-dim: #3d6ea8;
+    --code-bg: #21222c;
+    --code-border: #30363d;
+    --warn-bg: #2d2308;
+    --warn-border: #f59e0b;
+    --note-bg: #0d2137;
+    --note-border: #3b82f6;
+    --table-stripe: #1f2028;
+    --sidebar-bg: #16171f;
+    --sidebar-border: #2a2d3a;
+    --heading-fg: #e6edf3;
+    --muted-fg: #8b949e;
+    --h4-fg: #a0aec0;
+    --tip-bg: #0d2818;
+    --tip-border: #22c55e;
+    --diagram-bg: #21222c;
+    --syn-kw: #c678dd;
+    --syn-typ: #56d4e0;
+    --syn-str: #4ec970;
+    --syn-cmt: #6a737d;
+    --syn-num: #e5a537;
+    --syn-fn: #58a6ff;
+  }
+
+  html.light {
+    --bg: #fdfdfd;
+    --fg: #1a1a1a;
+    --accent: #2563eb;
+    --accent-dim: #93b4f5;
+    --code-bg: #f3f4f6;
+    --code-border: #dde1e6;
+    --warn-bg: #fef3c7;
+    --warn-border: #f59e0b;
+    --note-bg: #dbeafe;
+    --note-border: #3b82f6;
+    --table-stripe: #f8f9fa;
+    --sidebar-bg: #f8f9fb;
+    --sidebar-border: #e2e5ea;
+    --heading-fg: #0f172a;
+    --muted-fg: #64748b;
+    --h4-fg: #475569;
+    --tip-bg: #dcfce7;
+    --tip-border: #22c55e;
+    --diagram-bg: #fff;
+    --syn-kw: #8b5cf6;
+    --syn-typ: #0891b2;
+    --syn-str: #16a34a;
+    --syn-cmt: #94a3b8;
+    --syn-num: #d97706;
+    --syn-fn: #2563eb;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    font-size: 16px;
+    line-height: 1.7;
+    color: var(--fg);
+    background: var(--bg);
+    display: flex;
+    min-height: 100vh;
+  }
+
+  /* --- Sidebar / Table of Contents --- */
+
+  nav.sidebar {
+    position: sticky;
+    top: 0;
+    align-self: flex-start;
+    width: 280px;
+    min-width: 280px;
+    height: 100vh;
+    overflow-y: auto;
+    padding: 2rem 1.25rem;
+    background: var(--sidebar-bg);
+    border-right: 1px solid var(--sidebar-border);
+    font-size: 0.875rem;
+  }
+
+  nav.sidebar h2 {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--muted-fg);
+    margin-bottom: 1rem;
+  }
+
+  nav.sidebar ol {
+    list-style: none;
+    counter-reset: toc;
+  }
+
+  nav.sidebar > ol > li {
+    counter-increment: toc;
+    margin-bottom: 0.4rem;
+  }
+
+  nav.sidebar > ol > li > a::before {
+    content: counter(toc) ". ";
+    color: var(--accent-dim);
+    font-weight: 600;
+  }
+
+  nav.sidebar a {
+    color: var(--fg);
+    text-decoration: none;
+    display: block;
+    padding: 0.15rem 0;
+  }
+
+  nav.sidebar a:hover { color: var(--accent); }
+
+  nav.sidebar ol ol {
+    margin-left: 1rem;
+    margin-top: 0.2rem;
+    font-size: 0.82rem;
+  }
+
+  nav.sidebar ol ol li { margin-bottom: 0.2rem; }
+
+  /* --- Main Content --- */
+
+  main {
+    flex: 1;
+    max-width: 52rem;
+    margin: 0 auto;
+    padding: 3rem 2.5rem 6rem;
+  }
+
+  h1 {
+    font-size: 2.2rem;
+    font-weight: 700;
+    color: var(--heading-fg);
+    margin-bottom: 0.4rem;
+    line-height: 1.2;
+  }
+
+  h1 + .subtitle {
+    font-size: 1.1rem;
+    color: var(--muted-fg);
+    margin-bottom: 2.5rem;
+  }
+
+  h2 {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--heading-fg);
+    margin-top: 3.5rem;
+    margin-bottom: 1rem;
+    padding-bottom: 0.35rem;
+    border-bottom: 2px solid var(--accent);
+  }
+
+  h3 {
+    font-size: 1.15rem;
+    font-weight: 600;
+    color: var(--heading-fg);
+    margin-top: 2.2rem;
+    margin-bottom: 0.6rem;
+  }
+
+  h4 {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--h4-fg);
+    margin-top: 1.6rem;
+    margin-bottom: 0.4rem;
+  }
+
+  p { margin-bottom: 1rem; }
+
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  /* Code */
+
+  code {
+    font-family: 'SF Mono', 'Fira Code', 'JetBrains Mono', Menlo, Consolas, monospace;
+    font-size: 0.88em;
+    background: var(--code-bg);
+    border: 1px solid var(--code-border);
+    border-radius: 4px;
+    padding: 0.15em 0.4em;
+  }
+
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--code-border);
+    border-radius: 6px;
+    padding: 1.1rem 1.3rem;
+    overflow-x: auto;
+    margin-bottom: 1.2rem;
+    line-height: 1.55;
+  }
+
+  pre code {
+    background: none;
+    border: none;
+    padding: 0;
+    font-size: 0.86rem;
+  }
+
+  /* Keyword colouring (manual spans) */
+  .kw  { color: var(--syn-kw); font-weight: 600; }
+  .typ { color: var(--syn-typ); }
+  .str { color: var(--syn-str); }
+  .cmt { color: var(--syn-cmt); font-style: italic; }
+  .num { color: var(--syn-num); }
+  .fn  { color: var(--syn-fn); }
+
+  /* Tables */
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 1.4rem;
+    font-size: 0.92rem;
+  }
+
+  th, td {
+    text-align: left;
+    padding: 0.55rem 0.9rem;
+    border: 1px solid var(--code-border);
+  }
+
+  th {
+    background: var(--code-bg);
+    font-weight: 600;
+    color: var(--heading-fg);
+  }
+
+  tr:nth-child(even) { background: var(--table-stripe); }
+
+  /* Callout boxes */
+
+  .note, .warning, .tip {
+    border-left: 4px solid;
+    border-radius: 4px;
+    padding: 0.9rem 1.1rem;
+    margin-bottom: 1.2rem;
+    font-size: 0.94rem;
+  }
+
+  .note    { background: var(--note-bg); border-color: var(--note-border); }
+  .warning { background: var(--warn-bg); border-color: var(--warn-border); }
+  .tip     { background: var(--tip-bg); border-color: var(--tip-border); }
+
+  .note strong, .warning strong, .tip strong {
+    display: block;
+    margin-bottom: 0.25rem;
+  }
+
+  /* Lists */
+
+  ul, ol { margin-left: 1.6rem; margin-bottom: 1rem; }
+  li { margin-bottom: 0.3rem; }
+
+  /* Diagram */
+  .diagram {
+    background: var(--diagram-bg);
+    border: 1px solid var(--code-border);
+    border-radius: 6px;
+    padding: 1.5rem;
+    margin-bottom: 1.4rem;
+    overflow-x: auto;
+    text-align: center;
+  }
+
+  .diagram pre {
+    display: inline-block;
+    text-align: left;
+    background: none;
+    border: none;
+    padding: 0;
+    margin: 0;
+    font-size: 0.82rem;
+    line-height: 1.5;
+  }
+
+  /* Theme toggle */
+  .theme-toggle {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 1.5rem;
+    padding: 0.4rem 0.75rem;
+    background: var(--code-bg);
+    border: 1px solid var(--code-border);
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 1.1rem;
+    color: var(--fg);
+    transition: background 0.2s;
+    width: 100%;
+    justify-content: center;
+  }
+  .theme-toggle:hover { background: var(--table-stripe); }
+
+  body, nav.sidebar, pre, code, .note, .warning, .tip, .diagram, th, td {
+    transition: background-color 0.3s, color 0.3s, border-color 0.3s;
+  }
+
+  /* Responsive */
+  @media (max-width: 900px) {
+    nav.sidebar { display: none; }
+    main { padding: 2rem 1.2rem 4rem; }
+  }
+</style>
+<script>
+if (localStorage.getItem('tzpl-docs-theme') === 'light') document.documentElement.classList.add('light');
+</script>
+</head>
+<body>
+
+<!-- ================================================================ -->
+<!--  SIDEBAR                                                         -->
+<!-- ================================================================ -->
+
+<nav class="sidebar">
+  <button class="theme-toggle" id="theme-toggle" aria-label="Toggle theme">
+    <span id="theme-icon">&#9790;</span>
+  </button>
+  <h2>Contents</h2>
+  <ol>
+    <li><a href="#overview">Overview</a></li>
+    <li><a href="#common-machinery">The Common Machinery</a></li>
+    <li><a href="#at-a-glance">At a Glance</a></li>
+    <li><a href="#tzopilotl">Tzopilotl: <code>some C</code></a></li>
+    <li><a href="#haskell">Haskell: Existential Quantification</a></li>
+    <li><a href="#rust">Rust: <code>dyn Trait</code></a></li>
+    <li><a href="#swift">Swift: <code>any P</code></a></li>
+    <li><a href="#go">Go: Interfaces</a></li>
+    <li><a href="#synthesis">Where Tzopilotl Sits</a></li>
+    <li><a href="#summaries">One-Line Summaries</a></li>
+  </ol>
+</nav>
+
+<!-- ================================================================ -->
+<!--  MAIN                                                            -->
+<!-- ================================================================ -->
+
+<main>
+
+<h1>Existential Types</h1>
+<p class="subtitle">Tzopilotl's <code>some C</code> compared with Haskell, Rust, Swift, and Go</p>
+
+<h2 id="overview">1. Overview</h2>
+
+<p>This document compares Tzopilotl's <code>some C</code> existential types with
+the analogous features in four other statically typed languages. The goal is to
+locate Tzopilotl's design in the broader landscape and to explain <em>why</em>
+it made the choices it did &mdash; choices driven, for the most part, by static
+typing and a preference for simple, deterministic machinery.</p>
+
+<p>All five languages solve the same core problem: <em>erase a concrete type
+behind an interface so that values of different underlying types can be stored
+together and used uniformly, while keeping a record of how to call the
+interface's operations on each one.</em> They differ in the surface syntax, the
+runtime representation, when and how the "how to call it" record (the
+<strong>witness dictionary</strong> / <strong>vtable</strong> /
+<strong>itab</strong>) is built, and which operations are even <em>allowed</em>
+to appear in such an interface.</p>
+
+<h2 id="common-machinery">2. The Common Machinery</h2>
+
+<p>Every implementation here is a variation on the same idea, the
+<strong>dictionary-passing</strong> (or <strong>vtable</strong>) translation of
+bounded polymorphism:</p>
+
+<div class="note">
+  <strong>The core representation</strong>
+  A value behind an interface is represented as a pair
+  <em>(payload, dictionary)</em>, where the dictionary holds a function pointer
+  (or an index resolving to one) for each operation the interface requires,
+  specialized to the payload's hidden concrete type.
+</div>
+
+<p>The interesting differences are:</p>
+
+<table>
+  <thead>
+    <tr><th>Axis</th><th>What varies</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><strong>Naming discipline</strong></td><td>Is the interface <em>nominal</em> (you declare conformance) or <em>structural</em> (any type with the right shape qualifies)?</td></tr>
+    <tr><td><strong>When the dictionary is built</strong></td><td>At compile time, at the boxing/pack site, or lazily at runtime?</td></tr>
+    <tr><td><strong>Object safety</strong></td><td>Which operation signatures are allowed? In particular, can the hidden type appear in more than one position (the <em>binary-method problem</em>)?</td></tr>
+    <tr><td><strong>Payload storage</strong></td><td>Always heap-boxed, or inline for small values?</td></tr>
+    <tr><td><strong>World</strong></td><td>Open (conformances added anywhere, anytime) or closed (known at definition)?</td></tr>
+  </tbody>
+</table>
+
+<p>The most consequential of these axes is <strong>when the dictionary is
+built</strong>. It splits the five languages into those that resolve the
+dictionary statically &mdash; Tzopilotl, Rust, Swift &mdash; and those that
+build or capture it at runtime: Go lazily on first use, Haskell at box
+construction. Tzopilotl resolves at the <strong>pack site</strong> &mdash; the
+concrete type is statically known there and the overload resolver is a
+compile-time component, so no resolution work needs to happen at runtime.</p>
+
+<h2 id="at-a-glance">3. At a Glance</h2>
+
+<table>
+  <thead>
+    <tr>
+      <th></th><th>Tzopilotl</th><th>Haskell</th><th>Rust</th><th>Swift</th><th>Go</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><td>Surface syntax</td><td><code>some C</code></td><td><code>forall a. C a =&gt; &hellip;</code></td><td><code>dyn Trait</code></td><td><code>any P</code></td><td><code>interface{ &hellip; }</code></td></tr>
+    <tr><td>Interface decl</td><td><code>constraint C&lt;T&gt; = requires {&hellip;}</code></td><td><code>class C a where</code></td><td><code>trait T {&hellip;}</code></td><td><code>protocol P {&hellip;}</code></td><td><code>type I interface {&hellip;}</code></td></tr>
+    <tr><td>Naming</td><td><strong>Structural</strong></td><td>Nominal</td><td>Nominal</td><td>Nominal</td><td><strong>Structural</strong></td></tr>
+    <tr><td>Dictionary built</td><td><strong>At pack site</strong></td><td>At box construction</td><td>At coercion (static vtable)</td><td>At coercion (static PWT)</td><td><strong>Lazily at runtime</strong></td></tr>
+    <tr><td>Representation</td><td><code>{concreteType, words, indices&hellip;}</code></td><td>boxed ctor + dict</td><td>fat ptr <code>(data*, vtable*)</code></td><td>container (inline &le;3 words) + PWT</td><td><code>iface{itab*, data*}</code></td></tr>
+    <tr><td>Inline small payloads</td><td><strong>Yes</strong></td><td>No</td><td>No</td><td>Yes</td><td>No</td></tr>
+    <tr><td>Object safety</td><td><strong>Explicit, rejects unsafe</strong></td><td>Not enforced (legal but unusable)</td><td><strong>Explicit, strict</strong></td><td>"Self/assoc-type" restriction</td><td>Sidestepped by structure</td></tr>
+    <tr><td>Binary methods <code>+(T,T)</code></td><td>Rejected at use</td><td>Compiles, unusable across boxes</td><td>Not object-safe</td><td>Not usable as existential</td><td>Interface-typed args + runtime assert</td></tr>
+    <tr><td>World</td><td>Open (scope-based)</td><td>Open (orphan instances)</td><td>Open (coherence-checked)</td><td>Open (retroactive)</td><td>Open (structural)</td></tr>
+  </tbody>
+</table>
+
+<h2 id="tzopilotl">4. Tzopilotl: <code>some C</code></h2>
+
+<pre><code><span class="kw">constraint</span> <span class="typ">Drawable</span>&lt;<span class="typ">T</span>&gt; = <span class="kw">requires</span> { draw(<span class="typ">T</span>) <span class="kw">String</span>; };
+
+<span class="kw">struct</span> <span class="typ">Circle</span> { r <span class="kw">Float</span>; }
+<span class="kw">struct</span> <span class="typ">Square</span> { side <span class="kw">Int</span>; }
+<span class="kw">fn</span> draw(c <span class="typ">Circle</span>) <span class="kw">String</span> = <span class="str">"circle"</span>;
+<span class="kw">fn</span> draw(s <span class="typ">Square</span>) <span class="kw">String</span> = <span class="str">"square"</span>;
+
+<span class="kw">let</span> shapes [<span class="kw">some</span> <span class="typ">Drawable</span>] = [<span class="typ">Circle</span> { r: <span class="num">1.0</span> }, <span class="typ">Square</span> { side: <span class="num">3</span> }];
+shapes draw println;          <span class="cmt">-- [circle, square]  (auto-mapped, per-element dispatch)</span></code></pre>
+
+<h4>Mechanism</h4>
+<p>A <code>some C</code> value is a heap object
+<code>{ Type* concreteType; u8 payloadWords; u16 numMethods; Word slots[] }</code>.
+The <code>slots</code> array holds first the value's own words (the payload,
+copied inline, <code>concreteType-&gt;sizeWords</code> of them), then one global
+code index per required method. The dictionary is the trailing run of method
+indices; dispatch (<code>op_call_witness</code>) reads
+<code>slot[payloadWords + methodSlot]</code>, looks up the global
+<code>CodeBlock</code>, pushes a frame, copies the inline payload words into the
+callee's parameter slots, and runs.</p>
+
+<h4>When the dictionary is built</h4>
+<p>At the <strong>pack site</strong> &mdash; the point where a concrete value is
+coerced to <code>some C</code> (a <code>let</code>, an argument, a collection
+literal element). The concrete type is statically known there, so the type
+checker's <code>materializeWitness</code> resolves each required function to a
+fixed global index via ordinary overload resolution. The pack allocates one
+<code>Existential</code> object and stores those indices in it; what it
+<em>avoids</em> is any <strong>resolution</strong> work at runtime &mdash; no
+runtime monomorphization, no lazy dictionary build, no resolver reified into the
+VM. Dispatch is therefore a constant-time array lookup, and the whole mechanism
+falls out of static typing: because the type is known at the pack site, there is
+nothing left to decide later.</p>
+
+<h4>Structural, not nominal</h4>
+<p>A type satisfies <code>Drawable</code> simply by having a
+<code>draw(T) String</code> in scope &mdash; there is no <code>impl &hellip; for
+&hellip;</code> / <code>instance</code> ceremony. This is like Go's interfaces,
+not Haskell/Rust/Swift.</p>
+
+<h4>Object safety is enforced and explicit</h4>
+<p><code>isExistentialSafe</code> analyzes the constraint: each required function
+must have <strong>exactly one</strong> parameter that is <em>exactly</em> the
+type variable <code>T</code> (the dispatching argument); no other parameter may
+mention <code>T</code>; the return must be <code>T</code>-free (return-<code>T</code>
+re-packing is deferred). A constraint like
+<code>Addable = requires { +(T,T) T }</code> is the <strong>binary-method
+problem</strong> &mdash; <code>T</code> in two argument positions &mdash; and
+Tzopilotl <strong>rejects it at the point you try to use it
+existentially</strong>, with a diagnostic naming the offending requirement. The
+numeric constraints that pervade the codebase therefore cannot be made
+existential, which is the correct outcome.</p>
+
+<h4>Composition and modules</h4>
+<p>Composed constraints concatenate their component method lists (object-safety
+rejection propagates with a message naming the bad component); constraints
+export/import across modules, so <code>some C</code> works for an imported
+<code>C</code>, including an imported composition. Both fell out of the recursive
+machinery with no new code.</p>
+
+<h4>Heterogeneous collections + auto-map</h4>
+<p><code>[some C]</code>, <code>List&lt;some C&gt;</code>, and
+<code>#[some C]</code> pack each element on construction; a constraint method
+auto-maps over such a collection, dispatching per element through that element's
+own dictionary.</p>
+
+<div class="note">
+  <strong>Deferred (not yet implemented)</strong>
+  Multi-argument witness dispatch (only the receiver argument today), and
+  methods returning the hidden type <code>T</code> (re-packing the result).
+</div>
+
+<h2 id="haskell">5. Haskell: Existential Quantification</h2>
+
+<pre><code><span class="cmt">{-# LANGUAGE ExistentialQuantification #-}</span>
+<span class="kw">data</span> <span class="typ">Drawable</span> = <span class="kw">forall</span> a. <span class="typ">Draw</span> a =&gt; <span class="typ">MkDrawable</span> a
+
+draws :: [<span class="typ">Drawable</span>]
+draws = [<span class="typ">MkDrawable</span> <span class="typ">Circle</span>, <span class="typ">MkDrawable</span> <span class="typ">Square</span>]</code></pre>
+
+<h4>Mechanism</h4>
+<p>Haskell already compiles type classes by <strong>dictionary passing</strong>:
+a <code>Draw a =&gt;</code> constraint is an extra, invisible argument carrying
+the method table. An existential <code>data</code> type with a class context
+<em>captures that dictionary inside the box</em> at construction.
+<code>MkDrawable x</code> stores both <code>x</code> and the <code>Draw</code>
+dictionary for <code>x</code>'s type; unpacking gives you back a value plus its
+dictionary, with the concrete type existentially hidden (you may only use it
+through the captured class methods).</p>
+
+<h4>Closest kinship to Tzopilotl</h4>
+<p>Both are <em>dictionary-capturing at the box site</em>. The difference is
+what's in the box: Haskell stores a pointer to a heap-allocated,
+lazily-evaluated class dictionary (itself possibly built from superclass
+dictionaries via thunks); Tzopilotl stores the payload <em>inline</em> plus a
+flat array of <em>integer global indices</em>, fully resolved, no thunks.</p>
+
+<h4>Naming</h4>
+<p>Nominal: a type participates only via an <code>instance Draw T where
+&hellip;</code> declaration. Orphan instances make the world genuinely open
+&mdash; an instance can live in a third module &mdash; exactly the kind of late,
+non-local resolution that Tzopilotl's pack-site model forgoes, since it binds
+witnesses from the functions visible where the value is packed.</p>
+
+<h4>Object safety</h4>
+<p>Haskell does <em>not</em> reject "object-unsafe" classes. You can
+existentially quantify over <code>Eq</code>
+(<code>(==) :: a -&gt; a -&gt; Bool</code>, a binary method), but you simply
+<em>cannot call <code>==</code> on two <code>MkEq</code> boxes</em>, because each
+hides a possibly-different type and the dictionary only knows how to compare its
+own type with itself. The restriction is enforced by the type checker at the
+<em>use site</em>, not by forbidding the class. Tzopilotl instead rejects the
+<em>constraint</em> when used existentially, up front, with a targeted message
+&mdash; a more ergonomic failure mode for the same underlying limitation.</p>
+
+<h2 id="rust">6. Rust: <code>dyn Trait</code> Trait Objects</h2>
+
+<pre><code><span class="kw">trait</span> <span class="typ">Draw</span> { <span class="kw">fn</span> <span class="fn">draw</span>(&amp;<span class="kw">self</span>) -&gt; <span class="typ">String</span>; }
+<span class="kw">impl</span> <span class="typ">Draw</span> <span class="kw">for</span> <span class="typ">Circle</span> { <span class="kw">fn</span> <span class="fn">draw</span>(&amp;<span class="kw">self</span>) -&gt; <span class="typ">String</span> { <span class="str">"circle"</span>.into() } }
+<span class="kw">impl</span> <span class="typ">Draw</span> <span class="kw">for</span> <span class="typ">Square</span> { <span class="kw">fn</span> <span class="fn">draw</span>(&amp;<span class="kw">self</span>) -&gt; <span class="typ">String</span> { <span class="str">"square"</span>.into() } }
+
+<span class="kw">let</span> shapes: <span class="typ">Vec</span>&lt;<span class="typ">Box</span>&lt;<span class="kw">dyn</span> <span class="typ">Draw</span>&gt;&gt; = <span class="kw">vec!</span>[<span class="typ">Box</span>::new(<span class="typ">Circle</span>), <span class="typ">Box</span>::new(<span class="typ">Square</span>)];
+<span class="kw">for</span> s <span class="kw">in</span> &amp;shapes { <span class="kw">println!</span>(<span class="str">"{}"</span>, s.draw()); }</code></pre>
+
+<h4>Mechanism</h4>
+<p>A <code>dyn Trait</code> value is a <strong>fat pointer</strong>:
+<code>(data pointer, vtable pointer)</code>. The vtable for each
+<code>(concrete type, trait)</code> pair is built <strong>statically by the
+compiler</strong> and lives in the binary's read-only data; the coercion
+<code>Box::new(Circle) as Box&lt;dyn Draw&gt;</code> just attaches the address of
+<code>Circle</code>'s <code>Draw</code> vtable. So the dictionary exists at
+compile time and the "pack" is a pointer store &mdash; even cheaper than
+Tzopilotl's object construction, but the payload is <em>always behind a
+pointer</em> (no inline small-value buffer).</p>
+
+<h4>Object safety is explicit and strict</h4>
+<p>&mdash; and is the design Tzopilotl's analysis most resembles. Rust's rules:
+no generic methods, the trait must not require <code>Self: Sized</code>, and
+<strong><code>Self</code> may not appear in method signatures except as the
+receiver</strong>. That last rule is precisely the binary-method exclusion:
+<code>fn eq(&amp;self, other: &amp;Self)</code> makes <code>Eq</code> not
+object-safe, because a <code>dyn Eq</code> has erased the type that
+<code>other: &amp;Self</code> would need. Tzopilotl's "exactly one parameter is
+exactly <code>T</code>, return is <code>T</code>-free" rule is the same
+constraint phrased for a structural, multi-argument-function world.</p>
+
+<h4>Naming</h4>
+<p>Nominal, with coherence (the orphan rule) ensuring at most one
+<code>impl</code> per <code>(type, trait)</code> &mdash; so unlike Haskell the
+world is open but globally consistent.</p>
+
+<h4><code>dyn</code> vs <code>impl</code></h4>
+<p>Worth noting the dual: Rust's <code>impl Trait</code> is the
+<em>universal/opaque</em> counterpart ("some specific type the <em>callee</em>
+picks, erased from the <em>caller</em>"), whereas <code>dyn Trait</code> is the
+<em>existential</em> ("some type the <em>caller</em> picked, erased from the
+<em>callee</em>"). Tzopilotl's <code>some C</code> is the <code>dyn</code> side
+of this duality. (Confusingly, Swift names them the opposite way around &mdash;
+see below.)</p>
+
+<h4>Compared to Tzopilotl</h4>
+<p>On the dispatch mechanism the two are close peers &mdash; a statically built
+table attached at the coercion/pack site. The divergences are
+nominal-vs-structural and heap-pointer-vs-inline payload: a
+<code>dyn Trait</code> always reaches its data through a pointer, whereas
+Tzopilotl copies a small payload inline into the <code>Existential</code>
+object.</p>
+
+<h2 id="swift">7. Swift: <code>any P</code> Existentials and Witness Tables</h2>
+
+<pre><code><span class="kw">protocol</span> <span class="typ">Draw</span> { <span class="kw">func</span> <span class="fn">draw</span>() -&gt; <span class="typ">String</span> }
+<span class="kw">extension</span> <span class="typ">Circle</span>: <span class="typ">Draw</span> { <span class="kw">func</span> <span class="fn">draw</span>() -&gt; <span class="typ">String</span> { <span class="str">"circle"</span> } }
+<span class="kw">extension</span> <span class="typ">Square</span>: <span class="typ">Draw</span> { <span class="kw">func</span> <span class="fn">draw</span>() -&gt; <span class="typ">String</span> { <span class="str">"square"</span> } }
+
+<span class="kw">let</span> shapes: [<span class="kw">any</span> <span class="typ">Draw</span>] = [<span class="typ">Circle</span>(), <span class="typ">Square</span>()]
+<span class="kw">for</span> s <span class="kw">in</span> shapes { <span class="fn">print</span>(s.draw()) }</code></pre>
+
+<h4>Mechanism</h4>
+<p>A Swift existential is an <strong>existential container</strong>: a small
+fixed-size buffer (historically three machine words) that stores the payload
+<strong>inline if it fits</strong>, else a pointer to a heap box, <em>plus</em>
+pointers to the <strong>protocol witness table</strong> (PWT, the method
+dictionary) and value-witness table (for copy/destroy). The PWT is generated
+statically by the compiler per conformance and referenced at the coercion
+site.</p>
+
+<h4>Closest kinship on representation</h4>
+<p>Swift's inline-buffer-or-box container is the nearest analogue to Tzopilotl's
+<strong>inline payload words</strong>: both avoid a heap indirection for small
+values. Tzopilotl always allocates the one <code>Existential</code> object (it
+is a GC heap object), but the <em>payload</em> lives inline in that object's
+<code>slots</code>, not behind a further pointer &mdash; structurally similar to
+Swift packing a small value into the container's buffer.</p>
+
+<div class="warning">
+  <strong>The <code>some</code>/<code>any</code> naming inversion</strong>
+  This is the sharpest terminological contrast in this whole comparison. In
+  <strong>Swift</strong>, <code>some P</code> is the <em>opaque result type</em>
+  (universal &mdash; like Rust's <code>impl Trait</code>), and <code>any P</code>
+  is the <em>existential</em>. In <strong>Tzopilotl</strong>, <code>some C</code>
+  <strong>is the existential</strong>. So the same keyword names opposite
+  features. A reader fluent in Swift must consciously re-map: Tzopilotl
+  <code>some C</code> &asymp; Swift <code>any P</code>, not Swift
+  <code>some P</code>.
+</div>
+
+<h4>Object safety</h4>
+<p>Swift's historical restriction is that a protocol with <code>Self</code>
+requirements or <strong>associated types</strong> "can only be used as a generic
+constraint," not as an existential type &mdash; the same binary-method /
+hidden-type obstruction, surfaced as the famous <em>"Protocol can only be used
+as a generic constraint because it has Self or associated type
+requirements"</em> error. Swift 5.7's <code>any</code> and primary associated
+types relaxed parts of this, but the core obstruction (you can't call a
+<code>Self -&gt; Self -&gt; Bool</code> method across two erased values) remains.
+Tzopilotl's analysis covers the same ground for its function-style (non-method)
+requirements.</p>
+
+<h4>Naming</h4>
+<p>Nominal, with retroactive conformance via <code>extension</code> &mdash; an
+open world like Rust's, coherence-checked.</p>
+
+<h2 id="go">8. Go: Interfaces</h2>
+
+<pre><code><span class="kw">type</span> <span class="typ">Draw</span> <span class="kw">interface</span> { draw() <span class="kw">string</span> }
+<span class="kw">func</span> (c <span class="typ">Circle</span>) <span class="fn">draw</span>() <span class="kw">string</span> { <span class="kw">return</span> <span class="str">"circle"</span> }
+<span class="kw">func</span> (s <span class="typ">Square</span>) <span class="fn">draw</span>() <span class="kw">string</span> { <span class="kw">return</span> <span class="str">"square"</span> }
+
+shapes := []<span class="typ">Draw</span>{<span class="typ">Circle</span>{}, <span class="typ">Square</span>{}}
+<span class="kw">for</span> _, s := <span class="kw">range</span> shapes { <span class="typ">fmt</span>.Println(s.draw()) }</code></pre>
+
+<h4>Mechanism</h4>
+<p>A Go interface value is <code>iface{ itab*, data* }</code>. The
+<strong>itab</strong> (interface table) pairs the interface type with a concrete
+type and holds the method pointers &mdash; it is the dictionary. Critically,
+<strong>itabs are built lazily at runtime</strong> the first time a given
+<code>(interface, concrete)</code> pair is needed, then cached in a global hash
+table. The <code>data</code> word points to the value (boxed on the heap if it
+doesn't fit in a word).</p>
+
+<h4>Closest kinship on naming discipline</h4>
+<p>Go and Tzopilotl are the two <strong>structural</strong> systems here: a type
+satisfies an interface/constraint merely by having the right methods &mdash; no
+<code>impl</code>/<code>instance</code>/<code>extension</code> declaration. A
+Tzopilotl <code>constraint C&lt;T&gt; = requires { draw(T) String; }</code> and a
+Go <code>interface { draw() string }</code> express the same "any type with this
+shape" idea. This is the axis on which Tzopilotl departs furthest from
+Haskell/Rust/Swift and aligns with Go.</p>
+
+<h4>But the opposite choice on dictionary timing</h4>
+<p>Go builds itabs <em>lazily at runtime</em> &mdash; on first use of a given
+<code>(interface, concrete)</code> pair it assembles the method table and caches
+it in a global hash table; Tzopilotl resolves every witness to a global index
+<em>at the compile-time-known pack site</em>. This is the one axis where the two
+otherwise-similar structural systems diverge sharply: Go defers the dictionary
+to runtime because, with no compile step that specializes per concrete type, it
+has no earlier moment at which to build it; Tzopilotl has exactly that moment
+&mdash; the point where the value is packed, where the concrete type is
+known.</p>
+
+<h4>Object safety</h4>
+<p>Go has no <code>Self</code> type, so the binary-method problem doesn't arise
+the same way. A "compare two shapes" operation is written as
+<code>Equal(other Shape) bool</code> taking the <em>interface</em> type, and the
+implementation recovers the concrete type with a runtime <strong>type
+assertion</strong> / type switch. So Go permits binary-method-like APIs but
+pushes the "are these the same hidden type?" question to a <em>dynamic</em>
+check, trading Tzopilotl's static rejection for runtime flexibility (and a
+possible runtime failure).</p>
+
+<h2 id="synthesis">9. Where Tzopilotl Sits</h2>
+
+<p>Tzopilotl's existentials are best understood as <strong>Go's structural
+interfaces with Rust's compile-time resolution discipline and Swift's inline
+payload storage, gated by an explicit object-safety analysis like
+Rust's</strong>.</p>
+
+<ul>
+  <li><strong>From Go:</strong> structural conformance. No
+    <code>impl</code>/<code>instance</code> ceremony; a type qualifies by having
+    the required functions in scope. This fits Tzopilotl's function-centric
+    (non-OO) surface, where <code>draw(c Circle)</code> is a free function, not a
+    method on <code>Circle</code>.</li>
+  <li><strong>From Rust/Swift:</strong> the dictionary is resolved at compile
+    time and the "pack" attaches a fixed table &mdash; but Tzopilotl resolves to
+    <strong>global code indices</strong> (integers) rather than raw function
+    pointers, fitting its direct-threaded VM and its movable GC heap.</li>
+  <li><strong>From Swift:</strong> the payload lives <strong>inline</strong> in
+    the existential object, not behind a second pointer &mdash; cheaper access,
+    fewer indirections.</li>
+  <li><strong>From Rust:</strong> an <strong>explicit, enforced object-safety
+    rule</strong> that rejects binary-method constraints up front, rather than
+    Haskell's "legal but unusable" or Go's "defer it to a runtime
+    assertion."</li>
+</ul>
+
+<p>The genuine novelty is the combination itself: Go-style
+<strong>structural</strong> conformance <em>and</em> Rust/Swift-style
+<strong>fully-static</strong> resolution at once. Those two are usually traded
+against each other &mdash; structural systems (Go) tend to resolve dictionaries
+at runtime, while statically-resolved systems (Rust, Swift) tend to be nominal.
+Tzopilotl gets both because it packs at a site where the concrete type is always
+known, so a structural match can still be turned into a fixed table at compile
+time. The inline payload and the explicit object-safety gate round out a design
+that borrows the best-fitting piece from each neighbour.</p>
+
+<h3>Trade-offs Tzopilotl accepts</h3>
+<ul>
+  <li><strong>Conformance is resolved at the pack site, not registered on the
+    type.</strong> To use a value as <code>some C</code>, the functions
+    <code>C</code> requires need only be <em>in scope</em> where the value is
+    packed &mdash; the same condition as calling those functions directly. So
+    conformance is never a global fact stamped on a type (as a Haskell
+    <code>instance</code> or Swift <code>extension</code> is): it does not travel
+    with the value, but is recomputed at each pack site from the visible
+    functions. You <em>can</em> retroactively conform a foreign type, even from a
+    third module &mdash; you just import that module's functions. What is absent
+    is authoritative, program-wide registration (and the coherence rule that
+    would force two modules to supply the same witness). In practice this is
+    barely a restriction: needing an interface's methods in scope to use it is
+    unsurprising.</li>
+  <li><strong>Single dispatching argument (today).</strong> Multi-argument
+    witness dispatch and return-<code>T</code> re-packing are deferred. Rust/Swift
+    handle return-<code>Self</code> (it re-wraps); Tzopilotl will need the
+    re-pack path to match. Genuine binary methods stay rejected in <em>all</em>
+    of these systems (Go only "supports" them via dynamic assertion).</li>
+</ul>
+
+<h2 id="summaries">10. One-Line Summaries</h2>
+
+<ul>
+  <li><strong>Tzopilotl</strong> &mdash; structural constraints, witness
+    dictionary resolved to global indices <strong>at the pack site</strong>
+    (enabled by static typing), inline payload, explicit object-safety rejection
+    of binary methods.</li>
+  <li><strong>Haskell</strong> &mdash; nominal classes compiled by dictionary
+    passing; existential <code>data</code> captures the dictionary at the box;
+    object-unsafe classes are <em>legal but unusable</em>.</li>
+  <li><strong>Rust</strong> &mdash; nominal traits; <code>dyn Trait</code> fat
+    pointer with a <strong>static vtable</strong>; strict, explicit
+    object-safety rules; payload always behind a pointer.</li>
+  <li><strong>Swift</strong> &mdash; nominal protocols; <code>any P</code>
+    existential container (inline buffer or box) + static <strong>protocol
+    witness table</strong>; <code>some P</code> means the <em>opposite</em>
+    (opaque/universal); <code>Self</code>/associated-type requirements restrict
+    existential use.</li>
+  <li><strong>Go</strong> &mdash; structural interfaces;
+    <code>iface{itab, data}</code> with <strong>lazily-built, cached
+    itabs</strong>; no <code>Self</code>, so binary-method-like APIs go through
+    runtime type assertions.</li>
+</ul>
+
+</main>
+<script>
+(function() {
+  var btn = document.getElementById('theme-toggle');
+  var icon = document.getElementById('theme-icon');
+  function update() {
+    var isLight = document.documentElement.classList.contains('light');
+    icon.innerHTML = isLight ? '☀' : '☾';
+  }
+  update();
+  btn.addEventListener('click', function() {
+    document.documentElement.classList.toggle('light');
+    localStorage.setItem('tzpl-docs-theme',
+      document.documentElement.classList.contains('light') ? 'light' : 'dark');
+    update();
+  });
+})();
+</script>
+</body>
+</html>

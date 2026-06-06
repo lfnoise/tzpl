@@ -490,6 +490,7 @@ if (localStorage.getItem('tzpl-docs-theme') === 'light') document.documentElemen
         <li><a href="#template-enums">Template Enums</a></li>
         <li><a href="#template-constraints">Template Constraints</a></li>
         <li><a href="#template-lambdas">Template Lambdas</a></li>
+        <li><a href="#existential-types">Existential Types (<code>some C</code>)</a></li>
       </ol>
     </li>
     <li><a href="#type-aliases">Type Aliases</a>
@@ -2698,6 +2699,108 @@ triple(<span class="num">1.5</span>) println;    <span class="cmt">-- 4.5</span>
 
 pair(<span class="num">1</span>, <span class="str">"hello"</span>) println;    <span class="cmt">-- (1, "hello")</span>
 pair(<span class="num">3.14</span>, <span class="kw">true</span>) println;    <span class="cmt">-- (3.14, true)</span></code></pre>
+
+<h3 id="existential-types">20.6 Existential Types (<code>some C</code>)</h3>
+<p>A template parameter <code>&lt;T: C&gt;</code> is resolved to one concrete type at each
+   call site, so a function written that way is specialized per type and a
+   <code>[Drawable]</code>-style container would have to be homogeneous (see the
+   note in <a href="#template-constraints">Template Constraints</a> &mdash; constraints
+   are not supertypes). An <strong>existential type</strong>, written <code>some C</code>,
+   takes the opposite view: it is a value of <em>some</em> hidden type that
+   satisfies the structural constraint <code>C</code>, with the concrete type
+   erased. Different <code>some C</code> values may wrap different types, yet all
+   can be used through <code>C</code>'s methods.</p>
+
+<p>A concrete value is wrapped in <code>some C</code> automatically wherever it
+   flows into a <code>some C</code> slot &mdash; a function argument, a binding, or a
+   collection element. (In the type-theory literature this operation is called
+   <em>pack</em>.) Calling one of <code>C</code>'s required functions on a
+   <code>some C</code> value dispatches to the wrapped type's implementation:</p>
+<pre><code><span class="kw">constraint</span> Drawable&lt;T&gt; = <span class="kw">requires</span> { draw(T) <span class="kw">String</span> };
+
+<span class="kw">struct</span> Circle { r <span class="kw">Float</span>; }
+<span class="kw">struct</span> Square { side <span class="kw">Int</span>; }
+<span class="kw">fn</span> draw(c Circle) <span class="kw">String</span> = <span class="str">"circle"</span>;
+<span class="kw">fn</span> draw(s Square) <span class="kw">String</span> = <span class="str">"square"</span>;
+
+<span class="cmt">-- One function, many hidden types. The argument is wrapped; draw(x) dispatches.</span>
+<span class="kw">fn</span> render(x <span class="kw">some</span> Drawable) <span class="kw">String</span> = draw(x);
+
+render(Circle { r: <span class="num">2.0</span> }) println;   <span class="cmt">-- circle</span>
+render(Square { side: <span class="num">3</span> }) println;  <span class="cmt">-- square</span>
+
+<span class="cmt">-- A binding works the same way; the concrete type is hidden afterward.</span>
+<span class="kw">let</span> d <span class="kw">some</span> Drawable = Circle { r: <span class="num">1.0</span> };
+draw(d) println;                       <span class="cmt">-- circle</span></code></pre>
+
+<p><code>some</code> is a <em>contextual</em> keyword: it is special only at the start
+   of a type, and remains an ordinary identifier elsewhere (for instance as the
+   <code>some</code> case of <code>Option</code>).</p>
+
+<h4>Object Safety</h4>
+<p>Only constraints whose methods can dispatch on a single hidden value may be
+   used existentially. Each required function may mention the type variable in
+   <strong>at most one parameter</strong> (the value being dispatched on); every other
+   parameter must be a concrete type. A constraint with a <em>binary</em> method
+   such as <code>+(T, T) T</code> is therefore rejected: two <code>some C</code> values
+   could wrap different hidden types, so there is no single concrete
+   <code>+</code> to call.</p>
+<pre><code><span class="kw">constraint</span> Addable&lt;T&gt; = <span class="kw">requires</span> { +(T, T) T };
+
+<span class="cmt">-- Compile error: + uses T in two argument positions, so `some Addable`</span>
+<span class="cmt">-- cannot be formed (the binary-method problem).</span>
+<span class="cmt">-- fn bad(x some Addable) ... </span></code></pre>
+<p>Constraints like <code>Drawable</code> above &mdash; where the type variable appears
+   once, as the value's own type &mdash; are object-safe. (Constraints are still
+   free to use binary methods; the restriction applies only when the constraint
+   is used as <code>some C</code>.)</p>
+
+<h4>Composition</h4>
+<p>A composition constraint <code>A &amp; B</code> is existential-safe when both
+   components are, and a <code>some (A &amp; B)</code> value can dispatch the methods of
+   either:</p>
+<pre><code><span class="kw">constraint</span> Named&lt;T&gt; = <span class="kw">requires</span> { name(T) <span class="kw">String</span> };
+<span class="kw">constraint</span> Sized&lt;T&gt; = <span class="kw">requires</span> { size(T) <span class="kw">Int</span> };
+<span class="kw">constraint</span> NamedSized&lt;T&gt; = Named&lt;T&gt; &amp; Sized&lt;T&gt;;
+
+<span class="kw">fn</span> describe(x <span class="kw">some</span> NamedSized) <span class="kw">String</span> = name(x) $ <span class="str">"/"</span> $ toString(size(x));
+describe(Square { side: <span class="num">9</span> }) println;   <span class="cmt">-- square/4</span></code></pre>
+<p>Constraints exported from a module work as <code>some C</code> in importing modules
+   just like locally declared ones.</p>
+
+<h4>Heterogeneous Collections</h4>
+<p>This is where existentials differ most from plain constraints: an array, list,
+   or persistent vector of <code>some C</code> may hold values of different concrete
+   types together. Each element is wrapped as it is added:</p>
+<pre><code><span class="kw">let</span> shapes [<span class="kw">some</span> Drawable] = [Circle { r: <span class="num">1.0</span> }, Square { side: <span class="num">3</span> }];
+draw(shapes[<span class="num">0</span>]) println;          <span class="cmt">-- circle</span>
+draw(shapes[<span class="num">1</span>]) println;          <span class="cmt">-- square</span>
+
+<span class="kw">let</span> lst <span class="kw">List</span>&lt;<span class="kw">some</span> Drawable&gt; = <span class="kw">List</span>(Square { side: <span class="num">2</span> }, Circle { r: <span class="num">5.0</span> });
+draw(lst head) println;            <span class="cmt">-- square</span></code></pre>
+
+<p><a href="#auto-mapping">Auto-mapping</a> a constraint method over such a collection
+   dispatches per element, through each value's own implementation:</p>
+<pre><code>shapes draw println;               <span class="cmt">-- [circle, square]</span>
+lst draw println;                  <span class="cmt">-- List(square, circle)</span></code></pre>
+
+<p><strong>Existentials vs. <a href="#any-type">Any</a>:</strong> both erase a value's
+   concrete type, but they answer different needs. <code>Any</code> accepts <em>any</em>
+   value and is consumed by testing its type at runtime with <code>match</code> /
+   <code>as(Type)</code>. <code>some C</code> accepts only values satisfying a known
+   constraint and is consumed by calling that constraint's methods, which
+   dispatch to the right implementation without any runtime type test &mdash; useful
+   when you want behavior behind an interface rather than open-ended inspection.</p>
+
+<div class="note">
+  <strong>Further reading</strong>
+  For how Tzopilotl's <code>some C</code> relates to existential and interface
+  features in other languages &mdash; Haskell's existential quantification,
+  Rust's <code>dyn Trait</code>, Swift's <code>any P</code>, and Go interfaces,
+  including the witness-dictionary representation and the object-safety rule
+  &mdash; see <a href="Existential_Types_Comparison.html">Existential Types:
+  Tzopilotl vs. Haskell, Rust, Swift, and Go</a>.
+</div>
 
 <!-- ================================================================ -->
 <h2 id="type-aliases">21. Type Aliases</h2>

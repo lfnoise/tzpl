@@ -328,6 +328,15 @@ bool TypeChecker::isAssignable(Type* from, Type* to) const {
     if (from == to) return true;
     // nil (nullptr) is assignable to List types
     if (!from && dynamic_cast<ListType*>(to)) return true;
+    // Existential packing: a concrete type that satisfies C is assignable to
+    // `some C`. (checkConstraint mutates internal scratch state, hence the cast;
+    // it is re-entrancy-safe via its own recursion guard.)
+    if (from) {
+        if (auto* ex = dynamic_cast<ExistentialType*>(to)) {
+            return const_cast<TypeChecker*>(this)->checkConstraint(
+                from, ex->constraintName_, "", "", {}, false);
+        }
+    }
     // Numeric promotions: bool -> int -> fraction -> float -> complex
     int fromRank = numericRank(from);
     int toRank = numericRank(to);

@@ -685,6 +685,14 @@ private:
     u16 ensureFraction(u16 reg, Type* type);
     u16 ensureComplex(u16 reg, Type* type);
     u16 ensureType(u16 reg, Type* fromType, Type* toType);
+    // Pack a concrete value into a `some C` existential (exType is an
+    // ExistentialType*), emitting op_pack_existential with its witness dict.
+    u16 ensureExistential(u16 reg, Type* fromType, Type* exType);
+    // Lower a constraint-method call on a `some C` receiver to op_call_witness.
+    u16 genWitnessCall(CallExpr_* expr);
+    // Emit a single op_call_witness: dispatch method `slot` on the existential in
+    // `exReg`, result of type `retType`. Shared by scalar and auto-mapped paths.
+    u16 emitWitnessDispatch(u16 exReg, i32 slot, Type* retType);
 
     // Get the appropriate arithmetic opcode based on type
     Operation getArithOp(BinaryOpExpr::Op op, Type* type);

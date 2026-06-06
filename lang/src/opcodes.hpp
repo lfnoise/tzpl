@@ -476,6 +476,19 @@ void op_make_any(VM& vm, Code* pc);          // MAKE_ANY Rd, Rsrc, isObj (3 word
 void op_any_get_value(VM& vm, Code* pc);     // ANY_GET_VALUE Rd, Ra (2 words)
 void op_any_get_type_ptr(VM& vm, Code* pc);  // ANY_GET_TYPE_PTR Rd, Ra (2 words)
 
+// Pack a concrete value into a `some C` existential, building its witness
+// dictionary from inline method indices.
+// PACK_EXISTENTIAL Rd, valSrc
+//   (variable width: op, regs{dst,valSrc}, ExistentialType*, concreteType*,
+//    numMethods, idx0..idx{numMethods-1}; total = 5 + numMethods words)
+void op_pack_existential(VM& vm, Code* pc);
+
+// Dispatch a constraint method on a `some C` value: read the callee global
+// index from the existential's witness dictionary, then call it with the
+// unwrapped concrete value as the leading argument(s).
+// CALL_WITNESS Rd, argBase, exReg  (3 words: op, regs{dst,argBase,exReg}, slotIdx)
+void op_call_witness(VM& vm, Code* pc);
+
 } // namespace ts
 
 #endif /* opcodes_hpp */
