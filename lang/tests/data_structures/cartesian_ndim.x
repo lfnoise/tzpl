@@ -20,5 +20,7 @@ add3([1, 2]@3, [10, 20]@2, [100, 200]@1) println;
 add3(#[1, 2]@1, #[10, 20]@2, #[100, 200]@3) println;    -- 2x2x2 nested #[...]
 add4(#[1, 2]@1, #[10, 20]@2, #[100, 200]@3, #[1000, 2000]@4) println;
 
--- --- mixed array + persistent vector: result is a persistent vector ---
+-- --- mixed array + persistent vector: each level's container kind follows
+-- the argument supplying that cartesian dimension (dim1 array, dim2 #[...],
+-- dim3 array) ---
 add3([1, 2]@1, #[10, 20]@2, [100, 200]@3) println;

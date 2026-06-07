@@ -360,8 +360,21 @@ Type* TypeChecker::computeAutoMapReturnType(Type* scalarReturn,
 
     // Then wrap for outer auto-mapping
     if (hasCartesian) {
+        // Each cartesian dimension is produced by iterating one argument (or a
+        // group of args zipping at the same dimension), so the container kind at
+        // a given level is determined by the arg(s) at that cartesianIndex, not
+        // by a global "any pvec/list" flag. A plain `@` (cartesianIndex 0) acts
+        // as dimension 1. Precedence among args sharing a level: List > PVec.
         for (int level = maxCartesianIndex; level >= 1; --level) {
-            retType = wrap(retType, anyListArg, anyPVecArg);
+            bool levelList = false, levelPVec = false;
+            for (auto& am : autoMapArgs) {
+                if (!am) continue;
+                int ci = am.cartesianIndex > 0 ? am.cartesianIndex : 1;
+                if (ci != level) continue;
+                if (am.isList) levelList = true;
+                if (am.isPVec) levelPVec = true;
+            }
+            retType = wrap(retType, levelList, levelPVec);
         }
     } else {
         int maxDepth = 0;
