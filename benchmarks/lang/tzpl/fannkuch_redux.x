@@ -6,7 +6,7 @@
 -- counter array are plain `[Int]` written through `p[i] = x`. This mirrors
 -- the Lua reference implementation almost line for line.
 
-const N = 9;
+const N = 10;
 
 fn fannkuch(n Int) (Int, Int) {
     var p = (0..n-1) toArray;

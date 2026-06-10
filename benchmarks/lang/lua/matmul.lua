@@ -1,6 +1,6 @@
 -- Dense matrix multiply, same algorithm as the Tzopilotl port.
-local N = 200
-local FN = 200.0
+local N = 500
+local FN = 500.0
 local sin = math.sin
 
 local function init_matrix(phase)

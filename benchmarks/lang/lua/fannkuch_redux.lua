@@ -1,6 +1,6 @@
 -- Fannkuch-redux. 0-indexed port of Mike Pall's algorithm, matching the
 -- Tzopilotl version line-for-line so the comparison is apples-to-apples.
-local N = 9
+local N = 10
 
 local function fannkuch(n)
     local p, q, s = {}, {}, {}

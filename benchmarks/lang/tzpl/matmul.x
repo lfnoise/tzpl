@@ -2,8 +2,8 @@
 -- a Float accumulator. Tests array indexing + dense FP arithmetic.
 -- Output: trace(C) (sum of diagonal) for checksum.
 
-const N = 200;
-const FN = 200.0;
+const N = 500;
+const FN = 500.0;
 
 -- A[i][j] = sin(i*FN + j) and B[i][j] = cos(i*FN + j) -- chosen so the
 -- matrix entries are bounded and the result is reproducible. Each row is
