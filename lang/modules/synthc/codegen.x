@@ -144,18 +144,35 @@ fn _inlineSelect(ctx Ctx, n NIdx, cel String) String {
 fn _delayDIndex(ctx Ctx, d Int, n NIdx, cel String) String =
 	ctx.delays[d].chans > 1 ? _indexWrap(ctx.chans[n], `cgLoopChans, cel) : "";
 
+-- Ring-buffer index mask. A compile-time-sized (fixed) delay uses the constant
+-- allocSize-1; a runtime-sized (maxDelay-bound) delay stores its mask in the
+-- p->d{serial}_mask field. Mirrors the C++ `allocSize > 1 ? allocSize-1 : mask`.
+fn _delayMask(info DelayInfo) String =
+	info.allocSize > 1 ? "%^" fmt(info.allocSize - 1) : "p->d%^_mask" fmt(info.serial);
+
 fn _delayFixReadExpr(ctx Ctx, n NIdx, d Int, k Int, cel String) String {
 	let di = _delayDIndex(ctx, d, n, cel);
 	let info = ctx.delays[d];
 	if (info.allocSize == 1) {
 		"p->d%^%^" fmt(info.serial, di)
 	} else {
-		"p->d%^%^[(p->d%^_wrpos - u64(%^)) & %^]" fmt(info.serial, di, info.serial, k, info.allocSize - 1)
+		"p->d%^%^[(p->d%^_wrpos - u64(%^)) & %^]" fmt(info.serial, di, info.serial, k, _delayMask(info))
 	}
 }
 
+-- Variable (signal-rate) delay read with interpolation. interpNone reads the
+-- ring buffer directly; the interpolating kernels call tzpl_delay_<kernel>
+-- (declared in tzpl_delay_interp.hpp). off is the delay-time signal expression.
 fn _delayVarReadExpr(ctx Ctx, n NIdx, d Int, ip Interpolation, cel String) String {
-	"/* FIXME delay var read (M1: interpolation kernels) */"
+	let di = _delayDIndex(ctx, d, n, cel);
+	let info = ctx.delays[d];
+	let off = genExpr(ctx, ctx.ins[n][0], cel);
+	let mask = _delayMask(info);
+	match (ip) {
+		none: "p->d%^%^[(p->d%^_wrpos - u64(%^)) & %^]" fmt(info.serial, di, info.serial, off, mask);
+		_:    "tzpl_delay_%^(p->d%^%^, p->d%^_wrpos, %^, %^)"
+			fmt(ip toLispString, info.serial, di, info.serial, mask, off);
+	}
 }
 
 -- Emit a delay-write statement (a sink, called from genTree).
@@ -166,7 +183,7 @@ fn _delayWriteStmt(ctx Ctx, n NIdx, d Int, cel String, treeSerial Int) String {
 	if (info.allocSize == 1) {
 		"p->d%^%^ = %^; // %^\n" fmt(info.serial, di, value, treeSerial)
 	} else {
-		"p->d%^%^[p->d%^_wrpos & %^] = %^; // %^\n" fmt(info.serial, di, info.serial, info.allocSize - 1, value, treeSerial)
+		"p->d%^%^[p->d%^_wrpos & %^] = %^; // %^\n" fmt(info.serial, di, info.serial, _delayMask(info), value, treeSerial)
 	}
 }
 
@@ -391,12 +408,47 @@ fn genDelayInit(ctx Ctx) String {
 	s
 }
 
+-- Per-delay buffer setup at init: write position, mask, and (for runtime-sized
+-- delays) the calloc'd ring buffer. Mirrors C++ CppCodeGen::genDelayAlloc.
+--   allocSize == 1 : scalar delay, nothing to set up here.
+--   allocSize  > 1 : compile-time ring buffer, mask is the constant allocSize-1.
+--   allocSize == 0 : runtime-sized -- size = nextPowerOfTwo(headroom + ceil(max
+--                    delay)), mask = size-1, buffer calloc'd (freed in uninit).
+-- The maxDelay bound is emitted in init mode so constants inline directly.
+fn genDelayAlloc(ctx Ctx) String {
+	var s = "";
+	var `cgInInit Bool = true;
+	for (d : ctx.delays) {
+		if (d.allocSize != 1) { s = s $ "\tp->d%^_wrpos = 0;\n" fmt(d.serial); }
+		if (d.allocSize >= 1) {
+			if (d.allocSize > 1) { s = s $ "\tp->d%^_mask = %^;\n" fmt(d.serial, d.allocSize - 1); }
+		} else if (d.maxDelay != NONE) {
+			let headroom = max(4, d.maxOverread);
+			let maxExpr = genExpr(ctx, ctx.ins[d.maxDelay][0], "0");
+			let ty = cppType(d.typ);
+			s = s $ "\tu64 d%^_size = nextPowerOfTwo(%^+u64(ceil(%^)));\n" fmt(d.serial, headroom, maxExpr);
+			s = s $ "\tp->d%^_mask = d%^_size - 1;\n" fmt(d.serial, d.serial);
+			if (d.chans == 1) {
+				s = s $ "\tp->d%^ = (%^*)calloc(d%^_size, sizeof(%^));\n" fmt(d.serial, ty, d.serial, ty);
+			} else {
+				var j = 0;
+				while (j < d.chans) {
+					s = s $ "\tp->d%^[%^] = (%^*)calloc(d%^_size, sizeof(%^));\n" fmt(d.serial, j, ty, d.serial, ty);
+					j = j + 1;
+				}
+			}
+		}
+	}
+	s
+}
+
 fn genInitFun(ctx Ctx, name String) String {
 	var s = "tzpl_SErr %^_init(%^* p) {\n\tf64 fs = p->fs;\n\tp->sd = 1./fs;\n" fmt(name, name);
 	s = s $ genInitConstants(ctx);
 	-- inInitMode is only for genDelayAlloc (runtime delay sizing); init LOOPS
 	-- reference cross-tree roots as variables just like audio loops do.
 	s = s $ genLoops(ctx, ctx.initLoops);
+	s = s $ genDelayAlloc(ctx);
 	s = s $ genDelayInit(ctx);
 	s = s $ "\treturn tzpl_errNone;\n}\n\n";
 	s

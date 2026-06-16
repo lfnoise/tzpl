@@ -24,6 +24,7 @@
 #include "synthdef_cpp_codegen.hpp"
 #include "synthdef_expr_visitor.hpp"
 #include <format>
+#include <algorithm>
 
 /*
 
@@ -2383,8 +2384,12 @@ string CppCodeGen::genDelayAlloc() {
     string s;
     inInitMode = true;
 
-    // Top-level delays
-    for (auto delay : synth->delayBufs) {
+    // Top-level delays. delayBufs is an unordered_set; iterate by serial so the
+    // emitted alloc code is deterministic (and matches the Tzopilotl compiler).
+    vector<D> sortedDelays(synth->delayBufs.begin(), synth->delayBufs.end());
+    std::sort(sortedDelays.begin(), sortedDelays.end(),
+              [](D const& a, D const& b) { return a->serial < b->serial; });
+    for (auto delay : sortedDelays) {
         if (isVoicerSubgraph(delay->graph)) continue;
         if (delay->allocSize != 1) {
             s += FMT("\tp->d{}_wrpos = 0;\n", delay->serial);
@@ -2511,7 +2516,12 @@ string CppCodeGen::genDelayAlloc() {
 
 string CppCodeGen::genDelayInit() {
     string s;
-    for (auto delay : synth->delayBufs) {
+    // delayBufs is an unordered_set; iterate by serial so the emitted init
+    // code is deterministic (and matches the Tzopilotl-hosted compiler).
+    vector<D> sortedDelays(synth->delayBufs.begin(), synth->delayBufs.end());
+    std::sort(sortedDelays.begin(), sortedDelays.end(),
+              [](D const& a, D const& b) { return a->serial < b->serial; });
+    for (auto delay : sortedDelays) {
         if (isVoicerSubgraph(delay->graph)) continue;
         for (S expr : delay->initters) {
             auto* init = expr.as<DelayInit>();

@@ -25,6 +25,8 @@ render /tmp/synthc_ab_ref.wav         "$SCRIPTS/synthc_render_ab_ref.x"
 render /tmp/synthc_ab_synthc.wav      "$SCRIPTS/synthc_render_ab_synthc.x"
 render /tmp/synthc_ab_ctrl_ref.wav    "$SCRIPTS/synthc_render_ab_ctrl_ref.x"
 render /tmp/synthc_ab_ctrl_synthc.wav "$SCRIPTS/synthc_render_ab_ctrl_synthc.x"
+render /tmp/synthc_ab_vdelay_ref.wav    "$SCRIPTS/synthc_render_ab_vdelay_ref.x"
+render /tmp/synthc_ab_vdelay_synthc.wav "$SCRIPTS/synthc_render_ab_vdelay_synthc.x"
 
 OUT="$("$APP" --nogui --no-audio "${MODS[@]}" "$SCRIPTS/synthc_render_ab_compare.x" 2>/dev/null)"
 echo "$OUT"

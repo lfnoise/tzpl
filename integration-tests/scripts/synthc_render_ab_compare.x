@@ -22,6 +22,7 @@ fn _check(label String, refPath String, synPath String) Void {
 
 _check("audio", "/tmp/synthc_ab_ref.wav", "/tmp/synthc_ab_synthc.wav");
 _check("control", "/tmp/synthc_ab_ctrl_ref.wav", "/tmp/synthc_ab_ctrl_synthc.wav");
+_check("vdelay", "/tmp/synthc_ab_vdelay_ref.wav", "/tmp/synthc_ab_vdelay_synthc.wav");
 
 if (`fail == 0) {
 	println("RENDER AB PASS");
