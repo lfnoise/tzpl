@@ -26,6 +26,7 @@
 namespace synthdef {
     thread_local Synth* gSynth = nullptr;
     thread_local Graph* gGraph = nullptr;
+    thread_local bool gApplyRewrites = true;
 
     Graph::Graph(Synth *synth, Graph* parent)
         : synth(synth), parent(parent) 
@@ -78,7 +79,9 @@ namespace synthdef {
     S addExpr(S expr) {
         assert(gGraph && gSynth);
                 
-        expr = rewrite(expr);
+        if (gApplyRewrites) {
+            expr = rewrite(expr);
+        }
                 
         if (expr->should_hash_cons() && gGraph->hashConsSet.contains(expr)) {
             return *gGraph->hashConsSet.find(expr);
@@ -657,6 +660,14 @@ namespace synthdef {
     {
         if (cache.contains(tree)) return;
         ControlSet& result = cache[tree];
+        // A tree whose own root is a control reads that control directly, so
+        // it must re-run (and re-load the control into its instance var) when
+        // that control changes. Without this, the control-reading iso-group
+        // has an empty activation set and never fires, so the control value
+        // never reaches the audio loop and the synth is silent.
+        if (tree->root.as<Control>()) {
+            result.insert(tree->root);
+        }
         for (auto [ant, sepLoop] : tree->antecedents) {
             if (ant->root.as<Control>()) {
                 result.insert(ant->root);
@@ -917,7 +928,7 @@ namespace synthdef {
 
     string Synth::dumpToString() {
         string out;
-        out += std::format("SYNTH {} {:p}\n", name, (void*)this);
+        out += std::format("SYNTH {}\n", name);
         out += "-- SORTED EXPRS\n";
         for (u64 i = 0; S u : sorted) {
             printExpr(out, u, i);
@@ -933,12 +944,17 @@ namespace synthdef {
         printLoops(out, eventLoops);
         out += "-- AUDIO\n";
         for (Graph* graph : graphs) {
-            out += std::format("GRAPH {:p}\n", (void*)graph);
+            out += std::format("GRAPH {}\n", graph->serial);
             printLoops(out, graph->loops);
         }
-        for (D delay : delayBufs) {
-            out += std::format("DELAY {:p} {} {} {}\n",
-                (void*)delay.get(), delay->serial, delay->type.str(), delay->chans);
+        // delayBufs is an unordered_set; sort by serial so the dump is
+        // deterministic and comparable across runs and implementations.
+        vector<D> sortedDelays(delayBufs.begin(), delayBufs.end());
+        std::sort(sortedDelays.begin(), sortedDelays.end(),
+                  [](D const& a, D const& b) { return a->serial < b->serial; });
+        for (D delay : sortedDelays) {
+            out += std::format("DELAY {} {} {}\n",
+                delay->serial, delay->type.str(), delay->chans);
             for (S expr : delay->initters) {
                 out += std::format("  {:>4} {:<3} {} {}\n",
                     expr->userial, expr->type.str(),

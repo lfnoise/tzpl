@@ -23,6 +23,7 @@
 
 #include "tzpl_synthdef_compiler_ffi.hpp"
 #include "tzpl_audio_engine_ffi.hpp"
+#include "tzpl_clock_ffi.hpp"
 #include "tzpl_app_context.hpp"
 #include "tzpl.hpp"
 #include "module_compiler.hpp"
@@ -95,10 +96,11 @@ static void test_compile_success() {
     ts::Compiler compiler(types);
     bridge::registerAudioEngineFFI(compiler);
     bridge::registerSynthdefCompilerFFI(compiler);
+    bridge::registerClockFFI(compiler);
 
     engine::Engine* eng = makeTestEngine();
 
-    ts::ModuleCompiler moduleCompiler(compiler, {MODULES_DIR});
+    ts::ModuleCompiler moduleCompiler(compiler, {MODULES_DIR, LANG_MODULES_DIR});
     auto target = compiler.createTarget();
     ts::VM vm(16 * 1024 * 1024, types, target);
     bridge::AppContext appCtx; appCtx.engine = eng;
@@ -129,10 +131,11 @@ static void test_compile_error() {
     ts::Compiler compiler(types);
     bridge::registerAudioEngineFFI(compiler);
     bridge::registerSynthdefCompilerFFI(compiler);
+    bridge::registerClockFFI(compiler);
 
     engine::Engine* eng = makeTestEngine();
 
-    ts::ModuleCompiler moduleCompiler(compiler, {MODULES_DIR});
+    ts::ModuleCompiler moduleCompiler(compiler, {MODULES_DIR, LANG_MODULES_DIR});
     auto target = compiler.createTarget();
     ts::VM vm(16 * 1024 * 1024, types, target);
     bridge::AppContext appCtx; appCtx.engine = eng;
@@ -162,10 +165,11 @@ static void test_compile_and_load() {
     ts::Compiler compiler(types);
     bridge::registerAudioEngineFFI(compiler);
     bridge::registerSynthdefCompilerFFI(compiler);
+    bridge::registerClockFFI(compiler);
 
     engine::Engine* eng = makeTestEngine();
 
-    ts::ModuleCompiler moduleCompiler(compiler, {MODULES_DIR});
+    ts::ModuleCompiler moduleCompiler(compiler, {MODULES_DIR, LANG_MODULES_DIR});
     auto target = compiler.createTarget();
     ts::VM vm(16 * 1024 * 1024, types, target);
     bridge::AppContext appCtx; appCtx.engine = eng;
@@ -208,10 +212,11 @@ static void test_caching() {
     ts::Compiler compiler(types);
     bridge::registerAudioEngineFFI(compiler);
     bridge::registerSynthdefCompilerFFI(compiler);
+    bridge::registerClockFFI(compiler);
 
     engine::Engine* eng = makeTestEngine();
 
-    ts::ModuleCompiler moduleCompiler(compiler, {MODULES_DIR});
+    ts::ModuleCompiler moduleCompiler(compiler, {MODULES_DIR, LANG_MODULES_DIR});
     auto target = compiler.createTarget();
     ts::VM vm(16 * 1024 * 1024, types, target);
     bridge::AppContext appCtx; appCtx.engine = eng;
@@ -246,13 +251,14 @@ static void test_list_synthdefs() {
     ts::Compiler compiler(types);
     bridge::registerAudioEngineFFI(compiler);
     bridge::registerSynthdefCompilerFFI(compiler);
+    bridge::registerClockFFI(compiler);
 
     engine::Engine* eng = makeTestEngine();
 
     // Register a built-in test plugin so we have something to list
     engine::createSineNode(eng);
 
-    ts::ModuleCompiler moduleCompiler(compiler, {MODULES_DIR});
+    ts::ModuleCompiler moduleCompiler(compiler, {MODULES_DIR, LANG_MODULES_DIR});
     auto target = compiler.createTarget();
     ts::VM vm(16 * 1024 * 1024, types, target);
     bridge::AppContext appCtx; appCtx.engine = eng;
@@ -280,6 +286,156 @@ static void test_list_synthdefs() {
     engine::freeEngine(eng);
 }
 
+static void test_low_level_ffi() {
+    std::print("Test: low-level FFI (synthdefAnalysisDump, synthdefGenCppFromSexpr)\n");
+
+    ts::TypeUniverse types;
+    ts::Compiler compiler(types);
+    bridge::registerAudioEngineFFI(compiler);
+    bridge::registerSynthdefCompilerFFI(compiler);
+    bridge::registerClockFFI(compiler);
+
+    engine::Engine* eng = makeTestEngine();
+
+    ts::ModuleCompiler moduleCompiler(compiler, {MODULES_DIR, LANG_MODULES_DIR});
+    auto target = compiler.createTarget();
+    ts::VM vm(16 * 1024 * 1024, types, target);
+    bridge::AppContext appCtx; appCtx.engine = eng;
+    bridge::setAppContextOnVM(&vm, &appCtx);
+
+    // Capture print output so we can assert on it.
+    char* buf = nullptr;
+    size_t bufSize = 0;
+    FILE* memOut = open_memstream(&buf, &bufSize);
+    vm.setPrintOutput(memOut);
+
+    const char* source = R"LANG(
+        import synthdef.*;
+        let sexpr = "(Synth dump_test (Graph 1 ((0 Constant 1 12 (440.0)) (1 Outlet \"out\" 0))))";
+        let dump = synthdefAnalysisDump(sexpr, false);
+        println(dump startsWith("SYNTH dump_test") ? "DUMP_OK" : "DUMP_BAD: " $ dump);
+        let cpp = synthdefGenCppFromSexpr(sexpr, 0, true);
+        println(cpp contains("dump_test") && !(cpp startsWith("error:")) ? "CPP_OK" : "CPP_BAD: " $ cpp);
+    )LANG";
+
+    bool ok = compileAndRun(compiler, vm, source, "low_level_ffi.x", &moduleCompiler);
+    check(ok, "low-level FFI source compiles and runs");
+
+    fflush(memOut);
+    std::string output = buf ? std::string(buf, bufSize) : "";
+    fclose(memOut);
+    free(buf);
+
+    check(output.find("DUMP_OK") != std::string::npos,
+          "synthdefAnalysisDump returns address-free dump");
+    check(output.find("CPP_OK") != std::string::npos,
+          "synthdefGenCppFromSexpr returns generated C++ source");
+
+    engine::freeEngine(eng);
+}
+
+// Read a script file into a string.
+static std::string readScript(std::string const& path) {
+    FILE* f = fopen(path.c_str(), "r");
+    if (!f) return "";
+    std::string out;
+    char buf[4096];
+    size_t n;
+    while ((n = fread(buf, 1, sizeof(buf), f)) > 0) out.append(buf, n);
+    fclose(f);
+    return out;
+}
+
+static void test_synthc_analysis_diff() {
+    std::print("Test: synthc analysis (M1) matches C++ analysis dump\n");
+
+    ts::TypeUniverse types;
+    ts::Compiler compiler(types);
+    bridge::registerAudioEngineFFI(compiler);
+    bridge::registerSynthdefCompilerFFI(compiler);
+    bridge::registerClockFFI(compiler);
+
+    engine::Engine* eng = makeTestEngine();
+
+    ts::ModuleCompiler moduleCompiler(compiler, {MODULES_DIR, LANG_MODULES_DIR});
+    auto target = compiler.createTarget();
+    ts::VM vm(16 * 1024 * 1024, types, target);
+    bridge::AppContext appCtx; appCtx.engine = eng;
+    bridge::setAppContextOnVM(&vm, &appCtx);
+
+    char* buf = nullptr;
+    size_t bufSize = 0;
+    FILE* memOut = open_memstream(&buf, &bufSize);
+    vm.setPrintOutput(memOut);
+
+    std::string source = readScript(std::string(SCRIPTS_DIR) + "/synthc_analysis_diff.x");
+    check(!source.empty(), "synthc_analysis_diff.x script found");
+
+    bool ok = compileAndRun(compiler, vm, source.c_str(), "synthc_analysis_diff.x",
+                            &moduleCompiler);
+    check(ok, "synthc analysis-diff script compiles and runs");
+
+    fflush(memOut);
+    std::string output = buf ? std::string(buf, bufSize) : "";
+    fclose(memOut);
+    free(buf);
+
+    bool pass = output.find("M1 PASS") != std::string::npos;
+    if (!pass) {
+        std::print("--- script output ---\n{}\n---------------------\n", output);
+    }
+    check(pass, "synthc analysis (SORTED+TREES, audio-only loops) matches C++ "
+                "and codegen byte-matches");
+
+    engine::freeEngine(eng);
+}
+
+static void test_synthc_compile_and_load() {
+    std::print("Test: synthc defSynthX compiles a synth to a dylib and loads it\n");
+
+    ts::TypeUniverse types;
+    ts::Compiler compiler(types);
+    bridge::registerAudioEngineFFI(compiler);
+    bridge::registerSynthdefCompilerFFI(compiler);
+    bridge::registerClockFFI(compiler);
+
+    engine::Engine* eng = makeTestEngine();
+
+    ts::ModuleCompiler moduleCompiler(compiler, {MODULES_DIR, LANG_MODULES_DIR});
+    auto target = compiler.createTarget();
+    ts::VM vm(16 * 1024 * 1024, types, target);
+    bridge::AppContext appCtx; appCtx.engine = eng;
+    bridge::setAppContextOnVM(&vm, &appCtx);
+
+    FILE* devnull = fopen("/dev/null", "w");
+    vm.setPrintOutput(devnull);
+
+    // defSynthX runs the Tzopilotl-hosted compiler end to end: graph -> import
+    // -> analyze -> codegen -> clang -> dylib -> load into the engine.
+    const char* source = R"LANG(
+        import synthc.compile.*;
+        import synthdef.*;
+        fn integ() S {
+            let osc = (fs() / 440.0) sin;
+            let d = delayVar(); d init(1, 0.0); let r = d read(1);
+            let mixed = osc * 0.5 + r; d write(mixed); mixed outlet
+        }
+        defSynthX(integ, "synthc_integ");
+    )LANG";
+
+    bool ok = compileAndRun(compiler, vm, source, "synthc_compile.x", &moduleCompiler);
+    check(ok, "synthc defSynthX source compiles and runs");
+
+    std::vector<std::string> names;
+    engine::listNodeDefs(eng, names);
+    bool found = false;
+    for (auto const& n : names) if (n == "synthc_integ") found = true;
+    check(found, "synthc_integ def registered in engine after defSynthX");
+
+    fclose(devnull);
+    engine::freeEngine(eng);
+}
+
 // ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
@@ -292,6 +448,9 @@ int main(int argc, char const* argv[]) {
     test_compile_and_load();
     test_caching();
     test_list_synthdefs();
+    test_low_level_ffi();
+    test_synthc_analysis_diff();
+    test_synthc_compile_and_load();
 
     std::print("\n=== Results: {} passed, {} failed ===\n",
                gTestsPassed, gTestsFailed);

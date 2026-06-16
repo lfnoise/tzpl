@@ -1077,11 +1077,20 @@ fn toLisp(o S, indentLevel Int) String {
 }
 
 
+-- Build the in-memory SignalGraph for a synth function without compiling.
+-- Used by the Tzopilotl-hosted compiler (synthc) and its tests.
+fn makeGraph(synthFun GraphFn) SignalGraph = synthFun _makeTopGraph;
+
+-- The (Synth <name> <graph>) s-expression for a graph, as sent to the C++
+-- compiler by defSynth.
+fn toSynthSexpr(graph SignalGraph, synthName String) String =
+	"(Synth %^ %^)" fmt(synthName, graph toLisp(0));
+
 fn defSynth(synthFun GraphFn, synthName String) String {
 
 	let graph SignalGraph = synthFun _makeTopGraph;
 
-	let sexprString = "(Synth %^ %^)" fmt(synthName, graph toLisp(0));
+	let sexprString = graph toSynthSexpr(synthName);
 
 	let err = sexprString compileSynthDefAndLoad;
 	if (err length > 0) {

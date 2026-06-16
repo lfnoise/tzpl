@@ -32,10 +32,13 @@ if(TARGET tzpl_synthdef_compiler_bridge)
     target_link_libraries(test_synthdef_compiler_ffi
         PRIVATE tzpl_synthdef_compiler_bridge
         PRIVATE tzpl_audio_engine_bridge
+        PRIVATE tzpl_clock_bridge
     )
 
     target_compile_definitions(test_synthdef_compiler_ffi PRIVATE
+        SCRIPTS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/scripts"
         MODULES_DIR="${CMAKE_SOURCE_DIR}/bridge/modules"
+        LANG_MODULES_DIR="${CMAKE_SOURCE_DIR}/lang/modules"
     )
 endif()
 

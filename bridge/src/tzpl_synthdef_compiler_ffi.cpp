@@ -24,6 +24,7 @@
 
 #include "tzpl_synthdef_compiler_ffi.hpp"
 #include "tzpl_app_context.hpp"
+#include "tzpl_nrt_render.hpp"
 #include "tzpl.hpp"
 #include "value.hpp"
 #include "tzpl_client_interface.hpp"
@@ -35,6 +36,9 @@
 #include <memory>
 #include <unordered_map>
 #include <functional>
+#include <vector>
+#include <cmath>
+#include <cstdio>
 
 namespace bridge {
 
@@ -43,6 +47,15 @@ namespace bridge {
 // ---------------------------------------------------------------------------
 
 static engine::Engine* getEngine(ts::VM& vm) {
+    // During an NRT render the script's defSynth/loadSynthDylib calls must
+    // register the def into the per-render engine -- the same engine the audio
+    // bundling FFI (newNode/connect/setControl) targets via its own
+    // currentRenderContext() check. Without this, a def compiled inside a
+    // render lands in the live placeholder engine while newNode looks in the
+    // render engine, so the node is never created and the render is silent.
+    if (auto* r = bridge::currentRenderContext()) {
+        return r->engine;
+    }
     auto* ctx = static_cast<AppContext*>(vm.userData());
     return ctx ? ctx->engine : nullptr;
 }
@@ -210,11 +223,198 @@ static void ffi_compileSynthDefAndLoad(ts::VM& vm, u16 dst, u16, u16 argBase) {
 }
 
 // ---------------------------------------------------------------------------
+// Low-level FFI for the Tzopilotl-hosted synthdef compiler (synthc modules)
+// ---------------------------------------------------------------------------
+
+// Saves/restores the rewrite flag so a test setting can't leak.
+struct RewriteGuard {
+    bool prev;
+    explicit RewriteGuard(bool apply) : prev(synthdef::gApplyRewrites) {
+        synthdef::gApplyRewrites = apply;
+    }
+    ~RewriteGuard() { synthdef::gApplyRewrites = prev; }
+};
+
+// fn writeAndCompileCpp(name String, cppSource String) String
+// Writes generated C++ to the build dir, compiles and links it.
+// Returns the dylib path on success, "error: ..." on failure.
+static void ffi_writeAndCompileCpp(ts::VM& vm, u16 dst, u16, u16 argBase) {
+    std::string name = regString(vm, argBase);
+    std::string cppCode = regString(vm, argBase + 1);
+
+    std::string dir = synthdef::getBuildDir();
+    synthdef::ensureBuildDirs(dir);
+    try {
+        synthdef::writeCodeToFile(dir, name, cppCode);
+    } catch (std::exception const& e) {
+        returnErrString(vm, dst, std::string("error: write failed: ") + e.what(),
+                        __func__);
+        return;
+    }
+
+    int err = synthdef::compileAndLink(dir, name);
+    if (err) {
+        returnErrString(vm, dst,
+                        "error: compile/link failed with exit code " + std::to_string(err),
+                        __func__);
+        return;
+    }
+
+    returnString(vm, dst, synthdef::dylibPath(dir, name));
+}
+
+// fn loadSynthDylib(path String) String
+// Loads a compiled plugin dylib and registers its def with the engine.
+// Returns "" on success, error message on failure.
+static void ffi_loadSynthDylib(ts::VM& vm, u16 dst, u16, u16 argBase) {
+    std::string path = regString(vm, argBase);
+
+    auto optDef = synthdef::loadDef(path);
+    if (!optDef.has_value()) {
+        returnErrString(vm, dst, std::string("failed to load plugin: ") + path,
+                        __func__);
+        return;
+    }
+
+    engine::Engine* eng = getEngine(vm);
+    if (!eng) {
+        returnErrString(vm, dst, "no engine attached to VM", __func__);
+        return;
+    }
+
+    engine::addSynthDef(eng, optDef->def, optDef->dlHandle);
+    returnString(vm, dst, "");
+}
+
+// fn synthdefGenCppFromSexpr(sexpr String, maxSimdWidth Int, applyRewrites Bool) String
+// Runs the C++ compiler pipeline up to code generation and returns the
+// generated C++ source (no compile). For differential testing against the
+// Tzopilotl-hosted compiler. With applyRewrites=false the algebraic rewriter is
+// bypassed so the output is comparable against a compiler that does not yet
+// implement rewriting. Returns "error: ..." on failure.
+static void ffi_synthdefGenCppFromSexpr(ts::VM& vm, u16 dst, u16, u16 argBase) {
+    std::string sexpr = regString(vm, argBase);
+    int simdWidth = static_cast<int>(vm.reg(argBase + 1).i);
+    bool applyRewrites = vm.reg(argBase + 2).i != 0;
+
+    RewriteGuard guard(applyRewrites);
+
+    auto result = synthdef::synthFromSExprText(sexpr);
+    if (!result) {
+        returnErrString(vm, dst, std::string("error: parse error: ") + result.error(),
+                        __func__);
+        return;
+    }
+
+    std::unique_ptr<synthdef::Synth> synth(result.value());
+    try {
+        synthdef::PushSynth ps(synth.get());
+        synth->graphAnalysis();
+        returnString(vm, dst, synthdef::cppCodeGen(synth.get(), simdWidth, simdWidth));
+    } catch (std::exception const& e) {
+        returnErrString(vm, dst, std::string("error: codegen error: ") + e.what(),
+                        __func__);
+    }
+}
+
+// fn synthdefAnalysisDump(sexpr String, applyRewrites Bool) String
+// Runs the C++ compiler's graph analysis and returns Synth::dumpToString().
+// With applyRewrites=false the algebraic rewriter is bypassed so the dump is
+// comparable against compilers that don't implement rewriting.
+// Returns "error: ..." on failure.
+static void ffi_synthdefAnalysisDump(ts::VM& vm, u16 dst, u16, u16 argBase) {
+    std::string sexpr = regString(vm, argBase);
+    bool applyRewrites = vm.reg(argBase + 1).i != 0;
+
+    RewriteGuard guard(applyRewrites);
+
+    auto result = synthdef::synthFromSExprText(sexpr);
+    if (!result) {
+        returnErrString(vm, dst, std::string("error: parse error: ") + result.error(),
+                        __func__);
+        return;
+    }
+
+    std::unique_ptr<synthdef::Synth> synth(result.value());
+    try {
+        synthdef::PushSynth ps(synth.get());
+        synth->graphAnalysis();
+        returnString(vm, dst, synth->dumpToString());
+    } catch (std::exception const& e) {
+        returnErrString(vm, dst, std::string("error: ") + e.what(), __func__);
+    }
+}
+
+// fn compareAudioFiles(pathA String, pathB String) Float
+// Reads two WAV files (44-byte IEEE-float header + interleaved f32 samples; the
+// format wavOpen/wavWrite produce) and returns the maximum absolute difference
+// between corresponding samples. Returns a large sentinel (1e30) if a file is
+// missing/short or the two differ in sample count -- so a strict "< epsilon"
+// check fails loudly on any structural mismatch.
+static void ffi_compareAudioFiles(ts::VM& vm, u16 dst, u16, u16 argBase) {
+    std::string pathA = regString(vm, argBase);
+    std::string pathB = regString(vm, argBase + 1);
+
+    auto readSamples = [](std::string const& path, std::vector<float>& out) -> bool {
+        FILE* f = fopen(path.c_str(), "rb");
+        if (!f) return false;
+        if (fseek(f, 0, SEEK_END) != 0) { fclose(f); return false; }
+        long size = ftell(f);
+        if (size < 44) { fclose(f); return false; }
+        fseek(f, 44, SEEK_SET);  // skip the WAV header
+        size_t nbytes = (size_t)(size - 44);
+        size_t n = nbytes / sizeof(float);
+        out.resize(n);
+        size_t got = fread(out.data(), sizeof(float), n, f);
+        fclose(f);
+        return got == n;
+    };
+
+    std::vector<float> a, b;
+    if (!readSamples(pathA, a) || !readSamples(pathB, b) || a.size() != b.size()) {
+        vm.reg(dst).f = 1e30;
+        return;
+    }
+    double maxDiff = 0.0;
+    for (size_t i = 0; i < a.size(); ++i) {
+        double d = std::fabs((double)a[i] - (double)b[i]);
+        if (d > maxDiff) maxDiff = d;
+    }
+    vm.reg(dst).f = maxDiff;
+}
+
+// fn audioFileMaxAbs(path String) Float
+// Returns the maximum absolute sample value in a WAV file (same 44-byte-header
+// f32 format as compareAudioFiles), or -1.0 if the file is missing/short. Used
+// by the render A/B test to assert the rendered audio is non-silent, so a
+// silence-vs-silence comparison can't pass vacuously.
+static void ffi_audioFileMaxAbs(ts::VM& vm, u16 dst, u16, u16 argBase) {
+    std::string path = regString(vm, argBase);
+    FILE* f = fopen(path.c_str(), "rb");
+    if (!f) { vm.reg(dst).f = -1.0; return; }
+    if (fseek(f, 0, SEEK_END) != 0) { fclose(f); vm.reg(dst).f = -1.0; return; }
+    long size = ftell(f);
+    if (size < 44) { fclose(f); vm.reg(dst).f = -1.0; return; }
+    fseek(f, 44, SEEK_SET);
+    size_t n = (size_t)(size - 44) / sizeof(float);
+    std::vector<float> s(n);
+    size_t got = fread(s.data(), sizeof(float), n, f);
+    fclose(f);
+    if (got != n) { vm.reg(dst).f = -1.0; return; }
+    double maxAbs = 0.0;
+    for (float v : s) { double a = std::fabs((double)v); if (a > maxAbs) maxAbs = a; }
+    vm.reg(dst).f = maxAbs;
+}
+
+// ---------------------------------------------------------------------------
 // Registration
 // ---------------------------------------------------------------------------
 
 void registerSynthdefCompilerFFI(ts::Compiler& compiler) {
     auto* String = compiler.stringType();
+    auto* Int    = compiler.intType();
+    auto* Bool   = compiler.boolType();
+    auto* Float  = compiler.floatType();
     ts::Type* StringArray = reinterpret_cast<ts::Type*>(compiler.arrayType(String));
 
     using R = void (*)(ts::VM&, u16, u16, u16);
@@ -231,6 +431,15 @@ void registerSynthdefCompilerFFI(ts::Compiler& compiler) {
 
     reg("compileSynthDef",        String,      {String}, ffi_compileSynthDef);
     reg("compileSynthDefAndLoad", String,      {String}, ffi_compileSynthDefAndLoad);
+
+    // Low-level functions for the Tzopilotl-hosted compiler (synthc modules)
+    // and its differential test harness.
+    reg("writeAndCompileCpp",      String, {String, String}, ffi_writeAndCompileCpp);
+    reg("loadSynthDylib",          String, {String},         ffi_loadSynthDylib);
+    reg("compareAudioFiles",       Float,  {String, String}, ffi_compareAudioFiles);
+    reg("audioFileMaxAbs",         Float,  {String},         ffi_audioFileMaxAbs);
+    reg("synthdefGenCppFromSexpr", String, {String, Int, Bool}, ffi_synthdefGenCppFromSexpr);
+    reg("synthdefAnalysisDump",    String, {String, Bool},   ffi_synthdefAnalysisDump);
 }
 
 } // namespace bridge
