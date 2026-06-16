@@ -1973,6 +1973,19 @@ ExprPtr Parser::parsePrimary() {
             return std::make_unique<IfExprNode>(loc, std::move(cond),
                                                  std::move(thenBranch), std::move(elseBranch));
         }
+        case TokenKind::Match: {
+            // match as an expression: `let x = match (v) { ... }`, `f(match ...)`.
+            // parseMatchStmt builds a SwitchStmtNode; a trailing SwitchStmt in a
+            // block yields a value (genBlockForValue -> genSwitchStmtForValue),
+            // exactly as for an expression-body `fn f() = match ...`. Wrap it in
+            // a BlockExprNode so it can appear anywhere an expression is allowed.
+            SourceRange loc = currentLoc();
+            ASTPtr matchStmt = parseMatchStmt();
+            ASTList stmts;
+            stmts.push_back(std::move(matchStmt));
+            auto body = std::make_unique<BlockStmt>(loc, std::move(stmts));
+            return std::make_unique<BlockExprNode>(loc, std::move(body));
+        }
         case TokenKind::Yield: {
             // Prefix yield: yield value  ->  yield(value) as a CallExpr_
             SourceRange loc = currentLoc();

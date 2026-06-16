@@ -455,10 +455,14 @@ void VM::install(const CompileResult& result) {
         globalIsObj_.push_back(slot.isObj ? 1 : 0);
     }
 
-    // Ensure dynamic variable table is large enough
+    // Ensure dynamic variable table is large enough. Carry each new dynvar's
+    // GC root flag so dynvars holding Obj* are scanned as roots (and tag/atom
+    // dynvars are not). Older results without the vector default to 0.
     while (dynVars_.size() < result.numDynVars) {
+        u32 idx = (u32)dynVars_.size();
         dynVars_.push_back(Word());
-        dynVarIsObj_.push_back(0);
+        u8 isObj = (idx < result.dynVarIsObj.size()) ? result.dynVarIsObj[idx] : 0;
+        dynVarIsObj_.push_back(isObj);
     }
 }
 

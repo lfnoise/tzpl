@@ -312,6 +312,18 @@ CompileResult Compiler::compile(const std::string& source, const std::string& fi
     result.newGlobals = std::move(newGlobals);
     result.globalBase = globalBase;
     result.numDynVars = numDynVars();
+    // Per-dynvar GC root flags. A dynvar that holds an Obj* must be a GC root,
+    // else it can be collected while only the dynvar references it (its value
+    // survives in registers only by luck), corrupting later marks. Use
+    // storesObjPtr(), not isObjType() -- see the global-root fix in declareVar.
+    result.dynVarIsObj.assign(result.numDynVars, 0);
+    for (auto const& [name, info] : dynamicVars_) {
+        Type* t = info.type;
+        bool inlineMulti = t && t->repr_ == Type::Repr::Inline && t->sizeWords_ > 1;
+        if (!inlineMulti && info.dynIndex < result.dynVarIsObj.size()) {
+            result.dynVarIsObj[info.dynIndex] = (t && storesObjPtr(t)) ? 1 : 0;
+        }
+    }
     result.target = target;
 
     // Populate exported function metadata for host-to-VM calling

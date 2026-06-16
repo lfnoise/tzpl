@@ -71,6 +71,13 @@ struct CompileResult {
     // Number of dynamic scope variables used
     u32 numDynVars = 0;
 
+    // Per-dynvar GC root flag (size == numDynVars). True where a dynvar slot
+    // holds an Obj* and must be scanned as a GC root. Like globals, this uses
+    // storesObjPtr(), not isObjType(): a DiscriminantEnum/Atom dynvar holds a
+    // non-pointer and must NOT be marked. Multi-slot inline dynvars stay false
+    // (conservative, matching addInlineGlobal).
+    std::vector<u8> dynVarIsObj;
+
     // The target this result was compiled against
     VMTarget target;
 

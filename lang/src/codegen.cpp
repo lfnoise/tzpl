@@ -3379,6 +3379,30 @@ u16 CodeGen::genBinaryOp(BinaryOpExpr* expr) {
         if (result != UINT16_MAX) return result;
     }
 
+    // Short-circuit evaluation for scalar && and ||.
+    //   a && b: evaluate a; if a is false, skip b (result is a).
+    //   a || b: evaluate a; if a is true, skip b (result is a).
+    // The elementwise forms (auto-map over arrays, operator overloads,
+    // persistent vectors) intentionally fall through to the generic
+    // both-operands path below; short-circuit applies only to scalar Bool.
+    if ((expr->op == BinaryOpExpr::And || expr->op == BinaryOpExpr::Or)
+        && !expr->leftAutoMap && !expr->rightAutoMap
+        && expr->resolvedFuncGlobalIndex < 0
+        && expr->resolvedType == compiler_.boolType()) {
+        u16 leftReg = genExpr(static_cast<Expr*>(expr->left.get()));
+        u16 dst = allocReg();
+        emitMov(dst, leftReg);
+        // && skips when dst is false; || skips when dst is true.
+        Operation skipOp = (expr->op == BinaryOpExpr::And)
+            ? op_jump_if_false : op_jump_if_true;
+        u32 skip = emitJump(skipOp, dst);
+        u16 rightReg = genExpr(static_cast<Expr*>(expr->right.get()));
+        emitMov(dst, rightReg);
+        patchJump(skip);
+        setRegType(dst, compiler_.boolType());
+        return dst;
+    }
+
     // Check for auto-mapped binary ops (@ on operands)
     if (expr->leftAutoMap || expr->rightAutoMap) {
         bool hasCartesian = (expr->leftAutoMap.cartesianIndex > 0) ||
@@ -10188,8 +10212,12 @@ void CodeGen::genIfStmtForValue(IfStmtNode* stmt, u16 resultReg) {
     u16 condReg = genExpr(static_cast<Expr*>(stmt->condition.get()));
     u32 elseJump = emitJump(op_jump_if_false, condReg);
 
-    // Then branch
+    // Then branch. resultReg is write-only and not live-in to the branch, so
+    // its type must be cleared (freeRegsTo only clears regs >= savedReg, and
+    // resultReg sits below savedReg). Otherwise a safepoint inside the branch
+    // would mark an uninitialized register as a live Obj* root.
     if (enableRegReclaim) freeRegsTo(savedReg);
+    setRegType(resultReg, nullptr);
     if (stmt->thenBranch->kind == ASTNode::Block) {
         genBlockForValue(static_cast<BlockStmt*>(stmt->thenBranch.get()), resultReg);
     }
@@ -10199,6 +10227,7 @@ void CodeGen::genIfStmtForValue(IfStmtNode* stmt, u16 resultReg) {
 
     // Else branch
     if (enableRegReclaim) freeRegsTo(savedReg);
+    setRegType(resultReg, nullptr);
     if (stmt->elseBranch) {
         if (stmt->elseBranch->kind == ASTNode::Block) {
             genBlockForValue(static_cast<BlockStmt*>(stmt->elseBranch.get()), resultReg);
@@ -10223,6 +10252,10 @@ void CodeGen::genSwitchStmtForValue(SwitchStmtNode* stmt, u16 resultReg) {
         auto& clause = stmt->cases[i];
 
         if (enableRegReclaim) freeRegsTo(caseSavedReg);
+        // resultReg is write-only and not live-in to a case body; clear its
+        // type so a safepoint inside the case does not see a prior case's
+        // leaked type and mark an uninitialized register as a live Obj* root.
+        setRegType(resultReg, nullptr);
         pushScope();
 
         std::vector<u32> failJumps;
@@ -10405,6 +10438,14 @@ u16 CodeGen::genIfExpr(IfExprNode* expr) {
 
     u32 elseJump = emitJump(op_jump_if_false, condReg);
 
+    // resultReg is write-only and NOT live-in to either branch: each branch
+    // assigns it as its final act. Its per-register type must stay cleared
+    // during branch codegen so a safepoint inside a branch (a call or back
+    // edge) does not see the OTHER branch's leaked type and mark an
+    // uninitialized register as a live Obj* root. (See genIfStmtForValue /
+    // genSwitchStmtForValue for the same discipline.)
+    setRegType(resultReg, nullptr);
+
     // Then branch - generate and copy result
     if (expr->thenBranch->kind == ASTNode::Block) {
         genBlockForValue(static_cast<BlockStmt*>(expr->thenBranch.get()), resultReg);
@@ -10414,11 +10455,14 @@ u16 CodeGen::genIfExpr(IfExprNode* expr) {
     patchJump(elseJump);
 
     // Else branch
+    setRegType(resultReg, nullptr);
     if (expr->elseBranch && expr->elseBranch->kind == ASTNode::Block) {
         genBlockForValue(static_cast<BlockStmt*>(expr->elseBranch.get()), resultReg);
     }
 
     patchJump(endJump);
+    // After the join resultReg is live on both paths.
+    setRegType(resultReg, expr->resolvedType);
     return resultReg;
 }
 

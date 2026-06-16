@@ -593,16 +593,25 @@ void classifyImpl(Type* t, std::unordered_set<Type*>& visiting) {
         return;
     }
 
-    // Reset (overwriting any previous classification). isRecursive_ is preserved
-    // if a descendant detected a cycle through us during this classification.
-    t->isRecursive_ = false;
+    // Recursion is a structural property of the type, so isRecursive_ is
+    // STICKY -- once any classification detects a cycle through t, it stays
+    // recursive across every later re-classification. Resetting it here would
+    // make the recursive/Heap decision depend on which type the classifier
+    // happened to start from: a type reached mid-cycle (where the cycle breaks
+    // at a *different* type) could be mis-classified as non-recursive and given
+    // a multi-word inline layout, while the same type classified as a fresh
+    // entry point is correctly Heap. The two layouts then disagree on field
+    // offsets -- the bug that broke multi-payload cases like
+    // `delay(DelayVar, DelayOp)`. The cycle guard never reports false positives
+    // (it only fires on a genuine back-edge), so accumulating detections across
+    // entry points converges to the correct recursive set.
 
     if (auto* al = dynamic_cast<AliasedType*>(t)) {
         classifyImpl(al->aliasedType_, visiting);
         t->repr_ = al->aliasedType_->repr_;
         t->sizeWords_ = al->aliasedType_->sizeWords_;
         t->isValueType_ = al->aliasedType_->isValueType_;
-        t->isRecursive_ = al->aliasedType_->isRecursive_;
+        t->isRecursive_ = t->isRecursive_ || al->aliasedType_->isRecursive_;
         visiting.erase(t);
         return;
     }

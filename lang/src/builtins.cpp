@@ -230,9 +230,55 @@ static bool resolve_cat(Compiler& compiler, const std::vector<Type*>& args,
     return false;
 }
 
+// join([String]) / join([String], sep String) -> String
+// Concatenates string elements with an optional separator. Sizes the result
+// up front so the whole join is two passes and one allocation.
+static void joinStringsImpl(VM& vm, u16 dst, u16 ab, StringObj* sep) {
+    auto* arr = static_cast<ObjArray*>(vm.reg(ab).o);
+    size_t n = arr ? arr->size() : 0;
+
+    size_t total = 0;
+    for (size_t i = 0; i < n; ++i) {
+        if (auto* s = static_cast<StringObj*>(arr->get(i))) total += s->s.size();
+    }
+    if (sep && n > 1) total += sep->s.size() * (n - 1);
+
+    auto* result = new StringObj();
+    result->s.reserve(total);
+    for (size_t i = 0; i < n; ++i) {
+        if (sep && i > 0) result->s.append(sep->s.data(), sep->s.size());
+        if (auto* s = static_cast<StringObj*>(arr->get(i))) result->s.append(s->s.data(), s->s.size());
+    }
+    registerNewObj(result);
+    vm.reg(dst).o = result;
+}
+
+static void builtin_join_strings(VM& vm, u16 dst, u16, u16 ab) {
+    joinStringsImpl(vm, dst, ab, nullptr);
+}
+
+static void builtin_join_strings_sep(VM& vm, u16 dst, u16, u16 ab) {
+    joinStringsImpl(vm, dst, ab, static_cast<StringObj*>(vm.reg(ab + 1).o));
+}
+
 // join/flatten: [[T]] -> [T]  or  List<List<T>> -> List<T>
+// join([String]) / join([String], sep) -> String
 static bool resolve_join(Compiler& compiler, const std::vector<Type*>& args,
     std::vector<Type*>& pt, Type*& rt, CFun& cf) {
+    if (args.empty()) return false;
+    if (auto* at = dynamic_cast<ArrayType*>(args[0])) {
+        if (at->elemType_ == compiler.stringType()) {
+            if (args.size() == 1) {
+                pt = {at}; rt = compiler.stringType();
+                cf = builtin_join_strings; return true;
+            }
+            if (args.size() == 2 && args[1] == compiler.stringType()) {
+                pt = {at, compiler.stringType()}; rt = compiler.stringType();
+                cf = builtin_join_strings_sep; return true;
+            }
+            return false;
+        }
+    }
     if (args.size() != 1) return false;
     if (auto* at = dynamic_cast<ArrayType*>(args[0])) {
         if (dynamic_cast<ArrayType*>(at->elemType_)) {
