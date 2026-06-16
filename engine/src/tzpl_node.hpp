@@ -83,7 +83,6 @@ struct NodeDef {
         for (int i = 0; i < info_.num_controls; ++i) {
             ControlInfo& p = info_.controls[i];
             controlMap_[p.controlID] = i;
-            ++i;
         }
     }
 };
