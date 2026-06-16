@@ -29,6 +29,8 @@
 #include "synthdef_audio_io.hpp"
 #include <dlfcn.h> // dlopen, dlclose
 #include <unistd.h>
+#include <cmath>    // std::isfinite, std::fabs
+#include <cstdlib>  // getenv
 
 #define GENERATE_CODE 1
 #define COMPILE_CODE 1
@@ -100,8 +102,13 @@ tzpl_SynthData* setupSynth(tzpl_SynthDef const& def, f64 fs) {
 
 
 void runInternalAudioEngine(string dir, string synthName, int seconds) {
-    string filename = synthName + synthNameSuffix;
-    string filepath_dylib = dir + filename + ".dylib";
+    // Use the same path the linker just wrote to. compileAndLink() places the
+    // dylib under buildDir/dylib/ with a per-synth revision suffix (e.g.
+    // _r1.dylib); dylibPath() reproduces that exact path (the revision counter
+    // is unchanged between the compile and this load). Rebuilding the path by
+    // hand here previously produced a stale flat, suffix-less path that dlopen
+    // could not find.
+    string filepath_dylib = dylibPath(dir, synthName);
     try {
         printf("\nbegin run audio engine =====================================================\n");
         auto opt_synthdef = loadDef(filepath_dylib);
@@ -125,31 +132,59 @@ void runInternalAudioEngine(string dir, string synthName, int seconds) {
 
         printf("data->outlets = %p\n", (void*)data->outlets);
 
-        f32 outs[2];
+        // Outlet scratch buffer. A SIMD synth's processAudio writes a whole
+        // vector (chans * simdWidth floats) into outlets[0] per call, not just
+        // 2 -- so a 2-float buffer would overflow the stack. Size generously.
+        f32 outs[64] = {0};
         data->outlets[0] = outs;
         data->fs = 48000;
 
         def.funs.init(data);
 
-        AudioEngine e;
-
-        e.streamParams = { "default", 2, 0, 256, 48000.};
-
-        e.processFun = [&](AudioEngine* e, f32* out, f32 const* in, int numFrames) {
-            int chans = e->streamParams.channels;
-            for (int i = 0, j = 0; i < numFrames; ++i, j += chans) {
+        // Headless by default: render `seconds` of audio offline and verify the
+        // synth's output stays finite and bounded. This keeps the integration
+        // coverage (dylib loads via dlopen, allocates/inits/processes without
+        // crashing or emitting NaN/Inf) without opening a live CoreAudio device
+        // -- the test suite must not play sound to the speaker. Set
+        // TZPL_TEST_AUDIO to opt into live playback for manual listening.
+        if (getenv("TZPL_TEST_AUDIO")) {
+            AudioEngine e;
+            e.streamParams = { "default", 2, 0, 256, 48000.};
+            e.processFun = [&](AudioEngine* e, f32* out, f32 const* in, int numFrames) {
+                int chans = e->streamParams.channels;
+                for (int i = 0, j = 0; i < numFrames; ++i, j += chans) {
+                    def.funs.processAudio(data);
+                    out[j] = outs[0];
+                    out[j+1] = outs[1];
+                }
+            };
+            initAudio(&e);
+            std::println("NOW PLAYING: {}", synthName);
+            startAudio(&e);
+            sleep(seconds);
+            stopAudio(&e);
+            uninitAudio(&e);
+        } else {
+            long nframes = (long)seconds * 48000;
+            double maxAbs = 0.0;
+            bool nonFinite = false;
+            for (long i = 0; i < nframes; ++i) {
                 def.funs.processAudio(data);
-                out[j] = outs[0];
-                out[j+1] = outs[1];
+                for (int ch = 0; ch < 2; ++ch) {
+                    f32 v = outs[ch];
+                    if (!std::isfinite(v)) nonFinite = true;
+                    double a = std::fabs((double)v);
+                    if (a > maxAbs) maxAbs = a;
+                }
             }
-        };
-
-        initAudio(&e);
-        std::println("NOW PLAYING: {}", synthName);
-        startAudio(&e);
-        sleep(seconds);
-        stopAudio(&e);
-        uninitAudio(&e);
+            // assert() is a no-op in release (NDEBUG); surface anomalies with a
+            // printed warning instead. A clean signal is bounded near unity --
+            // non-finite or wildly large output means the synth (or this
+            // harness's fixed 2-float outlet buffer) is producing garbage.
+            const char* warn = (nonFinite || maxAbs > 10.0) ? "  <<< WARNING: garbage output" : "";
+            printf("offline render: %ld frames, maxAbs=%g, finite=%s%s\n",
+                   nframes, maxAbs, nonFinite ? "NO" : "yes", warn);
+        }
         free(data->outlets);
         def.funs.free(data);
     } catch (std::exception& err) {
