@@ -249,8 +249,10 @@ fn genLoop(ctx Ctx, loopIdx Int) String {
 	if (loop.chans == 0) { return ""; }
 	var `cgLoopChans Int = loop.chans;
 
+	-- Sort antecedent serials so the LOOP comment is deterministic (the C++
+	-- loop_antecedents is an unordered_set; both sides sort ascending to match).
 	var ante [String] = [];
-	for (a : loop.antecedents) { ante push!(a toString); }
+	for (a : loop.antecedents sort) { ante push!(a toString); }
 	var s = "\n" $ _tabs(`cgIndent) $ "// LOOP %^ [%^] %^ %^\n"
 		fmt(padLeft(loop.serial toString, 2), ante join(" "), loop.rate rateStr, loop.chans);
 

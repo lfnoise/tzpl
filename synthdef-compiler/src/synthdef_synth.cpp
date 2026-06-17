@@ -912,10 +912,15 @@ namespace synthdef {
 
     void printLoops(string& out, vector<GenLoop*>& loops) {
         for (GenLoop* loop : loops) {
-            string antecedents;
+            // loop_antecedents is an unordered_set; sort serials so the dump is
+            // deterministic and matches the Tzopilotl-hosted compiler.
+            vector<int> antSerials;
             for (GenLoop* antecedent : loop->loop_antecedents) {
-                antecedents += std::to_string(antecedent->serial) + " ";
+                antSerials.push_back(antecedent->serial);
             }
+            std::sort(antSerials.begin(), antSerials.end());
+            string antecedents;
+            for (int sv : antSerials) antecedents += std::to_string(sv) + " ";
             if (!antecedents.empty()) { antecedents.pop_back(); }
             out += std::format("  LOOP {:>2} [{}] {:<6} {}\n",
                 loop->serial, antecedents,

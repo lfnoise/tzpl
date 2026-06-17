@@ -2045,10 +2045,17 @@ string CppCodeGen::genTree(ExprTree const& tree, VarIndex cel) {
         return FMT("// Unused {} {}\n", current_root->userial, current_root->str());
     }
     tabIndent(s, indent);
-    
+
     Rank1GenTreeExprVisitor v(this, tree, s, cel);
     current_root->accept(v);
-    if (v.handled) return s;
+    if (v.handled) {
+        // Pure-metadata roots (MaxDelay, DelayInit) are "handled" but emit no
+        // statement. Drop the leading indent we optimistically wrote, otherwise
+        // it dangles (no newline) and the next tree's indent stacks onto it,
+        // producing a spuriously over-indented line.
+        if (s.find_first_not_of(" \t") == string::npos) return "";
+        return s;
+    }
     
     if (is_sink(current_root->cut)) {
         s += FMT("{}; // {} Sink {}\n", genExpr(current_root, cel),
@@ -2186,10 +2193,15 @@ string CppCodeGen::genLoop(GenLoop const& loop) {
 
     {
         // DEBUG {
-            string antecedents_str;
+            // loop_antecedents is an unordered_set; sort serials so the comment
+            // is deterministic and matches the Tzopilotl-hosted compiler.
+            vector<int> antSerials;
             for (GenLoop* antecedent : loop.loop_antecedents) {
-                antecedents_str += std::to_string(antecedent->serial) + " ";
+                antSerials.push_back(antecedent->serial);
             }
+            std::sort(antSerials.begin(), antSerials.end());
+            string antecedents_str;
+            for (int sv : antSerials) antecedents_str += std::to_string(sv) + " ";
             if (!antecedents_str.empty()) antecedents_str.pop_back();
             
             s += "\n";

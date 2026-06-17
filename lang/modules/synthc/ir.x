@@ -591,8 +591,10 @@ fn printTree(ctx Ctx, out [String], ti Int) Void {
 fn printLoops(ctx Ctx, out [String], loopIdxs [Int]) Void {
 	for (li : loopIdxs) {
 		let lp = ctx.loops[li];
+		-- Sort antecedent serials so the dump is deterministic and matches the
+		-- C++ printLoops (its loop_antecedents is an unordered_set, now sorted).
 		var ante [String] = [];
-		for (s : lp.antecedents) {
+		for (s : lp.antecedents sort) {
 			ante push!(s toString);
 		}
 		out push!("  LOOP "

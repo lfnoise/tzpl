@@ -106,6 +106,21 @@ fn twoCtrl() S {
 checkSortedAndTrees("two_ctrl", twoCtrl);
 checkCodegen("two_ctrl", twoCtrl);
 
+-- Variable (signal-rate) delay read with cubic interpolation: exercises the
+-- runtime-sized delay (calloc/_mask/_wrpos via genDelayAlloc) and the
+-- tzpl_delay_cubic kernel, with a control driving the delay time.
+fn vdelayCtrl() S {
+	let d = delayVar(0.05);
+	d init(1, 0.0);
+	let dt = control("dt", ControlSpec { lo: 0.0, hi: 0.05, init: 0.01, warp: ControlWarp.linear });
+	let inp = (fs() / 440.0) sin;
+	let r = d vread(dt, Interpolation.cubic);
+	d write(inp * 0.5 + r * 0.9);
+	r outlet
+}
+checkSortedAndTrees("vdelay_ctrl", vdelayCtrl);
+checkCodegen("vdelay_ctrl", vdelayCtrl);
+
 -- Audio-only integrator: no controls -> no iso-groups -> FULL dump matches.
 fn integrator() S {
 	let osc = (fs() / 440.0) sin;
