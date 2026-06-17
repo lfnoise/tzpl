@@ -32,6 +32,7 @@
 #include "synthdef_from_sexpr.hpp"
 #include "synthdef_cpp_codegen.hpp"
 #include "synthdef_synth.hpp"
+#include "synthdef_str_util.hpp"
 #include <dlfcn.h>
 #include <memory>
 #include <unordered_map>
@@ -383,6 +384,16 @@ static void ffi_compareAudioFiles(ts::VM& vm, u16 dst, u16, u16 argBase) {
     vm.reg(dst).f = maxDiff;
 }
 
+// fn ftosF32Cpp(x Float) String
+// Shortest round-trip decimal for x rounded to f32, with a trailing 'f' --
+// exactly the generator's f32 constant formatting (synthdef::ftos(f32)). synthc
+// uses this so its emitted f32 constants byte-match the C++ generator (a value's
+// shortest-f32 form differs from its shortest-f64 form, e.g. 0.70794576f).
+static void ffi_ftosF32Cpp(ts::VM& vm, u16 dst, u16, u16 argBase) {
+    double x = vm.reg(argBase).f;
+    returnString(vm, dst, synthdef::ftos((float)x));
+}
+
 // fn audioFileMaxAbs(path String) Float
 // Returns the maximum absolute sample value in a WAV file (same 44-byte-header
 // f32 format as compareAudioFiles), or -1.0 if the file is missing/short. Used
@@ -438,6 +449,7 @@ void registerSynthdefCompilerFFI(ts::Compiler& compiler) {
     reg("loadSynthDylib",          String, {String},         ffi_loadSynthDylib);
     reg("compareAudioFiles",       Float,  {String, String}, ffi_compareAudioFiles);
     reg("audioFileMaxAbs",         Float,  {String},         ffi_audioFileMaxAbs);
+    reg("ftosF32Cpp",              String, {Float},          ffi_ftosF32Cpp);
     reg("synthdefGenCppFromSexpr", String, {String, Int, Bool}, ffi_synthdefGenCppFromSexpr);
     reg("synthdefAnalysisDump",    String, {String, Bool},   ffi_synthdefAnalysisDump);
 }

@@ -330,6 +330,17 @@ VarIndex max(VarIndex a, VarIndex b) {
     }
 }
 
+// delayBufs is an unordered_set, so iterating it directly makes emitted code
+// (struct field order, alloc/free/advance order) depend on hash order. Codegen
+// iterates this sorted-by-serial view instead, so output is deterministic and
+// matches the Tzopilotl-hosted compiler.
+static vector<D> sortedDelays(unordered_set<D, DelayHasher> const& delays) {
+    vector<D> v(delays.begin(), delays.end());
+    std::sort(v.begin(), v.end(),
+              [](D const& a, D const& b) { return a->serial < b->serial; });
+    return v;
+}
+
 // Stack-allocated visitor; deliberately NOT an ArenaObj. Inheriting from
 // ArenaObj would register `this` (a stack address) with the current Arena,
 // causing a crash when the Arena later tries to `delete` it.
@@ -2396,12 +2407,8 @@ string CppCodeGen::genDelayAlloc() {
     string s;
     inInitMode = true;
 
-    // Top-level delays. delayBufs is an unordered_set; iterate by serial so the
-    // emitted alloc code is deterministic (and matches the Tzopilotl compiler).
-    vector<D> sortedDelays(synth->delayBufs.begin(), synth->delayBufs.end());
-    std::sort(sortedDelays.begin(), sortedDelays.end(),
-              [](D const& a, D const& b) { return a->serial < b->serial; });
-    for (auto delay : sortedDelays) {
+    // Top-level delays.
+    for (auto delay : sortedDelays(synth->delayBufs)) {
         if (isVoicerSubgraph(delay->graph)) continue;
         if (delay->allocSize != 1) {
             s += FMT("\tp->d{}_wrpos = 0;\n", delay->serial);
@@ -2432,7 +2439,7 @@ string CppCodeGen::genDelayAlloc() {
     // Per-voice delays (inside voicer subgraph)
     if (flatVoiceMode) {
         // SoA layout
-        for (auto delay : synth->delayBufs) {
+        for (auto delay : sortedDelays(synth->delayBufs)) {
             if (!isVoicerSubgraph(delay->graph)) continue;
             int mv = voicerExpr->maxVoices;
             int nbufs = delay->chans > 1 ? mv * delay->chans : mv;
@@ -2467,7 +2474,7 @@ string CppCodeGen::genDelayAlloc() {
         }
     } else {
         bool hasVoiceDelays = false;
-        for (auto delay : synth->delayBufs) {
+        for (auto delay : sortedDelays(synth->delayBufs)) {
             if (!isVoicerSubgraph(delay->graph)) continue;
             if (!hasVoiceDelays) {
                 hasVoiceDelays = true;
@@ -2528,12 +2535,7 @@ string CppCodeGen::genDelayAlloc() {
 
 string CppCodeGen::genDelayInit() {
     string s;
-    // delayBufs is an unordered_set; iterate by serial so the emitted init
-    // code is deterministic (and matches the Tzopilotl-hosted compiler).
-    vector<D> sortedDelays(synth->delayBufs.begin(), synth->delayBufs.end());
-    std::sort(sortedDelays.begin(), sortedDelays.end(),
-              [](D const& a, D const& b) { return a->serial < b->serial; });
-    for (auto delay : sortedDelays) {
+    for (auto delay : sortedDelays(synth->delayBufs)) {
         if (isVoicerSubgraph(delay->graph)) continue;
         for (S expr : delay->initters) {
             auto* init = expr.as<DelayInit>();
@@ -2571,7 +2573,7 @@ string CppCodeGen::genDelayInit() {
 string CppCodeGen::genDelayDealloc() {
     string s;
     // Top-level delays
-    for (auto delay : synth->delayBufs) {
+    for (auto delay : sortedDelays(synth->delayBufs)) {
         if (isVoicerSubgraph(delay->graph)) continue;
         if (delay->allocSize >= 1) {
             // OK, no allocation needed.
@@ -2590,7 +2592,7 @@ string CppCodeGen::genDelayDealloc() {
     // Per-voice delays
     if (flatVoiceMode) {
         // SoA layout
-        for (auto delay : synth->delayBufs) {
+        for (auto delay : sortedDelays(synth->delayBufs)) {
             if (!isVoicerSubgraph(delay->graph)) continue;
             if (delay->allocSize >= 1) {
                 // OK, no allocation needed.
@@ -2606,7 +2608,7 @@ string CppCodeGen::genDelayDealloc() {
         }
     } else {
         bool hasVoiceDelays = false;
-        for (auto delay : synth->delayBufs) {
+        for (auto delay : sortedDelays(synth->delayBufs)) {
             if (!isVoicerSubgraph(delay->graph)) continue;
             if (!hasVoiceDelays) {
                 hasVoiceDelays = true;
@@ -2944,7 +2946,7 @@ string genDelayDecls(unordered_set<D, DelayHasher> const& delays, string indent)
     string s;
     if (delays.empty()) return s;
     s += indent + "// delays\n";
-    for (D delay : delays) {
+    for (D delay : sortedDelays(delays)) {
         s += indent + delay->type.str();
         if (delay->allocSize == 1) {
             s += FMT(" d{0}{1};\n", delay->serial, genShape(delay));
@@ -2957,7 +2959,7 @@ string genDelayDecls(unordered_set<D, DelayHasher> const& delays, string indent)
         }
     }
     s += "\n";
-    for (D delay : delays) {
+    for (D delay : sortedDelays(delays)) {
         if (delay->allocSize != 1) {
             s += FMT("{}u64 d{}_wrpos;\n", indent, delay->serial);
         }
@@ -2972,7 +2974,7 @@ string genDelayDeclsSoA(unordered_set<D, DelayHasher> const& delays, string inde
     string s;
     if (delays.empty()) return s;
     s += indent + "// per-voice delays (SoA)\n";
-    for (D delay : delays) {
+    for (D delay : sortedDelays(delays)) {
         if (delay->allocSize == 1) {
             if (delay->chans == 1) {
                 s += FMT("{}{} voice_d{}[{}];\n", indent, delay->type.str(), delay->serial, maxVoices);
@@ -2994,7 +2996,7 @@ string genDelayDeclsSoA(unordered_set<D, DelayHasher> const& delays, string inde
         }
     }
     s += "\n";
-    for (D delay : delays) {
+    for (D delay : sortedDelays(delays)) {
         if (delay->allocSize != 1) {
             s += FMT("{}u64 voice_d{}_wrpos[{}];\n", indent, delay->serial, maxVoices);
         }
@@ -3049,7 +3051,7 @@ string CppCodeGen::genDeclVoiceState() {
 
         // Per-voice delays (SoA)
         unordered_set<D, DelayHasher> voiceDelays;
-        for (D delay : synth->delayBufs) {
+        for (D delay : sortedDelays(synth->delayBufs)) {
             if (isVoicerSubgraph(delay->graph)) {
                 voiceDelays.insert(delay);
             }
@@ -3084,7 +3086,7 @@ string CppCodeGen::genDeclVoiceState() {
 
         // Per-voice delays
         unordered_set<D, DelayHasher> voiceDelays;
-        for (D delay : synth->delayBufs) {
+        for (D delay : sortedDelays(synth->delayBufs)) {
             if (isVoicerSubgraph(delay->graph)) {
                 voiceDelays.insert(delay);
             }
@@ -3150,7 +3152,7 @@ string CppCodeGen::genDeclInstVars() {
 
     // Top-level delays (not inside voicer)
     unordered_set<D, DelayHasher> topDelays;
-    for (D delay : synth->delayBufs) {
+    for (D delay : sortedDelays(synth->delayBufs)) {
         if (!isVoicerSubgraph(delay->graph)) {
             topDelays.insert(delay);
         }
@@ -3231,7 +3233,7 @@ string CppCodeGen::genNoteFuns() {
             }
         }
         // Reset per-voice delay state
-        for (D delay : synth->delayBufs) {
+        for (D delay : sortedDelays(synth->delayBufs)) {
             if (!isVoicerSubgraph(delay->graph)) continue;
             if (delay->allocSize != 1) {
                 s += FMT("\tp->voice_d{}_wrpos[vi] = 0;\n", delay->serial);
@@ -3497,7 +3499,13 @@ string CppCodeGen::genClass()
     }
     for (usize i = 0; S u : synth->controls) {
         auto control = u.as<Control>();
-        s += FMT("\tdef.controls[{}] = {{\"{}\", {{{}, {}, {}}}, {}}};\n", i, control->name, genTypeTag(u), u->rate.codeStr(), u->chans, control->serial);
+        // Emit the control's spec so the engine can seed the control buffer with
+        // its declared init value. (The parser stores the sexpr's init into the
+        // ControlSpec's `param` field.) Designated initializers leave param/warp/
+        // kind value-initialized.
+        s += FMT("\tdef.controls[{}] = {{\"{}\", {{{}, {}, {}}}, {}, {{.lo = {}, .hi = {}, .init = {}}}}};\n",
+            i, control->name, genTypeTag(u), u->rate.codeStr(), u->chans, control->serial,
+            ftos(control->spec.lo), ftos(control->spec.hi), ftos(control->spec.param));
         ++i;
     }
     s += "\treturn def;\n";

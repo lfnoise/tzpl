@@ -396,7 +396,10 @@ fn ftosF64(x Float) String {
 	x toString
 }
 
-fn ftosF32(x Float) String = ftosF64(x) $ "f";
+-- f32 constants need the shortest round-trip for the f32 value (which differs
+-- from the f64 shortest form, e.g. 0.70794576f vs 0.7079457843841379f), so route
+-- through the C++ generator's exact formatter via FFI rather than ftosF64+"f".
+fn ftosF32(x Float) String = ftosF32Cpp(x);
 
 -- Constant::str(): per-element formatting selected by the node's
 -- (post-inference) concrete type; non-concrete falls back to the storage

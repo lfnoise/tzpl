@@ -621,8 +621,13 @@ fn genLoad(ctx Ctx, name String) String {
 	i = 0;
 	for (n : ctx.controls) {
 		match (ctx.kind[n]) {
-			control(_, cname, sn): {
-				s = s $ "\tdef.controls[%^] = {\"%^\", {%^, %^, %^}, %^};\n" fmt(i, cname, _typeTag(ctx.typ[n]), _rateCode(ctx.nrate[n]), ctx.chans[n], sn);
+			control(spec, cname, sn): {
+				-- Emit the control's spec (lo/hi/init) so the engine seeds the
+				-- control buffer with its declared init value. Matches the C++
+				-- emission; param/warp/kind are left value-initialized.
+				s = s $ "\tdef.controls[%^] = {\"%^\", {%^, %^, %^}, %^, {.lo = %^, .hi = %^, .init = %^}};\n"
+					fmt(i, cname, _typeTag(ctx.typ[n]), _rateCode(ctx.nrate[n]), ctx.chans[n], sn,
+					    ftosF64(spec.lo), ftosF64(spec.hi), ftosF64(spec.init));
 			}
 			_: {}
 		}
