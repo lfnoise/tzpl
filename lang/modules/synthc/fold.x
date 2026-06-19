@@ -144,6 +144,44 @@ fn foldBinary(a ConstVal, b ConstVal, op BinaryOp) ConstVal {
 }
 
 ---------------------------------------------------------------------------
+-- Reduce a constant vector over `cols` columns (port of reduce_int/reduce_float
+-- in synthdef_matrix.cpp). Input is reshaped as rows x cols; each output column
+-- j is acc = a[j], then op-folded down the rows: acc = op(acc, a[row*cols + j]).
+
+fn _reduceInts(a [Int], cols Int, op BinaryOp) [Int] {
+	let rows = a length // cols;
+	var out [Int] = [];
+	var j = 0;
+	while (j < cols) {
+		var acc = a[j];
+		var row = 1;
+		while (row < rows) { acc = _applyIntBinary(op, acc, a[row * cols + j]); row = row + 1; }
+		out push!(acc);
+		j = j + 1;
+	}
+	out
+}
+
+fn _reduceFloats(a [Float], cols Int, op BinaryOp) [Float] {
+	let rows = a length // cols;
+	var out [Float] = [];
+	var j = 0;
+	while (j < cols) {
+		var acc = a[j];
+		var row = 1;
+		while (row < rows) { acc = _applyFloatBinary(op, acc, a[row * cols + j]); row = row + 1; }
+		out push!(acc);
+		j = j + 1;
+	}
+	out
+}
+
+fn foldReduce(v ConstVal, cols Int, op BinaryOp) ConstVal = match (v) {
+	ints(a):   ConstVal.ints(_reduceInts(a, cols, op));
+	floats(a): ConstVal.floats(_reduceFloats(a, cols, op));
+};
+
+---------------------------------------------------------------------------
 -- Compare (result is always an i64 vector: -1 true, 0 false)
 
 fn _cmpF(op CompareOp, x Float, y Float) Int = match (op) {

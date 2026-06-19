@@ -19,6 +19,108 @@ fn _tabs(n Int) String = n <= 0 ? "" : "\t" $ _tabs(n - 1);
 
 fn cppType(t NumType) String = t numTypeStr;     -- i32/i64/f32/f64
 
+---------------------------------------------------------------------------
+-- Symbolic channel-index algebra (mirrors the C++ VarIndex + its operator
+-- overloads in synthdef_cpp_codegen.cpp). Vec ops remap the loop channel index;
+-- these constant simplifications are what make the emitted index expressions
+-- byte-match. A VIdx is a constant, the opaque loop var ("i"), a negation, or a
+-- binop. `synthc` only ever feeds "i" or "0" as the base index.
+
+enum VIdx {
+	vc(Int),
+	vs(String),
+	vneg(VIdx),
+	vadd(VIdx, VIdx),
+	vsub(VIdx, VIdx),
+	vmul(VIdx, VIdx),
+	vdiv(VIdx, VIdx),
+	vrem(VIdx, VIdx),   -- C++ operator% -> infix `%`
+	vmod(VIdx, VIdx),   -- C++ mod() -> synthdef::mod(a, b) (floored)
+}
+
+fn _viC(x VIdx) Bool = match (x) { vc(_): true; _: false; };
+fn _viVal(x VIdx) Int = match (x) { vc(k): k; _: 0; };
+fn _viZero(x VIdx) Bool = match (x) { vc(k): k == 0; _: false; };
+fn _viOne(x VIdx) Bool = match (x) { vc(k): k == 1; _: false; };
+fn _imod(x Int, y Int) Int = x - (x // y) * y;   -- remainder; index operands are >= 0
+
+fn viOf(cel String) VIdx = (cel == "0") ? VIdx.vc(0) : VIdx.vs(cel);
+
+fn viNeg(x VIdx) VIdx = x _viC ? VIdx.vc(0 - x _viVal) : VIdx.vneg(x);
+
+fn viAdd(a VIdx, b VIdx) VIdx {
+	if (a _viC && b _viC) { return VIdx.vc(a _viVal + b _viVal); }
+	if (a _viZero) { return b; }
+	if (b _viZero) { return a; }
+	var x = a; var y = b;
+	if (b _viC) { x = b; y = a; }      -- normalize constant to the left
+	if (x _viC) {
+		match (y) {
+			vadd(ya, yb): { if (ya _viC) { return VIdx.vadd(VIdx.vc(x _viVal + ya _viVal), yb); } }
+			_: {}
+		}
+	}
+	VIdx.vadd(x, y)
+}
+
+fn viSub(a VIdx, b VIdx) VIdx {
+	if (a _viC && b _viC) { return VIdx.vc(a _viVal - b _viVal); }
+	if (a _viZero) { return viNeg(b); }
+	if (b _viZero) { return a; }
+	VIdx.vsub(a, b)
+}
+
+fn viMul(a VIdx, b VIdx) VIdx {
+	if (a _viC && b _viC) { return VIdx.vc(a _viVal * b _viVal); }
+	if (a _viZero) { return VIdx.vc(0); }
+	if (b _viZero) { return VIdx.vc(0); }
+	if (a _viOne) { return b; }
+	if (b _viOne) { return a; }
+	var x = a; var y = b;
+	if (b _viC) { x = b; y = a; }
+	if (x _viC) {
+		match (y) {
+			vmul(ya, yb): { if (ya _viC) { return VIdx.vmul(VIdx.vc(x _viVal * ya _viVal), yb); } }
+			_: {}
+		}
+	}
+	VIdx.vmul(x, y)
+}
+
+fn viDiv(a VIdx, b VIdx) VIdx {
+	if (a _viC && b _viC) { return VIdx.vc(a _viVal // b _viVal); }
+	if (a _viZero) { return VIdx.vc(0); }
+	if (a _viOne) { return b; }
+	if (b _viC && b _viVal == 1) { return a; }
+	VIdx.vdiv(a, b)
+}
+
+fn viRem(a VIdx, b VIdx) VIdx {     -- C++ operator%
+	if (a _viC && b _viC) { return VIdx.vc(_imod(a _viVal, b _viVal)); }
+	if (a _viZero) { return VIdx.vc(0); }
+	if (b _viOne) { return VIdx.vc(0); }
+	VIdx.vrem(a, b)
+}
+
+fn viMod(a VIdx, b VIdx) VIdx {     -- C++ mod()
+	if (a _viC && b _viC) { return VIdx.vc(_imod(a _viVal, b _viVal)); }
+	if (a _viZero) { return VIdx.vc(0); }
+	if (b _viOne) { return VIdx.vc(0); }
+	VIdx.vmod(a, b)
+}
+
+fn vxstr(x VIdx) String = match (x) {
+	vc(k):      k toString;
+	vs(s):      s;
+	vneg(a):    genUnopStr(UnaryOp.neg, false, vxstr(a));
+	vadd(a, b): genBinopStr(BinaryOp.add, false, vxstr(a), vxstr(b));
+	vsub(a, b): genBinopStr(BinaryOp.sub, false, vxstr(a), vxstr(b));
+	vmul(a, b): genBinopStr(BinaryOp.mul, false, vxstr(a), vxstr(b));
+	vdiv(a, b): genBinopStr(BinaryOp.div, false, vxstr(a), vxstr(b));
+	vrem(a, b): "(" $ vxstr(a) $ " % " $ vxstr(b) $ ")";
+	vmod(a, b): "mod(" $ vxstr(a) $ ", " $ vxstr(b) $ ")";   -- i64 Mod op compile string (unqualified)
+};
+
 fn _shape(chans Int) String = chans > 1 ? "[%^]" fmt(chans) : "";
 
 fn _typeTag(t NumType) String = match (t.0) {
@@ -123,10 +225,54 @@ fn _inlineExpr(ctx Ctx, n NIdx, cel String) String {
 		compareopK(op): genCompareStr(op, genExpr(ctx, ins[0], cel), genExpr(ctx, ins[1], cel));
 		castopK(ct):    "%^(%^)" fmt(cppType(ct), genExpr(ctx, ins[0], cel));
 		selectK:        _inlineSelect(ctx, n, cel);
+		reduceK(op, cols): _genReduce(ctx, n, op, cols, cel);
+		vecK(vop):      _genVec(ctx, n, vop, cel);
 		delayFixReadK(d, k): _delayFixReadExpr(ctx, n, d, k, cel);
 		delayVarReadK(d, ip): _delayVarReadExpr(ctx, n, d, ip, cel);
 		_:              "/* FIXME %^ */" fmt(nodeStr(ctx, n));
 	}
+}
+
+-- ReduceExpr codegen: reduce_rows<rows, cols>(cel, inputArray, lambda). The
+-- input is materialized in a separate loop (reduceK forces a temp var), so we
+-- pass its array name; rows = inputChans / cols.
+fn _genReduce(ctx Ctx, n NIdx, op BinaryOp, cols Int, cel String) String {
+	let inp = ctx.ins[n][0];
+	let rows = ctx.chans[inp] // cols;
+	let ty = cppType(ctx.typ[n]);
+	let body = genBinopStr(op, ctx.typ[n] _isF32, "z", "x");
+	let lambda = "[](%^ z, %^ x){ return %^; }" fmt(ty, ty, body);
+	"reduce_rows<%^, %^>(%^, %^, %^)" fmt(rows, cols, cel, _varName(ctx, inp), lambda)
+}
+
+-- Vec op codegen: remap the channel index, then re-emit the (materialized)
+-- input at that index. The index algebra (VIdx) replicates the C++ VarIndex
+-- simplifications so the emitted subscript byte-matches.
+fn _transposeIdx(c VIdx, inChans Int, cols Int) VIdx {
+	let rows = inChans // cols;
+	viAdd(viMul(viRem(c, VIdx.vc(rows)), VIdx.vc(cols)), viDiv(c, VIdx.vc(rows)))
+}
+fn _rotateIdx(ctx Ctx, n NIdx, c VIdx, inChans Int) VIdx {
+	let nIn = ctx.ins[n][1];
+	let r = "isize(" $ genExpr(ctx, nIn, "0") $ ")";
+	viMod(viAdd(c, VIdx.vs(r)), VIdx.vc(inChans))
+}
+fn _genVec(ctx Ctx, n NIdx, vop VecOp, cel String) String {
+	let inp = ctx.ins[n][0];
+	let inChans = ctx.chans[inp];
+	let c = viOf(cel);
+	let idx = match (vop) {
+		take(_):         c;
+		drop(num):       viAdd(c, VIdx.vc(num));
+		stride(num):     viMul(c, VIdx.vc(num));
+		stutter(num):    viDiv(c, VIdx.vc(num));
+		ncyc(_):         viMod(c, VIdx.vc(inChans));
+		reverse:         viSub(VIdx.vc(inChans - 1), c);
+		transpose(cols): _transposeIdx(c, inChans, cols);
+		rotate:          _rotateIdx(ctx, n, c, inChans);
+		_:               c;
+	};
+	genExpr(ctx, inp, idx vxstr)
 }
 
 fn _inlineSelect(ctx Ctx, n NIdx, cel String) String {

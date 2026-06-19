@@ -12,15 +12,20 @@
 import synthdef.*;
 import synthc.ir.*;
 import synthc.fold.*;
+import synthc.rewrite.*;
 
 ---------------------------------------------------------------------------
 -- Entry point
 
-fn importGraph(g SignalGraph, name String) Ctx {
+fn importGraph(g SignalGraph, name String, applyRewrites Bool = false) Ctx {
 	var `scCtx = newCtx(name);
 	var `scIdMap [Int: Int] = [:];        -- front-end expr id -> node index
 	var `scDelayIdMap [Int: Int] = [:];   -- front-end DelayVar id -> delay idx
 	var `scConsMap [String: Int] = [:];   -- hash-cons key -> node index
+	-- Algebraic rewriting (interleaved with fold + hash-cons in _makeOp). Off by
+	-- default so rewrites-off dumps stay byte-identical; the C++ gApplyRewrites
+	-- mirror enables it for the real defSynth path and rewrites-on diffing.
+	var `scApplyRewrites Bool = applyRewrites;
 
 	-- Serial counters (mirror the Synth:: serial number fields).
 	var `scExprSerials Int = 0;
@@ -100,6 +105,18 @@ fn _constValKey(v ConstVal) String = match (v) {
 	}
 };
 
+fn _vecOpKey(vop VecOp) String = match (vop) {
+	take(n):      "t" $ n toString;
+	drop(n):      "d" $ n toString;
+	stride(n):    "s" $ n toString;
+	stutter(n):   "u" $ n toString;
+	ncyc(n):      "c" $ n toString;
+	reverse:      "r";
+	transpose(n): "x" $ n toString;
+	rotate:       "o";
+	_:            "?";
+};
+
 fn _kindKey(kind NodeKind) String = match (kind) {
 	constant(v, t):       "K|" $ v _constValKey $ "|" $ t.0 toString;
 	sampleRate:           "SR";
@@ -113,6 +130,7 @@ fn _kindKey(kind NodeKind) String = match (kind) {
 	compareopK(op):       "C|" $ op ordinal toString;
 	castopK(t):           "X|" $ t.0 toString;
 	reduceK(op, cols):    "R|" $ op ordinal toString $ "|" $ cols toString;
+	vecK(vop):            "V|" $ vop _vecOpKey;
 	selectK:              "SEL";
 	urandK(sn):           "UR|" $ sn toString;
 	birandK(sn):          "BR|" $ sn toString;
@@ -177,7 +195,15 @@ fn _appendNode(kind NodeKind, ins [Int], serial Int, r Rate, t NumType, ch Int) 
 fn _addExprNode(kind NodeKind, ins [Int], r Rate, t NumType, ch Int) Int {
 	let serial Int = `scExprSerials;
 	`scExprSerials = serial + 1;
+	_addExprNodeS(serial, kind, ins, r, t, ch)
+}
 
+-- Same, but with the serial (userial) already consumed by the caller. _makeOp
+-- consumes the candidate's serial before rewriting -- mirroring the C++ Expr
+-- ctor, where `new BinaryOpExpr` burns a userial even if addExpr() then rewrites
+-- or hash-conses it away -- so a rewritten/duplicate node still leaves the same
+-- serial gap.
+fn _addExprNodeS(serial Int, kind NodeKind, ins [Int], r Rate, t NumType, ch Int) Int {
 	let conses = kind shouldHashCons;
 	let key = conses ? _consKey(kind, ins) : "";
 	var m [String: Int] = `scConsMap;
@@ -292,6 +318,145 @@ fn _delayIdxFor(dvId Int) Int {
 }
 
 ---------------------------------------------------------------------------
+-- Unified op constructor: fold -> rewrite -> hash-cons (mirrors addExpr() with
+-- gApplyRewrites). The three optimizations interleave because a matched rule's
+-- RHS is built by re-entering _makeOp, so a rewrite can expose a fold, a fold a
+-- new hash-cons hit, etc. -- the same fixpoint the C++ reaches.
+
+fn _noInt() Option<Int> = Option<Int>.none;
+fn _someInt(n Int) Option<Int> = Option<Int>.some(n);
+
+fn _allConst(ctx Ctx, ins [Int]) Bool {
+	var i = 0;
+	while (i < ins length) {
+		if (!(ctx.kind[ins[i]] isConstantKind)) { return false; }
+		i = i + 1;
+	}
+	true
+}
+
+fn _foldUnopNode(ctx Ctx, op UnaryOp, ins [Int]) Int {
+	let r = foldUnary(_constValOf(ctx, ins[0]), op);
+	_addFoldedConstant(r, r _foldInitType)
+}
+fn _foldBinopNode(ctx Ctx, op BinaryOp, ins [Int]) Int {
+	let r = foldBinary(_constValOf(ctx, ins[0]), _constValOf(ctx, ins[1]), op);
+	_addFoldedConstant(r, r _foldInitType)
+}
+fn _foldCmpNode(ctx Ctx, op CompareOp, ins [Int]) Int {
+	let r = foldCompare(_constValOf(ctx, ins[0]), _constValOf(ctx, ins[1]), op);
+	_addFoldedConstant(r, r _foldInitType)
+}
+fn _foldOp(ctx Ctx, kind NodeKind, ins [Int]) Option<Int> = match (kind) {
+	unopK(op):      _someInt(_foldUnopNode(ctx, op, ins));
+	binopK(op):     _someInt(_foldBinopNode(ctx, op, ins));
+	compareopK(op): _someInt(_foldCmpNode(ctx, op, ins));
+	_:              _noInt();
+};
+
+fn _opRate(ctx Ctx, kind NodeKind, ins [Int]) Rate = match (kind) {
+	binopK(_):     _maxRateOf(ins);
+	compareopK(_): _maxRateOf(ins);
+	_:             ctx.nrate[ins[0]];
+};
+fn _opChans(ctx Ctx, kind NodeKind, ins [Int]) Int = match (kind) {
+	binopK(_):     _broadcastChans(ins);
+	compareopK(_): _broadcastChans(ins);
+	_:             ctx.chans[ins[0]];
+};
+fn _opType(kind NodeKind, ins [Int]) NumType = match (kind) {
+	binopK(op): op isFloatBinop ? ANY_FLOAT : (op isIntBinop ? ANY_INT : ANY_NUM);
+	unopK(op):  op isFloatUnop ? ANY_FLOAT : (op isIntUnop ? ANY_INT : ANY_NUM);
+	_:          ANY_NUM;
+};
+
+fn _makeOp(kind NodeKind, ins [Int]) Int {
+	var ctx Ctx = `scCtx;
+	if (ctx _allConst(ins)) {
+		match (_foldOp(ctx, kind, ins)) {
+			some(n): { return n; }
+			none: {}
+		}
+	}
+	-- Non-constant op: C++ constructs the Expr here, burning a serial in the ctor
+	-- before addExpr() rewrites/hash-conses it. Consume that candidate serial now
+	-- so a rewritten-away candidate still leaves the same serial gap as C++.
+	let serial Int = `scExprSerials;
+	`scExprSerials = serial + 1;
+	if (`scApplyRewrites) {
+		match (tryRewriteMatch(ctx, kind, ins)) {
+			some(hit): { return _buildRHS(hit.rhs, hit.subs); }
+			none: {}
+		}
+	}
+	_addExprNodeS(serial, kind, ins, ctx _opRate(kind, ins), _opType(kind, ins), ctx _opChans(kind, ins))
+}
+
+-- A scalar constant node for a rule RHS literal (hash-consed f64, like the C++
+-- constant(double)).
+fn _scalarConst(c Float) Int {
+	let v = ConstVal.floats([c]);
+	_addFoldedConstant(v, v _foldInitType)
+}
+fn _rhsMonoOp(subs [Int], m Int) UnaryOp {
+	let n = subs subsNode((m == 0) ? VMONOUP : VMONODN);
+	match (`scCtx.kind[n]) { unopK(op): op; _: UnaryOp.neg; }
+}
+
+-- Interpret a matched rule's RHS pattern, building nodes via _makeOp.
+fn _buildRHS(p Pat, subs [Int]) Int = match (p) {
+	pvar(id):   subs subsNode(id);
+	pscalar(c): _scalarConst(c);
+	pposnum:    subs subsNode(VPOS);
+	pnegnum:    subs subsNode(VNEG);
+	punop(op, a):     _makeOp(NodeKind.unopK(op), [_buildRHS(a, subs)]);
+	pbinop(op, a, b): _makeOp(NodeKind.binopK(op), [_buildRHS(a, subs), _buildRHS(b, subs)]);
+	pcmpop(op, a, b): _makeOp(NodeKind.compareopK(op), [_buildRHS(a, subs), _buildRHS(b, subs)]);
+	pmono(m, a):      _makeOp(NodeKind.unopK(subs _rhsMonoOp(m)), [_buildRHS(a, subs)]);
+};
+
+---------------------------------------------------------------------------
+-- Vector / reduce ops (front-end VecOp). Reduce changes the loop iteration
+-- count (output = cols channels); the pure vec ops remap the channel index.
+
+-- reduce(op, cols): C++ ReduceExpr(a->rate, {a}), chans=cols, type=in type. A
+-- constant input folds via reduce_int/reduce_float (addConstantExpr, no hash-cons).
+fn _makeReduce(ctx Ctx, ins [Int], op BinaryOp, cols Int) Int {
+	if (ctx.kind[ins[0]] isConstantKind) {
+		let r = foldReduce(_constValOf(ctx, ins[0]), cols, op);
+		return _addConstantNode(NodeKind.constant(r, r _foldInitType), r constSize);
+	}
+	_addExprNode(NodeKind.reduceK(op, cols), ins, ctx.nrate[ins[0]], ctx.typ[ins[0]], cols)
+}
+
+fn _vecChans(ctx Ctx, vop VecOp, ins [Int]) Int = vecOutChans(ctx.chans[ins[0]], vop);
+fn _vecRate(ctx Ctx, vop VecOp, ins [Int]) Rate = match (vop) {
+	rotate: _maxRateOf(ins);               -- rotate's amount can be a signal
+	_:      ctx.nrate[ins[0]];
+};
+
+fn _importVecOp(e SignalExpr, vop VecOp) Void {
+	var ctx Ctx = `scCtx;
+	let ins = e _resolveIns;
+	match (vop) {
+		reduce(op, cols): { _mapId(e.id, _makeReduce(ctx, ins, op, cols)); }
+		sum(cols):        { _mapId(e.id, _makeReduce(ctx, ins, BinaryOp.add, cols)); }
+		prod(cols):       { _mapId(e.id, _makeReduce(ctx, ins, BinaryOp.mul, cols)); }
+		minOf(cols):      { _mapId(e.id, _makeReduce(ctx, ins, BinaryOp.min, cols)); }
+		maxOf(cols):      { _mapId(e.id, _makeReduce(ctx, ins, BinaryOp.max, cols)); }
+		at:   { _impError("vec_at not exposed by the front-end"); }
+		put:  { _impError("vec_put not exposed by the front-end"); }
+		join: { _impError("vec_join not exposed by the front-end"); }
+		_: {
+			-- take/drop/stride/stutter/ncyc/rotate/reverse/transpose: no folding,
+			-- initial type = any (narrowed to the input type by inference).
+			_mapId(e.id, _addExprNode(NodeKind.vecK(vop), ins,
+				ctx _vecRate(vop, ins), ANY_NUM, ctx _vecChans(vop, ins)));
+		}
+	}
+}
+
+---------------------------------------------------------------------------
 -- Per-kind import (mirrors the parse* functions)
 
 fn _importExpr(e SignalExpr) Void {
@@ -346,40 +511,18 @@ fn _importExpr(e SignalExpr) Void {
 				_impError("Unknown unary operator: " $ op tag toString);
 				return;
 			}
-			let ins = e _resolveIns;
-			if (ctx.kind[ins[0]] isConstantKind) {
-				let r = foldUnary(_constValOf(ctx, ins[0]), op);
-				_mapId(e.id, _addFoldedConstant(r, r _foldInitType));
-				return;
-			}
-			let t = op isFloatUnop ? ANY_FLOAT : (op isIntUnop ? ANY_INT : ANY_NUM);
-			_mapId(e.id, _addExprNode(NodeKind.unopK(op), ins,
-				ctx.nrate[ins[0]], t, ctx.chans[ins[0]]));
+			-- _makeOp folds (if constant), rewrites (if enabled), then hash-conses.
+			_mapId(e.id, _makeOp(NodeKind.unopK(op), e _resolveIns));
 		}
 		binop(op): {
 			if (!(op _binopSupported)) {
 				_impError("Unknown binary operator: " $ op tag toString);
 				return;
 			}
-			let ins = e _resolveIns;
-			if (ctx.kind[ins[0]] isConstantKind && ctx.kind[ins[1]] isConstantKind) {
-				let r = foldBinary(_constValOf(ctx, ins[0]), _constValOf(ctx, ins[1]), op);
-				_mapId(e.id, _addFoldedConstant(r, r _foldInitType));
-				return;
-			}
-			let t = op isFloatBinop ? ANY_FLOAT : (op isIntBinop ? ANY_INT : ANY_NUM);
-			_mapId(e.id, _addExprNode(NodeKind.binopK(op), ins,
-				_maxRateOf(ins), t, _broadcastChans(ins)));
+			_mapId(e.id, _makeOp(NodeKind.binopK(op), e _resolveIns));
 		}
 		compareop(op): {
-			let ins = e _resolveIns;
-			if (ctx.kind[ins[0]] isConstantKind && ctx.kind[ins[1]] isConstantKind) {
-				let r = foldCompare(_constValOf(ctx, ins[0]), _constValOf(ctx, ins[1]), op);
-				_mapId(e.id, _addFoldedConstant(r, r _foldInitType));
-				return;
-			}
-			_mapId(e.id, _addExprNode(NodeKind.compareopK(op), ins,
-				_maxRateOf(ins), ANY_NUM, _broadcastChans(ins)));
+			_mapId(e.id, _makeOp(NodeKind.compareopK(op), e _resolveIns));
 		}
 		castop(op): {
 			let ins = e _resolveIns;
@@ -466,7 +609,7 @@ fn _importExpr(e SignalExpr) Void {
 			_mapId(e.id, _addExprNode(NodeKind.debugK(label, period, consecutive, sn), ins,
 				ctx.nrate[ins[0]], ANY_NUM, 1));
 		}
-		vecop(_): { _impError("vec ops not yet supported by synthc (M2)"); }
+		vecop(vop): { _importVecOp(e, vop); }
 		buffer(_, _): { _impError("buffer ops not yet supported by synthc (M2)"); }
 		if_(_, _): { _impError("if_ not yet supported by synthc (M3)"); }
 		for_(_, _): { _impError("for_ not yet supported by synthc (M3)"); }

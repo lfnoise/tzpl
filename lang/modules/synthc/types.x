@@ -60,6 +60,7 @@ fn calcShapeOf(ctx Ctx, n NIdx) Int {
 		compareopK(_):       _broadcastC(ctx.chans[ins[0]], ctx.chans[ins[1]]);
 		castopK(_):          ctx.chans[ins[0]];
 		reduceK(_, cols):    cols;
+		vecK(vop):           vecOutChans(ctx.chans[ins[0]], vop);
 		selectK:             _selectChans(ctx, n);
 		urandK(_):           ctx.chans[n];      -- fixed at import
 		birandK(_):          ctx.chans[n];
@@ -107,6 +108,7 @@ fn inputConstraintOf(ctx Ctx, n NIdx, i Int) NumType = match (ctx.kind[n]) {
 	compareopK(_): ctx.typ[n];          -- handled via input_type below; see note
 	castopK(_):    ANY_NUM;             -- cast input is unconstrained
 	selectK:       i == 0 ? ANY_INT : ctx.typ[n];
+	vecK(_):       i == 0 ? ctx.typ[n] : ANY_INT;   -- data input flows; rotate's index is integer
 	_:             ctx.typ[n];
 };
 
@@ -154,6 +156,7 @@ fn updateTypeOf(ctx Ctx, n NIdx, wl WorkList) Void {
 		compareopK(_):       { _updateCompare(ctx, n, wl); }
 		castopK(_):          {}                  -- output is cast_type; input unconstrained
 		reduceK(_, _):       { _narrow(ctx, n, ctx.typ[n] & ctx.typ[ins[0]], wl); }
+		vecK(_):             { _narrow(ctx, n, ctx.typ[n] & ctx.typ[ins[0]], wl); }
 		selectK:             { _updateSelect(ctx, n, wl); }
 		delayFixReadK(d, _): { _updateDelayRead(ctx, n, d, wl); }
 		delayVarReadK(d, _): { _updateDelayRead(ctx, n, d, wl); }

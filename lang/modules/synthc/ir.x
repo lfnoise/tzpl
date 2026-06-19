@@ -150,6 +150,7 @@ enum NodeKind {
 	compareopK(CompareOp),
 	castopK(NumType),                    -- cast_type
 	reduceK(BinaryOp, Int),              -- op, cols
+	vecK(VecOp),                         -- take/drop/stride/stutter/ncyc/rotate/reverse/transpose
 	selectK,
 
 	urandK(Int),                         -- serial
@@ -176,6 +177,30 @@ fn isSinkKind(k NodeKind) Bool = match (k) {
 };
 
 -- Mirrors Expr::should_hash_cons().
+-- Output channel count for a vec op given its input chans (mirrors each
+-- VecXxxExpr::calcShape). reverse/transpose/rotate keep the size.
+fn vecOutChans(inChans Int, vop VecOp) Int = match (vop) {
+	take(n):      n;
+	drop(n):      inChans - n;
+	stride(n):    (inChans + n - 1) // n;
+	stutter(n):   inChans * n;
+	ncyc(n):      inChans * n;
+	_:            inChans;
+};
+
+-- Dump str() for the vec ops (mirrors VecXxxExpr::str()).
+fn _vecStr(vop VecOp) String = match (vop) {
+	take(n):      "vec_take(%^)" fmt(n);
+	drop(n):      "vec_drop(%^)" fmt(n);
+	stride(n):    "vec_stride(%^)" fmt(n);
+	stutter(n):   "vec_stutter(%^)" fmt(n);
+	ncyc(n):      "vec_ncyc(%^)" fmt(n);
+	reverse:      "vec_reverse";
+	transpose(n): "vec_transpose(%^)" fmt(n);
+	rotate:       "vec_rotate";
+	_:            "vec_?";
+};
+
 fn shouldHashCons(k NodeKind) Bool = match (k) {
 	inletK(_, _):           false;
 	outletK(_, _):          false;
@@ -193,6 +218,7 @@ fn isConstantKind(k NodeKind) Bool = match (k) {
 -- input temp var; reduce (and the M2 vec ops) do.
 fn needsInputTempVar(k NodeKind, i Int) Bool = match (k) {
 	reduceK(_, _): true;
+	vecK(_):       i == 0;   -- the data input is index-remapped; rotate's n (i=1) is scalar
 	_:             false;
 };
 
@@ -204,6 +230,7 @@ fn outputMustBeSeparateLoop(k NodeKind) Bool = false;
 -- kinds do not.
 fn inputMustBeSeparateLoop(k NodeKind, i Int) Bool = match (k) {
 	reduceK(_, _): true;
+	vecK(_):       i == 0;
 	_:             false;
 };
 
@@ -521,6 +548,7 @@ fn nodeStr(ctx Ctx, n NIdx) String {
 		compareopK(op):      op compareopStr;
 		castopK(t):          "cast_" $ t numTypeStr;
 		reduceK(op, cols):   "reduce(%^, %^)" fmt(op binopStr, cols);
+		vecK(vop):           _vecStr(vop);
 		selectK:             "select";
 		urandK(_):           "urand";
 		birandK(_):          "birand";
