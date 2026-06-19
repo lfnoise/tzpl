@@ -145,11 +145,11 @@ void TypeChecker::declareVar(const std::string& name, Type* type, bool isMutable
         // tag as a pointer and crash.
         if (it != globalVars_.end()) {
             globalIdx = it->second.globalIndex;
-            compiler_.setGlobalIsObj(globalIdx, type ? storesObjPtr(type) : true);
+            compiler_.setGlobalIsObj(globalIdx, type ? storesObjPtrUnboxed(type) : true);
         } else if (inlineMulti) {
-            globalIdx = compiler_.addInlineGlobal((u32)type->sizeWords_);
+            globalIdx = compiler_.addInlineGlobal((u32)type->sizeWords_, type);
         } else {
-            globalIdx = compiler_.addGlobal(type ? storesObjPtr(type) : true);
+            globalIdx = compiler_.addGlobal(type ? storesObjPtrUnboxed(type) : true);
         }
         VarInfo info{};
         info.type = type;

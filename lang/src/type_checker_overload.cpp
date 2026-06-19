@@ -1212,8 +1212,13 @@ FuncInfo* TypeChecker::monomorphize(FuncInfo& templateFI,
         retType = compiler_.coroutineType(retType);
     }
 
-    // Allocate global slot
-    u32 globalIdx = compiler_.addGlobal(true);
+    // Allocate global slot. isObj MUST be false: a monomorphized user function's
+    // global holds its CodeBlock* (set by genFnDecl), which is NOT a GCObj --
+    // the regular function path (declareFn) uses addGlobal(false) for the same
+    // reason. Flagging it as an Obj root makes the GC scan the CodeBlock as an
+    // Obj* and dereference a bogus vtable. (Builtin monomorphizations store a
+    // Primitive GCObj, so those addGlobal(true) sites are correct.)
+    u32 globalIdx = compiler_.addGlobal(false);
 
     // Create monomorphized FuncInfo (heap-allocated for pointer stability)
     auto monoPtr = std::make_unique<FuncInfo>();

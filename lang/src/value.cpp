@@ -129,6 +129,12 @@ void InlineArray::pushSlot(Word const* src) {
 
 void InlineArray::setSlot(size_t i, Word const* src) {
     Word* dst = &v_[i * stride_];
+    // SATB: this slot's old inline value is about to be overwritten; shade any
+    // Obj* words it holds so an in-flight mark cycle doesn't lose them. (The
+    // boxed ObjArray::set has the same barrier; this inline path was missing
+    // it, so overwriting an array element of an inline-composite type during
+    // incremental marking could free a still-live String/array field.)
+    gcBarrierInlinePointers(dst, elemType(), gCurrentVM->tracingGC());
     // Retain new BEFORE releasing old, in case they alias (src == dst).
     Word saved[8];
     if (stride_ <= 8) {
@@ -229,7 +235,15 @@ void ListNode::force(VM& vm) {
         isLazy_ = 0;
         head_ = Word{};
         for (u32 i = 1; i < payloadWords_; ++i) (&head_)[i].i = 0;
+        // Pin the generator across generate(): we just dropped it from this
+        // node's union, so until generate() re-homes it onto a new tail node
+        // (tail->installGenerator(this)) it is reachable ONLY from this C++
+        // frame -- invisible to the GC root scan. A user lambda invoked by
+        // generate() can hit a safepoint and collect, freeing gen out from
+        // under us and leaving a dangling pointer on the new tail node.
+        vm.gcKeepAlivePush(gen);
         gen->generate(vm, this);
+        vm.gcKeepAlivePop();
         // Release the old owner's retain on the generator.
         // If the generator moved itself to a new tail node (retaining itself there),
         // this just decrements; 
@@ -2040,7 +2054,11 @@ VMString slotToString(VM& vm, u16 startReg, Type* type) {
 // layout at `base`. Same shape as inlineWalkPointers; the difference is the
 // action -- gc.mark() instead of retain/release. Skips Complex/Fraction
 // (Inline but no children).
-void gcScanInlinePointers(Word const* base, Type* type, TracingGC& gc) {
+// Visit every Obj* word embedded in an inline value of the given type, calling
+// `visit(Obj*)` on each. Shared by gcScanInlinePointers (mark) and
+// gcBarrierInlinePointers (SATB write barrier) so the two never drift.
+template <class Visit>
+static void gcWalkInlinePointers(Word const* base, Type* type, Visit&& visit) {
     if (!type) return;
     auto walk = [&](auto const& layout) {
         for (auto const& f : layout) {
@@ -2048,10 +2066,10 @@ void gcScanInlinePointers(Word const* base, Type* type, TracingGC& gc) {
             if (f.type->repr_ == Type::Repr::Inline) {
                 if (f.type == gCurrentVM->complexType()
                  || f.type == gCurrentVM->fractionType()) continue;
-                gcScanInlinePointers(base + f.wordOffset, f.type, gc);
+                gcWalkInlinePointers(base + f.wordOffset, f.type, visit);
             } else if (storesObjPtr(f.type)) {
                 // Obj derives from GCObj, so the upcast is implicit/free.
-                gc.mark(base[f.wordOffset].o);
+                visit(base[f.wordOffset].o);
             }
         }
     };
@@ -2065,11 +2083,23 @@ void gcScanInlinePointers(Word const* base, Type* type, TracingGC& gc) {
         if (f.type->repr_ == Type::Repr::Inline) {
             if (f.type == gCurrentVM->complexType()
              || f.type == gCurrentVM->fractionType()) return;
-            gcScanInlinePointers(base + f.wordOffset, f.type, gc);
+            gcWalkInlinePointers(base + f.wordOffset, f.type, visit);
         } else if (storesObjPtr(f.type)) {
-            gc.mark(base[f.wordOffset].o);
+            visit(base[f.wordOffset].o);
         }
     }
+}
+
+void gcScanInlinePointers(Word const* base, Type* type, TracingGC& gc) {
+    gcWalkInlinePointers(base, type, [&](Obj* o) { gc.mark(o); });
+}
+
+// SATB write barrier for inline values: shade every Obj* word that is about to
+// be overwritten or dropped, so an in-flight mark cycle still sees what was
+// reachable when it started. Must be called BEFORE the overwrite.
+void gcBarrierInlinePointers(Word const* base, Type* type, TracingGC& gc) {
+    if (gc.phase() != TracingGC::Phase::Mark) return;  // hot-path early out
+    gcWalkInlinePointers(base, type, [&](Obj* o) { gc.writeBarrier(o); });
 }
 
 void gcScanPayload(Word const* base, Type* type, TracingGC& gc) {

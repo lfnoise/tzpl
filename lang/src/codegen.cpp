@@ -289,7 +289,7 @@ bool regHoldsObjRoot(Type const* t) {
 }
 } // namespace
 
-void CodeGen::emitReturnPcStackMap(u16 /*unusedResultReg*/, Type* /*unusedResultType*/) {
+void CodeGen::emitReturnPcStackMap(u16 resultReg, Type* /*unusedResultType*/) {
     // The returnPC stack map is consulted ONLY while the callee is still
     // executing (the marker walks the caller via frames_[i+1].returnPC).
     // During that window the caller's resultReg slot is OVERLAPPED with
@@ -305,9 +305,20 @@ void CodeGen::emitReturnPcStackMap(u16 /*unusedResultReg*/, Type* /*unusedResult
     sm.pcOffset = pcOffset;
     u16 limit = (u16)std::min<size_t>(nextReg_, regTypes_.size());
     for (u16 r = 0; r < limit; ++r) {
+        // The result register is callee scratch while the call is in flight
+        // (its slot overlaps callee frame storage and is not written until the
+        // call returns). It must NOT appear in the returnPC map, or the marker
+        // will trace a stale/half-written word as an Obj* root. regTypes_[r]
+        // may already name the result type here if the binding was recorded
+        // before this map was emitted, so exclude it explicitly.
+        if (r == resultReg) continue;
         Type* t = regTypes_[r];
         if (!t) continue;
-        if (regHoldsObjRoot(t)) sm.liveRefRegs.push_back(r);
+        if (t->repr_ == ts::Type::Repr::Inline && t->sizeWords_ > 1) {
+            if (inlineHasObjPtr(t)) sm.liveInlineRegs.push_back({r, t});
+        } else if (regHoldsObjRoot(t)) {
+            sm.liveRefRegs.push_back(r);
+        }
     }
     currentBlock_->stackMaps_.push_back(std::move(sm));
 }
@@ -332,7 +343,14 @@ void CodeGen::emitSafepointWithStackMap() {
     for (u16 r = 0; r < limit; ++r) {
         Type* t = regTypes_[r];
         if (!t) continue;
-        if (regHoldsObjRoot(t)) sm.liveRefRegs.push_back(r);
+        if (t->repr_ == ts::Type::Repr::Inline && t->sizeWords_ > 1) {
+            // Inline multiword composite: not a single Obj* slot, but it may
+            // embed Obj* fields (e.g. a (String, Int) tuple) that must be
+            // traced through. Record it so the marker walks its layout.
+            if (inlineHasObjPtr(t)) sm.liveInlineRegs.push_back({r, t});
+        } else if (regHoldsObjRoot(t)) {
+            sm.liveRefRegs.push_back(r);
+        }
     }
     currentBlock_->stackMaps_.push_back(std::move(sm));
     emitOp(op_safepoint);
@@ -4643,11 +4661,18 @@ u16 CodeGen::genCall(CallExpr_* expr) {
         // Obj* fields inside inline composites that survive across a yield
         // are not yet traced; revisit when we promote container backends.
         std::vector<u16> gcMap;
+        std::vector<std::pair<u16, Type*>> inlineMap;
         for (auto& scope : localScopes_) {
             for (auto& entry : scope) {
                 Type* t = entry.second.type;
                 if (!t) continue;
-                if (isInlineMultiword(t)) continue;
+                if (isInlineMultiword(t)) {
+                    // Inline composite local: its base word is a payload word,
+                    // not an Obj*, but it may embed Obj* fields the GC must
+                    // walk across the yield.
+                    if (inlineHasObjPtr(t)) inlineMap.push_back({entry.second.reg, t});
+                    continue;
+                }
                 if (storesObjPtr(t)) {
                     gcMap.push_back(entry.second.reg);
                 }
@@ -4657,6 +4682,7 @@ u16 CodeGen::genCall(CallExpr_* expr) {
         // Store GC map in current code block
         u16 gcMapIndex = currentYieldCount_++;
         currentBlock_->coroGCMaps_.push_back(std::move(gcMap));
+        currentBlock_->coroInlineGCMaps_.push_back(std::move(inlineMap));
 
         // Phase 4g.12: yield transfers sizeWords_ words from src to the caller
         // -- no boxing of inline composites at the yield boundary.
@@ -4694,13 +4720,18 @@ u16 CodeGen::genCall(CallExpr_* expr) {
         u32 exitJump = emitJump(op_jump_if_true, doneReg);
 
         // Build GC map: collect registers that hold Obj* values.
-        // Phase 4g.4: skip Inline composite locals (see yield path comment).
+        // Phase 4g.4: skip Inline composite locals (see yield path comment),
+        // but record those that embed Obj* so the GC walks them across the yield.
         std::vector<u16> gcMap;
+        std::vector<std::pair<u16, Type*>> inlineMap;
         for (auto& scope : localScopes_) {
             for (auto& entry : scope) {
                 Type* t = entry.second.type;
                 if (!t) continue;
-                if (isInlineMultiword(t)) continue;
+                if (isInlineMultiword(t)) {
+                    if (inlineHasObjPtr(t)) inlineMap.push_back({entry.second.reg, t});
+                    continue;
+                }
                 if (storesObjPtr(t)) {
                     gcMap.push_back(entry.second.reg);
                 }
@@ -4715,6 +4746,7 @@ u16 CodeGen::genCall(CallExpr_* expr) {
 
         u16 gcMapIndex = currentYieldCount_++;
         currentBlock_->coroGCMaps_.push_back(std::move(gcMap));
+        currentBlock_->coroInlineGCMaps_.push_back(std::move(inlineMap));
 
         // Yield the value
         emitOp(op_yield);

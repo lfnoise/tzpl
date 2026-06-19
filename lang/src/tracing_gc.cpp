@@ -181,6 +181,12 @@ void TracingGC::step_root_globals(u64 deadlineNanos, u32& sinceCheck, u32& done)
             if (gcMonoNanos() >= deadlineNanos) return;
         }
     }
+    // Inline-composite globals: walk each one's layout to mark embedded Obj*
+    // (single-word isObj marking can't reach Obj* fields buried in a multi-word
+    // inline tuple/struct/enum global).
+    for (auto const& [gidx, ty] : vm_.inlineObjGlobals_) {
+        gcScanPayload(&vm_.global(gidx), ty, *this);
+    }
     rootPhase_ = RootPhase::DynVars;
     rootDynVarCursor_ = 0;
 }
@@ -199,6 +205,10 @@ void TracingGC::step_root_dynvars(u64 deadlineNanos, u32& sinceCheck, u32& done)
             sinceCheck = 0;
             if (gcMonoNanos() >= deadlineNanos) return;
         }
+    }
+    // Inline-composite dynvars: walk each one's layout to mark embedded Obj*.
+    for (auto const& [didx, ty] : vm_.inlineObjDynVars_) {
+        gcScanPayload(&vm_.dynVar(didx), ty, *this);
     }
     rootPhase_ = RootPhase::Frames;
     rootFrameCursor_ = 0;
@@ -234,6 +244,12 @@ void TracingGC::step_root_frames(u64 deadlineNanos, u32& sinceCheck, u32& done) 
                             mark(o); ++lastRootCount_;
                         }
                     }
+                    // Registers holding a multi-word inline composite that
+                    // embeds Obj* fields: walk the layout to mark each one
+                    // (single-Obj* marking can't reach them).
+                    for (auto const& [ireg, ity] : sm->liveInlineRegs) {
+                        gcScanPayload(base + ireg, ity, *this);
+                    }
                 }
             }
         }
@@ -253,6 +269,12 @@ void TracingGC::step_root_frames(u64 deadlineNanos, u32& sinceCheck, u32& done) 
     // re-trace it; we just need to keep the UpVar object alive.
     for (UpVar* uv = vm_.openUpVars_; uv != nullptr; uv = uv->next_) {
         mark(uv); ++lastRootCount_;
+    }
+    // GC keepalive: objects pinned only from the C++ call stack across a
+    // collection-triggering call (e.g. the generator being forced in
+    // ListNode::force() before it re-homes onto a new tail node).
+    for (GCObj* o : vm_.gcKeepAlive_) {
+        if (o) { mark(o); ++lastRootCount_; }
     }
     rootPhase_ = RootPhase::Extras;
     rootExtraCursor_ = 0;

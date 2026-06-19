@@ -47,13 +47,23 @@ void linkObjToAllList(GCObj* obj) {
     // its slot-pointer walk so no per-object prev pointer is needed.
     obj->allObjsNext_ = gCurrentVM->allObjsHead_;
     gCurrentVM->allObjsHead_ = obj;
-    // Phase 3 incremental: if a tracing cycle is in flight, color this new
-    // object Black so it is conservatively considered reachable for the
-    // remainder of the cycle. Otherwise sweep could classify it as garbage
-    // before any reference has had a chance to reach it. The next cycle
-    // resets colors back to White.
+    // Phase 3 incremental: if a tracing cycle is in flight, protect this new
+    // object from the current sweep. The next cycle resets colors to White.
+    //
+    // During MARK we color it Gray (enqueue for scanning) rather than Black:
+    // a new object's fields are filled in by the very next bytecode ops, and
+    // those fields may point at OLD white objects (e.g. an immutable struct
+    // built around a reused array/enum). Coloring it Black would skip the
+    // scan entirely, so those white children would never be marked and would
+    // be swept out from under a live, marked parent -- a premature free.
+    // Gray means the marker scans it (after its fields are populated, at the
+    // next safepoint) and marks its children. During SWEEP marking is already
+    // finished and the worklist is no longer drained, so we keep the old
+    // Black coloring to protect the object for the remainder of the cycle.
     auto& gc = gCurrentVM->tracingGC();
-    if (gc.phase() != TracingGC::Phase::Idle) {
+    if (gc.phase() == TracingGC::Phase::Mark) {
+        gc.mark(obj);  // White -> Gray, enqueue for scanning
+    } else if (gc.phase() == TracingGC::Phase::Sweep) {
         obj->setColor(GCColor::Black);
     }
     gc.recordAllocation();
@@ -451,8 +461,12 @@ void VM::install(const CompileResult& result) {
 
     // Extend globals_ with newly compiled global slots
     for (auto& slot : result.newGlobals) {
+        u32 gidx = (u32)globals_.size();
         globals_.push_back(slot.value);
         globalIsObj_.push_back(slot.isObj ? 1 : 0);
+        // A multi-word inline global embedding Obj* fields: record (baseIdx,
+        // type) so the GC walks its layout instead of single-word marking.
+        if (slot.inlineObjType) inlineObjGlobals_.push_back({gidx, slot.inlineObjType});
     }
 
     // Ensure dynamic variable table is large enough. Carry each new dynvar's
@@ -463,6 +477,10 @@ void VM::install(const CompileResult& result) {
         dynVars_.push_back(Word());
         u8 isObj = (idx < result.dynVarIsObj.size()) ? result.dynVarIsObj[idx] : 0;
         dynVarIsObj_.push_back(isObj);
+        // Multi-word inline dynvar embedding Obj* fields: record (idx, type) so
+        // the GC walks its layout.
+        Type* it = (idx < result.dynVarInlineType.size()) ? result.dynVarInlineType[idx] : nullptr;
+        if (it) inlineObjDynVars_.push_back({idx, it});
     }
 }
 

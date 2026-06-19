@@ -222,6 +222,12 @@ private:
     Vec<Word> dynVars_;
     Vec<u8>   dynVarIsObj_;  // Track which dynvars hold Obj* for GC
 
+    // Inline-composite roots: (baseIndex, type) for a multi-word inline global /
+    // dynvar that embeds Obj* fields. globalIsObj/dynVarIsObj single-word marking
+    // can't reach those; the GC walks the layout via gcScanPayload instead.
+    Vec<std::pair<u32, Type*>> inlineObjGlobals_;
+    Vec<std::pair<u32, Type*>> inlineObjDynVars_;
+
     // Extra GC root scanners registered by host wrappers (e.g. NRTVM's
     // HandlerTable holds Obj* pointers that aren't reachable from globals
     // or any live frame). Each callback is invoked once per mark cycle
@@ -334,6 +340,18 @@ public:
     //     the frame's register window and stop at the first cell that
     //     belongs to an outer frame.
     UpVar* openUpVars_ = nullptr;
+
+    // GC keepalive stack for objects that are temporarily reachable ONLY from
+    // the C++ call stack (invisible to the register/heap root scan) across a
+    // call that can trigger collection. ListNode::force() uses this to pin the
+    // generator while generate() runs: force() drops the generator from the
+    // node's union before invoking generate(), and generate() may run user
+    // lambdas that hit safepoints before it re-homes the generator onto a new
+    // tail node -- a window in which the generator would otherwise be swept.
+    // Scanned as a root (see TracingGC::step_root_frames).
+    Vec<GCObj*> gcKeepAlive_;
+    void gcKeepAlivePush(GCObj* o) { gcKeepAlive_.push_back(o); }
+    void gcKeepAlivePop() { gcKeepAlive_.pop_back(); }
 
     // Get-or-create an UpVar pointing to `location`. Returns the existing
     // open UpVar if one already references that slot; otherwise allocates

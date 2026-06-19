@@ -257,6 +257,40 @@ bool storesObjPtr(Type const* t) {
     return true;
 }
 
+bool storesObjPtrUnboxed(Type const* t) {
+    if (!t) return true;
+    if (t->repr_ == Type::Repr::Inline) {
+        // Multi-word inline composites aren't traced per-word.
+        if (t->sizeWords_ != 1) return false;
+        // 1-word inline: the slot holds the single field's raw word -- recurse.
+        Type const* inner = nullptr;
+        if (auto* st = dynamic_cast<StructType const*>(t)) inner = st->layout_.empty() ? nullptr : st->layout_[0].type;
+        else if (auto* tu = dynamic_cast<TupleType const*>(t)) inner = tu->layout_.empty() ? nullptr : tu->layout_[0].type;
+        else if (auto* en = dynamic_cast<EnumType const*>(t)) inner = en->layout_.empty() ? nullptr : en->layout_[0].type;
+        return storesObjPtrUnboxed(inner);
+    }
+    return storesObjPtr(t);
+}
+
+bool inlineHasObjPtr(Type const* t) {
+    if (!t || t->repr_ != Type::Repr::Inline) return false;
+    auto scan = [](auto const& layout) -> bool {
+        for (auto const& f : layout) {
+            if (!f.type) continue;
+            if (f.type->repr_ == Type::Repr::Inline) {
+                if (inlineHasObjPtr(f.type)) return true;   // recurse (skips Complex/Fraction: no layout)
+            } else if (storesObjPtr(f.type)) {
+                return true;
+            }
+        }
+        return false;
+    };
+    if (auto* st = dynamic_cast<StructType const*>(t)) return scan(st->layout_);
+    if (auto* tt = dynamic_cast<TupleType const*>(t))  return scan(tt->layout_);
+    if (auto* en = dynamic_cast<EnumType const*>(t))   return scan(en->layout_);
+    return false;
+}
+
 bool storesF64(Type const* t) {
     if (!t) return false;
     if (dynamic_cast<FloatType const*>(t)) return true;
