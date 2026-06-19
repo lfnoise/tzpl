@@ -21,6 +21,12 @@ render() {  # <out.wav> <script>
     "$APP" --nogui --nrt "$1" --duration "$DUR" "${MODS[@]}" "$2" >/dev/null 2>&1
 }
 
+# RNG renders use a fixed seed so both halves draw the identical random stream
+# (the generated plugins honor TZPL_RNG_SEED via shared/tzpl_random.hpp).
+render_seeded() {  # <out.wav> <script>
+    TZPL_RNG_SEED=0x5eed render "$1" "$2"
+}
+
 render /tmp/synthc_ab_ref.wav         "$SCRIPTS/synthc_render_ab_ref.x"
 render /tmp/synthc_ab_synthc.wav      "$SCRIPTS/synthc_render_ab_synthc.x"
 render /tmp/synthc_ab_ctrl_ref.wav    "$SCRIPTS/synthc_render_ab_ctrl_ref.x"
@@ -29,6 +35,8 @@ render /tmp/synthc_ab_vdelay_ref.wav    "$SCRIPTS/synthc_render_ab_vdelay_ref.x"
 render /tmp/synthc_ab_vdelay_synthc.wav "$SCRIPTS/synthc_render_ab_vdelay_synthc.x"
 render /tmp/synthc_ab_bubbles_ref.wav    "$SCRIPTS/synthc_render_ab_bubbles_ref.x"
 render /tmp/synthc_ab_bubbles_synthc.wav "$SCRIPTS/synthc_render_ab_bubbles_synthc.x"
+render_seeded /tmp/synthc_ab_rng_ref.wav    "$SCRIPTS/synthc_render_ab_rng_ref.x"
+render_seeded /tmp/synthc_ab_rng_synthc.wav "$SCRIPTS/synthc_render_ab_rng_synthc.x"
 
 OUT="$("$APP" --nogui --no-audio "${MODS[@]}" "$SCRIPTS/synthc_render_ab_compare.x" 2>/dev/null)"
 echo "$OUT"

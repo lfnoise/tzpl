@@ -26,6 +26,7 @@
 
 #include "synthdef_types.hpp"
 #include "tzpl_simd.hpp"
+#include <cstdlib>
 #ifndef __APPLE__
 #include <sys/random.h>
 #endif
@@ -119,8 +120,29 @@ inline auto birandf(RandState<1>& r) {
 	return f32(birand(r));
 }
 
+// splitmix64 -- deterministic well-distributed fill used by the test-mode seed.
+inline u64 _splitmix64(u64& x) {
+	u64 z = (x += 0x9E3779B97F4A7C15ULL);
+	z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ULL;
+	z = (z ^ (z >> 27)) * 0x94D049BB133111EBULL;
+	return z ^ (z >> 31);
+}
+
 template <int Chans>
 void arc4seedrand(RandState<Chans>& r) {
+	// Deterministic-seed test mode: when TZPL_RNG_SEED is set, seed the whole
+	// RandState (covering every SIMD lane) from splitmix64 instead of system
+	// entropy. The env var is process-global, so a differential render that
+	// loads both the C++- and synthc-compiled plugins gets byte-identical RNG
+	// streams across both. Off by default; production renders use entropy.
+	if (const char* seedEnv = std::getenv("TZPL_RNG_SEED")) {
+		u64 state = std::strtoull(seedEnv, nullptr, 0);
+		u64* words = reinterpret_cast<u64*>(&r);
+		for (usize i = 0; i < sizeof(r) / sizeof(u64); ++i) {
+			words[i] = _splitmix64(state);
+		}
+		return;
+	}
 #ifdef __APPLE__
 	arc4random_buf(&r, sizeof(r));
 #else

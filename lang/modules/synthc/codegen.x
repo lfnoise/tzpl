@@ -227,6 +227,9 @@ fn _inlineExpr(ctx Ctx, n NIdx, cel String) String {
 		selectK:        _inlineSelect(ctx, n, cel);
 		reduceK(op, cols): _genReduce(ctx, n, op, cols, cel);
 		vecK(vop):      _genVec(ctx, n, vop, cel);
+		urandK(_):      "urand%^(p->rgen0)" fmt(ctx.typ[n] _isF32 ? "f" : "");
+		birandK(_):     "birand%^(p->rgen0)" fmt(ctx.typ[n] _isF32 ? "f" : "");
+		rand64K(_):     "rand64(p->rgen0)";
 		delayFixReadK(d, k): _delayFixReadExpr(ctx, n, d, k, cel);
 		delayVarReadK(d, ip): _delayVarReadExpr(ctx, n, d, ip, cel);
 		_:              "/* FIXME %^ */" fmt(nodeStr(ctx, n));
@@ -474,6 +477,9 @@ fn genDelayDecls(ctx Ctx) String {
 
 fn genDeclInstVars(ctx Ctx) String {
 	var s = "";
+	-- RNG state (graph serial 0 in M2's single-graph synths), emitted first to
+	-- match the C++ genDeclInstVars ordering.
+	if (ctx.usesRng[0]) { s = s $ "\tRandState1 rgen0;\n"; }
 	-- inst-var roots, in loop/tree order.
 	for (lp : ctx.loops) {
 		for (t : lp.trees) {
@@ -593,6 +599,7 @@ fn genDelayAlloc(ctx Ctx) String {
 fn genInitFun(ctx Ctx, name String) String {
 	var s = "tzpl_SErr %^_init(%^* p) {\n\tf64 fs = p->fs;\n\tp->sd = 1./fs;\n" fmt(name, name);
 	s = s $ genInitConstants(ctx);
+	if (ctx.usesRng[0]) { s = s $ "\tarc4seedrand(p->rgen0);\n"; }
 	-- inInitMode is only for genDelayAlloc (runtime delay sizing); init LOOPS
 	-- reference cross-tree roots as variables just like audio loops do.
 	s = s $ genLoops(ctx, ctx.initLoops);
