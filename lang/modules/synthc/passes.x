@@ -39,6 +39,161 @@ fn _delayMembers(ctx Ctx, d Int) [Int] {
 	out
 }
 
+---------------------------------------------------------------------------
+-- mergeDelays (synthdef_synth.cpp:1049)
+--
+-- Two delay buffers can share storage when they have the same writer, the same
+-- graph, and the same set of initializers (compared by offset + init-value
+-- source). The C++ merge key uses the writer's *identity* (pointer), and the
+-- front end gives every delayVar() its own writer node, so each group is a
+-- singleton -- the pass is a structural no-op on every realizable graph, exactly
+-- as in the C++ compiler (verified by differential dump/render). The grouping is
+-- still performed (it classifies every delay); the merge body below is a
+-- faithful port for the case where a shared writer does arise.
+
+-- Reader dedup signature: fixed reads key on their sample offset; var reads key
+-- on interpolation + index-signal node (mirrors r->in0() in the C++).
+fn _readerSig(ctx Ctx, r NIdx) String = match (ctx.kind[r]) {
+	delayFixReadK(_, k):   "F" $ k toString;
+	delayVarReadK(_, ip):  "V" $ ip ordinal toString $ ":"
+		$ ((ctx.ins[r] length > 0) ? ctx.ins[r][0] toString : "-");
+	_:                     "?";
+};
+
+-- Order-independent merge key. The writer node id makes each key unique in the
+-- current front end, so groups stay singletons.
+fn _delayMergeKey(ctx Ctx, d Int) String {
+	let info = ctx.delays[d];
+	var its [String] = [];
+	for (n : info.initters) {
+		let off = match (ctx.kind[n]) { delayInitK(_, o): o; _: 0; };
+		let val = (ctx.ins[n] length > 0) ? ctx.ins[n][0] : NONE;
+		its push!(off toString $ ":" $ val toString);
+	}
+	"W" $ info.writer toString $ "|" $ (its sort join(","))
+}
+
+fn _repointReaderKind(k NodeKind, primary Int) NodeKind = match (k) {
+	delayFixReadK(_, s):  NodeKind.delayFixReadK(primary, s);
+	delayVarReadK(_, ip): NodeKind.delayVarReadK(primary, ip);
+	_:                    k;
+};
+
+-- Replace every reference to oldN in any node's input list with newN. Runs
+-- before topological sort / consumer collection, so all nodes are scanned.
+fn _redirectIns(ctx Ctx, oldN NIdx, newN NIdx) Void {
+	var i = 0;
+	while (i < ctx numNodes) {
+		let ins = ctx.ins[i];
+		var j = 0;
+		while (j < ins length) { if (ins[j] == oldN) { ins[j] = newN; } j = j + 1; }
+		i = i + 1;
+	}
+}
+
+fn _findReaderWithSig(ctx Ctx, lst [NIdx], sig String) Int {
+	var i = 0;
+	while (i < lst length) {
+		if (ctx _readerSig(lst[i]) == sig) { return lst[i]; }
+		i = i + 1;
+	}
+	NONE
+}
+
+-- Merge `other`'s readers (fixed or var) into `primary`: a reader whose read
+-- signature is new is moved (its delay index repointed); a duplicate read is
+-- collapsed by redirecting its consumers to the primary's existing reader.
+fn _mergeReaders(ctx Ctx, primary Int, other Int, isVar Bool) Void {
+	let plist = isVar ? ctx.delays[primary].varReaders : ctx.delays[primary].fixReaders;
+	var readers [Int] = [];
+	let olist = isVar ? ctx.delays[other].varReaders : ctx.delays[other].fixReaders;
+	for (r : olist) { readers push!(r); }
+	for (r : readers) {
+		let dup = ctx _findReaderWithSig(plist, ctx _readerSig(r));
+		if (dup == NONE) {
+			ctx.kind[r] = _repointReaderKind(ctx.kind[r], primary);
+			plist push!(r);
+		} else {
+			ctx _redirectIns(r, dup);
+		}
+	}
+}
+
+-- Merge a group of delays (all sharing a merge key) into grp[0]. Returns true if
+-- any delay was removed. Unreachable on the current front end (singletons).
+fn _mergeDelayGroup(ctx Ctx, grp [Int], removed [Bool]) Bool {
+	let primary = grp[0];
+	var changed = false;
+	var gi = 1;
+	while (gi < grp length) {
+		let other = grp[gi];
+		ctx _mergeReaders(primary, other, false);
+		ctx _mergeReaders(primary, other, true);
+		-- The non-primary writer is removed: drop it as a sink root so it (and
+		-- the now-orphaned non-primary delay) drop out of the sort.
+		_removeFromList(ctx.sinks, ctx.delays[other].writer);
+		removed[other] = true;
+		changed = true;
+		gi = gi + 1;
+	}
+	changed
+}
+
+fn _remapDelayKind(k NodeKind, remap [Int]) NodeKind = match (k) {
+	maxDelayK(d):         NodeKind.maxDelayK(remap[d]);
+	delayInitK(d, o):     NodeKind.delayInitK(remap[d], o);
+	delayFixReadK(d, s):  NodeKind.delayFixReadK(remap[d], s);
+	delayVarReadK(d, ip): NodeKind.delayVarReadK(remap[d], ip);
+	delayWriteK(d):       NodeKind.delayWriteK(remap[d]);
+	_:                    k;
+};
+
+-- Drop the merged-away delay records and renumber the surviving delay indices in
+-- every node kind. Serials are preserved (codegen names buffers by serial).
+fn _compactDelays(ctx Ctx, removed [Bool]) Void {
+	let nd = removed length;
+	var remap [Int] = NONE repeat(nd);
+	var newDelays [DelayInfo] = [];
+	var ni = 0;
+	var d = 0;
+	while (d < nd) {
+		if (!removed[d]) { remap[d] = ni; newDelays push!(ctx.delays[d]); ni = ni + 1; }
+		d = d + 1;
+	}
+	while (ctx.delays length > 0) { ctx.delays pop!; }
+	for (x : newDelays) { ctx.delays push!(x); }
+	var i = 0;
+	while (i < ctx numNodes) {
+		ctx.kind[i] = _remapDelayKind(ctx.kind[i], remap);
+		i = i + 1;
+	}
+}
+
+fn mergeDelays(ctx Ctx) Void {
+	let nd = ctx.delays length;
+	if (nd < 2) { return; }
+	var groups [String: [Int]] = [:];
+	var order [String] = [];
+	var d = 0;
+	while (d < nd) {
+		let key = ctx _delayMergeKey(d);
+		match (groups[key]) {
+			some(g): { g push!(d); }
+			none:    { var g [Int] = [d]; groups[key] = g; order push!(key); }
+		}
+		d = d + 1;
+	}
+	var removed [Bool] = false repeat(nd);
+	var anyRemoved = false;
+	for (key : order) {
+		match (groups[key]) {
+			some(grp): { if (grp length > 1 && ctx _mergeDelayGroup(grp, removed)) { anyRemoved = true; } }
+			none:      {}
+		}
+	}
+	if (anyRemoved) { ctx _compactDelays(removed); }
+}
+
 fn topologicalSortExprs(ctx Ctx) Void {
 	var visited [Bool] = false repeat(ctx numNodes);
 	var visitedDelay [Bool] = false repeat(ctx.delays length);
@@ -852,6 +1007,7 @@ fn splitRates(ctx Ctx) Void {
 -- M0 pipeline: import-time state is already in ctx; run the structural
 -- passes only.
 fn analyzeM0(ctx Ctx) Ctx {
+	ctx mergeDelays;
 	ctx topologicalSortExprs;
 	ctx collectConsumers;
 	ctx
@@ -860,6 +1016,7 @@ fn analyzeM0(ctx Ctx) Ctx {
 -- M1 analysis up to (and including) type inference + rates. Trees/loops are
 -- added in later stages.
 fn analyzeTypes(ctx Ctx) Ctx {
+	ctx mergeDelays;
 	ctx topologicalSortExprs;
 	ctx collectConsumers;
 	ctx calcDelayLengths;
@@ -883,7 +1040,7 @@ fn analyzeTrees(ctx Ctx) Ctx {
 
 -- Full analysis pipeline. Mirrors synthdef::Synth::graphAnalysis() for the
 -- supported node set, including iso-groups (so control synths' event-loop
--- grouping matches the C++). mergeDelays and subgraphs remain deferred.
+-- grouping matches the C++), including mergeDelays. Subgraphs remain deferred.
 fn analyzeM1(ctx Ctx) Ctx {
 	ctx analyzeTrees;
 	ctx computeIsoGroups;
