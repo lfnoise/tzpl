@@ -163,6 +163,11 @@ enum NodeKind {
 	delayVarReadK(Int, Interpolation),   -- delay index, interpolation
 	delayWriteK(Int),                    -- delay index
 
+	bufFixReadK(Int, Int, Int, Int),         -- buf index, index, readChans, startChan
+	bufVarReadK(Int, Interpolation, Int, Int), -- buf index, interp, readChans, startChan
+	bufWriteK(Int, Int, Int),                -- buf index, writeChans, startChan
+	bufLengthK(Int),                         -- buf index
+
 	debugK(String, Int, Int, Int),       -- label, period, consecutive, serial
 }
 
@@ -172,6 +177,7 @@ fn isSinkKind(k NodeKind) Bool = match (k) {
 	maxDelayK(_):        true;
 	delayInitK(_, _):    true;
 	delayWriteK(_):      true;
+	bufWriteK(_, _, _):  true;
 	debugK(_, _, _, _):  true;
 	_:                   false;
 };
@@ -343,6 +349,7 @@ struct Ctx {
 
 	delays [DelayInfo],
 	delayAllocs [Int],        -- delay indices needing runtime allocation
+	bufSerials [Int],         -- per-buffer SampleBuf serial (buf index -> serial)
 
 	trees [Tree],
 	sortedTrees [Int],        -- tree indices in sorted order
@@ -379,6 +386,7 @@ fn newCtx(name String) Ctx {
 		noteParams: [NIdx](),
 		delays: [DelayInfo](),
 		delayAllocs: [Int](),
+		bufSerials: [Int](),
 		trees: [Tree](),
 		sortedTrees: [Int](),
 		isoGroups: [IsoGroup](),
@@ -558,6 +566,10 @@ fn nodeStr(ctx Ctx, n NIdx) String {
 		delayFixReadK(_, k): "delay_fix_read(%^)" fmt(k);
 		delayVarReadK(_, _): "delay_var_read";
 		delayWriteK(_):      "delay_write";
+		bufFixReadK(_, index, _, _): "buf_fix_read(%^)" fmt(index);
+		bufVarReadK(_, _, _, _): "buf_var_read";
+		bufWriteK(_, _, _):  "buf_write";
+		bufLengthK(_):       "buf_length";
 		debugK(label, _, _, _): "debug(\"%^\")" fmt(label);
 	}
 }

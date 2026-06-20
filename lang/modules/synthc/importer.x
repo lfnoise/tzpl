@@ -21,6 +21,7 @@ fn importGraph(g SignalGraph, name String, applyRewrites Bool = false) Ctx {
 	var `scCtx = newCtx(name);
 	var `scIdMap [Int: Int] = [:];        -- front-end expr id -> node index
 	var `scDelayIdMap [Int: Int] = [:];   -- front-end DelayVar id -> delay idx
+	var `scBufIdMap [Int: Int] = [:];     -- front-end BufferVar id -> buf idx
 	var `scConsMap [String: Int] = [:];   -- hash-cons key -> node index
 	-- Algebraic rewriting (interleaved with fold + hash-cons in _makeOp). Off by
 	-- default so rewrites-off dumps stay byte-identical; the C++ gApplyRewrites
@@ -30,6 +31,7 @@ fn importGraph(g SignalGraph, name String, applyRewrites Bool = false) Ctx {
 	-- Serial counters (mirror the Synth:: serial number fields).
 	var `scExprSerials Int = 0;
 	var `scDelaySerials Int = 0;
+	var `scBufSerials Int = 0;
 	var `scControlSerials Int = 0;
 	var `scNoteParamSerials Int = 1;      -- 0 is reserved for gate
 	var `scInletSerials Int = 0;
@@ -140,6 +142,10 @@ fn _kindKey(kind NodeKind) String = match (kind) {
 	delayFixReadK(d, k):  "DFR|" $ d toString $ "|" $ k toString;
 	delayVarReadK(d, ip): "DVR|" $ d toString $ "|" $ ip ordinal toString;
 	delayWriteK(d):       "DW|" $ d toString;
+	bufFixReadK(bi, index, rc, sc): "BFR|" $ bi toString $ "|" $ index toString $ "|" $ rc toString $ "|" $ sc toString;
+	bufVarReadK(bi, ip, rc, sc):    "BVR|" $ bi toString $ "|" $ ip ordinal toString $ "|" $ rc toString $ "|" $ sc toString;
+	bufWriteK(bi, wc, sc):          "BW|" $ bi toString $ "|" $ wc toString $ "|" $ sc toString;
+	bufLengthK(bi):                 "BL|" $ bi toString;
 	debugK(_, _, _, sn):  "DBG|" $ sn toString;
 };
 
@@ -313,6 +319,24 @@ fn _delayIdxFor(dvId Int) Int {
 			ctx.delays push!(newDelayInfo(serial));
 			m[dvId] = d;
 			d
+		}
+	}
+}
+
+-- BufferVar id -> buffer index, assigning a SampleBuf serial on first reference
+-- (creation order), mirroring nextSampleBufSerialNo() / getOrCreateSampleBuf.
+fn _bufIdxFor(bvId Int) Int {
+	var m [Int: Int] = `scBufIdMap;
+	match (m[bvId]) {
+		some(bi): bi;
+		none: {
+			let serial Int = `scBufSerials;
+			`scBufSerials = serial + 1;
+			var ctx Ctx = `scCtx;
+			let bi = ctx.bufSerials length;
+			ctx.bufSerials push!(serial);
+			m[bvId] = bi;
+			bi
 		}
 	}
 }
@@ -610,7 +634,32 @@ fn _importExpr(e SignalExpr) Void {
 				ctx.nrate[ins[0]], ANY_NUM, 1));
 		}
 		vecop(vop): { _importVecOp(e, vop); }
-		buffer(_, _): { _impError("buffer ops not yet supported by synthc (M2)"); }
+		buffer(bv, op): {
+			let bi = bv.id _bufIdxFor;
+			-- BufExpr: audio rate, initial_type f64 (concrete). update_type is
+			-- empty (no input constraints), so inference leaves these untouched.
+			match (op) {
+				fixRead(index, readChans, startChan): {
+					_mapId(e.id, _addExprNode(NodeKind.bufFixReadK(bi, index, readChans, startChan), [Int](),
+						Rate.audio, FLOAT64, readChans));
+				}
+				vread(interp, readChans, startChan): {
+					let ins = e _resolveIns;
+					_mapId(e.id, _addExprNode(NodeKind.bufVarReadK(bi, interp, readChans, startChan), ins,
+						Rate.audio, FLOAT64, readChans));
+				}
+				write(writeChans, startChan): {
+					let ins = e _resolveIns;
+					-- BufWrite::calcShape sets chans = in0().chans.
+					_mapId(e.id, _addExprNode(NodeKind.bufWriteK(bi, writeChans, startChan), ins,
+						Rate.audio, FLOAT64, ctx.chans[ins[0]]));
+				}
+				length: {
+					_mapId(e.id, _addExprNode(NodeKind.bufLengthK(bi), [Int](),
+						Rate.audio, FLOAT64, 1));
+				}
+			}
+		}
 		if_(_, _): { _impError("if_ not yet supported by synthc (M3)"); }
 		for_(_, _): { _impError("for_ not yet supported by synthc (M3)"); }
 		switch_(_): { _impError("switch_ not yet supported by synthc (M3)"); }

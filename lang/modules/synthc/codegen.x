@@ -230,6 +230,9 @@ fn _inlineExpr(ctx Ctx, n NIdx, cel String) String {
 		urandK(_):      "urand%^(p->rgen0)" fmt(ctx.typ[n] _isF32 ? "f" : "");
 		birandK(_):     "birand%^(p->rgen0)" fmt(ctx.typ[n] _isF32 ? "f" : "");
 		rand64K(_):     "rand64(p->rgen0)";
+		bufFixReadK(bi, index, rc, sc): _bufFixReadExpr(ctx, bi, index, rc, sc, cel);
+		bufVarReadK(bi, ip, rc, sc):    _bufVarReadExpr(ctx, n, bi, ip, rc, sc, cel);
+		bufLengthK(bi):                 _bufLengthExpr(ctx, bi);
 		delayFixReadK(d, k): _delayFixReadExpr(ctx, n, d, k, cel);
 		delayVarReadK(d, ip): _delayVarReadExpr(ctx, n, d, ip, cel);
 		_:              "/* FIXME %^ */" fmt(nodeStr(ctx, n));
@@ -337,6 +340,64 @@ fn _delayWriteStmt(ctx Ctx, n NIdx, d Int, cel String, treeSerial Int) String {
 }
 
 ---------------------------------------------------------------------------
+-- Buffer ops (mirror the BufExpr visitors in synthdef_cpp_codegen.cpp).
+-- Buffers are external, swappable memory held as a `tzpl_Buffer*` that may be
+-- null, so every access is guarded with `buf ? ... : 0.0`.
+
+fn _bufPtr(ctx Ctx, bi Int) String = "p->buf%^" fmt(ctx.bufSerials[bi]);
+
+fn _bufInterpFunc(i Interpolation) String = match (i) {
+	none:     "tzpl_buf_none";
+	linear:   "tzpl_buf_linear";
+	cubic:    "tzpl_buf_cubic";
+	lagrange: "tzpl_buf_lagrange";
+	sinc:     "tzpl_buf_sinc";
+};
+
+-- Channel index: single-channel reads/writes use startChan directly;
+-- multichannel wrap (startChan + cel) & (buf->chans - 1).
+fn _bufChanExpr(chans Int, startChan Int, cel String, bufPtr String) String =
+	chans == 1 ? startChan toString
+	: "(%^ + %^) & (%^->chans - 1)" fmt(startChan, cel, bufPtr);
+
+fn _bufFixReadExpr(ctx Ctx, bi Int, index Int, readChans Int, startChan Int, cel String) String {
+	let bp = ctx _bufPtr(bi);
+	let chan = _bufChanExpr(readChans, startChan, cel, bp);
+	"%^ ? %^->data[%^][%^ & %^->mask] : 0.0" fmt(bp, bp, chan, index, bp)
+}
+
+fn _bufVarReadExpr(ctx Ctx, n NIdx, bi Int, interp Interpolation, readChans Int, startChan Int, cel String) String {
+	let bp = ctx _bufPtr(bi);
+	let chan = _bufChanExpr(readChans, startChan, cel, bp);
+	let idx = genExpr(ctx, ctx.ins[n][0], cel);
+	match (interp) {
+		none: "%^ ? %^->data[%^][u64(%^) & %^->mask] : 0.0" fmt(bp, bp, chan, idx, bp);
+		_:    "%^ ? %^(%^->data[%^], %^->mask, %^) : 0.0" fmt(bp, _bufInterpFunc(interp), bp, chan, bp, idx);
+	}
+}
+
+fn _bufLengthExpr(ctx Ctx, bi Int) String {
+	let bp = ctx _bufPtr(bi);
+	"%^ ? (f64)(%^->length) : 0.0" fmt(bp, bp)
+}
+
+-- BufWrite is a sink: a guarded multi-line store, like _delayWriteStmt.
+fn _bufWriteStmt(ctx Ctx, n NIdx, bi Int, writeChans Int, startChan Int, cel String, treeSerial Int) String {
+	let bp = ctx _bufPtr(bi);
+	let index = genExpr(ctx, ctx.ins[n][1], cel);
+	let value = genExpr(ctx, ctx.ins[n][0], cel);
+	-- writeChans 0 = auto: match the input channel count (BufWrite::calcShape).
+	let wc = writeChans == 0 ? ctx.chans[n] : writeChans;
+	let chan = _bufChanExpr(wc, startChan, cel, bp);
+	let i1 = _tabs(`cgIndent + 1);
+	let i0 = _tabs(`cgIndent);
+	"if (%^) {\n" fmt(bp)
+		$ i1 $ "u64 _idx = u64(%^) & %^->mask;\n" fmt(index, bp)
+		$ i1 $ "%^->data[%^][_idx] = %^;\n" fmt(bp, chan, value)
+		$ i0 $ "} // %^ BufWrite\n" fmt(treeSerial)
+}
+
+---------------------------------------------------------------------------
 -- Tree emission
 
 fn _isSink(ctx Ctx, n NIdx) Bool = ctx.kind[n] isSinkKind;
@@ -356,6 +417,7 @@ fn genTree(ctx Ctx, treeIdx Int, cel String) String {
 		delayWriteK(d): { return _tabs(`cgIndent) $ _delayWriteStmt(ctx, root, d, cel, tree.serial); }
 		delayInitK(_, _): { return ""; }   -- emitted by genDelayInit
 		maxDelayK(_): { return ""; }
+		bufWriteK(bi, wc, sc): { return _tabs(`cgIndent) $ _bufWriteStmt(ctx, root, bi, wc, sc, cel, tree.serial); }
 		_: {}
 	}
 
@@ -496,6 +558,15 @@ fn genDeclInstVars(ctx Ctx) String {
 	}
 	if (s length > 0) { s = "\t// instance variables\n" $ s $ "\n"; }
 	s = s $ genDelayDecls(ctx);
+	s = s $ genBufDecls(ctx);
+	s
+}
+
+-- Sample buffer pointers (one per SampleBuf), emitted after the delay decls to
+-- match the C++ genClass ordering.
+fn genBufDecls(ctx Ctx) String {
+	var s = "";
+	for (ser : ctx.bufSerials) { s = s $ "\ttzpl_Buffer* buf%^;\n" fmt(ser); }
 	s
 }
 
@@ -605,6 +676,8 @@ fn genInitFun(ctx Ctx, name String) String {
 	s = s $ genLoops(ctx, ctx.initLoops);
 	s = s $ genDelayAlloc(ctx);
 	s = s $ genDelayInit(ctx);
+	-- Buffer pointers start null; the host swaps real buffers in at runtime.
+	for (ser : ctx.bufSerials) { s = s $ "\tp->buf%^ = nullptr;\n" fmt(ser); }
 	s = s $ "\treturn tzpl_errNone;\n}\n\n";
 	s
 }
@@ -744,7 +817,24 @@ fn genFunPtrs(ctx Ctx, name String) String {
 	s = s $ "\t.event = (tzpl_SErr (*)(tzpl_SynthData*, u64, tzpl_Slice, tzpl_Slice))%^_event,\n" fmt(name);
 	s = s $ "\t.processEvents = (void (*)(tzpl_SynthData*))%^_processEvents,\n" fmt(name);
 	s = s $ "\t.processAudio = (void (*)(tzpl_SynthData*))%^_processAudio,\n" fmt(name);
+	if (ctx.bufSerials length > 0) {
+		s = s $ "\t.swapBuffer = (tzpl_Buffer* (*)(tzpl_SynthData*, i64, tzpl_Buffer*))%^_swapBuffer,\n" fmt(name);
+	}
 	s = s $ "};\n\n";
+	s
+}
+
+-- Runtime buffer swap: the host hands in a new tzpl_Buffer for a given buffer
+-- serial and gets the old one back (for NRT cleanup). Emitted only when the
+-- synth uses buffers.
+fn genSwapBufferFun(ctx Ctx, name String) String {
+	if (ctx.bufSerials length == 0) { return ""; }
+	var s = "tzpl_Buffer* %^_swapBuffer(%^* p, i64 bufID, tzpl_Buffer* newBuf) {\n" fmt(name, name);
+	s = s $ "\ttzpl_Buffer* old = nullptr;\n\tswitch (bufID) {\n";
+	for (ser : ctx.bufSerials) {
+		s = s $ "\t\tcase %^: old = p->buf%^; p->buf%^ = newBuf; break;\n" fmt(ser, ser, ser);
+	}
+	s = s $ "\t}\n\treturn old;\n}\n\n";
 	s
 }
 
@@ -830,6 +920,7 @@ fn genCpp(ctx Ctx, name String) String {
 	s = s $ genEventFun(ctx, name);
 	s = s $ genHandleEventsFun(ctx, name);
 	s = s $ genTickFun(ctx, name);
+	s = s $ genSwapBufferFun(ctx, name);
 	s = s $ genFunPtrs(ctx, name);
 	s = s $ genLoad(ctx, name);
 	s

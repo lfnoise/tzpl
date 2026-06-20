@@ -70,6 +70,10 @@ fn calcShapeOf(ctx Ctx, n NIdx) Int {
 		delayFixReadK(d, _): ctx.delays[d].chans;
 		delayVarReadK(d, _): ctx.delays[d].chans;
 		delayWriteK(_):      ctx.chans[ins[0]];
+		bufFixReadK(_, _, readChans, _): readChans;
+		bufVarReadK(_, _, readChans, _): readChans;
+		bufWriteK(_, _, _):  ctx.chans[ins[0]];   -- BufWrite::calcShape: in0().chans
+		bufLengthK(_):       1;
 		debugK(_, _, _, _):  1;
 	}
 }
