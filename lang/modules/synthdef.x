@@ -925,7 +925,9 @@ fn if_(test Bool, thenFn GraphFn) S = test ? thenFn() : 0 asSignal;
 fn for_(varname String, count Int, bodyFn GraphFn1) S {
 	let varexpr S = SignalExprKind.varexpr(varname) _newSignalExpr;
     let bodyGraph SignalGraph = bodyFn _makeSubGraph1(varexpr);
-    SignalExprKind.for_(count, bodyGraph) _newSignalExpr
+    -- The count flows as a signal input (a constant node), matching the C++
+    -- ForLoopExpr(S count, ...); parseForExpr expects an (count) inputs list.
+    SignalExprKind.for_(count, bodyGraph) _newSignalExpr([count asSignal])
 }
 
 fn switch(test, funs [GraphFn]) S {
@@ -1052,14 +1054,14 @@ fn toLisp(o S, indentLevel Int) String {
             "(%^ IfExpr %^ %^ %^)" fmt(o.id, o inputsToLisp, thenGraph toLisp(indentLevel + 1), elseGraph toLisp(indentLevel + 1))
 		}
         for_(count, bodyGraph) :
-            "(%^ ForExpr %^ %^)" fmt(o.id, count, bodyGraph toLisp(indentLevel + 1));
+            "(%^ ForExpr %^ %^)" fmt(o.id, o inputsToLisp, bodyGraph toLisp(indentLevel + 1));
 
         switch_(cases) :
             "(%^ SwitchExpr %^ %^)" fmt(o.id, o inputsToLisp, cases toLisp(indentLevel + 1) separatedString(" "));
 
         select : "(%^ SelectExpr %^)" fmt(o.id, o inputsToLisp);
         select2 : "(%^ SelectExpr %^)" fmt(o.id, o inputsToLisp);
-		varexpr(name) : "()%^ VarExpr %^)" fmt(o.id, name);
+		varexpr(name) : "(%^ VarExpr \"%^\")" fmt(o.id, name);
 
         voicer(maxVoices, bodyGraph) : {
             "(%^ Voicer %^ %^)" fmt(o.id, maxVoices, bodyGraph toLisp(indentLevel + 1))
