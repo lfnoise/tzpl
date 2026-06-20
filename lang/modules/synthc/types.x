@@ -74,14 +74,30 @@ fn calcShapeOf(ctx Ctx, n NIdx) Int {
 		bufVarReadK(_, _, readChans, _): readChans;
 		bufWriteK(_, _, _):  ctx.chans[ins[0]];   -- BufWrite::calcShape: in0().chans
 		bufLengthK(_):       1;
-		-- Control flow (M3.1 placeholders; M3.3 implements the branch broadcast).
-		ifK:                 ctx.chans[n];
-		switchK(_):          ctx.chans[n];
-		forK:                ctx.chans[n];
-		phiK(_):             ctx.chans[ins[0]];
-		varK(_):             ctx.chans[n];
+		-- Control flow: a control-flow node broadcasts over its branch/body phis
+		-- (the test/selector/count input is scalar and doesn't contribute); a
+		-- phi broadcasts its (current, target, input) channel counts.
+		ifK:                 _cfChans(ctx, n);
+		switchK(_):          _cfChans(ctx, n);
+		forK:                _cfChans(ctx, n);
+		phiK(t):             _phiChans(ctx, n, t);
+		varK(_):             ctx.chans[n];   -- fixed at import (scalar loop var)
 		debugK(_, _, _, _):  1;
 	}
+}
+
+-- Control-flow node shape: broadcast over the branch/body phis (ctx.subs).
+fn _cfChans(ctx Ctx, n NIdx) Int {
+	var ch = 0;
+	for (s : ctx.subs[n]) { ch = _broadcastC(ch, ctx.chans[s]); }
+	ch
+}
+
+-- PhiNode shape: broadcast(current, target, input). Mirrors PhiNodeExpr::calcShape.
+fn _phiChans(ctx Ctx, n NIdx, target Int) Int {
+	var ch = ctx.chans[n];
+	if (target != NONE) { ch = _broadcastC(ch, ctx.chans[target]); }
+	_broadcastC(ch, ctx.chans[ctx.ins[n][0]])
 }
 
 fn _selectChans(ctx Ctx, n NIdx) Int {

@@ -726,12 +726,33 @@ fn _importExpr(e SignalExpr) Void {
 			_linkPhi(elsePhi, ifNode, r);
 			_mapId(e.id, ifNode);
 		}
-		for_(_, _): { _impError("for_ not yet supported by synthc (M3.2b)"); }
-		switch_(_): { _impError("switch_ not yet supported by synthc (M3.2b)"); }
+		for_(_, bodySg): {
+			-- ins[0] is the count constant (front end emits [count asSignal]).
+			let ins = e _resolveIns;
+			let bodyPhi = _importSubgraph(bodySg);
+			var ctx Ctx = `scCtx;
+			let r = max(_maxRateOf(ins), ctx.nrate[bodyPhi]);
+			let forNode = _addCFNode(NodeKind.forK, ins, [bodyPhi], r, ANY_NUM, ctx.chans[bodyPhi]);
+			_linkPhi(bodyPhi, forNode, r);
+			_mapId(e.id, forNode);
+		}
+		switch_(cases): {
+			let ins = e _resolveIns;                  -- [selector]
+			var subs [Int] = [];
+			for (sg : cases) { subs push!(_importSubgraph(sg)); }
+			var ctx Ctx = `scCtx;
+			var r = _maxRateOf(ins);
+			var ch = 0;
+			for (s : subs) { r = max(r, ctx.nrate[s]); ch = max(ch, ctx.chans[s]); }
+			let swNode = _addCFNode(NodeKind.switchK(cases length), ins, subs, r, ANY_NUM, ch);
+			for (s : subs) { _linkPhi(s, swNode, r); }
+			_mapId(e.id, swNode);
+		}
 		varexpr(name): {
-			-- VarExpr: no inputs, initial_type any_int, audio rate; hash-consed by
-			-- name (handled by _addExprNode via the VAR| cons key).
-			_mapId(e.id, _addExprNode(NodeKind.varK(name), [Int](), Rate.audio, ANY_INT, 1));
+			-- VarExpr: no inputs, initial_type any_int, audio rate; chans stays 0
+			-- (Expr default; calcShape is a no-op), so it broadcasts to its use.
+			-- Hash-consed by name via the VAR| cons key.
+			_mapId(e.id, _addExprNode(NodeKind.varK(name), [Int](), Rate.audio, ANY_INT, 0));
 		}
 		voicer(_, _): { _impError("voicer not yet supported by synthc (M4)"); }
 		spectralChain(_, _, _): { _impError("spectralChain not yet supported by synthc (M4)"); }

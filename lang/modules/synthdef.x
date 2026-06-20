@@ -931,7 +931,10 @@ fn for_(varname String, count Int, bodyFn GraphFn1) S {
 }
 
 fn switch(test, funs [GraphFn]) S {
-    let graphs [SignalGraph] = funs _makeSubGraph;
+    -- Build a subgraph per case. (An explicit loop, not `funs _makeSubGraph`:
+    -- auto-mapping a function with a function-typed parameter has no codegen.)
+    var graphs [SignalGraph] = [];
+    for (f : funs) { graphs push!(f _makeSubGraph); }
     SignalExprKind.switch_(graphs) _newSignalExpr([test])
 }
 

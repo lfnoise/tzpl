@@ -55,10 +55,37 @@ fn if4() S {
 	(x + y) outlet
 }
 
+-- for_: counted loop; body uses the loop index (a VarExpr)
+fn for1() S {
+	let sig = (0.3 lfsaw);
+	for_("i", 4, fn(i S) { sig * (i f32) }) |> outlet
+}
+-- for_ with a bare-capture body (no local exprs in the body but the loop var)
+fn for2() S {
+	let sig = (0.3 lfsaw);
+	for_("k", 3, fn(k S) { sig + (k f32) }) |> outlet
+}
+-- switch_: multi-way over captured signals (some branches compute, some bare)
+fn sw1() S {
+	let a = (0.2 lfsaw);
+	let sel = a > 0.0;
+	switch(sel, [fn() { a * 0.5 }, fn() { a * 0.3 }, fn() { a * 0.1 }]) |> outlet
+}
+fn sw2() S {
+	let a = (0.2 lfsaw);
+	let b = (0.3 lfsaw);
+	let sel = a > 0.0;
+	switch(sel, [fn() { a }, fn() { b }]) |> outlet
+}
+
 checkCF("if1", if1);
 checkCF("if2", if2);
 checkCF("if3", if3);
 checkCF("if4", if4);
+checkCF("for1", for1);
+checkCF("for2", for2);
+checkCF("sw1", sw1);
+checkCF("sw2", sw2);
 
 if (`failures == 0) {
 	println("M3 CONTROLFLOW DIFF PASS");

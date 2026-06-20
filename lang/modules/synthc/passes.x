@@ -347,6 +347,15 @@ fn shapeInference(ctx Ctx) Void {
 		ctx.chans[n] = ch;
 		if (ch != chans0) {
 			for (c : ctx.consumers[n]) { wl wlPush(c); }
+			-- Control-flow shape edges aren't `consumers` edges: a phi feeds its
+			-- target, and a control-flow node feeds its branch/body phis (subs).
+			match (ctx.kind[n]) {
+				phiK(t):    { if (t != NONE) { wl wlPush(t); } }
+				ifK:        { for (s : ctx.subs[n]) { wl wlPush(s); } }
+				switchK(_): { for (s : ctx.subs[n]) { wl wlPush(s); } }
+				forK:       { for (s : ctx.subs[n]) { wl wlPush(s); } }
+				_: {}
+			}
 		}
 		match (ctx.kind[n]) {
 			delayWriteK(d): {

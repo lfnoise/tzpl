@@ -1,8 +1,9 @@
 # synthc M3 Plan -- Control Flow (if / switch / for, subgraphs, phi)
 
-Status: M3.0 (spike), M3.1 (data model) done. **M3.2 in progress: if_ lands**
-(import + topo + cuts + control-flow type/shape) with a byte-matching Tier-1 dump.
-Next within M3.2: for_ and switch_ (M3.2b), then M3.4 codegen.
+Status: M3.0 (spike), M3.1 (data model), M3.2+M3.3 (analysis: if_/for_/switch_
+import + topo + cuts + type/shape) all done -- the Tier-1 dump byte-matches the
+C++ for if/else, no-else, nested, multi-if, for loops, and switches.
+Next: M3.4 (codegen) -- emit the control-flow C++ (Tier-2 byte-match) + Tier-3.
 
 M1/M2 are complete: the Tzopilotl-hosted synthdef compiler (`lang/modules/synthc/`)
 byte-matches the C++ `synthdef-compiler/` for the whole non-control-flow corpus
@@ -261,7 +262,7 @@ Exhaustive matches that must gain the new kinds: `nodeStr`, `isSinkKind`,
 | **M3.0 Spike** | DONE. Fixed VarExpr + for_ serialization; resolved inlets-vs-cross-graph-refs (direct refs, no inlets); froze the multi-graph dump format. See "M3.0 findings". | -- |
 | **M3.1 Data model** | DONE. `graphOf [Int]` + `subs [[NIdx]]` per-node arrays; `graphs [GraphInfo]` (per-graph `audioLoops`); `Loop.graphOf`; NodeKinds `ifK`/`switchK(Int)`/`forK`/`phiK(Int)`/`varK(String)`; multi-graph dump (`GRAPH N`); `splitRates` per-graph audio bucketing. Byte-identical for single-graph; 382 lang tests pass. | low |
 | **M3.2 Import + topo + cuts** | if_ DONE; for_/switch_ pending (M3.2b). Recursive subgraph import (`_importSubgraph` wraps each branch root in `phiK`; `_addCFNode` stores `subs`); subgraph-aware `topologicalSortExprs` (`_topoKids` = ins ++ subs); GraphCut `Graph`/`Phi`/`ControlFlow`; real `addSubgraphAntecedents`; control-flow type/shape (`_updateCF`/`_updatePhi`, test->any_int). Tier-1 dump byte-matches if/else, no-else, nested, multi-if. | **high** |
-| **M3.3 Types/shape** | if/switch/for broadcast over branch phis; phi `update_type` intersect -> target propagation; test/selector/count -> any_int. | med |
+| **M3.3 Types/shape** | DONE (folded into M3.2). `_cfChans` broadcasts a control-flow node over its branch phis; `_phiChans` = broadcast(current, target, input); `shapeInference` re-queues the phi target / control-flow phis on a shape change; `varK` stays chans 0 (Expr default). Switch builder rewritten to avoid an un-codegen-able auto-map. | med |
 | **M3.4 Codegen** | Control-flow block visitors + subgraph-loop recursion + delay advance + indent; phi assignment; var emission; cross-graph inst-var reads (or inlet/outlet per M3.0). Fold in n-way select. | med |
 | **M3.5 Parity** | Tier-1 dump diff, Tier-2 byte-match, Tier-3 render A/B over an if/switch/for corpus (incl. nested + control-driven + event-rate). | -- |
 
