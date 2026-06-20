@@ -32,6 +32,9 @@ fn importGraph(g SignalGraph, name String, applyRewrites Bool = false) Ctx {
 	var `scExprSerials Int = 0;
 	var `scDelaySerials Int = 0;
 	var `scBufSerials Int = 0;
+	-- Graph being imported into (0 = root). M3.2's subgraph import pushes/pops
+	-- this; for non-control-flow synths it stays 0.
+	var `scCurGraph Int = 0;
 	var `scControlSerials Int = 0;
 	var `scNoteParamSerials Int = 1;      -- 0 is reserved for gate
 	var `scInletSerials Int = 0;
@@ -146,6 +149,11 @@ fn _kindKey(kind NodeKind) String = match (kind) {
 	bufVarReadK(bi, ip, rc, sc):    "BVR|" $ bi toString $ "|" $ ip ordinal toString $ "|" $ rc toString $ "|" $ sc toString;
 	bufWriteK(bi, wc, sc):          "BW|" $ bi toString $ "|" $ wc toString $ "|" $ sc toString;
 	bufLengthK(bi):                 "BL|" $ bi toString;
+	ifK:                  "IF";
+	switchK(nc):          "SW|" $ nc toString;
+	forK:                 "FOR";
+	phiK(t):              "PHI|" $ t toString;
+	varK(name):           "VAR|" $ name;
 	debugK(_, _, _, sn):  "DBG|" $ sn toString;
 };
 
@@ -163,10 +171,12 @@ fn _appendNode(kind NodeKind, ins [Int], serial Int, r Rate, t NumType, ch Int) 
 	let idx = ctx numNodes;
 	ctx.kind push!(kind);
 	ctx.ins push!(ins);
+	ctx.subs push!([Int]());
 	ctx.serial push!(serial);
 	ctx.nrate push!(r);
 	ctx.typ push!(t);
 	ctx.chans push!(ch);
+	ctx.graphOf push!(`scCurGraph);
 	ctx.cut push!(GraphCut.none);
 	ctx.treeOf push!(NONE);
 	ctx.consumers push!([Int]());

@@ -1,7 +1,7 @@
 # synthc M3 Plan -- Control Flow (if / switch / for, subgraphs, phi)
 
-Status: scoping complete; **M3.0 (spike) done** -- see "M3.0 findings" below.
-Next: M3.1 (data model).
+Status: scoping complete; **M3.0 (spike) and M3.1 (data model) done**.
+Next: M3.2 (import + topo + cuts).
 
 M1/M2 are complete: the Tzopilotl-hosted synthdef compiler (`lang/modules/synthc/`)
 byte-matches the C++ `synthdef-compiler/` for the whole non-control-flow corpus
@@ -258,7 +258,7 @@ Exhaustive matches that must gain the new kinds: `nodeStr`, `isSinkKind`,
 | Sub-milestone | Work | Risk |
 |---|---|---|
 | **M3.0 Spike** | DONE. Fixed VarExpr + for_ serialization; resolved inlets-vs-cross-graph-refs (direct refs, no inlets); froze the multi-graph dump format. See "M3.0 findings". | -- |
-| **M3.1 Data model** | `graphOf`, `graphs [GraphInfo]`, `subs`, new NodeKinds, multi-graph dump. | low |
+| **M3.1 Data model** | DONE. `graphOf [Int]` + `subs [[NIdx]]` per-node arrays; `graphs [GraphInfo]` (per-graph `audioLoops`); `Loop.graphOf`; NodeKinds `ifK`/`switchK(Int)`/`forK`/`phiK(Int)`/`varK(String)`; multi-graph dump (`GRAPH N`); `splitRates` per-graph audio bucketing. Byte-identical for single-graph; 382 lang tests pass. | low |
 | **M3.2 Import + topo + cuts** | Recursive subgraph import (branch -> fresh graph index, root wrapped in phi); control-flow node creation; subgraph-aware `topologicalSortExprs`; GraphCut `Graph`/`Phi`/`ControlFlow` rules; real `addSubgraphAntecedents`; `treesToLoops` own-loop for control-flow + per-graph audio bucketing; `splitRates` per-graph. | **high** |
 | **M3.3 Types/shape** | if/switch/for broadcast over branch phis; phi `update_type` intersect -> target propagation; test/selector/count -> any_int. | med |
 | **M3.4 Codegen** | Control-flow block visitors + subgraph-loop recursion + delay advance + indent; phi assignment; var emission; cross-graph inst-var reads (or inlet/outlet per M3.0). Fold in n-way select. | med |

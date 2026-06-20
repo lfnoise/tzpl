@@ -74,6 +74,12 @@ fn calcShapeOf(ctx Ctx, n NIdx) Int {
 		bufVarReadK(_, _, readChans, _): readChans;
 		bufWriteK(_, _, _):  ctx.chans[ins[0]];   -- BufWrite::calcShape: in0().chans
 		bufLengthK(_):       1;
+		-- Control flow (M3.1 placeholders; M3.3 implements the branch broadcast).
+		ifK:                 ctx.chans[n];
+		switchK(_):          ctx.chans[n];
+		forK:                ctx.chans[n];
+		phiK(_):             ctx.chans[ins[0]];
+		varK(_):             ctx.chans[n];
 		debugK(_, _, _, _):  1;
 	}
 }

@@ -885,11 +885,12 @@ fn computeIsoGroups(ctx Ctx) Void {
 	}
 }
 
-fn _newLoop(ctx Ctx, rate Rate, chans Int, isCF Bool, isoGroup Int) Int {
+fn _newLoop(ctx Ctx, rate Rate, chans Int, isCF Bool, isoGroup Int, graphOf Int) Int {
 	let li = ctx.loops length;
 	ctx.loops push!(Loop {
 		trees: [Int](), rate: rate, chans: chans,
-		isControlFlow: isCF, isoGroup: isoGroup, antecedents: [Int](), serial: li,
+		isControlFlow: isCF, isoGroup: isoGroup, antecedents: [Int](),
+		graphOf: graphOf, serial: li,
 	});
 	li
 }
@@ -952,18 +953,20 @@ fn treesToLoops(ctx Ctx) Void {
 		let rate = ctx.nrate[root];
 		let chans = ctx.chans[root];
 		let ig = ctx.trees[treeIdx].isoGroupOf;
+		let go = ctx.graphOf[root];
 		if (ctx.kind[root] isControlFlowKind) {
-			let li = _newLoop(ctx, rate, chans, true, ig);
+			let li = _newLoop(ctx, rate, chans, true, ig, go);
 			_loopAddTree(ctx, li, treeIdx);
 		} else if (outputMustBeSeparateLoop(ctx.kind[root])) {
-			let li = _newLoop(ctx, rate, chans, false, ig);
+			let li = _newLoop(ctx, rate, chans, false, ig, go);
 			_loopAddTree(ctx, li, treeIdx);
 		} else {
 			var placed = false;
 			var li = 0;
 			while (li < ctx.loops length && !placed) {
 				let lp = ctx.loops[li];
-				if (!lp.isControlFlow && lp.rate == rate && lp.chans == chans && lp.isoGroup == ig) {
+				if (!lp.isControlFlow && lp.rate == rate && lp.chans == chans
+					&& lp.isoGroup == ig && lp.graphOf == go) {
 					if (_canAccessAllAntecedents(ctx, li, treeIdx)
 						&& _hasNoSeparateLoopConstraints(ctx, li, treeIdx)) {
 						_loopAddTree(ctx, li, treeIdx);
@@ -973,7 +976,7 @@ fn treesToLoops(ctx Ctx) Void {
 				li = li + 1;
 			}
 			if (!placed) {
-				let nl = _newLoop(ctx, rate, chans, false, ig);
+				let nl = _newLoop(ctx, rate, chans, false, ig, go);
 				_loopAddTree(ctx, nl, treeIdx);
 			}
 		}
@@ -1005,7 +1008,7 @@ fn splitRates(ctx Ctx) Void {
 			init:     { ctx.initLoops push!(li); }
 			reset:    { ctx.resetLoops push!(li); }
 			event:    { ctx.eventLoops push!(li); }
-			audio:    { ctx.audioLoops push!(li); }
+			audio:    { ctx.graphs[ctx.loops[li].graphOf].audioLoops push!(li); }
 		}
 		li = li + 1;
 	}

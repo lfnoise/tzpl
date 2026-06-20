@@ -801,7 +801,9 @@ fn genDelayAdvance(ctx Ctx) String {
 
 fn genTickFun(ctx Ctx, name String) String {
 	var s = "void %^_processAudio(%^* p) {\n" fmt(name, name);
-	s = s $ genLoops(ctx, ctx.audioLoops);
+	-- Root graph's audio loops; subgraph loops are emitted inside their
+	-- control-flow blocks (M3.4).
+	s = s $ genLoops(ctx, ctx.graphs[0].audioLoops);
 	s = s $ genDelayAdvance(ctx);
 	s = s $ "}\n\n";
 	s

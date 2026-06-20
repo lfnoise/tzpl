@@ -168,6 +168,14 @@ enum NodeKind {
 	bufWriteK(Int, Int, Int),                -- buf index, writeChans, startChan
 	bufLengthK(Int),                         -- buf index
 
+	-- Control flow (M3). Branch/body subgraph roots are held in ctx.subs[node]
+	-- (each a PhiNode index), not in `ins`; `ins` carries the test/selector/count.
+	ifK,                                 -- if_else: subs = [thenPhi, elsePhi]
+	switchK(Int),                        -- ncases; subs = [casePhi...]
+	forK,                                -- for_loop: subs = [bodyPhi]
+	phiK(Int),                           -- target control-flow node (NONE until linked)
+	varK(String),                        -- loop/branch variable name
+
 	debugK(String, Int, Int, Int),       -- label, period, consecutive, serial
 }
 
@@ -212,7 +220,11 @@ fn shouldHashCons(k NodeKind) Bool = match (k) {
 	outletK(_, _):          false;
 	noteParamK(_, _, _):    false;
 	debugK(_, _, _, _):     false;
-	_:                      true;
+	phiK(_):                false;   -- PhiNodeExpr::should_hash_cons
+	ifK:                    false;   -- branches live in subs, not the cons key,
+	switchK(_):             false;   -- so distinct control-flow nodes never merge
+	forK:                   false;
+	_:                      true;    -- varK hash-conses by name (VarExpr default)
 };
 
 fn isConstantKind(k NodeKind) Bool = match (k) {
@@ -225,6 +237,7 @@ fn isConstantKind(k NodeKind) Bool = match (k) {
 fn needsInputTempVar(k NodeKind, i Int) Bool = match (k) {
 	reduceK(_, _): true;
 	vecK(_):       i == 0;   -- the data input is index-remapped; rotate's n (i=1) is scalar
+	phiK(_):       true;     -- PhiNodeExpr::needs_input_temp_var
 	_:             false;
 };
 
@@ -240,8 +253,14 @@ fn inputMustBeSeparateLoop(k NodeKind, i Int) Bool = match (k) {
 	_:             false;
 };
 
--- Mirrors Expr::is_control_flow(). M1 has no control-flow kinds (M3).
-fn isControlFlowKind(k NodeKind) Bool = false;
+-- Mirrors Expr::is_control_flow(). if/switch/for are ControlFlowExpr; phi and
+-- var are not.
+fn isControlFlowKind(k NodeKind) Bool = match (k) {
+	ifK:        true;
+	switchK(_): true;
+	forK:       true;
+	_:          false;
+};
 
 ---------------------------------------------------------------------------
 -- Delay records (mirror DelayBuf)
@@ -306,7 +325,17 @@ struct Loop {
 	isControlFlow Bool,
 	isoGroup Int,             -- iso-group index, NONE for non-event loops
 	antecedents [Int],        -- loop serials
+	graphOf Int,              -- graph index this loop runs in (0 = root)
 	serial Int,
+}
+
+-- A graph: the root (index 0) plus one per control-flow branch/body subgraph
+-- (M3). Mirrors synthdef::Graph. Audio-rate loops are bucketed per graph (the
+-- C++ keeps them in Graph::loops); init/reset/event loops stay synth-global.
+struct GraphInfo {
+	serial Int,               -- graph index (0 = root)
+	parent Int,               -- parent graph index, NONE for root
+	audioLoops [Int],         -- audio-rate loop indices in this graph
 }
 
 -- An iso-group: a set of event-rate trees sharing the same transitive control
@@ -330,11 +359,15 @@ struct Ctx {
 	-- per-node parallel arrays, indexed by NIdx
 	kind [NodeKind],
 	ins [[NIdx]],
+	subs [[NIdx]],            -- control-flow branch/body PhiNode roots (empty
+	                          -- for ordinary nodes); the synthc analog of
+	                          -- IfElseExpr.then_expr/else_expr/cases
 	serial [Int],             -- C++ userial (with gaps where nodes were
 	                          -- hash-consed away or folded)
 	nrate [Rate],
 	typ [NumType],
 	chans [Int],
+	graphOf [Int],            -- graph index each node belongs to (0 = root)
 	cut [GraphCut],
 	treeOf [Int],             -- tree index, NONE if none
 	consumers [[NIdx]],
@@ -355,12 +388,12 @@ struct Ctx {
 	sortedTrees [Int],        -- tree indices in sorted order
 	isoGroups [IsoGroup],     -- event-rate iso-groups (empty if no controls)
 	isoOrder [Int],           -- iso-group indices in topological order
+	graphs [GraphInfo],       -- root (index 0) + control-flow subgraphs (M3);
+	                          -- per-graph audio loops live in GraphInfo.audioLoops
 	loops [Loop],
 	initLoops [Int],
 	resetLoops [Int],
 	eventLoops [Int],
-	audioLoops [Int],         -- the C++ keeps these per Graph; M1 has only
-	                          -- the root graph
 	usesRng [Bool],           -- single element; mutable through Ctx copies
 	errors [String],          -- import/pass errors (no exceptions in the
 	                          -- language; callers must check)
@@ -371,10 +404,12 @@ fn newCtx(name String) Ctx {
 		name: name,
 		kind: [NodeKind](),
 		ins: [[NIdx]](),
+		subs: [[NIdx]](),
 		serial: [Int](),
 		nrate: [Rate](),
 		typ: [NumType](),
 		chans: [Int](),
+		graphOf: [Int](),
 		cut: [GraphCut](),
 		treeOf: [Int](),
 		consumers: [[NIdx]](),
@@ -391,11 +426,11 @@ fn newCtx(name String) Ctx {
 		sortedTrees: [Int](),
 		isoGroups: [IsoGroup](),
 		isoOrder: [Int](),
+		graphs: [GraphInfo { serial: 0, parent: NONE, audioLoops: [Int]() }],
 		loops: [Loop](),
 		initLoops: [Int](),
 		resetLoops: [Int](),
 		eventLoops: [Int](),
-		audioLoops: [Int](),
 		usesRng: [false],
 		errors: [String](),
 	}
@@ -570,6 +605,11 @@ fn nodeStr(ctx Ctx, n NIdx) String {
 		bufVarReadK(_, _, _, _): "buf_var_read";
 		bufWriteK(_, _, _):  "buf_write";
 		bufLengthK(_):       "buf_length";
+		ifK:                 "if_else";
+		switchK(_):          "switch";
+		forK:                "for_loop";
+		phiK(_):             "PhiNode";
+		varK(name):          name;
 		debugK(label, _, _, _): "debug(\"%^\")" fmt(label);
 	}
 }
@@ -671,8 +711,10 @@ fn dumpToString(ctx Ctx) String {
 	out push!("-- EVENT\n");
 	printLoops(ctx, out, ctx.eventLoops);
 	out push!("-- AUDIO\n");
-	out push!("GRAPH 0\n");
-	printLoops(ctx, out, ctx.audioLoops);
+	for (g : ctx.graphs) {
+		out push!("GRAPH %^\n" fmt(g.serial));
+		printLoops(ctx, out, g.audioLoops);
+	}
 	for (d : ctx.delays) {
 		out push!("DELAY %^ %^ %^\n" fmt(d.serial, d.typ numTypeStr, d.chans));
 		for (n : d.initters) { _printDelayMember(ctx, out, n); }
