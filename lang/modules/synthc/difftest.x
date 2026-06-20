@@ -134,6 +134,42 @@ fn treesCompare(mine String, theirs String) String {
 	report length == 0 ? "PASS" : report join("\n")
 }
 
+-- Full-dump comparison that sorts the antecedent bracket on every TREE/LOOP
+-- header line (order-independent), used for control-flow dumps where the trees
+-- also appear inside the per-graph loop sections. Member expr lines (6-space
+-- indent) keep their [inputs] order, which is significant.
+fn normalizeDump(dump String) [String] {
+	var out [String] = [];
+	for (line : dump split("\n")) {
+		if (line startsWith("    TREE") || line startsWith("  LOOP")) {
+			out push!(line _sortBracket);
+		} else {
+			out push!(line);
+		}
+	}
+	out
+}
+
+fn cfDumpCompare(mine String, theirs String) String {
+	let a = mine normalizeDump;
+	let b = theirs normalizeDump;
+	var report [String] = [];
+	let n = min(a length, b length);
+	var i = 0;
+	while (i < n) {
+		if (a[i] != b[i]) {
+			report push!("line %^:" fmt(i));
+			report push!("  synthc: " $ a[i]);
+			report push!("  C++:    " $ b[i]);
+		}
+		i = i + 1;
+	}
+	if (a length != b length) {
+		report push!("line count: synthc %^ vs C++ %^" fmt(a length, b length));
+	}
+	report length == 0 ? "PASS" : ("dumps differ:\n" $ report join("\n"))
+}
+
 -- Full-dump comparison for M1+.
 fn fullCompare(mine String, theirs String) String {
 	if (mine == theirs) { return "PASS"; }

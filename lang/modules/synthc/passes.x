@@ -29,6 +29,11 @@ fn _delayIdxOfKind(k NodeKind) Int = match (k) {
 	_:                    NONE;
 };
 
+-- Traversal children of a node: inputs first, then control-flow subgraph roots
+-- (mirrors the C++ visit(): inputs, then get_subgraph(i)). subs is empty for
+-- ordinary nodes, so this is just `ins` for them.
+fn _topoKids(ctx Ctx, n NIdx) [Int] = ctx.ins[n] $ ctx.subs[n];
+
 -- visitDelay traversal order: initters, fixReaders, varReaders, maxDelay.
 fn _delayMembers(ctx Ctx, d Int) [Int] {
 	var out [Int] = [];
@@ -224,7 +229,7 @@ fn topologicalSortExprs(ctx Ctx) Void {
 		fIsDelay push!(false);
 		fIdx push!(root);
 		fChild push!(0);
-		fKids push!(ctx.ins[root]);
+		fKids push!(ctx _topoKids(root));
 
 		while (fIsDelay length > 0) {
 			let top = fIsDelay length - 1;
@@ -238,7 +243,7 @@ fn topologicalSortExprs(ctx Ctx) Void {
 					fIsDelay push!(false);
 					fIdx push!(child);
 					fChild push!(0);
-					fKids push!(ctx.ins[child]);
+					fKids push!(ctx _topoKids(child));
 				}
 			} else if (!fIsDelay[top]) {
 				let n = fIdx[top];
@@ -458,9 +463,11 @@ fn findGraphCuts(ctx Ctx) Void {
 				-- constants are never cut
 			} else {
 				if (needsInputTempVar(ctx.kind[n], i)) { _setCut(ctx, inp, GraphCut.temp); }
-				-- All M1 nodes share the root graph, so the graph-cut branch is
-				-- never taken; rate/separate-loop/broadcast follow in priority.
-				if (ctx.nrate[n] != ctx.nrate[inp]) {
+				-- A cross-graph reference (input lives in a different graph) is an
+				-- instance variable; otherwise rate/separate-loop/broadcast.
+				if (ctx.graphOf[n] != ctx.graphOf[inp]) {
+					_setCut(ctx, inp, GraphCut.graph);
+				} else if (ctx.nrate[n] != ctx.nrate[inp]) {
 					_setCut(ctx, inp, GraphCut.rate);
 				} else if (outputMustBeSeparateLoop(ctx.kind[inp])) {
 					_setCut(ctx, inp, GraphCut.separateLoop);
@@ -478,6 +485,8 @@ fn findGraphCuts(ctx Ctx) Void {
 		} else {
 			if (ctx.kind[n] isSinkKind) {
 				_setCut(ctx, n, GraphCut.sink);
+			} else if (ctx.kind[n] isPhiKind) {
+				_setCut(ctx, n, GraphCut.phi);
 			} else if (ctx.consumers[n] length == 0) {
 				_setCut(ctx, n, GraphCut.unused);
 			} else if (ctx.consumers[n] length > 1) {
@@ -608,6 +617,23 @@ fn addDelayAntecedents(ctx Ctx) Void {
 				}
 			}
 			_: {}
+		}
+	}
+}
+
+---------------------------------------------------------------------------
+-- addSubgraphAntecedents (synthdef_synth.cpp:545)
+--
+-- A control-flow node's tree depends on each of its branch/body subgraph trees
+-- (the PhiNode roots in ctx.subs), with a separate-loop constraint (the `true`
+-- flag) so the branch runs in its own loop inside the control-flow block.
+
+fn addSubgraphAntecedents(ctx Ctx) Void {
+	for (n : ctx.sorted) {
+		let ntree = ctx.treeOf[n];
+		for (sub : ctx.subs[n]) {
+			let stree = ctx.treeOf[sub];
+			if (stree != ntree) { _treeAddAntecedent(ctx, ntree, stree, true); }
 		}
 	}
 }
@@ -1047,6 +1073,7 @@ fn analyzeTrees(ctx Ctx) Ctx {
 	ctx cutGraphToTrees;
 	ctx removeDeadCode;
 	ctx addDelayAntecedents;
+	ctx addSubgraphAntecedents;
 	ctx sortTrees;
 	ctx
 }

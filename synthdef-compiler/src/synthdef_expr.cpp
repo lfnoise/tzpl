@@ -478,6 +478,12 @@ namespace synthdef {
         }
     }
     void IfElseExpr::update_type(ExprIdentitySet& worklist) {
+        // The test input-type constraint (any_int) is an invariant; apply it on
+        // every visit, not only when this node's type narrows. Otherwise the
+        // result depends on worklist iteration order (whether this node updates
+        // from `any` before a consumer pins its type), which made the inferred
+        // test type non-deterministic across runs.
+        propagate_input_type(worklist);
         auto new_type = type & then_expr->type & else_expr->type;
         checkType(new_type);
         if (type != new_type) {
@@ -495,6 +501,7 @@ namespace synthdef {
     }
     void SwitchExpr::update_type(ExprIdentitySet& worklist) {
 //        std::println("SwitchExpr::update_type {} in0 {}", (void*)this, in0()->type.str());
+        propagate_input_type(worklist);   // selector -> any_int, order-independent
         auto new_type = type;
         for (S c : cases) {
             new_type = c->type;
@@ -512,6 +519,7 @@ namespace synthdef {
     }
 
     void ForLoopExpr::update_type(ExprIdentitySet& worklist) {
+        propagate_input_type(worklist);   // count -> any_int, order-independent
         auto new_type = type & loop_body->type;
         checkType(new_type);
         if (type != new_type) {

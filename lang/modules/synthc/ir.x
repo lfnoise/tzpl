@@ -262,6 +262,11 @@ fn isControlFlowKind(k NodeKind) Bool = match (k) {
 	_:          false;
 };
 
+fn isPhiKind(k NodeKind) Bool = match (k) {
+	phiK(_): true;
+	_:       false;
+};
+
 ---------------------------------------------------------------------------
 -- Delay records (mirror DelayBuf)
 

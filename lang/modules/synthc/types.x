@@ -119,6 +119,9 @@ fn inputConstraintOf(ctx Ctx, n NIdx, i Int) NumType = match (ctx.kind[n]) {
 	castopK(_):    ANY_NUM;             -- cast input is unconstrained
 	selectK:       i == 0 ? ANY_INT : ctx.typ[n];
 	vecK(_):       i == 0 ? ctx.typ[n] : ANY_INT;   -- data input flows; rotate's index is integer
+	ifK:           ANY_INT;             -- test must be integer (input 0)
+	switchK(_):    ANY_INT;             -- selector must be integer
+	forK:          ANY_INT;             -- count must be integer
 	_:             ctx.typ[n];
 };
 
@@ -168,6 +171,10 @@ fn updateTypeOf(ctx Ctx, n NIdx, wl WorkList) Void {
 		reduceK(_, _):       { _narrow(ctx, n, ctx.typ[n] & ctx.typ[ins[0]], wl); }
 		vecK(_):             { _narrow(ctx, n, ctx.typ[n] & ctx.typ[ins[0]], wl); }
 		selectK:             { _updateSelect(ctx, n, wl); }
+		ifK:                 { _updateCF(ctx, n, wl); }
+		switchK(_):          { _updateCF(ctx, n, wl); }
+		forK:                { _updateCF(ctx, n, wl); }
+		phiK(target):        { _updatePhi(ctx, n, target, wl); }
 		delayFixReadK(d, _): { _updateDelayRead(ctx, n, d, wl); }
 		delayVarReadK(d, _): { _updateDelayRead(ctx, n, d, wl); }
 		delayWriteK(d):      { _updateDelayWrite(ctx, n, d, wl); }
@@ -206,6 +213,50 @@ fn _updateSelect(ctx Ctx, n NIdx, wl WorkList) Void {
 		i = i + 1;
 	}
 	_narrow(ctx, n, newt, wl);
+}
+
+-- Control-flow node (if/switch/for): type = type & each branch/body phi type
+-- (the subs). On change, propagate (constrains the test/selector/count input to
+-- any_int via inputConstraintOf, re-queues consumers) and push the merged type
+-- back to each branch phi. Mirrors IfElseExpr/SwitchExpr/ForLoopExpr::update_type.
+fn _updateCF(ctx Ctx, n NIdx, wl WorkList) Void {
+	-- Constrain the test/selector/count input(s) to any_int. This is an
+	-- invariant, so apply it on every visit, not only when the node's own type
+	-- narrows. (The C++ applies it inside the type-change branch, but its
+	-- worklist order runs the node from `any` before a consumer pins its type;
+	-- applying it unconditionally reaches the same fixpoint independent of order.)
+	let ins = ctx.ins[n];
+	var i = 0;
+	while (i < ins length) {
+		let inp = ins[i];
+		let it = inputConstraintOf(ctx, n, i) & ctx.typ[inp];
+		if (it != ctx.typ[inp]) { ctx.typ[inp] = it; wl wlPush(inp); }
+		i = i + 1;
+	}
+	-- Narrow own type from the branch/body phis; on change re-queue consumers
+	-- and push the merged type back to each phi.
+	var newt = ctx.typ[n];
+	for (s : ctx.subs[n]) { newt = newt & ctx.typ[s]; }
+	if (!_checkType(ctx, n, newt)) { return; }
+	if (newt != ctx.typ[n]) {
+		ctx.typ[n] = newt;
+		for (c : ctx.consumers[n]) { wl wlPush(c); }
+		for (s : ctx.subs[n]) {
+			if (ctx.typ[s] != newt) { ctx.typ[s] = newt; wl wlPush(s); }
+		}
+	}
+}
+
+-- PhiNode: type = type & in0; on change, propagate to in0 (+ consumers) and
+-- re-queue the control-flow target. Mirrors PhiNodeExpr::update_type.
+fn _updatePhi(ctx Ctx, n NIdx, target Int, wl WorkList) Void {
+	let newt = ctx.typ[n] & ctx.typ[ctx.ins[n][0]];
+	if (!_checkType(ctx, n, newt)) { return; }
+	if (newt != ctx.typ[n]) {
+		ctx.typ[n] = newt;
+		_propagateTypes(ctx, n, wl);
+		if (target != NONE && ctx.typ[target] != newt) { wl wlPush(target); }
+	}
 }
 
 fn _updateDelayRead(ctx Ctx, n NIdx, d Int, wl WorkList) Void {

@@ -253,6 +253,48 @@ fn _addFoldedConstant(v ConstVal, initType NumType) Int {
 	_addExprNode(NodeKind.constant(v, initType), [Int](), Rate.constant, initType, v constSize)
 }
 
+---------------------------------------------------------------------------
+-- Control flow (M3): subgraph import + control-flow node creation.
+
+-- Allocate a new subgraph child of the current graph; return its index.
+fn _newGraph() Int {
+	var ctx Ctx = `scCtx;
+	let g = ctx.graphs length;
+	ctx.graphs push!(GraphInfo { serial: g, parent: `scCurGraph, audioLoops: [Int]() });
+	g
+}
+
+-- Import a branch/body SignalGraph into a fresh subgraph and wrap its root in a
+-- PhiNode (mirrors parseGraph(): new Graph context, then addExpr(PhiNodeExpr)).
+-- Branch exprs may reference enclosing-graph node ids directly (closure capture);
+-- those resolve via the global `scIdMap and get a GraphCut.graph cut later.
+fn _importSubgraph(sg SignalGraph) Int {
+	let g = _newGraph();
+	var `scCurGraph Int = g;            -- import the branch into the subgraph
+	for (e : sg.exprs) { _importExpr(e); }
+	var ctx Ctx = `scCtx;
+	let root = sg.root.id _nodeOf;
+	-- PhiNodeExpr(in): rate = in.rate (raised to the target's rate by setTarget,
+	-- applied by the caller); initial_type any; chans from calcShape (M3.3).
+	_addExprNode(NodeKind.phiK(NONE), [root], ctx.nrate[root], ANY_NUM, ctx.chans[root])
+}
+
+-- Append a control-flow node (if/switch/for): not hash-consed, carries its
+-- branch/body PhiNode roots in ctx.subs.
+fn _addCFNode(kind NodeKind, ins [Int], subs [Int], r Rate, t NumType, ch Int) Int {
+	let idx = _addExprNode(kind, ins, r, t, ch);
+	var ctx Ctx = `scCtx;
+	ctx.subs[idx] = subs;
+	idx
+}
+
+-- Link a PhiNode to its control-flow target and raise its rate (setTarget).
+fn _linkPhi(phi Int, target Int, r Rate) Void {
+	var ctx Ctx = `scCtx;
+	ctx.kind[phi] = NodeKind.phiK(target);
+	ctx.nrate[phi] = max(ctx.nrate[phi], r);
+}
+
 fn _constValOf(ctx Ctx, n NIdx) ConstVal = match (ctx.kind[n]) {
 	constant(v, _): v;
 	_:              ConstVal.floats([0.0]);   -- unreachable: guarded by isConstantKind
@@ -670,10 +712,27 @@ fn _importExpr(e SignalExpr) Void {
 				}
 			}
 		}
-		if_(_, _): { _impError("if_ not yet supported by synthc (M3)"); }
-		for_(_, _): { _impError("for_ not yet supported by synthc (M3)"); }
-		switch_(_): { _impError("switch_ not yet supported by synthc (M3)"); }
-		varexpr(_): { _impError("varexpr not yet supported by synthc (M3)"); }
+		if_(thenSg, elseSg): {
+			let ins = e _resolveIns;                  -- [test]
+			let thenPhi = _importSubgraph(thenSg);
+			let elsePhi = _importSubgraph(elseSg);
+			var ctx Ctx = `scCtx;
+			-- IfElseExpr rate = maxRate({test, then_phi, else_phi}); type any;
+			-- chans = broadcast(then, else) (refined by calcShape in M3.3).
+			let r = max(_maxRateOf(ins), max(ctx.nrate[thenPhi], ctx.nrate[elsePhi]));
+			let ch = max(ctx.chans[thenPhi], ctx.chans[elsePhi]);
+			let ifNode = _addCFNode(NodeKind.ifK, ins, [thenPhi, elsePhi], r, ANY_NUM, ch);
+			_linkPhi(thenPhi, ifNode, r);
+			_linkPhi(elsePhi, ifNode, r);
+			_mapId(e.id, ifNode);
+		}
+		for_(_, _): { _impError("for_ not yet supported by synthc (M3.2b)"); }
+		switch_(_): { _impError("switch_ not yet supported by synthc (M3.2b)"); }
+		varexpr(name): {
+			-- VarExpr: no inputs, initial_type any_int, audio rate; hash-consed by
+			-- name (handled by _addExprNode via the VAR| cons key).
+			_mapId(e.id, _addExprNode(NodeKind.varK(name), [Int](), Rate.audio, ANY_INT, 1));
+		}
 		voicer(_, _): { _impError("voicer not yet supported by synthc (M4)"); }
 		spectralChain(_, _, _): { _impError("spectralChain not yet supported by synthc (M4)"); }
 		spectralFrame(_): { _impError("spectralFrame not yet supported by synthc (M4)"); }

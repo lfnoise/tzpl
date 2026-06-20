@@ -977,6 +977,11 @@ fn numTypeInt(op CastOp) Int {
 }
 
 fn toLisp(graph SignalGraph, indentLevel Int) String {
+	-- A branch/body that just returns a captured enclosing value has no local
+	-- exprs; emit an empty list, not `(nil)` (which the C++ parseGraph rejects).
+	if (graph.exprs length == 0) {
+		return "\n" $ "(Graph %^ ())" fmt(graph.root.id) indent(indentLevel);
+	}
 	let sexprLines = graph.exprs toLisp(indentLevel);
 
 	-- Join with newlines and add indentation

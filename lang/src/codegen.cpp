@@ -1152,6 +1152,9 @@ void CodeGen::genFnDecl(FnDeclNode* decl) {
                     emitMoveN(paramSlot, defReg, typeSlotWords(pt));
                 }
                 nextReg_ = savedNextReg2;
+                // Clear stale scratch reg types the default expr set (see the
+                // monomorphized preamble below for the rationale).
+                for (size_t r = nextReg_; r < regTypes_.size(); ++r) regTypes_[r] = nullptr;
             }
         }
     }
@@ -1342,6 +1345,11 @@ void CodeGen::genMonoInstance(FuncInfo& monoInfo) {
                     emitMoveN(paramSlot, defReg, typeSlotWords(pt));
                 }
                 nextReg_ = savedNextReg2;
+                // The default expr wrote scratch regs >= nextReg_ and set their
+                // regTypes_ (e.g. an object-typed default like a String " ").
+                // Clear those stale types so the body reusing the slot for a
+                // non-object isn't over-approximated as a live GC root.
+                for (size_t r = nextReg_; r < regTypes_.size(); ++r) regTypes_[r] = nullptr;
             }
         }
     }
