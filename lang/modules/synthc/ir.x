@@ -267,6 +267,11 @@ fn isPhiKind(k NodeKind) Bool = match (k) {
 	_:       false;
 };
 
+fn isRngKind(k NodeKind) Bool = match (k) {
+	urandK(_): true; birandK(_): true; rand64K(_): true;
+	_:         false;
+};
+
 ---------------------------------------------------------------------------
 -- Delay records (mirror DelayBuf)
 

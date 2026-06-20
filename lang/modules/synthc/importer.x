@@ -157,7 +157,12 @@ fn _kindKey(kind NodeKind) String = match (kind) {
 	debugK(_, _, _, sn):  "DBG|" $ sn toString;
 };
 
-fn _consKey(kind NodeKind, ins [Int]) String = kind _kindKey $ "#" $ ins _insKey;
+-- Hash-consing is per-graph (each C++ Graph has its own hashConsSet), so the
+-- cons key is prefixed with the current graph index: an identical expression in
+-- a different subgraph is a distinct node (and stays inlined locally rather than
+-- becoming a cross-graph instance variable).
+fn _consKey(kind NodeKind, ins [Int]) String =
+	`scCurGraph toString $ "@" $ kind _kindKey $ "#" $ ins _insKey;
 
 ---------------------------------------------------------------------------
 -- Node creation

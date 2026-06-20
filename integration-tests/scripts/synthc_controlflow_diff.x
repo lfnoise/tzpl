@@ -85,6 +85,10 @@ fn sw2() S {
 	let sel = a > 0.0;
 	switch(sel, [fn() { a }, fn() { b }]) |> outlet
 }
+-- NOTE: the nested-delay-in-branch examples (pull_nested, pulltwo) live in
+-- synthc_controlflow_delay_diff.x, run in their own process: compiling ~10 heavy
+-- control-flow synths back-to-back here trips a latent lang-VM GC premature-free
+-- (a live array register missed by a stack map; see that file's header).
 
 checkCF("if1", if1);
 checkCF("if2", if2);

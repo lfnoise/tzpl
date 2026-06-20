@@ -4,8 +4,28 @@ Status: M3 DONE for if_/for_/switch_ -- analysis (M3.1/M3.2/M3.3), codegen
 (M3.4), and parity (M3.5) all complete. The Tier-1 dump and Tier-2 generated C++
 byte-match the C++ compiler, and the Tier-3 render A/B is bit-identical, for
 if/else, no-else, nested, multi-if, for loops, and switches.
-Remaining M3 tail: subgraph-local delays in branches (none of the test synths use
-them yet) and event-rate iso-groups spanning subgraphs. M4 = voicers/spectral.
+M3 tail (subgraph-local delays in branches) DONE: the pull_nested / pulltwo
+examples -- nested `pause` branches each holding a `combn` (runtime comb delay),
+multichannel branch signals, and `dust` (RNG) inside a branch -- byte-match the
+C++ codegen. Required: per-graph hash-consing (each subgraph has its own cons
+set, so a shared sampleDur cast stays inlined per graph rather than becoming a
+cross-graph inst var); per-graph delay-advance (advance only a graph's own
+delays, emitted at the end of its control-flow block); per-graph RNG state
+(rgenN, N = the RNG node's graph); a control-flow loop emits its block directly
+(no channel for-loop even when multichannel); and a dynamic-scope fix in
+cutGraphToTrees (per-tree `var ` accumulators were declared in the loop body and
+accumulated across iterations -> dynamic-scope overflow on many-tree synths;
+now scoped in a per-tree helper).
+
+KNOWN ISSUE (lang VM, not synthc): compiling ~10 heavy control-flow synths
+back-to-back trips a GC premature-free -- an array still live in a register
+during the deep control-flow codegen recursion is missed by a stack map, freed,
+and its reused memory faults in builtin_push_array (a stack-map UNDER-
+approximation, distinct from the default-arg over-approximation fixed earlier).
+The pull examples byte-match standalone; they run in their own process
+(synthc_controlflow_delay_diff.x) to stay under the GC-timing threshold.
+
+Remaining M3 tail: event-rate iso-groups spanning subgraphs. M4 = voicers/spectral.
 
 M1/M2 are complete: the Tzopilotl-hosted synthdef compiler (`lang/modules/synthc/`)
 byte-matches the C++ `synthdef-compiler/` for the whole non-control-flow corpus

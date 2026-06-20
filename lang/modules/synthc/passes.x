@@ -562,6 +562,25 @@ fn _traceTreeExpr(ctx Ctx, n NIdx, rootN NIdx, dstN NIdx, dstI Int) Void {
 	}
 }
 
+-- Trace one tree from its root with fresh per-tree accumulators. These are kept
+-- in this helper (not inline in cutGraphToTrees' loop) so the dynamic-var
+-- bindings restore on each return: a loop body's `var ` declarations would
+-- otherwise accumulate (they restore on function exit, not per iteration) and
+-- overflow the dynamic-scope stack on synths with many trees.
+fn _buildTree(ctx Ctx, treeIdx Int, root NIdx) Void {
+	var `curTreeIdx Int = treeIdx;
+	var `curVisited [Bool] = false repeat(ctx numNodes);
+	var `curExprs [Int] = [];
+	var `curAnte [Int] = [];
+	var `curAnteSep [Bool] = [];
+	_traceTreeExpr(ctx, root, root, NONE, 0);
+	ctx.trees[treeIdx] = Tree {
+		root: root, exprs: `curExprs,
+		antecedents: `curAnte, antecedentsSep: `curAnteSep,
+		loopOf: NONE, isoGroupOf: NONE, serial: ctx.trees[treeIdx].serial,
+	};
+}
+
 fn cutGraphToTrees(ctx Ctx) Void {
 	var serialNo = 1;
 	for (root : ctx.sorted) {
@@ -576,18 +595,7 @@ fn cutGraphToTrees(ctx Ctx) Void {
 					loopOf: NONE, isoGroupOf: NONE, serial: serialNo,
 				});
 				serialNo = serialNo + 1;
-				-- Trace with fresh per-tree accumulators.
-				var `curTreeIdx Int = treeIdx;
-				var `curVisited [Bool] = false repeat(ctx numNodes);
-				var `curExprs [Int] = [];
-				var `curAnte [Int] = [];
-				var `curAnteSep [Bool] = [];
-				_traceTreeExpr(ctx, root, root, NONE, 0);
-				ctx.trees[treeIdx] = Tree {
-					root: root, exprs: `curExprs,
-					antecedents: `curAnte, antecedentsSep: `curAnteSep,
-					loopOf: NONE, isoGroupOf: NONE, serial: ctx.trees[treeIdx].serial,
-				};
+				ctx _buildTree(treeIdx, root);
 			}
 		}
 	}

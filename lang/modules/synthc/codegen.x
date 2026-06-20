@@ -234,9 +234,9 @@ fn _inlineExpr(ctx Ctx, n NIdx, cel String) String {
 		selectK:        _inlineSelect(ctx, n, cel);
 		reduceK(op, cols): _genReduce(ctx, n, op, cols, cel);
 		vecK(vop):      _genVec(ctx, n, vop, cel);
-		urandK(_):      "urand%^(p->rgen0)" fmt(ctx.typ[n] _isF32 ? "f" : "");
-		birandK(_):     "birand%^(p->rgen0)" fmt(ctx.typ[n] _isF32 ? "f" : "");
-		rand64K(_):     "rand64(p->rgen0)";
+		urandK(_):      "urand%^(p->rgen%^)" fmt(ctx.typ[n] _isF32 ? "f" : "", ctx.graphOf[n]);
+		birandK(_):     "birand%^(p->rgen%^)" fmt(ctx.typ[n] _isF32 ? "f" : "", ctx.graphOf[n]);
+		rand64K(_):     "rand64(p->rgen%^)" fmt(ctx.graphOf[n]);
 		bufFixReadK(bi, index, rc, sc): _bufFixReadExpr(ctx, bi, index, rc, sc, cel);
 		bufVarReadK(bi, ip, rc, sc):    _bufVarReadExpr(ctx, n, bi, ip, rc, sc, cel);
 		bufLengthK(bi):                 _bufLengthExpr(ctx, bi);
@@ -414,7 +414,8 @@ fn _bufWriteStmt(ctx Ctx, n NIdx, bi Int, writeChans Int, startChan Int, cel Str
 -- Emit a branch/body subgraph's audio loops at the given indent.
 fn _branchLoops(ctx Ctx, phi NIdx, indent Int) String {
 	var `cgIndent Int = indent;
-	genLoops(ctx, ctx.graphs[ctx.graphOf[phi]].audioLoops)
+	let g = ctx.graphOf[phi];
+	genLoops(ctx, ctx.graphs[g].audioLoops) $ ctx genDelayAdvance(g)
 }
 
 -- `<userial> <cut>  is_consumed_in_loop <bool>` -- matches the C++ comment.
@@ -553,7 +554,11 @@ fn genLoop(ctx Ctx, loopIdx Int) String {
 	}
 
 	var code = "";
-	if (loop.chans == 1) {
+	if (loop.isControlFlow) {
+		-- A control-flow loop emits its block directly (no channel loop, even
+		-- multichannel); the branches' own subgraph loops handle the channels.
+		code = code $ genTree(ctx, loop.trees[0], "0");
+	} else if (loop.chans == 1) {
 		for (t : loop.trees) { code = code $ genTree(ctx, t, "0"); }
 	} else {
 		code = code $ _tabs(`cgIndent) $ "for (usize i = 0; i < %^; ++i) {\n" fmt(loop.chans);
@@ -610,11 +615,23 @@ fn genDelayDecls(ctx Ctx) String {
 	s
 }
 
+-- Graphs that use RNG (contain a urand/birand/rand64 node), in graph order.
+-- Each gets its own RandState (rgenN, N = graph serial), mirroring the C++ where
+-- a branch with RNG has its RandState scoped to that subgraph.
+fn _rngGraphs(ctx Ctx) [Int] {
+	var uses [Bool] = false repeat(ctx.graphs length);
+	for (n : ctx.sorted) { if (ctx.kind[n] isRngKind) { uses[ctx.graphOf[n]] = true; } }
+	var out [Int] = [];
+	var g = 0;
+	while (g < ctx.graphs length) { if (uses[g]) { out push!(g); } g = g + 1; }
+	out
+}
+
 fn genDeclInstVars(ctx Ctx) String {
 	var s = "";
 	-- RNG state (graph serial 0 in M2's single-graph synths), emitted first to
 	-- match the C++ genDeclInstVars ordering.
-	if (ctx.usesRng[0]) { s = s $ "\tRandState1 rgen0;\n"; }
+	for (g : ctx _rngGraphs) { s = s $ "\tRandState1 rgen%^;\n" fmt(g); }
 	-- inst-var roots, in loop/tree order.
 	for (lp : ctx.loops) {
 		for (t : lp.trees) {
@@ -743,7 +760,7 @@ fn genDelayAlloc(ctx Ctx) String {
 fn genInitFun(ctx Ctx, name String) String {
 	var s = "tzpl_SErr %^_init(%^* p) {\n\tf64 fs = p->fs;\n\tp->sd = 1./fs;\n" fmt(name, name);
 	s = s $ genInitConstants(ctx);
-	if (ctx.usesRng[0]) { s = s $ "\tarc4seedrand(p->rgen0);\n"; }
+	for (g : ctx _rngGraphs) { s = s $ "\tarc4seedrand(p->rgen%^);\n" fmt(g); }
 	-- inInitMode is only for genDelayAlloc (runtime delay sizing); init LOOPS
 	-- reference cross-tree roots as variables just like audio loops do.
 	s = s $ genLoops(ctx, ctx.initLoops);
@@ -860,10 +877,22 @@ fn genHandleEventsFun(ctx Ctx, name String) String {
 	s
 }
 
-fn genDelayAdvance(ctx Ctx) String {
+-- The graph a delay belongs to (all its nodes share one graph).
+fn _delayGraph(ctx Ctx, d DelayInfo) Int {
+	if (d.writer != NONE) { ctx.graphOf[d.writer] }
+	else if (d.initters length > 0) { ctx.graphOf[d.initters[0]] }
+	else if (d.fixReaders length > 0) { ctx.graphOf[d.fixReaders[0]] }
+	else if (d.varReaders length > 0) { ctx.graphOf[d.varReaders[0]] }
+	else { 0 }
+}
+
+-- Advance the write positions of the audio-rate delays in graph `graph` (the C++
+-- iterates graph->delayBufs). Called per graph: the root graph in processAudio,
+-- each branch/body graph at the end of its control-flow block.
+fn genDelayAdvance(ctx Ctx, graph Int) String {
 	var s = "";
 	for (d : ctx.delays) {
-		if (d.allocSize != 1) {
+		if (d.allocSize != 1 && ctx _delayGraph(d) == graph) {
 			let evtRate = d.writer != NONE && ctx.nrate[d.writer] == Rate.event;
 			if (!evtRate) { s = s $ _tabs(`cgIndent) $ "++p->d%^_wrpos;\n" fmt(d.serial); }
 		}
@@ -877,7 +906,7 @@ fn genTickFun(ctx Ctx, name String) String {
 	-- Root graph's audio loops; subgraph loops are emitted inside their
 	-- control-flow blocks (M3.4).
 	s = s $ genLoops(ctx, ctx.graphs[0].audioLoops);
-	s = s $ genDelayAdvance(ctx);
+	s = s $ genDelayAdvance(ctx, 0);
 	s = s $ "}\n\n";
 	s
 }
