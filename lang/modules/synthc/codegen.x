@@ -158,7 +158,11 @@ fn _varDeclName(ctx Ctx, n NIdx) String = match (ctx.kind[n]) {
 };
 
 fn _indexWrap(chans Int, loopChans Int, cel String) String =
-	chans < loopChans ? "[%^&%^]" fmt(cel, chans - 1) : "[%^]" fmt(cel);
+	chans < loopChans
+		-- chans is a power of two (or 0); the mask is (usize)(chans-1). For
+		-- chans 0 that wraps to SIZE_MAX (the C++ usize formatting), not -1.
+		? "[%^&%^]" fmt(cel, chans == 0 ? "18446744073709551615" : (chans - 1) toString)
+		: "[%^]" fmt(cel);
 
 -- genVarRef: a reference to a node's value at channel `cel` (scalar emits no index).
 fn _varRef(ctx Ctx, n NIdx, cel String) String {
@@ -198,6 +202,9 @@ fn _isF32(t NumType) Bool = t.0 == 4;
 
 -- Inline a node's value expression at channel `cel`.
 fn genExpr(ctx Ctx, n NIdx, cel String) String {
+	-- A loop variable (VarExpr) always emits as the bare C++ loop-var name,
+	-- never as `p->vN` -- even though it is cut Graph (cross-graph reference).
+	match (ctx.kind[n]) { varK(name): { return name; } _: {} }
 	let inInit Bool = `cgInInit;
 	if (!inInit && ctx _isRootNode(n) && n != `cgRoot) {
 		return _varRef(ctx, n, cel);
@@ -398,6 +405,65 @@ fn _bufWriteStmt(ctx Ctx, n NIdx, bi Int, writeChans Int, startChan Int, cel Str
 }
 
 ---------------------------------------------------------------------------
+-- Control-flow emission (mirror the IfElse/Switch/ForLoop visitors).
+-- A control-flow node is its own loop's single tree; its result variable is
+-- declared by genLoop (it is a temp not consumed in its loop), and the branch
+-- PhiNodes assign into it. Each branch body is the subgraph's own audio loops,
+-- emitted inside the block at +1 indent.
+
+-- Emit a branch/body subgraph's audio loops at the given indent.
+fn _branchLoops(ctx Ctx, phi NIdx, indent Int) String {
+	var `cgIndent Int = indent;
+	genLoops(ctx, ctx.graphs[ctx.graphOf[phi]].audioLoops)
+}
+
+-- `<userial> <cut>  is_consumed_in_loop <bool>` -- matches the C++ comment.
+fn _cfComment(ctx Ctx, root NIdx) String =
+	"%^ %^  is_consumed_in_loop %^" fmt(ctx.serial[root], ctx.cut[root] cutStr,
+		_consumedInLoop(ctx, ctx.treeOf[root]) ? "true" : "false");
+
+fn _genIf(ctx Ctx, root NIdx) String {
+	let cur = `cgIndent;
+	let test = genExpr(ctx, ctx.ins[root][0], "0");
+	var s = _tabs(cur) $ "if (%^) { // %^\n" fmt(test, ctx _cfComment(root));
+	s = s $ ctx _branchLoops(ctx.subs[root][0], cur + 1);
+	s = s $ _tabs(cur) $ "} else {\n";
+	s = s $ ctx _branchLoops(ctx.subs[root][1], cur + 1);
+	s = s $ _tabs(cur) $ "}\n";
+	s
+}
+
+fn _genFor(ctx Ctx, root NIdx) String {
+	let cur = `cgIndent;
+	let count = genExpr(ctx, ctx.ins[root][0], "0");
+	var s = _tabs(cur) $ "for (i32 i = 0; i < %^; ++i) {\n" fmt(count);
+	s = s $ ctx _branchLoops(ctx.subs[root][0], cur + 1);
+	s = s $ _tabs(cur) $ "}\n";
+	s
+}
+
+-- Mirrors the C++ SwitchExpr visitor byte-for-byte, including its indentation
+-- quirks: cases at cur+2, bodies at cur+3 (with a pre-genLoops tab), the closing
+-- brace at cur+1 plus a trailing tab, and a net +1 indent LEAK -- everything
+-- emitted after the switch is indented one deeper. The leak is reproduced by
+-- assigning `cgIndent (the persistent binding from genTickFun / a branch).
+fn _genSwitch(ctx Ctx, root NIdx, nc Int) String {
+	let cur = `cgIndent;
+	let sel = genExpr(ctx, ctx.ins[root][0], "0");
+	var s = _tabs(cur) $ "switch(std::min(u32(%^), u32(%^))) {\n" fmt(sel, nc - 1);
+	var i = 0;
+	while (i < nc) {
+		s = s $ _tabs(cur + 2) $ "case %^: {\n" fmt(i);
+		s = s $ _tabs(cur + 3) $ ctx _branchLoops(ctx.subs[root][i], cur + 3);
+		s = s $ _tabs(cur + 2) $ "} break;\n";
+		i = i + 1;
+	}
+	s = s $ _tabs(cur + 1) $ "}\n" $ _tabs(cur + 1);
+	`cgIndent = cur + 1;
+	s
+}
+
+---------------------------------------------------------------------------
 -- Tree emission
 
 fn _isSink(ctx Ctx, n NIdx) Bool = ctx.kind[n] isSinkKind;
@@ -418,6 +484,10 @@ fn genTree(ctx Ctx, treeIdx Int, cel String) String {
 		delayInitK(_, _): { return ""; }   -- emitted by genDelayInit
 		maxDelayK(_): { return ""; }
 		bufWriteK(bi, wc, sc): { return _tabs(`cgIndent) $ _bufWriteStmt(ctx, root, bi, wc, sc, cel, tree.serial); }
+		ifK:            { return ctx _genIf(root); }
+		forK:           { return ctx _genFor(root); }
+		switchK(nc):    { return ctx _genSwitch(root, nc); }
+		phiK(target):   { return _tabs(`cgIndent) $ "%^ = %^;\n" fmt(_varRef(ctx, target, cel), genExpr(ctx, ctx.ins[root][0], cel)); }
 		_: {}
 	}
 
@@ -467,8 +537,11 @@ fn genLoop(ctx Ctx, loopIdx Int) String {
 	var s = "\n" $ _tabs(`cgIndent) $ "// LOOP %^ [%^] %^ %^\n"
 		fmt(padLeft(loop.serial toString, 2), ante join(" "), loop.rate rateStr, loop.chans);
 
-	-- Declare multichannel temp-var roots that are not consumed in their loop.
-	if (loop.chans > 1) {
+	-- Declare temp-var roots not consumed in their loop: multichannel temps, and
+	-- control-flow nodes whose value is assigned inside the block (so they cannot
+	-- be declared inline like a scalar temp). The C++ hardcodes one tab here,
+	-- regardless of nesting depth.
+	if (loop.chans > 1 || loop.isControlFlow) {
 		var decls = "";
 		for (t : loop.trees) {
 			let root = ctx.trees[t].root;

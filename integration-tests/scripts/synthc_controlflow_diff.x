@@ -10,13 +10,13 @@ import common_ugens.*;
 import synthc.ir.*;
 import synthc.importer.*;
 import synthc.passes.*;
+import synthc.codegen.*;
 import synthc.difftest.*;
 
 var `failures Int = 0;
 
 fn checkCF(name String, synthFn GraphFn) Void {
 	let g = makeGraph(synthFn);
-	let theirs = synthdefAnalysisDump(g toSynthSexpr(name), false);
 	let ctx = g importGraph(name) analyzeM1;
 	if (ctx.errors length > 0) {
 		`failures = `failures + 1;
@@ -24,9 +24,17 @@ fn checkCF(name String, synthFn GraphFn) Void {
 		for (e : ctx.errors) { println("    " $ e); }
 		return;
 	}
-	let v = cfDumpCompare(ctx dumpToString, theirs);
-	if (v == "PASS") { println("  PASS " $ name); }
-	else { `failures = `failures + 1; println("  FAIL " $ name); println(v); }
+	-- Tier-1: analysis dump (antecedent-order-normalized).
+	let dumpV = cfDumpCompare(ctx dumpToString, synthdefAnalysisDump(g toSynthSexpr(name), false));
+	-- Tier-2: generated C++ must byte-match the C++ compiler.
+	let cppV = fullCompare(genCpp(ctx, name), synthdefGenCppFromSexpr(g toSynthSexpr(name), 0, false));
+	if (dumpV == "PASS" && cppV == "PASS") { println("  PASS " $ name); }
+	else {
+		`failures = `failures + 1;
+		println("  FAIL " $ name);
+		if (dumpV != "PASS") { println("  [dump] " $ dumpV); }
+		if (cppV != "PASS") { println("  [cpp] " $ cppV); }
+	}
 }
 
 -- basic if/else over a captured audio signal

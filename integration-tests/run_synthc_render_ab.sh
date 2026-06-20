@@ -37,6 +37,8 @@ render /tmp/synthc_ab_bubbles_ref.wav    "$SCRIPTS/synthc_render_ab_bubbles_ref.
 render /tmp/synthc_ab_bubbles_synthc.wav "$SCRIPTS/synthc_render_ab_bubbles_synthc.x"
 render_seeded /tmp/synthc_ab_rng_ref.wav    "$SCRIPTS/synthc_render_ab_rng_ref.x"
 render_seeded /tmp/synthc_ab_rng_synthc.wav "$SCRIPTS/synthc_render_ab_rng_synthc.x"
+render /tmp/synthc_ab_cf_ref.wav    "$SCRIPTS/synthc_render_ab_cf_ref.x"
+render /tmp/synthc_ab_cf_synthc.wav "$SCRIPTS/synthc_render_ab_cf_synthc.x"
 
 OUT="$("$APP" --nogui --no-audio "${MODS[@]}" "$SCRIPTS/synthc_render_ab_compare.x" 2>/dev/null)"
 echo "$OUT"
