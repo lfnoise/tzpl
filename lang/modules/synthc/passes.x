@@ -42,14 +42,24 @@ fn _delayMembers(ctx Ctx, d Int) [Int] {
 ---------------------------------------------------------------------------
 -- mergeDelays (synthdef_synth.cpp:1049)
 --
--- Two delay buffers can share storage when they have the same writer, the same
--- graph, and the same set of initializers (compared by offset + init-value
--- source). The C++ merge key uses the writer's *identity* (pointer), and the
--- front end gives every delayVar() its own writer node, so each group is a
--- singleton -- the pass is a structural no-op on every realizable graph, exactly
--- as in the C++ compiler (verified by differential dump/render). The grouping is
--- still performed (it classifies every delay); the merge body below is a
--- faithful port for the case where a shared writer does arise.
+-- The C++ merge key is (writer, initializers, graph) and merges delays that
+-- share a writer. But a DelayWrite's structural identity *is its buffer*:
+-- DelayWrite::equals_ compares only delayBuf and ignores the written signal.
+-- DelayWrite is hash-consed, so identity == structural identity, which means
+-- each buffer has exactly one writer node and two distinct delays can NEVER
+-- share a writer. The merge condition is unsatisfiable across distinct delays:
+-- every group is a singleton and the pass is a no-op by construction -- not a
+-- front-end accident (verified by differential dump/render).
+--
+-- (The name/intent suggest it meant to key on the written *signal*, to fold
+-- delays fed identical inputs + init; equals_ comparing the buffer instead makes
+-- that dead. We reproduce the C++ behavior exactly for byte-match -- keying on
+-- the signal would diverge. The real optimization could be revisited once
+-- synthc is the source of truth.)
+--
+-- The grouping still classifies every delay (keyed on the writer node id, the
+-- synthc analog of the DelayWrite pointer); the merge body below is a faithful
+-- port for the hypothetical shared-writer case.
 
 -- Reader dedup signature: fixed reads key on their sample offset; var reads key
 -- on interpolation + index-signal node (mirrors r->in0() in the C++).
