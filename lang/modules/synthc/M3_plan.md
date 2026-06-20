@@ -17,13 +17,16 @@ cutGraphToTrees (per-tree `var ` accumulators were declared in the loop body and
 accumulated across iterations -> dynamic-scope overflow on many-tree synths;
 now scoped in a per-tree helper).
 
-KNOWN ISSUE (lang VM, not synthc): compiling ~10 heavy control-flow synths
-back-to-back trips a GC premature-free -- an array still live in a register
-during the deep control-flow codegen recursion is missed by a stack map, freed,
-and its reused memory faults in builtin_push_array (a stack-map UNDER-
-approximation, distinct from the default-arg over-approximation fixed earlier).
-The pull examples byte-match standalone; they run in their own process
-(synthc_controlflow_delay_diff.x) to stay under the GC-timing threshold.
+GC bug found and FIXED (lang VM): compiling many heavy control-flow synths
+back-to-back used to fault in builtin_push_array. Root cause: the GC did not
+scan the dynamic-var SAVE STACK (dynStack_) -- values shadowed by an in-scope
+`var `x` rebinding. The front end's nested _makeSubGraph (used by nested pause/
+control flow) shadows `curGraphExprs (the enclosing graph's live exprs array);
+the saved array was unrooted and swept while still in use, then its reused memory
+faulted later. Fixed in tracing_gc.cpp step_root_dynvars: scan dynStack_, marking
+1-word object saves and walking multi-word inline-composite saves through the
+side payload buffer. The pull examples now compile together in the main
+synthc_controlflow_diff.x with no crash.
 
 Remaining M3 tail: event-rate iso-groups spanning subgraphs. M4 = voicers/spectral.
 

@@ -210,6 +210,21 @@ void TracingGC::step_root_dynvars(u64 deadlineNanos, u32& sinceCheck, u32& done)
     for (auto const& [didx, ty] : vm_.inlineObjDynVars_) {
         gcScanPayload(&vm_.dynVar(didx), ty, *this);
     }
+    // The dynamic-var SAVE STACK holds the values shadowed by in-scope `var `x`
+    // rebindings. They are restored on function return, so they are live roots
+    // and must be marked -- otherwise an object only reachable through a shadowed
+    // dynvar (e.g. the enclosing graph's exprs array saved by a nested
+    // _makeSubGraph) is swept while still in use. 1-word object saves mark
+    // directly; multi-word inline composites are walked through the side payload
+    // buffer via their saved layout.
+    for (u32 i = 0; i < vm_.dynStackTop_; ++i) {
+        DynSaveEntry const& e = vm_.dynStack_[i];
+        if (e.sizeWords <= 1) {
+            if (e.isObj && e.savedValue.o) { mark(e.savedValue.o); ++lastRootCount_; }
+        } else if (e.type) {
+            gcScanPayload(&vm_.dynStackPayload_[e.savedValue.i], e.type, *this);
+        }
+    }
     rootPhase_ = RootPhase::Frames;
     rootFrameCursor_ = 0;
 }
