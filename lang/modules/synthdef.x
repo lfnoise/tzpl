@@ -1096,6 +1096,13 @@ fn makeGraph(synthFun GraphFn) SignalGraph = synthFun _makeTopGraph;
 fn toSynthSexpr(graph SignalGraph, synthName String) String =
 	"(Synth %^ %^)" fmt(synthName, graph toLisp(0));
 
+-- LEGACY / oracle path. Compiles a synth via the S-expression serializer + the C++
+-- compiler (compileSynthDefAndLoad). As of the M5.5 switchover, production synths
+-- compile through synthc instead -- `defSynthX` (synthc/compile.x), the Tzopilotl-
+-- hosted compiler, which byte-matches this path's output (rewrites-on + SIMD width 4)
+-- across the whole corpus and renders bit-identically. `defSynth` (and the `toLisp`/
+-- `toSynthSexpr` serializer + the synthdefGenCppFromSexpr/synthdefAnalysisDump FFIs)
+-- are retained as the differential-test oracle the synthc diff suites compare against.
 fn defSynth(synthFun GraphFn, synthName String) String {
 
 	let graph SignalGraph = synthFun _makeTopGraph;

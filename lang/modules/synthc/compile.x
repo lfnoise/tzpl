@@ -18,14 +18,20 @@ enum CompileResult {
 
 -- Compile a graph to C++ source (no disk). Returns the generated source, or an
 -- "error: ..." string if import/analysis failed.
-fn compileToCpp(g SignalGraph, name String) String {
-	let ctx = g importGraph(name) analyzeM1;
+--
+-- The production pipeline runs with the algebraic rewriter ON and SIMD width 4 --
+-- matching the C++ compiler's production defaults (max=min=4, so 2-channel loops
+-- stay scalar; only the diff oracle uses width 2). Both are validated byte-for-byte
+-- against the C++ production output (synthc_rewrite_diff.x + the M5 SIMD diff suites;
+-- the full instrument corpus byte-matches at rewrites-on + width-4).
+fn compileToCpp(g SignalGraph, name String, applyRewrites Bool = true, simdWidth Int = 4) String {
+	let ctx = g importGraph(name, applyRewrites) analyzeM1;
 	if (ctx.errors length > 0) {
 		var msg = "error: " $ name $ " analysis:";
 		for (e : ctx.errors) { msg = msg $ "\n  " $ e; }
 		return msg;
 	}
-	genCpp(ctx, name)
+	genCpp(ctx, name, simdWidth)
 }
 
 -- Full pipeline: graph -> C++ -> dylib (written + compiled via clang). Returns

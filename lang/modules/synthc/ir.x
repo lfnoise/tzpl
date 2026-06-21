@@ -119,6 +119,22 @@ fn constSize(v ConstVal) Int = match (v) {
 	floats(a): a length;
 };
 
+-- Mirrors VectorT's extend_to_next_power_of_two: a constant value vector is
+-- zero-extended to a power-of-two length (the C++ does this in every VectorT
+-- construction, so every multichannel Constant has a power-of-two channel count).
+fn padPow2(v ConstVal) ConstVal = match (v) {
+	ints(a): {
+		let n = a length bitCeil;
+		if (n == a length) { ConstVal.ints(a) }
+		else { var out = a copy; while (out length < n) { out push!(0); } ConstVal.ints(out) }
+	}
+	floats(a): {
+		let n = a length bitCeil;
+		if (n == a length) { ConstVal.floats(a) }
+		else { var out = a copy; while (out length < n) { out push!(0.0); } ConstVal.floats(out) }
+	}
+};
+
 fn constF64At(v ConstVal, i Int) Float = match (v) {
 	ints(a):   a[i] toFloat;
 	floats(a): a[i];
@@ -173,6 +189,9 @@ enum NodeKind {
 	ifK,                                 -- if_else: subs = [thenPhi, elsePhi]
 	switchK(Int),                        -- ncases; subs = [casePhi...]
 	forK,                                -- for_loop: subs = [bodyPhi]
+	voicerK(Int),                        -- maxVoices; subs = [bodyPhi] (M4)
+	spectralChainK(Int, Int),            -- fftSize, hopSize; subs = [bodyPhi] (M4.4)
+	spectralFrameK(Int),                 -- fftSize (packed split-complex frame source)
 	phiK(Int),                           -- target control-flow node (NONE until linked)
 	varK(String),                        -- loop/branch variable name
 
@@ -224,6 +243,9 @@ fn shouldHashCons(k NodeKind) Bool = match (k) {
 	ifK:                    false;   -- branches live in subs, not the cons key,
 	switchK(_):             false;   -- so distinct control-flow nodes never merge
 	forK:                   false;
+	voicerK(_):             false;
+	spectralChainK(_, _):   false;
+	spectralFrameK(_):      false;
 	_:                      true;    -- varK hash-conses by name (VarExpr default)
 };
 
@@ -259,6 +281,8 @@ fn isControlFlowKind(k NodeKind) Bool = match (k) {
 	ifK:        true;
 	switchK(_): true;
 	forK:       true;
+	voicerK(_): true;
+	spectralChainK(_, _): true;
 	_:          false;
 };
 
@@ -618,6 +642,9 @@ fn nodeStr(ctx Ctx, n NIdx) String {
 		ifK:                 "if_else";
 		switchK(_):          "switch";
 		forK:                "for_loop";
+		voicerK(_):          "voicer";
+		spectralChainK(fft, hop): "spectral_chain(%^, %^)" fmt(fft, hop);
+		spectralFrameK(fft): "spectral_frame(%^)" fmt(fft);
 		phiK(_):             "PhiNode";
 		varK(name):          name;
 		debugK(label, _, _, _): "debug(\"%^\")" fmt(label);

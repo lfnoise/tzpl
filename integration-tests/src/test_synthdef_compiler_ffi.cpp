@@ -346,9 +346,12 @@ static std::string readScript(std::string const& path) {
     return out;
 }
 
-static void test_synthc_analysis_diff() {
-    std::print("Test: synthc analysis (M1) matches C++ analysis dump\n");
-
+// Run a synthc differential-test script and assert it prints `sentinel`. The
+// script does the actual A/B comparison against the C++ compiler over the FFI;
+// here we just drive it and check the PASS line. `checkLabel` is the assertion
+// message reported on failure.
+static void run_synthc_diff_script(char const* scriptFile, char const* sentinel,
+                                   char const* checkLabel) {
     ts::TypeUniverse types;
     ts::Compiler compiler(types);
     bridge::registerAudioEngineFFI(compiler);
@@ -368,26 +371,81 @@ static void test_synthc_analysis_diff() {
     FILE* memOut = open_memstream(&buf, &bufSize);
     vm.setPrintOutput(memOut);
 
-    std::string source = readScript(std::string(SCRIPTS_DIR) + "/synthc_analysis_diff.x");
-    check(!source.empty(), "synthc_analysis_diff.x script found");
+    std::string source = readScript(std::string(SCRIPTS_DIR) + "/" + scriptFile);
+    check(!source.empty(), std::format("{} script found", scriptFile).c_str());
 
-    bool ok = compileAndRun(compiler, vm, source.c_str(), "synthc_analysis_diff.x",
-                            &moduleCompiler);
-    check(ok, "synthc analysis-diff script compiles and runs");
+    bool ok = compileAndRun(compiler, vm, source.c_str(), scriptFile, &moduleCompiler);
+    check(ok, std::format("{} compiles and runs", scriptFile).c_str());
 
     fflush(memOut);
     std::string output = buf ? std::string(buf, bufSize) : "";
     fclose(memOut);
     free(buf);
 
-    bool pass = output.find("M1 PASS") != std::string::npos;
+    bool pass = output.find(sentinel) != std::string::npos;
     if (!pass) {
         std::print("--- script output ---\n{}\n---------------------\n", output);
     }
-    check(pass, "synthc analysis (SORTED+TREES, audio-only loops) matches C++ "
-                "and codegen byte-matches");
+    check(pass, checkLabel);
 
     engine::freeEngine(eng);
+}
+
+static void test_synthc_analysis_diff() {
+    std::print("Test: synthc analysis (M1) matches C++ analysis dump\n");
+    run_synthc_diff_script(
+        "synthc_analysis_diff.x", "M1 PASS",
+        "synthc analysis (SORTED+TREES, audio-only loops) matches C++ "
+        "and codegen byte-matches");
+}
+
+static void test_synthc_rewrite_diff() {
+    std::print("Test: synthc rewrites-ON dump + codegen match C++ (rewrites on)\n");
+    run_synthc_diff_script(
+        "synthc_rewrite_diff.x", "M2 REWRITE DIFF PASS",
+        "synthc rewrite engine reproduces the C++ rewriter (dump + codegen)");
+}
+
+static void test_synthc_voicer_diff() {
+    std::print("Test: synthc voicer (M4.0) dump + codegen match C++\n");
+    run_synthc_diff_script(
+        "synthc_voicer_diff.x", "M4 VOICER DIFF PASS",
+        "synthc flat-voice-mode voicer codegen matches C++ (dump + codegen)");
+}
+
+static void test_synthc_spectral_diff() {
+    std::print("Test: synthc spectral (M4.4) dump + codegen match C++\n");
+    run_synthc_diff_script(
+        "synthc_spectral_diff.x", "M4 SPECTRAL DIFF PASS",
+        "synthc spectral-chain codegen matches C++ (dump + codegen)");
+}
+
+static void test_synthc_simd_diff() {
+    std::print("Test: synthc SIMD (M5.1) codegen matches C++ at width 4\n");
+    run_synthc_diff_script(
+        "synthc_simd_diff.x", "M5 SIMD DIFF PASS",
+        "synthc SIMD scaffolding + simple forms match C++ (width 4)");
+}
+
+static void test_synthc_voicer_simd_diff() {
+    std::print("Test: synthc flat-voice SIMD (M5.3) codegen matches C++ at width 4\n");
+    run_synthc_diff_script(
+        "synthc_voicer_simd_diff.x", "M5 VOICER SIMD DIFF PASS",
+        "synthc flat-voice SIMD codegen matches C++ (width 4)");
+}
+
+static void test_synthc_buffer_simd_diff() {
+    std::print("Test: synthc buffer SIMD (M5.4) codegen matches C++ at width 4 + 2\n");
+    run_synthc_diff_script(
+        "synthc_buffer_simd_diff.x", "M5 BUFFER SIMD DIFF PASS",
+        "synthc buffer SIMD codegen matches C++ (width 4 + width 2)");
+}
+
+static void test_synthc_prod_diff() {
+    std::print("Test: synthc production config (M5.5) byte-matches C++ (rewrites-on + width 4)\n");
+    run_synthc_diff_script(
+        "synthc_prod_diff.x", "M5 PROD DIFF PASS",
+        "synthc production output (defSynthX: rewrites-on, width 4) byte-matches the C++ compiler");
 }
 
 static void test_synthc_compile_and_load() {
@@ -450,6 +508,13 @@ int main(int argc, char const* argv[]) {
     test_list_synthdefs();
     test_low_level_ffi();
     test_synthc_analysis_diff();
+    test_synthc_rewrite_diff();
+    test_synthc_voicer_diff();
+    test_synthc_spectral_diff();
+    test_synthc_simd_diff();
+    test_synthc_voicer_simd_diff();
+    test_synthc_buffer_simd_diff();
+    test_synthc_prod_diff();
     test_synthc_compile_and_load();
 
     std::print("\n=== Results: {} passed, {} failed ===\n",

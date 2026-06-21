@@ -191,3 +191,50 @@ fn fullCompare(mine String, theirs String) String {
 	}
 	report join("\n")
 }
+
+-- A per-voice delay-advance line, e.g. `for (int v = 0; ...) ++p->voice_dN_wrpos[v];`.
+fn _isVoiceAdvanceLine(line String) Bool =
+	(line split("++p->voice_d") length > 1) && (line split("_wrpos[v];") length > 1);
+
+-- Sort maximal runs of per-voice delay-advance lines. The C++ emits these in
+-- graph->delayBufs (unordered_set, pointer-hash) order, which is not derivable
+-- and is semantically irrelevant -- the wrpos increments are independent. Mirrors
+-- the antecedent-bracket sorting the dump comparators use for the same class of
+-- C++ hash-order non-determinism.
+fn _normVoiceAdvance(src String) [String] {
+	let lines = src split("\n");
+	var out [String] = [];
+	var i = 0;
+	while (i < lines length) {
+		if (lines[i] _isVoiceAdvanceLine) {
+			var run [String] = [];
+			while (i < lines length && lines[i] _isVoiceAdvanceLine) { run push!(lines[i]); i = i + 1; }
+			for (l : run sort) { out push!(l); }
+		} else {
+			out push!(lines[i]); i = i + 1;
+		}
+	}
+	out
+}
+
+-- Codegen comparison for voicers: like fullCompare, but order-normalizes the
+-- per-voice delay-advance lines (see _normVoiceAdvance).
+fn voicerCppCompare(mine String, theirs String) String {
+	let a = mine _normVoiceAdvance;
+	let b = theirs _normVoiceAdvance;
+	var report [String] = ["dumps differ:"];
+	let n = min(a length, b length);
+	var i = 0;
+	while (i < n) {
+		if (a[i] != b[i]) {
+			report push!("line %^:" fmt(i));
+			report push!("  synthc: " $ a[i]);
+			report push!("  C++:    " $ b[i]);
+		}
+		i = i + 1;
+	}
+	if (a length != b length) {
+		report push!("line count: synthc %^ vs C++ %^" fmt(a length, b length));
+	}
+	report length == 1 ? "PASS" : report join("\n")
+}

@@ -42,6 +42,36 @@ fn cppCompare(op CompareOp) String = match (op) {
 };
 
 ---------------------------------------------------------------------------
+-- SIMD C++ spellings (mirror to_cpp_simd_compile_string). The vector overloads
+-- live in tzpl_simd.hpp's namespace (no std::/__ prefix; sinpi/cospi/tanpi have
+-- no f32 variant suffix).
+
+fn cppSimdUnop(op UnaryOp, isF32 Bool) String = match (op) {
+	neg: "-";  not: "!";  bitNot: "~";  abs: "abs";
+	clz: "clz";  ctz: "ctz";  popCount: "popcount";  bitWidth: "numbits";
+	floor: "floor";  ceil: "ceil";  round: "round";  trunc: "trunc";
+	sqrt: "sqrt";  cbrt: "cbrt";
+	log: "log";  log2: "log2";  log10: "log10";  log1p: "log1p";
+	exp: "exp";  exp2: "exp2";  exp10: "exp10";  expm1: "expm1";
+	sinpi: "sinpi";  cospi: "cospi";  tanpi: "tanpi";
+	sin: "sin";  cos: "cos";  tan: "tan";
+	asin: "asin";  acos: "acos";  atan: "atan";
+	sinh: "sinh";  cosh: "cosh";  tanh: "tanh";
+	asinh: "asinh";  acosh: "acosh";  atanh: "atanh";
+	_: "unknown";
+};
+
+fn cppSimdBinop(op BinaryOp, isF32 Bool) String = match (op) {
+	add: "+";  sub: "-";  mul: "*";  div: "/";
+	mod: "mod";
+	bitAnd: "&";  bitOr: "|";  bitXor: "^";
+	shiftLeft: "<<";  shiftRight: ">>";  unsignedShiftRight: "ushr";
+	min: "min";  max: "max";
+	pow: "pow";  hypot: "hypot";  atan2: "atan2";  copysign: "copysign";
+	_: "unknown";
+};
+
+---------------------------------------------------------------------------
 -- Op syntax
 
 enum OpSyntax { prefix, infix, function }
@@ -61,8 +91,8 @@ fn binopSyntax(op BinaryOp) OpSyntax = match (op) {
 ---------------------------------------------------------------------------
 -- Expression builders (genUnopExprString / genBinopExprString)
 
-fn genUnopStr(op UnaryOp, isF32 Bool, a String) String {
-	let cs = cppUnop(op, isF32);
+fn genUnopStr(op UnaryOp, isF32 Bool, a String, simd Bool = false) String {
+	let cs = simd ? cppSimdUnop(op, isF32) : cppUnop(op, isF32);
 	match (op unopSyntax) {
 		function: "%^(%^)" fmt(cs, a);
 		prefix:   "%^%^" fmt(cs, a);
@@ -70,8 +100,8 @@ fn genUnopStr(op UnaryOp, isF32 Bool, a String) String {
 	}
 }
 
-fn genBinopStr(op BinaryOp, isF32 Bool, a String, b String) String {
-	let cs = cppBinop(op, isF32);
+fn genBinopStr(op BinaryOp, isF32 Bool, a String, b String, simd Bool = false) String {
+	let cs = simd ? cppSimdBinop(op, isF32) : cppBinop(op, isF32);
 	match (op binopSyntax) {
 		function: "%^(%^, %^)" fmt(cs, a, b);
 		infix:    "(%^ %^ %^)" fmt(a, cs, b);

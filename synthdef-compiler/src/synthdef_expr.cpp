@@ -360,6 +360,12 @@ namespace synthdef {
         auto new_input_type = in0()->type & in1()->type;
         checkType(new_input_type);
         if (input_type != new_input_type) {
+            // Commit the narrowed operand type before propagating. Without this
+            // the compare never converges its input_type, so propagation fires on
+            // every visit and the final (default-resolved) output type depends on
+            // worklist (hash) order -- a non-deterministic dump/codegen. Mirrors
+            // the other *::update_type that assign before propagate_types().
+            input_type = new_input_type;
             propagate_types(worklist);
         }
     }

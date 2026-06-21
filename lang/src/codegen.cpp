@@ -304,21 +304,28 @@ void CodeGen::emitReturnPcStackMap(u16 resultReg, Type* /*unusedResultType*/) {
     StackMap sm;
     sm.pcOffset = pcOffset;
     u16 limit = (u16)std::min<size_t>(nextReg_, regTypes_.size());
-    for (u16 r = 0; r < limit; ++r) {
+    for (u16 r = 0; r < limit; ) {
+        Type* t = regTypes_[r];
+        if (!t) { ++r; continue; }
+        // A multi-word inline composite occupies sizeWords consecutive regs; only
+        // the base carries the type. The trailing payload words are NOT independent
+        // roots (they're reached via gcScanPayload through the base), and their
+        // regTypes_ entries may be stale obj types left by a prior tenant -- so we
+        // skip the whole span rather than classify each trailing word on its own.
+        u16 span = (t->repr_ == ts::Type::Repr::Inline && t->sizeWords_ > 1) ? t->sizeWords_ : 1;
         // The result register is callee scratch while the call is in flight
         // (its slot overlaps callee frame storage and is not written until the
         // call returns). It must NOT appear in the returnPC map, or the marker
         // will trace a stale/half-written word as an Obj* root. regTypes_[r]
         // may already name the result type here if the binding was recorded
-        // before this map was emitted, so exclude it explicitly.
-        if (r == resultReg) continue;
-        Type* t = regTypes_[r];
-        if (!t) continue;
-        if (t->repr_ == ts::Type::Repr::Inline && t->sizeWords_ > 1) {
+        // before this map was emitted, so exclude its whole slot explicitly.
+        if (r == resultReg) { r = (u16)(r + span); continue; }
+        if (span > 1) {
             if (inlineHasObjPtr(t)) sm.liveInlineRegs.push_back({r, t});
         } else if (regHoldsObjRoot(t)) {
             sm.liveRefRegs.push_back(r);
         }
+        r = (u16)(r + span);
     }
     currentBlock_->stackMaps_.push_back(std::move(sm));
 }
@@ -340,17 +347,23 @@ void CodeGen::emitSafepointWithStackMap() {
     StackMap sm;
     sm.pcOffset = pcOffset;
     u16 limit = (u16)std::min<size_t>(nextReg_, regTypes_.size());
-    for (u16 r = 0; r < limit; ++r) {
+    for (u16 r = 0; r < limit; ) {
         Type* t = regTypes_[r];
-        if (!t) continue;
+        if (!t) { ++r; continue; }
         if (t->repr_ == ts::Type::Repr::Inline && t->sizeWords_ > 1) {
             // Inline multiword composite: not a single Obj* slot, but it may
             // embed Obj* fields (e.g. a (String, Int) tuple) that must be
-            // traced through. Record it so the marker walks its layout.
+            // traced through. Record it so the marker walks its layout. The
+            // trailing payload words are reached via that walk and may carry
+            // stale obj regTypes_ from a prior tenant, so skip the whole span
+            // rather than classify each on its own (would mark a Float/tag as
+            // an Obj* root -- a GC crash).
             if (inlineHasObjPtr(t)) sm.liveInlineRegs.push_back({r, t});
-        } else if (regHoldsObjRoot(t)) {
-            sm.liveRefRegs.push_back(r);
+            r = (u16)(r + t->sizeWords_);
+            continue;
         }
+        if (regHoldsObjRoot(t)) sm.liveRefRegs.push_back(r);
+        ++r;
     }
     currentBlock_->stackMaps_.push_back(std::move(sm));
     emitOp(op_safepoint);

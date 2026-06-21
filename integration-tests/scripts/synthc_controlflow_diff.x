@@ -108,6 +108,22 @@ fn pulltwo() S {
 	out outlet
 }
 
+-- M4.3 verification: an event-rate control() used INSIDE an if_ branch
+-- (subgraph). The iso-group for the control must activate consumers across the
+-- subgraph boundary -- the "event-rate iso-groups spanning subgraphs" case.
+fn ctrlInBranch() S {
+	let amp = control("amp", ControlSpec { lo: 0.0, hi: 1.0, init: 0.5, warp: ControlWarp.linear });
+	let sig = (0.3 lfsaw) * 0.3;
+	if_(sig > 0.0, fn() { sig * amp }, fn() { sig * 0.1 }) |> outlet
+}
+-- two controls, one consumed in each branch
+fn twoCtrlBranch() S {
+	let a = control("a", ControlSpec { lo: 0.0, hi: 1.0, init: 0.5, warp: ControlWarp.linear });
+	let b = control("b", ControlSpec { lo: 0.0, hi: 1.0, init: 0.3, warp: ControlWarp.linear });
+	let sig = (0.3 lfsaw) * 0.3;
+	if_(sig > 0.0, fn() { sig * a }, fn() { sig * b }) |> outlet
+}
+
 checkCF("if1", if1);
 checkCF("if2", if2);
 checkCF("if3", if3);
@@ -118,6 +134,8 @@ checkCF("sw1", sw1);
 checkCF("sw2", sw2);
 checkCF("pull_nested", pull_nested);
 checkCF("pulltwo", pulltwo);
+checkCF("ctrl_in_branch", ctrlInBranch);
+checkCF("two_ctrl_branch", twoCtrlBranch);
 
 if (`failures == 0) {
 	println("M3 CONTROLFLOW DIFF PASS");

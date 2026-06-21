@@ -354,6 +354,8 @@ fn shapeInference(ctx Ctx) Void {
 				ifK:        { for (s : ctx.subs[n]) { wl wlPush(s); } }
 				switchK(_): { for (s : ctx.subs[n]) { wl wlPush(s); } }
 				forK:       { for (s : ctx.subs[n]) { wl wlPush(s); } }
+				voicerK(_): { for (s : ctx.subs[n]) { wl wlPush(s); } }
+				spectralChainK(_, _): { for (s : ctx.subs[n]) { wl wlPush(s); } }
 				_: {}
 			}
 		}

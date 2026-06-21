@@ -41,6 +41,10 @@ fn importGraph(g SignalGraph, name String, applyRewrites Bool = false) Ctx {
 	var `scOutletSerials Int = 0;
 	var `scRandSerials Int = 0;
 	var `scDebugSerials Int = 0;
+	-- The most recently imported SpectralFrameInput node, so the enclosing
+	-- spectral_chain can set its shape (= inputChans * fftSize) once the input is
+	-- known (mirrors the C++ spectral_chain() setting frame->chans afterwards).
+	var `scLastSpectralFrame Int = NONE;
 
 	for (e : g.exprs) {
 		_importExpr(e);
@@ -254,7 +258,8 @@ fn _addConstantNode(kind NodeKind, ch Int) Int {
 -- routes folded constants through addExpr: they are hash-consed and get their
 -- type set to init_type (any_float for f64 results, any for i64, or the cast
 -- target type). Mirror that by reusing _addExprNode with a constant kind.
-fn _addFoldedConstant(v ConstVal, initType NumType) Int {
+fn _addFoldedConstant(v0 ConstVal, initType NumType) Int {
+	let v = v0 padPow2;
 	_addExprNode(NodeKind.constant(v, initType), [Int](), Rate.constant, initType, v constSize)
 }
 
@@ -504,7 +509,7 @@ fn _buildRHS(p Pat, subs [Int]) Int = match (p) {
 -- constant input folds via reduce_int/reduce_float (addConstantExpr, no hash-cons).
 fn _makeReduce(ctx Ctx, ins [Int], op BinaryOp, cols Int) Int {
 	if (ctx.kind[ins[0]] isConstantKind) {
-		let r = foldReduce(_constValOf(ctx, ins[0]), cols, op);
+		let r = foldReduce(_constValOf(ctx, ins[0]), cols, op) padPow2;
 		return _addConstantNode(NodeKind.constant(r, r _foldInitType), r constSize);
 	}
 	_addExprNode(NodeKind.reduceK(op, cols), ins, ctx.nrate[ins[0]], ctx.typ[ins[0]], cols)
@@ -544,13 +549,15 @@ fn _importExpr(e SignalExpr) Void {
 	var ctx Ctx = `scCtx;
 	match (e.kind) {
 		int(a, typ): {
-			-- parseConstant always builds f64 storage with explicit chans
-			let values = a toFloat;
-			let n = _addConstantNode(NodeKind.constant(ConstVal.floats(values), typ), values length);
+			-- parseConstant always builds f64 storage with explicit chans; the
+			-- value vector is zero-extended to a power-of-two length (VectorT).
+			let pv = ConstVal.floats(a toFloat) padPow2;
+			let n = _addConstantNode(NodeKind.constant(pv, typ), pv constSize);
 			_mapId(e.id, n);
 		}
 		float(a, typ): {
-			let n = _addConstantNode(NodeKind.constant(ConstVal.floats(a), typ), a length);
+			let pv = ConstVal.floats(a) padPow2;
+			let n = _addConstantNode(NodeKind.constant(pv, typ), pv constSize);
 			_mapId(e.id, n);
 		}
 		sampleRate: {
@@ -759,8 +766,43 @@ fn _importExpr(e SignalExpr) Void {
 			-- Hash-consed by name via the VAR| cons key.
 			_mapId(e.id, _addExprNode(NodeKind.varK(name), [Int](), Rate.audio, ANY_INT, 0));
 		}
-		voicer(_, _): { _impError("voicer not yet supported by synthc (M4)"); }
-		spectralChain(_, _, _): { _impError("spectralChain not yet supported by synthc (M4)"); }
-		spectralFrame(_): { _impError("spectralFrame not yet supported by synthc (M4)"); }
+		voicer(maxVoices, bodySg): {
+			-- VoicerExpr is a ControlFlowExpr with one subgraph (the voice body).
+			-- No direct inputs; the body root is wrapped in a PhiNode (like for_).
+			-- chans = maxVoices * voice_body.in0().chans (the body root's chans),
+			-- computed directly (not broadcast over the phi) to break the
+			-- voicer<->phi shape cycle; see _voicerChans in types.x.
+			let bodyPhi = _importSubgraph(bodySg);
+			var ctx Ctx = `scCtx;
+			let bodyRoot = ctx.ins[bodyPhi][0];
+			let r = ctx.nrate[bodyPhi];
+			let ch = maxVoices * ctx.chans[bodyRoot];
+			let vNode = _addCFNode(NodeKind.voicerK(maxVoices), [Int](), [bodyPhi], r, ANY_NUM, ch);
+			_linkPhi(bodyPhi, vNode, r);
+			_mapId(e.id, vNode);
+		}
+		spectralFrame(fftSize): {
+			-- The packed split-complex FFT frame: a source node (no inputs), type
+			-- f32. Its chans (inputChans * fftSize) is set by the enclosing
+			-- spectral_chain once its input is known; default to fftSize (mono).
+			let n = _addExprNode(NodeKind.spectralFrameK(fftSize), [Int](), Rate.audio, FLOAT32, fftSize);
+			`scLastSpectralFrame = n;
+			_mapId(e.id, n);
+		}
+		spectralChain(fftSize, hopSize, bodySg): {
+			-- SpectralChainExpr is a ControlFlowExpr with one subgraph (the body,
+			-- operating on the frame). rate/type from the input; chans = input chans.
+			let ins = e _resolveIns;                  -- [input]
+			let frame = `scLastSpectralFrame;
+			let bodyPhi = _importSubgraph(bodySg);
+			var ctx Ctx = `scCtx;
+			let r = max(_maxRateOf(ins), ctx.nrate[bodyPhi]);
+			let ch = ctx.chans[ins[0]];
+			-- The frame's shape is inputChans * fftSize.
+			if (frame != NONE) { ctx.chans[frame] = ch * fftSize; }
+			let scNode = _addCFNode(NodeKind.spectralChainK(fftSize, hopSize), ins, [bodyPhi], r, FLOAT32, ch);
+			_linkPhi(bodyPhi, scNode, r);
+			_mapId(e.id, scNode);
+		}
 	}
 }

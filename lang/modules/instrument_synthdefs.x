@@ -11,6 +11,7 @@
 -- the voice body; `gate` is implicit and always last).
 
 import synthdef.*;
+import synthc.compile.*;   -- M5.5 switchover: synths compile via synthc (defSynthX)
 import common_ugens.*;
 import filters.*;
 
@@ -47,7 +48,7 @@ fn organVoice() S {
 
 fn organ() S = voicer(kMaxVoices, organVoice) sum outlet;
 
-organ defSynth("organ");
+organ defSynthX("organ");
 
 ---------------------------------------------------------------------------
 -- 2. FM bell.
@@ -71,7 +72,7 @@ fn fmBellVoice() S {
 
 fn fmBell() S = voicer(kMaxVoices, fmBellVoice) sum outlet;
 
-fmBell defSynth("fmBell");
+fmBell defSynthX("fmBell");
 
 ---------------------------------------------------------------------------
 -- 3. FM brass.
@@ -93,7 +94,7 @@ fn fmBrassVoice() S {
 
 fn fmBrass() S = voicer(kMaxVoices, fmBrassVoice) sum outlet;
 
-fmBrass defSynth("fmBrass");
+fmBrass defSynthX("fmBrass");
 
 ---------------------------------------------------------------------------
 -- 4. Subtractive saw lead.
@@ -119,7 +120,7 @@ fn sawLeadVoice() S {
 
 fn sawLead() S = voicer(kMaxVoices, sawLeadVoice) sum outlet;
 
-sawLead defSynth("sawLead");
+sawLead defSynthX("sawLead");
 
 ---------------------------------------------------------------------------
 -- 5. PWM pad.
@@ -149,7 +150,7 @@ fn pwmPadVoice() S {
 
 fn pwmPad() S = voicer(kMaxVoices, pwmPadVoice) sum outlet;
 
-pwmPad defSynth("pwmPad");
+pwmPad defSynthX("pwmPad");
 
 ---------------------------------------------------------------------------
 -- 6. Karplus-Strong pluck.
@@ -179,7 +180,7 @@ fn pluckVoice() S {
 
 fn pluck() S = voicer(kMaxVoices, pluckVoice) sum outlet;
 
-pluck defSynth("pluck");
+pluck defSynthX("pluck");
 
 ---------------------------------------------------------------------------
 -- 7. Modal bell.
@@ -205,7 +206,7 @@ fn modalBellVoice() S {
 
 fn modalBell() S = voicer(kMaxVoices, modalBellVoice) sum outlet;
 
-modalBell defSynth("modalBell");
+modalBell defSynthX("modalBell");
 
 ---------------------------------------------------------------------------
 -- 8. Kick drum.
@@ -228,7 +229,7 @@ fn kickVoice() S {
 
 fn kick() S = voicer(4, kickVoice) sum outlet;
 
-kick defSynth("kick");
+kick defSynthX("kick");
 
 ---------------------------------------------------------------------------
 -- 9. Snare drum.
@@ -250,7 +251,7 @@ fn snareVoice() S {
 
 fn snare() S = voicer(4, snareVoice) sum outlet;
 
-snare defSynth("snare");
+snare defSynthX("snare");
 
 ---------------------------------------------------------------------------
 -- 10. Sub bass.
@@ -272,7 +273,7 @@ fn subBassVoice() S {
 
 fn subBass() S = voicer(4, subBassVoice) sum outlet;
 
-subBass defSynth("subBass");
+subBass defSynthX("subBass");
 
 ---------------------------------------------------------------------------
 

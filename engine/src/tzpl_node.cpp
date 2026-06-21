@@ -153,7 +153,12 @@ Node::~Node() {
     // Capture engine pointer before synth is freed.
     Engine* engine = (Engine*)synth->engine;
 
-    uninit();
+    // NB: do NOT call uninit() here. The generated `_free` (funs.free, below)
+    // already calls `_uninit` before releasing the instance, and built-in nodes
+    // do their teardown in `_free`/delete. Calling uninit() here too ran `_uninit`
+    // TWICE: a `_uninit` that frees a resource without nulling it (e.g. spectral's
+    // tzpl_fft_destroy) then double-freed and crashed on the second teardown.
+    // (Delay synths survived only because genDelayDealloc nulls after free.)
 
     for (int i = 0; i < synth->num_ins; ++i) {
         free(synth->inlets[i]);

@@ -80,6 +80,9 @@ fn calcShapeOf(ctx Ctx, n NIdx) Int {
 		ifK:                 _cfChans(ctx, n);
 		switchK(_):          _cfChans(ctx, n);
 		forK:                _cfChans(ctx, n);
+		voicerK(mv):         _voicerChans(ctx, n, mv);
+		spectralChainK(_, _): ctx.chans[ctx.ins[n][0]];   -- output = input chans
+		spectralFrameK(_):    ctx.chans[n];               -- inputChans * fftSize, set at import
 		phiK(t):             _phiChans(ctx, n, t);
 		varK(_):             ctx.chans[n];   -- fixed at import (scalar loop var)
 		debugK(_, _, _, _):  1;
@@ -91,6 +94,16 @@ fn _cfChans(ctx Ctx, n NIdx) Int {
 	var ch = 0;
 	for (s : ctx.subs[n]) { ch = _broadcastC(ch, ctx.chans[s]); }
 	ch
+}
+
+-- Voicer shape: maxVoices * voice_body.in0().chans (the body root's channels),
+-- computed directly from the body root rather than broadcasting over the phi --
+-- the phi's chans broadcasts UP to the voicer's (target), so reading it back
+-- would be circular. Mirrors VoicerExpr::calcShape.
+fn _voicerChans(ctx Ctx, n NIdx, maxVoices Int) Int {
+	let bodyPhi = ctx.subs[n][0];
+	let bodyRoot = ctx.ins[bodyPhi][0];
+	maxVoices * ctx.chans[bodyRoot]
 }
 
 -- PhiNode shape: broadcast(current, target, input). Mirrors PhiNodeExpr::calcShape.
@@ -138,6 +151,7 @@ fn inputConstraintOf(ctx Ctx, n NIdx, i Int) NumType = match (ctx.kind[n]) {
 	ifK:           ANY_INT;             -- test must be integer (input 0)
 	switchK(_):    ANY_INT;             -- selector must be integer
 	forK:          ANY_INT;             -- count must be integer
+	spectralChainK(_, _): ANY_NUM;      -- audio input, unconstrained
 	_:             ctx.typ[n];
 };
 
@@ -190,6 +204,8 @@ fn updateTypeOf(ctx Ctx, n NIdx, wl WorkList) Void {
 		ifK:                 { _updateCF(ctx, n, wl); }
 		switchK(_):          { _updateCF(ctx, n, wl); }
 		forK:                { _updateCF(ctx, n, wl); }
+		voicerK(_):          { _updateCF(ctx, n, wl); }   -- no test input; narrows from body phi
+		spectralChainK(_, _): { _updateCF(ctx, n, wl); } -- f32 chain, narrows from body phi
 		phiK(target):        { _updatePhi(ctx, n, target, wl); }
 		delayFixReadK(d, _): { _updateDelayRead(ctx, n, d, wl); }
 		delayVarReadK(d, _): { _updateDelayRead(ctx, n, d, wl); }

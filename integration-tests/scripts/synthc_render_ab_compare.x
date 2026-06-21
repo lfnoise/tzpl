@@ -27,6 +27,19 @@ _check("bubbles", "/tmp/synthc_ab_bubbles_ref.wav", "/tmp/synthc_ab_bubbles_synt
 _check("rng", "/tmp/synthc_ab_rng_ref.wav", "/tmp/synthc_ab_rng_synthc.wav");
 _check("cf", "/tmp/synthc_ab_cf_ref.wav", "/tmp/synthc_ab_cf_synthc.wav");
 
+-- Spectral: no C++ reference (the C++ compiler's SIMD spectral codegen is
+-- broken), so assert the synthc render is non-silent and didn't crash.
+fn _checkNonSilent(label String, path String) Void {
+	let m = audioFileMaxAbs(path);
+	if (m > 0.0001) {
+		println("  PASS " $ label $ ": non-silent end-to-end (maxAbs=" $ m toString $ ")");
+	} else {
+		`fail = `fail + 1;
+		println("  FAIL " $ label $ ": silent / not rendered (maxAbs=" $ m toString $ ")");
+	}
+}
+_checkNonSilent("spectral", "/tmp/synthc_ab_spectral_x.wav");
+
 if (`fail == 0) {
 	println("RENDER AB PASS");
 } else {

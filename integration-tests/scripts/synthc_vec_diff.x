@@ -45,6 +45,14 @@ checkVec("prod2", prod2);
 checkVec("sum2of4", sum2of4);
 checkVec("maxr", maxr);
 
+-- Non-power-of-two reduce: the constant vector (and so the reduce input) is
+-- zero-extended to the next power of two (VectorT::extend_to_next_power_of_two),
+-- e.g. 7 -> 8 with a trailing 0.0f, so reduce_rows<8,1> stays power-of-two.
+fn sum7() S = (([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 8.0] vec) * (0.3 lfsaw)) sum outlet;
+fn sum3() S = (([1.0, 2.0, 3.0] vec) * (0.3 lfsaw)) sum outlet;
+checkVec("sum7", sum7);
+checkVec("sum3", sum3);
+
 -- vec ops (channel-index remap). Const-array multichannel input.
 let m4 = fn() S = [1.0, 2.0, 3.0, 4.0] * (0.3 lfsaw);
 fn revv() S  = m4() reverse outlet;

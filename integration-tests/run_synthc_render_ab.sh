@@ -39,6 +39,11 @@ render_seeded /tmp/synthc_ab_rng_ref.wav    "$SCRIPTS/synthc_render_ab_rng_ref.x
 render_seeded /tmp/synthc_ab_rng_synthc.wav "$SCRIPTS/synthc_render_ab_rng_synthc.x"
 render /tmp/synthc_ab_cf_ref.wav    "$SCRIPTS/synthc_render_ab_cf_ref.x"
 render /tmp/synthc_ab_cf_synthc.wav "$SCRIPTS/synthc_render_ab_cf_synthc.x"
+# Spectral has no C++ reference (the C++ compiler's SIMD spectral codegen is
+# broken); this guards the synthc end-to-end pipeline + the teardown crash fix.
+# Longer duration so the FFT latency + overlap-add produces output. A teardown
+# crash would abort the script (set -e).
+"$APP" --nogui --nrt /tmp/synthc_ab_spectral_x.wav --duration 0.3 "${MODS[@]}" "$SCRIPTS/synthc_render_ab_spectral_synthc.x" >/dev/null 2>&1
 
 OUT="$("$APP" --nogui --no-audio "${MODS[@]}" "$SCRIPTS/synthc_render_ab_compare.x" 2>/dev/null)"
 echo "$OUT"

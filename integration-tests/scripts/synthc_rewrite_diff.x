@@ -1,16 +1,19 @@
 -- synthc rewrites-ON differential test (M2).
 --
 -- Runs synthc with the algebraic rewriter ENABLED (importGraph(.., true)) and
--- compares its generated C++ against the C++ compiler with rewrites ON
--- (synthdefGenCppFromSexpr(sexpr, 0, true)). A byte match proves synthc's
--- rewrite engine reproduces the C++ engine exactly -- same rules, same fixpoint
--- (rewrite interleaved with constant folding + hash-consing), and the same
--- userial allocation (the candidate-serial discipline: a node that is rewritten
--- or hash-consed away still burns a serial, mirroring the C++ Expr ctor).
+-- compares against the C++ compiler with rewrites ON, on two tiers:
+--   Tier-1  analysis dump:  ctx dumpToString  vs  synthdefAnalysisDump(sexpr, true)
+--   Tier-2  generated C++:  genCpp(ctx)       vs  synthdefGenCppFromSexpr(sexpr, 0, true)
+-- A match on both proves synthc's rewrite engine reproduces the C++ engine
+-- exactly -- same rules, same fixpoint (rewrite interleaved with constant
+-- folding + hash-consing), and the same userial allocation (the candidate-serial
+-- discipline: a node that is rewritten or hash-consed away still burns a serial,
+-- mirroring the C++ Expr ctor). The dump tier localizes any divergence to the
+-- rewritten GRAPH (sorted exprs, types, trees) independently of codegen.
 --
--- Audio-only synths (no event-rate controls -> no iso-groups) byte-match the
--- full generated source. The rewrites-OFF path is covered by
--- synthc_analysis_diff.x.
+-- Audio-only synths (no event-rate controls -> no iso-groups) match the full
+-- dump and byte-match the full generated source. The rewrites-OFF path is
+-- covered by synthc_analysis_diff.x.
 
 import synthdef.*;
 import common_ugens.*;
@@ -24,7 +27,7 @@ var `failures Int = 0;
 
 fn checkRW(name String, synthFn GraphFn) Void {
 	let g = makeGraph(synthFn);
-	let theirs = synthdefGenCppFromSexpr(g toSynthSexpr(name), 0, true);
+	let sexpr = g toSynthSexpr(name);
 	let ctx = g importGraph(name, true) analyzeM1;
 	if (ctx.errors length > 0) {
 		`failures = `failures + 1;
@@ -32,13 +35,16 @@ fn checkRW(name String, synthFn GraphFn) Void {
 		for (e : ctx.errors) { println("    " $ e); }
 		return;
 	}
-	let v = fullCompare(genCpp(ctx, name), theirs);
-	if (v == "PASS") {
-		println("  PASS " $ name);
-	} else {
+	-- Tier-1: analysis dump (rewrites ON), antecedent-order-normalized.
+	let dumpV = cfDumpCompare(ctx dumpToString, synthdefAnalysisDump(sexpr, true));
+	-- Tier-2: generated C++ must byte-match the C++ compiler (rewrites ON).
+	let cppV = fullCompare(genCpp(ctx, name), synthdefGenCppFromSexpr(sexpr, 0, true));
+	if (dumpV == "PASS" && cppV == "PASS") { println("  PASS " $ name); }
+	else {
 		`failures = `failures + 1;
 		println("  FAIL " $ name);
-		println(v);
+		if (dumpV != "PASS") { println("  [dump] " $ dumpV); }
+		if (cppV != "PASS") { println("  [cpp] " $ cppV); }
 	}
 }
 
