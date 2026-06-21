@@ -743,8 +743,14 @@ std::expected<S, std::string> SExprGraphBuilder::parseBufVarRead(sexpr::ItemVec 
     int64_t id = list[0].get<int64_t>();
     if (!list[2].is<int64_t>()) return std::unexpected("Buffer ID must be integer");
     SampleBuf* sb = getOrCreateSampleBuf(list[2].get<int64_t>());
-    if (!list[3].is<std::string>()) return std::unexpected("Interpolation must be string");
-    auto interpResult = interpFromString(list[3].get<std::string>());
+    // The front end serializes the interpolation as a bare symbol (e.g. cubic),
+    // so accept a symbol or a string -- as parseDelayVarRead does.
+    if (!list[3].is<std::string>() && !list[3].is<sexpr::Symbol>())
+        return std::unexpected("Interpolation must be string or symbol");
+    std::string interpName = list[3].is<std::string>()
+        ? list[3].get<std::string>()
+        : list[3].get<sexpr::Symbol>().name;
+    auto interpResult = interpFromString(interpName);
     if (!interpResult) return std::unexpected(interpResult.error());
     if (!list[4].is<int64_t>()) return std::unexpected("readChans must be integer");
     int64_t readChans = list[4].get<int64_t>();

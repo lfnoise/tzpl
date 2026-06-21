@@ -64,12 +64,25 @@ struct CompileResult {
     struct GlobalSlot {
         Word value;
         bool isObj = false;
+        // Non-null on the BASE slot of a multi-word INLINE composite global that
+        // embeds Obj* fields: the GC must walk this slot's layout (gcScanPayload)
+        // to trace those embedded pointers, since isObj single-word marking can't.
+        Type* inlineObjType = nullptr;
     };
     std::vector<GlobalSlot> newGlobals;
     u32 globalBase = 0;  // VM global index where newGlobals starts
 
     // Number of dynamic scope variables used
     u32 numDynVars = 0;
+
+    // Per-dynvar GC root flag (size == numDynVars). True where a dynvar slot
+    // holds an Obj* and must be scanned as a GC root. Like globals, this uses
+    // storesObjPtr(), not isObjType(): a DiscriminantEnum/Atom dynvar holds a
+    // non-pointer and must NOT be marked.
+    std::vector<u8> dynVarIsObj;
+    // Per-dynvar inline-composite type (size == numDynVars, mostly null): a
+    // multi-word inline dynvar embedding Obj* fields. The GC walks its layout.
+    std::vector<Type*> dynVarInlineType;
 
     // The target this result was compiled against
     VMTarget target;
@@ -181,7 +194,7 @@ public:
     // Phase 4g.5: allocate sizeWords consecutive slots for an inline-composite
     // global so its payload is stored inline (no per-store box). Returns the
     // first slot index. Continuation slots get isObj=false.
-    u32 addInlineGlobal(u32 sizeWords);
+    u32 addInlineGlobal(u32 sizeWords, Type* inlineType = nullptr);
     void setGlobalIsObj(u32 idx, bool isObj);
     bool isGlobalObj(u32 idx) const;
     Word& global(u32 idx);

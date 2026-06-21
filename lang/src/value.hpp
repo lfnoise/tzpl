@@ -88,6 +88,9 @@ void copyListHead(ListNode* dst, ListNode const* src, Type* elemType);
 // contain no nested pointers, so they short-circuit the recursion.
 class TracingGC;
 void gcScanInlinePointers(Word const* base, Type* type, TracingGC& gc);
+// SATB write barrier counterpart: shade every Obj* word in an inline value
+// before it is overwritten or dropped. Call BEFORE the store.
+void gcBarrierInlinePointers(Word const* base, Type* type, TracingGC& gc);
 void gcScanPayload(Word const* base, Type* type, TracingGC& gc);
 
 // Box a multi-Word inline-composite payload (Complex / Fraction / Struct /
@@ -127,7 +130,13 @@ Obj* boxInlineDeepFrom(VM& vm, Type* type, Word const* src);
 // binary-search lookup at runtime.
 struct StackMap {
     u32 pcOffset;                  // Offset into CodeBlock::code where op_safepoint lives
-    std::vector<u16> liveRefRegs;  // Register indices holding Obj* at this PC
+    std::vector<u16> liveRefRegs;  // Register indices holding a single Obj* at this PC
+    // Registers holding a multi-word INLINE composite (struct/tuple/enum) that
+    // embeds Obj* fields. The base word lives at this reg; the marker walks the
+    // composite's layout (gcScanPayload) to mark each embedded Obj*. Without
+    // this, arrays/strings reachable only through an inline composite in a
+    // register would be collected while still live.
+    std::vector<std::pair<u16, Type*>> liveInlineRegs;
 };
 
 // CodeBlock - compiled function holding register-based instructions
@@ -143,6 +152,12 @@ public:
     SymbolPtr  name;           // Function name (debug)
     Type*      funcType;       // FunctionType* (nullable for top-level blocks)
     std::vector<std::vector<u16>> coroGCMaps_;  // per yield point: Obj* register indices
+    // per yield point: inline-composite registers (baseReg, type) that embed
+    // Obj* fields and survive the yield. Parallel-indexed with coroGCMaps_; the
+    // frame's gcScanChildren walks each via gcScanPayload. Without this an
+    // array/string reachable only through an inline composite local across a
+    // yield would be collected.
+    std::vector<std::vector<std::pair<u16, Type*>>> coroInlineGCMaps_;
 
     // Phase 2 of tracing-GC project: per-safepoint live-reference register
     // bitmaps, emitted alongside op_safepoint. Phase 3 will use these as the
@@ -338,7 +353,17 @@ public:
         v_ = src->v_;
         for (auto* obj : v_) {  }
     }
-    void resize(size_t n) { v_.resize(n, nullptr); }
+    void resize(size_t n) {
+        // SATB: shrinking drops elements [n, size); shade them so an in-flight
+        // mark cycle doesn't lose a still-live element (e.g. `pop!` whose result
+        // is discarded removes the slot's only reference to it).
+        if (n < v_.size()) {
+            auto& gc = gCurrentVM->tracingGC();
+            for (size_t i = n; i < v_.size(); ++i)
+                if (v_[i]) gc.writeBarrier(v_[i]);
+        }
+        v_.resize(n, nullptr);
+    }
     void reserve(size_t n) { v_.reserve(n); }
 
     // Low-level access for bulk operations (txArray, sort, etc.)
@@ -410,7 +435,18 @@ public:
         return at->elemType_;
     }
 
-    void resize(size_t n) { v_.resize(n * stride_); }
+    void resize(size_t n) {
+        // SATB: shrinking drops inline slots [n, size); shade any Obj* words they
+        // hold (e.g. `pop!` on an array of inline composites with a boxed field).
+        size_t cur = v_.size() / stride_;
+        if (n < cur) {
+            auto& gc = gCurrentVM->tracingGC();
+            Type* et = elemType();
+            for (size_t i = n; i < cur; ++i)
+                gcBarrierInlinePointers(&v_[i * stride_], et, gc);
+        }
+        v_.resize(n * stride_);
+    }
     void reserve(size_t n) { v_.reserve(n * stride_); }
 
     // Append one element from src (stride_ consecutive Words). Retains any
@@ -1492,19 +1528,16 @@ public:
     }
 
     void gcScanChildren(TracingGC& gc) override {
-        // When still open, the live words sit in the register file (already
-        // a GC root via the frame chain) and value_ is empty -- nothing to
-        // scan here. Once closed, walk the gc mask and mark each Obj* word.
+        // When still open, the live words sit in the register file (already a GC
+        // root via the frame chain, traced through stack maps incl. inline
+        // composites) and value_ is empty -- nothing to scan here. Once closed,
+        // walk the captured value's layout. We use gcScanPayload(value_, type_)
+        // rather than the static gcMaskBits_ because a bitmap cannot represent a
+        // multi-word inline composite that embeds Obj* (mask was 0 -> leak) nor
+        // an enum (whose live Obj* words depend on the runtime tag). gcScanPayload
+        // dispatches on the type and walks the right words.
         if (!closed()) return;
-        u16 mask = gcMaskBits_;
-        u16 i = 0;
-        while (mask) {
-            if (mask & 1u) {
-                if (i < sizeWords_ && value_[i].o) gc.mark(value_[i].o);
-            }
-            mask >>= 1;
-            ++i;
-        }
+        gcScanPayload(value_, type_, gc);
     }
 
 private:
@@ -1538,6 +1571,12 @@ public:
             auto& map = codeBlock_->coroGCMaps_[gcMapIndex_];
             for (u16 idx : map) {
                 if (idx < numRegs_ && regs_[idx].o) gc.mark(regs_[idx].o);
+            }
+        }
+        // Inline-composite locals live across this yield: walk their layout.
+        if (codeBlock_ && gcMapIndex_ < codeBlock_->coroInlineGCMaps_.size()) {
+            for (auto const& [idx, ty] : codeBlock_->coroInlineGCMaps_[gcMapIndex_]) {
+                if (idx < numRegs_) gcScanPayload(&regs_[idx], ty, gc);
             }
         }
     }

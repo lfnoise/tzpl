@@ -137,13 +137,19 @@ void TypeChecker::declareVar(const std::string& name, Type* type, bool isMutable
         bool inlineMulti = type
             && type->repr_ == Type::Repr::Inline
             && type->sizeWords_ > 1;
+        // GC roots must use storesObjPtr(), the runtime question "does a Word
+        // holding this type contain an Obj*", NOT isObjType() (the type-system
+        // taxonomy, which is true for ALL enums). A DiscriminantEnum (all-void
+        // enum like Rate) is stored as an i64 tag and storesObjPtr() is false;
+        // flagging such a global as an Obj root makes the GC dereference the
+        // tag as a pointer and crash.
         if (it != globalVars_.end()) {
             globalIdx = it->second.globalIndex;
-            compiler_.setGlobalIsObj(globalIdx, type ? type->isObjType() : true);
+            compiler_.setGlobalIsObj(globalIdx, type ? storesObjPtrUnboxed(type) : true);
         } else if (inlineMulti) {
-            globalIdx = compiler_.addInlineGlobal((u32)type->sizeWords_);
+            globalIdx = compiler_.addInlineGlobal((u32)type->sizeWords_, type);
         } else {
-            globalIdx = compiler_.addGlobal(type ? type->isObjType() : true);
+            globalIdx = compiler_.addGlobal(type ? storesObjPtrUnboxed(type) : true);
         }
         VarInfo info{};
         info.type = type;
@@ -370,13 +376,36 @@ void TypeChecker::check(Program& program) {
     // where Color is an enum processed in a later loop). The layout_ vector
     // is derived from storesObjPtr() which depends on the dependency's
     // classification, so we recompute it here.
-    for (auto& kv : structTypes_) {
-        StructType* st = kv.second;
-        st->setFields(NameTypePairVec(st->fields_));
-    }
-    for (auto& kv : enumTypes_) {
-        EnumType* et = kv.second;
-        et->setCases(NameTypePairVec(et->cases_));
+    //
+    // Iterate to a fixpoint. A single struct-then-enum pass is not enough for
+    // mutually-recursive types: re-classifying one type can newly mark a
+    // dependency recursive (isRecursive_ is sticky), which flips that
+    // dependency from a multi-word inline layout to a 1-word Heap layout, which
+    // in turn changes the layout of everything that embeds it. We repeat until
+    // the set of recursive types stops growing -- the pass that discovers no
+    // new recursion has re-derived every layout against the final, complete
+    // recursion set, so all inline-payload offsets agree. Recursion only ever
+    // grows (monotone) and the type set is finite, so this converges; the
+    // iteration cap is a safety backstop.
+    auto countRecursiveTypes = [&]() {
+        size_t n = 0;
+        for (auto& kv : structTypes_) if (kv.second->isRecursive_) ++n;
+        for (auto& kv : enumTypes_)   if (kv.second->isRecursive_) ++n;
+        return n;
+    };
+    size_t prevRecursive = SIZE_MAX;
+    for (int pass = 0; pass < 64; ++pass) {
+        for (auto& kv : structTypes_) {
+            StructType* st = kv.second;
+            st->setFields(NameTypePairVec(st->fields_));
+        }
+        for (auto& kv : enumTypes_) {
+            EnumType* et = kv.second;
+            et->setCases(NameTypePairVec(et->cases_));
+        }
+        size_t now = countRecursiveTypes();
+        if (now == prevRecursive) break;
+        prevRecursive = now;
     }
 
     // Register constraints (after types/aliases, before functions)
@@ -665,13 +694,36 @@ void TypeChecker::checkREPLInput(Program& program) {
     // where Color is an enum processed in a later loop). The layout_ vector
     // is derived from storesObjPtr() which depends on the dependency's
     // classification, so we recompute it here.
-    for (auto& kv : structTypes_) {
-        StructType* st = kv.second;
-        st->setFields(NameTypePairVec(st->fields_));
-    }
-    for (auto& kv : enumTypes_) {
-        EnumType* et = kv.second;
-        et->setCases(NameTypePairVec(et->cases_));
+    //
+    // Iterate to a fixpoint. A single struct-then-enum pass is not enough for
+    // mutually-recursive types: re-classifying one type can newly mark a
+    // dependency recursive (isRecursive_ is sticky), which flips that
+    // dependency from a multi-word inline layout to a 1-word Heap layout, which
+    // in turn changes the layout of everything that embeds it. We repeat until
+    // the set of recursive types stops growing -- the pass that discovers no
+    // new recursion has re-derived every layout against the final, complete
+    // recursion set, so all inline-payload offsets agree. Recursion only ever
+    // grows (monotone) and the type set is finite, so this converges; the
+    // iteration cap is a safety backstop.
+    auto countRecursiveTypes = [&]() {
+        size_t n = 0;
+        for (auto& kv : structTypes_) if (kv.second->isRecursive_) ++n;
+        for (auto& kv : enumTypes_)   if (kv.second->isRecursive_) ++n;
+        return n;
+    };
+    size_t prevRecursive = SIZE_MAX;
+    for (int pass = 0; pass < 64; ++pass) {
+        for (auto& kv : structTypes_) {
+            StructType* st = kv.second;
+            st->setFields(NameTypePairVec(st->fields_));
+        }
+        for (auto& kv : enumTypes_) {
+            EnumType* et = kv.second;
+            et->setCases(NameTypePairVec(et->cases_));
+        }
+        size_t now = countRecursiveTypes();
+        if (now == prevRecursive) break;
+        prevRecursive = now;
     }
 
     // Register constraints (after types/aliases, before functions)

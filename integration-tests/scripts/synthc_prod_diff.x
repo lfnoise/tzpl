@@ -1,0 +1,61 @@
+-- synthc production-config differential test (M5.5 switchover).
+--
+-- The switchover makes synthc (defSynthX) the production compiler. Its production
+-- config is rewrites-ON + SIMD width 4 -- the SAME settings the C++ compiler uses by
+-- default. This test asserts synthc's production output byte-matches the C++ compiler
+-- at THAT config (synthdefGenCppFromSexpr(sexpr, 4, true)) across the real instrument
+-- corpus + a voicer/spectral/delay/buffer mix. (The other SIMD diff suites compare
+-- rewrites-OFF; this is the only one at the true production config -- rewrites + SIMD
+-- together -- which is what defSynthX actually emits.)
+
+import synthdef.*;
+import common_ugens.*;
+import filters.*;
+import instrument_synthdefs.*;
+import synthc.ir.*;
+import synthc.importer.*;
+import synthc.passes.*;
+import synthc.codegen.*;
+import synthc.difftest.*;
+
+var `failures Int = 0;
+
+fn checkProd(name String, synthFn GraphFn) Void {
+	let g = makeGraph(synthFn);
+	let sx = g toSynthSexpr(name);
+	-- production config: rewrites ON, SIMD width 4 (matches defSynthX + the C++ default).
+	let ctx = g importGraph(name, true) analyzeM1;
+	if (ctx.errors length > 0) {
+		`failures = `failures + 1;
+		println("  FAIL " $ name $ " (errors):");
+		for (e : ctx.errors) { println("    " $ e); }
+		return;
+	}
+	let v = voicerCppCompare(genCpp(ctx, name, 4), synthdefGenCppFromSexpr(sx, 4, true));
+	if (v == "PASS") { println("  PASS " $ name); }
+	else { `failures = `failures + 1; println("  FAIL " $ name); println(v); }
+}
+
+-- the real production instrument corpus (the synths defSynthX now compiles).
+checkProd("organ", organ);
+checkProd("fmBell", fmBell);
+checkProd("fmBrass", fmBrass);
+checkProd("sawLead", sawLead);
+checkProd("pwmPad", pwmPad);
+checkProd("pluck", pluck);
+checkProd("modalBell", modalBell);
+checkProd("kick", kick);
+checkProd("snare", snare);
+checkProd("subBass", subBass);
+
+-- a non-voicer audio synth + a delay synth exercising rewrites + SIMD together.
+fn arith() S { (inlet(FLOAT32, 4) * 0.5 + 0.5) sin * [0.1, 0.2, 0.3, 0.4] |> outlet }
+fn echo() S {
+	let x = inlet(FLOAT32, 4); let d = delayVar(); d init(2, 0.0);
+	let r = d read(2); d write(x + r * 0.5); (x + r) |> outlet
+}
+checkProd("arith", arith);
+checkProd("echo", echo);
+
+if (`failures == 0) { println("M5 PROD DIFF PASS"); }
+else { println("M5 PROD DIFF FAIL: " $ `failures toString); }

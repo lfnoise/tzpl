@@ -64,10 +64,14 @@ void Silo::mixDown(int numFrames, f32* out) {
 void Silo::runNodes() {
     Node* node = rt_sortedNodeList_;
     while (node) {
-//        if (node->triggered) {
-//            node->triggered = false;
-//            node->funs.processEvents(node->synth);
-//        }
+        // Run event processing before audio for any node whose controls
+        // changed this sample (set by setControl / initial control priming).
+        // processEvents re-evaluates the activated iso-groups, loading new
+        // control values into instance vars that processAudio then reads.
+        if (node->triggered) {
+            node->triggered = false;
+            if (node->funs.processEvents) node->funs.processEvents(node->synth);
+        }
         node->funs.processAudio(node->synth);
         node = node->sorted_next;
     }
@@ -385,7 +389,19 @@ tzpl_SErr Silo::setControl(Node* node, i64 controlID, int numValues, void* value
     Control* c = node->getControl(controlID);
     if (!c) return tzpl_errControlNotFound;
     if (numValues > c->type_.chans) throw tzpl_errChanMismatch;
-    memcpy(c->data_, values, numValues * elemSize(c->type_.elem));
+    // Route through the synth's event() so it updates the control buffer AND
+    // sets the ctrlN_active flag, then flag the node so the next runNodes()
+    // call runs processEvents and re-evaluates the affected iso-groups.
+    // (Synths without an event() -- e.g. built-ins -- fall back to a plain
+    // buffer write, matching the previous behaviour.)
+    if (node->funs.event) {
+        tzpl_Slice dst{0, nullptr};
+        tzpl_Slice data{numValues, values};
+        node->funs.event(node->synth, controlID, dst, data);
+        node->triggered = true;
+    } else {
+        memcpy(c->data_, values, numValues * elemSize(c->type_.elem));
+    }
     return tzpl_errNone;
 }
 

@@ -181,6 +181,12 @@ void TracingGC::step_root_globals(u64 deadlineNanos, u32& sinceCheck, u32& done)
             if (gcMonoNanos() >= deadlineNanos) return;
         }
     }
+    // Inline-composite globals: walk each one's layout to mark embedded Obj*
+    // (single-word isObj marking can't reach Obj* fields buried in a multi-word
+    // inline tuple/struct/enum global).
+    for (auto const& [gidx, ty] : vm_.inlineObjGlobals_) {
+        gcScanPayload(&vm_.global(gidx), ty, *this);
+    }
     rootPhase_ = RootPhase::DynVars;
     rootDynVarCursor_ = 0;
 }
@@ -198,6 +204,25 @@ void TracingGC::step_root_dynvars(u64 deadlineNanos, u32& sinceCheck, u32& done)
         if (++sinceCheck >= kCheckEvery) {
             sinceCheck = 0;
             if (gcMonoNanos() >= deadlineNanos) return;
+        }
+    }
+    // Inline-composite dynvars: walk each one's layout to mark embedded Obj*.
+    for (auto const& [didx, ty] : vm_.inlineObjDynVars_) {
+        gcScanPayload(&vm_.dynVar(didx), ty, *this);
+    }
+    // The dynamic-var SAVE STACK holds the values shadowed by in-scope `var `x`
+    // rebindings. They are restored on function return, so they are live roots
+    // and must be marked -- otherwise an object only reachable through a shadowed
+    // dynvar (e.g. the enclosing graph's exprs array saved by a nested
+    // _makeSubGraph) is swept while still in use. 1-word object saves mark
+    // directly; multi-word inline composites are walked through the side payload
+    // buffer via their saved layout.
+    for (u32 i = 0; i < vm_.dynStackTop_; ++i) {
+        DynSaveEntry const& e = vm_.dynStack_[i];
+        if (e.sizeWords <= 1) {
+            if (e.isObj && e.savedValue.o) { mark(e.savedValue.o); ++lastRootCount_; }
+        } else if (e.type) {
+            gcScanPayload(&vm_.dynStackPayload_[e.savedValue.i], e.type, *this);
         }
     }
     rootPhase_ = RootPhase::Frames;
@@ -234,6 +259,12 @@ void TracingGC::step_root_frames(u64 deadlineNanos, u32& sinceCheck, u32& done) 
                             mark(o); ++lastRootCount_;
                         }
                     }
+                    // Registers holding a multi-word inline composite that
+                    // embeds Obj* fields: walk the layout to mark each one
+                    // (single-Obj* marking can't reach them).
+                    for (auto const& [ireg, ity] : sm->liveInlineRegs) {
+                        gcScanPayload(base + ireg, ity, *this);
+                    }
                 }
             }
         }
@@ -253,6 +284,12 @@ void TracingGC::step_root_frames(u64 deadlineNanos, u32& sinceCheck, u32& done) 
     // re-trace it; we just need to keep the UpVar object alive.
     for (UpVar* uv = vm_.openUpVars_; uv != nullptr; uv = uv->next_) {
         mark(uv); ++lastRootCount_;
+    }
+    // GC keepalive: objects pinned only from the C++ call stack across a
+    // collection-triggering call (e.g. the generator being forced in
+    // ListNode::force() before it re-homes onto a new tail node).
+    for (GCObj* o : vm_.gcKeepAlive_) {
+        if (o) { mark(o); ++lastRootCount_; }
     }
     rootPhase_ = RootPhase::Extras;
     rootExtraCursor_ = 0;

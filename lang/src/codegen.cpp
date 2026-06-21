@@ -289,7 +289,7 @@ bool regHoldsObjRoot(Type const* t) {
 }
 } // namespace
 
-void CodeGen::emitReturnPcStackMap(u16 /*unusedResultReg*/, Type* /*unusedResultType*/) {
+void CodeGen::emitReturnPcStackMap(u16 resultReg, Type* /*unusedResultType*/) {
     // The returnPC stack map is consulted ONLY while the callee is still
     // executing (the marker walks the caller via frames_[i+1].returnPC).
     // During that window the caller's resultReg slot is OVERLAPPED with
@@ -304,10 +304,28 @@ void CodeGen::emitReturnPcStackMap(u16 /*unusedResultReg*/, Type* /*unusedResult
     StackMap sm;
     sm.pcOffset = pcOffset;
     u16 limit = (u16)std::min<size_t>(nextReg_, regTypes_.size());
-    for (u16 r = 0; r < limit; ++r) {
+    for (u16 r = 0; r < limit; ) {
         Type* t = regTypes_[r];
-        if (!t) continue;
-        if (regHoldsObjRoot(t)) sm.liveRefRegs.push_back(r);
+        if (!t) { ++r; continue; }
+        // A multi-word inline composite occupies sizeWords consecutive regs; only
+        // the base carries the type. The trailing payload words are NOT independent
+        // roots (they're reached via gcScanPayload through the base), and their
+        // regTypes_ entries may be stale obj types left by a prior tenant -- so we
+        // skip the whole span rather than classify each trailing word on its own.
+        u16 span = (t->repr_ == ts::Type::Repr::Inline && t->sizeWords_ > 1) ? t->sizeWords_ : 1;
+        // The result register is callee scratch while the call is in flight
+        // (its slot overlaps callee frame storage and is not written until the
+        // call returns). It must NOT appear in the returnPC map, or the marker
+        // will trace a stale/half-written word as an Obj* root. regTypes_[r]
+        // may already name the result type here if the binding was recorded
+        // before this map was emitted, so exclude its whole slot explicitly.
+        if (r == resultReg) { r = (u16)(r + span); continue; }
+        if (span > 1) {
+            if (inlineHasObjPtr(t)) sm.liveInlineRegs.push_back({r, t});
+        } else if (regHoldsObjRoot(t)) {
+            sm.liveRefRegs.push_back(r);
+        }
+        r = (u16)(r + span);
     }
     currentBlock_->stackMaps_.push_back(std::move(sm));
 }
@@ -329,10 +347,23 @@ void CodeGen::emitSafepointWithStackMap() {
     StackMap sm;
     sm.pcOffset = pcOffset;
     u16 limit = (u16)std::min<size_t>(nextReg_, regTypes_.size());
-    for (u16 r = 0; r < limit; ++r) {
+    for (u16 r = 0; r < limit; ) {
         Type* t = regTypes_[r];
-        if (!t) continue;
+        if (!t) { ++r; continue; }
+        if (t->repr_ == ts::Type::Repr::Inline && t->sizeWords_ > 1) {
+            // Inline multiword composite: not a single Obj* slot, but it may
+            // embed Obj* fields (e.g. a (String, Int) tuple) that must be
+            // traced through. Record it so the marker walks its layout. The
+            // trailing payload words are reached via that walk and may carry
+            // stale obj regTypes_ from a prior tenant, so skip the whole span
+            // rather than classify each on its own (would mark a Float/tag as
+            // an Obj* root -- a GC crash).
+            if (inlineHasObjPtr(t)) sm.liveInlineRegs.push_back({r, t});
+            r = (u16)(r + t->sizeWords_);
+            continue;
+        }
         if (regHoldsObjRoot(t)) sm.liveRefRegs.push_back(r);
+        ++r;
     }
     currentBlock_->stackMaps_.push_back(std::move(sm));
     emitOp(op_safepoint);
@@ -1134,6 +1165,9 @@ void CodeGen::genFnDecl(FnDeclNode* decl) {
                     emitMoveN(paramSlot, defReg, typeSlotWords(pt));
                 }
                 nextReg_ = savedNextReg2;
+                // Clear stale scratch reg types the default expr set (see the
+                // monomorphized preamble below for the rationale).
+                for (size_t r = nextReg_; r < regTypes_.size(); ++r) regTypes_[r] = nullptr;
             }
         }
     }
@@ -1324,6 +1358,11 @@ void CodeGen::genMonoInstance(FuncInfo& monoInfo) {
                     emitMoveN(paramSlot, defReg, typeSlotWords(pt));
                 }
                 nextReg_ = savedNextReg2;
+                // The default expr wrote scratch regs >= nextReg_ and set their
+                // regTypes_ (e.g. an object-typed default like a String " ").
+                // Clear those stale types so the body reusing the slot for a
+                // non-object isn't over-approximated as a live GC root.
+                for (size_t r = nextReg_; r < regTypes_.size(); ++r) regTypes_[r] = nullptr;
             }
         }
     }
@@ -3379,6 +3418,30 @@ u16 CodeGen::genBinaryOp(BinaryOpExpr* expr) {
         if (result != UINT16_MAX) return result;
     }
 
+    // Short-circuit evaluation for scalar && and ||.
+    //   a && b: evaluate a; if a is false, skip b (result is a).
+    //   a || b: evaluate a; if a is true, skip b (result is a).
+    // The elementwise forms (auto-map over arrays, operator overloads,
+    // persistent vectors) intentionally fall through to the generic
+    // both-operands path below; short-circuit applies only to scalar Bool.
+    if ((expr->op == BinaryOpExpr::And || expr->op == BinaryOpExpr::Or)
+        && !expr->leftAutoMap && !expr->rightAutoMap
+        && expr->resolvedFuncGlobalIndex < 0
+        && expr->resolvedType == compiler_.boolType()) {
+        u16 leftReg = genExpr(static_cast<Expr*>(expr->left.get()));
+        u16 dst = allocReg();
+        emitMov(dst, leftReg);
+        // && skips when dst is false; || skips when dst is true.
+        Operation skipOp = (expr->op == BinaryOpExpr::And)
+            ? op_jump_if_false : op_jump_if_true;
+        u32 skip = emitJump(skipOp, dst);
+        u16 rightReg = genExpr(static_cast<Expr*>(expr->right.get()));
+        emitMov(dst, rightReg);
+        patchJump(skip);
+        setRegType(dst, compiler_.boolType());
+        return dst;
+    }
+
     // Check for auto-mapped binary ops (@ on operands)
     if (expr->leftAutoMap || expr->rightAutoMap) {
         bool hasCartesian = (expr->leftAutoMap.cartesianIndex > 0) ||
@@ -4619,11 +4682,18 @@ u16 CodeGen::genCall(CallExpr_* expr) {
         // Obj* fields inside inline composites that survive across a yield
         // are not yet traced; revisit when we promote container backends.
         std::vector<u16> gcMap;
+        std::vector<std::pair<u16, Type*>> inlineMap;
         for (auto& scope : localScopes_) {
             for (auto& entry : scope) {
                 Type* t = entry.second.type;
                 if (!t) continue;
-                if (isInlineMultiword(t)) continue;
+                if (isInlineMultiword(t)) {
+                    // Inline composite local: its base word is a payload word,
+                    // not an Obj*, but it may embed Obj* fields the GC must
+                    // walk across the yield.
+                    if (inlineHasObjPtr(t)) inlineMap.push_back({entry.second.reg, t});
+                    continue;
+                }
                 if (storesObjPtr(t)) {
                     gcMap.push_back(entry.second.reg);
                 }
@@ -4633,6 +4703,7 @@ u16 CodeGen::genCall(CallExpr_* expr) {
         // Store GC map in current code block
         u16 gcMapIndex = currentYieldCount_++;
         currentBlock_->coroGCMaps_.push_back(std::move(gcMap));
+        currentBlock_->coroInlineGCMaps_.push_back(std::move(inlineMap));
 
         // Phase 4g.12: yield transfers sizeWords_ words from src to the caller
         // -- no boxing of inline composites at the yield boundary.
@@ -4670,13 +4741,18 @@ u16 CodeGen::genCall(CallExpr_* expr) {
         u32 exitJump = emitJump(op_jump_if_true, doneReg);
 
         // Build GC map: collect registers that hold Obj* values.
-        // Phase 4g.4: skip Inline composite locals (see yield path comment).
+        // Phase 4g.4: skip Inline composite locals (see yield path comment),
+        // but record those that embed Obj* so the GC walks them across the yield.
         std::vector<u16> gcMap;
+        std::vector<std::pair<u16, Type*>> inlineMap;
         for (auto& scope : localScopes_) {
             for (auto& entry : scope) {
                 Type* t = entry.second.type;
                 if (!t) continue;
-                if (isInlineMultiword(t)) continue;
+                if (isInlineMultiword(t)) {
+                    if (inlineHasObjPtr(t)) inlineMap.push_back({entry.second.reg, t});
+                    continue;
+                }
                 if (storesObjPtr(t)) {
                     gcMap.push_back(entry.second.reg);
                 }
@@ -4691,6 +4767,7 @@ u16 CodeGen::genCall(CallExpr_* expr) {
 
         u16 gcMapIndex = currentYieldCount_++;
         currentBlock_->coroGCMaps_.push_back(std::move(gcMap));
+        currentBlock_->coroInlineGCMaps_.push_back(std::move(inlineMap));
 
         // Yield the value
         emitOp(op_yield);
@@ -10188,8 +10265,12 @@ void CodeGen::genIfStmtForValue(IfStmtNode* stmt, u16 resultReg) {
     u16 condReg = genExpr(static_cast<Expr*>(stmt->condition.get()));
     u32 elseJump = emitJump(op_jump_if_false, condReg);
 
-    // Then branch
+    // Then branch. resultReg is write-only and not live-in to the branch, so
+    // its type must be cleared (freeRegsTo only clears regs >= savedReg, and
+    // resultReg sits below savedReg). Otherwise a safepoint inside the branch
+    // would mark an uninitialized register as a live Obj* root.
     if (enableRegReclaim) freeRegsTo(savedReg);
+    setRegType(resultReg, nullptr);
     if (stmt->thenBranch->kind == ASTNode::Block) {
         genBlockForValue(static_cast<BlockStmt*>(stmt->thenBranch.get()), resultReg);
     }
@@ -10199,6 +10280,7 @@ void CodeGen::genIfStmtForValue(IfStmtNode* stmt, u16 resultReg) {
 
     // Else branch
     if (enableRegReclaim) freeRegsTo(savedReg);
+    setRegType(resultReg, nullptr);
     if (stmt->elseBranch) {
         if (stmt->elseBranch->kind == ASTNode::Block) {
             genBlockForValue(static_cast<BlockStmt*>(stmt->elseBranch.get()), resultReg);
@@ -10223,6 +10305,10 @@ void CodeGen::genSwitchStmtForValue(SwitchStmtNode* stmt, u16 resultReg) {
         auto& clause = stmt->cases[i];
 
         if (enableRegReclaim) freeRegsTo(caseSavedReg);
+        // resultReg is write-only and not live-in to a case body; clear its
+        // type so a safepoint inside the case does not see a prior case's
+        // leaked type and mark an uninitialized register as a live Obj* root.
+        setRegType(resultReg, nullptr);
         pushScope();
 
         std::vector<u32> failJumps;
@@ -10405,6 +10491,14 @@ u16 CodeGen::genIfExpr(IfExprNode* expr) {
 
     u32 elseJump = emitJump(op_jump_if_false, condReg);
 
+    // resultReg is write-only and NOT live-in to either branch: each branch
+    // assigns it as its final act. Its per-register type must stay cleared
+    // during branch codegen so a safepoint inside a branch (a call or back
+    // edge) does not see the OTHER branch's leaked type and mark an
+    // uninitialized register as a live Obj* root. (See genIfStmtForValue /
+    // genSwitchStmtForValue for the same discipline.)
+    setRegType(resultReg, nullptr);
+
     // Then branch - generate and copy result
     if (expr->thenBranch->kind == ASTNode::Block) {
         genBlockForValue(static_cast<BlockStmt*>(expr->thenBranch.get()), resultReg);
@@ -10414,11 +10508,14 @@ u16 CodeGen::genIfExpr(IfExprNode* expr) {
     patchJump(elseJump);
 
     // Else branch
+    setRegType(resultReg, nullptr);
     if (expr->elseBranch && expr->elseBranch->kind == ASTNode::Block) {
         genBlockForValue(static_cast<BlockStmt*>(expr->elseBranch.get()), resultReg);
     }
 
     patchJump(endJump);
+    // After the join resultReg is live on both paths.
+    setRegType(resultReg, expr->resolvedType);
     return resultReg;
 }
 

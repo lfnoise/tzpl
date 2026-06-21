@@ -116,12 +116,18 @@ u32 Compiler::addGlobal(bool isObj) {
     return idx;
 }
 
-u32 Compiler::addInlineGlobal(u32 sizeWords) {
+u32 Compiler::addInlineGlobal(u32 sizeWords, Type* inlineType) {
     assert(currentTarget_ && "No current target set (call makeCurrent first)");
     if (sizeWords == 0) sizeWords = 1;
     u32 idx = (u32)currentTarget_->allGlobals.size();
     for (u32 i = 0; i < sizeWords; ++i) {
-        currentTarget_->allGlobals.push_back({Word(), false});
+        currentTarget_->allGlobals.push_back({Word(), false, nullptr});
+    }
+    // If the inline composite embeds Obj* fields, tag the BASE slot with its
+    // type so the GC walks the layout (gcScanPayload) and traces them. The
+    // remaining slots stay plain (their words are part of the same composite).
+    if (inlineType && inlineHasObjPtr(inlineType)) {
+        currentTarget_->allGlobals[idx].inlineObjType = inlineType;
     }
     currentTarget_->globalCount = (u32)currentTarget_->allGlobals.size();
     return idx;
@@ -312,6 +318,26 @@ CompileResult Compiler::compile(const std::string& source, const std::string& fi
     result.newGlobals = std::move(newGlobals);
     result.globalBase = globalBase;
     result.numDynVars = numDynVars();
+    // Per-dynvar GC root flags. A dynvar that holds an Obj* must be a GC root,
+    // else it can be collected while only the dynvar references it (its value
+    // survives in registers only by luck), corrupting later marks. Use
+    // storesObjPtr(), not isObjType() -- see the global-root fix in declareVar.
+    result.dynVarIsObj.assign(result.numDynVars, 0);
+    result.dynVarInlineType.assign(result.numDynVars, nullptr);
+    for (auto const& [name, info] : dynamicVars_) {
+        Type* t = info.type;
+        bool inlineMulti = t && t->repr_ == Type::Repr::Inline && t->sizeWords_ > 1;
+        if (info.dynIndex >= result.dynVarIsObj.size()) continue;
+        if (inlineMulti) {
+            // A multi-word inline dynvar embedding Obj* fields: the GC walks its
+            // layout (gcScanPayload) rather than single-word marking.
+            if (inlineHasObjPtr(t)) result.dynVarInlineType[info.dynIndex] = t;
+        } else {
+            // storesObjPtrUnboxed: a 1-word inline dynvar stores its field's raw
+            // word, not an Obj* -- storesObjPtr over-approximates Repr::Inline.
+            result.dynVarIsObj[info.dynIndex] = (t && storesObjPtrUnboxed(t)) ? 1 : 0;
+        }
+    }
     result.target = target;
 
     // Populate exported function metadata for host-to-VM calling

@@ -939,18 +939,10 @@ Type* TypeChecker::inferExpr(Expr* expr, Type* expectedType) {
         case ASTNode::BlockExpr: {
             auto* be = static_cast<BlockExprNode*>(expr);
             checkNode(be->body.get());
-            if (be->body->kind == ASTNode::Block) {
-                auto* block = static_cast<BlockStmt*>(be->body.get());
-                if (!block->stmts.empty()) {
-                    auto* last = block->stmts.back().get();
-                    if (last->kind == ASTNode::ExprStmt) {
-                        auto* es = static_cast<ExprStmtNode*>(last);
-                        if (es->isTrailing) {
-                            result = es->expr->resolvedType;
-                        }
-                    }
-                }
-            }
+            // getBlockTrailingType covers a trailing expression, value-producing
+            // if-else, AND value-producing match (SwitchStmt) -- the last of
+            // which lets `match` be used as an expression (let x = match ...).
+            result = getBlockTrailingType(be->body.get());
             if (!result) result = compiler_.voidType();
             break;
         }

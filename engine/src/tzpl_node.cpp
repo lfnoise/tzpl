@@ -101,6 +101,18 @@ tzpl_SynthData* Node::setupSynth(Engine* e, NodeDefInfo const& info) {
         control.spec_ = cinfo.spec;
         control.type_ = cinfo.type;
         control.data_ = (void*)calloc(cinfo.type.chans, elemSize(cinfo.type.elem));
+        // Seed the control buffer with its spec'd init value (calloc leaves it
+        // zero otherwise). The generated synth reads its controls into instance
+        // vars on the first processEvents, so without this every control would
+        // start at 0 regardless of its declared init.
+        for (int ch = 0; ch < cinfo.type.chans; ++ch) {
+            switch (cinfo.type.elem) {
+                case tzpl_kF32: ((f32*)control.data_)[ch] = (f32)cinfo.spec.init; break;
+                case tzpl_kF64: ((f64*)control.data_)[ch] = (f64)cinfo.spec.init; break;
+                case tzpl_kI32: ((i32*)control.data_)[ch] = (i32)cinfo.spec.init; break;
+                case tzpl_kI64: ((i64*)control.data_)[ch] = (i64)cinfo.spec.init; break;
+            }
+        }
         synth->controls[i] = control.data_;
         controls.push_back(control);
     }
@@ -122,13 +134,31 @@ Node::Node(Engine* e, Silo* silo, NodeDef* def, i64 nodeID)
     synth = setupSynth(e, info);
 
     init();
+
+    // Prime event-rate controls: push each control's (init-seeded) buffer
+    // through the synth's event() so its ctrlN_active flag is set, then flag
+    // the node so the first runNodes() call runs processEvents and propagates
+    // the init values into the synth's instance vars before audio reads them.
+    if (funs.event) {
+        for (Control& c : controls) {
+            tzpl_Slice dst{0, nullptr};
+            tzpl_Slice data{c.type_.chans, c.data_};
+            funs.event(synth, c.controlID_, dst, data);
+        }
+        if (!controls.empty()) triggered = true;
+    }
 }
 
 Node::~Node() {
     // Capture engine pointer before synth is freed.
     Engine* engine = (Engine*)synth->engine;
 
-    uninit();
+    // NB: do NOT call uninit() here. The generated `_free` (funs.free, below)
+    // already calls `_uninit` before releasing the instance, and built-in nodes
+    // do their teardown in `_free`/delete. Calling uninit() here too ran `_uninit`
+    // TWICE: a `_uninit` that frees a resource without nulling it (e.g. spectral's
+    // tzpl_fft_destroy) then double-freed and crashed on the second teardown.
+    // (Delay synths survived only because genDelayDealloc nulls after free.)
 
     for (int i = 0; i < synth->num_ins; ++i) {
         free(synth->inlets[i]);

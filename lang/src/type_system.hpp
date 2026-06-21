@@ -101,6 +101,20 @@ void classifyType(Type* t);
 //   UnwrappedTupleStruct               -> delegates to its inner type (layout_[0])
 bool storesObjPtr(Type const* t);
 
+// Like storesObjPtr, but for UNBOXED storage (registers, globals, dyn vars)
+// where a 1-word inline composite is stored as its single field's raw word --
+// so we must recurse into that field rather than treat the word as an Obj*
+// (storesObjPtr returns true for ALL Repr::Inline, which is correct only for
+// boxed slots). Multi-word inline values aren't traced per-word, so false.
+// This is the predicate GC roots must use; storesObjPtr over-approximates for
+// inline composites and makes the marker dereference e.g. a Float or enum tag.
+bool storesObjPtrUnboxed(Type const* t);
+
+// True iff a multi-word INLINE composite (struct/tuple/enum) embeds at least one
+// traceable Obj* field anywhere in its layout. Used to decide whether a register
+// holding such a value needs a GC stack-map entry (gcScanPayload walk).
+bool inlineHasObjPtr(Type const* t);
+
 // True iff a value of this type is stored as f64 at runtime. Used for
 // PodArray<i64> / PodArray<f64> / ObjArray dispatch. UnwrappedTupleStruct
 // delegates to its inner type.

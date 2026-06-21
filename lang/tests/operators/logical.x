@@ -18,21 +18,35 @@ println(!false);
 println(!!true);
 println(!!false);
 
--- Short-circuit: false && should not evaluate RHS
--- We verify this by using a function that would crash or produce output
-var side_effect_count = 0;
-fn side_effect() Bool {
-    side_effect_count = side_effect_count + 1;
+-- Short-circuit via an observable side effect. A mutable array is a
+-- reference type, so a function appending to it mutates the shared object
+-- (unlike a captured top-level scalar `var`, which is snapshotted by value
+-- and would mask whether the RHS actually ran).
+let log = [Int]();
+fn mark(n Int) Bool {
+    log push!(n);
     true
 }
 
-false && side_effect();
-side_effect_count println;
+-- false && _ : RHS must NOT run (log stays empty)
+false && mark(1);
+log length println;        -- 0
 
--- Short-circuit: true || should not evaluate RHS
-side_effect_count = 0;
-true || side_effect();
-side_effect_count println;
+-- true || _ : RHS must NOT run (log stays empty)
+true || mark(2);
+log length println;        -- 0
+
+-- true && _ : RHS MUST run
+true && mark(3);
+log length println;        -- 1
+
+-- false || _ : RHS MUST run
+false || mark(4);
+log length println;        -- 2
+
+-- only the marks past the short-circuit point were logged, in order
+log[0] println;            -- 3
+log[1] println;            -- 4
 
 -- Nested logical
 println(!(true && false));

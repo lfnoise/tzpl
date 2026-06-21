@@ -165,6 +165,10 @@ namespace synthdef {
 
     extern thread_local Synth* gSynth;
     extern thread_local Graph* gGraph;
+
+    // When false, addExpr skips the algebraic rewriter. Used by differential
+    // tests that compare analysis output against compilers without rewriting.
+    extern thread_local bool gApplyRewrites;
     
     inline u64 nextExprSerialNo() {
         return gSynth->exprSerialNos++;

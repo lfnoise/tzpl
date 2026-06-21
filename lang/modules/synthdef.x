@@ -925,11 +925,16 @@ fn if_(test Bool, thenFn GraphFn) S = test ? thenFn() : 0 asSignal;
 fn for_(varname String, count Int, bodyFn GraphFn1) S {
 	let varexpr S = SignalExprKind.varexpr(varname) _newSignalExpr;
     let bodyGraph SignalGraph = bodyFn _makeSubGraph1(varexpr);
-    SignalExprKind.for_(count, bodyGraph) _newSignalExpr
+    -- The count flows as a signal input (a constant node), matching the C++
+    -- ForLoopExpr(S count, ...); parseForExpr expects an (count) inputs list.
+    SignalExprKind.for_(count, bodyGraph) _newSignalExpr([count asSignal])
 }
 
 fn switch(test, funs [GraphFn]) S {
-    let graphs [SignalGraph] = funs _makeSubGraph;
+    -- Build a subgraph per case. (An explicit loop, not `funs _makeSubGraph`:
+    -- auto-mapping a function with a function-typed parameter has no codegen.)
+    var graphs [SignalGraph] = [];
+    for (f : funs) { graphs push!(f _makeSubGraph); }
     SignalExprKind.switch_(graphs) _newSignalExpr([test])
 }
 
@@ -975,6 +980,11 @@ fn numTypeInt(op CastOp) Int {
 }
 
 fn toLisp(graph SignalGraph, indentLevel Int) String {
+	-- A branch/body that just returns a captured enclosing value has no local
+	-- exprs; emit an empty list, not `(nil)` (which the C++ parseGraph rejects).
+	if (graph.exprs length == 0) {
+		return "\n" $ "(Graph %^ ())" fmt(graph.root.id) indent(indentLevel);
+	}
 	let sexprLines = graph.exprs toLisp(indentLevel);
 
 	-- Join with newlines and add indentation
@@ -1052,14 +1062,14 @@ fn toLisp(o S, indentLevel Int) String {
             "(%^ IfExpr %^ %^ %^)" fmt(o.id, o inputsToLisp, thenGraph toLisp(indentLevel + 1), elseGraph toLisp(indentLevel + 1))
 		}
         for_(count, bodyGraph) :
-            "(%^ ForExpr %^ %^)" fmt(o.id, count, bodyGraph toLisp(indentLevel + 1));
+            "(%^ ForExpr %^ %^)" fmt(o.id, o inputsToLisp, bodyGraph toLisp(indentLevel + 1));
 
         switch_(cases) :
             "(%^ SwitchExpr %^ %^)" fmt(o.id, o inputsToLisp, cases toLisp(indentLevel + 1) separatedString(" "));
 
         select : "(%^ SelectExpr %^)" fmt(o.id, o inputsToLisp);
         select2 : "(%^ SelectExpr %^)" fmt(o.id, o inputsToLisp);
-		varexpr(name) : "()%^ VarExpr %^)" fmt(o.id, name);
+		varexpr(name) : "(%^ VarExpr \"%^\")" fmt(o.id, name);
 
         voicer(maxVoices, bodyGraph) : {
             "(%^ Voicer %^ %^)" fmt(o.id, maxVoices, bodyGraph toLisp(indentLevel + 1))
@@ -1077,11 +1087,27 @@ fn toLisp(o S, indentLevel Int) String {
 }
 
 
+-- Build the in-memory SignalGraph for a synth function without compiling.
+-- Used by the Tzopilotl-hosted compiler (synthc) and its tests.
+fn makeGraph(synthFun GraphFn) SignalGraph = synthFun _makeTopGraph;
+
+-- The (Synth <name> <graph>) s-expression for a graph, as sent to the C++
+-- compiler by defSynth.
+fn toSynthSexpr(graph SignalGraph, synthName String) String =
+	"(Synth %^ %^)" fmt(synthName, graph toLisp(0));
+
+-- LEGACY / oracle path. Compiles a synth via the S-expression serializer + the C++
+-- compiler (compileSynthDefAndLoad). As of the M5.5 switchover, production synths
+-- compile through synthc instead -- `defSynthX` (synthc/compile.x), the Tzopilotl-
+-- hosted compiler, which byte-matches this path's output (rewrites-on + SIMD width 4)
+-- across the whole corpus and renders bit-identically. `defSynth` (and the `toLisp`/
+-- `toSynthSexpr` serializer + the synthdefGenCppFromSexpr/synthdefAnalysisDump FFIs)
+-- are retained as the differential-test oracle the synthc diff suites compare against.
 fn defSynth(synthFun GraphFn, synthName String) String {
 
 	let graph SignalGraph = synthFun _makeTopGraph;
 
-	let sexprString = "(Synth %^ %^)" fmt(synthName, graph toLisp(0));
+	let sexprString = graph toSynthSexpr(synthName);
 
 	let err = sexprString compileSynthDefAndLoad;
 	if (err length > 0) {
