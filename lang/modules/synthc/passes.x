@@ -45,26 +45,28 @@ fn _delayMembers(ctx Ctx, d Int) [Int] {
 }
 
 ---------------------------------------------------------------------------
--- mergeDelays (synthdef_synth.cpp:1049)
+-- mergeDelays -- Faust-style delay-line sharing.
 --
--- The C++ merge key is (writer, initializers, graph) and merges delays that
--- share a writer. But a DelayWrite's structural identity *is its buffer*:
--- DelayWrite::equals_ compares only delayBuf and ignores the written signal.
--- DelayWrite is hash-consed, so identity == structural identity, which means
--- each buffer has exactly one writer node and two distinct delays can NEVER
--- share a writer. The merge condition is unsatisfiable across distinct delays:
--- every group is a singleton and the pass is a no-op by construction -- not a
--- front-end accident (verified by differential dump/render).
+-- The C++ keys the merge on the writer NODE: DelayWrite::equals_ compares only
+-- delayBuf (the buffer object), so each delay's writer is unique to it and the
+-- pass is a no-op by construction -- two distinct delays can never share a key.
+-- The intent was clearly to fold delays fed identical inputs, but keying on the
+-- buffer defeats it.
 --
--- (The name/intent suggest it meant to key on the written *signal*, to fold
--- delays fed identical inputs + init; equals_ comparing the buffer instead makes
--- that dead. We reproduce the C++ behavior exactly for byte-match -- keying on
--- the signal would diverge. The real optimization could be revisited once
--- synthc is the source of truth.)
+-- synthc (the production compiler) instead keys on the WRITTEN SIGNAL, the way
+-- Faust derives a delay line from the (maximally shared) signal being delayed
+-- rather than from a user-allocated buffer object. Two delays merge when they
+-- share a graph, an init set, a max-delay bound, AND the same hash-consed written-
+-- signal node. Such delays hold bit-identical data at every sample (both written
+-- the same value each frame, both advance their write head in lockstep, both
+-- initialised identically), so they collapse to one ring buffer with multiple read
+-- taps, sized by calcDelayLengths to the max read offset across the merged taps.
 --
--- The grouping still classifies every delay (keyed on the writer node id, the
--- synthc analog of the DelayWrite pointer); the merge body below is a faithful
--- port for the hypothetical shared-writer case.
+-- A feedback delay's written value references its own read (a per-buffer node), so
+-- two feedback delays have distinct written-signal nodes and correctly never merge.
+-- This diverges from the C++ oracle (which keeps both buffers); the result is
+-- validated by render-equivalence -- a merged synth renders bit-identically to its
+-- two-buffer C++ build -- rather than by byte-match.
 
 -- Reader dedup signature: fixed reads key on their sample offset; var reads key
 -- on interpolation + index-signal node (mirrors r->in0() in the C++).
@@ -75,17 +77,42 @@ fn _readerSig(ctx Ctx, r NIdx) String = match (ctx.kind[r]) {
 	_:                     "?";
 };
 
--- Order-independent merge key. The writer node id makes each key unique in the
--- current front end, so groups stay singletons.
+-- Canonical signature for a delay-init VALUE node. A constant init folds by its
+-- value (so two `init(_, 0.0)` written from distinct, un-hash-consed 0.0 literals
+-- still match -- the Faust intent is "same initial content", not "same node"); a
+-- non-constant init value falls back to node identity (it must be the literally
+-- same signal to guarantee identical content). This is deliberately more aggressive
+-- than the C++ init compare, which keys on node identity (in0().get()).
+fn _initValSig(ctx Ctx, valNode Int) String = match (ctx.kind[valNode]) {
+	constant(v, _): match (v) {
+		ints(a):   "CI" $ a toString;
+		floats(a): "CF" $ a toString;
+	};
+	_: "N" $ valNode toString;
+};
+
+-- Order-independent merge key, keyed on the written SIGNAL (Faust-style). Two
+-- delays share a key iff same graph + same written-signal node + same max-delay
+-- bound + same init set (offset + init VALUE). The written-signal node is the
+-- writer's value input (ctx.ins[writer][0]); the signal graph is hash-consed at
+-- import, so equal signals are the same node -- structural identity is pointer
+-- identity here. (A constant written value would not fold by value, but writing a
+-- bare constant into a delay is degenerate; the common foldable case is the init.)
 fn _delayMergeKey(ctx Ctx, d Int) String {
 	let info = ctx.delays[d];
+	let wsig = (info.writer != NONE && ctx.ins[info.writer] length > 0)
+		? ctx.ins[info.writer][0] : NONE;
+	-- the writer's graph (passes can't reach codegen's _delayGraph; writer is set
+	-- for every real delay, so graphOf[writer] is the delay's graph).
+	let graph = info.writer != NONE ? ctx.graphOf[info.writer] : 0;
 	var its [String] = [];
 	for (n : info.initters) {
 		let off = match (ctx.kind[n]) { delayInitK(_, o): o; _: 0; };
-		let val = (ctx.ins[n] length > 0) ? ctx.ins[n][0] : NONE;
-		its push!(off toString $ ":" $ val toString);
+		let vsig = (ctx.ins[n] length > 0) ? ctx _initValSig(ctx.ins[n][0]) : "-";
+		its push!(off toString $ ":" $ vsig);
 	}
-	"W" $ info.writer toString $ "|" $ (its sort join(","))
+	"G" $ graph toString $ "|S" $ wsig toString $ "|M" $ info.maxDelay toString
+		$ "|" $ (its sort join(","))
 }
 
 fn _repointReaderKind(k NodeKind, primary Int) NodeKind = match (k) {

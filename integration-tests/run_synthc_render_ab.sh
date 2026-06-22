@@ -39,6 +39,8 @@ render_seeded /tmp/synthc_ab_rng_ref.wav    "$SCRIPTS/synthc_render_ab_rng_ref.x
 render_seeded /tmp/synthc_ab_rng_synthc.wav "$SCRIPTS/synthc_render_ab_rng_synthc.x"
 render /tmp/synthc_ab_cf_ref.wav    "$SCRIPTS/synthc_render_ab_cf_ref.x"
 render /tmp/synthc_ab_cf_synthc.wav "$SCRIPTS/synthc_render_ab_cf_synthc.x"
+render /tmp/synthc_ab_merge_ref.wav    "$SCRIPTS/synthc_render_ab_merge_ref.x"
+render /tmp/synthc_ab_merge_synthc.wav "$SCRIPTS/synthc_render_ab_merge_synthc.x"
 # Spectral has no C++ reference (the C++ compiler's SIMD spectral codegen is
 # broken); this guards the synthc end-to-end pipeline + the teardown crash fix.
 # Longer duration so the FFT latency + overlap-add produces output. A teardown

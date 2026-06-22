@@ -26,6 +26,9 @@ _check("vdelay", "/tmp/synthc_ab_vdelay_ref.wav", "/tmp/synthc_ab_vdelay_synthc.
 _check("bubbles", "/tmp/synthc_ab_bubbles_ref.wav", "/tmp/synthc_ab_bubbles_synthc.wav");
 _check("rng", "/tmp/synthc_ab_rng_ref.wav", "/tmp/synthc_ab_rng_synthc.wav");
 _check("cf", "/tmp/synthc_ab_cf_ref.wav", "/tmp/synthc_ab_cf_synthc.wav");
+-- merge: synthc collapses two identical delay lines into one (Faust-style); must
+-- render bit-identically to the C++ two-buffer build.
+_check("merge", "/tmp/synthc_ab_merge_ref.wav", "/tmp/synthc_ab_merge_synthc.wav");
 
 -- Spectral: no C++ reference (the C++ compiler's SIMD spectral codegen is
 -- broken), so assert the synthc render is non-silent and didn't crash.
