@@ -404,6 +404,13 @@ fn _rotateIdx(ctx Ctx, n NIdx, c VIdx, inChans Int) VIdx {
 fn _genVec(ctx Ctx, n NIdx, vop VecOp, cel String) String {
 	let inp = ctx.ins[n][0];
 	let inChans = ctx.chans[inp];
+	-- at(a, i): a dynamic gather from the materialized array a by the index signal i
+	-- at channel cel, wrapped mod a.chans. Mirrors the C++ VecAt visitor.
+	match (vop) {
+		at: { return "%^[synthdef::mod(isize(%^), isize(%^))]"
+			fmt(_varName(ctx, inp), genExpr(ctx, ctx.ins[n][1], cel), inChans); }
+		_: {}
+	}
 	let c = viOf(cel);
 	let idx = match (vop) {
 		take(_):         c;
@@ -417,6 +424,51 @@ fn _genVec(ctx Ctx, n NIdx, vop VecOp, cel String) String {
 		_:               c;
 	};
 	genExpr(ctx, inp, idx vxstr)
+}
+
+-- put(a, i, v): copy a into the output array, then scatter v into it at the
+-- (mod-wrapped) index positions. A gets_own_loop block (mirror the C++ VecPut).
+-- The own-loop block forms end WITHOUT a trailing newline; genLoop's `$ "\n"`
+-- supplies it (matching the control-flow convention, so byte-output lines up).
+fn _genVecPut(ctx Ctx, root NIdx) String {
+	let ins = ctx.ins[root];
+	let ty = cppType(ctx.typ[root]);
+	let outv = _varName(ctx, root);
+	let a = ins[0]; let i = ins[1]; let v = ins[2];
+	let aChans = ctx.chans[a];
+	let putCount = min(ctx.chans[i], ctx.chans[v]);
+	let t = _tabs(`cgIndent); let t1 = _tabs(`cgIndent + 1);
+	var parts [String] = [];
+	parts push!(t $ "memcpy(%^, %^, %^ * sizeof(%^));" fmt(outv, _varName(ctx, a), aChans, ty));
+	parts push!(t $ "for (usize _j = 0; _j < %^; ++_j) {" fmt(putCount));
+	parts push!(t1 $ "%^[synthdef::mod(isize(%^[_j]), isize(%^))] = %^[_j];" fmt(outv, _varName(ctx, i), aChans, _varName(ctx, v)));
+	parts push!(t $ "}");
+	parts join("\n")
+}
+
+-- join(inputs): concatenate inputs into the output array (scalar inputs are plain
+-- assignments, multichannel use memcpy); zero-fill any power-of-two padding.
+-- A gets_own_loop block (mirror the C++ VecJoin).
+fn _genVecJoin(ctx Ctx, root NIdx) String {
+	let ins = ctx.ins[root];
+	let ty = cppType(ctx.typ[root]);
+	let outv = _varName(ctx, root);
+	let t = _tabs(`cgIndent);
+	var parts [String] = [];
+	var offset = 0;
+	for (x : ins) {
+		let xc = ctx.chans[x];
+		if (xc == 1) {
+			parts push!(t $ "%^[%^] = %^;" fmt(outv, offset, _varName(ctx, x)));
+		} else {
+			parts push!(t $ "memcpy(%^ + %^, %^, %^ * sizeof(%^));" fmt(outv, offset, _varName(ctx, x), xc, ty));
+		}
+		offset = offset + xc;
+	}
+	if (offset < ctx.chans[root]) {
+		parts push!(t $ "memset(%^ + %^, 0, %^ * sizeof(%^));" fmt(outv, offset, ctx.chans[root] - offset, ty));
+	}
+	parts join("\n")
 }
 
 fn _inlineSelect(ctx Ctx, n NIdx, cel String) String {
@@ -1229,6 +1281,13 @@ fn genTree(ctx Ctx, treeIdx Int, cel String) String {
 		voicerK(mv):    { return ctx _genVoicer(root, mv); }
 		spectralChainK(fft, hop): { return ctx _genSpectral(root, fft, hop); }
 		phiK(target):   { return _tabs(`cgIndent) $ "%^ = %^;\n" fmt(_varRef(ctx, target, cel), genExpr(ctx, ctx.ins[root][0], cel)); }
+		-- put/join build their output array in a block (gets_own_loop); at is a
+		-- normal inline gather and falls through.
+		vecK(vop): { match (vop) {
+			put:  { return ctx _genVecPut(root); }
+			join: { return ctx _genVecJoin(root); }
+			_:    {}
+		} }
 		_: {}
 	}
 
@@ -1560,6 +1619,9 @@ fn genLoop(ctx Ctx, loopIdx Int) String {
 	} else if (loop.isControlFlow) {
 		-- A control-flow loop emits its block directly (no channel loop, even
 		-- multichannel); the branches' own subgraph loops handle the channels.
+		code = code $ genTree(ctx, loop.trees[0], "0");
+	} else if (loop.trees length == 1 && getsOwnLoop(ctx.kind[ctx.trees[loop.trees[0]].root])) {
+		-- put/join: the tree builds its output array in a block, no per-channel loop.
 		code = code $ genTree(ctx, loop.trees[0], "0");
 	} else if (loop.chans == 1) {
 		for (t : loop.trees) { code = code $ genTree(ctx, t, "0"); }

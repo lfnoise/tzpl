@@ -123,6 +123,9 @@ fn _vecOpKey(vop VecOp) String = match (vop) {
 	reverse:      "r";
 	transpose(n): "x" $ n toString;
 	rotate:       "o";
+	at:           "@";
+	put:          "P";
+	join:         "J";
 	_:            "?";
 };
 
@@ -515,9 +518,20 @@ fn _makeReduce(ctx Ctx, ins [Int], op BinaryOp, cols Int) Int {
 	_addExprNode(NodeKind.reduceK(op, cols), ins, ctx.nrate[ins[0]], ctx.typ[ins[0]], cols)
 }
 
-fn _vecChans(ctx Ctx, vop VecOp, ins [Int]) Int = vecOutChans(ctx.chans[ins[0]], vop);
+-- Output channel count (mirrors each VecXxxExpr::calcShape). at = the index
+-- vector's chans; put = the source array's chans; join = sum of all inputs,
+-- rounded up to a power of two; the single-input reorders use vecOutChans.
+fn _vecChans(ctx Ctx, vop VecOp, ins [Int]) Int = match (vop) {
+	at:   ctx.chans[ins[1]];
+	put:  ctx.chans[ins[0]];
+	join: { var raw = 0; for (x : ins) { raw = raw + ctx.chans[x]; } raw asChans }
+	_:    vecOutChans(ctx.chans[ins[0]], vop);
+};
 fn _vecRate(ctx Ctx, vop VecOp, ins [Int]) Rate = match (vop) {
 	rotate: _maxRateOf(ins);               -- rotate's amount can be a signal
+	at:     _maxRateOf(ins);               -- max(a, i)
+	put:    _maxRateOf(ins);               -- max(a, i, v)
+	join:   _maxRateOf(ins);               -- max of all inputs
 	_:      ctx.nrate[ins[0]];
 };
 
@@ -530,12 +544,9 @@ fn _importVecOp(e SignalExpr, vop VecOp) Void {
 		prod(cols):       { _mapId(e.id, _makeReduce(ctx, ins, BinaryOp.mul, cols)); }
 		minOf(cols):      { _mapId(e.id, _makeReduce(ctx, ins, BinaryOp.min, cols)); }
 		maxOf(cols):      { _mapId(e.id, _makeReduce(ctx, ins, BinaryOp.max, cols)); }
-		at:   { _impError("vec_at not exposed by the front-end"); }
-		put:  { _impError("vec_put not exposed by the front-end"); }
-		join: { _impError("vec_join not exposed by the front-end"); }
 		_: {
-			-- take/drop/stride/stutter/ncyc/rotate/reverse/transpose: no folding,
-			-- initial type = any (narrowed to the input type by inference).
+			-- take/drop/stride/stutter/ncyc/rotate/reverse/transpose/at/put/join:
+			-- no folding, initial type = any (narrowed to the input type by inference).
 			_mapId(e.id, _addExprNode(NodeKind.vecK(vop), ins,
 				ctx _vecRate(vop, ins), ANY_NUM, ctx _vecChans(vop, ins)));
 		}

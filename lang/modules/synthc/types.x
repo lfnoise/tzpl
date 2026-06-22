@@ -44,6 +44,26 @@ fn wlPop(wl WorkList) Int {
 
 fn _broadcastC(a Int, b Int) Int = max(a, b);
 
+-- vec op shape/type helpers (factored out: the join arms accumulate over all
+-- inputs). at = index chans; put = source chans; join = padded sum; the reorders
+-- use vecOutChans.
+fn _vecShapeOf(ctx Ctx, vop VecOp, ins [Int]) Int = match (vop) {
+	at:   ctx.chans[ins[1]];
+	put:  ctx.chans[ins[0]];
+	join: { var raw = 0; for (x : ins) { raw = raw + ctx.chans[x]; } raw asChans }
+	_:    vecOutChans(ctx.chans[ins[0]], vop);
+};
+fn _vecInputConstraint(vop VecOp, nodeTyp NumType, i Int) NumType = match (vop) {
+	put:  i == 1 ? ANY_INT : nodeTyp;
+	join: nodeTyp;
+	_:    i == 0 ? nodeTyp : ANY_INT;
+};
+fn _vecNarrowType(ctx Ctx, n NIdx, vop VecOp, ins [Int]) NumType = match (vop) {
+	put:  ctx.typ[n] & ctx.typ[ins[0]] & ctx.typ[ins[2]];
+	join: { var t = ctx.typ[n]; for (x : ins) { t = t & ctx.typ[x]; } t }
+	_:    ctx.typ[n] & ctx.typ[ins[0]];
+};
+
 -- Returns the recomputed channel count for node n from its inputs.
 fn calcShapeOf(ctx Ctx, n NIdx) Int {
 	let ins = ctx.ins[n];
@@ -60,7 +80,7 @@ fn calcShapeOf(ctx Ctx, n NIdx) Int {
 		compareopK(_):       _broadcastC(ctx.chans[ins[0]], ctx.chans[ins[1]]);
 		castopK(_):          ctx.chans[ins[0]];
 		reduceK(_, cols):    cols;
-		vecK(vop):           vecOutChans(ctx.chans[ins[0]], vop);
+		vecK(vop):           _vecShapeOf(ctx, vop, ins);
 		selectK:             _selectChans(ctx, n);
 		urandK(_):           ctx.chans[n];      -- fixed at import
 		birandK(_):          ctx.chans[n];
@@ -147,7 +167,10 @@ fn inputConstraintOf(ctx Ctx, n NIdx, i Int) NumType = match (ctx.kind[n]) {
 	compareopK(_): ctx.typ[n];          -- handled via input_type below; see note
 	castopK(_):    ANY_NUM;             -- cast input is unconstrained
 	selectK:       i == 0 ? ANY_INT : ctx.typ[n];
-	vecK(_):       i == 0 ? ctx.typ[n] : ANY_INT;   -- data input flows; rotate's index is integer
+	-- vec input constraints: put's index (i=1) is integer, its array+value are the
+	-- output type; join constrains every input to the output type (base default);
+	-- at + the reorders constrain the data input (0) to the type, indices to int.
+	vecK(vop):     _vecInputConstraint(vop, ctx.typ[n], i);
 	ifK:           ANY_INT;             -- test must be integer (input 0)
 	switchK(_):    ANY_INT;             -- selector must be integer
 	forK:          ANY_INT;             -- count must be integer
@@ -199,7 +222,9 @@ fn updateTypeOf(ctx Ctx, n NIdx, wl WorkList) Void {
 		compareopK(_):       { _updateCompare(ctx, n, wl); }
 		castopK(_):          {}                  -- output is cast_type; input unconstrained
 		reduceK(_, _):       { _narrow(ctx, n, ctx.typ[n] & ctx.typ[ins[0]], wl); }
-		vecK(_):             { _narrow(ctx, n, ctx.typ[n] & ctx.typ[ins[0]], wl); }
+		-- put narrows by its array + value (skip the integer index); join by all
+		-- inputs; at + the reorders narrow by the data input.
+		vecK(vop):           { _narrow(ctx, n, _vecNarrowType(ctx, n, vop, ins), wl); }
 		selectK:             { _updateSelect(ctx, n, wl); }
 		ifK:                 { _updateCF(ctx, n, wl); }
 		switchK(_):          { _updateCF(ctx, n, wl); }

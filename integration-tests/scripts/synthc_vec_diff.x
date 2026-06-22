@@ -72,6 +72,24 @@ checkVec("transpose", trnv);
 checkVec("rotate", rotv);
 checkVec("stutter", stuv);
 
+-- at / put / join: the multi-input "reorder" ops. at is an inline gather from the
+-- materialized array; put copies+scatters in its own loop; join concatenates inputs
+-- (memcpy for vectors, plain assignment for scalars) with power-of-two zero padding.
+-- (a dynamic/signal index for `at` requires an integer-typed signal; that path is
+-- covered end-to-end by seqTest's sequencer in the example corpus.)
+fn atv() S   = m4() at([0, 2, 1, 3] vec) outlet;
+fn putv() S  = put(m4(), [1] vec, (0.4 lfsaw) * 0.2) outlet;
+fn put2v() S = put(m4(), [0, 2] vec, [0.1, 0.2] * (0.4 lfsaw)) outlet;  -- multichannel scatter
+fn joinv() S = join([[1.0, 2.0] * (0.3 lfsaw), [3.0, 4.0] * (0.2 lfsaw)]) outlet;
+fn join3() S = join([[1.0, 2.0] * (0.3 lfsaw), [3.0] * (0.2 lfsaw), [4.0, 5.0, 6.0] * (0.1 lfsaw)]) outlet;
+fn joinsc() S = join([(0.3 lfsaw) * 0.2, [1.0, 2.0] * (0.1 lfsaw)]) outlet;  -- scalar + vector input
+checkVec("at", atv);
+checkVec("put", putv);
+checkVec("put2", put2v);
+checkVec("join", joinv);
+checkVec("join3", join3);
+checkVec("join_scalar", joinsc);
+
 if (`failures == 0) {
 	println("M2 VEC DIFF PASS");
 } else {

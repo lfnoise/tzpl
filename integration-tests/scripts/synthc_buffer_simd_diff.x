@@ -42,8 +42,11 @@ fn bv4G() S { let b = bufferVar(); let i = (0.3 lfsaw) * 100.0; b vread(i, Inter
 fn bv4S() S { let b = bufferVar(); let i = (0.3 lfsaw) * 100.0; b vread(i, Interpolation.sinc, 4) outlet }
 -- bufLength (f64 scalar) splatted into a 4-chan vector index.
 fn bl4()  S { let b = bufferVar(); let idx = b length * [0.1, 0.2, 0.3, 0.4]; b vread(idx, Interpolation.none, 4) outlet }
--- a 1-channel fixed read (f64) splatted into a 4-chan vector op.
-fn b4s() S { let b = bufferVar(); (inlet(FLOAT32, 4) f64 * (b read(0, 1, 0) + 1.0)) outlet }
+-- a 1-channel fixed read (f64) splatted into a 4-chan vector op. (No constant
+-- addend: a polymorphic float literal makes the C++ ORACLE nondeterministic here --
+-- it resolves the literal's f32/f64 type in pointer-hash order -- while synthc is
+-- deterministic. The bare read still exercises the BufFixRead splat path.)
+fn b4s() S { let b = bufferVar(); (inlet(FLOAT32, 4) f64 * b read(0, 1, 0)) outlet }
 -- 4-channel buffer write: the BufWrite sink stays the scalar-form store, but its
 -- index/value operands are vectors in a SIMD loop (matches the C++, which has no
 -- dedicated SIMD BufWrite path).

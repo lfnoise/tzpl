@@ -231,8 +231,15 @@ fn _vecStr(vop VecOp) String = match (vop) {
 	reverse:      "vec_reverse";
 	transpose(n): "vec_transpose(%^)" fmt(n);
 	rotate:       "vec_rotate";
+	at:           "vec_at";
+	put:          "vec_put";
+	join:         "vec_join";
 	_:            "vec_?";
 };
+
+-- A vop whose output is built by its own block (memcpy/scatter), so it gets its
+-- own loop with no per-channel for-wrapper. Mirrors VecPut/VecJoin gets_own_loop().
+fn _vecGetsOwnLoop(vop VecOp) Bool = match (vop) { put: true; join: true; _: false; };
 
 fn shouldHashCons(k NodeKind) Bool = match (k) {
 	inletK(_, _):           false;
@@ -256,22 +263,28 @@ fn isConstantKind(k NodeKind) Bool = match (k) {
 
 -- Mirrors Expr::needs_input_temp_var(i). M1 kinds with no reordering need no
 -- input temp var; reduce (and the M2 vec ops) do.
+-- vec input materialization. at needs only input 0 as a temp array; put/join
+-- materialize all inputs; the reorders need input 0.
 fn needsInputTempVar(k NodeKind, i Int) Bool = match (k) {
 	reduceK(_, _): true;
-	vecK(_):       i == 0;   -- the data input is index-remapped; rotate's n (i=1) is scalar
+	vecK(vop):     match (vop) { put: true; join: true; _: i == 0; };
 	phiK(_):       true;     -- PhiNodeExpr::needs_input_temp_var
 	_:             false;
 };
 
--- Mirrors Expr::output_must_be_separate_loop() / gets_own_loop(). None of the
--- M1 kinds force their own loop (VecJoin/VecPut do; deferred to M2).
-fn outputMustBeSeparateLoop(k NodeKind) Bool = false;
+-- Mirrors Expr::gets_own_loop() for the value-producing kinds synthc forms loops
+-- around here (control flow is handled separately via isControlFlowKind). put/join
+-- build their output array in a block.
+fn getsOwnLoop(k NodeKind) Bool = match (k) { vecK(vop): vop _vecGetsOwnLoop; _: false; };
 
--- Mirrors Expr::input_must_be_separate_loop(i). reduce forces it; M1 basic
--- kinds do not.
+-- Mirrors Expr::output_must_be_separate_loop() == gets_own_loop().
+fn outputMustBeSeparateLoop(k NodeKind) Bool = getsOwnLoop(k);
+
+-- Mirrors Expr::input_must_be_separate_loop(i). reduce + the single-input vec
+-- reorders force input 0; at forces all inputs; put/join force all (gets_own_loop).
 fn inputMustBeSeparateLoop(k NodeKind, i Int) Bool = match (k) {
 	reduceK(_, _): true;
-	vecK(_):       i == 0;
+	vecK(vop):     match (vop) { at: true; put: true; join: true; _: i == 0; };
 	_:             false;
 };
 
