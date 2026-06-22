@@ -48,3 +48,24 @@ describe(E.b(2)) println;
 -- match expression returning a non-scalar (array)
 let arr = match (E.b(3)) { a: [0]; b(n): [n, n+1, n+2]; c: [9]; };
 arr println;
+
+-- nested match as the DIRECT VALUE of an outer match arm, in expression context
+-- (expr-body fn). The inner match is terminated by ';' like an expression arm.
+fn classify(x E, n Int) String = match (x) {
+	a: match (n) { 0: "a-zero"; _: "a-other"; };
+	b(k): match (k) { 0: "b-zero"; _: "b-nonzero"; };
+	c: "c";
+};
+classify(E.a, 0) println;
+classify(E.a, 5) println;
+classify(E.b(0), 0) println;
+classify(E.b(3), 0) println;
+classify(E.c, 0) println;
+
+-- a block-wrapped nested match as an arm value, also ';'-terminated
+fn pick(x E) Int = match (x) {
+	a: { match (E.b(4)) { b(n): n; _: -1; } };
+	_: 0;
+};
+pick(E.a) println;
+pick(E.c) println;

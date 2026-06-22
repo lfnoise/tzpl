@@ -2309,6 +2309,14 @@ ASTPtr Parser::parseMatchStmt() {
             clause.body = parseStatement();
         }
 
+        // An expression-statement body (`a: 1;`) already consumed its trailing ';'
+        // via parseExprStmtOrAssign. A statement-form body -- a nested `match`, an
+        // `if`/`while`/`for`, or a `{ ... }` block -- does NOT, so a ';' written
+        // after it would dangle and make the next iteration parse ';' as a pattern.
+        // Consume that optional separator here so a nested match (or any statement
+        // body) may be terminated with ';' like an expression arm.
+        match(TokenKind::Semicolon);
+
         cases.push_back(std::move(clause));
         if (current_.loc.start.offset == offsetBefore) { synchronize(); }
     }
