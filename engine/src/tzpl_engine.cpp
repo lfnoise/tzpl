@@ -23,6 +23,7 @@
 
 #include "tzpl_engine.hpp"
 #include "RtAudio.h"
+#include <algorithm>
 #include <chrono>
 #include <thread>
 
@@ -46,6 +47,7 @@ Engine::Engine(EngineConfig const& config, AudioStreamParameters& asp)
     dead_node_thread_(processDeadNodes, this),
     streamParams_(asp)
 {
+    numTempoClocks_ = std::max(1, config.numTempoClocks);
     { int i = 0; for (Silo& s : silos_) {
         s.engine_ = this;
         s.index_ = i;
@@ -69,6 +71,7 @@ Engine::Engine(EngineConfig const& config, AudioStreamParameters& asp, bool /*nr
     dead_node_thread_(processDeadNodes, this),
     streamParams_(asp)
 {
+    numTempoClocks_ = std::max(1, config.numTempoClocks);
     { int i = 0; for (Silo& s : silos_) {
         s.engine_ = this;
         s.index_ = i;
@@ -100,6 +103,17 @@ Engine::Engine(EngineConfig const& config, AudioStreamParameters& asp, bool /*nr
 void Engine::postInit() {
     defOutputNode(streamParams_.channels);
     defInputNode(streamParams_.inputChannels);
+
+    // Size each silo's TempoClock slots. Done here (before worker threads
+    // start) so streamParams_.sampleRate reflects any device negotiation.
+    // Default 60 BPM => 1 beat == 1 second.
+    for (Silo& s : silos_) {
+        s.tempoClocks_.clear();
+        s.tempoClocks_.reserve(numTempoClocks_);
+        for (int k = 0; k < numTempoClocks_; ++k) {
+            s.tempoClocks_.emplace_back(60.0, streamParams_.sampleRate, 0);
+        }
+    }
 
     // start work loops
     for (int i = 1; i < silos_.size(); ++i) {

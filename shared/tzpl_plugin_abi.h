@@ -66,8 +66,9 @@ typedef enum tzpl_SErr {
     tzpl_errNumPortsMismatch,
     
     tzpl_errNotImplemented,
-    
+
     tzpl_errTooLate,
+    tzpl_errClockOutOfRange,
 } tzpl_SErr;
 
 /* Signal rate - defines how signals are processed */

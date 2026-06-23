@@ -411,7 +411,7 @@ void test2()
         setInput({101, 1}, 1, &amp, .2, fadeEaseInCubic);
         connect({101, 0}, {0, 0});
         f64 t = t0 + latency + i * dt;
-        sched(t);
+        sched(0, t);
     }
 
     sleepSec(5);
@@ -424,7 +424,7 @@ void test2()
         begin(e, i);
         setInput({101, 0}, 1, &freq, .5, fadeExponential);
         f64 t = t0 + latency + i * dt;
-        sched(t);
+        sched(0, t);
     }
 
     sleepSec(8);
@@ -436,7 +436,7 @@ void test2()
         begin(e, i);
         setInput({101, 0}, 1, &freq, .5, fadeExponential);
         f64 t = t0 + latency + i * dt;
-        sched(t);
+        sched(0, t);
     }
 
     sleepSec(8);
@@ -458,7 +458,7 @@ void test2()
         begin(e, i);
         setInput({101, 1}, 1, &amp, .5, fadeEaseOutCubic);
         f64 t = t0 + latency + i * dt;
-        sched(t);
+        sched(0, t);
     }
 
     sleepSec(6);
@@ -521,13 +521,13 @@ void test3()
             params[0] += 7;
             params[3] = .3;
             noteOn(101, noteID+1, 6, params);
-            sched(t);
+            sched(0, t);
 
             begin(e, 0);
             noteOff(101, noteID);
             noteOff(101, noteID+1);
             t += numPitches * dt;
-            sched(t);
+            sched(0, t);
 
             noteID+=2;
         }
@@ -541,12 +541,12 @@ void test3()
             noteOn(101, noteID, 6, params);
 
             f64 t = t0 + latency + i * dt;
-            sched(t);
+            sched(0, t);
 
             t += .1 + .04 * k;
             begin(e, 0);
             noteOff(101, noteID);
-            sched(t);
+            sched(0, t);
             ++noteID;
         }
         sleepf(.6);
@@ -563,13 +563,13 @@ void test3()
             params[0] += 7;
             params[3] = .3;
             noteOn(101, noteID+1, 6, params);
-            sched(t);
+            sched(0, t);
 
             begin(e, 0);
             noteOff(101, noteID);
             noteOff(101, noteID+1);
             t += numPitches * dt;
-            sched(t);
+            sched(0, t);
 
             noteID+=2;
         }
@@ -583,12 +583,12 @@ void test3()
             noteOn(101, noteID, 6, params);
 
             f64 t = t0 + latency + i * dt;
-            sched(t);
+            sched(0, t);
 
             t += .1 + .04 * k;
             begin(e, 0);
             noteOff(101, noteID);
-            sched(t);
+            sched(0, t);
             ++noteID;
         }
         sleepf(.6);
@@ -609,12 +609,12 @@ void test3()
             noteSetParamRange(101, noteID, 2, 1, &drive);
 
             f64 t = t0 + latency + i * dt;
-            sched(t);
+            sched(0, t);
 
             t += 2.;
             begin(e, 0);
             noteOff(101, noteID);
-            sched(t);
+            sched(0, t);
             ++noteID;
         }
         sleepSec(3);
@@ -628,12 +628,12 @@ void test3()
             noteSetParamRange(101, noteID, 2, 1, &drive);
 
             f64 t = t0 + latency + i * dt;
-            sched(t);
+            sched(0, t);
 
             t += 2.;
             begin(e, 0);
             noteOff(101, noteID);
-            sched(t);
+            sched(0, t);
             ++noteID;
         }
         sleepSec(3);

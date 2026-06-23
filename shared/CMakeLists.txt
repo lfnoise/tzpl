@@ -8,6 +8,7 @@ include(GNUInstallDirs)
 
 install(FILES
     tzpl_plugin_abi.h
+    tempo_ramp.hpp
     tzpl_simd.hpp
     tzpl_random.hpp
     tzpl_matrix_transform.hpp

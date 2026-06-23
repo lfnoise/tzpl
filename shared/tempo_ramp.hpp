@@ -16,7 +16,7 @@
 
 //
 //  tempo_ramp.hpp
-//  lang
+//  shared
 //
 //  A tempo ramp that is linear with respect to beats (exponential wrt seconds).
 //  Used by tempo-based schedulers to convert between beats and seconds.

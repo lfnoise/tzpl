@@ -36,6 +36,8 @@ struct Command
 	Command* prev_ = nullptr; // only used on scheduler
 	f64 streamTime_;
 	i64 sampleTime_;
+	f64 beatTime_ = 0.; // target beat when scheduled on a TempoClock (clock_ >= 0).
+	int clock_ = -1;    // TempoClock slot index, or -1 if not clock-scheduled.
 	SchedPolicy schedPolicy_ = schedImmediate;
 	int stage_ = 0; // stage is odd if RT.
 	tzpl_SErr err_ = tzpl_errNone;
@@ -127,6 +129,67 @@ struct TimeSortedCommandList {
 		if (!head) return out;
 		// pop from head of list
 		while (head->sampleTime_ <= sampleTime) {
+			Command* next = head->next_;
+			out.add(head);
+			head = next;
+			if (!head) break;
+		}
+		if (head) head->prev_ = nullptr;
+		else tail = nullptr;
+		return out;
+	}
+
+	void clear() {
+		Command* cmd = head;
+		while (cmd) {
+			Command* next = cmd->next_;
+			delete cmd;
+			cmd = next;
+		}
+		head = tail = nullptr;
+	}
+};
+
+//=============================================================================================
+#pragma mark BEAT SORTED COMMAND LIST
+
+// Like TimeSortedCommandList but keyed on Command::beatTime_ (used by TempoClock).
+// Commands are popped when a clock's current beat reaches their beatTime_.
+struct BeatSortedCommandList {
+	Command* head = nullptr;
+	Command* tail = nullptr;
+
+	void add(Command* cmd) {
+		if (tail) {
+			Command* pos = tail;
+			// search backwards from tail of list
+			while (pos && pos->beatTime_ > cmd->beatTime_) { pos = pos->prev_; }
+			if (pos) {
+				// insert after pos
+				cmd->next_ = pos->next_;
+				cmd->prev_ = pos;
+				if (pos->next_) pos->next_->prev_ = cmd;
+				else tail = cmd;
+				pos->next_ = cmd;
+			} else {
+				// insert at head
+				cmd->next_ = head;
+				cmd->prev_ = nullptr;
+				head->prev_ = cmd;
+				head = cmd;
+			}
+		} else { // list is empty
+			cmd->prev_ = nullptr;
+			cmd->next_ = nullptr;
+			head = tail = cmd;
+		}
+	}
+
+	CommandList pop(f64 beat) {
+		CommandList out;
+		if (!head) return out;
+		// pop from head of list
+		while (head->beatTime_ <= beat) {
 			Command* next = head->next_;
 			out.add(head);
 			head = next;

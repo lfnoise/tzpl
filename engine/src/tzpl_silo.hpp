@@ -27,6 +27,7 @@
 #include "tzpl_atomic_fifo.hpp"
 #include "tzpl_node.hpp"
 #include "tzpl_command.hpp"
+#include "tzpl_tempo_clock.hpp"
 #include <atomic>
 #ifdef __APPLE__
 #include <dispatch/dispatch.h>
@@ -90,14 +91,11 @@ struct Silo
     // Set from an NRT thread via command; only accessed by the Silo's RT thread.
     void* vm_ = nullptr;
 
-    // Optional tempo-based scheduler (opaque pointer).
-    // Polled each sample to fire beat-timed events on the attached VM.
-    void* rtTempoScheduler_ = nullptr;
-
-    // Callback for per-sample tempo scheduler processing.
-    // Set when a tempo scheduler is attached. Avoids engine depending on lang types.
-    using TempoSchedFn = void (*)(void* scheduler, i64 sampleTime, void* vm);
-    TempoSchedFn tempoSchedFn_ = nullptr;
+    // Beat-based tempo-clock slots. Each slot maps beats<->samples through a
+    // TempoRamp and holds a beat-sorted queue of scheduled bundles. Sized to
+    // EngineConfig::numTempoClocks at construction. Slot k is kept in sync
+    // across all Silos by broadcasting tempo changes to every Silo's slot k.
+    std::vector<TempoClock> tempoClocks_;
 
     // Per-buffer heartbeat callback for VM GC. Called once per audio buffer
     // to drain the deferred-delete queue and reclaim dead objects.

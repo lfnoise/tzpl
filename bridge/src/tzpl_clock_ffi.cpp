@@ -25,6 +25,7 @@
 #include "tzpl_clock_ffi.hpp"
 #include "tzpl_app_context.hpp"
 #include "tzpl_nrt_render.hpp"
+#include "tzpl_client_interface.hpp"
 #include "tzpl.hpp"
 #include "value.hpp"
 
@@ -44,6 +45,24 @@ static ts::NRTTempoScheduler* getScheduler(ts::VM& vm) {
     auto* ctx = static_cast<AppContext*>(vm.userData());
     return ctx ? ctx->tempoScheduler : nullptr;
 }
+
+// The engine whose tempo clocks back this scheduler context (render-local
+// engine inside a render, else the live engine). clock.x tempo changes are
+// mirrored onto this engine's clock slot 0 so that beat-scheduled bundles
+// (ae.sched(0, beat)) follow the same tempo as the clock module. The
+// NRTTempoScheduler still drives the lang callbacks; the engine clock is the
+// authority for engine-side beat scheduling.
+static engine::Engine* getClockEngine(ts::VM& vm) {
+    if (auto const* r = bridge::currentRenderContext()) {
+        return r->engine;
+    }
+    auto* ctx = static_cast<AppContext*>(vm.userData());
+    return ctx ? ctx->engine : nullptr;
+}
+
+// clock.x targets engine clock slot 0 for now. Multi-slot tempo control is
+// available via the audio_engine FFI (setTempo(clock, bpm) / schedTempoChange).
+static constexpr int kClockSlot = 0;
 
 // ---------------------------------------------------------------------------
 // FFI functions
@@ -102,9 +121,11 @@ static void ffi_cancel(ts::VM& vm, u16 dst, u16, u16 argBase) {
 
 // fn setTempo(bpm Float) Void
 static void ffi_setTempo(ts::VM& vm, u16 dst, u16, u16 argBase) {
-    auto* sched = getScheduler(vm);
-    if (!sched) return;
-    sched->setTempoBPM(vm.reg(argBase).f);
+    f64 bpm = vm.reg(argBase).f;
+    // Drive the NRT scheduler (lang callback timing) ...
+    if (auto* sched = getScheduler(vm)) sched->setTempoBPM(bpm);
+    // ... and the authoritative engine clock (engine-side beat scheduling).
+    if (auto* e = getClockEngine(vm)) engine::setTempo(e, kClockSlot, bpm);
 }
 
 // fn getTempo() Float
@@ -133,12 +154,19 @@ static void ffi_getBeatDur(ts::VM& vm, u16 dst, u16, u16) {
 // fn schedTempoChange(beat Float, targetBPM Float, rampBeats Float) Int
 // Schedule a tempo ramp at a specific beat.
 static void ffi_schedTempoChange(ts::VM& vm, u16 dst, u16, u16 argBase) {
-    auto* sched = getScheduler(vm);
-    if (!sched) { vm.reg(dst).i = -1; return; }
     f64 beat = vm.reg(argBase).f;
     f64 targetBPM = vm.reg(argBase + 1).f;
     f64 rampBeats = vm.reg(argBase + 2).f;
-    vm.reg(dst).i = sched->schedTempoChangeBPM(beat, targetBPM, rampBeats);
+    i64 id = -1;
+    // Drive the NRT scheduler (lang callback timing) ...
+    if (auto* sched = getScheduler(vm)) {
+        id = sched->schedTempoChangeBPM(beat, targetBPM, rampBeats);
+    }
+    // ... and the authoritative engine clock (engine-side beat scheduling).
+    if (auto* e = getClockEngine(vm)) {
+        engine::schedTempoChange(e, kClockSlot, beat, targetBPM, rampBeats);
+    }
+    vm.reg(dst).i = id;
 }
 
 // fn setLatency(seconds Float) Void

@@ -185,6 +185,7 @@ struct Engine
 	std::atomic_int runSilos_ = 1;
 
 	std::vector<Silo> silos_;
+	int numTempoClocks_ = 1; // number of TempoClock slots per silo
 	std::vector<NodeDef*> defs_;
 	std::unique_ptr<RtAudio> rtaudio_;
 

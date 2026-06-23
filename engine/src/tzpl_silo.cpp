@@ -125,8 +125,8 @@ void Silo::processFrames() {
 
         processScheduledEvents();
 
-        if (tempoSchedFn_ && rtTempoScheduler_) {
-            tempoSchedFn_(rtTempoScheduler_, sampleTime_, vm_);
+        for (auto& clk : tempoClocks_) {
+            clk.process(sampleTime_, this);
         }
 
         sortNodes();
@@ -416,31 +416,36 @@ void Silo::processRTCommands() {
         Command* cmd = head;
         while (cmd) {
             Command* next = cmd->next_;
-            switch (cmd->schedPolicy_) {
-                case schedImmediate:
-                    cmd->run(this);
-                    backToNRT.add(cmd);
-                    break;
-                case schedBetterLateThanNever:
-                    cmd->sampleTime_ = engine_->streamTimeToSampleTime(cmd->streamTime_);
-                    if (cmd->sampleTime_ < sampleTime_) {
-                        cmd->run(this); // perform late.
-                        backToNRT.add(cmd);
-                        printf("late A\n");
-                    } else {
-                        sched_.add(cmd);
-                    }
-                    break;
-                case schedOnTimeOnly:
-                    cmd->sampleTime_ = engine_->streamTimeToSampleTime(cmd->streamTime_);
-                    if (cmd->sampleTime_ < sampleTime_) {
+            if (cmd->schedPolicy_ == schedImmediate) {
+                cmd->run(this);
+                backToNRT.add(cmd);
+            } else if (cmd->clock_ >= 0 && cmd->clock_ < (int)tempoClocks_.size()) {
+                // Beat-scheduled on a TempoClock: late-bound, fires when the
+                // clock's beat reaches beatTime_.
+                TempoClock& clk = tempoClocks_[cmd->clock_];
+                if (cmd->beatTime_ < clk.beatAtSample(sampleTime_)) {
+                    if (cmd->schedPolicy_ == schedOnTimeOnly) {
                         cmd->err_ = tzpl_errTooLate;
-                        backToNRT.add(cmd);
-                        printf("late B\n");
                     } else {
-                        sched_.add(cmd);
+                        cmd->run(this); // betterLateThanNever: perform late.
                     }
-                    break;
+                    backToNRT.add(cmd);
+                } else {
+                    clk.schedule(cmd);
+                }
+            } else {
+                // Legacy sample-time path (no clock): schedule in stream seconds.
+                cmd->sampleTime_ = engine_->streamTimeToSampleTime(cmd->streamTime_);
+                if (cmd->sampleTime_ < sampleTime_) {
+                    if (cmd->schedPolicy_ == schedOnTimeOnly) {
+                        cmd->err_ = tzpl_errTooLate;
+                    } else {
+                        cmd->run(this); // perform late.
+                    }
+                    backToNRT.add(cmd);
+                } else {
+                    sched_.add(cmd);
+                }
             }
             cmd = next;
         }
@@ -457,6 +462,20 @@ void Silo::processScheduledEvents() {
             cmd = cmd->next_;
         }
         to_nrt_.push(cmds.head); // send cmds back to NRT.
+    }
+}
+
+void TempoClock::process(i64 sampleTime, Silo* s) {
+    if (!queue_.head) return;
+    f64 currentBeat = beatAtSample(sampleTime);
+    CommandList cmds = queue_.pop(currentBeat);
+    if (cmds.head) {
+        Command* cmd = cmds.head;
+        while (cmd) {
+            cmd->run(s);
+            cmd = cmd->next_;
+        }
+        s->to_nrt_.push(cmds.head); // send cmds back to NRT for stage-2 cleanup.
     }
 }
 

@@ -21,7 +21,7 @@ go(coro fn() Float {
         setInput(101, 1, 0.0);
         setInputX(101, 1, 0.05, 0.2, FadeCurve.fadeEaseInCubic);
         connect(101, 0, 0, 0);
-        sched(t0 + latency + i * 0.2);
+        sched(0, t0 + latency + i * 0.2);
     }
     yield 5.0;
 
@@ -30,7 +30,7 @@ go(coro fn() Float {
     for (i : (0..7)) {
         begin(i);
         setInputX(101, 0, 360.0 + 180.0 * i, 0.5, FadeCurve.fadeExponential);
-        sched(t0 + latency + i * 0.5);
+        sched(0, t0 + latency + i * 0.5);
     }
     yield 8.0;
 
@@ -39,7 +39,7 @@ go(coro fn() Float {
     for (i : (0..7)) {
         begin(i);
         setInputX(101, 0, 240.0 + 60.0 * i, 0.5, FadeCurve.fadeExponential);
-        sched(t0 + latency + i * 0.5);
+        sched(0, t0 + latency + i * 0.5);
     }
     yield 8.0;
 
@@ -56,7 +56,7 @@ go(coro fn() Float {
     for (i : (0..7)) {
         begin(i);
         setInputX(101, 1, 0.0, 0.5, FadeCurve.fadeEaseOutCubic);
-        sched(t0 + latency + i * 0.4);
+        sched(0, t0 + latency + i * 0.4);
     }
     yield 6.0;
     

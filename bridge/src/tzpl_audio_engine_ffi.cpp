@@ -90,6 +90,7 @@ static char const* errName(tzpl_SErr err) {
         case tzpl_errNumPortsMismatch:       return "errNumPortsMismatch";
         case tzpl_errNotImplemented:         return "errNotImplemented";
         case tzpl_errTooLate:                return "errTooLate";
+        case tzpl_errClockOutOfRange:        return "errClockOutOfRange";
     }
     return "errUnknown";
 }
@@ -195,22 +196,54 @@ static void ffi_begin(ts::VM& vm, u16 dst, u16, u16 argBase) {
     returnErr(vm, dst, engine::begin(getEngine(vm), silo), __func__);
 }
 
-// fn sched() -> Int  (send bundle for immediate execution)
+// fn go() -> Int  (send bundle for immediate execution)
 static void ffi_sched_immediate(ts::VM& vm, u16 dst, u16, u16) {
     returnErr(vm, dst, engine::go(), __func__);
 }
 
-// fn sched(time: Float) -> Int
+// fn sched(clock: Int, beat: Float) -> Int
 static void ffi_sched(ts::VM& vm, u16 dst, u16, u16 argBase) {
-    f64 time = vm.reg(argBase).f;
-    returnErr(vm, dst, engine::sched(time), __func__);
+    int clock = static_cast<int>(vm.reg(argBase).i);
+    f64 beat = vm.reg(argBase + 1).f;
+    returnErr(vm, dst, engine::sched(clock, beat), __func__);
 }
 
-// fn schedPolicy(time: Float, policy: Int) -> Int
+// fn schedPolicy(clock: Int, beat: Float, policy: Int) -> Int
 static void ffi_schedPolicy(ts::VM& vm, u16 dst, u16, u16 argBase) {
-    f64 time = vm.reg(argBase).f;
-    auto policy = static_cast<engine::SchedPolicy>(vm.reg(argBase + 1).i);
-    returnErr(vm, dst, engine::sched(time, policy), __func__);
+    int clock = static_cast<int>(vm.reg(argBase).i);
+    f64 beat = vm.reg(argBase + 1).f;
+    auto policy = static_cast<engine::SchedPolicy>(vm.reg(argBase + 2).i);
+    returnErr(vm, dst, engine::sched(clock, beat, policy), __func__);
+}
+
+// fn setTempo(clock: Int, bpm: Float) -> Int
+static void ffi_setTempo(ts::VM& vm, u16 dst, u16, u16 argBase) {
+    int clock = static_cast<int>(vm.reg(argBase).i);
+    f64 bpm = vm.reg(argBase + 1).f;
+    returnErr(vm, dst, engine::setTempo(getEngine(vm), clock, bpm), __func__);
+}
+
+// fn schedTempoChange(clock: Int, atBeat: Float, targetBPM: Float, rampBeats: Float) -> Int
+static void ffi_schedTempoChange(ts::VM& vm, u16 dst, u16, u16 argBase) {
+    int clock = static_cast<int>(vm.reg(argBase).i);
+    f64 atBeat = vm.reg(argBase + 1).f;
+    f64 targetBPM = vm.reg(argBase + 2).f;
+    f64 rampBeats = vm.reg(argBase + 3).f;
+    returnErr(vm, dst,
+        engine::schedTempoChange(getEngine(vm), clock, atBeat, targetBPM, rampBeats),
+        __func__);
+}
+
+// fn clockBeats(clock: Int) -> Float
+static void ffi_clockBeats(ts::VM& vm, u16 dst, u16, u16 argBase) {
+    int clock = static_cast<int>(vm.reg(argBase).i);
+    vm.reg(dst).f = engine::clockBeats(getEngine(vm), clock);
+}
+
+// fn clockTempo(clock: Int) -> Float  (BPM)
+static void ffi_clockTempo(ts::VM& vm, u16 dst, u16, u16 argBase) {
+    int clock = static_cast<int>(vm.reg(argBase).i);
+    vm.reg(dst).f = engine::clockTempoBPM(getEngine(vm), clock);
 }
 
 // ---------------------------------------------------------------------------
@@ -684,9 +717,14 @@ void registerAudioEngineFFI(ts::Compiler& compiler) {
 
     // Command bundling (rtSafe — these just queue commands via lock-free FIFO)
     reg("begin",            Int, {Int},            ffi_begin,         true);
+    reg("go",               Int, {},               ffi_sched_immediate, true);
     reg("sched",            Int, {},               ffi_sched_immediate, true);
-    reg("sched",            Int, {Float},          ffi_sched,         true);
-    reg("schedPolicy",      Int, {Float, Int},     ffi_schedPolicy,   true);
+    reg("sched",            Int, {Int, Float},     ffi_sched,         true);
+    reg("schedPolicy",      Int, {Int, Float, Int}, ffi_schedPolicy,  true);
+    reg("setTempo",         Int, {Int, Float},     ffi_setTempo,      true);
+    reg("schedTempoChange", Int, {Int, Float, Float, Float}, ffi_schedTempoChange, true);
+    reg("clockBeats",       Float, {Int},          ffi_clockBeats,    true);
+    reg("clockTempo",       Float, {Int},          ffi_clockTempo,    true);
 
     // Node operations (rtSafe — queued via command bundling)
     reg("newNode",          Int, {String, Int},    ffi_newNode,       true);

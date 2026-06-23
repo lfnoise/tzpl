@@ -74,6 +74,7 @@ struct PortAddr {
 
 struct EngineConfig {
     int numSilos = 4;
+    int numTempoClocks = 1; // beat-based TempoClock slots per silo
 };
 
 Engine* newEngine(EngineConfig const& config, AudioStreamParameters& streamParams);
@@ -136,14 +137,28 @@ f64 getStreamTime(Engine* e); // audio must be initialized, else exception.
 // begin a bundle to be executed on a silo.
 tzpl_SErr begin(Engine* e, int silo);
 
-// sched() schedules all bundled commands at the given time in seconds since start.
-// If SchedPolicy is immediate, the command will be executed on as soon as received. time is ignored.
-// If SchedPolicy is onTimeOnly, the command will be discarded if it is too late to be executed on time.
-// If SchedPolicy is betterLateThanNever (the default) the command will be executed even if it is too late.
-tzpl_SErr sched(f64 time, SchedPolicy policy = schedBetterLateThanNever);
+// sched() schedules all bundled commands at the given beat on tempo clock
+// `clock` (0 .. numTempoClocks-1). The bundle is late-bound: it fires when that
+// clock's beat reaches `beat`, tracking any tempo changes made in the meantime.
+// If SchedPolicy is immediate, the bundle executes as soon as received (clock/beat ignored).
+// If SchedPolicy is onTimeOnly, the bundle is discarded if the beat is already past.
+// If SchedPolicy is betterLateThanNever (the default) it executes even if the beat is past.
+tzpl_SErr sched(int clock, f64 beat, SchedPolicy policy = schedBetterLateThanNever);
 
-// go() is a convenience for calling sched(0., SchedPolicy::immediate)
+// go() is a convenience for immediate execution (SchedPolicy::immediate).
 tzpl_SErr go();
+
+// Tempo control. These are broadcast to clock slot `clock` on every silo so the
+// slot stays in sync across silos. Not part of a begin()/sched() bundle.
+// setTempo sets the tempo immediately; schedTempoChange ramps toward targetBPM
+// over rampBeats beats, starting when the clock reaches atBeat.
+tzpl_SErr setTempo(Engine* e, int clock, f64 bpm);
+tzpl_SErr schedTempoChange(Engine* e, int clock, f64 atBeat, f64 targetBPM, f64 rampBeats);
+
+// Query the current beat / tempo (BPM) of a clock slot (read from silo 0; all
+// silos are kept in sync). Returns 0 on an invalid clock index.
+f64 clockBeats(Engine* e, int clock);
+f64 clockTempoBPM(Engine* e, int clock);
 
 // Add a pre-built Command to the current bundle.
 // The Command must be heap-allocated; ownership is transferred.

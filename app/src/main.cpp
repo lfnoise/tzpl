@@ -74,6 +74,7 @@ struct Config {
     int bufferFrames = 512;
     double sampleRate = 48000.0;
     int numSilos = 4;
+    int numTempoClocks = 1;
     int oscPort = 0;  // 0 = disabled
     std::string natsUrl;  // empty = disabled
     std::string engineName;  // empty = single-instance mode (flat subjects only)
@@ -115,6 +116,7 @@ static bool parseConfigFile(const std::string& path, Config& config) {
 
         try {
             if (key == "silos")            config.numSilos = std::stoi(value);
+            else if (key == "tempoClocks") config.numTempoClocks = std::stoi(value);
             else if (key == "sampleRate")  config.sampleRate = std::stod(value);
             else if (key == "bufferFrames") config.bufferFrames = std::stoi(value);
             else if (key == "channels")    config.channels = std::stoi(value);
@@ -459,6 +461,7 @@ static engine::Engine* createEngine(const Config& config, bool nrt = false) {
 
     engine::EngineConfig engineConfig;
     engineConfig.numSilos = config.numSilos;
+    engineConfig.numTempoClocks = config.numTempoClocks;
 
     engine::Engine* e = nrt ? engine::newEngineNRT(engineConfig, params)
                             : engine::newEngine(engineConfig, params);
@@ -499,6 +502,7 @@ static void printHelp() {
         "\n"
         "Audio options (override config file):\n"
         "  --silos <n>             Number of parallel audio threads (default: 4)\n"
+        "  --tempo-clocks <n>      Number of tempo-clock slots per silo (default: 1)\n"
         "  --sample-rate <hz>      Sample rate (default: 48000)\n"
         "  --buffer-frames <n>     Audio buffer size in frames (default: 512)\n"
         "  --channels <n>          Output channels (default: 2)\n"
@@ -579,7 +583,7 @@ int main(int argc, const char* argv[]) {
 #endif
 
         // CLI overrides -- collected during parsing, applied after config file
-        std::optional<int> cliSilos, cliChannels, cliFirstChannel, cliBufferFrames;
+        std::optional<int> cliSilos, cliTempoClocks, cliChannels, cliFirstChannel, cliBufferFrames;
         std::optional<int> cliInputChannels, cliFirstInputChannel;
         std::optional<double> cliSampleRate;
         std::optional<std::string> cliDevice, cliInputDevice;
@@ -606,6 +610,8 @@ int main(int argc, const char* argv[]) {
                 waitAfterScript = true;
             } else if (arg == "--silos" && i + 1 < argc) {
                 cliSilos = std::stoi(argv[++i]);
+            } else if (arg == "--tempo-clocks" && i + 1 < argc) {
+                cliTempoClocks = std::stoi(argv[++i]);
             } else if (arg == "--sample-rate" && i + 1 < argc) {
                 cliSampleRate = std::stod(argv[++i]);
             } else if (arg == "--buffer-frames" && i + 1 < argc) {
@@ -651,6 +657,7 @@ int main(int argc, const char* argv[]) {
 
         // --- Apply CLI overrides (take priority over config file) ---
         if (cliSilos)        config.numSilos = *cliSilos;
+        if (cliTempoClocks)  config.numTempoClocks = *cliTempoClocks;
         if (cliSampleRate)   config.sampleRate = *cliSampleRate;
         if (cliBufferFrames) config.bufferFrames = *cliBufferFrames;
         if (cliChannels)     config.channels = *cliChannels;
@@ -840,6 +847,7 @@ int main(int argc, const char* argv[]) {
                         opts.channels    = config.channels;
                         opts.bufferFrames = config.bufferFrames;
                         opts.numSilos    = config.numSilos;
+                        opts.numTempoClocks = config.numTempoClocks;
                         opts.durationSeconds  = nrtDuration;
                         opts.tailSeconds      = nrtTailSeconds;
                         opts.safetyCapSeconds = nrtSafetyCapSeconds;

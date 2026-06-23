@@ -69,6 +69,8 @@ target_include_directories(tzpl_lib PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
+# shared/ provides tempo_ramp.hpp (and other common headers).
+target_link_libraries(tzpl_lib PUBLIC shared)
 target_compile_options(tzpl_lib PRIVATE ${TZPL_COMPILE_OPTIONS})
 
 # Debug flags

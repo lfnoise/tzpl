@@ -20,5 +20,5 @@ connect(100, 0, 0, 0);
 setControl(100, 0, 330.0);
 setControl(100, 1, 0.3);
 sched();
-begin(0); setControl(100, 0, 660.0); sched(0.04);
-begin(0); setControl(100, 1, 0.15); sched(0.07);
+begin(0); setControl(100, 0, 660.0); sched(0, 0.04);
+begin(0); setControl(100, 1, 0.15); sched(0, 0.07);

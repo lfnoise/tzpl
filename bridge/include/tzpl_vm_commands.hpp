@@ -30,7 +30,6 @@
 #include "tzpl_silo.hpp"
 #include "vm.hpp"
 #include "value.hpp"
-#include "tzpl_rt_tempo_scheduler.hpp"
 
 namespace bridge {
 
@@ -158,87 +157,10 @@ struct DetachVMCmd : engine::Command {
     }
 };
 
-// Attaches an RT tempo scheduler to a Silo.
-struct AttachRTTempoSchedulerCmd : engine::Command {
-    RTTempoScheduler* scheduler_;
-
-    explicit AttachRTTempoSchedulerCmd(RTTempoScheduler* sched)
-        : scheduler_(sched) {}
-
-    void doRT(engine::Silo* s) override {
-        s->rtTempoScheduler_ = scheduler_;
-        s->tempoSchedFn_ = &RTTempoScheduler::processSampleCallback;
-    }
-};
-
-// Detaches the RT tempo scheduler from a Silo.
-struct DetachRTTempoSchedulerCmd : engine::Command {
-    void doRT(engine::Silo* s) override {
-        s->rtTempoScheduler_ = nullptr;
-        s->tempoSchedFn_ = nullptr;
-    }
-};
-
-// Schedules a beat-timed event on the Silo's RT tempo scheduler.
-// The handler Obj* is retained by this command and transferred to the scheduler.
-struct RTTempoSchedCmd : engine::Command {
-    f64 beatTime_;
-    ts::Obj* handler_;
-
-    RTTempoSchedCmd(f64 beatTime, ts::Obj* handler)
-        : beatTime_(beatTime), handler_(handler)
-    {
-    }
-
-    void doRT(engine::Silo* s) override {
-        auto* sched = static_cast<RTTempoScheduler*>(s->rtTempoScheduler_);
-        if (sched && handler_) {
-            sched->addEntry(beatTime_, handler_);
-            // Scheduler took ownership (retained again), release our ref
-            handler_ = nullptr;
-        }
-    }
-
-    bool doNRT(engine::Silo* s) override {
-        // If doRT didn't fire (no scheduler), release on NRT
-        if (handler_) {
-            handler_ = nullptr;
-        }
-        return true;
-    }
-};
-
-// Schedules a tempo change on the Silo's RT tempo scheduler.
-struct RTTempoChangeCmd : engine::Command {
-    f64 beatTime_;
-    f64 targetTempoBPS_;
-    f64 rampBeats_;
-
-    RTTempoChangeCmd(f64 beatTime, f64 targetTempoBPS, f64 rampBeats)
-        : beatTime_(beatTime), targetTempoBPS_(targetTempoBPS)
-        , rampBeats_(rampBeats) {}
-
-    void doRT(engine::Silo* s) override {
-        auto* sched = static_cast<RTTempoScheduler*>(s->rtTempoScheduler_);
-        if (sched) {
-            sched->addTempoChange(beatTime_, targetTempoBPS_, rampBeats_);
-        }
-    }
-};
-
-// Sets the RT scheduler's tempo immediately.
-struct RTSetTempoCmd : engine::Command {
-    f64 tempoBPS_;
-
-    explicit RTSetTempoCmd(f64 tempoBPS) : tempoBPS_(tempoBPS) {}
-
-    void doRT(engine::Silo* s) override {
-        auto* sched = static_cast<RTTempoScheduler*>(s->rtTempoScheduler_);
-        if (sched) {
-            sched->setTempo(tempoBPS_, s->sampleTime_);
-        }
-    }
-};
+// NOTE: Beat-based tempo scheduling now lives in the engine's per-silo
+// TempoClock slots (engine::TempoClock, scheduled via engine::sched/setTempo/
+// schedTempoChange). The former single-slot RT tempo-scheduler commands that
+// drove bridge::RTTempoScheduler through Silo::rtTempoScheduler_ were removed.
 
 } // namespace bridge
 

@@ -63,11 +63,11 @@ go(coro fn() Float {
         let t = getStreamTime();
         begin(0);
         noteOn(nodeID, nid, [scale[i], 0.4]);
-        sched(t + latency);
+        sched(0, t + latency);
 
         begin(0);
         noteOff(nodeID, nid);
-        sched(t + latency + 0.35);
+        sched(0, t + latency + 0.35);
 
         nid = nid + 1;
         yield 0.4;
@@ -92,13 +92,13 @@ go(coro fn() Float {
         noteOn(nodeID, nid,     [root,              0.35]);
         noteOn(nodeID, nid + 1, [root + thirds[i],  0.35]);
         noteOn(nodeID, nid + 2, [root + fifths[i],  0.35]);
-        sched(t + latency);
+        sched(0, t + latency);
 
         begin(0);
         noteOff(nodeID, nid);
         noteOff(nodeID, nid + 1);
         noteOff(nodeID, nid + 2);
-        sched(t + latency + 0.6);
+        sched(0, t + latency + 0.6);
 
         nid = nid + 3;
         yield 0.7;
@@ -116,11 +116,11 @@ go(coro fn() Float {
     for (i : (0..5)) {
         begin(0);
         noteOn(nodeID, nid, [arpNotes[i], 0.3]);
-        sched(t0 + latency + 0.06 * i);
+        sched(0, t0 + latency + 0.06 * i);
 
         begin(0);
         noteOff(nodeID, nid);
-        sched(t0 + latency + 0.06 * i + 1.0);
+        sched(0, t0 + latency + 0.06 * i + 1.0);
 
         nid = nid + 1;
     }
@@ -137,7 +137,7 @@ go(coro fn() Float {
             let pitch = 48.0 + 3.0 * i + 12.0 * k;
             begin(0);
             noteOn(nodeID, nid, [pitch, 0.2]);
-            sched(t + latency);
+            sched(0, t + latency);
             nid = nid + 1;
         }
 
@@ -146,7 +146,7 @@ go(coro fn() Float {
         for (j : (0..7)) {
             noteOff(nodeID, nid - 8 + j);
         }
-        sched(t + latency + 0.8);
+        sched(0, t + latency + 0.8);
         yield 1.0;
     }
     yield 1.0;
@@ -159,17 +159,17 @@ go(coro fn() Float {
     let tGliss = getStreamTime();
     begin(0);
     noteOn(nodeID, nid, [60.0, 0.4]);
-    sched(tGliss + latency);
+    sched(0, tGliss + latency);
 
     for (i : (1..24)) {
         begin(0);
         noteSetParams(nodeID, nid, 0, [60.0 + 0.5 * i]);
-        sched(tGliss + latency + 0.05 * i);
+        sched(0, tGliss + latency + 0.05 * i);
     }
 
     begin(0);
     noteOff(nodeID, nid);
-    sched(tGliss + latency + 0.05 * 25);
+    sched(0, tGliss + latency + 0.05 * 25);
     nid = nid + 1;
     yield 2.0;
 
@@ -182,11 +182,11 @@ go(coro fn() Float {
         let t = tCloud + 0.25 * (i + std.urand());
         begin(0);
         noteOn(nodeID, nid, [std.rand(48, 84), 0.4]);
-        sched(t);
+        sched(0, t);
 
         begin(0);
         noteOff(nodeID, nid);
-        sched(t + 0.25 * std.rand(1.0, 8.0));
+        sched(0, t + 0.25 * std.rand(1.0, 8.0));
         nid = nid + 1;
     }
     yield 28.0;

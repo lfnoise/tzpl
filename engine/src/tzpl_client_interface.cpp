@@ -792,19 +792,23 @@ tzpl_SErr begin(Engine* e, int silo) {
     return tzpl_errNone;
 }
 
-tzpl_SErr sched(f64 time, SchedPolicy policy) {
+tzpl_SErr sched(int clock, f64 beat, SchedPolicy policy) {
     Engine* e = tBundle.engine;
     if (!e) return tzpl_errNoActiveBundle;
+    if (policy != schedImmediate &&
+        (clock < 0 || clock >= e->numTempoClocks_)) {
+        return tzpl_errClockOutOfRange;
+    }
 
-    //printf("SCHED %f\n", time);
     std::lock_guard<std::mutex> lck(e->nrt_lock_);
     Command* cmds = tBundle.popAll();
     if (!cmds) return tzpl_errNone; // not an error, just don't do anything.
-    
+
     Command* cmd = cmds;
     while (cmd) {
         cmd->schedPolicy_ = policy;
-        cmd->streamTime_ = time;
+        cmd->clock_ = clock;
+        cmd->beatTime_ = beat;
         cmd = cmd->next_;
     }
     sendCmds(e, tBundle.silo, cmds);
@@ -812,8 +816,48 @@ tzpl_SErr sched(f64 time, SchedPolicy policy) {
     return tzpl_errNone;
 }
 
-tzpl_SErr go() { 
-    return sched(0., schedImmediate);
+tzpl_SErr go() {
+    return sched(0, 0., schedImmediate);
+}
+
+// Broadcast a tempo command (one instance per silo) to keep clock slot `clock`
+// in sync across all silos. makeCmd allocates a fresh Command for each silo.
+template <typename MakeCmd>
+static tzpl_SErr broadcastTempoCmd(Engine* e, int clock, MakeCmd makeCmd) {
+    if (!e) return tzpl_errNoActiveBundle;
+    if (clock < 0 || clock >= e->numTempoClocks_) return tzpl_errClockOutOfRange;
+
+    std::lock_guard<std::mutex> lck(e->nrt_lock_);
+    for (Silo& s : e->silos_) {
+        sendCmds(e, &s, makeCmd());
+    }
+    return tzpl_errNone;
+}
+
+tzpl_SErr setTempo(Engine* e, int clock, f64 bpm) {
+    return broadcastTempoCmd(e, clock, [=] {
+        return new SetClockTempoCmd(clock, bpm / 60.0); // BPM -> beats per second
+    });
+}
+
+tzpl_SErr schedTempoChange(Engine* e, int clock, f64 atBeat, f64 targetBPM, f64 rampBeats) {
+    return broadcastTempoCmd(e, clock, [=] {
+        return new SchedClockTempoRampCmd(clock, atBeat, targetBPM / 60.0, rampBeats);
+    });
+}
+
+f64 clockBeats(Engine* e, int clock) {
+    if (!e || clock < 0 || clock >= e->numTempoClocks_) return 0.;
+    Silo& s = e->silos_[0];
+    if (clock >= (int)s.tempoClocks_.size()) return 0.;
+    return s.tempoClocks_[clock].beatAtSample(s.sampleTime_);
+}
+
+f64 clockTempoBPM(Engine* e, int clock) {
+    if (!e || clock < 0 || clock >= e->numTempoClocks_) return 0.;
+    Silo& s = e->silos_[0];
+    if (clock >= (int)s.tempoClocks_.size()) return 0.;
+    return s.tempoClocks_[clock].tempoAtSample(s.sampleTime_) * 60.0; // BPS -> BPM
 }
 
 tzpl_SErr newNode(const char* name, i64 nodeID) {

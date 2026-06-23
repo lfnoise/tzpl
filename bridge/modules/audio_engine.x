@@ -51,4 +51,5 @@ enum Err {
     errNumPortsMismatch,
     errNotImplemented,
     errTooLate,
+    errClockOutOfRange,
 }

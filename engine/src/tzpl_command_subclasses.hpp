@@ -591,6 +591,49 @@ struct LoadBufferCmd : Command {
     }
 };
 
+//=============================================================================================
+#pragma mark TEMPO CLOCK COMMANDS
+
+// Immediate tempo set on a clock slot. Broadcast to every silo; applied at the
+// receiving silo's current sample so all silos produce an identical ramp.
+struct SetClockTempoCmd : Command
+{
+    f64 bps_; // beats per second
+
+    SetClockTempoCmd(int clock, f64 bps) : bps_(bps) {
+        clock_ = clock;
+        schedPolicy_ = schedImmediate;
+    }
+
+    void doRT(Silo* s) override {
+        if (clock_ >= 0 && clock_ < (int)s->tempoClocks_.size()) {
+            s->tempoClocks_[clock_].setTempoNow(bps_, s->sampleTime_);
+        }
+    }
+};
+
+// Scheduled tempo ramp on a clock slot, applied when the clock reaches atBeat.
+// Broadcast to every silo; beat-anchored so all silos stay identical.
+struct SchedClockTempoRampCmd : Command
+{
+    f64 targetBPS_;
+    f64 rampBeats_;
+
+    SchedClockTempoRampCmd(int clock, f64 atBeat, f64 targetBPS, f64 rampBeats)
+        : targetBPS_(targetBPS), rampBeats_(rampBeats)
+    {
+        clock_ = clock;
+        beatTime_ = atBeat;
+        schedPolicy_ = schedBetterLateThanNever;
+    }
+
+    void doRT(Silo* s) override {
+        if (clock_ >= 0 && clock_ < (int)s->tempoClocks_.size()) {
+            s->tempoClocks_[clock_].applyRamp(beatTime_, targetBPS_, rampBeats_);
+        }
+    }
+};
+
 }
 
 #endif /* tzpl_command_subclasses_h */

@@ -61,6 +61,8 @@ struct RenderJobOpts {
     // Number of parallel silos (worker threads). Same as the live engine
     // default; lower for tiny renders where thread setup overhead dominates.
     int    numSilos = 4;
+    // Number of beat-based TempoClock slots per silo (engine clocks).
+    int    numTempoClocks = 1;
 };
 
 // Per-thread context describing the render currently being driven on this
