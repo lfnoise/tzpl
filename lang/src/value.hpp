@@ -253,6 +253,22 @@ public:
     }
 };
 
+// Bytes object -- a growable, length-based binary buffer. Unlike StringObj it
+// makes no UTF-8 assumptions and may hold embedded NUL bytes; it is the carrier
+// for the SExpr binary message format (see lang/modules/message.x). A leaf
+// object: it holds no Obj* children, so GC scanning is a no-op (GCTag::None).
+class BytesObj : public Obj {
+public:
+    Vec<u8> data;
+
+    BytesObj();
+    BytesObj(const u8* bytes, usize len);
+
+    VMString str() const override {
+        return rt::fmt("Bytes(len={})", data.size());
+    }
+};
+
 // Phase 4e: array storage backend selector. The runtime instantiates one of
 // PodArray<i64>, PodArray<f64>, PodArray<x64>, PodArray<r64>, InlineArray,
 // or ObjArray based on the static element type. Every array opcode and

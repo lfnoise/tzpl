@@ -455,6 +455,7 @@ inline void callTwoArgs(VM& vm, Callable* fn, u16 sb) {
 void registerMathBuiltins(Compiler& compiler, FuncMap& functions);
 void registerArrayBuiltins(Compiler& compiler, FuncMap& functions);
 void registerListGenBuiltins(Compiler& compiler, FuncMap& functions);
+void registerBytesBuiltins(Compiler& compiler, FuncMap& functions);
 
 // ============================================================================
 // Forward declarations of exported builtin functions

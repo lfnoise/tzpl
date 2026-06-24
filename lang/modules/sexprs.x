@@ -4,7 +4,7 @@ enum SExpr {
     bool Bool,
     int Int,
     float Float,
-    symbol String,
+    symbol Symbol,
     string String,
     vec [SExpr],
 }
@@ -16,14 +16,14 @@ fn toString(o SExpr) String {
         SExpr.float(i) : i toString;
         SExpr.symbol(s) : s toString;
         SExpr.string(s) : s quotes;
-        SExpr.vec(v) : v separatedString(", ") brackets;
+        SExpr.vec(v) : v @ toString separatedString(", ") brackets;
     }
 }
 
 fn sxpr(b Bool) SExpr = SExpr.bool(b);
 fn sxpr(i Int) SExpr = SExpr.int(i);
 fn sxpr(f Float) SExpr = SExpr.float(f);
-fn sxpr(s Symbol) SExpr = SExpr.symbol(s toString);
+fn sxpr(s Symbol) SExpr = SExpr.symbol(s);
 fn sxpr(s String) SExpr = SExpr.string(s);
 fn sxpr(v [SExpr]) SExpr = SExpr.vec(v);
 

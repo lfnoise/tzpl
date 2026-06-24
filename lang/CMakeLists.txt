@@ -53,6 +53,7 @@ set(LIB_SOURCES
     src/builtins_math.cpp
     src/builtins_array.cpp
     src/builtins_listgen.cpp
+    src/builtins_bytes.cpp
     src/disassemble.cpp
     src/module_compiler.cpp
     src/diagnostic.cpp

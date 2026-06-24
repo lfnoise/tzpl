@@ -214,6 +214,16 @@ public:
     VMString str() const override { return rt::vmstr("String"); }
 };
 
+// Bytes: a length-based binary buffer (Repr::Pointer, like String). Holds
+// arbitrary bytes including embedded NULs; no UTF-8 assumptions.
+class BytesType : public ObjType {
+public:
+    BytesType() {
+        registerNewObj(this);
+    }
+    VMString str() const override { return rt::vmstr("Bytes"); }
+};
+
 // Array type
 class ArrayType : public ObjType {
 public:

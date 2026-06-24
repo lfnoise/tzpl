@@ -134,6 +134,19 @@ static void ffi_natsPubF(ts::VM& vm, u16, u16, u16 argBase) {
     ctx->natsClient->publish(subject, data.c_str());
 }
 
+// fn natsPubMsg(subject String, msg Bytes) Void
+// Publish a binary message (e.g. an encoded SExpr from message.x). Carries the
+// exact bytes, including embedded NULs -- uses the length-bearing publish().
+static void ffi_natsPubMsg(ts::VM& vm, u16, u16, u16 argBase) {
+    auto* ctx = getAppContext(vm);
+    if (!ctx || !ctx->natsClient) return;
+    const char* subject = regString(vm, argBase);
+    auto* b = static_cast<ts::BytesObj*>(vm.reg(argBase + 1).o);
+    ctx->natsClient->publish(subject,
+        reinterpret_cast<const char*>(b->data.data()),
+        static_cast<int>(b->data.size()));
+}
+
 // fn natsRequest(subject String, data String, timeoutMs Int, handler fn(String) Void) Void
 // Async request/reply: subscribes to an inbox, publishes the request, and
 // invokes the handler with the reply payload via the NRTVM when it arrives.
@@ -156,6 +169,32 @@ static void ffi_natsRequest(ts::VM& vm, u16, u16, u16 argBase) {
             nrtvm->vm.makeCurrent();
             ts::Word args[1];
             args[0].o = new ts::StringObj(payload.c_str());
+            nrtvm->vm.callCallable(handler, args, 1);
+            nrtvm->vm.gcHeartbeat();
+        });
+}
+
+// fn natsRequestMsg(subject String, msg Bytes, timeoutMs Int, handler fn(Bytes) Void) Void
+// Binary request/reply: the reply payload is delivered to the handler as Bytes.
+static void ffi_natsRequestMsg(ts::VM& vm, u16, u16, u16 argBase) {
+    auto* ctx = getAppContext(vm);
+    if (!ctx || !ctx->natsClient || !ctx->nrtvm) return;
+    const char* subject = regString(vm, argBase);
+    auto* b = static_cast<ts::BytesObj*>(vm.reg(argBase + 1).o);
+    int timeoutMs = static_cast<int>(vm.reg(argBase + 2).i);
+    ts::Obj* handler = vm.reg(argBase + 3).o;
+
+    auto* nrtvm = ctx->nrtvm;
+    ctx->natsClient->asyncRequest(subject,
+        reinterpret_cast<const char*>(b->data.data()),
+        static_cast<int>(b->data.size()), timeoutMs,
+        [nrtvm, handler](const char* replyData, int replyLen) {
+            std::lock_guard lock(nrtvm->mtx);
+            nrtvm->vm.makeCurrent();
+            ts::Word args[1];
+            args[0].o = new ts::BytesObj(
+                reinterpret_cast<const u8*>(replyData),
+                static_cast<usize>(replyLen < 0 ? 0 : replyLen));
             nrtvm->vm.callCallable(handler, args, 1);
             nrtvm->vm.gcHeartbeat();
         });
@@ -262,6 +301,34 @@ static void ffi_onMessageF(ts::VM& vm, u16, u16, u16 argBase) {
     }
 }
 
+// fn onMessageMsg(subject String, handler fn(Bytes) Void) Void
+// Deliver the raw payload to the handler as Bytes (length-preserving, embedded
+// NULs intact). The handler typically decode()s it or reads it via a Reader.
+static void ffi_onMessageMsg(ts::VM& vm, u16, u16, u16 argBase) {
+    auto* ctx = getAppContext(vm);
+    if (!ctx || !ctx->natsDispatcher || !ctx->nrtvm) return;
+    const char* subject = regString(vm, argBase);
+    ts::Obj* handler = vm.reg(argBase + 1).o;
+
+    registerUserHandler(vm, subject, handler);
+    auto* nrtvm = ctx->nrtvm;
+    ctx->natsDispatcher->addHandler(subject,
+        [nrtvm, handler](const char*, const char* data, int dataLen, const char*) {
+            std::lock_guard lock(nrtvm->mtx);
+            nrtvm->vm.makeCurrent();
+            ts::Word args[1];
+            args[0].o = new ts::BytesObj(
+                reinterpret_cast<const u8*>(data),
+                static_cast<usize>(dataLen < 0 ? 0 : dataLen));
+            nrtvm->vm.callCallable(handler, args, 1);
+            nrtvm->vm.gcHeartbeat();
+        });
+
+    if (ctx->natsClient && ctx->natsClient->isConnected()) {
+        ctx->natsDispatcher->subscribeAll(*ctx->natsClient);
+    }
+}
+
 // fn removeHandler(subject String) Void
 static void ffi_removeHandler(ts::VM& vm, u16, u16, u16 argBase) {
     auto* ctx = getAppContext(vm);
@@ -287,6 +354,7 @@ void registerNatsFFI(ts::Compiler& compiler) {
     auto* Float  = compiler.floatType();
     auto* Bool   = compiler.boolType();
     auto* String = compiler.stringType();
+    auto* Bytes  = compiler.bytesType();
 
     using R = void (*)(ts::VM&, u16, u16, u16);
 
@@ -308,26 +376,31 @@ void registerNatsFFI(ts::Compiler& compiler) {
     reg("natsPub",     Void, {String, String},              ffi_natsPub);
     reg("natsPubI",    Void, {String, Int},                 ffi_natsPubI);
     reg("natsPubF",    Void, {String, Float},               ffi_natsPubF);
+    reg("natsPubMsg",  Void, {String, Bytes},               ffi_natsPubMsg);
 
     // Handler function types
     ts::Vec<ts::Type*> noArgs;
     ts::Vec<ts::Type*> intArgs;   intArgs.push_back(Int);
     ts::Vec<ts::Type*> floatArgs; floatArgs.push_back(Float);
     ts::Vec<ts::Type*> strArgs;   strArgs.push_back(String);
+    ts::Vec<ts::Type*> bytesArgs; bytesArgs.push_back(Bytes);
 
     ts::Type* FnVoid      = reinterpret_cast<ts::Type*>(compiler.functionType(noArgs, Void));
     ts::Type* FnIntVoid   = reinterpret_cast<ts::Type*>(compiler.functionType(intArgs, Void));
     ts::Type* FnFloatVoid = reinterpret_cast<ts::Type*>(compiler.functionType(floatArgs, Void));
     ts::Type* FnStrVoid   = reinterpret_cast<ts::Type*>(compiler.functionType(strArgs, Void));
+    ts::Type* FnBytesVoid = reinterpret_cast<ts::Type*>(compiler.functionType(bytesArgs, Void));
 
     // Async request/reply
-    reg("natsRequest", Void, {String, String, Int, FnStrVoid}, ffi_natsRequest);
+    reg("natsRequest",    Void, {String, String, Int, FnStrVoid},   ffi_natsRequest);
+    reg("natsRequestMsg", Void, {String, Bytes, Int, FnBytesVoid},  ffi_natsRequestMsg);
 
     // Handler registration
     reg("onMessage",     Void, {String, FnVoid},      ffi_onMessage);
     reg("onMessageS",    Void, {String, FnStrVoid},    ffi_onMessageS);
     reg("onMessageI",    Void, {String, FnIntVoid},    ffi_onMessageI);
     reg("onMessageF",    Void, {String, FnFloatVoid},  ffi_onMessageF);
+    reg("onMessageMsg",  Void, {String, FnBytesVoid},  ffi_onMessageMsg);
     reg("removeHandler", Void, {String},               ffi_removeHandler);
 }
 

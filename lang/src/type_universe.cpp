@@ -76,6 +76,7 @@ TypeUniverse::TypeUniverse() {
     types_.floatType = new FloatType();
     types_.symbolType = new SymbolType();
     types_.stringType = new StringType();
+    types_.bytesType = new BytesType();
     types_.fractionType = new FractionType();
     types_.complexType = new ComplexType();
     types_.voidType = new VoidType();
@@ -85,7 +86,7 @@ TypeUniverse::TypeUniverse() {
     types_.unitType = tupleType(nullptr, 0);
 
     if (!types_.boolType || !types_.intType || !types_.floatType || !types_.symbolType ||
-        !types_.stringType || !types_.fractionType || !types_.complexType ||
+        !types_.stringType || !types_.bytesType || !types_.fractionType || !types_.complexType ||
         !types_.voidType || !types_.unitType) {
         throw std::bad_alloc();
     }
@@ -99,6 +100,7 @@ TypeUniverse::TypeUniverse() {
     classifyType(types_.floatType);
     classifyType(types_.symbolType);
     classifyType(types_.stringType);
+    classifyType(types_.bytesType);
     classifyType(types_.fractionType);
     classifyType(types_.complexType);
     classifyType(types_.voidType);

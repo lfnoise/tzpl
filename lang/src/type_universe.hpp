@@ -55,6 +55,7 @@ struct BuiltinTypes {
     Type* floatType = nullptr;
     Type* symbolType = nullptr;
     Type* stringType = nullptr;
+    Type* bytesType = nullptr;
     Type* fractionType = nullptr;
     Type* complexType = nullptr;
     Type* voidType = nullptr;

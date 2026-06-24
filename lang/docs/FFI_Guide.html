@@ -454,6 +454,17 @@ if (localStorage.getItem('tzpl-docs-theme') === 'light') document.documentElemen
         <li><a href="#nrt-render-examples">Examples</a></li>
       </ol>
     </li>
+    <li><a href="#messages">Binary Messages (SExpr)</a>
+      <ol>
+        <li><a href="#messages-overview">Overview</a></li>
+        <li><a href="#messages-bytes">The Bytes Type</a></li>
+        <li><a href="#messages-encode">encode &amp; decode</a></li>
+        <li><a href="#messages-reader">Zero-Copy Reader</a></li>
+        <li><a href="#messages-format">Wire Format</a></li>
+        <li><a href="#messages-nats">Sending over NATS</a></li>
+        <li><a href="#messages-cpp">C++ Access</a></li>
+      </ol>
+    </li>
   </ol>
 </nav>
 
@@ -2091,6 +2102,8 @@ engineName = <span class="str">"piano"</span></code></pre>
   <tr><td><code>natsPubI(subject String, value Int) Void</code></td><td>Publish an integer (as its string representation).</td></tr>
   <tr><td><code>natsPubF(subject String, value Float) Void</code></td><td>Publish a float (as its string representation).</td></tr>
   <tr><td><code>natsRequest(subject String, data String, timeoutMs Int, handler fn(String) Void) Void</code></td><td>Async request/reply: publishes a request and invokes the handler with the reply payload when it arrives. Returns immediately. Uses the nats.c delivery thread internally (no extra threads spawned). The <code>timeoutMs</code> parameter is reserved for future use.</td></tr>
+  <tr><td><code>natsPubMsg(subject String, msg Bytes) Void</code></td><td>Publish a <strong>binary</strong> message &mdash; the exact bytes of a <code>Bytes</code> buffer, including embedded NULs (e.g. an <code>encode</code>d <a href="#messages">SExpr message</a>). Length-preserving, unlike the string variants.</td></tr>
+  <tr><td><code>natsRequestMsg(subject String, msg Bytes, timeoutMs Int, handler fn(Bytes) Void) Void</code></td><td>Binary request/reply: the reply payload is delivered to the handler as <code>Bytes</code>.</td></tr>
 </table>
 
 <h4>Example: publishing messages</h4>
@@ -2120,6 +2133,7 @@ engineName = <span class="str">"piano"</span></code></pre>
   <tr><td><code>onMessageS(subject String, handler fn(String) Void) Void</code></td><td>Register a handler that receives the payload as a string.</td></tr>
   <tr><td><code>onMessageI(subject String, handler fn(Int) Void) Void</code></td><td>Register a handler that parses the payload as an integer.</td></tr>
   <tr><td><code>onMessageF(subject String, handler fn(Float) Void) Void</code></td><td>Register a handler that parses the payload as a float.</td></tr>
+  <tr><td><code>onMessageMsg(subject String, handler fn(Bytes) Void) Void</code></td><td>Register a handler that receives the raw payload as a <code>Bytes</code> buffer (length-preserving, embedded NULs intact). The handler typically <code>decode</code>s it to an <a href="#messages">SExpr</a> or reads it via a Reader.</td></tr>
   <tr><td><code>removeHandler(subject String) Void</code></td><td>Remove a previously registered handler and unsubscribe from the subject.</td></tr>
 </table>
 
@@ -3067,6 +3081,178 @@ nats.<span class="fn">onMessageS</span>(<span class="str">"nodes.piano.chords"</
 <span class="kw">let</span> h = <span class="fn">renderNRT</span>(<span class="str">"bounce.wav"</span>, <span class="kw">fn</span>() Void {
     <span class="cmt">-- ... render setup ...</span>
 });</code></pre>
+
+<!-- ================================================================ -->
+<!--  15. BINARY MESSAGES (SEXPR)                                      -->
+<!-- ================================================================ -->
+
+<h2 id="messages">15. Binary Messages (SExpr)</h2>
+
+<!-- -------------------------------- -->
+<h3 id="messages-overview">15.1 Overview</h3>
+
+<p>The <code>message</code> module encodes an <code>SExpr</code> value to and from a compact binary buffer &mdash; the <strong>&ldquo;TZB&rdquo;</strong> format. It is the serialization substrate for moving structured data between threads (silos, each of which has its own VM and heap) and between processes (e.g. over NATS), where heap pointers cannot be shared.</p>
+
+<p>The value type it serializes is the <code>SExpr</code> enum (the <code>sexprs</code> module):</p>
+
+<pre><code><span class="kw">enum</span> SExpr {
+    bool   <span class="typ">Bool</span>,
+    int    <span class="typ">Int</span>,
+    float  <span class="typ">Float</span>,
+    symbol <span class="typ">Symbol</span>,
+    string <span class="typ">String</span>,
+    vec    [<span class="typ">SExpr</span>],
+}</code></pre>
+
+<p>Two ways to read an encoded message are provided: a full <code>decode</code> into an <code>SExpr</code> tree, and a <strong>zero-copy <code>Reader</code></strong> that reads fields and walks children directly off the buffer with no tree allocation. List children are stored columnarly, so reaching the <em>i</em>-th child is O(1).</p>
+
+<pre><code><span class="kw">import</span> message.*;
+<span class="kw">import</span> sexprs.*;</code></pre>
+
+<div class="note">
+  <strong>Note:</strong> <code>symbol</code> and <code>string</code> are distinct cases that both carry text: a <code>symbol</code> is an interned <code>Symbol</code> (renders bare, e.g. <code>note</code>); a <code>string</code> is text (renders quoted, e.g. <code>"note"</code>). The format preserves the distinction with separate tags, and round-trips a symbol back to an interned <code>Symbol</code>.
+</div>
+
+<!-- -------------------------------- -->
+<h3 id="messages-bytes">15.2 The Bytes Type</h3>
+
+<p><code>Bytes</code> is a growable, length-based binary buffer (like <code>String</code>, but with no UTF-8 assumptions &mdash; it holds arbitrary bytes including embedded NULs). It is the type <code>encode</code> returns and <code>decode</code> consumes, and what <code>natsPubMsg</code> / <code>onMessageMsg</code> carry. These low-level builders and readers are built-ins (no import needed) and underlie <code>message.x</code>; most code only needs <code>encode</code> / <code>decode</code> / <code>reader</code>.</p>
+
+<table>
+  <tr><th>Function</th><th>Description</th></tr>
+  <tr><td><code>bytes() Bytes</code></td><td>A new empty buffer.</td></tr>
+  <tr><td><code>byteLength(b Bytes) Int</code></td><td>Current length in bytes.</td></tr>
+  <tr><td><code>putU8! / putU32! / putU64!(b Bytes, v Int) Void</code></td><td>Append 1 / 4 / 8 bytes, little-endian.</td></tr>
+  <tr><td><code>putF64!(b Bytes, v Float) Void</code></td><td>Append an IEEE-754 double (8 bytes).</td></tr>
+  <tr><td><code>putUtf8!(b Bytes, s String) Void</code></td><td>Append the raw bytes of <code>s</code> (no length prefix).</td></tr>
+  <tr><td><code>setU32At!(b Bytes, off Int, v Int) Void</code></td><td>Overwrite 4 bytes at <code>off</code> (back-patch); no-op if out of range.</td></tr>
+  <tr><td><code>u8At / u32At / i64At(b Bytes, off Int) Int</code></td><td>Read 1 / 4 / 8 bytes LE. Bounds-checked: an out-of-range read returns <code>0</code>.</td></tr>
+  <tr><td><code>f64At(b Bytes, off Int) Float</code></td><td>Read a double; <code>0.0</code> if out of range.</td></tr>
+  <tr><td><code>utf8At(b Bytes, off Int, len Int) String</code></td><td>Copy <code>len</code> bytes as a String, clamped to the buffer.</td></tr>
+  <tr><td><code>toSymbol(s String) Symbol</code></td><td>Intern a String into a <code>Symbol</code> (the inverse of <code>Symbol.toString</code>); used by <code>decode</code>.</td></tr>
+</table>
+
+<!-- -------------------------------- -->
+<h3 id="messages-encode">15.3 encode &amp; decode</h3>
+
+<table>
+  <tr><th>Function</th><th>Description</th></tr>
+  <tr><td><code>encode(o SExpr) Bytes</code></td><td>Serialize an SExpr to a fresh TZB buffer.</td></tr>
+  <tr><td><code>decode(b Bytes) SExpr</code></td><td>Deserialize a TZB buffer back to an SExpr. Returns an empty vec if <code>b</code> is not a valid message.</td></tr>
+  <tr><td><code>isMessage(b Bytes) Bool</code></td><td>True if <code>b</code> carries a valid TZB header.</td></tr>
+</table>
+
+<pre><code><span class="kw">import</span> message.*;
+<span class="kw">import</span> sexprs.*;
+
+<span class="kw">let</span> msg = <span class="fn">encode</span>(SExpr.<span class="fn">vec</span>([
+    SExpr.<span class="fn">symbol</span>(<span class="fn">toSymbol</span>(<span class="str">"note"</span>)),
+    SExpr.<span class="fn">int</span>(<span class="num">60</span>),
+    SExpr.<span class="fn">float</span>(<span class="num">0.8</span>),
+    SExpr.<span class="fn">string</span>(<span class="str">"hello"</span>),
+]));
+
+<span class="fn">byteLength</span>(msg) <span class="fn">println</span>;          <span class="cmt">-- size in bytes</span>
+<span class="fn">decode</span>(msg) <span class="fn">toString</span> <span class="fn">println</span>;     <span class="cmt">-- [note, 60, 0.8, "hello"]</span></code></pre>
+
+<div class="note">
+  <strong>Untrusted input:</strong> <code>decode</code> is total and crash-safe. All reads are bounds-checked, the header is validated, child counts are clamped to the buffer length, and a per-message node budget plus a recursion-depth cap bound the work, so a truncated or corrupt buffer yields a small/empty SExpr rather than reading out of bounds, looping, or overflowing the stack. Still, validate foreign payloads with <code>isMessage</code> before trusting them.
+</div>
+
+<!-- -------------------------------- -->
+<h3 id="messages-reader">15.4 Zero-Copy Reader</h3>
+
+<p>A <code>Reader</code> is a cursor into the buffer. It reads tags, scalars, and string text, and navigates a vec's children, <strong>without building an SExpr tree</strong>. <code>tag</code> returns a <code>MsgTag</code> (<code>bool</code>, <code>int</code>, <code>float</code>, <code>symbol</code>, <code>string</code>, <code>vec</code>).</p>
+
+<table>
+  <tr><th>Function</th><th>Description</th></tr>
+  <tr><td><code>reader(b Bytes) Reader</code></td><td>A cursor at the root value.</td></tr>
+  <tr><td><code>tag(r Reader) MsgTag</code></td><td>The kind of this node.</td></tr>
+  <tr><td><code>asBool / asInt / asFloat(r Reader)</code></td><td>Read a scalar value.</td></tr>
+  <tr><td><code>asStr(r Reader) String</code></td><td>Read the text of a <code>symbol</code> or <code>string</code> node.</td></tr>
+  <tr><td><code>childCount(r Reader) Int</code></td><td>Number of children (vec nodes).</td></tr>
+  <tr><td><code>child(r Reader, i Int) Reader</code></td><td>A cursor for child <code>i</code> &mdash; O(1).</td></tr>
+  <tr><td><code>children(r Reader) [Reader]</code></td><td>Cursors for all children.</td></tr>
+</table>
+
+<pre><code><span class="kw">let</span> r = <span class="fn">reader</span>(msg);
+<span class="kw">if</span> (<span class="fn">tag</span>(r) == MsgTag.vec) {
+    <span class="fn">childCount</span>(r) <span class="fn">println</span>;               <span class="cmt">-- 4</span>
+    <span class="fn">asStr</span>(<span class="fn">child</span>(r, <span class="num">0</span>)) <span class="fn">println</span>;          <span class="cmt">-- note</span>
+    <span class="fn">asInt</span>(<span class="fn">child</span>(r, <span class="num">1</span>)) <span class="fn">println</span>;          <span class="cmt">-- 60</span>
+
+    <span class="kw">for</span> (c : <span class="fn">children</span>(r)) {
+        <span class="kw">match</span> (<span class="fn">tag</span>(c)) {
+            MsgTag.int:    <span class="fn">use</span>(<span class="fn">asInt</span>(c));
+            MsgTag.string: <span class="fn">use</span>(<span class="fn">asStr</span>(c));
+            _: <span class="fn">skip</span>();
+        }
+    }
+}</code></pre>
+
+<!-- -------------------------------- -->
+<h3 id="messages-format">15.5 Wire Format</h3>
+
+<p>All integers are little-endian. A message begins with a 4-byte header (<code>'T' 'Z' 'B'</code> + version <code>2</code>) and a <code>u32</code> offset to the root value slot. Each node is a <strong>value slot</strong> &mdash; a tag byte plus an 8-byte payload &mdash; interpreted by tag:</p>
+
+<table>
+  <tr><th>Tag</th><th>Case</th><th>8-byte payload</th></tr>
+  <tr><td>0</td><td><code>bool</code></td><td><code>0</code> / <code>1</code></td></tr>
+  <tr><td>1</td><td><code>int</code></td><td><code>i64</code></td></tr>
+  <tr><td>2</td><td><code>float</code></td><td><code>f64</code></td></tr>
+  <tr><td>3</td><td><code>symbol</code></td><td>offset to a string blob</td></tr>
+  <tr><td>4</td><td><code>string</code></td><td>offset to a string blob</td></tr>
+  <tr><td>5</td><td><code>vec</code></td><td>offset to a list node</td></tr>
+</table>
+
+<ul>
+  <li>A <strong>string blob</strong> is a <code>u32</code> byte length followed by the UTF-8 bytes.</li>
+  <li>A <strong>list node</strong> is <code>u32 count</code> + <code>u32 tagsOffset</code> + <code>u32 payloadsOffset</code>. The tag bytes and the 8-byte payloads of the children are stored in two parallel arrays, so child <em>i</em> is <code>tags[i]</code> and <code>payloads[i*8]</code> &mdash; <strong>O(1) random access</strong>, no walking.</li>
+</ul>
+
+<p>The format is defined once in <code>shared/tzpl_sexpr_bin.hpp</code> and mirrored byte-for-byte by <code>lang/modules/message.x</code>.</p>
+
+<!-- -------------------------------- -->
+<h3 id="messages-nats">15.6 Sending over NATS</h3>
+
+<p><a href="#nats">NATS</a> carries these buffers verbatim. Publish with <code>natsPubMsg</code> and receive with <code>onMessageMsg</code>, whose handler gets the raw payload as <code>Bytes</code>:</p>
+
+<pre><code><span class="kw">import</span> nats.*;
+<span class="kw">import</span> message.*;
+<span class="kw">import</span> sexprs.*;
+
+<span class="cmt">-- receive: decode each incoming message</span>
+nats.<span class="fn">onMessageMsg</span>(<span class="str">"part.cmd"</span>, <span class="kw">fn</span>(m <span class="typ">Bytes</span>) {
+    <span class="kw">if</span> (<span class="fn">isMessage</span>(m)) {
+        <span class="fn">println</span>(<span class="str">"got "</span> $ (<span class="fn">decode</span>(m) <span class="fn">toString</span>));
+    }
+});
+
+<span class="cmt">-- send: encode an SExpr and publish it</span>
+<span class="fn">natsPubMsg</span>(<span class="str">"part.cmd"</span>, <span class="fn">encode</span>(SExpr.<span class="fn">vec</span>([
+    SExpr.<span class="fn">symbol</span>(<span class="fn">toSymbol</span>(<span class="str">"play"</span>)),
+    SExpr.<span class="fn">int</span>(<span class="num">60</span>),
+])));</code></pre>
+
+<!-- -------------------------------- -->
+<h3 id="messages-cpp">15.7 C++ Access</h3>
+
+<p>The C++ header <code>shared/tzpl_sexpr_bin.hpp</code> (namespace <code>tzpl::sbin</code>) is the canonical layout definition and offers a matching zero-copy <code>Reader</code> (returning <code>string_view</code>s &mdash; no allocation) plus an <code>encode</code> over a small <code>Value</code> variant. This is what the engine / silo side uses to inspect a message without a round-trip through the language.</p>
+
+<pre><code><span class="cmt">// shared/tzpl_sexpr_bin.hpp</span>
+<span class="kw">using namespace</span> tzpl::sbin;
+
+<span class="cmt">// build a message</span>
+std::vector&lt;<span class="kw">uint8_t</span>&gt; buf = <span class="fn">encode</span>(Value::<span class="fn">Vec</span>({
+    Value::<span class="fn">Symbol</span>(<span class="str">"note"</span>), Value::<span class="fn">Int</span>(<span class="num">60</span>),
+}));
+
+<span class="cmt">// read it back, zero-copy</span>
+<span class="kw">if</span> (Reader::<span class="fn">valid</span>(buf.<span class="fn">data</span>(), buf.<span class="fn">size</span>())) {
+    Reader r = Reader::<span class="fn">root</span>(buf.<span class="fn">data</span>(), buf.<span class="fn">size</span>());
+    std::string_view name = r.<span class="fn">child</span>(<span class="num">0</span>).<span class="fn">asStr</span>();   <span class="cmt">// "note"</span>
+    <span class="kw">int64_t</span> n             = r.<span class="fn">child</span>(<span class="num">1</span>).<span class="fn">asInt</span>();   <span class="cmt">// 60</span>
+}</code></pre>
 
 </main>
 <script>

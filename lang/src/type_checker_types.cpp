@@ -54,6 +54,7 @@ Type* TypeChecker::resolveTypeExpr(TypeExpr* typeExpr) {
         if (named->name == "Int") return compiler_.intType();
         if (named->name == "Float") return compiler_.floatType();
         if (named->name == "String") return compiler_.stringType();
+        if (named->name == "Bytes") return compiler_.bytesType();
         if (named->name == "Bool") return compiler_.boolType();
         if (named->name == "Symbol") return compiler_.symbolType();
         if (named->name == "Void") return compiler_.voidType();

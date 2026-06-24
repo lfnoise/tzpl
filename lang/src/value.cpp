@@ -86,6 +86,22 @@ StringObj::StringObj(const std::string& str)
     registerNewObj(this, GCTag::None);
 }
 
+// BytesObj constructors
+BytesObj::BytesObj()
+    : Obj(gCurrentTypeUniverse->types().bytesType)
+    , data(rt::STLAllocator<u8>(rt::gCurrentAllocator))
+{
+    registerNewObj(this, GCTag::None);
+}
+
+BytesObj::BytesObj(const u8* bytes, usize len)
+    : Obj(gCurrentTypeUniverse->types().bytesType)
+    , data(rt::STLAllocator<u8>(rt::gCurrentAllocator))
+{
+    if (bytes && len) data.assign(bytes, bytes + len);
+    registerNewObj(this, GCTag::None);
+}
+
 // PodArray constructors
 template <typename T>
 PodArray<T>::PodArray(Type* type)

@@ -1,0 +1,9 @@
+false
+decoded-empty-ok
+true
+false
+decoded-garbage-ok
+false
+decoded-truncated-ok
+true
+decoded-hugecount-ok

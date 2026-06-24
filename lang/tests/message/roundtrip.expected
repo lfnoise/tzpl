@@ -1,0 +1,15 @@
+#t  ==  #t   ok=true
+#f  ==  #f   ok=true
+0  ==  0   ok=true
+-123456789  ==  -123456789   ok=true
+3.25  ==  3.25   ok=true
+-2.5  ==  -2.5   ok=true
+foo  ==  foo   ok=true
+""  ==  ""   ok=true
+"hello, world"  ==  "hello, world"   ok=true
+[]  ==  []   ok=true
+[1, "two", three]  ==  [1, "two", three]   ok=true
+[[[42]]]  ==  [[[42]]]   ok=true
+symbol renders bare: x
+string renders quoted: "x"
+distinct tags: true
