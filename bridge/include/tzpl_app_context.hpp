@@ -62,6 +62,9 @@ struct SiloVMState {
     // Global index of the most recently siloLoad'ed module's start() entry
     // (Void, no params), or -1 if none. siloStartAt schedules a call to it.
     int startGlobalIndex = -1;
+    // Owns the per-silo task scheduler (bridge::SiloTaskScheduler). Opaque here
+    // to keep this header free of the bridge .cpp's internals; deleted on detach.
+    void* taskSched = nullptr;
 };
 
 struct AppContext {

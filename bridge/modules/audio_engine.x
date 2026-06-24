@@ -53,3 +53,14 @@ enum Err {
     errTooLate,
     errClockOutOfRange,
 }
+
+-- Spawn a coroutine task on slot `clock` of the CURRENT silo (call from silo
+-- task code, e.g. inside start()). The coroutine yields beat-deltas (Float):
+-- after each yield it resumes that many beats later; returning from the
+-- coroutine (next -> None) stops the task. Returns a task id.
+fn spawn(clock Int, c Coroutine<Float>) Int {
+    scheduleTask(clock, fn() Float {
+        let r = c next;
+        if (r isSome) { r unwrap } else { 0.0 - 1.0 }
+    })
+}

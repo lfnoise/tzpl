@@ -102,6 +102,14 @@ struct Silo
     using HeartbeatFn = void (*)(void* vm);
     HeartbeatFn heartbeatFn_ = nullptr;
 
+    // Per-sample task-scheduler tick. Drives the bridge-side silo task pool
+    // (coroutines spawned on this silo, scheduled by beat on the tempo clocks):
+    // it fires due tasks and reschedules them. Opaque scheduler pointer +
+    // callback set from an NRT thread via command (mirrors vm_/heartbeatFn_).
+    using TaskTickFn = void (*)(void* sched, i64 sampleTime, Silo* s);
+    void* taskSched_ = nullptr;
+    TaskTickFn taskTickFn_ = nullptr;
+
     Silo();
     ~Silo();
 

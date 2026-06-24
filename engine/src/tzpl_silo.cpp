@@ -129,6 +129,12 @@ void Silo::processFrames() {
             clk.process(sampleTime_, this);
         }
 
+        // Fire/reschedule any beat-due silo tasks (coroutines spawned on this
+        // silo). Bridge-side pool; reads beats from the tempo clocks above.
+        if (taskTickFn_) {
+            taskTickFn_(taskSched_, sampleTime_, this);
+        }
+
         sortNodes();
         runNodes();
 

@@ -36,6 +36,7 @@
 #include <thread>
 #include <string>
 #include <utility>
+#include <cmath>
 
 // Both tzpl and engine define i64/f64/etc. in different ways.
 // engine: namespace engine { using i64 = long; }
@@ -507,6 +508,107 @@ static void ffi_listSynthDefs(ts::VM& vm, u16 dst, u16, u16) {
 
 // Command that installs compiled code on the RT VM, owning the CompileResult.
 // doNRT deletes the CompileResult after the RT thread has processed it.
+// ---------------------------------------------------------------------------
+// Silo task scheduler: self-rescheduling coroutine tasks on a silo's RT thread.
+// ---------------------------------------------------------------------------
+//
+// `spawn(clock, coro)` (silo-side) adds a `fn() Float` trampoline (resumes the
+// coroutine, returns the next beat-delta) to the owning silo's pool. The silo's
+// per-sample taskTickFn_ fires every task whose beat (on its tempo clock) has
+// arrived: it calls the handler, and reschedules at beat + returned-delta, or
+// drops it when the delta is <= 0 (coroutine done / explicit stop). No RT
+// allocation: entries come from a fixed pool. Handlers are GC-rooted via a root
+// scanner registered on the silo VM (markRoots).
+
+// The silo whose VM code is currently executing (start() / a task handler), so
+// silo-side FFIs (spawn, note events) target the right silo. Thread-local
+// because silos 1..N run on separate worker threads.
+static thread_local engine::Silo* gCurrentSilo = nullptr;
+
+struct SiloTaskScheduler {
+    static constexpr int kMaxTasks = 256;
+    struct Entry {
+        int    clock = 0;
+        f64    beatTime = 0.;
+        ts::Obj* handler = nullptr;   // fn() Float trampoline (null = free slot)
+        i64    id = 0;
+        Entry* next = nullptr;
+    };
+    Entry  pool_[kMaxTasks];
+    Entry* free_ = nullptr;
+    Entry* active_ = nullptr;
+    ts::Obj* inFlight_ = nullptr;     // handler mid-call (GC root)
+    i64    nextId_ = 1;
+    ts::VM* vm_ = nullptr;
+
+    explicit SiloTaskScheduler(ts::VM* vm) : vm_(vm) {
+        for (int i = 0; i < kMaxTasks - 1; ++i) pool_[i].next = &pool_[i + 1];
+        pool_[kMaxTasks - 1].next = nullptr;
+        free_ = &pool_[0];
+    }
+
+    i64 addTask(int clock, f64 beatTime, ts::Obj* handler) {
+        if (!free_) return -1;
+        Entry* e = free_; free_ = free_->next;
+        e->clock = clock; e->beatTime = beatTime; e->handler = handler;
+        e->id = nextId_++; e->next = active_; active_ = e;
+        return e->id;
+    }
+
+    bool cancel(i64 id) {
+        for (Entry** pp = &active_; *pp; pp = &(*pp)->next) {
+            if ((*pp)->id == id) {
+                Entry* e = *pp; *pp = e->next;
+                e->handler = nullptr; e->next = free_; free_ = e;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // Called per sample from the silo loop (gCurrentSilo already set by the
+    // tick wrapper). Fires due tasks and reschedules them.
+    void tick(i64 sampleTime, engine::Silo* s) {
+        Entry** pp = &active_;
+        while (*pp) {
+            Entry* e = *pp;
+            bool badClock = e->clock < 0 || e->clock >= (int)s->tempoClocks_.size();
+            f64 beat = badClock ? 0.0 : s->tempoClocks_[e->clock].beatAtSample(sampleTime);
+            if (!badClock && beat >= e->beatTime) {
+                inFlight_ = e->handler;
+                vm_->makeCurrent();
+                ts::Word r = vm_->callCallable(e->handler, nullptr, 0);
+                inFlight_ = nullptr;
+                f64 delta = r.f;
+                if (delta > 0.0 && std::isfinite(delta)) {
+                    e->beatTime = beat + delta;     // reschedule
+                    pp = &e->next;
+                } else {
+                    *pp = e->next; e->handler = nullptr; e->next = free_; free_ = e;
+                }
+            } else {
+                pp = &e->next;
+            }
+        }
+    }
+
+    void markRoots(ts::TracingGC& gc) {
+        for (Entry* e = active_; e; e = e->next) {
+            if (e->handler) gc.mark(static_cast<ts::GCObj*>(e->handler));
+        }
+        if (inFlight_) gc.mark(static_cast<ts::GCObj*>(inFlight_));
+    }
+};
+
+// Silo loop calls this per sample (matches Silo::TaskTickFn).
+static void siloTaskTick(void* sched, i64 sampleTime, engine::Silo* s) {
+    if (!sched) return;
+    engine::Silo* prev = gCurrentSilo;
+    gCurrentSilo = s;
+    static_cast<SiloTaskScheduler*>(sched)->tick(sampleTime, s);
+    gCurrentSilo = prev;
+}
+
 struct SiloCodeInstallCmd : engine::Command {
     ts::CompileResult* code_;
     explicit SiloCodeInstallCmd(ts::CompileResult* code) : code_(code) {}
@@ -570,11 +672,26 @@ struct SiloRunStartCmd : engine::Command {
     void doRT(engine::Silo* s) override {
         auto* vm = static_cast<ts::VM*>(s->vm_);
         if (vm && startIdx_ >= 0) {
+            engine::Silo* prev = gCurrentSilo;
+            gCurrentSilo = s;                 // so start() -> spawn targets this silo
             vm->makeCurrent();
             auto* cb = static_cast<ts::CodeBlock*>(vm->global((u32)startIdx_).p);
             if (cb) vm->callFunction(cb, nullptr, 0);
             vm->gcHeartbeat();
+            gCurrentSilo = prev;
         }
+    }
+    bool doNRT(engine::Silo*) override { return true; }
+};
+
+// Installs the per-silo task scheduler + per-sample tick onto the silo (RT
+// thread). The scheduler itself is owned by SiloVMState and freed on detach.
+struct SetSiloTaskSchedCmd : engine::Command {
+    SiloTaskScheduler* sched_;
+    explicit SetSiloTaskSchedCmd(SiloTaskScheduler* sched) : sched_(sched) {}
+    void doRT(engine::Silo* s) override {
+        s->taskSched_ = sched_;
+        s->taskTickFn_ = &siloTaskTick;
     }
     bool doNRT(engine::Silo*) override { return true; }
 };
@@ -646,8 +763,15 @@ static void ffi_attachVM(ts::VM& vm, u16 dst, u16, u16 argBase) {
         *ctx->compiler,
         std::vector<std::string>(ctx->moduleCompiler->includePaths()));
 
+    // Per-silo task scheduler (spawn'd coroutine tasks). GC-rooted on the silo VM.
+    auto* sched = new SiloTaskScheduler(state.vm);
+    state.taskSched = sched;
+    state.vm->addExtraRootScanner([sched](ts::TracingGC& gc) { sched->markRoots(gc); });
+
     // Attach VM to silo (sets vm_ and heartbeatFn_ on the RT thread)
     sendCmdToSilo(eng, siloIndex, new AttachVMCmd(state.vm));
+    // Wire the task scheduler + per-sample tick onto the silo (RT thread).
+    sendCmdToSilo(eng, siloIndex, new SetSiloTaskSchedCmd(sched));
 
     returnErr(vm, dst, tzpl_errNone, __func__);
 }
@@ -835,6 +959,25 @@ static void ffi_siloStartAt(ts::VM& vm, u16, u16, u16 argBase) {
     vm.makeCurrent();
 }
 
+// fn _scheduleTask(clock Int, handler Fn() Float) Int  -- silo-side primitive
+//
+// Adds a beat task to the CURRENT silo's scheduler (gCurrentSilo), scheduled at
+// the current beat of `clock` so it fires on the next tick. `handler` is a
+// fn() Float that returns the next beat-delta (<= 0 to stop). The `spawn`
+// wrapper builds this handler around a coroutine. Runs on the silo VM (RT thread
+// for live audio, or inline during start()). Returns a task id, or -1.
+static void ffi_scheduleTask(ts::VM& vm, u16 dst, u16, u16 argBase) {
+    int clock = static_cast<int>(vm.reg(argBase).i);
+    ts::Obj* handler = vm.reg(argBase + 1).o;
+    engine::Silo* s = gCurrentSilo;
+    if (!s || !s->taskSched_) { vm.reg(dst).i = -1; return; }
+    int nclk = (int)s->tempoClocks_.size();
+    int c = (clock >= 0 && clock < nclk) ? clock : 0;
+    f64 beat = s->tempoClocks_[c].beatAtSample(s->sampleTime_);
+    auto* sched = static_cast<SiloTaskScheduler*>(s->taskSched_);
+    vm.reg(dst).i = static_cast<i64>(sched->addTask(clock, beat, handler));
+}
+
 // ---------------------------------------------------------------------------
 // Registration
 // ---------------------------------------------------------------------------
@@ -852,6 +995,9 @@ void registerAudioEngineFFI(ts::Compiler& compiler) {
     ts::Type* IntArray = reinterpret_cast<ts::Type*>(compiler.arrayType(Int));
     // Future<String>, returned by siloLoad for the async load barrier.
     ts::Type* FutureString = reinterpret_cast<ts::Type*>(compiler.futureType(String));
+    // Fn() Float -- the silo task handler type (returns the next beat-delta).
+    ts::Vec<ts::Type*> noArgs;
+    ts::Type* FnFloat = reinterpret_cast<ts::Type*>(compiler.functionType(noArgs, Float));
 
     using R = void (*)(ts::VM&, u16, u16, u16);
 
@@ -937,6 +1083,7 @@ void registerAudioEngineFFI(ts::Compiler& compiler) {
     reg("siloEval",         Int, {Int, String},    ffi_siloEval);
     reg("siloLoad",         FutureString, {Int, String}, ffi_siloLoad);
     reg("siloStartAt",      Void, {Float, IntArray},      ffi_siloStartAt);
+    reg("scheduleTask",     Int,  {Int, FnFloat},         ffi_scheduleTask, true);
 
     // Enum constants (SchedPolicy, FadeCurve, Err, Enable) are defined
     // in the Tzopilotl module: bridge/modules/audio_engine.x
