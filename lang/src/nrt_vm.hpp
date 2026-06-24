@@ -30,6 +30,7 @@
 #include "vm.hpp"
 #include "compiler.hpp"
 #include <mutex>
+#include <condition_variable>
 #include <atomic>
 #include <thread>
 #include <string>
@@ -59,6 +60,10 @@ struct HandlerTable {
 struct NRTVM {
     VM vm;
     std::mutex mtx;
+    // Signaled whenever a cross-thread future resolution makes progress (e.g. a
+    // renderNRT completion). A top-level `await` parked in op_future_block's
+    // host-wait hook waits on this, releasing mtx while it sleeps.
+    std::condition_variable cv;
     HandlerTable handlers;
 
     // Current logical time for drift-free NRT scheduling.
@@ -92,6 +97,21 @@ struct NRTVM {
             for (auto& kv : handlers.natsHandlers) {
                 if (kv.second) gc.mark(static_cast<GCObj*>(kv.second));
             }
+        });
+
+        // Host-wait hook for a top-level `await` on a cross-thread future. We are
+        // called with `mtx` already held (NRTVM::execute / call wrap the whole run
+        // in a lock_guard), so adopt it, wait on cv -- which releases mtx while
+        // parked so the resolving thread can acquire it -- then detach without
+        // unlocking so the outer lock_guard still owns it on return.
+        vm.setHostBlockingWait([this](std::function<bool()> const& ready) {
+            std::unique_lock<std::mutex> lk(mtx, std::adopt_lock);
+            // Pause GC: while parked here the VM frame is frozen mid-opcode and
+            // not safely scannable by the heartbeat thread (see VM::gcHeartbeat).
+            vm.setGcSuspended(true);
+            cv.wait(lk, ready);
+            vm.setGcSuspended(false);
+            lk.release();
         });
     }
 

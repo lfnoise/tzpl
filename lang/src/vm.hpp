@@ -162,6 +162,24 @@ struct CallFrame {
     u32        dynStackMark; // Dynamic scope stack level at function entry
 };
 
+// Snapshot of the VM's execution state, taken when the main thread parks in a
+// top-level `await` on a cross-thread future. While parked the render thread
+// runs lang code (setup / scheduled handlers) on this SAME VM, resetting the
+// shared frame stack + register file; we save the parked context before the
+// wait and restore it on wake so the script continues where it left off.
+struct ExecSnapshot {
+    u32   frameCount = 0;
+    u32   baseReg = 0;
+    u32   dynStackTop = 0;
+    u32   dynStackPayloadTop = 0;
+    Code* pc = nullptr;
+    Word* currentRegs = nullptr;
+    class CoroutineObj* coro = nullptr;
+    class CoroutineFrame* coroFrame = nullptr;
+    Vec<Word>      regs;     // regs_[0 .. high-water] at park time
+    Vec<CallFrame> frames;   // frames_[0 .. frameCount)
+};
+
 // Forward declaration — defined in compiler.hpp
 class Compiler;
 
@@ -270,6 +288,16 @@ private:
     Vec<AsyncTimer>     asyncTimers_;       // pending delay() timers
     Vec<CoroutineObj*>  asyncReady_;        // coroutines ready to resume
     double              asyncBeat_ = 0.0;   // current virtual beat
+
+    // Externally-resolved futures (Phase C): e.g. renderNRT completion fired
+    // from a background thread. These are GC roots while in flight and signal
+    // the pump that an await may make progress only via the host-wait hook (the
+    // VM cannot advance them itself). The host (NRTVM) registers hostBlockingWait_
+    // so op_future_block can release the host mutex and park on a condition
+    // variable until a cross-thread resolution notifies it.
+    Vec<Future*>        asyncExternalFutures_;
+    std::function<void(std::function<bool()> const&)> hostBlockingWait_;
+    std::atomic<bool>   gcSuspended_{false};   // GC paused during an await park
 
     // Type universe (shared, system-allocated)
     TypeUniverse& typeUniverse_;
@@ -416,8 +444,17 @@ public:
     // Invoked from the existing ~20 ms host idle thread (nrt_vm.hpp) and
     // from between-event call sites in the bridges and scheduler.
     void gcHeartbeat() {
+        // Suppressed while the main thread is parked in a top-level `await` on a
+        // cross-thread future (op_future_block's host-wait): the parked frame is
+        // frozen mid-opcode with no valid stack map at vm_.pc_, so a concurrent
+        // collection from the heartbeat thread would scan it wrong. The main
+        // thread allocates nothing while parked, so pausing GC is safe.
+        if (gcSuspended_.load(std::memory_order_acquire)) return;
         nrtTick(gcMonoNanos() + gcStepBudgetNanos_);
     }
+
+    // Pause/resume GC across a cross-thread await park (see gcHeartbeat).
+    void setGcSuspended(bool b) { gcSuspended_.store(b, std::memory_order_release); }
 
     // Type universe access
     TypeUniverse& typeUniverse() { return typeUniverse_; }
@@ -472,6 +509,21 @@ public:
     // Pump the loop on this thread until `target` resolves (op_future_block).
     void pumpUntilResolved(Future* target);
     double asyncBeat() const { return asyncBeat_; }
+
+    // Cross-thread future support (Phase C). The host registers a blocking-wait
+    // callback that releases its mutex and parks until the predicate holds.
+    void setHostBlockingWait(std::function<void(std::function<bool()> const&)> fn) {
+        hostBlockingWait_ = std::move(fn);
+    }
+    // Save/restore the execution context across a cross-thread await park.
+    void saveExecSnapshot(ExecSnapshot& s);
+    void restoreExecSnapshot(ExecSnapshot const& s);
+    // Track a Pending future that will be resolved from another thread (roots it).
+    void registerExternalFuture(Future* f) { if (f) asyncExternalFutures_.push_back(f); }
+    // Resolve such a future: copy its value (if any was staged by the caller is
+    // not needed for Void), enqueue its waiters, and drop it from the in-flight
+    // set. MUST be called with the host mutex held (the VM made current).
+    void resolveExternalFuture(Future* f);
     void setCurrentRegs(Word* r) { currentRegs_ = r; }
     void setBaseReg(u32 b) { baseReg_ = b; }
     void setFrameCount(u32 c) { frameCount_ = c; }

@@ -474,6 +474,52 @@ static void ffi_onRenderDone(ts::VM& vm, u16, u16, u16 argBase) {
     onRenderDone(h, std::move(cb));
 }
 
+// fn renderDone(h Int) Future<Void>  -- the awaitable form of onRenderDone.
+//
+// Returns a Pending Future resolved when render `h` completes. `await
+// renderDone(h)` parks the script (releasing the NRTVM mutex via the VM's
+// host-wait hook) until the render thread fires the completion callback.
+static void ffi_renderDone(ts::VM& vm, u16 dst, u16, u16 argBase) {
+    int64_t h = vm.reg(argBase).i;
+
+    auto& tu = vm.typeUniverse();
+    ts::Type* voidT = tu.types().voidType;
+    ts::FutureType* futT = tu.futureType(voidT);
+    u16 vw = (u16)((voidT && voidT->sizeWords_ > 0) ? voidT->sizeWords_ : 1);
+    auto* future = ts::Future::create(futT, voidT, vw);
+    vm.registerExternalFuture(future);   // GC-root it while in flight
+    vm.reg(dst).o = future;
+
+    auto* ctx = static_cast<AppContext*>(vm.userData());
+    if (!ctx || !ctx->nrtvm) {
+        // No host to drive a cross-thread resolution -- resolve immediately so a
+        // top-level await doesn't hang.
+        vm.resolveExternalFuture(future);
+        return;
+    }
+    auto* nrtvm = ctx->nrtvm;
+
+    // onRenderDone fires the callback INLINE on this (script) thread if the
+    // render is already done, and otherwise on the render thread later. We hold
+    // nrtvm->mtx now, so the inline path must NOT relock it. Distinguish by the
+    // registering thread id: same thread => inline => resolve directly; other
+    // thread => render completion => lock, resolve, notify the host-wait cv.
+    auto regThread = std::this_thread::get_id();
+    onRenderDone(h, [nrtvm, future, regThread]() {
+        if (std::this_thread::get_id() == regThread) {
+            nrtvm->vm.resolveExternalFuture(future);
+        } else {
+            std::lock_guard<std::mutex> lk(nrtvm->mtx);
+            nrtvm->vm.makeCurrent();
+            nrtvm->vm.resolveExternalFuture(future);
+            nrtvm->cv.notify_all();
+            // No gcHeartbeat here: the awaiting main thread has GC suspended
+            // while parked, and resolveExternalFuture does no allocation worth
+            // collecting. GC resumes when the main thread wakes.
+        }
+    });
+}
+
 // fn stopRender(h Int) Void
 static void ffi_stopRender(ts::VM& vm, u16, u16, u16 argBase) {
     stopRender(vm.reg(argBase).i);
@@ -516,10 +562,14 @@ void registerNRTRenderFFI(ts::Compiler& compiler) {
                                                /*pure=*/false, /*rtSafe=*/false);
     };
 
+    // Future<Void>, returned by renderDone() for `await`.
+    ts::Type* FutureVoid = reinterpret_cast<ts::Type*>(compiler.futureType(Void));
+
     reg("renderNRT",    Int,  {String, FnVoid},          ffi_renderNRT_open);
     reg("renderNRT",    Int,  {String, Float, FnVoid},   ffi_renderNRT_dur);
     reg("isRenderDone", Bool, {Int},                     ffi_isRenderDone);
     reg("onRenderDone", Void, {Int, FnVoid},             ffi_onRenderDone);
+    reg("renderDone",   FutureVoid, {Int},               ffi_renderDone);
     reg("stopRender",   Void, {Int},                     ffi_stopRender);
     reg("stopRender",   Void, {Int, Float},              ffi_stopRender_tail);
     reg("endRender",    Void, {},                        ffi_endRender);

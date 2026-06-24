@@ -158,7 +158,8 @@ go(coro fn() Float {
 
 fn render_test3() {
 	let h = "/tmp/test3.wav" renderNRT(200, test3);
-	onRenderDone(h, fn(){ "render done" println });
+	await renderDone(h);    -- block until the NRT render finishes
+	"render done" println;
 }
 
 test3();

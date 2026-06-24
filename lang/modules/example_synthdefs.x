@@ -321,7 +321,8 @@ fn playExamples() {
 
 fn renderExamples() {
 	let h = "/tmp/examples.wav" ae.renderNRT(180, playExamples);
-	ae.onRenderDone(h, fn(){ "render done" println });
+	await ae.renderDone(h);    -- block until the NRT render finishes
+	"render done" println;
 }
 
 

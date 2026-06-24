@@ -662,6 +662,46 @@ void VM::resumeAsync(CoroutineObj* coro) {
     halted_ = wasHalted;
 }
 
+void VM::resolveExternalFuture(Future* f) {
+    if (!f || f->state_ == Future::Resolved) return;
+    f->state_ = Future::Resolved;          // Future<Void>: no value to stage
+    asyncEnqueueWaiters(f);                 // move its waiters to asyncReady_
+    for (size_t i = 0; i < asyncExternalFutures_.size(); ++i) {
+        if (asyncExternalFutures_[i] == f) {
+            asyncExternalFutures_.erase(asyncExternalFutures_.begin() + (std::ptrdiff_t)i);
+            break;
+        }
+    }
+}
+
+void VM::saveExecSnapshot(ExecSnapshot& s) {
+    s.frameCount = frameCount_;
+    s.baseReg = baseReg_;
+    s.dynStackTop = dynStackTop_;
+    s.dynStackPayloadTop = dynStackPayloadTop_;
+    s.pc = pc_;
+    s.currentRegs = currentRegs_;
+    s.coro = currentCoroutine_;
+    s.coroFrame = currentCoroFrame_;
+    u32 regHi = (frameCount_ > 0)
+              ? (baseReg_ + frames_[frameCount_ - 1].numRegs) : 0;
+    s.regs.assign(regs_, regs_ + regHi);
+    s.frames.assign(frames_, frames_ + frameCount_);
+}
+
+void VM::restoreExecSnapshot(ExecSnapshot const& s) {
+    if (!s.regs.empty())   std::copy(s.regs.begin(), s.regs.end(), regs_);
+    if (!s.frames.empty()) std::copy(s.frames.begin(), s.frames.end(), frames_);
+    frameCount_ = s.frameCount;
+    baseReg_ = s.baseReg;
+    dynStackTop_ = s.dynStackTop;
+    dynStackPayloadTop_ = s.dynStackPayloadTop;
+    pc_ = s.pc;
+    currentRegs_ = s.currentRegs;
+    currentCoroutine_ = s.coro;
+    currentCoroFrame_ = s.coroFrame;
+}
+
 void VM::pumpUntilResolved(Future* target) {
     if (!target) return;
     // `target` may be reachable only through op_future_block's register slot,
@@ -675,17 +715,40 @@ void VM::pumpUntilResolved(Future* target) {
             resumeAsync(coro);
             continue;
         }
-        // 2. Nothing ready: advance virtual time to the earliest pending timer.
-        if (asyncTimers_.empty()) break;         // target can never resolve -- bail
-        size_t best = 0;
-        for (size_t i = 1; i < asyncTimers_.size(); ++i) {
-            if (asyncTimers_[i].beat < asyncTimers_[best].beat) best = i;
+        // 2. Advance virtual time to the earliest pending delay() timer.
+        if (!asyncTimers_.empty()) {
+            size_t best = 0;
+            for (size_t i = 1; i < asyncTimers_.size(); ++i) {
+                if (asyncTimers_[i].beat < asyncTimers_[best].beat) best = i;
+            }
+            AsyncTimer t = asyncTimers_[best];
+            asyncTimers_.erase(asyncTimers_.begin() + (std::ptrdiff_t)best);
+            if (t.beat > asyncBeat_) asyncBeat_ = t.beat;
+            t.fut->state_ = Future::Resolved;    // Future<Void>: no value to copy
+            asyncEnqueueWaiters(t.fut);
+            continue;
         }
-        AsyncTimer t = asyncTimers_[best];
-        asyncTimers_.erase(asyncTimers_.begin() + (std::ptrdiff_t)best);
-        if (t.beat > asyncBeat_) asyncBeat_ = t.beat;
-        t.fut->state_ = Future::Resolved;        // Future<Void>: no value to copy
-        asyncEnqueueWaiters(t.fut);
+        // 3. No in-VM work left. If a future is in flight on another thread and
+        //    the host gave us a blocking-wait hook, release the host mutex and
+        //    park until a cross-thread resolution makes progress. Otherwise the
+        //    target can never resolve from here -- bail (op_future_block then
+        //    yields a default value).
+        if (!asyncExternalFutures_.empty() && hostBlockingWait_) {
+            // The resolving thread runs lang code (render setup / handlers) on
+            // this same VM while we wait, trampling the shared frame stack and
+            // register file. Snapshot our execution context and restore it on
+            // wake. (GC is also suspended across the wait -- see gcHeartbeat --
+            // so the snapshot's Obj* registers stay live without extra rooting.)
+            ExecSnapshot snap;
+            saveExecSnapshot(snap);
+            Future* tgt = target;
+            hostBlockingWait_([this, tgt]() {
+                return tgt->state_ == Future::Resolved || !asyncReady_.empty();
+            });
+            restoreExecSnapshot(snap);
+            continue;
+        }
+        break;
     }
     gcKeepAlivePop();
 }

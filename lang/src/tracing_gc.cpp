@@ -307,6 +307,11 @@ void TracingGC::step_root_frames(u64 deadlineNanos, u32& sinceCheck, u32& done) 
     for (CoroutineObj* c : vm_.asyncReady_) {
         if (c) { mark(c); ++lastRootCount_; }
     }
+    // Externally-resolved futures (renderNRT completion etc.) are in flight on a
+    // background thread and reachable only here until they resolve.
+    for (Future* f : vm_.asyncExternalFutures_) {
+        if (f) { mark(reinterpret_cast<GCObj*>(f)); ++lastRootCount_; }
+    }
     rootPhase_ = RootPhase::Extras;
     rootExtraCursor_ = 0;
 }
