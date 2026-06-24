@@ -298,6 +298,15 @@ void TracingGC::step_root_frames(u64 deadlineNanos, u32& sinceCheck, u32& done) 
     // any nested/suspended coroutines and frames alive transitively.
     if (vm_.currentCoroutine_) { mark(vm_.currentCoroutine_); ++lastRootCount_; }
     if (vm_.currentCoroFrame_) { mark(vm_.currentCoroFrame_); ++lastRootCount_; }
+    // Async event loop (Phase B): pending delay() timers hold the only reference
+    // to their Pending futures, and the ready queue holds coroutines unblocked by
+    // a resolution but not yet resumed. Both are GC roots while the loop pumps.
+    for (auto const& t : vm_.asyncTimers_) {
+        if (t.fut) { mark(reinterpret_cast<GCObj*>(t.fut)); ++lastRootCount_; }
+    }
+    for (CoroutineObj* c : vm_.asyncReady_) {
+        if (c) { mark(c); ++lastRootCount_; }
+    }
     rootPhase_ = RootPhase::Extras;
     rootExtraCursor_ = 0;
 }

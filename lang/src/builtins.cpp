@@ -1684,6 +1684,19 @@ static bool resolve_ready(Compiler& compiler, const std::vector<Type*>& args,
     return true;
 }
 
+// delay: Float -> Future<Void>  (codegen: op_delay; schedules a virtual-beat
+// timer on the VM async loop). Accepts any numeric scalar; coerced to Float.
+static bool resolve_delay(Compiler& compiler, const std::vector<Type*>& args,
+    std::vector<Type*>& pt, Type*& rt, CFun& cf) {
+    if (args.size() != 1) return false;
+    Type* a = args[0];
+    if (a != compiler.intType() && a != compiler.floatType()) return false;
+    pt = {compiler.floatType()};
+    rt = compiler.futureType(compiler.voidType());
+    cf = nullptr;  // codegen handles this specially via op_delay
+    return true;
+}
+
 // yield: T -> Void
 static bool resolve_yield(Compiler& compiler, const std::vector<Type*>& args,
     std::vector<Type*>& pt, Type*& rt, CFun& cf) {
@@ -3584,6 +3597,7 @@ void registerBuiltinFunctions(Compiler& compiler,
     // --- Async/await builtins ---
     registerTemplate(compiler, functions, "await",        resolve_await,    /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
     registerTemplate(compiler, functions, "ready",        resolve_ready,    /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "delay",        resolve_delay,    /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
 
     // --- Set builtins ---
     // Phase 4g.11: Set elements are stored natively (multi-word for inline

@@ -54,6 +54,7 @@ class FunctionType;
 class EnumType;
 class CoroutineType;
 class FutureType;
+class Future;
 class CoroutineObj;
 class CoroutineFrame;
 struct CompileResult;
@@ -256,6 +257,20 @@ private:
     CoroutineFrame*  currentCoroFrame_ = nullptr;
     Word*            currentRegs_ = nullptr;
 
+    // --- Async event loop (Phase B) ---
+    // A single-threaded, virtual-beat scheduler. `delay(beats)` (op_delay)
+    // enqueues a timer; a top-level `await` (op_future_block) pumps the loop:
+    // it drains ready coroutines, then advances the virtual beat to the
+    // earliest timer, resolves that timer's Future, and resumes the async
+    // coroutines waiting on it. Resolving a Future moves its waiters onto
+    // asyncReady_. All single-threaded -- no mutexes (the cross-thread
+    // resolution path arrives with renderNRT in Phase C). GC roots: the
+    // futures held by timers and the coroutines in asyncReady_ (tracing_gc).
+    struct AsyncTimer { double beat; Future* fut; };
+    Vec<AsyncTimer>     asyncTimers_;       // pending delay() timers
+    Vec<CoroutineObj*>  asyncReady_;        // coroutines ready to resume
+    double              asyncBeat_ = 0.0;   // current virtual beat
+
     // Type universe (shared, system-allocated)
     TypeUniverse& typeUniverse_;
 
@@ -445,6 +460,18 @@ public:
     CoroutineFrame* currentCoroFrame() const { return currentCoroFrame_; }
     void setCurrentCoroutine(CoroutineObj* c) { currentCoroutine_ = c; }
     void setCurrentCoroFrame(CoroutineFrame* f) { currentCoroFrame_ = f; }
+
+    // --- Async event loop driver (Phase B) ---
+    // Enqueue a virtual-beat timer for a Pending Future<Void> (op_delay).
+    void scheduleDelay(Future* fut, double beats);
+    // Move a resolved Future's awaiting coroutines onto the ready queue.
+    void asyncEnqueueWaiters(Future* fut);
+    // Resume a suspended async coroutine, injecting its awaited Future's value
+    // into the await result register, then run it to its next suspend/return.
+    void resumeAsync(CoroutineObj* coro);
+    // Pump the loop on this thread until `target` resolves (op_future_block).
+    void pumpUntilResolved(Future* target);
+    double asyncBeat() const { return asyncBeat_; }
     void setCurrentRegs(Word* r) { currentRegs_ = r; }
     void setBaseReg(u32 b) { baseReg_ = b; }
     void setFrameCount(u32 c) { frameCount_ = c; }

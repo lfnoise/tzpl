@@ -26,6 +26,7 @@
 #include "type_system.hpp"
 #include "tracing_gc.hpp"
 #include "value.hpp"
+#include "opcodes.hpp"   // op_halt sentinel for the async driver re-entry
 #include <algorithm>
 #include <cstdlib>
 #include <random>
@@ -589,6 +590,104 @@ Word VM::execute(CodeBlock* block) {
 
     // When HALT runs, it returns here
     return reg(0);
+}
+
+// --- Async event loop driver (Phase B) -----------------------------------
+//
+// Single-threaded virtual-beat scheduler. The pump (driven by op_future_block
+// at a top-level `await`) resolves delay() timers in beat order and resumes the
+// async coroutines waiting on them. resumeAsync() re-enters the VM the same way
+// VM::execute does -- it runs the coroutine until an opcode (here, the suspend/
+// return path's restored caller PC = g_asyncDriverHalt) plainly returns, which
+// unwinds the [[clang::musttail]] chain back to C++.
+
+// A one-instruction "return to the C++ driver" program: when a resumed coroutine
+// next suspends (op_future_await) or completes (op_async_return) it restores its
+// callerReturnPC_ to this and tail-calls it, unwinding back into resumeAsync().
+static Code g_asyncDriverHalt[1] = { Code(op_halt) };
+
+void VM::scheduleDelay(Future* fut, double beats) {
+    asyncTimers_.push_back(AsyncTimer{ asyncBeat_ + (beats > 0.0 ? beats : 0.0), fut });
+}
+
+void VM::asyncEnqueueWaiters(Future* fut) {
+    CoroutineObj* w = fut->waiters_;
+    fut->waiters_ = nullptr;
+    while (w) {
+        CoroutineObj* next = w->nextWaiter_;
+        w->nextWaiter_ = nullptr;
+        asyncReady_.push_back(w);
+        w = next;
+    }
+}
+
+void VM::resumeAsync(CoroutineObj* coro) {
+    if (coro->state_ != CoroutineObj::Suspended || !coro->topFrame_) return;
+    Future* awaited = coro->awaitedFuture_;
+    coro->awaitedFuture_ = nullptr;
+
+    // Save the driver's context as the synthetic caller. On the coroutine's next
+    // suspend/return, op_future_await / op_async_return restore this and tail-call
+    // callerReturnPC_ (= the halt sentinel), unwinding back to us below.
+    coro->callerReturnPC_   = g_asyncDriverHalt;
+    coro->callerResultReg_  = 0;                 // unused: coro holds its own future
+    coro->callerBaseReg_    = baseReg_;
+    coro->callerFrameCount_ = frameCount_;       // saved BEFORE pushFrame
+    coro->callerCoroFrame_  = currentCoroFrame_;
+    coro->callerCoroutine_  = currentCoroutine_;
+
+    setCurrentCoroutine(coro);                   // roots the coroutine
+    coro->state_ = CoroutineObj::Running;
+
+    u32 newBase = baseReg_ + currentFrameNumRegs();
+    CoroutineFrame* frame = coro->topFrame_;
+    setCurrentCoroFrame(frame);
+    for (u16 i = 0; i < frame->numRegs_; ++i) regs_[newBase + i] = frame->regs_[i];
+
+    // Inject the awaited value into the await's destination register (the value
+    // op_future_await did not have when it suspended).
+    if (awaited) {
+        u16 dst = coro->awaitResultReg_;
+        u16 stride = awaited->valueWords_;
+        for (u16 i = 0; i < stride; ++i) regs_[newBase + dst + i] = awaited->value_[i];
+    }
+    frame->gcMapIndex_ = UINT16_MAX;             // nothing retained until next suspend
+
+    pushFrame(nullptr, frame->codeBlock_, newBase, frame->numRegs_, 0);
+
+    Code* resumePC = coro->resumePC_;
+    bool wasHalted = halted_;
+    halted_ = false;
+    resumePC->op(*this, resumePC);               // runs until g_asyncDriverHalt returns
+    halted_ = wasHalted;
+}
+
+void VM::pumpUntilResolved(Future* target) {
+    if (!target) return;
+    // `target` may be reachable only through op_future_block's register slot,
+    // which is not a GC root at the (non-safepoint) re-entries below -- pin it.
+    gcKeepAlivePush(reinterpret_cast<GCObj*>(target));
+    while (target->state_ != Future::Resolved) {
+        // 1. Resume one ready coroutine (it may resolve `target` or enqueue more).
+        if (!asyncReady_.empty()) {
+            CoroutineObj* coro = asyncReady_.front();
+            asyncReady_.erase(asyncReady_.begin());
+            resumeAsync(coro);
+            continue;
+        }
+        // 2. Nothing ready: advance virtual time to the earliest pending timer.
+        if (asyncTimers_.empty()) break;         // target can never resolve -- bail
+        size_t best = 0;
+        for (size_t i = 1; i < asyncTimers_.size(); ++i) {
+            if (asyncTimers_[i].beat < asyncTimers_[best].beat) best = i;
+        }
+        AsyncTimer t = asyncTimers_[best];
+        asyncTimers_.erase(asyncTimers_.begin() + (std::ptrdiff_t)best);
+        if (t.beat > asyncBeat_) asyncBeat_ = t.beat;
+        t.fut->state_ = Future::Resolved;        // Future<Void>: no value to copy
+        asyncEnqueueWaiters(t.fut);
+    }
+    gcKeepAlivePop();
 }
 
 } // namespace ts

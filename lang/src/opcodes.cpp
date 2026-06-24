@@ -5013,6 +5013,23 @@ void op_future_ready(VM& vm, Code* pc) {
     DISPATCH(3);
 }
 
+// DELAY Rd, Rbeats (3 words: op, regs{dst, beats}, FutureType*) -- delay(beats)
+//
+// Returns a Pending Future<Void> and schedules a virtual-beat timer on the VM's
+// async loop. The future resolves when a pump (op_future_block) advances the
+// virtual beat past `beats`, at which point any awaiting async coroutine resumes.
+void op_delay(VM& vm, Code* pc) {
+    u16 dst = pc[1].regs[0], src = pc[1].regs[1];
+    auto* futType = static_cast<FutureType*>(pc[2].p);
+    Type* valueType = futType->valueType_;
+    u16 valueWords = (u16)((valueType && valueType->sizeWords_ > 0) ? valueType->sizeWords_ : 1);
+    double beats = vm.reg(src).f;
+    auto* future = Future::create(futType, valueType, valueWords);  // Pending
+    vm.scheduleDelay(future, beats);
+    vm.reg(dst).o = future;
+    DISPATCH(3);
+}
+
 // FUTURE_AWAIT Rd, Rfut, gcMapIdx (2 words: op, regs{dst, fut, gcMapIdx}) -- cooperative
 void op_future_await(VM& vm, Code* pc) {
     u16 dst = pc[1].regs[0], futReg = pc[1].regs[1], gcMapIdx = pc[1].regs[2];
@@ -5035,6 +5052,7 @@ void op_future_await(VM& vm, Code* pc) {
 
     coro->resumePC_ = pc + 2;
     coro->awaitResultReg_ = dst;
+    coro->awaitedFuture_ = future;   // value injected here by VM::resumeAsync
     frame->gcMapIndex_ = gcMapIdx;
     coro->topFrame_ = frame;
     coro->state_ = CoroutineObj::Suspended;
@@ -5064,11 +5082,17 @@ void op_future_block(VM& vm, Code* pc) {
     u16 dst = pc[1].regs[0], futReg = pc[1].regs[1];
     auto* future = static_cast<Future*>(vm.reg(futReg).o);
     u16 stride = future ? future->valueWords_ : 1;
+    if (!future || future->state_ != Future::Resolved) {
+        // Pump the async event loop on this thread until `future` resolves
+        // (advancing virtual beats over pending delay() timers, resuming the
+        // coroutines they unblock). Re-read after pumping: a GC during the pump
+        // doesn't move objects, but the register may have been overwritten by a
+        // resumed frame, so reload from the (pinned) Future pointer.
+        if (future) vm.pumpUntilResolved(future);
+    }
     if (future && future->state_ == Future::Resolved) {
         for (u16 i = 0; i < stride; ++i) vm.reg((u16)(dst + i)) = future->value_[i];
     } else {
-        // Phase B: pump the event loop on this thread until `future` resolves.
-        // Phase A only has already-resolved futures, so this never runs.
         for (u16 i = 0; i < stride; ++i) vm.reg((u16)(dst + i)).i = 0;
     }
     DISPATCH(2);
@@ -5084,8 +5108,9 @@ void op_async_return(VM& vm, Code* pc) {
         u16 stride = future->valueWords_;
         for (u16 i = 0; i < stride; ++i) future->value_[i] = vm.reg((u16)(src + i));
         future->state_ = Future::Resolved;
-        // Phase B: resume future->waiters_ via VM::resumeAsync. In Phase A,
-        // futures always resolve before they are awaited, so there are none.
+        // Move any coroutines awaiting this future onto the driver's ready queue;
+        // the pump (op_future_block) resumes them, injecting `future`'s value.
+        vm.asyncEnqueueWaiters(future);
     }
 
     coro->topFrame_ = nullptr;

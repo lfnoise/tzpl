@@ -459,6 +459,7 @@ void op_coro_wrap_option(VM& vm, Code* pc);   // CORO_WRAP_OPTION Rd, Rval, Rcor
 // --- Async / await (async fn lowers to a coroutine; await is a suspend point) ---
 void op_async_call(VM& vm, Code* pc);         // ASYNC_CALL Rd, argBase, argc (4 words: op, regs, global_idx, FutureType*)
 void op_future_ready(VM& vm, Code* pc);       // FUTURE_READY Rd, Rsrc (3 words: op, regs{dst, src}, FutureType*)
+void op_delay(VM& vm, Code* pc);              // DELAY Rd, Rbeats (3 words: op, regs{dst, beats}, FutureType*) -- schedule a virtual-beat timer
 void op_future_await(VM& vm, Code* pc);       // FUTURE_AWAIT Rd, Rfut, gcMapIdx (2 words: op, regs{dst, fut, gcMapIdx}) -- cooperative
 void op_future_block(VM& vm, Code* pc);       // FUTURE_BLOCK Rd, Rfut (2 words: op, regs{dst, fut}) -- blocking pump at non-async boundary
 void op_async_return(VM& vm, Code* pc);       // ASYNC_RETURN Rsrc (2 words: op, regs{src})

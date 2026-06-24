@@ -280,6 +280,7 @@ struct CallExpr_ : Expr {
     bool isAwaitBlocking = false;      // Set by type checker: await outside an async fn (block-and-pump)
     bool isAsyncCall = false;          // Set by type checker: true when calling an async fn (-> op_async_call)
     bool isFutureReady = false;        // Set by type checker: true for ready() Future constructor
+    bool isFutureDelay = false;        // Set by type checker: true for delay() -> op_delay
     std::vector<AutoMapArg> autoMapArgs;  // Set by type checker: explicit @ auto-map info for each arg
     std::vector<AutoMapArg> innerAutoMapArgs;  // Set by type checker: implicit auto-map (inner loop) for each arg
     i32 variadicPackStart = -1;       // Set by type checker: arg index where variadic packing begins (-1 = none)

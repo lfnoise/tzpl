@@ -129,6 +129,11 @@ Type* TypeChecker::finalizeResolvedCall(CallExpr_* expr, FuncInfo* func,
         expr->isFutureReady = true;
     }
 
+    // Mark delay() -- the virtual-beat awaitable (codegen: op_delay).
+    if (name == "delay" && func->isBuiltin && func->paramTypes.size() == 1) {
+        expr->isFutureDelay = true;
+    }
+
     // Set variadic packing info if this is a variadic function
     if (func->isVariadic && func->fixedParamCount >= 0 && expr->variadicPackStart < 0) {
         expr->variadicPackStart = func->fixedParamCount;

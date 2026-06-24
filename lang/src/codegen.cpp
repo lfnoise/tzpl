@@ -4638,7 +4638,8 @@ u16 CodeGen::genCall(CallExpr_* expr) {
         // lowering further down in this function.
         bool specialCoroOp = expr->isCoroYield || expr->isCoroResume
                           || expr->isCoroYieldAll
-                          || expr->isAsyncAwait || expr->isFutureReady;
+                          || expr->isAsyncAwait || expr->isFutureReady
+                          || expr->isFutureDelay;
         if (!isVariadic && expr->isBuiltinCall && !expr->builtinAcceptsInlineArgs
             && !specialCoroOp && targetType
             && targetType->repr_ == ts::Type::Repr::Inline
@@ -4711,6 +4712,17 @@ u16 CodeGen::genCall(CallExpr_* expr) {
         auto* futType = dynamic_cast<FutureType*>(expr->resolvedType);
         u16 resultReg = allocSlot(expr->resolvedType);  // Future is a pointer
         emitOp(op_future_ready);
+        emitRegs(resultReg, srcReg);
+        emitPtr(futType);
+        return resultReg;
+    }
+
+    // Async: delay(beats) -> a Pending Future<Void> + a scheduled timer (op_delay).
+    if (expr->isFutureDelay) {
+        u16 srcReg = argBase;  // beats (Float)
+        auto* futType = dynamic_cast<FutureType*>(expr->resolvedType);
+        u16 resultReg = allocSlot(expr->resolvedType);  // Future is a pointer
+        emitOp(op_delay);
         emitRegs(resultReg, srcReg);
         emitPtr(futType);
         return resultReg;

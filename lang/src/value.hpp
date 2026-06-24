@@ -1612,6 +1612,10 @@ public:
     Future*          resultFuture_ = nullptr;
     CoroutineObj*    nextWaiter_ = nullptr;
     u16              awaitResultReg_ = 0;
+    // Phase B: while suspended at an `await`, the Future this coroutine is
+    // blocked on. Its resolved value is injected into awaitResultReg_ when the
+    // driver resumes us (VM::resumeAsync). Null when running / not awaiting.
+    Future*          awaitedFuture_ = nullptr;
 
     // Initial arguments
     FunctionType*    funcType_;     // for GC scanning of args
@@ -1644,6 +1648,7 @@ public:
         if (callerCoroFrame_) gc.mark(callerCoroFrame_);
         if (callerCoroutine_) gc.mark(callerCoroutine_);
         if (resultFuture_) gc.mark(reinterpret_cast<GCObj*>(resultFuture_));
+        if (awaitedFuture_) gc.mark(reinterpret_cast<GCObj*>(awaitedFuture_));
         if (nextWaiter_) gc.mark(nextWaiter_);
         if (funcType_) {
             for (u16 i = 0; i < numArgs_ && i < funcType_->argTypes_.size(); ++i) {
