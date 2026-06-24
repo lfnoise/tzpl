@@ -197,7 +197,11 @@ rt::TLSFAllocator* Obj::getAllocator() const {
 }
 
 CodeBlock* VM::currentCodeBlock() const {
-    if (currentCoroFrame_) return currentCoroFrame_->codeBlock_;
+    // The executing CodeBlock is always the top flat frame: op_coro_resume
+    // pushes the coroutine body as a flat frame, and any function it calls
+    // pushes its own frame above that. Keying on currentCoroFrame_ here was a
+    // bug -- it returned the coroutine's CodeBlock while a *nested* call was
+    // running, so the callee's op_load_obj read the coroutine's objConstants.
     return frames_[frameCount_ - 1].codeBlock;
 }
 
