@@ -532,6 +532,15 @@ if (localStorage.getItem('tzpl-docs-theme') === 'light') document.documentElemen
         <li><a href="#coroutine-composition">Composition Patterns</a></li>
       </ol>
     </li>
+    <li><a href="#async-await">Async and Await</a>
+      <ol>
+        <li><a href="#async-functions">Async Functions and await</a></li>
+        <li><a href="#future-ready">The Future Type and ready</a></li>
+        <li><a href="#delay">Awaiting Time with delay</a></li>
+        <li><a href="#await-combinators">Combinators: awaitAll and gather</a></li>
+        <li><a href="#async-notes">How It Works</a></li>
+      </ol>
+    </li>
     <li><a href="#advanced-examples">Advanced Examples</a>
       <ol>
         <li><a href="#fibonacci">Fibonacci</a></li>
@@ -3313,9 +3322,106 @@ They also compose well: a coroutine can create and drive other coroutines.</p>
 <span class="cmt">-- List(0, 2, 4, 6)</span></code></pre>
 
 <!-- ================================================================ -->
-<h2 id="advanced-examples">25. Advanced Examples</h2>
+<h2 id="async-await">25. Async and Await</h2>
+<p>An <code>async fn</code> is a function whose body may <em>suspend</em> at an
+<code>await</code> and resume later, delivering its single result through a
+<code>Future&lt;T&gt;</code>. Async functions are built directly on
+<a href="#coroutines">coroutines</a>: an <code>async fn</code> compiles to a
+coroutine whose suspension points are <code>await</code>s. Calling one runs its
+body <em>eagerly</em> up to the first <code>await</code> (or to completion) and
+hands back a <code>Future</code>.</p>
 
-<h3 id="fibonacci">25.1 Fibonacci (Recursive and Iterative)</h3>
+<h3 id="async-functions">25.1 Async Functions and <code>await</code></h3>
+<p>Declare an async function with <code>async fn</code>. Inside it,
+<code>await</code> unwraps a <code>Future&lt;T&gt;</code> to its value
+<code>T</code>. The function's <em>external</em> return type is
+<code>Future&lt;T&gt;</code> even though its body produces a plain <code>T</code>.</p>
+<pre><code><span class="kw">async fn</span> compute(x <span class="kw">Int</span>) <span class="kw">Int</span> {
+    <span class="kw">let</span> a = <span class="kw">await</span> ready(x + <span class="num">1</span>);
+    <span class="kw">let</span> b = <span class="kw">await</span> ready(a * <span class="num">10</span>);
+    b + <span class="num">5</span>
+}
+
+<span class="cmt">-- compute returns Future&lt;Int&gt;; await it to get the Int</span>
+<span class="kw">let</span> r = <span class="kw">await</span> compute(<span class="num">4</span>);
+r println;   <span class="cmt">-- 55</span></code></pre>
+<p>At the top level (or any non-async context) <code>await</code> blocks until the
+future resolves; inside an <code>async fn</code> it suspends cooperatively and
+resumes when the awaited future is ready. It is the same keyword either way.</p>
+
+<h3 id="future-ready">25.2 The Future Type and <code>ready</code></h3>
+<p><code>ready(x)</code> wraps a value in an already-resolved
+<code>Future&lt;T&gt;</code> &mdash; handy for returning a constant from an async
+context, or in tests.</p>
+<pre><code><span class="kw">let</span> f = ready(<span class="num">42</span>);        <span class="cmt">-- f : Future&lt;Int&gt;</span>
+<span class="kw">let</span> v = <span class="kw">await</span> f;          <span class="cmt">-- 42</span>
+
+<span class="cmt">-- An async fn that takes and returns values:</span>
+<span class="kw">async fn</span> greet(name <span class="kw">String</span>) <span class="kw">String</span> { <span class="str">"hi "</span> $ name }
+
+<span class="kw">let</span> g = greet(<span class="str">"Ada"</span>);    <span class="cmt">-- runs eagerly; g : Future&lt;String&gt;</span>
+(<span class="kw">await</span> g) println;        <span class="cmt">-- hi Ada</span></code></pre>
+
+<h3 id="delay">25.3 Awaiting Time with <code>delay</code></h3>
+<p><code>delay(beats)</code> returns a <code>Future&lt;Void&gt;</code> that resolves
+after the given number of beats. Awaiting it suspends the async function until
+that time arrives, so a beat-based sequence reads top to bottom.</p>
+<pre><code><span class="kw">async fn</span> afterDelay(tag <span class="kw">String</span>, beats <span class="kw">Float</span>) <span class="kw">Void</span> {
+    <span class="kw">await</span> delay(beats);
+    tag println;
+}
+
+<span class="cmt">-- Start three out of order; they resolve in beat order.</span>
+<span class="kw">let</span> a = afterDelay(<span class="str">"A(3)"</span>, <span class="num">3.0</span>);
+<span class="kw">let</span> b = afterDelay(<span class="str">"B(1)"</span>, <span class="num">1.0</span>);
+<span class="kw">let</span> c = afterDelay(<span class="str">"C(2)"</span>, <span class="num">2.0</span>);
+<span class="kw">await</span> a; <span class="kw">await</span> b; <span class="kw">await</span> c;
+<span class="cmt">-- B(1)  C(2)  A(3)</span></code></pre>
+
+<h3 id="await-combinators">25.4 Combinators: <code>awaitAll</code> and <code>gather</code></h3>
+<p>The <code>futures</code> module provides combinators over a list of futures.
+<code>awaitAll</code> is a barrier &mdash; it returns once every future has
+resolved. <code>gather</code> also collects their values, in argument order
+(independent of the order they resolved in).</p>
+<pre><code><span class="kw">import</span> futures.*;
+
+<span class="cmt">-- awaitAll: wait for all of them (a barrier)</span>
+<span class="kw">await</span> awaitAll([afterDelay(<span class="str">"x"</span>, <span class="num">1.0</span>), afterDelay(<span class="str">"y"</span>, <span class="num">2.0</span>)]);
+
+<span class="kw">async fn</span> load(id <span class="kw">Int</span>, beats <span class="kw">Float</span>) <span class="kw">Int</span> {
+    <span class="kw">await</span> delay(beats);
+    id * <span class="num">10</span>
+}
+
+<span class="cmt">-- gather: results come back in argument order, not resolve order</span>
+<span class="kw">let</span> xs = <span class="kw">await</span> gather([load(<span class="num">1</span>, <span class="num">2.0</span>), load(<span class="num">2</span>, <span class="num">1.0</span>), load(<span class="num">3</span>, <span class="num">3.0</span>)]);
+xs println;   <span class="cmt">-- [10, 20, 30]</span></code></pre>
+<p>Because each <code>load(...)</code> runs eagerly to its first <code>await</code>
+before <code>gather</code> is called, the three loads are all in flight at once;
+<code>gather</code> just waits for them and assembles the results in order.</p>
+
+<h3 id="async-notes">25.5 How It Works</h3>
+<ul>
+<li><strong>An async fn is a coroutine.</strong> <code>await</code> is a suspension
+point, exactly like <code>yield</code> in a <a href="#coroutines">coroutine</a>;
+the single result is delivered through the <code>Future</code> rather than a
+stream of yields.</li>
+<li><strong>Calls are eager.</strong> Calling an async fn runs its body up to the
+first <code>await</code> (or to completion if it never awaits) <em>before</em>
+returning the <code>Future</code>. Start several async calls, then
+<code>await</code> / <code>awaitAll</code> them, to run them concurrently.</li>
+<li><strong><code>await</code> works everywhere.</strong> Inside an async fn it
+suspends cooperatively; at a non-async boundary (the top level, a callback) it
+blocks the caller and pumps the event loop until the future resolves.</li>
+<li><strong>Errors are values.</strong> Tzopilotl has no exceptions, so a fallible
+async operation returns a <code>Future</code> of an <code>Option</code> or a
+result enum; handle it with <code>match</code> after the <code>await</code>.</li>
+</ul>
+
+<!-- ================================================================ -->
+<h2 id="advanced-examples">26. Advanced Examples</h2>
+
+<h3 id="fibonacci">26.1 Fibonacci (Recursive and Iterative)</h3>
 <pre><code><span class="kw">fn</span> fib(n <span class="kw">Int</span>) <span class="kw">Int</span> {
     <span class="kw">if</span> (n <= <span class="num">1</span>) { <span class="kw">return</span> n; }
     fib(n - <span class="num">1</span>) + fib(n - <span class="num">2</span>)
@@ -3335,7 +3441,7 @@ They also compose well: a coroutine can create and drive other coroutines.</p>
     b
 }</code></pre>
 
-<h3 id="fizzbuzz">25.2 FizzBuzz</h3>
+<h3 id="fizzbuzz">26.2 FizzBuzz</h3>
 <pre><code><span class="kw">fn</span> fizzbuzz(n <span class="kw">Int</span>) <span class="kw">String</span> {
     <span class="kw">if</span> (n % <span class="num">15</span> == <span class="num">0</span>) { <span class="kw">return</span> <span class="str">"FizzBuzz"</span>; }
     <span class="kw">if</span> (n % <span class="num">3</span> == <span class="num">0</span>) { <span class="kw">return</span> <span class="str">"Fizz"</span>; }
@@ -3350,7 +3456,7 @@ They also compose well: a coroutine can create and drive other coroutines.</p>
     i = i + <span class="num">1</span>;
 }</code></pre>
 
-<h3 id="euler9">25.3 Euler Problem 9: Pythagorean Triplet</h3>
+<h3 id="euler9">26.3 Euler Problem 9: Pythagorean Triplet</h3>
 <pre><code><span class="cmt">-- Find a*b*c where a+b+c=1000, a^2+b^2=c^2</span>
 <span class="kw">fn</span> euler9() <span class="kw">Int</span> {
     <span class="kw">var</span> a = <span class="num">1</span>;
@@ -3370,14 +3476,14 @@ They also compose well: a coroutine can create and drive other coroutines.</p>
     <span class="num">0</span>
 }</code></pre>
 
-<h3 id="complex-powers">25.4 Complex Number Powers of i</h3>
+<h3 id="complex-powers">26.4 Complex Number Powers of i</h3>
 <pre><code><span class="cmt">-- i^1=i, i^2=-1, i^3=-i, i^4=1</span>
 <span class="kw">let</span> i_1 = <span class="num">1i</span>;
 <span class="kw">let</span> i_2 = i_1 * i_1;      <span class="cmt">-- -1+0i</span>
 <span class="kw">let</span> i_3 = i_2 * i_1;      <span class="cmt">-- 0-1i</span>
 <span class="kw">let</span> i_4 = i_3 * i_1;      <span class="cmt">-- 1+0i</span></code></pre>
 
-<h3 id="bitwise-overloading">25.5 Bitwise Operator Overloading</h3>
+<h3 id="bitwise-overloading">26.5 Bitwise Operator Overloading</h3>
 <pre><code><span class="kw">struct</span> Mask { bits <span class="kw">Int</span> }
 
 <span class="kw">fn</span> &(a Mask, b Mask) Mask = Mask { bits: a.bits & b.bits };
