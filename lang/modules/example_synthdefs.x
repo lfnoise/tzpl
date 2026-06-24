@@ -1,6 +1,7 @@
 -- Example synthdefs
 
 import synthdef.*;
+import synthc.compile.*;   -- M5.5 switchover: synths compile via synthc (defSynthX)
 import common_ugens.*;
 
 fn init_urand_test() S {
@@ -14,7 +15,7 @@ fn init_urand_test() S {
 	oscs sum(2) * 0.1 |> outlet
 }
 
-init_urand_test defSynth("init_urand_test");
+init_urand_test defSynthX("init_urand_test");
 
 
 fn bubbles() S =
@@ -24,7 +25,7 @@ fn bubbles() S =
 	|> nnhz sinosc * 0.04
 	|> combn(0.2, 4) outlet;
 
-bubbles defSynth("bubbles");
+bubbles defSynthX("bubbles");
 
 fn seqTest() S {
 	-- let middleC = 261.6255653;
@@ -40,7 +41,7 @@ fn seqTest() S {
 	* 0.2 |> combn(3/8, 4) outlet
 }
 
-seqTest defSynth("seqTest") println;
+seqTest defSynthX("seqTest") println;
 
 
 fn blipTest() S {
@@ -48,7 +49,7 @@ fn blipTest() S {
 	[36, 36.13] blip(0, h) mul(0.2) fadein(0.1) outlet
 }
 
-blipTest defSynth("blipTest");
+blipTest defSynthX("blipTest");
 
 
 fn smoothSawTest() S {
@@ -56,7 +57,7 @@ fn smoothSawTest() S {
 	[100, 100.13] smoothSaw(s) mul(0.2) fadein(0.1) outlet
 }
 
-smoothSawTest defSynth("smoothSawTest");
+smoothSawTest defSynthX("smoothSawTest");
 
 
 fn smoothSquareTest() S {
@@ -64,7 +65,7 @@ fn smoothSquareTest() S {
 	[100, 100.13] smoothSquare(s) mul(0.2) fadein(0.1) outlet
 }
 
-smoothSquareTest defSynth("smoothSquareTest");
+smoothSquareTest defSynthX("smoothSquareTest");
 
 
 fn usinWinUsinTest() S {
@@ -73,7 +74,7 @@ fn usinWinUsinTest() S {
 
 }
 
-usinWinUsinTest defSynth("usinWinUsinTest");
+usinWinUsinTest defSynthX("usinWinUsinTest");
 
 fn usinWinSinTest() S {
 	let s = 1/5 sinosc(0.75) bilin(1, 16);
@@ -81,7 +82,7 @@ fn usinWinSinTest() S {
 
 }
 
-usinWinSinTest defSynth("usinWinSinTest");
+usinWinSinTest defSynthX("usinWinSinTest");
 
 
 fn sawWinUsinTest() S {
@@ -90,7 +91,7 @@ fn sawWinUsinTest() S {
 
 }
 
-sawWinUsinTest defSynth("sawWinUsinTest");
+sawWinUsinTest defSynthX("sawWinUsinTest");
 
 
 fn sawWinSinTest() S {
@@ -99,13 +100,13 @@ fn sawWinSinTest() S {
 
 }
 
-sawWinSinTest defSynth("sawWinSinTest");
+sawWinSinTest defSynthX("sawWinSinTest");
 
-fn() S { 0.3 sinosc biexp(100, 6000) velvet(2) * 0.2 |> outlet } defSynth("dust1");
+fn() S { 0.3 sinosc biexp(100, 6000) velvet(2) * 0.2 |> outlet } defSynthX("dust1");
 
 fn dustone() = 0.2 * decay2(dust(4, 2), 0.04, 0.3) * 800 fsinxosc |> outlet;
 
-dustone defSynth("dustone");
+dustone defSynthX("dustone");
 
 fn apverbTest() S {
 	let chans = 16;
@@ -113,7 +114,7 @@ fn apverbTest() S {
 	(3/chans) pandust(chans) decay2(0.004, 0.2) * freqs sinosc |> transpose(chans) sum(2) * 0.5 |> apverb(0.02, 6, 8) outlet
 }
 
-apverbTest defSynth("apverbTest");
+apverbTest defSynthX("apverbTest");
 
 fn pause_bubbles() S {
     let gate = 0.5 sinosc - 0.5;
@@ -124,7 +125,7 @@ fn pause_bubbles() S {
     out fadein(0.1) combn(0.2, 4) outlet
 }
 
-pause_bubbles defSynth("pause_bubbles");
+pause_bubbles defSynthX("pause_bubbles");
 
 fn tog_pause() S {
     let s0 = 1 lfusqr;
@@ -134,7 +135,7 @@ fn tog_pause() S {
     out fadein(0.1) combn(0.2, 2) outlet
 }
 
-tog_pause defSynth("tog_pause")
+tog_pause defSynthX("tog_pause")
 
 
 fn pull_nested() S {
@@ -150,7 +151,7 @@ fn pull_nested() S {
     out outlet
 }
 
-pull_nested defSynth("pull_nested");
+pull_nested defSynthX("pull_nested");
 
 
 fn pulltwo() S {
@@ -168,7 +169,7 @@ fn pulltwo() S {
     out outlet
 }
 
-pulltwo defSynth("pulltwo");
+pulltwo defSynthX("pulltwo");
 
 
 fn pch_seq() S {
@@ -178,7 +179,7 @@ fn pch_seq() S {
 }
 
 
-pch_seq defSynth("pch_seq");
+pch_seq defSynthX("pch_seq");
 
 
 
@@ -188,7 +189,7 @@ fn sahtone1() S {
 	in combn(0.2, 2) outlet
 }
 
-sahtone1 defSynth("sahtone1");
+sahtone1 defSynthX("sahtone1");
 
 
 
@@ -198,7 +199,7 @@ fn sahtone2() S {
 	in combn(0.2, 2) outlet
 }
 
-sahtone2 defSynth("sahtone2");
+sahtone2 defSynthX("sahtone2");
 
 
 fn mod1_test() S {
@@ -207,7 +208,7 @@ fn mod1_test() S {
 	in chain(4, fn(x S)S{x onepole(c)}) outlet
 }
 
-mod1_test defSynth("mod1_test");
+mod1_test defSynthX("mod1_test");
 
 fn mod4_test() S {
 	let c S = 0.4 fsinosc bilin(0.1, 0.95);
@@ -217,7 +218,7 @@ fn mod4_test() S {
 	out combn([0.3,0.15], 4) outlet
 }
 
-mod4_test defSynth("mod4_test");
+mod4_test defSynthX("mod4_test");
 
 fn mod5_test() S {
 	let dv = 0.2;
@@ -230,42 +231,42 @@ fn mod5_test() S {
 	out comb(delayTimes * delayMod, delayMax, 4) outlet
 }
 
-mod5_test defSynth("mod5_test");
+mod5_test defSynthX("mod5_test");
 
 
 fn white_test() S = outlet(2 white * 0.2);
 
-white_test defSynth("white_test");
+white_test defSynthX("white_test");
 
 
 fn pink_test() S = outlet(2 pinkf * 0.15);
 
-pink_test defSynth("pink_test");
+pink_test defSynthX("pink_test");
 
 
 fn violet_test() S = outlet(2 violet * 0.2);
 
-violet_test defSynth("violet_test");
+violet_test defSynthX("violet_test");
 
 
 fn blue_test() S = outlet(2 blue * 0.2);
 
-blue_test defSynth("blue_test");
+blue_test defSynthX("blue_test");
 
 
 fn red_test() S = outlet(2 red * 0.2);
 
-red_test defSynth("red_test");
+red_test defSynthX("red_test");
 
 
 fn gray_test() S = outlet(2 gray * 0.2);
 
-gray_test defSynth("gray_test");
+gray_test defSynthX("gray_test");
 
 
 fn bubbles_lite() S = 0.4 lfsaw * 24 + 8 lfsaw * 3 + 81 |> nnhz sinosc * 0.04 |> outlet;
 
--- bubbles_lite defSynth("bubbles_lite")
+-- bubbles_lite defSynthX("bubbles_lite")
 
 
 ---------------------------------------------------------------------------
