@@ -1,0 +1,8 @@
+-- awaitAll --
+B(1) ready
+C(2) ready
+A(3) ready
+all parts ready
+-- gather --
+vals = [10, 20, 30]
+total = 60

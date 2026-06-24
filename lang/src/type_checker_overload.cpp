@@ -656,6 +656,14 @@ bool TypeChecker::unifyTypeExpr(TypeExpr* texpr, Type* concrete,
             return unifyTypeExpr(tmplNode->typeArgs[0].get(), coroType->yieldType_, typeParams, bindings);
         }
 
+        // Built-in parameterized type: Future<T> (deduce T from Future<T> args,
+        // e.g. gather<T>(fs [Future<T>])).
+        if (tmplNode->name == "Future" && tmplNode->typeArgs.size() == 1) {
+            auto* futType = dynamic_cast<FutureType*>(concrete);
+            if (!futType) return false;
+            return unifyTypeExpr(tmplNode->typeArgs[0].get(), futType->valueType_, typeParams, bindings);
+        }
+
         // Check if this is a template type alias (e.g. Wrapper<T> where type Wrapper<X> = Box<X>)
         auto taIt = templateTypeAliases_.find(tmplNode->name);
         if (taIt != templateTypeAliases_.end()) {
