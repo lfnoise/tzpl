@@ -59,6 +59,9 @@ struct SiloVMState {
     ts::VM* vm = nullptr;
     ts::VMTarget target;
     std::unique_ptr<ts::ModuleCompiler> moduleCompiler;
+    // Global index of the most recently siloLoad'ed module's start() entry
+    // (Void, no params), or -1 if none. siloStartAt schedules a call to it.
+    int startGlobalIndex = -1;
 };
 
 struct AppContext {

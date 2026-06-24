@@ -33,6 +33,9 @@
 #include "nrt_vm.hpp"
 #include "module_compiler.hpp"
 #include "diagnostic.hpp"
+#include <thread>
+#include <string>
+#include <utility>
 
 // Both tzpl and engine define i64/f64/etc. in different ways.
 // engine: namespace engine { using i64 = long; }
@@ -520,6 +523,62 @@ struct SiloCodeInstallCmd : engine::Command {
     }
 };
 
+// Resolves a siloLoad completion Future once the preceding install (+ optional
+// main-block run) command has landed on the silo. Chained AFTER those commands,
+// so the silo's ordered FIFO guarantees everything queued before it -- the part's
+// node graph, attachVM, and the code install -- has been processed.
+//
+// doNRT runs on the engine's NRT cleanup thread when audio is running, or inline
+// on the caller (script) thread when audio is stopped. The inline case already
+// holds the main NRTVM mutex (the script runs under it), so re-locking would
+// deadlock -- guard by comparing to the registering thread id (the renderDone
+// pattern). Either way the main VM is made current so the result String and the
+// future resolution land in the main VM's heap, not the silo's.
+struct SiloLoadCompleteCmd : engine::Command {
+    ts::NRTVM*       nrtvm_;
+    ts::Future*      future_;
+    std::string      result_;       // "" on success, error message otherwise
+    std::thread::id  regThread_;
+    SiloLoadCompleteCmd(ts::NRTVM* nrtvm, ts::Future* fut, std::string result,
+                        std::thread::id regThread)
+        : nrtvm_(nrtvm), future_(fut), result_(std::move(result)), regThread_(regThread) {}
+    void doRT(engine::Silo*) override {}   // nothing on the RT thread
+    bool doNRT(engine::Silo*) override {
+        if (std::this_thread::get_id() == regThread_) {
+            // Inline (audio stopped): script thread, main VM current + mutex held.
+            nrtvm_->vm.makeCurrent();
+            ts::Word w; w.o = new ts::StringObj(result_);
+            nrtvm_->vm.resolveExternalFuture(future_, &w, 1);
+        } else {
+            std::lock_guard<std::mutex> lk(nrtvm_->mtx);
+            nrtvm_->vm.makeCurrent();
+            ts::Word w; w.o = new ts::StringObj(result_);
+            nrtvm_->vm.resolveExternalFuture(future_, &w, 1);
+            nrtvm_->cv.notify_all();
+        }
+        return true;
+    }
+};
+
+// Calls the silo module's start() entry -- the global at `startIdx_`, recorded
+// by siloLoad from the module's exported functions. Scheduled on the silo's
+// TempoClock so all silos' starts fire on one common beat. The global holds an
+// immortal CodeBlock (functions aren't GC objects), so no rooting is needed.
+struct SiloRunStartCmd : engine::Command {
+    int startIdx_;
+    explicit SiloRunStartCmd(int startIdx) : startIdx_(startIdx) {}
+    void doRT(engine::Silo* s) override {
+        auto* vm = static_cast<ts::VM*>(s->vm_);
+        if (vm && startIdx_ >= 0) {
+            vm->makeCurrent();
+            auto* cb = static_cast<ts::CodeBlock*>(vm->global((u32)startIdx_).p);
+            if (cb) vm->callFunction(cb, nullptr, 0);
+            vm->gcHeartbeat();
+        }
+    }
+    bool doNRT(engine::Silo*) override { return true; }
+};
+
 // Command that detaches the VM from the silo and deletes it on the NRT thread.
 struct DetachAndDeleteVMCmd : engine::Command {
     ts::VM* vm_;
@@ -667,6 +726,115 @@ static void ffi_siloEval(ts::VM& vm, u16 dst, u16, u16 argBase) {
     returnErr(vm, dst, tzpl_errNone, __func__);
 }
 
+// fn siloLoad(siloIndex: Int, code: String) -> Future<String>
+//
+// Compiles `code` (the silo task module's definitions) on this NRT thread, queues
+// the install onto the silo, and returns a Future that resolves to "" once the
+// install has landed on the silo (or to an error message). Because the silo's
+// command FIFO is ordered, awaiting this one handle also gates everything queued
+// before it for that silo (its node graph + attachVM) -- so `prepare` returns
+// just this handle. Unlike siloEval, the completion is awaitable (the async/await
+// load barrier); like siloEval it runs the module's main block to install defs.
+static void ffi_siloLoad(ts::VM& vm, u16 dst, u16, u16 argBase) {
+    auto* ctx = getAppContext(vm);
+    auto* eng = ctx->engine;
+    int siloIndex = static_cast<int>(vm.reg(argBase).i);
+    const char* code = regString(vm, argBase + 1);
+
+    // Result Future<String>, GC-rooted while in flight.
+    auto& tu = ctx->nrtvm->vm.typeUniverse();
+    ts::Type* strT = tu.types().stringType;
+    ts::FutureType* futT = tu.futureType(strT);
+    auto* future = ts::Future::create(futT, strT, 1);
+    vm.registerExternalFuture(future);
+    vm.reg(dst).o = future;
+
+    // Resolve inline (we're on the script thread, main VM current + mutex held).
+    auto resolveNow = [&](std::string const& err) {
+        ts::Word w; w.o = new ts::StringObj(err);
+        vm.resolveExternalFuture(future, &w, 1);
+    };
+
+    if (siloIndex < 0 || siloIndex >= (int)ctx->siloVMs.size()) {
+        resolveNow("siloLoad: silo index out of range");
+        return;
+    }
+    auto& state = ctx->siloVMs[siloIndex];
+    if (!state.vm) { resolveNow("siloLoad: no VM attached to silo"); return; }
+
+    // Compile the module on this NRT thread with the silo's rt-restricted target.
+    std::string source(code);
+    ts::CompileResult compiled = ctx->compiler->compile(
+        source, "<siloLoad>", state.target, state.moduleCompiler.get());
+    if (!compiled.success) {
+        ts::printDiagnostics(compiled.errors, source, "<siloLoad>", std::cerr, true);
+        resolveNow("siloLoad: compile error");
+        return;
+    }
+
+    // Record the module's start() entry (Void, no params) so siloStartAt can
+    // call it later -- by global index, no re-resolution needed.
+    state.startGlobalIndex = -1;
+    for (auto& ef : compiled.exportedFunctions) {
+        if (ef.name == "start" && ef.paramTypes.empty()) {
+            state.startGlobalIndex = (int)ef.globalIndex;
+            break;
+        }
+    }
+
+    ts::CodeBlock* mainBlock = compiled.mainBlock;
+    auto* result = new ts::CompileResult(std::move(compiled));
+    auto* installCmd = new SiloCodeInstallCmd(result);
+    engine::Command* tail = installCmd;
+    if (mainBlock) {
+        auto* execCmd = new VMEventCmd(VMEventCmd::Custom, mainBlock);
+        tail->next_ = execCmd;
+        tail = execCmd;
+    }
+    auto* completeCmd = new SiloLoadCompleteCmd(ctx->nrtvm, future, "",
+                                                std::this_thread::get_id());
+    tail->next_ = completeCmd;
+    completeCmd->next_ = nullptr;
+    sendCmdListToSilo(eng, siloIndex, installCmd);
+
+    // When audio is stopped, sendCmdListToSilo ran the install/main-block on the
+    // SILO VM inline (makeCurrent(silo)), leaving the thread-local current VM
+    // pointing at the silo. Restore the main VM before returning to its bytecode.
+    vm.makeCurrent();
+}
+
+// fn siloStartAt(beat: Float, silos: [Int]) -> Void
+//
+// Broadcast a beat-scheduled call to each listed silo's start() at one common
+// beat -- the synchronized downbeat after the load barrier. For each silo we
+// compile a tiny "start();" block against its target (which resolves the start()
+// global installed by siloLoad) and schedule it on TempoClock 0 at `beat`. When
+// audio is running the calls fire sample-accurately on the RT thread at `beat`;
+// when stopped they run immediately (no clock is advancing).
+static void ffi_siloStartAt(ts::VM& vm, u16, u16, u16 argBase) {
+    auto* ctx = getAppContext(vm);
+    auto* eng = ctx->engine;
+    double beat = vm.reg(argBase).f;
+    ts::Obj* silosArr = vm.reg(argBase + 1).o;
+    size_t n = ts::arraySize(silosArr);
+
+    for (size_t k = 0; k < n; ++k) {
+        int siloIndex = static_cast<int>(ts::arrayGetInt(silosArr, k));
+        if (siloIndex < 0 || siloIndex >= (int)ctx->siloVMs.size()) continue;
+        auto& state = ctx->siloVMs[siloIndex];
+        if (!state.vm || state.startGlobalIndex < 0) {
+            std::fprintf(stderr, "siloStartAt: silo %d has no start() entry\n", siloIndex);
+            continue;
+        }
+        engine::begin(eng, siloIndex);
+        engine::sendCommand(new SiloRunStartCmd(state.startGlobalIndex));
+        engine::sched(0, beat, engine::schedBetterLateThanNever);
+    }
+    // When audio is stopped the scheduled start() ran inline on the silo VM
+    // (makeCurrent(silo)); restore the main VM before returning to its bytecode.
+    vm.makeCurrent();
+}
+
 // ---------------------------------------------------------------------------
 // Registration
 // ---------------------------------------------------------------------------
@@ -681,6 +849,9 @@ void registerAudioEngineFFI(ts::Compiler& compiler) {
     // to prevent TLS-related link issues. The cast is safe because
     // ArrayType inherits from Type.
     ts::Type* FloatArray = reinterpret_cast<ts::Type*>(compiler.arrayType(Float));
+    ts::Type* IntArray = reinterpret_cast<ts::Type*>(compiler.arrayType(Int));
+    // Future<String>, returned by siloLoad for the async load barrier.
+    ts::Type* FutureString = reinterpret_cast<ts::Type*>(compiler.futureType(String));
 
     using R = void (*)(ts::VM&, u16, u16, u16);
 
@@ -764,6 +935,8 @@ void registerAudioEngineFFI(ts::Compiler& compiler) {
     reg("attachVM",         Int, {Int},            ffi_attachVM);
     reg("detachVM",         Int, {Int},            ffi_detachVM);
     reg("siloEval",         Int, {Int, String},    ffi_siloEval);
+    reg("siloLoad",         FutureString, {Int, String}, ffi_siloLoad);
+    reg("siloStartAt",      Void, {Float, IntArray},      ffi_siloStartAt);
 
     // Enum constants (SchedPolicy, FadeCurve, Err, Enable) are defined
     // in the Tzopilotl module: bridge/modules/audio_engine.x

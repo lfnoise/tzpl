@@ -519,7 +519,7 @@ public:
     // Resolve such a future: copy its value (if any was staged by the caller is
     // not needed for Void), enqueue its waiters, and drop it from the in-flight
     // set. MUST be called with the host mutex held (the VM made current).
-    void resolveExternalFuture(Future* f);
+    void resolveExternalFuture(Future* f, Word const* value = nullptr, u16 stride = 0);
     void setCurrentRegs(Word* r) { currentRegs_ = r; }
     void setBaseReg(u32 b) { baseReg_ = b; }
     void setFrameCount(u32 c) { frameCount_ = c; }

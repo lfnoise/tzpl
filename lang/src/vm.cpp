@@ -662,9 +662,10 @@ void VM::resumeAsync(CoroutineObj* coro) {
     halted_ = wasHalted;
 }
 
-void VM::resolveExternalFuture(Future* f) {
+void VM::resolveExternalFuture(Future* f, Word const* value, u16 stride) {
     if (!f || f->state_ == Future::Resolved) return;
-    f->state_ = Future::Resolved;          // Future<Void>: no value to stage
+    for (u16 i = 0; i < stride && i < f->valueWords_; ++i) f->value_[i] = value[i];
+    f->state_ = Future::Resolved;
     asyncEnqueueWaiters(f);                 // move its waiters to asyncReady_
     for (size_t i = 0; i < asyncExternalFutures_.size(); ++i) {
         if (asyncExternalFutures_[i] == f) {
