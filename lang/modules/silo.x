@@ -39,3 +39,10 @@ async fn prepare(silo Int, source String) LoadResult {
     let err = await siloLoad(silo, source);
     if (err length > 0) { LoadResult.err(err) } else { LoadResult.ok }
 }
+
+-- Load a silo task module from a .x file. Returns the load completion handle
+-- (await it like siloLoad). The file should define the task coroutine(s) and a
+-- start() entry, and `import audio_engine.*` for spawn / playNote / releaseNote.
+fn siloLoadFile(silo Int, path String) Future<String> {
+    siloLoad(silo, readFile(path))
+}

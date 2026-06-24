@@ -37,6 +37,8 @@
 #include <string>
 #include <utility>
 #include <cmath>
+#include <fstream>
+#include <sstream>
 
 // Both tzpl and engine define i64/f64/etc. in different ways.
 // engine: namespace engine { using i64 = long; }
@@ -1012,6 +1014,24 @@ static void ffi_releaseNote(ts::VM& vm, u16 dst, u16, u16 argBase) {
     vm.reg(dst).i = (i64)tzpl_errNone;
 }
 
+// fn readFile(path String) String  -- read a text file into a String.
+//
+// Returns the file's contents, or "" if it can't be opened. A host/NRT utility
+// (file I/O is not RT-safe); handy for loading silo task code from a .x file:
+//   await siloLoad(0, readFile("tasks/bass_task.x"))
+static void ffi_readFile(ts::VM& vm, u16 dst, u16, u16 argBase) {
+    const char* path = regString(vm, argBase);
+    std::ifstream f(path);
+    if (!f) {
+        std::fprintf(stderr, "readFile: cannot open '%s'\n", path ? path : "(null)");
+        vm.reg(dst).o = new ts::StringObj(std::string());
+        return;
+    }
+    std::stringstream ss;
+    ss << f.rdbuf();
+    vm.reg(dst).o = new ts::StringObj(ss.str());
+}
+
 // ---------------------------------------------------------------------------
 // Registration
 // ---------------------------------------------------------------------------
@@ -1117,6 +1137,7 @@ void registerAudioEngineFFI(ts::Compiler& compiler) {
     reg("siloEval",         Int, {Int, String},    ffi_siloEval);
     reg("siloLoad",         FutureString, {Int, String}, ffi_siloLoad);
     reg("siloStartAt",      Void, {Float, IntArray},      ffi_siloStartAt);
+    reg("readFile",         String, {String},             ffi_readFile);
     reg("scheduleTask",     Int,  {Int, FnFloat},         ffi_scheduleTask, true);
     reg("playNote",         Int,  {Int, Int, FloatArray}, ffi_playNote,     true);
     reg("releaseNote",      Int,  {Int, Int},             ffi_releaseNote,  true);
