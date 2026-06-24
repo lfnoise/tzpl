@@ -4735,6 +4735,12 @@ u16 CodeGen::genCall(CallExpr_* expr) {
         u16 futReg = argBase;  // the future
         u16 resultReg = allocSlot(expr->resolvedType);  // T (may be multi-word)
         if (expr->isAwaitBlocking) {
+            // Record a stack map at the op_future_block PC (excluding the not-yet-
+            // written result reg), exactly like a call's returnPC map. While the
+            // main thread is parked here on a cross-thread future, a concurrent GC
+            // scans the parked frame snapshot using this map (see VM::pumpUntilResolved
+            // / tracing_gc await-snapshot scanning).
+            emitReturnPcStackMap(resultReg, expr->resolvedType);
             emitOp(op_future_block);
             emitRegs(resultReg, futReg);
         } else {

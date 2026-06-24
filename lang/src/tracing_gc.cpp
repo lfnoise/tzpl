@@ -133,6 +133,42 @@ static StackMap const* findStackMap(CodeBlock const* cb, u32 pcOffset) {
     return nullptr;
 }
 
+// Scan one saved frame stack (an ExecSnapshot of a thread parked in a
+// cross-thread await). Mirrors step_root_frames but reads the snapshot's copied
+// frames + register window instead of the live VM state. The top frame's stack
+// map is found at the op_future_block PC saved in the snapshot (which carries a
+// returnPC-style map emitted by codegen); lower frames use their child's
+// returnPC. Frame i's OWN register base is frames[i+1].baseReg (each frame
+// stores its caller's base in .baseReg), or topBaseReg for the top frame.
+void TracingGC::scanExecSnapshot(ExecSnapshot const& s) {
+    u32 n = (u32)s.frames.size();
+    for (u32 i = 0; i < n; ++i) {
+        CallFrame const& f = s.frames[i];
+        CodeBlock const* cb = f.codeBlock;
+        if (!cb || cb->code.empty()) continue;
+        bool isTop = (i + 1 == n);
+        Code const* pc = isTop ? s.pc : s.frames[i + 1].returnPC;
+        if (!pc) continue;
+        u32 pcOffset = (u32)(pc - cb->code.data());
+        StackMap const* sm = findStackMap(cb, pcOffset);
+        if (!sm) continue;
+        u32 activeBase = isTop ? s.baseReg : s.frames[i + 1].baseReg;
+        if (activeBase > s.regs.size()) continue;
+        Word const* base = s.regs.data() + activeBase;
+        for (u16 reg : sm->liveRefRegs) {
+            if (activeBase + reg >= s.regs.size()) continue;
+            if (Obj* o = base[reg].o) { mark(o); ++lastRootCount_; }
+        }
+        for (auto const& [ireg, ity] : sm->liveInlineRegs) {
+            if (activeBase + ireg >= s.regs.size()) continue;
+            gcScanPayload(base + ireg, ity, *this);
+        }
+    }
+    // A blocking await inside a coroutine body keeps the coroutine live too.
+    if (s.coro)      { mark(reinterpret_cast<GCObj*>(s.coro)); ++lastRootCount_; }
+    if (s.coroFrame) { mark(reinterpret_cast<GCObj*>(s.coroFrame)); ++lastRootCount_; }
+}
+
 void TracingGC::mark(GCObj* obj) {
     if (!obj) return;
     if (obj->isImmortal()) return;
@@ -311,6 +347,11 @@ void TracingGC::step_root_frames(u64 deadlineNanos, u32& sinceCheck, u32& done) 
     // background thread and reachable only here until they resolve.
     for (Future* f : vm_.asyncExternalFutures_) {
         if (f) { mark(reinterpret_cast<GCObj*>(f)); ++lastRootCount_; }
+    }
+    // Main threads parked in a cross-thread await: their execution context was
+    // moved out of the (now-empty) live frame stack into a snapshot, scanned here.
+    for (ExecSnapshot const* s : vm_.awaitSnapshots_) {
+        if (s) scanExecSnapshot(*s);
     }
     rootPhase_ = RootPhase::Extras;
     rootExtraCursor_ = 0;

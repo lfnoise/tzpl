@@ -297,7 +297,12 @@ private:
     // variable until a cross-thread resolution notifies it.
     Vec<Future*>        asyncExternalFutures_;
     std::function<void(std::function<bool()> const&)> hostBlockingWait_;
-    std::atomic<bool>   gcSuspended_{false};   // GC paused during an await park
+    // Execution snapshots of main threads parked in a cross-thread await. While
+    // parked, the live frame stack is reset to empty and belongs to whoever runs
+    // lang code next (e.g. the render thread); the parked context lives here and
+    // is a GC root (tracing_gc scans each snapshot's saved frames precisely via
+    // the stack map at op_future_block). LIFO -- supports nested parks.
+    Vec<ExecSnapshot*>  awaitSnapshots_;
 
     // Type universe (shared, system-allocated)
     TypeUniverse& typeUniverse_;
@@ -444,17 +449,8 @@ public:
     // Invoked from the existing ~20 ms host idle thread (nrt_vm.hpp) and
     // from between-event call sites in the bridges and scheduler.
     void gcHeartbeat() {
-        // Suppressed while the main thread is parked in a top-level `await` on a
-        // cross-thread future (op_future_block's host-wait): the parked frame is
-        // frozen mid-opcode with no valid stack map at vm_.pc_, so a concurrent
-        // collection from the heartbeat thread would scan it wrong. The main
-        // thread allocates nothing while parked, so pausing GC is safe.
-        if (gcSuspended_.load(std::memory_order_acquire)) return;
         nrtTick(gcMonoNanos() + gcStepBudgetNanos_);
     }
-
-    // Pause/resume GC across a cross-thread await park (see gcHeartbeat).
-    void setGcSuspended(bool b) { gcSuspended_.store(b, std::memory_order_release); }
 
     // Type universe access
     TypeUniverse& typeUniverse() { return typeUniverse_; }

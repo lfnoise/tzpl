@@ -262,6 +262,7 @@ private:
     void step_root_dynvars(u64 deadlineNanos, u32& sinceCheck, u32& done);
     void step_root_frames(u64 deadlineNanos, u32& sinceCheck, u32& done);
     void step_root_extras(u64 deadlineNanos, u32& sinceCheck, u32& done);
+    void scanExecSnapshot(struct ExecSnapshot const& s);
 };
 
 } // namespace ts

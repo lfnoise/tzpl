@@ -5088,6 +5088,11 @@ void op_future_block(VM& vm, Code* pc) {
         // coroutines they unblock). Re-read after pumping: a GC during the pump
         // doesn't move objects, but the register may have been overwritten by a
         // resumed frame, so reload from the (pinned) Future pointer.
+        //
+        // Publish this instruction's PC first: if the pump parks on a cross-thread
+        // future it snapshots the frame stack with pc_ here, and that PC carries
+        // the stack map emitted above so a concurrent GC can scan the snapshot.
+        vm.setPc(pc);
         if (future) vm.pumpUntilResolved(future);
     }
     if (future && future->state_ == Future::Resolved) {

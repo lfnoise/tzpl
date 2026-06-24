@@ -106,11 +106,7 @@ struct NRTVM {
         // unlocking so the outer lock_guard still owns it on return.
         vm.setHostBlockingWait([this](std::function<bool()> const& ready) {
             std::unique_lock<std::mutex> lk(mtx, std::adopt_lock);
-            // Pause GC: while parked here the VM frame is frozen mid-opcode and
-            // not safely scannable by the heartbeat thread (see VM::gcHeartbeat).
-            vm.setGcSuspended(true);
             cv.wait(lk, ready);
-            vm.setGcSuspended(false);
             lk.release();
         });
     }

@@ -736,15 +736,24 @@ void VM::pumpUntilResolved(Future* target) {
         if (!asyncExternalFutures_.empty() && hostBlockingWait_) {
             // The resolving thread runs lang code (render setup / handlers) on
             // this same VM while we wait, trampling the shared frame stack and
-            // register file. Snapshot our execution context and restore it on
-            // wake. (GC is also suspended across the wait -- see gcHeartbeat --
-            // so the snapshot's Obj* registers stay live without extra rooting.)
+            // register file. Snapshot our execution context, register it as a GC
+            // root, and clear the live frame stack so a concurrent collection
+            // (heartbeat thread, or the resolver thread) scans a consistent state
+            // -- the empty live stack plus our rooted snapshot -- never our frozen
+            // frames via a stale pc. Restore on wake.
             ExecSnapshot snap;
             saveExecSnapshot(snap);
+            awaitSnapshots_.push_back(&snap);
+            frameCount_ = 0;
+            baseReg_ = 0;
+            currentRegs_ = regs_;
+            currentCoroutine_ = nullptr;
+            currentCoroFrame_ = nullptr;
             Future* tgt = target;
             hostBlockingWait_([this, tgt]() {
                 return tgt->state_ == Future::Resolved || !asyncReady_.empty();
             });
+            awaitSnapshots_.pop_back();
             restoreExecSnapshot(snap);
             continue;
         }
