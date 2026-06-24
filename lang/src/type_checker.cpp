@@ -437,6 +437,7 @@ void TypeChecker::check(Program& program) {
                 info.isTemplate = true;
                 info.typeParams = fn->typeParams;
                 info.declNode = fn;
+                info.isAsync = fn->isAsync;
                 info.returnType = nullptr;
                 info.globalIndex = 0;  // no global slot for templates
                 if (hasVariadic) {
@@ -491,6 +492,7 @@ void TypeChecker::check(Program& program) {
             info.returnType = retType;
             info.paramTypes = paramTypes;
             info.globalIndex = globalIdx;
+            info.isAsync = fn->isAsync;
             if (hasVariadic) {
                 info.isVariadic = true;
                 info.fixedParamCount = (int)fn->params.size() - 1;
@@ -516,6 +518,7 @@ void TypeChecker::check(Program& program) {
                     partialInfo.returnType = retType;
                     partialInfo.paramTypes = std::vector<Type*>(paramTypes.begin(), paramTypes.begin() + arity);
                     partialInfo.globalIndex = globalIdx;
+                    partialInfo.isAsync = fn->isAsync;
                     partialInfo.canonicalFunc = canonical;
                     partialInfo.numDefaults = numDefaults;
                     partialInfo.minArity = minArity;
@@ -755,6 +758,7 @@ void TypeChecker::checkREPLInput(Program& program) {
                 info.isTemplate = true;
                 info.typeParams = fn->typeParams;
                 info.declNode = fn;
+                info.isAsync = fn->isAsync;
                 info.returnType = nullptr;
                 info.globalIndex = 0;
                 if (hasVariadic) {
@@ -831,6 +835,7 @@ void TypeChecker::checkREPLInput(Program& program) {
                 info.returnType = retType;
                 info.paramTypes = paramTypes;
                 info.globalIndex = globalIdx;
+                info.isAsync = fn->isAsync;
                 if (hasVariadic) {
                     info.isVariadic = true;
                     info.fixedParamCount = (int)fn->params.size() - 1;

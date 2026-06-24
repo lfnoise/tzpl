@@ -86,6 +86,11 @@ struct FuncInfo {
     FnDeclNode* declNode = nullptr; // AST node for demand-driven inference of _ return types
     bool isBuiltin = false;     // true for primitive built-in functions (e.g. math)
     bool isForeign = false;     // true for host-registered foreign functions
+    // True for an `async fn`. Its external return type is Future<T> AND calling
+    // it drives a coroutine (op_async_call) -- distinct from a NORMAL function
+    // that merely returns a Future<T> value (an ordinary op_call). Only async
+    // fns get isAsyncCall marking.
+    bool isAsync = false;
     // Phase 4g.6: true if this builtin reads inline-composite args directly as
     // multi-word slots out of vm.reg(...), so the codegen should skip the
     // box-at-builtin-boundary that emitArgPlacementForCall performs for legacy

@@ -77,10 +77,12 @@ Type* TypeChecker::finalizeResolvedCall(CallExpr_* expr, FuncInfo* func,
         expr->isCoroCall = true;
     }
 
-    // Mark async-fn calls: a non-builtin function whose (external) return type is
-    // Future<T> is an async fn -- calling it creates+drives a coroutine
-    // (op_async_call). The Future builtins (ready/await) are builtins, excluded.
-    if (func->returnType && dynamic_cast<FutureType*>(func->returnType) && !func->isBuiltin) {
+    // Mark async-fn calls: calling an `async fn` creates+drives a coroutine
+    // (op_async_call) and yields its Future. This is keyed on the function
+    // actually being async -- NOT merely on returning a Future<T>, since an
+    // ordinary function may return a Future value (e.g. siloLoad, or a helper
+    // that forwards a Future); those are normal op_call returns.
+    if (func->isAsync && !func->isBuiltin) {
         expr->isAsyncCall = true;
     }
 

@@ -1238,6 +1238,7 @@ FuncInfo* TypeChecker::monomorphize(FuncInfo& templateFI,
     monoPtr->globalIndex = globalIdx;
     monoPtr->isTemplate = false;
     monoPtr->isBuiltin = false;
+    monoPtr->isAsync = templateFI.isAsync;  // a monomorphized async fn is still async
     monoPtr->declNode = decl;
     monoPtr->monoBindings = bindings;
     monoPtr->isVariadic = templateFI.isVariadic;
