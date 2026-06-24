@@ -1662,6 +1662,28 @@ static bool resolve_next(Compiler& compiler, const std::vector<Type*>& args,
     return true;
 }
 
+// await: Future<T> -> T  (codegen lowers to op_future_await / op_future_block)
+static bool resolve_await(Compiler& compiler, const std::vector<Type*>& args,
+    std::vector<Type*>& pt, Type*& rt, CFun& cf) {
+    if (args.size() != 1) return false;
+    auto* ft = dynamic_cast<FutureType*>(args[0]);
+    if (!ft) return false;
+    pt = {ft};
+    rt = ft->valueType_;
+    cf = nullptr;  // codegen handles this specially (await is not a normal call)
+    return true;
+}
+
+// ready: T -> Future<T>  (an already-resolved future; codegen: op_future_ready)
+static bool resolve_ready(Compiler& compiler, const std::vector<Type*>& args,
+    std::vector<Type*>& pt, Type*& rt, CFun& cf) {
+    if (args.size() != 1) return false;
+    pt = {args[0]};
+    rt = compiler.futureType(args[0]);
+    cf = nullptr;  // codegen handles this specially
+    return true;
+}
+
 // yield: T -> Void
 static bool resolve_yield(Compiler& compiler, const std::vector<Type*>& args,
     std::vector<Type*>& pt, Type*& rt, CFun& cf) {
@@ -3558,6 +3580,10 @@ void registerBuiltinFunctions(Compiler& compiler,
     registerTemplate(compiler, functions, "next",         resolve_next,     /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
     registerTemplate(compiler, functions, "yield",        resolve_yield,    /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
     registerTemplate(compiler, functions, "yieldAll",     resolve_yieldAll, /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+
+    // --- Async/await builtins ---
+    registerTemplate(compiler, functions, "await",        resolve_await,    /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "ready",        resolve_ready,    /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
 
     // --- Set builtins ---
     // Phase 4g.11: Set elements are stored natively (multi-word for inline

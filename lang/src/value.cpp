@@ -755,6 +755,15 @@ CoroutineObj* CoroutineObj::create(CoroutineType* coroType, FunctionType* funcTy
     return coro;
 }
 
+// Future factory
+Future* Future::create(FutureType* type, Type* valueType, u16 valueWords) {
+    usize size = sizeof(Future) + valueWords * sizeof(Word);
+    void* mem = GCObj::operator new(size);
+    auto* future = new(mem) Future(type, valueType, valueWords);
+    registerNewObj(future);
+    return future;
+}
+
 // Method constructor
 Method::Method(Type* type)
     : Callable(type)

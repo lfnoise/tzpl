@@ -154,6 +154,8 @@ Type* TypeChecker::inferLambdaExpr(LambdaExprNode* expr) {
     Type* savedInferred = inferredReturnType_;
     bool savedInCoro = inCoroutineBody_;
     Type* savedYieldType = currentYieldType_;
+    bool savedInAsync = inAsyncBody_;
+    Type* savedAsyncValueType = currentAsyncValueType_;
 
     // Set up for capture detection
     currentCaptures_ = &expr->captures;
@@ -165,6 +167,13 @@ Type* TypeChecker::inferLambdaExpr(LambdaExprNode* expr) {
         currentYieldType_ = retType;
         retType = compiler_.coroutineType(retType);
         currentReturnType_ = compiler_.voidType();
+    } else if (expr->isAsync && retType) {
+        // Async lambdas: declared return type T is wrapped in Future<T>; the
+        // body returns T (so currentReturnType_ stays the value type).
+        inAsyncBody_ = true;
+        currentAsyncValueType_ = retType;
+        currentReturnType_ = retType;
+        retType = compiler_.futureType(retType);
     } else if (inferLambdaReturn) {
         inferringReturnType_ = true;
         currentReturnType_ = nullptr;
@@ -215,6 +224,8 @@ Type* TypeChecker::inferLambdaExpr(LambdaExprNode* expr) {
     inferredReturnType_ = savedInferred;
     inCoroutineBody_ = savedInCoro;
     currentYieldType_ = savedYieldType;
+    inAsyncBody_ = savedInAsync;
+    currentAsyncValueType_ = savedAsyncValueType;
 
     // Propagate captures upward: if we're inside a parent lambda, any variable
     // that the nested lambda captured from beyond the parent's boundary must also

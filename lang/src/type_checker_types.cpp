@@ -175,6 +175,9 @@ Type* TypeChecker::resolveTypeExpr(TypeExpr* typeExpr) {
         if (tmplNode->name == "Coroutine" && typeArgs.size() == 1) {
             return compiler_.coroutineType(typeArgs[0]);
         }
+        if (tmplNode->name == "Future" && typeArgs.size() == 1) {
+            return compiler_.futureType(typeArgs[0]);
+        }
         error(typeExpr->loc, "Unknown template type '" + tmplNode->name + "'");
         return compiler_.intType();
     }

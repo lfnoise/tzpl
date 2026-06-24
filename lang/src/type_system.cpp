@@ -679,7 +679,7 @@ void classifyImpl(Type* t, std::unordered_set<Type*>& visiting) {
         }
         else {
             // String, Array, List, Range, Ref, Map, Set, Function, Lambda,
-            // TemplateLambda, Coroutine, Any.
+            // TemplateLambda, Coroutine, Future, Any.
             // All represented as a single Obj* pointer; we do NOT recurse into
             // their element types (collections break cycles via heap allocation).
             setPointer(t);

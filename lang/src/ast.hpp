@@ -276,6 +276,10 @@ struct CallExpr_ : Expr {
     bool isCoroResume = false;         // Set by type checker: true for next() on Coroutine
     bool isCoroYield = false;          // Set by type checker: true for yield() in coro fn
     bool isCoroYieldAll = false;       // Set by type checker: true for yieldAll() in coro fn
+    bool isAsyncAwait = false;         // Set by type checker: true for await() on a Future
+    bool isAwaitBlocking = false;      // Set by type checker: await outside an async fn (block-and-pump)
+    bool isAsyncCall = false;          // Set by type checker: true when calling an async fn (-> op_async_call)
+    bool isFutureReady = false;        // Set by type checker: true for ready() Future constructor
     std::vector<AutoMapArg> autoMapArgs;  // Set by type checker: explicit @ auto-map info for each arg
     std::vector<AutoMapArg> innerAutoMapArgs;  // Set by type checker: implicit auto-map (inner loop) for each arg
     i32 variadicPackStart = -1;       // Set by type checker: arg index where variadic packing begins (-1 = none)
@@ -396,6 +400,7 @@ struct LambdaExprNode : Expr {
     TemplateLambdaType* templateLambdaType = nullptr;  // set by type checker for template lambdas
 
     bool isCoroutine = false;  // Set by parser when 'coro fn(...)' lambda syntax is used
+    bool isAsync = false;      // Set by parser when 'async fn(...)' lambda syntax is used
 
     LambdaExprNode(SourceRange l, std::vector<Param> p, TypeExprPtr ret, ASTPtr b)
         : Expr(LambdaExpr, l), params(std::move(p)),
@@ -776,6 +781,7 @@ struct FnDeclNode : Decl {
     i32 resolvedFuncGlobalIndex = -1;  // Set by type checker for codegen
     bool isPrivate = false;  // Set by parser when 'private' keyword is used
     bool isCoroutine = false;  // Set by parser when 'coro' keyword is used
+    bool isAsync = false;      // Set by parser when 'async' keyword is used
     bool hasParseError = false;  // Set by parser if any error occurred while parsing this function
     LambdaType* localLambdaType = nullptr;  // Set for local fn declarations (codegen wraps in Lambda)
     std::vector<LambdaExprNode::CapturedVar> captures;  // captured vars for local functions

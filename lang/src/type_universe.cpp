@@ -240,6 +240,16 @@ CoroutineType* TypeUniverse::coroutineType(Type* yieldType) {
     return t;
 }
 
+FutureType* TypeUniverse::futureType(Type* valueType) {
+    auto it = futureTypeCache_.find(valueType);
+    if (it != futureTypeCache_.end()) return it->second;
+    TypeCreationScope scope(this);
+    auto* t = new FutureType(valueType);
+    classifyType(t);
+    futureTypeCache_[valueType] = t;
+    return t;
+}
+
 FunctionType* TypeUniverse::functionType(Type* const* argTypes, size_t argCount, Type* returnType) {
     // Build cache key: [argTypes..., returnType]
     std::vector<Type*> key;

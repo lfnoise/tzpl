@@ -77,6 +77,13 @@ Type* TypeChecker::finalizeResolvedCall(CallExpr_* expr, FuncInfo* func,
         expr->isCoroCall = true;
     }
 
+    // Mark async-fn calls: a non-builtin function whose (external) return type is
+    // Future<T> is an async fn -- calling it creates+drives a coroutine
+    // (op_async_call). The Future builtins (ready/await) are builtins, excluded.
+    if (func->returnType && dynamic_cast<FutureType*>(func->returnType) && !func->isBuiltin) {
+        expr->isAsyncCall = true;
+    }
+
     // Mark next() on Coroutine as coroutine resume
     if (name == "next" && func->paramTypes.size() == 1 &&
         dynamic_cast<CoroutineType*>(func->paramTypes[0])) {
@@ -108,6 +115,18 @@ Type* TypeChecker::finalizeResolvedCall(CallExpr_* expr, FuncInfo* func,
             }
         }
         expr->isCoroYieldAll = true;
+    }
+
+    // Mark await() as async await. Allowed both inside an async fn (cooperative
+    // suspend) and at a non-async boundary (block-and-pump the event loop).
+    if (name == "await" && func->isBuiltin && func->paramTypes.size() == 1) {
+        expr->isAsyncAwait = true;
+        expr->isAwaitBlocking = !inAsyncBody_;
+    }
+
+    // Mark ready() -- the resolved-Future constructor (codegen: op_future_ready).
+    if (name == "ready" && func->isBuiltin && func->paramTypes.size() == 1) {
+        expr->isFutureReady = true;
     }
 
     // Set variadic packing info if this is a variadic function

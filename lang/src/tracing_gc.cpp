@@ -291,6 +291,13 @@ void TracingGC::step_root_frames(u64 deadlineNanos, u32& sinceCheck, u32& done) 
     for (GCObj* o : vm_.gcKeepAlive_) {
         if (o) { mark(o); ++lastRootCount_; }
     }
+    // The currently-running coroutine and its in-progress save frame. While a
+    // coroutine body executes, these are reachable only via these VM fields --
+    // an async coroutine in particular is held in no caller register (the
+    // caller holds the Future, not the coroutine). Their caller_* chains keep
+    // any nested/suspended coroutines and frames alive transitively.
+    if (vm_.currentCoroutine_) { mark(vm_.currentCoroutine_); ++lastRootCount_; }
+    if (vm_.currentCoroFrame_) { mark(vm_.currentCoroFrame_); ++lastRootCount_; }
     rootPhase_ = RootPhase::Extras;
     rootExtraCursor_ = 0;
 }

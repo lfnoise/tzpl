@@ -240,6 +240,13 @@ ASTPtr Parser::parseDeclaration() {
             if (node) static_cast<FnDeclNode*>(node.get())->isCoroutine = true;
             return node;
         }
+        case TokenKind::Async: {
+            advance(); // consume 'async'
+            if (!check(TokenKind::Fn)) { error("Expected 'fn' after 'async'"); return nullptr; }
+            auto node = parseFnDecl();
+            if (node) static_cast<FnDeclNode*>(node.get())->isAsync = true;
+            return node;
+        }
         case TokenKind::Fn:
             // If next token is '(' it's a lambda expression, not a named declaration
             if (lexer_.peek().kind == TokenKind::LParen)
@@ -1847,15 +1854,22 @@ ExprPtr Parser::parsePrimary() {
             return parseBracketLiteral(loc, /*isImmutable=*/false);
         }
         case TokenKind::Coro:
+        case TokenKind::Async:
         case TokenKind::Fn: {
             // Lambda expression: fn(params) retType { body }
             // or coroutine lambda: coro fn(params) retType { body }
+            // or async lambda: async fn(params) retType { body }
             // or template lambda: fn<T, U: Constraint>(params) retType { body }
             bool isCoro = false;
+            bool isAsync = false;
             if (current_.kind == TokenKind::Coro) {
                 isCoro = true;
                 advance(); // consume 'coro'
                 if (!check(TokenKind::Fn)) { error("Expected 'fn' after 'coro'"); return nullptr; }
+            } else if (current_.kind == TokenKind::Async) {
+                isAsync = true;
+                advance(); // consume 'async'
+                if (!check(TokenKind::Fn)) { error("Expected 'fn' after 'async'"); return nullptr; }
             }
             SourceRange loc = currentLoc();
             advance(); // consume 'fn'
@@ -1938,6 +1952,7 @@ ExprPtr Parser::parsePrimary() {
             lambda->typeParams = std::move(typeParams);
             lambda->whereConstraints = std::move(whereConstraints);
             lambda->isCoroutine = isCoro;
+            lambda->isAsync = isAsync;
             return lambda;
         }
         case TokenKind::LBrace: {
@@ -1997,6 +2012,18 @@ ExprPtr Parser::parsePrimary() {
                 current_.kind != TokenKind::Eof) {
                 args.push_back(parseExpression());
             }
+            return std::make_unique<CallExpr_>(loc, std::move(callee), std::move(args));
+        }
+        case TokenKind::Await: {
+            // Prefix await: await expr  ->  await(expr) as a CallExpr_.
+            // Binds tightly (like unary -/!): `await foo()` = await(foo()),
+            // `await a + b` = (await a) + b.
+            SourceRange loc = currentLoc();
+            advance(); // consume 'await'
+            ExprPtr operand = parseTightPostfix(parsePrimary());
+            ExprPtr callee = std::make_unique<IdentifierExpr>(loc, "await");
+            ExprList args;
+            args.push_back(std::move(operand));
             return std::make_unique<CallExpr_>(loc, std::move(callee), std::move(args));
         }
         default: {
@@ -2141,6 +2168,14 @@ ExprPtr Parser::parsePostfix(ExprPtr left) {
             SourceRange loc = currentLoc();
             advance(); // consume 'yield'
             ExprPtr callee = std::make_unique<IdentifierExpr>(loc, "yield");
+            ExprList args;
+            args.push_back(std::move(left));
+            left = std::make_unique<CallExpr_>(loc, std::move(callee), std::move(args));
+        } else if (check(TokenKind::Await)) {
+            // Pipeline await: value await  ->  await(value)
+            SourceRange loc = currentLoc();
+            advance(); // consume 'await'
+            ExprPtr callee = std::make_unique<IdentifierExpr>(loc, "await");
             ExprList args;
             args.push_back(std::move(left));
             left = std::make_unique<CallExpr_>(loc, std::move(callee), std::move(args));

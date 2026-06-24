@@ -885,9 +885,16 @@ void TypeChecker::checkFnDecl(FnDeclNode* decl) {
     // Save coroutine state
     bool savedInCoro = inCoroutineBody_;
     Type* savedYieldType = currentYieldType_;
+    bool savedInAsync = inAsyncBody_;
+    Type* savedAsyncValueType = currentAsyncValueType_;
 
     // Set current return type
     Type* savedReturnType = currentReturnType_;
+
+    // The type the body's trailing expression / return statements must produce.
+    // For a coro fn this is exempt (it yields, not returns). For an async fn it
+    // is the value type T (the body returns T; the external type is Future<T>).
+    Type* bodyReturnType = returnType;
 
     if (decl->isCoroutine) {
         // For coro fn, the returnType stored in FuncInfo is Coroutine<T>
@@ -899,6 +906,16 @@ void TypeChecker::checkFnDecl(FnDeclNode* decl) {
             // The body's return type is void (coro fn bodies don't return values,
             // they yield them; the body ending is handled by op_coro_done)
             currentReturnType_ = compiler_.voidType();
+        }
+    } else if (decl->isAsync) {
+        // For async fn, the returnType stored in FuncInfo is Future<T>. The body
+        // returns T normally; await points are checked via inAsyncBody_.
+        auto* ft = dynamic_cast<FutureType*>(returnType);
+        if (ft) {
+            inAsyncBody_ = true;
+            currentAsyncValueType_ = ft->valueType_;
+            currentReturnType_ = ft->valueType_;
+            bodyReturnType = ft->valueType_;
         }
     } else {
         currentReturnType_ = returnType;
@@ -913,17 +930,18 @@ void TypeChecker::checkFnDecl(FnDeclNode* decl) {
     // Validate body against declared return type (non-coroutine, non-void functions).
     // Coroutines yield values rather than returning them through the block's trailing
     // expression, so they're exempt. Void functions don't require a value either.
-    if (!decl->isCoroutine && returnType && returnType != compiler_.voidType()) {
+    // For async fns, bodyReturnType is the unwrapped value type T.
+    if (!decl->isCoroutine && bodyReturnType && bodyReturnType != compiler_.voidType()) {
         Type* trailingType = getBlockTrailingType(decl->body.get());
         if (trailingType) {
-            if (!isAssignable(trailingType, returnType)) {
+            if (!isAssignable(trailingType, bodyReturnType)) {
                 error(decl->loc, "Function '" + decl->name + "' declared to return '" +
-                      std::string(returnType->str()) + "' but body yields '" +
+                      std::string(bodyReturnType->str()) + "' but body yields '" +
                       std::string(trailingType->str()) + "'");
             }
         } else if (!bodyHasReturnStmt(decl->body.get())) {
             error(decl->loc, "Function '" + decl->name + "' declared to return '" +
-                  std::string(returnType->str()) +
+                  std::string(bodyReturnType->str()) +
                   "' but body has no trailing expression or return statement");
         }
     }
@@ -931,6 +949,8 @@ void TypeChecker::checkFnDecl(FnDeclNode* decl) {
     currentReturnType_ = savedReturnType;
     inCoroutineBody_ = savedInCoro;
     currentYieldType_ = savedYieldType;
+    inAsyncBody_ = savedInAsync;
+    currentAsyncValueType_ = savedAsyncValueType;
     popScope();
 
     // Restore capture tracking state

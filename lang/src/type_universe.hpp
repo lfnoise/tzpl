@@ -45,6 +45,7 @@ class TupleType;
 class FunctionType;
 class EnumType;
 class CoroutineType;
+class FutureType;
 
 // Built-in type pointers
 struct BuiltinTypes {
@@ -116,6 +117,7 @@ public:
     PersistentMapType* persistentMapType(Type* keyType, Type* valueType);
     EnumType* optionType(Type* elemType);
     CoroutineType* coroutineType(Type* yieldType);
+    FutureType* futureType(Type* valueType);
 
     // Convenience overloads accepting any container with .data() and .size()
     template <typename Container>
@@ -145,6 +147,7 @@ private:
     std::unordered_map<std::pair<Type*, Type*>, PersistentMapType*, TypePairHash> persistentMapTypeCache_;
     std::unordered_map<Type*, EnumType*> optionTypeCache_;
     std::unordered_map<Type*, CoroutineType*> coroutineTypeCache_;
+    std::unordered_map<Type*, FutureType*> futureTypeCache_;
 };
 
 } // namespace ts

@@ -1211,6 +1211,9 @@ FuncInfo* TypeChecker::monomorphize(FuncInfo& templateFI,
     if (decl->isCoroutine && retType) {
         retType = compiler_.coroutineType(retType);
     }
+    if (decl->isAsync && retType) {
+        retType = compiler_.futureType(retType);
+    }
 
     // Allocate global slot. isObj MUST be false: a monomorphized user function's
     // global holds its CodeBlock* (set by genFnDecl), which is NOT a GCObj --
@@ -1260,6 +1263,8 @@ FuncInfo* TypeChecker::monomorphize(FuncInfo& templateFI,
         Type* savedReturnType = currentReturnType_;
         bool savedInCoro = inCoroutineBody_;
         Type* savedYieldType = currentYieldType_;
+        bool savedInAsync = inAsyncBody_;
+        Type* savedAsyncValueType = currentAsyncValueType_;
 
         if (decl->isCoroutine) {
             auto* coroType = dynamic_cast<CoroutineType*>(retType);
@@ -1267,6 +1272,13 @@ FuncInfo* TypeChecker::monomorphize(FuncInfo& templateFI,
                 inCoroutineBody_ = true;
                 currentYieldType_ = coroType->yieldType_;
                 currentReturnType_ = compiler_.voidType();
+            }
+        } else if (decl->isAsync) {
+            auto* ft = dynamic_cast<FutureType*>(retType);
+            if (ft) {
+                inAsyncBody_ = true;
+                currentAsyncValueType_ = ft->valueType_;
+                currentReturnType_ = ft->valueType_;
             }
         } else {
             currentReturnType_ = retType;
@@ -1276,6 +1288,8 @@ FuncInfo* TypeChecker::monomorphize(FuncInfo& templateFI,
         currentReturnType_ = savedReturnType;
         inCoroutineBody_ = savedInCoro;
         currentYieldType_ = savedYieldType;
+        inAsyncBody_ = savedInAsync;
+        currentAsyncValueType_ = savedAsyncValueType;
         popScope();
         fi->bodyChecked = true;
     }

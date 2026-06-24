@@ -1084,6 +1084,7 @@ void CodeGen::genFnDecl(FnDeclNode* decl) {
 
     // Save coroutine codegen state
     bool savedInCoroFn = inCoroutineFn_;
+    bool savedInAsyncFn = inAsyncFn_;
     u16 savedYieldCount = currentYieldCount_;
     Type* savedReturnType = currentReturnType_;
     if (decl->isCoroutine) {
@@ -1091,6 +1092,15 @@ void CodeGen::genFnDecl(FnDeclNode* decl) {
         currentYieldCount_ = 0;
     }
     currentReturnType_ = funcInfo.returnType;
+    if (decl->isAsync) {
+        // The external return type is Future<T>; the body produces T. Await
+        // suspension points reuse the coroutine GC-map machinery.
+        inAsyncFn_ = true;
+        currentYieldCount_ = 0;
+        if (auto* ft = dynamic_cast<FutureType*>(funcInfo.returnType)) {
+            currentReturnType_ = ft->valueType_;
+        }
+    }
 
     // Create new CodeBlock for this function
     currentBlock_ = new CodeBlock();
@@ -1223,13 +1233,25 @@ void CodeGen::genFnDecl(FnDeclNode* decl) {
     }
 
     // If function doesn't explicitly return, emit appropriate terminator
-    if (currentBlock_->code.empty() ||
-        currentBlock_->code.back().op != op_return) {
-        if (inCoroutineFn_) {
-            // Coroutine: emit op_coro_done instead of return_void
-            emitOp(op_coro_done);
-        } else {
-            emitOp(op_return_void);
+    {
+        bool needsTerminator = currentBlock_->code.empty();
+        if (!needsTerminator) {
+            auto lastOp = currentBlock_->code.back().op;
+            needsTerminator = (lastOp != op_return)
+                && !(inAsyncFn_ && lastOp == op_async_return)
+                && !(inCoroutineFn_ && lastOp == op_coro_done);
+        }
+        if (needsTerminator) {
+            if (inCoroutineFn_) {
+                emitOp(op_coro_done);
+            } else if (inAsyncFn_) {
+                // async fn fell through (Void result): resolve with a placeholder.
+                u16 z = allocReg();
+                emitOp(op_async_return);
+                emitRegs(z);
+            } else {
+                emitOp(op_return_void);
+            }
         }
     }
 
@@ -1250,6 +1272,7 @@ void CodeGen::genFnDecl(FnDeclNode* decl) {
     inTailPosition_ = savedTailPos;
     inFunctionBody_ = savedInFunctionBody;
     inCoroutineFn_ = savedInCoroFn;
+    inAsyncFn_ = savedInAsyncFn;
     currentYieldCount_ = savedYieldCount;
     currentReturnType_ = savedReturnType;
     localScopes_ = std::move(savedScopes);
@@ -1296,13 +1319,23 @@ void CodeGen::genMonoInstance(FuncInfo& monoInfo) {
 
     // Save coroutine codegen state
     bool savedInCoroFn = inCoroutineFn_;
+    bool savedInAsyncFn = inAsyncFn_;
     u16 savedYieldCount = currentYieldCount_;
     Type* savedReturnType = currentReturnType_;
+    inCoroutineFn_ = false;
+    inAsyncFn_ = false;
     if (decl->isCoroutine) {
         inCoroutineFn_ = true;
         currentYieldCount_ = 0;
     }
     currentReturnType_ = monoInfo.returnType;
+    if (decl->isAsync) {
+        inAsyncFn_ = true;
+        currentYieldCount_ = 0;
+        if (auto* ft = dynamic_cast<FutureType*>(monoInfo.returnType)) {
+            currentReturnType_ = ft->valueType_;
+        }
+    }
 
     // Create new CodeBlock for this monomorphized function
     currentBlock_ = new CodeBlock();
@@ -1399,12 +1432,24 @@ void CodeGen::genMonoInstance(FuncInfo& monoInfo) {
         }
     }
 
-    if (currentBlock_->code.empty() ||
-        currentBlock_->code.back().op != op_return) {
-        if (inCoroutineFn_) {
-            emitOp(op_coro_done);
-        } else {
-            emitOp(op_return_void);
+    {
+        bool needsTerminator = currentBlock_->code.empty();
+        if (!needsTerminator) {
+            auto lastOp = currentBlock_->code.back().op;
+            needsTerminator = (lastOp != op_return)
+                && !(inAsyncFn_ && lastOp == op_async_return)
+                && !(inCoroutineFn_ && lastOp == op_coro_done);
+        }
+        if (needsTerminator) {
+            if (inCoroutineFn_) {
+                emitOp(op_coro_done);
+            } else if (inAsyncFn_) {
+                u16 z = allocReg();
+                emitOp(op_async_return);
+                emitRegs(z);
+            } else {
+                emitOp(op_return_void);
+            }
         }
     }
 
@@ -1422,6 +1467,7 @@ void CodeGen::genMonoInstance(FuncInfo& monoInfo) {
     inTailPosition_ = savedTailPos;
     inFunctionBody_ = savedInFunctionBody;
     inCoroutineFn_ = savedInCoroFn;
+    inAsyncFn_ = savedInAsyncFn;
     currentYieldCount_ = savedYieldCount;
     currentReturnType_ = savedReturnType;
     localScopes_ = std::move(savedScopes);
@@ -2646,7 +2692,12 @@ void CodeGen::genReturnStmt(ReturnStmtNode* stmt) {
         inTailPosition_ = true;
         u16 resultReg = genExpr(static_cast<Expr*>(stmt->value.get()));
         inTailPosition_ = false;
-        emitReturn(resultReg);
+        emitReturn(resultReg);  // async-aware (op_async_return inside an async fn)
+    } else if (inAsyncFn_) {
+        // `return;` in an async fn -> resolve with a (Void) placeholder.
+        u16 z = allocReg();
+        emitOp(op_async_return);
+        emitRegs(z);
     } else {
         emitOp(op_return_void);
     }
@@ -4586,7 +4637,8 @@ u16 CodeGen::genCall(CallExpr_* expr) {
         // coro_resume / coro_yieldAll which have their own specialized
         // lowering further down in this function.
         bool specialCoroOp = expr->isCoroYield || expr->isCoroResume
-                          || expr->isCoroYieldAll;
+                          || expr->isCoroYieldAll
+                          || expr->isAsyncAwait || expr->isFutureReady;
         if (!isVariadic && expr->isBuiltinCall && !expr->builtinAcceptsInlineArgs
             && !specialCoroOp && targetType
             && targetType->repr_ == ts::Type::Repr::Inline
@@ -4651,6 +4703,51 @@ u16 CodeGen::genCall(CallExpr_* expr) {
     if (enableConstFold && expr->isBuiltinCall && expr->autoMapArgs.empty()) {
         u16 folded = tryFoldBuiltinCall(expr, argBase, callArgc);
         if (folded != UINT16_MAX) return folded;
+    }
+
+    // Async: ready(x) -> an already-resolved Future via op_future_ready.
+    if (expr->isFutureReady) {
+        u16 srcReg = argBase;  // the value to wrap
+        auto* futType = dynamic_cast<FutureType*>(expr->resolvedType);
+        u16 resultReg = allocSlot(expr->resolvedType);  // Future is a pointer
+        emitOp(op_future_ready);
+        emitRegs(resultReg, srcReg);
+        emitPtr(futType);
+        return resultReg;
+    }
+
+    // Async: await f -> unwrap Future<T> to T. Inside an async fn this is a
+    // cooperative suspend point (op_future_await, with a yield-style GC map);
+    // at a non-async boundary it blocks and pumps the loop (op_future_block).
+    if (expr->isAsyncAwait) {
+        u16 futReg = argBase;  // the future
+        u16 resultReg = allocSlot(expr->resolvedType);  // T (may be multi-word)
+        if (expr->isAwaitBlocking) {
+            emitOp(op_future_block);
+            emitRegs(resultReg, futReg);
+        } else {
+            // Build a GC map of live Obj* locals across the suspend, exactly as
+            // op_yield does (reuses coroGCMaps_ / coroInlineGCMaps_).
+            std::vector<u16> gcMap;
+            std::vector<std::pair<u16, Type*>> inlineMap;
+            for (auto& scope : localScopes_) {
+                for (auto& entry : scope) {
+                    Type* t = entry.second.type;
+                    if (!t) continue;
+                    if (isInlineMultiword(t)) {
+                        if (inlineHasObjPtr(t)) inlineMap.push_back({entry.second.reg, t});
+                        continue;
+                    }
+                    if (storesObjPtr(t)) gcMap.push_back(entry.second.reg);
+                }
+            }
+            u16 gcMapIndex = currentYieldCount_++;
+            currentBlock_->coroGCMaps_.push_back(std::move(gcMap));
+            currentBlock_->coroInlineGCMaps_.push_back(std::move(inlineMap));
+            emitOp(op_future_await);
+            emitRegs(resultReg, futReg, gcMapIndex);
+        }
+        return resultReg;
     }
 
     // Coroutine resume: emit op_coro_resume + op_coro_wrap_option for next() calls
@@ -4790,6 +4887,21 @@ u16 CodeGen::genCall(CallExpr_* expr) {
         emitRegs(resultReg, argBase, callArgc);
         emitInt(expr->resolvedFuncGlobalIndex);  // global index for CodeBlock lookup
         emitPtr(coroType);
+        return resultReg;
+    }
+
+    // Async-fn call: create the coroutine + its result Future and eagerly drive
+    // it to the first suspension/completion. Returns the Future.
+    if (expr->isAsyncCall) {
+        auto* futType = dynamic_cast<FutureType*>(expr->resolvedType);
+        u16 resultReg = allocReg();  // holds the Future (a pointer)
+        emitOp(op_async_call);
+        emitRegs(resultReg, argBase, callArgc);
+        emitInt(expr->resolvedFuncGlobalIndex);  // global index for the body CodeBlock
+        emitPtr(futType);
+        // The coroutine body runs (and allocates) before control returns here,
+        // so map the caller frame's live Obj* across it, like op_coro_resume.
+        emitReturnPcStackMap(resultReg, expr->resolvedType);
         return resultReg;
     }
 
@@ -9835,6 +9947,10 @@ u16 CodeGen::genLambdaExpr(LambdaExprNode* expr) {
     bool savedInFunctionBody = inFunctionBody_;
     inFunctionBody_ = true;
     bool savedInCoroFn = inCoroutineFn_;
+    // Async lambdas are not yet supported; ensure a lambda nested inside an
+    // async fn body does not inherit inAsyncFn_ (which would mis-lower returns).
+    bool savedInAsyncFn = inAsyncFn_;
+    inAsyncFn_ = false;
     u32 savedYieldCount = currentYieldCount_;
     Type* savedReturnType = currentReturnType_;
     currentReturnType_ = lambdaType ? lambdaType->returnType_ : nullptr;
@@ -9949,6 +10065,7 @@ u16 CodeGen::genLambdaExpr(LambdaExprNode* expr) {
     inTailPosition_ = savedTailPos;
     inFunctionBody_ = savedInFunctionBody;
     inCoroutineFn_ = savedInCoroFn;
+    inAsyncFn_ = savedInAsyncFn;
     currentYieldCount_ = savedYieldCount;
     currentReturnType_ = savedReturnType;
     localScopes_ = std::move(savedScopes);

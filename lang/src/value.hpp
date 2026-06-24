@@ -1545,6 +1545,8 @@ private:
 };
 #pragma clang diagnostic pop
 
+class Future;
+
 // Coroutine frame - heap-allocated call frame for coroutine execution
 // Uses flexible array member for inline register storage
 #pragma clang diagnostic push
@@ -1603,6 +1605,14 @@ public:
     CoroutineFrame*  callerCoroFrame_;
     CoroutineObj*    callerCoroutine_;
 
+    // Async support: when this coroutine is the body of an `async fn`,
+    // resultFuture_ is the Future its `return` resolves; nextWaiter_ /
+    // awaitResultReg_ thread the intrusive waiter list of a Future this
+    // coroutine is suspended on (await). Null/0 for ordinary coroutines.
+    Future*          resultFuture_ = nullptr;
+    CoroutineObj*    nextWaiter_ = nullptr;
+    u16              awaitResultReg_ = 0;
+
     // Initial arguments
     FunctionType*    funcType_;     // for GC scanning of args
     u16              numArgs_;
@@ -1612,6 +1622,9 @@ public:
                                 CodeBlock* entryBlock, u16 numArgs);
 
     VMString str() const override {
+        // Async coroutines (the body of an async fn) have a FutureType in type_,
+        // not a CoroutineType -- don't cast.
+        if (resultFuture_) return rt::vmstr("[async]");
         auto* ct = static_cast<CoroutineType*>(type_);
         VMString s = rt::vmstr("Coroutine<");
         s += ct->yieldType_->str();
@@ -1630,6 +1643,8 @@ public:
         if (topFrame_) gc.mark(topFrame_);
         if (callerCoroFrame_) gc.mark(callerCoroFrame_);
         if (callerCoroutine_) gc.mark(callerCoroutine_);
+        if (resultFuture_) gc.mark(reinterpret_cast<GCObj*>(resultFuture_));
+        if (nextWaiter_) gc.mark(nextWaiter_);
         if (funcType_) {
             for (u16 i = 0; i < numArgs_ && i < funcType_->argTypes_.size(); ++i) {
                 if (storesObjPtr(funcType_->argTypes_[i]) && args_[i].o) gc.mark(args_[i].o);
@@ -1639,6 +1654,36 @@ public:
 
 private:
     CoroutineObj(Type* coroType, FunctionType* funcType, CodeBlock* entryBlock, u16 numArgs);
+};
+
+// Future - the result of an async computation. Pending until resolved with a
+// value; suspended async coroutines awaiting it are linked through their
+// intrusive nextWaiter_ field and resumed (Phase B) when it resolves.
+class Future : public Obj {
+public:
+    enum State : u8 { Pending, Resolved };
+
+    State            state_ = Pending;
+    Type*            valueType_;        // T (for GC scan + stride)
+    u16              valueWords_;       // sizeWords of T
+    CoroutineObj*    waiters_ = nullptr; // intrusive list of awaiting coroutines
+    Word             value_[];          // resolved value (valueWords_ words)
+
+    static Future* create(FutureType* type, Type* valueType, u16 valueWords);
+
+    VMString str() const override { return rt::vmstr("[Future]"); }
+
+    void gcScanChildren(TracingGC& gc) override {
+        if (state_ == Resolved && valueType_) gcScanPayload(&value_[0], valueType_, gc);
+        for (auto* w = waiters_; w; w = w->nextWaiter_) gc.mark(w);
+    }
+
+private:
+    Future(FutureType* type, Type* valueType, u16 valueWords)
+        : Obj(reinterpret_cast<Type*>(type)), valueType_(valueType), valueWords_(valueWords)
+    {
+        for (u16 i = 0; i < valueWords; ++i) value_[i] = Word();
+    }
 };
 #pragma clang diagnostic pop
 

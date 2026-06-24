@@ -1,0 +1,6 @@
+compute(4) = 55
+doubler(7) = 170
+early(-3) = 3
+early(5) = 5
+announce: 99
+direct = 42

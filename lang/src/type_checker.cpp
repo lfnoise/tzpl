@@ -473,6 +473,10 @@ void TypeChecker::check(Program& program) {
             if (fn->isCoroutine && retType) {
                 retType = compiler_.coroutineType(retType);
             }
+            // An async fn's declared return type T becomes the external Future<T>.
+            if (fn->isAsync && retType) {
+                retType = compiler_.futureType(retType);
+            }
 
             // Count default arguments
             int numDefaults = 0;
@@ -784,6 +788,9 @@ void TypeChecker::checkREPLInput(Program& program) {
             // and the function's external type is Coroutine<T>
             if (fn->isCoroutine && retType) {
                 retType = compiler_.coroutineType(retType);
+            }
+            if (fn->isAsync && retType) {
+                retType = compiler_.futureType(retType);
             }
 
             // In REPL mode, check if there's an existing overload with matching

@@ -4942,6 +4942,167 @@ void op_coro_wrap_option(VM& vm, Code* pc) {
     DISPATCH(3);
 }
 
+// --- Async / await ---
+//
+// An `async fn` lowers to a coroutine whose suspension points are `await`s and
+// whose `return` resolves a Future. `op_async_call` creates the coroutine + its
+// result Future and eagerly drives it to its first suspension or completion
+// (op_future_await / op_async_return tail-call back to the caller). With only
+// already-resolved futures (Phase A) the body runs straight through.
+
+// ASYNC_CALL Rd, argBase, argc (4 words: op, regs{dst,argBase,argc}, global_idx, FutureType*)
+void op_async_call(VM& vm, Code* pc) {
+    u16 dst = pc[1].regs[0], argBase = pc[1].regs[1], argc = pc[1].regs[2];
+    u32 globalIdx = (u32)pc[2].i;
+    auto* codeBlock = static_cast<CodeBlock*>(vm.global(globalIdx).p);
+    auto* futType = static_cast<FutureType*>(pc[3].p);
+    auto* funcType = static_cast<FunctionType*>(codeBlock->funcType);
+
+    Type* valueType = futType->valueType_;
+    u16 valueWords = (u16)((valueType && valueType->sizeWords_ > 0) ? valueType->sizeWords_ : 1);
+
+    // Allocation ordering matters for GC: root each object (currentCoroutine_,
+    // then via coro->resultFuture_, then currentCoroFrame_) before the next
+    // allocation, so a collection triggered mid-construction can't free it.
+    auto* coro = CoroutineObj::create(reinterpret_cast<CoroutineType*>(futType),
+                                      funcType, codeBlock, argc);
+    for (u16 i = 0; i < argc; ++i) coro->args_[i] = vm.reg(argBase + i);
+
+    // Drive to first suspension/completion; return to pc+4 afterward. Save the
+    // caller's coroutine context BEFORE overwriting currentCoroutine_.
+    coro->callerReturnPC_ = pc + 4;
+    coro->callerResultReg_ = dst;
+    coro->callerBaseReg_ = vm.baseReg();
+    coro->callerFrameCount_ = vm.frameCount();
+    coro->callerCoroFrame_ = vm.currentCoroFrame();
+    coro->callerCoroutine_ = vm.currentCoroutine();
+    vm.setCurrentCoroutine(coro);          // root the coroutine
+    coro->state_ = CoroutineObj::Running;
+
+    auto* future = Future::create(futType, valueType, valueWords);  // coro is rooted
+    coro->resultFuture_ = future;          // future now rooted via coro
+    // The caller keeps the future no matter when the coroutine suspends/returns.
+    vm.reg(dst).o = future;
+
+    u32 newBase = vm.baseReg() + vm.currentFrameNumRegs();
+    CodeBlock* callee = coro->entryBlock_;
+    auto* frame = CoroutineFrame::create(nullptr, callee, callee->numRegs);
+    vm.setCurrentCoroFrame(frame);         // root the save frame before pushFrame
+    for (u16 i = 0; i < coro->numArgs_; ++i) vm.regsBase()[newBase + i] = coro->args_[i];
+    vm.pushFrame(nullptr, callee, newBase, callee->numRegs, 0);
+    Code* entry;
+    if (!callee->defaultEntryOffsets.empty()) {
+        u16 idx = coro->numArgs_ - callee->minArity;
+        entry = callee->code.data() + callee->defaultEntryOffsets[idx];
+    } else {
+        entry = callee->code.data();
+    }
+    [[clang::musttail]] return entry->op(vm, entry);
+}
+
+// FUTURE_READY Rd, Rsrc (3 words: op, regs{dst, src}, FutureType*) -- ready(x)
+void op_future_ready(VM& vm, Code* pc) {
+    u16 dst = pc[1].regs[0], src = pc[1].regs[1];
+    auto* futType = static_cast<FutureType*>(pc[2].p);
+    Type* valueType = futType->valueType_;
+    u16 valueWords = (u16)((valueType && valueType->sizeWords_ > 0) ? valueType->sizeWords_ : 1);
+    auto* future = Future::create(futType, valueType, valueWords);
+    for (u16 i = 0; i < valueWords; ++i) future->value_[i] = vm.reg((u16)(src + i));
+    future->state_ = Future::Resolved;
+    vm.reg(dst).o = future;
+    DISPATCH(3);
+}
+
+// FUTURE_AWAIT Rd, Rfut, gcMapIdx (2 words: op, regs{dst, fut, gcMapIdx}) -- cooperative
+void op_future_await(VM& vm, Code* pc) {
+    u16 dst = pc[1].regs[0], futReg = pc[1].regs[1], gcMapIdx = pc[1].regs[2];
+    auto* future = static_cast<Future*>(vm.reg(futReg).o);
+    u16 stride = future ? future->valueWords_ : 1;
+
+    if (future && future->state_ == Future::Resolved) {
+        // Fast path: value is available, continue without suspending.
+        for (u16 i = 0; i < stride; ++i) vm.reg((u16)(dst + i)) = future->value_[i];
+        DISPATCH(2);
+    }
+
+    // Suspend: register on the future's waiter list and return to the resumer.
+    // (Phase B: the future's resolution will resume us via VM::resumeAsync,
+    // injecting the value into `dst`.)
+    auto* coro = vm.currentCoroutine();
+    auto* frame = vm.currentCoroFrame();
+    Word* flatRegs = vm.regsBase() + vm.baseReg();
+    for (u16 i = 0; i < frame->numRegs_; ++i) frame->regs_[i] = flatRegs[i];
+
+    coro->resumePC_ = pc + 2;
+    coro->awaitResultReg_ = dst;
+    frame->gcMapIndex_ = gcMapIdx;
+    coro->topFrame_ = frame;
+    coro->state_ = CoroutineObj::Suspended;
+
+    if (future) {
+        coro->nextWaiter_ = future->waiters_;
+        future->waiters_ = coro;
+    }
+
+    vm.setBaseReg(coro->callerBaseReg_);
+    vm.setFrameCount(coro->callerFrameCount_);
+    vm.setCurrentCoroFrame(coro->callerCoroFrame_);
+    vm.setCurrentCoroutine(coro->callerCoroutine_);
+    vm.setCurrentRegs(vm.regsBase() + vm.baseReg());
+    // Note: no value written to the caller's result reg -- it already holds the
+    // future (set by op_async_call).
+    coro->callerCoroFrame_ = nullptr;
+    coro->callerCoroutine_ = nullptr;
+
+    Code* returnPC = coro->callerReturnPC_;
+    [[clang::musttail]] return returnPC->op(vm, returnPC);
+}
+
+// FUTURE_BLOCK Rd, Rfut (2 words: op, regs{dst, fut}) -- blocking await at a
+// non-async boundary (script top level / render setup / a callback).
+void op_future_block(VM& vm, Code* pc) {
+    u16 dst = pc[1].regs[0], futReg = pc[1].regs[1];
+    auto* future = static_cast<Future*>(vm.reg(futReg).o);
+    u16 stride = future ? future->valueWords_ : 1;
+    if (future && future->state_ == Future::Resolved) {
+        for (u16 i = 0; i < stride; ++i) vm.reg((u16)(dst + i)) = future->value_[i];
+    } else {
+        // Phase B: pump the event loop on this thread until `future` resolves.
+        // Phase A only has already-resolved futures, so this never runs.
+        for (u16 i = 0; i < stride; ++i) vm.reg((u16)(dst + i)).i = 0;
+    }
+    DISPATCH(2);
+}
+
+// ASYNC_RETURN Rsrc (2 words: op, regs{src}) -- resolve this coroutine's future
+void op_async_return(VM& vm, Code* pc) {
+    u16 src = pc[1].regs[0];
+    auto* coro = vm.currentCoroutine();
+    auto* future = coro->resultFuture_;
+
+    if (future) {
+        u16 stride = future->valueWords_;
+        for (u16 i = 0; i < stride; ++i) future->value_[i] = vm.reg((u16)(src + i));
+        future->state_ = Future::Resolved;
+        // Phase B: resume future->waiters_ via VM::resumeAsync. In Phase A,
+        // futures always resolve before they are awaited, so there are none.
+    }
+
+    coro->topFrame_ = nullptr;
+    coro->state_ = CoroutineObj::Done;
+
+    vm.setBaseReg(coro->callerBaseReg_);
+    vm.setFrameCount(coro->callerFrameCount_);
+    vm.setCurrentCoroFrame(coro->callerCoroFrame_);
+    vm.setCurrentCoroutine(coro->callerCoroutine_);
+    vm.setCurrentRegs(vm.regsBase() + vm.baseReg());
+    coro->callerCoroFrame_ = nullptr;
+    coro->callerCoroutine_ = nullptr;
+
+    Code* returnPC = coro->callerReturnPC_;
+    [[clang::musttail]] return returnPC->op(vm, returnPC);
+}
+
 // --- Any ---
 
 // MAKE_ANY Rd, Rsrc, isObj (3 words: op, regs{dst, src, isObj}, Type* wrappedType)

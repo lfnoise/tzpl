@@ -53,6 +53,7 @@ class TupleType;
 class FunctionType;
 class EnumType;
 class CoroutineType;
+class FutureType;
 class CoroutineObj;
 class CoroutineFrame;
 struct CompileResult;

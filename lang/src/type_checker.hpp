@@ -293,6 +293,11 @@ private:
     bool inCoroutineBody_ = false;
     Type* currentYieldType_ = nullptr;
 
+    // Async-fn body tracking (analogous to coroutine tracking). Inside an
+    // async fn, `await` suspends cooperatively; outside, it blocks-and-pumps.
+    bool inAsyncBody_ = false;
+    Type* currentAsyncValueType_ = nullptr;
+
     // Return type inference state
     bool inferringReturnType_ = false;   // true when inferring return type from body
     Type* inferredReturnType_ = nullptr; // collected from return statements during inference

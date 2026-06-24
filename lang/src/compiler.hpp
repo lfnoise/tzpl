@@ -45,6 +45,7 @@ class TupleType;
 class FunctionType;
 class EnumType;
 class CoroutineType;
+class FutureType;
 class ModuleCompiler;
 
 // CFun is the runtime function pointer type — always takes VM& (not Compiler&)
@@ -180,6 +181,7 @@ public:
     PersistentMapType* persistentMapType(Type* keyType, Type* valueType) { return typeUniverse_.persistentMapType(keyType, valueType); }
     EnumType* optionType(Type* elemType) { return typeUniverse_.optionType(elemType); }
     CoroutineType* coroutineType(Type* yieldType) { return typeUniverse_.coroutineType(yieldType); }
+    FutureType* futureType(Type* valueType) { return typeUniverse_.futureType(valueType); }
     TupleType* tupleType(const Vec<Type*>& fields) { return typeUniverse_.tupleType(fields); }
     FunctionType* functionType(const Vec<Type*>& argTypes, Type* returnType) {
         return typeUniverse_.functionType(argTypes, returnType);

@@ -785,6 +785,11 @@ private:
     // --- Coroutine codegen state ---
     bool inCoroutineFn_ = false;
 
+    // --- Async codegen state --- true while compiling an `async fn` body, so
+    // returns lower to op_async_return (resolve the Future) and await suspension
+    // points record GC maps (reusing the coroutine GC-map machinery).
+    bool inAsyncFn_ = false;
+
     // Phase 4f: return type of the function currently being compiled.
     // Used to decide whether to box a multi-word inline value before op_return.
     Type* currentReturnType_ = nullptr;
@@ -793,6 +798,14 @@ private:
     // slot size; the handler copies nWords from src into the caller's result
     // slot. No boxing involved.
     void emitReturn(u16 reg) {
+        if (inAsyncFn_) {
+            // Inside an async fn, returning a value resolves its Future. Routes
+            // every return path (trailing expr, explicit return, if/switch-as-
+            // return) through op_async_return.
+            emitOp(op_async_return);
+            emitRegs(reg);
+            return;
+        }
         u32 nWords = typeSlotWords(currentReturnType_);
         emitOp(op_return);
         emitRegs(reg, (u16)nWords);

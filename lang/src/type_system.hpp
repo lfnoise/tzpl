@@ -527,6 +527,25 @@ public:
 
 };
 
+// Future type — the result of an asynchronous (`async fn`) computation.
+// Modeled on CoroutineType: a single-type-parameter heap object. `await`
+// unwraps Future<T> -> T.
+class FutureType : public ObjType {
+public:
+    Type* valueType_;
+
+    FutureType(Type* valueType)
+        : valueType_(valueType)
+    {
+        registerNewObj(this);
+    }
+
+    VMString str() const override {
+        return rt::fmt("Future<{}>", valueType_->str());
+    }
+
+};
+
 // Any type — wraps a value of any type into a uniform object
 class AnyType : public ObjType {
 public:
