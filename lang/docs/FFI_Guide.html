@@ -401,16 +401,6 @@ if (localStorage.getItem('tzpl-docs-theme') === 'light') document.documentElemen
         <li><a href="#osc-bundles">Bundles &amp; Scheduling</a></li>
       </ol>
     </li>
-    <li><a href="#clock">Clock / Tempo Scheduling</a>
-      <ol>
-        <li><a href="#clock-overview">Overview</a></li>
-        <li><a href="#clock-scheduling">Scheduling Functions</a></li>
-        <li><a href="#clock-tempo">Tempo Control</a></li>
-        <li><a href="#clock-queries">Beat &amp; Tempo Queries</a></li>
-        <li><a href="#clock-latency">Latency</a></li>
-        <li><a href="#clock-examples">Examples</a></li>
-      </ol>
-    </li>
     <li><a href="#nats">NATS Integration</a>
       <ol>
         <li><a href="#nats-overview">Overview</a></li>
@@ -422,6 +412,19 @@ if (localStorage.getItem('tzpl-docs-theme') === 'light') document.documentElemen
         <li><a href="#nats-engine-subjects">Engine NATS Subjects</a></li>
         <li><a href="#nats-distributed">Distributed Engines</a></li>
         <li><a href="#nats-vs-osc">NATS vs. OSC</a></li>
+      </ol>
+    </li>
+    <li><a href="#clock">Clock / Tempo Scheduling</a>
+      <ol>
+        <li><a href="#clock-overview">Overview</a></li>
+        <li><a href="#clock-scheduling">NRT Clock Module</a></li>
+        <li><a href="#clock-tempo">Tempo Control</a></li>
+        <li><a href="#clock-queries">Beat &amp; Tempo Queries</a></li>
+        <li><a href="#clock-latency">Latency</a></li>
+        <li><a href="#clock-engine-slots">Engine TempoClock Slots</a></li>
+        <li><a href="#clock-delay">Asynchronous delay</a></li>
+        <li><a href="#clock-silo-tasks">Silo Task Scheduling</a></li>
+        <li><a href="#clock-examples">Examples</a></li>
       </ol>
     </li>
     <li><a href="#synthdef-compiler">SynthDef Compiler</a>
@@ -1997,169 +2000,13 @@ osc.<span class="fn">removeHandler</span>(<span class="str">"/trigger"</span>);<
 </div>
 
 <!-- ================================================================ -->
-<!--  10. CLOCK / TEMPO SCHEDULING                                     -->
+<!--  10. NATS INTEGRATION                                             -->
 <!-- ================================================================ -->
 
-<h2 id="clock">10. Clock / Tempo Scheduling</h2>
+<h2 id="nats">10. NATS Integration</h2>
 
 <!-- -------------------------------- -->
-<h3 id="clock-overview">10.1 Overview</h3>
-
-<p>Tzopilotl includes a beat-based tempo scheduler for musical timing. Events are scheduled at beat positions rather than wall-clock times, with automatic conversion using a <strong>TempoRamp</strong> that supports smooth tempo transitions.</p>
-
-<p>The scheduler follows the SuperCollider <code>TempoClock</code> model:</p>
-
-<ul>
-  <li>Events are scheduled by <strong>beat position</strong>, not seconds.</li>
-  <li>A handler that returns a positive <code>Float</code> is automatically rescheduled that many beats later (useful for repeating patterns).</li>
-  <li>Tempo can be changed immediately or ramped smoothly over a specified number of beats.</li>
-  <li>The scheduler fires events slightly early by a configurable latency, giving commands time to reach the real-time audio thread before they must execute.</li>
-</ul>
-
-<p>All clock functions are registered under the <code>clock</code> foreign module. Import them with:</p>
-
-<pre><code><span class="kw">import</span> clock.*;</code></pre>
-
-<!-- -------------------------------- -->
-<h3 id="clock-scheduling">10.2 Scheduling Functions</h3>
-
-<h4>Reschedulable handlers</h4>
-
-<p>These take a <code>Fn() Float</code> handler. If the handler returns a positive finite number, it is rescheduled that many beats later. Return <code>0.0</code> or a negative number to stop.</p>
-
-<table>
-  <tr><th>Function</th><th>Description</th></tr>
-  <tr><td><code>sched(deltaBeats Float, handler Fn() Float) Int</code></td><td>Schedule relative to the current logical beat. Returns a timer ID.</td></tr>
-  <tr><td><code>schedAbs(beat Float, handler Fn() Float) Int</code></td><td>Schedule at an absolute beat position. Returns a timer ID.</td></tr>
-</table>
-
-<h4>One-shot handlers</h4>
-
-<p>These take a <code>Fn() Void</code> handler and never reschedule.</p>
-
-<table>
-  <tr><th>Function</th><th>Description</th></tr>
-  <tr><td><code>after(deltaBeats Float, handler Fn() Void) Int</code></td><td>Schedule relative to the current logical beat. Returns a timer ID.</td></tr>
-  <tr><td><code>at(beat Float, handler Fn() Void) Int</code></td><td>Schedule at an absolute beat position. Returns a timer ID.</td></tr>
-</table>
-
-<h4>Cancellation</h4>
-
-<table>
-  <tr><th>Function</th><th>Description</th></tr>
-  <tr><td><code>cancel(timerID Int) Void</code></td><td>Cancel a scheduled event by its timer ID.</td></tr>
-</table>
-
-<!-- -------------------------------- -->
-<h3 id="clock-tempo">10.3 Tempo Control</h3>
-
-<p>Tempo is specified in <strong>beats per minute</strong> (BPM). The default tempo is 60 BPM.</p>
-
-<table>
-  <tr><th>Function</th><th>Description</th></tr>
-  <tr><td><code>setTempo(bpm Float) Void</code></td><td>Set the tempo immediately.</td></tr>
-  <tr><td><code>schedTempoChange(beat Float, targetBPM Float, rampBeats Float) Int</code></td><td>Schedule a smooth tempo ramp starting at the given beat, reaching <code>targetBPM</code> over <code>rampBeats</code> beats. The ramp is linear in beats (exponential in seconds). Returns a timer ID.</td></tr>
-</table>
-
-<p>A tempo ramp with <code>rampBeats = 0</code> is an instantaneous change at the specified beat.</p>
-
-<div class="note">
-  <strong>Note:</strong> Internally, tempo is stored as beats per second (BPS). The FFI converts: BPS = BPM / 60. After a ramp completes, the ending tempo is held constant until a new ramp is installed.
-</div>
-
-<!-- -------------------------------- -->
-<h3 id="clock-queries">10.4 Beat &amp; Tempo Queries</h3>
-
-<table>
-  <tr><th>Function</th><th>Description</th></tr>
-  <tr><td><code>getTempo() Float</code></td><td>Current tempo in BPM.</td></tr>
-  <tr><td><code>getBeats() Float</code></td><td>Current beat position. Inside a handler callback, returns the handler's logical beat; outside, returns the wall-clock beat.</td></tr>
-  <tr><td><code>getBeatDur() Float</code></td><td>Duration of one beat in seconds at the current tempo.</td></tr>
-</table>
-
-<!-- -------------------------------- -->
-<h3 id="clock-latency">10.5 Latency</h3>
-
-<p>The NRT scheduler fires events slightly ahead of their beat time by a configurable latency. This gives engine commands time to travel through the lock-free FIFO and arrive at the real-time thread before they must execute. The default latency is 50 ms.</p>
-
-<div class="note">
-  <strong>Note:</strong> These latency functions apply to the NRT (non-real-time) tempo scheduler only. The RT tempo scheduler runs directly on the audio thread using sample time as its time base, with no latency offset &mdash; events fire at the exact sample.
-</div>
-
-<table>
-  <tr><th>Function</th><th>Description</th></tr>
-  <tr><td><code>setLatency(seconds Float) Void</code></td><td>Set the latency compensation in seconds.</td></tr>
-  <tr><td><code>getLatency() Float</code></td><td>Get the current latency in seconds.</td></tr>
-</table>
-
-<!-- -------------------------------- -->
-<h3 id="clock-examples">10.6 Examples</h3>
-
-<h4>Repeating pattern</h4>
-
-<pre><code><span class="kw">import</span> clock.*;
-<span class="kw">import</span> audio_engine.*;
-
-<span class="cmt">-- Play a note every beat using the reschedule convention.</span>
-<span class="cmt">-- The handler returns 1.0, so it fires again 1 beat later.</span>
-<span class="fn">sched</span>(<span class="num">0.0</span>, <span class="kw">fn</span>() Float {
-    <span class="fn">begin</span>(<span class="num">0</span>);
-    <span class="fn">noteOn</span>(<span class="num">100</span>, <span class="num">60</span>, [<span class="num">440.0</span>, <span class="num">0.5</span>]);
-    <span class="fn">sched</span>();
-    <span class="num">1.0</span>;  <span class="cmt">-- reschedule 1 beat later</span>
-});</code></pre>
-
-<h4>One-shot delayed event</h4>
-
-<pre><code><span class="kw">import</span> clock.*;
-<span class="kw">import</span> audio_engine.*;
-
-<span class="cmt">-- Turn off all notes after 8 beats</span>
-<span class="fn">after</span>(<span class="num">8.0</span>, <span class="kw">fn</span>() Void {
-    <span class="fn">begin</span>(<span class="num">0</span>);
-    <span class="fn">allNotesOff</span>(<span class="num">100</span>);
-    <span class="fn">sched</span>();
-});</code></pre>
-
-<h4>Tempo ramp</h4>
-
-<pre><code><span class="kw">import</span> clock.*;
-
-<span class="fn">setTempo</span>(<span class="num">120.0</span>);  <span class="cmt">-- start at 120 BPM</span>
-
-<span class="cmt">-- At beat 16, begin ramping to 140 BPM over 8 beats</span>
-<span class="fn">schedTempoChange</span>(<span class="num">16.0</span>, <span class="num">140.0</span>, <span class="num">8.0</span>);
-
-<span class="cmt">-- At beat 32, instantly drop to 90 BPM</span>
-<span class="fn">schedTempoChange</span>(<span class="num">32.0</span>, <span class="num">90.0</span>, <span class="num">0.0</span>);</code></pre>
-
-<h4>Scheduling from within a handler</h4>
-
-<pre><code><span class="kw">import</span> clock.*;
-<span class="kw">import</span> audio_engine.*;
-
-<span class="cmt">-- Schedule two notes a half-beat apart, starting at beat 4</span>
-<span class="fn">at</span>(<span class="num">4.0</span>, <span class="kw">fn</span>() Void {
-    <span class="fn">begin</span>(<span class="num">0</span>);
-    <span class="fn">noteOn</span>(<span class="num">100</span>, <span class="num">60</span>, [<span class="num">440.0</span>, <span class="num">0.8</span>]);
-    <span class="fn">sched</span>();
-
-    <span class="cmt">-- sched() is relative to the current logical beat (4.0)</span>
-    <span class="fn">after</span>(<span class="num">0.5</span>, <span class="kw">fn</span>() Void {
-        <span class="fn">begin</span>(<span class="num">0</span>);
-        <span class="fn">noteOn</span>(<span class="num">100</span>, <span class="num">67</span>, [<span class="num">587.33</span>, <span class="num">0.6</span>]);
-        <span class="fn">sched</span>();
-    });
-});</code></pre>
-
-<!-- ================================================================ -->
-<!--  11. NATS INTEGRATION                                             -->
-<!-- ================================================================ -->
-
-<h2 id="nats">11. NATS Integration</h2>
-
-<!-- -------------------------------- -->
-<h3 id="nats-overview">11.1 Overview</h3>
+<h3 id="nats-overview">10.1 Overview</h3>
 
 <p>Tzopilotl includes built-in <a href="https://nats.io/">NATS</a> messaging support for networked control and distributed communication. NATS functions are available when the application is built with <code>TZPL_BUILD_NATS=ON</code>.</p>
 
@@ -2188,7 +2035,7 @@ osc.<span class="fn">removeHandler</span>(<span class="str">"/trigger"</span>);<
 </div>
 
 <!-- -------------------------------- -->
-<h3 id="nats-setup">11.2 Setup &amp; Configuration</h3>
+<h3 id="nats-setup">10.2 Setup &amp; Configuration</h3>
 
 <p>The NATS client can be connected in two ways:</p>
 
@@ -2218,7 +2065,7 @@ engineName = <span class="str">"piano"</span></code></pre>
 <span class="fn">natsDisconnect</span>();                        <span class="cmt">-- disconnect</span></code></pre>
 
 <!-- -------------------------------- -->
-<h3 id="nats-connection">11.3 Connection Management</h3>
+<h3 id="nats-connection">10.3 Connection Management</h3>
 
 <table>
   <tr><th>Function</th><th>Description</th></tr>
@@ -2234,7 +2081,7 @@ engineName = <span class="str">"piano"</span></code></pre>
 </div>
 
 <!-- -------------------------------- -->
-<h3 id="nats-publishing">11.4 Publishing</h3>
+<h3 id="nats-publishing">10.4 Publishing</h3>
 
 <p>Publish messages to NATS subjects. The payload is a string (for typed variants, the value is converted to its string representation).</p>
 
@@ -2263,7 +2110,7 @@ engineName = <span class="str">"piano"</span></code></pre>
 });</code></pre>
 
 <!-- -------------------------------- -->
-<h3 id="nats-handler-registration">11.5 Handler Registration</h3>
+<h3 id="nats-handler-registration">10.5 Handler Registration</h3>
 
 <p>Register Tzopilotl functions as handlers for incoming NATS messages. When a message arrives on the subscribed subject, the handler is called via the NRTVM (mutex-serialized, non-RT). The message payload is passed as the argument.</p>
 
@@ -2301,7 +2148,7 @@ nats.<span class="fn">removeHandler</span>(<span class="str">"trigger"</span>);<
 </div>
 
 <!-- -------------------------------- -->
-<h3 id="nats-vm-subjects">11.6 VM NATS Subjects</h3>
+<h3 id="nats-vm-subjects">10.6 VM NATS Subjects</h3>
 
 <p>The following built-in NATS subjects allow external applications to interact with the Tzopilotl VM:</p>
 
@@ -2330,7 +2177,7 @@ nats.<span class="fn">removeHandler</span>(<span class="str">"trigger"</span>);<
 </div>
 
 <!-- -------------------------------- -->
-<h3 id="nats-engine-subjects">11.7 Engine NATS Subjects</h3>
+<h3 id="nats-engine-subjects">10.7 Engine NATS Subjects</h3>
 
 <p>When connected to a NATS server, the following subjects control the audio engine. These mirror the OSC engine addresses but use dot-separated NATS subject names and space-separated text payloads.</p>
 
@@ -2406,7 +2253,7 @@ nats.<span class="fn">removeHandler</span>(<span class="str">"trigger"</span>);<
 <span class="cmt">--   nats pub engine.masterGain '0.5'</span></code></pre>
 
 <!-- -------------------------------- -->
-<h3 id="nats-distributed">11.8 Distributed Engines</h3>
+<h3 id="nats-distributed">10.8 Distributed Engines</h3>
 
 <p>When running multiple Tzopilotl instances on different machines (or in separate processes), NATS provides a natural coordination layer. Each instance can be given a unique <strong>engine name</strong> so that commands and messages can be addressed to specific engines.</p>
 
@@ -2462,7 +2309,7 @@ nats.<span class="fn">onMessageS</span>(<span class="str">"nodes.piano.chords"</
 </div>
 
 <!-- -------------------------------- -->
-<h3 id="nats-vs-osc">11.9 NATS vs. OSC</h3>
+<h3 id="nats-vs-osc">10.9 NATS vs. OSC</h3>
 
 <p>Both protocols are supported simultaneously and share the same engine command set. Choose based on your needs:</p>
 
@@ -2483,6 +2330,263 @@ nats.<span class="fn">onMessageS</span>(<span class="str">"nodes.piano.chords"</
 <div class="tip">
   <strong>Tip:</strong> Use OSC when working with existing music software that speaks OSC, or when low-latency local communication is essential. Use NATS when building distributed systems across multiple machines, or when you need reliable delivery and request/reply semantics.
 </div>
+
+<!-- ================================================================ -->
+<!--  11. CLOCK / TEMPO SCHEDULING                                     -->
+<!-- ================================================================ -->
+
+<h2 id="clock">11. Clock / Tempo Scheduling</h2>
+
+<!-- -------------------------------- -->
+<h3 id="clock-overview">11.1 Overview</h3>
+
+<p>Tzopilotl schedules musical events by <strong>beat position</strong> rather than wall-clock time, converting beats to time with a <strong>TempoRamp</strong> that supports smooth tempo transitions. There are two cooperating scheduling layers:</p>
+
+<ul>
+  <li><strong>The NRT clock module</strong> (<code>import clock.*;</code>) &mdash; a single logical clock running on the main / non-real-time VM, modeled on the SuperCollider <code>TempoClock</code>. Its handlers run on the NRT VM and typically issue engine commands. This clock drives <strong>engine TempoClock slot&nbsp;0</strong>, so callbacks and beat-scheduled engine bundles share one timeline (&sect;11.2&ndash;11.5).</li>
+  <li><strong>Engine TempoClock slots</strong> (<code>import audio_engine.*;</code>) &mdash; N beat clocks owned by the engine, each synchronized across all silos. Engine command bundles and silo tasks bind to a <code>(slot, beat)</code> pair and fire sample-accurately on the audio thread (&sect;11.6).</li>
+</ul>
+
+<p>In both layers, a reschedulable handler that returns a positive <code>Float</code> is automatically run again that many beats later, which is the idiom for repeating patterns. Tempo can be changed instantly or ramped linearly over a number of beats.</p>
+
+<!-- -------------------------------- -->
+<h3 id="clock-scheduling">11.2 NRT Clock Module &mdash; Scheduling Functions</h3>
+
+<p>All NRT clock functions are registered under the <code>clock</code> foreign module:</p>
+
+<pre><code><span class="kw">import</span> clock.*;</code></pre>
+
+<h4>Reschedulable handlers</h4>
+
+<p>These take a <code>Fn() Float</code> handler. If the handler returns a positive finite number, it is rescheduled that many beats later. Return <code>0.0</code> or a negative number to stop.</p>
+
+<table>
+  <tr><th>Function</th><th>Description</th></tr>
+  <tr><td><code>sched(deltaBeats Float, handler Fn() Float) Int</code></td><td>Schedule relative to the current logical beat. Returns a timer ID.</td></tr>
+  <tr><td><code>schedAbs(beat Float, handler Fn() Float) Int</code></td><td>Schedule at an absolute beat position. Returns a timer ID.</td></tr>
+</table>
+
+<h4>One-shot handlers</h4>
+
+<p>These take a <code>Fn() Void</code> handler and never reschedule.</p>
+
+<table>
+  <tr><th>Function</th><th>Description</th></tr>
+  <tr><td><code>after(deltaBeats Float, handler Fn() Void) Int</code></td><td>Schedule relative to the current logical beat. Returns a timer ID.</td></tr>
+  <tr><td><code>at(beat Float, handler Fn() Void) Int</code></td><td>Schedule at an absolute beat position. Returns a timer ID.</td></tr>
+</table>
+
+<h4>Coroutine driver</h4>
+
+<table>
+  <tr><th>Function</th><th>Description</th></tr>
+  <tr><td><code>go(c Coroutine&lt;Float&gt;) Int</code></td><td>Run a coroutine on the clock. Each <code>yield</code>ed <code>Float</code> is a beat delta: after yielding, the coroutine is resumed that many beats later; when it finishes, scheduling stops. Returns a timer ID. (Defined in <code>clock.x</code> on top of <code>sched</code>.)</td></tr>
+</table>
+
+<h4>Cancellation</h4>
+
+<table>
+  <tr><th>Function</th><th>Description</th></tr>
+  <tr><td><code>cancel(timerID Int) Void</code></td><td>Cancel a scheduled event by its timer ID.</td></tr>
+</table>
+
+<!-- -------------------------------- -->
+<h3 id="clock-tempo">11.3 Tempo Control</h3>
+
+<p>Tempo is specified in <strong>beats per minute</strong> (BPM). The default tempo is 60 BPM.</p>
+
+<table>
+  <tr><th>Function</th><th>Description</th></tr>
+  <tr><td><code>setTempo(bpm Float) Void</code></td><td>Set the tempo immediately.</td></tr>
+  <tr><td><code>schedTempoChange(beat Float, targetBPM Float, rampBeats Float) Int</code></td><td>Schedule a smooth tempo ramp starting at the given beat, reaching <code>targetBPM</code> over <code>rampBeats</code> beats. The ramp is linear in beats (exponential in seconds). Returns a timer ID.</td></tr>
+</table>
+
+<p>A tempo ramp with <code>rampBeats = 0</code> is an instantaneous change at the specified beat.</p>
+
+<div class="note">
+  <strong>Note:</strong> Internally, tempo is stored as beats per second (BPS); the FFI converts BPS = BPM / 60. After a ramp completes, the ending tempo is held until a new ramp is installed. These two functions also mirror their change onto <strong>engine TempoClock slot&nbsp;0</strong>, so engine bundles scheduled on slot&nbsp;0 stay aligned with NRT clock callbacks. To drive other slots, use the engine <code>setTempo(clock, bpm)</code> / <code>schedTempoChange(clock, &hellip;)</code> overloads in &sect;11.6.
+</div>
+
+<!-- -------------------------------- -->
+<h3 id="clock-queries">11.4 Beat &amp; Tempo Queries</h3>
+
+<table>
+  <tr><th>Function</th><th>Description</th></tr>
+  <tr><td><code>getTempo() Float</code></td><td>Current tempo in BPM.</td></tr>
+  <tr><td><code>getBeats() Float</code></td><td>Current beat position. Inside a handler callback, returns the handler's logical beat; outside, returns the wall-clock beat.</td></tr>
+  <tr><td><code>getBeatDur() Float</code></td><td>Duration of one beat in seconds at the current tempo.</td></tr>
+</table>
+
+<!-- -------------------------------- -->
+<h3 id="clock-latency">11.5 Latency</h3>
+
+<p>The NRT clock fires its callbacks slightly ahead of their beat time by a configurable latency. This gives engine commands time to travel through the lock-free FIFO and arrive at the real-time thread before they must execute. The default latency is 50 ms.</p>
+
+<div class="note">
+  <strong>Note:</strong> These latency functions apply to the NRT clock module only. Engine TempoClock slots (&sect;11.6) fire beat-scheduled bundles sample-accurately on the audio thread with no latency offset &mdash; a bundle bound to <code>(clock, beat)</code> executes at the exact sample the slot reaches that beat.
+</div>
+
+<table>
+  <tr><th>Function</th><th>Description</th></tr>
+  <tr><td><code>setLatency(seconds Float) Void</code></td><td>Set the latency compensation in seconds.</td></tr>
+  <tr><td><code>getLatency() Float</code></td><td>Get the current latency in seconds.</td></tr>
+</table>
+
+<!-- -------------------------------- -->
+<h3 id="clock-engine-slots">11.6 Engine TempoClock Slots</h3>
+
+<p>The engine owns <strong>N beat-based TempoClock slots</strong> (the count is fixed at engine startup; the default is a single slot, index&nbsp;0). Slot <code>k</code> is <strong>synchronized across every silo</strong>: all silos share the same beat origin and tempo for that slot, and a tempo change to slot <code>k</code> is broadcast to all silos at once. This lets independent parts on different silos be scheduled against a common musical grid while still allowing several independent grids (one per slot).</p>
+
+<p>These functions live in the <code>audio_engine</code> module and are RT-safe:</p>
+
+<pre><code><span class="kw">import</span> audio_engine.*;</code></pre>
+
+<h4>Beat-scheduled command bundles</h4>
+
+<p>Open a command bundle with <code>begin(silo)</code>, add graph/note commands, then commit it. Committing either fires immediately or defers until a clock slot reaches a beat:</p>
+
+<table>
+  <tr><th>Function</th><th>Description</th></tr>
+  <tr><td><code>sched() Int</code></td><td>Commit the open bundle for <strong>immediate</strong> execution. Returns an engine error code (<code>0</code> = ok).</td></tr>
+  <tr><td><code>sched(clock Int, beat Float) Int</code></td><td>Commit the open bundle to fire when slot <code>clock</code> reaches <code>beat</code> (<strong>late-bound</strong>: the binding is to the beat, so tempo changes before the beat arrives still land the commands at the right musical position).</td></tr>
+  <tr><td><code>schedPolicy(clock Int, beat Float, policy Int) Int</code></td><td>Like <code>sched(clock, beat)</code>, but with an explicit <code>SchedPolicy</code> for late delivery (see below).</td></tr>
+</table>
+
+<p>The <code>SchedPolicy</code> enum (from <code>audio_engine</code>) controls what happens if the target beat has already passed by the time the bundle reaches the audio thread:</p>
+
+<table>
+  <tr><th>Policy</th><th>Behavior when late</th></tr>
+  <tr><td><code>schedImmediate</code></td><td>Fire as soon as it arrives, ignoring the beat.</td></tr>
+  <tr><td><code>schedBetterLateThanNever</code></td><td>Fire at the next sample even though the beat has passed.</td></tr>
+  <tr><td><code>schedOnTimeOnly</code></td><td>Drop the bundle if its beat has already passed.</td></tr>
+</table>
+
+<h4>Per-slot tempo (synchronized across silos)</h4>
+
+<table>
+  <tr><th>Function</th><th>Description</th></tr>
+  <tr><td><code>setTempo(clock Int, bpm Float) Int</code></td><td>Set slot <code>clock</code>'s tempo, on every silo, immediately.</td></tr>
+  <tr><td><code>schedTempoChange(clock Int, atBeat Float, targetBPM Float, rampBeats Float) Int</code></td><td>Ramp slot <code>clock</code> to <code>targetBPM</code> over <code>rampBeats</code> beats, starting at <code>atBeat</code>, on every silo.</td></tr>
+</table>
+
+<h4>Per-slot queries</h4>
+
+<table>
+  <tr><th>Function</th><th>Description</th></tr>
+  <tr><td><code>clockBeats(clock Int) Float</code></td><td>Current beat position of slot <code>clock</code>.</td></tr>
+  <tr><td><code>clockTempo(clock Int) Float</code></td><td>Current tempo (BPM) of slot <code>clock</code>.</td></tr>
+</table>
+
+<div class="note">
+  <strong>Note:</strong> The NRT <code>clock</code> module (&sect;11.2&ndash;11.5) and engine slot&nbsp;0 are kept in step because <code>clock.setTempo</code> / <code>clock.schedTempoChange</code> also drive slot&nbsp;0. Use the <code>clock</code> module to <em>run code</em> on the beat (NRT callbacks); use the engine slot functions to <em>schedule engine commands</em> on the beat, sample-accurately, possibly on additional slots.
+</div>
+
+<!-- -------------------------------- -->
+<h3 id="clock-delay">11.7 Asynchronous <code>delay</code></h3>
+
+<p>Inside an <code>async fn</code>, <code>await delay(beats)</code> suspends the async task for a number of beats on the VM's asynchronous event loop, then resumes after the statement. <code>delay</code> is a built-in (no import required):</p>
+
+<table>
+  <tr><th>Function</th><th>Description</th></tr>
+  <tr><td><code>delay(beats Float) Future&lt;Void&gt;</code></td><td>Return a pending future that resolves after <code>beats</code> have elapsed on the async event loop's virtual-beat timeline.</td></tr>
+</table>
+
+<pre><code><span class="kw">async fn</span> <span class="fn">part</span>() Void {
+    <span class="fn">println</span>(<span class="str">"start"</span>);
+    <span class="kw">await</span> <span class="fn">delay</span>(<span class="num">4.0</span>);   <span class="cmt">-- yield for 4 beats, then continue</span>
+    <span class="fn">println</span>(<span class="str">"4 beats later"</span>);
+}</code></pre>
+
+<div class="note">
+  <strong>Note:</strong> <code>delay</code> drives the async/await event loop (the orchestration layer on the NRT VM), which is distinct from the engine TempoClock slots that schedule audio-thread commands. See the &ldquo;Async and Await&rdquo; section of <em>Tzopilotl by Example</em> for the full async model (<code>async fn</code>, <code>await</code>, <code>Future&lt;T&gt;</code>, <code>awaitAll</code> / <code>gather</code>).
+</div>
+
+<!-- -------------------------------- -->
+<h3 id="clock-silo-tasks">11.8 Silo Task Scheduling</h3>
+
+<p>Code running on a silo's own VM (a task module installed with <code>siloLoad</code>) can schedule beat-driven tasks on that silo's TempoClock slots. Because the slots are synchronized across silos (&sect;11.6), parts loaded onto different silos can be started on a common downbeat. The silo-side primitives are:</p>
+
+<table>
+  <tr><th>Function</th><th>Description</th></tr>
+  <tr><td><code>spawn(clock Int, c Coroutine&lt;Float&gt;) Int</code></td><td>Run a coroutine as a task on slot <code>clock</code> of the current silo. Each <code>yield</code>ed <code>Float</code> is a beat delta; finishing the coroutine stops the task. Returns a task ID.</td></tr>
+  <tr><td><code>scheduleTask(clock Int, handler Fn() Float) Int</code></td><td>Lower-level form: schedule a reschedulable handler (positive return = beats until next run; <code>&le; 0</code> stops) on slot <code>clock</code>.</td></tr>
+</table>
+
+<p>The orchestration side (main / NRT VM) loads parts and starts them together via <code>attachVM</code>, <code>siloLoad</code> (an awaitable load barrier returning <code>Future&lt;String&gt;</code>), and <code>siloStartAt(beat, silos)</code>. See &sect;13 (Silo VM) for the full lifecycle.</p>
+
+<!-- -------------------------------- -->
+<h3 id="clock-examples">11.9 Examples</h3>
+
+<h4>Repeating pattern (NRT clock)</h4>
+
+<pre><code><span class="kw">import</span> clock.*;
+<span class="kw">import</span> audio_engine.*;
+
+<span class="cmt">-- Play a note every beat using the reschedule convention.</span>
+<span class="cmt">-- The handler returns 1.0, so it fires again 1 beat later.</span>
+<span class="fn">sched</span>(<span class="num">0.0</span>, <span class="kw">fn</span>() Float {
+    <span class="fn">begin</span>(<span class="num">0</span>);
+    <span class="fn">noteOn</span>(<span class="num">100</span>, <span class="num">60</span>, [<span class="num">440.0</span>, <span class="num">0.5</span>]);
+    <span class="fn">sched</span>();
+    <span class="num">1.0</span>;  <span class="cmt">-- reschedule 1 beat later</span>
+});</code></pre>
+
+<h4>One-shot delayed event</h4>
+
+<pre><code><span class="kw">import</span> clock.*;
+<span class="kw">import</span> audio_engine.*;
+
+<span class="cmt">-- Turn off all notes after 8 beats</span>
+<span class="fn">after</span>(<span class="num">8.0</span>, <span class="kw">fn</span>() Void {
+    <span class="fn">begin</span>(<span class="num">0</span>);
+    <span class="fn">allNotesOff</span>(<span class="num">100</span>);
+    <span class="fn">sched</span>();
+});</code></pre>
+
+<h4>Tempo ramp</h4>
+
+<pre><code><span class="kw">import</span> clock.*;
+
+<span class="fn">setTempo</span>(<span class="num">120.0</span>);  <span class="cmt">-- start at 120 BPM</span>
+
+<span class="cmt">-- At beat 16, begin ramping to 140 BPM over 8 beats</span>
+<span class="fn">schedTempoChange</span>(<span class="num">16.0</span>, <span class="num">140.0</span>, <span class="num">8.0</span>);
+
+<span class="cmt">-- At beat 32, instantly drop to 90 BPM</span>
+<span class="fn">schedTempoChange</span>(<span class="num">32.0</span>, <span class="num">90.0</span>, <span class="num">0.0</span>);</code></pre>
+
+<h4>Beat-scheduled engine bundle (slot 0)</h4>
+
+<pre><code><span class="kw">import</span> audio_engine.*;
+
+<span class="cmt">-- Set the grid tempo on clock slot 0 (all silos).</span>
+<span class="fn">setTempo</span>(<span class="num">0</span>, <span class="num">120.0</span>);
+
+<span class="cmt">-- Build a note bundle and bind it to beat 8 on slot 0.</span>
+<span class="cmt">-- It fires sample-accurately when the slot reaches beat 8,</span>
+<span class="cmt">-- even if the tempo changes before then.</span>
+<span class="fn">begin</span>(<span class="num">0</span>);
+<span class="fn">noteOn</span>(<span class="num">100</span>, <span class="num">67</span>, [<span class="num">587.33</span>, <span class="num">0.7</span>]);
+<span class="fn">sched</span>(<span class="num">0</span>, <span class="num">8.0</span>);</code></pre>
+
+<h4>Scheduling from within a handler</h4>
+
+<pre><code><span class="kw">import</span> clock.*;
+<span class="kw">import</span> audio_engine.*;
+
+<span class="cmt">-- Schedule two notes a half-beat apart, starting at beat 4</span>
+<span class="fn">at</span>(<span class="num">4.0</span>, <span class="kw">fn</span>() Void {
+    <span class="fn">begin</span>(<span class="num">0</span>);
+    <span class="fn">noteOn</span>(<span class="num">100</span>, <span class="num">60</span>, [<span class="num">440.0</span>, <span class="num">0.8</span>]);
+    <span class="fn">sched</span>();
+
+    <span class="cmt">-- sched() is relative to the current logical beat (4.0)</span>
+    <span class="fn">after</span>(<span class="num">0.5</span>, <span class="kw">fn</span>() Void {
+        <span class="fn">begin</span>(<span class="num">0</span>);
+        <span class="fn">noteOn</span>(<span class="num">100</span>, <span class="num">67</span>, [<span class="num">587.33</span>, <span class="num">0.6</span>]);
+        <span class="fn">sched</span>();
+    });
+});</code></pre>
 
 <!-- ================================================================ -->
 <!--  12. SYNTHDEF COMPILER                                           -->
