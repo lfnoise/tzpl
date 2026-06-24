@@ -978,6 +978,40 @@ static void ffi_scheduleTask(ts::VM& vm, u16 dst, u16, u16 argBase) {
     vm.reg(dst).i = static_cast<i64>(sched->addTask(clock, beat, handler));
 }
 
+// fn playNote(node Int, noteID Int, params [Float]) Int  -- silo-side, immediate
+//
+// Triggers a note on `node` of the CURRENT silo right now (the silo's sample
+// time), straight on the RT thread -- no bundle, no allocation. Meant to be
+// called from a spawned task. (The orchestration-layer noteOn queues a bundle
+// command instead; this is the in-task version.)
+static void ffi_playNote(ts::VM& vm, u16 dst, u16, u16 argBase) {
+    engine::Silo* s = gCurrentSilo;
+    if (!s) { vm.reg(dst).i = (i64)tzpl_errNodeNotFound; return; }
+    i64 nodeID = vm.reg(argBase).i;
+    int noteID = static_cast<int>(vm.reg(argBase + 1).i);
+    ts::Obj* arr = vm.reg(argBase + 2).o;
+    int len = static_cast<int>(ts::arraySize(arr));
+    if (len > 64) len = 64;
+    engine::f32 params[64];
+    for (int i = 0; i < len; ++i) params[i] = (engine::f32)ts::arrayGetFloat(arr, i);
+    engine::Node* node = s->rt_getNode(nodeID);
+    if (!node) { vm.reg(dst).i = (i64)tzpl_errNodeNotFound; return; }
+    node->funs.noteOn(node->synth, s->sampleTime_, noteID, len, params);
+    vm.reg(dst).i = (i64)tzpl_errNone;
+}
+
+// fn releaseNote(node Int, noteID Int) Int  -- silo-side, immediate noteOff
+static void ffi_releaseNote(ts::VM& vm, u16 dst, u16, u16 argBase) {
+    engine::Silo* s = gCurrentSilo;
+    if (!s) { vm.reg(dst).i = (i64)tzpl_errNodeNotFound; return; }
+    i64 nodeID = vm.reg(argBase).i;
+    int noteID = static_cast<int>(vm.reg(argBase + 1).i);
+    engine::Node* node = s->rt_getNode(nodeID);
+    if (!node) { vm.reg(dst).i = (i64)tzpl_errNodeNotFound; return; }
+    node->funs.noteOff(node->synth, s->sampleTime_, noteID);
+    vm.reg(dst).i = (i64)tzpl_errNone;
+}
+
 // ---------------------------------------------------------------------------
 // Registration
 // ---------------------------------------------------------------------------
@@ -1084,6 +1118,8 @@ void registerAudioEngineFFI(ts::Compiler& compiler) {
     reg("siloLoad",         FutureString, {Int, String}, ffi_siloLoad);
     reg("siloStartAt",      Void, {Float, IntArray},      ffi_siloStartAt);
     reg("scheduleTask",     Int,  {Int, FnFloat},         ffi_scheduleTask, true);
+    reg("playNote",         Int,  {Int, Int, FloatArray}, ffi_playNote,     true);
+    reg("releaseNote",      Int,  {Int, Int},             ffi_releaseNote,  true);
 
     // Enum constants (SchedPolicy, FadeCurve, Err, Enable) are defined
     // in the Tzopilotl module: bridge/modules/audio_engine.x
