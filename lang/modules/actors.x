@@ -14,6 +14,17 @@ fn siloSend(silo Int, name Symbol, msg SExpr) Void {
     siloDeliverBytes(silo, name, encode(msg));
 }
 
+-- Run the cross-silo message router on the NRT (main) thread: drain every
+-- silo's outbox and forward each message to its destination silo's actor. Must
+-- run on the main thread (the from_nrt_ producer); blocks, polling. A musical
+-- conductor that also routes silo<->silo traffic runs this.
+fn runActorServer() Void {
+    while (true) {
+        pumpSiloOutboxes();
+        sleepMs(2);
+    }
+}
+
 -- Schedule an SExpr message to the named silo actor for a specific beat:
 -- it lands in the actor's mailbox sample-accurately when TempoClock `clock`
 -- reaches `beat`, using the engine's late-bound beat scheduler. This is how a

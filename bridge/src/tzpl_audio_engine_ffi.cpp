@@ -527,8 +527,20 @@ static void ffi_listSynthDefs(ts::VM& vm, u16 dst, u16, u16) {
 // because silos 1..N run on separate worker threads.
 static thread_local engine::Silo* gCurrentSilo = nullptr;
 
+// A cross-silo actor message sitting in a silo's outbox. A fixed POD (no heap)
+// so it can be pushed by value on the RT thread into the lock-free outbox ring;
+// the main NRT thread pops it and forwards it to the destination silo (or, in a
+// later step, an NRT actor). Messages larger than the buffer are dropped.
+struct OutboxMsg {
+    int           targetSilo = -1;   // destination silo index (-1 = NRT actor)
+    ts::SymbolPtr name = nullptr;    // destination actor name
+    uint32_t      len = 0;
+    uint8_t       buf[256];          // encoded SExpr bytes (capped)
+};
+
 struct SiloTaskScheduler {
     static constexpr int kMaxTasks = 256;
+    static constexpr int kOutboxCap = 256;
     struct Entry {
         int    clock = 0;
         f64    beatTime = 0.;
@@ -542,6 +554,9 @@ struct SiloTaskScheduler {
     ts::Obj* inFlight_ = nullptr;     // handler mid-call (GC root)
     i64    nextId_ = 1;
     ts::VM* vm_ = nullptr;
+    // Outbound actor messages: pushed by this silo's RT thread, drained by the
+    // main NRT thread (single-producer / single-consumer).
+    engine::AtomicFifo<OutboxMsg> outbox_{kOutboxCap};
 
     explicit SiloTaskScheduler(ts::VM* vm) : vm_(vm) {
         for (int i = 0; i < kMaxTasks - 1; ++i) pool_[i].next = &pool_[i + 1];
@@ -1100,6 +1115,63 @@ static void ffi_siloDeliverBytesAt(ts::VM& vm, u16 dst, u16, u16 argBase) {
     returnErr(vm, dst, err, __func__);
 }
 
+// fn _siloOutbox(targetSilo Int, name Symbol, b Bytes) Int  -- SILO RT side.
+// Push an encoded actor message into this silo's outbox for the main NRT thread
+// to forward. RT-safe: a by-value push into a pre-allocated lock-free ring; an
+// over-capacity message or a full outbox is dropped.
+static void ffi_siloOutbox(ts::VM& vm, u16 dst, u16, u16 argBase) {
+    engine::Silo* s = gCurrentSilo;
+    int target = static_cast<int>(vm.reg(argBase).i);
+    ts::SymbolPtr name = vm.reg(argBase + 1).s;
+    auto* bytes = static_cast<ts::BytesObj*>(vm.reg(argBase + 2).o);
+    if (!s || !s->taskSched_ || !bytes) { vm.reg(dst).i = (i64)tzpl_errInternal; return; }
+    auto* sched = static_cast<SiloTaskScheduler*>(s->taskSched_);
+    OutboxMsg m;
+    if (bytes->data.size() > sizeof(m.buf)) { vm.reg(dst).i = (i64)tzpl_errInternal; return; }
+    m.targetSilo = target;
+    m.name = name;
+    m.len = static_cast<uint32_t>(bytes->data.size());
+    std::memcpy(m.buf, bytes->data.data(), m.len);
+    sched->outbox_.push(m);
+    vm.reg(dst).i = (i64)tzpl_errNone;
+}
+
+// fn _pumpSiloOutboxes() Int  -- main NRT thread: drain every silo's outbox and
+// forward each message to its destination silo's actor (the same beat-unaware
+// path NRT->silo uses; the target silo decodes via its trampoline). Returns the
+// number forwarded. (silo->NRT, target < 0, is a later step.)
+static void ffi_pumpSiloOutboxes(ts::VM& vm, u16 dst, u16, u16) {
+    auto* ctx = getAppContext(vm);
+    auto* eng = ctx ? ctx->engine : nullptr;
+    int forwarded = 0;
+    if (ctx && eng) {
+        for (auto& state : ctx->siloVMs) {
+            if (!state.taskSched) continue;
+            auto* sched = static_cast<SiloTaskScheduler*>(state.taskSched);
+            OutboxMsg m;
+            while (sched->outbox_.pop(m)) {
+                if (m.targetSilo < 0 || m.targetSilo >= (int)ctx->siloVMs.size()) continue;
+                auto& tstate = ctx->siloVMs[(size_t)m.targetSilo];
+                if (!tstate.vm || tstate.deliverGlobalIndex < 0) continue;
+                auto* deliverFn = static_cast<ts::CodeBlock*>(
+                    tstate.vm->global((u32)tstate.deliverGlobalIndex).p);
+                auto* cmd = new DeliverActorMsgCmd(deliverFn, m.name, m.buf, m.len);
+                sendCmdListToSilo(eng, m.targetSilo, cmd);
+                ++forwarded;
+            }
+        }
+    }
+    vm.makeCurrent();
+    vm.reg(dst).i = forwarded;
+}
+
+// fn _sleepMs(ms Int) Void -- NRT only; used by the actor-server poll loop.
+static void ffi_sleepMs(ts::VM& vm, u16 dst, u16, u16 argBase) {
+    int ms = static_cast<int>(vm.reg(argBase).i);
+    if (ms > 0) usleep(static_cast<useconds_t>(ms) * 1000);
+    vm.reg(dst).i = 0;
+}
+
 void registerAudioEngineFFI(ts::Compiler& compiler) {
     auto* Void   = compiler.voidType();
     auto* Int    = compiler.intType();
@@ -1205,6 +1277,9 @@ void registerAudioEngineFFI(ts::Compiler& compiler) {
     reg("siloStartAt",      Void, {Float, IntArray},      ffi_siloStartAt);
     reg("siloDeliverBytes",   Int, {Int, Symbol, Bytes},              ffi_siloDeliverBytes);
     reg("siloDeliverBytesAt", Int, {Int, Int, Float, Symbol, Bytes},  ffi_siloDeliverBytesAt);
+    reg("siloOutbox",         Int,  {Int, Symbol, Bytes},             ffi_siloOutbox, true);
+    reg("pumpSiloOutboxes",   Int,  {},                               ffi_pumpSiloOutboxes);
+    reg("sleepMs",            Void, {Int},                            ffi_sleepMs);
     reg("readFile",         String, {String},             ffi_readFile);
     reg("scheduleTask",     Int,  {Int, FnFloat},         ffi_scheduleTask, true);
     reg("playNote",         Int,  {Int, Int, FloatArray}, ffi_playNote,     true);
