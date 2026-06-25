@@ -1136,33 +1136,77 @@ static void ffi_siloOutbox(ts::VM& vm, u16 dst, u16, u16 argBase) {
     vm.reg(dst).i = (i64)tzpl_errNone;
 }
 
-// fn _pumpSiloOutboxes() Int  -- main NRT thread: drain every silo's outbox and
-// forward each message to its destination silo's actor (the same beat-unaware
-// path NRT->silo uses; the target silo decodes via its trampoline). Returns the
-// number forwarded. (silo->NRT, target < 0, is a later step.)
+// fn _pumpSiloOutboxes() Int  -- main NRT thread: drain every silo's outbox.
+// A message bound for another silo (targetSilo >= 0) is forwarded to that silo's
+// actor via the same beat-unaware path NRT->silo uses (the target silo decodes
+// via its trampoline). A message bound for an NRT actor (targetSilo < 0) is
+// stashed in ctx->nrtActorInbox for the lang actor server to decode + sendByName
+// (decode must run as lang on this VM, which we cannot do here without clobbering
+// the running frame). Returns the number routed (forwarded + stashed).
 static void ffi_pumpSiloOutboxes(ts::VM& vm, u16 dst, u16, u16) {
     auto* ctx = getAppContext(vm);
     auto* eng = ctx ? ctx->engine : nullptr;
-    int forwarded = 0;
+    int routed = 0;
     if (ctx && eng) {
         for (auto& state : ctx->siloVMs) {
             if (!state.taskSched) continue;
             auto* sched = static_cast<SiloTaskScheduler*>(state.taskSched);
             OutboxMsg m;
             while (sched->outbox_.pop(m)) {
-                if (m.targetSilo < 0 || m.targetSilo >= (int)ctx->siloVMs.size()) continue;
+                if (m.targetSilo < 0) {
+                    // Bound for an NRT actor: hand off to the lang server.
+                    AppContext::NrtActorMsg nm;
+                    nm.name = m.name;
+                    nm.bytes.assign(m.buf, m.buf + m.len);
+                    ctx->nrtActorInbox.push_back(std::move(nm));
+                    ++routed;
+                    continue;
+                }
+                if (m.targetSilo >= (int)ctx->siloVMs.size()) continue;
                 auto& tstate = ctx->siloVMs[(size_t)m.targetSilo];
                 if (!tstate.vm || tstate.deliverGlobalIndex < 0) continue;
                 auto* deliverFn = static_cast<ts::CodeBlock*>(
                     tstate.vm->global((u32)tstate.deliverGlobalIndex).p);
                 auto* cmd = new DeliverActorMsgCmd(deliverFn, m.name, m.buf, m.len);
                 sendCmdListToSilo(eng, m.targetSilo, cmd);
-                ++forwarded;
+                ++routed;
             }
         }
     }
     vm.makeCurrent();
-    vm.reg(dst).i = forwarded;
+    vm.reg(dst).i = routed;
+}
+
+// fn _nrtActorMsgCount() Int -- number of silo->NRT messages waiting in the
+// inbox (stashed by pumpSiloOutboxes). Main thread only.
+static void ffi_nrtActorMsgCount(ts::VM& vm, u16 dst, u16, u16) {
+    auto* ctx = getAppContext(vm);
+    vm.reg(dst).i = ctx ? (i64)ctx->nrtActorInbox.size() : 0;
+}
+
+// fn _nrtActorMsgName() Symbol -- the destination actor name of the head
+// silo->NRT message (peek, does not pop). Empty symbol if none.
+static void ffi_nrtActorMsgName(ts::VM& vm, u16 dst, u16, u16) {
+    auto* ctx = getAppContext(vm);
+    ts::SymbolPtr name = (ctx && !ctx->nrtActorInbox.empty())
+                             ? ctx->nrtActorInbox.front().name
+                             : ts::intern("");
+    vm.reg(dst).s = name;
+}
+
+// fn _nrtActorMsgTake() Bytes -- the encoded SExpr of the head silo->NRT message,
+// popping it. The lang server decodes this and sendByName's it to the actor named
+// by _nrtActorMsgName(). Empty Bytes if none.
+static void ffi_nrtActorMsgTake(ts::VM& vm, u16 dst, u16, u16) {
+    auto* ctx = getAppContext(vm);
+    if (ctx && !ctx->nrtActorInbox.empty()) {
+        auto& front = ctx->nrtActorInbox.front();
+        auto* b = new ts::BytesObj(front.bytes.data(), front.bytes.size());
+        ctx->nrtActorInbox.pop_front();
+        vm.reg(dst).o = b;
+    } else {
+        vm.reg(dst).o = new ts::BytesObj(nullptr, 0);
+    }
 }
 
 // fn _sleepMs(ms Int) Void -- NRT only; used by the actor-server poll loop.
@@ -1279,6 +1323,9 @@ void registerAudioEngineFFI(ts::Compiler& compiler) {
     reg("siloDeliverBytesAt", Int, {Int, Int, Float, Symbol, Bytes},  ffi_siloDeliverBytesAt);
     reg("siloOutbox",         Int,  {Int, Symbol, Bytes},             ffi_siloOutbox, true);
     reg("pumpSiloOutboxes",   Int,  {},                               ffi_pumpSiloOutboxes);
+    reg("nrtActorMsgCount",   Int,    {},                             ffi_nrtActorMsgCount);
+    reg("nrtActorMsgName",    Symbol, {},                             ffi_nrtActorMsgName);
+    reg("nrtActorMsgTake",    Bytes,  {},                             ffi_nrtActorMsgTake);
     reg("sleepMs",            Void, {Int},                            ffi_sleepMs);
     reg("readFile",         String, {String},             ffi_readFile);
     reg("scheduleTask",     Int,  {Int, FnFloat},         ffi_scheduleTask, true);

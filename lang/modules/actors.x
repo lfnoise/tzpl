@@ -14,13 +14,23 @@ fn siloSend(silo Int, name Symbol, msg SExpr) Void {
     siloDeliverBytes(silo, name, encode(msg));
 }
 
--- Run the cross-silo message router on the NRT (main) thread: drain every
--- silo's outbox and forward each message to its destination silo's actor. Must
--- run on the main thread (the from_nrt_ producer); blocks, polling. A musical
--- conductor that also routes silo<->silo traffic runs this.
+-- Run the actor router on the NRT (main) thread. Each poll it: (1) drains every
+-- silo's outbox -- forwarding silo->silo traffic to the destination silo and
+-- stashing silo->NRT traffic locally; (2) decodes each silo->NRT message and
+-- delivers it to the named NRT actor; (3) drives the NRT actors that just got
+-- mail. Must run on the main thread (the from_nrt_ producer); blocks, polling.
+-- A musical conductor that also routes actor traffic runs this.
 fn runActorServer() Void {
     while (true) {
         pumpSiloOutboxes();
+        var k = nrtActorMsgCount();
+        while (k > 0) {
+            let nm = nrtActorMsgName();   -- destination NRT actor (peek)
+            let b  = nrtActorMsgTake();   -- encoded SExpr (pops)
+            sendByName(nm, decode(b));
+            k = k - 1;
+        }
+        runActors();                       -- drive NRT actors that received mail
         sleepMs(2);
     }
 }

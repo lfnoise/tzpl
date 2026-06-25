@@ -25,6 +25,8 @@
 #ifndef tzpl_app_context_hpp
 #define tzpl_app_context_hpp
 
+#include <cstdint>
+#include <deque>
 #include <functional>
 #include <memory>
 #include <string>
@@ -39,6 +41,8 @@ namespace ts {
     class Compiler;
     class ModuleCompiler;
     class NRTTempoScheduler;
+    class Symbol;
+    using SymbolPtr = const Symbol*;
 }
 
 namespace osc {
@@ -85,6 +89,18 @@ struct AppContext {
     nats::NatsDispatcher* natsDispatcher = nullptr;
     std::string engineName;  // empty = single-instance mode
     std::vector<SiloVMState> siloVMs;  // indexed by silo number
+
+    // Silo->NRT actor messages: a silo actor targeting an NRT actor (outbox
+    // targetSilo < 0) has its encoded SExpr stashed here by pumpSiloOutboxes on
+    // the main thread. The lang actor server drains it (nrtActorMsgCount /
+    // nrtActorMsgName / nrtActorMsgTake) and does decode + sendByName itself --
+    // decode/sendByName must run as lang on the main VM, which the C++ pump
+    // cannot do without clobbering the running frame. Main-thread only (no lock).
+    struct NrtActorMsg {
+        ts::SymbolPtr            name = nullptr;
+        std::vector<std::uint8_t> bytes;
+    };
+    std::deque<NrtActorMsg> nrtActorInbox;
 
     // Optional initializer invoked on every freshly created Engine. The app
     // sets this to register built-in node defs (sinosc etc.) and to load any
