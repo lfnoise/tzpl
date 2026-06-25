@@ -1,0 +1,1169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tzopilotl Music Cookbook</title>
+<style>
+  :root {
+    --bg: #1a1b26;
+    --fg: #c9d1d9;
+    --accent: #58a6ff;
+    --accent-dim: #3d6ea8;
+    --code-bg: #21222c;
+    --code-border: #30363d;
+    --warn-bg: #2d2308;
+    --warn-border: #f59e0b;
+    --note-bg: #0d2137;
+    --note-border: #3b82f6;
+    --table-stripe: #1f2028;
+    --sidebar-bg: #16171f;
+    --sidebar-border: #2a2d3a;
+    --heading-fg: #e6edf3;
+    --muted-fg: #8b949e;
+    --h4-fg: #a0aec0;
+    --tip-bg: #0d2818;
+    --tip-border: #22c55e;
+    --diagram-bg: #21222c;
+    --syn-kw: #c678dd;
+    --syn-typ: #56d4e0;
+    --syn-str: #4ec970;
+    --syn-cmt: #6a737d;
+    --syn-num: #e5a537;
+    --syn-fn: #58a6ff;
+  }
+
+  html.light {
+    --bg: #fdfdfd;
+    --fg: #1a1a1a;
+    --accent: #2563eb;
+    --accent-dim: #93b4f5;
+    --code-bg: #f3f4f6;
+    --code-border: #dde1e6;
+    --warn-bg: #fef3c7;
+    --warn-border: #f59e0b;
+    --note-bg: #dbeafe;
+    --note-border: #3b82f6;
+    --table-stripe: #f8f9fa;
+    --sidebar-bg: #f8f9fb;
+    --sidebar-border: #e2e5ea;
+    --heading-fg: #0f172a;
+    --muted-fg: #64748b;
+    --h4-fg: #475569;
+    --tip-bg: #dcfce7;
+    --tip-border: #22c55e;
+    --diagram-bg: #fff;
+    --syn-kw: #8b5cf6;
+    --syn-typ: #0891b2;
+    --syn-str: #16a34a;
+    --syn-cmt: #94a3b8;
+    --syn-num: #d97706;
+    --syn-fn: #2563eb;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    font-size: 16px;
+    line-height: 1.7;
+    color: var(--fg);
+    background: var(--bg);
+    display: flex;
+    min-height: 100vh;
+  }
+
+  /* --- Sidebar / Table of Contents --- */
+
+  nav.sidebar {
+    position: sticky;
+    top: 0;
+    align-self: flex-start;
+    width: 280px;
+    min-width: 280px;
+    height: 100vh;
+    overflow-y: auto;
+    padding: 2rem 1.25rem;
+    background: var(--sidebar-bg);
+    border-right: 1px solid var(--sidebar-border);
+    font-size: 0.875rem;
+  }
+
+  nav.sidebar h2 {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--muted-fg);
+    margin-bottom: 1rem;
+  }
+
+  nav.sidebar ol {
+    list-style: none;
+    counter-reset: toc;
+  }
+
+  nav.sidebar > ol > li {
+    counter-increment: toc;
+    margin-bottom: 0.4rem;
+  }
+
+  nav.sidebar > ol > li > a::before {
+    content: counter(toc) ". ";
+    color: var(--accent-dim);
+    font-weight: 600;
+  }
+
+  nav.sidebar a {
+    color: var(--fg);
+    text-decoration: none;
+    display: block;
+    padding: 0.15rem 0;
+  }
+
+  nav.sidebar a:hover { color: var(--accent); }
+
+  nav.sidebar ol ol {
+    margin-left: 1rem;
+    margin-top: 0.2rem;
+    font-size: 0.82rem;
+  }
+
+  nav.sidebar ol ol li { margin-bottom: 0.2rem; }
+
+  /* --- Main Content --- */
+
+  main {
+    flex: 1;
+    max-width: 52rem;
+    margin: 0 auto;
+    padding: 3rem 2.5rem 6rem;
+  }
+
+  h1 {
+    font-size: 2.2rem;
+    font-weight: 700;
+    color: var(--heading-fg);
+    margin-bottom: 0.4rem;
+    line-height: 1.2;
+  }
+
+  h1 + .subtitle {
+    font-size: 1.1rem;
+    color: var(--muted-fg);
+    margin-bottom: 2.5rem;
+  }
+
+  h2 {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--heading-fg);
+    margin-top: 3.5rem;
+    margin-bottom: 1rem;
+    padding-bottom: 0.35rem;
+    border-bottom: 2px solid var(--accent);
+  }
+
+  h3 {
+    font-size: 1.15rem;
+    font-weight: 600;
+    color: var(--heading-fg);
+    margin-top: 2.2rem;
+    margin-bottom: 0.6rem;
+  }
+
+  h4 {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--h4-fg);
+    margin-top: 1.6rem;
+    margin-bottom: 0.4rem;
+  }
+
+  p { margin-bottom: 1rem; }
+
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  /* Code */
+
+  code {
+    font-family: 'SF Mono', 'Fira Code', 'JetBrains Mono', Menlo, Consolas, monospace;
+    font-size: 0.88em;
+    background: var(--code-bg);
+    border: 1px solid var(--code-border);
+    border-radius: 4px;
+    padding: 0.15em 0.4em;
+  }
+
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--code-border);
+    border-radius: 6px;
+    padding: 1.1rem 1.3rem;
+    overflow-x: auto;
+    margin-bottom: 1.2rem;
+    line-height: 1.55;
+  }
+
+  pre code {
+    background: none;
+    border: none;
+    padding: 0;
+    font-size: 0.86rem;
+  }
+
+  /* Keyword colouring (manual spans) */
+  .kw  { color: var(--syn-kw); font-weight: 600; }
+  .typ { color: var(--syn-typ); }
+  .str { color: var(--syn-str); }
+  .cmt { color: var(--syn-cmt); font-style: italic; }
+  .num { color: var(--syn-num); }
+  .fn  { color: var(--syn-fn); }
+
+  /* Tables */
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 1.4rem;
+    font-size: 0.92rem;
+  }
+
+  th, td {
+    text-align: left;
+    padding: 0.55rem 0.9rem;
+    border: 1px solid var(--code-border);
+  }
+
+  th {
+    background: var(--code-bg);
+    font-weight: 600;
+    color: var(--heading-fg);
+  }
+
+  tr:nth-child(even) { background: var(--table-stripe); }
+
+  /* Callout boxes */
+
+  .note, .warning, .tip {
+    border-left: 4px solid;
+    border-radius: 4px;
+    padding: 0.9rem 1.1rem;
+    margin-bottom: 1.2rem;
+    font-size: 0.94rem;
+  }
+
+  .note    { background: var(--note-bg); border-color: var(--note-border); }
+  .warning { background: var(--warn-bg); border-color: var(--warn-border); }
+  .tip     { background: var(--tip-bg); border-color: var(--tip-border); }
+
+  .note strong, .warning strong, .tip strong {
+    display: block;
+    margin-bottom: 0.25rem;
+  }
+
+  /* Lists */
+
+  ul, ol { margin-left: 1.6rem; margin-bottom: 1rem; }
+  li { margin-bottom: 0.3rem; }
+
+  /* Diagram */
+  .diagram {
+    background: var(--diagram-bg);
+    border: 1px solid var(--code-border);
+    border-radius: 6px;
+    padding: 1.5rem;
+    margin-bottom: 1.4rem;
+    overflow-x: auto;
+    text-align: center;
+  }
+
+  .diagram pre {
+    display: inline-block;
+    text-align: left;
+    background: none;
+    border: none;
+    padding: 0;
+    margin: 0;
+    font-size: 0.82rem;
+    line-height: 1.5;
+  }
+
+  /* Theme toggle */
+  .theme-toggle {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 1.5rem;
+    padding: 0.4rem 0.75rem;
+    background: var(--code-bg);
+    border: 1px solid var(--code-border);
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 1.1rem;
+    color: var(--fg);
+    transition: background 0.2s;
+    width: 100%;
+    justify-content: center;
+  }
+  .theme-toggle:hover { background: var(--table-stripe); }
+
+  body, nav.sidebar, pre, code, .note, .warning, .tip, .diagram, th, td {
+    transition: background-color 0.3s, color 0.3s, border-color 0.3s;
+  }
+
+  /* Responsive */
+  @media (max-width: 900px) {
+    nav.sidebar { display: none; }
+    main { padding: 2rem 1.2rem 4rem; }
+  }
+</style>
+<script>
+if (localStorage.getItem('tzpl-docs-theme') === 'light') document.documentElement.classList.add('light');
+</script>
+</head>
+<body>
+
+<!-- ================================================================ -->
+<!--  SIDEBAR                                                         -->
+<!-- ================================================================ -->
+
+<nav class="sidebar">
+  <button class="theme-toggle" id="theme-toggle" aria-label="Toggle theme">
+    <span id="theme-icon">&#9790;</span>
+  </button>
+  <h2>Contents</h2>
+  <ol>
+    <li><a href="#orientation">Orientation</a>
+      <ol>
+        <li><a href="#layers">The four layers</a></li>
+        <li><a href="#places">Three places code runs</a></li>
+        <li><a href="#running">Running the examples</a></li>
+      </ol>
+    </li>
+    <li><a href="#synthdef">Writing a SynthDef</a>
+      <ol>
+        <li><a href="#synthdef-concepts">Signal graphs</a></li>
+        <li><a href="#synthdef-stateless">A stateless synth</a></li>
+        <li><a href="#synthdef-voice">A polyphonic voice</a></li>
+      </ol>
+    </li>
+    <li><a href="#nodegraph">Engine &amp; node graph</a>
+      <ol>
+        <li><a href="#engine-lifecycle">Engine lifecycle</a></li>
+        <li><a href="#bundles">Command bundles</a></li>
+        <li><a href="#nodegraph-cook">Build a graph</a></li>
+      </ol>
+    </li>
+    <li><a href="#notes">Playing notes</a></li>
+    <li><a href="#silos">Loading scripts into silos</a></li>
+    <li><a href="#scheduling">Scheduling on the beat</a></li>
+    <li><a href="#generative">Generative sequences</a></li>
+    <li><a href="#actors">Actors &amp; messaging</a>
+      <ol>
+        <li><a href="#actors-basics">Actor basics</a></li>
+        <li><a href="#actors-messages">SExpr messages</a></li>
+        <li><a href="#actors-silo">Commanding silo actors</a></li>
+        <li><a href="#actors-routing">Silo&#8596;silo, silo&#8596;NRT</a></li>
+        <li><a href="#actors-nats">Across processes (NATS)</a></li>
+      </ol>
+    </li>
+    <li><a href="#render">Offline rendering</a></li>
+    <li><a href="#ensemble">Putting it together</a></li>
+    <li><a href="#appendix">Appendix</a>
+      <ol>
+        <li><a href="#quickref">Function quick reference</a></li>
+        <li><a href="#more">Where to read more</a></li>
+      </ol>
+    </li>
+  </ol>
+</nav>
+
+<main>
+
+<h1>Tzopilotl Music Cookbook</h1>
+<p class="subtitle">Task-oriented recipes for making sound and music with the Tzopilotl audio platform &mdash; synthdefs, node graphs, silos, scheduling, generative sequences, and actors.</p>
+
+<p>This is a <em>cookbook</em>: each section states the concepts, points at the
+functions you will call (and where to read more), gives working code, and then
+explains how that code works. Every runnable example here was executed against
+the build in this repository. For language syntax see
+<a href="Tzopilotl_by_Example.html">Tzopilotl By Example</a>; for the embedding
+and FFI details see the <a href="FFI_Guide.html">FFI Guide</a>; for the full list
+of built-ins see <a href="Builtin_Functions.html">Builtin Functions</a>.</p>
+
+<!-- ================================================================ -->
+<h2 id="orientation">1. Orientation</h2>
+
+<h3 id="layers">1.1 The four layers</h3>
+<p>The platform is four cooperating pieces, all reachable from Tzopilotl code:</p>
+<ul>
+  <li><strong>The language VM</strong> (<code>lang/</code>) &mdash; a statically
+  typed, real-time-safe interpreter. This is what runs your <code>.x</code> file.</li>
+  <li><strong>The synthdef compiler</strong> &mdash; turns a signal-flow graph you
+  write in Tzopilotl into an optimized native <code>.dylib</code> plugin.</li>
+  <li><strong>The audio engine</strong> (<code>engine/</code>) &mdash; loads those
+  plugins as <em>node defs</em>, builds a live audio graph of <em>nodes</em>, and
+  processes audio sample-accurately. It is organized into <strong>silos</strong>
+  (independent real-time processing units).</li>
+  <li><strong>The bridges</strong> (<code>bridge/</code>) &mdash; FFI modules that
+  expose the engine, the compiler, the clock, OSC and NATS to Tzopilotl. You reach
+  them with <code>import audio_engine.*;</code>, <code>import synthdef.*;</code>,
+  <code>import clock.*;</code> and friends.</li>
+</ul>
+
+<div class="diagram"><pre>
+  your .x file ── lang VM ──┬── synthdef compiler ──&gt; .dylib plugin ─┐
+                            │                                         v
+                            └── audio_engine FFI ──&gt; engine: nodes, graph, silos
+                                                          │
+                                                          v
+                                                    audio output
+</pre></div>
+
+<h3 id="places">1.2 Three places code runs</h3>
+<p>A recurring idea in this cookbook is <em>where</em> a piece of code runs. There
+are three locations, and the same actor/message APIs work across all of them:</p>
+<ul>
+  <li><strong>NRT</strong> &mdash; the main VM, on the orchestration thread. This is
+  where your script starts, where you build the graph, and where a "conductor"
+  lives. "NRT" means non-real-time: it may allocate and block.</li>
+  <li><strong>Silos</strong> &mdash; each silo has its own VM on a real-time audio
+  thread, driven sample-by-sample. Silo code is <em>rt-restricted</em>: it must not
+  allocate from the system heap or block. This is the natural home for musical
+  scheduling, because a silo actor can wake exactly on the beat.</li>
+  <li><strong>Other processes</strong> &mdash; a separate Tzopilotl process,
+  reached over NATS. Messages are the same <code>SExpr</code> values, serialized.</li>
+</ul>
+
+<h3 id="running">1.3 Running the examples</h3>
+<p>Pure-language examples (no audio) run with the bare interpreter:</p>
+<pre><code>./build/lang/tzpl -I lang/modules myscript.x</code></pre>
+<p>Anything that touches the engine, silos, the clock, or rendering needs the full
+application, which wires up all the bridges. Add both module search paths:</p>
+<pre><code><span class="cmt">-- run and exit when the script returns</span>
+./build/app/tzpl_app --nogui -I lang/modules -I bridge/modules myscript.x
+
+<span class="cmt">-- keep running (live audio) until Ctrl-C</span>
+./build/app/tzpl_app --nogui --wait -I lang/modules -I bridge/modules myscript.x</code></pre>
+<div class="note"><strong>Module imports</strong>
+The recipes below begin with the <code>import</code> lines they need. The common
+ones are <code>audio_engine</code> (engine control), <code>synthdef</code> +
+<code>synthc.compile</code> + <code>common_ugens</code> (writing synths),
+<code>clock</code> (tempo scheduling), <code>futures</code> (async helpers),
+<code>actors</code> + <code>sexprs</code> + <code>message</code> (actors and
+messages).</div>
+
+<!-- ================================================================ -->
+<h2 id="synthdef">2. Writing a SynthDef</h2>
+
+<h3 id="synthdef-concepts">2.1 Signal graphs, the <code>S</code> type, and <code>outlet</code></h3>
+<p>A synthdef is a function that builds a <strong>signal-flow graph</strong> and
+returns it. Every audio expression has type <code>S</code> (an alias for
+<code>SignalExpr</code>). You compose unit generators (UGens) with ordinary
+operators and the pipe operator <code>|&gt;</code>, and you mark the graph's
+output with <code>outlet</code>. The graph is then handed to <code>defSynthX</code>,
+which compiles it to a native plugin and registers it with the engine under a
+name you choose.</p>
+<p>Numbers auto-lift to constant signals, arrays of signals become multichannel
+(stereo is just <code>[left, right]</code>), and functions <em>auto-map</em> over
+channels &mdash; so <code>[440.0, 441.0] sinosc</code> is a two-channel detuned
+pair. The UGen library lives in <code>lang/modules/common_ugens.x</code>
+(oscillators, noise, envelopes) and <code>lang/modules/filters.x</code> (filters);
+the compiler internals are described in
+<code>synthdef-compiler/ARCHITECTURE.md</code>.</p>
+<div class="note"><strong>Two compile paths</strong>
+<code>defSynthX</code> is the production compiler (the Tzopilotl-hosted
+<code>synthc</code>). An older <code>defSynth</code> calls the legacy C++ compiler
+and exists mainly as a differential oracle. Prefer <code>defSynthX</code>. Both
+need a working <code>clang</code> toolchain on <code>PATH</code> &mdash; they emit
+C++, compile it to a <code>.dylib</code>, and <code>dlopen</code> it.</div>
+
+<h3 id="synthdef-stateless">2.2 A stateless synth</h3>
+<p>The simplest synth runs continuously with no note state. Here is a burbling
+sine, compiled and registered as <code>"bubbles"</code>:</p>
+<pre><code><span class="kw">import</span> synthdef.*;
+<span class="kw">import</span> synthc.compile.*;   <span class="cmt">-- defSynthX</span>
+<span class="kw">import</span> common_ugens.*;
+
+<span class="cmt">-- An LFO-driven sine through a comb filter. `nnhz` converts a MIDI-style</span>
+<span class="cmt">-- note number to Hz; `|&gt;` pipes the left value in as the last argument.</span>
+<span class="kw">fn</span> <span class="fn">bubbles</span>() <span class="typ">S</span> =
+    <span class="num">0.4</span> lfsaw * <span class="num">24</span>
+    + [<span class="num">8</span>, <span class="num">7.23</span>] lfsaw * <span class="num">3</span>
+    + <span class="num">81</span>
+    |&gt; nnhz sinosc * <span class="num">0.04</span>
+    |&gt; combn(<span class="num">0.2</span>, <span class="num">4</span>) outlet;
+
+bubbles <span class="fn">defSynthX</span>(<span class="str">"bubbles"</span>);
+<span class="str">"defs: "</span> print; <span class="fn">listSynthDefs</span>() println;</code></pre>
+<p>Running this under <code>tzpl_app --nogui</code> prints the compile/link commands
+and then:</p>
+<pre><code>bubbles compiled successfully (synthc).
+defs: [+, voicer, Audio In, bubbles, Audio Out, *, sinosc]</code></pre>
+<p><strong>How it works.</strong> <code>defSynthX</code> walks the returned
+<code>S</code> graph, generates SIMD C++ for it, compiles and links a
+<code>.dylib</code>, and registers it as a node def named <code>"bubbles"</code>.
+<code>listSynthDefs()</code> now shows it alongside the engine's built-in defs
+(<code>voicer</code>, <code>sinosc</code>, <code>+</code>, <code>*</code>, and the
+hardware endpoints <code>Audio In</code>/<code>Audio Out</code>). The synth is now
+ready to instantiate as a node (next section).</p>
+
+<h3 id="synthdef-voice">2.3 A polyphonic voice</h3>
+<p>For a playable instrument you wrap a single <em>voice</em> in
+<code>voicer(maxVoices, voiceFn)</code> and sum the voices. A voice reads its
+per-note inputs with <code>noteParam(name, spec)</code> and its note on/off
+trigger with <code>gate()</code> (gate is voice input 0, injected automatically).</p>
+<pre><code><span class="kw">import</span> synthdef.*;
+<span class="kw">import</span> synthc.compile.*;
+<span class="kw">import</span> common_ugens.*;
+<span class="kw">import</span> audio_engine.*;
+
+<span class="cmt">-- One voice: pitch + amp note params, an ADSR envelope driven by the gate.</span>
+<span class="kw">fn</span> <span class="fn">sineVoice</span>() <span class="typ">S</span> {
+    <span class="kw">let</span> pch = <span class="fn">noteParam</span>(<span class="str">"pitch"</span>, ControlSpec { lo: <span class="num">0.0</span>, hi: <span class="num">127.0</span>, init: <span class="num">60.0</span>, warp: ControlWarp.linear });
+    <span class="kw">let</span> amp = <span class="fn">noteParam</span>(<span class="str">"amp"</span>,   ControlSpec { lo: <span class="num">0.0</span>, hi: <span class="num">1.0</span>,   init: <span class="num">0.5</span>,  warp: ControlWarp.linear });
+    <span class="kw">let</span> env = <span class="fn">gate</span>() adsr(<span class="num">0.01</span>, <span class="num">0.1</span>, <span class="num">0.7</span>, <span class="num">0.3</span>);
+    pch nnhz sinosc * env * amp
+}
+
+<span class="cmt">-- 16-voice polyphonic synth; `sum` mixes the voices, `outlet` is the sink.</span>
+<span class="kw">fn</span> <span class="fn">sineSynth</span>() <span class="typ">S</span> = <span class="fn">voicer</span>(<span class="num">16</span>, sineVoice) sum outlet;
+
+sineSynth <span class="fn">defSynthX</span>(<span class="str">"sine_voice"</span>);</code></pre>
+<p><strong>How it works.</strong> <code>voicer(16, sineVoice)</code> instantiates the
+voice graph 16 times with independent note state; <code>sum</code> reduces them to
+one stereo signal. <code>noteParam</code> values arrive in the order they are
+declared (here index 1 = pitch, index 2 = amp; index 0 is always the gate), which
+is the layout you pass to <code>noteOn</code> when you play the synth in
+<a href="#notes">section&nbsp;4</a>. The <code>adsr</code> envelope opens when the
+gate goes high (note on) and releases when it goes low (note off).</p>
+<div class="warning"><strong>Compiler note</strong>
+A few envelope UGens (notably <code>fadein</code> and <code>asr</code>) currently
+trip a SIMD type-mismatch in <code>synthc</code> codegen and fail to compile;
+<code>adsr</code>, <code>decay</code>, and <code>lag</code> work. If a voice fails
+to build, simplify the envelope. The <em>built-in</em> <code>"voicer"</code> node
+def (used throughout the silo recipes below) needs no compilation at all.</div>
+
+<!-- ================================================================ -->
+<h2 id="nodegraph">3. Starting the engine &amp; building a node graph</h2>
+
+<h3 id="engine-lifecycle">3.1 Engine lifecycle</h3>
+<p>The engine is started once and produces sound until stopped. The core controls
+(all in <code>audio_engine</code>) are:</p>
+<table>
+  <tr><th>Function</th><th>Meaning</th></tr>
+  <tr><td><code>engineStart()</code></td><td>Open the audio device and begin processing.</td></tr>
+  <tr><td><code>engineStop()</code></td><td>Stop processing and close the device.</td></tr>
+  <tr><td><code>masterGain(g <span class="typ">Float</span>)</code></td><td>Set the master output gain.</td></tr>
+  <tr><td><code>isAudioRunning() <span class="typ">Bool</span></code></td><td>Is the audio callback running?</td></tr>
+  <tr><td><code>safetyLimiter(on <span class="typ">Bool</span>)</code></td><td>Toggle the output safety limiter.</td></tr>
+</table>
+
+<h3 id="bundles">3.2 Command bundles</h3>
+<p>Every change to the graph &mdash; creating nodes, connecting them, setting
+inputs &mdash; is a <strong>command</strong>. Commands are gathered into an
+<em>atomic bundle</em> with <code>begin(silo)</code> and dispatched with one of:</p>
+<ul>
+  <li><code>go()</code> or <code>sched()</code> &mdash; apply the bundle <em>now</em>.</li>
+  <li><code>sched(clock <span class="typ">Int</span>, beat <span class="typ">Float</span>)</code>
+  &mdash; apply it sample-accurately when tempo <code>clock</code> reaches
+  <code>beat</code>.</li>
+</ul>
+<p>Bundling means a whole patch change lands on the audio thread together, between
+two samples &mdash; never half-applied. <code>begin</code> takes the silo index the
+bundle targets (silo 0 is the audio-callback thread; see
+<a href="#silos">section&nbsp;5</a>).</p>
+
+<h3 id="nodegraph-cook">3.3 Recipe: instantiate a synth and hear it</h3>
+<p>Nodes are created with <code>newNode(defName, nodeId)</code> and wired with
+<code>connect(srcNode, srcPort, dstNode, dstPort)</code>. Two node ids are
+predefined: <strong>node&nbsp;0 is the audio output</strong> and node&nbsp;1 is the
+audio input. Connecting your node's output port 0 to node 0's input port 0 routes
+it to the speakers.</p>
+<pre><code><span class="kw">import</span> audio_engine.*;
+
+<span class="fn">engineStart</span>();
+<span class="fn">masterGain</span>(<span class="num">0.2</span>);
+
+<span class="fn">begin</span>(<span class="num">0</span>);                  <span class="cmt">-- open a bundle on silo 0</span>
+<span class="fn">newNode</span>(<span class="str">"bubbles"</span>, <span class="num">101</span>);   <span class="cmt">-- instantiate the synth from section 2 as node 101</span>
+<span class="fn">connect</span>(<span class="num">101</span>, <span class="num">0</span>, <span class="num">0</span>, <span class="num">0</span>);    <span class="cmt">-- node 101 out 0  ->  output (node 0) in 0</span>
+<span class="fn">sched</span>();                   <span class="cmt">-- dispatch the bundle now</span></code></pre>
+<p>Run it with <code>--wait</code> so the engine keeps playing, and you hear the
+<code>bubbles</code> synth. (You can use the engine's built-in <code>"sinosc"</code>
+def the same way without compiling anything.)</p>
+<p><strong>How it works.</strong> <code>newNode</code> asks the engine to allocate an
+instance of the named def; <code>connect</code> redirects node 101's output buffer
+pointer into the output node's input (a zero-copy patch &mdash; no samples are
+copied during processing). The engine re-runs a topological sort whenever
+connections change, so the graph is always processed in dependency order. To take
+a node down later, call <code>freeNode(nodeId)</code> inside a bundle; for a smooth
+transition use the crossfading variants (<code>connectX</code>,
+<code>replaceNode</code>). The full surface is in
+<code>bridge/audio-engine-ffi.md</code> and <code>engine/Architecture.md</code>.</p>
+
+<!-- ================================================================ -->
+<h2 id="notes">4. Playing notes</h2>
+<p>A <em>voicer</em> node (your <code>sine_voice</code> from section&nbsp;2, or the
+engine's built-in <code>"voicer"</code>) holds a pool of polyphonic voices. You
+trigger and release voices by a <em>note id</em> you choose:</p>
+<table>
+  <tr><th>From NRT</th><th>From inside a silo</th><th>Meaning</th></tr>
+  <tr><td><code>noteOn(node, noteId, params)</code></td><td><code>playNote(node, noteId, params)</code></td><td>Start a voice.</td></tr>
+  <tr><td><code>noteOff(node, noteId)</code></td><td><code>releaseNote(node, noteId)</code></td><td>Release that voice.</td></tr>
+</table>
+<p><code>params</code> is a <code>[Float]</code> of the voice's
+<code>noteParam</code>s, in declaration order. For your <code>sine_voice</code> it
+is <code>[pitch, amp]</code>. The engine's built-in <code>"voicer"</code> takes
+<code>[pitch, amp, drive, pan, attack, release]</code>.</p>
+<pre><code><span class="kw">import</span> audio_engine.*;
+
+<span class="fn">engineStart</span>();
+<span class="fn">masterGain</span>(<span class="num">0.2</span>);
+
+<span class="fn">begin</span>(<span class="num">0</span>);
+<span class="fn">newNode</span>(<span class="str">"sine_voice"</span>, <span class="num">200</span>);   <span class="cmt">-- the polyphonic synth from section 2.3</span>
+<span class="fn">connect</span>(<span class="num">200</span>, <span class="num">0</span>, <span class="num">0</span>, <span class="num">0</span>);
+<span class="fn">sched</span>();
+
+<span class="cmt">-- A C-major chord: three voices with distinct note ids.</span>
+<span class="fn">begin</span>(<span class="num">0</span>);
+<span class="fn">noteOn</span>(<span class="num">200</span>, <span class="num">0</span>, [<span class="num">60.0</span>, <span class="num">0.4</span>]);
+<span class="fn">noteOn</span>(<span class="num">200</span>, <span class="num">1</span>, [<span class="num">64.0</span>, <span class="num">0.4</span>]);
+<span class="fn">noteOn</span>(<span class="num">200</span>, <span class="num">2</span>, [<span class="num">67.0</span>, <span class="num">0.4</span>]);
+<span class="fn">sched</span>();</code></pre>
+<p><strong>How it works.</strong> Each <code>noteOn</code> claims a free voice in the
+node's pool, keyed by the note id, and feeds it the param array (filling any
+trailing params from the voice's declared defaults). A later
+<code>noteOff(200, 0)</code> drops the gate on the voice with that id, so its
+release stage plays out. Reusing a note id while it is still sounding retriggers
+that same voice. Like all graph changes, note commands are bundled and can be
+beat-scheduled with <code>sched(clock, beat)</code> &mdash; which is exactly what
+the generative and actor recipes below do.</p>
+
+<!-- ================================================================ -->
+<h2 id="silos">5. Loading scripts into silos</h2>
+<p>A <strong>silo</strong> is an independent real-time processing unit: its own
+audio node graph, its own Tzopilotl VM with a private memory pool, and a per-block
+tick that advances time against the silo's tempo clock. Silo 0 runs on the audio
+callback thread; silos 1..N run on dedicated worker threads. Putting parts on
+different silos is how you get true CPU parallelism. Because a silo VM runs on the
+audio thread it is <em>rt-restricted</em>: no system allocation, no blocking, only
+real-time-safe builtins.</p>
+<p>You give a silo code with four calls (all in <code>audio_engine</code>):</p>
+<table>
+  <tr><th>Function</th><th>Meaning</th></tr>
+  <tr><td><code>attachVM(silo <span class="typ">Int</span>) <span class="typ">Int</span></code></td><td>Create and attach a fresh VM to the silo.</td></tr>
+  <tr><td><code>siloLoad(silo <span class="typ">Int</span>, code <span class="typ">String</span>) <span class="typ">Future&lt;String&gt;</span></code></td><td>Compile + install a module on the silo; <code>await</code> it (resolves to <code>""</code> or an error).</td></tr>
+  <tr><td><code>siloStartAt(beat <span class="typ">Float</span>, silos [<span class="typ">Int</span>])</code></td><td>Call each silo module's <code>start()</code> at a shared beat.</td></tr>
+  <tr><td><code>detachVM(silo <span class="typ">Int</span>) <span class="typ">Int</span></code></td><td>Destroy the silo's VM.</td></tr>
+</table>
+<p>The silo module is just Tzopilotl source, most conveniently written as a
+triple-quoted multi-line string. A conventional <code>start()</code> entry point
+kicks off the music; <code>siloStartAt</code> calls it on the grid.</p>
+<pre><code><span class="kw">import</span> audio_engine.*;
+<span class="kw">import</span> futures.*;
+
+<span class="cmt">-- The silo module: an actor that plays a six-note scale, advancing time with</span>
+<span class="cmt">-- `await delay`. (Actors are covered in section 8; here just note that the silo</span>
+<span class="cmt">-- runs ordinary async code.) start() spawns it.</span>
+<span class="kw">let</span> taskCode = <span class="str">"""</span>
+<span class="str">import audio_engine.*;</span>
+<span class="str">import sexprs.*;</span>
+
+<span class="str">let scale = [60.0, 63.0, 65.0, 67.0, 70.0, 72.0];</span>
+
+<span class="str">async fn melody(self Actor&lt;SExpr&gt;, init SExpr) Void {</span>
+<span class="str">    var i = 0;</span>
+<span class="str">    while (true) {</span>
+<span class="str">        playNote(101, i % 16, [scale[i % 6], 0.6, 4.7, 0.0, 0.01, 0.2]);</span>
+<span class="str">        await delay(0.4);</span>
+<span class="str">        releaseNote(101, i % 16);</span>
+<span class="str">        await delay(0.1);</span>
+<span class="str">        i = i + 1;</span>
+<span class="str">    }</span>
+<span class="str">}</span>
+<span class="str">fn start() Void { spawn(melody, SExpr.int(0)); }</span>
+<span class="str">"""</span>;
+
+<span class="fn">engineStart</span>();
+<span class="fn">masterGain</span>(<span class="num">0.3</span>);
+<span class="fn">setTempo</span>(<span class="num">0</span>, <span class="num">120.0</span>);
+
+<span class="cmt">-- A built-in `voicer` node on silo 0 (the melody triggers notes on node 101).</span>
+<span class="fn">begin</span>(<span class="num">0</span>);
+<span class="fn">newNode</span>(<span class="str">"voicer"</span>, <span class="num">101</span>);
+<span class="fn">connect</span>(<span class="num">101</span>, <span class="num">0</span>, <span class="num">0</span>, <span class="num">0</span>);
+<span class="fn">sched</span>();
+
+<span class="fn">attachVM</span>(<span class="num">0</span>);
+<span class="kw">let</span> err = <span class="kw">await</span> <span class="fn">siloLoad</span>(<span class="num">0</span>, taskCode);
+<span class="str">"load err=["</span> print; err print; <span class="str">"]"</span> println;
+
+<span class="fn">siloStartAt</span>(<span class="fn">clockBeats</span>(<span class="num">0</span>), [<span class="num">0</span>]);   <span class="cmt">-- begin now (current beat)</span></code></pre>
+<p><strong>How it works.</strong> <code>siloLoad</code> compiles the module on the
+calling thread against the silo's rt-restricted target, then hands the installed
+code to the silo's RT thread; the returned <code>Future&lt;String&gt;</code> lets you
+<code>await</code> completion and check for errors before starting. The
+<code>start()</code> entry registers the actor; <code>siloStartAt</code> schedules
+the <code>start()</code> call (on tempo clock 0) at the given beat, so several
+silos can be launched together on a downbeat. From then on the silo's per-block
+tick drives the actor, and <code>await delay(beats)</code> resolves on the audio
+beat &mdash; the note timing is sample-accurate.</p>
+<div class="note"><strong>Headless playback</strong>
+These audio recipes assume a real audio device. In a headless run the audio
+callback may not start, in which case time does not advance past the first event.
+The mechanism is identical to the deterministic message recipes in
+section&nbsp;8.4, which verify end-to-end without sound.</div>
+
+<!-- ================================================================ -->
+<h2 id="scheduling">6. Scheduling on the beat</h2>
+<p>There are two complementary scheduling layers.</p>
+
+<h4>Engine tempo clocks (sample-accurate, musical)</h4>
+<p>The engine has numbered tempo clocks. Bundles and note commands can be tied to a
+clock and beat so they fire sample-accurately:</p>
+<table>
+  <tr><th>Function</th><th>Meaning</th></tr>
+  <tr><td><code>setTempo(clock <span class="typ">Int</span>, bpm <span class="typ">Float</span>)</code></td><td>Set a clock's tempo.</td></tr>
+  <tr><td><code>clockBeats(clock <span class="typ">Int</span>) <span class="typ">Float</span></code></td><td>The clock's current beat.</td></tr>
+  <tr><td><code>clockTempo(clock <span class="typ">Int</span>) <span class="typ">Float</span></code></td><td>The clock's current BPM.</td></tr>
+  <tr><td><code>sched(clock <span class="typ">Int</span>, beat <span class="typ">Float</span>)</code></td><td>Dispatch the current bundle at that beat.</td></tr>
+  <tr><td><code>schedTempoChange(clock, atBeat, targetBPM, rampBeats)</code></td><td>Ramp tempo over <code>rampBeats</code>.</td></tr>
+</table>
+<pre><code><span class="cmt">-- Schedule a note exactly two beats from now on clock 0.</span>
+<span class="kw">let</span> now = <span class="fn">clockBeats</span>(<span class="num">0</span>);
+<span class="fn">begin</span>(<span class="num">0</span>);
+<span class="fn">noteOn</span>(<span class="num">200</span>, <span class="num">0</span>, [<span class="num">60.0</span>, <span class="num">0.4</span>]);
+<span class="fn">sched</span>(<span class="num">0</span>, now + <span class="num">2.0</span>);   <span class="cmt">-- fires when clock 0 reaches now+2</span></code></pre>
+
+<h4>The NRT clock module (timed callbacks on the main thread)</h4>
+<p>For orchestration logic that runs on the main VM, <code>import clock.*;</code>
+gives a tempo-aware callback scheduler. Its tempo follows engine clock 0.</p>
+<table>
+  <tr><th>Function</th><th>Meaning</th></tr>
+  <tr><td><code>setTempo(bpm <span class="typ">Float</span>)</code> / <code>getTempo()</code></td><td>Global tempo (mirrors onto engine clock 0).</td></tr>
+  <tr><td><code>getBeats() <span class="typ">Float</span></code></td><td>Current logical beat.</td></tr>
+  <tr><td><code>sched(deltaBeats <span class="typ">Float</span>, fn() <span class="typ">Float</span>) <span class="typ">Int</span></code></td><td>Run a handler after <code>deltaBeats</code>; if it returns a positive number, reschedule that many beats later (SuperCollider Routine style).</td></tr>
+  <tr><td><code>after(deltaBeats <span class="typ">Float</span>, fn() <span class="typ">Void</span>)</code> / <code>at(beat, fn() <span class="typ">Void</span>)</code></td><td>One-shot, relative / absolute.</td></tr>
+  <tr><td><code>cancel(id <span class="typ">Int</span>)</code></td><td>Cancel a scheduled handler.</td></tr>
+</table>
+<pre><code><span class="kw">import</span> audio_engine.*;
+<span class="kw">import</span> clock.*;
+
+<span class="fn">engineStart</span>();
+<span class="fn">setTempo</span>(<span class="num">120.0</span>);
+
+<span class="cmt">-- A repeating quarter-note tick. State lives in a Ref, since a handler captures</span>
+<span class="cmt">-- by value -- mutate through the Ref, not an outer `var`.</span>
+<span class="kw">let</span> n = &<span class="num">0</span>;
+<span class="fn">sched</span>(<span class="num">0.0</span>, <span class="kw">fn</span>() <span class="typ">Float</span> {
+    n &lt;- (*n + <span class="num">1</span>);
+    <span class="str">"tick "</span> print; (*n) println;
+    <span class="kw">if</span> (*n &lt; <span class="num">4</span>) { <span class="num">0.5</span> } <span class="kw">else</span> { <span class="num">0.0</span> - <span class="num">1.0</span> }   <span class="cmt">-- reschedule 0.5 beats later, or stop</span>
+});</code></pre>
+<div class="warning"><strong>Two <code>setTempo</code>/<code>sched</code></strong>
+<code>clock</code> and <code>audio_engine</code> both export <code>setTempo</code>
+and <code>sched</code> with different signatures. The <code>clock</code> versions
+take a tempo/delta directly (no clock-slot argument); the <code>audio_engine</code>
+versions take a clock slot. If you <code>import</code> both with <code>*</code>,
+call the one whose argument shape you intend. The <code>clock</code> scheduler's
+logical time advances with the running engine clock, so its repeating callbacks
+fire while audio is playing.</div>
+
+<!-- ================================================================ -->
+<h2 id="generative">7. Generative sequences</h2>
+<p>The idiomatic way to generate notes or control values over time is an
+<code>async fn</code> that loops, doing work and then <code>await delay(beats)</code>
+to advance musical time. Inside a silo the delay resolves on the audio beat, so the
+sequence is sample-accurate and naturally polyphonic with other silo sequences. The
+event loop is single-threaded per VM, so thousands of these can interleave
+cheaply.</p>
+<pre><code><span class="cmt">-- A silo module: a generative arpeggio that walks a chord and drifts upward.</span>
+<span class="kw">import</span> audio_engine.*;
+<span class="kw">import</span> sexprs.*;
+
+<span class="kw">async</span> <span class="kw">fn</span> <span class="fn">arp</span>(self <span class="typ">Actor&lt;SExpr&gt;</span>, init <span class="typ">SExpr</span>) <span class="typ">Void</span> {
+    <span class="kw">let</span> chord = [<span class="num">0.0</span>, <span class="num">4.0</span>, <span class="num">7.0</span>, <span class="num">11.0</span>];   <span class="cmt">-- semitone offsets</span>
+    <span class="kw">var</span> root = <span class="num">48.0</span>;
+    <span class="kw">var</span> i = <span class="num">0</span>;
+    <span class="kw">while</span> (<span class="kw">true</span>) {
+        <span class="kw">let</span> pitch = root + chord[i % <span class="num">4</span>];
+        <span class="fn">playNote</span>(<span class="num">101</span>, i % <span class="num">16</span>, [pitch, <span class="num">0.3</span>, <span class="num">4.5</span>, <span class="num">0.0</span>, <span class="num">0.005</span>, <span class="num">0.2</span>]);
+        <span class="kw">await</span> <span class="fn">delay</span>(<span class="num">0.25</span>);
+        <span class="fn">releaseNote</span>(<span class="num">101</span>, i % <span class="num">16</span>);
+        i = i + <span class="num">1</span>;
+        <span class="kw">if</span> (i % <span class="num">8</span> == <span class="num">0</span>) { root = root + <span class="num">2.0</span>; }   <span class="cmt">-- drift up a step every 8 notes</span>
+    }
+}
+<span class="kw">fn</span> <span class="fn">start</span>() <span class="typ">Void</span> { <span class="fn">spawn</span>(arp, SExpr.int(<span class="num">0</span>)); }</code></pre>
+<p>Load it onto a silo exactly as in section&nbsp;5. The same shape generates
+<em>control</em> automation rather than notes &mdash; sweep a filter cutoff by
+calling <code>setControl(node, ctl, value)</code> (or <code>setInput</code>) each
+step instead of <code>playNote</code>.</p>
+<div class="note"><strong>Coroutine form</strong>
+There is an older equivalent: a <code>coro fn ... yield beats</code> coroutine,
+launched with <code>spawn(clock, coro())</code> (the <code>audio_engine.spawn</code>
+overload). It yields beat-deltas the silo tick uses to reschedule it. New code
+should prefer <code>async fn</code> + <code>await delay</code>, which composes with
+the actor and <code>Future</code> machinery.</div>
+<p><strong>How it works.</strong> Each silo VM has an event loop with a timer queue.
+<code>await delay(b)</code> parks the coroutine on a timer for beat <em>now+b</em>;
+the silo's per-block tick advances its clock to the audio beat, fires due timers,
+and resumes the parked coroutines &mdash; all within the audio block's budget, so a
+runaway sequence cannot overrun the block. Because everything is one cooperative
+loop per silo, ordering is deterministic and there are no data races.</p>
+
+<!-- ================================================================ -->
+<h2 id="actors">8. Actors &amp; messaging</h2>
+<p>Actors are lightweight concurrent objects built on the same async event loop.
+An actor is an <code>async fn(self Actor&lt;M&gt;, init M) Void</code> that loops,
+<code>await</code>ing messages of type <code>M</code> from its mailbox. Many
+actors interleave on one VM; they run at NRT, in silos, and &mdash; over NATS
+&mdash; in other processes, all with the same API. The full design is in
+<code>lang/modules/actors.x</code> and the actor tests under
+<code>lang/tests/actors/</code>.</p>
+
+<h3 id="actors-basics">8.1 Actor basics</h3>
+<table>
+  <tr><th>Builtin</th><th>Meaning</th></tr>
+  <tr><td><code>spawn(behavior, init) <span class="typ">Actor&lt;M&gt;</span></code></td><td>Create an actor and run it to its first <code>receive</code>.</td></tr>
+  <tr><td><code>send(to <span class="typ">Actor&lt;M&gt;</span>, msg M)</code></td><td>Deliver a message (wakes a parked receiver, else queues).</td></tr>
+  <tr><td><code>receive(self <span class="typ">Actor&lt;M&gt;</span>) <span class="typ">Future&lt;M&gt;</span></code></td><td><code>await</code> it to take the next message.</td></tr>
+  <tr><td><code>register(name <span class="typ">Symbol</span>, a <span class="typ">Actor&lt;M&gt;</span>)</code></td><td>Give an actor a name in this VM.</td></tr>
+  <tr><td><code>sendByName(name <span class="typ">Symbol</span>, msg M)</code></td><td>Deliver to a locally-registered name.</td></tr>
+  <tr><td><code>runActors()</code></td><td>Drive the event loop until every actor is parked (NRT, blocking).</td></tr>
+  <tr><td><code>serveActors()</code></td><td>Like <code>runActors</code> but parks when idle, woken by cross-thread delivery.</td></tr>
+</table>
+<p>Two actors bouncing a counter (from <code>lang/tests/actors/pingpong.x</code>):</p>
+<pre><code><span class="kw">import</span> sexprs.*;
+
+<span class="cmt">-- Seed a Ref so `ping` can refer to `pong`, which is spawned after it.</span>
+<span class="kw">let</span> dummy = <span class="fn">spawn</span>(<span class="kw">async</span> <span class="kw">fn</span>(s <span class="typ">Actor&lt;SExpr&gt;</span>, i <span class="typ">SExpr</span>) <span class="typ">Void</span> {}, SExpr.int(<span class="num">0</span>));
+<span class="kw">let</span> pongRef = &dummy;
+
+<span class="kw">let</span> ping = <span class="fn">spawn</span>(<span class="kw">async</span> <span class="kw">fn</span>(self <span class="typ">Actor&lt;SExpr&gt;</span>, init <span class="typ">SExpr</span>) <span class="typ">Void</span> {
+    <span class="kw">while</span> (<span class="kw">true</span>) {
+        <span class="kw">let</span> m = <span class="kw">await</span> <span class="fn">receive</span>(self);
+        <span class="kw">match</span> (m) {
+            SExpr.int(n): {
+                println(<span class="str">"ping "</span> $ (n toString));
+                <span class="kw">if</span> (n &lt; <span class="num">6</span>) { <span class="fn">send</span>(*pongRef, SExpr.int(n + <span class="num">1</span>)); }
+            }
+            _: {}
+        }
+    }
+}, SExpr.int(<span class="num">0</span>));
+
+<span class="kw">let</span> pong = <span class="fn">spawn</span>(<span class="kw">async</span> <span class="kw">fn</span>(self <span class="typ">Actor&lt;SExpr&gt;</span>, init <span class="typ">SExpr</span>) <span class="typ">Void</span> {
+    <span class="kw">while</span> (<span class="kw">true</span>) {
+        <span class="kw">let</span> m = <span class="kw">await</span> <span class="fn">receive</span>(self);
+        <span class="kw">match</span> (m) {
+            SExpr.int(n): { println(<span class="str">"pong "</span> $ (n toString)); <span class="fn">send</span>(ping, SExpr.int(n + <span class="num">1</span>)); }
+            _: {}
+        }
+    }
+}, SExpr.int(<span class="num">0</span>));
+
+pongRef &lt;- pong;
+<span class="fn">send</span>(ping, SExpr.int(<span class="num">0</span>));
+<span class="fn">runActors</span>();</code></pre>
+<p>This prints <code>ping 0</code>, <code>pong 1</code>, &hellip;, <code>pong 5</code>,
+<code>ping 6</code>. <strong>How it works.</strong> <code>receive</code> returns a
+resolved <code>Future</code> if a message is queued, otherwise a pending one the
+actor parks on; <code>send</code> resolves a parked receiver and re-queues it as
+runnable. <code>runActors</code> turns that crank until everyone is parked again.</p>
+
+<h3 id="actors-messages">8.2 SExpr messages</h3>
+<p>Messages are <code>SExpr</code> values &mdash; a small universal tree
+(<code>bool</code>, <code>int</code>, <code>float</code>, <code>symbol</code>,
+<code>string</code>, <code>vec</code>) from <code>lang/modules/sexprs.x</code>. The
+same type serializes to a compact binary form via <code>message.x</code>
+(<code>encode</code> / <code>decode</code>), which is what makes a message
+location-transparent: the identical value can be delivered locally, to a silo, or
+across a process boundary.</p>
+<pre><code><span class="kw">import</span> sexprs.*;
+<span class="kw">import</span> message.*;
+
+<span class="kw">let</span> m = SExpr.vec([SExpr.int(<span class="num">60</span>), SExpr.float(<span class="num">0.5</span>), SExpr.symbol(<span class="fn">toSymbol</span>(<span class="str">"hit"</span>))]);
+m toString println;          <span class="cmt">-- [60, 0.5, hit]</span>
+<span class="kw">let</span> b = <span class="fn">encode</span>(m);            <span class="cmt">-- Bytes (TZB binary form)</span>
+<span class="fn">decode</span>(b) toString println;   <span class="cmt">-- [60, 0.5, hit]  (round-trips)</span></code></pre>
+<p>Construct a chord-note message, match on it in the receiver with
+<code>match (m) { SExpr.float(p): &hellip; }</code>, and so on. The wire format and a
+zero-copy reader are documented in the Binary Messages section of the
+<a href="FFI_Guide.html">FFI Guide</a>.</p>
+
+<h3 id="actors-silo">8.3 Commanding silo actors by name</h3>
+<p>A musical "conductor" at NRT can command an actor living in a silo. The silo
+actor <code>register</code>s a name; the conductor addresses it with
+<code>siloSend</code> (immediate) or <code>siloSendAt</code> (on a beat). Both are
+in <code>actors.x</code>:</p>
+<pre><code><span class="cmt">-- actors.x</span>
+<span class="kw">fn</span> <span class="fn">siloSend</span>(silo <span class="typ">Int</span>, name <span class="typ">Symbol</span>, msg <span class="typ">SExpr</span>) <span class="typ">Void</span>;
+<span class="kw">fn</span> <span class="fn">siloSendAt</span>(silo <span class="typ">Int</span>, clock <span class="typ">Int</span>, beat <span class="typ">Float</span>, name <span class="typ">Symbol</span>, msg <span class="typ">SExpr</span>) <span class="typ">Void</span>;</code></pre>
+<p>The silo side (adapted from
+<code>integration-tests/scripts/silo_actor_scheduled.x</code>) registers
+<code>"voice"</code> and plays each pitch it receives:</p>
+<pre><code><span class="cmt">-- silo module source</span>
+<span class="kw">async</span> <span class="kw">fn</span> <span class="fn">voice</span>(self <span class="typ">Actor&lt;SExpr&gt;</span>, init <span class="typ">SExpr</span>) <span class="typ">Void</span> {
+    <span class="fn">register</span>(<span class="fn">toSymbol</span>(<span class="str">"voice"</span>), self);
+    <span class="kw">var</span> id = <span class="num">0</span>;
+    <span class="kw">while</span> (<span class="kw">true</span>) {
+        <span class="kw">let</span> m = <span class="kw">await</span> <span class="fn">receive</span>(self);
+        <span class="kw">match</span> (m) {
+            SExpr.float(pitch): { <span class="fn">playNote</span>(<span class="num">101</span>, id % <span class="num">16</span>, [pitch, <span class="num">0.6</span>, <span class="num">4.7</span>, <span class="num">0.0</span>, <span class="num">0.01</span>, <span class="num">0.2</span>]); id = id + <span class="num">1</span>; }
+            _: {}
+        }
+    }
+}
+<span class="fn">spawn</span>(voice, SExpr.int(<span class="num">0</span>));</code></pre>
+<p>The NRT conductor, after <code>siloLoad</code>ing that module, schedules a rising
+line one note per beat:</p>
+<pre><code><span class="kw">let</span> now = <span class="fn">clockBeats</span>(<span class="num">0</span>);
+<span class="fn">siloSendAt</span>(<span class="num">0</span>, <span class="num">0</span>, now + <span class="num">1.0</span>, <span class="fn">toSymbol</span>(<span class="str">"voice"</span>), SExpr.float(<span class="num">60.0</span>));
+<span class="fn">siloSendAt</span>(<span class="num">0</span>, <span class="num">0</span>, now + <span class="num">2.0</span>, <span class="fn">toSymbol</span>(<span class="str">"voice"</span>), SExpr.float(<span class="num">64.0</span>));
+<span class="fn">siloSendAt</span>(<span class="num">0</span>, <span class="num">0</span>, now + <span class="num">3.0</span>, <span class="fn">toSymbol</span>(<span class="str">"voice"</span>), SExpr.float(<span class="num">67.0</span>));
+<span class="fn">siloSendAt</span>(<span class="num">0</span>, <span class="num">0</span>, now + <span class="num">4.0</span>, <span class="fn">toSymbol</span>(<span class="str">"voice"</span>), SExpr.float(<span class="num">72.0</span>));</code></pre>
+<p><strong>How it works.</strong> The message is <code>encode</code>d to bytes on the
+NRT side and carried across the silo's command FIFO; the silo decodes it and
+<code>sendByName</code>s it into the actor's mailbox. <code>siloSendAt</code> uses
+the engine's beat scheduler, so each note lands in the mailbox sample-accurately
+when clock 0 reaches the beat &mdash; this is how you command silo voices on the
+musical grid from outside.</p>
+
+<h3 id="actors-routing">8.4 Silo&#8596;silo and silo&#8594;NRT</h3>
+<p>Silos can message each other, and message NRT actors, without you touching the
+transport. The audio thread cannot allocate, so a silo actor pushes an
+<em>encoded</em> message into a lock-free outbox with <code>siloOutbox(target,
+name, encode(msg))</code> (<code>target</code> is the destination silo, or
+<code>-1</code> for an NRT actor). A router on the main thread,
+<code>runActorServer()</code>, drains the outboxes and forwards each message:</p>
+<pre><code><span class="cmt">-- actors.x: the main-thread router. Run it instead of runActors when silos route.</span>
+<span class="kw">fn</span> <span class="fn">runActorServer</span>() <span class="typ">Void</span> {
+    <span class="kw">while</span> (<span class="kw">true</span>) {
+        <span class="fn">pumpSiloOutboxes</span>();                 <span class="cmt">-- forward silo-&gt;silo; stash silo-&gt;NRT</span>
+        <span class="kw">var</span> k = <span class="fn">nrtActorMsgCount</span>();
+        <span class="kw">while</span> (k &gt; <span class="num">0</span>) {
+            <span class="kw">let</span> nm = <span class="fn">nrtActorMsgName</span>();
+            <span class="kw">let</span> b  = <span class="fn">nrtActorMsgTake</span>();
+            <span class="fn">sendByName</span>(nm, <span class="fn">decode</span>(b));        <span class="cmt">-- deliver to the NRT actor</span>
+            k = k - <span class="num">1</span>;
+        }
+        <span class="fn">runActors</span>();                         <span class="cmt">-- drive NRT actors that got mail</span>
+        <span class="fn">sleepMs</span>(<span class="num">2</span>);
+    }
+}</code></pre>
+<p>A silo sender targeting an NRT conductor (from
+<code>integration-tests/scripts/silo_to_nrt.x</code>):</p>
+<pre><code><span class="cmt">-- inside the silo module</span>
+<span class="kw">async</span> <span class="kw">fn</span> <span class="fn">sender</span>(self <span class="typ">Actor&lt;SExpr&gt;</span>, init <span class="typ">SExpr</span>) <span class="typ">Void</span> {
+    <span class="kw">let</span> scale = [<span class="num">60.0</span>, <span class="num">64.0</span>, <span class="num">67.0</span>, <span class="num">72.0</span>];
+    <span class="kw">var</span> i = <span class="num">0</span>;
+    <span class="kw">while</span> (i &lt; <span class="num">4</span>) {
+        <span class="kw">await</span> <span class="fn">delay</span>(<span class="num">1.0</span>);
+        <span class="fn">siloOutbox</span>(-<span class="num">1</span>, <span class="fn">toSymbol</span>(<span class="str">"conductor"</span>), <span class="fn">encode</span>(SExpr.float(scale[i % <span class="num">4</span>])));
+        i = i + <span class="num">1</span>;
+    }
+}</code></pre>
+<p>The NRT side spawns a <code>conductor</code> actor (registered as
+<code>"conductor"</code>) and calls <code>runActorServer()</code>. This recipe is
+fully deterministic &mdash; its harness
+(<code>integration-tests/scripts/silo_to_nrt.sh</code>) confirms all four messages
+arrive without relying on audible sound. For silo&#8596;silo, use a positive
+target silo index instead of <code>-1</code>; the router forwards it to that
+silo's named actor.</p>
+
+<h3 id="actors-nats">8.5 Across processes (NATS)</h3>
+<p>Cross-process messaging is the same actor, addressed over NATS. A standing
+subscription bridges a subject to a local actor, and publishing encodes a message
+onto that subject (from
+<code>integration-tests/scripts/actor_nats_loopback.x</code>):</p>
+<pre><code><span class="kw">import</span> nats.*;
+<span class="kw">import</span> message.*;
+<span class="kw">import</span> sexprs.*;
+
+<span class="cmt">-- bridge subject "actors.w" -&gt; the local actor registered as "w"</span>
+<span class="fn">onMessageMsg</span>(<span class="str">"actors.w"</span>, <span class="kw">fn</span>(b <span class="typ">Bytes</span>) {
+    <span class="kw">if</span> (<span class="fn">isMessage</span>(b)) { <span class="fn">sendByName</span>(<span class="fn">toSymbol</span>(<span class="str">"w"</span>), <span class="fn">decode</span>(b)); }
+});
+
+<span class="fn">natsPubMsg</span>(<span class="str">"actors.w"</span>, <span class="fn">encode</span>(SExpr.string(<span class="str">"hello over nats"</span>)));
+<span class="fn">serveActors</span>();   <span class="cmt">-- park until a NATS delivery wakes the actor</span></code></pre>
+<p><strong>How it works.</strong> The NATS handler runs on the client thread,
+decodes the bytes, and enqueues into the named actor's mailbox; that enqueue wakes
+<code>serveActors</code>, which drives the actor. Use <code>serveActors</code> (not
+<code>runActors</code>) for a long-lived process so the VM parks when idle instead
+of returning. See the OSC/NATS sections of the
+<a href="FFI_Guide.html">FFI Guide</a> for connection setup and subject naming.</p>
+
+<!-- ================================================================ -->
+<h2 id="render">9. Offline (NRT) rendering</h2>
+<p>To render audio to a file faster (or slower) than real time, use
+<code>renderNRT</code>. It owns a private engine and tempo scheduler on a render
+thread, so it runs headless with no audio device. You build the graph in a setup
+callback and <code>await renderDone(handle)</code> for completion.</p>
+<table>
+  <tr><th>Function</th><th>Meaning</th></tr>
+  <tr><td><code>renderNRT(path <span class="typ">String</span>, setup fn() <span class="typ">Void</span>) <span class="typ">Int</span></code></td><td>Open-ended render; returns a handle.</td></tr>
+  <tr><td><code>renderNRT(path <span class="typ">String</span>, dur <span class="typ">Float</span>, setup fn() <span class="typ">Void</span>) <span class="typ">Int</span></code></td><td>Render a fixed number of seconds.</td></tr>
+  <tr><td><code>renderDone(handle <span class="typ">Int</span>) <span class="typ">Future&lt;Void&gt;</span></code></td><td>Awaitable completion.</td></tr>
+  <tr><td><code>isRenderDone(handle <span class="typ">Int</span>) <span class="typ">Bool</span></code> / <code>onRenderDone(handle, fn() <span class="typ">Void</span>)</code></td><td>Poll / callback.</td></tr>
+  <tr><td><code>stopRender(handle)</code> / <code>endRender()</code></td><td>Stop early (from outside / from inside the render).</td></tr>
+</table>
+<pre><code><span class="kw">import</span> synthdef.*;
+<span class="kw">import</span> synthc.compile.*;
+<span class="kw">import</span> common_ugens.*;
+<span class="kw">import</span> audio_engine.*;
+<span class="kw">import</span> futures.*;
+
+<span class="kw">fn</span> <span class="fn">beep</span>() <span class="typ">S</span> = [<span class="num">330.0</span>, <span class="num">331.0</span>] sinosc * (<span class="num">1.0</span> lfimp decay(<span class="num">0.25</span>)) * <span class="num">0.2</span> |&gt; outlet;
+beep <span class="fn">defSynthX</span>(<span class="str">"beep"</span>);
+
+<span class="cmt">-- Render two seconds of beeps to a WAV file.</span>
+<span class="kw">let</span> h = <span class="fn">renderNRT</span>(<span class="str">"out.wav"</span>, <span class="num">2.0</span>, <span class="kw">fn</span>() <span class="typ">Void</span> {
+    <span class="fn">setTempo</span>(<span class="num">0</span>, <span class="num">120.0</span>);
+    <span class="fn">begin</span>(<span class="num">0</span>);
+    <span class="fn">newNode</span>(<span class="str">"beep"</span>, <span class="num">101</span>);
+    <span class="fn">connect</span>(<span class="num">101</span>, <span class="num">0</span>, <span class="num">0</span>, <span class="num">0</span>);
+    <span class="fn">sched</span>();
+});
+<span class="kw">await</span> <span class="fn">renderDone</span>(h);
+<span class="str">"render done"</span> println;</code></pre>
+<p><strong>How it works.</strong> The setup callback runs with the render's engine
+installed as the current context, so the ordinary <code>begin</code>/<code>newNode</code>/
+<code>connect</code>/<code>sched</code> and <code>clock</code> calls target it. The
+render thread drives its own tempo scheduler, writes the WAV, and resolves the
+<code>renderDone</code> future. Because there is no audio device involved, this path
+is fully deterministic &mdash; the example above produces a stereo
+<code>out.wav</code> every run. You can also schedule notes and run generative
+sequences inside the setup, exactly as in the live recipes.</p>
+
+<!-- ================================================================ -->
+<h2 id="ensemble">10. Putting it together: a multi-silo ensemble</h2>
+<p>The pieces combine into a small ensemble: each part is an actor on its own silo,
+all loaded in parallel and started together on a downbeat. This mirrors
+<code>integration-tests/scripts/silo_scenario1_audible.x</code>.</p>
+<pre><code><span class="kw">import</span> audio_engine.*;
+<span class="kw">import</span> futures.*;
+<span class="kw">import</span> silo.*;          <span class="cmt">-- quantizeUp</span>
+
+<span class="kw">let</span> bass = <span class="str">"""</span>
+<span class="str">import audio_engine.*;</span>
+<span class="str">import sexprs.*;</span>
+<span class="str">let notes = [36.0, 36.0, 43.0, 41.0];</span>
+<span class="str">async fn play(self Actor&lt;SExpr&gt;, init SExpr) Void {</span>
+<span class="str">    var i = 0;</span>
+<span class="str">    while (true) {</span>
+<span class="str">        playNote(101, i % 8, [notes[i % 4], 0.7, 4.7, 0.0, 0.005, 0.15]);</span>
+<span class="str">        await delay(1.0); releaseNote(101, i % 8); await delay(0.0); i = i + 1;</span>
+<span class="str">    }</span>
+<span class="str">}</span>
+<span class="str">fn start() Void { spawn(play, SExpr.int(0)); }</span>
+<span class="str">"""</span>;
+
+<span class="kw">let</span> arp = <span class="str">"""</span>
+<span class="str">import audio_engine.*;</span>
+<span class="str">import sexprs.*;</span>
+<span class="str">let p = [72.0, 76.0, 79.0, 84.0];</span>
+<span class="str">async fn play(self Actor&lt;SExpr&gt;, init SExpr) Void {</span>
+<span class="str">    var i = 0;</span>
+<span class="str">    while (true) {</span>
+<span class="str">        playNote(301, i % 16, [p[i % 4], 0.25, 4.5, 0.0, 0.005, 0.1]);</span>
+<span class="str">        await delay(0.25); releaseNote(301, i % 16); i = i + 1;</span>
+<span class="str">    }</span>
+<span class="str">}</span>
+<span class="str">fn start() Void { spawn(play, SExpr.int(0)); }</span>
+<span class="str">"""</span>;
+
+<span class="cmt">-- Set up one part on a silo: a voicer node + the loaded module.</span>
+<span class="kw">fn</span> <span class="fn">preparePart</span>(silo <span class="typ">Int</span>, node <span class="typ">Int</span>, code <span class="typ">String</span>) <span class="typ">Future&lt;String&gt;</span> {
+    <span class="fn">begin</span>(silo);
+    <span class="fn">newNode</span>(<span class="str">"voicer"</span>, node);
+    <span class="fn">connect</span>(node, <span class="num">0</span>, <span class="num">0</span>, <span class="num">0</span>);
+    <span class="fn">sched</span>();
+    <span class="fn">attachVM</span>(silo);
+    <span class="fn">siloLoad</span>(silo, code)
+}
+
+<span class="kw">async</span> <span class="kw">fn</span> <span class="fn">startSession</span>() <span class="typ">Void</span> {
+    <span class="kw">await</span> <span class="fn">awaitAll</span>([
+        <span class="fn">preparePart</span>(<span class="num">0</span>, <span class="num">101</span>, bass),
+        <span class="fn">preparePart</span>(<span class="num">1</span>, <span class="num">301</span>, arp)
+    ]);
+    <span class="fn">siloStartAt</span>(<span class="fn">quantizeUp</span>(<span class="fn">clockBeats</span>(<span class="num">0</span>), <span class="num">4.0</span>), [<span class="num">0</span>, <span class="num">1</span>]);   <span class="cmt">-- both parts on the next bar</span>
+}
+
+<span class="fn">engineStart</span>();
+<span class="fn">masterGain</span>(<span class="num">0.22</span>);
+<span class="fn">setTempo</span>(<span class="num">0</span>, <span class="num">110.0</span>);
+<span class="kw">await</span> <span class="fn">startSession</span>();
+<span class="str">"ensemble running"</span> println;</code></pre>
+<p><strong>How it works.</strong> Each part builds its own voicer node on its own
+silo and loads an actor that sequences notes with <code>await delay</code>.
+<code>awaitAll</code> (from <code>futures.x</code>) waits for both
+<code>siloLoad</code>s to finish; <code>quantizeUp(clockBeats(0), 4.0)</code> finds
+the next bar line, and <code>siloStartAt</code> starts both silos exactly there so
+they are phase-locked. The two parts then run on separate threads, each
+self-timed against the shared tempo clock 0.</p>
+
+<!-- ================================================================ -->
+<h2 id="appendix">11. Appendix</h2>
+
+<h3 id="quickref">11.1 Function quick reference</h3>
+<table>
+  <tr><th>Function</th><th>Module</th><th>Runs at</th></tr>
+  <tr><td><code>engineStart / engineStop / masterGain</code></td><td>audio_engine</td><td>NRT</td></tr>
+  <tr><td><code>begin / go / sched / sched(clock,beat)</code></td><td>audio_engine</td><td>NRT</td></tr>
+  <tr><td><code>newNode / connect / freeNode</code></td><td>audio_engine</td><td>NRT</td></tr>
+  <tr><td><code>noteOn / noteOff</code></td><td>audio_engine</td><td>NRT</td></tr>
+  <tr><td><code>playNote / releaseNote</code></td><td>audio_engine</td><td>silo</td></tr>
+  <tr><td><code>setControl / setInput</code></td><td>audio_engine</td><td>NRT / silo</td></tr>
+  <tr><td><code>setTempo(clock,bpm) / clockBeats / clockTempo</code></td><td>audio_engine</td><td>NRT</td></tr>
+  <tr><td><code>attachVM / siloLoad / siloStartAt / detachVM</code></td><td>audio_engine</td><td>NRT</td></tr>
+  <tr><td><code>defSynthX / defSynth / listSynthDefs</code></td><td>synthc.compile / synthdef</td><td>NRT</td></tr>
+  <tr><td><code>sched / after / at / setTempo / getBeats / cancel</code></td><td>clock</td><td>NRT</td></tr>
+  <tr><td><code>renderNRT / renderDone / stopRender / endRender</code></td><td>audio_engine</td><td>NRT</td></tr>
+  <tr><td><code>spawn / send / receive / register / sendByName</code></td><td>(builtin)</td><td>NRT / silo</td></tr>
+  <tr><td><code>runActors / serveActors</code></td><td>(builtin)</td><td>NRT</td></tr>
+  <tr><td><code>siloSend / siloSendAt / runActorServer</code></td><td>actors</td><td>NRT</td></tr>
+  <tr><td><code>siloOutbox</code></td><td>audio_engine</td><td>silo</td></tr>
+  <tr><td><code>encode / decode / isMessage</code></td><td>message</td><td>NRT / silo</td></tr>
+  <tr><td><code>await delay(beats) / awaitAll</code></td><td>(builtin) / futures</td><td>NRT / silo</td></tr>
+</table>
+
+<h3 id="more">11.2 Where to read more</h3>
+<table>
+  <tr><th>Topic</th><th>Reference</th></tr>
+  <tr><td>Language syntax, async/await, pattern matching</td><td><a href="Tzopilotl_by_Example.html">Tzopilotl By Example</a></td></tr>
+  <tr><td>All built-in functions</td><td><a href="Builtin_Functions.html">Builtin Functions</a></td></tr>
+  <tr><td>Embedding, FFI, OSC, NATS, Clock/Tempo, Silo VM, NRT render, binary messages</td><td><a href="FFI_Guide.html">FFI Guide</a></td></tr>
+  <tr><td>Engine FFI surface (every node/connection/note call)</td><td><code>bridge/audio-engine-ffi.md</code></td></tr>
+  <tr><td>Engine design: silos, nodes, commands, voices, topo sort</td><td><code>engine/Architecture.md</code>, <code>engine/CLAUDE.md</code></td></tr>
+  <tr><td>SynthDef compiler: the <code>S</code> graph, rates, codegen</td><td><code>synthdef-compiler/ARCHITECTURE.md</code></td></tr>
+  <tr><td>UGen / filter / DSP libraries</td><td><code>lang/modules/common_ugens.x</code>, <code>filters.x</code>, <code>dsp_math.x</code></td></tr>
+  <tr><td>Actor model + message format</td><td><code>lang/modules/actors.x</code>, <code>message.x</code>, <code>sexprs.x</code></td></tr>
+  <tr><td>Worked examples to copy from</td><td><code>integration-tests/scripts/*.x</code>, <code>lang/tests/actors/*.x</code></td></tr>
+</table>
+
+</main>
+<script>
+(function() {
+  var btn = document.getElementById('theme-toggle');
+  var icon = document.getElementById('theme-icon');
+  function update() {
+    var isLight = document.documentElement.classList.contains('light');
+    icon.innerHTML = isLight ? '☀' : '☾';
+  }
+  update();
+  btn.addEventListener('click', function() {
+    document.documentElement.classList.toggle('light');
+    localStorage.setItem('tzpl-docs-theme',
+      document.documentElement.classList.contains('light') ? 'light' : 'dark');
+    update();
+  });
+})();
+</script>
+</body>
+</html>
