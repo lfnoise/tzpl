@@ -8,10 +8,16 @@ import audio_engine.*;   -- siloDeliverBytes (the C++ transport)
 import message.*;        -- encode (SExpr -> Bytes)
 import sexprs.*;         -- SExpr
 
--- Send an SExpr message to the actor registered as `name` in silo `silo`.
--- Encodes the message and ships the bytes to the silo's delivery trampoline,
--- which decodes it on the silo's RT thread and enqueues it into that actor.
--- Delivery is asynchronous; the message lands on the silo's next block.
+-- Send an SExpr message to the actor registered as `name` in silo `silo`,
+-- delivered as soon as it reaches the silo (the next audio block).
 fn siloSend(silo Int, name Symbol, msg SExpr) Void {
     siloDeliverBytes(silo, name, encode(msg));
+}
+
+-- Schedule an SExpr message to the named silo actor for a specific beat:
+-- it lands in the actor's mailbox sample-accurately when TempoClock `clock`
+-- reaches `beat`, using the engine's late-bound beat scheduler. This is how a
+-- conductor (NRT or external) commands silo actors on the musical grid.
+fn siloSendAt(silo Int, clock Int, beat Float, name Symbol, msg SExpr) Void {
+    siloDeliverBytesAt(silo, clock, beat, name, encode(msg));
 }

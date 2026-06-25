@@ -1052,32 +1052,52 @@ static void ffi_readFile(ts::VM& vm, u16 dst, u16, u16 argBase) {
 // Registration
 // ---------------------------------------------------------------------------
 
-// fn siloDeliverBytes(silo Int, name Symbol, b Bytes) Int
-// NRT -> silo: ship an already-encoded actor message (Bytes) to a silo's
-// delivery trampoline, which decodes it and enqueues it into the named local
-// actor. Used by the lang `siloSend(silo, name, msg)` after it encode()s.
-static void ffi_siloDeliverBytes(ts::VM& vm, u16 dst, u16, u16 argBase) {
-    auto* ctx = getAppContext(vm);
+// Build + dispatch a cross-VM actor message to a silo. `clock<0` => immediate;
+// otherwise the DeliverActorMsgCmd is beat-scheduled on the silo's TempoClock
+// slot `clock` and its decode+enqueue fires when that clock reaches `beat`.
+static tzpl_SErr siloDeliverImpl(AppContext* ctx, int silo, ts::SymbolPtr name,
+                                 ts::BytesObj* bytes, int clock, f64 beat,
+                                 engine::SchedPolicy policy) {
     auto* eng = ctx ? ctx->engine : nullptr;
-    int silo = static_cast<int>(vm.reg(argBase).i);
-    ts::SymbolPtr name = vm.reg(argBase + 1).s;
-    auto* bytes = static_cast<ts::BytesObj*>(vm.reg(argBase + 2).o);
-    if (!ctx || !eng || silo < 0 || silo >= (int)ctx->siloVMs.size()) {
-        returnErr(vm, dst, tzpl_errSiloOutOfRange, __func__);
-        return;
-    }
+    if (!ctx || !eng || silo < 0 || silo >= (int)ctx->siloVMs.size())
+        return tzpl_errSiloOutOfRange;
     auto& state = ctx->siloVMs[silo];
-    if (!state.vm || state.deliverGlobalIndex < 0) {
-        returnErr(vm, dst, tzpl_errInternal, __func__);
-        return;
-    }
+    if (!state.vm || state.deliverGlobalIndex < 0 || !bytes)
+        return tzpl_errInternal;
     auto* deliverFn = static_cast<ts::CodeBlock*>(
         state.vm->global((u32)state.deliverGlobalIndex).p);
     auto* cmd = new DeliverActorMsgCmd(deliverFn, name,
                                        bytes->data.data(), bytes->data.size());
+    cmd->clock_ = clock;
+    cmd->beatTime_ = beat;
+    cmd->schedPolicy_ = policy;
     sendCmdListToSilo(eng, silo, cmd);
+    return tzpl_errNone;
+}
+
+// fn siloDeliverBytes(silo Int, name Symbol, b Bytes) Int  -- deliver now.
+static void ffi_siloDeliverBytes(ts::VM& vm, u16 dst, u16, u16 argBase) {
+    tzpl_SErr err = siloDeliverImpl(
+        getAppContext(vm), static_cast<int>(vm.reg(argBase).i),
+        vm.reg(argBase + 1).s, static_cast<ts::BytesObj*>(vm.reg(argBase + 2).o),
+        /*clock=*/-1, /*beat=*/0.0, engine::schedImmediate);
     vm.makeCurrent();   // restore main VM if it ran inline (audio stopped)
-    returnErr(vm, dst, tzpl_errNone, __func__);
+    returnErr(vm, dst, err, __func__);
+}
+
+// fn siloDeliverBytesAt(silo Int, clock Int, beat Float, name Symbol, b Bytes) Int
+// Beat-scheduled delivery: the message lands in the silo actor's mailbox when
+// TempoClock `clock` reaches `beat` (sample-accurate), driven by the same
+// late-bound queue engine commands use. schedBetterLateThanNever so a slightly
+// late conductor message still plays rather than being dropped.
+static void ffi_siloDeliverBytesAt(ts::VM& vm, u16 dst, u16, u16 argBase) {
+    tzpl_SErr err = siloDeliverImpl(
+        getAppContext(vm), static_cast<int>(vm.reg(argBase).i),
+        vm.reg(argBase + 3).s, static_cast<ts::BytesObj*>(vm.reg(argBase + 4).o),
+        static_cast<int>(vm.reg(argBase + 1).i), vm.reg(argBase + 2).f,
+        engine::schedBetterLateThanNever);
+    vm.makeCurrent();
+    returnErr(vm, dst, err, __func__);
 }
 
 void registerAudioEngineFFI(ts::Compiler& compiler) {
@@ -1183,7 +1203,8 @@ void registerAudioEngineFFI(ts::Compiler& compiler) {
     reg("siloEval",         Int, {Int, String},    ffi_siloEval);
     reg("siloLoad",         FutureString, {Int, String}, ffi_siloLoad);
     reg("siloStartAt",      Void, {Float, IntArray},      ffi_siloStartAt);
-    reg("siloDeliverBytes", Int,  {Int, Symbol, Bytes},  ffi_siloDeliverBytes);
+    reg("siloDeliverBytes",   Int, {Int, Symbol, Bytes},              ffi_siloDeliverBytes);
+    reg("siloDeliverBytesAt", Int, {Int, Int, Float, Symbol, Bytes},  ffi_siloDeliverBytesAt);
     reg("readFile",         String, {String},             ffi_readFile);
     reg("scheduleTask",     Int,  {Int, FnFloat},         ffi_scheduleTask, true);
     reg("playNote",         Int,  {Int, Int, FloatArray}, ffi_playNote,     true);
