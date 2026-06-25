@@ -898,7 +898,12 @@ static void ffi_siloLoad(ts::VM& vm, u16 dst, u16, u16 argBase) {
     if (!state.vm) { resolveNow("siloLoad: no VM attached to silo"); return; }
 
     // Compile the module on this NRT thread with the silo's rt-restricted target.
-    std::string source(code);
+    // Inject the cross-VM actor delivery trampoline as a preamble so any silo
+    // module can receive messages sent by name from the NRT side.
+    std::string source =
+        "import message.*;\n"
+        "fn tzpl_actor_deliver(name Symbol, b Bytes) Void { sendByName(name, decode(b)); }\n"
+        + std::string(code);
     ts::CompileResult compiled = ctx->compiler->compile(
         source, "<siloLoad>", state.target, state.moduleCompiler.get());
     if (!compiled.success) {
@@ -910,10 +915,12 @@ static void ffi_siloLoad(ts::VM& vm, u16 dst, u16, u16 argBase) {
     // Record the module's start() entry (Void, no params) so siloStartAt can
     // call it later -- by global index, no re-resolution needed.
     state.startGlobalIndex = -1;
+    state.deliverGlobalIndex = -1;
     for (auto& ef : compiled.exportedFunctions) {
         if (ef.name == "start" && ef.paramTypes.empty()) {
             state.startGlobalIndex = (int)ef.globalIndex;
-            break;
+        } else if (ef.name == "tzpl_actor_deliver") {
+            state.deliverGlobalIndex = (int)ef.globalIndex;
         }
     }
 
@@ -1045,12 +1052,42 @@ static void ffi_readFile(ts::VM& vm, u16 dst, u16, u16 argBase) {
 // Registration
 // ---------------------------------------------------------------------------
 
+// fn siloDeliverBytes(silo Int, name Symbol, b Bytes) Int
+// NRT -> silo: ship an already-encoded actor message (Bytes) to a silo's
+// delivery trampoline, which decodes it and enqueues it into the named local
+// actor. Used by the lang `siloSend(silo, name, msg)` after it encode()s.
+static void ffi_siloDeliverBytes(ts::VM& vm, u16 dst, u16, u16 argBase) {
+    auto* ctx = getAppContext(vm);
+    auto* eng = ctx ? ctx->engine : nullptr;
+    int silo = static_cast<int>(vm.reg(argBase).i);
+    ts::SymbolPtr name = vm.reg(argBase + 1).s;
+    auto* bytes = static_cast<ts::BytesObj*>(vm.reg(argBase + 2).o);
+    if (!ctx || !eng || silo < 0 || silo >= (int)ctx->siloVMs.size()) {
+        returnErr(vm, dst, tzpl_errSiloOutOfRange, __func__);
+        return;
+    }
+    auto& state = ctx->siloVMs[silo];
+    if (!state.vm || state.deliverGlobalIndex < 0) {
+        returnErr(vm, dst, tzpl_errInternal, __func__);
+        return;
+    }
+    auto* deliverFn = static_cast<ts::CodeBlock*>(
+        state.vm->global((u32)state.deliverGlobalIndex).p);
+    auto* cmd = new DeliverActorMsgCmd(deliverFn, name,
+                                       bytes->data.data(), bytes->data.size());
+    sendCmdListToSilo(eng, silo, cmd);
+    vm.makeCurrent();   // restore main VM if it ran inline (audio stopped)
+    returnErr(vm, dst, tzpl_errNone, __func__);
+}
+
 void registerAudioEngineFFI(ts::Compiler& compiler) {
     auto* Void   = compiler.voidType();
     auto* Int    = compiler.intType();
     auto* Float  = compiler.floatType();
     auto* Bool   = compiler.boolType();
     auto* String = compiler.stringType();
+    auto* Symbol = compiler.symbolType();
+    auto* Bytes  = compiler.bytesType();
     // ArrayType is forward-declared; we avoid including type_system.hpp
     // to prevent TLS-related link issues. The cast is safe because
     // ArrayType inherits from Type.
@@ -1146,6 +1183,7 @@ void registerAudioEngineFFI(ts::Compiler& compiler) {
     reg("siloEval",         Int, {Int, String},    ffi_siloEval);
     reg("siloLoad",         FutureString, {Int, String}, ffi_siloLoad);
     reg("siloStartAt",      Void, {Float, IntArray},      ffi_siloStartAt);
+    reg("siloDeliverBytes", Int,  {Int, Symbol, Bytes},  ffi_siloDeliverBytes);
     reg("readFile",         String, {String},             ffi_readFile);
     reg("scheduleTask",     Int,  {Int, FnFloat},         ffi_scheduleTask, true);
     reg("playNote",         Int,  {Int, Int, FloatArray}, ffi_playNote,     true);

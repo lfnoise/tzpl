@@ -529,6 +529,13 @@ public:
     // Drain ready actors (and fire delay timers) until the system is quiescent
     // -- every actor parked on an empty mailbox. The NRT actor run loop.
     void runActorLoop();
+    // Name registry: give an actor a stable name in this VM, look one up.
+    void registerActorName(SymbolPtr name, i64 id) { actorNames_[name] = id; }
+    i64 actorIdByName(SymbolPtr name) const {
+        auto it = actorNames_.find(name);
+        return it == actorNames_.end() ? -1 : it->second;
+    }
+
     // Drive the actor/async loop one tick against an external clock: advance the
     // virtual beat to `beat`, fire due delay() timers, and resume up to `budget`
     // ready actors (bounded so an audio block never overruns). This is how silo

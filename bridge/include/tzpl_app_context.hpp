@@ -62,6 +62,10 @@ struct SiloVMState {
     // Global index of the most recently siloLoad'ed module's start() entry
     // (Void, no params), or -1 if none. siloStartAt schedules a call to it.
     int startGlobalIndex = -1;
+    // Global index of the cross-VM actor delivery trampoline
+    // (tzpl_actor_deliver(Symbol, Bytes) -> sendByName(name, decode(bytes))),
+    // injected as a preamble by siloLoad. -1 if absent.
+    int deliverGlobalIndex = -1;
     // Owns the per-silo task scheduler (bridge::SiloTaskScheduler). Opaque here
     // to keep this header free of the bridge .cpp's internals; deleted on detach.
     void* taskSched = nullptr;

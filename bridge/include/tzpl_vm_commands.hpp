@@ -33,6 +33,35 @@
 
 namespace bridge {
 
+// Cross-VM actor message delivery (NRT -> silo). Carries the encoded SExpr
+// (raw bytes, copied on the NRT thread, no Obj* crosses the heap boundary) and
+// the silo VM's delivery trampoline. On the silo's RT thread it rebuilds a
+// Bytes in the silo heap and calls the trampoline, which decodes the message
+// and enqueues it into the named local actor.
+struct DeliverActorMsgCmd : engine::Command {
+    ts::CodeBlock* deliverFn_;      // tzpl_actor_deliver(Symbol, Bytes)
+    ts::SymbolPtr  name_;           // target actor name (process-global symbol)
+    std::vector<u8> bytes_;         // encoded SExpr, owned
+
+    DeliverActorMsgCmd(ts::CodeBlock* fn, ts::SymbolPtr name,
+                       const u8* data, size_t len)
+        : deliverFn_(fn), name_(name),
+          bytes_(data, data + len) {}
+
+    void doRT(engine::Silo* s) override {
+        auto* vm = static_cast<ts::VM*>(s->vm_);
+        if (vm && deliverFn_) {
+            vm->makeCurrent();
+            auto* b = new ts::BytesObj(bytes_.data(), bytes_.size());  // silo heap
+            ts::Word args[2];
+            args[0].s = name_;
+            args[1].o = b;
+            vm->callFunction(deliverFn_, args, 2);
+            vm->gcHeartbeat();
+        }
+    }
+};
+
 // Dispatches an event to the Silo's attached VM.
 // Created on an NRT thread, sent through from_nrt_ or the scheduler.
 struct VMEventCmd : engine::Command {

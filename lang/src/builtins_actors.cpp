@@ -50,11 +50,9 @@ static void builtin_spawn(VM& vm, u16 dst, u16, u16 ab) {
     vm.reg(dst).o = actor;          // re-publish: the drive may have touched regs
 }
 
-// send(to Actor<M>, msg M) Void
-// If a receiver is parked, resolve its future and wake it; else queue the msg.
-static void builtin_send(VM& vm, u16 dst, u16, u16 ab) {
-    auto* actor = static_cast<ActorObj*>(vm.reg(ab).o);
-    Word msg = vm.reg((u16)(ab + 1));
+// Deliver one message to an actor's mailbox: wake a parked receiver, else queue.
+static void deliverToActor(VM& vm, ActorObj* actor, Word msg) {
+    if (!actor) return;
     Future* pend = actor->pendingReceiver_;
     if (pend && pend->state_ == Future::Pending) {
         actor->pendingReceiver_ = nullptr;
@@ -64,6 +62,30 @@ static void builtin_send(VM& vm, u16 dst, u16, u16 ab) {
     } else {
         actor->enqueue(msg);
     }
+}
+
+// send(to Actor<M>, msg M) Void
+static void builtin_send(VM& vm, u16 dst, u16, u16 ab) {
+    deliverToActor(vm, static_cast<ActorObj*>(vm.reg(ab).o), vm.reg((u16)(ab + 1)));
+    vm.reg(dst).i = 0;
+}
+
+// register(name Symbol, a Actor<M>) Void -- give an actor a stable name in this
+// VM's registry, so it can be addressed by name (incl. cross-VM delivery).
+static void builtin_register(VM& vm, u16 dst, u16, u16 ab) {
+    SymbolPtr name = vm.reg(ab).s;
+    auto* actor = static_cast<ActorObj*>(vm.reg((u16)(ab + 1)).o);
+    if (actor) vm.registerActorName(name, actor->id_);
+    vm.reg(dst).i = 0;
+}
+
+// sendByName(name Symbol, msg M) Void -- deliver to the locally-registered actor
+// of that name (no-op if none). This is the local enqueue used by the cross-VM
+// delivery trampoline after it decodes a message.
+static void builtin_sendByName(VM& vm, u16 dst, u16, u16 ab) {
+    SymbolPtr name = vm.reg(ab).s;
+    i64 id = vm.actorIdByName(name);
+    deliverToActor(vm, vm.actorById(id), vm.reg((u16)(ab + 1)));
     vm.reg(dst).i = 0;
 }
 
@@ -127,12 +149,36 @@ static bool resolve_receive(Compiler& compiler, const std::vector<Type*>& args,
     return true;
 }
 
+static bool resolve_register(Compiler& compiler, const std::vector<Type*>& args,
+    std::vector<Type*>& pt, Type*& rt, CFun& cf) {
+    if (args.size() != 2) return false;
+    if (args[0] != compiler.symbolType()) return false;
+    if (!dynamic_cast<ActorType*>(args[1])) return false;
+    pt = { compiler.symbolType(), args[1] };
+    rt = compiler.voidType();
+    cf = builtin_register;
+    return true;
+}
+
+static bool resolve_sendByName(Compiler& compiler, const std::vector<Type*>& args,
+    std::vector<Type*>& pt, Type*& rt, CFun& cf) {
+    if (args.size() != 2) return false;
+    if (args[0] != compiler.symbolType()) return false;
+    pt = { compiler.symbolType(), args[1] };
+    rt = compiler.voidType();
+    cf = builtin_sendByName;
+    return true;
+}
+
 void registerActorBuiltins(Compiler& compiler, FuncMap& functions) {
     // spawn / send / receive only allocate in the VM's TLSF heap and touch the
     // mailbox queue -- RT-safe, so silo actors can use them on the audio thread.
     registerTemplate(compiler, functions, "spawn",   resolve_spawn,   /*rtSafe=*/true, /*acceptsInlineArgs=*/false);
     registerTemplate(compiler, functions, "send",    resolve_send,    /*rtSafe=*/true, /*acceptsInlineArgs=*/false);
     registerTemplate(compiler, functions, "receive", resolve_receive, /*rtSafe=*/true, /*acceptsInlineArgs=*/false);
+    // Name registry (for addressing actors, incl. the cross-VM delivery path).
+    registerTemplate(compiler, functions, "register",   resolve_register,   /*rtSafe=*/true, /*acceptsInlineArgs=*/false);
+    registerTemplate(compiler, functions, "sendByName", resolve_sendByName, /*rtSafe=*/true, /*acceptsInlineArgs=*/false);
     // runActors is the NRT blocking drain loop -- not for the RT thread (silos
     // are driven by the per-block tick instead).
     registerOne(compiler, functions, "runActors", compiler.voidType(), {}, builtin_runActors,
