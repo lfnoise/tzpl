@@ -643,7 +643,9 @@ void VM::resumeAsync(CoroutineObj* coro) {
     setCurrentCoroutine(coro);                   // roots the coroutine
     coro->state_ = CoroutineObj::Running;
 
-    u32 newBase = baseReg_ + currentFrameNumRegs();
+    // When driven from an idle VM (e.g. the silo tick between commands) there is
+    // no active frame; place the coroutine's window at the current base (0).
+    u32 newBase = (frameCount_ > 0) ? (baseReg_ + currentFrameNumRegs()) : baseReg_;
     CoroutineFrame* frame = coro->topFrame_;
     setCurrentCoroFrame(frame);
     for (u16 i = 0; i < frame->numRegs_; ++i) regs_[newBase + i] = frame->regs_[i];
@@ -715,7 +717,7 @@ void VM::spawnActorDrive(ActorObj* actor, Lambda* behavior,
     coro->resultFuture_ = future;
     actor->behavior_ = coro;
 
-    u32 newBase = baseReg_ + currentFrameNumRegs();
+    u32 newBase = (frameCount_ > 0) ? (baseReg_ + currentFrameNumRegs()) : baseReg_;
     CodeBlock* callee = coro->entryBlock_;
     auto* frame = CoroutineFrame::create(nullptr, callee, callee->numRegs);
     setCurrentCoroFrame(frame);                  // root the save frame
@@ -754,6 +756,37 @@ void VM::runActorLoop() {
             continue;
         }
         break;   // quiescent: every actor parked on an empty mailbox
+    }
+}
+
+void VM::tickActors(double beat, int budget) {
+    // The silo VM is idle (no active frame) between commands; reset to a clean
+    // base so resumed actor coroutines get a valid register window.
+    if (frameCount_ == 0) { baseReg_ = 0; currentRegs_ = regs_; }
+    if (beat > asyncBeat_) asyncBeat_ = beat;
+    int n = 0;
+    while (n < budget) {
+        if (!asyncReady_.empty()) {
+            CoroutineObj* coro = asyncReady_.front();
+            asyncReady_.erase(asyncReady_.begin());
+            resumeAsync(coro);
+            ++n;
+            continue;
+        }
+        // Fire one delay() timer whose beat the clock has reached, then loop to
+        // drain the actor it unblocks.
+        int dueIdx = -1;
+        for (size_t i = 0; i < asyncTimers_.size(); ++i) {
+            if (asyncTimers_[i].beat <= asyncBeat_) { dueIdx = (int)i; break; }
+        }
+        if (dueIdx >= 0) {
+            Future* fut = asyncTimers_[(usize)dueIdx].fut;
+            asyncTimers_.erase(asyncTimers_.begin() + dueIdx);
+            fut->state_ = Future::Resolved;
+            asyncEnqueueWaiters(fut);
+            continue;
+        }
+        break;   // nothing ready, no due timers
     }
 }
 

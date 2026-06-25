@@ -592,6 +592,15 @@ struct SiloTaskScheduler {
                 pp = &e->next;
             }
         }
+
+        // Drive any actors living in this silo's VM against tempo clock 0, so a
+        // silo actor's `await delay(n)` resolves sample-accurately on the audio
+        // beat. Bounded per sample so a burst can't overrun the block.
+        if (vm_ && !s->tempoClocks_.empty()) {
+            f64 beat = s->tempoClocks_[0].beatAtSample(sampleTime);
+            vm_->makeCurrent();
+            vm_->tickActors(beat, /*budget=*/64);
+        }
     }
 
     void markRoots(ts::TracingGC& gc) {

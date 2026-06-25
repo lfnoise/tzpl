@@ -529,6 +529,12 @@ public:
     // Drain ready actors (and fire delay timers) until the system is quiescent
     // -- every actor parked on an empty mailbox. The NRT actor run loop.
     void runActorLoop();
+    // Drive the actor/async loop one tick against an external clock: advance the
+    // virtual beat to `beat`, fire due delay() timers, and resume up to `budget`
+    // ready actors (bounded so an audio block never overruns). This is how silo
+    // actors are clocked -- `await delay(n)` resolves when the audio beat reaches
+    // it. No host allocation beyond the VM's TLSF heap; safe on the RT thread.
+    void tickActors(double beat, int budget);
 
     // Cross-thread future support (Phase C). The host registers a blocking-wait
     // callback that releases its mutex and parks until the predicate holds.

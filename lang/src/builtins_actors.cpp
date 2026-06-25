@@ -128,9 +128,13 @@ static bool resolve_receive(Compiler& compiler, const std::vector<Type*>& args,
 }
 
 void registerActorBuiltins(Compiler& compiler, FuncMap& functions) {
-    registerTemplate(compiler, functions, "spawn",   resolve_spawn,   /*rtSafe=*/false, /*acceptsInlineArgs=*/false);
-    registerTemplate(compiler, functions, "send",    resolve_send,    /*rtSafe=*/false, /*acceptsInlineArgs=*/false);
-    registerTemplate(compiler, functions, "receive", resolve_receive, /*rtSafe=*/false, /*acceptsInlineArgs=*/false);
+    // spawn / send / receive only allocate in the VM's TLSF heap and touch the
+    // mailbox queue -- RT-safe, so silo actors can use them on the audio thread.
+    registerTemplate(compiler, functions, "spawn",   resolve_spawn,   /*rtSafe=*/true, /*acceptsInlineArgs=*/false);
+    registerTemplate(compiler, functions, "send",    resolve_send,    /*rtSafe=*/true, /*acceptsInlineArgs=*/false);
+    registerTemplate(compiler, functions, "receive", resolve_receive, /*rtSafe=*/true, /*acceptsInlineArgs=*/false);
+    // runActors is the NRT blocking drain loop -- not for the RT thread (silos
+    // are driven by the per-block tick instead).
     registerOne(compiler, functions, "runActors", compiler.voidType(), {}, builtin_runActors,
                 /*pure=*/false, /*rtSafe=*/false);
 }
