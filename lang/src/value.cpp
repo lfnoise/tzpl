@@ -780,6 +780,17 @@ Future* Future::create(FutureType* type, Type* valueType, u16 valueWords) {
     return future;
 }
 
+// Actor constructor
+ActorObj::ActorObj(ActorType* type, Type* msgType, FutureType* futType, i64 id)
+    : Obj(reinterpret_cast<Type*>(type))
+    , queue_(rt::STLAllocator<Word>(rt::gCurrentAllocator))
+    , msgType_(msgType)
+    , futType_(futType)
+    , id_(id)
+{
+    registerNewObj(this, GCTag::Default);
+}
+
 // Method constructor
 Method::Method(Type* type)
     : Callable(type)

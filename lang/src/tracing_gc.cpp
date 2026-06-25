@@ -353,6 +353,12 @@ void TracingGC::step_root_frames(u64 deadlineNanos, u32& sinceCheck, u32& done) 
     for (ExecSnapshot const* s : vm_.awaitSnapshots_) {
         if (s) scanExecSnapshot(*s);
     }
+    // Live actors: a parked actor (its coroutine on its mailbox future's waiter
+    // list) is reachable only through this registry. The actor in turn marks its
+    // queued messages, pending-receiver future, and behavior coroutine.
+    for (ActorObj* a : vm_.liveActors_) {
+        if (a) { mark(a); ++lastRootCount_; }
+    }
     rootPhase_ = RootPhase::Extras;
     rootExtraCursor_ = 0;
 }

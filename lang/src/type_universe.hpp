@@ -46,6 +46,7 @@ class FunctionType;
 class EnumType;
 class CoroutineType;
 class FutureType;
+class ActorType;
 
 // Built-in type pointers
 struct BuiltinTypes {
@@ -119,6 +120,7 @@ public:
     EnumType* optionType(Type* elemType);
     CoroutineType* coroutineType(Type* yieldType);
     FutureType* futureType(Type* valueType);
+    ActorType* actorType(Type* msgType);
 
     // Convenience overloads accepting any container with .data() and .size()
     template <typename Container>
@@ -149,6 +151,7 @@ private:
     std::unordered_map<Type*, EnumType*> optionTypeCache_;
     std::unordered_map<Type*, CoroutineType*> coroutineTypeCache_;
     std::unordered_map<Type*, FutureType*> futureTypeCache_;
+    std::unordered_map<Type*, ActorType*> actorTypeCache_;
 };
 
 } // namespace ts

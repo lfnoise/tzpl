@@ -183,6 +183,7 @@ public:
     EnumType* optionType(Type* elemType) { return typeUniverse_.optionType(elemType); }
     CoroutineType* coroutineType(Type* yieldType) { return typeUniverse_.coroutineType(yieldType); }
     FutureType* futureType(Type* valueType) { return typeUniverse_.futureType(valueType); }
+    ActorType* actorType(Type* msgType) { return typeUniverse_.actorType(msgType); }
     TupleType* tupleType(const Vec<Type*>& fields) { return typeUniverse_.tupleType(fields); }
     FunctionType* functionType(const Vec<Type*>& argTypes, Type* returnType) {
         return typeUniverse_.functionType(argTypes, returnType);

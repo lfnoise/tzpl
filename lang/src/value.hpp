@@ -1708,6 +1708,45 @@ private:
 };
 #pragma clang diagnostic pop
 
+// Actor - a lightweight actor with a single-threaded mailbox. Messages of type
+// M (1 word; e.g. an SExpr Obj*) queue in FIFO order; a `receive` when the queue
+// is empty parks the actor's coroutine on `pendingReceiver_` (a Future<M>) until
+// a `send` resolves it. Owned by one VM; all enqueues happen on that VM's
+// thread (cross-thread/heap delivery is re-enqueued here by the transport).
+// Rooted via the VM's actor registry so a parked actor is not collected.
+class ActorObj : public Obj {
+public:
+    Vec<Word>     queue_;                  // pending messages, 1 word each
+    usize         head_ = 0;               // dequeue cursor (index into queue_)
+    Type*         msgType_;                // M (for GC scan + Future value type)
+    FutureType*   futType_;                // cached Future<M> type for receive
+    Future*       pendingReceiver_ = nullptr;  // future a parked receiver awaits
+    CoroutineObj* behavior_ = nullptr;     // the actor's coroutine
+    i64           id_ = -1;                // registry index in the owning VM
+    bool          stopped_ = false;
+
+    ActorObj(ActorType* type, Type* msgType, FutureType* futType, i64 id);
+
+    bool empty() const { return head_ >= queue_.size(); }
+    void enqueue(Word msg) { queue_.push_back(msg); }
+    Word dequeue() {
+        Word w = queue_[head_++];
+        if (head_ >= queue_.size()) { queue_.clear(); head_ = 0; }
+        return w;
+    }
+
+    VMString str() const override { return rt::fmt("[Actor {}]", id_); }
+
+    void gcScanChildren(TracingGC& gc) override {
+        if (msgType_ && storesObjPtr(msgType_)) {
+            for (usize i = head_; i < queue_.size(); ++i)
+                if (queue_[i].o) gc.mark(queue_[i].o);
+        }
+        if (pendingReceiver_) gc.mark(reinterpret_cast<GCObj*>(pendingReceiver_));
+        if (behavior_) gc.mark(behavior_);
+    }
+};
+
 // Method
 class Method : public Callable {
 public:

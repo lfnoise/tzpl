@@ -54,6 +54,7 @@ set(LIB_SOURCES
     src/builtins_array.cpp
     src/builtins_listgen.cpp
     src/builtins_bytes.cpp
+    src/builtins_actors.cpp
     src/disassemble.cpp
     src/module_compiler.cpp
     src/diagnostic.cpp

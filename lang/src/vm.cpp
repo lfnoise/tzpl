@@ -666,6 +666,97 @@ void VM::resumeAsync(CoroutineObj* coro) {
     halted_ = wasHalted;
 }
 
+// --- Actors (Phase 1) ---
+
+i64 VM::registerActor(ActorObj* a) {
+    i64 id = (i64)liveActors_.size();
+    a->id_ = id;
+    liveActors_.push_back(a);
+    return id;
+}
+
+ActorObj* VM::actorById(i64 id) const {
+    if (id < 0 || (usize)id >= liveActors_.size()) return nullptr;
+    return liveActors_[(usize)id];
+}
+
+// Create the actor's behavior coroutine (from a Lambda) and drive it to its
+// first suspension. Mirrors op_async_call but starts from a Lambda's CodeBlock
+// + free vars and uses the g_asyncDriverHalt synthetic caller so control unwinds
+// back here (a C++ frame) when the body first suspends or completes.
+void VM::spawnActorDrive(ActorObj* actor, Lambda* behavior,
+                         Word const* extraArgs, u16 nExtra) {
+    CodeBlock* codeBlock = behavior->codeBlock_;
+    auto* funcType = static_cast<FunctionType*>(codeBlock->funcType);
+    u16 nFree = behavior->numFreeVars_;
+    u16 numArgs = (u16)(1 + nExtra + nFree);     // self + init... + freevars
+
+    // An async fn body's coroutine carries a FutureType (Future<Void>) and a
+    // resultFuture_ that op_async_return resolves on completion.
+    Type* voidT = typeUniverse_.types().voidType;
+    FutureType* futVoid = typeUniverse_.futureType(voidT);
+
+    auto* coro = CoroutineObj::create(reinterpret_cast<CoroutineType*>(futVoid),
+                                      funcType, codeBlock, numArgs);
+    coro->args_[0].o = actor;
+    for (u16 i = 0; i < nExtra; ++i) coro->args_[(u16)(1 + i)] = extraArgs[i];
+    for (u16 i = 0; i < nFree; ++i)  coro->args_[(u16)(1 + nExtra + i)] = behavior->freeVars_[i];
+
+    coro->callerReturnPC_   = g_asyncDriverHalt;
+    coro->callerResultReg_  = 0;
+    coro->callerBaseReg_    = baseReg_;
+    coro->callerFrameCount_ = frameCount_;
+    coro->callerCoroFrame_  = currentCoroFrame_;
+    coro->callerCoroutine_  = currentCoroutine_;
+    setCurrentCoroutine(coro);                   // root the coroutine
+    coro->state_ = CoroutineObj::Running;
+
+    auto* future = Future::create(futVoid, voidT, 1);  // coro rooted
+    coro->resultFuture_ = future;
+    actor->behavior_ = coro;
+
+    u32 newBase = baseReg_ + currentFrameNumRegs();
+    CodeBlock* callee = coro->entryBlock_;
+    auto* frame = CoroutineFrame::create(nullptr, callee, callee->numRegs);
+    setCurrentCoroFrame(frame);                  // root the save frame
+    for (u16 i = 0; i < coro->numArgs_; ++i) regs_[newBase + i] = coro->args_[i];
+    pushFrame(nullptr, callee, newBase, callee->numRegs, 0);
+    Code* entry;
+    if (!callee->defaultEntryOffsets.empty()) {
+        u16 idx = (u16)(coro->numArgs_ - callee->minArity);
+        entry = callee->code.data() + callee->defaultEntryOffsets[idx];
+    } else {
+        entry = callee->code.data();
+    }
+    bool wasHalted = halted_;
+    halted_ = false;
+    entry->op(*this, entry);                      // run to first suspend/complete
+    halted_ = wasHalted;
+}
+
+void VM::runActorLoop() {
+    while (true) {
+        if (!asyncReady_.empty()) {
+            CoroutineObj* coro = asyncReady_.front();
+            asyncReady_.erase(asyncReady_.begin());
+            resumeAsync(coro);
+            continue;
+        }
+        if (!asyncTimers_.empty()) {
+            size_t best = 0;
+            for (size_t i = 1; i < asyncTimers_.size(); ++i)
+                if (asyncTimers_[i].beat < asyncTimers_[best].beat) best = i;
+            AsyncTimer t = asyncTimers_[best];
+            asyncTimers_.erase(asyncTimers_.begin() + (std::ptrdiff_t)best);
+            if (t.beat > asyncBeat_) asyncBeat_ = t.beat;
+            t.fut->state_ = Future::Resolved;
+            asyncEnqueueWaiters(t.fut);
+            continue;
+        }
+        break;   // quiescent: every actor parked on an empty mailbox
+    }
+}
+
 void VM::resolveExternalFuture(Future* f, Word const* value, u16 stride) {
     if (!f || f->state_ == Future::Resolved) return;
     for (u16 i = 0; i < stride && i < f->valueWords_; ++i) f->value_[i] = value[i];

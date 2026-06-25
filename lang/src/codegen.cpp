@@ -9965,13 +9965,21 @@ u16 CodeGen::genLambdaExpr(LambdaExprNode* expr) {
     bool savedInFunctionBody = inFunctionBody_;
     inFunctionBody_ = true;
     bool savedInCoroFn = inCoroutineFn_;
-    // Async lambdas are not yet supported; ensure a lambda nested inside an
-    // async fn body does not inherit inAsyncFn_ (which would mis-lower returns).
+    // An `async fn(...)` lambda lowers its body like an async fn (await suspends,
+    // returns go through op_async_return). A plain lambda nested inside an async
+    // fn must NOT inherit inAsyncFn_, so key strictly on this lambda's own flag.
     bool savedInAsyncFn = inAsyncFn_;
-    inAsyncFn_ = false;
+    inAsyncFn_ = expr->isAsync;
     u32 savedYieldCount = currentYieldCount_;
     Type* savedReturnType = currentReturnType_;
     currentReturnType_ = lambdaType ? lambdaType->returnType_ : nullptr;
+    if (expr->isAsync) {
+        // External type is Future<T>; the body produces T.
+        currentYieldCount_ = 0;
+        if (auto* ft = dynamic_cast<FutureType*>(currentReturnType_)) {
+            currentReturnType_ = ft->valueType_;
+        }
+    }
 
     if (expr->isCoroutine) {
         inCoroutineFn_ = true;
@@ -10051,10 +10059,18 @@ u16 CodeGen::genLambdaExpr(LambdaExprNode* expr) {
             genNode(stmt);
         }
         if (!emittedReturn) {
-            if (currentBlock_->code.empty() ||
-                currentBlock_->code.back().op != op_return) {
+            auto lastOp = currentBlock_->code.empty() ? nullptr : currentBlock_->code.back().op;
+            bool terminated = (lastOp == op_return)
+                || (inAsyncFn_ && lastOp == op_async_return)
+                || (inCoroutineFn_ && lastOp == op_coro_done);
+            if (!terminated) {
                 if (inCoroutineFn_) {
                     emitOp(op_coro_done);
+                } else if (inAsyncFn_) {
+                    // async lambda fell through (Void result): resolve with a placeholder.
+                    u16 z = allocReg();
+                    emitOp(op_async_return);
+                    emitRegs(z);
                 } else {
                     emitOp(op_return_void);
                 }
@@ -10063,6 +10079,10 @@ u16 CodeGen::genLambdaExpr(LambdaExprNode* expr) {
     } else {
         if (inCoroutineFn_) {
             emitOp(op_coro_done);
+        } else if (inAsyncFn_) {
+            u16 z = allocReg();
+            emitOp(op_async_return);
+            emitRegs(z);
         } else {
             emitOp(op_return_void);
         }

@@ -57,6 +57,9 @@ class FutureType;
 class Future;
 class CoroutineObj;
 class CoroutineFrame;
+class ActorObj;
+class Lambda;
+class ActorType;
 struct CompileResult;
 class Primitive;
 struct VMTargetData;
@@ -304,6 +307,13 @@ private:
     // the stack map at op_future_block). LIFO -- supports nested parks.
     Vec<ExecSnapshot*>  awaitSnapshots_;
 
+    // Actor registry (Phase 1): every live actor owned by this VM, indexed by
+    // id (its slot here). A GC root -- a parked actor (its coroutine on its
+    // mailbox future's waiter list) is otherwise unreachable. A stopped actor
+    // leaves a null slot. actorNames_ maps a registered name to an actor id.
+    Vec<ActorObj*>      liveActors_;
+    std::unordered_map<SymbolPtr, i64> actorNames_;
+
     // Type universe (shared, system-allocated)
     TypeUniverse& typeUniverse_;
 
@@ -505,6 +515,20 @@ public:
     // Pump the loop on this thread until `target` resolves (op_future_block).
     void pumpUntilResolved(Future* target);
     double asyncBeat() const { return asyncBeat_; }
+
+    // --- Actors (Phase 1) ---
+    // Add an actor to this VM's registry, assigning + returning its id.
+    i64 registerActor(ActorObj* a);
+    // Look up a live actor by id (null if out of range / stopped).
+    ActorObj* actorById(i64 id) const;
+    // Create the behavior coroutine for a freshly-registered actor and drive it
+    // to its first suspension (its first `await receive`). `self` is injected as
+    // arg 0; `extraArgs` are the remaining declared params (e.g. the init msg).
+    void spawnActorDrive(ActorObj* actor, Lambda* behavior,
+                         Word const* extraArgs, u16 nExtra);
+    // Drain ready actors (and fire delay timers) until the system is quiescent
+    // -- every actor parked on an empty mailbox. The NRT actor run loop.
+    void runActorLoop();
 
     // Cross-thread future support (Phase C). The host registers a blocking-wait
     // callback that releases its mutex and parks until the predicate holds.

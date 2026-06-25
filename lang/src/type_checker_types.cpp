@@ -176,6 +176,9 @@ Type* TypeChecker::resolveTypeExpr(TypeExpr* typeExpr) {
         if (tmplNode->name == "Coroutine" && typeArgs.size() == 1) {
             return compiler_.coroutineType(typeArgs[0]);
         }
+        if (tmplNode->name == "Actor" && typeArgs.size() == 1) {
+            return compiler_.actorType(typeArgs[0]);
+        }
         if (tmplNode->name == "Future" && typeArgs.size() == 1) {
             return compiler_.futureType(typeArgs[0]);
         }

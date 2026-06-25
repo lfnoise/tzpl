@@ -556,6 +556,25 @@ public:
 
 };
 
+// Actor type — a lightweight actor whose mailbox carries messages of type M.
+// Modeled on CoroutineType/FutureType: a single-type-parameter heap object.
+// `receive(Actor<M>)` yields `Future<M>`; `send(Actor<M>, M)`.
+class ActorType : public ObjType {
+public:
+    Type* msgType_;
+
+    ActorType(Type* msgType)
+        : msgType_(msgType)
+    {
+        registerNewObj(this);
+    }
+
+    VMString str() const override {
+        return rt::fmt("Actor<{}>", msgType_->str());
+    }
+
+};
+
 // Any type — wraps a value of any type into a uniform object
 class AnyType : public ObjType {
 public:
