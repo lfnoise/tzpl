@@ -110,6 +110,13 @@ static void builtin_runActors(VM& vm, u16 dst, u16, u16) {
     vm.reg(dst).i = 0;
 }
 
+// serveActors() Void -- run as a long-lived actor server: drive the loop, and
+// when idle park until a cross-thread delivery (NATS, a silo) wakes it. Blocks.
+static void builtin_serveActors(VM& vm, u16 dst, u16, u16) {
+    vm.serveActorLoop();
+    vm.reg(dst).i = 0;
+}
+
 // --- resolvers (generic over the message type M, carried by Actor<M>) ---
 
 static bool resolve_spawn(Compiler& compiler, const std::vector<Type*>& args,
@@ -182,6 +189,8 @@ void registerActorBuiltins(Compiler& compiler, FuncMap& functions) {
     // runActors is the NRT blocking drain loop -- not for the RT thread (silos
     // are driven by the per-block tick instead).
     registerOne(compiler, functions, "runActors", compiler.voidType(), {}, builtin_runActors,
+                /*pure=*/false, /*rtSafe=*/false);
+    registerOne(compiler, functions, "serveActors", compiler.voidType(), {}, builtin_serveActors,
                 /*pure=*/false, /*rtSafe=*/false);
 }
 

@@ -109,6 +109,10 @@ struct NRTVM {
             cv.wait(lk, ready);
             lk.release();
         });
+
+        // Wake a thread parked in serveActors / a blocking await when another
+        // thread (a NATS handler, a future resolver) makes async progress.
+        vm.setNotifyAsyncProgress([this]() { cv.notify_all(); });
     }
 
     ~NRTVM() {

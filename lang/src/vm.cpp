@@ -617,12 +617,17 @@ void VM::scheduleDelay(Future* fut, double beats) {
 void VM::asyncEnqueueWaiters(Future* fut) {
     CoroutineObj* w = fut->waiters_;
     fut->waiters_ = nullptr;
+    bool any = false;
     while (w) {
         CoroutineObj* next = w->nextWaiter_;
         w->nextWaiter_ = nullptr;
         asyncReady_.push_back(w);
+        any = true;
         w = next;
     }
+    // Wake a thread parked in serveActors when this enqueue came from another
+    // thread (e.g. a NATS handler). Harmless on the loop's own thread.
+    if (any && notifyAsyncProgress_) notifyAsyncProgress_();
 }
 
 void VM::resumeAsync(CoroutineObj* coro) {
@@ -756,6 +761,46 @@ void VM::runActorLoop() {
             continue;
         }
         break;   // quiescent: every actor parked on an empty mailbox
+    }
+}
+
+void VM::serveActorLoop() {
+    while (true) {
+        if (!asyncReady_.empty()) {
+            CoroutineObj* coro = asyncReady_.front();
+            asyncReady_.erase(asyncReady_.begin());
+            resumeAsync(coro);
+            continue;
+        }
+        if (!asyncTimers_.empty()) {
+            size_t best = 0;
+            for (size_t i = 1; i < asyncTimers_.size(); ++i)
+                if (asyncTimers_[i].beat < asyncTimers_[best].beat) best = i;
+            AsyncTimer t = asyncTimers_[best];
+            asyncTimers_.erase(asyncTimers_.begin() + (std::ptrdiff_t)best);
+            if (t.beat > asyncBeat_) asyncBeat_ = t.beat;
+            t.fut->state_ = Future::Resolved;
+            asyncEnqueueWaiters(t.fut);
+            continue;
+        }
+        // Idle. With no live actors nothing can ever happen; with no host-wait
+        // hook we can't be woken from another thread -- either way, return.
+        if (liveActors_.empty() || !hostBlockingWait_) break;
+        // Park until a cross-thread delivery enqueues a ready actor. Snapshot the
+        // execution context out of the (now-cleared) live frame stack so the
+        // delivering thread can run lang code on this VM while we wait, and a
+        // concurrent GC scans the snapshot rather than our frozen frames.
+        ExecSnapshot snap;
+        saveExecSnapshot(snap);
+        awaitSnapshots_.push_back(&snap);
+        frameCount_ = 0;
+        baseReg_ = 0;
+        currentRegs_ = regs_;
+        currentCoroutine_ = nullptr;
+        currentCoroFrame_ = nullptr;
+        hostBlockingWait_([this]() { return !asyncReady_.empty(); });
+        awaitSnapshots_.pop_back();
+        restoreExecSnapshot(snap);
     }
 }
 

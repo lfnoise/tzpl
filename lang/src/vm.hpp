@@ -300,6 +300,10 @@ private:
     // variable until a cross-thread resolution notifies it.
     Vec<Future*>        asyncExternalFutures_;
     std::function<void(std::function<bool()> const&)> hostBlockingWait_;
+    // Notify any thread parked in serveActors/pump that the ready queue may have
+    // changed (e.g. a NATS handler delivered a message on another thread). The
+    // host (NRTVM) wires this to its condition variable's notify_all.
+    std::function<void()> notifyAsyncProgress_;
     // Execution snapshots of main threads parked in a cross-thread await. While
     // parked, the live frame stack is reset to empty and belongs to whoever runs
     // lang code next (e.g. the render thread); the parked context lives here and
@@ -529,6 +533,11 @@ public:
     // Drain ready actors (and fire delay timers) until the system is quiescent
     // -- every actor parked on an empty mailbox. The NRT actor run loop.
     void runActorLoop();
+    // Like runActorLoop, but instead of returning when quiescent it PARKS on the
+    // host-wait hook until a cross-thread delivery (NATS, a silo) wakes it -- a
+    // long-lived actor server. Returns only if there are no live actors or no
+    // way to be woken.
+    void serveActorLoop();
     // Name registry: give an actor a stable name in this VM, look one up.
     void registerActorName(SymbolPtr name, i64 id) { actorNames_[name] = id; }
     i64 actorIdByName(SymbolPtr name) const {
@@ -545,6 +554,9 @@ public:
 
     // Cross-thread future support (Phase C). The host registers a blocking-wait
     // callback that releases its mutex and parks until the predicate holds.
+    void setNotifyAsyncProgress(std::function<void()> fn) {
+        notifyAsyncProgress_ = std::move(fn);
+    }
     void setHostBlockingWait(std::function<void(std::function<bool()> const&)> fn) {
         hostBlockingWait_ = std::move(fn);
     }
