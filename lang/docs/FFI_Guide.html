@@ -2685,7 +2685,7 @@ nats.<span class="fn">onMessageS</span>(<span class="str">"nodes.piano.chords"</
 
 <p>Each engine silo can optionally have a Tzopilotl VM attached for event-driven scripting on the real-time audio thread. The silo VM is separate from the main NRT VM&mdash;it has its own TLSF memory pool, its own global variables, and its own compilation target with <code>rtRestricted = true</code>.</p>
 
-<p>The silo VM is <strong>event-driven</strong>: it does not run per-sample or per-buffer. Code sent via <code>siloEval</code> is compiled on an NRT thread and then executed on the silo's RT thread. Between events, the VM is idle. A per-buffer GC heartbeat drains the deferred-delete queue to reclaim dead objects.</p>
+<p>The silo VM is <strong>event-driven</strong>: it does not run per-sample or per-buffer. Code sent via <code>siloEval</code> is compiled on an NRT thread and then executed on the silo's RT thread. Between events, the VM is idle. A per-buffer GC heartbeat drives a bounded slice of the incremental tracing collector (mark/sweep work) to reclaim dead objects without overrunning the audio block.</p>
 
 <p>All functions are registered under the <code>audio_engine</code> foreign module:</p>
 
