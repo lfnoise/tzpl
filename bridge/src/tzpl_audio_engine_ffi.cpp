@@ -851,6 +851,13 @@ static void ffi_siloEval(ts::VM& vm, u16 dst, u16, u16 argBase) {
     ts::CompileResult compiled = ctx->compiler->compile(
         source, "<silo>", state.target, state.moduleCompiler.get());
 
+    // compile() leaves this thread's gCurrentVM null (Compiler::makeCurrent clears
+    // it and endCurrent does not restore it -- by contract the caller must). Unlike
+    // siloLoad, siloEval is not awaited, so nothing re-establishes it; restore the
+    // calling VM now, else the next op on this thread (e.g. a print, whose
+    // wordToString dereferences gCurrentVM) segfaults on null.
+    vm.makeCurrent();
+
     if (!compiled.success) {
         ts::printDiagnostics(compiled.errors, source, "<silo>", std::cerr, true);
         returnErr(vm, dst, tzpl_errInternal, __func__);
@@ -921,6 +928,11 @@ static void ffi_siloLoad(ts::VM& vm, u16 dst, u16, u16 argBase) {
         + std::string(code);
     ts::CompileResult compiled = ctx->compiler->compile(
         source, "<siloLoad>", state.target, state.moduleCompiler.get());
+    // Restore the calling VM as current: compile() left this thread's gCurrentVM
+    // null. The success path is normally masked (the await suspends and resume
+    // re-establishes it), but a compile error resolves the future immediately, so
+    // the await does not suspend and the next op on this thread would hit null.
+    vm.makeCurrent();
     if (!compiled.success) {
         ts::printDiagnostics(compiled.errors, source, "<siloLoad>", std::cerr, true);
         resolveNow("siloLoad: compile error");
