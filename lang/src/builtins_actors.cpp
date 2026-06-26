@@ -70,22 +70,40 @@ static void builtin_send(VM& vm, u16 dst, u16, u16 ab) {
     vm.reg(dst).i = 0;
 }
 
-// register(name Symbol, a Actor<M>) Void -- give an actor a stable name in this
-// VM's registry, so it can be addressed by name (incl. cross-VM delivery).
+// register(a Actor<M>, name Symbol|String) Actor<M> -- give an actor a stable
+// name in this VM's registry so it can be addressed by name (incl. cross-VM
+// delivery). Naming is the spawner's job, not the actor's, so the actor comes
+// first and the call returns the actor -- it chains off spawn:
+//   let v = voice spawn(SExpr.int(0)) register('voice);
 static void builtin_register(VM& vm, u16 dst, u16, u16 ab) {
-    SymbolPtr name = vm.reg(ab).s;
-    auto* actor = static_cast<ActorObj*>(vm.reg((u16)(ab + 1)).o);
+    auto* actor = static_cast<ActorObj*>(vm.reg(ab).o);
+    SymbolPtr name = vm.reg((u16)(ab + 1)).s;
     if (actor) vm.registerActorName(name, actor->id_);
-    vm.reg(dst).i = 0;
+    vm.reg(dst).o = actor;          // return the actor for chaining
 }
 
-// sendByName(name Symbol, msg M) Void -- deliver to the locally-registered actor
-// of that name (no-op if none). This is the local enqueue used by the cross-VM
-// delivery trampoline after it decodes a message.
+// String-named variant: intern the name, then register as above.
+static void builtin_register_str(VM& vm, u16 dst, u16, u16 ab) {
+    auto* actor = static_cast<ActorObj*>(vm.reg(ab).o);
+    auto* s = static_cast<StringObj*>(vm.reg((u16)(ab + 1)).o);
+    if (actor && s) vm.registerActorName(intern(std::string_view(s->s.data(), s->s.size())), actor->id_);
+    vm.reg(dst).o = actor;
+}
+
+// sendByName(name Symbol|String, msg M) Void -- deliver to the locally-registered
+// actor of that name (no-op if none). This is the local enqueue used by the
+// cross-VM delivery trampoline after it decodes a message.
 static void builtin_sendByName(VM& vm, u16 dst, u16, u16 ab) {
     SymbolPtr name = vm.reg(ab).s;
     i64 id = vm.actorIdByName(name);
     deliverToActor(vm, vm.actorById(id), vm.reg((u16)(ab + 1)));
+    vm.reg(dst).i = 0;
+}
+
+static void builtin_sendByName_str(VM& vm, u16 dst, u16, u16 ab) {
+    auto* s = static_cast<StringObj*>(vm.reg(ab).o);
+    SymbolPtr name = s ? intern(std::string_view(s->s.data(), s->s.size())) : nullptr;
+    deliverToActor(vm, vm.actorById(vm.actorIdByName(name)), vm.reg((u16)(ab + 1)));
     vm.reg(dst).i = 0;
 }
 
@@ -156,24 +174,28 @@ static bool resolve_receive(Compiler& compiler, const std::vector<Type*>& args,
     return true;
 }
 
+// register(a Actor<M>, name Symbol|String) Actor<M>: actor first (the spawner
+// names it), name as a Symbol or a String. Returns the actor type so it chains.
 static bool resolve_register(Compiler& compiler, const std::vector<Type*>& args,
     std::vector<Type*>& pt, Type*& rt, CFun& cf) {
     if (args.size() != 2) return false;
-    if (args[0] != compiler.symbolType()) return false;
-    if (!dynamic_cast<ActorType*>(args[1])) return false;
-    pt = { compiler.symbolType(), args[1] };
-    rt = compiler.voidType();
-    cf = builtin_register;
+    if (!dynamic_cast<ActorType*>(args[0])) return false;
+    if (args[1] == compiler.symbolType())      cf = builtin_register;
+    else if (args[1] == compiler.stringType()) cf = builtin_register_str;
+    else return false;
+    pt = { args[0], args[1] };
+    rt = args[0];                  // returns the actor, for chaining
     return true;
 }
 
 static bool resolve_sendByName(Compiler& compiler, const std::vector<Type*>& args,
     std::vector<Type*>& pt, Type*& rt, CFun& cf) {
     if (args.size() != 2) return false;
-    if (args[0] != compiler.symbolType()) return false;
-    pt = { compiler.symbolType(), args[1] };
+    if (args[0] == compiler.symbolType())      cf = builtin_sendByName;
+    else if (args[0] == compiler.stringType()) cf = builtin_sendByName_str;
+    else return false;
+    pt = { args[0], args[1] };
     rt = compiler.voidType();
-    cf = builtin_sendByName;
     return true;
 }
 

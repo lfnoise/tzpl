@@ -13,7 +13,6 @@ import audio_engine.*;
 import sexprs.*;
 
 async fn voice(self Actor<SExpr>, init SExpr) Void {
-    register(toSymbol("voice"), self);
     var id = 0;
     while (true) {
         let m = await receive(self);
@@ -27,7 +26,7 @@ async fn voice(self Actor<SExpr>, init SExpr) Void {
     }
 }
 
-spawn(voice, SExpr.int(0));
+voice spawn(SExpr.int(0)) register('voice);
 """;
 
 "starting engine..." println;

@@ -640,9 +640,9 @@ if (localStorage.getItem('tzpl-docs-theme') === 'light') document.documentElemen
 <pre><code><span class="kw">let</span> silo0 = <span class="str">"""</span>
 <span class="str">import audio_engine.*;</span>
 <span class="str">async fn voice(self Actor&lt;SExpr&gt;, init SExpr) Void {</span>
-<span class="str">    register(toSymbol("voice"), self);</span>
 <span class="str">    -- ...</span>
 <span class="str">}</span>
+<span class="str">voice spawn(SExpr.int(0)) register('voice);</span>
 <span class="str">"""</span>;
 attachVM(<span class="num">0</span>);
 <span class="kw">await</span> siloLoad(<span class="num">0</span>, silo0);</code></pre>

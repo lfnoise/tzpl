@@ -11,15 +11,14 @@ import message.*;
 import sexprs.*;
 
 async fn worker(self Actor<SExpr>, init SExpr) Void {
-    register(toSymbol("w"), self);
     while (true) {
         let m = await receive(self);
         println("ACTOR GOT " $ (m toString));
     }
 }
 
-spawn(worker, SExpr.int(0));
-runActors();                 -- let worker register itself and park
+worker spawn(SExpr.int(0)) register('w);
+runActors();                 -- let worker reach its first receive and park
 
 -- Bridge the NATS subject "actors.w" to the local actor "w": decode the payload
 -- and enqueue it. (A remote process would publish to this subject.)

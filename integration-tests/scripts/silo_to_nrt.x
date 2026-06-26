@@ -14,7 +14,6 @@ import sexprs.*;
 -- NRT actor: registered as "conductor", prints each pitch it receives. Spawned
 -- on the main VM before the server loop starts.
 async fn conductor(self Actor<SExpr>, init SExpr) Void {
-    register(toSymbol("conductor"), self);
     while (true) {
         let m = await receive(self);
         match (m) {
@@ -53,6 +52,6 @@ let e0 = await siloLoad(0, silo0);
 "load=[" print; e0 print; "]" println;
 
 -- Spawn the NRT conductor, then run the router/driver loop (blocks).
-spawn(conductor, SExpr.int(0));
+conductor spawn(SExpr.int(0)) register('conductor);
 "routing silo 0 -> NRT conductor ..." println;
 runActorServer();
