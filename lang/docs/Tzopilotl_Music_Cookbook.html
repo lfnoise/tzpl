@@ -538,12 +538,12 @@ declared (here index 1 = pitch, index 2 = amp; index 0 is always the gate), whic
 is the layout you pass to <code>noteOn</code> when you play the synth in
 <a href="#notes">section&nbsp;4</a>. The <code>adsr</code> envelope opens when the
 gate goes high (note on) and releases when it goes low (note off).</p>
-<div class="warning"><strong>Compiler note</strong>
-A few envelope UGens (notably <code>fadein</code> and <code>asr</code>) currently
-trip a SIMD type-mismatch in <code>synthc</code> codegen and fail to compile;
-<code>adsr</code>, <code>decay</code>, and <code>lag</code> work. If a voice fails
-to build, simplify the envelope. The <em>built-in</em> <code>"voicer"</code> node
-def (used throughout the silo recipes below) needs no compilation at all.</div>
+<div class="note"><strong>Tip</strong>
+Compiling a synthdef invokes <code>clang</code> to build a <code>.dylib</code>. To
+skip that while prototyping note logic, use the engine's built-in
+<code>"voicer"</code> node def (used throughout the silo recipes below) &mdash; it
+needs no compilation. Its note params are
+<code>[pitch, amp, drive, pan, attack, release]</code>.</div>
 
 <!-- ================================================================ -->
 <h2 id="nodegraph">3. Starting the engine &amp; building a node graph</h2>

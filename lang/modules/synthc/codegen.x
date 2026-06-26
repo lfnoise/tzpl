@@ -295,6 +295,17 @@ fn _consumedInLoop(ctx Ctx, treeIdx Int) Bool {
 
 fn _isF32(t NumType) Bool = t.0 == 4;
 
+-- A node's slot may be wider than the type its operands compute at -- e.g. an
+-- init-rate `1/(t*fs())` whose result is f64 but whose folded operands are f32.
+-- In scalar code C++ closes that gap with an implicit conversion on assignment
+-- (`f64 v = (f32expr);`). SIMD vector types have no implicit conversion, so the
+-- store `*(f64x4*)slot = (f32x4)expr` is a hard error; the cast must be explicit.
+-- This wraps `e` in `convert<wantT>(...)` when, under SIMD, the value computes at
+-- `haveT` but is stored/used as `wantT`. A no-op when they agree (the usual case)
+-- or in scalar mode, so existing output is byte-for-byte unchanged.
+fn _simdWiden(wantT NumType, haveT NumType, e String) String =
+	(`cgSimdW > 0 && wantT != haveT) ? "convert<%^>(%^)" fmt(cppType(wantT), e) : e;
+
 -- Inline a node's value expression at channel `cel`.
 fn genExpr(ctx Ctx, n NIdx, cel String) String {
 	-- A loop variable (VarExpr) always emits as the bare C++ loop-var name,
@@ -356,8 +367,10 @@ fn _inlineExpr(ctx Ctx, n NIdx, cel String) String {
 				else { _simdSplat(t, w, "((%^**)p->inlets)[%^][0]" fmt(cppType(t), sn)) }
 			} else { _varRef(ctx, n, cel) }
 		}
-		unopK(op):      genUnopStr(op, ctx.typ[n] _isF32, genExpr(ctx, ins[0], cel), `cgSimdW > 0);
-		binopK(op):     genBinopStr(op, ctx.typ[n] _isF32, genExpr(ctx, ins[0], cel), genExpr(ctx, ins[1], cel), `cgSimdW > 0);
+		unopK(op):      _simdWiden(ctx.typ[n], ctx.typ[ins[0]],
+		                    genUnopStr(op, ctx.typ[n] _isF32, genExpr(ctx, ins[0], cel), `cgSimdW > 0));
+		binopK(op):     _simdWiden(ctx.typ[n], commonType(ctx.typ[ins[0]], ctx.typ[ins[1]]),
+		                    genBinopStr(op, ctx.typ[n] _isF32, genExpr(ctx, ins[0], cel), genExpr(ctx, ins[1], cel), `cgSimdW > 0));
 		compareopK(op): genCompareStr(op, genExpr(ctx, ins[0], cel), genExpr(ctx, ins[1], cel));
 		castopK(ct):    (`cgSimdW > 0)
 			? "convert<%^>(%^)" fmt(cppType(ct), genExpr(ctx, ins[0], cel))

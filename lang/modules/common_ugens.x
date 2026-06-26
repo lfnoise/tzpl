@@ -506,15 +506,16 @@ fn iseq(trigger S, pattern AsSignal, length AsSignal) S {
 fn asr(gate S, a, s, r) S {
 	let a = a decay40dB;
 	let r = r decay40dB;
-	let stage = delayVar();
 	let y = delayVar();
 
-	-- stages: 0: gate off (released + waiting for attack) 1: gate on (attack + sustain)
+	-- stages: 0: gate off (released + waiting for attack) 1: gate on (attack + sustain).
+	-- Unlike adsr the stage is memoryless -- it is just gate>0 -- so it needs no
+	-- delay line; select it directly.
 
 	let y1 = y(1);
 	let stage = gate > 0;
-	let goal = select(stage(0), [0 asSignal, s asSignal]);
-	let coef = select(stage(0), [r, a]);
+	let goal = select(stage, [0 asSignal, s asSignal]);
+	let coef = select(stage, [r asSignal, a asSignal]);
 	
     y <- goal + coef * (y1 - goal)
 }

@@ -104,6 +104,26 @@ string genBinopExprString(BinaryOp op, NumType type, string a, string b, bool si
     }
 }
 
+// The C-promotion result type of `a op b` (mirrors lang commonType in
+// synthdef.x): 64 bits if either operand is, float if either operand is.
+NumType commonNumType(NumType a, NumType b) {
+    if (a.supports_64_bits() || b.supports_64_bits())
+        return (a.supports_float() || b.supports_float()) ? NumType(F64) : NumType(I64);
+    return (a.supports_float() || b.supports_float()) ? NumType(F32) : NumType(I32);
+}
+
+// A node's slot may be wider than the type its operands compute at -- e.g. an
+// init-rate `1/(t*fs())` whose result is f64 but whose folded operands are f32.
+// In scalar code C++ closes that gap with an implicit conversion on assignment.
+// SIMD vector types have no implicit conversion, so a store `*(f64x4*)slot =
+// (f32x4)expr` is a hard error; the cast must be explicit. This wraps `e` in
+// `convert<wantT>(...)` when, under SIMD, the value computes at `haveT` but is
+// stored/used as `wantT`. A no-op when they agree or in scalar mode, so existing
+// output is byte-for-byte unchanged.
+string simdWiden(bool simd, NumType wantT, NumType haveT, string e) {
+    return (simd && wantT != haveT) ? FMT("convert<{}>({})", wantT.str(), e) : e;
+}
+
 
 struct UnopVarIndex;
 struct BinopVarIndex;
@@ -910,10 +930,12 @@ struct ExprCodegenVisitor : ExprVisitor {
     }
     void visit(Outlet* p) override { shouldBeHandledAsTree(p); }
     void visit(UnaryOpExpr* p) override {
-        s += genUnopExprString(p->op, p->type, g.genExpr(p->in0(), cel), g.inSimdMode);
+        auto e = genUnopExprString(p->op, p->type, g.genExpr(p->in0(), cel), g.inSimdMode);
+        s += simdWiden(g.inSimdMode, p->type, p->in0()->type, e);
     }
     void visit(BinaryOpExpr* p) override {
-        s += genBinopExprString(p->op, p->type, g.genExpr(p->in0(), cel), g.genExpr(p->in1(), cel), g.inSimdMode);
+        auto e = genBinopExprString(p->op, p->type, g.genExpr(p->in0(), cel), g.genExpr(p->in1(), cel), g.inSimdMode);
+        s += simdWiden(g.inSimdMode, p->type, commonNumType(p->in0()->type, p->in1()->type), e);
     }
     void visit(CompareOpExpr* p) override {
         s += FMT("({} {} {})", g.genExpr(p->in0(), cel), to_string(p->op), g.genExpr(p->in1(), cel));
