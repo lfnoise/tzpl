@@ -926,7 +926,7 @@ across a process boundary.</p>
 <pre><code><span class="kw">import</span> sexprs.*;
 <span class="kw">import</span> message.*;
 
-<span class="kw">let</span> m = SExpr.vec([SExpr.int(<span class="num">60</span>), SExpr.float(<span class="num">0.5</span>), SExpr.symbol(<span class="fn">toSymbol</span>(<span class="str">"hit"</span>))]);
+<span class="kw">let</span> m = SExpr.vec([SExpr.int(<span class="num">60</span>), SExpr.float(<span class="num">0.5</span>), SExpr.symbol(<span class="str">'hit</span>)]);
 m toString println;          <span class="cmt">-- [60, 0.5, hit]</span>
 <span class="kw">let</span> b = <span class="fn">encode</span>(m);            <span class="cmt">-- Bytes (TZB binary form)</span>
 <span class="fn">decode</span>(b) toString println;   <span class="cmt">-- [60, 0.5, hit]  (round-trips)</span></code></pre>
@@ -962,10 +962,10 @@ voice <span class="fn">spawn</span>(SExpr.int(<span class="num">0</span>)) <span
 <p>The NRT conductor, after <code>siloLoad</code>ing that module, schedules a rising
 line one note per beat:</p>
 <pre><code><span class="kw">let</span> now = <span class="fn">clockBeats</span>(<span class="num">0</span>);
-<span class="fn">siloSendAt</span>(<span class="num">0</span>, <span class="num">0</span>, now + <span class="num">1.0</span>, <span class="fn">toSymbol</span>(<span class="str">"voice"</span>), SExpr.float(<span class="num">60.0</span>));
-<span class="fn">siloSendAt</span>(<span class="num">0</span>, <span class="num">0</span>, now + <span class="num">2.0</span>, <span class="fn">toSymbol</span>(<span class="str">"voice"</span>), SExpr.float(<span class="num">64.0</span>));
-<span class="fn">siloSendAt</span>(<span class="num">0</span>, <span class="num">0</span>, now + <span class="num">3.0</span>, <span class="fn">toSymbol</span>(<span class="str">"voice"</span>), SExpr.float(<span class="num">67.0</span>));
-<span class="fn">siloSendAt</span>(<span class="num">0</span>, <span class="num">0</span>, now + <span class="num">4.0</span>, <span class="fn">toSymbol</span>(<span class="str">"voice"</span>), SExpr.float(<span class="num">72.0</span>));</code></pre>
+<span class="fn">siloSendAt</span>(<span class="num">0</span>, <span class="num">0</span>, now + <span class="num">1.0</span>, <span class="str">'voice</span>, SExpr.float(<span class="num">60.0</span>));
+<span class="fn">siloSendAt</span>(<span class="num">0</span>, <span class="num">0</span>, now + <span class="num">2.0</span>, <span class="str">'voice</span>, SExpr.float(<span class="num">64.0</span>));
+<span class="fn">siloSendAt</span>(<span class="num">0</span>, <span class="num">0</span>, now + <span class="num">3.0</span>, <span class="str">'voice</span>, SExpr.float(<span class="num">67.0</span>));
+<span class="fn">siloSendAt</span>(<span class="num">0</span>, <span class="num">0</span>, now + <span class="num">4.0</span>, <span class="str">'voice</span>, SExpr.float(<span class="num">72.0</span>));</code></pre>
 <p><strong>How it works.</strong> The message is <code>encode</code>d to bytes on the
 NRT side and carried across the silo's command FIFO; the silo decodes it and
 <code>sendByName</code>s it into the actor's mailbox. <code>siloSendAt</code> uses
@@ -1003,7 +1003,7 @@ name, encode(msg))</code> (<code>target</code> is the destination silo, or
     <span class="kw">var</span> i = <span class="num">0</span>;
     <span class="kw">while</span> (i &lt; <span class="num">4</span>) {
         <span class="kw">await</span> <span class="fn">delay</span>(<span class="num">1.0</span>);
-        <span class="fn">siloOutbox</span>(-<span class="num">1</span>, <span class="fn">toSymbol</span>(<span class="str">"conductor"</span>), <span class="fn">encode</span>(SExpr.float(scale[i % <span class="num">4</span>])));
+        <span class="fn">siloOutbox</span>(-<span class="num">1</span>, <span class="str">'conductor</span>, <span class="fn">encode</span>(SExpr.float(scale[i % <span class="num">4</span>])));
         i = i + <span class="num">1</span>;
     }
 }</code></pre>
