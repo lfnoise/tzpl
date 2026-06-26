@@ -32,6 +32,10 @@
 #include <string>
 #include <vector>
 
+// Complete type needed: SiloVMState holds a unique_ptr<IncrementalCompiler>, so
+// every TU that destroys an AppContext must see its (pimpl, lightweight) decl.
+#include "incremental_compiler.hpp"
+
 namespace engine { struct Engine; }
 namespace ts {
     class VM;
@@ -63,6 +67,10 @@ struct SiloVMState {
     ts::VM* vm = nullptr;
     ts::VMTarget target;
     std::unique_ptr<ts::ModuleCompiler> moduleCompiler;
+    // Persistent incremental compile context for this silo. Keeps one TypeChecker
+    // across siloLoad/siloEval calls so redefining a function reuses its global
+    // index and live silo code picks up the new body. Created by attachVM.
+    std::unique_ptr<ts::IncrementalCompiler> incCompiler;
     // Global index of the most recently siloLoad'ed module's start() entry
     // (Void, no params), or -1 if none. siloStartAt schedules a call to it.
     int startGlobalIndex = -1;

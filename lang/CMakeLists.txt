@@ -59,6 +59,7 @@ set(LIB_SOURCES
     src/module_compiler.cpp
     src/diagnostic.cpp
     src/repl_session.cpp
+    src/incremental_compiler.cpp
     src/nrt_scheduler.cpp
     src/nrt_tempo_scheduler.cpp
     src/tzpl_c.cpp

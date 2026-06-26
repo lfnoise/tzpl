@@ -310,6 +310,14 @@ CompileResult Compiler::compile(const std::string& source, const std::string& fi
         return result;
     }
 
+    // Harvest globals, dynvar metadata, and exported functions into the result.
+    finalizeResult(result, typeChecker, mainBlock, target);
+
+    return result;
+}
+
+void Compiler::finalizeResult(CompileResult& result, TypeChecker& typeChecker,
+                              CodeBlock* mainBlock, const VMTarget& target) {
     // Harvest pending globals into the result
     auto [newGlobals, globalBase] = takePendingGlobals();
 
@@ -353,8 +361,6 @@ CompileResult Compiler::compile(const std::string& source, const std::string& fi
             result.exportedFunctions.push_back(std::move(ef));
         }
     }
-
-    return result;
 }
 
 } // namespace ts

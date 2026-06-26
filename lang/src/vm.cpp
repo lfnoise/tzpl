@@ -474,6 +474,16 @@ void VM::install(const CompileResult& result) {
         if (slot.inlineObjType) inlineObjGlobals_.push_back({gidx, slot.inlineObjType});
     }
 
+    // Apply in-place updates to PRE-EXISTING globals (redefinitions from an
+    // incremental compile). These live at indices below globalBase -- already
+    // installed -- so overwrite the value word directly. isObj-ness is unchanged:
+    // a redefined fn slot stays a CodeBlock*. Done after the append so a result
+    // that both adds and redefines is consistent. Function call sites read
+    // global(idx) at call time, so already-running code picks up the new value.
+    for (auto& ru : result.reusedGlobals) {
+        if (ru.index < globals_.size()) globals_[ru.index] = ru.value;
+    }
+
     // Ensure dynamic variable table is large enough. Carry each new dynvar's
     // GC root flag so dynvars holding Obj* are scanned as roots (and tag/atom
     // dynvars are not). Older results without the vector default to 0.

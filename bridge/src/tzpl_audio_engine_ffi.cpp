@@ -32,6 +32,7 @@
 #include "tzpl_vm_commands.hpp"
 #include "nrt_vm.hpp"
 #include "module_compiler.hpp"
+#include "incremental_compiler.hpp"
 #include "diagnostic.hpp"
 #include <thread>
 #include <string>
@@ -789,6 +790,14 @@ static void ffi_attachVM(ts::VM& vm, u16 dst, u16, u16 argBase) {
         *ctx->compiler,
         std::vector<std::string>(ctx->moduleCompiler->includePaths()));
 
+    // Persistent incremental compile context: one TypeChecker shared across all
+    // siloLoad/siloEval calls on this silo, so redefining a function reuses its
+    // global index (live code picks up the new body) instead of allocating a new
+    // slot the old code never sees. Builtins/imports are registered once (on the
+    // first compile) and installed into the silo VM like any other new global.
+    state.incCompiler = std::make_unique<ts::IncrementalCompiler>(
+        *ctx->compiler, state.target, *state.moduleCompiler);
+
     // Per-silo task scheduler (spawn'd coroutine tasks). GC-rooted on the silo VM.
     auto* sched = new SiloTaskScheduler(state.vm);
     state.taskSched = sched;
@@ -823,6 +832,8 @@ static void ffi_detachVM(ts::VM& vm, u16 dst, u16, u16 argBase) {
     sendCmdToSilo(eng, siloIndex, new DetachAndDeleteVMCmd(state.vm));
 
     state.vm = nullptr;
+    // Tear down the incremental compile context before its moduleCompiler/target.
+    state.incCompiler.reset();
     state.target.reset();
     state.moduleCompiler.reset();
 
@@ -846,13 +857,15 @@ static void ffi_siloEval(ts::VM& vm, u16 dst, u16, u16 argBase) {
         return;
     }
 
-    // Compile with the silo's rt_restricted target (on the calling NRT thread)
+    // Compile against the silo's persistent incremental context (on the calling
+    // NRT thread). Going through incCompiler -- not a one-shot compiler->compile --
+    // means a function redefined by a later siloEval reuses its existing global
+    // slot, so already-installed silo code picks up the new body.
     std::string source(code);
-    ts::CompileResult compiled = ctx->compiler->compile(
-        source, "<silo>", state.target, state.moduleCompiler.get());
+    ts::CompileResult compiled = state.incCompiler->compile(source, "<silo>");
 
-    // compile() leaves this thread's gCurrentVM null (Compiler::makeCurrent clears
-    // it and endCurrent does not restore it -- by contract the caller must). Unlike
+    // The incremental compile left this thread's gCurrentVM null (its internal
+    // endCurrent clears the compile context without restoring a VM). Unlike
     // siloLoad, siloEval is not awaited, so nothing re-establishes it; restore the
     // calling VM now, else the next op on this thread (e.g. a print, whose
     // wordToString dereferences gCurrentVM) segfaults on null.
@@ -926,12 +939,16 @@ static void ffi_siloLoad(ts::VM& vm, u16 dst, u16, u16 argBase) {
         "import message.*;\n"
         "fn tzpl_actor_deliver(name Symbol, b Bytes) Void { sendByName(name, decode(b)); }\n"
         + std::string(code);
-    ts::CompileResult compiled = ctx->compiler->compile(
-        source, "<siloLoad>", state.target, state.moduleCompiler.get());
-    // Restore the calling VM as current: compile() left this thread's gCurrentVM
-    // null. The success path is normally masked (the await suspends and resume
-    // re-establishes it), but a compile error resolves the future immediately, so
-    // the await does not suspend and the next op on this thread would hit null.
+    // Compile against the silo's persistent incremental context so functions
+    // redefined across successive loads reuse their global slots (see attachVM /
+    // siloEval). The injected preamble is idempotent: after the first load it
+    // simply redefines tzpl_actor_deliver to the same body (a no-op reused slot).
+    ts::CompileResult compiled = state.incCompiler->compile(source, "<siloLoad>");
+    // Restore the calling VM as current: the incremental compile left this
+    // thread's gCurrentVM null. The success path is normally masked (the await
+    // suspends and resume re-establishes it), but a compile error resolves the
+    // future immediately, so the await does not suspend and the next op on this
+    // thread would hit null.
     vm.makeCurrent();
     if (!compiled.success) {
         ts::printDiagnostics(compiled.errors, source, "<siloLoad>", std::cerr, true);

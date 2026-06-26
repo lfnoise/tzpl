@@ -47,6 +47,7 @@ class EnumType;
 class CoroutineType;
 class FutureType;
 class ModuleCompiler;
+class TypeChecker;
 
 // CFun is the runtime function pointer type — always takes VM& (not Compiler&)
 using CFun = void (*)(VM&, u16 resultReg, u16 argc, u16 argBase);
@@ -72,6 +73,17 @@ struct CompileResult {
     };
     std::vector<GlobalSlot> newGlobals;
     u32 globalBase = 0;  // VM global index where newGlobals starts
+
+    // In-place updates to PRE-EXISTING global slots (index < globalBase),
+    // overwritten during an incremental compile -- e.g. a redefined function's
+    // new CodeBlock stored into its existing slot. newGlobals carries only
+    // appended slots (>= globalBase); these carry updates to already-installed
+    // slots so VM::install can apply them in place. Empty for one-shot compiles.
+    struct ReusedGlobal {
+        u32 index = 0;
+        Word value;
+    };
+    std::vector<ReusedGlobal> reusedGlobals;
 
     // Number of dynamic scope variables used
     u32 numDynVars = 0;
@@ -144,6 +156,13 @@ public:
     // Returns (newGlobals, globalBase) for building a CompileResult manually.
     // Call this after codegen but before endCurrent().
     std::pair<std::vector<CompileResult::GlobalSlot>, u32> takePendingGlobals();
+
+    // Populate result's harvested globals, dynvar GC-root metadata, and exported
+    // function table from the current (makeCurrent-active) compile session.
+    // Shared by compile() and IncrementalCompiler; sets success/mainBlock/target.
+    // Does NOT touch reusedGlobals (the incremental path fills those itself).
+    void finalizeResult(CompileResult& result, TypeChecker& typeChecker,
+                        CodeBlock* mainBlock, const VMTarget& target);
 
     // Track a newly allocated object created during compilation.
     // These objects live forever (never collected by GC).
