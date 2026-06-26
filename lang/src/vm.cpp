@@ -216,7 +216,6 @@ VM::VM(usize poolSize, TypeUniverse& typeUniverse, const VMTarget& target)
     , frameCount_(0)
     , baseReg_(0)
     , pc_(nullptr)
-    , codeImage_(rt::STLAllocator<Word>(&allocator_))
     , dataGlobals_(rt::STLAllocator<Word>(&allocator_))
     , dataIsObj_(rt::STLAllocator<u8>(&allocator_))
     , dynVars_(rt::STLAllocator<Word>(&allocator_))
@@ -279,6 +278,9 @@ VM::VM(usize poolSize, TypeUniverse& typeUniverse, const VMTarget& target)
         &allocator_
     );
 
+    // Start with an empty (system-heap) code image; install/swap fills it.
+    codeImage_ = new CodeImage();
+
     // Allocate register file from TLSF
     regs_ = static_cast<Word*>(allocator_.allocate(maxRegs_ * sizeof(Word)));
     if (!regs_) throw std::bad_alloc();
@@ -314,6 +316,10 @@ VM::~VM() {
     if (frames_) allocator_.deallocate(frames_);
     if (dynStack_) allocator_.deallocate(dynStack_);
     if (dynStackPayload_) allocator_.deallocate(dynStackPayload_);
+
+    // The current code image (system heap). Retired old images are freed by
+    // their swap command's doNRT, not here.
+    delete codeImage_;
 }
 
 // Phase 4g.5: implementations for inline-composite dynvar save/restore.
@@ -449,43 +455,21 @@ void VM::dumpCallStack() const {
 }
 
 void VM::install(const CompileResult& result) {
-    // Validate target + per-space base sync when there are new globals to install.
-    bool anyNew = !result.newCodeGlobals.empty() || !result.newDataGlobals.empty();
-    if (anyNew) {
+    // Validate code base sync (this in-place path is for the NRT main VM / REPL).
+    if (!result.newCodeGlobals.empty()) {
         assert(result.target == target_ && "CompileResult target does not match VM target");
-    }
-    if (!result.newCodeGlobals.empty() && numCodeGlobals() != result.codeBase) {
-        throw std::runtime_error("VM code globals out of sync: VM has "
-            + std::to_string(numCodeGlobals()) + " but compiler expects base "
-            + std::to_string(result.codeBase));
-    }
-    if (!result.newDataGlobals.empty() && numDataGlobals() != result.dataBase) {
-        throw std::runtime_error("VM data globals out of sync: VM has "
-            + std::to_string(numDataGlobals()) + " but compiler expects base "
-            + std::to_string(result.dataBase));
+        if (numCodeGlobals() != result.codeBase) {
+            throw std::runtime_error("VM code globals out of sync: VM has "
+                + std::to_string(numCodeGlobals()) + " but compiler expects base "
+                + std::to_string(result.codeBase));
+        }
     }
 
-    // Pre-allocate to avoid repeated TLSF reallocations during push_back,
-    // which can corrupt adjacent heap objects due to TLSF coalescing.
-    codeImage_.reserve(codeImage_.size() + result.newCodeGlobals.size());
-    dataGlobals_.reserve(dataGlobals_.size() + result.newDataGlobals.size());
-    dataIsObj_.reserve(dataIsObj_.size() + result.newDataGlobals.size());
-
-    // Extend the immutable CODE image (function CodeBlock* / builtin Primitive*).
+    // Extend the immutable CODE image in place (no audio thread reads it here).
     // No isObj/root tracking: code slots hold immortal pointers, never GC roots.
+    codeImage_->slots.reserve(codeImage_->slots.size() + result.newCodeGlobals.size());
     for (auto& slot : result.newCodeGlobals) {
-        codeImage_.push_back(slot.value);
-    }
-
-    // Extend the mutable DATA segment (var/let). These carry GC-root flags and
-    // may be multi-word inline composites.
-    for (auto& slot : result.newDataGlobals) {
-        u32 didx = (u32)dataGlobals_.size();
-        dataGlobals_.push_back(slot.value);
-        dataIsObj_.push_back(slot.isObj ? 1 : 0);
-        // A multi-word inline data global embedding Obj* fields: record (baseIdx,
-        // type) so the GC walks its layout instead of single-word marking.
-        if (slot.inlineObjType) inlineObjData_.push_back({didx, slot.inlineObjType});
+        codeImage_->slots.push_back(slot.value);
     }
 
     // Apply in-place updates to PRE-EXISTING CODE slots (redefinitions from an
@@ -496,8 +480,37 @@ void VM::install(const CompileResult& result) {
     for (auto& ru : result.reusedGlobals) {
         if (ru.index >= kCodeGlobalBase) {
             u32 local = ru.index - kCodeGlobalBase;
-            if (local < codeImage_.size()) codeImage_[local] = ru.value;
+            if (local < codeImage_->slots.size()) codeImage_->slots[local] = ru.value;
         }
+    }
+
+    installData(result);
+}
+
+void VM::installData(const CompileResult& result) {
+    if (!result.newDataGlobals.empty()) {
+        assert(result.target == target_ && "CompileResult target does not match VM target");
+        if (numDataGlobals() != result.dataBase) {
+            throw std::runtime_error("VM data globals out of sync: VM has "
+                + std::to_string(numDataGlobals()) + " but compiler expects base "
+                + std::to_string(result.dataBase));
+        }
+    }
+
+    // Pre-allocate to avoid repeated TLSF reallocations during push_back,
+    // which can corrupt adjacent heap objects due to TLSF coalescing.
+    dataGlobals_.reserve(dataGlobals_.size() + result.newDataGlobals.size());
+    dataIsObj_.reserve(dataIsObj_.size() + result.newDataGlobals.size());
+
+    // Extend the mutable DATA segment (var/let). These carry GC-root flags and
+    // may be multi-word inline composites.
+    for (auto& slot : result.newDataGlobals) {
+        u32 didx = (u32)dataGlobals_.size();
+        dataGlobals_.push_back(slot.value);
+        dataIsObj_.push_back(slot.isObj ? 1 : 0);
+        // A multi-word inline data global embedding Obj* fields: record (baseIdx,
+        // type) so the GC walks its layout instead of single-word marking.
+        if (slot.inlineObjType) inlineObjData_.push_back({didx, slot.inlineObjType});
     }
 
     // Ensure dynamic variable table is large enough. Carry each new dynvar's

@@ -636,21 +636,47 @@ static void siloTaskTick(void* sched, i64 sampleTime, engine::Silo* s) {
     gCurrentSilo = prev;
 }
 
-struct SiloCodeInstallCmd : engine::Command {
-    ts::CompileResult* code_;
-    explicit SiloCodeInstallCmd(ts::CompileResult* code) : code_(code) {}
+// Installs newly compiled silo code. The CODE half is swapped wholesale: the
+// caller builds the complete new image off the audio thread (from the compiler
+// target's authoritative code layout) and ships the pointer, so doRT only does an
+// O(1) pointer swap -- the heavy work (builtins + modules + functions) never
+// touches the RT thread. The DATA half (var/let, much smaller) is appended in
+// place via the RT-safe TLSF segment. doNRT retires the old image + the result.
+struct SiloCodeSwapCmd : engine::Command {
+    ts::CodeImage*     newImage_;   // built on NRT, swapped in on RT
+    ts::CompileResult* dataResult_; // newDataGlobals + dynvars for installData
+    ts::CodeImage*     oldImage_ = nullptr;
+    SiloCodeSwapCmd(ts::CodeImage* img, ts::CompileResult* dr)
+        : newImage_(img), dataResult_(dr) {}
     void doRT(engine::Silo* s) override {
         auto* vm = static_cast<ts::VM*>(s->vm_);
-        if (vm && code_) {
+        if (vm) {
             vm->makeCurrent();
-            vm->install(*code_);
+            oldImage_ = vm->swapCodeImage(newImage_);   // O(1)
+            vm->installData(*dataResult_);              // append data in place
+        } else {
+            oldImage_ = newImage_;  // no VM: hand the image straight to retirement
         }
     }
     bool doNRT(engine::Silo* s) override {
-        delete code_;
+        delete oldImage_;     // retire the replaced image (frees only its slots)
+        delete dataResult_;
         return true;
     }
 };
+
+// Build a fresh immutable code image from the compiler target's authoritative
+// code layout. Read on the NRT thread from the target (never from the live silo
+// VM's image, which the RT thread may be swapping) -- the target is NRT-owned.
+// Captures every code slot, including this compile's redefinitions (codegen wrote
+// the new CodeBlock* into the target's existing slot). The work is O(image size)
+// but runs off the audio thread; the RT thread only swaps the resulting pointer.
+static ts::CodeImage* buildSiloCodeImage(const ts::VMTarget& target) {
+    auto* img = new ts::CodeImage();
+    img->slots.reserve(target->codeGlobals.size());
+    for (auto const& slot : target->codeGlobals) img->slots.push_back(slot.value);
+    return img;
+}
 
 // Resolves a siloLoad completion Future once the preceding install (+ optional
 // main-block run) command has landed on the silo. Chained AFTER those commands,
@@ -879,9 +905,10 @@ static void ffi_siloEval(ts::VM& vm, u16 dst, u16, u16 argBase) {
 
     ts::CodeBlock* mainBlock = compiled.mainBlock;
 
-    // Heap-allocate for async transfer to RT thread
-    auto* result = new ts::CompileResult(std::move(compiled));
-    auto* installCmd = new SiloCodeInstallCmd(result);
+    // Build the new code image off the audio thread; the RT swap is O(1).
+    ts::CodeImage* newImage = buildSiloCodeImage(state.target);
+    auto* result = new ts::CompileResult(std::move(compiled));  // for installData
+    auto* installCmd = new SiloCodeSwapCmd(newImage, result);
 
     if (mainBlock) {
         auto* execCmd = new VMEventCmd(VMEventCmd::Custom, mainBlock);
@@ -969,8 +996,10 @@ static void ffi_siloLoad(ts::VM& vm, u16 dst, u16, u16 argBase) {
     }
 
     ts::CodeBlock* mainBlock = compiled.mainBlock;
-    auto* result = new ts::CompileResult(std::move(compiled));
-    auto* installCmd = new SiloCodeInstallCmd(result);
+    // Build the new code image off the audio thread; the RT swap is O(1).
+    ts::CodeImage* newImage = buildSiloCodeImage(state.target);
+    auto* result = new ts::CompileResult(std::move(compiled));  // for installData
+    auto* installCmd = new SiloCodeSwapCmd(newImage, result);
     engine::Command* tail = installCmd;
     if (mainBlock) {
         auto* execCmd = new VMEventCmd(VMEventCmd::Custom, mainBlock);

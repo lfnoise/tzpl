@@ -104,6 +104,19 @@ union Word {
     explicit Word(Obj* val) : o(val) {}
 };
 
+// An immutable snapshot of the CODE image (function CodeBlock* / builtin
+// Primitive* slots, indexed by absoluteIdx - kCodeGlobalBase). Built on the NRT
+// thread and published to a VM by swapping the pointer on the VM's OWNING thread
+// (RT for a silo, NRT for the main VM); since a VM is single-threaded, the swap
+// needs no atomics. Uses the system heap (std::vector), never the VM's TLSF pool:
+// it is only READ on the audio thread, never allocated there, so a swap costs
+// nothing on the RT thread. CodeBlock*/Primitive* are immortal, so retiring an
+// old image frees only its slot array, not the pointed-to code.
+struct CodeImage {
+    std::vector<Word> slots;
+    u32 generation = 0;
+};
+
 // Base class for all runtime objects
 class Obj : public GCObj {
 public:
@@ -249,8 +262,9 @@ private:
     Code* pc_;
 
     // CODE image: function CodeBlock* / builtin Primitive* slots. Immutable,
-    // immortal pointers, never GC roots. Indexed by (absoluteIdx - kCodeGlobalBase).
-    Vec<Word> codeImage_;
+    // immortal pointers, never GC roots. A heap snapshot swapped wholesale (see
+    // CodeImage). Owned by the VM; freed in the destructor.
+    CodeImage* codeImage_ = nullptr;
 
     // DATA segment: var/let globals (mutable, persist across events, the only
     // globals that can hold heap roots). Indexed [0, kCodeGlobalBase).
@@ -622,8 +636,14 @@ public:
     u32 currentFrameNumRegs() const { return frames_[frameCount_ - 1].numRegs; }
 
     // Install a CompileResult: make compiled code ready for execution.
-    // Validates that the result's target matches this VM's target.
+    // Validates that the result's target matches this VM's target. Grows the code
+    // image in place (for the NRT main VM / REPL, where there is no audio thread).
     void install(const CompileResult& result);
+
+    // Install only the DATA-segment part of a result (append data globals + grow
+    // dynvars), leaving the code image untouched. Paired with swapCodeImage() on
+    // the silo path, where the code half is replaced wholesale off-thread.
+    void installData(const CompileResult& result);
 
     // Target accessors
     void setTarget(const VMTarget& target) { target_ = target; }
@@ -646,17 +666,27 @@ public:
     // Single accessor dispatching by index range (see kCodeGlobalBase). A code
     // index reads the immutable image; a data index reads the mutable segment.
     Word& global(u32 idx) {
-        return idx >= kCodeGlobalBase ? codeImage_[idx - kCodeGlobalBase]
+        return idx >= kCodeGlobalBase ? codeImage_->slots[idx - kCodeGlobalBase]
                                       : dataGlobals_[idx];
     }
     const Word& global(u32 idx) const {
-        return idx >= kCodeGlobalBase ? codeImage_[idx - kCodeGlobalBase]
+        return idx >= kCodeGlobalBase ? codeImage_->slots[idx - kCodeGlobalBase]
                                       : dataGlobals_[idx];
+    }
+
+    // Replace the code image with a prebuilt one, returning the old image for the
+    // caller to retire. O(1): a single pointer store on the VM's owning thread
+    // (no atomics -- a VM is single-threaded; for a silo this runs on the audio
+    // thread inside processRTCommands, sequenced before that buffer's reads).
+    CodeImage* swapCodeImage(CodeImage* img) {
+        CodeImage* old = codeImage_;
+        codeImage_ = img;
+        return old;
     }
 
     // Sizes. numGlobals() is the combined count (host introspection); the GC and
     // op_call bounds use the per-space counts.
-    u32 numCodeGlobals() const { return (u32)codeImage_.size(); }
+    u32 numCodeGlobals() const { return codeImage_ ? (u32)codeImage_->slots.size() : 0; }
     u32 numDataGlobals() const { return (u32)dataGlobals_.size(); }
     u32 numGlobals() const { return numCodeGlobals() + numDataGlobals(); }
 
