@@ -1,10 +1,18 @@
 # Design Note: Immutable Code Image + Mutable Data Segment
 
-Status: proposed
+Status: Stage 1 done (`208caa1`), Stage 2 done (`98207c7`), Stage 3 deferred.
 Scope: lang VM (globals representation, opcodes, codegen, GC, install) + engine
 silo command path
 Motivation tickets: silo live redefinition (commit `6b093dd`); RT-thread
 overload of silo code loading.
+
+> **Outcome (after Stage 2).** The original overload concern -- the first-load
+> install spike on the audio thread -- is resolved: the silo's new code image is
+> built on the NRT thread and applied with an O(1) pointer swap on the RT thread
+> (`SiloCodeSwapCmd`). Live redefinition is likewise O(1) on the audio thread.
+> Stage 3 (sharing one immutable standard image across silos) is therefore a pure
+> memory / NRT-allocation optimization and is **deferred** until a real multi-silo
+> or large-stdlib workload shows it matters -- see Stage 3 below.
 
 ## 1. Problem
 
@@ -129,7 +137,15 @@ scanned. Smaller root set, simpler loop.
 Each stage is independently shippable and leaves the suite green
 (`lang/tests` 392, silo harnesses, synthdef difftests, Release + ASan).
 
-### Stage 1 -- Split storage, no swap yet (semantics-preserving refactor)
+### Stage 1 -- Split storage, no swap yet (semantics-preserving refactor) -- DONE (`208caa1`)
+
+> **As implemented**, rather than `vm.code()/vm.data()` at every access site, code
+> globals are numbered from a high `kCodeGlobalBase` into a separate array and a
+> single dispatching `global(idx)` accessor routes by range. The code/data
+> decision is thus made once at the ~13 allocation sites; every existing
+> `.global(idx)` read/write routes automatically -- far fewer edited sites and the
+> index value carries the code/data bit everywhere. The original per-site plan
+> below is superseded by this.
 
 Introduce `codeImage_`/`dataGlobals_` as two plain arrays (no atomics), two
 counters in `VMTargetData`, and `vm.code()/vm.data()` accessors. Route:
@@ -153,7 +169,18 @@ their own append base (no cross-coupled `globalBase` invariant).
 Risk: largest stage (touches codegen + opcodes + type checker); pure refactor, so
 the test suite is a strong oracle. **Biggest, most mechanical stage.**
 
-### Stage 2 -- Swappable code image (the O(1) win)
+### Stage 2 -- Swappable code image (the O(1) win) -- DONE (`98207c7`)
+
+> **As implemented**, no atomics are needed: each VM's image is read and swapped
+> only on its OWNING thread (RT for a silo, inside `processRTCommands`, sequenced
+> before that buffer's reads; NRT for the main VM). So `codeImage_` is a plain
+> `CodeImage*` and `swapCodeImage()` is a plain pointer store. The new image is
+> built on NRT from the compiler target's authoritative `codeGlobals` (never from
+> the live RT image -- no race), so a redefinition's overwritten slot is captured
+> by the snapshot; no `reusedGlobals` delta and no `SiloDataExtendCmd` are needed
+> (data rides the same `SiloCodeSwapCmd::doRT` via `installData`). Old images are
+> retired in `doNRT` with no grace period: reads and the swap are sequential on
+> the RT thread, so after the swap nothing references the old slot array.
 
 Make `codeImage_` a heap `CodeImage` behind `std::atomic<CodeImage*>`. RT thread
 snapshots `rtCodeImage_` once in `processRTCommands` before the sample loop.
@@ -169,7 +196,21 @@ instead of in-place install). Delivers: O(1) batch / whole-module hot swap;
 image build moves off the audio thread.
 Risk: image lifetime/retirement; RT snapshot timing.
 
-### Stage 3 -- First-load priming + shared standard image
+### Stage 3 -- Shared standard image across silos -- DEFERRED
+
+> **Deferred.** Stage 2 already moved the first-load image build off the audio
+> thread (built on NRT, O(1) swap on RT), so the *overload* motivation is met.
+> What Stage 3 would still add is purely an optimization: share one immutable
+> builtins+stdlib image by reference across silos (memory), and avoid re-copying
+> that standard prefix into a fresh image on every load (NRT allocation). In
+> practice the per-load copy is small (a code image is tens of KB; copying it on
+> NRT is sub-microsecond), so this only matters at the many-silo / large-stdlib /
+> very-high-redefine-rate margin. It also carries the most architectural risk of
+> the three stages: a shared *standard target* whose builtins/stdlib occupy
+> identical code indices across silos, per-silo targets that extend it, and a
+> *segmented* `CodeImage` (shared immutable base + private per-silo tail). Pick it
+> up only when a real workload shows the per-load copy or per-silo memory is a
+> bottleneck.
 
 Build the builtins + standard-module code image entirely on NRT and hand it to a
 silo at `attachVM` (or as the first swap), so a silo's first real load only ships

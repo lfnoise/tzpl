@@ -81,17 +81,6 @@ struct CompileResult {
     std::vector<GlobalSlot> newDataGlobals;  // appended data slots this compile
     u32 dataBase = 0;   // data-segment size the VM must have before install
 
-    // In-place updates to PRE-EXISTING CODE slots (absolute code index <
-    // kCodeGlobalBase + codeBase) overwritten during an incremental compile --
-    // a redefined function's new CodeBlock stored into its existing slot.
-    // newCodeGlobals carries only appended slots; these carry the redefinitions
-    // so VM::install applies them in place. Empty for one-shot compiles.
-    struct ReusedGlobal {
-        u32 index = 0;     // absolute (ranged) code index
-        Word value;
-    };
-    std::vector<ReusedGlobal> reusedGlobals;
-
     // Number of dynamic scope variables used
     u32 numDynVars = 0;
 
@@ -172,7 +161,6 @@ public:
     // Populate result's harvested globals, dynvar GC-root metadata, and exported
     // function table from the current (makeCurrent-active) compile session.
     // Shared by compile() and IncrementalCompiler; sets success/mainBlock/target.
-    // Does NOT touch reusedGlobals (the incremental path fills those itself).
     void finalizeResult(CompileResult& result, TypeChecker& typeChecker,
                         CodeBlock* mainBlock, const VMTarget& target);
 

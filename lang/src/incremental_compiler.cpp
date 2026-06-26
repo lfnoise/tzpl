@@ -67,11 +67,8 @@ CompileResult IncrementalCompiler::compile(const std::string& source,
 
     // Enter the compile context for this target. makeCurrent records each index
     // space's size, so takePending{Code,Data}Globals later slice only the slots
-    // THIS call appends. Functions live in the CODE space: codeBase is the
-    // absolute (ranged) index marking the redefinition cutoff -- a function with
-    // a smaller index existed before this compile and was redefined in place.
+    // THIS call appends.
     impl_->compiler.makeCurrent(impl_->target);
-    u32 codeBase = kCodeGlobalBase + impl_->compiler.codeCompileBase();
 
     // Incremental type-check: reuses existing function/global indices, so a
     // redefined fn keeps its slot (the whole point of this class).
@@ -99,22 +96,10 @@ CompileResult IncrementalCompiler::compile(const std::string& source,
         return result;
     }
 
-    // Capture redefined functions: genFnDecl wrote the new CodeBlock into the
-    // function's EXISTING code slot (absolute index < codeBase). takePendingCode
-    // only returns slots appended this compile, so these in-place overwrites
-    // would be lost. Collect them as reusedGlobals for VM::install to apply by
-    // index. (Mirrors the REPL's reused-global sync, packaged for cross-thread
-    // install.)
-    for (auto& item : program.items) {
-        if (item->kind == ASTNode::FnDecl) {
-            auto* fn = static_cast<FnDeclNode*>(item.get());
-            if (fn->resolvedFuncGlobalIndex >= 0 &&
-                (u32)fn->resolvedFuncGlobalIndex < codeBase) {
-                u32 idx = (u32)fn->resolvedFuncGlobalIndex;
-                result.reusedGlobals.push_back({idx, impl_->compiler.global(idx)});
-            }
-        }
-    }
+    // Redefinitions need no special handling here: genFnDecl wrote the new
+    // CodeBlock into the function's EXISTING code slot in the target, and the
+    // silo install path (SiloCodeSwapCmd) snapshots the whole target code layout
+    // into a fresh image, so a redefined slot is captured automatically.
 
     // Harvest appended globals + dynvar/exported-function metadata.
     impl_->compiler.finalizeResult(result, impl_->typeChecker, mainBlock, impl_->target);

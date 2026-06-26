@@ -467,21 +467,11 @@ void VM::install(const CompileResult& result) {
 
     // Extend the immutable CODE image in place (no audio thread reads it here).
     // No isObj/root tracking: code slots hold immortal pointers, never GC roots.
+    // This in-place path only appends; the REPL handles function redefinition by
+    // syncing the reused slot itself, and the silo path swaps a fresh image.
     codeImage_->slots.reserve(codeImage_->slots.size() + result.newCodeGlobals.size());
     for (auto& slot : result.newCodeGlobals) {
         codeImage_->slots.push_back(slot.value);
-    }
-
-    // Apply in-place updates to PRE-EXISTING CODE slots (redefinitions from an
-    // incremental compile). The index is an absolute (ranged) code index; map it
-    // into the image and overwrite the pointer. A redefined fn slot stays a
-    // CodeBlock*. Function call sites read global(idx) at call time, so already-
-    // running code picks up the new body.
-    for (auto& ru : result.reusedGlobals) {
-        if (ru.index >= kCodeGlobalBase) {
-            u32 local = ru.index - kCodeGlobalBase;
-            if (local < codeImage_->slots.size()) codeImage_->slots[local] = ru.value;
-        }
     }
 
     installData(result);

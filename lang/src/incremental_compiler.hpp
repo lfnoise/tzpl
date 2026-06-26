@@ -45,9 +45,10 @@ struct CompileResult;
 // call sites pick up the new body.
 //
 // It is compile-only: it never executes the produced main block. The CompileResult
-// it returns carries newGlobals AND reusedGlobals, so a caller can ship it to a VM
-// living on another thread (the silo RT thread) and VM::install applies both the
-// appended and the in-place (redefined) global updates.
+// it returns can be shipped to a VM living on another thread (the silo RT thread).
+// A redefined function reuses its code slot in the shared target; the silo install
+// path snapshots the whole code layout into a fresh image, so redefinitions are
+// captured without any per-result delta.
 class IncrementalCompiler {
 public:
     // compiler and moduleCompiler are borrowed (owned by the caller). target is
