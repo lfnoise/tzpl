@@ -203,11 +203,13 @@ void TracingGC::resetColors() {
 // budget on its own, but is incremental anyway so a hypothetical 100k-
 // global REPL session can't blow it either.
 void TracingGC::step_root_globals(u64 deadlineNanos, u32& sinceCheck, u32& done) {
-    u32 n = vm_.numGlobals();
+    // Only DATA globals can be roots -- the CODE image holds immortal pointers
+    // (CodeBlock*/Primitive*) that are never GC objects, so it is not scanned.
+    u32 n = vm_.numDataGlobals();
     while (rootGlobalCursor_ < n) {
         u32 i = rootGlobalCursor_++;
-        if (vm_.globalIsObj(i)) {
-            if (Obj* o = vm_.global(i).o) {
+        if (vm_.dataGlobalIsObj(i)) {
+            if (Obj* o = vm_.dataGlobal(i).o) {
                 mark(o); ++lastRootCount_;
             }
         }
@@ -217,11 +219,11 @@ void TracingGC::step_root_globals(u64 deadlineNanos, u32& sinceCheck, u32& done)
             if (gcMonoNanos() >= deadlineNanos) return;
         }
     }
-    // Inline-composite globals: walk each one's layout to mark embedded Obj*
+    // Inline-composite data globals: walk each one's layout to mark embedded Obj*
     // (single-word isObj marking can't reach Obj* fields buried in a multi-word
     // inline tuple/struct/enum global).
-    for (auto const& [gidx, ty] : vm_.inlineObjGlobals_) {
-        gcScanPayload(&vm_.global(gidx), ty, *this);
+    for (auto const& [didx, ty] : vm_.inlineObjData_) {
+        gcScanPayload(&vm_.dataGlobal(didx), ty, *this);
     }
     rootPhase_ = RootPhase::DynVars;
     rootDynVarCursor_ = 0;

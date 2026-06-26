@@ -503,9 +503,18 @@ void disassembleCodeBlock(CodeBlock* block, FILE* out) {
             std::fprintf(out, ", %d", (int)(i16)pc[1].regs[2]);
             break;
 
-        case OpFmt::Regs_Int:
+        case OpFmt::Regs_Int: {
             printRegs(out, pc[1], info.nregs);
-            std::fprintf(out, "  ;  %lld", (long long)pc[2].i);
+            // CALL/CALL_PRIM/TAIL_CALL carry a CODE-image index (ranged from
+            // kCodeGlobalBase). Show its local index for readability; other
+            // Regs_Int operands (constants, data-global indices) print raw.
+            long long operand = (long long)pc[2].i;
+            bool codeRef = (pc->op == op_call || pc->op == op_call_primitive
+                            || pc->op == op_tail_call);
+            if (codeRef && (u32)operand >= kCodeGlobalBase) {
+                operand -= (long long)kCodeGlobalBase;
+            }
+            std::fprintf(out, "  ;  %lld", operand);
             // Try to show function name for CALL/TAIL_CALL (op_call_primitive
             // stores a Primitive* in the global slot, not a CodeBlock*, so the
             // cast in globalName would read garbage).
@@ -514,6 +523,7 @@ void disassembleCodeBlock(CodeBlock* block, FILE* out) {
                 if (name) std::fprintf(out, "  (%s)", name);
             }
             break;
+        }
 
         case OpFmt::Regs_Float: {
             printRegs(out, pc[1], info.nregs);

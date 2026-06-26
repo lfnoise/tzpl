@@ -145,11 +145,11 @@ void TypeChecker::declareVar(const std::string& name, Type* type, bool isMutable
         // tag as a pointer and crash.
         if (it != globalVars_.end()) {
             globalIdx = it->second.globalIndex;
-            compiler_.setGlobalIsObj(globalIdx, type ? storesObjPtrUnboxed(type) : true);
+            compiler_.setDataGlobalIsObj(globalIdx, type ? storesObjPtrUnboxed(type) : true);
         } else if (inlineMulti) {
-            globalIdx = compiler_.addInlineGlobal((u32)type->sizeWords_, type);
+            globalIdx = compiler_.addInlineDataGlobal((u32)type->sizeWords_, type);
         } else {
-            globalIdx = compiler_.addGlobal(type ? storesObjPtrUnboxed(type) : true);
+            globalIdx = compiler_.addDataGlobal(type ? storesObjPtrUnboxed(type) : true);
         }
         VarInfo info{};
         info.type = type;
@@ -224,7 +224,7 @@ void TypeChecker::registerBuiltins() {
 
     // Register host-provided global foreign functions
     for (auto& entry : compiler_.foreignFunctions()) {
-        u32 idx = compiler_.addGlobal(true);
+        u32 idx = compiler_.addCodeGlobal();
         auto* prim = new Primitive(compiler_.voidType());
         prim->cfun_ = entry.cfun;
         prim->pure_ = entry.pure;
@@ -486,7 +486,7 @@ void TypeChecker::check(Program& program) {
             }
 
             // Allocate a global slot for the function's CodeBlock
-            u32 globalIdx = compiler_.addGlobal(false);  // CodeBlock is not a GCObj
+            u32 globalIdx = compiler_.addCodeGlobal();  // CodeBlock is not a GCObj
 
             FuncInfo info{};
             info.returnType = retType;
@@ -829,7 +829,7 @@ void TypeChecker::checkREPLInput(Program& program) {
                 }
                 fn->resolvedFuncGlobalIndex = (i32)existing->globalIndex;
             } else {
-                u32 globalIdx = compiler_.addGlobal(false);
+                u32 globalIdx = compiler_.addCodeGlobal();
 
                 FuncInfo info{};
                 info.returnType = retType;

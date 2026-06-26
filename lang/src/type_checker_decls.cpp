@@ -764,7 +764,7 @@ void TypeChecker::checkFnDecl(FnDeclNode* decl) {
         std::vector<Type*> paramTypes = resolveAllParamTypes(decl->params);
         Type* retType = decl->returnType ? resolveTypeExpr(decl->returnType.get()) : nullptr;
 
-        u32 globalIdx = compiler_.addGlobal(false);
+        u32 globalIdx = compiler_.addCodeGlobal();
         FuncInfo info{};
         info.returnType = retType;
         info.paramTypes = paramTypes;

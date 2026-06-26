@@ -73,8 +73,10 @@ VMTarget Compiler::createTarget(bool rtRestricted) {
 void Compiler::makeCurrent(const VMTarget& target) {
     currentTarget_ = target;
 
-    // Prepare the layout for this compilation session
-    currentTarget_->compileGlobalBase = currentTarget_->globalCount;
+    // Prepare the layout for this compilation session: record each space's size
+    // so takePending{Code,Data}Globals slices only this session's new slots.
+    currentTarget_->codeCompileBase = (u32)currentTarget_->codeGlobals.size();
+    currentTarget_->dataCompileBase = (u32)currentTarget_->dataGlobals.size();
 
     // Set compiler as current; clear VM and allocator so compilation
     // uses system allocator (::malloc) for all object allocations.
@@ -90,13 +92,21 @@ void Compiler::endCurrent() {
     currentTarget_.reset();
 }
 
-std::pair<std::vector<CompileResult::GlobalSlot>, u32> Compiler::takePendingGlobals() {
+std::pair<std::vector<CompileResult::GlobalSlot>, u32> Compiler::takePendingCodeGlobals() {
     assert(currentTarget_ && "No current target set (call makeCurrent first)");
-    u32 base = currentTarget_->compileGlobalBase;
-    // Slice allGlobals[compileGlobalBase..end] as the new globals for this session
+    u32 base = currentTarget_->codeCompileBase;
     std::vector<CompileResult::GlobalSlot> pending(
-        currentTarget_->allGlobals.begin() + base,
-        currentTarget_->allGlobals.end());
+        currentTarget_->codeGlobals.begin() + base,
+        currentTarget_->codeGlobals.end());
+    return {std::move(pending), base};
+}
+
+std::pair<std::vector<CompileResult::GlobalSlot>, u32> Compiler::takePendingDataGlobals() {
+    assert(currentTarget_ && "No current target set (call makeCurrent first)");
+    u32 base = currentTarget_->dataCompileBase;
+    std::vector<CompileResult::GlobalSlot> pending(
+        currentTarget_->dataGlobals.begin() + base,
+        currentTarget_->dataGlobals.end());
     return {std::move(pending), base};
 }
 
@@ -106,65 +116,85 @@ void Compiler::trackObject(GCObj* obj) {
     ++numTrackedObjects_;
 }
 
-// --- Global variable management (per-VMTarget layout) ---
+// --- Global variable management (per-VMTarget layout, two index spaces) ---
 
-u32 Compiler::addGlobal(bool isObj) {
+u32 Compiler::addCodeGlobal() {
     assert(currentTarget_ && "No current target set (call makeCurrent first)");
-    u32 idx = (u32)currentTarget_->allGlobals.size();
-    currentTarget_->allGlobals.push_back({Word(), isObj});
-    currentTarget_->globalCount = (u32)currentTarget_->allGlobals.size();
+    u32 local = (u32)currentTarget_->codeGlobals.size();
+    currentTarget_->codeGlobals.push_back({Word(), false});
+    return kCodeGlobalBase + local;
+}
+
+u32 Compiler::addDataGlobal(bool isObj) {
+    assert(currentTarget_ && "No current target set (call makeCurrent first)");
+    u32 idx = (u32)currentTarget_->dataGlobals.size();
+    currentTarget_->dataGlobals.push_back({Word(), isObj});
     return idx;
 }
 
-u32 Compiler::addInlineGlobal(u32 sizeWords, Type* inlineType) {
+u32 Compiler::addInlineDataGlobal(u32 sizeWords, Type* inlineType) {
     assert(currentTarget_ && "No current target set (call makeCurrent first)");
     if (sizeWords == 0) sizeWords = 1;
-    u32 idx = (u32)currentTarget_->allGlobals.size();
+    u32 idx = (u32)currentTarget_->dataGlobals.size();
     for (u32 i = 0; i < sizeWords; ++i) {
-        currentTarget_->allGlobals.push_back({Word(), false, nullptr});
+        currentTarget_->dataGlobals.push_back({Word(), false, nullptr});
     }
     // If the inline composite embeds Obj* fields, tag the BASE slot with its
     // type so the GC walks the layout (gcScanPayload) and traces them. The
     // remaining slots stay plain (their words are part of the same composite).
     if (inlineType && inlineHasObjPtr(inlineType)) {
-        currentTarget_->allGlobals[idx].inlineObjType = inlineType;
+        currentTarget_->dataGlobals[idx].inlineObjType = inlineType;
     }
-    currentTarget_->globalCount = (u32)currentTarget_->allGlobals.size();
     return idx;
 }
 
-void Compiler::setGlobalIsObj(u32 idx, bool isObj) {
+void Compiler::setDataGlobalIsObj(u32 idx, bool isObj) {
     assert(currentTarget_ && "No current target set (call makeCurrent first)");
-    assert(idx < currentTarget_->allGlobals.size() && "Global index out of range");
-    currentTarget_->allGlobals[idx].isObj = isObj;
+    assert(idx < currentTarget_->dataGlobals.size() && "Data global index out of range");
+    currentTarget_->dataGlobals[idx].isObj = isObj;
 }
 
-bool Compiler::isGlobalObj(u32 idx) const {
-    assert(currentTarget_ && "No current target set (call makeCurrent first)");
-    assert(idx < currentTarget_->allGlobals.size() && "Global index out of range");
-    return currentTarget_->allGlobals[idx].isObj;
-}
-
+// Compile-time global accessor, dispatching by index range like the VM's.
 Word& Compiler::global(u32 idx) {
     assert(currentTarget_ && "No current target set (call makeCurrent first)");
-    assert(idx < currentTarget_->allGlobals.size() && "Global index out of range");
-    return currentTarget_->allGlobals[idx].value;
+    if (idx >= kCodeGlobalBase) {
+        u32 local = idx - kCodeGlobalBase;
+        assert(local < currentTarget_->codeGlobals.size() && "Code global index out of range");
+        return currentTarget_->codeGlobals[local].value;
+    }
+    assert(idx < currentTarget_->dataGlobals.size() && "Data global index out of range");
+    return currentTarget_->dataGlobals[idx].value;
 }
 
 const Word& Compiler::global(u32 idx) const {
     assert(currentTarget_ && "No current target set (call makeCurrent first)");
-    assert(idx < currentTarget_->allGlobals.size() && "Global index out of range");
-    return currentTarget_->allGlobals[idx].value;
+    if (idx >= kCodeGlobalBase) {
+        u32 local = idx - kCodeGlobalBase;
+        assert(local < currentTarget_->codeGlobals.size() && "Code global index out of range");
+        return currentTarget_->codeGlobals[local].value;
+    }
+    assert(idx < currentTarget_->dataGlobals.size() && "Data global index out of range");
+    return currentTarget_->dataGlobals[idx].value;
 }
 
-u32 Compiler::numGlobals() const {
+u32 Compiler::numCodeGlobals() const {
     assert(currentTarget_ && "No current target set (call makeCurrent first)");
-    return (u32)currentTarget_->allGlobals.size();
+    return (u32)currentTarget_->codeGlobals.size();
 }
 
-u32 Compiler::compileGlobalBase() const {
+u32 Compiler::numDataGlobals() const {
     assert(currentTarget_ && "No current target set (call makeCurrent first)");
-    return currentTarget_->compileGlobalBase;
+    return (u32)currentTarget_->dataGlobals.size();
+}
+
+u32 Compiler::codeCompileBase() const {
+    assert(currentTarget_ && "No current target set (call makeCurrent first)");
+    return currentTarget_->codeCompileBase;
+}
+
+u32 Compiler::dataCompileBase() const {
+    assert(currentTarget_ && "No current target set (call makeCurrent first)");
+    return currentTarget_->dataCompileBase;
 }
 
 // --- RT restriction query ---
@@ -318,13 +348,16 @@ CompileResult Compiler::compile(const std::string& source, const std::string& fi
 
 void Compiler::finalizeResult(CompileResult& result, TypeChecker& typeChecker,
                               CodeBlock* mainBlock, const VMTarget& target) {
-    // Harvest pending globals into the result
-    auto [newGlobals, globalBase] = takePendingGlobals();
+    // Harvest pending globals (both index spaces) into the result.
+    auto [newCodeGlobals, codeBase] = takePendingCodeGlobals();
+    auto [newDataGlobals, dataBase] = takePendingDataGlobals();
 
     result.success = true;
     result.mainBlock = mainBlock;
-    result.newGlobals = std::move(newGlobals);
-    result.globalBase = globalBase;
+    result.newCodeGlobals = std::move(newCodeGlobals);
+    result.codeBase = codeBase;
+    result.newDataGlobals = std::move(newDataGlobals);
+    result.dataBase = dataBase;
     result.numDynVars = numDynVars();
     // Per-dynvar GC root flags. A dynvar that holds an Obj* must be a GC root,
     // else it can be collected while only the dynvar references it (its value

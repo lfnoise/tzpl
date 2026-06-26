@@ -104,7 +104,7 @@ static void materializeForeignFunctions(
     std::unordered_map<std::string, std::deque<FuncInfo>>& functions)
 {
     for (const auto& entry : entries) {
-        u32 idx = compiler.addGlobal(true);
+        u32 idx = compiler.addCodeGlobal();
         auto* prim = new Primitive(compiler.voidType());
         prim->cfun_ = entry.cfun;
         prim->pure_ = entry.pure;
@@ -342,10 +342,11 @@ ModuleInfo* ModuleCompiler::compileModule(
 
     mod->initBlock = initBlock;
 
-    // Allocate global slots for the init block and init flag
-    mod->initBlockGlobalIndex = compiler_.addGlobal(false);  // CodeBlock is not a GCObj
+    // Init block is a CodeBlock (immutable code image); init flag is a mutable
+    // integer written at runtime (data segment).
+    mod->initBlockGlobalIndex = compiler_.addCodeGlobal();
     compiler_.global(mod->initBlockGlobalIndex).p = initBlock;
-    mod->initFlagGlobalIndex = compiler_.addGlobal(false);   // flag is an integer
+    mod->initFlagGlobalIndex = compiler_.addDataGlobal(false);
 
     // Helper: decide whether an imported non-function, non-variable name
     // should be re-exported from this module. For names not brought in via

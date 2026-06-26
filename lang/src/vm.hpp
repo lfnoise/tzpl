@@ -65,6 +65,17 @@ class Primitive;
 struct VMTargetData;
 using VMTarget = std::shared_ptr<VMTargetData>;
 
+// Global index spaces. Globals are split into an immutable CODE image
+// (function CodeBlock* / builtin Primitive*, never mutated, never GC roots) and
+// a mutable DATA segment (var/let, the only globals holding heap roots). DATA
+// indices are numbered [0, kCodeGlobalBase); CODE indices [kCodeGlobalBase, ..).
+// A single global(idx) accessor dispatches by range, so the code/data decision
+// is made once at allocation and every read/write routes automatically.
+// kCodeGlobalBase is 2^30 -- below 2^31 so a code index stays positive in the
+// i32 AST field resolvedFuncGlobalIndex (sentinels there are negative).
+// See lang/docs/Code_Image_Swap_Design.md.
+inline constexpr u32 kCodeGlobalBase = 0x40000000u;
+
 // VM-allocated type aliases for STL containers
 template <typename T>
 using Vec = rt::VMVector<T>;
@@ -237,18 +248,24 @@ private:
     u32   baseReg_;
     Code* pc_;
 
-    // Global variables (mutable, persist across events)
-    Vec<Word> globals_;
-    Vec<u8> globalIsObj_;  // Track which globals hold Obj* for GC
+    // CODE image: function CodeBlock* / builtin Primitive* slots. Immutable,
+    // immortal pointers, never GC roots. Indexed by (absoluteIdx - kCodeGlobalBase).
+    Vec<Word> codeImage_;
+
+    // DATA segment: var/let globals (mutable, persist across events, the only
+    // globals that can hold heap roots). Indexed [0, kCodeGlobalBase).
+    Vec<Word> dataGlobals_;
+    Vec<u8> dataIsObj_;  // Track which data globals hold Obj* for GC
 
     // Dynamic scope variables
     Vec<Word> dynVars_;
     Vec<u8>   dynVarIsObj_;  // Track which dynvars hold Obj* for GC
 
-    // Inline-composite roots: (baseIndex, type) for a multi-word inline global /
-    // dynvar that embeds Obj* fields. globalIsObj/dynVarIsObj single-word marking
-    // can't reach those; the GC walks the layout via gcScanPayload instead.
-    Vec<std::pair<u32, Type*>> inlineObjGlobals_;
+    // Inline-composite roots: (baseIndex, type) for a multi-word inline data
+    // global / dynvar that embeds Obj* fields. dataIsObj/dynVarIsObj single-word
+    // marking can't reach those; the GC walks the layout via gcScanPayload.
+    // (Code globals are never inline composites.)
+    Vec<std::pair<u32, Type*>> inlineObjData_;
     Vec<std::pair<u32, Type*>> inlineObjDynVars_;
 
     // Extra GC root scanners registered by host wrappers (e.g. NRTVM's
@@ -626,19 +643,27 @@ public:
 
     // --- Global variables ---
 
-    u32 addGlobal(bool isObj = false) {
-        u32 idx = (u32)globals_.size();
-        globals_.push_back(Word());
-        globalIsObj_.push_back(isObj ? 1 : 0);
-        return idx;
+    // Single accessor dispatching by index range (see kCodeGlobalBase). A code
+    // index reads the immutable image; a data index reads the mutable segment.
+    Word& global(u32 idx) {
+        return idx >= kCodeGlobalBase ? codeImage_[idx - kCodeGlobalBase]
+                                      : dataGlobals_[idx];
+    }
+    const Word& global(u32 idx) const {
+        return idx >= kCodeGlobalBase ? codeImage_[idx - kCodeGlobalBase]
+                                      : dataGlobals_[idx];
     }
 
-    void setGlobalIsObj(u32 idx, bool isObj) { globalIsObj_[idx] = isObj ? 1 : 0; }
-    bool globalIsObj(u32 idx) const { return globalIsObj_[idx] != 0; }
+    // Sizes. numGlobals() is the combined count (host introspection); the GC and
+    // op_call bounds use the per-space counts.
+    u32 numCodeGlobals() const { return (u32)codeImage_.size(); }
+    u32 numDataGlobals() const { return (u32)dataGlobals_.size(); }
+    u32 numGlobals() const { return numCodeGlobals() + numDataGlobals(); }
 
-    Word& global(u32 idx) { return globals_[idx]; }
-    const Word& global(u32 idx) const { return globals_[idx]; }
-    u32 numGlobals() const { return (u32)globals_.size(); }
+    // DATA-segment GC accessors (only data globals are roots).
+    bool dataGlobalIsObj(u32 dataIdx) const { return dataIsObj_[dataIdx] != 0; }
+    Word& dataGlobal(u32 dataIdx) { return dataGlobals_[dataIdx]; }
+    const Word& dataGlobal(u32 dataIdx) const { return dataGlobals_[dataIdx]; }
 
     // Register an extra GC root scanner. The callback is invoked once per
     // mark cycle from the tracing GC's root-scan substate; the callback

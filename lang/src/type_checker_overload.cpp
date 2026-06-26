@@ -882,7 +882,7 @@ FuncInfo* TypeChecker::tryResolveTemplate(const std::string& name,
                 }
 
                 // Create monomorphized FuncInfo
-                u32 globalIdx = compiler_.addGlobal(true);
+                u32 globalIdx = compiler_.addCodeGlobal();
                 // Store a TupleType of paramTypes in the Primitive's type_
                 // so builtins like print/println can access arg types at runtime
                 TypeVec primFields(rt::STLAllocator<Type*>(nullptr));
@@ -1072,7 +1072,7 @@ FuncInfo* TypeChecker::tryResolveModuleTemplate(
             Type* retType = nullptr;
             CFun cfun = nullptr;
             if (fi.builtinTemplate(compiler_, argTypes, paramTypes, retType, cfun)) {
-                u32 globalIdx = compiler_.addGlobal(true);
+                u32 globalIdx = compiler_.addCodeGlobal();
                 auto* prim = new Primitive(compiler_.voidType());
                 prim->cfun_ = cfun;
                 prim->rtSafe_ = fi.rtSafe;
@@ -1223,13 +1223,10 @@ FuncInfo* TypeChecker::monomorphize(FuncInfo& templateFI,
         retType = compiler_.futureType(retType);
     }
 
-    // Allocate global slot. isObj MUST be false: a monomorphized user function's
-    // global holds its CodeBlock* (set by genFnDecl), which is NOT a GCObj --
-    // the regular function path (declareFn) uses addGlobal(false) for the same
-    // reason. Flagging it as an Obj root makes the GC scan the CodeBlock as an
-    // Obj* and dereference a bogus vtable. (Builtin monomorphizations store a
-    // Primitive GCObj, so those addGlobal(true) sites are correct.)
-    u32 globalIdx = compiler_.addGlobal(false);
+    // A monomorphized user function's global holds its CodeBlock* (set by
+    // genFnDecl). Code globals live in the immutable image and are never GC
+    // roots, so no isObj flag is involved.
+    u32 globalIdx = compiler_.addCodeGlobal();
 
     // Create monomorphized FuncInfo (heap-allocated for pointer stability)
     auto monoPtr = std::make_unique<FuncInfo>();

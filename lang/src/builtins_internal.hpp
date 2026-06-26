@@ -41,7 +41,7 @@ inline void registerOne(Compiler& compiler, FuncMap& functions,
     std::vector<Type*> paramTypes, CFun cfun,
     bool pure = true, bool rtSafe = true)
 {
-    u32 idx = compiler.addGlobal(true);
+    u32 idx = compiler.addCodeGlobal();
     auto* prim = new Primitive(compiler.voidType());
     prim->cfun_ = cfun;
     prim->pure_ = pure;

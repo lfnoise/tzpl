@@ -995,15 +995,14 @@ void op_call(VM& vm, Code* pc) {
     u16 argBase = pc[1].regs[2];
     u32 calleeIdx = (u32)pc[2].i;
 
-    // Get the callee's CodeBlock from the global variable
-    if (calleeIdx >= vm.numGlobals()) {
-        throw std::runtime_error("op_call: global index " + std::to_string(calleeIdx)
-            + " out of range (VM has " + std::to_string(vm.numGlobals()) + " globals)");
+    // The callee is a CODE global: a ranged index into the immutable image.
+    if (calleeIdx < kCodeGlobalBase || (calleeIdx - kCodeGlobalBase) >= vm.numCodeGlobals()) {
+        throw std::runtime_error("op_call: code global index " + std::to_string(calleeIdx)
+            + " out of range (VM has " + std::to_string(vm.numCodeGlobals()) + " code globals)");
     }
     CodeBlock* callee = static_cast<CodeBlock*>(vm.global(calleeIdx).p);
     if (!callee) {
-        throw std::runtime_error("op_call: null CodeBlock at global index " + std::to_string(calleeIdx)
-            + " (VM has " + std::to_string(vm.numGlobals()) + " globals)");
+        throw std::runtime_error("op_call: null CodeBlock at code global index " + std::to_string(calleeIdx));
     }
 
     // Use flat register file (even when inside a coroutine)

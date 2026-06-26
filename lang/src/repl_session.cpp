@@ -68,15 +68,18 @@ struct REPLSession::Impl {
         // TypeChecker constructor registers builtins (creates Primitive objects).
         // This requires compilation context for global allocation.
         compiler.makeCurrent(target);
-        auto [initGlobals, initGlobalBase] = compiler.takePendingGlobals();
+        auto [initCode, initCodeBase] = compiler.takePendingCodeGlobals();
+        auto [initData, initDataBase] = compiler.takePendingDataGlobals();
         compiler.endCurrent();
 
         // Install builtin globals and switch to VM context
         vm.makeCurrent();
-        if (!initGlobals.empty()) {
+        if (!initCode.empty() || !initData.empty()) {
             CompileResult initResult;
-            initResult.newGlobals = std::move(initGlobals);
-            initResult.globalBase = initGlobalBase;
+            initResult.newCodeGlobals = std::move(initCode);
+            initResult.codeBase = initCodeBase;
+            initResult.newDataGlobals = std::move(initData);
+            initResult.dataBase = initDataBase;
             initResult.target = target;
             vm.install(initResult);
         }
@@ -85,13 +88,16 @@ struct REPLSession::Impl {
     // Install pending globals after compilation
     void installPendingGlobals() {
         u32 numDynVars = compiler.numDynVars();
-        auto [newGlobals, globalBase] = compiler.takePendingGlobals();
+        auto [newCode, codeBase] = compiler.takePendingCodeGlobals();
+        auto [newData, dataBase] = compiler.takePendingDataGlobals();
         compiler.endCurrent();
         vm.makeCurrent();
         {
             CompileResult installResult;
-            installResult.newGlobals = std::move(newGlobals);
-            installResult.globalBase = globalBase;
+            installResult.newCodeGlobals = std::move(newCode);
+            installResult.codeBase = codeBase;
+            installResult.newDataGlobals = std::move(newData);
+            installResult.dataBase = dataBase;
             installResult.numDynVars = numDynVars;
             installResult.target = target;
             vm.install(installResult);
@@ -164,16 +170,16 @@ REPLSession::EvalResult REPLSession::eval(const std::string& input) {
         }
 
         // Sync reused globals: when a REPL function is redefined, it reuses
-        // the old global index. genFnDecl stores the new CodeBlock in the
-        // compiler's globals, but installPendingGlobals only copies NEW globals
-        // (>= compileGlobalBase) to the VM. Manually update the VM for any
-        // pre-existing globals that were overwritten during codegen.
-        u32 base = impl_->compiler.compileGlobalBase();
+        // the old code-image index. genFnDecl stores the new CodeBlock in the
+        // compiler's code globals, but installPendingGlobals only copies NEW
+        // globals to the VM. Manually update the VM for any pre-existing code
+        // slot (absolute index < codeBase) overwritten during codegen.
+        u32 codeBase = kCodeGlobalBase + impl_->compiler.codeCompileBase();
         for (auto& item : program.items) {
             if (item->kind == ASTNode::FnDecl) {
                 auto* fn = static_cast<FnDeclNode*>(item.get());
                 u32 idx = (u32)fn->resolvedFuncGlobalIndex;
-                if (fn->resolvedFuncGlobalIndex >= 0 && idx < base) {
+                if (fn->resolvedFuncGlobalIndex >= 0 && idx < codeBase) {
                     impl_->vm.global(idx) = impl_->compiler.global(idx);
                 }
             }

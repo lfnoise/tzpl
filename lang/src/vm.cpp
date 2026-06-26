@@ -216,8 +216,9 @@ VM::VM(usize poolSize, TypeUniverse& typeUniverse, const VMTarget& target)
     , frameCount_(0)
     , baseReg_(0)
     , pc_(nullptr)
-    , globals_(rt::STLAllocator<Word>(&allocator_))
-    , globalIsObj_(rt::STLAllocator<u8>(&allocator_))
+    , codeImage_(rt::STLAllocator<Word>(&allocator_))
+    , dataGlobals_(rt::STLAllocator<Word>(&allocator_))
+    , dataIsObj_(rt::STLAllocator<u8>(&allocator_))
     , dynVars_(rt::STLAllocator<Word>(&allocator_))
     , dynVarIsObj_(rt::STLAllocator<u8>(&allocator_))
     , dynStack_(nullptr)
@@ -448,40 +449,55 @@ void VM::dumpCallStack() const {
 }
 
 void VM::install(const CompileResult& result) {
-    // Validate target match when there are new globals to install
-    if (!result.newGlobals.empty()) {
+    // Validate target + per-space base sync when there are new globals to install.
+    bool anyNew = !result.newCodeGlobals.empty() || !result.newDataGlobals.empty();
+    if (anyNew) {
         assert(result.target == target_ && "CompileResult target does not match VM target");
-        if (numGlobals() != result.globalBase) {
-            throw std::runtime_error("VM globals out of sync: VM has "
-                + std::to_string(numGlobals()) + " globals but compiler expects base "
-                + std::to_string(result.globalBase) + " (delta "
-                + std::to_string((i64)numGlobals() - (i64)result.globalBase) + ")");
-        }
+    }
+    if (!result.newCodeGlobals.empty() && numCodeGlobals() != result.codeBase) {
+        throw std::runtime_error("VM code globals out of sync: VM has "
+            + std::to_string(numCodeGlobals()) + " but compiler expects base "
+            + std::to_string(result.codeBase));
+    }
+    if (!result.newDataGlobals.empty() && numDataGlobals() != result.dataBase) {
+        throw std::runtime_error("VM data globals out of sync: VM has "
+            + std::to_string(numDataGlobals()) + " but compiler expects base "
+            + std::to_string(result.dataBase));
     }
 
     // Pre-allocate to avoid repeated TLSF reallocations during push_back,
     // which can corrupt adjacent heap objects due to TLSF coalescing.
-    globals_.reserve(globals_.size() + result.newGlobals.size());
-    globalIsObj_.reserve(globalIsObj_.size() + result.newGlobals.size());
+    codeImage_.reserve(codeImage_.size() + result.newCodeGlobals.size());
+    dataGlobals_.reserve(dataGlobals_.size() + result.newDataGlobals.size());
+    dataIsObj_.reserve(dataIsObj_.size() + result.newDataGlobals.size());
 
-    // Extend globals_ with newly compiled global slots
-    for (auto& slot : result.newGlobals) {
-        u32 gidx = (u32)globals_.size();
-        globals_.push_back(slot.value);
-        globalIsObj_.push_back(slot.isObj ? 1 : 0);
-        // A multi-word inline global embedding Obj* fields: record (baseIdx,
-        // type) so the GC walks its layout instead of single-word marking.
-        if (slot.inlineObjType) inlineObjGlobals_.push_back({gidx, slot.inlineObjType});
+    // Extend the immutable CODE image (function CodeBlock* / builtin Primitive*).
+    // No isObj/root tracking: code slots hold immortal pointers, never GC roots.
+    for (auto& slot : result.newCodeGlobals) {
+        codeImage_.push_back(slot.value);
     }
 
-    // Apply in-place updates to PRE-EXISTING globals (redefinitions from an
-    // incremental compile). These live at indices below globalBase -- already
-    // installed -- so overwrite the value word directly. isObj-ness is unchanged:
-    // a redefined fn slot stays a CodeBlock*. Done after the append so a result
-    // that both adds and redefines is consistent. Function call sites read
-    // global(idx) at call time, so already-running code picks up the new value.
+    // Extend the mutable DATA segment (var/let). These carry GC-root flags and
+    // may be multi-word inline composites.
+    for (auto& slot : result.newDataGlobals) {
+        u32 didx = (u32)dataGlobals_.size();
+        dataGlobals_.push_back(slot.value);
+        dataIsObj_.push_back(slot.isObj ? 1 : 0);
+        // A multi-word inline data global embedding Obj* fields: record (baseIdx,
+        // type) so the GC walks its layout instead of single-word marking.
+        if (slot.inlineObjType) inlineObjData_.push_back({didx, slot.inlineObjType});
+    }
+
+    // Apply in-place updates to PRE-EXISTING CODE slots (redefinitions from an
+    // incremental compile). The index is an absolute (ranged) code index; map it
+    // into the image and overwrite the pointer. A redefined fn slot stays a
+    // CodeBlock*. Function call sites read global(idx) at call time, so already-
+    // running code picks up the new body.
     for (auto& ru : result.reusedGlobals) {
-        if (ru.index < globals_.size()) globals_[ru.index] = ru.value;
+        if (ru.index >= kCodeGlobalBase) {
+            u32 local = ru.index - kCodeGlobalBase;
+            if (local < codeImage_.size()) codeImage_[local] = ru.value;
+        }
     }
 
     // Ensure dynamic variable table is large enough. Carry each new dynvar's

@@ -8,6 +8,12 @@ fn build_pair(i Int) (String, Int) {
     ("item-" $ toString(i), i * 2)
 }
 
+-- A heap object reachable through a global, so the synchronous trace below has
+-- a live root to mark. Only the DATA segment (var/let globals) is scanned for
+-- roots -- the immutable code image (functions/builtins) holds immortal
+-- pointers and is never marked -- so this exercises data-global root scanning.
+let kept = "live-root";
+
 var i = 0;
 var total = 0;
 while (i < 20000) {

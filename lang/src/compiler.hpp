@@ -71,16 +71,23 @@ struct CompileResult {
         // to trace those embedded pointers, since isObj single-word marking can't.
         Type* inlineObjType = nullptr;
     };
-    std::vector<GlobalSlot> newGlobals;
-    u32 globalBase = 0;  // VM global index where newGlobals starts
+    // Two global index spaces (see kCodeGlobalBase in vm.hpp). CODE globals are
+    // function CodeBlock* / builtin Primitive* -- immutable, immortal, never GC
+    // roots, numbered from kCodeGlobalBase. DATA globals are var/let -- mutable,
+    // the only globals holding heap roots, numbered from 0. A single global(idx)
+    // accessor dispatches by range. See lang/docs/Code_Image_Swap_Design.md.
+    std::vector<GlobalSlot> newCodeGlobals;  // appended code slots this compile
+    u32 codeBase = 0;   // code-image size the VM must have before install
+    std::vector<GlobalSlot> newDataGlobals;  // appended data slots this compile
+    u32 dataBase = 0;   // data-segment size the VM must have before install
 
-    // In-place updates to PRE-EXISTING global slots (index < globalBase),
-    // overwritten during an incremental compile -- e.g. a redefined function's
-    // new CodeBlock stored into its existing slot. newGlobals carries only
-    // appended slots (>= globalBase); these carry updates to already-installed
-    // slots so VM::install can apply them in place. Empty for one-shot compiles.
+    // In-place updates to PRE-EXISTING CODE slots (absolute code index <
+    // kCodeGlobalBase + codeBase) overwritten during an incremental compile --
+    // a redefined function's new CodeBlock stored into its existing slot.
+    // newCodeGlobals carries only appended slots; these carry the redefinitions
+    // so VM::install applies them in place. Empty for one-shot compiles.
     struct ReusedGlobal {
-        u32 index = 0;
+        u32 index = 0;     // absolute (ranged) code index
         Word value;
     };
     std::vector<ReusedGlobal> reusedGlobals;
@@ -114,9 +121,12 @@ struct CompileResult {
 // Shared compilation target — holds the global layout that a Compiler and
 // any number of VMs share.  Created by Compiler::createTarget().
 struct VMTargetData {
-    u32 globalCount = 0;
-    std::vector<CompileResult::GlobalSlot> allGlobals;
-    u32 compileGlobalBase = 0;
+    // Two global index spaces, mirroring the VM's split (see kCodeGlobalBase).
+    // Code slots hold immortal CodeBlock*/Primitive*; data slots hold var/let.
+    std::vector<CompileResult::GlobalSlot> codeGlobals;  // absolute idx = kCodeGlobalBase + position
+    std::vector<CompileResult::GlobalSlot> dataGlobals;  // absolute idx = position
+    u32 codeCompileBase = 0;   // codeGlobals.size() at makeCurrent
+    u32 dataCompileBase = 0;   // dataGlobals.size() at makeCurrent
     bool rtRestricted = false;
 };
 
@@ -152,10 +162,12 @@ public:
     // Does NOT switch to any VM context — caller must call vm.makeCurrent() if needed.
     void endCurrent();
 
-    // Harvest pending globals from the current compilation session.
-    // Returns (newGlobals, globalBase) for building a CompileResult manually.
-    // Call this after codegen but before endCurrent().
-    std::pair<std::vector<CompileResult::GlobalSlot>, u32> takePendingGlobals();
+    // Harvest pending globals from the current compilation session, one per
+    // index space. Each returns (newSlots, base) where base is the space size at
+    // makeCurrent. Call after codegen, before endCurrent. (Used when building a
+    // CompileResult manually, e.g. the REPL/incremental paths.)
+    std::pair<std::vector<CompileResult::GlobalSlot>, u32> takePendingCodeGlobals();
+    std::pair<std::vector<CompileResult::GlobalSlot>, u32> takePendingDataGlobals();
 
     // Populate result's harvested globals, dynvar GC-root metadata, and exported
     // function table from the current (makeCurrent-active) compile session.
@@ -212,18 +224,26 @@ public:
     SymbolPtr intern(std::string_view name) { return ts::intern(name); }
 
     // --- Global variables (compiler-owned, deferred until install) ---
-    // These operate on the current VMTarget's layout (set by makeCurrent or compile).
-    u32 addGlobal(bool isObj = false);
-    // Phase 4g.5: allocate sizeWords consecutive slots for an inline-composite
-    // global so its payload is stored inline (no per-store box). Returns the
-    // first slot index. Continuation slots get isObj=false.
-    u32 addInlineGlobal(u32 sizeWords, Type* inlineType = nullptr);
-    void setGlobalIsObj(u32 idx, bool isObj);
-    bool isGlobalObj(u32 idx) const;
+    // These operate on the current VMTarget's layout (set by makeCurrent or
+    // compile). Two index spaces: CODE (functions/builtins, immutable) numbered
+    // from kCodeGlobalBase, and DATA (var/let, mutable roots) numbered from 0.
+    // Allocation chooses the space; global(idx) dispatches by range thereafter.
+
+    // Allocate an immutable CODE slot (function CodeBlock* / builtin Primitive*).
+    // Returns an absolute (ranged) index >= kCodeGlobalBase.
+    u32 addCodeGlobal();
+    // Allocate a mutable DATA slot (var/let). Returns an index < kCodeGlobalBase.
+    u32 addDataGlobal(bool isObj = false);
+    // Phase 4g.5: allocate sizeWords consecutive DATA slots for an inline-
+    // composite global so its payload is stored inline. Returns the first index.
+    u32 addInlineDataGlobal(u32 sizeWords, Type* inlineType = nullptr);
+    void setDataGlobalIsObj(u32 idx, bool isObj);
     Word& global(u32 idx);
     const Word& global(u32 idx) const;
-    u32 numGlobals() const;
-    u32 compileGlobalBase() const;
+    u32 numCodeGlobals() const;
+    u32 numDataGlobals() const;
+    u32 codeCompileBase() const;
+    u32 dataCompileBase() const;
 
     // Query whether the current VM target is RT-restricted
     bool isRTRestricted() const;
