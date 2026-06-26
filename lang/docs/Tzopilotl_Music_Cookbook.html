@@ -195,6 +195,17 @@
     padding: 0.15em 0.4em;
   }
 
+  kbd {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-size: 0.82em;
+    background: var(--code-bg);
+    border: 1px solid var(--code-border);
+    border-bottom-width: 2px;
+    border-radius: 4px;
+    padding: 0.1em 0.4em;
+    white-space: nowrap;
+  }
+
   pre {
     background: var(--code-bg);
     border: 1px solid var(--code-border);
@@ -433,19 +444,33 @@ are three locations, and the same actor/message APIs work across all of them:</p
   allocate from the system heap or block. This is the natural home for musical
   scheduling, because a silo actor can wake exactly on the beat.</li>
   <li><strong>Other processes</strong> &mdash; a separate Tzopilotl process,
-  reached over NATS. Messages are the same <code>SExpr</code> values, serialized.</li>
+  reached over NATS. Messages are ordinary values serialized to a compact binary
+  form, so the same message travels unchanged between any of these locations
+  (<a href="#actors-messages">&sect;8.2</a>).</li>
 </ul>
 
 <h3 id="running">1.3 Running the examples</h3>
-<p>Pure-language examples (no audio) run with the bare interpreter:</p>
-<pre><code>./build/lang/tzpl -I lang/modules myscript.x</code></pre>
-<p>Anything that touches the engine, silos, the clock, or rendering needs the full
-application, which wires up all the bridges. Add both module search paths:</p>
-<pre><code><span class="cmt">-- run and exit when the script returns</span>
-./build/app/tzpl_app --nogui -I lang/modules -I bridge/modules myscript.x
-
-<span class="cmt">-- keep running (live audio) until Ctrl-C</span>
-./build/app/tzpl_app --nogui --wait -I lang/modules -I bridge/modules myscript.x</code></pre>
+<p>Tzopilotl runs as a desktop application, <code>tzpl_app</code>: a multi-tab code
+editor above an output panel. You type code in the editor and evaluate it from the
+keyboard &mdash; there is no separate REPL prompt and no Run button. Three shortcuts
+choose what to evaluate:</p>
+<table>
+  <tr><th>Keys</th><th>Evaluates</th></tr>
+  <tr><td><kbd>Cmd</kbd>+<kbd>Enter</kbd></td><td>the selection, or &mdash; with nothing selected &mdash; the <em>block</em> around the cursor (the surrounding run of non-blank lines)</td></tr>
+  <tr><td><kbd>Shift</kbd>+<kbd>Enter</kbd></td><td>the current line</td></tr>
+  <tr><td><kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>Enter</kbd></td><td>the whole file (the active tab)</td></tr>
+</table>
+<p>Output from <code>print</code>/<code>println</code>, evaluation results (shown as
+<code>=&gt; value : type</code>), and compile or runtime errors (marked <code>!!</code>)
+appear in the output panel below the editor. Open an existing <code>.x</code> file
+with <strong>File &rarr; Open</strong> (<kbd>Cmd</kbd>+<kbd>O</kbd>); the editor
+evaluates against the standard library and bridge modules, so the
+<code>import</code> lines in each recipe resolve as-is.</p>
+<p>To try a recipe, paste it into a tab, place the cursor in it, and press
+<kbd>Cmd</kbd>+<kbd>Enter</kbd> (or <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>Enter</kbd>
+to run the whole tab). Audio is silent until your code calls
+<code>engineStart()</code>; after that, sound continues for as long as the app is
+open, and you keep shaping it by evaluating more code.</p>
 <div class="note"><strong>Module imports</strong>
 The recipes below begin with the <code>import</code> lines they need. The common
 ones are <code>audio_engine</code> (engine control), <code>synthdef</code> +
@@ -497,8 +522,8 @@ sine, compiled and registered as <code>"bubbles"</code>:</p>
 
 bubbles <span class="fn">defSynthX</span>(<span class="str">"bubbles"</span>);
 <span class="str">"defs: "</span> print; <span class="fn">listSynthDefs</span>() println;</code></pre>
-<p>Running this under <code>tzpl_app --nogui</code> prints the compile/link commands
-and then:</p>
+<p>Evaluating this (<kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>Enter</kbd>) prints the
+compile/link commands to the output panel and then:</p>
 <pre><code>bubbles compiled successfully (synthc).
 defs: [+, voicer, Audio In, bubbles, Audio Out, *, sinosc]</code></pre>
 <p><strong>How it works.</strong> <code>defSynthX</code> walks the returned
@@ -590,9 +615,9 @@ it to the speakers.</p>
 <span class="fn">newNode</span>(<span class="str">"bubbles"</span>, <span class="num">101</span>);   <span class="cmt">-- instantiate the synth from section 2 as node 101</span>
 <span class="fn">connect</span>(<span class="num">101</span>, <span class="num">0</span>, <span class="num">0</span>, <span class="num">0</span>);    <span class="cmt">-- node 101 out 0  ->  output (node 0) in 0</span>
 <span class="fn">sched</span>();                   <span class="cmt">-- dispatch the bundle now</span></code></pre>
-<p>Run it with <code>--wait</code> so the engine keeps playing, and you hear the
-<code>bubbles</code> synth. (You can use the engine's built-in <code>"sinosc"</code>
-def the same way without compiling anything.)</p>
+<p>Evaluate it and you hear the <code>bubbles</code> synth &mdash; the engine keeps
+playing for as long as the app is open. (You can use the engine's built-in
+<code>"sinosc"</code> def the same way without compiling anything.)</p>
 <p><strong>How it works.</strong> <code>newNode</code> asks the engine to allocate an
 instance of the named def; <code>connect</code> redirects node 101's output buffer
 pointer into the output node's input (a zero-copy patch &mdash; no samples are
@@ -706,16 +731,28 @@ kicks off the music; <code>siloStartAt</code> calls it on the grid.</p>
 calling thread against the silo's rt-restricted target, then hands the installed
 code to the silo's RT thread; the returned <code>Future&lt;String&gt;</code> lets you
 <code>await</code> completion and check for errors before starting. The
-<code>start()</code> entry registers the actor; <code>siloStartAt</code> schedules
+<code>start()</code> entry spawns the actor; <code>siloStartAt</code> schedules
 the <code>start()</code> call (on tempo clock 0) at the given beat, so several
 silos can be launched together on a downbeat. From then on the silo's per-block
 tick drives the actor, and <code>await delay(beats)</code> resolves on the audio
 beat &mdash; the note timing is sample-accurate.</p>
-<div class="note"><strong>Headless playback</strong>
-These audio recipes assume a real audio device. In a headless run the audio
-callback may not start, in which case time does not advance past the first event.
-The mechanism is identical to the deterministic message recipes in
-section&nbsp;8.4, which verify end-to-end without sound.</div>
+<p>The task module above is an inline triple-quoted string, which is convenient for
+short parts. For anything substantial, keep the task in its own <code>.x</code> file
+and load it with <code>siloLoadFile(silo, path)</code> (from the <code>silo</code>
+module) &mdash; the file equivalent of <code>siloLoad</code>:</p>
+<pre><code><span class="kw">import</span> silo.*;
+
+<span class="fn">attachVM</span>(<span class="num">0</span>);
+<span class="kw">let</span> err = <span class="kw">await</span> <span class="fn">siloLoadFile</span>(<span class="num">0</span>, <span class="str">"parts/melody.x"</span>);   <span class="cmt">-- read + compile + load the file</span></code></pre>
+<p>It is just <code>siloLoad(silo, readFile(path))</code> &mdash; <code>readFile</code>
+returns the file's text. The file is an ordinary module with its own
+<code>import</code>s and a <code>start()</code>; you can edit it in another editor
+tab and re-load to iterate on a part without retyping it as a string.</p>
+<div class="note"><strong>Live coding</strong>
+Once a silo is started its sequence keeps running while the app is open. You can
+keep evaluating code to change things live &mdash; recompile a synthdef, re-run
+<code>siloLoad</code> with new task code, or send the silo new messages
+(<a href="#actors-silo">&sect;8.3</a>) &mdash; without stopping the audio.</div>
 
 <!-- ================================================================ -->
 <h2 id="scheduling">6. Scheduling on the beat</h2>
@@ -798,7 +835,10 @@ cheaply.</p>
     }
 }
 <span class="kw">fn</span> <span class="fn">start</span>() <span class="typ">Void</span> { <span class="fn">spawn</span>(arp, SExpr.int(<span class="num">0</span>)); }</code></pre>
-<p>Load it onto a silo exactly as in section&nbsp;5. The same shape generates
+<p>Load it onto a silo as in section&nbsp;5: save it as a <code>.x</code> file and
+<code>await siloLoadFile(0, "parts/arp.x")</code>, or wrap it in a triple-quoted
+string and pass it to <code>siloLoad</code>. Either way, <code>siloStartAt</code>
+launches its <code>start()</code> on the beat. The same shape generates
 <em>control</em> automation rather than notes &mdash; sweep a filter cutoff by
 calling <code>setControl(node, ctl, value)</code> (or <code>setInput</code>) each
 step instead of <code>playNote</code>.</p>
@@ -831,8 +871,8 @@ actors interleave on one VM; they run at NRT, in silos, and &mdash; over NATS
   <tr><td><code>spawn(behavior, init) <span class="typ">Actor&lt;M&gt;</span></code></td><td>Create an actor and run it to its first <code>receive</code>.</td></tr>
   <tr><td><code>send(to <span class="typ">Actor&lt;M&gt;</span>, msg M)</code></td><td>Deliver a message (wakes a parked receiver, else queues).</td></tr>
   <tr><td><code>receive(self <span class="typ">Actor&lt;M&gt;</span>) <span class="typ">Future&lt;M&gt;</span></code></td><td><code>await</code> it to take the next message.</td></tr>
-  <tr><td><code>register(name <span class="typ">Symbol</span>, a <span class="typ">Actor&lt;M&gt;</span>)</code></td><td>Give an actor a name in this VM.</td></tr>
-  <tr><td><code>sendByName(name <span class="typ">Symbol</span>, msg M)</code></td><td>Deliver to a locally-registered name.</td></tr>
+  <tr><td><code>register(a <span class="typ">Actor&lt;M&gt;</span>, name <span class="typ">Symbol</span>|<span class="typ">String</span>) <span class="typ">Actor&lt;M&gt;</span></code></td><td>Name an actor in this VM (the spawner names it); returns the actor, so it chains off <code>spawn</code>.</td></tr>
+  <tr><td><code>sendByName(name <span class="typ">Symbol</span>|<span class="typ">String</span>, msg M)</code></td><td>Deliver to a locally-registered name.</td></tr>
   <tr><td><code>runActors()</code></td><td>Drive the event loop until every actor is parked (NRT, blocking).</td></tr>
   <tr><td><code>serveActors()</code></td><td>Like <code>runActors</code> but parks when idle, woken by cross-thread delivery.</td></tr>
 </table>
@@ -896,19 +936,19 @@ zero-copy reader are documented in the Binary Messages section of the
 <a href="FFI_Guide.html">FFI Guide</a>.</p>
 
 <h3 id="actors-silo">8.3 Commanding silo actors by name</h3>
-<p>A musical "conductor" at NRT can command an actor living in a silo. The silo
-actor <code>register</code>s a name; the conductor addresses it with
-<code>siloSend</code> (immediate) or <code>siloSendAt</code> (on a beat). Both are
-in <code>actors.x</code>:</p>
+<p>A musical "conductor" at NRT can command an actor living in a silo. Whoever
+spawns the silo actor gives it a name with <code>register</code>; the conductor
+then addresses it with <code>siloSend</code> (immediate) or <code>siloSendAt</code>
+(on a beat). Both are in <code>actors.x</code>:</p>
 <pre><code><span class="cmt">-- actors.x</span>
 <span class="kw">fn</span> <span class="fn">siloSend</span>(silo <span class="typ">Int</span>, name <span class="typ">Symbol</span>, msg <span class="typ">SExpr</span>) <span class="typ">Void</span>;
 <span class="kw">fn</span> <span class="fn">siloSendAt</span>(silo <span class="typ">Int</span>, clock <span class="typ">Int</span>, beat <span class="typ">Float</span>, name <span class="typ">Symbol</span>, msg <span class="typ">SExpr</span>) <span class="typ">Void</span>;</code></pre>
 <p>The silo side (adapted from
-<code>integration-tests/scripts/silo_actor_scheduled.x</code>) registers
-<code>"voice"</code> and plays each pitch it receives:</p>
+<code>integration-tests/scripts/silo_actor_scheduled.x</code>) plays each pitch it
+receives; the module names it <code>'voice</code> at the spawn site &mdash; the
+behavior itself stays name-agnostic:</p>
 <pre><code><span class="cmt">-- silo module source</span>
 <span class="kw">async</span> <span class="kw">fn</span> <span class="fn">voice</span>(self <span class="typ">Actor&lt;SExpr&gt;</span>, init <span class="typ">SExpr</span>) <span class="typ">Void</span> {
-    <span class="fn">register</span>(<span class="fn">toSymbol</span>(<span class="str">"voice"</span>), self);
     <span class="kw">var</span> id = <span class="num">0</span>;
     <span class="kw">while</span> (<span class="kw">true</span>) {
         <span class="kw">let</span> m = <span class="kw">await</span> <span class="fn">receive</span>(self);
@@ -918,7 +958,7 @@ in <code>actors.x</code>:</p>
         }
     }
 }
-<span class="fn">spawn</span>(voice, SExpr.int(<span class="num">0</span>));</code></pre>
+voice <span class="fn">spawn</span>(SExpr.int(<span class="num">0</span>)) <span class="fn">register</span>(<span class="str">'voice</span>);   <span class="cmt">-- spawn, then name it</span></code></pre>
 <p>The NRT conductor, after <code>siloLoad</code>ing that module, schedules a rising
 line one note per beat:</p>
 <pre><code><span class="kw">let</span> now = <span class="fn">clockBeats</span>(<span class="num">0</span>);
@@ -984,9 +1024,12 @@ onto that subject (from
 <span class="kw">import</span> message.*;
 <span class="kw">import</span> sexprs.*;
 
-<span class="cmt">-- bridge subject "actors.w" -&gt; the local actor registered as "w"</span>
+<span class="cmt">-- a worker actor, named 'w by its spawner (as in 8.3)</span>
+worker <span class="fn">spawn</span>(SExpr.int(<span class="num">0</span>)) <span class="fn">register</span>(<span class="str">'w</span>);
+
+<span class="cmt">-- bridge subject "actors.w" -&gt; the local actor named 'w</span>
 <span class="fn">onMessageMsg</span>(<span class="str">"actors.w"</span>, <span class="kw">fn</span>(b <span class="typ">Bytes</span>) {
-    <span class="kw">if</span> (<span class="fn">isMessage</span>(b)) { <span class="fn">sendByName</span>(<span class="fn">toSymbol</span>(<span class="str">"w"</span>), <span class="fn">decode</span>(b)); }
+    <span class="kw">if</span> (<span class="fn">isMessage</span>(b)) { <span class="fn">sendByName</span>(<span class="str">'w</span>, <span class="fn">decode</span>(b)); }
 });
 
 <span class="fn">natsPubMsg</span>(<span class="str">"actors.w"</span>, <span class="fn">encode</span>(SExpr.string(<span class="str">"hello over nats"</span>)));
@@ -1002,8 +1045,9 @@ of returning. See the OSC/NATS sections of the
 <h2 id="render">9. Offline (NRT) rendering</h2>
 <p>To render audio to a file faster (or slower) than real time, use
 <code>renderNRT</code>. It owns a private engine and tempo scheduler on a render
-thread, so it runs headless with no audio device. You build the graph in a setup
-callback and <code>await renderDone(handle)</code> for completion.</p>
+thread, so it runs entirely offline, independent of the live audio device. You
+build the graph in a setup callback and <code>await renderDone(handle)</code> for
+completion.</p>
 <table>
   <tr><th>Function</th><th>Meaning</th></tr>
   <tr><td><code>renderNRT(path <span class="typ">String</span>, setup fn() <span class="typ">Void</span>) <span class="typ">Int</span></code></td><td>Open-ended render; returns a handle.</td></tr>
