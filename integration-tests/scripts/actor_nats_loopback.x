@@ -20,11 +20,10 @@ async fn worker(self Actor<SExpr>, init SExpr) Void {
 worker spawn(SExpr.int(0)) register('w);
 runActors();                 -- let worker reach its first receive and park
 
--- Bridge the NATS subject "actors.w" to the local actor "w": decode the payload
--- and enqueue it. (A remote process would publish to this subject.)
-onMessageMsg("actors.w", fn(b Bytes) {
-    if (isMessage(b)) { sendByName(toSymbol("w"), decode(b)); }
-});
+-- Bridge the NATS subject "actors.w" to the local actor "w": decode each payload
+-- and enqueue it. (A remote process would publish to this subject.) The helper
+-- wraps the onMessageMsg + isMessage + decode + sendByName pattern.
+natsBridgeActor("actors.w", 'w);
 
 -- Deliver two messages over NATS (cross-process transport, here looped back).
 natsPubMsg("actors.w", encode(SExpr.string("hello over nats")));

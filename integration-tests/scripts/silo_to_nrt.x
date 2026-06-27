@@ -26,8 +26,7 @@ async fn conductor(self Actor<SExpr>, init SExpr) Void {
 -- silo 0: a sender actor that emits a rising line to the NRT "conductor", one
 -- note per beat. The sends run inside the tick (gCurrentSilo set), after delay.
 let silo0 = """
-import audio_engine.*;
-import message.*;
+import silo_actors.*;   -- siloPost (the silo-side send helper)
 import sexprs.*;
 
 async fn sender(self Actor<SExpr>, init SExpr) Void {
@@ -35,7 +34,7 @@ async fn sender(self Actor<SExpr>, init SExpr) Void {
     var i = 0;
     while (i < 4) {
         await delay(1.0);
-        siloOutbox(-1, toSymbol("conductor"), encode(SExpr.float(scale[i % 4])));
+        siloPost(-1, 'conductor, SExpr.float(scale[i % 4]));
         i = i + 1;
     }
 }

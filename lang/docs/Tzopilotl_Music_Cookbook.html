@@ -975,10 +975,13 @@ musical grid from outside.</p>
 
 <h3 id="actors-routing">8.4 Silo&#8596;silo and silo&#8594;NRT</h3>
 <p>Silos can message each other, and message NRT actors, without you touching the
-transport. The audio thread cannot allocate, so a silo actor pushes an
-<em>encoded</em> message into a lock-free outbox with <code>siloOutbox(target,
-name, encode(msg))</code> (<code>target</code> is the destination silo, or
-<code>-1</code> for an NRT actor). A router on the main thread,
+transport. From inside a silo actor, call <code>siloPost(target, name, msg)</code>
+(from <code>silo_actors</code>) &mdash; <code>target</code> is the destination silo,
+or <code>-1</code> for an NRT actor. It encodes the <code>SExpr</code> and pushes it
+into a lock-free outbox (the audio thread cannot allocate a transport), returning
+an error code if the message exceeds the outbox cap. It is the silo-side
+counterpart to <code>siloSend</code>; under the hood it wraps the rt-safe
+<code>siloOutbox</code> primitive. A router on the main thread,
 <code>runActorServer()</code>, drains the outboxes and forwards each message:</p>
 <pre><code><span class="cmt">-- actors.x: the main-thread router. Run it instead of runActors when silos route.</span>
 <span class="kw">fn</span> <span class="fn">runActorServer</span>() <span class="typ">Void</span> {
@@ -998,12 +1001,14 @@ name, encode(msg))</code> (<code>target</code> is the destination silo, or
 <p>A silo sender targeting an NRT conductor (from
 <code>integration-tests/scripts/silo_to_nrt.x</code>):</p>
 <pre><code><span class="cmt">-- inside the silo module</span>
+<span class="kw">import</span> silo_actors.*;   <span class="cmt">-- siloPost</span>
+
 <span class="kw">async</span> <span class="kw">fn</span> <span class="fn">sender</span>(self <span class="typ">Actor&lt;SExpr&gt;</span>, init <span class="typ">SExpr</span>) <span class="typ">Void</span> {
     <span class="kw">let</span> scale = [<span class="num">60.0</span>, <span class="num">64.0</span>, <span class="num">67.0</span>, <span class="num">72.0</span>];
     <span class="kw">var</span> i = <span class="num">0</span>;
     <span class="kw">while</span> (i &lt; <span class="num">4</span>) {
         <span class="kw">await</span> <span class="fn">delay</span>(<span class="num">1.0</span>);
-        <span class="fn">siloOutbox</span>(-<span class="num">1</span>, <span class="str">'conductor</span>, <span class="fn">encode</span>(SExpr.float(scale[i % <span class="num">4</span>])));
+        <span class="fn">siloPost</span>(-<span class="num">1</span>, <span class="str">'conductor</span>, SExpr.float(scale[i % <span class="num">4</span>]));
         i = i + <span class="num">1</span>;
     }
 }</code></pre>
@@ -1021,16 +1026,15 @@ subscription bridges a subject to a local actor, and publishing encodes a messag
 onto that subject (from
 <code>integration-tests/scripts/actor_nats_loopback.x</code>):</p>
 <pre><code><span class="kw">import</span> nats.*;
-<span class="kw">import</span> message.*;
+<span class="kw">import</span> message.*;   <span class="cmt">-- encode (for publishing)</span>
 <span class="kw">import</span> sexprs.*;
 
 <span class="cmt">-- a worker actor, named 'w by its spawner (as in 8.3)</span>
 worker <span class="fn">spawn</span>(SExpr.int(<span class="num">0</span>)) <span class="fn">register</span>(<span class="str">'w</span>);
 
-<span class="cmt">-- bridge subject "actors.w" -&gt; the local actor named 'w</span>
-<span class="fn">onMessageMsg</span>(<span class="str">"actors.w"</span>, <span class="kw">fn</span>(b <span class="typ">Bytes</span>) {
-    <span class="kw">if</span> (<span class="fn">isMessage</span>(b)) { <span class="fn">sendByName</span>(<span class="str">'w</span>, <span class="fn">decode</span>(b)); }
-});
+<span class="cmt">-- bridge subject "actors.w" -&gt; the local actor named 'w. natsBridgeActor wraps</span>
+<span class="cmt">-- the onMessageMsg + isMessage + decode + sendByName pattern.</span>
+<span class="fn">natsBridgeActor</span>(<span class="str">"actors.w"</span>, <span class="str">'w</span>);
 
 <span class="fn">natsPubMsg</span>(<span class="str">"actors.w"</span>, <span class="fn">encode</span>(SExpr.string(<span class="str">"hello over nats"</span>)));
 <span class="fn">serveActors</span>();   <span class="cmt">-- park until a NATS delivery wakes the actor</span></code></pre>
@@ -1172,6 +1176,8 @@ self-timed against the shared tempo clock 0.</p>
   <tr><td><code>spawn / send / receive / register / sendByName</code></td><td>(builtin)</td><td>NRT / silo</td></tr>
   <tr><td><code>runActors / serveActors</code></td><td>(builtin)</td><td>NRT</td></tr>
   <tr><td><code>siloSend / siloSendAt / runActorServer</code></td><td>actors</td><td>NRT</td></tr>
+  <tr><td><code>siloPost</code></td><td>silo_actors</td><td>silo</td></tr>
+  <tr><td><code>natsBridgeActor</code></td><td>nats</td><td>NRT</td></tr>
   <tr><td><code>siloOutbox</code></td><td>audio_engine</td><td>silo</td></tr>
   <tr><td><code>encode / decode / isMessage</code></td><td>message</td><td>NRT / silo</td></tr>
   <tr><td><code>await delay(beats) / awaitAll</code></td><td>(builtin) / futures</td><td>NRT / silo</td></tr>
