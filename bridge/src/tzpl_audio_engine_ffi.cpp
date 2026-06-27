@@ -530,13 +530,19 @@ static thread_local engine::Silo* gCurrentSilo = nullptr;
 
 // A cross-silo actor message sitting in a silo's outbox. A fixed POD (no heap)
 // so it can be pushed by value on the RT thread into the lock-free outbox ring;
-// the main NRT thread pops it and forwards it to the destination silo (or, in a
-// later step, an NRT actor). Messages larger than the buffer are dropped.
+// the main NRT thread pops it and forwards it to the destination silo (or an NRT
+// actor). A message whose encoded payload exceeds kMaxBytes is REJECTED by
+// siloOutbox (it returns an error, not enqueued) -- never truncated.
 struct OutboxMsg {
+    // Max encoded-SExpr (TZB) payload per message. At ~9 bytes per immediate
+    // value (1 tag + 8 data) this holds a few hundred elements, e.g. a control
+    // vector or a chord, with headroom. Sized to the outbox ring: kOutboxCap
+    // entries are preallocated, so this is the per-slot cost (see kOutboxCap).
+    static constexpr int kMaxBytes = 4096;
     int           targetSilo = -1;   // destination silo index (-1 = NRT actor)
     ts::SymbolPtr name = nullptr;    // destination actor name
     uint32_t      len = 0;
-    uint8_t       buf[256];          // encoded SExpr bytes (capped)
+    uint8_t       buf[kMaxBytes];    // encoded SExpr bytes (rejected if over)
 };
 
 struct SiloTaskScheduler {
@@ -1175,8 +1181,9 @@ static void ffi_siloDeliverBytesAt(ts::VM& vm, u16 dst, u16, u16 argBase) {
 
 // fn _siloOutbox(targetSilo Int, name Symbol, b Bytes) Int  -- SILO RT side.
 // Push an encoded actor message into this silo's outbox for the main NRT thread
-// to forward. RT-safe: a by-value push into a pre-allocated lock-free ring; an
-// over-capacity message or a full outbox is dropped.
+// to forward. RT-safe: a by-value push into a pre-allocated lock-free ring.
+// Returns errInternal (without enqueuing) for a payload over OutboxMsg::kMaxBytes;
+// a full outbox ring also drops. Returns errNone on success.
 static void ffi_siloOutbox(ts::VM& vm, u16 dst, u16, u16 argBase) {
     engine::Silo* s = gCurrentSilo;
     int target = static_cast<int>(vm.reg(argBase).i);
