@@ -100,11 +100,16 @@ for test_file in "${TEST_FILES[@]}"; do
         expected_file="${base}.expected"
     fi
 
-    # Build -I flags: always include test_dir, plus _lib subdirectory if it exists
+    # Build -I flags: always include test_dir, plus a _lib subdirectory if it
+    # exists, plus the real lang/modules so tests resolve shared modules (sexprs,
+    # message, strings, ...) from the actual files users get -- not a copy. A
+    # test-local _lib still takes precedence (listed first) for module-system
+    # fixtures that intentionally shadow.
     I_FLAGS=(-I "$test_dir")
     if [[ -d "$test_dir/_lib" ]]; then
         I_FLAGS+=(-I "$test_dir/_lib")
     fi
+    I_FLAGS+=(-I "$ROOT_DIR/modules")
 
     # Check for @rt marker: "-- @rt" means pass --rt flag
     if grep -q '^-- @rt' "$test_file"; then
