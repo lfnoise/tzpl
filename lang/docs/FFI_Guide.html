@@ -465,6 +465,25 @@ if (localStorage.getItem('tzpl-docs-theme') === 'light') document.documentElemen
         <li><a href="#messages-cpp">C++ Access</a></li>
       </ol>
     </li>
+    <li><a href="#actors">Actors</a>
+      <ol>
+        <li><a href="#actors-overview">Overview</a></li>
+        <li><a href="#actors-primitives">Primitives</a></li>
+        <li><a href="#actors-driving">Driving the Loop</a></li>
+        <li><a href="#actors-example">Example</a></li>
+      </ol>
+    </li>
+    <li><a href="#silo-msg">Silo Messaging</a>
+      <ol>
+        <li><a href="#silo-msg-overview">Overview</a></li>
+        <li><a href="#silo-msg-nrt-to-silo">NRT &#8594; Silo</a></li>
+        <li><a href="#silo-msg-silo-out">Silo &#8594; NRT / Silo</a></li>
+        <li><a href="#silo-msg-router">The NRT Router</a></li>
+        <li><a href="#silo-msg-notes">Silo Node Commands</a></li>
+        <li><a href="#silo-msg-nats">NATS Bridge</a></li>
+        <li><a href="#silo-msg-example">Example</a></li>
+      </ol>
+    </li>
   </ol>
 </nav>
 
@@ -3253,6 +3272,174 @@ std::vector&lt;<span class="kw">uint8_t</span>&gt; buf = <span class="fn">encode
     std::string_view name = r.<span class="fn">child</span>(<span class="num">0</span>).<span class="fn">asStr</span>();   <span class="cmt">// "note"</span>
     <span class="kw">int64_t</span> n             = r.<span class="fn">child</span>(<span class="num">1</span>).<span class="fn">asInt</span>();   <span class="cmt">// 60</span>
 }</code></pre>
+
+<!-- ================================================================ -->
+<h2 id="actors">16. Actors</h2>
+
+<h3 id="actors-overview">16.1 Overview</h3>
+<p>An <strong>actor</strong> is an <code>async fn</code> coroutine with a private mailbox. It receives <a href="#messages">SExpr</a> messages one at a time, runs to its next <code>await receive</code>, then parks until more mail arrives. Actors share no mutable state &mdash; they communicate only by message &mdash; so the model is real-time safe and the same code runs at NRT (the main VM) or inside a silo (the audio thread). Messages are values of the actor's message type <code>M</code>; in practice <code>M</code> is <code>SExpr</code>, which the silo and NATS bridges serialize with <a href="#messages">encode/decode</a>.</p>
+<p>The primitives are <strong>built-ins</strong> (no import needed) and all real-time safe, so they work unchanged inside a silo. Cross-VM addressing uses an interned <code>Symbol</code> name: an actor registers a process-global name, and senders elsewhere reach it by that name (see <a href="#silo-msg">Silo Messaging</a>).</p>
+
+<h3 id="actors-primitives">16.2 Primitives</h3>
+<pre><code><span class="cmt">-- Spawn an actor from a behavior and an initial message. The behavior is an</span>
+<span class="cmt">-- async fn taking (self, init); the init value's type fixes M. Returns the handle.</span>
+<span class="kw">fn</span> <span class="fn">spawn</span>(behavior <span class="kw">async fn</span>(self <span class="typ">Actor&lt;M&gt;</span>, init <span class="typ">M</span>) <span class="typ">Void</span>, init <span class="typ">M</span>) <span class="typ">Actor&lt;M&gt;</span>
+
+<span class="cmt">-- Enqueue msg into actor's mailbox (handed to a parked receiver, else queued).</span>
+<span class="kw">fn</span> <span class="fn">send</span>(actor <span class="typ">Actor&lt;M&gt;</span>, msg <span class="typ">M</span>) <span class="typ">Void</span>
+
+<span class="cmt">-- Await the next message; parks the actor until one arrives. Used as</span>
+<span class="cmt">--   let m = await receive(self);</span>
+<span class="kw">fn</span> <span class="fn">receive</span>(self <span class="typ">Actor&lt;M&gt;</span>) <span class="typ">Future&lt;M&gt;</span>
+
+<span class="cmt">-- Give the actor a process-global name (Symbol or String). Returns the actor,</span>
+<span class="cmt">-- so it chains off spawn. The SPAWNER names the actor, not the actor itself.</span>
+<span class="kw">fn</span> <span class="fn">register</span>(actor <span class="typ">Actor&lt;M&gt;</span>, name <span class="typ">Symbol</span>) <span class="typ">Actor&lt;M&gt;</span>
+<span class="kw">fn</span> <span class="fn">register</span>(actor <span class="typ">Actor&lt;M&gt;</span>, name <span class="typ">String</span>) <span class="typ">Actor&lt;M&gt;</span>
+
+<span class="cmt">-- Send by registered name to an actor in THIS VM. Cross-VM delivery goes through</span>
+<span class="cmt">-- the silo/NATS bridges, which call this on the destination side.</span>
+<span class="kw">fn</span> <span class="fn">sendByName</span>(name <span class="typ">Symbol</span>, msg <span class="typ">M</span>) <span class="typ">Void</span></code></pre>
+<div class="note">
+  <strong>Note:</strong> <code>register</code> takes the name as its <em>second</em> argument so it reads naturally chained off <code>spawn</code>: <code>worker spawn(SExpr.int(0)) register('worker)</code>. Binding the result rebinds the name to the <code>Actor</code> (shadowing the behavior fn), so use a fresh name or leave it as a statement.
+</div>
+
+<h3 id="actors-driving">16.3 Driving the Loop</h3>
+<p>Spawned actors do not run until the event loop drives them. Two drivers, both on the main (NRT) thread:</p>
+<pre><code><span class="cmt">-- Drive all ready actors until the system is quiescent, then return.</span>
+<span class="kw">fn</span> <span class="fn">runActors</span>() <span class="typ">Void</span>
+
+<span class="cmt">-- Long-lived: drive actors, then park the thread until an external event (a NATS</span>
+<span class="cmt">-- delivery, a silo outbox message) wakes it. For servers.</span>
+<span class="kw">fn</span> <span class="fn">serveActors</span>() <span class="typ">Void</span></code></pre>
+<p>Use <code>runActors</code> for a batch that drains to completion; <code>serveActors</code> for a process that stays alive reacting to outside traffic. The silo router <a href="#silo-msg-router"><code>runActorServer</code></a> wraps <code>runActors</code> with outbox draining.</p>
+
+<h3 id="actors-example">16.4 Example</h3>
+<p>Two NRT actors addressed by name (from <code>lang/tests/actors/nrt_byname.x</code>):</p>
+<pre><code><span class="kw">import</span> sexprs.*;
+
+<span class="kw">async</span> <span class="kw">fn</span> <span class="fn">relay</span>(self <span class="typ">Actor&lt;SExpr&gt;</span>, init <span class="typ">SExpr</span>) <span class="typ">Void</span> {
+    <span class="kw">while</span> (<span class="kw">true</span>) {
+        <span class="kw">let</span> m = <span class="kw">await</span> <span class="fn">receive</span>(self);
+        <span class="kw">match</span> (m) {
+            SExpr.int(n): { <span class="fn">println</span>(<span class="str">"relay "</span> $ (n <span class="fn">toString</span>));
+                            <span class="kw">if</span> (n &lt; <span class="num">4</span>) { <span class="fn">sendByName</span>(<span class="str">'collector</span>, SExpr.int(n + <span class="num">1</span>)); } }
+            _: {}
+        }
+    }
+}
+<span class="cmt">-- ... a 'collector actor that bounces n+1 back to 'relay ...</span>
+
+relay <span class="fn">spawn</span>(SExpr.int(<span class="num">0</span>)) <span class="fn">register</span>(<span class="str">'relay</span>);
+collector <span class="fn">spawn</span>(SExpr.int(<span class="num">0</span>)) <span class="fn">register</span>(<span class="str">'collector</span>);
+<span class="fn">sendByName</span>(<span class="str">'relay</span>, SExpr.int(<span class="num">0</span>));
+<span class="fn">runActors</span>();</code></pre>
+
+<!-- ================================================================ -->
+<h2 id="silo-msg">17. Silo Messaging</h2>
+
+<h3 id="silo-msg-overview">17.1 Overview</h3>
+<p>Silo messaging carries actor messages across the VM boundary: from NRT to a silo, from a silo to NRT, and silo to silo. Because a silo runs on the audio thread it cannot allocate or block, so the transport is lock-free and the encoded <a href="#messages">SExpr</a> bytes &mdash; never an <code>Obj*</code> &mdash; cross the boundary:</p>
+<ul>
+  <li><strong>NRT &#8594; silo</strong>: a command queued onto the silo's FIFO, delivered on the next audio block (or beat-scheduled).</li>
+  <li><strong>silo &#8594; NRT / silo</strong>: the silo pushes into a fixed lock-free outbox; the main thread drains and routes it.</li>
+</ul>
+<p>Every message targets an actor by registered <code>Symbol</code> name; the destination side calls <a href="#actors-primitives"><code>sendByName</code></a> to enqueue it. The low-level FFIs below carry raw <code>Bytes</code>; the <code>actors</code> and <code>silo_actors</code> modules wrap them to take an <code>SExpr</code> directly.</p>
+
+<h3 id="silo-msg-nrt-to-silo">17.2 NRT &#8594; Silo</h3>
+<pre><code><span class="cmt">-- Deliver an encoded message to the actor `name` in silo `silo`, on the next</span>
+<span class="cmt">-- audio block. Returns an error code. (audio_engine)</span>
+<span class="kw">fn</span> <span class="fn">siloDeliverBytes</span>(silo <span class="typ">Int</span>, name <span class="typ">Symbol</span>, b <span class="typ">Bytes</span>) <span class="typ">Int</span>
+
+<span class="cmt">-- Beat-scheduled variant: lands sample-accurately when TempoClock `clock`</span>
+<span class="cmt">-- reaches `beat`. (audio_engine)</span>
+<span class="kw">fn</span> <span class="fn">siloDeliverBytesAt</span>(silo <span class="typ">Int</span>, clock <span class="typ">Int</span>, beat <span class="typ">Float</span>, name <span class="typ">Symbol</span>, b <span class="typ">Bytes</span>) <span class="typ">Int</span></code></pre>
+<p>The <code>actors</code> module wraps these to take an <code>SExpr</code>:</p>
+<pre><code><span class="cmt">-- actors.x (NRT side)</span>
+<span class="kw">fn</span> <span class="fn">siloSend</span>(silo <span class="typ">Int</span>, name <span class="typ">Symbol</span>, msg <span class="typ">SExpr</span>) <span class="typ">Void</span>
+<span class="kw">fn</span> <span class="fn">siloSendAt</span>(silo <span class="typ">Int</span>, clock <span class="typ">Int</span>, beat <span class="typ">Float</span>, name <span class="typ">Symbol</span>, msg <span class="typ">SExpr</span>) <span class="typ">Void</span></code></pre>
+
+<h3 id="silo-msg-silo-out">17.3 Silo &#8594; NRT / Silo</h3>
+<p>From inside a silo actor or task, push a message into the silo's outbox. Real-time safe (a by-value push into a lock-free ring). <code>target</code> is the destination silo index, or <code>-1</code> for an actor at NRT.</p>
+<pre><code><span class="cmt">-- Low-level: push pre-encoded bytes. Returns errInternal (without enqueuing) if</span>
+<span class="cmt">-- the payload exceeds the per-message cap or the outbox is full, else errNone.</span>
+<span class="cmt">-- (audio_engine, rt-safe)</span>
+<span class="kw">fn</span> <span class="fn">siloOutbox</span>(target <span class="typ">Int</span>, name <span class="typ">Symbol</span>, b <span class="typ">Bytes</span>) <span class="typ">Int</span>
+
+<span class="cmt">-- silo_actors.x: encodes the SExpr and posts it -- the silo-side counterpart to</span>
+<span class="cmt">-- siloSend. Importable into silo code (rt-safe).</span>
+<span class="kw">fn</span> <span class="fn">siloPost</span>(target <span class="typ">Int</span>, name <span class="typ">Symbol</span>, msg <span class="typ">SExpr</span>) <span class="typ">Int</span></code></pre>
+<div class="note">
+  <strong>Note:</strong> The outbox is a fixed ring &mdash; up to 256 messages in flight, each up to 4096 encoded bytes. A larger message is rejected (not truncated); check the return code if your payloads can be large.
+</div>
+
+<h3 id="silo-msg-router">17.4 The NRT Router</h3>
+<p>The main thread must drain every silo's outbox and route the traffic: silo&#8594;silo messages are forwarded to the destination silo; silo&#8594;NRT messages are decoded and delivered to the named NRT actor. The primitives:</p>
+<pre><code><span class="cmt">-- Drain every silo outbox. Forwards silo->silo to the destination silo; stashes</span>
+<span class="cmt">-- silo->NRT messages in an inbox. Returns the count routed. (audio_engine)</span>
+<span class="kw">fn</span> <span class="fn">pumpSiloOutboxes</span>() <span class="typ">Int</span>
+
+<span class="cmt">-- The silo->NRT inbox. The language drains it and does decode + sendByName</span>
+<span class="cmt">-- itself (both must run as lang on the main VM).</span>
+<span class="kw">fn</span> <span class="fn">nrtActorMsgCount</span>() <span class="typ">Int</span>      <span class="cmt">-- messages waiting</span>
+<span class="kw">fn</span> <span class="fn">nrtActorMsgName</span>() <span class="typ">Symbol</span>    <span class="cmt">-- peek the next message's target actor</span>
+<span class="kw">fn</span> <span class="fn">nrtActorMsgTake</span>() <span class="typ">Bytes</span>     <span class="cmt">-- pop the next message's encoded payload</span></code></pre>
+<p>The <code>actors</code> module assembles these into one router loop &mdash; run it on the main thread instead of <code>runActors</code> when silos route traffic:</p>
+<pre><code><span class="cmt">-- actors.x</span>
+<span class="kw">fn</span> <span class="fn">runActorServer</span>() <span class="typ">Void</span> {
+    <span class="kw">while</span> (<span class="kw">true</span>) {
+        <span class="fn">pumpSiloOutboxes</span>();                 <span class="cmt">-- forward silo-&gt;silo; stash silo-&gt;NRT</span>
+        <span class="kw">var</span> k = <span class="fn">nrtActorMsgCount</span>();
+        <span class="kw">while</span> (k &gt; <span class="num">0</span>) {
+            <span class="kw">let</span> nm = <span class="fn">nrtActorMsgName</span>();
+            <span class="kw">let</span> b  = <span class="fn">nrtActorMsgTake</span>();
+            <span class="fn">sendByName</span>(nm, <span class="fn">decode</span>(b));        <span class="cmt">-- deliver to the NRT actor</span>
+            k = k - <span class="num">1</span>;
+        }
+        <span class="fn">runActors</span>();                         <span class="cmt">-- drive NRT actors that got mail</span>
+        <span class="fn">sleepMs</span>(<span class="num">2</span>);
+    }
+}</code></pre>
+
+<h3 id="silo-msg-notes">17.5 Silo Node Commands</h3>
+<p>A silo actor typically reacts to a message by triggering a synth node in its own graph. These run immediately on the silo's RT thread (no bundle, no allocation) and are real-time safe:</p>
+<pre><code><span class="cmt">-- Trigger note `noteID` on `node` now, with a Float parameter array. (audio_engine, rt-safe)</span>
+<span class="kw">fn</span> <span class="fn">playNote</span>(node <span class="typ">Int</span>, noteID <span class="typ">Int</span>, params <span class="typ">[Float]</span>) <span class="typ">Int</span>
+
+<span class="cmt">-- Release a sounding note on `node`. (audio_engine, rt-safe)</span>
+<span class="kw">fn</span> <span class="fn">releaseNote</span>(node <span class="typ">Int</span>, noteID <span class="typ">Int</span>) <span class="typ">Int</span></code></pre>
+<div class="note">
+  <strong>Note:</strong> These are the in-task counterparts to the NRT <code>noteOn</code>/<code>noteOff</code> bundle commands (&sect;<a href="#silo-vm">13</a>): same effect, but issued from inside the silo rather than queued from NRT.
+</div>
+
+<h3 id="silo-msg-nats">17.6 NATS Bridge</h3>
+<p>Cross-process delivery reuses the same name-addressed actors over <a href="#nats">NATS</a>. <code>natsBridgeActor</code> (from the <code>nats</code> module) wires a subject to a local actor &mdash; every message published to the subject is decoded and delivered to the named actor's mailbox:</p>
+<pre><code><span class="cmt">-- nats.x</span>
+<span class="kw">fn</span> <span class="fn">natsBridgeActor</span>(subject <span class="typ">String</span>, name <span class="typ">Symbol</span>) <span class="typ">Void</span>
+
+<span class="cmt">-- equivalent to the hand-written:</span>
+<span class="fn">onMessageMsg</span>(subject, <span class="kw">fn</span>(b <span class="typ">Bytes</span>) {
+    <span class="kw">if</span> (<span class="fn">isMessage</span>(b)) { <span class="fn">sendByName</span>(name, <span class="fn">decode</span>(b)); }
+});</code></pre>
+<p>Drive the bridged actor with <code>serveActors()</code> so the process parks until a NATS delivery wakes it. See &sect;<a href="#nats">10</a> for connection setup and &sect;<a href="#messages-nats">15.6</a> for the publish side.</p>
+
+<h3 id="silo-msg-example">17.7 Example</h3>
+<p>A silo sender emitting a line to an NRT <code>conductor</code> (from <code>integration-tests/scripts/silo_to_nrt.x</code>):</p>
+<pre><code><span class="cmt">-- inside the silo module</span>
+<span class="kw">import</span> silo_actors.*;
+<span class="kw">import</span> sexprs.*;
+
+<span class="kw">async</span> <span class="kw">fn</span> <span class="fn">sender</span>(self <span class="typ">Actor&lt;SExpr&gt;</span>, init <span class="typ">SExpr</span>) <span class="typ">Void</span> {
+    <span class="kw">let</span> scale = [<span class="num">60.0</span>, <span class="num">64.0</span>, <span class="num">67.0</span>, <span class="num">72.0</span>];
+    <span class="kw">var</span> i = <span class="num">0</span>;
+    <span class="kw">while</span> (i &lt; <span class="num">4</span>) {
+        <span class="kw">await</span> <span class="fn">delay</span>(<span class="num">1.0</span>);
+        <span class="fn">siloPost</span>(-<span class="num">1</span>, <span class="str">'conductor</span>, SExpr.float(scale[i % <span class="num">4</span>]));
+        i = i + <span class="num">1</span>;
+    }
+}
+<span class="fn">spawn</span>(sender, SExpr.int(<span class="num">0</span>));</code></pre>
+<p>The NRT side spawns a <code>conductor</code> actor, registers it, and runs <code>runActorServer()</code> to route the silo&#8594;NRT traffic. See <code>integration-tests/scripts/silo_to_nrt.x</code> for the full program.</p>
 
 </main>
 <script>
