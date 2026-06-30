@@ -3540,7 +3540,7 @@ u16 CodeGen::genBinaryOp(BinaryOpExpr* expr) {
         u16 resultReg = builtinReturnsInlineComposite ? allocReg() : allocSlot(expr->resolvedType);
         // Phase 5.2: see the comment in genCall's main path -- arg slots
         // become callee-owned and a stack map at returnPC roots the rest.
-        clearArgRegTypes(argBase, resultReg);
+        clearArgRegTypesForCall(argBase, resultReg, expr->isBuiltinCall);
         emitOp(expr->isBuiltinCall ? op_call_primitive : op_call);
         emitRegs(resultReg, 2, argBase);
         emitInt(expr->resolvedFuncGlobalIndex);
@@ -3954,7 +3954,7 @@ u16 CodeGen::genUnaryOp(UnaryOpExpr* expr) {
             && expr->resolvedType != compiler_.complexType()
             && expr->resolvedType != compiler_.fractionType();
         u16 resultReg = builtinReturnsInlineComposite ? allocReg() : allocSlot(expr->resolvedType);
-        clearArgRegTypes(argBase, resultReg);
+        clearArgRegTypesForCall(argBase, resultReg, expr->isBuiltinCall);
         emitOp(expr->isBuiltinCall ? op_call_primitive : op_call);
         emitRegs(resultReg, 1, argBase);
         emitInt(expr->resolvedFuncGlobalIndex);
@@ -4293,7 +4293,7 @@ u16 CodeGen::genCall(CallExpr_* expr) {
                     return allocReg();
                 }
                 u16 resultReg = allocSlot(expr->resolvedType);
-                clearArgRegTypes(argBase, resultReg);
+                clearArgRegTypesForCall(argBase, resultReg, expr->isBuiltinCall);
                 emitOp(expr->isBuiltinCall ? op_call_primitive : op_call);
                 emitRegs(resultReg, (u16)expr->args.size(), argBase);
                 emitInt(expr->resolvedFuncGlobalIndex);
@@ -4961,7 +4961,7 @@ u16 CodeGen::genCall(CallExpr_* expr) {
     // dispatches; the caller's stack map at the returnPC must NOT name
     // them as live refs (a GC walker visiting mid-call would otherwise
     // read callee data as Obj* pointers).
-    clearArgRegTypes(argBase, callDst);
+    clearArgRegTypesForCall(argBase, callDst, expr->isBuiltinCall);
 
     // Emit CALL: op, regs{resultReg, argc, argBase}, callee_global_idx
     emitOp(expr->isBuiltinCall ? op_call_primitive : op_call);
@@ -5049,7 +5049,7 @@ u16 CodeGen::emitBinaryOpElem(BinaryOpExpr* expr,
         bool builtinReturnsInline = expr->isBuiltinCall && !expr->builtinAcceptsInlineArgs
                                      && needsBoxAuto(scalarResultType);
         u16 elemResultReg = builtinReturnsInline ? allocReg() : allocSlot(scalarResultType);
-        clearArgRegTypes(argBase, elemResultReg);
+        clearArgRegTypesForCall(argBase, elemResultReg, expr->isBuiltinCall);
         emitOp(expr->isBuiltinCall ? op_call_primitive : op_call);
         emitRegs(elemResultReg, 2, argBase);
         emitInt(expr->resolvedFuncGlobalIndex);
@@ -5400,7 +5400,7 @@ u16 CodeGen::genAutoMapBinaryOpList(BinaryOpExpr* expr) {
         if (rightElemReg != argBase + 1) { emitMov(argBase + 1, rightElemReg); }
         if (nextReg_ <= argBase + 1) { nextReg_ = argBase + 2; if (nextReg_ > maxReg_) maxReg_ = nextReg_; }
         elemResultReg = allocReg();
-        clearArgRegTypes(argBase, elemResultReg);
+        clearArgRegTypesForCall(argBase, elemResultReg, expr->isBuiltinCall);
         emitOp(expr->isBuiltinCall ? op_call_primitive : op_call);
         emitRegs(elemResultReg, 2, argBase);
         emitInt(expr->resolvedFuncGlobalIndex);
@@ -5916,7 +5916,7 @@ u16 CodeGen::emitMappedCallElem(CallExpr_* expr, const FuncInfo* funcInfo, Type*
         && returnT != compiler_.fractionType();
     bool builtinReturnsInline = boxAtBoundary && retInlineComposite;
     u16 callResultReg = (retInlineComposite && !boxAtBoundary) ? allocSlot(returnT) : allocReg();
-    clearArgRegTypes(callArgBase, callResultReg);
+    clearArgRegTypesForCall(callArgBase, callResultReg, expr->isBuiltinCall);
     emitOp(expr->isBuiltinCall ? op_call_primitive : op_call);
     emitRegs(callResultReg, callArgc, callArgBase);
     emitInt(expr->resolvedFuncGlobalIndex);
@@ -6882,7 +6882,7 @@ u16 CodeGen::genAutoMapCallListVoid(CallExpr_* expr, const FuncInfo* funcInfo) {
     // --- Phase 5: Variadic packing + Call function (discard result) ---
     u16 callArgc = emitVariadicPack(expr, callArgBase, argc);
     u16 callResultReg = allocReg();
-    clearArgRegTypes(callArgBase, callResultReg);
+    clearArgRegTypesForCall(callArgBase, callResultReg, expr->isBuiltinCall);
     emitOp(expr->isBuiltinCall ? op_call_primitive : op_call);
     emitRegs(callResultReg, callArgc, callArgBase);
     emitInt(expr->resolvedFuncGlobalIndex);
@@ -7202,7 +7202,7 @@ u16 CodeGen::genExplicitImplicitAutoMapCall(CallExpr_* expr) {
     u16 callResultReg = builtinReturnsInline
         ? allocReg()
         : (retInlineComposite ? allocSlot(returnT) : allocReg());
-    clearArgRegTypes(callArgBase, callResultReg);
+    clearArgRegTypesForCall(callArgBase, callResultReg, expr->isBuiltinCall);
     emitOp(expr->isBuiltinCall ? op_call_primitive : op_call);
     emitRegs(callResultReg, callArgc, callArgBase);
     emitInt(expr->resolvedFuncGlobalIndex);

@@ -2962,11 +2962,14 @@ static void builtin_map_pvec(VM& vm, u16 dst, u16, u16 ab) {
     Type* resET = fnType->returnType_;
     auto* resType = vm.persistentVectorType(resET);
     PVec* result = new PVec(resType);
+    // result is rebuilt by immutable push each step; keep the LIVE one rooted.
+    GCKeepAliveScope keep(vm, {(GCObj*)v, (GCObj*)fn, (GCObj*)result});
     u16 sb = vm.currentCodeBlock()->numRegs;
     for (u32 i = 0; i < v->count_; ++i) {
         placeLambdaArgSlot(vm, sb, v->elemAt(i), srcET);
         callOneArg(vm, fn, sb);
         result = result->push(&vm.reg(sb));
+        vm.gcKeepAliveUpdateTop((GCObj*)result);
     }
     vm.reg(dst).o = result;
 }
@@ -2978,12 +2981,14 @@ static void builtin_filter_pvec(VM& vm, u16 dst, u16, u16 ab) {
     Type* et = v->elemType();
     auto* resType = static_cast<PersistentVectorType*>(v->type_);
     PVec* result = new PVec(resType);
+    // result is rebuilt by immutable push each step; keep the LIVE one rooted.
+    GCKeepAliveScope keep(vm, {(GCObj*)v, (GCObj*)fn, (GCObj*)result});
     u16 sb = vm.currentCodeBlock()->numRegs;
     for (u32 i = 0; i < v->count_; ++i) {
         Word const* elem = v->elemAt(i);
         placeLambdaArgSlot(vm, sb, elem, et);
         callOneArg(vm, fn, sb);
-        if (vm.reg(sb).i) result = result->push(elem);
+        if (vm.reg(sb).i) { result = result->push(elem); vm.gcKeepAliveUpdateTop((GCObj*)result); }
     }
     vm.reg(dst).o = result;
 }
@@ -2996,6 +3001,7 @@ static void builtin_fold_pvec(VM& vm, u16 dst, u16, u16 ab) {
     Type* accT = primTT->fields_[1];
     u32 accSW = (accT && accT->sizeWords_ > 0) ? accT->sizeWords_ : 1;
     auto* fn = static_cast<Callable*>(vm.reg((u16)(ab + 1 + accSW)).o);
+    GCKeepAliveScope keep(vm, {(GCObj*)v, (GCObj*)fn});  // args cleared from stack map
     Type* et = v->elemType();
     u16 sb = vm.currentCodeBlock()->numRegs;
     Word const* accSrc = &vm.reg((u16)(ab + 1));
@@ -3155,6 +3161,7 @@ static void builtin_scan_pvec(VM& vm, u16 dst, u16, u16 ab) {
     Type* accT = static_cast<TupleType*>(prim->type_)->fields_[1];
     u32 accSW = (accT && accT->sizeWords_ > 0) ? accT->sizeWords_ : 1;
     auto* fn = static_cast<Callable*>(vm.reg((u16)(ab + 1 + accSW)).o);
+    GCKeepAliveScope keep(vm, {(GCObj*)v, (GCObj*)fn});  // args cleared from stack map
     Type* accET = static_cast<FunctionType*>(fn->type_)->returnType_;
     Type* et = v->elemType();
     u16 sb = vm.currentCodeBlock()->numRegs;
@@ -3176,6 +3183,7 @@ static void builtin_scan_pvec(VM& vm, u16 dst, u16, u16 ab) {
 static void builtin_scan1_pvec(VM& vm, u16 dst, u16, u16 ab) {
     auto* v = static_cast<PVec*>(vm.reg(ab).o);
     auto* fn = static_cast<Callable*>(vm.reg((u16)(ab + 1)).o);
+    GCKeepAliveScope keep(vm, {(GCObj*)v, (GCObj*)fn});  // args cleared from stack map
     Type* et = v->elemType();
     u32 sw = strideForType(et);
     Vec<Word> buf((rt::STLAllocator<Word>(rt::gCurrentAllocator)));
@@ -3196,6 +3204,7 @@ static void builtin_scan1_pvec(VM& vm, u16 dst, u16, u16 ab) {
 static void builtin_fold1_pvec(VM& vm, u16 dst, u16, u16 ab) {
     auto* v = static_cast<PVec*>(vm.reg(ab).o);
     auto* fn = static_cast<Callable*>(vm.reg((u16)(ab + 1)).o);
+    GCKeepAliveScope keep(vm, {(GCObj*)v, (GCObj*)fn});  // args cleared from stack map
     Type* et = v->elemType();
     u32 sw = strideForType(et);
     u16 sb = vm.currentCodeBlock()->numRegs;
@@ -3214,6 +3223,7 @@ static void builtin_fold1_pvec(VM& vm, u16 dst, u16, u16 ab) {
 static void builtin_find_pvec(VM& vm, u16 dst, u16, u16 ab) {
     auto* v = static_cast<PVec*>(vm.reg(ab).o);
     auto* fn = static_cast<Callable*>(vm.reg((u16)(ab + 1)).o);
+    GCKeepAliveScope keep(vm, {(GCObj*)v, (GCObj*)fn});  // args cleared from stack map
     Type* et = v->elemType();
     u16 sb = vm.currentCodeBlock()->numRegs;
     i64 found = -1;
@@ -3229,6 +3239,7 @@ static void builtin_find_pvec(VM& vm, u16 dst, u16, u16 ab) {
 static void builtin_takeWhile_pvec(VM& vm, u16 dst, u16, u16 ab) {
     auto* v = static_cast<PVec*>(vm.reg(ab).o);
     auto* fn = static_cast<Callable*>(vm.reg((u16)(ab + 1)).o);
+    GCKeepAliveScope keep(vm, {(GCObj*)v, (GCObj*)fn});  // args cleared from stack map
     Type* et = v->elemType();
     u16 sb = vm.currentCodeBlock()->numRegs;
     Vec<Word> buf((rt::STLAllocator<Word>(rt::gCurrentAllocator)));
@@ -3245,6 +3256,7 @@ static void builtin_takeWhile_pvec(VM& vm, u16 dst, u16, u16 ab) {
 static void builtin_dropWhile_pvec(VM& vm, u16 dst, u16, u16 ab) {
     auto* v = static_cast<PVec*>(vm.reg(ab).o);
     auto* fn = static_cast<Callable*>(vm.reg((u16)(ab + 1)).o);
+    GCKeepAliveScope keep(vm, {(GCObj*)v, (GCObj*)fn});  // args cleared from stack map
     Type* et = v->elemType();
     u16 sb = vm.currentCodeBlock()->numRegs;
     Vec<Word> buf((rt::STLAllocator<Word>(rt::gCurrentAllocator)));
@@ -3354,6 +3366,7 @@ static void sortByComparator(VM& vm, PVec* v, Callable* fn, std::vector<u32>& id
 static void builtin_sort_by_pvec(VM& vm, u16 dst, u16, u16 ab) {
     auto* v = static_cast<PVec*>(vm.reg(ab).o);
     auto* fn = static_cast<Callable*>(vm.reg((u16)(ab + 1)).o);
+    GCKeepAliveScope keep(vm, {(GCObj*)v, (GCObj*)fn});  // args cleared from stack map
     std::vector<u32> idx(v->count_);
     for (u32 i = 0; i < v->count_; ++i) idx[i] = i;
     sortByComparator(vm, v, fn, idx);
@@ -3364,6 +3377,7 @@ static void builtin_sort_by_pvec(VM& vm, u16 dst, u16, u16 ab) {
 static void builtin_grade_pvec(VM& vm, u16 dst, u16, u16 ab) {
     auto* v = static_cast<PVec*>(vm.reg(ab).o);
     auto* fn = static_cast<Callable*>(vm.reg((u16)(ab + 1)).o);
+    GCKeepAliveScope keep(vm, {(GCObj*)v, (GCObj*)fn});  // args cleared from stack map
     std::vector<u32> idx(v->count_);
     for (u32 i = 0; i < v->count_; ++i) idx[i] = i;
     sortByComparator(vm, v, fn, idx);

@@ -283,6 +283,27 @@ inline void txArray(VM& vm, u16 dst, Obj* src, ArrayType* at, F&& f) {
 // Synchronous call helpers for higher-order builtins
 // ============================================================================
 
+// RAII root pin for heap objects reachable only from a C++ local across nested
+// VM calls that can drive a GC cycle. A higher-order builtin reads its source
+// collection and function out of the (now stack-map-cleared) argument registers
+// into C++ locals and builds its result in another local, then invokes user
+// code per element -- none of those locals are visible to the GC root scan, so
+// without pinning they can be swept mid-loop. Pushes each non-null object on
+// construction and pops them on scope exit (VM::gcKeepAlive_ is a LIFO stack).
+struct GCKeepAliveScope {
+    VM& vm_;
+    int n_ = 0;
+    GCKeepAliveScope(VM& vm, std::initializer_list<GCObj*> objs) : vm_(vm) {
+        for (GCObj* o : objs) if (o) { vm_.gcKeepAlivePush(o); ++n_; }
+    }
+    explicit GCKeepAliveScope(VM& vm, GCObj* o) : vm_(vm) {
+        if (o) { vm_.gcKeepAlivePush(o); ++n_; }
+    }
+    ~GCKeepAliveScope() { for (int i = 0; i < n_; ++i) vm_.gcKeepAlivePop(); }
+    GCKeepAliveScope(GCKeepAliveScope const&) = delete;
+    GCKeepAliveScope& operator=(GCKeepAliveScope const&) = delete;
+};
+
 inline void op_sync_return(VM&, Code*) { return; }
 
 inline Code& syncReturnCode() {
@@ -421,7 +442,9 @@ inline void callOneArg(VM& vm, Callable* fn, u16 sb) {
         u16 paramWords = lambdaParamSlotWords(lam);
         for (u16 i = 0; i < lam->numFreeVars_; i++)
             vm.reg(sb + paramWords + i) = lam->freeVars_[i];
-        vm.pushFrame(&syncReturnCode(), cb, callBase, cb->numRegs, sb);
+        // gcReturnPC = vm.pc(): the enclosing builtin's call-site stack map, so
+        // the caller frame's live registers stay scannable across this sync call.
+        vm.pushFrame(&syncReturnCode(), cb, callBase, cb->numRegs, sb, vm.syncCallerPC());
         Code* entry = cb->code.data();
         entry->op(vm, entry);
     }
@@ -442,7 +465,8 @@ inline void callTwoArgs(VM& vm, Callable* fn, u16 sb) {
         u16 paramWords = lambdaParamSlotWords(lam);
         for (u16 i = 0; i < lam->numFreeVars_; i++)
             vm.reg(sb + paramWords + i) = lam->freeVars_[i];
-        vm.pushFrame(&syncReturnCode(), cb, callBase, cb->numRegs, sb);
+        // gcReturnPC = vm.pc(): keep the caller frame scannable across the call.
+        vm.pushFrame(&syncReturnCode(), cb, callBase, cb->numRegs, sb, vm.syncCallerPC());
         Code* entry = cb->code.data();
         entry->op(vm, entry);
     }

@@ -378,7 +378,8 @@ void VM::makeCurrent() {
     gCurrentTypeUniverse = &typeUniverse_;
 }
 
-void VM::pushFrame(Code* returnPC, CodeBlock* codeBlock, u32 newBase, u32 numRegs, u16 resultReg) {
+void VM::pushFrame(Code* returnPC, CodeBlock* codeBlock, u32 newBase, u32 numRegs, u16 resultReg,
+                   Code* gcReturnPC) {
     if (frameCount_ >= maxFrames_) {
         throw std::runtime_error("Call stack overflow");
     }
@@ -388,6 +389,7 @@ void VM::pushFrame(Code* returnPC, CodeBlock* codeBlock, u32 newBase, u32 numReg
 
     CallFrame& frame = frames_[frameCount_++];
     frame.returnPC = returnPC;
+    frame.gcReturnPC = gcReturnPC ? gcReturnPC : returnPC;
     frame.codeBlock = codeBlock;
     frame.baseReg = baseReg_;
     frame.numRegs = numRegs;

@@ -251,14 +251,19 @@ void ListNode::force(VM& vm) {
         isLazy_ = 0;
         head_ = Word{};
         for (u32 i = 1; i < payloadWords_; ++i) (&head_)[i].i = 0;
-        // Pin the generator across generate(): we just dropped it from this
-        // node's union, so until generate() re-homes it onto a new tail node
-        // (tail->installGenerator(this)) it is reachable ONLY from this C++
-        // frame -- invisible to the GC root scan. A user lambda invoked by
-        // generate() can hit a safepoint and collect, freeing gen out from
-        // under us and leaving a dangling pointer on the new tail node.
+        // Pin the generator AND this owner node across generate(): we just
+        // dropped the generator from this node's union, so until generate()
+        // re-homes it onto a new tail node (tail->installGenerator(this)) it is
+        // reachable ONLY from this C++ frame -- invisible to the GC root scan. A
+        // user function invoked by generate() (e.g. an auto-map / witness map
+        // over an infinite list) can hit a safepoint and collect, freeing them
+        // out from under us. `this` (owner) is being written by generate() but
+        // may be reachable only through a builtin's C++ local (e.g. collect's
+        // cursor), so pin it too.
         vm.gcKeepAlivePush(gen);
+        vm.gcKeepAlivePush(this);
         gen->generate(vm, this);
+        vm.gcKeepAlivePop();
         vm.gcKeepAlivePop();
         // Release the old owner's retain on the generator.
         // If the generator moved itself to a new tail node (retaining itself there),

@@ -147,7 +147,7 @@ void TracingGC::scanExecSnapshot(ExecSnapshot const& s) {
         CodeBlock const* cb = f.codeBlock;
         if (!cb || cb->code.empty()) continue;
         bool isTop = (i + 1 == n);
-        Code const* pc = isTop ? s.pc : s.frames[i + 1].returnPC;
+        Code const* pc = isTop ? s.pc : s.frames[i + 1].gcReturnPC;
         if (!pc) continue;
         u32 pcOffset = (u32)(pc - cb->code.data());
         StackMap const* sm = findStackMap(cb, pcOffset);
@@ -285,7 +285,10 @@ void TracingGC::step_root_frames(u64 deadlineNanos, u32& sinceCheck, u32& done) 
         CodeBlock const* cb = f.codeBlock;
         if (cb && !cb->code.empty()) {
             bool isTop = (i + 1 == vm_.frameCount_);
-            Code const* pc = isTop ? vm_.pc_ : vm_.frames_[i + 1].returnPC;
+            // For a non-top frame, locate its stack map via the child's
+            // gcReturnPC -- the real caller PC even when the child was entered
+            // through the synchronous-call sentinel (returnPC == syncReturnCode).
+            Code const* pc = isTop ? vm_.pc_ : vm_.frames_[i + 1].gcReturnPC;
             if (pc) {
                 u32 pcOffset = (u32)(pc - cb->code.data());
                 if (StackMap const* sm = findStackMap(cb, pcOffset)) {

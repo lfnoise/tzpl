@@ -181,7 +181,13 @@ struct DynSaveEntry {
 
 // Call frame for register-based VM
 struct CallFrame {
-    Code*      returnPC;    // Resume point in caller
+    Code*      returnPC;    // Resume point in caller (control flow)
+    Code*      gcReturnPC;  // PC in the caller used to locate the caller's stack
+                            // map during GC root scanning. Equals returnPC for
+                            // ordinary bytecode calls; for a synchronous call
+                            // into C++ (returnPC == syncReturnCode sentinel) it
+                            // holds the real caller PC so the caller frame's
+                            // live registers are still scanned. See pushFrame.
     CodeBlock* codeBlock;   // Compiled function (GC root - holds objConstants)
     u32        baseReg;     // Start of this frame's register window
     u32        numRegs;     // Registers allocated for this frame
@@ -260,6 +266,13 @@ private:
     // Current execution state
     u32   baseReg_;
     Code* pc_;
+    // Return PC of the innermost active op_call_primitive (its call-site stack
+    // map in the builtin's CALLER frame). A higher-order builtin pushes a
+    // synchronous frame per element to run user code; that frame records this as
+    // its gcReturnPC so the GC root scan can still find the caller frame's stack
+    // map. Unlike pc_ (overwritten by every nested safepoint), this stays stable
+    // across the builtin's loop; op_call_primitive save/restores it for nesting.
+    Code* syncCallerPC_ = nullptr;
 
     // CODE image: function CodeBlock* / builtin Primitive* slots. Immutable,
     // immortal pointers, never GC roots. A heap snapshot swapped wholesale (see
@@ -446,6 +459,11 @@ public:
     Vec<GCObj*> gcKeepAlive_;
     void gcKeepAlivePush(GCObj* o) { gcKeepAlive_.push_back(o); }
     void gcKeepAlivePop() { gcKeepAlive_.pop_back(); }
+    // Replace the most-recently-pushed keepalive entry. For a builtin that
+    // rebuilds an accumulator by reassignment each iteration (e.g. a persistent
+    // vector's immutable push returns a NEW object), pin the initial value, then
+    // call this with the new value after each step so the live one stays rooted.
+    void gcKeepAliveUpdateTop(GCObj* o) { if (!gcKeepAlive_.empty()) gcKeepAlive_.back() = o; }
 
     // Get-or-create an UpVar pointing to `location`. Returns the existing
     // open UpVar if one already references that slot; otherwise allocates
@@ -623,6 +641,9 @@ public:
     // dispatch keeps pc in a local register, so it must be synced here before
     // any operation that can drive a GC step (op_safepoint).
     void setPc(Code* pc) { pc_ = pc; }
+    // GC-stable caller PC for synchronous (C++) calls. See syncCallerPC_.
+    Code* syncCallerPC() const { return syncCallerPC_; }
+    void  setSyncCallerPC(Code* pc) { syncCallerPC_ = pc; }
     CodeBlock* currentCodeBlock() const;
 
     // Update current frame's codeBlock (used by tail call opcodes)
@@ -652,8 +673,13 @@ public:
     // Execute a code block (entry point for running compiled code)
     Word execute(CodeBlock* block);
 
-    // Push a call frame for function calls (used by CALL opcode)
-    void pushFrame(Code* returnPC, CodeBlock* codeBlock, u32 newBase, u32 numRegs, u16 resultReg);
+    // Push a call frame for function calls (used by CALL opcode).
+    // gcReturnPC: PC used by GC to locate the CALLER's stack map while this
+    // frame runs. Pass nullptr for ordinary bytecode calls (it then mirrors
+    // returnPC). Synchronous calls into C++ (returnPC == syncReturnCode) must
+    // pass the real caller PC (vm.pc()) so the caller frame stays scannable.
+    void pushFrame(Code* returnPC, CodeBlock* codeBlock, u32 newBase, u32 numRegs, u16 resultReg,
+                   Code* gcReturnPC = nullptr);
 
     // Pop a call frame - returns the popped frame's data
     CallFrame popFrame();

@@ -576,6 +576,17 @@ private:
     // would read callee data as Obj* pointers.
     void clearArgRegTypes(u16 argBase, u16 argEnd);
 
+    // Clear arg-reg types ahead of a call's returnPC stack map. This must run
+    // for builtin calls too: clearArgRegTypes resets regTypes_, which feeds
+    // EVERY later stack map in the function, not just this call's. Leaving a
+    // consumed arg register typed would make a subsequent safepoint mark a dead
+    // slot as a live Obj* root. So a higher-order builtin's arg objects (the
+    // source collection, the function) are kept alive across its nested user
+    // calls by explicit gcKeepAlive pins in the builtin, not via the stack map.
+    void clearArgRegTypesForCall(u16 argBase, u16 argEnd, bool /*isBuiltinCall*/) {
+        clearArgRegTypes(argBase, argEnd);
+    }
+
     // BOX an inline value into a heap Obj* (returns reg holding the Obj*).
     // For non-inline types, returns srcReg unchanged.
     //

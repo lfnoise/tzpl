@@ -576,6 +576,7 @@ void builtin_sort_by_array(VM& vm, u16 dst, u16, u16 ab) {
     u16 elemWords = isLambdaInlineComposite(paramT) ? paramT->sizeWords_ : 1;
     u16 sb = vm.currentCodeBlock()->numRegs;
     auto* result = makeEmptyArray(at);
+    GCKeepAliveScope keep(vm, {src, (GCObj*)fn, result});
     dispatchBackend(arrayBackendFor(et), [&]<ArrayBackend B>() {
         size_t n = getArraySize_t<B>(src);
         std::vector<size_t> idx(n);
@@ -603,6 +604,7 @@ void builtin_grade_array(VM& vm, u16 dst, u16, u16 ab) {
     u16 elemWords = isLambdaInlineComposite(paramT) ? paramT->sizeWords_ : 1;
     u16 sb = vm.currentCodeBlock()->numRegs;
     auto* result = new PodArray<i64>(vm.arrayType(vm.intType()));
+    GCKeepAliveScope keep(vm, {src, (GCObj*)fn, result});
     dispatchBackend(arrayBackendFor(et), [&]<ArrayBackend B>() {
         size_t n = getArraySize_t<B>(src);
         std::vector<size_t> idx(n);
@@ -898,6 +900,7 @@ void builtin_map_array(VM& vm, u16 dst, u16, u16 ab) {
     Type* resET = fnType->returnType_;
     auto* resAT = vm.arrayType(resET);
     auto* result = makeEmptyArray(resAT);
+    GCKeepAliveScope keep(vm, {src, (GCObj*)fn, result});  // result lives only here across user calls
     u16 sb = vm.currentCodeBlock()->numRegs;
     dispatchBackend(arrayBackendFor(srcET), [&]<ArrayBackend B>() {
         size_t n = getArraySize_t<B>(src);
@@ -917,6 +920,7 @@ void builtin_filter_array(VM& vm, u16 dst, u16, u16 ab) {
     auto* at = static_cast<ArrayType*>(src->type_);
     Type* et = at->elemType_;
     auto* result = makeEmptyArray(at);
+    GCKeepAliveScope keep(vm, {src, (GCObj*)fn, result});  // result lives only here across user calls
     u16 sb = vm.currentCodeBlock()->numRegs;
     dispatchBackend(arrayBackendFor(et), [&]<ArrayBackend B>() {
         size_t n = getArraySize_t<B>(src);
@@ -940,6 +944,7 @@ void builtin_fold_array(VM& vm, u16 dst, u16, u16 ab) {
     // there and op_return writes the new acc back to the same slot.
     u32 accSW = (accT && accT->sizeWords_ > 0) ? accT->sizeWords_ : 1;
     auto* fn = static_cast<Callable*>(vm.reg((u16)(ab + 1 + accSW)).o);
+    GCKeepAliveScope keep(vm, {src, (GCObj*)fn});  // args cleared from stack map
     auto* at = static_cast<ArrayType*>(src->type_);
     Type* et = at->elemType_;
     u16 sb = vm.currentCodeBlock()->numRegs;
@@ -973,6 +978,7 @@ void builtin_scan_array(VM& vm, u16 dst, u16, u16 ab) {
     Type* accET = fnType->returnType_;
     auto* resAT = vm.arrayType(accET);
     auto* result = makeEmptyArray(resAT);
+    GCKeepAliveScope keep(vm, {src, (GCObj*)fn, result});
     u16 sb = vm.currentCodeBlock()->numRegs;
 
     Word const* accSrc = &vm.reg((u16)(ab + 1));
@@ -994,6 +1000,7 @@ void builtin_scan_array(VM& vm, u16 dst, u16, u16 ab) {
 void builtin_fold1_array(VM& vm, u16 dst, u16, u16 ab) {
     auto* src = vm.reg(ab).o;
     auto* fn = static_cast<Callable*>(vm.reg(ab+1).o);
+    GCKeepAliveScope keep(vm, {src, (GCObj*)fn});  // args cleared from stack map
     auto* at = static_cast<ArrayType*>(src->type_);
     Type* et = at->elemType_;
     // Phase 4g.27: native ABI; acc spans accSW words at sb.
@@ -1018,6 +1025,7 @@ void builtin_scan1_array(VM& vm, u16 dst, u16, u16 ab) {
     auto* at = static_cast<ArrayType*>(src->type_);
     Type* et = at->elemType_;
     auto* result = makeEmptyArray(at);
+    GCKeepAliveScope keep(vm, {src, (GCObj*)fn, result});
     // Phase 4g.27: native ABI; acc spans accSW words at sb.
     u32 accSW = (et && et->sizeWords_ > 0) ? et->sizeWords_ : 1;
     u16 sb = vm.currentCodeBlock()->numRegs;
@@ -1039,6 +1047,7 @@ void builtin_scan1_array(VM& vm, u16 dst, u16, u16 ab) {
 void builtin_find_array(VM& vm, u16 dst, u16, u16 ab) {
     auto* src = vm.reg(ab).o;
     auto* fn = static_cast<Callable*>(vm.reg(ab+1).o);
+    GCKeepAliveScope keep(vm, {src, (GCObj*)fn});  // args cleared from stack map
     auto* at = static_cast<ArrayType*>(src->type_);
     Type* et = at->elemType_;
     u16 sb = vm.currentCodeBlock()->numRegs;
@@ -1060,6 +1069,7 @@ void builtin_takeWhile_array(VM& vm, u16 dst, u16, u16 ab) {
     auto* at = static_cast<ArrayType*>(src->type_);
     Type* et = at->elemType_;
     auto* result = makeEmptyArray(at);
+    GCKeepAliveScope keep(vm, {src, (GCObj*)fn, result});
     u16 sb = vm.currentCodeBlock()->numRegs;
     dispatchBackend(arrayBackendFor(et), [&]<ArrayBackend B>() {
         size_t n = getArraySize_t<B>(src);
@@ -1079,6 +1089,7 @@ void builtin_dropWhile_array(VM& vm, u16 dst, u16, u16 ab) {
     auto* at = static_cast<ArrayType*>(src->type_);
     Type* et = at->elemType_;
     auto* result = makeEmptyArray(at);
+    GCKeepAliveScope keep(vm, {src, (GCObj*)fn, result});
     u16 sb = vm.currentCodeBlock()->numRegs;
     bool dropping = true;
     dispatchBackend(arrayBackendFor(et), [&]<ArrayBackend B>() {

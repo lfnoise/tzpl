@@ -312,7 +312,7 @@ void WitnessMapListGen::generate(VM& vm, ListNode* owner) {
 
     u16 sb = vm.currentCodeBlock()->numRegs;
     u32 callBase = vm.baseReg() + sb;
-    vm.pushFrame(&syncReturnCode(), callee, callBase, callee->numRegs, sb);
+    vm.pushFrame(&syncReturnCode(), callee, callBase, callee->numRegs, sb, vm.syncCallerPC());
     // Unwrap the concrete value into the callee's leading parameter slots.
     for (u8 i = 0; i < pw; ++i) vm.reg(i) = ex->slots_[i];
     Code* entry = callee->code.data();
@@ -438,7 +438,7 @@ void AutoMapListGen::generate(VM& vm, ListNode* owner) {
     } else {
         auto* cb = static_cast<CodeBlock*>(vm.global(info_->funcGlobalIndex).p);
         u32 callBase = vm.baseReg() + sb;
-        vm.pushFrame(&syncReturnCode(), cb, callBase, cb->numRegs, sb);
+        vm.pushFrame(&syncReturnCode(), cb, callBase, cb->numRegs, sb, vm.syncCallerPC());
         Code* entry = cb->code.data();
         entry->op(vm, entry);
     }
@@ -965,6 +965,7 @@ void builtin_collect(VM& vm, u16 dst, u16, u16 ab) {
     Type* elemType = lt->elemType_;
     auto* arrType = vm.arrayType(elemType);
     auto* arr = makeEmptyArray(arrType);
+    GCKeepAliveScope keep(vm, {src, arr});  // src spine + arr live only here across forced user calls
     ListNode* cur = src;
     for (i64 i = 0; i < n && cur; i++) {
         cur->force(vm);
@@ -1101,6 +1102,7 @@ void builtin_filter_list(VM& vm, u16 dst, u16, u16 ab) {
     Type* et = lt->elemType_;
     auto* fnType = static_cast<FunctionType*>(fn->type_);
     Type* paramT = fnType->argTypes_.empty() ? nullptr : fnType->argTypes_[0];
+    GCKeepAliveScope keep(vm, {src, (GCObj*)fn});  // args cleared from stack map
     // Eagerly find the first element that passes the predicate
     u16 sb = vm.currentCodeBlock()->numRegs;
     ListNode* cur = src;
@@ -1136,6 +1138,7 @@ void builtin_fold_list(VM& vm, u16 dst, u16, u16 ab) {
     // Phase 4g.27: native ABI; acc spans accSW words at sb across iters.
     u32 accSW = (accT && accT->sizeWords_ > 0) ? accT->sizeWords_ : 1;
     auto* fn = static_cast<Callable*>(vm.reg((u16)(ab + 1 + accSW)).o);
+    GCKeepAliveScope keep(vm, {src, (GCObj*)fn});  // args cleared from stack map
     auto* fnType = static_cast<FunctionType*>(fn->type_);
     Type* elT  = fnType->argTypes_.size() > 1 ? fnType->argTypes_[1] : nullptr;
     u16 sb = vm.currentCodeBlock()->numRegs;
@@ -1183,6 +1186,7 @@ void builtin_fold1_list(VM& vm, u16 dst, u16, u16 ab) {
     auto* src = static_cast<ListNode*>(vm.reg(ab).o);
     auto* fn = static_cast<Callable*>(vm.reg(ab+1).o);
     if (!src) { vm.reg(dst).i = 0; return; }
+    GCKeepAliveScope keep(vm, {src, (GCObj*)fn});  // args cleared from stack map
     src->force(vm);
     auto* lt = static_cast<ListType*>(src->type_);
     Type* et = lt->elemType_;
@@ -1250,6 +1254,7 @@ void builtin_iter(VM& vm, u16 dst, u16, u16 ab) {
 void builtin_find_list(VM& vm, u16 dst, u16, u16 ab) {
     auto* src = static_cast<ListNode*>(vm.reg(ab).o);
     auto* fn = static_cast<Callable*>(vm.reg(ab+1).o);
+    GCKeepAliveScope keep(vm, {src, (GCObj*)fn});  // args cleared from stack map
     auto* fnType = static_cast<FunctionType*>(fn->type_);
     Type* paramT = fnType->argTypes_.empty() ? nullptr : fnType->argTypes_[0];
     u16 sb = vm.currentCodeBlock()->numRegs;
@@ -1270,6 +1275,7 @@ void builtin_takeWhile_list(VM& vm, u16 dst, u16, u16 ab) {
     auto* src = static_cast<ListNode*>(vm.reg(ab).o);
     auto* fn = static_cast<Callable*>(vm.reg(ab+1).o);
     if (!src) { vm.reg(dst).o = nullptr; return; }
+    GCKeepAliveScope keep(vm, {src, (GCObj*)fn});  // args cleared from stack map
     src->force(vm);
     u16 sb = vm.currentCodeBlock()->numRegs;
     auto* fnType = static_cast<FunctionType*>(fn->type_);

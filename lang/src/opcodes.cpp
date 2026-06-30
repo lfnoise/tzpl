@@ -1033,7 +1033,17 @@ void op_call_primitive(VM& vm, Code* pc) {
     u32 idx = (u32)pc[2].i;
     auto* prim = static_cast<Primitive*>(vm.global(idx).o);
     vm.setCurrentPrimitive(prim);
+    // Publish this call's return PC (its stack-map offset in THIS caller frame)
+    // as the GC-stable sync-caller PC. A higher-order builtin may push a
+    // synchronous frame per element to run user code that triggers GC; that
+    // frame records this PC as its gcReturnPC so the GC root scan can still find
+    // this caller frame's stack map and mark its live locals. Save/restore so a
+    // builtin whose user code calls another builtin nests correctly. (pc_ can't
+    // serve this -- nested safepoints overwrite it with the callee's PC.)
+    Code* savedSyncPC = vm.syncCallerPC();
+    vm.setSyncCallerPC(pc + 3);
     prim->cfun_(vm, dst, argc, argBase);
+    vm.setSyncCallerPC(savedSyncPC);
     DISPATCH(3);
 }
 
