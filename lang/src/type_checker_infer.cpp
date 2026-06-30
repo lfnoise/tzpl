@@ -153,20 +153,27 @@ Type* TypeChecker::inferExpr(Expr* expr, Type* expectedType) {
                                         : static_cast<Type*>(compiler_.arrayType(et));
             };
             if (lit->elemTypeExpr) {
-                // Typed array constructor: [Type](...)
+                // Typed array constructor: [Type](...) / #[Type](...). The bracket
+                // type is the element type; each element is checked (and, for a
+                // `some C` element type, packed into the existential by codegen via
+                // ensureType, exactly as the binding-annotation sink path does).
                 Type* elemType = resolveTypeExpr(lit->elemTypeExpr.get());
+                auto* exElem = dynamic_cast<ExistentialType*>(elemType);
                 for (auto& elem : lit->elements) {
                     Type* et = inferExpr(static_cast<Expr*>(elem.get()));
                     if (et && !isAssignable(et, elemType)) {
                         if (isNumeric(et) && isNumeric(elemType)) {
                             // Allow numeric promotion (e.g. Int -> Float)
+                        } else if (exElem) {
+                            error(elem->loc, "Array element type '" + std::string(et->str()) +
+                                  "' does not satisfy constraint '" + exElem->constraintName_ + "'");
                         } else {
                             error(elem->loc, "Array element type mismatch: expected " +
                                   std::string(elemType->str()) + " but got " + std::string(et->str()));
                         }
                     }
                 }
-                result = compiler_.arrayType(elemType);
+                result = vecType(elemType);
             } else if (lit->elements.empty()) {
                 if (lit->isImmutable) {
                     if (auto* pv = dynamic_cast<PersistentVectorType*>(expectedType)) {

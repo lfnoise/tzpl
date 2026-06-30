@@ -1509,17 +1509,23 @@ ExprPtr Parser::parseExpression(int minPrec) {
 ExprPtr Parser::parseBracketLiteral(SourceRange loc, bool isImmutable) {
     // The opening '[' has already been consumed by the caller.
 
-    // Typed array constructor [Type](...) applies only to the mutable form.
-    // In the immutable position, #[...] is always a literal.
-    if (!isImmutable) {
-        // Detect typed array constructor: [Type](...)
-        // Type keywords are unambiguous (never valid expressions).
-        // For '[', '(', 'fn', and capitalized Identifiers, use tentative parsing.
+    // Typed array constructor [Type](...) / #[Type](...): the element type sits
+    // in the bracket slot and the elements follow in parens. Works for both the
+    // mutable ([...]) and persistent (#[...]) forms; the trailing `](` after the
+    // type disambiguates it from an ordinary literal.
+    {
+        // Detect typed array constructor.
+        // Type keywords are unambiguous (never valid expressions). For '[', '(',
+        // 'fn', capitalized Identifiers, and the `some C` existential introducer,
+        // use tentative parsing.
         bool tryTypedConstructor = isTypeKeyword(current_.kind);
+        bool isSomeExistential = current_.kind == TokenKind::Identifier &&
+            current_.text == "some" && lexer_.peek().kind == TokenKind::Identifier;
         if (!tryTypedConstructor &&
             (current_.kind == TokenKind::LBracket ||
              current_.kind == TokenKind::LParen ||
              current_.kind == TokenKind::Fn ||
+             isSomeExistential ||
              (current_.kind == TokenKind::Identifier && !current_.text.empty() && std::isupper(current_.text[0])))) {
             // Tentative parse: save state, try type + ]( , restore if it fails
             Token savedCurrent = current_;
@@ -1552,6 +1558,7 @@ ExprPtr Parser::parseBracketLiteral(SourceRange loc, bool isImmutable) {
             expectClosing(TokenKind::RParen, "(", typedParenLoc);
             auto arr = std::make_unique<ArrayLiteralExpr>(loc, std::move(elements));
             arr->elemTypeExpr = std::move(typeExpr);
+            arr->isImmutable = isImmutable;
             return arr;
         }
     }
