@@ -34,10 +34,4 @@ fn asMsg(f Float) Msg = Msg.float(f);
 fn asMsg(s Symbol) Msg = Msg.symbol(s);
 fn asMsg(s String) Msg = Msg.string(s);
 fn asMsg(v [Msg]) Msg = Msg.vec(v);
-
--- Per-element conversion is routed through a scalar `some AsMsg` parameter so
--- the witness dispatch fires per element. Explicit `@`-mapping the constraint
--- method directly (`v @ asMsg`) does not dispatch through the existential
--- witness; auto-mapping over a scalar existential parameter does.
-fn _asMsgElem(x some AsMsg) Msg = asMsg(x);
-fn asMsg(v [some AsMsg]) Msg = Msg.vec(v @ _asMsgElem);
+fn asMsg(v [some AsMsg]) Msg = Msg.vec(v @ asMsg);

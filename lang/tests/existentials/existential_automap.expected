@@ -1,3 +1,6 @@
 [circle, square, circle]
 List(square, circle)
 #[circle, square]
+[circle, square, circle]
+List(square, circle)
+#[circle, square]

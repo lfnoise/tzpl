@@ -20,3 +20,9 @@ lst draw println;               -- List(square, circle)
 
 let pv #[some Drawable] = #[c, s];
 pv draw println;                -- #[circle, square]
+
+-- The explicit `@` form dispatches through the witness identically to the
+-- implicit auto-map above, for arrays, lists, and persistent vectors.
+(arr @ draw) println;           -- [circle, square, circle]
+(lst @ draw) println;           -- List(square, circle)
+(pv @ draw) println;            -- #[circle, square]
