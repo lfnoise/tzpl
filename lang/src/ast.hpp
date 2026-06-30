@@ -288,7 +288,10 @@ struct CallExpr_ : Expr {
     LambdaType* resolvedTemplateLambdaType = nullptr;  // Set by type checker: monomorphized type for template lambda calls
     bool isWitnessDispatch = false;    // Set by type checker: dispatch a constraint method through an existential's witness dict
     i32 witnessMethodSlot = -1;        // Set by type checker: witness dictionary slot of the dispatched method
-    i32 witnessAutoMapKind = 0;        // Set by type checker: 0=scalar receiver, 1=array, 2=list, 3=persistent vector
+    // Set by type checker: collection nesting from receiver down to the existential
+    // element, outer->inner (1=array, 2=list, 3=persistent vector). Empty = scalar
+    // receiver; the witness method is auto-mapped through every recorded level.
+    std::vector<i32> witnessMapKinds;
 
     CallExpr_(SourceRange l, ExprPtr c, ExprList a)
         : Expr(CallExpr, l), callee(std::move(c)), args(std::move(a)) {}

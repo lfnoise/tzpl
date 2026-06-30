@@ -1599,7 +1599,7 @@ Type* TypeChecker::inferCall(CallExpr_* expr) {
         // `arr @ method` where arr : [some C]. There is no concrete overload at the
         // erased element type, so route to witness dispatch -- the same path the
         // implicit `arr method` form takes. Witness dispatch performs its own
-        // auto-mapping (witnessAutoMapKind) over the original collection, so we
+        // auto-mapping (witnessMapKinds) over the original collection, so we
         // return its result type directly and do NOT also apply the explicit
         // autoMapArgs (that would map twice).
         if (!func) {

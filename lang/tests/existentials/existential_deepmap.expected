@@ -1,0 +1,9 @@
+[[moo, caw, arf, meow], [arf, arf]]
+[[moo, caw, arf, meow], [arf, arf]]
+[[moo, caw, arf, meow], [arf, arf]]
+[[[moo, caw, arf, meow], [arf, arf]], [[moo, caw, arf, meow]]]
+[[[moo, caw, arf, meow], [arf, arf]], [[moo, caw, arf, meow]]]
+List([moo, caw, arf, meow], [arf, arf])
+List([moo, caw, arf, meow], [arf, arf])
+#[arf, meow]
+#[arf, meow]

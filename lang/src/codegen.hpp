@@ -690,6 +690,10 @@ private:
     u16 ensureExistential(u16 reg, Type* fromType, Type* exType);
     // Lower a constraint-method call on a `some C` receiver to op_call_witness.
     u16 genWitnessCall(CallExpr_* expr);
+    // Recursively map witness dispatch through `kinds[level..]` collection levels
+    // (outer->inner), bottoming out in emitWitnessDispatch at the existential.
+    u16 genWitnessMap(u16 srcReg, Type* srcType, Type* dstType,
+                      std::vector<i32> const& kinds, size_t level, i32 slot);
     // Emit a single op_call_witness: dispatch method `slot` on the existential in
     // `exReg`, result of type `retType`. Shared by scalar and auto-mapped paths.
     u16 emitWitnessDispatch(u16 exReg, i32 slot, Type* retType);

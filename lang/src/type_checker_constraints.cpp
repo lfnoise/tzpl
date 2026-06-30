@@ -876,15 +876,20 @@ bool TypeChecker::materializeWitness(Type* concreteType, const std::string& cons
 Type* TypeChecker::tryInferWitnessDispatch(CallExpr_* expr, const std::string& name,
                                            const std::vector<Type*>& argTypes) {
     // The dispatching argument is the sole argument (the receiver). The receiver
-    // is either the existential itself, or a collection of existentials -- in
-    // which case the method is auto-mapped over the elements (witnessAutoMapKind).
+    // is either the existential itself, or a (possibly deeply nested) collection
+    // of existentials -- in which case the method is auto-mapped through every
+    // collection level down to the existential elements (witnessMapKinds).
     if (argTypes.size() != 1 || !argTypes[0]) return nullptr;
-    Type* recv = argTypes[0];
-    int mapKind = 0;
-    Type* elem = recv;
-    if (auto* at = dynamic_cast<ArrayType*>(recv)) { elem = at->elemType_; mapKind = 1; }
-    else if (auto* lt = dynamic_cast<ListType*>(recv)) { elem = lt->elemType_; mapKind = 2; }
-    else if (auto* pv = dynamic_cast<PersistentVectorType*>(recv)) { elem = pv->elemType_; mapKind = 3; }
+
+    // Peel collection layers, outer->inner, until we reach the element type.
+    std::vector<i32> mapKinds;  // 1=array, 2=list, 3=persistent vector
+    Type* elem = argTypes[0];
+    while (true) {
+        if (auto* at = dynamic_cast<ArrayType*>(elem)) { mapKinds.push_back(1); elem = at->elemType_; }
+        else if (auto* lt = dynamic_cast<ListType*>(elem)) { mapKinds.push_back(2); elem = lt->elemType_; }
+        else if (auto* pv = dynamic_cast<PersistentVectorType*>(elem)) { mapKinds.push_back(3); elem = pv->elemType_; }
+        else break;
+    }
     auto* ex = dynamic_cast<ExistentialType*>(elem);
     if (!ex) return nullptr;
 
@@ -908,12 +913,15 @@ Type* TypeChecker::tryInferWitnessDispatch(CallExpr_* expr, const std::string& n
 
         expr->isWitnessDispatch = true;
         expr->witnessMethodSlot = (i32)i;
-        expr->witnessAutoMapKind = mapKind;
-        if (mapKind == 0) return retType;
-        // Auto-mapped: result is a collection (of the same kind) of the return type.
-        if (mapKind == 1) return compiler_.arrayType(retType);
-        if (mapKind == 2) return compiler_.listType(retType);
-        return compiler_.persistentVectorType(retType);
+        expr->witnessMapKinds = mapKinds;
+        // Re-wrap the scalar return type in the same nesting (inner->outer).
+        Type* result = retType;
+        for (auto it = mapKinds.rbegin(); it != mapKinds.rend(); ++it) {
+            if (*it == 1)      result = compiler_.arrayType(result);
+            else if (*it == 2) result = compiler_.listType(result);
+            else               result = compiler_.persistentVectorType(result);
+        }
+        return result;
     }
     return nullptr;
 }

@@ -4127,35 +4127,38 @@ u16 CodeGen::emitWitnessDispatch(u16 exReg, i32 slot, Type* retType) {
 
 u16 CodeGen::genWitnessCall(CallExpr_* expr) {
     Expr* recv = static_cast<Expr*>(expr->args[0].get());
-    i32 slot = expr->witnessMethodSlot;
-
-    // Scalar receiver: a single existential.
-    if (expr->witnessAutoMapKind == 0) {
-        u16 exReg = genExpr(recv);   // existential Obj* (1 word)
-        return emitWitnessDispatch(exReg, slot, expr->resolvedType);
-    }
-
-    // Auto-mapped receiver: a collection of existentials. Map the witness
-    // dispatch over each element, producing a collection of the return type.
     u16 srcReg = genExpr(recv);
+    return genWitnessMap(srcReg, recv->resolvedType, expr->resolvedType,
+                         expr->witnessMapKinds, 0, expr->witnessMethodSlot);
+}
 
-    if (expr->witnessAutoMapKind == 1) {  // array
-        auto* srcT = dynamic_cast<ArrayType*>(recv->resolvedType);
-        auto* dstT = dynamic_cast<ArrayType*>(expr->resolvedType);
+// Recursively map witness dispatch through the recorded collection nesting.
+// At `level == kinds.size()` the receiver is the existential element itself, so
+// emit a single op_call_witness; otherwise emit a map loop of the level's kind
+// whose body recurses into the next level.
+u16 CodeGen::genWitnessMap(u16 srcReg, Type* srcType, Type* dstType,
+                           std::vector<i32> const& kinds, size_t level, i32 slot) {
+    if (level == kinds.size()) {
+        return emitWitnessDispatch(srcReg, slot, dstType);
+    }
+    i32 kind = kinds[level];
+    if (kind == 1) {  // array
+        auto* srcT = dynamic_cast<ArrayType*>(srcType);
+        auto* dstT = dynamic_cast<ArrayType*>(dstType);
         return emitArrayMapLoop(srcReg, srcT, dstT, [&](u16 elemReg, Type*) -> u16 {
-            return emitWitnessDispatch(elemReg, slot, dstT->elemType_);
+            return genWitnessMap(elemReg, srcT->elemType_, dstT->elemType_, kinds, level + 1, slot);
         });
     }
-    if (expr->witnessAutoMapKind == 2) {  // list
-        auto* srcT = dynamic_cast<ListType*>(recv->resolvedType);
-        auto* dstT = dynamic_cast<ListType*>(expr->resolvedType);
+    if (kind == 2) {  // list
+        auto* srcT = dynamic_cast<ListType*>(srcType);
+        auto* dstT = dynamic_cast<ListType*>(dstType);
         return emitListMapLoop(srcReg, srcT, dstT, [&](u16 elemReg, Type*) -> u16 {
-            return emitWitnessDispatch(elemReg, slot, dstT->elemType_);
+            return genWitnessMap(elemReg, srcT->elemType_, dstT->elemType_, kinds, level + 1, slot);
         });
     }
     // persistent vector: map via a temporary array, then freeze.
-    auto* srcPV = dynamic_cast<PersistentVectorType*>(recv->resolvedType);
-    auto* dstPV = dynamic_cast<PersistentVectorType*>(expr->resolvedType);
+    auto* srcPV = dynamic_cast<PersistentVectorType*>(srcType);
+    auto* dstPV = dynamic_cast<PersistentVectorType*>(dstType);
     auto* srcArrT = compiler_.arrayType(srcPV->elemType_);
     auto* dstArrT = compiler_.arrayType(dstPV->elemType_);
     u16 srcArr = allocReg();
@@ -4163,7 +4166,7 @@ u16 CodeGen::genWitnessCall(CallExpr_* expr) {
     emitRegs(srcArr, srcReg);
     emitPtr(srcArrT);
     u16 resArr = emitArrayMapLoop(srcArr, srcArrT, dstArrT, [&](u16 elemReg, Type*) -> u16 {
-        return emitWitnessDispatch(elemReg, slot, dstArrT->elemType_);
+        return genWitnessMap(elemReg, srcPV->elemType_, dstPV->elemType_, kinds, level + 1, slot);
     });
     u16 dst = allocReg();
     emitOp(op_pvec_from_array);
