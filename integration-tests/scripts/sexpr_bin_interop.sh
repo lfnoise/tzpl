@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Proves the C++ encoder (shared/tzpl_sexpr_bin.hpp) and the Tzopilotl encoder
 # (lang/modules/message.x) agree byte-for-byte on the TZB wire format: both
-# encode the same SExpr value and their byte dumps are diffed.
+# encode the same Msg value and their byte dumps are diffed.
 set -u
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -22,19 +22,19 @@ c++ -std=c++23 -I "$ROOT/shared" "$SELFTEST_SRC" -o "$SELFTEST_BIN" || { echo "F
 
 # Encode the same value in Tzopilotl and dump its bytes.
 cat > "$LANG_DUMP" <<'EOF'
-import sexprs.*;
 import message.*;
+import messageEncoding.*;
 fn dump(b Bytes) Void {
     var i = 0; let n = b byteLength;
     while (i < n) { print((b u8At(i)) toString); print(" "); i = i + 1; }
     println("");
 }
-dump(encode(SExpr.vec([
-    SExpr.symbol(toSymbol("note")),
-    SExpr.int(60),
-    SExpr.float(0.5),
-    SExpr.string("hi"),
-    SExpr.vec([SExpr.int(1), SExpr.bool(true)]),
+dump(encode(Msg.vec([
+    Msg.symbol(toSymbol("note")),
+    Msg.int(60),
+    Msg.float(0.5),
+    Msg.string("hi"),
+    Msg.vec([Msg.int(1), Msg.bool(true)]),
 ])));
 EOF
 "$TZPL" -I "$ROOT/lang/modules" "$LANG_DUMP" > "$LANG_OUT"

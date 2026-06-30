@@ -1,6 +1,6 @@
 -- Zero-copy reader: direct field access without decoding the whole tree.
-import sexprs.*;
 import message.*;
+import messageEncoding.*;
 
 fn tagName(t MsgTag) String {
     match (t) {
@@ -13,13 +13,13 @@ fn tagName(t MsgTag) String {
     }
 }
 
-let e = SExpr.vec([
-    SExpr.bool(false),
-    SExpr.int(7),
-    SExpr.float(1.5),
-    SExpr.symbol(toSymbol("sym")),
-    SExpr.string("str"),
-    SExpr.vec([SExpr.int(10), SExpr.int(20), SExpr.int(30)]),
+let e = Msg.vec([
+    Msg.bool(false),
+    Msg.int(7),
+    Msg.float(1.5),
+    Msg.symbol(toSymbol("sym")),
+    Msg.string("str"),
+    Msg.vec([Msg.int(10), Msg.int(20), Msg.int(30)]),
 ]);
 let b = encode(e);
 let r = reader(b);

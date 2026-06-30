@@ -74,7 +74,7 @@ static void builtin_send(VM& vm, u16 dst, u16, u16 ab) {
 // name in this VM's registry so it can be addressed by name (incl. cross-VM
 // delivery). Naming is the spawner's job, not the actor's, so the actor comes
 // first and the call returns the actor -- it chains off spawn:
-//   let v = voice spawn(SExpr.int(0)) register('voice);
+//   let v = voice spawn(Msg.int(0)) register('voice);
 static void builtin_register(VM& vm, u16 dst, u16, u16 ab) {
     auto* actor = static_cast<ActorObj*>(vm.reg(ab).o);
     SymbolPtr name = vm.reg((u16)(ab + 1)).s;

@@ -99,7 +99,7 @@ struct AppContext {
     std::vector<SiloVMState> siloVMs;  // indexed by silo number
 
     // Silo->NRT actor messages: a silo actor targeting an NRT actor (outbox
-    // targetSilo < 0) has its encoded SExpr stashed here by pumpSiloOutboxes on
+    // targetSilo < 0) has its encoded Msg stashed here by pumpSiloOutboxes on
     // the main thread. The lang actor server drains it (nrtActorMsgCount /
     // nrtActorMsgName / nrtActorMsgTake) and does decode + sendByName itself --
     // decode/sendByName must run as lang on the main VM, which the C++ pump

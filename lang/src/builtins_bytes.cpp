@@ -19,9 +19,9 @@
 //  lang
 //
 //  Low-level primitives over the `Bytes` type: a growable little-endian byte
-//  buffer plus bounds-checked readers. These are the substrate the SExpr binary
-//  message format is built from (see lang/modules/message.x and
-//  shared/tzpl_sexpr_bin.hpp for the wire layout). They never reference SExpr;
+//  buffer plus bounds-checked readers. These are the substrate the Msg binary
+//  message format is built from (see lang/modules/messageEncoding.x and
+//  shared/tzpl_sexpr_bin.hpp for the wire layout). They never reference Msg;
 //  encode/decode/Reader live in Tzopilotl on top of these.
 //
 //  Also registers `toSymbol(String) Symbol` (interning), the inverse of the

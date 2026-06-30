@@ -5,8 +5,8 @@
 
 export nats_ffi.*;
 
-import message.*;   -- isMessage / decode
-import sexprs.*;    -- SExpr
+import messageEncoding.*;   -- isMessage / decode
+import message.*;    -- Msg
 
 -- Bridge a NATS subject to a local actor: every TZB-encoded message published to
 -- `subject` (by this or any other process) is decoded and delivered into the

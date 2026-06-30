@@ -19,7 +19,7 @@
 //  shared
 //
 //  The "TZB" binary message format -- canonical wire layout for serializing an
-//  SExpr value (sexprs.x) to a flat byte buffer. This C++ header is the single
+//  Msg value (message.x) to a flat byte buffer. This C++ header is the single
 //  source of truth for the layout and is mirrored, byte for byte, by the
 //  Tzopilotl implementation in lang/modules/message.x. Keep the two in sync.
 //
@@ -158,7 +158,7 @@ private:
 };
 
 // ---------------------------------------------------------------------------
-// Value -- a small in-memory SExpr mirror, for building messages in C++.
+// Value -- a small in-memory Msg mirror, for building messages in C++.
 // ---------------------------------------------------------------------------
 
 struct Value {

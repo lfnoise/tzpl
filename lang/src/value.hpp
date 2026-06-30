@@ -255,7 +255,7 @@ public:
 
 // Bytes object -- a growable, length-based binary buffer. Unlike StringObj it
 // makes no UTF-8 assumptions and may hold embedded NUL bytes; it is the carrier
-// for the SExpr binary message format (see lang/modules/message.x). A leaf
+// for the Msg binary message format (see lang/modules/messageEncoding.x). A leaf
 // object: it holds no Obj* children, so GC scanning is a no-op (GCTag::None).
 class BytesObj : public Obj {
 public:
@@ -1709,7 +1709,7 @@ private:
 #pragma clang diagnostic pop
 
 // Actor - a lightweight actor with a single-threaded mailbox. Messages of type
-// M (1 word; e.g. an SExpr Obj*) queue in FIFO order; a `receive` when the queue
+// M (1 word; e.g. a Msg Obj*) queue in FIFO order; a `receive` when the queue
 // is empty parks the actor's coroutine on `pendingReceiver_` (a Future<M>) until
 // a `send` resolves it. Owned by one VM; all enqueues happen on that VM's
 // thread (cross-thread/heap delivery is re-enqueued here by the transport).

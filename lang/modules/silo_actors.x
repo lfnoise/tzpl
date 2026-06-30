@@ -7,16 +7,16 @@
 -- (siloOutbox), drained on the main thread by runActorServer.
 
 import audio_engine.*;   -- siloOutbox (the rt-safe outbox transport)
-import message.*;        -- encode (SExpr -> Bytes)
-import sexprs.*;         -- SExpr
+import messageEncoding.*;        -- encode (Msg -> Bytes)
+import message.*;         -- Msg
 
--- From inside a silo actor or task, send an SExpr to an actor elsewhere.
+-- From inside a silo actor or task, send a Msg to an actor elsewhere.
 --   target = -1  -> an actor registered at NRT (the main VM)
 --   target >= 0  -> the actor named `name` in that silo
 -- Real-time safe: a by-value push into the silo's lock-free outbox; the main
 -- thread's runActorServer drains it, decodes, and routes by name. Returns an
 -- error code -- errInternal if the encoded message exceeds the outbox cap
 -- (OutboxMsg::kMaxBytes, ~4 KB) or the outbox is full, otherwise errNone.
-fn siloPost(target Int, name Symbol, msg SExpr) Int {
+fn siloPost(target Int, name Symbol, msg Msg) Int {
     siloOutbox(target, name, encode(msg))
 }

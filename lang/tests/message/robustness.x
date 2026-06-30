@@ -1,7 +1,7 @@
 -- Untrusted/garbage input must never crash: readers are bounds-checked and
 -- isMessage guards the header. Printing past each decode proves no OOB / abort.
-import sexprs.*;
 import message.*;
+import messageEncoding.*;
 
 -- empty buffer is not a message
 let empty = bytes();
@@ -10,7 +10,7 @@ let d0 = decode(empty);
 println("decoded-empty-ok");
 
 -- a real message validates
-let full = encode(SExpr.vec([SExpr.int(1), SExpr.string("hi")]));
+let full = encode(Msg.vec([Msg.int(1), Msg.string("hi")]));
 println(isMessage(full));
 
 -- a few stray bytes: not a message, and decode is still safe

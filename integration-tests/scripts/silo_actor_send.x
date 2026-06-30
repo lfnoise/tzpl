@@ -1,5 +1,5 @@
 -- Cross-VM actor messaging (actor model Phase 2b): an NRT "conductor" sends
--- messages BY NAME to an actor living in a silo. The message (an SExpr) is
+-- messages BY NAME to an actor living in a silo. The message (a Msg) is
 -- encoded to bytes on the NRT side, shipped across the silo command FIFO, and
 -- decoded + delivered into the named actor's mailbox on the silo's RT thread.
 --
@@ -10,21 +10,21 @@
 import audio_engine.*;
 import futures.*;
 import actors.*;          -- siloSend
-import sexprs.*;
+import message.*;
 
 -- The silo actor registers itself as "voice" and plays a note for each pitch
 -- message it receives. Spawned at module top level so it is registered as soon
 -- as the module loads (before any message is sent).
 let taskCode = """
 import audio_engine.*;
-import sexprs.*;
+import message.*;
 
-async fn voice(self Actor<SExpr>, init SExpr) Void {
+async fn voice(self Actor<Msg>, init Msg) Void {
     var id = 0;
     while (true) {
         let m = await receive(self);
         match (m) {
-            SExpr.float(pitch): {
+            Msg.float(pitch): {
                 playNote(101, id % 16, [pitch, 0.6, 4.7, 0.0, 0.01, 0.2]);
                 id = id + 1;
             }
@@ -33,7 +33,7 @@ async fn voice(self Actor<SExpr>, init SExpr) Void {
     }
 }
 
-voice spawn(SExpr.int(0)) register('voice);
+voice spawn(Msg.int(0)) register('voice);
 """;
 
 "starting engine..." println;
@@ -51,7 +51,7 @@ let err = await siloLoad(0, taskCode);
 "load err=[" print; err print; "]" println;
 
 -- Conductor: send three notes from NRT to the silo actor, by name (cross-VM).
-siloSend(0, toSymbol("voice"), SExpr.float(60.0));
-siloSend(0, toSymbol("voice"), SExpr.float(64.0));
-siloSend(0, toSymbol("voice"), SExpr.float(67.0));
+siloSend(0, toSymbol("voice"), Msg.float(60.0));
+siloSend(0, toSymbol("voice"), Msg.float(64.0));
+siloSend(0, toSymbol("voice"), Msg.float(67.0));
 "sent 3 notes to silo actor 'voice'" println;

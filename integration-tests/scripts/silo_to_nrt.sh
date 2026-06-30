@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Silo -> NRT actor messaging (actor model Phase 2c, reverse direction). A silo
 # actor sends a 4-note line to an NRT actor "conductor"; the main thread's
-# runActorServer drains the silo outbox, decodes each SExpr, delivers it by name,
+# runActorServer drains the silo outbox, decodes each Msg, delivers it by name,
 # and drives the NRT actor, which prints "NRT GOT <pitch>". Verifies all four
 # arrive. (The silo's per-beat tick is driven by the audio callback; if CoreAudio
 # does not start in a headless run, no notes tick -- reported as SKIP.)

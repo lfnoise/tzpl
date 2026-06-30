@@ -454,7 +454,7 @@ if (localStorage.getItem('tzpl-docs-theme') === 'light') document.documentElemen
         <li><a href="#nrt-render-examples">Examples</a></li>
       </ol>
     </li>
-    <li><a href="#messages">Binary Messages (SExpr)</a>
+    <li><a href="#messages">Binary Messages (Msg)</a>
       <ol>
         <li><a href="#messages-overview">Overview</a></li>
         <li><a href="#messages-bytes">The Bytes Type</a></li>
@@ -2121,7 +2121,7 @@ engineName = <span class="str">"piano"</span></code></pre>
   <tr><td><code>natsPubI(subject String, value Int) Void</code></td><td>Publish an integer (as its string representation).</td></tr>
   <tr><td><code>natsPubF(subject String, value Float) Void</code></td><td>Publish a float (as its string representation).</td></tr>
   <tr><td><code>natsRequest(subject String, data String, timeoutMs Int, handler fn(String) Void) Void</code></td><td>Async request/reply: publishes a request and invokes the handler with the reply payload when it arrives. Returns immediately. Uses the nats.c delivery thread internally (no extra threads spawned). The <code>timeoutMs</code> parameter is reserved for future use.</td></tr>
-  <tr><td><code>natsPubMsg(subject String, msg Bytes) Void</code></td><td>Publish a <strong>binary</strong> message &mdash; the exact bytes of a <code>Bytes</code> buffer, including embedded NULs (e.g. an <code>encode</code>d <a href="#messages">SExpr message</a>). Length-preserving, unlike the string variants.</td></tr>
+  <tr><td><code>natsPubMsg(subject String, msg Bytes) Void</code></td><td>Publish a <strong>binary</strong> message &mdash; the exact bytes of a <code>Bytes</code> buffer, including embedded NULs (e.g. an <code>encode</code>d <a href="#messages">Msg message</a>). Length-preserving, unlike the string variants.</td></tr>
   <tr><td><code>natsRequestMsg(subject String, msg Bytes, timeoutMs Int, handler fn(Bytes) Void) Void</code></td><td>Binary request/reply: the reply payload is delivered to the handler as <code>Bytes</code>.</td></tr>
 </table>
 
@@ -2152,7 +2152,7 @@ engineName = <span class="str">"piano"</span></code></pre>
   <tr><td><code>onMessageS(subject String, handler fn(String) Void) Void</code></td><td>Register a handler that receives the payload as a string.</td></tr>
   <tr><td><code>onMessageI(subject String, handler fn(Int) Void) Void</code></td><td>Register a handler that parses the payload as an integer.</td></tr>
   <tr><td><code>onMessageF(subject String, handler fn(Float) Void) Void</code></td><td>Register a handler that parses the payload as a float.</td></tr>
-  <tr><td><code>onMessageMsg(subject String, handler fn(Bytes) Void) Void</code></td><td>Register a handler that receives the raw payload as a <code>Bytes</code> buffer (length-preserving, embedded NULs intact). The handler typically <code>decode</code>s it to an <a href="#messages">SExpr</a> or reads it via a Reader.</td></tr>
+  <tr><td><code>onMessageMsg(subject String, handler fn(Bytes) Void) Void</code></td><td>Register a handler that receives the raw payload as a <code>Bytes</code> buffer (length-preserving, embedded NULs intact). The handler typically <code>decode</code>s it to an <a href="#messages">Msg</a> or reads it via a Reader.</td></tr>
   <tr><td><code>removeHandler(subject String) Void</code></td><td>Remove a previously registered handler and unsubscribe from the subject.</td></tr>
 </table>
 
@@ -3105,28 +3105,28 @@ nats.<span class="fn">onMessageS</span>(<span class="str">"nodes.piano.chords"</
 <!--  15. BINARY MESSAGES (SEXPR)                                      -->
 <!-- ================================================================ -->
 
-<h2 id="messages">15. Binary Messages (SExpr)</h2>
+<h2 id="messages">15. Binary Messages (Msg)</h2>
 
 <!-- -------------------------------- -->
 <h3 id="messages-overview">15.1 Overview</h3>
 
-<p>The <code>message</code> module encodes an <code>SExpr</code> value to and from a compact binary buffer &mdash; the <strong>&ldquo;TZB&rdquo;</strong> format. It is the serialization substrate for moving structured data between threads (silos, each of which has its own VM and heap) and between processes (e.g. over NATS), where heap pointers cannot be shared.</p>
+<p>The <code>messageEncoding</code> module encodes a <code>Msg</code> value to and from a compact binary buffer &mdash; the <strong>&ldquo;TZB&rdquo;</strong> format. It is the serialization substrate for moving structured data between threads (silos, each of which has its own VM and heap) and between processes (e.g. over NATS), where heap pointers cannot be shared.</p>
 
-<p>The value type it serializes is the <code>SExpr</code> enum (the <code>sexprs</code> module):</p>
+<p>The value type it serializes is the <code>Msg</code> enum (the <code>message</code> module):</p>
 
-<pre><code><span class="kw">enum</span> SExpr {
+<pre><code><span class="kw">enum</span> Msg {
     bool   <span class="typ">Bool</span>,
     int    <span class="typ">Int</span>,
     float  <span class="typ">Float</span>,
     symbol <span class="typ">Symbol</span>,
     string <span class="typ">String</span>,
-    vec    [<span class="typ">SExpr</span>],
+    vec    [<span class="typ">Msg</span>],
 }</code></pre>
 
-<p>Two ways to read an encoded message are provided: a full <code>decode</code> into an <code>SExpr</code> tree, and a <strong>zero-copy <code>Reader</code></strong> that reads fields and walks children directly off the buffer with no tree allocation. List children are stored columnarly, so reaching the <em>i</em>-th child is O(1).</p>
+<p>Two ways to read an encoded message are provided: a full <code>decode</code> into a <code>Msg</code> tree, and a <strong>zero-copy <code>Reader</code></strong> that reads fields and walks children directly off the buffer with no tree allocation. List children are stored columnarly, so reaching the <em>i</em>-th child is O(1).</p>
 
-<pre><code><span class="kw">import</span> message.*;
-<span class="kw">import</span> sexprs.*;</code></pre>
+<pre><code><span class="kw">import</span> messageEncoding.*;
+<span class="kw">import</span> message.*;</code></pre>
 
 <div class="note">
   <strong>Note:</strong> <code>symbol</code> and <code>string</code> are distinct cases that both carry text: a <code>symbol</code> is an interned <code>Symbol</code> (renders bare, e.g. <code>note</code>); a <code>string</code> is text (renders quoted, e.g. <code>"note"</code>). The format preserves the distinction with separate tags, and round-trips a symbol back to an interned <code>Symbol</code>.
@@ -3135,7 +3135,7 @@ nats.<span class="fn">onMessageS</span>(<span class="str">"nodes.piano.chords"</
 <!-- -------------------------------- -->
 <h3 id="messages-bytes">15.2 The Bytes Type</h3>
 
-<p><code>Bytes</code> is a growable, length-based binary buffer (like <code>String</code>, but with no UTF-8 assumptions &mdash; it holds arbitrary bytes including embedded NULs). It is the type <code>encode</code> returns and <code>decode</code> consumes, and what <code>natsPubMsg</code> / <code>onMessageMsg</code> carry. These low-level builders and readers are built-ins (no import needed) and underlie <code>message.x</code>; most code only needs <code>encode</code> / <code>decode</code> / <code>reader</code>.</p>
+<p><code>Bytes</code> is a growable, length-based binary buffer (like <code>String</code>, but with no UTF-8 assumptions &mdash; it holds arbitrary bytes including embedded NULs). It is the type <code>encode</code> returns and <code>decode</code> consumes, and what <code>natsPubMsg</code> / <code>onMessageMsg</code> carry. These low-level builders and readers are built-ins (no import needed) and underlie <code>messageEncoding.x</code>; most code only needs <code>encode</code> / <code>decode</code> / <code>reader</code>.</p>
 
 <table>
   <tr><th>Function</th><th>Description</th></tr>
@@ -3156,32 +3156,32 @@ nats.<span class="fn">onMessageS</span>(<span class="str">"nodes.piano.chords"</
 
 <table>
   <tr><th>Function</th><th>Description</th></tr>
-  <tr><td><code>encode(o SExpr) Bytes</code></td><td>Serialize an SExpr to a fresh TZB buffer.</td></tr>
-  <tr><td><code>decode(b Bytes) SExpr</code></td><td>Deserialize a TZB buffer back to an SExpr. Returns an empty vec if <code>b</code> is not a valid message.</td></tr>
+  <tr><td><code>encode(o Msg) Bytes</code></td><td>Serialize a Msg to a fresh TZB buffer.</td></tr>
+  <tr><td><code>decode(b Bytes) Msg</code></td><td>Deserialize a TZB buffer back to a Msg. Returns an empty vec if <code>b</code> is not a valid message.</td></tr>
   <tr><td><code>isMessage(b Bytes) Bool</code></td><td>True if <code>b</code> carries a valid TZB header.</td></tr>
 </table>
 
-<pre><code><span class="kw">import</span> message.*;
-<span class="kw">import</span> sexprs.*;
+<pre><code><span class="kw">import</span> messageEncoding.*;
+<span class="kw">import</span> message.*;
 
-<span class="kw">let</span> msg = <span class="fn">encode</span>(SExpr.<span class="fn">vec</span>([
-    SExpr.<span class="fn">symbol</span>(<span class="fn">toSymbol</span>(<span class="str">"note"</span>)),
-    SExpr.<span class="fn">int</span>(<span class="num">60</span>),
-    SExpr.<span class="fn">float</span>(<span class="num">0.8</span>),
-    SExpr.<span class="fn">string</span>(<span class="str">"hello"</span>),
+<span class="kw">let</span> msg = <span class="fn">encode</span>(Msg.<span class="fn">vec</span>([
+    Msg.<span class="fn">symbol</span>(<span class="fn">toSymbol</span>(<span class="str">"note"</span>)),
+    Msg.<span class="fn">int</span>(<span class="num">60</span>),
+    Msg.<span class="fn">float</span>(<span class="num">0.8</span>),
+    Msg.<span class="fn">string</span>(<span class="str">"hello"</span>),
 ]));
 
 <span class="fn">byteLength</span>(msg) <span class="fn">println</span>;          <span class="cmt">-- size in bytes</span>
 <span class="fn">decode</span>(msg) <span class="fn">toString</span> <span class="fn">println</span>;     <span class="cmt">-- [note, 60, 0.8, "hello"]</span></code></pre>
 
 <div class="note">
-  <strong>Untrusted input:</strong> <code>decode</code> is total and crash-safe. All reads are bounds-checked, the header is validated, child counts are clamped to the buffer length, and a per-message node budget plus a recursion-depth cap bound the work, so a truncated or corrupt buffer yields a small/empty SExpr rather than reading out of bounds, looping, or overflowing the stack. Still, validate foreign payloads with <code>isMessage</code> before trusting them.
+  <strong>Untrusted input:</strong> <code>decode</code> is total and crash-safe. All reads are bounds-checked, the header is validated, child counts are clamped to the buffer length, and a per-message node budget plus a recursion-depth cap bound the work, so a truncated or corrupt buffer yields a small/empty Msg rather than reading out of bounds, looping, or overflowing the stack. Still, validate foreign payloads with <code>isMessage</code> before trusting them.
 </div>
 
 <!-- -------------------------------- -->
 <h3 id="messages-reader">15.4 Zero-Copy Reader</h3>
 
-<p>A <code>Reader</code> is a cursor into the buffer. It reads tags, scalars, and string text, and navigates a vec's children, <strong>without building an SExpr tree</strong>. <code>tag</code> returns a <code>MsgTag</code> (<code>bool</code>, <code>int</code>, <code>float</code>, <code>symbol</code>, <code>string</code>, <code>vec</code>).</p>
+<p>A <code>Reader</code> is a cursor into the buffer. It reads tags, scalars, and string text, and navigates a vec's children, <strong>without building a Msg tree</strong>. <code>tag</code> returns a <code>MsgTag</code> (<code>bool</code>, <code>int</code>, <code>float</code>, <code>symbol</code>, <code>string</code>, <code>vec</code>).</p>
 
 <table>
   <tr><th>Function</th><th>Description</th></tr>
@@ -3229,7 +3229,7 @@ nats.<span class="fn">onMessageS</span>(<span class="str">"nodes.piano.chords"</
   <li>A <strong>list node</strong> is <code>u32 count</code> + <code>u32 tagsOffset</code> + <code>u32 payloadsOffset</code>. The tag bytes and the 8-byte payloads of the children are stored in two parallel arrays, so child <em>i</em> is <code>tags[i]</code> and <code>payloads[i*8]</code> &mdash; <strong>O(1) random access</strong>, no walking.</li>
 </ul>
 
-<p>The format is defined once in <code>shared/tzpl_sexpr_bin.hpp</code> and mirrored byte-for-byte by <code>lang/modules/message.x</code>.</p>
+<p>The format is defined once in <code>shared/tzpl_sexpr_bin.hpp</code> and mirrored byte-for-byte by <code>lang/modules/messageEncoding.x</code>.</p>
 
 <!-- -------------------------------- -->
 <h3 id="messages-nats">15.6 Sending over NATS</h3>
@@ -3237,8 +3237,8 @@ nats.<span class="fn">onMessageS</span>(<span class="str">"nodes.piano.chords"</
 <p><a href="#nats">NATS</a> carries these buffers verbatim. Publish with <code>natsPubMsg</code> and receive with <code>onMessageMsg</code>, whose handler gets the raw payload as <code>Bytes</code>:</p>
 
 <pre><code><span class="kw">import</span> nats.*;
+<span class="kw">import</span> messageEncoding.*;
 <span class="kw">import</span> message.*;
-<span class="kw">import</span> sexprs.*;
 
 <span class="cmt">-- receive: decode each incoming message</span>
 nats.<span class="fn">onMessageMsg</span>(<span class="str">"part.cmd"</span>, <span class="kw">fn</span>(m <span class="typ">Bytes</span>) {
@@ -3247,10 +3247,10 @@ nats.<span class="fn">onMessageMsg</span>(<span class="str">"part.cmd"</span>, <
     }
 });
 
-<span class="cmt">-- send: encode an SExpr and publish it</span>
-<span class="fn">natsPubMsg</span>(<span class="str">"part.cmd"</span>, <span class="fn">encode</span>(SExpr.<span class="fn">vec</span>([
-    SExpr.<span class="fn">symbol</span>(<span class="fn">toSymbol</span>(<span class="str">"play"</span>)),
-    SExpr.<span class="fn">int</span>(<span class="num">60</span>),
+<span class="cmt">-- send: encode a Msg and publish it</span>
+<span class="fn">natsPubMsg</span>(<span class="str">"part.cmd"</span>, <span class="fn">encode</span>(Msg.<span class="fn">vec</span>([
+    Msg.<span class="fn">symbol</span>(<span class="fn">toSymbol</span>(<span class="str">"play"</span>)),
+    Msg.<span class="fn">int</span>(<span class="num">60</span>),
 ])));</code></pre>
 
 <!-- -------------------------------- -->
@@ -3277,7 +3277,7 @@ std::vector&lt;<span class="kw">uint8_t</span>&gt; buf = <span class="fn">encode
 <h2 id="actors">16. Actors</h2>
 
 <h3 id="actors-overview">16.1 Overview</h3>
-<p>An <strong>actor</strong> is an <code>async fn</code> coroutine with a private mailbox. It receives <a href="#messages">SExpr</a> messages one at a time, runs to its next <code>await receive</code>, then parks until more mail arrives. Actors share no mutable state &mdash; they communicate only by message &mdash; so the model is real-time safe and the same code runs at NRT (the main VM) or inside a silo (the audio thread). Messages are values of the actor's message type <code>M</code>; in practice <code>M</code> is <code>SExpr</code>, which the silo and NATS bridges serialize with <a href="#messages">encode/decode</a>.</p>
+<p>An <strong>actor</strong> is an <code>async fn</code> coroutine with a private mailbox. It receives <a href="#messages">Msg</a> messages one at a time, runs to its next <code>await receive</code>, then parks until more mail arrives. Actors share no mutable state &mdash; they communicate only by message &mdash; so the model is real-time safe and the same code runs at NRT (the main VM) or inside a silo (the audio thread). Messages are values of the actor's message type <code>M</code>; in practice <code>M</code> is <code>Msg</code>, which the silo and NATS bridges serialize with <a href="#messages">encode/decode</a>.</p>
 <p>The primitives are <strong>built-ins</strong> (no import needed) and all real-time safe, so they work unchanged inside a silo. Cross-VM addressing uses an interned <code>Symbol</code> name: an actor registers a process-global name, and senders elsewhere reach it by that name (see <a href="#silo-msg">Silo Messaging</a>).</p>
 
 <h3 id="actors-primitives">16.2 Primitives</h3>
@@ -3301,7 +3301,7 @@ std::vector&lt;<span class="kw">uint8_t</span>&gt; buf = <span class="fn">encode
 <span class="cmt">-- the silo/NATS bridges, which call this on the destination side.</span>
 <span class="kw">fn</span> <span class="fn">sendByName</span>(name <span class="typ">Symbol</span>, msg <span class="typ">M</span>) <span class="typ">Void</span></code></pre>
 <div class="note">
-  <strong>Note:</strong> <code>register</code> takes the name as its <em>second</em> argument so it reads naturally chained off <code>spawn</code>: <code>worker spawn(SExpr.int(0)) register('worker)</code>. Binding the result rebinds the name to the <code>Actor</code> (shadowing the behavior fn), so use a fresh name or leave it as a statement.
+  <strong>Note:</strong> <code>register</code> takes the name as its <em>second</em> argument so it reads naturally chained off <code>spawn</code>: <code>worker spawn(Msg.int(0)) register('worker)</code>. Binding the result rebinds the name to the <code>Actor</code> (shadowing the behavior fn), so use a fresh name or leave it as a statement.
 </div>
 
 <h3 id="actors-driving">16.3 Driving the Loop</h3>
@@ -3316,35 +3316,35 @@ std::vector&lt;<span class="kw">uint8_t</span>&gt; buf = <span class="fn">encode
 
 <h3 id="actors-example">16.4 Example</h3>
 <p>Two NRT actors addressed by name (from <code>lang/tests/actors/nrt_byname.x</code>):</p>
-<pre><code><span class="kw">import</span> sexprs.*;
+<pre><code><span class="kw">import</span> message.*;
 
-<span class="kw">async</span> <span class="kw">fn</span> <span class="fn">relay</span>(self <span class="typ">Actor&lt;SExpr&gt;</span>, init <span class="typ">SExpr</span>) <span class="typ">Void</span> {
+<span class="kw">async</span> <span class="kw">fn</span> <span class="fn">relay</span>(self <span class="typ">Actor&lt;Msg&gt;</span>, init <span class="typ">Msg</span>) <span class="typ">Void</span> {
     <span class="kw">while</span> (<span class="kw">true</span>) {
         <span class="kw">let</span> m = <span class="kw">await</span> <span class="fn">receive</span>(self);
         <span class="kw">match</span> (m) {
-            SExpr.int(n): { <span class="fn">println</span>(<span class="str">"relay "</span> $ (n <span class="fn">toString</span>));
-                            <span class="kw">if</span> (n &lt; <span class="num">4</span>) { <span class="fn">sendByName</span>(<span class="str">'collector</span>, SExpr.int(n + <span class="num">1</span>)); } }
+            Msg.int(n): { <span class="fn">println</span>(<span class="str">"relay "</span> $ (n <span class="fn">toString</span>));
+                            <span class="kw">if</span> (n &lt; <span class="num">4</span>) { <span class="fn">sendByName</span>(<span class="str">'collector</span>, Msg.int(n + <span class="num">1</span>)); } }
             _: {}
         }
     }
 }
 <span class="cmt">-- ... a 'collector actor that bounces n+1 back to 'relay ...</span>
 
-relay <span class="fn">spawn</span>(SExpr.int(<span class="num">0</span>)) <span class="fn">register</span>(<span class="str">'relay</span>);
-collector <span class="fn">spawn</span>(SExpr.int(<span class="num">0</span>)) <span class="fn">register</span>(<span class="str">'collector</span>);
-<span class="fn">sendByName</span>(<span class="str">'relay</span>, SExpr.int(<span class="num">0</span>));
+relay <span class="fn">spawn</span>(Msg.int(<span class="num">0</span>)) <span class="fn">register</span>(<span class="str">'relay</span>);
+collector <span class="fn">spawn</span>(Msg.int(<span class="num">0</span>)) <span class="fn">register</span>(<span class="str">'collector</span>);
+<span class="fn">sendByName</span>(<span class="str">'relay</span>, Msg.int(<span class="num">0</span>));
 <span class="fn">runActors</span>();</code></pre>
 
 <!-- ================================================================ -->
 <h2 id="silo-msg">17. Silo Messaging</h2>
 
 <h3 id="silo-msg-overview">17.1 Overview</h3>
-<p>Silo messaging carries actor messages across the VM boundary: from NRT to a silo, from a silo to NRT, and silo to silo. Because a silo runs on the audio thread it cannot allocate or block, so the transport is lock-free and the encoded <a href="#messages">SExpr</a> bytes &mdash; never an <code>Obj*</code> &mdash; cross the boundary:</p>
+<p>Silo messaging carries actor messages across the VM boundary: from NRT to a silo, from a silo to NRT, and silo to silo. Because a silo runs on the audio thread it cannot allocate or block, so the transport is lock-free and the encoded <a href="#messages">Msg</a> bytes &mdash; never an <code>Obj*</code> &mdash; cross the boundary:</p>
 <ul>
   <li><strong>NRT &#8594; silo</strong>: a command queued onto the silo's FIFO, delivered on the next audio block (or beat-scheduled).</li>
   <li><strong>silo &#8594; NRT / silo</strong>: the silo pushes into a fixed lock-free outbox; the main thread drains and routes it.</li>
 </ul>
-<p>Every message targets an actor by registered <code>Symbol</code> name; the destination side calls <a href="#actors-primitives"><code>sendByName</code></a> to enqueue it. The low-level FFIs below carry raw <code>Bytes</code>; the <code>actors</code> and <code>silo_actors</code> modules wrap them to take an <code>SExpr</code> directly.</p>
+<p>Every message targets an actor by registered <code>Symbol</code> name; the destination side calls <a href="#actors-primitives"><code>sendByName</code></a> to enqueue it. The low-level FFIs below carry raw <code>Bytes</code>; the <code>actors</code> and <code>silo_actors</code> modules wrap them to take a <code>Msg</code> directly.</p>
 
 <h3 id="silo-msg-nrt-to-silo">17.2 NRT &#8594; Silo</h3>
 <pre><code><span class="cmt">-- Deliver an encoded message to the actor `name` in silo `silo`, on the next</span>
@@ -3354,10 +3354,10 @@ collector <span class="fn">spawn</span>(SExpr.int(<span class="num">0</span>)) <
 <span class="cmt">-- Beat-scheduled variant: lands sample-accurately when TempoClock `clock`</span>
 <span class="cmt">-- reaches `beat`. (audio_engine)</span>
 <span class="kw">fn</span> <span class="fn">siloDeliverBytesAt</span>(silo <span class="typ">Int</span>, clock <span class="typ">Int</span>, beat <span class="typ">Float</span>, name <span class="typ">Symbol</span>, b <span class="typ">Bytes</span>) <span class="typ">Int</span></code></pre>
-<p>The <code>actors</code> module wraps these to take an <code>SExpr</code>:</p>
+<p>The <code>actors</code> module wraps these to take a <code>Msg</code>:</p>
 <pre><code><span class="cmt">-- actors.x (NRT side)</span>
-<span class="kw">fn</span> <span class="fn">siloSend</span>(silo <span class="typ">Int</span>, name <span class="typ">Symbol</span>, msg <span class="typ">SExpr</span>) <span class="typ">Void</span>
-<span class="kw">fn</span> <span class="fn">siloSendAt</span>(silo <span class="typ">Int</span>, clock <span class="typ">Int</span>, beat <span class="typ">Float</span>, name <span class="typ">Symbol</span>, msg <span class="typ">SExpr</span>) <span class="typ">Void</span></code></pre>
+<span class="kw">fn</span> <span class="fn">siloSend</span>(silo <span class="typ">Int</span>, name <span class="typ">Symbol</span>, msg <span class="typ">Msg</span>) <span class="typ">Void</span>
+<span class="kw">fn</span> <span class="fn">siloSendAt</span>(silo <span class="typ">Int</span>, clock <span class="typ">Int</span>, beat <span class="typ">Float</span>, name <span class="typ">Symbol</span>, msg <span class="typ">Msg</span>) <span class="typ">Void</span></code></pre>
 
 <h3 id="silo-msg-silo-out">17.3 Silo &#8594; NRT / Silo</h3>
 <p>From inside a silo actor or task, push a message into the silo's outbox. Real-time safe (a by-value push into a lock-free ring). <code>target</code> is the destination silo index, or <code>-1</code> for an actor at NRT.</p>
@@ -3366,9 +3366,9 @@ collector <span class="fn">spawn</span>(SExpr.int(<span class="num">0</span>)) <
 <span class="cmt">-- (audio_engine, rt-safe)</span>
 <span class="kw">fn</span> <span class="fn">siloOutbox</span>(target <span class="typ">Int</span>, name <span class="typ">Symbol</span>, b <span class="typ">Bytes</span>) <span class="typ">Int</span>
 
-<span class="cmt">-- silo_actors.x: encodes the SExpr and posts it -- the silo-side counterpart to</span>
+<span class="cmt">-- silo_actors.x: encodes the Msg and posts it -- the silo-side counterpart to</span>
 <span class="cmt">-- siloSend. Importable into silo code (rt-safe).</span>
-<span class="kw">fn</span> <span class="fn">siloPost</span>(target <span class="typ">Int</span>, name <span class="typ">Symbol</span>, msg <span class="typ">SExpr</span>) <span class="typ">Int</span></code></pre>
+<span class="kw">fn</span> <span class="fn">siloPost</span>(target <span class="typ">Int</span>, name <span class="typ">Symbol</span>, msg <span class="typ">Msg</span>) <span class="typ">Int</span></code></pre>
 <div class="note">
   <strong>Note:</strong> The outbox is a fixed ring &mdash; up to 256 messages in flight, each up to 4096 encoded bytes. A larger message is rejected (not truncated); check the return code if your payloads can be large.
 </div>
@@ -3427,18 +3427,18 @@ collector <span class="fn">spawn</span>(SExpr.int(<span class="num">0</span>)) <
 <p>A silo sender emitting a line to an NRT <code>conductor</code> (from <code>integration-tests/scripts/silo_to_nrt.x</code>):</p>
 <pre><code><span class="cmt">-- inside the silo module</span>
 <span class="kw">import</span> silo_actors.*;
-<span class="kw">import</span> sexprs.*;
+<span class="kw">import</span> message.*;
 
-<span class="kw">async</span> <span class="kw">fn</span> <span class="fn">sender</span>(self <span class="typ">Actor&lt;SExpr&gt;</span>, init <span class="typ">SExpr</span>) <span class="typ">Void</span> {
+<span class="kw">async</span> <span class="kw">fn</span> <span class="fn">sender</span>(self <span class="typ">Actor&lt;Msg&gt;</span>, init <span class="typ">Msg</span>) <span class="typ">Void</span> {
     <span class="kw">let</span> scale = [<span class="num">60.0</span>, <span class="num">64.0</span>, <span class="num">67.0</span>, <span class="num">72.0</span>];
     <span class="kw">var</span> i = <span class="num">0</span>;
     <span class="kw">while</span> (i &lt; <span class="num">4</span>) {
         <span class="kw">await</span> <span class="fn">delay</span>(<span class="num">1.0</span>);
-        <span class="fn">siloPost</span>(-<span class="num">1</span>, <span class="str">'conductor</span>, SExpr.float(scale[i % <span class="num">4</span>]));
+        <span class="fn">siloPost</span>(-<span class="num">1</span>, <span class="str">'conductor</span>, Msg.float(scale[i % <span class="num">4</span>]));
         i = i + <span class="num">1</span>;
     }
 }
-<span class="fn">spawn</span>(sender, SExpr.int(<span class="num">0</span>));</code></pre>
+<span class="fn">spawn</span>(sender, Msg.int(<span class="num">0</span>));</code></pre>
 <p>The NRT side spawns a <code>conductor</code> actor, registers it, and runs <code>runActorServer()</code> to route the silo&#8594;NRT traffic. See <code>integration-tests/scripts/silo_to_nrt.x</code> for the full program.</p>
 
 </main>

@@ -5,12 +5,12 @@
 -- the NRT->silo bridge: sending a message by name to an actor living in a silo.
 
 import audio_engine.*;   -- siloDeliverBytes (the C++ transport)
-import message.*;        -- encode (SExpr -> Bytes)
-import sexprs.*;         -- SExpr
+import messageEncoding.*;        -- encode (Msg -> Bytes)
+import message.*;         -- Msg
 
--- Send an SExpr message to the actor registered as `name` in silo `silo`,
+-- Send a Msg message to the actor registered as `name` in silo `silo`,
 -- delivered as soon as it reaches the silo (the next audio block).
-fn siloSend(silo Int, name Symbol, msg SExpr) Void {
+fn siloSend(silo Int, name Symbol, msg Msg) Void {
     siloDeliverBytes(silo, name, encode(msg));
 }
 
@@ -26,7 +26,7 @@ fn runActorServer() Void {
         var k = nrtActorMsgCount();
         while (k > 0) {
             let nm = nrtActorMsgName();   -- destination NRT actor (peek)
-            let b  = nrtActorMsgTake();   -- encoded SExpr (pops)
+            let b  = nrtActorMsgTake();   -- encoded Msg (pops)
             sendByName(nm, decode(b));
             k = k - 1;
         }
@@ -35,10 +35,10 @@ fn runActorServer() Void {
     }
 }
 
--- Schedule an SExpr message to the named silo actor for a specific beat:
+-- Schedule a Msg message to the named silo actor for a specific beat:
 -- it lands in the actor's mailbox sample-accurately when TempoClock `clock`
 -- reaches `beat`, using the engine's late-bound beat scheduler. This is how a
 -- conductor (NRT or external) commands silo actors on the musical grid.
-fn siloSendAt(silo Int, clock Int, beat Float, name Symbol, msg SExpr) Void {
+fn siloSendAt(silo Int, clock Int, beat Float, name Symbol, msg Msg) Void {
     siloDeliverBytesAt(silo, clock, beat, name, encode(msg));
 }

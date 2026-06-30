@@ -534,7 +534,7 @@ static thread_local engine::Silo* gCurrentSilo = nullptr;
 // actor). A message whose encoded payload exceeds kMaxBytes is REJECTED by
 // siloOutbox (it returns an error, not enqueued) -- never truncated.
 struct OutboxMsg {
-    // Max encoded-SExpr (TZB) payload per message. At ~9 bytes per immediate
+    // Max encoded-Msg (TZB) payload per message. At ~9 bytes per immediate
     // value (1 tag + 8 data) this holds a few hundred elements, e.g. a control
     // vector or a chord, with headroom. Sized to the outbox ring: kOutboxCap
     // entries are preallocated, so this is the per-slot cost (see kOutboxCap).
@@ -542,7 +542,7 @@ struct OutboxMsg {
     int           targetSilo = -1;   // destination silo index (-1 = NRT actor)
     ts::SymbolPtr name = nullptr;    // destination actor name
     uint32_t      len = 0;
-    uint8_t       buf[kMaxBytes];    // encoded SExpr bytes (rejected if over)
+    uint8_t       buf[kMaxBytes];    // encoded Msg bytes (rejected if over)
 };
 
 struct SiloTaskScheduler {
@@ -1259,7 +1259,7 @@ static void ffi_nrtActorMsgName(ts::VM& vm, u16 dst, u16, u16) {
     vm.reg(dst).s = name;
 }
 
-// fn _nrtActorMsgTake() Bytes -- the encoded SExpr of the head silo->NRT message,
+// fn _nrtActorMsgTake() Bytes -- the encoded Msg of the head silo->NRT message,
 // popping it. The lang server decodes this and sendByName's it to the actor named
 // by _nrtActorMsgName(). Empty Bytes if none.
 static void ffi_nrtActorMsgTake(ts::VM& vm, u16 dst, u16, u16) {

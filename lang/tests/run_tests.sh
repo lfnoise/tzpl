@@ -101,7 +101,7 @@ for test_file in "${TEST_FILES[@]}"; do
     fi
 
     # Build -I flags: always include test_dir, plus a _lib subdirectory if it
-    # exists, plus the real lang/modules so tests resolve shared modules (sexprs,
+    # exists, plus the real lang/modules so tests resolve shared modules (message,
     # message, strings, ...) from the actual files users get -- not a copy. A
     # test-local _lib still takes precedence (listed first) for module-system
     # fixtures that intentionally shadow.

@@ -9,21 +9,21 @@ import futures.*;
 
 let silo0 = """
 import audio_engine.*;
+import messageEncoding.*;
 import message.*;
-import sexprs.*;
 
 fn start() Void {
     -- ~1000 floats encode to ~9 KB, well over the 4096-byte cap.
-    var xs = [SExpr.float(0.0)];
+    var xs = [Msg.float(0.0)];
     var i = 1;
-    while (i < 1000) { xs push!(SExpr.float(toFloat(i))); i = i + 1; }
-    let big = encode(SExpr.vec(xs));
+    while (i < 1000) { xs push!(Msg.float(toFloat(i))); i = i + 1; }
+    let big = encode(Msg.vec(xs));
     let bl = big byteLength;
     "bigLen=" print; bl println;
     let rBig = siloOutbox(-1, 'sink, big);
     "oversize_rc=" print; rBig println;
 
-    let small = encode(SExpr.float(60.0));
+    let small = encode(Msg.float(60.0));
     let rSmall = siloOutbox(-1, 'sink, small);
     "normal_rc=" print; rSmall println;
 }

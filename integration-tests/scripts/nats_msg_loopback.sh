@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Live NATS loopback test for the SExpr binary message format.
+# Live NATS loopback test for the Msg binary message format.
 # Starts a local nats-server, runs nats_msg_loopback.x (which subscribes to a
-# subject as Bytes and publishes an encoded SExpr to it), and checks the message
+# subject as Bytes and publishes an encoded Msg to it), and checks the message
 # round-trips and decodes correctly.
 #
 # Requires: nats-server on PATH, and tzpl_app built with -DTZPL_BUILD_NATS=ON.

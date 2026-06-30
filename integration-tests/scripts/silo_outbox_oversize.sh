@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# siloOutbox oversize rejection. A silo start() encodes a ~9 KB SExpr (well over
+# siloOutbox oversize rejection. A silo start() encodes a ~9 KB Msg (well over
 # the 4096-byte OutboxMsg::kMaxBytes cap) and calls siloOutbox; it must return
 # tzpl_errInternal (1) without enqueuing, while a small message returns
 # tzpl_errNone (0). start() runs via siloStartAt (gCurrentSilo set); ordering vs

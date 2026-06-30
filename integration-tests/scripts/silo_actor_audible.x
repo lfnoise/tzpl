@@ -18,11 +18,11 @@ import futures.*;
 -- behavior plays a scale, advancing time with `await delay`. start() spawns it.
 let taskCode = """
 import audio_engine.*;
-import sexprs.*;
+import message.*;
 
 let scale = [60.0, 63.0, 65.0, 67.0, 70.0, 72.0];
 
-async fn melody(self Actor<SExpr>, init SExpr) Void {
+async fn melody(self Actor<Msg>, init Msg) Void {
     var i = 0;
     while (true) {
         playNote(101, i % 16, [scale[i % 6], 0.6, 4.7, 0.0, 0.01, 0.2]);
@@ -33,7 +33,7 @@ async fn melody(self Actor<SExpr>, init SExpr) Void {
     }
 }
 
-fn start() Void { spawn(melody, SExpr.int(0)); }
+fn start() Void { spawn(melody, Msg.int(0)); }
 """;
 
 "starting engine..." println;

@@ -7,17 +7,17 @@
 -- Run via integration-tests/scripts/actor_nats_loopback.sh (needs nats-server).
 
 import nats.*;
+import messageEncoding.*;
 import message.*;
-import sexprs.*;
 
-async fn worker(self Actor<SExpr>, init SExpr) Void {
+async fn worker(self Actor<Msg>, init Msg) Void {
     while (true) {
         let m = await receive(self);
         println("ACTOR GOT " $ (m toString));
     }
 }
 
-worker spawn(SExpr.int(0)) register('w);
+worker spawn(Msg.int(0)) register('w);
 runActors();                 -- let worker reach its first receive and park
 
 -- Bridge the NATS subject "actors.w" to the local actor "w": decode each payload
@@ -26,8 +26,8 @@ runActors();                 -- let worker reach its first receive and park
 natsBridgeActor("actors.w", 'w);
 
 -- Deliver two messages over NATS (cross-process transport, here looped back).
-natsPubMsg("actors.w", encode(SExpr.string("hello over nats")));
-natsPubMsg("actors.w", encode(SExpr.int(123)));
+natsPubMsg("actors.w", encode(Msg.string("hello over nats")));
+natsPubMsg("actors.w", encode(Msg.int(123)));
 
 "serving..." println;
 serveActors();               -- park; NATS deliveries wake us, the actor runs

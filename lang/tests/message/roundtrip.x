@@ -1,8 +1,8 @@
--- encode -> decode round-trips every SExpr case, including nesting and edges.
-import sexprs.*;
+-- encode -> decode round-trips every Msg case, including nesting and edges.
 import message.*;
+import messageEncoding.*;
 
-fn rt(o SExpr) Void {
+fn rt(o Msg) Void {
     let b = encode(o);
     print(o toString);
     print("  ==  ");
@@ -11,22 +11,22 @@ fn rt(o SExpr) Void {
     println(o toString == decode(b) toString);
 }
 
-rt(SExpr.bool(true));
-rt(SExpr.bool(false));
-rt(SExpr.int(0));
-rt(SExpr.int(0 - 123456789));
-rt(SExpr.float(3.25));
-rt(SExpr.float(0.0 - 2.5));
-rt(SExpr.symbol(toSymbol("foo")));
-rt(SExpr.string(""));
-rt(SExpr.string("hello, world"));
-rt(SExpr.vec([SExpr]()));
-rt(SExpr.vec([SExpr.int(1), SExpr.string("two"), SExpr.symbol(toSymbol("three"))]));
-rt(SExpr.vec([SExpr.vec([SExpr.vec([SExpr.int(42)])])]));
+rt(Msg.bool(true));
+rt(Msg.bool(false));
+rt(Msg.int(0));
+rt(Msg.int(0 - 123456789));
+rt(Msg.float(3.25));
+rt(Msg.float(0.0 - 2.5));
+rt(Msg.symbol(toSymbol("foo")));
+rt(Msg.string(""));
+rt(Msg.string("hello, world"));
+rt(Msg.vec([Msg]()));
+rt(Msg.vec([Msg.int(1), Msg.string("two"), Msg.symbol(toSymbol("three"))]));
+rt(Msg.vec([Msg.vec([Msg.vec([Msg.int(42)])])]));
 
 -- symbol vs string: same text, different rendering + tag
-let sym = encode(SExpr.symbol(toSymbol("x")));
-let str = encode(SExpr.string("x"));
+let sym = encode(Msg.symbol(toSymbol("x")));
+let str = encode(Msg.string("x"));
 print("symbol renders bare: "); println(decode(sym) toString);
 print("string renders quoted: "); println(decode(str) toString);
 print("distinct tags: ");

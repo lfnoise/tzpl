@@ -6,18 +6,18 @@
 import audio_engine.*;
 import futures.*;
 import actors.*;          -- siloSendAt
-import sexprs.*;
+import message.*;
 
 let taskCode = """
 import audio_engine.*;
-import sexprs.*;
+import message.*;
 
-async fn voice(self Actor<SExpr>, init SExpr) Void {
+async fn voice(self Actor<Msg>, init Msg) Void {
     var id = 0;
     while (true) {
         let m = await receive(self);
         match (m) {
-            SExpr.float(pitch): {
+            Msg.float(pitch): {
                 playNote(101, id % 16, [pitch, 0.6, 4.7, 0.0, 0.01, 0.2]);
                 id = id + 1;
             }
@@ -26,7 +26,7 @@ async fn voice(self Actor<SExpr>, init SExpr) Void {
     }
 }
 
-voice spawn(SExpr.int(0)) register('voice);
+voice spawn(Msg.int(0)) register('voice);
 """;
 
 "starting engine..." println;
@@ -46,8 +46,8 @@ let err = await siloLoad(0, taskCode);
 -- Schedule a rising arpeggio: one note on each of the next four beats. They
 -- arrive in the silo actor's mailbox exactly on the beat, not all at once.
 let now = clockBeats(0);
-siloSendAt(0, 0, now + 1.0, toSymbol("voice"), SExpr.float(60.0));
-siloSendAt(0, 0, now + 2.0, toSymbol("voice"), SExpr.float(64.0));
-siloSendAt(0, 0, now + 3.0, toSymbol("voice"), SExpr.float(67.0));
-siloSendAt(0, 0, now + 4.0, toSymbol("voice"), SExpr.float(72.0));
+siloSendAt(0, 0, now + 1.0, toSymbol("voice"), Msg.float(60.0));
+siloSendAt(0, 0, now + 2.0, toSymbol("voice"), Msg.float(64.0));
+siloSendAt(0, 0, now + 3.0, toSymbol("voice"), Msg.float(67.0));
+siloSendAt(0, 0, now + 4.0, toSymbol("voice"), Msg.float(72.0));
 "scheduled 4 notes on beats" println;

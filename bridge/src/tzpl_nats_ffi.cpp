@@ -135,7 +135,7 @@ static void ffi_natsPubF(ts::VM& vm, u16, u16, u16 argBase) {
 }
 
 // fn natsPubMsg(subject String, msg Bytes) Void
-// Publish a binary message (e.g. an encoded SExpr from message.x). Carries the
+// Publish a binary message (e.g. an encoded Msg from messageEncoding.x). Carries the
 // exact bytes, including embedded NULs -- uses the length-bearing publish().
 static void ffi_natsPubMsg(ts::VM& vm, u16, u16, u16 argBase) {
     auto* ctx = getAppContext(vm);

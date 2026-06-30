@@ -1,11 +1,11 @@
 -- nats_msg_loopback.x
--- Live round-trip of the SExpr binary message format over NATS: subscribe to a
--- subject as Bytes, publish an encoded SExpr to it, and decode it on receipt.
+-- Live round-trip of the Msg binary message format over NATS: subscribe to a
+-- subject as Bytes, publish an encoded Msg to it, and decode it on receipt.
 -- Run via integration-tests/scripts/nats_msg_loopback.sh (needs nats-server).
 
 import nats.*;
+import messageEncoding.*;
 import message.*;
-import sexprs.*;
 
 let subject = "tzpl.test.msg";
 
@@ -18,11 +18,11 @@ onMessageMsg(subject, fn(m Bytes) {
     }
 });
 
-let payload = SExpr.vec([
-    SExpr.symbol(toSymbol("note")),
-    SExpr.int(60),
-    SExpr.float(0.8),
-    SExpr.string("hello over nats"),
+let payload = Msg.vec([
+    Msg.symbol(toSymbol("note")),
+    Msg.int(60),
+    Msg.float(0.8),
+    Msg.string("hello over nats"),
 ]);
 println("PUBLISHING " $ (payload toString));
 natsPubMsg(subject, encode(payload));
