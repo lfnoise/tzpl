@@ -5957,6 +5957,22 @@ u16 CodeGen::emitPVecCallLevel(CallExpr_* expr, const FuncInfo* funcInfo, Type* 
                 emitPtr(pv);
                 subRegs[i] = s;
                 subTypes[i] = pv->elemType_;
+                // The result is uniformly nested in persistent vectors
+                // (auto-map over any pvec yields a pvec at every level), but a
+                // SOURCE element may be a mutable array (#[[Int]] holds [Int]).
+                // The recursion peels a pvec level off each arg, so freeze an
+                // array element to a pvec first to keep the source uniform --
+                // mirrors the top-level array->pvec freeze in genAutoMapCall.
+                if (auto* subArr = dynamic_cast<ArrayType*>(pv->elemType_)) {
+                    auto* subPV = compiler_.persistentVectorType(subArr->elemType_);
+                    u16 conv = allocReg();
+                    emitOp(op_pvec_from_array);
+                    emitRegs(conv, s);
+                    emitPtr(subPV);
+                    setRegType(conv, subPV);
+                    subRegs[i] = conv;
+                    subTypes[i] = subPV;
+                }
             }
             return emitPVecCallLevel(expr, funcInfo, returnT, subRegs, subTypes, argMapped, resElemPV);
         });
