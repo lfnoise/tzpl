@@ -297,6 +297,38 @@ void MapListGen::generate(VM& vm, ListNode* owner) {
     tail->installGenerator(this); owner->tail_ = tail; 
 }
 
+// Lazy witness dispatch over a list of existentials. Mirrors op_call_witness
+// for one element, then re-homes onto a lazy tail (cf. MapListGen::generate).
+void WitnessMapListGen::generate(VM& vm, ListNode* owner) {
+    if (!source_) { owner->tail_ = nullptr; return; }
+    source_->force(vm);
+
+    // The source head is an existential (1-Word Obj*). Dispatch the constraint
+    // method through its witness dictionary into a callee CodeBlock.
+    auto* ex = static_cast<Existential*>(source_->head_.o);
+    u32 calleeIdx = ex->methodIndex((u16)methodSlot_);
+    auto* callee = static_cast<CodeBlock*>(vm.global(calleeIdx).p);
+    u8 pw = ex->payloadWords_;
+
+    u16 sb = vm.currentCodeBlock()->numRegs;
+    u32 callBase = vm.baseReg() + sb;
+    vm.pushFrame(&syncReturnCode(), callee, callBase, callee->numRegs, sb);
+    // Unwrap the concrete value into the callee's leading parameter slots.
+    for (u8 i = 0; i < pw; ++i) vm.reg(i) = ex->slots_[i];
+    Code* entry = callee->code.data();
+    entry->op(vm, entry);
+
+    // The T-free result lands in the caller's reg(sb); drop it into the owner
+    // head (handles multi-word Inline-composite results).
+    writeListHeadFromSlot(vm, owner, &vm.reg(sb), resultElemType_);
+
+    if (!source_->tail_) { owner->tail_ = nullptr; return; }
+    auto* tail = ListNode::create(resultListType_);
+    source_ = source_->tail_;
+    tail->installGenerator(this);
+    owner->tail_ = tail;
+}
+
 void AutoMapListGen::generate(VM& vm, ListNode* owner) {
     if (!source_) { owner->tail_ = nullptr; return; }
     source_->force(vm);

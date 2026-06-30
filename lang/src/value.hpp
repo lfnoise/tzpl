@@ -903,6 +903,25 @@ public:
     }
 };
 
+// Generator for lazy auto-map of a constraint method over a list of
+// existentials (`some C`). Each generate() forces one source element, dispatches
+// the method through that existential's witness dictionary, and creates a lazy
+// tail. This keeps `picks`-style infinite lists lazy under witness dispatch, so
+// consumers like `collect(n)` force only n elements.
+class WitnessMapListGen : public ListGenerator {
+public:
+    ListNode* source_;          // current node of source list (heads are existentials)
+    i32       methodSlot_;      // witness-method slot to dispatch
+    Type*     resultElemType_;  // T-free return type of the method
+    ListType* resultListType_;  // List[resultElemType_]
+
+    WitnessMapListGen(Type* type);
+    void generate(VM& vm, ListNode* owner) override;
+    void gcScanChildren(TracingGC& gc) override {
+        if (source_) gc.mark(source_);
+    }
+};
+
 // Generator for filter(list, fn) - keep elements where fn returns true
 class FilterListGen : public ListGenerator {
 public:

@@ -341,6 +341,7 @@ static const std::unordered_map<Operation, OpInfo>& opInfoMap() {
 
         // --- Lazy auto-map ---
         { op_make_lazy_automap, { "MAKE_LAZY_AUTOMAP", 3, OpFmt::Regs_Ptr, 4 } },
+        { op_make_lazy_witness_map, { "MAKE_LAZY_WITNESS_MAP", 4, OpFmt::Regs_Ptr_Flags, 2 } },
 
         // --- Map ---
         { op_make_map,          { "MAKE_MAP",          3, OpFmt::Regs_Ptr, 3 } },

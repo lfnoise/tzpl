@@ -4257,6 +4257,32 @@ void op_make_lazy_automap(VM& vm, Code* pc) {
     DISPATCH(3);
 }
 
+// MAKE_LAZY_WITNESS_MAP Rd, RsrcList (4 words: op, regs, ListType*, methodSlot)
+// Wrap a list of existentials in a lazy witness-map generator so a constraint
+// method is dispatched per element on demand (keeps infinite lists lazy).
+void op_make_lazy_witness_map(VM& vm, Code* pc) {
+    u16 dst        = pc[1].regs[0];
+    u16 srcListReg = pc[1].regs[1];
+    auto* resultLT = static_cast<ListType*>(pc[2].p);
+    i32 methodSlot = (i32)pc[3].i;
+
+    auto* srcList = static_cast<ListNode*>(vm.reg(srcListReg).o);
+    if (!srcList) {
+        vm.reg(dst).o = nullptr;
+        DISPATCH(4);
+    }
+
+    auto* node = ListNode::create(resultLT);
+    auto* gen  = new WitnessMapListGen(resultLT);
+    gen->source_         = srcList;
+    gen->methodSlot_     = methodSlot;
+    gen->resultElemType_ = resultLT->elemType_;
+    gen->resultListType_ = resultLT;
+    node->installGenerator(gen);
+    vm.reg(dst).o = node;
+    DISPATCH(4);
+}
+
 // --- Map ---
 
 // MAKE_MAP Rd, firstKeyReg, numPairs (3 words: op, regs{dst, firstKeyReg, numPairs}, MapType*)

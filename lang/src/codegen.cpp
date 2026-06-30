@@ -4152,6 +4152,19 @@ u16 CodeGen::genWitnessMap(u16 srcReg, Type* srcType, Type* dstType,
     if (kind == 2) {  // list
         auto* srcT = dynamic_cast<ListType*>(srcType);
         auto* dstT = dynamic_cast<ListType*>(dstType);
+        // Lists may be infinite (lazy generators like `picks`). When the list
+        // elements are the existentials themselves (no deeper nesting), build a
+        // lazy witness-map list so consumers like `collect(n)` force only n
+        // elements rather than walking to nil. Deeper nesting after a list
+        // (the rarer list-of-collections shape) still uses the eager loop.
+        if (level + 1 == kinds.size()) {
+            u16 dst = allocSlot(dstT);
+            emitOp(op_make_lazy_witness_map);
+            emitRegs(dst, srcReg);
+            emitPtr(dstT);
+            emitInt(slot);
+            return dst;
+        }
         return emitListMapLoop(srcReg, srcT, dstT, [&](u16 elemReg, Type*) -> u16 {
             return genWitnessMap(elemReg, srcT->elemType_, dstT->elemType_, kinds, level + 1, slot);
         });

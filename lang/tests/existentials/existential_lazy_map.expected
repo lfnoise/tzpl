@@ -1,0 +1,4 @@
+List(circle, square, circle, square, circle)
+List(circle, square, circle, square, circle)
+[circle, square, circle, square]
+[List(circle, square, circle), List(circle, square, circle)]

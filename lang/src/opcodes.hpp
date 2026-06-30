@@ -411,6 +411,7 @@ void op_tail_call_lambda(VM& vm, Code* pc);   // TAIL_CALL_LAMBDA unused, argc, 
 
 // --- Lazy auto-map ---
 void op_make_lazy_automap(VM& vm, Code* pc);  // MAKE_LAZY_AUTOMAP Rd, RsrcList, RbroadcastBase, numBroadcast (3 words: op, regs, AutoMapCallInfo*)
+void op_make_lazy_witness_map(VM& vm, Code* pc);  // MAKE_LAZY_WITNESS_MAP Rd, RsrcList (4 words: op, regs, ListType*, methodSlot)
 
 // --- Map ---
 void op_make_map(VM& vm, Code* pc);       // MAKE_MAP Rd, firstKeyReg, numPairs (3 words: op, regs, MapType*)

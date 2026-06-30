@@ -336,6 +336,7 @@ CycleListGen::CycleListGen(Type* type) : ListGenerator(type), current_(nullptr),
 NCycleListGen::NCycleListGen(Type* type) : ListGenerator(type), current_(nullptr), head_(nullptr), remaining_(0), listType_(nullptr) {}
 HangListGen::HangListGen(Type* type) : ListGenerator(type), source_(nullptr), lastValue_(), hasLast_(false), valueIsObj_(false), listType_(nullptr) {}
 MapListGen::MapListGen(Type* type) : ListGenerator(type), source_(nullptr), fn_(nullptr), scratchBase_(0), resultElemType_(nullptr), resultListType_(nullptr) {}
+WitnessMapListGen::WitnessMapListGen(Type* type) : ListGenerator(type), source_(nullptr), methodSlot_(0), resultElemType_(nullptr), resultListType_(nullptr) {}
 AutoMapCallInfo::AutoMapCallInfo()
     : Obj(gCurrentTypeUniverse->types().typeType)
     , funcGlobalIndex(-1)
