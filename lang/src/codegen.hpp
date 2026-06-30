@@ -587,6 +587,20 @@ private:
         clearArgRegTypes(argBase, argEnd);
     }
 
+    // Materialize a persistent vector (in srcReg) into a fresh mutable array of
+    // type arrType, returning the holding register. Sets the register's type so
+    // the temporary array is a tracked GC root: callers feed it to a map loop
+    // whose per-element user calls hit safepoints, and an untyped temp would be
+    // swept mid-loop (heap-use-after-free).
+    u16 emitPvecToArray(u16 srcReg, ArrayType* arrType) {
+        u16 conv = allocReg();
+        emitOp(op_pvec_to_array);
+        emitRegs(conv, srcReg);
+        emitPtr(arrType);
+        setRegType(conv, arrType);
+        return conv;
+    }
+
     // BOX an inline value into a heap Obj* (returns reg holding the Obj*).
     // For non-inline types, returns srcReg unchanged.
     //

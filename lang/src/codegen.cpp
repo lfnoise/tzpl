@@ -4174,10 +4174,7 @@ u16 CodeGen::genWitnessMap(u16 srcReg, Type* srcType, Type* dstType,
     auto* dstPV = dynamic_cast<PersistentVectorType*>(dstType);
     auto* srcArrT = compiler_.arrayType(srcPV->elemType_);
     auto* dstArrT = compiler_.arrayType(dstPV->elemType_);
-    u16 srcArr = allocReg();
-    emitOp(op_pvec_to_array);
-    emitRegs(srcArr, srcReg);
-    emitPtr(srcArrT);
+    u16 srcArr = emitPvecToArray(srcReg, srcArrT);
     u16 resArr = emitArrayMapLoop(srcArr, srcArrT, dstArrT, [&](u16 elemReg, Type*) -> u16 {
         return genWitnessMap(elemReg, srcPV->elemType_, dstPV->elemType_, kinds, level + 1, slot);
     });
@@ -5536,11 +5533,7 @@ u16 CodeGen::genCartesianBinaryOp(BinaryOpExpr* expr) {
     auto toArr = [&](u16& reg, Type* type) -> ArrayType* {
         if (auto* pv = dynamic_cast<PersistentVectorType*>(type)) {
             auto* aT = compiler_.arrayType(pv->elemType_);
-            u16 conv = allocReg();
-            emitOp(op_pvec_to_array);
-            emitRegs(conv, reg);
-            emitPtr(aT);
-            reg = conv;
+            reg = emitPvecToArray(reg, aT);
             return aT;
         }
         return dynamic_cast<ArrayType*>(type);
@@ -5981,11 +5974,7 @@ u16 CodeGen::emitPVecCallLevel(CallExpr_* expr, const FuncInfo* funcInfo, Type* 
         if (!argMapped[i]) continue;
         auto* pv = static_cast<PersistentVectorType*>(argTypes[i]);
         auto* aT = compiler_.arrayType(pv->elemType_);
-        u16 conv = allocReg();
-        emitOp(op_pvec_to_array);
-        emitRegs(conv, argRegs[i]);
-        emitPtr(aT);
-        argRegs[i] = conv;
+        argRegs[i] = emitPvecToArray(argRegs[i], aT);
         mappedArrType[i] = aT;
     }
     auto* tmpArrT = compiler_.arrayType(returnT);
@@ -6081,11 +6070,7 @@ u16 CodeGen::genAutoMapCall(CallExpr_* expr) {
             mappedArrType[i] = arrT;
         } else if (auto* pvT = dynamic_cast<PersistentVectorType*>(at)) {
             auto* tmpArrT = compiler_.arrayType(pvT->elemType_);
-            u16 conv = allocReg();
-            emitOp(op_pvec_to_array);
-            emitRegs(conv, argRegs[i]);
-            emitPtr(tmpArrT);
-            argRegs[i] = conv;
+            argRegs[i] = emitPvecToArray(argRegs[i], tmpArrT);
             mappedArrType[i] = tmpArrT;
         }
     }
@@ -6456,11 +6441,7 @@ u16 CodeGen::emitPVecLambdaCallLevel(CallExpr_* expr, u16 calleeReg, FunctionTyp
         if (!argMapped[i]) continue;
         auto* pv = static_cast<PersistentVectorType*>(argTypes[i]);
         auto* aT = compiler_.arrayType(pv->elemType_);
-        u16 conv = allocReg();
-        emitOp(op_pvec_to_array);
-        emitRegs(conv, argRegs[i]);
-        emitPtr(aT);
-        argRegs[i] = conv;
+        argRegs[i] = emitPvecToArray(argRegs[i], aT);
         mappedArrType[i] = aT;
     }
     auto* tmpArrT = compiler_.arrayType(returnT);
@@ -7292,11 +7273,7 @@ u16 CodeGen::genCartesianCall(CallExpr_* expr) {
             argArrType[i] = arrT;
         } else if (auto* pvT = dynamic_cast<PersistentVectorType*>(at)) {
             auto* aT = compiler_.arrayType(pvT->elemType_);
-            u16 conv = allocReg();
-            emitOp(op_pvec_to_array);
-            emitRegs(conv, argRegs[i]);
-            emitPtr(aT);
-            argRegs[i] = conv;
+            argRegs[i] = emitPvecToArray(argRegs[i], aT);
             argArrType[i] = aT;
         }
     }
