@@ -2953,6 +2953,14 @@ static void builtin_pmap_to_map(VM& vm, u16 dst, u16, u16 ab) {
     vm.reg(dst).o = result;
 }
 
+// Is it safe to stash an element of this type in a plain Vec<Word> buffer
+// across a per-element user call? The buffer is invisible to the GC, so the
+// only safe case is one whose packed words hold no Obj pointers; an Obj-bearing
+// element only survives if something the GC *can* see still references it.
+static inline bool pvecElemBufferSafe(Type* et, u32 stride) {
+    return stride == 1 ? !storesObjPtrUnboxed(et) : !inlineHasObjPtr(et);
+}
+
 // map: #[T], (T)->U -> #[U]
 static void builtin_map_pvec(VM& vm, u16 dst, u16, u16 ab) {
     auto* v = static_cast<PVec*>(vm.reg(ab).o);
@@ -2961,10 +2969,26 @@ static void builtin_map_pvec(VM& vm, u16 dst, u16, u16 ab) {
     auto* fnType = static_cast<FunctionType*>(fn->type_);
     Type* resET = fnType->returnType_;
     auto* resType = vm.persistentVectorType(resET);
-    PVec* result = new PVec(resType);
-    // result is rebuilt by immutable push each step; keep the LIVE one rooted.
-    GCKeepAliveScope keep(vm, {(GCObj*)v, (GCObj*)fn, (GCObj*)result});
     u16 sb = vm.currentCodeBlock()->numRegs;
+    u32 resStride = strideForType(resET);
+    if (pvecElemBufferSafe(resET, resStride)) {
+        // Non-Obj results: accumulate into a flat buffer and build the vector
+        // once (transient-style), avoiding the per-element tail re-copy.
+        GCKeepAliveScope keep(vm, {(GCObj*)v, (GCObj*)fn});
+        Vec<Word> buf((rt::STLAllocator<Word>(rt::gCurrentAllocator)));
+        buf.reserve((size_t)v->count_ * resStride);
+        for (u32 i = 0; i < v->count_; ++i) {
+            placeLambdaArgSlot(vm, sb, v->elemAt(i), srcET);
+            callOneArg(vm, fn, sb);
+            for (u32 w = 0; w < resStride; ++w) buf.push_back(vm.reg((u16)(sb + w)));
+        }
+        vm.reg(dst).o = PVec::fromWords(resType, v->count_ ? &buf[0] : nullptr, v->count_);
+        return;
+    }
+    // Obj-bearing results can't be parked in an unscanned buffer across a call;
+    // keep them in the rooted, incrementally-rebuilt result vector.
+    PVec* result = new PVec(resType);
+    GCKeepAliveScope keep(vm, {(GCObj*)v, (GCObj*)fn, (GCObj*)result});
     for (u32 i = 0; i < v->count_; ++i) {
         placeLambdaArgSlot(vm, sb, v->elemAt(i), srcET);
         callOneArg(vm, fn, sb);
@@ -2980,17 +3004,20 @@ static void builtin_filter_pvec(VM& vm, u16 dst, u16, u16 ab) {
     auto* fn = static_cast<Callable*>(vm.reg((u16)(ab + 1)).o);
     Type* et = v->elemType();
     auto* resType = static_cast<PersistentVectorType*>(v->type_);
-    PVec* result = new PVec(resType);
-    // result is rebuilt by immutable push each step; keep the LIVE one rooted.
-    GCKeepAliveScope keep(vm, {(GCObj*)v, (GCObj*)fn, (GCObj*)result});
+    u32 sw = strideForType(et);
+    // Kept elements are aliases into the rooted source `v`, so even Obj-bearing
+    // ones stay reachable while buffered; build the result once at the end.
+    GCKeepAliveScope keep(vm, {(GCObj*)v, (GCObj*)fn});
     u16 sb = vm.currentCodeBlock()->numRegs;
+    Vec<Word> buf((rt::STLAllocator<Word>(rt::gCurrentAllocator)));
+    u32 count = 0;
     for (u32 i = 0; i < v->count_; ++i) {
         Word const* elem = v->elemAt(i);
         placeLambdaArgSlot(vm, sb, elem, et);
         callOneArg(vm, fn, sb);
-        if (vm.reg(sb).i) { result = result->push(elem); vm.gcKeepAliveUpdateTop((GCObj*)result); }
+        if (vm.reg(sb).i) { for (u32 w = 0; w < sw; ++w) buf.push_back(elem[w]); ++count; }
     }
-    vm.reg(dst).o = result;
+    vm.reg(dst).o = PVec::fromWords(resType, count ? &buf[0] : nullptr, count);
 }
 
 // fold: #[T], U, (U,T)->U -> U

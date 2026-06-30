@@ -189,13 +189,62 @@ PVec* PVec::assocN(u32 i, Word const* elem) const {
     return result;
 }
 
+// Bulk builder: assemble a persistent vector from a fully-materialized,
+// stride-packed buffer in one pass, transient-style. Instead of `count`
+// immutable pushes (each of which re-copies the whole growing <=32-element
+// tail leaf and allocates a throwaway PVec), this fills complete 32-element
+// leaves directly and groups them bottom-up into the trie. Every element word
+// is copied exactly once, cutting tail-node reallocation by a factor of
+// kPVecWidth (32). GC-safe by the same invariant as the old loop: fromWords
+// runs with no safepoints, so the white temporaries it allocates cannot be
+// swept before the finished vector is rooted by the caller.
 PVec* PVec::fromWords(PersistentVectorType* type, Word const* elems, u32 count) {
     u32 stride = strideForType(type->elemType_);
-    PVec* v = new PVec(type);
-    for (u32 i = 0; i < count; ++i) {
-        v = v->push(elems + (size_t)i * stride);
+    Type* et = type->elemType_;
+    PVec* result = new PVec(type);  // empty: count_=0, shift_=kPVecBits, empty root/tail
+    if (count == 0) return result;
+
+    // Tail holds the trailing [tailoff, count) elements (1..32); the tree holds
+    // the leading `tailoff` elements, always an exact multiple of kPVecWidth.
+    u32 tailoff   = (count <= kPVecWidth) ? 0 : (((count - 1) >> kPVecBits) << kPVecBits);
+    u32 tailCount = count - tailoff;
+    u32 numLeaves = tailoff >> kPVecBits;   // full 32-element tree leaves
+
+    result->count_ = count;
+    result->tail_  = makeLeaf(et, stride, elems + (size_t)tailoff * stride, tailCount);
+
+    // No tree portion: everything lives in the tail (count <= 32, or one full
+    // leaf's worth landing entirely in the tail). Default root/shift stand.
+    if (numLeaves == 0) return result;
+
+    // Build the full tree leaves, then group bottom-up into interior nodes (up
+    // to kPVecWidth children each), one trie level per round, until one root
+    // node remains. Leaves sit one level below the root, so shift starts at
+    // kPVecBits and rises kPVecBits per additional grouping round.
+    Vec<Obj*> level((rt::STLAllocator<Obj*>(rt::gCurrentAllocator)));
+    level.reserve(numLeaves);
+    for (u32 i = 0; i < numLeaves; ++i)
+        level.push_back(makeLeaf(et, stride, elems + (size_t)(i * kPVecWidth) * stride, kPVecWidth));
+
+    u32 shift = kPVecBits;
+    for (;;) {
+        Vec<Obj*> parents((rt::STLAllocator<Obj*>(rt::gCurrentAllocator)));
+        parents.reserve((level.size() + kPVecWidth - 1) / kPVecWidth);
+        for (size_t i = 0; i < level.size(); i += kPVecWidth) {
+            auto* node = new PVecNode();
+            size_t n = level.size() - i;
+            if (n > kPVecWidth) n = kPVecWidth;
+            for (size_t j = 0; j < n; ++j) node->children_[j] = level[i + j];
+            parents.push_back(node);
+        }
+        if (parents.size() == 1) {
+            result->root_  = static_cast<PVecNode*>(parents[0]);
+            result->shift_ = shift;
+            return result;
+        }
+        level = std::move(parents);
+        shift += kPVecBits;
     }
-    return v;
 }
 
 // --- printing ---
