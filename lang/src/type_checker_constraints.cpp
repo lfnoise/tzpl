@@ -170,10 +170,12 @@ void TypeChecker::desugarConstraintParams(FnDeclNode* decl) {
 }
 
 void TypeChecker::checkConstraintDecl(ConstraintDeclNode* decl) {
-    if (constraints_.count(decl->name)) {
-        error(decl->loc, "Duplicate constraint name '" + decl->name + "'");
-        return;
-    }
+    // A later declaration redefines an earlier one of the same name (last wins),
+    // matching how struct/enum declarations behave. This is what lets an editor
+    // window or REPL input that declares a constraint be re-evaluated against the
+    // incremental, state-preserving type checker without a spurious "duplicate
+    // constraint" error -- the fresh declNode simply replaces the prior one.
+    constraints_.erase(decl->name);
 
     // Pre-register the constraint name (empty info) so self-references work
     ConstraintInfo info;
