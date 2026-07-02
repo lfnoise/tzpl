@@ -305,6 +305,25 @@ static void builtin_gcd_int(VM& vm, u16 dst, u16, u16 argBase) {
     vm.reg(dst).i = a;
 }
 
+// pow(Int, Int) -> Int -- exponentiation by squaring. Negative exponents
+// truncate toward zero: 1/-1 keep their reciprocal, anything else gives 0.
+static void builtin_pow_int(VM& vm, u16 dst, u16, u16 argBase) {
+    i64 base = vm.reg(argBase).i, e = vm.reg(argBase + 1).i;
+    if (e < 0) {
+        if (base == 1)  { vm.reg(dst).i = 1; return; }
+        if (base == -1) { vm.reg(dst).i = (e & 1) ? -1 : 1; return; }
+        vm.reg(dst).i = 0;
+        return;
+    }
+    i64 acc = 1;
+    while (e) {
+        if (e & 1) acc *= base;
+        base *= base;
+        e >>= 1;
+    }
+    vm.reg(dst).i = acc;
+}
+
 // lcm(Int, Int) -> Int
 static void builtin_lcm_int(VM& vm, u16 dst, u16, u16 argBase) {
     i64 a = vm.reg(argBase).i, b = vm.reg(argBase + 1).i;
@@ -396,6 +415,25 @@ static inline void writeFr(VM& vm, u16 dst, r64 r) {
 // abs(Fraction)
 static void builtin_abs_fraction(VM& vm, u16 dst, u16, u16 argBase) {
     writeFr(vm, dst, readFr(vm, argBase).abs());
+}
+
+// pow(Fraction, Int) -> Fraction. Exponentiation by squaring; a negative
+// exponent inverts the base first (0 to a negative power throws the same
+// rational divide-by-zero as Fraction division).
+static void builtin_pow_fraction_int(VM& vm, u16 dst, u16, u16 argBase) {
+    r64 base = readFr(vm, argBase);
+    i64 e = vm.reg((u16)(argBase + 2)).i;
+    if (e < 0) {
+        base = r64(base.denom(), base.numer());  // simplifying ctor: throws on 0
+        e = -e;
+    }
+    r64 acc(1);
+    while (e) {
+        if (e & 1) acc = acc * base;
+        base = base * base;
+        e >>= 1;
+    }
+    writeFr(vm, dst, acc);
 }
 
 // min(Fraction, Fraction): args at argBase (2w) and argBase+2 (2w)
@@ -1009,6 +1047,8 @@ void registerMathBuiltins(Compiler& compiler, FuncMap& functions)
     registerOne(compiler, functions, "copysign",  Float, {Float, Float}, builtin_copysign_float);
     registerOne(compiler, functions, "nextafter", Float, {Float, Float}, builtin_nextafter_float);
     registerOne(compiler, functions, "pow",       Float, {Float, Float}, builtin_pow_float);
+    registerOne(compiler, functions, "pow",       Int,   {Int, Int},     builtin_pow_int);
+    registerOne(compiler, functions, "pow",       Frac,  {Frac, Int},    builtin_pow_fraction_int);
     registerOne(compiler, functions, "pow",       Cmplx, {Cmplx, Cmplx}, builtin_pow_complex);
     registerOne(compiler, functions, "atan2",     Float, {Float, Float}, builtin_atan2_float);
     registerOne(compiler, functions, "hypot",     Float, {Float, Float}, builtin_hypot_float);

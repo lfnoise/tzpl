@@ -1143,18 +1143,34 @@ void builtin_fold_list(VM& vm, u16 dst, u16, u16 ab) {
     Type* elT  = fnType->argTypes_.size() > 1 ? fnType->argTypes_[1] : nullptr;
     u16 sb = vm.currentCodeBlock()->numRegs;
 
+    // The accumulator cannot be parked in the scratch window across force():
+    // forcing a lazy node runs generator machinery that stages ITS lambda
+    // calls at the same currentCodeBlock()->numRegs scratch base, clobbering
+    // anything left there -- and scratch regs sit outside every stack map, so
+    // a GC during force() would not root it either. Keep it boxed in a single
+    // pinned Word between calls (the ScanListGen discipline) and re-stage it
+    // per element.
     Word const* accSrc = &vm.reg((u16)(ab + 1));
     for (u32 i = 0; i < accSW; ++i) vm.reg(sb + i) = accSrc[i];
+    readLambdaResult(vm, sb, accT);  // box inline-composite acc into 1 Word
+    Word acc = vm.reg(sb);
+    bool accIsObj = accT && (isLambdaInlineComposite(accT) || storesObjPtr(accT));
+    if (accIsObj) vm.gcKeepAlivePush(acc.o);
     u16 elemSb = (u16)(sb + accSW);
 
     ListNode* cur = src;
     while (cur) {
         cur->force(vm);
+        placeLambdaArg(vm, sb, acc, accT);
         placeLambdaArgSlot(vm, elemSb, cur->headData(), elT);
         callTwoArgs(vm, fn, sb);
+        readLambdaResult(vm, sb, accT);
+        acc = vm.reg(sb);
+        if (accIsObj) vm.gcKeepAliveUpdateTop(acc.o);
         cur = cur->tail_;
     }
-    for (u32 i = 0; i < accSW; ++i) vm.reg(dst + i) = vm.reg(sb + i);
+    if (accIsObj) vm.gcKeepAlivePop();
+    placeLambdaArg(vm, dst, acc, accT);  // unbox result into dst regs
 }
 
 void builtin_scan_list(VM& vm, u16 dst, u16, u16 ab) {
@@ -1193,17 +1209,29 @@ void builtin_fold1_list(VM& vm, u16 dst, u16, u16 ab) {
     // Phase 4g.27: native ABI; acc spans accSW words at sb across iters.
     u32 accSW = (et && et->sizeWords_ > 0) ? et->sizeWords_ : 1;
     u16 sb = vm.currentCodeBlock()->numRegs;
-    // Seed acc = src->headData() (first list element).
+    // Seed acc = src->headData() (first list element). As in fold: the acc
+    // must not sit in the scratch window across force() (nested generators
+    // reuse the same scratch base, and scratch is invisible to stack maps),
+    // so keep it boxed in a single pinned Word and re-stage per element.
     placeLambdaArgSlot(vm, sb, src->headData(), et);
+    readLambdaResult(vm, sb, et);  // box inline-composite acc into 1 Word
+    Word acc = vm.reg(sb);
+    bool accIsObj = et && (isLambdaInlineComposite(et) || storesObjPtr(et));
+    if (accIsObj) vm.gcKeepAlivePush(acc.o);
     u16 elemSb = (u16)(sb + accSW);
     ListNode* cur = src->tail_;
     while (cur) {
         cur->force(vm);
+        placeLambdaArg(vm, sb, acc, et);
         placeLambdaArgSlot(vm, elemSb, cur->headData(), et);
         callTwoArgs(vm, fn, sb);
+        readLambdaResult(vm, sb, et);
+        acc = vm.reg(sb);
+        if (accIsObj) vm.gcKeepAliveUpdateTop(acc.o);
         cur = cur->tail_;
     }
-    for (u32 i = 0; i < accSW; ++i) vm.reg(dst + i) = vm.reg(sb + i);
+    if (accIsObj) vm.gcKeepAlivePop();
+    placeLambdaArg(vm, dst, acc, et);  // unbox result into dst regs
 }
 
 void builtin_scan1_list(VM& vm, u16 dst, u16, u16 ab) {
@@ -1491,6 +1519,421 @@ void builtin_isNil_list(VM& vm, u16 dst, u16, u16 ab) {
 void builtin_notNil_list(VM& vm, u16 dst, u16, u16 ab) {
     vm.reg(dst).i = (vm.reg(ab).o != nullptr) ? 1 : 0;
 }
+
+// ============================================================================
+// Aggregates and reshaping over lists: sum, product, mean, any, all,
+// contains, toSet, fromCodePoints
+//
+// All of these force lazy nodes, which can run arbitrary user code (generator
+// lambdas) and hence GC. Accumulators are plain C++ PODs (safe) or pinned
+// via GCKeepAliveScope; nothing is parked in the scratch register window
+// across force() (see builtin_fold_list for why that is forbidden).
+// ============================================================================
+
+void builtin_sum_int_list(VM& vm, u16 dst, u16, u16 ab) {
+    auto* src = static_cast<ListNode*>(vm.reg(ab).o);
+    GCKeepAliveScope keep(vm, src);  // args cleared from stack map
+    i64 acc = 0;
+    for (ListNode* cur = src; cur; cur = cur->tail_) {
+        cur->force(vm);
+        acc += cur->headData()[0].i;
+    }
+    vm.reg(dst).i = acc;
+}
+
+void builtin_sum_float_list(VM& vm, u16 dst, u16, u16 ab) {
+    auto* src = static_cast<ListNode*>(vm.reg(ab).o);
+    GCKeepAliveScope keep(vm, src);
+    f64 acc = 0.0;
+    for (ListNode* cur = src; cur; cur = cur->tail_) {
+        cur->force(vm);
+        acc += cur->headData()[0].f;
+    }
+    vm.reg(dst).f = acc;
+}
+
+void builtin_product_int_list(VM& vm, u16 dst, u16, u16 ab) {
+    auto* src = static_cast<ListNode*>(vm.reg(ab).o);
+    GCKeepAliveScope keep(vm, src);
+    i64 acc = 1;
+    for (ListNode* cur = src; cur; cur = cur->tail_) {
+        cur->force(vm);
+        acc *= cur->headData()[0].i;
+    }
+    vm.reg(dst).i = acc;
+}
+
+void builtin_product_float_list(VM& vm, u16 dst, u16, u16 ab) {
+    auto* src = static_cast<ListNode*>(vm.reg(ab).o);
+    GCKeepAliveScope keep(vm, src);
+    f64 acc = 1.0;
+    for (ListNode* cur = src; cur; cur = cur->tail_) {
+        cur->force(vm);
+        acc *= cur->headData()[0].f;
+    }
+    vm.reg(dst).f = acc;
+}
+
+void builtin_mean_int_list(VM& vm, u16 dst, u16, u16 ab) {
+    auto* src = static_cast<ListNode*>(vm.reg(ab).o);
+    GCKeepAliveScope keep(vm, src);
+    f64 acc = 0.0, n = 0.0;
+    for (ListNode* cur = src; cur; cur = cur->tail_) {
+        cur->force(vm);
+        acc += (f64)cur->headData()[0].i;
+        n += 1.0;
+    }
+    vm.reg(dst).f = acc / n;
+}
+
+void builtin_mean_float_list(VM& vm, u16 dst, u16, u16 ab) {
+    auto* src = static_cast<ListNode*>(vm.reg(ab).o);
+    GCKeepAliveScope keep(vm, src);
+    f64 acc = 0.0, n = 0.0;
+    for (ListNode* cur = src; cur; cur = cur->tail_) {
+        cur->force(vm);
+        acc += cur->headData()[0].f;
+        n += 1.0;
+    }
+    vm.reg(dst).f = acc / n;
+}
+
+void builtin_any_list(VM& vm, u16 dst, u16, u16 ab) {
+    auto* src = static_cast<ListNode*>(vm.reg(ab).o);
+    auto* fn = static_cast<Callable*>(vm.reg(ab+1).o);
+    GCKeepAliveScope keep(vm, {src, (GCObj*)fn});
+    auto* fnType = static_cast<FunctionType*>(fn->type_);
+    Type* paramT = fnType->argTypes_.empty() ? nullptr : fnType->argTypes_[0];
+    u16 sb = vm.currentCodeBlock()->numRegs;
+    for (ListNode* cur = src; cur; cur = cur->tail_) {
+        cur->force(vm);
+        placeLambdaArgSlot(vm, sb, cur->headData(), paramT);
+        callOneArg(vm, fn, sb);
+        if (vm.reg(sb).i) { vm.reg(dst).i = 1; return; }
+    }
+    vm.reg(dst).i = 0;
+}
+
+void builtin_all_list(VM& vm, u16 dst, u16, u16 ab) {
+    auto* src = static_cast<ListNode*>(vm.reg(ab).o);
+    auto* fn = static_cast<Callable*>(vm.reg(ab+1).o);
+    GCKeepAliveScope keep(vm, {src, (GCObj*)fn});
+    auto* fnType = static_cast<FunctionType*>(fn->type_);
+    Type* paramT = fnType->argTypes_.empty() ? nullptr : fnType->argTypes_[0];
+    u16 sb = vm.currentCodeBlock()->numRegs;
+    for (ListNode* cur = src; cur; cur = cur->tail_) {
+        cur->force(vm);
+        placeLambdaArgSlot(vm, sb, cur->headData(), paramT);
+        callOneArg(vm, fn, sb);
+        if (!vm.reg(sb).i) { vm.reg(dst).i = 0; return; }
+    }
+    vm.reg(dst).i = 1;
+}
+
+void builtin_any_bool_list(VM& vm, u16 dst, u16, u16 ab) {
+    auto* src = static_cast<ListNode*>(vm.reg(ab).o);
+    GCKeepAliveScope keep(vm, src);
+    for (ListNode* cur = src; cur; cur = cur->tail_) {
+        cur->force(vm);
+        if (cur->headData()[0].i) { vm.reg(dst).i = 1; return; }
+    }
+    vm.reg(dst).i = 0;
+}
+
+void builtin_all_bool_list(VM& vm, u16 dst, u16, u16 ab) {
+    auto* src = static_cast<ListNode*>(vm.reg(ab).o);
+    GCKeepAliveScope keep(vm, src);
+    for (ListNode* cur = src; cur; cur = cur->tail_) {
+        cur->force(vm);
+        if (!cur->headData()[0].i) { vm.reg(dst).i = 0; return; }
+    }
+    vm.reg(dst).i = 1;
+}
+
+// contains: List<T>, T -> Bool. The target element is copied out of the
+// (stack-map-cleared) arg regs into a C++ buffer; any Obj* it holds is kept
+// alive across force() by pinning either the Obj itself or, for an inline
+// composite with embedded Obj* fields, a box that shares those pointers.
+void builtin_contains_list(VM& vm, u16 dst, u16, u16 ab) {
+    auto* src = static_cast<ListNode*>(vm.reg(ab).o);
+    auto* prim = vm.currentPrimitive();
+    auto* primTT = static_cast<TupleType*>(prim->type_);
+    Type* et = primTT->fields_[1];
+    u32 sw = (et && et->sizeWords_ > 0) ? (u32)et->sizeWords_ : 1u;
+    Word buf[8];
+    for (u32 i = 0; i < sw; ++i) buf[i] = vm.reg((u16)(ab + 1 + i));
+    Obj* pin = nullptr;
+    if (isLambdaInlineComposite(et) && inlineHasObjPtr(et)) {
+        pin = boxPayload(vm, et, buf).o;
+    } else if (storesObjPtr(et)) {
+        pin = buf[0].o;
+    }
+    GCKeepAliveScope keep(vm, {src, pin});
+    for (ListNode* cur = src; cur; cur = cur->tail_) {
+        cur->force(vm);
+        if (wordsEqual(cur->headData(), buf, et)) { vm.reg(dst).i = 1; return; }
+    }
+    vm.reg(dst).i = 0;
+}
+
+void builtin_toSet_list(VM& vm, u16 dst, u16, u16 ab) {
+    auto* src = static_cast<ListNode*>(vm.reg(ab).o);
+    auto* lt = src ? static_cast<ListType*>(src->type_) : nullptr;
+    auto* prim = vm.currentPrimitive();
+    auto* primTT = static_cast<TupleType*>(prim->type_);
+    Type* et = lt ? lt->elemType_
+                  : static_cast<ListType*>(primTT->fields_[0])->elemType_;
+    auto* set = new SetObj(vm.setType(et));
+    GCKeepAliveScope keep(vm, {src, set});
+    for (ListNode* cur = src; cur; cur = cur->tail_) {
+        cur->force(vm);
+        set->insertElem(cur->headData());
+    }
+    vm.reg(dst).o = set;
+}
+
+// fromCodePoints: List<Int> -> String -- inverse of codePoints.
+void builtin_fromCodePoints_list(VM& vm, u16 dst, u16, u16 ab) {
+    auto* src = static_cast<ListNode*>(vm.reg(ab).o);
+    auto* so = new StringObj();
+    GCKeepAliveScope keep(vm, {src, so});
+    for (ListNode* cur = src; cur; cur = cur->tail_) {
+        cur->force(vm);
+        appendUtf8Cp(so->s, cur->headData()[0].i);
+    }
+    vm.reg(dst).o = so;
+}
+
+// Fraction/Complex reductions read the native 2-word heads and write the
+// 2-word result at dst/dst+1.
+void builtin_sum_fraction_list(VM& vm, u16 dst, u16, u16 ab) {
+    auto* src = static_cast<ListNode*>(vm.reg(ab).o);
+    GCKeepAliveScope keep(vm, src);
+    r64 acc(0);
+    for (ListNode* cur = src; cur; cur = cur->tail_) {
+        cur->force(vm);
+        Word const* h = cur->headData();
+        acc = acc + r64(h[0].i, h[1].i, true);
+    }
+    vm.reg(dst).i = acc.numer();
+    vm.reg((u16)(dst + 1)).i = acc.denom();
+}
+
+void builtin_product_fraction_list(VM& vm, u16 dst, u16, u16 ab) {
+    auto* src = static_cast<ListNode*>(vm.reg(ab).o);
+    GCKeepAliveScope keep(vm, src);
+    r64 acc(1);
+    for (ListNode* cur = src; cur; cur = cur->tail_) {
+        cur->force(vm);
+        Word const* h = cur->headData();
+        acc = acc * r64(h[0].i, h[1].i, true);
+    }
+    vm.reg(dst).i = acc.numer();
+    vm.reg((u16)(dst + 1)).i = acc.denom();
+}
+
+void builtin_sum_complex_list(VM& vm, u16 dst, u16, u16 ab) {
+    auto* src = static_cast<ListNode*>(vm.reg(ab).o);
+    GCKeepAliveScope keep(vm, src);
+    x64 acc(0.0, 0.0);
+    for (ListNode* cur = src; cur; cur = cur->tail_) {
+        cur->force(vm);
+        Word const* h = cur->headData();
+        acc += x64(h[0].f, h[1].f);
+    }
+    vm.reg(dst).f = acc.real();
+    vm.reg((u16)(dst + 1)).f = acc.imag();
+}
+
+void builtin_product_complex_list(VM& vm, u16 dst, u16, u16 ab) {
+    auto* src = static_cast<ListNode*>(vm.reg(ab).o);
+    GCKeepAliveScope keep(vm, src);
+    x64 acc(1.0, 0.0);
+    for (ListNode* cur = src; cur; cur = cur->tail_) {
+        cur->force(vm);
+        Word const* h = cur->headData();
+        acc *= x64(h[0].f, h[1].f);
+    }
+    vm.reg(dst).f = acc.real();
+    vm.reg((u16)(dst + 1)).f = acc.imag();
+}
+
+static void minMaxFractionList(VM& vm, u16 dst, u16 ab, bool wantMax) {
+    auto* src = static_cast<ListNode*>(vm.reg(ab).o);
+    GCKeepAliveScope keep(vm, src);
+    // First-element seeding: rational comparison cross-multiplies, so an
+    // INT64_MAX/MIN sentinel overflows and compares wrong. Empty input
+    // keeps the sentinel.
+    r64 acc(wantMax ? std::numeric_limits<i64>::min()
+                    : std::numeric_limits<i64>::max());
+    bool first = true;
+    for (ListNode* cur = src; cur; cur = cur->tail_) {
+        cur->force(vm);
+        Word const* h = cur->headData();
+        r64 x(h[0].i, h[1].i, true);
+        if (first) { acc = x; first = false; }
+        else if (wantMax ? (acc < x) : (x < acc)) acc = x;
+    }
+    vm.reg(dst).i = acc.numer();
+    vm.reg((u16)(dst + 1)).i = acc.denom();
+}
+
+void builtin_min_fraction_list(VM& vm, u16 dst, u16, u16 ab) { minMaxFractionList(vm, dst, ab, false); }
+void builtin_max_fraction_list(VM& vm, u16 dst, u16, u16 ab) { minMaxFractionList(vm, dst, ab, true); }
+
+// min/max reductions. Empty lists yield the reduction identity (Int:
+// INT64_MAX/MIN, Float: +/-inf, String: "").
+void builtin_min_int_list(VM& vm, u16 dst, u16, u16 ab) {
+    auto* src = static_cast<ListNode*>(vm.reg(ab).o);
+    GCKeepAliveScope keep(vm, src);
+    i64 acc = std::numeric_limits<i64>::max();
+    for (ListNode* cur = src; cur; cur = cur->tail_) {
+        cur->force(vm);
+        i64 x = cur->headData()[0].i;
+        if (x < acc) acc = x;
+    }
+    vm.reg(dst).i = acc;
+}
+
+void builtin_max_int_list(VM& vm, u16 dst, u16, u16 ab) {
+    auto* src = static_cast<ListNode*>(vm.reg(ab).o);
+    GCKeepAliveScope keep(vm, src);
+    i64 acc = std::numeric_limits<i64>::min();
+    for (ListNode* cur = src; cur; cur = cur->tail_) {
+        cur->force(vm);
+        i64 x = cur->headData()[0].i;
+        if (x > acc) acc = x;
+    }
+    vm.reg(dst).i = acc;
+}
+
+void builtin_min_float_list(VM& vm, u16 dst, u16, u16 ab) {
+    auto* src = static_cast<ListNode*>(vm.reg(ab).o);
+    GCKeepAliveScope keep(vm, src);
+    f64 acc = std::numeric_limits<f64>::infinity();
+    for (ListNode* cur = src; cur; cur = cur->tail_) {
+        cur->force(vm);
+        f64 x = cur->headData()[0].f;
+        if (x < acc) acc = x;
+    }
+    vm.reg(dst).f = acc;
+}
+
+void builtin_max_float_list(VM& vm, u16 dst, u16, u16 ab) {
+    auto* src = static_cast<ListNode*>(vm.reg(ab).o);
+    GCKeepAliveScope keep(vm, src);
+    f64 acc = -std::numeric_limits<f64>::infinity();
+    for (ListNode* cur = src; cur; cur = cur->tail_) {
+        cur->force(vm);
+        f64 x = cur->headData()[0].f;
+        if (x > acc) acc = x;
+    }
+    vm.reg(dst).f = acc;
+}
+
+// The String result is an element of the pinned source list (or a fresh ""
+// for an empty list), so it stays reachable across force().
+static void minMaxStringList(VM& vm, u16 dst, u16 ab, bool wantMax) {
+    auto* src = static_cast<ListNode*>(vm.reg(ab).o);
+    GCKeepAliveScope keep(vm, src);
+    StringObj* acc = nullptr;
+    for (ListNode* cur = src; cur; cur = cur->tail_) {
+        cur->force(vm);
+        auto* x = static_cast<StringObj*>(cur->headData()[0].o);
+        if (!acc || (wantMax ? (x->s > acc->s) : (x->s < acc->s))) acc = x;
+    }
+    vm.reg(dst).o = acc ? (Obj*)acc : (Obj*)new StringObj();
+}
+
+void builtin_min_string_list(VM& vm, u16 dst, u16, u16 ab) { minMaxStringList(vm, dst, ab, false); }
+void builtin_max_string_list(VM& vm, u16 dst, u16, u16 ab) { minMaxStringList(vm, dst, ab, true); }
+
+// Running reductions: sums / products / mins / maxs. Lazy via
+// RunningListGen so they compose with infinite lists.
+void RunningListGen::generate(VM& vm, ListNode* owner) {
+    // source_ holds the element this position absorbs. Forcing it can run
+    // user generator code; this generator's state is GC-scanned via owner.
+    source_->force(vm);
+    Word const* x = source_->headData();
+    if (!started_) {
+        accumulator_[0] = x[0];
+        accumulator_[1] = source_->payloadWords_ > 1 ? x[1] : Word();
+        started_ = true;
+    } else {
+        switch (flavor_) {
+        case Flavor::Int:
+            switch (op_) {
+                case Op::Sum:  accumulator_[0].i += x[0].i; break;
+                case Op::Prod: accumulator_[0].i *= x[0].i; break;
+                case Op::Min:  if (x[0].i < accumulator_[0].i) accumulator_[0] = x[0]; break;
+                case Op::Max:  if (x[0].i > accumulator_[0].i) accumulator_[0] = x[0]; break;
+            }
+            break;
+        case Flavor::Float:
+            switch (op_) {
+                case Op::Sum:  accumulator_[0].f += x[0].f; break;
+                case Op::Prod: accumulator_[0].f *= x[0].f; break;
+                case Op::Min:  if (x[0].f < accumulator_[0].f) accumulator_[0] = x[0]; break;
+                case Op::Max:  if (x[0].f > accumulator_[0].f) accumulator_[0] = x[0]; break;
+            }
+            break;
+        case Flavor::Fraction: {
+            r64 acc(accumulator_[0].i, accumulator_[1].i, true);
+            r64 xv(x[0].i, x[1].i, true);
+            switch (op_) {
+                case Op::Sum:  acc = acc + xv; break;
+                case Op::Prod: acc = acc * xv; break;
+                case Op::Min:  if (xv < acc) acc = xv; break;
+                case Op::Max:  if (acc < xv) acc = xv; break;
+            }
+            accumulator_[0].i = acc.numer();
+            accumulator_[1].i = acc.denom();
+            break;
+        }
+        case Flavor::Complex: {
+            x64 acc(accumulator_[0].f, accumulator_[1].f);
+            x64 xv(x[0].f, x[1].f);
+            switch (op_) {
+                case Op::Sum:  acc += xv; break;
+                case Op::Prod: acc *= xv; break;
+                case Op::Min: case Op::Max: break;  // unordered; not registered
+            }
+            accumulator_[0].f = acc.real();
+            accumulator_[1].f = acc.imag();
+            break;
+        }
+        }
+    }
+    writeListHeadFromSlot(vm, owner, accumulator_, listType_->elemType_);
+    ListNode* rest = source_->tail_;
+    if (!rest) { owner->tail_ = nullptr; return; }
+    source_ = rest;
+    auto* tail = ListNode::create(listType_);
+    tail->installGenerator(this);
+    owner->tail_ = tail;
+}
+
+static void makeRunningList(VM& vm, u16 dst, u16 ab, RunningListGen::Op op) {
+    auto* src = static_cast<ListNode*>(vm.reg(ab).o);
+    if (!src) { vm.reg(dst).o = nullptr; return; }
+    auto* lt = static_cast<ListType*>(src->type_);
+    auto* gen = new RunningListGen(vm.typeType());
+    gen->source_ = src;
+    gen->listType_ = lt;
+    if (lt->elemType_ == vm.floatType())         gen->flavor_ = RunningListGen::Flavor::Float;
+    else if (lt->elemType_ == vm.fractionType()) gen->flavor_ = RunningListGen::Flavor::Fraction;
+    else if (lt->elemType_ == vm.complexType())  gen->flavor_ = RunningListGen::Flavor::Complex;
+    else                                         gen->flavor_ = RunningListGen::Flavor::Int;
+    gen->op_ = op;
+    auto* node = ListNode::create(lt);
+    node->installGenerator(gen);
+    vm.reg(dst).o = node;
+}
+
+void builtin_sums_list(VM& vm, u16 dst, u16, u16 ab)     { makeRunningList(vm, dst, ab, RunningListGen::Op::Sum); }
+void builtin_products_list(VM& vm, u16 dst, u16, u16 ab) { makeRunningList(vm, dst, ab, RunningListGen::Op::Prod); }
+void builtin_mins_list(VM& vm, u16 dst, u16, u16 ab)     { makeRunningList(vm, dst, ab, RunningListGen::Op::Min); }
+void builtin_maxs_list(VM& vm, u16 dst, u16, u16 ab)     { makeRunningList(vm, dst, ab, RunningListGen::Op::Max); }
 
 // ============================================================================
 // Registration

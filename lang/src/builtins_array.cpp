@@ -1259,6 +1259,327 @@ void builtin_length_array(VM& vm, u16 dst, u16, u16 ab) {
 }
 
 // ============================================================================
+// Aggregates: sum, product, mean, any, all, contains
+// ============================================================================
+
+void builtin_sum_int_array(VM& vm, u16 dst, u16, u16 ab) {
+    auto& v = static_cast<PodArray<i64>*>(vm.reg(ab).o)->v;
+    i64 acc = 0;
+    for (i64 x : v) acc += x;
+    vm.reg(dst).i = acc;
+}
+
+void builtin_sum_float_array(VM& vm, u16 dst, u16, u16 ab) {
+    auto& v = static_cast<PodArray<f64>*>(vm.reg(ab).o)->v;
+    f64 acc = 0.0;
+    for (f64 x : v) acc += x;
+    vm.reg(dst).f = acc;
+}
+
+void builtin_product_int_array(VM& vm, u16 dst, u16, u16 ab) {
+    auto& v = static_cast<PodArray<i64>*>(vm.reg(ab).o)->v;
+    i64 acc = 1;
+    for (i64 x : v) acc *= x;
+    vm.reg(dst).i = acc;
+}
+
+void builtin_product_float_array(VM& vm, u16 dst, u16, u16 ab) {
+    auto& v = static_cast<PodArray<f64>*>(vm.reg(ab).o)->v;
+    f64 acc = 1.0;
+    for (f64 x : v) acc *= x;
+    vm.reg(dst).f = acc;
+}
+
+// mean of an empty collection is nan (0/0), matching the float division.
+void builtin_mean_int_array(VM& vm, u16 dst, u16, u16 ab) {
+    auto& v = static_cast<PodArray<i64>*>(vm.reg(ab).o)->v;
+    f64 acc = 0.0;
+    for (i64 x : v) acc += (f64)x;
+    vm.reg(dst).f = acc / (f64)v.size();
+}
+
+void builtin_mean_float_array(VM& vm, u16 dst, u16, u16 ab) {
+    auto& v = static_cast<PodArray<f64>*>(vm.reg(ab).o)->v;
+    f64 acc = 0.0;
+    for (f64 x : v) acc += x;
+    vm.reg(dst).f = acc / (f64)v.size();
+}
+
+void builtin_any_array(VM& vm, u16 dst, u16, u16 ab) {
+    auto* src = vm.reg(ab).o;
+    auto* fn = static_cast<Callable*>(vm.reg(ab+1).o);
+    GCKeepAliveScope keep(vm, {src, (GCObj*)fn});  // args cleared from stack map
+    auto* at = static_cast<ArrayType*>(src->type_);
+    Type* et = at->elemType_;
+    u16 sb = vm.currentCodeBlock()->numRegs;
+    bool found = false;
+    dispatchBackend(arrayBackendFor(et), [&]<ArrayBackend B>() {
+        size_t n = getArraySize_t<B>(src);
+        for (size_t i = 0; i < n; i++) {
+            placeLambdaArgFromArrayElem_t<B>(vm, sb, src, et, i);
+            callOneArg(vm, fn, sb);
+            if (vm.reg(sb).i) { found = true; return; }
+        }
+    });
+    vm.reg(dst).i = found ? 1 : 0;
+}
+
+void builtin_all_array(VM& vm, u16 dst, u16, u16 ab) {
+    auto* src = vm.reg(ab).o;
+    auto* fn = static_cast<Callable*>(vm.reg(ab+1).o);
+    GCKeepAliveScope keep(vm, {src, (GCObj*)fn});  // args cleared from stack map
+    auto* at = static_cast<ArrayType*>(src->type_);
+    Type* et = at->elemType_;
+    u16 sb = vm.currentCodeBlock()->numRegs;
+    bool holds = true;
+    dispatchBackend(arrayBackendFor(et), [&]<ArrayBackend B>() {
+        size_t n = getArraySize_t<B>(src);
+        for (size_t i = 0; i < n; i++) {
+            placeLambdaArgFromArrayElem_t<B>(vm, sb, src, et, i);
+            callOneArg(vm, fn, sb);
+            if (!vm.reg(sb).i) { holds = false; return; }
+        }
+    });
+    vm.reg(dst).i = holds ? 1 : 0;
+}
+
+void builtin_any_bool_array(VM& vm, u16 dst, u16, u16 ab) {
+    auto& v = static_cast<PodArray<i64>*>(vm.reg(ab).o)->v;
+    for (i64 x : v) if (x) { vm.reg(dst).i = 1; return; }
+    vm.reg(dst).i = 0;
+}
+
+void builtin_all_bool_array(VM& vm, u16 dst, u16, u16 ab) {
+    auto& v = static_cast<PodArray<i64>*>(vm.reg(ab).o)->v;
+    for (i64 x : v) if (!x) { vm.reg(dst).i = 0; return; }
+    vm.reg(dst).i = 1;
+}
+
+void builtin_contains_array(VM& vm, u16 dst, u16, u16 ab) {
+    auto* src = vm.reg(ab).o;
+    auto* at = static_cast<ArrayType*>(src->type_);
+    Type* et = at->elemType_;
+    Word const* target = &vm.reg((u16)(ab + 1));
+    size_t n = getArraySize(src, arrayBackendFor(et));
+    Word tmp[2];
+    for (size_t i = 0; i < n; ++i) {
+        if (wordsEqual(arrayElemSlot(src, et, i, tmp), target, et)) {
+            vm.reg(dst).i = 1;
+            return;
+        }
+    }
+    vm.reg(dst).i = 0;
+}
+
+// ============================================================================
+// Reshaping: clump, spread, ncyc, toSet, fromCodePoints
+// ============================================================================
+
+// clump: [T], Int -> [[T]] -- group into rows of n; a short remainder row
+// is kept. n <= 0 yields [].
+void builtin_clump_array(VM& vm, u16 dst, u16, u16 ab) {
+    auto* src = vm.reg(ab).o;
+    i64 k = vm.reg(ab+1).i;
+    auto* at = static_cast<ArrayType*>(src->type_);
+    Type* et = at->elemType_;
+    auto* outer = new ObjArray(vm.arrayType(at));
+    if (k > 0) {
+        size_t n = getArraySize(src, arrayBackendFor(et));
+        Word tmp[2];
+        for (size_t start = 0; start < n; start += (size_t)k) {
+            size_t end = std::min(n, start + (size_t)k);
+            Obj* chunk = makeEmptyArray(at);
+            for (size_t i = start; i < end; ++i)
+                arrayPushFromSlot(vm, chunk, et, arrayElemSlot(src, et, i, tmp));
+            outer->push(chunk);
+        }
+    }
+    vm.reg(dst).o = outer;
+}
+
+// spread: [T], [Int] -> [T] -- replicate element i counts[i] times; counts
+// index cyclically (like array indexing). counts <= 0 drop the element.
+void builtin_spread_array(VM& vm, u16 dst, u16, u16 ab) {
+    auto* src = vm.reg(ab).o;
+    auto& counts = static_cast<PodArray<i64>*>(vm.reg(ab+1).o)->v;
+    auto* at = static_cast<ArrayType*>(src->type_);
+    Type* et = at->elemType_;
+    auto* result = makeEmptyArray(at);
+    if (!counts.empty()) {
+        size_t n = getArraySize(src, arrayBackendFor(et));
+        Word tmp[2];
+        for (size_t i = 0; i < n; ++i) {
+            i64 c = counts[i % counts.size()];
+            Word const* slot = arrayElemSlot(src, et, i, tmp);
+            for (i64 j = 0; j < c; ++j) arrayPushFromSlot(vm, result, et, slot);
+        }
+    }
+    vm.reg(dst).o = result;
+}
+
+// ncyc: [T], Int -> [T] -- the array repeated n times.
+void builtin_ncyc_array(VM& vm, u16 dst, u16, u16 ab) {
+    auto* src = vm.reg(ab).o;
+    i64 k = vm.reg(ab+1).i;
+    auto* at = static_cast<ArrayType*>(src->type_);
+    Type* et = at->elemType_;
+    auto* result = makeEmptyArray(at);
+    size_t n = getArraySize(src, arrayBackendFor(et));
+    Word tmp[2];
+    for (i64 r = 0; r < k; ++r)
+        for (size_t i = 0; i < n; ++i)
+            arrayPushFromSlot(vm, result, et, arrayElemSlot(src, et, i, tmp));
+    vm.reg(dst).o = result;
+}
+
+void builtin_toSet_array(VM& vm, u16 dst, u16, u16 ab) {
+    auto* src = vm.reg(ab).o;
+    auto* at = static_cast<ArrayType*>(src->type_);
+    Type* et = at->elemType_;
+    auto* set = new SetObj(vm.setType(et));
+    size_t n = getArraySize(src, arrayBackendFor(et));
+    Word tmp[2];
+    for (size_t i = 0; i < n; ++i)
+        set->insertElem(arrayElemSlot(src, et, i, tmp));
+    vm.reg(dst).o = set;
+}
+
+// fromCodePoints: [Int] -> String -- inverse of codePoints.
+void builtin_fromCodePoints_array(VM& vm, u16 dst, u16, u16 ab) {
+    auto& v = static_cast<PodArray<i64>*>(vm.reg(ab).o)->v;
+    auto* so = new StringObj();
+    for (i64 cp : v) appendUtf8Cp(so->s, cp);
+    vm.reg(dst).o = so;
+}
+
+// Fraction/Complex reductions write the native 2-word result at dst/dst+1.
+void builtin_sum_fraction_array(VM& vm, u16 dst, u16, u16 ab) {
+    auto& v = static_cast<PodArray<r64>*>(vm.reg(ab).o)->v;
+    r64 acc(0);
+    for (r64 x : v) acc = acc + x;
+    vm.reg(dst).i = acc.numer();
+    vm.reg((u16)(dst + 1)).i = acc.denom();
+}
+
+void builtin_product_fraction_array(VM& vm, u16 dst, u16, u16 ab) {
+    auto& v = static_cast<PodArray<r64>*>(vm.reg(ab).o)->v;
+    r64 acc(1);
+    for (r64 x : v) acc = acc * x;
+    vm.reg(dst).i = acc.numer();
+    vm.reg((u16)(dst + 1)).i = acc.denom();
+}
+
+void builtin_sum_complex_array(VM& vm, u16 dst, u16, u16 ab) {
+    auto& v = static_cast<PodArray<x64>*>(vm.reg(ab).o)->v;
+    x64 acc(0.0, 0.0);
+    for (x64 x : v) acc += x;
+    vm.reg(dst).f = acc.real();
+    vm.reg((u16)(dst + 1)).f = acc.imag();
+}
+
+void builtin_product_complex_array(VM& vm, u16 dst, u16, u16 ab) {
+    auto& v = static_cast<PodArray<x64>*>(vm.reg(ab).o)->v;
+    x64 acc(1.0, 0.0);
+    for (x64 x : v) acc *= x;
+    vm.reg(dst).f = acc.real();
+    vm.reg((u16)(dst + 1)).f = acc.imag();
+}
+
+static void minMaxFractionArray(VM& vm, u16 dst, u16 ab, bool wantMax) {
+    auto& v = static_cast<PodArray<r64>*>(vm.reg(ab).o)->v;
+    // Seed from the first element rather than an INT64_MAX/MIN sentinel:
+    // rational comparison cross-multiplies, so a sentinel that large
+    // overflows and compares wrong. Empty input keeps the sentinel.
+    r64 acc(wantMax ? std::numeric_limits<i64>::min()
+                    : std::numeric_limits<i64>::max());
+    bool first = true;
+    for (r64 x : v) {
+        if (first) { acc = x; first = false; }
+        else if (wantMax ? (acc < x) : (x < acc)) acc = x;
+    }
+    vm.reg(dst).i = acc.numer();
+    vm.reg((u16)(dst + 1)).i = acc.denom();
+}
+
+void builtin_min_fraction_array(VM& vm, u16 dst, u16, u16 ab) { minMaxFractionArray(vm, dst, ab, false); }
+void builtin_max_fraction_array(VM& vm, u16 dst, u16, u16 ab) { minMaxFractionArray(vm, dst, ab, true); }
+
+// min/max reductions. Empty arrays yield the reduction identity (Int:
+// INT64_MAX/MIN, Float: +/-inf, String: "").
+void builtin_min_int_array(VM& vm, u16 dst, u16, u16 ab) {
+    auto& v = static_cast<PodArray<i64>*>(vm.reg(ab).o)->v;
+    i64 acc = std::numeric_limits<i64>::max();
+    for (i64 x : v) if (x < acc) acc = x;
+    vm.reg(dst).i = acc;
+}
+
+void builtin_max_int_array(VM& vm, u16 dst, u16, u16 ab) {
+    auto& v = static_cast<PodArray<i64>*>(vm.reg(ab).o)->v;
+    i64 acc = std::numeric_limits<i64>::min();
+    for (i64 x : v) if (x > acc) acc = x;
+    vm.reg(dst).i = acc;
+}
+
+void builtin_min_float_array(VM& vm, u16 dst, u16, u16 ab) {
+    auto& v = static_cast<PodArray<f64>*>(vm.reg(ab).o)->v;
+    f64 acc = std::numeric_limits<f64>::infinity();
+    for (f64 x : v) if (x < acc) acc = x;
+    vm.reg(dst).f = acc;
+}
+
+void builtin_max_float_array(VM& vm, u16 dst, u16, u16 ab) {
+    auto& v = static_cast<PodArray<f64>*>(vm.reg(ab).o)->v;
+    f64 acc = -std::numeric_limits<f64>::infinity();
+    for (f64 x : v) if (x > acc) acc = x;
+    vm.reg(dst).f = acc;
+}
+
+static void minMaxStringArray(VM& vm, u16 dst, u16 ab, bool wantMax) {
+    auto* a = static_cast<ObjArray*>(vm.reg(ab).o);
+    StringObj* acc = nullptr;
+    for (size_t i = 0; i < a->size(); ++i) {
+        auto* x = static_cast<StringObj*>(a->get(i));
+        if (!acc || (wantMax ? (x->s > acc->s) : (x->s < acc->s))) acc = x;
+    }
+    vm.reg(dst).o = acc ? (Obj*)acc : (Obj*)new StringObj();
+}
+
+void builtin_min_string_array(VM& vm, u16 dst, u16, u16 ab) { minMaxStringArray(vm, dst, ab, false); }
+void builtin_max_string_array(VM& vm, u16 dst, u16, u16 ab) { minMaxStringArray(vm, dst, ab, true); }
+
+// Running reductions: sums / products / mins / maxs. Element i of the
+// result is op(x0..xi); same length as the input.
+template <typename T, typename F>
+static void runningPodArray(VM& vm, u16 dst, u16 ab, F&& step) {
+    auto* s = static_cast<PodArray<T>*>(vm.reg(ab).o);
+    auto* r = new PodArray<T>(static_cast<ArrayType*>(s->type_));
+    r->v.reserve(s->v.size());
+    T acc{};
+    bool first = true;
+    for (T x : s->v) {
+        acc = first ? x : step(acc, x);
+        first = false;
+        r->v.push_back(acc);
+    }
+    vm.reg(dst).o = r;
+}
+
+void builtin_sums_int_array(VM& vm, u16 dst, u16, u16 ab)       { runningPodArray<i64>(vm, dst, ab, [](i64 a, i64 b) { return a + b; }); }
+void builtin_sums_float_array(VM& vm, u16 dst, u16, u16 ab)     { runningPodArray<f64>(vm, dst, ab, [](f64 a, f64 b) { return a + b; }); }
+void builtin_products_int_array(VM& vm, u16 dst, u16, u16 ab)   { runningPodArray<i64>(vm, dst, ab, [](i64 a, i64 b) { return a * b; }); }
+void builtin_products_float_array(VM& vm, u16 dst, u16, u16 ab) { runningPodArray<f64>(vm, dst, ab, [](f64 a, f64 b) { return a * b; }); }
+void builtin_mins_int_array(VM& vm, u16 dst, u16, u16 ab)       { runningPodArray<i64>(vm, dst, ab, [](i64 a, i64 b) { return b < a ? b : a; }); }
+void builtin_mins_float_array(VM& vm, u16 dst, u16, u16 ab)     { runningPodArray<f64>(vm, dst, ab, [](f64 a, f64 b) { return b < a ? b : a; }); }
+void builtin_maxs_int_array(VM& vm, u16 dst, u16, u16 ab)       { runningPodArray<i64>(vm, dst, ab, [](i64 a, i64 b) { return b > a ? b : a; }); }
+void builtin_maxs_float_array(VM& vm, u16 dst, u16, u16 ab)     { runningPodArray<f64>(vm, dst, ab, [](f64 a, f64 b) { return b > a ? b : a; }); }
+void builtin_sums_fraction_array(VM& vm, u16 dst, u16, u16 ab)     { runningPodArray<r64>(vm, dst, ab, [](r64 a, r64 b) { return a + b; }); }
+void builtin_products_fraction_array(VM& vm, u16 dst, u16, u16 ab) { runningPodArray<r64>(vm, dst, ab, [](r64 a, r64 b) { return a * b; }); }
+void builtin_mins_fraction_array(VM& vm, u16 dst, u16, u16 ab)     { runningPodArray<r64>(vm, dst, ab, [](r64 a, r64 b) { return b < a ? b : a; }); }
+void builtin_maxs_fraction_array(VM& vm, u16 dst, u16, u16 ab)     { runningPodArray<r64>(vm, dst, ab, [](r64 a, r64 b) { return a < b ? b : a; }); }
+void builtin_sums_complex_array(VM& vm, u16 dst, u16, u16 ab)      { runningPodArray<x64>(vm, dst, ab, [](x64 a, x64 b) { return a + b; }); }
+void builtin_products_complex_array(VM& vm, u16 dst, u16, u16 ab)  { runningPodArray<x64>(vm, dst, ab, [](x64 a, x64 b) { return a * b; }); }
+
+// ============================================================================
 // Registration
 // ============================================================================
 

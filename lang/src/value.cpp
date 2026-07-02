@@ -368,6 +368,7 @@ AutoMapListGen::AutoMapListGen(Type* type)
 FilterListGen::FilterListGen(Type* type) : ListGenerator(type), source_(nullptr), fn_(nullptr), scratchBase_(0), listType_(nullptr) {}
 PredicateListGen::PredicateListGen(Type* type) : ListGenerator(type), mode_(TakeWhile), source_(nullptr), fn_(nullptr), scratchBase_(0), dropping_(true), listType_(nullptr) {}
 ScanListGen::ScanListGen(Type* type) : ListGenerator(type), source_(nullptr), fn_(nullptr), accumulator_(), accIsObj_(false), scratchBase_(0), accElemType_(nullptr), resultListType_(nullptr) {}
+RunningListGen::RunningListGen(Type* type) : ListGenerator(type), source_(nullptr), accumulator_(), started_(false), flavor_(Flavor::Int), op_(Op::Sum), listType_(nullptr) {}
 ZipListGen::ZipListGen(Type* type) : ListGenerator(type), left_(nullptr), right_(nullptr), leftElemType_(nullptr), rightElemType_(nullptr), resultListType_(nullptr), tupleType_(nullptr) {}
 EnumerateListGen::EnumerateListGen(Type* type) : ListGenerator(type), source_(nullptr), index_(0), elemType_(nullptr), resultListType_(nullptr), tupleType_(nullptr) {}
 JoinListGen::JoinListGen(Type* type) : ListGenerator(type), outer_(nullptr), inner_(nullptr), resultListType_(nullptr) {}

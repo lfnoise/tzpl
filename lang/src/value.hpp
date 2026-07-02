@@ -974,6 +974,27 @@ public:
     }
 };
 
+// Generator for running reductions (sums / products / mins / maxs) over a
+// numeric list. Emits op(x0..xi) at position i. Fully lazy, so it works on
+// infinite lists. Elements are Int, Float, Fraction, or Complex -- the
+// accumulator (up to 2 words) never holds an Obj*.
+class RunningListGen : public ListGenerator {
+public:
+    enum class Op : u8 { Sum, Prod, Min, Max };
+    enum class Flavor : u8 { Int, Float, Fraction, Complex };
+    ListNode* source_;     // node whose element position i absorbs
+    Word accumulator_[2];
+    bool started_;
+    Flavor flavor_;
+    Op op_;
+    ListType* listType_;
+
+    RunningListGen(Type* type);
+    void generate(VM& vm, ListNode* owner) override;    void gcScanChildren(TracingGC& gc) override {
+        if (source_) gc.mark(source_);
+    }
+};
+
 // Generator for zip(list1, list2) - zip into tuples
 class ZipListGen : public ListGenerator {
 public:

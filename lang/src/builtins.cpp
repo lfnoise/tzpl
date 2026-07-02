@@ -586,13 +586,216 @@ static bool resolve_cyc(Compiler& compiler, const std::vector<Type*>& args,
     pt = {lt}; rt = lt; cf = builtin_cyc_list; return true;
 }
 
-// ncyc: List[T], Int -> List[T]
+// ncyc: List[T], Int -> List[T]  or  [T], Int -> [T]
 static bool resolve_ncyc(Compiler& compiler, const std::vector<Type*>& args,
     std::vector<Type*>& pt, Type*& rt, CFun& cf) {
     if (args.size() != 2 || args[1] != compiler.intType()) return false;
+    if (auto* at = dynamic_cast<ArrayType*>(args[0])) {
+        pt = {at, compiler.intType()}; rt = at; cf = builtin_ncyc_array; return true;
+    }
     auto* lt = dynamic_cast<ListType*>(args[0]);
     if (!lt) return false;
     pt = {lt, compiler.intType()}; rt = lt; cf = builtin_ncyc_list; return true;
+}
+
+// sum/product over [Int]/[Float]/[Fraction]/[Complex] and the List forms;
+// the result type is the element type.
+#define RESOLVE_NUMERIC_REDUCE(fname, cf_ai, cf_af, cf_afr, cf_ac, cf_li, cf_lf, cf_lfr, cf_lc) \
+static bool resolve_##fname(Compiler& compiler, const std::vector<Type*>& args, \
+    std::vector<Type*>& pt, Type*& rt, CFun& cf) { \
+    if (args.size() != 1) return false; \
+    if (auto* at = dynamic_cast<ArrayType*>(args[0])) { \
+        if (at->elemType_ == compiler.intType())      { pt = {at}; rt = at->elemType_; cf = cf_ai;  return true; } \
+        if (at->elemType_ == compiler.floatType())    { pt = {at}; rt = at->elemType_; cf = cf_af;  return true; } \
+        if (at->elemType_ == compiler.fractionType()) { pt = {at}; rt = at->elemType_; cf = cf_afr; return true; } \
+        if (at->elemType_ == compiler.complexType())  { pt = {at}; rt = at->elemType_; cf = cf_ac;  return true; } \
+        return false; \
+    } \
+    if (auto* lt = dynamic_cast<ListType*>(args[0])) { \
+        if (lt->elemType_ == compiler.intType())      { pt = {lt}; rt = lt->elemType_; cf = cf_li;  return true; } \
+        if (lt->elemType_ == compiler.floatType())    { pt = {lt}; rt = lt->elemType_; cf = cf_lf;  return true; } \
+        if (lt->elemType_ == compiler.fractionType()) { pt = {lt}; rt = lt->elemType_; cf = cf_lfr; return true; } \
+        if (lt->elemType_ == compiler.complexType())  { pt = {lt}; rt = lt->elemType_; cf = cf_lc;  return true; } \
+    } \
+    return false; \
+}
+RESOLVE_NUMERIC_REDUCE(sum,
+    builtin_sum_int_array, builtin_sum_float_array,
+    builtin_sum_fraction_array, builtin_sum_complex_array,
+    builtin_sum_int_list, builtin_sum_float_list,
+    builtin_sum_fraction_list, builtin_sum_complex_list)
+RESOLVE_NUMERIC_REDUCE(product,
+    builtin_product_int_array, builtin_product_float_array,
+    builtin_product_fraction_array, builtin_product_complex_array,
+    builtin_product_int_list, builtin_product_float_list,
+    builtin_product_fraction_list, builtin_product_complex_list)
+#undef RESOLVE_NUMERIC_REDUCE
+
+// min/max reductions: [Int] | [Float] | [String] | the List forms -> element.
+// (The two-arg scalar min/max overloads are registered separately in
+// builtins_math.cpp; these single-arg forms coexist with them.)
+#define RESOLVE_MINMAX_REDUCE(fname, cf_ai, cf_af, cf_afr, cf_as, cf_li, cf_lf, cf_lfr, cf_ls) \
+static bool resolve_##fname(Compiler& compiler, const std::vector<Type*>& args, \
+    std::vector<Type*>& pt, Type*& rt, CFun& cf) { \
+    if (args.size() != 1) return false; \
+    if (auto* at = dynamic_cast<ArrayType*>(args[0])) { \
+        if (at->elemType_ == compiler.intType())      { pt = {at}; rt = at->elemType_; cf = cf_ai;  return true; } \
+        if (at->elemType_ == compiler.floatType())    { pt = {at}; rt = at->elemType_; cf = cf_af;  return true; } \
+        if (at->elemType_ == compiler.fractionType()) { pt = {at}; rt = at->elemType_; cf = cf_afr; return true; } \
+        if (at->elemType_ == compiler.stringType())   { pt = {at}; rt = at->elemType_; cf = cf_as;  return true; } \
+        return false; \
+    } \
+    if (auto* lt = dynamic_cast<ListType*>(args[0])) { \
+        if (lt->elemType_ == compiler.intType())      { pt = {lt}; rt = lt->elemType_; cf = cf_li;  return true; } \
+        if (lt->elemType_ == compiler.floatType())    { pt = {lt}; rt = lt->elemType_; cf = cf_lf;  return true; } \
+        if (lt->elemType_ == compiler.fractionType()) { pt = {lt}; rt = lt->elemType_; cf = cf_lfr; return true; } \
+        if (lt->elemType_ == compiler.stringType())   { pt = {lt}; rt = lt->elemType_; cf = cf_ls;  return true; } \
+    } \
+    return false; \
+}
+RESOLVE_MINMAX_REDUCE(min_reduce,
+    builtin_min_int_array, builtin_min_float_array, builtin_min_fraction_array, builtin_min_string_array,
+    builtin_min_int_list, builtin_min_float_list, builtin_min_fraction_list, builtin_min_string_list)
+RESOLVE_MINMAX_REDUCE(max_reduce,
+    builtin_max_int_array, builtin_max_float_array, builtin_max_fraction_array, builtin_max_string_array,
+    builtin_max_int_list, builtin_max_float_list, builtin_max_fraction_list, builtin_max_string_list)
+#undef RESOLVE_MINMAX_REDUCE
+
+// Running reductions: sums / products / mins / maxs. The result has the
+// input's shape; the List forms are lazy (one RunningListGen builtin per op
+// covers every element flavor). Complex is unordered, so mins/maxs pass
+// nullptr for it and reject.
+#define RESOLVE_RUNNING(fname, cf_ai, cf_af, cf_afr, cf_ac, cf_l, allowComplex) \
+static bool resolve_##fname(Compiler& compiler, const std::vector<Type*>& args, \
+    std::vector<Type*>& pt, Type*& rt, CFun& cf) { \
+    if (args.size() != 1) return false; \
+    if (auto* at = dynamic_cast<ArrayType*>(args[0])) { \
+        if (at->elemType_ == compiler.intType())      { pt = {at}; rt = at; cf = cf_ai;  return true; } \
+        if (at->elemType_ == compiler.floatType())    { pt = {at}; rt = at; cf = cf_af;  return true; } \
+        if (at->elemType_ == compiler.fractionType()) { pt = {at}; rt = at; cf = cf_afr; return true; } \
+        if (allowComplex && at->elemType_ == compiler.complexType()) { pt = {at}; rt = at; cf = cf_ac; return true; } \
+        return false; \
+    } \
+    if (auto* lt = dynamic_cast<ListType*>(args[0])) { \
+        if (lt->elemType_ == compiler.intType() || lt->elemType_ == compiler.floatType() \
+            || lt->elemType_ == compiler.fractionType() \
+            || (allowComplex && lt->elemType_ == compiler.complexType())) { \
+            pt = {lt}; rt = lt; cf = cf_l; return true; \
+        } \
+    } \
+    return false; \
+}
+RESOLVE_RUNNING(sums, builtin_sums_int_array, builtin_sums_float_array,
+                builtin_sums_fraction_array, builtin_sums_complex_array,
+                builtin_sums_list, true)
+RESOLVE_RUNNING(products, builtin_products_int_array, builtin_products_float_array,
+                builtin_products_fraction_array, builtin_products_complex_array,
+                builtin_products_list, true)
+RESOLVE_RUNNING(mins, builtin_mins_int_array, builtin_mins_float_array,
+                builtin_mins_fraction_array, nullptr,
+                builtin_mins_list, false)
+RESOLVE_RUNNING(maxs, builtin_maxs_int_array, builtin_maxs_float_array,
+                builtin_maxs_fraction_array, nullptr,
+                builtin_maxs_list, false)
+#undef RESOLVE_RUNNING
+
+// mean: [Int] | [Float] | List<Int> | List<Float> -> Float
+static bool resolve_mean(Compiler& compiler, const std::vector<Type*>& args,
+    std::vector<Type*>& pt, Type*& rt, CFun& cf) {
+    if (args.size() != 1) return false;
+    rt = compiler.floatType();
+    if (auto* at = dynamic_cast<ArrayType*>(args[0])) {
+        if (at->elemType_ == compiler.intType())   { pt = {at}; cf = builtin_mean_int_array;   return true; }
+        if (at->elemType_ == compiler.floatType()) { pt = {at}; cf = builtin_mean_float_array; return true; }
+        return false;
+    }
+    if (auto* lt = dynamic_cast<ListType*>(args[0])) {
+        if (lt->elemType_ == compiler.intType())   { pt = {lt}; cf = builtin_mean_int_list;   return true; }
+        if (lt->elemType_ == compiler.floatType()) { pt = {lt}; cf = builtin_mean_float_list; return true; }
+    }
+    return false;
+}
+
+// any/all: ([T], (T)->Bool) -> Bool  |  (List<T>, (T)->Bool) -> Bool
+//          [Bool] -> Bool            |  List<Bool> -> Bool
+#define RESOLVE_ANY_ALL(fname, cf_bool_a, cf_bool_l, cf_pred_a, cf_pred_l) \
+static bool resolve_##fname(Compiler& compiler, const std::vector<Type*>& args, \
+    std::vector<Type*>& pt, Type*& rt, CFun& cf) { \
+    rt = compiler.boolType(); \
+    if (args.size() == 1) { \
+        if (auto* at = dynamic_cast<ArrayType*>(args[0]); at && at->elemType_ == compiler.boolType()) { \
+            pt = {at}; cf = cf_bool_a; return true; \
+        } \
+        if (auto* lt = dynamic_cast<ListType*>(args[0]); lt && lt->elemType_ == compiler.boolType()) { \
+            pt = {lt}; cf = cf_bool_l; return true; \
+        } \
+        return false; \
+    } \
+    if (args.size() != 2) return false; \
+    auto* ft = dynamic_cast<FunctionType*>(args[1]); \
+    if (!ft || ft->argTypes_.size() != 1 || ft->returnType_ != compiler.boolType()) return false; \
+    if (auto* at = dynamic_cast<ArrayType*>(args[0])) { \
+        if (ft->argTypes_[0] != at->elemType_) return false; \
+        pt = {at, args[1]}; cf = cf_pred_a; return true; \
+    } \
+    if (auto* lt = dynamic_cast<ListType*>(args[0])) { \
+        if (ft->argTypes_[0] != lt->elemType_) return false; \
+        pt = {lt, args[1]}; cf = cf_pred_l; return true; \
+    } \
+    return false; \
+}
+RESOLVE_ANY_ALL(any, builtin_any_bool_array, builtin_any_bool_list,
+                builtin_any_array, builtin_any_list)
+RESOLVE_ANY_ALL(all, builtin_all_bool_array, builtin_all_bool_list,
+                builtin_all_array, builtin_all_list)
+#undef RESOLVE_ANY_ALL
+
+// clump: [T], Int -> [[T]]
+static bool resolve_clump(Compiler& compiler, const std::vector<Type*>& args,
+    std::vector<Type*>& pt, Type*& rt, CFun& cf) {
+    if (args.size() != 2 || args[1] != compiler.intType()) return false;
+    auto* at = dynamic_cast<ArrayType*>(args[0]);
+    if (!at) return false;
+    pt = {at, compiler.intType()}; rt = compiler.arrayType(at); cf = builtin_clump_array;
+    return true;
+}
+
+// spread: [T], [Int] -> [T]
+static bool resolve_spread(Compiler& compiler, const std::vector<Type*>& args,
+    std::vector<Type*>& pt, Type*& rt, CFun& cf) {
+    if (args.size() != 2) return false;
+    auto* at = dynamic_cast<ArrayType*>(args[0]);
+    auto* ct = dynamic_cast<ArrayType*>(args[1]);
+    if (!at || !ct || ct->elemType_ != compiler.intType()) return false;
+    pt = {at, ct}; rt = at; cf = builtin_spread_array;
+    return true;
+}
+
+// toSet: [T] | List<T> -> Set<T>
+static bool resolve_toSet(Compiler& compiler, const std::vector<Type*>& args,
+    std::vector<Type*>& pt, Type*& rt, CFun& cf) {
+    if (args.size() != 1) return false;
+    if (auto* at = dynamic_cast<ArrayType*>(args[0])) {
+        pt = {at}; rt = compiler.setType(at->elemType_); cf = builtin_toSet_array; return true;
+    }
+    if (auto* lt = dynamic_cast<ListType*>(args[0])) {
+        pt = {lt}; rt = compiler.setType(lt->elemType_); cf = builtin_toSet_list; return true;
+    }
+    return false;
+}
+
+// fromCodePoints: [Int] | List<Int> -> String  (inverse of codePoints)
+static bool resolve_fromCodePoints(Compiler& compiler, const std::vector<Type*>& args,
+    std::vector<Type*>& pt, Type*& rt, CFun& cf) {
+    if (args.size() != 1) return false;
+    rt = compiler.stringType();
+    if (auto* at = dynamic_cast<ArrayType*>(args[0]); at && at->elemType_ == compiler.intType()) {
+        pt = {at}; cf = builtin_fromCodePoints_array; return true;
+    }
+    if (auto* lt = dynamic_cast<ListType*>(args[0]); lt && lt->elemType_ == compiler.intType()) {
+        pt = {lt}; cf = builtin_fromCodePoints_list; return true;
+    }
+    return false;
 }
 
 // hang: List[T] -> List[T]
@@ -1139,6 +1342,14 @@ static bool resolve_contains(Compiler& compiler, const std::vector<Type*>& args,
     if (auto* st = dynamic_cast<SetType*>(args[0])) {
         if (args[1] != st->elemType_) return false;
         pt = {st, st->elemType_}; rt = compiler.boolType(); cf = builtin_contains_set; return true;
+    }
+    if (auto* at = dynamic_cast<ArrayType*>(args[0])) {
+        if (args[1] != at->elemType_) return false;
+        pt = {at, at->elemType_}; rt = compiler.boolType(); cf = builtin_contains_array; return true;
+    }
+    if (auto* lt = dynamic_cast<ListType*>(args[0])) {
+        if (args[1] != lt->elemType_) return false;
+        pt = {lt, lt->elemType_}; rt = compiler.boolType(); cf = builtin_contains_list; return true;
     }
     return false;
 }
@@ -3565,6 +3776,21 @@ void registerBuiltinFunctions(Compiler& compiler,
     registerTemplate(compiler, functions, "repeat",    resolve_repeat,    /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
     registerTemplate(compiler, functions, "cat",       resolve_cat,       /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
     registerTemplate(compiler, functions, "join",      resolve_join,      /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "sum",       resolve_sum,       /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "product",   resolve_product,   /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "mean",      resolve_mean,      /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "min",       resolve_min_reduce, /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "max",       resolve_max_reduce, /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "sums",      resolve_sums,      /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "products",  resolve_products,  /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "mins",      resolve_mins,      /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "maxs",      resolve_maxs,      /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "any",       resolve_any,       /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "all",       resolve_all,       /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "clump",     resolve_clump,     /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "spread",    resolve_spread,    /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "toSet",     resolve_toSet,     /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "fromCodePoints", resolve_fromCodePoints, /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
     registerTemplate(compiler, functions, "flatten",   resolve_flatten,   /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
     registerTemplate(compiler, functions, "map",       resolve_map,       /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
     registerTemplate(compiler, functions, "filter",    resolve_filter,    /*rtSafe=*/true, /*acceptsInlineArgs=*/true);

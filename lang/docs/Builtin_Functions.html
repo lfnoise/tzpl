@@ -347,7 +347,7 @@
                 <li><a href="#string">String Functions</a> &mdash; length, substring, contains, startsWith, endsWith, split, trim, toUpper, toLower, replace, codePoints, indexing, min, max, cmp</li>
                 <li><a href="#formatting">String Formatting</a> &mdash; fmt</li>
                 <li><a href="#range">Range Functions</a> &mdash; length, toArray, toList</li>
-                <li><a href="#collections">Collection Functions (Arrays &amp; Lists)</a> &mdash; length, map, filter, fold, scan, fold1, scan1, find, zip, enumerate, take, drop, takeWhile, dropWhile, stride, stutter, repeat, cat, join, flatten</li>
+                <li><a href="#collections">Collection Functions (Arrays &amp; Lists)</a> &mdash; length, map, filter, fold, scan, fold1, scan1, find, zip, enumerate, take, drop, takeWhile, dropWhile, stride, stutter, repeat, cat, join, flatten, sum, product, mean, min, max, sums, products, mins, maxs, any, all, contains, clump, spread, toSet, fromCodePoints</li>
                 <li><a href="#array-only">Array-only Functions</a> &mdash; reverse, push, pop, push!, pop!, sort, muss, copy</li>
                 <li><a href="#list-only">List-only Functions</a> &mdash; head, tail, cons, isNil, notNil, cyc, ncyc, hang, iter</li>
                 <li><a href="#map-functions">Map Functions</a> &mdash; get, getOrDefault, getOrElse, put, put!, remove, remove!, contains, keys, values, pairs, merge, mergeIfAbsent, mergeIfPresent, length, copy, <code>m[k] = v</code></li>
@@ -612,6 +612,8 @@ picks(["a", "b", "c"], 4)   <span class="cmt">-- e.g. ["b", "a", "c", "a"]</span
                 <tr><td><code>sqrt(z)</code></td><td><code>Complex &rarr; Complex</code></td><td>Complex square root.</td></tr>
                 <tr><td><code>cbrt(x)</code></td><td><code>Float &rarr; Float</code></td><td>Cube root.</td></tr>
                 <tr><td><code>pow(x, y)</code></td><td><code>(Float, Float) &rarr; Float</code></td><td>Raise <code>x</code> to the power <code>y</code>.</td></tr>
+                <tr><td><code>pow(n, e)</code></td><td><code>(Int, Int) &rarr; Int</code></td><td>Integer power (exponentiation by squaring). Negative exponents truncate toward zero: bases 1 / -1 keep their reciprocal, anything else gives 0.</td></tr>
+                <tr><td><code>pow(q, e)</code></td><td><code>(Fraction, Int) &rarr; Fraction</code></td><td>Exact rational power. Negative exponents invert the base: <code>pow(3/4, -2)</code> is <code>16/9</code>.</td></tr>
                 <tr><td><code>pow(z, w)</code></td><td><code>(Complex, Complex) &rarr; Complex</code></td><td>Complex power.</td></tr>
                 <tr><td><code>hypot(x, y)</code></td><td><code>(Float, Float) &rarr; Float</code></td><td>Hypotenuse: <code>sqrt(x&sup2; + y&sup2;)</code> without overflow.</td></tr>
                 <tr><td><code>remainder(x, y)</code></td><td><code>(Float, Float) &rarr; Float</code></td><td>IEEE remainder of <code>x / y</code>. Result is <code>x &minus; n*y</code> where <code>n</code> is the nearest integer to <code>x/y</code>.</td></tr>
@@ -1258,6 +1260,100 @@ List(List(1, 2), List(3, 4)) join      <span class="cmt">-- List(1, 2, 3, 4)</sp
                 <code>flatten</code> only removes layers of the <em>same</em> container type. A <code>[[List&lt;Int&gt;]]</code> flattens to <code>[List&lt;Int&gt;]</code> &mdash; the array layers are removed but the List is preserved.
             </div>
 
+            <h3><code>sum(collection)</code>, <code>product(collection)</code>, <code>mean(collection)</code></h3>
+            <p>Numeric reductions over <code>Int</code>, <code>Float</code>, <code>Fraction</code>, or <code>Complex</code> elements; the result has the element type. <code>sum</code> of an empty collection is 0, <code>product</code> is 1, and <code>mean</code> is nan. <code>mean</code> is Int/Float only and always returns <code>Float</code>.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>sum([T]) &rarr; T</code> for T in Int/Float/Fraction/Complex</td><td>Sum of the elements. Also for the List forms.</td></tr>
+                <tr><td><code>product([T]) &rarr; T</code>, same element types</td><td>Product of the elements. Also for lists.</td></tr>
+                <tr><td><code>mean([Int]) &rarr; Float</code>, <code>mean([Float]) &rarr; Float</code></td><td>Arithmetic mean. Also for lists.</td></tr>
+            </table>
+            <pre><code>[1, 2, 3, 4] sum                         <span class="cmt">-- 10</span>
+[1/2, 1/3, 1/6] sum                      <span class="cmt">-- 1/1</span>
+(1..5) toList product                    <span class="cmt">-- 120</span>
+[1.0, 2.0, 6.0] mean                     <span class="cmt">-- 3.0</span></code></pre>
+
+            <h3><code>min(collection)</code>, <code>max(collection)</code></h3>
+            <p>Smallest / largest element of an array or list. Works for <code>Int</code>, <code>Float</code>, <code>Fraction</code>, and <code>String</code> elements (the two-arg scalar forms <code>min(a, b)</code> / <code>max(a, b)</code> are documented in the math section). Empty collections yield the reduction identity: <code>INT64_MAX</code>/<code>INT64_MIN</code> for Int and Fraction, &plusmn;inf for Float, <code>""</code> for String.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>min([T]) &rarr; T</code> for T in Int/Float/Fraction/String</td><td>Minimum element. Also for lists.</td></tr>
+                <tr><td><code>max([T]) &rarr; T</code>, same element types</td><td>Maximum element. Also for lists.</td></tr>
+            </table>
+            <pre><code>[3, 1, 4, 1, 5] min                      <span class="cmt">-- 1</span>
+[3, 1, 4, 1, 5] max                      <span class="cmt">-- 5</span>
+["banana", "apple"] min                  <span class="cmt">-- "apple"</span></code></pre>
+
+            <h3><code>sums(collection)</code>, <code>products(collection)</code>, <code>mins(collection)</code>, <code>maxs(collection)</code></h3>
+            <p>Running (cumulative) reductions: element <code>i</code> of the result is the reduction of elements <code>0..i</code>, so the result has the same length as the input. The List forms are lazy and compose with infinite lists.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>sums([T]) &rarr; [T]</code> for T in Int/Float/Fraction/Complex</td><td>Running sum. Also for lists (lazy).</td></tr>
+                <tr><td><code>products(...)</code></td><td>Running product; same shapes.</td></tr>
+                <tr><td><code>mins(...)</code>, <code>maxs(...)</code></td><td>Running minimum / maximum; Int/Float/Fraction (Complex is unordered).</td></tr>
+            </table>
+            <pre><code>[1, 2, 3, 4] sums                        <span class="cmt">-- [1, 3, 6, 10]</span>
+[3, 1, 4, 1, 5] mins                     <span class="cmt">-- [3, 1, 1, 1, 1]</span>
+(1..) toList sums take(5)                <span class="cmt">-- List(1, 3, 6, 10, 15)</span></code></pre>
+
+            <h3><code>any(collection, fn)</code>, <code>all(collection, fn)</code></h3>
+            <p>Predicate quantifiers, short-circuiting (lazy lists are only forced as far as needed). <code>any</code> of an empty collection is false; <code>all</code> is true. Without a predicate they reduce a <code>Bool</code> collection directly.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>any([T], (T) Bool) &rarr; Bool</code></td><td>True if the predicate holds for some element. Also for lists.</td></tr>
+                <tr><td><code>all([T], (T) Bool) &rarr; Bool</code></td><td>True if the predicate holds for every element. Also for lists.</td></tr>
+                <tr><td><code>any([Bool]) &rarr; Bool</code>, <code>all([Bool]) &rarr; Bool</code></td><td>Reduce a Bool collection by or / and. Also for lists.</td></tr>
+            </table>
+            <pre><code>[1, 2, 3] any(fn(x Int) { x &gt; 2 })       <span class="cmt">-- true</span>
+[1, 2, 3] all(fn(x Int) { x &gt; 2 })       <span class="cmt">-- false</span>
+[true, false] any                        <span class="cmt">-- true</span></code></pre>
+
+            <h3><code>contains(collection, x)</code></h3>
+            <p>Membership test for arrays and lists (in addition to the String/Set/Map forms documented in their own sections). Uses element equality, so it works for strings, tuples, and other composite element types.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>contains([T], T) &rarr; Bool</code></td><td>True if some element equals x.</td></tr>
+                <tr><td><code>contains(List&lt;T&gt;, T) &rarr; Bool</code></td><td>List form; forces lazy elements only until a match.</td></tr>
+            </table>
+            <pre><code>[1, 2, 3] contains(2)                    <span class="cmt">-- true</span>
+List((1, 2), (3, 4)) contains((3, 4))    <span class="cmt">-- true</span></code></pre>
+
+            <h3><code>clump(array, n)</code></h3>
+            <p>Groups an array into rows of <code>n</code> elements; a short remainder row is kept. <code>n &lt;= 0</code> yields an empty array.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>clump([T], Int) &rarr; [[T]]</code></td><td>Fixed-size grouping.</td></tr>
+            </table>
+            <pre><code>(1..10) toArray clump(3)                 <span class="cmt">-- [[1, 2, 3], [4, 5, 6], [7, 8, 9], [10]]</span></code></pre>
+
+            <h3><code>spread(array, counts)</code></h3>
+            <p>Replicates element <code>i</code> <code>counts[i]</code> times. The counts array is indexed cyclically (like ordinary array indexing), so a shorter counts array tiles across the source; counts <code>&lt;= 0</code> drop the element.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>spread([T], [Int]) &rarr; [T]</code></td><td>Per-element replication.</td></tr>
+            </table>
+            <pre><code>[10, 20, 30] spread([1, 0, 2])           <span class="cmt">-- [10, 30, 30]</span>
+[7, 8] spread([3])                       <span class="cmt">-- [7, 7, 7, 8, 8, 8]</span></code></pre>
+
+            <h3><code>toSet(collection)</code></h3>
+            <p>Builds a <code>Set</code> from the elements of an array or list, discarding duplicates.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>toSet([T]) &rarr; Set&lt;T&gt;</code></td><td>Array form.</td></tr>
+                <tr><td><code>toSet(List&lt;T&gt;) &rarr; Set&lt;T&gt;</code></td><td>List form (forces the whole list).</td></tr>
+            </table>
+            <pre><code>[1, 2, 2, 3, 1] toSet length             <span class="cmt">-- 3</span></code></pre>
+
+            <h3><code>fromCodePoints(collection)</code></h3>
+            <p>The inverse of <code>codePoints</code>: builds a String from Unicode code points (UTF-8 encoded). Invalid code points become U+FFFD.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>fromCodePoints([Int]) &rarr; String</code></td><td>Array form.</td></tr>
+                <tr><td><code>fromCodePoints(List&lt;Int&gt;) &rarr; String</code></td><td>List form.</td></tr>
+            </table>
+            <pre><code>[72, 105, 33] fromCodePoints             <span class="cmt">-- "Hi!"</span>
+"héllo" codePoints fromCodePoints        <span class="cmt">-- "héllo"</span></code></pre>
+
             <a href="#top" class="back-to-top">&uarr; Back to top</a>
         </div>
 
@@ -1414,14 +1510,15 @@ notNil(empty)   <span class="cmt">-- false</span></code></pre>
             <pre><code>List(1, 2, 3) cyc take(10)     <span class="cmt">-- List(1, 2, 3, 1, 2, 3, 1, 2, 3, 1)</span>
 List(1, 2, 3) cyc take(7)      <span class="cmt">-- List(1, 2, 3, 1, 2, 3, 1)</span></code></pre>
 
-            <h3><code>ncyc(list, n)</code></h3>
-            <p>Returns a list that repeats the input list <code>n</code> times.</p>
+            <h3><code>ncyc(collection, n)</code></h3>
+            <p>Returns the input repeated <code>n</code> times. Works on both lists and arrays (unlike <code>cyc</code>, whose infinite result only makes sense as a lazy list).</p>
             <table>
                 <tr><th>Signature</th><th>Description</th></tr>
                 <tr><td><code>ncyc(List&lt;T&gt;, Int) &rarr; List&lt;T&gt;</code></td><td>Cycle a list <code>n</code> times.</td></tr>
+                <tr><td><code>ncyc([T], Int) &rarr; [T]</code></td><td>Cycle an array <code>n</code> times.</td></tr>
             </table>
             <pre><code>List(1, 2, 3) ncyc(3)     <span class="cmt">-- List(1, 2, 3, 1, 2, 3, 1, 2, 3)</span>
-List(1, 2) ncyc(4)        <span class="cmt">-- List(1, 2, 1, 2, 1, 2, 1, 2)</span></code></pre>
+[1, 2] ncyc(4)            <span class="cmt">-- [1, 2, 1, 2, 1, 2, 1, 2]</span></code></pre>
 
             <h3><code>hang(list)</code></h3>
             <p>Returns an infinite list that, upon reaching the last element, repeats it indefinitely.</p>

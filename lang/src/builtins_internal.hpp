@@ -206,6 +206,51 @@ inline void arrayPushFromSlot(VM& vm, Obj* a, Type* et, Word const* src) {
     }
 }
 
+// Pointer to element i's Words in native (stride-packed) form, suitable for
+// wordsEqual / arrayPushFromSlot / SetObj::insertElem. POD backends copy the
+// value into caller-provided tmp (>= 2 Words); Complex/Fraction reinterpret
+// their 16-byte storage as 2 Words in place; Inline returns the interior
+// slot pointer directly. The returned pointer is invalidated by any mutation
+// of the source array.
+inline Word const* arrayElemSlot(Obj* a, Type* et, size_t i, Word* tmp) {
+    switch (arrayBackendFor(et)) {
+        case ArrayBackend::Int:
+            tmp[0] = Word(static_cast<PodArray<i64>*>(a)->v[i]); return tmp;
+        case ArrayBackend::Float:
+            tmp[0] = Word(static_cast<PodArray<f64>*>(a)->v[i]); return tmp;
+        case ArrayBackend::Complex:
+            return reinterpret_cast<Word const*>(&static_cast<PodArray<x64>*>(a)->v[i]);
+        case ArrayBackend::Fraction:
+            return reinterpret_cast<Word const*>(&static_cast<PodArray<r64>*>(a)->v[i]);
+        case ArrayBackend::Inline:
+            return static_cast<InlineArray*>(a)->slot(i);
+        case ArrayBackend::Obj:
+            tmp[0] = Word(static_cast<ObjArray*>(a)->get(i)); return tmp;
+    }
+    return tmp;
+}
+
+// Append code point cp to out as UTF-8; invalid code points (negative,
+// surrogates, > U+10FFFF) become U+FFFD.
+inline void appendUtf8Cp(VMString& out, i64 cp) {
+    u32 c = (cp < 0 || cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF))
+          ? 0xFFFDu : (u32)cp;
+    if (c < 0x80) { out += (char)c; }
+    else if (c < 0x800) {
+        out += (char)(0xC0 | (c >> 6));
+        out += (char)(0x80 | (c & 0x3F));
+    } else if (c < 0x10000) {
+        out += (char)(0xE0 | (c >> 12));
+        out += (char)(0x80 | ((c >> 6) & 0x3F));
+        out += (char)(0x80 | (c & 0x3F));
+    } else {
+        out += (char)(0xF0 | (c >> 18));
+        out += (char)(0x80 | ((c >> 12) & 0x3F));
+        out += (char)(0x80 | ((c >> 6) & 0x3F));
+        out += (char)(0x80 | (c & 0x3F));
+    }
+}
+
 // arrayPush takes a single Word source. Phase 4g.21: Complex/Fraction Word
 // sources are expected to be heap Obj* pointers (the caller boxes if
 // necessary) -- we read the value and store it natively into the
@@ -528,6 +573,48 @@ void builtin_dropWhile_array(VM&, u16, u16, u16);
 void builtin_zip_array(VM&, u16, u16, u16);
 void builtin_enumerate_array(VM&, u16, u16, u16);
 void builtin_length_array(VM&, u16, u16, u16);
+void builtin_sum_int_array(VM&, u16, u16, u16);
+void builtin_sum_float_array(VM&, u16, u16, u16);
+void builtin_product_int_array(VM&, u16, u16, u16);
+void builtin_product_float_array(VM&, u16, u16, u16);
+void builtin_mean_int_array(VM&, u16, u16, u16);
+void builtin_mean_float_array(VM&, u16, u16, u16);
+void builtin_any_array(VM&, u16, u16, u16);
+void builtin_all_array(VM&, u16, u16, u16);
+void builtin_any_bool_array(VM&, u16, u16, u16);
+void builtin_all_bool_array(VM&, u16, u16, u16);
+void builtin_contains_array(VM&, u16, u16, u16);
+void builtin_clump_array(VM&, u16, u16, u16);
+void builtin_spread_array(VM&, u16, u16, u16);
+void builtin_ncyc_array(VM&, u16, u16, u16);
+void builtin_toSet_array(VM&, u16, u16, u16);
+void builtin_fromCodePoints_array(VM&, u16, u16, u16);
+void builtin_min_int_array(VM&, u16, u16, u16);
+void builtin_max_int_array(VM&, u16, u16, u16);
+void builtin_min_float_array(VM&, u16, u16, u16);
+void builtin_max_float_array(VM&, u16, u16, u16);
+void builtin_min_string_array(VM&, u16, u16, u16);
+void builtin_max_string_array(VM&, u16, u16, u16);
+void builtin_sums_int_array(VM&, u16, u16, u16);
+void builtin_sums_float_array(VM&, u16, u16, u16);
+void builtin_products_int_array(VM&, u16, u16, u16);
+void builtin_products_float_array(VM&, u16, u16, u16);
+void builtin_mins_int_array(VM&, u16, u16, u16);
+void builtin_mins_float_array(VM&, u16, u16, u16);
+void builtin_maxs_int_array(VM&, u16, u16, u16);
+void builtin_maxs_float_array(VM&, u16, u16, u16);
+void builtin_sum_fraction_array(VM&, u16, u16, u16);
+void builtin_product_fraction_array(VM&, u16, u16, u16);
+void builtin_sum_complex_array(VM&, u16, u16, u16);
+void builtin_product_complex_array(VM&, u16, u16, u16);
+void builtin_min_fraction_array(VM&, u16, u16, u16);
+void builtin_max_fraction_array(VM&, u16, u16, u16);
+void builtin_sums_fraction_array(VM&, u16, u16, u16);
+void builtin_products_fraction_array(VM&, u16, u16, u16);
+void builtin_mins_fraction_array(VM&, u16, u16, u16);
+void builtin_maxs_fraction_array(VM&, u16, u16, u16);
+void builtin_sums_complex_array(VM&, u16, u16, u16);
+void builtin_products_complex_array(VM&, u16, u16, u16);
 
 // --- List/generator builtins (builtins_listgen.cpp) ---
 void builtin_take_list(VM&, u16, u16, u16);
@@ -559,6 +646,35 @@ void builtin_cons_list_symbol(VM&, u16, u16, u16);
 void builtin_cons_list_obj(VM&, u16, u16, u16);
 void builtin_isNil_list(VM&, u16, u16, u16);
 void builtin_notNil_list(VM&, u16, u16, u16);
+void builtin_sum_int_list(VM&, u16, u16, u16);
+void builtin_sum_float_list(VM&, u16, u16, u16);
+void builtin_product_int_list(VM&, u16, u16, u16);
+void builtin_product_float_list(VM&, u16, u16, u16);
+void builtin_mean_int_list(VM&, u16, u16, u16);
+void builtin_mean_float_list(VM&, u16, u16, u16);
+void builtin_any_list(VM&, u16, u16, u16);
+void builtin_all_list(VM&, u16, u16, u16);
+void builtin_any_bool_list(VM&, u16, u16, u16);
+void builtin_all_bool_list(VM&, u16, u16, u16);
+void builtin_contains_list(VM&, u16, u16, u16);
+void builtin_toSet_list(VM&, u16, u16, u16);
+void builtin_fromCodePoints_list(VM&, u16, u16, u16);
+void builtin_min_int_list(VM&, u16, u16, u16);
+void builtin_max_int_list(VM&, u16, u16, u16);
+void builtin_min_float_list(VM&, u16, u16, u16);
+void builtin_max_float_list(VM&, u16, u16, u16);
+void builtin_min_string_list(VM&, u16, u16, u16);
+void builtin_max_string_list(VM&, u16, u16, u16);
+void builtin_sums_list(VM&, u16, u16, u16);
+void builtin_products_list(VM&, u16, u16, u16);
+void builtin_mins_list(VM&, u16, u16, u16);
+void builtin_maxs_list(VM&, u16, u16, u16);
+void builtin_sum_fraction_list(VM&, u16, u16, u16);
+void builtin_product_fraction_list(VM&, u16, u16, u16);
+void builtin_sum_complex_list(VM&, u16, u16, u16);
+void builtin_product_complex_list(VM&, u16, u16, u16);
+void builtin_min_fraction_list(VM&, u16, u16, u16);
+void builtin_max_fraction_list(VM&, u16, u16, u16);
 void builtin_toList_array(VM&, u16, u16, u16);
 void builtin_toList_coroutine(VM&, u16, u16, u16);
 void builtin_codePoints(VM&, u16, u16, u16);
