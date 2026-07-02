@@ -12,6 +12,8 @@
 -- The decimal digits of a non-negative integer.
 fn digits(n Int) List<Int> = n toString codePoints - 48;
 
+fn sq(x Int) Int = x * x;
+
 fn isqrt(n Int) Int = n toFloat sqrt round toInt;
 
 ------------------------------------------------------------------------------
@@ -25,7 +27,6 @@ fn doorIsOpen(door Int) Bool =
 (1..100) toArray filter(doorIsOpen) println;
 
 -- Optimized: exactly the perfect squares.
-fn sq(x Int) Int = x * x;
 (1..10) toArray sq println;
 
 ------------------------------------------------------------------------------
@@ -101,10 +102,7 @@ acc(2.5) println;
 
 "== happy numbers ==" println;
 
-fn sumSqDigits(n Int) Int {
-    let ds = digits(n);
-    (ds * ds) sum
-}
+fn sumSqDigits(n Int) Int = digits(n) sq sum;
 -- Iterating sumSqDigits always falls into 1 (happy) or the cycle through 4.
 fn isHappy(n Int) Bool =
     iter(n, sumSqDigits) dropWhile(fn(x Int) { x != 1 && x != 4 }) head == 1;
