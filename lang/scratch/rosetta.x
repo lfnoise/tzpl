@@ -14,7 +14,7 @@ fn digits(n Int) List<Int> = n toString codePoints - 48;
 
 fn sq(x Int) Int = x * x;
 
-fn isqrt(n Int) Int = n toFloat sqrt round toInt;
+fn isqrt(n Int) Int = n sqrt round toInt;
 
 ------------------------------------------------------------------------------
 -- 100 doors              http://rosettacode.org/wiki/100_doors
@@ -223,7 +223,7 @@ fn hammingUpTo(limit Float) [Int] =
     (0..31) toArray map(fn(i Int) {
         (0..20) toArray map(fn(j Int) {
             (0..13) toArray map(fn(k Int) {
-                2.0 pow(i toFloat) * 3.0 pow(j toFloat) * 5.0 pow(k toFloat)
+                2.0 pow(i) * 3.0 pow(j) * 5.0 pow(k)
             })
         })
     }) flatten filter(fn(x Float) { x <= limit }) sort toInt;
@@ -352,7 +352,7 @@ fn priceFrac(v Float) Float = priceOut[priceTop find(fn(t Float) { v < t })];
 
 let points = zip(irands(-15, 15), irands(-15, 15))
     filter(fn(p (Int, Int)) {
-        let h = hypot(p.0 toFloat, p.1 toFloat);
+        let h = hypot(p.0, p.1);
         h >= 10.0 && h <= 15.0
     })
     take(100);
