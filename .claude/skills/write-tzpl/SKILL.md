@@ -56,6 +56,12 @@ fn inner() {
 
 ## Functions
 
+Top-level declarations (`fn`, `struct`, `enum`, `constraint`, `type`) are
+**order independent** -- a function may be called textually before its
+definition, and mutual recursion needs no forward declarations. Order
+functions for readability, not for scope. (Top-level `let`/`var` initializers
+still run in program order.)
+
 ### Block body (no semicolon after closing brace)
 ```
 fn max(a Int, b Int) Int {
