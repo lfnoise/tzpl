@@ -1704,18 +1704,30 @@ void builtin_fromCodePoints_list(VM& vm, u16 dst, u16, u16 ab) {
     vm.reg(dst).o = so;
 }
 
-// join(List<String>) -> String: the List analogue of join([String]) --
-// one-level flatten of strings-as-char-sequences, i.e. concatenation.
-void builtin_join_strings_list(VM& vm, u16 dst, u16, u16 ab) {
+// join(List<String>) / join(List<String>, sep) -> String: the List
+// analogues of the [String] forms -- one-level flatten of strings-as-
+// char-sequences, i.e. concatenation, optionally separated.
+static void joinStringsListImpl(VM& vm, u16 dst, u16 ab, StringObj* sep) {
     auto* src = static_cast<ListNode*>(vm.reg(ab).o);
     auto* so = new StringObj();
-    GCKeepAliveScope keep(vm, {src, so});
+    GCKeepAliveScope keep(vm, {src, (GCObj*)sep, so});
+    bool first = true;
     for (ListNode* cur = src; cur; cur = cur->tail_) {
         cur->force(vm);
+        if (!first && sep) so->s += sep->s;
+        first = false;
         auto* s = static_cast<StringObj*>(cur->headData()[0].o);
         so->s += s->s;
     }
     vm.reg(dst).o = so;
+}
+
+void builtin_join_strings_list(VM& vm, u16 dst, u16, u16 ab) {
+    joinStringsListImpl(vm, dst, ab, nullptr);
+}
+
+void builtin_join_strings_sep_list(VM& vm, u16 dst, u16, u16 ab) {
+    joinStringsListImpl(vm, dst, ab, static_cast<StringObj*>(vm.reg(ab + 1).o));
 }
 
 // Fraction/Complex reductions read the native 2-word heads and write the

@@ -1243,7 +1243,7 @@ cat(List(1, 2), List(3, 4))              <span class="cmt">-- List(1, 2, 3, 4)</
                 <tr><td><code>join([[T]]) &rarr; [T]</code></td><td>Flatten an array of arrays.</td></tr>
                 <tr><td><code>join(List&lt;List&lt;T&gt;&gt;) &rarr; List&lt;T&gt;</code></td><td>Lazily flatten a list of lists.</td></tr>
                 <tr><td><code>join([String]) &rarr; String</code>, <code>join(List&lt;String&gt;) &rarr; String</code></td><td>Concatenate strings.</td></tr>
-                <tr><td><code>join([String], String) &rarr; String</code></td><td>Concatenate with a separator between elements.</td></tr>
+                <tr><td><code>join([String], String) &rarr; String</code>, <code>join(List&lt;String&gt;, String) &rarr; String</code></td><td>Concatenate with a separator between elements.</td></tr>
             </table>
             <pre><code>[[1, 2], [3, 4], [5]] join             <span class="cmt">-- [1, 2, 3, 4, 5]</span>
 List(List(1, 2), List(3, 4)) join      <span class="cmt">-- List(1, 2, 3, 4)</span>

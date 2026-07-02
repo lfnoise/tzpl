@@ -27,3 +27,8 @@ List("ab", "cd") join println;
 [["a", "b"], ["c"]] join println;
 [["a", "b"], ["c"]] join join println;
 List(List("a"), List("b", "c")) join println;
+
+-- join(List<String>, sep) -> String
+List("a", "b", "c") join(", ") println;
+(1..3) toList map(fn(x Int) String { x toString }) join("-") println;
+List("solo") join("-") println;

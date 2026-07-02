@@ -263,9 +263,10 @@ static void builtin_join_strings_sep(VM& vm, u16 dst, u16, u16 ab) {
 
 // join/flatten: [[T]] -> [T]  or  List<List<T>> -> List<T>
 // join([String]) / join(List<String>) -> String -- for strings, one-level
-// flatten means concatenation. join([String], sep) is a convenience overload;
-// the String branches only fire when the ELEMENT type is String, so they can
-// never hide a nested-collection flatten ([[String]] takes the [[T]] path).
+// flatten means concatenation. join(coll, sep) is a convenience overload for
+// both container kinds; the String branches only fire when the ELEMENT type
+// is String, so they can never hide a nested-collection flatten ([[String]]
+// takes the [[T]] path).
 static bool resolve_join(Compiler& compiler, const std::vector<Type*>& args,
     std::vector<Type*>& pt, Type*& rt, CFun& cf) {
     if (args.empty()) return false;
@@ -282,6 +283,19 @@ static bool resolve_join(Compiler& compiler, const std::vector<Type*>& args,
             return false;
         }
     }
+    if (auto* lt = dynamic_cast<ListType*>(args[0])) {
+        if (lt->elemType_ == compiler.stringType()) {
+            if (args.size() == 1) {
+                pt = {lt}; rt = compiler.stringType();
+                cf = builtin_join_strings_list; return true;
+            }
+            if (args.size() == 2 && args[1] == compiler.stringType()) {
+                pt = {lt, compiler.stringType()}; rt = compiler.stringType();
+                cf = builtin_join_strings_sep_list; return true;
+            }
+            return false;
+        }
+    }
     if (args.size() != 1) return false;
     if (auto* at = dynamic_cast<ArrayType*>(args[0])) {
         if (dynamic_cast<ArrayType*>(at->elemType_)) {
@@ -290,10 +304,6 @@ static bool resolve_join(Compiler& compiler, const std::vector<Type*>& args,
         }
     }
     if (auto* lt = dynamic_cast<ListType*>(args[0])) {
-        if (lt->elemType_ == compiler.stringType()) {
-            pt = {lt}; rt = compiler.stringType();
-            cf = builtin_join_strings_list; return true;
-        }
         if (dynamic_cast<ListType*>(lt->elemType_)) {
             pt = {lt}; rt = static_cast<ListType*>(lt->elemType_);
             cf = builtin_join_list; return true;

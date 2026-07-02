@@ -660,6 +660,7 @@ void builtin_contains_list(VM&, u16, u16, u16);
 void builtin_toSet_list(VM&, u16, u16, u16);
 void builtin_fromCodePoints_list(VM&, u16, u16, u16);
 void builtin_join_strings_list(VM&, u16, u16, u16);
+void builtin_join_strings_sep_list(VM&, u16, u16, u16);
 void builtin_min_int_list(VM&, u16, u16, u16);
 void builtin_max_int_list(VM&, u16, u16, u16);
 void builtin_min_float_list(VM&, u16, u16, u16);
