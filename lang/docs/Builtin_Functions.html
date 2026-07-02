@@ -1237,14 +1237,18 @@ zip(["a", "b"], [1, 2])         <span class="cmt">-- [("a", 1), ("b", 2)]</span>
 cat(List(1, 2), List(3, 4))              <span class="cmt">-- List(1, 2, 3, 4)</span></code></pre>
 
             <h3><code>join(collection)</code></h3>
-            <p>Flattens one level of nesting. Given a collection of collections, returns a single flat collection.</p>
+            <p>Flattens one level of nesting. Given a collection of collections, returns a single flat collection. For String elements &mdash; strings being sequences of characters &mdash; one-level flattening means concatenation; a separator overload exists for the array form as a convenience. The String forms only apply when the <em>element</em> type is String, so they never hide a nested-collection flatten.</p>
             <table>
                 <tr><th>Signature</th><th>Description</th></tr>
                 <tr><td><code>join([[T]]) &rarr; [T]</code></td><td>Flatten an array of arrays.</td></tr>
                 <tr><td><code>join(List&lt;List&lt;T&gt;&gt;) &rarr; List&lt;T&gt;</code></td><td>Lazily flatten a list of lists.</td></tr>
+                <tr><td><code>join([String]) &rarr; String</code>, <code>join(List&lt;String&gt;) &rarr; String</code></td><td>Concatenate strings.</td></tr>
+                <tr><td><code>join([String], String) &rarr; String</code></td><td>Concatenate with a separator between elements.</td></tr>
             </table>
             <pre><code>[[1, 2], [3, 4], [5]] join             <span class="cmt">-- [1, 2, 3, 4, 5]</span>
-List(List(1, 2), List(3, 4)) join      <span class="cmt">-- List(1, 2, 3, 4)</span></code></pre>
+List(List(1, 2), List(3, 4)) join      <span class="cmt">-- List(1, 2, 3, 4)</span>
+["ab", "cd"] join                      <span class="cmt">-- "abcd"</span>
+["a", "b"] join(", ")                  <span class="cmt">-- "a, b"</span></code></pre>
 
             <h3><code>flatten(collection)</code></h3>
             <p>Recursively flattens all nesting levels of the same container type. Unlike <code>join</code> which removes only one level, <code>flatten</code> removes all levels of <code>Array</code> (or <code>List</code>) nesting until the element type is no longer the same container type.</p>

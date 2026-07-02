@@ -1704,6 +1704,20 @@ void builtin_fromCodePoints_list(VM& vm, u16 dst, u16, u16 ab) {
     vm.reg(dst).o = so;
 }
 
+// join(List<String>) -> String: the List analogue of join([String]) --
+// one-level flatten of strings-as-char-sequences, i.e. concatenation.
+void builtin_join_strings_list(VM& vm, u16 dst, u16, u16 ab) {
+    auto* src = static_cast<ListNode*>(vm.reg(ab).o);
+    auto* so = new StringObj();
+    GCKeepAliveScope keep(vm, {src, so});
+    for (ListNode* cur = src; cur; cur = cur->tail_) {
+        cur->force(vm);
+        auto* s = static_cast<StringObj*>(cur->headData()[0].o);
+        so->s += s->s;
+    }
+    vm.reg(dst).o = so;
+}
+
 // Fraction/Complex reductions read the native 2-word heads and write the
 // 2-word result at dst/dst+1.
 void builtin_sum_fraction_list(VM& vm, u16 dst, u16, u16 ab) {

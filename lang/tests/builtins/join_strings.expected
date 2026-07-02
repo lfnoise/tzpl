@@ -7,3 +7,8 @@ solo
 <>
 a -- b
 [1, 2, 3, 4]
+abcd
+123
+[a, b, c]
+abc
+List(a, b, c)
