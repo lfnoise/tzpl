@@ -328,7 +328,7 @@ fn spiral(n Int) [[Int]] {
     let runLens = [n - 1] $ ((1..n - 1) toArray reverse stutter(2));
     let dirs = [1, n, -1, -n] ncyc(n) take(2 * n - 1);   -- right, down, left, up, ...
     let visitOrder = ([0] $ dirs stutter(runLens)) sums;
-    visitOrder grade(fn(a Int, b Int) { a < b }) clump(n)
+    visitOrder grade(<) clump(n)
 }
 spiral(5) @ println;
 
@@ -389,7 +389,7 @@ fn bestShuffle(s String) Void {
     let scores = tries map(fn(t [String]) {
         zip(t, cs) filter(fn(p (String, String)) { p.0 == p.1 }) length
     });
-    let order = scores grade(fn(a Int, b Int) { a < b });
+    let order = scores grade(<);
     "%^, %^, (%^)" fmt(s, tries[order[0]] join, scores[order[0]]) println;
 }
 ["a", "up", "elk", "seesaw", "grrrrrr", "abracadabra"] @ bestShuffle;
@@ -439,8 +439,12 @@ fn toRoman(x Int) String {
 --  * toSet over arrays and lists.
 --
 -- Still open:
---  * Operators as function values, e.g. fold(0, +) or fold1(`+`) -- a
---    language feature rather than a builtin.
+--  * Operators as function values are prototyped for call-argument
+--    position: fold(0, +), sort(<), map(!) work (an operator token right
+--    before ',' or ')' desugars to the equivalent lambda). Dual-arity
+--    operators desugar to their binary form there; unary negation still
+--    needs a lambda. General expression positions (let f = +;) are not
+--    supported.
 --  * The new builtins have no persistent-vector (#[...]) variants yet.
 --  * clump / spread are array-only (a lazy List clump would be a generator).
 ------------------------------------------------------------------------------

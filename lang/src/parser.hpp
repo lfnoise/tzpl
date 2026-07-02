@@ -89,6 +89,9 @@ private:
 
     // Expressions (Pratt parsing)
     ExprPtr parseExpression(int minPrec = 0);
+    // One argument inside a call's parens; handles operator-as-function
+    // sugar (an operator token directly followed by ',' or ')').
+    ExprPtr parseCallArgument();
     ExprPtr parsePrimary();
     // Parses a bracketed array/map literal body. Assumes the opening '[' has
     // already been consumed. When isImmutable is true the result is a

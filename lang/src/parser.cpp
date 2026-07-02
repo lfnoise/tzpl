@@ -1375,6 +1375,61 @@ int Parser::getPrecedence(TokenKind kind) const {
     }
 }
 
+// Operator-as-function sugar in call-argument position: an operator token
+// immediately followed by ',' or ')' is the operator as a function value,
+// desugared to the equivalent untyped lambda -- fold(0, +) is
+// fold(0, fn(a, b) { a + b }) -- which then rides the deferred-lambda
+// backward inference exactly like a handwritten template lambda. The
+// two-token lookahead keeps ordinary prefix expressions like f(-x)
+// unambiguous. Unary-only operators (!, ~) desugar to fn(a) { op a };
+// dual-arity operators (+, -) desugar to their binary form here (arity is
+// inferred from sibling arguments, which cannot see the callee's signature).
+// Pipeline / assignment arrows are excluded -- they are not functions.
+ExprPtr Parser::parseCallArgument() {
+    TokenKind k = current_.kind;
+    TokenKind next = lexer_.peek().kind;
+    if (next == TokenKind::Comma || next == TokenKind::RParen) {
+        SourceRange loc = currentLoc();
+        auto makeParam = [](const char* name) {
+            LambdaExprNode::Param p;
+            p.name = name;
+            return p;
+        };
+        auto makeBody = [&](ExprPtr e) {
+            ASTList stmts;
+            auto stmt = std::make_unique<ExprStmtNode>(loc, std::move(e));
+            stmt->isTrailing = true;
+            stmts.push_back(std::move(stmt));
+            return std::make_unique<BlockStmt>(loc, std::move(stmts));
+        };
+        if (k == TokenKind::Bang || k == TokenKind::Tilde) {
+            advance();
+            UnaryOpExpr::Op op = (k == TokenKind::Bang) ? UnaryOpExpr::Not
+                                                        : UnaryOpExpr::BitNot;
+            auto body = std::make_unique<UnaryOpExpr>(loc, op,
+                std::make_unique<IdentifierExpr>(loc, "a"));
+            std::vector<LambdaExprNode::Param> params;
+            params.push_back(makeParam("a"));
+            return std::make_unique<LambdaExprNode>(loc, std::move(params),
+                nullptr, makeBody(std::move(body)));
+        }
+        if (getPrecedence(k) > 0 &&
+            k != TokenKind::PipeGreater && k != TokenKind::LeftArrow &&
+            k != TokenKind::Arrow) {
+            advance();
+            auto body = std::make_unique<BinaryOpExpr>(loc, getBinaryOp(k),
+                std::make_unique<IdentifierExpr>(loc, "a"),
+                std::make_unique<IdentifierExpr>(loc, "b"));
+            std::vector<LambdaExprNode::Param> params;
+            params.push_back(makeParam("a"));
+            params.push_back(makeParam("b"));
+            return std::make_unique<LambdaExprNode>(loc, std::move(params),
+                nullptr, makeBody(std::move(body)));
+        }
+    }
+    return parseExpression();
+}
+
 BinaryOpExpr::Op Parser::getBinaryOp(TokenKind kind) const {
     switch (kind) {
         case TokenKind::Plus:        return BinaryOpExpr::Add;
@@ -1478,7 +1533,7 @@ ExprPtr Parser::parseExpression(int minPrec) {
                 advance(); // consume (
                 if (!check(TokenKind::RParen)) {
                     do {
-                        args.push_back(parseExpression());
+                        args.push_back(parseCallArgument());
                     } while (match(TokenKind::Comma));
                 }
                 expectClosing(TokenKind::RParen, "(", pipeOpenLoc);
@@ -2056,7 +2111,7 @@ ExprPtr Parser::parseTightPostfix(ExprPtr left) {
             ExprList args;
             if (!check(TokenKind::RParen)) {
                 do {
-                    args.push_back(parseExpression());
+                    args.push_back(parseCallArgument());
                 } while (match(TokenKind::Comma));
             }
             expectClosing(TokenKind::RParen, "(", openLoc);
@@ -2119,7 +2174,7 @@ ExprPtr Parser::parsePostfix(ExprPtr left) {
             ExprList args;
             if (!check(TokenKind::RParen)) {
                 do {
-                    args.push_back(parseExpression());
+                    args.push_back(parseCallArgument());
                 } while (match(TokenKind::Comma));
             }
             expectClosing(TokenKind::RParen, "(", openLoc);
@@ -2221,7 +2276,7 @@ ExprPtr Parser::parsePostfix(ExprPtr left) {
                 args.push_back(std::move(left)); // prepend receiver
                 if (!check(TokenKind::RParen)) {
                     do {
-                        args.push_back(parseExpression());
+                        args.push_back(parseCallArgument());
                     } while (match(TokenKind::Comma));
                 }
                 expectClosing(TokenKind::RParen, "(", spOpenLoc);
