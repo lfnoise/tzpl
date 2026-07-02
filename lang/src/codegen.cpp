@@ -1078,6 +1078,10 @@ void CodeGen::genFnDecl(FnDeclNode* decl) {
     auto savedFixups = std::move(jumpFixups_);
     auto savedConsts = std::move(constRegs_);
     auto savedPinned = std::move(regPinned_);
+    // regTypes_ must round-trip with the other per-function state: stack maps
+    // emitted in the enclosing block after this nested compile would otherwise
+    // be built from the nested function's register types (GC unsoundness).
+    auto savedRegTypes = std::move(regTypes_);
     inTailPosition_ = false;
     bool savedInFunctionBody = inFunctionBody_;
     inFunctionBody_ = true;
@@ -1279,6 +1283,7 @@ void CodeGen::genFnDecl(FnDeclNode* decl) {
     jumpFixups_ = std::move(savedFixups);
     constRegs_ = std::move(savedConsts);
     regPinned_ = std::move(savedPinned);
+    regTypes_ = std::move(savedRegTypes);
 
     // Store the function's CodeBlock in the VM's globals
     compiler_.global(funcInfo.globalIndex).p = fnBlock;
@@ -1313,6 +1318,10 @@ void CodeGen::genMonoInstance(FuncInfo& monoInfo) {
     auto savedFixups = std::move(jumpFixups_);
     auto savedConsts = std::move(constRegs_);
     auto savedPinned = std::move(regPinned_);
+    // regTypes_ must round-trip with the other per-function state: stack maps
+    // emitted in the enclosing block after this nested compile would otherwise
+    // be built from the nested function's register types (GC unsoundness).
+    auto savedRegTypes = std::move(regTypes_);
     inTailPosition_ = false;
     bool savedInFunctionBody = inFunctionBody_;
     inFunctionBody_ = true;
@@ -1474,6 +1483,7 @@ void CodeGen::genMonoInstance(FuncInfo& monoInfo) {
     jumpFixups_ = std::move(savedFixups);
     constRegs_ = std::move(savedConsts);
     regPinned_ = std::move(savedPinned);
+    regTypes_ = std::move(savedRegTypes);
 
     // Restore source context
     sourceFilePath_ = savedFilePath;
@@ -9970,6 +9980,10 @@ u16 CodeGen::genLambdaExpr(LambdaExprNode* expr) {
     auto savedFixups = std::move(jumpFixups_);
     auto savedConsts = std::move(constRegs_);
     auto savedPinned = std::move(regPinned_);
+    // regTypes_ must round-trip with the other per-function state: stack maps
+    // emitted in the enclosing block after this nested compile would otherwise
+    // be built from the nested function's register types (GC unsoundness).
+    auto savedRegTypes = std::move(regTypes_);
     inTailPosition_ = false;
     bool savedInFunctionBody = inFunctionBody_;
     inFunctionBody_ = true;
@@ -10119,6 +10133,7 @@ u16 CodeGen::genLambdaExpr(LambdaExprNode* expr) {
     jumpFixups_ = std::move(savedFixups);
     constRegs_ = std::move(savedConsts);
     regPinned_ = std::move(savedPinned);
+    regTypes_ = std::move(savedRegTypes);
 
     // Set codeBlock_ on LambdaType so Lambda constructor can read it
     lambdaType->codeBlock_ = lambdaBlock;
@@ -10273,6 +10288,10 @@ void CodeGen::compileTemplateLambdaBody(LambdaExprNode* expr, LambdaType* lambda
     auto savedFixups = std::move(jumpFixups_);
     auto savedConsts = std::move(constRegs_);
     auto savedPinned = std::move(regPinned_);
+    // regTypes_ must round-trip with the other per-function state: stack maps
+    // emitted in the enclosing block after this nested compile would otherwise
+    // be built from the nested function's register types (GC unsoundness).
+    auto savedRegTypes = std::move(regTypes_);
     inTailPosition_ = false;
 
     // Create new CodeBlock for this instantiation
@@ -10370,6 +10389,7 @@ void CodeGen::compileTemplateLambdaBody(LambdaExprNode* expr, LambdaType* lambda
     jumpFixups_ = std::move(savedFixups);
     constRegs_ = std::move(savedConsts);
     regPinned_ = std::move(savedPinned);
+    regTypes_ = std::move(savedRegTypes);
 
     // Set codeBlock_ on the LambdaType
     lambdaType->codeBlock_ = lambdaBlock;
