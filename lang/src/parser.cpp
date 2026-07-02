@@ -1515,18 +1515,22 @@ ExprPtr Parser::parseBracketLiteral(SourceRange loc, bool isImmutable) {
     // type disambiguates it from an ordinary literal.
     {
         // Detect typed array constructor.
-        // Type keywords are unambiguous (never valid expressions). For '[', '(',
-        // 'fn', capitalized Identifiers, and the `some C` existential introducer,
-        // use tentative parsing.
-        bool tryTypedConstructor = isTypeKeyword(current_.kind);
+        // Never commit on the leading token alone -- only the trailing `](`
+        // proves the constructor form. Even type keywords are ambiguous:
+        // Complex and Fraction are also constructor functions, so
+        // [Complex(1.0, 2.0), ...] must parse as an ordinary array literal
+        // while [Complex](...) is the typed constructor. For type keywords,
+        // '[', '(', 'fn', capitalized Identifiers, and the `some C`
+        // existential introducer, use tentative parsing.
+        bool tryTypedConstructor = false;
         bool isSomeExistential = current_.kind == TokenKind::Identifier &&
             current_.text == "some" && lexer_.peek().kind == TokenKind::Identifier;
-        if (!tryTypedConstructor &&
-            (current_.kind == TokenKind::LBracket ||
-             current_.kind == TokenKind::LParen ||
-             current_.kind == TokenKind::Fn ||
-             isSomeExistential ||
-             (current_.kind == TokenKind::Identifier && !current_.text.empty() && std::isupper(current_.text[0])))) {
+        if (isTypeKeyword(current_.kind) ||
+            current_.kind == TokenKind::LBracket ||
+            current_.kind == TokenKind::LParen ||
+            current_.kind == TokenKind::Fn ||
+            isSomeExistential ||
+            (current_.kind == TokenKind::Identifier && !current_.text.empty() && std::isupper(current_.text[0]))) {
             // Tentative parse: save state, try type + ]( , restore if it fails
             Token savedCurrent = current_;
             Token savedPrevious = previous_;

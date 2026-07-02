@@ -35,3 +35,13 @@ p speak println;                     -- #[arf, moo]
 
 -- Empty existential array.
 [some CanSpeak]() length println;    -- 0
+
+-- Disambiguation: the parser only commits to [Type](...) when `](` follows
+-- the type. A type-keyword constructor call as the FIRST ELEMENT of an
+-- ordinary array literal must parse as a literal, not a typed constructor.
+[Complex(1.0, 2.0), Complex(3.0, -1.0)] println;
+[Complex(0.0, 1.0)] length println;
+let z = [Complex(1.0, 1.0)][0];
+z println;
+-- ...while the typed-constructor form keeps working right next to it.
+[Complex](Complex(5.0, 6.0)) println;

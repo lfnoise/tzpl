@@ -60,12 +60,12 @@ List(1/2, 1/3, 1/6) sums collect(3) println;
 List(3/4, 1/2, 5/6) mins collect(3) println;
 
 -- Complex sum/product, eager and lazy, plus running forms
-[Complex](Complex(1.0, 2.0), Complex(3.0, -1.0)) sum println;
-[Complex](Complex(0.0, 1.0), Complex(0.0, 1.0)) product println;
+[Complex(1.0, 2.0), Complex(3.0, -1.0)] sum println;
+[Complex(0.0, 1.0), Complex(0.0, 1.0)] product println;
 List(Complex(1.0, 1.0), Complex(2.0, 2.0)) sum println;
 List(Complex(0.0, 1.0), Complex(0.0, 1.0), Complex(0.0, 1.0)) product println;
-[Complex](Complex(1.0, 0.0), Complex(0.0, 1.0), Complex(1.0, 1.0)) sums println;
-[Complex](Complex(0.0, 1.0), Complex(0.0, 1.0)) products println;
+[Complex(1.0, 0.0), Complex(0.0, 1.0), Complex(1.0, 1.0)] sums println;
+[Complex(0.0, 1.0), Complex(0.0, 1.0)] products println;
 List(Complex(1.0, 0.0), Complex(0.0, 1.0)) sums collect(2) println;
 
 -- pow(Fraction, Int), including negative exponents
