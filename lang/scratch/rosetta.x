@@ -327,7 +327,7 @@ largestCat([54, 546, 548, 60]) println;
 fn spiral(n Int) [[Int]] {
     let runLens = [n - 1] $ ((1..n - 1) toArray reverse stutter(2));
     let dirs = [1, n, -1, -n] ncyc(n) take(2 * n - 1);   -- right, down, left, up, ...
-    let visitOrder = ([0] $ dirs spread(runLens)) sums;
+    let visitOrder = ([0] $ dirs stutter(runLens)) sums;
     visitOrder grade(fn(a Int, b Int) { a < b }) clump(n)
 }
 spiral(5) @ println;
@@ -431,8 +431,9 @@ fn toRoman(x Int) String {
 --  * contains([T], x) and contains(List<T>, x).
 --  * pow(Int, Int) -> Int.
 --  * clump([T], n) -> [[T]] -- fixed-size rows, short remainder kept.
---  * spread([T], [Int]) -> [T] -- replicate element i counts[i] times
---    (counts index cyclically); sapf's spread.
+--  * stutter([T], [Int]) -- per-element-counts overload of stutter:
+--    replicate element i counts[i] times (counts index cyclically);
+--    what sapf calls spread.
 --  * ncyc for arrays (cyc stays List-only: an infinite array is infeasible).
 --  * fromCodePoints ([Int] or List<Int> -> String), inverse of codePoints.
 --  * toSet over arrays and lists.

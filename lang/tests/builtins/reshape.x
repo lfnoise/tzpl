@@ -1,4 +1,4 @@
--- clump / spread / ncyc / toSet / fromCodePoints
+-- clump / stutter-with-counts / ncyc / toSet / fromCodePoints
 
 -- clump: group into fixed-size rows, short remainder kept
 (1..10) toArray clump(3) println;
@@ -7,12 +7,12 @@
 [1, 2] clump(0) println;
 ["a", "b", "c"] clump(2) println;
 
--- spread: replicate element i counts[i] times (counts index cyclically)
-[10, 20, 30] spread([1, 0, 2]) println;
-[7, 8] spread([3]) println;
-[1, 2, 3, 4] spread([2, 0]) println;
+-- stutter with per-element counts (counts index cyclically)
+[10, 20, 30] stutter([1, 0, 2]) println;
+[7, 8] stutter([3]) println;
+[1, 2, 3, 4] stutter([2, 0]) println;
 let e [Int] = [];
-e spread([2]) println;
+e stutter([2]) println;
 
 -- ncyc on arrays
 [1, 2, 3] ncyc(3) println;

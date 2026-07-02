@@ -347,7 +347,7 @@
                 <li><a href="#string">String Functions</a> &mdash; length, substring, contains, startsWith, endsWith, split, trim, toUpper, toLower, replace, codePoints, indexing, min, max, cmp</li>
                 <li><a href="#formatting">String Formatting</a> &mdash; fmt</li>
                 <li><a href="#range">Range Functions</a> &mdash; length, toArray, toList</li>
-                <li><a href="#collections">Collection Functions (Arrays &amp; Lists)</a> &mdash; length, map, filter, fold, scan, fold1, scan1, find, zip, enumerate, take, drop, takeWhile, dropWhile, stride, stutter, repeat, cat, join, flatten, sum, product, mean, min, max, sums, products, mins, maxs, any, all, contains, clump, spread, toSet, fromCodePoints</li>
+                <li><a href="#collections">Collection Functions (Arrays &amp; Lists)</a> &mdash; length, map, filter, fold, scan, fold1, scan1, find, zip, enumerate, take, drop, takeWhile, dropWhile, stride, stutter, repeat, cat, join, flatten, sum, product, mean, min, max, sums, products, mins, maxs, any, all, contains, clump, toSet, fromCodePoints</li>
                 <li><a href="#array-only">Array-only Functions</a> &mdash; reverse, push, pop, push!, pop!, sort, muss, copy</li>
                 <li><a href="#list-only">List-only Functions</a> &mdash; head, tail, cons, isNil, notNil, cyc, ncyc, hang, iter</li>
                 <li><a href="#map-functions">Map Functions</a> &mdash; get, getOrDefault, getOrElse, put, put!, remove, remove!, contains, keys, values, pairs, merge, mergeIfAbsent, mergeIfPresent, length, copy, <code>m[k] = v</code></li>
@@ -1107,15 +1107,17 @@ List(1, 2, 3, 4, 5) drop(2)       <span class="cmt">-- List(3, 4, 5)</span></cod
             <pre><code>[1, 2, 3, 4, 5, 6, 7] stride(2)            <span class="cmt">-- [1, 3, 5, 7]</span>
 [1, 2, 3, 4, 5, 6, 7, 8, 9] stride(3)     <span class="cmt">-- [1, 4, 7]</span></code></pre>
 
-            <h3><code>stutter(collection, n)</code></h3>
-            <p>Repeats each element <code>n</code> times.</p>
+            <h3><code>stutter(collection, n)</code>, <code>stutter(array, counts)</code></h3>
+            <p>Repeats each element <code>n</code> times. The counts overload replicates element <code>i</code> <code>counts[i]</code> times; the counts array is indexed cyclically (like ordinary array indexing), so a shorter counts array tiles across the source, and counts <code>&lt;= 0</code> drop the element.</p>
             <table>
                 <tr><th>Signature</th><th>Description</th></tr>
                 <tr><td><code>stutter([T], Int) &rarr; [T]</code></td><td>Repeat each element <code>n</code> times in an array.</td></tr>
                 <tr><td><code>stutter(List&lt;T&gt;, Int) &rarr; List&lt;T&gt;</code></td><td>Lazily repeats each element <code>n</code> times.</td></tr>
+                <tr><td><code>stutter([T], [Int]) &rarr; [T]</code></td><td>Per-element replication counts.</td></tr>
             </table>
             <pre><code>[1, 2, 3] stutter(2)            <span class="cmt">-- [1, 1, 2, 2, 3, 3]</span>
-[1, 2, 3] stutter(3)            <span class="cmt">-- [1, 1, 1, 2, 2, 2, 3, 3, 3]</span></code></pre>
+[10, 20, 30] stutter([1, 0, 2]) <span class="cmt">-- [10, 30, 30]</span>
+[7, 8] stutter([3])             <span class="cmt">-- [7, 7, 7, 8, 8, 8]</span></code></pre>
 
             <h3><code>repeat(value, n)</code></h3>
             <p>Creates an array containing <code>value</code> repeated <code>n</code> times.</p>
@@ -1329,15 +1331,6 @@ List((1, 2), (3, 4)) contains((3, 4))    <span class="cmt">-- true</span></code>
                 <tr><td><code>clump([T], Int) &rarr; [[T]]</code></td><td>Fixed-size grouping.</td></tr>
             </table>
             <pre><code>(1..10) toArray clump(3)                 <span class="cmt">-- [[1, 2, 3], [4, 5, 6], [7, 8, 9], [10]]</span></code></pre>
-
-            <h3><code>spread(array, counts)</code></h3>
-            <p>Replicates element <code>i</code> <code>counts[i]</code> times. The counts array is indexed cyclically (like ordinary array indexing), so a shorter counts array tiles across the source; counts <code>&lt;= 0</code> drop the element.</p>
-            <table>
-                <tr><th>Signature</th><th>Description</th></tr>
-                <tr><td><code>spread([T], [Int]) &rarr; [T]</code></td><td>Per-element replication.</td></tr>
-            </table>
-            <pre><code>[10, 20, 30] spread([1, 0, 2])           <span class="cmt">-- [10, 30, 30]</span>
-[7, 8] spread([3])                       <span class="cmt">-- [7, 7, 7, 8, 8, 8]</span></code></pre>
 
             <h3><code>toSet(collection)</code></h3>
             <p>Builds a <code>Set</code> from the elements of an array or list, discarding duplicates.</p>

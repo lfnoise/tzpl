@@ -1397,9 +1397,10 @@ void builtin_clump_array(VM& vm, u16 dst, u16, u16 ab) {
     vm.reg(dst).o = outer;
 }
 
-// spread: [T], [Int] -> [T] -- replicate element i counts[i] times; counts
-// index cyclically (like array indexing). counts <= 0 drop the element.
-void builtin_spread_array(VM& vm, u16 dst, u16, u16 ab) {
+// stutter: [T], [Int] -> [T] -- per-element counts overload: replicate
+// element i counts[i] times; counts index cyclically (like array indexing).
+// counts <= 0 drop the element.
+void builtin_stutter_counts_array(VM& vm, u16 dst, u16, u16 ab) {
     auto* src = vm.reg(ab).o;
     auto& counts = static_cast<PodArray<i64>*>(vm.reg(ab+1).o)->v;
     auto* at = static_cast<ArrayType*>(src->type_);

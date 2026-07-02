@@ -197,8 +197,29 @@ static bool resolve_##fname(Compiler& compiler, const std::vector<Type*>& args, 
 RESOLVE_ARRAY_INT(take, builtin_take_array, builtin_take_list)
 RESOLVE_ARRAY_INT(drop, builtin_drop_array, builtin_drop_list)
 RESOLVE_ARRAY_INT(stride, builtin_stride_array, builtin_stride_list)
-RESOLVE_ARRAY_INT(stutter, builtin_stutter_array, builtin_stutter_list)
 #undef RESOLVE_ARRAY_INT
+
+// stutter: ([T], Int) / (List<T>, Int) repeat every element n times, plus
+// the per-element overload ([T], [Int]) where element i repeats counts[i]
+// times (counts index cyclically, like ordinary array indexing).
+static bool resolve_stutter(Compiler& compiler, const std::vector<Type*>& args,
+    std::vector<Type*>& pt, Type*& rt, CFun& cf) {
+    if (args.size() != 2) return false;
+    if (auto* at = dynamic_cast<ArrayType*>(args[0])) {
+        if (args[1] == compiler.intType()) {
+            pt = {at, compiler.intType()}; rt = at; cf = builtin_stutter_array; return true;
+        }
+        if (auto* ct = dynamic_cast<ArrayType*>(args[1]); ct && ct->elemType_ == compiler.intType()) {
+            pt = {at, ct}; rt = at; cf = builtin_stutter_counts_array; return true;
+        }
+        return false;
+    }
+    if (auto* lt = dynamic_cast<ListType*>(args[0])) {
+        if (args[1] != compiler.intType()) return false;
+        pt = {lt, compiler.intType()}; rt = lt; cf = builtin_stutter_list; return true;
+    }
+    return false;
+}
 
 // repeat: (T, Int) -> [T]
 static bool resolve_repeat(Compiler& compiler, const std::vector<Type*>& args,
@@ -774,17 +795,6 @@ static bool resolve_clump(Compiler& compiler, const std::vector<Type*>& args,
     auto* at = dynamic_cast<ArrayType*>(args[0]);
     if (!at) return false;
     pt = {at, compiler.intType()}; rt = compiler.arrayType(at); cf = builtin_clump_array;
-    return true;
-}
-
-// spread: [T], [Int] -> [T]
-static bool resolve_spread(Compiler& compiler, const std::vector<Type*>& args,
-    std::vector<Type*>& pt, Type*& rt, CFun& cf) {
-    if (args.size() != 2) return false;
-    auto* at = dynamic_cast<ArrayType*>(args[0]);
-    auto* ct = dynamic_cast<ArrayType*>(args[1]);
-    if (!at || !ct || ct->elemType_ != compiler.intType()) return false;
-    pt = {at, ct}; rt = at; cf = builtin_spread_array;
     return true;
 }
 
@@ -3805,7 +3815,6 @@ void registerBuiltinFunctions(Compiler& compiler,
     registerTemplate(compiler, functions, "any",       resolve_any,       /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
     registerTemplate(compiler, functions, "all",       resolve_all,       /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
     registerTemplate(compiler, functions, "clump",     resolve_clump,     /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
-    registerTemplate(compiler, functions, "spread",    resolve_spread,    /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
     registerTemplate(compiler, functions, "toSet",     resolve_toSet,     /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
     registerTemplate(compiler, functions, "fromCodePoints", resolve_fromCodePoints, /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
     registerTemplate(compiler, functions, "flatten",   resolve_flatten,   /*rtSafe=*/true, /*acceptsInlineArgs=*/true);

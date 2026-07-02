@@ -585,7 +585,7 @@ void builtin_any_bool_array(VM&, u16, u16, u16);
 void builtin_all_bool_array(VM&, u16, u16, u16);
 void builtin_contains_array(VM&, u16, u16, u16);
 void builtin_clump_array(VM&, u16, u16, u16);
-void builtin_spread_array(VM&, u16, u16, u16);
+void builtin_stutter_counts_array(VM&, u16, u16, u16);
 void builtin_ncyc_array(VM&, u16, u16, u16);
 void builtin_toSet_array(VM&, u16, u16, u16);
 void builtin_fromCodePoints_array(VM&, u16, u16, u16);
