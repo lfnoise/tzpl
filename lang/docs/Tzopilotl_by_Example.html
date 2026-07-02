@@ -999,6 +999,44 @@ println(<span class="num">2.0</span> * p1);     <span class="cmt">-- Point { x: 
 println(-p1);          <span class="cmt">-- Point { x: -1.0, y: -2.0 }</span>
 println(p1 == p1);     <span class="cmt">-- true</span></code></pre>
 
+<h4 id="operators-as-functions">Operators as Function Arguments</h4>
+<p>Since operators are functions (that is what <code>fn +(a, b)</code> declares), an
+operator can be passed as a function argument directly. An operator token that
+sits immediately before a <code>,</code> or <code>)</code> in a call's argument list
+denotes the operator as a function value, and desugars to the equivalent
+lambda: <code>fold(0, +)</code> means <code>fold(0, fn(a, b) { a + b })</code>.
+The parameter types are inferred from the call, exactly as they would be for
+that handwritten lambda.</p>
+
+<pre><code>[<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>, <span class="num">4</span>] fold(<span class="num">0</span>, +) println;     <span class="cmt">-- 10</span>
+[<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>, <span class="num">4</span>] fold1(-) println;       <span class="cmt">-- -8</span>
+[<span class="str">"a"</span>, <span class="str">"b"</span>, <span class="str">"c"</span>] fold1($) println;    <span class="cmt">-- "abc"</span>
+[<span class="num">3</span>, <span class="num">1</span>, <span class="num">2</span>] sort(&gt;) println;           <span class="cmt">-- [3, 2, 1]</span>
+[<span class="num">30</span>, <span class="num">10</span>, <span class="num">20</span>] grade(&lt;) println;       <span class="cmt">-- [1, 2, 0]</span>
+[<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>, <span class="num">4</span>] scan(<span class="num">0</span>, +) println;     <span class="cmt">-- [0, 1, 3, 6, 10]</span>
+[<span class="kw">true</span>, <span class="kw">false</span>] map(!) println;      <span class="cmt">-- [false, true]</span></code></pre>
+
+<p>Because only an operator directly followed by <code>,</code> or <code>)</code> is
+treated this way, ordinary prefix expressions in argument position are
+unaffected: <code>max(1, -2)</code> and <code>min(3, -x + 1)</code> parse as usual.</p>
+
+<h4>Rules and Limits</h4>
+<ul>
+<li>Operators with both unary and binary forms (<code>+</code>, <code>-</code>)
+    mean their <em>binary</em> form in this position. For unary negation pass a
+    lambda: <code>map(fn(x <span class="kw">Int</span>) { -x })</code>. The unary-only
+    operators <code>!</code> and <code>~</code> desugar to their unary form.</li>
+<li><code>|&gt;</code>, <code>&lt;-</code>, and <code>-&gt;</code> are not functions and are excluded.</li>
+<li><code>&amp;&amp;</code> and <code>||</code> work, but as functions they are
+    eager -- both operands are evaluated before the call, so there is no
+    short-circuiting.</li>
+<li>The sugar applies only inside a call's argument list. In other expression
+    positions write the lambda: <code><span class="kw">let</span> add = <span class="kw">fn</span>(a <span class="kw">Int</span>, b <span class="kw">Int</span>) { a + b };</code></li>
+<li>The desugared lambda types like any other. <code>[1, 2, 3] fold1(/)</code>
+    is a type error because <code>Int / Int</code> is <code>Fraction</code>, so the
+    accumulator type does not close; use <code>fold1(//)</code> for integers.</li>
+</ul>
+
 <h3 id="function-overloading">4.7 Function Overloading</h3>
 <pre><code><span class="kw">fn</span> describe(x <span class="kw">Int</span>) <span class="kw">String</span> = <span class="str">"an integer"</span>;
 <span class="kw">fn</span> describe(x <span class="kw">Float</span>) <span class="kw">String</span> = <span class="str">"a float"</span>;
