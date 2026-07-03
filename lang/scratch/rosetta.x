@@ -42,7 +42,7 @@ fn powerset(s [Int]) [[Int]] {
     let rest = powerset(s drop(1));
     rest $ rest map(fn(x [Int]) { [s[0]] $ x })
 }
-powerset([1, 2, 3, 4]) println;
+[1, 2, 3, 4] powerset println;
 
 ------------------------------------------------------------------------------
 -- FizzBuzz                http://rosettacode.org/wiki/FizzBuzz
@@ -61,10 +61,10 @@ fn fizzbuzz(n Int) String =
 "== factorial ==" println;
 
 fn factorialRec(n Int) Int = n < 2 ? 1 : n * factorialRec(n - 1);
-factorialRec(7) println;
+7 factorialRec println;
 
 fn factorial(n Int) Int = (1..n) toList product;
-factorial(7) println;
+7 factorial println;
 
 ------------------------------------------------------------------------------
 -- Anonymous recursion     http://rosettacode.org/wiki/Anonymous_recursion
@@ -81,7 +81,7 @@ fn fibon(n Int) Int {
     }
     f(n)
 }
-fibon(9) println;
+9 fibon println;
 
 ------------------------------------------------------------------------------
 -- Accumulator factory     http://rosettacode.org/wiki/Accumulator_factory
@@ -94,8 +94,8 @@ fn accumulator(x Float) (Float) Float {
     fn(y Float) Float { r <- *r + y; *r }
 }
 let acc = accumulator(5.0);
-acc(3.0) println;
-acc(2.5) println;
+3.0 acc println;
+2.5 acc println;
 
 ------------------------------------------------------------------------------
 -- Happy numbers           http://rosettacode.org/wiki/Happy_numbers
@@ -125,17 +125,17 @@ harshads dropWhile(fn(n Int) { n <= 1000 }) head println;
 
 fn hailNext(n Int) Int = n % 2 == 0 ? n // 2 : 3 * n + 1;
 fn hail(n Int) List<Int> = iter(n, hailNext) takeWhile(fn(x Int) { x != 1 }) $ List(1);
-hail(27) length println;
-hail(27) take(4) println;
+27 hail length println;
+27 hail take(4) println;
 
 fn longestHail(limit Int) Void {
     let lens = (1..limit) toArray map(fn(n Int) { hail(n) length });
     let best = lens max;
     "under %^: n = %^ with length %^" fmt(limit, lens find(fn(l Int) { l == best }) + 1, best) println;
 }
-longestHail(1000);
-longestHail(10000);
-longestHail(100000);
+1000 longestHail;
+10000 longestHail;
+100000 longestHail;
 
 ------------------------------------------------------------------------------
 -- Flatten a list          http://rosettacode.org/wiki/Flatten_a_list
@@ -274,9 +274,9 @@ fn triples(n Int) [[Int]] =
 fn primitiveTriples(n Int) [[Int]] =
     triples(n) filter(fn(t [Int]) { gcd(t[0], t[1]) == 1 });
 
-triples(100) length println;
-primitiveTriples(100) length println;
-primitiveTriples(100) @ println;
+100 triples length println;
+100 primitiveTriples length println;
+100 primitiveTriples @ println;
 
 ------------------------------------------------------------------------------
 -- Forward difference      http://rosettacode.org/wiki/Forward_difference
@@ -314,8 +314,8 @@ vectorTriple(va, vb, vc) println;
 
 fn largestCat(xs [Int]) String =
     xs @ toString sort(fn(a String, b String) { a $ b > b $ a }) join;
-largestCat([1, 34, 3, 98, 9, 76, 45, 4]) println;
-largestCat([54, 546, 548, 60]) println;
+[1, 34, 3, 98, 9, 76, 45, 4] largestCat println;
+[54, 546, 548, 60] largestCat println;
 
 ------------------------------------------------------------------------------
 -- Spiral matrix           http://rosettacode.org/wiki/Spiral_matrix
@@ -330,7 +330,7 @@ fn spiral(n Int) [[Int]] {
     let visitOrder = ([0] $ dirs stutter(runLens)) sums;
     visitOrder grade(<) clump(n)
 }
-spiral(5) @ println;
+5 spiral @ println;
 
 ------------------------------------------------------------------------------
 -- Price fraction          http://rosettacode.org/wiki/Price_fraction
