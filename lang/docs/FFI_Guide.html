@@ -484,6 +484,21 @@ if (localStorage.getItem('tzpl-docs-theme') === 'light') document.documentElemen
         <li><a href="#silo-msg-example">Example</a></li>
       </ol>
     </li>
+    <li><a href="#audio-engine">Audio Engine</a>
+      <ol>
+        <li><a href="#ae-overview">Overview</a></li>
+        <li><a href="#ae-lifecycle">Engine Lifecycle</a></li>
+        <li><a href="#ae-plugins">Plugin Loading</a></li>
+        <li><a href="#ae-bundling">Command Bundling</a></li>
+        <li><a href="#ae-nodes">Node Operations</a></li>
+        <li><a href="#ae-connections">Connections</a></li>
+        <li><a href="#ae-params">Parameter Control</a></li>
+        <li><a href="#ae-notes">Note / Voice Management</a></li>
+        <li><a href="#ae-introspection">Introspection &amp; Utilities</a></li>
+        <li><a href="#ae-enums">Enums</a></li>
+        <li><a href="#ae-example">Example</a></li>
+      </ol>
+    </li>
   </ol>
 </nav>
 
@@ -3440,6 +3455,247 @@ collector <span class="fn">spawn</span>(Msg.int(<span class="num">0</span>)) <sp
 }
 <span class="fn">spawn</span>(sender, Msg.int(<span class="num">0</span>));</code></pre>
 <p>The NRT side spawns a <code>conductor</code> actor, registers it, and runs <code>runActorServer()</code> to route the silo&#8594;NRT traffic. See <code>integration-tests/scripts/silo_to_nrt.x</code> for the full program.</p>
+
+<!-- ================================================================ -->
+<!--  18. AUDIO ENGINE                                                -->
+<!-- ================================================================ -->
+
+<h2 id="audio-engine">18. Audio Engine</h2>
+
+<!-- -------------------------------- -->
+<h3 id="ae-overview">18.1 Overview</h3>
+
+<p>The audio engine bindings, registered by <code>bridge::registerAudioEngineFFI()</code>, control the live audio graph: starting the stream, loading plugins, creating and connecting nodes, setting parameters, and triggering voices. All functions live in the <code>audio_engine</code> module:</p>
+
+<pre><code><span class="kw">import</span> audio_engine.*;</code></pre>
+
+<p>Conventions used throughout this section:</p>
+
+<ul>
+  <li><strong>Command bundling:</strong> functions that modify the audio graph do not execute immediately &mdash; they are collected into a bundle opened by <code>begin(silo)</code> and submitted atomically by <code>go()</code> / <code>sched(&hellip;)</code> (&sect;18.4).</li>
+  <li><strong>Error codes:</strong> error-returning functions return <code>Int</code>, where <code>0</code> = success. The codes are the <code>Err</code> enum (&sect;18.10).</li>
+  <li><strong>Enums:</strong> the constants (<code>FadeCurve</code>, <code>SchedPolicy</code>, <code>Err</code>, <code>Enable</code>) are defined in the Tzopilotl wrapper module <code>bridge/modules/audio_engine.x</code>, which re-exports the foreign functions alongside them. Simple enums are implicitly coerced to <code>Int</code> when passed to FFI functions, so you can write <code>connectX(&hellip;, FadeCurve.fadeEqualPower)</code> directly.</li>
+  <li><strong>RT safety:</strong> the command-bundling, node, connection, parameter, and note functions are RT-safe (they queue commands through a lock-free FIFO), so they may also be called from silo VM code (&sect;13). Lifecycle, plugin loading, and introspection functions are NRT-only.</li>
+</ul>
+
+<p>Related engine functionality documented elsewhere in this guide:</p>
+
+<ul>
+  <li>Beat-scheduled bundles and engine TempoClock slots (<code>sched(clock, beat)</code>, <code>setTempo</code>, <code>schedTempoChange</code>, <code>clockBeats</code>, <code>clockTempo</code>) &mdash; &sect;<a href="#clock-engine-slots">11.6</a>.</li>
+  <li>Silo task scheduling (<code>spawn</code>, <code>scheduleTask</code>) &mdash; &sect;<a href="#clock-silo-tasks">11.8</a>.</li>
+  <li>Silo VM management (<code>attachVM</code>, <code>detachVM</code>, <code>siloEval</code>, <code>siloLoad</code>, <code>siloStartAt</code>) &mdash; &sect;<a href="#silo-vm">13</a>.</li>
+  <li>Non-real-time rendering (<code>renderNRT</code>, <code>isRenderDone</code>, <code>onRenderDone</code>, <code>stopRender</code>, <code>endRender</code>) &mdash; &sect;<a href="#nrt-render">14</a>.</li>
+  <li>Silo messaging (<code>siloDeliverBytes</code>, <code>siloOutbox</code>, <code>pumpSiloOutboxes</code>, <code>playNote</code>, <code>releaseNote</code>) &mdash; &sect;<a href="#silo-msg">17</a>.</li>
+</ul>
+
+<!-- -------------------------------- -->
+<h3 id="ae-lifecycle">18.2 Engine Lifecycle</h3>
+
+<table>
+  <tr><th>Function</th><th>Description</th></tr>
+  <tr><td><code>engineStart() Void</code></td><td>Start the audio stream. Must be called before any audio is produced.</td></tr>
+  <tr><td><code>engineStop() Void</code></td><td>Stop the audio stream.</td></tr>
+  <tr><td><code>isAudioRunning() Bool</code></td><td>Returns <code>true</code> if the audio stream is currently running.</td></tr>
+  <tr><td><code>getStreamTime() Float</code></td><td>Current audio stream time in seconds.</td></tr>
+  <tr><td><code>masterGain(gain Float) Void</code></td><td>Set the master output gain. <code>1.0</code> = unity, <code>0.0</code> = silence. When the safety limiter is enabled, the master gain can reduce the limiter's gain but never increase it &mdash; it will not fight the limiter. When audio is below the limit, the master gain applies freely. When the limiter is disabled, the master gain is a simple multiply.</td></tr>
+  <tr><td><code>safetyLimiter(on Bool) Void</code></td><td>Enable or disable the safety limiter on the master output. When enabled, output is hard-limited to prevent clipping/damage.</td></tr>
+  <tr><td><code>inputChannels() Int</code></td><td>Number of active hardware input channels (<code>0</code> if audio input is disabled).</td></tr>
+</table>
+
+<!-- -------------------------------- -->
+<h3 id="ae-plugins">18.3 Plugin Loading</h3>
+
+<p>Plugins are shared libraries (<code>.dylib</code>/<code>.so</code>) conforming to the C plugin ABI (<code>shared/tzpl_plugin_abi.h</code>). Any conforming library can be loaded, not just those produced by the synthdef compiler (&sect;<a href="#synthdef-compiler">12</a>). Both functions are NRT-only (file I/O + <code>dlopen</code>).</p>
+
+<table>
+  <tr><th>Function</th><th>Description</th></tr>
+  <tr><td><code>loadPlugins(path String) Bool</code></td><td>Load all plugin definitions found in the directory at <code>path</code>. Returns <code>true</code> on success.</td></tr>
+  <tr><td><code>loadPlugin(path String, name String) Bool</code></td><td>Load a single plugin definition from the shared library at <code>path</code> under the given <code>name</code>. Returns <code>true</code> on success.</td></tr>
+</table>
+
+<!-- -------------------------------- -->
+<h3 id="ae-bundling">18.4 Command Bundling</h3>
+
+<p>Commands that modify the audio graph are not executed immediately. They are collected into a bundle and submitted atomically &mdash; either for the next audio callback (<code>go()</code> / <code>sched()</code>) or bound to a beat on an engine TempoClock slot (<code>sched(clock, beat)</code>).</p>
+
+<table>
+  <tr><th>Function</th><th>Description</th></tr>
+  <tr><td><code>begin(silo Int) Int</code></td><td>Begin a new command bundle targeting the given silo (audio worker thread). Silo indices start at <code>0</code>. Returns an error code.</td></tr>
+  <tr><td><code>go() Int</code></td><td>Submit the current bundle for immediate execution on the next audio callback. Returns an error code.</td></tr>
+  <tr><td><code>sched() Int</code></td><td>Same as <code>go()</code> &mdash; immediate submission.</td></tr>
+  <tr><td><code>sched(clock Int, beat Float) Int</code></td><td>Submit the current bundle to fire when TempoClock slot <code>clock</code> reaches <code>beat</code>. Late-bound to the beat, sample-accurate. See &sect;<a href="#clock-engine-slots">11.6</a>.</td></tr>
+  <tr><td><code>schedPolicy(clock Int, beat Float, policy Int) Int</code></td><td>Like <code>sched(clock, beat)</code>, but with an explicit <code>SchedPolicy</code> for late delivery. See &sect;<a href="#clock-engine-slots">11.6</a>.</td></tr>
+</table>
+
+<div class="note">
+  <strong>Note:</strong> Calling <code>begin()</code> while a previous bundle is still open (queued but never submitted) returns <code>errCommandsQueuedButNotSent</code>; issuing graph commands with no open bundle returns <code>errNoActiveBundle</code>.
+</div>
+
+<!-- -------------------------------- -->
+<h3 id="ae-nodes">18.5 Node Operations</h3>
+
+<p>These must be called within a <code>begin()</code>/<code>go()</code> block.</p>
+
+<table>
+  <tr><th>Function</th><th>Description</th></tr>
+  <tr><td><code>newNode(defName String, nodeID Int) Int</code></td><td>Create a node instance from the plugin definition named <code>defName</code>, assigning it <code>nodeID</code>. The node ID must be unique within the silo.</td></tr>
+  <tr><td><code>freeNode(nodeID Int) Int</code></td><td>Remove and free the node with the given ID.</td></tr>
+  <tr><td><code>freeAllNodes() Int</code></td><td>Remove and free all nodes on the current silo.</td></tr>
+  <tr><td><code>channelOffset(offset Int) Int</code></td><td>Set the channel offset for the current silo's output in the hardware buffer. With an offset of <code>2</code> on a 4-channel output, the silo writes to channels 2&ndash;3 instead of 0&ndash;1, letting different silos target different hardware channels (surround, multi-speaker). Clamped to the hardware channel count. Default <code>0</code>.</td></tr>
+</table>
+
+<!-- -------------------------------- -->
+<h3 id="ae-connections">18.6 Connections</h3>
+
+<p>These must be called within a <code>begin()</code>/<code>go()</code> block. Node <code>0</code> is the hardware output; connecting to <code>(0, 0)</code> sends audio to the output. Node <code>1</code> is the hardware input; connecting from <code>(1, 0)</code> receives live audio (requires audio input to be enabled).</p>
+
+<table>
+  <tr><th>Function</th><th>Description</th></tr>
+  <tr><td><code>connect(srcNode Int, srcPort Int, dstNode Int, dstPort Int) Int</code></td><td>Connect an output port to an input port. Takes effect instantly (no crossfade).</td></tr>
+  <tr><td><code>connectX(srcNode Int, srcPort Int, dstNode Int, dstPort Int, xfade Float, curve Int) Int</code></td><td>Connect with a crossfade. <code>xfade</code> is the fade duration in seconds; <code>curve</code> is a <code>FadeCurve</code>.</td></tr>
+  <tr><td><code>disconnectInput(dstNode Int, dstPort Int) Int</code></td><td>Disconnect whatever is connected to the given input port. Takes effect instantly.</td></tr>
+  <tr><td><code>disconnectInputX(dstNode Int, dstPort Int, xfade Float, curve Int) Int</code></td><td>Disconnect an input port with a crossfade to silence.</td></tr>
+  <tr><td><code>disconnectSource(srcNode Int, srcPort Int, dstNode Int, dstPort Int) Int</code></td><td>Disconnect the specific connection from the given output port to the given input port. Takes effect instantly.</td></tr>
+  <tr><td><code>disconnectSourceX(srcNode Int, srcPort Int, dstNode Int, dstPort Int, xfade Float, curve Int) Int</code></td><td>Same, with a crossfade to silence.</td></tr>
+  <tr><td><code>disconnectOutput(srcNode Int, srcPort Int) Int</code></td><td>Disconnect all connections from the given output port.</td></tr>
+  <tr><td><code>disconnectNode(nodeID Int) Int</code></td><td>Disconnect all inputs and outputs of the given node.</td></tr>
+  <tr><td><code>reconnectOutput(oldSrcNode Int, oldSrcPort Int, newSrcNode Int, newSrcPort Int, xfade Float, curve Int) Int</code></td><td>Move all connections from one output port to another, crossfading over <code>xfade</code> seconds.</td></tr>
+  <tr><td><code>replaceNode(oldNodeID Int, newNodeID Int, xfade Float, curve Int) Int</code></td><td>Replace one node with another, reconnecting all inputs and outputs and crossfading over <code>xfade</code> seconds. The old node is freed after the fade completes.</td></tr>
+</table>
+
+<div class="note">
+  <strong>Note:</strong> Connections are validated on the audio thread; a connection that would create a cycle, or whose ports disagree in element type, signal rate, or channel count, is rejected with the corresponding <code>Err</code> code (&sect;18.10).
+</div>
+
+<!-- -------------------------------- -->
+<h3 id="ae-params">18.7 Parameter Control</h3>
+
+<p>These must be called within a <code>begin()</code>/<code>go()</code> block.</p>
+
+<table>
+  <tr><th>Function</th><th>Description</th></tr>
+  <tr><td><code>setInput(nodeID Int, portIndex Int, value Float) Int</code></td><td>Set an input port to a constant value (no crossfade). Overrides any existing connection on that port.</td></tr>
+  <tr><td><code>setInputX(nodeID Int, portIndex Int, value Float, xfade Float, curve Int) Int</code></td><td>Set an input port to a constant value with a crossfade from the current value.</td></tr>
+  <tr><td><code>setControl(nodeID Int, controlID Int, value Float) Int</code></td><td>Set a control parameter on a node. Controls are node-specific named parameters distinct from audio-rate input ports.</td></tr>
+</table>
+
+<!-- -------------------------------- -->
+<h3 id="ae-notes">18.8 Note / Voice Management</h3>
+
+<p>For nodes that support polyphonic voice allocation (e.g., voicer nodes). These must be called within a <code>begin()</code>/<code>go()</code> block.</p>
+
+<table>
+  <tr><th>Function</th><th>Description</th></tr>
+  <tr><td><code>noteOn(nodeID Int, noteID Int, params [Float]) Int</code></td><td>Start a new voice on the given voicer node. <code>noteID</code> identifies the voice for later <code>noteOff</code>/<code>noteSetParams</code> calls; <code>params</code> holds the voice's initial parameter values.</td></tr>
+  <tr><td><code>noteOff(nodeID Int, noteID Int) Int</code></td><td>Release the voice identified by <code>noteID</code>.</td></tr>
+  <tr><td><code>allNotesOff(nodeID Int) Int</code></td><td>Release all active voices on the given voicer node.</td></tr>
+  <tr><td><code>noteSetParams(nodeID Int, noteID Int, firstParam Int, values [Float]) Int</code></td><td>Update parameters on an active voice: sets <code>values length</code> consecutive parameters starting at index <code>firstParam</code>.</td></tr>
+</table>
+
+<div class="note">
+  <strong>Note:</strong> Code running <em>inside</em> a silo (a silo actor or task) triggers voices directly with <code>playNote</code>/<code>releaseNote</code> instead of a bundle &mdash; see &sect;<a href="#silo-msg-notes">17.5</a>.
+</div>
+
+<!-- -------------------------------- -->
+<h3 id="ae-introspection">18.9 Introspection &amp; Utilities</h3>
+
+<table>
+  <tr><th>Function</th><th>Description</th></tr>
+  <tr><td><code>listSynthDefs() [String]</code></td><td>Names of all registered node definitions (synth plugins). NRT-only.</td></tr>
+  <tr><td><code>readFile(path String) String</code></td><td>Read a file's contents into a <code>String</code>, or <code>""</code> if it cannot be opened. NRT-only host utility &mdash; handy for loading silo task code: <code>await siloLoad(0, readFile("tasks/bass.x"))</code>.</td></tr>
+  <tr><td><code>sleepMs(ms Int) Void</code></td><td>Block the calling thread for <code>ms</code> milliseconds. NRT-only; used by polling loops such as the actor server (&sect;<a href="#silo-msg-router">17.4</a>). For musical timing, prefer the clock module (&sect;<a href="#clock">11</a>) over sleeping.</td></tr>
+</table>
+
+<!-- -------------------------------- -->
+<h3 id="ae-enums">18.10 Enums</h3>
+
+<p>Defined in the wrapper module <code>bridge/modules/audio_engine.x</code>; <code>import audio_engine.*;</code> brings them in together with the foreign functions. Pass the enum case directly wherever a function takes the corresponding <code>Int</code> parameter.</p>
+
+<h4><code>FadeCurve</code></h4>
+
+<table>
+  <tr><th>Case</th><th>Description</th></tr>
+  <tr><td><code>fadeLinear</code></td><td>Linear interpolation</td></tr>
+  <tr><td><code>fadeExponential</code></td><td>Exponential curve (perceptually even volume change)</td></tr>
+  <tr><td><code>fadeSmoothstep</code></td><td>Hermite smoothstep (S-curve)</td></tr>
+  <tr><td><code>fadeEqualPower</code></td><td>Equal-power crossfade (constant energy)</td></tr>
+  <tr><td><code>fadeOutIn</code></td><td>Fade out then fade in (dip in the middle)</td></tr>
+  <tr><td><code>fadeEaseInCubic</code></td><td>Cubic ease-in (slow start, fast end)</td></tr>
+  <tr><td><code>fadeEaseOutCubic</code></td><td>Cubic ease-out (fast start, slow end)</td></tr>
+</table>
+
+<h4><code>SchedPolicy</code></h4>
+
+<p>Controls what happens when a beat-scheduled bundle arrives after its beat has passed; see &sect;<a href="#clock-engine-slots">11.6</a> for the case-by-case behavior. Cases: <code>schedImmediate</code>, <code>schedBetterLateThanNever</code>, <code>schedOnTimeOnly</code>.</p>
+
+<h4><code>Err</code></h4>
+
+<p>Error codes returned by the engine FFI functions. <code>0</code> (<code>errNone</code>) is success.</p>
+
+<table>
+  <tr><th>Case</th><th>Description</th></tr>
+  <tr><td><code>errNone</code></td><td>Success (0)</td></tr>
+  <tr><td><code>errInternal</code></td><td>Internal engine error</td></tr>
+  <tr><td><code>errNodeIDAlreadyTaken</code></td><td>Node ID already in use on this silo</td></tr>
+  <tr><td><code>errNodeDefNotFound</code></td><td>No plugin definition with the given name</td></tr>
+  <tr><td><code>errNodeNotFound</code></td><td>No node with the given ID</td></tr>
+  <tr><td><code>errNoteNotFound</code></td><td>No active note with the given ID</td></tr>
+  <tr><td><code>errControlNotFound</code></td><td>No control with the given ID</td></tr>
+  <tr><td><code>errDeviceNotFound</code></td><td>Audio device not found</td></tr>
+  <tr><td><code>errAlreadyAdded</code></td><td>Node was already added to the silo</td></tr>
+  <tr><td><code>errAlreadyRemoved</code></td><td>Node was already removed from the silo</td></tr>
+  <tr><td><code>errSiloOutOfRange</code></td><td>Silo index out of range</td></tr>
+  <tr><td><code>errInputOutOfRange</code></td><td>Input port index out of range</td></tr>
+  <tr><td><code>errOutputOutOfRange</code></td><td>Output port index out of range</td></tr>
+  <tr><td><code>errNoAudioDevices</code></td><td>No audio devices available</td></tr>
+  <tr><td><code>errAudioNotInitialized</code></td><td>Audio stream not initialized</td></tr>
+  <tr><td><code>errCommandsQueuedButNotSent</code></td><td>Commands queued but <code>go()</code>/<code>sched()</code> not called before the next <code>begin()</code></td></tr>
+  <tr><td><code>errNoActiveBundle</code></td><td>No <code>begin()</code> was called before commands</td></tr>
+  <tr><td><code>errEngineInUse</code></td><td>Engine is already in use</td></tr>
+  <tr><td><code>errCyclicConnection</code></td><td>Connection would create a cycle</td></tr>
+  <tr><td><code>errTypeMismatch</code></td><td>Port element types do not match</td></tr>
+  <tr><td><code>errRateMismatch</code></td><td>Port signal rates do not match</td></tr>
+  <tr><td><code>errChanMismatch</code></td><td>Port channel counts do not match</td></tr>
+  <tr><td><code>errNumPortsMismatch</code></td><td>Number of ports does not match</td></tr>
+  <tr><td><code>errNotImplemented</code></td><td>Feature not yet implemented</td></tr>
+  <tr><td><code>errTooLate</code></td><td>Scheduled event missed its deadline</td></tr>
+  <tr><td><code>errClockOutOfRange</code></td><td>TempoClock slot index out of range</td></tr>
+</table>
+
+<h4><code>Enable</code></h4>
+
+<table>
+  <tr><th>Case</th><th>Description</th></tr>
+  <tr><td><code>kOff</code></td><td>Disabled (0)</td></tr>
+  <tr><td><code>kOn</code></td><td>Enabled (1)</td></tr>
+</table>
+
+<!-- -------------------------------- -->
+<h3 id="ae-example">18.11 Example</h3>
+
+<p>Create a 440&nbsp;Hz sine oscillator, fade it in, hold it, then fade it out:</p>
+
+<pre><code><span class="kw">import</span> audio_engine.*;
+
+<span class="fn">engineStart</span>();
+
+<span class="fn">begin</span>(<span class="num">0</span>);
+<span class="fn">newNode</span>(<span class="str">"sinosc"</span>, <span class="num">101</span>);
+<span class="fn">setInput</span>(<span class="num">101</span>, <span class="num">0</span>, <span class="num">440.0</span>);                                <span class="cmt">-- frequency</span>
+<span class="fn">setInputX</span>(<span class="num">101</span>, <span class="num">1</span>, <span class="num">0.2</span>, <span class="num">0.5</span>, FadeCurve.fadeLinear);      <span class="cmt">-- fade amp to 0.2 over 0.5 s</span>
+<span class="fn">connect</span>(<span class="num">101</span>, <span class="num">0</span>, <span class="num">0</span>, <span class="num">0</span>);                                  <span class="cmt">-- node output -&gt; hardware out</span>
+<span class="fn">go</span>();
+
+<span class="fn">sleepMs</span>(<span class="num">3000</span>);
+
+<span class="fn">begin</span>(<span class="num">0</span>);
+<span class="fn">setInputX</span>(<span class="num">101</span>, <span class="num">1</span>, <span class="num">0.0</span>, <span class="num">1.0</span>, FadeCurve.fadeEaseOutCubic);
+<span class="fn">go</span>();
+
+<span class="fn">sleepMs</span>(<span class="num">1500</span>);
+<span class="fn">engineStop</span>();</code></pre>
+
+<p>For beat-accurate scheduling of bundles instead of sleeping, see the examples in &sect;<a href="#clock-examples">11.9</a>.</p>
 
 </main>
 <script>

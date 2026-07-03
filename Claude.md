@@ -148,8 +148,7 @@ Each sub-project has its own CLAUDE.md with detailed file layouts and convention
 - `lang/Theory_of_Operation.md` -- Detailed language design and implementation
 - `lang/docs/Tzopilotl_by_Example.html` -- Comprehensive syntax guide
 - `lang/docs/Builtin_Functions.html` -- Built-in function reference
-- `lang/docs/FFI_Guide.html` -- Foreign function interface guide
-- `bridge/audio-engine-ffi.md` -- FFI bridge documentation
+- `lang/docs/FFI_Guide.html` -- Foreign function interface guide (includes the audio engine FFI)
 
 ## Key Source Files
 

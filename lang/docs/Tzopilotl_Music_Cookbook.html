@@ -625,8 +625,9 @@ copied during processing). The engine re-runs a topological sort whenever
 connections change, so the graph is always processed in dependency order. To take
 a node down later, call <code>freeNode(nodeId)</code> inside a bundle; for a smooth
 transition use the crossfading variants (<code>connectX</code>,
-<code>replaceNode</code>). The full surface is in
-<code>bridge/audio-engine-ffi.md</code> and <code>engine/Architecture.md</code>.</p>
+<code>replaceNode</code>). The full surface is in the
+<a href="FFI_Guide.html#audio-engine">FFI Guide's Audio Engine section</a> and
+<code>engine/Architecture.md</code>.</p>
 
 <!-- ================================================================ -->
 <h2 id="notes">4. Playing notes</h2>
@@ -1189,7 +1190,7 @@ self-timed against the shared tempo clock 0.</p>
   <tr><td>Language syntax, async/await, pattern matching</td><td><a href="Tzopilotl_by_Example.html">Tzopilotl By Example</a></td></tr>
   <tr><td>All built-in functions</td><td><a href="Builtin_Functions.html">Builtin Functions</a></td></tr>
   <tr><td>Embedding, FFI, OSC, NATS, Clock/Tempo, Silo VM, NRT render, binary messages</td><td><a href="FFI_Guide.html">FFI Guide</a></td></tr>
-  <tr><td>Engine FFI surface (every node/connection/note call)</td><td><code>bridge/audio-engine-ffi.md</code></td></tr>
+  <tr><td>Engine FFI surface (every node/connection/note call)</td><td><a href="FFI_Guide.html#audio-engine">FFI Guide &mdash; Audio Engine</a></td></tr>
   <tr><td>Engine design: silos, nodes, commands, voices, topo sort</td><td><code>engine/Architecture.md</code>, <code>engine/CLAUDE.md</code></td></tr>
   <tr><td>SynthDef compiler: the <code>S</code> graph, rates, codegen</td><td><code>synthdef-compiler/ARCHITECTURE.md</code></td></tr>
   <tr><td>UGen / filter / DSP libraries</td><td><code>lang/modules/common_ugens.x</code>, <code>filters.x</code>, <code>dsp_math.x</code></td></tr>
