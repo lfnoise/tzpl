@@ -83,6 +83,33 @@ fn remove(w Widget) Void = uiRemove(w.0);
 fn clear() Void = uiClear();
 
 ---------------------------------------------------------------------------
+-- Tap widgets (engine readback)
+
+-- Level meter on a node outlet (rms bar + peak marker).
+fn meter(name String, node Int, outlet Int = 0, silo Int = 0) Widget =
+	Widget(uiMeter(name, node, outlet, silo));
+
+-- Oscilloscope on a node outlet (channel 0).
+fn scope(name String, node Int, outlet Int = 0, silo Int = 0) Widget =
+	Widget(uiScope(name, node, outlet, silo));
+
+-- Tap reads for scripts (bypass the GUI display mirror). Note the scope
+-- FIFO has one consumer stream: samples taken here don't also reach the
+-- GUI scope display.
+fn peakLevel(w Widget) Float = uiTapPeak(w.0);
+fn rmsLevel(w Widget) Float = uiTapRms(w.0);
+fn samples(w Widget, max Int = 4096) [Float] = uiTapSamples(w.0, max);
+
+-- Static data plot; update with setData.
+fn plot(name String, data [Float]) Widget = Widget(uiPlot(name, data));
+fn setData(w Widget, data [Float]) Void = uiSetData(w.0, data);
+
+-- Overview of the audio file loaded into a node's buffer slot
+-- (see audio_engine.loadBuffer).
+fn waveform(name String, node Int, buf Int) Widget =
+	Widget(uiWaveform(name, node, buf));
+
+---------------------------------------------------------------------------
 -- Synthdef-derived widgets
 
 -- One widget named, ranged, warped, and bound from the def's control

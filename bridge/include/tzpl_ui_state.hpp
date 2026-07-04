@@ -84,6 +84,10 @@ enum class UIWidgetKind : int {
     Button,
     Toggle,
     XY,
+    Meter,   // engine tap: rms in values[0], peak in values[1]
+    Scope,   // engine tap: sample FIFO drained into scopeRing
+    Plot,    // static data plot (plotData)
+    Waveform,// audio file overview (waveMin/waveMax mipmap)
 };
 
 // Engine fast-path binding: on value change the GUI thread sends
@@ -117,6 +121,23 @@ struct UIWidget {
     // the per-frame dispatch (fast path) and callback delivery.
     bool dirtyEngine = false;
     bool dirtyCallback = false;
+
+    // Engine tap (Meter/Scope). tapID 0 = none. The tap is installed on
+    // tapSilo's RT tap table; removing the widget untaps it.
+    long tapID = 0;
+    int tapSilo = 0;
+
+    // GUI-thread-only scope display ring (drained from the tap FIFO).
+    std::vector<float> scopeRing;
+
+    // Plot data (Plot kind), set by ui.plot / ui.setData.
+    std::vector<float> plotData;
+
+    // Waveform overview (Waveform kind): per-bin min/max of channel 0,
+    // built by ui.waveform from the buffer's source audio file.
+    std::vector<float> waveMin;
+    std::vector<float> waveMax;
+    std::int64_t waveFrames = 0;
 };
 
 // ---------------------------------------------------------------------------
@@ -133,6 +154,9 @@ struct UIState {
     // Target panel for subsequent widget constructors (set by ui.panel).
     // "" = the default Controls panel.
     std::string currentPanel;
+
+    // Engine tap id allocator (Meter/Scope widgets).
+    std::uint64_t nextTapId = 1;
 
     // ---- All methods below require mtx to be held by the caller. ----
 

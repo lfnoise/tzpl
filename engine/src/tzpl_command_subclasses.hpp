@@ -25,6 +25,7 @@
 #define tzpl_command_subclasses_h
 
 #include "tzpl_silo.hpp"
+#include "tzpl_engine.hpp"
 #include "tzpl_xfader.hpp"
 #include "tzpl_mixer.hpp"
 #include "tzpl_audio_file.hpp"
@@ -626,6 +627,65 @@ struct LoadBufferCmd : Command {
 
 //=============================================================================================
 #pragma mark TEMPO CLOCK COMMANDS
+
+//=============================================================================================
+#pragma mark TAP COMMANDS
+
+// Install a signal tap on a node outlet. The TapSlot was created at bundle
+// submit and lives in the Engine's tap registry; this command hands the RT
+// thread a raw pointer to install in the silo's tap table.
+struct TapOutletCmd : Command
+{
+    Engine* engine_;
+    i64 nodeID_;
+    int outlet_;
+    i64 tapID_;
+    TapSlot* slot_;  // owned by engine_->taps_
+
+    TapOutletCmd(Engine* e, i64 nodeID, int outlet, i64 tapID, TapSlot* slot)
+        : engine_(e), nodeID_(nodeID), outlet_(outlet), tapID_(tapID), slot_(slot)
+    {}
+
+    // Never ran: the bundle was aborted after the registry entry was created
+    // at submit; remove it again. Caller holds nrt_lock_.
+    ~TapOutletCmd() override {
+        if (stage_ == 0) engine_->taps_.erase(tapID_);
+    }
+
+    void doRT(Silo* s) override {
+        Node* node = s->rt_getNode(nodeID_);
+        if (!node) { err_ = tzpl_errNodeNotFound; return; }
+        err_ = s->installTap(slot_, node, outlet_, tapID_);
+    }
+
+    bool doNRT(Silo* s) override {
+        // Install failed (node gone / tap table full): free the registry
+        // entry so the tapID reads as silence and can be reused.
+        // nrt_lock_ is held by the NRT drain loop.
+        if (err_ != tzpl_errNone) {
+            s->engine_->taps_.erase(tapID_);
+        }
+        return true;
+    }
+};
+
+struct UntapCmd : Command
+{
+    i64 tapID_;
+
+    UntapCmd(i64 tapID) : tapID_(tapID) {}
+
+    void doRT(Silo* s) override {
+        s->removeTap(tapID_);
+    }
+
+    bool doNRT(Silo* s) override {
+        // The RT thread no longer references the slot; free it.
+        // nrt_lock_ is held by the NRT drain loop.
+        s->engine_->taps_.erase(tapID_);
+        return true;
+    }
+};
 
 // Immediate tempo set on a clock slot. Broadcast to every silo; applied at the
 // receiving silo's current sample so all silos produce an identical ramp.

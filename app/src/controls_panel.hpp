@@ -35,6 +35,13 @@ struct ControlsPanel {
     // True if any widget event is still pending (e.g. a callback deferred
     // because an eval holds the VM mutex) -- keeps the frame loop ticking.
     bool hasPendingEvents(bridge::UIState& ui);
+
+    // True while a meter/scope widget was visible last frame -- the frame
+    // loop stays at animation rate so live displays keep moving.
+    bool wantsContinuousFrames() const { return anyTapsVisible_; }
+
+private:
+    bool anyTapsVisible_ = false;
 };
 
 #endif /* controls_panel_hpp */

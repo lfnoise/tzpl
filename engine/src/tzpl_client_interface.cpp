@@ -1089,6 +1089,35 @@ static tzpl_SErr applySetInput(Engine* e, Silo* s, CommandList& out,
     return tzpl_errNone;
 }
 
+static tzpl_SErr applyTapOutlet(Engine* e, Silo* s, CommandList& out,
+                                i64 nodeID, int outlet, i64 tapID, int mode) {
+    OutPort* port;
+    tzpl_SErr err = s->nrt_getOutPort(PortAddr{nodeID, outlet}, port);
+    if (err != tzpl_errNone) return err;
+    if (port->type_.elem != tzpl_kF32) return tzpl_errTypeMismatch;
+    if (mode != tapMeter && mode != tapScope) return tzpl_errNotImplemented;
+
+    TapSlot* slot;
+    {
+        std::lock_guard<std::mutex> lck(e->nrt_lock_);
+        auto [it, inserted] = e->taps_.try_emplace(
+            tapID, std::make_unique<TapSlot>(static_cast<TapMode>(mode)));
+        if (!inserted) return tzpl_errAlreadyAdded;
+        slot = it->second.get();
+    }
+    out.add(new TapOutletCmd(e, nodeID, outlet, tapID, slot));
+    return tzpl_errNone;
+}
+
+static tzpl_SErr applyUntap(Engine* e, Silo*, CommandList& out, i64 tapID) {
+    {
+        std::lock_guard<std::mutex> lck(e->nrt_lock_);
+        if (!e->taps_.count(tapID)) return tzpl_errNodeNotFound;
+    }
+    out.add(new UntapCmd(tapID));
+    return tzpl_errNone;
+}
+
 static tzpl_SErr applySetControl(Engine*, Silo* s, CommandList& out,
                                  i64 nodeID, i64 controlID,
                                  tzpl_ElemType srcElem, void const* bytes, int numValues) {
@@ -1295,6 +1324,33 @@ struct SetControlOp : BundleOp
     tzpl_SErr apply(Engine* e, Silo* s, CommandList& out) override {
         return applySetControl(e, s, out, nodeID_, controlID_, elem_,
                                bytes_.data(), numValues_);
+    }
+};
+
+struct TapOutletOp : BundleOp
+{
+    i64 nodeID_;
+    int outlet_;
+    i64 tapID_;
+    int mode_;
+
+    TapOutletOp(i64 nodeID, int outlet, i64 tapID, int mode)
+        : nodeID_(nodeID), outlet_(outlet), tapID_(tapID), mode_(mode)
+    {}
+
+    tzpl_SErr apply(Engine* e, Silo* s, CommandList& out) override {
+        return applyTapOutlet(e, s, out, nodeID_, outlet_, tapID_, mode_);
+    }
+};
+
+struct UntapOp : BundleOp
+{
+    i64 tapID_;
+
+    UntapOp(i64 tapID) : tapID_(tapID) {}
+
+    tzpl_SErr apply(Engine* e, Silo* s, CommandList& out) override {
+        return applyUntap(e, s, out, tapID_);
     }
 };
 
@@ -1522,6 +1578,58 @@ tzpl_SErr setControl(i64 nodeID, i64 controlID, int numValues, i32 const* values
 }
 tzpl_SErr setControl(i64 nodeID, i64 controlID, int numValues, i64 const* values) {
     return recordSetControl(nodeID, controlID, tzpl_kI64, numValues, values);
+}
+
+tzpl_SErr tapOutlet(i64 nodeID, int outlet, i64 tapID, int mode) {
+    if (!tBundle.engine) return tzpl_errNoActiveBundle;
+    tBundle.add(new TapOutletOp(nodeID, outlet, tapID, mode));
+    return tzpl_errNone;
+}
+
+tzpl_SErr untap(i64 tapID) {
+    if (!tBundle.engine) return tzpl_errNoActiveBundle;
+    tBundle.add(new UntapOp(tapID));
+    return tzpl_errNone;
+}
+
+bool tapExists(Engine* e, i64 tapID) {
+    if (!e) return false;
+    std::lock_guard<std::mutex> lck(e->nrt_lock_);
+    return e->taps_.count(tapID) != 0;
+}
+
+f32 tapPeak(Engine* e, i64 tapID) {
+    if (!e) return 0.f;
+    std::lock_guard<std::mutex> lck(e->nrt_lock_);
+    auto it = e->taps_.find(tapID);
+    return it == e->taps_.end() ? 0.f
+         : it->second->peak.load(std::memory_order_relaxed);
+}
+
+f32 tapRms(Engine* e, i64 tapID) {
+    if (!e) return 0.f;
+    std::lock_guard<std::mutex> lck(e->nrt_lock_);
+    auto it = e->taps_.find(tapID);
+    return it == e->taps_.end() ? 0.f
+         : it->second->rms.load(std::memory_order_relaxed);
+}
+
+int tapDrain(Engine* e, i64 tapID, f32* dst, int maxSamples) {
+    if (!e) return 0;
+    TapSlot* slot = nullptr;
+    {
+        std::lock_guard<std::mutex> lck(e->nrt_lock_);
+        auto it = e->taps_.find(tapID);
+        if (it == e->taps_.end()) return 0;
+        slot = it->second.get();
+        // Safe to drain outside the lock ONLY if the slot can't be freed
+        // concurrently; drain inside the lock instead -- the FIFO pop is
+        // wait-free and cheap, and untap frees slots under this same lock.
+        int n = 0;
+        f32 v;
+        while (n < maxSamples && slot->fifo.pop(v)) dst[n++] = v;
+        return n;
+    }
 }
 
 tzpl_SErr allNotesOff(i64 nodeID) {

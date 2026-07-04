@@ -28,6 +28,7 @@
 #include "tzpl_node.hpp"
 #include "tzpl_command.hpp"
 #include "tzpl_tempo_clock.hpp"
+#include "tzpl_tap.hpp"
 #include <atomic>
 #ifdef __APPLE__
 #include <dispatch/dispatch.h>
@@ -110,6 +111,21 @@ struct Silo
     void* taskSched_ = nullptr;
     TaskTickFn taskTickFn_ = nullptr;
 
+    // Signal taps (meters/scopes). Fixed table, RT-thread only: installed
+    // and removed by Tap commands, scanned once per sample by processTaps.
+    // The TapSlot objects are owned by the Engine's tap registry; entries
+    // whose node dies are cleared by removeNode.
+    static constexpr int kMaxTaps = 32;
+    struct RTTap {
+        TapSlot* slot = nullptr;
+        Node* node = nullptr;
+        f32 const* buf = nullptr;  // node outlet buffer (chans wide)
+        int chans = 0;
+        i64 tapID = 0;
+    };
+    RTTap rt_taps_[kMaxTaps];
+    bool anyTaps_ = false;
+
     Silo();
     ~Silo();
 
@@ -145,6 +161,12 @@ struct Silo
     void processFrames();
     void runNodes();
     void mixDown(int numFrames, f32* out);
+
+    // Taps (RT thread).
+    tzpl_SErr installTap(TapSlot* slot, Node* node, int outlet, i64 tapID);
+    void removeTap(i64 tapID);
+    void clearTapsForNode(Node* node);
+    void processTaps();
 
     static void workLoop(Silo* s);
     

@@ -438,6 +438,39 @@ static void ffi_setControl(ts::VM& vm, u16 dst, u16, u16 argBase) {
 }
 
 // ---------------------------------------------------------------------------
+// Buffers
+// ---------------------------------------------------------------------------
+
+// fn resizeBuffer(nodeID: Int, bufID: Int, numChannels: Int, length: Int) -> Int
+static void ffi_resizeBuffer(ts::VM& vm, u16 dst, u16, u16 argBase) {
+    auto nodeID = static_cast<engine::i64>(vm.reg(argBase).i);
+    auto bufID = static_cast<engine::i64>(vm.reg(argBase + 1).i);
+    int numChannels = static_cast<int>(vm.reg(argBase + 2).i);
+    auto length = static_cast<engine::i64>(vm.reg(argBase + 3).i);
+    returnErr(vm, dst, engine::resizeBuffer(nodeID, bufID, numChannels, length),
+              __func__);
+}
+
+// fn loadBuffer(nodeID: Int, bufID: Int, path: String) -> Int
+// Loads an audio file into a node's buffer slot (bundled command; the file
+// is read at bundle submit on the calling thread).
+static void ffi_loadBuffer(ts::VM& vm, u16 dst, u16, u16 argBase) {
+    auto nodeID = static_cast<engine::i64>(vm.reg(argBase).i);
+    auto bufID = static_cast<engine::i64>(vm.reg(argBase + 1).i);
+    const char* path = regString(vm, argBase + 2);
+    tzpl_SErr err = engine::loadBuffer(nodeID, bufID, path);
+    // Record the path so ui.waveform can re-read the file for display.
+    if (err == tzpl_errNone && !bridge::currentRenderContext()) {
+        if (auto* ctx = getAppContext(vm)) {
+            std::lock_guard<std::mutex> lock(ctx->bufferPathsMtx);
+            ctx->bufferPaths[{static_cast<std::int64_t>(nodeID),
+                              static_cast<std::int64_t>(bufID)}] = path;
+        }
+    }
+    returnErr(vm, dst, err, __func__);
+}
+
+// ---------------------------------------------------------------------------
 // Note / voice management
 // ---------------------------------------------------------------------------
 
@@ -1378,6 +1411,10 @@ void registerAudioEngineFFI(ts::Compiler& compiler) {
     reg("freeNode",         Int, {Int},            ffi_freeNode,      true);
     reg("freeAllNodes",     Int, {},               ffi_freeAllNodes,  true);
     reg("channelOffset",    Int, {Int},            ffi_channelOffset, true);
+
+    // Buffers (bundled; loadBuffer reads the file at submit on the caller)
+    reg("resizeBuffer",     Int, {Int, Int, Int, Int},    ffi_resizeBuffer, true);
+    reg("loadBuffer",       Int, {Int, Int, String},      ffi_loadBuffer);
 
     // Connections (rtSafe)
     reg("connect",          Int, {Int, Int, Int, Int},             ffi_connect,          true);

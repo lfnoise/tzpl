@@ -90,6 +90,118 @@ static void drawToggle(UIWidget& w) {
     }
 }
 
+static float ampToDbPos(float amp) {
+    // Map amplitude to a 0..1 meter position on a -60..0 dB scale.
+    if (amp <= 0.001f) return 0.0f;
+    float db = 20.0f * std::log10(amp);
+    return std::clamp((db + 60.0f) / 60.0f, 0.0f, 1.0f);
+}
+
+static void drawMeter(UIWidget& w) {
+    float rms = w.values.size() > 0 ? static_cast<float>(w.values[0]) : 0.0f;
+    float peak = w.values.size() > 1 ? static_cast<float>(w.values[1]) : 0.0f;
+
+    const float width = 200.0f, height = 14.0f;
+    ImVec2 origin = ImGui::GetCursorScreenPos();
+    ImGui::InvisibleButton((std::string("##") + w.name).c_str(),
+                           ImVec2(width, height));
+    auto* dl = ImGui::GetWindowDrawList();
+    dl->AddRectFilled(origin, ImVec2(origin.x + width, origin.y + height),
+                      ImGui::GetColorU32(ImGuiCol_FrameBg));
+    float rmsW = ampToDbPos(rms) * width;
+    dl->AddRectFilled(origin, ImVec2(origin.x + rmsW, origin.y + height),
+                      ImGui::GetColorU32(ImGuiCol_PlotHistogram));
+    float peakX = origin.x + ampToDbPos(peak) * width;
+    ImU32 peakCol = peak >= 1.0f ? IM_COL32(255, 64, 64, 255)
+                                 : ImGui::GetColorU32(ImGuiCol_SliderGrab);
+    dl->AddLine(ImVec2(peakX, origin.y), ImVec2(peakX, origin.y + height),
+                peakCol, 2.0f);
+    dl->AddRect(origin, ImVec2(origin.x + width, origin.y + height),
+                ImGui::GetColorU32(ImGuiCol_Border));
+
+    ImGui::SameLine();
+    float db = peak > 0.001f ? 20.0f * std::log10(peak) : -60.0f;
+    ImGui::Text("%s  %5.1f dB", w.name.c_str(), db);
+}
+
+static void drawScope(UIWidget& w) {
+    const int displayN = 512;
+    auto const& ring = w.scopeRing;
+    int n = static_cast<int>(ring.size());
+
+    // Trigger on a rising zero crossing so periodic signals hold still:
+    // search the span that leaves displayN samples after the trigger.
+    int start = std::max(0, n - displayN);
+    for (int i = std::max(0, n - 2 * displayN); i < n - displayN; ++i) {
+        if (ring[i] <= 0.0f && ring[i + 1] > 0.0f) { start = i; break; }
+    }
+    int count = std::min(displayN, n - start);
+
+    if (count > 1) {
+        ImGui::PlotLines((std::string("##") + w.name).c_str(),
+                         ring.data() + start, count, 0, nullptr,
+                         -1.0f, 1.0f, ImVec2(320.0f, 100.0f));
+    } else {
+        ImGui::Dummy(ImVec2(320.0f, 100.0f));
+    }
+    ImGui::SameLine();
+    ImGui::TextUnformatted(w.name.c_str());
+}
+
+static void drawPlot(UIWidget& w) {
+    if (w.plotData.size() > 1) {
+        float lo = w.plotData[0], hi = w.plotData[0];
+        for (float v : w.plotData) {
+            if (v < lo) lo = v;
+            if (v > hi) hi = v;
+        }
+        if (hi == lo) { hi += 1.0f; lo -= 1.0f; }
+        float pad = (hi - lo) * 0.05f;
+        ImGui::PlotLines((std::string("##") + w.name).c_str(),
+                         w.plotData.data(), (int)w.plotData.size(), 0, nullptr,
+                         lo - pad, hi + pad, ImVec2(320.0f, 100.0f));
+    } else {
+        ImGui::Dummy(ImVec2(320.0f, 100.0f));
+    }
+    ImGui::SameLine();
+    ImGui::TextUnformatted(w.name.c_str());
+}
+
+static void drawWaveform(UIWidget& w) {
+    const float width = 320.0f, height = 80.0f;
+    ImVec2 origin = ImGui::GetCursorScreenPos();
+    ImGui::InvisibleButton((std::string("##") + w.name).c_str(),
+                           ImVec2(width, height));
+    auto* dl = ImGui::GetWindowDrawList();
+    dl->AddRectFilled(origin, ImVec2(origin.x + width, origin.y + height),
+                      ImGui::GetColorU32(ImGuiCol_FrameBg));
+    int bins = (int)w.waveMin.size();
+    if (bins > 0) {
+        float midY = origin.y + height * 0.5f;
+        float halfH = height * 0.5f;
+        ImU32 col = ImGui::GetColorU32(ImGuiCol_PlotLines);
+        for (int px = 0; px < (int)width; ++px) {
+            int b0 = bins * px / (int)width;
+            int b1 = bins * (px + 1) / (int)width;
+            if (b1 <= b0) b1 = b0 + 1;
+            float lo = w.waveMin[b0], hi = w.waveMax[b0];
+            for (int b = b0 + 1; b < b1 && b < bins; ++b) {
+                lo = std::min(lo, w.waveMin[b]);
+                hi = std::max(hi, w.waveMax[b]);
+            }
+            float x = origin.x + px;
+            dl->AddLine(ImVec2(x, midY - hi * halfH),
+                        ImVec2(x, midY - lo * halfH), col);
+        }
+        dl->AddLine(ImVec2(origin.x, midY), ImVec2(origin.x + width, midY),
+                    ImGui::GetColorU32(ImGuiCol_Border));
+    }
+    dl->AddRect(origin, ImVec2(origin.x + width, origin.y + height),
+                ImGui::GetColorU32(ImGuiCol_Border));
+    ImGui::Text("%s  (%lld frames)", w.name.c_str(),
+                (long long)w.waveFrames);
+}
+
 static void drawXY(UIWidget& w) {
     const float size = 160.0f;
     ImVec2 origin = ImGui::GetCursorScreenPos();
@@ -122,6 +234,7 @@ static void drawXY(UIWidget& w) {
 }
 
 void ControlsPanel::draw(bridge::UIState& ui) {
+    anyTapsVisible_ = false;
     std::lock_guard<std::mutex> lock(ui.mtx);
     if (ui.widgets.empty()) return;
 
@@ -146,6 +259,10 @@ void ControlsPanel::draw(bridge::UIState& ui) {
                     case UIWidgetKind::Button: drawButton(w); break;
                     case UIWidgetKind::Toggle: drawToggle(w); break;
                     case UIWidgetKind::XY:     drawXY(w);     break;
+                    case UIWidgetKind::Meter:  drawMeter(w); anyTapsVisible_ = true; break;
+                    case UIWidgetKind::Scope:  drawScope(w); anyTapsVisible_ = true; break;
+                    case UIWidgetKind::Plot:     drawPlot(w);     break;
+                    case UIWidgetKind::Waveform: drawWaveform(w); break;
                 }
                 ImGui::PopID();
             }
@@ -176,6 +293,33 @@ struct CallbackCall {
 } // namespace
 
 void ControlsPanel::dispatch(bridge::UIState& ui, bridge::AppContext& ctx) {
+    // ---- Poll engine taps into meter values / scope rings. ---------------
+    // (ui.mtx before the engine's NRT lock inside tapPeak/tapDrain -- the
+    // reverse order never occurs: no engine code touches UIState.)
+    if (ctx.engine) {
+        std::lock_guard<std::mutex> lock(ui.mtx);
+        for (auto& wp : ui.widgets) {
+            UIWidget& w = *wp;
+            if (w.tapID == 0) continue;
+            if (w.kind == UIWidgetKind::Meter) {
+                w.values[0] = engine::tapRms(ctx.engine, w.tapID);
+                w.values[1] = engine::tapPeak(ctx.engine, w.tapID);
+            } else if (w.kind == UIWidgetKind::Scope) {
+                float buf[4096];
+                int n = engine::tapDrain(ctx.engine, w.tapID, buf, 4096);
+                if (n > 0) {
+                    w.scopeRing.insert(w.scopeRing.end(), buf, buf + n);
+                    constexpr size_t kMaxRing = 8192;
+                    if (w.scopeRing.size() > kMaxRing) {
+                        w.scopeRing.erase(
+                            w.scopeRing.begin(),
+                            w.scopeRing.end() - kMaxRing);
+                    }
+                }
+            }
+        }
+    }
+
     // ---- Engine fast path: collect under ui.mtx, send after releasing. ----
     std::vector<EngineSend> sends;
     {

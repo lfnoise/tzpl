@@ -215,6 +215,22 @@ tzpl_SErr setControl(i64 nodeID, i64 controlID, int numValues, f64 const* values
 tzpl_SErr setControl(i64 nodeID, i64 controlID, int numValues, i32 const* values);
 tzpl_SErr setControl(i64 nodeID, i64 controlID, int numValues, i64 const* values);
 
+// Signal taps: RT -> NRT readback of a node outlet for meters/scopes.
+// tapOutlet is a bundled command (record between begin() and go()/sched()):
+// it creates tap `tapID` (caller-chosen, unique) on outlet `outlet` of node
+// `nodeID`. mode 0 = meter (peak/rms only), 1 = scope (peak/rms + a sample
+// FIFO of channel 0). The outlet's element type must be f32. untap removes
+// the tap and frees it.
+tzpl_SErr tapOutlet(i64 nodeID, int outlet, i64 tapID, int mode);
+tzpl_SErr untap(i64 tapID);
+
+// Tap reads (any thread). Unknown tapIDs read as false / 0 / no samples.
+bool tapExists(Engine* e, i64 tapID);
+f32 tapPeak(Engine* e, i64 tapID);
+f32 tapRms(Engine* e, i64 tapID);
+// Drain up to maxSamples pending scope samples into dst; returns the count.
+int tapDrain(Engine* e, i64 tapID, f32* dst, int maxSamples);
+
 // notes
 tzpl_SErr allNotesOff(i64 nodeID);
 tzpl_SErr noteOn(i64 nodeID, int noteID, int length, f32* paramValues);

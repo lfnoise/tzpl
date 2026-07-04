@@ -28,10 +28,12 @@
 #include <cstdint>
 #include <deque>
 #include <functional>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 // Complete type needed: SiloVMState holds a unique_ptr<IncrementalCompiler>, so
@@ -112,6 +114,12 @@ struct AppContext {
     // threads, read by the ui FFI).
     std::mutex nodeDefNamesMtx;
     std::unordered_map<std::int64_t, std::string> nodeDefNames;
+
+    // (nodeID, bufID) -> audio file path, recorded by audio_engine.loadBuffer
+    // on the live engine so ui.waveform can re-read the file for display.
+    // Guarded by bufferPathsMtx.
+    std::mutex bufferPathsMtx;
+    std::map<std::pair<std::int64_t, std::int64_t>, std::string> bufferPaths;
 
     // Silo->NRT actor messages: a silo actor targeting an NRT actor (outbox
     // targetSilo < 0) has its encoded Msg stashed here by pumpSiloOutboxes on

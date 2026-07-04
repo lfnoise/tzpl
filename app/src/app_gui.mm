@@ -760,6 +760,7 @@ int runGui(bridge::AppContext& appCtx) {
             // because an eval holds the VM mutex).
             bool needsActivity = guiState.flash.active()
                               || guiState.asyncEval.busy()
+                              || controlsPanel.wantsContinuousFrames()
                               || (appCtx.uiState
                                   && controlsPanel.hasPendingEvents(*appCtx.uiState));
             if (needsActivity)

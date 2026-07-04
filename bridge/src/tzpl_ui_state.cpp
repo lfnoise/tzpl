@@ -99,7 +99,11 @@ double UISpec::unmap(double v) const {
 // ---------------------------------------------------------------------------
 
 static int numValuesFor(UIWidgetKind kind) {
-    return kind == UIWidgetKind::XY ? 2 : 1;
+    switch (kind) {
+        case UIWidgetKind::XY:    return 2;  // x, y
+        case UIWidgetKind::Meter: return 2;  // rms, peak
+        default:                  return 1;
+    }
 }
 
 UIWidget* UIState::findByName(std::string const& panel, std::string const& name) {

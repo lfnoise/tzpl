@@ -26,8 +26,11 @@
 
 #include "tzpl_client_interface.hpp"
 #include "tzpl_silo.hpp"
+#include "tzpl_tap.hpp"
 #include <atomic>
+#include <memory>
 #include <mutex>
+#include <unordered_map>
 #include <vector>
 #include <thread>
 
@@ -187,6 +190,12 @@ struct Engine
 	std::vector<Silo> silos_;
 	int numTempoClocks_ = 1; // number of TempoClock slots per silo
 	std::vector<NodeDef*> defs_;
+
+	// Signal tap registry (meters/scopes), keyed by caller-chosen tapID.
+	// Guarded by nrt_lock_. Slots are created at bundle submit, installed on
+	// a silo's RT tap table by TapOutletCmd, and freed by UntapCmd::doNRT
+	// (which runs under nrt_lock_ in the NRT drain loop).
+	std::unordered_map<i64, std::unique_ptr<TapSlot>> taps_;
 	std::unique_ptr<RtAudio> rtaudio_;
 
 	AudioState audioState_ = AudioState::off;

@@ -33,6 +33,8 @@
 #include "nrt_vm.hpp"
 #include "tracing_gc.hpp"
 #include "tzpl_client_interface.hpp"
+#include "tzpl_tap.hpp"
+#include "tzpl_audio_file.hpp"
 
 #include <cstdio>
 #include <string>
@@ -328,21 +330,273 @@ static void ffi_uiSetValueXY(ts::VM& vm, u16, u16, u16 argBase) {
     }
 }
 
+// Remove an engine tap (best-effort; logs on failure). Must be called
+// WITHOUT ui->mtx held: bundle submission takes the engine's NRT lock.
+static void untapWidget(AppContext* ctx, long tapID, int silo) {
+    if (!ctx || !ctx->engine || tapID == 0) return;
+    tzpl_SErr err = engine::begin(ctx->engine);
+    if (err == tzpl_errNone) {
+        engine::untap(tapID);
+        err = engine::go(silo);
+    }
+    if (err != tzpl_errNone) {
+        std::fprintf(stderr, "ui: untap %ld failed (%d)\n", tapID, (int)err);
+    }
+}
+
 // fn uiRemove(id Int) Void
 static void ffi_uiRemove(ts::VM& vm, u16, u16, u16 argBase) {
     UIState* ui = getUIState(vm);
     if (!ui) return;
     auto id = static_cast<std::uint64_t>(vm.reg(argBase).i);
-    std::lock_guard<std::mutex> lock(ui->mtx);
-    ui->remove(id);
+    long tapID = 0;
+    int tapSilo = 0;
+    {
+        std::lock_guard<std::mutex> lock(ui->mtx);
+        if (UIWidget* w = ui->findById(id)) {
+            tapID = w->tapID;
+            tapSilo = w->tapSilo;
+        }
+        ui->remove(id);
+    }
+    untapWidget(getAppContext(vm), tapID, tapSilo);
 }
 
 // fn uiClear() Void
 static void ffi_uiClear(ts::VM& vm, u16, u16, u16) {
     UIState* ui = getUIState(vm);
     if (!ui) return;
+    std::vector<std::pair<long, int>> taps;
+    {
+        std::lock_guard<std::mutex> lock(ui->mtx);
+        for (auto& w : ui->widgets) {
+            if (w->tapID) taps.push_back({w->tapID, w->tapSilo});
+        }
+        ui->clear();
+    }
+    for (auto [tapID, silo] : taps) {
+        untapWidget(getAppContext(vm), tapID, silo);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tap widgets (meters/scopes)
+// ---------------------------------------------------------------------------
+
+// Shared body for uiMeter / uiScope: upsert the widget, allocate a tap id,
+// and install the engine tap in its own bundle. Engine calls happen outside
+// ui->mtx (bundle submit takes the engine's NRT lock).
+static i64 makeTapWidget(ts::VM& vm, const char* name, UIWidgetKind kind,
+                         i64 nodeID, int outlet, int silo) {
+    UIState* ui = getUIState(vm);
+    auto* ctx = getAppContext(vm);
+    if (!ui || !ctx || !ctx->engine) return 0;
+
+    long oldTap = 0;
+    int oldSilo = 0;
+    long tapID = 0;
+    i64 widgetID = 0;
+    {
+        std::lock_guard<std::mutex> lock(ui->mtx);
+        UIWidget* w = ui->upsert(ui->currentPanel, name, kind, UISpec{}, UISpec{});
+        oldTap = w->tapID;
+        oldSilo = w->tapSilo;
+        tapID = static_cast<long>(ui->nextTapId++);
+        w->tapID = tapID;
+        w->tapSilo = silo;
+        widgetID = static_cast<i64>(w->id);
+    }
+    if (oldTap) untapWidget(ctx, oldTap, oldSilo);
+
+    int mode = (kind == UIWidgetKind::Scope) ? engine::tapScope : engine::tapMeter;
+    tzpl_SErr err = engine::begin(ctx->engine);
+    if (err == tzpl_errNone) {
+        engine::tapOutlet(nodeID, outlet, tapID, mode);
+        err = engine::go(silo);
+    }
+    if (err != tzpl_errNone) {
+        std::fprintf(stderr,
+                     "ui: tap on node %lld outlet %d failed (%d)\n",
+                     static_cast<long long>(nodeID), outlet, (int)err);
+        std::lock_guard<std::mutex> lock(ui->mtx);
+        if (UIWidget* w = ui->findById(static_cast<std::uint64_t>(widgetID)))
+            w->tapID = 0;
+    }
+    return widgetID;
+}
+
+// ---------------------------------------------------------------------------
+// Tap reads from lang (scripts reacting to levels, tests). These read the
+// engine tap directly, bypassing the GUI's per-frame value mirror. Note the
+// scope FIFO has ONE consumer stream: samples drained here don't reach the
+// GUI scope display and vice versa.
+// ---------------------------------------------------------------------------
+
+static long widgetTapID(ts::VM& vm, u16 argBase) {
+    UIState* ui = getUIState(vm);
+    if (!ui) return 0;
+    auto id = static_cast<std::uint64_t>(vm.reg(argBase).i);
     std::lock_guard<std::mutex> lock(ui->mtx);
-    ui->clear();
+    UIWidget* w = ui->findById(id);
+    return w ? w->tapID : 0;
+}
+
+// fn uiTapPeak(id Int) Float
+static void ffi_uiTapPeak(ts::VM& vm, u16 dst, u16, u16 argBase) {
+    auto* ctx = getAppContext(vm);
+    long tapID = widgetTapID(vm, argBase);
+    vm.reg(dst).f = (ctx && ctx->engine && tapID)
+                  ? engine::tapPeak(ctx->engine, tapID) : 0.0;
+}
+
+// fn uiTapRms(id Int) Float
+static void ffi_uiTapRms(ts::VM& vm, u16 dst, u16, u16 argBase) {
+    auto* ctx = getAppContext(vm);
+    long tapID = widgetTapID(vm, argBase);
+    vm.reg(dst).f = (ctx && ctx->engine && tapID)
+                  ? engine::tapRms(ctx->engine, tapID) : 0.0;
+}
+
+// fn uiTapSamples(id Int, max Int) Array[Float]
+static void ffi_uiTapSamples(ts::VM& vm, u16 dst, u16, u16 argBase) {
+    auto* ctx = getAppContext(vm);
+    long tapID = widgetTapID(vm, argBase);
+    int maxSamples = static_cast<int>(vm.reg(argBase + 1).i);
+    maxSamples = std::min(std::max(maxSamples, 0), 65536);
+
+    std::vector<float> buf(maxSamples);
+    int n = 0;
+    if (ctx && ctx->engine && tapID && maxSamples > 0) {
+        n = engine::tapDrain(ctx->engine, tapID, buf.data(), maxSamples);
+    }
+    auto* arrType = vm.arrayType(vm.floatType());
+    auto* arr = new ts::PodArray<f64>(arrType);
+    arr->v.reserve(n);
+    for (int i = 0; i < n; ++i) arr->v.push_back(buf[i]);
+    vm.reg(dst).o = arr;
+}
+
+// ---------------------------------------------------------------------------
+// Plot / waveform widgets
+// ---------------------------------------------------------------------------
+
+static void readFloatArray(ts::VM& vm, u16 reg, std::vector<float>& out) {
+    auto* arr = vm.reg(reg).o;
+    auto n = ts::arraySize(arr);
+    out.resize(n);
+    for (usize i = 0; i < n; ++i) {
+        out[i] = static_cast<float>(ts::arrayGetFloat(arr, i));
+    }
+}
+
+// fn uiPlot(name String, data Array[Float]) Int
+static void ffi_uiPlot(ts::VM& vm, u16 dst, u16, u16 argBase) {
+    UIState* ui = getUIState(vm);
+    if (!ui) { vm.reg(dst).i = 0; return; }
+    const char* name = regString(vm, argBase);
+    std::vector<float> data;
+    readFloatArray(vm, argBase + 1, data);
+
+    std::lock_guard<std::mutex> lock(ui->mtx);
+    UIWidget* w = ui->upsert(ui->currentPanel, name, UIWidgetKind::Plot,
+                             UISpec{}, UISpec{});
+    w->plotData = std::move(data);
+    vm.reg(dst).i = static_cast<i64>(w->id);
+}
+
+// fn uiSetData(id Int, data Array[Float]) Void
+static void ffi_uiSetData(ts::VM& vm, u16, u16, u16 argBase) {
+    UIState* ui = getUIState(vm);
+    if (!ui) return;
+    auto id = static_cast<std::uint64_t>(vm.reg(argBase).i);
+    std::vector<float> data;
+    readFloatArray(vm, argBase + 1, data);
+
+    std::lock_guard<std::mutex> lock(ui->mtx);
+    if (UIWidget* w = ui->findById(id)) {
+        w->plotData = std::move(data);
+    }
+}
+
+// fn uiWaveform(name String, node Int, buf Int) Int
+// Displays the audio file loaded into a node's buffer slot. Re-reads the
+// file recorded by audio_engine.loadBuffer and builds a min/max overview
+// (no engine readback involved).
+static void ffi_uiWaveform(ts::VM& vm, u16 dst, u16, u16 argBase) {
+    UIState* ui = getUIState(vm);
+    auto* ctx = getAppContext(vm);
+    vm.reg(dst).i = 0;
+    if (!ui || !ctx) return;
+    const char* name = regString(vm, argBase);
+    i64 nodeID = vm.reg(argBase + 1).i;
+    i64 bufID = vm.reg(argBase + 2).i;
+
+    std::string path;
+    {
+        std::lock_guard<std::mutex> lock(ctx->bufferPathsMtx);
+        auto it = ctx->bufferPaths.find({nodeID, bufID});
+        if (it == ctx->bufferPaths.end()) {
+            std::fprintf(stderr,
+                         "ui.waveform: no file loaded for node %lld buf %lld\n",
+                         static_cast<long long>(nodeID),
+                         static_cast<long long>(bufID));
+            return;
+        }
+        path = it->second;
+    }
+
+    tzpl_Buffer* buffer = tzpl_loadAudioFile(path.c_str(), 0, 0, INT64_MAX);
+    if (!buffer) {
+        std::fprintf(stderr, "ui.waveform: cannot read \"%s\"\n", path.c_str());
+        return;
+    }
+
+    // Min/max overview of channel 0.
+    constexpr int kBins = 2048;
+    std::int64_t frames = buffer->length;
+    int bins = static_cast<int>(std::min<std::int64_t>(kBins, frames));
+    std::vector<float> mins(bins, 0.0f), maxs(bins, 0.0f);
+    double const* ch0 = buffer->data[0];
+    for (int b = 0; b < bins; ++b) {
+        std::int64_t i0 = frames * b / bins;
+        std::int64_t i1 = frames * (b + 1) / bins;
+        if (i1 <= i0) i1 = i0 + 1;
+        float lo = static_cast<float>(ch0[i0]), hi = lo;
+        for (std::int64_t i = i0 + 1; i < i1 && i < frames; ++i) {
+            float v = static_cast<float>(ch0[i]);
+            if (v < lo) lo = v;
+            if (v > hi) hi = v;
+        }
+        mins[b] = lo;
+        maxs[b] = hi;
+    }
+    tzpl_freeBuffer(buffer);
+
+    std::lock_guard<std::mutex> lock(ui->mtx);
+    UIWidget* w = ui->upsert(ui->currentPanel, name, UIWidgetKind::Waveform,
+                             UISpec{}, UISpec{});
+    w->waveMin = std::move(mins);
+    w->waveMax = std::move(maxs);
+    w->waveFrames = frames;
+    vm.reg(dst).i = static_cast<i64>(w->id);
+}
+
+// fn uiMeter(name String, node Int, outlet Int, silo Int) Int
+static void ffi_uiMeter(ts::VM& vm, u16 dst, u16, u16 argBase) {
+    const char* name = regString(vm, argBase);
+    i64 node = vm.reg(argBase + 1).i;
+    int outlet = static_cast<int>(vm.reg(argBase + 2).i);
+    int silo = static_cast<int>(vm.reg(argBase + 3).i);
+    vm.reg(dst).i = makeTapWidget(vm, name, UIWidgetKind::Meter, node, outlet, silo);
+}
+
+// fn uiScope(name String, node Int, outlet Int, silo Int) Int
+static void ffi_uiScope(ts::VM& vm, u16 dst, u16, u16 argBase) {
+    const char* name = regString(vm, argBase);
+    i64 node = vm.reg(argBase + 1).i;
+    int outlet = static_cast<int>(vm.reg(argBase + 2).i);
+    int silo = static_cast<int>(vm.reg(argBase + 3).i);
+    vm.reg(dst).i = makeTapWidget(vm, name, UIWidgetKind::Scope, node, outlet, silo);
 }
 
 // ---------------------------------------------------------------------------
@@ -434,6 +688,7 @@ void registerUIFFI(ts::Compiler& compiler) {
     auto* Bool   = compiler.boolType();
     auto* String = compiler.stringType();
     ts::Type* IntArray = reinterpret_cast<ts::Type*>(compiler.arrayType(Int));
+    ts::Type* FloatArray = reinterpret_cast<ts::Type*>(compiler.arrayType(Float));
 
     // fn(Float) Void and fn(Float, Float) Void for onChange handlers.
     ts::Vec<ts::Type*> fArgs1; fArgs1.push_back(Float);
@@ -466,6 +721,14 @@ void registerUIFFI(ts::Compiler& compiler) {
     reg("uiSetValueXY",   Void, {Int, Float, Float},            ffi_uiSetValueXY);
     reg("uiRemove",       Void, {Int},                          ffi_uiRemove);
     reg("uiClear",        Void, {},                             ffi_uiClear);
+    reg("uiMeter",        Int,  {String, Int, Int, Int},        ffi_uiMeter);
+    reg("uiScope",        Int,  {String, Int, Int, Int},        ffi_uiScope);
+    reg("uiPlot",         Int,  {String, FloatArray},           ffi_uiPlot);
+    reg("uiSetData",      Void, {Int, FloatArray},              ffi_uiSetData);
+    reg("uiWaveform",     Int,  {String, Int, Int},             ffi_uiWaveform);
+    reg("uiTapPeak",      Float, {Int},                         ffi_uiTapPeak);
+    reg("uiTapRms",       Float, {Int},                         ffi_uiTapRms);
+    reg("uiTapSamples",   FloatArray, {Int, Int},               ffi_uiTapSamples);
     reg("uiControl",      Int,  {Int, String, Int},             ffi_uiControl);
     reg("uiControls",     IntArray, {Int, Int},                 ffi_uiControls);
 }

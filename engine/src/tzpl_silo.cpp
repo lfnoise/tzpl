@@ -23,6 +23,7 @@
 
 #include "tzpl_silo.hpp"
 #include "tzpl_engine.hpp"
+#include <cmath>
 
 namespace engine {
 
@@ -58,6 +59,75 @@ void Silo::mixDown(int numFrames, f32* out) {
         }
         a >>= 1;
         b <<= 1;
+    }
+}
+
+tzpl_SErr Silo::installTap(TapSlot* slot, Node* node, int outlet, i64 tapID) {
+    for (RTTap& t : rt_taps_) {
+        if (t.slot) continue;
+        t.slot = slot;
+        t.node = node;
+        t.buf = static_cast<f32 const*>(node->synth->outlets[outlet]);
+        t.chans = node->outs[outlet].type_.chans;
+        t.tapID = tapID;
+        anyTaps_ = true;
+        return tzpl_errNone;
+    }
+    return tzpl_errInternal; // tap table full
+}
+
+void Silo::removeTap(i64 tapID) {
+    bool any = false;
+    for (RTTap& t : rt_taps_) {
+        if (t.slot && t.tapID == tapID) t = RTTap{};
+        if (t.slot) any = true;
+    }
+    anyTaps_ = any;
+}
+
+void Silo::clearTapsForNode(Node* node) {
+    if (!anyTaps_) return;
+    bool any = false;
+    for (RTTap& t : rt_taps_) {
+        if (t.slot && t.node == node) {
+            // Zero the published levels so a meter on a dead node reads
+            // silence rather than freezing at its last value.
+            t.slot->peak.store(0.0f, std::memory_order_relaxed);
+            t.slot->rms.store(0.0f, std::memory_order_relaxed);
+            t = RTTap{};
+        }
+        if (t.slot) any = true;
+    }
+    anyTaps_ = any;
+}
+
+void Silo::processTaps() {
+    if (!anyTaps_) return;
+    for (RTTap& t : rt_taps_) {
+        TapSlot* ts = t.slot;
+        if (!ts) continue;
+
+        f32 sq = 0.0f;
+        f32 pk = ts->accumPeak;
+        for (int c = 0; c < t.chans; ++c) {
+            f32 v = t.buf[c];
+            f32 a = std::fabs(v);
+            if (a > pk) pk = a;
+            sq += v * v;
+        }
+        ts->accumPeak = pk;
+        ts->accumSq += sq / (f32)t.chans;
+        if (++ts->accumCount >= ts->publishPeriod) {
+            ts->peak.store(ts->accumPeak, std::memory_order_relaxed);
+            ts->rms.store(std::sqrt(ts->accumSq / (f32)ts->accumCount),
+                          std::memory_order_relaxed);
+            ts->accumPeak = 0.0f;
+            ts->accumSq = 0.0f;
+            ts->accumCount = 0;
+        }
+        if (ts->mode == tapScope) {
+            ts->fifo.push(t.buf[0]); // drop-on-full: scopes tolerate gaps
+        }
     }
 }
 
@@ -137,6 +207,7 @@ void Silo::processFrames() {
 
         sortNodes();
         runNodes();
+        processTaps();
 
         f32* data = (f32*)getInput(outputNode_->synth, 0);
         memcpy(outp, data, copyByteSize);
@@ -298,7 +369,8 @@ tzpl_SErr Silo::addNode(Node* node) {
 
 tzpl_SErr Silo::removeNode(Node* node) {
     if (!node->rt_active) return tzpl_errAlreadyRemoved;
-    
+
+    clearTapsForNode(node);
     disconnectNode(node);
     
     //sortedListRemove(node);
