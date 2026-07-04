@@ -117,8 +117,10 @@ public:
     TextEditor* activeEditor();
     void updateSearchHighlights();
 
-private:
+    // Tzopilotl syntax highlighting, shared with the notebook's code cells.
     static TextEditor::LanguageDefinition createTzopilotlDef();
+
+private:
 
     struct Tab {
         std::string name;

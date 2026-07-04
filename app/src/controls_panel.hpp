@@ -10,26 +10,38 @@
 //  controls_panel.hpp
 //  app
 //
-//  Renders the `ui` module's widget registry (bridge::UIState) as ImGui
-//  windows, and dispatches widget value changes each frame:
+//  Renders the `ui` module's widget registry (bridge::UIState) as floating
+//  ImGui windows -- one per panel name not claimed by the open notebook
+//  document (claimed panels render inline as notebook panel cells) -- and
+//  dispatches widget value changes each frame:
 //    * engine fast path: dirty engine-bound widgets batch into one
 //      begin()/setControl()/go() bundle per silo, on the GUI thread,
 //      without entering the VM;
 //    * lang callbacks: onChange closures fire with the latest value at
 //      most once per widget per frame, only when nrtvm.mtx is free
 //      (try_lock) -- a long-running eval never blocks the GUI.
+//  dispatch() also polls engine taps into meter values / scope rings for
+//  ALL widgets, wherever they are drawn.
 //
 
 #ifndef controls_panel_hpp
 #define controls_panel_hpp
 
+#include <string>
+#include <vector>
+
 namespace bridge { struct AppContext; struct UIState; }
 
 struct ControlsPanel {
-    // Draw all widgets, grouped into one window per panel name.
-    void draw(bridge::UIState& ui);
+    // Reset per-frame display state. Call once per frame BEFORE any widget
+    // drawing (notebook panel cells or floating windows).
+    void beginFrame() { anyTapsVisible_ = false; }
 
-    // Per-frame event dispatch; call after draw().
+    // Draw floating windows for all panels except those in `skipPanels`.
+    void draw(bridge::UIState& ui,
+              std::vector<std::string> const* skipPanels = nullptr);
+
+    // Per-frame event dispatch + tap polling; call after all widget drawing.
     void dispatch(bridge::UIState& ui, bridge::AppContext& ctx);
 
     // True if any widget event is still pending (e.g. a callback deferred
@@ -39,6 +51,10 @@ struct ControlsPanel {
     // True while a meter/scope widget was visible last frame -- the frame
     // loop stays at animation rate so live displays keep moving.
     bool wantsContinuousFrames() const { return anyTapsVisible_; }
+
+    // Notebook panel cells report their visible taps here (draw() resets
+    // the flag each frame before either view draws).
+    void noteTapsVisible() { anyTapsVisible_ = true; }
 
 private:
     bool anyTapsVisible_ = false;

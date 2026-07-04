@@ -13,6 +13,7 @@
 #include <vector>
 #include <mutex>
 #include <atomic>
+#include <cstdint>
 #include <cstdio>
 #include <pthread.h>
 
@@ -70,6 +71,11 @@ struct PrintCapture {
     // Call once per frame from the GUI thread.
     void drain(OutputBuffer& buf);
 
+    // Non-blocking read of pending print output as raw lines, so the
+    // caller can attribute them (e.g. to the notebook cell whose eval is
+    // in flight) instead of the global console.
+    std::vector<std::string> drainLines();
+
 private:
     int pipeFds_[2] = {-1, -1};
     FILE* writeFile_ = nullptr;
@@ -106,13 +112,27 @@ struct AsyncEval {
     int flashStart = -1;
     int flashEnd = -1;
 
+    // Notebook cell this eval belongs to (0 = plain editor eval). Only one
+    // eval is in flight at a time, so prints drained while busy() can be
+    // attributed to this cell unambiguously.
+    std::uint64_t cellId = 0;
+
     bool busy() const { return running.load(); }
 
     // Launch eval on a background thread. Ignored if already running.
     void launch(const std::string& code, bridge::AppContext& ctx,
-                ts::REPLSession& session, int flashStart, int flashEnd);
+                ts::REPLSession& session, int flashStart, int flashEnd,
+                std::uint64_t cellId = 0);
 
-    // If eval finished, join thread and process result into output. Returns true if collected.
+    // True once a launched eval has finished and its result is ready to take.
+    bool finished() const { return threadActive_ && !running.load(); }
+
+    // Join the worker thread after finished(); result/code/cellId are then
+    // valid until the next launch.
+    void join();
+
+    // Editor-eval path: join and format result/errors into the console
+    // output + trigger the eval flash. Returns true if collected.
     bool collect(GuiState& state);
 
     ~AsyncEval();

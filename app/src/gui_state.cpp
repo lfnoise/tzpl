@@ -61,8 +61,9 @@ PrintCapture::~PrintCapture() {
     if (pipeFds_[0] >= 0) close(pipeFds_[0]);
 }
 
-void PrintCapture::drain(OutputBuffer& buf) {
-    if (pipeFds_[0] < 0) return;
+std::vector<std::string> PrintCapture::drainLines() {
+    std::vector<std::string> lines;
+    if (pipeFds_[0] < 0) return lines;
 
     char tmp[4096];
     std::string accum;
@@ -73,18 +74,24 @@ void PrintCapture::drain(OutputBuffer& buf) {
         accum.append(tmp, n);
     }
 
-    if (accum.empty()) return;
+    if (accum.empty()) return lines;
 
-    // Split by newlines and append each line
     size_t start = 0;
     while (start < accum.size()) {
         size_t nl = accum.find('\n', start);
         if (nl == std::string::npos) {
-            buf.append(accum.substr(start), LineKind::Output);
+            lines.push_back(accum.substr(start));
             break;
         }
-        buf.append(accum.substr(start, nl - start), LineKind::Output);
+        lines.push_back(accum.substr(start, nl - start));
         start = nl + 1;
+    }
+    return lines;
+}
+
+void PrintCapture::drain(OutputBuffer& buf) {
+    for (auto& line : drainLines()) {
+        buf.append(line, LineKind::Output);
     }
 }
 
@@ -135,13 +142,15 @@ static void* evalThreadFunc(void* arg) {
 }
 
 void AsyncEval::launch(const std::string& src, bridge::AppContext& ctx,
-                       ts::REPLSession& session, int fs, int fe) {
+                       ts::REPLSession& session, int fs, int fe,
+                       std::uint64_t cell) {
     if (running.load()) return;
     if (threadActive_) { pthread_join(thread_, nullptr); threadActive_ = false; }
 
     code = src;
     flashStart = fs;
     flashEnd = fe;
+    cellId = cell;
     running.store(true);
 
     auto* args = new EvalArgs{this, &ctx, &session};
@@ -151,6 +160,12 @@ void AsyncEval::launch(const std::string& src, bridge::AppContext& ctx,
     pthread_create(&thread_, &attr, evalThreadFunc, args);
     pthread_attr_destroy(&attr);
     threadActive_ = true;
+}
+
+void AsyncEval::join() {
+    if (running.load() || !threadActive_) return;
+    pthread_join(thread_, nullptr);
+    threadActive_ = false;
 }
 
 bool AsyncEval::collect(GuiState& state) {

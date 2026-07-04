@@ -30,6 +30,7 @@
 #include "workspace_panel.hpp"
 #include "output_panel.hpp"
 #include "controls_panel.hpp"
+#include "notebook_panel.hpp"
 
 #include "repl_session.hpp"
 #include "nrt_vm.hpp"
@@ -69,7 +70,8 @@ extern volatile sig_atomic_t gShouldQuit;
 enum class AppCmd {
     Quit,
     // File
-    FileNew, FileOpen, FileSave, FileSaveAs, FileSaveCopy, FileClose,
+    FileNew, FileNewNotebook, FileOpen, FileSave, FileSaveAs, FileSaveCopy,
+    FileClose,
     // Edit
     EditUndo, EditRedo, EditCut, EditCopy, EditPaste, EditSelectAll,
     EditClearOutput, EditToggleComment, EditIndent, EditOutdent,
@@ -176,6 +178,7 @@ static std::string findMonoFont() {
 @interface TzplMenuHandler : NSObject
 - (void)requestQuit:(id)sender;
 - (void)fileNew:(id)sender;
+- (void)fileNewNotebook:(id)sender;
 - (void)fileOpen:(id)sender;
 - (void)fileSave:(id)sender;
 - (void)fileSaveAs:(id)sender;
@@ -202,6 +205,7 @@ static std::string findMonoFont() {
 @implementation TzplMenuHandler
 - (void)requestQuit:(id)sender { gWantsToQuit = true; }
 - (void)fileNew:(id)sender     { gCmdQueue.push(AppCmd::FileNew); }
+- (void)fileNewNotebook:(id)sender { gCmdQueue.push(AppCmd::FileNewNotebook); }
 - (void)fileOpen:(id)sender    { gCmdQueue.push(AppCmd::FileOpen); }
 - (void)fileSave:(id)sender    { gCmdQueue.push(AppCmd::FileSave); }
 - (void)fileSaveAs:(id)sender  { gCmdQueue.push(AppCmd::FileSaveAs); }
@@ -257,6 +261,10 @@ static void setupNativeMenuBar(const float* fontSizes, int numFontSizes) {
     NSMenuItem* newItem = [fileMenu addItemWithTitle:@"New"
         action:@selector(fileNew:) keyEquivalent:@"n"];
     newItem.target = gMenuHandler;
+
+    NSMenuItem* newNotebookItem = [fileMenu addItemWithTitle:@"New Notebook"
+        action:@selector(fileNewNotebook:) keyEquivalent:@"N"];
+    newNotebookItem.target = gMenuHandler;
 
     NSMenuItem* openItem = [fileMenu addItemWithTitle:@"Open..."
         action:@selector(fileOpen:) keyEquivalent:@"o"];
@@ -412,7 +420,11 @@ static void setupNativeMenuBar(const float* fontSizes, int numFontSizes) {
 static std::string nativeOpenFileDialog() {
     NSOpenPanel* panel = [NSOpenPanel openPanel];
     UTType* tzplType = [UTType typeWithFilenameExtension:@"x"];
-    panel.allowedContentTypes = tzplType ? @[tzplType] : @[];
+    UTType* notebookType = [UTType typeWithFilenameExtension:@"tzd"];
+    NSMutableArray* types = [NSMutableArray array];
+    if (tzplType) [types addObject:tzplType];
+    if (notebookType) [types addObject:notebookType];
+    panel.allowedContentTypes = types;
     panel.allowsOtherFileTypes = YES;
     panel.canChooseDirectories = YES;
     if ([panel runModal] == NSModalResponseOK) {
@@ -421,9 +433,11 @@ static std::string nativeOpenFileDialog() {
     return "";
 }
 
-static std::string nativeSaveFileDialog(const std::string& suggestedName) {
+static std::string nativeSaveFileDialog(const std::string& suggestedName,
+                                        const char* extension = "x") {
     NSSavePanel* panel = [NSSavePanel savePanel];
-    UTType* tzplType = [UTType typeWithFilenameExtension:@"x"];
+    UTType* tzplType = [UTType typeWithFilenameExtension:
+        [NSString stringWithUTF8String:extension]];
     panel.allowedContentTypes = tzplType ? @[tzplType] : @[];
     panel.allowsOtherFileTypes = YES;
     [panel setNameFieldStringValue:
@@ -432,6 +446,11 @@ static std::string nativeSaveFileDialog(const std::string& suggestedName) {
         return std::string([[panel URL] fileSystemRepresentation]);
     }
     return "";
+}
+
+static bool hasExtension(std::string const& path, const char* ext) {
+    auto dot = path.find_last_of('.');
+    return dot != std::string::npos && path.substr(dot + 1) == ext;
 }
 
 // ---------------------------------------------------------------------------
@@ -677,6 +696,7 @@ int runGui(bridge::AppContext& appCtx) {
     WorkspacePanel workspacePanel;
     OutputPanel outputPanel;
     ControlsPanel controlsPanel;
+    NotebookPanel notebookPanel;
 
     guiState.output.append("Tzopilotl. Cmd+Enter: eval block, "
                            "Shift+Enter: eval line, "
@@ -742,6 +762,11 @@ int runGui(bridge::AppContext& appCtx) {
             if (gWantsToQuit) {
                 gWantsToQuit = false;
                 auto unsaved = workspacePanel.unsavedFileNames();
+                if (notebookPanel.isOpen() && notebookPanel.modified()) {
+                    unsaved.push_back(notebookPanel.filePath().empty()
+                        ? std::string("untitled notebook")
+                        : notebookPanel.filePath());
+                }
                 if (unsaved.empty()) break;
                 int choice = showUnsavedChangesAlert(unsaved);
                 if (choice == 0) { workspacePanel.saveAll(); break; } // Save All
@@ -761,6 +786,7 @@ int runGui(bridge::AppContext& appCtx) {
             bool needsActivity = guiState.flash.active()
                               || guiState.asyncEval.busy()
                               || controlsPanel.wantsContinuousFrames()
+                              || notebookPanel.hasQueuedRuns()
                               || (appCtx.uiState
                                   && controlsPanel.hasPendingEvents(*appCtx.uiState));
             if (needsActivity)
@@ -768,9 +794,35 @@ int runGui(bridge::AppContext& appCtx) {
             else
                 glfwWaitEventsTimeout(0.5);
 
-            // Drain captured print output and collect async eval results
-            guiState.printCapture.drain(guiState.output);
-            guiState.asyncEval.collect(guiState);
+            // Drain captured print output. Lines captured while a notebook
+            // cell's eval is in flight are attributed to that cell; all
+            // other prints (actors, timers, engine) go to the console.
+            {
+                std::uint64_t evalCell =
+                    (guiState.asyncEval.busy() || guiState.asyncEval.finished())
+                        ? guiState.asyncEval.cellId : 0;
+                auto lines = guiState.printCapture.drainLines();
+                if (evalCell != 0 && notebookPanel.isOpen()) {
+                    for (auto& line : lines)
+                        notebookPanel.addCellOutput(evalCell, line,
+                                                    LineKind::Output);
+                } else {
+                    for (auto& line : lines)
+                        guiState.output.append(line, LineKind::Output);
+                }
+            }
+
+            // Collect async eval results: notebook cell evals route to the
+            // cell; editor evals format into the console as before.
+            if (guiState.asyncEval.finished() && guiState.asyncEval.cellId != 0) {
+                guiState.asyncEval.join();
+                notebookPanel.onEvalDone(guiState.asyncEval.cellId,
+                                         guiState.asyncEval.result,
+                                         guiState.asyncEval.code);
+                guiState.asyncEval.cellId = 0;
+            } else {
+                guiState.asyncEval.collect(guiState);
+            }
 
             // Update eval flash
             guiState.flash.update(io.DeltaTime);
@@ -853,6 +905,33 @@ int runGui(bridge::AppContext& appCtx) {
                     editorPanel.saveAs(path);
                 afterNativeDialog();
             };
+            // Save the notebook; asks for a path if it has none (or if
+            // forceDialog). Returns false if cancelled or failed.
+            auto saveNotebook = [&](bool forceDialog) {
+                std::string path = notebookPanel.filePath();
+                if (path.empty() || forceDialog) {
+                    path = nativeSaveFileDialog("untitled.tzd", "tzd");
+                    afterNativeDialog();
+                    if (path.empty()) return false;
+                }
+                std::string err;
+                if (!notebookPanel.saveAs(path, appCtx, err)) {
+                    guiState.output.append("notebook save failed: " + err,
+                                           LineKind::Error);
+                    return false;
+                }
+                guiState.output.append("saved " + path, LineKind::Info);
+                return true;
+            };
+            auto openNotebook = [&](std::string const& path) {
+                std::string err;
+                if (notebookPanel.open(path, appCtx, err)) {
+                    guiState.output.append("opened " + path, LineKind::Info);
+                } else {
+                    guiState.output.append("notebook open failed: " + err,
+                                           LineKind::Error);
+                }
+            };
 
             for (AppCommand const& c : gCmdQueue.drain()) {
                 switch (c.cmd) {
@@ -864,11 +943,16 @@ int runGui(bridge::AppContext& appCtx) {
                 case AppCmd::FileNew:
                     editorPanel.newTab();
                     break;
+                case AppCmd::FileNewNotebook:
+                    notebookPanel.newDocument();
+                    break;
                 case AppCmd::FileOpen: {
                     std::string path = nativeOpenFileDialog();
                     if (!path.empty()) {
                         if (std::filesystem::is_directory(path))
                             workspacePanel.addWorkspace(path);
+                        else if (hasExtension(path, "tzd"))
+                            openNotebook(path);
                         else
                             workspacePanel.openFile(path);
                     }
@@ -876,13 +960,18 @@ int runGui(bridge::AppContext& appCtx) {
                     break;
                 }
                 case AppCmd::FileSave:
-                    if (editorPanel.hasFilePath())
+                    if (notebookPanel.isOpen())
+                        saveNotebook(false);
+                    else if (editorPanel.hasFilePath())
                         editorPanel.save();
                     else
                         doSaveAs();
                     break;
                 case AppCmd::FileSaveAs:
-                    doSaveAs();
+                    if (notebookPanel.isOpen())
+                        saveNotebook(true);
+                    else
+                        doSaveAs();
                     break;
                 case AppCmd::FileSaveCopy: {
                     std::string path = nativeSaveFileDialog(
@@ -893,7 +982,21 @@ int runGui(bridge::AppContext& appCtx) {
                     break;
                 }
                 case AppCmd::FileClose:
-                    editorPanel.closeActiveTab();
+                    if (notebookPanel.isOpen()) {
+                        bool doClose = true;
+                        if (notebookPanel.modified()) {
+                            std::string name = notebookPanel.filePath().empty()
+                                ? std::string("untitled notebook")
+                                : notebookPanel.filePath();
+                            int choice = showCloseTabAlert(name);
+                            if (choice == 0) doClose = saveNotebook(false);
+                            else if (choice == 2) doClose = false;
+                            afterNativeDialog();
+                        }
+                        if (doClose) notebookPanel.close();
+                    } else {
+                        editorPanel.closeActiveTab();
+                    }
                     break;
 
                 // -- Edit ---------------------------------------------------
@@ -1029,6 +1132,7 @@ int runGui(bridge::AppContext& appCtx) {
             // (Eval requests processed AFTER draw so ImGui tab bar has
             //  updated activeTab_ to match the visually selected tab.)
             // ---------------------------------------------------------------
+            controlsPanel.beginFrame();
             ImGuiViewport* viewport = ImGui::GetMainViewport();
             ImGui::SetNextWindowPos(viewport->Pos);
             ImGui::SetNextWindowSize(viewport->Size);
@@ -1076,8 +1180,12 @@ int runGui(bridge::AppContext& appCtx) {
             // scrollbars are not affected by extra window nesting.
             ImGui::BeginGroup();
 
-            // Editor panel (from active workspace)
-            editorPanel.draw(rightW, editorH, guiState);
+            // Notebook replaces the editor pane while a document is open.
+            if (notebookPanel.isOpen())
+                notebookPanel.draw(rightW, editorH, guiState, appCtx,
+                                   session, controlsPanel);
+            else
+                editorPanel.draw(rightW, editorH, guiState);
 
             // Horizontal splitter
             ImGui::InvisibleButton("##splitter", ImVec2(rightW, splitterH));
@@ -1096,9 +1204,22 @@ int runGui(bridge::AppContext& appCtx) {
             ImGui::EndGroup();
 
             // ---------------------------------------------------------------
-            // Process eval requests AFTER draw (activeTab_ is now current)
+            // Process eval requests AFTER draw (activeTab_ is now current).
+            // With a notebook open the shortcuts drive cells instead:
+            // Cmd+Enter / Shift+Enter run the focused cell, Cmd+Shift+Enter
+            // runs all cells.
             // ---------------------------------------------------------------
-            if (session && !guiState.asyncEval.busy()) {
+            if (notebookPanel.isOpen()) {
+                if (guiState.evalSelection || guiState.evalLine) {
+                    guiState.evalSelection = guiState.evalLine = false;
+                    notebookPanel.runFocused(guiState, appCtx, session);
+                }
+                if (guiState.evalFile) {
+                    guiState.evalFile = false;
+                    notebookPanel.runAll();
+                }
+                notebookPanel.pumpRunQueue(guiState, appCtx, session);
+            } else if (session && !guiState.asyncEval.busy()) {
                 if (guiState.evalSelection) {
                     guiState.evalSelection = false;
                     editorPanel.clearErrorMarkers();
@@ -1134,11 +1255,16 @@ int runGui(bridge::AppContext& appCtx) {
 
             // ---------------------------------------------------------------
             // Live control widgets (`ui` module): draw floating panel
-            // windows, then dispatch value changes -- engine fast path in
+            // windows (skipping panels rendered inline as notebook panel
+            // cells), then dispatch value changes -- engine fast path in
             // one bundle per silo, lang callbacks coalesced under try_lock.
+            // (controlsPanel.beginFrame() ran before the notebook drew its
+            // panel cells, so their noteTapsVisible reports survive.)
             // ---------------------------------------------------------------
             if (appCtx.uiState) {
-                controlsPanel.draw(*appCtx.uiState);
+                auto claimed = notebookPanel.claimedPanels();
+                controlsPanel.draw(*appCtx.uiState,
+                                   claimed.empty() ? nullptr : &claimed);
                 controlsPanel.dispatch(*appCtx.uiState, appCtx);
             }
 
