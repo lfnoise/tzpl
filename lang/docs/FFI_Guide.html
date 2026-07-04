@@ -3543,6 +3543,9 @@ collector <span class="fn">spawn</span>(Msg.int(<span class="num">0</span>)) <sp
   <strong>Note:</strong> Calling <code>begin()</code> while a previous bundle is still open (queued but never submitted) returns <code>errCommandsQueuedButNotSent</code>; issuing graph commands with no open bundle returns <code>errNoActiveBundle</code>.
 </div>
 
+<div class="note">
+  <strong>First-class bundles:</strong> the <code>bundles</code> module (<code>import bundles.*;</code>) layers a data-structure representation on top of this API &mdash; an <code>EngineCmd</code> enum for the bundleable commands and a <code>Bundle</code> struct holding an ordered sequence of them. A <code>Bundle</code> is an ordinary value that can be built anywhere, stored, inspected, and submitted repeatedly with <code>b go(silo)</code> / <code>b sched(silo, clock, beat)</code> / <code>b schedPolicy(&hellip;)</code>, which replay it through <code>begin()</code>/<code>sched()</code>.</div>
+
 <!-- -------------------------------- -->
 <h3 id="ae-nodes">18.5 Node Operations</h3>
 

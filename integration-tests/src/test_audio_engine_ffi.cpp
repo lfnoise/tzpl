@@ -722,6 +722,7 @@ static constexpr ScriptTestConfig kScriptTests[] = {
     {"test2.x",     8,    96000.,  256, true, true,  false, false},
     {"test4.x",    10,    48000.,  256, true, false, false, false},
     {"test3.x",     1,    96000.,  256, false, false, false, true},
+    {"bundle_test.x", 1,  48000.,  256, true, false, false, false},
 };
 
 // ---------------------------------------------------------------------------
