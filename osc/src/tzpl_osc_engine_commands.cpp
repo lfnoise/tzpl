@@ -20,7 +20,7 @@
 //
 //  Maps OSC addresses to engine:: client interface calls.
 //  Graph commands received as single (non-bundled) messages are
-//  auto-wrapped in begin(0)/go().
+//  auto-wrapped in begin()/go(0).
 //
 
 #include "tzpl_osc.hpp"
@@ -38,18 +38,18 @@ namespace osc {
 // ---------------------------------------------------------------------------
 
 // Defined here, declared extern in tzpl_osc.hpp.
-// When false, graph commands are auto-wrapped in begin(0)/go().
+// When false, graph commands are auto-wrapped in begin()/go(0).
 thread_local bool tInsideBundle = false;
 
 static void autoBegin(engine::Engine* eng) {
     if (!tInsideBundle) {
-        engine::begin(eng, 0);
+        engine::begin(eng);
     }
 }
 
 static void autoGo() {
     if (!tInsideBundle) {
-        engine::go();
+        engine::go(0);
     }
 }
 

@@ -20,7 +20,7 @@
 //
 //  Maps NATS subjects to engine:: client interface calls.
 //  NATS message payloads use simple space-separated text arguments.
-//  Single (non-bundled) graph commands are auto-wrapped in begin(0)/go().
+//  Single (non-bundled) graph commands are auto-wrapped in begin()/go(0).
 //
 
 #include "tzpl_nats.hpp"
@@ -154,9 +154,9 @@ static void handleNewNode(const char*, const char* data, int len, const char*,
     const char* defName = argStr(args, 0);
     auto nodeID = static_cast<engine::i64>(argInt(args, 1));
 
-    engine::begin(d.engine(), 0);
+    engine::begin(d.engine());
     engine::newNode(defName, nodeID);
-    engine::go();
+    engine::go(0);
 }
 
 static void handleFreeNode(const char*, const char* data, int len, const char*,
@@ -165,16 +165,16 @@ static void handleFreeNode(const char*, const char* data, int len, const char*,
     if (args.empty()) return;
     auto nodeID = static_cast<engine::i64>(argInt(args, 0));
 
-    engine::begin(d.engine(), 0);
+    engine::begin(d.engine());
     engine::freeNode(nodeID);
-    engine::go();
+    engine::go(0);
 }
 
 static void handleFreeAllNodes(const char*, const char*, int, const char*,
                                 NatsDispatcher& d) {
-    engine::begin(d.engine(), 0);
+    engine::begin(d.engine());
     engine::freeAllNodes();
-    engine::go();
+    engine::go(0);
 }
 
 static void handleConnect(const char*, const char* data, int len, const char*,
@@ -184,9 +184,9 @@ static void handleConnect(const char*, const char* data, int len, const char*,
     engine::PortAddr src{static_cast<engine::i64>(argInt(args, 0)), argInt(args, 1)};
     engine::PortAddr dst{static_cast<engine::i64>(argInt(args, 2)), argInt(args, 3)};
 
-    engine::begin(d.engine(), 0);
+    engine::begin(d.engine());
     engine::connect(src, dst);
-    engine::go();
+    engine::go(0);
 }
 
 static void handleConnectX(const char*, const char* data, int len, const char*,
@@ -198,9 +198,9 @@ static void handleConnectX(const char*, const char* data, int len, const char*,
     float xfade = argFloat(args, 4);
     auto curve = static_cast<engine::FadeCurve>(argInt(args, 5));
 
-    engine::begin(d.engine(), 0);
+    engine::begin(d.engine());
     engine::connect(src, dst, xfade, curve);
-    engine::go();
+    engine::go(0);
 }
 
 static void handleDisconnectInput(const char*, const char* data, int len, const char*,
@@ -209,9 +209,9 @@ static void handleDisconnectInput(const char*, const char* data, int len, const 
     if (args.size() < 2) return;
     engine::PortAddr dst{static_cast<engine::i64>(argInt(args, 0)), argInt(args, 1)};
 
-    engine::begin(d.engine(), 0);
+    engine::begin(d.engine());
     engine::disconnectInput(dst);
-    engine::go();
+    engine::go(0);
 }
 
 static void handleDisconnectOutput(const char*, const char* data, int len, const char*,
@@ -220,9 +220,9 @@ static void handleDisconnectOutput(const char*, const char* data, int len, const
     if (args.size() < 2) return;
     engine::PortAddr src{static_cast<engine::i64>(argInt(args, 0)), argInt(args, 1)};
 
-    engine::begin(d.engine(), 0);
+    engine::begin(d.engine());
     engine::disconnectOutput(src);
-    engine::go();
+    engine::go(0);
 }
 
 static void handleDisconnectNode(const char*, const char* data, int len, const char*,
@@ -231,9 +231,9 @@ static void handleDisconnectNode(const char*, const char* data, int len, const c
     if (args.empty()) return;
     auto nodeID = static_cast<engine::i64>(argInt(args, 0));
 
-    engine::begin(d.engine(), 0);
+    engine::begin(d.engine());
     engine::disconnectNode(nodeID);
-    engine::go();
+    engine::go(0);
 }
 
 static void handleReplaceNode(const char*, const char* data, int len, const char*,
@@ -245,9 +245,9 @@ static void handleReplaceNode(const char*, const char* data, int len, const char
     float xfade = argFloat(args, 2);
     auto curve = static_cast<engine::FadeCurve>(argInt(args, 3));
 
-    engine::begin(d.engine(), 0);
+    engine::begin(d.engine());
     engine::replaceNode(oldID, newID, xfade, curve);
-    engine::go();
+    engine::go(0);
 }
 
 static void handleSetInput(const char*, const char* data, int len, const char*,
@@ -257,9 +257,9 @@ static void handleSetInput(const char*, const char* data, int len, const char*,
     engine::PortAddr port{static_cast<engine::i64>(argInt(args, 0)), argInt(args, 1)};
     engine::f32 val = argFloat(args, 2);
 
-    engine::begin(d.engine(), 0);
+    engine::begin(d.engine());
     engine::setInput(port, 1, &val);
-    engine::go();
+    engine::go(0);
 }
 
 static void handleSetControl(const char*, const char* data, int len, const char*,
@@ -270,9 +270,9 @@ static void handleSetControl(const char*, const char* data, int len, const char*
     auto controlID = static_cast<engine::i64>(argInt(args, 1));
     engine::f32 val = argFloat(args, 2);
 
-    engine::begin(d.engine(), 0);
+    engine::begin(d.engine());
     engine::setControl(nodeID, controlID, 1, &val);
-    engine::go();
+    engine::go(0);
 }
 
 static void handleNoteOn(const char*, const char* data, int len, const char*,
@@ -287,10 +287,10 @@ static void handleNoteOn(const char*, const char* data, int len, const char*,
         params.push_back(argFloat(args, i));
     }
 
-    engine::begin(d.engine(), 0);
+    engine::begin(d.engine());
     engine::noteOn(nodeID, noteID, static_cast<int>(params.size()),
                     params.empty() ? nullptr : params.data());
-    engine::go();
+    engine::go(0);
 }
 
 static void handleNoteOff(const char*, const char* data, int len, const char*,
@@ -300,9 +300,9 @@ static void handleNoteOff(const char*, const char* data, int len, const char*,
     auto nodeID = static_cast<engine::i64>(argInt(args, 0));
     int noteID = argInt(args, 1);
 
-    engine::begin(d.engine(), 0);
+    engine::begin(d.engine());
     engine::noteOff(nodeID, noteID);
-    engine::go();
+    engine::go(0);
 }
 
 static void handleAllNotesOff(const char*, const char* data, int len, const char*,
@@ -311,9 +311,9 @@ static void handleAllNotesOff(const char*, const char* data, int len, const char
     if (args.empty()) return;
     auto nodeID = static_cast<engine::i64>(argInt(args, 0));
 
-    engine::begin(d.engine(), 0);
+    engine::begin(d.engine());
     engine::allNotesOff(nodeID);
-    engine::go();
+    engine::go(0);
 }
 
 // ---------------------------------------------------------------------------

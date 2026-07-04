@@ -9,7 +9,7 @@ fn cfsyn() S {
 	if_(sig > 0.0, fn() { sig }, fn() { sig * 0.5 }) |> outlet
 }
 defSynthX(cfsyn, "ab_cf");
-begin(0);
+begin();
 newNode("ab_cf", 100);
 connect(100, 0, 0, 0);
-sched();
+sched(0);

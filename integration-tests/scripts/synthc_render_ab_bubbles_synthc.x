@@ -12,7 +12,7 @@ fn bubbles() S =
 	0.4 lfsaw * 24 + [8, 7.23] lfsaw * 3 + 81 |> nnhz sinosc * 0.04 |> combn(0.2, 4) outlet;
 defSynthX(bubbles, "ab_bubbles");
 
-begin(0);
+begin();
 newNode("ab_bubbles", 100);
 connect(100, 0, 0, 0);
-sched();
+sched(0);

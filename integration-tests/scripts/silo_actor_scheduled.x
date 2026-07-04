@@ -34,10 +34,10 @@ engineStart();
 masterGain(0.3);
 setTempo(0, 120.0);          -- 2 beats/second
 
-begin(0);
+begin();
 newNode("voicer", 101);
 connect(101, 0, 0, 0);
-sched();
+sched(0);
 
 attachVM(0);
 let err = await siloLoad(0, taskCode);

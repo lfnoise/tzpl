@@ -12,7 +12,7 @@ fn rnoise() S {
 	y write(fb); fb outlet
 }
 rnoise defSynth("ab_rnoise");
-begin(0);
+begin();
 newNode("ab_rnoise", 100);
 connect(100, 0, 0, 0);
-sched();
+sched(0);

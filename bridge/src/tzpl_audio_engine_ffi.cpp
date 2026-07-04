@@ -197,30 +197,33 @@ static void ffi_loadPlugin(ts::VM& vm, u16 dst, u16, u16 argBase) {
 // Command bundling
 // ---------------------------------------------------------------------------
 
-// fn begin(silo: Int) -> Int   (returns error code, 0 = success)
-static void ffi_begin(ts::VM& vm, u16 dst, u16, u16 argBase) {
+// fn begin() -> Int   (returns error code, 0 = success)
+// The target silo is chosen at submit time: go(silo) / sched(silo, ...).
+static void ffi_begin(ts::VM& vm, u16 dst, u16, u16) {
+    returnErr(vm, dst, engine::begin(getEngine(vm)), __func__);
+}
+
+// fn go(silo: Int) -> Int  (send bundle to silo for immediate execution)
+static void ffi_sched_immediate(ts::VM& vm, u16 dst, u16, u16 argBase) {
     int silo = static_cast<int>(vm.reg(argBase).i);
-    returnErr(vm, dst, engine::begin(getEngine(vm), silo), __func__);
+    returnErr(vm, dst, engine::go(silo), __func__);
 }
 
-// fn go() -> Int  (send bundle for immediate execution)
-static void ffi_sched_immediate(ts::VM& vm, u16 dst, u16, u16) {
-    returnErr(vm, dst, engine::go(), __func__);
-}
-
-// fn sched(clock: Int, beat: Float) -> Int
+// fn sched(silo: Int, clock: Int, beat: Float) -> Int
 static void ffi_sched(ts::VM& vm, u16 dst, u16, u16 argBase) {
-    int clock = static_cast<int>(vm.reg(argBase).i);
-    f64 beat = vm.reg(argBase + 1).f;
-    returnErr(vm, dst, engine::sched(clock, beat), __func__);
+    int silo = static_cast<int>(vm.reg(argBase).i);
+    int clock = static_cast<int>(vm.reg(argBase + 1).i);
+    f64 beat = vm.reg(argBase + 2).f;
+    returnErr(vm, dst, engine::sched(silo, clock, beat), __func__);
 }
 
-// fn schedPolicy(clock: Int, beat: Float, policy: Int) -> Int
+// fn schedPolicy(silo: Int, clock: Int, beat: Float, policy: Int) -> Int
 static void ffi_schedPolicy(ts::VM& vm, u16 dst, u16, u16 argBase) {
-    int clock = static_cast<int>(vm.reg(argBase).i);
-    f64 beat = vm.reg(argBase + 1).f;
-    auto policy = static_cast<engine::SchedPolicy>(vm.reg(argBase + 2).i);
-    returnErr(vm, dst, engine::sched(clock, beat, policy), __func__);
+    int silo = static_cast<int>(vm.reg(argBase).i);
+    int clock = static_cast<int>(vm.reg(argBase + 1).i);
+    f64 beat = vm.reg(argBase + 2).f;
+    auto policy = static_cast<engine::SchedPolicy>(vm.reg(argBase + 3).i);
+    returnErr(vm, dst, engine::sched(silo, clock, beat, policy), __func__);
 }
 
 // fn setTempo(clock: Int, bpm: Float) -> Int
@@ -1047,9 +1050,13 @@ static void ffi_siloStartAt(ts::VM& vm, u16, u16, u16 argBase) {
             std::fprintf(stderr, "siloStartAt: silo %d has no start() entry\n", siloIndex);
             continue;
         }
-        engine::begin(eng, siloIndex);
+        // NB: if a user bundle is already open on this thread, begin fails
+        // with errCommandsQueuedButNotSent and the start command would join
+        // the user's bundle -- pre-existing hazard, unchanged by the
+        // silo-at-submit refactor.
+        engine::begin(eng);
         engine::sendCommand(new SiloRunStartCmd(state.startGlobalIndex));
-        engine::sched(0, beat, engine::schedBetterLateThanNever);
+        engine::sched(siloIndex, 0, beat, engine::schedBetterLateThanNever);
     }
     // When audio is stopped the scheduled start() ran inline on the silo VM
     // (makeCurrent(silo)); restore the main VM before returning to its bytecode.
@@ -1334,11 +1341,11 @@ void registerAudioEngineFFI(ts::Compiler& compiler) {
     reg("loadPlugin",       Bool, {String, String},        ffi_loadPlugin);
 
     // Command bundling (rtSafe — these just queue commands via lock-free FIFO)
-    reg("begin",            Int, {Int},            ffi_begin,         true);
-    reg("go",               Int, {},               ffi_sched_immediate, true);
-    reg("sched",            Int, {},               ffi_sched_immediate, true);
-    reg("sched",            Int, {Int, Float},     ffi_sched,         true);
-    reg("schedPolicy",      Int, {Int, Float, Int}, ffi_schedPolicy,  true);
+    reg("begin",            Int, {},               ffi_begin,         true);
+    reg("go",               Int, {Int},            ffi_sched_immediate, true);
+    reg("sched",            Int, {Int},            ffi_sched_immediate, true);
+    reg("sched",            Int, {Int, Int, Float}, ffi_sched,        true);
+    reg("schedPolicy",      Int, {Int, Int, Float, Int}, ffi_schedPolicy, true);
     reg("setTempo",         Int, {Int, Float},     ffi_setTempo,      true);
     reg("schedTempoChange", Int, {Int, Float, Float, Float}, ffi_schedTempoChange, true);
     reg("clockBeats",       Float, {Int},          ffi_clockBeats,    true);

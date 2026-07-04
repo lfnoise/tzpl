@@ -160,7 +160,7 @@ Replies are sent back to the sender's address and port.
 
 ### Graph Manipulation
 
-These commands modify the audio graph. When sent individually (not inside an OSC bundle), they are automatically wrapped in a `begin(silo)/go()` transaction. When sent inside a bundle, multiple commands execute atomically.
+These commands modify the audio graph. When sent individually (not inside an OSC bundle), they are automatically wrapped in a `begin()/go(silo)` transaction. When sent inside a bundle, multiple commands execute atomically.
 
 | Address | Arguments | Description |
 |---|---|---|
@@ -190,7 +190,7 @@ These commands modify the audio graph. When sent individually (not inside an OSC
 
 ## OSC Bundles
 
-OSC bundles allow multiple commands to be sent atomically. The engine processes all commands in a bundle within a single `begin(silo)` transaction, finalized with either `go()` (immediate) or `sched(time)` (scheduled).
+OSC bundles allow multiple commands to be sent atomically. The engine processes all commands in a bundle within a single `begin()` transaction, finalized with either `go(silo)` (immediate) or `sched(silo, ...)` (scheduled); the silo from the optional `/engine/silo` element is passed at finalize.
 
 ### Silo selection
 
@@ -199,8 +199,8 @@ The first element in a bundle can optionally be `/engine/silo <int>` to target a
 ### Timetag scheduling
 
 Bundle timetags determine how the command batch is finalized:
-- Timetag <= 1 (including the "immediately" timetag): finalized with `go()` for immediate execution
-- Timetag > 1: interpreted as NTP timestamp, converted to engine stream time and finalized with `sched(time)` for scheduled execution
+- Timetag <= 1 (including the "immediately" timetag): finalized with `go(silo)` for immediate execution
+- Timetag > 1: interpreted as NTP timestamp, converted to engine stream time and finalized with `sched(silo, ...)` for scheduled execution
 
 ### Nested bundles
 

@@ -42,10 +42,10 @@ masterGain(0.3);
 setTempo(0, 120.0);
 
 -- Voicer node on silo 0 (the actor triggers notes on node 101).
-begin(0);
+begin();
 newNode("voicer", 101);
 connect(101, 0, 0, 0);
-sched();
+sched(0);
 
 attachVM(0);
 let err = await siloLoad(0, taskCode);

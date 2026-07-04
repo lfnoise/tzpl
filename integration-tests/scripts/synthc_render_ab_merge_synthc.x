@@ -17,7 +17,7 @@ fn mergesyn() S {
 }
 defSynthX(mergesyn, "ab_merge");
 
-begin(0);
+begin();
 newNode("ab_merge", 100);
 connect(100, 0, 0, 0);
-sched();
+sched(0);

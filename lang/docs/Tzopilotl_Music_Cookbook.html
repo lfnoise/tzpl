@@ -588,17 +588,19 @@ needs no compilation. Its note params are
 <h3 id="bundles">3.2 Command bundles</h3>
 <p>Every change to the graph &mdash; creating nodes, connecting them, setting
 inputs &mdash; is a <strong>command</strong>. Commands are gathered into an
-<em>atomic bundle</em> with <code>begin(silo)</code> and dispatched with one of:</p>
+<em>atomic bundle</em> with <code>begin()</code> and dispatched with one of:</p>
 <ul>
-  <li><code>go()</code> or <code>sched()</code> &mdash; apply the bundle <em>now</em>.</li>
-  <li><code>sched(clock <span class="typ">Int</span>, beat <span class="typ">Float</span>)</code>
+  <li><code>go(silo)</code> or <code>sched(silo)</code> &mdash; apply the bundle <em>now</em>.</li>
+  <li><code>sched(silo <span class="typ">Int</span>, clock <span class="typ">Int</span>, beat <span class="typ">Float</span>)</code>
   &mdash; apply it sample-accurately when tempo <code>clock</code> reaches
   <code>beat</code>.</li>
 </ul>
 <p>Bundling means a whole patch change lands on the audio thread together, between
-two samples &mdash; never half-applied. <code>begin</code> takes the silo index the
+two samples &mdash; never half-applied. The dispatch call takes the silo index the
 bundle targets (silo 0 is the audio-callback thread; see
-<a href="#silos">section&nbsp;5</a>).</p>
+<a href="#silos">section&nbsp;5</a>). The bundle is validated as a whole at
+dispatch: if any command in it is invalid, the entire bundle is discarded and the
+dispatch call returns the error.</p>
 
 <h3 id="nodegraph-cook">3.3 Recipe: instantiate a synth and hear it</h3>
 <p>Nodes are created with <code>newNode(defName, nodeId)</code> and wired with
@@ -611,10 +613,10 @@ it to the speakers.</p>
 <span class="fn">engineStart</span>();
 <span class="fn">masterGain</span>(<span class="num">0.2</span>);
 
-<span class="fn">begin</span>(<span class="num">0</span>);                  <span class="cmt">-- open a bundle on silo 0</span>
+<span class="fn">begin</span>();                  <span class="cmt">-- open a bundle on silo 0</span>
 <span class="fn">newNode</span>(<span class="str">"bubbles"</span>, <span class="num">101</span>);   <span class="cmt">-- instantiate the synth from section 2 as node 101</span>
 <span class="fn">connect</span>(<span class="num">101</span>, <span class="num">0</span>, <span class="num">0</span>, <span class="num">0</span>);    <span class="cmt">-- node 101 out 0  ->  output (node 0) in 0</span>
-<span class="fn">sched</span>();                   <span class="cmt">-- dispatch the bundle now</span></code></pre>
+<span class="fn">sched</span>(<span class="num">0</span>);                   <span class="cmt">-- dispatch the bundle now</span></code></pre>
 <p>Evaluate it and you hear the <code>bubbles</code> synth &mdash; the engine keeps
 playing for as long as the app is open. (You can use the engine's built-in
 <code>"sinosc"</code> def the same way without compiling anything.)</p>
@@ -648,24 +650,24 @@ is <code>[pitch, amp]</code>. The engine's built-in <code>"voicer"</code> takes
 <span class="fn">engineStart</span>();
 <span class="fn">masterGain</span>(<span class="num">0.2</span>);
 
-<span class="fn">begin</span>(<span class="num">0</span>);
+<span class="fn">begin</span>();
 <span class="fn">newNode</span>(<span class="str">"sine_voice"</span>, <span class="num">200</span>);   <span class="cmt">-- the polyphonic synth from section 2.3</span>
 <span class="fn">connect</span>(<span class="num">200</span>, <span class="num">0</span>, <span class="num">0</span>, <span class="num">0</span>);
-<span class="fn">sched</span>();
+<span class="fn">sched</span>(<span class="num">0</span>);
 
 <span class="cmt">-- A C-major chord: three voices with distinct note ids.</span>
-<span class="fn">begin</span>(<span class="num">0</span>);
+<span class="fn">begin</span>();
 <span class="fn">noteOn</span>(<span class="num">200</span>, <span class="num">0</span>, [<span class="num">60.0</span>, <span class="num">0.4</span>]);
 <span class="fn">noteOn</span>(<span class="num">200</span>, <span class="num">1</span>, [<span class="num">64.0</span>, <span class="num">0.4</span>]);
 <span class="fn">noteOn</span>(<span class="num">200</span>, <span class="num">2</span>, [<span class="num">67.0</span>, <span class="num">0.4</span>]);
-<span class="fn">sched</span>();</code></pre>
+<span class="fn">sched</span>(<span class="num">0</span>);</code></pre>
 <p><strong>How it works.</strong> Each <code>noteOn</code> claims a free voice in the
 node's pool, keyed by the note id, and feeds it the param array (filling any
 trailing params from the voice's declared defaults). A later
 <code>noteOff(200, 0)</code> drops the gate on the voice with that id, so its
 release stage plays out. Reusing a note id while it is still sounding retriggers
 that same voice. Like all graph changes, note commands are bundled and can be
-beat-scheduled with <code>sched(clock, beat)</code> &mdash; which is exactly what
+beat-scheduled with <code>sched(silo, clock, beat)</code> &mdash; which is exactly what
 the generative and actor recipes below do.</p>
 
 <!-- ================================================================ -->
@@ -718,10 +720,10 @@ kicks off the music; <code>siloStartAt</code> calls it on the grid.</p>
 <span class="fn">setTempo</span>(<span class="num">0</span>, <span class="num">120.0</span>);
 
 <span class="cmt">-- A built-in `voicer` node on silo 0 (the melody triggers notes on node 101).</span>
-<span class="fn">begin</span>(<span class="num">0</span>);
+<span class="fn">begin</span>();
 <span class="fn">newNode</span>(<span class="str">"voicer"</span>, <span class="num">101</span>);
 <span class="fn">connect</span>(<span class="num">101</span>, <span class="num">0</span>, <span class="num">0</span>, <span class="num">0</span>);
-<span class="fn">sched</span>();
+<span class="fn">sched</span>(<span class="num">0</span>);
 
 <span class="fn">attachVM</span>(<span class="num">0</span>);
 <span class="kw">let</span> err = <span class="kw">await</span> <span class="fn">siloLoad</span>(<span class="num">0</span>, taskCode);
@@ -767,14 +769,14 @@ clock and beat so they fire sample-accurately:</p>
   <tr><td><code>setTempo(clock <span class="typ">Int</span>, bpm <span class="typ">Float</span>)</code></td><td>Set a clock's tempo.</td></tr>
   <tr><td><code>clockBeats(clock <span class="typ">Int</span>) <span class="typ">Float</span></code></td><td>The clock's current beat.</td></tr>
   <tr><td><code>clockTempo(clock <span class="typ">Int</span>) <span class="typ">Float</span></code></td><td>The clock's current BPM.</td></tr>
-  <tr><td><code>sched(clock <span class="typ">Int</span>, beat <span class="typ">Float</span>)</code></td><td>Dispatch the current bundle at that beat.</td></tr>
+  <tr><td><code>sched(silo <span class="typ">Int</span>, clock <span class="typ">Int</span>, beat <span class="typ">Float</span>)</code></td><td>Dispatch the current bundle to <code>silo</code> at that beat.</td></tr>
   <tr><td><code>schedTempoChange(clock, atBeat, targetBPM, rampBeats)</code></td><td>Ramp tempo over <code>rampBeats</code>.</td></tr>
 </table>
 <pre><code><span class="cmt">-- Schedule a note exactly two beats from now on clock 0.</span>
 <span class="kw">let</span> now = <span class="fn">clockBeats</span>(<span class="num">0</span>);
-<span class="fn">begin</span>(<span class="num">0</span>);
+<span class="fn">begin</span>();
 <span class="fn">noteOn</span>(<span class="num">200</span>, <span class="num">0</span>, [<span class="num">60.0</span>, <span class="num">0.4</span>]);
-<span class="fn">sched</span>(<span class="num">0</span>, now + <span class="num">2.0</span>);   <span class="cmt">-- fires when clock 0 reaches now+2</span></code></pre>
+<span class="fn">sched</span>(<span class="num">0</span>, <span class="num">0</span>, now + <span class="num">2.0</span>);   <span class="cmt">-- silo 0; fires when clock 0 reaches now+2</span></code></pre>
 
 <h4>The NRT clock module (timed callbacks on the main thread)</h4>
 <p>For orchestration logic that runs on the main VM, <code>import clock.*;</code>
@@ -1073,10 +1075,10 @@ beep <span class="fn">defSynthX</span>(<span class="str">"beep"</span>);
 <span class="cmt">-- Render two seconds of beeps to a WAV file.</span>
 <span class="kw">let</span> h = <span class="fn">renderNRT</span>(<span class="str">"out.wav"</span>, <span class="num">2.0</span>, <span class="kw">fn</span>() <span class="typ">Void</span> {
     <span class="fn">setTempo</span>(<span class="num">0</span>, <span class="num">120.0</span>);
-    <span class="fn">begin</span>(<span class="num">0</span>);
+    <span class="fn">begin</span>();
     <span class="fn">newNode</span>(<span class="str">"beep"</span>, <span class="num">101</span>);
     <span class="fn">connect</span>(<span class="num">101</span>, <span class="num">0</span>, <span class="num">0</span>, <span class="num">0</span>);
-    <span class="fn">sched</span>();
+    <span class="fn">sched</span>(<span class="num">0</span>);
 });
 <span class="kw">await</span> <span class="fn">renderDone</span>(h);
 <span class="str">"render done"</span> println;</code></pre>
@@ -1131,7 +1133,7 @@ all loaded in parallel and started together on a downbeat. This mirrors
     <span class="fn">begin</span>(silo);
     <span class="fn">newNode</span>(<span class="str">"voicer"</span>, node);
     <span class="fn">connect</span>(node, <span class="num">0</span>, <span class="num">0</span>, <span class="num">0</span>);
-    <span class="fn">sched</span>();
+    <span class="fn">sched</span>(<span class="num">0</span>);
     <span class="fn">attachVM</span>(silo);
     <span class="fn">siloLoad</span>(silo, code)
 }
@@ -1164,7 +1166,7 @@ self-timed against the shared tempo clock 0.</p>
 <table>
   <tr><th>Function</th><th>Module</th><th>Runs at</th></tr>
   <tr><td><code>engineStart / engineStop / masterGain</code></td><td>audio_engine</td><td>NRT</td></tr>
-  <tr><td><code>begin / go / sched / sched(clock,beat)</code></td><td>audio_engine</td><td>NRT</td></tr>
+  <tr><td><code>begin / go(silo) / sched(silo) / sched(silo,clock,beat)</code></td><td>audio_engine</td><td>NRT</td></tr>
   <tr><td><code>newNode / connect / freeNode</code></td><td>audio_engine</td><td>NRT</td></tr>
   <tr><td><code>noteOn / noteOff</code></td><td>audio_engine</td><td>NRT</td></tr>
   <tr><td><code>playNote / releaseNote</code></td><td>audio_engine</td><td>silo</td></tr>

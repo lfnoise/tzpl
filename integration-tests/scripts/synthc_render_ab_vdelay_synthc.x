@@ -20,7 +20,7 @@ fn vdelayVoice() S {
 }
 defSynthX(vdelayVoice, "ab_vdelay");
 
-begin(0);
+begin();
 newNode("ab_vdelay", 100);
 connect(100, 0, 0, 0);
-sched();
+sched(0);

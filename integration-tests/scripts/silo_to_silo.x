@@ -52,10 +52,10 @@ masterGain(0.3);
 setTempo(0, 120.0);
 
 -- voicer node lives on silo 1 (where "voice" plays).
-begin(1);
+begin();
 newNode("voicer", 101);
 connect(101, 0, 0, 0);
-sched();
+sched(1);
 
 attachVM(0);
 let e0 = await siloLoad(0, silo0);

@@ -13,7 +13,7 @@ go(coro fn() Float {
     yield 1.0;
 
     println("create graph A");
-    begin(siloA);
+    begin();
     newNode("sinosc", 101);
     newNode("sinosc", 102);
     newNode("+", 103);
@@ -23,24 +23,24 @@ go(coro fn() Float {
     connect(101, 0, 103, 0);
     connect(102, 0, 103, 1);
     connect(103, 0, 0, 0);
-    sched();
+    sched(siloA);
     yield 2.0;
 
     for (h : (0..2)) {
         println("replace 103 -> 203 w fade");
-        begin(siloA);
+        begin();
         replaceNode(103, 203, 1.25, FadeCurve.fadeLinear);
-        sched();
+        sched(siloA);
         yield 2.0;
 
         println("replace 203 -> 103 w fade");
-        begin(siloA);
+        begin();
         replaceNode(203, 103, 1.25, FadeCurve.fadeLinear);
-        sched();
+        sched(siloA);
         yield 2.0;
     }
 
-    begin(siloB);
+    begin();
     println("create graph B");
     newNode("sinosc", 101);
     newNode("sinosc", 102);
@@ -52,38 +52,38 @@ go(coro fn() Float {
     connect(101, 0, 103, 0);
     connect(102, 0, 103, 1);
     connect(103, 0, 0, 0);
-    sched();
+    sched(siloB);
     yield 1.0;
 
     println("attempt to change a connection.");
-    begin(siloB);
+    begin();
     newNode("sinosc", 104);
     setInput(104, 0, 400.0);
     connectX(104, 0, 103, 0, 0.1, FadeCurve.fadeLinear);
-    sched();
+    sched(siloB);
     yield 1.0;
 
     println("ok, set it back.");
-    begin(siloB);
+    begin();
     connectX(101, 0, 103, 0, 0.1, FadeCurve.fadeLinear);
-    sched();
+    sched(siloB);
     yield 0.4;
 
-    begin(siloB);
+    begin();
     disconnectNode(104);
-    sched();
+    sched(siloB);
     yield 2.0;
 
     println("slide freq to 600 in 8 seconds");
-    begin(siloA);
+    begin();
     setInputX(101, 0, 600.0, 8.0, FadeCurve.fadeLinear);
-    sched();
+    sched(siloA);
     yield 4.0;
 
     println("attempt to start a new slide while the first is running");
-    begin(siloA);
+    begin();
     setInputX(101, 0, 400.0, 8.0, FadeCurve.fadeLinear);
-    sched();
+    sched(siloA);
     yield 4.0;
 
     println("first slide should be done about now");
@@ -93,79 +93,79 @@ go(coro fn() Float {
     yield 3.0;
 
     println("disconnect a sinosc");
-    begin(siloA);
+    begin();
     disconnectInputX(103, 1, 0.5, FadeCurve.fadeLinear);
-    sched();
+    sched(siloA);
     yield 3.0;
 
     println("reconnect a sinosc");
-    begin(siloA);
+    begin();
     connectX(102, 0, 103, 1, 0.5, FadeCurve.fadeLinear);
-    sched();
+    sched(siloA);
     yield 4.0;
 
     println("tremolo");
     for (ti : (0..15)) {
         let amp = ti % 2 == 1 ? 0.2 : 0.02;
-        begin(siloA);
+        begin();
         setInputX(101, 1, amp, 0.1, FadeCurve.fadeSmoothstep);
         setInputX(102, 1, amp, 0.1, FadeCurve.fadeSmoothstep);
-        sched();
+        sched(siloA);
         yield 0.2;
     }
     yield 2.0;
 
     println("very loud (engage safety limiter).");
-    begin(siloA);
+    begin();
     setInputX(101, 1, 20.0, 0.04, FadeCurve.fadeLinear);
-    sched();
+    sched(siloA);
     yield 1.0;
 
     println("set amp .2");
-    begin(siloA);
+    begin();
     setInputX(101, 1, 0.2, 0.04, FadeCurve.fadeLinear);
-    sched();
+    sched(siloA);
     yield 1.0;
 
     println("random amplitudes 0.1 .. 20.0");
     for (ri : (0..7)) {
         let ramp = rand(0.0, 20.0);
-        begin(siloA);
+        begin();
         setInputX(101, 1, ramp, 0.04, FadeCurve.fadeLinear);
-        sched();
+        sched(siloA);
         yield 0.1;
     }
 
     println("set amp .2");
-    begin(siloA);
+    begin();
     setInputX(101, 1, 0.2, 0.04, FadeCurve.fadeLinear);
-    sched();
+    sched(siloA);
     yield 2.0;
 
     println("set graph B amps silent");
-    begin(siloB);
+    begin();
     setInputX(101, 1, 0.0, 3.0, FadeCurve.fadeEaseOutCubic);
     setInputX(102, 1, 0.0, 3.0, FadeCurve.fadeEaseOutCubic);
-    sched();
+    sched(siloB);
     yield 4.0;
 
     println("set graph A amps silent");
-    begin(siloA);
+    begin();
     setInputX(101, 1, 0.0, 3.0, FadeCurve.fadeEaseOutCubic);
     setInputX(102, 1, 0.0, 3.0, FadeCurve.fadeEaseOutCubic);
-    sched();
+    sched(siloA);
     yield 4.0;
 
     println("free graph B");
-    begin(siloB);
+    begin();
     freeAllNodes();
-    sched();
+    sched(siloB);
     yield 1.0;
 
     println("free graph A");
-    begin(siloA);
+    begin();
     freeAllNodes();
-    sched();
+    sched(siloA);
     yield 1.0;
 
     println("stop");

@@ -74,14 +74,14 @@ void test0()
     f32 freq;
     f32 amp;
 
-    begin(e, 0);
+    begin(e);
     newNode("sinosc", 101);
     freq = 240;
     setInput({101, 0}, 1, &freq);
     amp = 0.15;
     setInput({101, 1}, 1, &amp, .2);
     connect({101, 0}, {0, 0});
-    go();
+    go(0);
 
     sleepSec(8);
 
@@ -121,7 +121,7 @@ void test1()
     f32 freq;
     f32 amp;
 
-    begin(e, siloA);
+    begin(e);
     newNode("sinosc", 101);
     newNode("sinosc", 102);
     newNode("+", 103);
@@ -133,28 +133,28 @@ void test1()
     connect({101, 0}, {103, 0});
     connect({102, 0}, {103, 1});
     connect({103, 0}, {0, 0});
-    go();
+    go(siloA);
 
 
     sleepSec(2);
 
     for (int h = 0; h < 3; ++h) {
         printf("replace 103 -> 203 w fade\n");
-        begin(e, siloA);
+        begin(e);
         replaceNode(103, 203, 1.25);
-        go();
+        go(siloA);
 
         sleepSec(2);
 
         printf("replace 203 -> 103 w fade\n");
-        begin(e, siloA);
+        begin(e);
         replaceNode(203, 103, 1.25);
-        go();
+        go(siloA);
 
         sleepSec(2);
     }
 
-    begin(e, siloB);
+    begin(e);
     printf("create graph B\n");
     newNode("sinosc", 101);
     newNode("sinosc", 102);
@@ -169,41 +169,41 @@ void test1()
     connect({101, 0}, {103, 0});
     connect({102, 0}, {103, 1});
     connect({103, 0}, {0, 0});
-    go();
+    go(siloB);
 
     sleepSec(1);
 
     printf("attempt to change a connection.\n");
-    begin(e, siloB);
+    begin(e);
     newNode("sinosc", 104);
     freq = 400;
     setInput({104, 0}, 1, &freq);
     connect({104, 0}, {103, 0}, 0.1);
-    go();
+    go(siloB);
 
     sleepSec(1);
     printf("ok, set it back.\n");
-    begin(e, siloB);
+    begin(e);
     connect({101, 0}, {103, 0}, 0.1);
-    go();
+    go(siloB);
     sleepf(.4);
-    begin(e, siloB);
+    begin(e);
     disconnectNode(104);
-    go();
+    go(siloB);
     sleepSec(2);
 
     printf("slide freq to 600 in 8 seconds\n");
     freq = 600;
-    begin(e, siloA);
+    begin(e);
     setInput({101, 0}, 1, &freq, 8);
-    go();
+    go(siloA);
 
     sleepSec(4);
     printf("attempt to start a new slide while the first is running\n");
     freq = 400;
-    begin(e, siloA);
+    begin(e);
     setInput({101, 0}, 1, &freq, 8);
-    go();
+    go(siloA);
     sleepSec(4);
     printf("first slide should be done about now\n");
     sleepSec(4);
@@ -212,16 +212,16 @@ void test1()
     sleepSec(3);
 
     printf("disconnect a sinosc\n");
-    begin(e, siloA);
+    begin(e);
     disconnectInput({103, 1}, .5);
-    go();
+    go(siloA);
 
     sleepSec(3);
 
     printf("reconnect a sinosc\n");
-    begin(e, siloA);
+    begin(e);
     connect({102, 0}, {103, 1}, .5);
-    go();
+    go(siloA);
 
     sleepSec(4);
 
@@ -229,10 +229,10 @@ void test1()
     printf("tremolo\n");
     for (int i = 0; i < 16; ++i) {
         amp = (i&1) ? .2 : .02;
-        begin(e, siloA);
+        begin(e);
         setInput({101, 1}, 1, &amp, .1, fadeSmoothstep);
         setInput({102, 1}, 1, &amp, .1, fadeSmoothstep);
-        go();
+        go(siloA);
 
         sleepf(.2);
     }
@@ -240,17 +240,17 @@ void test1()
 
     printf("very loud (engage safety limiter).\n");
     amp = 20.;
-    begin(e, siloA);
+    begin(e);
     setInput({101, 1}, 1, &amp, .04);
-    go();
+    go(siloA);
 
     sleepSec(1);
 
     printf("set amp .2\n");
     amp = .2;
-    begin(e, siloA);
+    begin(e);
     setInput({101, 1}, 1, &amp, .04);
-    go();
+    go(siloA);
 
     sleepSec(1);
 
@@ -258,50 +258,50 @@ void test1()
     for (int i = 0; i < 8; ++i) {
         { static std::mt19937 rng{std::random_device{}()};
           amp = std::uniform_int_distribution<int>(0, 199)(rng) * .1f; }
-        begin(e, siloA);
+        begin(e);
         setInput({101, 1}, 1, &amp, .04);
-        go();
+        go(siloA);
 
         sleepf(.1);
     }
 
     printf("set amp .2\n");
     amp = .2;
-    begin(e, siloA);
+    begin(e);
     setInput({101, 1}, 1, &amp, .04);
-    go();
+    go(siloA);
 
     sleepSec(2);
 
     printf("set graph B amps silent\n");
     amp = 0.;
-    begin(e, siloB);
+    begin(e);
     setInput({101, 1}, 1, &amp, 3., fadeEaseOutCubic);
     setInput({102, 1}, 1, &amp, 3., fadeEaseOutCubic);
-    go();
+    go(siloB);
 
     sleepSec(4);
 
     printf("set graph A amps silent\n");
     amp = 0.;
-    begin(e, siloA);
+    begin(e);
     setInput({101, 1}, 1, &amp, 3., fadeEaseOutCubic);
     setInput({102, 1}, 1, &amp, 3., fadeEaseOutCubic);
-    go();
+    go(siloA);
 
     sleepSec(4);
 
     printf("free graph B\n");
-    begin(e, siloB);
+    begin(e);
     freeAllNodes();
-    go();
+    go(siloB);
 
     sleepSec(1);
 
     printf("free graph A\n");
-    begin(e, siloA);
+    begin(e);
     freeAllNodes();
-      go();
+      go(siloA);
 
     sleepSec(1);
 
@@ -336,7 +336,7 @@ void test5()
     f32 freq;
     f32 amp;
 
-    begin(e, 0);
+    begin(e);
     newNode("sinosc", 101);
     newNode("+", 102);
     freq = 240;
@@ -345,21 +345,21 @@ void test5()
     setInput({101, 1}, 1, &amp, .2);
     connect({101, 0}, {102, 0});
     connect({102, 0}, {0, 0});
-    go();
+    go(0);
 
     sleepSec(1);
 
     printf("test fan out\n");
     for (int i = 0; i < 4; ++i) {
-        begin(e, 0);
+        begin(e);
         connect({101, 0}, {102, 1}, 0.3); // test fan out.
-        go();
+        go(0);
 
         sleepf(.4);
 
-        begin(e, 0);
+        begin(e);
         disconnectInput({102, 1}, 0.3); // test fan out.
-        go();
+        go(0);
 
         sleepf(.4);
     }
@@ -401,7 +401,7 @@ void test2()
     printf("start graphs on %d threads\n", config.numSilos);
     f64 t0 = getStreamTime(e);
     for (int i = 0; i < config.numSilos; ++i) {
-        begin(e, i);
+        begin(e);
         newNode("sinosc", 101);
         freq = 240 + 60 * i;
         setInput({101, 0}, 1, &freq);
@@ -411,7 +411,7 @@ void test2()
         setInput({101, 1}, 1, &amp, .2, fadeEaseInCubic);
         connect({101, 0}, {0, 0});
         f64 t = t0 + latency + i * dt;
-        sched(0, t);
+        sched(i, 0, t);
     }
 
     sleepSec(5);
@@ -421,10 +421,10 @@ void test2()
     dt = .5;
     for (int i = 0; i < config.numSilos; ++i) {
         freq = 360 + 180 * i;
-        begin(e, i);
+        begin(e);
         setInput({101, 0}, 1, &freq, .5, fadeExponential);
         f64 t = t0 + latency + i * dt;
-        sched(0, t);
+        sched(i, 0, t);
     }
 
     sleepSec(8);
@@ -433,10 +433,10 @@ void test2()
     t0 = getStreamTime(e);
     for (int i = 0; i < config.numSilos; ++i) {
         freq = 240 + 60 * i;
-        begin(e, i);
+        begin(e);
         setInput({101, 0}, 1, &freq, .5, fadeExponential);
         f64 t = t0 + latency + i * dt;
-        sched(0, t);
+        sched(i, 0, t);
     }
 
     sleepSec(8);
@@ -455,10 +455,10 @@ void test2()
     t0 = getStreamTime(e);
     dt = .4;
     for (int i = 0; i < config.numSilos; ++i) {
-        begin(e, i);
+        begin(e);
         setInput({101, 1}, 1, &amp, .5, fadeEaseOutCubic);
         f64 t = t0 + latency + i * dt;
-        sched(0, t);
+        sched(i, 0, t);
     }
 
     sleepSec(6);
@@ -491,10 +491,10 @@ void test3()
 
     printf("create graph A\n");
 
-    begin(e, 0);
+    begin(e);
         newNode("voicer", 101);
         connect({101, 0}, {0,0});
-    go();
+    go(0);
 
     sleepSec(1);
 
@@ -515,24 +515,24 @@ void test3()
             f32 veloc = .7;
             f32 drive = 4.7;
             f32 params[6] = { root, veloc, drive, -.3, .01, .2 };
-            begin(e, 0);
+            begin(e);
             f64 t = t0 + latency;
             noteOn(101, noteID, 6, params);
             params[0] += 7;
             params[3] = .3;
             noteOn(101, noteID+1, 6, params);
-            sched(0, t);
+            sched(0, 0, t);
 
-            begin(e, 0);
+            begin(e);
             noteOff(101, noteID);
             noteOff(101, noteID+1);
             t += numPitches * dt;
-            sched(0, t);
+            sched(0, 0, t);
 
             noteID+=2;
         }
         for (int i = 0; i < numPitches; ++i) {
-            begin(e, 0);
+            begin(e);
             f32 pitch = pitches[i] - 1 * k + 10;
             f32 veloc = .5 + .04 * (numPitches - i - 1);
             f32 drive = 1. + .3 * k;
@@ -541,12 +541,12 @@ void test3()
             noteOn(101, noteID, 6, params);
 
             f64 t = t0 + latency + i * dt;
-            sched(0, t);
+            sched(0, 0, t);
 
             t += .1 + .04 * k;
-            begin(e, 0);
+            begin(e);
             noteOff(101, noteID);
-            sched(0, t);
+            sched(0, 0, t);
             ++noteID;
         }
         sleepf(.6);
@@ -557,24 +557,24 @@ void test3()
             f32 veloc = .7;
             f32 drive = 4.7;
             f32 params[6] = { root, veloc, drive, -.3, .01, .2 };
-            begin(e, 0);
+            begin(e);
             f64 t = t0 + latency;
             noteOn(101, noteID, 6, params);
             params[0] += 7;
             params[3] = .3;
             noteOn(101, noteID+1, 6, params);
-            sched(0, t);
+            sched(0, 0, t);
 
-            begin(e, 0);
+            begin(e);
             noteOff(101, noteID);
             noteOff(101, noteID+1);
             t += numPitches * dt;
-            sched(0, t);
+            sched(0, 0, t);
 
             noteID+=2;
         }
         for (int i = 0; i < numPitches; ++i) {
-            begin(e, 0);
+            begin(e);
             f32 pitch = pitches[numPitches-i-1] - 1 * k + 8;
             f32 veloc = .5 + .04 * (numPitches - i - 1);
             f32 drive = 1.15 + .3 * k;
@@ -583,12 +583,12 @@ void test3()
             noteOn(101, noteID, 6, params);
 
             f64 t = t0 + latency + i * dt;
-            sched(0, t);
+            sched(0, 0, t);
 
             t += .1 + .04 * k;
-            begin(e, 0);
+            begin(e);
             noteOff(101, noteID);
-            sched(0, t);
+            sched(0, 0, t);
             ++noteID;
         }
         sleepf(.6);
@@ -602,47 +602,47 @@ void test3()
         f64 latency = .02;
         f64 t0 = getStreamTime(e);
         for (int i = 0; i < numPitches; ++i) {
-            begin(e, 0);
+            begin(e);
             f32 pitch = pitches[i] - 5 * k + 10;
             noteOn(101, noteID, 1, &pitch);
             f32 drive = 1. + 2.3 * k;
             noteSetParamRange(101, noteID, 2, 1, &drive);
 
             f64 t = t0 + latency + i * dt;
-            sched(0, t);
+            sched(0, 0, t);
 
             t += 2.;
-            begin(e, 0);
+            begin(e);
             noteOff(101, noteID);
-            sched(0, t);
+            sched(0, 0, t);
             ++noteID;
         }
         sleepSec(3);
 
         t0 = getStreamTime(e);
         for (int i = 0; i < numPitches; ++i) {
-            begin(e, 0);
+            begin(e);
             f32 pitch = 2 + pitches[i] - 5 * k + 10;
             noteOn(101, noteID, 1, &pitch);
             f32 drive = 2. + 2.3 * k;
             noteSetParamRange(101, noteID, 2, 1, &drive);
 
             f64 t = t0 + latency + i * dt;
-            sched(0, t);
+            sched(0, 0, t);
 
             t += 2.;
-            begin(e, 0);
+            begin(e);
             noteOff(101, noteID);
-            sched(0, t);
+            sched(0, 0, t);
             ++noteID;
         }
         sleepSec(3);
     }
     sleepSec(4);
     printf("allNotesOff\n");
-    begin(e, 0);
+    begin(e);
         allNotesOff(101);
-    go();
+    go(0);
     sleepSec(5);
 
     printf("stop\n");
@@ -676,7 +676,7 @@ void test4()
     printf("create graphs on %d threads\n", config.numSilos);
     for (int i = 0; i < config.numSilos; ++i) {
         sleepf(.5);
-        begin(e, i);
+        begin(e);
         newNode("sinosc", 101);
         freq = 240 + 73.371 * i;
         setInput({101, 0}, 1, &freq);
@@ -685,17 +685,17 @@ void test4()
         amp = 0.05;
         setInput({101, 1}, 1, &amp, .5, fadeEaseInCubic);
         connect({101, 0}, {0, 0});
-        go();
+        go(i);
     }
 
     sleepSec(4);
 
     for (int i = 0; i < config.numSilos; ++i) {
         sleepf(.5);
-        begin(e, config.numSilos-i-1);
+        begin(e);
         amp = 0.00;
         setInput({101, 1}, 1, &amp, .5, fadeEaseOutCubic);
-        go();
+        go(config.numSilos-i-1);
     }
     sleepSec(1);
 

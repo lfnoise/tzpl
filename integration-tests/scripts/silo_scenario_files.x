@@ -9,7 +9,7 @@ import futures.*;
 import silo.*;
 
 fn preparePart(silo Int, node Int, path String) Future<String> {
-    begin(silo); newNode("voicer", node); connect(node, 0, 0, 0); sched();
+    begin(); newNode("voicer", node); connect(node, 0, 0, 0); sched(silo);
     attachVM(silo);
     siloLoadFile(silo, path)
 }

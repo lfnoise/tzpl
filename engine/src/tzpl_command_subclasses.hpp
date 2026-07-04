@@ -34,12 +34,23 @@ namespace engine {
 //=============================================================================================
 #pragma mark COMMAND SUBCLASSES
 
+// NB: several commands own pre-allocated objects (nodes, mixers, xfaders,
+// buffers) between construction and execution. A destructor that sees
+// stage_ == 0 is destroying a command that never ran -- an aborted or
+// abandoned bundle -- and must free what the command owns. Once doRT has
+// run (stage_ > 0), ownership has passed to the RT graph / dead-node path
+// and the guards are no-ops.
+
 struct AddNodeCmd : Command
 {
     Node* node_;
-    
+
     AddNodeCmd(Node* node) : node_(node) {}
-        
+
+    // Never ran: the node was allocated and inserted into the silo's NRT
+    // table at bundle submit; ~Node removes it again. Caller holds nrt_lock_.
+    ~AddNodeCmd() override { if (stage_ == 0) delete node_; }
+
     void doRT(Silo* s) override {
         err_ = s->addNode(node_);
     }
@@ -126,6 +137,14 @@ struct ConnectCmd : Command
           mixerNode_(mixerNode), mixerSlot_(mixerSlot), curve_(curve)
     {}
 
+    // Never ran: hidden nodes (nodeID -1) are in no table; plain delete.
+    ~ConnectCmd() override {
+        if (stage_ == 0) {
+            delete xfaderNode_;
+            delete mixerNode_;
+        }
+    }
+
     void doRT(Silo* s) override {
         OutPort* src;
         err_ = s->rt_getOutPort(src_, src);
@@ -191,6 +210,8 @@ struct ReconnectOutputCmd : Command
     ReconnectOutputCmd(PortAddr oldSrc, PortAddr newSrc, Node* xfaderNode, FadeCurve curve)
         : oldSrc_(oldSrc), newSrc_(newSrc), xfaderNode_(xfaderNode), curve_(curve)
     {}
+
+    ~ReconnectOutputCmd() override { if (stage_ == 0) delete xfaderNode_; }
     
     void doRT(Silo* s) override {
         OutPort* oldSrc;
@@ -219,6 +240,8 @@ struct DisconnectInputCmd : Command
     DisconnectInputCmd(PortAddr dst, Node* xfaderNode, FadeCurve curve)
         : dst_(dst), xfaderNode_(xfaderNode), curve_(curve)
     {}
+
+    ~DisconnectInputCmd() override { if (stage_ == 0) delete xfaderNode_; }
 
     void doRT(Silo* s) override {
         InPort* dst;
@@ -250,6 +273,8 @@ struct DisconnectSourceCmd : Command
     DisconnectSourceCmd(PortAddr src, PortAddr dst, Node* xfaderNode, FadeCurve curve)
         : src_(src), dst_(dst), xfaderNode_(xfaderNode), curve_(curve)
     {}
+
+    ~DisconnectSourceCmd() override { if (stage_ == 0) delete xfaderNode_; }
 
     void doRT(Silo* s) override {
         OutPort* src;
@@ -334,12 +359,14 @@ struct SetInputCmd : Command
     Node* xfaderNode_;
     FadeCurve curve_;
 
-    SetInputCmd(PortAddr dst, usize numValues,  T* values, 
+    SetInputCmd(PortAddr dst, usize numValues,  T* values,
             Node* xfaderNode = nullptr, FadeCurve curve = fadeLinear)
         : dst_(dst), values_(numValues), xfaderNode_(xfaderNode), curve_(curve)
     {
         memcpy(&values_[0], values, numValues*sizeof(T));
     }
+
+    ~SetInputCmd() override { if (stage_ == 0) delete xfaderNode_; }
 
     void doRT(Silo* s) override {
         InPort* dst;
@@ -520,6 +547,8 @@ struct ResizeBufferCmd : Command {
         newBuf_ = tzpl_createBuffer(numChannels, length);
     }
 
+    ~ResizeBufferCmd() override { if (stage_ == 0) tzpl_freeBuffer(newBuf_); }
+
     void doRT(Silo* s) override {
         Node* node = s->rt_getNode(nodeID_);
         if (!node || !node->funs.swapBuffer) {
@@ -543,6 +572,8 @@ struct ReplaceBufferCmd : Command {
 
     ReplaceBufferCmd(i64 nodeID, i64 bufID, tzpl_Buffer* buffer)
         : nodeID_(nodeID), bufID_(bufID), newBuf_(buffer) {}
+
+    ~ReplaceBufferCmd() override { if (stage_ == 0) tzpl_freeBuffer(newBuf_); }
 
     void doRT(Silo* s) override {
         Node* node = s->rt_getNode(nodeID_);
@@ -571,6 +602,8 @@ struct LoadBufferCmd : Command {
     {
         newBuf_ = tzpl_loadAudioFile(path, channelOffset, frameOffset, numFrames);
     }
+
+    ~LoadBufferCmd() override { if (stage_ == 0) tzpl_freeBuffer(newBuf_); }
 
     void doRT(Silo* s) override {
         if (!newBuf_) {

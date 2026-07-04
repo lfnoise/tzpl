@@ -21,17 +21,17 @@ import instrument_synthdefs.*;
 
 -- Wrap a noteOn in a single-command bundle.
 fn note(nodeID Int, noteID Int, freq Float, amp Float) Int {
-	ae.begin(0);
+	ae.begin();
 	ae.noteOn(nodeID, noteID, [freq, amp, 1.0]);
-	ae.sched();
+	ae.sched(0);
 	noteID
 }
 
 -- Wrap a noteOff in a single-command bundle.
 fn release(nodeID Int, noteID Int) Int {
-	ae.begin(0);
+	ae.begin();
 	ae.noteOff(nodeID, noteID);
-	ae.sched();
+	ae.sched(0);
 	noteID
 }
 

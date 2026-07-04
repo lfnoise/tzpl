@@ -1127,10 +1127,10 @@ import audio_engine as ae;
 var _nextNodeID = 1000;
 
 fn play(defName String, nodeID Int) Int {
-	ae.begin(0);
+	ae.begin();
 	ae.newNode(defName, nodeID);
 	ae.connect(nodeID, 0, 0, 0);
-	ae.sched();
+	ae.sched(0);
 	nodeID
 }
 
@@ -1141,9 +1141,9 @@ fn play(defName String) Int {
 }
 
 fn stop(nodeID Int) Int {
-	ae.begin(0);
+	ae.begin();
 	ae.freeNode(nodeID);
-	ae.sched();
+	ae.sched(0);
 	nodeID
 }
 

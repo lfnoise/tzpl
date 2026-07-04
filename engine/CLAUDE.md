@@ -45,7 +45,7 @@ The shared plugin ABI header lives in `../shared/tzpl_plugin_abi.h`.
 ## Key Architectural Concepts
 
 - **Silos**: Independent parallel processing units, each with its own node graph, worker thread, and command queue. Silo 0 runs on the audio callback thread; silos 1..N-1 run on dedicated worker threads. Outputs are summed via binary-tree reduction.
-- **Two-stage commands**: Stage 1 (`doRT`) runs on the RT thread; stage 2 (`doNRT`) runs on a background thread for cleanup/deallocation. Commands are bundled atomically via `begin()`/`go()`/`sched()`.
+- **Two-stage commands**: Stage 1 (`doRT`) runs on the RT thread; stage 2 (`doNRT`) runs on a background thread for cleanup/deallocation. Commands are bundled atomically via `begin()`/`go(silo)`/`sched(silo, ...)` -- the target silo is chosen at submit, where the whole bundle is validated and materialized; an invalid bundle is discarded in its entirety (atomic abort).
 - **Lock-free FIFOs**: All RT <-> NRT communication uses `AtomicFifo` (SPSC). No locks or allocations on the audio thread.
 - **Zero-copy connections**: Connecting an InPort to an OutPort redirects the inlet pointer to the outlet's buffer. No data copying during audio processing.
 - **Sample-by-sample processing**: Nodes process one sample at a time, enabling sample-accurate scheduling.

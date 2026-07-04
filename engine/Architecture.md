@@ -23,7 +23,7 @@ that generates native plugin code from graph descriptions.
 ```
 Client Code (any thread)
     |
-    begin(engine, silo) / newNode() / connect() / go()
+    begin(engine) / newNode() / connect() / go(silo)
     |
     v
 thread-local CmdBundle
@@ -279,16 +279,29 @@ execution model:
 
 ### Command Bundling
 
-Commands are accumulated in a thread-local `CmdBundle`:
+Commands are accumulated in a thread-local `CmdBundle`; the target silo is chosen
+at submit time:
 
-1. `begin(engine, silo)` — Start a new bundle targeting a specific silo.
-2. Zero or more command calls (`newNode()`, `connect()`, etc.) — Each creates a Command
-   object and appends it to the bundle.
-3. `go()` — Dispatch immediately (sugar for `sched(0., schedImmediate)`).
-4. `sched(time, policy)` — Dispatch at a specific stream time.
+1. `begin(engine)` — Start a new bundle.
+2. Zero or more command calls (`newNode()`, `connect()`, etc.) — Each records a
+   deferred op (`BundleOp`) into the bundle. No silo is touched yet; the only error
+   a builder can return is `errNoActiveBundle`.
+3. `go(silo)` — Dispatch immediately (sugar for `sched(silo, 0, 0., schedImmediate)`).
+4. `sched(silo, clock, beat, policy)` — Dispatch bound to a beat on a TempoClock slot.
 
-The entire bundle is pushed atomically through the `from_nrt_` FIFO, ensuring that a group
-of related commands (e.g., create a node and connect it) execute together.
+At submit, the recorded ops are replayed in order against the chosen silo: node IDs
+and ports are validated against the silo's NRT node-table mirror, connections are
+type-checked, and the silo-bound objects (nodes, hidden mixers, crossfaders) are
+allocated. The bundle is atomic: on the first invalid op everything already
+materialized is freed (never-run Commands free what they own via `stage_ == 0`
+destructor guards), the bundle is discarded, and the submit call returns the error.
+Submit always closes the bundle.
+
+On success the entire bundle is pushed atomically through the `from_nrt_` FIFO,
+ensuring that a group of related commands (e.g., create a node and connect it)
+execute together. Beat-scheduled bundles are re-validated on the RT thread when
+they fire; a command whose target no longer (or does not yet) exist is silently
+dropped.
 
 ### Scheduling
 
@@ -457,9 +470,9 @@ Several plugins are defined directly in `main.cpp` for testing:
 - `loadDefs(e, dirPath)` / `loadDef(e, dirPath, defName)`
 
 ### Command Bundling
-- `begin(e, silo)` — Start a command bundle for a silo.
-- `go()` — Dispatch immediately.
-- `sched(time, policy)` — Dispatch at a scheduled time.
+- `begin(e)` — Start a command bundle.
+- `go(silo)` — Dispatch to a silo immediately.
+- `sched(silo, clock, beat, policy)` — Dispatch to a silo at a scheduled beat.
 
 ### Graph Mutation
 - `newNode(defName, nodeID)` / `freeNode(nodeID)` / `freeAllNodes()`

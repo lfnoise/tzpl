@@ -19,12 +19,12 @@ fn ctrlVoice() S {
 }
 ctrlVoice defSynth("ab_ctrl");
 
-begin(0);
+begin();
 newNode("ab_ctrl", 100);
 connect(100, 0, 0, 0);
 setControl(100, 0, 330.0);
 setControl(100, 1, 0.3);
-sched();
+sched(0);
 -- Scheduled control changes exercise dynamic, sample-accurate control updates.
-begin(0); setControl(100, 0, 660.0); sched(0, 0.04);
-begin(0); setControl(100, 1, 0.15); sched(0, 0.07);
+begin(); setControl(100, 0, 660.0); sched(0, 0, 0.04);
+begin(); setControl(100, 1, 0.15); sched(0, 0, 0.07);

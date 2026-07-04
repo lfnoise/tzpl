@@ -131,22 +131,29 @@ f64 getStreamTime(Engine* e); // audio must be initialized, else exception.
 // real time commands
 
 // Real time commands are queued up and are not submitted for execution
-// until either doBundle() or sched() are called.
+// until either go() or sched() are called.
 // This allows to ensure that a group of commands can be executed atomically in real time.
 
-// begin a bundle to be executed on a silo.
-tzpl_SErr begin(Engine* e, int silo);
+// begin a bundle. The target silo is chosen at submit time (go/sched).
+tzpl_SErr begin(Engine* e);
 
-// sched() schedules all bundled commands at the given beat on tempo clock
-// `clock` (0 .. numTempoClocks-1). The bundle is late-bound: it fires when that
-// clock's beat reaches `beat`, tracking any tempo changes made in the meantime.
+// sched() submits the bundle to `silo`, scheduled at the given beat on tempo
+// clock `clock` (0 .. numTempoClocks-1). The bundle is late-bound: it fires when
+// that clock's beat reaches `beat`, tracking any tempo changes made in the meantime.
 // If SchedPolicy is immediate, the bundle executes as soon as received (clock/beat ignored).
 // If SchedPolicy is onTimeOnly, the bundle is discarded if the beat is already past.
 // If SchedPolicy is betterLateThanNever (the default) it executes even if the beat is past.
-tzpl_SErr sched(int clock, f64 beat, SchedPolicy policy = schedBetterLateThanNever);
+//
+// Submit validates and materializes every queued command against the chosen
+// silo. On the first error the ENTIRE bundle is discarded (nothing is applied)
+// and that error is returned. The bundle is always closed on return, success
+// or failure. Beat-scheduled bundles are re-checked on the audio thread at
+// execution time; a command whose target no longer exists then is silently
+// dropped.
+tzpl_SErr sched(int silo, int clock, f64 beat, SchedPolicy policy = schedBetterLateThanNever);
 
 // go() is a convenience for immediate execution (SchedPolicy::immediate).
-tzpl_SErr go();
+tzpl_SErr go(int silo);
 
 // Tempo control. These are broadcast to clock slot `clock` on every silo so the
 // slot stays in sync across silos. Not part of a begin()/sched() bundle.
@@ -185,10 +192,18 @@ tzpl_SErr reconnectOutput(PortAddr oldSrc, PortAddr newSrc, f64 xfadeTime = 0., 
 tzpl_SErr replaceNode(i64 oldNodeID, i64 newNodeID, f64 xfadeTime = 0., FadeCurve curve = fadeLinear);
 
 // set the input to a constant value. This will have no effect if the input is normalled internally.
-tzpl_SErr setInput(PortAddr inPort, int numValues, void* values, f64 xfadeTime = 0., FadeCurve curve = fadeLinear);
+// The values are captured with the caller's element type and converted to the
+// port's element type at submit if they differ.
+tzpl_SErr setInput(PortAddr inPort, int numValues, f32 const* values, f64 xfadeTime = 0., FadeCurve curve = fadeLinear);
+tzpl_SErr setInput(PortAddr inPort, int numValues, f64 const* values, f64 xfadeTime = 0., FadeCurve curve = fadeLinear);
+tzpl_SErr setInput(PortAddr inPort, int numValues, i32 const* values, f64 xfadeTime = 0., FadeCurve curve = fadeLinear);
+tzpl_SErr setInput(PortAddr inPort, int numValues, i64 const* values, f64 xfadeTime = 0., FadeCurve curve = fadeLinear);
 
 // controls
-tzpl_SErr setControl(i64 nodeID, i64 controlID, int numValues, void* values);
+tzpl_SErr setControl(i64 nodeID, i64 controlID, int numValues, f32 const* values);
+tzpl_SErr setControl(i64 nodeID, i64 controlID, int numValues, f64 const* values);
+tzpl_SErr setControl(i64 nodeID, i64 controlID, int numValues, i32 const* values);
+tzpl_SErr setControl(i64 nodeID, i64 controlID, int numValues, i64 const* values);
 
 // notes
 tzpl_SErr allNotesOff(i64 nodeID);

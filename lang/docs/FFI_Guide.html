@@ -1986,7 +1986,7 @@ osc.<span class="fn">removeHandler</span>(<span class="str">"/trigger"</span>);<
 
 <h4>Graph Manipulation</h4>
 
-<p>Standalone graph commands are automatically wrapped in a <code>begin()/sched()</code> transaction. Inside a bundle, they are batched together.</p>
+<p>Standalone graph commands are automatically wrapped in a <code>begin()/go(0)</code> transaction. Inside a bundle, they are batched together.</p>
 
 <table>
   <tr><th>Address</th><th>Arguments</th><th>Description</th></tr>
@@ -2022,8 +2022,8 @@ osc.<span class="fn">removeHandler</span>(<span class="str">"/trigger"</span>);<
 <p>OSC bundles group multiple messages into an atomic transaction with an optional timetag for scheduling:</p>
 
 <ul>
-  <li><strong>Timetag &le; 1</strong> (including the "immediately" timetag): execute all messages immediately via <code>begin()/sched()</code>.</li>
-  <li><strong>Timetag &gt; 1</strong>: schedule execution at the corresponding engine stream time via <code>begin()/sched(time)</code>. The NTP timestamp is converted to engine stream time.</li>
+  <li><strong>Timetag &le; 1</strong> (including the "immediately" timetag): execute all messages immediately via <code>begin()/go(silo)</code>.</li>
+  <li><strong>Timetag &gt; 1</strong>: schedule execution at the corresponding engine stream time via <code>begin()/sched(silo, &hellip;)</code>. The NTP timestamp is converted to engine stream time.</li>
 </ul>
 
 <h4>Silo selection</h4>
@@ -2038,7 +2038,7 @@ osc.<span class="fn">removeHandler</span>(<span class="str">"/trigger"</span>);<
 
 <h4>Auto-wrapping</h4>
 
-<p>Graph manipulation commands sent as standalone messages (outside a bundle) are automatically wrapped in a <code>begin(silo)/sched()</code> transaction so they execute atomically. Inside a bundle, this auto-wrapping is suppressed and the bundle provides the transaction boundary.</p>
+<p>Graph manipulation commands sent as standalone messages (outside a bundle) are automatically wrapped in a <code>begin()/go(0)</code> transaction so they execute atomically. Inside a bundle, this auto-wrapping is suppressed and the bundle provides the transaction boundary; the <code>/engine/silo</code> element selects the silo passed at submit.</p>
 
 <div class="note">
   <strong>Note:</strong> Bundles can be nested. Inner bundles inherit the outer bundle's transaction context.
@@ -2254,7 +2254,7 @@ nats.<span class="fn">removeHandler</span>(<span class="str">"trigger"</span>);<
 
 <h4>Graph Manipulation</h4>
 
-<p>Each graph command is automatically wrapped in a <code>begin(0)/sched()</code> transaction. Payloads are space-separated values.</p>
+<p>Each graph command is automatically wrapped in a <code>begin()/go(0)</code> transaction. Payloads are space-separated values.</p>
 
 <table>
   <tr><th>Subject</th><th>Payload</th><th>Description</th></tr>
@@ -2491,13 +2491,13 @@ nats.<span class="fn">onMessageS</span>(<span class="str">"nodes.piano.chords"</
 
 <h4>Beat-scheduled command bundles</h4>
 
-<p>Open a command bundle with <code>begin(silo)</code>, add graph/note commands, then commit it. Committing either fires immediately or defers until a clock slot reaches a beat:</p>
+<p>Open a command bundle with <code>begin()</code>, add graph/note commands, then commit it to a silo. Committing either fires immediately or defers until a clock slot reaches a beat:</p>
 
 <table>
   <tr><th>Function</th><th>Description</th></tr>
-  <tr><td><code>sched() Int</code></td><td>Commit the open bundle for <strong>immediate</strong> execution. Returns an engine error code (<code>0</code> = ok).</td></tr>
-  <tr><td><code>sched(clock Int, beat Float) Int</code></td><td>Commit the open bundle to fire when slot <code>clock</code> reaches <code>beat</code> (<strong>late-bound</strong>: the binding is to the beat, so tempo changes before the beat arrives still land the commands at the right musical position).</td></tr>
-  <tr><td><code>schedPolicy(clock Int, beat Float, policy Int) Int</code></td><td>Like <code>sched(clock, beat)</code>, but with an explicit <code>SchedPolicy</code> for late delivery (see below).</td></tr>
+  <tr><td><code>sched(silo Int) Int</code></td><td>Commit the open bundle to <code>silo</code> for <strong>immediate</strong> execution. Returns an engine error code (<code>0</code> = ok).</td></tr>
+  <tr><td><code>sched(silo Int, clock Int, beat Float) Int</code></td><td>Commit the open bundle to <code>silo</code>, to fire when slot <code>clock</code> reaches <code>beat</code> (<strong>late-bound</strong>: the binding is to the beat, so tempo changes before the beat arrives still land the commands at the right musical position).</td></tr>
+  <tr><td><code>schedPolicy(silo Int, clock Int, beat Float, policy Int) Int</code></td><td>Like <code>sched(silo, clock, beat)</code>, but with an explicit <code>SchedPolicy</code> for late delivery (see below).</td></tr>
 </table>
 
 <p>The <code>SchedPolicy</code> enum (from <code>audio_engine</code>) controls what happens if the target beat has already passed by the time the bundle reaches the audio thread:</p>
@@ -2573,9 +2573,9 @@ nats.<span class="fn">onMessageS</span>(<span class="str">"nodes.piano.chords"</
 <span class="cmt">-- Play a note every beat using the reschedule convention.</span>
 <span class="cmt">-- The handler returns 1.0, so it fires again 1 beat later.</span>
 <span class="fn">sched</span>(<span class="num">0.0</span>, <span class="kw">fn</span>() Float {
-    <span class="fn">begin</span>(<span class="num">0</span>);
+    <span class="fn">begin</span>();
     <span class="fn">noteOn</span>(<span class="num">100</span>, <span class="num">60</span>, [<span class="num">440.0</span>, <span class="num">0.5</span>]);
-    <span class="fn">sched</span>();
+    <span class="fn">sched</span>(<span class="num">0</span>);
     <span class="num">1.0</span>;  <span class="cmt">-- reschedule 1 beat later</span>
 });</code></pre>
 
@@ -2586,9 +2586,9 @@ nats.<span class="fn">onMessageS</span>(<span class="str">"nodes.piano.chords"</
 
 <span class="cmt">-- Turn off all notes after 8 beats</span>
 <span class="fn">after</span>(<span class="num">8.0</span>, <span class="kw">fn</span>() Void {
-    <span class="fn">begin</span>(<span class="num">0</span>);
+    <span class="fn">begin</span>();
     <span class="fn">allNotesOff</span>(<span class="num">100</span>);
-    <span class="fn">sched</span>();
+    <span class="fn">sched</span>(<span class="num">0</span>);
 });</code></pre>
 
 <h4>Tempo ramp</h4>
@@ -2613,9 +2613,9 @@ nats.<span class="fn">onMessageS</span>(<span class="str">"nodes.piano.chords"</
 <span class="cmt">-- Build a note bundle and bind it to beat 8 on slot 0.</span>
 <span class="cmt">-- It fires sample-accurately when the slot reaches beat 8,</span>
 <span class="cmt">-- even if the tempo changes before then.</span>
-<span class="fn">begin</span>(<span class="num">0</span>);
+<span class="fn">begin</span>();
 <span class="fn">noteOn</span>(<span class="num">100</span>, <span class="num">67</span>, [<span class="num">587.33</span>, <span class="num">0.7</span>]);
-<span class="fn">sched</span>(<span class="num">0</span>, <span class="num">8.0</span>);</code></pre>
+<span class="fn">sched</span>(<span class="num">0</span>, <span class="num">0</span>, <span class="num">8.0</span>);</code></pre>
 
 <h4>Scheduling from within a handler</h4>
 
@@ -2624,15 +2624,15 @@ nats.<span class="fn">onMessageS</span>(<span class="str">"nodes.piano.chords"</
 
 <span class="cmt">-- Schedule two notes a half-beat apart, starting at beat 4</span>
 <span class="fn">at</span>(<span class="num">4.0</span>, <span class="kw">fn</span>() Void {
-    <span class="fn">begin</span>(<span class="num">0</span>);
+    <span class="fn">begin</span>();
     <span class="fn">noteOn</span>(<span class="num">100</span>, <span class="num">60</span>, [<span class="num">440.0</span>, <span class="num">0.8</span>]);
-    <span class="fn">sched</span>();
+    <span class="fn">sched</span>(<span class="num">0</span>);
 
     <span class="cmt">-- sched() is relative to the current logical beat (4.0)</span>
     <span class="fn">after</span>(<span class="num">0.5</span>, <span class="kw">fn</span>() Void {
-        <span class="fn">begin</span>(<span class="num">0</span>);
+        <span class="fn">begin</span>();
         <span class="fn">noteOn</span>(<span class="num">100</span>, <span class="num">67</span>, [<span class="num">587.33</span>, <span class="num">0.6</span>]);
-        <span class="fn">sched</span>();
+        <span class="fn">sched</span>(<span class="num">0</span>);
     });
 });</code></pre>
 
@@ -2762,7 +2762,7 @@ nats.<span class="fn">onMessageS</span>(<span class="str">"nodes.piano.chords"</
 </ol>
 
 <div class="note">
-  <strong>Note:</strong> <code>siloEval</code> bypasses the command bundling API (<code>begin</code>/<code>go</code>), so it can be called safely inside or outside of a command bundle without conflict.
+  <strong>Note:</strong> <code>siloEval</code> bypasses the command bundling API (<code>begin</code>/<code>go(silo)</code>), so it can be called safely inside or outside of a command bundle without conflict.
 </div>
 
 <!-- -------------------------------- -->
@@ -2804,10 +2804,10 @@ nats.<span class="fn">onMessageS</span>(<span class="str">"nodes.piano.chords"</
 <span class="cmt">-- Compile and execute RT code on silo 0</span>
 <span class="fn">siloEval</span>(<span class="num">0</span>, <span class="str">"
     import audio_engine.*;
-    begin(0);
+    begin();
     newNode(\"SinOsc\", 100);
     connect(100, 0, 0, 0);
-    go();
+    go(0);
 "</span>);
 
 <span class="cmt">-- Later: clean up</span>
@@ -2842,7 +2842,7 @@ nats.<span class="fn">onMessageS</span>(<span class="str">"nodes.piano.chords"</
   <li><strong>Async:</strong> <code>renderNRT</code> returns immediately with a handle. The language never blocks waiting for a render &mdash; poll with <code>isRenderDone(h)</code> or register a one-shot <code>onRenderDone(h, cb)</code> callback.</li>
   <li><strong>Independent per render:</strong> each call creates its own Engine, tempo scheduler, and render thread. Multiple renders run concurrently without interfering.</li>
   <li><strong>Live audio coexists:</strong> the live engine (if the script has called <code>engineStart()</code>) keeps playing while one or more NRT renders run in the background.</li>
-  <li><strong>Logical audio time:</strong> inside a render, all schedulers (engine per-sample <code>SchedulerQueue</code>, the RT tempo scheduler, and the per-render <code>NRTTempoScheduler</code> in its manual mode) advance with the sample clock. Scripts using <code>clock.go</code>, <code>playFor</code>, coroutine <code>yield</code>, and <code>sched(time)</code> produce identical timing in NRT and RT, up to floating-point determinism.</li>
+  <li><strong>Logical audio time:</strong> inside a render, all schedulers (engine per-sample <code>SchedulerQueue</code>, the RT tempo scheduler, and the per-render <code>NRTTempoScheduler</code> in its manual mode) advance with the sample clock. Scripts using <code>clock.go</code>, <code>playFor</code>, coroutine <code>yield</code>, and beat-scheduled bundles (<code>sched(silo, clock, beat)</code>) produce identical timing in NRT and RT, up to floating-point determinism.</li>
 </ul>
 
 <h3 id="nrt-render-ffi">14.2 FFI Functions</h3>
@@ -3014,12 +3014,12 @@ nats.<span class="fn">onMessageS</span>(<span class="str">"nodes.piano.chords"</
 <pre><code><span class="cmt">-- sine.x: define a synth and queue it for play</span>
 <span class="kw">import</span> audio_engine.*;
 
-<span class="fn">begin</span>(<span class="num">0</span>);
+<span class="fn">begin</span>();
 <span class="fn">newNode</span>(<span class="str">"sinosc"</span>, <span class="num">100</span>);
 <span class="fn">setInput</span>(<span class="num">100</span>, <span class="num">0</span>, <span class="num">440.0</span>);  <span class="cmt">-- frequency</span>
 <span class="fn">setInput</span>(<span class="num">100</span>, <span class="num">1</span>, <span class="num">0.2</span>);    <span class="cmt">-- amplitude</span>
 <span class="fn">connect</span>(<span class="num">100</span>, <span class="num">0</span>, <span class="num">0</span>, <span class="num">0</span>);
-<span class="fn">sched</span>();</code></pre>
+<span class="fn">sched</span>(<span class="num">0</span>);</code></pre>
 
 <pre><code>tzpl --nrt sine.wav --duration 1 sine.x</code></pre>
 
@@ -3032,16 +3032,16 @@ nats.<span class="fn">onMessageS</span>(<span class="str">"nodes.piano.chords"</
 <span class="kw">import</span> audio_engine.*;
 
 <span class="fn">go</span>(<span class="kw">coro fn</span>() Float {
-    <span class="fn">begin</span>(<span class="num">0</span>);
+    <span class="fn">begin</span>();
     <span class="fn">newNode</span>(<span class="str">"sinosc"</span>, <span class="num">100</span>);
     <span class="fn">setInput</span>(<span class="num">100</span>, <span class="num">0</span>, <span class="num">220.0</span>);
     <span class="fn">setInput</span>(<span class="num">100</span>, <span class="num">1</span>, <span class="num">0.15</span>);
     <span class="fn">connect</span>(<span class="num">100</span>, <span class="num">0</span>, <span class="num">0</span>, <span class="num">0</span>);
-    <span class="fn">sched</span>();
+    <span class="fn">sched</span>(<span class="num">0</span>);
     <span class="kw">yield</span> <span class="num">1.0</span>;
-    <span class="fn">begin</span>(<span class="num">0</span>);
+    <span class="fn">begin</span>();
     <span class="fn">freeNode</span>(<span class="num">100</span>);
-    <span class="fn">sched</span>();
+    <span class="fn">sched</span>(<span class="num">0</span>);
 }());</code></pre>
 
 <pre><code>tzpl --nrt sequence.wav sequence.x</code></pre>
@@ -3053,12 +3053,12 @@ nats.<span class="fn">onMessageS</span>(<span class="str">"nodes.piano.chords"</
 
 <span class="kw">let</span> h = <span class="fn">renderNRT</span>(<span class="str">"/tmp/take.wav"</span>, <span class="kw">fn</span>() Void {
     <span class="fn">go</span>(<span class="kw">coro fn</span>() Float {
-        <span class="fn">begin</span>(<span class="num">0</span>);
+        <span class="fn">begin</span>();
         <span class="fn">newNode</span>(<span class="str">"sinosc"</span>, <span class="num">100</span>);
         <span class="fn">setInput</span>(<span class="num">100</span>, <span class="num">0</span>, <span class="num">220.0</span>);
         <span class="fn">setInput</span>(<span class="num">100</span>, <span class="num">1</span>, <span class="num">0.15</span>);
         <span class="fn">connect</span>(<span class="num">100</span>, <span class="num">0</span>, <span class="num">0</span>, <span class="num">0</span>);
-        <span class="fn">sched</span>();
+        <span class="fn">sched</span>(<span class="num">0</span>);
         <span class="kw">yield</span> <span class="num">2.0</span>;
         <span class="fn">endRender</span>();
     }());
@@ -3073,12 +3073,12 @@ nats.<span class="fn">onMessageS</span>(<span class="str">"nodes.piano.chords"</
 
 <span class="kw">let</span> a = <span class="fn">renderNRT</span>(<span class="str">"a.wav"</span>, <span class="kw">fn</span>() Void {
     <span class="fn">go</span>(<span class="kw">coro fn</span>() Float {
-        <span class="fn">begin</span>(<span class="num">0</span>);
+        <span class="fn">begin</span>();
         <span class="fn">newNode</span>(<span class="str">"sinosc"</span>, <span class="num">100</span>);
         <span class="fn">setInput</span>(<span class="num">100</span>, <span class="num">0</span>, <span class="num">220.0</span>);
         <span class="fn">setInput</span>(<span class="num">100</span>, <span class="num">1</span>, <span class="num">0.15</span>);
         <span class="fn">connect</span>(<span class="num">100</span>, <span class="num">0</span>, <span class="num">0</span>, <span class="num">0</span>);
-        <span class="fn">sched</span>();
+        <span class="fn">sched</span>(<span class="num">0</span>);
         <span class="kw">yield</span> <span class="num">1.0</span>;
         <span class="fn">endRender</span>();
     }());
@@ -3086,12 +3086,12 @@ nats.<span class="fn">onMessageS</span>(<span class="str">"nodes.piano.chords"</
 
 <span class="kw">let</span> b = <span class="fn">renderNRT</span>(<span class="str">"b.wav"</span>, <span class="kw">fn</span>() Void {
     <span class="fn">go</span>(<span class="kw">coro fn</span>() Float {
-        <span class="fn">begin</span>(<span class="num">0</span>);
+        <span class="fn">begin</span>();
         <span class="fn">newNode</span>(<span class="str">"sinosc"</span>, <span class="num">100</span>);
         <span class="fn">setInput</span>(<span class="num">100</span>, <span class="num">0</span>, <span class="num">440.0</span>);
         <span class="fn">setInput</span>(<span class="num">100</span>, <span class="num">1</span>, <span class="num">0.15</span>);
         <span class="fn">connect</span>(<span class="num">100</span>, <span class="num">0</span>, <span class="num">0</span>, <span class="num">0</span>);
-        <span class="fn">sched</span>();
+        <span class="fn">sched</span>(<span class="num">0</span>);
         <span class="kw">yield</span> <span class="num">0.5</span>;
         <span class="fn">endRender</span>();
     }());
@@ -3472,7 +3472,7 @@ collector <span class="fn">spawn</span>(Msg.int(<span class="num">0</span>)) <sp
 <p>Conventions used throughout this section:</p>
 
 <ul>
-  <li><strong>Command bundling:</strong> functions that modify the audio graph do not execute immediately &mdash; they are collected into a bundle opened by <code>begin(silo)</code> and submitted atomically by <code>go()</code> / <code>sched(&hellip;)</code> (&sect;18.4).</li>
+  <li><strong>Command bundling:</strong> functions that modify the audio graph do not execute immediately &mdash; they are collected into a bundle opened by <code>begin()</code> and submitted atomically by <code>go(silo)</code> / <code>sched(silo, &hellip;)</code>; the target silo is chosen at submit time (&sect;18.4).</li>
   <li><strong>Error codes:</strong> error-returning functions return <code>Int</code>, where <code>0</code> = success. The codes are the <code>Err</code> enum (&sect;18.10).</li>
   <li><strong>Enums:</strong> the constants (<code>FadeCurve</code>, <code>SchedPolicy</code>, <code>Err</code>, <code>Enable</code>) are defined in the Tzopilotl wrapper module <code>bridge/modules/audio_engine.x</code>, which re-exports the foreign functions alongside them. Simple enums are implicitly coerced to <code>Int</code> when passed to FFI functions, so you can write <code>connectX(&hellip;, FadeCurve.fadeEqualPower)</code> directly.</li>
   <li><strong>RT safety:</strong> the command-bundling, node, connection, parameter, and note functions are RT-safe (they queue commands through a lock-free FIFO), so they may also be called from silo VM code (&sect;13). Lifecycle, plugin loading, and introspection functions are NRT-only.</li>
@@ -3481,7 +3481,7 @@ collector <span class="fn">spawn</span>(Msg.int(<span class="num">0</span>)) <sp
 <p>Related engine functionality documented elsewhere in this guide:</p>
 
 <ul>
-  <li>Beat-scheduled bundles and engine TempoClock slots (<code>sched(clock, beat)</code>, <code>setTempo</code>, <code>schedTempoChange</code>, <code>clockBeats</code>, <code>clockTempo</code>) &mdash; &sect;<a href="#clock-engine-slots">11.6</a>.</li>
+  <li>Beat-scheduled bundles and engine TempoClock slots (<code>sched(silo, clock, beat)</code>, <code>setTempo</code>, <code>schedTempoChange</code>, <code>clockBeats</code>, <code>clockTempo</code>) &mdash; &sect;<a href="#clock-engine-slots">11.6</a>.</li>
   <li>Silo task scheduling (<code>spawn</code>, <code>scheduleTask</code>) &mdash; &sect;<a href="#clock-silo-tasks">11.8</a>.</li>
   <li>Silo VM management (<code>attachVM</code>, <code>detachVM</code>, <code>siloEval</code>, <code>siloLoad</code>, <code>siloStartAt</code>) &mdash; &sect;<a href="#silo-vm">13</a>.</li>
   <li>Non-real-time rendering (<code>renderNRT</code>, <code>isRenderDone</code>, <code>onRenderDone</code>, <code>stopRender</code>, <code>endRender</code>) &mdash; &sect;<a href="#nrt-render">14</a>.</li>
@@ -3516,16 +3516,28 @@ collector <span class="fn">spawn</span>(Msg.int(<span class="num">0</span>)) <sp
 <!-- -------------------------------- -->
 <h3 id="ae-bundling">18.4 Command Bundling</h3>
 
-<p>Commands that modify the audio graph are not executed immediately. They are collected into a bundle and submitted atomically &mdash; either for the next audio callback (<code>go()</code> / <code>sched()</code>) or bound to a beat on an engine TempoClock slot (<code>sched(clock, beat)</code>).</p>
+<p>Commands that modify the audio graph are not executed immediately. They are collected into a bundle and submitted atomically. The target silo (audio worker thread) is chosen when the bundle is <em>submitted</em> &mdash; either for the next audio callback (<code>go(silo)</code> / <code>sched(silo)</code>) or bound to a beat on an engine TempoClock slot (<code>sched(silo, clock, beat)</code>).</p>
 
 <table>
   <tr><th>Function</th><th>Description</th></tr>
-  <tr><td><code>begin(silo Int) Int</code></td><td>Begin a new command bundle targeting the given silo (audio worker thread). Silo indices start at <code>0</code>. Returns an error code.</td></tr>
-  <tr><td><code>go() Int</code></td><td>Submit the current bundle for immediate execution on the next audio callback. Returns an error code.</td></tr>
-  <tr><td><code>sched() Int</code></td><td>Same as <code>go()</code> &mdash; immediate submission.</td></tr>
-  <tr><td><code>sched(clock Int, beat Float) Int</code></td><td>Submit the current bundle to fire when TempoClock slot <code>clock</code> reaches <code>beat</code>. Late-bound to the beat, sample-accurate. See &sect;<a href="#clock-engine-slots">11.6</a>.</td></tr>
-  <tr><td><code>schedPolicy(clock Int, beat Float, policy Int) Int</code></td><td>Like <code>sched(clock, beat)</code>, but with an explicit <code>SchedPolicy</code> for late delivery. See &sect;<a href="#clock-engine-slots">11.6</a>.</td></tr>
+  <tr><td><code>begin() Int</code></td><td>Begin a new command bundle. Returns an error code.</td></tr>
+  <tr><td><code>go(silo Int) Int</code></td><td>Submit the current bundle to the given silo for immediate execution on the next audio callback. Silo indices start at <code>0</code>. Returns an error code.</td></tr>
+  <tr><td><code>sched(silo Int) Int</code></td><td>Same as <code>go(silo)</code> &mdash; immediate submission.</td></tr>
+  <tr><td><code>sched(silo Int, clock Int, beat Float) Int</code></td><td>Submit the current bundle to the given silo, to fire when TempoClock slot <code>clock</code> reaches <code>beat</code>. Late-bound to the beat, sample-accurate. See &sect;<a href="#clock-engine-slots">11.6</a>.</td></tr>
+  <tr><td><code>schedPolicy(silo Int, clock Int, beat Float, policy Int) Int</code></td><td>Like <code>sched(silo, clock, beat)</code>, but with an explicit <code>SchedPolicy</code> for late delivery. See &sect;<a href="#clock-engine-slots">11.6</a>.</td></tr>
 </table>
+
+<h4>Validation and atomicity</h4>
+
+<p>Because the silo is unknown until submit, the command builders (<code>newNode</code>, <code>connect</code>, <code>setInput</code>, &hellip;) only record the request; the only error a builder itself can return is <code>errNoActiveBundle</code>. All validation happens at <code>go()</code>/<code>sched()</code>, against the submitting thread's (NRT) view of the chosen silo's graph, and the bundle is <strong>atomic</strong>: on the first invalid command (unknown def name, duplicate node ID, type/rate/channel mismatch, bad port index, out-of-range silo or clock) the entire bundle is discarded, nothing is applied, and the submit call returns that error. Submit always closes the bundle, success or failure.</p>
+
+<p>Command ordering rules:</p>
+<ul>
+  <li><strong>Within a bundle</strong>, commands validate and execute in order &mdash; <code>newNode(&hellip;, 100); connect(100, &hellip;)</code> works; the reverse fails at submit.</li>
+  <li><strong>Across bundles, submission order governs validation:</strong> a bundle referencing node N resolves it if the bundle creating N was <em>submitted</em> first, regardless of scheduled beats. Submitting a <code>newNode</code> bundle bound to beat 8 and then immediately submitting bundles that reference the node is fine.</li>
+  <li><strong>Scheduled execution order governs effect:</strong> beat-scheduled bundles are re-checked on the audio thread when they fire; a command whose target does not exist <em>yet</em> at its scheduled time (e.g. a connect that fires before the newNode's bundle) is silently dropped.</li>
+  <li><strong>Node-ID reuse:</strong> a freed node's ID stays taken until the node is actually destroyed (after its <code>freeNode</code> bundle has executed); recreating an ID in the same bundle that frees it is rejected.</li>
+</ul>
 
 <div class="note">
   <strong>Note:</strong> Calling <code>begin()</code> while a previous bundle is still open (queued but never submitted) returns <code>errCommandsQueuedButNotSent</code>; issuing graph commands with no open bundle returns <code>errNoActiveBundle</code>.
@@ -3534,7 +3546,7 @@ collector <span class="fn">spawn</span>(Msg.int(<span class="num">0</span>)) <sp
 <!-- -------------------------------- -->
 <h3 id="ae-nodes">18.5 Node Operations</h3>
 
-<p>These must be called within a <code>begin()</code>/<code>go()</code> block.</p>
+<p>These must be called within a <code>begin()</code>/<code>go(silo)</code> bundle.</p>
 
 <table>
   <tr><th>Function</th><th>Description</th></tr>
@@ -3547,7 +3559,7 @@ collector <span class="fn">spawn</span>(Msg.int(<span class="num">0</span>)) <sp
 <!-- -------------------------------- -->
 <h3 id="ae-connections">18.6 Connections</h3>
 
-<p>These must be called within a <code>begin()</code>/<code>go()</code> block. Node <code>0</code> is the hardware output; connecting to <code>(0, 0)</code> sends audio to the output. Node <code>1</code> is the hardware input; connecting from <code>(1, 0)</code> receives live audio (requires audio input to be enabled).</p>
+<p>These must be called within a <code>begin()</code>/<code>go(silo)</code> bundle. Node <code>0</code> is the hardware output; connecting to <code>(0, 0)</code> sends audio to the output. Node <code>1</code> is the hardware input; connecting from <code>(1, 0)</code> receives live audio (requires audio input to be enabled).</p>
 
 <table>
   <tr><th>Function</th><th>Description</th></tr>
@@ -3570,7 +3582,7 @@ collector <span class="fn">spawn</span>(Msg.int(<span class="num">0</span>)) <sp
 <!-- -------------------------------- -->
 <h3 id="ae-params">18.7 Parameter Control</h3>
 
-<p>These must be called within a <code>begin()</code>/<code>go()</code> block.</p>
+<p>These must be called within a <code>begin()</code>/<code>go(silo)</code> bundle.</p>
 
 <table>
   <tr><th>Function</th><th>Description</th></tr>
@@ -3582,7 +3594,7 @@ collector <span class="fn">spawn</span>(Msg.int(<span class="num">0</span>)) <sp
 <!-- -------------------------------- -->
 <h3 id="ae-notes">18.8 Note / Voice Management</h3>
 
-<p>For nodes that support polyphonic voice allocation (e.g., voicer nodes). These must be called within a <code>begin()</code>/<code>go()</code> block.</p>
+<p>For nodes that support polyphonic voice allocation (e.g., voicer nodes). These must be called within a <code>begin()</code>/<code>go(silo)</code> bundle.</p>
 
 <table>
   <tr><th>Function</th><th>Description</th></tr>
@@ -3649,8 +3661,8 @@ collector <span class="fn">spawn</span>(Msg.int(<span class="num">0</span>)) <sp
   <tr><td><code>errOutputOutOfRange</code></td><td>Output port index out of range</td></tr>
   <tr><td><code>errNoAudioDevices</code></td><td>No audio devices available</td></tr>
   <tr><td><code>errAudioNotInitialized</code></td><td>Audio stream not initialized</td></tr>
-  <tr><td><code>errCommandsQueuedButNotSent</code></td><td>Commands queued but <code>go()</code>/<code>sched()</code> not called before the next <code>begin()</code></td></tr>
-  <tr><td><code>errNoActiveBundle</code></td><td>No <code>begin()</code> was called before commands</td></tr>
+  <tr><td><code>errCommandsQueuedButNotSent</code></td><td>Commands queued but <code>go(silo)</code>/<code>sched(silo, &hellip;)</code> not called before the next <code>begin()</code></td></tr>
+  <tr><td><code>errNoActiveBundle</code></td><td>No <code>begin()</code> was called before commands &mdash; the only error the command builders themselves return; all other bundle-related codes come from the submit call</td></tr>
   <tr><td><code>errEngineInUse</code></td><td>Engine is already in use</td></tr>
   <tr><td><code>errCyclicConnection</code></td><td>Connection would create a cycle</td></tr>
   <tr><td><code>errTypeMismatch</code></td><td>Port element types do not match</td></tr>
@@ -3679,18 +3691,18 @@ collector <span class="fn">spawn</span>(Msg.int(<span class="num">0</span>)) <sp
 
 <span class="fn">engineStart</span>();
 
-<span class="fn">begin</span>(<span class="num">0</span>);
+<span class="fn">begin</span>();
 <span class="fn">newNode</span>(<span class="str">"sinosc"</span>, <span class="num">101</span>);
 <span class="fn">setInput</span>(<span class="num">101</span>, <span class="num">0</span>, <span class="num">440.0</span>);                                <span class="cmt">-- frequency</span>
 <span class="fn">setInputX</span>(<span class="num">101</span>, <span class="num">1</span>, <span class="num">0.2</span>, <span class="num">0.5</span>, FadeCurve.fadeLinear);      <span class="cmt">-- fade amp to 0.2 over 0.5 s</span>
 <span class="fn">connect</span>(<span class="num">101</span>, <span class="num">0</span>, <span class="num">0</span>, <span class="num">0</span>);                                  <span class="cmt">-- node output -&gt; hardware out</span>
-<span class="fn">go</span>();
+<span class="fn">go</span>(<span class="num">0</span>);
 
 <span class="fn">sleepMs</span>(<span class="num">3000</span>);
 
-<span class="fn">begin</span>(<span class="num">0</span>);
+<span class="fn">begin</span>();
 <span class="fn">setInputX</span>(<span class="num">101</span>, <span class="num">1</span>, <span class="num">0.0</span>, <span class="num">1.0</span>, FadeCurve.fadeEaseOutCubic);
-<span class="fn">go</span>();
+<span class="fn">go</span>(<span class="num">0</span>);
 
 <span class="fn">sleepMs</span>(<span class="num">1500</span>);
 <span class="fn">engineStop</span>();</code></pre>

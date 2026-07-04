@@ -11,10 +11,10 @@ go(coro fn() Float {
     yield 1.0;
 
     println("create graph A");
-    begin(0);
+    begin();
     newNode("voicer", 101);
     connect(101, 0, 0, 0);
-    sched();
+    sched(0);
     yield 1.0;
 
     let numPitches = 6;
@@ -31,15 +31,15 @@ go(coro fn() Float {
         -- Chord: two bass notes
         let root = pitches[0] - 1.0 * k - 2.0;
 		"root %^" fmt(root) println;
-        begin(0);
+        begin();
         noteOn(101, noteID, [root, 0.7, 4.7, -0.3, 0.01, 0.2]);
         noteOn(101, noteID + 1, [root + 7.0, 0.7, 4.7, 0.3, 0.01, 0.2]);
-        sched(0, t0 + latency);
+        sched(0, 0, t0 + latency);
 
-        begin(0);
+        begin();
         noteOff(101, noteID);
         noteOff(101, noteID + 1);
-        sched(0, t0 + latency + numPitches * dt);
+        sched(0, 0, t0 + latency + numPitches * dt);
 
         noteID = noteID + 2;
 
@@ -50,13 +50,13 @@ go(coro fn() Float {
             let drive = 1.0 + 0.3 * k;
             let pan = -0.8 + (1.6 / (numPitches - 1)) * i;
 			"pitch %^" fmt(pitch) println;
-            begin(0);
+            begin();
             noteOn(101, noteID, [pitch, veloc, drive, pan, 0.01, 0.2]);
-            sched(0, t0 + latency + i * dt);
+            sched(0, 0, t0 + latency + i * dt);
 
-            begin(0);
+            begin();
             noteOff(101, noteID);
-            sched(0, t0 + latency + i * dt + 0.1 + 0.04 * k);
+            sched(0, 0, t0 + latency + i * dt + 0.1 + 0.04 * k);
 
             noteID = noteID + 1;
         }
@@ -65,16 +65,16 @@ go(coro fn() Float {
         -- Descending section
         let t1 = getStreamTime();
         let root2 = pitches[0] - 1.0 * k - 4.0;
-        begin(0);
+        begin();
 		"root2 %^" fmt(root2) println;
         noteOn(101, noteID, [root2, 0.7, 4.7, -0.3, 0.01, 0.2]);
         noteOn(101, noteID + 1, [root2 + 7.0, 0.7, 4.7, 0.3, 0.01, 0.2]);
-        sched(0, t1 + latency);
+        sched(0, 0, t1 + latency);
 
-        begin(0);
+        begin();
         noteOff(101, noteID);
         noteOff(101, noteID + 1);
-        sched(0, t1 + latency + numPitches * dt);
+        sched(0, 0, t1 + latency + numPitches * dt);
 
         noteID = noteID + 2;
 
@@ -84,13 +84,13 @@ go(coro fn() Float {
             let drive = 1.15 + 0.3 * k;
             let pan = -0.8 + (1.6 / (numPitches - 1)) * i;
 			"pitch %^" fmt(pitch) println;
-            begin(0);
+            begin();
             noteOn(101, noteID, [pitch, veloc, drive, pan, 0.01, 0.2]);
-            sched(0, t1 + latency + i * dt);
+            sched(0, 0, t1 + latency + i * dt);
 
-            begin(0);
+            begin();
             noteOff(101, noteID);
-            sched(0, t1 + latency + i * dt + 0.1 + 0.04 * k);
+            sched(0, 0, t1 + latency + i * dt + 0.1 + 0.04 * k);
 
             noteID = noteID + 1;
         }
@@ -108,14 +108,14 @@ go(coro fn() Float {
             let pitch = pitches[i] - 5.0 * k + 10.0;
             let drive = 1.0 + 2.3 * k;
 			"pitch %^" fmt(pitch) println;
-            begin(0);
+            begin();
             noteOn(101, noteID, [pitch]);
             noteSetParams(101, noteID, 2, [drive]);
-            sched(0, t0 + latency + i * dt);
+            sched(0, 0, t0 + latency + i * dt);
 
-            begin(0);
+            begin();
             noteOff(101, noteID);
-            sched(0, t0 + latency + i * dt + 2.0);
+            sched(0, 0, t0 + latency + i * dt + 2.0);
 
             noteID = noteID + 1;
         }
@@ -126,14 +126,14 @@ go(coro fn() Float {
             let pitch = 2.0 + pitches[i] - 5.0 * k + 10.0;
             let drive = 2.0 + 2.3 * k;
 			"pitch %^" fmt(pitch) println;
-            begin(0);
+            begin();
             noteOn(101, noteID, [pitch]);
             noteSetParams(101, noteID, 2, [drive]);
-            sched(0, t1 + latency + i * dt);
+            sched(0, 0, t1 + latency + i * dt);
 
-            begin(0);
+            begin();
             noteOff(101, noteID);
-            sched(0, t1 + latency + i * dt + 2.0);
+            sched(0, 0, t1 + latency + i * dt + 2.0);
 
             noteID = noteID + 1;
         }
@@ -142,15 +142,15 @@ go(coro fn() Float {
     yield 4.0;
 
     println("allNotesOff");
-    begin(0);
+    begin();
     allNotesOff(101);
-    sched();
+    sched(0);
     yield 5.0;
 
     println("stop");
-    begin(0);
+    begin();
 	freeNode(101);
-    sched();
+    sched(0);
     engineStop();
 }());
 

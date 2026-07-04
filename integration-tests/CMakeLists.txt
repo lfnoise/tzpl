@@ -15,7 +15,7 @@ add_executable(test_audio_engine_ffi
 )
 
 target_link_libraries(test_audio_engine_ffi
-    PRIVATE tzpl_audio_engine_bridge
+    PRIVATE tzpl_audio_engine_bridge tzpl_clock_bridge
 )
 
 target_compile_definitions(test_audio_engine_ffi PRIVATE

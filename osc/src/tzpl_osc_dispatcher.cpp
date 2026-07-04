@@ -89,9 +89,10 @@ void OscDispatcher::dispatchBundle(const char* data, int size, const SenderInfo&
         ::osc::uint64 timetag = bundle.TimeTag();
         bool immediate = (timetag <= 1);
 
-        // Begin a command bundle on the engine
+        // Begin a command bundle on the engine; the silo (from the optional
+        // /engine/silo element) is passed at go/sched below.
         if (engine_) {
-            engine::begin(engine_, silo);
+            engine::begin(engine_);
         }
 
         // Set bundle flag so graph handlers don't auto-wrap
@@ -125,15 +126,16 @@ void OscDispatcher::dispatchBundle(const char* data, int size, const SenderInfo&
         // Finalize the bundle
         if (engine_) {
             if (immediate) {
-                engine::go();
+                engine::go(silo);
             } else {
                 // Convert NTP timetag to seconds since epoch, then to engine stream time.
                 // NTP epoch is 1900-01-01, Unix epoch is 1970-01-01.
                 // For now, treat the timetag as raw seconds offset from engine start.
-                // A proper implementation would anchor NTP time to engine time at startup.
+                // A proper implementation would anchor NTP time to engine time at
+                // startup and map it onto a TempoClock beat.
                 double seconds = static_cast<double>(timetag >> 32) +
                                  static_cast<double>(timetag & 0xFFFFFFFF) / 4294967296.0;
-                engine::sched(seconds);
+                engine::sched(silo, 0, seconds);
             }
         }
     } catch (::osc::Exception const& e) {

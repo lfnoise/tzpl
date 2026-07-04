@@ -10,7 +10,7 @@ fn voice() S {
 	y write(fb); fb outlet
 }
 voice defSynth("ab_voice");
-begin(0);
+begin();
 newNode("ab_voice", 100);
 connect(100, 0, 0, 0);
-sched();
+sched(0);

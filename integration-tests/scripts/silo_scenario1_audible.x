@@ -21,7 +21,7 @@ let arpTask = "import audio_engine.*; let p = [72.0, 76.0, 79.0, 84.0]; coro fn 
 
 -- Build a part's voicer node on its silo, attach the silo VM, load the task.
 fn preparePart(silo Int, node Int, code String) Future<String> {
-    begin(silo); newNode("voicer", node); connect(node, 0, 0, 0); sched();
+    begin(); newNode("voicer", node); connect(node, 0, 0, 0); sched(silo);
     attachVM(silo);
     siloLoad(silo, code)
 }

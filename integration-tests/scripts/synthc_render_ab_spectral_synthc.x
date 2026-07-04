@@ -12,7 +12,7 @@ fn spec() S {
 	spectralChain(sig, 256, 128, fn(frame S) { frame }) outlet
 }
 defSynthX(spec, "ab_spec");
-begin(0);
+begin();
 newNode("ab_spec", 100);
 connect(100, 0, 0, 0);
-sched();
+sched(0);

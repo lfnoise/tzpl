@@ -754,10 +754,52 @@ void listNodeDefs(Engine* e, std::vector<std::string>& names) {
     }
 }
 
-struct CmdBundle : CommandList
+// ============================================================================
+// Command bundling.
+//
+// The command builders (newNode, connect, setInput, ...) do not touch any
+// silo when called: each call records a BundleOp into the thread-local
+// bundle. The target silo is chosen at submit time -- go(silo) /
+// sched(silo, clock, beat) -- which replays the recorded ops in order
+// against that silo, validating and materializing the actual Commands.
+// On the first error the ENTIRE bundle is discarded (atomic abort): nothing
+// is applied, and everything pre-allocated during replay is freed via the
+// stage_ == 0 guards in the Command destructors. Submit always closes the
+// bundle, success or failure.
+// ============================================================================
+
+struct BundleOp
+{
+    BundleOp* next_ = nullptr;
+    virtual ~BundleOp() = default;
+    // Validate against the chosen silo and append the materialized
+    // Command(s) to `out`. Runs on the submitting (NRT) thread.
+    virtual tzpl_SErr apply(Engine* e, Silo* s, CommandList& out) = 0;
+};
+
+struct CmdBundle
 {
     Engine* engine = nullptr;
-    Silo* silo = nullptr;
+    BundleOp* head = nullptr;
+    BundleOp* tail = nullptr;
+
+    void add(BundleOp* op) noexcept {
+        op->next_ = nullptr;
+        if (tail) tail->next_ = op;
+        else head = op;
+        tail = op;
+    }
+
+    void reset() noexcept {
+        BundleOp* op = head;
+        while (op) {
+            BundleOp* next = op->next_;
+            delete op;
+            op = next;
+        }
+        head = tail = nullptr;
+        engine = nullptr;
+    }
 };
 
 thread_local CmdBundle tBundle;
@@ -775,49 +817,535 @@ void sendCmds(Engine* e, Silo* s, Command* cmd) noexcept {
     }
 }
 
-void sendCommand(Command* cmd) {
-    tBundle.add(cmd);
+// ----------------------------------------------------------------------------
+// Apply helpers: the silo-dependent halves of the command builders. Each one
+// validates against the chosen silo and appends the materialized Command(s)
+// to `out`. These replay in recorded order, so an op that references a node
+// created earlier in the same bundle resolves it via the NRT mirror exactly
+// as the eager builders used to.
+// ----------------------------------------------------------------------------
+
+static tzpl_SErr applyNewNode(Engine* e, Silo* s, CommandList& out,
+                              char const* name, i64 nodeID) {
+    NodeDef* def = getNodeDef(e, name); // getNodeDef has its own lock.
+    if (!def) return tzpl_errNodeDefNotFound;
+
+    std::lock_guard<std::mutex> lck(e->nrt_lock_);
+
+    Node* test = s->nrt_getNode(nodeID);
+    if (test) return tzpl_errNodeIDAlreadyTaken;
+
+    Node* node = nullptr;
+    try {
+        node = new Node(e, s, def, nodeID);
+    } catch (tzpl_SErr& err) {
+        printf("newNode failed %d\n", err);
+        return err;
+    }
+
+    out.add(new AddNodeCmd{node});
+    return tzpl_errNone;
 }
 
-tzpl_SErr begin(Engine* e, int silo) {
+static tzpl_SErr applyConnect(Engine* e, Silo* s, CommandList& out,
+                              PortAddr src, PortAddr dst,
+                              f64 xfadeTime, FadeCurve curve) {
+    tzpl_SErr err;
+    OutPort* srcPort;
+    err = s->nrt_getOutPort(src, srcPort);
+    if (err != tzpl_errNone) return err;
+
+    InPort* dstPort;
+    err = s->nrt_getInPort(dst, dstPort);
+    if (err != tzpl_errNone) return err;
+
+    if (dstPort->node_->nodeID == 0) {
+        tzpl_SErr err = relaxedCompatibleTypes(srcPort->type_, dstPort->type_);
+        if (err != tzpl_errNone) return err;
+    } else {
+        tzpl_SErr err = compatibleTypes(srcPort->type_, dstPort->type_);
+        if (err != tzpl_errNone) return err;
+    }
+
+    // Always pre-allocate a mixer in NRT (cheap). The RT thread decides
+    // whether to use it based on the actual connection state at execution
+    // time. This avoids NRT/RT race conditions -- the NRT thread cannot
+    // reliably know whether previous connects have been applied yet.
+    //
+    // Use the SOURCE's type for the mixer, not the destination's. The source
+    // determines the actual channel count; the mixer-to-destination connect
+    // uses relaxed type checking (for the output node) which allows channel
+    // mismatch. If we used the destination's type, connecting a mono source
+    // to a stereo mixer input would fail strict type checking.
+    tzpl_SignalType type = srcPort->type_;
+    Node* mixerNode = newMixerNode(e, s, type, 4);
+
+    Node* xfaderNode = nullptr;
+    if (xfadeTime > 0. && isFloat(srcPort->type_.elem)) {
+        xfaderNode = newXFaderNode(e, s, xfadeTime, curve, srcPort->type_);
+    }
+    out.add(new ConnectCmd(src, dst, xfaderNode, curve, mixerNode, -1));
+    return tzpl_errNone;
+}
+
+static tzpl_SErr applyReconnectOutput(Engine* e, Silo* s, CommandList& out,
+                                      PortAddr oldSrc, PortAddr newSrc,
+                                      f64 xfadeTime, FadeCurve curve) {
+    tzpl_SErr err;
+    OutPort* oldSrcPort;
+    err = s->nrt_getOutPort(oldSrc, oldSrcPort);
+    if (err != tzpl_errNone) return err;
+
+    OutPort* newSrcPort;
+    err = s->nrt_getOutPort(newSrc, newSrcPort);
+    if (err != tzpl_errNone) return err;
+
+    err = compatibleTypes(oldSrcPort->type_, newSrcPort->type_);
+    if (err != tzpl_errNone) return err;
+
+    Node* xfaderNode = nullptr;
+    tzpl_SignalType type = newSrcPort->type_;
+    if (xfadeTime > 0. && isFloat(type.elem)) {
+        xfaderNode = newXFaderNode(e, s, xfadeTime, curve, type);
+    }
+    out.add(new ReconnectOutputCmd(oldSrc, newSrc, xfaderNode, curve));
+    return tzpl_errNone;
+}
+
+static tzpl_SErr applyReplaceNode(Engine* e, Silo* s, CommandList& out,
+                                  i64 oldNodeID, i64 newNodeID,
+                                  f64 xfadeTime, FadeCurve curve) {
+    Node* oldNode = s->nrt_getNode(oldNodeID);
+    if (!oldNode) return tzpl_errNodeNotFound;
+    Node* newNode = s->nrt_getNode(newNodeID);
+    if (!newNode) return tzpl_errNodeNotFound;
+
+    if (oldNode->ins.size() != newNode->ins.size()) return tzpl_errNumPortsMismatch;
+    if (oldNode->outs.size() != newNode->outs.size()) return tzpl_errNumPortsMismatch;
+
+    for (int i = 0; i < oldNode->ins.size(); ++i) {
+        tzpl_SErr err = compatibleTypes(oldNode->ins[i].type_, newNode->ins[i].type_);
+        if (err) return err;
+    }
+    for (int i = 0; i < oldNode->outs.size(); ++i) {
+        tzpl_SErr err = compatibleTypes(oldNode->outs[i].type_, newNode->outs[i].type_);
+        if (err) return err;
+    }
+
+    // Connect new node to all the same inputs.
+    // If an input has a hidden mixer, iterate the mixer's actual sources
+    // and connect each one. The additive connect will automatically
+    // create a new mixer on the new node's input.
+    // NB: call the apply helpers directly (NOT the public builders, which
+    // would append ops to the bundle being replayed).
+    for (int i = 0; i < (int)oldNode->ins.size(); ++i) {
+        if (oldNode->ins[i].mixerNode_) {
+            Node* mixer = oldNode->ins[i].mixerNode_;
+            for (auto& mixerIn : mixer->ins) {
+                if (mixerIn.srcPort_ && mixerIn.srcPort_->node_->nodeID >= 0) {
+                    applyConnect(e, s, out,
+                            {mixerIn.srcPort_->node_->nodeID, mixerIn.srcPort_->index_},
+                            {newNodeID, i}, 0., fadeLinear);
+                }
+            }
+        } else {
+            OutPort* src = oldNode->ins[i].srcPort_;
+            if (src && src->node_->nodeID >= 0) {
+                applyConnect(e, s, out,
+                        {src->node_->nodeID, src->index_}, {newNodeID, i},
+                        0., fadeLinear);
+            }
+        }
+    }
+
+    // reconnect all outputs
+    for (int i = 0; i < oldNode->outs.size(); ++i) {
+        applyReconnectOutput(e, s, out, {oldNodeID, i}, {newNodeID, i}, xfadeTime, curve);
+    }
+
+    return tzpl_errNone;
+}
+
+static tzpl_SErr applyDisconnectInput(Engine* e, Silo* s, CommandList& out,
+                                      PortAddr dst, f64 xfadeTime, FadeCurve curve) {
+    InPort* port;
+    tzpl_SErr err = s->nrt_getInPort(dst, port);
+    if (err != tzpl_errNone) return err;
+
+    Node* xfaderNode = nullptr;
+    tzpl_SignalType type = port->type_;
+    if (xfadeTime > 0. && isFloat(type.elem)) {
+        xfaderNode = newXFaderNode(e, s, xfadeTime, curve, type);
+    }
+    out.add(new DisconnectInputCmd(dst, xfaderNode, curve));
+    return tzpl_errNone;
+}
+
+static tzpl_SErr applyDisconnectSource(Engine* e, Silo* s, CommandList& out,
+                                       PortAddr src, PortAddr dst,
+                                       f64 xfadeTime, FadeCurve curve) {
+    OutPort* srcPort;
+    tzpl_SErr err = s->nrt_getOutPort(src, srcPort);
+    if (err != tzpl_errNone) return err;
+
+    InPort* dstPort;
+    err = s->nrt_getInPort(dst, dstPort);
+    if (err != tzpl_errNone) return err;
+
+    Node* xfaderNode = nullptr;
+    tzpl_SignalType type = dstPort->type_;
+    if (xfadeTime > 0. && isFloat(type.elem)) {
+        xfaderNode = newXFaderNode(e, s, xfadeTime, curve, type);
+    }
+    out.add(new DisconnectSourceCmd(src, dst, xfaderNode, curve));
+    return tzpl_errNone;
+}
+
+static tzpl_SErr applyDisconnectOutput(Engine*, Silo* s, CommandList& out, PortAddr src) {
+    OutPort* port;
+    tzpl_SErr err = s->nrt_getOutPort(src, port);
+    if (err != tzpl_errNone) return err;
+
+    out.add(new DisconnectOutputCmd(src));
+    return tzpl_errNone;
+}
+
+// Convert the values captured at record time (srcElem-typed bytes) into the
+// destination element type. When the types match this is a straight copy;
+// when they differ, convert per element (the old void* API silently
+// reinterpreted the buffer in that case).
+template <class T>
+static std::vector<T> convertValues(tzpl_ElemType srcElem, void const* bytes, int n) {
+    std::vector<T> out(n);
+    switch (srcElem) {
+        case tzpl_kI32 : {
+            i32 const* p = static_cast<i32 const*>(bytes);
+            for (int i = 0; i < n; ++i) out[i] = static_cast<T>(p[i]);
+        } break;
+        case tzpl_kI64 : {
+            i64 const* p = static_cast<i64 const*>(bytes);
+            for (int i = 0; i < n; ++i) out[i] = static_cast<T>(p[i]);
+        } break;
+        case tzpl_kF32 : {
+            f32 const* p = static_cast<f32 const*>(bytes);
+            for (int i = 0; i < n; ++i) out[i] = static_cast<T>(p[i]);
+        } break;
+        case tzpl_kF64 : {
+            f64 const* p = static_cast<f64 const*>(bytes);
+            for (int i = 0; i < n; ++i) out[i] = static_cast<T>(p[i]);
+        } break;
+    }
+    return out;
+}
+
+static tzpl_SErr applySetInput(Engine* e, Silo* s, CommandList& out,
+                               PortAddr dst, tzpl_ElemType srcElem,
+                               void const* bytes, int numValues,
+                               f64 xfadeTime, FadeCurve curve) {
+    InPort* port;
+    tzpl_SErr err = s->nrt_getInPort(dst, port);
+    if (err != tzpl_errNone) return err;
+
+    tzpl_SignalType type = port->type_;
+    switch (type.elem) {
+        case tzpl_kI32 : {
+            auto v = convertValues<i32>(srcElem, bytes, numValues);
+            out.add(new SetInputCmd<i32>(dst, numValues, v.data(), nullptr));
+        }   break;
+        case tzpl_kI64 : {
+            auto v = convertValues<i64>(srcElem, bytes, numValues);
+            out.add(new SetInputCmd<i64>(dst, numValues, v.data(), nullptr));
+        }   break;
+        case tzpl_kF32 : {
+            auto v = convertValues<f32>(srcElem, bytes, numValues);
+            Node* xfader = xfadeTime > 0. ? newXFaderNode(e, s, xfadeTime, curve, type) : nullptr;
+            out.add(new SetInputCmd<f32>(dst, numValues, v.data(), xfader));
+        }   break;
+        case tzpl_kF64 : {
+            auto v = convertValues<f64>(srcElem, bytes, numValues);
+            Node* xfader = xfadeTime > 0. ? newXFaderNode(e, s, xfadeTime, curve, type) : nullptr;
+            out.add(new SetInputCmd<f64>(dst, numValues, v.data(), xfader));
+        }   break;
+    }
+    return tzpl_errNone;
+}
+
+static tzpl_SErr applySetControl(Engine*, Silo* s, CommandList& out,
+                                 i64 nodeID, i64 controlID,
+                                 tzpl_ElemType srcElem, void const* bytes, int numValues) {
+    Node* node = s->nrt_getNode(nodeID);
+    if (!node) return tzpl_errNodeNotFound;
+
+    // check existence of control.
+    Control* c = node->getControl(controlID);
+    if (!c) return tzpl_errControlNotFound;
+
+    switch (c->type_.elem) {
+        case tzpl_kI32 : {
+            auto v = convertValues<i32>(srcElem, bytes, numValues);
+            out.add(new SetControlCmd<i32>(nodeID, controlID, numValues, v.data()));
+        }   break;
+        case tzpl_kI64 : {
+            auto v = convertValues<i64>(srcElem, bytes, numValues);
+            out.add(new SetControlCmd<i64>(nodeID, controlID, numValues, v.data()));
+        }   break;
+        case tzpl_kF32 : {
+            auto v = convertValues<f32>(srcElem, bytes, numValues);
+            out.add(new SetControlCmd<f32>(nodeID, controlID, numValues, v.data()));
+        }   break;
+        case tzpl_kF64 : {
+            auto v = convertValues<f64>(srcElem, bytes, numValues);
+            out.add(new SetControlCmd<f64>(nodeID, controlID, numValues, v.data()));
+        }   break;
+    }
+    return tzpl_errNone;
+}
+
+// ----------------------------------------------------------------------------
+// Bundle op records. All argument data is OWNED by the op (copied at record
+// time): the caller's strings/arrays need not outlive the builder call.
+// ----------------------------------------------------------------------------
+
+// A command that was fully built at record time and needs no silo-side
+// validation (freeAllNodes, channelOffset, buffer commands, sendCommand).
+struct PrebuiltCmdOp : BundleOp
+{
+    Command* cmd_;
+
+    explicit PrebuiltCmdOp(Command* cmd) : cmd_(cmd) {}
+    ~PrebuiltCmdOp() override { delete cmd_; } // owned until applied
+
+    tzpl_SErr apply(Engine*, Silo*, CommandList& out) override {
+        out.add(cmd_);
+        cmd_ = nullptr;
+        return tzpl_errNone;
+    }
+};
+
+// A command that was fully built at record time and whose only silo-side
+// validation is that the target node exists (freeNode, disconnectNode, and
+// the note/voice commands).
+struct NodeCheckedCmdOp : BundleOp
+{
+    i64 nodeID_;
+    Command* cmd_;
+
+    NodeCheckedCmdOp(i64 nodeID, Command* cmd) : nodeID_(nodeID), cmd_(cmd) {}
+    ~NodeCheckedCmdOp() override { delete cmd_; } // owned until applied
+
+    tzpl_SErr apply(Engine*, Silo* s, CommandList& out) override {
+        if (!s->nrt_getNode(nodeID_)) return tzpl_errNodeNotFound;
+        out.add(cmd_);
+        cmd_ = nullptr;
+        return tzpl_errNone;
+    }
+};
+
+struct NewNodeOp : BundleOp
+{
+    std::string defName_;
+    i64 nodeID_;
+
+    NewNodeOp(char const* defName, i64 nodeID) : defName_(defName), nodeID_(nodeID) {}
+
+    tzpl_SErr apply(Engine* e, Silo* s, CommandList& out) override {
+        return applyNewNode(e, s, out, defName_.c_str(), nodeID_);
+    }
+};
+
+struct ConnectOp : BundleOp
+{
+    PortAddr src_, dst_;
+    f64 xfadeTime_;
+    FadeCurve curve_;
+
+    ConnectOp(PortAddr src, PortAddr dst, f64 xfadeTime, FadeCurve curve)
+        : src_(src), dst_(dst), xfadeTime_(xfadeTime), curve_(curve) {}
+
+    tzpl_SErr apply(Engine* e, Silo* s, CommandList& out) override {
+        return applyConnect(e, s, out, src_, dst_, xfadeTime_, curve_);
+    }
+};
+
+struct ReconnectOutputOp : BundleOp
+{
+    PortAddr oldSrc_, newSrc_;
+    f64 xfadeTime_;
+    FadeCurve curve_;
+
+    ReconnectOutputOp(PortAddr oldSrc, PortAddr newSrc, f64 xfadeTime, FadeCurve curve)
+        : oldSrc_(oldSrc), newSrc_(newSrc), xfadeTime_(xfadeTime), curve_(curve) {}
+
+    tzpl_SErr apply(Engine* e, Silo* s, CommandList& out) override {
+        return applyReconnectOutput(e, s, out, oldSrc_, newSrc_, xfadeTime_, curve_);
+    }
+};
+
+struct ReplaceNodeOp : BundleOp
+{
+    i64 oldNodeID_, newNodeID_;
+    f64 xfadeTime_;
+    FadeCurve curve_;
+
+    ReplaceNodeOp(i64 oldNodeID, i64 newNodeID, f64 xfadeTime, FadeCurve curve)
+        : oldNodeID_(oldNodeID), newNodeID_(newNodeID), xfadeTime_(xfadeTime), curve_(curve) {}
+
+    tzpl_SErr apply(Engine* e, Silo* s, CommandList& out) override {
+        return applyReplaceNode(e, s, out, oldNodeID_, newNodeID_, xfadeTime_, curve_);
+    }
+};
+
+struct DisconnectInputOp : BundleOp
+{
+    PortAddr dst_;
+    f64 xfadeTime_;
+    FadeCurve curve_;
+
+    DisconnectInputOp(PortAddr dst, f64 xfadeTime, FadeCurve curve)
+        : dst_(dst), xfadeTime_(xfadeTime), curve_(curve) {}
+
+    tzpl_SErr apply(Engine* e, Silo* s, CommandList& out) override {
+        return applyDisconnectInput(e, s, out, dst_, xfadeTime_, curve_);
+    }
+};
+
+struct DisconnectSourceOp : BundleOp
+{
+    PortAddr src_, dst_;
+    f64 xfadeTime_;
+    FadeCurve curve_;
+
+    DisconnectSourceOp(PortAddr src, PortAddr dst, f64 xfadeTime, FadeCurve curve)
+        : src_(src), dst_(dst), xfadeTime_(xfadeTime), curve_(curve) {}
+
+    tzpl_SErr apply(Engine* e, Silo* s, CommandList& out) override {
+        return applyDisconnectSource(e, s, out, src_, dst_, xfadeTime_, curve_);
+    }
+};
+
+struct DisconnectOutputOp : BundleOp
+{
+    PortAddr src_;
+
+    explicit DisconnectOutputOp(PortAddr src) : src_(src) {}
+
+    tzpl_SErr apply(Engine* e, Silo* s, CommandList& out) override {
+        return applyDisconnectOutput(e, s, out, src_);
+    }
+};
+
+struct SetInputOp : BundleOp
+{
+    PortAddr dst_;
+    tzpl_ElemType elem_;
+    int numValues_;
+    f64 xfadeTime_;
+    FadeCurve curve_;
+    std::vector<u8> bytes_;
+
+    SetInputOp(PortAddr dst, tzpl_ElemType elem, int numValues, void const* values,
+               f64 xfadeTime, FadeCurve curve)
+        : dst_(dst), elem_(elem), numValues_(numValues),
+          xfadeTime_(xfadeTime), curve_(curve),
+          bytes_(numValues * elemSize(elem))
+    {
+        memcpy(bytes_.data(), values, bytes_.size());
+    }
+
+    tzpl_SErr apply(Engine* e, Silo* s, CommandList& out) override {
+        return applySetInput(e, s, out, dst_, elem_, bytes_.data(), numValues_,
+                             xfadeTime_, curve_);
+    }
+};
+
+struct SetControlOp : BundleOp
+{
+    i64 nodeID_, controlID_;
+    tzpl_ElemType elem_;
+    int numValues_;
+    std::vector<u8> bytes_;
+
+    SetControlOp(i64 nodeID, i64 controlID, tzpl_ElemType elem, int numValues,
+                 void const* values)
+        : nodeID_(nodeID), controlID_(controlID), elem_(elem), numValues_(numValues),
+          bytes_(numValues * elemSize(elem))
+    {
+        memcpy(bytes_.data(), values, bytes_.size());
+    }
+
+    tzpl_SErr apply(Engine* e, Silo* s, CommandList& out) override {
+        return applySetControl(e, s, out, nodeID_, controlID_, elem_,
+                               bytes_.data(), numValues_);
+    }
+};
+
+// ----------------------------------------------------------------------------
+// Bundle open / submit.
+// ----------------------------------------------------------------------------
+
+void sendCommand(Command* cmd) {
+    tBundle.add(new PrebuiltCmdOp(cmd));
+}
+
+tzpl_SErr begin(Engine* e) {
     if (tBundle.head) {
         return tzpl_errCommandsQueuedButNotSent;
     }
-    if (!e || silo < 0 || silo >= (int)e->silos_.size()) {
-        return tzpl_errSiloOutOfRange;
-    }
+    if (!e) return tzpl_errInternal;
 
     tBundle.engine = e;
-    tBundle.silo = &e->silos_[silo];
     return tzpl_errNone;
 }
 
-tzpl_SErr sched(int clock, f64 beat, SchedPolicy policy) {
+tzpl_SErr sched(int silo, int clock, f64 beat, SchedPolicy policy) {
     Engine* e = tBundle.engine;
     if (!e) return tzpl_errNoActiveBundle;
+    if (silo < 0 || silo >= (int)e->silos_.size()) {
+        tBundle.reset();
+        return tzpl_errSiloOutOfRange;
+    }
     if (policy != schedImmediate &&
         (clock < 0 || clock >= e->numTempoClocks_)) {
+        tBundle.reset();
         return tzpl_errClockOutOfRange;
     }
+    Silo* s = &e->silos_[silo];
+
+    // Materialize the recorded ops against the chosen silo, in order.
+    // On the first error the whole bundle is discarded: deleting the
+    // never-run commands (stage_ == 0) frees everything they pre-allocated,
+    // including nodes already inserted into the silo's NRT table.
+    CommandList cmds;
+    for (BundleOp* op = tBundle.head; op; op = op->next_) {
+        tzpl_SErr err = op->apply(e, s, cmds);
+        if (err != tzpl_errNone) {
+            {
+                // ~Node runs releaseNodeDef and unlinks the NRT table,
+                // both of which require nrt_lock_.
+                std::lock_guard<std::mutex> lck(e->nrt_lock_);
+                cmds.clear();
+            }
+            tBundle.reset();
+            return err;
+        }
+    }
+    tBundle.reset();
+
+    Command* head = cmds.popAll();
+    if (!head) return tzpl_errNone; // empty bundle: closed, nothing to do.
 
     std::lock_guard<std::mutex> lck(e->nrt_lock_);
-    Command* cmds = tBundle.popAll();
-    if (!cmds) return tzpl_errNone; // not an error, just don't do anything.
-
-    Command* cmd = cmds;
-    while (cmd) {
+    for (Command* cmd = head; cmd; cmd = cmd->next_) {
         cmd->schedPolicy_ = policy;
         cmd->clock_ = clock;
         cmd->beatTime_ = beat;
-        cmd = cmd->next_;
     }
-    sendCmds(e, tBundle.silo, cmds);
-    tBundle.engine = nullptr;
+    sendCmds(e, s, head);
     return tzpl_errNone;
 }
 
-tzpl_SErr go() {
-    return sched(0, 0., schedImmediate);
+tzpl_SErr go(int silo) {
+    return sched(silo, 0, 0., schedImmediate);
 }
 
 // Broadcast a tempo command (one instance per silo) to keep clock slot `clock`
@@ -860,368 +1388,175 @@ f64 clockTempoBPM(Engine* e, int clock) {
     return s.tempoClocks_[clock].tempoAtSample(s.sampleTime_) * 60.0; // BPS -> BPM
 }
 
+// ----------------------------------------------------------------------------
+// Command builders. Each call records an op into the thread-local bundle;
+// all silo-side validation happens when the bundle is submitted with
+// go(silo) / sched(silo, ...). The only error a builder itself can return
+// is tzpl_errNoActiveBundle.
+// ----------------------------------------------------------------------------
+
 tzpl_SErr newNode(const char* name, i64 nodeID) {
-    Engine* e = tBundle.engine;
-    if (!e) return tzpl_errNoActiveBundle;
-
-    NodeDef* def = getNodeDef(e, name); // getNodeDef has its own lock.
-    if (!def) return tzpl_errNodeDefNotFound;
-
-    std::lock_guard<std::mutex> lck(e->nrt_lock_);
-
-    Node* test = tBundle.silo->nrt_getNode(nodeID);
-    if (test) return tzpl_errNodeIDAlreadyTaken;
-
-    Node* node = nullptr;
-    try {
-        node = new Node(e, tBundle.silo, def, nodeID);
-    } catch (tzpl_SErr& err) {
-        printf("newNode failed %d\n", err);
-        return err;
-    }
-
-    tBundle.add(new AddNodeCmd{node});
+    if (!tBundle.engine) return tzpl_errNoActiveBundle;
+    tBundle.add(new NewNodeOp(name, nodeID));
     return tzpl_errNone;
 }
 
 tzpl_SErr freeNode(i64 nodeID) {
-    Engine* e = tBundle.engine;
-    if (!e) return tzpl_errNoActiveBundle;
-    
-    Node* node = tBundle.silo->nrt_getNode(nodeID);
-    if (!node) return tzpl_errNodeNotFound;
-
-    tBundle.add(new RemoveNodeCmd{nodeID});
+    if (!tBundle.engine) return tzpl_errNoActiveBundle;
+    tBundle.add(new NodeCheckedCmdOp(nodeID, new RemoveNodeCmd{nodeID}));
     return tzpl_errNone;
 }
 
 tzpl_SErr freeAllNodes() {
-    Engine* e = tBundle.engine;
-    if (!e) return tzpl_errNoActiveBundle;
-    
-    tBundle.add(new RemoveAllNodesCmd{});
+    if (!tBundle.engine) return tzpl_errNoActiveBundle;
+    tBundle.add(new PrebuiltCmdOp(new RemoveAllNodesCmd{}));
     return tzpl_errNone;
 }
 
 tzpl_SErr channelOffset(i32 offset) {
-    Engine* e = tBundle.engine;
-    if (!e) return tzpl_errNoActiveBundle;
-
-    tBundle.add(new ChannelOffsetCmd{offset});
+    if (!tBundle.engine) return tzpl_errNoActiveBundle;
+    tBundle.add(new PrebuiltCmdOp(new ChannelOffsetCmd{offset}));
     return tzpl_errNone;
 }
 
-// TODO notes, controls, buffers...
-
 tzpl_SErr connect(PortAddr src, PortAddr dst, f64 xfadeTime, FadeCurve curve) {
-    Engine* e = tBundle.engine;
-    if (!e) return tzpl_errNoActiveBundle;
-
-    tzpl_SErr err;
-    OutPort* srcPort;
-    err = tBundle.silo->nrt_getOutPort(src, srcPort);
-    if (err != tzpl_errNone) return err;
-
-    InPort* dstPort;
-    err = tBundle.silo->nrt_getInPort(dst, dstPort);
-    if (err != tzpl_errNone) return err;
-
-    if (dstPort->node_->nodeID == 0) {
-        tzpl_SErr err = relaxedCompatibleTypes(srcPort->type_, dstPort->type_);
-        if (err != tzpl_errNone) return err;
-    } else {
-        tzpl_SErr err = compatibleTypes(srcPort->type_, dstPort->type_);
-        if (err != tzpl_errNone) return err;
-    }
-
-    // Always pre-allocate a mixer in NRT (cheap). The RT thread decides
-    // whether to use it based on the actual connection state at execution
-    // time. This avoids NRT/RT race conditions -- the NRT thread cannot
-    // reliably know whether previous connects have been applied yet.
-    //
-    // Use the SOURCE's type for the mixer, not the destination's. The source
-    // determines the actual channel count; the mixer-to-destination connect
-    // uses relaxed type checking (for the output node) which allows channel
-    // mismatch. If we used the destination's type, connecting a mono source
-    // to a stereo mixer input would fail strict type checking.
-    tzpl_SignalType type = srcPort->type_;
-    Node* mixerNode = newMixerNode(e, tBundle.silo, type, 4);
-
-    Node* xfaderNode = nullptr;
-    if (xfadeTime > 0. && isFloat(srcPort->type_.elem)) {
-        xfaderNode = newXFaderNode(e, tBundle.silo, xfadeTime, curve, srcPort->type_);
-    }
-    tBundle.add(new ConnectCmd(src, dst, xfaderNode, curve, mixerNode, -1));
+    if (!tBundle.engine) return tzpl_errNoActiveBundle;
+    tBundle.add(new ConnectOp(src, dst, xfadeTime, curve));
     return tzpl_errNone;
 }
 
 tzpl_SErr reconnectOutput(PortAddr oldSrc, PortAddr newSrc, f64 xfadeTime, FadeCurve curve) {
-    Engine* e = tBundle.engine;
-    if (!e) return tzpl_errNoActiveBundle;
-    
-    tzpl_SErr err;
-    OutPort* oldSrcPort;
-    err = tBundle.silo->nrt_getOutPort(oldSrc, oldSrcPort);
-    if (err != tzpl_errNone) return err;
-    
-    OutPort* newSrcPort;
-    err = tBundle.silo->nrt_getOutPort(newSrc, newSrcPort);
-    if (err != tzpl_errNone) return err;
-
-    err = compatibleTypes(oldSrcPort->type_, newSrcPort->type_);
-    if (err != tzpl_errNone) return err;
-
-    Node* xfaderNode = nullptr;
-    tzpl_SignalType type = newSrcPort->type_;
-    if (xfadeTime > 0. && isFloat(type.elem)) {
-        xfaderNode = newXFaderNode(e, tBundle.silo, xfadeTime, curve, type);
-    }
-    tBundle.add(new ReconnectOutputCmd(oldSrc, newSrc, xfaderNode, curve));
+    if (!tBundle.engine) return tzpl_errNoActiveBundle;
+    tBundle.add(new ReconnectOutputOp(oldSrc, newSrc, xfadeTime, curve));
     return tzpl_errNone;
 }
 
-tzpl_SErr replaceNode(i64 oldNodeID, i64 newNodeID, f64 xfadeTime, FadeCurve curve)
-{
-    Silo* s = tBundle.silo;
-    Node* oldNode = s->nrt_getNode(oldNodeID);
-    if (!oldNode) return tzpl_errNodeNotFound;
-    Node* newNode = s->nrt_getNode(newNodeID);
-    if (!newNode) return tzpl_errNodeNotFound;
-
-    if (oldNode->ins.size() != newNode->ins.size()) return tzpl_errNumPortsMismatch;
-    if (oldNode->outs.size() != newNode->outs.size()) return tzpl_errNumPortsMismatch;
-    
-    for (int i = 0; i < oldNode->ins.size(); ++i) {
-        tzpl_SErr err = compatibleTypes(oldNode->ins[i].type_, newNode->ins[i].type_);
-        if (err) return err;
-    }
-    for (int i = 0; i < oldNode->outs.size(); ++i) {
-        tzpl_SErr err = compatibleTypes(oldNode->outs[i].type_, newNode->outs[i].type_);
-        if (err) return err;
-    }
-    
-    // Connect new node to all the same inputs.
-    // If an input has a hidden mixer, iterate the mixer's actual sources
-    // and connect each one. The additive connect() will automatically
-    // create a new mixer on the new node's input.
-    for (int i = 0; i < (int)oldNode->ins.size(); ++i) {
-        if (oldNode->ins[i].mixerNode_) {
-            Node* mixer = oldNode->ins[i].mixerNode_;
-            for (auto& mixerIn : mixer->ins) {
-                if (mixerIn.srcPort_ && mixerIn.srcPort_->node_->nodeID >= 0) {
-                    connect({mixerIn.srcPort_->node_->nodeID, mixerIn.srcPort_->index_},
-                            {newNodeID, i});
-                }
-            }
-        } else {
-            OutPort* src = oldNode->ins[i].srcPort_;
-            if (src && src->node_->nodeID >= 0) {
-                connect({src->node_->nodeID, src->index_}, {newNodeID, i});
-            }
-        }
-    }
-    
-    // reconnect all outputs
-    for (int i = 0; i < oldNode->outs.size(); ++i) {
-        reconnectOutput({oldNodeID, i}, {newNodeID, i}, xfadeTime, curve);
-    }
-    
+tzpl_SErr replaceNode(i64 oldNodeID, i64 newNodeID, f64 xfadeTime, FadeCurve curve) {
+    if (!tBundle.engine) return tzpl_errNoActiveBundle;
+    tBundle.add(new ReplaceNodeOp(oldNodeID, newNodeID, xfadeTime, curve));
     return tzpl_errNone;
 }
 
 tzpl_SErr disconnectInput(PortAddr dst, f64 xfadeTime, FadeCurve curve) {
-    Engine* e = tBundle.engine;
-    if (!e) return tzpl_errNoActiveBundle;
-
-    InPort* port;
-    tzpl_SErr err = tBundle.silo->nrt_getInPort(dst, port);
-    if (err != tzpl_errNone) return err;
-
-    Node* xfaderNode = nullptr;
-    tzpl_SignalType type = port->type_;
-    if (xfadeTime > 0. && isFloat(type.elem)) {
-        xfaderNode = newXFaderNode(e, tBundle.silo, xfadeTime, curve, type);
-    }
-    tBundle.add(new DisconnectInputCmd(dst, xfaderNode, curve));
+    if (!tBundle.engine) return tzpl_errNoActiveBundle;
+    tBundle.add(new DisconnectInputOp(dst, xfadeTime, curve));
     return tzpl_errNone;
 }
 
 tzpl_SErr disconnectSource(PortAddr src, PortAddr dst, f64 xfadeTime, FadeCurve curve) {
-    Engine* e = tBundle.engine;
-    if (!e) return tzpl_errNoActiveBundle;
-
-    OutPort* srcPort;
-    tzpl_SErr err = tBundle.silo->nrt_getOutPort(src, srcPort);
-    if (err != tzpl_errNone) return err;
-
-    InPort* dstPort;
-    err = tBundle.silo->nrt_getInPort(dst, dstPort);
-    if (err != tzpl_errNone) return err;
-
-    Node* xfaderNode = nullptr;
-    tzpl_SignalType type = dstPort->type_;
-    if (xfadeTime > 0. && isFloat(type.elem)) {
-        xfaderNode = newXFaderNode(e, tBundle.silo, xfadeTime, curve, type);
-    }
-    tBundle.add(new DisconnectSourceCmd(src, dst, xfaderNode, curve));
+    if (!tBundle.engine) return tzpl_errNoActiveBundle;
+    tBundle.add(new DisconnectSourceOp(src, dst, xfadeTime, curve));
     return tzpl_errNone;
 }
 
 tzpl_SErr disconnectOutput(PortAddr src) {
-    Engine* e = tBundle.engine;
-    if (!e) return tzpl_errNoActiveBundle;
-    
-    OutPort* port;
-    tzpl_SErr err = tBundle.silo->nrt_getOutPort(src, port);
-    if (err != tzpl_errNone) return err;
-
-    tBundle.add(new DisconnectOutputCmd(src));
+    if (!tBundle.engine) return tzpl_errNoActiveBundle;
+    tBundle.add(new DisconnectOutputOp(src));
     return tzpl_errNone;
 }
 
 tzpl_SErr disconnectNode(i64 nodeID) {
-    Engine* e = tBundle.engine;
-    if (!e) return tzpl_errNoActiveBundle;
-    
-    Node* node = tBundle.silo->nrt_getNode(nodeID);
-    if (!node) return tzpl_errNodeNotFound;
-
-    tBundle.add(new DisconnectNodeCmd(nodeID));
+    if (!tBundle.engine) return tzpl_errNoActiveBundle;
+    tBundle.add(new NodeCheckedCmdOp(nodeID, new DisconnectNodeCmd(nodeID)));
     return tzpl_errNone;
 }
 
-tzpl_SErr setInput(PortAddr dst, int numValues, void* values, f64 xfadeTime, FadeCurve curve) {
-    Engine* e = tBundle.engine;
-    if (!e) return tzpl_errNoActiveBundle;
-    
-    InPort* port;
-    tzpl_SErr err = tBundle.silo->nrt_getInPort(dst, port);
-    if (err != tzpl_errNone) return err;
+// setInput / setControl capture the caller's values with their static type;
+// at submit the values are converted to the port's / control's element type
+// if they differ.
 
-    tzpl_SignalType type = port->type_;
-    switch (type.elem) {
-        case tzpl_kI32 :
-            tBundle.add(new SetInputCmd<i32>(dst, numValues, (i32*)values, nullptr));
-            break;
-        case tzpl_kI64 :
-            tBundle.add(new SetInputCmd<i64>(dst, numValues, (i64*)values, nullptr));
-            break;
-        case tzpl_kF32 : {
-            Node* xfader = xfadeTime > 0. ? newXFaderNode(e, tBundle.silo, xfadeTime, curve, type) : nullptr;
-            tBundle.add(new SetInputCmd<f32>(dst, numValues, (f32*)values, xfader));
-        }   break;
-        case tzpl_kF64 : {
-            Node* xfader = xfadeTime > 0. ? newXFaderNode(e, tBundle.silo, xfadeTime, curve, type) : nullptr;
-            tBundle.add(new SetInputCmd<f64>(dst, numValues, (f64*)values, xfader));
-        }   break;
-    }
+static tzpl_SErr recordSetInput(PortAddr dst, tzpl_ElemType elem, int numValues,
+                                void const* values, f64 xfadeTime, FadeCurve curve) {
+    if (!tBundle.engine) return tzpl_errNoActiveBundle;
+    tBundle.add(new SetInputOp(dst, elem, numValues, values, xfadeTime, curve));
     return tzpl_errNone;
 }
 
-tzpl_SErr setControl(i64 nodeID, i64 controlID, int numValues, void* values) {
-    Engine* e = tBundle.engine;
-    if (!e) return tzpl_errNoActiveBundle;
-    
-    Node* node = tBundle.silo->nrt_getNode(nodeID);
-    if (!node) return tzpl_errNodeNotFound;
-    
-    // check existence of control.
-    Control* c = node->getControl(controlID);
-    if (!c) return tzpl_errControlNotFound;
+tzpl_SErr setInput(PortAddr dst, int numValues, f32 const* values, f64 xfadeTime, FadeCurve curve) {
+    return recordSetInput(dst, tzpl_kF32, numValues, values, xfadeTime, curve);
+}
+tzpl_SErr setInput(PortAddr dst, int numValues, f64 const* values, f64 xfadeTime, FadeCurve curve) {
+    return recordSetInput(dst, tzpl_kF64, numValues, values, xfadeTime, curve);
+}
+tzpl_SErr setInput(PortAddr dst, int numValues, i32 const* values, f64 xfadeTime, FadeCurve curve) {
+    return recordSetInput(dst, tzpl_kI32, numValues, values, xfadeTime, curve);
+}
+tzpl_SErr setInput(PortAddr dst, int numValues, i64 const* values, f64 xfadeTime, FadeCurve curve) {
+    return recordSetInput(dst, tzpl_kI64, numValues, values, xfadeTime, curve);
+}
 
-    switch (c->type_.elem) {
-        case tzpl_kI32 :
-            tBundle.add(new SetControlCmd<i32>(nodeID, controlID, numValues, (i32*)values));
-            break;
-        case tzpl_kI64 :
-            tBundle.add(new SetControlCmd<i64>(nodeID, controlID, numValues, (i64*)values));
-            break;
-        case tzpl_kF32 : {
-            tBundle.add(new SetControlCmd<f32>(nodeID, controlID, numValues, (f32*)values));
-        }   break;
-        case tzpl_kF64 : {
-            tBundle.add(new SetControlCmd<f64>(nodeID, controlID, numValues, (f64*)values));
-        }   break;
-    }
+static tzpl_SErr recordSetControl(i64 nodeID, i64 controlID, tzpl_ElemType elem,
+                                  int numValues, void const* values) {
+    if (!tBundle.engine) return tzpl_errNoActiveBundle;
+    tBundle.add(new SetControlOp(nodeID, controlID, elem, numValues, values));
     return tzpl_errNone;
+}
+
+tzpl_SErr setControl(i64 nodeID, i64 controlID, int numValues, f32 const* values) {
+    return recordSetControl(nodeID, controlID, tzpl_kF32, numValues, values);
+}
+tzpl_SErr setControl(i64 nodeID, i64 controlID, int numValues, f64 const* values) {
+    return recordSetControl(nodeID, controlID, tzpl_kF64, numValues, values);
+}
+tzpl_SErr setControl(i64 nodeID, i64 controlID, int numValues, i32 const* values) {
+    return recordSetControl(nodeID, controlID, tzpl_kI32, numValues, values);
+}
+tzpl_SErr setControl(i64 nodeID, i64 controlID, int numValues, i64 const* values) {
+    return recordSetControl(nodeID, controlID, tzpl_kI64, numValues, values);
 }
 
 tzpl_SErr allNotesOff(i64 nodeID) {
-    Engine* e = tBundle.engine;
-    if (!e) return tzpl_errNoActiveBundle;
-    
-    Node* node = tBundle.silo->nrt_getNode(nodeID);
-    if (!node) return tzpl_errNodeNotFound;
-
-    tBundle.add(new AllNotesOffCmd(nodeID));
+    if (!tBundle.engine) return tzpl_errNoActiveBundle;
+    tBundle.add(new NodeCheckedCmdOp(nodeID, new AllNotesOffCmd(nodeID)));
     return tzpl_errNone;
 }
 
 tzpl_SErr noteOn(i64 nodeID, int noteID, int length, f32* paramValues) {
-    Engine* e = tBundle.engine;
-    if (!e) return tzpl_errNoActiveBundle;
-    
-    Node* node = tBundle.silo->nrt_getNode(nodeID);
-    if (!node) return tzpl_errNodeNotFound;
-
-    tBundle.add(new NoteOnCmd(nodeID, noteID, length, paramValues));
+    if (!tBundle.engine) return tzpl_errNoActiveBundle;
+    // NoteOnCmd copies paramValues into its own vector.
+    tBundle.add(new NodeCheckedCmdOp(nodeID, new NoteOnCmd(nodeID, noteID, length, paramValues)));
     return tzpl_errNone;
 }
 
 tzpl_SErr noteOff(i64 nodeID, int noteID) {
-    Engine* e = tBundle.engine;
-    if (!e) return tzpl_errNoActiveBundle;
-    
-    Node* node = tBundle.silo->nrt_getNode(nodeID);
-    if (!node) return tzpl_errNodeNotFound;
-
-    tBundle.add(new NoteOffCmd(nodeID, noteID));
+    if (!tBundle.engine) return tzpl_errNoActiveBundle;
+    tBundle.add(new NodeCheckedCmdOp(nodeID, new NoteOffCmd(nodeID, noteID)));
     return tzpl_errNone;
 }
 
 tzpl_SErr noteSetParams(i64 nodeID, int noteID, int n, tzpl_ParamPair* paramValues) {
-    Engine* e = tBundle.engine;
-    if (!e) return tzpl_errNoActiveBundle;
-    
-    Node* node = tBundle.silo->nrt_getNode(nodeID);
-    if (!node) return tzpl_errNodeNotFound;
-
-    tBundle.add(new NoteSetParamsCmd(nodeID, noteID, n, paramValues));
+    if (!tBundle.engine) return tzpl_errNoActiveBundle;
+    tBundle.add(new NodeCheckedCmdOp(nodeID, new NoteSetParamsCmd(nodeID, noteID, n, paramValues)));
     return tzpl_errNone;
 }
 
 tzpl_SErr noteSetParamRange(i64 nodeID, int noteID, int first, int length, f32* paramValues) {
-    Engine* e = tBundle.engine;
-    if (!e) return tzpl_errNoActiveBundle;
-    
-    Node* node = tBundle.silo->nrt_getNode(nodeID);
-    if (!node) return tzpl_errNodeNotFound;
-
-    tBundle.add(new NoteSetParamRangeCmd(nodeID, noteID, first, length, paramValues));
+    if (!tBundle.engine) return tzpl_errNoActiveBundle;
+    tBundle.add(new NodeCheckedCmdOp(nodeID,
+        new NoteSetParamRangeCmd(nodeID, noteID, first, length, paramValues)));
     return tzpl_errNone;
 }
 
 // -- Buffer commands --
 
 tzpl_SErr resizeBuffer(i64 nodeID, i64 bufID, int numChannels, i64 length) {
-    Engine* e = tBundle.engine;
-    if (!e) return tzpl_errNoActiveBundle;
-    tBundle.add(new ResizeBufferCmd(nodeID, bufID, numChannels, length));
+    if (!tBundle.engine) return tzpl_errNoActiveBundle;
+    tBundle.add(new PrebuiltCmdOp(new ResizeBufferCmd(nodeID, bufID, numChannels, length)));
     return tzpl_errNone;
 }
 
 tzpl_SErr loadBuffer(i64 nodeID, i64 bufID, const char* path,
                      int channelOffset, i64 frameOffset, i64 numFrames) {
-    Engine* e = tBundle.engine;
-    if (!e) return tzpl_errNoActiveBundle;
-    tBundle.add(new LoadBufferCmd(nodeID, bufID, path, channelOffset, frameOffset, numFrames));
+    if (!tBundle.engine) return tzpl_errNoActiveBundle;
+    // LoadBufferCmd reads the file in its constructor, i.e. at record time.
+    tBundle.add(new PrebuiltCmdOp(new LoadBufferCmd(nodeID, bufID, path,
+                                                    channelOffset, frameOffset, numFrames)));
     return tzpl_errNone;
 }
 
 tzpl_SErr replaceBuffer(i64 nodeID, i64 bufID, tzpl_Buffer* buffer) {
-    Engine* e = tBundle.engine;
-    if (!e) return tzpl_errNoActiveBundle;
-    tBundle.add(new ReplaceBufferCmd(nodeID, bufID, buffer));
+    if (!tBundle.engine) return tzpl_errNoActiveBundle;
+    tBundle.add(new PrebuiltCmdOp(new ReplaceBufferCmd(nodeID, bufID, buffer)));
     return tzpl_errNone;
 }
 

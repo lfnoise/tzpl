@@ -23,6 +23,8 @@
 //
 
 #include "tzpl_audio_engine_ffi.hpp"
+#include "tzpl_clock_ffi.hpp"
+#include "tzpl_nrt_render.hpp"
 #include "tzpl_app_context.hpp"
 #include "tzpl.hpp"
 #include "module_compiler.hpp"
@@ -191,11 +193,12 @@ static void test_command_bundling() {
     FILE* devnull = fopen("/dev/null", "w");
     vm.setPrintOutput(devnull);
 
-    // Test begin/go without starting audio (commands run synchronously)
+    // Test begin/sched without starting audio (commands run synchronously).
+    // The silo is chosen at submit time.
     const char* source = R"(
         import audio_engine.*;
-        let err1 = begin(0);
-        let err2 = sched();
+        let err1 = begin();
+        let err2 = sched(0);
     )";
 
     bool ok = compileAndRun(compiler, vm, source, "bundling.x", &moduleCompiler);
@@ -218,11 +221,20 @@ static void test_type_checking() {
     // This should fail to compile: wrong argument type
     const char* badSource = R"(
         import audio_engine.*;
-        let err = begin(3.14);
+        let err = go(3.14);
     )";
 
     auto result = compiler.compile(badSource, "bad_types.x", target, &moduleCompiler);
     check(!result.success, "Type mismatch correctly rejected at compile time");
+
+    // The old API shape must not compile: begin no longer takes a silo.
+    const char* oldApiSource = R"(
+        import audio_engine.*;
+        let err = begin(0);
+    )";
+
+    auto result2 = compiler.compile(oldApiSource, "old_api.x", target, &moduleCompiler);
+    check(!result2.success, "Old begin(silo) form correctly rejected at compile time");
 }
 
 static void test_node_and_connect() {
@@ -253,17 +265,87 @@ static void test_node_and_connect() {
     FILE* devnull = fopen("/dev/null", "w");
     vm.setPrintOutput(devnull);
 
-    // Try to create a node with a def name that doesn't exist yet — should error
+    // Try to create a node with a def name that doesn't exist. The builder
+    // itself succeeds (it only records the op); the validation error
+    // surfaces when the bundle is submitted.
     const char* source = R"(
         import audio_engine.*;
-        let e1 = begin(0);
+        let e1 = begin();
         let e2 = newNode("NonExistent", 100);
-        let e3 = sched();
+        let e3 = sched(0);
+        println(e1);
         println(e2);
+        println(e3);
     )";
 
     bool ok = compileAndRun(compiler, vm, source, "node_connect.x", &moduleCompiler);
     check(ok, "Node/connect source compiles and runs (error code expected for missing def)");
+    check(eng->silos_[0].nrt_getNode(100) == nullptr,
+          "Failed bundle left no node behind");
+
+    fclose(devnull);
+    engine::freeEngine(eng);
+}
+
+static void test_atomic_abort() {
+    std::print("Test: Bundle validation at submit (atomic abort)\n");
+
+    ts::TypeUniverse types;
+    ts::Compiler compiler(types);
+    bridge::registerAudioEngineFFI(compiler);
+
+    engine::AudioStreamParameters params{};
+    params.channels = 2;
+    params.bufferFrames = 512;
+    params.sampleRate = 44100.0;
+    params.deviceName = "default";
+    params.firstChannel = 0;
+
+    engine::EngineConfig config;
+    config.numSilos = 1;
+
+    engine::Engine* eng = engine::newEngine(config, params);
+    engine::createSineNode(eng); // registers the "sinosc" def
+
+    ts::ModuleCompiler moduleCompiler(compiler, {MODULES_DIR});
+    auto target = compiler.createTarget();
+    ts::VM vm(16 * 1024 * 1024, types, target);
+    bridge::AppContext appCtx; appCtx.engine = eng;
+    bridge::setAppContextOnVM(&vm, &appCtx);
+
+    FILE* devnull = fopen("/dev/null", "w");
+    vm.setPrintOutput(devnull);
+
+    const char* source = R"(
+        import audio_engine.*;
+        -- A valid newNode followed by a failing one: the whole bundle must
+        -- be discarded, including the already-materialized node 100.
+        begin();
+        newNode("sinosc", 100);
+        newNode("NonExistent", 101);
+        let e1 = sched(0);
+
+        -- Re-creating the same node ID must succeed: the aborted bundle
+        -- unwound node 100 from the silo's table.
+        begin();
+        newNode("sinosc", 100);
+        let e2 = go(0);
+
+        -- Out-of-range silo at submit discards and closes the bundle.
+        begin();
+        newNode("sinosc", 200);
+        let e3 = sched(7);
+        let e4 = begin();
+        let e5 = go(0);
+    )";
+
+    bool ok = compileAndRun(compiler, vm, source, "atomic_abort.x", &moduleCompiler);
+    check(ok, "Atomic abort source compiles and runs");
+    check(eng->silos_[0].nrt_getNode(100) != nullptr,
+          "Node 100 exists after abort-then-recreate (abort unwound the first attempt)");
+    check(eng->silos_[0].nrt_getNode(101) == nullptr, "Node 101 was never created");
+    check(eng->silos_[0].nrt_getNode(200) == nullptr,
+          "Bad-silo submit discarded its bundle (node 200 absent)");
 
     fclose(devnull);
     engine::freeEngine(eng);
@@ -575,6 +657,14 @@ static void runScriptTest(ScriptTestConfig const& cfg) {
     ts::TypeUniverse types;
     ts::Compiler compiler(types);
     bridge::registerAudioEngineFFI(compiler);
+    // The scripts import clock.*, which re-exports the clock_ffi foreign
+    // module, so it must be registered for them to compile. No tempo
+    // scheduler is installed in the AppContext, so clock callbacks never
+    // fire here -- these tests assert that the scripts compile and their
+    // main blocks execute, not the full timed sequences. test3.x also
+    // references the NRT-render FFI (renderNRT / renderDone).
+    bridge::registerClockFFI(compiler);
+    bridge::registerNRTRenderFFI(compiler);
 
     ts::ModuleCompiler moduleCompiler(compiler, {MODULES_DIR});
 
@@ -647,6 +737,7 @@ int main(int argc, char const* argv[]) {
     test_command_bundling();
     test_type_checking();
     test_node_and_connect();
+    test_atomic_abort();
     test_mixer_fanin();
     test_master_gain();
 

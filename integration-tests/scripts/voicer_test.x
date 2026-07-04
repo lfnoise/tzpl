@@ -45,10 +45,10 @@ go(coro fn() Float {
     engineStart();
     yield 0.5;
 
-    begin(0);
+    begin();
     newNode("sine_voice", nodeID);
     connect(nodeID, 0, 0, 0);
-    sched();
+    sched(0);
     yield 0.5;
 
     ---------------------------------------------------------------------------
@@ -61,13 +61,13 @@ go(coro fn() Float {
 
     for (i : (0..7)) {
         let t = getStreamTime();
-        begin(0);
+        begin();
         noteOn(nodeID, nid, [scale[i], 0.4]);
-        sched(0, t + latency);
+        sched(0, 0, t + latency);
 
-        begin(0);
+        begin();
         noteOff(nodeID, nid);
-        sched(0, t + latency + 0.35);
+        sched(0, 0, t + latency + 0.35);
 
         nid = nid + 1;
         yield 0.4;
@@ -88,17 +88,17 @@ go(coro fn() Float {
         let root = roots[i];
 
         -- three note chord
-        begin(0);
+        begin();
         noteOn(nodeID, nid,     [root,              0.35]);
         noteOn(nodeID, nid + 1, [root + thirds[i],  0.35]);
         noteOn(nodeID, nid + 2, [root + fifths[i],  0.35]);
-        sched(0, t + latency);
+        sched(0, 0, t + latency);
 
-        begin(0);
+        begin();
         noteOff(nodeID, nid);
         noteOff(nodeID, nid + 1);
         noteOff(nodeID, nid + 2);
-        sched(0, t + latency + 0.6);
+        sched(0, 0, t + latency + 0.6);
 
         nid = nid + 3;
         yield 0.7;
@@ -114,13 +114,13 @@ go(coro fn() Float {
     let t0 = getStreamTime();
 
     for (i : (0..5)) {
-        begin(0);
+        begin();
         noteOn(nodeID, nid, [arpNotes[i], 0.3]);
-        sched(0, t0 + latency + 0.06 * i);
+        sched(0, 0, t0 + latency + 0.06 * i);
 
-        begin(0);
+        begin();
         noteOff(nodeID, nid);
-        sched(0, t0 + latency + 0.06 * i + 1.0);
+        sched(0, 0, t0 + latency + 0.06 * i + 1.0);
 
         nid = nid + 1;
     }
@@ -135,18 +135,18 @@ go(coro fn() Float {
         let t = getStreamTime();
         for (i : (0..7)) {
             let pitch = 48.0 + 3.0 * i + 12.0 * k;
-            begin(0);
+            begin();
             noteOn(nodeID, nid, [pitch, 0.2]);
-            sched(0, t + latency);
+            sched(0, 0, t + latency);
             nid = nid + 1;
         }
 
         -- release after 0.8s
-        begin(0);
+        begin();
         for (j : (0..7)) {
             noteOff(nodeID, nid - 8 + j);
         }
-        sched(0, t + latency + 0.8);
+        sched(0, 0, t + latency + 0.8);
         yield 1.0;
     }
     yield 1.0;
@@ -157,19 +157,19 @@ go(coro fn() Float {
     println("glissando");
 
     let tGliss = getStreamTime();
-    begin(0);
+    begin();
     noteOn(nodeID, nid, [60.0, 0.4]);
-    sched(0, tGliss + latency);
+    sched(0, 0, tGliss + latency);
 
     for (i : (1..24)) {
-        begin(0);
+        begin();
         noteSetParams(nodeID, nid, 0, [60.0 + 0.5 * i]);
-        sched(0, tGliss + latency + 0.05 * i);
+        sched(0, 0, tGliss + latency + 0.05 * i);
     }
 
-    begin(0);
+    begin();
     noteOff(nodeID, nid);
-    sched(0, tGliss + latency + 0.05 * 25);
+    sched(0, 0, tGliss + latency + 0.05 * 25);
     nid = nid + 1;
     yield 2.0;
 
@@ -180,13 +180,13 @@ go(coro fn() Float {
     let tCloud = getStreamTime() + latency;
     for (i : (1..100)) {
         let t = tCloud + 0.25 * (i + std.urand());
-        begin(0);
+        begin();
         noteOn(nodeID, nid, [std.rand(48, 84), 0.4]);
-        sched(0, t);
+        sched(0, 0, t);
 
-        begin(0);
+        begin();
         noteOff(nodeID, nid);
-        sched(0, t + 0.25 * std.rand(1.0, 8.0));
+        sched(0, 0, t + 0.25 * std.rand(1.0, 8.0));
         nid = nid + 1;
     }
     yield 28.0;
@@ -195,9 +195,9 @@ go(coro fn() Float {
     -- 9. allNotesOff
 
     println("all notes off");
-    begin(0);
+    begin();
     allNotesOff(nodeID);
-    sched();
+    sched(0);
     yield 1.0;
 
     ---------------------------------------------------------------------------

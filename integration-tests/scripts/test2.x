@@ -15,31 +15,31 @@ go(coro fn() Float {
     println("start graphs on 8 threads");
     var t0 = getStreamTime();
     for (i : (0..7)) {
-        begin(i);
+        begin();
         newNode("sinosc", 101);
         setInput(101, 0, 240.0 + 60.0 * i);
         setInput(101, 1, 0.0);
         setInputX(101, 1, 0.05, 0.2, FadeCurve.fadeEaseInCubic);
         connect(101, 0, 0, 0);
-        sched(0, t0 + latency + i * 0.2);
+        sched(i, 0, t0 + latency + i * 0.2);
     }
     yield 5.0;
 
     println("change freqs");
     t0 = getStreamTime();
     for (i : (0..7)) {
-        begin(i);
+        begin();
         setInputX(101, 0, 360.0 + 180.0 * i, 0.5, FadeCurve.fadeExponential);
-        sched(0, t0 + latency + i * 0.5);
+        sched(i, 0, t0 + latency + i * 0.5);
     }
     yield 8.0;
 
     println("reset freqs");
     t0 = getStreamTime();
     for (i : (0..7)) {
-        begin(i);
+        begin();
         setInputX(101, 0, 240.0 + 60.0 * i, 0.5, FadeCurve.fadeExponential);
-        sched(0, t0 + latency + i * 0.5);
+        sched(i, 0, t0 + latency + i * 0.5);
     }
     yield 8.0;
 
@@ -54,16 +54,16 @@ go(coro fn() Float {
     println("set silent");
     t0 = getStreamTime();
     for (i : (0..7)) {
-        begin(i);
+        begin();
         setInputX(101, 1, 0.0, 0.5, FadeCurve.fadeEaseOutCubic);
-        sched(0, t0 + latency + i * 0.4);
+        sched(i, 0, t0 + latency + i * 0.4);
     }
     yield 6.0;
     
     for (i : (0..7)) {
-        begin(i);
+        begin();
         freeNode(101);
-      	sched();
+      	sched(i);
     }   
     println("stop");
     engineStop();
