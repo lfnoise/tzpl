@@ -1,0 +1,644 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tzopilotl &mdash; Live Controls &amp; Notebooks</title>
+<style>
+  :root {
+    --bg: #1a1b26;
+    --fg: #c9d1d9;
+    --accent: #58a6ff;
+    --accent-dim: #3d6ea8;
+    --code-bg: #21222c;
+    --code-border: #30363d;
+    --warn-bg: #2d2308;
+    --warn-border: #f59e0b;
+    --note-bg: #0d2137;
+    --note-border: #3b82f6;
+    --table-stripe: #1f2028;
+    --sidebar-bg: #16171f;
+    --sidebar-border: #2a2d3a;
+    --heading-fg: #e6edf3;
+    --muted-fg: #8b949e;
+    --h4-fg: #a0aec0;
+    --tip-bg: #0d2818;
+    --tip-border: #22c55e;
+    --diagram-bg: #21222c;
+    --syn-kw: #c678dd;
+    --syn-typ: #56d4e0;
+    --syn-str: #4ec970;
+    --syn-cmt: #6a737d;
+    --syn-num: #e5a537;
+    --syn-fn: #58a6ff;
+  }
+
+  html.light {
+    --bg: #fdfdfd;
+    --fg: #1a1a1a;
+    --accent: #2563eb;
+    --accent-dim: #93b4f5;
+    --code-bg: #f3f4f6;
+    --code-border: #dde1e6;
+    --warn-bg: #fef3c7;
+    --warn-border: #f59e0b;
+    --note-bg: #dbeafe;
+    --note-border: #3b82f6;
+    --table-stripe: #f8f9fa;
+    --sidebar-bg: #f8f9fb;
+    --sidebar-border: #e2e5ea;
+    --heading-fg: #0f172a;
+    --muted-fg: #64748b;
+    --h4-fg: #475569;
+    --tip-bg: #dcfce7;
+    --tip-border: #22c55e;
+    --diagram-bg: #fff;
+    --syn-kw: #8b5cf6;
+    --syn-typ: #0891b2;
+    --syn-str: #16a34a;
+    --syn-cmt: #94a3b8;
+    --syn-num: #d97706;
+    --syn-fn: #2563eb;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    font-size: 16px;
+    line-height: 1.7;
+    color: var(--fg);
+    background: var(--bg);
+    display: flex;
+    min-height: 100vh;
+  }
+
+  /* --- Sidebar / Table of Contents --- */
+
+  nav.sidebar {
+    position: sticky;
+    top: 0;
+    align-self: flex-start;
+    width: 280px;
+    min-width: 280px;
+    height: 100vh;
+    overflow-y: auto;
+    padding: 2rem 1.25rem;
+    background: var(--sidebar-bg);
+    border-right: 1px solid var(--sidebar-border);
+    font-size: 0.875rem;
+  }
+
+  nav.sidebar h2 {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--muted-fg);
+    margin-bottom: 1rem;
+  }
+
+  nav.sidebar ol {
+    list-style: none;
+    counter-reset: toc;
+  }
+
+  nav.sidebar > ol > li {
+    counter-increment: toc;
+    margin-bottom: 0.4rem;
+  }
+
+  nav.sidebar > ol > li > a::before {
+    content: counter(toc) ". ";
+    color: var(--accent-dim);
+    font-weight: 600;
+  }
+
+  nav.sidebar a {
+    color: var(--fg);
+    text-decoration: none;
+    display: block;
+    padding: 0.15rem 0;
+  }
+
+  nav.sidebar a:hover { color: var(--accent); }
+
+  nav.sidebar ol ol {
+    margin-left: 1rem;
+    margin-top: 0.2rem;
+    font-size: 0.82rem;
+  }
+
+  nav.sidebar ol ol li { margin-bottom: 0.2rem; }
+
+  /* --- Main Content --- */
+
+  main {
+    flex: 1;
+    max-width: 52rem;
+    margin: 0 auto;
+    padding: 3rem 2.5rem 6rem;
+  }
+
+  h1 {
+    font-size: 2.2rem;
+    font-weight: 700;
+    color: var(--heading-fg);
+    margin-bottom: 0.4rem;
+    line-height: 1.2;
+  }
+
+  h1 + .subtitle {
+    font-size: 1.1rem;
+    color: var(--muted-fg);
+    margin-bottom: 2.5rem;
+  }
+
+  h2 {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--heading-fg);
+    margin-top: 3.5rem;
+    margin-bottom: 1rem;
+    padding-bottom: 0.35rem;
+    border-bottom: 2px solid var(--accent);
+  }
+
+  h3 {
+    font-size: 1.15rem;
+    font-weight: 600;
+    color: var(--heading-fg);
+    margin-top: 2.2rem;
+    margin-bottom: 0.6rem;
+  }
+
+  h4 {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--h4-fg);
+    margin-top: 1.6rem;
+    margin-bottom: 0.4rem;
+  }
+
+  p { margin-bottom: 1rem; }
+
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  /* Code */
+
+  code {
+    font-family: 'SF Mono', 'Fira Code', 'JetBrains Mono', Menlo, Consolas, monospace;
+    font-size: 0.88em;
+    background: var(--code-bg);
+    border: 1px solid var(--code-border);
+    border-radius: 4px;
+    padding: 0.15em 0.4em;
+  }
+
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--code-border);
+    border-radius: 6px;
+    padding: 1.1rem 1.3rem;
+    overflow-x: auto;
+    margin-bottom: 1.2rem;
+    line-height: 1.55;
+  }
+
+  pre code {
+    background: none;
+    border: none;
+    padding: 0;
+    font-size: 0.86rem;
+  }
+
+  /* Keyword colouring (manual spans) */
+  .kw  { color: var(--syn-kw); font-weight: 600; }
+  .typ { color: var(--syn-typ); }
+  .str { color: var(--syn-str); }
+  .cmt { color: var(--syn-cmt); font-style: italic; }
+  .num { color: var(--syn-num); }
+  .fn  { color: var(--syn-fn); }
+
+  /* Tables */
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 1.4rem;
+    font-size: 0.92rem;
+  }
+
+  th, td {
+    text-align: left;
+    padding: 0.55rem 0.9rem;
+    border: 1px solid var(--code-border);
+  }
+
+  th {
+    background: var(--code-bg);
+    font-weight: 600;
+    color: var(--heading-fg);
+  }
+
+  tr:nth-child(even) { background: var(--table-stripe); }
+
+  /* Callout boxes */
+
+  .note, .warning, .tip {
+    border-left: 4px solid;
+    border-radius: 4px;
+    padding: 0.9rem 1.1rem;
+    margin-bottom: 1.2rem;
+    font-size: 0.94rem;
+  }
+
+  .note    { background: var(--note-bg); border-color: var(--note-border); }
+  .warning { background: var(--warn-bg); border-color: var(--warn-border); }
+  .tip     { background: var(--tip-bg); border-color: var(--tip-border); }
+
+  .note strong, .warning strong, .tip strong {
+    display: block;
+    margin-bottom: 0.25rem;
+  }
+
+  /* Lists */
+
+  ul, ol { margin-left: 1.6rem; margin-bottom: 1rem; }
+  li { margin-bottom: 0.3rem; }
+
+  /* Diagram */
+  .diagram {
+    background: var(--diagram-bg);
+    border: 1px solid var(--code-border);
+    border-radius: 6px;
+    padding: 1.5rem;
+    margin-bottom: 1.4rem;
+    overflow-x: auto;
+    text-align: center;
+  }
+
+  .diagram pre {
+    display: inline-block;
+    text-align: left;
+    background: none;
+    border: none;
+    padding: 0;
+    margin: 0;
+    font-size: 0.82rem;
+    line-height: 1.5;
+  }
+
+  /* Theme toggle */
+  .theme-toggle {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 1.5rem;
+    padding: 0.4rem 0.75rem;
+    background: var(--code-bg);
+    border: 1px solid var(--code-border);
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 1.1rem;
+    color: var(--fg);
+    transition: background 0.2s;
+    width: 100%;
+    justify-content: center;
+  }
+  .theme-toggle:hover { background: var(--table-stripe); }
+
+  body, nav.sidebar, pre, code, .note, .warning, .tip, .diagram, th, td {
+    transition: background-color 0.3s, color 0.3s, border-color 0.3s;
+  }
+
+  /* Responsive */
+  @media (max-width: 900px) {
+    nav.sidebar { display: none; }
+    main { padding: 2rem 1.2rem 4rem; }
+  }
+</style>
+<script>
+if (localStorage.getItem('tzpl-docs-theme') === 'light') document.documentElement.classList.add('light');
+</script>
+</head><body>
+
+<!-- ================================================================ -->
+<!--  SIDEBAR                                                         -->
+<!-- ================================================================ -->
+
+<nav class="sidebar">
+  <button class="theme-toggle" id="theme-toggle" aria-label="Toggle theme">
+    <span id="theme-icon">&#9790;</span>
+  </button>
+  <h2>Contents</h2>
+  <ol>
+    <li><a href="#overview">Overview</a></li>
+    <li><a href="#quick-start">Quick Start</a></li>
+    <li><a href="#ui-module">The ui Module</a>
+      <ol>
+        <li><a href="#ui-widgets">Widgets</a></li>
+        <li><a href="#ui-binding">Binding to Sound</a></li>
+        <li><a href="#ui-derive">Widgets from Synthdefs</a></li>
+        <li><a href="#ui-reading">Reading Values &amp; Taps</a></li>
+        <li><a href="#ui-panels">Panels</a></li>
+        <li><a href="#ui-reference">Function Reference</a></li>
+      </ol>
+    </li>
+    <li><a href="#notebooks">Notebooks</a>
+      <ol>
+        <li><a href="#nb-create">Creating a Notebook</a></li>
+        <li><a href="#nb-cells">Cell Types</a></li>
+        <li><a href="#nb-run">Running Code</a></li>
+        <li><a href="#nb-panels">Panel Cells</a></li>
+        <li><a href="#nb-save">Saving &amp; Loading</a></li>
+        <li><a href="#nb-history">Undo &amp; History</a></li>
+      </ol>
+    </li>
+    <li><a href="#shortcuts">Keyboard Shortcuts</a></li>
+    <li><a href="#limitations">Current Limitations</a></li>
+  </ol>
+</nav>
+
+<main>
+
+<h1>Tzopilotl &mdash; Live Controls &amp; Notebooks</h1>
+<p class="subtitle">Building performance surfaces with the <code>ui</code> module, and working with notebook documents in the app.</p>
+
+<!-- ================================================================ -->
+<h2 id="overview">1. Overview</h2>
+
+<p>The app is both a code editor and a host for <strong>live control surfaces</strong>. The <code>ui</code> module creates widgets &mdash; sliders, XY pads, meters, scopes &mdash; from code, and binds them to running audio. There are two places widgets can live:</p>
+
+<ul>
+  <li><strong>Floating panel windows.</strong> Evaluate <code>ui</code> code from any <code>.x</code> editor tab (or the REPL) and widgets appear in floating windows over the editor. Nothing else changes; this works exactly like the editor always has.</li>
+  <li><strong>Notebook documents.</strong> A notebook (<strong>File &gt; New Notebook</strong>) replaces the editor pane with a vertical list of <em>cells</em>: prose, runnable code, and <em>panel cells</em> that embed widgets right in the document. Notebooks save to <code>.tzd</code> files, remember widget values, and have undo/redo over a persistent history tree.</li>
+</ul>
+
+<p>The guiding rule of the whole design: <strong>code creates behavior; the document stores state.</strong> Widgets are always created and bound by running code. What the document persists is the widgets' names, ranges, and current values &mdash; never their bindings. Re-running the code is what brings a loaded document back to life (see <a href="#nb-save">&sect;4.5</a>).</p>
+
+<div class="note"><p><strong>Two sources of truth, one rule.</strong> If you wonder &ldquo;where does X live?&rdquo;: behavior (which node a slider drives, what a callback does) lives in code; state (the slider's position, the cell order) lives in the document.</p></div>
+
+<!-- ================================================================ -->
+<h2 id="quick-start">2. Quick Start</h2>
+
+<p>Paste this into an editor tab and evaluate it (<kbd>Cmd+Shift+Enter</kbd> evaluates the whole file):</p>
+
+<pre><code><span class="cmt">-- A synth with two declared controls</span>
+<span class="kw">import</span> synthdef.*;
+<span class="kw">import</span> synthc.compile.*;
+<span class="kw">import</span> common_ugens.*;
+<span class="kw">import</span> audio_engine.*;
+<span class="kw">import</span> ui.*;
+
+<span class="kw">fn</span> <span class="fn">demo</span>() <span class="typ">S</span> {
+    <span class="kw">let</span> freq = control(<span class="str">"freq"</span>, <span class="typ">ControlSpec</span> { lo: <span class="num">50.0</span>, hi: <span class="num">2000.0</span>, init: <span class="num">220.0</span>, warp: <span class="typ">ControlWarp</span>.exponential });
+    <span class="kw">let</span> amp  = control(<span class="str">"amp"</span>,  <span class="typ">ControlSpec</span> { lo: <span class="num">0.0</span>,  hi: <span class="num">1.0</span>,    init: <span class="num">0.2</span>,   warp: <span class="typ">ControlWarp</span>.linear });
+    freq sinosc(<span class="num">0</span>) mul(amp) outlet
+}
+
+demo defSynthX(<span class="str">"demo"</span>);
+<span class="kw">let</span> node = play(<span class="str">"demo"</span>);
+
+<span class="cmt">-- One line: a slider per control, named, ranged, warped, and bound</span>
+<span class="cmt">-- from the synthdef's own ControlSpecs.</span>
+controls(node);
+
+<span class="cmt">-- And an oscilloscope on its output.</span>
+scope(<span class="str">"out"</span>, node);</code></pre>
+
+<p>A <strong>Controls</strong> window appears with a <code>freq</code> slider (exponential, 50&ndash;2000&nbsp;Hz), an <code>amp</code> slider, and a live scope. Drag the sliders &mdash; the sound follows immediately, even while other code is evaluating.</p>
+
+<!-- ================================================================ -->
+<h2 id="ui-module">3. The <code>ui</code> Module</h2>
+
+<p><code>import ui.*;</code> to use it. All constructors are <strong>idempotent upserts</strong> keyed by <code>(panel, name)</code>: re-running the same code <em>adopts</em> the existing widget &mdash; it keeps its current value and refreshes its range/spec &mdash; and clears stale bindings so the code can attach fresh ones. Running your setup code twice never duplicates widgets; this is also how saved documents come back to life.</p>
+
+<!-- -------------------------------- -->
+<h3 id="ui-widgets">3.1 Widgets</h3>
+
+<table>
+<tr><th>Constructor</th><th>Widget</th><th>Notes</th></tr>
+<tr><td><code>slider(name, spec)</code></td><td>horizontal slider</td><td><code>spec</code> is a <code>synthdef.ControlSpec</code>; the warp (linear / exponential / step / signedSquare / cubed) shapes the mapping</td></tr>
+<tr><td><code>slider(name, lo, hi, init)</code></td><td>horizontal slider</td><td>linear convenience form</td></tr>
+<tr><td><code>number(name, init)</code></td><td>drag/type number box</td><td></td></tr>
+<tr><td><code>button(name)</code></td><td>momentary button</td><td>sends 1 while held, 0 on release (a gate)</td></tr>
+<tr><td><code>toggle(name, init)</code></td><td>checkbox</td><td>sends 1 / 0</td></tr>
+<tr><td><code>xy(name, xspec, yspec)</code></td><td>2-D pad</td><td>two ControlSpecs; bind each axis separately</td></tr>
+<tr><td><code>meter(name, node)</code></td><td>level meter</td><td>rms bar + peak marker, &minus;60..0 dB; reads an engine tap</td></tr>
+<tr><td><code>scope(name, node)</code></td><td>oscilloscope</td><td>channel 0 of a node outlet, zero-cross triggered</td></tr>
+<tr><td><code>plot(name, data)</code></td><td>static line plot</td><td>update with <code>setData(w, data)</code></td></tr>
+<tr><td><code>waveform(name, node, buf)</code></td><td>audio file overview</td><td>shows the file loaded by <code>audio_engine.loadBuffer</code></td></tr>
+</table>
+
+<p>Every constructor returns a <code>Widget</code> handle used by the binding and value functions below.</p>
+
+<!-- -------------------------------- -->
+<h3 id="ui-binding">3.2 Binding to Sound</h3>
+
+<p>There are two binding paths, and a widget may use both at once:</p>
+
+<pre><code><span class="kw">let</span> cutoff = slider(<span class="str">"cutoff"</span>, <span class="typ">ControlSpec</span> { lo: <span class="num">20.0</span>, hi: <span class="num">20000.0</span>, init: <span class="num">440.0</span>, warp: <span class="typ">ControlWarp</span>.exponential });
+
+<span class="cmt">-- FAST PATH: drive an engine control directly. The GUI thread sends</span>
+<span class="cmt">-- setControl without entering the VM, so the slider keeps working at</span>
+<span class="cmt">-- full rate even while a long eval (say, a synthdef compile) runs.</span>
+cutoff bindControl(node, <span class="str">"cutoff"</span>);
+
+<span class="cmt">-- FLEXIBLE PATH: a callback, for logic (sequencing, bookkeeping, math).</span>
+<span class="cmt">-- Coalesced: fires with the LATEST value at most once per GUI frame.</span>
+cutoff onChange(<span class="kw">fn</span>(v <span class="typ">Float</span>) <span class="typ">Void</span> { <span class="str">"cutoff -&gt; %^"</span> fmt(v) println; });</code></pre>
+
+<p><code>bindControl</code> resolves the control <em>by name</em> against the node's synthdef and returns an <code>audio_engine</code> error code (0&nbsp;=&nbsp;ok; a wrong name prints <code>errControlNotFound</code> to the console). For an XY pad, bind each axis: <code>bindControl</code> drives X and <code>bindControlY</code> drives Y; <code>onChangeXY</code> receives both values.</p>
+
+<div class="tip"><p>Prefer <code>bindControl</code> for anything that shapes sound in real time. Use <code>onChange</code> when you need language-side logic. If an eval holds the VM busy, fast-path bindings keep sounding; callbacks queue their latest value and fire when the VM frees up.</p></div>
+
+<!-- -------------------------------- -->
+<h3 id="ui-derive">3.3 Widgets from Synthdefs</h3>
+
+<p>Compiled synthdefs carry each declared control's name and <code>ControlSpec</code>. The <code>ui</code> module can materialize widgets directly from them:</p>
+
+<pre><code><span class="cmt">-- One widget, everything (name, range, warp, init, binding) from the def:</span>
+<span class="kw">let</span> c = control(node, <span class="str">"cutoff"</span>);
+
+<span class="cmt">-- The node's whole interface at once:</span>
+<span class="kw">let</span> ws = controls(node);</code></pre>
+
+<p>This is the shortest path from &ldquo;synth is playing&rdquo; to &ldquo;synth has a control surface.&rdquo; The synthdef declaration is the single source of truth for ranges and warps &mdash; change the <code>ControlSpec</code> in the def and every derived widget follows on the next run.</p>
+
+<!-- -------------------------------- -->
+<h3 id="ui-reading">3.4 Reading Values &amp; Taps from Code</h3>
+
+<pre><code>cutoff value;            <span class="cmt">-- current value (Float)</span>
+pad valueY;              <span class="cmt">-- Y of an xy pad</span>
+cutoff setValue(<span class="num">880.0</span>);  <span class="cmt">-- move the widget AND fire its bindings</span>
+
+<span class="cmt">-- Tap-backed widgets can be read from scripts:</span>
+<span class="kw">let</span> m = meter(<span class="str">"m"</span>, node);
+m rmsLevel;              <span class="cmt">-- smoothed level, published every 512 samples</span>
+m peakLevel;
+<span class="kw">let</span> s = scope(<span class="str">"sc"</span>, node);
+<span class="kw">let</span> xs = s samples(<span class="num">4096</span>);   <span class="cmt">-- drain raw samples as [Float]</span></code></pre>
+
+<div class="warn"><p><strong>One consumer per scope stream.</strong> The scope's sample FIFO feeds either the on-screen display or <code>samples()</code> &mdash; whatever one drains, the other doesn't see. Meters (<code>rmsLevel</code>/<code>peakLevel</code>) are fine to read from both places.</p></div>
+
+<!-- -------------------------------- -->
+<h3 id="ui-panels">3.5 Panels</h3>
+
+<p>Every widget belongs to a named <em>panel</em>. Constructors place widgets into the <strong>current panel</strong>, set by <code>panel(name)</code>; the default is <code>""</code>, shown as the floating <strong>Controls</strong> window:</p>
+
+<pre><code>panel(<span class="str">"mixer"</span>);          <span class="cmt">-- subsequent widgets go to "mixer"</span>
+slider(<span class="str">"ch1"</span>, <span class="num">0.0</span>, <span class="num">1.0</span>, <span class="num">0.8</span>);
+slider(<span class="str">"ch2"</span>, <span class="num">0.0</span>, <span class="num">1.0</span>, <span class="num">0.6</span>);
+panel(<span class="str">""</span>);               <span class="cmt">-- back to the default Controls window</span></code></pre>
+
+<p>Where a panel <em>appears</em> depends on context: normally each panel is its own floating window; but if an open notebook has a <strong>panel cell</strong> with the same name, the widgets render inside that cell instead (<a href="#nb-panels">&sect;4.4</a>).</p>
+
+<!-- -------------------------------- -->
+<h3 id="ui-reference">3.6 Function Reference</h3>
+
+<table>
+<tr><th>Function</th><th>Description</th></tr>
+<tr><td><code>panel(name String) Void</code></td><td>set the target panel for subsequent constructors</td></tr>
+<tr><td><code>slider(name, spec) Widget</code><br><code>slider(name, lo, hi, init) Widget</code></td><td>slider (ControlSpec / linear form)</td></tr>
+<tr><td><code>number(name, init) Widget</code></td><td>number box</td></tr>
+<tr><td><code>button(name) Widget</code></td><td>momentary gate button</td></tr>
+<tr><td><code>toggle(name, init = false) Widget</code></td><td>checkbox</td></tr>
+<tr><td><code>xy(name, xspec, yspec) Widget</code></td><td>2-D pad</td></tr>
+<tr><td><code>meter(name, node, outlet = 0, silo = 0) Widget</code></td><td>level meter (engine tap)</td></tr>
+<tr><td><code>scope(name, node, outlet = 0, silo = 0) Widget</code></td><td>oscilloscope (engine tap)</td></tr>
+<tr><td><code>plot(name, data [Float]) Widget</code> / <code>setData(w, data)</code></td><td>static plot / replace its data</td></tr>
+<tr><td><code>waveform(name, node, buf) Widget</code></td><td>overview of the file loaded into a buffer slot</td></tr>
+<tr><td><code>bindControl(w, node, control String, silo = 0) Int</code></td><td>fast-path engine binding, by control name</td></tr>
+<tr><td><code>bindControlY(w, node, control String, silo = 0) Int</code></td><td>fast-path binding for an xy pad's Y axis</td></tr>
+<tr><td><code>onChange(w, f (Float) Void)</code> / <code>onChangeXY(w, f (Float, Float) Void)</code></td><td>coalesced value callback</td></tr>
+<tr><td><code>value(w) Float</code> / <code>valueY(w) Float</code></td><td>read the widget</td></tr>
+<tr><td><code>setValue(w, v)</code> / <code>setValueXY(w, x, y)</code></td><td>move the widget and fire its bindings</td></tr>
+<tr><td><code>rmsLevel(w)</code> / <code>peakLevel(w)</code> / <code>samples(w, max = 4096)</code></td><td>read a tap widget from code</td></tr>
+<tr><td><code>control(node, name String, silo = 0) Widget</code></td><td>one widget derived + bound from the def's ControlSpec</td></tr>
+<tr><td><code>controls(node, silo = 0) [Widget]</code></td><td>materialize the node's whole interface</td></tr>
+<tr><td><code>remove(w)</code> / <code>clear()</code></td><td>remove one widget / all widgets (taps are released)</td></tr>
+</table>
+
+<!-- ================================================================ -->
+<h2 id="notebooks">4. Notebooks</h2>
+
+<!-- -------------------------------- -->
+<h3 id="nb-create">4.1 Creating a Notebook</h3>
+
+<p><strong>File &gt; New Notebook</strong> (<kbd>Cmd+Shift+N</kbd>). The notebook takes over the editor pane; the console strip stays below it, and your <code>.x</code> editor tabs are untouched underneath &mdash; close the notebook (<kbd>Cmd+W</kbd>) and the editor returns.</p>
+
+<p>Only <strong>one notebook is open at a time</strong>: New Notebook or opening a <code>.tzd</code> replaces the current one (you are asked to save first if it has unsaved changes).</p>
+
+<p>The toolbar across the top: <strong>+ code / + prose / + panel</strong> insert a cell after the focused one; <strong>Run All</strong> runs every code cell top to bottom; <strong>Undo / Redo / History</strong> drive the document history (<a href="#nb-history">&sect;4.6</a>). The title shows the file path, with <code>*</code> when modified.</p>
+
+<!-- -------------------------------- -->
+<h3 id="nb-cells">4.2 Cell Types</h3>
+
+<ul>
+  <li><strong>code</strong> &mdash; a Tzopilotl editor with syntax highlighting, a <strong>Run</strong> button, a <strong>run on load</strong> checkbox, and its own output area underneath. The colored dot at the left of the header shows status: <span style="color:#8b949e">&#9679;</span> never ran, <span style="color:#22c55e">&#9679;</span> ran clean, <span style="color:#f59e0b">&#9679;</span> edited since it last ran (stale), <span style="color:#ef4444">&#9679;</span> last run errored.</li>
+  <li><strong>prose</strong> &mdash; free text for notes and titles. Not evaluated.</li>
+  <li><strong>panel</strong> &mdash; an embedded control surface; see below.</li>
+</ul>
+
+<p>Each cell header also has <strong>^ / v</strong> (move) and <strong>x</strong> (delete) on the right.</p>
+
+<!-- -------------------------------- -->
+<h3 id="nb-run">4.3 Running Code</h3>
+
+<p>Cells share the <strong>one live session</strong> &mdash; the same globals, modules, and running audio as the editor and REPL. There is no hidden kernel: <code>let</code>s from one cell are visible to the next, and evaluation happens only when you ask.</p>
+
+<ul>
+  <li><kbd>Cmd+Enter</kbd> or <kbd>Shift+Enter</kbd> &mdash; run the focused cell (hover or click a cell to focus it).</li>
+  <li><strong>Run</strong> button &mdash; run that cell.</li>
+  <li><kbd>Cmd+Shift+Enter</kbd> or <strong>Run All</strong> &mdash; run all code cells top to bottom, stopping at the first error.</li>
+</ul>
+
+<p>Output printed <em>while a cell runs</em> appears under that cell; a returned value is shown as <code>&rarr; value : Type</code>. Errors underline the offending line in the cell and print the message below it. Output from timers, actors, and the engine (things that print when no cell is running) goes to the console strip at the bottom, since it can't be attributed to any one cell.</p>
+
+<!-- -------------------------------- -->
+<h3 id="nb-panels">4.4 Panel Cells</h3>
+
+<p>A panel cell embeds the widgets of the panel with the <strong>same name</strong>. The connection is by name, nothing more:</p>
+
+<ol>
+  <li>Add a panel cell; it gets a name like <code>panel1</code> (shown in its header).</li>
+  <li>In a code cell: <code>panel("panel1"); slider("cutoff", ...); ...</code></li>
+  <li>Run the cell &mdash; the widgets appear inside the panel cell.</li>
+</ol>
+
+<p>Panels claimed by the document render only there; panels no cell claims (including the default <code>""</code>) float as windows, as always.</p>
+
+<!-- -------------------------------- -->
+<h3 id="nb-save">4.5 Saving &amp; Loading</h3>
+
+<p><kbd>Cmd+S</kbd> saves the notebook to a <code>.tzd</code> file (a compact TZB binary container). Saved: the cells (kind, text, order, run-on-load flags) and, for each panel cell, its widgets' <strong>names, kinds, ranges, and current values</strong>. Not saved: bindings, eval outputs, scope data &mdash; anything that is behavior or transient display.</p>
+
+<p>On open, widgets reappear immediately with their saved positions and values, but <strong>unbound</strong> &mdash; they drive nothing until their creating code runs again. Because constructors are upserts, re-running the setup cell adopts each saved widget (keeping its saved value, which is pushed through the fresh binding) rather than resetting it. So the loading ritual is simply:</p>
+
+<ol>
+  <li>Open the <code>.tzd</code>.</li>
+  <li>Run the setup cells (or mark them <strong>run on load</strong> and they run themselves).</li>
+  <li>Perform.</li>
+</ol>
+
+<div class="note"><p><strong>Why not save bindings?</strong> Bindings reference closures and engine node IDs that only exist in a live session. Rather than invent a second, weaker way to describe behavior, the document re-runs your code &mdash; the same code path as the first time, guaranteed to agree with it.</p></div>
+
+<!-- -------------------------------- -->
+<h3 id="nb-history">4.6 Undo &amp; History</h3>
+
+<p>The notebook keeps one immutable history tree covering <strong>cell structure, code text, and widget values</strong> in document panels. Commits are coalesced so the tree stays readable: one entry per slider drag (committed when you release), one per pause in typing (&asymp;1&nbsp;s), one per cell run, one per structural edit.</p>
+
+<ul>
+  <li><kbd>Cmd+Z</kbd> / <kbd>Cmd+Shift+Z</kbd> &mdash; undo / redo. <strong>Focus-routed:</strong> while your cursor is in a text cell this is the editor's own fine-grained character undo; click outside the text (or on a widget) and it becomes <em>document</em> undo. Undoing a control move re-sends the old value through the widget's binding &mdash; you <em>hear</em> the undo.</li>
+  <li><strong>History window</strong> (toolbar button) &mdash; the whole tree. Editing after an undo doesn't discard the redo path; it starts a <em>branch</em>, listed indented with a &ldquo;(n branches)&rdquo; marker on the fork. Click any entry to jump straight to it; redo then follows the branch you jumped into.</li>
+</ul>
+
+<p>History is per-session: the <code>.tzd</code> file stores the current state only.</p>
+
+<!-- ================================================================ -->
+<h2 id="shortcuts">5. Keyboard Shortcuts</h2>
+
+<table>
+<tr><th>Key</th><th>Editor mode</th><th>Notebook mode</th></tr>
+<tr><td><kbd>Cmd+Enter</kbd></td><td>evaluate selection / block</td><td>run focused cell</td></tr>
+<tr><td><kbd>Shift+Enter</kbd></td><td>evaluate line</td><td>run focused cell</td></tr>
+<tr><td><kbd>Cmd+Shift+Enter</kbd></td><td>evaluate file</td><td>run all cells</td></tr>
+<tr><td><kbd>Cmd+Shift+N</kbd></td><td colspan="2">new notebook</td></tr>
+<tr><td><kbd>Cmd+S</kbd></td><td>save file</td><td>save notebook (.tzd)</td></tr>
+<tr><td><kbd>Cmd+W</kbd></td><td>close tab</td><td>close notebook</td></tr>
+<tr><td><kbd>Cmd+Z</kbd> / <kbd>Cmd+Shift+Z</kbd></td><td>text undo / redo</td><td>text undo in a focused cell; document history otherwise</td></tr>
+<tr><td><kbd>Cmd+K</kbd></td><td colspan="2">clear console</td></tr>
+</table>
+
+<!-- ================================================================ -->
+<h2 id="limitations">6. Current Limitations</h2>
+
+<ul>
+  <li><strong>Layout is automatic.</strong> Widgets stack in creation order; drag-to-arrange, resize, and snap grids are the next milestone, along with <code>multislider</code>, <code>matrix</code>, and <code>pianoRoll</code> widgets and <code>show(...)</code> value materialization.</li>
+  <li><strong>One notebook at a time.</strong> Opening or creating another replaces the current one (with a save prompt if modified).</li>
+  <li><strong>Prose cells are plain text</strong> &mdash; no markdown rendering yet.</li>
+  <li><strong>History is not saved</strong> in the <code>.tzd</code> file.</li>
+  <li><strong>Scopes/waveforms:</strong> scope taps read f32 outlets; waveforms show file-loaded buffer contents (not live-recorded audio).</li>
+</ul>
+
+</main>
+<script>
+(function() {
+  var btn = document.getElementById('theme-toggle');
+  var icon = document.getElementById('theme-icon');
+  function update() {
+    var isLight = document.documentElement.classList.contains('light');
+    icon.innerHTML = isLight ? '☀' : '☾';
+  }
+  update();
+  btn.addEventListener('click', function() {
+    document.documentElement.classList.toggle('light');
+    localStorage.setItem('tzpl-docs-theme',
+      document.documentElement.classList.contains('light') ? 'light' : 'dark');
+    update();
+  });
+})();
+</script>
+</body>
+</html>

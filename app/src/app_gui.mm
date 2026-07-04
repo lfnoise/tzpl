@@ -943,9 +943,23 @@ int runGui(bridge::AppContext& appCtx) {
                 case AppCmd::FileNew:
                     editorPanel.newTab();
                     break;
-                case AppCmd::FileNewNotebook:
-                    notebookPanel.newDocument();
+                case AppCmd::FileNewNotebook: {
+                    // Only one notebook is open at a time: starting a new
+                    // one replaces the current document. Confirm if it has
+                    // unsaved changes.
+                    bool proceed = true;
+                    if (notebookPanel.isOpen() && notebookPanel.modified()) {
+                        std::string name = notebookPanel.filePath().empty()
+                            ? std::string("untitled notebook")
+                            : notebookPanel.filePath();
+                        int choice = showCloseTabAlert(name);
+                        if (choice == 0) proceed = saveNotebook(false);
+                        else if (choice == 2) proceed = false;
+                        afterNativeDialog();
+                    }
+                    if (proceed) notebookPanel.newDocument();
                     break;
+                }
                 case AppCmd::FileOpen: {
                     std::string path = nativeOpenFileDialog();
                     if (!path.empty()) {
