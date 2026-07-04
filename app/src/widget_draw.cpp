@@ -35,6 +35,12 @@ static void markDirty(UIWidget& w) {
     w.dirtyCallback = true;
 }
 
+// One history commit per continuous interaction: flag the release edge of
+// the last-drawn item (sliders, drags, checkboxes).
+static void markGestureEdges(UIWidget& w) {
+    if (ImGui::IsItemDeactivatedAfterEdit()) w.gestureEnded = true;
+}
+
 static void drawSlider(UIWidget& w) {
     float pos = static_cast<float>(w.spec.unmap(w.values[0]));
     char display[64];
@@ -45,6 +51,7 @@ static void drawSlider(UIWidget& w) {
         w.values[0] = w.spec.map(pos);
         markDirty(w);
     }
+    markGestureEdges(w);
     ImGui::SameLine();
     ImGui::TextUnformatted(w.name.c_str());
 }
@@ -58,6 +65,7 @@ static void drawNumber(UIWidget& w) {
         w.values[0] = w.spec.clamp(v);
         markDirty(w);
     }
+    markGestureEdges(w);
     ImGui::SameLine();
     ImGui::TextUnformatted(w.name.c_str());
 }
@@ -81,6 +89,7 @@ static void drawToggle(UIWidget& w) {
         w.values[0] = on ? 1.0 : 0.0;
         markDirty(w);
     }
+    markGestureEdges(w);
 }
 
 static float ampToDbPos(float amp) {
@@ -208,6 +217,12 @@ static void drawXY(UIWidget& w) {
         w.values[0] = w.spec.map(px);
         w.values[1] = w.spec2.map(py);
         markDirty(w);
+    }
+    if (active) {
+        w.gestureActive = true;
+    } else if (w.gestureActive) {
+        w.gestureActive = false;
+        w.gestureEnded = true;
     }
     // Pad frame + crosshair
     auto* dl = ImGui::GetWindowDrawList();

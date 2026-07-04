@@ -132,6 +132,90 @@ void DocumentStore::reset(SnapshotPtr snap, std::string filePath) {
     snap_ = std::move(snap);
     filePath_ = std::move(filePath);
     modified_ = false;
+    rerootHistory("open");
+}
+
+// ---------------------------------------------------------------------------
+// History tree
+// ---------------------------------------------------------------------------
+
+bool DocumentStore::setWidgetSnap(std::shared_ptr<WidgetSnapList const> widgets) {
+    bool same;
+    if (snap_->widgets == widgets) {
+        same = true;
+    } else if (snap_->widgets && widgets) {
+        same = *snap_->widgets == *widgets;
+    } else {
+        // One side null: equal only if the other is empty.
+        auto const* nonNull = (snap_->widgets ? snap_->widgets : widgets).get();
+        same = !nonNull || nonNull->empty();
+    }
+    if (same) return false;
+    auto next = std::make_shared<DocSnapshot>(*snap_);
+    next->widgets = std::move(widgets);
+    snap_ = std::move(next);
+    return true;
+}
+
+bool DocumentStore::commit(std::string const& label) {
+    if (!cursor_) return false;
+    if (snap_ == cursor_->snap) return false;
+    auto node = std::make_unique<HistNode>();
+    node->snap = snap_;
+    node->label = label;
+    node->parent = cursor_;
+    cursor_->activeChild = (int)cursor_->children.size();
+    cursor_->children.push_back(std::move(node));
+    cursor_ = cursor_->children.back().get();
+    return true;
+}
+
+void DocumentStore::rerootHistory(std::string const& label) {
+    root_ = std::make_unique<HistNode>();
+    root_->snap = snap_;
+    root_->label = label;
+    cursor_ = root_.get();
+}
+
+SnapshotPtr DocumentStore::undo() {
+    if (!canUndo()) return nullptr;
+    // Remember which child we came from so redo retraces it.
+    HistNode* parent = cursor_->parent;
+    for (int i = 0; i < (int)parent->children.size(); ++i) {
+        if (parent->children[i].get() == cursor_) {
+            parent->activeChild = i;
+            break;
+        }
+    }
+    cursor_ = parent;
+    snap_ = cursor_->snap;
+    modified_ = true;
+    return snap_;
+}
+
+SnapshotPtr DocumentStore::redo() {
+    if (!canRedo()) return nullptr;
+    cursor_ = cursor_->children[cursor_->activeChild].get();
+    snap_ = cursor_->snap;
+    modified_ = true;
+    return snap_;
+}
+
+SnapshotPtr DocumentStore::jumpTo(HistNode* node) {
+    if (!node || node == cursor_) return nullptr;
+    // Mark the path from the root to `node` as the active branch.
+    for (HistNode* n = node; n->parent; n = n->parent) {
+        for (int i = 0; i < (int)n->parent->children.size(); ++i) {
+            if (n->parent->children[i].get() == n) {
+                n->parent->activeChild = i;
+                break;
+            }
+        }
+    }
+    cursor_ = node;
+    snap_ = cursor_->snap;
+    modified_ = true;
+    return snap_;
 }
 
 // ---------------------------------------------------------------------------
@@ -321,6 +405,91 @@ SnapshotPtr loadDocument(bridge::AppContext& ctx, std::string const& path,
     }
 
     return snap;
+}
+
+// ---------------------------------------------------------------------------
+// Widget capture / restore
+// ---------------------------------------------------------------------------
+
+static bool inPanels(std::vector<std::string> const& panels,
+                     std::string const& p) {
+    return std::find(panels.begin(), panels.end(), p) != panels.end();
+}
+
+std::shared_ptr<WidgetSnapList const>
+captureWidgets(bridge::UIState* ui, std::vector<std::string> const& panels) {
+    auto out = std::make_shared<WidgetSnapList>();
+    if (!ui) return out;
+    std::lock_guard<std::mutex> lock(ui->mtx);
+    for (auto const& w : ui->widgets) {
+        if (!inPanels(panels, w->panel)) continue;
+        WidgetSnap s;
+        s.panel = w->panel;
+        s.name = w->name;
+        s.kind = w->kind;
+        s.spec = w->spec;
+        s.spec2 = w->spec2;
+        s.values = w->values;
+        out->push_back(std::move(s));
+    }
+    return out;
+}
+
+void restoreWidgets(bridge::AppContext& ctx, WidgetSnapList const& target,
+                    std::vector<std::string> const& panels) {
+    if (!ctx.uiState) return;
+    std::vector<std::pair<long, int>> taps;
+    {
+        std::lock_guard<std::mutex> lock(ctx.uiState->mtx);
+
+        // Remove live widgets (in the restored panels) that the target
+        // state doesn't contain.
+        auto inTarget = [&](bridge::UIWidget const& w) {
+            for (auto const& s : target) {
+                if (s.panel == w.panel && s.name == w.name) return true;
+            }
+            return false;
+        };
+        auto& ws = ctx.uiState->widgets;
+        for (auto& w : ws) {
+            if (inPanels(panels, w->panel) && !inTarget(*w) && w->tapID)
+                taps.push_back({w->tapID, w->tapSilo});
+        }
+        std::erase_if(ws, [&](auto const& w) {
+            return inPanels(panels, w->panel) && !inTarget(*w);
+        });
+
+        // Update surviving widgets (bindings preserved; changed values are
+        // marked dirty so the per-frame dispatch re-sends them) and
+        // recreate missing ones unbound.
+        for (auto const& s : target) {
+            if (!inPanels(panels, s.panel)) continue;
+            bridge::UIWidget* w = ctx.uiState->findByName(s.panel, s.name);
+            if (w && w->kind == s.kind) {
+                w->spec = s.spec;
+                w->spec2 = s.spec2;
+                if (w->values != s.values) {
+                    w->values = s.values;
+                    w->dirtyEngine = true;
+                    w->dirtyCallback = true;
+                }
+            } else {
+                if (w && w->tapID) taps.push_back({w->tapID, w->tapSilo});
+                if (w) {
+                    // Kind changed across history: replace wholesale.
+                    ctx.uiState->remove(w->id);
+                }
+                bridge::UIWidget* nw =
+                    ctx.uiState->upsert(s.panel, s.name, s.kind, s.spec, s.spec2);
+                // upsert sized values for the kind; copy what the capture has.
+                for (size_t i = 0; i < nw->values.size() && i < s.values.size(); ++i)
+                    nw->values[i] = s.values[i];
+                nw->dirtyEngine = true;
+                nw->dirtyCallback = true;
+            }
+        }
+    }
+    for (auto [tapID, silo] : taps) untapWidget(ctx, tapID, silo);
 }
 
 } // namespace doc

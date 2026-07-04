@@ -34,12 +34,14 @@
 #ifndef document_hpp
 #define document_hpp
 
+#include "tzpl_ui_state.hpp"
+
 #include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
 
-namespace bridge { struct AppContext; struct UIState; }
+namespace bridge { struct AppContext; }
 
 namespace doc {
 
@@ -55,12 +57,51 @@ struct Cell {
     bool runOnLoad = false;  // Code: run automatically after open.
 };
 
+// State of one widget in a document-claimed panel, captured into snapshots
+// at history commit points so undo/redo can restore (and audibly re-send)
+// control values. Bindings are runtime-only and never captured.
+struct WidgetSnap {
+    std::string panel;
+    std::string name;
+    bridge::UIWidgetKind kind = bridge::UIWidgetKind::Slider;
+    bridge::UISpec spec;
+    bridge::UISpec spec2;
+    std::vector<double> values;
+
+    bool operator==(WidgetSnap const& o) const {
+        return panel == o.panel && name == o.name && kind == o.kind
+            && spec.lo == o.spec.lo && spec.hi == o.spec.hi
+            && spec.init == o.spec.init && spec.warp == o.spec.warp
+            && spec.warpParam == o.spec.warpParam
+            && spec2.lo == o.spec2.lo && spec2.hi == o.spec2.hi
+            && spec2.init == o.spec2.init && spec2.warp == o.spec2.warp
+            && spec2.warpParam == o.spec2.warpParam
+            && values == o.values;
+    }
+};
+
+using WidgetSnapList = std::vector<WidgetSnap>;
+
 struct DocSnapshot {
     std::vector<std::shared_ptr<Cell const>> cells;
     CellId nextCellId = 1;
+    // Widgets of document-claimed panels at the last commit (shared between
+    // snapshots when unchanged).
+    std::shared_ptr<WidgetSnapList const> widgets;
 };
 
 using SnapshotPtr = std::shared_ptr<DocSnapshot const>;
+
+// One node of the persistent history tree. Undo moves to parent, redo
+// descends activeChild; an edit made off-tip appends a new child (branch)
+// -- nothing is ever destroyed.
+struct HistNode {
+    SnapshotPtr snap;
+    std::string label;
+    HistNode* parent = nullptr;
+    std::vector<std::unique_ptr<HistNode>> children;
+    int activeChild = -1;
+};
 
 // GUI-thread-only mutator. Every edit produces a new snapshot; M3 keeps
 // only the current one (M4 hangs the history tree off these).
@@ -87,8 +128,41 @@ public:
     std::string const& filePath() const { return filePath_; }
     void setFilePath(std::string path) { filePath_ = std::move(path); }
 
-    // Replace the whole document (after load / new).
+    // Replace the whole document (after load / new). Re-roots the history
+    // at the new snapshot.
     void reset(SnapshotPtr snap, std::string filePath);
+
+    // ---- History tree -----------------------------------------------------
+    // snap_ is the WORKING snapshot; commit() records it as a HistNode
+    // child of the cursor (branching if the cursor already has children).
+
+    // Install a widget capture into the working snapshot. Returns true if
+    // it differed from the current one.
+    bool setWidgetSnap(std::shared_ptr<WidgetSnapList const> widgets);
+
+    // Commit the working snapshot (no-op if identical to the cursor's).
+    // Returns true if a node was created.
+    bool commit(std::string const& label);
+
+    // Make the current working snapshot the new history root (discards any
+    // previous tree). Used right after new/open.
+    void rerootHistory(std::string const& label);
+
+    bool canUndo() const { return cursor_ && cursor_->parent; }
+    bool canRedo() const {
+        return cursor_ && cursor_->activeChild >= 0
+            && cursor_->activeChild < (int)cursor_->children.size();
+    }
+    // Move the cursor and set the working snapshot; return it (null if
+    // no move happened). The caller applies it to editors/widgets.
+    SnapshotPtr undo();
+    SnapshotPtr redo();
+    // Jump directly to any node in the tree (marks the path to it as the
+    // active branch so redo follows it).
+    SnapshotPtr jumpTo(HistNode* node);
+
+    HistNode* historyRoot() { return root_.get(); }
+    HistNode* historyCursor() { return cursor_; }
 
 private:
     // Clone-on-write: returns a mutable copy of the cell installed in a
@@ -97,6 +171,9 @@ private:
     SnapshotPtr snap_;
     std::string filePath_;
     bool modified_ = false;
+
+    std::unique_ptr<HistNode> root_;
+    HistNode* cursor_ = nullptr;
 };
 
 // ---------------------------------------------------------------------------
@@ -113,6 +190,21 @@ bool saveDocument(DocSnapshot const& snap, bridge::AppContext& ctx,
 // engine taps untapped). Returns null with `err` set on failure.
 SnapshotPtr loadDocument(bridge::AppContext& ctx, std::string const& path,
                          std::string& err);
+
+// ---------------------------------------------------------------------------
+// Widget capture / restore (history commits and navigation)
+// ---------------------------------------------------------------------------
+
+// Snapshot the widgets of the given panels from the ui registry.
+std::shared_ptr<WidgetSnapList const>
+captureWidgets(bridge::UIState* ui, std::vector<std::string> const& panels);
+
+// Restore the given panels' widgets to a captured state: values updated
+// (marked dirty so the per-frame dispatch re-sends them -- undo is
+// audible), missing widgets recreated unbound, extra widgets removed
+// (untapping engine taps). Bindings of surviving widgets are preserved.
+void restoreWidgets(bridge::AppContext& ctx, WidgetSnapList const& target,
+                    std::vector<std::string> const& panels);
 
 } // namespace doc
 

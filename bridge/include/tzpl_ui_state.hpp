@@ -122,6 +122,12 @@ struct UIWidget {
     bool dirtyEngine = false;
     bool dirtyCallback = false;
 
+    // Gesture tracking (GUI thread only): a continuous interaction (slider
+    // drag, XY sweep) sets gestureEnded once on release, so the notebook
+    // commits ONE history node per gesture.
+    bool gestureActive = false;
+    bool gestureEnded = false;
+
     // Engine tap (Meter/Scope). tapID 0 = none. The tap is installed on
     // tapSilo's RT tap table; removing the widget untaps it.
     long tapID = 0;

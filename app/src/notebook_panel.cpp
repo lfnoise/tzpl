@@ -50,6 +50,7 @@ void NotebookPanel::newDocument() {
     // Start with one code cell so there's something to type into.
     store_.insertCell(0, CellKind::Code);
     store_.clearModified();
+    store_.rerootHistory("new");
 }
 
 bool NotebookPanel::open(std::string const& path, bridge::AppContext& ctx,
@@ -62,6 +63,7 @@ bool NotebookPanel::open(std::string const& path, bridge::AppContext& ctx,
     focusedCell_ = 0;
     open_ = true;
     queueRunOnLoad();
+    rerootHistory("open", ctx);
     return true;
 }
 
@@ -104,6 +106,116 @@ void NotebookPanel::queueRunOnLoad() {
     for (auto const& c : store_.snapshot()->cells) {
         if (c->kind == CellKind::Code && c->runOnLoad)
             runQueue_.push_back(c->id);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// History
+// ---------------------------------------------------------------------------
+
+void NotebookPanel::commitHistory(std::string const& label,
+                                  bridge::AppContext& ctx) {
+    store_.setWidgetSnap(doc::captureWidgets(ctx.uiState, claimedPanels()));
+    store_.commit(label);
+}
+
+void NotebookPanel::rerootHistory(std::string const& label,
+                                  bridge::AppContext& ctx) {
+    store_.setWidgetSnap(doc::captureWidgets(ctx.uiState, claimedPanels()));
+    store_.rerootHistory(label);
+}
+
+void NotebookPanel::applySnapshot(doc::SnapshotPtr snap,
+                                  bridge::AppContext& ctx) {
+    if (!snap) return;
+
+    // Resync cell editors whose text differs; drop runtime of removed cells.
+    for (auto const& c : snap->cells) {
+        auto it = runtime_.find(c->id);
+        if (it == runtime_.end() || !it->second.editor) continue;
+        if (it->second.editor->GetText() != c->text) {
+            it->second.editor->SetText(c->text);
+            it->second.lastEditTime = 0.0;
+        }
+    }
+    for (auto it = runtime_.begin(); it != runtime_.end();) {
+        bool live = false;
+        for (auto const& c : snap->cells) {
+            if (c->id == it->first) { live = true; break; }
+        }
+        it = live ? std::next(it) : runtime_.erase(it);
+    }
+    if (focusedCell_ && !store_.cell(focusedCell_)) focusedCell_ = 0;
+
+    // Restore claimed-panel widgets; changed values are marked dirty and
+    // re-sent by the normal per-frame dispatch (undo is audible).
+    if (snap->widgets) {
+        doc::restoreWidgets(ctx, *snap->widgets, claimedPanels());
+    }
+}
+
+void NotebookPanel::undoDocument(bridge::AppContext& ctx) {
+    // A pending typing coalesce is its own edit: commit it first so undo
+    // steps back to the pre-typing state, not past it.
+    for (auto const& c : store_.snapshot()->cells) {
+        auto it = runtime_.find(c->id);
+        if (it != runtime_.end() && it->second.lastEditTime > 0.0) {
+            syncCellText(c->id);
+            it->second.lastEditTime = 0.0;
+        }
+    }
+    commitHistory("edit", ctx);
+    applySnapshot(store_.undo(), ctx);
+}
+
+void NotebookPanel::redoDocument(bridge::AppContext& ctx) {
+    applySnapshot(store_.redo(), ctx);
+}
+
+void NotebookPanel::update(bridge::AppContext& ctx) {
+    if (!open_) return;
+
+    // One history commit per finished widget gesture (claimed panels only;
+    // floating-panel tweaks are performance state outside the document).
+    if (ctx.uiState) {
+        std::string gestured;
+        auto claimed = claimedPanels();
+        {
+            std::lock_guard<std::mutex> lock(ctx.uiState->mtx);
+            for (auto& w : ctx.uiState->widgets) {
+                if (!w->gestureEnded) continue;
+                w->gestureEnded = false;
+                bool claimedPanel = std::find(claimed.begin(), claimed.end(),
+                                              w->panel) != claimed.end();
+                if (claimedPanel && w->kind != bridge::UIWidgetKind::Button) {
+                    if (!gestured.empty()) gestured += ", ";
+                    gestured += w->name;
+                }
+            }
+        }
+        if (!gestured.empty()) commitHistory("adjust " + gestured, ctx);
+    }
+
+    // Typing coalesce: ~1s after the last keystroke, sync + commit once.
+    double now = ImGui::GetTime();
+    for (auto const& c : store_.snapshot()->cells) {
+        auto it = runtime_.find(c->id);
+        if (it == runtime_.end() || it->second.lastEditTime == 0.0) continue;
+        if (now - it->second.lastEditTime > 1.0) {
+            it->second.lastEditTime = 0.0;
+            syncCellText(c->id);
+            commitHistory("edit", ctx);
+        }
+    }
+
+    // Deferred single commits for structural edits and finished evals.
+    if (!structureCommitLabel_.empty()) {
+        commitHistory(structureCommitLabel_, ctx);
+        structureCommitLabel_.clear();
+    }
+    if (!evalCommitLabel_.empty()) {
+        commitHistory(evalCommitLabel_, ctx);
+        evalCommitLabel_.clear();
     }
 }
 
@@ -199,6 +311,7 @@ void NotebookPanel::onEvalDone(std::uint64_t cellId,
     auto cell = store_.cell(cellId);
     if (!cell) return;
     auto& rt = runtime(cellId, *cell);
+    rt.lastEditTime = 0.0;  // launchCell synced the text already
     rt.everRan = true;
 
     if (!result.errors.empty()) {
@@ -223,6 +336,10 @@ void NotebookPanel::onEvalDone(std::uint64_t cellId,
                                  + " : " + result.typeName, LineKind::Result});
         }
     }
+    // One history node per eval: the synced text plus whatever widgets the
+    // code created or changed. Committed in update(), which has the
+    // AppContext for the widget capture.
+    evalCommitLabel_ = "run cell";
 }
 
 void NotebookPanel::addCellOutput(std::uint64_t cellId,
@@ -318,6 +435,7 @@ void NotebookPanel::drawCell(std::shared_ptr<Cell const> const& cell,
         bool rol = cell->runOnLoad;
         if (ImGui::Checkbox("run on load", &rol)) {
             store_.setCellRunOnLoad(id, rol);
+            structureCommitLabel_ = "toggle run-on-load";
         }
     }
 
@@ -355,6 +473,9 @@ void NotebookPanel::drawCell(std::shared_ptr<Cell const> const& cell,
         if (ImGui::IsItemHovered()) {
             focusedCell_ = id;
         }
+        if (rt.editor->IsTextChanged()) {
+            rt.lastEditTime = ImGui::GetTime();
+        }
         if (cell->kind == CellKind::Code) {
             drawCellOutput(rt, width);
         }
@@ -378,12 +499,14 @@ void NotebookPanel::draw(float width, float height, GuiState& gui,
         int at = focusedCell_ ? store_.indexOf(focusedCell_) + 1
                               : store_.cellCount();
         focusedCell_ = store_.insertCell(at, CellKind::Code);
+        structureCommitLabel_ = "add code cell";
     }
     ImGui::SameLine();
     if (ImGui::SmallButton("+ prose")) {
         int at = focusedCell_ ? store_.indexOf(focusedCell_) + 1
                               : store_.cellCount();
         focusedCell_ = store_.insertCell(at, CellKind::Prose);
+        structureCommitLabel_ = "add prose cell";
     }
     ImGui::SameLine();
     if (ImGui::SmallButton("+ panel")) {
@@ -392,11 +515,22 @@ void NotebookPanel::draw(float width, float height, GuiState& gui,
         static int panelCounter = 1;
         focusedCell_ = store_.insertCell(
             at, CellKind::Panel, "panel" + std::to_string(panelCounter++));
+        structureCommitLabel_ = "add panel cell";
     }
     ImGui::SameLine();
     if (ImGui::SmallButton("Run All")) {
         runAll();
     }
+    ImGui::SameLine();
+    ImGui::BeginDisabled(!store_.canUndo());
+    if (ImGui::SmallButton("Undo")) applySnapshot(store_.undo(), ctx);
+    ImGui::EndDisabled();
+    ImGui::SameLine();
+    ImGui::BeginDisabled(!store_.canRedo());
+    if (ImGui::SmallButton("Redo")) applySnapshot(store_.redo(), ctx);
+    ImGui::EndDisabled();
+    ImGui::SameLine();
+    if (ImGui::SmallButton("History")) showHistory_ = !showHistory_;
     ImGui::SameLine();
     {
         std::string title = store_.filePath().empty()
@@ -419,11 +553,53 @@ void NotebookPanel::draw(float width, float height, GuiState& gui,
         store_.removeCell(pendingDelete_);
         if (focusedCell_ == pendingDelete_) focusedCell_ = 0;
         pendingDelete_ = 0;
+        structureCommitLabel_ = "delete cell";
     }
     if (pendingMove_) {
         store_.moveCell(pendingMove_, pendingMoveDelta_);
         pendingMove_ = 0;
+        structureCommitLabel_ = "move cell";
     }
 
     ImGui::EndChild();
+
+    if (showHistory_) drawHistoryWindow(ctx);
+}
+
+// ---------------------------------------------------------------------------
+// History window
+// ---------------------------------------------------------------------------
+
+void NotebookPanel::drawHistoryWindow(bridge::AppContext& ctx) {
+    ImGui::SetNextWindowSize(ImVec2(280.0f, 360.0f), ImGuiCond_FirstUseEver);
+    if (ImGui::Begin("History", &showHistory_)) {
+        doc::HistNode* jump = nullptr;
+        int row = 0;
+        // Depth-first over the whole tree; siblings indent under branches.
+        std::function<void(doc::HistNode*, int)> walk =
+            [&](doc::HistNode* n, int depth) {
+                ImGui::PushID(row++);
+                ImGui::Indent((float)depth * 12.0f);
+                std::string label = n->label;
+                if (n->children.size() > 1) {
+                    label += " (" + std::to_string(n->children.size())
+                           + " branches)";
+                }
+                bool isCursor = (n == store_.historyCursor());
+                if (ImGui::Selectable(label.c_str(), isCursor)) {
+                    jump = n;
+                }
+                ImGui::Unindent((float)depth * 12.0f);
+                ImGui::PopID();
+                for (auto& child : n->children) {
+                    walk(child.get(),
+                         depth + (n->children.size() > 1 ? 1 : 0));
+                }
+            };
+        if (store_.historyRoot()) walk(store_.historyRoot(), 0);
+        if (jump) {
+            applySnapshot(store_.jumpTo(jump), ctx);
+        }
+    }
+    ImGui::End();
 }

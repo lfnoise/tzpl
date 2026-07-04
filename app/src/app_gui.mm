@@ -1000,12 +1000,18 @@ int runGui(bridge::AppContext& appCtx) {
                     break;
 
                 // -- Edit ---------------------------------------------------
+                // Undo/redo are focus-routed: a focused text field (cell
+                // editor, find bar) gets the key injected and handles its
+                // own fine-grained undo; otherwise the open notebook's
+                // document history (or the editor panel) takes it.
                 case AppCmd::EditUndo:
                     if (io.WantTextInput) deferKey(ImGuiKey_Z);
+                    else if (notebookPanel.isOpen()) notebookPanel.undoDocument(appCtx);
                     else editorPanel.undo();
                     break;
                 case AppCmd::EditRedo:
                     if (io.WantTextInput) deferKey(ImGuiKey_Z, true);
+                    else if (notebookPanel.isOpen()) notebookPanel.redoDocument(appCtx);
                     else editorPanel.redo();
                     break;
                 case AppCmd::EditCut:
@@ -1267,6 +1273,11 @@ int runGui(bridge::AppContext& appCtx) {
                                    claimed.empty() ? nullptr : &claimed);
                 controlsPanel.dispatch(*appCtx.uiState, appCtx);
             }
+
+            // Notebook history upkeep: widget gesture commits, typing
+            // coalesce, eval/structure commits (after dispatch so committed
+            // values are the ones just sent).
+            notebookPanel.update(appCtx);
 
             // Render
             ImGui::Render();

@@ -90,6 +90,20 @@ public:
     // True while queued runs are waiting -- keeps the frame loop ticking.
     bool hasQueuedRuns() const { return !runQueue_.empty(); }
 
+    // ---- History (M4) -----------------------------------------------------
+    // One immutable history tree over cells + code text + claimed-panel
+    // widget values. Continuous gestures commit once on release; typing
+    // coalesces on ~1s idle; each cell eval commits once.
+
+    // Per-frame history upkeep: consume widget gesture-end flags and the
+    // typing-coalesce timer. Call after widget event dispatch.
+    void update(bridge::AppContext& ctx);
+
+    // Document-level undo/redo (the Cmd+Z route when no text field is
+    // focused). Applies the snapshot to editors and widgets.
+    void undoDocument(bridge::AppContext& ctx);
+    void redoDocument(bridge::AppContext& ctx);
+
 private:
     struct CellRuntime {
         std::unique_ptr<TextEditor> editor;   // Prose/Code cells
@@ -97,6 +111,8 @@ private:
         std::size_t ranTextHash = 0;          // text hash at last clean eval
         bool everRan = false;
         bool lastErrored = false;
+        // Typing coalesce: time of the last observed edit; 0 = clean.
+        double lastEditTime = 0.0;
     };
 
     CellRuntime& runtime(doc::CellId id, doc::Cell const& cell);
@@ -111,6 +127,15 @@ private:
     void drawCellOutput(CellRuntime& rt, float width);
     void queueRunOnLoad();
 
+    // Capture claimed-panel widgets into the working snapshot and commit
+    // one history node (no-op if nothing changed).
+    void commitHistory(std::string const& label, bridge::AppContext& ctx);
+    // Make current state the history root (after new/open).
+    void rerootHistory(std::string const& label, bridge::AppContext& ctx);
+    // Apply a history snapshot: resync cell editors + restore widgets.
+    void applySnapshot(doc::SnapshotPtr snap, bridge::AppContext& ctx);
+    void drawHistoryWindow(bridge::AppContext& ctx);
+
     doc::DocumentStore store_;
     std::unordered_map<doc::CellId, CellRuntime> runtime_;
     TextEditor::LanguageDefinition langDef_;
@@ -123,6 +148,13 @@ private:
     doc::CellId pendingDelete_ = 0;
     doc::CellId pendingMove_ = 0;
     int pendingMoveDelta_ = 0;
+
+    bool showHistory_ = false;
+
+    // Set by onEvalDone; update() turns it into one history commit.
+    std::string evalCommitLabel_;
+    // Set by draw() when a structural edit happened; committed in update().
+    std::string structureCommitLabel_;
 };
 
 #endif /* notebook_panel_hpp */
