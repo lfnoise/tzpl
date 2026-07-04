@@ -125,6 +125,16 @@ void addSynthDef(Engine* e, tzpl_SynthDef const& def, void* dlHandle = nullptr);
 
 // Collect the names of all registered node defs.
 void listNodeDefs(Engine* e, std::vector<std::string>& names);
+
+// Control metadata for a registered node def (for UI/introspection).
+struct ControlDesc {
+    std::string name;
+    i64 controlID;
+    tzpl_ControlSpec spec;
+};
+
+// Collect control metadata for def `defName`. Returns false if no such def.
+bool listDefControls(Engine* e, const char* defName, std::vector<ControlDesc>& out);
     
 f64 getStreamTime(Engine* e); // audio must be initialized, else exception.
 

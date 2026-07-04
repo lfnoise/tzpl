@@ -2346,6 +2346,14 @@ fn _portLine(ctx Ctx, n NIdx, i Int, arr String, fallback String, sn Int) String
 	"\tdef.%^[%^] = {\"%^\", {%^, %^, %^}};\n" fmt(arr, i, nm, _typeTag(ctx.typ[n]), _rateCode(ctx.nrate[n]), ctx.chans[n])
 }
 
+-- Warp payload (step size for .step; 0.0 otherwise) for ControlDef emission.
+fn _warpStepSize(w ControlWarp) Float {
+	match (w) {
+		ControlWarp.step(sz): sz;
+		_: 0.0;
+	}
+}
+
 fn genLoad(ctx Ctx, name String) String {
 	var s = "extern \"C\" tzpl_SynthDef load() {\n\ttzpl_SynthDef def;\n";
 	s = s $ "\tdef.name = \"%^\";\n" fmt(name);
@@ -2364,12 +2372,16 @@ fn genLoad(ctx Ctx, name String) String {
 	for (n : ctx.controls) {
 		match (ctx.kind[n]) {
 			control(spec, cname, sn): {
-				-- Emit the control's spec (lo/hi/init) so the engine seeds the
-				-- control buffer with its declared init value. Matches the C++
-				-- emission; param/warp/kind are left value-initialized.
-				s = s $ "\tdef.controls[%^] = {\"%^\", {%^, %^, %^}, %^, {.lo = %^, .hi = %^, .init = %^}};\n"
+				-- Emit the full control spec: the engine seeds the control
+				-- buffer from init; UI clients derive widgets from
+				-- lo/hi/param/warp/kind. Matches the C++ emission: the ABI
+				-- warp ordinal is the lang ControlWarp ordinal + 1 (0 is
+				-- reserved for tzpl_cwNone), and `param` carries the warp
+				-- payload (step size for the step warp).
+				s = s $ "\tdef.controls[%^] = {\"%^\", {%^, %^, %^}, %^, {.lo = %^, .hi = %^, .init = %^, .param = %^, .warp = (tzpl_ControlWarp)%^, .kind = tzpl_ckContinuous}};\n"
 					fmt(i, cname, _typeTag(ctx.typ[n]), _rateCode(ctx.nrate[n]), ctx.chans[n], sn,
-					    ftosF64(spec.lo), ftosF64(spec.hi), ftosF64(spec.init));
+					    ftosF64(spec.lo), ftosF64(spec.hi), ftosF64(spec.init),
+					    ftosF64(spec.warp _warpStepSize), spec.warp ordinal + 1);
 			}
 			_: {}
 		}

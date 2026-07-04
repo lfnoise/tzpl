@@ -29,7 +29,9 @@
 #include <deque>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 // Complete type needed: SiloVMState holds a unique_ptr<IncrementalCompiler>, so
@@ -61,6 +63,8 @@ class NatsDispatcher;
 }
 
 namespace bridge {
+
+struct UIState;
 
 // Per-silo RT VM state. Created by attachVM(), destroyed by detachVM().
 struct SiloVMState {
@@ -97,6 +101,17 @@ struct AppContext {
     nats::NatsDispatcher* natsDispatcher = nullptr;
     std::string engineName;  // empty = single-instance mode
     std::vector<SiloVMState> siloVMs;  // indexed by silo number
+
+    // Live-control widget registry for the `ui` module (owned by the app;
+    // null when no GUI is running).
+    UIState* uiState = nullptr;
+
+    // nodeID -> def name for nodes created on the live engine, recorded by
+    // audio_engine.newNode so ui.control(node, name) can look up the def's
+    // control specs. Guarded by nodeDefNamesMtx (written on eval/scheduler
+    // threads, read by the ui FFI).
+    std::mutex nodeDefNamesMtx;
+    std::unordered_map<std::int64_t, std::string> nodeDefNames;
 
     // Silo->NRT actor messages: a silo actor targeting an NRT actor (outbox
     // targetSilo < 0) has its encoded Msg stashed here by pumpSiloOutboxes on

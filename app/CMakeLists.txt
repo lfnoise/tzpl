@@ -93,6 +93,7 @@ if(TZPL_BUILD_GUI)
         src/workspace_panel.cpp
         src/output_panel.cpp
         src/find_replace.cpp
+        src/controls_panel.cpp
     )
     if(APPLE)
         list(APPEND APP_SOURCES src/app_gui.mm)

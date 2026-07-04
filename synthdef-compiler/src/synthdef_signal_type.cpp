@@ -44,7 +44,7 @@ namespace synthdef {
     }
 
     u64 ControlSpec::hash() const {
-        return hash_combine(kHashStart, lo, hi, param) + hash64(warp);
+        return hash_combine(kHashStart, lo, hi, param, warpParam) + hash64(warp);
     }
 
 }

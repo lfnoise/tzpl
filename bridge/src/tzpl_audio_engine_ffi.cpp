@@ -264,17 +264,39 @@ static void ffi_clockTempo(ts::VM& vm, u16 dst, u16, u16 argBase) {
 static void ffi_newNode(ts::VM& vm, u16 dst, u16, u16 argBase) {
     const char* defName = regString(vm, argBase);
     auto nodeID = static_cast<engine::i64>(vm.reg(argBase + 1).i);
-    returnErr(vm, dst, engine::newNode(defName, nodeID), __func__);
+    tzpl_SErr err = engine::newNode(defName, nodeID);
+    // Record nodeID -> def name for the live engine so ui.control(node, name)
+    // can look up the def's control specs. (Bundles are validated at submit,
+    // so a failed go() can leave a stale entry; lookups re-validate anyway.)
+    if (err == tzpl_errNone && !bridge::currentRenderContext()) {
+        if (auto* ctx = getAppContext(vm)) {
+            std::lock_guard<std::mutex> lock(ctx->nodeDefNamesMtx);
+            ctx->nodeDefNames[static_cast<std::int64_t>(nodeID)] = defName;
+        }
+    }
+    returnErr(vm, dst, err, __func__);
 }
 
 // fn freeNode(nodeID: Int) -> Int
 static void ffi_freeNode(ts::VM& vm, u16 dst, u16, u16 argBase) {
     auto nodeID = static_cast<engine::i64>(vm.reg(argBase).i);
+    if (!bridge::currentRenderContext()) {
+        if (auto* ctx = getAppContext(vm)) {
+            std::lock_guard<std::mutex> lock(ctx->nodeDefNamesMtx);
+            ctx->nodeDefNames.erase(static_cast<std::int64_t>(nodeID));
+        }
+    }
     returnErr(vm, dst, engine::freeNode(nodeID), __func__);
 }
 
 // fn freeAllNodes() -> Int
 static void ffi_freeAllNodes(ts::VM& vm, u16 dst, u16, u16) {
+    if (!bridge::currentRenderContext()) {
+        if (auto* ctx = getAppContext(vm)) {
+            std::lock_guard<std::mutex> lock(ctx->nodeDefNamesMtx);
+            ctx->nodeDefNames.clear();
+        }
+    }
     returnErr(vm, dst, engine::freeAllNodes(), __func__);
 }
 

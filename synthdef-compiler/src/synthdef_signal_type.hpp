@@ -192,15 +192,17 @@ namespace synthdef {
     
 
     struct ControlSpec {
-        f64 lo, hi, param;
-        int warp;
+        f64 lo, hi, param;      // param holds the init value
+        int warp;               // lang ControlWarp ordinal (ABI ordinal - 1)
+        f64 warpParam = 0.0;    // warp payload (step size for step warp)
 
         u64 hash() const;
         bool operator==(ControlSpec const& that) const {
-            return lo == that.lo 
-                && hi == that.hi 
-                && param == that.param 
-                && warp == that.warp;
+            return lo == that.lo
+                && hi == that.hi
+                && param == that.param
+                && warp == that.warp
+                && warpParam == that.warpParam;
         }
     };
 

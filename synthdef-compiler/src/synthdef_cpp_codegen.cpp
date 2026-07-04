@@ -3521,13 +3521,18 @@ string CppCodeGen::genClass()
     }
     for (usize i = 0; S u : synth->controls) {
         auto control = u.as<Control>();
-        // Emit the control's spec so the engine can seed the control buffer with
-        // its declared init value. (The parser stores the sexpr's init into the
-        // ControlSpec's `param` field.) Designated initializers leave param/warp/
-        // kind value-initialized.
-        s += FMT("\tdef.controls[{}] = {{\"{}\", {{{}, {}, {}}}, {}, {{.lo = {}, .hi = {}, .init = {}}}}};\n",
+        // Emit the full control spec: the engine seeds the control buffer from
+        // `init`, and UI clients derive widgets from lo/hi/param/warp/kind.
+        // (The parser stores the sexpr's init into the ControlSpec's `param`
+        // field; the ABI warp ordinal is the lang ControlWarp ordinal + 1, with
+        // 0 reserved for tzpl_cwNone. `param` in the ABI spec carries the warp
+        // payload -- the step size for the step warp.)
+        s += FMT("\tdef.controls[{}] = {{\"{}\", {{{}, {}, {}}}, {}, "
+                 "{{.lo = {}, .hi = {}, .init = {}, .param = {}, "
+                 ".warp = (tzpl_ControlWarp){}, .kind = tzpl_ckContinuous}}}};\n",
             i, control->name, genTypeTag(u), u->rate.codeStr(), u->chans, control->serial,
-            ftos(control->spec.lo), ftos(control->spec.hi), ftos(control->spec.param));
+            ftos(control->spec.lo), ftos(control->spec.hi), ftos(control->spec.param),
+            ftos(control->spec.warpParam), control->spec.warp + 1);
         ++i;
     }
     s += "\treturn def;\n";

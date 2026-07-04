@@ -38,6 +38,8 @@
 #include "tzpl_nrt_render.hpp"
 #include "tzpl_synthdef_compiler_ffi.hpp"
 #include "tzpl_clock_ffi.hpp"
+#include "tzpl_ui_ffi.hpp"
+#include "tzpl_ui_state.hpp"
 #include "nrt_tempo_scheduler.hpp"
 #include "tzpl_client_interface.hpp"
 #include "tzpl_test_plugins.hpp"
@@ -554,6 +556,7 @@ int main(int argc, const char* argv[]) {
         bridge::registerNRTRenderFFI(compiler);
         bridge::registerSynthdefCompilerFFI(compiler);
         bridge::registerClockFFI(compiler);
+        bridge::registerUIFFI(compiler);
 #if TZPL_HAS_OSC
         bridge::registerOscFFI(compiler);
 #endif
@@ -743,6 +746,11 @@ int main(int argc, const char* argv[]) {
 
         VMTarget target = compiler.createTarget();
 
+        // Live-control widget registry for the `ui` module. Declared before
+        // the NRTVM: its GC root scanner references uiState, and the GC
+        // heartbeat runs until the NRTVM destructor stops it.
+        bridge::UIState uiState;
+
         // Use NRTVM for mutex-serialized access from multiple threads
         // (main thread for REPL/script, scheduler thread for timed events).
         NRTVM nrtvm(256 * 1024 * 1024, types, target);
@@ -764,6 +772,12 @@ int main(int argc, const char* argv[]) {
 
         // Initialize per-silo VM slots (populated later by attachVM())
         appCtx.siloVMs.resize(config.numSilos);
+
+        // Wire up the `ui` widget registry. Present in both GUI and headless
+        // modes (headless scripts can build widgets; nothing renders them).
+        // The root scanner keeps onChange closures alive across GC cycles.
+        appCtx.uiState = &uiState;
+        bridge::registerUIRootScanner(nrtvm, uiState);
 
         bridge::setAppContextOnVM(&nrtvm.vm, &appCtx);
         nrtvm.startHeartbeat();  // drain deferred deletes at ~50Hz

@@ -1041,7 +1041,16 @@ static std::expected<ControlSpec, std::string> parseControlSpec(sexpr::ItemVec c
     if (!specList[4].is<int64_t>()) return std::unexpected("Warp must be integer");
     int warp = (int)specList[4].get<int64_t>();
 
-    return ControlSpec{*lo, *hi, *init, warp};
+    // Optional warp payload (step size for the step warp); older emitters
+    // produce the 5-element form without it.
+    f64 warpParam = 0.0;
+    if (specList.size() > 5) {
+        auto wp = getNum(specList[5]);
+        if (!wp) return std::unexpected(wp.error());
+        warpParam = *wp;
+    }
+
+    return ControlSpec{*lo, *hi, *init, warp, warpParam};
 }
 
 std::expected<S, std::string> SExprGraphBuilder::parseControl(sexpr::ItemVec const& list) {

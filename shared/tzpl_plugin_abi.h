@@ -115,11 +115,16 @@ typedef enum tzpl_ControlKind {
     tzpl_ckSelect
 } tzpl_ControlKind;
 
-/* Control warp types for mapping */
+/* Control warp types for mapping (position 0..1 -> value).
+ * Ordinals are the lang-side synthdef.x ControlWarp ordinal + 1;
+ * 0 (None) means the plugin predates warp emission. */
 typedef enum tzpl_ControlWarp {
     tzpl_cwNone = 0,
     tzpl_cwLinear,
-    tzpl_cwExponential
+    tzpl_cwExponential,
+    tzpl_cwStep,         /* step size in tzpl_ControlSpec.param */
+    tzpl_cwSignedSquare,
+    tzpl_cwCubed
 } tzpl_ControlWarp;
 
 /* Control specification */

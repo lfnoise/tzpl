@@ -24,10 +24,12 @@
 
 #include "app_gui.hpp"
 #include "tzpl_app_context.hpp"
+#include "tzpl_ui_state.hpp"
 #include "gui_state.hpp"
 #include "editor_panel.hpp"
 #include "workspace_panel.hpp"
 #include "output_panel.hpp"
+#include "controls_panel.hpp"
 
 #include "repl_session.hpp"
 #include "nrt_vm.hpp"
@@ -58,34 +60,62 @@
 extern volatile sig_atomic_t gShouldQuit;
 
 // ---------------------------------------------------------------------------
-// Global state (declared early so native menu handlers can access them)
+// Application command queue
+//
+// Native menu handlers and the GLFW key callback push commands; the frame
+// loop drains the queue once per frame and dispatches them in order.
 // ---------------------------------------------------------------------------
 
-// Font size switching
-static int gCurrentFontIdx = 0;
-static int gNumFontSizes = 0;
-static ImFont** gFonts = nullptr;
-static bool gFontChanged = false;
+enum class AppCmd {
+    Quit,
+    // File
+    FileNew, FileOpen, FileSave, FileSaveAs, FileSaveCopy, FileClose,
+    // Edit
+    EditUndo, EditRedo, EditCut, EditCopy, EditPaste, EditSelectAll,
+    EditClearOutput, EditToggleComment, EditIndent, EditOutdent,
+    // Cursor movement (Cmd+Arrow; `shift` extends selection)
+    MoveHome, MoveEnd, MoveTop, MoveBottom,
+    // Find
+    FindShow, FindNext, FindPrevious, FindUseSelection, FindUseSelectionReplace,
+    // View (`arg` = font index for FontSet)
+    FontIncrease, FontDecrease, FontSet,
+    // Eval (dispatched by setting GuiState flags; processed after draw)
+    EvalSelection, EvalLine, EvalFile,
+};
 
-// File operation flags (set by native menu or GLFW key callback)
-static bool gFileNew = false;
-static bool gFileOpen = false;
-static bool gFileSave = false;
-static bool gFileSaveAs = false;
-static bool gFileSaveCopy = false;
-static bool gFileClose = false;
+struct AppCommand {
+    AppCmd cmd;
+    bool shift = false;
+    int arg = 0;
+};
 
-// Edit operation flags (set by native Edit menu)
-static bool gEditUndo = false;
-static bool gEditRedo = false;
-static bool gEditCut = false;
-static bool gEditCopy = false;
-static bool gEditPaste = false;
-static bool gEditSelectAll = false;
-static bool gEditClearOutput = false;
-static bool gEditToggleComment = false;
-static bool gEditIndent = false;
-static bool gEditOutdent = false;
+struct AppCmdQueue {
+    void push(AppCmd cmd, bool shift = false, int arg = 0) {
+        std::lock_guard<std::mutex> lock(mtx_);
+        cmds_.push_back({cmd, shift, arg});
+    }
+    std::vector<AppCommand> drain() {
+        std::lock_guard<std::mutex> lock(mtx_);
+        std::vector<AppCommand> out;
+        out.swap(cmds_);
+        return out;
+    }
+    // Discard pending eval commands. Native modal dialogs pump macOS events,
+    // so eval shortcuts can be enqueued while a dialog is up; call this after
+    // a modal returns to avoid evaluating against the wrong tab.
+    void purgeEvals() {
+        std::lock_guard<std::mutex> lock(mtx_);
+        std::erase_if(cmds_, [](AppCommand const& c) {
+            return c.cmd == AppCmd::EvalSelection || c.cmd == AppCmd::EvalLine
+                || c.cmd == AppCmd::EvalFile;
+        });
+    }
+private:
+    std::mutex mtx_;
+    std::vector<AppCommand> cmds_;
+};
+
+static AppCmdQueue gCmdQueue;
 
 // Deferred key injection for text-field clipboard operations.
 // When the native Edit menu fires while an ImGui text input is focused,
@@ -95,25 +125,9 @@ static ImGuiKey gDeferredEditKey = ImGuiKey_None;
 static bool gDeferredEditShift = false;
 static int gDeferredEditFrame = 0;  // 0=idle, 1=inject key-down, 2=inject key-up
 
-// Cursor movement flags (Cmd+Arrow, bypasses ImGui key routing)
-static bool gMoveHome = false;
-static bool gMoveEnd = false;
-static bool gMoveTop = false;
-static bool gMoveBottom = false;
-static bool gMoveShift = false;  // shift held during move
-
-// Quit request flag (from Cmd+Q or window close button)
+// Quit request flag (from Cmd+Q or window close button); handled at the top
+// of the frame loop, outside command dispatch.
 static bool gWantsToQuit = false;
-
-// Find operation flags
-static bool gFindShow = false;
-static bool gFindNext = false;
-static bool gFindPrevious = false;
-static bool gFindUseSelection = false;
-static bool gFindUseSelectionReplace = false;
-
-// Eval request flags
-static GuiState* gGuiState = nullptr;
 
 // ---------------------------------------------------------------------------
 // Font discovery
@@ -187,44 +201,33 @@ static std::string findMonoFont() {
 
 @implementation TzplMenuHandler
 - (void)requestQuit:(id)sender { gWantsToQuit = true; }
-- (void)fileNew:(id)sender     { gFileNew = true; }
-- (void)fileOpen:(id)sender    { gFileOpen = true; }
-- (void)fileSave:(id)sender    { gFileSave = true; }
-- (void)fileSaveAs:(id)sender  { gFileSaveAs = true; }
-- (void)fileSaveCopy:(id)sender { gFileSaveCopy = true; }
-- (void)fileClose:(id)sender   { gFileClose = true; }
-- (void)editUndo:(id)sender    { gEditUndo = true; }
-- (void)editRedo:(id)sender    { gEditRedo = true; }
-- (void)editCut:(id)sender     { gEditCut = true; }
-- (void)editCopy:(id)sender    { gEditCopy = true; }
-- (void)editPaste:(id)sender   { gEditPaste = true; }
-- (void)editSelectAll:(id)sender { gEditSelectAll = true; }
-- (void)editClearOutput:(id)sender { gEditClearOutput = true; }
-- (void)editToggleComment:(id)sender { gEditToggleComment = true; }
-- (void)editIndent:(id)sender { gEditIndent = true; }
-- (void)editOutdent:(id)sender { gEditOutdent = true; }
-- (void)findShow:(id)sender    { gFindShow = true; }
-- (void)findNext:(id)sender    { gFindNext = true; }
-- (void)findPrevious:(id)sender { gFindPrevious = true; }
-- (void)findUseSelection:(id)sender { gFindUseSelection = true; }
-- (void)findUseSelectionReplace:(id)sender { gFindUseSelectionReplace = true; }
+- (void)fileNew:(id)sender     { gCmdQueue.push(AppCmd::FileNew); }
+- (void)fileOpen:(id)sender    { gCmdQueue.push(AppCmd::FileOpen); }
+- (void)fileSave:(id)sender    { gCmdQueue.push(AppCmd::FileSave); }
+- (void)fileSaveAs:(id)sender  { gCmdQueue.push(AppCmd::FileSaveAs); }
+- (void)fileSaveCopy:(id)sender { gCmdQueue.push(AppCmd::FileSaveCopy); }
+- (void)fileClose:(id)sender   { gCmdQueue.push(AppCmd::FileClose); }
+- (void)editUndo:(id)sender    { gCmdQueue.push(AppCmd::EditUndo); }
+- (void)editRedo:(id)sender    { gCmdQueue.push(AppCmd::EditRedo); }
+- (void)editCut:(id)sender     { gCmdQueue.push(AppCmd::EditCut); }
+- (void)editCopy:(id)sender    { gCmdQueue.push(AppCmd::EditCopy); }
+- (void)editPaste:(id)sender   { gCmdQueue.push(AppCmd::EditPaste); }
+- (void)editSelectAll:(id)sender { gCmdQueue.push(AppCmd::EditSelectAll); }
+- (void)editClearOutput:(id)sender { gCmdQueue.push(AppCmd::EditClearOutput); }
+- (void)editToggleComment:(id)sender { gCmdQueue.push(AppCmd::EditToggleComment); }
+- (void)editIndent:(id)sender { gCmdQueue.push(AppCmd::EditIndent); }
+- (void)editOutdent:(id)sender { gCmdQueue.push(AppCmd::EditOutdent); }
+- (void)findShow:(id)sender    { gCmdQueue.push(AppCmd::FindShow); }
+- (void)findNext:(id)sender    { gCmdQueue.push(AppCmd::FindNext); }
+- (void)findPrevious:(id)sender { gCmdQueue.push(AppCmd::FindPrevious); }
+- (void)findUseSelection:(id)sender { gCmdQueue.push(AppCmd::FindUseSelection); }
+- (void)findUseSelectionReplace:(id)sender { gCmdQueue.push(AppCmd::FindUseSelectionReplace); }
 - (void)fontSizeAction:(id)sender {
     NSMenuItem* item = (NSMenuItem*)sender;
     int tag = (int)[item tag];
-    if (tag == -1) { // increase
-        if (gCurrentFontIdx < gNumFontSizes - 1) {
-            ++gCurrentFontIdx;
-            gFontChanged = true;
-        }
-    } else if (tag == -2) { // decrease
-        if (gCurrentFontIdx > 0) {
-            --gCurrentFontIdx;
-            gFontChanged = true;
-        }
-    } else {
-        gCurrentFontIdx = tag;
-        gFontChanged = true;
-    }
+    if (tag == -1)      gCmdQueue.push(AppCmd::FontIncrease);
+    else if (tag == -2) gCmdQueue.push(AppCmd::FontDecrease);
+    else                gCmdQueue.push(AppCmd::FontSet, false, tag);
 }
 @end
 
@@ -525,55 +528,42 @@ static void keyCallback(GLFWwindow* window, int key, int scancode,
 
         // Font size: Cmd+= / Cmd+-
         if (cmd && !shift) {
-            if (key == GLFW_KEY_EQUAL && gCurrentFontIdx < gNumFontSizes - 1) {
-                ++gCurrentFontIdx;
-                gFontChanged = true;
-            }
-            if (key == GLFW_KEY_MINUS && gCurrentFontIdx > 0) {
-                --gCurrentFontIdx;
-                gFontChanged = true;
-            }
+            if (key == GLFW_KEY_EQUAL) gCmdQueue.push(AppCmd::FontIncrease);
+            if (key == GLFW_KEY_MINUS) gCmdQueue.push(AppCmd::FontDecrease);
         }
 
         // File shortcuts
         if (cmd) {
-            if (key == GLFW_KEY_N && !shift) { gFileNew = true; return; }
-            if (key == GLFW_KEY_O && !shift) { gFileOpen = true; return; }
-            if (key == GLFW_KEY_S && !shift) { gFileSave = true; return; }
-            if (key == GLFW_KEY_S && shift)  { gFileSaveAs = true; return; }
-            if (key == GLFW_KEY_W && !shift) { gFileClose = true; return; }
-            if (key == GLFW_KEY_K && !shift) { gEditClearOutput = true; return; }
+            if (key == GLFW_KEY_N && !shift) { gCmdQueue.push(AppCmd::FileNew); return; }
+            if (key == GLFW_KEY_O && !shift) { gCmdQueue.push(AppCmd::FileOpen); return; }
+            if (key == GLFW_KEY_S && !shift) { gCmdQueue.push(AppCmd::FileSave); return; }
+            if (key == GLFW_KEY_S && shift)  { gCmdQueue.push(AppCmd::FileSaveAs); return; }
+            if (key == GLFW_KEY_W && !shift) { gCmdQueue.push(AppCmd::FileClose); return; }
+            if (key == GLFW_KEY_K && !shift) { gCmdQueue.push(AppCmd::EditClearOutput); return; }
         }
 
         // Cmd+Arrow: cursor movement (bypass ImGui key routing)
         if (cmd) {
-            if (key == GLFW_KEY_LEFT)  { gMoveHome = true; gMoveShift = shift; return; }
-            if (key == GLFW_KEY_RIGHT) { gMoveEnd = true; gMoveShift = shift; return; }
-            if (key == GLFW_KEY_UP)    { gMoveTop = true; gMoveShift = shift; return; }
-            if (key == GLFW_KEY_DOWN)  { gMoveBottom = true; gMoveShift = shift; return; }
+            if (key == GLFW_KEY_LEFT)  { gCmdQueue.push(AppCmd::MoveHome, shift); return; }
+            if (key == GLFW_KEY_RIGHT) { gCmdQueue.push(AppCmd::MoveEnd, shift); return; }
+            if (key == GLFW_KEY_UP)    { gCmdQueue.push(AppCmd::MoveTop, shift); return; }
+            if (key == GLFW_KEY_DOWN)  { gCmdQueue.push(AppCmd::MoveBottom, shift); return; }
         }
 
         // Find shortcuts
         if (cmd) {
-            if (key == GLFW_KEY_F && !shift) { gFindShow = true; return; }
-            if (key == GLFW_KEY_G && !shift) { gFindNext = true; return; }
-            if (key == GLFW_KEY_G && shift)  { gFindPrevious = true; return; }
-            if (key == GLFW_KEY_E && !shift) { gFindUseSelection = true; return; }
-            if (key == GLFW_KEY_E && shift)  { gFindUseSelectionReplace = true; return; }
+            if (key == GLFW_KEY_F && !shift) { gCmdQueue.push(AppCmd::FindShow); return; }
+            if (key == GLFW_KEY_G && !shift) { gCmdQueue.push(AppCmd::FindNext); return; }
+            if (key == GLFW_KEY_G && shift)  { gCmdQueue.push(AppCmd::FindPrevious); return; }
+            if (key == GLFW_KEY_E && !shift) { gCmdQueue.push(AppCmd::FindUseSelection); return; }
+            if (key == GLFW_KEY_E && shift)  { gCmdQueue.push(AppCmd::FindUseSelectionReplace); return; }
         }
 
         // Eval shortcuts
-        if (gGuiState && key == GLFW_KEY_ENTER) {
-            if (cmd && shift) {
-                gGuiState->evalFile = true;
-                return;
-            } else if (cmd) {
-                gGuiState->evalSelection = true;
-                return;
-            } else if (shift) {
-                gGuiState->evalLine = true;
-                return;
-            }
+        if (key == GLFW_KEY_ENTER) {
+            if (cmd && shift) { gCmdQueue.push(AppCmd::EvalFile); return; }
+            if (cmd)          { gCmdQueue.push(AppCmd::EvalSelection); return; }
+            if (shift)        { gCmdQueue.push(AppCmd::EvalLine); return; }
         }
     }
 
@@ -686,6 +676,7 @@ int runGui(bridge::AppContext& appCtx) {
 
     WorkspacePanel workspacePanel;
     OutputPanel outputPanel;
+    ControlsPanel controlsPanel;
 
     guiState.output.append("Tzopilotl. Cmd+Enter: eval block, "
                            "Shift+Enter: eval line, "
@@ -694,11 +685,6 @@ int runGui(bridge::AppContext& appCtx) {
     // --- Install GLFW callbacks --------------------------------------------
     glfwSetWindowCloseCallback(window, windowCloseCallback);
     gPrevScrollCallback = glfwSetScrollCallback(window, scrollCallback);
-    gFonts = fonts;
-    gNumFontSizes = numFontSizes;
-    gCurrentFontIdx = 0;
-    gFontChanged = false;
-    gGuiState = &guiState;
     gPrevKeyCallback = glfwSetKeyCallback(window, keyCallback);
 
     // Swizzle the GLFW content view's flagsChanged: to suppress Caps Lock
@@ -744,9 +730,10 @@ int runGui(bridge::AppContext& appCtx) {
                 } else if (choice == 1) {
                     editor->closeTab(idx);
                 }
-                // Clear stale flags set during the modal
+                // Clear stale eval state set during the modal
                 guiState.evalFile = guiState.evalSelection
                                   = guiState.evalLine = false;
+                gCmdQueue.purgeEvals();
                 glfwFocusWindow(window);
                 [nswin makeFirstResponder:nswin.contentView];
             }
@@ -759,17 +746,22 @@ int runGui(bridge::AppContext& appCtx) {
                 int choice = showUnsavedChangesAlert(unsaved);
                 if (choice == 0) { workspacePanel.saveAll(); break; } // Save All
                 if (choice == 1) break;                               // Don't Save
-                // Cancel -- clear stale flags from modal dialog
+                // Cancel -- clear stale eval state from modal dialog
                 guiState.evalFile = guiState.evalSelection
                                   = guiState.evalLine = false;
+                gCmdQueue.purgeEvals();
                 glfwFocusWindow(window);
                 [nswin makeFirstResponder:nswin.contentView];
             }
 
             // Throttle frame rate when idle to save CPU.
-            // Use short timeout when animations or async work are active.
+            // Use short timeout when animations or async work are active,
+            // or when widget events are pending (e.g. a callback deferred
+            // because an eval holds the VM mutex).
             bool needsActivity = guiState.flash.active()
-                              || guiState.asyncEval.busy();
+                              || guiState.asyncEval.busy()
+                              || (appCtx.uiState
+                                  && controlsPanel.hasPendingEvents(*appCtx.uiState));
             if (needsActivity)
                 glfwWaitEventsTimeout(1.0 / 30.0);
             else
@@ -824,175 +816,210 @@ int runGui(bridge::AppContext& appCtx) {
 
             ImGui::NewFrame();
 
-            // Apply font size change
-            if (gFontChanged) {
-                currentFontIdx = gCurrentFontIdx;
-                io.FontDefault = fonts[currentFontIdx];
-                gFontChanged = false;
-            }
-
             // ---------------------------------------------------------------
-            // Process file operations (triggered by native menu or keyboard)
+            // Dispatch queued commands (from native menus and key shortcuts)
             // ---------------------------------------------------------------
-            // Get active editor for this frame
             auto& editorPanel = workspacePanel.activeEditor();
 
-            if (gFileNew) {
-                gFileNew = false;
-                editorPanel.newTab();
-            }
-            if (gFileOpen) {
-                gFileOpen = false;
-                // Native dialog pumps macOS events, so key callbacks (eval
-                // shortcuts) can fire during it.  Clear stale eval flags
-                // after the dialog returns to avoid evaluating the wrong tab.
-                std::string path = nativeOpenFileDialog();
-                guiState.evalFile = false;
-                guiState.evalSelection = false;
-                guiState.evalLine = false;
-                if (!path.empty()) {
-                    if (std::filesystem::is_directory(path))
-                        workspacePanel.addWorkspace(path);
-                    else
-                        workspacePanel.openFile(path);
+            auto applyFontIdx = [&](int idx) {
+                idx = std::max(0, std::min(idx, numFontSizes - 1));
+                if (idx != currentFontIdx) {
+                    currentFontIdx = idx;
+                    io.FontDefault = fonts[currentFontIdx];
                 }
-                // Restore keyboard focus after native dialog
+            };
+            // Defer clipboard keys when an ImGui text field is focused (e.g.
+            // Find/Replace bar) so ImGui handles them next frame instead of
+            // the editor.
+            auto deferKey = [](ImGuiKey key, bool shift = false) {
+                gDeferredEditKey = key;
+                gDeferredEditShift = shift;
+                gDeferredEditFrame = 1;
+            };
+            // Native dialogs pump macOS events, so eval shortcuts can fire
+            // during them; drop stale eval state and restore keyboard focus
+            // after a dialog returns.
+            auto afterNativeDialog = [&]() {
+                guiState.evalFile = guiState.evalSelection = guiState.evalLine = false;
+                gCmdQueue.purgeEvals();
                 glfwFocusWindow(window);
                 [nswin makeFirstResponder:nswin.contentView];
-            }
-            if (gFileSave) {
-                gFileSave = false;
-                if (editorPanel.hasFilePath()) {
-                    editorPanel.save();
-                } else {
-                    // No path yet -- fall through to Save As
-                    gFileSaveAs = true;
-                }
-            }
-            if (gFileSaveAs) {
-                gFileSaveAs = false;
+            };
+            auto doSaveAs = [&]() {
                 std::string path = nativeSaveFileDialog(
                     editorPanel.activeTabName());
-                guiState.evalFile = guiState.evalSelection = guiState.evalLine = false;
                 if (!path.empty())
                     editorPanel.saveAs(path);
-                glfwFocusWindow(window);
-                [nswin makeFirstResponder:nswin.contentView];
-            }
-            if (gFileSaveCopy) {
-                gFileSaveCopy = false;
-                std::string path = nativeSaveFileDialog(
-                    editorPanel.activeTabName());
-                guiState.evalFile = guiState.evalSelection = guiState.evalLine = false;
-                if (!path.empty())
-                    editorPanel.saveCopy(path);
-                glfwFocusWindow(window);
-                [nswin makeFirstResponder:nswin.contentView];
-            }
-            if (gFileClose) {
-                gFileClose = false;
-                editorPanel.closeActiveTab();
-            }
+                afterNativeDialog();
+            };
 
-            // ---------------------------------------------------------------
-            // Process edit operations (triggered by native Edit menu)
-            // ---------------------------------------------------------------
-            if (io.WantTextInput) {
-                // An ImGui text field is focused (e.g. Find/Replace bar).
-                // Defer clipboard keys so ImGui handles them next frame.
-                auto deferKey = [](bool& flag, ImGuiKey key, bool shift = false) {
-                    if (flag) {
-                        flag = false;
-                        gDeferredEditKey = key;
-                        gDeferredEditShift = shift;
-                        gDeferredEditFrame = 1;
+            for (AppCommand const& c : gCmdQueue.drain()) {
+                switch (c.cmd) {
+                case AppCmd::Quit:
+                    gWantsToQuit = true;
+                    break;
+
+                // -- File ---------------------------------------------------
+                case AppCmd::FileNew:
+                    editorPanel.newTab();
+                    break;
+                case AppCmd::FileOpen: {
+                    std::string path = nativeOpenFileDialog();
+                    if (!path.empty()) {
+                        if (std::filesystem::is_directory(path))
+                            workspacePanel.addWorkspace(path);
+                        else
+                            workspacePanel.openFile(path);
                     }
-                };
-                deferKey(gEditUndo,      ImGuiKey_Z);
-                deferKey(gEditRedo,      ImGuiKey_Z, true);
-                deferKey(gEditCut,       ImGuiKey_X);
-                deferKey(gEditCopy,      ImGuiKey_C);
-                deferKey(gEditPaste,     ImGuiKey_V);
-                deferKey(gEditSelectAll, ImGuiKey_A);
-            } else {
-                if (gEditUndo)      { gEditUndo = false;      editorPanel.undo(); }
-                if (gEditRedo)      { gEditRedo = false;      editorPanel.redo(); }
-                if (gEditCut)       { gEditCut = false;       editorPanel.cut(); }
-                if (gEditCopy)      { gEditCopy = false;      if (!outputPanel.tryCopy()) editorPanel.copy(); }
-                if (gEditPaste)     { gEditPaste = false;     editorPanel.paste(); }
-                if (gEditSelectAll) { gEditSelectAll = false;  if (!outputPanel.trySelectAll()) editorPanel.selectAll(); }
-            }
-            if (gEditClearOutput) { gEditClearOutput = false; outputPanel.clear(guiState.output); }
-            if (gEditToggleComment) { gEditToggleComment = false; editorPanel.toggleComment(); }
-            if (gEditIndent)    { gEditIndent = false;    editorPanel.indent(); }
-            if (gEditOutdent)   { gEditOutdent = false;   editorPanel.outdent(); }
+                    afterNativeDialog();
+                    break;
+                }
+                case AppCmd::FileSave:
+                    if (editorPanel.hasFilePath())
+                        editorPanel.save();
+                    else
+                        doSaveAs();
+                    break;
+                case AppCmd::FileSaveAs:
+                    doSaveAs();
+                    break;
+                case AppCmd::FileSaveCopy: {
+                    std::string path = nativeSaveFileDialog(
+                        editorPanel.activeTabName());
+                    if (!path.empty())
+                        editorPanel.saveCopy(path);
+                    afterNativeDialog();
+                    break;
+                }
+                case AppCmd::FileClose:
+                    editorPanel.closeActiveTab();
+                    break;
 
-            // ---------------------------------------------------------------
-            // Process cursor movement (Cmd+Arrow) -- route to focused pane
-            // ---------------------------------------------------------------
-            if (gMoveHome || gMoveEnd || gMoveTop || gMoveBottom) {
-                if (outputPanel.hasFocus()) {
-                    if (gMoveHome)   outputPanel.moveHome(gMoveShift);
-                    if (gMoveEnd)    outputPanel.moveEnd(gMoveShift);
-                    if (gMoveTop)    outputPanel.moveTop(gMoveShift);
-                    if (gMoveBottom) outputPanel.moveBottom(gMoveShift);
-                } else {
-                    if (gMoveHome)   editorPanel.moveHome(gMoveShift);
-                    if (gMoveEnd)    editorPanel.moveEnd(gMoveShift);
-                    if (gMoveTop)    editorPanel.moveTop(gMoveShift);
-                    if (gMoveBottom) editorPanel.moveBottom(gMoveShift);
-                }
-                gMoveHome = gMoveEnd = gMoveTop = gMoveBottom = false;
-            }
+                // -- Edit ---------------------------------------------------
+                case AppCmd::EditUndo:
+                    if (io.WantTextInput) deferKey(ImGuiKey_Z);
+                    else editorPanel.undo();
+                    break;
+                case AppCmd::EditRedo:
+                    if (io.WantTextInput) deferKey(ImGuiKey_Z, true);
+                    else editorPanel.redo();
+                    break;
+                case AppCmd::EditCut:
+                    if (io.WantTextInput) deferKey(ImGuiKey_X);
+                    else editorPanel.cut();
+                    break;
+                case AppCmd::EditCopy:
+                    if (io.WantTextInput) deferKey(ImGuiKey_C);
+                    else if (!outputPanel.tryCopy()) editorPanel.copy();
+                    break;
+                case AppCmd::EditPaste:
+                    if (io.WantTextInput) deferKey(ImGuiKey_V);
+                    else editorPanel.paste();
+                    break;
+                case AppCmd::EditSelectAll:
+                    if (io.WantTextInput) deferKey(ImGuiKey_A);
+                    else if (!outputPanel.trySelectAll()) editorPanel.selectAll();
+                    break;
+                case AppCmd::EditClearOutput:
+                    outputPanel.clear(guiState.output);
+                    break;
+                case AppCmd::EditToggleComment:
+                    editorPanel.toggleComment();
+                    break;
+                case AppCmd::EditIndent:
+                    editorPanel.indent();
+                    break;
+                case AppCmd::EditOutdent:
+                    editorPanel.outdent();
+                    break;
 
-            // ---------------------------------------------------------------
-            // Process find operations
-            // ---------------------------------------------------------------
-            if (gFindShow) {
-                gFindShow = false;
-                auto& fr = editorPanel.findReplace();
-                std::string sel = editorPanel.getSelectedText();
-                if (!sel.empty())
-                    fr.useSelectionForFind(sel);
-                fr.show();
-                if (auto* ed = editorPanel.activeEditor()) {
-                    fr.search(*ed);
-                    editorPanel.updateSearchHighlights();
-                }
-            }
-            if (gFindNext) {
-                gFindNext = false;
-                if (auto* ed = editorPanel.activeEditor()) {
-                    editorPanel.findReplace().findNext(*ed);
-                    editorPanel.updateSearchHighlights();
-                }
-            }
-            if (gFindPrevious) {
-                gFindPrevious = false;
-                if (auto* ed = editorPanel.activeEditor()) {
-                    editorPanel.findReplace().findPrevious(*ed);
-                    editorPanel.updateSearchHighlights();
-                }
-            }
-            if (gFindUseSelection) {
-                gFindUseSelection = false;
-                std::string sel = editorPanel.getSelectedText();
-                if (!sel.empty()) {
+                // -- Cursor movement (Cmd+Arrow), routed to focused pane -----
+                case AppCmd::MoveHome:
+                    if (outputPanel.hasFocus()) outputPanel.moveHome(c.shift);
+                    else editorPanel.moveHome(c.shift);
+                    break;
+                case AppCmd::MoveEnd:
+                    if (outputPanel.hasFocus()) outputPanel.moveEnd(c.shift);
+                    else editorPanel.moveEnd(c.shift);
+                    break;
+                case AppCmd::MoveTop:
+                    if (outputPanel.hasFocus()) outputPanel.moveTop(c.shift);
+                    else editorPanel.moveTop(c.shift);
+                    break;
+                case AppCmd::MoveBottom:
+                    if (outputPanel.hasFocus()) outputPanel.moveBottom(c.shift);
+                    else editorPanel.moveBottom(c.shift);
+                    break;
+
+                // -- Find ---------------------------------------------------
+                case AppCmd::FindShow: {
                     auto& fr = editorPanel.findReplace();
-                    fr.useSelectionForFind(sel);
+                    std::string sel = editorPanel.getSelectedText();
+                    if (!sel.empty())
+                        fr.useSelectionForFind(sel);
                     fr.show();
                     if (auto* ed = editorPanel.activeEditor()) {
                         fr.search(*ed);
                         editorPanel.updateSearchHighlights();
                     }
+                    break;
                 }
-            }
-            if (gFindUseSelectionReplace) {
-                gFindUseSelectionReplace = false;
-                std::string sel = editorPanel.getSelectedText();
-                if (!sel.empty()) {
-                    editorPanel.findReplace().useSelectionForReplace(sel);
-                    editorPanel.findReplace().show();
+                case AppCmd::FindNext:
+                    if (auto* ed = editorPanel.activeEditor()) {
+                        editorPanel.findReplace().findNext(*ed);
+                        editorPanel.updateSearchHighlights();
+                    }
+                    break;
+                case AppCmd::FindPrevious:
+                    if (auto* ed = editorPanel.activeEditor()) {
+                        editorPanel.findReplace().findPrevious(*ed);
+                        editorPanel.updateSearchHighlights();
+                    }
+                    break;
+                case AppCmd::FindUseSelection: {
+                    std::string sel = editorPanel.getSelectedText();
+                    if (!sel.empty()) {
+                        auto& fr = editorPanel.findReplace();
+                        fr.useSelectionForFind(sel);
+                        fr.show();
+                        if (auto* ed = editorPanel.activeEditor()) {
+                            fr.search(*ed);
+                            editorPanel.updateSearchHighlights();
+                        }
+                    }
+                    break;
+                }
+                case AppCmd::FindUseSelectionReplace: {
+                    std::string sel = editorPanel.getSelectedText();
+                    if (!sel.empty()) {
+                        editorPanel.findReplace().useSelectionForReplace(sel);
+                        editorPanel.findReplace().show();
+                    }
+                    break;
+                }
+
+                // -- View ---------------------------------------------------
+                case AppCmd::FontIncrease:
+                    applyFontIdx(currentFontIdx + 1);
+                    break;
+                case AppCmd::FontDecrease:
+                    applyFontIdx(currentFontIdx - 1);
+                    break;
+                case AppCmd::FontSet:
+                    applyFontIdx(c.arg);
+                    break;
+
+                // -- Eval (flags processed after draw, when the ImGui tab
+                //    bar has committed the visually selected tab) -----------
+                case AppCmd::EvalSelection:
+                    guiState.evalSelection = true;
+                    break;
+                case AppCmd::EvalLine:
+                    guiState.evalLine = true;
+                    break;
+                case AppCmd::EvalFile:
+                    guiState.evalFile = true;
+                    break;
                 }
             }
 
@@ -1104,6 +1131,16 @@ int runGui(bridge::AppContext& appCtx) {
 
             ImGui::End();
 
+            // ---------------------------------------------------------------
+            // Live control widgets (`ui` module): draw floating panel
+            // windows, then dispatch value changes -- engine fast path in
+            // one bundle per silo, lang callbacks coalesced under try_lock.
+            // ---------------------------------------------------------------
+            if (appCtx.uiState) {
+                controlsPanel.draw(*appCtx.uiState);
+                controlsPanel.dispatch(*appCtx.uiState, appCtx);
+            }
+
             // Render
             ImGui::Render();
             ImGui_ImplMetal_RenderDrawData(ImGui::GetDrawData(),
@@ -1116,7 +1153,6 @@ int runGui(bridge::AppContext& appCtx) {
     }
 
     // --- Cleanup -----------------------------------------------------------
-    gGuiState = nullptr;
     ownedSession.reset();
 
     // Restore VM print output to stdout

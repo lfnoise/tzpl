@@ -966,8 +966,17 @@ fn inputsToLisp(o S) String = o.ins.id separatedString parens;
 fn idsToLisp(o [S]) String = o.id separatedString parens;
 fn numbersToLisp(o [Int]) String = o separatedString parens;
 
+-- Warp payload (step size for .step; 0.0 otherwise), carried as the optional
+-- fifth ControlSpec number so plugins can expose it in tzpl_ControlSpec.param.
+fn _warpParam(o ControlWarp) Float {
+	match (o) {
+		ControlWarp.step(sz): sz;
+		_: 0.0;
+	}
+}
+
 fn toLisp(o ControlSpec) String {
-    "(ControlSpec %^ %^ %^ %^)" fmt(o.lo, o.hi, o.init, o.warp ordinal)
+    "(ControlSpec %^ %^ %^ %^ %^)" fmt(o.lo, o.hi, o.init, o.warp ordinal, o.warp _warpParam)
 }
 
 fn numTypeInt(op CastOp) Int {

@@ -754,6 +754,25 @@ void listNodeDefs(Engine* e, std::vector<std::string>& names) {
     }
 }
 
+bool listDefControls(Engine* e, const char* defName, std::vector<ControlDesc>& out) {
+    u64 hash = hash64(defName, kHashStart);
+    u32 bin = hash & kHashMask;
+
+    // Copy while holding the lock so the def can't be released underneath us.
+    std::lock_guard<std::mutex> lck(e->nrt_lock_);
+    NodeDef* def = e->defs_[bin];
+    while (def) {
+        if (def->hash_ == hash && strcmp(def->info_.name, defName) == 0) break;
+        def = def->next_;
+    }
+    if (!def) return false;
+    for (int i = 0; i < def->info_.num_controls; ++i) {
+        ControlInfo const& c = def->info_.controls[i];
+        out.push_back({c.name ? c.name : "", c.controlID, c.spec});
+    }
+    return true;
+}
+
 // ============================================================================
 // Command bundling.
 //
