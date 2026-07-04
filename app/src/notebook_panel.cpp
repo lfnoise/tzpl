@@ -398,6 +398,7 @@ void NotebookPanel::drawCell(std::shared_ptr<Cell const> const& cell,
     CellId id = cell->id;
     CellRuntime& rt = runtime(id, *cell);
     ImGui::PushID((int)id);
+    ImVec2 cellTop = ImGui::GetCursorScreenPos();
 
     // ---- header row -------------------------------------------------------
     char const* kindName = cell->kind == CellKind::Code ? "code"
@@ -470,15 +471,28 @@ void NotebookPanel::drawCell(std::shared_ptr<Cell const> const& cell,
         float editorH = std::min((float)lines + 1.5f, 25.0f)
                         * ImGui::GetTextLineHeightWithSpacing();
         rt.editor->Render("##celledit", ImVec2(width, editorH), true);
-        if (ImGui::IsItemHovered()) {
-            focusedCell_ = id;
-        }
         if (rt.editor->IsTextChanged()) {
             rt.lastEditTime = ImGui::GetTime();
         }
         if (cell->kind == CellKind::Code) {
             drawCellOutput(rt, width);
         }
+    }
+
+    // Selection: clicking anywhere in the cell selects it. New cells are
+    // inserted after the selected cell, which shows an accent bar.
+    ImVec2 cellBottom = ImGui::GetCursorScreenPos();
+    cellBottom.x = cellTop.x + width;
+    if (ImGui::IsMouseClicked(0)
+        && ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows)
+        && ImGui::IsMouseHoveringRect(cellTop, cellBottom)) {
+        focusedCell_ = id;
+    }
+    if (focusedCell_ == id) {
+        ImGui::GetWindowDrawList()->AddRectFilled(
+            ImVec2(cellTop.x - 8.0f, cellTop.y),
+            ImVec2(cellTop.x - 5.0f, cellBottom.y),
+            ImGui::GetColorU32(ImGuiCol_SliderGrab));
     }
 
     ImGui::PopID();
@@ -539,6 +553,14 @@ void NotebookPanel::draw(float width, float height, GuiState& gui,
         if (modified()) title += " *";
         ImGui::TextDisabled("%s", title.c_str());
     }
+    // Right side: Editor swaps the view (notebook stays open; Cmd+\ or
+    // View > Toggle Notebook / Editor swaps back); Close ends the document.
+    float rightW = ImGui::CalcTextSize("Editor").x
+                 + ImGui::CalcTextSize("Close").x + 44.0f;
+    ImGui::SameLine(std::max(ImGui::GetContentRegionMax().x - rightW, 0.0f));
+    if (ImGui::SmallButton("Editor")) editorViewRequested_ = true;
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Close")) closeRequested_ = true;
     ImGui::Separator();
 
     float cellWidth = ImGui::GetContentRegionAvail().x;

@@ -90,6 +90,22 @@ public:
     // True while queued runs are waiting -- keeps the frame loop ticking.
     bool hasQueuedRuns() const { return !runQueue_.empty(); }
 
+    // The toolbar Close button was pressed; the app routes this through
+    // the same confirm-and-close flow as Cmd+W. One-shot.
+    bool takeCloseRequest() {
+        bool r = closeRequested_;
+        closeRequested_ = false;
+        return r;
+    }
+
+    // The toolbar Editor button was pressed: show the editor tabs while
+    // keeping the notebook open in the background. One-shot.
+    bool takeEditorViewRequest() {
+        bool r = editorViewRequested_;
+        editorViewRequested_ = false;
+        return r;
+    }
+
     // ---- History (M4) -----------------------------------------------------
     // One immutable history tree over cells + code text + claimed-panel
     // widget values. Continuous gestures commit once on release; typing
@@ -150,6 +166,8 @@ private:
     int pendingMoveDelta_ = 0;
 
     bool showHistory_ = false;
+    bool closeRequested_ = false;
+    bool editorViewRequested_ = false;
 
     // Set by onEvalDone; update() turns it into one history commit.
     std::string evalCommitLabel_;

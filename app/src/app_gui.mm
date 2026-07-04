@@ -81,6 +81,9 @@ enum class AppCmd {
     FindShow, FindNext, FindPrevious, FindUseSelection, FindUseSelectionReplace,
     // View (`arg` = font index for FontSet)
     FontIncrease, FontDecrease, FontSet,
+    // Swap the center pane between the open notebook and the editor tabs
+    // (the notebook document stays alive either way)
+    ToggleNotebookView,
     // Eval (dispatched by setting GuiState flags; processed after draw)
     EvalSelection, EvalLine, EvalFile,
 };
@@ -195,6 +198,7 @@ static std::string findMonoFont() {
 - (void)editIndent:(id)sender;
 - (void)editOutdent:(id)sender;
 - (void)findShow:(id)sender;
+- (void)viewToggleNotebook:(id)sender;
 - (void)findNext:(id)sender;
 - (void)findPrevious:(id)sender;
 - (void)findUseSelection:(id)sender;
@@ -226,6 +230,7 @@ static std::string findMonoFont() {
 - (void)findPrevious:(id)sender { gCmdQueue.push(AppCmd::FindPrevious); }
 - (void)findUseSelection:(id)sender { gCmdQueue.push(AppCmd::FindUseSelection); }
 - (void)findUseSelectionReplace:(id)sender { gCmdQueue.push(AppCmd::FindUseSelectionReplace); }
+- (void)viewToggleNotebook:(id)sender { gCmdQueue.push(AppCmd::ToggleNotebookView); }
 - (void)fontSizeAction:(id)sender {
     NSMenuItem* item = (NSMenuItem*)sender;
     int tag = (int)[item tag];
@@ -380,6 +385,12 @@ static void setupNativeMenuBar(const float* fontSizes, int numFontSizes) {
     // -- View menu -----------------------------------------------------------
     NSMenuItem* viewMenuItem = [[NSMenuItem alloc] init];
     NSMenu* viewMenu = [[NSMenu alloc] initWithTitle:@"View"];
+
+    NSMenuItem* toggleNotebookItem = [viewMenu addItemWithTitle:@"Toggle Notebook / Editor"
+        action:@selector(viewToggleNotebook:) keyEquivalent:@"\\"];
+    toggleNotebookItem.target = gMenuHandler;
+
+    [viewMenu addItem:[NSMenuItem separatorItem]];
 
     NSMenuItem* fontSizeMenuItem = [[NSMenuItem alloc] init];
     fontSizeMenuItem.title = @"Font Size";
@@ -697,6 +708,10 @@ int runGui(bridge::AppContext& appCtx) {
     OutputPanel outputPanel;
     ControlsPanel controlsPanel;
     NotebookPanel notebookPanel;
+    // Which pane the center shows while a notebook is open. Toggled by
+    // View > Toggle Notebook / Editor (Cmd+\); the notebook document
+    // stays alive (widgets, history, queued runs) while hidden.
+    bool notebookVisible = true;
 
     guiState.output.append("Tzopilotl. Cmd+Enter: eval block, "
                            "Shift+Enter: eval line, "
@@ -926,6 +941,7 @@ int runGui(bridge::AppContext& appCtx) {
             auto openNotebook = [&](std::string const& path) {
                 std::string err;
                 if (notebookPanel.open(path, appCtx, err)) {
+                    notebookVisible = true;
                     guiState.output.append("opened " + path, LineKind::Info);
                 } else {
                     guiState.output.append("notebook open failed: " + err,
@@ -957,7 +973,10 @@ int runGui(bridge::AppContext& appCtx) {
                         else if (choice == 2) proceed = false;
                         afterNativeDialog();
                     }
-                    if (proceed) notebookPanel.newDocument();
+                    if (proceed) {
+                        notebookPanel.newDocument();
+                        notebookVisible = true;
+                    }
                     break;
                 }
                 case AppCmd::FileOpen: {
@@ -974,7 +993,7 @@ int runGui(bridge::AppContext& appCtx) {
                     break;
                 }
                 case AppCmd::FileSave:
-                    if (notebookPanel.isOpen())
+                    if (notebookPanel.isOpen() && notebookVisible)
                         saveNotebook(false);
                     else if (editorPanel.hasFilePath())
                         editorPanel.save();
@@ -982,7 +1001,7 @@ int runGui(bridge::AppContext& appCtx) {
                         doSaveAs();
                     break;
                 case AppCmd::FileSaveAs:
-                    if (notebookPanel.isOpen())
+                    if (notebookPanel.isOpen() && notebookVisible)
                         saveNotebook(true);
                     else
                         doSaveAs();
@@ -996,7 +1015,7 @@ int runGui(bridge::AppContext& appCtx) {
                     break;
                 }
                 case AppCmd::FileClose:
-                    if (notebookPanel.isOpen()) {
+                    if (notebookPanel.isOpen() && notebookVisible) {
                         bool doClose = true;
                         if (notebookPanel.modified()) {
                             std::string name = notebookPanel.filePath().empty()
@@ -1020,12 +1039,14 @@ int runGui(bridge::AppContext& appCtx) {
                 // document history (or the editor panel) takes it.
                 case AppCmd::EditUndo:
                     if (io.WantTextInput) deferKey(ImGuiKey_Z);
-                    else if (notebookPanel.isOpen()) notebookPanel.undoDocument(appCtx);
+                    else if (notebookPanel.isOpen() && notebookVisible)
+                        notebookPanel.undoDocument(appCtx);
                     else editorPanel.undo();
                     break;
                 case AppCmd::EditRedo:
                     if (io.WantTextInput) deferKey(ImGuiKey_Z, true);
-                    else if (notebookPanel.isOpen()) notebookPanel.redoDocument(appCtx);
+                    else if (notebookPanel.isOpen() && notebookVisible)
+                        notebookPanel.redoDocument(appCtx);
                     else editorPanel.redo();
                     break;
                 case AppCmd::EditCut:
@@ -1132,6 +1153,10 @@ int runGui(bridge::AppContext& appCtx) {
                 case AppCmd::FontSet:
                     applyFontIdx(c.arg);
                     break;
+                case AppCmd::ToggleNotebookView:
+                    if (notebookPanel.isOpen())
+                        notebookVisible = !notebookVisible;
+                    break;
 
                 // -- Eval (flags processed after draw, when the ImGui tab
                 //    bar has committed the visually selected tab) -----------
@@ -1200,8 +1225,9 @@ int runGui(bridge::AppContext& appCtx) {
             // scrollbars are not affected by extra window nesting.
             ImGui::BeginGroup();
 
-            // Notebook replaces the editor pane while a document is open.
-            if (notebookPanel.isOpen())
+            // Notebook replaces the editor pane while a document is open
+            // and shown (View > Toggle Notebook / Editor swaps back).
+            if (notebookPanel.isOpen() && notebookVisible)
                 notebookPanel.draw(rightW, editorH, guiState, appCtx,
                                    session, controlsPanel);
             else
@@ -1229,7 +1255,9 @@ int runGui(bridge::AppContext& appCtx) {
             // Cmd+Enter / Shift+Enter run the focused cell, Cmd+Shift+Enter
             // runs all cells.
             // ---------------------------------------------------------------
-            if (notebookPanel.isOpen()) {
+            if (notebookPanel.isOpen())
+                notebookPanel.pumpRunQueue(guiState, appCtx, session);
+            if (notebookPanel.isOpen() && notebookVisible) {
                 if (guiState.evalSelection || guiState.evalLine) {
                     guiState.evalSelection = guiState.evalLine = false;
                     notebookPanel.runFocused(guiState, appCtx, session);
@@ -1238,7 +1266,6 @@ int runGui(bridge::AppContext& appCtx) {
                     guiState.evalFile = false;
                     notebookPanel.runAll();
                 }
-                notebookPanel.pumpRunQueue(guiState, appCtx, session);
             } else if (session && !guiState.asyncEval.busy()) {
                 if (guiState.evalSelection) {
                     guiState.evalSelection = false;
@@ -1282,7 +1309,12 @@ int runGui(bridge::AppContext& appCtx) {
             // panel cells, so their noteTapsVisible reports survive.)
             // ---------------------------------------------------------------
             if (appCtx.uiState) {
-                auto claimed = notebookPanel.claimedPanels();
+                // Panels rendered inline as notebook cells are skipped from
+                // the floating windows -- but only while the notebook is
+                // shown; hidden, its panels float so controls stay usable.
+                auto claimed = (notebookPanel.isOpen() && notebookVisible)
+                             ? notebookPanel.claimedPanels()
+                             : std::vector<std::string>{};
                 controlsPanel.draw(*appCtx.uiState,
                                    claimed.empty() ? nullptr : &claimed);
                 controlsPanel.dispatch(*appCtx.uiState, appCtx);
@@ -1292,6 +1324,13 @@ int runGui(bridge::AppContext& appCtx) {
             // coalesce, eval/structure commits (after dispatch so committed
             // values are the ones just sent).
             notebookPanel.update(appCtx);
+
+            // Toolbar Close button routes through the same confirm-and-
+            // close flow as Cmd+W (handled next frame by dispatch).
+            if (notebookPanel.takeCloseRequest())
+                gCmdQueue.push(AppCmd::FileClose);
+            if (notebookPanel.takeEditorViewRequest())
+                notebookVisible = false;
 
             // Render
             ImGui::Render();

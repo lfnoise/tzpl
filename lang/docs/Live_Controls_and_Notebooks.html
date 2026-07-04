@@ -526,11 +526,13 @@ panel(<span class="str">""</span>);               <span class="cmt">-- back to t
 <!-- -------------------------------- -->
 <h3 id="nb-create">4.1 Creating a Notebook</h3>
 
-<p><strong>File &gt; New Notebook</strong> (<kbd>Cmd+Shift+N</kbd>). The notebook takes over the editor pane; the console strip stays below it, and your <code>.x</code> editor tabs are untouched underneath &mdash; close the notebook (<kbd>Cmd+W</kbd>) and the editor returns.</p>
+<p><strong>File &gt; New Notebook</strong> (<kbd>Cmd+Shift+N</kbd>). The notebook takes over the editor pane; the console strip stays below it, and your <code>.x</code> editor tabs are untouched underneath &mdash; the <strong>Editor</strong> button at the right of the notebook toolbar (or <kbd>Cmd+\</kbd>, View &gt; Toggle Notebook / Editor) swaps back to your editor tabs <em>without closing the notebook</em> &mdash; its widgets, history, and queued runs stay live, and its panels appear as floating windows while it's hidden. <strong>Close</strong> (or <kbd>Cmd+W</kbd>) ends the document.</p>
 
 <p>Only <strong>one notebook is open at a time</strong>: New Notebook or opening a <code>.tzd</code> replaces the current one (you are asked to save first if it has unsaved changes).</p>
 
-<p>The toolbar across the top: <strong>+ code / + prose / + panel</strong> insert a cell after the focused one; <strong>Run All</strong> runs every code cell top to bottom; <strong>Undo / Redo / History</strong> drive the document history (<a href="#nb-history">&sect;4.6</a>). The title shows the file path, with <code>*</code> when modified.</p>
+<p>The toolbar across the top: <strong>+ code / + prose / + panel</strong> insert a cell <em>after the selected cell</em> (or at the end if none is selected); <strong>Run All</strong> runs every code cell top to bottom; <strong>Undo / Redo / History</strong> drive the document history (<a href="#nb-history">&sect;4.6</a>); <strong>Editor</strong> swaps to the editor tabs (notebook stays open); <strong>Close</strong> ends the document. The title shows the file path, with <code>*</code> when modified.</p>
+
+<p>Click anywhere in a cell to <strong>select</strong> it &mdash; the selected cell shows an accent bar along its left edge. Selection determines where new cells insert and which cell <kbd>Cmd+Enter</kbd> runs.</p>
 
 <!-- -------------------------------- -->
 <h3 id="nb-cells">4.2 Cell Types</h3>
@@ -549,7 +551,7 @@ panel(<span class="str">""</span>);               <span class="cmt">-- back to t
 <p>Cells share the <strong>one live session</strong> &mdash; the same globals, modules, and running audio as the editor and REPL. There is no hidden kernel: <code>let</code>s from one cell are visible to the next, and evaluation happens only when you ask.</p>
 
 <ul>
-  <li><kbd>Cmd+Enter</kbd> or <kbd>Shift+Enter</kbd> &mdash; run the focused cell (hover or click a cell to focus it).</li>
+  <li><kbd>Cmd+Enter</kbd> or <kbd>Shift+Enter</kbd> &mdash; run the selected cell (click a cell to select it; the accent bar shows which one).</li>
   <li><strong>Run</strong> button &mdash; run that cell.</li>
   <li><kbd>Cmd+Shift+Enter</kbd> or <strong>Run All</strong> &mdash; run all code cells top to bottom, stopping at the first error.</li>
 </ul>
@@ -607,6 +609,7 @@ panel(<span class="str">""</span>);               <span class="cmt">-- back to t
 <tr><td><kbd>Cmd+Shift+N</kbd></td><td colspan="2">new notebook</td></tr>
 <tr><td><kbd>Cmd+S</kbd></td><td>save file</td><td>save notebook (.tzd)</td></tr>
 <tr><td><kbd>Cmd+W</kbd></td><td>close tab</td><td>close notebook</td></tr>
+<tr><td><kbd>Cmd+\</kbd></td><td colspan="2">toggle notebook / editor view (notebook stays open)</td></tr>
 <tr><td><kbd>Cmd+Z</kbd> / <kbd>Cmd+Shift+Z</kbd></td><td>text undo / redo</td><td>text undo in a focused cell; document history otherwise</td></tr>
 <tr><td><kbd>Cmd+K</kbd></td><td colspan="2">clear console</td></tr>
 </table>
