@@ -686,6 +686,24 @@ int runGui(bridge::AppContext& appCtx) {
     ImGui_ImplGlfw_InitForOther(window, true);
     ImGui_ImplMetal_Init(device);
 
+    // macOS convention: Ctrl+click acts as a right-click. AppKit does
+    // this translation but GLFW bypasses it, so reproduce it here --
+    // replace ImGui's installed callback with one that translates the
+    // whole press/release pair, then hands the event to the backend.
+    glfwSetMouseButtonCallback(
+        window, [](GLFWwindow* w, int button, int action, int mods) {
+            static bool ctrlClickAsRight = false;
+            if (button == GLFW_MOUSE_BUTTON_LEFT) {
+                if (action == GLFW_PRESS && (mods & GLFW_MOD_CONTROL))
+                    ctrlClickAsRight = true;
+                if (ctrlClickAsRight) {
+                    button = GLFW_MOUSE_BUTTON_RIGHT;
+                    if (action == GLFW_RELEASE) ctrlClickAsRight = false;
+                }
+            }
+            ImGui_ImplGlfw_MouseButtonCallback(w, button, action, mods);
+        });
+
     // --- GUI state and panels ----------------------------------------------
     GuiState guiState;
 
