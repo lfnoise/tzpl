@@ -1793,9 +1793,27 @@ ExprPtr Parser::parsePrimary() {
                         ec->typeArgs = std::move(typeArgs);
                         return ec;
                     }
-                    // Parsed type args but not followed by { or . — this shouldn't happen
-                    // in well-formed code, but treat as struct literal attempt
-                    error("Expected '{' or '.' after type arguments");
+                    if (check(TokenKind::LParen)) {
+                        // Explicit call-site type args: Name<Types>(args)
+                        SourceRange openLoc = currentLoc();
+                        advance(); // consume (
+                        ExprList callArgs;
+                        if (!check(TokenKind::RParen)) {
+                            do {
+                                callArgs.push_back(parseCallArgument());
+                            } while (match(TokenKind::Comma));
+                        }
+                        expectClosing(TokenKind::RParen, "(", openLoc);
+                        auto callee = std::make_unique<IdentifierExpr>(tok.loc, tok.text);
+                        auto call = std::make_unique<CallExpr_>(
+                            tok.loc, std::move(callee), std::move(callArgs));
+                        call->typeArgs = std::move(typeArgs);
+                        return call;
+                    }
+                    // Parsed type args but not followed by {, . or ( — this
+                    // shouldn't happen in well-formed code, but treat as
+                    // struct literal attempt
+                    error("Expected '{', '.' or '(' after type arguments");
                     return std::make_unique<IdentifierExpr>(tok.loc, tok.text);
                 }
                 // tryParseTypeArgs failed — fall through to normal handling

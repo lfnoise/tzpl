@@ -1,0 +1,13 @@
+Int
+Float
+Bool
+String
+[Int]
+[String:Float]
+(Int, Bool)
+[[Float]]
+Point
+Color
+false
+true
+true

@@ -1,0 +1,5 @@
+Type error [tests/errors/type_args_unsupported.x:2:1]
+  |
+2 | sin<Int>(0.5) println;
+  | ^^^
+  'sin' does not take explicit type arguments

@@ -72,6 +72,21 @@ inline void registerTemplate(Compiler& compiler, FuncMap& functions,
     functions[name].push_back(info);
 }
 
+// Same, for resolvers that receive explicit call-site type args (f<T>(x)).
+inline void registerTemplateEx(Compiler& compiler, FuncMap& functions,
+    const std::string& name, BuiltinTemplateResolverEx resolver,
+    bool rtSafe = true, bool acceptsInlineArgs = false)
+{
+    FuncInfo info{};
+    info.isTemplate = true;
+    info.builtinTemplateEx = resolver;
+    info.bodyChecked = true;
+    info.isBuiltin = true;
+    info.rtSafe = rtSafe;
+    info.acceptsInlineArgs = acceptsInlineArgs;
+    functions[name].push_back(info);
+}
+
 // ============================================================================
 // Array helpers
 // ============================================================================

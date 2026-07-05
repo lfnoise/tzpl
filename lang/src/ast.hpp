@@ -269,6 +269,11 @@ struct UnaryOpExpr : Expr {
 struct CallExpr_ : Expr {
     ExprPtr callee;
     ExprList args;
+    // Explicit call-site type args: f<T>(x). Parsed only for identifier
+    // callees; consumed by builtin template resolvers (BuiltinTemplateResolverEx).
+    std::vector<TypeExprPtr> typeArgs;
+    std::vector<Type*> resolvedTypeArgs;  // set by type checker per instantiation
+    bool typeArgsUsed = false;            // set when a resolver consumed them
     i32 resolvedFuncGlobalIndex = -1;  // Set by type checker for overload resolution
     bool isBuiltinCall = false;        // Set by type checker: true for primitive built-in functions
     bool builtinAcceptsInlineArgs = false;  // Phase 4g.6: builtin reads inline-composite args natively

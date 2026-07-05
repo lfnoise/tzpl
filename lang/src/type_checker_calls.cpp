@@ -35,6 +35,13 @@ namespace ts {
 Type* TypeChecker::finalizeResolvedCall(CallExpr_* expr, FuncInfo* func,
                                          const std::string& name,
                                          const std::vector<Type*>& argTypes) {
+    // Explicit type args are only meaningful to type-arg-aware builtins
+    // (BuiltinTemplateResolverEx); anywhere else they'd be silently ignored.
+    if (!expr->typeArgs.empty() && !expr->typeArgsUsed) {
+        error(expr->loc, "'" + name + "' does not take explicit type arguments");
+        return compiler_.intType();
+    }
+
     // RT safety check
     checkRTSafety(func, name, expr->loc);
 
@@ -1098,6 +1105,15 @@ Type* TypeChecker::inferCall(CallExpr_* expr) {
     // of the same AST node (template bodies share AST across monomorphizations)
     expr->autoMapArgs.clear();
     expr->innerAutoMapArgs.clear();
+
+    // Resolve explicit call-site type args (f<T>(x)) fresh per instantiation.
+    expr->resolvedTypeArgs.clear();
+    expr->typeArgsUsed = false;
+    for (auto& ta : expr->typeArgs) {
+        Type* t = resolveTypeExpr(ta.get());
+        if (!t) return compiler_.intType();  // error already reported
+        expr->resolvedTypeArgs.push_back(t);
+    }
 
     // Check for std-qualified or module-qualified function call: std.func(args) or module.func(args)
     if (expr->callee->kind == ASTNode::FieldExpr) {

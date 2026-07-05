@@ -828,11 +828,35 @@ FuncInfo* TypeChecker::tryResolveTemplate(const std::string& name,
         if (!fi.isTemplate) continue;
 
         // Built-in template: use the resolver callback (no AST node needed)
-        if (fi.builtinTemplate) {
+        if (fi.builtinTemplate || fi.builtinTemplateEx) {
             std::vector<Type*> paramTypes;
             Type* retType = nullptr;
             CFun cfun = nullptr;
-            if (fi.builtinTemplate(compiler_, argTypes, paramTypes, retType, cfun)) {
+            bool resolved;
+            // Ex monos instantiated with explicit type args live in a
+            // MANGLED bucket ("deserialize<Int>"): the same paramTypes can
+            // monomorphize differently per type-arg list, and plain calls
+            // must never resolve to a type-arg'd instantiation by accident.
+            std::string monoBucket = name;
+            if (fi.builtinTemplateEx) {
+                static const std::vector<Type*> kNoTypeArgs;
+                auto const& tArgs = callExpr ? callExpr->resolvedTypeArgs : kNoTypeArgs;
+                resolved = fi.builtinTemplateEx(compiler_, argTypes, tArgs,
+                                                paramTypes, retType, cfun);
+                if (resolved && !tArgs.empty()) {
+                    callExpr->typeArgsUsed = true;
+                    monoBucket += "<";
+                    for (size_t i = 0; i < tArgs.size(); ++i) {
+                        if (i > 0) monoBucket += ",";
+                        VMString ts = tArgs[i]->str();
+                        monoBucket.append(ts.data(), ts.size());
+                    }
+                    monoBucket += ">";
+                }
+            } else {
+                resolved = fi.builtinTemplate(compiler_, argTypes, paramTypes, retType, cfun);
+            }
+            if (resolved) {
                 // Detect variadic builtin: paramTypes differs from argTypes due to packing.
                 // Cases: (1) resolver returns fewer params (3 args → 2 params),
                 //        (2) resolver returns more params (1 arg → 2 params, zero variadic),
@@ -850,25 +874,28 @@ FuncInfo* TypeChecker::tryResolveTemplate(const std::string& name,
                 // builtins like println that preserve exact arg types don't get
                 // incorrectly matched via numeric promotion (e.g. println(Int) → println(Float))
                 if (!builtinVariadic) {
-                    for (auto& fi2 : it->second) {
-                        if (fi2.isTemplate || fi2.paramTypes.size() != paramTypes.size()) continue;
-                        bool match = true;
-                        for (size_t j = 0; j < paramTypes.size(); ++j) {
-                            if (fi2.paramTypes[j] != paramTypes[j]) { match = false; break; }
-                        }
-                        if (match) {
-                            if (callExpr) {
-                                callExpr->resolvedFuncGlobalIndex = (i32)fi2.globalIndex;
-                                callExpr->isBuiltinCall = fi2.isBuiltin; callExpr->builtinAcceptsInlineArgs = fi2.acceptsInlineArgs;
+                    auto bucketIt = functions_.find(monoBucket);
+                    if (bucketIt != functions_.end()) {
+                        for (auto& fi2 : bucketIt->second) {
+                            if (fi2.isTemplate || fi2.paramTypes.size() != paramTypes.size()) continue;
+                            bool match = true;
+                            for (size_t j = 0; j < paramTypes.size(); ++j) {
+                                if (fi2.paramTypes[j] != paramTypes[j]) { match = false; break; }
                             }
-                            return &fi2;
+                            if (match) {
+                                if (callExpr) {
+                                    callExpr->resolvedFuncGlobalIndex = (i32)fi2.globalIndex;
+                                    callExpr->isBuiltinCall = fi2.isBuiltin; callExpr->builtinAcceptsInlineArgs = fi2.acceptsInlineArgs;
+                                }
+                                return &fi2;
+                            }
                         }
                     }
                 }
 
                 // For variadic builtins, check cache by paramTypes (the packed signature)
                 if (builtinVariadic) {
-                    if (auto* existing = tryResolveOverload(name, paramTypes)) {
+                    if (auto* existing = tryResolveOverload(monoBucket, paramTypes)) {
                         if (callExpr) {
                             callExpr->resolvedFuncGlobalIndex = (i32)existing->globalIndex;
                             callExpr->isBuiltinCall = existing->isBuiltin; callExpr->builtinAcceptsInlineArgs = existing->acceptsInlineArgs;
@@ -884,9 +911,14 @@ FuncInfo* TypeChecker::tryResolveTemplate(const std::string& name,
                 // Create monomorphized FuncInfo
                 u32 globalIdx = compiler_.addCodeGlobal();
                 // Store a TupleType of paramTypes in the Primitive's type_
-                // so builtins like print/println can access arg types at runtime
+                // so builtins like print/println can access arg types at runtime.
+                // Explicit type args are appended AFTER the params (Ex
+                // builtins read them back at fields_[paramCount + i]).
                 TypeVec primFields(rt::STLAllocator<Type*>(nullptr));
                 for (Type* pt2 : paramTypes) primFields.push_back(pt2);
+                if (fi.builtinTemplateEx && callExpr) {
+                    for (Type* ta : callExpr->resolvedTypeArgs) primFields.push_back(ta);
+                }
                 auto* primTupleType = compiler_.tupleType(primFields);
                 auto* prim = new Primitive(primTupleType);
                 prim->cfun_ = cfun;
@@ -905,7 +937,7 @@ FuncInfo* TypeChecker::tryResolveTemplate(const std::string& name,
 
                 FuncInfo* result = monoPtr.get();
                 monoStorage_.push_back(std::move(monoPtr));
-                functions_[name].push_back(*result);
+                functions_[monoBucket].push_back(*result);
 
                 if (callExpr) {
                     callExpr->resolvedFuncGlobalIndex = (i32)globalIdx;

@@ -76,6 +76,16 @@ using BuiltinTemplateResolver = bool (*)(Compiler& compiler,
     Type*& outReturnType,
     CFun& outCfun);
 
+// Extended resolver that also receives explicit call-site type args
+// (f<T>(x), CallExpr_::resolvedTypeArgs; empty when none were written).
+// Lets a builtin derive its return type from T (e.g. deserialize<T>).
+using BuiltinTemplateResolverEx = bool (*)(Compiler& compiler,
+    const std::vector<Type*>& argTypes,
+    const std::vector<Type*>& typeArgs,
+    std::vector<Type*>& outParamTypes,
+    Type*& outReturnType,
+    CFun& outCfun);
+
 // Function info
 struct FuncInfo {
     Type* returnType;
@@ -105,6 +115,7 @@ struct FuncInfo {
 
     // Built-in template support (no AST node needed)
     BuiltinTemplateResolver builtinTemplate = nullptr;
+    BuiltinTemplateResolverEx builtinTemplateEx = nullptr;  // type-arg-aware variant
 
     // Variadic function support
     bool isVariadic = false;

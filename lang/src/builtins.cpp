@@ -2473,6 +2473,33 @@ static bool resolve_toString(Compiler& compiler, const std::vector<Type*>& args,
 }
 
 // ============================================================================
+// typeName builtin -- first consumer of explicit call-site type args
+// ============================================================================
+
+// typeName<T>() String -- the display name of T. The type arg is smuggled
+// through the monomorphized Primitive's type_ TupleType: params first, then
+// explicit type args (here: no params, so T is fields_[0]).
+static void builtin_typeName(VM& vm, u16 dst, u16, u16) {
+    auto* prim = static_cast<Primitive*>(vm.currentPrimitive());
+    auto* tt = static_cast<TupleType*>(prim->type_);
+    Type* t = tt->fields_[0];
+    auto* result = new StringObj();
+    result->s = t->str();
+    registerNewObj(result);
+    vm.reg(dst).o = result;
+}
+
+static bool resolve_typeName(Compiler& compiler, const std::vector<Type*>& args,
+    const std::vector<Type*>& typeArgs,
+    std::vector<Type*>& pt, Type*& rt, CFun& cf) {
+    if (!args.empty() || typeArgs.size() != 1 || !typeArgs[0]) return false;
+    pt = {};
+    rt = compiler.stringType();
+    cf = builtin_typeName;
+    return true;
+}
+
+// ============================================================================
 // prettyString / prettyPrint builtins
 // ============================================================================
 
@@ -4011,6 +4038,7 @@ void registerBuiltinFunctions(Compiler& compiler,
     registerTemplate(compiler, functions, "toString",     resolve_toString, /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
     registerTemplate(compiler, functions, "prettyString", resolve_prettyString, /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
     registerTemplate(compiler, functions, "prettyPrint",  resolve_prettyPrint,  /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplateEx(compiler, functions, "typeName",   resolve_typeName,     /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
 
     // --- copy: shallow copy of Array, Map, or Set ---
     registerTemplate(compiler, functions, "copy",         resolve_copy,     /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
