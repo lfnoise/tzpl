@@ -457,6 +457,54 @@ static void drawXY(UIWidget& w) {
     ImGui::Text("%s  (%.4g, %.4g)", w.name.c_str(), w.values[0], w.values[1]);
 }
 
+// Multislider hover gestures: keys act on ALL bars (independent
+// randoms per bar for r and j); the wheel adjusts the single bar
+// under the cursor.
+static void hoverAdjustMultiSlider(UIWidget& w, ImVec2 origin,
+                                   float width) {
+    if (!hoverAdjustBegin(w)) return;
+    int n = (int)w.values.size();
+    if (n < 1) return;
+
+    auto stamp = [&] {
+        markDirty(w);
+        w.gestureActive = true;
+        w.wheelTime = ImGui::GetTime();
+    };
+    auto setBar = [&](int i, float p) {
+        w.values[(size_t)i] = w.spec.map(std::clamp(p, 0.0f, 1.0f));
+    };
+    auto setAll = [&](auto posOf) {
+        for (int i = 0; i < n; ++i) setBar(i, posOf(i));
+        stamp();
+    };
+
+    if (ImGui::IsKeyPressed(ImGuiKey_C)) setAll([](int) { return 0.5f; });
+    if (ImGui::IsKeyPressed(ImGuiKey_LeftBracket))
+        setAll([](int) { return 0.0f; });
+    if (ImGui::IsKeyPressed(ImGuiKey_RightBracket))
+        setAll([](int) { return 1.0f; });
+    if (ImGui::IsKeyPressed(ImGuiKey_R))
+        setAll([&](int) { return hoverUniform(0.0f, 1.0f); });
+    if (ImGui::IsKeyPressed(ImGuiKey_J)) {
+        setAll([&](int i) {
+            float p = (float)w.spec.unmap(w.values[(size_t)i]);
+            return hoverBounce(p + hoverUniform(-0.05f, 0.05f));
+        });
+    }
+
+    float wheel = ImGui::GetIO().MouseWheel;
+    if (wheel != 0.0f) {
+        int idx = std::clamp(
+            (int)((ImGui::GetIO().MousePos.x - origin.x) / width * n),
+            0, n - 1);
+        float p = (float)w.spec.unmap(w.values[(size_t)idx]);
+        setBar(idx, p - wheel * 0.01f);
+        stamp();
+    }
+    hoverOwnWheel();
+}
+
 static void drawMultiSlider(UIWidget& w) {
     int n = (int)w.values.size();
     if (n < 1) return;
@@ -475,10 +523,12 @@ static void drawMultiSlider(UIWidget& w) {
     }
     if (active) {
         w.gestureActive = true;
-    } else if (w.gestureActive) {
+        w.wheelTime = 0.0;  // a drag owns the gesture; hover timer off
+    } else if (w.gestureActive && w.wheelTime == 0.0) {
         w.gestureActive = false;
         w.gestureEnded = true;
     }
+    hoverAdjustMultiSlider(w, origin, width);
     auto* dl = ImGui::GetWindowDrawList();
     dl->AddRectFilled(origin, ImVec2(origin.x + width, origin.y + height),
                       ImGui::GetColorU32(ImGuiCol_FrameBg));
