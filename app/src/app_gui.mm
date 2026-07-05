@@ -1398,10 +1398,12 @@ int runGui(bridge::AppContext& appCtx) {
                 // no text field owns the keyboard -- notebook, perform
                 // mode, and floating panels alike.
                 dispatchWidgetKeys(*appCtx.uiState);
-                // Panels rendered inline as notebook cells are skipped from
-                // the floating windows -- but only while the notebook is
-                // shown; hidden, its panels float so controls stay usable.
-                auto claimed = (notebookPanel.isOpen() && notebookVisible)
+                // Panels claimed by the open notebook NEVER float -- not
+                // while the notebook is hidden either (closing a floating
+                // window deletes widgets, a trap when they were only
+                // borrowed from the document). Hidden notebook = its
+                // controls are simply not shown until it returns.
+                auto claimed = notebookPanel.isOpen()
                              ? notebookPanel.claimedPanels()
                              : std::vector<std::string>{};
                 controlsPanel.draw(*appCtx.uiState,
