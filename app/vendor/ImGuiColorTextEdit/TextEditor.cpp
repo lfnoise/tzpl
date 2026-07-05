@@ -911,6 +911,8 @@ void TextEditor::HandleKeyboardInputs()
 			Undo();
 		else if (!IsReadOnly() && ctrl && !shift && !alt && ImGui::IsKeyPressed(ImGuiKey_Y))
 			Redo();
+		else if (!IsReadOnly() && ctrl && shift && !alt && ImGui::IsKeyPressed(ImGuiKey_Z))
+			Redo();
 		else if (!ctrl && !alt && ImGui::IsKeyPressed(ImGuiKey_UpArrow))
 			MoveUp(1, shift);
 		else if (!ctrl && !alt && ImGui::IsKeyPressed(ImGuiKey_DownArrow))

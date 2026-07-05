@@ -131,6 +131,13 @@ static ImGuiKey gDeferredEditKey = ImGuiKey_None;
 static bool gDeferredEditShift = false;
 static int gDeferredEditFrame = 0;  // 0=idle, 1=inject key-down, 2=inject key-up
 
+// io.WantTextInput as of the END of the last frame. Commands dispatch
+// right after NewFrame, which has already reset WantTextInput; the cell
+// TextEditors only re-assert it later, during their draw. Routing edit
+// commands on the live flag alone would steer a focused cell's paste
+// into the (hidden) editor panel, so route on either.
+static bool gTextFieldFocusedLastFrame = false;
+
 // Quit request flag (from Cmd+Q or window close button); handled at the top
 // of the frame loop, outside command dispatch.
 static bool gWantsToQuit = false;
@@ -1040,31 +1047,37 @@ int runGui(bridge::AppContext& appCtx) {
                 // own fine-grained undo; otherwise the open notebook's
                 // document history (or the editor panel) takes it.
                 case AppCmd::EditUndo:
-                    if (io.WantTextInput) deferKey(ImGuiKey_Z);
+                    if (io.WantTextInput || gTextFieldFocusedLastFrame)
+                        deferKey(ImGuiKey_Z);
                     else if (notebookPanel.isOpen() && notebookVisible)
                         notebookPanel.undoDocument(appCtx);
                     else editorPanel.undo();
                     break;
                 case AppCmd::EditRedo:
-                    if (io.WantTextInput) deferKey(ImGuiKey_Z, true);
+                    if (io.WantTextInput || gTextFieldFocusedLastFrame)
+                        deferKey(ImGuiKey_Z, true);
                     else if (notebookPanel.isOpen() && notebookVisible)
                         notebookPanel.redoDocument(appCtx);
                     else editorPanel.redo();
                     break;
                 case AppCmd::EditCut:
-                    if (io.WantTextInput) deferKey(ImGuiKey_X);
+                    if (io.WantTextInput || gTextFieldFocusedLastFrame)
+                        deferKey(ImGuiKey_X);
                     else editorPanel.cut();
                     break;
                 case AppCmd::EditCopy:
-                    if (io.WantTextInput) deferKey(ImGuiKey_C);
+                    if (io.WantTextInput || gTextFieldFocusedLastFrame)
+                        deferKey(ImGuiKey_C);
                     else if (!outputPanel.tryCopy()) editorPanel.copy();
                     break;
                 case AppCmd::EditPaste:
-                    if (io.WantTextInput) deferKey(ImGuiKey_V);
+                    if (io.WantTextInput || gTextFieldFocusedLastFrame)
+                        deferKey(ImGuiKey_V);
                     else editorPanel.paste();
                     break;
                 case AppCmd::EditSelectAll:
-                    if (io.WantTextInput) deferKey(ImGuiKey_A);
+                    if (io.WantTextInput || gTextFieldFocusedLastFrame)
+                        deferKey(ImGuiKey_A);
                     else if (!outputPanel.trySelectAll()) editorPanel.selectAll();
                     break;
                 case AppCmd::EditClearOutput:
@@ -1337,6 +1350,12 @@ int runGui(bridge::AppContext& appCtx) {
                 gCmdQueue.push(AppCmd::FileClose);
             if (notebookPanel.takeEditorViewRequest())
                 notebookVisible = false;
+
+            // All windows have drawn: WantTextInput now reflects any
+            // focused text field, including the cell TextEditors that
+            // only assert it during their draw. Snapshot for next
+            // frame's edit-command routing.
+            gTextFieldFocusedLastFrame = io.WantTextInput;
 
             // Render
             ImGui::Render();
