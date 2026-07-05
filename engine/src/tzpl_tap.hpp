@@ -23,8 +23,10 @@
 //  Engine's tap registry, and installed on a silo's fixed tap table by
 //  TapOutletCmd on the RT thread. Each sample the silo accumulates
 //  peak/RMS (published to atomics every publishPeriod samples) and, in
-//  scope mode, pushes channel 0 into a drop-on-full FIFO -- the RT
-//  thread never blocks and never allocates.
+//  scope mode, pushes ALL channels of the outlet into a drop-on-full
+//  FIFO as interleaved frames (whole frames or nothing, so channel
+//  alignment never slips) -- the RT thread never blocks and never
+//  allocates.
 //
 
 #ifndef tzpl_tap_hpp
@@ -46,12 +48,17 @@ struct TapSlot {
     std::atomic<f32> peak{0.0f};
     std::atomic<f32> rms{0.0f};
 
-    // Scope samples (channel 0). Pushed on RT (drop-on-full), drained by
-    // the GUI thread via tapDrain().
+    // Scope samples, interleaved frames of `chans` channels. Pushed on RT
+    // (drop-on-full, whole frames only), drained via tapDrain().
     AtomicFifo<f32> fifo;
 
     TapMode const mode;
     int const publishPeriod;
+
+    // Channel count of the tapped outlet (set at bundle submit, before the
+    // RT install; capped at kMaxScopeChans for scope capture).
+    int chans = 1;
+    static constexpr int kMaxScopeChans = 16;
 
     // RT-thread-only accumulation state.
     f32 accumPeak = 0.0f;

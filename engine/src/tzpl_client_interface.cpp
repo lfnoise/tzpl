@@ -1104,6 +1104,9 @@ static tzpl_SErr applyTapOutlet(Engine* e, Silo* s, CommandList& out,
             tapID, std::make_unique<TapSlot>(static_cast<TapMode>(mode)));
         if (!inserted) return tzpl_errAlreadyAdded;
         slot = it->second.get();
+        slot->chans = std::min(port->type_.chans,
+                               (decltype(port->type_.chans))TapSlot::kMaxScopeChans);
+        if (slot->chans < 1) slot->chans = 1;
     }
     out.add(new TapOutletCmd(e, nodeID, outlet, tapID, slot));
     return tzpl_errNone;
@@ -1612,6 +1615,13 @@ f32 tapRms(Engine* e, i64 tapID) {
     auto it = e->taps_.find(tapID);
     return it == e->taps_.end() ? 0.f
          : it->second->rms.load(std::memory_order_relaxed);
+}
+
+int tapChans(Engine* e, i64 tapID) {
+    if (!e) return 0;
+    std::lock_guard<std::mutex> lck(e->nrt_lock_);
+    auto it = e->taps_.find(tapID);
+    return it == e->taps_.end() ? 0 : it->second->chans;
 }
 
 int tapDrain(Engine* e, i64 tapID, f32* dst, int maxSamples) {

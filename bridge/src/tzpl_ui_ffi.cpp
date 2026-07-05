@@ -484,12 +484,26 @@ static void ffi_uiTapRms(ts::VM& vm, u16 dst, u16, u16 argBase) {
                   ? engine::tapRms(ctx->engine, tapID) : 0.0;
 }
 
+// fn uiTapChans(id Int) Int
+static void ffi_uiTapChans(ts::VM& vm, u16 dst, u16, u16 argBase) {
+    auto* ctx = getAppContext(vm);
+    long tapID = widgetTapID(vm, argBase);
+    vm.reg(dst).i = (ctx && ctx->engine && tapID)
+                  ? engine::tapChans(ctx->engine, tapID) : 0;
+}
+
 // fn uiTapSamples(id Int, max Int) Array[Float]
+// Returns interleaved frames of uiTapChans(id) channels. The drain count
+// is clamped to a frame multiple so subsequent consumers (this call or
+// the GUI scope) stay frame-aligned.
 static void ffi_uiTapSamples(ts::VM& vm, u16 dst, u16, u16 argBase) {
     auto* ctx = getAppContext(vm);
     long tapID = widgetTapID(vm, argBase);
     int maxSamples = static_cast<int>(vm.reg(argBase + 1).i);
     maxSamples = std::min(std::max(maxSamples, 0), 65536);
+    int chans = (ctx && ctx->engine && tapID)
+              ? std::max(1, engine::tapChans(ctx->engine, tapID)) : 1;
+    maxSamples -= maxSamples % chans;
 
     std::vector<float> buf(maxSamples);
     int n = 0;
@@ -757,6 +771,7 @@ void registerUIFFI(ts::Compiler& compiler) {
     reg("uiWaveform",     Int,  {String, Int, Int},             ffi_uiWaveform);
     reg("uiTapPeak",      Float, {Int},                         ffi_uiTapPeak);
     reg("uiTapRms",       Float, {Int},                         ffi_uiTapRms);
+    reg("uiTapChans",     Int,  {Int},                          ffi_uiTapChans);
     reg("uiTapSamples",   FloatArray, {Int, Int},               ffi_uiTapSamples);
     reg("uiControl",      Int,  {Int, String, Int},             ffi_uiControl);
     reg("uiControls",     IntArray, {Int, Int},                 ffi_uiControls);

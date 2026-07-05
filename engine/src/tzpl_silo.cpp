@@ -68,7 +68,8 @@ tzpl_SErr Silo::installTap(TapSlot* slot, Node* node, int outlet, i64 tapID) {
         t.slot = slot;
         t.node = node;
         t.buf = static_cast<f32 const*>(node->synth->outlets[outlet]);
-        t.chans = node->outs[outlet].type_.chans;
+        // slot->chans was set at bundle submit (capped for scope capture).
+        t.chans = slot->chans;
         t.tapID = tapID;
         anyTaps_ = true;
         return tzpl_errNone;
@@ -126,7 +127,11 @@ void Silo::processTaps() {
             ts->accumCount = 0;
         }
         if (ts->mode == tapScope) {
-            ts->fifo.push(t.buf[0]); // drop-on-full: scopes tolerate gaps
+            // Whole interleaved frames or nothing, so a full FIFO drops
+            // frames without slipping channel alignment.
+            if (ts->fifo.space() >= t.chans) {
+                for (int c = 0; c < t.chans; ++c) ts->fifo.push(t.buf[c]);
+            }
         }
     }
 }

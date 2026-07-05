@@ -72,6 +72,16 @@ public:
 		front_.store(f+1, std::memory_order_release);
 		return true;
 	}
+
+	// Free slots, as seen by the PRODUCER. Conservative: the consumer may
+	// advance front_ concurrently, so the true space is >= this value.
+	// Lets a producer push an N-element group (e.g. one interleaved audio
+	// frame) atomically-or-not-at-all.
+	int space() {
+		int b = back_.load(std::memory_order_relaxed);
+		pfront = front_.load(std::memory_order_acquire);
+		return pfront + size_ - b;
+	}
 //	int numPushed() const { return back_.load(); }
 //	int numPopped() const { return front_.load(); }
 };

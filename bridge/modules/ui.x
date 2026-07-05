@@ -101,6 +101,12 @@ fn scope(name String, node Int, outlet Int = 0, silo Int = 0) Widget =
 -- GUI scope display.
 fn peakLevel(w Widget) Float = uiTapPeak(w.0);
 fn rmsLevel(w Widget) Float = uiTapRms(w.0);
+
+-- Channel count captured by a tap widget's scope.
+fn tapChannels(w Widget) Int = uiTapChans(w.0);
+
+-- Raw scope samples: interleaved frames of tapChannels(w) channels
+-- (the count is clamped to whole frames).
 fn samples(w Widget, max Int = 4096) [Float] = uiTapSamples(w.0, max);
 
 -- Static data plot; update with setData.

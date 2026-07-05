@@ -23,6 +23,7 @@
 #include <algorithm>
 #include <cmath>
 #include <string>
+#include <vector>
 
 // All widget interaction happens with UIState::mtx held (GUI thread only).
 // Never call into the VM from here (lock order: see tzpl_ui_state.hpp).
@@ -128,26 +129,65 @@ static void drawMeter(UIWidget& w) {
 
 static void drawScope(UIWidget& w) {
     const int displayN = 512;
-    auto const& ring = w.scopeRing;
-    int n = static_cast<int>(ring.size());
+    int chans = std::max(1, w.scopeChans);
+    if (w.scopeChannel >= chans) w.scopeChannel = -1;
 
-    // Trigger on a rising zero crossing so periodic signals hold still:
-    // search the span that leaves displayN samples after the trigger.
-    int start = std::max(0, n - displayN);
-    for (int i = std::max(0, n - 2 * displayN); i < n - displayN; ++i) {
-        if (ring[i] <= 0.0f && ring[i + 1] > 0.0f) { start = i; break; }
+    // The ring holds interleaved frames; de-interleave the tail.
+    int frames = (int)(w.scopeRing.size() / chans);
+
+    // Trigger on a rising zero crossing of the reference channel (the
+    // selected one, or channel 0 in "all" view) so periodic signals hold
+    // still; all channels share the trigger to keep phase relationships.
+    int refCh = w.scopeChannel < 0 ? 0 : w.scopeChannel;
+    auto sample = [&](int frame, int ch) {
+        return w.scopeRing[(size_t)frame * chans + ch];
+    };
+    int start = std::max(0, frames - displayN);
+    for (int f = std::max(0, frames - 2 * displayN); f < frames - displayN; ++f) {
+        if (sample(f, refCh) <= 0.0f && sample(f + 1, refCh) > 0.0f) {
+            start = f;
+            break;
+        }
     }
-    int count = std::min(displayN, n - start);
+    int count = std::min(displayN, frames - start);
 
-    if (count > 1) {
-        ImGui::PlotLines((std::string("##") + w.name).c_str(),
-                         ring.data() + start, count, 0, nullptr,
-                         -1.0f, 1.0f, ImVec2(320.0f, 100.0f));
+    static std::vector<float> lane;  // GUI thread only
+    auto plotLane = [&](int ch, float height) {
+        lane.resize((size_t)std::max(count, 0));
+        for (int f = 0; f < count; ++f) lane[f] = sample(start + f, ch);
+        if (count > 1) {
+            ImGui::PlotLines(("##" + w.name + std::to_string(ch)).c_str(),
+                             lane.data(), count, 0, nullptr,
+                             -1.0f, 1.0f, ImVec2(320.0f, height));
+        } else {
+            ImGui::Dummy(ImVec2(320.0f, height));
+        }
+    };
+
+    ImGui::BeginGroup();
+    if (w.scopeChannel < 0) {
+        // All channels, stacked lanes sharing one trigger.
+        float laneH = std::max(100.0f / (float)chans, 32.0f);
+        for (int ch = 0; ch < chans; ++ch) plotLane(ch, laneH);
     } else {
-        ImGui::Dummy(ImVec2(320.0f, 100.0f));
+        plotLane(w.scopeChannel, 100.0f);
     }
+    ImGui::EndGroup();
+
     ImGui::SameLine();
+    ImGui::BeginGroup();
     ImGui::TextUnformatted(w.name.c_str());
+    if (chans > 1) {
+        // Cycle: all -> 0 -> 1 -> ... -> all
+        char label[16];
+        if (w.scopeChannel < 0) std::snprintf(label, sizeof(label), "ch: all");
+        else std::snprintf(label, sizeof(label), "ch: %d", w.scopeChannel);
+        if (ImGui::SmallButton(label)) {
+            w.scopeChannel = (w.scopeChannel + 1 < chans) ? w.scopeChannel + 1
+                                                          : -1;
+        }
+    }
+    ImGui::EndGroup();
 }
 
 static void drawPlot(UIWidget& w) {

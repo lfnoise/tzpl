@@ -426,7 +426,7 @@ scope(<span class="str">"out"</span>, node);</code></pre>
 <tr><td><code>toggle(name, init)</code></td><td>checkbox</td><td>sends 1 / 0</td></tr>
 <tr><td><code>xy(name, xspec, yspec)</code></td><td>2-D pad</td><td>two ControlSpecs; bind each axis separately</td></tr>
 <tr><td><code>meter(name, node)</code></td><td>level meter</td><td>rms bar + peak marker, &minus;60..0 dB; reads an engine tap</td></tr>
-<tr><td><code>scope(name, node)</code></td><td>oscilloscope</td><td>channel 0 of a node outlet, zero-cross triggered</td></tr>
+<tr><td><code>scope(name, node)</code></td><td>oscilloscope</td><td>all channels of a node outlet, zero-cross triggered; the <em>ch</em> button cycles all / single channel (stacked lanes in &ldquo;all&rdquo; view share one trigger, preserving phase)</td></tr>
 <tr><td><code>plot(name, data)</code></td><td>static line plot</td><td>update with <code>setData(w, data)</code></td></tr>
 <tr><td><code>waveform(name, node, buf)</code></td><td>audio file overview</td><td>shows the file loaded by <code>audio_engine.loadBuffer</code></td></tr>
 </table>
@@ -488,7 +488,9 @@ cutoff setValue(<span class="num">880.0</span>);  <span class="cmt">-- move the 
 m rmsLevel;              <span class="cmt">-- smoothed level, published every 512 samples</span>
 m peakLevel;
 <span class="kw">let</span> s = scope(<span class="str">"sc"</span>, node);
-<span class="kw">let</span> xs = s samples(<span class="num">4096</span>);   <span class="cmt">-- drain raw samples as [Float]</span></code></pre>
+s tapChannels;           <span class="cmt">-- channels captured by the scope</span>
+<span class="kw">let</span> xs = s samples(<span class="num">4096</span>);   <span class="cmt">-- raw samples: interleaved frames of</span>
+                         <span class="cmt">-- tapChannels(s) channels, whole frames only</span></code></pre>
 
 <div class="warn"><p><strong>One consumer per scope stream.</strong> The scope's sample FIFO feeds either the on-screen display or <code>samples()</code> &mdash; whatever one drains, the other doesn't see. Meters (<code>rmsLevel</code>/<code>peakLevel</code>) are fine to read from both places.</p></div>
 
@@ -526,7 +528,7 @@ panel(<span class="str">""</span>);               <span class="cmt">-- back to t
 <tr><td><code>onChange(w, f (Float) Void)</code> / <code>onChangeXY(w, f (Float, Float) Void)</code></td><td>coalesced value callback</td></tr>
 <tr><td><code>value(w) Float</code> / <code>valueY(w) Float</code></td><td>read the widget</td></tr>
 <tr><td><code>setValue(w, v)</code> / <code>setValueXY(w, x, y)</code></td><td>move the widget and fire its bindings</td></tr>
-<tr><td><code>rmsLevel(w)</code> / <code>peakLevel(w)</code> / <code>samples(w, max = 4096)</code></td><td>read a tap widget from code</td></tr>
+<tr><td><code>rmsLevel(w)</code> / <code>peakLevel(w)</code> / <code>tapChannels(w)</code> / <code>samples(w, max = 4096)</code></td><td>read a tap widget from code; samples are interleaved frames of tapChannels(w) channels</td></tr>
 <tr><td><code>control(node, name String, silo = 0) Widget</code><br><code>control(node, name, panel String, silo = 0)</code></td><td>one widget derived + bound from the def's ControlSpec; defaults into a panel named after the def</td></tr>
 <tr><td><code>controls(node, silo = 0) [Widget]</code><br><code>controls(node, panel String, silo = 0)</code></td><td>materialize the node's whole interface; defaults into a panel named after the def</td></tr>
 <tr><td><code>defName(node) String</code></td><td>the def name of a live node ("" if unknown)</td></tr>
@@ -635,7 +637,7 @@ panel(<span class="str">""</span>);               <span class="cmt">-- back to t
   <li><strong>One notebook at a time.</strong> Opening or creating another replaces the current one (with a save prompt if modified).</li>
   <li><strong>Prose cells are plain (monospaced) text</strong> &mdash; styled without line numbers, but no markdown rendering or proportional font yet.</li>
   <li><strong>History is not saved</strong> in the <code>.tzd</code> file.</li>
-  <li><strong>Scopes/waveforms:</strong> scope taps read f32 outlets; waveforms show file-loaded buffer contents (not live-recorded audio).</li>
+  <li><strong>Scopes/waveforms:</strong> scope taps read f32 outlets (up to 16 channels captured); waveforms show file-loaded buffer contents (not live-recorded audio).</li>
 </ul>
 
 </main>

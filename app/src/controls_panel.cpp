@@ -120,15 +120,21 @@ void ControlsPanel::dispatch(bridge::UIState& ui, bridge::AppContext& ctx) {
                 w.values[0] = engine::tapRms(ctx.engine, w.tapID);
                 w.values[1] = engine::tapPeak(ctx.engine, w.tapID);
             } else if (w.kind == UIWidgetKind::Scope) {
+                int chans = std::max(1, engine::tapChans(ctx.engine, w.tapID));
+                w.scopeChans = chans;
+                // Drain and trim in whole interleaved frames so the ring
+                // stays frame-aligned.
                 float buf[4096];
-                int n = engine::tapDrain(ctx.engine, w.tapID, buf, 4096);
+                int want = (4096 / chans) * chans;
+                int n = engine::tapDrain(ctx.engine, w.tapID, buf, want);
                 if (n > 0) {
                     w.scopeRing.insert(w.scopeRing.end(), buf, buf + n);
-                    constexpr size_t kMaxRing = 8192;
-                    if (w.scopeRing.size() > kMaxRing) {
-                        w.scopeRing.erase(
-                            w.scopeRing.begin(),
-                            w.scopeRing.end() - kMaxRing);
+                    size_t maxRing = (size_t)8192 * chans;
+                    if (w.scopeRing.size() > maxRing) {
+                        size_t excess = w.scopeRing.size() - maxRing;
+                        excess = ((excess + chans - 1) / chans) * chans;
+                        w.scopeRing.erase(w.scopeRing.begin(),
+                                          w.scopeRing.begin() + excess);
                     }
                 }
             }

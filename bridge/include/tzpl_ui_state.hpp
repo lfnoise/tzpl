@@ -133,8 +133,12 @@ struct UIWidget {
     long tapID = 0;
     int tapSilo = 0;
 
-    // GUI-thread-only scope display ring (drained from the tap FIFO).
+    // GUI-thread-only scope display state. scopeRing holds interleaved
+    // frames of scopeChans channels (frame-aligned from tap creation);
+    // scopeChannel selects the displayed channel (-1 = all, stacked).
     std::vector<float> scopeRing;
+    int scopeChans = 1;
+    int scopeChannel = -1;
 
     // Plot data (Plot kind), set by ui.plot / ui.setData.
     std::vector<float> plotData;

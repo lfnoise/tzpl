@@ -228,7 +228,11 @@ tzpl_SErr untap(i64 tapID);
 bool tapExists(Engine* e, i64 tapID);
 f32 tapPeak(Engine* e, i64 tapID);
 f32 tapRms(Engine* e, i64 tapID);
+// Channel count captured by the tap (scope frames are interleaved).
+int tapChans(Engine* e, i64 tapID);
 // Drain up to maxSamples pending scope samples into dst; returns the count.
+// Scope data is interleaved frames of tapChans() channels; drain in
+// multiples of the channel count to keep frame alignment across drains.
 int tapDrain(Engine* e, i64 tapID, f32* dst, int maxSamples);
 
 // notes
