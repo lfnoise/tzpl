@@ -324,10 +324,13 @@ bool NotebookPanel::openFileIntoFocusedCell(std::string const& path) {
     if (!f) return false;
     std::stringstream ss;
     ss << f.rdbuf();
-    std::string text = ss.str();
-    store_.setCellText(focusedCell_, text);
-    auto& rt = runtime(focusedCell_, *store_.cell(focusedCell_));
-    if (rt.editor) rt.editor->SetText(text);
+    // Insert at the cell's cursor (replacing any selection), like a
+    // paste -- Select All first to replace the whole cell.
+    auto& rt = runtime(focusedCell_, *cell);
+    if (!rt.editor) return false;
+    if (rt.editor->HasSelection()) rt.editor->Delete();
+    rt.editor->InsertText(ss.str());
+    syncCellText(focusedCell_);
     rt.lastEditTime = 0.0;
     structureCommitLabel_ = "open file into cell";  // commits in update()
     return true;

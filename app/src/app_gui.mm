@@ -811,6 +811,7 @@ int runGui(bridge::AppContext& appCtx) {
                               || controlsPanel.wantsContinuousFrames()
                               || notebookPanel.hasQueuedRuns()
                               || guiState.printCapture.hasPending()
+                              || gDeferredEditFrame != 0
                               || (appCtx.uiState
                                   && controlsPanel.hasPendingEvents(*appCtx.uiState));
             if (needsActivity)
