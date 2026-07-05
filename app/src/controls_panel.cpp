@@ -37,12 +37,21 @@ void ControlsPanel::draw(bridge::UIState& ui,
     std::lock_guard<std::mutex> lock(ui.mtx);
     if (ui.widgets.empty()) return;
 
-    // Group widgets by panel, preserving insertion order of first appearance.
+    // Group widgets by panel, preserving insertion order of first
+    // appearance. Claimed panels (exact or sub-panels of a claimed
+    // root) render inline in the notebook, not as floating windows.
     std::vector<std::string> panels;
     for (auto& w : ui.widgets) {
-        if (skipPanels && std::find(skipPanels->begin(), skipPanels->end(),
-                                    w->panel) != skipPanels->end())
-            continue;
+        if (skipPanels) {
+            bool claimed = false;
+            for (auto const& root : *skipPanels) {
+                if (bridge::panelUnderRoot(w->panel, root)) {
+                    claimed = true;
+                    break;
+                }
+            }
+            if (claimed) continue;
+        }
         if (std::find(panels.begin(), panels.end(), w->panel) == panels.end())
             panels.push_back(w->panel);
     }
@@ -91,12 +100,13 @@ void ControlsPanel::dispatch(bridge::UIState& ui, bridge::AppContext& ctx) {
         {
             std::lock_guard<std::mutex> lock(ui.mtx);
             for (auto const& panel : pendingClosedPanels_) {
+                // Sub-panels ("panel/...") go with their root.
                 for (auto& w : ui.widgets) {
-                    if (w->panel == panel && w->tapID)
+                    if (bridge::panelUnderRoot(w->panel, panel) && w->tapID)
                         taps.push_back({w->tapID, w->tapSilo});
                 }
                 std::erase_if(ui.widgets, [&](auto const& w) {
-                    return w->panel == panel;
+                    return bridge::panelUnderRoot(w->panel, panel);
                 });
             }
         }

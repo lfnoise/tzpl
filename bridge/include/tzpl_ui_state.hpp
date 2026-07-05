@@ -74,6 +74,18 @@ struct UISpec {
     double clamp(double value) const;
 };
 
+// True if `panel` belongs to the panel-cell root `root`: the exact name
+// or a sub-panel "root/...". Sub-panels render as tabs inside the
+// root's panel cell; everywhere else (save, history capture, floating
+// skip, close removal) they follow their root.
+inline bool panelUnderRoot(std::string const& panel,
+                           std::string const& root) {
+    if (panel == root) return true;
+    return panel.size() > root.size() + 1
+        && panel.compare(0, root.size(), root) == 0
+        && panel[root.size()] == '/';
+}
+
 // ---------------------------------------------------------------------------
 // Widgets
 // ---------------------------------------------------------------------------

@@ -583,7 +583,7 @@ void NotebookPanel::drawCell(std::shared_ptr<Cell const> const& cell,
         if (ImGui::SmallButton("reflow") && ctx.uiState) {
             std::lock_guard<std::mutex> lock(ctx.uiState->mtx);
             for (auto& wp : ctx.uiState->widgets) {
-                if (wp->panel == cell->name) {
+                if (bridge::panelUnderRoot(wp->panel, cell->name)) {
                     wp->fx = -1.0f;
                     wp->fy = -1.0f;
                 }
@@ -708,8 +708,55 @@ float NotebookPanel::drawPanelCanvas(
     std::shared_ptr<doc::Cell const> const& cell, float width,
     bridge::AppContext& ctx, ControlsPanel& controls, bool arrange,
     float scale, float canvasH) {
+    // Sub-panels "<cell>/<tab>" show as tabs; the bare cell name is
+    // the first page. Distinct names gathered in registry order.
+    std::vector<std::string> pages;
+    {
+        std::lock_guard<std::mutex> lock(ctx.uiState->mtx);
+        bool bare = false;
+        for (auto& wp : ctx.uiState->widgets) {
+            if (wp->panel == cell->name) {
+                bare = true;
+            } else if (bridge::panelUnderRoot(wp->panel, cell->name)
+                       && std::find(pages.begin(), pages.end(), wp->panel)
+                              == pages.end()) {
+                pages.push_back(wp->panel);
+            }
+        }
+        if (bare || pages.empty())
+            pages.insert(pages.begin(), cell->name);
+    }
+    if (pages.size() <= 1) {
+        return drawPanelPage(pages[0], width, ctx, controls, arrange,
+                             scale, canvasH);
+    }
+    // Tab bar + the selected page below it. Selection is ImGui view
+    // state (keyed by the panel name), never document state.
+    float tabH = ImGui::GetFrameHeight() / scale;
+    float content = 52.0f;
+    if (ImGui::BeginTabBar("##panelpages")) {
+        for (auto const& p : pages) {
+            std::string label = p == cell->name
+                              ? std::string("(main)")
+                              : p.substr(cell->name.size() + 1);
+            if (ImGui::BeginTabItem((label + "###" + p).c_str())) {
+                content = drawPanelPage(p, width, ctx, controls, arrange,
+                                        scale,
+                                        std::max(60.0f, canvasH - tabH));
+                ImGui::EndTabItem();
+            }
+        }
+        ImGui::EndTabBar();
+    }
+    return content + tabH;
+}
+
+float NotebookPanel::drawPanelPage(
+    std::string const& panel, float width, bridge::AppContext& ctx,
+    ControlsPanel& controls, bool arrange, float scale, float canvasH) {
     float contentBottom = 52.0f;
-    ImGui::BeginChild("##panelcanvas", ImVec2(width, canvasH * scale), true,
+    ImGui::BeginChild(("##pc" + panel).c_str(),
+                      ImVec2(width, canvasH * scale), true,
                       ImGuiWindowFlags_NoScrollWithMouse);
     if (scale != 1.0f) {
         ImGui::SetWindowFontScale(scale);
@@ -726,7 +773,7 @@ float NotebookPanel::drawPanelCanvas(
         // creating code with calls reordered reflows to match.
         std::vector<bridge::UIWidget*> ws;
         for (auto& wp : ctx.uiState->widgets)
-            if (wp->panel == cell->name) ws.push_back(wp.get());
+            if (wp->panel == panel) ws.push_back(wp.get());
         std::sort(ws.begin(), ws.end(),
                   [](bridge::UIWidget* a, bridge::UIWidget* b) {
                       return a->seq < b->seq;
@@ -818,8 +865,7 @@ float NotebookPanel::drawPanelCanvas(
             ImGui::TextDisabled("(no widgets -- run code that calls "
                                 "controls(node, \"%s\") or "
                                 "ui.panel(\"%s\") and creates some)",
-                                cell->name.c_str(),
-                                cell->name.c_str());
+                                panel.c_str(), panel.c_str());
         }
     }
     if (scale != 1.0f) {

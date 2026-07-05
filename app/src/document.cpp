@@ -338,7 +338,18 @@ bool saveDocument(DocSnapshot const& snap, bridge::AppContext& ctx,
     std::vector<Value> panels{Value::Symbol("panels")};
     if (ctx.uiState) {
         std::lock_guard<std::mutex> lock(ctx.uiState->mtx);
-        for (auto const& panel : panelNames) {
+        // One record per distinct widget panel name claimed by a panel
+        // cell -- exact names and "name/sub" sub-panels (cell tabs).
+        std::vector<std::string> claimed;
+        for (auto const& w : ctx.uiState->widgets) {
+            bool owned = false;
+            for (auto const& root : panelNames)
+                if (bridge::panelUnderRoot(w->panel, root)) { owned = true; break; }
+            if (owned && std::find(claimed.begin(), claimed.end(), w->panel)
+                             == claimed.end())
+                claimed.push_back(w->panel);
+        }
+        for (auto const& panel : claimed) {
             std::vector<Value> pv{Value::Symbol("panel"), Value::String(panel)};
             for (auto const& w : ctx.uiState->widgets) {
                 if (w->panel != panel) continue;
@@ -503,7 +514,9 @@ SnapshotPtr loadDocument(bridge::AppContext& ctx, std::string const& path,
 
 static bool inPanels(std::vector<std::string> const& panels,
                      std::string const& p) {
-    return std::find(panels.begin(), panels.end(), p) != panels.end();
+    for (auto const& root : panels)
+        if (bridge::panelUnderRoot(p, root)) return true;
+    return false;
 }
 
 std::shared_ptr<WidgetSnapList const>

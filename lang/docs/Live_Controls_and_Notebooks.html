@@ -598,6 +598,9 @@ panel(<span class="str">""</span>);               <span class="cmt">-- back to t
   <li>Run the cell &mdash; the widgets appear inside the panel cell.</li>
 </ol>
 
+<h4>Tabs within a panel cell</h4>
+<p>A panel named <code>"&lt;cell&gt;/&lt;tab&gt;"</code> renders as a <strong>tab</strong> inside the cell: <code>panel("mixer/eq")</code> and <code>panel("mixer/sends")</code> give the cell named <code>mixer</code> an <em>eq</em> and a <em>sends</em> page, one showing at a time (widgets in the bare <code>"mixer"</code> panel become a <em>(main)</em> tab). Which tab is selected is pure view state &mdash; never in history. Sub-panels follow their root everywhere: saved with the document, captured by undo, removed with the cell. Separate control sets per cell, created entirely from code.</p>
+
 <p>Panels claimed by the document render only there; panels no cell claims (including the default <code>""</code>) float as windows, as always. Closing or replacing the notebook (Close, New Notebook, opening another file) removes its claimed panels' widgets along with it &mdash; they don't fall out into floating windows. Hiding the notebook (<kbd>Cmd+\</kbd>) is different: the document stays open, so its panels float temporarily to keep the controls playable.</p>
 
 <h4>Arrange mode</h4>

@@ -174,14 +174,19 @@ private:
                      ControlsPanel& controls);
     // The panel cell's widget canvas, shared between the normal cell
     // body (arrange supported, scale 1) and perform mode (locked,
-    // scaled). Draws the BeginChild canvas at canvasH (unscaled) and
-    // returns the measured content height, which the caller caches so
-    // the canvas grows to fit its widgets next frame. The caller adds
-    // any splitter/chrome.
+    // scaled). Panels named "<cell>/<tab>" render as tabs inside the
+    // cell (tab choice is view state, not history). Draws at canvasH
+    // (unscaled) and returns the measured content height, which the
+    // caller caches so the canvas grows to fit next frame. The caller
+    // adds any splitter/chrome.
     float drawPanelCanvas(std::shared_ptr<doc::Cell const> const& cell,
                           float width, bridge::AppContext& ctx,
                           ControlsPanel& controls, bool arrange,
                           float scale, float canvasH);
+    // One page (one exact panel name) of the canvas.
+    float drawPanelPage(std::string const& panel, float width,
+                        bridge::AppContext& ctx, ControlsPanel& controls,
+                        bool arrange, float scale, float canvasH);
 
     CellRuntime& runtime(doc::CellId id, doc::Cell const& cell);
     TextEditor* focusedEditor();              // focused cell's editor, if any
