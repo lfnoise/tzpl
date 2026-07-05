@@ -594,13 +594,25 @@ void NotebookPanel::drawCell(std::shared_ptr<Cell const> const& cell,
         }
     } else if (rt.editor) {
         int lines = std::max(rt.editor->GetTotalLines(), 2);
-        float editorH = std::min((float)lines + 1.5f, 25.0f)
-                        * ImGui::GetTextLineHeightWithSpacing();
+        float lineH = ImGui::GetTextLineHeightWithSpacing();
+        float autoH = std::min((float)lines + 1.5f, 25.0f) * lineH;
+        float editorH = rt.editorHeight > 0.0f ? rt.editorHeight : autoH;
         rt.editor->Render("##celledit", ImVec2(width, editorH), true);
         if (rt.editor->IsTextChanged()) {
             rt.lastEditTime = ImGui::GetTime();
         }
         if (cell->kind == CellKind::Code) {
+            // Split between the text and its output: drag to resize the
+            // editor area (session-only, like the output pane's bar).
+            ImGui::InvisibleButton("##editsplit", ImVec2(width, 5.0f));
+            if (ImGui::IsItemActive()) {
+                float base = rt.editorHeight > 0.0f ? rt.editorHeight
+                                                    : editorH;
+                rt.editorHeight = std::max(2.0f * lineH,
+                                           base + ImGui::GetIO().MouseDelta.y);
+            }
+            if (ImGui::IsItemHovered())
+                ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNS);
             drawCellOutput(rt, width);
         }
     }

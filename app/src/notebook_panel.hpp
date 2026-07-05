@@ -157,8 +157,10 @@ private:
         double lastEditTime = 0.0;
         // Panel cells: arrange mode (drag/resize widgets on the canvas).
         bool arrange = false;
-        // Code cells: output pane height dragged by the user; 0 = fit
-        // the content (up to a cap).
+        // Code cells: pane heights dragged by the user; 0 = fit the
+        // content (up to a cap). editorHeight is the text area,
+        // outputHeight the output pane below it.
+        float editorHeight = 0.0f;
         float outputHeight = 0.0f;
     };
 
