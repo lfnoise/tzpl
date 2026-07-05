@@ -11,5 +11,10 @@ evaluate it (Cmd+Return), or paste it into a notebook code cell.
   whose controls carry ControlSpecs, play it, and let `controls(node)`
   materialize its whole interface as engine-bound widgets, plus a level
   meter and scope on its output. Run with audio on.
+- `ui_piano_roll.x` -- a pianoRoll driving a synth: a clock coroutine
+  steps the roll in 16ths and plays it through the synth's materialized
+  control widgets, re-reading the notes live so edits are heard on the
+  next pass. Set `edo` to 19/31/53 for those equal temperaments (pitch
+  is in steps of 1/edo octave). Run with audio on.
 
 The full guide is `lang/docs/Live_Controls_and_Notebooks.html`.
