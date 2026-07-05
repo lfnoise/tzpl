@@ -316,6 +316,25 @@ void NotebookPanel::runFocused(GuiState& gui, bridge::AppContext& ctx,
     if (focusedCell_) launchCell(focusedCell_, gui, ctx, session);
 }
 
+TextEditor* NotebookPanel::focusedEditor() {
+    if (!open_ || !focusedCell_) return nullptr;
+    auto it = runtime_.find(focusedCell_);
+    return it != runtime_.end() ? it->second.editor.get() : nullptr;
+}
+
+void NotebookPanel::moveHome(bool select) {
+    if (auto* ed = focusedEditor()) ed->MoveHome(select);
+}
+void NotebookPanel::moveEnd(bool select) {
+    if (auto* ed = focusedEditor()) ed->MoveEnd(select);
+}
+void NotebookPanel::moveTop(bool select) {
+    if (auto* ed = focusedEditor()) ed->MoveTop(select);
+}
+void NotebookPanel::moveBottom(bool select) {
+    if (auto* ed = focusedEditor()) ed->MoveBottom(select);
+}
+
 bool NotebookPanel::openFileIntoFocusedCell(std::string const& path) {
     if (!open_ || !focusedCell_) return false;
     auto cell = store_.cell(focusedCell_);
@@ -421,8 +440,13 @@ static ImVec4 kindColor(bool everRan, bool errored, bool stale) {
 
 void NotebookPanel::drawCellOutput(CellRuntime& rt, float width) {
     if (rt.output.empty()) return;
-    float h = std::min((float)rt.output.size(), 8.0f)
-              * ImGui::GetTextLineHeightWithSpacing() + 8.0f;
+    // Fit the content (up to a cap), with room for the frame padding
+    // and the horizontal scrollbar, so short output isn't clipped.
+    float lineH = ImGui::GetTextLineHeightWithSpacing();
+    float pad = ImGui::GetStyle().WindowPadding.y * 2.0f
+              + ImGui::GetStyle().ScrollbarSize;
+    float autoH = std::min((float)rt.output.size(), 12.0f) * lineH + pad;
+    float h = rt.outputHeight > 0.0f ? rt.outputHeight : autoH;
     ImGui::BeginChild("##cellout", ImVec2(width, h), true,
                       ImGuiWindowFlags_HorizontalScrollbar);
     for (auto const& line : rt.output) {
@@ -441,6 +465,16 @@ void NotebookPanel::drawCellOutput(CellRuntime& rt, float width) {
         }
     }
     ImGui::EndChild();
+
+    // Drag bar: resize the output pane (session-only, like scroll state).
+    ImGui::InvisibleButton("##outsplit", ImVec2(width, 5.0f));
+    if (ImGui::IsItemActive()) {
+        float base = rt.outputHeight > 0.0f ? rt.outputHeight : h;
+        rt.outputHeight = std::max(lineH + pad,
+                                   base + ImGui::GetIO().MouseDelta.y);
+    }
+    if (ImGui::IsItemHovered())
+        ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNS);
 }
 
 void NotebookPanel::drawCell(std::shared_ptr<Cell const> const& cell,

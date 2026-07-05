@@ -1100,18 +1100,26 @@ int runGui(bridge::AppContext& appCtx) {
                 // -- Cursor movement (Cmd+Arrow), routed to focused pane -----
                 case AppCmd::MoveHome:
                     if (outputPanel.hasFocus()) outputPanel.moveHome(c.shift);
+                    else if (notebookPanel.isOpen() && notebookVisible)
+                        notebookPanel.moveHome(c.shift);
                     else editorPanel.moveHome(c.shift);
                     break;
                 case AppCmd::MoveEnd:
                     if (outputPanel.hasFocus()) outputPanel.moveEnd(c.shift);
+                    else if (notebookPanel.isOpen() && notebookVisible)
+                        notebookPanel.moveEnd(c.shift);
                     else editorPanel.moveEnd(c.shift);
                     break;
                 case AppCmd::MoveTop:
                     if (outputPanel.hasFocus()) outputPanel.moveTop(c.shift);
+                    else if (notebookPanel.isOpen() && notebookVisible)
+                        notebookPanel.moveTop(c.shift);
                     else editorPanel.moveTop(c.shift);
                     break;
                 case AppCmd::MoveBottom:
                     if (outputPanel.hasFocus()) outputPanel.moveBottom(c.shift);
+                    else if (notebookPanel.isOpen() && notebookVisible)
+                        notebookPanel.moveBottom(c.shift);
                     else editorPanel.moveBottom(c.shift);
                     break;
 

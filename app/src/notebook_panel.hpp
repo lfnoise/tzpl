@@ -79,6 +79,13 @@ public:
     // the file in the editor as usual.
     bool openFileIntoFocusedCell(std::string const& path);
 
+    // Cmd+Arrow cursor movement (native menu shortcuts), routed to the
+    // focused cell's editor. No-ops when no text cell is focused.
+    void moveHome(bool select);
+    void moveEnd(bool select);
+    void moveTop(bool select);
+    void moveBottom(bool select);
+
     // Route a finished cell eval (AsyncEval cellId != 0) into cell state.
     void onEvalDone(std::uint64_t cellId,
                     ts::REPLSession::EvalResult const& result,
@@ -137,6 +144,9 @@ private:
         double lastEditTime = 0.0;
         // Panel cells: arrange mode (drag/resize widgets on the canvas).
         bool arrange = false;
+        // Code cells: output pane height dragged by the user; 0 = fit
+        // the content (up to a cap).
+        float outputHeight = 0.0f;
     };
 
     // Perform mode: locked layout, panel cells only, widgets drawn at
@@ -153,6 +163,7 @@ private:
                          ControlsPanel& controls, bool arrange, float scale);
 
     CellRuntime& runtime(doc::CellId id, doc::Cell const& cell);
+    TextEditor* focusedEditor();              // focused cell's editor, if any
     void syncCellText(doc::CellId id);        // editor text -> snapshot
     void syncAllCellText();
     bool anyEditorDirty() const;              // editor text differs from snapshot
