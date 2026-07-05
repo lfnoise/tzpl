@@ -528,6 +528,7 @@ public:
     Type* floatType() const { return typeUniverse_.types().floatType; }
     Type* symbolType() const { return typeUniverse_.types().symbolType; }
     Type* stringType() const { return typeUniverse_.types().stringType; }
+    Type* bytesType() const { return typeUniverse_.types().bytesType; }
     Type* fractionType() const { return typeUniverse_.types().fractionType; }
     Type* complexType() const { return typeUniverse_.types().complexType; }
     Type* voidType() const { return typeUniverse_.types().voidType; }

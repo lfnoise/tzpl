@@ -2752,6 +2752,7 @@ bool Parser::tryParseTypeArgs(std::vector<TypeExprPtr>& typeArgs) {
             current_.kind != TokenKind::KwAny &&
             current_.kind != TokenKind::Identifier &&
             current_.kind != TokenKind::LBracket &&
+            current_.kind != TokenKind::Hash &&
             current_.kind != TokenKind::LParen) {
             // Not a type expression start — restore and fail
             current_ = savedCurrent;

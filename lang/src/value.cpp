@@ -1370,6 +1370,11 @@ size_t WordHash::hashFast(Word w) const {
         auto* s = static_cast<StringObj*>(w.o);
         return std::hash<std::string_view>{}(std::string_view(s->s.data(), s->s.size()));
     }
+    if (type == gCurrentVM->bytesType()) {
+        auto* s = static_cast<BytesObj*>(w.o);
+        return std::hash<std::string_view>{}(
+            std::string_view((char const*)s->data.data(), s->data.size()));
+    }
     if (type == gCurrentVM->fractionType()) {
         auto* frac = static_cast<Fraction*>(w.o);
         return hashCombine(std::hash<i64>{}(frac->r.numer()),
@@ -1576,6 +1581,11 @@ bool WordEqual::eqFast(Word a, Word b) const {
         auto* sa = static_cast<StringObj*>(a.o);
         auto* sb = static_cast<StringObj*>(b.o);
         return sa->s == sb->s;
+    }
+    if (type == gCurrentVM->bytesType()) {
+        auto* ba = static_cast<BytesObj*>(a.o);
+        auto* bb = static_cast<BytesObj*>(b.o);
+        return ba->data == bb->data;
     }
     if (type == gCurrentVM->fractionType()) {
         auto* fa = static_cast<Fraction*>(a.o);

@@ -36,6 +36,7 @@ set(LIB_SOURCES
     src/graph_equal.cpp
     src/graph_hash.cpp
     src/pretty_print.cpp
+    src/value_serialize.cpp
     src/persistent_vector.cpp
     src/persistent_map.cpp
     src/type_system.cpp

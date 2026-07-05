@@ -128,6 +128,11 @@ size_t graphHashSlowWord(Word w, Type* type, GraphHashCtx& ctx) {
         auto* s = static_cast<StringObj*>(w.o);
         return std::hash<std::string_view>{}(std::string_view(s->s.data(), s->s.size()));
     }
+    if (type == gCurrentVM->bytesType()) {
+        auto* s = static_cast<BytesObj*>(w.o);
+        return std::hash<std::string_view>{}(
+            std::string_view((char const*)s->data.data(), s->data.size()));
+    }
     if (type == gCurrentVM->fractionType()) {
         auto* frac = static_cast<Fraction*>(w.o);
         return hashCombine(std::hash<i64>{}(frac->r.numer()),

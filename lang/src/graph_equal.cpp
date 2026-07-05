@@ -122,6 +122,11 @@ bool graphEqualSlowWord(Word a, Word b, Type* type, GraphEqCtx& ctx) {
         auto* sb = static_cast<StringObj*>(b.o);
         return sa->s == sb->s;
     }
+    if (type == gCurrentVM->bytesType()) {
+        auto* ba = static_cast<BytesObj*>(a.o);
+        auto* bb = static_cast<BytesObj*>(b.o);
+        return ba->data == bb->data;
+    }
     if (type == gCurrentVM->fractionType()) {
         auto* fa = static_cast<Fraction*>(a.o);
         auto* fb = static_cast<Fraction*>(b.o);

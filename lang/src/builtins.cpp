@@ -27,6 +27,7 @@
 #include "persistent_vector.hpp"
 #include "persistent_map.hpp"
 #include "pretty_print.hpp"
+#include "value_serialize.hpp"
 
 namespace ts {
 
@@ -2473,6 +2474,73 @@ static bool resolve_toString(Compiler& compiler, const std::vector<Type*>& args,
 }
 
 // ============================================================================
+// serialize / deserialize builtins (TZV1, value_serialize.cpp)
+// ============================================================================
+
+static void builtin_serialize(VM& vm, u16 dst, u16, u16 argBase) {
+    auto* prim = static_cast<Primitive*>(vm.currentPrimitive());
+    auto* tt = static_cast<TupleType*>(prim->type_);
+    Type* t = tt->fields_[0];
+    // Pin the root across encoding: forcing lazy list tails runs user code
+    // that can drive a GC cycle, and every discovered object is reachable
+    // from this root.
+    GCObj* rootObj = (t->repr_ != Type::Repr::Inline && t->isObjType())
+        ? vm.reg(argBase).o : nullptr;
+    GCKeepAliveScope keep(vm, rootObj);
+    Vec<u8> buf{rt::STLAllocator<u8>(rt::gCurrentAllocator)};
+    serializeValue(&vm.reg(argBase), t, buf);
+    auto* result = new BytesObj();   // self-registers
+    result->data.assign(buf.begin(), buf.end());
+    vm.reg(dst).o = result;
+}
+
+static bool resolve_serialize(Compiler& compiler, const std::vector<Type*>& args,
+    std::vector<Type*>& pt, Type*& rt, CFun& cf) {
+    if (args.size() != 1) return false;
+    if (!isSerializableType(args[0])) return false;
+    pt = args;
+    rt = compiler.bytesType();
+    cf = builtin_serialize;
+    return true;
+}
+
+static void builtin_deserialize(VM& vm, u16 dst, u16, u16 argBase) {
+    auto* prim = static_cast<Primitive*>(vm.currentPrimitive());
+    auto* tt = static_cast<TupleType*>(prim->type_);
+    Type* t = tt->fields_[1];   // fields_ = { Bytes param, T type arg }
+    auto* bytes = static_cast<BytesObj*>(vm.reg(argBase).o);
+    u32 sw = strideForType(t);
+    Vec<Word> out{rt::STLAllocator<Word>(rt::gCurrentAllocator)};
+    out.resize(sw);
+    deserializeValue(bytes->data.data(), bytes->data.size(), t, out.data());
+    if (t->repr_ == Type::Repr::Inline) {
+        if (t == gCurrentVM->complexType() || t == gCurrentVM->fractionType()) {
+            // Codegen gave us a native 2-word result slot.
+            vm.reg(dst) = out[0];
+            vm.reg((u16)(dst + 1)) = out[1];
+        } else {
+            // Registered without acceptsInlineArgs: codegen unboxes the
+            // returned heap composite into the multi-word result slot.
+            vm.reg(dst).o = boxInlineDeepFrom(vm, t, out.data());
+        }
+    } else {
+        vm.reg(dst) = out[0];
+    }
+}
+
+static bool resolve_deserialize(Compiler& compiler, const std::vector<Type*>& args,
+    const std::vector<Type*>& typeArgs,
+    std::vector<Type*>& pt, Type*& rt, CFun& cf) {
+    if (args.size() != 1 || args[0] != compiler.bytesType()) return false;
+    if (typeArgs.size() != 1 || !typeArgs[0]) return false;
+    if (!isSerializableType(typeArgs[0])) return false;
+    pt = args;
+    rt = typeArgs[0];
+    cf = builtin_deserialize;
+    return true;
+}
+
+// ============================================================================
 // typeName builtin -- first consumer of explicit call-site type args
 // ============================================================================
 
@@ -4039,6 +4107,8 @@ void registerBuiltinFunctions(Compiler& compiler,
     registerTemplate(compiler, functions, "prettyString", resolve_prettyString, /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
     registerTemplate(compiler, functions, "prettyPrint",  resolve_prettyPrint,  /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
     registerTemplateEx(compiler, functions, "typeName",   resolve_typeName,     /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "serialize",    resolve_serialize,    /*rtSafe=*/false, /*acceptsInlineArgs=*/true);
+    registerTemplateEx(compiler, functions, "deserialize", resolve_deserialize, /*rtSafe=*/false, /*acceptsInlineArgs=*/false);
 
     // --- copy: shallow copy of Array, Map, or Set ---
     registerTemplate(compiler, functions, "copy",         resolve_copy,     /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
