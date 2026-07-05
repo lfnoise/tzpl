@@ -190,7 +190,7 @@ bool AsyncEval::collect(GuiState& state) {
             state.output.append(line, LineKind::Error);
         }
     } else if (result.hasValue) {
-        state.output.append("\xe2\x86\x92 " + result.formattedValue
+        state.output.append("\xe2\x86\x92 " + result.prettyValue
                             + " : " + result.typeName, LineKind::Result);
     }
 

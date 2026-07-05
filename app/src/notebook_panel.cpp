@@ -449,7 +449,7 @@ void NotebookPanel::onEvalDone(std::uint64_t cellId,
         rt.lastErrored = false;
         rt.ranTextHash = std::hash<std::string>{}(code);
         if (result.hasValue) {
-            rt.output.push_back({"\xe2\x86\x92 " + result.formattedValue
+            rt.output.push_back({"\xe2\x86\x92 " + result.prettyValue
                                  + " : " + result.typeName, LineKind::Result});
         }
     }

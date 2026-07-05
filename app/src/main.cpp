@@ -429,7 +429,7 @@ static void runREPL(VM& vm, Compiler& compiler, const VMTarget& target,
 
         if (result.hasValue) {
             std::printf("\xe2\x86\x92 %s : %s\n",
-                result.formattedValue.c_str(), result.typeName.c_str());
+                result.prettyValue.c_str(), result.typeName.c_str());
         }
 
         vm.gcHeartbeat();

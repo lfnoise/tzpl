@@ -26,6 +26,7 @@
 #include "tracing_gc.hpp"
 #include "persistent_vector.hpp"
 #include "persistent_map.hpp"
+#include "pretty_print.hpp"
 
 namespace ts {
 
@@ -2472,6 +2473,73 @@ static bool resolve_toString(Compiler& compiler, const std::vector<Type*>& args,
 }
 
 // ============================================================================
+// prettyString / prettyPrint builtins
+// ============================================================================
+
+// Shared body: render the first arg (any printable type, multi-word aware)
+// at the width given by the optional second Int arg (default 80).
+static VMString prettyArgToString(VM& vm, u16 argBase) {
+    auto* prim = static_cast<Primitive*>(vm.currentPrimitive());
+    auto* tt = static_cast<TupleType*>(prim->type_);
+    Type* t = tt->fields_[0];
+    bool inlineMulti = t && t->repr_ == Type::Repr::Inline;
+    u32 sw = inlineMulti ? (u32)t->sizeWords_ : 1u;
+    if (sw == 0) sw = 1;
+    i32 width = kPrettyDefaultWidth;
+    if (tt->fields_.size() == 2) {
+        width = (i32)vm.reg((u16)(argBase + sw)).i;
+        if (width < 1) width = 1;
+    }
+    return prettyString(&vm.reg(argBase), t, width);
+}
+
+static void builtin_prettyString(VM& vm, u16 dst, u16, u16 argBase) {
+    VMString s = prettyArgToString(vm, argBase);
+    auto* result = new StringObj();
+    result->s = std::move(s);
+    registerNewObj(result);
+    vm.reg(dst).o = result;
+}
+
+static void builtin_prettyPrint(VM& vm, u16 dst, u16, u16 argBase) {
+    VMString s = prettyArgToString(vm, argBase);
+    FILE* out = vm.printOutput();
+    std::fprintf(out, "%.*s\n", (int)s.size(), s.data());
+    vm.reg(dst).i = 0;
+}
+
+static bool prettyArgsOk(Compiler& compiler, const std::vector<Type*>& args) {
+    if (args.size() < 1 || args.size() > 2) return false;
+    if (args.size() == 2 && args[1] != compiler.intType()) return false;
+    Type* t = args[0];
+    if (!t) return false;
+    // Same acceptance set as toString.
+    return t == compiler.boolType() || t == compiler.intType()
+        || t == compiler.floatType() || t == compiler.symbolType()
+        || t->repr_ == Type::Repr::DiscriminantEnum
+        || t->repr_ == Type::Repr::Inline
+        || t->isObjType();
+}
+
+static bool resolve_prettyString(Compiler& compiler, const std::vector<Type*>& args,
+    std::vector<Type*>& pt, Type*& rt, CFun& cf) {
+    if (!prettyArgsOk(compiler, args)) return false;
+    pt = args;
+    rt = compiler.stringType();
+    cf = builtin_prettyString;
+    return true;
+}
+
+static bool resolve_prettyPrint(Compiler& compiler, const std::vector<Type*>& args,
+    std::vector<Type*>& pt, Type*& rt, CFun& cf) {
+    if (!prettyArgsOk(compiler, args)) return false;
+    pt = args;
+    rt = compiler.voidType();
+    cf = builtin_prettyPrint;
+    return true;
+}
+
+// ============================================================================
 // fmt builtin
 // ============================================================================
 
@@ -3941,6 +4009,8 @@ void registerBuiltinFunctions(Compiler& compiler,
     // --- toString builtin ---
     // Phase 4g.6: toString reads inline composites natively via slotToString.
     registerTemplate(compiler, functions, "toString",     resolve_toString, /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "prettyString", resolve_prettyString, /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "prettyPrint",  resolve_prettyPrint,  /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
 
     // --- copy: shallow copy of Array, Map, or Set ---
     registerTemplate(compiler, functions, "copy",         resolve_copy,     /*rtSafe=*/true, /*acceptsInlineArgs=*/true);

@@ -50,11 +50,15 @@ public:
     struct EvalResult {
         bool success = false;
         bool hasValue = false;
-        std::string formattedValue;  // "42", "'hello", "[1, 2, 3]"
+        std::string formattedValue;  // "42", "'hello", "[1, 2, 3]" (flat)
+        std::string prettyValue;     // width-aware, possibly multi-line
         std::string typeName;        // "Int", "Symbol", "[Int]"
         std::string source;          // echoed back for error formatting
         std::vector<CompileError> errors;
     };
+
+    // Target line width for EvalResult::prettyValue (default 80).
+    void setDisplayWidth(int width);
 
     // Evaluate a line of input (lex -> parse -> typecheck -> codegen -> execute)
     EvalResult eval(const std::string& input);

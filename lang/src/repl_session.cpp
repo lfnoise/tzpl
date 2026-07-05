@@ -29,6 +29,7 @@
 #include "value.hpp"
 #include "module_compiler.hpp"
 #include "diagnostic.hpp"
+#include "pretty_print.hpp"
 #include <cstdio>
 
 namespace ts {
@@ -46,6 +47,7 @@ struct REPLSession::Impl {
     ModuleCompiler& moduleCompiler;
     TypeChecker typeChecker;
     std::vector<Program> programs;  // keep ASTs alive for template declNodes
+    int displayWidth = 80;          // line width for EvalResult::prettyValue
 
     Impl(Compiler& c, VM& v, const VMTarget& t, std::vector<std::string> includePaths)
         : compiler(c), vm(v), target(t),
@@ -116,6 +118,10 @@ REPLSession::REPLSession(Compiler& compiler, VM& vm, const VMTarget& target,
 {}
 
 REPLSession::~REPLSession() = default;
+
+void REPLSession::setDisplayWidth(int width) {
+    impl_->displayWidth = width < 1 ? 1 : width;
+}
 
 REPLSession::EvalResult REPLSession::eval(const std::string& input) {
     EvalResult result;
@@ -202,6 +208,14 @@ REPLSession::EvalResult REPLSession::eval(const std::string& input) {
             result.hasValue = true;
             VMString vs = wordToString(value, lastType);
             result.formattedValue = toStdString(vs);
+            if (lastType && lastType->repr_ == Type::Repr::Inline) {
+                // Inline composites arrive boxed in a single result Word;
+                // the flat form is already correct.
+                result.prettyValue = result.formattedValue;
+            } else {
+                VMString ps = prettyString(&value, lastType, impl_->displayWidth);
+                result.prettyValue = toStdString(ps);
+            }
             VMString ts = lastType->str();
             result.typeName = toStdString(ts);
         }

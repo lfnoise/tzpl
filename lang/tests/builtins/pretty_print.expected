@@ -1,0 +1,53 @@
+[[1, 2, 3], [4, 5, 6], [7, 8, 9]]
+[
+  [1, 2, 3],
+  [4, 5, 6],
+  [7, 8, 9]
+]
+[
+  [
+    1,
+    2,
+    3
+  ],
+  [
+    4,
+    5,
+    6
+  ],
+  [
+    7,
+    8,
+    9
+  ]
+]
+Point { x: 1.5, y: 2.5 }
+Point {
+  x: 1.5,
+  y: 2.5
+}
+[
+  alpha: [
+    1,
+    2
+  ],
+  beta: [3, 4]
+]
+Shape.rect(3.0, 4.0)
+Shape.rect(
+  3.0,
+  4.0
+)
+Shape.dot
+[Tree.leaf(1), Tree.node(^1^)]
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+'sym
