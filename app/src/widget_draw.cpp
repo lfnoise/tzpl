@@ -157,11 +157,12 @@ static void hoverAdjustXY(UIWidget& w) {
     }
 
     // Vertical wheel drives Y (push up = higher), horizontal drives X
-    // (push right = higher).
+    // (push right = higher). The two axes' deltas arrive with opposite
+    // signs relative to finger direction.
     float wheelY = ImGui::GetIO().MouseWheel;
     if (wheelY != 0.0f) setY(y - wheelY * 0.01f);
     float wheelX = ImGui::GetIO().MouseWheelH;
-    if (wheelX != 0.0f) setX(x - wheelX * 0.01f);
+    if (wheelX != 0.0f) setX(x + wheelX * 0.01f);
     hoverOwnWheel();
 }
 
