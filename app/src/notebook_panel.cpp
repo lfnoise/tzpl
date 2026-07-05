@@ -850,21 +850,35 @@ void NotebookPanel::drawPerform(float width, float height,
         ImGui::EndChild();
         return;
     }
-    float cellWidth = ImGui::GetContentRegionAvail().x;
+    // One tab per panel cell: separate control sets, one showing at a
+    // time (the HyperCard card model). Tab selection is pure view
+    // state -- ImGui remembers it; nothing touches the document or
+    // history.
     auto snap = store_.snapshot();
     bool anyPanel = false;
-    for (auto const& cell : snap->cells) {
-        if (cell->kind != CellKind::Panel) continue;
-        anyPanel = true;
-        ImGui::PushID((int)cell->id);
-        ImGui::TextUnformatted(cell->name.c_str());
-        auto& rt = runtime(cell->id, *cell);
-        float canvasH = std::max({60.0f, cell->panelHeight,
-                                  rt.panelContentH});
-        rt.panelContentH = drawPanelCanvas(cell, cellWidth, ctx, controls,
-                                           false, kPerformScale, canvasH);
-        ImGui::Spacing();
-        ImGui::PopID();
+    if (ImGui::BeginTabBar("##performtabs")) {
+        for (auto const& cell : snap->cells) {
+            if (cell->kind != CellKind::Panel) continue;
+            anyPanel = true;
+            std::string tab = (cell->name.empty() ? "(panel)" : cell->name)
+                            + "###" + std::to_string(cell->id);
+            if (ImGui::BeginTabItem(tab.c_str())) {
+                ImGui::PushID((int)cell->id);
+                auto& rt = runtime(cell->id, *cell);
+                // The selected panel gets the full remaining height
+                // (or its content, whichever is taller).
+                float availH = ImGui::GetContentRegionAvail().y
+                             / kPerformScale;
+                float canvasH = std::max({availH, cell->panelHeight,
+                                          rt.panelContentH});
+                rt.panelContentH = drawPanelCanvas(
+                    cell, ImGui::GetContentRegionAvail().x, ctx, controls,
+                    false, kPerformScale, canvasH);
+                ImGui::PopID();
+                ImGui::EndTabItem();
+            }
+        }
+        ImGui::EndTabBar();
     }
     if (!anyPanel)
         ImGui::TextDisabled("(no panel cells in this notebook)");
