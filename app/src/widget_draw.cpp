@@ -117,6 +117,13 @@ static void hoverAdjustSlider(UIWidget& w) {
     if (ImGui::IsKeyPressed(ImGuiKey_R)) setPos(hoverUniform(0.0f, 1.0f));
     if (ImGui::IsKeyPressed(ImGuiKey_J))
         setPos(hoverBounce(pos + hoverUniform(-0.05f, 0.05f)));
+    // z / i work in MAPPED value space: zero and the spec's init
+    // (clamped into range before unmapping -- keeps exponential warps
+    // away from log(0)).
+    if (ImGui::IsKeyPressed(ImGuiKey_Z))
+        setPos((float)w.spec.unmap(w.spec.clamp(0.0)));
+    if (ImGui::IsKeyPressed(ImGuiKey_I))
+        setPos((float)w.spec.unmap(w.spec.clamp(w.spec.init)));
 
     // Positive io.MouseWheel is a scroll-up gesture reading as "push
     // the content up"; for a value, pushing up should RAISE it.
@@ -154,6 +161,14 @@ static void hoverAdjustXY(UIWidget& w) {
     if (ImGui::IsKeyPressed(ImGuiKey_J)) {
         setX(hoverBounce(x + hoverUniform(-0.05f, 0.05f)));
         setY(hoverBounce(y + hoverUniform(-0.05f, 0.05f)));
+    }
+    if (ImGui::IsKeyPressed(ImGuiKey_Z)) {
+        setX((float)w.spec.unmap(w.spec.clamp(0.0)));
+        setY((float)w.spec2.unmap(w.spec2.clamp(0.0)));
+    }
+    if (ImGui::IsKeyPressed(ImGuiKey_I)) {
+        setX((float)w.spec.unmap(w.spec.clamp(w.spec.init)));
+        setY((float)w.spec2.unmap(w.spec2.clamp(w.spec2.init)));
     }
 
     // Vertical wheel drives Y (push up = higher), horizontal drives X
@@ -491,6 +506,13 @@ static void hoverAdjustMultiSlider(UIWidget& w, ImVec2 origin,
         setAll([&](int i) {
             float p = (float)w.spec.unmap(w.values[(size_t)i]);
             return hoverBounce(p + hoverUniform(-0.05f, 0.05f));
+        });
+    }
+    if (ImGui::IsKeyPressed(ImGuiKey_Z))
+        setAll([&](int) { return (float)w.spec.unmap(w.spec.clamp(0.0)); });
+    if (ImGui::IsKeyPressed(ImGuiKey_I)) {
+        setAll([&](int) {
+            return (float)w.spec.unmap(w.spec.clamp(w.spec.init));
         });
     }
 
