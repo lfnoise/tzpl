@@ -73,6 +73,12 @@ public:
                     ts::REPLSession* session);
     void runAll();
 
+    // File > Open with a code cell focused reads the file into that
+    // cell (one history commit). Returns false when not applicable
+    // (no focused code cell, unreadable file) -- the caller then opens
+    // the file in the editor as usual.
+    bool openFileIntoFocusedCell(std::string const& path);
+
     // Route a finished cell eval (AsyncEval cellId != 0) into cell state.
     void onEvalDone(std::uint64_t cellId,
                     ts::REPLSession::EvalResult const& result,

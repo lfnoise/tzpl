@@ -995,6 +995,9 @@ int runGui(bridge::AppContext& appCtx) {
                             workspacePanel.addWorkspace(path);
                         else if (hasExtension(path, "tzd"))
                             openNotebook(path);
+                        else if (notebookPanel.isOpen() && notebookVisible
+                                 && notebookPanel.openFileIntoFocusedCell(path))
+                            ;  // read into the focused code cell
                         else
                             workspacePanel.openFile(path);
                     }

@@ -27,7 +27,9 @@
 #include "imgui.h"
 
 #include <algorithm>
+#include <fstream>
 #include <functional>
+#include <sstream>
 
 using doc::Cell;
 using doc::CellId;
@@ -312,6 +314,23 @@ void NotebookPanel::launchCell(CellId id, GuiState& gui,
 void NotebookPanel::runFocused(GuiState& gui, bridge::AppContext& ctx,
                                ts::REPLSession* session) {
     if (focusedCell_) launchCell(focusedCell_, gui, ctx, session);
+}
+
+bool NotebookPanel::openFileIntoFocusedCell(std::string const& path) {
+    if (!open_ || !focusedCell_) return false;
+    auto cell = store_.cell(focusedCell_);
+    if (!cell || cell->kind != CellKind::Code) return false;
+    std::ifstream f(path, std::ios::binary);
+    if (!f) return false;
+    std::stringstream ss;
+    ss << f.rdbuf();
+    std::string text = ss.str();
+    store_.setCellText(focusedCell_, text);
+    auto& rt = runtime(focusedCell_, *store_.cell(focusedCell_));
+    if (rt.editor) rt.editor->SetText(text);
+    rt.lastEditTime = 0.0;
+    structureCommitLabel_ = "open file into cell";  // commits in update()
+    return true;
 }
 
 void NotebookPanel::runAll() {
