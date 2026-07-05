@@ -47,7 +47,21 @@ namespace doc {
 
 using CellId = std::uint64_t;
 
-enum class CellKind : int { Prose = 0, Code = 1, Panel = 2 };
+enum class CellKind : int { Prose = 0, Code = 1, Panel = 2, Presets = 3 };
+
+// One stored control snapshot in a Presets cell: values of the input
+// widgets in the cell's scope (the panel cells after it, up to the
+// next Presets cell), keyed by exact panel + widget name.
+struct PresetEntry {
+    std::string panel;
+    std::string widget;
+    std::vector<double> values;
+};
+
+struct Preset {
+    std::string name;  // optional
+    std::vector<PresetEntry> entries;
+};
 
 struct Cell {
     CellId id = 0;
@@ -57,6 +71,7 @@ struct Cell {
     bool runOnLoad = false;  // Code: run automatically after open.
     float panelHeight = 240.0f;  // Panel: canvas height (arrange layout).
     bool collapsed = false;  // Body hidden; only the header strip shows.
+    std::vector<Preset> presets;  // Presets cells: the stored snapshots.
 };
 
 // State of one widget in a document-claimed panel, captured into snapshots
@@ -142,6 +157,7 @@ public:
     void setCellRunOnLoad(CellId id, bool runOnLoad);
     void setCellPanelHeight(CellId id, float height);
     void setCellCollapsed(CellId id, bool collapsed);
+    void setCellPresets(CellId id, std::vector<Preset> presets);
 
     bool modified() const { return modified_; }
     void clearModified() { modified_ = false; }

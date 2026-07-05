@@ -474,6 +474,167 @@ void NotebookPanel::addCellOutput(std::uint64_t cellId,
 // Drawing
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Presets cells (Galaxy-style snapshot matrix)
+// ---------------------------------------------------------------------------
+
+// Kinds whose values a preset stores/recalls: the input widgets.
+// Displays (meter/scope/plot/waveform/label), momentary buttons, and
+// piano rolls (note lists, not values) are left alone.
+static bool presetStorableKind(bridge::UIWidgetKind k) {
+    switch (k) {
+        case bridge::UIWidgetKind::Slider:
+        case bridge::UIWidgetKind::Number:
+        case bridge::UIWidgetKind::Toggle:
+        case bridge::UIWidgetKind::XY:
+        case bridge::UIWidgetKind::MultiSlider:
+        case bridge::UIWidgetKind::Matrix:
+            return true;
+        default:
+            return false;
+    }
+}
+
+std::vector<std::string> NotebookPanel::presetScope(doc::CellId id) const {
+    // The panel cells after this presets cell, up to the next one.
+    std::vector<std::string> out;
+    bool after = false;
+    for (auto const& c : store_.snapshot()->cells) {
+        if (c->id == id) {
+            after = true;
+            continue;
+        }
+        if (!after) continue;
+        if (c->kind == CellKind::Presets) break;
+        if (c->kind == CellKind::Panel) out.push_back(c->name);
+    }
+    return out;
+}
+
+doc::Preset NotebookPanel::capturePreset(
+    std::vector<std::string> const& scope, bridge::AppContext& ctx) {
+    doc::Preset p;
+    if (!ctx.uiState) return p;
+    std::lock_guard<std::mutex> lock(ctx.uiState->mtx);
+    for (auto const& w : ctx.uiState->widgets) {
+        if (!presetStorableKind(w->kind)) continue;
+        bool inScope = false;
+        for (auto const& root : scope) {
+            if (bridge::panelUnderRoot(w->panel, root)) {
+                inScope = true;
+                break;
+            }
+        }
+        if (!inScope) continue;
+        p.entries.push_back({w->panel, w->name, w->values});
+    }
+    return p;
+}
+
+void NotebookPanel::applyPreset(doc::Preset const& p,
+                                bridge::AppContext& ctx) {
+    if (!ctx.uiState) return;
+    std::lock_guard<std::mutex> lock(ctx.uiState->mtx);
+    for (auto const& e : p.entries) {
+        bridge::UIWidget* w = ctx.uiState->findByName(e.panel, e.widget);
+        if (!w || !presetStorableKind(w->kind)) continue;
+        for (size_t i = 0; i < w->values.size() && i < e.values.size(); ++i)
+            w->values[i] = e.values[i];
+        w->dirtyEngine = true;
+        w->dirtyCallback = true;
+    }
+}
+
+void NotebookPanel::drawPresetsCell(
+    std::shared_ptr<doc::Cell const> const& cell, CellRuntime& rt,
+    float width, bridge::AppContext& ctx) {
+    auto presets = cell->presets;  // COW: edit a copy, install via store_
+    doc::CellId id = cell->id;
+    int selected = rt.selectedPreset;
+    if (selected >= (int)presets.size()) selected = -1;
+
+    // Top row: store new / overwrite selected / name / delete.
+    if (ImGui::SmallButton("+ store")) {
+        doc::Preset p = capturePreset(presetScope(id), ctx);
+        presets.push_back(std::move(p));
+        selected = (int)presets.size() - 1;
+        store_.setCellPresets(id, presets);
+        structureCommitLabel_ = "store preset";
+    }
+    if (selected >= 0) {
+        ImGui::SameLine();
+        if (ImGui::SmallButton("overwrite")) {
+            doc::Preset p = capturePreset(presetScope(id), ctx);
+            p.name = presets[(size_t)selected].name;
+            presets[(size_t)selected] = std::move(p);
+            store_.setCellPresets(id, presets);
+            structureCommitLabel_ = "overwrite preset";
+        }
+        ImGui::SameLine();
+        char nameBuf[64];
+        std::snprintf(nameBuf, sizeof(nameBuf), "%s",
+                      presets[(size_t)selected].name.c_str());
+        ImGui::SetNextItemWidth(160.0f);
+        if (ImGui::InputTextWithHint("##presetname", "(name)", nameBuf,
+                                     sizeof(nameBuf))) {
+            presets[(size_t)selected].name = nameBuf;
+            store_.setCellPresets(id, presets);
+        }
+        if (ImGui::IsItemDeactivatedAfterEdit())
+            structureCommitLabel_ = "rename preset";
+        ImGui::SameLine();
+        if (ImGui::SmallButton("delete")) {
+            presets.erase(presets.begin() + selected);
+            selected = -1;
+            store_.setCellPresets(id, presets);
+            structureCommitLabel_ = "delete preset";
+        }
+    } else {
+        ImGui::SameLine();
+        ImGui::TextDisabled(presets.empty()
+                                ? "(stores the controls of the panels "
+                                  "below, until the next presets cell)"
+                                : "(click a slot to recall; cmd-click "
+                                  "to overwrite)");
+    }
+
+    // The slot matrix. Click = recall (+select); Cmd-click = overwrite.
+    float slotW = 84.0f;
+    int perRow = std::max(1, (int)((width - 16.0f)
+                                   / (slotW + ImGui::GetStyle().ItemSpacing.x)));
+    for (int i = 0; i < (int)presets.size(); ++i) {
+        if (i % perRow != 0) ImGui::SameLine();
+        ImGui::PushID(i);
+        char label[80];
+        if (presets[(size_t)i].name.empty())
+            std::snprintf(label, sizeof(label), "%d", i + 1);
+        else
+            std::snprintf(label, sizeof(label), "%s",
+                          presets[(size_t)i].name.c_str());
+        bool isSel = i == selected;
+        if (isSel)
+            ImGui::PushStyleColor(ImGuiCol_Button,
+                                  ImGui::GetStyleColorVec4(
+                                      ImGuiCol_ButtonActive));
+        if (ImGui::Button(label, ImVec2(slotW, 0.0f))) {
+            selected = i;
+            if (ImGui::GetIO().KeySuper || ImGui::GetIO().KeyCtrl) {
+                doc::Preset p = capturePreset(presetScope(id), ctx);
+                p.name = presets[(size_t)i].name;
+                presets[(size_t)i] = std::move(p);
+                store_.setCellPresets(id, presets);
+                structureCommitLabel_ = "overwrite preset";
+            } else {
+                applyPreset(presets[(size_t)i], ctx);
+                structureCommitLabel_ = "recall preset";
+            }
+        }
+        if (isSel) ImGui::PopStyleColor();
+        ImGui::PopID();
+    }
+    rt.selectedPreset = selected;
+}
+
 static ImVec4 kindColor(bool everRan, bool errored, bool stale) {
     if (errored) return ImVec4(0.90f, 0.30f, 0.30f, 1.0f);   // red
     if (!everRan) return ImVec4(0.45f, 0.45f, 0.45f, 1.0f);  // hollow gray
@@ -532,7 +693,9 @@ void NotebookPanel::drawCell(std::shared_ptr<Cell const> const& cell,
 
     // ---- header row -------------------------------------------------------
     char const* kindName = cell->kind == CellKind::Code ? "code"
-                         : cell->kind == CellKind::Prose ? "prose" : "panel";
+                         : cell->kind == CellKind::Prose ? "prose"
+                         : cell->kind == CellKind::Presets ? "presets"
+                                                           : "panel";
 
     bool stale = false;
     if (cell->kind == CellKind::Code && rt.editor) {
@@ -597,7 +760,7 @@ void NotebookPanel::drawCell(std::shared_ptr<Cell const> const& cell,
         }
     }
 
-    if (cell->kind == CellKind::Code) {
+    if (cell->kind == CellKind::Code || cell->kind == CellKind::Presets) {
         // Editable label so cells can be identified (saved with the
         // document; purely descriptive).
         ImGui::SameLine();
@@ -611,6 +774,9 @@ void NotebookPanel::drawCell(std::shared_ptr<Cell const> const& cell,
         if (ImGui::IsItemDeactivatedAfterEdit()) {
             structureCommitLabel_ = "rename cell";
         }
+    }
+
+    if (cell->kind == CellKind::Code) {
         ImGui::SameLine();
         if (ImGui::SmallButton("Run")) {
             focusedCell_ = id;
@@ -639,6 +805,8 @@ void NotebookPanel::drawCell(std::shared_ptr<Cell const> const& cell,
     // ---- body (hidden while collapsed) --------------------------------------
     if (cell->collapsed) {
         // Header strip only.
+    } else if (cell->kind == CellKind::Presets) {
+        drawPresetsCell(cell, rt, width, ctx);
     } else if (cell->kind == CellKind::Panel) {
         if (ctx.uiState) {
             // The canvas grows to fit its widgets (measured last frame);
@@ -982,6 +1150,13 @@ void NotebookPanel::draw(float width, float height, GuiState& gui,
         focusedCell_ = store_.insertCell(
             at, CellKind::Panel, "panel" + std::to_string(panelCounter++));
         structureCommitLabel_ = "add panel cell";
+    }
+    ImGui::SameLine();
+    if (ImGui::SmallButton("+ presets")) {
+        int at = focusedCell_ ? store_.indexOf(focusedCell_) + 1
+                              : store_.cellCount();
+        focusedCell_ = store_.insertCell(at, CellKind::Presets);
+        structureCommitLabel_ = "add presets cell";
     }
     ImGui::SameLine();
     if (!runQueue_.empty()) {

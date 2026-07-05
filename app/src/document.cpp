@@ -140,6 +140,10 @@ void DocumentStore::setCellCollapsed(CellId id, bool collapsed) {
     if (Cell* c = mutableCell(id)) c->collapsed = collapsed;
 }
 
+void DocumentStore::setCellPresets(CellId id, std::vector<Preset> presets) {
+    if (Cell* c = mutableCell(id)) c->presets = std::move(presets);
+}
+
 void DocumentStore::reset(SnapshotPtr snap, std::string filePath) {
     snap_ = std::move(snap);
     filePath_ = std::move(filePath);
@@ -322,6 +326,20 @@ bool saveDocument(DocSnapshot const& snap, bridge::AppContext& ctx,
     std::vector<Value> cells{Value::Symbol("cells")};
     std::set<std::string> panelNames;
     for (auto const& c : snap.cells) {
+        std::vector<Value> ps{Value::Symbol("presets")};
+        for (auto const& p : c->presets) {
+            std::vector<Value> pv{Value::Symbol("preset"),
+                                  Value::String(p.name)};
+            for (auto const& e : p.entries) {
+                std::vector<Value> vals;
+                for (double v : e.values) vals.push_back(Value::Float(v));
+                pv.push_back(Value::Vec({Value::Symbol("entry"),
+                                         Value::String(e.panel),
+                                         Value::String(e.widget),
+                                         Value::Vec(std::move(vals))}));
+            }
+            ps.push_back(Value::Vec(std::move(pv)));
+        }
         cells.push_back(Value::Vec({
             Value::Symbol("cell"),
             Value::Int((std::int64_t)c->id),
@@ -331,6 +349,7 @@ bool saveDocument(DocSnapshot const& snap, bridge::AppContext& ctx,
             Value::Bool(c->runOnLoad),
             Value::Float(c->panelHeight),
             Value::Bool(c->collapsed),
+            Value::Vec(std::move(ps)),
         }));
         if (c->kind == CellKind::Panel) panelNames.insert(c->name);
     }
@@ -443,7 +462,7 @@ SnapshotPtr loadDocument(bridge::AppContext& ctx, std::string const& path,
         auto cell = std::make_shared<Cell>();
         cell->id = (CellId)rc.child(1).asInt();
         int kind = (int)rc.child(2).asInt();
-        cell->kind = (kind >= 0 && kind <= 2) ? (CellKind)kind : CellKind::Code;
+        cell->kind = (kind >= 0 && kind <= 3) ? (CellKind)kind : CellKind::Code;
         cell->name = std::string(rc.child(3).asStr());
         cell->text = std::string(rc.child(4).asStr());
         cell->runOnLoad = rc.child(5).asBool();
@@ -451,6 +470,27 @@ SnapshotPtr loadDocument(bridge::AppContext& ctx, std::string const& path,
             cell->panelHeight = (float)rc.child(6).asFloat();
         }
         if (rc.childCount() > 7) cell->collapsed = rc.child(7).asBool();
+        if (rc.childCount() > 8) {
+            Reader ps = rc.child(8);
+            for (std::uint32_t k = 1; k < ps.childCount(); ++k) {
+                Reader rp2 = ps.child(k);
+                if (rp2.tag() != Tag::Vec || rp2.childCount() < 2) continue;
+                Preset p;
+                p.name = std::string(rp2.child(1).asStr());
+                for (std::uint32_t m = 2; m < rp2.childCount(); ++m) {
+                    Reader re = rp2.child(m);
+                    if (re.tag() != Tag::Vec || re.childCount() < 4) continue;
+                    PresetEntry e;
+                    e.panel = std::string(re.child(1).asStr());
+                    e.widget = std::string(re.child(2).asStr());
+                    Reader rv = re.child(3);
+                    for (std::uint32_t j = 0; j < rv.childCount(); ++j)
+                        e.values.push_back(rv.child(j).asFloat());
+                    p.entries.push_back(std::move(e));
+                }
+                cell->presets.push_back(std::move(p));
+            }
+        }
         if (cell->id >= snap->nextCellId) snap->nextCellId = cell->id + 1;
         snap->cells.push_back(std::move(cell));
     }

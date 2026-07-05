@@ -160,6 +160,8 @@ private:
         // Panel cells: content height measured last frame; the canvas
         // grows to at least this, so widgets are never clipped.
         float panelContentH = 0.0f;
+        // Presets cells: selected slot (view state, -1 = none).
+        int selectedPreset = -1;
         // Code cells: pane heights dragged by the user; 0 = fit the
         // content (up to a cap). editorHeight is the text area,
         // outputHeight the output pane below it.
@@ -187,6 +189,16 @@ private:
     float drawPanelPage(std::string const& panel, float width,
                         bridge::AppContext& ctx, ControlsPanel& controls,
                         bool arrange, float scale, float canvasH);
+
+    // Presets cells (Galaxy-style snapshot matrix). A presets cell
+    // governs the panel cells AFTER it, up to the next presets cell.
+    std::vector<std::string> presetScope(doc::CellId id) const;
+    doc::Preset capturePreset(std::vector<std::string> const& scope,
+                              bridge::AppContext& ctx);
+    void applyPreset(doc::Preset const& p, bridge::AppContext& ctx);
+    void drawPresetsCell(std::shared_ptr<doc::Cell const> const& cell,
+                         CellRuntime& rt, float width,
+                         bridge::AppContext& ctx);
 
     CellRuntime& runtime(doc::CellId id, doc::Cell const& cell);
     TextEditor* focusedEditor();              // focused cell's editor, if any
