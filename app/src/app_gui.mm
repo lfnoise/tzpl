@@ -802,6 +802,7 @@ int runGui(bridge::AppContext& appCtx) {
                               || guiState.asyncEval.busy()
                               || controlsPanel.wantsContinuousFrames()
                               || notebookPanel.hasQueuedRuns()
+                              || guiState.printCapture.hasPending()
                               || (appCtx.uiState
                                   && controlsPanel.hasPendingEvents(*appCtx.uiState));
             if (needsActivity)

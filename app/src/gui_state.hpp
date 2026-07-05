@@ -76,6 +76,12 @@ struct PrintCapture {
     // in flight) instead of the global console.
     std::vector<std::string> drainLines();
 
+    // True while captured output is waiting in the pipe. The frame loop
+    // checks this before its idle wait: lines printed late in a frame
+    // (e.g. by a widget callback in dispatch) are drained at the top of
+    // the NEXT frame, which must not be half a second away.
+    bool hasPending() const;
+
 private:
     int pipeFds_[2] = {-1, -1};
     FILE* writeFile_ = nullptr;

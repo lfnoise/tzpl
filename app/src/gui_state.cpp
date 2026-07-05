@@ -7,6 +7,7 @@
 #include "diagnostic.hpp"
 #include <unistd.h>
 #include <fcntl.h>
+#include <poll.h>
 #include <cstring>
 #include <pthread.h>
 #include <GLFW/glfw3.h>
@@ -87,6 +88,12 @@ std::vector<std::string> PrintCapture::drainLines() {
         start = nl + 1;
     }
     return lines;
+}
+
+bool PrintCapture::hasPending() const {
+    if (pipeFds_[0] < 0) return false;
+    struct pollfd pfd = {pipeFds_[0], POLLIN, 0};
+    return poll(&pfd, 1, 0) > 0 && (pfd.revents & POLLIN);
 }
 
 void PrintCapture::drain(OutputBuffer& buf) {
