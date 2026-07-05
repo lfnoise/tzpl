@@ -535,6 +535,22 @@ void NotebookPanel::drawCell(std::shared_ptr<Cell const> const& cell,
              && std::hash<std::string>{}(editorText(*rt.editor)) != rt.ranTextHash;
     }
 
+    // Collapse triangle: body hidden, header strip stays (all cell
+    // kinds). Document state, saved with the file; not its own history
+    // step -- it rides along with the next commit.
+    {
+        ImVec2 pad = ImGui::GetStyle().FramePadding;
+        ImGui::PushStyleVar(ImGuiStyleVar_FramePadding,
+                            ImVec2(pad.x * 0.5f, 0.0f));
+        if (ImGui::ArrowButton("##collapse", cell->collapsed
+                                                 ? ImGuiDir_Right
+                                                 : ImGuiDir_Down)) {
+            store_.setCellCollapsed(id, !cell->collapsed);
+        }
+        ImGui::PopStyleVar();
+        ImGui::SameLine();
+    }
+
     // Staleness / status dot
     ImVec2 dotPos = ImGui::GetCursorScreenPos();
     float lineH = ImGui::GetTextLineHeight();
@@ -615,8 +631,10 @@ void NotebookPanel::drawCell(std::shared_ptr<Cell const> const& cell,
     ImGui::SameLine();
     if (ImGui::SmallButton("x")) { pendingDelete_ = id; }
 
-    // ---- body -------------------------------------------------------------
-    if (cell->kind == CellKind::Panel) {
+    // ---- body (hidden while collapsed) --------------------------------------
+    if (cell->collapsed) {
+        // Header strip only.
+    } else if (cell->kind == CellKind::Panel) {
         if (ctx.uiState) {
             // The canvas grows to fit its widgets (measured last frame);
             // the splitter's panelHeight sets a minimum beyond that.

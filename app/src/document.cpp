@@ -134,6 +134,12 @@ void DocumentStore::setCellPanelHeight(CellId id, float height) {
     if (Cell* c = mutableCell(id)) c->panelHeight = height;
 }
 
+void DocumentStore::setCellCollapsed(CellId id, bool collapsed) {
+    auto existing = cell(id);
+    if (!existing || existing->collapsed == collapsed) return;
+    if (Cell* c = mutableCell(id)) c->collapsed = collapsed;
+}
+
 void DocumentStore::reset(SnapshotPtr snap, std::string filePath) {
     snap_ = std::move(snap);
     filePath_ = std::move(filePath);
@@ -324,6 +330,7 @@ bool saveDocument(DocSnapshot const& snap, bridge::AppContext& ctx,
             Value::String(c->text),
             Value::Bool(c->runOnLoad),
             Value::Float(c->panelHeight),
+            Value::Bool(c->collapsed),
         }));
         if (c->kind == CellKind::Panel) panelNames.insert(c->name);
     }
@@ -432,6 +439,7 @@ SnapshotPtr loadDocument(bridge::AppContext& ctx, std::string const& path,
         if (rc.childCount() > 6) {
             cell->panelHeight = (float)rc.child(6).asFloat();
         }
+        if (rc.childCount() > 7) cell->collapsed = rc.child(7).asBool();
         if (cell->id >= snap->nextCellId) snap->nextCellId = cell->id + 1;
         snap->cells.push_back(std::move(cell));
     }

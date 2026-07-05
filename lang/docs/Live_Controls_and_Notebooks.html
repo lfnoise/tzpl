@@ -570,7 +570,7 @@ panel(<span class="str">""</span>);               <span class="cmt">-- back to t
   <li><strong>panel</strong> &mdash; an embedded control surface; see below.</li>
 </ul>
 
-<p>Each cell header also has <strong>&uarr; / &darr;</strong> (move) and <strong>x</strong> (delete) on the right.</p>
+<p>Every cell header starts with a <strong>collapse triangle</strong> that hides the body (code, output, or panel canvas), leaving just the header strip &mdash; collapsed state is saved with the document. Each header also has <strong>&uarr; / &darr;</strong> (move) and <strong>x</strong> (delete) on the right. Collapsed code cells still run (Run, Run All, run-on-load).</p>
 
 <p>With a code cell focused, <strong>File &gt; Open</strong> (<kbd>Cmd+O</kbd>) reads the chosen file's text <em>into that cell</em> (one undoable history commit) &mdash; a quick way to pull an existing <code>.x</code> script into a notebook. With no code cell focused, Open behaves as usual (<code>.tzd</code> opens as a notebook; other files open in the editor).</p>
 

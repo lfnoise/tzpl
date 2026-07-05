@@ -56,6 +56,7 @@ struct Cell {
     std::string text;        // Prose/Code source.
     bool runOnLoad = false;  // Code: run automatically after open.
     float panelHeight = 240.0f;  // Panel: canvas height (arrange layout).
+    bool collapsed = false;  // Body hidden; only the header strip shows.
 };
 
 // State of one widget in a document-claimed panel, captured into snapshots
@@ -140,6 +141,7 @@ public:
     void setCellName(CellId id, std::string const& name);
     void setCellRunOnLoad(CellId id, bool runOnLoad);
     void setCellPanelHeight(CellId id, float height);
+    void setCellCollapsed(CellId id, bool collapsed);
 
     bool modified() const { return modified_; }
     void clearModified() { modified_ = false; }
