@@ -550,6 +550,19 @@ void NotebookPanel::drawCell(std::shared_ptr<Cell const> const& cell,
     }
 
     if (cell->kind == CellKind::Code) {
+        // Editable label so cells can be identified (saved with the
+        // document; purely descriptive).
+        ImGui::SameLine();
+        char nameBuf[64];
+        std::snprintf(nameBuf, sizeof(nameBuf), "%s", cell->name.c_str());
+        ImGui::SetNextItemWidth(160.0f);
+        if (ImGui::InputTextWithHint("##cellname", "(name)", nameBuf,
+                                     sizeof(nameBuf))) {
+            store_.setCellName(id, nameBuf);
+        }
+        if (ImGui::IsItemDeactivatedAfterEdit()) {
+            structureCommitLabel_ = "rename cell";
+        }
         ImGui::SameLine();
         if (ImGui::SmallButton("Run")) {
             focusedCell_ = id;
