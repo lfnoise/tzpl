@@ -117,13 +117,15 @@ void NotebookPanel::queueRunOnLoad() {
 
 void NotebookPanel::commitHistory(std::string const& label,
                                   bridge::AppContext& ctx) {
-    store_.setWidgetSnap(doc::captureWidgets(ctx.uiState, claimedPanels()));
+    store_.setWidgetSnap(doc::captureWidgets(
+        ctx.uiState, claimedPanels(), store_.snapshot()->widgets.get()));
     store_.commit(label);
 }
 
 void NotebookPanel::rerootHistory(std::string const& label,
                                   bridge::AppContext& ctx) {
-    store_.setWidgetSnap(doc::captureWidgets(ctx.uiState, claimedPanels()));
+    store_.setWidgetSnap(doc::captureWidgets(
+        ctx.uiState, claimedPanels(), store_.snapshot()->widgets.get()));
     store_.rerootHistory(label);
 }
 
@@ -553,10 +555,18 @@ void NotebookPanel::drawPresetsCell(
     int selected = rt.selectedPreset;
     if (selected >= (int)presets.size()) selected = -1;
 
+    // Slots are shared immutable Presets: editing one replaces that
+    // pointer; the rest stay shared across history snapshots.
+    auto renameSlot = [&](int i, char const* name) {
+        auto np = std::make_shared<doc::Preset>(*presets[(size_t)i]);
+        np->name = name;
+        presets[(size_t)i] = std::move(np);
+    };
+
     // Top row: store new / overwrite selected / name / delete.
     if (ImGui::SmallButton("+ store")) {
-        doc::Preset p = capturePreset(presetScope(id), ctx);
-        presets.push_back(std::move(p));
+        presets.push_back(std::make_shared<doc::Preset const>(
+            capturePreset(presetScope(id), ctx)));
         selected = (int)presets.size() - 1;
         store_.setCellPresets(id, presets);
         structureCommitLabel_ = "store preset";
@@ -565,19 +575,20 @@ void NotebookPanel::drawPresetsCell(
         ImGui::SameLine();
         if (ImGui::SmallButton("overwrite")) {
             doc::Preset p = capturePreset(presetScope(id), ctx);
-            p.name = presets[(size_t)selected].name;
-            presets[(size_t)selected] = std::move(p);
+            p.name = presets[(size_t)selected]->name;
+            presets[(size_t)selected] =
+                std::make_shared<doc::Preset const>(std::move(p));
             store_.setCellPresets(id, presets);
             structureCommitLabel_ = "overwrite preset";
         }
         ImGui::SameLine();
         char nameBuf[64];
         std::snprintf(nameBuf, sizeof(nameBuf), "%s",
-                      presets[(size_t)selected].name.c_str());
+                      presets[(size_t)selected]->name.c_str());
         ImGui::SetNextItemWidth(160.0f);
         if (ImGui::InputTextWithHint("##presetname", "(name)", nameBuf,
                                      sizeof(nameBuf))) {
-            presets[(size_t)selected].name = nameBuf;
+            renameSlot(selected, nameBuf);
             store_.setCellPresets(id, presets);
         }
         if (ImGui::IsItemDeactivatedAfterEdit())
@@ -609,11 +620,11 @@ void NotebookPanel::drawPresetsCell(
         if (i % perRow != 0) ImGui::SameLine();
         ImGui::PushID(i);
         char label[80];
-        if (presets[(size_t)i].name.empty())
+        if (presets[(size_t)i]->name.empty())
             std::snprintf(label, sizeof(label), "%d", i + 1);
         else
             std::snprintf(label, sizeof(label), "%s",
-                          presets[(size_t)i].name.c_str());
+                          presets[(size_t)i]->name.c_str());
         bool isSel = i == selected;
         if (isSel)
             ImGui::PushStyleColor(ImGuiCol_Button,
@@ -625,7 +636,7 @@ void NotebookPanel::drawPresetsCell(
                 // Cmd-click = the context menu, same as right-click.
                 ImGui::OpenPopup("##slotmenu");
             } else {
-                applyPreset(presets[(size_t)i], ctx);
+                applyPreset(*presets[(size_t)i], ctx);
                 structureCommitLabel_ = "recall preset";
             }
         }
@@ -636,11 +647,11 @@ void NotebookPanel::drawPresetsCell(
             selected = i;
             char nameBuf[64];
             std::snprintf(nameBuf, sizeof(nameBuf), "%s",
-                          presets[(size_t)i].name.c_str());
+                          presets[(size_t)i]->name.c_str());
             ImGui::SetNextItemWidth(160.0f);
             if (ImGui::InputTextWithHint("##rename", "(name)", nameBuf,
                                          sizeof(nameBuf))) {
-                presets[(size_t)i].name = nameBuf;
+                renameSlot(i, nameBuf);
                 renamed = true;
             }
             if (ImGui::IsItemDeactivatedAfterEdit())
@@ -659,8 +670,9 @@ void NotebookPanel::drawPresetsCell(
     }
     if (overwriteIdx >= 0) {
         doc::Preset p = capturePreset(presetScope(id), ctx);
-        p.name = presets[(size_t)overwriteIdx].name;
-        presets[(size_t)overwriteIdx] = std::move(p);
+        p.name = presets[(size_t)overwriteIdx]->name;
+        presets[(size_t)overwriteIdx] =
+            std::make_shared<doc::Preset const>(std::move(p));
         store_.setCellPresets(id, presets);
         structureCommitLabel_ = "overwrite preset";
     } else if (deleteIdx >= 0) {

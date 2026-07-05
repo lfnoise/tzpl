@@ -71,7 +71,10 @@ struct Cell {
     bool runOnLoad = false;  // Code: run automatically after open.
     float panelHeight = 240.0f;  // Panel: canvas height (arrange layout).
     bool collapsed = false;  // Body hidden; only the header strip shows.
-    std::vector<Preset> presets;  // Presets cells: the stored snapshots.
+    // Presets cells: the stored snapshots. Elements are shared
+    // (immutable), so editing one slot doesn't duplicate the bank
+    // across history snapshots.
+    std::vector<std::shared_ptr<Preset const>> presets;
 };
 
 // State of one widget in a document-claimed panel, captured into snapshots
@@ -113,7 +116,10 @@ struct WidgetSnap {
     }
 };
 
-using WidgetSnapList = std::vector<WidgetSnap>;
+// Elements are shared (immutable) so history snapshots duplicate only
+// the widgets that actually changed; captureWidgets reuses the previous
+// capture's pointers for unchanged widgets.
+using WidgetSnapList = std::vector<std::shared_ptr<WidgetSnap const>>;
 
 struct DocSnapshot {
     std::vector<std::shared_ptr<Cell const>> cells;
@@ -157,7 +163,8 @@ public:
     void setCellRunOnLoad(CellId id, bool runOnLoad);
     void setCellPanelHeight(CellId id, float height);
     void setCellCollapsed(CellId id, bool collapsed);
-    void setCellPresets(CellId id, std::vector<Preset> presets);
+    void setCellPresets(CellId id,
+                        std::vector<std::shared_ptr<Preset const>> presets);
 
     bool modified() const { return modified_; }
     void clearModified() { modified_ = false; }
@@ -240,7 +247,8 @@ SnapshotPtr loadDocument(bridge::AppContext& ctx, std::string const& path,
 
 // Snapshot the widgets of the given panels from the ui registry.
 std::shared_ptr<WidgetSnapList const>
-captureWidgets(bridge::UIState* ui, std::vector<std::string> const& panels);
+captureWidgets(bridge::UIState* ui, std::vector<std::string> const& panels,
+               WidgetSnapList const* prev = nullptr);
 
 // Restore the given panels' widgets to a captured state: values updated
 // (marked dirty so the per-frame dispatch re-sends them -- undo is

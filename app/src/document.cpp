@@ -140,7 +140,8 @@ void DocumentStore::setCellCollapsed(CellId id, bool collapsed) {
     if (Cell* c = mutableCell(id)) c->collapsed = collapsed;
 }
 
-void DocumentStore::setCellPresets(CellId id, std::vector<Preset> presets) {
+void DocumentStore::setCellPresets(
+    CellId id, std::vector<std::shared_ptr<Preset const>> presets) {
     if (Cell* c = mutableCell(id)) c->presets = std::move(presets);
 }
 
@@ -155,12 +156,23 @@ void DocumentStore::reset(SnapshotPtr snap, std::string filePath) {
 // History tree
 // ---------------------------------------------------------------------------
 
+// Element-wise equality with a shared-pointer short-circuit: captures
+// reuse unchanged widgets' pointers, so the common case is cheap.
+static bool sameWidgetLists(WidgetSnapList const& a, WidgetSnapList const& b) {
+    if (a.size() != b.size()) return false;
+    for (std::size_t i = 0; i < a.size(); ++i) {
+        if (a[i] == b[i]) continue;
+        if (!a[i] || !b[i] || !(*a[i] == *b[i])) return false;
+    }
+    return true;
+}
+
 bool DocumentStore::setWidgetSnap(std::shared_ptr<WidgetSnapList const> widgets) {
     bool same;
     if (snap_->widgets == widgets) {
         same = true;
     } else if (snap_->widgets && widgets) {
-        same = *snap_->widgets == *widgets;
+        same = sameWidgetLists(*snap_->widgets, *widgets);
     } else {
         // One side null: equal only if the other is empty.
         auto const* nonNull = (snap_->widgets ? snap_->widgets : widgets).get();
@@ -327,7 +339,8 @@ bool saveDocument(DocSnapshot const& snap, bridge::AppContext& ctx,
     std::set<std::string> panelNames;
     for (auto const& c : snap.cells) {
         std::vector<Value> ps{Value::Symbol("presets")};
-        for (auto const& p : c->presets) {
+        for (auto const& pp : c->presets) {
+            Preset const& p = *pp;
             std::vector<Value> pv{Value::Symbol("preset"),
                                   Value::String(p.name)};
             for (auto const& e : p.entries) {
@@ -488,7 +501,8 @@ SnapshotPtr loadDocument(bridge::AppContext& ctx, std::string const& path,
                         e.values.push_back(rv.child(j).asFloat());
                     p.entries.push_back(std::move(e));
                 }
-                cell->presets.push_back(std::move(p));
+                cell->presets.push_back(
+                    std::make_shared<Preset const>(std::move(p)));
             }
         }
         if (cell->id >= snap->nextCellId) snap->nextCellId = cell->id + 1;
@@ -560,7 +574,8 @@ static bool inPanels(std::vector<std::string> const& panels,
 }
 
 std::shared_ptr<WidgetSnapList const>
-captureWidgets(bridge::UIState* ui, std::vector<std::string> const& panels) {
+captureWidgets(bridge::UIState* ui, std::vector<std::string> const& panels,
+               WidgetSnapList const* prev) {
     auto out = std::make_shared<WidgetSnapList>();
     if (!ui) return out;
     std::lock_guard<std::mutex> lock(ui->mtx);
@@ -589,7 +604,20 @@ captureWidgets(bridge::UIState* ui, std::vector<std::string> const& panels) {
         s.rollRows = w->rollRows;
         s.rollEdo = w->rollEdo;
         s.keyChord = w->keyChord;
-        out->push_back(std::move(s));
+        // Share the previous capture's element when unchanged, so
+        // history nodes duplicate only the widgets that moved.
+        std::shared_ptr<WidgetSnap const> reused;
+        if (prev) {
+            for (auto const& q : *prev) {
+                if (q && q->panel == s.panel && q->name == s.name) {
+                    if (*q == s) reused = q;
+                    break;
+                }
+            }
+        }
+        out->push_back(reused ? reused
+                              : std::make_shared<WidgetSnap const>(
+                                    std::move(s)));
     }
     return out;
 }
@@ -604,8 +632,8 @@ void restoreWidgets(bridge::AppContext& ctx, WidgetSnapList const& target,
         // Remove live widgets (in the restored panels) that the target
         // state doesn't contain.
         auto inTarget = [&](bridge::UIWidget const& w) {
-            for (auto const& s : target) {
-                if (s.panel == w.panel && s.name == w.name) return true;
+            for (auto const& sp : target) {
+                if (sp->panel == w.panel && sp->name == w.name) return true;
             }
             return false;
         };
@@ -621,7 +649,8 @@ void restoreWidgets(bridge::AppContext& ctx, WidgetSnapList const& target,
         // Update surviving widgets (bindings preserved; changed values are
         // marked dirty so the per-frame dispatch re-sends them) and
         // recreate missing ones unbound.
-        for (auto const& s : target) {
+        for (auto const& sp : target) {
+            WidgetSnap const& s = *sp;
             if (!inPanels(panels, s.panel)) continue;
             bridge::UIWidget* w = ctx.uiState->findByName(s.panel, s.name);
             if (w && w->kind == s.kind) {
