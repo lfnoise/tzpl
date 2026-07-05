@@ -157,6 +157,9 @@ private:
         double lastEditTime = 0.0;
         // Panel cells: arrange mode (drag/resize widgets on the canvas).
         bool arrange = false;
+        // Panel cells: content height measured last frame; the canvas
+        // grows to at least this, so widgets are never clipped.
+        float panelContentH = 0.0f;
         // Code cells: pane heights dragged by the user; 0 = fit the
         // content (up to a cap). editorHeight is the text area,
         // outputHeight the output pane below it.
@@ -171,11 +174,14 @@ private:
                      ControlsPanel& controls);
     // The panel cell's widget canvas, shared between the normal cell
     // body (arrange supported, scale 1) and perform mode (locked,
-    // scaled). Draws the BeginChild canvas; the caller adds any
-    // splitter/chrome.
-    void drawPanelCanvas(std::shared_ptr<doc::Cell const> const& cell,
-                         float width, bridge::AppContext& ctx,
-                         ControlsPanel& controls, bool arrange, float scale);
+    // scaled). Draws the BeginChild canvas at canvasH (unscaled) and
+    // returns the measured content height, which the caller caches so
+    // the canvas grows to fit its widgets next frame. The caller adds
+    // any splitter/chrome.
+    float drawPanelCanvas(std::shared_ptr<doc::Cell const> const& cell,
+                          float width, bridge::AppContext& ctx,
+                          ControlsPanel& controls, bool arrange,
+                          float scale, float canvasH);
 
     CellRuntime& runtime(doc::CellId id, doc::Cell const& cell);
     TextEditor* focusedEditor();              // focused cell's editor, if any

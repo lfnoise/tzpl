@@ -553,7 +553,7 @@ panel(<span class="str">""</span>);               <span class="cmt">-- back to t
 <!-- -------------------------------- -->
 <h3 id="nb-create">4.1 Creating a Notebook</h3>
 
-<p><strong>File &gt; New Notebook</strong> (<kbd>Cmd+Shift+N</kbd>). The notebook takes over the editor pane; the console strip stays below it, and your <code>.x</code> editor tabs are untouched underneath &mdash; the <strong>Editor</strong> button at the right of the notebook toolbar (or <kbd>Cmd+\</kbd>, View &gt; Toggle Notebook / Editor) swaps back to your editor tabs <em>without closing the notebook</em> &mdash; its widgets, history, and queued runs stay live, and its panels appear as floating windows while it's hidden. <strong>Close</strong> (or <kbd>Cmd+W</kbd>) ends the document.</p>
+<p><strong>File &gt; New Notebook</strong> (<kbd>Cmd+Shift+N</kbd>). The notebook takes over the editor pane, with the console as a resizable column on the right (the cell strip gets the full window height), and your <code>.x</code> editor tabs are untouched underneath &mdash; the <strong>Editor</strong> button at the right of the notebook toolbar (or <kbd>Cmd+\</kbd>, View &gt; Toggle Notebook / Editor) swaps back to your editor tabs <em>without closing the notebook</em> &mdash; its widgets, history, and queued runs stay live, and its panels appear as floating windows while it's hidden. <strong>Close</strong> (or <kbd>Cmd+W</kbd>) ends the document.</p>
 
 <p>Only <strong>one notebook is open at a time</strong>: New Notebook or opening a <code>.tzd</code> replaces the current one (you are asked to save first if it has unsaved changes).</p>
 
@@ -585,7 +585,7 @@ panel(<span class="str">""</span>);               <span class="cmt">-- back to t
   <li><kbd>Cmd+Shift+Enter</kbd> or <strong>Run All</strong> &mdash; run all code cells top to bottom, stopping at the first error. While cells are queued the toolbar button becomes <strong>Stop&nbsp;(n)</strong> &mdash; click it to cancel the remaining runs. If a cell errors, the run stops there and the cell's output notes how many queued cells were skipped.</li>
 </ul>
 
-<p>Output printed <em>while a cell runs</em> appears under that cell; a returned value is shown as <code>&rarr; value : Type</code>. Errors underline the offending line in the cell and print the message below it. Output from timers, actors, and the engine (things that print when no cell is running) goes to the console strip at the bottom, since it can't be attributed to any one cell.</p>
+<p>Output printed <em>while a cell runs</em> appears under that cell; a returned value is shown as <code>&rarr; value : Type</code>. Errors underline the offending line in the cell and print the message below it. Output from timers, actors, and the engine (things that print when no cell is running) goes to the console column on the right, since it can't be attributed to any one cell.</p>
 
 <!-- -------------------------------- -->
 <h3 id="nb-panels">4.4 Panel Cells</h3>

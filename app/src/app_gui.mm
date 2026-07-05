@@ -1290,25 +1290,47 @@ int runGui(bridge::AppContext& appCtx) {
 
             // Notebook replaces the editor pane while a document is open
             // and shown (View > Toggle Notebook / Editor swaps back).
-            if (notebookPanel.isOpen() && notebookVisible)
-                notebookPanel.draw(rightW, editorH, guiState, appCtx,
+            if (notebookPanel.isOpen() && notebookVisible) {
+                // Notebook view: the console is a RIGHT column -- the
+                // cell strip wants the full window height.
+                float vsplitW = 6.0f;
+                float nbW = std::clamp(
+                    (rightW - vsplitW) * guiState.notebookSplitRatio,
+                    240.0f, rightW - vsplitW - 160.0f);
+                notebookPanel.draw(nbW, totalH, guiState, appCtx,
                                    session, controlsPanel);
-            else
+                ImGui::SameLine();
+                ImGui::InvisibleButton("##nbsplitter",
+                                       ImVec2(vsplitW, totalH));
+                if (ImGui::IsItemActive()) {
+                    guiState.notebookSplitRatio = std::clamp(
+                        guiState.notebookSplitRatio
+                            + io.MouseDelta.x / (rightW - vsplitW),
+                        0.3f, 0.9f);
+                }
+                if (ImGui::IsItemHovered())
+                    ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
+                ImGui::SameLine();
+                outputPanel.draw(rightW - vsplitW - nbW, totalH,
+                                 guiState.output);
+            } else {
                 editorPanel.draw(rightW, editorH, guiState);
 
-            // Horizontal splitter
-            ImGui::InvisibleButton("##splitter", ImVec2(rightW, splitterH));
-            if (ImGui::IsItemActive()) {
-                float delta = io.MouseDelta.y / usableH;
-                guiState.splitRatio += delta;
-                if (guiState.splitRatio < 0.2f) guiState.splitRatio = 0.2f;
-                if (guiState.splitRatio > 0.9f) guiState.splitRatio = 0.9f;
-            }
-            if (ImGui::IsItemHovered())
-                ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNS);
+                // Horizontal splitter
+                ImGui::InvisibleButton("##splitter",
+                                       ImVec2(rightW, splitterH));
+                if (ImGui::IsItemActive()) {
+                    float delta = io.MouseDelta.y / usableH;
+                    guiState.splitRatio += delta;
+                    if (guiState.splitRatio < 0.2f) guiState.splitRatio = 0.2f;
+                    if (guiState.splitRatio > 0.9f) guiState.splitRatio = 0.9f;
+                }
+                if (ImGui::IsItemHovered())
+                    ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNS);
 
-            // Output panel
-            outputPanel.draw(rightW, outputH, guiState.output);
+                // Output panel
+                outputPanel.draw(rightW, outputH, guiState.output);
+            }
 
             ImGui::EndGroup();
 

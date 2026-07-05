@@ -618,7 +618,12 @@ void NotebookPanel::drawCell(std::shared_ptr<Cell const> const& cell,
     // ---- body -------------------------------------------------------------
     if (cell->kind == CellKind::Panel) {
         if (ctx.uiState) {
-            drawPanelCanvas(cell, width, ctx, controls, rt.arrange, 1.0f);
+            // The canvas grows to fit its widgets (measured last frame);
+            // the splitter's panelHeight sets a minimum beyond that.
+            float canvasH = std::max({60.0f, cell->panelHeight,
+                                      rt.panelContentH});
+            rt.panelContentH = drawPanelCanvas(cell, width, ctx, controls,
+                                               rt.arrange, 1.0f, canvasH);
 
             // Canvas height splitter.
             ImGui::InvisibleButton("##panelheight", ImVec2(width, 6.0f));
@@ -681,12 +686,12 @@ void NotebookPanel::drawCell(std::shared_ptr<Cell const> const& cell,
     ImGui::Spacing();
 }
 
-void NotebookPanel::drawPanelCanvas(
+float NotebookPanel::drawPanelCanvas(
     std::shared_ptr<doc::Cell const> const& cell, float width,
     bridge::AppContext& ctx, ControlsPanel& controls, bool arrange,
-    float scale) {
-    float canvasH = std::max(cell->panelHeight, 60.0f) * scale;
-    ImGui::BeginChild("##panelcanvas", ImVec2(width, canvasH), true,
+    float scale, float canvasH) {
+    float contentBottom = 52.0f;
+    ImGui::BeginChild("##panelcanvas", ImVec2(width, canvasH * scale), true,
                       ImGuiWindowFlags_NoScrollWithMouse);
     if (scale != 1.0f) {
         ImGui::SetWindowFontScale(scale);
@@ -736,6 +741,8 @@ void NotebookPanel::drawPanelCanvas(
             float itemH = (ImGui::GetItemRectMax().y
                            - ImGui::GetItemRectMin().y) / scale;
             autoY = std::max(autoY, py + std::max(itemH, 24.0f) + 8.0f);
+            contentBottom = std::max(contentBottom,
+                                     py + std::max(itemH, 24.0f));
 
             if (arrange) {
                 // Drag overlay: move; corner grip: resize. Both snap to
@@ -802,12 +809,14 @@ void NotebookPanel::drawPanelCanvas(
         ImGui::SetWindowFontScale(1.0f);
     }
     ImGui::EndChild();
+    return contentBottom + 8.0f;
 }
 
 void NotebookPanel::drawPerform(float width, float height,
                                 bridge::AppContext& ctx,
                                 ControlsPanel& controls) {
-    ImGui::BeginChild("##perform", ImVec2(width, height), false);
+    ImGui::BeginChild("##perform", ImVec2(width, height), false,
+                      ImGuiWindowFlags_AlwaysVerticalScrollbar);
     if (ImGui::SmallButton("Exit Perform")) performMode_ = false;
     ImGui::SameLine();
     {
@@ -831,8 +840,11 @@ void NotebookPanel::drawPerform(float width, float height,
         anyPanel = true;
         ImGui::PushID((int)cell->id);
         ImGui::TextUnformatted(cell->name.c_str());
-        drawPanelCanvas(cell, cellWidth, ctx, controls, false,
-                        kPerformScale);
+        auto& rt = runtime(cell->id, *cell);
+        float canvasH = std::max({60.0f, cell->panelHeight,
+                                  rt.panelContentH});
+        rt.panelContentH = drawPanelCanvas(cell, cellWidth, ctx, controls,
+                                           false, kPerformScale, canvasH);
         ImGui::Spacing();
         ImGui::PopID();
     }
@@ -860,7 +872,10 @@ void NotebookPanel::draw(float width, float height, GuiState& gui,
         return;
     }
 
-    ImGui::BeginChild("##notebook", ImVec2(width, height), false);
+    // Always show the vertical scrollbar: the cell strip must stay
+    // navigable when cells overflow the view.
+    ImGui::BeginChild("##notebook", ImVec2(width, height), false,
+                      ImGuiWindowFlags_AlwaysVerticalScrollbar);
 
     // Toolbar
     if (ImGui::SmallButton("+ code")) {

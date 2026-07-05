@@ -154,6 +154,9 @@ struct GuiState {
     EvalFlash flash;
     AsyncEval asyncEval;
     float splitRatio = 0.65f; // editor takes 65% of window height
+    // Notebook view: the console is a right-hand column instead of a
+    // bottom strip (the cell strip needs the vertical space).
+    float notebookSplitRatio = 0.72f; // notebook takes 72% of the width
 
     // Eval request flags (set by GLFW key callback, consumed by main loop)
     bool evalSelection = false; // Cmd+Enter
