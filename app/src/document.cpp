@@ -533,6 +533,13 @@ captureWidgets(bridge::UIState* ui, std::vector<std::string> const& panels) {
         s.spec = w->spec;
         s.spec2 = w->spec2;
         s.values = w->values;
+        // Meter/Scope values are live tap readouts, not document state:
+        // capture stable zeros so a run that only changes AUDIO (stop a
+        // node, stop a coroutine) doesn't read as a document change and
+        // pollute history.
+        if (w->kind == bridge::UIWidgetKind::Meter
+            || w->kind == bridge::UIWidgetKind::Scope)
+            std::fill(s.values.begin(), s.values.end(), 0.0);
         s.fx = w->fx; s.fy = w->fy; s.fw = w->fw; s.fh = w->fh;
         s.rows = w->rows; s.cols = w->cols;
         s.noteData = w->noteData;
@@ -592,7 +599,11 @@ void restoreWidgets(bridge::AppContext& ctx, WidgetSnapList const& target,
                     w->noteData = s.noteData;
                     w->dirtyCallback = true;
                 }
-                if (w->values != s.values) {
+                // Tap-backed displays keep their live values (captured
+                // as zeros; see captureWidgets).
+                bool tapKind = s.kind == bridge::UIWidgetKind::Meter
+                            || s.kind == bridge::UIWidgetKind::Scope;
+                if (!tapKind && w->values != s.values) {
                     w->values = s.values;
                     w->dirtyEngine = true;
                     w->dirtyCallback = true;
