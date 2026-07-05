@@ -281,6 +281,8 @@ static void readWidgetExtras(Reader rw, bridge::UIWidget& w) {
         w.rollLowPitch = (int)rw.child(12).asInt();
         w.rollRows = std::max(1, (int)rw.child(13).asInt());
     }
+    if (rw.childCount() > 14)
+        w.rollEdo = std::max(1, (int)rw.child(14).asInt());
 }
 
 bool saveDocument(DocSnapshot const& snap, bridge::AppContext& ctx,
@@ -327,6 +329,7 @@ bool saveDocument(DocSnapshot const& snap, bridge::AppContext& ctx,
                     Value::Float(w->rollBeats),
                     Value::Int(w->rollLowPitch),
                     Value::Int(w->rollRows),
+                    Value::Int(w->rollEdo),
                 }));
             }
             panels.push_back(Value::Vec(std::move(pv)));
@@ -489,6 +492,7 @@ captureWidgets(bridge::UIState* ui, std::vector<std::string> const& panels) {
         s.rollBeats = w->rollBeats;
         s.rollLowPitch = w->rollLowPitch;
         s.rollRows = w->rollRows;
+        s.rollEdo = w->rollEdo;
         out->push_back(std::move(s));
     }
     return out;
@@ -533,6 +537,7 @@ void restoreWidgets(bridge::AppContext& ctx, WidgetSnapList const& target,
                 w->rollBeats = s.rollBeats;
                 w->rollLowPitch = s.rollLowPitch;
                 w->rollRows = s.rollRows;
+                w->rollEdo = s.rollEdo;
                 if (w->noteData != s.noteData) {
                     w->noteData = s.noteData;
                     w->dirtyCallback = true;
@@ -563,6 +568,7 @@ void restoreWidgets(bridge::AppContext& ctx, WidgetSnapList const& target,
                 nw->rollBeats = s.rollBeats;
                 nw->rollLowPitch = s.rollLowPitch;
                 nw->rollRows = s.rollRows;
+                nw->rollEdo = s.rollEdo;
                 nw->dirtyEngine = true;
                 nw->dirtyCallback = true;
             }

@@ -70,8 +70,12 @@ fn matrix(name String, rows Int, cols Int) Widget =
 
 -- Grid note editor over `beats` beats (16th grid). Notes are read/written
 -- as flat (pitch, startBeat, durBeats) triplets; see notes()/setNotes().
-fn pianoRoll(name String, beats Float = 4.0) Widget =
-	Widget(uiPianoRoll(name, beats));
+-- Pitch is in steps of 1/edo octave: edo 12 (default) = MIDI note
+-- numbers, 19/31/53 = those equal temperaments, 1200 = cents, 1 =
+-- octaves. Fractional pitches are legal and drawn unquantized; clicking
+-- adds whole steps.
+fn pianoRoll(name String, beats Float = 4.0, edo Int = 12) Widget =
+	Widget(uiPianoRoll(name, beats, edo));
 
 -- Static text.
 fn label(name String, text String) Widget = Widget(uiLabel(name, text));

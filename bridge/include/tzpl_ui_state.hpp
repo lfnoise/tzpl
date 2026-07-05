@@ -141,10 +141,14 @@ struct UIWidget {
     int rows = 1, cols = 1;
 
     // Piano roll: flat (pitch, startBeat, durBeats) triplets + view range.
+    // Pitch is in steps of 1/rollEdo octave: edo 12 = MIDI note numbers,
+    // 1200 = cents, 1 = octaves. Fractional pitches are legal and drawn
+    // unquantized; the click grid adds whole steps.
     std::vector<float> noteData;
     float rollBeats = 4.0f;
     int rollLowPitch = 48;
-    int rollRows = 24;
+    int rollRows = 24;      // vertical extent in steps
+    int rollEdo = 12;       // equal divisions of the octave
 
     // Label text (Label kind).
     std::string labelText;

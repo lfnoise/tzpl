@@ -247,17 +247,26 @@ static void ffi_uiMatrix(ts::VM& vm, u16 dst, u16, u16 argBase) {
     vm.reg(dst).i = (i64)w->id;
 }
 
-// fn uiPianoRoll(name String, beats Float) Int
+// fn uiPianoRoll(name String, beats Float, edo Int) Int
 static void ffi_uiPianoRoll(ts::VM& vm, u16 dst, u16, u16 argBase) {
     UIState* ui = getUIState(vm);
     if (!ui) { vm.reg(dst).i = 0; return; }
     const char* name = regString(vm, argBase);
     double beats = vm.reg(argBase + 1).f;
+    int edo = std::max(1, (int)vm.reg(argBase + 2).i);
 
     std::lock_guard<std::mutex> lock(ui->mtx);
     UIWidget* w = ui->upsert(ui->currentPanel, name, UIWidgetKind::PianoRoll,
                              UISpec{}, UISpec{});
     w->rollBeats = (float)std::max(1.0, beats);
+    if (w->rollEdo != edo) {
+        // Pitch units changed: reset the view window to a sane default
+        // for this division (2 octaves starting 4 above the reference).
+        // rollRange() afterwards still customizes it.
+        w->rollEdo = edo;
+        w->rollLowPitch = 4 * edo;
+        w->rollRows = 2 * edo;
+    }
     vm.reg(dst).i = (i64)w->id;
 }
 
@@ -998,7 +1007,7 @@ void registerUIFFI(ts::Compiler& compiler) {
                                          Float, Float, Float, Int, Float}, ffi_uiXY);
     reg("uiMultiSlider",  Int,  {String, Int, Float, Float, Float, Int, Float}, ffi_uiMultiSlider);
     reg("uiMatrix",       Int,  {String, Int, Int},             ffi_uiMatrix);
-    reg("uiPianoRoll",    Int,  {String, Float},                ffi_uiPianoRoll);
+    reg("uiPianoRoll",    Int,  {String, Float, Int},           ffi_uiPianoRoll);
     reg("uiLabel",        Int,  {String, String},               ffi_uiLabel);
     reg("uiOnChange",     Void, {Int, FnFloat},                 ffi_uiOnChange);
     reg("uiOnChangeXY",   Void, {Int, FnFloat2},                ffi_uiOnChangeXY);

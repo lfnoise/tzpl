@@ -76,6 +76,7 @@ struct WidgetSnap {
     float rollBeats = 4.0f;
     int rollLowPitch = 48;
     int rollRows = 24;
+    int rollEdo = 12;
 
     bool operator==(WidgetSnap const& o) const {
         return panel == o.panel && name == o.name && kind == o.kind
@@ -90,7 +91,7 @@ struct WidgetSnap {
             && rows == o.rows && cols == o.cols
             && noteData == o.noteData && labelText == o.labelText
             && rollBeats == o.rollBeats && rollLowPitch == o.rollLowPitch
-            && rollRows == o.rollRows;
+            && rollRows == o.rollRows && rollEdo == o.rollEdo;
     }
 };
 

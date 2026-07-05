@@ -410,8 +410,14 @@ static void drawMatrix(UIWidget& w) {
 }
 
 static void drawPianoRoll(UIWidget& w) {
+    // The vertical axis is CONTINUOUS pitch in steps of 1/edo octave
+    // (edo 12 = MIDI numbers, 1200 = cents, 1 = octaves). A note at
+    // pitch p fills the band [p, p+1); fractional pitches draw at their
+    // true position. The click grid adds whole steps; per-step grid
+    // lines and step shading disappear when steps are subpixel (cents).
     const float stepBeats = 0.25f;  // 16th grid
     int rows = std::max(1, w.rollRows);
+    int edo = std::max(1, w.rollEdo);
     int cols = std::max(1, (int)std::lround(w.rollBeats / stepBeats));
     const float width = w.fw > 0.0f ? w.fw : 320.0f;
     const float height = w.fh > 0.0f ? w.fh : 200.0f;
@@ -419,26 +425,37 @@ static void drawPianoRoll(UIWidget& w) {
     ImGui::InvisibleButton((std::string("##") + w.name).c_str(),
                            ImVec2(width, height));
     float cw = width / (float)cols, chh = height / (float)rows;
+    // y(p) = bottom edge of pitch p's band; bands stack upward.
+    float top = (float)(w.rollLowPitch + rows);
+    auto yOf = [&](float p) { return origin.y + (top - p) * chh; };
 
     if (ImGui::IsItemClicked()) {
         ImVec2 m = ImGui::GetIO().MousePos;
         int c = std::clamp((int)((m.x - origin.x) / cw), 0, cols - 1);
-        int r = std::clamp((int)((m.y - origin.y) / chh), 0, rows - 1);
-        float pitch = (float)(w.rollLowPitch + (rows - 1 - r));
         float start = c * stepBeats;
-        // Click a note to delete it; click empty space to add a 16th note.
-        bool removed = false;
+        // Pitch whose band center is at the cursor (continuous).
+        float clickPitch = top - (m.y - origin.y) / chh - 0.5f;
+        // Delete the nearest note covering this beat within a half
+        // semitone (1/24 octave) of the click; otherwise add a whole
+        // step (matching exact-cell deletion for integer notes).
+        float tol = (float)edo / 24.0f;
+        size_t best = w.noteData.size();
+        float bestDist = tol;
         for (size_t i = 0; i + 2 < w.noteData.size(); i += 3) {
-            if (w.noteData[i] == pitch && start >= w.noteData[i + 1]
-                && start < w.noteData[i + 1] + w.noteData[i + 2]) {
-                w.noteData.erase(w.noteData.begin() + i,
-                                 w.noteData.begin() + i + 3);
-                removed = true;
-                break;
+            if (start < w.noteData[i + 1]
+                || start >= w.noteData[i + 1] + w.noteData[i + 2]) continue;
+            float d = std::fabs(w.noteData[i] - clickPitch);
+            if (d <= bestDist) {
+                bestDist = d;
+                best = i;
             }
         }
-        if (!removed) {
-            w.noteData.push_back(pitch);
+        if (best < w.noteData.size()) {
+            w.noteData.erase(w.noteData.begin() + best,
+                             w.noteData.begin() + best + 3);
+        } else {
+            int r = std::clamp((int)((m.y - origin.y) / chh), 0, rows - 1);
+            w.noteData.push_back((float)(w.rollLowPitch + (rows - 1 - r)));
             w.noteData.push_back(start);
             w.noteData.push_back(stepBeats);
         }
@@ -452,13 +469,17 @@ static void drawPianoRoll(UIWidget& w) {
     ImU32 gridCol = ImGui::GetColorU32(ImGuiCol_TableBorderLight);
     ImU32 beatCol = ImGui::GetColorU32(ImGuiCol_Border);
     ImU32 noteCol = ImGui::GetColorU32(ImGuiCol_PlotHistogram);
-    // Octave shading for orientation (C rows).
-    for (int r = 0; r < rows; ++r) {
-        int pitch = w.rollLowPitch + (rows - 1 - r);
-        if (pitch % 12 == 0) {
-            dl->AddRectFilled(ImVec2(origin.x, origin.y + r * chh),
-                              ImVec2(origin.x + width, origin.y + (r + 1) * chh),
-                              ImGui::GetColorU32(ImGuiCol_TableRowBgAlt));
+    // Reference-step shading for orientation (the C rows in 12-edo),
+    // when a step is wide enough to see.
+    if (chh >= 2.0f) {
+        for (int r = 0; r < rows; ++r) {
+            int pitch = w.rollLowPitch + (rows - 1 - r);
+            if (pitch % edo == 0) {
+                dl->AddRectFilled(
+                    ImVec2(origin.x, origin.y + r * chh),
+                    ImVec2(origin.x + width, origin.y + (r + 1) * chh),
+                    ImGui::GetColorU32(ImGuiCol_TableRowBgAlt));
+            }
         }
     }
     for (int c = 0; c <= cols; ++c) {
@@ -466,16 +487,24 @@ static void drawPianoRoll(UIWidget& w) {
                     ImVec2(origin.x + c * cw, origin.y + height),
                     (c % 4 == 0) ? beatCol : gridCol);
     }
-    for (int r = 0; r <= rows; ++r)
-        dl->AddLine(ImVec2(origin.x, origin.y + r * chh),
-                    ImVec2(origin.x + width, origin.y + r * chh), gridCol);
+    if (chh >= 3.0f) {
+        for (int r = 0; r <= rows; ++r)
+            dl->AddLine(ImVec2(origin.x, origin.y + r * chh),
+                        ImVec2(origin.x + width, origin.y + r * chh), gridCol);
+    }
+    // Octave boundary lines keep dense divisions (cents) navigable.
+    for (int p = ((w.rollLowPitch + edo - 1) / edo) * edo;
+         p <= w.rollLowPitch + rows; p += edo)
+        dl->AddLine(ImVec2(origin.x, yOf((float)p)),
+                    ImVec2(origin.x + width, yOf((float)p)), beatCol);
     for (size_t i = 0; i + 2 < w.noteData.size(); i += 3) {
-        int r = rows - 1 - ((int)w.noteData[i] - w.rollLowPitch);
-        if (r < 0 || r >= rows) continue;
+        float p = w.noteData[i];
+        if (p + 1.0f < (float)w.rollLowPitch || p > top) continue;
+        float y1 = std::min(yOf(p), origin.y + height);
+        float y0 = std::max(yOf(p) - std::max(chh, 2.0f), origin.y);
         float x0 = origin.x + w.noteData[i + 1] / stepBeats * cw;
         float x1 = x0 + w.noteData[i + 2] / stepBeats * cw;
-        dl->AddRectFilled(ImVec2(x0 + 1, origin.y + r * chh + 1),
-                          ImVec2(x1 - 1, origin.y + (r + 1) * chh - 1),
+        dl->AddRectFilled(ImVec2(x0 + 1, y0 + 1), ImVec2(x1 - 1, y1 - 1),
                           noteCol);
     }
     dl->AddRect(origin, ImVec2(origin.x + width, origin.y + height), beatCol);

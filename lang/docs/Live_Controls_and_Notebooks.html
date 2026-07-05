@@ -429,7 +429,7 @@ scope(<span class="str">"out"</span>, node);</code></pre>
 <tr><td><code>scope(name, node)</code></td><td>oscilloscope</td><td>all channels of a node outlet, zero-cross triggered; the <em>ch</em> button cycles all / single channel (stacked lanes in &ldquo;all&rdquo; view share one trigger, preserving phase)</td></tr>
 <tr><td><code>multislider(name, n, spec?)</code></td><td>N vertical bars</td><td>drag across to paint; values mapped through the spec (default 0..1)</td></tr>
 <tr><td><code>matrix(name, rows, cols)</code></td><td>toggle grid</td><td>click cells on/off; a step-sequencer surface (values are 0/1, row-major)</td></tr>
-<tr><td><code>pianoRoll(name, beats = 4.0)</code></td><td>grid note editor</td><td>16th grid; click to add/remove notes; <code>rollRange(w, lowPitch, rows)</code> sets the pitch window; notes are (pitch, startBeat, durBeats) triplets via <code>notes()</code>/<code>setNotes()</code></td></tr>
+<tr><td><code>pianoRoll(name, beats = 4.0, edo = 12)</code></td><td>grid note editor</td><td>16th grid; click to add/remove notes; <code>rollRange(w, lowPitch, rows)</code> sets the pitch window; notes are (pitch, startBeat, durBeats) triplets via <code>notes()</code>/<code>setNotes()</code>. Pitch is in steps of 1/<code>edo</code> octave &mdash; 12 (default) gives MIDI note numbers, 19/31/53 those equal temperaments, 1200 cents, 1 octaves. Fractional pitches are legal and drawn at their true (unquantized) position; clicking adds whole steps and deletes the nearest note within 1/24 octave</td></tr>
 <tr><td><code>label(name, text)</code></td><td>static text</td><td></td></tr>
 <tr><td><code>plot(name, data)</code></td><td>static line plot</td><td>update with <code>setData(w, data)</code></td></tr>
 <tr><td><code>waveform(name, node, buf)</code></td><td>audio file overview</td><td>shows the file loaded by <code>audio_engine.loadBuffer</code></td></tr>
@@ -535,7 +535,7 @@ panel(<span class="str">""</span>);               <span class="cmt">-- back to t
 <tr><td><code>notes(w) [Float]</code> / <code>setNotes(w, ns)</code></td><td>piano-roll notes as flat (pitch, startBeat, durBeats) triplets</td></tr>
 <tr><td><code>onChangeVec(w, f ([Float]) Void)</code></td><td>coalesced vector callback: multislider/matrix values, or roll note triplets</td></tr>
 <tr><td><code>setFrame(w, x, y, wd, ht)</code></td><td>layout frame within the panel (what arrange mode sets by dragging)</td></tr>
-<tr><td><code>rollRange(w, lowPitch, rows)</code></td><td>piano-roll pitch window</td></tr>
+<tr><td><code>rollRange(w, lowPitch, rows)</code></td><td>piano-roll pitch window, in steps of the roll&rsquo;s <code>edo</code></td></tr>
 <tr><td><code>show(name, v)</code></td><td>materialize a value as its natural widget: Float&rarr;number, Bool&rarr;toggle, [Float]&rarr;multislider (&le;64) or plot, String&rarr;label</td></tr>
 <tr><td><code>rmsLevel(w)</code> / <code>peakLevel(w)</code> / <code>tapChannels(w)</code> / <code>samples(w, max = 4096)</code></td><td>read a tap widget from code; samples are interleaved frames of tapChannels(w) channels</td></tr>
 <tr><td><code>control(node, name String, silo = 0) Widget</code><br><code>control(node, name, panel String, silo = 0)</code></td><td>one widget derived + bound from the def's ControlSpec; defaults into a panel named after the def</td></tr>
@@ -646,7 +646,7 @@ panel(<span class="str">""</span>);               <span class="cmt">-- back to t
 
 <ul>
   <li><strong>Floating panel windows stack widgets top-to-bottom</strong>; arrange mode (drag/resize) applies to notebook panel cells, where layout is document state.</li>
-  <li><strong>Piano roll is a fixed 16th grid</strong>: click to add/remove quarter-beat notes; no velocity lanes, note dragging, or CC curves. Longer notes via <code>setNotes()</code>.</li>
+  <li><strong>Piano roll is a fixed 16th grid</strong>: click to add/remove quarter-beat notes; no velocity lanes, note dragging, or CC curves. Longer notes and fractional pitches via <code>setNotes()</code>.</li>
   <li><strong>One notebook at a time.</strong> Opening or creating another replaces the current one (with a save prompt if modified).</li>
   <li><strong>Prose cells are plain (monospaced) text</strong> &mdash; styled without line numbers, but no markdown rendering or proportional font yet.</li>
   <li><strong>History is not saved</strong> in the <code>.tzd</code> file.</li>
