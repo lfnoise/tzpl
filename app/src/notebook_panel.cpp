@@ -578,11 +578,13 @@ void NotebookPanel::drawCell(std::shared_ptr<Cell const> const& cell,
     }
 
     // Right-aligned structure buttons
-    float btnW = ImGui::CalcTextSize("^  v  x").x + 60.0f;
+    float btnW = ImGui::CalcTextSize("\xe2\x86\x91  \xe2\x86\x93  x").x + 60.0f;
     ImGui::SameLine(std::max(width - btnW, 0.0f));
-    if (ImGui::SmallButton("^")) { pendingMove_ = id; pendingMoveDelta_ = -1; }
+    if (ImGui::SmallButton("\xe2\x86\x91"))  // up arrow
+        { pendingMove_ = id; pendingMoveDelta_ = -1; }
     ImGui::SameLine();
-    if (ImGui::SmallButton("v")) { pendingMove_ = id; pendingMoveDelta_ = 1; }
+    if (ImGui::SmallButton("\xe2\x86\x93"))  // down arrow
+        { pendingMove_ = id; pendingMoveDelta_ = 1; }
     ImGui::SameLine();
     if (ImGui::SmallButton("x")) { pendingDelete_ = id; }
 
