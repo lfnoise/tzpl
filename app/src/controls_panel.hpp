@@ -58,6 +58,9 @@ struct ControlsPanel {
 
 private:
     bool anyTapsVisible_ = false;
+    // Panels whose floating window was closed this frame; dispatch()
+    // removes their widgets (and releases engine taps).
+    std::vector<std::string> pendingClosedPanels_;
 };
 
 #endif /* controls_panel_hpp */

@@ -24,6 +24,7 @@
 
 #include "tzpl_audio_engine_ffi.hpp"
 #include "tzpl_app_context.hpp"
+#include "tzpl_ui_state.hpp"
 #include "tzpl_nrt_render.hpp"
 #include "tzpl.hpp"
 #include "value.hpp"
@@ -124,6 +125,21 @@ static void returnErr(ts::VM& vm, u16 dst, tzpl_SErr err, char const* fnName) {
 // Extract a C string from a Tzopilotl String object in a register.
 static const char* regString(ts::VM& vm, u16 reg) {
     return ts::stringData(vm.reg(reg).o);
+}
+
+// Unbind ui widgets whose engine fast path targets `nodeID` (all nodes if
+// nodeID < 0). Freeing a node otherwise leaves its widgets sending
+// setControl at a dead ID, spamming errNodeNotFound on every drag; unbound
+// widgets are silent until code rebinds them.
+static void unbindWidgetsForNode(AppContext* ctx, std::int64_t nodeID) {
+    if (!ctx || !ctx->uiState) return;
+    std::lock_guard<std::mutex> lock(ctx->uiState->mtx);
+    for (auto& w : ctx->uiState->widgets) {
+        if (w->target && (nodeID < 0 || w->target->nodeID == (long)nodeID))
+            w->target.reset();
+        if (w->target2 && (nodeID < 0 || w->target2->nodeID == (long)nodeID))
+            w->target2.reset();
+    }
 }
 
 
@@ -281,10 +297,12 @@ static void ffi_newNode(ts::VM& vm, u16 dst, u16, u16 argBase) {
 static void ffi_freeNode(ts::VM& vm, u16 dst, u16, u16 argBase) {
     auto nodeID = static_cast<engine::i64>(vm.reg(argBase).i);
     if (!bridge::currentRenderContext()) {
-        if (auto* ctx = getAppContext(vm)) {
+        auto* ctx = getAppContext(vm);
+        if (ctx) {
             std::lock_guard<std::mutex> lock(ctx->nodeDefNamesMtx);
             ctx->nodeDefNames.erase(static_cast<std::int64_t>(nodeID));
         }
+        unbindWidgetsForNode(ctx, static_cast<std::int64_t>(nodeID));
     }
     returnErr(vm, dst, engine::freeNode(nodeID), __func__);
 }
@@ -292,10 +310,12 @@ static void ffi_freeNode(ts::VM& vm, u16 dst, u16, u16 argBase) {
 // fn freeAllNodes() -> Int
 static void ffi_freeAllNodes(ts::VM& vm, u16 dst, u16, u16) {
     if (!bridge::currentRenderContext()) {
-        if (auto* ctx = getAppContext(vm)) {
+        auto* ctx = getAppContext(vm);
+        if (ctx) {
             std::lock_guard<std::mutex> lock(ctx->nodeDefNamesMtx);
             ctx->nodeDefNames.clear();
         }
+        unbindWidgetsForNode(ctx, -1);
     }
     returnErr(vm, dst, engine::freeAllNodes(), __func__);
 }

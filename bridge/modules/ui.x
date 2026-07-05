@@ -32,6 +32,9 @@ fn _stepParam(w ControlWarp) Float {
 -- Target panel for subsequent constructors ("" = default Controls panel).
 fn panel(name String) Void = uiPanel(name);
 
+-- The current target panel name.
+fn currentPanel() String = uiGetPanel();
+
 ---------------------------------------------------------------------------
 -- Constructors (upsert by (panel, name); return a Widget handle)
 
@@ -117,6 +120,24 @@ fn waveform(name String, node Int, buf Int) Widget =
 fn control(node Int, name String, silo Int = 0) Widget =
 	Widget(uiControl(node, name, silo));
 
--- Materialize the node's whole interface.
+-- Materialize the node's whole interface (into the current panel).
 fn controls(node Int, silo Int = 0) [Widget] =
 	uiControls(node, silo) map(fn(id Int) Widget { Widget(id) });
+
+-- Variants targeting a named panel directly -- e.g. a notebook panel
+-- cell: controls(node, "mixer"). The previous target panel is restored.
+fn control(node Int, name String, panel String, silo Int = 0) Widget {
+	let prev = uiGetPanel();
+	uiPanel(panel);
+	let w = Widget(uiControl(node, name, silo));
+	uiPanel(prev);
+	w
+}
+
+fn controls(node Int, panel String, silo Int = 0) [Widget] {
+	let prev = uiGetPanel();
+	uiPanel(panel);
+	let ws = uiControls(node, silo) map(fn(id Int) Widget { Widget(id) });
+	uiPanel(prev);
+	ws
+}

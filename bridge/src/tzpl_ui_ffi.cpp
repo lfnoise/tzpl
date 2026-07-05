@@ -124,6 +124,18 @@ static void ffi_uiPanel(ts::VM& vm, u16, u16, u16 argBase) {
     ui->currentPanel = name;
 }
 
+// fn uiGetPanel() String
+static void ffi_uiGetPanel(ts::VM& vm, u16 dst, u16, u16) {
+    UIState* ui = getUIState(vm);
+    std::string panel;
+    if (ui) {
+        std::lock_guard<std::mutex> lock(ui->mtx);
+        panel = ui->currentPanel;
+    }
+    // Allocate after releasing ui->mtx (allocation may run the GC).
+    vm.reg(dst).o = new ts::StringObj(panel);
+}
+
 // fn uiSlider(name String, lo Float, hi Float, init Float,
 //             warp Int, warpParam Float) Int
 static void ffi_uiSlider(ts::VM& vm, u16 dst, u16, u16 argBase) {
@@ -705,6 +717,7 @@ void registerUIFFI(ts::Compiler& compiler) {
     };
 
     reg("uiPanel",        Void, {String},                       ffi_uiPanel);
+    reg("uiGetPanel",     String, {},                           ffi_uiGetPanel);
     reg("uiSlider",       Int,  {String, Float, Float, Float, Int, Float}, ffi_uiSlider);
     reg("uiNumber",       Int,  {String, Float},                ffi_uiNumber);
     reg("uiButton",       Int,  {String},                       ffi_uiButton);

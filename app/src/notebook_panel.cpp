@@ -421,8 +421,18 @@ void NotebookPanel::drawCell(std::shared_ptr<Cell const> const& cell,
     ImGui::TextDisabled("%s", kindName);
 
     if (cell->kind == CellKind::Panel) {
+        // Editable panel name: this is the name code targets with
+        // ui.panel(...) / controls(node, "name").
         ImGui::SameLine();
-        ImGui::TextUnformatted(cell->name.c_str());
+        char nameBuf[64];
+        std::snprintf(nameBuf, sizeof(nameBuf), "%s", cell->name.c_str());
+        ImGui::SetNextItemWidth(160.0f);
+        if (ImGui::InputText("##panelname", nameBuf, sizeof(nameBuf))) {
+            store_.setCellName(id, nameBuf);
+        }
+        if (ImGui::IsItemDeactivatedAfterEdit()) {
+            structureCommitLabel_ = "rename panel";
+        }
     }
 
     if (cell->kind == CellKind::Code) {

@@ -49,10 +49,15 @@ void ControlsPanel::draw(bridge::UIState& ui,
     for (auto const& panel : panels) {
         std::string title = panel.empty() ? "Controls" : panel;
         ImGui::SetNextWindowSize(ImVec2(420.0f, 0.0f), ImGuiCond_FirstUseEver);
-        if (ImGui::Begin(title.c_str())) {
+        // Closing a floating panel window REMOVES its widgets (code can
+        // recreate them by re-running). Processed in dispatch(), which has
+        // the engine context to release taps.
+        bool open = true;
+        if (ImGui::Begin(title.c_str(), &open)) {
             anyTapsVisible_ |= drawPanelWidgets(ui, panel);
         }
         ImGui::End();
+        if (!open) pendingClosedPanels_.push_back(panel);
     }
 }
 
@@ -78,6 +83,31 @@ struct CallbackCall {
 } // namespace
 
 void ControlsPanel::dispatch(bridge::UIState& ui, bridge::AppContext& ctx) {
+    // ---- Remove widgets of panels whose window was closed. ---------------
+    if (!pendingClosedPanels_.empty()) {
+        std::vector<std::pair<long, int>> taps;
+        {
+            std::lock_guard<std::mutex> lock(ui.mtx);
+            for (auto const& panel : pendingClosedPanels_) {
+                for (auto& w : ui.widgets) {
+                    if (w->panel == panel && w->tapID)
+                        taps.push_back({w->tapID, w->tapSilo});
+                }
+                std::erase_if(ui.widgets, [&](auto const& w) {
+                    return w->panel == panel;
+                });
+            }
+        }
+        pendingClosedPanels_.clear();
+        for (auto [tapID, silo] : taps) {
+            if (!ctx.engine) break;
+            if (engine::begin(ctx.engine) == tzpl_errNone) {
+                engine::untap(tapID);
+                engine::go(silo);
+            }
+        }
+    }
+
     // ---- Poll engine taps into meter values / scope rings. ---------------
     // (ui.mtx before the engine's NRT lock inside tapPeak/tapDrain -- the
     // reverse order never occurs: no engine code touches UIState.)
