@@ -547,6 +547,20 @@ void NotebookPanel::drawCell(std::shared_ptr<Cell const> const& cell,
         }
         ImGui::SameLine();
         ImGui::Checkbox("arrange", &rt.arrange);
+        // Unpin every widget in this panel back to code-order flow
+        // (frames from arrange drags, setFrame, or files saved by
+        // older builds -- which pinned auto-flowed positions).
+        ImGui::SameLine();
+        if (ImGui::SmallButton("reflow") && ctx.uiState) {
+            std::lock_guard<std::mutex> lock(ctx.uiState->mtx);
+            for (auto& wp : ctx.uiState->widgets) {
+                if (wp->panel == cell->name) {
+                    wp->fx = -1.0f;
+                    wp->fy = -1.0f;
+                }
+            }
+            structureCommitLabel_ = "reflow panel";
+        }
     }
 
     if (cell->kind == CellKind::Code) {
