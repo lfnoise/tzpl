@@ -128,7 +128,8 @@ void NotebookPanel::rerootHistory(std::string const& label,
 }
 
 void NotebookPanel::applySnapshot(doc::SnapshotPtr snap,
-                                  bridge::AppContext& ctx) {
+                                  bridge::AppContext& ctx,
+                                  std::vector<std::string> const& panelsBefore) {
     if (!snap) return;
 
     // Resync cell editors whose text differs; drop runtime of removed cells.
@@ -151,8 +152,18 @@ void NotebookPanel::applySnapshot(doc::SnapshotPtr snap,
 
     // Restore claimed-panel widgets; changed values are marked dirty and
     // re-sent by the normal per-frame dispatch (undo is audible).
+    // Reconcile the union of panels claimed before and after the jump:
+    // a panel whose cell doesn't exist on this side has no widgets in
+    // the target snapshot either, so its live widgets are removed.
     if (snap->widgets) {
-        doc::restoreWidgets(ctx, *snap->widgets, claimedPanels());
+        auto panels = claimedPanels();
+        for (auto const& p : panelsBefore) {
+            bool have = false;
+            for (auto const& q : panels)
+                if (q == p) { have = true; break; }
+            if (!have) panels.push_back(p);
+        }
+        doc::restoreWidgets(ctx, *snap->widgets, panels);
     }
 }
 
@@ -167,11 +178,13 @@ void NotebookPanel::undoDocument(bridge::AppContext& ctx) {
         }
     }
     commitHistory("edit", ctx);
-    applySnapshot(store_.undo(), ctx);
+    auto before = claimedPanels();
+    applySnapshot(store_.undo(), ctx, before);
 }
 
 void NotebookPanel::redoDocument(bridge::AppContext& ctx) {
-    applySnapshot(store_.redo(), ctx);
+    auto before = claimedPanels();
+    applySnapshot(store_.redo(), ctx, before);
 }
 
 void NotebookPanel::update(bridge::AppContext& ctx) {
@@ -884,11 +897,17 @@ void NotebookPanel::draw(float width, float height, GuiState& gui,
     }
     ImGui::SameLine();
     ImGui::BeginDisabled(!store_.canUndo());
-    if (ImGui::SmallButton("Undo")) applySnapshot(store_.undo(), ctx);
+    if (ImGui::SmallButton("Undo")) {
+        auto before = claimedPanels();
+        applySnapshot(store_.undo(), ctx, before);
+    }
     ImGui::EndDisabled();
     ImGui::SameLine();
     ImGui::BeginDisabled(!store_.canRedo());
-    if (ImGui::SmallButton("Redo")) applySnapshot(store_.redo(), ctx);
+    if (ImGui::SmallButton("Redo")) {
+        auto before = claimedPanels();
+        applySnapshot(store_.redo(), ctx, before);
+    }
     ImGui::EndDisabled();
     ImGui::SameLine();
     if (ImGui::SmallButton("History")) showHistory_ = !showHistory_;
@@ -971,7 +990,8 @@ void NotebookPanel::drawHistoryWindow(bridge::AppContext& ctx) {
             };
         if (store_.historyRoot()) walk(store_.historyRoot(), 0);
         if (jump) {
-            applySnapshot(store_.jumpTo(jump), ctx);
+            auto before = claimedPanels();
+            applySnapshot(store_.jumpTo(jump), ctx, before);
         }
     }
     ImGui::End();

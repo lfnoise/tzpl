@@ -196,7 +196,12 @@ private:
     // Make current state the history root (after new/open).
     void rerootHistory(std::string const& label, bridge::AppContext& ctx);
     // Apply a history snapshot: resync cell editors + restore widgets.
-    void applySnapshot(doc::SnapshotPtr snap, bridge::AppContext& ctx);
+    // panelsBefore = claimedPanels() captured before the history jump:
+    // widgets are reconciled over the union of panels claimed before
+    // and after, so undoing past a panel cell's creation removes its
+    // widgets instead of orphaning them into floating windows.
+    void applySnapshot(doc::SnapshotPtr snap, bridge::AppContext& ctx,
+                       std::vector<std::string> const& panelsBefore);
     void drawHistoryWindow(bridge::AppContext& ctx);
 
     doc::DocumentStore store_;
