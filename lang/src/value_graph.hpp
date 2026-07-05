@@ -61,6 +61,10 @@ inline constexpr u32 kGraphMaxDepth = 10000;
 // already-forced nodes is not charged.
 inline constexpr i64 kLazyForceLimit = 10000;
 
+// Max nesting of cycle-capable containers while printing before eliding
+// with "..." (stack-overflow guard; ordinary values never get near it).
+inline constexpr u32 kPrintMaxDepth = 200;
+
 // Returns `defaultFuel`, or TZPL_GRAPH_FUEL from the environment if set.
 // (Test knob: a tiny value forces the slow paths across the whole suite.)
 i64 graphFastFuel(i64 defaultFuel);
@@ -129,10 +133,20 @@ struct GraphHashCtx {
 // MapObj::findSlot while a slow map comparison probes) consult these to
 // join the traversal in flight instead of starting a fresh one -- that
 // sharing is what makes cyclic keys inside cyclic maps terminate.
+// Ancestor chain of the cycle-capable containers on the current print
+// path. Cycles print as "^n^" (re-entered the object n container levels
+// up) instead of recursing.
+struct PrintCtx {
+    Vec<Obj const*> ancestors;
+
+    PrintCtx() : ancestors(rt::STLAllocator<Obj const*>(rt::gCurrentAllocator)) {}
+};
+
 extern thread_local GraphFastState* gEqFast;
 extern thread_local GraphEqCtx*     gGraphEqCtx;
 extern thread_local GraphFastState* gHashFast;
 extern thread_local GraphHashCtx*   gGraphHashCtx;
+extern thread_local PrintCtx*       gPrintCtx;
 
 inline void eqFuelTick() {
     if (gEqFast && --gEqFast->fuel < 0) throw GraphFuelExhausted{};
@@ -171,11 +185,32 @@ class GraphNeutralScope {
     GraphEqCtx*     eqCtx_;
     GraphFastState* hashFast_;
     GraphHashCtx*   hashCtx_;
+    PrintCtx*       printCtx_;
 public:
     GraphNeutralScope();
     ~GraphNeutralScope();
     GraphNeutralScope(GraphNeutralScope const&) = delete;
     GraphNeutralScope& operator=(GraphNeutralScope const&) = delete;
+};
+
+// RAII guard placed at the top of every cycle-capable str() body
+// (ObjArray, InlineArray, MapObj, SetObj, RefValue, InlineRef). Lazily
+// creates the root PrintCtx, detects re-entry of `o` on the ancestor
+// chain, and enforces the print depth cap. When neither flag is set the
+// object was pushed and is popped on destruction.
+class PrintCycleScope {
+    PrintCtx  rootStorage_;   // used only when this scope is the root
+    bool      isRoot_ = false;
+    bool      pushed_ = false;
+public:
+    bool cycled  = false;   // `o` is an ancestor: print "^levelsUp^"
+    u32  levelsUp = 0;
+    bool tooDeep = false;   // depth cap hit: print "..."
+
+    explicit PrintCycleScope(Obj const* o);
+    ~PrintCycleScope();
+    PrintCycleScope(PrintCycleScope const&) = delete;
+    PrintCycleScope& operator=(PrintCycleScope const&) = delete;
 };
 
 } // namespace ts

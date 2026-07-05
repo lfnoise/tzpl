@@ -1,0 +1,6 @@
+[Tree.leaf(1), Tree.node(^1^)]
+Tree.node([Tree.leaf(1), Tree.node(^1^)])
+[Tree.leaf(1), Tree.node([Tree.leaf(2), Tree.node(^2^)])]
+Ref(Chain.link(^1^))
+[x: MT.mleaf(7), loop: MT.mmap(^1^)]
+[Tree.node([Tree.leaf(9)]), Tree.node([Tree.leaf(9)])]

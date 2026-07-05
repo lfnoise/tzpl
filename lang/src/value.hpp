@@ -411,25 +411,7 @@ public:
     Vec<Obj*>& rawVec() { return v_; }
     const Vec<Obj*>& rawVec() const { return v_; }
 
-    VMString str() const override {
-        VMString s = rt::vmstr("[");
-        // Dispatch through wordToString so UnwrappedTupleStruct elements print
-        // with their wrapper-type formatting (Name(inner)).
-        Type* elemType = nullptr;
-        if (auto* at = dynamic_cast<ArrayType*>(type_)) elemType = at->elemType_;
-        for (size_t i = 0; i < v_.size(); ++i) {
-            if (i > 0) s += ", ";
-            if (elemType && (elemType->repr_ == Type::Repr::UnwrappedTupleStruct
-                          || elemType->repr_ == Type::Repr::NullablePtrEnum)) {
-                Word w; w.o = v_[i];
-                s += wordToString(w, elemType);
-            } else if (v_[i]) {
-                s += v_[i]->str();
-            } else s += "nil";
-        }
-        s += "]";
-        return s;
-    }
+    VMString str() const override;   // value.cpp (print-cycle guarded)
 
     void gcScanChildren(TracingGC& gc) override {
         // Bounded fan-out: tiny arrays scan inline; large ones defer to

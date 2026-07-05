@@ -33,6 +33,7 @@ thread_local GraphFastState* gEqFast       = nullptr;
 thread_local GraphEqCtx*     gGraphEqCtx   = nullptr;
 thread_local GraphFastState* gHashFast     = nullptr;
 thread_local GraphHashCtx*   gGraphHashCtx = nullptr;
+thread_local PrintCtx*       gPrintCtx     = nullptr;
 
 i64 graphFastFuel(i64 defaultFuel) {
     static i64 const envFuel = [] {
@@ -78,11 +79,13 @@ GraphNeutralScope::GraphNeutralScope()
     , eqCtx_(gGraphEqCtx)
     , hashFast_(gHashFast)
     , hashCtx_(gGraphHashCtx)
+    , printCtx_(gPrintCtx)
 {
     gEqFast = nullptr;
     gGraphEqCtx = nullptr;
     gHashFast = nullptr;
     gGraphHashCtx = nullptr;
+    gPrintCtx = nullptr;
 }
 
 GraphNeutralScope::~GraphNeutralScope() {
@@ -90,6 +93,35 @@ GraphNeutralScope::~GraphNeutralScope() {
     gGraphEqCtx = eqCtx_;
     gHashFast = hashFast_;
     gGraphHashCtx = hashCtx_;
+    gPrintCtx = printCtx_;
+}
+
+// --- print-path cycle guard ---
+
+PrintCycleScope::PrintCycleScope(Obj const* o) {
+    if (!gPrintCtx) {
+        gPrintCtx = &rootStorage_;
+        isRoot_ = true;
+    }
+    auto& anc = gPrintCtx->ancestors;
+    for (size_t i = anc.size(); i-- > 0;) {
+        if (anc[i] == o) {
+            cycled = true;
+            levelsUp = (u32)(anc.size() - i);
+            return;
+        }
+    }
+    if (anc.size() >= kPrintMaxDepth) {
+        tooDeep = true;
+        return;
+    }
+    anc.push_back(o);
+    pushed_ = true;
+}
+
+PrintCycleScope::~PrintCycleScope() {
+    if (pushed_) gPrintCtx->ancestors.pop_back();
+    if (isRoot_) gPrintCtx = nullptr;
 }
 
 void graphForceListNode(ListNode* node, i64& forces, char const* op) {

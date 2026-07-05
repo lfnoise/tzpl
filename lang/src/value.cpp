@@ -198,12 +198,39 @@ u32 InlineArray::gcScanChunk(TracingGC& gc, u32 cursor) {
 }
 
 VMString InlineArray::str() const {
+    PrintCycleScope pcs(this);
+    if (pcs.cycled) return rt::fmt("^{}^", pcs.levelsUp);
+    if (pcs.tooDeep) return rt::vmstr("...");
     VMString s = rt::vmstr("[");
     Type* et = const_cast<InlineArray*>(this)->elemType();
     size_t n = size();
     for (size_t i = 0; i < n; ++i) {
         if (i > 0) s += ", ";
         s += wordsToString(&v_[i * stride_], et);
+    }
+    s += "]";
+    return s;
+}
+
+// ObjArray::str() -- moved out of value.hpp for the print-cycle guard.
+VMString ObjArray::str() const {
+    PrintCycleScope pcs(this);
+    if (pcs.cycled) return rt::fmt("^{}^", pcs.levelsUp);
+    if (pcs.tooDeep) return rt::vmstr("...");
+    VMString s = rt::vmstr("[");
+    // Dispatch through wordToString so UnwrappedTupleStruct elements print
+    // with their wrapper-type formatting (Name(inner)).
+    Type* elemType = nullptr;
+    if (auto* at = dynamic_cast<ArrayType*>(type_)) elemType = at->elemType_;
+    for (size_t i = 0; i < v_.size(); ++i) {
+        if (i > 0) s += ", ";
+        if (elemType && (elemType->repr_ == Type::Repr::UnwrappedTupleStruct
+                      || elemType->repr_ == Type::Repr::NullablePtrEnum)) {
+            Word w; w.o = v_[i];
+            s += wordToString(w, elemType);
+        } else if (v_[i]) {
+            s += v_[i]->str();
+        } else s += "nil";
     }
     s += "]";
     return s;
@@ -394,7 +421,12 @@ VMString ListNode::str() const {
     bool first = true;
     i64 count = 0;
     while (node) {
-        node->force(*gCurrentVM);
+        {
+            // The generator is arbitrary user code; keep the print (and any
+            // other graph-traversal) state out of its sight.
+            GraphNeutralScope neutral;
+            node->force(*gCurrentVM);
+        }
 
         if (count >= limit) {
             s += ", ...";
@@ -425,6 +457,9 @@ RefValue::RefValue(Type* type)
 
 // RefValue::str()
 VMString RefValue::str() const {
+    PrintCycleScope pcs(this);
+    if (pcs.cycled) return rt::fmt("^{}^", pcs.levelsUp);
+    if (pcs.tooDeep) return rt::vmstr("...");
     auto* rt = static_cast<RefType*>(type_);
     VMString s = rt::vmstr("Ref(");
     s += wordToString(value_, rt->elemType_);
@@ -450,6 +485,9 @@ InlineRef* InlineRef::create(RefType* type) {
 }
 
 VMString InlineRef::str() const {
+    PrintCycleScope pcs(this);
+    if (pcs.cycled) return rt::fmt("^{}^", pcs.levelsUp);
+    if (pcs.tooDeep) return rt::vmstr("...");
     auto* rt = static_cast<RefType*>(type_);
     VMString s = rt::vmstr("Ref(");
     s += wordsToString(&v[0], rt->elemType_);
@@ -1001,6 +1039,9 @@ void MapObj::copyFrom(MapObj const& src) {
 }
 
 VMString MapObj::str() const {
+    PrintCycleScope pcs(this);
+    if (pcs.cycled) return rt::fmt("^{}^", pcs.levelsUp);
+    if (pcs.tooDeep) return rt::vmstr("...");
     Type* kt = keyType();
     Type* vt = valueType();
     if (empty()) return rt::vmstr("[:]");
@@ -1184,6 +1225,9 @@ void SetObj::copyFrom(SetObj const& src) {
 }
 
 VMString SetObj::str() const {
+    PrintCycleScope pcs(this);
+    if (pcs.cycled) return rt::fmt("^{}^", pcs.levelsUp);
+    if (pcs.tooDeep) return rt::vmstr("...");
     Type* et = elemType();
     VMString s = rt::vmstr("Set(");
     bool first = true;
