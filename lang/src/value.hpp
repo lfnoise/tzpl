@@ -41,6 +41,10 @@ struct WordHash {
 struct WordEqual {
     Type* type;
     bool operator()(Word a, Word b) const;
+    // The pre-existing naive recursion, fuel-ticked. Runs only under an
+    // armed fast attempt (value_graph.hpp) and may throw GraphFuelExhausted;
+    // the root entry then restarts on the cycle-safe slow path.
+    bool eqFast(Word a, Word b) const;
 };
 
 // Format a Word as a string given its static type
@@ -69,6 +73,10 @@ size_t hashWords(Word const* base, Type* type);
 // the same `type`. Mirrors hashWords' traversal. For non-inline types
 // (atomic, Obj*) it delegates to WordEqual on a single Word.
 bool wordsEqual(Word const* a, Word const* b, Type* type);
+
+// Fuel-ticked naive fast path behind wordsEqual. Runs only under an armed
+// fast attempt (value_graph.hpp); may throw GraphFuelExhausted.
+bool wordsEqualFast(Word const* a, Word const* b, Type* type);
 
 // Hash a multi-word value at `a` of `type`. For 1-word types this delegates
 // to WordHash. For Inline composites it walks layout_ and combines child

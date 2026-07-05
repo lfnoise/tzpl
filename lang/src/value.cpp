@@ -22,6 +22,7 @@
 //
 
 #include "value.hpp"
+#include "value_graph.hpp"
 #include "vm.hpp"
 #include "tracing_gc.hpp"
 #include "persistent_vector.hpp"
@@ -1457,7 +1458,19 @@ size_t WordHash::operator()(Word w) const {
 
 // --- WordEqual ---
 
+// Public entry: routes to whichever traversal is active. With a slow
+// (cycle-safe) traversal in flight, join it -- this is how Map/Set probe
+// re-entries share one equivalence set. With a fast attempt armed, stay on
+// the fast path. Otherwise this call is a root: arm the fast path with a
+// fuel budget and fall back to the slow path on exhaustion.
 bool WordEqual::operator()(Word a, Word b) const {
+    if (gGraphEqCtx) return graphEqualSlowWord(a, b, type, *gGraphEqCtx);
+    if (gEqFast) return eqFast(a, b);
+    return graphEqualRootWord(a, b, type);
+}
+
+bool WordEqual::eqFast(Word a, Word b) const {
+    eqFuelTick();
     if (type && type->repr_ == Type::Repr::DiscriminantEnum) {
         return a.i == b.i;
     }
@@ -1467,7 +1480,15 @@ bool WordEqual::operator()(Word a, Word b) const {
         int voidIdx = nullablePtrVoidCaseIndex(et);
         int dataIdx = (voidIdx == 0) ? 1 : 0;
         WordEqual sub{et->cases_[dataIdx].type};
-        return sub(a, b);
+        return sub.eqFast(a, b);
+    }
+    // UnwrappedTupleStruct slots hold the inner value directly; compare via
+    // the inner type (mirrors wordToString).
+    if (type && type->repr_ == Type::Repr::UnwrappedTupleStruct) {
+        if (auto* st = dynamic_cast<StructType*>(type); st && !st->layout_.empty()) {
+            WordEqual sub{st->layout_[0].type};
+            return sub.eqFast(a, b);
+        }
     }
     if (type == gCurrentVM->intType() || type == gCurrentVM->boolType()) {
         return a.i == b.i;
@@ -1495,7 +1516,7 @@ bool WordEqual::operator()(Word a, Word b) const {
         if (ta->numFields_ != tb->numFields_) return false;
         for (u32 i = 0; i < ta->numFields_; ++i) {
             auto const& f = tt->layout_[i];
-            if (!wordsEqual(&ta->v[f.wordOffset], &tb->v[f.wordOffset], f.type)) return false;
+            if (!wordsEqualFast(&ta->v[f.wordOffset], &tb->v[f.wordOffset], f.type)) return false;
         }
         return true;
     }
@@ -1505,7 +1526,7 @@ bool WordEqual::operator()(Word a, Word b) const {
         if (sa->numFields_ != sb->numFields_) return false;
         for (u32 i = 0; i < sa->numFields_; ++i) {
             auto const& f = st->layout_[i];
-            if (!wordsEqual(&sa->v[f.wordOffset], &sb->v[f.wordOffset], f.type)) return false;
+            if (!wordsEqualFast(&sa->v[f.wordOffset], &sb->v[f.wordOffset], f.type)) return false;
         }
         return true;
     }
@@ -1516,7 +1537,7 @@ bool WordEqual::operator()(Word a, Word b) const {
         Type* caseType = et->cases_[ea->which_].type;
         if (caseType == gCurrentVM->voidType()) return true;
         // Phase 4g.15: native multi-word payload comparison.
-        return wordsEqual(&ea->v[0], &eb->v[0], caseType);
+        return wordsEqualFast(&ea->v[0], &eb->v[0], caseType);
     }
     if (dynamic_cast<SetType*>(type)) {
         auto* sa = static_cast<SetObj*>(a.o);
@@ -1540,7 +1561,7 @@ bool WordEqual::operator()(Word a, Word b) const {
             if (ma->slotState(i) != MapObj::SlotOccupied) continue;
             u32 bs = mb->findSlot(ma->slotKey(i));
             if (bs == mb->capacity()) return false;
-            if (!wordsEqual(ma->slotVal(i), mb->slotVal(bs), vt)) return false;
+            if (!wordsEqualFast(ma->slotVal(i), mb->slotVal(bs), vt)) return false;
         }
         return true;
     }
@@ -1583,7 +1604,7 @@ bool WordEqual::operator()(Word a, Word b) const {
                 auto* ab = static_cast<InlineArray*>(b.o);
                 if (aa->size() != ab->size()) return false;
                 for (size_t i = 0; i < aa->size(); ++i) {
-                    if (!wordsEqual(aa->slot(i), ab->slot(i), et)) return false;
+                    if (!wordsEqualFast(aa->slot(i), ab->slot(i), et)) return false;
                 }
                 return true;
             }
@@ -1595,7 +1616,7 @@ bool WordEqual::operator()(Word a, Word b) const {
                 for (size_t i = 0; i < aa->size(); ++i) {
                     Word wa; wa.o = aa->get(i);
                     Word wb; wb.o = ab->get(i);
-                    if (!sub(wa, wb)) return false;
+                    if (!sub.eqFast(wa, wb)) return false;
                 }
                 return true;
             }
@@ -1603,13 +1624,15 @@ bool WordEqual::operator()(Word a, Word b) const {
     }
     if (auto* listT = dynamic_cast<ListType*>(type)) {
         Type* et = listT->elemType_;
-        WordEqual sub{et};
         auto* na = static_cast<ListNode*>(a.o);
         auto* nb = static_cast<ListNode*>(b.o);
+        i64 localForces = 0;
+        i64& forces = gEqFast ? gEqFast->forces : localForces;
         while (na && nb) {
-            na->force(*gCurrentVM);
-            nb->force(*gCurrentVM);
-            if (!sub(na->head_, nb->head_)) return false;
+            graphForceListNode(na, forces, "==");
+            graphForceListNode(nb, forces, "==");
+            // headData covers both 1-word and multi-word (Inline) heads.
+            if (!wordsEqualFast(na->headData(), nb->headData(), et)) return false;
             na = na->tail_;
             nb = nb->tail_;
         }
@@ -1621,16 +1644,23 @@ bool WordEqual::operator()(Word a, Word b) const {
         auto* rb = static_cast<RangeObj*>(b.o);
         if (ra->isInfinite_ != rb->isInfinite_) return false;
         Type* et = rt->elemType_;
-        if (!wordsEqual(ra->startData(), rb->startData(), et)) return false;
-        if (!wordsEqual(ra->stepData(),  rb->stepData(),  et)) return false;
-        if (!ra->isInfinite_ && !wordsEqual(ra->endData(), rb->endData(), et)) return false;
+        if (!wordsEqualFast(ra->startData(), rb->startData(), et)) return false;
+        if (!wordsEqualFast(ra->stepData(),  rb->stepData(),  et)) return false;
+        if (!ra->isInfinite_ && !wordsEqualFast(ra->endData(), rb->endData(), et)) return false;
         return true;
     }
     if (auto* refT = dynamic_cast<RefType*>(type)) {
+        // InlineRef (inline-composite referent) stores its payload words in
+        // a flex array; RefValue stores a single word.
+        if (a.o && a.o->gcTag() == GCTag::InlineRef) {
+            auto* ia = static_cast<InlineRef*>(a.o);
+            auto* ib = static_cast<InlineRef*>(b.o);
+            return wordsEqualFast(&ia->v[0], &ib->v[0], refT->elemType_);
+        }
         auto* ra = static_cast<RefValue*>(a.o);
         auto* rb = static_cast<RefValue*>(b.o);
         WordEqual sub{refT->elemType_};
-        return sub(ra->value_, rb->value_);
+        return sub.eqFast(ra->value_, rb->value_);
     }
     if (auto* pvT = dynamic_cast<PersistentVectorType*>(type)) {
         auto* va = static_cast<PVec*>(a.o);
@@ -1639,7 +1669,7 @@ bool WordEqual::operator()(Word a, Word b) const {
         if (va->count_ != vb->count_) return false;
         Type* et = pvT->elemType_;
         for (u32 i = 0; i < va->count_; ++i) {
-            if (!wordsEqual(va->elemAt(i), vb->elemAt(i), et)) return false;
+            if (!wordsEqualFast(va->elemAt(i), vb->elemAt(i), et)) return false;
         }
         return true;
     }
@@ -1654,7 +1684,7 @@ bool WordEqual::operator()(Word a, Word b) const {
         while (Word const* pair = it.next()) {
             Word const* bv = mb->get(pair);
             if (!bv) return false;
-            if (!wordsEqual(pair + kS, bv, vt)) return false;
+            if (!wordsEqualFast(pair + kS, bv, vt)) return false;
         }
         return true;
     }
@@ -1973,10 +2003,17 @@ size_t wordsHash(Word const* a, Type* type) {
     return WordHash{type}(a[0]);
 }
 
+// Public entry: see WordEqual::operator() for the dispatch scheme.
 bool wordsEqual(Word const* a, Word const* b, Type* type) {
+    if (gGraphEqCtx) return graphEqualSlowWords(a, b, type, *gGraphEqCtx);
+    if (gEqFast) return wordsEqualFast(a, b, type);
+    return graphEqualRootWords(a, b, type);
+}
+
+bool wordsEqualFast(Word const* a, Word const* b, Type* type) {
     if (!type) return a[0].i == b[0].i;
     if (type->repr_ != Type::Repr::Inline) {
-        return WordEqual{type}(a[0], b[0]);
+        return WordEqual{type}.eqFast(a[0], b[0]);
     }
     if (type == gCurrentVM->complexType()) {
         return a[0].f == b[0].f && a[1].f == b[1].f;
@@ -1987,7 +2024,7 @@ bool wordsEqual(Word const* a, Word const* b, Type* type) {
     auto cmpFields = [&](auto const& layout) {
         for (auto const& f : layout) {
             if (!f.type) continue;
-            if (!wordsEqual(a + f.wordOffset, b + f.wordOffset, f.type))
+            if (!wordsEqualFast(a + f.wordOffset, b + f.wordOffset, f.type))
                 return false;
         }
         return true;
@@ -2000,9 +2037,9 @@ bool wordsEqual(Word const* a, Word const* b, Type* type) {
         if (which < 0 || (size_t)which >= en->layout_.size()) return true;
         auto const& f = en->layout_[which];
         if (!f.type || f.sizeWords == 0) return true;
-        return wordsEqual(a + f.wordOffset, b + f.wordOffset, f.type);
+        return wordsEqualFast(a + f.wordOffset, b + f.wordOffset, f.type);
     }
-    return WordEqual{type}(a[0], b[0]);
+    return WordEqual{type}.eqFast(a[0], b[0]);
 }
 
 // Phase 4g.2: format a multi-word value out of consecutive Words. For inline
