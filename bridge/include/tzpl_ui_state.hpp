@@ -121,6 +121,10 @@ struct UIWidget {
     // adopt, so a re-run re-stamps widgets in its call order. Panel
     // flow lays unpinned widgets out by this. Runtime-only.
     std::uint64_t seq = 0;
+
+    // Last hover-wheel adjustment time (sliders); wheel bursts commit
+    // one history entry when this goes idle. Runtime-only.
+    double wheelTime = 0.0;
     UIWidgetKind kind = UIWidgetKind::Slider;
     std::string name;      // reconciliation key, unique per panel
     std::string panel;     // panel name ("" = default Controls panel)

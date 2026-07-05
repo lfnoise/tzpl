@@ -24,6 +24,7 @@
 #include <algorithm>
 #include <cmath>
 #include <mutex>
+#include <random>
 #include <string>
 #include <vector>
 
@@ -55,6 +56,53 @@ static float wFrameH(UIWidget const& w, float def) {
 // the last-drawn item (sliders, drags, checkboxes).
 static void markGestureEdges(UIWidget& w) {
     if (ImGui::IsItemDeactivatedAfterEdit()) w.gestureEnded = true;
+}
+
+// Hover gestures on sliders, all in UNMAPPED 0..1 position space:
+//   c = center (0.5)     [ = lo (0.0)      ] = hi (1.0)
+//   r = uniform random   j = jitter by uniform(-0.05, +0.05), clamped
+//   wheel = step by 0.01 per tick (up = higher)
+// Keys commit one history entry per press; wheel bursts coalesce into
+// one entry when the wheel goes idle. Call right after the slider item.
+static void hoverAdjustSlider(UIWidget& w) {
+    // Wheel-burst coalesce: emit the gesture end once the wheel has
+    // been idle for a while (checked every frame, hovered or not).
+    if (w.gestureActive && w.wheelTime > 0.0
+        && ImGui::GetTime() - w.wheelTime > 0.4) {
+        w.gestureActive = false;
+        w.wheelTime = 0.0;
+        w.gestureEnded = true;
+    }
+
+    if (!ImGui::IsItemHovered() || ImGui::GetIO().WantTextInput) return;
+
+    auto setPos = [&](float pos, bool endGesture) {
+        w.values[0] = w.spec.map(std::clamp(pos, 0.0f, 1.0f));
+        markDirty(w);
+        if (endGesture) w.gestureEnded = true;
+    };
+    float pos = static_cast<float>(w.spec.unmap(w.values[0]));
+
+    static std::minstd_rand rng{std::random_device{}()};
+    auto uniform = [&](float lo, float hi) {
+        return lo + (hi - lo) * std::uniform_real_distribution<float>{}(rng);
+    };
+
+    if (ImGui::IsKeyPressed(ImGuiKey_C, false)) setPos(0.5f, true);
+    if (ImGui::IsKeyPressed(ImGuiKey_LeftBracket, false)) setPos(0.0f, true);
+    if (ImGui::IsKeyPressed(ImGuiKey_RightBracket, false)) setPos(1.0f, true);
+    if (ImGui::IsKeyPressed(ImGuiKey_R)) setPos(uniform(0.0f, 1.0f), true);
+    if (ImGui::IsKeyPressed(ImGuiKey_J))
+        setPos(pos + uniform(-0.05f, 0.05f), true);
+
+    float wheel = ImGui::GetIO().MouseWheel;
+    if (wheel != 0.0f) {
+        setPos(pos + wheel * 0.01f, false);
+        w.gestureActive = true;  // ends via the idle timer above
+        w.wheelTime = ImGui::GetTime();
+    }
+    // Own the wheel while hovered so the notebook strip doesn't scroll.
+    ImGui::SetItemKeyOwner(ImGuiKey_MouseWheelY);
 }
 
 static void drawSlider(UIWidget& w) {
@@ -94,6 +142,7 @@ static void drawSlider(UIWidget& w) {
             markDirty(w);
         }
         markGestureEdges(w);
+        hoverAdjustSlider(w);
     }
     ImGui::SameLine();
     ImGui::TextUnformatted(w.name.c_str());
