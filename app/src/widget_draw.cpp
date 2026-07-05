@@ -107,8 +107,11 @@ static void hoverAdjustSlider(UIWidget& w) {
     // the content up"; for a value, pushing up should RAISE it.
     float wheel = ImGui::GetIO().MouseWheel;
     if (wheel != 0.0f) setPos(pos - wheel * 0.01f);
-    // Own the wheel while hovered so the notebook strip doesn't scroll.
+    // Own BOTH wheel axes while hovered: vertical adjusts the slider,
+    // and the sideways component of a trackpad scroll must not slide
+    // the window contents around underneath.
     ImGui::SetItemKeyOwner(ImGuiKey_MouseWheelY);
+    ImGui::SetItemKeyOwner(ImGuiKey_MouseWheelX);
 }
 
 static void drawSlider(UIWidget& w) {
