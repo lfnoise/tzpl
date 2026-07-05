@@ -58,60 +58,111 @@ static void markGestureEdges(UIWidget& w) {
     if (ImGui::IsItemDeactivatedAfterEdit()) w.gestureEnded = true;
 }
 
-// Hover gestures on sliders, all in UNMAPPED 0..1 position space:
+// Hover gestures (sliders and xy pads), all in UNMAPPED 0..1 position
+// space:
 //   c = center (0.5)     [ = lo (0.0)      ] = hi (1.0)
-//   r = uniform random   j = jitter by uniform(-0.05, +0.05), clamped
-//   wheel = step by 0.01 per tick (up = higher)
+//   r = uniform random   j = jitter by uniform(-0.05, +0.05), bouncing
+//   wheel = step by 0.01 per tick (up = higher; on an xy pad the
+//           horizontal wheel axis drives X)
 // Keys repeat while held (hold j for a random walk), so key and wheel
 // bursts alike coalesce into ONE history entry, committed when the
-// adjustments go idle. Call right after the slider item.
-static void hoverAdjustSlider(UIWidget& w) {
-    // Burst coalesce: emit the gesture end once adjustments have been
-    // idle for a while (checked every frame, hovered or not).
+// adjustments go idle. Call right after the hoverable item.
+
+// Burst coalesce timer + hover/typing gate. Runs the timer every frame
+// (hovered or not); returns true when hover adjustments may fire.
+static bool hoverAdjustBegin(UIWidget& w) {
     if (w.gestureActive && w.wheelTime > 0.0
         && ImGui::GetTime() - w.wheelTime > 0.4) {
         w.gestureActive = false;
         w.wheelTime = 0.0;
         w.gestureEnded = true;
     }
+    return ImGui::IsItemHovered() && !ImGui::GetIO().WantTextInput;
+}
 
-    if (!ImGui::IsItemHovered() || ImGui::GetIO().WantTextInput) return;
+static float hoverUniform(float lo, float hi) {
+    static std::minstd_rand rng{std::random_device{}()};
+    return lo + (hi - lo) * std::uniform_real_distribution<float>{}(rng);
+}
+
+// Bounce off the ends rather than clamping, so jitter keeps its energy
+// at the rails: 0.02 - 0.03 -> 0.01, 1.03 -> 0.97.
+static float hoverBounce(float p) {
+    if (p < 0.0f) return -p;
+    if (p > 1.0f) return 2.0f - p;
+    return p;
+}
+
+static void hoverOwnWheel() {
+    // Own BOTH wheel axes while hovered so trackpad scroll gestures
+    // can't slide the window contents around underneath.
+    ImGui::SetItemKeyOwner(ImGuiKey_MouseWheelY);
+    ImGui::SetItemKeyOwner(ImGuiKey_MouseWheelX);
+}
+
+static void hoverAdjustSlider(UIWidget& w) {
+    if (!hoverAdjustBegin(w)) return;
 
     auto setPos = [&](float pos) {
         w.values[0] = w.spec.map(std::clamp(pos, 0.0f, 1.0f));
         markDirty(w);
-        w.gestureActive = true;  // ends via the idle timer above
+        w.gestureActive = true;  // ends via the idle timer
         w.wheelTime = ImGui::GetTime();
     };
     float pos = static_cast<float>(w.spec.unmap(w.values[0]));
 
-    static std::minstd_rand rng{std::random_device{}()};
-    auto uniform = [&](float lo, float hi) {
-        return lo + (hi - lo) * std::uniform_real_distribution<float>{}(rng);
-    };
-
     if (ImGui::IsKeyPressed(ImGuiKey_C)) setPos(0.5f);
     if (ImGui::IsKeyPressed(ImGuiKey_LeftBracket)) setPos(0.0f);
     if (ImGui::IsKeyPressed(ImGuiKey_RightBracket)) setPos(1.0f);
-    if (ImGui::IsKeyPressed(ImGuiKey_R)) setPos(uniform(0.0f, 1.0f));
-    if (ImGui::IsKeyPressed(ImGuiKey_J)) {
-        float p = pos + uniform(-0.05f, 0.05f);
-        // Bounce off the ends rather than clamping, so jitter keeps
-        // its energy at the rails: 0.02 - 0.03 -> 0.01, 1.03 -> 0.97.
-        if (p < 0.0f) p = -p;
-        else if (p > 1.0f) p = 2.0f - p;
-        setPos(p);
-    }
+    if (ImGui::IsKeyPressed(ImGuiKey_R)) setPos(hoverUniform(0.0f, 1.0f));
+    if (ImGui::IsKeyPressed(ImGuiKey_J))
+        setPos(hoverBounce(pos + hoverUniform(-0.05f, 0.05f)));
 
     // Positive io.MouseWheel is a scroll-up gesture reading as "push
     // the content up"; for a value, pushing up should RAISE it.
     float wheel = ImGui::GetIO().MouseWheel;
     if (wheel != 0.0f) setPos(pos - wheel * 0.01f);
-    // Own BOTH wheel axes while hovered: vertical adjusts the slider,
-    // and the sideways component of a trackpad scroll must not slide
-    // the window contents around underneath.
-    ImGui::SetItemKeyOwner(ImGuiKey_MouseWheelY);
-    ImGui::SetItemKeyOwner(ImGuiKey_MouseWheelX);
+    hoverOwnWheel();
+}
+
+static void hoverAdjustXY(UIWidget& w) {
+    if (!hoverAdjustBegin(w)) return;
+
+    auto stamp = [&] {
+        markDirty(w);
+        w.gestureActive = true;
+        w.wheelTime = ImGui::GetTime();
+    };
+    auto setX = [&](float p) {
+        w.values[0] = w.spec.map(std::clamp(p, 0.0f, 1.0f));
+        stamp();
+    };
+    auto setY = [&](float p) {
+        w.values[1] = w.spec2.map(std::clamp(p, 0.0f, 1.0f));
+        stamp();
+    };
+    float x = static_cast<float>(w.spec.unmap(w.values[0]));
+    float y = static_cast<float>(w.spec2.unmap(w.values[1]));
+
+    if (ImGui::IsKeyPressed(ImGuiKey_C)) { setX(0.5f); setY(0.5f); }
+    if (ImGui::IsKeyPressed(ImGuiKey_LeftBracket)) { setX(0.0f); setY(0.0f); }
+    if (ImGui::IsKeyPressed(ImGuiKey_RightBracket)) { setX(1.0f); setY(1.0f); }
+    if (ImGui::IsKeyPressed(ImGuiKey_R)) {
+        setX(hoverUniform(0.0f, 1.0f));
+        setY(hoverUniform(0.0f, 1.0f));
+    }
+    if (ImGui::IsKeyPressed(ImGuiKey_J)) {
+        setX(hoverBounce(x + hoverUniform(-0.05f, 0.05f)));
+        setY(hoverBounce(y + hoverUniform(-0.05f, 0.05f)));
+    }
+
+    // Vertical wheel drives Y (push up = higher), horizontal drives X
+    // (push right = higher).
+    float wheelY = ImGui::GetIO().MouseWheel;
+    if (wheelY != 0.0f) setY(y - wheelY * 0.01f);
+    float wheelX = ImGui::GetIO().MouseWheelH;
+    if (wheelX != 0.0f) setX(x - wheelX * 0.01f);
+    hoverOwnWheel();
 }
 
 static void drawSlider(UIWidget& w) {
@@ -395,6 +446,10 @@ static void drawXY(UIWidget& w) {
     dl->AddLine(ImVec2(origin.x, cy), ImVec2(origin.x + size, cy), cursorCol);
     dl->AddLine(ImVec2(cx, origin.y), ImVec2(cx, origin.y + size), cursorCol);
     dl->AddCircleFilled(ImVec2(cx, cy), 4.0f, cursorCol);
+
+    // The pad InvisibleButton is still the last item here (the lines
+    // above only touch the draw list), so hover gestures see the pad.
+    hoverAdjustXY(w);
 
     ImGui::Text("%s  (%.4g, %.4g)", w.name.c_str(), w.values[0], w.values[1]);
 }
