@@ -594,8 +594,8 @@ void NotebookPanel::drawPresetsCell(
         ImGui::TextDisabled(presets.empty()
                                 ? "(stores the controls of the panels "
                                   "below, until the next presets cell)"
-                                : "(click recalls; right-click names / "
-                                  "overwrites / deletes)");
+                                : "(click recalls; right- or cmd-click "
+                                  "names / overwrites / deletes)");
     }
 
     // The slot matrix. Click = recall (+select); Cmd-click = overwrite;
@@ -621,15 +621,17 @@ void NotebookPanel::drawPresetsCell(
                                       ImGuiCol_ButtonActive));
         if (ImGui::Button(label, ImVec2(slotW, 0.0f))) {
             selected = i;
-            if (ImGui::GetIO().KeySuper || ImGui::GetIO().KeyCtrl)
-                overwriteIdx = i;
-            else {
+            if (ImGui::GetIO().KeySuper || ImGui::GetIO().KeyCtrl) {
+                // Cmd-click = the context menu, same as right-click.
+                ImGui::OpenPopup("##slotmenu");
+            } else {
                 applyPreset(presets[(size_t)i], ctx);
                 structureCommitLabel_ = "recall preset";
             }
         }
         if (isSel) ImGui::PopStyleColor();
-        // Right-click: select (without recalling) and edit in place.
+        // Right-click / cmd-click: select (without recalling) and edit
+        // in place.
         if (ImGui::BeginPopupContextItem("##slotmenu")) {
             selected = i;
             char nameBuf[64];
