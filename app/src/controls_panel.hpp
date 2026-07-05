@@ -56,6 +56,16 @@ struct ControlsPanel {
     // the flag each frame before either view draws).
     void noteTapsVisible() { anyTapsVisible_ = true; }
 
+    // Queue removal of these panels' widgets (with engine untap),
+    // processed in dispatch() -- the same path as closing a floating
+    // panel window. Used when a notebook document is closed or
+    // replaced: its claimed panels' widgets go with it instead of
+    // falling out into floating windows.
+    void queuePanelRemoval(std::vector<std::string> const& panels) {
+        pendingClosedPanels_.insert(pendingClosedPanels_.end(),
+                                    panels.begin(), panels.end());
+    }
+
 private:
     bool anyTapsVisible_ = false;
     // Panels whose floating window was closed this frame; dispatch()

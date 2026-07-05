@@ -949,8 +949,21 @@ int runGui(bridge::AppContext& appCtx) {
                 return true;
             };
             auto openNotebook = [&](std::string const& path) {
+                auto oldPanels = notebookPanel.claimedPanels();
                 std::string err;
                 if (notebookPanel.open(path, appCtx, err)) {
+                    // The replaced document's widgets go with it -- but
+                    // keep panels the new document also claims (its load
+                    // just restored their widgets).
+                    auto newPanels = notebookPanel.claimedPanels();
+                    std::vector<std::string> stale;
+                    for (auto const& p : oldPanels) {
+                        bool kept = false;
+                        for (auto const& n : newPanels)
+                            if (n == p) { kept = true; break; }
+                        if (!kept) stale.push_back(p);
+                    }
+                    controlsPanel.queuePanelRemoval(stale);
                     notebookVisible = true;
                     guiState.output.append("opened " + path, LineKind::Info);
                 } else {
@@ -984,6 +997,9 @@ int runGui(bridge::AppContext& appCtx) {
                         afterNativeDialog();
                     }
                     if (proceed) {
+                        // The discarded document's widgets go with it.
+                        controlsPanel.queuePanelRemoval(
+                            notebookPanel.claimedPanels());
                         notebookPanel.newDocument();
                         notebookVisible = true;
                     }
@@ -1039,7 +1055,12 @@ int runGui(bridge::AppContext& appCtx) {
                             else if (choice == 2) doClose = false;
                             afterNativeDialog();
                         }
-                        if (doClose) notebookPanel.close();
+                        if (doClose) {
+                            // The closed document's widgets go with it.
+                            controlsPanel.queuePanelRemoval(
+                                notebookPanel.claimedPanels());
+                            notebookPanel.close();
+                        }
                     } else {
                         editorPanel.closeActiveTab();
                     }
