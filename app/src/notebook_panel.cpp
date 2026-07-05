@@ -682,7 +682,6 @@ void NotebookPanel::drawPanelCanvas(
                 w.fx = 8.0f;
                 w.fy = autoY;
             }
-            autoY = std::max(autoY, w.fy + 32.0f);
 
             ImGui::SetCursorPos(ImVec2(w.fx * scale, w.fy * scale));
             if (arrange) ImGui::BeginDisabled();
@@ -690,6 +689,13 @@ void NotebookPanel::drawPanelCanvas(
             if (drawUIWidget(w)) controls.noteTapsVisible();
             ImGui::EndGroup();
             if (arrange) ImGui::EndDisabled();
+
+            // Advance the auto-flow cursor past the widget's ACTUAL
+            // drawn extent (an xy pad or piano roll is far taller than
+            // a slider row), back in unscaled canvas coordinates.
+            float itemH = (ImGui::GetItemRectMax().y
+                           - ImGui::GetItemRectMin().y) / scale;
+            autoY = std::max(autoY, w.fy + std::max(itemH, 24.0f) + 8.0f);
 
             if (arrange) {
                 // Drag overlay: move; corner grip: resize. Both snap to
