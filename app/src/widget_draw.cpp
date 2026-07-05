@@ -487,7 +487,10 @@ static void drawPianoRoll(UIWidget& w) {
                     ImVec2(origin.x + c * cw, origin.y + height),
                     (c % 4 == 0) ? beatCol : gridCol);
     }
-    if (chh >= 3.0f) {
+    // Per-step gridlines only for divisions coarse enough that a line
+    // per pitch is readable; denser edos rely on the octave lines and
+    // reference-band shading.
+    if (edo <= 24 && chh >= 3.0f) {
         for (int r = 0; r <= rows; ++r)
             dl->AddLine(ImVec2(origin.x, origin.y + r * chh),
                         ImVec2(origin.x + width, origin.y + r * chh), gridCol);
