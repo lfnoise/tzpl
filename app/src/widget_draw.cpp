@@ -94,8 +94,14 @@ static void hoverAdjustSlider(UIWidget& w) {
     if (ImGui::IsKeyPressed(ImGuiKey_LeftBracket)) setPos(0.0f);
     if (ImGui::IsKeyPressed(ImGuiKey_RightBracket)) setPos(1.0f);
     if (ImGui::IsKeyPressed(ImGuiKey_R)) setPos(uniform(0.0f, 1.0f));
-    if (ImGui::IsKeyPressed(ImGuiKey_J))
-        setPos(pos + uniform(-0.05f, 0.05f));
+    if (ImGui::IsKeyPressed(ImGuiKey_J)) {
+        float p = pos + uniform(-0.05f, 0.05f);
+        // Bounce off the ends rather than clamping, so jitter keeps
+        // its energy at the rails: 0.02 - 0.03 -> 0.01, 1.03 -> 0.97.
+        if (p < 0.0f) p = -p;
+        else if (p > 1.0f) p = 2.0f - p;
+        setPos(p);
+    }
 
     float wheel = ImGui::GetIO().MouseWheel;
     if (wheel != 0.0f) setPos(pos + wheel * 0.01f);
