@@ -605,7 +605,7 @@ panel(<span class="str">""</span>);               <span class="cmt">-- back to t
 <p>The notebook keeps one immutable history tree covering <strong>cell structure, code text, and widget values</strong> in document panels. Commits are coalesced so the tree stays readable: one entry per slider drag (committed when you release), one per pause in typing (&asymp;1&nbsp;s), one per cell run, one per structural edit.</p>
 
 <ul>
-  <li><kbd>Cmd+Z</kbd> / <kbd>Cmd+Shift+Z</kbd> &mdash; undo / redo. <strong>Focus-routed:</strong> while your cursor is in a text cell this is the editor's own fine-grained character undo; click outside the text (or on a widget) and it becomes <em>document</em> undo. Undoing a control move re-sends the old value through the widget's binding &mdash; you <em>hear</em> the undo.</li>
+  <li><kbd>Cmd+Z</kbd> / <kbd>Cmd+Shift+Z</kbd> &mdash; undo / redo, at two granularities. <strong>Text edits are always part of document history</strong> (each typing burst commits as one &ldquo;edit&rdquo; node when you pause); what focus selects is the step size. While your cursor is in a text cell, <kbd>Cmd+Z</kbd> is the editor's character-by-character undo &mdash; right for fixing a typo. Click outside the text (or on a widget) and <kbd>Cmd+Z</kbd> steps through <em>document</em> commits: whole text edits, control moves, cell operations, runs. Pending (un-coalesced) typing is committed before a document undo, so the first step lands on the pre-typing state. Undoing a control move re-sends the old value through the widget's binding &mdash; you <em>hear</em> the undo. (A document-level text restore replaces the cell's editor buffer, which resets that cell's character-level undo stack.)</li>
   <li><strong>History window</strong> (toolbar button) &mdash; the whole tree. Editing after an undo doesn't discard the redo path; it starts a <em>branch</em>, listed indented with a &ldquo;(n branches)&rdquo; marker on the fork. Click any entry to jump straight to it; redo then follows the branch you jumped into.</li>
 </ul>
 
@@ -623,7 +623,7 @@ panel(<span class="str">""</span>);               <span class="cmt">-- back to t
 <tr><td><kbd>Cmd+S</kbd></td><td>save file</td><td>save notebook (.tzd)</td></tr>
 <tr><td><kbd>Cmd+W</kbd></td><td>close tab</td><td>close notebook</td></tr>
 <tr><td><kbd>Cmd+\</kbd></td><td colspan="2">toggle notebook / editor view (notebook stays open)</td></tr>
-<tr><td><kbd>Cmd+Z</kbd> / <kbd>Cmd+Shift+Z</kbd></td><td>text undo / redo</td><td>text undo in a focused cell; document history otherwise</td></tr>
+<tr><td><kbd>Cmd+Z</kbd> / <kbd>Cmd+Shift+Z</kbd></td><td>text undo / redo</td><td>character undo in the focused cell; document-history undo otherwise (text edits are in both &mdash; see &sect;4.6)</td></tr>
 <tr><td><kbd>Cmd+K</kbd></td><td colspan="2">clear console</td></tr>
 </table>
 
