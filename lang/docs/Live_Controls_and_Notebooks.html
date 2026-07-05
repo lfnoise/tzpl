@@ -459,6 +459,8 @@ cutoff onChange(<span class="kw">fn</span>(v <span class="typ">Float</span>) <sp
 
 <p>When a node is freed (<code>stop(node)</code>, <code>freeNode</code>, <code>freeAllNodes</code>), widgets bound to it are automatically <strong>unbound</strong>: they stay on screen with their values but drive nothing until code rebinds them (e.g. re-running the cell after <code>play</code>ing the synth again). <code>onChange</code> callbacks are untouched &mdash; they're yours.</p>
 
+<p>Buttons and toggles can also be bound to the <strong>keyboard</strong>: <code>kick bindKey("a")</code> makes the <kbd>a</kbd> key press the button (momentary &mdash; down sends 1, up sends 0) and shows <code>kick [a]</code> on its face; on a toggle the key flips it. Accepted keys: a single character <code>"a"</code>&ndash;<code>"z"</code> / <code>"0"</code>&ndash;<code>"9"</code>, or <code>"space"</code>; <code>""</code> unbinds. Key bindings fire whenever no text field has focus &mdash; in the notebook, in perform mode, and over floating panels &mdash; and are saved with the document.</p>
+
 <!-- -------------------------------- -->
 <h3 id="ui-derive">3.3 Widgets from Synthdefs</h3>
 
@@ -529,6 +531,7 @@ panel(<span class="str">""</span>);               <span class="cmt">-- back to t
 <tr><td><code>waveform(name, node, buf) Widget</code></td><td>overview of the file loaded into a buffer slot</td></tr>
 <tr><td><code>bindControl(w, node, control String, silo = 0) Int</code></td><td>fast-path engine binding, by control name</td></tr>
 <tr><td><code>bindControlY(w, node, control String, silo = 0) Int</code></td><td>fast-path binding for an xy pad's Y axis</td></tr>
+<tr><td><code>bindKey(w, key String)</code></td><td>keyboard binding for a button (momentary) or toggle (flip): <code>"a"</code>&ndash;<code>"z"</code>, <code>"0"</code>&ndash;<code>"9"</code>, <code>"space"</code>; <code>""</code> unbinds</td></tr>
 <tr><td><code>onChange(w, f (Float) Void)</code> / <code>onChangeXY(w, f (Float, Float) Void)</code></td><td>coalesced value callback</td></tr>
 <tr><td><code>value(w) Float</code> / <code>valueY(w) Float</code> / <code>values(w) [Float]</code></td><td>read the widget</td></tr>
 <tr><td><code>setValue(w, v)</code> / <code>setValueXY(w, x, y)</code> / <code>setValues(w, vals)</code></td><td>move the widget and fire its bindings</td></tr>
@@ -554,7 +557,7 @@ panel(<span class="str">""</span>);               <span class="cmt">-- back to t
 
 <p>Only <strong>one notebook is open at a time</strong>: New Notebook or opening a <code>.tzd</code> replaces the current one (you are asked to save first if it has unsaved changes).</p>
 
-<p>The toolbar across the top: <strong>+ code / + prose / + panel</strong> insert a cell <em>after the selected cell</em> (or at the end if none is selected); <strong>Run All</strong> runs every code cell top to bottom; <strong>Undo / Redo / History</strong> drive the document history (<a href="#nb-history">&sect;4.6</a>); <strong>Editor</strong> swaps to the editor tabs (notebook stays open); <strong>Close</strong> ends the document. The title shows the file path, with <code>*</code> when modified.</p>
+<p>The toolbar across the top: <strong>+ code / + prose / + panel</strong> insert a cell <em>after the selected cell</em> (or at the end if none is selected); <strong>Run All</strong> runs every code cell top to bottom (and becomes <strong>Stop&nbsp;(n)</strong> while runs are queued); <strong>Undo / Redo / History</strong> drive the document history (<a href="#nb-history">&sect;4.6</a>); <strong>Perform</strong> enters the locked stage view (<a href="#nb-panels">&sect;4.4</a>); <strong>Editor</strong> swaps to the editor tabs (notebook stays open); <strong>Close</strong> ends the document. The title shows the file path, with <code>*</code> when modified.</p>
 
 <p>Click anywhere in a cell to <strong>select</strong> it &mdash; the selected cell shows an accent bar along its left edge. Selection determines where new cells insert and which cell <kbd>Cmd+Enter</kbd> runs.</p>
 
@@ -577,7 +580,7 @@ panel(<span class="str">""</span>);               <span class="cmt">-- back to t
 <ul>
   <li><kbd>Cmd+Enter</kbd> or <kbd>Shift+Enter</kbd> &mdash; run the selected cell (click a cell to select it; the accent bar shows which one).</li>
   <li><strong>Run</strong> button &mdash; run that cell.</li>
-  <li><kbd>Cmd+Shift+Enter</kbd> or <strong>Run All</strong> &mdash; run all code cells top to bottom, stopping at the first error.</li>
+  <li><kbd>Cmd+Shift+Enter</kbd> or <strong>Run All</strong> &mdash; run all code cells top to bottom, stopping at the first error. While cells are queued the toolbar button becomes <strong>Stop&nbsp;(n)</strong> &mdash; click it to cancel the remaining runs. If a cell errors, the run stops there and the cell's output notes how many queued cells were skipped.</li>
 </ul>
 
 <p>Output printed <em>while a cell runs</em> appears under that cell; a returned value is shown as <code>&rarr; value : Type</code>. Errors underline the offending line in the cell and print the message below it. Output from timers, actors, and the engine (things that print when no cell is running) goes to the console strip at the bottom, since it can't be attributed to any one cell.</p>
@@ -597,6 +600,9 @@ panel(<span class="str">""</span>);               <span class="cmt">-- back to t
 
 <h4>Arrange mode</h4>
 <p>Each panel cell has an <strong>arrange</strong> checkbox. While it's on, widgets stop responding to input and instead become draggable: drag a widget to move it, drag the small grip at its bottom-right corner to resize, both snapping to an 8-pixel grid. The bar under the canvas drags to change the panel's height. Layout is document state: frames save into the <code>.tzd</code>, are covered by undo (one history entry per drag), and survive re-running the creating code (upserts adopt position along with value). Widgets you never arrange flow top-to-bottom automatically. Code can also place widgets directly with <code>setFrame(w, x, y, wd, ht)</code>.</p>
+
+<h4>Perform mode</h4>
+<p>The toolbar's <strong>Perform</strong> button (or <kbd>Cmd+Shift+P</kbd>) swaps the notebook for a stage view: <em>only the panel cells</em>, drawn at 1.5&times; scale for reliable targets, with the layout locked &mdash; no cell chrome, no arrange, no structural edits, nothing to grab by accident mid-set. Widgets stay fully live (bindings, taps, key bindings), and code keeps running; you just can't edit the document's shape. <kbd>Esc</kbd> or <strong>Exit Perform</strong> returns to the normal notebook.</p>
 
 <!-- -------------------------------- -->
 <h3 id="nb-save">4.5 Saving &amp; Loading</h3>
@@ -623,7 +629,7 @@ panel(<span class="str">""</span>);               <span class="cmt">-- back to t
   <li><strong>History window</strong> (toolbar button) &mdash; the whole tree. Editing after an undo doesn't discard the redo path; it starts a <em>branch</em>, listed indented with a &ldquo;(n branches)&rdquo; marker on the fork. Click any entry to jump straight to it; redo then follows the branch you jumped into.</li>
 </ul>
 
-<p>History is per-session: the <code>.tzd</code> file stores the current state only.</p>
+<p>History is per-session: the <code>.tzd</code> file stores the current state only. The tree is capped at 500 nodes &mdash; past that, the oldest states fall off the root (along with any branches hanging off them) as new commits arrive.</p>
 
 <!-- ================================================================ -->
 <h2 id="shortcuts">5. Keyboard Shortcuts</h2>
@@ -637,6 +643,7 @@ panel(<span class="str">""</span>);               <span class="cmt">-- back to t
 <tr><td><kbd>Cmd+S</kbd></td><td>save file</td><td>save notebook (.tzd)</td></tr>
 <tr><td><kbd>Cmd+W</kbd></td><td>close tab</td><td>close notebook</td></tr>
 <tr><td><kbd>Cmd+\</kbd></td><td colspan="2">toggle notebook / editor view (notebook stays open)</td></tr>
+<tr><td><kbd>Cmd+Shift+P</kbd></td><td></td><td>toggle perform mode (<kbd>Esc</kbd> also exits)</td></tr>
 <tr><td><kbd>Cmd+Z</kbd> / <kbd>Cmd+Shift+Z</kbd></td><td>text undo / redo</td><td>character undo in the focused cell; document-history undo otherwise (text edits are in both &mdash; see &sect;4.6)</td></tr>
 <tr><td><kbd>Cmd+K</kbd></td><td colspan="2">clear console</td></tr>
 </table>

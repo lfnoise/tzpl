@@ -77,6 +77,7 @@ struct WidgetSnap {
     int rollLowPitch = 48;
     int rollRows = 24;
     int rollEdo = 12;
+    std::string keyChord;
 
     bool operator==(WidgetSnap const& o) const {
         return panel == o.panel && name == o.name && kind == o.kind
@@ -91,7 +92,8 @@ struct WidgetSnap {
             && rows == o.rows && cols == o.cols
             && noteData == o.noteData && labelText == o.labelText
             && rollBeats == o.rollBeats && rollLowPitch == o.rollLowPitch
-            && rollRows == o.rollRows && rollEdo == o.rollEdo;
+            && rollRows == o.rollRows && rollEdo == o.rollEdo
+            && keyChord == o.keyChord;
     }
 };
 
@@ -179,6 +181,13 @@ public:
 
     HistNode* historyRoot() { return root_.get(); }
     HistNode* historyCursor() { return cursor_; }
+
+    // History is bounded: past this many nodes, commit() advances the
+    // root along the path to the cursor, discarding the oldest state
+    // and any branches hanging off it. Snapshots are COW-shared, so the
+    // cap bounds node count, not memory precisely -- but dropped nodes
+    // release every cell/widget state unique to them.
+    static constexpr int kHistoryCap = 500;
 
 private:
     // Clone-on-write: returns a mutable copy of the cell installed in a

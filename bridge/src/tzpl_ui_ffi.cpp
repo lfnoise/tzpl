@@ -36,6 +36,7 @@
 #include "tzpl_tap.hpp"
 #include "tzpl_audio_file.hpp"
 
+#include <cctype>
 #include <cstdio>
 #include <string>
 #include <vector>
@@ -364,6 +365,19 @@ static void ffi_uiBindControl(ts::VM& vm, u16 dst, u16, u16 argBase) {
                      static_cast<long long>(nodeID), control, (int)err);
     }
     vm.reg(dst).i = static_cast<i64>(err);
+}
+
+// fn uiBindKey(id Int, key String) Void
+// Key binding: single char 'a'-'z' / '0'-'9' or "space"; "" unbinds.
+static void ffi_uiBindKey(ts::VM& vm, u16, u16, u16 argBase) {
+    UIState* ui = getUIState(vm);
+    if (!ui) return;
+    auto id = static_cast<std::uint64_t>(vm.reg(argBase).i);
+    std::string chord = regString(vm, argBase + 1);
+    for (auto& c : chord)
+        c = (char)std::tolower((unsigned char)c);
+    std::lock_guard<std::mutex> lock(ui->mtx);
+    if (UIWidget* w = ui->findById(id)) w->keyChord = std::move(chord);
 }
 
 // fn uiBindControlY(id Int, node Int, control String, silo Int) Int
@@ -1014,6 +1028,7 @@ void registerUIFFI(ts::Compiler& compiler) {
     reg("uiOnChangeVec",  Void, {Int, FnVec},                   ffi_uiOnChangeVec);
     reg("uiBindControl",  Int,  {Int, Int, String, Int},        ffi_uiBindControl);
     reg("uiBindControlY", Int,  {Int, Int, String, Int},        ffi_uiBindControlY);
+    reg("uiBindKey",      Void, {Int, String},                  ffi_uiBindKey);
     reg("uiValue",        Float, {Int},                         ffi_uiValue);
     reg("uiValues",       FloatArray, {Int},                    ffi_uiValues);
     reg("uiSetValues",    Void, {Int, FloatArray},              ffi_uiSetValues);

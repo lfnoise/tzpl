@@ -31,6 +31,7 @@
 #include "output_panel.hpp"
 #include "controls_panel.hpp"
 #include "notebook_panel.hpp"
+#include "widget_draw.hpp"
 
 #include "repl_session.hpp"
 #include "nrt_vm.hpp"
@@ -1310,6 +1311,10 @@ int runGui(bridge::AppContext& appCtx) {
             // panel cells, so their noteTapsVisible reports survive.)
             // ---------------------------------------------------------------
             if (appCtx.uiState) {
+                // Key-bound widgets (ui.bindKey) fire from here whenever
+                // no text field owns the keyboard -- notebook, perform
+                // mode, and floating panels alike.
+                dispatchWidgetKeys(*appCtx.uiState);
                 // Panels rendered inline as notebook cells are skipped from
                 // the floating windows -- but only while the notebook is
                 // shown; hidden, its panels float so controls stay usable.

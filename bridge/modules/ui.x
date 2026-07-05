@@ -100,6 +100,11 @@ fn bindControl(w Widget, node Int, control String, silo Int = 0) Int =
 fn bindControlY(w Widget, node Int, control String, silo Int = 0) Int =
 	uiBindControlY(w.0, node, control, silo);
 
+-- Keyboard binding: a single character ("a".."z", "0".."9") or "space".
+-- Buttons fire momentary (down/up), toggles flip on press -- whenever no
+-- text field has focus. Pass "" to unbind. Saved with the document.
+fn bindKey(w Widget, key String) Void = uiBindKey(w.0, key);
+
 ---------------------------------------------------------------------------
 -- Values
 

@@ -23,6 +23,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -37,6 +38,19 @@ static void markDirty(UIWidget& w) {
     w.dirtyCallback = true;
 }
 
+// Perform-mode magnification: explicit frames and per-kind default sizes
+// multiply by this. Positions are scaled by the panel drawing code.
+static float gUIScale = 1.0f;
+
+void setUIDrawScale(float s) { gUIScale = s > 0.0f ? s : 1.0f; }
+
+static float wFrameW(UIWidget const& w, float def) {
+    return (w.fw > 0.0f ? w.fw : def) * gUIScale;
+}
+static float wFrameH(UIWidget const& w, float def) {
+    return (w.fh > 0.0f ? w.fh : def) * gUIScale;
+}
+
 // One history commit per continuous interaction: flag the release edge of
 // the last-drawn item (sliders, drags, checkboxes).
 static void markGestureEdges(UIWidget& w) {
@@ -45,7 +59,7 @@ static void markGestureEdges(UIWidget& w) {
 
 static void drawSlider(UIWidget& w) {
     std::string label = std::string("##") + w.name;
-    ImGui::SetNextItemWidth(w.fw > 0.0f ? w.fw : -140.0f);
+    ImGui::SetNextItemWidth((w.fw > 0.0f ? w.fw : -140.0f) * gUIScale);
     // Cmd-click text entry must edit the DISPLAYED (mapped) value, while
     // the drag operates on the 0..1 warp position. The edit buffer seeds
     // from the datum passed on the ACTIVATION frame, so predict the
@@ -88,7 +102,7 @@ static void drawSlider(UIWidget& w) {
 static void drawNumber(UIWidget& w) {
     std::string label = std::string("##") + w.name;
     double v = w.values[0];
-    ImGui::SetNextItemWidth(w.fw > 0.0f ? w.fw : -140.0f);
+    ImGui::SetNextItemWidth((w.fw > 0.0f ? w.fw : -140.0f) * gUIScale);
     bool typing = ImGui::TempInputIsActive(ImGui::GetID(label.c_str()));
     bool changed = ImGui::DragScalar(label.c_str(), ImGuiDataType_Double, &v,
                                      0.01f, nullptr, nullptr, "%.4g");
@@ -110,7 +124,11 @@ static void drawNumber(UIWidget& w) {
 
 static void drawButton(UIWidget& w) {
     // Momentary/gate: 1 while held, 0 on release; both edges dispatch.
-    ImGui::Button(w.name.c_str(), ImVec2(120.0f, 0.0f));
+    // A key binding shows as a label hint (### keeps the ImGui id stable).
+    std::string label = w.keyChord.empty()
+        ? w.name
+        : w.name + " [" + w.keyChord + "]###" + w.name;
+    ImGui::Button(label.c_str(), ImVec2(wFrameW(w, 120.0f), 0.0f));
     if (ImGui::IsItemActivated()) {
         w.values[0] = 1.0;
         markDirty(w);
@@ -141,8 +159,8 @@ static void drawMeter(UIWidget& w) {
     float rms = w.values.size() > 0 ? static_cast<float>(w.values[0]) : 0.0f;
     float peak = w.values.size() > 1 ? static_cast<float>(w.values[1]) : 0.0f;
 
-    const float width = w.fw > 0.0f ? w.fw : 200.0f;
-    const float height = w.fh > 0.0f ? w.fh : 14.0f;
+    const float width = wFrameW(w, 200.0f);
+    const float height = wFrameH(w, 14.0f);
     ImVec2 origin = ImGui::GetCursorScreenPos();
     ImGui::InvisibleButton((std::string("##") + w.name).c_str(),
                            ImVec2(width, height));
@@ -193,7 +211,7 @@ static void drawScope(UIWidget& w) {
     auto plotLane = [&](int ch, float height) {
         lane.resize((size_t)std::max(count, 0));
         for (int f = 0; f < count; ++f) lane[f] = sample(start + f, ch);
-        float scopeW = w.fw > 0.0f ? w.fw : 320.0f;
+        float scopeW = wFrameW(w, 320.0f);
         if (count > 1) {
             ImGui::PlotLines(("##" + w.name + std::to_string(ch)).c_str(),
                              lane.data(), count, 0, nullptr,
@@ -203,7 +221,7 @@ static void drawScope(UIWidget& w) {
         }
     };
 
-    float scopeH = w.fh > 0.0f ? w.fh : 100.0f;
+    float scopeH = wFrameH(w, 100.0f);
     ImGui::BeginGroup();
     if (w.scopeChannel < 0) {
         // All channels, stacked lanes sharing one trigger.
@@ -242,19 +260,17 @@ static void drawPlot(UIWidget& w) {
         ImGui::PlotLines((std::string("##") + w.name).c_str(),
                          w.plotData.data(), (int)w.plotData.size(), 0, nullptr,
                          lo - pad, hi + pad,
-                         ImVec2(w.fw > 0.0f ? w.fw : 320.0f,
-                                w.fh > 0.0f ? w.fh : 100.0f));
+                         ImVec2(wFrameW(w, 320.0f), wFrameH(w, 100.0f)));
     } else {
-        ImGui::Dummy(ImVec2(w.fw > 0.0f ? w.fw : 320.0f,
-                            w.fh > 0.0f ? w.fh : 100.0f));
+        ImGui::Dummy(ImVec2(wFrameW(w, 320.0f), wFrameH(w, 100.0f)));
     }
     ImGui::SameLine();
     ImGui::TextUnformatted(w.name.c_str());
 }
 
 static void drawWaveform(UIWidget& w) {
-    const float width = w.fw > 0.0f ? w.fw : 320.0f;
-    const float height = w.fh > 0.0f ? w.fh : 80.0f;
+    const float width = wFrameW(w, 320.0f);
+    const float height = wFrameH(w, 80.0f);
     ImVec2 origin = ImGui::GetCursorScreenPos();
     ImGui::InvisibleButton((std::string("##") + w.name).c_str(),
                            ImVec2(width, height));
@@ -289,7 +305,7 @@ static void drawWaveform(UIWidget& w) {
 }
 
 static void drawXY(UIWidget& w) {
-    const float size = w.fw > 0.0f ? w.fw : 160.0f;
+    const float size = wFrameW(w, 160.0f);
     ImVec2 origin = ImGui::GetCursorScreenPos();
     ImGui::InvisibleButton((std::string("##") + w.name).c_str(),
                            ImVec2(size, size));
@@ -328,8 +344,8 @@ static void drawXY(UIWidget& w) {
 static void drawMultiSlider(UIWidget& w) {
     int n = (int)w.values.size();
     if (n < 1) return;
-    const float width = w.fw > 0.0f ? w.fw : 240.0f;
-    const float height = w.fh > 0.0f ? w.fh : 80.0f;
+    const float width = wFrameW(w, 240.0f);
+    const float height = wFrameH(w, 80.0f);
     ImVec2 origin = ImGui::GetCursorScreenPos();
     ImGui::InvisibleButton((std::string("##") + w.name).c_str(),
                            ImVec2(width, height));
@@ -366,8 +382,8 @@ static void drawMultiSlider(UIWidget& w) {
 
 static void drawMatrix(UIWidget& w) {
     int rows = std::max(1, w.rows), cols = std::max(1, w.cols);
-    const float width = w.fw > 0.0f ? w.fw : cols * 22.0f;
-    const float height = w.fh > 0.0f ? w.fh : rows * 22.0f;
+    const float width = wFrameW(w, cols * 22.0f);
+    const float height = wFrameH(w, rows * 22.0f);
     ImVec2 origin = ImGui::GetCursorScreenPos();
     ImGui::InvisibleButton((std::string("##") + w.name).c_str(),
                            ImVec2(width, height));
@@ -419,8 +435,8 @@ static void drawPianoRoll(UIWidget& w) {
     int rows = std::max(1, w.rollRows);
     int edo = std::max(1, w.rollEdo);
     int cols = std::max(1, (int)std::lround(w.rollBeats / stepBeats));
-    const float width = w.fw > 0.0f ? w.fw : 320.0f;
-    const float height = w.fh > 0.0f ? w.fh : 200.0f;
+    const float width = wFrameW(w, 320.0f);
+    const float height = wFrameH(w, 200.0f);
     ImVec2 origin = ImGui::GetCursorScreenPos();
     ImGui::InvisibleButton((std::string("##") + w.name).c_str(),
                            ImVec2(width, height));
@@ -549,4 +565,47 @@ bool drawPanelWidgets(bridge::UIState& ui, std::string const& panel) {
         anyTaps |= drawUIWidget(*wp);
     }
     return anyTaps;
+}
+
+// ---------------------------------------------------------------------------
+// Key bindings (ui.bindKey)
+// ---------------------------------------------------------------------------
+
+static ImGuiKey chordKey(std::string const& chord) {
+    if (chord == "space") return ImGuiKey_Space;
+    if (chord.size() != 1) return ImGuiKey_None;
+    char c = chord[0];
+    if (c >= 'a' && c <= 'z') return (ImGuiKey)(ImGuiKey_A + (c - 'a'));
+    if (c >= '0' && c <= '9') return (ImGuiKey)(ImGuiKey_0 + (c - '0'));
+    return ImGuiKey_None;
+}
+
+void dispatchWidgetKeys(bridge::UIState& ui) {
+    // Typing anywhere (cell editors, slider text entry, panel names)
+    // owns the keyboard; bindings fire only outside text input.
+    if (ImGui::GetIO().WantTextInput) return;
+    std::lock_guard<std::mutex> lock(ui.mtx);
+    for (auto& wp : ui.widgets) {
+        UIWidget& w = *wp;
+        if (w.keyChord.empty()) continue;
+        ImGuiKey key = chordKey(w.keyChord);
+        if (key == ImGuiKey_None) continue;
+        if (w.kind == UIWidgetKind::Button) {
+            // Momentary, like a mouse press: down = 1, up = 0.
+            if (ImGui::IsKeyPressed(key, false)) {
+                w.values[0] = 1.0;
+                markDirty(w);
+            }
+            if (ImGui::IsKeyReleased(key)) {
+                w.values[0] = 0.0;
+                markDirty(w);
+            }
+        } else if (w.kind == UIWidgetKind::Toggle) {
+            if (ImGui::IsKeyPressed(key, false)) {
+                w.values[0] = w.values[0] != 0.0 ? 0.0 : 1.0;
+                markDirty(w);
+                w.gestureEnded = true;  // one history commit per flip
+            }
+        }
+    }
 }

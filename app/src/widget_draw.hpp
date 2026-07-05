@@ -30,4 +30,14 @@ bool drawUIWidget(bridge::UIWidget& w);
 // UIState::mtx. Returns true if any tap-backed widget was drawn.
 bool drawPanelWidgets(bridge::UIState& ui, std::string const& panel);
 
+// Scale applied to widget frames and default sizes by the draw functions
+// (perform mode's big targets). Set around a panel draw, then restore to
+// 1.0. Pair with ImGui::SetWindowFontScale so text follows.
+void setUIDrawScale(float s);
+
+// Fire key-bound widgets (ui.bindKey): buttons act momentary (down/up),
+// toggles flip on press. Call once per frame inside the ImGui frame; a
+// no-op while a text field wants input. Takes UIState::mtx itself.
+void dispatchWidgetKeys(bridge::UIState& ui);
+
 #endif /* widget_draw_hpp */

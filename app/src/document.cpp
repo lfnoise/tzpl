@@ -163,6 +163,12 @@ bool DocumentStore::setWidgetSnap(std::shared_ptr<WidgetSnapList const> widgets)
     return true;
 }
 
+static int countHistNodes(HistNode const* n) {
+    int c = 1;
+    for (auto const& ch : n->children) c += countHistNodes(ch.get());
+    return c;
+}
+
 bool DocumentStore::commit(std::string const& label) {
     if (!cursor_) return false;
     if (snap_ == cursor_->snap) return false;
@@ -173,6 +179,24 @@ bool DocumentStore::commit(std::string const& label) {
     cursor_->activeChild = (int)cursor_->children.size();
     cursor_->children.push_back(std::move(node));
     cursor_ = cursor_->children.back().get();
+
+    // Enforce the cap: advance the root toward the cursor, one
+    // generation at a time, until the tree fits. The cursor's own
+    // ancestry survives; branches off dropped ancestors go with them.
+    while (root_.get() != cursor_
+           && countHistNodes(root_.get()) > kHistoryCap) {
+        HistNode* n = cursor_;
+        while (n->parent != root_.get()) n = n->parent;
+        std::unique_ptr<HistNode> keep;
+        for (auto& ch : root_->children) {
+            if (ch.get() == n) {
+                keep = std::move(ch);
+                break;
+            }
+        }
+        keep->parent = nullptr;
+        root_ = std::move(keep);
+    }
     return true;
 }
 
@@ -283,6 +307,8 @@ static void readWidgetExtras(Reader rw, bridge::UIWidget& w) {
     }
     if (rw.childCount() > 14)
         w.rollEdo = std::max(1, (int)rw.child(14).asInt());
+    if (rw.childCount() > 15)
+        w.keyChord = std::string(rw.child(15).asStr());
 }
 
 bool saveDocument(DocSnapshot const& snap, bridge::AppContext& ctx,
@@ -330,6 +356,7 @@ bool saveDocument(DocSnapshot const& snap, bridge::AppContext& ctx,
                     Value::Int(w->rollLowPitch),
                     Value::Int(w->rollRows),
                     Value::Int(w->rollEdo),
+                    Value::String(w->keyChord),
                 }));
             }
             panels.push_back(Value::Vec(std::move(pv)));
@@ -493,6 +520,7 @@ captureWidgets(bridge::UIState* ui, std::vector<std::string> const& panels) {
         s.rollLowPitch = w->rollLowPitch;
         s.rollRows = w->rollRows;
         s.rollEdo = w->rollEdo;
+        s.keyChord = w->keyChord;
         out->push_back(std::move(s));
     }
     return out;
@@ -538,6 +566,7 @@ void restoreWidgets(bridge::AppContext& ctx, WidgetSnapList const& target,
                 w->rollLowPitch = s.rollLowPitch;
                 w->rollRows = s.rollRows;
                 w->rollEdo = s.rollEdo;
+                w->keyChord = s.keyChord;
                 if (w->noteData != s.noteData) {
                     w->noteData = s.noteData;
                     w->dirtyCallback = true;
@@ -569,6 +598,7 @@ void restoreWidgets(bridge::AppContext& ctx, WidgetSnapList const& target,
                 nw->rollLowPitch = s.rollLowPitch;
                 nw->rollRows = s.rollRows;
                 nw->rollEdo = s.rollEdo;
+                nw->keyChord = s.keyChord;
                 nw->dirtyEngine = true;
                 nw->dirtyCallback = true;
             }

@@ -340,7 +340,14 @@ void NotebookPanel::onEvalDone(std::uint64_t cellId,
 
     if (!result.errors.empty()) {
         rt.lastErrored = true;
-        runQueue_.clear();  // Run All stops on first error
+        if (!runQueue_.empty()) {
+            // Run All stops on first error; say what was skipped.
+            rt.output.push_back({"Run All stopped here -- "
+                                     + std::to_string(runQueue_.size())
+                                     + " queued cell(s) not run",
+                                 LineKind::Error});
+            runQueue_.clear();
+        }
         auto formatted = ts::formatErrorsPlain(result.errors, code, "<cell>");
         for (auto& line : formatted) {
             rt.output.push_back({line, LineKind::Error});
@@ -488,90 +495,7 @@ void NotebookPanel::drawCell(std::shared_ptr<Cell const> const& cell,
     // ---- body -------------------------------------------------------------
     if (cell->kind == CellKind::Panel) {
         if (ctx.uiState) {
-            float canvasH = std::max(cell->panelHeight, 60.0f);
-            ImGui::BeginChild("##panelcanvas", ImVec2(width, canvasH), true,
-                              ImGuiWindowFlags_NoScrollWithMouse);
-            {
-                std::lock_guard<std::mutex> lock(ctx.uiState->mtx);
-                bool any = false;
-                float autoY = 8.0f;
-                auto snap8 = [](float v) {
-                    return std::round(v / 8.0f) * 8.0f;
-                };
-                for (auto& wp : ctx.uiState->widgets) {
-                    bridge::UIWidget& w = *wp;
-                    if (w.panel != cell->name) continue;
-                    any = true;
-
-                    // Auto-place widgets that have never been arranged.
-                    if (w.fx < 0.0f) {
-                        w.fx = 8.0f;
-                        w.fy = autoY;
-                    }
-                    autoY = std::max(autoY, w.fy + 32.0f);
-
-                    ImGui::SetCursorPos(ImVec2(w.fx, w.fy));
-                    if (rt.arrange) ImGui::BeginDisabled();
-                    ImGui::BeginGroup();
-                    if (drawUIWidget(w)) controls.noteTapsVisible();
-                    ImGui::EndGroup();
-                    if (rt.arrange) ImGui::EndDisabled();
-
-                    if (rt.arrange) {
-                        // Drag overlay: move; corner grip: resize. Both
-                        // snap to the 8px grid and commit one history
-                        // node on release (via gestureEnded).
-                        ImVec2 rmin = ImGui::GetItemRectMin();
-                        ImVec2 rmax = ImGui::GetItemRectMax();
-                        ImGui::SetCursorScreenPos(rmin);
-                        ImGui::PushID((int)w.id);
-                        ImGui::InvisibleButton("##move",
-                            ImVec2(std::max(rmax.x - rmin.x, 16.0f),
-                                   std::max(rmax.y - rmin.y, 16.0f)));
-                        if (ImGui::IsItemActive()) {
-                            ImVec2 d = ImGui::GetIO().MouseDelta;
-                            w.fx = std::max(0.0f, w.fx + d.x);
-                            w.fy = std::max(0.0f, w.fy + d.y);
-                            w.gestureActive = true;
-                        } else if (ImGui::IsItemDeactivated()) {
-                            w.fx = std::max(0.0f, snap8(w.fx));
-                            w.fy = std::max(0.0f, snap8(w.fy));
-                            w.gestureActive = false;
-                            w.gestureEnded = true;
-                        }
-                        // Resize grip (bottom-right corner).
-                        ImGui::SetCursorScreenPos(
-                            ImVec2(rmax.x - 10.0f, rmax.y - 10.0f));
-                        ImGui::InvisibleButton("##size", ImVec2(12.0f, 12.0f));
-                        if (ImGui::IsItemActive()) {
-                            ImVec2 d = ImGui::GetIO().MouseDelta;
-                            float baseW = w.fw > 0.0f ? w.fw : rmax.x - rmin.x;
-                            float baseH = w.fh > 0.0f ? w.fh : rmax.y - rmin.y;
-                            w.fw = std::max(24.0f, baseW + d.x);
-                            w.fh = std::max(14.0f, baseH + d.y);
-                            w.gestureActive = true;
-                        } else if (ImGui::IsItemDeactivated()) {
-                            w.fw = std::max(24.0f, snap8(w.fw));
-                            w.fh = std::max(14.0f, snap8(w.fh));
-                            w.gestureActive = false;
-                            w.gestureEnded = true;
-                        }
-                        ImGui::GetWindowDrawList()->AddRect(
-                            rmin, rmax,
-                            ImGui::GetColorU32(ImGuiCol_DragDropTarget));
-                        ImGui::PopID();
-                    }
-                }
-                if (!any) {
-                    ImGui::SetCursorPos(ImVec2(8.0f, 8.0f));
-                    ImGui::TextDisabled("(no widgets -- run code that calls "
-                                        "controls(node, \"%s\") or "
-                                        "ui.panel(\"%s\") and creates some)",
-                                        cell->name.c_str(),
-                                        cell->name.c_str());
-                }
-            }
-            ImGui::EndChild();
+            drawPanelCanvas(cell, width, ctx, controls, rt.arrange, 1.0f);
 
             // Canvas height splitter.
             ImGui::InvisibleButton("##panelheight", ImVec2(width, 6.0f));
@@ -622,10 +546,159 @@ void NotebookPanel::drawCell(std::shared_ptr<Cell const> const& cell,
     ImGui::Spacing();
 }
 
+void NotebookPanel::drawPanelCanvas(
+    std::shared_ptr<doc::Cell const> const& cell, float width,
+    bridge::AppContext& ctx, ControlsPanel& controls, bool arrange,
+    float scale) {
+    float canvasH = std::max(cell->panelHeight, 60.0f) * scale;
+    ImGui::BeginChild("##panelcanvas", ImVec2(width, canvasH), true,
+                      ImGuiWindowFlags_NoScrollWithMouse);
+    if (scale != 1.0f) {
+        ImGui::SetWindowFontScale(scale);
+        setUIDrawScale(scale);
+    }
+    {
+        std::lock_guard<std::mutex> lock(ctx.uiState->mtx);
+        bool any = false;
+        float autoY = 8.0f;
+        auto snap8 = [](float v) {
+            return std::round(v / 8.0f) * 8.0f;
+        };
+        for (auto& wp : ctx.uiState->widgets) {
+            bridge::UIWidget& w = *wp;
+            if (w.panel != cell->name) continue;
+            any = true;
+
+            // Auto-place widgets that have never been arranged.
+            if (w.fx < 0.0f) {
+                w.fx = 8.0f;
+                w.fy = autoY;
+            }
+            autoY = std::max(autoY, w.fy + 32.0f);
+
+            ImGui::SetCursorPos(ImVec2(w.fx * scale, w.fy * scale));
+            if (arrange) ImGui::BeginDisabled();
+            ImGui::BeginGroup();
+            if (drawUIWidget(w)) controls.noteTapsVisible();
+            ImGui::EndGroup();
+            if (arrange) ImGui::EndDisabled();
+
+            if (arrange) {
+                // Drag overlay: move; corner grip: resize. Both snap to
+                // the 8px grid and commit one history node on release
+                // (via gestureEnded). Arrange only runs at scale 1.
+                ImVec2 rmin = ImGui::GetItemRectMin();
+                ImVec2 rmax = ImGui::GetItemRectMax();
+                ImGui::SetCursorScreenPos(rmin);
+                ImGui::PushID((int)w.id);
+                ImGui::InvisibleButton("##move",
+                    ImVec2(std::max(rmax.x - rmin.x, 16.0f),
+                           std::max(rmax.y - rmin.y, 16.0f)));
+                if (ImGui::IsItemActive()) {
+                    ImVec2 d = ImGui::GetIO().MouseDelta;
+                    w.fx = std::max(0.0f, w.fx + d.x);
+                    w.fy = std::max(0.0f, w.fy + d.y);
+                    w.gestureActive = true;
+                } else if (ImGui::IsItemDeactivated()) {
+                    w.fx = std::max(0.0f, snap8(w.fx));
+                    w.fy = std::max(0.0f, snap8(w.fy));
+                    w.gestureActive = false;
+                    w.gestureEnded = true;
+                }
+                // Resize grip (bottom-right corner).
+                ImGui::SetCursorScreenPos(
+                    ImVec2(rmax.x - 10.0f, rmax.y - 10.0f));
+                ImGui::InvisibleButton("##size", ImVec2(12.0f, 12.0f));
+                if (ImGui::IsItemActive()) {
+                    ImVec2 d = ImGui::GetIO().MouseDelta;
+                    float baseW = w.fw > 0.0f ? w.fw : rmax.x - rmin.x;
+                    float baseH = w.fh > 0.0f ? w.fh : rmax.y - rmin.y;
+                    w.fw = std::max(24.0f, baseW + d.x);
+                    w.fh = std::max(14.0f, baseH + d.y);
+                    w.gestureActive = true;
+                } else if (ImGui::IsItemDeactivated()) {
+                    w.fw = std::max(24.0f, snap8(w.fw));
+                    w.fh = std::max(14.0f, snap8(w.fh));
+                    w.gestureActive = false;
+                    w.gestureEnded = true;
+                }
+                ImGui::GetWindowDrawList()->AddRect(
+                    rmin, rmax,
+                    ImGui::GetColorU32(ImGuiCol_DragDropTarget));
+                ImGui::PopID();
+            }
+        }
+        if (!any) {
+            ImGui::SetCursorPos(ImVec2(8.0f, 8.0f));
+            ImGui::TextDisabled("(no widgets -- run code that calls "
+                                "controls(node, \"%s\") or "
+                                "ui.panel(\"%s\") and creates some)",
+                                cell->name.c_str(),
+                                cell->name.c_str());
+        }
+    }
+    if (scale != 1.0f) {
+        setUIDrawScale(1.0f);
+        ImGui::SetWindowFontScale(1.0f);
+    }
+    ImGui::EndChild();
+}
+
+void NotebookPanel::drawPerform(float width, float height,
+                                bridge::AppContext& ctx,
+                                ControlsPanel& controls) {
+    ImGui::BeginChild("##perform", ImVec2(width, height), false);
+    if (ImGui::SmallButton("Exit Perform")) performMode_ = false;
+    ImGui::SameLine();
+    {
+        std::string title = store_.filePath().empty()
+                          ? std::string("(untitled notebook)")
+                          : store_.filePath();
+        ImGui::TextDisabled("%s -- esc exits; widget keys are live",
+                            title.c_str());
+    }
+    ImGui::Separator();
+
+    if (!ctx.uiState) {
+        ImGui::EndChild();
+        return;
+    }
+    float cellWidth = ImGui::GetContentRegionAvail().x;
+    auto snap = store_.snapshot();
+    bool anyPanel = false;
+    for (auto const& cell : snap->cells) {
+        if (cell->kind != CellKind::Panel) continue;
+        anyPanel = true;
+        ImGui::PushID((int)cell->id);
+        ImGui::TextUnformatted(cell->name.c_str());
+        drawPanelCanvas(cell, cellWidth, ctx, controls, false,
+                        kPerformScale);
+        ImGui::Spacing();
+        ImGui::PopID();
+    }
+    if (!anyPanel)
+        ImGui::TextDisabled("(no panel cells in this notebook)");
+    ImGui::EndChild();
+}
+
 void NotebookPanel::draw(float width, float height, GuiState& gui,
                          bridge::AppContext& ctx, ts::REPLSession* session,
                          ControlsPanel& controls) {
     if (!open_) return;
+
+    // Perform mode toggle: Cmd+Shift+P anywhere (outside text input);
+    // Esc leaves. The toolbar has matching buttons.
+    if (!ImGui::GetIO().WantTextInput) {
+        if (ImGui::IsKeyChordPressed(ImGuiMod_Super | ImGuiMod_Shift
+                                     | ImGuiKey_P))
+            performMode_ = !performMode_;
+        if (performMode_ && ImGui::IsKeyPressed(ImGuiKey_Escape))
+            performMode_ = false;
+    }
+    if (performMode_) {
+        drawPerform(width, height, ctx, controls);
+        return;
+    }
 
     ImGui::BeginChild("##notebook", ImVec2(width, height), false);
 
@@ -653,7 +726,13 @@ void NotebookPanel::draw(float width, float height, GuiState& gui,
         structureCommitLabel_ = "add panel cell";
     }
     ImGui::SameLine();
-    if (ImGui::SmallButton("Run All")) {
+    if (!runQueue_.empty()) {
+        // Queued runs in flight: the button becomes Stop with a count.
+        char stopLabel[32];
+        std::snprintf(stopLabel, sizeof(stopLabel), "Stop (%d)###runall",
+                      (int)runQueue_.size());
+        if (ImGui::SmallButton(stopLabel)) runQueue_.clear();
+    } else if (ImGui::SmallButton("Run All###runall")) {
         runAll();
     }
     ImGui::SameLine();
@@ -674,11 +753,15 @@ void NotebookPanel::draw(float width, float height, GuiState& gui,
         if (modified()) title += " *";
         ImGui::TextDisabled("%s", title.c_str());
     }
-    // Right side: Editor swaps the view (notebook stays open; Cmd+\ or
-    // View > Toggle Notebook / Editor swaps back); Close ends the document.
-    float rightW = ImGui::CalcTextSize("Editor").x
-                 + ImGui::CalcTextSize("Close").x + 44.0f;
+    // Right side: Perform locks the layout and enlarges panel widgets
+    // (Cmd+Shift+P / Esc); Editor swaps the view (notebook stays open;
+    // Cmd+\ swaps back); Close ends the document.
+    float rightW = ImGui::CalcTextSize("Perform").x
+                 + ImGui::CalcTextSize("Editor").x
+                 + ImGui::CalcTextSize("Close").x + 66.0f;
     ImGui::SameLine(std::max(ImGui::GetContentRegionMax().x - rightW, 0.0f));
+    if (ImGui::SmallButton("Perform")) performMode_ = true;
+    ImGui::SameLine();
     if (ImGui::SmallButton("Editor")) editorViewRequested_ = true;
     ImGui::SameLine();
     if (ImGui::SmallButton("Close")) closeRequested_ = true;

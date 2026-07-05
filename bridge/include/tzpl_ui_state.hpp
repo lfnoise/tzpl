@@ -153,6 +153,11 @@ struct UIWidget {
     // Label text (Label kind).
     std::string labelText;
 
+    // Key binding (ui.bindKey): a single character 'a'-'z' / '0'-'9' or
+    // "space". Buttons fire momentary, toggles flip, when no text field
+    // has input focus. Empty = unbound. Document state (saved in .tzd).
+    std::string keyChord;
+
     // Engine tap (Meter/Scope). tapID 0 = none. The tap is installed on
     // tapSilo's RT tap table; removing the widget untaps it.
     long tapID = 0;

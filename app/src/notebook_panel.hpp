@@ -133,6 +133,19 @@ private:
         bool arrange = false;
     };
 
+    // Perform mode: locked layout, panel cells only, widgets drawn at
+    // kPerformScale for stage-sized targets. Esc or Exit Perform leaves.
+    static constexpr float kPerformScale = 1.5f;
+    void drawPerform(float width, float height, bridge::AppContext& ctx,
+                     ControlsPanel& controls);
+    // The panel cell's widget canvas, shared between the normal cell
+    // body (arrange supported, scale 1) and perform mode (locked,
+    // scaled). Draws the BeginChild canvas; the caller adds any
+    // splitter/chrome.
+    void drawPanelCanvas(std::shared_ptr<doc::Cell const> const& cell,
+                         float width, bridge::AppContext& ctx,
+                         ControlsPanel& controls, bool arrange, float scale);
+
     CellRuntime& runtime(doc::CellId id, doc::Cell const& cell);
     void syncCellText(doc::CellId id);        // editor text -> snapshot
     void syncAllCellText();
@@ -170,6 +183,7 @@ private:
     bool showHistory_ = false;
     bool closeRequested_ = false;
     bool editorViewRequested_ = false;
+    bool performMode_ = false;
 
     // Set by onEvalDone; update() turns it into one history commit.
     std::string evalCommitLabel_;
