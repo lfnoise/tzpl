@@ -19,6 +19,7 @@
 #include "tzpl_ui_state.hpp"
 
 #include "imgui.h"
+#include "imgui_internal.h"  // TempInputIsActive: cmd-click text entry
 
 #include <algorithm>
 #include <cmath>
@@ -43,30 +44,56 @@ static void markGestureEdges(UIWidget& w) {
 }
 
 static void drawSlider(UIWidget& w) {
-    float pos = static_cast<float>(w.spec.unmap(w.values[0]));
-    char display[64];
-    std::snprintf(display, sizeof(display), "%.4g", w.values[0]);
+    std::string label = std::string("##") + w.name;
     ImGui::SetNextItemWidth(w.fw > 0.0f ? w.fw : -140.0f);
-    if (ImGui::SliderFloat((std::string("##") + w.name).c_str(), &pos,
-                           0.0f, 1.0f, display)) {
-        w.values[0] = w.spec.map(pos);
-        markDirty(w);
+    if (ImGui::TempInputIsActive(ImGui::GetID(label.c_str()))) {
+        // Cmd-click text entry. The drag operates on the 0..1 warp
+        // position, but typing must edit the DISPLAYED (mapped) value,
+        // so while temp input owns the id run the slider over the real
+        // value. Nothing is applied until Enter / focus loss -- the
+        // per-keystroke edits ImGui reports are discarded.
+        float v = static_cast<float>(w.values[0]);
+        ImGui::SliderFloat(label.c_str(), &v,
+                           static_cast<float>(w.spec.lo),
+                           static_cast<float>(w.spec.hi), "%.4g");
+        if (ImGui::IsItemDeactivatedAfterEdit()) {
+            w.values[0] = w.spec.map(w.spec.unmap(v));  // clamp + warp snap
+            markDirty(w);
+            w.gestureEnded = true;
+        }
+    } else {
+        float pos = static_cast<float>(w.spec.unmap(w.values[0]));
+        char display[64];
+        std::snprintf(display, sizeof(display), "%.4g", w.values[0]);
+        if (ImGui::SliderFloat(label.c_str(), &pos, 0.0f, 1.0f, display)) {
+            w.values[0] = w.spec.map(pos);
+            markDirty(w);
+        }
+        markGestureEdges(w);
     }
-    markGestureEdges(w);
     ImGui::SameLine();
     ImGui::TextUnformatted(w.name.c_str());
 }
 
 static void drawNumber(UIWidget& w) {
+    std::string label = std::string("##") + w.name;
     double v = w.values[0];
     ImGui::SetNextItemWidth(w.fw > 0.0f ? w.fw : -140.0f);
-    if (ImGui::DragScalar((std::string("##") + w.name).c_str(),
-                          ImGuiDataType_Double, &v, 0.01f, nullptr, nullptr,
-                          "%.4g")) {
+    bool typing = ImGui::TempInputIsActive(ImGui::GetID(label.c_str()));
+    bool changed = ImGui::DragScalar(label.c_str(), ImGuiDataType_Double, &v,
+                                     0.01f, nullptr, nullptr, "%.4g");
+    if (!typing) {
+        if (changed) {
+            w.values[0] = w.spec.clamp(v);
+            markDirty(w);
+        }
+        markGestureEdges(w);
+    } else if (ImGui::IsItemDeactivatedAfterEdit()) {
+        // Text entry commits once, on Enter / focus loss.
         w.values[0] = w.spec.clamp(v);
         markDirty(w);
+        w.gestureEnded = true;
     }
-    markGestureEdges(w);
     ImGui::SameLine();
     ImGui::TextUnformatted(w.name.c_str());
 }
