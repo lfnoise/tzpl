@@ -105,6 +105,10 @@ struct UIEngineTarget {
 
 struct UIWidget {
     std::uint64_t id = 0;
+    // Last-upsert order: bumped on every constructor call, create OR
+    // adopt, so a re-run re-stamps widgets in its call order. Panel
+    // flow lays unpinned widgets out by this. Runtime-only.
+    std::uint64_t seq = 0;
     UIWidgetKind kind = UIWidgetKind::Slider;
     std::string name;      // reconciliation key, unique per panel
     std::string panel;     // panel name ("" = default Controls panel)
@@ -190,6 +194,7 @@ struct UIState {
     // Insertion-ordered for stable drawing; owned here.
     std::vector<std::unique_ptr<UIWidget>> widgets;
     std::uint64_t nextId = 1;
+    std::uint64_t nextSeq = 1;
 
     // Target panel for subsequent widget constructors (set by ui.panel).
     // "" = the default Controls panel.

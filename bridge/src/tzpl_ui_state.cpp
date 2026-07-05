@@ -126,6 +126,7 @@ UIWidget* UIState::upsert(std::string const& panel, std::string const& name,
                           UISpec const& spec2) {
     UIWidget* w = findByName(panel, name);
     if (w) {
+        w->seq = nextSeq++;
         // Adopt: keep current values (clamped into the new range), take the
         // new kind/spec, drop stale bindings so the caller rebinds fresh.
         // Variable-count kinds (MultiSlider/Matrix) keep their sizes; their
@@ -148,6 +149,7 @@ UIWidget* UIState::upsert(std::string const& panel, std::string const& name,
     }
     auto ww = std::make_unique<UIWidget>();
     ww->id = nextId++;
+    ww->seq = nextSeq++;
     ww->kind = kind;
     ww->name = name;
     ww->panel = panel;

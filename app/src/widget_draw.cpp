@@ -559,11 +559,16 @@ bool drawUIWidget(bridge::UIWidget& w) {
 }
 
 bool drawPanelWidgets(bridge::UIState& ui, std::string const& panel) {
+    // Last-upsert order, matching the notebook panel canvas flow.
+    std::vector<bridge::UIWidget*> ws;
+    for (auto& wp : ui.widgets)
+        if (wp->panel == panel) ws.push_back(wp.get());
+    std::sort(ws.begin(), ws.end(),
+              [](bridge::UIWidget* a, bridge::UIWidget* b) {
+                  return a->seq < b->seq;
+              });
     bool anyTaps = false;
-    for (auto& wp : ui.widgets) {
-        if (wp->panel != panel) continue;
-        anyTaps |= drawUIWidget(*wp);
-    }
+    for (auto* w : ws) anyTaps |= drawUIWidget(*w);
     return anyTaps;
 }
 

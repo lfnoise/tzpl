@@ -686,9 +686,17 @@ void NotebookPanel::drawPanelCanvas(
         auto snap8 = [](float v) {
             return std::round(v / 8.0f) * 8.0f;
         };
-        for (auto& wp : ctx.uiState->widgets) {
-            bridge::UIWidget& w = *wp;
-            if (w.panel != cell->name) continue;
+        // Lay out in last-upsert order (seq), so re-running the
+        // creating code with calls reordered reflows to match.
+        std::vector<bridge::UIWidget*> ws;
+        for (auto& wp : ctx.uiState->widgets)
+            if (wp->panel == cell->name) ws.push_back(wp.get());
+        std::sort(ws.begin(), ws.end(),
+                  [](bridge::UIWidget* a, bridge::UIWidget* b) {
+                      return a->seq < b->seq;
+                  });
+        for (auto* wpp : ws) {
+            bridge::UIWidget& w = *wpp;
             any = true;
 
             // Unplaced widgets (fx < 0) FLOW: top to bottom in creation
