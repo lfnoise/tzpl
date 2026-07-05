@@ -62,11 +62,12 @@ static void markGestureEdges(UIWidget& w) {
 //   c = center (0.5)     [ = lo (0.0)      ] = hi (1.0)
 //   r = uniform random   j = jitter by uniform(-0.05, +0.05), clamped
 //   wheel = step by 0.01 per tick (up = higher)
-// Keys commit one history entry per press; wheel bursts coalesce into
-// one entry when the wheel goes idle. Call right after the slider item.
+// Keys repeat while held (hold j for a random walk), so key and wheel
+// bursts alike coalesce into ONE history entry, committed when the
+// adjustments go idle. Call right after the slider item.
 static void hoverAdjustSlider(UIWidget& w) {
-    // Wheel-burst coalesce: emit the gesture end once the wheel has
-    // been idle for a while (checked every frame, hovered or not).
+    // Burst coalesce: emit the gesture end once adjustments have been
+    // idle for a while (checked every frame, hovered or not).
     if (w.gestureActive && w.wheelTime > 0.0
         && ImGui::GetTime() - w.wheelTime > 0.4) {
         w.gestureActive = false;
@@ -76,10 +77,11 @@ static void hoverAdjustSlider(UIWidget& w) {
 
     if (!ImGui::IsItemHovered() || ImGui::GetIO().WantTextInput) return;
 
-    auto setPos = [&](float pos, bool endGesture) {
+    auto setPos = [&](float pos) {
         w.values[0] = w.spec.map(std::clamp(pos, 0.0f, 1.0f));
         markDirty(w);
-        if (endGesture) w.gestureEnded = true;
+        w.gestureActive = true;  // ends via the idle timer above
+        w.wheelTime = ImGui::GetTime();
     };
     float pos = static_cast<float>(w.spec.unmap(w.values[0]));
 
@@ -88,19 +90,15 @@ static void hoverAdjustSlider(UIWidget& w) {
         return lo + (hi - lo) * std::uniform_real_distribution<float>{}(rng);
     };
 
-    if (ImGui::IsKeyPressed(ImGuiKey_C, false)) setPos(0.5f, true);
-    if (ImGui::IsKeyPressed(ImGuiKey_LeftBracket, false)) setPos(0.0f, true);
-    if (ImGui::IsKeyPressed(ImGuiKey_RightBracket, false)) setPos(1.0f, true);
-    if (ImGui::IsKeyPressed(ImGuiKey_R)) setPos(uniform(0.0f, 1.0f), true);
+    if (ImGui::IsKeyPressed(ImGuiKey_C)) setPos(0.5f);
+    if (ImGui::IsKeyPressed(ImGuiKey_LeftBracket)) setPos(0.0f);
+    if (ImGui::IsKeyPressed(ImGuiKey_RightBracket)) setPos(1.0f);
+    if (ImGui::IsKeyPressed(ImGuiKey_R)) setPos(uniform(0.0f, 1.0f));
     if (ImGui::IsKeyPressed(ImGuiKey_J))
-        setPos(pos + uniform(-0.05f, 0.05f), true);
+        setPos(pos + uniform(-0.05f, 0.05f));
 
     float wheel = ImGui::GetIO().MouseWheel;
-    if (wheel != 0.0f) {
-        setPos(pos + wheel * 0.01f, false);
-        w.gestureActive = true;  // ends via the idle timer above
-        w.wheelTime = ImGui::GetTime();
-    }
+    if (wheel != 0.0f) setPos(pos + wheel * 0.01f);
     // Own the wheel while hovered so the notebook strip doesn't scroll.
     ImGui::SetItemKeyOwner(ImGuiKey_MouseWheelY);
 }
