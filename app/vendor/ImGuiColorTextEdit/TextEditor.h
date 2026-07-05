@@ -193,6 +193,10 @@ public:
 	const Palette& GetPalette() const { return mPaletteBase; }
 	void SetPalette(const Palette& aValue);
 
+	// Local patch: hide the line-number gutter (prose cells in the notebook).
+	void SetShowLineNumbers(bool aValue) { mShowLineNumbers = aValue; }
+	bool IsShowingLineNumbers() const { return mShowLineNumbers; }
+
 	void SetErrorMarkers(const ErrorMarkers& aMarkers) { mErrorMarkers = aMarkers; }
 	void SetBreakpoints(const Breakpoints& aMarkers) { mBreakpoints = aMarkers; }
 
@@ -382,6 +386,7 @@ private:
 	bool mColorizerEnabled;
 	float mTextStart;                   // position (in pixels) where a code line starts relative to the left of the TextEditor.
 	int  mLeftMargin;
+	bool mShowLineNumbers = true;
 	bool mCursorPositionChanged;
 	int mColorRangeMin, mColorRangeMax;
 	SelectionMode mSelectionMode;

@@ -223,6 +223,26 @@ void NotebookPanel::update(bridge::AppContext& ctx) {
 // Cell runtime
 // ---------------------------------------------------------------------------
 
+// Prose cells read as text, not code: no line numbers, warm ivory type on
+// a slightly lifted background. (A proportional font / styled prose editor
+// is future work -- ImGui fonts are per-atlas, so mixing families needs a
+// second loaded font.)
+static TextEditor::Palette const& prosePalette() {
+    static TextEditor::Palette p = [] {
+        TextEditor::Palette pal = TextEditor::GetDarkPalette();
+        pal[(int)TextEditor::PaletteIndex::Default] = 0xffb0ccda;    // warm ivory
+        pal[(int)TextEditor::PaletteIndex::Identifier] = 0xffb0ccda;
+        pal[(int)TextEditor::PaletteIndex::Number] = 0xffb0ccda;
+        pal[(int)TextEditor::PaletteIndex::Punctuation] = 0xffb0ccda;
+        pal[(int)TextEditor::PaletteIndex::Background] = 0xff181614; // lifted
+        pal[(int)TextEditor::PaletteIndex::CurrentLineFill] = 0x00000000;
+        pal[(int)TextEditor::PaletteIndex::CurrentLineFillInactive] = 0x00000000;
+        pal[(int)TextEditor::PaletteIndex::CurrentLineEdge] = 0x00000000;
+        return pal;
+    }();
+    return p;
+}
+
 NotebookPanel::CellRuntime& NotebookPanel::runtime(CellId id, Cell const& cell) {
     auto it = runtime_.find(id);
     if (it != runtime_.end()) return it->second;
@@ -230,8 +250,12 @@ NotebookPanel::CellRuntime& NotebookPanel::runtime(CellId id, Cell const& cell) 
     CellRuntime rt;
     if (cell.kind == CellKind::Code || cell.kind == CellKind::Prose) {
         rt.editor = std::make_unique<TextEditor>();
-        if (cell.kind == CellKind::Code)
+        if (cell.kind == CellKind::Code) {
             rt.editor->SetLanguageDefinition(langDef_);
+        } else {
+            rt.editor->SetShowLineNumbers(false);
+            rt.editor->SetPalette(prosePalette());
+        }
         rt.editor->SetShowWhitespaces(false);
         rt.editor->SetText(cell.text);
     }
