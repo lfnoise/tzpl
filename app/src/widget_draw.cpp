@@ -429,7 +429,10 @@ static void drawXY(UIWidget& w) {
     }
     if (active) {
         w.gestureActive = true;
-    } else if (w.gestureActive) {
+        w.wheelTime = 0.0;  // a drag owns the gesture; hover timer off
+    } else if (w.gestureActive && w.wheelTime == 0.0) {
+        // Drag release. Hover bursts (wheelTime > 0) end via the
+        // hover idle timer instead.
         w.gestureActive = false;
         w.gestureEnded = true;
     }

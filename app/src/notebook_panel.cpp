@@ -200,8 +200,13 @@ void NotebookPanel::update(bridge::AppContext& ctx) {
             for (auto& w : ctx.uiState->widgets) {
                 if (!w->gestureEnded) continue;
                 w->gestureEnded = false;
-                bool claimedPanel = std::find(claimed.begin(), claimed.end(),
-                                              w->panel) != claimed.end();
+                bool claimedPanel = false;
+                for (auto const& root : claimed) {
+                    if (bridge::panelUnderRoot(w->panel, root)) {
+                        claimedPanel = true;
+                        break;
+                    }
+                }
                 if (claimedPanel && w->kind != bridge::UIWidgetKind::Button) {
                     if (!gestured.empty()) gestured += ", ";
                     gestured += w->name;
