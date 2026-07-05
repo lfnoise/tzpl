@@ -103,8 +103,10 @@ static void hoverAdjustSlider(UIWidget& w) {
         setPos(p);
     }
 
+    // Positive io.MouseWheel is a scroll-up gesture reading as "push
+    // the content up"; for a value, pushing up should RAISE it.
     float wheel = ImGui::GetIO().MouseWheel;
-    if (wheel != 0.0f) setPos(pos + wheel * 0.01f);
+    if (wheel != 0.0f) setPos(pos - wheel * 0.01f);
     // Own the wheel while hovered so the notebook strip doesn't scroll.
     ImGui::SetItemKeyOwner(ImGuiKey_MouseWheelY);
 }
