@@ -457,6 +457,8 @@ void NotebookPanel::drawCell(std::shared_ptr<Cell const> const& cell,
         if (ImGui::IsItemDeactivatedAfterEdit()) {
             structureCommitLabel_ = "rename panel";
         }
+        ImGui::SameLine();
+        ImGui::Checkbox("arrange", &rt.arrange);
     }
 
     if (cell->kind == CellKind::Code) {
@@ -486,19 +488,104 @@ void NotebookPanel::drawCell(std::shared_ptr<Cell const> const& cell,
     // ---- body -------------------------------------------------------------
     if (cell->kind == CellKind::Panel) {
         if (ctx.uiState) {
-            std::lock_guard<std::mutex> lock(ctx.uiState->mtx);
-            bool any = false;
-            for (auto& w : ctx.uiState->widgets) {
-                if (w->panel == cell->name) { any = true; break; }
+            float canvasH = std::max(cell->panelHeight, 60.0f);
+            ImGui::BeginChild("##panelcanvas", ImVec2(width, canvasH), true,
+                              ImGuiWindowFlags_NoScrollWithMouse);
+            {
+                std::lock_guard<std::mutex> lock(ctx.uiState->mtx);
+                bool any = false;
+                float autoY = 8.0f;
+                auto snap8 = [](float v) {
+                    return std::round(v / 8.0f) * 8.0f;
+                };
+                for (auto& wp : ctx.uiState->widgets) {
+                    bridge::UIWidget& w = *wp;
+                    if (w.panel != cell->name) continue;
+                    any = true;
+
+                    // Auto-place widgets that have never been arranged.
+                    if (w.fx < 0.0f) {
+                        w.fx = 8.0f;
+                        w.fy = autoY;
+                    }
+                    autoY = std::max(autoY, w.fy + 32.0f);
+
+                    ImGui::SetCursorPos(ImVec2(w.fx, w.fy));
+                    if (rt.arrange) ImGui::BeginDisabled();
+                    ImGui::BeginGroup();
+                    if (drawUIWidget(w)) controls.noteTapsVisible();
+                    ImGui::EndGroup();
+                    if (rt.arrange) ImGui::EndDisabled();
+
+                    if (rt.arrange) {
+                        // Drag overlay: move; corner grip: resize. Both
+                        // snap to the 8px grid and commit one history
+                        // node on release (via gestureEnded).
+                        ImVec2 rmin = ImGui::GetItemRectMin();
+                        ImVec2 rmax = ImGui::GetItemRectMax();
+                        ImGui::SetCursorScreenPos(rmin);
+                        ImGui::PushID((int)w.id);
+                        ImGui::InvisibleButton("##move",
+                            ImVec2(std::max(rmax.x - rmin.x, 16.0f),
+                                   std::max(rmax.y - rmin.y, 16.0f)));
+                        if (ImGui::IsItemActive()) {
+                            ImVec2 d = ImGui::GetIO().MouseDelta;
+                            w.fx = std::max(0.0f, w.fx + d.x);
+                            w.fy = std::max(0.0f, w.fy + d.y);
+                            w.gestureActive = true;
+                        } else if (ImGui::IsItemDeactivated()) {
+                            w.fx = std::max(0.0f, snap8(w.fx));
+                            w.fy = std::max(0.0f, snap8(w.fy));
+                            w.gestureActive = false;
+                            w.gestureEnded = true;
+                        }
+                        // Resize grip (bottom-right corner).
+                        ImGui::SetCursorScreenPos(
+                            ImVec2(rmax.x - 10.0f, rmax.y - 10.0f));
+                        ImGui::InvisibleButton("##size", ImVec2(12.0f, 12.0f));
+                        if (ImGui::IsItemActive()) {
+                            ImVec2 d = ImGui::GetIO().MouseDelta;
+                            float baseW = w.fw > 0.0f ? w.fw : rmax.x - rmin.x;
+                            float baseH = w.fh > 0.0f ? w.fh : rmax.y - rmin.y;
+                            w.fw = std::max(24.0f, baseW + d.x);
+                            w.fh = std::max(14.0f, baseH + d.y);
+                            w.gestureActive = true;
+                        } else if (ImGui::IsItemDeactivated()) {
+                            w.fw = std::max(24.0f, snap8(w.fw));
+                            w.fh = std::max(14.0f, snap8(w.fh));
+                            w.gestureActive = false;
+                            w.gestureEnded = true;
+                        }
+                        ImGui::GetWindowDrawList()->AddRect(
+                            rmin, rmax,
+                            ImGui::GetColorU32(ImGuiCol_DragDropTarget));
+                        ImGui::PopID();
+                    }
+                }
+                if (!any) {
+                    ImGui::SetCursorPos(ImVec2(8.0f, 8.0f));
+                    ImGui::TextDisabled("(no widgets -- run code that calls "
+                                        "controls(node, \"%s\") or "
+                                        "ui.panel(\"%s\") and creates some)",
+                                        cell->name.c_str(),
+                                        cell->name.c_str());
+                }
             }
-            if (any) {
-                if (drawPanelWidgets(*ctx.uiState, cell->name))
-                    controls.noteTapsVisible();
-            } else {
-                ImGui::TextDisabled("(no widgets -- run code that calls "
-                                    "ui.panel(\"%s\") and creates some)",
-                                    cell->name.c_str());
+            ImGui::EndChild();
+
+            // Canvas height splitter.
+            ImGui::InvisibleButton("##panelheight", ImVec2(width, 6.0f));
+            if (ImGui::IsItemActive()) {
+                store_.setCellPanelHeight(
+                    id, std::max(60.0f,
+                                 cell->panelHeight
+                                     + ImGui::GetIO().MouseDelta.y));
             }
+            if (ImGui::IsItemDeactivated()) {
+                structureCommitLabel_ = "resize panel";
+            }
+            if (ImGui::IsItemHovered())
+                ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNS);
         }
     } else if (rt.editor) {
         int lines = std::max(rt.editor->GetTotalLines(), 2);

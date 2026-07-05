@@ -88,6 +88,10 @@ enum class UIWidgetKind : int {
     Scope,   // engine tap: sample FIFO drained into scopeRing
     Plot,    // static data plot (plotData)
     Waveform,// audio file overview (waveMin/waveMax mipmap)
+    MultiSlider, // values = N bars mapped through spec
+    Matrix,      // values = rows*cols cells (row-major, 0/1 toggles)
+    PianoRoll,   // noteData = (pitch, startBeat, durBeats) triplets
+    Label,       // static text (labelText)
 };
 
 // Engine fast-path binding: on value change the GUI thread sends
@@ -127,6 +131,23 @@ struct UIWidget {
     // commits ONE history node per gesture.
     bool gestureActive = false;
     bool gestureEnded = false;
+
+    // Layout frame in panel-cell coordinates (arrange mode; document
+    // state). fx < 0 = unplaced (auto-flow assigns a slot on first draw
+    // in an arranged panel); fw/fh <= 0 = the widget's default size.
+    float fx = -1.0f, fy = -1.0f, fw = 0.0f, fh = 0.0f;
+
+    // Matrix dimensions (values is rows*cols, row-major).
+    int rows = 1, cols = 1;
+
+    // Piano roll: flat (pitch, startBeat, durBeats) triplets + view range.
+    std::vector<float> noteData;
+    float rollBeats = 4.0f;
+    int rollLowPitch = 48;
+    int rollRows = 24;
+
+    // Label text (Label kind).
+    std::string labelText;
 
     // Engine tap (Meter/Scope). tapID 0 = none. The tap is installed on
     // tapSilo's RT tap table; removing the widget untaps it.

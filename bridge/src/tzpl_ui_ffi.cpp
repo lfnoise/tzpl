@@ -59,6 +59,15 @@ static const char* regString(ts::VM& vm, u16 reg) {
     return ts::stringData(vm.reg(reg).o);
 }
 
+static void readFloatArray(ts::VM& vm, u16 reg, std::vector<float>& out) {
+    auto* arr = vm.reg(reg).o;
+    auto n = ts::arraySize(arr);
+    out.resize(n);
+    for (usize i = 0; i < n; ++i) {
+        out[i] = static_cast<float>(ts::arrayGetFloat(arr, i));
+    }
+}
+
 static UISpec specFromRegs(ts::VM& vm, u16 base) {
     // lo, hi, init, warp ordinal, warp param
     UISpec spec;
@@ -193,6 +202,79 @@ static void ffi_uiXY(ts::VM& vm, u16 dst, u16, u16 argBase) {
     vm.reg(dst).i = upsertWidget(vm, name, UIWidgetKind::XY, sx, sy);
 }
 
+// fn uiMultiSlider(name String, n Int, lo,hi,init Float, warp Int, warpParam Float) Int
+static void ffi_uiMultiSlider(ts::VM& vm, u16 dst, u16, u16 argBase) {
+    UIState* ui = getUIState(vm);
+    if (!ui) { vm.reg(dst).i = 0; return; }
+    const char* name = regString(vm, argBase);
+    int n = std::max(1, (int)vm.reg(argBase + 1).i);
+    UISpec spec = specFromRegs(vm, argBase + 2);
+
+    std::lock_guard<std::mutex> lock(ui->mtx);
+    UIWidget* w = ui->upsert(ui->currentPanel, name, UIWidgetKind::MultiSlider,
+                             spec, UISpec{});
+    // Resize preserving existing bars; new bars start at init.
+    w->values.resize((size_t)n, spec.clamp(spec.init));
+    for (auto& v : w->values) v = spec.clamp(v);
+    vm.reg(dst).i = (i64)w->id;
+}
+
+// fn uiMatrix(name String, rows Int, cols Int) Int
+static void ffi_uiMatrix(ts::VM& vm, u16 dst, u16, u16 argBase) {
+    UIState* ui = getUIState(vm);
+    if (!ui) { vm.reg(dst).i = 0; return; }
+    const char* name = regString(vm, argBase);
+    int rows = std::max(1, (int)vm.reg(argBase + 1).i);
+    int cols = std::max(1, (int)vm.reg(argBase + 2).i);
+    UISpec spec;  // 0..1
+
+    std::lock_guard<std::mutex> lock(ui->mtx);
+    UIWidget* w = ui->upsert(ui->currentPanel, name, UIWidgetKind::Matrix,
+                             spec, UISpec{});
+    if (w->rows != rows || w->cols != cols) {
+        // Dimension change: keep overlapping cells, zero the rest.
+        std::vector<double> next((size_t)rows * cols, 0.0);
+        for (int r = 0; r < std::min(rows, w->rows); ++r)
+            for (int c = 0; c < std::min(cols, w->cols); ++c)
+                if ((size_t)(r * w->cols + c) < w->values.size())
+                    next[(size_t)r * cols + c] = w->values[(size_t)r * w->cols + c];
+        w->values = std::move(next);
+        w->rows = rows;
+        w->cols = cols;
+    } else {
+        w->values.resize((size_t)rows * cols, 0.0);
+    }
+    vm.reg(dst).i = (i64)w->id;
+}
+
+// fn uiPianoRoll(name String, beats Float) Int
+static void ffi_uiPianoRoll(ts::VM& vm, u16 dst, u16, u16 argBase) {
+    UIState* ui = getUIState(vm);
+    if (!ui) { vm.reg(dst).i = 0; return; }
+    const char* name = regString(vm, argBase);
+    double beats = vm.reg(argBase + 1).f;
+
+    std::lock_guard<std::mutex> lock(ui->mtx);
+    UIWidget* w = ui->upsert(ui->currentPanel, name, UIWidgetKind::PianoRoll,
+                             UISpec{}, UISpec{});
+    w->rollBeats = (float)std::max(1.0, beats);
+    vm.reg(dst).i = (i64)w->id;
+}
+
+// fn uiLabel(name String, text String) Int
+static void ffi_uiLabel(ts::VM& vm, u16 dst, u16, u16 argBase) {
+    UIState* ui = getUIState(vm);
+    if (!ui) { vm.reg(dst).i = 0; return; }
+    const char* name = regString(vm, argBase);
+    const char* text = regString(vm, argBase + 1);
+
+    std::lock_guard<std::mutex> lock(ui->mtx);
+    UIWidget* w = ui->upsert(ui->currentPanel, name, UIWidgetKind::Label,
+                             UISpec{}, UISpec{});
+    w->labelText = text;
+    vm.reg(dst).i = (i64)w->id;
+}
+
 // ---------------------------------------------------------------------------
 // Bindings
 // ---------------------------------------------------------------------------
@@ -220,6 +302,13 @@ static void ffi_uiOnChange(ts::VM& vm, u16, u16, u16 argBase) {
 
 // fn uiOnChangeXY(id Int, f fn(Float, Float) Void) Void
 static void ffi_uiOnChangeXY(ts::VM& vm, u16, u16, u16 argBase) {
+    storeOnChange(vm, argBase);
+}
+
+// fn uiOnChangeVec(id Int, f fn(Array[Float]) Void) Void
+// For MultiSlider/Matrix (values) and PianoRoll (note triplets); the
+// per-frame dispatch builds the array argument by widget kind.
+static void ffi_uiOnChangeVec(ts::VM& vm, u16, u16, u16 argBase) {
     storeOnChange(vm, argBase);
 }
 
@@ -371,6 +460,166 @@ static void untapWidget(AppContext* ctx, long tapID, int silo) {
     }
 }
 
+// fn uiValues(id Int) Array[Float]
+static void ffi_uiValues(ts::VM& vm, u16 dst, u16, u16 argBase) {
+    UIState* ui = getUIState(vm);
+    auto id = static_cast<std::uint64_t>(vm.reg(argBase).i);
+    std::vector<double> vals;
+    if (ui) {
+        std::lock_guard<std::mutex> lock(ui->mtx);
+        if (UIWidget* w = ui->findById(id)) vals = w->values;
+    }
+    auto* arr = new ts::PodArray<f64>(vm.arrayType(vm.floatType()));
+    arr->v.assign(vals.begin(), vals.end());
+    vm.reg(dst).o = arr;
+}
+
+// fn uiSetValues(id Int, vals Array[Float]) Void
+static void ffi_uiSetValues(ts::VM& vm, u16, u16, u16 argBase) {
+    UIState* ui = getUIState(vm);
+    if (!ui) return;
+    auto id = static_cast<std::uint64_t>(vm.reg(argBase).i);
+    std::vector<float> vals;
+    readFloatArray(vm, argBase + 1, vals);
+    std::lock_guard<std::mutex> lock(ui->mtx);
+    if (UIWidget* w = ui->findById(id)) {
+        for (size_t i = 0; i < w->values.size() && i < vals.size(); ++i)
+            w->values[i] = w->spec.clamp(vals[i]);
+        w->dirtyEngine = true;
+        w->dirtyCallback = true;
+    }
+}
+
+// fn uiNotes(id Int) Array[Float]  -- flat (pitch, startBeat, durBeats)
+static void ffi_uiNotes(ts::VM& vm, u16 dst, u16, u16 argBase) {
+    UIState* ui = getUIState(vm);
+    auto id = static_cast<std::uint64_t>(vm.reg(argBase).i);
+    std::vector<float> notes;
+    if (ui) {
+        std::lock_guard<std::mutex> lock(ui->mtx);
+        if (UIWidget* w = ui->findById(id)) notes = w->noteData;
+    }
+    auto* arr = new ts::PodArray<f64>(vm.arrayType(vm.floatType()));
+    arr->v.assign(notes.begin(), notes.end());
+    vm.reg(dst).o = arr;
+}
+
+// fn uiSetNotes(id Int, notes Array[Float]) Void
+static void ffi_uiSetNotes(ts::VM& vm, u16, u16, u16 argBase) {
+    UIState* ui = getUIState(vm);
+    if (!ui) return;
+    auto id = static_cast<std::uint64_t>(vm.reg(argBase).i);
+    std::vector<float> notes;
+    readFloatArray(vm, argBase + 1, notes);
+    notes.resize(notes.size() - notes.size() % 3);  // whole triplets
+    std::lock_guard<std::mutex> lock(ui->mtx);
+    if (UIWidget* w = ui->findById(id)) {
+        w->noteData = std::move(notes);
+        w->dirtyCallback = true;
+    }
+}
+
+// fn uiSetFrame(id Int, x,y,w,h Float) Void
+static void ffi_uiSetFrame(ts::VM& vm, u16, u16, u16 argBase) {
+    UIState* ui = getUIState(vm);
+    if (!ui) return;
+    auto id = static_cast<std::uint64_t>(vm.reg(argBase).i);
+    std::lock_guard<std::mutex> lock(ui->mtx);
+    if (UIWidget* w = ui->findById(id)) {
+        w->fx = (float)vm.reg(argBase + 1).f;
+        w->fy = (float)vm.reg(argBase + 2).f;
+        w->fw = (float)vm.reg(argBase + 3).f;
+        w->fh = (float)vm.reg(argBase + 4).f;
+    }
+}
+
+// fn uiRollRange(id Int, lowPitch Int, rows Int) Void
+static void ffi_uiRollRange(ts::VM& vm, u16, u16, u16 argBase) {
+    UIState* ui = getUIState(vm);
+    if (!ui) return;
+    auto id = static_cast<std::uint64_t>(vm.reg(argBase).i);
+    std::lock_guard<std::mutex> lock(ui->mtx);
+    if (UIWidget* w = ui->findById(id)) {
+        w->rollLowPitch = (int)vm.reg(argBase + 1).i;
+        w->rollRows = std::max(1, (int)vm.reg(argBase + 2).i);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// show(): materialize a value as its natural widget
+// ---------------------------------------------------------------------------
+
+// fn uiShowFloat(name String, v Float) Int
+static void ffi_uiShowFloat(ts::VM& vm, u16 dst, u16, u16 argBase) {
+    UIState* ui = getUIState(vm);
+    if (!ui) { vm.reg(dst).i = 0; return; }
+    const char* name = regString(vm, argBase);
+    double v = vm.reg(argBase + 1).f;
+    std::lock_guard<std::mutex> lock(ui->mtx);
+    UISpec spec;
+    spec.lo = -1.0e18; spec.hi = 1.0e18; spec.init = v;
+    UIWidget* w = ui->upsert(ui->currentPanel, name, UIWidgetKind::Number,
+                             spec, UISpec{});
+    w->values[0] = v;
+    vm.reg(dst).i = (i64)w->id;
+}
+
+// fn uiShowBool(name String, v Bool) Int
+static void ffi_uiShowBool(ts::VM& vm, u16 dst, u16, u16 argBase) {
+    UIState* ui = getUIState(vm);
+    if (!ui) { vm.reg(dst).i = 0; return; }
+    const char* name = regString(vm, argBase);
+    bool v = vm.reg(argBase + 1).i != 0;
+    std::lock_guard<std::mutex> lock(ui->mtx);
+    UISpec spec;
+    spec.init = v ? 1.0 : 0.0;
+    UIWidget* w = ui->upsert(ui->currentPanel, name, UIWidgetKind::Toggle,
+                             spec, UISpec{});
+    w->values[0] = v ? 1.0 : 0.0;
+    vm.reg(dst).i = (i64)w->id;
+}
+
+// fn uiShowVec(name String, data Array[Float]) Int
+// <= 64 elements: an editable multislider ranged around the data;
+// larger: a plot.
+static void ffi_uiShowVec(ts::VM& vm, u16 dst, u16, u16 argBase) {
+    UIState* ui = getUIState(vm);
+    if (!ui) { vm.reg(dst).i = 0; return; }
+    const char* name = regString(vm, argBase);
+    std::vector<float> data;
+    readFloatArray(vm, argBase + 1, data);
+
+    std::lock_guard<std::mutex> lock(ui->mtx);
+    if (data.size() <= 64 && !data.empty()) {
+        float lo = 0.0f, hi = 1.0f;
+        for (float v : data) { lo = std::min(lo, v); hi = std::max(hi, v); }
+        UISpec spec;
+        spec.lo = lo; spec.hi = hi; spec.init = 0.0;
+        UIWidget* w = ui->upsert(ui->currentPanel, name,
+                                 UIWidgetKind::MultiSlider, spec, UISpec{});
+        w->values.assign(data.begin(), data.end());
+        vm.reg(dst).i = (i64)w->id;
+    } else {
+        UIWidget* w = ui->upsert(ui->currentPanel, name, UIWidgetKind::Plot,
+                                 UISpec{}, UISpec{});
+        w->plotData = std::move(data);
+        vm.reg(dst).i = (i64)w->id;
+    }
+}
+
+// fn uiShowString(name String, s String) Int
+static void ffi_uiShowString(ts::VM& vm, u16 dst, u16, u16 argBase) {
+    UIState* ui = getUIState(vm);
+    if (!ui) { vm.reg(dst).i = 0; return; }
+    const char* name = regString(vm, argBase);
+    const char* text = regString(vm, argBase + 1);
+    std::lock_guard<std::mutex> lock(ui->mtx);
+    UIWidget* w = ui->upsert(ui->currentPanel, name, UIWidgetKind::Label,
+                             UISpec{}, UISpec{});
+    w->labelText = text;
+    vm.reg(dst).i = (i64)w->id;
+}
+
 // fn uiRemove(id Int) Void
 static void ffi_uiRemove(ts::VM& vm, u16, u16, u16 argBase) {
     UIState* ui = getUIState(vm);
@@ -520,15 +769,6 @@ static void ffi_uiTapSamples(ts::VM& vm, u16 dst, u16, u16 argBase) {
 // ---------------------------------------------------------------------------
 // Plot / waveform widgets
 // ---------------------------------------------------------------------------
-
-static void readFloatArray(ts::VM& vm, u16 reg, std::vector<float>& out) {
-    auto* arr = vm.reg(reg).o;
-    auto n = ts::arraySize(arr);
-    out.resize(n);
-    for (usize i = 0; i < n; ++i) {
-        out[i] = static_cast<float>(ts::arrayGetFloat(arr, i));
-    }
-}
 
 // fn uiPlot(name String, data Array[Float]) Int
 static void ffi_uiPlot(ts::VM& vm, u16 dst, u16, u16 argBase) {
@@ -736,6 +976,8 @@ void registerUIFFI(ts::Compiler& compiler) {
     ts::Type* FnFloat = reinterpret_cast<ts::Type*>(compiler.functionType(fArgs1, Void));
     ts::Vec<ts::Type*> fArgs2; fArgs2.push_back(Float); fArgs2.push_back(Float);
     ts::Type* FnFloat2 = reinterpret_cast<ts::Type*>(compiler.functionType(fArgs2, Void));
+    ts::Vec<ts::Type*> fArgsV; fArgsV.push_back(FloatArray);
+    ts::Type* FnVec = reinterpret_cast<ts::Type*>(compiler.functionType(fArgsV, Void));
 
     using R = void (*)(ts::VM&, u16, u16, u16);
     auto reg = [&](const char* name, ts::Type* retType,
@@ -754,11 +996,26 @@ void registerUIFFI(ts::Compiler& compiler) {
     reg("uiToggle",       Int,  {String, Bool},                 ffi_uiToggle);
     reg("uiXY",           Int,  {String, Float, Float, Float, Int, Float,
                                          Float, Float, Float, Int, Float}, ffi_uiXY);
+    reg("uiMultiSlider",  Int,  {String, Int, Float, Float, Float, Int, Float}, ffi_uiMultiSlider);
+    reg("uiMatrix",       Int,  {String, Int, Int},             ffi_uiMatrix);
+    reg("uiPianoRoll",    Int,  {String, Float},                ffi_uiPianoRoll);
+    reg("uiLabel",        Int,  {String, String},               ffi_uiLabel);
     reg("uiOnChange",     Void, {Int, FnFloat},                 ffi_uiOnChange);
     reg("uiOnChangeXY",   Void, {Int, FnFloat2},                ffi_uiOnChangeXY);
+    reg("uiOnChangeVec",  Void, {Int, FnVec},                   ffi_uiOnChangeVec);
     reg("uiBindControl",  Int,  {Int, Int, String, Int},        ffi_uiBindControl);
     reg("uiBindControlY", Int,  {Int, Int, String, Int},        ffi_uiBindControlY);
     reg("uiValue",        Float, {Int},                         ffi_uiValue);
+    reg("uiValues",       FloatArray, {Int},                    ffi_uiValues);
+    reg("uiSetValues",    Void, {Int, FloatArray},              ffi_uiSetValues);
+    reg("uiNotes",        FloatArray, {Int},                    ffi_uiNotes);
+    reg("uiSetNotes",     Void, {Int, FloatArray},              ffi_uiSetNotes);
+    reg("uiSetFrame",     Void, {Int, Float, Float, Float, Float}, ffi_uiSetFrame);
+    reg("uiRollRange",    Void, {Int, Int, Int},                ffi_uiRollRange);
+    reg("uiShowFloat",    Int,  {String, Float},                ffi_uiShowFloat);
+    reg("uiShowBool",     Int,  {String, Bool},                 ffi_uiShowBool);
+    reg("uiShowVec",      Int,  {String, FloatArray},           ffi_uiShowVec);
+    reg("uiShowString",   Int,  {String, String},               ffi_uiShowString);
     reg("uiValueY",       Float, {Int},                         ffi_uiValueY);
     reg("uiSetValue",     Void, {Int, Float},                   ffi_uiSetValue);
     reg("uiSetValueXY",   Void, {Int, Float, Float},            ffi_uiSetValueXY);

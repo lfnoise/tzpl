@@ -55,6 +55,7 @@ struct Cell {
     std::string name;        // Panel: panel name. Code: optional label.
     std::string text;        // Prose/Code source.
     bool runOnLoad = false;  // Code: run automatically after open.
+    float panelHeight = 240.0f;  // Panel: canvas height (arrange layout).
 };
 
 // State of one widget in a document-claimed panel, captured into snapshots
@@ -67,6 +68,14 @@ struct WidgetSnap {
     bridge::UISpec spec;
     bridge::UISpec spec2;
     std::vector<double> values;
+    // Layout + kind-specific state (M5).
+    float fx = -1.0f, fy = -1.0f, fw = 0.0f, fh = 0.0f;
+    int rows = 1, cols = 1;
+    std::vector<float> noteData;
+    std::string labelText;
+    float rollBeats = 4.0f;
+    int rollLowPitch = 48;
+    int rollRows = 24;
 
     bool operator==(WidgetSnap const& o) const {
         return panel == o.panel && name == o.name && kind == o.kind
@@ -76,7 +85,12 @@ struct WidgetSnap {
             && spec2.lo == o.spec2.lo && spec2.hi == o.spec2.hi
             && spec2.init == o.spec2.init && spec2.warp == o.spec2.warp
             && spec2.warpParam == o.spec2.warpParam
-            && values == o.values;
+            && values == o.values
+            && fx == o.fx && fy == o.fy && fw == o.fw && fh == o.fh
+            && rows == o.rows && cols == o.cols
+            && noteData == o.noteData && labelText == o.labelText
+            && rollBeats == o.rollBeats && rollLowPitch == o.rollLowPitch
+            && rollRows == o.rollRows;
     }
 };
 
@@ -122,6 +136,7 @@ public:
     void setCellText(CellId id, std::string const& text);
     void setCellName(CellId id, std::string const& name);
     void setCellRunOnLoad(CellId id, bool runOnLoad);
+    void setCellPanelHeight(CellId id, float height);
 
     bool modified() const { return modified_; }
     void clearModified() { modified_ = false; }

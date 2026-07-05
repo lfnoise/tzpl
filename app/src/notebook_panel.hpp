@@ -129,6 +129,8 @@ private:
         bool lastErrored = false;
         // Typing coalesce: time of the last observed edit; 0 = clean.
         double lastEditTime = 0.0;
+        // Panel cells: arrange mode (drag/resize widgets on the canvas).
+        bool arrange = false;
     };
 
     CellRuntime& runtime(doc::CellId id, doc::Cell const& cell);

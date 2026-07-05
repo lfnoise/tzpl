@@ -128,6 +128,12 @@ void DocumentStore::setCellRunOnLoad(CellId id, bool runOnLoad) {
     if (Cell* c = mutableCell(id)) c->runOnLoad = runOnLoad;
 }
 
+void DocumentStore::setCellPanelHeight(CellId id, float height) {
+    auto existing = cell(id);
+    if (!existing || existing->panelHeight == height) return;
+    if (Cell* c = mutableCell(id)) c->panelHeight = height;
+}
+
 void DocumentStore::reset(SnapshotPtr snap, std::string filePath) {
     snap_ = std::move(snap);
     filePath_ = std::move(filePath);
@@ -249,6 +255,34 @@ static bridge::UISpec readSpec(Reader r) {
     return s;
 }
 
+// Read the M5 widget-record extension (frame, matrix dims, notes, label,
+// roll params) if present; older files simply lack the trailing children.
+static void readWidgetExtras(Reader rw, bridge::UIWidget& w) {
+    if (rw.childCount() > 6) {
+        Reader rf = rw.child(6);
+        if (rf.tag() == Tag::Vec && rf.childCount() >= 4) {
+            w.fx = (float)rf.child(0).asFloat();
+            w.fy = (float)rf.child(1).asFloat();
+            w.fw = (float)rf.child(2).asFloat();
+            w.fh = (float)rf.child(3).asFloat();
+        }
+    }
+    if (rw.childCount() > 13) {
+        w.rows = std::max(1, (int)rw.child(7).asInt());
+        w.cols = std::max(1, (int)rw.child(8).asInt());
+        Reader rn = rw.child(9);
+        if (rn.tag() == Tag::Vec) {
+            w.noteData.resize(rn.childCount());
+            for (std::uint32_t i = 0; i < rn.childCount(); ++i)
+                w.noteData[i] = (float)rn.child(i).asFloat();
+        }
+        w.labelText = std::string(rw.child(10).asStr());
+        w.rollBeats = (float)rw.child(11).asFloat();
+        w.rollLowPitch = (int)rw.child(12).asInt();
+        w.rollRows = std::max(1, (int)rw.child(13).asInt());
+    }
+}
+
 bool saveDocument(DocSnapshot const& snap, bridge::AppContext& ctx,
                   std::string const& path, std::string& err) {
     std::vector<Value> cells{Value::Symbol("cells")};
@@ -261,6 +295,7 @@ bool saveDocument(DocSnapshot const& snap, bridge::AppContext& ctx,
             Value::String(c->name),
             Value::String(c->text),
             Value::Bool(c->runOnLoad),
+            Value::Float(c->panelHeight),
         }));
         if (c->kind == CellKind::Panel) panelNames.insert(c->name);
     }
@@ -274,6 +309,8 @@ bool saveDocument(DocSnapshot const& snap, bridge::AppContext& ctx,
                 if (w->panel != panel) continue;
                 std::vector<Value> values;
                 for (double v : w->values) values.push_back(Value::Float(v));
+                std::vector<Value> notes;
+                for (float v : w->noteData) notes.push_back(Value::Float(v));
                 pv.push_back(Value::Vec({
                     Value::Symbol("widget"),
                     Value::String(w->name),
@@ -281,8 +318,15 @@ bool saveDocument(DocSnapshot const& snap, bridge::AppContext& ctx,
                     specValue(w->spec),
                     specValue(w->spec2),
                     Value::Vec(std::move(values)),
-                    Value::Vec({Value::Float(0), Value::Float(0),
-                                Value::Float(0), Value::Float(0)}),
+                    Value::Vec({Value::Float(w->fx), Value::Float(w->fy),
+                                Value::Float(w->fw), Value::Float(w->fh)}),
+                    Value::Int(w->rows),
+                    Value::Int(w->cols),
+                    Value::Vec(std::move(notes)),
+                    Value::String(w->labelText),
+                    Value::Float(w->rollBeats),
+                    Value::Int(w->rollLowPitch),
+                    Value::Int(w->rollRows),
                 }));
             }
             panels.push_back(Value::Vec(std::move(pv)));
@@ -355,6 +399,9 @@ SnapshotPtr loadDocument(bridge::AppContext& ctx, std::string const& path,
         cell->name = std::string(rc.child(3).asStr());
         cell->text = std::string(rc.child(4).asStr());
         cell->runOnLoad = rc.child(5).asBool();
+        if (rc.childCount() > 6) {
+            cell->panelHeight = (float)rc.child(6).asFloat();
+        }
         if (cell->id >= snap->nextCellId) snap->nextCellId = cell->id + 1;
         snap->cells.push_back(std::move(cell));
     }
@@ -386,15 +433,20 @@ SnapshotPtr loadDocument(bridge::AppContext& ctx, std::string const& path,
                 if (rw.tag() != Tag::Vec || rw.childCount() < 6) continue;
                 std::string name{rw.child(1).asStr()};
                 int kindInt = (int)rw.child(2).asInt();
-                if (kindInt < 0 || kindInt > (int)bridge::UIWidgetKind::Waveform)
+                if (kindInt < 0 || kindInt > (int)bridge::UIWidgetKind::Label)
                     kindInt = 0;
                 auto kind = (bridge::UIWidgetKind)kindInt;
                 bridge::UISpec spec = readSpec(rw.child(3));
                 bridge::UISpec spec2 = readSpec(rw.child(4));
                 bridge::UIWidget* w =
                     ctx.uiState->upsert(panel, name, kind, spec, spec2);
+                readWidgetExtras(rw, *w);
                 Reader rv = rw.child(5);
                 if (rv.tag() == Tag::Vec) {
+                    if (kind == bridge::UIWidgetKind::MultiSlider
+                        || kind == bridge::UIWidgetKind::Matrix) {
+                        w->values.assign(rv.childCount(), 0.0);
+                    }
                     for (std::uint32_t v = 0;
                          v < rv.childCount() && v < w->values.size(); ++v) {
                         w->values[v] = rv.child(v).asFloat();
@@ -430,6 +482,13 @@ captureWidgets(bridge::UIState* ui, std::vector<std::string> const& panels) {
         s.spec = w->spec;
         s.spec2 = w->spec2;
         s.values = w->values;
+        s.fx = w->fx; s.fy = w->fy; s.fw = w->fw; s.fh = w->fh;
+        s.rows = w->rows; s.cols = w->cols;
+        s.noteData = w->noteData;
+        s.labelText = w->labelText;
+        s.rollBeats = w->rollBeats;
+        s.rollLowPitch = w->rollLowPitch;
+        s.rollRows = w->rollRows;
         out->push_back(std::move(s));
     }
     return out;
@@ -468,6 +527,16 @@ void restoreWidgets(bridge::AppContext& ctx, WidgetSnapList const& target,
             if (w && w->kind == s.kind) {
                 w->spec = s.spec;
                 w->spec2 = s.spec2;
+                w->fx = s.fx; w->fy = s.fy; w->fw = s.fw; w->fh = s.fh;
+                w->rows = s.rows; w->cols = s.cols;
+                w->labelText = s.labelText;
+                w->rollBeats = s.rollBeats;
+                w->rollLowPitch = s.rollLowPitch;
+                w->rollRows = s.rollRows;
+                if (w->noteData != s.noteData) {
+                    w->noteData = s.noteData;
+                    w->dirtyCallback = true;
+                }
                 if (w->values != s.values) {
                     w->values = s.values;
                     w->dirtyEngine = true;
@@ -481,9 +550,19 @@ void restoreWidgets(bridge::AppContext& ctx, WidgetSnapList const& target,
                 }
                 bridge::UIWidget* nw =
                     ctx.uiState->upsert(s.panel, s.name, s.kind, s.spec, s.spec2);
-                // upsert sized values for the kind; copy what the capture has.
+                if (s.kind == bridge::UIWidgetKind::MultiSlider
+                    || s.kind == bridge::UIWidgetKind::Matrix) {
+                    nw->values.assign(s.values.size(), 0.0);
+                }
                 for (size_t i = 0; i < nw->values.size() && i < s.values.size(); ++i)
                     nw->values[i] = s.values[i];
+                nw->fx = s.fx; nw->fy = s.fy; nw->fw = s.fw; nw->fh = s.fh;
+                nw->rows = s.rows; nw->cols = s.cols;
+                nw->noteData = s.noteData;
+                nw->labelText = s.labelText;
+                nw->rollBeats = s.rollBeats;
+                nw->rollLowPitch = s.rollLowPitch;
+                nw->rollRows = s.rollRows;
                 nw->dirtyEngine = true;
                 nw->dirtyCallback = true;
             }

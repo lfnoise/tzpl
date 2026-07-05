@@ -21,6 +21,7 @@
 #include "tzpl_app_context.hpp"
 #include "tzpl_client_interface.hpp"
 #include "nrt_vm.hpp"
+#include "value.hpp"
 
 #include "imgui.h"
 
@@ -71,13 +72,14 @@ struct EngineSend {
     long nodeID;
     long controlID;
     int silo;
-    float value;
+    std::vector<float> values;  // 1 for scalar widgets; N for multi/matrix
 };
 
 struct CallbackCall {
     ts::Obj* fn;
     double v0, v1;
-    int argc;
+    int argc;                 // 1 or 2 scalar args, or -1 = one array arg
+    std::vector<double> vec;  // array payload when argc == -1
 };
 
 } // namespace
@@ -149,14 +151,20 @@ void ControlsPanel::dispatch(bridge::UIState& ui, bridge::AppContext& ctx) {
             UIWidget& w = *wp;
             if (!w.dirtyEngine) continue;
             if (w.target) {
+                std::vector<float> vals;
+                if (w.kind == UIWidgetKind::MultiSlider
+                    || w.kind == UIWidgetKind::Matrix) {
+                    vals.assign(w.values.begin(), w.values.end());
+                } else {
+                    vals.push_back(static_cast<float>(w.values[0]));
+                }
                 sends.push_back({w.target->nodeID, w.target->controlID,
-                                 w.target->silo,
-                                 static_cast<float>(w.values[0])});
+                                 w.target->silo, std::move(vals)});
             }
             if (w.target2 && w.values.size() > 1) {
                 sends.push_back({w.target2->nodeID, w.target2->controlID,
                                  w.target2->silo,
-                                 static_cast<float>(w.values[1])});
+                                 {static_cast<float>(w.values[1])}});
             }
             w.dirtyEngine = false;
         }
@@ -174,7 +182,8 @@ void ControlsPanel::dispatch(bridge::UIState& ui, bridge::AppContext& ctx) {
             for (; i < sends.size() && sends[i].silo == silo; ++i) {
                 if (err == tzpl_errNone) {
                     engine::setControl(sends[i].nodeID, sends[i].controlID,
-                                       1, &sends[i].value);
+                                       (int)sends[i].values.size(),
+                                       sends[i].values.data());
                 }
             }
             if (err == tzpl_errNone) err = engine::go(silo);
@@ -209,9 +218,21 @@ void ControlsPanel::dispatch(bridge::UIState& ui, bridge::AppContext& ctx) {
         for (auto& wp : ui.widgets) {
             UIWidget& w = *wp;
             if (!w.dirtyCallback || !w.onChange) continue;
-            double v1 = w.values.size() > 1 ? w.values[1] : 0.0;
-            int argc = (w.kind == UIWidgetKind::XY) ? 2 : 1;
-            calls.push_back({w.onChange, w.values[0], v1, argc});
+            CallbackCall call{};
+            call.fn = w.onChange;
+            if (w.kind == UIWidgetKind::PianoRoll) {
+                call.argc = -1;
+                call.vec.assign(w.noteData.begin(), w.noteData.end());
+            } else if (w.kind == UIWidgetKind::MultiSlider
+                       || w.kind == UIWidgetKind::Matrix) {
+                call.argc = -1;
+                call.vec = w.values;
+            } else {
+                call.v0 = w.values[0];
+                call.v1 = w.values.size() > 1 ? w.values[1] : 0.0;
+                call.argc = (w.kind == UIWidgetKind::XY) ? 2 : 1;
+            }
+            calls.push_back(std::move(call));
             w.dirtyCallback = false;
         }
     }
@@ -220,9 +241,18 @@ void ControlsPanel::dispatch(bridge::UIState& ui, bridge::AppContext& ctx) {
     ctx.nrtvm->vm.makeCurrent();
     for (auto const& c : calls) {
         ts::Word args[2];
-        args[0].f = c.v0;
-        args[1].f = c.v1;
-        ctx.nrtvm->vm.callCallable(c.fn, args, static_cast<u16>(c.argc));
+        if (c.argc < 0) {
+            // Array[Float] argument (multislider/matrix values, roll notes).
+            auto* arr = new ts::PodArray<f64>(
+                ctx.nrtvm->vm.arrayType(ctx.nrtvm->vm.floatType()));
+            arr->v.assign(c.vec.begin(), c.vec.end());
+            args[0].o = arr;
+            ctx.nrtvm->vm.callCallable(c.fn, args, 1);
+        } else {
+            args[0].f = c.v0;
+            args[1].f = c.v1;
+            ctx.nrtvm->vm.callCallable(c.fn, args, static_cast<u16>(c.argc));
+        }
     }
     ctx.nrtvm->vm.gcHeartbeat();
 }

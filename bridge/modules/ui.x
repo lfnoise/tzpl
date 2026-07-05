@@ -56,12 +56,36 @@ fn xy(name String, xspec ControlSpec, yspec ControlSpec) Widget =
 	            xspec.lo, xspec.hi, xspec.init, xspec.warp ordinal, xspec.warp _stepParam,
 	            yspec.lo, yspec.hi, yspec.init, yspec.warp ordinal, yspec.warp _stepParam));
 
+-- N vertical bars mapped through a ControlSpec (drag across to paint).
+fn multislider(name String, n Int, spec ControlSpec) Widget =
+	Widget(uiMultiSlider(name, n, spec.lo, spec.hi, spec.init,
+	                     spec.warp ordinal, spec.warp _stepParam));
+
+fn multislider(name String, n Int) Widget =
+	Widget(uiMultiSlider(name, n, 0.0, 1.0, 0.0, 0, 0.0));
+
+-- rows x cols grid of 0/1 toggle cells (a step sequencer surface).
+fn matrix(name String, rows Int, cols Int) Widget =
+	Widget(uiMatrix(name, rows, cols));
+
+-- Grid note editor over `beats` beats (16th grid). Notes are read/written
+-- as flat (pitch, startBeat, durBeats) triplets; see notes()/setNotes().
+fn pianoRoll(name String, beats Float = 4.0) Widget =
+	Widget(uiPianoRoll(name, beats));
+
+-- Static text.
+fn label(name String, text String) Widget = Widget(uiLabel(name, text));
+
 ---------------------------------------------------------------------------
 -- Bindings
 
 -- Lang callback, fired with the latest value at most once per GUI frame.
 fn onChange(w Widget, f (Float) Void) Void = uiOnChange(w.0, f);
 fn onChangeXY(w Widget, f (Float, Float) Void) Void = uiOnChangeXY(w.0, f);
+
+-- Vector callback for multislider/matrix (all values) and pianoRoll
+-- (note triplets), fired coalesced like onChange.
+fn onChangeVec(w Widget, f ([Float]) Void) Void = uiOnChangeVec(w.0, f);
 
 -- Engine fast path: control resolved by name on the node's def.
 -- Returns an audio_engine error code (0 = ok).
@@ -77,10 +101,34 @@ fn bindControlY(w Widget, node Int, control String, silo Int = 0) Int =
 
 fn value(w Widget) Float = uiValue(w.0);
 fn valueY(w Widget) Float = uiValueY(w.0);
+fn values(w Widget) [Float] = uiValues(w.0);
 
 -- Move the widget and fire its bindings (coalesced, next GUI frame).
 fn setValue(w Widget, v Float) Void = uiSetValue(w.0, v);
 fn setValueXY(w Widget, x Float, y Float) Void = uiSetValueXY(w.0, x, y);
+fn setValues(w Widget, vals [Float]) Void = uiSetValues(w.0, vals);
+
+-- Piano roll notes: flat (pitch, startBeat, durBeats) triplets.
+fn notes(w Widget) [Float] = uiNotes(w.0);
+fn setNotes(w Widget, ns [Float]) Void = uiSetNotes(w.0, ns);
+
+-- Layout frame within the widget's panel (arrange mode sets this by
+-- dragging; code can too). w/h <= 0 keeps the default size.
+fn setFrame(w Widget, x Float, y Float, wd Float, ht Float) Void =
+	uiSetFrame(w.0, x, y, wd, ht);
+
+-- Piano roll pitch range: bottom pitch + number of rows.
+fn rollRange(w Widget, lowPitch Int, rows Int) Void =
+	uiRollRange(w.0, lowPitch, rows);
+
+---------------------------------------------------------------------------
+-- show(): materialize a value as its natural widget (editable where it
+-- makes sense; read back with value()/values()).
+
+fn show(name String, v Float) Widget = Widget(uiShowFloat(name, v));
+fn show(name String, v Bool) Widget = Widget(uiShowBool(name, v));
+fn show(name String, v [Float]) Widget = Widget(uiShowVec(name, v));
+fn show(name String, v String) Widget = Widget(uiShowString(name, v));
 
 fn remove(w Widget) Void = uiRemove(w.0);
 fn clear() Void = uiClear();

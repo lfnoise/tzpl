@@ -46,7 +46,7 @@ static void drawSlider(UIWidget& w) {
     float pos = static_cast<float>(w.spec.unmap(w.values[0]));
     char display[64];
     std::snprintf(display, sizeof(display), "%.4g", w.values[0]);
-    ImGui::SetNextItemWidth(-140.0f);
+    ImGui::SetNextItemWidth(w.fw > 0.0f ? w.fw : -140.0f);
     if (ImGui::SliderFloat((std::string("##") + w.name).c_str(), &pos,
                            0.0f, 1.0f, display)) {
         w.values[0] = w.spec.map(pos);
@@ -59,7 +59,7 @@ static void drawSlider(UIWidget& w) {
 
 static void drawNumber(UIWidget& w) {
     double v = w.values[0];
-    ImGui::SetNextItemWidth(-140.0f);
+    ImGui::SetNextItemWidth(w.fw > 0.0f ? w.fw : -140.0f);
     if (ImGui::DragScalar((std::string("##") + w.name).c_str(),
                           ImGuiDataType_Double, &v, 0.01f, nullptr, nullptr,
                           "%.4g")) {
@@ -104,7 +104,8 @@ static void drawMeter(UIWidget& w) {
     float rms = w.values.size() > 0 ? static_cast<float>(w.values[0]) : 0.0f;
     float peak = w.values.size() > 1 ? static_cast<float>(w.values[1]) : 0.0f;
 
-    const float width = 200.0f, height = 14.0f;
+    const float width = w.fw > 0.0f ? w.fw : 200.0f;
+    const float height = w.fh > 0.0f ? w.fh : 14.0f;
     ImVec2 origin = ImGui::GetCursorScreenPos();
     ImGui::InvisibleButton((std::string("##") + w.name).c_str(),
                            ImVec2(width, height));
@@ -155,22 +156,24 @@ static void drawScope(UIWidget& w) {
     auto plotLane = [&](int ch, float height) {
         lane.resize((size_t)std::max(count, 0));
         for (int f = 0; f < count; ++f) lane[f] = sample(start + f, ch);
+        float scopeW = w.fw > 0.0f ? w.fw : 320.0f;
         if (count > 1) {
             ImGui::PlotLines(("##" + w.name + std::to_string(ch)).c_str(),
                              lane.data(), count, 0, nullptr,
-                             -1.0f, 1.0f, ImVec2(320.0f, height));
+                             -1.0f, 1.0f, ImVec2(scopeW, height));
         } else {
-            ImGui::Dummy(ImVec2(320.0f, height));
+            ImGui::Dummy(ImVec2(scopeW, height));
         }
     };
 
+    float scopeH = w.fh > 0.0f ? w.fh : 100.0f;
     ImGui::BeginGroup();
     if (w.scopeChannel < 0) {
         // All channels, stacked lanes sharing one trigger.
-        float laneH = std::max(100.0f / (float)chans, 32.0f);
+        float laneH = std::max(scopeH / (float)chans, 24.0f);
         for (int ch = 0; ch < chans; ++ch) plotLane(ch, laneH);
     } else {
-        plotLane(w.scopeChannel, 100.0f);
+        plotLane(w.scopeChannel, scopeH);
     }
     ImGui::EndGroup();
 
@@ -201,16 +204,20 @@ static void drawPlot(UIWidget& w) {
         float pad = (hi - lo) * 0.05f;
         ImGui::PlotLines((std::string("##") + w.name).c_str(),
                          w.plotData.data(), (int)w.plotData.size(), 0, nullptr,
-                         lo - pad, hi + pad, ImVec2(320.0f, 100.0f));
+                         lo - pad, hi + pad,
+                         ImVec2(w.fw > 0.0f ? w.fw : 320.0f,
+                                w.fh > 0.0f ? w.fh : 100.0f));
     } else {
-        ImGui::Dummy(ImVec2(320.0f, 100.0f));
+        ImGui::Dummy(ImVec2(w.fw > 0.0f ? w.fw : 320.0f,
+                            w.fh > 0.0f ? w.fh : 100.0f));
     }
     ImGui::SameLine();
     ImGui::TextUnformatted(w.name.c_str());
 }
 
 static void drawWaveform(UIWidget& w) {
-    const float width = 320.0f, height = 80.0f;
+    const float width = w.fw > 0.0f ? w.fw : 320.0f;
+    const float height = w.fh > 0.0f ? w.fh : 80.0f;
     ImVec2 origin = ImGui::GetCursorScreenPos();
     ImGui::InvisibleButton((std::string("##") + w.name).c_str(),
                            ImVec2(width, height));
@@ -245,7 +252,7 @@ static void drawWaveform(UIWidget& w) {
 }
 
 static void drawXY(UIWidget& w) {
-    const float size = 160.0f;
+    const float size = w.fw > 0.0f ? w.fw : 160.0f;
     ImVec2 origin = ImGui::GetCursorScreenPos();
     ImGui::InvisibleButton((std::string("##") + w.name).c_str(),
                            ImVec2(size, size));
@@ -281,6 +288,169 @@ static void drawXY(UIWidget& w) {
     ImGui::Text("%s  (%.4g, %.4g)", w.name.c_str(), w.values[0], w.values[1]);
 }
 
+static void drawMultiSlider(UIWidget& w) {
+    int n = (int)w.values.size();
+    if (n < 1) return;
+    const float width = w.fw > 0.0f ? w.fw : 240.0f;
+    const float height = w.fh > 0.0f ? w.fh : 80.0f;
+    ImVec2 origin = ImGui::GetCursorScreenPos();
+    ImGui::InvisibleButton((std::string("##") + w.name).c_str(),
+                           ImVec2(width, height));
+    bool active = ImGui::IsItemActive();
+    if (active) {
+        ImVec2 m = ImGui::GetIO().MousePos;
+        int idx = std::clamp((int)((m.x - origin.x) / width * n), 0, n - 1);
+        float pos = 1.0f - std::clamp((m.y - origin.y) / height, 0.0f, 1.0f);
+        w.values[(size_t)idx] = w.spec.map(pos);
+        markDirty(w);
+    }
+    if (active) {
+        w.gestureActive = true;
+    } else if (w.gestureActive) {
+        w.gestureActive = false;
+        w.gestureEnded = true;
+    }
+    auto* dl = ImGui::GetWindowDrawList();
+    dl->AddRectFilled(origin, ImVec2(origin.x + width, origin.y + height),
+                      ImGui::GetColorU32(ImGuiCol_FrameBg));
+    ImU32 barCol = ImGui::GetColorU32(ImGuiCol_PlotHistogram);
+    float barW = width / (float)n;
+    for (int i = 0; i < n; ++i) {
+        float p = (float)w.spec.unmap(w.values[(size_t)i]);
+        float x0 = origin.x + i * barW;
+        dl->AddRectFilled(ImVec2(x0 + 1.0f, origin.y + (1.0f - p) * height),
+                          ImVec2(x0 + barW - 1.0f, origin.y + height), barCol);
+    }
+    dl->AddRect(origin, ImVec2(origin.x + width, origin.y + height),
+                ImGui::GetColorU32(ImGuiCol_Border));
+    ImGui::SameLine();
+    ImGui::TextUnformatted(w.name.c_str());
+}
+
+static void drawMatrix(UIWidget& w) {
+    int rows = std::max(1, w.rows), cols = std::max(1, w.cols);
+    const float width = w.fw > 0.0f ? w.fw : cols * 22.0f;
+    const float height = w.fh > 0.0f ? w.fh : rows * 22.0f;
+    ImVec2 origin = ImGui::GetCursorScreenPos();
+    ImGui::InvisibleButton((std::string("##") + w.name).c_str(),
+                           ImVec2(width, height));
+    if (ImGui::IsItemClicked()) {
+        ImVec2 m = ImGui::GetIO().MousePos;
+        int c = std::clamp((int)((m.x - origin.x) / width * cols), 0, cols - 1);
+        int r = std::clamp((int)((m.y - origin.y) / height * rows), 0, rows - 1);
+        size_t i = (size_t)r * cols + c;
+        if (i < w.values.size()) {
+            w.values[i] = w.values[i] > 0.5 ? 0.0 : 1.0;
+            markDirty(w);
+            w.gestureEnded = true;  // one history commit per toggle
+        }
+    }
+    auto* dl = ImGui::GetWindowDrawList();
+    float cw = width / (float)cols, chh = height / (float)rows;
+    ImU32 onCol = ImGui::GetColorU32(ImGuiCol_PlotHistogram);
+    ImU32 gridCol = ImGui::GetColorU32(ImGuiCol_Border);
+    dl->AddRectFilled(origin, ImVec2(origin.x + width, origin.y + height),
+                      ImGui::GetColorU32(ImGuiCol_FrameBg));
+    for (int r = 0; r < rows; ++r) {
+        for (int c = 0; c < cols; ++c) {
+            size_t i = (size_t)r * cols + c;
+            if (i < w.values.size() && w.values[i] > 0.5) {
+                dl->AddRectFilled(
+                    ImVec2(origin.x + c * cw + 1, origin.y + r * chh + 1),
+                    ImVec2(origin.x + (c + 1) * cw - 1,
+                           origin.y + (r + 1) * chh - 1), onCol);
+            }
+        }
+    }
+    for (int c = 0; c <= cols; ++c)
+        dl->AddLine(ImVec2(origin.x + c * cw, origin.y),
+                    ImVec2(origin.x + c * cw, origin.y + height), gridCol);
+    for (int r = 0; r <= rows; ++r)
+        dl->AddLine(ImVec2(origin.x, origin.y + r * chh),
+                    ImVec2(origin.x + width, origin.y + r * chh), gridCol);
+    ImGui::SameLine();
+    ImGui::TextUnformatted(w.name.c_str());
+}
+
+static void drawPianoRoll(UIWidget& w) {
+    const float stepBeats = 0.25f;  // 16th grid
+    int rows = std::max(1, w.rollRows);
+    int cols = std::max(1, (int)std::lround(w.rollBeats / stepBeats));
+    const float width = w.fw > 0.0f ? w.fw : 320.0f;
+    const float height = w.fh > 0.0f ? w.fh : 200.0f;
+    ImVec2 origin = ImGui::GetCursorScreenPos();
+    ImGui::InvisibleButton((std::string("##") + w.name).c_str(),
+                           ImVec2(width, height));
+    float cw = width / (float)cols, chh = height / (float)rows;
+
+    if (ImGui::IsItemClicked()) {
+        ImVec2 m = ImGui::GetIO().MousePos;
+        int c = std::clamp((int)((m.x - origin.x) / cw), 0, cols - 1);
+        int r = std::clamp((int)((m.y - origin.y) / chh), 0, rows - 1);
+        float pitch = (float)(w.rollLowPitch + (rows - 1 - r));
+        float start = c * stepBeats;
+        // Click a note to delete it; click empty space to add a 16th note.
+        bool removed = false;
+        for (size_t i = 0; i + 2 < w.noteData.size(); i += 3) {
+            if (w.noteData[i] == pitch && start >= w.noteData[i + 1]
+                && start < w.noteData[i + 1] + w.noteData[i + 2]) {
+                w.noteData.erase(w.noteData.begin() + i,
+                                 w.noteData.begin() + i + 3);
+                removed = true;
+                break;
+            }
+        }
+        if (!removed) {
+            w.noteData.push_back(pitch);
+            w.noteData.push_back(start);
+            w.noteData.push_back(stepBeats);
+        }
+        w.dirtyCallback = true;
+        w.gestureEnded = true;  // one history commit per note edit
+    }
+
+    auto* dl = ImGui::GetWindowDrawList();
+    dl->AddRectFilled(origin, ImVec2(origin.x + width, origin.y + height),
+                      ImGui::GetColorU32(ImGuiCol_FrameBg));
+    ImU32 gridCol = ImGui::GetColorU32(ImGuiCol_TableBorderLight);
+    ImU32 beatCol = ImGui::GetColorU32(ImGuiCol_Border);
+    ImU32 noteCol = ImGui::GetColorU32(ImGuiCol_PlotHistogram);
+    // Octave shading for orientation (C rows).
+    for (int r = 0; r < rows; ++r) {
+        int pitch = w.rollLowPitch + (rows - 1 - r);
+        if (pitch % 12 == 0) {
+            dl->AddRectFilled(ImVec2(origin.x, origin.y + r * chh),
+                              ImVec2(origin.x + width, origin.y + (r + 1) * chh),
+                              ImGui::GetColorU32(ImGuiCol_TableRowBgAlt));
+        }
+    }
+    for (int c = 0; c <= cols; ++c) {
+        dl->AddLine(ImVec2(origin.x + c * cw, origin.y),
+                    ImVec2(origin.x + c * cw, origin.y + height),
+                    (c % 4 == 0) ? beatCol : gridCol);
+    }
+    for (int r = 0; r <= rows; ++r)
+        dl->AddLine(ImVec2(origin.x, origin.y + r * chh),
+                    ImVec2(origin.x + width, origin.y + r * chh), gridCol);
+    for (size_t i = 0; i + 2 < w.noteData.size(); i += 3) {
+        int r = rows - 1 - ((int)w.noteData[i] - w.rollLowPitch);
+        if (r < 0 || r >= rows) continue;
+        float x0 = origin.x + w.noteData[i + 1] / stepBeats * cw;
+        float x1 = x0 + w.noteData[i + 2] / stepBeats * cw;
+        dl->AddRectFilled(ImVec2(x0 + 1, origin.y + r * chh + 1),
+                          ImVec2(x1 - 1, origin.y + (r + 1) * chh - 1),
+                          noteCol);
+    }
+    dl->AddRect(origin, ImVec2(origin.x + width, origin.y + height), beatCol);
+    ImGui::SameLine();
+    ImGui::TextUnformatted(w.name.c_str());
+}
+
+static void drawLabel(UIWidget& w) {
+    ImGui::TextUnformatted(w.labelText.empty() ? w.name.c_str()
+                                               : w.labelText.c_str());
+}
+
 bool drawUIWidget(bridge::UIWidget& w) {
     ImGui::PushID(static_cast<int>(w.id));
     bool tap = false;
@@ -294,6 +464,10 @@ bool drawUIWidget(bridge::UIWidget& w) {
         case UIWidgetKind::Scope:    drawScope(w); tap = true; break;
         case UIWidgetKind::Plot:     drawPlot(w); break;
         case UIWidgetKind::Waveform: drawWaveform(w); break;
+        case UIWidgetKind::MultiSlider: drawMultiSlider(w); break;
+        case UIWidgetKind::Matrix:      drawMatrix(w); break;
+        case UIWidgetKind::PianoRoll:   drawPianoRoll(w); break;
+        case UIWidgetKind::Label:       drawLabel(w); break;
     }
     ImGui::PopID();
     return tap;
