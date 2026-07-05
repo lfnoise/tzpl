@@ -136,6 +136,21 @@ static void ffi_uiGetPanel(ts::VM& vm, u16 dst, u16, u16) {
     vm.reg(dst).o = new ts::StringObj(panel);
 }
 
+// fn uiNodeDefName(node Int) String
+// The def name of a live-engine node ("" if unknown). Used by ui.x to
+// default a node's derived widgets into a panel named after its synthdef.
+static void ffi_uiNodeDefName(ts::VM& vm, u16 dst, u16, u16 argBase) {
+    auto* ctx = getAppContext(vm);
+    i64 nodeID = vm.reg(argBase).i;
+    std::string name;
+    if (ctx) {
+        std::lock_guard<std::mutex> lock(ctx->nodeDefNamesMtx);
+        auto it = ctx->nodeDefNames.find(nodeID);
+        if (it != ctx->nodeDefNames.end()) name = it->second;
+    }
+    vm.reg(dst).o = new ts::StringObj(name);
+}
+
 // fn uiSlider(name String, lo Float, hi Float, init Float,
 //             warp Int, warpParam Float) Int
 static void ffi_uiSlider(ts::VM& vm, u16 dst, u16, u16 argBase) {
@@ -718,6 +733,7 @@ void registerUIFFI(ts::Compiler& compiler) {
 
     reg("uiPanel",        Void, {String},                       ffi_uiPanel);
     reg("uiGetPanel",     String, {},                           ffi_uiGetPanel);
+    reg("uiNodeDefName",  String, {Int},                        ffi_uiNodeDefName);
     reg("uiSlider",       Int,  {String, Float, Float, Float, Int, Float}, ffi_uiSlider);
     reg("uiNumber",       Int,  {String, Float},                ffi_uiNumber);
     reg("uiButton",       Int,  {String},                       ffi_uiButton);

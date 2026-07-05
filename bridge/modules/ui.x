@@ -115,14 +115,34 @@ fn waveform(name String, node Int, buf Int) Widget =
 ---------------------------------------------------------------------------
 -- Synthdef-derived widgets
 
+-- The def name of a live node ("" if unknown).
+fn defName(node Int) String = uiNodeDefName(node);
+
 -- One widget named, ranged, warped, and bound from the def's control
 -- declaration. Returns Widget(0) if the node or control is unknown.
-fn control(node Int, name String, silo Int = 0) Widget =
-	Widget(uiControl(node, name, silo));
+-- Defaults into a panel named after the node's synthdef, so each synth
+-- gets its own panel (window, or notebook cell of that name).
+fn control(node Int, name String, silo Int = 0) Widget {
+	let p = uiNodeDefName(node);
+	if (p length == 0) {
+		Widget(uiControl(node, name, silo))
+	} else {
+		control(node, name, p, silo)
+	}
+}
 
--- Materialize the node's whole interface (into the current panel).
-fn controls(node Int, silo Int = 0) [Widget] =
-	uiControls(node, silo) map(fn(id Int) Widget { Widget(id) });
+-- Materialize the node's whole interface, into a panel named after the
+-- node's synthdef (falls back to the current panel if the def name is
+-- unknown). Use the explicit-panel form below to place them elsewhere,
+-- or when running several instances of the SAME def.
+fn controls(node Int, silo Int = 0) [Widget] {
+	let p = uiNodeDefName(node);
+	if (p length == 0) {
+		uiControls(node, silo) map(fn(id Int) Widget { Widget(id) })
+	} else {
+		controls(node, p, silo)
+	}
+}
 
 -- Variants targeting a named panel directly -- e.g. a notebook panel
 -- cell: controls(node, "mixer"). The previous target panel is restored.

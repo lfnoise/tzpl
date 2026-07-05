@@ -407,7 +407,7 @@ controls(node);
 <span class="cmt">-- And an oscilloscope on its output.</span>
 scope(<span class="str">"out"</span>, node);</code></pre>
 
-<p>A <strong>Controls</strong> window appears with a <code>freq</code> slider (exponential, 50&ndash;2000&nbsp;Hz), an <code>amp</code> slider, and a live scope. Drag the sliders &mdash; the sound follows immediately, even while other code is evaluating.</p>
+<p>A window named <strong>demo</strong> appears with a <code>freq</code> slider (exponential, 50&ndash;2000&nbsp;Hz) and an <code>amp</code> slider &mdash; widgets derived from a synthdef default into a panel named after the def. The scope, created by hand without a panel, lands in the default <strong>Controls</strong> window. Drag the sliders &mdash; the sound follows immediately, even while other code is evaluating.</p>
 
 <!-- ================================================================ -->
 <h2 id="ui-module">3. The <code>ui</code> Module</h2>
@@ -468,12 +468,13 @@ cutoff onChange(<span class="kw">fn</span>(v <span class="typ">Float</span>) <sp
 
 <p>This is the shortest path from &ldquo;synth is playing&rdquo; to &ldquo;synth has a control surface.&rdquo; The synthdef declaration is the single source of truth for ranges and warps &mdash; change the <code>ControlSpec</code> in the def and every derived widget follows on the next run.</p>
 
-<p>Both forms take an optional <strong>panel name</strong>, which is the easy way to land the widgets in a notebook panel cell (<a href="#nb-panels">&sect;4.4</a>) instead of a floating window:</p>
+<p>Derived widgets default into a panel <strong>named after the node's synthdef</strong> &mdash; each synth automatically gets its own window (or notebook panel cell of that name). Pass an explicit panel name to place them elsewhere, e.g. a differently-named notebook cell (<a href="#nb-panels">&sect;4.4</a>):</p>
 
-<pre><code>controls(node, <span class="str">"mixer"</span>);            <span class="cmt">-- into the panel named "mixer"</span>
+<pre><code>controls(node);                       <span class="cmt">-- into the panel named after node's def</span>
+controls(node, <span class="str">"mixer"</span>);            <span class="cmt">-- into the panel named "mixer"</span>
 control(node, <span class="str">"freq"</span>, <span class="str">"mixer"</span>);      <span class="cmt">-- one control, same destination</span></code></pre>
 
-<div class="note"><p><strong>Widgets are keyed by (panel, name).</strong> Calling <code>controls</code> twice for the same node updates the same widgets &mdash; no duplicates. But two <em>different</em> synths that both declare <code>freq</code> would fight over one widget if materialized into the same panel; give each synth its own panel (<code>controls(node1, "synthA"); controls(node2, "synthB");</code>).</p></div>
+<div class="note"><p><strong>Widgets are keyed by (panel, name).</strong> Calling <code>controls</code> twice for the same node updates the same widgets &mdash; no duplicates, and different synths never collide (they default to different panels). The one case needing care is <em>two instances of the same def</em>: both default to the same panel, so the second call would rebind the shared widgets. Give each instance an explicit panel: <code>controls(bass1, "bass 1"); controls(bass2, "bass 2");</code></p></div>
 
 <!-- -------------------------------- -->
 <h3 id="ui-reading">3.4 Reading Values &amp; Taps from Code</h3>
@@ -526,8 +527,9 @@ panel(<span class="str">""</span>);               <span class="cmt">-- back to t
 <tr><td><code>value(w) Float</code> / <code>valueY(w) Float</code></td><td>read the widget</td></tr>
 <tr><td><code>setValue(w, v)</code> / <code>setValueXY(w, x, y)</code></td><td>move the widget and fire its bindings</td></tr>
 <tr><td><code>rmsLevel(w)</code> / <code>peakLevel(w)</code> / <code>samples(w, max = 4096)</code></td><td>read a tap widget from code</td></tr>
-<tr><td><code>control(node, name String, silo = 0) Widget</code><br><code>control(node, name, panel String, silo = 0)</code></td><td>one widget derived + bound from the def's ControlSpec (optionally into a named panel)</td></tr>
-<tr><td><code>controls(node, silo = 0) [Widget]</code><br><code>controls(node, panel String, silo = 0)</code></td><td>materialize the node's whole interface (optionally into a named panel)</td></tr>
+<tr><td><code>control(node, name String, silo = 0) Widget</code><br><code>control(node, name, panel String, silo = 0)</code></td><td>one widget derived + bound from the def's ControlSpec; defaults into a panel named after the def</td></tr>
+<tr><td><code>controls(node, silo = 0) [Widget]</code><br><code>controls(node, panel String, silo = 0)</code></td><td>materialize the node's whole interface; defaults into a panel named after the def</td></tr>
+<tr><td><code>defName(node) String</code></td><td>the def name of a live node ("" if unknown)</td></tr>
 <tr><td><code>remove(w)</code> / <code>clear()</code></td><td>remove one widget / all widgets (taps are released)</td></tr>
 </table>
 
@@ -575,8 +577,8 @@ panel(<span class="str">""</span>);               <span class="cmt">-- back to t
 <p>A panel cell embeds the widgets of the panel with the <strong>same name</strong>. The connection is by name, nothing more:</p>
 
 <ol>
-  <li>Add a panel cell. Its name (editable right in the cell header &mdash; it starts as something like <code>panel1</code>) is what code targets.</li>
-  <li>In a code cell: <code>controls(node, "panel1");</code> &mdash; or set a sticky target with <code>panel("panel1")</code> and create widgets individually.</li>
+  <li>Add a panel cell. Its name (editable right in the cell header &mdash; it starts as something like <code>panel1</code>) is what code targets. Naming it after your synthdef means <code>controls(node)</code> lands there with no extra arguments.</li>
+  <li>In a code cell: <code>controls(node);</code> (cell named after the def) or <code>controls(node, "panel1");</code> &mdash; or set a sticky target with <code>panel("panel1")</code> and create widgets individually.</li>
   <li>Run the cell &mdash; the widgets appear inside the panel cell.</li>
 </ol>
 
