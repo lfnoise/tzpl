@@ -594,14 +594,17 @@ void NotebookPanel::drawPresetsCell(
         ImGui::TextDisabled(presets.empty()
                                 ? "(stores the controls of the panels "
                                   "below, until the next presets cell)"
-                                : "(click a slot to recall; cmd-click "
-                                  "to overwrite)");
+                                : "(click recalls; right-click names / "
+                                  "overwrites / deletes)");
     }
 
-    // The slot matrix. Click = recall (+select); Cmd-click = overwrite.
+    // The slot matrix. Click = recall (+select); Cmd-click = overwrite;
+    // right-click = context menu (rename without recalling).
     float slotW = 84.0f;
     int perRow = std::max(1, (int)((width - 16.0f)
                                    / (slotW + ImGui::GetStyle().ItemSpacing.x)));
+    int overwriteIdx = -1, deleteIdx = -1;
+    bool renamed = false;
     for (int i = 0; i < (int)presets.size(); ++i) {
         if (i % perRow != 0) ImGui::SameLine();
         ImGui::PushID(i);
@@ -618,19 +621,49 @@ void NotebookPanel::drawPresetsCell(
                                       ImGuiCol_ButtonActive));
         if (ImGui::Button(label, ImVec2(slotW, 0.0f))) {
             selected = i;
-            if (ImGui::GetIO().KeySuper || ImGui::GetIO().KeyCtrl) {
-                doc::Preset p = capturePreset(presetScope(id), ctx);
-                p.name = presets[(size_t)i].name;
-                presets[(size_t)i] = std::move(p);
-                store_.setCellPresets(id, presets);
-                structureCommitLabel_ = "overwrite preset";
-            } else {
+            if (ImGui::GetIO().KeySuper || ImGui::GetIO().KeyCtrl)
+                overwriteIdx = i;
+            else {
                 applyPreset(presets[(size_t)i], ctx);
                 structureCommitLabel_ = "recall preset";
             }
         }
         if (isSel) ImGui::PopStyleColor();
+        // Right-click: select (without recalling) and edit in place.
+        if (ImGui::BeginPopupContextItem("##slotmenu")) {
+            selected = i;
+            char nameBuf[64];
+            std::snprintf(nameBuf, sizeof(nameBuf), "%s",
+                          presets[(size_t)i].name.c_str());
+            ImGui::SetNextItemWidth(160.0f);
+            if (ImGui::InputTextWithHint("##rename", "(name)", nameBuf,
+                                         sizeof(nameBuf))) {
+                presets[(size_t)i].name = nameBuf;
+                renamed = true;
+            }
+            if (ImGui::IsItemDeactivatedAfterEdit())
+                structureCommitLabel_ = "rename preset";
+            if (ImGui::MenuItem("Overwrite with current values"))
+                overwriteIdx = i;
+            if (ImGui::MenuItem("Delete")) deleteIdx = i;
+            ImGui::EndPopup();
+        }
         ImGui::PopID();
+    }
+    if (overwriteIdx >= 0) {
+        doc::Preset p = capturePreset(presetScope(id), ctx);
+        p.name = presets[(size_t)overwriteIdx].name;
+        presets[(size_t)overwriteIdx] = std::move(p);
+        store_.setCellPresets(id, presets);
+        structureCommitLabel_ = "overwrite preset";
+    } else if (deleteIdx >= 0) {
+        presets.erase(presets.begin() + deleteIdx);
+        if (selected == deleteIdx) selected = -1;
+        else if (selected > deleteIdx) --selected;
+        store_.setCellPresets(id, presets);
+        structureCommitLabel_ = "delete preset";
+    } else if (renamed) {
+        store_.setCellPresets(id, presets);
     }
     rt.selectedPreset = selected;
 }
