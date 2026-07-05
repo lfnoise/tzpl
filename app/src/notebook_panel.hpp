@@ -190,7 +190,7 @@ private:
                         bridge::AppContext& ctx, ControlsPanel& controls,
                         bool arrange, float scale, float canvasH);
 
-    // Presets cells (Galaxy-style snapshot matrix). A presets cell
+    // Presets cells (a matrix of control snapshots). A presets cell
     // governs the panel cells AFTER it, up to the next presets cell.
     std::vector<std::string> presetScope(doc::CellId id) const;
     doc::Preset capturePreset(std::vector<std::string> const& scope,

@@ -475,7 +475,7 @@ void NotebookPanel::addCellOutput(std::uint64_t cellId,
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
-// Presets cells (Galaxy-style snapshot matrix)
+// Presets cells (a matrix of control snapshots)
 // ---------------------------------------------------------------------------
 
 // Kinds whose values a preset stores/recalls: the input widgets.
