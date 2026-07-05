@@ -1299,7 +1299,9 @@ int runGui(bridge::AppContext& appCtx) {
                     240.0f, rightW - vsplitW - 160.0f);
                 notebookPanel.draw(nbW, totalH, guiState, appCtx,
                                    session, controlsPanel);
-                ImGui::SameLine();
+                // Zero spacing around the splitter: the seam between the
+                // cell strip and the console is just the 6px grab bar.
+                ImGui::SameLine(0.0f, 0.0f);
                 ImGui::InvisibleButton("##nbsplitter",
                                        ImVec2(vsplitW, totalH));
                 if (ImGui::IsItemActive()) {
@@ -1310,7 +1312,7 @@ int runGui(bridge::AppContext& appCtx) {
                 }
                 if (ImGui::IsItemHovered())
                     ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
-                ImGui::SameLine();
+                ImGui::SameLine(0.0f, 0.0f);
                 outputPanel.draw(rightW - vsplitW - nbW, totalH,
                                  guiState.output);
             } else {
