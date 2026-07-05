@@ -46,11 +46,21 @@ static void markGestureEdges(UIWidget& w) {
 static void drawSlider(UIWidget& w) {
     std::string label = std::string("##") + w.name;
     ImGui::SetNextItemWidth(w.fw > 0.0f ? w.fw : -140.0f);
-    if (ImGui::TempInputIsActive(ImGui::GetID(label.c_str()))) {
-        // Cmd-click text entry. The drag operates on the 0..1 warp
-        // position, but typing must edit the DISPLAYED (mapped) value,
-        // so while temp input owns the id run the slider over the real
-        // value. Nothing is applied until Enter / focus loss -- the
+    // Cmd-click text entry must edit the DISPLAYED (mapped) value, while
+    // the drag operates on the 0..1 warp position. The edit buffer seeds
+    // from the datum passed on the ACTIVATION frame, so predict the
+    // cmd-click before submitting the item (same condition SliderScalar
+    // uses: hovered + clicked + KeyCtrl) and pass the mapped value from
+    // that frame on.
+    bool editing = ImGui::TempInputIsActive(ImGui::GetID(label.c_str()));
+    if (!editing && ImGui::GetIO().KeyCtrl && ImGui::IsMouseClicked(0)) {
+        ImVec2 p = ImGui::GetCursorScreenPos();
+        ImVec2 sz(ImGui::CalcItemWidth(), ImGui::GetFrameHeight());
+        editing = ImGui::IsMouseHoveringRect(
+            p, ImVec2(p.x + sz.x, p.y + sz.y));
+    }
+    if (editing) {
+        // Nothing is applied until Enter / focus loss -- the
         // per-keystroke edits ImGui reports are discarded.
         float v = static_cast<float>(w.values[0]);
         ImGui::SliderFloat(label.c_str(), &v,
