@@ -645,6 +645,11 @@ void NotebookPanel::drawPresetsCell(
             }
             if (ImGui::IsItemDeactivatedAfterEdit())
                 structureCommitLabel_ = "rename preset";
+            // Enter in the name field dismisses the menu.
+            if (ImGui::IsItemDeactivated()
+                && (ImGui::IsKeyPressed(ImGuiKey_Enter)
+                    || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter)))
+                ImGui::CloseCurrentPopup();
             if (ImGui::MenuItem("Overwrite with current values"))
                 overwriteIdx = i;
             if (ImGui::MenuItem("Delete")) deleteIdx = i;
