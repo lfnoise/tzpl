@@ -1224,18 +1224,23 @@ u32 SetObj::gcScanChunk(TracingGC& gc, u32 cursor) {
 }
 
 // --- WordHash ---
+// (hashCombine lives in value.hpp: the slow path in graph_hash.cpp must
+// combine identically.)
 
-static size_t hashCombine(size_t seed, size_t h) {
-    return seed ^ (h + 0x9e3779b9 + (seed << 6) + (seed >> 2));
+// Public entry: see WordEqual::operator() for the dispatch scheme.
+size_t hashWords(Word const* base, Type* type) {
+    if (gGraphHashCtx) return graphHashSlowWords(base, type, *gGraphHashCtx);
+    if (gHashFast) return hashWordsFast(base, type);
+    return graphHashRootWords(base, type);
 }
 
 // Phase 4g.6: walk an inline composite payload at `base` and combine the
 // per-field hashes. Mirrors wordsToString's traversal; for atomic/Obj*
 // fields falls through to WordHash on a single Word.
-size_t hashWords(Word const* base, Type* type) {
+size_t hashWordsFast(Word const* base, Type* type) {
     if (!type) return 0;
     if (type->repr_ != Type::Repr::Inline) {
-        return WordHash{type}(base[0]);
+        return WordHash{type}.hashFast(base[0]);
     }
     if (type == gCurrentVM->complexType()) {
         return hashCombine(std::hash<f64>{}(base[0].f),
@@ -1249,7 +1254,7 @@ size_t hashWords(Word const* base, Type* type) {
         size_t h = tt->fields_.size();
         for (size_t i = 0; i < tt->fields_.size(); ++i) {
             auto const& f = tt->layout_[i];
-            h = hashCombine(h, hashWords(base + f.wordOffset, f.type));
+            h = hashCombine(h, hashWordsFast(base + f.wordOffset, f.type));
         }
         return h;
     }
@@ -1257,7 +1262,7 @@ size_t hashWords(Word const* base, Type* type) {
         size_t h = std::hash<const void*>{}(st->name_);
         for (size_t i = 0; i < st->fields_.size(); ++i) {
             auto const& f = st->layout_[i];
-            h = hashCombine(h, hashWords(base + f.wordOffset, f.type));
+            h = hashCombine(h, hashWordsFast(base + f.wordOffset, f.type));
         }
         return h;
     }
@@ -1269,15 +1274,23 @@ size_t hashWords(Word const* base, Type* type) {
             bool isVoid = f.type && !f.type->isObjType()
                        && (dynamic_cast<VoidType*>(f.type) != nullptr);
             if (f.type && !isVoid && f.sizeWords > 0) {
-                h = hashCombine(h, hashWords(base + f.wordOffset, f.type));
+                h = hashCombine(h, hashWordsFast(base + f.wordOffset, f.type));
             }
         }
         return h;
     }
-    return WordHash{type}(base[0]);
+    return WordHash{type}.hashFast(base[0]);
 }
 
+// Public entry: see WordEqual::operator() for the dispatch scheme.
 size_t WordHash::operator()(Word w) const {
+    if (gGraphHashCtx) return graphHashSlowWord(w, type, *gGraphHashCtx);
+    if (gHashFast) return hashFast(w);
+    return graphHashRootWord(w, type);
+}
+
+size_t WordHash::hashFast(Word w) const {
+    hashFuelTick();
     if (type && type->repr_ == Type::Repr::DiscriminantEnum) {
         return std::hash<i64>{}(w.i);
     }
@@ -1288,7 +1301,15 @@ size_t WordHash::operator()(Word w) const {
         int voidIdx = nullablePtrVoidCaseIndex(et);
         int dataIdx = (voidIdx == 0) ? 1 : 0;
         WordHash sub{et->cases_[dataIdx].type};
-        return hashCombine(1, sub(w));
+        return hashCombine(1, sub.hashFast(w));
+    }
+    // UnwrappedTupleStruct slots hold the inner value directly; hash via
+    // the inner type (mirrors wordToString).
+    if (type && type->repr_ == Type::Repr::UnwrappedTupleStruct) {
+        if (auto* st = dynamic_cast<StructType*>(type); st && !st->layout_.empty()) {
+            WordHash sub{st->layout_[0].type};
+            return sub.hashFast(w);
+        }
     }
     if (type == gCurrentVM->intType() || type == gCurrentVM->boolType()) {
         return std::hash<i64>{}(w.i);
@@ -1317,7 +1338,7 @@ size_t WordHash::operator()(Word w) const {
         size_t h = tt->fields_.size();
         for (u32 i = 0; i < tup->numFields_; ++i) {
             auto const& f = tt->layout_[i];
-            h = hashCombine(h, wordsHash(&tup->v[f.wordOffset], f.type));
+            h = hashCombine(h, wordsHashFast(&tup->v[f.wordOffset], f.type));
         }
         return h;
     }
@@ -1326,7 +1347,7 @@ size_t WordHash::operator()(Word w) const {
         size_t h = std::hash<const void*>{}(st->name_);
         for (u32 i = 0; i < s->numFields_; ++i) {
             auto const& f = st->layout_[i];
-            h = hashCombine(h, wordsHash(&s->v[f.wordOffset], f.type));
+            h = hashCombine(h, wordsHashFast(&s->v[f.wordOffset], f.type));
         }
         return h;
     }
@@ -1336,7 +1357,7 @@ size_t WordHash::operator()(Word w) const {
         Type* caseType = et->cases_[e->which_].type;
         if (caseType != gCurrentVM->voidType()) {
             // Phase 4g.15: payload lives natively in e->v[]; hash multi-word.
-            h = hashCombine(h, wordsHash(&e->v[0], caseType));
+            h = hashCombine(h, wordsHashFast(&e->v[0], caseType));
         }
         return h;
     }
@@ -1347,7 +1368,7 @@ size_t WordHash::operator()(Word w) const {
         u32 cap = s->capacity();
         for (u32 i = 0; i < cap; ++i) {
             if (s->slotState(i) != SetObj::SlotOccupied) continue;
-            h ^= hashWords(s->slotElem(i), et);  // XOR -> order-independent
+            h ^= hashWordsFast(s->slotElem(i), et);  // XOR -> order-independent
         }
         return h;
     }
@@ -1359,8 +1380,8 @@ size_t WordHash::operator()(Word w) const {
         u32 cap = m->capacity();
         for (u32 i = 0; i < cap; ++i) {
             if (m->slotState(i) != MapObj::SlotOccupied) continue;
-            h ^= hashCombine(hashWords(m->slotKey(i), kt),
-                             hashWords(m->slotVal(i), vt));
+            h ^= hashCombine(hashWordsFast(m->slotKey(i), kt),
+                             hashWordsFast(m->slotVal(i), vt));
         }
         return h;
     }
@@ -1407,7 +1428,7 @@ size_t WordHash::operator()(Word w) const {
                 auto* a = static_cast<InlineArray*>(w.o);
                 size_t h = a->size();
                 for (size_t i = 0; i < a->size(); ++i) {
-                    h = hashCombine(h, hashWords(a->slot(i), et));
+                    h = hashCombine(h, hashWordsFast(a->slot(i), et));
                 }
                 return h;
             }
@@ -1417,7 +1438,7 @@ size_t WordHash::operator()(Word w) const {
                 size_t h = a->size();
                 for (auto* obj : *a) {
                     Word ew; ew.o = obj;
-                    h = hashCombine(h, sub(ew));
+                    h = hashCombine(h, sub.hashFast(ew));
                 }
                 return h;
             }
@@ -1425,12 +1446,14 @@ size_t WordHash::operator()(Word w) const {
     }
     if (auto* listT = dynamic_cast<ListType*>(type)) {
         Type* et = listT->elemType_;
-        WordHash sub{et};
         auto* node = static_cast<ListNode*>(w.o);
         size_t h = 0;
+        i64 localForces = 0;
+        i64& forces = gHashFast ? gHashFast->forces : localForces;
         while (node) {
-            node->force(*gCurrentVM);
-            h = hashCombine(h, sub(node->head_));
+            graphForceListNode(node, forces, "hash");
+            // headData covers both 1-word and multi-word (Inline) heads.
+            h = hashCombine(h, hashWordsFast(node->headData(), et));
             node = node->tail_;
         }
         return h;
@@ -1442,15 +1465,21 @@ size_t WordHash::operator()(Word w) const {
         auto* rt = static_cast<RangeType*>(r->type_);
         Type* et = rt->elemType_;
         size_t h = std::hash<bool>{}(r->isInfinite_);
-        h = hashCombine(h, wordsHash(r->startData(), et));
-        h = hashCombine(h, wordsHash(r->stepData(),  et));
-        if (!r->isInfinite_) h = hashCombine(h, wordsHash(r->endData(), et));
+        h = hashCombine(h, wordsHashFast(r->startData(), et));
+        h = hashCombine(h, wordsHashFast(r->stepData(),  et));
+        if (!r->isInfinite_) h = hashCombine(h, wordsHashFast(r->endData(), et));
         return h;
     }
     if (auto* refT = dynamic_cast<RefType*>(type)) {
+        // InlineRef (inline-composite referent) stores its payload words in
+        // a flex array; RefValue stores a single word.
+        if (w.o && w.o->gcTag() == GCTag::InlineRef) {
+            auto* ir = static_cast<InlineRef*>(w.o);
+            return hashWordsFast(&ir->v[0], refT->elemType_);
+        }
         auto* ref = static_cast<RefValue*>(w.o);
         WordHash sub{refT->elemType_};
-        return sub(ref->value_);
+        return sub.hashFast(ref->value_);
     }
     // Fallback: hash pointer
     return std::hash<void*>{}(w.p);
@@ -1968,10 +1997,17 @@ void copyListHead(ListNode* dst, ListNode const* src, Type* elemType) {
     }
 }
 
+// Public entry: see WordEqual::operator() for the dispatch scheme.
 size_t wordsHash(Word const* a, Type* type) {
+    if (gGraphHashCtx) return graphHashSlowWords(a, type, *gGraphHashCtx);
+    if (gHashFast) return wordsHashFast(a, type);
+    return graphHashRootWords(a, type);
+}
+
+size_t wordsHashFast(Word const* a, Type* type) {
     if (!type) return std::hash<i64>{}(a[0].i);
     if (type->repr_ != Type::Repr::Inline) {
-        return WordHash{type}(a[0]);
+        return WordHash{type}.hashFast(a[0]);
     }
     if (type == gCurrentVM->complexType()) {
         return hashCombine(std::hash<f64>{}(a[0].f), std::hash<f64>{}(a[1].f));
@@ -1983,7 +2019,7 @@ size_t wordsHash(Word const* a, Type* type) {
         size_t h = seed;
         for (auto const& f : layout) {
             if (!f.type) continue;
-            h = hashCombine(h, wordsHash(a + f.wordOffset, f.type));
+            h = hashCombine(h, wordsHashFast(a + f.wordOffset, f.type));
         }
         return h;
     };
@@ -1995,12 +2031,12 @@ size_t wordsHash(Word const* a, Type* type) {
         if (which >= 0 && (size_t)which < en->layout_.size()) {
             auto const& f = en->layout_[which];
             if (f.type && f.sizeWords > 0) {
-                h = hashCombine(h, wordsHash(a + f.wordOffset, f.type));
+                h = hashCombine(h, wordsHashFast(a + f.wordOffset, f.type));
             }
         }
         return h;
     }
-    return WordHash{type}(a[0]);
+    return WordHash{type}.hashFast(a[0]);
 }
 
 // Public entry: see WordEqual::operator() for the dispatch scheme.

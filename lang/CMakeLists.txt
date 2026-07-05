@@ -34,6 +34,7 @@ set(LIB_SOURCES
     src/value.cpp
     src/value_graph.cpp
     src/graph_equal.cpp
+    src/graph_hash.cpp
     src/persistent_vector.cpp
     src/persistent_map.cpp
     src/type_system.cpp

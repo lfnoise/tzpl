@@ -36,6 +36,10 @@ namespace ts {
 struct WordHash {
     Type* type;
     size_t operator()(Word w) const;
+    // The pre-existing naive recursion, fuel-ticked. Runs only under an
+    // armed fast attempt (value_graph.hpp) and may throw GraphFuelExhausted;
+    // the root entry then restarts on the cycle-safe slow path.
+    size_t hashFast(Word w) const;
 };
 
 struct WordEqual {
@@ -69,6 +73,11 @@ VMString wordsToString(Word const* base, Type* type);
 // composite args (no box round-trip).
 size_t hashWords(Word const* base, Type* type);
 
+// Fuel-ticked naive fast paths behind hashWords / wordsHash. Run only under
+// an armed fast attempt (value_graph.hpp); may throw GraphFuelExhausted.
+size_t hashWordsFast(Word const* base, Type* type);
+size_t wordsHashFast(Word const* a, Type* type);
+
 // Phase 4g.8: structural equality for two multi-word inline payloads of
 // the same `type`. Mirrors hashWords' traversal. For non-inline types
 // (atomic, Obj*) it delegates to WordEqual on a single Word.
@@ -82,6 +91,13 @@ bool wordsEqualFast(Word const* a, Word const* b, Type* type);
 // to WordHash. For Inline composites it walks layout_ and combines child
 // hashes the same way WordHash does for 1-word inline boxed values.
 size_t wordsHash(Word const* a, Type* type);
+
+// The one hash mixer used by every value-hash path (fast and slow paths
+// must combine identically for the memoized slow hash to agree with the
+// fast hash on acyclic values).
+inline size_t hashCombine(size_t seed, size_t h) {
+    return seed ^ (h + 0x9e3779b9 + (seed << 6) + (seed >> 2));
+}
 
 // Phase 4g.9: list-head helper. Copies one node's head into another's
 // head storage and retains the appropriate ARC references. Handles both

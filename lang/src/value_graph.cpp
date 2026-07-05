@@ -29,8 +29,10 @@
 
 namespace ts {
 
-thread_local GraphFastState* gEqFast     = nullptr;
-thread_local GraphEqCtx*     gGraphEqCtx = nullptr;
+thread_local GraphFastState* gEqFast       = nullptr;
+thread_local GraphEqCtx*     gGraphEqCtx   = nullptr;
+thread_local GraphFastState* gHashFast     = nullptr;
+thread_local GraphHashCtx*   gGraphHashCtx = nullptr;
 
 i64 graphFastFuel(i64 defaultFuel) {
     static i64 const envFuel = [] {
@@ -74,14 +76,20 @@ bool EquivalenceSet::unionFind(Obj* a, Obj* b) {
 GraphNeutralScope::GraphNeutralScope()
     : eqFast_(gEqFast)
     , eqCtx_(gGraphEqCtx)
+    , hashFast_(gHashFast)
+    , hashCtx_(gGraphHashCtx)
 {
     gEqFast = nullptr;
     gGraphEqCtx = nullptr;
+    gHashFast = nullptr;
+    gGraphHashCtx = nullptr;
 }
 
 GraphNeutralScope::~GraphNeutralScope() {
     gEqFast = eqFast_;
     gGraphEqCtx = eqCtx_;
+    gHashFast = hashFast_;
+    gGraphHashCtx = hashCtx_;
 }
 
 void graphForceListNode(ListNode* node, i64& forces, char const* op) {
@@ -135,6 +143,44 @@ bool graphEqualRootWords(Word const* a, Word const* b, Type* type) {
     }
     EqSlowScope slow;
     return graphEqualSlowWords(a, b, type, slow.ctx);
+}
+
+namespace {
+
+struct HashFastScope {
+    GraphFastState state;
+    explicit HashFastScope(i64 fuel) : state{fuel, 0} { gHashFast = &state; }
+    ~HashFastScope() { gHashFast = nullptr; }
+};
+
+struct HashSlowScope {
+    GraphHashCtx ctx;
+    HashSlowScope() { gGraphHashCtx = &ctx; }
+    ~HashSlowScope() { gGraphHashCtx = nullptr; }
+};
+
+} // namespace
+
+size_t graphHashRootWord(Word w, Type* type) {
+    try {
+        HashFastScope fast(graphFastFuel(kHashFastFuel));
+        return WordHash{type}.hashFast(w);
+    } catch (GraphFuelExhausted const&) {
+        // Huge value or a cycle: restart from the root, cycle-safe.
+    }
+    HashSlowScope slow;
+    return graphHashSlowWord(w, type, slow.ctx);
+}
+
+size_t graphHashRootWords(Word const* base, Type* type) {
+    try {
+        HashFastScope fast(graphFastFuel(kHashFastFuel));
+        return hashWordsFast(base, type);
+    } catch (GraphFuelExhausted const&) {
+        // Huge value or a cycle: restart from the root, cycle-safe.
+    }
+    HashSlowScope slow;
+    return graphHashSlowWords(base, type, slow.ctx);
 }
 
 } // namespace ts

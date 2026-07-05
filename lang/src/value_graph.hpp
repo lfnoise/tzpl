@@ -103,6 +103,27 @@ struct GraphEqCtx {
     i64 forces = 0;
 };
 
+// Per-root state of an active slow (cycle-safe) hash traversal. The memo
+// holds, per heap composite: a PRELIMINARY hash (type + non-recursive local
+// data) while the node's children are being combined, overwritten by the
+// final hash afterwards. A cycle hitting back into an in-progress node
+// absorbs the preliminary value -- that is the cycle cut. Since the memo
+// only ever short-circuits pointer-identical subobjects (which the fast
+// path would recompute identically), acyclic values hash bit-identically
+// on both paths -- the invariant that keeps Map/Set probing coherent.
+//
+// Documented caveat: bisimilar cycles of different unrolled lengths (which
+// == treats as equal) may hash differently; such keys are pathological.
+struct GraphHashCtx {
+    Map<Obj*, size_t> memo;
+    u32 depth = 0;
+    i64 forces = 0;
+
+    GraphHashCtx()
+        : memo(0, std::hash<Obj*>{}, std::equal_to<Obj*>{},
+               rt::STLAllocator<std::pair<Obj* const, size_t>>(rt::gCurrentAllocator)) {}
+};
+
 // Active-traversal registers. Non-null exactly while the corresponding
 // traversal runs. Nested public entries (e.g. wordsEqual re-entered through
 // MapObj::findSlot while a slow map comparison probes) consult these to
@@ -110,9 +131,15 @@ struct GraphEqCtx {
 // sharing is what makes cyclic keys inside cyclic maps terminate.
 extern thread_local GraphFastState* gEqFast;
 extern thread_local GraphEqCtx*     gGraphEqCtx;
+extern thread_local GraphFastState* gHashFast;
+extern thread_local GraphHashCtx*   gGraphHashCtx;
 
 inline void eqFuelTick() {
     if (gEqFast && --gEqFast->fuel < 0) throw GraphFuelExhausted{};
+}
+
+inline void hashFuelTick() {
+    if (gHashFast && --gHashFast->fuel < 0) throw GraphFuelExhausted{};
 }
 
 // Root entries: arm the fast path, fall back to the slow path on fuel
@@ -125,6 +152,12 @@ bool graphEqualRootWords(Word const* a, Word const* b, Type* type);
 bool graphEqualSlowWord(Word a, Word b, Type* type, GraphEqCtx& ctx);
 bool graphEqualSlowWords(Word const* a, Word const* b, Type* type, GraphEqCtx& ctx);
 
+// Hash counterparts (value_graph.cpp roots, graph_hash.cpp slow paths).
+size_t graphHashRootWord(Word w, Type* type);
+size_t graphHashRootWords(Word const* base, Type* type);
+size_t graphHashSlowWord(Word w, Type* type, GraphHashCtx& ctx);
+size_t graphHashSlowWords(Word const* base, Type* type, GraphHashCtx& ctx);
+
 // Force one list node on behalf of a bounded traversal: charges `forces`
 // if the node is actually lazy (runtime error past kLazyForceLimit, naming
 // `op`), and neutralizes all graph-traversal registers while the generator
@@ -136,6 +169,8 @@ void graphForceListNode(ListNode* node, i64& forces, char const* op);
 class GraphNeutralScope {
     GraphFastState* eqFast_;
     GraphEqCtx*     eqCtx_;
+    GraphFastState* hashFast_;
+    GraphHashCtx*   hashCtx_;
 public:
     GraphNeutralScope();
     ~GraphNeutralScope();
