@@ -86,6 +86,19 @@ public:
     void moveTop(bool select);
     void moveBottom(bool select);
 
+    // Edit-menu commands applied directly to the focused cell's editor
+    // (the selected cell with the accent bar). Direct calls, not key
+    // injection -- deterministic regardless of ImGui focus timing.
+    // No-ops when no text cell is focused.
+    void cutText();
+    void copyText();
+    void pasteText();
+    void selectAllText();
+    // Character-level undo/redo in the focused cell's editor; false if
+    // no cell editor is focused (caller falls back to doc history).
+    bool undoText();
+    bool redoText();
+
     // Route a finished cell eval (AsyncEval cellId != 0) into cell state.
     void onEvalDone(std::uint64_t cellId,
                     ts::REPLSession::EvalResult const& result,

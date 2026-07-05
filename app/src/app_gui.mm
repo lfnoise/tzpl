@@ -1050,39 +1050,54 @@ int runGui(bridge::AppContext& appCtx) {
                 // editor, find bar) gets the key injected and handles its
                 // own fine-grained undo; otherwise the open notebook's
                 // document history (or the editor panel) takes it.
+                // io.WantTextInput here means a real ImGui text field
+                // (find bar, panel name) is active -- it keeps the flag
+                // through NewFrame, so the injected key reaches it. Cell
+                // TextEditors get DIRECT calls on the focused cell
+                // instead: no injection, no focus-timing dependence.
                 case AppCmd::EditUndo:
-                    if (io.WantTextInput || gTextFieldFocusedLastFrame)
-                        deferKey(ImGuiKey_Z);
-                    else if (notebookPanel.isOpen() && notebookVisible)
-                        notebookPanel.undoDocument(appCtx);
-                    else editorPanel.undo();
+                    if (io.WantTextInput) deferKey(ImGuiKey_Z);
+                    else if (notebookPanel.isOpen() && notebookVisible) {
+                        // Character undo while the cursor is in a cell's
+                        // text; document history otherwise (guide 4.6).
+                        if (!(gTextFieldFocusedLastFrame
+                              && notebookPanel.undoText()))
+                            notebookPanel.undoDocument(appCtx);
+                    } else editorPanel.undo();
                     break;
                 case AppCmd::EditRedo:
-                    if (io.WantTextInput || gTextFieldFocusedLastFrame)
-                        deferKey(ImGuiKey_Z, true);
-                    else if (notebookPanel.isOpen() && notebookVisible)
-                        notebookPanel.redoDocument(appCtx);
-                    else editorPanel.redo();
+                    if (io.WantTextInput) deferKey(ImGuiKey_Z, true);
+                    else if (notebookPanel.isOpen() && notebookVisible) {
+                        if (!(gTextFieldFocusedLastFrame
+                              && notebookPanel.redoText()))
+                            notebookPanel.redoDocument(appCtx);
+                    } else editorPanel.redo();
                     break;
                 case AppCmd::EditCut:
-                    if (io.WantTextInput || gTextFieldFocusedLastFrame)
-                        deferKey(ImGuiKey_X);
+                    if (io.WantTextInput) deferKey(ImGuiKey_X);
+                    else if (notebookPanel.isOpen() && notebookVisible)
+                        notebookPanel.cutText();
                     else editorPanel.cut();
                     break;
                 case AppCmd::EditCopy:
-                    if (io.WantTextInput || gTextFieldFocusedLastFrame)
-                        deferKey(ImGuiKey_C);
-                    else if (!outputPanel.tryCopy()) editorPanel.copy();
+                    if (io.WantTextInput) deferKey(ImGuiKey_C);
+                    else if (outputPanel.tryCopy()) {}
+                    else if (notebookPanel.isOpen() && notebookVisible)
+                        notebookPanel.copyText();
+                    else editorPanel.copy();
                     break;
                 case AppCmd::EditPaste:
-                    if (io.WantTextInput || gTextFieldFocusedLastFrame)
-                        deferKey(ImGuiKey_V);
+                    if (io.WantTextInput) deferKey(ImGuiKey_V);
+                    else if (notebookPanel.isOpen() && notebookVisible)
+                        notebookPanel.pasteText();
                     else editorPanel.paste();
                     break;
                 case AppCmd::EditSelectAll:
-                    if (io.WantTextInput || gTextFieldFocusedLastFrame)
-                        deferKey(ImGuiKey_A);
-                    else if (!outputPanel.trySelectAll()) editorPanel.selectAll();
+                    if (io.WantTextInput) deferKey(ImGuiKey_A);
+                    else if (outputPanel.trySelectAll()) {}
+                    else if (notebookPanel.isOpen() && notebookVisible)
+                        notebookPanel.selectAllText();
+                    else editorPanel.selectAll();
                     break;
                 case AppCmd::EditClearOutput:
                     outputPanel.clear(guiState.output);

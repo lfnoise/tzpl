@@ -335,6 +335,31 @@ void NotebookPanel::moveBottom(bool select) {
     if (auto* ed = focusedEditor()) ed->MoveBottom(select);
 }
 
+void NotebookPanel::cutText() {
+    if (auto* ed = focusedEditor()) ed->Cut();
+}
+void NotebookPanel::copyText() {
+    if (auto* ed = focusedEditor()) ed->Copy();
+}
+void NotebookPanel::pasteText() {
+    if (auto* ed = focusedEditor()) ed->Paste();
+}
+void NotebookPanel::selectAllText() {
+    if (auto* ed = focusedEditor()) ed->SelectAll();
+}
+bool NotebookPanel::undoText() {
+    auto* ed = focusedEditor();
+    if (!ed) return false;
+    ed->Undo();
+    return true;
+}
+bool NotebookPanel::redoText() {
+    auto* ed = focusedEditor();
+    if (!ed) return false;
+    ed->Redo();
+    return true;
+}
+
 bool NotebookPanel::openFileIntoFocusedCell(std::string const& path) {
     if (!open_ || !focusedCell_) return false;
     auto cell = store_.cell(focusedCell_);
