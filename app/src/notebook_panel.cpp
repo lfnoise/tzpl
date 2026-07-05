@@ -677,25 +677,30 @@ void NotebookPanel::drawPanelCanvas(
             if (w.panel != cell->name) continue;
             any = true;
 
-            // Auto-place widgets that have never been arranged.
+            // Unplaced widgets (fx < 0) FLOW: top to bottom in creation
+            // order, recomputed every frame -- so editing the creating
+            // code re-lays them out on the next run. A frame becomes
+            // sticky document state only via an arrange drag or
+            // setFrame(); those widgets stay where they were put.
+            float px = w.fx, py = w.fy;
             if (w.fx < 0.0f) {
-                w.fx = 8.0f;
-                w.fy = autoY;
+                px = 8.0f;
+                py = autoY;
             }
 
-            ImGui::SetCursorPos(ImVec2(w.fx * scale, w.fy * scale));
+            ImGui::SetCursorPos(ImVec2(px * scale, py * scale));
             if (arrange) ImGui::BeginDisabled();
             ImGui::BeginGroup();
             if (drawUIWidget(w)) controls.noteTapsVisible();
             ImGui::EndGroup();
             if (arrange) ImGui::EndDisabled();
 
-            // Advance the auto-flow cursor past the widget's ACTUAL
-            // drawn extent (an xy pad or piano roll is far taller than
-            // a slider row), back in unscaled canvas coordinates.
+            // Advance the flow cursor past the widget's ACTUAL drawn
+            // extent (an xy pad or piano roll is far taller than a
+            // slider row), back in unscaled canvas coordinates.
             float itemH = (ImGui::GetItemRectMax().y
                            - ImGui::GetItemRectMin().y) / scale;
-            autoY = std::max(autoY, w.fy + std::max(itemH, 24.0f) + 8.0f);
+            autoY = std::max(autoY, py + std::max(itemH, 24.0f) + 8.0f);
 
             if (arrange) {
                 // Drag overlay: move; corner grip: resize. Both snap to
@@ -709,6 +714,12 @@ void NotebookPanel::drawPanelCanvas(
                     ImVec2(std::max(rmax.x - rmin.x, 16.0f),
                            std::max(rmax.y - rmin.y, 16.0f)));
                 if (ImGui::IsItemActive()) {
+                    // Dragging a flowing widget pins it: its current
+                    // flow position becomes the sticky frame.
+                    if (w.fx < 0.0f) {
+                        w.fx = px;
+                        w.fy = py;
+                    }
                     ImVec2 d = ImGui::GetIO().MouseDelta;
                     w.fx = std::max(0.0f, w.fx + d.x);
                     w.fy = std::max(0.0f, w.fy + d.y);
