@@ -16,6 +16,7 @@
 
 #include "notebook_panel.hpp"
 
+#include "content_hash.hpp"
 #include "editor_panel.hpp"
 #include "controls_panel.hpp"
 #include "widget_draw.hpp"
@@ -1330,6 +1331,13 @@ void NotebookPanel::drawHistoryWindow(bridge::AppContext& ctx) {
             auto before = claimedPanels();
             applySnapshot(store_.jumpTo(jump), ctx, before);
         }
+        ImGui::Separator();
+        auto& pool = store_.interns();
+        ImGui::TextDisabled("%d nodes | unique: %d cells, %d widget states, "
+                            "%d presets",
+                            row, pool.cells.liveCount(),
+                            pool.snaps.liveCount(),
+                            pool.presets.liveCount());
     }
     ImGui::End();
 }

@@ -285,6 +285,44 @@ static void testV1Compat() {
 #endif
 }
 
+static int countNodes(doc::HistNode const* n) {
+    int c = 1;
+    for (auto const& ch : n->children) c += countNodes(ch.get());
+    return c;
+}
+
+static void testHistorySize() {
+    // 120 commits toggling one widget between two states: the file must
+    // grow with UNIQUE content (2 widget states, ~2 snapshots, 1 chunky
+    // cell), not node count x document size. Naive duplication would be
+    // ~120 x 2KB; content addressing keeps it to the tree records.
+    bridge::AppContext ctx;
+    std::string err;
+    std::string path = tempPath("tzpl_doc_size.tzd");
+    doc::DocumentStore store;
+    store.rerootHistory("start");
+    store.insertCell(0, doc::CellKind::Code, "", std::string(2000, 'x'));
+    store.commit("big cell");
+    for (int i = 0; i < 120; ++i) {
+        store.setWidgetSnap(
+            makeSnapList({makeSnap("freq", (i % 2) ? 1.0 : 2.0)}));
+        store.commit("toggle");
+    }
+    CHECK(doc::saveDocument(store, ctx, path, err));
+    auto size = std::filesystem::file_size(path);
+    CHECK(size < 32768);   // naive would exceed 240KB
+
+    // The full 122-node tree survives the round trip.
+    doc::DocumentStore store2;
+    doc::LoadedHistory hist;
+    auto snap = doc::loadDocument(ctx, path, err, &store2.interns(), &hist);
+    CHECK(snap && hist.root);
+    CHECK(countNodes(hist.root.get()) == 122);
+    std::filesystem::remove(path);
+    std::printf("history size: ok (%lld bytes for 122 nodes)\n",
+                (long long)size);
+}
+
 static void testMalformedHistory() {
     // A version-2 document whose history child is garbage must load its
     // current state and silently drop the history.
@@ -324,6 +362,7 @@ int main(int argc, char** argv) {
     testStoreDedup();
     testHistoryRoundTrip();
     testV1Compat();
+    testHistorySize();
     testMalformedHistory();
     std::printf("all doc tests passed\n");
     return 0;
