@@ -57,7 +57,8 @@ void NotebookPanel::newDocument() {
 
 bool NotebookPanel::open(std::string const& path, bridge::AppContext& ctx,
                          std::string& err) {
-    auto snap = doc::loadDocument(ctx, path, err);
+    doc::LoadedHistory hist;
+    auto snap = doc::loadDocument(ctx, path, err, &store_.interns(), &hist);
     if (!snap) return false;
     store_.reset(std::move(snap), path);
     runtime_.clear();
@@ -65,7 +66,18 @@ bool NotebookPanel::open(std::string const& path, bridge::AppContext& ctx,
     focusedCell_ = 0;
     open_ = true;
     queueRunOnLoad();
-    rerootHistory("open", ctx);
+    if (hist.root) {
+        // Capture the just-restored live widgets into the working snapshot
+        // (interning collapses them onto the history's snaps when equal),
+        // then install the restored tree. adoptHistory unifies the working
+        // snapshot with the cursor's when content-equal, so undo/redo pick
+        // up exactly where the document was saved.
+        store_.setWidgetSnap(doc::captureWidgets(
+            ctx.uiState, claimedPanels(), store_.snapshot()->widgets.get()));
+        store_.adoptHistory(std::move(hist.root), hist.cursor);
+    } else {
+        rerootHistory("open", ctx);
+    }
     return true;
 }
 
@@ -80,7 +92,7 @@ bool NotebookPanel::saveAs(std::string const& path, bridge::AppContext& ctx,
         return false;
     }
     syncAllCellText();
-    if (!doc::saveDocument(*store_.snapshot(), ctx, path, err)) return false;
+    if (!doc::saveDocument(store_, ctx, path, err)) return false;
     store_.setFilePath(path);
     store_.clearModified();
     return true;

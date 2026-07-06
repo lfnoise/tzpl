@@ -25,8 +25,10 @@
 #include <algorithm>
 #include <cstdio>
 #include <fstream>
+#include <map>
 #include <mutex>
 #include <set>
+#include <unordered_map>
 
 namespace doc {
 
@@ -266,6 +268,23 @@ void DocumentStore::rerootHistory(std::string const& label) {
     cursor_ = root_.get();
 }
 
+void DocumentStore::adoptHistory(std::unique_ptr<HistNode> root,
+                                 HistNode* cursor) {
+    if (!root || !cursor) return;
+    root_ = std::move(root);
+    cursor_ = cursor;
+    // Unify the working snapshot with the cursor's when content-equal, so
+    // the first post-load commit's pointer compare doesn't record a
+    // phantom node. (They differ legitimately when the file was saved
+    // with uncommitted changes.)
+    if (snap_ && cursor_->snap
+        && contentHashOf(*snap_) == contentHashOf(*cursor_->snap)
+        && sameSnapshot(*snap_, *cursor_->snap)) {
+        snap_ = cursor_->snap;
+    }
+    enforceHistoryCap();
+}
+
 SnapshotPtr DocumentStore::undo() {
     if (!canUndo()) return nullptr;
     // Remember which child we came from so redo retraces it.
@@ -334,6 +353,25 @@ static bridge::UISpec readSpec(Reader r) {
     return s;
 }
 
+// Parse one (preset name (entry panel widget (v...))...) record.
+// Returns false on malformed structure.
+static bool readPresetRec(Reader rp2, Preset& p) {
+    if (rp2.tag() != Tag::Vec || rp2.childCount() < 2) return false;
+    p.name = std::string(rp2.child(1).asStr());
+    for (std::uint32_t m = 2; m < rp2.childCount(); ++m) {
+        Reader re = rp2.child(m);
+        if (re.tag() != Tag::Vec || re.childCount() < 4) continue;
+        PresetEntry e;
+        e.panel = std::string(re.child(1).asStr());
+        e.widget = std::string(re.child(2).asStr());
+        Reader rv = re.child(3);
+        for (std::uint32_t j = 0; j < rv.childCount(); ++j)
+            e.values.push_back(rv.child(j).asFloat());
+        p.entries.push_back(std::move(e));
+    }
+    return true;
+}
+
 // Read the M5 widget-record extension (frame, matrix dims, notes, label,
 // roll params) if present; older files simply lack the trailing children.
 static void readWidgetExtras(Reader rw, bridge::UIWidget& w) {
@@ -366,8 +404,163 @@ static void readWidgetExtras(Reader rw, bridge::UIWidget& w) {
         w.keyChord = std::string(rw.child(15).asStr());
 }
 
-bool saveDocument(DocSnapshot const& snap, bridge::AppContext& ctx,
+// ---------------------------------------------------------------------------
+// History serialization (v2): content-addressed tables + flat preorder tree.
+//
+//   history = (history (ptab preset...) (wtab wsnap...) (ctab cellrec...)
+//              (stab snaprec...) (tree noderec...) cursorIdx)
+//   cellrec = v1 cell record except child 8 is (prefs pIdx...)
+//   snaprec = (snap nextCellId (cIdx...) hasWidgets (wIdx...))
+//   noderec = (node sIdx label activeChild parentIdx)   [root parentIdx -1]
+//
+// Each table entry is written once; records reference entries by index, so
+// shared content across the ~500 snapshots costs one copy on disk. Dedup
+// keys on pointer identity first (Phase-1 interning makes equal content
+// pointer-identical in practice) with a content-hash + deep-equality
+// fallback for stragglers.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+// One deduplicated table: items are appended on first sight, looked up by
+// pointer, then by content hash with a structural verify.
+template <class T>
+struct DedupTable {
+    std::vector<Value> tab;
+    std::vector<std::shared_ptr<T const>> items;
+    std::unordered_map<T const*, int> byPtr;
+    std::unordered_map<std::uint64_t, std::vector<int>> byHash;
+
+    template <class MakeValue>
+    int index(std::shared_ptr<T const> const& p, MakeValue&& makeValue) {
+        auto it = byPtr.find(p.get());
+        if (it != byPtr.end()) return it->second;
+        std::uint64_t h = contentHashOf(*p);
+        for (int i : byHash[h]) {
+            if (sameContent(*items[i], *p)) {
+                byPtr.emplace(p.get(), i);
+                return i;
+            }
+        }
+        int idx = (int)items.size();
+        items.push_back(p);
+        byPtr.emplace(p.get(), idx);
+        byHash[h].push_back(idx);
+        tab.push_back(makeValue(*p));
+        return idx;
+    }
+};
+
+struct HistoryTables {
+    DedupTable<Preset> presets;
+    DedupTable<WidgetSnap> snaps;
+    DedupTable<Cell> cells;
+    DedupTable<DocSnapshot> snapshots;
+
+    HistoryTables() {
+        presets.tab.push_back(Value::Symbol("ptab"));
+        snaps.tab.push_back(Value::Symbol("wtab"));
+        cells.tab.push_back(Value::Symbol("ctab"));
+        snapshots.tab.push_back(Value::Symbol("stab"));
+        // Discriminator symbols occupy slot 0; indices are 1-based into
+        // the vec but stored 0-based relative to the first entry, so keep
+        // items[] and tab[] aligned by subtracting nothing: entry i lives
+        // at tab child (i + 1).
+    }
+
+    int presetIndex(std::shared_ptr<Preset const> const& p) {
+        return presets.index(p, [](Preset const& v) { return presetValue(v); });
+    }
+    int snapIndex(std::shared_ptr<WidgetSnap const> const& s) {
+        return snaps.index(s, [](WidgetSnap const& v) { return widgetSnapValue(v); });
+    }
+    int cellIndex(std::shared_ptr<Cell const> const& c) {
+        return cells.index(c, [this](Cell const& v) {
+            // v1 cell record shape, but child 8 references ptab entries.
+            std::vector<Value> ps{Value::Symbol("prefs")};
+            for (auto const& pp : v.presets)
+                ps.push_back(Value::Int(presetIndex(pp)));
+            return Value::Vec({
+                Value::Symbol("cell"),
+                Value::Int((std::int64_t)v.id),
+                Value::Int((int)v.kind),
+                Value::String(v.name),
+                Value::String(v.text),
+                Value::Bool(v.runOnLoad),
+                Value::Float(v.panelHeight),
+                Value::Bool(v.collapsed),
+                Value::Vec(std::move(ps)),
+            });
+        });
+    }
+    int snapshotIndex(SnapshotPtr const& s) {
+        return snapshots.index(s, [this](DocSnapshot const& v) {
+            std::vector<Value> cIdx;
+            for (auto const& c : v.cells)
+                cIdx.push_back(Value::Int(cellIndex(c)));
+            std::vector<Value> wIdx;
+            if (v.widgets) {
+                for (auto const& w : *v.widgets)
+                    wIdx.push_back(Value::Int(snapIndex(w)));
+            }
+            return Value::Vec({
+                Value::Symbol("snap"),
+                Value::Int((std::int64_t)v.nextCellId),
+                Value::Vec(std::move(cIdx)),
+                Value::Bool(v.widgets != nullptr),
+                Value::Vec(std::move(wIdx)),
+            });
+        });
+    }
+};
+
+Value buildHistoryValue(HistNode const* root, HistNode const* cursor) {
+    HistoryTables t;
+    std::vector<Value> tree{Value::Symbol("tree")};
+    std::int64_t cursorIdx = 0;
+
+    // Iterative preorder walk; children pushed in reverse so they pop in
+    // order, which makes reconstruction (append to parent) reproduce the
+    // children order and keep activeChild indices valid.
+    struct Item { HistNode const* node; int parentIdx; };
+    std::vector<Item> stack;
+    std::unordered_map<HistNode const*, int> nodeIdx;
+    if (root) stack.push_back({root, -1});
+    while (!stack.empty()) {
+        auto [node, parentIdx] = stack.back();
+        stack.pop_back();
+        int idx = (int)nodeIdx.size();
+        nodeIdx.emplace(node, idx);
+        if (node == cursor) cursorIdx = idx;
+        tree.push_back(Value::Vec({
+            Value::Symbol("node"),
+            Value::Int(t.snapshotIndex(node->snap)),
+            Value::String(node->label),
+            Value::Int(node->activeChild),
+            Value::Int(parentIdx),
+        }));
+        for (auto it = node->children.rbegin(); it != node->children.rend();
+             ++it) {
+            stack.push_back({it->get(), idx});
+        }
+    }
+
+    return Value::Vec({
+        Value::Symbol("history"),
+        Value::Vec(std::move(t.presets.tab)),
+        Value::Vec(std::move(t.snaps.tab)),
+        Value::Vec(std::move(t.cells.tab)),
+        Value::Vec(std::move(t.snapshots.tab)),
+        Value::Vec(std::move(tree)),
+        Value::Int(cursorIdx),
+    });
+}
+
+} // namespace
+
+bool saveDocument(DocumentStore const& store, bridge::AppContext& ctx,
                   std::string const& path, std::string& err) {
+    DocSnapshot const& snap = *store.snapshot();
     std::vector<Value> cells{Value::Symbol("cells")};
     std::set<std::string> panelNames;
     for (auto const& c : snap.cells) {
@@ -423,13 +616,18 @@ bool saveDocument(DocSnapshot const& snap, bridge::AppContext& ctx,
         }
     }
 
-    Value root = Value::Vec({
+    std::vector<Value> rootKids{
         Value::Symbol("doc"),
-        Value::Int(1),  // version
+        Value::Int(2),  // version (2 = trailing content-addressed history)
         Value::Int((std::int64_t)snap.nextCellId),
         Value::Vec(std::move(cells)),
         Value::Vec(std::move(panels)),
-    });
+    };
+    if (store.historyRoot()) {
+        rootKids.push_back(
+            buildHistoryValue(store.historyRoot(), store.historyCursor()));
+    }
+    Value root = Value::Vec(std::move(rootKids));
 
     auto bytes = tzpl::sbin::encode(root);
     std::ofstream out(path, std::ios::binary | std::ios::trunc);
@@ -455,8 +653,218 @@ static void untapWidget(bridge::AppContext& ctx, long tapID, int silo) {
     }
 }
 
+// ---------------------------------------------------------------------------
+// History deserialization (v2). Any malformed record aborts the WHOLE
+// history (returns false; caller drops it) -- the document itself always
+// loads from the stable current-state sections.
+// ---------------------------------------------------------------------------
+
+static bool parseHistory(Reader h, InternPool& pool, LoadedHistory& out) {
+    if (h.tag() != Tag::Vec || h.childCount() < 7
+        || h.child(0).asStr() != "history") {
+        return false;
+    }
+
+    // ptab: unique presets.
+    Reader ptab = h.child(1);
+    if (ptab.tag() != Tag::Vec || ptab.childCount() < 1
+        || ptab.child(0).asStr() != "ptab") {
+        return false;
+    }
+    std::vector<std::shared_ptr<Preset const>> presets;
+    for (std::uint32_t i = 1; i < ptab.childCount(); ++i) {
+        Preset p;
+        if (!readPresetRec(ptab.child(i), p)) return false;
+        presets.push_back(
+            pool.presets.intern(std::make_shared<Preset const>(std::move(p))));
+    }
+
+    // wtab: unique widget snapshots. Record shape mirrors widgetSnapValue.
+    Reader wtab = h.child(2);
+    if (wtab.tag() != Tag::Vec || wtab.childCount() < 1
+        || wtab.child(0).asStr() != "wtab") {
+        return false;
+    }
+    std::vector<std::shared_ptr<WidgetSnap const>> snaps;
+    for (std::uint32_t i = 1; i < wtab.childCount(); ++i) {
+        Reader rw = wtab.child(i);
+        if (rw.tag() != Tag::Vec || rw.childCount() < 17
+            || rw.child(0).asStr() != "wsnap") {
+            return false;
+        }
+        WidgetSnap s;
+        s.panel = std::string(rw.child(1).asStr());
+        s.name = std::string(rw.child(2).asStr());
+        int kindInt = (int)rw.child(3).asInt();
+        if (kindInt < 0 || kindInt > (int)bridge::UIWidgetKind::Label)
+            kindInt = 0;
+        s.kind = (bridge::UIWidgetKind)kindInt;
+        s.spec = readSpec(rw.child(4));
+        s.spec2 = readSpec(rw.child(5));
+        Reader rv = rw.child(6);
+        for (std::uint32_t j = 0; j < rv.childCount(); ++j)
+            s.values.push_back(rv.child(j).asFloat());
+        Reader rf = rw.child(7);
+        if (rf.tag() == Tag::Vec && rf.childCount() >= 4) {
+            s.fx = (float)rf.child(0).asFloat();
+            s.fy = (float)rf.child(1).asFloat();
+            s.fw = (float)rf.child(2).asFloat();
+            s.fh = (float)rf.child(3).asFloat();
+        }
+        s.rows = std::max(1, (int)rw.child(8).asInt());
+        s.cols = std::max(1, (int)rw.child(9).asInt());
+        Reader rn = rw.child(10);
+        for (std::uint32_t j = 0; j < rn.childCount(); ++j)
+            s.noteData.push_back((float)rn.child(j).asFloat());
+        s.labelText = std::string(rw.child(11).asStr());
+        s.rollBeats = (float)rw.child(12).asFloat();
+        s.rollLowPitch = (int)rw.child(13).asInt();
+        s.rollRows = std::max(1, (int)rw.child(14).asInt());
+        s.rollEdo = std::max(1, (int)rw.child(15).asInt());
+        s.keyChord = std::string(rw.child(16).asStr());
+        snaps.push_back(
+            pool.snaps.intern(std::make_shared<WidgetSnap const>(std::move(s))));
+    }
+
+    // ctab: unique cells (preset children are ptab indices).
+    Reader ctab = h.child(3);
+    if (ctab.tag() != Tag::Vec || ctab.childCount() < 1
+        || ctab.child(0).asStr() != "ctab") {
+        return false;
+    }
+    std::vector<std::shared_ptr<Cell const>> cells;
+    for (std::uint32_t i = 1; i < ctab.childCount(); ++i) {
+        Reader rc = ctab.child(i);
+        if (rc.tag() != Tag::Vec || rc.childCount() < 9
+            || rc.child(0).asStr() != "cell") {
+            return false;
+        }
+        Cell c;
+        c.id = (CellId)rc.child(1).asInt();
+        int kind = (int)rc.child(2).asInt();
+        c.kind = (kind >= 0 && kind <= 3) ? (CellKind)kind : CellKind::Code;
+        c.name = std::string(rc.child(3).asStr());
+        c.text = std::string(rc.child(4).asStr());
+        c.runOnLoad = rc.child(5).asBool();
+        c.panelHeight = (float)rc.child(6).asFloat();
+        c.collapsed = rc.child(7).asBool();
+        Reader ps = rc.child(8);
+        if (ps.tag() != Tag::Vec || ps.childCount() < 1
+            || ps.child(0).asStr() != "prefs") {
+            return false;
+        }
+        for (std::uint32_t k = 1; k < ps.childCount(); ++k) {
+            std::int64_t idx = ps.child(k).asInt();
+            if (idx < 0 || (std::size_t)idx >= presets.size()) return false;
+            c.presets.push_back(presets[(std::size_t)idx]);
+        }
+        cells.push_back(
+            pool.cells.intern(std::make_shared<Cell const>(std::move(c))));
+    }
+
+    // stab: unique snapshots (cell/widget children are table indices).
+    Reader stab = h.child(4);
+    if (stab.tag() != Tag::Vec || stab.childCount() < 1
+        || stab.child(0).asStr() != "stab") {
+        return false;
+    }
+    std::vector<SnapshotPtr> snapshots;
+    // Equal widget-index sequences share one WidgetSnapList allocation.
+    std::map<std::vector<std::int64_t>,
+             std::shared_ptr<WidgetSnapList const>> listMemo;
+    for (std::uint32_t i = 1; i < stab.childCount(); ++i) {
+        Reader rs = stab.child(i);
+        if (rs.tag() != Tag::Vec || rs.childCount() < 5
+            || rs.child(0).asStr() != "snap") {
+            return false;
+        }
+        auto snap = std::make_shared<DocSnapshot>();
+        snap->nextCellId = (CellId)rs.child(1).asInt();
+        Reader cIdx = rs.child(2);
+        for (std::uint32_t k = 0; k < cIdx.childCount(); ++k) {
+            std::int64_t idx = cIdx.child(k).asInt();
+            if (idx < 0 || (std::size_t)idx >= cells.size()) return false;
+            snap->cells.push_back(cells[(std::size_t)idx]);
+        }
+        if (rs.child(3).asBool()) {
+            Reader wIdx = rs.child(4);
+            std::vector<std::int64_t> key;
+            for (std::uint32_t k = 0; k < wIdx.childCount(); ++k) {
+                std::int64_t idx = wIdx.child(k).asInt();
+                if (idx < 0 || (std::size_t)idx >= snaps.size()) return false;
+                key.push_back(idx);
+            }
+            auto& memo = listMemo[key];
+            if (!memo) {
+                auto list = std::make_shared<WidgetSnapList>();
+                for (std::int64_t idx : key)
+                    list->push_back(snaps[(std::size_t)idx]);
+                memo = std::move(list);
+            }
+            snap->widgets = memo;
+        }
+        snapshots.push_back(
+            pool.snapshots.intern(SnapshotPtr(std::move(snap))));
+    }
+
+    // tree: flat preorder node records.
+    Reader tree = h.child(5);
+    if (tree.tag() != Tag::Vec || tree.childCount() < 2
+        || tree.child(0).asStr() != "tree") {
+        return false;   // an empty tree is malformed: there is always a root
+    }
+    std::unique_ptr<HistNode> root;
+    std::vector<HistNode*> byIndex;
+    for (std::uint32_t i = 1; i < tree.childCount(); ++i) {
+        Reader rn = tree.child(i);
+        if (rn.tag() != Tag::Vec || rn.childCount() < 5
+            || rn.child(0).asStr() != "node") {
+            return false;
+        }
+        std::int64_t sIdx = rn.child(1).asInt();
+        if (sIdx < 0 || (std::size_t)sIdx >= snapshots.size()) return false;
+        std::int64_t parentIdx = rn.child(4).asInt();
+        auto node = std::make_unique<HistNode>();
+        node->snap = snapshots[(std::size_t)sIdx];
+        node->label = std::string(rn.child(2).asStr());
+        node->activeChild = (int)rn.child(3).asInt();
+        HistNode* raw = node.get();
+        if (byIndex.empty()) {
+            if (parentIdx != -1) return false;
+            root = std::move(node);
+        } else {
+            if (parentIdx < 0 || (std::size_t)parentIdx >= byIndex.size())
+                return false;
+            HistNode* parent = byIndex[(std::size_t)parentIdx];
+            node->parent = parent;
+            parent->children.push_back(std::move(node));
+        }
+        byIndex.push_back(raw);
+    }
+    // Clamp activeChild now that children counts are final.
+    for (HistNode* n : byIndex) {
+        if (n->activeChild < -1
+            || n->activeChild >= (int)n->children.size()) {
+            n->activeChild = -1;
+        }
+    }
+
+    std::int64_t cursorIdx = h.child(6).asInt();
+    if (cursorIdx < 0 || (std::size_t)cursorIdx >= byIndex.size())
+        cursorIdx = 0;
+
+    out.root = std::move(root);
+    out.cursor = byIndex[(std::size_t)cursorIdx];
+    return true;
+}
+
 SnapshotPtr loadDocument(bridge::AppContext& ctx, std::string const& path,
-                         std::string& err) {
+                         std::string& err, InternPool* pool,
+                         LoadedHistory* history) {
+    if (history) {
+        history->root.reset();
+        history->cursor = nullptr;
+    }
     std::ifstream in(path, std::ios::binary);
     if (!in) {
         err = "cannot open \"" + path + "\"";
@@ -496,27 +904,17 @@ SnapshotPtr loadDocument(bridge::AppContext& ctx, std::string const& path,
         if (rc.childCount() > 8) {
             Reader ps = rc.child(8);
             for (std::uint32_t k = 1; k < ps.childCount(); ++k) {
-                Reader rp2 = ps.child(k);
-                if (rp2.tag() != Tag::Vec || rp2.childCount() < 2) continue;
                 Preset p;
-                p.name = std::string(rp2.child(1).asStr());
-                for (std::uint32_t m = 2; m < rp2.childCount(); ++m) {
-                    Reader re = rp2.child(m);
-                    if (re.tag() != Tag::Vec || re.childCount() < 4) continue;
-                    PresetEntry e;
-                    e.panel = std::string(re.child(1).asStr());
-                    e.widget = std::string(re.child(2).asStr());
-                    Reader rv = re.child(3);
-                    for (std::uint32_t j = 0; j < rv.childCount(); ++j)
-                        e.values.push_back(rv.child(j).asFloat());
-                    p.entries.push_back(std::move(e));
-                }
-                cell->presets.push_back(
-                    std::make_shared<Preset const>(std::move(p)));
+                if (!readPresetRec(ps.child(k), p)) continue;
+                auto sp = std::make_shared<Preset const>(std::move(p));
+                if (pool) sp = pool->presets.intern(std::move(sp));
+                cell->presets.push_back(std::move(sp));
             }
         }
         if (cell->id >= snap->nextCellId) snap->nextCellId = cell->id + 1;
-        snap->cells.push_back(std::move(cell));
+        std::shared_ptr<Cell const> cc = std::move(cell);
+        if (pool) cc = pool->cells.intern(std::move(cc));
+        snap->cells.push_back(std::move(cc));
     }
 
     // Restore panel widgets into the ui registry, unbound. Existing widgets
@@ -567,6 +965,26 @@ SnapshotPtr loadDocument(bridge::AppContext& ctx, std::string const& path,
                 }
             }
         }
+    }
+
+    // History (v2+): the version field is now actually read. v1 files (or
+    // files without the trailing history child) simply carry no history;
+    // files from a FUTURE version load their stable current-state sections
+    // and drop the history with a warning; malformed history is dropped
+    // silently rather than failing the load.
+    std::int64_t version = root.child(1).asInt();
+    if (history && version >= 2 && root.childCount() > 5) {
+        InternPool localPool;
+        LoadedHistory parsed;
+        if (parseHistory(root.child(5), pool ? *pool : localPool, parsed)) {
+            *history = std::move(parsed);
+        }
+    }
+    if (version > 2) {
+        std::fprintf(stderr,
+                     "tzpl: \"%s\" is a newer document version (%lld); "
+                     "loaded without history\n",
+                     path.c_str(), (long long)version);
     }
 
     return snap;

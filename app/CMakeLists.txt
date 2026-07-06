@@ -157,6 +157,9 @@ if(TZPL_BUILD_GUI)
         src/content_hash.cpp
     )
     target_include_directories(tzpl_doc_tests PRIVATE src)
+    target_compile_definitions(tzpl_doc_tests PRIVATE
+        TZPL_EXAMPLES_DIR="${CMAKE_SOURCE_DIR}/examples"
+    )
     target_link_libraries(tzpl_doc_tests
         PRIVATE tzpl_synthdef_compiler_bridge
         PRIVATE tzpl_audio_engine_bridge

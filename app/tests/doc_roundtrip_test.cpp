@@ -33,21 +33,38 @@
 #include "document.hpp"
 #include "module_compiler.hpp"   // complete type for AppContext's SiloVMState
 #include "tzpl_app_context.hpp"
+#include "tzpl_sexpr_bin.hpp"
 
-#include <cassert>
 #include <cstdio>
 #include <cstring>
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
 #include <string>
+
+// CHECK() vanishes under NDEBUG (Release builds); tests must always check.
+#define CHECK(cond)                                                          \
+    do {                                                                     \
+        if (!(cond)) {                                                       \
+            std::fprintf(stderr, "CHECK failed at %s:%d: %s\n", __FILE__,   \
+                         __LINE__, #cond);                                   \
+            std::exit(1);                                                    \
+        }                                                                    \
+    } while (0)
 
 static int resave(char const* inPath, char const* outPath) {
     bridge::AppContext ctx;   // all subsystem pointers null: headless
     std::string err;
-    auto snap = doc::loadDocument(ctx, inPath, err);
+    doc::DocumentStore store;
+    doc::LoadedHistory hist;
+    auto snap = doc::loadDocument(ctx, inPath, err, &store.interns(), &hist);
     if (!snap) {
         std::fprintf(stderr, "load failed: %s\n", err.c_str());
         return 1;
     }
-    if (!doc::saveDocument(*snap, ctx, outPath, err)) {
+    store.reset(std::move(snap), inPath);
+    if (hist.root) store.adoptHistory(std::move(hist.root), hist.cursor);
+    if (!doc::saveDocument(store, ctx, outPath, err)) {
         std::fprintf(stderr, "save failed: %s\n", err.c_str());
         return 1;
     }
@@ -86,20 +103,20 @@ static void testContentHash() {
     // perturbation -> different hash (FNV collisions aside).
     auto p1 = makePreset("a", 440.0, 0.5);
     auto p2 = makePreset("a", 440.0, 0.5);
-    assert(doc::contentHashOf(p1) == doc::contentHashOf(p2));
-    assert(p1 == p2);
+    CHECK(doc::contentHashOf(p1) == doc::contentHashOf(p2));
+    CHECK(p1 == p2);
     auto p3 = makePreset("a", 440.0, 0.6);
     auto p4 = makePreset("b", 440.0, 0.5);
-    assert(doc::contentHashOf(p1) != doc::contentHashOf(p3));
-    assert(doc::contentHashOf(p1) != doc::contentHashOf(p4));
+    CHECK(doc::contentHashOf(p1) != doc::contentHashOf(p3));
+    CHECK(doc::contentHashOf(p1) != doc::contentHashOf(p4));
 
     auto s1 = makeSnap("freq", 440.0);
     auto s2 = makeSnap("freq", 440.0);
-    assert(doc::contentHashOf(s1) == doc::contentHashOf(s2));
-    assert(s1 == s2);
+    CHECK(doc::contentHashOf(s1) == doc::contentHashOf(s2));
+    CHECK(s1 == s2);
     s2.rollEdo = 19;
     doc::WidgetSnap s2b = s2;             // copy resets the cache
-    assert(doc::contentHashOf(s2b) != doc::contentHashOf(s1));
+    CHECK(doc::contentHashOf(s2b) != doc::contentHashOf(s1));
 
     // The cache resets across copy-then-mutate (the mutableCell pattern).
     doc::Cell c1;
@@ -108,7 +125,7 @@ static void testContentHash() {
     std::uint64_t h1 = doc::contentHashOf(c1);
     doc::Cell c2 = c1;
     c2.text = "x = 2;";
-    assert(doc::contentHashOf(c2) != h1);
+    CHECK(doc::contentHashOf(c2) != h1);
     std::printf("content hash: ok\n");
 }
 
@@ -117,10 +134,10 @@ static void testInterner() {
     auto a = std::make_shared<doc::Preset const>(makePreset("a", 1.0, 2.0));
     auto b = std::make_shared<doc::Preset const>(makePreset("a", 1.0, 2.0));
     auto c = std::make_shared<doc::Preset const>(makePreset("c", 1.0, 2.0));
-    assert(pool.intern(a) == a);
-    assert(pool.intern(b) == a);          // equal content collapses
-    assert(pool.intern(c) == c);          // distinct content stays distinct
-    assert(pool.liveCount() == 2);
+    CHECK(pool.intern(a) == a);
+    CHECK(pool.intern(b) == a);          // equal content collapses
+    CHECK(pool.intern(c) == c);          // distinct content stays distinct
+    CHECK(pool.liveCount() == 2);
     std::printf("interner: ok\n");
 }
 
@@ -135,7 +152,7 @@ static void testStoreDedup() {
     auto first = store.cell(id)->presets[0];
     store.setCellPresets(id, {std::make_shared<doc::Preset const>(
                                   makePreset("a", 1.0, 2.0))});
-    assert(store.cell(id)->presets[0] == first);
+    CHECK(store.cell(id)->presets[0] == first);
 
     // Widget toggle A -> B -> A across commits: the third state's snap is
     // pointer-identical to the first (content interning, not prev-reuse).
@@ -146,20 +163,156 @@ static void testStoreDedup() {
     store.commit("B");
     store.setWidgetSnap(makeSnapList({makeSnap("freq", 1.0)}));
     bool committed = store.commit("A again");
-    assert((*store.snapshot()->widgets)[0] == snapA);
+    CHECK((*store.snapshot()->widgets)[0] == snapA);
 
     // Snapshot-level interning: returning exactly to the previous state
     // must still record a node (undo history), but the SNAPSHOT object is
     // shared with the earlier node.
-    assert(committed);
+    CHECK(committed);
     auto cursorSnap = store.historyCursor()->snap;
     auto nodeA = store.historyCursor()->parent->parent;   // "A"
-    assert(doc::sameSnapshot(*cursorSnap, *nodeA->snap));
-    assert(cursorSnap == nodeA->snap);   // interned to the same object
+    CHECK(doc::sameSnapshot(*cursorSnap, *nodeA->snap));
+    CHECK(cursorSnap == nodeA->snap);   // interned to the same object
 
     // Working snapshot pointer-equals the tip: immediate commit no-ops.
-    assert(!store.commit("noop"));
+    CHECK(!store.commit("noop"));
     std::printf("store dedup: ok\n");
+}
+
+static std::string tempPath(char const* name) {
+    return (std::filesystem::temp_directory_path() / name).string();
+}
+
+// Walk two history trees in parallel, asserting identical shape, labels,
+// activeChild, and content-equal snapshots.
+static void assertSameTree(doc::HistNode const* a, doc::HistNode const* b) {
+    CHECK(a && b);
+    CHECK(a->label == b->label);
+    CHECK(a->activeChild == b->activeChild);
+    CHECK(doc::sameSnapshot(*a->snap, *b->snap));
+    CHECK(a->children.size() == b->children.size());
+    for (std::size_t i = 0; i < a->children.size(); ++i)
+        assertSameTree(a->children[i].get(), b->children[i].get());
+}
+
+static void testHistoryRoundTrip() {
+    bridge::AppContext ctx;
+    std::string err;
+    std::string path = tempPath("tzpl_doc_roundtrip.tzd");
+
+    // Build a store with edits, a widget capture, presets, and an
+    // undo-branch.
+    doc::DocumentStore store;
+    store.rerootHistory("start");
+    auto id = store.insertCell(0, doc::CellKind::Code, "", "a();");
+    store.commit("add cell");
+    store.setCellText(id, "b();");
+    store.commit("edit b");
+    CHECK(store.undo());
+    store.setCellText(id, "c();");
+    store.commit("edit c");                     // branch off "add cell"
+    store.setWidgetSnap(makeSnapList({makeSnap("freq", 1.0)}));
+    store.commit("widget");
+    auto pid = store.insertCell(1, doc::CellKind::Presets, "bank");
+    store.setCellPresets(pid, {std::make_shared<doc::Preset const>(
+                                   makePreset("a", 1.0, 2.0))});
+    store.commit("preset");
+
+    CHECK(doc::saveDocument(store, ctx, path, err));
+
+    // Reload into a fresh store, emulating NotebookPanel::open: reset,
+    // re-capture widgets (headless: install the equivalent list by hand),
+    // adopt the history.
+    doc::DocumentStore store2;
+    doc::LoadedHistory hist;
+    auto snap = doc::loadDocument(ctx, path, err, &store2.interns(), &hist);
+    CHECK(snap);
+    store2.reset(std::move(snap), path);
+    CHECK(hist.root && hist.cursor);
+    store2.setWidgetSnap(makeSnapList({makeSnap("freq", 1.0)}));
+    store2.adoptHistory(std::move(hist.root), hist.cursor);
+
+    // The whole tree round-trips: shape, labels, redo path, content.
+    assertSameTree(store.historyRoot(), store2.historyRoot());
+
+    // Cursor restored; working snapshot unified with it (no phantom node
+    // on the next commit).
+    CHECK(store2.historyCursor()->label == "preset");
+    CHECK(store2.snapshot() == store2.historyCursor()->snap);
+    CHECK(!store2.commit("noop"));
+
+    // Branch structure: "add cell" has both edits, redo path follows the
+    // branch that was taken.
+    auto const* root2 = store2.historyRoot();
+    CHECK(root2->label == "start" && root2->children.size() == 1);
+    auto const* add = root2->children[0].get();
+    CHECK(add->children.size() == 2);
+    CHECK(add->children[0]->label == "edit b");
+    CHECK(add->children[1]->label == "edit c");
+    CHECK(add->activeChild == 1);
+
+    // Content addressing on disk + intern-on-load: the same WidgetSnap
+    // object serves the "widget" and "preset" nodes, and the working
+    // snapshot's capture collapsed onto it too.
+    auto const* widgetNode = add->children[1]->children[0].get();
+    auto const* presetNode = widgetNode->children[0].get();
+    CHECK((*widgetNode->snap->widgets)[0] == (*presetNode->snap->widgets)[0]);
+    CHECK((*store2.snapshot()->widgets)[0]
+           == (*widgetNode->snap->widgets)[0]);
+
+    // Undo walks the restored tree and restores content.
+    CHECK(store2.canUndo());
+    auto prev = store2.undo();
+    CHECK(prev && doc::sameSnapshot(*prev, *widgetNode->snap));
+
+    std::filesystem::remove(path);
+    std::printf("history round trip: ok\n");
+}
+
+static void testV1Compat() {
+#ifdef TZPL_EXAMPLES_DIR
+    bridge::AppContext ctx;
+    std::string err;
+    for (char const* name : {"piano_roll.tzd", "ui_controls_layout.tzd"}) {
+        std::string path = std::string(TZPL_EXAMPLES_DIR) + "/" + name;
+        doc::DocumentStore store;
+        doc::LoadedHistory hist;
+        auto snap = doc::loadDocument(ctx, path, err, &store.interns(), &hist);
+        CHECK(snap && "v1 example must load");
+        CHECK(!hist.root && "v1 files carry no history");
+    }
+    std::printf("v1 compat: ok\n");
+#endif
+}
+
+static void testMalformedHistory() {
+    // A version-2 document whose history child is garbage must load its
+    // current state and silently drop the history.
+    using tzpl::sbin::Value;
+    Value root = Value::Vec({
+        Value::Symbol("doc"),
+        Value::Int(2),
+        Value::Int(1),
+        Value::Vec({Value::Symbol("cells")}),
+        Value::Vec({Value::Symbol("panels")}),
+        Value::Int(12345),   // not a history vec
+    });
+    auto bytes = tzpl::sbin::encode(root);
+    std::string path = tempPath("tzpl_doc_badhist.tzd");
+    {
+        std::ofstream out(path, std::ios::binary | std::ios::trunc);
+        out.write(reinterpret_cast<char const*>(bytes.data()),
+                  (std::streamsize)bytes.size());
+    }
+    bridge::AppContext ctx;
+    std::string err;
+    doc::DocumentStore store;
+    doc::LoadedHistory hist;
+    auto snap = doc::loadDocument(ctx, path, err, &store.interns(), &hist);
+    CHECK(snap && "document must load despite bad history");
+    CHECK(!hist.root);
+    std::filesystem::remove(path);
+    std::printf("malformed history: ok\n");
 }
 
 int main(int argc, char** argv) {
@@ -169,6 +322,9 @@ int main(int argc, char** argv) {
     testContentHash();
     testInterner();
     testStoreDedup();
+    testHistoryRoundTrip();
+    testV1Compat();
+    testMalformedHistory();
     std::printf("all doc tests passed\n");
     return 0;
 }

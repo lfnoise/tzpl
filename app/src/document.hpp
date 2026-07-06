@@ -213,6 +213,12 @@ public:
     // previous tree). Used right after new/open.
     void rerootHistory(std::string const& label);
 
+    // Install a history tree restored from a .tzd (replaces the current
+    // tree). If the working snapshot is content-equal to the cursor's,
+    // the cursor's snapshot pointer is adopted so the next commit()
+    // doesn't record a phantom node. Enforces kHistoryCap.
+    void adoptHistory(std::unique_ptr<HistNode> root, HistNode* cursor);
+
     bool canUndo() const { return cursor_ && cursor_->parent; }
     bool canRedo() const {
         return cursor_ && cursor_->activeChild >= 0
@@ -263,16 +269,29 @@ private:
 // Persistence (.tzd)
 // ---------------------------------------------------------------------------
 
-// Save the document. Widgets of each panel cell's panel are snapshotted
-// from ctx.uiState. Returns false with `err` set on failure.
-bool saveDocument(DocSnapshot const& snap, bridge::AppContext& ctx,
+// History restored from a .tzd v2 file (content-addressed tables in the
+// document's trailing `history` child). root is null when the file
+// carried no (readable) history.
+struct LoadedHistory {
+    std::unique_ptr<HistNode> root;
+    HistNode* cursor = nullptr;   // node the document was saved at
+};
+
+// Save the document (current state + the content-addressed history tree).
+// Widgets of each panel cell's panel are snapshotted from ctx.uiState.
+// Returns false with `err` set on failure.
+bool saveDocument(DocumentStore const& store, bridge::AppContext& ctx,
                   std::string const& path, std::string& err);
 
 // Load a document. Widgets recorded in the file are (re)created unbound in
 // ctx.uiState -- existing widgets in those panels are removed first (their
 // engine taps untapped). Returns null with `err` set on failure.
+// When `pool` is given, loaded presets/cells (and history content) are
+// interned through it; when `history` is given, a v2 file's history tree
+// is materialized into it (malformed history is dropped, never an error).
 SnapshotPtr loadDocument(bridge::AppContext& ctx, std::string const& path,
-                         std::string& err);
+                         std::string& err, InternPool* pool = nullptr,
+                         LoadedHistory* history = nullptr);
 
 // ---------------------------------------------------------------------------
 // Widget capture / restore (history commits and navigation)
