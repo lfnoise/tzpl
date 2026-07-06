@@ -344,7 +344,8 @@
                 <li><a href="#float-util">Float Utilities</a> &mdash; copysign, nextafter, isNan, isInf, isFinite, isNormal</li>
                 <li><a href="#bitwise">Bit Manipulation</a> &mdash; clz, clo, ctz, cto, popCount, rotl, rotr, bitCeil, bitFloor, bitWidth, hasSingleBit</li>
                 <li><a href="#complex">Complex Number Functions</a> &mdash; Complex, real, imag, arg, norm, conj, polar</li>
-                <li><a href="#string">String Functions</a> &mdash; length, substring, contains, startsWith, endsWith, split, trim, toUpper, toLower, replace, codePoints, indexing, min, max, cmp</li>
+                <li><a href="#fraction">Fraction Functions</a> &mdash; numer, denom</li>
+                <li><a href="#string">String Functions</a> &mdash; length, substring, contains, startsWith, endsWith, split, trim, toUpper, toLower, replace, codePoints, indexing, toSymbol, min, max, cmp</li>
                 <li><a href="#formatting">String Formatting</a> &mdash; fmt</li>
                 <li><a href="#range">Range Functions</a> &mdash; length, toArray, toList</li>
                 <li><a href="#collections">Collection Functions (Arrays &amp; Lists)</a> &mdash; length, map, filter, fold, scan, fold1, scan1, find, zip, enumerate, take, drop, takeWhile, dropWhile, stride, stutter, repeat, cat, join, flatten, sum, product, mean, min, max, sums, products, mins, maxs, any, all, contains, clump, toSet, fromCodePoints</li>
@@ -363,7 +364,7 @@
                 <li><a href="#operators">Built-in Operators</a> &mdash; arithmetic, comparison, bitwise, logical, string</li>
                 <li><a href="#type-conversions">Type Conversions</a> &mdash; toInt, toFloat, toFraction, toComplex</li>
                 <li><a href="#io">I/O Functions</a> &mdash; print, println, toString, prettyString, prettyPrint, getListPrintLimit, setListPrintLimit</li>
-                <li><a href="#introspection">Introspection</a> &mdash; disassemble, typeName&lt;T&gt;</li>
+                <li><a href="#introspection">Introspection</a> &mdash; disassemble, typeName&lt;T&gt;, typeRepr</li>
             </ul>
         </div>
 
@@ -839,6 +840,34 @@ polar(5.0, 0.0)  <span class="cmt">-- 5.0+0.0i</span></code></pre>
         </div>
 
         <!-- ============================================================ -->
+        <div class="section" id="fraction">
+            <h2>Fraction Functions</h2>
+            <p>A <code>Fraction</code> is an exact rational number written with the <code>/</code> operator between two integers, e.g. <code>7/2</code>. Fractions are always stored in lowest terms with a positive denominator; any sign is carried by the numerator (<code>6/(-8)</code> becomes <code>-3/4</code>). Fractions sit between <code>Int</code> and <code>Float</code> in the numeric tower, so they participate in the usual implicit conversions and arithmetic (see <a href="#type-conversions">Type Conversions</a> for <code>toFraction</code>, <code>toFloat</code>, etc.).</p>
+
+            <h3>Numerator &amp; Denominator</h3>
+            <table>
+                <tr><th>Function</th><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>numer(x)</code></td><td><code>Fraction &rarr; Int</code></td><td>Numerator of the reduced fraction. Carries the sign of the value.</td></tr>
+                <tr><td><code>denom(x)</code></td><td><code>Fraction &rarr; Int</code></td><td>Denominator of the reduced fraction. Always positive.</td></tr>
+            </table>
+            <pre><code>numer(<span class="hl-num">7</span>/<span class="hl-num">2</span>) println;        <span class="cmt">-- 7</span>
+denom(<span class="hl-num">7</span>/<span class="hl-num">2</span>) println;        <span class="cmt">-- 2</span>
+
+<span class="cmt">-- Values are reduced to lowest terms first</span>
+numer(<span class="hl-num">4</span>/<span class="hl-num">6</span>) println;        <span class="cmt">-- 2</span>
+denom(<span class="hl-num">4</span>/<span class="hl-num">6</span>) println;        <span class="cmt">-- 3</span>
+
+<span class="cmt">-- The sign lives in the numerator; the denominator stays positive</span>
+numer(<span class="hl-num">6</span>/(<span class="hl-num">-8</span>)) println;    <span class="cmt">-- -3</span>
+denom(<span class="hl-num">6</span>/(<span class="hl-num">-8</span>)) println;    <span class="cmt">-- 4</span>
+
+<span class="cmt">-- An integer-valued fraction reduces to denominator 1</span>
+denom(<span class="hl-num">10</span>/<span class="hl-num">5</span>) println;       <span class="cmt">-- 1</span></code></pre>
+
+            <a href="#top" class="back-to-top">&uarr; Back to top</a>
+        </div>
+
+        <!-- ============================================================ -->
         <!-- ============================================================ -->
         <div class="section" id="string">
             <h2>String Functions</h2>
@@ -962,6 +991,16 @@ codePoints("hello") take(3) collect(3)  <span class="cmt">-- [104, 101, 108]</sp
 s[0]   <span class="cmt">-- 104  (ASCII 'h')</span>
 s[1]   <span class="cmt">-- 101  (ASCII 'e')</span>
 s[4]   <span class="cmt">-- 111  (ASCII 'o')</span></code></pre>
+
+            <h3><code>toSymbol(s)</code></h3>
+            <p>Intern a string into a <code>Symbol</code>. The resulting symbol is the same interned value as the corresponding <code>'</code>-literal, so <code>toSymbol("foo") == 'foo</code>. Use this when the symbol name is only known at runtime (built from string operations) rather than written as a literal.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>toSymbol(String) &rarr; Symbol</code></td><td>Intern the string's text as a symbol.</td></tr>
+            </table>
+            <pre><code>toSymbol(<span class="hl-str">"hello"</span>) println;          <span class="cmt">-- hello</span>
+toSymbol(<span class="hl-str">"foo"</span>) == 'foo;              <span class="cmt">-- true  (same interned symbol)</span>
+toSymbol(<span class="hl-str">"note_"</span> $ toString(<span class="hl-num">3</span>));    <span class="cmt">-- 'note_3  (name built at runtime)</span></code></pre>
 
             <a href="#top" class="back-to-top">&uarr; Back to top</a>
         </div>
@@ -2632,8 +2671,27 @@ typeName&lt;[<span class="type-int">Int</span>]&gt;() println;           <span c
 typeName&lt;[String: Float]&gt;() println;  <span class="cmt">-- [String:Float]</span>
 typeName&lt;(<span class="type-int">Int</span>, Bool)&gt;() println;      <span class="cmt">-- (Int, Bool)</span></code></pre>
 
+            <h3><code>typeRepr(x)</code></h3>
+            <p>A low-level debugging aid that prints how a value's type is represented internally: its representation class (<code>Atom</code>, <code>Inline</code>, <code>Pointer</code>, &hellip;), its size in 64-bit words, whether it is a value type, whether it is recursive, and &mdash; for composites &mdash; the field layout with word offsets. The argument is a normal value; its <em>static</em> type is what gets described. Intended for understanding memory layout and inline-promotion decisions, not for use in programs.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>typeRepr(T) &rarr; Void</code></td><td>Print the internal representation of <code>T</code> to standard output.</td></tr>
+            </table>
+            <pre><code>typeRepr(<span class="hl-num">42</span>);
+<span class="cmt">-- Int: repr=Atom sizeWords=1 value=1 recursive=0</span>
+
+typeRepr(<span class="hl-num">7</span>/<span class="hl-num">2</span>);
+<span class="cmt">-- Fraction: repr=Inline sizeWords=2 value=1 recursive=0</span>
+
+<span class="kw">struct</span> Point { x <span class="type-float">Float</span>; y <span class="type-float">Float</span>; }
+typeRepr(Point { x: <span class="hl-num">1.5</span>, y: <span class="hl-num">2.5</span> });
+<span class="cmt">-- Point: repr=Inline sizeWords=2 value=1 recursive=0 inline=2 layout=[(@0,1w,Float),(@1,1w,Float)]</span>
+
+typeRepr([<span class="hl-num">1</span>, <span class="hl-num">2</span>, <span class="hl-num">3</span>]);
+<span class="cmt">-- [Int]: repr=Pointer sizeWords=1 value=1 recursive=0</span></code></pre>
+
             <div class="note">
-                <p><strong>Note:</strong> <code>disassemble</code> is not real-time safe &mdash; it writes to standard output. If a function has multiple overloads, you must disambiguate by binding it to a variable with a specific type first, since overloaded names cannot be used as values directly.</p>
+                <p><strong>Note:</strong> <code>disassemble</code> and <code>typeRepr</code> are not real-time safe &mdash; they write to standard output. For <code>disassemble</code>, if a function has multiple overloads you must disambiguate by binding it to a variable with a specific type first, since overloaded names cannot be used as values directly.</p>
             </div>
 
             <a href="#top" class="back-to-top">&uarr; Back to top</a>
@@ -2674,6 +2732,7 @@ typeName&lt;(<span class="type-int">Int</span>, Bool)&gt;() println;      <span 
             <h3 class="type-fraction">Fraction</h3>
             <p>
                 <code>abs</code>, <code>sign</code>, <code>min</code>, <code>max</code>, <code>clamp</code>, <code>cmp</code>,
+                <code>numer</code>, <code>denom</code>,
                 <code>hash</code>
             </p>
 
@@ -2697,6 +2756,7 @@ typeName&lt;(<span class="type-int">Int</span>, Bool)&gt;() println;      <span 
                 <code>codePoints</code>,
                 <code>fmt</code>,
                 <code>s[i]</code> (byte indexing),
+                <code>toSymbol</code>,
                 <code>min</code>, <code>max</code>, <code>cmp</code>,
                 <code>hash</code>
             </p>
