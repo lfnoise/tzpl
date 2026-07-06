@@ -557,7 +557,11 @@ u32 TracingGC::step(u64 deadlineNanos, GCStepSource source) {
     } else if (phase_ == Phase::Sweep) {
         done += step_sweep(deadlineNanos);
     }
-    u64 elapsed = gcMonoNanos() - start;
+    u64 endT = gcMonoNanos();
+    u64 elapsed = endT - start;
+    // Feed the MMU governor at the same choke point that measures the step.
+    // No-op (single branch) when the governor is disabled.
+    governor_.record(endT, elapsed);
     ++stepCount_;
     stepSumNanos_ += elapsed;
     if (elapsed > stepMaxNanos_) stepMaxNanos_ = elapsed;

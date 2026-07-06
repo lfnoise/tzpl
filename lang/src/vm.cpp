@@ -96,6 +96,11 @@ void registerNewObj(GCObj* obj, GCTag tag) {
 
 TracingGC& VM::tracingGC() { return *tracingGC_; }
 
+void VM::setMMUEnabled(bool on) { tracingGC_->mmuGovernor().setEnabled(on); }
+void VM::setMMUTarget(u32 mutatorPermille, u64 windowNanos) {
+    tracingGC_->mmuGovernor().setTarget(mutatorPermille, windowNanos);
+}
+
 // Shared by rtTick / nrtTick. The source is forwarded into step() so the
 // driver-split telemetry can distinguish audio-callback pauses from looser
 // NRT-thread pauses.
@@ -107,6 +112,18 @@ static void hostTickImpl(VM& vm, u64 deadlineNanos, GCStepSource source) {
         }
     }
     if (gc.phase() != TracingGC::Phase::Idle) {
+        // MMU gate: cap collector time to the mutator's guaranteed share over
+        // the trailing window. Behind mmuEnabled() so the default path is one
+        // branch and byte-for-byte the pre-MMU behavior.
+        if (gc.mmuEnabled()) {
+            u64 now = gcMonoNanos();
+            u64 permitted = gc.mmuPermittedNanos(now);
+            if (permitted == 0) return;  // window exhausted: yield to mutator
+            if (permitted != kGCNoDeadline) {
+                u64 cap = now + permitted;
+                if (cap < deadlineNanos) deadlineNanos = cap;
+            }
+        }
         gc.step(deadlineNanos, source);
     }
 }
@@ -127,13 +144,29 @@ void VM::safepointPoll() {
     // kCheckEvery work units so a single safepoint cannot stall the mutator
     // for longer than (kCheckEvery * worstUnitCost) past the budget.
     auto& gc = *tracingGC_;
-    u64 deadline = gcMonoNanos() + gcStepBudgetNanos_;
+    u64 now = gcMonoNanos();
+    u64 deadline = now + gcStepBudgetNanos_;
     if (gc.phase() == TracingGC::Phase::Idle) {
         if (gc.allocsSinceLastCycle() >= gc.cycleTriggerAllocs()) {
             gc.requestCycle();
         }
     }
     if (gc.phase() != TracingGC::Phase::Idle) {
+        // MMU gate (see hostTickImpl). When the window is exhausted we skip
+        // the step but re-arm gcRequested_ so the very next safepoint retries
+        // once wall-clock time frees window budget -- the cycle keeps making
+        // progress in slivers rather than stalling.
+        if (gc.mmuEnabled()) {
+            u64 permitted = gc.mmuPermittedNanos(now);
+            if (permitted == 0) {
+                gcRequested_.store(true, std::memory_order_relaxed);
+                return;
+            }
+            if (permitted != kGCNoDeadline) {
+                u64 cap = now + permitted;
+                if (cap < deadline) deadline = cap;
+            }
+        }
         gc.step(deadline, GCStepSource::Safepoint);
         // Cycle still in flight: re-arm so the next safepoint continues.
         if (gc.phase() != TracingGC::Phase::Idle) {

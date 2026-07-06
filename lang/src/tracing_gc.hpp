@@ -29,6 +29,7 @@
 
 #include "base_types.hpp"
 #include "gc.hpp"
+#include "mmu_governor.hpp"
 #include <vector>
 #include <time.h>
 
@@ -49,6 +50,11 @@ inline u64 gcMonoNanos() {
 
 // Sentinel for "no deadline" (used by runFullCycle and tests).
 inline constexpr u64 kGCNoDeadline = ~u64{0};
+
+// The MMU governor's "unconstrained" sentinel must share this value so a
+// driver can treat a governor result of kUnbounded as "leave my own deadline".
+static_assert(MMUGovernor::kUnbounded == kGCNoDeadline,
+              "MMUGovernor::kUnbounded must equal kGCNoDeadline");
 
 // Phase 6: who called step()? Used to split telemetry buckets so the
 // audio-thread max-pause (the one the user cares about) doesn't get
@@ -140,6 +146,31 @@ public:
         }
     }
 
+    // ---- Minimum Mutator Utilization (MMU) scheduling --------------------
+    // The governor bounds the *fraction* of CPU the collector consumes over a
+    // trailing window, on top of the per-step *pause* bound. See
+    // mmu_governor.hpp. Disabled by default; RT VMs enable a conservative
+    // preset at attach (bridge AttachVMCmd). All governor state is touched
+    // only on this VM's owning thread, matching the step() telemetry.
+    MMUGovernor& mmuGovernor() { return governor_; }
+    bool mmuEnabled() const { return governor_.enabled(); }
+
+    // How much collector time is permitted starting at `now` without breaking
+    // the utilization target. First refreshes the safety valve: while a cycle
+    // is in flight and allocation has run kUrgencyFactor x past the trigger
+    // that started it, the collector is falling behind the mutator, so the cap
+    // is lifted (returns kGCNoDeadline) to guarantee the cycle completes before
+    // the heap grows unbounded. Returns kGCNoDeadline when the governor is
+    // disabled. Drivers clamp their deadline to min(ownBudget, now + result),
+    // or skip the step when the result is 0.
+    u64 mmuPermittedNanos(u64 now) {
+        bool urgent = phase_ != Phase::Idle &&
+            (u64)allocsSinceLastCycle_ >= (u64)nextTriggerAllocs_ * kUrgencyFactor;
+        governor_.setUrgent(urgent);
+        return governor_.permittedNanos(now);
+    }
+    static constexpr u32 kUrgencyFactor = 3;
+
     // Mark an object: if currently white, transition to gray and push to
     // worklist. No-op for immortals, blacks, and grays. Called by the
     // root walker and by future write barriers.
@@ -215,6 +246,10 @@ private:
     u32 currentBlackCount_ = 0;
     u32 allocsSinceLastCycle_ = 0;
     u32 nextTriggerAllocs_ = kMinTriggerAllocs;
+
+    // MMU scheduler. record() is fed from step(); permittedNanos()/urgency
+    // are driven via mmuPermittedNanos() above. Disabled until configured.
+    MMUGovernor governor_;
 
     // Phase 6 telemetry counters; written only inside step(). Cheap to
     // maintain (single add + max each call) so we leave them always-on.

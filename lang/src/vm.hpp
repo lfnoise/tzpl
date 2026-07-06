@@ -425,6 +425,13 @@ public:
     void setGCStepBudgetNanos(u64 ns) { gcStepBudgetNanos_ = ns; }
     u64  gcStepBudgetNanos() const { return gcStepBudgetNanos_; }
 
+    // Minimum Mutator Utilization scheduling. Off by default; RT VMs enable a
+    // conservative preset at attach. setMMUTarget takes the mutator's target
+    // share in parts-per-thousand (900 = 90% mutator) and the window length W
+    // in nanoseconds. Defined in vm.cpp (TracingGC is pimpl-ed).
+    void setMMUEnabled(bool on);
+    void setMMUTarget(u32 mutatorPermille, u64 windowNanos);
+
 private:
     void hostTick_(u64 deadlineNanos);
 public:

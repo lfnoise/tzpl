@@ -3034,6 +3034,45 @@ static void builtin_gc_set_step_budget_ns(VM& vm, u16 dst, u16, u16 argBase) {
     vm.reg(dst).i = 0;
 }
 
+// ---- Minimum Mutator Utilization (MMU) scheduler controls -----------------
+// Enable/disable the utilization governor for this VM. Arg != 0 enables.
+static void builtin_gc_mmu_set_enabled(VM& vm, u16 dst, u16, u16 argBase) {
+    vm.setMMUEnabled(vm.reg(argBase).i != 0);
+    vm.reg(dst).i = 0;
+}
+// Configure the target: (mutatorPermille, windowNanos). 900 = 90% mutator.
+// Reconfiguring clears accumulated window history.
+static void builtin_gc_mmu_set_target(VM& vm, u16 dst, u16, u16 argBase) {
+    i64 permille = vm.reg(argBase).i;
+    i64 windowNs = vm.reg(argBase + 1).i;
+    if (permille < 0) permille = 0;
+    if (permille > 1000) permille = 1000;
+    if (windowNs < 1) windowNs = 1;
+    vm.setMMUTarget((u32)permille, (u64)windowNs);
+    vm.reg(dst).i = 0;
+}
+static void builtin_gc_mmu_enabled(VM& vm, u16 dst, u16, u16) {
+    vm.reg(dst).i = vm.tracingGC().mmuGovernor().enabled() ? 1 : 0;
+}
+// Lowest mutator utilization (parts-per-thousand) observed over any sampled
+// window since the last reset. The achieved-MMU number; should stay >= the
+// configured target while enabled and not escalating.
+static void builtin_gc_mmu_min_mutator_permille(VM& vm, u16 dst, u16, u16) {
+    vm.reg(dst).i = (i64)vm.tracingGC().mmuGovernor().minMutatorPermilleObserved();
+}
+// Count of urgency escalations (cap lifted because allocation outran the
+// in-flight cycle). A health signal: frequent escalations mean the target is
+// too strict for the allocation rate.
+static void builtin_gc_mmu_escalations(VM& vm, u16 dst, u16, u16) {
+    vm.reg(dst).i = (i64)vm.tracingGC().mmuGovernor().escalations();
+}
+// Clear the governor's sliding window and observed-MMU low-water (keeps
+// config). Useful to take a clean measurement after warm-up.
+static void builtin_gc_mmu_reset(VM& vm, u16 dst, u16, u16) {
+    vm.tracingGC().mmuGovernor().reset();
+    vm.reg(dst).i = 0;
+}
+
 // Legacy name retained for .x tests written against the ARC era. Under the
 // tracing GC there is no auto-release pool; just run a full cycle.
 static void builtin_gc_drain_pool(VM& vm, u16 dst, u16, u16) {
@@ -4156,6 +4195,14 @@ void registerBuiltinFunctions(Compiler& compiler,
     // Per-VM step-budget knob.
     registerOne(compiler, functions, "__gc_get_step_budget_ns", compiler.intType(),  {},                       builtin_gc_get_step_budget_ns, /*pure=*/false, /*rtSafe=*/false);
     registerOne(compiler, functions, "__gc_set_step_budget_ns", compiler.intType(),  {compiler.intType()},     builtin_gc_set_step_budget_ns, /*pure=*/false, /*rtSafe=*/false);
+
+    // MMU (minimum mutator utilization) scheduler controls.
+    registerOne(compiler, functions, "__gc_mmu_set_enabled",           compiler.intType(), {compiler.intType()},                    builtin_gc_mmu_set_enabled,           /*pure=*/false, /*rtSafe=*/false);
+    registerOne(compiler, functions, "__gc_mmu_set_target",            compiler.intType(), {compiler.intType(), compiler.intType()}, builtin_gc_mmu_set_target,            /*pure=*/false, /*rtSafe=*/false);
+    registerOne(compiler, functions, "__gc_mmu_enabled",               compiler.intType(), {},                                       builtin_gc_mmu_enabled,               /*pure=*/false, /*rtSafe=*/false);
+    registerOne(compiler, functions, "__gc_mmu_min_mutator_permille",  compiler.intType(), {},                                       builtin_gc_mmu_min_mutator_permille,  /*pure=*/false, /*rtSafe=*/false);
+    registerOne(compiler, functions, "__gc_mmu_escalations",           compiler.intType(), {},                                       builtin_gc_mmu_escalations,           /*pure=*/false, /*rtSafe=*/false);
+    registerOne(compiler, functions, "__gc_mmu_reset",                 compiler.intType(), {},                                       builtin_gc_mmu_reset,                 /*pure=*/false, /*rtSafe=*/false);
 
     // --- Ref builtins ---
     // Phase 4g.6: ref / deref / setref read inline-composite args directly
