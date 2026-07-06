@@ -241,6 +241,9 @@ private:
     int pendingMoveDelta_ = 0;
 
     bool showHistory_ = false;
+    // Scroll the History window to the cursor row on the next draw
+    // (set after an arrow-key jump so the cursor stays visible).
+    bool historyScrollPending_ = false;
     bool closeRequested_ = false;
     bool editorViewRequested_ = false;
     bool performMode_ = false;

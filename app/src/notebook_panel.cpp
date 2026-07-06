@@ -1304,10 +1304,12 @@ void NotebookPanel::drawHistoryWindow(bridge::AppContext& ctx) {
     ImGui::SetNextWindowSize(ImVec2(280.0f, 360.0f), ImGuiCond_FirstUseEver);
     if (ImGui::Begin("History", &showHistory_)) {
         doc::HistNode* jump = nullptr;
+        std::vector<doc::HistNode*> rows;   // nodes in draw (preorder) order
         int row = 0;
         // Depth-first over the whole tree; siblings indent under branches.
         std::function<void(doc::HistNode*, int)> walk =
             [&](doc::HistNode* n, int depth) {
+                rows.push_back(n);
                 ImGui::PushID(row++);
                 ImGui::Indent((float)depth * 12.0f);
                 std::string label = n->label;
@@ -1316,6 +1318,10 @@ void NotebookPanel::drawHistoryWindow(bridge::AppContext& ctx) {
                            + " branches)";
                 }
                 bool isCursor = (n == store_.historyCursor());
+                if (isCursor && historyScrollPending_) {
+                    ImGui::SetScrollHereY(0.5f);
+                    historyScrollPending_ = false;
+                }
                 if (ImGui::Selectable(label.c_str(), isCursor)) {
                     jump = n;
                 }
@@ -1327,6 +1333,26 @@ void NotebookPanel::drawHistoryWindow(bridge::AppContext& ctx) {
                 }
             };
         if (store_.historyRoot()) walk(store_.historyRoot(), 0);
+        // While the window is focused, Up/Down step the cursor through the
+        // rows exactly as listed (holding a key repeats): a linear history
+        // scrubs like undo/redo, and crossing into a sibling branch is the
+        // same jump a click performs. Each step recalls the state.
+        if (ImGui::IsWindowFocused() && !rows.empty()) {
+            int delta = 0;
+            if (ImGui::IsKeyPressed(ImGuiKey_UpArrow)) delta = -1;
+            if (ImGui::IsKeyPressed(ImGuiKey_DownArrow)) delta = 1;
+            if (delta != 0) {
+                int cur = 0;
+                for (int i = 0; i < (int)rows.size(); ++i) {
+                    if (rows[i] == store_.historyCursor()) { cur = i; break; }
+                }
+                int next = std::clamp(cur + delta, 0, (int)rows.size() - 1);
+                if (rows[next] != store_.historyCursor()) {
+                    jump = rows[next];
+                    historyScrollPending_ = true;
+                }
+            }
+        }
         if (jump) {
             auto before = claimedPanels();
             applySnapshot(store_.jumpTo(jump), ctx, before);

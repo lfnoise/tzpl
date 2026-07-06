@@ -270,19 +270,54 @@ static void testHistoryRoundTrip() {
 }
 
 static void testV1Compat() {
-#ifdef TZPL_EXAMPLES_DIR
     bridge::AppContext ctx;
     std::string err;
-    for (char const* name : {"piano_roll.tzd", "ui_controls_layout.tzd"}) {
-        std::string path = std::string(TZPL_EXAMPLES_DIR) + "/" + name;
+
+    // Synthesize a v1 document (5 children, version 1, no history child)
+    // and check it loads with empty history. Self-contained: the example
+    // .tzd files in the repo get re-saved as v2 over time.
+    {
+        using tzpl::sbin::Value;
+        Value root = Value::Vec({
+            Value::Symbol("doc"),
+            Value::Int(1),
+            Value::Int(2),
+            Value::Vec({Value::Symbol("cells"),
+                        Value::Vec({Value::Symbol("cell"), Value::Int(1),
+                                    Value::Int(1), Value::String(""),
+                                    Value::String("x();"),
+                                    Value::Bool(false)})}),
+            Value::Vec({Value::Symbol("panels")}),
+        });
+        auto bytes = tzpl::sbin::encode(root);
+        std::string path = tempPath("tzpl_doc_v1.tzd");
+        {
+            std::ofstream out(path, std::ios::binary | std::ios::trunc);
+            out.write(reinterpret_cast<char const*>(bytes.data()),
+                      (std::streamsize)bytes.size());
+        }
         doc::DocumentStore store;
         doc::LoadedHistory hist;
         auto snap = doc::loadDocument(ctx, path, err, &store.interns(), &hist);
-        CHECK(snap && "v1 example must load");
+        CHECK(snap && "v1 document must load");
+        CHECK(snap->cells.size() == 1 && snap->cells[0]->text == "x();");
         CHECK(!hist.root && "v1 files carry no history");
+        std::filesystem::remove(path);
     }
-    std::printf("v1 compat: ok\n");
+
+#ifdef TZPL_EXAMPLES_DIR
+    // The shipped examples (whatever version they were last saved as)
+    // must load cleanly.
+    for (char const* name : {"piano_roll.tzd", "ui_controls_layout.tzd"}) {
+        std::string path = std::string(TZPL_EXAMPLES_DIR) + "/" + name;
+        if (!std::filesystem::exists(path)) continue;
+        doc::DocumentStore store;
+        doc::LoadedHistory hist;
+        auto snap = doc::loadDocument(ctx, path, err, &store.interns(), &hist);
+        CHECK(snap && "example must load");
+    }
 #endif
+    std::printf("v1 compat: ok\n");
 }
 
 static int countNodes(doc::HistNode const* n) {
