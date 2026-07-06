@@ -34,6 +34,8 @@
 //
 
 #include "value_graph.hpp"
+#include "persistent_vector.hpp"
+#include "persistent_map.hpp"
 
 #include <stdexcept>
 
@@ -307,11 +309,32 @@ size_t graphHashSlowWord(Word w, Type* type, GraphHashCtx& ctx) {
         ctx.memo[w.o] = h;
         return h;
     }
-    // NOTE: the fast path has no PVec/PMap branches -- persistent
-    // collections fall through to the pointer hash -- so the slow path
-    // must fall through too (fast/slow agreement outweighs structural
-    // hashing here; a structural PVec/PMap hash would have to land in
-    // both paths at once).
+    if (auto* pvT = dynamic_cast<PersistentVectorType*>(type)) {
+        auto* v = static_cast<PVec*>(w.o);
+        ctx.memo.emplace(w.o, prelim(GCTag::PVec, v->count_));
+        Type* et = pvT->elemType_;
+        size_t h = v->count_;
+        for (u32 i = 0; i < v->count_; ++i) {
+            h = hashCombine(h, graphHashSlowWords(v->elemAt(i), et, ctx));
+        }
+        ctx.memo[w.o] = h;
+        return h;
+    }
+    if (auto* pmT = dynamic_cast<PersistentMapType*>(type)) {
+        auto* m = static_cast<PMap*>(w.o);
+        ctx.memo.emplace(w.o, prelim(GCTag::PMap, m->count_));
+        Type* kt = pmT->keyType_;
+        Type* vt = pmT->valueType_;
+        u32 kS = strideForType(kt);
+        size_t h = m->count_;
+        PMapIter it(m);
+        while (Word const* pair = it.next()) {
+            h ^= hashCombine(graphHashSlowWords(pair, kt, ctx),
+                             graphHashSlowWords(pair + kS, vt, ctx));
+        }
+        ctx.memo[w.o] = h;
+        return h;
+    }
     // Fallback: hash pointer (same as the fast path).
     return std::hash<void*>{}(w.p);
 }

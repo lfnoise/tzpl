@@ -1530,6 +1530,30 @@ size_t WordHash::hashFast(Word w) const {
         WordHash sub{refT->elemType_};
         return sub.hashFast(ref->value_);
     }
+    if (auto* pvT = dynamic_cast<PersistentVectorType*>(type)) {
+        // Structural, like Array: ordered combine over elements. Must stay
+        // in lockstep with WordEqual's structural PVec comparison.
+        auto* v = static_cast<PVec*>(w.o);
+        Type* et = pvT->elemType_;
+        size_t h = v->count_;
+        for (u32 i = 0; i < v->count_; ++i) {
+            h = hashCombine(h, hashWordsFast(v->elemAt(i), et));
+        }
+        return h;
+    }
+    if (auto* pmT = dynamic_cast<PersistentMapType*>(type)) {
+        // Structural, like Map: XOR combine -> iteration-order independent.
+        auto* m = static_cast<PMap*>(w.o);
+        Type* kt = pmT->keyType_;
+        Type* vt = pmT->valueType_;
+        u32 kS = strideForType(kt);
+        size_t h = m->count_;
+        PMapIter it(m);
+        while (Word const* pair = it.next()) {
+            h ^= hashCombine(hashWordsFast(pair, kt), hashWordsFast(pair + kS, vt));
+        }
+        return h;
+    }
     // Fallback: hash pointer
     return std::hash<void*>{}(w.p);
 }
