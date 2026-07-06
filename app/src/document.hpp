@@ -49,6 +49,19 @@ using CellId = std::uint64_t;
 
 enum class CellKind : int { Prose = 0, Code = 1, Panel = 2, Presets = 3 };
 
+// Lazily computed 64-bit content hash (see content_hash.hpp). 0 = not yet
+// computed; a computed hash is never 0. Copies start UNSET so the
+// copy-then-mutate patterns (mutableCell, preset slot edits) can never
+// carry a stale hash. Objects are shared_ptr<T const> immutable-after-
+// publish and touched only by the GUI thread, so a plain mutable field is
+// safe. Excluded from all structural equality.
+struct CHash {
+    mutable std::uint64_t v = 0;
+    CHash() = default;
+    CHash(CHash const&) {}
+    CHash& operator=(CHash const&) { v = 0; return *this; }
+};
+
 // One stored control snapshot in a Presets cell: values of the input
 // widgets in the cell's scope (the panel cells after it, up to the
 // next Presets cell), keyed by exact panel + widget name.
@@ -61,6 +74,7 @@ struct PresetEntry {
 struct Preset {
     std::string name;  // optional
     std::vector<PresetEntry> entries;
+    CHash chash;
 };
 
 struct Cell {
@@ -75,6 +89,7 @@ struct Cell {
     // (immutable), so editing one slot doesn't duplicate the bank
     // across history snapshots.
     std::vector<std::shared_ptr<Preset const>> presets;
+    CHash chash;
 };
 
 // State of one widget in a document-claimed panel, captured into snapshots
@@ -97,6 +112,7 @@ struct WidgetSnap {
     int rollRows = 24;
     int rollEdo = 12;
     std::string keyChord;
+    CHash chash;
 
     bool operator==(WidgetSnap const& o) const {
         return panel == o.panel && name == o.name && kind == o.kind
@@ -127,6 +143,7 @@ struct DocSnapshot {
     // Widgets of document-claimed panels at the last commit (shared between
     // snapshots when unchanged).
     std::shared_ptr<WidgetSnapList const> widgets;
+    CHash chash;
 };
 
 using SnapshotPtr = std::shared_ptr<DocSnapshot const>;
@@ -142,11 +159,16 @@ struct HistNode {
     int activeChild = -1;
 };
 
+struct InternPool;   // content_hash.hpp
+
 // GUI-thread-only mutator. Every edit produces a new snapshot; M3 keeps
 // only the current one (M4 hangs the history tree off these).
 class DocumentStore {
 public:
     DocumentStore();
+    ~DocumentStore();
+    DocumentStore(DocumentStore const&) = delete;
+    DocumentStore& operator=(DocumentStore const&) = delete;
 
     SnapshotPtr snapshot() const { return snap_; }
     int cellCount() const { return (int)snap_->cells.size(); }
@@ -206,6 +228,13 @@ public:
 
     HistNode* historyRoot() { return root_.get(); }
     HistNode* historyCursor() { return cursor_; }
+    HistNode const* historyRoot() const { return root_.get(); }
+    HistNode const* historyCursor() const { return cursor_; }
+
+    // Content-addressed pointer pool: equal-but-not-pointer-identical
+    // Presets/WidgetSnaps/Cells/Snapshots collapse to shared pointers as
+    // they pass through the store's mutation APIs (and document load).
+    InternPool& interns() { return *interns_; }
 
     // History is bounded: past this many nodes, commit() advances the
     // root along the path to the cursor, discarding the oldest state
@@ -218,12 +247,16 @@ private:
     // Clone-on-write: returns a mutable copy of the cell installed in a
     // fresh snapshot.
     Cell* mutableCell(CellId id);
+    // Enforce kHistoryCap: advance the root toward the cursor, one
+    // generation at a time, until the tree fits.
+    void enforceHistoryCap();
     SnapshotPtr snap_;
     std::string filePath_;
     bool modified_ = false;
 
     std::unique_ptr<HistNode> root_;
     HistNode* cursor_ = nullptr;
+    std::unique_ptr<InternPool> interns_;
 };
 
 // ---------------------------------------------------------------------------

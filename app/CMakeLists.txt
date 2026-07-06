@@ -96,6 +96,7 @@ if(TZPL_BUILD_GUI)
         src/controls_panel.cpp
         src/widget_draw.cpp
         src/document.cpp
+        src/content_hash.cpp
         src/notebook_panel.cpp
     )
     if(APPLE)
@@ -143,6 +144,25 @@ endif()
 target_compile_definitions(tzpl_app PRIVATE
     MODULES_DIR="${CMAKE_SOURCE_DIR}/bridge/modules"
 )
+
+# ---------------------------------------------------------------------------
+# Headless document-layer tests (save/load round trips, content hashing,
+# interning, persistent history). Runs with an all-null AppContext.
+# ---------------------------------------------------------------------------
+
+if(TZPL_BUILD_GUI)
+    add_executable(tzpl_doc_tests
+        tests/doc_roundtrip_test.cpp
+        src/document.cpp
+        src/content_hash.cpp
+    )
+    target_include_directories(tzpl_doc_tests PRIVATE src)
+    target_link_libraries(tzpl_doc_tests
+        PRIVATE tzpl_synthdef_compiler_bridge
+        PRIVATE tzpl_audio_engine_bridge
+        PRIVATE tzpl_clock_bridge
+    )
+endif()
 
 # --- install targets ---
 

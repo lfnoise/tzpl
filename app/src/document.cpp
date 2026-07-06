@@ -15,6 +15,7 @@
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "document.hpp"
+#include "content_hash.hpp"
 
 #include "tzpl_app_context.hpp"
 #include "tzpl_ui_state.hpp"
@@ -37,9 +38,12 @@ using tzpl::sbin::Tag;
 // DocumentStore
 // ---------------------------------------------------------------------------
 
-DocumentStore::DocumentStore() {
+DocumentStore::DocumentStore()
+    : interns_(std::make_unique<InternPool>()) {
     snap_ = std::make_shared<DocSnapshot const>();
 }
+
+DocumentStore::~DocumentStore() = default;
 
 std::shared_ptr<Cell const> DocumentStore::cellAt(int index) const {
     if (index < 0 || index >= (int)snap_->cells.size()) return nullptr;
@@ -142,6 +146,10 @@ void DocumentStore::setCellCollapsed(CellId id, bool collapsed) {
 
 void DocumentStore::setCellPresets(
     CellId id, std::vector<std::shared_ptr<Preset const>> presets) {
+    // Content-intern each slot: a recreated-equal preset (re-capture,
+    // rename back, ...) collapses onto the existing object anywhere in
+    // the history instead of duplicating it.
+    for (auto& p : presets) p = interns_->presets.intern(std::move(p));
     if (Cell* c = mutableCell(id)) c->presets = std::move(presets);
 }
 
@@ -156,18 +164,23 @@ void DocumentStore::reset(SnapshotPtr snap, std::string filePath) {
 // History tree
 // ---------------------------------------------------------------------------
 
-// Element-wise equality with a shared-pointer short-circuit: captures
-// reuse unchanged widgets' pointers, so the common case is cheap.
-static bool sameWidgetLists(WidgetSnapList const& a, WidgetSnapList const& b) {
-    if (a.size() != b.size()) return false;
-    for (std::size_t i = 0; i < a.size(); ++i) {
-        if (a[i] == b[i]) continue;
-        if (!a[i] || !b[i] || !(*a[i] == *b[i])) return false;
-    }
-    return true;
-}
+// (sameWidgetLists lives in content_hash.cpp: shared-pointer short-circuit,
+// cached-hash inequality pre-check, then deep ==.)
 
 bool DocumentStore::setWidgetSnap(std::shared_ptr<WidgetSnapList const> widgets) {
+    // Content-intern the incoming elements so recurring states (toggle
+    // A->B->A across non-adjacent commits) collapse onto the existing
+    // objects anywhere in the history. captureWidgets' prev-reuse only
+    // catches the adjacent-frame case.
+    if (widgets) {
+        bool changed = false;
+        auto interned = std::make_shared<WidgetSnapList>(*widgets);
+        for (auto& w : *interned) {
+            auto q = interns_->snaps.intern(w);
+            if (q != w) { w = std::move(q); changed = true; }
+        }
+        if (changed) widgets = std::move(interned);
+    }
     bool same;
     if (snap_->widgets == widgets) {
         same = true;
@@ -194,6 +207,26 @@ static int countHistNodes(HistNode const* n) {
 bool DocumentStore::commit(std::string const& label) {
     if (!cursor_) return false;
     if (snap_ == cursor_->snap) return false;
+
+    // Content-intern the working snapshot's cells and the snapshot
+    // itself: undo-branch re-edits that recreate an earlier state
+    // collapse onto the existing objects instead of duplicating them.
+    {
+        bool changed = false;
+        auto cells = snap_->cells;
+        for (auto& c : cells) {
+            auto q = interns_->cells.intern(c);
+            if (q != c) { c = std::move(q); changed = true; }
+        }
+        if (changed) {
+            auto next = std::make_shared<DocSnapshot>(*snap_);
+            next->cells = std::move(cells);
+            snap_ = std::move(next);
+        }
+        snap_ = interns_->snapshots.intern(snap_);
+        if (snap_ == cursor_->snap) return false;   // interned to the tip
+    }
+
     auto node = std::make_unique<HistNode>();
     node->snap = snap_;
     node->label = label;
@@ -202,9 +235,14 @@ bool DocumentStore::commit(std::string const& label) {
     cursor_->children.push_back(std::move(node));
     cursor_ = cursor_->children.back().get();
 
-    // Enforce the cap: advance the root toward the cursor, one
-    // generation at a time, until the tree fits. The cursor's own
-    // ancestry survives; branches off dropped ancestors go with them.
+    enforceHistoryCap();
+    return true;
+}
+
+void DocumentStore::enforceHistoryCap() {
+    // Advance the root toward the cursor, one generation at a time, until
+    // the tree fits. The cursor's own ancestry survives; branches off
+    // dropped ancestors go with them.
     while (root_.get() != cursor_
            && countHistNodes(root_.get()) > kHistoryCap) {
         HistNode* n = cursor_;
@@ -219,7 +257,6 @@ bool DocumentStore::commit(std::string const& label) {
         keep->parent = nullptr;
         root_ = std::move(keep);
     }
-    return true;
 }
 
 void DocumentStore::rerootHistory(std::string const& label) {
@@ -282,11 +319,7 @@ SnapshotPtr DocumentStore::jumpTo(HistNode* node) {
 //   values = (v...)          frame = (x y w h)   [frame unused until M5]
 // ---------------------------------------------------------------------------
 
-static Value specValue(bridge::UISpec const& s) {
-    return Value::Vec({Value::Float(s.lo), Value::Float(s.hi),
-                       Value::Float(s.init), Value::Int((int)s.warp),
-                       Value::Float(s.warpParam)});
-}
+// (specValue lives in content_hash.cpp, shared with the content hashes.)
 
 static bridge::UISpec readSpec(Reader r) {
     bridge::UISpec s;
@@ -338,32 +371,9 @@ bool saveDocument(DocSnapshot const& snap, bridge::AppContext& ctx,
     std::vector<Value> cells{Value::Symbol("cells")};
     std::set<std::string> panelNames;
     for (auto const& c : snap.cells) {
-        std::vector<Value> ps{Value::Symbol("presets")};
-        for (auto const& pp : c->presets) {
-            Preset const& p = *pp;
-            std::vector<Value> pv{Value::Symbol("preset"),
-                                  Value::String(p.name)};
-            for (auto const& e : p.entries) {
-                std::vector<Value> vals;
-                for (double v : e.values) vals.push_back(Value::Float(v));
-                pv.push_back(Value::Vec({Value::Symbol("entry"),
-                                         Value::String(e.panel),
-                                         Value::String(e.widget),
-                                         Value::Vec(std::move(vals))}));
-            }
-            ps.push_back(Value::Vec(std::move(pv)));
-        }
-        cells.push_back(Value::Vec({
-            Value::Symbol("cell"),
-            Value::Int((std::int64_t)c->id),
-            Value::Int((int)c->kind),
-            Value::String(c->name),
-            Value::String(c->text),
-            Value::Bool(c->runOnLoad),
-            Value::Float(c->panelHeight),
-            Value::Bool(c->collapsed),
-            Value::Vec(std::move(ps)),
-        }));
+        // The canonical builder (content_hash.cpp) is also what the
+        // content hashes are computed from -- one representation.
+        cells.push_back(cellValue(*c));
         if (c->kind == CellKind::Panel) panelNames.insert(c->name);
     }
 
