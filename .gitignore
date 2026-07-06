@@ -1,5 +1,4 @@
-build/
-build-asan/
+build*/
 DerivedData/
 tzpl_dir/
 sapf3_dir/
