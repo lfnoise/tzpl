@@ -542,6 +542,13 @@ if (localStorage.getItem('tzpl-docs-theme') === 'light') document.documentElemen
         <li><a href="#async-notes">How It Works</a></li>
       </ol>
     </li>
+    <li><a href="#serialization">Serialization and Pretty Printing</a>
+      <ol>
+        <li><a href="#pretty-printing">Pretty Printing</a></li>
+        <li><a href="#serialize-deserialize">serialize and deserialize&lt;T&gt;</a></li>
+        <li><a href="#serialization-typing">Type Safety and Errors</a></li>
+      </ol>
+    </li>
     <li><a href="#advanced-examples">Advanced Examples</a>
       <ol>
         <li><a href="#fibonacci">Fibonacci</a></li>
@@ -678,6 +685,8 @@ println(<span class="num">42</span>);                       <span class="cmt">--
 <span class="cmt">-- 1</span>
 <span class="cmt">-- 2</span>
 <span class="cmt">-- 3</span></code></pre>
+
+<p>For large nested values there is also a width-aware pretty printer, <code>prettyPrint</code> / <code>prettyString</code> &mdash; see <a href="#serialization">&sect;26</a>.</p>
 
 
 <!-- ================================================================ -->
@@ -2332,6 +2341,21 @@ println(hash(Key{<span class="num">1</span>, <span class="num">2</span>}) == has
 <p>The <code>hash</code> function is used internally by <code>Map</code> and <code>Set</code>. Because <code>hash</code> is structural by default, any value can be used as a map key or set element &mdash; including structs, tuples, and enums.</p>
 </div>
 
+<p>Both <code>hash</code> and <code>==</code> are <strong>cycle-safe</strong>: values that reference themselves (through <code>Ref</code> assignment or in-place container mutation) compare and hash without recursing forever, and acyclic values pay essentially nothing for the safety. Equality of cyclic graphs is <em>bisimulation</em> &mdash; two separately built but identically shaped cycles are equal &mdash; and such cycles also hash identically, so they work as map keys:</p>
+
+<pre><code><span class="kw">enum</span> Tree { node [Tree], leaf <span class="kw">Int</span> }
+
+<span class="kw">var</span> a = [Tree.leaf(<span class="num">1</span>)];
+a push!(Tree.node(a));               <span class="cmt">-- a[1]'s payload is a itself: a cycle</span>
+<span class="kw">var</span> b = [Tree.leaf(<span class="num">1</span>)];
+b push!(Tree.node(b));               <span class="cmt">-- independently built, same shape</span>
+
+println(a == b);                     <span class="cmt">-- true</span>
+println(hash(a) == hash(b));         <span class="cmt">-- true</span>
+a println;                           <span class="cmt">-- [Tree.leaf(1), Tree.node(^1^)]</span></code></pre>
+
+<p>Printing is cycle-safe too: a container that re-enters itself prints <code>^n^</code> (&ldquo;the same object <em>n</em> container levels up&rdquo;) instead of recursing. See <a href="#serialization">&sect;26</a> for serializing cyclic graphs.</p>
+
 <!-- ================================================================ -->
 <h2 id="refs">18. Refs (Mutable References)</h2>
 
@@ -3487,9 +3511,79 @@ result enum; handle it with <code>match</code> after the <code>await</code>.</li
 </ul>
 
 <!-- ================================================================ -->
-<h2 id="advanced-examples">26. Advanced Examples</h2>
+<h2 id="serialization">26. Serialization and Pretty Printing</h2>
 
-<h3 id="fibonacci">26.1 Fibonacci (Recursive and Iterative)</h3>
+<p>Values print, compare, hash, and serialize <em>as graphs</em>: shared substructure is respected, and cycles &mdash; built through <code>Ref</code> assignment or in-place container mutation &mdash; are handled everywhere instead of recursing forever (see also <a href="#hashing">&sect;17</a>).</p>
+
+<h3 id="pretty-printing">26.1 Pretty Printing</h3>
+
+<p><code>prettyString(x)</code> renders a value against a target line width (default 80; pass a second <code>Int</code> argument to change it), and <code>prettyPrint(x)</code> prints the result. Each container stays on one line when it fits and otherwise breaks one element per line with two-space indentation. At a very large width the output equals <code>toString</code>. The REPL and notebook cells display results this way automatically.</p>
+
+<pre><code><span class="kw">let</span> v = [[<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>], [<span class="num">4</span>, <span class="num">5</span>, <span class="num">6</span>], [<span class="num">7</span>, <span class="num">8</span>, <span class="num">9</span>]];
+v prettyPrint;               <span class="cmt">-- fits: [[1, 2, 3], [4, 5, 6], [7, 8, 9]]</span>
+v prettyPrint(<span class="num">20</span>);           <span class="cmt">-- narrower target width:</span>
+<span class="cmt">-- [</span>
+<span class="cmt">--   [1, 2, 3],</span>
+<span class="cmt">--   [4, 5, 6],</span>
+<span class="cmt">--   [7, 8, 9]</span>
+<span class="cmt">-- ]</span>
+
+<span class="kw">struct</span> Point { x <span class="kw">Float</span>, y <span class="kw">Float</span> }
+Point { x: <span class="num">1.5</span>, y: <span class="num">2.5</span> } prettyPrint(<span class="num">12</span>);
+<span class="cmt">-- Point {</span>
+<span class="cmt">--   x: 1.5,</span>
+<span class="cmt">--   y: 2.5</span>
+<span class="cmt">-- }</span></code></pre>
+
+<p>Cyclic values print with <code>^n^</code> markers (&ldquo;the same object <em>n</em> container levels up&rdquo;) in both the flat and pretty printers &mdash; printing always terminates.</p>
+
+<h3 id="serialize-deserialize">26.2 serialize and deserialize&lt;T&gt;</h3>
+
+<p><code>serialize(x)</code> encodes any <em>data</em> value into a compact binary <code>Bytes</code> buffer; <code>deserialize&lt;T&gt;(b)</code> decodes it, with the target type as an explicit type argument. All the data types serialize &mdash; scalars, strings, <code>Bytes</code>, arrays, lists, maps, sets, refs, tuples, structs, enums (including recursive ones), and persistent collections. Types containing functions, coroutines, futures, actors, <code>Any</code>, or existentials are rejected at compile time.</p>
+
+<pre><code><span class="kw">struct</span> Patch { name <span class="kw">String</span>, params [<span class="kw">Float</span>] }
+<span class="kw">let</span> p = Patch { name: <span class="str">"lead"</span>, params: [<span class="num">440.0</span>, <span class="num">0.3</span>] };
+
+<span class="kw">let</span> b = serialize(p);                      <span class="cmt">-- Bytes</span>
+<span class="kw">let</span> q = deserialize&lt;Patch&gt;(b);
+println(p == q);                           <span class="cmt">-- true</span></code></pre>
+
+<p>Serialization is <strong>graph-preserving</strong>: shared substructure is written once and restored as sharing; cycles are stored as references and round-trip intact. And it is <strong>deterministic</strong>: equal values produce identical bytes no matter how they were built (map and set entries are written in a canonical order), so <code>hash(serialize(x))</code> is a stable content address.</p>
+
+<pre><code><span class="cmt">-- Aliases stay aliases across a round trip</span>
+<span class="kw">let</span> shared = &amp;<span class="num">10</span>;
+<span class="kw">let</span> out = deserialize&lt;[<span class="typ">Ref</span>&lt;<span class="kw">Int</span>&gt;]&gt;(serialize([shared, shared]));
+out[<span class="num">0</span>] &lt;- <span class="num">99</span>;
+*(out[<span class="num">1</span>]) println;                         <span class="cmt">-- 99  (still one Ref)</span>
+
+<span class="cmt">-- Cycles round-trip and stay cyclic</span>
+<span class="kw">enum</span> Tree { node [Tree], leaf <span class="kw">Int</span> }
+<span class="kw">var</span> a = [Tree.leaf(<span class="num">1</span>)];
+a push!(Tree.node(a));
+<span class="kw">let</span> c = deserialize&lt;[Tree]&gt;(serialize(a));
+println(c == a);                           <span class="cmt">-- true</span>
+
+<span class="cmt">-- Deterministic bytes: construction order doesn't matter</span>
+<span class="kw">var</span> m1 = [<span class="str">"a"</span>: <span class="num">1</span>]; m1[<span class="str">"b"</span>] = <span class="num">2</span>;
+<span class="kw">var</span> m2 = [<span class="str">"b"</span>: <span class="num">2</span>]; m2[<span class="str">"a"</span>] = <span class="num">1</span>;
+println(serialize(m1) == serialize(m2));   <span class="cmt">-- true</span></code></pre>
+
+<h3 id="serialization-typing">26.3 Type Safety and Errors</h3>
+
+<p>The buffer embeds a structural signature of the type it was serialized as &mdash; field and case names and the full recursive layout. <code>deserialize&lt;T&gt;</code> validates it against <code>T</code> by exact comparison, so decoding into the wrong type, or feeding truncated/corrupt bytes, raises a clean runtime error rather than producing garbage. Compatibility is structural: a structurally identical declaration (same shape and the same spelled names) in another program round-trips; renaming a field or case intentionally breaks it. Declared sizes are validated against the buffer length, so hostile input cannot cause runaway allocation.</p>
+
+<pre><code><span class="kw">let</span> b = serialize(<span class="num">42</span>);
+<span class="cmt">-- deserialize&lt;Float&gt;(b);      -- runtime error: type signature mismatch</span></code></pre>
+
+<div class="note">
+<h4>Explicit type arguments</h4>
+<p><code>deserialize&lt;T&gt;(b)</code> uses the explicit call-site type argument form <code>f&lt;T&gt;(&hellip;)</code>. It is available on built-ins that need a type the arguments can't supply &mdash; <code>typeName&lt;T&gt;() String</code> is another (<code>typeName&lt;[Int]&gt;()</code> &rarr; <code>"[Int]"</code>). Ordinary template functions infer their type parameters from arguments as usual (<a href="#templates">&sect;20</a>).</p>
+</div>
+
+<!-- ================================================================ -->
+<h2 id="advanced-examples">27. Advanced Examples</h2>
+
+<h3 id="fibonacci">27.1 Fibonacci (Recursive and Iterative)</h3>
 <pre><code><span class="kw">fn</span> fib(n <span class="kw">Int</span>) <span class="kw">Int</span> {
     <span class="kw">if</span> (n <= <span class="num">1</span>) { <span class="kw">return</span> n; }
     fib(n - <span class="num">1</span>) + fib(n - <span class="num">2</span>)
@@ -3509,7 +3603,7 @@ result enum; handle it with <code>match</code> after the <code>await</code>.</li
     b
 }</code></pre>
 
-<h3 id="fizzbuzz">26.2 FizzBuzz</h3>
+<h3 id="fizzbuzz">27.2 FizzBuzz</h3>
 <pre><code><span class="kw">fn</span> fizzbuzz(n <span class="kw">Int</span>) <span class="kw">String</span> {
     <span class="kw">if</span> (n % <span class="num">15</span> == <span class="num">0</span>) { <span class="kw">return</span> <span class="str">"FizzBuzz"</span>; }
     <span class="kw">if</span> (n % <span class="num">3</span> == <span class="num">0</span>) { <span class="kw">return</span> <span class="str">"Fizz"</span>; }
@@ -3524,7 +3618,7 @@ result enum; handle it with <code>match</code> after the <code>await</code>.</li
     i = i + <span class="num">1</span>;
 }</code></pre>
 
-<h3 id="euler9">26.3 Euler Problem 9: Pythagorean Triplet</h3>
+<h3 id="euler9">27.3 Euler Problem 9: Pythagorean Triplet</h3>
 <pre><code><span class="cmt">-- Find a*b*c where a+b+c=1000, a^2+b^2=c^2</span>
 <span class="kw">fn</span> euler9() <span class="kw">Int</span> {
     <span class="kw">var</span> a = <span class="num">1</span>;
@@ -3544,14 +3638,14 @@ result enum; handle it with <code>match</code> after the <code>await</code>.</li
     <span class="num">0</span>
 }</code></pre>
 
-<h3 id="complex-powers">26.4 Complex Number Powers of i</h3>
+<h3 id="complex-powers">27.4 Complex Number Powers of i</h3>
 <pre><code><span class="cmt">-- i^1=i, i^2=-1, i^3=-i, i^4=1</span>
 <span class="kw">let</span> i_1 = <span class="num">1i</span>;
 <span class="kw">let</span> i_2 = i_1 * i_1;      <span class="cmt">-- -1+0i</span>
 <span class="kw">let</span> i_3 = i_2 * i_1;      <span class="cmt">-- 0-1i</span>
 <span class="kw">let</span> i_4 = i_3 * i_1;      <span class="cmt">-- 1+0i</span></code></pre>
 
-<h3 id="bitwise-overloading">26.5 Bitwise Operator Overloading</h3>
+<h3 id="bitwise-overloading">27.5 Bitwise Operator Overloading</h3>
 <pre><code><span class="kw">struct</span> Mask { bits <span class="kw">Int</span> }
 
 <span class="kw">fn</span> &(a Mask, b Mask) Mask = Mask { bits: a.bits & b.bits };

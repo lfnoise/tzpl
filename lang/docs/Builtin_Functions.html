@@ -357,12 +357,13 @@
                 <li><a href="#coroutine-functions">Coroutine Functions</a> &mdash; next, yield, yieldAll, toList</li>
                 <li><a href="#set-functions">Set Functions</a> &mdash; add, remove, remove!, insert!, pop!, contains, union, intersection, difference, toArray, length, copy</li>
                 <li><a href="#persistent-functions">Persistent Collection Functions</a> &mdash; <code>#[&hellip;]</code> vectors &amp; maps: length, push, put, get, remove, contains, keys, values, merge, toPersistentVector, toArray, toPersistentMap, toMap</li>
-                <li><a href="#hashing">Hashing &amp; Equality</a> &mdash; hash, ==, !=</li>
+                <li><a href="#hashing">Hashing &amp; Equality</a> &mdash; hash, ==, != (cycle-safe)</li>
+                <li><a href="#serialization">Serialization</a> &mdash; serialize, deserialize&lt;T&gt;</li>
                 <li><a href="#enum-functions">Enum Functions</a> &mdash; ordinal, tag</li>
                 <li><a href="#operators">Built-in Operators</a> &mdash; arithmetic, comparison, bitwise, logical, string</li>
                 <li><a href="#type-conversions">Type Conversions</a> &mdash; toInt, toFloat, toFraction, toComplex</li>
-                <li><a href="#io">I/O Functions</a> &mdash; print, println, getListPrintLimit, setListPrintLimit</li>
-                <li><a href="#introspection">Introspection</a> &mdash; disassemble</li>
+                <li><a href="#io">I/O Functions</a> &mdash; print, println, prettyString, prettyPrint, getListPrintLimit, setListPrintLimit</li>
+                <li><a href="#introspection">Introspection</a> &mdash; disassemble, typeName&lt;T&gt;</li>
             </ul>
         </div>
 
@@ -2264,6 +2265,72 @@ fn ==(a Vec2, b Vec2) Bool {
     dx * dx + dy * dy < 0.001    <span class="cmt">-- approximate equality</span>
 }</code></pre>
 
+            <h3>Cyclic Values</h3>
+            <p>Both <code>==</code> and <code>hash</code> are <strong>cycle-safe</strong>: values that reference themselves (built through <code>Ref</code> assignment or in-place <code>Array</code>/<code>Map</code>/<code>Set</code> mutation) compare and hash without recursing forever. The common acyclic case pays essentially nothing &mdash; the ordinary recursive fast path runs first with a small work budget, and only a huge value or an actual cycle falls back to the cycle-aware algorithm.</p>
+            <p>Equality of cyclic values is <em>bisimulation</em>: two graphs are equal if their infinite unrollings are equal. Two separately built but identically shaped cycles compare equal, and shared substructure is detected so comparing large shared graphs stays fast. Isomorphic separately-built cycles also hash identically, so cyclic values work as <code>Map</code> keys and <code>Set</code> elements.</p>
+            <pre><code>enum Tree { node [Tree], leaf Int }
+
+var a = [Tree.leaf(1)];
+a push!(Tree.node(a));           <span class="cmt">-- a[1] refers back to a: a cycle</span>
+var b = [Tree.leaf(1)];
+b push!(Tree.node(b));           <span class="cmt">-- an independently built equal cycle</span>
+
+println(a == b);                 <span class="cmt">-- true  (bisimulation)</span>
+println(hash(a) == hash(b));     <span class="cmt">-- true</span>
+var m = [Tree.node(a): "found"]; <span class="cmt">-- cyclic values as map keys work</span>
+m[Tree.node(b)] unwrap println;  <span class="cmt">-- found</span></code></pre>
+            <div class="note">
+                <p><strong>One edge case:</strong> bisimilar cycles of <em>different unrolled length</em> (a 1-node cycle versus its hand-built 2-node unrolling) compare equal but may hash differently. Such values are pathological as hash keys; everything structurally built stays consistent.</p>
+            </div>
+            <p><code>==</code> and <code>hash</code> on <code>Bytes</code> compare and hash the byte contents (structural, like String).</p>
+
+            <a href="#top" class="back-to-top">&uarr; Back to top</a>
+        </div>
+
+        <!-- ============================================================ -->
+        <div class="section" id="serialization">
+            <h2>Serialization</h2>
+
+            <p>Any <em>data</em> value &mdash; including cyclic object graphs &mdash; can be serialized to a compact binary form (<code>Bytes</code>) and restored. Shared substructure is written once and cycles are stored as references, so serialization never duplicates or diverges. The bytes are <strong>deterministic</strong>: equal values produce identical bytes regardless of how they were built (Map/Set entries are written in a canonical order), which makes <code>hash(serialize(x))</code> a stable content address.</p>
+
+            <h3><code>serialize(x)</code></h3>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>serialize(T) &rarr; Bytes</code></td><td>Encode a value of any serializable type into a self-describing binary buffer.</td></tr>
+            </table>
+            <p>Serializable: <code>Bool</code>, <code>Int</code>, <code>Float</code>, <code>Symbol</code>, <code>String</code>, <code>Bytes</code>, <code>Complex</code>, <code>Fraction</code>, ranges, arrays, lists, maps, sets, refs, tuples, structs, enums (including recursive ones), and persistent collections &mdash; any composition of these. Types containing functions, coroutines, futures, actors, <code>Any</code>, or existentials are rejected <em>at compile time</em>.</p>
+
+            <h3><code>deserialize&lt;T&gt;(b)</code></h3>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>deserialize&lt;T&gt;(Bytes) &rarr; T</code></td><td>Decode a buffer produced by <code>serialize</code>. The target type is given as an explicit type argument.</td></tr>
+            </table>
+            <p>The buffer embeds a <em>structural signature</em> of the type it was serialized as (field and case names, recursive layout). <code>deserialize&lt;T&gt;</code> validates it against <code>T</code> exactly; a mismatch &mdash; or any malformed/truncated input &mdash; raises a clean runtime error rather than decoding garbage. Compatibility is structural: an identical declaration in another program (same shape <em>and</em> the same spelled names) round-trips; renaming a field or case intentionally breaks it.</p>
+
+            <pre><code><span class="cmt">-- Round trip any data value</span>
+struct Point { x Float, y Float }
+let p = Point { x: 1.5, y: 2.5 };
+let b = serialize(p);                        <span class="cmt">-- Bytes</span>
+println(deserialize&lt;Point&gt;(b) == p);         <span class="cmt">-- true</span>
+
+<span class="cmt">-- Cycles and sharing survive: aliases stay aliases</span>
+let shared = &amp;10;
+let out = deserialize&lt;[Ref&lt;Int&gt;]&gt;(serialize([shared, shared]));
+out[0] &lt;- 99;
+*(out[1]) println;                           <span class="cmt">-- 99  (still one Ref)</span>
+
+<span class="cmt">-- Deterministic bytes: construction order does not matter</span>
+var m1 = ["a": 1]; m1["b"] = 2;
+var m2 = ["b": 2]; m2["a"] = 1;
+println(serialize(m1) == serialize(m2));     <span class="cmt">-- true</span>
+
+<span class="cmt">-- Wrong type or corrupt bytes: runtime error, never garbage</span>
+<span class="cmt">-- deserialize&lt;Float&gt;(serialize(42));       -- error: type signature mismatch</span></code></pre>
+
+            <div class="note">
+                <p><strong>Bounded decoding.</strong> Declared sizes in a buffer are validated against its length, so a corrupt or hostile buffer cannot cause runaway allocation. Lazy lists are forced during serialization (bounded; an unbounded list raises a runtime error).</p>
+            </div>
+
             <a href="#top" class="back-to-top">&uarr; Back to top</a>
         </div>
 
@@ -2444,6 +2511,37 @@ println(<span class="hl-num">42</span>);                       <span class="cmt"
 <span class="cmt">-- Auto-mapping: print each element on its own line</span>
 [<span class="hl-num">1</span>, <span class="hl-num">2</span>, <span class="hl-num">3</span>] @ println;                <span class="cmt">-- 1  2  3  (each on its own line)</span></code></pre>
 
+            <h3><code>prettyString(x)</code> / <code>prettyPrint(x)</code></h3>
+            <p>Width-aware pretty printing. Each container prints on one line when it fits the target width, and otherwise breaks one element per line with two-space indentation. At a very large width the output is identical to <code>toString</code>. The REPL and notebook cells display results this way automatically.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>prettyString(T) &rarr; String</code></td><td>Render at the default width (80 columns).</td></tr>
+                <tr><td><code>prettyString(T, Int) &rarr; String</code></td><td>Render at the given line width.</td></tr>
+                <tr><td><code>prettyPrint(T) &rarr; Void</code><br><code>prettyPrint(T, Int) &rarr; Void</code></td><td>Print the pretty form followed by a newline.</td></tr>
+            </table>
+            <pre><code>let v = [[1, 2, 3], [4, 5, 6], [7, 8, 9]];
+v prettyPrint;                 <span class="cmt">-- fits in 80 columns: one line</span>
+<span class="cmt">-- [[1, 2, 3], [4, 5, 6], [7, 8, 9]]</span>
+
+v prettyPrint(20);             <span class="cmt">-- narrower: one element per line</span>
+<span class="cmt">-- [</span>
+<span class="cmt">--   [1, 2, 3],</span>
+<span class="cmt">--   [4, 5, 6],</span>
+<span class="cmt">--   [7, 8, 9]</span>
+<span class="cmt">-- ]</span>
+
+struct Point { x Float, y Float }
+Point { x: 1.5, y: 2.5 } prettyPrint(12);
+<span class="cmt">-- Point {</span>
+<span class="cmt">--   x: 1.5,</span>
+<span class="cmt">--   y: 2.5</span>
+<span class="cmt">-- }</span></code></pre>
+            <p><strong>Cyclic values print safely</strong> &mdash; in both <code>print</code>/<code>toString</code> and the pretty printer. A container that re-enters itself prints <code>^n^</code>, meaning &ldquo;this is the same object <em>n</em> container levels up,&rdquo; and recursion stops there:</p>
+            <pre><code>enum Tree { node [Tree], leaf Int }
+var a = [Tree.leaf(1)];
+a push!(Tree.node(a));
+a println;                     <span class="cmt">-- [Tree.leaf(1), Tree.node(^1^)]</span></code></pre>
+
             <h3>List Print Limit</h3>
             <p>Control how many elements are displayed when printing lists.</p>
             <table>
@@ -2497,6 +2595,17 @@ disassemble(double);
 }
 disassemble(fib);
 <span class="cmt">-- Shows CALL instructions with resolved function names like (fib)</span></code></pre>
+
+            <h3><code>typeName&lt;T&gt;()</code></h3>
+            <p>Returns the display name of a type, given as an explicit type argument. (Built-in functions can take explicit type arguments with the <code>f&lt;T&gt;(&hellip;)</code> call form &mdash; the same syntax <code>deserialize&lt;T&gt;</code> uses.)</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>typeName&lt;T&gt;() &rarr; String</code></td><td>The display name of <code>T</code>.</td></tr>
+            </table>
+            <pre><code>typeName&lt;<span class="type-int">Int</span>&gt;() println;             <span class="cmt">-- Int</span>
+typeName&lt;[<span class="type-int">Int</span>]&gt;() println;           <span class="cmt">-- [Int]</span>
+typeName&lt;[String: Float]&gt;() println;  <span class="cmt">-- [String:Float]</span>
+typeName&lt;(<span class="type-int">Int</span>, Bool)&gt;() println;      <span class="cmt">-- (Int, Bool)</span></code></pre>
 
             <div class="note">
                 <p><strong>Note:</strong> <code>disassemble</code> is not real-time safe &mdash; it writes to standard output. If a function has multiple overloads, you must disambiguate by binding it to a variable with a specific type first, since overloaded names cannot be used as values directly.</p>

@@ -615,7 +615,7 @@ panel(<span class="str">""</span>);               <span class="cmt">-- back to t
 <!-- -------------------------------- -->
 <h3 id="nb-save">4.5 Saving &amp; Loading</h3>
 
-<p><kbd>Cmd+S</kbd> saves the notebook to a <code>.tzd</code> file (a compact TZB binary container). Saved: the cells (kind, text, order, run-on-load flags) and, for each panel cell, its widgets' <strong>names, kinds, ranges, and current values</strong>. Not saved: bindings, eval outputs, scope data &mdash; anything that is behavior or transient display.</p>
+<p><kbd>Cmd+S</kbd> saves the notebook to a <code>.tzd</code> file (a compact TZB binary container). Saved: the cells (kind, text, order, run-on-load flags), for each panel cell its widgets' <strong>names, kinds, ranges, and current values</strong> &mdash; and the whole <strong>undo history tree</strong> (<a href="#nb-history">&sect;4.6</a>). Not saved: bindings, eval outputs, scope data &mdash; anything that is behavior or transient display.</p>
 
 <p>On open, widgets reappear immediately with their saved positions and values, but <strong>unbound</strong> &mdash; they drive nothing until their creating code runs again. Because constructors are upserts, re-running the setup cell adopts each saved widget (keeping its saved value, which is pushed through the fresh binding) rather than resetting it. So the loading ritual is simply:</p>
 
@@ -637,7 +637,11 @@ panel(<span class="str">""</span>);               <span class="cmt">-- back to t
   <li><strong>History window</strong> (toolbar button) &mdash; the whole tree. Editing after an undo doesn't discard the redo path; it starts a <em>branch</em>, listed indented with a &ldquo;(n branches)&rdquo; marker on the fork. Click any entry to jump straight to it; redo then follows the branch you jumped into.</li>
 </ul>
 
-<p>History is per-session: the <code>.tzd</code> file stores the current state only. The tree is capped at 500 nodes &mdash; past that, the oldest states fall off the root (along with any branches hanging off them) as new commits arrive.</p>
+<p><strong>History is saved with the document.</strong> The <code>.tzd</code> file stores the whole tree &mdash; every node, its branches, and where the cursor was &mdash; so after save and reopen, Undo/Redo and the History window pick up exactly where you left off (undoing a control move is still audible once the setup cells have re-run and rebound the widgets). Storage is <em>content-addressed</em>: each distinct cell, widget state, and preset is written once and shared by every history node that contains it, so a session of hundreds of small tweaks costs little more than its unique content. Files saved by older builds open normally (they simply carry no history), and older concerns about file bloat don't apply &mdash; a few hundred slider tweaks typically add only tens of kilobytes.</p>
+
+<p>The same content addressing works in memory: recreating a state you were in before (toggling a control back, re-storing an identical preset, re-editing a branch to match another) <em>shares</em> the earlier objects instead of duplicating them, and committing a state identical to the current history tip is a no-op. The History window's footer shows the live tally &mdash; node count and the number of unique cells, widget states, and presets behind them.</p>
+
+<p>The tree is capped at 500 nodes &mdash; past that, the oldest states fall off the root (along with any branches hanging off them) as new commits arrive.</p>
 
 <!-- ================================================================ -->
 <h2 id="shortcuts">5. Keyboard Shortcuts</h2>
@@ -664,7 +668,6 @@ panel(<span class="str">""</span>);               <span class="cmt">-- back to t
   <li><strong>Piano roll is a fixed 16th grid</strong>: click to add/remove quarter-beat notes; no velocity lanes, note dragging, or CC curves. Longer notes and fractional pitches via <code>setNotes()</code>.</li>
   <li><strong>One notebook at a time.</strong> Opening or creating another replaces the current one (with a save prompt if modified).</li>
   <li><strong>Prose cells are plain (monospaced) text</strong> &mdash; styled without line numbers, but no markdown rendering or proportional font yet.</li>
-  <li><strong>History is not saved</strong> in the <code>.tzd</code> file.</li>
   <li><strong>Scopes/waveforms:</strong> scope taps read f32 outlets (up to 16 channels captured); waveforms show file-loaded buffer contents (not live-recorded audio).</li>
 </ul>
 
