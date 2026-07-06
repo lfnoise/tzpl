@@ -362,7 +362,7 @@
                 <li><a href="#enum-functions">Enum Functions</a> &mdash; ordinal, tag</li>
                 <li><a href="#operators">Built-in Operators</a> &mdash; arithmetic, comparison, bitwise, logical, string</li>
                 <li><a href="#type-conversions">Type Conversions</a> &mdash; toInt, toFloat, toFraction, toComplex</li>
-                <li><a href="#io">I/O Functions</a> &mdash; print, println, prettyString, prettyPrint, getListPrintLimit, setListPrintLimit</li>
+                <li><a href="#io">I/O Functions</a> &mdash; print, println, toString, prettyString, prettyPrint, getListPrintLimit, setListPrintLimit</li>
                 <li><a href="#introspection">Introspection</a> &mdash; disassemble, typeName&lt;T&gt;</li>
             </ul>
         </div>
@@ -2510,6 +2510,31 @@ println(<span class="hl-num">42</span>);                       <span class="cmt"
 
 <span class="cmt">-- Auto-mapping: print each element on its own line</span>
 [<span class="hl-num">1</span>, <span class="hl-num">2</span>, <span class="hl-num">3</span>] @ println;                <span class="cmt">-- 1  2  3  (each on its own line)</span></code></pre>
+
+            <h3><code>toString(x)</code></h3>
+            <p>Convert any value to its printed representation. The result is exactly the text that <code>print</code> would output for the value, as a single-line <code>String</code> with no width awareness (see <code>prettyString</code> below for the width-aware form). Works on values of every type: numbers, Bool, Symbol, String, containers, tuples, structs, enums, and so on.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>toString(T) &rarr; String</code></td><td>The printed form of the value. For a String argument this is the identity.</td></tr>
+            </table>
+            <p>Note that strings are rendered without quotes, both at top level and inside containers, and symbols are rendered without the leading <code>'</code>.</p>
+            <pre><code>toString(<span class="hl-num">42</span>) println;                    <span class="cmt">-- 42</span>
+toString(<span class="hl-num">7</span>/<span class="hl-num">2</span>) println;                   <span class="cmt">-- 7/2</span>
+toString(<span class="hl-num">3.0</span> + <span class="hl-num">4.0</span>i) println;           <span class="cmt">-- 3+4i</span>
+toString([<span class="hl-num">1</span>, <span class="hl-num">2</span>, <span class="hl-num">3</span>]) println;            <span class="cmt">-- [1, 2, 3]</span>
+toString([<span class="hl-str">"a"</span>, <span class="hl-str">"b"</span>]) println;          <span class="cmt">-- [a, b]  (strings unquoted)</span>
+toString((<span class="hl-num">1</span>, <span class="hl-str">"two"</span>, <span class="hl-num">3.0</span>)) println;     <span class="cmt">-- (1, two, 3.0)</span>
+
+struct Point { x Float; y Float; }
+toString(Point { x: <span class="hl-num">1.5</span>, y: <span class="hl-num">2.5</span> }) println;
+                                        <span class="cmt">-- Point { x: 1.5, y: 2.5 }</span>
+
+<span class="cmt">-- Useful for building strings with the $ concatenation operator</span>
+<span class="hl-kw">let</span> s = <span class="hl-str">"answer: "</span> $ toString(<span class="hl-num">42</span>);
+s println;                              <span class="cmt">-- answer: 42</span>
+
+<span class="cmt">-- Pipeline syntax</span>
+[<span class="hl-num">1</span>, <span class="hl-num">2</span>, <span class="hl-num">3</span>] toString println;             <span class="cmt">-- [1, 2, 3]</span></code></pre>
 
             <h3><code>prettyString(x)</code> / <code>prettyPrint(x)</code></h3>
             <p>Width-aware pretty printing. Each container prints on one line when it fits the target width, and otherwise breaks one element per line with two-space indentation. At a very large width the output is identical to <code>toString</code>. The REPL and notebook cells display results this way automatically.</p>
