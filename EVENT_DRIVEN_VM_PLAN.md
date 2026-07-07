@@ -370,7 +370,7 @@ User code registers OSC handlers from Tzopilotl:
 ```
 import osc;
 
-fn myHandler(args Array[Float]) Void {
+fn myHandler(args [Float]) Void {
     let freq = args[0];
     begin(0);
     setInput(1, 0, freq);
@@ -454,7 +454,7 @@ Coroutines are permitted on both RT and NRT VMs. On the RT side, coroutines are 
 
 ```
 -- RT handler that drives a coroutine one step per event
-fn stepSequencer(coro Coroutine[Void, Void]) Void {
+fn stepSequencer(coro Coroutine<Void, Void>) Void {
     resume(coro);
 }
 ```

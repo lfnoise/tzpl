@@ -93,7 +93,7 @@ import osc.*;
 | `oscSendI` | `(host String, port Int, address String, value Int) Void` |
 | `oscSendF` | `(host String, port Int, address String, value Float) Void` |
 | `oscSendS` | `(host String, port Int, address String, value String) Void` |
-| `oscSendArgs` | `(host String, port Int, address String, args Array[Float]) Void` |
+| `oscSendArgs` | `(host String, port Int, address String, args [Float]) Void` |
 
 **Local send** (in-process dispatch, bypasses the network):
 
@@ -103,7 +103,7 @@ import osc.*;
 | `oscSendLocalI` | `(address String, value Int) Void` |
 | `oscSendLocalF` | `(address String, value Float) Void` |
 | `oscSendLocalS` | `(address String, value String) Void` |
-| `oscSendLocalArgs` | `(address String, args Array[Float]) Void` |
+| `oscSendLocalArgs` | `(address String, args [Float]) Void` |
 
 **Server control:**
 

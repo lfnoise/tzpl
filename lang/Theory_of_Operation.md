@@ -262,7 +262,7 @@ The ternary conditional `?:` has effective precedence 0 (it binds looser than al
 
 ```
 TypeExpr        = '[' TypeExpr ']'                         -- [T] array
-                | '[' TypeExpr ':' TypeExpr ']'            -- Map[K, V]
+                | '[' TypeExpr ':' TypeExpr ']'            -- [K:V] map
                 | '#' '[' TypeExpr ']'                     -- #[T] persistent vector
                 | '#' '[' TypeExpr ':' TypeExpr ']'        -- #[K:V] persistent map
                 | '(' ')'                                   -- unit type
@@ -271,9 +271,9 @@ TypeExpr        = '[' TypeExpr ']'                         -- [T] array
                 | '(' TypeExpr ')' TypeExpr                 -- single-arg function type
                 | '(' TypeExpr ( ',' TypeExpr )+ ')'        -- tuple type
                 | '(' TypeExpr ( ',' TypeExpr )+ ')' TypeExpr  -- multi-arg function type
-                | 'List' '<' TypeExpr '>'                   -- List[T]
-                | 'Ref' '<' TypeExpr '>'                    -- Ref[T]
-                | 'Set' '<' TypeExpr '>'                    -- Set[T]
+                | 'List' '<' TypeExpr '>'                   -- List<T>
+                | 'Ref' '<' TypeExpr '>'                    -- Ref<T>
+                | 'Set' '<' TypeExpr '>'                    -- Set<T>
                 | IDENT '<' TypeExpr ( ',' TypeExpr )* '>'  -- template type
                 | NamedType
 

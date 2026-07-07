@@ -218,13 +218,13 @@ fn setInputX(nodeID Int, portIndex Int, value Float, xfade Float, curve Int) Int
 fn setControl(nodeID Int, controlID Int, value Float) Int;
 
 -- Notes
-fn noteOn(nodeID Int, noteID Int, params Array[Float]) Int;
+fn noteOn(nodeID Int, noteID Int, params [Float]) Int;
 fn noteOff(nodeID Int, noteID Int) Int;
 fn allNotesOff(nodeID Int) Int;
-fn noteSetParams(nodeID Int, noteID Int, firstParam Int, values Array[Float]) Int;
+fn noteSetParams(nodeID Int, noteID Int, firstParam Int, values [Float]) Int;
 
 -- Introspection
-fn listSynthDefs() Array[String];
+fn listSynthDefs() [String];
 
 -- Utility
 fn sleep(seconds Float) Void;
@@ -258,7 +258,7 @@ fn compileSynthDef(sexpr String) String;
 fn compileSynthDefAndLoad(sexpr String) String;
 
 -- Query available synthdefs (implemented in audio_engine FFI)
-fn listSynthDefs() Array[String];
+fn listSynthDefs() [String];
 ```
 
 Note: The name parameter was removed vs. the original plan — the synth name is extracted from the s-expression itself, avoiding redundancy.
@@ -356,7 +356,7 @@ App integration: `--osc-port <port>` CLI flag, `oscPort` config file key. Server
 - `osc.onMessageI(address String, handler fn(Int) Void) Void` -- int arg handler
 - `osc.onMessageF(address String, handler fn(Float) Void) Void` -- float arg handler
 - `osc.onMessageS(address String, handler fn(String) Void) Void` -- string arg handler
-- `osc.onMessageArgs(address String, handler fn(Array[Float]) Void) Void` -- float array handler
+- `osc.onMessageArgs(address String, handler fn([Float]) Void) Void` -- float array handler
 - `osc.removeHandler(address String) Void` -- remove a registered handler
 
 Handlers are retained via ARC, stored in NRTVM's HandlerTable, and dispatched via OscDispatcher. String and array args are created inside the NRTVM mutex to ensure correct allocator usage. AppContext extended with `nrtvm`, `compiler`, `moduleCompiler`, and `target` pointers for full VM access from OSC handlers.
@@ -372,14 +372,14 @@ FFI bridge (`bridge/src/tzpl_osc_ffi.cpp`) exposes both remote and local send fu
 - `oscSendI(host String, port Int, address String, value Int) Void`
 - `oscSendF(host String, port Int, address String, value Float) Void`
 - `oscSendS(host String, port Int, address String, value String) Void`
-- `oscSendArgs(host String, port Int, address String, args Array[Float]) Void`
+- `oscSendArgs(host String, port Int, address String, args [Float]) Void`
 
 **Local send** (in-process dispatch, bypasses network):
 - `oscSendLocal(address String) Void`
 - `oscSendLocalI(address String, value Int) Void`
 - `oscSendLocalF(address String, value Float) Void`
 - `oscSendLocalS(address String, value String) Void`
-- `oscSendLocalArgs(address String, args Array[Float]) Void`
+- `oscSendLocalArgs(address String, args [Float]) Void`
 
 **Server control**:
 - `oscServerStart(port Int) Bool`
@@ -547,7 +547,7 @@ Test file: `lang/tests/dynamic_scope.x`. Module example: `lang/modules/dynvar.x`
 ### 9.3 Standard library completion (Phase 13 in lang's plan) — MOSTLY DONE
 
 **Completed**:
-1. String functions: substring, split, contains, startsWith, endsWith, trim, toUpper, toLower, replace, byte indexing, codePoints (lazy `List[Int]` of Unicode code points from UTF-8 string). Tested in `tests/builtins/string_functions.x` and `tests/builtins/codepoints.x`.
+1. String functions: substring, split, contains, startsWith, endsWith, trim, toUpper, toLower, replace, byte indexing, codePoints (lazy `List<Int>` of Unicode code points from UTF-8 string). Tested in `tests/builtins/string_functions.x` and `tests/builtins/codepoints.x`.
 2. Array/list utility functions: Extensively tested.
 3. Range operations: Working.
 4. Map operations: `MapObj` class with builtins -- get (returns Option), getDefault, contains, keys, values, copy, merge.

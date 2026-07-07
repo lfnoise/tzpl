@@ -59,7 +59,7 @@ Syntax essentials for reading and writing `.x` files:
 
     -- Types: Bool, Int, Float, Symbol, String, Fraction, Complex,
     --        [T], List<T>, Range<T>, Set<T>, Map<K,V>,
-    --        Tuple(T1, T2, ...), Struct, Enum, Ref[T], Function, Coroutine[T]
+    --        Tuple(T1, T2, ...), Struct, Enum, Ref<T>, Function, Coroutine<T>
 
     -- Auto-mapping: functions automatically apply over arrays/lists
     let xs = [1, 2, 3];
@@ -80,7 +80,7 @@ Syntax essentials for reading and writing `.x` files:
 
     -- Structs and enums
     struct Point { x Float; y Float; }
-    enum Option[T] { case Some(T); case None; }
+    enum Option<T> { case Some(T); case None; }
 
     -- Lambdas
     let f = |x Int| x * 2;

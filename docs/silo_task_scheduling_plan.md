@@ -97,7 +97,7 @@ async fn startSession() Void {
 ## New API surface
 
 Silo-side module `silo.*` (inside a silo VM; targets the running silo):
-- `spawn(clock Int, body Coroutine[Float]) Int`, `cancelTask(id Int)`
+- `spawn(clock Int, body Coroutine<Float>) Int`, `cancelTask(id Int)`
 - `noteOn/noteOff/setControl/allNotesOff/noteSetParams` applied to *this* silo
   immediately (no begin/sched -- already on the silo at the right beat)
 - `getBeat(clock Int) Float`

@@ -58,8 +58,8 @@ Syntax essentials for reading and writing `.x` files:
     -- Semicolons after struct/enum closing braces are optional
 
     -- Types: Bool, Int, Float, Symbol, String, Fraction, Complex,
-    --        Array[T], List[T], Range[T], Set[T], Map[K,V],
-    --        Tuple(T1, T2, ...), Struct, Enum, Ref[T], Function, Coroutine[T]
+    --        [T], List<T>, Range<T>, Set<T>, Map<K,V>,
+    --        Tuple(T1, T2, ...), Struct, Enum, Ref<T>, Function, Coroutine<T>
 
     -- Mutable containers (Array, Map, Set): heap objects passed by reference.
     -- Mutating builtins idiomatically end in `!`; non-mutating ones return new
@@ -95,7 +95,7 @@ Syntax essentials for reading and writing `.x` files:
 
     -- Structs and enums
     struct Point { x Float; y Float; }
-    enum Option[T] { case Some(T); case None; }
+    enum Option<T> { case Some(T); case None; }
 
     -- Lambdas
     let f = |x Int| x * 2;

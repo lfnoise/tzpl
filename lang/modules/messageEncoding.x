@@ -198,7 +198,7 @@ fn _clampCount(r Reader) Int {
     if (n < 0 || n > cap) { 0 } else { n }
 }
 
--- `budget` is a shared node allowance (Ref[Int]): every decoded node spends one,
+-- `budget` is a shared node allowance (Ref<Int>): every decoded node spends one,
 -- so a corrupt buffer whose nodes all look like vecs cannot amplify into an
 -- exponential tree -- total nodes are bounded by the buffer length. `depth`
 -- separately caps nesting so deep input cannot overflow the VM call stack.

@@ -250,7 +250,7 @@ See Phase 6 below. Implemented after templates were completed.
 **Files**: `type_system.hpp/cpp`, `value.hpp/cpp`, `opcodes.hpp/cpp`, `parser.hpp/cpp`, `type_checker.hpp/cpp`, `codegen.hpp/cpp`
 
 **Tasks**:
-1. Define `ListType` in type system: `List[T]`.
+1. Define `ListType` in type system: `List<T>`.
 2. Define `ListNode` runtime object: `{ head: Word, tail: ListNode* | Generator* }`.
 3. Define `Generator` runtime object: A callable that produces the next `(value, nextGenerator)` pair on demand.
 4. Add list literal syntax if desired, or construct via functions like `cons`, `list()`.
@@ -336,7 +336,7 @@ See Phase 6 below. Implemented after templates were completed.
 **Completed tasks**:
 1. Built-in generators: `ord` (infinite integers), lazy `toList` for ranges/arrays/coroutines, `iter` (infinite function iteration), random generators (`urands`, `brands`, `irands`, `rands`, `xrands`), `picks` (random selection). Done.
 2. List operations: `take`, `drop`, `stride`, `stutter`, `cat`, `cyc`, `ncyc`, `hang`, `join`, `map`, `filter`, `fold`, `scan`, `zip`, `enumerate`, `takeWhile`, `dropWhile`. All lazy. Done.
-3. String-to-code-points: `codePoints(String) -> List[Int]` lazily decodes UTF-8. Done.
+3. String-to-code-points: `codePoints(String) -> List<Int>` lazily decodes UTF-8. Done.
 4. GC handles lazy list chains correctly -- generators use `releaseChildren()` for proper lifecycle. Done.
 5. Infinite list printing bounded (displays first elements then `...`). Done.
 
@@ -491,7 +491,7 @@ See Phase 6 below. Implemented after templates were completed.
 
 ### 13.2 String Functions — Done
 
-**Done**: `length`, `cmp`, `min`, `max`, comparison operators (`<`, `<=`, `>`, `>=`, `==`, `!=`), `$` concatenation, `substring`, `contains`, `startsWith`, `endsWith`, `split`, `trim`, `toUpper`, `toLower`, `replace`, byte indexing (`s[i]`), `codePoints` (lazy `List[Int]` of Unicode code points), `toString`, `fmt`. Tested in `tests/builtins/string_functions.x` and `tests/builtins/codepoints.x`.
+**Done**: `length`, `cmp`, `min`, `max`, comparison operators (`<`, `<=`, `>`, `>=`, `==`, `!=`), `$` concatenation, `substring`, `contains`, `startsWith`, `endsWith`, `split`, `trim`, `toUpper`, `toLower`, `replace`, byte indexing (`s[i]`), `codePoints` (lazy `List<Int>` of Unicode code points), `toString`, `fmt`. Tested in `tests/builtins/string_functions.x` and `tests/builtins/codepoints.x`.
 
 ### 13.3 Array/List Functions — Done
 
