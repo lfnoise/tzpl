@@ -202,6 +202,25 @@ public:
         window_->setMenuBar(menuModel_.get());
 #endif
 
+        // The engine/VM come up before the window (runGui is called partway
+        // through main()), so the process may not be frontmost; bring it up.
+        juce::Process::makeForegroundProcess();
+        window_->toFront(true);
+
+        // TZPL_JUCE_OPEN=<path>: open a file in the editor at startup
+        // (testing hook -- a plain file argument is *evaluated*, like the
+        // ImGui app).
+        if (auto* p = std::getenv("TZPL_JUCE_OPEN"))
+            window_->mainComponent()->testOpenFile(juce::File(juce::String(p)));
+
+        // TZPL_JUCE_DEMO=find|flash: open a visual state at startup so it can
+        // be screenshotted without injecting global keystrokes.
+        if (auto* d = std::getenv("TZPL_JUCE_DEMO"))
+            juce::MessageManager::callAsync(
+                [this, demo = juce::String(d)] {
+                    window_->mainComponent()->testShowDemo(demo);
+                });
+
         // TZPL_JUCE_SELFTEST=1: invoke every registered command through the
         // command manager (as the menus would), report, and quit. Used for
         // headless verification and CI.
@@ -242,8 +261,10 @@ public:
         int invoked = 0, failed = 0;
         for (auto id : ids) {
             // Skip commands that open dialogs or quit -- they don't return.
-            if (id == cmd::fileOpen || id == cmd::fileSaveAs
-                || id == cmd::fileSaveCopy || id == cmd::quit)
+            // (fileSave prompts for a path when the tab has none.)
+            if (id == cmd::fileOpen || id == cmd::fileSave
+                || id == cmd::fileSaveAs || id == cmd::fileSaveCopy
+                || id == cmd::quit)
                 continue;
             juce::ApplicationCommandInfo info(id);
             main->getCommandInfo(id, info);
@@ -260,7 +281,69 @@ public:
         std::printf("SELFTEST %s: %d commands invoked, %d failed\n",
                     failed == 0 ? "OK" : "FAILED", invoked, failed);
         std::fflush(stdout);
-        quit();
+
+        // End-to-end evals: type into the editor, fire the Cmd+Enter command,
+        // wait for the async REPL round trip, check the result. Phase 0 is a
+        // clean eval; phase 1 is a syntax error (exercises error markers).
+        evalPhase_ = 0;
+        main->testTypeIntoEditor("40 + 2;");
+        commands_.invokeDirectly(cmd::evalSelection, false);
+        evalPollsLeft_ = 100;
+        pollEvalThenQuit();
+    }
+
+    void pollEvalThenQuit() {
+        auto* main = window_->mainComponent();
+        if (main->testEvalCollected()) {
+            auto summary = main->testLastEvalSummary();
+            if (evalPhase_ == 0) {
+                std::printf("SELFTEST EVAL %s: %s\n",
+                            summary == "42 : Int" ? "OK" : "FAILED",
+                            summary.toRawUTF8());
+                std::fflush(stdout);
+                evalPhase_ = 1;
+                main->testTypeIntoEditor("\n\nlet nope = ;");
+                commands_.invokeDirectly(cmd::evalSelection, false);
+                evalPollsLeft_ = 100;
+            } else {
+                std::printf("SELFTEST ERRMARK %s: %s\n",
+                            summary.startsWith("errors:") ? "OK" : "FAILED",
+                            summary.toRawUTF8());
+                std::fflush(stdout);
+                runFindReplaceSelfTest();
+                quit();
+                return;
+            }
+        } else if (--evalPollsLeft_ <= 0) {
+            std::printf("SELFTEST EVAL FAILED: timeout (phase %d)\n", evalPhase_);
+            std::fflush(stdout);
+            quit();
+            return;
+        }
+        juce::Timer::callAfterDelay(100, [this] { pollEvalThenQuit(); });
+    }
+
+    void runFindReplaceSelfTest() {
+        // Fresh tab, known content; find "foo" and confirm the selection
+        // landed on a real occurrence.
+        auto& pane = window_->mainComponent()->testEditorPane();
+        pane.newTab("findtest.x");
+        auto* ed = pane.activeEditor();
+        if (ed == nullptr) { std::printf("SELFTEST FIND FAILED: no editor\n"); return; }
+        ed->getDocument().replaceAllContent("foo bar foo baz foo");
+        ed->moveCaretToTop(false);
+
+        pane.showFind("foo");
+        commands_.invokeDirectly(cmd::findNext, false);
+
+        auto sel = ed->getHighlightedRegion();
+        juce::String selText = ed->getDocument().getTextBetween(
+            juce::CodeDocument::Position(ed->getDocument(), sel.getStart()),
+            juce::CodeDocument::Position(ed->getDocument(), sel.getEnd()));
+        bool ok = selText == "foo" && sel.getLength() == 3;
+        std::printf("SELFTEST FIND %s: selected \"%s\"\n",
+                    ok ? "OK" : "FAILED", selText.toRawUTF8());
+        std::fflush(stdout);
     }
 
     void anotherInstanceStarted(juce::String const&) override {}
@@ -272,6 +355,8 @@ public:
 private:
     juce::ApplicationCommandManager commands_;
     juce::ApplicationProperties appProperties_;
+    int evalPollsLeft_ = 0;
+    int evalPhase_ = 0;
     std::unique_ptr<TzplLookAndFeel> lookAndFeel_;
     std::unique_ptr<AppMenuModel> menuModel_;
     std::unique_ptr<MainWindow> window_;

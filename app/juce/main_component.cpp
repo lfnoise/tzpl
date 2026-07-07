@@ -21,46 +21,13 @@
 
 #include "main_component.hpp"
 #include "tzpl_app_context.hpp"
+#include "nrt_vm.hpp"
+#include "repl_session.hpp"
+#include "module_compiler.hpp"
 
 namespace tzplapp {
 
 using juce::String;
-
-// ---------------------------------------------------------------------------
-// OutputLog
-// ---------------------------------------------------------------------------
-
-OutputLog::OutputLog() {
-    text_.setMultiLine(true);
-    text_.setReadOnly(true);
-    text_.setScrollbarsShown(true);
-    text_.setCaretVisible(false);
-    text_.setFont(juce::FontOptions(juce::Font::getDefaultMonospacedFontName(),
-                                    cmd::kEditorFontSizes[0], juce::Font::plain));
-    addAndMakeVisible(text_);
-}
-
-void OutputLog::appendLine(String const& line) {
-    text_.moveCaretToEnd();
-    text_.insertTextAtCaret(line + "\n");
-}
-
-void OutputLog::setFontSize(float px) {
-    text_.applyFontToAllText(
-        juce::FontOptions(juce::Font::getDefaultMonospacedFontName(), px,
-                          juce::Font::plain));
-}
-
-void OutputLog::lookAndFeelChanged() {
-    text_.applyColourToAllText(
-        findColour(juce::TextEditor::textColourId), true);
-    text_.setColour(juce::TextEditor::backgroundColourId,
-                    findColour(juce::TextEditor::backgroundColourId));
-}
-
-// ---------------------------------------------------------------------------
-// MainComponent
-// ---------------------------------------------------------------------------
 
 MainComponent::MainComponent(bridge::AppContext& appCtx,
                              juce::ApplicationCommandManager& commands,
@@ -69,35 +36,66 @@ MainComponent::MainComponent(bridge::AppContext& appCtx,
     : appCtx_(appCtx), commands_(commands), lookAndFeel_(lookAndFeel),
       settings_(settings)
 {
-    centerPane_.setText("editor pane (M2)", juce::dontSendNotification);
-    centerPane_.setJustificationType(juce::Justification::centred);
-    addAndMakeVisible(centerPane_);
-    addAndMakeVisible(outputLog_);
+    addAndMakeVisible(editorPane_);
+    addAndMakeVisible(console_);
 
-    // Vertical split: center pane | resizer | output console. Mirrors the
-    // ImGui app's splitRatio (editor fraction, default 0.7, clamped .2-.9).
+    // Vertical split: editor | resizer | console. Mirrors the ImGui app's
+    // splitRatio (editor fraction, clamped .2-.9).
     double ratio = settings_.getDoubleValue("splitRatio", 0.7);
     ratio = juce::jlimit(0.2, 0.9, ratio);
-    layout_.setItemLayout(0, 80.0, -0.9, -ratio);         // center pane
+    layout_.setItemLayout(0, 80.0, -0.9, -ratio);         // editor
     layout_.setItemLayout(1, 8.0, 8.0, 8.0);              // resizer bar
-    layout_.setItemLayout(2, 60.0, -0.8, -(1.0 - ratio)); // output
+    layout_.setItemLayout(2, 60.0, -0.8, -(1.0 - ratio)); // console
     resizer_ = std::make_unique<juce::StretchableLayoutResizerBar>(
         &layout_, 1, /*vertical bar=*/false);
     addAndMakeVisible(*resizer_);
 
+    // Redirect VM print output into the capture pipe; the console's timer
+    // drains it. Restored in the destructor.
+    if (appCtx_.nrtvm && guiState_.printCapture.captureFile())
+        appCtx_.nrtvm->vm.setPrintOutput(guiState_.printCapture.captureFile());
+
+    // REPL session for editor evaluation. Reuse the app's ModuleCompiler so
+    // modules compiled during the initial runSource() keep their cached
+    // type objects (same reasoning as the ImGui app).
+    if (appCtx_.nrtvm && appCtx_.compiler) {
+        if (appCtx_.moduleCompiler) {
+            session_ = std::make_unique<ts::REPLSession>(
+                *appCtx_.compiler, appCtx_.nrtvm->vm, appCtx_.target,
+                *appCtx_.moduleCompiler);
+        } else {
+            session_ = std::make_unique<ts::REPLSession>(
+                *appCtx_.compiler, appCtx_.nrtvm->vm, appCtx_.target);
+        }
+    }
+
+    // Wake the message thread when a background eval completes. SafePointer:
+    // the callback may land after this component is torn down at quit.
+    guiState_.asyncEval.onFinished =
+        [safe = juce::Component::SafePointer<MainComponent>(this)]() mutable {
+            juce::MessageManager::callAsync([safe] {
+                if (safe != nullptr) safe->collectEvalResult();
+            });
+        };
+
     applyTheme(settings_.getIntValue("theme", themeDark));
     applyFontIndex(settings_.getIntValue("fontIndex", 0));
 
-    logLine("Tzopilotl. Cmd+Enter: eval block, Shift+Enter: eval line, "
-            "Cmd+Shift+Enter: eval file.");
+    guiState_.output.append("Tzopilotl. Cmd+Enter: eval block, "
+                            "Shift+Enter: eval line, "
+                            "Cmd+Shift+Enter: eval file.", LineKind::Info);
 }
 
 MainComponent::~MainComponent() {
+    // Stop the completion callback racing teardown, then restore stdout.
+    guiState_.asyncEval.onFinished = nullptr;
+    if (appCtx_.nrtvm)
+        appCtx_.nrtvm->vm.setPrintOutput(stdout);
     saveSplitRatio();
 }
 
 void MainComponent::resized() {
-    juce::Component* comps[] = { &centerPane_, resizer_.get(), &outputLog_ };
+    juce::Component* comps[] = { &editorPane_, resizer_.get(), &console_ };
     layout_.layOutComponents(comps, 3, 0, 0, getWidth(), getHeight(),
                              /*vertically=*/true, /*resizeOther=*/true);
     saveSplitRatio();
@@ -105,38 +103,144 @@ void MainComponent::resized() {
 
 void MainComponent::saveSplitRatio() {
     if (getHeight() <= 0) return;
-    double ratio = (double)centerPane_.getHeight() / getHeight();
+    double ratio = (double)editorPane_.getHeight() / getHeight();
     if (ratio > 0.05 && ratio < 0.95)
         settings_.setValue("splitRatio", ratio);
 }
 
 void MainComponent::logLine(String const& line) {
-    outputLog_.appendLine(line);
+    guiState_.output.append(line.toStdString(), LineKind::Info);
+    console_.drainNow();
 }
 
-void MainComponent::confirmUnsavedChangesThen(std::function<void()> proceed) {
-    // M1: no documents can hold unsaved changes yet; the editor (M2) and
-    // notebook (M3) hook their dirty state in here. The async shape is the
-    // one all close/quit flows share.
-    bool hasUnsavedChanges = false;
-    String description;
+// ---------------------------------------------------------------------------
+// Unsaved-changes / file dialog flows (all async)
+// ---------------------------------------------------------------------------
 
-    if (!hasUnsavedChanges) {
+void MainComponent::confirmUnsavedChangesThen(std::function<void()> proceed) {
+    if (!editorPane_.hasUnsavedChanges()) {
         proceed();
         return;
     }
 
+    auto names = editorPane_.unsavedFileNames();
+    String msg;
+    if (names.size() == 1) {
+        msg = "Do you want to save changes to \"" + names[0] + "\"?\n"
+              "Your changes will be lost if you don't save them.";
+    } else {
+        msg << "You have " << (int)names.size()
+            << " files with unsaved changes.\n"
+               "Your changes will be lost if you don't save them.\n";
+        for (auto const& n : names) msg << "\n  \xe2\x80\xa2 " << n;
+    }
+
+    juce::NativeMessageBox::showYesNoCancelBox(
+        juce::MessageBoxIconType::WarningIcon, "Unsaved Changes", msg, this,
+        juce::ModalCallbackFunction::create([this, proceed](int result) {
+            // 1 = Save All, 2 = Don't Save, 0 = Cancel
+            if (result == 1) { editorPane_.saveAll(); proceed(); }
+            else if (result == 2) proceed();
+        }));
+}
+
+void MainComponent::openFileFlow() {
+    fileChooser_ = std::make_unique<juce::FileChooser>(
+        "Open", juce::File(), "*.x;*.tzd");
+    fileChooser_->launchAsync(
+        juce::FileBrowserComponent::openMode
+            | juce::FileBrowserComponent::canSelectFiles,
+        [this](juce::FileChooser const& fc) {
+            auto file = fc.getResult();
+            if (file == juce::File()) return;
+            if (file.hasFileExtension("tzd")) {
+                logLine("[TODO M3] open notebook: " + file.getFullPathName());
+            } else if (!editorPane_.openFile(file)) {
+                logLine("could not open " + file.getFullPathName());
+            }
+        });
+}
+
+// Save the active tab; asks for a path if it has none (or if forceDialog).
+// `done(true)` fires only after a successful save.
+void MainComponent::saveActiveFlow(bool forceDialog,
+                                   std::function<void(bool)> done) {
+    if (!forceDialog && editorPane_.activeHasFilePath()) {
+        bool ok = editorPane_.saveActive();
+        if (done) done(ok);
+        return;
+    }
+    fileChooser_ = std::make_unique<juce::FileChooser>(
+        "Save As",
+        juce::File::getSpecialLocation(juce::File::userHomeDirectory)
+            .getChildFile(editorPane_.activeTabName()),
+        "*.x");
+    fileChooser_->launchAsync(
+        juce::FileBrowserComponent::saveMode
+            | juce::FileBrowserComponent::warnAboutOverwriting,
+        [this, done](juce::FileChooser const& fc) {
+            auto file = fc.getResult();
+            bool ok = file != juce::File() && editorPane_.saveActiveAs(file);
+            if (done) done(ok);
+        });
+}
+
+void MainComponent::closeActiveTabFlow() {
+    int idx = editorPane_.activeTabIndex();
+    if (!editorPane_.tabModified(idx)) {
+        editorPane_.closeTab(idx);
+        return;
+    }
     juce::NativeMessageBox::showYesNoCancelBox(
         juce::MessageBoxIconType::WarningIcon,
         "Unsaved Changes",
-        "Do you want to save changes to " + description + "?\n"
+        "Do you want to save changes to \"" + editorPane_.tabName(idx) + "\"?\n"
         "Your changes will be lost if you don't save them.",
         this,
-        juce::ModalCallbackFunction::create([proceed](int result) {
-            // 1 = yes/save, 2 = no/don't save, 0 = cancel
-            if (result == 1) { /* M2+: save all, then */ proceed(); }
-            else if (result == 2) proceed();
+        juce::ModalCallbackFunction::create([this](int result) {
+            // 1 = Save, 2 = Don't Save, 0 = Cancel
+            if (result == 1) {
+                saveActiveFlow(false, [this](bool ok) {
+                    if (ok) editorPane_.closeTab(editorPane_.activeTabIndex());
+                });
+            } else if (result == 2) {
+                editorPane_.closeTab(editorPane_.activeTabIndex());
+            }
         }));
+}
+
+// ---------------------------------------------------------------------------
+// Eval
+// ---------------------------------------------------------------------------
+
+void MainComponent::launchEval(String const& code, int flashStart, int flashEnd) {
+    if (!session_ || guiState_.asyncEval.busy() || code.trim().isEmpty())
+        return;
+    editorPane_.clearErrorMarkers();
+    guiState_.asyncEval.launch(code.toStdString(), appCtx_, *session_,
+                               flashStart, flashEnd);
+}
+
+void MainComponent::collectEvalResult() {
+    auto& ae = guiState_.asyncEval;
+    if (ae.busy()) return;
+    // collect() joins the worker, formats result/errors into the output
+    // buffer, and triggers guiState_.flash (which the JUCE editor overlay
+    // replaces -- we forward the same line range below).
+    if (!ae.collect(guiState_)) return;
+
+    if (!ae.result.errors.empty()) {
+        std::vector<std::pair<int, String>> markers;
+        for (auto const& e : ae.result.errors) {
+            // SourceLoc lines are 1-based within the evaluated text.
+            int line = ae.flashStart + (int)e.loc.start.line - 1;
+            markers.emplace_back(line, String(e.message));
+        }
+        editorPane_.setErrorMarkersFromEval(markers);
+    } else if (ae.flashStart >= 0 && ae.flashEnd >= 0) {
+        editorPane_.triggerFlash(ae.flashStart, ae.flashEnd);
+    }
+    console_.drainNow();
 }
 
 // ---------------------------------------------------------------------------
@@ -320,7 +424,6 @@ void MainComponent::getCommandInfo(juce::CommandID id,
 bool MainComponent::perform(InvocationInfo const& info) {
     auto id = info.commandID;
 
-    // Font-size / theme ranges
     if (id >= cmd::fontSetBase && id < cmd::fontSetBase + cmd::kNumEditorFontSizes) {
         applyFontIndex(id - cmd::fontSetBase);
         return true;
@@ -330,88 +433,149 @@ bool MainComponent::perform(InvocationInfo const& info) {
         return true;
     }
 
-    // M1: the panels these commands drive arrive in M2 (editor) and M3
-    // (notebook); until then the commands land in the console so the whole
-    // menu/shortcut path is verifiable end to end.
     auto todo = [&](char const* name) {
         logLine(String("[command] ") + name);
         return true;
     };
 
     switch (id) {
-    case cmd::fileNew:          return todo("File > New");
-    case cmd::fileNewNotebook:  return todo("File > New Notebook");
-    case cmd::fileOpen: {
-        fileChooser_ = std::make_unique<juce::FileChooser>(
-            "Open", juce::File(), "*.x;*.tzd");
-        fileChooser_->launchAsync(
-            juce::FileBrowserComponent::openMode
-                | juce::FileBrowserComponent::canSelectFiles
-                | juce::FileBrowserComponent::canSelectDirectories,
-            [this](juce::FileChooser const& fc) {
-                auto file = fc.getResult();
-                if (file != juce::File())
-                    logLine("[open] " + file.getFullPathName());
-            });
+    // -- File ---------------------------------------------------------------
+    case cmd::fileNew:
+        editorPane_.newTab();
         return true;
-    }
-    case cmd::fileSave:         return todo("File > Save");
-    case cmd::fileSaveAs: {
+    case cmd::fileNewNotebook:
+        return todo("File > New Notebook (M3)");
+    case cmd::fileOpen:
+        openFileFlow();
+        return true;
+    case cmd::fileSave:
+        saveActiveFlow(false);
+        return true;
+    case cmd::fileSaveAs:
+        saveActiveFlow(true);
+        return true;
+    case cmd::fileSaveCopy: {
         fileChooser_ = std::make_unique<juce::FileChooser>(
-            "Save As", juce::File::getSpecialLocation(
-                           juce::File::userHomeDirectory)
-                           .getChildFile("untitled.x"),
+            "Save a Copy As",
+            juce::File::getSpecialLocation(juce::File::userHomeDirectory)
+                .getChildFile(editorPane_.activeTabName()),
             "*.x");
         fileChooser_->launchAsync(
             juce::FileBrowserComponent::saveMode
                 | juce::FileBrowserComponent::warnAboutOverwriting,
             [this](juce::FileChooser const& fc) {
                 auto file = fc.getResult();
-                if (file != juce::File())
-                    logLine("[save as] " + file.getFullPathName());
+                if (file != juce::File()) editorPane_.saveCopy(file);
             });
         return true;
     }
-    case cmd::fileSaveCopy:     return todo("File > Save a Copy As...");
-    case cmd::fileClose:        return todo("File > Close Tab");
+    case cmd::fileClose:
+        closeActiveTabFlow();
+        return true;
     case cmd::quit:
-        confirmUnsavedChangesThen(
-            [] { juce::JUCEApplicationBase::quit(); });
+        confirmUnsavedChangesThen([] { juce::JUCEApplicationBase::quit(); });
         return true;
 
-    case cmd::editUndo:         return todo("Edit > Undo");
-    case cmd::editRedo:         return todo("Edit > Redo");
-    case cmd::editCut:          return todo("Edit > Cut");
-    case cmd::editCopy:         return todo("Edit > Copy");
-    case cmd::editPaste:        return todo("Edit > Paste");
-    case cmd::editSelectAll:    return todo("Edit > Select All");
+    // -- Edit -----------------------------------------------------------
+    // Menu edit ops act on the code editor. When another text field has
+    // keyboard focus its native key handling covers the shortcuts; per-
+    // focus menu routing (console copy, find bar) lands with M2.3+.
+    case cmd::editUndo:   editorPane_.undo(); return true;
+    case cmd::editRedo:   editorPane_.redo(); return true;
+    case cmd::editCut:    editorPane_.cutToClipboard(); return true;
+    case cmd::editCopy:   editorPane_.copyToClipboard(); return true;
+    case cmd::editPaste:  editorPane_.pasteFromClipboard(); return true;
+    case cmd::editSelectAll: editorPane_.selectAll(); return true;
     case cmd::editClearOutput:
-        outputLog_.clear();
+        console_.clear();
         return true;
-    case cmd::editToggleComment: return todo("Edit > Toggle Line Comment");
-    case cmd::editIndent:       return todo("Edit > Indent");
-    case cmd::editOutdent:      return todo("Edit > Outdent");
+    case cmd::editToggleComment: editorPane_.toggleComment(); return true;
+    case cmd::editIndent:        editorPane_.indentSelection(); return true;
+    case cmd::editOutdent:       editorPane_.outdentSelection(); return true;
 
-    case cmd::findShow:         return todo("Find > Find...");
-    case cmd::findNext:         return todo("Find > Find Next");
-    case cmd::findPrevious:     return todo("Find > Find Previous");
-    case cmd::findUseSelection: return todo("Find > Use Selection for Find");
-    case cmd::findUseSelectionReplace:
-        return todo("Find > Use Selection for Replace");
+    // -- Find -------------------------------------------------------------
+    case cmd::findShow:
+        editorPane_.showFind(editorPane_.getSelectedText());
+        return true;
+    case cmd::findNext:
+        editorPane_.findNext();
+        return true;
+    case cmd::findPrevious:
+        editorPane_.findPrevious();
+        return true;
+    case cmd::findUseSelection: {
+        String sel = editorPane_.getSelectedText();
+        if (sel.isNotEmpty()) editorPane_.showFind(sel);
+        return true;
+    }
+    case cmd::findUseSelectionReplace: {
+        String sel = editorPane_.getSelectedText();
+        if (sel.isNotEmpty()) editorPane_.seedReplace(sel);
+        return true;
+    }
 
+    // -- View -------------------------------------------------------------
     case cmd::fontIncrease:
         applyFontIndex(fontIndex_ + 1);
         return true;
     case cmd::fontDecrease:
         applyFontIndex(fontIndex_ - 1);
         return true;
-    case cmd::toggleNotebookView: return todo("View > Toggle Notebook / Editor");
+    case cmd::toggleNotebookView:
+        return todo("View > Toggle Notebook / Editor (M3)");
 
-    case cmd::evalSelection:    return todo("Eval Selection (Cmd+Enter)");
-    case cmd::evalLine:         return todo("Eval Line (Shift+Enter)");
-    case cmd::evalFile:         return todo("Eval File (Cmd+Shift+Enter)");
+    // -- Eval ---------------------------------------------------------------
+    case cmd::evalSelection: {
+        String code = editorPane_.getSelectedText();
+        int startLine, endLine;
+        if (code.isEmpty()) {
+            code = editorPane_.getCurrentBlockText(startLine, endLine);
+        } else {
+            startLine = endLine = editorPane_.cursorLine();
+        }
+        launchEval(code, startLine, endLine);
+        return true;
+    }
+    case cmd::evalLine: {
+        int line = editorPane_.cursorLine();
+        launchEval(editorPane_.getCurrentLineText(), line, line);
+        return true;
+    }
+    case cmd::evalFile:
+        launchEval(editorPane_.getAllText(), 0, editorPane_.cursorLine());
+        return true;
     }
     return false;
+}
+
+// ---------------------------------------------------------------------------
+// Self-test hooks
+// ---------------------------------------------------------------------------
+
+void MainComponent::testTypeIntoEditor(String const& text) {
+    if (auto* ed = editorPane_.activeEditor())
+        ed->insertTextAtCaret(text);
+}
+
+bool MainComponent::testEvalCollected() const {
+    auto& ae = guiState_.asyncEval;
+    return !ae.busy() && !ae.threadActive_;
+}
+
+void MainComponent::testShowDemo(String const& which) {
+    if (which == "find") {
+        editorPane_.showFind("blip");
+    } else if (which == "flash") {
+        editorPane_.triggerFlash(6, 8);
+        editorPane_.setErrorMarkersFromEval({ { 12, "example error marker" } });
+    }
+}
+
+String MainComponent::testLastEvalSummary() const {
+    auto& r = guiState_.asyncEval.result;
+    if (!r.errors.empty()) return "errors:" + String((int)r.errors.size());
+    if (r.hasValue) return String(r.formattedValue) + " : " + String(r.typeName);
+    return "(no value)";
 }
 
 void MainComponent::applyTheme(int themeIdx) {
@@ -428,7 +592,8 @@ void MainComponent::applyTheme(int themeIdx) {
 void MainComponent::applyFontIndex(int idx) {
     fontIndex_ = juce::jlimit(0, cmd::kNumEditorFontSizes - 1, idx);
     settings_.setValue("fontIndex", fontIndex_);
-    outputLog_.setFontSize(cmd::kEditorFontSizes[fontIndex_]);
+    editorPane_.setFontSize(cmd::kEditorFontSizes[fontIndex_]);
+    console_.setFontSize(cmd::kEditorFontSizes[fontIndex_]);
     commands_.commandStatusChanged();
 }
 

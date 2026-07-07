@@ -726,6 +726,7 @@ int runGui(bridge::AppContext& appCtx) {
 
     // --- GUI state and panels ----------------------------------------------
     GuiState guiState;
+    guiState.asyncEval.onFinished = [] { glfwPostEmptyEvent(); };
 
     // Redirect VM print output to capture pipe
     if (appCtx.nrtvm && guiState.printCapture.captureFile()) {

@@ -20,6 +20,7 @@
 //
 
 #include "tzpl_look_and_feel.hpp"
+#include <juce_gui_extra/juce_gui_extra.h> // CodeEditorComponent colour IDs
 
 namespace tzplapp {
 
@@ -106,6 +107,15 @@ void TzplLookAndFeel::applyTheme(int t) {
     setColour(juce::PopupMenu::highlightedBackgroundColourId, c.highlight);
     setColour(juce::ResizableWindow::backgroundColourId, c.windowBg);
     setColour(juce::DocumentWindow::textColourId, c.text);
+
+    setColour(juce::CodeEditorComponent::backgroundColourId, c.windowBg);
+    setColour(juce::CodeEditorComponent::defaultTextColourId, c.text);
+    setColour(juce::CodeEditorComponent::highlightColourId,
+              c.highlight.withAlpha(0.4f));
+    setColour(juce::CodeEditorComponent::lineNumberBackgroundId,
+              c.windowBg.darker(0.15f));
+    setColour(juce::CodeEditorComponent::lineNumberTextId,
+              c.dimText);
 }
 
 }

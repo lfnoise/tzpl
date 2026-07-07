@@ -15,6 +15,7 @@
 #include <atomic>
 #include <cstdint>
 #include <cstdio>
+#include <functional>
 #include <pthread.h>
 
 #include "repl_session.hpp"
@@ -122,6 +123,11 @@ struct AsyncEval {
     // eval is in flight at a time, so prints drained while busy() can be
     // attributed to this cell unambiguously.
     std::uint64_t cellId = 0;
+
+    // Called from the WORKER thread right after `running` flips false, so
+    // the GUI can wake up and collect the result. The ImGui app posts an
+    // empty GLFW event; the JUCE app posts a MessageManager callback.
+    std::function<void()> onFinished;
 
     bool busy() const { return running.load(); }
 

@@ -225,10 +225,15 @@ if(TZPL_BUILD_APP_JUCE)
 
     target_sources(tzpl_app_juce PRIVATE
         src/main.cpp
+        src/gui_state.cpp
         juce/juce_gui_main.cpp
         juce/juce_audio_backend.cpp
         juce/main_component.cpp
         juce/tzpl_look_and_feel.cpp
+        juce/tzpl_tokeniser.cpp
+        juce/editor_pane.cpp
+        juce/find_replace_bar.cpp
+        juce/output_console.cpp
     )
     target_include_directories(tzpl_app_juce PRIVATE src juce)
 

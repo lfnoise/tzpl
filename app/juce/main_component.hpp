@@ -18,37 +18,26 @@
 //  main_component.hpp
 //  app (JUCE)
 //
-//  The window's content: center pane over output console with a draggable
-//  split, and the ApplicationCommandTarget handling every app command.
-//  The center/output panes are M1 placeholders -- the code editor (M2) and
-//  notebook (M3) replace them without changing the surrounding shell.
+//  The window's content: editor tabs over the output console with a
+//  draggable split, plus the ApplicationCommandTarget handling every app
+//  command, the REPL session, and the async eval plumbing.
 //
 
 #ifndef main_component_hpp
 #define main_component_hpp
 
 #include "app_commands.hpp"
+#include "editor_pane.hpp"
+#include "output_console.hpp"
+#include "gui_state.hpp"
 #include "tzpl_look_and_feel.hpp"
 #include <juce_gui_extra/juce_gui_extra.h>
 #include <functional>
 
 namespace bridge { struct AppContext; }
+namespace ts { class REPLSession; }
 
 namespace tzplapp {
-
-// Read-only scrolling log; becomes the real output console in M2.
-class OutputLog : public juce::Component {
-public:
-    OutputLog();
-    void resized() override { text_.setBounds(getLocalBounds()); }
-    void appendLine(juce::String const& line);
-    void clear() { text_.clear(); }
-    void setFontSize(float px);
-    void lookAndFeelChanged() override;
-
-private:
-    juce::TextEditor text_;
-};
 
 class MainComponent : public juce::Component,
                       public juce::ApplicationCommandTarget {
@@ -67,7 +56,7 @@ public:
     void getCommandInfo(juce::CommandID id, juce::ApplicationCommandInfo& info) override;
     bool perform(InvocationInfo const& info) override;
 
-    // Append a line to the output console.
+    // Append an info line to the output console.
     void logLine(juce::String const& line);
 
     // Asks about unsaved changes (async) and calls `proceed` only if the
@@ -77,19 +66,36 @@ public:
     int currentTheme() const { return lookAndFeel_.currentTheme(); }
     int currentFontIndex() const { return fontIndex_; }
 
+    // Test hooks for the TZPL_JUCE_SELFTEST / TZPL_JUCE_OPEN paths.
+    void testTypeIntoEditor(juce::String const& text);
+    bool testEvalCollected() const;
+    juce::String testLastEvalSummary() const;
+    void testOpenFile(juce::File const& f) { editorPane_.openFile(f); }
+    EditorPane& testEditorPane() { return editorPane_; }
+    void testShowDemo(juce::String const& which);
+
 private:
     void applyTheme(int themeIdx);
     void applyFontIndex(int idx);
     void saveSplitRatio();
+
+    void openFileFlow();
+    void saveActiveFlow(bool forceDialog, std::function<void(bool)> done = {});
+    void closeActiveTabFlow();
+
+    void launchEval(juce::String const& code, int flashStart, int flashEnd);
+    void collectEvalResult();
 
     bridge::AppContext& appCtx_;
     juce::ApplicationCommandManager& commands_;
     TzplLookAndFeel& lookAndFeel_;
     juce::PropertiesFile& settings_;
 
-    // M1 placeholder for the editor/notebook pane.
-    juce::Label centerPane_;
-    OutputLog outputLog_;
+    GuiState guiState_;
+    std::unique_ptr<ts::REPLSession> session_;
+
+    EditorPane editorPane_;
+    OutputConsole console_ { guiState_ };
     juce::StretchableLayoutManager layout_;
     std::unique_ptr<juce::StretchableLayoutResizerBar> resizer_;
 
