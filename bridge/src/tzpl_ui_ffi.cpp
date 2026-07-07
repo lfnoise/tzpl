@@ -169,6 +169,39 @@ static void ffi_uiSlider(ts::VM& vm, u16 dst, u16, u16 argBase) {
     vm.reg(dst).i = upsertWidget(vm, name, UIWidgetKind::Slider, spec);
 }
 
+// fn uiRange(name String, lo Float, hi Float, initLo Float, initHi Float,
+//            warp Int, warpParam Float) Int
+// Two-ended slider: values[0] = lo end, values[1] = hi end, both mapped
+// through the same spec.
+static void ffi_uiRange(ts::VM& vm, u16 dst, u16, u16 argBase) {
+    UIState* ui = getUIState(vm);
+    if (!ui) { vm.reg(dst).i = 0; return; }
+    const char* name = regString(vm, argBase);
+    UISpec spec;
+    spec.lo = vm.reg(argBase + 1).f;
+    spec.hi = vm.reg(argBase + 2).f;
+    double initLo = vm.reg(argBase + 3).f;
+    double initHi = vm.reg(argBase + 4).f;
+    spec.init = initLo;
+    int warp = static_cast<int>(vm.reg(argBase + 5).i);
+    if (warp < 0 || warp > static_cast<int>(UIWarp::Cubed)) warp = 0;
+    spec.warp = static_cast<UIWarp>(warp);
+    spec.warpParam = vm.reg(argBase + 6).f;
+
+    std::lock_guard<std::mutex> lock(ui->mtx);
+    bool fresh = ui->findByName(ui->currentPanel, name) == nullptr;
+    UIWidget* w = ui->upsert(ui->currentPanel, name, UIWidgetKind::Range,
+                             spec, UISpec{});
+    if (fresh) {
+        // An adopted widget keeps its ends (upsert clamps and orders them);
+        // a new one starts at the declared initial range.
+        w->values[0] = spec.clamp(initLo);
+        w->values[1] = spec.clamp(initHi);
+        if (w->values[0] > w->values[1]) std::swap(w->values[0], w->values[1]);
+    }
+    vm.reg(dst).i = static_cast<i64>(w->id);
+}
+
 // fn uiNumber(name String, init Float) Int
 static void ffi_uiNumber(ts::VM& vm, u16 dst, u16, u16 argBase) {
     const char* name = regString(vm, argBase);
@@ -464,6 +497,25 @@ static void ffi_uiSetValueXY(ts::VM& vm, u16, u16, u16 argBase) {
     if (UIWidget* w = ui->findById(id); w && w->values.size() > 1) {
         w->values[0] = w->spec.clamp(x);
         w->values[1] = w->spec2.clamp(y);
+        w->dirtyEngine = true;
+        w->dirtyCallback = true;
+    }
+}
+
+// fn uiSetRange(id Int, lo Float, hi Float) Void
+static void ffi_uiSetRange(ts::VM& vm, u16, u16, u16 argBase) {
+    UIState* ui = getUIState(vm);
+    if (!ui) return;
+    auto id = static_cast<std::uint64_t>(vm.reg(argBase).i);
+    double lo = vm.reg(argBase + 1).f;
+    double hi = vm.reg(argBase + 2).f;
+    std::lock_guard<std::mutex> lock(ui->mtx);
+    if (UIWidget* w = ui->findById(id); w && w->values.size() > 1) {
+        lo = w->spec.clamp(lo);
+        hi = w->spec.clamp(hi);
+        if (lo > hi) std::swap(lo, hi);
+        w->values[0] = lo;
+        w->values[1] = hi;
         w->dirtyEngine = true;
         w->dirtyCallback = true;
     }
@@ -1014,6 +1066,7 @@ void registerUIFFI(ts::Compiler& compiler) {
     reg("uiGetPanel",     String, {},                           ffi_uiGetPanel);
     reg("uiNodeDefName",  String, {Int},                        ffi_uiNodeDefName);
     reg("uiSlider",       Int,  {String, Float, Float, Float, Int, Float}, ffi_uiSlider);
+    reg("uiRange",        Int,  {String, Float, Float, Float, Float, Int, Float}, ffi_uiRange);
     reg("uiNumber",       Int,  {String, Float},                ffi_uiNumber);
     reg("uiButton",       Int,  {String},                       ffi_uiButton);
     reg("uiToggle",       Int,  {String, Bool},                 ffi_uiToggle);
@@ -1043,6 +1096,7 @@ void registerUIFFI(ts::Compiler& compiler) {
     reg("uiValueY",       Float, {Int},                         ffi_uiValueY);
     reg("uiSetValue",     Void, {Int, Float},                   ffi_uiSetValue);
     reg("uiSetValueXY",   Void, {Int, Float, Float},            ffi_uiSetValueXY);
+    reg("uiSetRange",     Void, {Int, Float, Float},            ffi_uiSetRange);
     reg("uiRemove",       Void, {Int},                          ffi_uiRemove);
     reg("uiClear",        Void, {},                             ffi_uiClear);
     reg("uiMeter",        Int,  {String, Int, Int, Int},        ffi_uiMeter);

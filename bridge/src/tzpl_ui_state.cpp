@@ -102,6 +102,7 @@ static int numValuesFor(UIWidgetKind kind) {
     switch (kind) {
         case UIWidgetKind::XY:    return 2;  // x, y
         case UIWidgetKind::Meter: return 2;  // rms, peak
+        case UIWidgetKind::Range: return 2;  // lo, hi
         // MultiSlider/Matrix are resized by their constructors after upsert.
         default:                  return 1;
     }
@@ -140,6 +141,11 @@ UIWidget* UIState::upsert(std::string const& panel, std::string const& name,
             w->values.resize(numValuesFor(kind), 0.0);
         w->values[0] = spec.clamp(w->values[0]);
         if (kind == UIWidgetKind::XY) w->values[1] = spec2.clamp(w->values[1]);
+        if (kind == UIWidgetKind::Range) {
+            w->values[1] = spec.clamp(w->values[1]);
+            if (w->values[0] > w->values[1])
+                std::swap(w->values[0], w->values[1]);
+        }
         w->target.reset();
         w->target2.reset();
         w->onChange = nullptr;
@@ -158,6 +164,7 @@ UIWidget* UIState::upsert(std::string const& panel, std::string const& name,
     ww->values.assign(numValuesFor(kind), 0.0);
     ww->values[0] = spec.clamp(spec.init);
     if (kind == UIWidgetKind::XY) ww->values[1] = spec2.clamp(spec2.init);
+    if (kind == UIWidgetKind::Range) ww->values[1] = spec.clamp(spec.init);
     w = ww.get();
     widgets.push_back(std::move(ww));
     return w;

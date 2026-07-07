@@ -37,7 +37,15 @@ void setUIDrawScale(float s);
 
 // Fire key-bound widgets (ui.bindKey): buttons act momentary (down/up),
 // toggles flip on press. Call once per frame inside the ImGui frame; a
-// no-op while a text field wants input. Takes UIState::mtx itself.
+// no-op while a text field wants input or a hovered gesture widget owns
+// the keyboard. Takes UIState::mtx itself.
 void dispatchWidgetKeys(bridge::UIState& ui);
+
+// Hover keyboard ownership: a hovered slider/range/xy/multislider eats
+// ALL typed characters (they act on the widget and reach nothing else).
+// Call right after ImGui::NewFrame(), before any window draws -- when a
+// widget was hovered last frame this moves the character queue aside
+// before editors can read it.
+void uiHoverKeysNewFrame();
 
 #endif /* widget_draw_hpp */

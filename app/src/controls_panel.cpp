@@ -240,7 +240,8 @@ void ControlsPanel::dispatch(bridge::UIState& ui, bridge::AppContext& ctx) {
             } else {
                 call.v0 = w.values[0];
                 call.v1 = w.values.size() > 1 ? w.values[1] : 0.0;
-                call.argc = (w.kind == UIWidgetKind::XY) ? 2 : 1;
+                call.argc = (w.kind == UIWidgetKind::XY
+                             || w.kind == UIWidgetKind::Range) ? 2 : 1;
             }
             calls.push_back(std::move(call));
             w.dirtyCallback = false;

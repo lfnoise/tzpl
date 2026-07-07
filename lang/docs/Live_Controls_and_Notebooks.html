@@ -339,6 +339,7 @@ if (localStorage.getItem('tzpl-docs-theme') === 'light') document.documentElemen
       <ol>
         <li><a href="#ui-widgets">Widgets</a></li>
         <li><a href="#ui-binding">Binding to Sound</a></li>
+        <li><a href="#ui-gestures">Mouse &amp; Keyboard Control</a></li>
         <li><a href="#ui-derive">Widgets from Synthdefs</a></li>
         <li><a href="#ui-reading">Reading Values &amp; Taps</a></li>
         <li><a href="#ui-panels">Panels</a></li>
@@ -421,6 +422,8 @@ scope(<span class="str">"out"</span>, node);</code></pre>
 <tr><th>Constructor</th><th>Widget</th><th>Notes</th></tr>
 <tr><td><code>slider(name, spec)</code></td><td>horizontal slider</td><td><code>spec</code> is a <code>synthdef.ControlSpec</code>; the warp (linear / exponential / step / signedSquare / cubed) shapes the mapping</td></tr>
 <tr><td><code>slider(name, lo, hi, init)</code></td><td>horizontal slider</td><td>linear convenience form</td></tr>
+<tr><td><code>range(name, spec)</code></td><td>range slider</td><td>two ends (lo, hi) on one scale; sweep, slide, and end-adjust gestures in <a href="#ui-gestures">&sect;3.3</a></td></tr>
+<tr><td><code>range(name, lo, hi, initLo, initHi)</code></td><td>range slider</td><td>linear convenience form</td></tr>
 <tr><td><code>number(name, init)</code></td><td>drag/type number box</td><td></td></tr>
 <tr><td><code>button(name)</code></td><td>momentary button</td><td>sends 1 while held, 0 on release (a gate)</td></tr>
 <tr><td><code>toggle(name, init)</code></td><td>checkbox</td><td>sends 1 / 0</td></tr>
@@ -453,18 +456,70 @@ cutoff bindControl(node, <span class="str">"cutoff"</span>);
 <span class="cmt">-- Coalesced: fires with the LATEST value at most once per GUI frame.</span>
 cutoff onChange(<span class="kw">fn</span>(v <span class="typ">Float</span>) <span class="typ">Void</span> { <span class="str">"cutoff -&gt; %^"</span> fmt(v) println; });</code></pre>
 
-<p><code>bindControl</code> resolves the control <em>by name</em> against the node's synthdef and returns an <code>audio_engine</code> error code (0&nbsp;=&nbsp;ok; a wrong name prints <code>errControlNotFound</code> to the console). For an XY pad, bind each axis: <code>bindControl</code> drives X and <code>bindControlY</code> drives Y; <code>onChangeXY</code> receives both values.</p>
+<p><code>bindControl</code> resolves the control <em>by name</em> against the node's synthdef and returns an <code>audio_engine</code> error code (0&nbsp;=&nbsp;ok; a wrong name prints <code>errControlNotFound</code> to the console). For an XY pad, bind each axis: <code>bindControl</code> drives X and <code>bindControlY</code> drives Y; <code>onChangeXY</code> receives both values. A range slider works the same way: <code>bindControl</code> drives the lo end, <code>bindControlY</code> the hi end, and <code>onChangeRange</code> receives <code>(lo, hi)</code>.</p>
 
 <div class="tip"><p>Prefer <code>bindControl</code> for anything that shapes sound in real time. Use <code>onChange</code> when you need language-side logic. If an eval holds the VM busy, fast-path bindings keep sounding; callbacks queue their latest value and fire when the VM frees up.</p></div>
 
 <p>When a node is freed (<code>stop(node)</code>, <code>freeNode</code>, <code>freeAllNodes</code>), widgets bound to it are automatically <strong>unbound</strong>: they stay on screen with their values but drive nothing until code rebinds them (e.g. re-running the cell after <code>play</code>ing the synth again). <code>onChange</code> callbacks are untouched &mdash; they're yours.</p>
 
-<p><strong>Hovering a slider or xy pad</strong> enables quick adjustments, all in the unmapped 0..1 position (so they respect the warp): <kbd>c</kbd> centers (position 0.5), <kbd>[</kbd> jumps to lo, <kbd>]</kbd> to hi, <kbd>z</kbd> sets the <em>mapped</em> value to zero (clamped into range), <kbd>i</kbd> sets the spec's <code>init</code> value, <kbd>r</kbd> sets a uniform random position, <kbd>j</kbd> jitters by a random &plusmn;0.05, bouncing off the ends rather than clamping (hold to walk), and the <strong>scroll wheel</strong> nudges by 0.01 per tick (up = higher). On an xy pad the keys act on both axes (independent randoms for <kbd>r</kbd>/<kbd>j</kbd>), the vertical wheel drives Y, and the horizontal wheel drives X &mdash; a trackpad plays the pad in 2-D. On a multislider the keys act on <em>all</em> bars (independent randoms per bar for <kbd>r</kbd>/<kbd>j</kbd> &mdash; <kbd>r</kbd> scatters, held <kbd>j</kbd> makes the whole surface shimmer), and the wheel adjusts the single bar under the cursor. Keys auto-repeat while held, and key and wheel bursts alike commit <em>one</em> history entry when the adjustments stop.</p>
+<!-- -------------------------------- -->
+<h3 id="ui-gestures">3.3 Mouse &amp; Keyboard Control</h3>
 
-<p>Buttons and toggles can also be bound to the <strong>keyboard</strong>: <code>kick bindKey("a")</code> makes the <kbd>a</kbd> key press the button (momentary &mdash; down sends 1, up sends 0) and shows <code>kick [a]</code> on its face; on a toggle the key flips it. Accepted keys: a single character <code>"a"</code>&ndash;<code>"z"</code> / <code>"0"</code>&ndash;<code>"9"</code>, or <code>"space"</code>; <code>""</code> unbinds. Key bindings fire whenever no text field has focus &mdash; in the notebook, in perform mode, and over floating panels &mdash; and are saved with the document.</p>
+<p>Sliders, range sliders, xy pads, and multisliders are played with drag gestures and single-key hover commands. While a slider or range is hovered or dragged, a <strong>graduated tick scale</strong> appears on its background &mdash; decimal steps for linear ranges, decades (1&ndash;9 log-spaced, longer ticks at 1 and 5) for exponential ones.</p>
+
+<h4>Pointer</h4>
+
+<table>
+<tr><th>Gesture</th><th>Slider</th><th>Range slider</th></tr>
+<tr><td>drag</td><td>positions absolutely</td><td>sweeps out a new range from the click point</td></tr>
+<tr><td><kbd>option</kbd>-drag</td><td><em>fine</em>: 1/10 rate</td><td>slides the whole range (width preserved)</td></tr>
+<tr><td><kbd>option+cmd</kbd>-drag</td><td><em>ultra fine</em>: 1/100 rate</td><td>&mdash;</td></tr>
+<tr><td><kbd>shift</kbd>-drag</td><td>&mdash;</td><td>adjusts whichever end is nearer</td></tr>
+<tr><td><kbd>cmd</kbd>-click</td><td>type the value (<kbd>Enter</kbd> commits, <kbd>Esc</kbd> cancels)</td><td>type one end &mdash; left half = lo, right half = hi (clamped so the ends can't cross)</td></tr>
+<tr><td>scroll wheel</td><td>nudges by 0.01 per tick (up = higher)</td><td>slides the whole range by 0.01 per tick</td></tr>
+</table>
+
+<p>The fine modes are <strong>anchored</strong> at the value where you enter them, so you can slam close with a plain drag, then hold <kbd>option</kbd> and land it exactly &mdash; switching modes mid-drag never jumps. A range drag reads its modifiers every frame too: start a sweep, then hold <kbd>option</kbd> to slide it into place.</p>
+
+<h4>Hover keys</h4>
+
+<p>Hovering a widget enables quick single-key adjustments, all in the unmapped 0..1 position (so they respect the warp) except where noted. Keys auto-repeat while held, and key and wheel bursts alike commit <em>one</em> history entry when the adjustments stop.</p>
+
+<table>
+<tr><th>Key</th><th>Action</th></tr>
+<tr><td><kbd>c</kbd></td><td>center &mdash; position 0.5</td></tr>
+<tr><td><kbd>[</kbd></td><td>jump to lo (position 0.0)</td></tr>
+<tr><td><kbd>]</kbd></td><td>jump to hi (position 1.0)</td></tr>
+<tr><td><kbd>1</kbd>&ndash;<kbd>9</kbd></td><td>jump to position 0.1&ndash;0.9 (sliders only)</td></tr>
+<tr><td><kbd>r</kbd></td><td>uniform random position</td></tr>
+<tr><td><kbd>j</kbd></td><td>jitter by a random &plusmn;0.05, bouncing off the ends rather than clamping (hold to walk)</td></tr>
+<tr><td><kbd>J</kbd></td><td>fine jitter, &plusmn;0.005</td></tr>
+<tr><td><kbd>,</kbd></td><td>step the position down by 0.05</td></tr>
+<tr><td><kbd>.</kbd></td><td>step the position up by 0.05</td></tr>
+<tr><td><kbd>z</kbd></td><td>set the <em>mapped</em> value to zero (clamped into range)</td></tr>
+<tr><td><kbd>i</kbd></td><td>set the spec's <code>init</code> value</td></tr>
+<tr><td><kbd>-</kbd></td><td>negate the <em>mapped</em> value (only when the result stays in range &mdash; handy on a &plusmn; range)</td></tr>
+<tr><td><kbd>/</kbd></td><td>reciprocal of the <em>mapped</em> value (when in range &mdash; handy on a ratio)</td></tr>
+</table>
+
+<p>What a key acts <em>on</em> follows the widget:</p>
+
+<table>
+<tr><th>Widget</th><th>Keys apply to</th><th>Wheel</th></tr>
+<tr><td>slider</td><td>the value</td><td>nudges the value</td></tr>
+<tr><td>xy pad</td><td>both axes (independent randoms for <kbd>r</kbd>/<kbd>j</kbd>)</td><td>vertical wheel drives Y, horizontal drives X &mdash; a trackpad plays the pad in 2-D</td></tr>
+<tr><td>multislider</td><td><em>all</em> bars (independent randoms per bar &mdash; <kbd>r</kbd> scatters, held <kbd>j</kbd> makes the whole surface shimmer)</td><td>adjusts the single bar under the cursor</td></tr>
+<tr><td>range slider</td><td>both ends: <kbd>c</kbd>, <kbd>z</kbd>, and <kbd>i</kbd> collapse the range; <kbd>[</kbd> and <kbd>]</kbd> send one end to its rail; <kbd>r</kbd>, <kbd>j</kbd>, and <kbd>J</kbd> randomize or jitter both ends; <kbd>-</kbd> negates and <kbd>/</kbd> inverts the range; <kbd>,</kbd> and <kbd>.</kbd> slide it, width preserved</td><td>slides the whole range</td></tr>
+</table>
+
+<div class="note"><p><strong>A hovered control owns the keyboard.</strong> While the pointer rests on a slider, range, xy pad, or multislider, typed keys act on that widget and go nowhere else &mdash; not to a focused cell editor, not to <code>bindKey</code> bindings. To type code or fire key bindings, hover somewhere else. (The one exception: an open cmd-click value edit keeps its keystrokes until you commit or cancel it.)</p></div>
+
+<h4>Key bindings</h4>
+
+<p>Buttons and toggles can be bound to the <strong>keyboard</strong>: <code>kick bindKey("a")</code> makes the <kbd>a</kbd> key press the button (momentary &mdash; down sends 1, up sends 0) and shows <code>kick [a]</code> on its face; on a toggle the key flips it. Accepted keys: a single character <code>"a"</code>&ndash;<code>"z"</code> / <code>"0"</code>&ndash;<code>"9"</code>, or <code>"space"</code>; <code>""</code> unbinds. Key bindings fire whenever no text field has focus &mdash; in the notebook, in perform mode, and over floating panels &mdash; and are saved with the document.</p>
 
 <!-- -------------------------------- -->
-<h3 id="ui-derive">3.3 Widgets from Synthdefs</h3>
+<h3 id="ui-derive">3.4 Widgets from Synthdefs</h3>
 
 <p>Compiled synthdefs carry each declared control's name and <code>ControlSpec</code>. The <code>ui</code> module can materialize widgets directly from them:</p>
 
@@ -485,7 +540,7 @@ control(node, <span class="str">"freq"</span>, <span class="str">"mixer"</span>)
 <div class="note"><p><strong>Widgets are keyed by (panel, name).</strong> Calling <code>controls</code> twice for the same node updates the same widgets &mdash; no duplicates, and different synths never collide (they default to different panels). The one case needing care is <em>two instances of the same def</em>: both default to the same panel, so the second call would rebind the shared widgets. Give each instance an explicit panel: <code>controls(bass1, "bass 1"); controls(bass2, "bass 2");</code></p></div>
 
 <!-- -------------------------------- -->
-<h3 id="ui-reading">3.4 Reading Values &amp; Taps from Code</h3>
+<h3 id="ui-reading">3.5 Reading Values &amp; Taps from Code</h3>
 
 <pre><code>cutoff value;            <span class="cmt">-- current value (Float)</span>
 pad valueY;              <span class="cmt">-- Y of an xy pad</span>
@@ -503,7 +558,7 @@ s tapChannels;           <span class="cmt">-- channels captured by the scope</sp
 <div class="warn"><p><strong>One consumer per scope stream.</strong> The scope's sample FIFO feeds either the on-screen display or <code>samples()</code> &mdash; whatever one drains, the other doesn't see. Meters (<code>rmsLevel</code>/<code>peakLevel</code>) are fine to read from both places.</p></div>
 
 <!-- -------------------------------- -->
-<h3 id="ui-panels">3.5 Panels</h3>
+<h3 id="ui-panels">3.6 Panels</h3>
 
 <p>Every widget belongs to a named <em>panel</em>. Constructors place widgets into the <strong>current panel</strong>, set by <code>panel(name)</code>; the default is <code>""</code>, shown as the floating <strong>Controls</strong> window:</p>
 
@@ -517,12 +572,13 @@ panel(<span class="str">""</span>);               <span class="cmt">-- back to t
 <p><strong>Closing a floating panel window (its &times; button) removes its widgets</strong> &mdash; the window is just a view of them, and code recreates them by re-running (values reset to their inits, since floating panels aren't part of a document). It's the direct-manipulation equivalent of <code>ui.clear()</code> for that panel. Notebook panel <em>cells</em> are different: their widgets are document state, saved and covered by undo.</p>
 
 <!-- -------------------------------- -->
-<h3 id="ui-reference">3.6 Function Reference</h3>
+<h3 id="ui-reference">3.7 Function Reference</h3>
 
 <table>
 <tr><th>Function</th><th>Description</th></tr>
 <tr><td><code>panel(name String) Void</code> / <code>currentPanel() String</code></td><td>set / read the target panel for subsequent constructors</td></tr>
 <tr><td><code>slider(name, spec) Widget</code><br><code>slider(name, lo, hi, init) Widget</code></td><td>slider (ControlSpec / linear form)</td></tr>
+<tr><td><code>range(name, spec) Widget</code><br><code>range(name, lo, hi, initLo, initHi) Widget</code></td><td>range slider (ControlSpec / linear form); <code>value</code>/<code>valueY</code> read the ends, <code>bindControl</code>/<code>bindControlY</code> drive them</td></tr>
 <tr><td><code>number(name, init) Widget</code></td><td>number box</td></tr>
 <tr><td><code>button(name) Widget</code></td><td>momentary gate button</td></tr>
 <tr><td><code>toggle(name, init = false) Widget</code></td><td>checkbox</td></tr>
@@ -534,9 +590,9 @@ panel(<span class="str">""</span>);               <span class="cmt">-- back to t
 <tr><td><code>bindControl(w, node, control String, silo = 0) Int</code></td><td>fast-path engine binding, by control name</td></tr>
 <tr><td><code>bindControlY(w, node, control String, silo = 0) Int</code></td><td>fast-path binding for an xy pad's Y axis</td></tr>
 <tr><td><code>bindKey(w, key String)</code></td><td>keyboard binding for a button (momentary) or toggle (flip): <code>"a"</code>&ndash;<code>"z"</code>, <code>"0"</code>&ndash;<code>"9"</code>, <code>"space"</code>; <code>""</code> unbinds</td></tr>
-<tr><td><code>onChange(w, f (Float) Void)</code> / <code>onChangeXY(w, f (Float, Float) Void)</code></td><td>coalesced value callback</td></tr>
+<tr><td><code>onChange(w, f (Float) Void)</code> / <code>onChangeXY(w, f (Float, Float) Void)</code> / <code>onChangeRange(w, f (Float, Float) Void)</code></td><td>coalesced value callback</td></tr>
 <tr><td><code>value(w) Float</code> / <code>valueY(w) Float</code> / <code>values(w) [Float]</code></td><td>read the widget</td></tr>
-<tr><td><code>setValue(w, v)</code> / <code>setValueXY(w, x, y)</code> / <code>setValues(w, vals)</code></td><td>move the widget and fire its bindings</td></tr>
+<tr><td><code>setValue(w, v)</code> / <code>setValueXY(w, x, y)</code> / <code>setRange(w, lo, hi)</code> / <code>setValues(w, vals)</code></td><td>move the widget and fire its bindings</td></tr>
 <tr><td><code>notes(w) [Float]</code> / <code>setNotes(w, ns)</code></td><td>piano-roll notes as flat (pitch, startBeat, durBeats) triplets</td></tr>
 <tr><td><code>onChangeVec(w, f ([Float]) Void)</code></td><td>coalesced vector callback: multislider/matrix values, or roll note triplets</td></tr>
 <tr><td><code>setFrame(w, x, y, wd, ht)</code></td><td>layout frame within the panel (what arrange mode sets by dragging)</td></tr>
@@ -570,7 +626,7 @@ panel(<span class="str">""</span>);               <span class="cmt">-- back to t
   <li><strong>code</strong> &mdash; a Tzopilotl editor with syntax highlighting, an editable name (purely descriptive, saved with the document), a <strong>Run</strong> button, a <strong>run on load</strong> checkbox, and its own output area underneath. The colored dot at the left of the header shows status: <span style="color:#8b949e">&#9679;</span> never ran, <span style="color:#22c55e">&#9679;</span> ran clean, <span style="color:#f59e0b">&#9679;</span> edited since it last ran (stale), <span style="color:#ef4444">&#9679;</span> last run errored.</li>
   <li><strong>prose</strong> &mdash; free text for notes and titles; drawn without line numbers, in a distinct color. Not evaluated.</li>
   <li><strong>panel</strong> &mdash; an embedded control surface; see below.</li>
-  <li><strong>presets</strong> &mdash; a matrix of stored control snapshots. A presets cell governs the panel cells <em>after</em> it, up to the next presets cell: <strong>+ store</strong> snapshots the current values of every input widget in those panels into a new slot; <strong>click</strong> a slot to recall (audible, one undoable step); <strong>right-click or cmd-click</strong> a slot for its menu &mdash; name it, overwrite it with the current values, or delete it &mdash; without recalling; the <strong>overwrite</strong> button does the same for the selected slot. Presets store the values of sliders, numbers, toggles, xy pads, multisliders, and matrices &mdash; not meters/scopes, buttons, or piano-roll notes. Saved with the document; collapse the cell to a single strip when performing without it.</li>
+  <li><strong>presets</strong> &mdash; a matrix of stored control snapshots. A presets cell governs the panel cells <em>after</em> it, up to the next presets cell: <strong>+ store</strong> snapshots the current values of every input widget in those panels into a new slot; <strong>click</strong> a slot to recall (audible, one undoable step); <strong>right-click or cmd-click</strong> a slot for its menu &mdash; name it, overwrite it with the current values, or delete it &mdash; without recalling; the <strong>overwrite</strong> button does the same for the selected slot. Presets store the values of sliders, range sliders, numbers, toggles, xy pads, multisliders, and matrices &mdash; not meters/scopes, buttons, or piano-roll notes. Saved with the document; collapse the cell to a single strip when performing without it.</li>
 </ul>
 
 <p>Every cell header starts with a <strong>collapse triangle</strong> that hides the body (code, output, or panel canvas), leaving just the header strip &mdash; collapsed state is saved with the document. Each header also has <strong>&uarr; / &darr;</strong> (move) and <strong>x</strong> (delete) on the right. Collapsed code cells still run (Run, Run All, run-on-load).</p>
@@ -659,6 +715,8 @@ panel(<span class="str">""</span>);               <span class="cmt">-- back to t
 <tr><td><kbd>Cmd+Z</kbd> / <kbd>Cmd+Shift+Z</kbd></td><td>text undo / redo</td><td>character undo in the focused cell; document-history undo otherwise (text edits are in both &mdash; see &sect;4.6)</td></tr>
 <tr><td><kbd>Cmd+K</kbd></td><td colspan="2">clear console</td></tr>
 </table>
+
+<p>The <strong>View</strong> menu also holds the editor font size and the color theme (<strong>View &gt; Theme</strong>: Dark, Corporate Gray, Dark 2, Cherry, Dark Grey).</p>
 
 <!-- ================================================================ -->
 <h2 id="limitations">6. Current Limitations</h2>

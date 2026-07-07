@@ -72,6 +72,10 @@ struct UISpec {
     double map(double pos01) const;    // position [0,1] -> value [lo,hi]
     double unmap(double value) const;  // value -> position [0,1]
     double clamp(double value) const;
+    bool contains(double v) const {
+        double a = lo < hi ? lo : hi, b = lo < hi ? hi : lo;
+        return a <= v && v <= b;
+    }
 };
 
 // True if `panel` belongs to the panel-cell root `root`: the exact name
@@ -104,6 +108,7 @@ enum class UIWidgetKind : int {
     Matrix,      // values = rows*cols cells (row-major, 0/1 toggles)
     PianoRoll,   // noteData = (pitch, startBeat, durBeats) triplets
     Label,       // static text (labelText)
+    Range,       // two-ended slider: values[0] = lo, values[1] = hi (mapped)
 };
 
 // Engine fast-path binding: on value change the GUI thread sends

@@ -499,6 +499,7 @@ void NotebookPanel::addCellOutput(std::uint64_t cellId,
 static bool presetStorableKind(bridge::UIWidgetKind k) {
     switch (k) {
         case bridge::UIWidgetKind::Slider:
+        case bridge::UIWidgetKind::Range:
         case bridge::UIWidgetKind::Number:
         case bridge::UIWidgetKind::Toggle:
         case bridge::UIWidgetKind::XY:

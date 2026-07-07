@@ -98,6 +98,7 @@ if(TZPL_BUILD_GUI)
         src/document.cpp
         src/content_hash.cpp
         src/notebook_panel.cpp
+        src/themes.cpp
     )
     if(APPLE)
         list(APPEND APP_SOURCES src/app_gui.mm)
@@ -164,6 +165,19 @@ if(TZPL_BUILD_GUI)
         PRIVATE tzpl_synthdef_compiler_bridge
         PRIVATE tzpl_audio_engine_bridge
         PRIVATE tzpl_clock_bridge
+    )
+
+    # Headless widget-interaction tests: an ImGui context with no
+    # rendering backend, driven by injected IO events (slider drags,
+    # fine control, cmd-click text entry, range gestures).
+    add_executable(tzpl_widget_tests
+        tests/widget_interaction_test.cpp
+        src/widget_draw.cpp
+    )
+    target_include_directories(tzpl_widget_tests PRIVATE src)
+    target_link_libraries(tzpl_widget_tests
+        PRIVATE imgui_lib
+        PRIVATE tzpl_audio_engine_bridge
     )
 endif()
 

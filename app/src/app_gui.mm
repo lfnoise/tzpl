@@ -32,6 +32,7 @@
 #include "controls_panel.hpp"
 #include "notebook_panel.hpp"
 #include "widget_draw.hpp"
+#include "themes.hpp"
 
 #include "repl_session.hpp"
 #include "nrt_vm.hpp"
@@ -80,8 +81,8 @@ enum class AppCmd {
     MoveHome, MoveEnd, MoveTop, MoveBottom,
     // Find
     FindShow, FindNext, FindPrevious, FindUseSelection, FindUseSelectionReplace,
-    // View (`arg` = font index for FontSet)
-    FontIncrease, FontDecrease, FontSet,
+    // View (`arg` = font index for FontSet, theme index for ThemeSet)
+    FontIncrease, FontDecrease, FontSet, ThemeSet,
     // Swap the center pane between the open notebook and the editor tabs
     // (the notebook document stays alive either way)
     ToggleNotebookView,
@@ -212,6 +213,7 @@ static std::string findMonoFont() {
 - (void)findUseSelection:(id)sender;
 - (void)findUseSelectionReplace:(id)sender;
 - (void)fontSizeAction:(id)sender;
+- (void)themeAction:(id)sender;
 @end
 
 @implementation TzplMenuHandler
@@ -245,6 +247,10 @@ static std::string findMonoFont() {
     if (tag == -1)      gCmdQueue.push(AppCmd::FontIncrease);
     else if (tag == -2) gCmdQueue.push(AppCmd::FontDecrease);
     else                gCmdQueue.push(AppCmd::FontSet, false, tag);
+}
+- (void)themeAction:(id)sender {
+    NSMenuItem* item = (NSMenuItem*)sender;
+    gCmdQueue.push(AppCmd::ThemeSet, false, (int)[item tag]);
 }
 @end
 
@@ -412,6 +418,20 @@ static void setupNativeMenuBar(const float* fontSizes, int numFontSizes) {
     }
     fontSizeMenuItem.submenu = fontSizeMenu;
     [viewMenu addItem:fontSizeMenuItem];
+
+    NSMenuItem* themeMenuItem = [[NSMenuItem alloc] init];
+    themeMenuItem.title = @"Theme";
+    NSMenu* themeMenu = [[NSMenu alloc] initWithTitle:@"Theme"];
+    for (int i = 0; i < themeCount; ++i) {
+        NSMenuItem* item = [themeMenu
+            addItemWithTitle:[NSString stringWithUTF8String:kAppThemeNames[i]]
+                      action:@selector(themeAction:)
+               keyEquivalent:@""];
+        item.target = gMenuHandler;
+        item.tag = i;
+    }
+    themeMenuItem.submenu = themeMenu;
+    [viewMenu addItem:themeMenuItem];
 
     // Font size shortcuts as separate menu items
     NSMenuItem* fontUp = [viewMenu addItemWithTitle:@"Increase Font Size"
@@ -681,7 +701,7 @@ int runGui(bridge::AppContext& appCtx) {
     }
     io.FontGlobalScale = 1.0f / xscale;
 
-    ImGui::StyleColorsDark();
+    applyAppTheme(themeDark);
 
     ImGui_ImplGlfw_InitForOther(window, true);
     ImGui_ImplMetal_Init(device);
@@ -911,6 +931,10 @@ int runGui(bridge::AppContext& appCtx) {
             }
 
             ImGui::NewFrame();
+
+            // A gesture widget hovered last frame owns the keyboard:
+            // claim its typed characters before any editor draws.
+            uiHoverKeysNewFrame();
 
             // ---------------------------------------------------------------
             // Dispatch queued commands (from native menus and key shortcuts)
@@ -1233,6 +1257,9 @@ int runGui(bridge::AppContext& appCtx) {
                     break;
                 case AppCmd::FontSet:
                     applyFontIdx(c.arg);
+                    break;
+                case AppCmd::ThemeSet:
+                    applyAppTheme(c.arg);
                     break;
                 case AppCmd::ToggleNotebookView:
                     if (notebookPanel.isOpen())

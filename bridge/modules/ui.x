@@ -45,6 +45,18 @@ fn slider(name String, spec ControlSpec) Widget =
 fn slider(name String, lo Float, hi Float, init Float) Widget =
 	Widget(uiSlider(name, lo, hi, init, 0, 0.0));
 
+-- Range slider: one scale, two ends (lo, hi). Drag sweeps out a new
+-- range, option-drag moves the whole range, shift-drag adjusts the
+-- nearer end, cmd-click types an end's value. Read the ends with
+-- value()/valueY() or values(); bindControl drives the lo end,
+-- bindControlY the hi end.
+fn range(name String, spec ControlSpec) Widget =
+	Widget(uiRange(name, spec.lo, spec.hi, spec.init, spec.init,
+	               spec.warp ordinal, spec.warp _stepParam));
+
+fn range(name String, lo Float, hi Float, initLo Float, initHi Float) Widget =
+	Widget(uiRange(name, lo, hi, initLo, initHi, 0, 0.0));
+
 fn number(name String, init Float) Widget = Widget(uiNumber(name, init));
 
 fn button(name String) Widget = Widget(uiButton(name));
@@ -87,6 +99,9 @@ fn label(name String, text String) Widget = Widget(uiLabel(name, text));
 fn onChange(w Widget, f (Float) Void) Void = uiOnChange(w.0, f);
 fn onChangeXY(w Widget, f (Float, Float) Void) Void = uiOnChangeXY(w.0, f);
 
+-- Range callback: fired with (lo, hi), coalesced like onChange.
+fn onChangeRange(w Widget, f (Float, Float) Void) Void = uiOnChangeXY(w.0, f);
+
 -- Vector callback for multislider/matrix (all values) and pianoRoll
 -- (note triplets), fired coalesced like onChange.
 fn onChangeVec(w Widget, f ([Float]) Void) Void = uiOnChangeVec(w.0, f);
@@ -115,6 +130,9 @@ fn values(w Widget) [Float] = uiValues(w.0);
 -- Move the widget and fire its bindings (coalesced, next GUI frame).
 fn setValue(w Widget, v Float) Void = uiSetValue(w.0, v);
 fn setValueXY(w Widget, x Float, y Float) Void = uiSetValueXY(w.0, x, y);
+
+-- Set both ends of a range widget (clamped and ordered).
+fn setRange(w Widget, lo Float, hi Float) Void = uiSetRange(w.0, lo, hi);
 fn setValues(w Widget, vals [Float]) Void = uiSetValues(w.0, vals);
 
 -- Piano roll notes: flat (pitch, startBeat, durBeats) triplets.

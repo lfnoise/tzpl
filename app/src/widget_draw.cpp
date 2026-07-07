@@ -59,17 +59,51 @@ static void markGestureEdges(UIWidget& w) {
 }
 
 // Hover gestures (sliders and xy pads), all in UNMAPPED 0..1 position
-// space:
+// space unless noted:
 //   c = center (0.5)     [ = lo (0.0)      ] = hi (1.0)
+//   1..9 = position 0.1..0.9 (sliders only)
 //   r = uniform random   j = jitter by uniform(-0.05, +0.05), bouncing
+//   J = fine jitter by uniform(-0.005, +0.005)
+//   , / . = step down / up by 0.05
+//   - = negate the MAPPED value    / = its reciprocal (when in range)
 //   wheel = step by 0.01 per tick (up = higher; on an xy pad the
 //           horizontal wheel axis drives X)
-// Keys repeat while held (hold j for a random walk), so key and wheel
-// bursts alike coalesce into ONE history entry, committed when the
-// adjustments go idle. Call right after the hoverable item.
+// Keys arrive as TYPED CHARACTERS (ImGui's character queue, drained and
+// consumed while the item is hovered), so they follow the keyboard
+// layout and shift pairs like j/J come for free. Auto-repeat makes a
+// held j walk, and key and wheel bursts alike coalesce into ONE history
+// entry, committed when the adjustments go idle. Call right after the
+// hoverable item.
 
-// Burst coalesce timer + hover/typing gate. Runs the timer every frame
-// (hovered or not); returns true when hover adjustments may fire.
+// A hovered gesture widget OWNS the keyboard: typed characters act on
+// the widget and go nowhere else -- not to focused cell editors, not to
+// key bindings. To type, hover somewhere else. Widgets draw at various
+// points in the frame (some after the editors have already read the
+// character queue), so ownership is asserted a frame ahead:
+// uiHoverKeysNewFrame() runs right after ImGui::NewFrame() and, when a
+// widget was hovered last frame, moves the whole character queue into a
+// private buffer before any editor can see it. The one exception is an
+// open cmd-click value edit (temp input) -- that is the widget system's
+// own text entry, so hover gestures stand down until it closes.
+static bool gHoverOwnerLastFrame = false;
+static bool gHoverOwnerThisFrame = false;
+static ImVector<ImWchar> gStolenChars;
+
+void uiHoverKeysNewFrame() {
+    gHoverOwnerLastFrame = gHoverOwnerThisFrame;
+    gHoverOwnerThisFrame = false;
+    gStolenChars.resize(0);
+    ImGuiContext& g = *GImGui;
+    bool tempInputActive = g.TempInputId != 0 && g.ActiveId == g.TempInputId;
+    if (gHoverOwnerLastFrame && !tempInputActive) {
+        gStolenChars = ImGui::GetIO().InputQueueCharacters;
+        ImGui::GetIO().InputQueueCharacters.resize(0);
+    }
+}
+
+// Burst coalesce timer + hover gate. Runs the timer every frame
+// (hovered or not); returns true when hover adjustments may fire, and
+// claims keyboard ownership for the next frame when hovered.
 static bool hoverAdjustBegin(UIWidget& w) {
     if (w.gestureActive && w.wheelTime > 0.0
         && ImGui::GetTime() - w.wheelTime > 0.4) {
@@ -77,7 +111,11 @@ static bool hoverAdjustBegin(UIWidget& w) {
         w.wheelTime = 0.0;
         w.gestureEnded = true;
     }
-    return ImGui::IsItemHovered() && !ImGui::GetIO().WantTextInput;
+    ImGuiContext& g = *GImGui;
+    if (g.TempInputId != 0 && g.ActiveId == g.TempInputId) return false;
+    bool hovered = ImGui::IsItemHovered();
+    if (hovered) gHoverOwnerThisFrame = true;
+    return hovered;
 }
 
 static float hoverUniform(float lo, float hi) {
@@ -100,6 +138,21 @@ static void hoverOwnWheel() {
     ImGui::SetItemKeyOwner(ImGuiKey_MouseWheelX);
 }
 
+// Feed the hovered item every typed character: the ones stolen at frame
+// start (see uiHoverKeysNewFrame) plus any still in the live queue (the
+// first frame of a hover, before ownership was asserted). `handle` is a
+// per-widget switch over each character. At most one widget is hovered,
+// so at most one drains.
+template <typename Handle>
+static void hoverChars(Handle&& handle) {
+    for (int i = 0; i < gStolenChars.Size; ++i)
+        handle((unsigned)gStolenChars[i]);
+    gStolenChars.resize(0);
+    ImVector<ImWchar>& q = ImGui::GetIO().InputQueueCharacters;
+    for (int i = 0; i < q.Size; ++i) handle((unsigned)q[i]);
+    q.resize(0);
+}
+
 static void hoverAdjustSlider(UIWidget& w) {
     if (!hoverAdjustBegin(w)) return;
 
@@ -109,26 +162,51 @@ static void hoverAdjustSlider(UIWidget& w) {
         w.gestureActive = true;  // ends via the idle timer
         w.wheelTime = ImGui::GetTime();
     };
-    float pos = static_cast<float>(w.spec.unmap(w.values[0]));
 
-    if (ImGui::IsKeyPressed(ImGuiKey_C)) setPos(0.5f);
-    if (ImGui::IsKeyPressed(ImGuiKey_LeftBracket)) setPos(0.0f);
-    if (ImGui::IsKeyPressed(ImGuiKey_RightBracket)) setPos(1.0f);
-    if (ImGui::IsKeyPressed(ImGuiKey_R)) setPos(hoverUniform(0.0f, 1.0f));
-    if (ImGui::IsKeyPressed(ImGuiKey_J))
-        setPos(hoverBounce(pos + hoverUniform(-0.05f, 0.05f)));
-    // z / i work in MAPPED value space: zero and the spec's init
-    // (clamped into range before unmapping -- keeps exponential warps
-    // away from log(0)).
-    if (ImGui::IsKeyPressed(ImGuiKey_Z))
-        setPos((float)w.spec.unmap(w.spec.clamp(0.0)));
-    if (ImGui::IsKeyPressed(ImGuiKey_I))
-        setPos((float)w.spec.unmap(w.spec.clamp(w.spec.init)));
+    hoverChars([&](unsigned c) {
+        // Recompute per character so a burst chains correctly.
+        float pos = static_cast<float>(w.spec.unmap(w.values[0]));
+        double v = w.values[0];
+        switch (c) {
+            case 'c': case 'C': setPos(0.5f); break;
+            case '[': setPos(0.0f); break;
+            case ']': setPos(1.0f); break;
+            case 'r': case 'R': setPos(hoverUniform(0.0f, 1.0f)); break;
+            case 'j': setPos(hoverBounce(pos + hoverUniform(-0.05f, 0.05f))); break;
+            case 'J': setPos(hoverBounce(pos + hoverUniform(-0.005f, 0.005f))); break;
+            case ',': setPos(pos - 0.05f); break;
+            case '.': setPos(pos + 0.05f); break;
+            // z / i / - / slash work in MAPPED value space: zero, the
+            // spec's init, negation, and the reciprocal (the latter two
+            // only when the result stays in range). Clamping before
+            // unmapping keeps exponential warps away from log(0).
+            case 'z': case 'Z':
+                setPos((float)w.spec.unmap(w.spec.clamp(0.0)));
+                break;
+            case 'i': case 'I':
+                setPos((float)w.spec.unmap(w.spec.clamp(w.spec.init)));
+                break;
+            case '-':
+                if (w.spec.contains(-v)) setPos((float)w.spec.unmap(-v));
+                break;
+            case '/':
+                if (v != 0.0 && w.spec.contains(1.0 / v))
+                    setPos((float)w.spec.unmap(1.0 / v));
+                break;
+            default:
+                // 1..9 jump to position 0.1..0.9.
+                if (c >= '1' && c <= '9') setPos(0.1f * (float)(c - '0'));
+                break;
+        }
+    });
 
     // Positive io.MouseWheel is a scroll-up gesture reading as "push
     // the content up"; for a value, pushing up should RAISE it.
     float wheel = ImGui::GetIO().MouseWheel;
-    if (wheel != 0.0f) setPos(pos - wheel * 0.01f);
+    if (wheel != 0.0f) {
+        float pos = static_cast<float>(w.spec.unmap(w.values[0]));
+        setPos(pos - wheel * 0.01f);
+    }
     hoverOwnWheel();
 }
 
@@ -148,32 +226,40 @@ static void hoverAdjustXY(UIWidget& w) {
         w.values[1] = w.spec2.map(std::clamp(p, 0.0f, 1.0f));
         stamp();
     };
-    float x = static_cast<float>(w.spec.unmap(w.values[0]));
-    float y = static_cast<float>(w.spec2.unmap(w.values[1]));
-
-    if (ImGui::IsKeyPressed(ImGuiKey_C)) { setX(0.5f); setY(0.5f); }
-    if (ImGui::IsKeyPressed(ImGuiKey_LeftBracket)) { setX(0.0f); setY(0.0f); }
-    if (ImGui::IsKeyPressed(ImGuiKey_RightBracket)) { setX(1.0f); setY(1.0f); }
-    if (ImGui::IsKeyPressed(ImGuiKey_R)) {
-        setX(hoverUniform(0.0f, 1.0f));
-        setY(hoverUniform(0.0f, 1.0f));
-    }
-    if (ImGui::IsKeyPressed(ImGuiKey_J)) {
-        setX(hoverBounce(x + hoverUniform(-0.05f, 0.05f)));
-        setY(hoverBounce(y + hoverUniform(-0.05f, 0.05f)));
-    }
-    if (ImGui::IsKeyPressed(ImGuiKey_Z)) {
-        setX((float)w.spec.unmap(w.spec.clamp(0.0)));
-        setY((float)w.spec2.unmap(w.spec2.clamp(0.0)));
-    }
-    if (ImGui::IsKeyPressed(ImGuiKey_I)) {
-        setX((float)w.spec.unmap(w.spec.clamp(w.spec.init)));
-        setY((float)w.spec2.unmap(w.spec2.clamp(w.spec2.init)));
-    }
+    hoverChars([&](unsigned c) {
+        float x = static_cast<float>(w.spec.unmap(w.values[0]));
+        float y = static_cast<float>(w.spec2.unmap(w.values[1]));
+        auto jitter = [&](float d) {
+            setX(hoverBounce(x + hoverUniform(-d, d)));
+            setY(hoverBounce(y + hoverUniform(-d, d)));
+        };
+        switch (c) {
+            case 'c': case 'C': setX(0.5f); setY(0.5f); break;
+            case '[': setX(0.0f); setY(0.0f); break;
+            case ']': setX(1.0f); setY(1.0f); break;
+            case 'r': case 'R':
+                setX(hoverUniform(0.0f, 1.0f));
+                setY(hoverUniform(0.0f, 1.0f));
+                break;
+            case 'j': jitter(0.05f); break;
+            case 'J': jitter(0.005f); break;
+            case 'z': case 'Z':
+                setX((float)w.spec.unmap(w.spec.clamp(0.0)));
+                setY((float)w.spec2.unmap(w.spec2.clamp(0.0)));
+                break;
+            case 'i': case 'I':
+                setX((float)w.spec.unmap(w.spec.clamp(w.spec.init)));
+                setY((float)w.spec2.unmap(w.spec2.clamp(w.spec2.init)));
+                break;
+            default: break;
+        }
+    });
 
     // Vertical wheel drives Y (push up = higher), horizontal drives X
     // (push right = higher). The two axes' deltas arrive with opposite
     // signs relative to finger direction.
+    float x = static_cast<float>(w.spec.unmap(w.values[0]));
+    float y = static_cast<float>(w.spec2.unmap(w.values[1]));
     float wheelY = ImGui::GetIO().MouseWheel;
     if (wheelY != 0.0f) setY(y - wheelY * 0.01f);
     float wheelX = ImGui::GetIO().MouseWheelH;
@@ -181,45 +267,462 @@ static void hoverAdjustXY(UIWidget& w) {
     hoverOwnWheel();
 }
 
+// ---------------------------------------------------------------------------
+// Custom slider / range slider
+//
+// Both render as a frame with a filled bar, a graduated tick scale on
+// the background while hovered or active, and the value(s) as centered
+// text. The drag has fine-control modes: option = 1/10 rate, option+cmd
+// = 1/100, anchored so switching modes mid-drag doesn't jump.
+// ---------------------------------------------------------------------------
+
+static const float kGrabPad = 2.0f;
+
+// 0 = absolute positioning, 1 = fine (x0.1), 2 = ultra fine (x0.01).
+// NOTE on macOS modifiers: ImGui swaps Cmd<->Ctrl (io.KeyCtrl is the
+// PHYSICAL Cmd key), and physical ctrl+click arrives as a right-click,
+// so ctrl is unusable for slider gestures. Option = io.KeyAlt,
+// option+cmd = KeyAlt+KeyCtrl.
+static int fineControlMode() {
+    ImGuiIO& io = ImGui::GetIO();
+    return io.KeyAlt ? (io.KeyCtrl ? 2 : 1) : 0;
+}
+
+// Fine-drag anchor. One drag is active at a time, so shared state is fine.
+struct SliderDrag {
+    float anchorPos = 0.0f;    // grab position 0..1 at the anchor
+    float anchorMouse = 0.0f;  // mouse x at the anchor
+    int fine = 0;
+};
+static SliderDrag gSliderDrag;
+static float gRangeAnchor = 0.0f;  // plain-drag sweep origin (position 0..1)
+
+// Submit the slider/range item and route activation the way SliderScalar
+// does. The ItemAdd MUST happen before TempInputScalar every frame --
+// its InputText runs as a merged item that reuses this item's entry --
+// and cmd-click routes to text entry (ImGui reports macOS Cmd as
+// KeyCtrl). Option is excluded from that test so an option+cmd
+// ultra-fine drag can start without opening the text editor.
+struct SliderItem {
+    ImRect bb;
+    ImGuiID id = 0;
+    bool ok = false;         // ItemAdd succeeded (not clipped)
+    bool hovered = false;
+    bool tempInput = false;  // a text edit owns the item this frame
+    bool active = false;     // a mouse drag is in progress
+    bool activated = false;  // ... and started this frame
+};
+
+static SliderItem sliderItemBehavior(char const* label, UIWidget const& w) {
+    SliderItem it;
+    ImGuiWindow* window = ImGui::GetCurrentWindow();
+    if (window->SkipItems) return it;
+    ImGuiContext& g = *GImGui;
+
+    ImGui::SetNextItemWidth((w.fw > 0.0f ? w.fw : -140.0f) * gUIScale);
+    float width = std::max(ImGui::CalcItemWidth(), 40.0f);
+    float height = ImGui::GetFrameHeight();
+    ImVec2 origin = window->DC.CursorPos;
+    it.bb = ImRect(origin, ImVec2(origin.x + width, origin.y + height));
+    it.id = window->GetID(label);
+    ImGui::ItemSize(it.bb, g.Style.FramePadding.y);
+    if (!ImGui::ItemAdd(it.bb, it.id, &it.bb, ImGuiItemFlags_Inputable))
+        return it;
+    it.ok = true;
+
+    it.hovered = ImGui::ItemHoverable(it.bb, it.id, g.LastItemData.InFlags);
+    it.tempInput = ImGui::TempInputIsActive(it.id);
+    if (!it.tempInput) {
+        bool clicked = it.hovered
+            && ImGui::IsMouseClicked(0, ImGuiInputFlags_None, it.id);
+        if (clicked) {
+            ImGui::SetKeyOwner(ImGuiKey_MouseLeft, it.id);
+            if (g.IO.KeyCtrl && !g.IO.KeyAlt) {
+                it.tempInput = true;
+            } else {
+                ImGui::SetActiveID(it.id, window);
+                ImGui::SetFocusID(it.id, window);
+                ImGui::FocusWindow(window);
+                g.ActiveIdUsingNavDirMask |=
+                    (1 << ImGuiDir_Left) | (1 << ImGuiDir_Right);
+            }
+        }
+    }
+    if (!it.tempInput && g.ActiveId == it.id) {
+        if (g.ActiveIdSource == ImGuiInputSource_Mouse && !g.IO.MouseDown[0]) {
+            ImGui::ClearActiveID();
+        } else {
+            it.active = true;
+            it.activated = g.ActiveIdIsJustActivated;
+        }
+    }
+    return it;
+}
+
+static void drawTick(ImDrawList* dl, ImRect const& z, float lenScale,
+                     float pos, ImU32 color) {
+    float x = z.Min.x + pos * z.GetWidth();
+    dl->AddLine(ImVec2(x, z.Min.y),
+                ImVec2(x, z.Min.y + z.GetHeight() * lenScale), color, 1.0f);
+}
+
+// Graduated scale on the slider background. Exponential warps get
+// log-spaced ticks (1..9 per decade, longer at 1 and 5); everything
+// else gets a decimal hierarchy (longest at 0, then every 10th, 5th,
+// 1st step) with the step sized so the scale stays readable.
+static void drawTickMarks(ImDrawList* dl, bridge::UISpec const& spec,
+                          ImRect const& z) {
+    double lo = spec.lo, hi = spec.hi;
+    if (!(hi > lo) || !std::isfinite(lo) || !std::isfinite(hi)) return;
+    ImU32 color = ImGui::GetColorU32(ImGuiCol_Text, 0.35f);
+
+    if (spec.warp == bridge::UIWarp::Exponential && lo > 0.0 && hi > 0.0) {
+        int lowOrder = (int)std::floor(std::log10(lo));
+        int highOrder = (int)std::floor(std::log10(hi));
+        for (int i = lowOrder; i <= highOrder; ++i) {
+            double decade = std::pow(10.0, i);
+            for (int j = 1; j <= 9; ++j) {
+                double v = decade * j;
+                if (v <= lo || v >= hi) continue;
+                float pos = (float)spec.unmap(v);
+                // Drop ticks that would fuse with their neighbor.
+                float next = (float)spec.unmap(decade * (j + 1));
+                if (std::fabs(next - pos) < 0.005f) continue;
+                float lenScale = j == 1 ? 0.75f : j == 5 ? 0.525f : 0.3f;
+                drawTick(dl, z, lenScale, pos, color);
+            }
+        }
+    } else {
+        double range = hi - lo;
+        int order = (int)std::floor(std::log10(range) + 0.5);
+        double step = std::pow(10.0, order - 1);
+        if (range / step >= 20.0) {
+            step *= 2.0;
+            if (range / step >= 20.0) step *= 2.5;
+        }
+        double epsilon = range * 1e-5;
+        for (double v = step * std::ceil(lo / step); v <= hi + epsilon;
+             v += step) {
+            int index = (int)std::floor(v / step + 0.5);
+            float lenScale = index == 0        ? 1.0f
+                           : index % 10 == 0   ? 0.75f
+                           : index % 5 == 0    ? 0.525f
+                                               : 0.3f;
+            drawTick(dl, z, lenScale, (float)spec.unmap(v), color);
+        }
+    }
+}
+
 static void drawSlider(UIWidget& w) {
     std::string label = std::string("##") + w.name;
-    ImGui::SetNextItemWidth((w.fw > 0.0f ? w.fw : -140.0f) * gUIScale);
-    // Cmd-click text entry must edit the DISPLAYED (mapped) value, while
-    // the drag operates on the 0..1 warp position. The edit buffer seeds
-    // from the datum passed on the ACTIVATION frame, so predict the
-    // cmd-click before submitting the item (same condition SliderScalar
-    // uses: hovered + clicked + KeyCtrl) and pass the mapped value from
-    // that frame on.
-    bool editing = ImGui::TempInputIsActive(ImGui::GetID(label.c_str()));
-    if (!editing && ImGui::GetIO().KeyCtrl && ImGui::IsMouseClicked(0)) {
-        ImVec2 p = ImGui::GetCursorScreenPos();
-        ImVec2 sz(ImGui::CalcItemWidth(), ImGui::GetFrameHeight());
-        editing = ImGui::IsMouseHoveringRect(
-            p, ImVec2(p.x + sz.x, p.y + sz.y));
-    }
-    if (editing) {
-        // Nothing is applied until Enter / focus loss -- the
-        // per-keystroke edits ImGui reports are discarded.
-        float v = static_cast<float>(w.values[0]);
-        ImGui::SliderFloat(label.c_str(), &v,
-                           static_cast<float>(w.spec.lo),
-                           static_cast<float>(w.spec.hi), "%.4g");
+    ImGuiStyle const& style = ImGui::GetStyle();
+    SliderItem it = sliderItemBehavior(label.c_str(), w);
+    if (!it.ok) return;
+    ImRect const& bb = it.bb;
+
+    // Cmd-click text entry edits the DISPLAYED (mapped) value, while the
+    // drag operates on the 0..1 warp position. Nothing is applied until
+    // Enter / focus loss -- the per-keystroke edits ImGui reports are
+    // discarded (v reseeds from the widget every frame; on the commit
+    // frame the deactivating InputText applies its final buffer to v).
+    if (it.tempInput) {
+        double v = w.values[0];
+        ImGui::TempInputScalar(bb, it.id, label.c_str(),
+                               ImGuiDataType_Double, &v, "%.4g");
         if (ImGui::IsItemDeactivatedAfterEdit()) {
             w.values[0] = w.spec.map(w.spec.unmap(v));  // clamp + warp snap
             markDirty(w);
             w.gestureEnded = true;
         }
-    } else {
-        float pos = static_cast<float>(w.spec.unmap(w.values[0]));
-        char display[64];
-        std::snprintf(display, sizeof(display), "%.4g", w.values[0]);
-        if (ImGui::SliderFloat(label.c_str(), &pos, 0.0f, 1.0f, display)) {
-            w.values[0] = w.spec.map(pos);
-            markDirty(w);
-        }
-        markGestureEdges(w);
-        hoverAdjustSlider(w);
+        ImGui::SameLine();
+        ImGui::TextUnformatted(w.name.c_str());
+        return;
     }
+
+    float minx = bb.Min.x + kGrabPad;
+    float usable = std::max(bb.GetWidth() - 2.0f * kGrabPad, 1.0f);
+
+    if (it.active) {
+        ImGuiIO& io = ImGui::GetIO();
+        int fine = fineControlMode();
+        if (it.activated || fine != gSliderDrag.fine) {
+            // (Re-)anchor at the current value, so entering or leaving a
+            // fine mode mid-drag never jumps.
+            gSliderDrag = {(float)w.spec.unmap(w.values[0]), io.MousePos.x,
+                           fine};
+        }
+        float pos;
+        if (fine) {
+            float rate = fine == 1 ? 0.1f : 0.01f;
+            float anchorPx = minx + gSliderDrag.anchorPos * usable;
+            pos = (anchorPx + rate * (io.MousePos.x - gSliderDrag.anchorMouse)
+                   - minx) / usable;
+        } else {
+            pos = (io.MousePos.x - minx) / usable;
+        }
+        double v = w.spec.map(std::clamp(pos, 0.0f, 1.0f));
+        if (v != w.values[0]) {
+            w.values[0] = v;
+            markDirty(w);
+            ImGui::MarkItemEdited(it.id);
+        }
+        w.gestureActive = true;
+        w.wheelTime = 0.0;  // a drag owns the gesture; hover timer off
+    } else if (w.gestureActive && w.wheelTime == 0.0) {
+        w.gestureActive = false;
+        w.gestureEnded = true;
+    }
+
+    auto* dl = ImGui::GetWindowDrawList();
+    ImU32 frameCol = ImGui::GetColorU32(it.active    ? ImGuiCol_FrameBgActive
+                                        : it.hovered ? ImGuiCol_FrameBgHovered
+                                                     : ImGuiCol_FrameBg);
+    ImGui::RenderFrame(bb.Min, bb.Max, frameCol, true, style.FrameRounding);
+    float gx = minx + (float)w.spec.unmap(w.values[0]) * usable;
+    dl->AddRectFilled(ImVec2(minx, bb.Min.y + kGrabPad),
+                      ImVec2(gx, bb.Max.y - kGrabPad),
+                      ImGui::GetColorU32(it.active ? ImGuiCol_SliderGrabActive
+                                                   : ImGuiCol_SliderGrab),
+                      style.GrabRounding);
+    if (it.hovered || it.active) {
+        ImRect z = bb;
+        z.Expand(-kGrabPad);
+        drawTickMarks(dl, w.spec, z);
+    }
+    char display[64];
+    std::snprintf(display, sizeof(display), "%.4g", w.values[0]);
+    ImGui::RenderTextClipped(bb.Min, bb.Max, display, nullptr, nullptr,
+                             ImVec2(0.5f, 0.5f));
+    hoverAdjustSlider(w);
+
+    ImGui::SameLine();
+    ImGui::TextUnformatted(w.name.c_str());
+}
+
+// Translate a whole range (positions 0..1) so its midpoint tracks `pos`,
+// pinning at the rails so the width is preserved.
+static void moveRange(float pos, float& lo, float& hi) {
+    float range = hi - lo;
+    float adjust = pos - (hi + lo) * 0.5f;
+    if (lo + adjust < 0.0f) {
+        lo = 0.0f;
+        hi = range;
+    } else if (hi + adjust > 1.0f) {
+        lo = 1.0f - range;
+        hi = 1.0f;
+    } else {
+        lo += adjust;
+        hi += adjust;
+    }
+}
+
+// Move whichever end of the range is nearer to `pos`.
+static void adjustRangeEnd(float pos, float& lo, float& hi) {
+    if (std::fabs(pos - lo) < std::fabs(pos - hi)) lo = pos;
+    else hi = pos;
+    if (hi < lo) std::swap(lo, hi);
+}
+
+// Range hover gestures, mirroring the slider's where they make sense:
+// keys that set one position act on both ends (collapsing the range),
+// [ / ] send one end to the rail, , / . and the wheel slide the whole
+// range (width preserved), - / slash negate / take reciprocals of both
+// ends (re-ordered).
+static void hoverAdjustRange(UIWidget& w) {
+    if (!hoverAdjustBegin(w)) return;
+
+    auto stamp = [&] {
+        markDirty(w);
+        w.gestureActive = true;
+        w.wheelTime = ImGui::GetTime();
+    };
+    auto setPos = [&](float plo, float phi) {
+        if (plo > phi) std::swap(plo, phi);
+        w.values[0] = w.spec.map(std::clamp(plo, 0.0f, 1.0f));
+        w.values[1] = w.spec.map(std::clamp(phi, 0.0f, 1.0f));
+        stamp();
+    };
+    auto setVal = [&](double lo, double hi) {
+        if (lo > hi) std::swap(lo, hi);
+        w.values[0] = lo;
+        w.values[1] = hi;
+        stamp();
+    };
+    // , / . and the wheel slide the whole range (width preserved).
+    auto slide = [&](float d) {
+        float a = (float)w.spec.unmap(w.values[0]);
+        float b = (float)w.spec.unmap(w.values[1]);
+        moveRange((a + b) * 0.5f + d, a, b);
+        setPos(a, b);
+    };
+
+    hoverChars([&](unsigned c) {
+        float ulo = (float)w.spec.unmap(w.values[0]);
+        float uhi = (float)w.spec.unmap(w.values[1]);
+        double lo = w.values[0], hi = w.values[1];
+        switch (c) {
+            case 'c': case 'C': setPos(0.5f, 0.5f); break;
+            case '[': setPos(0.0f, uhi); break;
+            case ']': setPos(ulo, 1.0f); break;
+            case 'r': case 'R':
+                setPos(hoverUniform(0.0f, 1.0f), hoverUniform(0.0f, 1.0f));
+                break;
+            case 'j':
+                setPos(hoverBounce(ulo + hoverUniform(-0.05f, 0.05f)),
+                       hoverBounce(uhi + hoverUniform(-0.05f, 0.05f)));
+                break;
+            case 'J':
+                setPos(hoverBounce(ulo + hoverUniform(-0.005f, 0.005f)),
+                       hoverBounce(uhi + hoverUniform(-0.005f, 0.005f)));
+                break;
+            case 'z': case 'Z':
+                if (w.spec.contains(0.0)) setVal(0.0, 0.0);
+                break;
+            case 'i': case 'I': {
+                double init = w.spec.clamp(w.spec.init);
+                setVal(init, init);
+            }   break;
+            case '-':
+                if (w.spec.contains(-lo) && w.spec.contains(-hi))
+                    setVal(-hi, -lo);
+                break;
+            case '/':
+                if (lo != 0.0 && hi != 0.0 && w.spec.contains(1.0 / lo)
+                    && w.spec.contains(1.0 / hi))
+                    setVal(1.0 / lo, 1.0 / hi);
+                break;
+            case ',': slide(-0.05f); break;
+            case '.': slide(0.05f); break;
+            default: break;
+        }
+    });
+
+    float wheel = ImGui::GetIO().MouseWheel;
+    if (wheel != 0.0f) slide(-wheel * 0.01f);
+    hoverOwnWheel();
+}
+
+static void drawRange(UIWidget& w) {
+    std::string label = std::string("##") + w.name;
+    ImGuiStyle const& style = ImGui::GetStyle();
+    // Which end an in-progress cmd-click text edit targets. One temp
+    // input exists at a time, so shared state is fine; latch it on the
+    // frame the edit begins (the click frame).
+    static int editEnd = 0;
+    bool wasEditing = ImGui::TempInputIsActive(ImGui::GetID(label.c_str()));
+
+    SliderItem it = sliderItemBehavior(label.c_str(), w);
+    if (!it.ok) return;
+    ImRect const& bb = it.bb;
+    float halfx = bb.Min.x + bb.GetWidth() * 0.5f;
+    ImRect loBB(bb.Min, ImVec2(halfx, bb.Max.y));
+    ImRect hiBB(ImVec2(halfx, bb.Min.y), bb.Max);
+
+    // Cmd-click text entry edits the end whose half was clicked (left =
+    // lo, right = hi), clamped so the ends can't cross; commits on
+    // Enter / focus loss like the slider.
+    if (it.tempInput) {
+        if (!wasEditing)
+            editEnd = ImGui::GetIO().MousePos.x < halfx ? 0 : 1;
+        // Keep the whole control visible while one end is edited: the
+        // frame and the other end's value stay drawn; the InputText
+        // covers only the edited half.
+        ImGui::RenderFrame(bb.Min, bb.Max,
+                           ImGui::GetColorU32(ImGuiCol_FrameBg), true,
+                           style.FrameRounding);
+        int other = 1 - editEnd;
+        char display[64];
+        std::snprintf(display, sizeof(display), "%.4g",
+                      w.values[(size_t)other]);
+        ImRect const& otherBB = other == 0 ? loBB : hiBB;
+        ImGui::RenderTextClipped(otherBB.Min, otherBB.Max, display, nullptr,
+                                 nullptr, ImVec2(0.5f, 0.5f));
+
+        double v = w.values[(size_t)editEnd];
+        double cmin = editEnd == 0 ? w.spec.lo : w.values[0];
+        double cmax = editEnd == 0 ? w.values[1] : w.spec.hi;
+        ImGui::TempInputScalar(editEnd == 0 ? loBB : hiBB, it.id,
+                               label.c_str(), ImGuiDataType_Double, &v,
+                               "%.4g", &cmin, &cmax);
+        // The InputText re-ran ItemSize with its half-width rect; restore
+        // the full-width line advance so the SameLine label below lands
+        // where it does on every other frame.
+        ImGui::GetCurrentWindow()->DC.CursorPosPrevLine.x = bb.Max.x;
+        if (ImGui::IsItemDeactivatedAfterEdit()) {
+            w.values[(size_t)editEnd] = w.spec.map(w.spec.unmap(v));
+            if (w.values[0] > w.values[1])
+                std::swap(w.values[0], w.values[1]);
+            markDirty(w);
+            w.gestureEnded = true;
+        }
+        ImGui::SameLine();
+        ImGui::TextUnformatted(w.name.c_str());
+        return;
+    }
+
+    float minx = bb.Min.x + kGrabPad;
+    float usable = std::max(bb.GetWidth() - 2.0f * kGrabPad, 1.0f);
+
+    if (it.active) {
+        ImGuiIO& io = ImGui::GetIO();
+        float pos = std::clamp((io.MousePos.x - minx) / usable, 0.0f, 1.0f);
+        float ulo = (float)w.spec.unmap(w.values[0]);
+        float uhi = (float)w.spec.unmap(w.values[1]);
+        if (it.activated) gRangeAnchor = pos;
+        // Modifiers are read every frame, so a drag can switch modes
+        // mid-gesture (start a sweep, then option-slide it into place).
+        // Shift (not ctrl/cmd) adjusts ends: physical ctrl+click arrives
+        // as a right-click on macOS, and cmd-click opens text entry.
+        if (io.KeyAlt) {
+            moveRange(pos, ulo, uhi);           // slide the whole range
+        } else if (io.KeyShift) {
+            adjustRangeEnd(pos, ulo, uhi);      // adjust the nearer end
+        } else {
+            ulo = std::min(gRangeAnchor, pos);  // sweep out a new range
+            uhi = std::max(gRangeAnchor, pos);
+        }
+        double lo = w.spec.map(ulo), hi = w.spec.map(uhi);
+        if (lo != w.values[0] || hi != w.values[1]) {
+            w.values[0] = lo;
+            w.values[1] = hi;
+            markDirty(w);
+            ImGui::MarkItemEdited(it.id);
+        }
+        w.gestureActive = true;
+        w.wheelTime = 0.0;
+    } else if (w.gestureActive && w.wheelTime == 0.0) {
+        w.gestureActive = false;
+        w.gestureEnded = true;
+    }
+
+    auto* dl = ImGui::GetWindowDrawList();
+    ImU32 frameCol = ImGui::GetColorU32(it.active    ? ImGuiCol_FrameBgActive
+                                        : it.hovered ? ImGuiCol_FrameBgHovered
+                                                     : ImGuiCol_FrameBg);
+    ImGui::RenderFrame(bb.Min, bb.Max, frameCol, true, style.FrameRounding);
+    // The bar spans lo..hi; the half-pixel outsets keep a collapsed
+    // range visible as a thin line.
+    float x0 = minx + (float)w.spec.unmap(w.values[0]) * usable - 0.5f;
+    float x1 = minx + (float)w.spec.unmap(w.values[1]) * usable + 0.5f;
+    dl->AddRectFilled(ImVec2(x0, bb.Min.y + kGrabPad),
+                      ImVec2(x1, bb.Max.y - kGrabPad),
+                      ImGui::GetColorU32(it.active ? ImGuiCol_SliderGrabActive
+                                                   : ImGuiCol_SliderGrab),
+                      style.GrabRounding);
+    if (it.hovered || it.active) {
+        ImRect z = bb;
+        z.Expand(-kGrabPad);
+        drawTickMarks(dl, w.spec, z);
+    }
+    char display[64];
+    std::snprintf(display, sizeof(display), "%.4g", w.values[0]);
+    ImGui::RenderTextClipped(loBB.Min, loBB.Max, display, nullptr, nullptr,
+                             ImVec2(0.5f, 0.5f));
+    std::snprintf(display, sizeof(display), "%.4g", w.values[1]);
+    ImGui::RenderTextClipped(hiBB.Min, hiBB.Max, display, nullptr, nullptr,
+                             ImVec2(0.5f, 0.5f));
+    hoverAdjustRange(w);
+
     ImGui::SameLine();
     ImGui::TextUnformatted(w.name.c_str());
 }
@@ -495,26 +998,36 @@ static void hoverAdjustMultiSlider(UIWidget& w, ImVec2 origin,
         stamp();
     };
 
-    if (ImGui::IsKeyPressed(ImGuiKey_C)) setAll([](int) { return 0.5f; });
-    if (ImGui::IsKeyPressed(ImGuiKey_LeftBracket))
-        setAll([](int) { return 0.0f; });
-    if (ImGui::IsKeyPressed(ImGuiKey_RightBracket))
-        setAll([](int) { return 1.0f; });
-    if (ImGui::IsKeyPressed(ImGuiKey_R))
-        setAll([&](int) { return hoverUniform(0.0f, 1.0f); });
-    if (ImGui::IsKeyPressed(ImGuiKey_J)) {
+    auto jitterAll = [&](float d) {
         setAll([&](int i) {
             float p = (float)w.spec.unmap(w.values[(size_t)i]);
-            return hoverBounce(p + hoverUniform(-0.05f, 0.05f));
+            return hoverBounce(p + hoverUniform(-d, d));
         });
-    }
-    if (ImGui::IsKeyPressed(ImGuiKey_Z))
-        setAll([&](int) { return (float)w.spec.unmap(w.spec.clamp(0.0)); });
-    if (ImGui::IsKeyPressed(ImGuiKey_I)) {
-        setAll([&](int) {
-            return (float)w.spec.unmap(w.spec.clamp(w.spec.init));
-        });
-    }
+    };
+
+    hoverChars([&](unsigned c) {
+        switch (c) {
+            case 'c': case 'C': setAll([](int) { return 0.5f; }); break;
+            case '[': setAll([](int) { return 0.0f; }); break;
+            case ']': setAll([](int) { return 1.0f; }); break;
+            case 'r': case 'R':
+                setAll([&](int) { return hoverUniform(0.0f, 1.0f); });
+                break;
+            case 'j': jitterAll(0.05f); break;
+            case 'J': jitterAll(0.005f); break;
+            case 'z': case 'Z':
+                setAll([&](int) {
+                    return (float)w.spec.unmap(w.spec.clamp(0.0));
+                });
+                break;
+            case 'i': case 'I':
+                setAll([&](int) {
+                    return (float)w.spec.unmap(w.spec.clamp(w.spec.init));
+                });
+                break;
+            default: break;
+        }
+    });
 
     float wheel = ImGui::GetIO().MouseWheel;
     if (wheel != 0.0f) {
@@ -730,6 +1243,7 @@ bool drawUIWidget(bridge::UIWidget& w) {
     bool tap = false;
     switch (w.kind) {
         case UIWidgetKind::Slider:   drawSlider(w); break;
+        case UIWidgetKind::Range:    drawRange(w); break;
         case UIWidgetKind::Number:   drawNumber(w); break;
         case UIWidgetKind::Button:   drawButton(w); break;
         case UIWidgetKind::Toggle:   drawToggle(w); break;
@@ -775,6 +1289,8 @@ static ImGuiKey chordKey(std::string const& chord) {
 }
 
 void dispatchWidgetKeys(bridge::UIState& ui) {
+    // A hovered gesture widget owns the keyboard: bindings stand down.
+    if (gHoverOwnerLastFrame || gHoverOwnerThisFrame) return;
     // Typing anywhere (cell editors, slider text entry, panel names)
     // owns the keyboard; bindings fire only outside text input.
     if (ImGui::GetIO().WantTextInput) return;

@@ -696,7 +696,7 @@ static bool parseHistory(Reader h, InternPool& pool, LoadedHistory& out) {
         s.panel = std::string(rw.child(1).asStr());
         s.name = std::string(rw.child(2).asStr());
         int kindInt = (int)rw.child(3).asInt();
-        if (kindInt < 0 || kindInt > (int)bridge::UIWidgetKind::Label)
+        if (kindInt < 0 || kindInt > (int)bridge::UIWidgetKind::Range)
             kindInt = 0;
         s.kind = (bridge::UIWidgetKind)kindInt;
         s.spec = readSpec(rw.child(4));
@@ -944,7 +944,7 @@ SnapshotPtr loadDocument(bridge::AppContext& ctx, std::string const& path,
                 if (rw.tag() != Tag::Vec || rw.childCount() < 6) continue;
                 std::string name{rw.child(1).asStr()};
                 int kindInt = (int)rw.child(2).asInt();
-                if (kindInt < 0 || kindInt > (int)bridge::UIWidgetKind::Label)
+                if (kindInt < 0 || kindInt > (int)bridge::UIWidgetKind::Range)
                     kindInt = 0;
                 auto kind = (bridge::UIWidgetKind)kindInt;
                 bridge::UISpec spec = readSpec(rw.child(3));
