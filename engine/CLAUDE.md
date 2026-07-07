@@ -13,6 +13,8 @@ The shared plugin ABI header lives in `../shared/tzpl_plugin_abi.h`.
 | File(s) | Role |
 |---------|------|
 | `tzpl_client_interface.hpp/cpp` | Public API: engine lifecycle, command bundling, plugin loading |
+| `tzpl_audio_backend.hpp` | AudioBackend interface (device open/start/stop/streamTime) + `processAudioBlock()` |
+| `tzpl_audio_backend_rtaudio.hpp/cpp` | Default RtAudio backend (CoreAudio/ALSA), separate-input-device staging, macOS sample-rate listener |
 | `tzpl_engine.hpp/cpp` | Engine struct, safety limiter, built-in node defs, NRT/dead-node threads |
 | `tzpl_silo.hpp/cpp` | Parallel processing unit: node tables, topological sort, audio processing, command dispatch |
 | `tzpl_node.hpp/cpp` | Node, InPort, OutPort, Control, NodeDef — the graph data model |

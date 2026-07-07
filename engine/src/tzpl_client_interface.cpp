@@ -24,7 +24,7 @@
 #include "tzpl_engine.hpp"
 #include "tzpl_client_interface.hpp"
 #include "tzpl_node.hpp"
-#include "RtAudio.h"
+#include "tzpl_audio_backend_rtaudio.hpp"
 #include "tzpl_hash.hpp"
 #include "tzpl_command_subclasses.hpp"
 #include <cstring>
@@ -33,136 +33,22 @@
 #include <chrono>
 #include <thread>
 
-#ifdef __APPLE__
-#include <CoreAudio/CoreAudio.h>
-#include <CoreFoundation/CoreFoundation.h>
-#endif
-
 namespace engine {
-
-#ifdef __APPLE__
-
-#if defined(MAC_OS_VERSION_12_0) && (MAC_OS_X_VERSION_MIN_REQUIRED >= MAC_OS_VERSION_12_0)
-constexpr AudioObjectPropertyElement kElement = kAudioObjectPropertyElementMain;
-#else
-constexpr AudioObjectPropertyElement kElement = kAudioObjectPropertyElementMaster;
-#endif
-
-// Find the CoreAudio AudioDeviceID for the device RtAudio is using as the
-// engine's output. Matches "default" via kAudioHardwarePropertyDefaultOutputDevice
-// and named devices by enumerating and comparing kAudioObjectPropertyName.
-// Returns kAudioObjectUnknown if not found.
-static AudioDeviceID resolveOutputAudioDeviceID(const char* deviceName) {
-    bool isDefault = !deviceName || strlen(deviceName) == 0
-        || strcmp(deviceName, "default") == 0;
-
-    if (isDefault) {
-        AudioObjectPropertyAddress prop = {
-            kAudioHardwarePropertyDefaultOutputDevice,
-            kAudioObjectPropertyScopeGlobal,
-            kElement
-        };
-        AudioDeviceID devId = kAudioObjectUnknown;
-        UInt32 size = sizeof(devId);
-        if (AudioObjectGetPropertyData(kAudioObjectSystemObject, &prop, 0,
-                                       nullptr, &size, &devId) != noErr) {
-            return kAudioObjectUnknown;
-        }
-        return devId;
-    }
-
-    AudioObjectPropertyAddress listProp = {
-        kAudioHardwarePropertyDevices,
-        kAudioObjectPropertyScopeGlobal,
-        kElement
-    };
-    UInt32 dataSize = 0;
-    if (AudioObjectGetPropertyDataSize(kAudioObjectSystemObject, &listProp,
-                                       0, nullptr, &dataSize) != noErr) {
-        return kAudioObjectUnknown;
-    }
-    UInt32 nDevices = dataSize / sizeof(AudioDeviceID);
-    std::vector<AudioDeviceID> ids(nDevices);
-    if (AudioObjectGetPropertyData(kAudioObjectSystemObject, &listProp, 0,
-                                   nullptr, &dataSize, ids.data()) != noErr) {
-        return kAudioObjectUnknown;
-    }
-
-    AudioObjectPropertyAddress nameProp = {
-        kAudioObjectPropertyName,
-        kAudioObjectPropertyScopeGlobal,
-        kElement
-    };
-    for (AudioDeviceID id : ids) {
-        CFStringRef name = nullptr;
-        UInt32 nameSize = sizeof(name);
-        if (AudioObjectGetPropertyData(id, &nameProp, 0, nullptr,
-                                       &nameSize, &name) != noErr || !name) {
-            continue;
-        }
-        char buf[256];
-        bool match = CFStringGetCString(name, buf, sizeof(buf), kCFStringEncodingUTF8)
-                     && strcmp(buf, deviceName) == 0;
-        CFRelease(name);
-        if (match) return id;
-    }
-    return kAudioObjectUnknown;
-}
-
-// Called by CoreAudio on an internal HAL dispatch queue when the device's
-// nominal sample rate changes. Must do as little as possible. We just set
-// an atomic flag; processNRTCommands picks it up on the next tick.
-static OSStatus sampleRateChangeListener(AudioObjectID /*inObjectID*/,
-                                         UInt32 /*inNumAddresses*/,
-                                         const AudioObjectPropertyAddress* /*inAddresses*/,
-                                         void* inClientData) {
-    Engine* e = static_cast<Engine*>(inClientData);
-    e->sampleRateChanged_.store(true, std::memory_order_relaxed);
-    return noErr;
-}
-
-static void installSampleRateListener(Engine* e) {
-    AudioDeviceID devId = resolveOutputAudioDeviceID(e->streamParams_.deviceName);
-    if (devId == kAudioObjectUnknown) return;
-
-    AudioObjectPropertyAddress prop = {
-        kAudioDevicePropertyNominalSampleRate,
-        kAudioObjectPropertyScopeGlobal,
-        kElement
-    };
-    OSStatus result = AudioObjectAddPropertyListener(devId, &prop,
-                                                     sampleRateChangeListener, e);
-    if (result == noErr) {
-        e->monitoredOutputDeviceID_ = (u32)devId;
-    }
-}
-
-static void removeSampleRateListener(Engine* e) {
-    if (e->monitoredOutputDeviceID_ == 0) return;
-    AudioObjectPropertyAddress prop = {
-        kAudioDevicePropertyNominalSampleRate,
-        kAudioObjectPropertyScopeGlobal,
-        kElement
-    };
-    AudioObjectRemovePropertyListener((AudioDeviceID)e->monitoredOutputDeviceID_,
-                                      &prop, sampleRateChangeListener, e);
-    e->monitoredOutputDeviceID_ = 0;
-}
-
-#endif // __APPLE__
 
 //=============================================================================================
 #pragma mark CLIENT INTERFACE IMPLEMENTATION
 
 void uninitAudio(Engine* e);
 
-Engine* newEngine(EngineConfig const& config, AudioStreamParameters& asp) {
+Engine* newEngine(EngineConfig const& config, AudioStreamParameters& asp,
+                  std::unique_ptr<AudioBackend> backend) {
 #if DEBUG_NODES
     printf(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>\n");
     numNodesCreated = 0;
     numNodesDeleted = 0;
 #endif
-    return new Engine(config, asp);
+    if (!backend) backend = std::make_unique<RtAudioBackend>();
+    return new Engine(config, asp, std::move(backend));
 }
 
 Engine* newEngineNRT(EngineConfig const& config, AudioStreamParameters& asp) {
@@ -214,11 +100,6 @@ void freeEngine(Engine* e) {
     printf("<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<\n");
 #endif
 }
-
-RtAudio* getRTAudio(Engine* e) {
-    return e->rtaudio_.get();
-}
-
 
 bool loadOneDef(Engine* e, const char* path) {
     void* handle = dlopen(path, RTLD_NOW);
@@ -284,10 +165,6 @@ bool loadDefs(Engine* e, const char* dirPath) {
     return allOK && anyOK; // all loads succeeded and there was at least one.
 }
 
-void errorCallback( RtAudioErrorType type, const std::string &errorText ) {
-    printf("error %d '%s'\n", type, errorText.c_str());
-}
-
 void masterGain(Engine* e, f32 gain) {
     e->masterGain_ = gain;
 }
@@ -298,9 +175,9 @@ void safetyLimiter(Engine* e, Enable onoff) {
 
 // Shared dispatch: signals worker silos, runs silo 0 on the calling thread,
 // applies the safety limiter, and advances anchorSampleTime_. Used by both
-// the RtAudio callback and the NRT renderer.
-static void dispatchSilos(Engine* e, f32 const* in, f32* out,
-                          unsigned int numFrames, double streamTime) {
+// the backend RT callbacks and the NRT renderer.
+void processAudioBlock(Engine* e, f32 const* in, f32* out,
+                       unsigned int numFrames, f64 streamTime) {
     e->in_ = in;
     e->out_ = out;
     e->anchorStreamTime_ = streamTime;
@@ -321,177 +198,18 @@ static void dispatchSilos(Engine* e, f32 const* in, f32* out,
     e->anchorSampleTime_ += numFrames;
 }
 
-int audioCallback( void *outputBuffer, void *inputBuffer,
-                    unsigned int numFrames,
-                    double streamTime,
-                    RtAudioStreamStatus status,
-                    void *userData )
-{
-    Engine* e = (Engine*)userData;
-
-    try {
-        // For duplex mode, inputBuffer comes from the callback.
-        // For separate input device, use the staging buffer.
-        f32 const* in = e->inputRtaudio_
-            ? (f32 const*)e->inputStagingBuf_
-            : (f32 const*)inputBuffer;
-        dispatchSilos(e, in, (f32*)outputBuffer, numFrames, streamTime);
-    } catch (...) {
-        fprintf(stderr, "exception on real time thread");
-    }
-    return 0;
-}
-
 void renderNRTBlock(Engine* e, f32* outBuffer) {
     unsigned int numFrames = e->streamParams_.bufferFrames;
     f64 streamTime = (f64)e->anchorSampleTime_ / e->streamParams_.sampleRate;
-    dispatchSilos(e, /*in=*/nullptr, outBuffer, numFrames, streamTime);
+    processAudioBlock(e, /*in=*/nullptr, outBuffer, numFrames, streamTime);
     e->drainNRTQueues();
 }
 
-
-// Find a device ID by name on a given RtAudio instance.
-// Returns -1 if not found.
-int findDeviceByName(RtAudio* rta, const char* name) {
-    int n = rta->getDeviceCount();
-    for (int i = 0; i < n; ++i) {
-        auto info = rta->getDeviceInfo(i);
-        if (name == info.name) {
-            return i;
-        }
-    }
-    return -1;
-}
-
-// Callback for a separate input-only stream.
-// Copies hardware input data into the engine's staging buffer.
-// NOTE: No clock drift compensation -- the input and output devices run on
-// independent sample clocks, so over time samples will be repeated or dropped.
-// For drift-free operation, use an aggregate device (macOS) or JACK (Linux).
-// A future improvement would be an adaptive resampler with a PLL to track the
-// rate difference.
-int inputAudioCallback(void* /*outputBuffer*/, void* inputBuffer,
-                       unsigned int numFrames,
-                       double /*streamTime*/,
-                       RtAudioStreamStatus /*status*/,
-                       void* userData)
-{
-    Engine* e = (Engine*)userData;
-    if (inputBuffer && e->inputStagingBuf_) {
-        memcpy(e->inputStagingBuf_, inputBuffer,
-               numFrames * e->streamParams_.inputChannels * sizeof(f32));
-    }
-    return 0;
-}
-
 void initAudio(Engine* e) {
-    auto& rta = e->rtaudio_;
-
-    int numDevices = rta->getDeviceCount();
-    if (numDevices == 0) {
-        throw tzpl_errNoAudioDevices;
-    }
-
-    // --- Resolve output device ---
-    int outputDeviceID = -1;
-    if (strcmp(e->streamParams_.deviceName, "default") == 0) {
-        outputDeviceID = rta->getDefaultOutputDevice();
-    } else {
-        outputDeviceID = findDeviceByName(rta.get(), e->streamParams_.deviceName);
-        if (outputDeviceID < 0) {
-            throw tzpl_errDeviceNotFound;
-        }
-    }
-
-    RtAudio::StreamParameters outputParams;
-    outputParams.deviceId = outputDeviceID;
-    outputParams.nChannels = e->streamParams_.channels;
-    outputParams.firstChannel = e->streamParams_.firstChannel;
-
-    // --- Determine input configuration ---
-    int inputChannels = e->streamParams_.inputChannels;
-    bool hasInput = inputChannels > 0;
-    bool separateInputDevice = false;
-
-    if (hasInput) {
-        const char* inputDevName = e->streamParams_.inputDeviceName;
-        bool inputIsDefault = !inputDevName || strlen(inputDevName) == 0;
-        bool inputSameAsOutput = inputIsDefault
-            || strcmp(inputDevName, e->streamParams_.deviceName) == 0;
-
-        if (!inputSameAsOutput) {
-            // Different input device -- need a separate RtAudio instance
-            separateInputDevice = true;
-        }
-    }
-
-    void* userData = (void*)e;
-
-    if (hasInput && !separateInputDevice) {
-        // --- Duplex mode: same device for input and output ---
-        RtAudio::StreamParameters inputParams;
-        inputParams.deviceId = outputDeviceID;
-        inputParams.nChannels = inputChannels;
-        inputParams.firstChannel = e->streamParams_.firstInputChannel;
-
-        rta->setErrorCallback(errorCallback);
-        unsigned int bufferFrames = e->streamParams_.bufferFrames;
-        rta->openStream(&outputParams, &inputParams, RTAUDIO_FLOAT32,
-                        e->streamParams_.sampleRate, &bufferFrames,
-                        audioCallback, userData);
-
-        e->streamParams_.bufferFrames = bufferFrames;
-        e->streamParams_.channels = outputParams.nChannels;
-        e->streamParams_.inputChannels = inputParams.nChannels;
-    } else {
-        // --- Output-only stream (or separate input device) ---
-        rta->setErrorCallback(errorCallback);
-        unsigned int bufferFrames = e->streamParams_.bufferFrames;
-        rta->openStream(&outputParams, nullptr, RTAUDIO_FLOAT32,
-                        e->streamParams_.sampleRate, &bufferFrames,
-                        audioCallback, userData);
-
-        e->streamParams_.bufferFrames = bufferFrames;
-        e->streamParams_.channels = outputParams.nChannels;
-
-        if (separateInputDevice) {
-            // --- Open a separate input-only stream ---
-            const char* inputDevName = e->streamParams_.inputDeviceName;
-
-#ifdef __APPLE__
-            e->inputRtaudio_ = std::make_unique<RtAudio>(RtAudio::MACOSX_CORE);
-#elif defined(__linux__)
-            e->inputRtaudio_ = std::make_unique<RtAudio>(RtAudio::LINUX_ALSA);
-#endif
-            e->inputRtaudio_->setErrorCallback(errorCallback);
-
-            int inputDeviceID = -1;
-            if (strcmp(inputDevName, "default") == 0) {
-                inputDeviceID = e->inputRtaudio_->getDefaultInputDevice();
-            } else {
-                inputDeviceID = findDeviceByName(e->inputRtaudio_.get(), inputDevName);
-                if (inputDeviceID < 0) {
-                    throw tzpl_errDeviceNotFound;
-                }
-            }
-
-            RtAudio::StreamParameters inputParams;
-            inputParams.deviceId = inputDeviceID;
-            inputParams.nChannels = inputChannels;
-            inputParams.firstChannel = e->streamParams_.firstInputChannel;
-
-            unsigned int inputBufFrames = e->streamParams_.bufferFrames;
-            e->inputRtaudio_->openStream(nullptr, &inputParams, RTAUDIO_FLOAT32,
-                                         e->streamParams_.sampleRate, &inputBufFrames,
-                                         inputAudioCallback, userData);
-
-            e->streamParams_.inputChannels = inputParams.nChannels;
-
-            // Allocate staging buffer for the input callback to write into
-            e->inputStagingBuf_ = (f32*)calloc(
-                e->streamParams_.bufferFrames * inputChannels, sizeof(f32));
-        }
-    }
+    // Open the device(s). The backend may adjust streamParams_ (bufferFrames,
+    // channels, inputChannels) to what the device negotiated, so the silo and
+    // limiter buffers below must be sized after this call.
+    e->backend_->init(e);
 
     int byteSize = e->streamParams_.bufferFrames * e->streamParams_.channels * sizeof(f32);
 
@@ -507,10 +225,6 @@ void initAudio(Engine* e) {
         }
     }
 
-#ifdef __APPLE__
-    installSampleRateListener(e);
-#endif
-
     e->audioState_ = AudioState::initted;
 }
 
@@ -518,10 +232,6 @@ void uninitAudio(Engine* e) {
     stopAudio(e); // in case it was running.
 
     if (e->audioState_ == AudioState::off) return;
-
-#ifdef __APPLE__
-    removeSampleRateListener(e);
-#endif
 
     for (Silo& s : e->silos_) {
         if (s.index_ > 0) {
@@ -537,17 +247,7 @@ void uninitAudio(Engine* e) {
         return;
     }
 
-    // Close separate input stream if present
-    if (e->inputRtaudio_) {
-        if (e->inputRtaudio_->isStreamOpen()) {
-            e->inputRtaudio_->closeStream();
-        }
-        e->inputRtaudio_.reset();
-    }
-    free(e->inputStagingBuf_);
-    e->inputStagingBuf_ = nullptr;
-
-    e->rtaudio_->closeStream();
+    e->backend_->uninit();
     e->audioState_ = AudioState::off;
 }
 
@@ -560,10 +260,7 @@ void startAudio(Engine* e) {
         throw tzpl_errAudioNotInitialized;
     }
     e->muteGain_ = 1.f;
-    if (e->inputRtaudio_) {
-        e->inputRtaudio_->startStream();
-    }
-    e->rtaudio_->startStream();
+    e->backend_->start();
     e->audioState_ = AudioState::running;
 }
 
@@ -573,36 +270,14 @@ void stopAudio(Engine* e) {
     if (e->audioState_ != AudioState::running) return;
     e->muteGain_ = 0.f;
     std::this_thread::sleep_for(std::chrono::microseconds(100000));
-    e->rtaudio_->stopStream();
-    if (e->inputRtaudio_) {
-        e->inputRtaudio_->stopStream();
-    }
+    e->backend_->stop();
     e->audioState_ = AudioState::initted;
 }
 
-void printDevices(Engine* e) 
+void printDevices(Engine* e)
 {
-    auto& rta = e->rtaudio_;
-    int n = rta->getDeviceCount();
-    for (int i = 0; i < n; ++i) {
-        auto info = rta->getDeviceInfo(i);
-        printf("%2d device: '%s'\n", i, info.name.c_str());
-        printf("   %2d output ch, %2d input ch, %2d max duplex ch.\n",
-            info.outputChannels, info.inputChannels, info.duplexChannels);
-        if (info.isDefaultOutput) printf("   * This is the default output device.\n");
-        if (info.isDefaultInput)  printf("   * This is the default input device.\n");
-        printf("   sample rates: ");
-        { int i = 0; for (auto sr : info.sampleRates) {
-            if (i>0) {
-                printf(", ");
-                if ((i%8)==0) printf("\n   ");
-            }
-            printf("%d", sr);
-            ++i;
-        }}
-        printf("\n");
-        printf("   preferred sample rate: %d\n", info.preferredSampleRate);
-    }
+    if (!e->backend_) return; // NRT engines have no device backend.
+    e->backend_->printDevices();
 }
 
 

@@ -29,6 +29,7 @@ set(LIB_SOURCES
     src/tzpl_sexpr.cpp
     src/tzpl_sexpr_binary_buffer.cpp
     src/tzpl_command.cpp
+    src/tzpl_audio_backend_rtaudio.cpp
     src/tzpl_client_interface.cpp
     src/tzpl_silo.cpp
     src/tzpl_engine.cpp
@@ -66,6 +67,8 @@ install(TARGETS audio_engine_lib
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
 )
 install(FILES
+    src/tzpl_audio_backend.hpp
+    src/tzpl_audio_backend_rtaudio.hpp
     src/tzpl_client_interface.hpp
     src/tzpl_node.hpp
     src/tzpl_engine.hpp

@@ -26,8 +26,8 @@
 
 #include "tzpl_plugin_abi.h"
 #include "tzpl_common.hpp"
-
-class RtAudio;
+#include "tzpl_audio_backend.hpp"
+#include <memory>
 
 namespace engine {
 
@@ -77,7 +77,10 @@ struct EngineConfig {
     int numTempoClocks = 1; // beat-based TempoClock slots per silo
 };
 
-Engine* newEngine(EngineConfig const& config, AudioStreamParameters& streamParams);
+// Create a real-time engine. `backend` selects the audio device backend;
+// nullptr (the default) uses RtAudio (CoreAudio on macOS, ALSA on Linux).
+Engine* newEngine(EngineConfig const& config, AudioStreamParameters& streamParams,
+                  std::unique_ptr<AudioBackend> backend = nullptr);
 
 // Construct an engine for non-real-time (offline) rendering. No audio device
 // is opened; the caller drives processing via renderNRTBlock(). The provided
@@ -99,8 +102,6 @@ void renderNRTBlock(Engine* e, f32* outBuffer);
 void copyNodeDefs(Engine* from, Engine* to);
 
 void freeEngine(Engine* e);
-
-RtAudio* getRTAudio(Engine* e);
 
 void startAudio(Engine* e);
 void stopAudio(Engine* e);

@@ -22,7 +22,6 @@
 //
 
 #include "tzpl_engine.hpp"
-#include "RtAudio.h"
 #include <algorithm>
 #include <chrono>
 #include <thread>
@@ -34,15 +33,12 @@ namespace engine {
 
 void initAudio(Engine* e);
 
-Engine::Engine(EngineConfig const& config, AudioStreamParameters& asp)
+Engine::Engine(EngineConfig const& config, AudioStreamParameters& asp,
+               std::unique_ptr<AudioBackend> backend)
     :
     silos_(config.numSilos),
     defs_(kHashBins),
-#ifdef __APPLE__
-    rtaudio_(std::make_unique<RtAudio>(RtAudio::MACOSX_CORE)),
-#elif defined(__linux__)
-    rtaudio_(std::make_unique<RtAudio>(RtAudio::LINUX_ALSA)),
-#endif
+    backend_(std::move(backend)),
     nrt_cmd_thread_(processNRTCommands, this),
     dead_node_thread_(processDeadNodes, this),
     streamParams_(asp)
@@ -158,7 +154,7 @@ f64 Engine::getStreamTime() {
     if (nrtMode_) {
         return (f64)anchorSampleTime_ / streamParams_.sampleRate;
     }
-    return rtaudio_->getStreamTime();
+    return backend_->streamTime();
 }
 
 void plugInAudioNoOp(tzpl_SynthData*) {}
