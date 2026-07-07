@@ -1,0 +1,298 @@
+// Tzopilotl
+// Copyright (C) 2026 James McCartney
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+//
+//  juce_gui_main.cpp
+//  app (JUCE)
+//
+//  GUI mode entry point. main() lives in src/main.cpp (shared with the
+//  ImGui app) and calls runGui(appCtx) after the engine, VM, and
+//  schedulers are up. runGui hosts a real JUCEApplicationBase via
+//  JUCEApplicationBase::main() -- that (rather than a bare dispatch loop)
+//  is what wires up the native macOS app menu, routes Cmd+Q through
+//  systemRequestedQuit, and runs an orderly shutdown.
+//
+
+#include "app_gui.hpp"
+#include "app_commands.hpp"
+#include "main_component.hpp"
+#include "tzpl_app_context.hpp"
+#include "tzpl_look_and_feel.hpp"
+#include <juce_gui_extra/juce_gui_extra.h>
+
+namespace tzplapp {
+
+// Set by runGui before the application object is created.
+static bridge::AppContext* gAppContext = nullptr;
+
+// ---------------------------------------------------------------------------
+// Menu bar model: File / Edit / Find / View, all items driven by the
+// command manager (shortcuts shown and dispatched automatically).
+// ---------------------------------------------------------------------------
+
+class AppMenuModel : public juce::MenuBarModel {
+public:
+    explicit AppMenuModel(juce::ApplicationCommandManager& commands)
+        : commands_(commands) {}
+
+    juce::StringArray getMenuBarNames() override {
+        return { "File", "Edit", "Find", "View" };
+    }
+
+    juce::PopupMenu getMenuForIndex(int index, juce::String const&) override {
+        juce::PopupMenu m;
+        switch (index) {
+        case 0: // File
+            m.addCommandItem(&commands_, cmd::fileNew);
+            m.addCommandItem(&commands_, cmd::fileNewNotebook);
+            m.addCommandItem(&commands_, cmd::fileOpen);
+            m.addSeparator();
+            m.addCommandItem(&commands_, cmd::fileSave);
+            m.addCommandItem(&commands_, cmd::fileSaveAs);
+            m.addCommandItem(&commands_, cmd::fileSaveCopy);
+            m.addSeparator();
+            m.addCommandItem(&commands_, cmd::fileClose);
+#if !JUCE_MAC
+            m.addSeparator();
+            m.addCommandItem(&commands_, cmd::quit);
+#endif
+            break;
+        case 1: // Edit
+            m.addCommandItem(&commands_, cmd::editUndo);
+            m.addCommandItem(&commands_, cmd::editRedo);
+            m.addSeparator();
+            m.addCommandItem(&commands_, cmd::editCut);
+            m.addCommandItem(&commands_, cmd::editCopy);
+            m.addCommandItem(&commands_, cmd::editPaste);
+            m.addSeparator();
+            m.addCommandItem(&commands_, cmd::editSelectAll);
+            m.addSeparator();
+            m.addCommandItem(&commands_, cmd::editClearOutput);
+            m.addSeparator();
+            m.addCommandItem(&commands_, cmd::editToggleComment);
+            m.addCommandItem(&commands_, cmd::editIndent);
+            m.addCommandItem(&commands_, cmd::editOutdent);
+            break;
+        case 2: // Find
+            m.addCommandItem(&commands_, cmd::findShow);
+            m.addCommandItem(&commands_, cmd::findNext);
+            m.addCommandItem(&commands_, cmd::findPrevious);
+            m.addSeparator();
+            m.addCommandItem(&commands_, cmd::findUseSelection);
+            m.addCommandItem(&commands_, cmd::findUseSelectionReplace);
+            break;
+        case 3: { // View
+            m.addCommandItem(&commands_, cmd::toggleNotebookView);
+            m.addSeparator();
+            juce::PopupMenu fontMenu;
+            for (int i = 0; i < cmd::kNumEditorFontSizes; ++i)
+                fontMenu.addCommandItem(&commands_, cmd::fontSetBase + i);
+            m.addSubMenu("Font Size", fontMenu);
+            juce::PopupMenu themeMenu;
+            for (int i = 0; i < themeCount; ++i)
+                themeMenu.addCommandItem(&commands_, cmd::themeSetBase + i);
+            m.addSubMenu("Theme", themeMenu);
+            m.addSeparator();
+            m.addCommandItem(&commands_, cmd::fontIncrease);
+            m.addCommandItem(&commands_, cmd::fontDecrease);
+            break;
+        }
+        }
+        return m;
+    }
+
+    void menuItemSelected(int, int) override {} // command items dispatch themselves
+
+private:
+    juce::ApplicationCommandManager& commands_;
+};
+
+// ---------------------------------------------------------------------------
+// Main window
+// ---------------------------------------------------------------------------
+
+class MainWindow : public juce::DocumentWindow {
+public:
+    MainWindow(bridge::AppContext& appCtx,
+               juce::ApplicationCommandManager& commands,
+               TzplLookAndFeel& lookAndFeel,
+               juce::PropertiesFile& settings)
+        : juce::DocumentWindow(
+              "Tzopilotl",
+              lookAndFeel.findColour(juce::ResizableWindow::backgroundColourId),
+              juce::DocumentWindow::allButtons),
+          settings_(settings)
+    {
+        setUsingNativeTitleBar(true);
+        setResizable(true, false);
+
+        auto* main = new MainComponent(appCtx, commands, lookAndFeel, settings);
+        setContentOwned(main, false);
+
+        centreWithSize(1280, 800);
+        juce::String state = settings.getValue("windowState");
+        if (state.isNotEmpty())
+            restoreWindowStateFromString(state);
+
+        commands.registerAllCommandsForTarget(main);
+        commands.setFirstCommandTarget(main);
+        addKeyListener(commands.getKeyMappings());
+
+        setVisible(true);
+    }
+
+    ~MainWindow() override {
+        settings_.setValue("windowState", getWindowStateAsString());
+    }
+
+    MainComponent* mainComponent() {
+        return static_cast<MainComponent*>(getContentComponent());
+    }
+
+    void closeButtonPressed() override {
+        juce::JUCEApplicationBase::getInstance()->systemRequestedQuit();
+    }
+
+private:
+    juce::PropertiesFile& settings_;
+};
+
+// ---------------------------------------------------------------------------
+// Application
+// ---------------------------------------------------------------------------
+
+class TzplApplication : public juce::JUCEApplicationBase {
+public:
+    juce::String const getApplicationName() override { return "Tzopilotl"; }
+    juce::String const getApplicationVersion() override { return "0.1.0"; }
+    bool moreThanOneInstanceAllowed() override { return true; }
+
+    void initialise(juce::String const&) override {
+        juce::PropertiesFile::Options opts;
+        opts.applicationName = "Tzopilotl";
+        opts.filenameSuffix = ".settings";
+        opts.osxLibrarySubFolder = "Application Support";
+        opts.folderName = "Tzopilotl";
+        appProperties_.setStorageParameters(opts);
+
+        lookAndFeel_ = std::make_unique<TzplLookAndFeel>();
+        juce::LookAndFeel::setDefaultLookAndFeel(lookAndFeel_.get());
+
+        window_ = std::make_unique<MainWindow>(*gAppContext, commands_,
+                                               *lookAndFeel_,
+                                               *appProperties_.getUserSettings());
+
+        menuModel_ = std::make_unique<AppMenuModel>(commands_);
+#if JUCE_MAC
+        juce::MenuBarModel::setMacMainMenu(menuModel_.get());
+#else
+        window_->setMenuBar(menuModel_.get());
+#endif
+
+        // TZPL_JUCE_SELFTEST=1: invoke every registered command through the
+        // command manager (as the menus would), report, and quit. Used for
+        // headless verification and CI.
+        if (std::getenv("TZPL_JUCE_SELFTEST") != nullptr)
+            juce::MessageManager::callAsync([this] { runCommandSelfTest(); });
+    }
+
+    void shutdown() override {
+#if JUCE_MAC
+        juce::MenuBarModel::setMacMainMenu(nullptr);
+#else
+        if (window_) window_->setMenuBar(nullptr);
+#endif
+        window_.reset();
+        menuModel_.reset();
+        appProperties_.saveIfNeeded();
+        juce::LookAndFeel::setDefaultLookAndFeel(nullptr);
+        lookAndFeel_.reset();
+    }
+
+    void systemRequestedQuit() override {
+        if (window_ && window_->mainComponent()) {
+            window_->mainComponent()->confirmUnsavedChangesThen([] { quit(); });
+        } else {
+            quit();
+        }
+    }
+
+    void runCommandSelfTest() {
+        auto* main = window_->mainComponent();
+        juce::Array<juce::CommandID> ids;
+        main->getAllCommands(ids);
+
+        // Theme/font commands apply for real; restore afterwards.
+        int themeBefore = main->currentTheme();
+        int fontBefore = main->currentFontIndex();
+
+        int invoked = 0, failed = 0;
+        for (auto id : ids) {
+            // Skip commands that open dialogs or quit -- they don't return.
+            if (id == cmd::fileOpen || id == cmd::fileSaveAs
+                || id == cmd::fileSaveCopy || id == cmd::quit)
+                continue;
+            juce::ApplicationCommandInfo info(id);
+            main->getCommandInfo(id, info);
+            if (commands_.invokeDirectly(id, false)) ++invoked;
+            else {
+                ++failed;
+                std::printf("SELFTEST command failed: %d (%s)\n", (int)id,
+                            info.shortName.toRawUTF8());
+            }
+        }
+        commands_.invokeDirectly(cmd::themeSetBase + themeBefore, false);
+        commands_.invokeDirectly(cmd::fontSetBase + fontBefore, false);
+
+        std::printf("SELFTEST %s: %d commands invoked, %d failed\n",
+                    failed == 0 ? "OK" : "FAILED", invoked, failed);
+        std::fflush(stdout);
+        quit();
+    }
+
+    void anotherInstanceStarted(juce::String const&) override {}
+    void suspended() override {}
+    void resumed() override {}
+    void unhandledException(std::exception const*, juce::String const&,
+                            int) override {}
+
+private:
+    juce::ApplicationCommandManager commands_;
+    juce::ApplicationProperties appProperties_;
+    std::unique_ptr<TzplLookAndFeel> lookAndFeel_;
+    std::unique_ptr<AppMenuModel> menuModel_;
+    std::unique_ptr<MainWindow> window_;
+};
+
+}
+
+#if JUCE_MAC
+namespace juce { extern void initialiseNSApplication(); }
+#endif
+
+int runGui(bridge::AppContext& appCtx) {
+    tzplapp::gAppContext = &appCtx;
+    juce::JUCEApplicationBase::createInstance =
+        []() -> juce::JUCEApplicationBase* {
+            return new tzplapp::TzplApplication();
+        };
+#if JUCE_MAC
+    juce::initialiseNSApplication();
+#endif
+    int rc = juce::JUCEApplicationBase::main();
+    tzplapp::gAppContext = nullptr;
+    return rc;
+}

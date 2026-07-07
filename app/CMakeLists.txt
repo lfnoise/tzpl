@@ -1,11 +1,16 @@
 # app/CMakeLists.txt
 # Audio coding application: tzpl + audio engine + synthdef compiler + OSC + GUI
+#
+# Two GUI app targets can be built from this directory:
+#   tzpl_app      -- the Dear ImGui app (TZPL_BUILD_APP, GUI gated on TZPL_BUILD_GUI)
+#   tzpl_app_juce -- the JUCE app, sharing main.cpp and the document model
+#                    (TZPL_BUILD_APP_JUCE; see juce/ and the section at the bottom)
 
 # ---------------------------------------------------------------------------
 # GUI dependencies (Dear ImGui + GLFW) -- only when TZPL_BUILD_GUI is ON
 # ---------------------------------------------------------------------------
 
-if(TZPL_BUILD_GUI)
+if(TZPL_BUILD_APP AND TZPL_BUILD_GUI)
     include(FetchContent)
 
     # --- GLFW ---------------------------------------------------------------
@@ -81,14 +86,16 @@ if(TZPL_BUILD_GUI)
 endif()
 
 # ---------------------------------------------------------------------------
-# Application target
+# Application target (Dear ImGui)
 # ---------------------------------------------------------------------------
+
+if(TZPL_BUILD_APP)
 
 set(APP_SOURCES src/main.cpp)
 
 if(TZPL_BUILD_GUI)
     list(APPEND APP_SOURCES
-        src/gui_state.cpp
+        src/gui_state.cpp # keep in sync with the tzpl_app_juce shared sources below
         src/editor_panel.cpp
         src/workspace_panel.cpp
         src/output_panel.cpp
@@ -188,3 +195,71 @@ include(GNUInstallDirs)
 install(TARGETS tzpl_app
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
+
+endif() # TZPL_BUILD_APP
+
+# ---------------------------------------------------------------------------
+# JUCE application target (tzpl_app_juce)
+#
+# Shares src/main.cpp (entry point, engine/VM setup, REPL, NRT paths) and the
+# document model with the ImGui app; the GUI layer lives in juce/. runGui()
+# is the seam: main.cpp calls it, juce/juce_gui_main.cpp implements it.
+# ---------------------------------------------------------------------------
+
+if(TZPL_BUILD_APP_JUCE)
+    include(FetchContent)
+
+    FetchContent_Declare(juce
+        GIT_REPOSITORY https://github.com/juce-framework/JUCE.git
+        GIT_TAG 8.0.8
+        GIT_SHALLOW TRUE
+    )
+    FetchContent_MakeAvailable(juce)
+
+    juce_add_gui_app(tzpl_app_juce
+        PRODUCT_NAME "Tzopilotl"
+        COMPANY_NAME "Tzopilotl"
+        BUNDLE_ID "org.tzopilotl.app"
+        VERSION "0.1.0"
+    )
+
+    target_sources(tzpl_app_juce PRIVATE
+        src/main.cpp
+        juce/juce_gui_main.cpp
+        juce/juce_audio_backend.cpp
+        juce/main_component.cpp
+        juce/tzpl_look_and_feel.cpp
+    )
+    target_include_directories(tzpl_app_juce PRIVATE src juce)
+
+    target_compile_definitions(tzpl_app_juce PRIVATE
+        TZPL_HAS_GUI=1
+        TZPL_GUI_JUCE=1
+        MODULES_DIR="${CMAKE_SOURCE_DIR}/bridge/modules"
+        JUCE_WEB_BROWSER=0
+        JUCE_USE_CURL=0
+        JUCE_APPLICATION_NAME_STRING="Tzopilotl"
+        JUCE_APPLICATION_VERSION_STRING="0.1.0"
+    )
+
+    target_link_libraries(tzpl_app_juce
+        PRIVATE tzpl_synthdef_compiler_bridge
+        PRIVATE tzpl_audio_engine_bridge
+        PRIVATE tzpl_clock_bridge
+        PRIVATE linenoise
+        PRIVATE juce::juce_gui_extra
+        PRIVATE juce::juce_audio_devices
+        PRIVATE juce::juce_audio_utils
+        PRIVATE juce::juce_recommended_config_flags
+    )
+
+    if(TARGET tzpl_osc_bridge)
+        target_link_libraries(tzpl_app_juce PRIVATE tzpl_osc_bridge)
+        target_compile_definitions(tzpl_app_juce PRIVATE TZPL_HAS_OSC=1)
+    endif()
+
+    if(TARGET tzpl_nats_bridge)
+        target_link_libraries(tzpl_app_juce PRIVATE tzpl_nats_bridge)
+        target_compile_definitions(tzpl_app_juce PRIVATE TZPL_HAS_NATS=1)
+    endif()
+endif() # TZPL_BUILD_APP_JUCE
