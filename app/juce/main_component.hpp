@@ -29,6 +29,7 @@
 #include "app_commands.hpp"
 #include "editor_pane.hpp"
 #include "output_console.hpp"
+#include "notebook/notebook_view.hpp"
 #include "gui_state.hpp"
 #include "tzpl_look_and_feel.hpp"
 #include <juce_gui_extra/juce_gui_extra.h>
@@ -40,7 +41,8 @@ namespace ts { class REPLSession; }
 namespace tzplapp {
 
 class MainComponent : public juce::Component,
-                      public juce::ApplicationCommandTarget {
+                      public juce::ApplicationCommandTarget,
+                      private juce::Timer {
 public:
     MainComponent(bridge::AppContext& appCtx,
                   juce::ApplicationCommandManager& commands,
@@ -66,13 +68,20 @@ public:
     int currentTheme() const { return lookAndFeel_.currentTheme(); }
     int currentFontIndex() const { return fontIndex_; }
 
+    bool notebookActive() const { return notebookVisible_; }
+
     // Test hooks for the TZPL_JUCE_SELFTEST / TZPL_JUCE_OPEN paths.
     void testTypeIntoEditor(juce::String const& text);
     bool testEvalCollected() const;
     juce::String testLastEvalSummary() const;
-    void testOpenFile(juce::File const& f) { editorPane_.openFile(f); }
+    void testOpenFile(juce::File const& f) {
+        if (f.hasFileExtension("tzd")) openNotebookFile(f);
+        else editorPane_.openFile(f);
+    }
     EditorPane& testEditorPane() { return editorPane_; }
     void testShowDemo(juce::String const& which);
+    void testShowNotebook(bool show) { showNotebook(show); }
+    NotebookView& testNotebook() { return *notebook_; }
 
 private:
     void applyTheme(int themeIdx);
@@ -82,9 +91,13 @@ private:
     void openFileFlow();
     void saveActiveFlow(bool forceDialog, std::function<void(bool)> done = {});
     void closeActiveTabFlow();
+    void openNotebookFile(juce::File const& file);
+    void saveNotebookFlow(bool forceDialog);
+    void showNotebook(bool show);
 
     void launchEval(juce::String const& code, int flashStart, int flashEnd);
     void collectEvalResult();
+    void timerCallback() override; // print-drain coordinator
 
     bridge::AppContext& appCtx_;
     juce::ApplicationCommandManager& commands_;
@@ -95,7 +108,9 @@ private:
     std::unique_ptr<ts::REPLSession> session_;
 
     EditorPane editorPane_;
-    OutputConsole console_ { guiState_ };
+    std::unique_ptr<NotebookView> notebook_;
+    bool notebookVisible_ = false;
+    OutputConsole console_;
     juce::StretchableLayoutManager layout_;
     std::unique_ptr<juce::StretchableLayoutResizerBar> resizer_;
 

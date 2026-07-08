@@ -24,9 +24,7 @@
 
 namespace tzplapp {
 
-OutputConsole::OutputConsole(GuiState& guiState)
-    : guiState_(guiState), fontSize_(cmd::kEditorFontSizes[0])
-{
+OutputConsole::OutputConsole() : fontSize_(cmd::kEditorFontSizes[0]) {
     text_.setMultiLine(true);
     text_.setReadOnly(true);
     text_.setScrollbarsShown(true);
@@ -34,16 +32,6 @@ OutputConsole::OutputConsole(GuiState& guiState)
     text_.setFont(juce::FontOptions(juce::Font::getDefaultMonospacedFontName(),
                                     fontSize_, juce::Font::plain));
     addAndMakeVisible(text_);
-
-    // Idle poll: cheap (a pipe poll + a mutex'd empty check); picks up
-    // prints from the scheduler/actor/engine threads with no UI activity.
-    startTimerHz(10);
-}
-
-void OutputConsole::drainNow() {
-    guiState_.printCapture.drain(guiState_.output);
-    for (auto const& line : guiState_.output.drain())
-        appendLine(line);
 }
 
 void OutputConsole::appendLine(OutputLine const& line) {
@@ -65,7 +53,6 @@ void OutputConsole::appendLine(OutputLine const& line) {
 }
 
 void OutputConsole::clear() {
-    guiState_.output.clear();
     text_.clear();
 }
 

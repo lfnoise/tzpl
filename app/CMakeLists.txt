@@ -234,6 +234,10 @@ if(TZPL_BUILD_APP_JUCE)
         juce/editor_pane.cpp
         juce/find_replace_bar.cpp
         juce/output_console.cpp
+        juce/notebook/cell_component.cpp
+        juce/notebook/notebook_view.cpp
+        src/document.cpp
+        src/content_hash.cpp
     )
     target_include_directories(tzpl_app_juce PRIVATE src juce)
 

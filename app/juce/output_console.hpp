@@ -18,10 +18,9 @@
 //  output_console.hpp
 //  app (JUCE)
 //
-//  Console pane: colored, read-only log of VM prints, eval results, and
-//  errors. Drains the shared GuiState buffers (PrintCapture pipe and
-//  OutputBuffer) on a low-frequency timer -- prints can arrive from any
-//  thread (scheduler, actors, engine) at any time.
+//  Console pane: colored, read-only log. Display only -- MainComponent owns
+//  the print-drain coordinator (a print can arrive from any thread and may
+//  belong to an in-flight notebook cell rather than the console).
 //
 
 #ifndef output_console_hpp
@@ -32,25 +31,18 @@
 
 namespace tzplapp {
 
-class OutputConsole : public juce::Component, private juce::Timer {
+class OutputConsole : public juce::Component {
 public:
-    explicit OutputConsole(GuiState& guiState);
+    OutputConsole();
 
     void resized() override { text_.setBounds(getLocalBounds()); }
     void lookAndFeelChanged() override;
 
-    // Drain both buffers now (called on eval completion so results appear
-    // immediately rather than on the next timer tick).
-    void drainNow();
-
+    void appendLine(OutputLine const& line);
     void clear();
     void setFontSize(float px);
 
 private:
-    void timerCallback() override { drainNow(); }
-    void appendLine(OutputLine const& line);
-
-    GuiState& guiState_;
     juce::TextEditor text_;
     float fontSize_;
 };

@@ -260,11 +260,13 @@ public:
 
         int invoked = 0, failed = 0;
         for (auto id : ids) {
-            // Skip commands that open dialogs or quit -- they don't return.
-            // (fileSave prompts for a path when the tab has none.)
+            // Skip commands that open dialogs or quit (they don't return),
+            // and the eval commands (they launch async evals that would
+            // race the dedicated eval phases below).
             if (id == cmd::fileOpen || id == cmd::fileSave
                 || id == cmd::fileSaveAs || id == cmd::fileSaveCopy
-                || id == cmd::quit)
+                || id == cmd::quit || id == cmd::evalSelection
+                || id == cmd::evalLine || id == cmd::evalFile)
                 continue;
             juce::ApplicationCommandInfo info(id);
             main->getCommandInfo(id, info);
@@ -285,8 +287,12 @@ public:
         // End-to-end evals: type into the editor, fire the Cmd+Enter command,
         // wait for the async REPL round trip, check the result. Phase 0 is a
         // clean eval; phase 1 is a syntax error (exercises error markers).
+        // (The command loop left the notebook shown and mutated the active
+        // tab via the edit commands -- switch back and start on a clean tab.)
+        main->testShowNotebook(false);
+        main->testEditorPane().newTab("evaltest.x");
         evalPhase_ = 0;
-        main->testTypeIntoEditor("40 + 2;");
+        main->testTypeIntoEditor("40 + 2");
         commands_.invokeDirectly(cmd::evalSelection, false);
         evalPollsLeft_ = 100;
         pollEvalThenQuit();
@@ -305,12 +311,25 @@ public:
                 main->testTypeIntoEditor("\n\nlet nope = ;");
                 commands_.invokeDirectly(cmd::evalSelection, false);
                 evalPollsLeft_ = 100;
-            } else {
+            } else if (evalPhase_ == 1) {
                 std::printf("SELFTEST ERRMARK %s: %s\n",
                             summary.startsWith("errors:") ? "OK" : "FAILED",
                             summary.toRawUTF8());
                 std::fflush(stdout);
                 runFindReplaceSelfTest();
+                // Notebook eval: fresh document, type into the cell, run it.
+                evalPhase_ = 2;
+                main->testShowNotebook(true);
+                main->testNotebook().newDocument();
+                main->testNotebook().testTypeIntoFocusedCell("6 * 7;");
+                commands_.invokeDirectly(cmd::evalSelection, false);
+                evalPollsLeft_ = 100;
+            } else {
+                auto out = main->testNotebook().testFocusedCellOutput();
+                std::printf("SELFTEST NOTEBOOK %s: %s\n",
+                            out.contains("42") ? "OK" : "FAILED",
+                            out.toRawUTF8());
+                std::fflush(stdout);
                 quit();
                 return;
             }

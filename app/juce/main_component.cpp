@@ -39,8 +39,12 @@ MainComponent::MainComponent(bridge::AppContext& appCtx,
     addAndMakeVisible(editorPane_);
     addAndMakeVisible(console_);
 
-    // Vertical split: editor | resizer | console. Mirrors the ImGui app's
-    // splitRatio (editor fraction, clamped .2-.9).
+    notebook_ = std::make_unique<NotebookView>(
+        appCtx_, guiState_, [this] { return session_.get(); });
+    addChildComponent(*notebook_);
+
+    // Vertical split: center pane | resizer | console. Mirrors the ImGui
+    // app's splitRatio (editor fraction, clamped .2-.9).
     double ratio = settings_.getDoubleValue("splitRatio", 0.7);
     ratio = juce::jlimit(0.2, 0.9, ratio);
     layout_.setItemLayout(0, 80.0, -0.9, -ratio);         // editor
@@ -81,12 +85,16 @@ MainComponent::MainComponent(bridge::AppContext& appCtx,
     applyTheme(settings_.getIntValue("theme", themeDark));
     applyFontIndex(settings_.getIntValue("fontIndex", 0));
 
-    guiState_.output.append("Tzopilotl. Cmd+Enter: eval block, "
-                            "Shift+Enter: eval line, "
-                            "Cmd+Shift+Enter: eval file.", LineKind::Info);
+    logLine("Tzopilotl. Cmd+Enter: eval block, Shift+Enter: eval line, "
+            "Cmd+Shift+Enter: eval file.");
+
+    // Print-drain coordinator: routes VM prints (any thread) to the in-flight
+    // notebook cell or the console, and pumps the notebook's Run-All queue.
+    startTimerHz(15);
 }
 
 MainComponent::~MainComponent() {
+    stopTimer();
     // Stop the completion callback racing teardown, then restore stdout.
     guiState_.asyncEval.onFinished = nullptr;
     if (appCtx_.nrtvm)
@@ -95,7 +103,10 @@ MainComponent::~MainComponent() {
 }
 
 void MainComponent::resized() {
-    juce::Component* comps[] = { &editorPane_, resizer_.get(), &console_ };
+    juce::Component* center = notebookVisible_
+        ? static_cast<juce::Component*>(notebook_.get())
+        : static_cast<juce::Component*>(&editorPane_);
+    juce::Component* comps[] = { center, resizer_.get(), &console_ };
     layout_.layOutComponents(comps, 3, 0, 0, getWidth(), getHeight(),
                              /*vertically=*/true, /*resizeOther=*/true);
     saveSplitRatio();
@@ -103,14 +114,40 @@ void MainComponent::resized() {
 
 void MainComponent::saveSplitRatio() {
     if (getHeight() <= 0) return;
-    double ratio = (double)editorPane_.getHeight() / getHeight();
+    auto* center = notebookVisible_
+        ? static_cast<juce::Component*>(notebook_.get())
+        : static_cast<juce::Component*>(&editorPane_);
+    double ratio = (double)center->getHeight() / getHeight();
     if (ratio > 0.05 && ratio < 0.95)
         settings_.setValue("splitRatio", ratio);
 }
 
+void MainComponent::showNotebook(bool show) {
+    if (notebookVisible_ == show) return;
+    notebookVisible_ = show;
+    notebook_->setVisible(show);
+    editorPane_.setVisible(!show);
+    resized();
+    commands_.commandStatusChanged();
+}
+
+// Route VM prints and result summaries to the console; drain from a timer
+// since prints can arrive from any thread (scheduler, actors, engine).
+void MainComponent::timerCallback() {
+    std::uint64_t cell = guiState_.asyncEval.cellId;
+    auto lines = guiState_.printCapture.drainLines();
+    for (auto const& text : lines) {
+        OutputLine line { text, LineKind::Output };
+        if (cell != 0 && notebook_) notebook_->addCellOutput(cell, line);
+        else console_.appendLine(line);
+    }
+    for (auto const& line : guiState_.output.drain())
+        console_.appendLine(line);
+    if (notebook_) notebook_->pumpRunQueue();
+}
+
 void MainComponent::logLine(String const& line) {
-    guiState_.output.append(line.toStdString(), LineKind::Info);
-    console_.drainNow();
+    console_.appendLine({ line.toStdString(), LineKind::Info });
 }
 
 // ---------------------------------------------------------------------------
@@ -153,11 +190,54 @@ void MainComponent::openFileFlow() {
         [this](juce::FileChooser const& fc) {
             auto file = fc.getResult();
             if (file == juce::File()) return;
-            if (file.hasFileExtension("tzd")) {
-                logLine("[TODO M3] open notebook: " + file.getFullPathName());
-            } else if (!editorPane_.openFile(file)) {
+            if (file.hasFileExtension("tzd"))
+                openNotebookFile(file);
+            else if (!editorPane_.openFile(file))
                 logLine("could not open " + file.getFullPathName());
-            }
+        });
+}
+
+// ---------------------------------------------------------------------------
+// Notebook file flows
+// ---------------------------------------------------------------------------
+
+void MainComponent::openNotebookFile(juce::File const& file) {
+    String err;
+    if (!notebook_->openFile(file, err)) {
+        logLine("notebook open failed: " + err);
+        return;
+    }
+    showNotebook(true);
+    logLine("opened " + file.getFullPathName());
+}
+
+// Save the notebook; asks for a path if it has none (or if forceDialog).
+void MainComponent::saveNotebookFlow(bool forceDialog) {
+    juce::File existing = notebook_->currentFile();
+    if (!forceDialog && existing != juce::File()) {
+        String err;
+        if (notebook_->saveToFile(existing, err))
+            logLine("saved " + existing.getFullPathName());
+        else
+            logLine("notebook save failed: " + err);
+        return;
+    }
+    fileChooser_ = std::make_unique<juce::FileChooser>(
+        "Save Notebook As",
+        juce::File::getSpecialLocation(juce::File::userHomeDirectory)
+            .getChildFile("untitled.tzd"),
+        "*.tzd");
+    fileChooser_->launchAsync(
+        juce::FileBrowserComponent::saveMode
+            | juce::FileBrowserComponent::warnAboutOverwriting,
+        [this](juce::FileChooser const& fc) {
+            auto file = fc.getResult();
+            if (file == juce::File()) return;
+            String err;
+            if (notebook_->saveToFile(file, err))
+                logLine("saved " + file.getFullPathName());
+            else
+                logLine("notebook save failed: " + err);
         });
 }
 
@@ -223,12 +303,24 @@ void MainComponent::launchEval(String const& code, int flashStart, int flashEnd)
 
 void MainComponent::collectEvalResult() {
     auto& ae = guiState_.asyncEval;
-    if (ae.busy()) return;
-    // collect() joins the worker, formats result/errors into the output
-    // buffer, and triggers guiState_.flash (which the JUCE editor overlay
-    // replaces -- we forward the same line range below).
-    if (!ae.collect(guiState_)) return;
+    if (ae.busy() || !ae.finished()) return;
 
+    // Notebook cell eval: join, route result/errors/markers to the cell.
+    if (ae.cellId != 0) {
+        ae.join();
+        std::uint64_t cellId = ae.cellId;
+        auto result = ae.result;   // copy before cellId is cleared
+        std::string code = ae.code;
+        ae.cellId = 0;
+        // Drain any trailing cell prints before the result summary lands.
+        timerCallback();
+        if (notebook_) notebook_->onCellEvalDone(cellId, result, code);
+        return;
+    }
+
+    // Editor eval: collect() formats result/errors into guiState_.output
+    // (drained to the console by the timer) and we forward flash/markers.
+    if (!ae.collect(guiState_)) return;
     if (!ae.result.errors.empty()) {
         std::vector<std::pair<int, String>> markers;
         for (auto const& e : ae.result.errors) {
@@ -240,7 +332,7 @@ void MainComponent::collectEvalResult() {
     } else if (ae.flashStart >= 0 && ae.flashEnd >= 0) {
         editorPane_.triggerFlash(ae.flashStart, ae.flashEnd);
     }
-    console_.drainNow();
+    timerCallback(); // flush output buffer to the console now
 }
 
 // ---------------------------------------------------------------------------
@@ -442,17 +534,22 @@ bool MainComponent::perform(InvocationInfo const& info) {
     // -- File ---------------------------------------------------------------
     case cmd::fileNew:
         editorPane_.newTab();
+        showNotebook(false);
         return true;
     case cmd::fileNewNotebook:
-        return todo("File > New Notebook (M3)");
+        notebook_->newDocument();
+        showNotebook(true);
+        return true;
     case cmd::fileOpen:
         openFileFlow();
         return true;
     case cmd::fileSave:
-        saveActiveFlow(false);
+        if (notebookVisible_) saveNotebookFlow(false);
+        else saveActiveFlow(false);
         return true;
     case cmd::fileSaveAs:
-        saveActiveFlow(true);
+        if (notebookVisible_) saveNotebookFlow(true);
+        else saveActiveFlow(true);
         return true;
     case cmd::fileSaveCopy: {
         fileChooser_ = std::make_unique<juce::FileChooser>(
@@ -479,9 +576,17 @@ bool MainComponent::perform(InvocationInfo const& info) {
     // -- Edit -----------------------------------------------------------
     // Menu edit ops act on the code editor. When another text field has
     // keyboard focus its native key handling covers the shortcuts; per-
-    // focus menu routing (console copy, find bar) lands with M2.3+.
-    case cmd::editUndo:   editorPane_.undo(); return true;
-    case cmd::editRedo:   editorPane_.redo(); return true;
+    // focus menu routing (console copy, find bar) lands later.
+    // In the notebook, undo/redo drive the document history tree; the
+    // per-cell editors keep their own native character-level undo.
+    case cmd::editUndo:
+        if (notebookVisible_) notebook_->undoDocument();
+        else editorPane_.undo();
+        return true;
+    case cmd::editRedo:
+        if (notebookVisible_) notebook_->redoDocument();
+        else editorPane_.redo();
+        return true;
     case cmd::editCut:    editorPane_.cutToClipboard(); return true;
     case cmd::editCopy:   editorPane_.copyToClipboard(); return true;
     case cmd::editPaste:  editorPane_.pasteFromClipboard(); return true;
@@ -522,10 +627,14 @@ bool MainComponent::perform(InvocationInfo const& info) {
         applyFontIndex(fontIndex_ - 1);
         return true;
     case cmd::toggleNotebookView:
-        return todo("View > Toggle Notebook / Editor (M3)");
+        showNotebook(!notebookVisible_);
+        return true;
 
     // -- Eval ---------------------------------------------------------------
+    // With the notebook shown, Cmd+Enter / Shift+Enter run the focused cell
+    // and Cmd+Shift+Enter runs every cell, matching the ImGui app.
     case cmd::evalSelection: {
+        if (notebookVisible_) { notebook_->runFocusedCell(); return true; }
         String code = editorPane_.getSelectedText();
         int startLine, endLine;
         if (code.isEmpty()) {
@@ -536,12 +645,15 @@ bool MainComponent::perform(InvocationInfo const& info) {
         launchEval(code, startLine, endLine);
         return true;
     }
-    case cmd::evalLine: {
-        int line = editorPane_.cursorLine();
-        launchEval(editorPane_.getCurrentLineText(), line, line);
+    case cmd::evalLine:
+        if (notebookVisible_) { notebook_->runFocusedCell(); return true; }
+        {
+            int line = editorPane_.cursorLine();
+            launchEval(editorPane_.getCurrentLineText(), line, line);
+        }
         return true;
-    }
     case cmd::evalFile:
+        if (notebookVisible_) { notebook_->runAll(); return true; }
         launchEval(editorPane_.getAllText(), 0, editorPane_.cursorLine());
         return true;
     }
