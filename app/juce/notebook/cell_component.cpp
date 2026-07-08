@@ -20,6 +20,7 @@
 //
 
 #include "cell_component.hpp"
+#include "../tzpl_fonts.hpp"
 
 namespace tzplapp {
 
@@ -88,8 +89,7 @@ CellComponent::CellComponent(doc::CellId id, TzplTokeniser& tokeniser,
     output_.setReadOnly(true);
     output_.setCaretVisible(false);
     output_.setScrollbarsShown(true);
-    output_.setFont(juce::FontOptions(juce::Font::getDefaultMonospacedFontName(),
-                                      fontSize_, juce::Font::plain));
+    output_.setFont(monoFont(fontSize_));
 
     placeholder_.setJustificationType(juce::Justification::centred);
     placeholder_.setColour(juce::Label::textColourId, juce::Colour(0xff808080));
@@ -119,8 +119,7 @@ void CellComponent::buildForKind(doc::CellKind kind) {
     if (wantsEditor && !editor_) {
         codeDoc_ = std::make_unique<juce::CodeDocument>();
         editor_ = std::make_unique<TzplCodeEditor>(*codeDoc_, &tokeniser_);
-        editor_->setFont(juce::FontOptions(
-            juce::Font::getDefaultMonospacedFontName(), fontSize_, juce::Font::plain));
+        editor_->setFont(monoFont(fontSize_));
         // Prose cells hide the gutter (the ImGuiColorTextEdit patch's role).
         editor_->setLineNumbersShown(kind == doc::CellKind::Code);
         codeDoc_->addListener(this); // text change -> onTextChanged
@@ -243,11 +242,8 @@ void CellComponent::setErrorMarkers(
 
 void CellComponent::setFontSize(float px) {
     fontSize_ = px;
-    if (editor_)
-        editor_->setFont(juce::FontOptions(
-            juce::Font::getDefaultMonospacedFontName(), px, juce::Font::plain));
-    output_.applyFontToAllText(juce::FontOptions(
-        juce::Font::getDefaultMonospacedFontName(), px, juce::Font::plain));
+    if (editor_) editor_->setFont(monoFont(px));
+    output_.applyFontToAllText(monoFont(px));
 }
 
 int CellComponent::preferredHeight(int width) const {

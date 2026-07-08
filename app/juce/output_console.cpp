@@ -20,6 +20,7 @@
 //
 
 #include "output_console.hpp"
+#include "tzpl_fonts.hpp"
 #include "app_commands.hpp"
 
 namespace tzplapp {
@@ -29,8 +30,7 @@ OutputConsole::OutputConsole() : fontSize_(cmd::kEditorFontSizes[0]) {
     text_.setReadOnly(true);
     text_.setScrollbarsShown(true);
     text_.setCaretVisible(false);
-    text_.setFont(juce::FontOptions(juce::Font::getDefaultMonospacedFontName(),
-                                    fontSize_, juce::Font::plain));
+    text_.setFont(monoFont(fontSize_));
     addAndMakeVisible(text_);
 }
 
@@ -58,9 +58,7 @@ void OutputConsole::clear() {
 
 void OutputConsole::setFontSize(float px) {
     fontSize_ = px;
-    text_.applyFontToAllText(
-        juce::FontOptions(juce::Font::getDefaultMonospacedFontName(), px,
-                          juce::Font::plain));
+    text_.applyFontToAllText(monoFont(px));
 }
 
 void OutputConsole::lookAndFeelChanged() {

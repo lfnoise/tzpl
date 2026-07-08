@@ -20,6 +20,7 @@
 //
 
 #include "editor_pane.hpp"
+#include "tzpl_fonts.hpp"
 
 namespace tzplapp {
 
@@ -188,8 +189,7 @@ int EditorPane::indexOfDocument(CodeDocument const* doc) const {
 
 void EditorPane::addTabInternal(std::unique_ptr<Tab> tab) {
     tab->doc->addListener(this);
-    tab->editor->setFont(juce::FontOptions(
-        juce::Font::getDefaultMonospacedFontName(), fontSize_, juce::Font::plain));
+    tab->editor->setFont(monoFont(fontSize_));
     tabsUI_.addTab(tab->name, juce::Colours::transparentBlack,
                    tab->editor.get(), /*deleteComponentWhenNotNeeded=*/false);
     tabs_.push_back(std::move(tab));
@@ -481,8 +481,7 @@ TzplCodeEditor* EditorPane::activeEditor() const {
 void EditorPane::setFontSize(float px) {
     fontSize_ = px;
     for (auto& tab : tabs_)
-        tab->editor->setFont(juce::FontOptions(
-            juce::Font::getDefaultMonospacedFontName(), px, juce::Font::plain));
+        tab->editor->setFont(monoFont(px));
 }
 
 // ---------------------------------------------------------------------------
