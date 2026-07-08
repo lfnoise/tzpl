@@ -68,6 +68,10 @@ public:
 private:
     // Slider/XY/MultiSlider accept hover-key value nudges.
     bool isHoverAdjustable() const;
+    // Inline numeric entry (Cmd-click on a Slider/Number): open a TextEditor
+    // seeded with the current value; commit on Return/focus-loss.
+    void openValueEntry(double current);
+    void commitValueEntry();
     // The horizontal track geometry (in local coords) for slider-like kinds.
     void trackGeometry(float& minx, float& usable) const;
     void markDirtyAndNotify(bridge::UIWidget& w, bool gestureEnd);
@@ -98,6 +102,7 @@ private:
     ui_gesture::DragAnchor dragAnchor_;
     bool dragging_ = false;
     int matrixPaintValue_ = -1; // value being painted across a matrix drag
+    std::unique_ptr<juce::TextEditor> valueEditor_; // Cmd-click numeric entry
 
     static constexpr int kLabelH = 16;
 

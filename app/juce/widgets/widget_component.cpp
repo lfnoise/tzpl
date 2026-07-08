@@ -461,6 +461,14 @@ void WidgetComponent::mouseDown(juce::MouseEvent const& e) {
     UIWidget* wp = ui_.findById(id_);
     if (!wp) return;
     UIWidget& w = *wp;
+
+    // Cmd-click a Slider/Number opens inline numeric entry (Alt is fine-drag,
+    // so Cmd is free for this -- matches the ImGui app).
+    if (e.mods.isCommandDown() && !e.mods.isAltDown()
+        && (w.kind == UIWidgetKind::Slider || w.kind == UIWidgetKind::Number)) {
+        openValueEntry(w.values.empty() ? w.spec.init : w.values[0]);
+        return;
+    }
     dragging_ = true;
 
     float minx, usable;
@@ -541,8 +549,9 @@ void WidgetComponent::mouseDrag(juce::MouseEvent const& e) {
     float minx, usable;
     trackGeometry(minx, usable);
     auto bb = bodyRect(*this, kLabelH);
-    // Cmd (or Ctrl) = fine drag; Shift = finer.
-    int fine = e.mods.isCommandDown() ? 1 : (e.mods.isShiftDown() ? 2 : 0);
+    // Shift = fine drag (0.1x), Alt = finer (0.01x). Cmd is reserved for
+    // numeric text entry.
+    int fine = e.mods.isShiftDown() ? 1 : (e.mods.isAltDown() ? 2 : 0);
 
     switch (w.kind) {
         case UIWidgetKind::Slider: {
@@ -785,6 +794,34 @@ void WidgetComponent::mouseExit(juce::MouseEvent const&) {
     // Release focus so a non-hovered widget doesn't keep eating keys.
     if (hasKeyboardFocus(false)) giveAwayKeyboardFocus();
     repaint();
+}
+
+void WidgetComponent::openValueEntry(double current) {
+    valueEditor_ = std::make_unique<juce::TextEditor>();
+    valueEditor_->setBounds(bodyRect(*this, kLabelH).toNearestInt());
+    valueEditor_->setJustification(juce::Justification::centred);
+    valueEditor_->setText(fmtValue(current), false);
+    valueEditor_->selectAll();
+    valueEditor_->onReturnKey = [this] { commitValueEntry(); };
+    valueEditor_->onEscapeKey = [this] { valueEditor_.reset(); };
+    valueEditor_->onFocusLost = [this] { commitValueEntry(); };
+    addAndMakeVisible(*valueEditor_);
+    valueEditor_->grabKeyboardFocus();
+}
+
+void WidgetComponent::commitValueEntry() {
+    if (!valueEditor_) return;
+    // reset() first so the onFocusLost fired by destroying/refocusing doesn't
+    // re-enter this.
+    auto editor = std::move(valueEditor_);
+    double v = editor->getText().getDoubleValue();
+    {
+        std::lock_guard<std::mutex> lock(ui_.mtx);
+        if (auto* wp = ui_.findById(id_); wp && !wp->values.empty()) {
+            wp->values[0] = wp->spec.clamp(v);
+            markDirtyAndNotify(*wp, true);
+        }
+    }
 }
 
 }
