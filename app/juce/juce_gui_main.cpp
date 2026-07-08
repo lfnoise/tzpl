@@ -101,6 +101,7 @@ public:
             break;
         case 3: { // View
             m.addCommandItem(&commands_, cmd::toggleNotebookView);
+            m.addCommandItem(&commands_, cmd::togglePerform);
             m.addSeparator();
             juce::PopupMenu fontMenu;
             for (int i = 0; i < cmd::kNumEditorFontSizes; ++i)
@@ -278,7 +279,8 @@ public:
             if (id == cmd::fileOpen || id == cmd::fileSave
                 || id == cmd::fileSaveAs || id == cmd::fileSaveCopy
                 || id == cmd::quit || id == cmd::evalSelection
-                || id == cmd::evalLine || id == cmd::evalFile)
+                || id == cmd::evalLine || id == cmd::evalFile
+                || id == cmd::togglePerform)  // would overlay the eval phases
                 continue;
             juce::ApplicationCommandInfo info(id);
             main->getCommandInfo(id, info);

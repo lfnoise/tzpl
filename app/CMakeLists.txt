@@ -234,6 +234,7 @@ if(TZPL_BUILD_APP_JUCE)
         juce/editor_pane.cpp
         juce/find_replace_bar.cpp
         juce/output_console.cpp
+        juce/perform_view.cpp
         juce/notebook/cell_component.cpp
         juce/notebook/notebook_view.cpp
         juce/notebook/presets_view.cpp

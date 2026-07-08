@@ -33,6 +33,7 @@
 #include "widgets/controls_dispatch.hpp"
 #include "widgets/controls_window.hpp"
 #include "widgets/key_dispatch.hpp"
+#include "perform_view.hpp"
 #include "gui_state.hpp"
 #include "tzpl_look_and_feel.hpp"
 #include <map>
@@ -110,6 +111,7 @@ private:
     void openNotebookFile(juce::File const& file);
     void saveNotebookFlow(bool forceDialog);
     void showNotebook(bool show);
+    void togglePerform();
 
     void launchEval(juce::String const& code, int flashStart, int flashEnd);
     void collectEvalResult();
@@ -136,6 +138,7 @@ private:
 
     std::unique_ptr<juce::FileChooser> fileChooser_;
     std::map<std::string, std::unique_ptr<ControlsWindow>> controlsWindows_;
+    std::unique_ptr<PerformView> performView_;
     int fontIndex_ = 0;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MainComponent)

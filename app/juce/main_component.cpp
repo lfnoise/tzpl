@@ -111,6 +111,10 @@ MainComponent::~MainComponent() {
 }
 
 void MainComponent::resized() {
+    if (performView_) {
+        performView_->setBounds(getLocalBounds());
+        return;
+    }
     juce::Component* center = notebookVisible_
         ? static_cast<juce::Component*>(notebook_.get())
         : static_cast<juce::Component*>(&editorPane_);
@@ -118,6 +122,22 @@ void MainComponent::resized() {
     layout_.layOutComponents(comps, 3, 0, 0, getWidth(), getHeight(),
                              /*vertically=*/false, /*resizeOther=*/true);
     saveSplitRatio();
+}
+
+void MainComponent::togglePerform() {
+    if (performView_) {
+        performView_.reset();
+        resized();
+        return;
+    }
+    if (!appCtx_.uiState) return;
+    performView_ = std::make_unique<PerformView>(
+        appCtx_, dispatcher_,
+        [this] { return notebook_->claimedPanels(); },
+        [this] { togglePerform(); });
+    addAndMakeVisible(*performView_);
+    performView_->setBounds(getLocalBounds());
+    performView_->refreshPanels();
 }
 
 void MainComponent::saveSplitRatio() {
@@ -406,6 +426,7 @@ void MainComponent::getAllCommands(juce::Array<juce::CommandID>& ids) {
         cmd::findShow, cmd::findNext, cmd::findPrevious,
         cmd::findUseSelection, cmd::findUseSelectionReplace,
         cmd::fontIncrease, cmd::fontDecrease, cmd::toggleNotebookView,
+        cmd::togglePerform,
         cmd::evalSelection, cmd::evalLine, cmd::evalFile,
     });
     for (int i = 0; i < cmd::kNumEditorFontSizes; ++i)
@@ -546,6 +567,11 @@ void MainComponent::getCommandInfo(juce::CommandID id,
         set("Toggle Notebook / Editor", "View");
         info.addDefaultKeypress('\\', mod);
         break;
+    case cmd::togglePerform:
+        set("Perform Mode", "View");
+        info.addDefaultKeypress('p', modShift);
+        info.setTicked(performView_ != nullptr);
+        break;
 
     case cmd::evalSelection:
         set("Evaluate Selection", "Eval");
@@ -683,6 +709,9 @@ bool MainComponent::perform(InvocationInfo const& info) {
     case cmd::toggleNotebookView:
         showNotebook(!notebookVisible_);
         return true;
+    case cmd::togglePerform:
+        togglePerform();
+        return true;
 
     // -- Eval ---------------------------------------------------------------
     // With the notebook shown, Cmd+Enter / Shift+Enter run the focused cell
@@ -759,6 +788,9 @@ void MainComponent::testShowDemo(String const& which) {
     } else if (which == "history") {
         showNotebook(true);
         notebook_->toggleHistoryWindow();
+    } else if (which == "perform") {
+        showNotebook(true);
+        togglePerform();
     }
 }
 
