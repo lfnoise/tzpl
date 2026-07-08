@@ -83,7 +83,7 @@ MainComponent::MainComponent(bridge::AppContext& appCtx,
         };
 
     applyTheme(settings_.getIntValue("theme", themeDark));
-    applyFontIndex(settings_.getIntValue("fontIndex", 0));
+    applyFontIndex(settings_.getIntValue("fontIndex", cmd::kDefaultFontSizeIndex));
 
     logLine("Tzopilotl. Cmd+Enter: eval block, Shift+Enter: eval line, "
             "Cmd+Shift+Enter: eval file.");
