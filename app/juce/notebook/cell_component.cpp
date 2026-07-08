@@ -65,6 +65,17 @@ CellComponent::CellComponent(doc::CellId id, TzplTokeniser& tokeniser,
         b->setColour(juce::TextButton::buttonColourId, juce::Colour(0x30ffffff));
         addAndMakeVisible(b);
     }
+
+    arrangeButton_.setColour(juce::TextButton::buttonColourId,
+                             juce::Colour(0x30ffffff));
+    arrangeButton_.onClick = [this] {
+        arrangeOn_ = !arrangeOn_;
+        arrangeButton_.setColour(juce::TextButton::buttonColourId,
+                                 arrangeOn_ ? juce::Colour(0xffe0a020)
+                                            : juce::Colour(0x30ffffff));
+        if (panelCanvas_) panelCanvas_->setArrange(arrangeOn_);
+    };
+    addChildComponent(arrangeButton_);
     // The disclosure control is a bare click target; paint() draws the
     // triangle over it (a glyph gets ellipsized in the narrow button).
     collapseButton_.setColour(juce::TextButton::buttonColourId,
@@ -154,6 +165,11 @@ void CellComponent::syncFromModel(doc::Cell const& cell) {
             panelName_ = String(cell.name);
             panelCanvas_ = std::make_unique<PanelCanvas>(*ui_, cell.name,
                                                          *dispatcher_);
+            panelCanvas_->onArrangeCommit = [this] {
+                if (onArrangeCommit) onArrangeCommit();
+            };
+            panelCanvas_->setArrange(arrangeOn_);
+            arrangeButton_.setVisible(true);
             addAndMakeVisible(*panelCanvas_);
             resized();
         }
@@ -276,6 +292,10 @@ void CellComponent::layOutHeader(juce::Rectangle<int>& r) {
     header.removeFromRight(4);
     if (runButton_.isVisible()) {
         runButton_.setBounds(header.removeFromRight(48));
+        header.removeFromRight(4);
+    }
+    if (arrangeButton_.isVisible()) {
+        arrangeButton_.setBounds(header.removeFromRight(64));
         header.removeFromRight(4);
     }
     kindLabel_.setBounds(header);

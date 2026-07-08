@@ -33,6 +33,8 @@
 #include "widget_gestures.hpp"
 #include <juce_gui_basics/juce_gui_basics.h>
 #include <cstdint>
+#include <functional>
+#include <memory>
 
 namespace tzplapp {
 
@@ -46,6 +48,13 @@ public:
     std::uint64_t widgetId() const { return id_; }
     bridge::UIWidgetKind kind() const { return kind_; }
     bool isTapBacked() const;
+
+    // Arrange mode: the widget is drag-moved / corner-resized instead of
+    // adjusted, writing fx/fy/fw/fh back to the registry. canvasTop is the
+    // panel's content-origin y (below any tab strip) so fy stays canvas-local.
+    void setArrange(bool on, int canvasTop);
+    // Called by the canvas after an arrange gesture ends (relayout + commit).
+    std::function<void()> onArrangeEnd;
 
     // Refresh the cached kind/name/label after a reconcile (the registry may
     // have re-upserted this id with a new kind).
@@ -103,6 +112,12 @@ private:
     bool dragging_ = false;
     int matrixPaintValue_ = -1; // value being painted across a matrix drag
     std::unique_ptr<juce::TextEditor> valueEditor_; // Cmd-click numeric entry
+
+    // Arrange mode state.
+    bool arrange_ = false;
+    int canvasTop_ = 0;
+    bool arrangeResizing_ = false;
+    juce::Rectangle<int> arrangeStartBounds_;
 
     static constexpr int kLabelH = 16;
 

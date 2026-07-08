@@ -177,6 +177,13 @@ void WidgetComponent::paint(Graphics& g) {
         case UIWidgetKind::PianoRoll:   paintPianoRoll(g, w); break;
         case UIWidgetKind::Label:       paintLabel(g, w); break;
     }
+    if (arrange_) {
+        // Move border + bottom-right resize grip.
+        g.setColour(juce::Colour(0xffe0a020));
+        g.drawRect(getLocalBounds().toFloat(), 1.5f);
+        float s = 12.0f;
+        g.fillRect(getWidth() - s, getHeight() - s, s, s);
+    }
 }
 
 // Common helpers used by several paints.
@@ -480,7 +487,22 @@ void WidgetComponent::paintLabel(Graphics& g, UIWidget& w) {
 // Interaction
 // ---------------------------------------------------------------------------
 
+void WidgetComponent::setArrange(bool on, int canvasTop) {
+    arrange_ = on;
+    canvasTop_ = canvasTop;
+    setMouseCursor(on ? juce::MouseCursor::DraggingHandCursor
+                      : juce::MouseCursor::NormalCursor);
+    repaint();
+}
+
 void WidgetComponent::mouseDown(juce::MouseEvent const& e) {
+    // Arrange mode: begin a move, or a resize if in the bottom-right grip.
+    if (arrange_) {
+        arrangeStartBounds_ = getBounds();
+        arrangeResizing_ = e.x >= getWidth() - 14 && e.y >= getHeight() - 14;
+        return;
+    }
+
     std::lock_guard<std::mutex> lock(ui_.mtx);
     UIWidget* wp = ui_.findById(id_);
     if (!wp) return;
@@ -598,6 +620,18 @@ void WidgetComponent::mouseDown(juce::MouseEvent const& e) {
 }
 
 void WidgetComponent::mouseDrag(juce::MouseEvent const& e) {
+    if (arrange_) {
+        int dx = e.getDistanceFromDragStartX(), dy = e.getDistanceFromDragStartY();
+        if (arrangeResizing_) {
+            setSize(std::max(24, arrangeStartBounds_.getWidth() + dx),
+                    std::max(14, arrangeStartBounds_.getHeight() + dy));
+        } else {
+            setTopLeftPosition(
+                std::max(0, arrangeStartBounds_.getX() + dx),
+                std::max(canvasTop_, arrangeStartBounds_.getY() + dy));
+        }
+        return;
+    }
     if (!dragging_) return;
     std::lock_guard<std::mutex> lock(ui_.mtx);
     UIWidget* wp = ui_.findById(id_);
@@ -673,6 +707,24 @@ void WidgetComponent::mouseDrag(juce::MouseEvent const& e) {
 }
 
 void WidgetComponent::mouseUp(juce::MouseEvent const&) {
+    if (arrange_) {
+        // Snap to the 8px grid and write the frame back to the registry.
+        auto snap = [](int v) { return (v + 4) / 8 * 8; };
+        int nx = std::max(0, snap(getX()));
+        int ny = std::max(0, snap(getY() - canvasTop_));
+        setTopLeftPosition(nx, ny + canvasTop_);
+        {
+            std::lock_guard<std::mutex> lock(ui_.mtx);
+            if (auto* wp = ui_.findById(id_)) {
+                wp->fx = (float)nx;
+                wp->fy = (float)ny;
+                wp->fw = (float)getWidth();
+                wp->fh = (float)getHeight();
+            }
+        }
+        if (onArrangeEnd) onArrangeEnd();
+        return;
+    }
     if (!dragging_) return;
     dragging_ = false;
     matrixPaintValue_ = -1;
@@ -716,6 +768,7 @@ void WidgetComponent::mouseWheelMove(juce::MouseEvent const& e,
     // Pushing the wheel up RAISES the value (matches the ImGui app, whose
     // handler subtracts the +up wheel delta from the position). Non-adjustable
     // kinds pass the event through so an enclosing viewport can scroll.
+    if (arrange_) { juce::Component::mouseWheelMove(e, wheel); return; }
     constexpr float kStep = 0.06f;
     std::lock_guard<std::mutex> lock(ui_.mtx);
     UIWidget* wp = ui_.findById(id_);
@@ -838,6 +891,7 @@ bool WidgetComponent::keyPressed(juce::KeyPress const& key) {
 }
 
 void WidgetComponent::mouseEnter(juce::MouseEvent const&) {
+    if (arrange_) return;
     // Take keyboard focus so hover-keys reach this widget -- but never steal
     // it from an editor/text field the user is typing in.
     if (isHoverAdjustable()) {

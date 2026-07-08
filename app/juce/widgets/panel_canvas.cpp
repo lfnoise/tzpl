@@ -121,6 +121,11 @@ bool PanelCanvas::reconcile() {
         auto& slot = widgets_[id];
         if (!slot) {
             slot = std::make_unique<WidgetComponent>(ui_, id, dispatcher_);
+            slot->onArrangeEnd = [this] {
+                layOutWidgets();
+                if (onArrangeCommit) onArrangeCommit();
+            };
+            slot->setArrange(arrange_, contentTop());
             addChildComponent(*slot);
         } else {
             slot->refreshMeta();
@@ -163,22 +168,59 @@ std::vector<std::uint64_t> const& PanelCanvas::visibleIds() const {
     return it == pageIds_.end() ? empty : it->second;
 }
 
+int PanelCanvas::contentTop() const {
+    return pages_.size() > 1 ? kTabH + kGap : kGap;
+}
+
+// Slider-likes stretch to the panel width when flowing; others keep size.
+static bool stretchKind(bridge::UIWidgetKind k) {
+    switch (k) {
+        case bridge::UIWidgetKind::Slider:
+        case bridge::UIWidgetKind::Range:
+        case bridge::UIWidgetKind::Meter:
+        case bridge::UIWidgetKind::MultiSlider:
+        case bridge::UIWidgetKind::Scope:
+        case bridge::UIWidgetKind::Plot:
+        case bridge::UIWidgetKind::Waveform:
+        case bridge::UIWidgetKind::Label:
+            return true;
+        default:
+            return false;
+    }
+}
+
 int PanelCanvas::preferredHeight(int width) const {
-    int y = pages_.size() > 1 ? kTabH + kGap : kGap;
+    int top = contentTop();
+    int flowBottom = top, absBottom = top;
+    std::lock_guard<std::mutex> lock(ui_.mtx);
     for (auto id : visibleIds()) {
         auto it = widgets_.find(id);
         if (it == widgets_.end()) continue;
-        y += it->second->preferredSize().y + kGap;
+        auto pref = it->second->preferredSize();
+        auto* uw = ui_.findById(id);
+        if (uw && uw->fx >= 0.0f) {
+            int fh = uw->fh > 0.0f ? (int)uw->fh : pref.y;
+            absBottom = std::max(absBottom, top + (int)uw->fy + fh);
+        } else {
+            flowBottom += pref.y + kGap;
+        }
     }
     juce::ignoreUnused(width);
-    return std::max(y, 40);
+    return std::max({ 40, flowBottom, absBottom + kGap });
 }
 
 void PanelCanvas::resized() { layOutWidgets(); }
 
+void PanelCanvas::setArrange(bool on) {
+    arrange_ = on;
+    int top = contentTop();
+    for (auto& [id, comp] : widgets_) comp->setArrange(on, top);
+    if (auto* p = getParentComponent()) p->resized();
+    repaint();
+}
+
 void PanelCanvas::layOutWidgets() {
     int w = getWidth();
-    int y = kGap;
     if (pages_.size() > 1) {
         int x = kGap;
         for (auto& b : tabButtons_) {
@@ -186,8 +228,8 @@ void PanelCanvas::layOutWidgets() {
             b->setBounds(x, kGap / 2, tw, kTabH - 4);
             x += tw + 4;
         }
-        y = kTabH + kGap;
     }
+    int top = contentTop();
     // Show only the selected page's widgets; hide the rest.
     auto const& vis = visibleIds();
     std::unordered_map<std::uint64_t, bool> shown;
@@ -195,29 +237,27 @@ void PanelCanvas::layOutWidgets() {
     for (auto& [id, comp] : widgets_)
         if (!shown.count(id)) comp->setVisible(false);
 
+    int flowY = top;
+    std::lock_guard<std::mutex> lock(ui_.mtx);
     for (auto id : vis) {
         auto it = widgets_.find(id);
         if (it == widgets_.end()) continue;
         it->second->setVisible(true);
         auto pref = it->second->preferredSize();
-        int cw = pref.x;
-        // Slider-likes stretch to the panel width (capped); others keep size.
-        switch (it->second->kind()) {
-            case bridge::UIWidgetKind::Slider:
-            case bridge::UIWidgetKind::Range:
-            case bridge::UIWidgetKind::Meter:
-            case bridge::UIWidgetKind::MultiSlider:
-            case bridge::UIWidgetKind::Scope:
-            case bridge::UIWidgetKind::Plot:
-            case bridge::UIWidgetKind::Waveform:
-            case bridge::UIWidgetKind::Label:
-                cw = std::min(w - 2 * kGap, kFullWidthMax);
-                break;
-            default:
-                break;
+        int cw = stretchKind(it->second->kind())
+                     ? std::min(w - 2 * kGap, kFullWidthMax) : pref.x;
+        auto* uw = ui_.findById(id);
+        if (uw && uw->fx >= 0.0f) {
+            // Placed (arranged): absolute frame, fw/fh default to preferred.
+            int fw = uw->fw > 0.0f ? (int)uw->fw : cw;
+            int fh = uw->fh > 0.0f ? (int)uw->fh : pref.y;
+            it->second->setBounds((int)uw->fx, top + (int)uw->fy,
+                                  std::max(fw, 24), std::max(fh, 14));
+        } else {
+            // Unplaced: flow top to bottom.
+            it->second->setBounds(kGap, flowY, std::max(cw, 40), pref.y);
+            flowY += pref.y + kGap;
         }
-        it->second->setBounds(kGap, y, std::max(cw, 40), pref.y);
-        y += pref.y + kGap;
     }
 }
 

@@ -90,6 +90,7 @@ public:
     std::function<void(bool)> onCollapse;   // new collapsed state
     std::function<void()> onFocused;        // editor gained focus
     std::function<void()> onTextChanged;
+    std::function<void()> onArrangeCommit;  // panel arrange gesture ended
 
     // Presets cell callbacks (index into the cell's preset bank).
     std::function<void()> onPresetStore;
@@ -122,6 +123,8 @@ private:
     // Header
     juce::Label kindLabel_;
     juce::TextButton runButton_ { "Run" };
+    juce::TextButton arrangeButton_ { "arrange" };
+    bool arrangeOn_ = false;
     juce::TextButton collapseButton_ { "-" };
     juce::TextButton upButton_ { "^" };
     juce::TextButton downButton_ { "v" };

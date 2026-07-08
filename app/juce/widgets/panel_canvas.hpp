@@ -58,9 +58,17 @@ public:
     // set of widgets changed (host may need to relayout for a new height).
     bool reconcile();
 
+    // Arrange mode: widgets become drag/resizable (writing fx/fy/fw/fh).
+    void setArrange(bool on);
+    bool isArranging() const { return arrange_; }
+    // Invoked once when an arrange gesture ends, so the host can commit a
+    // history node (the widget frames just changed).
+    std::function<void()> onArrangeCommit;
+
 private:
     void timerCallback() override;
     void layOutWidgets();
+    int contentTop() const;   // y where widgets start (below any tab strip)
     void rebuildTabs();
     // The panel's pages: "(main)" for the bare root, one per sub-panel
     // "root/sub". Fills pages_/pageIds_ under the lock; returns the union of
@@ -84,6 +92,7 @@ private:
     std::unordered_map<std::string, std::vector<std::uint64_t>> pageIds_;
     int selectedPage_ = 0;
     std::vector<std::unique_ptr<juce::TextButton>> tabButtons_;
+    bool arrange_ = false;
     // Last-painted values per widget, so external mutations (preset recall,
     // undo/redo, key bindings) that don't pass through this component's own
     // mouse handlers still trigger a repaint. Retained-mode's answer to the

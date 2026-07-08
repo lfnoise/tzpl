@@ -197,6 +197,14 @@ void NotebookView::rebuildCells() {
             };
             slot->onTextChanged = [this] { relayoutContent(); };
 
+            // Arrange: a widget was moved/resized -- commit the new frames.
+            slot->onArrangeCommit = [this] {
+                store_.setWidgetSnap(doc::captureWidgets(
+                    appCtx_.uiState, claimedPanels(),
+                    store_.snapshot()->widgets.get()));
+                store_.commit("arrange");
+            };
+
             // Presets: capture/recall operate on the live widget registry
             // and commit a history node (recall changes control values).
             slot->onPresetStore = [this, cid] {
