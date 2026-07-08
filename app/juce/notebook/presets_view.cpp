@@ -39,7 +39,10 @@ public:
 }
 
 PresetsView::PresetsView() {
-    storeButton_.onClick = [this] { if (onStore) onStore(); };
+    storeButton_.onClick = [this] {
+        selectLastOnStore_ = true;   // select the new slot when the model syncs
+        if (onStore) onStore();
+    };
     overwriteButton_.onClick = [this] {
         if (selected_ >= 0 && onOverwrite) onOverwrite(selected_);
     };
@@ -68,7 +71,12 @@ void PresetsView::setPresets(
     names_.clear();
     for (auto const& p : presets)
         names_.push_back(String(p ? p->name : std::string()));
-    if (selected_ >= (int)names_.size()) selected_ = -1;
+    if (selectLastOnStore_) {
+        selected_ = (int)names_.size() - 1;   // the just-stored slot
+        selectLastOnStore_ = false;
+    } else if (selected_ >= (int)names_.size()) {
+        selected_ = -1;
+    }
     rebuildSlots();
 }
 
@@ -78,19 +86,30 @@ void PresetsView::rebuildSlots() {
         auto b = std::make_unique<SlotButton>();
         b->setButtonText(names_[(size_t)i].isEmpty() ? String(i + 1)
                                                      : names_[(size_t)i]);
-        b->setColour(juce::TextButton::buttonColourId,
-                     i == selected_ ? juce::Colour(0xff4a70a0)
-                                    : juce::Colour(0x30ffffff));
         b->onSlotDown = [this, i](juce::ModifierKeys mods) {
-            select(i);
-            if (mods.isPopupMenu() || mods.isCommandDown())
+            // Recall / menu BEFORE changing selection; select() only
+            // recolours (it must not recreate this very button mid-click).
+            if (mods.isPopupMenu() || mods.isCommandDown()) {
+                select(i);
                 showSlotMenu(i);
-            else if (onRecall)
-                onRecall(i);
+            } else {
+                select(i);
+                if (onRecall) onRecall(i);
+            }
         };
         addAndMakeVisible(*b);
         slotButtons_.push_back(std::move(b));
     }
+    updateSelectionUI();
+}
+
+// Recolour the slots and toggle the top row for the current selection.
+// Does NOT recreate buttons, so it is safe to call from a slot's own click.
+void PresetsView::updateSelectionUI() {
+    for (int i = 0; i < (int)slotButtons_.size(); ++i)
+        slotButtons_[(size_t)i]->setColour(
+            juce::TextButton::buttonColourId,
+            i == selected_ ? juce::Colour(0xff4a70a0) : juce::Colour(0x30ffffff));
 
     bool hasSel = selected_ >= 0 && selected_ < (int)names_.size();
     overwriteButton_.setVisible(hasSel);
@@ -112,7 +131,7 @@ void PresetsView::rebuildSlots() {
 void PresetsView::select(int idx) {
     if (selected_ == idx) return;
     selected_ = idx;
-    rebuildSlots();
+    updateSelectionUI();
 }
 
 void PresetsView::commitRename() {

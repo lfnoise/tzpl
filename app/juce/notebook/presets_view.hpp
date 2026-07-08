@@ -65,6 +65,7 @@ private:
 
     void rebuildSlots();
     void layOutSlots();
+    void updateSelectionUI();   // recolour slots + top row for selected_
     void select(int idx);
     void showSlotMenu(int idx);
     void commitRename();
@@ -72,6 +73,7 @@ private:
     std::vector<juce::String> names_;          // one per slot (may be empty)
     std::vector<std::unique_ptr<juce::TextButton>> slotButtons_;
     int selected_ = -1;
+    bool selectLastOnStore_ = false;           // "+ store" selects the new slot
 
     // Top control row.
     juce::TextButton storeButton_ { "+ store" };
