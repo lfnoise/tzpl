@@ -46,7 +46,12 @@ static bridge::AppContext* gAppContext = nullptr;
 class AppMenuModel : public juce::MenuBarModel {
 public:
     explicit AppMenuModel(juce::ApplicationCommandManager& commands)
-        : commands_(commands) {}
+        : commands_(commands) {
+        // Rebuild the menus (and their check marks) whenever a command's
+        // state changes -- e.g. commandStatusChanged() after a font/theme
+        // pick. Without this the ticks freeze at their first-built values.
+        setApplicationCommandManagerToWatch(&commands_);
+    }
 
     juce::StringArray getMenuBarNames() override {
         return { "File", "Edit", "Find", "View" };
