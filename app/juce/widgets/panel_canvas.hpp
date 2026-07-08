@@ -34,6 +34,7 @@
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 namespace bridge { struct UIState; }
 
@@ -60,6 +61,13 @@ public:
 private:
     void timerCallback() override;
     void layOutWidgets();
+    void rebuildTabs();
+    // The panel's pages: "(main)" for the bare root, one per sub-panel
+    // "root/sub". Fills pages_/pageIds_ under the lock; returns the union of
+    // ids (for component create/remove).
+    std::vector<std::uint64_t> gatherPages();
+    // The ids of the currently selected page, in layout order.
+    std::vector<std::uint64_t> const& visibleIds() const;
 
     bridge::UIState& ui_;
     std::string panel_;
@@ -67,6 +75,15 @@ private:
     // id -> component, plus the seq-ordered id list from the last reconcile.
     std::unordered_map<std::uint64_t, std::unique_ptr<WidgetComponent>> widgets_;
     std::vector<std::uint64_t> order_;
+
+    // Sub-panel tabs. pages_[i] is a full panel name (== panel_ for the bare
+    // root page); pageIds_ maps each to its widgets in seq order. When more
+    // than one page exists a tab strip shows and only the selected page lays
+    // out. Selection is view state.
+    std::vector<std::string> pages_;
+    std::unordered_map<std::string, std::vector<std::uint64_t>> pageIds_;
+    int selectedPage_ = 0;
+    std::vector<std::unique_ptr<juce::TextButton>> tabButtons_;
     // Last-painted values per widget, so external mutations (preset recall,
     // undo/redo, key bindings) that don't pass through this component's own
     // mouse handlers still trigger a repaint. Retained-mode's answer to the

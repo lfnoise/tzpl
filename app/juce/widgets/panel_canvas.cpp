@@ -29,6 +29,7 @@ namespace tzplapp {
 namespace {
 constexpr int kGap = 6;
 constexpr int kFullWidthMax = 520; // slider-likes stretch up to this
+constexpr int kTabH = 24;          // sub-panel tab strip height
 }
 
 PanelCanvas::PanelCanvas(bridge::UIState& ui, std::string panel,
@@ -64,20 +65,45 @@ void PanelCanvas::timerCallback() {
             it->second->repaint();
 }
 
-bool PanelCanvas::reconcile() {
-    std::vector<std::uint64_t> ids;
+std::vector<std::uint64_t> PanelCanvas::gatherPages() {
+    // Distinct pages: the bare root ("(main)") if any widget targets the panel
+    // exactly, plus one page per sub-panel "root/sub", in first-appearance
+    // order. Mirrors NotebookPanel::drawPanelCanvas.
+    std::vector<std::string> pages;
+    std::unordered_map<std::string, std::vector<std::pair<std::uint64_t,
+                                                          std::uint64_t>>> seqById;
+    std::vector<std::uint64_t> unionIds;
     {
         std::lock_guard<std::mutex> lock(ui_.mtx);
-        // Collect this panel's widget ids in seq order.
-        std::vector<std::pair<std::uint64_t, std::uint64_t>> seqId; // (seq, id)
-        for (auto& wp : ui_.widgets)
-            if (bridge::panelUnderRoot(wp->panel, panel_))
-                seqId.push_back({ wp->seq, wp->id });
-        std::sort(seqId.begin(), seqId.end());
-        for (auto& [seq, id] : seqId) ids.push_back(id);
+        bool bare = false;
+        for (auto& wp : ui_.widgets) {
+            if (!bridge::panelUnderRoot(wp->panel, panel_)) continue;
+            if (wp->panel == panel_) bare = true;
+            else if (std::find(pages.begin(), pages.end(), wp->panel)
+                     == pages.end())
+                pages.push_back(wp->panel);
+            seqById[wp->panel].push_back({ wp->seq, wp->id });
+        }
+        if (bare || pages.empty())
+            pages.insert(pages.begin(), panel_);
     }
 
-    bool changed = ids != order_;
+    pages_ = std::move(pages);
+    pageIds_.clear();
+    for (auto& [panel, sv] : seqById) {
+        std::sort(sv.begin(), sv.end());
+        auto& ids = pageIds_[panel];
+        for (auto& [seq, id] : sv) { ids.push_back(id); unionIds.push_back(id); }
+    }
+    std::sort(unionIds.begin(), unionIds.end());
+    return unionIds;
+}
+
+bool PanelCanvas::reconcile() {
+    auto prevPages = pages_;
+    std::vector<std::uint64_t> ids = gatherPages();
+
+    bool changed = ids != order_ || pages_ != prevPages;
 
     // Remove components whose widget vanished.
     std::unordered_map<std::uint64_t, bool> live;
@@ -91,19 +117,51 @@ bool PanelCanvas::reconcile() {
         auto& slot = widgets_[id];
         if (!slot) {
             slot = std::make_unique<WidgetComponent>(ui_, id, dispatcher_);
-            addAndMakeVisible(*slot);
+            addChildComponent(*slot);
         } else {
             slot->refreshMeta();
         }
     }
     order_ = ids;
-    if (changed) layOutWidgets();
+    if (selectedPage_ >= (int)pages_.size()) selectedPage_ = 0;
+    if (changed) { rebuildTabs(); layOutWidgets(); }
     return changed;
 }
 
+void PanelCanvas::rebuildTabs() {
+    tabButtons_.clear();
+    if (pages_.size() <= 1) return;
+    for (int i = 0; i < (int)pages_.size(); ++i) {
+        auto const& p = pages_[(size_t)i];
+        juce::String label = (p == panel_)
+            ? juce::String("main")
+            : juce::String(p.substr(panel_.size() + 1));
+        auto b = std::make_unique<juce::TextButton>(label);
+        b->setColour(juce::TextButton::buttonColourId,
+                     i == selectedPage_ ? juce::Colour(0xff4a70a0)
+                                        : juce::Colour(0x30ffffff));
+        b->onClick = [this, i] {
+            selectedPage_ = i;
+            rebuildTabs();
+            layOutWidgets();
+            if (auto* par = getParentComponent()) par->resized();
+        };
+        addAndMakeVisible(*b);
+        tabButtons_.push_back(std::move(b));
+    }
+}
+
+std::vector<std::uint64_t> const& PanelCanvas::visibleIds() const {
+    static const std::vector<std::uint64_t> empty;
+    if (pages_.empty()) return empty;
+    int p = juce::jlimit(0, (int)pages_.size() - 1, selectedPage_);
+    auto it = pageIds_.find(pages_[(size_t)p]);
+    return it == pageIds_.end() ? empty : it->second;
+}
+
 int PanelCanvas::preferredHeight(int width) const {
-    int y = kGap;
-    for (auto id : order_) {
+    int y = pages_.size() > 1 ? kTabH + kGap : kGap;
+    for (auto id : visibleIds()) {
         auto it = widgets_.find(id);
         if (it == widgets_.end()) continue;
         y += it->second->preferredSize().y + kGap;
@@ -117,9 +175,26 @@ void PanelCanvas::resized() { layOutWidgets(); }
 void PanelCanvas::layOutWidgets() {
     int w = getWidth();
     int y = kGap;
-    for (auto id : order_) {
+    if (pages_.size() > 1) {
+        int x = kGap;
+        for (auto& b : tabButtons_) {
+            int tw = std::max(48, b->getBestWidthForHeight(kTabH - 4));
+            b->setBounds(x, kGap / 2, tw, kTabH - 4);
+            x += tw + 4;
+        }
+        y = kTabH + kGap;
+    }
+    // Show only the selected page's widgets; hide the rest.
+    auto const& vis = visibleIds();
+    std::unordered_map<std::uint64_t, bool> shown;
+    for (auto id : vis) shown[id] = true;
+    for (auto& [id, comp] : widgets_)
+        if (!shown.count(id)) comp->setVisible(false);
+
+    for (auto id : vis) {
         auto it = widgets_.find(id);
         if (it == widgets_.end()) continue;
+        it->second->setVisible(true);
         auto pref = it->second->preferredSize();
         int cw = pref.x;
         // Slider-likes stretch to the panel width (capped); others keep size.
