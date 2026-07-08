@@ -40,7 +40,7 @@ MainComponent::MainComponent(bridge::AppContext& appCtx,
     addAndMakeVisible(console_);
 
     notebook_ = std::make_unique<NotebookView>(
-        appCtx_, guiState_, [this] { return session_.get(); });
+        appCtx_, guiState_, [this] { return session_.get(); }, dispatcher_);
     addChildComponent(*notebook_);
 
     // Vertical split: center pane | resizer | console. Mirrors the ImGui
@@ -144,6 +144,52 @@ void MainComponent::timerCallback() {
     for (auto const& line : guiState_.output.drain())
         console_.appendLine(line);
     if (notebook_) notebook_->pumpRunQueue();
+    refreshControlsWindows();
+}
+
+// A floating window per ui panel not claimed by the shown notebook. Panels
+// the notebook renders inline (its panel cells) are skipped here.
+void MainComponent::refreshControlsWindows() {
+    auto* ui = appCtx_.uiState;
+    if (!ui) return;
+
+    std::vector<std::string> claimed;
+    if (notebookVisible_ && notebook_) claimed = notebook_->claimedPanels();
+
+    // Distinct root panels present in the registry, minus claimed ones.
+    std::vector<std::string> wanted;
+    {
+        std::lock_guard<std::mutex> lock(ui->mtx);
+        for (auto& w : ui->widgets) {
+            bool skip = false;
+            for (auto const& root : claimed)
+                if (bridge::panelUnderRoot(w->panel, root)) { skip = true; break; }
+            if (skip) continue;
+            // Reduce sub-panels ("root/x") to their root for one window.
+            std::string root = w->panel;
+            auto slash = root.find('/');
+            if (slash != std::string::npos) root = root.substr(0, slash);
+            if (std::find(wanted.begin(), wanted.end(), root) == wanted.end())
+                wanted.push_back(root);
+        }
+    }
+
+    // Close windows whose panel is gone or now claimed.
+    for (auto it = controlsWindows_.begin(); it != controlsWindows_.end();) {
+        if (std::find(wanted.begin(), wanted.end(), it->first) == wanted.end())
+            it = controlsWindows_.erase(it);
+        else ++it;
+    }
+    // Open windows for new panels.
+    for (auto const& panel : wanted) {
+        if (controlsWindows_.count(panel)) continue;
+        auto win = std::make_unique<ControlsWindow>(*ui, panel, dispatcher_);
+        win->onClose = [this, panel] {
+            dispatcher_.queuePanelRemoval({ panel });
+            controlsWindows_.erase(panel);
+        };
+        controlsWindows_[panel] = std::move(win);
+    }
 }
 
 void MainComponent::logLine(String const& line) {
@@ -672,6 +718,28 @@ void MainComponent::testTypeIntoEditor(String const& text) {
 bool MainComponent::testEvalCollected() const {
     auto& ae = guiState_.asyncEval;
     return !ae.busy() && !ae.threadActive_;
+}
+
+int MainComponent::testWidgetCount() const {
+    auto* ui = appCtx_.uiState;
+    if (!ui) return 0;
+    std::lock_guard<std::mutex> lock(ui->mtx);
+    return (int)ui->widgets.size();
+}
+
+double MainComponent::testDriveFirstSlider() {
+    auto* ui = appCtx_.uiState;
+    if (!ui) return -1.0;
+    std::lock_guard<std::mutex> lock(ui->mtx);
+    for (auto& w : ui->widgets) {
+        if (w->kind == bridge::UIWidgetKind::Slider) {
+            if (w->values.empty()) w->values.resize(1);
+            w->values[0] = w->spec.map(0.75);
+            w->dirtyEngine = true;
+            return w->values[0];
+        }
+    }
+    return -1.0;
 }
 
 void MainComponent::testShowDemo(String const& which) {

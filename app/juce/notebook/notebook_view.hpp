@@ -43,11 +43,14 @@ namespace ts { class REPLSession; }
 
 namespace tzplapp {
 
+class ControlsDispatcher;
+
 class NotebookView : public juce::Component,
                      private juce::FocusChangeListener {
 public:
     NotebookView(bridge::AppContext& appCtx, GuiState& guiState,
-                 std::function<ts::REPLSession*()> session);
+                 std::function<ts::REPLSession*()> session,
+                 ControlsDispatcher& dispatcher);
     ~NotebookView() override;
 
     void resized() override;
@@ -103,6 +106,7 @@ private:
     bridge::AppContext& appCtx_;
     GuiState& guiState_;
     std::function<ts::REPLSession*()> session_;
+    ControlsDispatcher& dispatcher_;
     TzplTokeniser tokeniser_;
 
     doc::DocumentStore store_;

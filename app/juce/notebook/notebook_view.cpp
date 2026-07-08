@@ -32,8 +32,10 @@ using doc::CellId;
 using doc::CellKind;
 
 NotebookView::NotebookView(bridge::AppContext& appCtx, GuiState& guiState,
-                           std::function<ts::REPLSession*()> session)
-    : appCtx_(appCtx), guiState_(guiState), session_(std::move(session))
+                           std::function<ts::REPLSession*()> session,
+                           ControlsDispatcher& dispatcher)
+    : appCtx_(appCtx), guiState_(guiState), session_(std::move(session)),
+      dispatcher_(dispatcher)
 {
     addCodeButton_.onClick  = [this] { addCell(CellKind::Code); };
     addProseButton_.onClick = [this] { addCell(CellKind::Prose); };
@@ -169,7 +171,8 @@ void NotebookView::rebuildCells() {
     for (auto const& cell : snap->cells) {
         auto& slot = cells_[cell->id];
         if (!slot) {
-            slot = std::make_unique<CellComponent>(cell->id, tokeniser_, fontSize_);
+            slot = std::make_unique<CellComponent>(
+                cell->id, tokeniser_, fontSize_, appCtx_.uiState, &dispatcher_);
             CellId cid = cell->id;
             slot->onRun = [this, cid] { selectCell(cid); launchCell(cid); };
             slot->onDelete = [this, cid] {

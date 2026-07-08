@@ -42,8 +42,10 @@ CellComponent::~CellComponent() {
 }
 
 CellComponent::CellComponent(doc::CellId id, TzplTokeniser& tokeniser,
-                             float fontSize)
-    : id_(id), tokeniser_(tokeniser), fontSize_(fontSize)
+                             float fontSize, bridge::UIState* ui,
+                             ControlsDispatcher* dispatcher)
+    : id_(id), tokeniser_(tokeniser), fontSize_(fontSize),
+      ui_(ui), dispatcher_(dispatcher)
 {
     kindLabel_.setFont(juce::FontOptions(11.0f));
     kindLabel_.setColour(juce::Label::textColourId, juce::Colour(0xff909090));
@@ -95,10 +97,19 @@ void CellComponent::buildForKind(doc::CellKind kind) {
     if (kind == doc::CellKind::Code) addAndMakeVisible(output_);
     else                            output_.setVisible(false);
 
-    if (kind == doc::CellKind::Panel || kind == doc::CellKind::Presets) {
-        placeholder_.setText(String(kindName(kind)).toUpperCase()
-                                 + " cell -- widgets arrive in M4/M5",
-                             juce::dontSendNotification);
+    if (kind == doc::CellKind::Panel && ui_ && dispatcher_) {
+        // Panel cells render the panel's live widgets inline. The exact
+        // panel name is set in syncFromModel (cell.name); rebuild here with
+        // an empty name and let reconcile pick up widgets after the name is
+        // known.
+        panelCanvas_.reset();
+        placeholder_.setVisible(false);
+    } else if (kind == doc::CellKind::Panel || kind == doc::CellKind::Presets) {
+        placeholder_.setText(
+            kind == doc::CellKind::Presets
+                ? String("PRESETS cell -- arrives in M5")
+                : String("PANEL cell -- no live widgets"),
+            juce::dontSendNotification);
         addAndMakeVisible(placeholder_);
     } else {
         placeholder_.setVisible(false);
@@ -113,8 +124,19 @@ void CellComponent::syncFromModel(doc::Cell const& cell) {
     collapsed_ = cell.collapsed;
     collapseButton_.setButtonText(collapsed_ ? "+" : "-");
 
-    if (kind_ == doc::CellKind::Panel)
-        kindLabel_.setText(String("panel: ") + cell.name, juce::dontSendNotification);
+    if (kind_ == doc::CellKind::Panel) {
+        kindLabel_.setText(String("panel: ") + cell.name,
+                           juce::dontSendNotification);
+        // (Re)build the live canvas once the panel name is known.
+        if (ui_ && dispatcher_
+            && (!panelCanvas_ || panelName_ != String(cell.name))) {
+            panelName_ = String(cell.name);
+            panelCanvas_ = std::make_unique<PanelCanvas>(*ui_, cell.name,
+                                                         *dispatcher_);
+            addAndMakeVisible(*panelCanvas_);
+            resized();
+        }
+    }
 
     // Only replace editor text when it actually differs, to avoid stomping
     // in-progress typing / resetting the caret.
@@ -183,7 +205,9 @@ int CellComponent::preferredHeight(int width) const {
         int outLines = juce::jmin(12, (int)outputLines_.size());
         h += kPad + lineH * (outLines + 1);
     }
-    if (kind_ == doc::CellKind::Panel || kind_ == doc::CellKind::Presets)
+    if (kind_ == doc::CellKind::Panel && panelCanvas_)
+        h += panelCanvas_->preferredHeight(width);
+    else if (kind_ == doc::CellKind::Panel || kind_ == doc::CellKind::Presets)
         h += 80;
     return h + kPad;
 }
@@ -201,6 +225,8 @@ void CellComponent::resized() {
     }
     if (editor_)
         editor_->setBounds(r);
+    else if (panelCanvas_)
+        panelCanvas_->setBounds(r);
     else if (placeholder_.isVisible())
         placeholder_.setBounds(r);
 }

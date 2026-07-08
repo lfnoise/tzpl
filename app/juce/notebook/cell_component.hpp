@@ -31,17 +31,26 @@
 #include "gui_state.hpp"
 #include "../editor_pane.hpp"      // TzplCodeEditor
 #include "../tzpl_tokeniser.hpp"
+#include "../widgets/panel_canvas.hpp"
 #include <juce_gui_extra/juce_gui_extra.h>
 #include <functional>
 #include <memory>
 #include <vector>
 
+namespace bridge { struct UIState; }
+
 namespace tzplapp {
+
+class ControlsDispatcher;
 
 class CellComponent : public juce::Component,
                       private juce::CodeDocument::Listener {
 public:
-    CellComponent(doc::CellId id, TzplTokeniser& tokeniser, float fontSize);
+    // ui/dispatcher are non-null only for hosts that render panel cells
+    // (the notebook); null elsewhere (panel cells fall back to a label).
+    CellComponent(doc::CellId id, TzplTokeniser& tokeniser, float fontSize,
+                  bridge::UIState* ui = nullptr,
+                  ControlsDispatcher* dispatcher = nullptr);
     ~CellComponent() override;
 
     doc::CellId cellId() const { return id_; }
@@ -94,7 +103,10 @@ private:
     doc::CellId id_;
     TzplTokeniser& tokeniser_;
     float fontSize_;
+    bridge::UIState* ui_ = nullptr;
+    ControlsDispatcher* dispatcher_ = nullptr;
     doc::CellKind kind_ = doc::CellKind::Code;
+    juce::String panelName_;           // Panel cells: canvas panel name
     bool collapsed_ = false;
     bool selected_ = false;
 
@@ -110,7 +122,8 @@ private:
     std::unique_ptr<juce::CodeDocument> codeDoc_;
     std::unique_ptr<TzplCodeEditor> editor_;
     juce::TextEditor output_;          // Code cells
-    juce::Label placeholder_;          // Panel/Presets cells
+    juce::Label placeholder_;          // Presets cells (+ panel w/o registry)
+    std::unique_ptr<PanelCanvas> panelCanvas_; // Panel cells
     std::vector<OutputLine> outputLines_;
 
     static constexpr int kHeaderH = 22;

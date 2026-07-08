@@ -210,8 +210,15 @@ public:
         // TZPL_JUCE_OPEN=<path>: open a file in the editor at startup
         // (testing hook -- a plain file argument is *evaluated*, like the
         // ImGui app).
-        if (auto* p = std::getenv("TZPL_JUCE_OPEN"))
+        if (auto* p = std::getenv("TZPL_JUCE_OPEN")) {
             window_->mainComponent()->testOpenFile(juce::File(juce::String(p)));
+            // TZPL_JUCE_EVAL=1: evaluate the just-opened file (creates ui
+            // widgets etc.) shortly after the window is up.
+            if (std::getenv("TZPL_JUCE_EVAL"))
+                juce::Timer::callAfterDelay(300, [this] {
+                    commands_.invokeDirectly(cmd::evalFile, false);
+                });
+        }
 
         // TZPL_JUCE_DEMO=find|flash: open a visual state at startup so it can
         // be screenshotted without injecting global keystrokes.
@@ -324,11 +331,29 @@ public:
                 main->testNotebook().testTypeIntoFocusedCell("6 * 7;");
                 commands_.invokeDirectly(cmd::evalSelection, false);
                 evalPollsLeft_ = 100;
-            } else {
+            } else if (evalPhase_ == 2) {
                 auto out = main->testNotebook().testFocusedCellOutput();
                 std::printf("SELFTEST NOTEBOOK %s: %s\n",
                             out.contains("42") ? "OK" : "FAILED",
                             out.toRawUTF8());
+                std::fflush(stdout);
+                // Widgets: eval a panel + slider in the editor, then check
+                // the registry and drive a slider through the UIState path.
+                evalPhase_ = 3;
+                main->testShowNotebook(false);
+                main->testEditorPane().newTab("widgettest.x");
+                main->testTypeIntoEditor(
+                    "import ui.*;\npanel(\"t\");\n"
+                    "slider(\"a\", 0.0, 1.0, 0.5);\n"
+                    "slider(\"b\", 0.0, 10.0, 5.0)");
+                commands_.invokeDirectly(cmd::evalFile, false);
+                evalPollsLeft_ = 100;
+            } else {
+                int n = main->testWidgetCount();
+                double v = main->testDriveFirstSlider();
+                bool ok = n >= 2 && v == 0.75; // slider "a": map(0.75) on [0,1]
+                std::printf("SELFTEST WIDGETS %s: count=%d sliderVal=%.4g\n",
+                            ok ? "OK" : "FAILED", n, v);
                 std::fflush(stdout);
                 quit();
                 return;

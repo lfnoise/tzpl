@@ -30,8 +30,11 @@
 #include "editor_pane.hpp"
 #include "output_console.hpp"
 #include "notebook/notebook_view.hpp"
+#include "widgets/controls_dispatch.hpp"
+#include "widgets/controls_window.hpp"
 #include "gui_state.hpp"
 #include "tzpl_look_and_feel.hpp"
+#include <map>
 #include <juce_gui_extra/juce_gui_extra.h>
 #include <functional>
 
@@ -82,6 +85,10 @@ public:
     void testShowDemo(juce::String const& which);
     void testShowNotebook(bool show) { showNotebook(show); }
     NotebookView& testNotebook() { return *notebook_; }
+    int testWidgetCount() const;
+    // Nudge the first slider in the registry and return its new value
+    // (exercises the WidgetComponent->UIState->dispatcher path).
+    double testDriveFirstSlider();
 
 private:
     void applyTheme(int themeIdx);
@@ -98,6 +105,8 @@ private:
     void launchEval(juce::String const& code, int flashStart, int flashEnd);
     void collectEvalResult();
     void timerCallback() override; // print-drain coordinator
+    // Show a floating window per ui panel not claimed by the open notebook.
+    void refreshControlsWindows();
 
     bridge::AppContext& appCtx_;
     juce::ApplicationCommandManager& commands_;
@@ -106,6 +115,7 @@ private:
 
     GuiState guiState_;
     std::unique_ptr<ts::REPLSession> session_;
+    ControlsDispatcher dispatcher_ { appCtx_ };
 
     EditorPane editorPane_;
     std::unique_ptr<NotebookView> notebook_;
@@ -115,6 +125,7 @@ private:
     std::unique_ptr<juce::StretchableLayoutResizerBar> resizer_;
 
     std::unique_ptr<juce::FileChooser> fileChooser_;
+    std::map<std::string, std::unique_ptr<ControlsWindow>> controlsWindows_;
     int fontIndex_ = 0;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MainComponent)

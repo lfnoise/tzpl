@@ -1,0 +1,58 @@
+// Tzopilotl
+// Copyright (C) 2026 James McCartney
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+//
+//  controls_window.cpp
+//  app (JUCE)
+//
+
+#include "controls_window.hpp"
+
+namespace tzplapp {
+
+using juce::String;
+
+ControlsWindow::Content::Content(bridge::UIState& ui, std::string const& panel,
+                                 ControlsDispatcher& d)
+    : canvas_(ui, panel, d)
+{
+    viewport_.setViewedComponent(&canvas_, false);
+    viewport_.setScrollBarsShown(true, false);
+    addAndMakeVisible(viewport_);
+}
+
+void ControlsWindow::Content::resized() {
+    viewport_.setBounds(getLocalBounds());
+    canvas_.setSize(viewport_.getMaximumVisibleWidth(),
+                    juce::jmax(canvas_.preferredHeight(getWidth()),
+                               viewport_.getHeight()));
+}
+
+ControlsWindow::ControlsWindow(bridge::UIState& ui, std::string const& panel,
+                               ControlsDispatcher& dispatcher)
+    : juce::DocumentWindow(panel.empty() ? "Controls" : String(panel),
+                           juce::Colours::darkgrey,
+                           juce::DocumentWindow::closeButton),
+      panel_(panel)
+{
+    setUsingNativeTitleBar(true);
+    setResizable(true, false);
+    setContentOwned(new Content(ui, panel, dispatcher), false);
+    centreWithSize(440, 300);
+    setVisible(true);
+}
+
+}
