@@ -197,6 +197,14 @@ void NotebookView::rebuildCells() {
             };
             slot->onTextChanged = [this] { relayoutContent(); };
 
+            // Editable cell name (Code label / Panel target name).
+            slot->onRenameCell = [this, cid](juce::String name) {
+                auto cell = store_.cell(cid);
+                if (!cell || cell->name == name.toStdString()) return;
+                store_.setCellName(cid, name.toStdString());
+                rebuildCells();  // repoints a Panel cell's canvas
+            };
+
             // Arrange: a widget was moved/resized -- commit the new frames.
             slot->onArrangeCommit = [this] {
                 store_.setWidgetSnap(doc::captureWidgets(

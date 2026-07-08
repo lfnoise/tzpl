@@ -93,12 +93,27 @@ CellComponent::CellComponent(doc::CellId id, TzplTokeniser& tokeniser,
 
     placeholder_.setJustificationType(juce::Justification::centred);
     placeholder_.setColour(juce::Label::textColourId, juce::Colour(0xff808080));
+
+    // Editable name: Code cells store an optional label, Panel cells the
+    // panel name that code targets. Commit on Return / focus-loss.
+    nameField_.setFont(juce::FontOptions(12.0f));
+    nameField_.setTextToShowWhenEmpty("(name)", juce::Colour(0xff707070));
+    nameField_.onReturnKey = [this] { commitCellName(); };
+    nameField_.onFocusLost = [this] { commitCellName(); };
+    addChildComponent(nameField_);
+}
+
+void CellComponent::commitCellName() {
+    if (onRenameCell) onRenameCell(nameField_.getText());
 }
 
 void CellComponent::buildForKind(doc::CellKind kind) {
     kind_ = kind;
     kindLabel_.setText(kindName(kind), juce::dontSendNotification);
     runButton_.setVisible(kind == doc::CellKind::Code);
+    // Code and Panel cells expose an editable name; Prose/Presets don't.
+    nameField_.setVisible(kind == doc::CellKind::Code
+                          || kind == doc::CellKind::Panel);
 
     bool wantsEditor = (kind == doc::CellKind::Prose || kind == doc::CellKind::Code);
     if (wantsEditor && !editor_) {
@@ -156,9 +171,12 @@ void CellComponent::syncFromModel(doc::Cell const& cell) {
 
     collapsed_ = cell.collapsed;
 
+    // Seed the editable name (unless the user is mid-edit in it).
+    if (nameField_.isVisible() && !nameField_.hasKeyboardFocus(true)
+        && nameField_.getText() != String(cell.name))
+        nameField_.setText(cell.name, juce::dontSendNotification);
+
     if (kind_ == doc::CellKind::Panel) {
-        kindLabel_.setText(String("panel: ") + cell.name,
-                           juce::dontSendNotification);
         // (Re)build the live canvas once the panel name is known.
         if (ui_ && dispatcher_
             && (!panelCanvas_ || panelName_ != String(cell.name))) {
@@ -285,20 +303,28 @@ void CellComponent::layOutHeader(juce::Rectangle<int>& r) {
     // Disclosure triangle on the far left.
     collapseButton_.setBounds(header.removeFromLeft(20));
     header.removeFromLeft(2);
+    // Right cluster: delete / down / up (+ arrange for panels).
     deleteButton_.setBounds(header.removeFromRight(24));
     header.removeFromRight(2);
     downButton_.setBounds(header.removeFromRight(24));
     upButton_.setBounds(header.removeFromRight(24));
     header.removeFromRight(4);
-    if (runButton_.isVisible()) {
-        runButton_.setBounds(header.removeFromRight(48));
-        header.removeFromRight(4);
-    }
     if (arrangeButton_.isVisible()) {
         arrangeButton_.setBounds(header.removeFromRight(64));
         header.removeFromRight(4);
     }
-    kindLabel_.setBounds(header);
+    // Left cluster: kind label, then the editable name, then Run to its right.
+    kindLabel_.setBounds(header.removeFromLeft(46));
+    header.removeFromLeft(2);
+    if (nameField_.isVisible()) {
+        int reserve = runButton_.isVisible() ? 52 : 0;
+        int nw = juce::jlimit(60, 200, header.getWidth() - reserve);
+        nameField_.setBounds(header.removeFromLeft(nw).withSizeKeepingCentre(
+            nw, kHeaderH - 2));
+        header.removeFromLeft(4);
+    }
+    if (runButton_.isVisible())
+        runButton_.setBounds(header.removeFromLeft(48));
 }
 
 void CellComponent::paintDisclosure(juce::Graphics& g) const {

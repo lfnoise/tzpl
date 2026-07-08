@@ -91,6 +91,7 @@ public:
     std::function<void()> onFocused;        // editor gained focus
     std::function<void()> onTextChanged;
     std::function<void()> onArrangeCommit;  // panel arrange gesture ended
+    std::function<void(juce::String)> onRenameCell;  // name field committed
 
     // Presets cell callbacks (index into the cell's preset bank).
     std::function<void()> onPresetStore;
@@ -122,6 +123,8 @@ private:
 
     // Header
     juce::Label kindLabel_;
+    juce::TextEditor nameField_;      // Code label / Panel name (editable)
+    void commitCellName();
     juce::TextButton runButton_ { "Run" };
     juce::TextButton arrangeButton_ { "arrange" };
     bool arrangeOn_ = false;

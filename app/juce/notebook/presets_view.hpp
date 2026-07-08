@@ -19,11 +19,10 @@
 //  app (JUCE)
 //
 //  The body of a Presets cell: a bank of stored control snapshots. A slot
-//  grid where click = recall, cmd/right-click = edit menu, plus a top row
-//  to store / overwrite / rename / delete the selected slot. The view holds
-//  only slot names + selection; the Preset data and capture/recall logic
-//  live in NotebookView (which owns the DocumentStore and UIState). This
-//  mirrors ImGui NotebookPanel::drawPresetsCell.
+//  grid where a plain click recalls, and cmd/right-click opens a transient
+//  menu (Rename / Overwrite / Delete) that a click-away dismisses -- so no
+//  destructive control lingers to be hit by a stray click. Rename edits in
+//  place. The Preset data and capture/recall logic live in NotebookView.
 //
 
 #ifndef presets_view_hpp
@@ -41,8 +40,7 @@ class PresetsView : public juce::Component {
 public:
     PresetsView();
 
-    // Reload the slot bank from the model. Preserves the current selection
-    // when still in range, otherwise clears it.
+    // Reload the slot bank from the model.
     void setPresets(
         std::vector<std::shared_ptr<doc::Preset const>> const& presets);
 
@@ -58,29 +56,20 @@ public:
     std::function<void(int)> onDelete;
 
 private:
-    struct Slot {
-        juce::String label;                    // name or 1-based index
-        std::unique_ptr<juce::TextButton> button;
-    };
-
     void rebuildSlots();
     void layOutSlots();
-    void updateSelectionUI();   // recolour slots + top row for selected_
-    void select(int idx);
     void showSlotMenu(int idx);
+    void startRename(int idx);     // inline editor over the slot
     void commitRename();
 
     std::vector<juce::String> names_;          // one per slot (may be empty)
     std::vector<std::unique_ptr<juce::TextButton>> slotButtons_;
-    int selected_ = -1;
-    bool selectLastOnStore_ = false;           // "+ store" selects the new slot
+    bool nameNextStored_ = false;              // "+ store" -> rename new slot
 
-    // Top control row.
     juce::TextButton storeButton_ { "+ store" };
-    juce::TextButton overwriteButton_ { "overwrite" };
-    juce::TextButton deleteButton_ { "delete" };
-    juce::TextEditor nameField_;
     juce::Label hintLabel_;
+    std::unique_ptr<juce::TextEditor> renameEditor_;
+    int renameIndex_ = -1;
 
     static constexpr int kRowH = 24;
     static constexpr int kSlotW = 84;

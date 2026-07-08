@@ -27,8 +27,7 @@ using juce::String;
 
 namespace {
 // A slot button that reports the modifier keys of its press so the view can
-// route plain clicks to recall and cmd/right-clicks to the edit menu (as the
-// ImGui slot matrix does).
+// route plain clicks to recall and cmd/right-clicks to the edit menu.
 class SlotButton : public juce::TextButton {
 public:
     std::function<void(juce::ModifierKeys)> onSlotDown;
@@ -40,25 +39,12 @@ public:
 
 PresetsView::PresetsView() {
     storeButton_.onClick = [this] {
-        selectLastOnStore_ = true;   // select the new slot when the model syncs
+        nameNextStored_ = true;   // pop the rename editor on the new slot
         if (onStore) onStore();
     };
-    overwriteButton_.onClick = [this] {
-        if (selected_ >= 0 && onOverwrite) onOverwrite(selected_);
-    };
-    deleteButton_.onClick = [this] {
-        if (selected_ >= 0 && onDelete) onDelete(selected_);
-    };
-    for (auto* b : { &storeButton_, &overwriteButton_, &deleteButton_ }) {
-        b->setColour(juce::TextButton::buttonColourId, juce::Colour(0x30ffffff));
-        addChildComponent(b);
-    }
+    storeButton_.setColour(juce::TextButton::buttonColourId,
+                           juce::Colour(0x30ffffff));
     addAndMakeVisible(storeButton_);
-
-    nameField_.setTextToShowWhenEmpty("(name)", juce::Colour(0xff707070));
-    nameField_.onReturnKey  = [this] { commitRename(); };
-    nameField_.onFocusLost  = [this] { commitRename(); };
-    addChildComponent(nameField_);
 
     hintLabel_.setJustificationType(juce::Justification::centredLeft);
     hintLabel_.setColour(juce::Label::textColourId, juce::Colour(0xff808080));
@@ -71,13 +57,11 @@ void PresetsView::setPresets(
     names_.clear();
     for (auto const& p : presets)
         names_.push_back(String(p ? p->name : std::string()));
-    if (selectLastOnStore_) {
-        selected_ = (int)names_.size() - 1;   // the just-stored slot
-        selectLastOnStore_ = false;
-    } else if (selected_ >= (int)names_.size()) {
-        selected_ = -1;
-    }
     rebuildSlots();
+    if (nameNextStored_) {
+        nameNextStored_ = false;
+        if (!names_.empty()) startRename((int)names_.size() - 1);
+    }
 }
 
 void PresetsView::rebuildSlots() {
@@ -86,71 +70,64 @@ void PresetsView::rebuildSlots() {
         auto b = std::make_unique<SlotButton>();
         b->setButtonText(names_[(size_t)i].isEmpty() ? String(i + 1)
                                                      : names_[(size_t)i]);
+        b->setColour(juce::TextButton::buttonColourId, juce::Colour(0x30ffffff));
         b->onSlotDown = [this, i](juce::ModifierKeys mods) {
-            // Recall / menu BEFORE changing selection; select() only
-            // recolours (it must not recreate this very button mid-click).
-            if (mods.isPopupMenu() || mods.isCommandDown()) {
-                select(i);
-                showSlotMenu(i);
-            } else {
-                select(i);
-                if (onRecall) onRecall(i);
-            }
+            if (mods.isPopupMenu() || mods.isCommandDown()) showSlotMenu(i);
+            else if (onRecall) onRecall(i);
         };
         addAndMakeVisible(*b);
         slotButtons_.push_back(std::move(b));
     }
-    updateSelectionUI();
-}
-
-// Recolour the slots and toggle the top row for the current selection.
-// Does NOT recreate buttons, so it is safe to call from a slot's own click.
-void PresetsView::updateSelectionUI() {
-    for (int i = 0; i < (int)slotButtons_.size(); ++i)
-        slotButtons_[(size_t)i]->setColour(
-            juce::TextButton::buttonColourId,
-            i == selected_ ? juce::Colour(0xff4a70a0) : juce::Colour(0x30ffffff));
-
-    bool hasSel = selected_ >= 0 && selected_ < (int)names_.size();
-    overwriteButton_.setVisible(hasSel);
-    deleteButton_.setVisible(hasSel);
-    nameField_.setVisible(hasSel);
-    hintLabel_.setVisible(!hasSel);
     hintLabel_.setText(names_.empty()
         ? String("(stores the controls of the panels below, "
                  "until the next presets cell)")
         : String("(click recalls; cmd- or right-click to "
-                 "name / overwrite / delete)"),
+                 "rename / overwrite / delete)"),
         juce::dontSendNotification);
-    if (hasSel)
-        nameField_.setText(names_[(size_t)selected_], juce::dontSendNotification);
     resized();
     repaint();
 }
 
-void PresetsView::select(int idx) {
-    if (selected_ == idx) return;
-    selected_ = idx;
-    updateSelectionUI();
-}
-
-void PresetsView::commitRename() {
-    if (selected_ < 0 || selected_ >= (int)names_.size()) return;
-    String text = nameField_.getText();
-    if (text == names_[(size_t)selected_]) return;
-    if (onRename) onRename(selected_, text);
-}
-
 void PresetsView::showSlotMenu(int idx) {
     juce::PopupMenu m;
-    m.addItem(1, "Overwrite with current values");
-    m.addItem(2, "Delete");
+    m.addItem(1, "Rename...");
+    m.addItem(2, "Overwrite with current values");
+    m.addItem(3, "Delete");
+    // Dismissing the menu (click away / Esc) does nothing -- the user's
+    // way to decline. Each action fires once and the menu closes.
     m.showMenuAsync(juce::PopupMenu::Options()
                         .withTargetComponent(slotButtons_[(size_t)idx].get()),
         [this, idx](int result) {
-            if (result == 1 && onOverwrite) onOverwrite(idx);
-            else if (result == 2 && onDelete) onDelete(idx);
+            if (result == 1) startRename(idx);
+            else if (result == 2 && onOverwrite) onOverwrite(idx);
+            else if (result == 3 && onDelete) onDelete(idx);
         });
+}
+
+void PresetsView::startRename(int idx) {
+    if (idx < 0 || idx >= (int)slotButtons_.size()) return;
+    renameIndex_ = idx;
+    renameEditor_ = std::make_unique<juce::TextEditor>();
+    renameEditor_->setBounds(slotButtons_[(size_t)idx]->getBounds());
+    renameEditor_->setText(names_[(size_t)idx], false);
+    renameEditor_->selectAll();
+    renameEditor_->onReturnKey = [this] { commitRename(); };
+    renameEditor_->onEscapeKey = [this] {   // decline
+        renameIndex_ = -1;
+        renameEditor_.reset();
+    };
+    renameEditor_->onFocusLost = [this] { commitRename(); };
+    addAndMakeVisible(*renameEditor_);
+    renameEditor_->grabKeyboardFocus();
+}
+
+void PresetsView::commitRename() {
+    if (!renameEditor_) return;
+    auto editor = std::move(renameEditor_);
+    int idx = renameIndex_;
+    renameIndex_ = -1;
+    if (idx >= 0 && idx < (int)names_.size() && onRename)
+        onRename(idx, editor->getText());
 }
 
 int PresetsView::preferredHeight(int width) const {
@@ -164,29 +141,22 @@ void PresetsView::resized() {
     auto top = r.removeFromTop(kRowH);
     storeButton_.setBounds(top.removeFromLeft(70));
     top.removeFromLeft(kGap);
-    if (selected_ >= 0 && selected_ < (int)names_.size()) {
-        overwriteButton_.setBounds(top.removeFromLeft(80));
-        top.removeFromLeft(kGap);
-        nameField_.setBounds(top.removeFromLeft(160));
-        top.removeFromLeft(kGap);
-        deleteButton_.setBounds(top.removeFromLeft(60));
-    } else {
-        hintLabel_.setBounds(top);
-    }
-
+    hintLabel_.setBounds(top);
     r.removeFromTop(kGap);
     layOutSlots();
+    if (renameEditor_ && renameIndex_ >= 0
+        && renameIndex_ < (int)slotButtons_.size())
+        renameEditor_->setBounds(slotButtons_[(size_t)renameIndex_]->getBounds());
 }
 
 void PresetsView::layOutSlots() {
     int width = getWidth();
     int perRow = juce::jmax(1, (width - kGap) / (kSlotW + kGap));
-    int x0 = 0, y0 = kRowH + kGap;
+    int y0 = kRowH + kGap;
     for (int i = 0; i < (int)slotButtons_.size(); ++i) {
         int col = i % perRow, row = i / perRow;
         slotButtons_[(size_t)i]->setBounds(
-            x0 + col * (kSlotW + kGap), y0 + row * (kSlotH + kGap),
-            kSlotW, kSlotH);
+            col * (kSlotW + kGap), y0 + row * (kSlotH + kGap), kSlotW, kSlotH);
     }
 }
 
