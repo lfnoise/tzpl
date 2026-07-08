@@ -20,7 +20,9 @@
 //
 
 #include "notebook_view.hpp"
+#include "../widgets/controls_dispatch.hpp"
 #include "tzpl_app_context.hpp"
+#include "tzpl_ui_state.hpp"
 #include "repl_session.hpp"
 #include "diagnostic.hpp"
 #include <functional>
@@ -40,9 +42,10 @@ NotebookView::NotebookView(bridge::AppContext& appCtx, GuiState& guiState,
     addCodeButton_.onClick  = [this] { addCell(CellKind::Code); };
     addProseButton_.onClick = [this] { addCell(CellKind::Prose); };
     addPanelButton_.onClick = [this] { addCell(CellKind::Panel); };
+    addPresetsButton_.onClick = [this] { addCell(CellKind::Presets); };
     runAllButton_.onClick   = [this] { runAll(); };
     for (auto* b : { &addCodeButton_, &addProseButton_, &addPanelButton_,
-                     &runAllButton_ })
+                     &addPresetsButton_, &runAllButton_ })
         toolbar_.addAndMakeVisible(b);
     addAndMakeVisible(toolbar_);
 
@@ -62,7 +65,8 @@ void NotebookView::resized() {
     auto bar = r.removeFromTop(28);
     toolbar_.setBounds(bar);
     bar.reduce(4, 3);
-    for (auto* b : { &addCodeButton_, &addProseButton_, &addPanelButton_ }) {
+    for (auto* b : { &addCodeButton_, &addProseButton_, &addPanelButton_,
+                     &addPresetsButton_ }) {
         b->setBounds(bar.removeFromLeft(64));
         bar.removeFromLeft(4);
     }
@@ -188,6 +192,48 @@ void NotebookView::rebuildCells() {
                 relayoutContent();
             };
             slot->onTextChanged = [this] { relayoutContent(); };
+
+            // Presets: capture/recall operate on the live widget registry
+            // and commit a history node (recall changes control values).
+            slot->onPresetStore = [this, cid] {
+                auto presets = store_.cell(cid)->presets;
+                presets.push_back(std::make_shared<doc::Preset const>(
+                    capturePreset(presetScope(cid))));
+                commitPresets(cid, std::move(presets), "store preset");
+            };
+            slot->onPresetRecall = [this, cid](int i) {
+                auto cell = store_.cell(cid);
+                if (i < 0 || i >= (int)cell->presets.size()) return;
+                applyPreset(*cell->presets[(size_t)i]);
+                // Recall changed widget values: commit a history node.
+                store_.setWidgetSnap(doc::captureWidgets(
+                    appCtx_.uiState, claimedPanels(),
+                    store_.snapshot()->widgets.get()));
+                store_.commit("recall preset");
+            };
+            slot->onPresetOverwrite = [this, cid](int i) {
+                auto presets = store_.cell(cid)->presets;
+                if (i < 0 || i >= (int)presets.size()) return;
+                doc::Preset p = capturePreset(presetScope(cid));
+                p.name = presets[(size_t)i]->name;
+                presets[(size_t)i] =
+                    std::make_shared<doc::Preset const>(std::move(p));
+                commitPresets(cid, std::move(presets), "overwrite preset");
+            };
+            slot->onPresetRename = [this, cid](int i, juce::String n) {
+                auto presets = store_.cell(cid)->presets;
+                if (i < 0 || i >= (int)presets.size()) return;
+                auto np = std::make_shared<doc::Preset>(*presets[(size_t)i]);
+                np->name = n.toStdString();
+                presets[(size_t)i] = std::move(np);
+                commitPresets(cid, std::move(presets), "rename preset");
+            };
+            slot->onPresetDelete = [this, cid](int i) {
+                auto presets = store_.cell(cid)->presets;
+                if (i < 0 || i >= (int)presets.size()) return;
+                presets.erase(presets.begin() + i);
+                commitPresets(cid, std::move(presets), "delete preset");
+            };
         }
         slot->syncFromModel(*cell);
         slot->setSelected(cell->id == selectedCell_);
@@ -396,6 +442,122 @@ void NotebookView::redoDocument() {
                             before);
         rebuildCells();
     }
+}
+
+bool NotebookView::testPresetsRoundTrip(std::string const& panel) {
+    if (!appCtx_.uiState) return false;
+    newDocument();
+    // A Presets cell governs the Panel cells *after* it, up to the next
+    // Presets cell -- so the panel must follow the presets cell.
+    CellId presetsCell = store_.insertCell(store_.cellCount(),
+                                           CellKind::Presets);
+    CellId panelCell = store_.insertCell(store_.cellCount(),
+                                         CellKind::Panel, panel);
+    (void)panelCell;
+    rebuildCells();
+
+    doc::Preset p = capturePreset(presetScope(presetsCell));
+    if (p.entries.empty()) return false;
+
+    // Read + perturb slider "a" so recall has something to restore.
+    double before = 0.0, perturbed = 0.0;
+    {
+        std::lock_guard<std::mutex> lock(appCtx_.uiState->mtx);
+        auto* w = appCtx_.uiState->findByName(panel, "a");
+        if (!w || w->values.empty()) return false;
+        before = w->values[0];
+        w->values[0] = before + 0.123;
+        perturbed = w->values[0];
+    }
+    std::vector<std::shared_ptr<doc::Preset const>> bank;
+    bank.push_back(std::make_shared<doc::Preset const>(p));
+    store_.setCellPresets(presetsCell, bank);
+    applyPreset(*bank[0]);
+
+    double after = -999.0;
+    {
+        std::lock_guard<std::mutex> lock(appCtx_.uiState->mtx);
+        if (auto* w = appCtx_.uiState->findByName(panel, "a");
+            w && !w->values.empty())
+            after = w->values[0];
+    }
+    return before != perturbed && after == before;
+}
+
+// ---------------------------------------------------------------------------
+// Presets (mirror of ImGui NotebookPanel)
+// ---------------------------------------------------------------------------
+
+// Input widgets whose values a preset stores. Displays, momentary buttons,
+// and piano rolls are left alone.
+static bool presetStorableKind(bridge::UIWidgetKind k) {
+    switch (k) {
+        case bridge::UIWidgetKind::Slider:
+        case bridge::UIWidgetKind::Range:
+        case bridge::UIWidgetKind::Number:
+        case bridge::UIWidgetKind::Toggle:
+        case bridge::UIWidgetKind::XY:
+        case bridge::UIWidgetKind::MultiSlider:
+        case bridge::UIWidgetKind::Matrix:
+            return true;
+        default:
+            return false;
+    }
+}
+
+std::vector<std::string> NotebookView::presetScope(CellId id) const {
+    std::vector<std::string> out;
+    bool after = false;
+    for (auto const& c : store_.snapshot()->cells) {
+        if (c->id == id) { after = true; continue; }
+        if (!after) continue;
+        if (c->kind == CellKind::Presets) break;
+        if (c->kind == CellKind::Panel) out.push_back(c->name);
+    }
+    return out;
+}
+
+doc::Preset NotebookView::capturePreset(
+    std::vector<std::string> const& scope) const {
+    doc::Preset p;
+    if (!appCtx_.uiState) return p;
+    std::lock_guard<std::mutex> lock(appCtx_.uiState->mtx);
+    for (auto const& w : appCtx_.uiState->widgets) {
+        if (!presetStorableKind(w->kind)) continue;
+        bool inScope = false;
+        for (auto const& root : scope) {
+            if (bridge::panelUnderRoot(w->panel, root)) { inScope = true; break; }
+        }
+        if (!inScope) continue;
+        p.entries.push_back({ w->panel, w->name, w->values });
+    }
+    return p;
+}
+
+void NotebookView::applyPreset(doc::Preset const& p) {
+    if (!appCtx_.uiState) return;
+    std::lock_guard<std::mutex> lock(appCtx_.uiState->mtx);
+    for (auto const& e : p.entries) {
+        bridge::UIWidget* w = appCtx_.uiState->findByName(e.panel, e.widget);
+        if (!w || !presetStorableKind(w->kind)) continue;
+        for (size_t i = 0; i < w->values.size() && i < e.values.size(); ++i)
+            w->values[i] = e.values[i];
+        w->dirtyEngine = true;
+        w->dirtyCallback = true;
+    }
+    // Push the recalled values to the engine and fire onChange callbacks.
+    dispatcher_.ensureRunning();
+}
+
+void NotebookView::commitPresets(
+    CellId id, std::vector<std::shared_ptr<doc::Preset const>> presets,
+    char const* label) {
+    store_.setCellPresets(id, std::move(presets));
+    store_.setWidgetSnap(doc::captureWidgets(
+        appCtx_.uiState, claimedPanels(), store_.snapshot()->widgets.get()));
+    store_.commit(label);
+    if (auto* cc = cellFor(id)) cc->syncFromModel(*store_.cell(id));
+    relayoutContent();
 }
 
 }

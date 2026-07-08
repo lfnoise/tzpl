@@ -91,6 +91,9 @@ public:
     void testTypeIntoFocusedCell(juce::String const& text);
     juce::String testFocusedCellOutput() const;
     int testCellCount() const { return store_.cellCount(); }
+    // Build a Panel cell naming `panel` + a Presets cell, store the live
+    // values, perturb widget "a", recall, and report whether it was restored.
+    bool testPresetsRoundTrip(std::string const& panel);
 
 private:
     void rebuildCells();          // reconcile CellComponents against the snapshot
@@ -103,6 +106,19 @@ private:
     void queueRunOnLoad();
     void globalFocusChanged(juce::Component* focused) override;
 
+    // -- Presets (mirror of ImGui NotebookPanel; UIState-backed) --
+    // Panel roots governed by the Presets cell `id`: the Panel cells after
+    // it, up to the next Presets cell.
+    std::vector<std::string> presetScope(doc::CellId id) const;
+    // Snapshot the in-scope input widgets' values into a new Preset.
+    doc::Preset capturePreset(std::vector<std::string> const& scope) const;
+    // Write a preset's values back into the live widgets (marks them dirty).
+    void applyPreset(doc::Preset const& p);
+    // Install a mutated bank, commit history, and refresh the cell view.
+    void commitPresets(doc::CellId id,
+                       std::vector<std::shared_ptr<doc::Preset const>> presets,
+                       char const* label);
+
     bridge::AppContext& appCtx_;
     GuiState& guiState_;
     std::function<ts::REPLSession*()> session_;
@@ -114,6 +130,7 @@ private:
     juce::TextButton addCodeButton_ { "+ Code" };
     juce::TextButton addProseButton_ { "+ Prose" };
     juce::TextButton addPanelButton_ { "+ Panel" };
+    juce::TextButton addPresetsButton_ { "+ Presets" };
     juce::TextButton runAllButton_ { "Run All" };
     juce::Viewport viewport_;
     juce::Component content_;                 // holds the CellComponents

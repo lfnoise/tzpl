@@ -88,6 +88,14 @@ MainComponent::MainComponent(bridge::AppContext& appCtx,
     logLine("Tzopilotl. Cmd+Enter: eval block, Shift+Enter: eval line, "
             "Cmd+Shift+Enter: eval file.");
 
+    // Global key bindings (ui.bindKey): a message-thread poll firing bound
+    // Buttons/Toggles when no text field owns focus.
+    if (appCtx_.uiState) {
+        keyDispatch_ = std::make_unique<KeyDispatch>(*appCtx_.uiState,
+                                                     dispatcher_);
+        keyDispatch_->start();
+    }
+
     // Print-drain coordinator: routes VM prints (any thread) to the in-flight
     // notebook cell or the console, and pumps the notebook's Run-All queue.
     startTimerHz(15);

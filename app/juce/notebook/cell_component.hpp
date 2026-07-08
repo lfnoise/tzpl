@@ -32,6 +32,7 @@
 #include "../editor_pane.hpp"      // TzplCodeEditor
 #include "../tzpl_tokeniser.hpp"
 #include "../widgets/panel_canvas.hpp"
+#include "presets_view.hpp"
 #include <juce_gui_extra/juce_gui_extra.h>
 #include <functional>
 #include <memory>
@@ -90,6 +91,13 @@ public:
     std::function<void()> onFocused;        // editor gained focus
     std::function<void()> onTextChanged;
 
+    // Presets cell callbacks (index into the cell's preset bank).
+    std::function<void()> onPresetStore;
+    std::function<void(int)> onPresetRecall;
+    std::function<void(int)> onPresetOverwrite;
+    std::function<void(int, juce::String)> onPresetRename;
+    std::function<void(int)> onPresetDelete;
+
 private:
     void buildForKind(doc::CellKind kind);
     void layOutHeader(juce::Rectangle<int>& r);
@@ -122,8 +130,9 @@ private:
     std::unique_ptr<juce::CodeDocument> codeDoc_;
     std::unique_ptr<TzplCodeEditor> editor_;
     juce::TextEditor output_;          // Code cells
-    juce::Label placeholder_;          // Presets cells (+ panel w/o registry)
+    juce::Label placeholder_;          // panel w/o registry
     std::unique_ptr<PanelCanvas> panelCanvas_; // Panel cells
+    std::unique_ptr<PresetsView> presetsView_; // Presets cells
     std::vector<OutputLine> outputLines_;
 
     static constexpr int kHeaderH = 22;

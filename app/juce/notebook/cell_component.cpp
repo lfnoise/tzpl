@@ -97,19 +97,35 @@ void CellComponent::buildForKind(doc::CellKind kind) {
     if (kind == doc::CellKind::Code) addAndMakeVisible(output_);
     else                            output_.setVisible(false);
 
-    if (kind == doc::CellKind::Panel && ui_ && dispatcher_) {
+    if (kind == doc::CellKind::Presets) {
+        // The preset bank. Slot data is loaded in syncFromModel; the view
+        // forwards store/recall/overwrite/rename/delete to the NotebookView.
+        presetsView_ = std::make_unique<PresetsView>();
+        presetsView_->onStore = [this] { if (onPresetStore) onPresetStore(); };
+        presetsView_->onRecall = [this](int i) {
+            if (onPresetRecall) onPresetRecall(i);
+        };
+        presetsView_->onOverwrite = [this](int i) {
+            if (onPresetOverwrite) onPresetOverwrite(i);
+        };
+        presetsView_->onRename = [this](int i, String n) {
+            if (onPresetRename) onPresetRename(i, n);
+        };
+        presetsView_->onDelete = [this](int i) {
+            if (onPresetDelete) onPresetDelete(i);
+        };
+        addAndMakeVisible(*presetsView_);
+        placeholder_.setVisible(false);
+    } else if (kind == doc::CellKind::Panel && ui_ && dispatcher_) {
         // Panel cells render the panel's live widgets inline. The exact
         // panel name is set in syncFromModel (cell.name); rebuild here with
         // an empty name and let reconcile pick up widgets after the name is
         // known.
         panelCanvas_.reset();
         placeholder_.setVisible(false);
-    } else if (kind == doc::CellKind::Panel || kind == doc::CellKind::Presets) {
-        placeholder_.setText(
-            kind == doc::CellKind::Presets
-                ? String("PRESETS cell -- arrives in M5")
-                : String("PANEL cell -- no live widgets"),
-            juce::dontSendNotification);
+    } else if (kind == doc::CellKind::Panel) {
+        placeholder_.setText(String("PANEL cell -- no live widgets"),
+                             juce::dontSendNotification);
         addAndMakeVisible(placeholder_);
     } else {
         placeholder_.setVisible(false);
@@ -137,6 +153,9 @@ void CellComponent::syncFromModel(doc::Cell const& cell) {
             resized();
         }
     }
+
+    if (kind_ == doc::CellKind::Presets && presetsView_)
+        presetsView_->setPresets(cell.presets);
 
     // Only replace editor text when it actually differs, to avoid stomping
     // in-progress typing / resetting the caret.
@@ -207,7 +226,9 @@ int CellComponent::preferredHeight(int width) const {
     }
     if (kind_ == doc::CellKind::Panel && panelCanvas_)
         h += panelCanvas_->preferredHeight(width);
-    else if (kind_ == doc::CellKind::Panel || kind_ == doc::CellKind::Presets)
+    else if (kind_ == doc::CellKind::Presets && presetsView_)
+        h += presetsView_->preferredHeight(width - 2 * kPad);
+    else if (kind_ == doc::CellKind::Panel)
         h += 80;
     return h + kPad;
 }
@@ -227,6 +248,8 @@ void CellComponent::resized() {
         editor_->setBounds(r);
     else if (panelCanvas_)
         panelCanvas_->setBounds(r);
+    else if (presetsView_)
+        presetsView_->setBounds(r);
     else if (placeholder_.isVisible())
         placeholder_.setBounds(r);
 }

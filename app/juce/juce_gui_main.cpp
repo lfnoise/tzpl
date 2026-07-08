@@ -348,12 +348,39 @@ public:
                     "slider(\"b\", 0.0, 10.0, 5.0)");
                 commands_.invokeDirectly(cmd::evalFile, false);
                 evalPollsLeft_ = 100;
-            } else {
+            } else if (evalPhase_ == 3) {
                 int n = main->testWidgetCount();
                 double v = main->testDriveFirstSlider();
                 bool ok = n >= 2 && v == 0.75; // slider "a": map(0.75) on [0,1]
                 std::printf("SELFTEST WIDGETS %s: count=%d sliderVal=%.4g\n",
                             ok ? "OK" : "FAILED", n, v);
+                std::fflush(stdout);
+
+                // Presets: notebook capture + recall round-trip over panel "t"
+                // (synchronous -- reuses the widgets just evaluated).
+                bool pOk = main->testPresetsRoundTrip("t");
+                std::printf("SELFTEST PRESETS %s: recall restored\n",
+                            pOk ? "OK" : "FAILED");
+                std::fflush(stdout);
+
+                // Key bindings: bind a key to a toggle, then simulate a press.
+                evalPhase_ = 4;
+                main->testShowNotebook(false);
+                main->testEditorPane().newTab("keytest.x");
+                main->testTypeIntoEditor(
+                    "import ui.*;\npanel(\"k\");\n"
+                    "bindKey(toggle(\"kt\", false), \"g\")");
+                commands_.invokeDirectly(cmd::evalFile, false);
+                evalPollsLeft_ = 100;
+            } else {
+                double kv = main->testFireKeyChord("g");
+                bool codeOk = KeyDispatch::chordKeyCode("g") == 'G'
+                    && KeyDispatch::chordKeyCode("space")
+                           == juce::KeyPress::spaceKey
+                    && KeyDispatch::chordKeyCode("!") == -1;
+                bool ok = kv == 1.0 && codeOk; // toggle flipped false -> true
+                std::printf("SELFTEST KEYBIND %s: toggle=%.4g codes=%s\n",
+                            ok ? "OK" : "FAILED", kv, codeOk ? "ok" : "bad");
                 std::fflush(stdout);
                 quit();
                 return;

@@ -236,7 +236,9 @@ if(TZPL_BUILD_APP_JUCE)
         juce/output_console.cpp
         juce/notebook/cell_component.cpp
         juce/notebook/notebook_view.cpp
+        juce/notebook/presets_view.cpp
         juce/widgets/controls_dispatch.cpp
+        juce/widgets/key_dispatch.cpp
         juce/widgets/widget_component.cpp
         juce/widgets/panel_canvas.cpp
         juce/widgets/controls_window.cpp

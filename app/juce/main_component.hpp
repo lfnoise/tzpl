@@ -32,6 +32,7 @@
 #include "notebook/notebook_view.hpp"
 #include "widgets/controls_dispatch.hpp"
 #include "widgets/controls_window.hpp"
+#include "widgets/key_dispatch.hpp"
 #include "gui_state.hpp"
 #include "tzpl_look_and_feel.hpp"
 #include <map>
@@ -89,6 +90,14 @@ public:
     // Nudge the first slider in the registry and return its new value
     // (exercises the WidgetComponent->UIState->dispatcher path).
     double testDriveFirstSlider();
+    // Presets: notebook capture + recall round-trip for `panel`.
+    bool testPresetsRoundTrip(std::string const& panel) {
+        return notebook_->testPresetsRoundTrip(panel);
+    }
+    // Key bindings: simulate a chord press; returns the bound widget's value.
+    double testFireKeyChord(std::string const& chord) {
+        return keyDispatch_ ? keyDispatch_->testPressChord(chord) : -999.0;
+    }
 
 private:
     void applyTheme(int themeIdx);
@@ -116,6 +125,7 @@ private:
     GuiState guiState_;
     std::unique_ptr<ts::REPLSession> session_;
     ControlsDispatcher dispatcher_ { appCtx_ };
+    std::unique_ptr<KeyDispatch> keyDispatch_;   // ui.bindKey polling
 
     EditorPane editorPane_;
     std::unique_ptr<NotebookView> notebook_;
