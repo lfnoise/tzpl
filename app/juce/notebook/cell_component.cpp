@@ -220,14 +220,18 @@ int CellComponent::preferredHeight(int width) const {
     int h = kHeaderH + kPad;
     if (collapsed_) return h + kPad;
 
-    int lineH = juce::roundToInt(fontSize_ * 1.4f);
+    // Size the editor from its ACTUAL line height, not a font-based estimate
+    // (which overshoots CodeEditorComponent's line height and leaves a gap).
     if (editor_) {
+        int lh = editor_->getLineHeight();
+        if (lh <= 0) lh = juce::roundToInt(fontSize_ * 1.4f);
         int lines = juce::jmax(1, codeDoc_->getNumLines());
-        h += juce::jlimit(lineH * 2, lineH * 30, lineH * (lines + 1));
+        h += juce::jlimit(lh * 2, lh * 40, lines * lh + kPad);
     }
     if (kind_ == doc::CellKind::Code && !outputLines_.empty()) {
+        int outLineH = juce::roundToInt(fontSize_ * 1.4f);
         int outLines = juce::jmin(12, (int)outputLines_.size());
-        h += kPad + lineH * (outLines + 1);
+        h += kPad + outLineH * (outLines + 1);
     }
     if (kind_ == doc::CellKind::Panel && panelCanvas_)
         h += panelCanvas_->preferredHeight(width);
