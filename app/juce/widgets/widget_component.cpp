@@ -535,6 +535,40 @@ void WidgetComponent::mouseDown(juce::MouseEvent const& e) {
                 markDirtyAndNotify(w, false);
             }
         } break;
+        case UIWidgetKind::PianoRoll: {
+            // Click a cell to add a 16th note; click an existing note to
+            // remove it. Notes are (pitch, startBeat, durBeats) triplets.
+            dragging_ = false;   // a discrete edit, not a drag
+            constexpr float stepBeats = 0.25f;
+            int rows = std::max(1, w.rollRows);
+            float rh = bb.getHeight() / rows;
+            float beats = std::max(0.001f, w.rollBeats);
+            float bx = (float)e.x / bb.getWidth() * beats;
+            float start = std::max(0.0f, std::floor(bx / stepBeats) * stepBeats);
+            int row = std::clamp((int)std::floor((bb.getBottom() - (float)e.y) / rh),
+                                 0, rows - 1);
+            int pitch = w.rollLowPitch + row;
+            int hit = -1;
+            for (size_t i = 0; i + 2 < w.noteData.size(); i += 3) {
+                if (start < w.noteData[i + 1]
+                    || start >= w.noteData[i + 1] + w.noteData[i + 2]) continue;
+                if ((int)std::lround(w.noteData[i]) == pitch) { hit = (int)i; break; }
+            }
+            if (hit >= 0)
+                w.noteData.erase(w.noteData.begin() + hit,
+                                 w.noteData.begin() + hit + 3);
+            else {
+                w.noteData.push_back((float)pitch);
+                w.noteData.push_back(start);
+                w.noteData.push_back(stepBeats);
+            }
+            // Note lists deliver via the onChange callback only (no engine
+            // fast path); commit one history node per edit.
+            w.dirtyCallback = true;
+            w.gestureEnded = true;
+            dispatcher_.ensureRunning();
+            repaint();
+        } break;
         default: break;
     }
 }

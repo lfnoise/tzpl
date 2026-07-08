@@ -56,8 +56,12 @@ void PanelCanvas::timerCallback() {
             if (comp->isTapBacked()) { toRepaint.push_back(id); continue; }
             auto* w = ui_.findById(id);
             if (!w) continue;
+            // Signature = values + noteData, so piano-roll edits (and any
+            // undo/redo) repaint too, not just slider-like value changes.
+            std::vector<double> sig = w->values;
+            sig.insert(sig.end(), w->noteData.begin(), w->noteData.end());
             auto& cached = lastValues_[id];
-            if (cached != w->values) { cached = w->values; toRepaint.push_back(id); }
+            if (cached != sig) { cached = std::move(sig); toRepaint.push_back(id); }
         }
     }
     for (auto id : toRepaint)
