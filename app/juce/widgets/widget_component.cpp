@@ -421,13 +421,37 @@ void WidgetComponent::paintPianoRoll(Graphics& g, UIWidget& w) {
     g.setColour(juce::Colours::black.withAlpha(0.4f));
     g.fillRect(bb);
     int rows = std::max(1, w.rollRows);
+    int edo = std::max(1, w.rollEdo);
     float rh = bb.getHeight() / rows;
-    // Horizontal lane lines.
-    g.setColour(juce::Colour(0x18ffffff));
-    for (int r = 0; r <= rows; ++r)
-        g.drawHorizontalLine((int)(bb.getY() + r * rh), bb.getX(), bb.getRight());
-    // Notes: (pitch, startBeat, durBeats) triplets.
     float beats = std::max(0.001f, w.rollBeats);
+    constexpr float stepBeats = 0.25f;   // 16th grid
+    int cols = std::max(1, (int)std::lround(beats / stepBeats));
+    float cw = bb.getWidth() / cols;
+
+    // Reference-band shading on octave rows (pitch % edo == 0) for orientation.
+    if (rh >= 2.0f) {
+        g.setColour(juce::Colour(0x10ffffff));
+        for (int r = 0; r < rows; ++r) {
+            int pitch = w.rollLowPitch + r;
+            if (pitch % edo == 0)
+                g.fillRect(bb.getX(), bb.getBottom() - (r + 1) * rh,
+                           bb.getWidth(), rh);
+        }
+    }
+    // Horizontal lane lines (skip when subpixel-dense, e.g. cents).
+    if (edo <= 24 && rh >= 3.0f) {
+        g.setColour(juce::Colour(0x18ffffff));
+        for (int r = 0; r <= rows; ++r)
+            g.drawHorizontalLine((int)(bb.getY() + r * rh),
+                                 bb.getX(), bb.getRight());
+    }
+    // Vertical grid: 16th columns, brighter on beats (every 4th step).
+    for (int c = 0; c <= cols; ++c) {
+        g.setColour(c % 4 == 0 ? juce::Colour(0x50ffffff)
+                               : juce::Colour(0x1cffffff));
+        g.drawVerticalLine((int)(bb.getX() + c * cw), bb.getY(), bb.getBottom());
+    }
+    // Notes: (pitch, startBeat, durBeats) triplets.
     g.setColour(juce::Colour(0xff5a9bd4));
     for (size_t i = 0; i + 2 < w.noteData.size(); i += 3) {
         float pitch = w.noteData[i];
