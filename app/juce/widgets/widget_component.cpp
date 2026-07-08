@@ -23,6 +23,7 @@
 #include "controls_dispatch.hpp"
 #include <algorithm>
 #include <cmath>
+#include <random>
 
 namespace tzplapp {
 
@@ -39,13 +40,65 @@ juce::Colour trackColour(juce::Component& c) {
     return c.findColour(juce::Slider::backgroundColourId,
                         /*inheritFromParent=*/true);
 }
+
+void drawTick(Graphics& g, juce::Rectangle<float> const& z, float lenScale,
+              float pos) {
+    float x = z.getX() + pos * z.getWidth();
+    g.drawLine(x, z.getY(), x, z.getY() + z.getHeight() * lenScale, 1.0f);
+}
+
+// Graduated scale on the slider background, ported from widget_draw.cpp.
+// Exponential warps get log-spaced ticks (1..9 per decade, longer at 1/5);
+// everything else gets a decimal hierarchy (longest at 0, then every 10th,
+// 5th, 1st step).
+void drawTickMarks(Graphics& g, bridge::UISpec const& spec,
+                   juce::Rectangle<float> const& z) {
+    double lo = spec.lo, hi = spec.hi;
+    if (!(hi > lo) || !std::isfinite(lo) || !std::isfinite(hi)) return;
+    g.setColour(juce::Colours::white.withAlpha(0.30f));
+
+    if (spec.warp == bridge::UIWarp::Exponential && lo > 0.0 && hi > 0.0) {
+        int lowOrder = (int)std::floor(std::log10(lo));
+        int highOrder = (int)std::floor(std::log10(hi));
+        for (int i = lowOrder; i <= highOrder; ++i) {
+            double decade = std::pow(10.0, i);
+            for (int j = 1; j <= 9; ++j) {
+                double v = decade * j;
+                if (v <= lo || v >= hi) continue;
+                float pos = (float)spec.unmap(v);
+                float next = (float)spec.unmap(decade * (j + 1));
+                if (std::fabs(next - pos) < 0.005f) continue;
+                float lenScale = j == 1 ? 0.75f : j == 5 ? 0.525f : 0.3f;
+                drawTick(g, z, lenScale, pos);
+            }
+        }
+    } else {
+        double range = hi - lo;
+        int order = (int)std::floor(std::log10(range) + 0.5);
+        double step = std::pow(10.0, order - 1);
+        if (range / step >= 20.0) {
+            step *= 2.0;
+            if (range / step >= 20.0) step *= 2.5;
+        }
+        double epsilon = range * 1e-5;
+        for (double v = step * std::ceil(lo / step); v <= hi + epsilon;
+             v += step) {
+            int index = (int)std::floor(v / step + 0.5);
+            float lenScale = index == 0      ? 1.0f
+                           : index % 10 == 0 ? 0.75f
+                           : index % 5 == 0  ? 0.525f
+                                             : 0.3f;
+            drawTick(g, z, lenScale, (float)spec.unmap(v));
+        }
+    }
+}
 }
 
 WidgetComponent::WidgetComponent(bridge::UIState& ui, std::uint64_t id,
                                  ControlsDispatcher& dispatcher)
     : ui_(ui), id_(id), dispatcher_(dispatcher)
 {
-    setWantsKeyboardFocus(false);
+    setMouseClickGrabsKeyboardFocus(false);
     refreshMeta();
 }
 
@@ -55,6 +108,8 @@ void WidgetComponent::refreshMeta() {
         kind_ = w->kind;
         name_ = w->name;
     }
+    // Only slider-likes accept hover-key focus; others never take it.
+    setWantsKeyboardFocus(isHoverAdjustable());
 }
 
 bool WidgetComponent::isTapBacked() const {
@@ -140,6 +195,11 @@ void WidgetComponent::paintSlider(Graphics& g, UIWidget& w) {
     g.setColour(juce::Colour(0xff5a9bd4));
     g.fillRoundedRectangle(minx, bb.getY() + 2, pos * usable,
                            bb.getHeight() - 4, 3.0f);
+    // Graduated tick scale while hovered or dragging (matches ImGui).
+    if (isMouseOverOrDragging(true) || dragging_) {
+        auto z = bb.reduced(2.0f, 2.0f);
+        drawTickMarks(g, w.spec, z);
+    }
     g.setColour(juce::Colours::white.withAlpha(0.9f));
     g.setFont(12.0f);
     g.drawText(fmtValue(w.values.empty() ? 0.0 : w.values[0]), bb,
@@ -584,17 +644,147 @@ void WidgetComponent::mouseDoubleClick(juce::MouseEvent const&) {
     }
 }
 
-void WidgetComponent::mouseWheelMove(juce::MouseEvent const&,
+void WidgetComponent::mouseWheelMove(juce::MouseEvent const& e,
                                      juce::MouseWheelDetails const& wheel) {
+    // Pushing the wheel up RAISES the value (matches the ImGui app, whose
+    // handler subtracts the +up wheel delta from the position). Non-adjustable
+    // kinds pass the event through so an enclosing viewport can scroll.
+    constexpr float kStep = 0.06f;
     std::lock_guard<std::mutex> lock(ui_.mtx);
     UIWidget* wp = ui_.findById(id_);
-    if (!wp) return;
+    if (!wp) { juce::Component::mouseWheelMove(e, wheel); return; }
     UIWidget& w = *wp;
-    if (w.kind == UIWidgetKind::Slider && !w.values.empty()) {
-        float pos = (float)w.spec.unmap(w.values[0]) + wheel.deltaY * 0.03f;
-        w.values[0] = w.spec.map(std::clamp(pos, 0.0f, 1.0f));
-        markDirtyAndNotify(w, true);
+    auto bb = bodyRect(*this, kLabelH);
+    switch (w.kind) {
+        case UIWidgetKind::Slider: {
+            if (w.values.empty()) break;
+            float pos = (float)w.spec.unmap(w.values[0]) - wheel.deltaY * kStep;
+            w.values[0] = w.spec.map(std::clamp(pos, 0.0f, 1.0f));
+            markDirtyAndNotify(w, true);
+        } break;
+        case UIWidgetKind::XY: {
+            if (w.values.size() < 2) break;
+            // Vertical wheel drives Y (up = higher), horizontal drives X.
+            float y = (float)w.spec2.unmap(w.values[1]) - wheel.deltaY * kStep;
+            float x = (float)w.spec.unmap(w.values[0]) + wheel.deltaX * kStep;
+            w.values[0] = w.spec.map(std::clamp(x, 0.0f, 1.0f));
+            w.values[1] = w.spec2.map(std::clamp(y, 0.0f, 1.0f));
+            markDirtyAndNotify(w, true);
+        } break;
+        case UIWidgetKind::MultiSlider: {
+            int n = (int)w.values.size();
+            if (n <= 0) break;
+            // The wheel adjusts only the bar under the cursor.
+            int i = std::clamp((int)(e.position.x / (bb.getWidth() / n)),
+                               0, n - 1);
+            float pos = (float)w.spec.unmap(w.values[i]) - wheel.deltaY * kStep;
+            w.values[i] = w.spec.map(std::clamp(pos, 0.0f, 1.0f));
+            markDirtyAndNotify(w, true);
+        } break;
+        default:
+            juce::Component::mouseWheelMove(e, wheel);
+            break;
     }
+}
+
+// ---------------------------------------------------------------------------
+// Hover-key adjustments (widget_draw.cpp hoverAdjust*). While the pointer is
+// over a slider-like widget and no text field is focused, typed characters
+// nudge the value: c center, [ / ] rails, 1-9 jump, r randomize, j/J jitter,
+// , / . step, z zero, i init, - negate, / reciprocal.
+// ---------------------------------------------------------------------------
+
+bool WidgetComponent::isHoverAdjustable() const {
+    return kind_ == UIWidgetKind::Slider || kind_ == UIWidgetKind::XY
+        || kind_ == UIWidgetKind::MultiSlider;
+}
+
+namespace {
+float hoverUniform(float lo, float hi) {
+    static thread_local std::minstd_rand rng{ std::random_device{}() };
+    return lo + (hi - lo) * std::uniform_real_distribution<float>{}(rng);
+}
+float hoverBounce(float p) {
+    if (p < 0.0f) return -p;
+    if (p > 1.0f) return 2.0f - p;
+    return p;
+}
+
+// Apply one character to a single-axis position (Slider bar / MultiSlider bar).
+// Returns true and writes the new value if the char was a recognized command.
+bool hoverAxisChar(unsigned c, bridge::UISpec const& spec, double& value) {
+    float pos = (float)spec.unmap(value);
+    double v = value;
+    auto set = [&](float p) {
+        value = spec.map(std::clamp(p, 0.0f, 1.0f));
+    };
+    switch (c) {
+        case 'c': case 'C': set(0.5f); return true;
+        case '[': set(0.0f); return true;
+        case ']': set(1.0f); return true;
+        case 'r': case 'R': set(hoverUniform(0.0f, 1.0f)); return true;
+        case 'j': set(hoverBounce(pos + hoverUniform(-0.05f, 0.05f))); return true;
+        case 'J': set(hoverBounce(pos + hoverUniform(-0.005f, 0.005f))); return true;
+        case ',': set(pos - 0.05f); return true;
+        case '.': set(pos + 0.05f); return true;
+        case 'z': case 'Z': set((float)spec.unmap(spec.clamp(0.0))); return true;
+        case 'i': case 'I': set((float)spec.unmap(spec.clamp(spec.init))); return true;
+        case '-':
+            if (spec.contains(-v)) set((float)spec.unmap(-v));
+            return true;
+        case '/':
+            if (v != 0.0 && spec.contains(1.0 / v)) set((float)spec.unmap(1.0 / v));
+            return true;
+        default:
+            if (c >= '1' && c <= '9') { set(0.1f * (float)(c - '0')); return true; }
+            return false;
+    }
+}
+}
+
+bool WidgetComponent::keyPressed(juce::KeyPress const& key) {
+    if (!isHoverAdjustable()) return false;
+    juce::juce_wchar ch = key.getTextCharacter();
+    if (ch == 0) return false;
+    unsigned c = (unsigned)ch;
+
+    std::lock_guard<std::mutex> lock(ui_.mtx);
+    UIWidget* wp = ui_.findById(id_);
+    if (!wp) return false;
+    UIWidget& w = *wp;
+    bool handled = false;
+
+    if (w.kind == UIWidgetKind::Slider) {
+        if (!w.values.empty()) handled = hoverAxisChar(c, w.spec, w.values[0]);
+    } else if (w.kind == UIWidgetKind::MultiSlider) {
+        // Keys act on ALL bars (independent randoms per bar for r/j).
+        for (auto& val : w.values)
+            handled = hoverAxisChar(c, w.spec, val) || handled;
+    } else if (w.kind == UIWidgetKind::XY && w.values.size() >= 2) {
+        bool hx = hoverAxisChar(c, w.spec, w.values[0]);
+        bool hy = hoverAxisChar(c, w.spec2, w.values[1]);
+        handled = hx || hy;
+    }
+
+    if (handled) markDirtyAndNotify(w, true);
+    return handled;
+}
+
+void WidgetComponent::mouseEnter(juce::MouseEvent const&) {
+    // Take keyboard focus so hover-keys reach this widget -- but never steal
+    // it from an editor/text field the user is typing in.
+    if (isHoverAdjustable()) {
+        auto* f = juce::Component::getCurrentlyFocusedComponent();
+        if (dynamic_cast<juce::TextInputTarget*>(f) == nullptr)
+            grabKeyboardFocus();
+    }
+    repaint(); // show the graduated scale on hover
+}
+
+void WidgetComponent::mouseExit(juce::MouseEvent const&) {
+    // Release focus so a non-hovered widget doesn't keep eating keys.
+    if (hasKeyboardFocus(false)) giveAwayKeyboardFocus();
+    repaint();
 }
 
 }

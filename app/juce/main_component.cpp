@@ -43,15 +43,15 @@ MainComponent::MainComponent(bridge::AppContext& appCtx,
         appCtx_, guiState_, [this] { return session_.get(); }, dispatcher_);
     addChildComponent(*notebook_);
 
-    // Vertical split: center pane | resizer | console. Mirrors the ImGui
-    // app's splitRatio (editor fraction, clamped .2-.9).
+    // Horizontal split: center pane | resizer | console column on the right.
+    // splitRatio is the editor's width fraction (clamped .2-.9).
     double ratio = settings_.getDoubleValue("splitRatio", 0.7);
     ratio = juce::jlimit(0.2, 0.9, ratio);
-    layout_.setItemLayout(0, 80.0, -0.9, -ratio);         // editor
+    layout_.setItemLayout(0, 120.0, -0.9, -ratio);        // editor
     layout_.setItemLayout(1, 8.0, 8.0, 8.0);              // resizer bar
-    layout_.setItemLayout(2, 60.0, -0.8, -(1.0 - ratio)); // console
+    layout_.setItemLayout(2, 80.0, -0.8, -(1.0 - ratio)); // console
     resizer_ = std::make_unique<juce::StretchableLayoutResizerBar>(
-        &layout_, 1, /*vertical bar=*/false);
+        &layout_, 1, /*vertical bar=*/true);
     addAndMakeVisible(*resizer_);
 
     // Redirect VM print output into the capture pipe; the console's timer
@@ -116,16 +116,16 @@ void MainComponent::resized() {
         : static_cast<juce::Component*>(&editorPane_);
     juce::Component* comps[] = { center, resizer_.get(), &console_ };
     layout_.layOutComponents(comps, 3, 0, 0, getWidth(), getHeight(),
-                             /*vertically=*/true, /*resizeOther=*/true);
+                             /*vertically=*/false, /*resizeOther=*/true);
     saveSplitRatio();
 }
 
 void MainComponent::saveSplitRatio() {
-    if (getHeight() <= 0) return;
+    if (getWidth() <= 0) return;
     auto* center = notebookVisible_
         ? static_cast<juce::Component*>(notebook_.get())
         : static_cast<juce::Component*>(&editorPane_);
-    double ratio = (double)center->getHeight() / getHeight();
+    double ratio = (double)center->getWidth() / getWidth();
     if (ratio > 0.05 && ratio < 0.95)
         settings_.setValue("splitRatio", ratio);
 }

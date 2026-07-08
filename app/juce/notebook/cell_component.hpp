@@ -101,6 +101,7 @@ public:
 private:
     void buildForKind(doc::CellKind kind);
     void layOutHeader(juce::Rectangle<int>& r);
+    void paintDisclosure(juce::Graphics& g) const;
     void codeDocumentTextInserted(juce::String const&, int) override {
         if (onTextChanged) onTextChanged();
     }

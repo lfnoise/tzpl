@@ -45,9 +45,23 @@ void PanelCanvas::timerCallback() {
     if (reconcile()) {
         if (auto* p = getParentComponent()) p->resized();
     }
-    // Repaint tap-backed widgets so meters/scopes animate.
-    for (auto& [id, comp] : widgets_)
-        if (comp->isTapBacked()) comp->repaint();
+    // Repaint tap-backed widgets (meters/scopes animate) and any widget whose
+    // values changed since we last painted it -- catches preset recall,
+    // undo/redo and key bindings, which mutate the registry directly.
+    std::vector<std::uint64_t> toRepaint;
+    {
+        std::lock_guard<std::mutex> lock(ui_.mtx);
+        for (auto& [id, comp] : widgets_) {
+            if (comp->isTapBacked()) { toRepaint.push_back(id); continue; }
+            auto* w = ui_.findById(id);
+            if (!w) continue;
+            auto& cached = lastValues_[id];
+            if (cached != w->values) { cached = w->values; toRepaint.push_back(id); }
+        }
+    }
+    for (auto id : toRepaint)
+        if (auto it = widgets_.find(id); it != widgets_.end())
+            it->second->repaint();
 }
 
 bool PanelCanvas::reconcile() {

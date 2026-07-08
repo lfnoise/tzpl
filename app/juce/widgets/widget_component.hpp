@@ -58,11 +58,16 @@ public:
     void mouseDoubleClick(juce::MouseEvent const& e) override;
     void mouseWheelMove(juce::MouseEvent const& e,
                         juce::MouseWheelDetails const& wheel) override;
+    void mouseEnter(juce::MouseEvent const& e) override;
+    void mouseExit(juce::MouseEvent const& e) override;
+    bool keyPressed(juce::KeyPress const& key) override;
 
     // A widget's natural size (used by the panel flow layout).
     juce::Point<int> preferredSize() const;
 
 private:
+    // Slider/XY/MultiSlider accept hover-key value nudges.
+    bool isHoverAdjustable() const;
     // The horizontal track geometry (in local coords) for slider-like kinds.
     void trackGeometry(float& minx, float& usable) const;
     void markDirtyAndNotify(bridge::UIWidget& w, bool gestureEnd);

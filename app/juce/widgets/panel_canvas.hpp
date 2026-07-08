@@ -67,6 +67,11 @@ private:
     // id -> component, plus the seq-ordered id list from the last reconcile.
     std::unordered_map<std::uint64_t, std::unique_ptr<WidgetComponent>> widgets_;
     std::vector<std::uint64_t> order_;
+    // Last-painted values per widget, so external mutations (preset recall,
+    // undo/redo, key bindings) that don't pass through this component's own
+    // mouse handlers still trigger a repaint. Retained-mode's answer to the
+    // ImGui app redrawing every widget from `values` every frame.
+    std::unordered_map<std::uint64_t, std::vector<double>> lastValues_;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(PanelCanvas)
 };

@@ -57,15 +57,21 @@ CellComponent::CellComponent(doc::CellId id, TzplTokeniser& tokeniser,
     downButton_.onClick = [this] { if (onMove) onMove(+1); };
     collapseButton_.onClick = [this] {
         collapsed_ = !collapsed_;
-        collapseButton_.setButtonText(collapsed_ ? "+" : "-");
         if (onCollapse) onCollapse(collapsed_);
+        repaint();
     };
 
-    for (auto* b : { &runButton_, &collapseButton_, &upButton_, &downButton_,
-                     &deleteButton_ }) {
+    for (auto* b : { &runButton_, &upButton_, &downButton_, &deleteButton_ }) {
         b->setColour(juce::TextButton::buttonColourId, juce::Colour(0x30ffffff));
         addAndMakeVisible(b);
     }
+    // The disclosure control is a bare click target; paint() draws the
+    // triangle over it (a glyph gets ellipsized in the narrow button).
+    collapseButton_.setColour(juce::TextButton::buttonColourId,
+                              juce::Colours::transparentBlack);
+    collapseButton_.setColour(juce::TextButton::buttonOnColourId,
+                              juce::Colours::transparentBlack);
+    addAndMakeVisible(collapseButton_);
 
     output_.setMultiLine(true);
     output_.setReadOnly(true);
@@ -138,7 +144,6 @@ void CellComponent::syncFromModel(doc::Cell const& cell) {
         buildForKind(cell.kind);
 
     collapsed_ = cell.collapsed;
-    collapseButton_.setButtonText(collapsed_ ? "+" : "-");
 
     if (kind_ == doc::CellKind::Panel) {
         kindLabel_.setText(String("panel: ") + cell.name,
@@ -257,17 +262,33 @@ void CellComponent::resized() {
 void CellComponent::layOutHeader(juce::Rectangle<int>& r) {
     auto header = r.removeFromTop(kHeaderH);
     r.removeFromTop(kPad / 2);
+    // Disclosure triangle on the far left.
+    collapseButton_.setBounds(header.removeFromLeft(20));
+    header.removeFromLeft(2);
     deleteButton_.setBounds(header.removeFromRight(24));
     header.removeFromRight(2);
     downButton_.setBounds(header.removeFromRight(24));
     upButton_.setBounds(header.removeFromRight(24));
-    collapseButton_.setBounds(header.removeFromRight(24));
     header.removeFromRight(4);
     if (runButton_.isVisible()) {
         runButton_.setBounds(header.removeFromRight(48));
         header.removeFromRight(4);
     }
     kindLabel_.setBounds(header);
+}
+
+void CellComponent::paintDisclosure(juce::Graphics& g) const {
+    auto b = collapseButton_.getBounds().toFloat();
+    float cx = b.getCentreX(), cy = b.getCentreY(), s = 5.0f;
+    juce::Path tri;
+    if (collapsed_)  // right-pointing (closed)
+        tri.addTriangle(cx - s * 0.7f, cy - s, cx - s * 0.7f, cy + s,
+                        cx + s * 0.8f, cy);
+    else             // down-pointing (open)
+        tri.addTriangle(cx - s, cy - s * 0.7f, cx + s, cy - s * 0.7f,
+                        cx, cy + s * 0.8f);
+    g.setColour(juce::Colours::white.withAlpha(0.75f));
+    g.fillPath(tri);
 }
 
 void CellComponent::paint(juce::Graphics& g) {
@@ -281,6 +302,7 @@ void CellComponent::paint(juce::Graphics& g) {
     g.setColour(bg.darker(0.3f));
     g.drawLine(0.0f, (float)getHeight() - 0.5f, (float)getWidth(),
                (float)getHeight() - 0.5f);
+    paintDisclosure(g);
 }
 
 }
