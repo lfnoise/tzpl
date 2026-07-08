@@ -478,7 +478,14 @@ void NotebookView::jumpToHistory(doc::HistNode* node) {
 }
 
 void NotebookView::toggleHistoryWindow() {
-    if (historyWindow_) { historyWindow_.reset(); return; }
+    // Show/raise, don't toggle: if the window already exists it may just be
+    // hidden behind the main window, so bring it to the front. Closing it is
+    // the window's own close button (which clears historyWindow_).
+    if (historyWindow_) {
+        historyWindow_->setVisible(true);
+        historyWindow_->toFront(true);
+        return;
+    }
     historyWindow_ = std::make_unique<HistoryWindow>(
         *this, [this] { historyWindow_.reset(); });
 }
