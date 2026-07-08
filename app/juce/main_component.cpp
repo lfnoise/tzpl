@@ -783,8 +783,10 @@ void MainComponent::applyTheme(int themeIdx) {
 void MainComponent::applyFontIndex(int idx) {
     fontIndex_ = juce::jlimit(0, cmd::kNumEditorFontSizes - 1, idx);
     settings_.setValue("fontIndex", fontIndex_);
-    editorPane_.setFontSize(cmd::kEditorFontSizes[fontIndex_]);
-    console_.setFontSize(cmd::kEditorFontSizes[fontIndex_]);
+    float px = cmd::kEditorFontSizes[fontIndex_];
+    editorPane_.setFontSize(px);
+    console_.setFontSize(px);
+    if (notebook_) notebook_->setFontSize(px);  // cells + relayout
     commands_.commandStatusChanged();
 }
 
