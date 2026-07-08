@@ -20,6 +20,7 @@
 //
 
 #include "notebook_view.hpp"
+#include "history_window.hpp"
 #include "../widgets/controls_dispatch.hpp"
 #include "tzpl_app_context.hpp"
 #include "tzpl_ui_state.hpp"
@@ -43,9 +44,10 @@ NotebookView::NotebookView(bridge::AppContext& appCtx, GuiState& guiState,
     addProseButton_.onClick = [this] { addCell(CellKind::Prose); };
     addPanelButton_.onClick = [this] { addCell(CellKind::Panel); };
     addPresetsButton_.onClick = [this] { addCell(CellKind::Presets); };
+    historyButton_.onClick  = [this] { toggleHistoryWindow(); };
     runAllButton_.onClick   = [this] { runAll(); };
     for (auto* b : { &addCodeButton_, &addProseButton_, &addPanelButton_,
-                     &addPresetsButton_, &runAllButton_ })
+                     &addPresetsButton_, &historyButton_, &runAllButton_ })
         toolbar_.addAndMakeVisible(b);
     addAndMakeVisible(toolbar_);
 
@@ -71,6 +73,8 @@ void NotebookView::resized() {
         bar.removeFromLeft(4);
     }
     runAllButton_.setBounds(bar.removeFromRight(64));
+    bar.removeFromRight(4);
+    historyButton_.setBounds(bar.removeFromRight(64));
     viewport_.setBounds(r);
     relayoutContent();
 }
@@ -442,6 +446,41 @@ void NotebookView::redoDocument() {
                             before);
         rebuildCells();
     }
+}
+
+std::vector<NotebookView::HistoryRow> NotebookView::historyRows() {
+    std::vector<HistoryRow> rows;
+    doc::HistNode* cursor = store_.historyCursor();
+    // Depth-first; siblings indent one level under a branch point.
+    std::function<void(doc::HistNode*, int)> walk =
+        [&](doc::HistNode* n, int depth) {
+            juce::String label(n->label);
+            if (n->children.size() > 1)
+                label += " (" + juce::String((int)n->children.size())
+                       + " branches)";
+            rows.push_back({ n, depth, label, n == cursor });
+            int childDepth = depth + (n->children.size() > 1 ? 1 : 0);
+            for (auto& child : n->children) walk(child.get(), childDepth);
+        };
+    if (store_.historyRoot()) walk(store_.historyRoot(), 0);
+    return rows;
+}
+
+void NotebookView::jumpToHistory(doc::HistNode* node) {
+    if (!node) return;
+    auto before = claimedPanels();
+    if (auto snap = store_.jumpTo(node)) {
+        doc::restoreWidgets(appCtx_, snap->widgets ? *snap->widgets
+                                                   : doc::WidgetSnapList{},
+                            before);
+        rebuildCells();
+    }
+}
+
+void NotebookView::toggleHistoryWindow() {
+    if (historyWindow_) { historyWindow_.reset(); return; }
+    historyWindow_ = std::make_unique<HistoryWindow>(
+        *this, [this] { historyWindow_.reset(); });
 }
 
 bool NotebookView::testPresetsRoundTrip(std::string const& panel) {

@@ -756,6 +756,9 @@ void MainComponent::testShowDemo(String const& which) {
     } else if (which == "flash") {
         editorPane_.triggerFlash(6, 8);
         editorPane_.setErrorMarkersFromEval({ { 12, "example error marker" } });
+    } else if (which == "history") {
+        showNotebook(true);
+        notebook_->toggleHistoryWindow();
     }
 }
 

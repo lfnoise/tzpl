@@ -82,6 +82,19 @@ public:
     void undoDocument();
     void redoDocument();
 
+    // One row of the history tree, flattened preorder for the History window.
+    struct HistoryRow {
+        doc::HistNode* node = nullptr;
+        int depth = 0;
+        juce::String label;
+        bool isCursor = false;
+    };
+    std::vector<HistoryRow> historyRows();
+    // Recall a history node (moves the cursor, restores + re-sends widgets).
+    void jumpToHistory(doc::HistNode* node);
+    // Open/close the floating History window.
+    void toggleHistoryWindow();
+
     // Panels claimed by this document's panel cells (M4 dispatch skips them).
     std::vector<std::string> claimedPanels() const;
 
@@ -131,7 +144,9 @@ private:
     juce::TextButton addProseButton_ { "+ Prose" };
     juce::TextButton addPanelButton_ { "+ Panel" };
     juce::TextButton addPresetsButton_ { "+ Presets" };
+    juce::TextButton historyButton_ { "History" };
     juce::TextButton runAllButton_ { "Run All" };
+    std::unique_ptr<class HistoryWindow> historyWindow_;
     juce::Viewport viewport_;
     juce::Component content_;                 // holds the CellComponents
     std::unordered_map<doc::CellId, std::unique_ptr<CellComponent>> cells_;
