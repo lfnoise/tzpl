@@ -1090,9 +1090,10 @@ float NotebookPanel::drawPanelPage(
                 // inside: overlapping items are first-come-first-served
                 // (the first to claim HoveredId wins), so the smaller,
                 // more specific target has to go first.
-                ImGui::SetCursorScreenPos(
-                    ImVec2(rmax.x - 10.0f, rmax.y - 10.0f));
-                ImGui::InvisibleButton("##size", ImVec2(12.0f, 12.0f));
+                float const kGrip = 12.0f;   // hit area == the drawn square
+                ImVec2 gripMin(rmax.x - kGrip, rmax.y - kGrip);
+                ImGui::SetCursorScreenPos(gripMin);
+                ImGui::InvisibleButton("##size", ImVec2(kGrip, kGrip));
                 if (ImGui::IsItemActivated()) {
                     gArrangeAnchor =
                         ImVec2(w.fw > 0.0f ? w.fw : rmax.x - rmin.x,
@@ -1132,9 +1133,12 @@ float NotebookPanel::drawPanelPage(
                     w.gestureActive = false;
                     w.gestureEnded = true;
                 }
-                ImGui::GetWindowDrawList()->AddRect(
-                    rmin, rmax,
-                    ImGui::GetColorU32(ImGuiCol_DragDropTarget));
+                // Move border + a filled bottom-right resize grip, so the
+                // corner that resizes is visible (matches the JUCE app).
+                ImU32 arrangeCol = ImGui::GetColorU32(ImGuiCol_DragDropTarget);
+                auto* dl = ImGui::GetWindowDrawList();
+                dl->AddRect(rmin, rmax, arrangeCol);
+                dl->AddRectFilled(gripMin, rmax, arrangeCol);
                 ImGui::PopID();
             }
         }

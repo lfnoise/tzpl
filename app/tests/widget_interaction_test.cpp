@@ -87,8 +87,10 @@ static void drawArrangeOverlay() {
     gGroupMax = ImGui::GetItemRectMax();
     ImGui::PushID(1);
     // Grip first: overlapping items are first-come-first-served.
-    ImGui::SetCursorScreenPos(ImVec2(gGroupMax.x - 10.0f, gGroupMax.y - 10.0f));
-    ImGui::InvisibleButton("##size", ImVec2(12.0f, 12.0f));
+    float const kGrip = 12.0f;   // hit area == the drawn square
+    ImGui::SetCursorScreenPos(
+        ImVec2(gGroupMax.x - kGrip, gGroupMax.y - kGrip));
+    ImGui::InvisibleButton("##size", ImVec2(kGrip, kGrip));
     gSizeActive = ImGui::IsItemActive();
     ImGui::SetCursorScreenPos(gGroupMin);
     ImGui::InvisibleButton("##move",
