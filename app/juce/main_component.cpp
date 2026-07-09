@@ -879,6 +879,20 @@ void MainComponent::testShowDemo(String const& which) {
     } else if (which == "perform") {
         showNotebook(true);
         togglePerform();
+    } else if (which == "prose-add") {
+        // Prose cell + typing + a new Panel cell: the prose text must survive
+        // the rebuild that adding a cell triggers.
+        showNotebook(true);
+        notebook_->testAddCell(doc::CellKind::Prose);
+        notebook_->testTypeIntoFocusedCell("prose text must survive");
+        int prose = notebook_->testCellCount() - 1;
+        notebook_->testAddCell(doc::CellKind::Panel);
+        String after = notebook_->testCellEditorText(prose);
+        String verdict = after == "prose text must survive"
+                             ? "prose-add: prose text survived"
+                             : "prose-add: PROSE TEXT LOST -- got \"" + after + "\"";
+        logLine(verdict);
+        std::fprintf(stderr, "%s\n", verdict.toRawUTF8());   // scriptable
     } else if (which == "quit-dirty") {
         // Dirty the untitled tab, then take the real quit path: the
         // unsaved-changes box must appear rather than the app just quitting.

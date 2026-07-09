@@ -104,6 +104,9 @@ public:
     void testTypeIntoFocusedCell(juce::String const& text);
     juce::String testFocusedCellOutput() const;
     int testCellCount() const { return store_.cellCount(); }
+    void testAddCell(doc::CellKind kind) { addCell(kind); }
+    // The live editor text of cell `index` (not the store's copy).
+    juce::String testCellEditorText(int index);
     // Build a Panel cell naming `panel` + a Presets cell, store the live
     // values, perturb widget "a", recall, and report whether it was restored.
     bool testPresetsRoundTrip(std::string const& panel);

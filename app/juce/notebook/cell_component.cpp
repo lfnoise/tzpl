@@ -195,8 +195,10 @@ void CellComponent::syncFromModel(doc::Cell const& cell) {
     if (kind_ == doc::CellKind::Presets && presetsView_)
         presetsView_->setPresets(cell.presets);
 
-    // Only replace editor text when it actually differs, to avoid stomping
-    // in-progress typing / resetting the caret.
+    // Re-seed from the model only when the text actually differs, so an
+    // unchanged cell keeps its caret / undo history. This DOES overwrite
+    // typing the store has not seen yet -- callers sync first (see
+    // NotebookView::rebuildCells).
     if (editor_ && codeDoc_->getAllContent() != String(cell.text))
         codeDoc_->replaceAllContent(cell.text);
 }

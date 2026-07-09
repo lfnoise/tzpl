@@ -163,6 +163,13 @@ std::vector<std::string> NotebookView::claimedPanels() const {
 // Cell view reconciliation
 // ---------------------------------------------------------------------------
 
+// Reconcile the cell views against the store. Editors are re-seeded from
+// the store's text, so THE STORE IS THE TRUTH here: a caller that mutates
+// structure while a cell editor holds text typed since the last eval/save
+// must syncAllCellText() first, or that text is silently discarded. The
+// callers where the store is already the truth (open, new, undo, redo,
+// history jump) must NOT sync -- that would push stale editor text back
+// over what they just restored.
 void NotebookView::rebuildCells() {
     auto snap = store_.snapshot();
 
@@ -188,6 +195,7 @@ void NotebookView::rebuildCells() {
                 deleteSelectedCell();
             };
             slot->onMove = [this, cid](int delta) {
+                syncAllCellText();   // rebuildCells() re-seeds every editor
                 store_.moveCell(cid, delta);
                 rebuildCells();
             };
@@ -201,6 +209,7 @@ void NotebookView::rebuildCells() {
             slot->onRenameCell = [this, cid](juce::String name) {
                 auto cell = store_.cell(cid);
                 if (!cell || cell->name == name.toStdString()) return;
+                syncAllCellText();   // rebuildCells() re-seeds every editor
                 store_.setCellName(cid, name.toStdString());
                 rebuildCells();  // repoints a Panel cell's canvas
             };
@@ -302,6 +311,9 @@ void NotebookView::globalFocusChanged(juce::Component* focused) {
 // ---------------------------------------------------------------------------
 
 void NotebookView::addCell(CellKind kind) {
+    // rebuildCells() re-seeds every editor from the store, so text typed
+    // since the last eval/save has to land in the store first or it is lost.
+    syncAllCellText();
     int index = selectedCell_ ? store_.indexOf(selectedCell_) + 1
                               : store_.cellCount();
     CellId id = store_.insertCell(index, kind);
@@ -311,6 +323,7 @@ void NotebookView::addCell(CellKind kind) {
 
 void NotebookView::deleteSelectedCell() {
     if (!selectedCell_) return;
+    syncAllCellText();   // rebuildCells() re-seeds every editor
     int idx = store_.indexOf(selectedCell_);
     store_.removeCell(selectedCell_);
     cells_.erase(selectedCell_);
@@ -429,6 +442,13 @@ void NotebookView::addCellOutput(CellId cellId, OutputLine const& line) {
 void NotebookView::testTypeIntoFocusedCell(String const& text) {
     if (auto* cc = cellFor(selectedCell_); cc && cc->editor())
         cc->editor()->getDocument().replaceAllContent(text);
+}
+
+String NotebookView::testCellEditorText(int index) {
+    auto snap = store_.snapshot();
+    if (index < 0 || index >= (int)snap->cells.size()) return {};
+    auto* cc = cellFor(snap->cells[(size_t)index]->id);
+    return cc && cc->hasEditor() ? cc->editorText() : String();
 }
 
 String NotebookView::testFocusedCellOutput() const {
