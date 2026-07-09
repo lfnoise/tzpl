@@ -33,3 +33,54 @@ jobs:
         run: |
           bash run_tests.sh | tee result.txt
           grep -Eq '[1-9][0-9]* passed' result.txt
+
+  # Both GUI apps must keep building in parallel (ImGui + JUCE), with the
+  # notebook/document tests and the JUCE headless self-test green.
+  apps-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure (both apps)
+        run: >
+          cmake -B build -DCMAKE_BUILD_TYPE=Release
+          -DTZPL_BUILD_APP=ON -DTZPL_BUILD_APP_JUCE=ON
+
+      - name: Build ImGui app + doc tests
+        run: cmake --build build --target tzpl_app tzpl_doc_tests -j$(sysctl -n hw.ncpu)
+
+      - name: Build JUCE app
+        run: cmake --build build --target tzpl_app_juce -j$(sysctl -n hw.ncpu)
+
+      - name: Doc tests
+        run: ./build/app/tzpl_doc_tests
+
+      - name: JUCE headless self-test
+        run: |
+          BIN=./build/app/tzpl_app_juce_artefacts/Release/Tzopilotl.app/Contents/MacOS/Tzopilotl
+          TZPL_JUCE_SELFTEST=1 "$BIN" -I bridge/modules:lang/modules | tee st.txt
+          grep -q "SELFTEST OK" st.txt
+
+  # Experimental Windows/Linux bring-up for the JUCE app (M6). Informational
+  # until the engine/rtaudio + toolchain are portable; failures don't block.
+  app-juce-linux:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install JUCE + build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build \
+            libasound2-dev libjack-jackd2-dev libfreetype-dev \
+            libx11-dev libxcomposite-dev libxcursor-dev libxext-dev \
+            libxinerama-dev libxrandr-dev libxrender-dev \
+            libglu1-mesa-dev libcurl4-openssl-dev libfontconfig1-dev
+
+      - name: Configure (clang; musttail needs Clang or GCC 15+)
+        env: { CC: clang, CXX: clang++ }
+        run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DTZPL_BUILD_APP_JUCE=ON
+
+      - name: Build JUCE app
+        run: cmake --build build --target tzpl_app_juce -j$(nproc)

@@ -24,6 +24,7 @@
 #ifndef tzpl_engine_hpp
 #define tzpl_engine_hpp
 
+#include "tzpl_audio_backend.hpp"
 #include "tzpl_client_interface.hpp"
 #include "tzpl_silo.hpp"
 #include "tzpl_tap.hpp"
@@ -196,7 +197,8 @@ struct Engine
 	// a silo's RT tap table by TapOutletCmd, and freed by UntapCmd::doNRT
 	// (which runs under nrt_lock_ in the NRT drain loop).
 	std::unordered_map<i64, std::unique_ptr<TapSlot>> taps_;
-	std::unique_ptr<RtAudio> rtaudio_;
+	// Audio device backend (RtAudio, JUCE, ...). Null in NRT mode.
+	std::unique_ptr<AudioBackend> backend_;
 
 	AudioState audioState_ = AudioState::off;
 
@@ -222,16 +224,12 @@ struct Engine
 	f32 const* in_ = nullptr;
 	f32* out_ = nullptr;
 
-	// Separate input device support
-	std::unique_ptr<RtAudio> inputRtaudio_;  // non-null when using a separate input device
-	f32* inputStagingBuf_ = nullptr;          // intermediate buffer for separate input device
-
-	// Set by a CoreAudio listener when the device's nominal sample rate is
+	// Set by a backend listener when the device's nominal sample rate is
 	// changed externally; processNRTCommands stops the stream on the next tick.
 	std::atomic<bool> sampleRateChanged_{false};
-	u32 monitoredOutputDeviceID_ = 0;
 
-    Engine(EngineConfig const& config, AudioStreamParameters& streamParams);
+    Engine(EngineConfig const& config, AudioStreamParameters& streamParams,
+           std::unique_ptr<AudioBackend> backend);
     Engine(EngineConfig const& config, AudioStreamParameters& streamParams, bool nrt);
     ~Engine();
 

@@ -56,6 +56,9 @@
 #if TZPL_HAS_GUI
 #include "app_gui.hpp"
 #endif
+#if TZPL_GUI_JUCE
+#include "juce_audio_backend.hpp"
+#endif
 #include "repl_session.hpp"
 #include "linenoise.h"
 
@@ -465,8 +468,14 @@ static engine::Engine* createEngine(const Config& config, bool nrt = false) {
     engineConfig.numSilos = config.numSilos;
     engineConfig.numTempoClocks = config.numTempoClocks;
 
+#if TZPL_GUI_JUCE
+    engine::Engine* e = nrt ? engine::newEngineNRT(engineConfig, params)
+                            : engine::newEngine(engineConfig, params,
+                                                tzplapp::makeJuceAudioBackend());
+#else
     engine::Engine* e = nrt ? engine::newEngineNRT(engineConfig, params)
                             : engine::newEngine(engineConfig, params);
+#endif
 
     registerBuiltinDefs(e);
 

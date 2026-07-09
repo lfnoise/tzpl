@@ -25,10 +25,18 @@ enum AppTheme {
     themeCount,
 };
 
-// Display names, indexed by AppTheme.
-extern const char* const kAppThemeNames[themeCount];
+// Display names, indexed by AppTheme. Defined here (not in themes.cpp) so
+// the JUCE app can share theme identity without pulling in ImGui.
+inline const char* const kAppThemeNames[themeCount] = {
+    "Dark (Default)",
+    "Corporate Gray",
+    "Dark 2",
+    "Cherry",
+    "Dark Grey",
+};
 
 // Reset the style to defaults, then apply the theme's colors and metrics.
+// (ImGui app only; the JUCE app's counterpart is TzplLookAndFeel.)
 void applyAppTheme(int theme);
 
 #endif /* themes_hpp */

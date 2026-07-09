@@ -18,14 +18,6 @@
 
 #include "imgui.h"
 
-const char* const kAppThemeNames[themeCount] = {
-    "Dark (Default)",
-    "Corporate Gray",
-    "Dark 2",
-    "Cherry",
-    "Dark Grey",
-};
-
 static void corpGrayTheme() {
     ImGuiStyle& style = ImGui::GetStyle();
     ImVec4* colors = style.Colors;

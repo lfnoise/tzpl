@@ -26,6 +26,7 @@
 #include "diagnostic.hpp"
 
 #include "imgui.h"
+#include "imgui_internal.h"  // ImGuiItemFlags_AllowOverlap: arrange overlay
 
 #include <algorithm>
 #include <fstream>
@@ -701,6 +702,11 @@ void NotebookPanel::drawPresetsCell(
     rt.selectedPreset = selected;
 }
 
+// The frame (position, or size for the resize grip) at the instant an
+// arrange drag began. One drag is active at a time, so shared state is
+// fine -- and move/resize can never both be active.
+static ImVec2 gArrangeAnchor(0.0f, 0.0f);
+
 static ImVec4 kindColor(bool everRan, bool errored, bool stale) {
     if (errored) return ImVec4(0.90f, 0.30f, 0.30f, 1.0f);   // red
     if (!everRan) return ImVec4(0.45f, 0.45f, 0.45f, 1.0f);  // hollow gray
@@ -1008,6 +1014,13 @@ float NotebookPanel::drawPanelPage(
         auto snap8 = [](float v) {
             return std::round(v / 8.0f) * 8.0f;
         };
+        // The flow cursor advances in whole grid steps, so a flowing
+        // widget's y is always a multiple of 8 -- an arranged widget,
+        // whose frame snaps to the same grid, can then line up with it.
+        // (Its x already can: the flow margin below is 8.)
+        auto snap8up = [](float v) {
+            return std::ceil(v / 8.0f) * 8.0f;
+        };
         // Lay out in last-upsert order (seq), so re-running the
         // creating code with calls reordered reflows to match.
         std::vector<bridge::UIWidget*> ws;
@@ -1033,69 +1046,102 @@ float NotebookPanel::drawPanelPage(
             }
 
             ImGui::SetCursorPos(ImVec2(px * scale, py * scale));
-            if (arrange) ImGui::BeginDisabled();
+            if (arrange) {
+                ImGui::BeginDisabled();
+                // A DISABLED item still claims HoveredId -- imgui.cpp's
+                // ItemHoverable() sets it before its disabled early-out --
+                // and a claimed HoveredId blocks every later overlapping
+                // item. Without AllowOverlap the arrange overlay submitted
+                // below can only be grabbed where the widget happened to
+                // submit no item of its own, i.e. its text label.
+                ImGui::PushItemFlag(ImGuiItemFlags_AllowOverlap, true);
+            }
             ImGui::BeginGroup();
             if (drawUIWidget(w)) controls.noteTapsVisible();
             ImGui::EndGroup();
-            if (arrange) ImGui::EndDisabled();
+            if (arrange) {
+                ImGui::PopItemFlag();
+                ImGui::EndDisabled();
+            }
 
             // Advance the flow cursor past the widget's ACTUAL drawn
             // extent (an xy pad or piano roll is far taller than a
             // slider row), back in unscaled canvas coordinates.
             float itemH = (ImGui::GetItemRectMax().y
                            - ImGui::GetItemRectMin().y) / scale;
-            autoY = std::max(autoY, py + std::max(itemH, 24.0f) + 8.0f);
+            autoY = std::max(autoY,
+                             snap8up(py + std::max(itemH, 24.0f) + 8.0f));
             contentBottom = std::max(contentBottom,
                                      py + std::max(itemH, 24.0f));
 
             if (arrange) {
                 // Drag overlay: move; corner grip: resize. Both snap to
-                // the 8px grid and commit one history node on release
-                // (via gestureEnded). Arrange only runs at scale 1.
+                // the 8px grid live, and commit one history node on
+                // release (via gestureEnded). Arrange only runs at scale 1.
+                //
+                // The snap quantizes (frame at mouse-down + total drag
+                // delta) rather than accumulating per-frame deltas into
+                // the already-snapped frame -- the latter would swallow
+                // every mouse motion smaller than the grid.
+                //
+                // Only gestureEnded is set, never gestureActive: that flag
+                // belongs to the widget's own drag, and drawUIWidget (which
+                // ran above, disabled) reads it to detect a released drag.
+                // Setting it here made that check fire on the NEXT frame,
+                // raising gestureEnded -- and so a history commit -- on
+                // every frame of an arrange drag instead of one per drag.
                 ImVec2 rmin = ImGui::GetItemRectMin();
                 ImVec2 rmax = ImGui::GetItemRectMax();
-                ImGui::SetCursorScreenPos(rmin);
                 ImGui::PushID((int)w.id);
+                // The grip is submitted BEFORE the move overlay it sits
+                // inside: overlapping items are first-come-first-served
+                // (the first to claim HoveredId wins), so the smaller,
+                // more specific target has to go first.
+                float const kGrip = 12.0f;   // hit area == the drawn square
+                ImVec2 gripMin(rmax.x - kGrip, rmax.y - kGrip);
+                ImGui::SetCursorScreenPos(gripMin);
+                ImGui::InvisibleButton("##size", ImVec2(kGrip, kGrip));
+                if (ImGui::IsItemActivated()) {
+                    gArrangeAnchor =
+                        ImVec2(w.fw > 0.0f ? w.fw : rmax.x - rmin.x,
+                               w.fh > 0.0f ? w.fh : rmax.y - rmin.y);
+                }
+                if (ImGui::IsItemActive()) {
+                    ImVec2 d = ImGui::GetMouseDragDelta(ImGuiMouseButton_Left,
+                                                        0.0f);
+                    w.fw = std::max(24.0f, snap8(gArrangeAnchor.x + d.x));
+                    w.fh = std::max(14.0f, snap8(gArrangeAnchor.y + d.y));
+                } else if (ImGui::IsItemDeactivated()) {
+                    w.gestureEnded = true;
+                }
+                // Move overlay: the whole widget, grip corner excepted.
+                ImGui::SetCursorScreenPos(rmin);
                 ImGui::InvisibleButton("##move",
                     ImVec2(std::max(rmax.x - rmin.x, 16.0f),
                            std::max(rmax.y - rmin.y, 16.0f)));
-                if (ImGui::IsItemActive()) {
+                if (ImGui::IsItemActivated()) {
                     // Dragging a flowing widget pins it: its current
                     // flow position becomes the sticky frame.
                     if (w.fx < 0.0f) {
                         w.fx = px;
                         w.fy = py;
                     }
-                    ImVec2 d = ImGui::GetIO().MouseDelta;
-                    w.fx = std::max(0.0f, w.fx + d.x);
-                    w.fy = std::max(0.0f, w.fy + d.y);
-                    w.gestureActive = true;
-                } else if (ImGui::IsItemDeactivated()) {
-                    w.fx = std::max(0.0f, snap8(w.fx));
-                    w.fy = std::max(0.0f, snap8(w.fy));
-                    w.gestureActive = false;
-                    w.gestureEnded = true;
+                    gArrangeAnchor = ImVec2(w.fx, w.fy);
                 }
-                // Resize grip (bottom-right corner).
-                ImGui::SetCursorScreenPos(
-                    ImVec2(rmax.x - 10.0f, rmax.y - 10.0f));
-                ImGui::InvisibleButton("##size", ImVec2(12.0f, 12.0f));
                 if (ImGui::IsItemActive()) {
-                    ImVec2 d = ImGui::GetIO().MouseDelta;
-                    float baseW = w.fw > 0.0f ? w.fw : rmax.x - rmin.x;
-                    float baseH = w.fh > 0.0f ? w.fh : rmax.y - rmin.y;
-                    w.fw = std::max(24.0f, baseW + d.x);
-                    w.fh = std::max(14.0f, baseH + d.y);
-                    w.gestureActive = true;
+                    ImVec2 d = ImGui::GetMouseDragDelta(ImGuiMouseButton_Left,
+                                                        0.0f);
+                    w.fx = std::max(0.0f, snap8(gArrangeAnchor.x + d.x));
+                    w.fy = std::max(0.0f, snap8(gArrangeAnchor.y + d.y));
                 } else if (ImGui::IsItemDeactivated()) {
-                    w.fw = std::max(24.0f, snap8(w.fw));
-                    w.fh = std::max(14.0f, snap8(w.fh));
-                    w.gestureActive = false;
                     w.gestureEnded = true;
                 }
-                ImGui::GetWindowDrawList()->AddRect(
-                    rmin, rmax,
-                    ImGui::GetColorU32(ImGuiCol_DragDropTarget));
+                // Move border + a filled bottom-right resize grip, so the
+                // corner that resizes is visible (matches the JUCE app).
+                ImU32 arrangeCol = ImGui::GetColorU32(ImGuiCol_DragDropTarget);
+                auto* dl = ImGui::GetWindowDrawList();
+                dl->AddRect(rmin, rmax, arrangeCol);
+                dl->AddRectFilled(gripMin, rmax, arrangeCol);
                 ImGui::PopID();
             }
         }

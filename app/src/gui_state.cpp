@@ -10,7 +10,6 @@
 #include <poll.h>
 #include <cstring>
 #include <pthread.h>
-#include <GLFW/glfw3.h>
 
 // ---------------------------------------------------------------------------
 // OutputBuffer
@@ -143,7 +142,7 @@ static void* evalThreadFunc(void* arg) {
         ea->ctx->nrtvm->vm.gcHeartbeat();
     }
     ea->self->running.store(false);
-    glfwPostEmptyEvent();  // wake main loop
+    if (ea->self->onFinished) ea->self->onFinished(); // wake the GUI loop
     delete ea;
     return nullptr;
 }

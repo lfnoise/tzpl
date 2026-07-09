@@ -17,6 +17,7 @@ option(TZPL_BUILD_BENCHMARKS        "Build benchmarks"                          
 option(TZPL_BUILD_OSC               "Build OSC (Open Sound Control) support"              OFF)
 option(TZPL_BUILD_NATS              "Build NATS messaging support"                       OFF)
 option(TZPL_BUILD_GUI               "Build with GUI support (Dear ImGui + GLFW)"         ON)
+option(TZPL_BUILD_APP_JUCE          "Build the JUCE GUI application (tzpl_app_juce)"     OFF)
 
 # --- Core dependencies (always needed) --------------------------------------
 
@@ -59,7 +60,7 @@ endif()
 # The NATS bridge inside bridge/CMakeLists.txt is guarded
 # by if(TARGET nats_lib), so it only builds when TZPL_BUILD_NATS is ON.
 
-if(TZPL_BUILD_APP AND EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/app/CMakeLists.txt)
+if((TZPL_BUILD_APP OR TZPL_BUILD_APP_JUCE) AND EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/app/CMakeLists.txt)
     add_subdirectory(app)
 endif()
 

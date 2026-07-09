@@ -59,6 +59,61 @@ static ImVec2 gItemPos;    // top-left of the widget's frame (captured per frame
 static float gFrameH = 0;
 static float gLabelX = 0;  // where the name label landed (layout regression)
 
+// Arrange mode: the widget is drawn DISABLED under an invisible move
+// overlay + resize grip, mirroring notebook_panel.cpp's drawPanelPage.
+static bool gArrange = false;
+// The fix. With it off, the disabled widget keeps HoveredId and the
+// overlay is only grabbable where the widget submitted no item (its label).
+static bool gArrangeAllowOverlap = true;
+// IsItemHovered() is only a rect test (it never consults HoveredId), so the
+// meaningful signal is whether a press actually activates the overlay --
+// that path runs ButtonBehavior -> ItemHoverable, where the HoveredId
+// first-come rule lives.
+static bool gMoveActive = false;
+static bool gSizeActive = false;
+static ImVec2 gGroupMin, gGroupMax;
+// Set to reproduce the old bug: the arrange drag also raised gestureActive,
+// which the (disabled) widget's own draw code read as a released drag.
+static bool gArrangeSetsGestureActive = false;
+// How many gestureEnded flags NotebookPanel::update() would have consumed,
+// i.e. how many history commits the drag produced.
+static int gGestureEnds = 0;
+
+static void drawArrangeOverlay() {
+    ImGui::BeginDisabled();
+    if (gArrangeAllowOverlap)
+        ImGui::PushItemFlag(ImGuiItemFlags_AllowOverlap, true);
+    ImGui::BeginGroup();
+    if (gW) drawUIWidget(*gW);
+    ImGui::EndGroup();
+    if (gArrangeAllowOverlap) ImGui::PopItemFlag();
+    ImGui::EndDisabled();
+
+    gGroupMin = ImGui::GetItemRectMin();
+    gGroupMax = ImGui::GetItemRectMax();
+    ImGui::PushID(1);
+    // Grip first: overlapping items are first-come-first-served.
+    float const kGrip = 12.0f;   // hit area == the drawn square
+    ImGui::SetCursorScreenPos(
+        ImVec2(gGroupMax.x - kGrip, gGroupMax.y - kGrip));
+    ImGui::InvisibleButton("##size", ImVec2(kGrip, kGrip));
+    gSizeActive = ImGui::IsItemActive();
+    ImGui::SetCursorScreenPos(gGroupMin);
+    ImGui::InvisibleButton("##move",
+        ImVec2(std::max(gGroupMax.x - gGroupMin.x, 16.0f),
+               std::max(gGroupMax.y - gGroupMin.y, 16.0f)));
+    gMoveActive = ImGui::IsItemActive();
+    if (gW) {
+        if (ImGui::IsItemActive()) {
+            if (gArrangeSetsGestureActive) gW->gestureActive = true;
+        } else if (ImGui::IsItemDeactivated()) {
+            if (gArrangeSetsGestureActive) gW->gestureActive = false;
+            gW->gestureEnded = true;
+        }
+    }
+    ImGui::PopID();
+}
+
 static void frame() {
     ImGuiIO& io = ImGui::GetIO();
     io.DeltaTime = 1.0f / 60.0f;
@@ -69,10 +124,21 @@ static void frame() {
     ImGui::Begin("test", nullptr, ImGuiWindowFlags_NoDecoration);
     gItemPos = ImGui::GetCursorScreenPos();
     gFrameH = ImGui::GetFrameHeight();
-    if (gW) drawUIWidget(*gW);
-    gLabelX = ImGui::GetItemRectMin().x;  // last item = the name label
+    if (gArrange) {
+        drawArrangeOverlay();
+    } else {
+        if (gW) drawUIWidget(*gW);
+        gLabelX = ImGui::GetItemRectMin().x;  // last item = the name label
+    }
     ImGui::End();
     ImGui::Render();
+    // NotebookPanel::update() drains gestureEnded once per frame, committing
+    // one history node for each. Count them the same way -- but only while
+    // arranging; the other tests inspect gestureEnded themselves.
+    if (gArrange && gW && gW->gestureEnded) {
+        gW->gestureEnded = false;
+        ++gGestureEnds;
+    }
 }
 
 static void frames(int n) {
@@ -265,6 +331,100 @@ int main() {
                   labelXNormal, 0.5);
         settle();
         gW = nullptr;
+    }
+
+    // ---- xy pad sizes on both axes (fw x fh), not a forced square --------
+    // A square pad ignored fh, so arrange mode's grip only responded to
+    // horizontal drags. With fh honoured, y maps over the shorter height.
+    {
+        auto w = makeWidget(bridge::UIWidgetKind::XY, 0, 100, 0, 0);
+        w.values.push_back(0.0);   // XY needs both axes
+        w.fw = 200.0f;
+        w.fh = 100.0f;             // deliberately not square
+        gW = &w;
+        frames(3);
+        ImGui::GetIO().AddMousePosEvent(gItemPos.x + 150.0f,
+                                        gItemPos.y + 25.0f);
+        frames(2);
+        press();
+        checkNear("xy x maps over fw", w.values[0], 75.0);
+        // 1 - 25/100 = 0.75. A square pad would give 1 - 25/200 = 0.875.
+        checkNear("xy y maps over fh, not fw", w.values[1], 0.75, 0.02);
+        release();
+        settle();
+        gW = nullptr;
+    }
+
+    // ---- arrange overlay: the whole widget is grabbable, not just its
+    // label. A disabled item still claims HoveredId (imgui.cpp's
+    // ItemHoverable sets it before the disabled early-out), which used to
+    // block the move overlay everywhere the widget drew an item.
+    {
+        auto w = makeWidget(bridge::UIWidgetKind::Slider, 0, 100, 50, 0);
+        gW = &w;
+        gArrange = true;
+        settle();
+
+        auto pressAt = [](float x, float y) {
+            ImGui::GetIO().AddMousePosEvent(x, y);
+            frames(3);
+            press();
+        };
+        float midx = gGroupMin.x + 40.0f;             // over the slider track
+        float midy = (gGroupMin.y + gGroupMax.y) * 0.5f;
+        float gripx = gGroupMax.x - 4.0f, gripy = gGroupMax.y - 4.0f;
+
+        // Over the control itself -- the case that was broken.
+        pressAt(midx, midy);
+        check(gMoveActive, "arrange: move overlay grabbable over the control");
+        check(!gSizeActive, "arrange: grip not grabbed mid-widget");
+        release();
+        settle();
+
+        // The grip corner belongs to the grip, not the move overlay.
+        pressAt(gripx, gripy);
+        check(gSizeActive, "arrange: resize grip grabbable in its corner");
+        check(!gMoveActive, "arrange: move overlay yields the grip corner");
+        release();
+        settle();
+
+        // Without AllowOverlap the disabled widget keeps HoveredId: this is
+        // the reported bug, and proves the checks above are not vacuous.
+        gArrangeAllowOverlap = false;
+        pressAt(midx, midy);
+        check(!gMoveActive,
+              "arrange: (regression probe) disabled widget blocks the overlay");
+        release();
+        gArrangeAllowOverlap = true;
+
+        // ---- one history commit per arrange drag, not one per frame ------
+        auto dragMove = [&](float fromX, float fromY) {
+            ImGui::GetIO().AddMousePosEvent(fromX, fromY);
+            frames(3);
+            gGestureEnds = 0;
+            press();
+            for (int i = 1; i <= 5; ++i) {   // several drag deltas
+                ImGui::GetIO().AddMousePosEvent(fromX + i * 9.0f, fromY);
+                frames(2);
+            }
+            release();
+            settle();
+        };
+        dragMove(midx, midy);
+        checkNear("arrange drag commits one history node", gGestureEnds, 1, 0);
+
+        // The old shape: the arrange drag also set gestureActive, which the
+        // disabled widget's own draw read as a released drag every frame.
+        gArrangeSetsGestureActive = true;
+        dragMove(midx, midy);
+        check(gGestureEnds > 1,
+              "arrange: (regression probe) gestureActive spams history");
+        gArrangeSetsGestureActive = false;
+        w.gestureActive = false;
+
+        gArrange = false;
+        gW = nullptr;
+        settle();
     }
 
     ImGui::DestroyContext();
