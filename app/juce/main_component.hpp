@@ -109,7 +109,14 @@ private:
     void saveActiveFlow(bool forceDialog, std::function<void(bool)> done = {});
     void closeActiveTabFlow();
     void openNotebookFile(juce::File const& file);
-    void saveNotebookFlow(bool forceDialog);
+    // `done(true)` fires only after a successful save (an untitled notebook
+    // asks for a path first, so this can complete long after the call).
+    void saveNotebookFlow(bool forceDialog, std::function<void(bool)> done = {});
+    // Save every modified editor tab, asking for a path for the untitled
+    // ones (one chooser at a time). `done(false)` if any save fails or the
+    // user cancels a chooser -- so callers must not treat it as "saved".
+    void saveAllTabsThen(std::function<void(bool)> done);
+    void saveNextUntitledTabThen(std::function<void(bool)> done);
     void showNotebook(bool show);
     void togglePerform();
 

@@ -24,6 +24,7 @@
 #include "nrt_vm.hpp"
 #include "repl_session.hpp"
 #include "module_compiler.hpp"
+#include <cstdio>
 
 namespace tzplapp {
 
@@ -229,30 +230,60 @@ void MainComponent::logLine(String const& line) {
 // ---------------------------------------------------------------------------
 
 void MainComponent::confirmUnsavedChangesThen(std::function<void()> proceed) {
-    if (!editorPane_.hasUnsavedChanges()) {
+    // Both the editor tabs AND the notebook document hold unsaved state; a
+    // dirty notebook alone must still prompt.
+    auto names = editorPane_.unsavedFileNames();
+    bool notebookDirty = notebook_ && notebook_->isModified();
+    if (names.empty() && !notebookDirty) {
         proceed();
         return;
     }
+    if (notebookDirty) {
+        juce::File f = notebook_->currentFile();
+        names.insert(names.begin(), f != juce::File() ? f.getFileName()
+                                                      : String("untitled notebook"));
+    }
 
-    auto names = editorPane_.unsavedFileNames();
     String msg;
     if (names.size() == 1) {
         msg = "Do you want to save changes to \"" + names[0] + "\"?\n"
               "Your changes will be lost if you don't save them.";
     } else {
         msg << "You have " << (int)names.size()
-            << " files with unsaved changes.\n"
+            << " documents with unsaved changes.\n"
                "Your changes will be lost if you don't save them.\n";
         for (auto const& n : names) msg << "\n  \xe2\x80\xa2 " << n;
     }
 
-    juce::NativeMessageBox::showYesNoCancelBox(
-        juce::MessageBoxIconType::WarningIcon, "Unsaved Changes", msg, this,
-        juce::ModalCallbackFunction::create([this, proceed](int result) {
-            // 1 = Save All, 2 = Don't Save, 0 = Cancel
-            if (result == 1) { editorPane_.saveAll(); proceed(); }
-            else if (result == 2) proceed();
-        }));
+    auto options = juce::MessageBoxOptions()
+        .withIconType(juce::MessageBoxIconType::WarningIcon)
+        .withTitle("Unsaved Changes")
+        .withMessage(msg)
+        .withButton(names.size() > 1 ? "Save All" : "Save")
+        .withButton("Don't Save")
+        .withButton("Cancel")
+        .withAssociatedComponent(this);
+
+    // showAsync reports the BUTTON INDEX: 0 = Save(All), 1 = Don't Save,
+    // 2 = Cancel. Saving an untitled document opens a file chooser, so
+    // `proceed` must wait for those to finish -- and must not run if the
+    // user backs out of any of them, or their contents would be lost.
+    juce::NativeMessageBox::showAsync(
+        options, [this, proceed, notebookDirty](int result) {
+            if (result == 0) {
+                saveAllTabsThen([this, proceed, notebookDirty](bool ok) {
+                    if (!ok) return;   // a chooser was cancelled: stay open
+                    if (notebookDirty)
+                        saveNotebookFlow(false, [proceed](bool saved) {
+                            if (saved) proceed();
+                        });
+                    else
+                        proceed();
+                });
+            } else if (result == 1) {
+                proceed();
+            }
+        });
 }
 
 void MainComponent::openFileFlow() {
@@ -286,14 +317,75 @@ void MainComponent::openNotebookFile(juce::File const& file) {
 }
 
 // Save the notebook; asks for a path if it has none (or if forceDialog).
-void MainComponent::saveNotebookFlow(bool forceDialog) {
+void MainComponent::saveAllTabsThen(std::function<void(bool)> done) {
+    editorPane_.saveAll();   // synchronous: every modified tab that has a path
+    // saveAll() swallows write failures. A tab still modified despite having
+    // a path means its write failed (permissions, deleted directory); report
+    // it rather than letting the caller quit over it.
+    for (int i = 0; i < editorPane_.tabCount(); ++i) {
+        if (editorPane_.tabModified(i) && editorPane_.tabHasFilePath(i)) {
+            logLine("could not save " + editorPane_.tabName(i));
+            done(false);
+            return;
+        }
+    }
+    saveNextUntitledTabThen(std::move(done));
+}
+
+// One untitled tab per call, recursing through its own chooser callback.
+void MainComponent::saveNextUntitledTabThen(std::function<void(bool)> done) {
+    int idx = -1;
+    for (int i = 0; i < editorPane_.tabCount(); ++i) {
+        if (editorPane_.tabModified(i) && !editorPane_.tabHasFilePath(i)) {
+            idx = i;
+            break;
+        }
+    }
+    if (idx < 0) { done(true); return; }
+
+    String name = editorPane_.tabName(idx);
+    fileChooser_ = std::make_unique<juce::FileChooser>(
+        "Save \"" + name + "\"",
+        juce::File::getSpecialLocation(juce::File::userHomeDirectory)
+            .getChildFile(name),
+        "*.x");
+    fileChooser_->launchAsync(
+        juce::FileBrowserComponent::saveMode
+            | juce::FileBrowserComponent::warnAboutOverwriting,
+        [this, idx, done](juce::FileChooser const& fc) {
+            auto file = fc.getResult();
+            if (file == juce::File() || !editorPane_.saveTabAs(idx, file)) {
+                done(false);   // cancelled or write failed -- don't proceed
+                return;
+            }
+            // The tab must no longer qualify, or the recursion never ends.
+            if (editorPane_.tabModified(idx)
+                && !editorPane_.tabHasFilePath(idx)) {
+                logLine("could not save " + file.getFullPathName());
+                done(false);
+                return;
+            }
+            // Defer: replacing fileChooser_ here would destroy the chooser
+            // that owns this running lambda.
+            juce::MessageManager::callAsync(
+                [this, done] { saveNextUntitledTabThen(done); });
+        });
+}
+
+// Save the notebook; asks for a path if it has none (or if forceDialog).
+void MainComponent::saveNotebookFlow(bool forceDialog,
+                                     std::function<void(bool)> done) {
+    auto write = [this](juce::File const& file) {
+        String err;
+        bool ok = notebook_->saveToFile(file, err);
+        logLine(ok ? "saved " + file.getFullPathName()
+                   : "notebook save failed: " + err);
+        return ok;
+    };
     juce::File existing = notebook_->currentFile();
     if (!forceDialog && existing != juce::File()) {
-        String err;
-        if (notebook_->saveToFile(existing, err))
-            logLine("saved " + existing.getFullPathName());
-        else
-            logLine("notebook save failed: " + err);
+        bool ok = write(existing);
+        if (done) done(ok);
         return;
     }
     fileChooser_ = std::make_unique<juce::FileChooser>(
@@ -304,14 +396,10 @@ void MainComponent::saveNotebookFlow(bool forceDialog) {
     fileChooser_->launchAsync(
         juce::FileBrowserComponent::saveMode
             | juce::FileBrowserComponent::warnAboutOverwriting,
-        [this](juce::FileChooser const& fc) {
+        [this, write, done](juce::FileChooser const& fc) {
             auto file = fc.getResult();
-            if (file == juce::File()) return;
-            String err;
-            if (notebook_->saveToFile(file, err))
-                logLine("saved " + file.getFullPathName());
-            else
-                logLine("notebook save failed: " + err);
+            bool ok = file != juce::File() && write(file);
+            if (done) done(ok);
         });
 }
 
@@ -791,6 +879,23 @@ void MainComponent::testShowDemo(String const& which) {
     } else if (which == "perform") {
         showNotebook(true);
         togglePerform();
+    } else if (which == "quit-dirty") {
+        // Dirty the untitled tab, then take the real quit path: the
+        // unsaved-changes box must appear rather than the app just quitting.
+        testTypeIntoEditor("let dirty = 1;");
+        juce::Timer::callAfterDelay(300, [] {
+            juce::JUCEApplicationBase::getInstance()->systemRequestedQuit();
+        });
+    } else if (which == "quit-dirty-save") {
+        // What the box's Save button runs: an untitled tab must get a Save
+        // As chooser, and cancelling it must report failure (not "saved").
+        testTypeIntoEditor("let dirty = 1;");
+        juce::Timer::callAfterDelay(300, [this] {
+            saveAllTabsThen([this](bool ok) {
+                logLine(ok ? "quit-dirty-save: all tabs saved"
+                           : "quit-dirty-save: save cancelled or failed");
+            });
+        });
     }
 }
 

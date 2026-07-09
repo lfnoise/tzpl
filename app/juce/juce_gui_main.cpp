@@ -226,8 +226,9 @@ public:
                 });
         }
 
-        // TZPL_JUCE_DEMO=find|flash: open a visual state at startup so it can
-        // be screenshotted without injecting global keystrokes.
+        // TZPL_JUCE_DEMO=find|flash|history|perform|quit-dirty: open a visual
+        // state at startup so it can be screenshotted without injecting
+        // global keystrokes.
         if (auto* d = std::getenv("TZPL_JUCE_DEMO"))
             juce::MessageManager::callAsync(
                 [this, demo = juce::String(d)] {
