@@ -933,15 +933,19 @@ static void drawWaveform(UIWidget& w) {
 }
 
 static void drawXY(UIWidget& w) {
-    const float size = wFrameW(w, 160.0f);
+    // The two axes size independently (fw / fh), like every other 2D
+    // widget: a pad forced square ignores the frame's height, so arrange
+    // mode's resize grip would only ever respond to horizontal drags.
+    const float width = wFrameW(w, 160.0f);
+    const float height = wFrameH(w, 160.0f);
     ImVec2 origin = ImGui::GetCursorScreenPos();
     ImGui::InvisibleButton((std::string("##") + w.name).c_str(),
-                           ImVec2(size, size));
+                           ImVec2(width, height));
     bool active = ImGui::IsItemActive();
     if (active) {
         ImVec2 m = ImGui::GetIO().MousePos;
-        float px = std::clamp((m.x - origin.x) / size, 0.0f, 1.0f);
-        float py = 1.0f - std::clamp((m.y - origin.y) / size, 0.0f, 1.0f);
+        float px = std::clamp((m.x - origin.x) / width, 0.0f, 1.0f);
+        float py = 1.0f - std::clamp((m.y - origin.y) / height, 0.0f, 1.0f);
         w.values[0] = w.spec.map(px);
         w.values[1] = w.spec2.map(py);
         markDirty(w);
@@ -959,14 +963,15 @@ static void drawXY(UIWidget& w) {
     auto* dl = ImGui::GetWindowDrawList();
     ImU32 frameCol = ImGui::GetColorU32(active ? ImGuiCol_FrameBgActive
                                                : ImGuiCol_FrameBg);
-    dl->AddRectFilled(origin, ImVec2(origin.x + size, origin.y + size), frameCol);
-    dl->AddRect(origin, ImVec2(origin.x + size, origin.y + size),
-                ImGui::GetColorU32(ImGuiCol_Border));
-    float cx = origin.x + static_cast<float>(w.spec.unmap(w.values[0])) * size;
-    float cy = origin.y + (1.0f - static_cast<float>(w.spec2.unmap(w.values[1]))) * size;
+    ImVec2 farCorner(origin.x + width, origin.y + height);
+    dl->AddRectFilled(origin, farCorner, frameCol);
+    dl->AddRect(origin, farCorner, ImGui::GetColorU32(ImGuiCol_Border));
+    float cx = origin.x + static_cast<float>(w.spec.unmap(w.values[0])) * width;
+    float cy = origin.y
+             + (1.0f - static_cast<float>(w.spec2.unmap(w.values[1]))) * height;
     ImU32 cursorCol = ImGui::GetColorU32(ImGuiCol_SliderGrab);
-    dl->AddLine(ImVec2(origin.x, cy), ImVec2(origin.x + size, cy), cursorCol);
-    dl->AddLine(ImVec2(cx, origin.y), ImVec2(cx, origin.y + size), cursorCol);
+    dl->AddLine(ImVec2(origin.x, cy), ImVec2(farCorner.x, cy), cursorCol);
+    dl->AddLine(ImVec2(cx, origin.y), ImVec2(cx, farCorner.y), cursorCol);
     dl->AddCircleFilled(ImVec2(cx, cy), 4.0f, cursorCol);
 
     // The pad InvisibleButton is still the last item here (the lines

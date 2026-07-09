@@ -312,6 +312,28 @@ int main() {
         gW = nullptr;
     }
 
+    // ---- xy pad sizes on both axes (fw x fh), not a forced square --------
+    // A square pad ignored fh, so arrange mode's grip only responded to
+    // horizontal drags. With fh honoured, y maps over the shorter height.
+    {
+        auto w = makeWidget(bridge::UIWidgetKind::XY, 0, 100, 0, 0);
+        w.values.push_back(0.0);   // XY needs both axes
+        w.fw = 200.0f;
+        w.fh = 100.0f;             // deliberately not square
+        gW = &w;
+        frames(3);
+        ImGui::GetIO().AddMousePosEvent(gItemPos.x + 150.0f,
+                                        gItemPos.y + 25.0f);
+        frames(2);
+        press();
+        checkNear("xy x maps over fw", w.values[0], 75.0);
+        // 1 - 25/100 = 0.75. A square pad would give 1 - 25/200 = 0.875.
+        checkNear("xy y maps over fh, not fw", w.values[1], 0.75, 0.02);
+        release();
+        settle();
+        gW = nullptr;
+    }
+
     // ---- arrange overlay: the whole widget is grabbable, not just its
     // label. A disabled item still claims HoveredId (imgui.cpp's
     // ItemHoverable sets it before the disabled early-out), which used to
