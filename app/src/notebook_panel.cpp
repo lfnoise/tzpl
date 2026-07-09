@@ -1013,6 +1013,13 @@ float NotebookPanel::drawPanelPage(
         auto snap8 = [](float v) {
             return std::round(v / 8.0f) * 8.0f;
         };
+        // The flow cursor advances in whole grid steps, so a flowing
+        // widget's y is always a multiple of 8 -- an arranged widget,
+        // whose frame snaps to the same grid, can then line up with it.
+        // (Its x already can: the flow margin below is 8.)
+        auto snap8up = [](float v) {
+            return std::ceil(v / 8.0f) * 8.0f;
+        };
         // Lay out in last-upsert order (seq), so re-running the
         // creating code with calls reordered reflows to match.
         std::vector<bridge::UIWidget*> ws;
@@ -1049,7 +1056,8 @@ float NotebookPanel::drawPanelPage(
             // slider row), back in unscaled canvas coordinates.
             float itemH = (ImGui::GetItemRectMax().y
                            - ImGui::GetItemRectMin().y) / scale;
-            autoY = std::max(autoY, py + std::max(itemH, 24.0f) + 8.0f);
+            autoY = std::max(autoY,
+                             snap8up(py + std::max(itemH, 24.0f) + 8.0f));
             contentBottom = std::max(contentBottom,
                                      py + std::max(itemH, 24.0f));
 

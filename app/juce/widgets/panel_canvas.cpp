@@ -27,9 +27,21 @@
 namespace tzplapp {
 
 namespace {
-constexpr int kGap = 6;
+// The flow layout's margin doubles as the left edge of every unarranged
+// widget, so it must sit ON the arrange grid (widget_component.cpp's
+// snap8) -- otherwise no arranged widget can ever line up with a flowing
+// one, since the snap can only land on multiples of 8.
+constexpr int kGrid = 8;           // arrange snap grid
+constexpr int kGap = kGrid;
 constexpr int kFullWidthMax = 520; // slider-likes stretch up to this
 constexpr int kTabH = 24;          // sub-panel tab strip height
+
+// One step of the flow layout, rounded up to the grid so that flowing
+// widgets sit at grid-aligned y as well as x. Sizes are untouched; a row
+// just gains up to kGrid-1 extra px of gap.
+int flowAdvance(int widgetHeight) {
+    return (widgetHeight + kGap + kGrid - 1) / kGrid * kGrid;
+}
 }
 
 PanelCanvas::PanelCanvas(bridge::UIState& ui, std::string panel,
@@ -202,7 +214,7 @@ int PanelCanvas::preferredHeight(int width) const {
             int fh = uw->fh > 0.0f ? (int)uw->fh : pref.y;
             absBottom = std::max(absBottom, top + (int)uw->fy + fh);
         } else {
-            flowBottom += pref.y + kGap;
+            flowBottom += flowAdvance(pref.y);
         }
     }
     juce::ignoreUnused(width);
@@ -256,7 +268,7 @@ void PanelCanvas::layOutWidgets() {
         } else {
             // Unplaced: flow top to bottom.
             it->second->setBounds(kGap, flowY, std::max(cw, 40), pref.y);
-            flowY += pref.y + kGap;
+            flowY += flowAdvance(pref.y);
         }
     }
 }
