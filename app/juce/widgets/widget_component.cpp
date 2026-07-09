@@ -24,6 +24,7 @@
 #include <algorithm>
 #include <cmath>
 #include <random>
+#include <utility>
 
 namespace tzplapp {
 
@@ -225,9 +226,14 @@ void WidgetComponent::paintRange(Graphics& g, UIWidget& w) {
     double lo = w.values.size() > 0 ? w.values[0] : w.spec.lo;
     double hi = w.values.size() > 1 ? w.values[1] : w.spec.hi;
     float plo = (float)w.spec.unmap(lo), phi = (float)w.spec.unmap(hi);
+    // The half-pixel outsets keep a collapsed range visible as a thin line.
+    float x0 = minx + plo * usable - 0.5f;
+    float x1 = minx + phi * usable + 0.5f;
     g.setColour(juce::Colour(0xff5a9bd4));
-    g.fillRoundedRectangle(minx + plo * usable, bb.getY() + 2,
-                           (phi - plo) * usable, bb.getHeight() - 4, 3.0f);
+    g.fillRoundedRectangle(x0, bb.getY() + 2, x1 - x0, bb.getHeight() - 4, 3.0f);
+    // Graduated tick scale while hovered or dragging (matches ImGui).
+    if (isMouseOverOrDragging(true) || dragging_)
+        drawTickMarks(g, w.spec, bb.reduced(2.0f, 2.0f));
     g.setColour(juce::Colours::white.withAlpha(0.9f));
     g.setFont(12.0f);
     g.drawText(fmtValue(lo) + " .. " + fmtValue(hi), bb,
@@ -495,6 +501,26 @@ void WidgetComponent::setArrange(bool on, int canvasTop) {
     repaint();
 }
 
+// Modifiers are read live rather than latched at mouse-down, so one gesture
+// can switch modes mid-drag. Shift (not ctrl) adjusts an end: on macOS a
+// physical ctrl+click arrives as a right-click.
+void WidgetComponent::applyRangeDrag(UIWidget& w, float pos,
+                                     juce::ModifierKeys mods) {
+    float plo = (float)w.spec.unmap(w.values[0]);
+    float phi = (float)w.spec.unmap(w.values[1]);
+    if (mods.isAltDown()) {
+        ui_gesture::moveRange(pos, plo, phi);        // slide the whole range
+    } else if (mods.isShiftDown()) {
+        ui_gesture::adjustRangeEnd(pos, plo, phi);   // adjust the nearer end
+    } else {
+        plo = std::min(rangeAnchor_, pos);           // sweep out a new range
+        phi = std::max(rangeAnchor_, pos);
+    }
+    w.values[0] = w.spec.map(plo);
+    w.values[1] = w.spec.map(phi);
+    markDirtyAndNotify(w, false);
+}
+
 void WidgetComponent::mouseDown(juce::MouseEvent const& e) {
     // Arrange mode: begin a move, or a resize if in the bottom-right grip.
     if (arrange_) {
@@ -512,7 +538,20 @@ void WidgetComponent::mouseDown(juce::MouseEvent const& e) {
     // so Cmd is free for this -- matches the ImGui app).
     if (e.mods.isCommandDown() && !e.mods.isAltDown()
         && (w.kind == UIWidgetKind::Slider || w.kind == UIWidgetKind::Number)) {
-        openValueEntry(w.values.empty() ? w.spec.init : w.values[0]);
+        openValueEntry(w.values.empty() ? w.spec.init : w.values[0], 0,
+                       bodyRect(*this, kLabelH).toNearestInt());
+        return;
+    }
+    // Cmd-click a Range edits the end whose half was clicked; the editor
+    // covers only that half so the other end stays readable.
+    if (e.mods.isCommandDown() && !e.mods.isAltDown()
+        && w.kind == UIWidgetKind::Range) {
+        if (w.values.size() < 2) w.values.resize(2);
+        auto halves = bodyRect(*this, kLabelH);
+        int end = (float)e.x < halves.getCentreX() ? 0 : 1;
+        auto half = end == 0 ? halves.withTrimmedRight(halves.getWidth() * 0.5f)
+                             : halves.withTrimmedLeft(halves.getWidth() * 0.5f);
+        openValueEntry(w.values[(size_t)end], end, half.toNearestInt());
         return;
     }
     dragging_ = true;
@@ -531,13 +570,8 @@ void WidgetComponent::mouseDown(juce::MouseEvent const& e) {
         } break;
         case UIWidgetKind::Range: {
             if (w.values.size() < 2) w.values.resize(2);
-            float plo = (float)w.spec.unmap(w.values[0]);
-            float phi = (float)w.spec.unmap(w.values[1]);
-            float pos = std::clamp((e.x - minx) / usable, 0.0f, 1.0f);
-            ui_gesture::adjustRangeEnd(pos, plo, phi);
-            w.values[0] = w.spec.map(plo);
-            w.values[1] = w.spec.map(phi);
-            markDirtyAndNotify(w, false);
+            rangeAnchor_ = std::clamp((e.x - minx) / usable, 0.0f, 1.0f);
+            applyRangeDrag(w, rangeAnchor_, e.mods);
         } break;
         case UIWidgetKind::Number:
             if (w.values.empty()) w.values.resize(1);
@@ -656,15 +690,10 @@ void WidgetComponent::mouseDrag(juce::MouseEvent const& e) {
             w.values[0] = w.spec.map(std::clamp(pos, 0.0f, 1.0f));
             markDirtyAndNotify(w, false);
         } break;
-        case UIWidgetKind::Range: {
-            float plo = (float)w.spec.unmap(w.values[0]);
-            float phi = (float)w.spec.unmap(w.values[1]);
-            float pos = std::clamp((e.x - minx) / usable, 0.0f, 1.0f);
-            ui_gesture::adjustRangeEnd(pos, plo, phi);
-            w.values[0] = w.spec.map(plo);
-            w.values[1] = w.spec.map(phi);
-            markDirtyAndNotify(w, false);
-        } break;
+        case UIWidgetKind::Range:
+            applyRangeDrag(w, std::clamp((e.x - minx) / usable, 0.0f, 1.0f),
+                           e.mods);
+            break;
         case UIWidgetKind::Number: {
             // Vertical drag adjusts; scale by the spec range.
             float dy = dragAnchor_.anchorMouse - (float)e.y;
@@ -782,6 +811,17 @@ void WidgetComponent::mouseWheelMove(juce::MouseEvent const& e,
             w.values[0] = w.spec.map(std::clamp(pos, 0.0f, 1.0f));
             markDirtyAndNotify(w, true);
         } break;
+        case UIWidgetKind::Range: {
+            if (w.values.size() < 2) break;
+            // The wheel slides the whole range, preserving its width.
+            float plo = (float)w.spec.unmap(w.values[0]);
+            float phi = (float)w.spec.unmap(w.values[1]);
+            ui_gesture::moveRange((plo + phi) * 0.5f - wheel.deltaY * kStep,
+                                  plo, phi);
+            w.values[0] = w.spec.map(plo);
+            w.values[1] = w.spec.map(phi);
+            markDirtyAndNotify(w, true);
+        } break;
         case UIWidgetKind::XY: {
             if (w.values.size() < 2) break;
             // Vertical wheel drives Y (up = higher), horizontal drives X.
@@ -811,12 +851,13 @@ void WidgetComponent::mouseWheelMove(juce::MouseEvent const& e,
 // Hover-key adjustments (widget_draw.cpp hoverAdjust*). While the pointer is
 // over a slider-like widget and no text field is focused, typed characters
 // nudge the value: c center, [ / ] rails, 1-9 jump, r randomize, j/J jitter,
-// , / . step, z zero, i init, - negate, / reciprocal.
+// , / . step, z zero, i init, - negate, / reciprocal. The Range binds the same
+// keys to both of its ends (see hoverRangeChar).
 // ---------------------------------------------------------------------------
 
 bool WidgetComponent::isHoverAdjustable() const {
-    return kind_ == UIWidgetKind::Slider || kind_ == UIWidgetKind::XY
-        || kind_ == UIWidgetKind::MultiSlider;
+    return kind_ == UIWidgetKind::Slider || kind_ == UIWidgetKind::Range
+        || kind_ == UIWidgetKind::XY || kind_ == UIWidgetKind::MultiSlider;
 }
 
 namespace {
@@ -860,6 +901,66 @@ bool hoverAxisChar(unsigned c, bridge::UISpec const& spec, double& value) {
             return false;
     }
 }
+
+// The Range's hover keys mirror the slider's where they make sense: keys that
+// set one position act on both ends (collapsing the range), [ / ] send one end
+// to its rail, , / . slide the whole range (width preserved), and - / / negate
+// / take reciprocals of both ends (re-ordered). Digits are not bound: there is
+// no single position for them to jump to.
+bool hoverRangeChar(unsigned c, bridge::UISpec const& spec, double& lo,
+                    double& hi) {
+    float ulo = (float)spec.unmap(lo), uhi = (float)spec.unmap(hi);
+    double vlo = lo, vhi = hi;
+    auto setPos = [&](float plo, float phi) {
+        if (plo > phi) std::swap(plo, phi);
+        lo = spec.map(std::clamp(plo, 0.0f, 1.0f));
+        hi = spec.map(std::clamp(phi, 0.0f, 1.0f));
+    };
+    auto setVal = [&](double a, double b) {
+        if (a > b) std::swap(a, b);
+        lo = a;
+        hi = b;
+    };
+    auto slide = [&](float d) {
+        float a = ulo, b = uhi;
+        ui_gesture::moveRange((a + b) * 0.5f + d, a, b);
+        setPos(a, b);
+    };
+    switch (c) {
+        case 'c': case 'C': setPos(0.5f, 0.5f); return true;
+        case '[': setPos(0.0f, uhi); return true;
+        case ']': setPos(ulo, 1.0f); return true;
+        case 'r': case 'R':
+            setPos(hoverUniform(0.0f, 1.0f), hoverUniform(0.0f, 1.0f));
+            return true;
+        case 'j':
+            setPos(hoverBounce(ulo + hoverUniform(-0.05f, 0.05f)),
+                   hoverBounce(uhi + hoverUniform(-0.05f, 0.05f)));
+            return true;
+        case 'J':
+            setPos(hoverBounce(ulo + hoverUniform(-0.005f, 0.005f)),
+                   hoverBounce(uhi + hoverUniform(-0.005f, 0.005f)));
+            return true;
+        case 'z': case 'Z':
+            if (spec.contains(0.0)) setVal(0.0, 0.0);
+            return true;
+        case 'i': case 'I': {
+            double init = spec.clamp(spec.init);
+            setVal(init, init);
+        }   return true;
+        case '-':
+            if (spec.contains(-vlo) && spec.contains(-vhi)) setVal(-vhi, -vlo);
+            return true;
+        case '/':
+            if (vlo != 0.0 && vhi != 0.0 && spec.contains(1.0 / vlo)
+                && spec.contains(1.0 / vhi))
+                setVal(1.0 / vlo, 1.0 / vhi);
+            return true;
+        case ',': slide(-0.05f); return true;
+        case '.': slide(0.05f); return true;
+        default: return false;
+    }
+}
 }
 
 bool WidgetComponent::keyPressed(juce::KeyPress const& key) {
@@ -876,6 +977,9 @@ bool WidgetComponent::keyPressed(juce::KeyPress const& key) {
 
     if (w.kind == UIWidgetKind::Slider) {
         if (!w.values.empty()) handled = hoverAxisChar(c, w.spec, w.values[0]);
+    } else if (w.kind == UIWidgetKind::Range) {
+        if (w.values.size() >= 2)
+            handled = hoverRangeChar(c, w.spec, w.values[0], w.values[1]);
     } else if (w.kind == UIWidgetKind::MultiSlider) {
         // Keys act on ALL bars (independent randoms per bar for r/j).
         for (auto& val : w.values)
@@ -908,9 +1012,11 @@ void WidgetComponent::mouseExit(juce::MouseEvent const&) {
     repaint();
 }
 
-void WidgetComponent::openValueEntry(double current) {
+void WidgetComponent::openValueEntry(double current, int index,
+                                     juce::Rectangle<int> bounds) {
+    valueEditIndex_ = index;
     valueEditor_ = std::make_unique<juce::TextEditor>();
-    valueEditor_->setBounds(bodyRect(*this, kLabelH).toNearestInt());
+    valueEditor_->setBounds(bounds);
     valueEditor_->setJustification(juce::Justification::centred);
     valueEditor_->setText(fmtValue(current), false);
     valueEditor_->selectAll();
@@ -929,10 +1035,15 @@ void WidgetComponent::commitValueEntry() {
     double v = editor->getText().getDoubleValue();
     {
         std::lock_guard<std::mutex> lock(ui_.mtx);
-        if (auto* wp = ui_.findById(id_); wp && !wp->values.empty()) {
-            wp->values[0] = wp->spec.clamp(v);
-            markDirtyAndNotify(*wp, true);
-        }
+        auto* wp = ui_.findById(id_);
+        if (!wp || (int)wp->values.size() <= valueEditIndex_) return;
+        wp->values[(size_t)valueEditIndex_] = wp->spec.clamp(v);
+        // Typing past the other end of a Range re-orders the pair rather
+        // than rejecting the edit.
+        if (wp->kind == UIWidgetKind::Range && wp->values.size() >= 2
+            && wp->values[0] > wp->values[1])
+            std::swap(wp->values[0], wp->values[1]);
+        markDirtyAndNotify(*wp, true);
     }
 }
 

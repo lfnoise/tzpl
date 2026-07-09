@@ -75,15 +75,23 @@ public:
     juce::Point<int> preferredSize() const;
 
 private:
-    // Slider/XY/MultiSlider accept hover-key value nudges.
+    // Slider/Range/XY/MultiSlider accept hover-key value nudges.
     bool isHoverAdjustable() const;
-    // Inline numeric entry (Cmd-click on a Slider/Number): open a TextEditor
-    // seeded with the current value; commit on Return/focus-loss.
-    void openValueEntry(double current);
+    // Inline numeric entry (Cmd-click on a Slider/Number/Range): open a
+    // TextEditor over `bounds`, seeded with the current value, editing
+    // values[index]; commit on Return/focus-loss.
+    void openValueEntry(double current, int index,
+                        juce::Rectangle<int> bounds);
     void commitValueEntry();
     // The horizontal track geometry (in local coords) for slider-like kinds.
     void trackGeometry(float& minx, float& usable) const;
     void markDirtyAndNotify(bridge::UIWidget& w, bool gestureEnd);
+    // One frame of a Range drag at track position `pos`. Modifiers are read
+    // live, so a gesture can switch modes mid-drag (sweep, then option-slide
+    // it into place). Alt slides the whole range, shift adjusts the nearer
+    // end, and a plain drag sweeps a new range out from rangeAnchor_.
+    void applyRangeDrag(bridge::UIWidget& w, float pos,
+                        juce::ModifierKeys mods);
 
     // Per-kind paint (called with UIState::mtx held and `w` valid).
     void paintSlider(juce::Graphics&, bridge::UIWidget&);
@@ -109,9 +117,11 @@ private:
 
     // Drag state (message thread only).
     ui_gesture::DragAnchor dragAnchor_;
+    float rangeAnchor_ = 0.0f;  // plain-drag sweep origin (position 0..1)
     bool dragging_ = false;
     int matrixPaintValue_ = -1; // value being painted across a matrix drag
     std::unique_ptr<juce::TextEditor> valueEditor_; // Cmd-click numeric entry
+    int valueEditIndex_ = 0;    // which of values[] that editor targets
 
     // Arrange mode state.
     bool arrange_ = false;
