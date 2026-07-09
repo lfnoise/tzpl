@@ -119,11 +119,14 @@ bool WidgetComponent::isTapBacked() const {
 
 juce::Point<int> WidgetComponent::preferredSize() const {
     switch (kind_) {
+        // Slider-likes are kLabelH taller than the rest: the name sits under
+        // the track rather than beside it, and the track itself wants enough
+        // height for the tick scale and an easy click target.
+        case UIWidgetKind::Slider:
+        case UIWidgetKind::Range:  return { 200, 40 };
         case UIWidgetKind::Button:
         case UIWidgetKind::Toggle:
         case UIWidgetKind::Number:
-        case UIWidgetKind::Slider:
-        case UIWidgetKind::Range:
         case UIWidgetKind::Label:
         case UIWidgetKind::Meter:  return { 200, 28 };
         case UIWidgetKind::XY:     return { 160, 160 };
@@ -196,13 +199,12 @@ static juce::Rectangle<float> bodyRect(juce::Component const& c, int labelH) {
 void WidgetComponent::paintSlider(Graphics& g, UIWidget& w) {
     auto bb = bodyRect(*this, kLabelH);
     g.setColour(trackColour(*this).withAlpha(0.5f));
-    g.fillRoundedRectangle(bb, 3.0f);
+    g.fillRect(bb);
     float minx, usable;
     trackGeometry(minx, usable);
     float pos = (float)w.spec.unmap(w.values.empty() ? 0.0 : w.values[0]);
     g.setColour(juce::Colour(0xff5a9bd4));
-    g.fillRoundedRectangle(minx, bb.getY() + 2, pos * usable,
-                           bb.getHeight() - 4, 3.0f);
+    g.fillRect(minx, bb.getY() + 2, pos * usable, bb.getHeight() - 4);
     // Graduated tick scale while hovered or dragging (matches ImGui).
     if (isMouseOverOrDragging(true) || dragging_) {
         auto z = bb.reduced(2.0f, 2.0f);
@@ -220,7 +222,7 @@ void WidgetComponent::paintSlider(Graphics& g, UIWidget& w) {
 void WidgetComponent::paintRange(Graphics& g, UIWidget& w) {
     auto bb = bodyRect(*this, kLabelH);
     g.setColour(trackColour(*this).withAlpha(0.5f));
-    g.fillRoundedRectangle(bb, 3.0f);
+    g.fillRect(bb);
     float minx, usable;
     trackGeometry(minx, usable);
     double lo = w.values.size() > 0 ? w.values[0] : w.spec.lo;
@@ -230,7 +232,7 @@ void WidgetComponent::paintRange(Graphics& g, UIWidget& w) {
     float x0 = minx + plo * usable - 0.5f;
     float x1 = minx + phi * usable + 0.5f;
     g.setColour(juce::Colour(0xff5a9bd4));
-    g.fillRoundedRectangle(x0, bb.getY() + 2, x1 - x0, bb.getHeight() - 4, 3.0f);
+    g.fillRect(x0, bb.getY() + 2, x1 - x0, bb.getHeight() - 4);
     // Graduated tick scale while hovered or dragging (matches ImGui).
     if (isMouseOverOrDragging(true) || dragging_)
         drawTickMarks(g, w.spec, bb.reduced(2.0f, 2.0f));
