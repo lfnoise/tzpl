@@ -674,21 +674,33 @@ Type* TypeChecker::inferExpr(Expr* expr, Type* expectedType) {
         }
 
         case ASTNode::EnumConstructor: {
-            // This node may be a re-tagged CallExpr_ or FieldExpr_ from a previous
-            // type-check pass (e.g., recheckTemplateBody).  In that case, the
-            // resolvedType is already set correctly, but we still must re-infer the
-            // inner argument so its overload-resolution state (e.g.
-            // resolvedFuncGlobalIndex) reflects the bindings of the *current*
-            // monomorphization.  Otherwise a different mono's resolution leaks in.
-            if (auto* existingEnum = dynamic_cast<EnumType*>(expr->resolvedType)) {
-                Expr* argExpr = nullptr;
-                if (auto* ce = dynamic_cast<CallExpr_*>(expr)) {
-                    if (!ce->args.empty()) argExpr = static_cast<Expr*>(ce->args[0].get());
-                } else if (auto* ec = dynamic_cast<EnumConstructExpr*>(expr)) {
-                    if (ec->arg) argExpr = static_cast<Expr*>(ec->arg.get());
+            // A node carrying this kind has one of three shapes: a genuine
+            // EnumConstructExpr from the parser, or a CallExpr_ / FieldExpr_ that an
+            // earlier pass re-tagged.  The static_cast below is only valid once the
+            // latter two are ruled out.
+            //
+            // recheckTemplateBody re-visits this node once per monomorphization of
+            // the enclosing template fn, so nothing cached on it may be reused: both
+            // the monomorphized enum type and the overload picks inside the argument
+            // belong to whichever mono ran first.  Re-infer each shape instead.
+            if (auto* ce = dynamic_cast<CallExpr_*>(expr)) {
+                // EnumName.caseName(arg), re-tagged by tryInferEnumConstruct.
+                if (ce->callee->kind == ASTNode::FieldExpr) {
+                    auto* fe = static_cast<FieldExpr_*>(ce->callee.get());
+                    if (fe->object->kind == ASTNode::Identifier) {
+                        auto* ident = static_cast<IdentifierExpr*>(fe->object.get());
+                        result = tryInferEnumConstruct(ce, fe, ident);
+                        if (result) break;
+                    }
                 }
-                if (argExpr) inferExpr(argExpr);
-                result = existingEnum;
+                result = expr->resolvedType ? expr->resolvedType : compiler_.intType();
+                break;
+            }
+            if (dynamic_cast<FieldExpr_*>(expr)) {
+                // Nullary case of a non-template enum -- template enums cannot reach
+                // this shape (they need explicit type args, which the parser turns
+                // into an EnumConstructExpr).  Its type cannot depend on bindings.
+                result = expr->resolvedType ? expr->resolvedType : compiler_.intType();
                 break;
             }
 
