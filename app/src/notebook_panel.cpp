@@ -26,6 +26,7 @@
 #include "diagnostic.hpp"
 
 #include "imgui.h"
+#include "imgui_internal.h"  // ImGuiItemFlags_AllowOverlap: arrange overlay
 
 #include <algorithm>
 #include <fstream>
@@ -1045,11 +1046,23 @@ float NotebookPanel::drawPanelPage(
             }
 
             ImGui::SetCursorPos(ImVec2(px * scale, py * scale));
-            if (arrange) ImGui::BeginDisabled();
+            if (arrange) {
+                ImGui::BeginDisabled();
+                // A DISABLED item still claims HoveredId -- imgui.cpp's
+                // ItemHoverable() sets it before its disabled early-out --
+                // and a claimed HoveredId blocks every later overlapping
+                // item. Without AllowOverlap the arrange overlay submitted
+                // below can only be grabbed where the widget happened to
+                // submit no item of its own, i.e. its text label.
+                ImGui::PushItemFlag(ImGuiItemFlags_AllowOverlap, true);
+            }
             ImGui::BeginGroup();
             if (drawUIWidget(w)) controls.noteTapsVisible();
             ImGui::EndGroup();
-            if (arrange) ImGui::EndDisabled();
+            if (arrange) {
+                ImGui::PopItemFlag();
+                ImGui::EndDisabled();
+            }
 
             // Advance the flow cursor past the widget's ACTUAL drawn
             // extent (an xy pad or piano roll is far taller than a
@@ -1072,8 +1085,31 @@ float NotebookPanel::drawPanelPage(
                 // every mouse motion smaller than the grid.
                 ImVec2 rmin = ImGui::GetItemRectMin();
                 ImVec2 rmax = ImGui::GetItemRectMax();
-                ImGui::SetCursorScreenPos(rmin);
                 ImGui::PushID((int)w.id);
+                // The grip is submitted BEFORE the move overlay it sits
+                // inside: overlapping items are first-come-first-served
+                // (the first to claim HoveredId wins), so the smaller,
+                // more specific target has to go first.
+                ImGui::SetCursorScreenPos(
+                    ImVec2(rmax.x - 10.0f, rmax.y - 10.0f));
+                ImGui::InvisibleButton("##size", ImVec2(12.0f, 12.0f));
+                if (ImGui::IsItemActivated()) {
+                    gArrangeAnchor =
+                        ImVec2(w.fw > 0.0f ? w.fw : rmax.x - rmin.x,
+                               w.fh > 0.0f ? w.fh : rmax.y - rmin.y);
+                }
+                if (ImGui::IsItemActive()) {
+                    ImVec2 d = ImGui::GetMouseDragDelta(ImGuiMouseButton_Left,
+                                                        0.0f);
+                    w.fw = std::max(24.0f, snap8(gArrangeAnchor.x + d.x));
+                    w.fh = std::max(14.0f, snap8(gArrangeAnchor.y + d.y));
+                    w.gestureActive = true;
+                } else if (ImGui::IsItemDeactivated()) {
+                    w.gestureActive = false;
+                    w.gestureEnded = true;
+                }
+                // Move overlay: the whole widget, grip corner excepted.
+                ImGui::SetCursorScreenPos(rmin);
                 ImGui::InvisibleButton("##move",
                     ImVec2(std::max(rmax.x - rmin.x, 16.0f),
                            std::max(rmax.y - rmin.y, 16.0f)));
@@ -1091,25 +1127,6 @@ float NotebookPanel::drawPanelPage(
                                                         0.0f);
                     w.fx = std::max(0.0f, snap8(gArrangeAnchor.x + d.x));
                     w.fy = std::max(0.0f, snap8(gArrangeAnchor.y + d.y));
-                    w.gestureActive = true;
-                } else if (ImGui::IsItemDeactivated()) {
-                    w.gestureActive = false;
-                    w.gestureEnded = true;
-                }
-                // Resize grip (bottom-right corner).
-                ImGui::SetCursorScreenPos(
-                    ImVec2(rmax.x - 10.0f, rmax.y - 10.0f));
-                ImGui::InvisibleButton("##size", ImVec2(12.0f, 12.0f));
-                if (ImGui::IsItemActivated()) {
-                    gArrangeAnchor =
-                        ImVec2(w.fw > 0.0f ? w.fw : rmax.x - rmin.x,
-                               w.fh > 0.0f ? w.fh : rmax.y - rmin.y);
-                }
-                if (ImGui::IsItemActive()) {
-                    ImVec2 d = ImGui::GetMouseDragDelta(ImGuiMouseButton_Left,
-                                                        0.0f);
-                    w.fw = std::max(24.0f, snap8(gArrangeAnchor.x + d.x));
-                    w.fh = std::max(14.0f, snap8(gArrangeAnchor.y + d.y));
                     w.gestureActive = true;
                 } else if (ImGui::IsItemDeactivated()) {
                     w.gestureActive = false;
