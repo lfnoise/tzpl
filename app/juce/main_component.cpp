@@ -296,7 +296,9 @@ void MainComponent::openFileFlow() {
             auto file = fc.getResult();
             if (file == juce::File()) return;
             if (file.hasFileExtension("tzd"))
-                openNotebookFile(file);
+                // Opening a notebook replaces the current one.
+                confirmNotebookDiscardThen(
+                    [this, file] { openNotebookFile(file); });
             else if (!editorPane_.openFile(file))
                 logLine("could not open " + file.getFullPathName());
         });
@@ -316,7 +318,37 @@ void MainComponent::openNotebookFile(juce::File const& file) {
     logLine("opened " + file.getFullPathName());
 }
 
-// Save the notebook; asks for a path if it has none (or if forceDialog).
+// Replacing the open notebook (New Notebook / opening a .tzd) discards it.
+// Ask first when it has unsaved changes; `proceed` runs only if the user
+// saved or explicitly discarded.
+void MainComponent::confirmNotebookDiscardThen(std::function<void()> proceed) {
+    if (!notebook_ || !notebook_->isModified()) {
+        proceed();
+        return;
+    }
+    juce::File f = notebook_->currentFile();
+    String name = f != juce::File() ? f.getFileName()
+                                    : String("untitled notebook");
+    auto options = juce::MessageBoxOptions()
+        .withIconType(juce::MessageBoxIconType::WarningIcon)
+        .withTitle("Unsaved Changes")
+        .withMessage("Do you want to save changes to \"" + name + "\"?\n"
+                     "Your changes will be lost if you don't save them.")
+        .withButton("Save")
+        .withButton("Don't Save")
+        .withButton("Cancel")
+        .withAssociatedComponent(this);
+
+    // 0 = Save, 1 = Don't Save, 2 = Cancel. An untitled notebook's Save
+    // opens a chooser, so `proceed` waits for the write to succeed.
+    juce::NativeMessageBox::showAsync(options, [this, proceed](int result) {
+        if (result == 0)
+            saveNotebookFlow(false, [proceed](bool ok) { if (ok) proceed(); });
+        else if (result == 1)
+            proceed();
+    });
+}
+
 void MainComponent::saveAllTabsThen(std::function<void(bool)> done) {
     editorPane_.saveAll();   // synchronous: every modified tab that has a path
     // saveAll() swallows write failures. A tab still modified despite having
@@ -705,8 +737,11 @@ bool MainComponent::perform(InvocationInfo const& info) {
         showNotebook(false);
         return true;
     case cmd::fileNewNotebook:
-        notebook_->newDocument();
-        showNotebook(true);
+        // Only one notebook is open at a time: a new one replaces it.
+        confirmNotebookDiscardThen([this] {
+            notebook_->newDocument();
+            showNotebook(true);
+        });
         return true;
     case cmd::fileOpen:
         openFileFlow();
@@ -893,6 +928,26 @@ void MainComponent::testShowDemo(String const& which) {
                              : "prose-add: PROSE TEXT LOST -- got \"" + after + "\"";
         logLine(verdict);
         std::fprintf(stderr, "%s\n", verdict.toRawUTF8());   // scriptable
+    } else if (which == "new-notebook-dirty") {
+        // A dirty notebook must not be replaced without asking: the box
+        // appears and the typed cell is still there behind it.
+        showNotebook(true);
+        notebook_->testTypeIntoFocusedCell("notebook text must survive");
+        juce::Timer::callAfterDelay(300, [this] {
+            // Drive the real menu command, not the helper directly.
+            juce::ApplicationCommandTarget::InvocationInfo info(
+                cmd::fileNewNotebook);
+            perform(info);
+            juce::Timer::callAfterDelay(600, [this] {
+                String after = notebook_->testCellEditorText(0);
+                String verdict =
+                    after == "notebook text must survive"
+                        ? "new-notebook-dirty: notebook intact, box is up"
+                        : "new-notebook-dirty: NOTEBOOK WIPED -- got \""
+                              + after + "\"";
+                std::fprintf(stderr, "%s\n", verdict.toRawUTF8());
+            });
+        });
     } else if (which == "quit-dirty") {
         // Dirty the untitled tab, then take the real quit path: the
         // unsaved-changes box must appear rather than the app just quitting.

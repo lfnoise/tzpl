@@ -991,6 +991,22 @@ int runGui(bridge::AppContext& appCtx) {
                 guiState.output.append("saved " + path, LineKind::Info);
                 return true;
             };
+            // Replacing the open notebook (New Notebook / opening a .tzd)
+            // discards it. Ask first when it has unsaved changes; false
+            // means "user cancelled, keep the current document".
+            auto confirmDiscardNotebook = [&]() {
+                if (!notebookPanel.isOpen() || !notebookPanel.modified())
+                    return true;
+                std::string name = notebookPanel.filePath().empty()
+                    ? std::string("untitled notebook")
+                    : notebookPanel.filePath();
+                int choice = showCloseTabAlert(name);
+                bool proceed = choice == 0   ? saveNotebook(false)
+                             : choice == 2   ? false
+                                             : true;  // 1 = Don't Save
+                afterNativeDialog();
+                return proceed;
+            };
             auto openNotebook = [&](std::string const& path) {
                 auto oldPanels = notebookPanel.claimedPanels();
                 std::string err;
@@ -1025,21 +1041,10 @@ int runGui(bridge::AppContext& appCtx) {
                 case AppCmd::FileNew:
                     editorPanel.newTab();
                     break;
-                case AppCmd::FileNewNotebook: {
+                case AppCmd::FileNewNotebook:
                     // Only one notebook is open at a time: starting a new
-                    // one replaces the current document. Confirm if it has
-                    // unsaved changes.
-                    bool proceed = true;
-                    if (notebookPanel.isOpen() && notebookPanel.modified()) {
-                        std::string name = notebookPanel.filePath().empty()
-                            ? std::string("untitled notebook")
-                            : notebookPanel.filePath();
-                        int choice = showCloseTabAlert(name);
-                        if (choice == 0) proceed = saveNotebook(false);
-                        else if (choice == 2) proceed = false;
-                        afterNativeDialog();
-                    }
-                    if (proceed) {
+                    // one replaces the current document.
+                    if (confirmDiscardNotebook()) {
                         // The discarded document's widgets go with it.
                         controlsPanel.queuePanelRemoval(
                             notebookPanel.claimedPanels());
@@ -1047,14 +1052,15 @@ int runGui(bridge::AppContext& appCtx) {
                         notebookVisible = true;
                     }
                     break;
-                }
                 case AppCmd::FileOpen: {
                     std::string path = nativeOpenFileDialog();
                     if (!path.empty()) {
                         if (std::filesystem::is_directory(path))
                             workspacePanel.addWorkspace(path);
-                        else if (hasExtension(path, "tzd"))
-                            openNotebook(path);
+                        else if (hasExtension(path, "tzd")) {
+                            // Opening a notebook replaces the current one.
+                            if (confirmDiscardNotebook()) openNotebook(path);
+                        }
                         else if (notebookPanel.isOpen() && notebookVisible
                                  && notebookPanel.openFileIntoFocusedCell(path))
                             ;  // read into the focused code cell

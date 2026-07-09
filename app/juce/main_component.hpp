@@ -108,6 +108,9 @@ private:
     void openFileFlow();
     void saveActiveFlow(bool forceDialog, std::function<void(bool)> done = {});
     void closeActiveTabFlow();
+    // Asks about the open notebook's unsaved changes (async) before it is
+    // replaced; `proceed` runs only if the user saved or discarded.
+    void confirmNotebookDiscardThen(std::function<void()> proceed);
     void openNotebookFile(juce::File const& file);
     // `done(true)` fires only after a successful save (an untitled notebook
     // asks for a path first, so this can complete long after the call).
