@@ -72,6 +72,12 @@ static bool gArrangeAllowOverlap = true;
 static bool gMoveActive = false;
 static bool gSizeActive = false;
 static ImVec2 gGroupMin, gGroupMax;
+// Set to reproduce the old bug: the arrange drag also raised gestureActive,
+// which the (disabled) widget's own draw code read as a released drag.
+static bool gArrangeSetsGestureActive = false;
+// How many gestureEnded flags NotebookPanel::update() would have consumed,
+// i.e. how many history commits the drag produced.
+static int gGestureEnds = 0;
 
 static void drawArrangeOverlay() {
     ImGui::BeginDisabled();
@@ -97,6 +103,14 @@ static void drawArrangeOverlay() {
         ImVec2(std::max(gGroupMax.x - gGroupMin.x, 16.0f),
                std::max(gGroupMax.y - gGroupMin.y, 16.0f)));
     gMoveActive = ImGui::IsItemActive();
+    if (gW) {
+        if (ImGui::IsItemActive()) {
+            if (gArrangeSetsGestureActive) gW->gestureActive = true;
+        } else if (ImGui::IsItemDeactivated()) {
+            if (gArrangeSetsGestureActive) gW->gestureActive = false;
+            gW->gestureEnded = true;
+        }
+    }
     ImGui::PopID();
 }
 
@@ -118,6 +132,13 @@ static void frame() {
     }
     ImGui::End();
     ImGui::Render();
+    // NotebookPanel::update() drains gestureEnded once per frame, committing
+    // one history node for each. Count them the same way -- but only while
+    // arranging; the other tests inspect gestureEnded themselves.
+    if (gArrange && gW && gW->gestureEnded) {
+        gW->gestureEnded = false;
+        ++gGestureEnds;
+    }
 }
 
 static void frames(int n) {
@@ -375,6 +396,31 @@ int main() {
               "arrange: (regression probe) disabled widget blocks the overlay");
         release();
         gArrangeAllowOverlap = true;
+
+        // ---- one history commit per arrange drag, not one per frame ------
+        auto dragMove = [&](float fromX, float fromY) {
+            ImGui::GetIO().AddMousePosEvent(fromX, fromY);
+            frames(3);
+            gGestureEnds = 0;
+            press();
+            for (int i = 1; i <= 5; ++i) {   // several drag deltas
+                ImGui::GetIO().AddMousePosEvent(fromX + i * 9.0f, fromY);
+                frames(2);
+            }
+            release();
+            settle();
+        };
+        dragMove(midx, midy);
+        checkNear("arrange drag commits one history node", gGestureEnds, 1, 0);
+
+        // The old shape: the arrange drag also set gestureActive, which the
+        // disabled widget's own draw read as a released drag every frame.
+        gArrangeSetsGestureActive = true;
+        dragMove(midx, midy);
+        check(gGestureEnds > 1,
+              "arrange: (regression probe) gestureActive spams history");
+        gArrangeSetsGestureActive = false;
+        w.gestureActive = false;
 
         gArrange = false;
         gW = nullptr;

@@ -1083,6 +1083,13 @@ float NotebookPanel::drawPanelPage(
                 // delta) rather than accumulating per-frame deltas into
                 // the already-snapped frame -- the latter would swallow
                 // every mouse motion smaller than the grid.
+                //
+                // Only gestureEnded is set, never gestureActive: that flag
+                // belongs to the widget's own drag, and drawUIWidget (which
+                // ran above, disabled) reads it to detect a released drag.
+                // Setting it here made that check fire on the NEXT frame,
+                // raising gestureEnded -- and so a history commit -- on
+                // every frame of an arrange drag instead of one per drag.
                 ImVec2 rmin = ImGui::GetItemRectMin();
                 ImVec2 rmax = ImGui::GetItemRectMax();
                 ImGui::PushID((int)w.id);
@@ -1104,9 +1111,7 @@ float NotebookPanel::drawPanelPage(
                                                         0.0f);
                     w.fw = std::max(24.0f, snap8(gArrangeAnchor.x + d.x));
                     w.fh = std::max(14.0f, snap8(gArrangeAnchor.y + d.y));
-                    w.gestureActive = true;
                 } else if (ImGui::IsItemDeactivated()) {
-                    w.gestureActive = false;
                     w.gestureEnded = true;
                 }
                 // Move overlay: the whole widget, grip corner excepted.
@@ -1128,9 +1133,7 @@ float NotebookPanel::drawPanelPage(
                                                         0.0f);
                     w.fx = std::max(0.0f, snap8(gArrangeAnchor.x + d.x));
                     w.fy = std::max(0.0f, snap8(gArrangeAnchor.y + d.y));
-                    w.gestureActive = true;
                 } else if (ImGui::IsItemDeactivated()) {
-                    w.gestureActive = false;
                     w.gestureEnded = true;
                 }
                 // Move border + a filled bottom-right resize grip, so the
