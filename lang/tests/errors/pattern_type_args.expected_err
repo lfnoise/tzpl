@@ -1,0 +1,11 @@
+Parse error [tests/errors/pattern_type_args.x:9:14]
+  |
+9 |     ThunkCell<Int>.value(v) : v println;
+  |              ^
+  Type arguments are not allowed in patterns; the type comes from the value being matched. Write 'ThunkCell' without '<...>'
+
+Parse error [tests/errors/pattern_type_args.x:10:14]
+   |
+10 |     ThunkCell<Int>.thunk(f) : f() println;
+   |              ^
+   Type arguments are not allowed in patterns; the type comes from the value being matched. Write 'ThunkCell' without '<...>'

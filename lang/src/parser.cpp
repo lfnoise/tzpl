@@ -2637,6 +2637,21 @@ PatternPtr Parser::parsePrimaryPattern() {
                 nameTok.loc, nameTok.text, std::move(typeExpr));
         }
 
+        // No pattern accepts type arguments: the type comes from the value being
+        // matched, so a `<...>` here has nothing to disambiguate.  Report it and
+        // swallow the type args, letting the pattern parse on so a single clear
+        // error surfaces instead of a cascade from the leftover '<'.  A failed
+        // tryParseTypeArgs restores the position, leaving other uses of '<' alone.
+        if (check(TokenKind::Less)) {
+            SourceRange argsLoc = currentLoc();
+            std::vector<TypeExprPtr> typeArgs;
+            if (tryParseTypeArgs(typeArgs)) {
+                error(argsLoc, "Type arguments are not allowed in patterns; the type comes "
+                               "from the value being matched. Write '" + nameTok.text +
+                               "' without '<...>'");
+            }
+        }
+
         // Enum pattern: Name.caseName or Name.caseName(pattern)
         if (check(TokenKind::Dot)) {
             advance(); // consume .
