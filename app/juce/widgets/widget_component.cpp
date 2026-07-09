@@ -34,6 +34,10 @@ using juce::Graphics;
 using juce::String;
 
 namespace {
+// Arrange-mode layout grid. Callers clamp to >= 0 first: integer division
+// truncates toward zero, so this only rounds correctly for non-negatives.
+int snap8(int v) { return (v + 4) / 8 * 8; }
+
 String fmtValue(double v) {
     return String(v, v == std::floor(v) && std::abs(v) < 1e9 ? 0 : 4);
 }
@@ -657,14 +661,19 @@ void WidgetComponent::mouseDown(juce::MouseEvent const& e) {
 
 void WidgetComponent::mouseDrag(juce::MouseEvent const& e) {
     if (arrange_) {
+        // Snap live, not just on release. arrangeStartBounds_ anchors the
+        // gesture, so quantizing (anchor + total drag distance) never
+        // swallows sub-grid mouse motion the way accumulating snapped
+        // deltas would. y snaps in canvas-local space, matching fy.
         int dx = e.getDistanceFromDragStartX(), dy = e.getDistanceFromDragStartY();
         if (arrangeResizing_) {
-            setSize(std::max(24, arrangeStartBounds_.getWidth() + dx),
-                    std::max(14, arrangeStartBounds_.getHeight() + dy));
+            setSize(std::max(24, snap8(arrangeStartBounds_.getWidth() + dx)),
+                    std::max(14, snap8(arrangeStartBounds_.getHeight() + dy)));
         } else {
-            setTopLeftPosition(
-                std::max(0, arrangeStartBounds_.getX() + dx),
-                std::max(canvasTop_, arrangeStartBounds_.getY() + dy));
+            int nx = snap8(std::max(0, arrangeStartBounds_.getX() + dx));
+            int ny = snap8(std::max(0, arrangeStartBounds_.getY() - canvasTop_
+                                          + dy));
+            setTopLeftPosition(nx, ny + canvasTop_);
         }
         return;
     }
@@ -739,10 +748,11 @@ void WidgetComponent::mouseDrag(juce::MouseEvent const& e) {
 
 void WidgetComponent::mouseUp(juce::MouseEvent const&) {
     if (arrange_) {
-        // Snap to the 8px grid and write the frame back to the registry.
-        auto snap = [](int v) { return (v + 4) / 8 * 8; };
-        int nx = std::max(0, snap(getX()));
-        int ny = std::max(0, snap(getY() - canvasTop_));
+        // A drag already snapped these; re-snapping is idempotent and also
+        // grid-aligns a widget merely clicked (never dragged) in arrange
+        // mode, which pins it at its flow position.
+        int nx = snap8(std::max(0, getX()));
+        int ny = snap8(std::max(0, getY() - canvasTop_));
         setTopLeftPosition(nx, ny + canvasTop_);
         {
             std::lock_guard<std::mutex> lock(ui_.mtx);

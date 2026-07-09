@@ -701,6 +701,11 @@ void NotebookPanel::drawPresetsCell(
     rt.selectedPreset = selected;
 }
 
+// The frame (position, or size for the resize grip) at the instant an
+// arrange drag began. One drag is active at a time, so shared state is
+// fine -- and move/resize can never both be active.
+static ImVec2 gArrangeAnchor(0.0f, 0.0f);
+
 static ImVec4 kindColor(bool everRan, bool errored, bool stale) {
     if (errored) return ImVec4(0.90f, 0.30f, 0.30f, 1.0f);   // red
     if (!everRan) return ImVec4(0.45f, 0.45f, 0.45f, 1.0f);  // hollow gray
@@ -1050,8 +1055,13 @@ float NotebookPanel::drawPanelPage(
 
             if (arrange) {
                 // Drag overlay: move; corner grip: resize. Both snap to
-                // the 8px grid and commit one history node on release
-                // (via gestureEnded). Arrange only runs at scale 1.
+                // the 8px grid live, and commit one history node on
+                // release (via gestureEnded). Arrange only runs at scale 1.
+                //
+                // The snap quantizes (frame at mouse-down + total drag
+                // delta) rather than accumulating per-frame deltas into
+                // the already-snapped frame -- the latter would swallow
+                // every mouse motion smaller than the grid.
                 ImVec2 rmin = ImGui::GetItemRectMin();
                 ImVec2 rmax = ImGui::GetItemRectMax();
                 ImGui::SetCursorScreenPos(rmin);
@@ -1059,20 +1069,22 @@ float NotebookPanel::drawPanelPage(
                 ImGui::InvisibleButton("##move",
                     ImVec2(std::max(rmax.x - rmin.x, 16.0f),
                            std::max(rmax.y - rmin.y, 16.0f)));
-                if (ImGui::IsItemActive()) {
+                if (ImGui::IsItemActivated()) {
                     // Dragging a flowing widget pins it: its current
                     // flow position becomes the sticky frame.
                     if (w.fx < 0.0f) {
                         w.fx = px;
                         w.fy = py;
                     }
-                    ImVec2 d = ImGui::GetIO().MouseDelta;
-                    w.fx = std::max(0.0f, w.fx + d.x);
-                    w.fy = std::max(0.0f, w.fy + d.y);
+                    gArrangeAnchor = ImVec2(w.fx, w.fy);
+                }
+                if (ImGui::IsItemActive()) {
+                    ImVec2 d = ImGui::GetMouseDragDelta(ImGuiMouseButton_Left,
+                                                        0.0f);
+                    w.fx = std::max(0.0f, snap8(gArrangeAnchor.x + d.x));
+                    w.fy = std::max(0.0f, snap8(gArrangeAnchor.y + d.y));
                     w.gestureActive = true;
                 } else if (ImGui::IsItemDeactivated()) {
-                    w.fx = std::max(0.0f, snap8(w.fx));
-                    w.fy = std::max(0.0f, snap8(w.fy));
                     w.gestureActive = false;
                     w.gestureEnded = true;
                 }
@@ -1080,16 +1092,18 @@ float NotebookPanel::drawPanelPage(
                 ImGui::SetCursorScreenPos(
                     ImVec2(rmax.x - 10.0f, rmax.y - 10.0f));
                 ImGui::InvisibleButton("##size", ImVec2(12.0f, 12.0f));
+                if (ImGui::IsItemActivated()) {
+                    gArrangeAnchor =
+                        ImVec2(w.fw > 0.0f ? w.fw : rmax.x - rmin.x,
+                               w.fh > 0.0f ? w.fh : rmax.y - rmin.y);
+                }
                 if (ImGui::IsItemActive()) {
-                    ImVec2 d = ImGui::GetIO().MouseDelta;
-                    float baseW = w.fw > 0.0f ? w.fw : rmax.x - rmin.x;
-                    float baseH = w.fh > 0.0f ? w.fh : rmax.y - rmin.y;
-                    w.fw = std::max(24.0f, baseW + d.x);
-                    w.fh = std::max(14.0f, baseH + d.y);
+                    ImVec2 d = ImGui::GetMouseDragDelta(ImGuiMouseButton_Left,
+                                                        0.0f);
+                    w.fw = std::max(24.0f, snap8(gArrangeAnchor.x + d.x));
+                    w.fh = std::max(14.0f, snap8(gArrangeAnchor.y + d.y));
                     w.gestureActive = true;
                 } else if (ImGui::IsItemDeactivated()) {
-                    w.fw = std::max(24.0f, snap8(w.fw));
-                    w.fh = std::max(14.0f, snap8(w.fh));
                     w.gestureActive = false;
                     w.gestureEnded = true;
                 }
