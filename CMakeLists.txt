@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(tzpl LANGUAGES C CXX)
+project(tzpl VERSION 0.1.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -73,17 +73,23 @@ if(TZPL_BUILD_BENCHMARKS AND TZPL_BUILD_SYNTHDEF_COMPILER AND EXISTS ${CMAKE_CUR
 endif()
 
 # --- Install rules (cmake --install build --prefix dist/tzpl) ----------------
+#
+# Rules marked COMPONENT dist form the user-facing distribution folder (see
+# the `dist` target below); a plain `cmake --install` still installs
+# everything, including dev artifacts (libs, headers, integration scripts).
 
 include(GNUInstallDirs)
 
 # Modules: merge lang/modules and bridge/modules into a single modules/ dir
 install(DIRECTORY lang/modules/
     DESTINATION modules
+    COMPONENT dist
     FILES_MATCHING PATTERN "*.x"
 )
 if(TZPL_BUILD_BRIDGE)
     install(DIRECTORY bridge/modules/
         DESTINATION modules
+        COMPONENT dist
         FILES_MATCHING PATTERN "*.x"
     )
 endif()
@@ -91,6 +97,7 @@ endif()
 # Examples
 install(DIRECTORY examples/
     DESTINATION examples
+    COMPONENT dist
 )
 install(DIRECTORY integration-tests/scripts/
     DESTINATION examples/integration
@@ -103,19 +110,59 @@ install(FILES
     lang/docs/Builtin_Functions.html
     lang/docs/FFI_Guide.html
     lang/docs/Coroutines.html
+    lang/docs/Live_Controls_and_Notebooks.html
+    lang/docs/Tzopilotl_Music_Cookbook.html
     DESTINATION docs
+    COMPONENT dist
 )
 
 # Editor packages
 install(DIRECTORY lang/editors/vscode
     DESTINATION editors
+    COMPONENT dist
     PATTERN ".DS_Store" EXCLUDE
 )
 install(DIRECTORY lang/editors/Tzopilotl.tmbundle
     DESTINATION editors
+    COMPONENT dist
 )
 install(DIRECTORY lang/editors/tree-sitter-tzpl
     DESTINATION editors
+    COMPONENT dist
     PATTERN "node_modules" EXCLUDE
     PATTERN ".gitignore"   EXCLUDE
 )
+
+# Top-level README for the distribution folder
+install(FILES packaging/README.txt
+    DESTINATION .
+    COMPONENT dist
+)
+
+# --- Distribution folder + DMG ------------------------------------------------
+#
+# `cmake --build build --target dist` assembles the drag-anywhere user folder
+#
+#     Tzopilotl/            <- the unit users install and updates replace
+#       Tzopilotl.app         (finds ../modules via the executable walk-up)
+#       bin/tzpl
+#       modules/  examples/  docs/  editors/  README.txt
+#
+# from the COMPONENT dist install rules, then wraps it in a compressed DMG.
+# User work lives outside the folder (projects), so replacing it is an update.
+if(APPLE AND TZPL_BUILD_APP_JUCE)
+    set(TZPL_DIST_STAGE "${CMAKE_BINARY_DIR}/dist-stage")
+    add_custom_target(dist
+        COMMAND ${CMAKE_COMMAND} -E rm -rf "${TZPL_DIST_STAGE}"
+        COMMAND ${CMAKE_COMMAND} --install "${CMAKE_BINARY_DIR}"
+                --component dist --prefix "${TZPL_DIST_STAGE}/Tzopilotl"
+        COMMAND hdiutil create -volname "Tzopilotl"
+                -srcfolder "${TZPL_DIST_STAGE}" -ov -format UDZO -quiet
+                "${CMAKE_BINARY_DIR}/Tzopilotl-${PROJECT_VERSION}.dmg"
+        COMMAND ${CMAKE_COMMAND} -E echo
+                "dist: ${TZPL_DIST_STAGE}/Tzopilotl and ${CMAKE_BINARY_DIR}/Tzopilotl-${PROJECT_VERSION}.dmg"
+        DEPENDS tzpl tzpl_app_juce
+        COMMENT "Assembling distribution folder and DMG"
+        VERBATIM
+    )
+endif()

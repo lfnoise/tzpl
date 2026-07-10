@@ -133,4 +133,5 @@ install(FILES
 )
 install(TARGETS tzpl
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+    COMPONENT dist
 )

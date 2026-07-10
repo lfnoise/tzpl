@@ -221,7 +221,7 @@ if(TZPL_BUILD_APP_JUCE)
         PRODUCT_NAME "Tzopilotl"
         COMPANY_NAME "Tzopilotl"
         BUNDLE_ID "org.tzopilotl.app"
-        VERSION "0.1.0"
+        VERSION "${PROJECT_VERSION}"
         DOCUMENT_EXTENSIONS x tzd
     )
 
@@ -261,7 +261,7 @@ if(TZPL_BUILD_APP_JUCE)
         JUCE_WEB_BROWSER=0
         JUCE_USE_CURL=0
         JUCE_APPLICATION_NAME_STRING="Tzopilotl"
-        JUCE_APPLICATION_VERSION_STRING="0.1.0"
+        JUCE_APPLICATION_VERSION_STRING="${PROJECT_VERSION}"
     )
 
     target_link_libraries(tzpl_app_juce
@@ -284,4 +284,11 @@ if(TZPL_BUILD_APP_JUCE)
         target_link_libraries(tzpl_app_juce PRIVATE tzpl_nats_bridge)
         target_compile_definitions(tzpl_app_juce PRIVATE TZPL_HAS_NATS=1)
     endif()
+
+    # The bundle goes at the root of the distribution folder, next to
+    # modules/ (found at runtime via the executable-relative walk-up).
+    install(TARGETS tzpl_app_juce
+        BUNDLE DESTINATION .
+        COMPONENT dist
+    )
 endif() # TZPL_BUILD_APP_JUCE
