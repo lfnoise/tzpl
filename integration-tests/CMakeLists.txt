@@ -39,6 +39,7 @@ if(TARGET tzpl_synthdef_compiler_bridge)
         SCRIPTS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/scripts"
         MODULES_DIR="${CMAKE_SOURCE_DIR}/bridge/modules"
         LANG_MODULES_DIR="${CMAKE_SOURCE_DIR}/lang/modules"
+        EXAMPLES_DIR="${CMAKE_SOURCE_DIR}/examples"
     )
 endif()
 

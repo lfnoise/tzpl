@@ -1,5 +1,5 @@
 -- Plays a short phrase through every voicer-based instrument defined in
--- modules/instrument_synthdefs.x.
+-- examples/instrument_synthdefs.x (needs examples/ on the module path).
 --
 -- For each synth we:
 --   1. spawn a node with synthdef.play(...)

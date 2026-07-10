@@ -89,7 +89,7 @@ if(TZPL_BUILD_BRIDGE)
 endif()
 
 # Examples
-install(FILES lang/modules/example_synthdefs.x
+install(DIRECTORY examples/
     DESTINATION examples
 )
 install(DIRECTORY integration-tests/scripts/

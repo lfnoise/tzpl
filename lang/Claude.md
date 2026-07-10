@@ -106,7 +106,6 @@ cd lang/tests && bash run_tests.sh
 - `synthdef.x` -- SynthDef integration framework
 - `dsp_math.x` -- DSP math utilities
 - `filters.x` -- IIR/FIR filter implementations
-- `example_synthdefs.x` -- Example synthesizer definitions
 - `message.x` -- the Msg message value type and `asMsg` constructors
 - `messageEncoding.x` -- TZB binary encode/decode + zero-copy Reader for `Msg`
 

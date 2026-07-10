@@ -360,7 +360,9 @@ static void run_synthc_diff_script(char const* scriptFile, char const* sentinel,
 
     engine::Engine* eng = makeTestEngine();
 
-    ts::ModuleCompiler moduleCompiler(compiler, {MODULES_DIR, LANG_MODULES_DIR});
+    // EXAMPLES_DIR: synthc_prod_diff.x imports instrument_synthdefs, which
+    // lives with the shipped examples rather than the stdlib modules.
+    ts::ModuleCompiler moduleCompiler(compiler, {MODULES_DIR, LANG_MODULES_DIR, EXAMPLES_DIR});
     auto target = compiler.createTarget();
     ts::VM vm(16 * 1024 * 1024, types, target);
     bridge::AppContext appCtx; appCtx.engine = eng;
