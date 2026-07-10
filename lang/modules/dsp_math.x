@@ -58,14 +58,14 @@ fn sq(x) = x * x;
 fn cb(x) = x * x * x;
 fn qu(x) = x sq sq;
 fn ssq(x) = x * x abs;                              -- signed square
-fn ssqrt(x Float) Float = x sgn * (x abs sqrt);                 -- signed square root
-fn scbrt(x Float) Float = x sgn * (x abs cbrt);                 -- signed cube root
-fn spow(x Float, y Float) Float = x sgn * (x abs pow(y));       -- signed exponentiation
+fn ssqrt(x Float) Float = x sign * (x abs sqrt);                 -- signed square root
+fn scbrt(x Float) Float = x sign * (x abs cbrt);                 -- signed cube root
+fn spow(x Float, y Float) Float = x sign * (x abs pow(y));       -- signed exponentiation
 
 fn qurt(x Float) Float = x pow(0.25);                           -- fourth root
 
 fn evenpow(x Float, p Float) Float = x abs pow(p);
-fn oddpow(x Float, p Float) Float = x sgn * x evenpow(p);
+fn oddpow(x Float, p Float) Float = x sign * x evenpow(p);
 
 -- ============================================================
 -- Trig extensions
@@ -308,7 +308,7 @@ fn bwarp(x Float, w Float) Float {
 fn bwarpS(x Float, w Float) Float {
     if (x == 0.0) { return 0.0; }
     let wx = w * x;
-    let sx = x sgn;
+    let sx = x sign;
     sx * (wx - x) / (2.0 * wx - sx * w - x)
 }
 
