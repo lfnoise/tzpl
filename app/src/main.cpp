@@ -32,6 +32,7 @@
 #include <filesystem>
 #include "tzpl.hpp"
 #include "module_compiler.hpp"
+#include "module_paths.hpp"
 #include "diagnostic.hpp"
 #include "tzpl_app_context.hpp"
 #include "tzpl_audio_engine_ffi.hpp"
@@ -689,6 +690,21 @@ int main(int argc, const char* argv[]) {
                 includePaths.push_back(modulesDir);
             }
         }
+
+        // --- Complete the module search path ---
+        // $TZPL_PATH, then the installed stdlib (TZPL_HOME override /
+        // executable-relative walk-up for a distribution folder / source
+        // tree for dev builds). Stdlib last so -I, the project, and
+        // $TZPL_PATH can shadow it.
+        for (auto& p : envModulePaths()) includePaths.push_back(std::move(p));
+        std::vector<std::string> stdlibFallbacks;
+#ifdef MODULES_DIR
+        stdlibFallbacks.push_back(MODULES_DIR);
+#endif
+#ifdef LANG_MODULES_DIR
+        stdlibFallbacks.push_back(LANG_MODULES_DIR);
+#endif
+        for (auto& p : defaultModulePaths(stdlibFallbacks)) includePaths.push_back(std::move(p));
 
         // --- NRT mode: force headless, never open an audio device ---
         // The "live" engine is created in NRT-mode as a placeholder so the

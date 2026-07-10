@@ -40,20 +40,6 @@ namespace ts {
 ModuleCompiler::ModuleCompiler(Compiler& compiler, std::vector<std::string> includePaths)
     : compiler_(compiler), includePaths_(std::move(includePaths))
 {
-    // Append TZPL_PATH directories
-    if (const char* envPath = std::getenv("TZPL_PATH")) {
-        std::string pathStr(envPath);
-        size_t start = 0;
-        while (start < pathStr.size()) {
-            size_t end = pathStr.find(':', start);
-            if (end == std::string::npos) end = pathStr.size();
-            std::string dir = pathStr.substr(start, end - start);
-            if (!dir.empty()) {
-                includePaths_.push_back(std::move(dir));
-            }
-            start = end + 1;
-        }
-    }
 }
 
 std::string ModuleCompiler::resolveModulePath(
@@ -76,7 +62,8 @@ std::string ModuleCompiler::resolveModulePath(
         }
     }
 
-    // 2. Try each include path (CLI -I paths + TZPL_PATH)
+    // 2. Try each include path in order (composed by the entry point via
+    //    module_paths.hpp: -I, project, $TZPL_PATH, stdlib)
     for (const auto& dir : includePaths_) {
         std::filesystem::path candidate = std::filesystem::path(dir) / relPath;
         if (std::filesystem::exists(candidate)) {

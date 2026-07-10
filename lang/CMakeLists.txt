@@ -62,6 +62,7 @@ set(LIB_SOURCES
     src/builtins_actors.cpp
     src/disassemble.cpp
     src/module_compiler.cpp
+    src/module_paths.cpp
     src/diagnostic.cpp
     src/repl_session.cpp
     src/incremental_compiler.cpp
@@ -101,6 +102,12 @@ target_include_directories(linenoise PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/third_pa
 add_executable(tzpl src/main.cpp)
 target_link_libraries(tzpl PRIVATE tzpl_lib linenoise)
 target_compile_options(tzpl PRIVATE ${TZPL_COMPILE_OPTIONS})
+
+# Stdlib fallback for dev builds, where the build directory has no modules/
+# ancestor for the executable-relative walk-up to find (see module_paths.hpp).
+target_compile_definitions(tzpl PRIVATE
+    LANG_MODULES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/modules"
+)
 
 # Debug flags
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")

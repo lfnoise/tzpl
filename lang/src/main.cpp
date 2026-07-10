@@ -29,6 +29,7 @@
 #include "linenoise.h"
 #include "tzpl.hpp"
 #include "module_compiler.hpp"
+#include "module_paths.hpp"
 #include "diagnostic.hpp"
 #include "repl_session.hpp"
 
@@ -370,6 +371,16 @@ int main(int argc, const char* argv[]) {
                 filename = arg;
             }
         }
+
+        // Complete the module search path: $TZPL_PATH, then the installed
+        // stdlib (TZPL_HOME override / executable-relative walk-up / source
+        // tree). Stdlib last so -I and $TZPL_PATH can shadow it.
+        for (auto& p : envModulePaths()) includePaths.push_back(std::move(p));
+        std::vector<std::string> stdlibFallbacks;
+#ifdef LANG_MODULES_DIR
+        stdlibFallbacks.push_back(LANG_MODULES_DIR);
+#endif
+        for (auto& p : defaultModulePaths(stdlibFallbacks)) includePaths.push_back(std::move(p));
 
         // Create target and VM after parsing args (so rtRestricted is known)
         VMTarget target = compiler.createTarget(rtRestricted);

@@ -32,6 +32,14 @@ cd lang/tests && bash run_tests.sh
 ./build/lang/tzpl -I path      # Add module search paths
 ```
 
+Module imports resolve in order: the importing file's directory, `-I` paths,
+`$TZPL_PATH` (colon-separated), then the stdlib. The stdlib is discovered
+automatically (`src/module_paths.cpp`): `$TZPL_HOME/modules` if set, else the
+nearest ancestor of the executable containing `modules/` (an installed
+distribution folder), else the source tree's `lang/modules` compiled in as a
+dev fallback. Earlier entries shadow later ones, so a project or `$TZPL_PATH`
+directory can override a stdlib module.
+
 ## Source Layout (`src/`)
 
 ### Compiler Frontend

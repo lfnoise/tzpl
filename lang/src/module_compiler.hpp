@@ -127,7 +127,7 @@ public:
 
 private:
     Compiler& compiler_;
-    std::vector<std::string> includePaths_;  // CLI + env paths
+    std::vector<std::string> includePaths_;  // ordered search path (see module_paths.hpp)
     std::unordered_map<std::string, std::unique_ptr<ModuleInfo>> modules_;
     int compileDepth_ = 0;  // re-entrancy counter so we sweep only at outermost call
 
