@@ -425,7 +425,18 @@ public:
         std::fflush(stdout);
     }
 
-    void anotherInstanceStarted(juce::String const&) override {}
+    // Finder "open document" events (and second-instance launches) arrive
+    // here as a quoted command line. Open every token that is a file.
+    void anotherInstanceStarted(juce::String const& commandLine) override {
+        if (!window_) return;
+        auto* main = window_->mainComponent();
+        if (!main) return;
+        auto tokens = juce::StringArray::fromTokens(commandLine, true);
+        for (auto const& t : tokens) {
+            juce::File f(t.unquoted());
+            if (f.existsAsFile()) main->openPath(f);
+        }
+    }
     void suspended() override {}
     void resumed() override {}
     void unhandledException(std::exception const*, juce::String const&,

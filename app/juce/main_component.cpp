@@ -24,6 +24,7 @@
 #include "nrt_vm.hpp"
 #include "repl_session.hpp"
 #include "module_compiler.hpp"
+#include "project_paths.hpp"
 #include <cstdio>
 
 namespace tzplapp {
@@ -295,13 +296,37 @@ void MainComponent::openFileFlow() {
         [this](juce::FileChooser const& fc) {
             auto file = fc.getResult();
             if (file == juce::File()) return;
-            if (file.hasFileExtension("tzd"))
-                // Opening a notebook replaces the current one.
-                confirmNotebookDiscardThen(
-                    [this, file] { openNotebookFile(file); });
-            else if (!editorPane_.openFile(file))
-                logLine("could not open " + file.getFullPathName());
+            openPath(file);
         });
+}
+
+void MainComponent::openPath(juce::File const& file) {
+    if (!file.existsAsFile()) {
+        logLine("no such file: " + file.getFullPathName());
+        return;
+    }
+    registerProjectFor(file);
+    if (file.hasFileExtension("tzd"))
+        // Opening a notebook replaces the current one.
+        confirmNotebookDiscardThen(
+            [this, file] { openNotebookFile(file); });
+    else if (!editorPane_.openFile(file))
+        logLine("could not open " + file.getFullPathName());
+}
+
+// The engine config of a project discovered mid-session can't be applied (the
+// engine is already running); its modules/ can, so imports resolve. Engine
+// settings apply when the app is next launched on a file in the project.
+void MainComponent::registerProjectFor(juce::File const& file) {
+    if (!appCtx_.moduleCompiler) return;
+    std::string root = tzplapp::findProjectRoot(
+        file.getFullPathName().toStdString());
+    if (root.empty()) return;
+    juce::File modulesDir = juce::File(root).getChildFile("modules");
+    if (!modulesDir.isDirectory()) return;
+    if (appCtx_.moduleCompiler->addIncludePath(
+            modulesDir.getFullPathName().toStdString()))
+        logLine("project modules: " + modulesDir.getFullPathName());
 }
 
 // ---------------------------------------------------------------------------

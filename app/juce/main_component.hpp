@@ -66,6 +66,11 @@ public:
     // Append an info line to the output console.
     void logLine(juce::String const& line);
 
+    // Open a .x/.tzd file as if chosen in the Open dialog (also the entry
+    // point for Finder open events). Registers the file's project (nearest
+    // ancestor with a `config` file) so its modules/ joins the search path.
+    void openPath(juce::File const& file);
+
     // Asks about unsaved changes (async) and calls `proceed` only if the
     // user did not cancel. With nothing unsaved it proceeds immediately.
     void confirmUnsavedChangesThen(std::function<void()> proceed);
@@ -80,6 +85,7 @@ public:
     bool testEvalCollected() const;
     juce::String testLastEvalSummary() const;
     void testOpenFile(juce::File const& f) {
+        registerProjectFor(f);
         if (f.hasFileExtension("tzd")) openNotebookFile(f);
         else editorPane_.openFile(f);
     }
@@ -106,6 +112,7 @@ private:
     void saveSplitRatio();
 
     void openFileFlow();
+    void registerProjectFor(juce::File const& file);
     void saveActiveFlow(bool forceDialog, std::function<void(bool)> done = {});
     void closeActiveTabFlow();
     // Asks about the open notebook's unsaved changes (async) before it is

@@ -91,7 +91,7 @@ endif()
 
 if(TZPL_BUILD_APP)
 
-set(APP_SOURCES src/main.cpp)
+set(APP_SOURCES src/main.cpp src/project_paths.cpp)
 
 if(TZPL_BUILD_GUI)
     list(APPEND APP_SOURCES
@@ -222,10 +222,12 @@ if(TZPL_BUILD_APP_JUCE)
         COMPANY_NAME "Tzopilotl"
         BUNDLE_ID "org.tzopilotl.app"
         VERSION "0.1.0"
+        DOCUMENT_EXTENSIONS x tzd
     )
 
     target_sources(tzpl_app_juce PRIVATE
         src/main.cpp
+        src/project_paths.cpp
         src/gui_state.cpp
         juce/juce_gui_main.cpp
         juce/juce_audio_backend.cpp

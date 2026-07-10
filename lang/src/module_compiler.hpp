@@ -101,7 +101,16 @@ struct ModuleInfo {
 
 class ModuleCompiler {
 public:
-    ModuleCompiler(Compiler& compiler, std::vector<std::string> includePaths);
+    // `includePaths` are user paths (-I, project modules/, $TZPL_PATH);
+    // `systemPaths` is the stdlib (see module_paths.hpp). They are kept
+    // separate so a path added at runtime -- e.g. the modules/ of a project
+    // opened in the GUI -- still searches ahead of the stdlib.
+    ModuleCompiler(Compiler& compiler, std::vector<std::string> includePaths,
+                   std::vector<std::string> systemPaths = {});
+
+    // Append a user include path (still ahead of systemPaths_). Returns false
+    // if the path was already present in either list.
+    bool addIncludePath(std::string path);
 
     // Compile a module identified by its dotted path.
     // Returns nullptr on error (errors appended to the provided vector).
@@ -114,6 +123,7 @@ public:
 
     Compiler& compiler() { return compiler_; }
     const std::vector<std::string>& includePaths() const { return includePaths_; }
+    const std::vector<std::string>& systemPaths() const { return systemPaths_; }
 
     // Invalidate a single module from the cache and recursively invalidate
     // any other cached module that depends on it. Used by sweepStaleModules.
@@ -127,7 +137,8 @@ public:
 
 private:
     Compiler& compiler_;
-    std::vector<std::string> includePaths_;  // ordered search path (see module_paths.hpp)
+    std::vector<std::string> includePaths_;  // user paths, searched first
+    std::vector<std::string> systemPaths_;   // stdlib, searched last
     std::unordered_map<std::string, std::unique_ptr<ModuleInfo>> modules_;
     int compileDepth_ = 0;  // re-entrancy counter so we sweep only at outermost call
 

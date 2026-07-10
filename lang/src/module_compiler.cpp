@@ -37,9 +37,25 @@
 
 namespace ts {
 
-ModuleCompiler::ModuleCompiler(Compiler& compiler, std::vector<std::string> includePaths)
-    : compiler_(compiler), includePaths_(std::move(includePaths))
+ModuleCompiler::ModuleCompiler(Compiler& compiler, std::vector<std::string> includePaths,
+                               std::vector<std::string> systemPaths)
+    : compiler_(compiler), includePaths_(std::move(includePaths)),
+      systemPaths_(std::move(systemPaths))
 {
+}
+
+bool ModuleCompiler::addIncludePath(std::string path) {
+    std::error_code ec;
+    std::filesystem::path canon = std::filesystem::weakly_canonical(path, ec);
+    if (!ec) path = canon.string();
+    for (const auto& p : includePaths_) {
+        if (p == path) return false;
+    }
+    for (const auto& p : systemPaths_) {
+        if (p == path) return false;
+    }
+    includePaths_.push_back(std::move(path));
+    return true;
 }
 
 std::string ModuleCompiler::resolveModulePath(
@@ -62,9 +78,17 @@ std::string ModuleCompiler::resolveModulePath(
         }
     }
 
-    // 2. Try each include path in order (composed by the entry point via
-    //    module_paths.hpp: -I, project, $TZPL_PATH, stdlib)
+    // 2. Try each user include path in order (composed by the entry point
+    //    via module_paths.hpp: -I, project, $TZPL_PATH)
     for (const auto& dir : includePaths_) {
+        std::filesystem::path candidate = std::filesystem::path(dir) / relPath;
+        if (std::filesystem::exists(candidate)) {
+            return std::filesystem::canonical(candidate).string();
+        }
+    }
+
+    // 3. Finally the stdlib, so any user path can shadow a stdlib module
+    for (const auto& dir : systemPaths_) {
         std::filesystem::path candidate = std::filesystem::path(dir) / relPath;
         if (std::filesystem::exists(candidate)) {
             return std::filesystem::canonical(candidate).string();

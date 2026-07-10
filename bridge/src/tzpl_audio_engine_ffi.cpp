@@ -898,7 +898,8 @@ static void ffi_attachVM(ts::VM& vm, u16 dst, u16, u16 argBase) {
     // target get their own cache (distinct from the NRT target's cache).
     state.moduleCompiler = std::make_unique<ts::ModuleCompiler>(
         *ctx->compiler,
-        std::vector<std::string>(ctx->moduleCompiler->includePaths()));
+        std::vector<std::string>(ctx->moduleCompiler->includePaths()),
+        std::vector<std::string>(ctx->moduleCompiler->systemPaths()));
 
     // Persistent incremental compile context: one TypeChecker shared across all
     // siloLoad/siloEval calls on this silo, so redefining a function reuses its

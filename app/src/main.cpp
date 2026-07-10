@@ -33,6 +33,7 @@
 #include "tzpl.hpp"
 #include "module_compiler.hpp"
 #include "module_paths.hpp"
+#include "project_paths.hpp"
 #include "diagnostic.hpp"
 #include "tzpl_app_context.hpp"
 #include "tzpl_audio_engine_ffi.hpp"
@@ -660,6 +661,18 @@ int main(int argc, const char* argv[]) {
             }
         }
 
+        // --- Auto-detect the project from the opened file ---
+        // GUI users can't pass -P; opening any file inside a project (the
+        // nearest ancestor directory with a `config` file) applies that
+        // project's engine config and paths. -P still overrides.
+        if (config.projectDir.empty() && !filename.empty()) {
+            std::string root = tzplapp::findProjectRoot(filename);
+            if (!root.empty()) {
+                config.projectDir = root;
+                std::cerr << "project: " << root << "\n";
+            }
+        }
+
         // --- Load config file from project directory ---
         if (!config.projectDir.empty()) {
             std::string configPath = config.projectDir + "/config";
@@ -692,10 +705,11 @@ int main(int argc, const char* argv[]) {
         }
 
         // --- Complete the module search path ---
-        // $TZPL_PATH, then the installed stdlib (TZPL_HOME override /
-        // executable-relative walk-up for a distribution folder / source
-        // tree for dev builds). Stdlib last so -I, the project, and
-        // $TZPL_PATH can shadow it.
+        // User paths: -I, the project's modules/, then $TZPL_PATH. The stdlib
+        // (TZPL_HOME override / executable-relative walk-up for a distribution
+        // folder / source tree for dev builds) goes in a separate system list
+        // that the ModuleCompiler always searches last, so user paths -- even
+        // ones added at runtime when the GUI opens a project -- can shadow it.
         for (auto& p : envModulePaths()) includePaths.push_back(std::move(p));
         std::vector<std::string> stdlibFallbacks;
 #ifdef MODULES_DIR
@@ -704,7 +718,7 @@ int main(int argc, const char* argv[]) {
 #ifdef LANG_MODULES_DIR
         stdlibFallbacks.push_back(LANG_MODULES_DIR);
 #endif
-        for (auto& p : defaultModulePaths(stdlibFallbacks)) includePaths.push_back(std::move(p));
+        std::vector<std::string> systemPaths = defaultModulePaths(stdlibFallbacks);
 
         // --- NRT mode: force headless, never open an audio device ---
         // The "live" engine is created in NRT-mode as a placeholder so the
@@ -792,7 +806,8 @@ int main(int argc, const char* argv[]) {
         appCtx.target = target;
 
         // Create module compiler (available to both GUI and headless modes)
-        ModuleCompiler moduleCompiler(compiler, std::vector<std::string>(includePaths));
+        ModuleCompiler moduleCompiler(compiler, std::vector<std::string>(includePaths),
+                                      std::vector<std::string>(systemPaths));
         appCtx.moduleCompiler = &moduleCompiler;
 
         // Initialize per-silo VM slots (populated later by attachVM())
@@ -954,9 +969,13 @@ int main(int argc, const char* argv[]) {
                                  || filename.empty();
 
                 if (isatty(STDIN_FILENO) && stayAlive) {
-                    // Interactive terminal: run REPL
-                    runREPL(nrtvm.vm, compiler, target,
-                            std::vector<std::string>(includePaths));
+                    // Interactive terminal: run REPL. Its REPLSession builds
+                    // its own ModuleCompiler from one flat list, so merge the
+                    // user and system paths (order still user-first).
+                    std::vector<std::string> replPaths(includePaths);
+                    replPaths.insert(replPaths.end(), systemPaths.begin(),
+                                     systemPaths.end());
+                    runREPL(nrtvm.vm, compiler, target, std::move(replPaths));
                 } else if (stayAlive && hasActiveListeners) {
                     // Non-interactive but listeners active: wait for messages
                     std::cout << "Running headless. Press Ctrl-C to stop.\n";
