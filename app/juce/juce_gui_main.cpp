@@ -213,6 +213,15 @@ public:
         juce::Process::makeForegroundProcess();
         window_->toFront(true);
 
+        // Startup document from the command line: a .tzd opens in the
+        // notebook (main.cpp never evaluates it); a .x was already evaluated
+        // there and is also shown in an editor tab.
+        if (!gAppContext->startupDocument.empty()) {
+            juce::File doc(juce::String(gAppContext->startupDocument));
+            if (doc.existsAsFile())
+                window_->mainComponent()->openPath(doc);
+        }
+
         // TZPL_JUCE_OPEN=<path>: open a file in the editor at startup
         // (testing hook -- a plain file argument is *evaluated*, like the
         // ImGui app).

@@ -42,7 +42,14 @@ MainComponent::MainComponent(bridge::AppContext& appCtx,
     addAndMakeVisible(console_);
 
     notebook_ = std::make_unique<NotebookView>(
-        appCtx_, guiState_, [this] { return session_.get(); }, dispatcher_);
+        appCtx_, guiState_,
+        [this] {
+            // Re-anchor document-relative imports every time the notebook
+            // fetches the session (i.e. before each cell eval).
+            updateSessionDocumentPath();
+            return session_.get();
+        },
+        dispatcher_);
     addChildComponent(*notebook_);
 
     // Horizontal split: center pane | resizer | console column on the right.
@@ -289,7 +296,7 @@ void MainComponent::confirmUnsavedChangesThen(std::function<void()> proceed) {
 
 void MainComponent::openFileFlow() {
     fileChooser_ = std::make_unique<juce::FileChooser>(
-        "Open", juce::File(), "*.x;*.tzd");
+        "Open", dialogDefaultDir(), "*.x;*.tzd");
     fileChooser_->launchAsync(
         juce::FileBrowserComponent::openMode
             | juce::FileBrowserComponent::canSelectFiles,
@@ -403,8 +410,7 @@ void MainComponent::saveNextUntitledTabThen(std::function<void(bool)> done) {
     String name = editorPane_.tabName(idx);
     fileChooser_ = std::make_unique<juce::FileChooser>(
         "Save \"" + name + "\"",
-        juce::File::getSpecialLocation(juce::File::userHomeDirectory)
-            .getChildFile(name),
+        dialogDefaultDir().getChildFile(name),
         "*.x");
     fileChooser_->launchAsync(
         juce::FileBrowserComponent::saveMode
@@ -447,8 +453,7 @@ void MainComponent::saveNotebookFlow(bool forceDialog,
     }
     fileChooser_ = std::make_unique<juce::FileChooser>(
         "Save Notebook As",
-        juce::File::getSpecialLocation(juce::File::userHomeDirectory)
-            .getChildFile("untitled.tzd"),
+        dialogDefaultDir().getChildFile("untitled.tzd"),
         "*.tzd");
     fileChooser_->launchAsync(
         juce::FileBrowserComponent::saveMode
@@ -471,8 +476,7 @@ void MainComponent::saveActiveFlow(bool forceDialog,
     }
     fileChooser_ = std::make_unique<juce::FileChooser>(
         "Save As",
-        juce::File::getSpecialLocation(juce::File::userHomeDirectory)
-            .getChildFile(editorPane_.activeTabName()),
+        dialogDefaultDir().getChildFile(editorPane_.activeTabName()),
         "*.x");
     fileChooser_->launchAsync(
         juce::FileBrowserComponent::saveMode
@@ -516,8 +520,35 @@ void MainComponent::launchEval(String const& code, int flashStart, int flashEnd)
     if (!session_ || guiState_.asyncEval.busy() || code.trim().isEmpty())
         return;
     editorPane_.clearErrorMarkers();
+    updateSessionDocumentPath();
     guiState_.asyncEval.launch(code.toStdString(), appCtx_, *session_,
                                flashStart, flashEnd);
+}
+
+// Anchor document-relative imports to the visible document: evaluated code
+// can import a .x file sitting next to the notebook/tab it came from, with
+// no project setup. An unsaved document has no path, so it clears the anchor
+// (imports then use the search paths only).
+void MainComponent::updateSessionDocumentPath() {
+    if (!session_) return;
+    juce::File doc = notebookVisible_ ? notebook_->currentFile()
+                                      : editorPane_.activeFile();
+    session_->setDocumentPath(
+        doc == juce::File() ? std::string{}
+                            : doc.getFullPathName().toStdString());
+}
+
+// Where file dialogs should start: the visible document's directory, else
+// the project, else home.
+juce::File MainComponent::dialogDefaultDir() const {
+    juce::File doc = notebookVisible_ ? notebook_->currentFile()
+                                      : editorPane_.activeFile();
+    if (doc != juce::File()) return doc.getParentDirectory();
+    if (!appCtx_.projectDir.empty()) {
+        juce::File proj(juce::String(appCtx_.projectDir));
+        if (proj.isDirectory()) return proj;
+    }
+    return juce::File::getSpecialLocation(juce::File::userHomeDirectory);
 }
 
 void MainComponent::collectEvalResult() {
@@ -782,8 +813,7 @@ bool MainComponent::perform(InvocationInfo const& info) {
     case cmd::fileSaveCopy: {
         fileChooser_ = std::make_unique<juce::FileChooser>(
             "Save a Copy As",
-            juce::File::getSpecialLocation(juce::File::userHomeDirectory)
-                .getChildFile(editorPane_.activeTabName()),
+            dialogDefaultDir().getChildFile(editorPane_.activeTabName()),
             "*.x");
         fileChooser_->launchAsync(
             juce::FileBrowserComponent::saveMode
@@ -917,7 +947,10 @@ double MainComponent::testDriveFirstSlider() {
     if (!ui) return -1.0;
     std::lock_guard<std::mutex> lock(ui->mtx);
     for (auto& w : ui->widgets) {
-        if (w->kind == bridge::UIWidgetKind::Slider) {
+        // Drive the selftest's own slider ("a" on panel "t"): a startup
+        // document may have materialized widgets ahead of it.
+        if (w->kind == bridge::UIWidgetKind::Slider
+            && w->name == "a" && w->panel == "t") {
             if (w->values.empty()) w->values.resize(1);
             w->values[0] = w->spec.map(0.75);
             w->dirtyEngine = true;

@@ -104,6 +104,15 @@ struct AppContext {
     std::string engineName;  // empty = single-instance mode
     std::vector<SiloVMState> siloVMs;  // indexed by silo number
 
+    // Project directory resolved at startup (-P or auto-detected from the
+    // opened file); empty if none. Used by the GUI for dialog defaults.
+    std::string projectDir;
+
+    // Document to open in the GUI once the window is up (absolute path):
+    // a .tzd startup argument (notebooks can't be evaluated as source), or
+    // a .x argument that was evaluated and should also be visible in a tab.
+    std::string startupDocument;
+
     // Live-control widget registry for the `ui` module (owned by the app;
     // null when no GUI is running).
     UIState* uiState = nullptr;

@@ -94,8 +94,8 @@ public:
     void testShowNotebook(bool show) { showNotebook(show); }
     NotebookView& testNotebook() { return *notebook_; }
     int testWidgetCount() const;
-    // Nudge the first slider in the registry and return its new value
-    // (exercises the WidgetComponent->UIState->dispatcher path).
+    // Nudge the selftest's slider ("a" on panel "t") and return its new
+    // value (exercises the WidgetComponent->UIState->dispatcher path).
     double testDriveFirstSlider();
     // Presets: notebook capture + recall round-trip for `panel`.
     bool testPresetsRoundTrip(std::string const& panel) {
@@ -113,6 +113,8 @@ private:
 
     void openFileFlow();
     void registerProjectFor(juce::File const& file);
+    void updateSessionDocumentPath();
+    juce::File dialogDefaultDir() const;
     void saveActiveFlow(bool forceDialog, std::function<void(bool)> done = {});
     void closeActiveTabFlow();
     // Asks about the open notebook's unsaved changes (async) before it is

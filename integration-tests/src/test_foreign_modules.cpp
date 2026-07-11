@@ -28,6 +28,7 @@
 #include "vm.hpp"
 #include "type_universe.hpp"
 #include "module_compiler.hpp"
+#include "repl_session.hpp"
 #include <print>
 #include <cstdio>
 #include <filesystem>
@@ -585,6 +586,45 @@ static void test_cascade_invalidate_transitive_dependency() {
     std::filesystem::remove_all(tmpDir);
 }
 
+// A REPLSession anchored with setDocumentPath resolves imports relative to
+// the document's directory -- so notebook cells and editor evals can import
+// a .x file sitting next to the open document with no -I or project setup.
+static void test_repl_document_relative_import() {
+    std::print("Test: REPLSession document-relative imports\n");
+
+    std::string tmpDir =
+        std::filesystem::temp_directory_path().string() + "/tzpl_docrel_test";
+    std::filesystem::remove_all(tmpDir);
+    std::filesystem::create_directories(tmpDir);
+    {
+        std::ofstream f(tmpDir + "/sibling.x");
+        f << "fn sibValue() Int = 41;\n";
+    }
+
+    ts::TypeUniverse types;
+    ts::Compiler compiler(types);
+    auto target = compiler.createTarget();
+    ts::VM vm(64 * 1024 * 1024, types, target);
+
+    ts::REPLSession session(compiler, vm, target);  // no include paths
+
+    // Without an anchor the sibling module is invisible.
+    auto r0 = session.eval("import sibling.*;");
+    check(!r0.success, "import fails with no document anchor");
+
+    // Anchored to a document in tmpDir (the file itself need not exist),
+    // the sibling resolves via importing-dir-relative lookup.
+    session.setDocumentPath(tmpDir + "/notebook.tzd");
+    auto r1 = session.eval("import sibling.*;");
+    check(r1.success, "import resolves relative to the document");
+    auto r2 = session.eval("sibValue() + 1");
+    check(r2.success && r2.formattedValue == "42",
+          "imported function evaluates (41 + 1 = 42; got '"
+              + r2.formattedValue + "')");
+
+    std::filesystem::remove_all(tmpDir);
+}
+
 // Main
 // ---------------------------------------------------------------------------
 
@@ -602,6 +642,7 @@ int main() {
     test_ffi_script_name_collision_is_error();
     test_dynvar_recompile_no_stale_cascade();
     test_cascade_invalidate_transitive_dependency();
+    test_repl_document_relative_import();
 
     std::print("\n=== Results: {} passed, {} failed ===\n",
                gTestsPassed, gTestsFailed);

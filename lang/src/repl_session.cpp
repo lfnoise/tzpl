@@ -48,6 +48,7 @@ struct REPLSession::Impl {
     TypeChecker typeChecker;
     std::vector<Program> programs;  // keep ASTs alive for template declNodes
     int displayWidth = 80;          // line width for EvalResult::prettyValue
+    std::string documentPath;       // anchors document-relative imports
 
     Impl(Compiler& c, VM& v, const VMTarget& t, std::vector<std::string> includePaths)
         : compiler(c), vm(v), target(t),
@@ -123,6 +124,14 @@ void REPLSession::setDisplayWidth(int width) {
     impl_->displayWidth = width < 1 ? 1 : width;
 }
 
+void REPLSession::setDocumentPath(const std::string& path) {
+    impl_->documentPath = path;
+    // Imports resolve relative to the importing file's directory first; give
+    // the persistent TypeChecker the document's path so eval() input behaves
+    // like text in that file. Empty clears the anchor (search paths only).
+    impl_->typeChecker.setSourceFilePath(path);
+}
+
 REPLSession::EvalResult REPLSession::eval(const std::string& input) {
     EvalResult result;
     result.source = input;
@@ -162,6 +171,8 @@ REPLSession::EvalResult REPLSession::eval(const std::string& input) {
 
         // Codegen
         CodeGen codegen(impl_->compiler, impl_->typeChecker);
+        if (!impl_->documentPath.empty())
+            codegen.setSourceFilePath(impl_->documentPath);
         codegen.enableRegReclaim = impl_->compiler.enableRegReclaim;
         codegen.enableConstFold = impl_->compiler.enableConstFold;
         codegen.enableTailCalls = impl_->compiler.enableTailCalls;

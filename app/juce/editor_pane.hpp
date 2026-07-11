@@ -80,9 +80,11 @@ public:
     juce::String tabName(int index) const;
     bool tabModified(int index) const;
     bool tabHasFilePath(int index) const;
+    juce::File tabFile(int index) const;  // invalid File if no path yet
 
     bool activeHasFilePath() const { return tabHasFilePath(activeTabIndex()); }
     juce::String activeTabName() const { return tabName(activeTabIndex()); }
+    juce::File activeFile() const { return tabFile(activeTabIndex()); }
 
     // -- Saving (returns true on success) --
     bool saveTab(int index);                        // to its own path

@@ -254,6 +254,11 @@ bool EditorPane::tabHasFilePath(int index) const {
     return tab && tab->file != juce::File();
 }
 
+juce::File EditorPane::tabFile(int index) const {
+    auto* tab = tabAt(index);
+    return tab ? tab->file : juce::File();
+}
+
 bool EditorPane::saveTab(int index) {
     auto* tab = tabAt(index);
     if (!tab || tab->file == juce::File()) return false;

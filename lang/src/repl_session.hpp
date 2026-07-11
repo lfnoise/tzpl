@@ -60,6 +60,12 @@ public:
     // Target line width for EvalResult::prettyValue (default 80).
     void setDisplayWidth(int width);
 
+    // Anchor for document-relative imports: subsequent eval() input resolves
+    // imports relative to this file's directory (ahead of the search paths),
+    // exactly as if it were text in that file. Pass the open document's path
+    // (the file itself need not exist yet); empty to clear.
+    void setDocumentPath(const std::string& path);
+
     // Evaluate a line of input (lex -> parse -> typecheck -> codegen -> execute)
     EvalResult eval(const std::string& input);
 

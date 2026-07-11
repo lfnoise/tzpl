@@ -730,6 +730,15 @@ int main(int argc, const char* argv[]) {
             startAudio = false;
         }
 
+        // Notebook documents are binary; they can only be opened in the GUI,
+        // never evaluated as source.
+        if (!guiMode && filename.size() > 4
+            && filename.compare(filename.size() - 4, 4, ".tzd") == 0) {
+            std::cerr << "notebook documents (.tzd) require the GUI; "
+                         "run without --nogui/--nrt\n";
+            return 1;
+        }
+
         // --- Create engine and AppContext ---
         engine::Engine* eng = createEngine(config, /*nrt=*/nrtMode);
 
@@ -817,6 +826,7 @@ int main(int argc, const char* argv[]) {
         // modes (headless scripts can build widgets; nothing renders them).
         // The root scanner keeps onChange closures alive across GC cycles.
         appCtx.uiState = &uiState;
+        appCtx.projectDir = config.projectDir;
         bridge::registerUIRootScanner(nrtvm, uiState);
 
         bridge::setAppContextOnVM(&nrtvm.vm, &appCtx);
@@ -866,13 +876,20 @@ int main(int argc, const char* argv[]) {
 #if TZPL_HAS_GUI
         if (guiMode) {
             // --- GUI mode --------------------------------------------------
-            // Run file if given (audio starts before the window opens)
+            // A .x file is evaluated before the window opens (audio starts
+            // first) and then shown in an editor tab; a .tzd is a binary
+            // notebook document -- never evaluated as source, just opened.
             if (!filename.empty()) {
-                std::string source = readFile(filename);
-                if (!source.empty()) {
-                    runSourceLocked(nrtvm, compiler, target, source, filename,
-                                    &moduleCompiler);
+                bool isNotebook = filename.size() > 4
+                    && filename.compare(filename.size() - 4, 4, ".tzd") == 0;
+                if (!isNotebook) {
+                    std::string source = readFile(filename);
+                    if (!source.empty()) {
+                        runSourceLocked(nrtvm, compiler, target, source,
+                                        filename, &moduleCompiler);
+                    }
                 }
+                appCtx.startupDocument = fs::absolute(filename).string();
             }
             exitCode = runGui(appCtx);
         } else
