@@ -69,7 +69,12 @@ public:
     // Open a .x/.tzd file as if chosen in the Open dialog (also the entry
     // point for Finder open events). Registers the file's project (nearest
     // ancestor with a `config` file) so its modules/ joins the search path.
+    // Files inside the distribution's examples/ open as untitled copies.
     void openPath(juce::File const& file);
+
+    // Recent projects (most recent first), for the File menu submenu.
+    juce::StringArray recentProjectRoots() const;
+    void openRecentProject(int index);
 
     // Asks about unsaved changes (async) and calls `proceed` only if the
     // user did not cancel. With nothing unsaved it proceeds immediately.
@@ -112,9 +117,15 @@ private:
     void saveSplitRatio();
 
     void openFileFlow();
+    void newProjectFlow();
+    void createProject(juce::File const& dir);
     void registerProjectFor(juce::File const& file);
+    void noteRecentProject(juce::String const& root, juce::String const& doc);
     void updateSessionDocumentPath();
     juce::File dialogDefaultDir() const;
+    juce::File stdlibModulesDir() const;
+    juce::File distExamplesDir() const;
+    bool isDistExample(juce::File const& file) const;
     void saveActiveFlow(bool forceDialog, std::function<void(bool)> done = {});
     void closeActiveTabFlow();
     // Asks about the open notebook's unsaved changes (async) before it is

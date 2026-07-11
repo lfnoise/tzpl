@@ -73,6 +73,10 @@ public:
     void newTab(juce::String const& name = "untitled.x");
     // Opens `file`; if already open just selects its tab. False on read error.
     bool openFile(juce::File const& file);
+    // Open `file`'s contents in a new tab with no file path (an untitled
+    // copy, marked modified): saving prompts for a location. Used for
+    // distribution examples, which are templates.
+    bool openFileAsCopy(juce::File const& file);
     void closeTab(int index);            // unconditional
     int tabCount() const { return (int)tabs_.size(); }
     int activeTabIndex() const;

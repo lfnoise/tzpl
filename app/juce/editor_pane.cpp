@@ -227,6 +227,20 @@ bool EditorPane::openFile(juce::File const& file) {
     return true;
 }
 
+bool EditorPane::openFileAsCopy(juce::File const& file) {
+    if (!file.existsAsFile()) return false;
+    auto tab = std::make_unique<Tab>();
+    tab->name = file.getFileName();
+    tab->doc = std::make_unique<CodeDocument>();
+    tab->doc->replaceAllContent(file.loadFileAsString());
+    tab->doc->clearUndoHistory();
+    // No file path and no save point: the tab is an untitled copy that
+    // counts as modified, so closing prompts and Save asks for a location.
+    tab->editor = std::make_unique<TzplCodeEditor>(*tab->doc, &tokeniser_);
+    addTabInternal(std::move(tab));
+    return true;
+}
+
 void EditorPane::closeTab(int index) {
     if (auto* tab = tabAt(index)) {
         tab->doc->removeListener(this);

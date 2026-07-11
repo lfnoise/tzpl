@@ -60,6 +60,9 @@ public:
     bool openFile(juce::File const& file, juce::String& err);
     bool saveToFile(juce::File const& file, juce::String& err);
     juce::File currentFile() const;
+    // Drop the file association: the open document becomes an untitled copy
+    // and saving prompts for a new location. Used for distribution examples.
+    void detachFile();
     bool isModified() const;
 
     // -- Cell operations --

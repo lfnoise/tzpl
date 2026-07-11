@@ -26,6 +26,7 @@
 #include "module_compiler.hpp"
 #include "project_paths.hpp"
 #include <cstdio>
+#include <cstdlib>
 
 namespace tzplapp {
 
@@ -312,6 +313,23 @@ void MainComponent::openPath(juce::File const& file) {
         logLine("no such file: " + file.getFullPathName());
         return;
     }
+    // Distribution examples are templates: open an untitled copy so a user
+    // edit is never saved into the (possibly read-only) distribution folder
+    // and never clobbered by an update.
+    if (isDistExample(file)) {
+        if (file.hasFileExtension("tzd")) {
+            confirmNotebookDiscardThen([this, file] {
+                openNotebookFile(file);
+                notebook_->detachFile();
+                logLine("(example: editing a copy; Save asks for a location)");
+            });
+        } else if (editorPane_.openFileAsCopy(file)) {
+            logLine("opened a copy of " + file.getFullPathName());
+        } else {
+            logLine("could not open " + file.getFullPathName());
+        }
+        return;
+    }
     registerProjectFor(file);
     if (file.hasFileExtension("tzd"))
         // Opening a notebook replaces the current one.
@@ -325,15 +343,70 @@ void MainComponent::openPath(juce::File const& file) {
 // engine is already running); its modules/ can, so imports resolve. Engine
 // settings apply when the app is next launched on a file in the project.
 void MainComponent::registerProjectFor(juce::File const& file) {
-    if (!appCtx_.moduleCompiler) return;
     std::string root = tzplapp::findProjectRoot(
         file.getFullPathName().toStdString());
     if (root.empty()) return;
-    juce::File modulesDir = juce::File(root).getChildFile("modules");
+    noteRecentProject(String(root), file.getFullPathName());
+    if (!appCtx_.moduleCompiler) return;
+    juce::File modulesDir = juce::File(String(root)).getChildFile("modules");
     if (!modulesDir.isDirectory()) return;
     if (appCtx_.moduleCompiler->addIncludePath(
             modulesDir.getFullPathName().toStdString()))
         logLine("project modules: " + modulesDir.getFullPathName());
+}
+
+// Recent projects persist in the settings file as most-recent-first
+// "root|lastDocument" lines; the File menu submenu shows the roots and
+// opening one reopens its last document.
+void MainComponent::noteRecentProject(String const& root, String const& doc) {
+    auto lines = juce::StringArray::fromLines(
+        settings_.getValue("recentProjects"));
+    lines.removeEmptyStrings();
+    for (int i = lines.size(); --i >= 0;)
+        if (lines[i].upToFirstOccurrenceOf("|", false, false) == root)
+            lines.remove(i);
+    lines.insert(0, root + "|" + doc);
+    while (lines.size() > cmd::kMaxRecentProjects)
+        lines.remove(lines.size() - 1);
+    settings_.setValue("recentProjects", lines.joinIntoString("\n"));
+}
+
+juce::StringArray MainComponent::recentProjectRoots() const {
+    juce::StringArray roots;
+    for (auto& l : juce::StringArray::fromLines(
+             settings_.getValue("recentProjects")))
+        if (l.isNotEmpty())
+            roots.add(l.upToFirstOccurrenceOf("|", false, false));
+    return roots;
+}
+
+void MainComponent::openRecentProject(int index) {
+    auto lines = juce::StringArray::fromLines(
+        settings_.getValue("recentProjects"));
+    lines.removeEmptyStrings();
+    if (index < 0 || index >= lines.size()) return;
+    String root = lines[index].upToFirstOccurrenceOf("|", false, false);
+    String doc = lines[index].fromFirstOccurrenceOf("|", false, false);
+    if (juce::File docFile(doc); docFile.existsAsFile()) {
+        openPath(docFile);
+        return;
+    }
+    // The last document is gone; fall back to an Open dialog in the project.
+    juce::File rootDir(root);
+    if (!rootDir.isDirectory()) {
+        logLine("project no longer exists: " + root);
+        return;
+    }
+    appCtx_.projectDir = rootDir.getFullPathName().toStdString();
+    fileChooser_ = std::make_unique<juce::FileChooser>(
+        "Open", rootDir, "*.x;*.tzd");
+    fileChooser_->launchAsync(
+        juce::FileBrowserComponent::openMode
+            | juce::FileBrowserComponent::canSelectFiles,
+        [this](juce::FileChooser const& fc) {
+            auto file = fc.getResult();
+            if (file != juce::File()) openPath(file);
+        });
 }
 
 // ---------------------------------------------------------------------------
@@ -551,6 +624,78 @@ juce::File MainComponent::dialogDefaultDir() const {
     return juce::File::getSpecialLocation(juce::File::userHomeDirectory);
 }
 
+// The stdlib modules directory (first existing system search path).
+juce::File MainComponent::stdlibModulesDir() const {
+    if (!appCtx_.moduleCompiler) return {};
+    for (auto const& p : appCtx_.moduleCompiler->systemPaths()) {
+        juce::File dir((juce::String(p)));
+        if (dir.isDirectory()) return dir;
+    }
+    return {};
+}
+
+// The examples/ sibling of the stdlib modules directory -- present in an
+// installed distribution folder, absent in a dev source tree (where the
+// compiled-in fallbacks are lang/modules and bridge/modules).
+juce::File MainComponent::distExamplesDir() const {
+    juce::File mods = stdlibModulesDir();
+    if (mods == juce::File()) return {};
+    juce::File ex = mods.getParentDirectory().getChildFile("examples");
+    return ex.isDirectory() ? ex : juce::File();
+}
+
+bool MainComponent::isDistExample(juce::File const& file) const {
+    juce::File ex = distExamplesDir();
+    return ex != juce::File() && file.isAChildOf(ex);
+}
+
+// Create <dir> with a config file, a modules/ directory, and a starter
+// notebook, then open the notebook (which registers the project).
+void MainComponent::newProjectFlow() {
+    fileChooser_ = std::make_unique<juce::FileChooser>(
+        "New Project (choose a folder name)",
+        dialogDefaultDir().getChildFile("Untitled Project"), "");
+    fileChooser_->launchAsync(
+        juce::FileBrowserComponent::saveMode,
+        [this](juce::FileChooser const& fc) {
+            auto dir = fc.getResult();
+            if (dir == juce::File()) return;
+            confirmNotebookDiscardThen([this, dir] { createProject(dir); });
+        });
+}
+
+void MainComponent::createProject(juce::File const& dir) {
+    if (!dir.getChildFile("modules").createDirectory()) {
+        logLine("could not create project at " + dir.getFullPathName());
+        return;
+    }
+    juce::File config = dir.getChildFile("config");
+    if (!config.existsAsFile()) {
+        config.replaceWithText(
+            "-- Tzopilotl project config (key = value, `--` comments).\n"
+            "-- Applied when the app is launched on a file in this project.\n"
+            "-- silos = 2\n"
+            "-- sampleRate = 48000\n"
+            "-- bufferFrames = 512\n"
+            "-- channels = 2\n");
+    }
+    juce::File doc = dir.getChildFile("main.tzd");
+    if (doc.existsAsFile()) {  // re-running over an existing project
+        openPath(doc);
+        return;
+    }
+    notebook_->newDocument();
+    String err;
+    if (!notebook_->saveToFile(doc, err)) {
+        logLine("could not write " + doc.getFullPathName() + ": " + err);
+        return;
+    }
+    showNotebook(true);
+    appCtx_.projectDir = dir.getFullPathName().toStdString();
+    registerProjectFor(doc);  // recents + modules/ on the search path
+    logLine("project created: " + dir.getFullPathName());
+}
+
 void MainComponent::collectEvalResult() {
     auto& ae = guiState_.asyncEval;
     if (ae.busy() || !ae.finished()) return;
@@ -591,8 +736,9 @@ void MainComponent::collectEvalResult() {
 
 void MainComponent::getAllCommands(juce::Array<juce::CommandID>& ids) {
     ids.addArray({
-        cmd::fileNew, cmd::fileNewNotebook, cmd::fileOpen, cmd::fileSave,
-        cmd::fileSaveAs, cmd::fileSaveCopy, cmd::fileClose,
+        cmd::fileNew, cmd::fileNewNotebook, cmd::fileNewProject,
+        cmd::fileOpen, cmd::fileOpenExample, cmd::fileRevealModules,
+        cmd::fileSave, cmd::fileSaveAs, cmd::fileSaveCopy, cmd::fileClose,
 #if !JUCE_MAC
         cmd::quit,
 #endif
@@ -648,6 +794,17 @@ void MainComponent::getCommandInfo(juce::CommandID id,
     case cmd::fileOpen:
         set("Open...", "File");
         info.addDefaultKeypress('o', mod);
+        break;
+    case cmd::fileNewProject:
+        set("New Project...", "File");
+        break;
+    case cmd::fileOpenExample:
+        set("Open Example...", "File");
+        info.setActive(distExamplesDir() != juce::File());
+        break;
+    case cmd::fileRevealModules:
+        set("Reveal Modules Folder", "File");
+        info.setActive(stdlibModulesDir() != juce::File());
         break;
     case cmd::fileSave:
         set("Save", "File");
@@ -802,6 +959,38 @@ bool MainComponent::perform(InvocationInfo const& info) {
     case cmd::fileOpen:
         openFileFlow();
         return true;
+    case cmd::fileNewProject:
+        newProjectFlow();
+        return true;
+    case cmd::fileOpenExample: {
+        juce::File ex = distExamplesDir();
+        if (ex == juce::File()) {
+            logLine("no examples folder found next to the modules folder");
+            return true;
+        }
+        fileChooser_ = std::make_unique<juce::FileChooser>(
+            "Open Example", ex, "*.x;*.tzd");
+        fileChooser_->launchAsync(
+            juce::FileBrowserComponent::openMode
+                | juce::FileBrowserComponent::canSelectFiles,
+            [this](juce::FileChooser const& fc) {
+                auto file = fc.getResult();
+                if (file != juce::File()) openPath(file);
+            });
+        return true;
+    }
+    case cmd::fileRevealModules: {
+        juce::File mods = stdlibModulesDir();
+        if (mods == juce::File()) {
+            logLine("no modules folder found");
+        } else if (std::getenv("TZPL_JUCE_SELFTEST")) {
+            // The selftest sweeps every command; don't open Finder windows.
+            logLine("reveal skipped under selftest");
+        } else {
+            mods.revealToUser();
+        }
+        return true;
+    }
     case cmd::fileSave:
         if (notebookVisible_) saveNotebookFlow(false);
         else saveActiveFlow(false);

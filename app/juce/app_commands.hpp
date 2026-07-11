@@ -74,11 +74,21 @@ enum : juce::CommandID {
     evalLine,
     evalFile,
 
+    // Project / distribution
+    fileNewProject,
+    fileOpenExample,
+    fileRevealModules,
+
     // Ranges: fontSetBase + i selects font size i, themeSetBase + i selects
     // theme i (see kEditorFontSizes / AppTheme).
     fontSetBase = 100,
     themeSetBase = 200,
 };
+
+// Recent-projects submenu: raw PopupMenu item IDs (dispatched through
+// MenuBarModel::menuItemSelected, not the command manager).
+inline constexpr int recentProjectBase = 9000;
+inline constexpr int kMaxRecentProjects = 8;
 
 // Editor font sizes offered in View > Font Size. JUCE renders vector fonts
 // (no pre-baked bitmap atlas like the ImGui app), so any size is cheap --

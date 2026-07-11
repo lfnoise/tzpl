@@ -20,7 +20,9 @@ Projects
 A project is any folder containing a file named `config` (engine
 settings, one `key = value` per line; see docs). Opening any file
 inside a project makes the app apply its settings and search its
-modules/ directory. Your projects live outside this folder.
+modules/ directory. File > New Project creates one, with a starter
+notebook. Your projects live outside this folder; files opened from
+examples/ open as copies, so the originals stay pristine.
 
 Updating
 --------

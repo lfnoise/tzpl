@@ -140,6 +140,10 @@ juce::File NotebookView::currentFile() const {
     return p.empty() ? juce::File() : juce::File(String(p));
 }
 
+void NotebookView::detachFile() {
+    store_.setFilePath("");
+}
+
 bool NotebookView::isModified() const {
     if (store_.modified()) return true;
     // An editor whose text drifted from the snapshot counts as modified.

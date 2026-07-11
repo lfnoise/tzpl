@@ -45,8 +45,9 @@ static bridge::AppContext* gAppContext = nullptr;
 
 class AppMenuModel : public juce::MenuBarModel {
 public:
-    explicit AppMenuModel(juce::ApplicationCommandManager& commands)
-        : commands_(commands) {
+    AppMenuModel(juce::ApplicationCommandManager& commands,
+                 MainComponent* main)
+        : commands_(commands), main_(main) {
         // Rebuild the menus (and their check marks) whenever a command's
         // state changes -- e.g. commandStatusChanged() after a font/theme
         // pick. Without this the ticks freeze at their first-built values.
@@ -63,11 +64,24 @@ public:
         case 0: // File
             m.addCommandItem(&commands_, cmd::fileNew);
             m.addCommandItem(&commands_, cmd::fileNewNotebook);
+            m.addCommandItem(&commands_, cmd::fileNewProject);
+            m.addSeparator();
             m.addCommandItem(&commands_, cmd::fileOpen);
+            m.addCommandItem(&commands_, cmd::fileOpenExample);
+            if (main_) {
+                juce::PopupMenu recent;
+                auto roots = main_->recentProjectRoots();
+                for (int i = 0; i < roots.size(); ++i)
+                    recent.addItem(cmd::recentProjectBase + i, roots[i]);
+                m.addSubMenu("Open Recent Project", recent,
+                             roots.size() > 0);
+            }
             m.addSeparator();
             m.addCommandItem(&commands_, cmd::fileSave);
             m.addCommandItem(&commands_, cmd::fileSaveAs);
             m.addCommandItem(&commands_, cmd::fileSaveCopy);
+            m.addSeparator();
+            m.addCommandItem(&commands_, cmd::fileRevealModules);
             m.addSeparator();
             m.addCommandItem(&commands_, cmd::fileClose);
 #if !JUCE_MAC
@@ -120,10 +134,17 @@ public:
         return m;
     }
 
-    void menuItemSelected(int, int) override {} // command items dispatch themselves
+    // Command items dispatch themselves; only the raw-ID recent-projects
+    // entries land here.
+    void menuItemSelected(int itemID, int) override {
+        if (main_ && itemID >= cmd::recentProjectBase
+            && itemID < cmd::recentProjectBase + cmd::kMaxRecentProjects)
+            main_->openRecentProject(itemID - cmd::recentProjectBase);
+    }
 
 private:
     juce::ApplicationCommandManager& commands_;
+    MainComponent* main_ = nullptr;
 };
 
 // ---------------------------------------------------------------------------
@@ -201,7 +222,8 @@ public:
                                                *lookAndFeel_,
                                                *appProperties_.getUserSettings());
 
-        menuModel_ = std::make_unique<AppMenuModel>(commands_);
+        menuModel_ = std::make_unique<AppMenuModel>(
+            commands_, window_->mainComponent());
 #if JUCE_MAC
         juce::MenuBarModel::setMacMainMenu(menuModel_.get());
 #else
@@ -222,11 +244,18 @@ public:
                 window_->mainComponent()->openPath(doc);
         }
 
-        // TZPL_JUCE_OPEN=<path>: open a file in the editor at startup
-        // (testing hook -- a plain file argument is *evaluated*, like the
-        // ImGui app).
+        // TZPL_JUCE_OPEN=<path>: open a file at startup through the real
+        // open path (project registration, example-copy) and report the
+        // resulting file association for headless verification. (A plain
+        // file argument is *evaluated* instead, like the ImGui app.)
         if (auto* p = std::getenv("TZPL_JUCE_OPEN")) {
-            window_->mainComponent()->testOpenFile(juce::File(juce::String(p)));
+            auto* mc = window_->mainComponent();
+            mc->openPath(juce::File(juce::String(p)));
+            std::printf("JUCE OPEN: tabHasPath=%d nbHasPath=%d\n",
+                        (int)mc->testEditorPane().activeHasFilePath(),
+                        (int)(mc->testNotebook().currentFile()
+                              != juce::File()));
+            std::fflush(stdout);
             // TZPL_JUCE_EVAL=1: evaluate the just-opened file (creates ui
             // widgets etc.) shortly after the window is up.
             if (std::getenv("TZPL_JUCE_EVAL"))
@@ -288,6 +317,7 @@ public:
             // race the dedicated eval phases below).
             if (id == cmd::fileOpen || id == cmd::fileSave
                 || id == cmd::fileSaveAs || id == cmd::fileSaveCopy
+                || id == cmd::fileNewProject || id == cmd::fileOpenExample
                 || id == cmd::quit || id == cmd::evalSelection
                 || id == cmd::evalLine || id == cmd::evalFile
                 || id == cmd::togglePerform)  // would overlay the eval phases
