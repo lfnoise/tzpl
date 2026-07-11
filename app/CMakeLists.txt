@@ -220,7 +220,7 @@ if(TZPL_BUILD_APP_JUCE)
     juce_add_gui_app(tzpl_app_juce
         PRODUCT_NAME "Tzopilotl"
         COMPANY_NAME "Tzopilotl"
-        BUNDLE_ID "org.tzopilotl.app"
+        BUNDLE_ID "com.audiosynth.tzopilotl"
         VERSION "${PROJECT_VERSION}"
         DOCUMENT_EXTENSIONS x tzd
     )
