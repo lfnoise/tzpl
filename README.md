@@ -15,7 +15,7 @@ A statically typed, real-time safe interpreted language designed for audio and s
 - Direct-threaded VM using `[[clang::musttail]]` tail-call dispatch
 - TLSF O(1) real-time allocator
 - Incremental tri-color snapshot-at-the-beginning (SATB) tracing garbage collector with stack-map-based precise roots and a bounded per-step budget (sub-millisecond pauses suitable for audio-rate workloads)
-- Rich type system: Bool, Int, Float, Symbol, String, Fraction, Complex, Array, List, Range, Tuple, Struct, Enum, Ref, Function, Lambda, Coroutine
+- Rich type system: Bool, Int, Float, Symbol, String, Fraction, Complex, Bytes, Array, List, Range, Set, Map, Tuple, Struct, Enum, Ref, Function, Lambda, Coroutine
 - Template monomorphization, function overloading, pattern matching
 - File-based module system with selective imports
 - C/C++ embedding APIs and foreign function interface
@@ -56,16 +56,16 @@ Common headers used by multiple sub-projects:
 
 ### FFI Bridge (`bridge/`)
 
-Connects Tzopilotl to the engine and synthdef-compiler via the language's foreign function interface. Includes Tzopilotl module files (e.g., `audio_engine.x`) that expose native functions to scripts.
+Connects Tzopilotl to the engine and synthdef-compiler via the language's foreign function interface, with optional OSC and NATS messaging bridges. Includes Tzopilotl module files (e.g., `audio_engine.x`) that expose native functions to scripts.
 
 ### Application (`app/`)
 
-A Dear ImGui desktop application integrating all the sub-projects: multi-tab code editor with syntax highlighting, output panel, and REPL.
+A Dear ImGui desktop application integrating all the sub-projects: multi-tab code editor with syntax highlighting, output panel, REPL, and live documents (notebooks) with interactive UI widgets. A JUCE-based port (`tzpl_app_juce`, in `app/juce/`) is in progress.
 
 ## Directory Structure
 
 ```
-A-new-project/
+tzpl/
 ├── CMakeLists.txt              Top-level build configuration
 ├── build.sh                    Quick build script
 ├── shared/                     Shared headers (plugin ABI, SIMD, RNG)
@@ -83,9 +83,17 @@ A-new-project/
 │   ├── src/                    Bridge implementations
 │   ├── include/                Bridge headers
 │   └── modules/                Tzopilotl bridge modules
-├── app/                        Dear ImGui desktop application
+├── osc/                        OSC (Open Sound Control) support library
+├── nats/                       NATS messaging support library
+├── app/                        Desktop application
+│   ├── src/                    Dear ImGui application source
+│   └── juce/                   JUCE application port (in progress)
+├── examples/                   Example scripts and live documents
 ├── integration-tests/          Cross-project integration tests
 ├── benchmarks/                 Performance benchmarks
+├── packaging/                  Distribution: DMG build, signing, notarization
+├── tools/                      Standalone developer tools
+├── docs/                       Project-level design documents
 ├── third_party/
 │   ├── oscpack/                OSC message encoding/decoding
 │   └── rtaudio/                Audio I/O library
@@ -126,7 +134,12 @@ cmake --build build -j$(sysctl -n hw.ncpu)
 | `TZPL_BUILD_SYNTHDEF_COMPILER` | `ON` | Build the synthdef compiler |
 | `TZPL_BUILD_BRIDGE` | `ON` | Build the FFI bridge libraries |
 | `TZPL_BUILD_APP` | `OFF` | Build the audio coding application |
+| `TZPL_BUILD_APP_JUCE` | `OFF` | Build the JUCE GUI application (`tzpl_app_juce`) |
+| `TZPL_BUILD_GUI` | `ON` | Build with GUI support (Dear ImGui + GLFW) |
+| `TZPL_BUILD_OSC` | `OFF` | Build OSC (Open Sound Control) support |
+| `TZPL_BUILD_NATS` | `OFF` | Build NATS messaging support |
 | `TZPL_BUILD_TESTS` | `OFF` | Build integration tests |
+| `TZPL_BUILD_BENCHMARKS` | `OFF` | Build benchmarks |
 
 Example — build only the language:
 
@@ -148,6 +161,7 @@ cmake --build build
 | `tzpl_audio_engine_bridge` | FFI bridge: Tzopilotl ↔ audio engine |
 | `tzpl_synthdef_compiler_bridge` | FFI bridge: Tzopilotl ↔ synthdef compiler |
 | `tzpl_app` | Dear ImGui desktop application (requires `-DTZPL_BUILD_APP=ON`) |
+| `tzpl_app_juce` | JUCE desktop application (requires `-DTZPL_BUILD_APP_JUCE=ON`) |
 | `test_audio_engine_ffi` | Audio engine FFI test executable |
 | `test_synthdef_compiler_ffi` | Synthdef compiler FFI test executable |
 
@@ -203,6 +217,8 @@ bash run_tests.sh -x              # Stop on first failure
 - [Built-in Functions](lang/docs/Builtin_Functions.html) — Reference for all built-in functions
 - [Coroutines](lang/docs/Coroutines.html) — Coroutine system design and usage
 - [FFI Guide](lang/docs/FFI_Guide.html) — Calling C functions from Tzopilotl
+- [Live Controls and Notebooks](lang/docs/Live_Controls_and_Notebooks.html) — The `ui` widget module and notebook documents in the app
+- [Tzopilotl Music Cookbook](lang/docs/Tzopilotl_Music_Cookbook.html) — Recipes for making music with the platform
 
 ### Architecture
 
@@ -216,7 +232,6 @@ bash run_tests.sh -x              # Stop on first failure
 Syntax highlighting for Tzopilotl is available for:
 
 - **VS Code** — `lang/editors/vscode`
-- **Zed** — `lang/editors/zed-tzpl`
 - **TextMate / Sublime Text** — `lang/editors/Tzopilotl.tmbundle`
 - **Tree-sitter grammar** — `lang/editors/tree-sitter-tzpl`
 
