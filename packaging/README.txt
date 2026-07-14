@@ -18,12 +18,11 @@ together, because the app finds them relative to itself:
 Projects
 --------
 A project is any folder containing a file named `tzpl-config` (engine
-settings, one `key = value` per line; see docs -- the legacy name
-`config` also works). Opening any file inside a project makes the app
-apply its settings and search its modules/ directory. File > New
-Project creates one, with a starter notebook. Your projects live
-outside this folder; files opened from examples/ open as copies, so
-the originals stay pristine.
+settings, one `key = value` per line; see docs). Opening any file
+inside a project makes the app apply its settings and search its
+modules/ directory. File > New Project creates one, with a starter
+notebook. Your projects live outside this folder; files opened from
+examples/ open as copies, so the originals stay pristine.
 
 Updating
 --------

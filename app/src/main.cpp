@@ -675,7 +675,7 @@ int main(int argc, const char* argv[]) {
 
         // --- Auto-detect the project from the opened file ---
         // GUI users can't pass -P; opening any file inside a project (the
-        // nearest ancestor directory with a `config` file) applies that
+        // nearest ancestor directory with a `tzpl-config` file) applies that
         // project's engine config and paths. -P still overrides.
         if (config.projectDir.empty() && !filename.empty()) {
             std::string root = tzplapp::findProjectRoot(filename);

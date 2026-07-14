@@ -68,7 +68,7 @@ public:
 
     // Open a .x/.tzd file as if chosen in the Open dialog (also the entry
     // point for Finder open events). Registers the file's project (nearest
-    // ancestor with a `config` file) so its modules/ joins the search path.
+    // ancestor with a `tzpl-config` file) so its modules/ joins the search path.
     // Files inside the distribution's examples/ open as untitled copies.
     void openPath(juce::File const& file);
 

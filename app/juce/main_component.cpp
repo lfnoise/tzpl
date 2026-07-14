@@ -662,7 +662,7 @@ bool MainComponent::isDistExample(juce::File const& file) const {
     return ex != juce::File() && file.isAChildOf(ex);
 }
 
-// Create <dir> with a config file, a modules/ directory, and a starter
+// Create <dir> with a tzpl-config file, a modules/ directory, and a starter
 // notebook, then open the notebook (which registers the project).
 void MainComponent::newProjectFlow() {
     fileChooser_ = std::make_unique<juce::FileChooser>(
@@ -683,7 +683,7 @@ void MainComponent::createProject(juce::File const& dir) {
         return;
     }
     juce::File config = dir.getChildFile("tzpl-config");
-    if (!config.existsAsFile() && !dir.getChildFile("config").existsAsFile()) {
+    if (!config.existsAsFile()) {
         config.replaceWithText(
             "-- Tzopilotl project config (key = value, `--` comments).\n"
             "-- Applied when the app is launched on a file in this project.\n"
