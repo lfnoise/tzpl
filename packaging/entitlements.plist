@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- The app compiles synthdefs with clang at runtime and dlopens the
+         resulting dylibs; they are ad-hoc signed by the linker, not by our
+         Team ID, so hardened-runtime library validation must be disabled.
+         Also lets users load third-party plugins conforming to the ABI. -->
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+    <!-- Audio input (config: inputDevice / inputChannels). -->
+    <key>com.apple.security.device.audio-input</key>
+    <true/>
+</dict>
+</plist>

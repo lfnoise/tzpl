@@ -223,6 +223,9 @@ if(TZPL_BUILD_APP_JUCE)
         BUNDLE_ID "com.audiosynth.tzopilotl"
         VERSION "${PROJECT_VERSION}"
         DOCUMENT_EXTENSIONS x tzd
+        MICROPHONE_PERMISSION_ENABLED TRUE
+        MICROPHONE_PERMISSION_TEXT
+            "Tzopilotl uses the microphone for audio input to the engine."
     )
 
     target_sources(tzpl_app_juce PRIVATE

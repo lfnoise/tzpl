@@ -152,15 +152,18 @@ install(FILES packaging/README.txt
 # User work lives outside the folder (projects), so replacing it is an update.
 if(APPLE AND TZPL_BUILD_APP_JUCE)
     set(TZPL_DIST_STAGE "${CMAKE_BINARY_DIR}/dist-stage")
+    # Signing and notarization are opt-in via environment variables read by
+    # make_dist_dmg.sh at build time (TZPL_CODESIGN_IDENTITY,
+    # TZPL_NOTARY_PROFILE); without them the DMG is assembled with the
+    # binaries' ad-hoc signatures, so contributor builds need no setup.
     add_custom_target(dist
         COMMAND ${CMAKE_COMMAND} -E rm -rf "${TZPL_DIST_STAGE}"
         COMMAND ${CMAKE_COMMAND} --install "${CMAKE_BINARY_DIR}"
                 --component dist --prefix "${TZPL_DIST_STAGE}/Tzopilotl"
-        COMMAND hdiutil create -volname "Tzopilotl"
-                -srcfolder "${TZPL_DIST_STAGE}" -ov -format UDZO -quiet
+        COMMAND bash "${CMAKE_SOURCE_DIR}/packaging/make_dist_dmg.sh"
+                "${TZPL_DIST_STAGE}"
                 "${CMAKE_BINARY_DIR}/Tzopilotl-${PROJECT_VERSION}.dmg"
-        COMMAND ${CMAKE_COMMAND} -E echo
-                "dist: ${TZPL_DIST_STAGE}/Tzopilotl and ${CMAKE_BINARY_DIR}/Tzopilotl-${PROJECT_VERSION}.dmg"
+                "${CMAKE_SOURCE_DIR}/packaging/entitlements.plist"
         DEPENDS tzpl tzpl_app_juce
         COMMENT "Assembling distribution folder and DMG"
         VERBATIM
