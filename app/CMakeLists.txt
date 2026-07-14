@@ -152,6 +152,7 @@ endif()
 target_compile_definitions(tzpl_app PRIVATE
     MODULES_DIR="${CMAKE_SOURCE_DIR}/bridge/modules"
     LANG_MODULES_DIR="${CMAKE_SOURCE_DIR}/lang/modules"
+    EXAMPLES_DIR="${CMAKE_SOURCE_DIR}/examples"
 )
 
 # ---------------------------------------------------------------------------
@@ -261,6 +262,7 @@ if(TZPL_BUILD_APP_JUCE)
         TZPL_GUI_JUCE=1
         MODULES_DIR="${CMAKE_SOURCE_DIR}/bridge/modules"
         LANG_MODULES_DIR="${CMAKE_SOURCE_DIR}/lang/modules"
+        EXAMPLES_DIR="${CMAKE_SOURCE_DIR}/examples"
         JUCE_WEB_BROWSER=0
         JUCE_USE_CURL=0
         JUCE_APPLICATION_NAME_STRING="Tzopilotl"

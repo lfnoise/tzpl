@@ -896,10 +896,13 @@ static void ffi_attachVM(ts::VM& vm, u16 dst, u16, u16 argBase) {
 
     // Create a separate module compiler so modules compiled for this
     // target get their own cache (distinct from the NRT target's cache).
+    // includePaths()/systemPaths() return snapshots; a project registered
+    // after this attach is propagated by the GUI (registerProjectFor adds
+    // to every attached silo's compiler).
     state.moduleCompiler = std::make_unique<ts::ModuleCompiler>(
         *ctx->compiler,
-        std::vector<std::string>(ctx->moduleCompiler->includePaths()),
-        std::vector<std::string>(ctx->moduleCompiler->systemPaths()));
+        ctx->moduleCompiler->includePaths(),
+        ctx->moduleCompiler->systemPaths());
 
     // Persistent incremental compile context: one TypeChecker shared across all
     // siloLoad/siloEval calls on this silo, so redefining a function reuses its

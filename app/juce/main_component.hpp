@@ -131,7 +131,7 @@ private:
     // Asks about the open notebook's unsaved changes (async) before it is
     // replaced; `proceed` runs only if the user saved or discarded.
     void confirmNotebookDiscardThen(std::function<void()> proceed);
-    void openNotebookFile(juce::File const& file);
+    bool openNotebookFile(juce::File const& file);  // false: open failed
     // `done(true)` fires only after a successful save (an untitled notebook
     // asks for a path first, so this can complete long after the call).
     void saveNotebookFlow(bool forceDialog, std::function<void(bool)> done = {});

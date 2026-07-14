@@ -107,6 +107,7 @@ target_compile_options(tzpl PRIVATE ${TZPL_COMPILE_OPTIONS})
 # ancestor for the executable-relative walk-up to find (see module_paths.hpp).
 target_compile_definitions(tzpl PRIVATE
     LANG_MODULES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/modules"
+    EXAMPLES_DIR="${CMAKE_SOURCE_DIR}/examples"
 )
 
 # Debug flags

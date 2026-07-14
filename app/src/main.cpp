@@ -26,6 +26,7 @@
 #include <fstream>
 #include <sstream>
 #include <cstdlib>
+#include <cctype>
 #include <unistd.h>
 #include <csignal>
 #include <optional>
@@ -194,6 +195,17 @@ static std::string readFile(const std::string& path) {
     std::stringstream ss;
     ss << file.rdbuf();
     return ss.str();
+}
+
+// Case-insensitive .tzd check: macOS filesystems are case-insensitive, so
+// Song.TZD is the same notebook document as song.tzd and must never be fed
+// to the compiler as source (matches JUCE's hasFileExtension behavior).
+static bool isNotebookDocument(const std::string& path) {
+    auto dot = path.find_last_of('.');
+    if (dot == std::string::npos) return false;
+    std::string ext = path.substr(dot + 1);
+    for (auto& c : ext) c = (char)std::tolower((unsigned char)c);
+    return ext == "tzd";
 }
 
 static std::vector<std::string> splitPaths(const std::string& paths) {
@@ -675,8 +687,8 @@ int main(int argc, const char* argv[]) {
 
         // --- Load config file from project directory ---
         if (!config.projectDir.empty()) {
-            std::string configPath = config.projectDir + "/config";
-            if (fs::exists(configPath)) {
+            std::string configPath = tzplapp::projectConfigFile(config.projectDir);
+            if (!configPath.empty()) {
                 parseConfigFile(configPath, config);
             }
         }
@@ -718,6 +730,9 @@ int main(int argc, const char* argv[]) {
 #ifdef LANG_MODULES_DIR
         stdlibFallbacks.push_back(LANG_MODULES_DIR);
 #endif
+#ifdef EXAMPLES_DIR
+        stdlibFallbacks.push_back(EXAMPLES_DIR);
+#endif
         std::vector<std::string> systemPaths = defaultModulePaths(stdlibFallbacks);
 
         // --- NRT mode: force headless, never open an audio device ---
@@ -732,8 +747,7 @@ int main(int argc, const char* argv[]) {
 
         // Notebook documents are binary; they can only be opened in the GUI,
         // never evaluated as source.
-        if (!guiMode && filename.size() > 4
-            && filename.compare(filename.size() - 4, 4, ".tzd") == 0) {
+        if (!guiMode && isNotebookDocument(filename)) {
             std::cerr << "notebook documents (.tzd) require the GUI; "
                          "run without --nogui/--nrt\n";
             return 1;
@@ -880,9 +894,7 @@ int main(int argc, const char* argv[]) {
             // first) and then shown in an editor tab; a .tzd is a binary
             // notebook document -- never evaluated as source, just opened.
             if (!filename.empty()) {
-                bool isNotebook = filename.size() > 4
-                    && filename.compare(filename.size() - 4, 4, ".tzd") == 0;
-                if (!isNotebook) {
+                if (!isNotebookDocument(filename)) {
                     std::string source = readFile(filename);
                     if (!source.empty()) {
                         runSourceLocked(nrtvm, compiler, target, source,

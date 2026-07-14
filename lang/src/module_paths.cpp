@@ -65,9 +65,17 @@ std::vector<std::string> defaultModulePaths(
         result.push_back(std::move(s));
     };
 
-    // 1. $TZPL_HOME/modules -- explicit override
+    // The distribution's examples/ (modules dir's sibling) also joins the
+    // search path, after the stdlib proper: examples import each other
+    // (instrument_synthdefs etc.) and user scripts import them by name.
+    auto addModulesAndExamples = [&](fs::path const& root) {
+        addIfDir(root / "modules");
+        addIfDir(root / "examples");
+    };
+
+    // 1. $TZPL_HOME -- explicit override
     if (const char* home = std::getenv("TZPL_HOME"); home && *home) {
-        addIfDir(fs::path(home) / "modules");
+        addModulesAndExamples(fs::path(home));
     }
 
     // 2. Nearest ancestor of the executable containing modules/. Depth-capped
@@ -79,9 +87,8 @@ std::vector<std::string> defaultModulePaths(
         for (int depth = 0;
              depth < 6 && !dir.empty() && dir != dir.root_path();
              ++depth, dir = dir.parent_path()) {
-            fs::path candidate = dir / "modules";
-            if (fs::is_directory(candidate, ec)) {
-                addIfDir(candidate);
+            if (fs::is_directory(dir / "modules", ec)) {
+                addModulesAndExamples(dir);
                 break;
             }
         }

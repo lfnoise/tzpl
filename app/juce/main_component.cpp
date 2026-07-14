@@ -319,7 +319,9 @@ void MainComponent::openPath(juce::File const& file) {
     if (isDistExample(file)) {
         if (file.hasFileExtension("tzd")) {
             confirmNotebookDiscardThen([this, file] {
-                openNotebookFile(file);
+                // Detach only on success: a failed open keeps the previous
+                // notebook, whose file association must survive.
+                if (!openNotebookFile(file)) return;
                 notebook_->detachFile();
                 logLine("(example: editing a copy; Save asks for a location)");
             });
@@ -350,9 +352,14 @@ void MainComponent::registerProjectFor(juce::File const& file) {
     if (!appCtx_.moduleCompiler) return;
     juce::File modulesDir = juce::File(String(root)).getChildFile("modules");
     if (!modulesDir.isDirectory()) return;
-    if (appCtx_.moduleCompiler->addIncludePath(
-            modulesDir.getFullPathName().toStdString()))
+    std::string dir = modulesDir.getFullPathName().toStdString();
+    if (appCtx_.moduleCompiler->addIncludePath(dir))
         logLine("project modules: " + modulesDir.getFullPathName());
+    // Silo module compilers snapshot the app's paths when the silo VM is
+    // attached; keep already-attached silos in sync so a project module
+    // imports the same on a silo as in the notebook.
+    for (auto& silo : appCtx_.siloVMs)
+        if (silo.moduleCompiler) silo.moduleCompiler->addIncludePath(dir);
 }
 
 // Recent projects persist in the settings file as most-recent-first
@@ -413,14 +420,15 @@ void MainComponent::openRecentProject(int index) {
 // Notebook file flows
 // ---------------------------------------------------------------------------
 
-void MainComponent::openNotebookFile(juce::File const& file) {
+bool MainComponent::openNotebookFile(juce::File const& file) {
     String err;
     if (!notebook_->openFile(file, err)) {
         logLine("notebook open failed: " + err);
-        return;
+        return false;
     }
     showNotebook(true);
     logLine("opened " + file.getFullPathName());
+    return true;
 }
 
 // Replacing the open notebook (New Notebook / opening a .tzd) discards it.
@@ -604,6 +612,11 @@ void MainComponent::launchEval(String const& code, int flashStart, int flashEnd)
 // (imports then use the search paths only).
 void MainComponent::updateSessionDocumentPath() {
     if (!session_) return;
+    // Never touch the session/TypeChecker while a background eval owns it
+    // (the worker reads the source path during import resolution). A busy
+    // eval also means no new eval will launch, so skipping is safe -- the
+    // next successful launch re-anchors.
+    if (guiState_.asyncEval.busy()) return;
     juce::File doc = notebookVisible_ ? notebook_->currentFile()
                                       : editorPane_.activeFile();
     session_->setDocumentPath(
@@ -669,8 +682,8 @@ void MainComponent::createProject(juce::File const& dir) {
         logLine("could not create project at " + dir.getFullPathName());
         return;
     }
-    juce::File config = dir.getChildFile("config");
-    if (!config.existsAsFile()) {
+    juce::File config = dir.getChildFile("tzpl-config");
+    if (!config.existsAsFile() && !dir.getChildFile("config").existsAsFile()) {
         config.replaceWithText(
             "-- Tzopilotl project config (key = value, `--` comments).\n"
             "-- Applied when the app is launched on a file in this project.\n"

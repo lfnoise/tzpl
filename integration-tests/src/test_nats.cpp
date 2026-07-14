@@ -214,6 +214,8 @@ struct NatsVMTestEnv {
 
         target = compiler.createTarget();
         nrtvm = new ts::NRTVM(16 * 1024 * 1024, types, target);
+        // Hermetic: only MODULES_DIR -- $TZPL_PATH is intentionally not composed
+        // in (ModuleCompiler no longer reads the environment; see module_paths.hpp).
         moduleCompiler = new ts::ModuleCompiler(compiler, {MODULES_DIR});
 
         natsDispatcher.setEngine(eng);
@@ -526,6 +528,8 @@ static void test_namespaced_tzpl_eval() {
     engine::Engine* eng = makeTestEngine();
     auto target = compiler.createTarget();
     auto* nrtvm = new ts::NRTVM(16 * 1024 * 1024, types, target);
+    // Hermetic: only MODULES_DIR -- $TZPL_PATH is intentionally not composed
+    // in (ModuleCompiler no longer reads the environment; see module_paths.hpp).
     auto* moduleCompiler = new ts::ModuleCompiler(compiler, {MODULES_DIR});
 
     nats::NatsClient natsClient;

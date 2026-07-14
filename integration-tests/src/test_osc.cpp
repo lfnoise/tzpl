@@ -202,6 +202,8 @@ static void test_ffi_registration() {
     appCtx.oscDispatcher = &oscDispatcher;
     appCtx.oscServer = &oscServer;
 
+    // Hermetic: only MODULES_DIR -- $TZPL_PATH is intentionally not composed
+    // in (ModuleCompiler no longer reads the environment; see module_paths.hpp).
     ts::ModuleCompiler moduleCompiler(compiler, {MODULES_DIR});
     auto target = compiler.createTarget();
     ts::VM vm(16 * 1024 * 1024, types, target);
@@ -257,6 +259,8 @@ struct OscVMTestEnv {
 
         target = compiler.createTarget();
         nrtvm = new ts::NRTVM(16 * 1024 * 1024, types, target);
+        // Hermetic: only MODULES_DIR -- $TZPL_PATH is intentionally not composed
+        // in (ModuleCompiler no longer reads the environment; see module_paths.hpp).
         moduleCompiler = new ts::ModuleCompiler(compiler, {MODULES_DIR});
 
         oscDispatcher.setEngine(eng);

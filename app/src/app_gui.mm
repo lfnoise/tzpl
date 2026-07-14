@@ -54,6 +54,7 @@
 
 #include <cstdio>
 #include <csignal>
+#include <cctype>
 #include <string>
 #include <mutex>
 #include <filesystem>
@@ -487,9 +488,14 @@ static std::string nativeSaveFileDialog(const std::string& suggestedName,
     return "";
 }
 
+// Case-insensitive: macOS filesystems are case-insensitive, so Song.TZD is
+// the same notebook document as song.tzd.
 static bool hasExtension(std::string const& path, const char* ext) {
     auto dot = path.find_last_of('.');
-    return dot != std::string::npos && path.substr(dot + 1) == ext;
+    if (dot == std::string::npos) return false;
+    std::string e = path.substr(dot + 1);
+    for (auto& c : e) c = (char)std::tolower((unsigned char)c);
+    return e == ext;
 }
 
 // ---------------------------------------------------------------------------
@@ -763,6 +769,25 @@ int runGui(bridge::AppContext& appCtx) {
     guiState.output.append("Tzopilotl. Cmd+Enter: eval block, "
                            "Shift+Enter: eval line, "
                            "Cmd+Shift+Enter: eval file.", LineKind::Info);
+
+    // Open the startup document from the command line: a .tzd opens in the
+    // notebook (main() never evaluates it); a .x was already evaluated there
+    // and is also shown in an editor tab.
+    if (!appCtx.startupDocument.empty()) {
+        std::string const& path = appCtx.startupDocument;
+        if (hasExtension(path, "tzd")) {
+            std::string err;
+            if (notebookPanel.open(path, appCtx, err)) {
+                notebookVisible = true;
+                guiState.output.append("opened " + path, LineKind::Info);
+            } else {
+                guiState.output.append("notebook open failed: " + err,
+                                       LineKind::Error);
+            }
+        } else {
+            workspacePanel.openFile(path);
+        }
+    }
 
     // --- Install GLFW callbacks --------------------------------------------
     glfwSetWindowCloseCallback(window, windowCloseCallback);

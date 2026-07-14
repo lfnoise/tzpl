@@ -28,9 +28,14 @@ if(TZPL_NATS_STATIC)
        AND TZPL_SSL_STATIC_LIBRARY AND TZPL_CRYPTO_STATIC_LIBRARY)
         set(CNATS_STATIC_FOUND TRUE)
     else()
-        message(STATUS
-            "TZPL_NATS_STATIC: static cnats/OpenSSL not found; "
-            "falling back to dynamic linking")
+        # WARNING, not STATUS: a dynamic fallback produces binaries that
+        # reference Homebrew dylib paths. Fine for local dev; the dist
+        # target's packaging script refuses to ship such binaries.
+        message(WARNING
+            "TZPL_NATS_STATIC: static cnats/OpenSSL not found; falling back "
+            "to DYNAMIC linking. The resulting binaries are not "
+            "distributable (the dist target will reject them). Install "
+            "static libs: brew install cnats openssl@3")
     endif()
 endif()
 

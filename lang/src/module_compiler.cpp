@@ -48,6 +48,7 @@ bool ModuleCompiler::addIncludePath(std::string path) {
     std::error_code ec;
     std::filesystem::path canon = std::filesystem::weakly_canonical(path, ec);
     if (!ec) path = canon.string();
+    std::lock_guard<std::mutex> lock(pathsMtx_);
     for (const auto& p : includePaths_) {
         if (p == path) return false;
     }
@@ -56,6 +57,16 @@ bool ModuleCompiler::addIncludePath(std::string path) {
     }
     includePaths_.push_back(std::move(path));
     return true;
+}
+
+std::vector<std::string> ModuleCompiler::includePaths() const {
+    std::lock_guard<std::mutex> lock(pathsMtx_);
+    return includePaths_;
+}
+
+std::vector<std::string> ModuleCompiler::systemPaths() const {
+    std::lock_guard<std::mutex> lock(pathsMtx_);
+    return systemPaths_;
 }
 
 std::string ModuleCompiler::resolveModulePath(
@@ -79,19 +90,16 @@ std::string ModuleCompiler::resolveModulePath(
     }
 
     // 2. Try each user include path in order (composed by the entry point
-    //    via module_paths.hpp: -I, project, $TZPL_PATH)
-    for (const auto& dir : includePaths_) {
-        std::filesystem::path candidate = std::filesystem::path(dir) / relPath;
-        if (std::filesystem::exists(candidate)) {
-            return std::filesystem::canonical(candidate).string();
-        }
-    }
-
-    // 3. Finally the stdlib, so any user path can shadow a stdlib module
-    for (const auto& dir : systemPaths_) {
-        std::filesystem::path candidate = std::filesystem::path(dir) / relPath;
-        if (std::filesystem::exists(candidate)) {
-            return std::filesystem::canonical(candidate).string();
+    //    via module_paths.hpp: -I, project, $TZPL_PATH), then the stdlib,
+    //    so any user path can shadow a stdlib module. Locked: the GUI can
+    //    addIncludePath from another thread while an eval resolves here.
+    std::lock_guard<std::mutex> lock(pathsMtx_);
+    for (const auto* paths : {&includePaths_, &systemPaths_}) {
+        for (const auto& dir : *paths) {
+            std::filesystem::path candidate = std::filesystem::path(dir) / relPath;
+            if (std::filesystem::exists(candidate)) {
+                return std::filesystem::canonical(candidate).string();
+            }
         }
     }
 

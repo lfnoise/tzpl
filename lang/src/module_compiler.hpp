@@ -32,6 +32,7 @@
 #include <deque>
 #include <unordered_map>
 #include <memory>
+#include <mutex>
 #include <filesystem>
 
 namespace ts {
@@ -109,7 +110,10 @@ public:
                    std::vector<std::string> systemPaths = {});
 
     // Append a user include path (still ahead of systemPaths_). Returns false
-    // if the path was already present in either list.
+    // if the path was already present in either list. Thread-safe against
+    // concurrent resolveModulePath: the GUI registers a project's modules/
+    // from the message thread while an eval may be resolving imports on a
+    // worker thread.
     bool addIncludePath(std::string path);
 
     // Compile a module identified by its dotted path.
@@ -122,8 +126,10 @@ public:
     ModuleInfo* getModule(const std::string& canonicalPath) const;
 
     Compiler& compiler() { return compiler_; }
-    const std::vector<std::string>& includePaths() const { return includePaths_; }
-    const std::vector<std::string>& systemPaths() const { return systemPaths_; }
+    // Copies, not references: includePaths_ can grow on another thread
+    // (addIncludePath), so callers get a stable snapshot.
+    std::vector<std::string> includePaths() const;
+    std::vector<std::string> systemPaths() const;
 
     // Invalidate a single module from the cache and recursively invalidate
     // any other cached module that depends on it. Used by sweepStaleModules.
@@ -137,6 +143,10 @@ public:
 
 private:
     Compiler& compiler_;
+    // Guards includePaths_ (grown by addIncludePath on the GUI message
+    // thread, iterated by resolveModulePath on eval threads). systemPaths_
+    // is immutable after construction but shares the lock for simplicity.
+    mutable std::mutex pathsMtx_;
     std::vector<std::string> includePaths_;  // user paths, searched first
     std::vector<std::string> systemPaths_;   // stdlib, searched last
     std::unordered_map<std::string, std::unique_ptr<ModuleInfo>> modules_;

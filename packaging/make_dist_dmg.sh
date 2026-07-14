@@ -32,6 +32,24 @@ CLI="$STAGE/Tzopilotl/bin/tzpl"
 IDENTITY="${TZPL_CODESIGN_IDENTITY:-}"
 PROFILE="${TZPL_NOTARY_PROFILE:-}"
 
+# A distributable binary must reference only system libraries: a stray
+# Homebrew dylib path (e.g. libnats when the static-link config fell back
+# to dynamic) would make the app fail to launch on end-user machines.
+check_no_external_dylibs() {
+    local bin="$1"
+    local bad
+    bad=$(otool -L "$bin" | tail -n +2 | awk '{print $1}' \
+          | grep -v -e '^/usr/lib/' -e '^/System/' -e '^@' || true)
+    if [[ -n "$bad" ]]; then
+        echo "dist: ERROR: $bin references non-system dylibs:" >&2
+        echo "$bad" >&2
+        echo "dist: (for NATS, install static libs: brew install cnats openssl@3)" >&2
+        exit 1
+    fi
+}
+check_no_external_dylibs "$CLI"
+check_no_external_dylibs "$APP/Contents/MacOS/Tzopilotl"
+
 if [[ -n "$IDENTITY" ]]; then
     SIGN_FLAGS=(--force --options runtime --entitlements "$ENTITLEMENTS")
     # A real identity gets a secure timestamp (required for notarization);

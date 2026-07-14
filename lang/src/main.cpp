@@ -380,6 +380,9 @@ int main(int argc, const char* argv[]) {
 #ifdef LANG_MODULES_DIR
         stdlibFallbacks.push_back(LANG_MODULES_DIR);
 #endif
+#ifdef EXAMPLES_DIR
+        stdlibFallbacks.push_back(EXAMPLES_DIR);
+#endif
         for (auto& p : defaultModulePaths(stdlibFallbacks)) includePaths.push_back(std::move(p));
 
         // Create target and VM after parsing args (so rtRestricted is known)
