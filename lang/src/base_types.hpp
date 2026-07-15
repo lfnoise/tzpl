@@ -44,6 +44,8 @@
 #include <print>
 #include <format>
 #include <charconv>
+#include <cstdlib>
+#include <xlocale.h>
 
 #pragma mark BASE TYPES
 
@@ -70,6 +72,17 @@ using x64 = std::complex<f64> ;
 
 using usize = size_t;
 using isize = ptrdiff_t;
+
+// Parse a double from a C string: the inverse of formatFloat below.
+// strtod pinned to the C locale so a host that calls setlocale() (GUI
+// frameworks do) cannot change the decimal separator, preserving the
+// bit-identical print->parse round-trip guarantee. macOS strtod (gdtoa)
+// is correctly rounded, so parseFloatC(formatFloat(v)) == v bit-for-bit.
+// (FP std::from_chars needs a macOS 26 deployment target; revisit then.)
+inline f64 parseFloatC(char const* s, char** end) {
+    static locale_t cLocale = newlocale(LC_ALL_MASK, "C", (locale_t)0);
+    return strtod_l(s, end, cLocale);
+}
 
 // Format a double to its shortest round-trip representation.
 // Always includes a decimal point (e.g., "1.0" not "1").

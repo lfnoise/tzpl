@@ -285,26 +285,22 @@ Token Lexer::scanNumber() {
 
     std::string text = source_.substr(startPos, pos_ - startPos);
 
+    // Float literals go through parseFloatC (C-locale, correctly rounded
+    // strtod) -- the exact inverse of formatFloat, so printed floats paste
+    // back bit-identically regardless of the host's locale. Overflow
+    // saturates to +-inf, which is what strtod returns natively.
     if (isImaginary) {
         // Strip trailing 'i' for numeric parsing
         std::string numText = text.substr(0, text.size() - 1);
         Token tok = makeToken(TokenKind::ImaginaryLiteral, start, text);
-        try {
-            tok.floatValue = std::stod(numText);
-        } catch (const std::out_of_range&) {
-            tok.floatValue = (numText[0] == '-') ? -INFINITY : INFINITY;
-        }
+        tok.floatValue = parseFloatC(numText.c_str(), nullptr);
         return tok;
     }
 
     Token tok = makeToken(isFloat ? TokenKind::FloatLiteral : TokenKind::IntLiteral, start, text);
 
     if (isFloat) {
-        try {
-            tok.floatValue = std::stod(text);
-        } catch (const std::out_of_range&) {
-            tok.floatValue = (text[0] == '-') ? -INFINITY : INFINITY;
-        }
+        tok.floatValue = parseFloatC(text.c_str(), nullptr);
     } else {
         tok.intValue = std::stoll(text);
     }
