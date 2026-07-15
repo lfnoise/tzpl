@@ -238,7 +238,7 @@
       "patterns": [
         {
           "name": "keyword.control.x",
-          "match": "\\b(if|else|while|for|break|continue|return|match|switch|case|yield)\\b"
+          "match": "\\b(if|else|while|for|break|continue|return|match|switch|case|yield|await|try)\\b"
         }
       ]
     },
@@ -246,7 +246,7 @@
       "patterns": [
         {
           "name": "storage.type.x",
-          "match": "\\b(fn|let|var|const|struct|enum|type|constraint|coro)\\b"
+          "match": "\\b(fn|let|var|const|struct|enum|type|constraint|coro|async)\\b"
         }
       ]
     },

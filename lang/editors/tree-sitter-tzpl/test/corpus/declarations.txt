@@ -178,7 +178,8 @@ fn identity<T>(x T) T = x;
   (function_definition
     name: (identifier)
     (type_parameters
-      (identifier))
+      (type_param
+        name: (identifier)))
     (parameter_list
       (parameter
         name: (identifier)
@@ -240,9 +241,51 @@ struct Box<T> { value T }
   (struct_definition
     name: (identifier)
     (type_parameters
-      (identifier))
+      (type_param
+        name: (identifier)))
     (struct_body
       (struct_field
         name: (identifier)
         type: (type_identifier
           (identifier))))))
+
+================================================================================
+Async function
+================================================================================
+
+async fn compute(x Int) Int {
+    await ready(x)
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_definition
+    (identifier)
+    (parameter_list
+      (parameter
+        (identifier)
+        (primitive_type)))
+    (primitive_type)
+    (block
+      (expression_statement
+        (await_expression
+          (call_expression
+            (primary_expression
+              (identifier))
+            (primary_expression
+              (identifier))))))))
+
+================================================================================
+Wildcard import
+================================================================================
+
+import std.result.*;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (import_declaration
+    (import_path
+      (identifier)
+      (identifier))))

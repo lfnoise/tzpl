@@ -16,6 +16,10 @@
           "named": true
         },
         {
+          "type": "await_expression",
+          "named": true
+        },
+        {
           "type": "binary_expression",
           "named": true
         },
@@ -65,6 +69,10 @@
         },
         {
           "type": "ternary_expression",
+          "named": true
+        },
+        {
+          "type": "try_expression",
           "named": true
         },
         {
@@ -157,6 +165,10 @@
             "named": true
           },
           {
+            "type": "await_expression",
+            "named": true
+          },
+          {
             "type": "binary_expression",
             "named": true
           },
@@ -206,6 +218,10 @@
           },
           {
             "type": "ternary_expression",
+            "named": true
+          },
+          {
+            "type": "try_expression",
             "named": true
           },
           {
@@ -231,6 +247,10 @@
             "named": true
           },
           {
+            "type": "await_expression",
+            "named": true
+          },
+          {
             "type": "binary_expression",
             "named": true
           },
@@ -280,6 +300,10 @@
           },
           {
             "type": "ternary_expression",
+            "named": true
+          },
+          {
+            "type": "try_expression",
             "named": true
           },
           {
@@ -311,6 +335,10 @@
             "named": true
           },
           {
+            "type": "await_expression",
+            "named": true
+          },
+          {
             "type": "binary_expression",
             "named": true
           },
@@ -360,6 +388,10 @@
           },
           {
             "type": "ternary_expression",
+            "named": true
+          },
+          {
+            "type": "try_expression",
             "named": true
           },
           {
@@ -385,10 +417,10 @@
     }
   },
   {
-    "type": "binary_expression",
+    "type": "await_expression",
     "named": true,
     "fields": {
-      "left": {
+      "value": {
         "multiple": false,
         "required": true,
         "types": [
@@ -398,6 +430,10 @@
           },
           {
             "type": "automap_expression",
+            "named": true
+          },
+          {
+            "type": "await_expression",
             "named": true
           },
           {
@@ -450,6 +486,98 @@
           },
           {
             "type": "ternary_expression",
+            "named": true
+          },
+          {
+            "type": "try_expression",
+            "named": true
+          },
+          {
+            "type": "tuple_expression",
+            "named": true
+          },
+          {
+            "type": "unary_expression",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "binary_expression",
+    "named": true,
+    "fields": {
+      "left": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "array_expression",
+            "named": true
+          },
+          {
+            "type": "automap_expression",
+            "named": true
+          },
+          {
+            "type": "await_expression",
+            "named": true
+          },
+          {
+            "type": "binary_expression",
+            "named": true
+          },
+          {
+            "type": "call_expression",
+            "named": true
+          },
+          {
+            "type": "field_expression",
+            "named": true
+          },
+          {
+            "type": "if_expression",
+            "named": true
+          },
+          {
+            "type": "index_expression",
+            "named": true
+          },
+          {
+            "type": "lambda_expression",
+            "named": true
+          },
+          {
+            "type": "match_expression",
+            "named": true
+          },
+          {
+            "type": "parenthesized_expression",
+            "named": true
+          },
+          {
+            "type": "primary_expression",
+            "named": true
+          },
+          {
+            "type": "space_pipeline",
+            "named": true
+          },
+          {
+            "type": "struct_construction",
+            "named": true
+          },
+          {
+            "type": "struct_update",
+            "named": true
+          },
+          {
+            "type": "ternary_expression",
+            "named": true
+          },
+          {
+            "type": "try_expression",
             "named": true
           },
           {
@@ -589,6 +717,10 @@
             "named": true
           },
           {
+            "type": "await_expression",
+            "named": true
+          },
+          {
             "type": "binary_expression",
             "named": true
           },
@@ -638,6 +770,10 @@
           },
           {
             "type": "ternary_expression",
+            "named": true
+          },
+          {
+            "type": "try_expression",
             "named": true
           },
           {
@@ -777,6 +913,10 @@
             "named": true
           },
           {
+            "type": "await_expression",
+            "named": true
+          },
+          {
             "type": "binary_expression",
             "named": true
           },
@@ -829,6 +969,10 @@
             "named": true
           },
           {
+            "type": "try_expression",
+            "named": true
+          },
+          {
             "type": "tuple_expression",
             "named": true
           },
@@ -849,6 +993,10 @@
         },
         {
           "type": "automap_expression",
+          "named": true
+        },
+        {
+          "type": "await_expression",
           "named": true
         },
         {
@@ -901,6 +1049,10 @@
         },
         {
           "type": "ternary_expression",
+          "named": true
+        },
+        {
+          "type": "try_expression",
           "named": true
         },
         {
@@ -1005,6 +1157,10 @@
             "named": true
           },
           {
+            "type": "await_expression",
+            "named": true
+          },
+          {
             "type": "binary_expression",
             "named": true
           },
@@ -1054,6 +1210,10 @@
           },
           {
             "type": "ternary_expression",
+            "named": true
+          },
+          {
+            "type": "try_expression",
             "named": true
           },
           {
@@ -1372,6 +1532,10 @@
           "named": true
         },
         {
+          "type": "await_expression",
+          "named": true
+        },
+        {
           "type": "binary_expression",
           "named": true
         },
@@ -1424,6 +1588,10 @@
           "named": true
         },
         {
+          "type": "try_expression",
+          "named": true
+        },
+        {
           "type": "tuple_expression",
           "named": true
         },
@@ -1465,6 +1633,10 @@
             "named": true
           },
           {
+            "type": "await_expression",
+            "named": true
+          },
+          {
             "type": "binary_expression",
             "named": true
           },
@@ -1474,6 +1646,10 @@
           },
           {
             "type": "field_expression",
+            "named": true
+          },
+          {
+            "type": "generic_type",
             "named": true
           },
           {
@@ -1514,6 +1690,10 @@
           },
           {
             "type": "ternary_expression",
+            "named": true
+          },
+          {
+            "type": "try_expression",
             "named": true
           },
           {
@@ -1555,6 +1735,10 @@
             "named": true
           },
           {
+            "type": "await_expression",
+            "named": true
+          },
+          {
             "type": "binary_expression",
             "named": true
           },
@@ -1604,6 +1788,10 @@
           },
           {
             "type": "ternary_expression",
+            "named": true
+          },
+          {
+            "type": "try_expression",
             "named": true
           },
           {
@@ -1649,6 +1837,10 @@
             "named": true
           },
           {
+            "type": "await_expression",
+            "named": true
+          },
+          {
             "type": "binary_expression",
             "named": true
           },
@@ -1702,6 +1894,10 @@
           },
           {
             "type": "ternary_expression",
+            "named": true
+          },
+          {
+            "type": "try_expression",
             "named": true
           },
           {
@@ -1929,6 +2125,10 @@
             "named": true
           },
           {
+            "type": "await_expression",
+            "named": true
+          },
+          {
             "type": "binary_expression",
             "named": true
           },
@@ -1978,6 +2178,10 @@
           },
           {
             "type": "ternary_expression",
+            "named": true
+          },
+          {
+            "type": "try_expression",
             "named": true
           },
           {
@@ -2033,6 +2237,10 @@
             "named": true
           },
           {
+            "type": "await_expression",
+            "named": true
+          },
+          {
             "type": "binary_expression",
             "named": true
           },
@@ -2082,6 +2290,10 @@
           },
           {
             "type": "ternary_expression",
+            "named": true
+          },
+          {
+            "type": "try_expression",
             "named": true
           },
           {
@@ -2176,6 +2388,10 @@
             "named": true
           },
           {
+            "type": "await_expression",
+            "named": true
+          },
+          {
             "type": "binary_expression",
             "named": true
           },
@@ -2225,6 +2441,10 @@
           },
           {
             "type": "ternary_expression",
+            "named": true
+          },
+          {
+            "type": "try_expression",
             "named": true
           },
           {
@@ -2250,6 +2470,10 @@
             "named": true
           },
           {
+            "type": "await_expression",
+            "named": true
+          },
+          {
             "type": "binary_expression",
             "named": true
           },
@@ -2299,6 +2523,10 @@
           },
           {
             "type": "ternary_expression",
+            "named": true
+          },
+          {
+            "type": "try_expression",
             "named": true
           },
           {
@@ -2327,6 +2555,10 @@
           },
           {
             "type": "automap_expression",
+            "named": true
+          },
+          {
+            "type": "await_expression",
             "named": true
           },
           {
@@ -2383,6 +2615,10 @@
           },
           {
             "type": "ternary_expression",
+            "named": true
+          },
+          {
+            "type": "try_expression",
             "named": true
           },
           {
@@ -2526,6 +2762,10 @@
             "named": true
           },
           {
+            "type": "await_expression",
+            "named": true
+          },
+          {
             "type": "binary_expression",
             "named": true
           },
@@ -2575,6 +2815,10 @@
           },
           {
             "type": "ternary_expression",
+            "named": true
+          },
+          {
+            "type": "try_expression",
             "named": true
           },
           {
@@ -2727,6 +2971,10 @@
             "named": true
           },
           {
+            "type": "await_expression",
+            "named": true
+          },
+          {
             "type": "binary_expression",
             "named": true
           },
@@ -2783,6 +3031,10 @@
             "named": true
           },
           {
+            "type": "try_expression",
+            "named": true
+          },
+          {
             "type": "tuple_expression",
             "named": true
           },
@@ -2802,6 +3054,10 @@
           },
           {
             "type": "automap_expression",
+            "named": true
+          },
+          {
+            "type": "await_expression",
             "named": true
           },
           {
@@ -2854,6 +3110,10 @@
           },
           {
             "type": "ternary_expression",
+            "named": true
+          },
+          {
+            "type": "try_expression",
             "named": true
           },
           {
@@ -2895,6 +3155,10 @@
             "named": true
           },
           {
+            "type": "await_expression",
+            "named": true
+          },
+          {
             "type": "binary_expression",
             "named": true
           },
@@ -2944,6 +3208,10 @@
           },
           {
             "type": "ternary_expression",
+            "named": true
+          },
+          {
+            "type": "try_expression",
             "named": true
           },
           {
@@ -2990,6 +3258,10 @@
             "named": true
           },
           {
+            "type": "await_expression",
+            "named": true
+          },
+          {
             "type": "binary_expression",
             "named": true
           },
@@ -3039,6 +3311,10 @@
           },
           {
             "type": "ternary_expression",
+            "named": true
+          },
+          {
+            "type": "try_expression",
             "named": true
           },
           {
@@ -3176,6 +3452,10 @@
           "named": true
         },
         {
+          "type": "await_expression",
+          "named": true
+        },
+        {
           "type": "binary_expression",
           "named": true
         },
@@ -3225,6 +3505,10 @@
         },
         {
           "type": "ternary_expression",
+          "named": true
+        },
+        {
+          "type": "try_expression",
           "named": true
         },
         {
@@ -3484,6 +3768,10 @@
           "named": true
         },
         {
+          "type": "await_expression",
+          "named": true
+        },
+        {
           "type": "binary_expression",
           "named": true
         },
@@ -3533,6 +3821,10 @@
         },
         {
           "type": "ternary_expression",
+          "named": true
+        },
+        {
+          "type": "try_expression",
           "named": true
         },
         {
@@ -3657,6 +3949,10 @@
             "named": true
           },
           {
+            "type": "await_expression",
+            "named": true
+          },
+          {
             "type": "binary_expression",
             "named": true
           },
@@ -3709,6 +4005,10 @@
             "named": true
           },
           {
+            "type": "try_expression",
+            "named": true
+          },
+          {
             "type": "tuple_expression",
             "named": true
           },
@@ -3729,6 +4029,10 @@
         },
         {
           "type": "automap_expression",
+          "named": true
+        },
+        {
+          "type": "await_expression",
           "named": true
         },
         {
@@ -3781,6 +4085,10 @@
         },
         {
           "type": "ternary_expression",
+          "named": true
+        },
+        {
+          "type": "try_expression",
           "named": true
         },
         {
@@ -3856,6 +4164,10 @@
           "named": true
         },
         {
+          "type": "await_expression",
+          "named": true
+        },
+        {
           "type": "binary_expression",
           "named": true
         },
@@ -3909,6 +4221,10 @@
         },
         {
           "type": "ternary_expression",
+          "named": true
+        },
+        {
+          "type": "try_expression",
           "named": true
         },
         {
@@ -4065,6 +4381,10 @@
             "named": true
           },
           {
+            "type": "await_expression",
+            "named": true
+          },
+          {
             "type": "binary_expression",
             "named": true
           },
@@ -4114,6 +4434,10 @@
           },
           {
             "type": "ternary_expression",
+            "named": true
+          },
+          {
+            "type": "try_expression",
             "named": true
           },
           {
@@ -4175,6 +4499,10 @@
             "named": true
           },
           {
+            "type": "await_expression",
+            "named": true
+          },
+          {
             "type": "binary_expression",
             "named": true
           },
@@ -4224,6 +4552,10 @@
           },
           {
             "type": "ternary_expression",
+            "named": true
+          },
+          {
+            "type": "try_expression",
             "named": true
           },
           {
@@ -4265,6 +4597,10 @@
             "named": true
           },
           {
+            "type": "await_expression",
+            "named": true
+          },
+          {
             "type": "binary_expression",
             "named": true
           },
@@ -4314,6 +4650,10 @@
           },
           {
             "type": "ternary_expression",
+            "named": true
+          },
+          {
+            "type": "try_expression",
             "named": true
           },
           {
@@ -4339,6 +4679,10 @@
             "named": true
           },
           {
+            "type": "await_expression",
+            "named": true
+          },
+          {
             "type": "binary_expression",
             "named": true
           },
@@ -4388,6 +4732,10 @@
           },
           {
             "type": "ternary_expression",
+            "named": true
+          },
+          {
+            "type": "try_expression",
             "named": true
           },
           {
@@ -4413,6 +4761,10 @@
             "named": true
           },
           {
+            "type": "await_expression",
+            "named": true
+          },
+          {
             "type": "binary_expression",
             "named": true
           },
@@ -4462,6 +4814,10 @@
           },
           {
             "type": "ternary_expression",
+            "named": true
+          },
+          {
+            "type": "try_expression",
             "named": true
           },
           {
@@ -4496,6 +4852,94 @@
     }
   },
   {
+    "type": "try_expression",
+    "named": true,
+    "fields": {
+      "value": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "array_expression",
+            "named": true
+          },
+          {
+            "type": "automap_expression",
+            "named": true
+          },
+          {
+            "type": "await_expression",
+            "named": true
+          },
+          {
+            "type": "binary_expression",
+            "named": true
+          },
+          {
+            "type": "call_expression",
+            "named": true
+          },
+          {
+            "type": "field_expression",
+            "named": true
+          },
+          {
+            "type": "if_expression",
+            "named": true
+          },
+          {
+            "type": "index_expression",
+            "named": true
+          },
+          {
+            "type": "lambda_expression",
+            "named": true
+          },
+          {
+            "type": "match_expression",
+            "named": true
+          },
+          {
+            "type": "parenthesized_expression",
+            "named": true
+          },
+          {
+            "type": "primary_expression",
+            "named": true
+          },
+          {
+            "type": "space_pipeline",
+            "named": true
+          },
+          {
+            "type": "struct_construction",
+            "named": true
+          },
+          {
+            "type": "struct_update",
+            "named": true
+          },
+          {
+            "type": "ternary_expression",
+            "named": true
+          },
+          {
+            "type": "try_expression",
+            "named": true
+          },
+          {
+            "type": "tuple_expression",
+            "named": true
+          },
+          {
+            "type": "unary_expression",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
     "type": "tuple_expression",
     "named": true,
     "fields": {},
@@ -4509,6 +4953,10 @@
         },
         {
           "type": "automap_expression",
+          "named": true
+        },
+        {
+          "type": "await_expression",
           "named": true
         },
         {
@@ -4561,6 +5009,10 @@
         },
         {
           "type": "ternary_expression",
+          "named": true
+        },
+        {
+          "type": "try_expression",
           "named": true
         },
         {
@@ -4844,6 +5296,10 @@
             "named": true
           },
           {
+            "type": "await_expression",
+            "named": true
+          },
+          {
             "type": "binary_expression",
             "named": true
           },
@@ -4893,6 +5349,10 @@
           },
           {
             "type": "ternary_expression",
+            "named": true
+          },
+          {
+            "type": "try_expression",
             "named": true
           },
           {
@@ -4998,6 +5458,10 @@
             "named": true
           },
           {
+            "type": "await_expression",
+            "named": true
+          },
+          {
             "type": "binary_expression",
             "named": true
           },
@@ -5047,6 +5511,10 @@
           },
           {
             "type": "ternary_expression",
+            "named": true
+          },
+          {
+            "type": "try_expression",
             "named": true
           },
           {
@@ -5103,6 +5571,10 @@
             "named": true
           },
           {
+            "type": "await_expression",
+            "named": true
+          },
+          {
             "type": "binary_expression",
             "named": true
           },
@@ -5155,6 +5627,10 @@
             "named": true
           },
           {
+            "type": "try_expression",
+            "named": true
+          },
+          {
             "type": "tuple_expression",
             "named": true
           },
@@ -5180,6 +5656,10 @@
         },
         {
           "type": "automap_expression",
+          "named": true
+        },
+        {
+          "type": "await_expression",
           "named": true
         },
         {
@@ -5232,6 +5712,10 @@
         },
         {
           "type": "ternary_expression",
+          "named": true
+        },
+        {
+          "type": "try_expression",
           "named": true
         },
         {
@@ -5434,8 +5918,16 @@
     "named": false
   },
   {
+    "type": "async",
+    "named": false
+  },
+  {
     "type": "automap_operator",
     "named": true
+  },
+  {
+    "type": "await",
+    "named": false
   },
   {
     "type": "block_comment",
@@ -5563,6 +6055,10 @@
   },
   {
     "type": "true",
+    "named": false
+  },
+  {
+    "type": "try",
     "named": false
   },
   {

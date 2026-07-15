@@ -521,7 +521,7 @@
 					<key>name</key>
 					<string>keyword.control.x</string>
 					<key>match</key>
-					<string>\b(if|else|while|for|break|continue|return|match|switch|case|yield)\b</string>
+					<string>\b(if|else|while|for|break|continue|return|match|switch|case|yield|await|try)\b</string>
 				</dict>
 			</array>
 		</dict>
@@ -533,7 +533,7 @@
 					<key>name</key>
 					<string>storage.type.x</string>
 					<key>match</key>
-					<string>\b(fn|let|var|const|struct|enum|type|coro)\b</string>
+					<string>\b(fn|let|var|const|struct|enum|type|coro|async)\b</string>
 				</dict>
 			</array>
 		</dict>

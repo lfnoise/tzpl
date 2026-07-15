@@ -394,3 +394,158 @@ arr sort take(3) println;
         (primary_expression
           (integer_literal)))
       function: (identifier))))
+
+================================================================================
+Postfix try
+================================================================================
+
+let x = f(s) try;
+let y = g(s) try h;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (let_declaration
+    pattern: (identifier)
+    value: (try_expression
+      value: (call_expression
+        function: (primary_expression
+          (identifier))
+        (primary_expression
+          (identifier)))))
+  (let_declaration
+    pattern: (identifier)
+    value: (space_pipeline
+      value: (try_expression
+        value: (call_expression
+          function: (primary_expression
+            (identifier))
+          (primary_expression
+            (identifier))))
+      function: (identifier))))
+
+================================================================================
+Prefix await
+================================================================================
+
+let a = await ready(x + 1);
+let b = await f(x) + 5;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (let_declaration
+    (identifier)
+    (await_expression
+      (call_expression
+        (primary_expression
+          (identifier))
+        (binary_expression
+          (primary_expression
+            (identifier))
+          (primary_expression
+            (integer_literal))))))
+  (let_declaration
+    (identifier)
+    (binary_expression
+      (await_expression
+        (call_expression
+          (primary_expression
+            (identifier))
+          (primary_expression
+            (identifier))))
+      (primary_expression
+        (integer_literal)))))
+
+================================================================================
+Postfix await
+================================================================================
+
+let a = f(x) await;
+let b = f(x) await + 5;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (let_declaration
+    (identifier)
+    (await_expression
+      (call_expression
+        (primary_expression
+          (identifier))
+        (primary_expression
+          (identifier)))))
+  (let_declaration
+    (identifier)
+    (binary_expression
+      (await_expression
+        (call_expression
+          (primary_expression
+            (identifier))
+          (primary_expression
+            (identifier))))
+      (primary_expression
+        (integer_literal)))))
+
+================================================================================
+Async lambda
+================================================================================
+
+let f = async fn(x Int) Int { await ready(x) };
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (let_declaration
+    (identifier)
+    (lambda_expression
+      (parameter_list
+        (parameter
+          (identifier)
+          (primitive_type)))
+      (primitive_type)
+      (block
+        (expression_statement
+          (await_expression
+            (call_expression
+              (primary_expression
+                (identifier))
+              (primary_expression
+                (identifier)))))))))
+
+================================================================================
+Generic-qualified enum construction
+================================================================================
+
+let x = Result<Int, String>.ok(n);
+let y = Option<Int>.none;
+let z = a < b;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (let_declaration
+    (identifier)
+    (call_expression
+      (field_expression
+        (generic_type
+          (identifier)
+          (primitive_type)
+          (primitive_type))
+        (identifier))
+      (primary_expression
+        (identifier))))
+  (let_declaration
+    (identifier)
+    (field_expression
+      (generic_type
+        (identifier)
+        (primitive_type))
+      (identifier)))
+  (let_declaration
+    (identifier)
+    (binary_expression
+      (primary_expression
+        (identifier))
+      (primary_expression
+        (identifier)))))

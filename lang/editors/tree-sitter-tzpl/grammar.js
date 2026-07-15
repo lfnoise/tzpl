@@ -40,6 +40,16 @@ module.exports = grammar({
   conflicts: $ => [
     // Identifier as binding_pattern vs type_identifier in struct patterns
     [$.binding_pattern, $.type_identifier],
+    // `Name<...>` as a generic qualification (before `.`) vs `Name < expr`
+    // comparison — GLR explores both; the generic branch dies unless the
+    // closing `>` is followed by `.`.
+    [$.primary_expression, $.generic_qualified_type],
+    // `import a.b` continuing the dotted path vs stopping before a trailing
+    // `.*` / `.{...}` — GLR resolves on the token after the dot.
+    [$.import_path],
+    // `(T, U` as a tuple type vs a bare function type's argument list —
+    // GLR resolves on whether a return type follows the `)`.
+    [$.tuple_type],
   ],
 
   rules: {
@@ -66,7 +76,7 @@ module.exports = grammar({
 
     function_definition: $ => seq(
       optional('private'),
-      optional('coro'),
+      optional(choice('coro', 'async')),
       'fn',
       field('name', choice($.identifier, $.operator_name)),
       optional($.type_parameters),
@@ -245,14 +255,14 @@ module.exports = grammar({
       'import',
       $.import_path,
       optional(choice(
-        seq(':', '*'),
+        seq('.', '*'),
         seq('.', '{', commaSep1($.import_specifier), '}'),
         seq('as', $.identifier),
       )),
       ';',
     ),
 
-    import_path: $ => prec.right(sep1($.identifier, '.')),
+    import_path: $ => sep1($.identifier, '.'),
 
     import_specifier: $ => seq(
       $.identifier,
@@ -351,6 +361,8 @@ module.exports = grammar({
       $.field_expression,
       $.automap_expression,
       $.space_pipeline,
+      $.try_expression,
+      $.await_expression,
       $.ternary_expression,
       $.lambda_expression,
       $.match_expression,
@@ -440,10 +452,22 @@ module.exports = grammar({
       ']',
     )),
 
+    // The object may be a generic type qualification, for enum/static member
+    // access like `Result<Int, String>.ok(n)` or `Option<Int>.none`. This is
+    // a declared GLR conflict with binary `<` comparisons; the generic
+    // reading only survives when the whole `Name<...>` is followed by `.`,
+    // and prec.dynamic(-1) makes comparisons win any residual ambiguity.
     field_expression: $ => prec(PREC.POSTFIX, seq(
-      field('object', $._expression),
+      field('object', choice($._expression, alias($.generic_qualified_type, $.generic_type))),
       '.',
       field('field', choice($.identifier, $.integer_literal)),
+    )),
+
+    generic_qualified_type: $ => prec.dynamic(-1, seq(
+      field('name', $.identifier),
+      '<',
+      commaSep1($._type),
+      '>',
     )),
 
     automap_expression: $ => prec.left(PREC.POSTFIX, seq(
@@ -464,6 +488,20 @@ module.exports = grammar({
       optional(seq('(', commaSep($._expression), ')')),
     )),
 
+    // Postfix error propagation: `expr try` unwraps Result/Option or
+    // early-returns err/none from the enclosing function.
+    try_expression: $ => prec.left(PREC.POSTFIX, seq(
+      field('value', $._expression),
+      'try',
+    )),
+
+    // Await: prefix form binds tightly like unary (`await a + b` is
+    // `(await a) + b`); postfix form sits in the pipeline layer (`x await`).
+    await_expression: $ => choice(
+      prec(PREC.UNARY, seq('await', field('value', $._expression))),
+      prec.left(PREC.POSTFIX, seq(field('value', $._expression), 'await')),
+    ),
+
     ternary_expression: $ => prec.right(PREC.TERNARY, seq(
       field('condition', $._expression),
       '?',
@@ -473,6 +511,7 @@ module.exports = grammar({
     )),
 
     lambda_expression: $ => prec.right(1, seq(
+      optional(choice('coro', 'async')),
       'fn',
       optional($.type_parameters),
       $.parameter_list,
@@ -687,12 +726,12 @@ module.exports = grammar({
       ')',
     ),
 
-    function_type: $ => seq(
-      'fn',
-      '(',
-      commaSep($._type),
-      ')',
-      $._type,
+    // Two spellings: `fn(Int) Int` and the bare `(Int) Int` / `() Int` form
+    // (a parenthesized arg list is a function type when a return type
+    // follows, mirroring the reference parser's lookahead).
+    function_type: $ => choice(
+      seq('fn', '(', commaSep($._type), ')', $._type),
+      prec.right(seq('(', commaSep($._type), ')', $._type)),
     ),
 
     // ===================== LITERALS =====================
