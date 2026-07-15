@@ -4,8 +4,8 @@
 -- Run via integration-tests/scripts/nats_msg_loopback.sh (needs nats-server).
 
 import nats.*;
-import messageEncoding.*;
-import message.*;
+import std.messageEncoding.*;
+import std.message.*;
 
 let subject = "tzpl.test.msg";
 

@@ -1,7 +1,7 @@
 -- Untrusted/garbage input must never crash: readers are bounds-checked and
 -- isMessage guards the header. Printing past each decode proves no OOB / abort.
-import message.*;
-import messageEncoding.*;
+import std.message.*;
+import std.messageEncoding.*;
 
 -- empty buffer is not a message
 let empty = bytes();

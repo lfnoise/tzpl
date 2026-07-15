@@ -5,7 +5,7 @@
 --       integration-tests/scripts/silo_scenario_files.x
 
 import audio_engine.*;
-import futures.*;
+import std.futures.*;
 import silo.*;
 
 fn preparePart(silo Int, node Int, path String) Future<String> {

@@ -5,7 +5,7 @@
 -- The tasks themselves run on the silos' RT VMs (their own coroutines).
 
 import audio_engine.*;
-import futures.*;
+import std.futures.*;
 
 -- The result of preparing a part: ok, or an error message from compile/load.
 enum LoadResult {

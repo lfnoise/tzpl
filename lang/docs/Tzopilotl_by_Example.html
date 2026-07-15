@@ -2968,28 +2968,31 @@ lst draw println;                  <span class="cmt">-- List(square, circle)</sp
 println(math.square(<span class="num">5</span>));    <span class="cmt">-- 25</span>
 
 <span class="cmt">-- Import with alias</span>
-<span class="kw">import</span> std.collections <span class="kw">as</span> cols;
-cols.get(mymap, <span class="str">"key"</span>);
+<span class="kw">import</span> std.strings <span class="kw">as</span> strs;
+strs.quotes(<span class="str">"hi"</span>) println;  <span class="cmt">-- "hi"</span>
 
 <span class="cmt">-- Import all exports into current scope (wildcard)</span>
-<span class="kw">import</span> std.math.*;
-<span class="num">1.0</span> sin println;            <span class="cmt">-- no qualifier needed</span>
+<span class="kw">import</span> std.strings.*;
+<span class="str">"7"</span> padStart(<span class="num">3</span>, <span class="str">"0"</span>) println;   <span class="cmt">-- 007, no qualifier needed</span>
 
 <span class="cmt">-- Import specific names</span>
-<span class="kw">import</span> std.math.{sin, cos, sqrt};
-<span class="num">1.0</span> sin println;
+<span class="kw">import</span> std.strings.{glob, padStart};
+<span class="str">"kick.wav"</span> glob(<span class="str">"*.wav"</span>) println;
 
 <span class="cmt">-- Import with aliases</span>
-<span class="kw">import</span> std.math.{sin <span class="kw">as</span> sine, cos <span class="kw">as</span> cosine};
-<span class="num">1.0</span> sine println;</code></pre>
+<span class="kw">import</span> std.strings.{padStart <span class="kw">as</span> padLeft};
+<span class="str">"7"</span> padLeft(<span class="num">3</span>) println;</code></pre>
+<div class="note">
+    <p>General-purpose standard-library modules live under the <code>std.*</code> namespace (<code>std.strings</code>, <code>std.path</code>, <code>std.fs</code>, <code>std.result</code>, <code>std.test</code>, <code>std.json</code>, <code>std.message</code>, <code>std.thunk</code>, <code>std.futures</code>). Math, string, and collection <em>functions</em> are built-ins &mdash; always available, no import needed. Audio-domain modules (<code>synthdef</code>, <code>common_ugens</code>, <code>filters</code>, <code>dsp_math</code>) keep flat names. See the <a href="Standard_Library.html">Standard Library reference</a>.</p>
+</div>
 
 <h3 id="dotted-paths">22.2 Dotted Paths</h3>
 <pre><code><span class="cmt">-- Dotted paths map to directories:</span>
-<span class="cmt">--   std.math  →  std/math.x</span>
-<span class="cmt">--   utils     →  utils.x</span>
+<span class="cmt">--   std.strings  →  std/strings.x</span>
+<span class="cmt">--   utils        →  utils.x</span>
 
-<span class="kw">import</span> std.math;            <span class="cmt">-- loads std/math.x</span>
-println(math.add(<span class="num">3</span>, <span class="num">4</span>));    <span class="cmt">-- qualified by last path component</span></code></pre>
+<span class="kw">import</span> std.strings;             <span class="cmt">-- loads std/strings.x</span>
+strings.quotes(<span class="str">"hi"</span>) println;   <span class="cmt">-- qualified by last path component</span></code></pre>
 
 <h3 id="file-resolution">22.3 File Resolution</h3>
 <div class="note">
@@ -2999,6 +3002,7 @@ println(math.add(<span class="num">3</span>, <span class="num">4</span>));    <s
         <li>Relative to the directory containing the importing file</li>
         <li>Each directory in the CLI <code>-I path1:path2</code> argument</li>
         <li>Each directory in the <code>TZPL_PATH</code> environment variable (colon-separated)</li>
+        <li>The auto-discovered standard library (<code>$TZPL_HOME/modules</code> if set, else the <code>modules/</code> directory found next to the executable, else the source tree's <code>lang/modules</code>)</li>
     </ol>
 </div>
 <p>Run with include paths:</p>
@@ -3051,7 +3055,7 @@ table. The two keywords can be mixed freely within a module.</p>
 <span class="kw">export</span> math_utils;
 
 <span class="cmt">-- Re-export a dotted path or renamed alias.</span>
-<span class="kw">export</span> std.collections <span class="kw">as</span> cols;</code></pre>
+<span class="kw">export</span> std.strings <span class="kw">as</span> strs;</code></pre>
 
 <p>A downstream module then sees the re-exported names as if they were
 declared locally in the re-exporter:</p>

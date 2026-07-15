@@ -5,11 +5,11 @@
 -- silo, ...) can't compile under the plain CLI and are exercised by the
 -- integration tests instead.
 import dsp_math.*;
-import futures.*;
-import json.*;
-import message.*;
-import messageEncoding.*;
-import strings.*;
+import std.futures.*;
+import std.json.*;
+import std.message.*;
+import std.messageEncoding.*;
+import std.strings.*;
 
 ssqrt(-4.0) println;
 scbrt(-8.0) println;

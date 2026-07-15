@@ -5,16 +5,16 @@
 -- silo 1, whose trampoline decodes it and enqueues it into "voice".
 
 import audio_engine.*;
-import futures.*;
+import std.futures.*;
 import actors.*;          -- runActorServer
-import message.*;
+import std.message.*;
 
 -- silo 0: a sender actor that emits a rising line to silo 1's "voice", one note
 -- per beat. The sends run inside the tick (gCurrentSilo set), after a delay.
 let silo0 = """
 import audio_engine.*;
-import messageEncoding.*;
-import message.*;
+import std.messageEncoding.*;
+import std.message.*;
 
 async fn sender(self Actor<Msg>, init Msg) Void {
     let scale = [60.0, 64.0, 67.0, 72.0];
@@ -31,7 +31,7 @@ spawn(sender, Msg.int(0));
 -- silo 1: the "voice" actor plays a note for each message it receives.
 let silo1 = """
 import audio_engine.*;
-import message.*;
+import std.message.*;
 
 async fn voice(self Actor<Msg>, init Msg) Void {
     var id = 0;

@@ -1,7 +1,7 @@
 -- Two actors bounce a counter back and forth (async-lambda behaviors capturing
 -- each other), stopping at 6. Exercises actor-to-actor send + the event-loop
 -- cascade, and closure capture of actor references.
-import message.*;
+import std.message.*;
 
 -- Seed a Ref<Actor<Msg>> so ping can reference pong (spawned after it).
 let dummy = spawn(async fn(s Actor<Msg>, i Msg) Void {}, Msg.int(0));

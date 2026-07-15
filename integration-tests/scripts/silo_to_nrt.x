@@ -6,10 +6,10 @@
 -- NRT actor, then drives the NRT actor loop so it processes the mail.
 
 import audio_engine.*;
-import futures.*;
+import std.futures.*;
 import actors.*;          -- runActorServer
-import messageEncoding.*;         -- decode (also re-exported use of sendByName builtin)
-import message.*;
+import std.messageEncoding.*;         -- decode (also re-exported use of sendByName builtin)
+import std.message.*;
 
 -- NRT actor: registered as "conductor", prints each pitch it receives. Spawned
 -- on the main VM before the server loop starts.
@@ -27,7 +27,7 @@ async fn conductor(self Actor<Msg>, init Msg) Void {
 -- note per beat. The sends run inside the tick (gCurrentSilo set), after delay.
 let silo0 = """
 import silo_actors.*;   -- siloPost (the silo-side send helper)
-import message.*;
+import std.message.*;
 
 async fn sender(self Actor<Msg>, init Msg) Void {
     let scale = [60.0, 64.0, 67.0, 72.0];

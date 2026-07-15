@@ -4,7 +4,7 @@
 -- image on NRT and swaps it on the silo; the previous image is retired in doNRT.
 
 import audio_engine.*;
-import futures.*;
+import std.futures.*;
 
 let base = """
 fn pitch() Float { 100.0 }

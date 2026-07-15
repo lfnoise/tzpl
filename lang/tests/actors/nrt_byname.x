@@ -3,7 +3,7 @@
 -- entirely on the main VM. Distinct from pingpong.x, which uses direct actor refs.
 -- Exercises register-from-the-spawn-site (actor spawn(...) register('name)) and
 -- sendByName resolving a process-global name to a local mailbox.
-import message.*;
+import std.message.*;
 
 -- relay: on int n, forward n+1 to 'collector by name (until n reaches 4).
 async fn relay(self Actor<Msg>, init Msg) Void {

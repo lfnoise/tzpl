@@ -8,16 +8,16 @@
 --       -I lang/modules -I bridge/modules integration-tests/scripts/silo_actor_send.x
 
 import audio_engine.*;
-import futures.*;
+import std.futures.*;
 import actors.*;          -- siloSend
-import message.*;
+import std.message.*;
 
 -- The silo actor registers itself as "voice" and plays a note for each pitch
 -- message it receives. Spawned at module top level so it is registered as soon
 -- as the module loads (before any message is sent).
 let taskCode = """
 import audio_engine.*;
-import message.*;
+import std.message.*;
 
 async fn voice(self Actor<Msg>, init Msg) Void {
     var id = 0;

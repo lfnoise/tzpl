@@ -1,6 +1,6 @@
 -- encode -> decode round-trips every Msg case, including nesting and edges.
-import message.*;
-import messageEncoding.*;
+import std.message.*;
+import std.messageEncoding.*;
 
 fn rt(o Msg) Void {
     let b = encode(o);

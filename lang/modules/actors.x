@@ -5,8 +5,8 @@
 -- the NRT->silo bridge: sending a message by name to an actor living in a silo.
 
 import audio_engine.*;   -- siloDeliverBytes (the C++ transport)
-import messageEncoding.*;        -- encode (Msg -> Bytes)
-import message.*;         -- Msg
+import std.messageEncoding.*;        -- encode (Msg -> Bytes)
+import std.message.*;         -- Msg
 
 -- Send a Msg message to the actor registered as `name` in silo `silo`,
 -- delivered as soon as it reaches the silo (the next audio block).

@@ -7,8 +7,8 @@
 -- (siloOutbox), drained on the main thread by runActorServer.
 
 import audio_engine.*;   -- siloOutbox (the rt-safe outbox transport)
-import messageEncoding.*;        -- encode (Msg -> Bytes)
-import message.*;         -- Msg
+import std.messageEncoding.*;        -- encode (Msg -> Bytes)
+import std.message.*;         -- Msg
 
 -- From inside a silo actor or task, send a Msg to an actor elsewhere.
 --   target = -1  -> an actor registered at NRT (the main VM)

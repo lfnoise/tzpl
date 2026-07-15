@@ -7,7 +7,7 @@
 --       integration-tests/scripts/silo_scenario1_audible.x
 
 import audio_engine.*;
-import futures.*;
+import std.futures.*;
 import silo.*;
 
 -- bass on silo 0 / node 101: one low note per beat

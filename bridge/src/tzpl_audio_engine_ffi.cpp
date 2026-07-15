@@ -1051,7 +1051,7 @@ static void ffi_siloLoad(ts::VM& vm, u16 dst, u16, u16 argBase) {
     // Inject the cross-VM actor delivery trampoline as a preamble so any silo
     // module can receive messages sent by name from the NRT side.
     std::string source =
-        "import message.*;\n"
+        "import std.message.*;\n"
         "fn tzpl_actor_deliver(name Symbol, b Bytes) Void { sendByName(name, decode(b)); }\n"
         + std::string(code);
     // Compile against the silo's persistent incremental context so functions

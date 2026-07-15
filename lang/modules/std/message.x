@@ -1,6 +1,6 @@
 -- message.x -- the Msg value type, its printer, and constructors.
 
-import strings.*;   -- separatedString, brackets, quotes (used by toString)
+import std.strings.*;   -- separatedString, brackets, quotes (used by toString)
 
 enum Msg {
     bool Bool,

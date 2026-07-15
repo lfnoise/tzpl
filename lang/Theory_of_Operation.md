@@ -951,7 +951,7 @@ Per-driver telemetry (`stepCountBySource`, `stepMaxNanosBySource`, …) lets you
 
 The `ModuleCompiler` handles multi-file compilation:
 
-1. **Resolution:** Module paths (`import std.math`) are resolved to filesystem paths by searching include directories.
+1. **Resolution:** Module paths (`import std.strings` → `std/strings.x`) are resolved to filesystem paths by searching include directories, then the auto-discovered stdlib.
 2. **Compilation:** Each module is independently lexed, parsed, type-checked, and code-generated through the same pipeline. The result is a `ModuleInfo` with an `initBlock` (module-level code), exports (functions, types, variables), and the retained AST (needed for template re-instantiation).
 3. **Caching:** Compiled modules are cached by canonical path. Circular imports are detected via `compiling` flag.
 4. **Import forms:**

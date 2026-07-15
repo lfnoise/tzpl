@@ -1,6 +1,6 @@
 -- json.x -- a minimal JSON value type and printer.
 
-import strings.*;   -- separatedString, braces
+import std.strings.*;   -- separatedString, braces
 
 enum Json {
     null,

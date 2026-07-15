@@ -1,7 +1,7 @@
 -- Lightweight: spawn many actors and deliver a message to each. Each worker
 -- accumulates into a shared total via a forwarder, proving thousands of actors
 -- interleave on one event loop. Only summary output (deterministic).
-import message.*;
+import std.message.*;
 
 -- A collector actor sums everything it receives; workers forward to it.
 let total = &0;

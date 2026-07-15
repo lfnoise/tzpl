@@ -6,7 +6,7 @@
 -- through the awaitable siloLoad path, so the await barrier makes ordering
 -- deterministic (no dependency on the audio thread ticking).
 import audio_engine.*;
-import futures.*;
+import std.futures.*;
 
 let mod = """
 fn pitch() Float { 60.0 }

@@ -1,6 +1,6 @@
 -- Zero-copy reader: direct field access without decoding the whole tree.
-import message.*;
-import messageEncoding.*;
+import std.message.*;
+import std.messageEncoding.*;
 
 fn tagName(t MsgTag) String {
     match (t) {

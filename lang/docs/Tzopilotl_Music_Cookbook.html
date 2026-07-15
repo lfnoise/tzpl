@@ -698,7 +698,7 @@ kicks off the music; <code>siloStartAt</code> calls it on the grid.</p>
 <span class="cmt">-- runs ordinary async code.) start() spawns it.</span>
 <span class="kw">let</span> taskCode = <span class="str">"""</span>
 <span class="str">import audio_engine.*;</span>
-<span class="str">import message.*;</span>
+<span class="str">import std.message.*;</span>
 
 <span class="str">let scale = [60.0, 63.0, 65.0, 67.0, 70.0, 72.0];</span>
 
@@ -1102,7 +1102,7 @@ all loaded in parallel and started together on a downbeat. This mirrors
 
 <span class="kw">let</span> bass = <span class="str">"""</span>
 <span class="str">import audio_engine.*;</span>
-<span class="str">import message.*;</span>
+<span class="str">import std.message.*;</span>
 <span class="str">let notes = [36.0, 36.0, 43.0, 41.0];</span>
 <span class="str">async fn play(self Actor&lt;Msg&gt;, init Msg) Void {</span>
 <span class="str">    var i = 0;</span>
@@ -1116,7 +1116,7 @@ all loaded in parallel and started together on a downbeat. This mirrors
 
 <span class="kw">let</span> arp = <span class="str">"""</span>
 <span class="str">import audio_engine.*;</span>
-<span class="str">import message.*;</span>
+<span class="str">import std.message.*;</span>
 <span class="str">let p = [72.0, 76.0, 79.0, 84.0];</span>
 <span class="str">async fn play(self Actor&lt;Msg&gt;, init Msg) Void {</span>
 <span class="str">    var i = 0;</span>

@@ -1,6 +1,6 @@
 -- Basic actor lifecycle: spawn, send (queued + delivered-to-parked), receive,
 -- runActors drains to quiescence. Messages are Msg.
-import message.*;
+import std.message.*;
 
 -- Counter actor: accumulates ints, prints the running total.
 async fn counter(self Actor<Msg>, init Msg) Void {

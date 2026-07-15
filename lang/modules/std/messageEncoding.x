@@ -28,7 +28,7 @@
 -- Children live in parallel tag/payload arrays, so child i is reached in O(1):
 -- tag at tagsOffset+i, payload at payloadsOffset+i*8.
 
-import message.*;
+import std.message.*;
 
 -- Node kinds; discriminants line up with the wire tags and Msg cases.
 enum MsgTag {

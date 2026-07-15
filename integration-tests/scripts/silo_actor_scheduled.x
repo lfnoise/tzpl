@@ -4,13 +4,13 @@
 -- beat (via the engine's late-bound beat scheduler), so the notes play in time.
 
 import audio_engine.*;
-import futures.*;
+import std.futures.*;
 import actors.*;          -- siloSendAt
-import message.*;
+import std.message.*;
 
 let taskCode = """
 import audio_engine.*;
-import message.*;
+import std.message.*;
 
 async fn voice(self Actor<Msg>, init Msg) Void {
     var id = 0;

@@ -7,8 +7,8 @@
 -- Run via integration-tests/scripts/actor_nats_loopback.sh (needs nats-server).
 
 import nats.*;
-import messageEncoding.*;
-import message.*;
+import std.messageEncoding.*;
+import std.message.*;
 
 async fn worker(self Actor<Msg>, init Msg) Void {
     while (true) {

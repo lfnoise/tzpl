@@ -5,12 +5,12 @@
 -- whole thing runs inline on the script thread -- deterministic, no CoreAudio.
 
 import audio_engine.*;
-import futures.*;
+import std.futures.*;
 
 let silo0 = """
 import audio_engine.*;
-import messageEncoding.*;
-import message.*;
+import std.messageEncoding.*;
+import std.message.*;
 
 fn start() Void {
     -- ~1000 floats encode to ~9 KB, well over the 4096-byte cap.

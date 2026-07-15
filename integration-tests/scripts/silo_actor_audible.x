@@ -12,13 +12,13 @@
 -- You should hear a 6-note scale, a note every half beat at 120 BPM. Ctrl-C to stop.
 
 import audio_engine.*;
-import futures.*;
+import std.futures.*;
 
 -- Silo task module (installed on silo 0's RT VM). `melody` is an actor whose
 -- behavior plays a scale, advancing time with `await delay`. start() spawns it.
 let taskCode = """
 import audio_engine.*;
-import message.*;
+import std.message.*;
 
 let scale = [60.0, 63.0, 65.0, 67.0, 70.0, 72.0];
 

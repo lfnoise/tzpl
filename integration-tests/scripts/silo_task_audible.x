@@ -9,7 +9,7 @@
 -- task resumes on the silo's tempo clock and triggers the voicer. Ctrl-C to stop.
 
 import audio_engine.*;
-import futures.*;
+import std.futures.*;
 
 -- The silo task module (installed on silo 0's RT VM). A coroutine plays a
 -- 6-note scale, advancing time by yielding beat-deltas; start() spawns it.

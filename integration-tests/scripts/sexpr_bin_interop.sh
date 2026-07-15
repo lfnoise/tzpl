@@ -22,8 +22,8 @@ c++ -std=c++23 -I "$ROOT/shared" "$SELFTEST_SRC" -o "$SELFTEST_BIN" || { echo "F
 
 # Encode the same value in Tzopilotl and dump its bytes.
 cat > "$LANG_DUMP" <<'EOF'
-import message.*;
-import messageEncoding.*;
+import std.message.*;
+import std.messageEncoding.*;
 fn dump(b Bytes) Void {
     var i = 0; let n = b byteLength;
     while (i < n) { print((b u8At(i)) toString); print(" "); i = i + 1; }
