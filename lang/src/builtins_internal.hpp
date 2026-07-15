@@ -88,6 +88,27 @@ inline void registerTemplateEx(Compiler& compiler, FuncMap& functions,
 }
 
 // ============================================================================
+// Option-result helpers
+// ============================================================================
+
+// Option<Int> / Option<Float> have Inline repr; a legacy (registerOne'd)
+// builtin returns them as a boxed heap Enum* (Some = case 0, None = case 1)
+// and codegen unboxes into the inline slot after the call (see
+// builtin_get_map's heap fallback for the pattern).
+
+inline void writeOptionIntResult(VM& vm, u16 dst, bool some, i64 v) {
+    auto* e = Enum::create(vm.optionType(vm.intType()), some ? 0 : 1);
+    if (some) e->v[0].i = v;
+    vm.reg(dst).o = e;
+}
+
+inline void writeOptionFloatResult(VM& vm, u16 dst, bool some, f64 v) {
+    auto* e = Enum::create(vm.optionType(vm.floatType()), some ? 0 : 1);
+    if (some) e->v[0].f = v;
+    vm.reg(dst).o = e;
+}
+
+// ============================================================================
 // Array helpers
 // ============================================================================
 
@@ -541,6 +562,7 @@ void registerArrayBuiltins(Compiler& compiler, FuncMap& functions);
 void registerListGenBuiltins(Compiler& compiler, FuncMap& functions);
 void registerBytesBuiltins(Compiler& compiler, FuncMap& functions);
 void registerActorBuiltins(Compiler& compiler, FuncMap& functions);
+void registerIoBuiltins(Compiler& compiler, FuncMap& functions);
 
 // ============================================================================
 // Forward declarations of exported builtin functions

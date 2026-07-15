@@ -60,6 +60,7 @@ set(LIB_SOURCES
     src/builtins_listgen.cpp
     src/builtins_bytes.cpp
     src/builtins_actors.cpp
+    src/builtins_io.cpp
     src/disassemble.cpp
     src/module_compiler.cpp
     src/module_paths.cpp

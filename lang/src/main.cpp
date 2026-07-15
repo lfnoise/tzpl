@@ -28,6 +28,7 @@
 #include <unistd.h>
 #include "linenoise.h"
 #include "tzpl.hpp"
+#include "builtins.hpp"
 #include "module_compiler.hpp"
 #include "module_paths.hpp"
 #include "diagnostic.hpp"
@@ -338,11 +339,18 @@ int main(int argc, const char* argv[]) {
 
         std::vector<std::string> includePaths;
         std::string filename;
+        std::vector<std::string> scriptArgs;
         bool rtRestricted = false;
 
         // Parse command line arguments
         for (int i = 1; i < argc; ++i) {
             std::string arg = argv[i];
+            // Everything after the script filename belongs to the script
+            // (exposed via the programArgs() builtin).
+            if (!filename.empty()) {
+                scriptArgs.push_back(std::move(arg));
+                continue;
+            }
             if (arg == "--help" || arg == "-h") {
                 std::cout << "Usage: tzpl [options] [file]\n"
                           << "\n"
@@ -384,6 +392,8 @@ int main(int argc, const char* argv[]) {
         stdlibFallbacks.push_back(EXAMPLES_DIR);
 #endif
         for (auto& p : defaultModulePaths(stdlibFallbacks)) includePaths.push_back(std::move(p));
+
+        setProgramArgs(std::move(scriptArgs));
 
         // Create target and VM after parsing args (so rtRestricted is known)
         VMTarget target = compiler.createTarget(rtRestricted);

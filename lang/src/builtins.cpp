@@ -3987,6 +3987,7 @@ void registerBuiltinFunctions(Compiler& compiler,
     registerListGenBuiltins(compiler, functions);
     registerBytesBuiltins(compiler, functions);
     registerActorBuiltins(compiler, functions);
+    registerIoBuiltins(compiler, functions);
 
     // --- Collection builtins (template-resolved) ---
     // Phase 4g.27: all higher-order builtins now use the native multi-word

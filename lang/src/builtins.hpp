@@ -32,6 +32,10 @@ namespace ts {
 void registerBuiltinFunctions(Compiler& compiler,
     std::unordered_map<std::string, std::deque<FuncInfo>>& functions);
 
+// Stash the script's CLI arguments (everything after the script filename)
+// for the programArgs() builtin. Called once by the host before running.
+void setProgramArgs(std::vector<std::string> args);
+
 } // namespace ts
 
 #endif /* builtins_hpp */

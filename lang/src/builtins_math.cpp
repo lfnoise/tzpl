@@ -23,6 +23,9 @@
 #include <complex>
 #include <bit>
 #include <algorithm>
+#include <cctype>
+#include <cstdlib>
+#include <limits>
 
 namespace ts {
 
@@ -636,6 +639,82 @@ static void builtin_endsWith_string(VM& vm, u16 dst, u16, u16 ab) {
                      s->s.compare(s->s.size() - suffix->s.size(), suffix->s.size(), suffix->s) == 0) ? 1 : 0;
 }
 
+// indexOf(String, String) -> Option<Int> -- byte offset of the first
+// occurrence of the needle, composable with substring's byte indexing.
+static void builtin_indexOf_string(VM& vm, u16 dst, u16, u16 ab) {
+    auto* s = static_cast<StringObj*>(vm.reg(ab).o);
+    auto* sub = static_cast<StringObj*>(vm.reg(ab + 1).o);
+    size_t pos = s->s.find(sub->s);
+    writeOptionIntResult(vm, dst, pos != VMString::npos, (i64)pos);
+}
+
+// lastIndexOf(String, String) -> Option<Int> -- byte offset of the last
+// occurrence of the needle.
+static void builtin_lastIndexOf_string(VM& vm, u16 dst, u16, u16 ab) {
+    auto* s = static_cast<StringObj*>(vm.reg(ab).o);
+    auto* sub = static_cast<StringObj*>(vm.reg(ab + 1).o);
+    size_t pos = s->s.rfind(sub->s);
+    writeOptionIntResult(vm, dst, pos != VMString::npos, (i64)pos);
+}
+
+// Strict integer scan: optional sign, then >= 1 digit in the radix, and the
+// digits must span the whole string. Overflow -> failure.
+static bool parseIntStrict(VMString const& s, int radix, i64& out) {
+    if (radix < 2 || radix > 36) return false;
+    size_t i = 0;
+    bool neg = false;
+    if (i < s.size() && (s[i] == '+' || s[i] == '-')) { neg = s[i] == '-'; ++i; }
+    if (i >= s.size()) return false;
+    u64 acc = 0;
+    u64 limit = neg ? (u64)std::numeric_limits<i64>::max() + 1
+                    : (u64)std::numeric_limits<i64>::max();
+    for (; i < s.size(); ++i) {
+        char c = s[i];
+        int d;
+        if (c >= '0' && c <= '9')      d = c - '0';
+        else if (c >= 'a' && c <= 'z') d = c - 'a' + 10;
+        else if (c >= 'A' && c <= 'Z') d = c - 'A' + 10;
+        else return false;
+        if (d >= radix) return false;
+        if (acc > (limit - (u64)d) / (u64)radix) return false;  // overflow
+        acc = acc * (u64)radix + (u64)d;
+    }
+    out = neg ? (i64)(0 - acc) : (i64)acc;
+    return true;
+}
+
+// parseInt(String) -> Option<Int>
+static void builtin_parseInt_string(VM& vm, u16 dst, u16, u16 ab) {
+    auto* s = static_cast<StringObj*>(vm.reg(ab).o);
+    i64 v = 0;
+    writeOptionIntResult(vm, dst, parseIntStrict(s->s, 10, v), v);
+}
+
+// parseInt(String, Int) -> Option<Int> -- radix 2..36.
+static void builtin_parseInt_radix_string(VM& vm, u16 dst, u16, u16 ab) {
+    auto* s = static_cast<StringObj*>(vm.reg(ab).o);
+    i64 v = 0;
+    writeOptionIntResult(vm, dst,
+        parseIntStrict(s->s, (int)vm.reg(ab + 1).i, v), v);
+}
+
+// parseFloat(String) -> Option<Float> -- strict: the whole string must be a
+// valid float ("inf" / "nan" accepted, optional leading sign allowed).
+// parseFloatC = C-locale strtod: correctly rounded on this platform, so the
+// shortest form printed by formatFloat parses back bit-identically.
+static void builtin_parseFloat_string(VM& vm, u16 dst, u16, u16 ab) {
+    auto* s = static_cast<StringObj*>(vm.reg(ab).o);
+    const char* cs = s->s.c_str();
+    // strtod skips leading whitespace; a strict parse must not.
+    if (s->s.empty() || std::isspace((unsigned char)cs[0])) {
+        writeOptionFloatResult(vm, dst, false, 0.0);
+        return;
+    }
+    char* end = nullptr;
+    f64 v = parseFloatC(cs, &end);
+    writeOptionFloatResult(vm, dst, end == cs + s->s.size(), v);
+}
+
 // split(String, String) -> [String]
 static void builtin_split_string(VM& vm, u16 dst, u16, u16 ab) {
     auto* s = static_cast<StringObj*>(vm.reg(ab).o);
@@ -1101,6 +1180,13 @@ void registerMathBuiltins(Compiler& compiler, FuncMap& functions)
     registerOne(compiler, functions, "toUpper",    Str,      {Str},           builtin_toUpper_string);
     registerOne(compiler, functions, "toLower",    Str,      {Str},           builtin_toLower_string);
     registerOne(compiler, functions, "replace",    Str,      {Str, Str, Str}, builtin_replace_string);
+    Type* OptInt2   = compiler.optionType(Int);
+    Type* OptFloat2 = compiler.optionType(Float);
+    registerOne(compiler, functions, "indexOf",     OptInt2,   {Str, Str},      builtin_indexOf_string);
+    registerOne(compiler, functions, "lastIndexOf", OptInt2,   {Str, Str},      builtin_lastIndexOf_string);
+    registerOne(compiler, functions, "parseInt",    OptInt2,   {Str},           builtin_parseInt_string);
+    registerOne(compiler, functions, "parseInt",    OptInt2,   {Str, Int},      builtin_parseInt_radix_string);
+    registerOne(compiler, functions, "parseFloat",  OptFloat2, {Str},           builtin_parseFloat_string);
 
     // --- fraction accessors ---
     registerOne(compiler, functions, "numer", Int, {Frac}, builtin_numer_fraction);
