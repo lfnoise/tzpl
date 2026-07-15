@@ -440,6 +440,7 @@ private:
     Type* inferExpr(Expr* expr, Type* expectedType = nullptr);
     Type* inferBinaryOp(BinaryOpExpr* expr);
     Type* inferUnaryOp(UnaryOpExpr* expr);
+    Type* inferTryExpr(TryExprNode* expr);
     Type* inferCall(CallExpr_* expr);
 
     // Extracted helpers for inferCall (Steps 1-7)

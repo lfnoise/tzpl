@@ -1,0 +1,5 @@
+3200
+negative
+negative
+Option<Int>.some(42)
+Option<Int>.none

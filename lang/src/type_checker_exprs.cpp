@@ -440,6 +440,11 @@ void TypeChecker::discoverCaptures(LambdaExprNode* expr) {
                 walk(ate->subject.get());
                 break;
             }
+            case ASTNode::TryExpr: {
+                auto* te = static_cast<TryExprNode*>(node);
+                walk(te->inner.get());
+                break;
+            }
             default:
                 break;  // Other node kinds don't contain identifiers we need
         }
@@ -1303,6 +1308,85 @@ Type* TypeChecker::inferUnaryOp(UnaryOpExpr* expr) {
             break;
     }
     return compiler_.intType();
+}
+
+// --- Postfix `try` error propagation ---
+
+// Recognize an instantiation of std.result's `enum Result<T, E> { ok T, err E }`.
+static bool isResultEnum(Type* t, Type** okType, Type** errType) {
+    auto* et = dynamic_cast<EnumType*>(t);
+    if (!et || et->cases_.size() != 2) return false;
+    if (et->name_->str().substr(0, 7) != "Result<") return false;
+    if (et->cases_[0].name->str() != "ok" || et->cases_[1].name->str() != "err") return false;
+    if (okType) *okType = et->cases_[0].type;
+    if (errType) *errType = et->cases_[1].type;
+    return true;
+}
+
+// Recognize an instantiation of the builtin `enum Option<T> { some T, none }`.
+static bool isOptionEnum(Type* t, Type** someType) {
+    auto* et = dynamic_cast<EnumType*>(t);
+    if (!et || et->cases_.size() != 2) return false;
+    if (et->name_->str().substr(0, 7) != "Option<") return false;
+    if (et->cases_[0].name->str() != "some" || et->cases_[1].name->str() != "none") return false;
+    if (someType) *someType = et->cases_[0].type;
+    return true;
+}
+
+Type* TypeChecker::inferTryExpr(TryExprNode* expr) {
+    Type* opType = inferExpr(static_cast<Expr*>(expr->inner.get()));
+    if (!opType) return compiler_.intType();
+
+    Type* okType = nullptr;
+    Type* errType = nullptr;
+    Type* someType = nullptr;
+    bool opIsResult = isResultEnum(opType, &okType, &errType);
+    bool opIsOption = !opIsResult && isOptionEnum(opType, &someType);
+
+    if (!opIsResult && !opIsOption) {
+        error(expr->loc, "'try' operand must be a Result or Option, got '" +
+              std::string(opType->str()) + "'");
+        return opType;
+    }
+    Type* payload = opIsResult ? okType : someType;
+
+    if (!currentReturnType_) {
+        if (inferringReturnType_) {
+            error(expr->loc, "'try' requires the enclosing function to declare an "
+                  "explicit Result or Option return type");
+        } else {
+            error(expr->loc, "'try' can only be used inside a function");
+        }
+        return payload;
+    }
+
+    if (opIsResult) {
+        Type* retErrType = nullptr;
+        if (!isResultEnum(currentReturnType_, nullptr, &retErrType)) {
+            error(expr->loc, "'try' on a '" + std::string(opType->str()) +
+                  "' requires the enclosing function to return a Result, but it returns '" +
+                  std::string(currentReturnType_->str()) + "'");
+            return payload;
+        }
+        if (!typesEqual(errType, retErrType) && !typesNominallyEqual(errType, retErrType)) {
+            error(expr->loc, "'try' error type mismatch: operand has error type '" +
+                  std::string(errType->str()) + "' but the enclosing function returns '" +
+                  std::string(currentReturnType_->str()) +
+                  "' (error types must match exactly; no conversion is applied)");
+            return payload;
+        }
+    } else {
+        if (!isOptionEnum(currentReturnType_, nullptr)) {
+            error(expr->loc, "'try' on an '" + std::string(opType->str()) +
+                  "' requires the enclosing function to return an Option, but it returns '" +
+                  std::string(currentReturnType_->str()) + "'");
+            return payload;
+        }
+    }
+
+    expr->isOption = opIsOption;
+    expr->propagateEnumType = currentReturnType_;
+    return payload;
 }
 
 } // namespace ts

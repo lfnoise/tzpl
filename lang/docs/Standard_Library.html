@@ -439,6 +439,15 @@ readFileResult(<span class="hl-str">"missing"</span>) errOption unwrap println;
 
 half(<span class="hl-num">8</span>) unwrapOr(<span class="hl-num">0</span>) println;                 <span class="cmt">-- 4</span>
 half(<span class="hl-num">7</span>) errOption unwrap println;            <span class="cmt">-- odd: 7</span></code></pre>
+            <p>The postfix <code>try</code> operator propagates errors without boilerplate: <code>expr try</code> unwraps <code>ok</code>/<code>some</code>, and on <code>err</code>/<code>none</code> early-returns it from the enclosing function (whose return type must be a <code>Result</code> with the same error type, or an <code>Option</code>). It chains mid-pipeline like <code>await</code>.</p>
+            <pre><code><span class="hl-kw">fn</span> quarter(x Int) Result&lt;Int, String&gt; {
+    <span class="hl-kw">let</span> h = half(x) <span class="hl-kw">try</span>;         <span class="cmt">-- err propagates out of quarter</span>
+    <span class="hl-kw">let</span> q = half(h) <span class="hl-kw">try</span>;
+    Result&lt;Int, String&gt;.ok(q)
+}
+
+quarter(<span class="hl-num">8</span>) unwrapOr(<span class="hl-num">0</span>) println;              <span class="cmt">-- 2</span>
+quarter(<span class="hl-num">6</span>) errOption unwrap println;         <span class="cmt">-- odd: 3</span></code></pre>
             <a href="#top" class="back-to-top">&uarr; Back to top</a>
         </div>
 

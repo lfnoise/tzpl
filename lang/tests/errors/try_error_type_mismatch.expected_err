@@ -1,0 +1,5 @@
+Type error [tests/errors/try_error_type_mismatch.x:9:21]
+  |
+9 |     let n = inner() try;
+  |                     ^^^
+  'try' error type mismatch: operand has error type 'String' but the enclosing function returns 'Result<Int, Int>' (error types must match exactly; no conversion is applied)

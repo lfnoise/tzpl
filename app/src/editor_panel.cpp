@@ -23,7 +23,7 @@ TextEditor::LanguageDefinition EditorPanel::createTzopilotlDef() {
         "fn", "let", "var", "const", "if", "else", "while", "for",
         "break", "continue", "return", "case", "match",
         "struct", "enum", "import", "as", "where", "private",
-        "coro", "yield", "constraint", "requires",
+        "coro", "yield", "async", "await", "try", "constraint", "requires",
         "true", "false", "nil",
         "Int", "Float", "String", "Symbol", "Bool", "Void",
         "Fraction", "Complex", "Any", "type"

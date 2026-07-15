@@ -1,0 +1,5 @@
+Type error [tests/errors/try_inferred_return.x:4:25]
+  |
+4 |     let n = parseInt(s) try;
+  |                         ^^^
+  'try' requires the enclosing function to declare an explicit Result or Option return type

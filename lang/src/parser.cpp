@@ -2263,6 +2263,11 @@ ExprPtr Parser::parsePostfix(ExprPtr left) {
             ExprList args;
             args.push_back(std::move(left));
             left = std::make_unique<CallExpr_>(loc, std::move(callee), std::move(args));
+        } else if (check(TokenKind::Try)) {
+            // Postfix error propagation: value try
+            SourceRange loc = currentLoc();
+            advance(); // consume 'try'
+            left = std::make_unique<TryExprNode>(loc, std::move(left));
         } else if (check(TokenKind::As) && lexer_.peek().kind == TokenKind::LParen) {
             // as(TypeExpr): type cast/test on Any value
             SourceRange loc = currentLoc();

@@ -1,0 +1,5 @@
+Type error [tests/errors/try_bad_operand.x:5:15]
+  |
+5 |     let y = x try;
+  |               ^^^
+  'try' operand must be a Result or Option, got 'Int'

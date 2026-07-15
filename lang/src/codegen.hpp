@@ -284,6 +284,7 @@ private:
     u16 genTemplateLambdaDef(LambdaExprNode* expr);
     void compileTemplateLambdaBody(LambdaExprNode* expr, LambdaType* lambdaType);
     u16 genIfExpr(IfExprNode* expr);
+    u16 genTryExpr(TryExprNode* expr);
     u16 genNilLiteral();
     u16 genListLiteral(ListLiteralExpr* expr);
     u16 genMapLiteral(MapLiteralExpr* expr);

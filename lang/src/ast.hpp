@@ -57,7 +57,7 @@ struct ASTNode {
         IntLiteral, FloatLiteral, ImaginaryLiteral, FractionLiteral, StringLiteral, BoolLiteral, SymbolLiteral,
         Identifier, DynamicVar, BinaryOp, UnaryOp, CallExpr, IndexExpr, FieldExpr,
         TupleLiteral, ArrayLiteral, ListLiteral, MapLiteral, SetLiteral, NilLiteral, StructLiteral, EnumConstructor,
-        LambdaExpr, IfExpr, BlockExpr, AutoMap, RangeExpr, AsTypeExpr,
+        LambdaExpr, IfExpr, BlockExpr, AutoMap, RangeExpr, AsTypeExpr, TryExpr,
 
         // Type expressions
         NamedType, ArrayType, ListType, MapType, SetType, TupleType, FunctionType, RefType, TemplateType,
@@ -441,6 +441,18 @@ struct AutoMapExpr : Expr {
 
     AutoMapExpr(SourceRange l, ExprPtr e, int d, int ci)
         : Expr(AutoMap, l), inner(std::move(e)), depth(d), cartesianIndex(ci) {}
+};
+
+// Postfix error propagation: `expr try` — on Result.err / Option.none,
+// early-returns the propagated error from the enclosing fn; otherwise
+// evaluates to the ok/some payload.
+struct TryExprNode : Expr {
+    ExprPtr inner;
+    bool isOption = false;              // set by type checker: Option-try vs Result-try
+    Type* propagateEnumType = nullptr;  // enclosing fn's return enum (Result<RetT,E> / Option<RetT>)
+
+    TryExprNode(SourceRange l, ExprPtr e)
+        : Expr(TryExpr, l), inner(std::move(e)) {}
 };
 
 struct RangeExprNode : Expr {

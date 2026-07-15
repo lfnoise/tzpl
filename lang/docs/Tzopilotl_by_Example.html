@@ -1529,6 +1529,32 @@ temp println;              <span class="cmt">-- Temperature(98.6)</span></code><
     <p><code>Option&lt;T&gt;</code> is a built-in template enum with cases <code>some T</code> and <code>none</code>. It is returned by map subscript and <code>get(map, key)</code>. See <a href="#maps">Maps</a> and <a href="#templates">Templates</a> for details.</p>
 </div>
 
+<div class="note">
+    <h4>Error propagation with postfix <code>try</code></h4>
+    <p>The postfix <code>try</code> operator unwraps a <code>Result&lt;T, E&gt;</code> (from <code>std.result</code>) or an <code>Option&lt;T&gt;</code>: on <code>ok(v)</code>/<code>some(v)</code> the expression evaluates to <code>v</code>; on <code>err(e)</code>/<code>none</code> it <em>early-returns</em> the error from the enclosing function. The function's declared return type must be a <code>Result</code> with the same error type (or an <code>Option</code>). Like <code>await</code>, <code>try</code> sits in the postfix layer, so it binds tighter than any binary operator and chains mid-pipeline.</p>
+    <pre><code><span class="kw">import</span> std.result.*;
+
+<span class="kw">fn</span> parsePositive(s <span class="kw">String</span>) Result&lt;<span class="kw">Int</span>, <span class="kw">String</span>&gt; {
+    <span class="kw">match</span> (parseInt(s)) {
+        Option.some(n): n &gt;= <span class="num">0</span> ? Result&lt;<span class="kw">Int</span>, <span class="kw">String</span>&gt;.ok(n)
+                               : Result&lt;<span class="kw">Int</span>, <span class="kw">String</span>&gt;.err(<span class="str">"negative: "</span> $ s);
+        Option.none: Result&lt;<span class="kw">Int</span>, <span class="kw">String</span>&gt;.err(<span class="str">"not a number: "</span> $ s);
+    }
+}
+
+<span class="kw">fn</span> addParsed(a <span class="kw">String</span>, b <span class="kw">String</span>) Result&lt;<span class="kw">Int</span>, <span class="kw">String</span>&gt; {
+    <span class="kw">let</span> x = parsePositive(a) <span class="kw">try</span>;   <span class="cmt">-- err returns immediately</span>
+    <span class="kw">let</span> y = parsePositive(b) <span class="kw">try</span>;
+    Result&lt;<span class="kw">Int</span>, <span class="kw">String</span>&gt;.ok(x + y)
+}
+
+<span class="cmt">-- chains mid-pipeline: unwrap, then keep piping</span>
+<span class="kw">fn</span> doubled(s <span class="kw">String</span>) Result&lt;<span class="kw">Int</span>, <span class="kw">String</span>&gt; {
+    Result&lt;<span class="kw">Int</span>, <span class="kw">String</span>&gt;.ok(parsePositive(s) <span class="kw">try</span> * <span class="num">2</span>)
+}</code></pre>
+    <p>Inside a lambda, <code>try</code> returns from the lambda; inside an <code>async fn</code>, the early return resolves the function's <code>Future</code>. Mixing kinds (an <code>Option</code>-<code>try</code> in a <code>Result</code>-returning function), mismatched error types, and <code>try</code> in a function without a declared <code>Result</code>/<code>Option</code> return type are all compile-time errors.</p>
+</div>
+
 <h3 id="ordinal">7.5 Ordinal (Case Index)</h3>
 <pre><code><span class="cmt">-- ordinal returns the zero-based index of an enum case</span>
 <span class="kw">enum</span> Color { red, green, blue, }

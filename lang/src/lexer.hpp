@@ -49,7 +49,7 @@ enum class TokenKind {
     Fn, Let, Var, Const,
     If, Else, While, For, Break, Continue,
     Return, Case, Match,
-    Struct, Enum, Import, Export, As, Where, Private, Coro, Yield, Async, Await, Constraint, Requires,
+    Struct, Enum, Import, Export, As, Where, Private, Coro, Yield, Async, Await, Try, Constraint, Requires,
     True, False, Nil,
     // Type keywords
     KwInt, KwFloat, KwString, KwSymbol, KwBool, KwVoid,

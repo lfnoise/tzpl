@@ -2863,6 +2863,7 @@ u16 CodeGen::genExprDispatch(Expr* expr) {
         case ASTNode::SetLiteral:      return genSetLiteral(static_cast<SetLiteralExpr*>(expr));
         case ASTNode::RangeExpr:    return genRangeExpr(static_cast<RangeExprNode*>(expr));
         case ASTNode::AsTypeExpr:   return genAsTypeExpr(static_cast<AsTypeExprNode*>(expr));
+        case ASTNode::TryExpr:      return genTryExpr(static_cast<TryExprNode*>(expr));
         case ASTNode::AutoMap: {
             // Auto-map wrapper: generate the inner expression
             auto* am = static_cast<AutoMapExpr*>(expr);
@@ -10700,6 +10701,150 @@ u16 CodeGen::genIfExpr(IfExprNode* expr) {
     patchJump(endJump);
     // After the join resultReg is live on both paths.
     setRegType(resultReg, expr->resolvedType);
+    return resultReg;
+}
+
+// Postfix `try`: test the operand's discriminant; on err/none construct the
+// enclosing function's return enum from the error side and early-return it;
+// on ok/some the expression evaluates to the extracted payload.
+u16 CodeGen::genTryExpr(TryExprNode* expr) {
+    auto* opEt  = dynamic_cast<EnumType*>(expr->inner->resolvedType);
+    auto* retEt = dynamic_cast<EnumType*>(expr->propagateEnumType);
+    if (!opEt || !retEt) {
+        error(expr->loc, "Codegen: 'try' without resolved Result/Option types");
+        return allocReg();
+    }
+
+    auto caseIndex = [](EnumType* et, std::string_view name) -> int {
+        for (size_t i = 0; i < et->cases_.size(); ++i)
+            if (et->cases_[i].name->str() == name) return (int)i;
+        return -1;
+    };
+    int okIdx     = caseIndex(opEt,  expr->isOption ? "some" : "ok");
+    int errIdx    = caseIndex(opEt,  expr->isOption ? "none" : "err");
+    int retErrIdx = caseIndex(retEt, expr->isOption ? "none" : "err");
+    if (okIdx < 0 || errIdx < 0 || retErrIdx < 0) {
+        error(expr->loc, "Codegen: malformed Result/Option enum in 'try'");
+        return allocReg();
+    }
+
+    u16 operandReg = genExpr(static_cast<Expr*>(expr->inner.get()));
+    // Result slot for the ok/some payload. Its per-register type stays
+    // cleared until after the join (same discipline as genIfExpr) so no
+    // stack map sees an uninitialized register as a live Obj* root.
+    u16 resultReg = allocSlot(expr->resolvedType);
+    setRegType(resultReg, nullptr);
+    u16 savedReg = nextReg_;
+
+    // --- discriminant test: jump to the ok path on ok/some ---
+    u32 okJump;
+    if (opEt->repr_ == ts::Type::Repr::NullablePtrEnum) {
+        // The null side is the Void-payload case (none for Option; may be
+        // either side of a Result with a Void payload).
+        u16 nullReg = allocReg();
+        emitOp(op_load_nil);
+        emitRegs(nullReg);
+        u16 cmpReg = allocReg();
+        emitOp(op_cmp_eq_obj);
+        emitRegs(cmpReg, operandReg, nullReg);
+        emitPtr(opEt);
+        bool voidIsOk = (nullablePtrVoidCaseIndex(opEt) == okIdx);
+        okJump = emitJump(voidIsOk ? op_jump_if_true : op_jump_if_false, cmpReg);
+    } else {
+        // DiscriminantEnum / Inline: the tag is (word 0 of) the value itself.
+        u16 whichReg;
+        if (opEt->repr_ == ts::Type::Repr::DiscriminantEnum
+            || opEt->repr_ == ts::Type::Repr::Inline) {
+            whichReg = operandReg;
+        } else {
+            whichReg = allocReg();
+            emitOp(op_enum_get_which);
+            emitRegs(whichReg, operandReg);
+        }
+        u16 expectedReg = allocReg();
+        emitOp(op_load_int_const);
+        emitRegs(expectedReg);
+        emitInt((i64)okIdx);
+        u16 matchReg = allocReg();
+        emitOp(op_cmp_eq_int);
+        emitRegs(matchReg, whichReg, expectedReg);
+        okJump = emitJump(op_jump_if_true, matchReg);
+    }
+
+    // --- error path (fallthrough): early-return err/none rebuilt as the
+    // enclosing function's return enum ---
+    if (opEt == retEt) {
+        // Same enum instantiation: propagate the operand unchanged.
+        emitReturn(operandReg);
+    } else {
+        Type* errType = opEt->cases_[errIdx].type;
+        u16 retReg = allocSlot(retEt);
+        if (!expr->isOption && errType != compiler_.voidType()) {
+            // Extract the err payload from the operand.
+            u16 errReg;
+            if (opEt->repr_ == ts::Type::Repr::NullablePtrEnum) {
+                errReg = operandReg;             // non-null pointer IS the payload
+            } else if (opEt->repr_ == ts::Type::Repr::Inline) {
+                errReg = (u16)(operandReg + 1);  // payload lives in-place
+            } else {
+                errReg = allocSlot(errType);
+                emitOp(op_enum_get_value);
+                emitRegs(errReg, operandReg);
+                emitPtr(errType);
+                setRegType(errReg, errType);
+            }
+            if (retEt->repr_ == ts::Type::Repr::NullablePtrEnum) {
+                emitMov(retReg, errReg);
+            } else if (retEt->repr_ == ts::Type::Repr::Inline) {
+                emitOp(op_make_inline_enum);
+                emitRegs(retReg, errReg, (u16)retErrIdx);
+                emitPtr(retEt);
+            } else {
+                emitOp(op_make_enum);
+                emitRegs(retReg, errReg, (u16)retErrIdx);
+                emitPtr(retEt);
+            }
+        } else {
+            // none, or err with a Void payload: no-data construction.
+            if (retEt->repr_ == ts::Type::Repr::DiscriminantEnum) {
+                emitOp(op_load_int_const);
+                emitRegs(retReg);
+                emitInt((i64)retErrIdx);
+            } else if (retEt->repr_ == ts::Type::Repr::NullablePtrEnum) {
+                emitOp(op_load_nil);
+                emitRegs(retReg);
+            } else if (retEt->repr_ == ts::Type::Repr::Inline) {
+                emitOp(op_make_inline_enum_nodata);
+                emitRegs(retReg, (u16)retErrIdx);
+                emitPtr(retEt);
+            } else {
+                emitOp(op_make_enum_nodata);
+                emitRegs(retReg, (u16)retErrIdx);
+                emitPtr(retEt);
+            }
+        }
+        emitReturn(retReg);
+    }
+    // Reclaim error-path temps so later stack maps don't see stale entries.
+    if (enableRegReclaim) freeRegsTo(savedReg);
+
+    patchJump(okJump);
+    // --- ok path: extract the payload into resultReg ---
+    Type* payload = expr->resolvedType;
+    if (payload == compiler_.voidType()) {
+        // Result<Void, E>: nothing to extract.
+    } else if (opEt->repr_ == ts::Type::Repr::NullablePtrEnum) {
+        emitMov(resultReg, operandReg);
+    } else if (opEt->repr_ == ts::Type::Repr::Inline) {
+        // Copy (not alias) the in-place payload: the operand slot may be
+        // reclaimed and reused while the payload is still live.
+        emitMoveN(resultReg, (u16)(operandReg + 1), typeSlotWords(payload));
+    } else {
+        emitOp(op_enum_get_value);
+        emitRegs(resultReg, operandReg);
+        emitPtr(payload);
+    }
+    setRegType(resultReg, payload);
     return resultReg;
 }
 

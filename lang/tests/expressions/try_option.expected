@@ -1,0 +1,10 @@
+Option<Int>.some(42)
+Option<Int>.none
+Option<String>.some(HELLO)
+Option<String>.none
+Option<Int>.some(3)
+Option<Int>.none
+Option<Int>.none
+[Option<Int>.some(10), Option<Int>.none, Option<Int>.some(30)]
+Option<Int>.some(22)
+Option<Int>.some(-1)

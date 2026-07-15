@@ -326,6 +326,15 @@ s contains(2) println;
 
 -- Chaining
 [1, 2, 3] map(fn(x Int) { x * x }) filter(fn(x Int) { x > 2 }) println;
+
+-- Postfix try: unwrap Result/Option, early-return err/none from the
+-- enclosing fn. Requires the fn to declare a matching Result/Option
+-- return type (same error type; no conversion).
+fn addParsed(a String, b String) Option<Int> {
+    let x = parseInt(a) try;             -- none returns immediately
+    let y = parseInt(b) try;
+    Option.some(x + y)
+}
 ```
 
 ## Auto-mapping

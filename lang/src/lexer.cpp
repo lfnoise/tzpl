@@ -191,6 +191,7 @@ TokenKind Lexer::keywordKind(const std::string& text) const {
     if (text == "yield") return TokenKind::Yield;
     if (text == "async") return TokenKind::Async;
     if (text == "await") return TokenKind::Await;
+    if (text == "try") return TokenKind::Try;
     if (text == "constraint") return TokenKind::Constraint;
     if (text == "requires") return TokenKind::Requires;
     if (text == "true") return TokenKind::True;
@@ -719,6 +720,7 @@ const char* tokenKindString(TokenKind kind) {
         case TokenKind::Yield:           return "'yield'";
         case TokenKind::Async:           return "'async'";
         case TokenKind::Await:           return "'await'";
+        case TokenKind::Try:             return "'try'";
         case TokenKind::Constraint:      return "'constraint'";
         case TokenKind::Requires:        return "'requires'";
         case TokenKind::True:            return "'true'";

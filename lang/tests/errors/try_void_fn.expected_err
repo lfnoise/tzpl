@@ -1,0 +1,5 @@
+Type error [tests/errors/try_void_fn.x:3:25]
+  |
+3 |     let n = parseInt(s) try;
+  |                         ^^^
+  'try' on an 'Option<Int>' requires the enclosing function to return an Option, but it returns 'Void'

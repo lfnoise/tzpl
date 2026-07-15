@@ -1,0 +1,5 @@
+Type error [tests/errors/try_top_level.x:2:23]
+  |
+2 | let n = parseInt("1") try;
+  |                       ^^^
+  'try' can only be used inside a function

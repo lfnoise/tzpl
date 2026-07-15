@@ -219,6 +219,10 @@ TightPostfix    = '(' ExprList? ')'               -- function call
 
 Postfix         = TightPostfix
                 | IDENT CallArgs?                   -- space-pipeline: x f or x f(y)
+                | 'yield'                           -- pipeline yield: x yield -> yield(x)
+                | 'await'                           -- pipeline await: x await -> await(x)
+                | 'try'                             -- error propagation (see below)
+                | 'as' '(' TypeExpr ')'             -- type cast/test on Any
 ```
 
 **Space-pipeline** is the key syntactic sugar of Tzopilotl. When an identifier appears after an expression at postfix level, the parser desugars it to a function call with the expression prepended as the first argument:
@@ -228,7 +232,9 @@ Postfix         = TightPostfix
 - `x f g` becomes `g(f(x))` (chained pipeline)
 - `x f(y) g(z)` becomes `g(f(x, y), z)` (chained multi-arg pipeline)
 
-Keywords (`let`, `var`, `fn`, `if`, `else`, `while`, `for`, `break`, `continue`, `return`, `switch`, `match`, `const`, `coro`, `yield`, `constraint`, `requires`, `where`) cannot be consumed by space-pipeline because they are lexed as distinct token kinds, not as `Identifier`. The postfix loop only enters space-pipeline handling when `current_` is `TokenKind::Identifier`.
+Keywords (`let`, `var`, `fn`, `if`, `else`, `while`, `for`, `break`, `continue`, `return`, `switch`, `match`, `const`, `coro`, `yield`, `async`, `await`, `try`, `constraint`, `requires`, `where`) cannot be consumed by space-pipeline because they are lexed as distinct token kinds, not as `Identifier`. The postfix loop only enters space-pipeline handling when `current_` is `TokenKind::Identifier`.
+
+**Postfix `try` (error propagation).** `expr try` unwraps a `Result<T, E>` or `Option<T>`: on `ok(v)`/`some(v)` the expression evaluates to `v`; on `err(e)`/`none` it early-returns the error from the enclosing function, whose declared return type must be a `Result` with the same error type `E` (no conversion is applied) or an `Option` respectively. It lives in the postfix layer like `await`, so it binds tighter than all binary operators and chains mid-pipeline (`readFileResult(p) try splitLines`). Inside a lambda it returns from the lambda; inside an `async fn` the early return resolves the Future (`op_async_return` routing is shared with normal returns). Unlike `await`, `try` is not a builtin call: it lowers to a dedicated `TryExprNode` (the type checker records the enclosing return enum) and codegen emits a discriminant test, an error-path enum construction + return, and an ok-path payload extraction — no new opcodes. `try` requires an explicitly declared return type; it does not participate in return-type inference.
 
 **Chained tuple field access** (`expr.1.0`) requires special handling: the lexer produces `.` + `FloatLiteral("1.0")`, which the parser splits into two consecutive field accesses `.1` then `.0`.
 

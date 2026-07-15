@@ -1,0 +1,11 @@
+Type error [tests/errors/try_mix_option_result.x:5:25]
+  |
+5 |     let n = parseInt(s) try;
+  |                         ^^^
+  'try' on an 'Option<Int>' requires the enclosing function to return an Option, but it returns 'Result<Int, String>'
+
+Type error [tests/errors/try_mix_option_result.x:11:15]
+   |
+11 |     let n = r try;
+   |               ^^^
+   'try' on a 'Result<Int, String>' requires the enclosing function to return a Result, but it returns 'Option<Int>'

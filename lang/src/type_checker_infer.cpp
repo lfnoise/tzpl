@@ -923,6 +923,10 @@ Type* TypeChecker::inferExpr(Expr* expr, Type* expectedType) {
             break;
         }
 
+        case ASTNode::TryExpr:
+            result = inferTryExpr(static_cast<TryExprNode*>(expr));
+            break;
+
         case ASTNode::LambdaExpr:
             result = inferLambdaExpr(static_cast<LambdaExprNode*>(expr));
             break;
