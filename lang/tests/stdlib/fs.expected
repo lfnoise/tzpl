@@ -1,0 +1,32 @@
+true
+true
+true
+true
+hello
+world
+more
+
+<none>
+true
+true
+false
+17
+-1
+true
+[one, two]
+dflt
+true
+cannot read file: /tmp/tzpl_test_stdlib_fs/nope.txt
+[a.txt, l.txt, nested]
+true
+false
+true
+2
+65
+66
+true
+[]
+true
+true
+true
+[nested]

@@ -1,0 +1,13 @@
+PASS ints add
+PASS strings concat
+PASS arrays concat
+PASS comparison
+PASS negative comparison
+PASS float near
+PASS check passes
+FAIL deliberate mismatch: expected 2 got 1
+FAIL deliberate false: expected true
+FAIL deliberate far: expected 2.0 +- 0.5 got 1.0
+FAIL deliberate check: check returned false
+7 passed, 4 failed
+4

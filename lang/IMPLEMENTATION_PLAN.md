@@ -59,7 +59,7 @@ The following components exist and are functional:
 | **10** | **10.1--10.3** | **Methods & OO** | Not started. Method declarations, struct inheritance, where clauses. MethodType and Method value types exist but no syntax/dispatch. |
 | 11 | 11.1 | Dynamic Scoping | Done. Backtick-prefixed variables (`var \`name = expr`), `op_load_dynamic`/`op_store_dynamic`/`op_dynscope_push` opcodes, zero overhead on normal calls. |
 | 12 | 12.1 | Event-Driven VM | Done. See `EVENT_DRIVEN_VM_PLAN.md`. Cross-thread ARC, NRT VM, RT VM on Silo, NRT and RT tempo schedulers, clock FFI. |
-| 13 | 13.2--13.4 | Standard Library (remaining) | Mostly done. String functions complete. Array/list/map functions extensive. Remaining: file I/O functions (NRT only). |
+| 13 | 13.2--13.5 | Standard Library | Done (July 2026). String/array/list/map builtins + file/OS IO builtins (NRT) + `std.*` module namespace (result, fs, path, test, strings, json, message, thunk, futures). Expansion roadmap in 13.5. |
 | 14 | 14.x | Optimizations | Mostly done. Register reclamation, tail call optimization, constant folding, range loop inlining all done. Remaining: general function inlining. |
 | 15 | 15.x | Error Handling & Diagnostics | Done. Parser error recovery with synchronization, cascading error suppression, `expectClosing()` with diagnostic notes pointing to opening delimiters, readable token names. |
 | 16 | 16.x | Testing Infrastructure | Done. 318 integration tests (`.x` files with expected output), `run_tests.sh` test runner, doc-extracted tests. |
@@ -473,7 +473,7 @@ See Phase 6 below. Implemented after templates were completed.
 
 ---
 
-## Phase 13: Standard Library (MOSTLY DONE)
+## Phase 13: Standard Library (DONE — see Phase 13.5 roadmap for expansion)
 
 ### 13.1 Math Functions — Done
 
@@ -493,15 +493,75 @@ See Phase 6 below. Implemented after templates were completed.
 
 **Done**: `length`, `cmp`, `min`, `max`, comparison operators (`<`, `<=`, `>`, `>=`, `==`, `!=`), `$` concatenation, `substring`, `contains`, `startsWith`, `endsWith`, `split`, `trim`, `toUpper`, `toLower`, `replace`, byte indexing (`s[i]`), `codePoints` (lazy `List<Int>` of Unicode code points), `toString`, `fmt`. Tested in `tests/builtins/string_functions.x` and `tests/builtins/codepoints.x`.
 
+July 2026: `indexOf`/`lastIndexOf` (byte offsets, `Option<Int>`) and strict
+`parseInt(s)`/`parseInt(s, radix)`/`parseFloat(s)` (`Option` returns) added
+in `builtins_math.cpp`; richer utilities (padding, lines, glob, stripping)
+live in `std.strings`. Tested in `tests/stdlib/`.
+
 ### 13.3 Array/List Functions — Done
 
 **Done**: `length`, indexing, concatenation (`$`), construction, `push`, `pop`, `reverse`, `sort`, `grade`, `muss`, `take`, `drop`, `stride`, `stutter`, `repeat`, `cat`, `join`, `flatten`, `map`, `filter`, `fold`, `fold1`, `scan`, `scan1`, `find`, `zip`, `enumerate`, `iter`, `cyc`, `ncyc`, `hang`, `head`, `tail`, `cons`, `isNil`, `notNil`, `toList`, `toArray`, `collect`, `pick`, `picks`, `takeWhile`, `dropWhile`. All lazy list operations use generators.
 
-### 13.4 IO Functions (Non-Real-Time Only)
+### 13.4 IO Functions (Non-Real-Time Only) — Done
 
 **Done**: `print`, `println`.
 
-**Remaining**: `readFile`, `writeFile` (file I/O for loading scripts -- NRT only).
+**Done July 2026** (`builtins_io.cpp`, all registered `rtSafe=false` so the
+type checker rejects them in RT contexts): `readFile`, `readFileBytes`,
+`writeFile`/`appendFile` (String and Bytes overloads), `fileExists`,
+`isDirectory`, `fileSize`, `fileModTime`, `listDir`, `makeDir`, `removeFile`,
+`renameFile`, `getEnv`, `programArgs` (CLI args after the script filename),
+`currentDir`. Fallible ops return `Option`; mutating ops return `Bool`.
+Whole-file granularity only — no streaming handles (Bytes accessors cover
+structured binary reads). Ergonomic wrappers in `std.fs`; pure path helpers
+in `std.path`. Tested in `tests/stdlib/fs.x`.
+
+### 13.5 Standard Library Expansion (July 2026: P0 done; P1/P2 roadmap)
+
+**P0 — shipped July 2026**:
+- `std.*` namespace: general-purpose modules moved to `modules/std/`
+  (`strings`, `json`, `message`, `messageEncoding`, `futures`, `thunk` +
+  new `result`, `fs`, `path`, `test`). Audio-domain modules and bridge FFI
+  wrappers stay flat. All import sites updated; docs' `import std.math`
+  fiction replaced with real examples.
+- New builtins: file/OS IO (13.4), `parseInt`/`parseFloat`,
+  `indexOf`/`lastIndexOf`.
+- New modules: `std.result` (Result<T,E> + combinators), `std.path`
+  (basename/dirname/extension/joinPath/splitPath), `std.fs` (readLines/
+  writeLines/readFileOr + Result variants), `std.test` (assertEq/assertTrue/
+  assertNear/check/testSummary, stable PASS/FAIL lines), `std.strings`
+  expansion (padStart/padEnd/repeatString/splitLines/capitalize/stripPrefix/
+  stripSuffix/equalsIgnoreCase + glob with `* ? [a-z] [!...]`).
+- Docs: new `docs/Standard_Library.html`; NRT badge + File & OS section in
+  `Builtin_Functions.html`. Golden tests in `tests/stdlib/`.
+
+**P1 — breadth (next)**:
+- Builtins: `zip3`/`unzip`; persistent-vector variants of the newer
+  reductions (sum/product/mean/any/all/sums/...); lazy-list `clump`/`spread`;
+  time: `nowMonotonic()`/`nowUnix()` (non-blocking clock reads, rtSafe),
+  `localUtcOffsetSeconds()` + `sleepSeconds()` (NRT).
+- `.x`: `std.json` parser (recursive descent over codePoints,
+  `Result<Json, String>` with byte offset in errors); `std.datetime`
+  (civil-time math, days-from-civil algorithm, UTC + fixed offsets only, no
+  tz database — distinct from the tempo `clock` module); `std.collections`
+  (`groupBy`, `distinct`, `partition`, `minBy`/`maxBy`, `count`, `sumBy`,
+  `frequencies`, `windowed`, `intersperse`; `sortBy(xs, keyFn)` as a thin
+  wrapper since comparator `sort`/`grade` already exist); `std.functional`
+  (`identity`, `always`, `compose`, `flip`, `tap`) + `std.ops` (named
+  wrappers for operators lacking builtin twins, chiefly unary `neg`);
+  `std.stats` (`median`, `variance`, `stddev`, `mode`, `percentile`,
+  `normalize`, `histogram`).
+
+**P2 — depth (on demand)**:
+- Regex builtin: Thompson NFA (linear time, no catastrophic backtracking —
+  consistent with the RT philosophy); opaque `Regex` value type;
+  `regex(pattern) Option<Regex>`, `reMatch`, `reFind`, `reFindAll`,
+  `reReplace`, `reSplit`. Largest single C++ item (~1–2 wk).
+- `std.wavfile`: NRT WAV header/sample parsing over `readFileBytes` +
+  Bytes accessors (wavetables, analysis).
+- Language work item (not stdlib): operators as first-class values in
+  binding/return position (today only call-arg position, e.g. `fold(0, +)`);
+  shrink `std.ops` afterward.
 
 ---
 

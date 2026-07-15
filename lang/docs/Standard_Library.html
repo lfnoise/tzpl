@@ -1,0 +1,528 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Standard Library Reference</title>
+    <style>
+        :root {
+            --bg: #1a1b26;
+            --fg: #c9d1d9;
+            --container-bg: #21222c;
+            --accent: #58a6ff;
+            --heading-fg: #e6edf3;
+            --heading2-fg: #b0bec5;
+            --heading2-border: #30363d;
+            --intro-bg: #0d2137;
+            --intro-border: #58a6ff;
+            --intro-fg: #b0bec5;
+            --toc-bg: #1f2028;
+            --toc-border: #30363d;
+            --toc-hover: #2a2d3a;
+            --code-bg: #30363d;
+            --code-fg: #c9d1d9;
+            --pre-bg: #161b22;
+            --pre-fg: #e6edf3;
+            --pre-border: #58a6ff;
+            --table-th-bg: #2a2d3a;
+            --table-th-fg: #e6edf3;
+            --table-border: #30363d;
+            --table-hover: #1f2028;
+            --highlight-bg: #2d2308;
+            --highlight-border: #ffc107;
+            --note-bg: #0d2818;
+            --note-border: #27ae60;
+            --badge-bg: #58a6ff;
+            --badge-fg: #fff;
+            --shadow: rgba(0,0,0,0.3);
+            --syn-cmt: #6a737d;
+            --syn-num: #e5a537;
+            --syn-str: #4ec970;
+            --syn-kw: #c678dd;
+            --type-int: #58a6ff;
+            --type-float: #e5a537;
+            --type-bool: #c678dd;
+            --type-fraction: #56d4e0;
+            --type-complex: #f47067;
+            --type-range: #8b949e;
+            --type-array: #e6edf3;
+            --type-list: #4ec970;
+            --back-to-top: #58a6ff;
+        }
+
+        html.light {
+            --bg: #f5f5f5;
+            --fg: #333;
+            --container-bg: white;
+            --accent: #3498db;
+            --heading-fg: #2c3e50;
+            --heading2-fg: #34495e;
+            --heading2-border: #ecf0f1;
+            --intro-bg: #f8f9fa;
+            --intro-border: #3498db;
+            --intro-fg: #555;
+            --toc-bg: #f8f9fa;
+            --toc-border: #bdc3c7;
+            --toc-hover: #e8f4f8;
+            --code-bg: #ecf0f1;
+            --code-fg: #2c3e50;
+            --pre-bg: #2c3e50;
+            --pre-fg: #ecf0f1;
+            --pre-border: #3498db;
+            --table-th-bg: #34495e;
+            --table-th-fg: white;
+            --table-border: #ecf0f1;
+            --table-hover: #f8f9fa;
+            --highlight-bg: #fff3cd;
+            --highlight-border: #ffc107;
+            --note-bg: #e8f5e8;
+            --note-border: #27ae60;
+            --badge-bg: #3498db;
+            --badge-fg: white;
+            --shadow: rgba(0,0,0,0.1);
+            --syn-cmt: #95a5a6;
+            --syn-num: #e67e22;
+            --syn-str: #27ae60;
+            --syn-kw: #e74c3c;
+            --type-int: #2980b9;
+            --type-float: #e67e22;
+            --type-bool: #8e44ad;
+            --type-fraction: #16a085;
+            --type-complex: #c0392b;
+            --type-range: #7f8c8d;
+            --type-array: #2c3e50;
+            --type-list: #27ae60;
+            --back-to-top: #3498db;
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            line-height: 1.6;
+            margin: 0;
+            padding: 20px;
+            background-color: var(--bg);
+            color: var(--fg);
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background-color: var(--container-bg);
+            padding: 40px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px var(--shadow);
+        }
+
+        h1 {
+            color: var(--heading-fg);
+            border-bottom: 3px solid var(--accent);
+            padding-bottom: 10px;
+            margin-bottom: 30px;
+        }
+
+        h2 {
+            color: var(--heading2-fg);
+            border-bottom: 2px solid var(--heading2-border);
+            padding-bottom: 8px;
+            margin-top: 40px;
+            margin-bottom: 20px;
+        }
+
+        h3 {
+            color: var(--heading-fg);
+            margin-top: 30px;
+            margin-bottom: 15px;
+        }
+
+        .intro {
+            font-size: 1.1em;
+            color: var(--intro-fg);
+            background-color: var(--intro-bg);
+            padding: 20px;
+            border-left: 4px solid var(--intro-border);
+            margin-bottom: 30px;
+        }
+
+        .toc {
+            background-color: var(--toc-bg);
+            padding: 20px;
+            border-radius: 5px;
+            margin-bottom: 30px;
+        }
+
+        .toc h2 {
+            margin-top: 0;
+            color: var(--heading-fg);
+            border-bottom: 1px solid var(--toc-border);
+        }
+
+        .toc ul {
+            list-style: none;
+            padding-left: 0;
+        }
+
+        .toc li {
+            margin: 8px 0;
+        }
+
+        .toc a {
+            color: var(--accent);
+            text-decoration: none;
+            padding: 5px 10px;
+            display: block;
+            border-radius: 3px;
+            transition: background-color 0.2s;
+        }
+
+        .toc a:hover {
+            background-color: var(--toc-hover);
+        }
+
+        code {
+            background-color: var(--code-bg);
+            color: var(--code-fg);
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Monaco', 'Consolas', 'Courier New', monospace;
+        }
+
+        pre {
+            background-color: var(--pre-bg);
+            color: var(--pre-fg);
+            padding: 20px;
+            border-radius: 5px;
+            overflow-x: auto;
+            margin: 15px 0;
+            border-left: 4px solid var(--pre-border);
+        }
+
+        pre code {
+            background-color: transparent;
+            color: inherit;
+            padding: 0;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 15px 0 25px 0;
+        }
+
+        th {
+            background-color: var(--table-th-bg);
+            color: var(--table-th-fg);
+            padding: 12px 15px;
+            text-align: left;
+            font-weight: 600;
+        }
+
+        td {
+            padding: 10px 15px;
+            border-bottom: 1px solid var(--table-border);
+        }
+
+        tr:hover {
+            background-color: var(--table-hover);
+        }
+
+        td code {
+            font-size: 0.95em;
+        }
+
+        .section {
+            margin-bottom: 40px;
+        }
+
+        .highlight {
+            background-color: var(--highlight-bg);
+            padding: 15px;
+            border-left: 4px solid var(--highlight-border);
+            margin: 15px 0;
+            border-radius: 0 5px 5px 0;
+        }
+
+        .note {
+            background-color: var(--note-bg);
+            padding: 15px;
+            border-left: 4px solid var(--note-border);
+            margin: 15px 0;
+            border-radius: 0 5px 5px 0;
+        }
+
+        .overload-badge {
+            display: inline-block;
+            background-color: var(--badge-bg);
+            color: var(--badge-fg);
+            font-size: 0.7em;
+            padding: 2px 6px;
+            border-radius: 3px;
+            vertical-align: middle;
+            margin-left: 6px;
+        }
+
+        .type-int { color: var(--type-int); font-weight: 600; }
+        .type-float { color: var(--type-float); font-weight: 600; }
+        .type-bool { color: var(--type-bool); font-weight: 600; }
+        .type-fraction { color: var(--type-fraction); font-weight: 600; }
+        .type-complex { color: var(--type-complex); font-weight: 600; }
+        .type-range { color: var(--type-range); font-weight: 600; }
+        .type-array { color: var(--type-array); font-weight: 600; }
+        .type-list { color: var(--type-list); font-weight: 600; }
+
+        .back-to-top {
+            display: inline-block;
+            margin-top: 10px;
+            color: var(--back-to-top);
+            text-decoration: none;
+            font-size: 0.9em;
+        }
+
+        .back-to-top:hover {
+            text-decoration: underline;
+        }
+
+        /* Syntax highlight classes for code examples */
+        .cmt { color: var(--syn-cmt); }
+        .hl-num { color: var(--syn-num); }
+        .hl-str { color: var(--syn-str); }
+        .hl-kw { color: var(--syn-kw); }
+
+        /* Theme toggle */
+        .theme-toggle {
+            position: fixed;
+            top: 1rem;
+            right: 1rem;
+            z-index: 1000;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.4rem 0.75rem;
+            background: var(--container-bg);
+            border: 1px solid var(--table-border);
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 1.1rem;
+            color: var(--fg);
+            box-shadow: 0 2px 6px var(--shadow);
+            transition: background 0.2s;
+        }
+        .theme-toggle:hover { background: var(--toc-hover); }
+
+        body, .container, pre, code, .note, .highlight, .intro, .toc, th, td {
+            transition: background-color 0.3s, color 0.3s, border-color 0.3s;
+        }
+    </style>
+    <script>
+    if (localStorage.getItem('tzpl-docs-theme') === 'light') document.documentElement.classList.add('light');
+    </script>
+</head>
+<body>
+    <button class="theme-toggle" id="theme-toggle" aria-label="Toggle theme">
+        <span id="theme-icon">&#9790;</span>
+    </button>
+    <div class="container">
+        <h1 id="top">Standard Library Reference</h1>
+
+        <div class="intro">
+            The standard library is the set of Tzopilotl modules shipped with the interpreter, discovered automatically next to the executable (or via <code>$TZPL_HOME</code>; see the module search path in the language docs). General-purpose modules live under the <code>std.*</code> namespace (<code>import std.strings.*;</code>). Audio-domain modules (<code>synthdef</code>, <code>common_ugens</code>, <code>filters</code>, <code>dsp_math</code>, <code>complex_signal</code>) and host bindings (<code>audio_engine</code>, <code>ui</code>, <code>osc</code>, <code>nats</code>, <code>clock</code>, <code>bundles</code>) keep their flat names.
+            <p style="margin-top: 0.6em;">Functions marked <strong>NRT</strong> perform blocking syscalls and cannot be called from real-time code; each module's RT-safety is stated in its section. Built-in (C++-implemented) functions are documented separately in the <a href="Builtin_Functions.html">Built-in Functions Reference</a>.</p>
+        </div>
+
+        <div class="toc">
+            <h2>Table of Contents</h2>
+            <ul>
+                <li><a href="#std-strings">std.strings</a> &mdash; padding, lines, stripping, glob matching, wrapping</li>
+                <li><a href="#std-path">std.path</a> &mdash; pure path-string manipulation</li>
+                <li><a href="#std-fs">std.fs</a> &mdash; file-system wrappers (NRT)</li>
+                <li><a href="#std-result">std.result</a> &mdash; Result&lt;T, E&gt; error handling</li>
+                <li><a href="#std-test">std.test</a> &mdash; assertions with stable PASS/FAIL output</li>
+                <li><a href="#std-thunk">std.thunk</a> &mdash; memoized lazy values</li>
+                <li><a href="#std-futures">std.futures</a> &mdash; async combinators (awaitAll, gather)</li>
+                <li><a href="#std-json">std.json</a> &mdash; Json value type and printer</li>
+                <li><a href="#std-message">std.message / std.messageEncoding</a> &mdash; Msg dynamic values and the TZB binary codec</li>
+            </ul>
+        </div>
+
+        <!-- ============================================================ -->
+        <div class="section" id="std-strings">
+            <h2>std.strings</h2>
+            <p>String utilities beyond the built-ins. Pure and RT-safe. String offsets and <code>length</code> are byte-based, matching <code>substring</code> and <code>indexOf</code>.</p>
+            <table>
+                <tr><th>Function</th><th>Description</th></tr>
+                <tr><td><code>parens(s)</code> / <code>brackets(s)</code> / <code>braces(s)</code> / <code>quotes(s)</code></td><td>Wrap in <code>()</code>, <code>[]</code>, <code>{}</code>, <code>""</code>.</td></tr>
+                <tr><td><code>separatedString([String], sep = " ")</code></td><td>Join with a separator.</td></tr>
+                <tr><td><code>repeatString(s, n)</code></td><td><code>s</code> repeated <code>n</code> times.</td></tr>
+                <tr><td><code>padStart(s, width, pad = " ")</code> / <code>padEnd(s, width, pad = " ")</code></td><td>Pad to at least <code>width</code>.</td></tr>
+                <tr><td><code>splitLines(s)</code> / <code>lines(s)</code></td><td>Split into lines; <code>\r\n</code> normalized, no empty last line from a trailing newline.</td></tr>
+                <tr><td><code>capitalize(s)</code></td><td>Uppercase the first character (ASCII).</td></tr>
+                <tr><td><code>stripPrefix(s, p)</code> / <code>stripSuffix(s, p)</code></td><td>Remove a prefix/suffix if present, else unchanged.</td></tr>
+                <tr><td><code>equalsIgnoreCase(a, b)</code></td><td>ASCII case-insensitive comparison.</td></tr>
+                <tr><td><code>glob(s, pattern)</code></td><td>Whole-string glob match: <code>*</code>, <code>?</code>, <code>[abc]</code>, <code>[a-z]</code>, <code>[!abc]</code>.</td></tr>
+            </table>
+            <pre><code><span class="hl-kw">import</span> std.strings.*;
+
+<span class="hl-str">"7"</span> padStart(<span class="hl-num">3</span>, <span class="hl-str">"0"</span>)                <span class="cmt">-- "007"</span>
+<span class="hl-str">"a\r\nb\nc\n"</span> splitLines             <span class="cmt">-- [a, b, c]</span>
+<span class="hl-str">"snare_04.wav"</span> glob(<span class="hl-str">"snare_*.wav"</span>)  <span class="cmt">-- true</span>
+<span class="hl-str">"beat7"</span> glob(<span class="hl-str">"beat[0-9]"</span>)           <span class="cmt">-- true</span></code></pre>
+            <a href="#top" class="back-to-top">&uarr; Back to top</a>
+        </div>
+
+        <!-- ============================================================ -->
+        <div class="section" id="std-path">
+            <h2>std.path</h2>
+            <p>Pure path-string manipulation &mdash; no syscalls, RT-safe. Paths are byte strings with <code>/</code> separators. The filesystem itself lives in <code>std.fs</code>.</p>
+            <table>
+                <tr><th>Function</th><th>Description</th></tr>
+                <tr><td><code>basename(p)</code></td><td>Final component: <code>basename("/a/b/c.txt")</code> &rarr; <code>"c.txt"</code>.</td></tr>
+                <tr><td><code>dirname(p)</code></td><td>Everything before the last <code>/</code>; <code>"."</code> for bare names.</td></tr>
+                <tr><td><code>extension(p)</code></td><td>The basename's extension including the dot (<code>""</code> if none; dotfiles have none).</td></tr>
+                <tr><td><code>withExtension(p, ext)</code></td><td>Replace (or add) the extension.</td></tr>
+                <tr><td><code>joinPath(a, b)</code></td><td>Join with exactly one separator; an absolute <code>b</code> wins.</td></tr>
+                <tr><td><code>splitPath(p)</code></td><td>Components, empty ones dropped: <code>"/a//b"</code> &rarr; <code>[a, b]</code>.</td></tr>
+                <tr><td><code>isAbsolute(p)</code></td><td>True if the path starts with <code>/</code>.</td></tr>
+            </table>
+            <pre><code><span class="hl-kw">import</span> std.path.*;
+
+<span class="hl-str">"/a/b/c.txt"</span> basename               <span class="cmt">-- "c.txt"</span>
+<span class="hl-str">"/a/b/c.txt"</span> dirname                <span class="cmt">-- "/a/b"</span>
+<span class="hl-str">"take1.wav"</span> withExtension(<span class="hl-str">".aif"</span>)   <span class="cmt">-- "take1.aif"</span>
+joinPath(<span class="hl-str">"samples"</span>, <span class="hl-str">"kick.wav"</span>)     <span class="cmt">-- "samples/kick.wav"</span></code></pre>
+            <a href="#top" class="back-to-top">&uarr; Back to top</a>
+        </div>
+
+        <!-- ============================================================ -->
+        <div class="section" id="std-fs">
+            <h2>std.fs <span style="font-size: 0.7em; background: #c0392b; color: #fff; padding: 2px 8px; border-radius: 4px; vertical-align: middle;">NRT</span></h2>
+            <p>Ergonomic wrappers over the NRT file built-ins (<code>readFile</code>, <code>writeFile</code>, <code>listDir</code>, &hellip;). Everything here blocks on syscalls and is rejected in real-time code. The <code>Result</code> variants carry a path-bearing error message via <code>std.result</code>.</p>
+            <table>
+                <tr><th>Function</th><th>Description</th></tr>
+                <tr><td><code>readFileOr(path, default)</code></td><td>Contents, or <code>default</code> if unreadable.</td></tr>
+                <tr><td><code>readLines(path) &rarr; Option[[String]]</code></td><td>Contents split into lines.</td></tr>
+                <tr><td><code>writeLines(path, [String]) &rarr; Bool</code></td><td>Write lines joined with <code>\n</code>, trailing newline.</td></tr>
+                <tr><td><code>readFileResult(path) &rarr; Result[String, String]</code></td><td><code>readFile</code> with an error message.</td></tr>
+                <tr><td><code>readFileBytesResult(path) &rarr; Result[Bytes, String]</code></td><td><code>readFileBytes</code> with an error message.</td></tr>
+                <tr><td><code>writeFileResult(path, s) &rarr; Result[Bool, String]</code></td><td><code>writeFile</code> with an error message.</td></tr>
+                <tr><td><code>listDirResult(path) &rarr; Result[[String], String]</code></td><td><code>listDir</code> with an error message.</td></tr>
+            </table>
+            <pre><code><span class="hl-kw">import</span> std.fs.*;
+
+readLines(<span class="hl-str">"setlist.txt"</span>) unwrapOr([<span class="hl-str">"(empty)"</span>]) println;
+writeLines(<span class="hl-str">"/tmp/out.txt"</span>, [<span class="hl-str">"one"</span>, <span class="hl-str">"two"</span>]);
+readFileResult(<span class="hl-str">"missing"</span>) errOption unwrap println;
+                        <span class="cmt">-- cannot read file: missing</span></code></pre>
+            <a href="#top" class="back-to-top">&uarr; Back to top</a>
+        </div>
+
+        <!-- ============================================================ -->
+        <div class="section" id="std-result">
+            <h2>std.result</h2>
+            <p><code>Result&lt;T, E&gt;</code> is a success-or-error sum type. Convention: <em>built-ins</em> that can fail return <code>Option</code>; stdlib <code>.x</code> APIs that want an error <em>message</em> return <code>Result&lt;T, String&gt;</code>.</p>
+            <table>
+                <tr><th>Function</th><th>Description</th></tr>
+                <tr><td><code>Result&lt;T, E&gt;.ok(v)</code> / <code>Result&lt;T, E&gt;.err(e)</code></td><td>Constructors.</td></tr>
+                <tr><td><code>isOk(r)</code> / <code>isErr(r)</code></td><td>Case tests.</td></tr>
+                <tr><td><code>okOption(r)</code> / <code>errOption(r)</code></td><td>Either side as an <code>Option</code>.</td></tr>
+                <tr><td><code>unwrapResult(r)</code></td><td>The ok value; traps on err.</td></tr>
+                <tr><td><code>unwrapOr(r, default)</code></td><td>The ok value or a default.</td></tr>
+                <tr><td><code>unwrapOrElse(r, f)</code></td><td>The ok value or <code>f(err)</code>.</td></tr>
+                <tr><td><code>mapOk(r, f)</code> / <code>mapErr(r, f)</code></td><td>Transform one side, pass the other through.</td></tr>
+            </table>
+            <pre><code><span class="hl-kw">import</span> std.result.*;
+
+<span class="hl-kw">fn</span> half(x Int) Result&lt;Int, String&gt; {
+    x % <span class="hl-num">2</span> == <span class="hl-num">0</span> ? Result&lt;Int, String&gt;.ok(x / <span class="hl-num">2</span>)
+               : Result&lt;Int, String&gt;.err(<span class="hl-str">"odd: "</span> $ x toString)
+}
+
+half(<span class="hl-num">8</span>) unwrapOr(<span class="hl-num">0</span>) println;                 <span class="cmt">-- 4</span>
+half(<span class="hl-num">7</span>) errOption unwrap println;            <span class="cmt">-- odd: 7</span></code></pre>
+            <a href="#top" class="back-to-top">&uarr; Back to top</a>
+        </div>
+
+        <!-- ============================================================ -->
+        <div class="section" id="std-test">
+            <h2>std.test</h2>
+            <p>Assertion helpers with stable one-line output (<code>PASS label</code> / <code>FAIL label: expected X got Y</code>), designed to compose with the golden-file test runner and read well in the app's output panel. Each assertion returns its outcome as a <code>Bool</code> and updates shared counters.</p>
+            <table>
+                <tr><th>Function</th><th>Description</th></tr>
+                <tr><td><code>assertEq&lt;T&gt;(actual, expected, label)</code></td><td>Structural equality.</td></tr>
+                <tr><td><code>assertTrue(cond, label)</code> / <code>assertFalse(cond, label)</code></td><td>Boolean conditions.</td></tr>
+                <tr><td><code>assertNear(actual, expected, eps, label)</code></td><td>Float comparison within a tolerance.</td></tr>
+                <tr><td><code>check(label, f () Bool)</code></td><td>Run a named check function.</td></tr>
+                <tr><td><code>testSummary() &rarr; Int</code></td><td>Print <code>N passed, M failed</code>; return the failure count.</td></tr>
+            </table>
+            <pre><code><span class="hl-kw">import</span> std.test.*;
+
+assertEq(<span class="hl-num">2</span> + <span class="hl-num">2</span>, <span class="hl-num">4</span>, <span class="hl-str">"ints add"</span>);       <span class="cmt">-- PASS ints add</span>
+assertNear(<span class="hl-num">0.1</span> + <span class="hl-num">0.2</span>, <span class="hl-num">0.3</span>, <span class="hl-num">1e-9</span>, <span class="hl-str">"float near"</span>);
+<span class="hl-kw">let</span> failures = testSummary();          <span class="cmt">-- 2 passed, 0 failed</span></code></pre>
+            <a href="#top" class="back-to-top">&uarr; Back to top</a>
+        </div>
+
+        <!-- ============================================================ -->
+        <div class="section" id="std-thunk">
+            <h2>std.thunk</h2>
+            <p>Memoized lazy values: a <code>Thunk&lt;T&gt;</code> wraps a deferred computation that runs at most once; <code>force</code> evaluates it on first use and caches the result in place.</p>
+            <table>
+                <tr><th>Function</th><th>Description</th></tr>
+                <tr><td><code>thunk&lt;T&gt;(f () T) &rarr; Thunk&lt;T&gt;</code></td><td>Wrap a deferred computation.</td></tr>
+                <tr><td><code>force&lt;T&gt;(t Thunk&lt;T&gt;) &rarr; T</code></td><td>Evaluate on first force, then return the cached value.</td></tr>
+            </table>
+            <pre><code><span class="hl-kw">import</span> std.thunk.*;
+
+<span class="hl-kw">let</span> t = thunk(<span class="hl-kw">fn</span>() Int { expensive() });
+t force println;    <span class="cmt">-- computed now</span>
+t force println;    <span class="cmt">-- cached</span></code></pre>
+            <a href="#top" class="back-to-top">&uarr; Back to top</a>
+        </div>
+
+        <!-- ============================================================ -->
+        <div class="section" id="std-futures">
+            <h2>std.futures</h2>
+            <p>Combinators over <code>Future&lt;T&gt;</code> from the async/await core.</p>
+            <table>
+                <tr><th>Function</th><th>Description</th></tr>
+                <tr><td><code>awaitAll&lt;T&gt;(fs [Future&lt;T&gt;]) &rarr; Void</code></td><td>Barrier: wait for every future to resolve.</td></tr>
+                <tr><td><code>gather&lt;T&gt;(fs [Future&lt;T&gt;]) &rarr; [T]</code></td><td>Await all and collect results in input order.</td></tr>
+            </table>
+            <a href="#top" class="back-to-top">&uarr; Back to top</a>
+        </div>
+
+        <!-- ============================================================ -->
+        <div class="section" id="std-json">
+            <h2>std.json</h2>
+            <p>The <code>Json</code> value enum (<code>null</code>, <code>bool</code>, <code>number</code>, <code>string</code>, <code>array</code>, <code>object</code>) and <code>toString</code> rendering. A parser returning <code>Result&lt;Json, String&gt;</code> is planned (see the roadmap in <code>IMPLEMENTATION_PLAN.md</code>). For fast binary interchange, prefer <code>std.message</code>'s TZB codec.</p>
+            <a href="#top" class="back-to-top">&uarr; Back to top</a>
+        </div>
+
+        <!-- ============================================================ -->
+        <div class="section" id="std-message">
+            <h2>std.message / std.messageEncoding</h2>
+            <p><code>Msg</code> is the dynamic message value type (bool/int/float/symbol/string/vec) with <code>asMsg</code> constructors; <code>std.messageEncoding</code> provides the TZB binary codec: <code>encode(Msg) &rarr; Bytes</code>, <code>decode(Bytes) &rarr; Msg</code>, <code>isMessage</code>, and a zero-copy <code>Reader</code> with O(1) child access for columnar vectors. Used by the actor system and the NATS bridge.</p>
+            <a href="#top" class="back-to-top">&uarr; Back to top</a>
+        </div>
+
+    </div>
+    </div>
+<script>
+(function() {
+  var btn = document.getElementById('theme-toggle');
+  var icon = document.getElementById('theme-icon');
+  function update() {
+    var isLight = document.documentElement.classList.contains('light');
+    icon.innerHTML = isLight ? '\u2600' : '\u263E';
+  }
+  update();
+  btn.addEventListener('click', function() {
+    document.documentElement.classList.toggle('light');
+    localStorage.setItem('tzpl-docs-theme',
+      document.documentElement.classList.contains('light') ? 'light' : 'dark');
+    update();
+  });
+})();
+</script>
+</body>
+</html>

@@ -110,12 +110,44 @@ directory can override a stdlib module.
 
 ## Standard Library Modules (`modules/`)
 
+General-purpose modules live under the `std.*` namespace (`modules/std/`);
+audio-domain modules and the bridge FFI wrappers keep flat names. Documented
+in `docs/Standard_Library.html`.
+
+`modules/std/` (import as `std.<name>`):
+
+- `std/strings.x` -- padding, lines, stripping, glob matching, wrapping
+- `std/path.x` -- pure path-string manipulation (RT-safe)
+- `std/fs.x` -- file-system wrappers over the NRT IO builtins
+- `std/result.x` -- `Result<T, E>` error handling
+- `std/test.x` -- assertions with stable PASS/FAIL output + testSummary
+- `std/json.x` -- Json value enum and printer
+- `std/message.x` -- the Msg message value type and `asMsg` constructors
+- `std/messageEncoding.x` -- TZB binary encode/decode + zero-copy Reader for `Msg`
+- `std/futures.x` -- awaitAll / gather combinators
+- `std/thunk.x` -- memoized lazy values (thunk / force)
+
+Flat (audio-domain):
+
 - `common_ugens.x` -- Audio unit generators (oscillators, noise, envelopes)
 - `synthdef.x` -- SynthDef integration framework
 - `dsp_math.x` -- DSP math utilities
 - `filters.x` -- IIR/FIR filter implementations
-- `message.x` -- the Msg message value type and `asMsg` constructors
-- `messageEncoding.x` -- TZB binary encode/decode + zero-copy Reader for `Msg`
+- `complex_signal.x` -- complex arithmetic over signals
+- `actors.x`, `silo.x`, `silo_actors.x` -- engine-coupled concurrency helpers
+- `synthc/` -- the Tzopilotl-hosted synthdef compiler port
+
+**Conventions**: camelCase names; `!` suffix strictly means "mutates an
+argument"; `_` prefix or `private` for module internals. Fallible builtins
+return `Option<T>`; `.x` APIs that carry an error message return
+`Result<T, String>`. Builtins touching syscalls register `rtSafe=false`
+(the type checker rejects them in RT contexts); each module header comment
+states whether it is RT-safe.
+
+**Builtin-vs-.x heuristic**: syscalls, new value types, VM-callback hot
+loops (sort/map-class), and per-element hot paths become C++ builtins;
+protocols, codecs, combinators, formatting, and pure math are written in
+Tzopilotl. When in doubt, write `.x` first and promote with a benchmark.
 
 ## Language Design Principles
 

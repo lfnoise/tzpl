@@ -544,16 +544,15 @@ Implementation details:
 
 Test file: `lang/tests/dynamic_scope.x`. Module example: `lang/modules/dynvar.x`.
 
-### 9.3 Standard library completion (Phase 13 in lang's plan) — MOSTLY DONE
+### 9.3 Standard library completion (Phase 13 in lang's plan) — DONE
 
 **Completed**:
-1. String functions: substring, split, contains, startsWith, endsWith, trim, toUpper, toLower, replace, byte indexing, codePoints (lazy `List<Int>` of Unicode code points from UTF-8 string). Tested in `tests/builtins/string_functions.x` and `tests/builtins/codepoints.x`.
+1. String functions: substring, split, contains, startsWith, endsWith, trim, toUpper, toLower, replace, byte indexing, codePoints (lazy `List<Int>` of Unicode code points from UTF-8 string), indexOf/lastIndexOf, strict parseInt/parseFloat (Option returns). Tested in `tests/builtins/string_functions.x`, `tests/builtins/codepoints.x`, `tests/stdlib/`.
 2. Array/list utility functions: Extensively tested.
 3. Range operations: Working.
 4. Map operations: `MapObj` class with builtins -- get (returns Option), getDefault, contains, keys, values, copy, merge.
-
-**Remaining tasks**:
-1. Add I/O functions (file reading for loading scripts -- NRT only).
+5. File/OS IO builtins (July 2026, `builtins_io.cpp`, NRT-gated via `rtSafe=false`): readFile/readFileBytes/writeFile/appendFile, fileExists/isDirectory/fileSize/fileModTime, listDir/makeDir/removeFile/renameFile, getEnv/programArgs/currentDir.
+6. `std.*` module namespace (`lang/modules/std/`): strings, path, fs, result, test, json, message, messageEncoding, futures, thunk. Documented in `lang/docs/Standard_Library.html`; expansion roadmap in lang's plan §13.5.
 
 ### 9.4 Optimizations (Phase 14 in lang's plan) — MOSTLY DONE
 

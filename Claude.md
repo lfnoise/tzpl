@@ -148,6 +148,7 @@ Each sub-project has its own CLAUDE.md with detailed file layouts and convention
 - `lang/Theory_of_Operation.md` -- Detailed language design and implementation
 - `lang/docs/Tzopilotl_by_Example.html` -- Comprehensive syntax guide
 - `lang/docs/Builtin_Functions.html` -- Built-in function reference
+- `lang/docs/Standard_Library.html` -- Standard library module reference (std.* namespace)
 - `lang/docs/FFI_Guide.html` -- Foreign function interface guide (includes the audio engine FFI)
 - `lang/docs/Live_Controls_and_Notebooks.html` -- User guide: the `ui` widget module and notebook documents in the app
 

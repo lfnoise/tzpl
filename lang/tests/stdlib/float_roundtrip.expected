@@ -1,0 +1,23 @@
+PASS 0.1
+PASS 0.2
+PASS 0.1+0.2 sum
+PASS one third
+PASS min subnormal
+PASS min subnormal long form
+PASS min normal
+PASS halfway hard case
+PASS max double
+PASS 2^53+1 rounds
+PASS 1e22
+PASS 1e23 near-halfway
+PASS planck
+PASS 2^1023
+PASS negative large
+PASS many digits
+0.1
+5e-324
+1.7976931348623157e+308
+9007199254740992.0
+0.30000000000000004
+16 passed, 0 failed
+0

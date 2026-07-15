@@ -326,7 +326,7 @@
         <h1 id="top">Built-in Functions Reference</h1>
 
         <div class="intro">
-            This document lists all built-in functions available in the language. Functions are overloaded on their argument types &mdash; many function names accept multiple type signatures. All built-in functions are real-time safe.
+            This document lists all built-in functions available in the language. Functions are overloaded on their argument types &mdash; many function names accept multiple type signatures. Built-in functions are real-time safe unless marked <strong>NRT</strong> (currently the <a href="#file-os">File &amp; OS</a> section); calling an NRT function in code compiled for a real-time VM is a compile-time error.
             <p style="margin-top: 0.6em;"><strong>Mutating-function convention.</strong> Function names ending in <code>!</code> mutate their first argument in place; names without <code>!</code> return new values and leave their inputs untouched. <code>!</code> is part of the identifier &mdash; <code>push</code> and <code>push!</code> are different functions. The convention is not enforced; users may name a mutating function with or without <code>!</code> as they prefer.</p>
         </div>
 
@@ -345,7 +345,7 @@
                 <li><a href="#bitwise">Bit Manipulation</a> &mdash; clz, clo, ctz, cto, popCount, rotl, rotr, bitCeil, bitFloor, bitWidth, hasSingleBit</li>
                 <li><a href="#complex">Complex Number Functions</a> &mdash; Complex, real, imag, arg, norm, conj, polar</li>
                 <li><a href="#fraction">Fraction Functions</a> &mdash; numer, denom</li>
-                <li><a href="#string">String Functions</a> &mdash; length, substring, contains, startsWith, endsWith, split, trim, toUpper, toLower, replace, codePoints, indexing, toSymbol, min, max, cmp</li>
+                <li><a href="#string">String Functions</a> &mdash; length, substring, contains, startsWith, endsWith, split, trim, toUpper, toLower, replace, indexOf, lastIndexOf, parseInt, parseFloat, codePoints, indexing, toSymbol, min, max, cmp</li>
                 <li><a href="#formatting">String Formatting</a> &mdash; fmt</li>
                 <li><a href="#range">Range Functions</a> &mdash; length, toArray, toList</li>
                 <li><a href="#collections">Collection Functions (Arrays &amp; Lists)</a> &mdash; length, map, filter, fold, scan, fold1, scan1, find, zip, enumerate, take, drop, takeWhile, dropWhile, stride, stutter, repeat, cat, join, flatten, sum, product, mean, min, max, sums, products, mins, maxs, any, all, contains, clump, toSet, fromCodePoints</li>
@@ -364,6 +364,7 @@
                 <li><a href="#operators">Built-in Operators</a> &mdash; arithmetic, comparison, bitwise, logical, string</li>
                 <li><a href="#type-conversions">Type Conversions</a> &mdash; toInt, toFloat, toFraction, toComplex</li>
                 <li><a href="#io">I/O Functions</a> &mdash; print, println, toString, prettyString, prettyPrint, getListPrintLimit, setListPrintLimit</li>
+                <li><a href="#file-os">File &amp; OS Functions (NRT)</a> &mdash; readFile, readFileBytes, writeFile, appendFile, fileExists, isDirectory, fileSize, fileModTime, listDir, makeDir, removeFile, renameFile, getEnv, programArgs, currentDir</li>
                 <li><a href="#introspection">Introspection</a> &mdash; disassemble, typeName&lt;T&gt;, typeRepr</li>
             </ul>
         </div>
@@ -967,6 +968,40 @@ toLower("Hello World")  <span class="cmt">-- "hello world"</span></code></pre>
             <pre><code>replace("hello world", "world", "there")  <span class="cmt">-- "hello there"</span>
 replace("aabbcc", "bb", "XX")              <span class="cmt">-- "aaXXcc"</span>
 replace("abcabc", "abc", "x")              <span class="cmt">-- "xx"</span></code></pre>
+
+            <h3><code>indexOf(s, needle)</code> / <code>lastIndexOf(s, needle)</code></h3>
+            <p>Find the first (or last) occurrence of <code>needle</code> in <code>s</code>. The result is a <em>byte</em> offset, so it composes directly with <code>substring</code>'s byte indexing. Returns <code>Option.none</code> when the needle does not occur.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>indexOf(String, String) &rarr; Option[Int]</code></td><td>Byte offset of the first occurrence.</td></tr>
+                <tr><td><code>lastIndexOf(String, String) &rarr; Option[Int]</code></td><td>Byte offset of the last occurrence.</td></tr>
+            </table>
+            <pre><code>indexOf(<span class="hl-str">"hello world"</span>, <span class="hl-str">"world"</span>) unwrap     <span class="cmt">-- 6</span>
+indexOf(<span class="hl-str">"hello"</span>, <span class="hl-str">"xyz"</span>) isNone             <span class="cmt">-- true</span>
+lastIndexOf(<span class="hl-str">"abcabc"</span>, <span class="hl-str">"bc"</span>) unwrap        <span class="cmt">-- 4</span>
+
+<span class="cmt">-- Composes with substring (both are byte-based)</span>
+<span class="hl-kw">let</span> s = <span class="hl-str">"key=value"</span>;
+<span class="hl-kw">let</span> i = s indexOf(<span class="hl-str">"="</span>) unwrap;
+s substring(i + <span class="hl-num">1</span>, s length - i - <span class="hl-num">1</span>)      <span class="cmt">-- "value"</span></code></pre>
+
+            <h3><code>parseInt(s)</code> / <code>parseInt(s, radix)</code> / <code>parseFloat(s)</code></h3>
+            <p>Strict string-to-number parsing that can report failure (unlike the <code>toInt</code>/<code>toFloat</code> conversions, which only accept values that are already numbers). The whole string must be a valid number &mdash; no surrounding whitespace, no trailing characters. Returns <code>Option.none</code> on any malformed input, including integer overflow.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>parseInt(String) &rarr; Option[Int]</code></td><td>Parse a base-10 integer with optional sign.</td></tr>
+                <tr><td><code>parseInt(String, Int) &rarr; Option[Int]</code></td><td>Parse in the given radix (2&ndash;36; digits beyond 9 are letters, case-insensitive).</td></tr>
+                <tr><td><code>parseFloat(String) &rarr; Option[Float]</code></td><td>Parse a float; <code>"inf"</code>/<code>"nan"</code> and exponents accepted.</td></tr>
+            </table>
+            <pre><code>parseInt(<span class="hl-str">"42"</span>) unwrap              <span class="cmt">-- 42</span>
+parseInt(<span class="hl-str">"-17"</span>) unwrap             <span class="cmt">-- -17</span>
+parseInt(<span class="hl-str">"12x"</span>) isNone             <span class="cmt">-- true  (trailing junk)</span>
+parseInt(<span class="hl-str">" 12"</span>) isNone             <span class="cmt">-- true  (whitespace not skipped)</span>
+parseInt(<span class="hl-str">"ff"</span>, <span class="hl-num">16</span>) unwrap          <span class="cmt">-- 255</span>
+parseInt(<span class="hl-str">"101"</span>, <span class="hl-num">2</span>) unwrap          <span class="cmt">-- 5</span>
+parseFloat(<span class="hl-str">"3.5"</span>) unwrap           <span class="cmt">-- 3.5</span>
+parseFloat(<span class="hl-str">"1e3"</span>) unwrap           <span class="cmt">-- 1000.0</span>
+parseFloat(<span class="hl-str">"nope"</span>) unwrapOr(<span class="hl-num">0.0</span>)  <span class="cmt">-- 0.0</span></code></pre>
 
             <h3><code>codePoints(s)</code></h3>
             <p>Returns a lazy <code>List[Int]</code> of Unicode code points decoded from the UTF-8 string. Each element is the integer value of a single code point. Because the result is a lazy list, it composes naturally with <code>take</code>, <code>drop</code>, <code>map</code>, <code>filter</code>, and other list operations without decoding the entire string up front.</p>
@@ -2617,6 +2652,56 @@ a println;                     <span class="cmt">-- [Tree.leaf(1), Tree.node(^1^
 (1..10) toList println;        <span class="cmt">-- List(1, 2, 3, ...)</span>
 setListPrintLimit(old);        <span class="cmt">-- restore previous limit</span>
 getListPrintLimit();           <span class="cmt">-- check current limit</span></code></pre>
+
+            <a href="#top" class="back-to-top">&uarr; Back to top</a>
+        </div>
+
+        <!-- ============================================================ -->
+        <div class="section" id="file-os">
+            <h2>File &amp; OS Functions <span style="font-size: 0.7em; background: #c0392b; color: #fff; padding: 2px 8px; border-radius: 4px; vertical-align: middle;">NRT</span></h2>
+
+            <p>Whole-file reads and writes, directory operations, and environment access. Every function in this section performs blocking syscalls and is <strong>not real-time safe</strong>: calling one in a program compiled for a real-time VM (<code>--rt</code>, silo code) is a compile-time type error. Fallible operations return <code>Option</code> (<code>none</code> on any OS error); mutating operations return a success <code>Bool</code>.</p>
+
+            <p>There are no streaming file handles &mdash; files are read and written whole. For structured binary data, use <code>readFileBytes</code> with the <code>Bytes</code> accessors (<code>u8At</code>, <code>f64At</code>, <code>utf8At</code>, &hellip;). Ergonomic wrappers (<code>readLines</code>, <code>readFileOr</code>, <code>Result</code>-returning variants) live in the <code>std.fs</code> module; pure path-string helpers live in <code>std.path</code> (see the <a href="Standard_Library.html">Standard Library</a> reference).</p>
+
+            <h3>Reading and Writing</h3>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>readFile(String) &rarr; Option[String]</code></td><td>The file's entire contents as a string.</td></tr>
+                <tr><td><code>readFileBytes(String) &rarr; Option[Bytes]</code></td><td>The file's entire contents as bytes.</td></tr>
+                <tr><td><code>writeFile(String, String) &rarr; Bool</code><br><code>writeFile(String, Bytes) &rarr; Bool</code></td><td>Replace the file's contents; true on success.</td></tr>
+                <tr><td><code>appendFile(String, String) &rarr; Bool</code><br><code>appendFile(String, Bytes) &rarr; Bool</code></td><td>Append to the file (creating it if missing).</td></tr>
+            </table>
+            <pre><code>writeFile(<span class="hl-str">"/tmp/notes.txt"</span>, <span class="hl-str">"hello\n"</span>);
+appendFile(<span class="hl-str">"/tmp/notes.txt"</span>, <span class="hl-str">"world\n"</span>);
+readFile(<span class="hl-str">"/tmp/notes.txt"</span>) unwrapOr(<span class="hl-str">""</span>) print;   <span class="cmt">-- hello\nworld\n</span>
+readFile(<span class="hl-str">"/missing"</span>) isNone;                      <span class="cmt">-- true</span></code></pre>
+
+            <h3>Metadata and Directories</h3>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>fileExists(String) &rarr; Bool</code></td><td>True for any existing entry (file or directory).</td></tr>
+                <tr><td><code>isDirectory(String) &rarr; Bool</code></td><td>True if the path is a directory.</td></tr>
+                <tr><td><code>fileSize(String) &rarr; Option[Int]</code></td><td>Size in bytes of a regular file.</td></tr>
+                <tr><td><code>fileModTime(String) &rarr; Option[Float]</code></td><td>Last-modified time, Unix seconds.</td></tr>
+                <tr><td><code>listDir(String) &rarr; Option[[String]]</code></td><td>Entry names, sorted; no <code>"."</code>/<code>".."</code>.</td></tr>
+                <tr><td><code>makeDir(String) &rarr; Bool</code></td><td>Create the directory and missing parents; true if it exists afterwards.</td></tr>
+                <tr><td><code>removeFile(String) &rarr; Bool</code></td><td>Delete a file (not a directory).</td></tr>
+                <tr><td><code>renameFile(String, String) &rarr; Bool</code></td><td>Rename/move a file.</td></tr>
+            </table>
+            <pre><code>makeDir(<span class="hl-str">"/tmp/proj/samples"</span>);
+listDir(<span class="hl-str">"/tmp/proj"</span>) unwrap println;   <span class="cmt">-- [samples]</span>
+fileSize(<span class="hl-str">"/tmp/kick.wav"</span>) unwrapOr(<span class="hl-num">-1</span>);</code></pre>
+
+            <h3>Environment and Process</h3>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>getEnv(String) &rarr; Option[String]</code></td><td>An environment variable's value.</td></tr>
+                <tr><td><code>programArgs() &rarr; [String]</code></td><td>CLI arguments after the script filename (<code>tzpl run.x a b</code> &rarr; <code>[a, b]</code>).</td></tr>
+                <tr><td><code>currentDir() &rarr; Option[String]</code></td><td>The process's current working directory.</td></tr>
+            </table>
+            <pre><code>getEnv(<span class="hl-str">"HOME"</span>) unwrapOr(<span class="hl-str">"/"</span>) println;
+programArgs() println;</code></pre>
 
             <a href="#top" class="back-to-top">&uarr; Back to top</a>
         </div>
