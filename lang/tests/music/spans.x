@@ -1,5 +1,5 @@
--- music.tidal: pattern-as-function-of-time combinators + epsilon policy.
-import music.tidal.*;
+-- music.spans: pattern-as-function-of-time combinators + epsilon policy.
+import music.spans.*;
 import std.test.*;
 
 fn parts<T>(hs [Hap<T>]) [Float] {

@@ -327,7 +327,7 @@
 
         <div class="intro">
             The <code>music.*</code> family (<code>lang/modules/music/</code>) is a set of composition libraries built on one shared core: four dialects for generating music, each drawing on a different tradition of computer-music system design, all producing the same <code>List&lt;Event&gt;</code> so they interoperate freely and share one player. Every layer supports <strong>any real-numbered division of the octave</strong> (or of any period &mdash; equal temperaments with fractional step counts, tritave-based tunings, just-intonation and Scala-style tables) and <strong>any real-numbered division of time</strong> (time is <code>Float</code> beats throughout).
-            <p style="margin-top: 0.6em;">Everything except <code>music.play</code> is pure and runs under plain <code>tzpl</code> (which is how the golden tests work); <code>music.play</code> talks to the audio engine and needs the app (<code>tzpl_app</code>). Each dialect module re-exports <code>music.core</code>, so a single <code>import music.pat.*;</code> (or <code>.media</code>, <code>.job</code>, <code>.tidal</code>, <code>.play</code>) is enough. For a task-oriented walkthrough see the <a href="Tzopilotl_Music_Cookbook.html">Music Cookbook</a>, chapter&nbsp;11.</p>
+            <p style="margin-top: 0.6em;">Everything except <code>music.play</code> is pure and runs under plain <code>tzpl</code> (which is how the golden tests work); <code>music.play</code> talks to the audio engine and needs the app (<code>tzpl_app</code>). Each dialect module re-exports <code>music.core</code>, so a single <code>import music.pat.*;</code> (or <code>.media</code>, <code>.job</code>, <code>.spans</code>, <code>.play</code>) is enough. For a task-oriented walkthrough see the <a href="Tzopilotl_Music_Cookbook.html">Music Cookbook</a>, chapter&nbsp;11.</p>
         </div>
 
         <div class="toc">
@@ -338,7 +338,7 @@
                 <li><a href="#music-score">music.score / music.play</a> &mdash; events to commands to the engine</li>
                 <li><a href="#music-media">music.media</a> &mdash; an algebra of notes and compositions</li>
                 <li><a href="#music-shape">music.shape / music.job</a> &mdash; shapes, morphology, hierarchical forms</li>
-                <li><a href="#music-tidal">music.tidal</a> &mdash; patterns as functions of time</li>
+                <li><a href="#music-spans">music.spans</a> &mdash; patterns as functions of time</li>
                 <li><a href="#music-interop">Interop &amp; examples</a></li>
             </ul>
         </div>
@@ -538,8 +538,8 @@ p enqueue(realize(form));         <span class="cmt">-- a different reading follo
         </div>
 
         <!-- ============================================================ -->
-        <div class="section" id="music-tidal">
-            <h2>music.tidal</h2>
+        <div class="section" id="music-spans">
+            <h2>music.spans</h2>
             <p>Patterns as functions of time, inspired by Tidal Cycles. A <code>Pattern&lt;T&gt;</code> is a callable value: query it with a <code>Span</code> (in cycles, half-open) and it returns the <code>Hap</code>s &mdash; value fragments &mdash; active in that window. Structure is computed, never stored, so transformations compose freely and everything is repeatable. Time is <code>Float</code> cycles with an explicit edge policy: fragments shorter than <code>kEps</code> (10<sup>&minus;9</sup>) are dropped, cycle iteration starts at <code>floor(a + kEps)</code>, and onset tests compare within <code>kEps</code>. Combinators take the pattern first, so pipelines read left-to-right. Pure and RT-safe.</p>
             <table>
                 <tr><th>Type / Function</th><th>Description</th></tr>
@@ -559,7 +559,7 @@ p enqueue(realize(form));         <span class="cmt">-- a different reading follo
                 <tr><td><code>withAmp(pe, pa)</code> / <code>withLegato(pe, pl)</code> / <code>withParam(pe, name, pv)</code> / <code>mix(a, b)</code></td><td>Combine an event pattern with value patterns / overlay two event patterns.</td></tr>
                 <tr><td><code>patEvents(p, cycles, beatsPerCycle = 4.0)</code></td><td>Render onsets of the first <code>cycles</code> cycles to the shared <code>List&lt;Event&gt;</code> in beats &mdash; the bridge to the player.</td></tr>
             </table>
-            <pre><code><span class="hl-kw">import</span> music.tidal.*;
+            <pre><code><span class="hl-kw">import</span> music.spans.*;
 <span class="hl-kw">import</span> music.play.*;
 
 <span class="hl-kw">fn</span> d(x Float) Pattern&lt;Pitch&gt; = pure(Pitch.degree(x));
@@ -580,7 +580,7 @@ play(patEvents(tune, <span class="hl-num">16.0</span>, <span class="hl-num">2.0<
         <!-- ============================================================ -->
         <div class="section" id="music-interop">
             <h2>Interop &amp; examples</h2>
-            <p>Because every dialect ends in the same <code>List&lt;Event&gt;</code>, the layers combine freely: <code>merge</code> a <code>bind</code> stream with a <code>perform</code>ed canon, <code>enqueue</code> Tidal-rendered cycles after a realized form, apply the event helpers (<code>stretch</code>, <code>gain</code>, <code>takeDur</code>) to any of them, and resolve all of it through one tuning at play time. The pure layers golden-test under plain <code>tzpl</code> (see <code>lang/tests/music/</code>).</p>
+            <p>Because every dialect ends in the same <code>List&lt;Event&gt;</code>, the layers combine freely: <code>merge</code> a <code>bind</code> stream with a <code>perform</code>ed canon, <code>enqueue</code> rendered span-pattern cycles after a realized form, apply the event helpers (<code>stretch</code>, <code>gain</code>, <code>takeDur</code>) to any of them, and resolve all of it through one tuning at play time. The pure layers golden-test under plain <code>tzpl</code> (see <code>lang/tests/music/</code>).</p>
             <p>Complete runnable examples, each with run instructions in its header:</p>
             <table>
                 <tr><th>Script</th><th>Shows</th></tr>
@@ -588,7 +588,7 @@ play(patEvents(tune, <span class="hl-num">16.0</span>, <span class="hl-num">2.0<
                 <tr><td><code>integration-tests/scripts/pat_nrt.x</code></td><td>Offline render of a tritave-tuning walk (13 equal divisions of 3/1) via <code>render</code>.</td></tr>
                 <tr><td><code>integration-tests/scripts/media_audible.x</code></td><td>A canon built with <code>$</code>/<code>&amp;</code>/<code>trans</code>/<code>tempo</code> and performed.</td></tr>
                 <tr><td><code>integration-tests/scripts/hmsl_audible.x</code></td><td>Shape morphs + a shuffled hierarchical form, three readings queued on one Player.</td></tr>
-                <tr><td><code>integration-tests/scripts/tidal_audible.x</code></td><td>Euclidean bass, offbeat stab, rotating/reversing melody with a sine-ridden amp.</td></tr>
+                <tr><td><code>integration-tests/scripts/spans_audible.x</code></td><td>Euclidean bass, offbeat stab, rotating/reversing melody with a sine-ridden amp.</td></tr>
             </table>
             <a href="#top" class="back-to-top">&uarr; Back to top</a>
         </div>

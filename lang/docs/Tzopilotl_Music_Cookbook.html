@@ -387,7 +387,7 @@ if (localStorage.getItem('tzpl-docs-theme') === 'light') document.documentElemen
         <li><a href="#musiclibs-pat">Streams (music.pat)</a></li>
         <li><a href="#musiclibs-media">Music algebra (music.media)</a></li>
         <li><a href="#musiclibs-hmsl">Shapes &amp; forms (music.shape/job)</a></li>
-        <li><a href="#musiclibs-tidal">Time patterns (music.tidal)</a></li>
+        <li><a href="#musiclibs-spans">Time patterns (music.spans)</a></li>
         <li><a href="#musiclibs-play">Playing &amp; rendering</a></li>
       </ul>
     </li>
@@ -1251,7 +1251,7 @@ hierarchy (<code>Coll</code>) whose selection behaviors roll at realize time
 <span class="kw">let</span> form = Coll.rpt((<span class="num">4</span>, Coll.sel((Behavior.shuffled, riffs))));
 <span class="kw">let</span> events = realize(form);    <span class="cmt">-- a different reading every call</span></code></pre>
 
-<h3 id="musiclibs-tidal">11.5 Patterns as functions of time: music.tidal</h3>
+<h3 id="musiclibs-spans">11.5 Patterns as functions of time: music.spans</h3>
 <p>Inspired by Tidal Cycles. A <code>Pattern&lt;T&gt;</code> is a callable value:
 query a time span (in cycles) and get back the value fragments active in it.
 Structure is computed, never stored, so transformations like <code>fast</code>,
@@ -1259,7 +1259,7 @@ Structure is computed, never stored, so transformations like <code>fast</code>,
 compose freely; continuous signals (<code>sinePat</code>, <code>sawPat</code>) ride
 along and are sampled with <code>segment</code>. <code>patEvents</code> renders
 cycles to the shared event list:</p>
-<pre><code><span class="kw">import</span> music.tidal.*;
+<pre><code><span class="kw">import</span> music.spans.*;
 
 <span class="kw">fn</span> <span class="fn">d</span>(x <span class="typ">Float</span>) <span class="typ">Pattern&lt;Pitch&gt;</span> = pure(Pitch.degree(x));
 <span class="kw">let</span> tune = stack([
@@ -1301,7 +1301,7 @@ audio thread.</p>
 <div class="note"><strong>Runnable examples</strong>
 &mdash; <code>integration-tests/scripts/pat_audible.x</code>,
 <code>media_audible.x</code>, <code>hmsl_audible.x</code>,
-<code>tidal_audible.x</code> (live, one per dialect), and
+<code>spans_audible.x</code> (live, one per dialect), and
 <code>pat_nrt.x</code> (offline render in a tritave tuning). Each header has the
 run command. The pure layers are golden-tested in <code>lang/tests/music/</code>.</div>
 

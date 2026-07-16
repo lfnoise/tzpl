@@ -1,4 +1,4 @@
--- tidal.x -- patterns as functions of time, inspired by Tidal Cycles.
+-- spans.x -- patterns as functions of time, inspired by Tidal Cycles.
 --
 -- A Pattern<T> is a callable value: query it with a time Span (in CYCLES,
 -- half-open [a, b)) and it returns the Haps -- value fragments -- active in

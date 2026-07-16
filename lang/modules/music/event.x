@@ -1,7 +1,7 @@
 -- event.x -- the shared note-event representation for the music libraries.
 --
 -- Every music dialect (music.pat streams, music.media, music.shape/job,
--- music.tidal) produces or consumes List<Event>. An Event is symbolic about
+-- music.spans) produces or consumes List<Event>. An Event is symbolic about
 -- pitch: it carries a Pitch specification that is only resolved to Hz at
 -- play time through a Tuning and Scale (see music.tuning), so the same event
 -- stream can be performed in 12ED2, Bohlen-Pierce, a Scala table, or any

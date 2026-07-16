@@ -141,7 +141,7 @@ Flat (audio-domain):
   Pitch, tunings over any real division of any period), plus four composition
   dialects -- `pat` (lazy-list streams, inspired by SuperCollider Patterns and
   SAPF), `media` (temporal-media algebra, inspired by Haskore), `shape` +
-  `job` (shapes and hierarchical forms, inspired by HMSL), `tidal` (patterns
+  `job` (shapes and hierarchical forms, inspired by HMSL), `spans` (patterns
   as functions of time, inspired by Tidal Cycles) -- and the player: `score`
   (pure Event -> NoteCmd lowering) + `play` (engine-coupled; needs tzpl_app)
 

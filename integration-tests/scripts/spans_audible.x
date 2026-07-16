@@ -1,17 +1,17 @@
--- tidal_audible: Tidal-Cycles-style patterns, live.
+-- spans_audible: patterns as functions of time (music.spans), live.
 -- A euclidean bass, an offbeat chord stab, and a melody that reverses every
 -- fourth cycle, with amp riding a slow sine -- all one Pattern value,
 -- rendered to 16 cycles of events and played.
 --
 -- Run interactively (Ctrl-C to stop):
 --   ./build/app/tzpl_app --nogui --wait -I lang/modules -I bridge/modules \
---       integration-tests/scripts/tidal_audible.x
+--       integration-tests/scripts/spans_audible.x
 
 import synthdef.*;
 import common_ugens.*;
 import clock.*;
 import audio_engine.*;
-import music.tidal.*;
+import music.spans.*;
 import music.play.*;
 
 fn sineVoice() S {
@@ -22,14 +22,14 @@ fn sineVoice() S {
     pch nnhz sinosc cb * env * amp
 }
 fn sineSynth() S = voicer(16, sineVoice) sum outlet;
-sineSynth defSynth("tidal_sine");
+sineSynth defSynth("spans_sine");
 
 engineStart();
 masterGain(0.2);
 setTempo(0, 140.0);
 
 let v = pitchVoice(101);
-voiceBundle(v, "tidal_sine") go(0);
+voiceBundle(v, "spans_sine") go(0);
 
 fn d(x Float) Pattern<Pitch> = pure(Pitch.degree(x));
 
@@ -50,4 +50,4 @@ let melody = fastcat([d(0.0), d(4.0), d(5.0), d(7.0)])
 let tune = stack([bass, stab, melody]);
 
 let p = play(patEvents(tune, 16.0, 2.0), v);
-"playing 16 cycles of tidal patterns -- Ctrl-C to stop" println;
+"playing 16 cycles of span patterns -- Ctrl-C to stop" println;
