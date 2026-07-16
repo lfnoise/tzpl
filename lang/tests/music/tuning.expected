@@ -1,0 +1,41 @@
+PASS et12 A4
+PASS et12 middle C
+PASS et12 A5
+PASS et12 quarter tone above A4
+PASS et12 inverse
+PASS et12 inverse fractional
+PASS bp period
+PASS bp one step
+PASS bp inverse
+PASS 8.5-EDO period
+PASS 8.5-EDO step
+PASS 8.5-EDO inverse
+PASS ji unison
+PASS ji third
+PASS ji fifth
+PASS ji octave
+PASS ji octave+third
+PASS ji step below root
+PASS ji halfway 0..1
+PASS ji inverse
+PASS ji inverse fractional
+PASS major degree 0
+PASS major degree 2
+PASS major degree 7 wraps
+PASS major degree 9
+PASS major degree -1
+PASS major degree -7
+PASS major degree 0.5 interp
+PASS major degree 6.5 interp
+PASS degreeHz root
+PASS degreeHz sharp acc
+PASS pitch hz
+PASS pitch step
+PASS pitch degree
+PASS pitch ratio
+PASS pitch cents
+PASS pitch rest
+PASS root re-anchor
+PASS root re-anchor tritave
+PASS chromatic degree
+40 passed, 0 failed

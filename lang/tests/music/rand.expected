@@ -1,0 +1,13 @@
+PASS randSeed reproducible
+PASS coin(0) never
+PASS coin(1) always
+PASS coin(0.25) frequency
+PASS gauss mean
+PASS gauss sigma
+PASS wpick zero weight
+PASS wpick weighting
+PASS wpick total
+-- seeded stream
+[0.08386297105988216, 0.3789802506626686, 0.6800434110281394, 0.9246929453253876]
+[6, 4, 4, 7, 8, 5]
+9 passed, 0 failed

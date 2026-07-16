@@ -1,0 +1,31 @@
+PASS numFrames
+PASS shapeDur
+PASS dimOf
+PASS dimIndex
+PASS dimIndex missing
+PASS retrograde
+PASS retro twice = id
+PASS retrograde durs
+PASS invertDim
+PASS invert twice = id
+PASS transposeDim
+PASS scaleDim
+PASS warpDim
+PASS quantizeDim
+PASS missing dim no-op
+PASS withDim
+PASS catShapes
+PASS interleave
+-- shapeEvents
+(t: 0.0, dur: 0.5, sus: 0.45, amp: 0.4, degree(0.0))
+(t: 0.5, dur: 0.5, sus: 0.45, amp: 0.5, degree(2.0))
+(t: 1.0, dur: 1.0, sus: 0.9, amp: 0.6, degree(4.0))
+(t: 2.0, dur: 2.0, sus: 1.8, amp: 0.3, degree(7.0))
+PASS events count
+PASS running onset
+PASS amp dim
+-- control-dimension shape
+(t: 0.0, dur: 0.5, sus: 0.45, amp: 0.5, step(60.0)) +[ 'cutoff: 1200.0 ]
+(t: 0.5, dur: 0.5, sus: 0.45, amp: 0.5, step(64.0)) +[ 'cutoff: 2400.0 ]
+PASS extra dim becomes param
+22 passed, 0 failed

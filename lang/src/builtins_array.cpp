@@ -299,6 +299,12 @@ static void builtin_urand(VM& vm, u16 dst, u16, u16) {
     vm.reg(dst).f = (r >> 11) * (1.0 / (1ULL << 53));
 }
 
+// randSeed(seed) -> Void  re-seed the per-VM RNG for reproducible random
+// streams (tests, replayable performances).
+static void builtin_randseed(VM& vm, u16, u16, u16 ab) {
+    vm.rng().seed((u64)vm.reg(ab).i);
+}
+
 // brand() -> Float  bipolar [-1.0, 1.0)
 static void builtin_brand(VM& vm, u16 dst, u16, u16) {
     u64 r = vm.rng().next();
@@ -1590,6 +1596,7 @@ void registerArrayBuiltins(Compiler& compiler, FuncMap& functions)
     Type* Float = compiler.floatType();
 
     // --- random number generation (impure) ---
+    registerOne(compiler, functions, "randSeed", compiler.voidType(), {Int}, builtin_randseed, /*pure=*/false);
     registerOne(compiler, functions, "urand", Float, {}, builtin_urand, /*pure=*/false);
     registerOne(compiler, functions, "brand", Float, {}, builtin_brand, /*pure=*/false);
     registerOne(compiler, functions, "irand", Int,   {Int, Int},     builtin_irand, /*pure=*/false);

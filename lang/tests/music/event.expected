@@ -1,0 +1,37 @@
+-- showEvents
+(t: 0.0, dur: 1.0, sus: 0.8, amp: 0.5, degree(0.0))
+(t: 1.0, dur: 0.5, sus: 0.4, amp: 0.7, degree(2.0))
+(t: 1.5, dur: 0.5, sus: 0.4, amp: 0.5, rest)
+(t: 2.0, dur: 2.0, sus: 1.5, amp: 0.7, degree(4.0))
+PASS default sustain
+PASS explicit sustain
+PASS rest detection
+PASS non-rest detection
+PASS offset t
+PASS offset leaves dur
+PASS stretch t
+PASS stretch dur
+PASS stretch sustain
+PASS gain amp
+-- merged
+(t: 0.0, dur: 1.0, sus: 0.8, amp: 0.5, degree(0.0))
+(t: 0.5, dur: 1.0, sus: 0.8, amp: 0.5, step(60.0))
+(t: 1.0, dur: 0.5, sus: 0.4, amp: 0.7, degree(2.0))
+(t: 1.0, dur: 1.0, sus: 0.8, amp: 0.5, step(64.0))
+(t: 1.5, dur: 0.5, sus: 0.4, amp: 0.5, rest)
+(t: 2.0, dur: 2.0, sus: 1.5, amp: 0.7, degree(4.0))
+(t: 3.0, dur: 1.0, sus: 0.8, amp: 0.5, step(67.0))
+PASS merge length
+PASS merge first
+PASS merge last
+-- lazy merge of two infinite streams
+(t: 0.0, dur: 1.0, sus: 0.8, amp: 0.5, degree(0.0))
+(t: 0.1, dur: 0.75, sus: 0.6000000000000001, amp: 0.5, degree(0.0))
+(t: 0.85, dur: 0.75, sus: 0.6000000000000001, amp: 0.5, degree(1.0))
+(t: 1.0, dur: 1.0, sus: 0.8, amp: 0.5, degree(1.0))
+(t: 1.6, dur: 0.75, sus: 0.6000000000000001, amp: 0.5, degree(2.0))
+(t: 2.0, dur: 1.0, sus: 0.8, amp: 0.5, degree(2.0))
+PASS lazy merge take
+PASS takeDur count
+(t: 0.0, dur: 1.0, sus: 0.5, amp: 0.9, hz(440.0)) +[ 'pan: 0.5 'cutoff: 2000.0 ]
+15 passed, 0 failed

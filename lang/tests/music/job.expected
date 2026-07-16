@@ -1,0 +1,22 @@
+-- seqc
+(t: 0.0, dur: 1.0, sus: 0.9, amp: 0.5, degree(0.0))
+(t: 1.0, dur: 0.5, sus: 0.45, amp: 0.5, degree(4.0))
+(t: 1.5, dur: 0.5, sus: 0.45, amp: 0.5, degree(5.0))
+(t: 2.0, dur: 2.0, sus: 1.8, amp: 0.5, degree(7.0))
+PASS seqc count
+PASS seqc running onset
+PASS parc count
+PASS parc onset
+PASS parc dur = max
+PASS rpt count
+PASS rpt onsets chain
+PASS inOrder count
+PASS inOrder first pick
+PASS inOrder second pick
+PASS inOrder durations 1+2+1+2
+PASS shuffled: a twice
+PASS shuffled: c twice
+PASS shuffled: b twice (2 notes each)
+PASS weighted zero never picked
+PASS atRandom reproducible under seed
+16 passed, 0 failed

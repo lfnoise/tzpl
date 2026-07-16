@@ -1,0 +1,41 @@
+PASS mdur seq+par
+PASS mdur with rest
+PASS tempo halves duration
+PASS times
+PASS line
+PASS chord
+-- perform m1
+(t: 0.0, dur: 1.0, sus: 0.9, amp: 0.5, degree(0.0))
+(t: 1.0, dur: 0.5, sus: 0.45, amp: 0.5, degree(2.0))
+(t: 1.5, dur: 2.0, sus: 1.8, amp: 0.5, degree(4.0))
+(t: 1.5, dur: 1.0, sus: 0.9, amp: 0.5, degree(-3.0))
+PASS perform count
+PASS par onset
+PASS par onset same
+PASS retro preserves dur
+-- perform retro(m1)
+(t: 0.0, dur: 2.0, sus: 1.8, amp: 0.5, degree(4.0))
+(t: 1.0, dur: 1.0, sus: 0.9, amp: 0.5, degree(-3.0))
+(t: 2.0, dur: 0.5, sus: 0.45, amp: 0.5, degree(2.0))
+(t: 2.5, dur: 1.0, sus: 0.9, amp: 0.5, degree(0.0))
+-- perform retro(retro(m1))
+(t: 0.0, dur: 1.0, sus: 0.9, amp: 0.5, degree(0.0))
+(t: 1.0, dur: 0.5, sus: 0.45, amp: 0.5, degree(2.0))
+(t: 1.5, dur: 2.0, sus: 1.8, amp: 0.5, degree(4.0))
+(t: 1.5, dur: 1.0, sus: 0.9, amp: 0.5, degree(-3.0))
+-- perform nested controls
+(t: 0.0, dur: 0.5, sus: 0.45, amp: 0.25, degree(12.0))
+(t: 0.5, dur: 0.25, sus: 0.225, amp: 0.25, degree(14.0))
+PASS tempo scales dur
+PASS dyn scales amp
+PASS trans shifts degree
+PASS tempo scales onsets
+PASS nested tempo mdur
+PASS post-tempo onset
+PASS mmap transpose
+-- perform MNote
+(t: 0.0, dur: 1.0, sus: 0.9, amp: 0.8, step(69.0)) +[ 'pan: -0.5 'inst: 3.0 ]
+(t: 1.0, dur: 1.0, sus: 0.9, amp: 0.5, step(72.0))
+PASS params + inst tag
+PASS inst scoped to subtree
+19 passed, 0 failed

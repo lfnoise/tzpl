@@ -136,6 +136,14 @@ Flat (audio-domain):
 - `complex_signal.x` -- complex arithmetic over signals
 - `actors.x`, `silo.x`, `silo_actors.x` -- engine-coupled concurrency helpers
 - `synthc/` -- the Tzopilotl-hosted synthdef compiler port
+- `music/` -- the music libraries (import as `music.<name>`), documented in
+  `docs/Music_Libraries.html`: `core`/`event`/`tuning`/`rand` (shared Event,
+  Pitch, tunings over any real division of any period), plus four composition
+  dialects -- `pat` (lazy-list streams, inspired by SuperCollider Patterns and
+  SAPF), `media` (temporal-media algebra, inspired by Haskore), `shape` +
+  `job` (shapes and hierarchical forms, inspired by HMSL), `tidal` (patterns
+  as functions of time, inspired by Tidal Cycles) -- and the player: `score`
+  (pure Event -> NoteCmd lowering) + `play` (engine-coupled; needs tzpl_app)
 
 **Conventions**: camelCase names; `!` suffix strictly means "mutates an
 argument"; `_` prefix or `private` for module internals. Fallible builtins

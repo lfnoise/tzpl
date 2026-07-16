@@ -1,0 +1,615 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Music Libraries Reference</title>
+    <style>
+        :root {
+            --bg: #1a1b26;
+            --fg: #c9d1d9;
+            --container-bg: #21222c;
+            --accent: #58a6ff;
+            --heading-fg: #e6edf3;
+            --heading2-fg: #b0bec5;
+            --heading2-border: #30363d;
+            --intro-bg: #0d2137;
+            --intro-border: #58a6ff;
+            --intro-fg: #b0bec5;
+            --toc-bg: #1f2028;
+            --toc-border: #30363d;
+            --toc-hover: #2a2d3a;
+            --code-bg: #30363d;
+            --code-fg: #c9d1d9;
+            --pre-bg: #161b22;
+            --pre-fg: #e6edf3;
+            --pre-border: #58a6ff;
+            --table-th-bg: #2a2d3a;
+            --table-th-fg: #e6edf3;
+            --table-border: #30363d;
+            --table-hover: #1f2028;
+            --highlight-bg: #2d2308;
+            --highlight-border: #ffc107;
+            --note-bg: #0d2818;
+            --note-border: #27ae60;
+            --badge-bg: #58a6ff;
+            --badge-fg: #fff;
+            --shadow: rgba(0,0,0,0.3);
+            --syn-cmt: #6a737d;
+            --syn-num: #e5a537;
+            --syn-str: #4ec970;
+            --syn-kw: #c678dd;
+            --type-int: #58a6ff;
+            --type-float: #e5a537;
+            --type-bool: #c678dd;
+            --type-fraction: #56d4e0;
+            --type-complex: #f47067;
+            --type-range: #8b949e;
+            --type-array: #e6edf3;
+            --type-list: #4ec970;
+            --back-to-top: #58a6ff;
+        }
+
+        html.light {
+            --bg: #f5f5f5;
+            --fg: #333;
+            --container-bg: white;
+            --accent: #3498db;
+            --heading-fg: #2c3e50;
+            --heading2-fg: #34495e;
+            --heading2-border: #ecf0f1;
+            --intro-bg: #f8f9fa;
+            --intro-border: #3498db;
+            --intro-fg: #555;
+            --toc-bg: #f8f9fa;
+            --toc-border: #bdc3c7;
+            --toc-hover: #e8f4f8;
+            --code-bg: #ecf0f1;
+            --code-fg: #2c3e50;
+            --pre-bg: #2c3e50;
+            --pre-fg: #ecf0f1;
+            --pre-border: #3498db;
+            --table-th-bg: #34495e;
+            --table-th-fg: white;
+            --table-border: #ecf0f1;
+            --table-hover: #f8f9fa;
+            --highlight-bg: #fff3cd;
+            --highlight-border: #ffc107;
+            --note-bg: #e8f5e8;
+            --note-border: #27ae60;
+            --badge-bg: #3498db;
+            --badge-fg: white;
+            --shadow: rgba(0,0,0,0.1);
+            --syn-cmt: #95a5a6;
+            --syn-num: #e67e22;
+            --syn-str: #27ae60;
+            --syn-kw: #e74c3c;
+            --type-int: #2980b9;
+            --type-float: #e67e22;
+            --type-bool: #8e44ad;
+            --type-fraction: #16a085;
+            --type-complex: #c0392b;
+            --type-range: #7f8c8d;
+            --type-array: #2c3e50;
+            --type-list: #27ae60;
+            --back-to-top: #3498db;
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            line-height: 1.6;
+            margin: 0;
+            padding: 20px;
+            background-color: var(--bg);
+            color: var(--fg);
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background-color: var(--container-bg);
+            padding: 40px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px var(--shadow);
+        }
+
+        h1 {
+            color: var(--heading-fg);
+            border-bottom: 3px solid var(--accent);
+            padding-bottom: 10px;
+            margin-bottom: 30px;
+        }
+
+        h2 {
+            color: var(--heading2-fg);
+            border-bottom: 2px solid var(--heading2-border);
+            padding-bottom: 8px;
+            margin-top: 40px;
+            margin-bottom: 20px;
+        }
+
+        h3 {
+            color: var(--heading-fg);
+            margin-top: 30px;
+            margin-bottom: 15px;
+        }
+
+        .intro {
+            font-size: 1.1em;
+            color: var(--intro-fg);
+            background-color: var(--intro-bg);
+            padding: 20px;
+            border-left: 4px solid var(--intro-border);
+            margin-bottom: 30px;
+        }
+
+        .toc {
+            background-color: var(--toc-bg);
+            padding: 20px;
+            border-radius: 5px;
+            margin-bottom: 30px;
+        }
+
+        .toc h2 {
+            margin-top: 0;
+            color: var(--heading-fg);
+            border-bottom: 1px solid var(--toc-border);
+        }
+
+        .toc ul {
+            list-style: none;
+            padding-left: 0;
+        }
+
+        .toc li {
+            margin: 8px 0;
+        }
+
+        .toc a {
+            color: var(--accent);
+            text-decoration: none;
+            padding: 5px 10px;
+            display: block;
+            border-radius: 3px;
+            transition: background-color 0.2s;
+        }
+
+        .toc a:hover {
+            background-color: var(--toc-hover);
+        }
+
+        code {
+            background-color: var(--code-bg);
+            color: var(--code-fg);
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Monaco', 'Consolas', 'Courier New', monospace;
+        }
+
+        pre {
+            background-color: var(--pre-bg);
+            color: var(--pre-fg);
+            padding: 20px;
+            border-radius: 5px;
+            overflow-x: auto;
+            margin: 15px 0;
+            border-left: 4px solid var(--pre-border);
+        }
+
+        pre code {
+            background-color: transparent;
+            color: inherit;
+            padding: 0;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 15px 0 25px 0;
+        }
+
+        th {
+            background-color: var(--table-th-bg);
+            color: var(--table-th-fg);
+            padding: 12px 15px;
+            text-align: left;
+            font-weight: 600;
+        }
+
+        td {
+            padding: 10px 15px;
+            border-bottom: 1px solid var(--table-border);
+        }
+
+        tr:hover {
+            background-color: var(--table-hover);
+        }
+
+        td code {
+            font-size: 0.95em;
+        }
+
+        .section {
+            margin-bottom: 40px;
+        }
+
+        .highlight {
+            background-color: var(--highlight-bg);
+            padding: 15px;
+            border-left: 4px solid var(--highlight-border);
+            margin: 15px 0;
+            border-radius: 0 5px 5px 0;
+        }
+
+        .note {
+            background-color: var(--note-bg);
+            padding: 15px;
+            border-left: 4px solid var(--note-border);
+            margin: 15px 0;
+            border-radius: 0 5px 5px 0;
+        }
+
+        .overload-badge {
+            display: inline-block;
+            background-color: var(--badge-bg);
+            color: var(--badge-fg);
+            font-size: 0.7em;
+            padding: 2px 6px;
+            border-radius: 3px;
+            vertical-align: middle;
+            margin-left: 6px;
+        }
+
+        .type-int { color: var(--type-int); font-weight: 600; }
+        .type-float { color: var(--type-float); font-weight: 600; }
+        .type-bool { color: var(--type-bool); font-weight: 600; }
+        .type-fraction { color: var(--type-fraction); font-weight: 600; }
+        .type-complex { color: var(--type-complex); font-weight: 600; }
+        .type-range { color: var(--type-range); font-weight: 600; }
+        .type-array { color: var(--type-array); font-weight: 600; }
+        .type-list { color: var(--type-list); font-weight: 600; }
+
+        .back-to-top {
+            display: inline-block;
+            margin-top: 10px;
+            color: var(--back-to-top);
+            text-decoration: none;
+            font-size: 0.9em;
+        }
+
+        .back-to-top:hover {
+            text-decoration: underline;
+        }
+
+        /* Syntax highlight classes for code examples */
+        .cmt { color: var(--syn-cmt); }
+        .hl-num { color: var(--syn-num); }
+        .hl-str { color: var(--syn-str); }
+        .hl-kw { color: var(--syn-kw); }
+
+        /* Theme toggle */
+        .theme-toggle {
+            position: fixed;
+            top: 1rem;
+            right: 1rem;
+            z-index: 1000;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.4rem 0.75rem;
+            background: var(--container-bg);
+            border: 1px solid var(--table-border);
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 1.1rem;
+            color: var(--fg);
+            box-shadow: 0 2px 6px var(--shadow);
+            transition: background 0.2s;
+        }
+        .theme-toggle:hover { background: var(--toc-hover); }
+
+        body, .container, pre, code, .note, .highlight, .intro, .toc, th, td {
+            transition: background-color 0.3s, color 0.3s, border-color 0.3s;
+        }
+    </style>
+    <script>
+    if (localStorage.getItem('tzpl-docs-theme') === 'light') document.documentElement.classList.add('light');
+    </script>
+</head>
+<body>
+    <button class="theme-toggle" id="theme-toggle" aria-label="Toggle theme">
+        <span id="theme-icon">&#9790;</span>
+    </button>
+    <div class="container">
+        <h1 id="top">Music Libraries Reference</h1>
+
+        <div class="intro">
+            The <code>music.*</code> family (<code>lang/modules/music/</code>) is a set of composition libraries built on one shared core: four dialects for generating music, each drawing on a different tradition of computer-music system design, all producing the same <code>List&lt;Event&gt;</code> so they interoperate freely and share one player. Every layer supports <strong>any real-numbered division of the octave</strong> (or of any period &mdash; equal temperaments with fractional step counts, tritave-based tunings, just-intonation and Scala-style tables) and <strong>any real-numbered division of time</strong> (time is <code>Float</code> beats throughout).
+            <p style="margin-top: 0.6em;">Everything except <code>music.play</code> is pure and runs under plain <code>tzpl</code> (which is how the golden tests work); <code>music.play</code> talks to the audio engine and needs the app (<code>tzpl_app</code>). Each dialect module re-exports <code>music.core</code>, so a single <code>import music.pat.*;</code> (or <code>.media</code>, <code>.job</code>, <code>.tidal</code>, <code>.play</code>) is enough. For a task-oriented walkthrough see the <a href="Tzopilotl_Music_Cookbook.html">Music Cookbook</a>, chapter&nbsp;11.</p>
+        </div>
+
+        <div class="toc">
+            <h2>Table of Contents</h2>
+            <ul>
+                <li><a href="#music-core">music.core</a> &mdash; Event, Pitch, tunings, scales, random helpers</li>
+                <li><a href="#music-pat">music.pat</a> &mdash; lazy-list pattern streams</li>
+                <li><a href="#music-score">music.score / music.play</a> &mdash; events to commands to the engine</li>
+                <li><a href="#music-media">music.media</a> &mdash; an algebra of notes and compositions</li>
+                <li><a href="#music-shape">music.shape / music.job</a> &mdash; shapes, morphology, hierarchical forms</li>
+                <li><a href="#music-tidal">music.tidal</a> &mdash; patterns as functions of time</li>
+                <li><a href="#music-interop">Interop &amp; examples</a></li>
+            </ul>
+        </div>
+
+        <!-- ============================================================ -->
+        <div class="section" id="music-core">
+            <h2>music.core</h2>
+            <p>The shared substrate, re-exported by every dialect: the event and pitch types (<code>music.event</code>), tunings and scales (<code>music.tuning</code>), and a few random helpers (<code>music.rand</code>). Pure and RT-safe.</p>
+
+            <h3>Events</h3>
+            <p>An <code>Event</code> is one note (or rest) with an <em>absolute</em> onset in beats. Pitch stays symbolic &mdash; a <code>Pitch</code> value is only resolved to Hz at play time, through a <code>Tuning</code> and <code>Scale</code>, so the same events can be performed in 12ED2, a tritave tuning, or a just-intonation table. Note value and sounding time are distinct fields: <code>dur</code> is the time the note occupies in its line (it drives retrograde, stretching, and spacing); <code>sustain</code> is the time until release (it drives <code>noteOff</code>).</p>
+            <table>
+                <tr><th>Type / Function</th><th>Description</th></tr>
+                <tr><td><code>Pitch</code></td><td>Enum: <code>hz(Float)</code>, <code>step(Float)</code> (real-valued tuning step; in <code>et12</code> a step is a MIDI note number), <code>degree(Float)</code> (scale degree, root-relative), <code>ratio(Float)</code>, <code>cents(Float)</code> (both root-relative), <code>rest</code>.</td></tr>
+                <tr><td><code>Event</code></td><td>Struct: <code>t</code>, <code>dur</code>, <code>sustain</code>, <code>amp</code>, <code>pitch</code>, and <code>params [(Symbol, Float)]</code> &mdash; named per-note synth controls.</td></tr>
+                <tr><td><code>event(t, dur, pitch, amp = 0.5, sustain = 0.0, params = [])</code></td><td>Constructor; <code>sustain</code> defaults to <code>0.8 * dur</code> when not given.</td></tr>
+                <tr><td><code>isRest(e)</code></td><td>True when the pitch is <code>Pitch.rest</code>.</td></tr>
+                <tr><td><code>offset(es, dt)</code> / <code>stretch(es, k)</code> / <code>gain(es, k)</code></td><td>Shift onsets / scale time (onset, dur, sustain) / scale amplitude. Lazy.</td></tr>
+                <tr><td><code>merge(a, b)</code></td><td>Onset-ordered merge of two event streams &mdash; parallel combination. Lazy; works on infinite streams.</td></tr>
+                <tr><td><code>takeDur(es, beats)</code></td><td>Keep events with onset before <code>beats</code>; the sanctioned cut for infinite streams.</td></tr>
+                <tr><td><code>showEvent(e)</code> / <code>showEvents(es)</code></td><td>Stable formatting, one event per line (used by the golden tests).</td></tr>
+            </table>
+
+            <h3>Tunings and scales</h3>
+            <p>A <code>Tuning</code> maps real-valued <em>steps</em> to frequency; a <code>Scale</code> is a separate layer that selects steps per <em>degree</em> (the same split as Scala's .scl tuning files versus keyboard mappings). Equal tunings are a formula &mdash; the division count is a real number, so 8.5 divisions of the octave is legal &mdash; and unequal tunings are a cents table with linear interpolation at fractional positions. Degrees, ratios, and cents resolve relative to the tuning root; steps and Hz are absolute.</p>
+            <table>
+                <tr><th>Type / Function</th><th>Description</th></tr>
+                <tr><td><code>Tuning</code> / <code>TuningKind</code></td><td><code>ed(divisions, periodRatio)</code> (both real) or <code>table(cents, periodRatio)</code>; plus <code>rootHz</code> anchored at <code>rootStep</code>.</td></tr>
+                <tr><td><code>edo(n)</code> / <code>ed(n, period)</code></td><td>n equal divisions of the octave / of an arbitrary period ratio.</td></tr>
+                <tr><td><code>bp()</code></td><td>13 equal divisions of the tritave (the Bohlen&ndash;Pierce division).</td></tr>
+                <tr><td><code>et12</code></td><td>12ED2 anchored so step = MIDI note number (69 &rarr; 440&nbsp;Hz).</td></tr>
+                <tr><td><code>scala(cents, period = 2.0)</code> / <code>ji(ratios, period = 2.0)</code></td><td>Unequal tunings from a cents table / from just-intonation frequency ratios.</td></tr>
+                <tr><td><code>root(t, hz, step)</code></td><td>Re-anchor: frequency <code>hz</code> at step <code>step</code>.</td></tr>
+                <tr><td><code>Scale</code></td><td><code>degrees [Float]</code> (steps per degree) + <code>wrap</code> (steps per repetition). Constants: <code>major</code>, <code>minor</code>, <code>dorian</code>, <code>pentMajor</code>, <code>pentMinor</code>, <code>wholeTone</code>; <code>chromatic(k)</code> makes every step a degree.</td></tr>
+                <tr><td><code>stepHz(t, step)</code> / <code>hzStep(t, hz)</code></td><td>Step &harr; frequency, continuous in both directions.</td></tr>
+                <tr><td><code>degreeStep(s, d)</code></td><td>Scale degree &rarr; tuning step; integer part wraps, fractional part interpolates between neighboring degrees. Negative degrees descend below the root.</td></tr>
+                <tr><td><code>degreeHz(t, s, d, acc = 0.0)</code></td><td>Degree &rarr; Hz with an optional accidental in tuning steps.</td></tr>
+                <tr><td><code>pitchHz(p, t, s)</code></td><td>The single play-time resolver for any <code>Pitch</code>.</td></tr>
+            </table>
+
+            <h3>Random helpers</h3>
+            <table>
+                <tr><th>Function</th><th>Description</th></tr>
+                <tr><td><code>coin(p)</code></td><td>True with probability p.</td></tr>
+                <tr><td><code>gauss(mu, sigma)</code></td><td>Normally distributed value.</td></tr>
+                <tr><td><code>wpick(xs, ws)</code></td><td>Weighted random choice (stream form <code>wpicks</code> is in <code>music.pat</code>).</td></tr>
+            </table>
+            <p>These sit alongside the built-ins <code>urand</code>/<code>brand</code>/<code>rand</code>/<code>irand</code>/<code>xrand</code>/<code>pick</code>/<code>muss</code> and their stream forms; <code>randSeed(n)</code> re-seeds the per-VM generator for reproducible streams and performances.</p>
+
+            <pre><code><span class="hl-kw">import</span> music.core.*;
+
+<span class="cmt">-- 13 equal divisions of the tritave, anchored at 220 Hz</span>
+<span class="hl-kw">let</span> t = bp() root(<span class="hl-num">220.0</span>, <span class="hl-num">0.0</span>);
+stepHz(t, <span class="hl-num">13.0</span>)                      <span class="cmt">-- 660.0 (one tritave up)</span>
+
+<span class="cmt">-- 8.5 equal divisions of the octave; fractional steps are ordinary</span>
+stepHz(edo(<span class="hl-num">8.5</span>), <span class="hl-num">4.25</span>)              <span class="cmt">-- halfway up the octave</span>
+
+<span class="cmt">-- degrees resolve through a scale, fractionally and below the root</span>
+degreeStep(major, <span class="hl-num">6.5</span>)               <span class="cmt">-- 11.5</span>
+degreeStep(major, -<span class="hl-num">1.0</span>)              <span class="cmt">-- -1.0 (leading tone below)</span></code></pre>
+            <a href="#top" class="back-to-top">&uarr; Back to top</a>
+        </div>
+
+        <!-- ============================================================ -->
+        <div class="section" id="music-pat">
+            <h2>music.pat</h2>
+            <p>Pattern streams, inspired by SuperCollider's Patterns library and by Sound as Pure Form (SAPF). There is no separate pattern class: <strong>patterns are ordinary lazy <code>List</code> values</strong>, usually infinite, so the whole list vocabulary already applies (<code>cyc</code>, <code>take</code>, <code>drop</code>, <code>stutter</code>, <code>zip</code>, <code>scan</code>, the infinite random streams <code>rands</code>/<code>irands</code>/<code>xrands</code>/<code>picks</code>, &hellip;). This module adds the missing musical vocabulary plus <code>bind</code>, which zips per-field streams into events. Pure and RT-safe; seed with <code>randSeed</code> for reproducibility.</p>
+            <table>
+                <tr><th>Function</th><th>Description</th></tr>
+                <tr><td><code>series(a, d)</code> / <code>geom(a, r)</code></td><td>Infinite arithmetic / geometric series.</td></tr>
+                <tr><td><code>browns(lo, hi, step)</code></td><td>Brownian walk, reflecting at the bounds.</td></tr>
+                <tr><td><code>gausses(mu, sigma)</code> / <code>coins(p)</code></td><td>Infinite gaussian / weighted-Bool streams.</td></tr>
+                <tr><td><code>wpicks(xs, ws)</code></td><td>Weighted random choices.</td></tr>
+                <tr><td><code>xpicks(xs)</code></td><td>Random choices, never the same element twice in a row.</td></tr>
+                <tr><td><code>shufs(xs)</code></td><td>Concatenated fresh shuffles &mdash; every pass is a new permutation.</td></tr>
+                <tr><td><code>lace(ls)</code></td><td>Round-robin interleave of streams; skips exhausted ones, tolerates infinite ones.</td></tr>
+                <tr><td><code>stutter(ns, xs)</code></td><td>Repeat element i of <code>xs</code> <code>ns[i]</code> times (0 drops it).</td></tr>
+                <tr><td><code>once(x)</code> / <code>embed(ls)</code></td><td>One-element stream / flatten a stream of streams one level &mdash; the embedding idiom.</td></tr>
+                <tr><td><code>step</code> / <code>degree</code> / <code>hz</code> / <code>ratio</code> / <code>cents</code> / <code>rest</code></td><td>Scalar <code>Float &rarr; Pitch</code> constructors; auto-mapping lifts them over lists: <code>[0.0, 2.0, 4.0] cyc degree</code>.</td></tr>
+                <tr><td><code>bind(pitch, dur, amp = 0.5&hellip;, legato = 0.8&hellip;, extras = [])</code></td><td>Zip one stream per event field into <code>List&lt;Event&gt;</code>. Onsets are the running sum of <code>dur</code>; <code>sustain = dur * legato</code>; <code>extras</code> pairs a param name with a value stream. Ends at the shortest input, so any finite stream bounds the result.</td></tr>
+            </table>
+            <pre><code><span class="hl-kw">import</span> music.pat.*;
+randSeed(<span class="hl-num">2026</span>);
+
+<span class="hl-kw">let</span> melody = bind(
+    wpicks([<span class="hl-num">0.0</span>, <span class="hl-num">1.0</span>, <span class="hl-num">2.0</span>, <span class="hl-num">4.0</span>], [<span class="hl-num">4.0</span>, <span class="hl-num">2.0</span>, <span class="hl-num">3.0</span>, <span class="hl-num">1.0</span>]) degree,  <span class="cmt">-- weighted degrees</span>
+    List(<span class="hl-num">0.5</span>, <span class="hl-num">0.25</span>, <span class="hl-num">0.25</span>) cyc,                              <span class="cmt">-- durations</span>
+    rands(<span class="hl-num">0.2</span>, <span class="hl-num">0.6</span>),                                        <span class="cmt">-- amplitudes</span>
+    List(<span class="hl-num">0.7</span>) cyc,                                          <span class="cmt">-- legato</span>
+    [('cutoff, series(<span class="hl-num">800.0</span>, <span class="hl-num">50.0</span>))]);                      <span class="cmt">-- a param stream</span>
+
+<span class="hl-kw">let</span> bass = bind(List(-<span class="hl-num">7.0</span>, -<span class="hl-num">5.0</span>) cyc degree, List(<span class="hl-num">2.0</span>) cyc);
+<span class="hl-kw">let</span> tune = merge(melody, bass) takeDur(<span class="hl-num">32.0</span>);              <span class="cmt">-- two voices, 32 beats</span></code></pre>
+            <a href="#top" class="back-to-top">&uarr; Back to top</a>
+        </div>
+
+        <!-- ============================================================ -->
+        <div class="section" id="music-score">
+            <h2>music.score / music.play</h2>
+            <p>The player, split so its logic stays testable. <code>music.score</code> is pure: it lowers an event stream to a time-ordered command stream &mdash; <code>noteOn</code> at each onset, <code>noteOff</code> at onset&nbsp;+&nbsp;sustain, note IDs allocated round-robin from the voice's pool, rests skipped. <code>NoteCmd</code> deliberately mirrors the note cases of <code>bundles.x</code>'s <code>EngineCmd</code>, so the engine adapter is a one-line map per case. <code>music.play</code> (engine-coupled; re-exports <code>bundles.*</code>) turns each group of simultaneous commands into <em>one</em> first-class <code>Bundle</code> scheduled at an absolute beat on the engine's TempoClock &mdash; chords are atomic and timing is sample-accurate.</p>
+            <table>
+                <tr><th>Type / Function</th><th>Description</th></tr>
+                <tr><td><code>NoteCmd</code></td><td><code>noteOn(node, id, params)</code> / <code>noteOff(node, id)</code> / <code>noteSetParams(&hellip;)</code>.</td></tr>
+                <tr><td><code>Voice</code>, <code>voice(node, names, defaults, poly = 16)</code></td><td>How events map onto one synth node: positional param order (= <code>noteParam</code> declaration order), per-name defaults, note-ID pool size.</td></tr>
+                <tr><td><code>pitchVoice(node)</code> / <code>freqVoice(node)</code></td><td>Ready-made voices: <code>['pitch, 'amp]</code> for synths taking a note number, <code>['freq, 'amp]</code> for synths taking Hz.</td></tr>
+                <tr><td><code>eventParams(e, v, t, s)</code></td><td>Resolve one event to positional <code>[Float]</code>: <code>'freq</code> &rarr; <code>pitchHz</code> through the tuning; <code>'pitch</code> &rarr; the equivalent (fractional) note number, so any tuning survives a note-number synth exactly; <code>'amp</code> &rarr; the event amp; other names look up <code>e.params</code>, then the default.</td></tr>
+                <tr><td><code>score(events, v, t = et12, s = major)</code></td><td>Lazy <code>List&lt;(Float, NoteCmd)&gt;</code> &mdash; the golden-test surface.</td></tr>
+                <tr><td><code>showScore(sc)</code></td><td>One <code>beat: command</code> line per entry.</td></tr>
+                <tr><td><code>play(events, v, t = et12, s = major, silo = 0, clock = 0)</code></td><td>Compile and start playing; returns a <code>Player</code> handle.</td></tr>
+                <tr><td><code>stop(p)</code> / <code>replace(p, events)</code> / <code>enqueue(p, events)</code></td><td>Stop (releases held notes); swap the playing sequence at the next wake; queue a sequence to follow the current one.</td></tr>
+                <tr><td><code>voiceBundle(v, defName)</code></td><td>Node-graph setup (create voicer, connect to output) as a reusable <code>Bundle</code>.</td></tr>
+                <tr><td><code>scorePlayer(sc)</code></td><td>A coroutine for code running <em>inside</em> a silo task: walks a score with immediate <code>playNote</code>/<code>releaseNote</code>; drive it with <code>spawn(clock, scorePlayer(sc))</code>.</td></tr>
+                <tr><td><code>render(events, v, defName, path, durSecs, t = et12, s = major)</code></td><td>Offline render of a finite stream via <code>renderNRT</code>; returns the handle for <code>await renderDone(h)</code>.</td></tr>
+            </table>
+            <pre><code><span class="hl-kw">import</span> music.pat.*;
+<span class="hl-kw">import</span> music.play.*;
+
+engineStart();
+<span class="hl-kw">let</span> v = pitchVoice(<span class="hl-num">101</span>);
+voiceBundle(v, <span class="hl-str">"my_voicer"</span>) go(<span class="hl-num">0</span>);
+
+<span class="hl-kw">let</span> p = play(tune, v, et12, pentMinor);   <span class="cmt">-- sample-accurate Bundles on the beat</span>
+p replace(otherTune);                     <span class="cmt">-- swap what's playing</span>
+p stop;
+
+<span class="cmt">-- or render offline, in any tuning:</span>
+<span class="hl-kw">let</span> h = render(tune, v, <span class="hl-str">"my_voicer"</span>, <span class="hl-str">"/tmp/take1.wav"</span>, <span class="hl-num">20.0</span>, bp() root(<span class="hl-num">220.0</span>, <span class="hl-num">0.0</span>), chromatic(<span class="hl-num">13</span>));
+<span class="hl-kw">await</span> renderDone(h);</code></pre>
+            <a href="#top" class="back-to-top">&uarr; Back to top</a>
+        </div>
+
+        <!-- ============================================================ -->
+        <div class="section" id="music-media">
+            <h2>music.media</h2>
+            <p>An algebra of notes and compositions, inspired by Paul Hudak's Haskore and the temporal-media work in <em>The Haskell School of Music</em>. <code>Music&lt;T&gt;</code> is a recursive value: a note (duration + payload), a rest, two Musics in sequence, two in parallel, or a control annotation over a subtree. Because a piece is a value, it can be analyzed and transformed before it is performed. Payloads are un-timed by design &mdash; time lives in the structure, and <code>Event</code> is the <em>output</em> of <code>perform</code>. Pure and RT-safe.</p>
+            <table>
+                <tr><th>Type / Function</th><th>Description</th></tr>
+                <tr><td><code>Music&lt;T&gt;</code></td><td><code>note (Float, T)</code>, <code>rest Float</code>, <code>mseq</code>, <code>mpar</code>, <code>ctl (Control, Music&lt;T&gt;)</code>.</td></tr>
+                <tr><td><code>a $ b</code> / <code>a &amp; b</code></td><td>Sequential / parallel composition (operator overloads on <code>Music</code>).</td></tr>
+                <tr><td><code>note(d, x)</code> / <code>mrest(d)</code></td><td>A note / a <code>Music&lt;Pitch&gt;</code> rest (for other payloads write <code>Music&lt;T&gt;.rest(d)</code>).</td></tr>
+                <tr><td><code>line(ms)</code> / <code>chord(ms)</code> / <code>times(n, m)</code></td><td>Fold an array sequentially / in parallel / repeat n times.</td></tr>
+                <tr><td><code>tempo(k, m)</code> / <code>trans(k, m)</code> / <code>dyn(k, m)</code> / <code>inst(i, m)</code></td><td>Controls: divide durations; transpose step/degree pitches by a real amount; scale amplitude; tag a subtree with an instrument (emitted as an <code>'inst</code> param).</td></tr>
+                <tr><td><code>mdur(m)</code></td><td>Duration in beats, tempo annotations included.</td></tr>
+                <tr><td><code>retro(m)</code></td><td>Retrograde; parallel branches are rest-padded so they still end together.</td></tr>
+                <tr><td><code>mmap(m, f)</code></td><td>Map over payloads, preserving structure.</td></tr>
+                <tr><td><code>perform(m, t0 = 0.0, legato = 0.9)</code></td><td>Interpret <code>Music&lt;Pitch&gt;</code> or <code>Music&lt;MNote&gt;</code> into <code>List&lt;Event&gt;</code>; the generic form <code>perform(m, mk, ctx)</code> takes an event-builder for any payload type.</td></tr>
+                <tr><td><code>MNote</code>, <code>mnote(pitch, amp = 0.5, params = [])</code></td><td>A payload carrying amplitude and synth params alongside the pitch.</td></tr>
+            </table>
+            <pre><code><span class="hl-kw">import</span> music.media.*;
+
+<span class="hl-kw">fn</span> deg(d Float, dur Float) Music&lt;Pitch&gt; = note(dur, Pitch.degree(d));
+<span class="hl-kw">let</span> theme = line([deg(<span class="hl-num">0.0</span>, <span class="hl-num">1.0</span>), deg(<span class="hl-num">1.0</span>, <span class="hl-num">1.0</span>), deg(<span class="hl-num">2.0</span>, <span class="hl-num">0.5</span>), deg(<span class="hl-num">4.0</span>, <span class="hl-num">1.5</span>)]);
+
+<span class="cmt">-- the theme against itself: two beats late, a fifth down, quieter</span>
+<span class="hl-kw">let</span> canon = theme &amp; (mrest(<span class="hl-num">2.0</span>) $ trans(-<span class="hl-num">4.0</span>, dyn(<span class="hl-num">0.7</span>, theme)));
+
+canon mdur                       <span class="cmt">-- 6.0</span>
+canon retro perform showEvents;  <span class="cmt">-- reversed, as events</span>
+canon perform play(v);           <span class="cmt">-- or straight to the player</span></code></pre>
+            <a href="#top" class="back-to-top">&uarr; Back to top</a>
+        </div>
+
+        <!-- ============================================================ -->
+        <div class="section" id="music-shape">
+            <h2>music.shape / music.job</h2>
+            <p>Shapes, morphological operators, and hierarchical forms, inspired by HMSL (the Hierarchical Music Specification Language). A <code>Shape</code> is a sequence of frames over named dimensions &mdash; by default <code>[dur, degree, amp]</code>, but any dimension you add (<code>'cutoff</code>, <code>'pan</code>, &hellip;) is carried into events as a synth param of the same name, so melodies can run over any set of control dimensions, not just pitch. <code>music.job</code> arranges shapes into hierarchies whose selection behaviors are rolled <em>at realize time</em>: realizing the same form twice gives two readings. Pure (RNG only).</p>
+            <table>
+                <tr><th>Type / Function</th><th>Description</th></tr>
+                <tr><td><code>Shape</code>, <code>shape(data, dims = ['dur, 'degree, 'amp])</code></td><td>Frames &times; named dimensions.</td></tr>
+                <tr><td><code>numFrames</code> / <code>dimIndex</code> / <code>dimOf</code> / <code>withDim</code></td><td>Introspection and column replacement.</td></tr>
+                <tr><td><code>retrograde(sh)</code></td><td>Reverse the frame order.</td></tr>
+                <tr><td><code>invertDim(sh, dim, center)</code> / <code>transposeDim</code> / <code>scaleDim</code> / <code>quantizeDim</code> / <code>warpDim(sh, dim, f)</code></td><td>Per-dimension morphs (reflect, shift, scale, snap to grid, arbitrary function). Missing dimensions are a no-op.</td></tr>
+                <tr><td><code>catShapes(a, b)</code> / <code>interleave(a, b)</code></td><td>Concatenate / alternate frames.</td></tr>
+                <tr><td><code>shapeDur(sh)</code> / <code>shapeEvents(sh, t0 = 0.0, legato = 0.9)</code></td><td>Total beats / render to events (pitch from the first of <code>degree</code>/<code>step</code>/<code>hz</code>/<code>cents</code> present).</td></tr>
+                <tr><td><code>Coll</code></td><td><code>leaf Shape</code>, <code>seqc [Coll]</code>, <code>parc [Coll]</code>, <code>rpt (Int, Coll)</code>, <code>sel (Behavior, [Coll])</code>.</td></tr>
+                <tr><td><code>Behavior</code></td><td><code>inOrder</code> (cycle), <code>atRandom</code>, <code>shuffled</code> (no repeat until all seen), <code>weighted [Float]</code>.</td></tr>
+                <tr><td><code>realize(c, t0 = 0.0)</code> / <code>realizeDur(c)</code></td><td>Walk the hierarchy into <code>List&lt;Event&gt;</code>; behaviors and repeats re-roll per call, and selection state advances across visits (e.g. under <code>rpt</code>).</td></tr>
+            </table>
+            <pre><code><span class="hl-kw">import</span> music.job.*;
+
+<span class="hl-kw">let</span> theme = shape([[<span class="hl-num">0.5</span>, <span class="hl-num">0.0</span>, <span class="hl-num">0.5</span>], [<span class="hl-num">0.25</span>, <span class="hl-num">1.0</span>, <span class="hl-num">0.4</span>], [<span class="hl-num">0.5</span>, <span class="hl-num">3.0</span>, <span class="hl-num">0.5</span>], [<span class="hl-num">0.75</span>, <span class="hl-num">4.0</span>, <span class="hl-num">0.6</span>]]);
+<span class="hl-kw">let</span> riffs = [
+    Coll.leaf(theme),
+    Coll.leaf(theme retrograde),
+    Coll.leaf(theme invertDim('degree, <span class="hl-num">2.0</span>)),
+    Coll.leaf(theme transposeDim('degree, <span class="hl-num">4.0</span>) scaleDim('dur, <span class="hl-num">0.5</span>)),
+];
+<span class="hl-kw">let</span> form = Coll.seqc([
+    Coll.rpt((<span class="hl-num">4</span>, Coll.sel((Behavior.shuffled, riffs)))),   <span class="cmt">-- four shuffled riffs</span>
+    Coll.parc([Coll.leaf(theme), Coll.leaf(shape([[<span class="hl-num">3.0</span>, -<span class="hl-num">7.0</span>, <span class="hl-num">0.4</span>]]))]),
+]);
+
+<span class="hl-kw">let</span> p = play(realize(form), v);   <span class="cmt">-- one reading</span>
+p enqueue(realize(form));         <span class="cmt">-- a different reading follows it</span></code></pre>
+            <a href="#top" class="back-to-top">&uarr; Back to top</a>
+        </div>
+
+        <!-- ============================================================ -->
+        <div class="section" id="music-tidal">
+            <h2>music.tidal</h2>
+            <p>Patterns as functions of time, inspired by Tidal Cycles. A <code>Pattern&lt;T&gt;</code> is a callable value: query it with a <code>Span</code> (in cycles, half-open) and it returns the <code>Hap</code>s &mdash; value fragments &mdash; active in that window. Structure is computed, never stored, so transformations compose freely and everything is repeatable. Time is <code>Float</code> cycles with an explicit edge policy: fragments shorter than <code>kEps</code> (10<sup>&minus;9</sup>) are dropped, cycle iteration starts at <code>floor(a + kEps)</code>, and onset tests compare within <code>kEps</code>. Combinators take the pattern first, so pipelines read left-to-right. Pure and RT-safe.</p>
+            <table>
+                <tr><th>Type / Function</th><th>Description</th></tr>
+                <tr><td><code>Span</code> / <code>Hap&lt;T&gt;</code> / <code>Pattern&lt;T&gt;</code></td><td><code>span(a, b)</code>; a hap's <code>whole</code> is its full extent (<code>none</code> for continuous signals), <code>part</code> the fragment inside the query; patterns are callable (<code>p call(s)</code> or <code>p(s)</code>).</td></tr>
+                <tr><td><code>pure(x)</code></td><td>One occurrence of x per cycle.</td></tr>
+                <tr><td><code>signal(f)</code> / <code>sinePat()</code> / <code>sawPat()</code> / <code>steady(x)</code></td><td>Continuous signals (sampled, not evented).</td></tr>
+                <tr><td><code>fast(p, k)</code> / <code>slow(p, k)</code> / <code>early(p, off)</code> / <code>late(p, off)</code></td><td>Time scaling and rotation, by real amounts.</td></tr>
+                <tr><td><code>rev(p)</code></td><td>Reverse each cycle.</td></tr>
+                <tr><td><code>fastcat(ps)</code> / <code>slowcat(ps)</code> / <code>stack(ps)</code></td><td>All in one cycle / one per cycle in rotation / all at once.</td></tr>
+                <tr><td><code>every(p, n, f)</code> / <code>iterp(p, n)</code></td><td>Apply f every n-th cycle / rotate one n-th further each cycle.</td></tr>
+                <tr><td><code>euclid(p, k, n, rot = 0)</code> / <code>euclidMask(k, n, rot)</code></td><td>Distribute p over the onsets of a Euclidean rhythm (e.g. <code>euclid(p, 3, 8)</code> is the tresillo).</td></tr>
+                <tr><td><code>segment(p, n)</code></td><td>Sample a (usually continuous) pattern n times per cycle.</td></tr>
+                <tr><td><code>pmap(p, f)</code> / <code>range(p, lo, hi)</code></td><td>Map values / scale a 0..1 signal into a range.</td></tr>
+                <tr><td><code>filterOnsets(p)</code> / <code>sortHaps(hs)</code></td><td>Keep haps that begin in the query / order haps by part start.</td></tr>
+                <tr><td><code>zipl(pa, pb, f)</code></td><td>Structure from the left, values combined with the right pattern sampled per hap &mdash; the role Tidal's <code>#</code> plays (the operator set is fixed, so combination is by name).</td></tr>
+                <tr><td><code>events(pp, amp = 0.5, legato = 0.8)</code></td><td>Lift a <code>Pattern&lt;Pitch&gt;</code> to <code>Pattern&lt;Event&gt;</code>.</td></tr>
+                <tr><td><code>withAmp(pe, pa)</code> / <code>withLegato(pe, pl)</code> / <code>withParam(pe, name, pv)</code> / <code>mix(a, b)</code></td><td>Combine an event pattern with value patterns / overlay two event patterns.</td></tr>
+                <tr><td><code>patEvents(p, cycles, beatsPerCycle = 4.0)</code></td><td>Render onsets of the first <code>cycles</code> cycles to the shared <code>List&lt;Event&gt;</code> in beats &mdash; the bridge to the player.</td></tr>
+            </table>
+            <pre><code><span class="hl-kw">import</span> music.tidal.*;
+<span class="hl-kw">import</span> music.play.*;
+
+<span class="hl-kw">fn</span> d(x Float) Pattern&lt;Pitch&gt; = pure(Pitch.degree(x));
+
+<span class="hl-kw">let</span> tune = stack([
+    d(-<span class="hl-num">14.0</span>) euclid(<span class="hl-num">3</span>, <span class="hl-num">8</span>) events(<span class="hl-num">0.8</span>, <span class="hl-num">0.6</span>),                <span class="cmt">-- euclidean bass</span>
+    fastcat([d(<span class="hl-num">0.0</span>), d(<span class="hl-num">4.0</span>), d(<span class="hl-num">5.0</span>), d(<span class="hl-num">7.0</span>)])
+        iterp(<span class="hl-num">4</span>)
+        every(<span class="hl-num">4</span>, <span class="hl-kw">fn</span>(p Pattern&lt;Pitch&gt;) Pattern&lt;Pitch&gt; { p rev })
+        events(<span class="hl-num">0.5</span>, <span class="hl-num">0.9</span>)
+        withAmp(sinePat() slow(<span class="hl-num">4.0</span>) range(<span class="hl-num">0.25</span>, <span class="hl-num">0.6</span>) segment(<span class="hl-num">4</span>)),
+]);
+
+play(patEvents(tune, <span class="hl-num">16.0</span>, <span class="hl-num">2.0</span>), v);   <span class="cmt">-- 16 cycles, 2 beats per cycle</span></code></pre>
+            <a href="#top" class="back-to-top">&uarr; Back to top</a>
+        </div>
+
+        <!-- ============================================================ -->
+        <div class="section" id="music-interop">
+            <h2>Interop &amp; examples</h2>
+            <p>Because every dialect ends in the same <code>List&lt;Event&gt;</code>, the layers combine freely: <code>merge</code> a <code>bind</code> stream with a <code>perform</code>ed canon, <code>enqueue</code> Tidal-rendered cycles after a realized form, apply the event helpers (<code>stretch</code>, <code>gain</code>, <code>takeDur</code>) to any of them, and resolve all of it through one tuning at play time. The pure layers golden-test under plain <code>tzpl</code> (see <code>lang/tests/music/</code>).</p>
+            <p>Complete runnable examples, each with run instructions in its header:</p>
+            <table>
+                <tr><th>Script</th><th>Shows</th></tr>
+                <tr><td><code>integration-tests/scripts/pat_audible.x</code></td><td>Stream patterns live: weighted-random melody + bass via <code>bind</code>/<code>merge</code>.</td></tr>
+                <tr><td><code>integration-tests/scripts/pat_nrt.x</code></td><td>Offline render of a tritave-tuning walk (13 equal divisions of 3/1) via <code>render</code>.</td></tr>
+                <tr><td><code>integration-tests/scripts/media_audible.x</code></td><td>A canon built with <code>$</code>/<code>&amp;</code>/<code>trans</code>/<code>tempo</code> and performed.</td></tr>
+                <tr><td><code>integration-tests/scripts/hmsl_audible.x</code></td><td>Shape morphs + a shuffled hierarchical form, three readings queued on one Player.</td></tr>
+                <tr><td><code>integration-tests/scripts/tidal_audible.x</code></td><td>Euclidean bass, offbeat stab, rotating/reversing melody with a sine-ridden amp.</td></tr>
+            </table>
+            <a href="#top" class="back-to-top">&uarr; Back to top</a>
+        </div>
+
+    </div>
+<script>
+(function() {
+  var btn = document.getElementById('theme-toggle');
+  var icon = document.getElementById('theme-icon');
+  function update() {
+    var isLight = document.documentElement.classList.contains('light');
+    icon.innerHTML = isLight ? '☀' : '☾';
+  }
+  update();
+  btn.addEventListener('click', function() {
+    document.documentElement.classList.toggle('light');
+    localStorage.setItem('tzpl-docs-theme',
+      document.documentElement.classList.contains('light') ? 'light' : 'dark');
+    update();
+  });
+})();
+</script>
+</body>
+</html>

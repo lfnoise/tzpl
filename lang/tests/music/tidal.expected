@@ -1,0 +1,41 @@
+PASS pure 3 cycles
+PASS pure fragments
+PASS pure fragment starts
+PASS fragment keeps whole
+PASS integer boundary query
+PASS epsilon boundary split
+PASS fastcat order
+PASS fastcat non-dyadic thirds
+PASS fastcat repeats
+PASS slowcat rotation
+PASS fast(3) count
+PASS slow(2) count
+PASS rev reverses
+PASS rev twice = id
+PASS early rotates
+PASS every other cycle reversed
+PASS iter rotates per cycle
+PASS stack count
+PASS e(3,8) mask
+PASS e(3,8) onsets
+PASS e(3,8) positions
+PASS rotated euclid count
+PASS segment count
+PASS segment samples midpoint
+PASS segment last
+PASS zipl combine
+-- patEvents (2 cycles, 3 beats per cycle)
+(t: 0.0, dur: 1.0, sus: 0.8, amp: 0.30000000000000004, degree(0.0)) +[ 'cutoff: 1500.0 ]
+(t: 1.0, dur: 1.0, sus: 0.8, amp: 0.5, degree(2.0)) +[ 'cutoff: 1500.0 ]
+(t: 2.0, dur: 1.0, sus: 0.8, amp: 0.7, degree(4.0)) +[ 'cutoff: 1500.0 ]
+(t: 3.0, dur: 0.9999999999999998, sus: 0.7999999999999998, amp: 0.29999999999999993, degree(0.0)) +[ 'cutoff: 1500.0 ]
+(t: 4.0, dur: 1.0000000000000004, sus: 0.8000000000000004, amp: 0.5, degree(2.0)) +[ 'cutoff: 1500.0 ]
+(t: 5.0, dur: 0.9999999999999998, sus: 0.7999999999999998, amp: 0.7, degree(4.0)) +[ 'cutoff: 1500.0 ]
+PASS patEvents count
+PASS first onset
+PASS second cycle in beats
+PASS dur in beats
+PASS sustain from legato fraction
+PASS withParam carried
+PASS fast(3) over 2 cycles, exact
+33 passed, 0 failed

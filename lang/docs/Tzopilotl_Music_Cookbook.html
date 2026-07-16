@@ -381,6 +381,16 @@ if (localStorage.getItem('tzpl-docs-theme') === 'light') document.documentElemen
     </li>
     <li><a href="#render">Offline rendering</a></li>
     <li><a href="#ensemble">Putting it together</a></li>
+    <li><a href="#musiclibs">The music libraries</a>
+      <ul>
+        <li><a href="#musiclibs-events">Events &amp; tunings</a></li>
+        <li><a href="#musiclibs-pat">Streams (music.pat)</a></li>
+        <li><a href="#musiclibs-media">Music algebra (music.media)</a></li>
+        <li><a href="#musiclibs-hmsl">Shapes &amp; forms (music.shape/job)</a></li>
+        <li><a href="#musiclibs-tidal">Time patterns (music.tidal)</a></li>
+        <li><a href="#musiclibs-play">Playing &amp; rendering</a></li>
+      </ul>
+    </li>
     <li><a href="#appendix">Appendix</a>
       <ol>
         <li><a href="#quickref">Function quick reference</a></li>
@@ -393,7 +403,7 @@ if (localStorage.getItem('tzpl-docs-theme') === 'light') document.documentElemen
 <main>
 
 <h1>Tzopilotl Music Cookbook</h1>
-<p class="subtitle">Task-oriented recipes for making sound and music with the Tzopilotl audio platform &mdash; synthdefs, node graphs, silos, scheduling, generative sequences, and actors.</p>
+<p class="subtitle">Task-oriented recipes for making sound and music with the Tzopilotl audio platform &mdash; synthdefs, node graphs, silos, scheduling, generative sequences, actors, and the music libraries.</p>
 
 <p>This is a <em>cookbook</em>: each section states the concepts, points at the
 functions you will call (and where to read more), gives working code, and then
@@ -814,6 +824,11 @@ fire while audio is playing.</div>
 
 <!-- ================================================================ -->
 <h2 id="generative">7. Generative sequences</h2>
+<div class="note"><strong>Higher-level option</strong> &mdash; the
+<a href="#musiclibs">music libraries</a> (chapter&nbsp;11) generate event streams
+declaratively and play them for you; this chapter shows the underlying
+hand-rolled technique, which remains the right tool for open-ended reactive
+processes.</div>
 <p>The idiomatic way to generate notes or control values over time is an
 <code>async fn</code> that loops, doing work and then <code>await delay(beats)</code>
 to advance musical time. Inside a silo the delay resolves on the audio beat, so the
@@ -1160,9 +1175,141 @@ they are phase-locked. The two parts then run on separate threads, each
 self-timed against the shared tempo clock 0.</p>
 
 <!-- ================================================================ -->
-<h2 id="appendix">11. Appendix</h2>
+<h2 id="musiclibs">11. The music libraries</h2>
+<p>Everything so far has generated notes by hand &mdash; loops that call
+<code>playNote</code> and wait. The <code>music.*</code> libraries
+(<code>lang/modules/music/</code>) raise the level: four composition dialects, each
+inspired by a different tradition of computer-music system design, all producing the
+same <code>List&lt;Event&gt;</code> so they combine freely and share one player. The
+full API is in the <a href="Music_Libraries.html">Music Libraries Reference</a>;
+this chapter is the tour.</p>
 
-<h3 id="quickref">11.1 Function quick reference</h3>
+<h3 id="musiclibs-events">11.1 One event stream, one tuning step</h3>
+<p>An <code>Event</code> is a note with an absolute onset in beats, a note value
+(<code>dur</code>), a sounding time (<code>sustain</code>), an amplitude, named synth
+params &mdash; and a <em>symbolic</em> pitch. A <code>Pitch</code> is a frequency, a
+tuning step, a scale degree, a ratio, cents, or a rest; it only becomes Hz at play
+time, through a <code>Tuning</code> and <code>Scale</code>. Tunings are real-numbered
+all the way down: any count of equal divisions (including fractional counts) of any
+period ratio, or a cents table for unequal tunings, with real-valued steps and
+degrees interpolating in between.</p>
+<pre><code><span class="kw">import</span> music.core.*;
+
+<span class="kw">let</span> t = bp() root(<span class="num">220.0</span>, <span class="num">0.0</span>);   <span class="cmt">-- 13 equal divisions of the tritave, 220 Hz root</span>
+stepHz(t, <span class="num">6.5</span>)                   <span class="cmt">-- halfway up the tritave, a legal step</span>
+degreeStep(major, -<span class="num">1.0</span>)          <span class="cmt">-- degrees wrap below the root too</span></code></pre>
+<p>Because the events stay symbolic, the <em>same</em> phrase plays in 12ED2, in a
+tritave tuning, or in a just-intonation table by changing one argument to the
+player.</p>
+
+<h3 id="musiclibs-pat">11.2 Streams: music.pat</h3>
+<p>Inspired by SuperCollider's Patterns library and by Sound as Pure Form (SAPF).
+Patterns are ordinary lazy lists &mdash; usually infinite &mdash; so the whole list
+vocabulary applies, plus musical generators (<code>series</code>,
+<code>browns</code>, <code>wpicks</code>, <code>xpicks</code>, <code>shufs</code>,
+<code>lace</code>, <code>stutter</code>&hellip;) and <code>bind</code>, which zips
+one stream per event field:</p>
+<pre><code><span class="kw">import</span> music.pat.*;
+randSeed(<span class="num">2026</span>);                                <span class="cmt">-- reproducible randomness</span>
+
+<span class="kw">let</span> melody = bind(
+    wpicks([<span class="num">0.0</span>, <span class="num">1.0</span>, <span class="num">2.0</span>, <span class="num">4.0</span>], [<span class="num">4.0</span>, <span class="num">2.0</span>, <span class="num">3.0</span>, <span class="num">1.0</span>]) degree,
+    List(<span class="num">0.5</span>, <span class="num">0.25</span>, <span class="num">0.25</span>) cyc,
+    rands(<span class="num">0.2</span>, <span class="num">0.6</span>));
+<span class="kw">let</span> bass = bind(List(-<span class="num">7.0</span>, -<span class="num">5.0</span>) cyc degree, List(<span class="num">2.0</span>) cyc);
+<span class="kw">let</span> tune = merge(melody, bass) takeDur(<span class="num">32.0</span>);  <span class="cmt">-- polyphony is a lazy merge</span></code></pre>
+
+<h3 id="musiclibs-media">11.3 An algebra of pieces: music.media</h3>
+<p>Inspired by Paul Hudak's Haskore and the temporal-media algebra of the
+<em>Haskell School of Music</em>. A <code>Music&lt;T&gt;</code> is a value built
+from notes, rests, sequential (<code>$</code>) and parallel (<code>&amp;</code>)
+composition, and control annotations (<code>tempo</code>, <code>trans</code>,
+<code>dyn</code>, <code>inst</code>) &mdash; so a piece can be analyzed
+(<code>mdur</code>), transformed (<code>retro</code>, <code>mmap</code>), and only
+then <code>perform</code>ed into events:</p>
+<pre><code><span class="kw">import</span> music.media.*;
+
+<span class="kw">fn</span> <span class="fn">deg</span>(d <span class="typ">Float</span>, dur <span class="typ">Float</span>) <span class="typ">Music&lt;Pitch&gt;</span> = note(dur, Pitch.degree(d));
+<span class="kw">let</span> theme = line([deg(<span class="num">0.0</span>, <span class="num">1.0</span>), deg(<span class="num">1.0</span>, <span class="num">1.0</span>), deg(<span class="num">2.0</span>, <span class="num">0.5</span>), deg(<span class="num">4.0</span>, <span class="num">1.5</span>)]);
+<span class="kw">let</span> canon = theme &amp; (mrest(<span class="num">2.0</span>) $ trans(-<span class="num">4.0</span>, dyn(<span class="num">0.7</span>, theme)));
+<span class="kw">let</span> events = canon perform;    <span class="cmt">-- List&lt;Event&gt;, same as bind produces</span></code></pre>
+
+<h3 id="musiclibs-hmsl">11.4 Shapes and forms: music.shape / music.job</h3>
+<p>Inspired by HMSL (the Hierarchical Music Specification Language). A
+<code>Shape</code> is a sequence of frames over named dimensions; morphological
+operators (<code>retrograde</code>, <code>invertDim</code>,
+<code>transposeDim</code>, <code>warpDim</code>&hellip;) act one dimension at a
+time, and any extra dimension becomes a per-note synth param. Shapes arrange into a
+hierarchy (<code>Coll</code>) whose selection behaviors roll at realize time
+&mdash; each <code>realize</code> is a fresh reading of the form:</p>
+<pre><code><span class="kw">import</span> music.job.*;
+
+<span class="kw">let</span> theme = shape([[<span class="num">0.5</span>, <span class="num">0.0</span>, <span class="num">0.5</span>], [<span class="num">0.25</span>, <span class="num">1.0</span>, <span class="num">0.4</span>], [<span class="num">0.5</span>, <span class="num">3.0</span>, <span class="num">0.5</span>]]);
+<span class="kw">let</span> riffs = [Coll.leaf(theme),
+             Coll.leaf(theme retrograde),
+             Coll.leaf(theme invertDim('degree, <span class="num">2.0</span>))];
+<span class="kw">let</span> form = Coll.rpt((<span class="num">4</span>, Coll.sel((Behavior.shuffled, riffs))));
+<span class="kw">let</span> events = realize(form);    <span class="cmt">-- a different reading every call</span></code></pre>
+
+<h3 id="musiclibs-tidal">11.5 Patterns as functions of time: music.tidal</h3>
+<p>Inspired by Tidal Cycles. A <code>Pattern&lt;T&gt;</code> is a callable value:
+query a time span (in cycles) and get back the value fragments active in it.
+Structure is computed, never stored, so transformations like <code>fast</code>,
+<code>rev</code>, <code>every</code>, <code>iterp</code>, and <code>euclid</code>
+compose freely; continuous signals (<code>sinePat</code>, <code>sawPat</code>) ride
+along and are sampled with <code>segment</code>. <code>patEvents</code> renders
+cycles to the shared event list:</p>
+<pre><code><span class="kw">import</span> music.tidal.*;
+
+<span class="kw">fn</span> <span class="fn">d</span>(x <span class="typ">Float</span>) <span class="typ">Pattern&lt;Pitch&gt;</span> = pure(Pitch.degree(x));
+<span class="kw">let</span> tune = stack([
+    d(-<span class="num">14.0</span>) euclid(<span class="num">3</span>, <span class="num">8</span>) events(<span class="num">0.8</span>, <span class="num">0.6</span>),
+    fastcat([d(<span class="num">0.0</span>), d(<span class="num">4.0</span>), d(<span class="num">5.0</span>), d(<span class="num">7.0</span>)])
+        iterp(<span class="num">4</span>)
+        every(<span class="num">4</span>, <span class="kw">fn</span>(p <span class="typ">Pattern&lt;Pitch&gt;</span>) <span class="typ">Pattern&lt;Pitch&gt;</span> { p rev })
+        events(<span class="num">0.5</span>, <span class="num">0.9</span>)
+        withAmp(sinePat() slow(<span class="num">4.0</span>) range(<span class="num">0.25</span>, <span class="num">0.6</span>) segment(<span class="num">4</span>)),
+]);
+<span class="kw">let</span> events = patEvents(tune, <span class="num">16.0</span>, <span class="num">2.0</span>);   <span class="cmt">-- 16 cycles, 2 beats per cycle</span></code></pre>
+
+<h3 id="musiclibs-play">11.6 Playing and rendering: music.play</h3>
+<p>Whichever dialect produced the events, one player takes them from there.
+<code>score</code> (pure) lowers events to timestamped note commands;
+<code>play</code> groups simultaneous commands into single command bundles
+(section&nbsp;3.2) scheduled at absolute beats on the engine's TempoClock &mdash;
+chords atomic, timing sample-accurate. The returned <code>Player</code> is a live
+handle: <code>replace</code> swaps what's playing, <code>enqueue</code> queues what
+follows, <code>stop</code> releases everything.</p>
+<pre><code><span class="kw">import</span> music.play.*;
+
+engineStart();
+<span class="kw">let</span> v = pitchVoice(<span class="num">101</span>);              <span class="cmt">-- a voice: node, param order, pool size</span>
+voiceBundle(v, <span class="str">"sine_voice"</span>) go(<span class="num">0</span>);   <span class="cmt">-- build the node graph (section 2's synth)</span>
+
+<span class="kw">let</span> p = play(tune, v, et12, pentMinor);
+p replace(realize(form));             <span class="cmt">-- live-swap in an 11.4 reading</span>
+p enqueue(canon perform);             <span class="cmt">-- follow it with the 11.3 canon</span>
+
+<span class="cmt">-- the same events, offline, in a tritave tuning:</span>
+<span class="kw">let</span> h = render(tune, v, <span class="str">"sine_voice"</span>, <span class="str">"/tmp/take.wav"</span>, <span class="num">20.0</span>,
+               bp() root(<span class="num">220.0</span>, <span class="num">0.0</span>), chromatic(<span class="num">13</span>));
+<span class="kw">await</span> renderDone(h);</code></pre>
+<p>For code running <em>inside</em> a silo (section&nbsp;5), use
+<code>scorePlayer</code> with <code>spawn</code> instead &mdash; it walks the same
+score with immediate <code>playNote</code>/<code>releaseNote</code> on the silo's
+audio thread.</p>
+<div class="note"><strong>Runnable examples</strong>
+&mdash; <code>integration-tests/scripts/pat_audible.x</code>,
+<code>media_audible.x</code>, <code>hmsl_audible.x</code>,
+<code>tidal_audible.x</code> (live, one per dialect), and
+<code>pat_nrt.x</code> (offline render in a tritave tuning). Each header has the
+run command. The pure layers are golden-tested in <code>lang/tests/music/</code>.</div>
+
+
+<!-- ================================================================ -->
+<h2 id="appendix">12. Appendix</h2>
+
+<h3 id="quickref">12.1 Function quick reference</h3>
 <table>
   <tr><th>Function</th><th>Module</th><th>Runs at</th></tr>
   <tr><td><code>engineStart / engineStop / masterGain</code></td><td>audio_engine</td><td>NRT</td></tr>
@@ -1175,6 +1322,9 @@ self-timed against the shared tempo clock 0.</p>
   <tr><td><code>attachVM / siloLoad / siloStartAt / detachVM</code></td><td>audio_engine</td><td>NRT</td></tr>
   <tr><td><code>defSynthX / defSynth / listSynthDefs</code></td><td>synthc.compile / synthdef</td><td>NRT</td></tr>
   <tr><td><code>sched / after / at / setTempo / getBeats / cancel</code></td><td>clock</td><td>NRT</td></tr>
+  <tr><td><code>bind / merge / takeDur / perform / realize / patEvents</code></td><td>music.*</td><td>NRT / silo</td></tr>
+  <tr><td><code>play / stop / replace / enqueue / voiceBundle / render</code></td><td>music.play</td><td>NRT</td></tr>
+  <tr><td><code>scorePlayer</code></td><td>music.play</td><td>silo</td></tr>
   <tr><td><code>renderNRT / renderDone / stopRender / endRender</code></td><td>audio_engine</td><td>NRT</td></tr>
   <tr><td><code>spawn / send / receive / register / sendByName</code></td><td>(builtin)</td><td>NRT / silo</td></tr>
   <tr><td><code>runActors / serveActors</code></td><td>(builtin)</td><td>NRT</td></tr>
@@ -1186,11 +1336,12 @@ self-timed against the shared tempo clock 0.</p>
   <tr><td><code>await delay(beats) / awaitAll</code></td><td>(builtin) / futures</td><td>NRT / silo</td></tr>
 </table>
 
-<h3 id="more">11.2 Where to read more</h3>
+<h3 id="more">12.2 Where to read more</h3>
 <table>
   <tr><th>Topic</th><th>Reference</th></tr>
   <tr><td>Language syntax, async/await, pattern matching</td><td><a href="Tzopilotl_by_Example.html">Tzopilotl By Example</a></td></tr>
   <tr><td>All built-in functions</td><td><a href="Builtin_Functions.html">Builtin Functions</a></td></tr>
+  <tr><td>The music libraries: events, tunings, and the four dialects</td><td><a href="Music_Libraries.html">Music Libraries Reference</a></td></tr>
   <tr><td>Embedding, FFI, OSC, NATS, Clock/Tempo, Silo VM, NRT render, binary messages</td><td><a href="FFI_Guide.html">FFI Guide</a></td></tr>
   <tr><td>Engine FFI surface (every node/connection/note call)</td><td><a href="FFI_Guide.html#audio-engine">FFI Guide &mdash; Audio Engine</a></td></tr>
   <tr><td>Engine design: silos, nodes, commands, voices, topo sort</td><td><code>engine/Architecture.md</code>, <code>engine/CLAUDE.md</code></td></tr>

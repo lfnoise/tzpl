@@ -1,0 +1,25 @@
+-- basic score
+0.0: noteOn(101, 0, [440.0, 0.9])
+0.5: noteOff(101, 0)
+2.0: noteOn(101, 1, [880.0, 0.4])
+2.25: noteOff(101, 1)
+PASS score length (rest skipped)
+PASS first onset
+PASS release at sustain
+PASS freq param
+PASS amp param
+PASS extra param by name
+PASS default param
+PASS pitch nn encodes BP exactly
+-- overlap score
+0.0: noteOn(101, 0, [261.6255653005986, 0.5])
+1.0: noteOn(101, 1, [329.6275569128699, 0.5])
+1.5: noteOff(101, 1)
+2.0: noteOn(101, 2, [391.99543598174927, 0.5])
+2.5: noteOff(101, 2)
+4.0: noteOff(101, 0)
+PASS overlap count
+PASS overlap times ordered
+PASS noteID round robin
+PASS score is lazy over infinite events
+12 passed, 0 failed
