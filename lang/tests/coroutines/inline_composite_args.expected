@@ -1,0 +1,8 @@
+Option<Float>.some(1.5)
+Option<Float>.some(2.0)
+Option<Float>.some(10.0)
+Option<Float>.none
+[1.5, 2.0, 10.0]
+[31.5, 1.5]
+[42, 2]
+[11.5, 20.0]

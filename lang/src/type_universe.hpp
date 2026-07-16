@@ -122,6 +122,19 @@ public:
     FutureType* futureType(Type* valueType);
     ActorType* actorType(Type* msgType);
 
+    // Monomorphized template struct/enum identity. Every TypeChecker (each
+    // module compiles with its own) monomorphizes independently, but the
+    // template DECLARATIONS are shared -- so (decl, typeArgs) keys a global
+    // identity: the importer's Music<Pitch> must be pointer-equal to the
+    // defining module's, or cross-module signatures would never unify.
+    Type* findMonoNominal(void const* decl, const std::vector<Type*>& args) const {
+        auto it = monoNominalCache_.find(DeclArgsKey{decl, args});
+        return it == monoNominalCache_.end() ? nullptr : it->second;
+    }
+    void registerMonoNominal(void const* decl, const std::vector<Type*>& args, Type* t) {
+        monoNominalCache_[DeclArgsKey{decl, args}] = t;
+    }
+
     // Convenience overloads accepting any container with .data() and .size()
     template <typename Container>
     TupleType* tupleType(const Container& fields) {
@@ -136,6 +149,17 @@ public:
 private:
     BuiltinTypes types_;
     BuiltinSymbols syms_;
+
+    // (template decl, type args) -> monomorphized nominal type
+    using DeclArgsKey = std::pair<void const*, std::vector<Type*>>;
+    struct DeclArgsHash {
+        size_t operator()(const DeclArgsKey& k) const noexcept {
+            size_t h = std::hash<void const*>{}(k.first);
+            h ^= TypeVecHash{}(k.second) + 0x9e3779b9 + (h << 6) + (h >> 2);
+            return h;
+        }
+    };
+    std::unordered_map<DeclArgsKey, Type*, DeclArgsHash> monoNominalCache_;
 
     // Type interning caches (system-allocated std containers)
     std::unordered_map<Type*, ArrayType*> arrayTypeCache_;

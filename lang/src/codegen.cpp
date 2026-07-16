@@ -1351,8 +1351,10 @@ void CodeGen::genMonoInstance(FuncInfo& monoInfo) {
     currentBlock_->name = compiler_.intern(decl->name);
     currentBlock_->numArgs = (u16)decl->params.size();
 
-    // For coroutine functions, set funcType on CodeBlock (for op_coro_create)
-    if (decl->isCoroutine) {
+    // Phase 4g.2: set funcType on every CodeBlock (not just coroutines --
+    // op_coro_create needs it there, but op_tail_call and the lambda-call
+    // opcodes read param slot widths from it to copy multi-word inline args).
+    {
         TypeVec argTV(rt::STLAllocator<Type*>(nullptr));
         for (auto& pt : monoInfo.paramTypes) argTV.push_back(pt);
         currentBlock_->funcType = compiler_.functionType(argTV, monoInfo.returnType);
@@ -1945,7 +1947,14 @@ void CodeGen::genForStmt(ForStmtNode* stmt) {
 
     // Strategy 3: For-loop over List
     if (auto* listType = dynamic_cast<ListType*>(iterType)) {
-        u16 listReg = genExpr(static_cast<Expr*>(stmt->iterable.get()));
+        u16 srcReg = genExpr(static_cast<Expr*>(stmt->iterable.get()));
+
+        // Iterate on a CURSOR COPY: the tail-advance below overwrites this
+        // register in place, and genExpr returns the variable's own register
+        // for a simple identifier -- without the copy, `for (x : xs)` would
+        // consume xs (leaving it nil after the loop).
+        u16 listReg = allocReg();
+        emitMov(listReg, srcReg);
 
         // loopStart:
         u16 loopSavedReg = nextReg_;
@@ -1957,7 +1966,9 @@ void CodeGen::genForStmt(ForStmtNode* stmt) {
 
         u32 exitJump = emitJump(op_jump_if_true, isNilReg);
 
-        u16 headReg = allocReg();
+        // op_list_head writes payloadWords_ words -- reserve a slot wide
+        // enough for Inline multi-word elements (e.g. a (Float, T) tuple).
+        u16 headReg = allocSlot(listType->elemType_);
         emitOp(op_list_head);
         emitRegs(headReg, listReg);
 

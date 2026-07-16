@@ -767,8 +767,10 @@ void VM::spawnActorDrive(ActorObj* actor, Lambda* behavior,
     Type* voidT = typeUniverse_.types().voidType;
     FutureType* futVoid = typeUniverse_.futureType(voidT);
 
+    // numArgs here is already a word count: self and each extra arg / free
+    // var occupy one word apiece in this path.
     auto* coro = CoroutineObj::create(reinterpret_cast<CoroutineType*>(futVoid),
-                                      funcType, codeBlock, numArgs);
+                                      funcType, codeBlock, numArgs, numArgs);
     coro->args_[0].o = actor;
     for (u16 i = 0; i < nExtra; ++i) coro->args_[(u16)(1 + i)] = extraArgs[i];
     for (u16 i = 0; i < nFree; ++i)  coro->args_[(u16)(1 + nExtra + i)] = behavior->freeVars_[i];

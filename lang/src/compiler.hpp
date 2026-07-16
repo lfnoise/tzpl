@@ -190,6 +190,8 @@ public:
     Type* anyType() const { return typeUniverse_.types().anyType; }
     TupleType* unitType() const { return typeUniverse_.types().unitType; }
 
+    TypeUniverse& typeUniverse() { return typeUniverse_; }
+
     // --- Composite type interning (delegate to TypeUniverse) ---
     ArrayType* arrayType(Type* elemType) { return typeUniverse_.arrayType(elemType); }
     ListType* listType(Type* elemType) { return typeUniverse_.listType(elemType); }

@@ -789,7 +789,8 @@ CoroutineFrame* CoroutineFrame::create(CoroutineType* type, CodeBlock* cb, u16 n
 }
 
 // CoroutineObj constructor (private — use CoroutineObj::create())
-CoroutineObj::CoroutineObj(Type* coroType, FunctionType* funcType, CodeBlock* entryBlock, u16 numArgs)
+CoroutineObj::CoroutineObj(Type* coroType, FunctionType* funcType, CodeBlock* entryBlock,
+                           u16 numArgs, u16 numArgWords)
     : Obj(coroType)
     , entryBlock_(entryBlock)
     , state_(Created)
@@ -803,16 +804,17 @@ CoroutineObj::CoroutineObj(Type* coroType, FunctionType* funcType, CodeBlock* en
     , callerCoroutine_(nullptr)
     , funcType_(funcType)
     , numArgs_(numArgs)
+    , numArgWords_(numArgWords)
 {
-    for (u16 i = 0; i < numArgs; ++i) args_[i] = Word();
+    for (u16 i = 0; i < numArgWords; ++i) args_[i] = Word();
 }
 
 // CoroutineObj factory
 CoroutineObj* CoroutineObj::create(CoroutineType* coroType, FunctionType* funcType,
-                                    CodeBlock* entryBlock, u16 numArgs) {
-    usize size = sizeof(CoroutineObj) + numArgs * sizeof(Word);
+                                    CodeBlock* entryBlock, u16 numArgs, u16 numArgWords) {
+    usize size = sizeof(CoroutineObj) + numArgWords * sizeof(Word);
     void* mem = GCObj::operator new(size);
-    auto* coro = new(mem) CoroutineObj(coroType, funcType, entryBlock, numArgs);
+    auto* coro = new(mem) CoroutineObj(coroType, funcType, entryBlock, numArgs, numArgWords);
     registerNewObj(coro);
     return coro;
 }

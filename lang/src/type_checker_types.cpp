@@ -303,13 +303,6 @@ StructType* TypeChecker::monomorphizeStruct(const std::string& name,
         }
     }
 
-    // Resolve field types with bindings active
-    NameTypePairVec fields(rt::STLAllocator<NameTypePair>(nullptr));
-    for (auto& field : decl->fields) {
-        Type* t = resolveTypeExpr(field.typeExpr.get());
-        fields.push_back(NameTypePair{compiler_.intern(field.name), t});
-    }
-
     // Build display name: Name<T1, T2, ...>
     std::string displayName = name + "<";
     for (size_t i = 0; i < typeArgs.size(); ++i) {
@@ -319,13 +312,40 @@ StructType* TypeChecker::monomorphizeStruct(const std::string& name,
     }
     displayName += ">";
 
-    // Create the monomorphized StructType
-    auto* structType = new StructType(compiler_.intern(displayName), std::move(fields), decl->isTupleStruct);
+    // Cross-checker identity: another TypeChecker (a module's) may already
+    // have monomorphized this decl with these args -- reuse its type, or
+    // cross-module signatures would never unify.
+    if (Type* prior = compiler_.typeUniverse().findMonoNominal(decl, typeArgs)) {
+        auto* priorStruct = static_cast<StructType*>(prior);
+        monoStructCache_[key] = priorStruct;
+        structTypes_[displayName] = priorStruct;
+        monoOrigin_[priorStruct] = MonoOrigin{name, typeArgs};
+        typeParamBindings_ = savedBindings;
+        return priorStruct;
+    }
 
-    // Cache and register (by display name for pattern matching lookup)
+    // Create the monomorphized StructType with empty fields and cache it
+    // BEFORE resolving field types, so a self-referential template struct
+    // (e.g. struct Tree<T> { kids [Tree<T>] }) resolves its recursive
+    // mention to this same type instead of re-entering monomorphization
+    // forever. Mirrors the two-pass register-then-resolve scheme used for
+    // non-generic declarations in checkProgram.
+    NameTypePairVec empty(rt::STLAllocator<NameTypePair>(nullptr));
+    auto* structType = new StructType(compiler_.intern(displayName), std::move(empty), decl->isTupleStruct);
     monoStructCache_[key] = structType;
     structTypes_[displayName] = structType;
     monoOrigin_[structType] = MonoOrigin{name, typeArgs};
+    compiler_.typeUniverse().registerMonoNominal(decl, typeArgs, structType);
+
+    // Resolve field types with bindings active (may recursively hit the
+    // cache entry above), then install them; setFields re-classifies with
+    // the cycle guard, marking genuine recursion sticky.
+    NameTypePairVec fields(rt::STLAllocator<NameTypePair>(nullptr));
+    for (auto& field : decl->fields) {
+        Type* t = resolveTypeExpr(field.typeExpr.get());
+        fields.push_back(NameTypePair{compiler_.intern(field.name), t});
+    }
+    structType->setFields(std::move(fields));
 
     // Restore bindings
     typeParamBindings_ = savedBindings;
@@ -382,13 +402,6 @@ EnumType* TypeChecker::monomorphizeEnum(const std::string& name,
         }
     }
 
-    // Resolve case types with bindings active
-    NameTypePairVec cases(rt::STLAllocator<NameTypePair>(nullptr));
-    for (auto& ucase : decl->cases) {
-        Type* t = ucase.typeExpr ? resolveTypeExpr(ucase.typeExpr.get()) : compiler_.voidType();
-        cases.push_back(NameTypePair{compiler_.intern(ucase.name), t});
-    }
-
     // Build display name: Name<T1, T2, ...>
     std::string displayName = name + "<";
     for (size_t i = 0; i < typeArgs.size(); ++i) {
@@ -398,13 +411,40 @@ EnumType* TypeChecker::monomorphizeEnum(const std::string& name,
     }
     displayName += ">";
 
-    // Create the monomorphized EnumType
-    auto* enumType = new EnumType(compiler_.intern(displayName), std::move(cases));
+    // Cross-checker identity: another TypeChecker (a module's) may already
+    // have monomorphized this decl with these args -- reuse its type, or
+    // cross-module signatures would never unify.
+    if (Type* prior = compiler_.typeUniverse().findMonoNominal(decl, typeArgs)) {
+        auto* priorEnum = static_cast<EnumType*>(prior);
+        monoEnumCache_[key] = priorEnum;
+        enumTypes_[displayName] = priorEnum;
+        monoOrigin_[priorEnum] = MonoOrigin{name, typeArgs};
+        typeParamBindings_ = savedBindings;
+        return priorEnum;
+    }
 
-    // Cache and register (by display name for pattern matching lookup)
+    // Create the monomorphized EnumType with empty cases and cache it BEFORE
+    // resolving case types, so a self-referential template enum
+    // (e.g. enum Music<T> { note T, mseq (Music<T>, Music<T>) }) resolves its
+    // recursive mention to this same type instead of re-entering
+    // monomorphization forever. Mirrors the two-pass register-then-resolve
+    // scheme used for non-generic declarations in checkProgram.
+    NameTypePairVec empty(rt::STLAllocator<NameTypePair>(nullptr));
+    auto* enumType = new EnumType(compiler_.intern(displayName), std::move(empty));
     monoEnumCache_[key] = enumType;
     enumTypes_[displayName] = enumType;
     monoOrigin_[enumType] = MonoOrigin{name, typeArgs};
+    compiler_.typeUniverse().registerMonoNominal(decl, typeArgs, enumType);
+
+    // Resolve case types with bindings active (may recursively hit the cache
+    // entry above), then install them; setCases re-classifies with the cycle
+    // guard, marking genuine recursion sticky.
+    NameTypePairVec cases(rt::STLAllocator<NameTypePair>(nullptr));
+    for (auto& ucase : decl->cases) {
+        Type* t = ucase.typeExpr ? resolveTypeExpr(ucase.typeExpr.get()) : compiler_.voidType();
+        cases.push_back(NameTypePair{compiler_.intern(ucase.name), t});
+    }
+    enumType->setCases(std::move(cases));
 
     // Restore bindings
     typeParamBindings_ = savedBindings;

@@ -789,7 +789,7 @@ static void syncResumeCoroutineInto(VM& vm, CoroutineObj* coro, Word* out) {
         auto* frame = CoroutineFrame::create(coroType, callee, callee->numRegs);
         vm.setCurrentCoroFrame(frame);
 
-        for (u16 i = 0; i < coro->numArgs_; ++i) {
+        for (u16 i = 0; i < coro->numArgWords_; ++i) {
             vm.regsBase()[newBase + i] = coro->args_[i];
         }
 

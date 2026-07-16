@@ -360,6 +360,10 @@ private:
     };
     std::unordered_map<Type*, MonoOrigin> monoOrigin_;
 
+    // In-progress (texpr, concrete) pairs for unifyTypeExpr's structural
+    // template walk -- breaks the cycle on self-recursive template types.
+    std::vector<std::pair<TypeExpr*, Type*>> unifyInProgress_;
+
     // Concrete type aliases (resolved)
     std::unordered_map<std::string, Type*> typeAliases_;
 

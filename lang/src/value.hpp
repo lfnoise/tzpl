@@ -117,6 +117,11 @@ void gcScanInlinePointers(Word const* base, Type* type, TracingGC& gc);
 void gcBarrierInlinePointers(Word const* base, Type* type, TracingGC& gc);
 void gcScanPayload(Word const* base, Type* type, TracingGC& gc);
 
+// Register/payload footprint of a value of this type, in Words (>= 1).
+inline u16 typeSizeWords(Type const* t) {
+    return (u16)((t && t->sizeWords_ > 0) ? t->sizeWords_ : 1);
+}
+
 // Box a multi-Word inline-composite payload (Complex / Fraction / Struct /
 // Tuple / Enum) into a single Word. Used by Map/Set get paths where the
 // caller expects a 1-word Obj* (heap-allocated) result. Caller owns the
@@ -1679,13 +1684,20 @@ public:
     // driver resumes us (VM::resumeAsync). Null when running / not awaiting.
     Future*          awaitedFuture_ = nullptr;
 
-    // Initial arguments
+    // Initial arguments. args_ mirrors the callee's parameter register
+    // window WORD-for-word: an Inline multi-word arg (e.g. a 2-word struct)
+    // occupies typeSizeWords(argType) consecutive slots, exactly as it does
+    // at the call site's argBase. numArgs_ counts ARGUMENTS (for default-
+    // entry arity selection); numArgWords_ counts WORDS (for copying and
+    // GC scanning). Lambda-coroutine free vars are appended after the args,
+    // one word each.
     FunctionType*    funcType_;     // for GC scanning of args
     u16              numArgs_;
-    Word             args_[];       // flexible array
+    u16              numArgWords_;
+    Word             args_[];       // flexible array (numArgWords_ words)
 
     static CoroutineObj* create(CoroutineType* coroType, FunctionType* funcType,
-                                CodeBlock* entryBlock, u16 numArgs);
+                                CodeBlock* entryBlock, u16 numArgs, u16 numArgWords);
 
     VMString str() const override {
         // Async coroutines (the body of an async fn) have a FutureType in type_,
@@ -1713,14 +1725,25 @@ public:
         if (awaitedFuture_) gc.mark(reinterpret_cast<GCObj*>(awaitedFuture_));
         if (nextWaiter_) gc.mark(nextWaiter_);
         if (funcType_) {
-            for (u16 i = 0; i < numArgs_ && i < funcType_->argTypes_.size(); ++i) {
-                if (storesObjPtr(funcType_->argTypes_[i]) && args_[i].o) gc.mark(args_[i].o);
+            // Walk args_ with a word cursor: each arg spans typeSizeWords()
+            // slots (Inline composites are stored unboxed, matching the
+            // caller's register layout). gcScanPayload marks the pointer
+            // word of Pointer/Heap args and every embedded Obj* of Inline
+            // composites. Trailing lambda free-var words (beyond the declared
+            // params) have no type here and are kept alive by the Lambda.
+            u16 w = 0;
+            for (u16 i = 0; i < numArgs_ && i < funcType_->argTypes_.size()
+                            && w < numArgWords_; ++i) {
+                Type* at = funcType_->argTypes_[i];
+                gcScanPayload(&args_[w], at, gc);
+                w = (u16)(w + typeSizeWords(at));
             }
         }
     }
 
 private:
-    CoroutineObj(Type* coroType, FunctionType* funcType, CodeBlock* entryBlock, u16 numArgs);
+    CoroutineObj(Type* coroType, FunctionType* funcType, CodeBlock* entryBlock,
+                 u16 numArgs, u16 numArgWords);
 };
 
 // Future - the result of an async computation. Pending until resolved with a

@@ -3902,10 +3902,20 @@ void op_call_lambda(VM& vm, Code* pc) {
     Code* returnPC = pc + 2;
     vm.pushFrame(returnPC, callee, newBase, callee->numRegs, resultReg);
 
-    // Copy free vars into callee's registers right after the args
-    // Use numArgs (total param count) instead of argc so defaults don't clobber free vars
+    // Copy free vars into callee's registers right after the args.
+    // Use the full param WORD span (multi-word inline params occupy
+    // typeSizeWords registers each; defaults must not clobber free vars).
+    u16 paramWords = callee->numArgs;
+    if (callee->funcType) {
+        auto* ft = static_cast<FunctionType*>(callee->funcType);
+        u16 sum = 0;
+        for (size_t i = 0; i < ft->argTypes_.size(); ++i) {
+            sum = (u16)(sum + typeSizeWords(ft->argTypes_[i]));
+        }
+        if (sum > paramWords) paramWords = sum;
+    }
     for (u16 i = 0; i < lambda->numFreeVars_; ++i) {
-        vm.reg(callee->numArgs + i) = lambda->freeVars_[i];
+        vm.reg(paramWords + i) = lambda->freeVars_[i];
     }
 
     // Jump to the appropriate entry point (handle default arguments)
@@ -4058,18 +4068,40 @@ void op_tail_call_template_lambda(VM& vm, Code* pc) {
     auto* lambda = static_cast<Lambda*>(vm.reg(calleeReg).o);
     CodeBlock* callee = static_cast<CodeBlock*>(pc[2].p);
 
+    // Phase 4g.2 (mirrors op_tail_call): total slot words may exceed argc
+    // when params are multi-word inline composites.
+    u16 wordCount = argc;
+    if (callee->funcType) {
+        auto* ft = static_cast<FunctionType*>(callee->funcType);
+        u16 sum = 0;
+        for (size_t i = 0; i < ft->argTypes_.size() && i < argc; ++i) {
+            sum = (u16)(sum + typeSizeWords(ft->argTypes_[i]));
+        }
+        if (sum > argc) wordCount = sum;
+    }
+
     // The current frame's register window is about to be overwritten with
     // the callee's args + free vars. Close any open upvalues that point
     // into it so escaping closures see the snapshotted values, not the
     // callee's data.
     vm.closeUpVarsAtOrAbove(&vm.reg(0));
 
-    for (u16 i = 0; i < argc; i++) {
+    for (u16 i = 0; i < wordCount; i++) {
         vm.reg(i) = vm.reg(argBase + i);
     }
 
+    // Free vars land after the full param WORD span (see op_call_lambda).
+    u16 paramWords = callee->numArgs;
+    if (callee->funcType) {
+        auto* ft = static_cast<FunctionType*>(callee->funcType);
+        u16 sum = 0;
+        for (size_t i = 0; i < ft->argTypes_.size(); ++i) {
+            sum = (u16)(sum + typeSizeWords(ft->argTypes_[i]));
+        }
+        if (sum > paramWords) paramWords = sum;
+    }
     for (u16 i = 0; i < lambda->numFreeVars_; ++i) {
-        vm.reg(callee->numArgs + i) = lambda->freeVars_[i];
+        vm.reg(paramWords + i) = lambda->freeVars_[i];
     }
 
     vm.updateCurrentCodeBlock(callee);
@@ -4164,17 +4196,35 @@ void op_tail_call_lambda(VM& vm, Code* pc) {
     auto* lambda = static_cast<Lambda*>(vm.reg(calleeReg).o);
     CodeBlock* callee = lambda->codeBlock_;
 
+    // Phase 4g.2 (mirrors op_tail_call): total slot words may exceed argc
+    // when params are multi-word inline composites; free vars land after
+    // the full param word span.
+    u16 wordCount = argc;
+    u16 paramWords = callee->numArgs;
+    if (callee->funcType) {
+        auto* ft = static_cast<FunctionType*>(callee->funcType);
+        u16 allWords = 0;
+        u16 argWords = 0;
+        for (size_t i = 0; i < ft->argTypes_.size(); ++i) {
+            u16 w = typeSizeWords(ft->argTypes_[i]);
+            allWords = (u16)(allWords + w);
+            if (i < argc) argWords = (u16)(argWords + w);
+        }
+        if (allWords > paramWords) paramWords = allWords;
+        if (argWords > wordCount) wordCount = argWords;
+    }
+
     // Close upvalues pointing into the current frame's register window
     // before the args overwrite those slots.
     vm.closeUpVarsAtOrAbove(&vm.reg(0));
-    // Copy args to r0..r(argc-1)
-    for (u16 i = 0; i < argc; i++) {
+    // Copy arg words to r0..r(wordCount-1)
+    for (u16 i = 0; i < wordCount; i++) {
         vm.reg(i) = vm.reg(argBase + i);
     }
 
     // Copy free vars after the params
     for (u16 i = 0; i < lambda->numFreeVars_; ++i) {
-        vm.reg(callee->numArgs + i) = lambda->freeVars_[i];
+        vm.reg(paramWords + i) = lambda->freeVars_[i];
     }
 
     // Update current frame's codeBlock and ensure its reg window fits the callee
@@ -4723,11 +4773,23 @@ void op_coro_create(VM& vm, Code* pc) {
     // Get function type from the code block
     auto* funcType = static_cast<FunctionType*>(codeBlock->funcType);
 
-    // Allocate CoroutineObj with space for args
-    auto* coro = CoroutineObj::create(coroType, funcType, codeBlock, argc);
+    // Args occupy one register window word per typeSizeWords (Inline
+    // composites are unboxed multi-word values) -- copy WORDS, not args.
+    // funcType can be null (e.g. monomorphized templates); fall back to one
+    // word per arg.
+    u16 argWords = argc;
+    if (funcType) {
+        argWords = 0;
+        for (u16 i = 0; i < argc && i < funcType->argTypes_.size(); ++i) {
+            argWords = (u16)(argWords + typeSizeWords(funcType->argTypes_[i]));
+        }
+    }
 
-    // Copy arguments into coroutine
-    for (u16 i = 0; i < argc; ++i) {
+    // Allocate CoroutineObj with space for args
+    auto* coro = CoroutineObj::create(coroType, funcType, codeBlock, argc, argWords);
+
+    // Copy argument words into coroutine
+    for (u16 i = 0; i < argWords; ++i) {
         coro->args_[i] = vm.reg(argBase + i);
     }
     vm.reg(dst).o = coro;
@@ -4745,17 +4807,30 @@ void op_coro_create_lambda(VM& vm, Code* pc) {
     CodeBlock* codeBlock = lambda->codeBlock_;
     auto* funcType = static_cast<FunctionType*>(codeBlock->funcType);
 
+    // Declared args are copied word-accurately (Inline composites span
+    // typeSizeWords registers); free vars are single words appended after.
+    // funcType can be null (e.g. monomorphized templates); fall back to one
+    // word per arg.
+    u16 argWords = argc;
+    if (funcType) {
+        argWords = 0;
+        for (u16 i = 0; i < argc && i < funcType->argTypes_.size(); ++i) {
+            argWords = (u16)(argWords + typeSizeWords(funcType->argTypes_[i]));
+        }
+    }
+
     // Total stored values: args + free vars
     u16 totalArgs = argc + lambda->numFreeVars_;
-    auto* coro = CoroutineObj::create(coroType, funcType, codeBlock, totalArgs);
+    u16 totalWords = (u16)(argWords + lambda->numFreeVars_);
+    auto* coro = CoroutineObj::create(coroType, funcType, codeBlock, totalArgs, totalWords);
 
-    // Copy function arguments
-    for (u16 i = 0; i < argc; ++i) {
+    // Copy function argument words
+    for (u16 i = 0; i < argWords; ++i) {
         coro->args_[i] = vm.reg(argBase + i);
     }
     // Copy free variables from Lambda
     for (u16 i = 0; i < lambda->numFreeVars_; ++i) {
-        coro->args_[argc + i] = lambda->freeVars_[i];
+        coro->args_[argWords + i] = lambda->freeVars_[i];
     }
 
     vm.reg(dst).o = coro;
@@ -4795,8 +4870,8 @@ void op_coro_resume(VM& vm, Code* pc) {
         auto* frame = CoroutineFrame::create(coroType, callee, callee->numRegs);
         vm.setCurrentCoroFrame(frame);
 
-        // Copy args from CoroutineObj into flat register file
-        for (u16 i = 0; i < coro->numArgs_; ++i) {
+        // Copy arg words from CoroutineObj into flat register file
+        for (u16 i = 0; i < coro->numArgWords_; ++i) {
             vm.regsBase()[newBase + i] = coro->args_[i];
         }
 
@@ -4996,12 +5071,24 @@ void op_async_call(VM& vm, Code* pc) {
     Type* valueType = futType->valueType_;
     u16 valueWords = (u16)((valueType && valueType->sizeWords_ > 0) ? valueType->sizeWords_ : 1);
 
+    // Args occupy one register window word per typeSizeWords (Inline
+    // composites are unboxed multi-word values) -- copy WORDS, not args.
+    // funcType can be null (e.g. monomorphized templates); fall back to one
+    // word per arg.
+    u16 argWords = argc;
+    if (funcType) {
+        argWords = 0;
+        for (u16 i = 0; i < argc && i < funcType->argTypes_.size(); ++i) {
+            argWords = (u16)(argWords + typeSizeWords(funcType->argTypes_[i]));
+        }
+    }
+
     // Allocation ordering matters for GC: root each object (currentCoroutine_,
     // then via coro->resultFuture_, then currentCoroFrame_) before the next
     // allocation, so a collection triggered mid-construction can't free it.
     auto* coro = CoroutineObj::create(reinterpret_cast<CoroutineType*>(futType),
-                                      funcType, codeBlock, argc);
-    for (u16 i = 0; i < argc; ++i) coro->args_[i] = vm.reg(argBase + i);
+                                      funcType, codeBlock, argc, argWords);
+    for (u16 i = 0; i < argWords; ++i) coro->args_[i] = vm.reg(argBase + i);
 
     // Drive to first suspension/completion; return to pc+4 afterward. Save the
     // caller's coroutine context BEFORE overwriting currentCoroutine_.
@@ -5023,7 +5110,7 @@ void op_async_call(VM& vm, Code* pc) {
     CodeBlock* callee = coro->entryBlock_;
     auto* frame = CoroutineFrame::create(nullptr, callee, callee->numRegs);
     vm.setCurrentCoroFrame(frame);         // root the save frame before pushFrame
-    for (u16 i = 0; i < coro->numArgs_; ++i) vm.regsBase()[newBase + i] = coro->args_[i];
+    for (u16 i = 0; i < coro->numArgWords_; ++i) vm.regsBase()[newBase + i] = coro->args_[i];
     vm.pushFrame(nullptr, callee, newBase, callee->numRegs, 0);
     Code* entry;
     if (!callee->defaultEntryOffsets.empty()) {

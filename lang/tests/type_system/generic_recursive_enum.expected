@@ -1,0 +1,8 @@
+6
+3
+Tree<Int>.node(Tree<Int>.leaf(1), Tree<Int>.node(Tree<Int>.leaf(2), Tree<Int>.leaf(3)))
+2
+Tree<String>.node(Tree<String>.leaf(a), Tree<String>.leaf(b))
+42
+4
+Rose<Float>.branch([Rose<Float>.tip(1.0), Rose<Float>.branch([Rose<Float>.tip(2.0), Rose<Float>.tip(3.0)]), Rose<Float>.tip(4.0)])

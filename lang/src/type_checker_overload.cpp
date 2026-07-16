@@ -701,6 +701,41 @@ bool TypeChecker::unifyTypeExpr(TypeExpr* texpr, Type* concrete,
             return false;
         }
 
+        // Fast path: the monomorphized type records its origin template and
+        // type args, so unify directly against those. This is not just an
+        // optimization -- the structural fallback below walks every field/case
+        // type, which never terminates for a self-recursive template
+        // (e.g. enum Music<T> { note T, mseq (Music<T>, Music<T>) }: deducing
+        // T from the mseq case requires unifying M<T> against M<Int> again).
+        if (auto originIt = monoOrigin_.find(concrete); originIt != monoOrigin_.end()) {
+            auto const& origin = originIt->second;
+            if (origin.templateName == tmplNode->name &&
+                origin.typeArgs.size() == tmplNode->typeArgs.size()) {
+                for (size_t i = 0; i < tmplNode->typeArgs.size(); ++i) {
+                    if (!unifyTypeExpr(tmplNode->typeArgs[i].get(), origin.typeArgs[i],
+                                       typeParams, bindings))
+                        return false;
+                }
+                return true;
+            }
+        }
+
+        // Structural fallback (e.g. the concrete type was monomorphized by a
+        // DIFFERENT TypeChecker -- a module import -- so this checker's
+        // monoOrigin_ has no entry). Self-recursive templates make this walk
+        // cyclic: deducing T for Music<T> vs Music<Pitch> revisits the same
+        // (texpr, concrete) pair through the recursive case. Guard with an
+        // in-progress stack and treat re-entry as success (coinductive: the
+        // outer frame completes the bindings).
+        for (auto const& fr : unifyInProgress_) {
+            if (fr.first == texpr && fr.second == concrete) return true;
+        }
+        unifyInProgress_.push_back({texpr, concrete});
+        struct UnifyGuard {
+            std::vector<std::pair<TypeExpr*, Type*>>& stack;
+            ~UnifyGuard() { stack.pop_back(); }
+        } unifyGuard{unifyInProgress_};
+
         // Get the type args from the template declaration and the concrete type
         // We need to look up the template declaration to get the field/case types
         if (structType) {
