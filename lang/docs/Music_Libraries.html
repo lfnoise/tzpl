@@ -478,7 +478,7 @@ p stop;
             <table>
                 <tr><th>Type / Function</th><th>Description</th></tr>
                 <tr><td><code>Music&lt;T&gt;</code></td><td><code>note (Float, T)</code>, <code>rest Float</code>, <code>mseq</code>, <code>mpar</code>, <code>ctl (Control, Music&lt;T&gt;)</code>.</td></tr>
-                <tr><td><code>a $ b</code> / <code>a &amp; b</code></td><td>Sequential / parallel composition (operator overloads on <code>Music</code>).</td></tr>
+                <tr><td><code>a $ b</code> / <code>a | b</code></td><td>Sequential / parallel composition (operator overloads on <code>Music</code>; <code>|</code> as in the pi calculus).</td></tr>
                 <tr><td><code>note(d, x)</code> / <code>mrest(d)</code></td><td>A note / a <code>Music&lt;Pitch&gt;</code> rest (for other payloads write <code>Music&lt;T&gt;.rest(d)</code>).</td></tr>
                 <tr><td><code>line(ms)</code> / <code>chord(ms)</code> / <code>times(n, m)</code></td><td>Fold an array sequentially / in parallel / repeat n times.</td></tr>
                 <tr><td><code>tempo(k, m)</code> / <code>trans(k, m)</code> / <code>dyn(k, m)</code> / <code>inst(i, m)</code></td><td>Controls: divide durations; transpose step/degree pitches by a real amount; scale amplitude; tag a subtree with an instrument (emitted as an <code>'inst</code> param).</td></tr>
@@ -494,7 +494,7 @@ p stop;
 <span class="hl-kw">let</span> theme = line([deg(<span class="hl-num">0.0</span>, <span class="hl-num">1.0</span>), deg(<span class="hl-num">1.0</span>, <span class="hl-num">1.0</span>), deg(<span class="hl-num">2.0</span>, <span class="hl-num">0.5</span>), deg(<span class="hl-num">4.0</span>, <span class="hl-num">1.5</span>)]);
 
 <span class="cmt">-- the theme against itself: two beats late, a fifth down, quieter</span>
-<span class="hl-kw">let</span> canon = theme &amp; (mrest(<span class="hl-num">2.0</span>) $ trans(-<span class="hl-num">4.0</span>, dyn(<span class="hl-num">0.7</span>, theme)));
+<span class="hl-kw">let</span> canon = theme | (mrest(<span class="hl-num">2.0</span>) $ trans(-<span class="hl-num">4.0</span>, dyn(<span class="hl-num">0.7</span>, theme)));
 
 canon mdur                       <span class="cmt">-- 6.0</span>
 canon retro perform showEvents;  <span class="cmt">-- reversed, as events</span>

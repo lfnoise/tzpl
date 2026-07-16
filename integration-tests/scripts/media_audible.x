@@ -38,11 +38,11 @@ let theme = line([deg(0.0, 1.0), deg(1.0, 1.0), deg(2.0, 0.5), deg(1.0, 0.5),
 
 -- theme against itself: two beats late, a fifth down, quieter
 let canon = theme
-          & (mrest(2.0) $ trans(-4.0, dyn(0.7, theme)));
+          | (mrest(2.0) $ trans(-4.0, dyn(0.7, theme)));
 
 -- close with the theme in doubled tempo over a low drone
 let coda = tempo(2.0, theme)
-         & dyn(0.6, note(3.0, Pitch.degree(-7.0)));
+         | dyn(0.6, note(3.0, Pitch.degree(-7.0)));
 
 let piece = canon $ mrest(0.5) $ coda;
 

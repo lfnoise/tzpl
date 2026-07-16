@@ -6,11 +6,12 @@
 -- Composition operators (fixed token set -- no new infix tokens exist):
 --
 --     a $ b     sequential (Haskore's :+: inspired this)
---     a & b     parallel   (Haskore's :=: inspired this)
+--     a | b     parallel   (Haskore's :=: inspired this; | as in the
+--               pi calculus)
 --
 --     let tune = line([note(1.0, Pitch.degree(0.0)),
 --                      note(1.0, Pitch.degree(2.0))])
---                & trans(-7.0, note(2.0, Pitch.degree(0.0)));
+--                | trans(-7.0, note(2.0, Pitch.degree(0.0)));
 --     tune perform play(freqVoice(101));
 --
 -- `perform` interprets a Music into the shared List<Event>; the canned
@@ -48,7 +49,7 @@ fn note<T>(d Float, x T) Music<T> = Music<T>.note((d, x));
 fn mrest(d Float) Music<Pitch> = Music<Pitch>.rest(d);
 
 fn $<T>(a Music<T>, b Music<T>) Music<T> = Music<T>.mseq((a, b));
-fn &<T>(a Music<T>, b Music<T>) Music<T> = Music<T>.mpar((a, b));
+fn |<T>(a Music<T>, b Music<T>) Music<T> = Music<T>.mpar((a, b));
 
 -- Sequential composition of a non-empty array.
 fn line<T>(ms [Music<T>]) Music<T> {
@@ -62,7 +63,7 @@ fn line<T>(ms [Music<T>]) Music<T> {
 fn chord<T>(ms [Music<T>]) Music<T> {
     var acc = ms[0];
     var i = 1;
-    while (i < ms length) { acc = acc & ms[i]; i = i + 1; }
+    while (i < ms length) { acc = acc | ms[i]; i = i + 1; }
     acc
 }
 
@@ -112,9 +113,9 @@ fn retro<T>(m Music<T>) Music<T> {
             let da = mdur(a);
             let db = mdur(b);
             if (da >= db) {
-                retro(a) & (Music<T>.rest(da - db) $ retro(b))
+                retro(a) | (Music<T>.rest(da - db) $ retro(b))
             } else {
-                (Music<T>.rest(db - da) $ retro(a)) & retro(b)
+                (Music<T>.rest(db - da) $ retro(a)) | retro(b)
             }
         }
         Music.ctl(p): { let (c, inner) = p; Music<T>.ctl((c, retro(inner))) }

@@ -2,11 +2,11 @@
 import music.media.*;
 import std.test.*;
 
--- $ / & / mdur algebra
+-- $ / | / mdur algebra
 let a = note(1.0, Pitch.degree(0.0));
 let b = note(0.5, Pitch.degree(2.0));
 let c = note(2.0, Pitch.degree(4.0));
-let m1 = a $ b $ (c & note(1.0, Pitch.degree(-3.0)));
+let m1 = a $ b $ (c | note(1.0, Pitch.degree(-3.0)));
 assertNear(m1 mdur, 3.5, 1e-12, "mdur seq+par");
 assertNear((m1 $ mrest(1.5)) mdur, 5.0, 1e-12, "mdur with rest");
 assertNear(tempo(2.0, m1) mdur, 1.75, 1e-12, "tempo halves duration");

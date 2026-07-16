@@ -1222,8 +1222,8 @@ randSeed(<span class="num">2026</span>);                                <span cl
 <h3 id="musiclibs-media">11.3 An algebra of pieces: music.media</h3>
 <p>Inspired by Paul Hudak's Haskore and the temporal-media algebra of the
 <em>Haskell School of Music</em>. A <code>Music&lt;T&gt;</code> is a value built
-from notes, rests, sequential (<code>$</code>) and parallel (<code>&amp;</code>)
-composition, and control annotations (<code>tempo</code>, <code>trans</code>,
+from notes, rests, sequential (<code>$</code>) and parallel (<code>|</code>, as in
+the pi calculus) composition, and control annotations (<code>tempo</code>, <code>trans</code>,
 <code>dyn</code>, <code>inst</code>) &mdash; so a piece can be analyzed
 (<code>mdur</code>), transformed (<code>retro</code>, <code>mmap</code>), and only
 then <code>perform</code>ed into events:</p>
@@ -1231,7 +1231,7 @@ then <code>perform</code>ed into events:</p>
 
 <span class="kw">fn</span> <span class="fn">deg</span>(d <span class="typ">Float</span>, dur <span class="typ">Float</span>) <span class="typ">Music&lt;Pitch&gt;</span> = note(dur, Pitch.degree(d));
 <span class="kw">let</span> theme = line([deg(<span class="num">0.0</span>, <span class="num">1.0</span>), deg(<span class="num">1.0</span>, <span class="num">1.0</span>), deg(<span class="num">2.0</span>, <span class="num">0.5</span>), deg(<span class="num">4.0</span>, <span class="num">1.5</span>)]);
-<span class="kw">let</span> canon = theme &amp; (mrest(<span class="num">2.0</span>) $ trans(-<span class="num">4.0</span>, dyn(<span class="num">0.7</span>, theme)));
+<span class="kw">let</span> canon = theme | (mrest(<span class="num">2.0</span>) $ trans(-<span class="num">4.0</span>, dyn(<span class="num">0.7</span>, theme)));
 <span class="kw">let</span> events = canon perform;    <span class="cmt">-- List&lt;Event&gt;, same as bind produces</span></code></pre>
 
 <h3 id="musiclibs-hmsl">11.4 Shapes and forms: music.shape / music.job</h3>
