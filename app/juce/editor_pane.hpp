@@ -90,6 +90,25 @@ public:
     juce::String activeTabName() const { return tabName(activeTabIndex()); }
     juce::File activeFile() const { return tabFile(activeTabIndex()); }
 
+    // -- Revert / external-change detection --
+    // Reload a tab's content from its file on disk, discarding in-memory
+    // edits and clearing the external-change flag. False if the tab has no
+    // path or the file can no longer be read.
+    bool reloadTab(int index);
+    bool reloadActive() { return reloadTab(activeTabIndex()); }
+
+    // True once checkExternalChanges has seen the tab's file change on disk
+    // since it was last loaded or saved (until the tab is reverted or saved).
+    bool tabExternallyChanged(int index) const;
+    bool activeExternallyChanged() const {
+        return tabExternallyChanged(activeTabIndex());
+    }
+
+    // Poll every file-backed tab's on-disk modification time; flag tabs whose
+    // file changed under us and repaint their titles. Returns true if any
+    // tab's external-change flag flipped (so the menu can refresh).
+    bool checkExternalChanges();
+
     // -- Saving (returns true on success) --
     bool saveTab(int index);                        // to its own path
     bool saveTabAs(int index, juce::File const& f); // adopts the new path
@@ -141,6 +160,11 @@ private:
         juce::File file;                   // invalid = no path yet
         std::unique_ptr<juce::CodeDocument> doc;
         std::unique_ptr<TzplCodeEditor> editor;
+        // On-disk modification time (ms) when this tab was last loaded or
+        // saved; 0 for an untitled tab. Compared against the live mtime to
+        // detect edits made outside the app.
+        juce::int64 diskModTime = 0;
+        bool externallyChanged = false;    // disk copy changed under us
     };
 
     Tab* activeTab() const;

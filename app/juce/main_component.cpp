@@ -183,6 +183,15 @@ void MainComponent::timerCallback() {
         console_.appendLine(line);
     if (notebook_) notebook_->pumpRunQueue();
     refreshControlsWindows();
+
+    // Poll the disk for files edited outside the app about once a second
+    // (the timer runs at 15 Hz). A flipped flag marks the tab and may change
+    // menu state, so refresh the command manager when something changed.
+    if (++externalCheckTicks_ >= 15) {
+        externalCheckTicks_ = 0;
+        if (editorPane_.checkExternalChanges())
+            commands_.commandStatusChanged();
+    }
 }
 
 // A floating window per ui panel not claimed by the shown notebook. Panels
@@ -593,6 +602,29 @@ void MainComponent::closeActiveTabFlow() {
         }));
 }
 
+void MainComponent::revertActiveFlow() {
+    int idx = editorPane_.activeTabIndex();
+    if (!editorPane_.tabHasFilePath(idx)) return;
+    // No in-memory edits to lose: reload silently.
+    if (!editorPane_.tabModified(idx)) {
+        editorPane_.reloadTab(idx);
+        commands_.commandStatusChanged();
+        return;
+    }
+    juce::NativeMessageBox::showOkCancelBox(
+        juce::MessageBoxIconType::WarningIcon,
+        "Revert to Saved",
+        "Discard your changes to \"" + editorPane_.tabName(idx) + "\" and "
+        "reload it from disk?",
+        this,
+        juce::ModalCallbackFunction::create([this, idx](int result) {
+            if (result == 1) {  // 1 = OK, 0 = Cancel
+                editorPane_.reloadTab(idx);
+                commands_.commandStatusChanged();
+            }
+        }));
+}
+
 // ---------------------------------------------------------------------------
 // Eval
 // ---------------------------------------------------------------------------
@@ -751,7 +783,8 @@ void MainComponent::getAllCommands(juce::Array<juce::CommandID>& ids) {
     ids.addArray({
         cmd::fileNew, cmd::fileNewNotebook, cmd::fileNewProject,
         cmd::fileOpen, cmd::fileOpenExample, cmd::fileRevealModules,
-        cmd::fileSave, cmd::fileSaveAs, cmd::fileSaveCopy, cmd::fileClose,
+        cmd::fileSave, cmd::fileSaveAs, cmd::fileSaveCopy, cmd::fileRevert,
+        cmd::fileClose,
 #if !JUCE_MAC
         cmd::quit,
 #endif
@@ -829,6 +862,12 @@ void MainComponent::getCommandInfo(juce::CommandID id,
         break;
     case cmd::fileSaveCopy:
         set("Save a Copy As...", "File");
+        break;
+    case cmd::fileRevert:
+        set("Revert to Saved", "File");
+        // Only meaningful for a file-backed editor tab; the notebook keeps
+        // its own history.
+        info.setActive(!notebookVisible_ && editorPane_.activeHasFilePath());
         break;
     case cmd::fileClose:
         set("Close Tab", "File");
@@ -1026,6 +1065,9 @@ bool MainComponent::perform(InvocationInfo const& info) {
             });
         return true;
     }
+    case cmd::fileRevert:
+        revertActiveFlow();
+        return true;
     case cmd::fileClose:
         closeActiveTabFlow();
         return true;

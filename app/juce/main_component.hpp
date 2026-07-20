@@ -128,6 +128,9 @@ private:
     bool isDistExample(juce::File const& file) const;
     void saveActiveFlow(bool forceDialog, std::function<void(bool)> done = {});
     void closeActiveTabFlow();
+    // Reload the active editor tab from disk, confirming first if it has
+    // unsaved in-memory edits.
+    void revertActiveFlow();
     // Asks about the open notebook's unsaved changes (async) before it is
     // replaced; `proceed` runs only if the user saved or discarded.
     void confirmNotebookDiscardThen(std::function<void()> proceed);
@@ -170,6 +173,8 @@ private:
     std::map<std::string, std::unique_ptr<ControlsWindow>> controlsWindows_;
     std::unique_ptr<PerformView> performView_;
     int fontIndex_ = 0;
+    // Throttles the 15 Hz timer's disk-mtime polling down to ~once/second.
+    int externalCheckTicks_ = 0;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MainComponent)
 };

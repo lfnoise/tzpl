@@ -80,6 +80,7 @@ public:
             m.addCommandItem(&commands_, cmd::fileSave);
             m.addCommandItem(&commands_, cmd::fileSaveAs);
             m.addCommandItem(&commands_, cmd::fileSaveCopy);
+            m.addCommandItem(&commands_, cmd::fileRevert);
             m.addSeparator();
             m.addCommandItem(&commands_, cmd::fileRevealModules);
             m.addSeparator();
@@ -324,6 +325,11 @@ public:
                 continue;
             juce::ApplicationCommandInfo info(id);
             main->getCommandInfo(id, info);
+            // A command that is inactive in the current context (e.g. Revert
+            // with no file-backed tab) legitimately returns false from
+            // invokeDirectly -- that is not a failure, so skip it.
+            if ((info.flags & juce::ApplicationCommandInfo::isDisabled) != 0)
+                continue;
             if (commands_.invokeDirectly(id, false)) ++invoked;
             else {
                 ++failed;
@@ -344,6 +350,7 @@ public:
         // (The command loop left the notebook shown and mutated the active
         // tab via the edit commands -- switch back and start on a clean tab.)
         main->testShowNotebook(false);
+        runRevertSelfTest();
         main->testEditorPane().newTab("evaltest.x");
         evalPhase_ = 0;
         main->testTypeIntoEditor("40 + 2");
@@ -462,6 +469,42 @@ public:
         std::printf("SELFTEST FIND %s: selected \"%s\"\n",
                     ok ? "OK" : "FAILED", selText.toRawUTF8());
         std::fflush(stdout);
+    }
+
+    // Revert + external-change detection: open a temp file, edit it on disk
+    // behind the app's back, confirm the tab is flagged, then reload it.
+    void runRevertSelfTest() {
+        auto& pane = window_->mainComponent()->testEditorPane();
+        auto tmp = juce::File::getSpecialLocation(juce::File::tempDirectory)
+                       .getChildFile("tzpl_revert_selftest.x");
+        tmp.replaceWithText("let a = 1;\n");
+
+        bool opened = pane.openFile(tmp);
+        int idx = pane.activeTabIndex();
+        bool cleanAtOpen = !pane.activeExternallyChanged();
+
+        // Rewrite on disk with a guaranteed-later mtime so the poll sees it
+        // regardless of filesystem timestamp granularity.
+        tmp.replaceWithText("let a = 2;\n");
+        tmp.setLastModificationTime(tmp.getLastModificationTime()
+                                    + juce::RelativeTime::seconds(2));
+
+        bool detected = pane.checkExternalChanges()
+                        && pane.activeExternallyChanged();
+        bool reloaded = pane.reloadActive();
+        bool contentOk = pane.getAllText().contains("let a = 2;");
+        bool flagCleared = !pane.activeExternallyChanged();
+        bool notModified = !pane.tabModified(idx);
+
+        bool ok = opened && cleanAtOpen && detected && reloaded && contentOk
+                  && flagCleared && notModified;
+        std::printf("SELFTEST REVERT %s: detected=%d reloaded=%d content=%d "
+                    "cleared=%d\n", ok ? "OK" : "FAILED", detected, reloaded,
+                    contentOk, flagCleared);
+        std::fflush(stdout);
+
+        pane.closeTab(idx);
+        tmp.deleteFile();
     }
 
     // Finder "open document" events (and second-instance launches) arrive

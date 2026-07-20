@@ -41,6 +41,7 @@ enum : juce::CommandID {
     fileSave,
     fileSaveAs,
     fileSaveCopy,
+    fileRevert,
     fileClose,
     quit, // File > Quit on Windows/Linux; the macOS app menu provides it
 

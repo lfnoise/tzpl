@@ -27,6 +27,15 @@ namespace tzplapp {
 using juce::CodeDocument;
 using juce::String;
 
+namespace {
+// On-disk modification time in ms, or 0 if the file does not exist. Used both
+// to stamp a tab at load/save and to detect later external changes.
+juce::int64 fileModMs(juce::File const& f) {
+    if (f == juce::File() || !f.existsAsFile()) return 0;
+    return f.getLastModificationTime().toMilliseconds();
+}
+}  // namespace
+
 // ---------------------------------------------------------------------------
 // TzplCodeEditor::Overlay -- eval flash + error markers, painted above the
 // text without intercepting mouse events. The flash fades on a timer.
@@ -222,6 +231,7 @@ bool EditorPane::openFile(juce::File const& file) {
     tab->doc->replaceAllContent(file.loadFileAsString());
     tab->doc->setSavePoint();
     tab->doc->clearUndoHistory();
+    tab->diskModTime = fileModMs(file);
     tab->editor = std::make_unique<TzplCodeEditor>(*tab->doc, &tokeniser_);
     addTabInternal(std::move(tab));
     return true;
@@ -278,6 +288,8 @@ bool EditorPane::saveTab(int index) {
     if (!tab || tab->file == juce::File()) return false;
     if (!tab->file.replaceWithText(tab->doc->getAllContent())) return false;
     tab->doc->setSavePoint();
+    tab->diskModTime = fileModMs(tab->file);
+    tab->externallyChanged = false;
     refreshTabTitle(index);
     return true;
 }
@@ -289,6 +301,8 @@ bool EditorPane::saveTabAs(int index, juce::File const& f) {
     tab->file = f;
     tab->name = f.getFileName();
     tab->doc->setSavePoint();
+    tab->diskModTime = fileModMs(f);
+    tab->externallyChanged = false;
     refreshTabTitle(index);
     return true;
 }
@@ -318,9 +332,56 @@ std::vector<String> EditorPane::unsavedFileNames() const {
     return names;
 }
 
+bool EditorPane::reloadTab(int index) {
+    auto* tab = tabAt(index);
+    if (!tab || tab->file == juce::File() || !tab->file.existsAsFile())
+        return false;
+    // Best-effort: keep the caret on the same line number after reloading.
+    int caretLine = tab->editor ? tab->editor->getCaretPos().getLineNumber() : 0;
+    tab->doc->replaceAllContent(tab->file.loadFileAsString());
+    tab->doc->setSavePoint();
+    tab->doc->clearUndoHistory();
+    tab->diskModTime = fileModMs(tab->file);
+    tab->externallyChanged = false;
+    if (tab->editor) {
+        int line = juce::jlimit(0, tab->doc->getNumLines() - 1, caretLine);
+        tab->editor->moveCaretTo(CodeDocument::Position(*tab->doc, line, 0), false);
+    }
+    refreshTabTitle(index);
+    return true;
+}
+
+bool EditorPane::tabExternallyChanged(int index) const {
+    auto* tab = tabAt(index);
+    return tab && tab->externallyChanged;
+}
+
+bool EditorPane::checkExternalChanges() {
+    bool flipped = false;
+    for (int i = 0; i < (int)tabs_.size(); ++i) {
+        auto& tab = tabs_[i];
+        if (tab->file == juce::File()) continue;
+        juce::int64 now = fileModMs(tab->file);
+        // now == 0 means the file was deleted or is unreadable; leave the tab
+        // untouched so its contents are not lost to a transient rename.
+        if (now == 0 || now == tab->diskModTime) continue;
+        tab->diskModTime = now;
+        if (!tab->externallyChanged) {
+            tab->externallyChanged = true;
+            refreshTabTitle(i);
+            flipped = true;
+        }
+    }
+    return flipped;
+}
+
 void EditorPane::refreshTabTitle(int index) {
-    if (auto* tab = tabAt(index))
-        tabsUI_.setTabName(index, tab->name + (tabModified(index) ? "*" : ""));
+    if (auto* tab = tabAt(index)) {
+        String title = tab->name;
+        if (tabModified(index)) title << "*";
+        if (tab->externallyChanged) title << " \xE2\x9A\xA0";  // U+26A0 warning
+        tabsUI_.setTabName(index, title);
+    }
 }
 
 void EditorPane::codeDocumentTextInserted(String const&, int) {
