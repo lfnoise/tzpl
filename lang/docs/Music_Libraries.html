@@ -352,7 +352,8 @@
             <p>An <code>Event</code> is one note (or rest) with an <em>absolute</em> onset in beats. Pitch stays symbolic &mdash; a <code>Pitch</code> value is only resolved to Hz at play time, through a <code>Tuning</code> and <code>Scale</code>, so the same events can be performed in 12ED2, a tritave tuning, or a just-intonation table. Note value and sounding time are distinct fields: <code>dur</code> is the time the note occupies in its line (it drives retrograde, stretching, and spacing); <code>sustain</code> is the time until release (it drives <code>noteOff</code>).</p>
             <table>
                 <tr><th>Type / Function</th><th>Description</th></tr>
-                <tr><td><code>Pitch</code></td><td>Enum: <code>hz(Float)</code>, <code>step(Float)</code> (real-valued tuning step; in <code>et12</code> a step is a MIDI note number), <code>degree(Float)</code> (scale degree, root-relative), <code>ratio(Float)</code>, <code>cents(Float)</code> (both root-relative), <code>rest</code>.</td></tr>
+                <tr><td><code>Pitch</code></td><td>Enum: <code>hz(Float)</code>, <code>step(Float)</code> (real-valued tuning step; in <code>et12</code> a step is a MIDI note number), <code>degree(Int, Float)</code> (whole scale degree + accidental in tuning steps, root-relative), <code>ratio(Float)</code>, <code>cents(Float)</code> (both root-relative), <code>rest</code>.</td></tr>
+                <tr><td><code>degree(d, acc = 0.0)</code></td><td>Canonical degree constructor: <code>degree(4)</code> is scale degree 4, <code>degree(4, 1.0)</code> the same degree sharpened by one tuning step. The accidental is a per-note inflection; to transpose a whole performance chromatically, re-anchor the tuning with <code>transposeRoot</code> instead.</td></tr>
                 <tr><td><code>Event</code></td><td>Struct: <code>t</code>, <code>dur</code>, <code>sustain</code>, <code>amp</code>, <code>pitch</code>, and <code>params [(Symbol, Float)]</code> &mdash; named per-note synth controls.</td></tr>
                 <tr><td><code>event(t, dur, pitch, amp = 0.5, sustain = 0.0, params = [])</code></td><td>Constructor; <code>sustain</code> defaults to <code>0.8 * dur</code> when not given.</td></tr>
                 <tr><td><code>isRest(e)</code></td><td>True when the pitch is <code>Pitch.rest</code>.</td></tr>
@@ -372,9 +373,10 @@
                 <tr><td><code>et12</code></td><td>12ED2 anchored so step = MIDI note number (69 &rarr; 440&nbsp;Hz).</td></tr>
                 <tr><td><code>scala(cents, period = 2.0)</code> / <code>ji(ratios, period = 2.0)</code></td><td>Unequal tunings from a cents table / from just-intonation frequency ratios.</td></tr>
                 <tr><td><code>root(t, hz, step)</code></td><td>Re-anchor: frequency <code>hz</code> at step <code>step</code>.</td></tr>
+                <tr><td><code>transposeRoot(t, k)</code></td><td>Chromatic transposition of the whole performance: re-anchor so degree 0 (and every root-relative pitch) sounds <code>k</code> steps higher. Degree pitches keep their spelling; in a table tuning the new key picks up the temperament's flavor at that root.</td></tr>
                 <tr><td><code>Scale</code></td><td><code>degrees [Float]</code> (steps per degree) + <code>wrap</code> (steps per repetition). Constants: <code>major</code>, <code>minor</code>, <code>dorian</code>, <code>pentMajor</code>, <code>pentMinor</code>, <code>wholeTone</code>; <code>chromatic(k)</code> makes every step a degree.</td></tr>
                 <tr><td><code>stepHz(t, step)</code> / <code>hzStep(t, hz)</code></td><td>Step &harr; frequency, continuous in both directions.</td></tr>
-                <tr><td><code>degreeStep(s, d)</code></td><td>Scale degree &rarr; tuning step; integer part wraps, fractional part interpolates between neighboring degrees. Negative degrees descend below the root.</td></tr>
+                <tr><td><code>degreeStep(s, d)</code></td><td>Integer scale degree &rarr; tuning step, wrapping through the scale in both directions (negative degrees descend below the root).</td></tr>
                 <tr><td><code>degreeHz(t, s, d, acc = 0.0)</code></td><td>Degree &rarr; Hz with an optional accidental in tuning steps.</td></tr>
                 <tr><td><code>pitchHz(p, t, s)</code></td><td>The single play-time resolver for any <code>Pitch</code>.</td></tr>
             </table>
@@ -397,9 +399,9 @@ stepHz(t, <span class="hl-num">13.0</span>)                      <span class="cm
 <span class="cmt">-- 8.5 equal divisions of the octave; fractional steps are ordinary</span>
 stepHz(edo(<span class="hl-num">8.5</span>), <span class="hl-num">4.25</span>)              <span class="cmt">-- halfway up the octave</span>
 
-<span class="cmt">-- degrees resolve through a scale, fractionally and below the root</span>
-degreeStep(major, <span class="hl-num">6.5</span>)               <span class="cmt">-- 11.5</span>
-degreeStep(major, -<span class="hl-num">1.0</span>)              <span class="cmt">-- -1.0 (leading tone below)</span></code></pre>
+<span class="cmt">-- degrees resolve through a scale, wrapping below the root</span>
+degreeStep(major, <span class="hl-num">9</span>)                 <span class="cmt">-- 16.0 (a tenth: octave + third)</span>
+degreeStep(major, -<span class="hl-num">1</span>)                <span class="cmt">-- -1.0 (leading tone below)</span></code></pre>
             <a href="#top" class="back-to-top">&uarr; Back to top</a>
         </div>
 
@@ -416,22 +418,22 @@ degreeStep(major, -<span class="hl-num">1.0</span>)              <span class="cm
                 <tr><td><code>xpicks(xs)</code></td><td>Random choices, never the same element twice in a row.</td></tr>
                 <tr><td><code>shufs(xs)</code></td><td>Concatenated fresh shuffles &mdash; every pass is a new permutation.</td></tr>
                 <tr><td><code>lace(ls)</code></td><td>Round-robin interleave of streams; skips exhausted ones, tolerates infinite ones.</td></tr>
-                <tr><td><code>stutter(ns, xs)</code></td><td>Repeat element i of <code>xs</code> <code>ns[i]</code> times (0 drops it).</td></tr>
+                <tr><td><code>stutter(xs, ns)</code></td><td>Repeat element i of <code>xs</code> <code>ns[i]</code> times (0 drops it); stream first, like the scalar-count <code>stutter</code> builtin.</td></tr>
                 <tr><td><code>once(x)</code> / <code>embed(ls)</code></td><td>One-element stream / flatten a stream of streams one level &mdash; the embedding idiom.</td></tr>
-                <tr><td><code>step</code> / <code>degree</code> / <code>hz</code> / <code>ratio</code> / <code>cents</code> / <code>rest</code></td><td>Scalar <code>Float &rarr; Pitch</code> constructors; auto-mapping lifts them over lists: <code>[0.0, 2.0, 4.0] cyc degree</code>.</td></tr>
+                <tr><td><code>step</code> / <code>hz</code> / <code>ratio</code> / <code>cents</code> / <code>rest</code></td><td>Scalar <code>Float &rarr; Pitch</code> constructors; auto-mapping lifts them (and the core's <code>degree</code>) over lists: <code>[0, 2, 4] cyc degree</code>.</td></tr>
                 <tr><td><code>bind(pitch, dur, amp = 0.5&hellip;, legato = 0.8&hellip;, extras = [])</code></td><td>Zip one stream per event field into <code>List&lt;Event&gt;</code>. Onsets are the running sum of <code>dur</code>; <code>sustain = dur * legato</code>; <code>extras</code> pairs a param name with a value stream. Ends at the shortest input, so any finite stream bounds the result.</td></tr>
             </table>
             <pre><code><span class="hl-kw">import</span> music.pat.*;
 randSeed(<span class="hl-num">2026</span>);
 
 <span class="hl-kw">let</span> melody = bind(
-    wpicks([<span class="hl-num">0.0</span>, <span class="hl-num">1.0</span>, <span class="hl-num">2.0</span>, <span class="hl-num">4.0</span>], [<span class="hl-num">4.0</span>, <span class="hl-num">2.0</span>, <span class="hl-num">3.0</span>, <span class="hl-num">1.0</span>]) degree,  <span class="cmt">-- weighted degrees</span>
+    wpicks([<span class="hl-num">0</span>, <span class="hl-num">1</span>, <span class="hl-num">2</span>, <span class="hl-num">4</span>], [<span class="hl-num">4.0</span>, <span class="hl-num">2.0</span>, <span class="hl-num">3.0</span>, <span class="hl-num">1.0</span>]) degree,  <span class="cmt">-- weighted degrees</span>
     List(<span class="hl-num">0.5</span>, <span class="hl-num">0.25</span>, <span class="hl-num">0.25</span>) cyc,                              <span class="cmt">-- durations</span>
     rands(<span class="hl-num">0.2</span>, <span class="hl-num">0.6</span>),                                        <span class="cmt">-- amplitudes</span>
     List(<span class="hl-num">0.7</span>) cyc,                                          <span class="cmt">-- legato</span>
     [('cutoff, series(<span class="hl-num">800.0</span>, <span class="hl-num">50.0</span>))]);                      <span class="cmt">-- a param stream</span>
 
-<span class="hl-kw">let</span> bass = bind(List(-<span class="hl-num">7.0</span>, -<span class="hl-num">5.0</span>) cyc degree, List(<span class="hl-num">2.0</span>) cyc);
+<span class="hl-kw">let</span> bass = bind(List(-<span class="hl-num">7</span>, -<span class="hl-num">5</span>) cyc degree, List(<span class="hl-num">2.0</span>) cyc);
 <span class="hl-kw">let</span> tune = merge(melody, bass) takeDur(<span class="hl-num">32.0</span>);              <span class="cmt">-- two voices, 32 beats</span></code></pre>
             <a href="#top" class="back-to-top">&uarr; Back to top</a>
         </div>
@@ -474,14 +476,14 @@ p stop;
         <!-- ============================================================ -->
         <div class="section" id="music-media">
             <h2>music.media</h2>
-            <p>An algebra of notes and compositions, inspired by Paul Hudak's Haskore and the temporal-media work in <em>The Haskell School of Music</em>. <code>Music&lt;T&gt;</code> is a recursive value: a note (duration + payload), a rest, two Musics in sequence, two in parallel, or a control annotation over a subtree. Because a piece is a value, it can be analyzed and transformed before it is performed. Payloads are un-timed by design &mdash; time lives in the structure, and <code>Event</code> is the <em>output</em> of <code>perform</code>. Pure and RT-safe.</p>
+            <p>An algebra of notes and compositions, inspired by Paul Hudak's Haskore and the temporal-media work in <em>The Haskell School of Music</em>. <code>Music&lt;T&gt;</code> is a recursive value: a note (duration + payload), a rest, two Musics in sequence, two in parallel, or a control annotation over a subtree. Because a piece is a value, it can be analyzed and transformed before it is performed. Payloads are un-timed by design &mdash; time lives in the structure, and <code>Event</code> is the <em>output</em> of <code>perform</code>. Transformations take the Music first, so pipelines read left-to-right: <code>theme dyn(0.7) trans(-4) tempo(2.0)</code>. Pure and RT-safe.</p>
             <table>
                 <tr><th>Type / Function</th><th>Description</th></tr>
                 <tr><td><code>Music&lt;T&gt;</code></td><td><code>note (Float, T)</code>, <code>rest Float</code>, <code>mseq</code>, <code>mpar</code>, <code>ctl (Control, Music&lt;T&gt;)</code>.</td></tr>
                 <tr><td><code>a $ b</code> / <code>a | b</code></td><td>Sequential / parallel composition (operator overloads on <code>Music</code>).</td></tr>
                 <tr><td><code>note(d, x)</code> / <code>mrest(d)</code></td><td>A note / a <code>Music&lt;Pitch&gt;</code> rest (for other payloads write <code>Music&lt;T&gt;.rest(d)</code>).</td></tr>
-                <tr><td><code>line(ms)</code> / <code>chord(ms)</code> / <code>times(n, m)</code></td><td>Fold an array sequentially / in parallel / repeat n times.</td></tr>
-                <tr><td><code>tempo(k, m)</code> / <code>trans(k, m)</code> / <code>dyn(k, m)</code> / <code>inst(i, m)</code></td><td>Controls: divide durations; transpose step/degree pitches by a real amount; scale amplitude; tag a subtree with an instrument (emitted as an <code>'inst</code> param).</td></tr>
+                <tr><td><code>line(ms)</code> / <code>chord(ms)</code> / <code>times(m, n)</code></td><td>Fold an array sequentially / in parallel / repeat n times.</td></tr>
+                <tr><td><code>tempo(m, k)</code> / <code>trans(m, k)</code> / <code>dyn(m, k)</code> / <code>inst(m, i)</code></td><td>Controls: divide durations; transpose <em>modally</em> &mdash; shift degree pitches by <code>k</code> whole scale degrees, accidentals riding along, other pitch kinds untouched (chromatic transposition of a whole piece is a tuning property: <code>transposeRoot</code>); scale amplitude; tag a subtree with an instrument (emitted as an <code>'inst</code> param).</td></tr>
                 <tr><td><code>mdur(m)</code></td><td>Duration in beats, tempo annotations included.</td></tr>
                 <tr><td><code>retro(m)</code></td><td>Retrograde; parallel branches are rest-padded so they still end together.</td></tr>
                 <tr><td><code>mmap(m, f)</code></td><td>Map over payloads, preserving structure.</td></tr>
@@ -490,11 +492,11 @@ p stop;
             </table>
             <pre><code><span class="hl-kw">import</span> music.media.*;
 
-<span class="hl-kw">fn</span> deg(d Float, dur Float) Music&lt;Pitch&gt; = note(dur, Pitch.degree(d));
-<span class="hl-kw">let</span> theme = line([deg(<span class="hl-num">0.0</span>, <span class="hl-num">1.0</span>), deg(<span class="hl-num">1.0</span>, <span class="hl-num">1.0</span>), deg(<span class="hl-num">2.0</span>, <span class="hl-num">0.5</span>), deg(<span class="hl-num">4.0</span>, <span class="hl-num">1.5</span>)]);
+<span class="hl-kw">fn</span> deg(d Int, dur Float) Music&lt;Pitch&gt; = note(dur, degree(d));
+<span class="hl-kw">let</span> theme = line([deg(<span class="hl-num">0</span>, <span class="hl-num">1.0</span>), deg(<span class="hl-num">1</span>, <span class="hl-num">1.0</span>), deg(<span class="hl-num">2</span>, <span class="hl-num">0.5</span>), deg(<span class="hl-num">4</span>, <span class="hl-num">1.5</span>)]);
 
 <span class="cmt">-- the theme against itself: two beats late, a fifth down, quieter</span>
-<span class="hl-kw">let</span> canon = theme | (mrest(<span class="hl-num">2.0</span>) $ trans(-<span class="hl-num">4.0</span>, dyn(<span class="hl-num">0.7</span>, theme)));
+<span class="hl-kw">let</span> canon = theme | (mrest(<span class="hl-num">2.0</span>) $ (theme dyn(<span class="hl-num">0.7</span>) trans(-<span class="hl-num">4</span>)));
 
 canon mdur                       <span class="cmt">-- 6.0</span>
 canon retro perform showEvents;  <span class="cmt">-- reversed, as events</span>
@@ -513,7 +515,7 @@ canon perform play(v);           <span class="cmt">-- or straight to the player<
                 <tr><td><code>retrograde(sh)</code></td><td>Reverse the frame order.</td></tr>
                 <tr><td><code>invertDim(sh, dim, center)</code> / <code>transposeDim</code> / <code>scaleDim</code> / <code>quantizeDim</code> / <code>warpDim(sh, dim, f)</code></td><td>Per-dimension morphs (reflect, shift, scale, snap to grid, arbitrary function). Missing dimensions are a no-op.</td></tr>
                 <tr><td><code>catShapes(a, b)</code> / <code>interleave(a, b)</code></td><td>Concatenate / alternate frames.</td></tr>
-                <tr><td><code>shapeDur(sh)</code> / <code>shapeEvents(sh, t0 = 0.0, legato = 0.9)</code></td><td>Total beats / render to events (pitch from the first of <code>degree</code>/<code>step</code>/<code>hz</code>/<code>cents</code> present).</td></tr>
+                <tr><td><code>shapeDur(sh)</code> / <code>shapeEvents(sh, t0 = 0.0, legato = 0.9)</code></td><td>Total beats / render to events (pitch from the first of <code>degree</code>/<code>step</code>/<code>hz</code>/<code>cents</code> present). The degree dimension stays Float so morphs can interpolate; rendering rounds it to the nearest whole scale degree.</td></tr>
                 <tr><td><code>Coll</code></td><td><code>leaf Shape</code>, <code>seqc [Coll]</code>, <code>parc [Coll]</code>, <code>rpt (Int, Coll)</code>, <code>sel (Behavior, [Coll])</code>.</td></tr>
                 <tr><td><code>Behavior</code></td><td><code>inOrder</code> (cycle), <code>atRandom</code>, <code>shuffled</code> (no repeat until all seen), <code>weighted [Float]</code>.</td></tr>
                 <tr><td><code>realize(c, t0 = 0.0)</code> / <code>realizeDur(c)</code></td><td>Walk the hierarchy into <code>List&lt;Event&gt;</code>; behaviors and repeats re-roll per call, and selection state advances across visits (e.g. under <code>rpt</code>).</td></tr>
@@ -562,11 +564,11 @@ p enqueue(realize(form));         <span class="cmt">-- a different reading follo
             <pre><code><span class="hl-kw">import</span> music.spans.*;
 <span class="hl-kw">import</span> music.play.*;
 
-<span class="hl-kw">fn</span> d(x Float) Pattern&lt;Pitch&gt; = pure(Pitch.degree(x));
+<span class="hl-kw">fn</span> d(x Int) Pattern&lt;Pitch&gt; = pure(degree(x));
 
 <span class="hl-kw">let</span> tune = stack([
-    d(-<span class="hl-num">14.0</span>) euclid(<span class="hl-num">3</span>, <span class="hl-num">8</span>) events(<span class="hl-num">0.8</span>, <span class="hl-num">0.6</span>),                <span class="cmt">-- euclidean bass</span>
-    fastcat([d(<span class="hl-num">0.0</span>), d(<span class="hl-num">4.0</span>), d(<span class="hl-num">5.0</span>), d(<span class="hl-num">7.0</span>)])
+    d(-<span class="hl-num">14</span>) euclid(<span class="hl-num">3</span>, <span class="hl-num">8</span>) events(<span class="hl-num">0.8</span>, <span class="hl-num">0.6</span>),                <span class="cmt">-- euclidean bass</span>
+    fastcat([d(<span class="hl-num">0</span>), d(<span class="hl-num">4</span>), d(<span class="hl-num">5</span>), d(<span class="hl-num">7</span>)])
         iterp(<span class="hl-num">4</span>)
         every(<span class="hl-num">4</span>, <span class="hl-kw">fn</span>(p Pattern&lt;Pitch&gt;) Pattern&lt;Pitch&gt; { p rev })
         events(<span class="hl-num">0.5</span>, <span class="hl-num">0.9</span>)
@@ -586,7 +588,7 @@ play(patEvents(tune, <span class="hl-num">16.0</span>, <span class="hl-num">2.0<
                 <tr><th>Script</th><th>Shows</th></tr>
                 <tr><td><code>integration-tests/scripts/pat_audible.x</code></td><td>Stream patterns live: weighted-random melody + bass via <code>bind</code>/<code>merge</code>.</td></tr>
                 <tr><td><code>integration-tests/scripts/pat_nrt.x</code></td><td>Offline render of a tritave-tuning walk (13 equal divisions of 3/1) via <code>render</code>.</td></tr>
-                <tr><td><code>integration-tests/scripts/media_audible.x</code></td><td>A canon built with <code>$</code>/<code>&amp;</code>/<code>trans</code>/<code>tempo</code> and performed.</td></tr>
+                <tr><td><code>integration-tests/scripts/media_audible.x</code></td><td>A canon built with <code>$</code>/<code>|</code>/<code>trans</code>/<code>tempo</code> and performed.</td></tr>
                 <tr><td><code>integration-tests/scripts/hmsl_audible.x</code></td><td>Shape morphs + a shuffled hierarchical form, three readings queued on one Player.</td></tr>
                 <tr><td><code>integration-tests/scripts/spans_audible.x</code></td><td>Euclidean bass, offbeat stab, rotating/reversing melody with a sine-ridden amp.</td></tr>
             </table>

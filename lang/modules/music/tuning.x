@@ -12,8 +12,8 @@
 -- A Scale is a different layer (the Scala .scl/.kbm distinction): it selects
 -- a subset of a tuning's steps per scale DEGREE (major = 7 of 12), plus the
 -- steps added per repetition (`wrap`). Scales work identically over both
--- tuning kinds, and degrees are real-valued (fractional degrees interpolate
--- between neighbors).
+-- tuning kinds. Degrees are integers; in-between pitches are accidentals
+-- (Pitch.degree's alteration, in tuning steps), not fractional degrees.
 --
 -- Anchoring: rootHz is the frequency at step rootStep. Default constructors
 -- anchor step 0 at middle C (261.6256 Hz); `et12` anchors 440 Hz at step 69
@@ -69,6 +69,14 @@ fn ji(ratios [Float], period Float = 2.0) Tuning =
 -- Re-anchor: the returned tuning has frequency hz at step `step`.
 fn root(t Tuning, hz Float, step Float) Tuning =
     Tuning { ...t, rootHz: hz, rootStep: step };
+
+-- Chromatic transposition of the whole performance: re-anchor so degree 0
+-- (and every root-relative pitch) sounds k tuning steps higher. This is a
+-- property of the tuning, not of any note -- degree pitches keep their
+-- spelling. In equal tunings this is a plain frequency shift; in table
+-- tunings the new key picks up the temperament's flavor at that root.
+fn transposeRoot(t Tuning, k Float) Tuning =
+    root(t, stepHz(t, t.rootStep + k), t.rootStep);
 
 ---------------------------------------------------------------------------
 -- Scale constructors
@@ -147,31 +155,20 @@ fn hzStep(t Tuning, hz Float) Float {
     }
 }
 
--- Tuning step of a real-valued scale degree. The integer part wraps through
--- `degrees` adding `wrap` per repetition (degree -1 is the top of the scale
--- one wrap down); the fractional part interpolates between adjacent degrees.
-fn degreeStep(s Scale, d Float) Float {
+-- Tuning step of a scale degree. Wraps through `degrees` adding `wrap` per
+-- repetition (degree -1 is the top of the scale one wrap down).
+fn degreeStep(s Scale, d Int) Float {
     let n = s.degrees length;
-    let di = d floor toInt;
-    let frac = d - di toFloat;
-    var cyc = di // n;
-    var idx = di - cyc * n;
+    var cyc = d // n;
+    var idx = d - cyc * n;
     if (idx < 0) { idx = idx + n; cyc = cyc - 1; }
-    let s0 = s.degrees[idx] + cyc toFloat * s.wrap;
-    if (frac == 0.0) {
-        s0
-    } else {
-        let s1 = idx + 1 < n
-            ? s.degrees[idx + 1] + cyc toFloat * s.wrap
-            : s.degrees[0] + (cyc + 1) toFloat * s.wrap;
-        s0 + frac * (s1 - s0)
-    }
+    s.degrees[idx] + cyc toFloat * s.wrap
 }
 
 -- Frequency of a scale degree, with optional accidental in tuning steps.
 -- Degrees are ROOT-relative (degree 0 sounds at rootHz), like ratio and
 -- cents; step and hz are absolute.
-fn degreeHz(t Tuning, s Scale, d Float, acc Float = 0.0) Float =
+fn degreeHz(t Tuning, s Scale, d Int, acc Float = 0.0) Float =
     stepHz(t, t.rootStep + degreeStep(s, d) + acc);
 
 -- Resolve a symbolic Pitch to Hz. The single play-time resolver used by the
@@ -180,7 +177,7 @@ fn pitchHz(p Pitch, t Tuning, s Scale) Float {
     match (p) {
         Pitch.hz(f):     f;
         Pitch.step(st):  stepHz(t, st);
-        Pitch.degree(d): degreeHz(t, s, d);
+        Pitch.degree(d): degreeHz(t, s, d.0, d.1);
         Pitch.ratio(r):  t.rootHz * r;
         Pitch.cents(c):  t.rootHz * (c / 1200.0) exp2;
         Pitch.rest:      0.0;

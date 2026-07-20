@@ -29,11 +29,11 @@ let cyc = Coll.rpt((4, Coll.sel((Behavior.inOrder, [Coll.leaf(a), Coll.leaf(c)])
 let ce = realize(cyc);
 assertEq(ce length, 4, "inOrder count");
 match ((ce head).pitch) {
-    Pitch.degree(d): assertNear(d, 0.0, 1e-12, "inOrder first pick");
+    Pitch.degree(d): assertEq(d.0, 0, "inOrder first pick");
     _: assertTrue(false, "inOrder first pick");
 }
 match ((ce drop(1) head).pitch) {
-    Pitch.degree(d): assertNear(d, 7.0, 1e-12, "inOrder second pick");
+    Pitch.degree(d): assertEq(d.0, 7, "inOrder second pick");
     _: assertTrue(false, "inOrder second pick");
 }
 assertNear(realizeDur(cyc), 6.0, 1e-12, "inOrder durations 1+2+1+2");
@@ -49,8 +49,8 @@ var others = 0;
 for (e : se) {
     match (e.pitch) {
         Pitch.degree(d): {
-            if (d == 0.0) { ones = ones + 1; }
-            else if (d == 7.0) { twos = twos + 1; }
+            if (d.0 == 0) { ones = ones + 1; }
+            else if (d.0 == 7) { twos = twos + 1; }
             else { others = others + 1; }
         }
         _: 0;
@@ -67,7 +67,7 @@ let we = realize(Coll.rpt((20, Coll.sel((Behavior.weighted([1.0, 0.0]),
 var sawC = false;
 for (e : we) {
     match (e.pitch) {
-        Pitch.degree(d): { if (d == 7.0) { sawC = true; } }
+        Pitch.degree(d): { if (d.0 == 7) { sawC = true; } }
         _: 0;
     }
 }

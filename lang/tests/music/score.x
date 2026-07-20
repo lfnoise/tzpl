@@ -67,7 +67,7 @@ for (tc : sc3) {
 assertEq(onIds, [0, 1, 2, 3, 0], "noteID round robin");
 
 -- lazy: score of an infinite bind stream
-let infSc = score(bind(series(0.0, 1.0) degree, List(0.5) cyc), v) take(6);
+let infSc = score(bind(iter(0, fn(d Int) Int { d + 1 }) degree, List(0.5) cyc), v) take(6);
 assertEq(infSc length, 6, "score is lazy over infinite events");
 
 testSummary();

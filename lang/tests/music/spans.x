@@ -76,7 +76,7 @@ let z = zipl(fastcat([pure(10), pure(20)]), steady(5.0),
 assertEq(z cycles(1.0) vals, [15, 25], "zipl combine");
 
 -- events + setters + patEvents
-let pp = fastcat([pure(Pitch.degree(0.0)), pure(Pitch.degree(2.0)), pure(Pitch.degree(4.0))]);
+let pp = fastcat([pure(degree(0)), pure(degree(2)), pure(degree(4))]);
 let pe = pp events withAmp(sawPat() range(0.2, 0.8) segment(3))
             withParam('cutoff, steady(1500.0));
 let es = patEvents(pe, 2.0, 3.0);

@@ -16,14 +16,14 @@ PASS coins(1) all true
 PASS gausses mean
 PASS degree lift length
 -- lifted pitches
-degree(0.0)
-degree(2.0)
-degree(4.0)
+degree(0)
+degree(2)
+degree(4)
 -- bind result
-(t: 0.0, dur: 0.5, sus: 0.25, amp: 0.9, degree(0.0)) +[ 'cutoff: 1000.0 ]
-(t: 0.5, dur: 0.5, sus: 0.25, amp: 0.3, degree(1.0)) +[ 'cutoff: 1500.0 ]
-(t: 1.0, dur: 1.0, sus: 0.5, amp: 0.9, degree(2.0)) +[ 'cutoff: 2000.0 ]
-(t: 2.0, dur: 0.5, sus: 0.25, amp: 0.3, degree(4.0)) +[ 'cutoff: 2500.0 ]
+(t: 0.0, dur: 0.5, sus: 0.25, amp: 0.9, degree(0)) +[ 'cutoff: 1000.0 ]
+(t: 0.5, dur: 0.5, sus: 0.25, amp: 0.3, degree(1)) +[ 'cutoff: 1500.0 ]
+(t: 1.0, dur: 1.0, sus: 0.5, amp: 0.9, degree(2)) +[ 'cutoff: 2000.0 ]
+(t: 2.0, dur: 0.5, sus: 0.25, amp: 0.3, degree(4)) +[ 'cutoff: 2500.0 ]
 PASS bind ends at shortest (pitch)
 PASS bind onset running sum
 PASS bind sustain legato

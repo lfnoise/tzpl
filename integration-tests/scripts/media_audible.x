@@ -32,17 +32,17 @@ let v = pitchVoice(101);
 voiceBundle(v, "media_sine") go(0);
 
 -- the theme, in scale degrees
-fn deg(d Float, dur Float) Music<Pitch> = note(dur, Pitch.degree(d));
-let theme = line([deg(0.0, 1.0), deg(1.0, 1.0), deg(2.0, 0.5), deg(1.0, 0.5),
-                  deg(2.0, 0.5), deg(3.0, 0.5), deg(4.0, 2.0)]);
+fn deg(d Int, dur Float) Music<Pitch> = note(dur, degree(d));
+let theme = line([deg(0, 1.0), deg(1, 1.0), deg(2, 0.5), deg(1, 0.5),
+                  deg(2, 0.5), deg(3, 0.5), deg(4, 2.0)]);
 
 -- theme against itself: two beats late, a fifth down, quieter
 let canon = theme
-          | (mrest(2.0) $ trans(-4.0, dyn(0.7, theme)));
+          | (mrest(2.0) $ (theme dyn(0.7) trans(-4)));
 
 -- close with the theme in doubled tempo over a low drone
-let coda = tempo(2.0, theme)
-         | dyn(0.6, note(3.0, Pitch.degree(-7.0)));
+let coda = theme tempo(2.0)
+         | (note(3.0, degree(-7)) dyn(0.6));
 
 let piece = canon $ mrest(0.5) $ coda;
 

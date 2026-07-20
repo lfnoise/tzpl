@@ -18,14 +18,24 @@
 -- RT-safe: pure data + combinators, no IO.
 
 -- A symbolic pitch, resolved by music.tuning pitchHz at play time.
+--
+-- degree carries (scale degree, chromatic alteration): the Int is a whole
+-- scale degree, the Float an accidental in TUNING STEPS (+1.0 = sharp,
+-- -1.0 = flat in 12ED2). Modal transposition moves the degree; the
+-- accidental rides along unchanged. Whole-piece chromatic transposition is
+-- NOT an alteration -- re-anchor the Tuning instead (transposeRoot).
 enum Pitch {
-    hz Float,       -- absolute frequency, bypasses the tuning
-    step Float,     -- real-valued step in the Tuning (12ED2 step == MIDI nn)
-    degree Float,   -- real-valued scale degree, resolved via Scale + Tuning
-    ratio Float,    -- frequency ratio above the tuning root
-    cents Float,    -- cents above the tuning root
-    rest,           -- no note; time still advances
+    hz Float,           -- absolute frequency, bypasses the tuning
+    step Float,         -- real-valued step in the Tuning (12ED2 step == MIDI nn)
+    degree (Int, Float),-- (scale degree, accidental in steps), via Scale + Tuning
+    ratio Float,        -- frequency ratio above the tuning root
+    cents Float,        -- cents above the tuning root
+    rest,               -- no note; time still advances
 }
+
+-- Canonical degree constructor: degree(4) is scale degree 4, degree(4, 1.0)
+-- the same degree sharpened by one tuning step.
+fn degree(d Int, acc Float = 0.0) Pitch = Pitch.degree(d, acc);
 
 struct Event {
     t Float,                    -- onset, absolute beats
@@ -103,7 +113,8 @@ fn toString(p Pitch) String {
     match (p) {
         Pitch.hz(f):     "hz(%^)" fmt(f);
         Pitch.step(s):   "step(%^)" fmt(s);
-        Pitch.degree(d): "degree(%^)" fmt(d);
+        Pitch.degree(d): d.1 == 0.0 ? "degree(%^)" fmt(d.0)
+                                    : "degree(%^, %^)" fmt(d.0, d.1);
         Pitch.ratio(r):  "ratio(%^)" fmt(r);
         Pitch.cents(c):  "cents(%^)" fmt(c);
         Pitch.rest:      "rest";

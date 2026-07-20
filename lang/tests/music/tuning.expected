@@ -25,17 +25,20 @@ PASS major degree 7 wraps
 PASS major degree 9
 PASS major degree -1
 PASS major degree -7
-PASS major degree 0.5 interp
-PASS major degree 6.5 interp
 PASS degreeHz root
 PASS degreeHz sharp acc
 PASS pitch hz
 PASS pitch step
 PASS pitch degree
+PASS pitch degree sharp
+PASS pitch degree flat
 PASS pitch ratio
 PASS pitch cents
 PASS pitch rest
 PASS root re-anchor
 PASS root re-anchor tritave
+PASS transposeRoot degree 0
+PASS transposeRoot degree 2
+PASS transposeRoot table
 PASS chromatic degree
-40 passed, 0 failed
+43 passed, 0 failed

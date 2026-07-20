@@ -145,7 +145,9 @@ fn shapeDur(sh Shape) Float {
 
 -- Render to events. Pitch comes from the first of degree/step/hz/cents
 -- present; every other dimension besides dur/amp/legato becomes a synth
--- param named after it.
+-- param named after it. The degree dimension stays Float so morphological
+-- operators can interpolate; rendering rounds it to the nearest whole
+-- scale degree (use a step/hz/cents dimension for continuous pitch).
 fn shapeEvents(sh Shape, t0 Float = 0.0, legato Float = 0.9) List<Event> {
     let dDur = sh dimIndex('dur);
     let dDeg = sh dimIndex('degree);
@@ -158,7 +160,7 @@ fn shapeEvents(sh Shape, t0 Float = 0.0, legato Float = 0.9) List<Event> {
     var t = t0;
     for (fr : sh.data) {
         let dur = dDur >= 0 ? fr[dDur] : 1.0;
-        let pitch = dDeg >= 0 ? Pitch.degree(fr[dDeg])
+        let pitch = dDeg >= 0 ? Pitch.degree(fr[dDeg] round toInt, 0.0)
                   : dStep >= 0 ? Pitch.step(fr[dStep])
                   : dHz >= 0 ? Pitch.hz(fr[dHz])
                   : dCents >= 0 ? Pitch.cents(fr[dCents])

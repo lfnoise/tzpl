@@ -9,10 +9,13 @@
 --     a | b     parallel   (Haskore's :=: inspired this; | as in the
 --               pi calculus)
 --
---     let tune = line([note(1.0, Pitch.degree(0.0)),
---                      note(1.0, Pitch.degree(2.0))])
---                | trans(-7.0, note(2.0, Pitch.degree(0.0)));
+--     let tune = line([note(1.0, degree(0)),
+--                      note(1.0, degree(2))])
+--                | (note(2.0, degree(0)) trans(-7));
 --     tune perform play(freqVoice(101));
+--
+-- Transformations take the Music first, so pipelines read left to right:
+--     theme dyn(0.7) trans(-4) tempo(2.0)
 --
 -- `perform` interprets a Music into the shared List<Event>; the canned
 -- overloads cover Music<Pitch> and Music<Note>, and the generic form takes
@@ -34,7 +37,10 @@ enum Music<T> {
 
 enum Control {
     tempo Float,     -- divide durations (2.0 = twice as fast)
-    trans Float,     -- transpose step/degree pitches (real-valued)
+    trans Int,       -- MODAL transposition: shift degree pitches by whole
+                     -- scale degrees (accidentals ride along; other pitch
+                     -- kinds unchanged). Chromatic transposition of a whole
+                     -- piece is a tuning property: see transposeRoot.
     dyn Float,       -- scale amplitude
     inst Int,        -- instrument tag, emitted as an 'inst event param
 }
@@ -68,7 +74,7 @@ fn chord<T>(ms [Music<T>]) Music<T> {
 }
 
 -- n repetitions in sequence (n >= 1).
-fn times<T>(n Int, m Music<T>) Music<T> {
+fn times<T>(m Music<T>, n Int) Music<T> {
     var acc = m;
     var i = 1;
     while (i < n) { acc = acc $ m; i = i + 1; }
@@ -76,10 +82,10 @@ fn times<T>(n Int, m Music<T>) Music<T> {
 }
 
 -- Control wrappers
-fn tempo<T>(k Float, m Music<T>) Music<T> = Music<T>.ctl((Control.tempo(k), m));
-fn trans<T>(k Float, m Music<T>) Music<T> = Music<T>.ctl((Control.trans(k), m));
-fn dyn<T>(k Float, m Music<T>) Music<T> = Music<T>.ctl((Control.dyn(k), m));
-fn inst<T>(i Int, m Music<T>) Music<T> = Music<T>.ctl((Control.inst(i), m));
+fn tempo<T>(m Music<T>, k Float) Music<T> = Music<T>.ctl((Control.tempo(k), m));
+fn trans<T>(m Music<T>, k Int) Music<T> = Music<T>.ctl((Control.trans(k), m));
+fn dyn<T>(m Music<T>, k Float) Music<T> = Music<T>.ctl((Control.dyn(k), m));
+fn inst<T>(m Music<T>, i Int) Music<T> = Music<T>.ctl((Control.inst(i), m));
 
 ---------------------------------------------------------------------------
 -- Algebra
@@ -140,20 +146,20 @@ fn mmap<T, U>(m Music<T>, f (T) U) Music<U> {
 struct Ctx {
     t Float,        -- absolute onset of this subtree, beats
     tempoK Float,   -- accumulated tempo factor (durations divide by this)
-    transK Float,   -- accumulated transposition
+    transK Int,     -- accumulated modal transposition, scale degrees
     ampK Float,     -- accumulated dynamics factor
     inst Int,       -- innermost instrument tag (-1 = none)
 }
 
 fn initialCtx(t0 Float = 0.0) Ctx =
-    Ctx { t: t0, tempoK: 1.0, transK: 0.0, ampK: 1.0, inst: -1 };
+    Ctx { t: t0, tempoK: 1.0, transK: 0, ampK: 1.0, inst: -1 };
 
--- Transpose a symbolic pitch by k (steps for step pitches, degrees for
--- degree pitches; hz/ratio/cents/rest are unchanged).
-fn transposed(p Pitch, k Float) Pitch {
+-- Modal transposition: shift a degree pitch by k whole scale degrees, its
+-- accidental unchanged. Every other pitch kind is returned as-is -- modal
+-- distance has no meaning for step/hz/ratio/cents.
+fn transposed(p Pitch, k Int) Pitch {
     match (p) {
-        Pitch.step(s): Pitch.step(s + k);
-        Pitch.degree(d): Pitch.degree(d + k);
+        Pitch.degree(d): Pitch.degree(d.0 + k, d.1);
         _: p;
     }
 }

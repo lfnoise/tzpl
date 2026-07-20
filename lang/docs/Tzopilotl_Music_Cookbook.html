@@ -1188,16 +1188,19 @@ this chapter is the tour.</p>
 <p>An <code>Event</code> is a note with an absolute onset in beats, a note value
 (<code>dur</code>), a sounding time (<code>sustain</code>), an amplitude, named synth
 params &mdash; and a <em>symbolic</em> pitch. A <code>Pitch</code> is a frequency, a
-tuning step, a scale degree, a ratio, cents, or a rest; it only becomes Hz at play
-time, through a <code>Tuning</code> and <code>Scale</code>. Tunings are real-numbered
-all the way down: any count of equal divisions (including fractional counts) of any
-period ratio, or a cents table for unequal tunings, with real-valued steps and
-degrees interpolating in between.</p>
+tuning step, a scale degree with an optional accidental (<code>degree(4)</code>,
+<code>degree(4, 1.0)</code> &mdash; a whole degree plus an alteration in tuning
+steps), a ratio, cents, or a rest; it only becomes Hz at play time, through a
+<code>Tuning</code> and <code>Scale</code>. Tunings are real-numbered all the way
+down: any count of equal divisions (including fractional counts) of any period
+ratio, or a cents table for unequal tunings, with real-valued steps interpolating
+in between. To move a whole performance up a fifth, re-anchor the tuning
+(<code>transposeRoot(t, 7.0)</code>) &mdash; degrees keep their spelling.</p>
 <pre><code><span class="kw">import</span> music.core.*;
 
 <span class="kw">let</span> t = bp() root(<span class="num">220.0</span>, <span class="num">0.0</span>);   <span class="cmt">-- 13 equal divisions of the tritave, 220 Hz root</span>
 stepHz(t, <span class="num">6.5</span>)                   <span class="cmt">-- halfway up the tritave, a legal step</span>
-degreeStep(major, -<span class="num">1.0</span>)          <span class="cmt">-- degrees wrap below the root too</span></code></pre>
+degreeStep(major, -<span class="num">1</span>)            <span class="cmt">-- degrees wrap below the root too</span></code></pre>
 <p>Because the events stay symbolic, the <em>same</em> phrase plays in 12ED2, in a
 tritave tuning, or in a just-intonation table by changing one argument to the
 player.</p>
@@ -1213,10 +1216,10 @@ one stream per event field:</p>
 randSeed(<span class="num">2026</span>);                                <span class="cmt">-- reproducible randomness</span>
 
 <span class="kw">let</span> melody = bind(
-    wpicks([<span class="num">0.0</span>, <span class="num">1.0</span>, <span class="num">2.0</span>, <span class="num">4.0</span>], [<span class="num">4.0</span>, <span class="num">2.0</span>, <span class="num">3.0</span>, <span class="num">1.0</span>]) degree,
+    wpicks([<span class="num">0</span>, <span class="num">1</span>, <span class="num">2</span>, <span class="num">4</span>], [<span class="num">4.0</span>, <span class="num">2.0</span>, <span class="num">3.0</span>, <span class="num">1.0</span>]) degree,
     List(<span class="num">0.5</span>, <span class="num">0.25</span>, <span class="num">0.25</span>) cyc,
     rands(<span class="num">0.2</span>, <span class="num">0.6</span>));
-<span class="kw">let</span> bass = bind(List(-<span class="num">7.0</span>, -<span class="num">5.0</span>) cyc degree, List(<span class="num">2.0</span>) cyc);
+<span class="kw">let</span> bass = bind(List(-<span class="num">7</span>, -<span class="num">5</span>) cyc degree, List(<span class="num">2.0</span>) cyc);
 <span class="kw">let</span> tune = merge(melody, bass) takeDur(<span class="num">32.0</span>);  <span class="cmt">-- polyphony is a lazy merge</span></code></pre>
 
 <h3 id="musiclibs-media">11.3 An algebra of pieces: music.media</h3>
@@ -1229,9 +1232,9 @@ the pi calculus) composition, and control annotations (<code>tempo</code>, <code
 then <code>perform</code>ed into events:</p>
 <pre><code><span class="kw">import</span> music.media.*;
 
-<span class="kw">fn</span> <span class="fn">deg</span>(d <span class="typ">Float</span>, dur <span class="typ">Float</span>) <span class="typ">Music&lt;Pitch&gt;</span> = note(dur, Pitch.degree(d));
-<span class="kw">let</span> theme = line([deg(<span class="num">0.0</span>, <span class="num">1.0</span>), deg(<span class="num">1.0</span>, <span class="num">1.0</span>), deg(<span class="num">2.0</span>, <span class="num">0.5</span>), deg(<span class="num">4.0</span>, <span class="num">1.5</span>)]);
-<span class="kw">let</span> canon = theme | (mrest(<span class="num">2.0</span>) $ trans(-<span class="num">4.0</span>, dyn(<span class="num">0.7</span>, theme)));
+<span class="kw">fn</span> <span class="fn">deg</span>(d <span class="typ">Int</span>, dur <span class="typ">Float</span>) <span class="typ">Music&lt;Pitch&gt;</span> = note(dur, degree(d));
+<span class="kw">let</span> theme = line([deg(<span class="num">0</span>, <span class="num">1.0</span>), deg(<span class="num">1</span>, <span class="num">1.0</span>), deg(<span class="num">2</span>, <span class="num">0.5</span>), deg(<span class="num">4</span>, <span class="num">1.5</span>)]);
+<span class="kw">let</span> canon = theme | (mrest(<span class="num">2.0</span>) $ (theme dyn(<span class="num">0.7</span>) trans(-<span class="num">4</span>)));
 <span class="kw">let</span> events = canon perform;    <span class="cmt">-- List&lt;Event&gt;, same as bind produces</span></code></pre>
 
 <h3 id="musiclibs-hmsl">11.4 Shapes and forms: music.shape / music.job</h3>
@@ -1261,10 +1264,10 @@ along and are sampled with <code>segment</code>. <code>patEvents</code> renders
 cycles to the shared event list:</p>
 <pre><code><span class="kw">import</span> music.spans.*;
 
-<span class="kw">fn</span> <span class="fn">d</span>(x <span class="typ">Float</span>) <span class="typ">Pattern&lt;Pitch&gt;</span> = pure(Pitch.degree(x));
+<span class="kw">fn</span> <span class="fn">d</span>(x <span class="typ">Int</span>) <span class="typ">Pattern&lt;Pitch&gt;</span> = pure(degree(x));
 <span class="kw">let</span> tune = stack([
-    d(-<span class="num">14.0</span>) euclid(<span class="num">3</span>, <span class="num">8</span>) events(<span class="num">0.8</span>, <span class="num">0.6</span>),
-    fastcat([d(<span class="num">0.0</span>), d(<span class="num">4.0</span>), d(<span class="num">5.0</span>), d(<span class="num">7.0</span>)])
+    d(-<span class="num">14</span>) euclid(<span class="num">3</span>, <span class="num">8</span>) events(<span class="num">0.8</span>, <span class="num">0.6</span>),
+    fastcat([d(<span class="num">0</span>), d(<span class="num">4</span>), d(<span class="num">5</span>), d(<span class="num">7</span>)])
         iterp(<span class="num">4</span>)
         every(<span class="num">4</span>, <span class="kw">fn</span>(p <span class="typ">Pattern&lt;Pitch&gt;</span>) <span class="typ">Pattern&lt;Pitch&gt;</span> { p rev })
         events(<span class="num">0.5</span>, <span class="num">0.9</span>)

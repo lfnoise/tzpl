@@ -3,10 +3,10 @@ import music.core.*;
 import std.test.*;
 
 let melody = List(
-    event(0.0, 1.0, Pitch.degree(0.0)),
-    event(1.0, 0.5, Pitch.degree(2.0), 0.7),
+    event(0.0, 1.0, degree(0)),
+    event(1.0, 0.5, degree(2), 0.7),
     event(1.5, 0.5, Pitch.rest),
-    event(2.0, 2.0, Pitch.degree(4.0), 0.7, 1.5)
+    event(2.0, 2.0, degree(4), 0.7, 1.5)
 );
 
 "-- showEvents" println;
@@ -47,7 +47,7 @@ assertNear((merged drop(6) head).t, 3.0, 1e-12, "merge last");
 coro fn ticks(dt Float) Event {
     var i = 0;
     while (true) {
-        yield event(i toFloat * dt, dt, Pitch.degree(i toFloat));
+        yield event(i toFloat * dt, dt, degree(i));
         i = i + 1;
     }
 }

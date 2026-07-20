@@ -9,7 +9,7 @@
 --
 --     import music.pat.*;
 --     randSeed(42);
---     let es = bind([0.0, 1.0, 2.0, 4.0] cyc degree,
+--     let es = bind([0, 1, 2, 4] cyc degree,
 --                   List(0.25) cyc,
 --                   amp: rands(0.2, 0.6));
 --
@@ -140,15 +140,16 @@ coro fn _stutterNsCo<T>(ns List<Int>, xs List<T>) T {
 }
 
 -- Stutter with a per-element repeat-count stream (Pdup): element i of xs is
--- repeated ns[i] times (0 drops it).
-fn stutter<T>(ns List<Int>, xs List<T>) List<T> = _stutterNsCo(ns, xs) toList;
+-- repeated ns[i] times (0 drops it). Stream first, like the scalar-count
+-- stutter builtin: `xs stutter(ns)`.
+fn stutter<T>(xs List<T>, ns List<Int>) List<T> = _stutterNsCo(ns, xs) toList;
 
 ---------------------------------------------------------------------------
 -- Pitch lifting. Scalar constructors; auto-mapping lifts them over lists:
---     [0.0, 2.0, 4.0] cyc degree     -- List<Pitch> of scale degrees
+--     [0, 2, 4] cyc degree           -- List<Pitch> of scale degrees
+-- (`degree` itself lives in music.event, re-exported through the core.)
 
 fn step(x Float) Pitch = Pitch.step(x);
-fn degree(x Float) Pitch = Pitch.degree(x);
 fn hz(x Float) Pitch = Pitch.hz(x);
 fn ratio(x Float) Pitch = Pitch.ratio(x);
 fn cents(x Float) Pitch = Pitch.cents(x);

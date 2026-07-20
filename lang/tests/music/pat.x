@@ -13,7 +13,7 @@ assertEq(lace([List(1, 2, 3), List(10, 20), List(100)]) collect(9),
          [1, 10, 100, 2, 20, 3], "lace uneven");
 assertEq(lace([(1..) toList, List(0, 0)]) take(7) collect(7),
          [1, 0, 2, 0, 3, 4, 5], "lace with infinite");
-assertEq(stutter(List(2, 0, 3, 1), List(7, 8, 9, 10)) collect(9),
+assertEq(List(7, 8, 9, 10) stutter(List(2, 0, 3, 1)) collect(9),
          [7, 7, 9, 9, 9, 10], "stutter counts");
 
 -- random streams under a fixed seed: bounds + shape properties
@@ -74,13 +74,13 @@ for (g : gs) { gsum = gsum + g; }
 assertNear(gsum / 500.0, 5.0, 0.1, "gausses mean");
 
 -- pitch lifting via auto-mapping
-let ps = [0.0, 2.0, 4.0] degree;
+let ps = [0, 2, 4] degree;
 assertEq(ps length, 3, "degree lift length");
 "-- lifted pitches" println;
 for (p : ps) { p toString println; }
 
 -- bind: running-sum onsets, sustain = dur * legato, ends at shortest
-let es = bind([0.0, 1.0, 2.0, 4.0] toList degree,
+let es = bind([0, 1, 2, 4] toList degree,
               List(0.5, 0.5, 1.0) cyc,
               List(0.9, 0.3) cyc,
               List(0.5) cyc,
@@ -93,7 +93,7 @@ assertNear(e2.t, 1.0, 1e-12, "bind onset running sum");
 assertNear(e2.sustain, 0.5, 1e-12, "bind sustain legato");
 
 -- infinite bind cut by takeDur
-let inf = bind(series(0.0, 1.0) degree, List(0.25) cyc);
+let inf = bind(iter(0, fn(d Int) Int { d + 1 }) degree, List(0.25) cyc);
 assertEq(inf takeDur(2.0) length, 8, "infinite bind takeDur");
 
 testSummary();

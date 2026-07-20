@@ -31,7 +31,7 @@ setTempo(0, 140.0);
 let v = pitchVoice(101);
 voiceBundle(v, "spans_sine") go(0);
 
-fn d(x Float) Pattern<Pitch> = pure(Pitch.degree(x));
+fn d(x Int) Pattern<Pitch> = pure(degree(x));
 
 -- euclidean bass: tresillo on the root, two octaves down
 let bass = d(-14.0) euclid(3, 8) events(0.8, 0.6);

@@ -17,10 +17,10 @@ PASS withDim
 PASS catShapes
 PASS interleave
 -- shapeEvents
-(t: 0.0, dur: 0.5, sus: 0.45, amp: 0.4, degree(0.0))
-(t: 0.5, dur: 0.5, sus: 0.45, amp: 0.5, degree(2.0))
-(t: 1.0, dur: 1.0, sus: 0.9, amp: 0.6, degree(4.0))
-(t: 2.0, dur: 2.0, sus: 1.8, amp: 0.3, degree(7.0))
+(t: 0.0, dur: 0.5, sus: 0.45, amp: 0.4, degree(0))
+(t: 0.5, dur: 0.5, sus: 0.45, amp: 0.5, degree(2))
+(t: 1.0, dur: 1.0, sus: 0.9, amp: 0.6, degree(4))
+(t: 2.0, dur: 2.0, sus: 1.8, amp: 0.3, degree(7))
 PASS events count
 PASS running onset
 PASS amp dim

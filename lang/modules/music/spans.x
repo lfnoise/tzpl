@@ -7,8 +7,8 @@
 -- combinators over queries, so structure is computed, never stored:
 --
 --     let p = stack([
---         pure(Pitch.degree(0.0)) euclid(3, 8),
---         fastcat([pure(Pitch.degree(4.0)), pure(Pitch.degree(7.0))]) fast(2.0) rev,
+--         pure(degree(0)) euclid(3, 8),
+--         fastcat([pure(degree(4)), pure(degree(7))]) fast(2.0) rev,
 --     ]);
 --     patEvents(p events, 4.0) play(freqVoice(101));
 --

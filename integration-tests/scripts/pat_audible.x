@@ -39,14 +39,14 @@ randSeed(2026);
 
 -- melody: weighted random pentatonic degrees, cycling short durations
 let melody = bind(
-    wpicks([0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 7.0], [4.0, 2.0, 3.0, 2.0, 3.0, 1.0, 1.0]) degree,
+    wpicks([0, 1, 2, 3, 4, 5, 7], [4.0, 2.0, 3.0, 2.0, 3.0, 1.0, 1.0]) degree,
     List(0.5, 0.25, 0.25) cyc,
     rands(0.25, 0.55),
     List(0.7) cyc);
 
 -- bass: slow roots and fifths below
 let bass = bind(
-    List(-5.0, -5.0, -4.0, -3.0) cyc degree,
+    List(-5, -5, -4, -3) cyc degree,
     List(2.0) cyc,
     List(0.5) cyc,
     List(0.95) cyc);
