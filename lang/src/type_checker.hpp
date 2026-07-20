@@ -466,6 +466,11 @@ private:
                                     bool anyListArg, bool anyPVecArg = false);
     Type* tryInferEnumConstruct(CallExpr_* expr, FieldExpr_* fe, IdentifierExpr* ident);
     Type* tryInferTupleStructConstruct(CallExpr_* expr, IdentifierExpr* ident);
+    // Detect implicit/explicit-@ auto-mapping on a (already-resolved) struct
+    // literal's fields against the concrete struct type `stype`. Sets
+    // lit->autoMapFields and returns the (possibly array-wrapped) result type.
+    // Shared by the concrete and template struct-literal construction paths.
+    Type* detectStructLiteralAutoMap(StructLiteralExpr* lit, StructType* stype);
     Type* tryInferVariableCall(CallExpr_* expr, IdentifierExpr* ident);
     Type* inferIndirectCall(CallExpr_* expr);
 

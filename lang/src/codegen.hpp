@@ -280,6 +280,21 @@ private:
     // in `elemReg`, returning the register holding it (0 if not found).
     u16 emitMapFieldGet(FieldExpr_* expr, u16 elemReg, Type* elemType);
     u16 genEnumConstruct(ASTNode* node);
+    u16 genAutoMapEnumConstruct(CallExpr_* expr);
+    // Recursive depth-N auto-map driver for construction (@@ / @@@). Peels one
+    // array layer per level over the inputs flagged in `mapped` (broadcasting
+    // the rest unchanged), building nested result arrays, and calls
+    // buildLeaf(elemRegs) at the innermost level to construct one value from the
+    // per-input element registers. Shared by the deep tuple-struct, struct-
+    // literal, and enum construction emitters below.
+    u16 emitMapAtDepth(std::vector<u16> const& inputRegs,
+                       std::vector<Type*> const& inputTypes,
+                       std::vector<bool> const& mapped,
+                       ArrayType* resultType, int remainingDepth,
+                       function_ref<u16(std::vector<u16> const&)> buildLeaf);
+    u16 genDeepMapTupleStruct(CallExpr_* expr, int depth);
+    u16 genDeepMapStructLiteral(StructLiteralExpr* expr, int depth);
+    u16 genDeepMapEnumConstruct(CallExpr_* expr, int depth);
     u16 genLambdaExpr(LambdaExprNode* expr);
     u16 genTemplateLambdaDef(LambdaExprNode* expr);
     void compileTemplateLambdaBody(LambdaExprNode* expr, LambdaType* lambdaType);

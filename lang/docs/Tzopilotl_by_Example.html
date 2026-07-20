@@ -1907,6 +1907,24 @@ ps println;
 <span class="kw">let</span> ps2 = Point { x: [<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>], y: [<span class="num">10</span>, <span class="num">20</span>, <span class="num">30</span>] };
 ps2 println;
 <span class="cmt">-- [Point { x: 1, y: 10 }, Point { x: 2, y: 20 }, Point { x: 3, y: 30 }]</span></code></pre>
+<p>Tuple-struct and enum-case construction auto-map the same way: an array where a scalar payload is expected produces one value per element.</p>
+<pre><code><span class="kw">struct</span> Celsius(<span class="kw">Float</span>);
+[<span class="num">0.0</span>, <span class="num">37.0</span>, <span class="num">100.0</span>] Celsius println;
+<span class="cmt">-- [Celsius(0.0), Celsius(37.0), Celsius(100.0)]</span>
+
+<span class="kw">enum</span> Shape { circle <span class="kw">Float</span>, point }
+Shape.circle([<span class="num">1.0</span>, <span class="num">2.0</span>, <span class="num">3.0</span>]) println;
+<span class="cmt">-- [Shape.circle(1.0), Shape.circle(2.0), Shape.circle(3.0)]</span></code></pre>
+<p>An explicit <code>@</code> (and <code>@@</code>, <code>@1</code>/<code>@2</code>, &hellip;) requests auto-mapping at every construction site &mdash; struct literals, tuple structs, and enum cases, including <em>generic</em> ones. For a generic constructor the type parameter binds from the <em>element</em> type, so <code>@</code> is what distinguishes &ldquo;one value per element&rdquo; from &ldquo;one value whose field is the whole array&rdquo;:</p>
+<pre><code><span class="kw">struct</span> Box&lt;T&gt; { v T }
+
+Box { v: [<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>] @ } println;   <span class="cmt">-- [Box&lt;Int&gt; { v: 1 }, Box&lt;Int&gt; { v: 2 }, Box&lt;Int&gt; { v: 3 }]</span>
+Box { v: [<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>] } println;     <span class="cmt">-- Box&lt;[Int]&gt; { v: [1, 2, 3] }  (no @: T := [Int])</span>
+
+<span class="cmt">-- @@ peels two array layers, building a nested result</span>
+Box { v: [[<span class="num">1</span>, <span class="num">2</span>], [<span class="num">3</span>, <span class="num">4</span>]] @@ } println;
+<span class="cmt">-- [[Box&lt;Int&gt; { v: 1 }, Box&lt;Int&gt; { v: 2 }], [Box&lt;Int&gt; { v: 3 }, Box&lt;Int&gt; { v: 4 }]]</span></code></pre>
+<p>All auto-mapped fields/arguments of a single construction must share the same depth (e.g. you cannot mix <code>@</code> and <code>@@</code> in one constructor); non-mapped fields are broadcast across every element.</p>
 
 <h3 id="explicit-at-operator">12.3 Explicit <code>@</code> Operator</h3>
 <p>The postfix <code>@</code> operator forces the next function to see a scalar (by unwrapping one level), even when an array/list overload exists.</p>

@@ -474,7 +474,22 @@ Type* TypeChecker::inferExpr(Expr* expr, Type* expectedType) {
                         // First, type-check all field values
                         std::vector<Type*> fieldTypes;
                         for (size_t i = 0; i < lit->fields.size(); ++i) {
-                            fieldTypes.push_back(inferExpr(static_cast<Expr*>(lit->fields[i].value.get())));
+                            Expr* fv = static_cast<Expr*>(lit->fields[i].value.get());
+                            Type* ft = inferExpr(fv);
+                            // An explicit @ requests auto-mapping: bind the type
+                            // parameter from the element type (peel `depth`
+                            // layers), not from the array type. Peel tolerantly
+                            // here; detectStructLiteralAutoMap does the checking.
+                            if (fv->kind == ASTNode::AutoMap && ft) {
+                                auto* am = static_cast<AutoMapExpr*>(fv);
+                                Type* t = ft;
+                                for (int d = 0; d < am->depth; ++d) {
+                                    if (auto* at = dynamic_cast<ArrayType*>(t)) t = at->elemType_;
+                                    else break;
+                                }
+                                ft = t;
+                            }
+                            fieldTypes.push_back(ft);
                         }
 
                         // Build field name -> type mapping
@@ -545,7 +560,9 @@ Type* TypeChecker::inferExpr(Expr* expr, Type* expectedType) {
                                   std::to_string(stype->fields_.size()) + " fields, got " +
                                   std::to_string(lit->fields.size()));
                         }
-                        result = stype;
+                        // Detect implicit/explicit-@ auto-mapping (same helper the
+                        // concrete struct-literal path uses).
+                        result = detectStructLiteralAutoMap(lit, stype);
                         break;
                     }
                 } else {
@@ -587,89 +604,9 @@ Type* TypeChecker::inferExpr(Expr* expr, Type* expectedType) {
                 }
             }
 
-            // Type-check each field, verify names match, and detect auto-mapping
-            bool anyAutoMap = false;
-            std::vector<AutoMapArg> autoMap(lit->fields.size());
-
-            for (size_t i = 0; i < lit->fields.size(); ++i) {
-                // Check for explicit @-annotation on field value
-                Expr* fieldExpr = static_cast<Expr*>(lit->fields[i].value.get());
-                AutoMapArg explicitAM;
-                if (fieldExpr->kind == ASTNode::AutoMap) {
-                    auto* am = static_cast<AutoMapExpr*>(fieldExpr);
-                    explicitAM.depth = am->depth;
-                    explicitAM.cartesianIndex = am->cartesianIndex;
-                }
-
-                Type* fieldType = inferExpr(fieldExpr);
-
-                // Find the field in the struct type by name
-                bool found = false;
-                for (size_t j = 0; j < stype->fields_.size(); ++j) {
-                    if (stype->fields_[j].name->str() == lit->fields[i].name) {
-                        found = true;
-                        Type* declType = stype->fields_[j].type;
-
-                        if (explicitAM.depth > 0) {
-                            // Explicit @ on this field
-                            auto* arrT = dynamic_cast<ArrayType*>(fieldType);
-                            if (!arrT) {
-                                error(lit->fields[i].loc, "Explicit '@' on field '" +
-                                      lit->fields[i].name + "' requires Array type");
-                            } else {
-                                // Validate inner type matches declared type
-                                Type* innerType = arrT->elemType_;
-                                if (!typesEqual(innerType, declType) &&
-                                    !(declType == compiler_.floatType() && innerType == compiler_.intType())) {
-                                    error(lit->fields[i].loc, "Field '" + lit->fields[i].name +
-                                          "' type mismatch in struct '" + lit->structName + "'");
-                                }
-                            }
-                            autoMap[i] = explicitAM;
-                            anyAutoMap = true;
-                        } else if (fieldType && !typesEqual(fieldType, declType)) {
-                            if (declType == compiler_.floatType() && fieldType == compiler_.intType()) {
-                                // promotion OK
-                            } else if (auto* arrT = dynamic_cast<ArrayType*>(fieldType)) {
-                                // Implicit auto-mapping: [T] provided where T expected
-                                if (typesEqual(arrT->elemType_, declType) ||
-                                    (declType == compiler_.floatType() && arrT->elemType_ == compiler_.intType())) {
-                                    autoMap[i] = AutoMapArg{1, 0};
-                                    anyAutoMap = true;
-                                } else {
-                                    error(lit->fields[i].loc, "Field '" + lit->fields[i].name +
-                                          "' type mismatch in struct '" + lit->structName + "'");
-                                }
-                            } else {
-                                error(lit->fields[i].loc, "Field '" + lit->fields[i].name +
-                                      "' type mismatch in struct '" + lit->structName + "'");
-                            }
-                        }
-                        break;
-                    }
-                }
-                if (!found) {
-                    error(lit->fields[i].loc, "Unknown field '" + lit->fields[i].name +
-                          "' in struct '" + lit->structName + "'");
-                }
-            }
-
-            if (anyAutoMap) {
-                lit->autoMapFields = std::move(autoMap);
-                // Compute cartesian nesting depth
-                int maxCartesian = 0;
-                for (auto& am : lit->autoMapFields) {
-                    if (am.cartesianIndex > maxCartesian) maxCartesian = am.cartesianIndex;
-                }
-                int wrapLevels = (maxCartesian > 0) ? maxCartesian : 1;
-                Type* wrapped = static_cast<Type*>(stype);
-                for (int level = 0; level < wrapLevels; ++level) {
-                    wrapped = compiler_.arrayType(wrapped);
-                }
-                result = wrapped;
-            } else {
-                result = stype;
-            }
+            // Detect implicit/explicit-@ auto-mapping across the fields (shared
+            // with the template struct-literal path above).
+            result = detectStructLiteralAutoMap(lit, stype);
             break;
         }
 

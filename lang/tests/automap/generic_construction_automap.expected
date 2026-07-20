@@ -1,0 +1,8 @@
+[Box<Int>(1), Box<Int>(2), Box<Int>(3)]
+[Cell<Int> { v: 1 }, Cell<Int> { v: 2 }, Cell<Int> { v: 3 }]
+Cell<[Int]> { v: [1, 2, 3] }
+[Opt<Int>.some(10), Opt<Int>.some(20), Opt<Int>.some(30)]
+Opt<[Int]>.some([1, 2, 3])
+[Opt<String>.some(a), Opt<String>.some(b)]
+[[Pair<Int, String> { a: 1, b: x }, Pair<Int, String> { a: 1, b: y }], [Pair<Int, String> { a: 2, b: x }, Pair<Int, String> { a: 2, b: y }]]
+[Pair<Int, Int> { a: 1, b: 9 }, Pair<Int, Int> { a: 2, b: 9 }, Pair<Int, Int> { a: 3, b: 9 }]

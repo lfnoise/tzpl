@@ -1,0 +1,6 @@
+[Enum.a(1), Enum.a(2), Enum.a(3), Enum.a(4)]
+Enum.a(99)
+[FloatCase.f(1.0), FloatCase.f(2.0), FloatCase.f(3.0)]
+[Opt.some(10), Opt.some(20), Opt.some(30)]
+[Shape.at(P { x: 1, y: 2 }), Shape.at(P { x: 3, y: 4 })]
+[500, 600, 700]

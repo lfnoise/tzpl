@@ -422,6 +422,92 @@ Type* TypeChecker::computeAutoMapReturnType(Type* scalarReturn,
     return retType;
 }
 
+// Detect implicit/explicit-@ auto-mapping on a resolved struct literal's fields.
+// Sets lit->autoMapFields and returns the (possibly array-wrapped) result type.
+// Shared by the concrete and template struct-literal construction paths.
+Type* TypeChecker::detectStructLiteralAutoMap(StructLiteralExpr* lit, StructType* stype) {
+    bool anyAutoMap = false;
+    std::vector<AutoMapArg> autoMap(lit->fields.size());
+
+    for (size_t i = 0; i < lit->fields.size(); ++i) {
+        // Check for an explicit @-annotation on the field value.
+        Expr* fieldExpr = static_cast<Expr*>(lit->fields[i].value.get());
+        AutoMapArg explicitAM;
+        if (fieldExpr->kind == ASTNode::AutoMap) {
+            auto* am = static_cast<AutoMapExpr*>(fieldExpr);
+            explicitAM.depth = am->depth;
+            explicitAM.cartesianIndex = am->cartesianIndex;
+        }
+
+        Type* fieldType = inferExpr(fieldExpr);
+
+        // Find the field in the struct type by name.
+        bool found = false;
+        for (size_t j = 0; j < stype->fields_.size(); ++j) {
+            if (stype->fields_[j].name->str() == lit->fields[i].name) {
+                found = true;
+                Type* declType = stype->fields_[j].type;
+
+                if (explicitAM.depth > 0) {
+                    // Explicit @ / @@ / @n: peel `depth` container layers; the
+                    // element type must be (assignable to) the declared type.
+                    bool isList = false;
+                    Type* innerType = unwrapAutoMapLayers(fieldType, explicitAM.depth,
+                                                          isList, lit->fields[i].loc);
+                    if (isList) {
+                        error(lit->fields[i].loc, "Field '" + lit->fields[i].name +
+                              "' auto-map supports only Array values, not lazy Lists");
+                    } else if (innerType && !typesEqual(innerType, declType) &&
+                               !(declType == compiler_.floatType() && innerType == compiler_.intType()) &&
+                               !isAssignable(innerType, declType)) {
+                        error(lit->fields[i].loc, "Field '" + lit->fields[i].name +
+                              "' type mismatch in struct '" + lit->structName + "'");
+                    }
+                    autoMap[i] = explicitAM;
+                    anyAutoMap = true;
+                } else if (fieldType && !typesEqual(fieldType, declType)) {
+                    if (declType == compiler_.floatType() && fieldType == compiler_.intType()) {
+                        // promotion OK
+                    } else if (auto* arrT = dynamic_cast<ArrayType*>(fieldType)) {
+                        // Implicit auto-mapping: [T] provided where T expected
+                        if (typesEqual(arrT->elemType_, declType) ||
+                            (declType == compiler_.floatType() && arrT->elemType_ == compiler_.intType())) {
+                            autoMap[i] = AutoMapArg{1, 0};
+                            anyAutoMap = true;
+                        } else {
+                            error(lit->fields[i].loc, "Field '" + lit->fields[i].name +
+                                  "' type mismatch in struct '" + lit->structName + "'");
+                        }
+                    } else {
+                        error(lit->fields[i].loc, "Field '" + lit->fields[i].name +
+                              "' type mismatch in struct '" + lit->structName + "'");
+                    }
+                }
+                break;
+            }
+        }
+        if (!found) {
+            error(lit->fields[i].loc, "Unknown field '" + lit->fields[i].name +
+                  "' in struct '" + lit->structName + "'");
+        }
+    }
+
+    if (!anyAutoMap) return static_cast<Type*>(stype);
+
+    lit->autoMapFields = std::move(autoMap);
+    bool hasCartesian = false, anyList = false, anyPVec = false;
+    int maxCart = 0;
+    for (auto& am : lit->autoMapFields) {
+        if (!am) continue;
+        if (am.cartesianIndex > 0) hasCartesian = true;
+        if (am.cartesianIndex > maxCart) maxCart = am.cartesianIndex;
+        if (am.isList) anyList = true;
+        if (am.isPVec) anyPVec = true;
+    }
+    return computeAutoMapReturnType(static_cast<Type*>(stype), lit->autoMapFields, {},
+                                    hasCartesian, maxCart, anyList, anyPVec);
+}
+
 // Step 5: Try to infer an enum data case construction: EnumName.caseName(value)
 Type* TypeChecker::tryInferEnumConstruct(CallExpr_* expr, FieldExpr_* fe, IdentifierExpr* ident) {
     auto enumIt = enumTypes_.find(ident->name);
@@ -429,6 +515,13 @@ Type* TypeChecker::tryInferEnumConstruct(CallExpr_* expr, FieldExpr_* fe, Identi
         EnumType* etype = enumIt->second;
         // Find the case
         bool found = false;
+        // Auto-mapping: when a single scalar-payload case is given an Array of
+        // the payload type -- either implicitly ([caseType]) or via an explicit
+        // `@` / `@@` / `@n` on the payload -- construct one enum value per
+        // element. Like the struct paths, only plain Arrays are supported (not
+        // lazy Lists or persistent vectors).
+        bool autoMapEnum = false;
+        AutoMapArg autoMapArg{};
         for (size_t i = 0; i < etype->cases_.size(); ++i) {
             if (etype->cases_[i].name->str() == fe->field) {
                 found = true;
@@ -436,12 +529,41 @@ Type* TypeChecker::tryInferEnumConstruct(CallExpr_* expr, FieldExpr_* fe, Identi
                 if (caseType == compiler_.voidType()) {
                     error(expr->loc, "Enum case '" + fe->field + "' takes no data");
                 } else if (expr->args.size() == 1) {
-                    Type* argType = inferExpr(static_cast<Expr*>(expr->args[0].get()));
-                    if (argType && !typesEqual(argType, caseType)) {
-                        if (isAssignable(argType, caseType)) {
-                            expr->args[0]->resolvedType = caseType;
+                    Expr* arg0 = static_cast<Expr*>(expr->args[0].get());
+                    // Explicit @ / @@ / @n annotation on the payload.
+                    int amDepth = 0, amCart = 0;
+                    if (arg0->kind == ASTNode::AutoMap) {
+                        auto* am = static_cast<AutoMapExpr*>(arg0);
+                        amDepth = am->depth;
+                        amCart = am->cartesianIndex;
+                    }
+                    Type* argType = inferExpr(arg0);
+                    if (amDepth > 0) {
+                        // Explicit map: peel `amDepth` layers; the element type
+                        // must be (assignable to) the scalar payload type.
+                        bool isList = false;
+                        Type* inner = unwrapAutoMapLayers(argType, amDepth, isList, arg0->loc);
+                        if (isList) {
+                            error(arg0->loc, "Enum case '" + fe->field +
+                                  "' auto-map supports only Array payloads, not lazy Lists");
+                        } else if (inner && (typesEqual(inner, caseType) || isAssignable(inner, caseType))) {
+                            autoMapEnum = true;
+                            autoMapArg = AutoMapArg{amDepth, amCart, false};
                         } else {
-                            error(expr->args[0]->loc, "Enum case '" + fe->field +
+                            error(arg0->loc, "Enum case '" + fe->field +
+                                  "' expects type '" + std::string(caseType->str().data(), caseType->str().size()) + "'");
+                        }
+                    } else if (argType && !typesEqual(argType, caseType)) {
+                        if (isAssignable(argType, caseType)) {
+                            arg0->resolvedType = caseType;
+                        } else if (auto* arrT = dynamic_cast<ArrayType*>(argType);
+                                   arrT && (typesEqual(arrT->elemType_, caseType) ||
+                                            isAssignable(arrT->elemType_, caseType))) {
+                            // Implicit auto-map: [caseType] -> [Enum]
+                            autoMapEnum = true;
+                            autoMapArg = AutoMapArg{1, 0, false};
+                        } else {
+                            error(arg0->loc, "Enum case '" + fe->field +
                                   "' expects type '" + std::string(caseType->str().data(), caseType->str().size()) + "'");
                         }
                     }
@@ -483,6 +605,16 @@ Type* TypeChecker::tryInferEnumConstruct(CallExpr_* expr, FieldExpr_* fe, Identi
         }
         // Re-tag this node as EnumConstructor for codegen
         expr->kind = ASTNode::EnumConstructor;
+        if (autoMapEnum) {
+            // One entry (single payload arg) drives the enum auto-map codegen.
+            expr->autoMapArgs = { autoMapArg };
+            Type* wrapped = computeAutoMapReturnType(
+                static_cast<Type*>(etype), expr->autoMapArgs, {},
+                autoMapArg.cartesianIndex > 0, autoMapArg.cartesianIndex,
+                autoMapArg.isList, autoMapArg.isPVec);
+            expr->resolvedType = wrapped;
+            return wrapped;
+        }
         expr->resolvedType = etype;
         return etype;
     }
@@ -512,11 +644,35 @@ Type* TypeChecker::tryInferEnumConstruct(CallExpr_* expr, FieldExpr_* fe, Identi
         }
         // Infer type args from the argument
         if (expr->args.size() == 1) {
-            Type* argType = inferExpr(static_cast<Expr*>(expr->args[0].get()));
+            Expr* arg0 = static_cast<Expr*>(expr->args[0].get());
+            // Explicit `@` requests auto-mapping: bind the type parameter from
+            // the *element* type (peeling `amDepth` layers), then construct one
+            // enum value per element. Without `@`, an array binds T to the array
+            // type (so Option<[Int]> is still constructible) -- unchanged.
+            int amDepth = 0, amCart = 0;
+            if (arg0->kind == ASTNode::AutoMap) {
+                auto* am = static_cast<AutoMapExpr*>(arg0);
+                amDepth = am->depth;
+                amCart = am->cartesianIndex;
+            }
+            Type* argType = inferExpr(arg0);
+            AutoMapArg autoMapArg{};
+            Type* bindType = argType;
+            if (amDepth > 0 && argType) {
+                bool isList = false;
+                Type* inner = unwrapAutoMapLayers(argType, amDepth, isList, arg0->loc);
+                if (isList) {
+                    error(arg0->loc, "Enum case '" + fe->field +
+                          "' auto-map supports only Array payloads, not lazy Lists");
+                    inner = nullptr;
+                }
+                bindType = inner;
+                autoMapArg = AutoMapArg{amDepth, amCart, false};
+            }
             for (auto& ucase : decl->cases) {
                 if (ucase.name == fe->field && ucase.typeExpr) {
                     std::unordered_map<std::string, Type*> bindings;
-                    if (argType && unifyTypeExpr(ucase.typeExpr.get(), argType,
+                    if (bindType && unifyTypeExpr(ucase.typeExpr.get(), bindType,
                                                   decl->typeParams, bindings)) {
                         std::vector<Type*> typeArgs;
                         bool allBound = true;
@@ -532,6 +688,14 @@ Type* TypeChecker::tryInferEnumConstruct(CallExpr_* expr, FieldExpr_* fe, Identi
                             EnumType* etype2 = monomorphizeEnum(ident->name, typeArgs, expr->loc);
                             if (etype2) {
                                 expr->kind = ASTNode::EnumConstructor;
+                                if (amDepth > 0) {
+                                    expr->autoMapArgs = { autoMapArg };
+                                    Type* wrapped = computeAutoMapReturnType(
+                                        static_cast<Type*>(etype2), expr->autoMapArgs, {},
+                                        amCart > 0, amCart, false, false);
+                                    expr->resolvedType = wrapped;
+                                    return wrapped;
+                                }
                                 expr->resolvedType = etype2;
                                 return etype2;
                             }
@@ -631,22 +795,17 @@ Type* TypeChecker::tryInferTupleStructConstruct(CallExpr_* expr, IdentifierExpr*
             expr->resolvedFuncGlobalIndex = -3;  // sentinel for tuple struct construction
             if (anyAutoMap) {
                 expr->autoMapArgs = std::move(autoMap);
-                // Determine if any auto-mapped arg is a List
-                bool anyList = false;
-                for (auto& am : expr->autoMapArgs) {
-                    if (am.isList) { anyList = true; break; }
-                }
-                // Compute cartesian nesting depth
+                bool anyList = false, hasCartesian = false;
                 int maxCartesian = 0;
                 for (auto& am : expr->autoMapArgs) {
+                    if (am.isList) anyList = true;
+                    if (am.cartesianIndex > 0) hasCartesian = true;
                     if (am.cartesianIndex > maxCartesian) maxCartesian = am.cartesianIndex;
                 }
-                int wrapLevels = (maxCartesian > 0) ? maxCartesian : 1;
-                Type* wrapped = static_cast<Type*>(stype);
-                for (int level = 0; level < wrapLevels; ++level) {
-                    if (anyList) wrapped = compiler_.listType(wrapped);
-                    else         wrapped = compiler_.arrayType(wrapped);
-                }
+                // Wrap for cartesian dimensions or (plain @/@@) depth.
+                Type* wrapped = computeAutoMapReturnType(static_cast<Type*>(stype),
+                                    expr->autoMapArgs, {}, hasCartesian, maxCartesian,
+                                    anyList, false);
                 expr->resolvedType = wrapped;
                 return wrapped;
             } else {
@@ -765,17 +924,16 @@ Type* TypeChecker::tryInferTupleStructConstruct(CallExpr_* expr, IdentifierExpr*
                         if (stype2) {
                             expr->autoMapArgs = std::move(autoMap);
                             expr->resolvedFuncGlobalIndex = -3;
-                            // Compute cartesian nesting depth
+                            bool hasCartesian = false;
                             int maxCartesian = 0;
                             for (auto& am : expr->autoMapArgs) {
+                                if (am.cartesianIndex > 0) hasCartesian = true;
                                 if (am.cartesianIndex > maxCartesian) maxCartesian = am.cartesianIndex;
                             }
-                            int wrapLevels = (maxCartesian > 0) ? maxCartesian : 1;
-                            Type* wrapped = static_cast<Type*>(stype2);
-                            for (int level = 0; level < wrapLevels; ++level) {
-                                if (anyList) wrapped = compiler_.listType(wrapped);
-                                else         wrapped = compiler_.arrayType(wrapped);
-                            }
+                            // Wrap for cartesian dimensions or (plain @/@@) depth.
+                            Type* wrapped = computeAutoMapReturnType(static_cast<Type*>(stype2),
+                                                expr->autoMapArgs, {}, hasCartesian, maxCartesian,
+                                                anyList, false);
                             expr->resolvedType = wrapped;
                             return wrapped;
                         }

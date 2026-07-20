@@ -2858,7 +2858,15 @@ u16 CodeGen::genExprDispatch(Expr* expr) {
         case ASTNode::StructLiteral:   return genStructLiteral(static_cast<StructLiteralExpr*>(expr));
         case ASTNode::IndexExpr:       return genIndexExpr(static_cast<IndexExpr_*>(expr));
         case ASTNode::FieldExpr:       return genFieldExpr(static_cast<FieldExpr_*>(expr));
-        case ASTNode::EnumConstructor: return genEnumConstruct(expr);
+        case ASTNode::EnumConstructor: {
+            if (auto* ce = dynamic_cast<CallExpr_*>(expr); ce && !ce->autoMapArgs.empty()) {
+                int maxDepth = 0;
+                for (auto& am : ce->autoMapArgs) if (am.depth > maxDepth) maxDepth = am.depth;
+                if (maxDepth > 1) return genDeepMapEnumConstruct(ce, maxDepth);
+                return genAutoMapEnumConstruct(ce);
+            }
+            return genEnumConstruct(expr);
+        }
         case ASTNode::LambdaExpr:      return genLambdaExpr(static_cast<LambdaExprNode*>(expr));
         case ASTNode::IfExpr:          return genIfExpr(static_cast<IfExprNode*>(expr));
         case ASTNode::BlockExpr: {
@@ -4218,12 +4226,14 @@ u16 CodeGen::genCall(CallExpr_* expr) {
     // Tuple struct construction: resolvedFuncGlobalIndex == -3
     if (expr->resolvedFuncGlobalIndex == -3) {
         if (!expr->autoMapArgs.empty()) {
-            // Check for cartesian (@1/@2) vs zip (@)
-            int maxCartesian = 0;
+            // Check for cartesian (@1/@2), depth (@@) vs zip (@)
+            int maxCartesian = 0, maxDepth = 0;
             for (auto& am : expr->autoMapArgs) {
                 if (am.cartesianIndex > maxCartesian) maxCartesian = am.cartesianIndex;
+                if (am.depth > maxDepth) maxDepth = am.depth;
             }
             if (maxCartesian > 0) return genCartesianTupleStruct(expr);
+            if (maxDepth > 1) return genDeepMapTupleStruct(expr, maxDepth);
             return genAutoMapTupleStruct(expr);
         }
         auto* stype = dynamic_cast<StructType*>(expr->resolvedType);
@@ -7744,12 +7754,14 @@ u16 CodeGen::genTupleLiteral(TupleLiteralExpr* expr) {
 u16 CodeGen::genStructLiteral(StructLiteralExpr* expr) {
     // Check for auto-mapped struct literal
     if (!expr->autoMapFields.empty()) {
-        // Check for cartesian (@1/@2) vs zip (@)
-        int maxCartesian = 0;
+        // Check for cartesian (@1/@2), depth (@@) vs zip (@)
+        int maxCartesian = 0, maxDepth = 0;
         for (auto& am : expr->autoMapFields) {
             if (am.cartesianIndex > maxCartesian) maxCartesian = am.cartesianIndex;
+            if (am.depth > maxDepth) maxDepth = am.depth;
         }
         if (maxCartesian > 0) return genCartesianStructLiteral(expr);
+        if (maxDepth > 1) return genDeepMapStructLiteral(expr, maxDepth);
         return genAutoMapStructLiteral(expr);
     }
 
@@ -9969,6 +9981,368 @@ u16 CodeGen::genEnumConstruct(ASTNode* node) {
     }
 
     return dst;
+}
+
+// ============================================================
+// Auto-map for enum-case construction: Enum.case([x, y, z]) builds one enum
+// value per element -> [Enum.case(x), Enum.case(y), Enum.case(z)]. Mirrors
+// the GC-safe loop shape of genAutoMapTupleStruct; only a single Array-typed
+// payload arg is auto-mapped (set up by tryInferEnumConstruct).
+// ============================================================
+u16 CodeGen::genAutoMapEnumConstruct(CallExpr_* expr) {
+    auto* resultArrayType = dynamic_cast<ArrayType*>(expr->resolvedType);
+    if (!resultArrayType) {
+        error(expr->loc, "Auto-mapped enum construct has non-array resolved type");
+        return allocReg();
+    }
+    auto* etype = dynamic_cast<EnumType*>(resultArrayType->elemType_);
+    if (!etype) {
+        error(expr->loc, "Auto-mapped enum construct element type is not an enum");
+        return allocReg();
+    }
+
+    // Resolve the case index from the callee (EnumName.caseName).
+    auto* fe = dynamic_cast<FieldExpr_*>(expr->callee.get());
+    if (!fe) {
+        error(expr->loc, "Auto-mapped enum construct missing case selector");
+        return allocReg();
+    }
+    int caseIdx = -1;
+    for (size_t i = 0; i < etype->cases_.size(); ++i) {
+        if (etype->cases_[i].name->str() == fe->field) { caseIdx = (int)i; break; }
+    }
+    if (caseIdx < 0) {
+        error(expr->loc, "Codegen: unknown enum case '" + fe->field + "'");
+        return allocReg();
+    }
+    Type* caseType = etype->cases_[caseIdx].type;
+
+    // --- Evaluate the payload array (the single auto-mapped arg) ---
+    Expr* argExpr = static_cast<Expr*>(expr->args[0].get());
+    u16 argReg = genExpr(argExpr);
+    auto* arrType = dynamic_cast<ArrayType*>(argExpr->resolvedType);
+    if (!arrType) {
+        error(expr->loc, "Auto-mapped enum payload is not an array");
+        return allocReg();
+    }
+
+    // --- Payload array length ---
+    u16 lenReg = allocReg();
+    emitOp(opArrayLengthFor(arrType->elemType_));
+    emitRegs(lenReg, argReg);
+    emitPtr(arrType);
+
+    // --- Allocate result array ---
+    u16 resultArrReg = allocReg();
+    emitOp(op_array_alloc);
+    emitRegs(resultArrReg, lenReg);
+    emitPtr(resultArrayType);
+
+    // --- Loop counter setup ---
+    u16 iReg = allocReg();
+    emitOp(op_load_int_const);
+    emitRegs(iReg);
+    emitInt(0);
+
+    u16 oneReg = allocReg();
+    emitOp(op_load_int_const);
+    emitRegs(oneReg);
+    emitInt(1);
+
+    u16 condReg = allocReg();
+
+    // --- Loop start ---
+    u32 loopStartIdx = (u32)currentBlock_->code.size();
+    emitOp(op_cmp_lt_int);
+    emitRegs(condReg, iReg, lenReg);
+    u32 exitJump = emitJump(op_jump_if_false, condReg);
+
+    // --- Extract element i, promoting to the case payload type. allocSlot
+    // sizes the slot for a (possibly multi-word inline-composite) payload. ---
+    u16 payloadReg = allocSlot(caseType);
+    emitOp(opArrayGetDynFor(arrType->elemType_));
+    emitRegs(payloadReg, argReg, iReg);
+    emitPtr(arrType);
+    if (arrType->elemType_ != caseType) {
+        u16 promoted = ensureType(payloadReg, arrType->elemType_, caseType);
+        if (promoted != payloadReg) emitMov(payloadReg, promoted);
+    }
+
+    // --- Construct one enum value (mirrors genEnumConstruct's data-case). A
+    // payload-bearing case is never a no-data DiscriminantEnum, so the three
+    // payload reprs below are exhaustive. ---
+    u16 elemReg = allocSlot(etype);
+    if (etype->repr_ == ts::Type::Repr::NullablePtrEnum) {
+        emitMov(elemReg, payloadReg);
+    } else if (etype->repr_ == ts::Type::Repr::Inline) {
+        emitOp(op_make_inline_enum);
+        emitRegs(elemReg, payloadReg, (u16)caseIdx);
+        emitPtr(etype);
+    } else {
+        emitOp(op_make_enum);
+        emitRegs(elemReg, payloadReg, (u16)caseIdx);
+        emitPtr(etype);
+    }
+
+    // --- Store into result array ---
+    emitOp(opArraySetFor(resultArrayType->elemType_));
+    emitRegs(resultArrReg, iReg, elemReg);
+    emitPtr(resultArrayType);
+
+    // --- Increment and loop ---
+    emitOp(op_add_int);
+    emitRegs(iReg, iReg, oneReg);
+    emitJumpTo(loopStartIdx);
+    patchJump(exitJump);
+
+    return resultArrReg;
+}
+
+// ============================================================
+// Depth-N auto-map for construction (@@ / @@@ ...). Shared driver: peels one
+// array layer per level over the `mapped` inputs, broadcasting the rest, and
+// builds nested result arrays. buildLeaf constructs one value at the bottom.
+// ============================================================
+u16 CodeGen::emitMapAtDepth(std::vector<u16> const& inputRegs,
+                            std::vector<Type*> const& inputTypes,
+                            std::vector<bool> const& mapped,
+                            ArrayType* resultType, int remainingDepth,
+                            function_ref<u16(std::vector<u16> const&)> buildLeaf) {
+    // Length = min over the arrays iterated at this level.
+    std::vector<std::pair<u16, ArrayType*>> mapArrays;
+    for (size_t k = 0; k < inputRegs.size(); ++k) {
+        if (mapped[k]) {
+            mapArrays.push_back({inputRegs[k], dynamic_cast<ArrayType*>(inputTypes[k])});
+        }
+    }
+    u16 lenReg = emitMinArrayLength(mapArrays);
+
+    return emitArrayBuildLoop(lenReg, resultType, [&](u16 iReg) -> u16 {
+        std::vector<u16> elemRegs(inputRegs.size());
+        std::vector<Type*> elemTypes(inputRegs.size());
+        for (size_t k = 0; k < inputRegs.size(); ++k) {
+            if (mapped[k]) {
+                auto* at = dynamic_cast<ArrayType*>(inputTypes[k]);
+                // allocSlot sizes for a (possibly multi-word inline) element.
+                u16 er = allocSlot(at->elemType_);
+                emitOp(opArrayGetDynFor(at->elemType_));
+                emitRegs(er, inputRegs[k], iReg);
+                emitPtr(at);
+                elemRegs[k] = er;
+                elemTypes[k] = at->elemType_;
+            } else {
+                // Broadcast input: passed unchanged at every level.
+                elemRegs[k] = inputRegs[k];
+                elemTypes[k] = inputTypes[k];
+            }
+        }
+        if (remainingDepth <= 1) return buildLeaf(elemRegs);
+        auto* innerResult = dynamic_cast<ArrayType*>(resultType->elemType_);
+        return emitMapAtDepth(elemRegs, elemTypes, mapped, innerResult,
+                              remainingDepth - 1, buildLeaf);
+    });
+}
+
+// Validate that every auto-mapped input drives the SAME nesting depth. Deep
+// construction peels each mapped input `depth` times in lockstep, so a mix like
+// `Pair(x @@, y @)` has no well-defined shape. Returns false (after emitting an
+// error) when depths are inconsistent.
+static bool uniformDeepMapDepth(std::vector<AutoMapArg> const& ams, int maxDepth) {
+    for (auto& am : ams) {
+        if (am.depth > 0 && am.depth != maxDepth) return false;
+    }
+    return true;
+}
+
+u16 CodeGen::genDeepMapTupleStruct(CallExpr_* expr, int depth) {
+    auto* topResult = dynamic_cast<ArrayType*>(expr->resolvedType);
+    Type* t = topResult;
+    for (int d = 0; d < depth && t; ++d) {
+        auto* at = dynamic_cast<ArrayType*>(t);
+        t = at ? at->elemType_ : nullptr;
+    }
+    auto* stype = dynamic_cast<StructType*>(t);
+    if (!topResult || !stype) {
+        error(expr->loc, "Deep auto-mapped tuple struct has malformed result type");
+        return allocReg();
+    }
+    if (!uniformDeepMapDepth(expr->autoMapArgs, depth)) {
+        error(expr->loc, "Mixed auto-map depths (e.g. @ with @@) are not supported in construction");
+        return allocReg();
+    }
+    usize numFields = stype->fields_.size();
+    size_t n = expr->args.size();
+
+    std::vector<u16> argRegs(n);
+    for (size_t i = 0; i < n; ++i) argRegs[i] = genExpr(static_cast<Expr*>(expr->args[i].get()));
+
+    std::vector<bool> mapped(n, false);
+    std::vector<Type*> inputTypes(n, nullptr), elemScalarType(n, nullptr);
+    for (size_t i = 0; i < n; ++i) {
+        inputTypes[i] = expr->args[i]->resolvedType;
+        elemScalarType[i] = inputTypes[i];
+        if (expr->autoMapArgs[i]) {
+            mapped[i] = true;
+            Type* et = inputTypes[i];
+            for (int d = 0; d < depth && et; ++d) {
+                auto* at = dynamic_cast<ArrayType*>(et);
+                et = at ? at->elemType_ : nullptr;
+            }
+            elemScalarType[i] = et;
+        }
+    }
+
+    auto buildLeaf = [&](std::vector<u16> const& elemRegs) -> u16 {
+        u16 base = nextReg_;
+        for (size_t i = 0; i < numFields; ++i) {
+            u16 target = base + (u16)i;
+            if (nextReg_ <= target) { nextReg_ = target + 1; if (nextReg_ > maxReg_) maxReg_ = nextReg_; }
+            Type* declType = stype->fields_[i].type;
+            u16 v = ensureType(elemRegs[i], elemScalarType[i], declType);
+            if (v != target) emitMov(target, v);
+        }
+        if (stype->repr_ == ts::Type::Repr::UnwrappedTupleStruct && numFields == 1) {
+            return base;
+        }
+        u16 sreg = (stype->repr_ == ts::Type::Repr::Inline) ? allocSlot(stype) : allocReg();
+        emitOp(op_make_struct);
+        emitRegs(sreg, base, (u16)numFields);
+        emitPtr(stype);
+        return sreg;
+    };
+    return emitMapAtDepth(argRegs, inputTypes, mapped, topResult, depth, buildLeaf);
+}
+
+u16 CodeGen::genDeepMapStructLiteral(StructLiteralExpr* expr, int depth) {
+    auto* topResult = dynamic_cast<ArrayType*>(expr->resolvedType);
+    Type* t = topResult;
+    for (int d = 0; d < depth && t; ++d) {
+        auto* at = dynamic_cast<ArrayType*>(t);
+        t = at ? at->elemType_ : nullptr;
+    }
+    auto* stype = dynamic_cast<StructType*>(t);
+    if (!topResult || !stype) {
+        error(expr->loc, "Deep auto-mapped struct literal has malformed result type");
+        return allocReg();
+    }
+    if (!uniformDeepMapDepth(expr->autoMapFields, depth)) {
+        error(expr->loc, "Mixed auto-map depths (e.g. @ with @@) are not supported in construction");
+        return allocReg();
+    }
+    usize numFields = stype->fields_.size();
+
+    // Struct-field index -> literal-field index (SIZE_MAX = from spread source).
+    std::unordered_map<std::string, size_t> litFieldMap;
+    for (size_t i = 0; i < expr->fields.size(); ++i) litFieldMap[expr->fields[i].name] = i;
+    std::vector<size_t> declOrder(numFields, SIZE_MAX);
+    for (size_t i = 0; i < numFields; ++i) {
+        auto it = litFieldMap.find(std::string(stype->fields_[i].name->str()));
+        if (it != litFieldMap.end()) declOrder[i] = it->second;
+    }
+
+    size_t n = expr->fields.size();
+    std::vector<u16> fieldRegs(n);
+    for (size_t i = 0; i < n; ++i) fieldRegs[i] = genExpr(static_cast<Expr*>(expr->fields[i].value.get()));
+    u16 spreadReg = 0;
+    if (expr->spreadExpr) spreadReg = genExpr(static_cast<Expr*>(expr->spreadExpr.get()));
+
+    std::vector<bool> mapped(n, false);
+    std::vector<Type*> inputTypes(n, nullptr), elemScalarType(n, nullptr);
+    for (size_t i = 0; i < n; ++i) {
+        inputTypes[i] = expr->fields[i].value->resolvedType;
+        elemScalarType[i] = inputTypes[i];
+        if (expr->autoMapFields[i]) {
+            mapped[i] = true;
+            Type* et = inputTypes[i];
+            for (int d = 0; d < depth && et; ++d) {
+                auto* at = dynamic_cast<ArrayType*>(et);
+                et = at ? at->elemType_ : nullptr;
+            }
+            elemScalarType[i] = et;
+        }
+    }
+
+    auto buildLeaf = [&](std::vector<u16> const& elemRegs) -> u16 {
+        u16 base = nextReg_;
+        for (size_t i = 0; i < numFields; ++i) {
+            u16 target = base + (u16)i;
+            if (nextReg_ <= target) { nextReg_ = target + 1; if (nextReg_ > maxReg_) maxReg_ = nextReg_; }
+            Type* declType = stype->fields_[i].type;
+            size_t litIdx = declOrder[i];
+            if (litIdx == SIZE_MAX) {
+                emitOp(op_struct_get);
+                emitRegs(target, spreadReg, (u16)i);
+                emitPtr(stype);
+            } else {
+                u16 v = ensureType(elemRegs[litIdx], elemScalarType[litIdx], declType);
+                if (v != target) emitMov(target, v);
+            }
+        }
+        u16 sreg = (stype->repr_ == ts::Type::Repr::Inline) ? allocSlot(stype) : allocReg();
+        emitOp(op_make_struct);
+        emitRegs(sreg, base, (u16)numFields);
+        emitPtr(stype);
+        return sreg;
+    };
+    return emitMapAtDepth(fieldRegs, inputTypes, mapped, topResult, depth, buildLeaf);
+}
+
+u16 CodeGen::genDeepMapEnumConstruct(CallExpr_* expr, int depth) {
+    auto* topResult = dynamic_cast<ArrayType*>(expr->resolvedType);
+    Type* t = topResult;
+    for (int d = 0; d < depth && t; ++d) {
+        auto* at = dynamic_cast<ArrayType*>(t);
+        t = at ? at->elemType_ : nullptr;
+    }
+    auto* etype = dynamic_cast<EnumType*>(t);
+    auto* fe = dynamic_cast<FieldExpr_*>(expr->callee.get());
+    if (!topResult || !etype || !fe) {
+        error(expr->loc, "Deep auto-mapped enum construct has malformed result type");
+        return allocReg();
+    }
+    if (!uniformDeepMapDepth(expr->autoMapArgs, depth)) {
+        error(expr->loc, "Mixed auto-map depths (e.g. @ with @@) are not supported in construction");
+        return allocReg();
+    }
+    int caseIdx = -1;
+    for (size_t i = 0; i < etype->cases_.size(); ++i) {
+        if (etype->cases_[i].name->str() == fe->field) { caseIdx = (int)i; break; }
+    }
+    if (caseIdx < 0) {
+        error(expr->loc, "Codegen: unknown enum case '" + fe->field + "'");
+        return allocReg();
+    }
+    Type* caseType = etype->cases_[caseIdx].type;
+
+    Expr* argExpr = static_cast<Expr*>(expr->args[0].get());
+    u16 argReg = genExpr(argExpr);
+    Type* payloadElemType = argExpr->resolvedType;
+    for (int d = 0; d < depth && payloadElemType; ++d) {
+        auto* at = dynamic_cast<ArrayType*>(payloadElemType);
+        payloadElemType = at ? at->elemType_ : nullptr;
+    }
+
+    std::vector<u16> inputRegs = { argReg };
+    std::vector<Type*> inputTypes = { argExpr->resolvedType };
+    std::vector<bool> mapped = { true };
+
+    auto buildLeaf = [&](std::vector<u16> const& elemRegs) -> u16 {
+        u16 payloadReg = ensureType(elemRegs[0], payloadElemType, caseType);
+        u16 dst = allocSlot(etype);
+        if (etype->repr_ == ts::Type::Repr::NullablePtrEnum) {
+            emitMov(dst, payloadReg);
+        } else if (etype->repr_ == ts::Type::Repr::Inline) {
+            emitOp(op_make_inline_enum);
+            emitRegs(dst, payloadReg, (u16)caseIdx);
+            emitPtr(etype);
+        } else {
+            emitOp(op_make_enum);
+            emitRegs(dst, payloadReg, (u16)caseIdx);
+            emitPtr(etype);
+        }
+        return dst;
+    };
+    return emitMapAtDepth(inputRegs, inputTypes, mapped, topResult, depth, buildLeaf);
 }
 
 u16 CodeGen::genLambdaExpr(LambdaExprNode* expr) {
