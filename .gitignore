@@ -5,7 +5,9 @@ sapf3_dir/
 imgui.ini
 lang/scratch/
 .DS_Store
+.vscode/
 *.o
 *.a
 *.dylib
 .claude/scheduled_tasks.lock
+.claude/worktrees/
