@@ -1,11 +1,11 @@
--- hmsl_audible: HMSL-style shapes + hierarchical form, live.
+-- shape_audible: HMSL-style shapes + hierarchical form, live.
 -- A form built from shapes with morphological variations; the sel/shuffled
 -- behavior re-rolls at every realize, and three different readings of the
 -- same form are queued back to back on one Player.
 --
 -- Run interactively (Ctrl-C to stop):
 --   ./build/app/tzpl_app --nogui --wait -I lang/modules -I bridge/modules \
---       integration-tests/scripts/hmsl_audible.x
+--       integration-tests/scripts/shape_audible.x
 
 import synthdef.*;
 import common_ugens.*;
