@@ -1,0 +1,608 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tzopilotl &mdash; Getting Started</title>
+<style>
+  :root {
+    --bg: #1a1b26;
+    --fg: #c9d1d9;
+    --accent: #58a6ff;
+    --accent-dim: #3d6ea8;
+    --code-bg: #21222c;
+    --code-border: #30363d;
+    --warn-bg: #2d2308;
+    --warn-border: #f59e0b;
+    --note-bg: #0d2137;
+    --note-border: #3b82f6;
+    --table-stripe: #1f2028;
+    --sidebar-bg: #16171f;
+    --sidebar-border: #2a2d3a;
+    --heading-fg: #e6edf3;
+    --muted-fg: #8b949e;
+    --h4-fg: #a0aec0;
+    --tip-bg: #0d2818;
+    --tip-border: #22c55e;
+    --diagram-bg: #21222c;
+    --syn-kw: #c678dd;
+    --syn-typ: #56d4e0;
+    --syn-str: #4ec970;
+    --syn-cmt: #6a737d;
+    --syn-num: #e5a537;
+    --syn-fn: #58a6ff;
+  }
+
+  html.light {
+    --bg: #fdfdfd;
+    --fg: #1a1a1a;
+    --accent: #2563eb;
+    --accent-dim: #93b4f5;
+    --code-bg: #f3f4f6;
+    --code-border: #dde1e6;
+    --warn-bg: #fef3c7;
+    --warn-border: #f59e0b;
+    --note-bg: #dbeafe;
+    --note-border: #3b82f6;
+    --table-stripe: #f8f9fa;
+    --sidebar-bg: #f8f9fb;
+    --sidebar-border: #e2e5ea;
+    --heading-fg: #0f172a;
+    --muted-fg: #64748b;
+    --h4-fg: #475569;
+    --tip-bg: #dcfce7;
+    --tip-border: #22c55e;
+    --diagram-bg: #fff;
+    --syn-kw: #8b5cf6;
+    --syn-typ: #0891b2;
+    --syn-str: #16a34a;
+    --syn-cmt: #94a3b8;
+    --syn-num: #d97706;
+    --syn-fn: #2563eb;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    font-size: 16px;
+    line-height: 1.7;
+    color: var(--fg);
+    background: var(--bg);
+    display: flex;
+    min-height: 100vh;
+  }
+
+  /* --- Sidebar / Table of Contents --- */
+
+  nav.sidebar {
+    position: sticky;
+    top: 0;
+    align-self: flex-start;
+    width: 280px;
+    min-width: 280px;
+    height: 100vh;
+    overflow-y: auto;
+    padding: 2rem 1.25rem;
+    background: var(--sidebar-bg);
+    border-right: 1px solid var(--sidebar-border);
+    font-size: 0.875rem;
+  }
+
+  nav.sidebar h2 {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--muted-fg);
+    margin-bottom: 1rem;
+  }
+
+  nav.sidebar ol {
+    list-style: none;
+    counter-reset: toc;
+  }
+
+  nav.sidebar > ol > li {
+    counter-increment: toc;
+    margin-bottom: 0.4rem;
+  }
+
+  nav.sidebar > ol > li > a::before {
+    content: counter(toc) ". ";
+    color: var(--accent-dim);
+    font-weight: 600;
+  }
+
+  nav.sidebar a {
+    color: var(--fg);
+    text-decoration: none;
+    display: block;
+    padding: 0.15rem 0;
+  }
+
+  nav.sidebar a:hover { color: var(--accent); }
+
+  nav.sidebar ol ol {
+    margin-left: 1rem;
+    margin-top: 0.2rem;
+    font-size: 0.82rem;
+  }
+
+  nav.sidebar ol ol li { margin-bottom: 0.2rem; }
+
+  /* --- Main Content --- */
+
+  main {
+    flex: 1;
+    max-width: 52rem;
+    margin: 0 auto;
+    padding: 3rem 2.5rem 6rem;
+  }
+
+  h1 {
+    font-size: 2.2rem;
+    font-weight: 700;
+    color: var(--heading-fg);
+    margin-bottom: 0.4rem;
+    line-height: 1.2;
+  }
+
+  h1 + .subtitle {
+    font-size: 1.1rem;
+    color: var(--muted-fg);
+    margin-bottom: 2.5rem;
+  }
+
+  h2 {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--heading-fg);
+    margin-top: 3.5rem;
+    margin-bottom: 1rem;
+    padding-bottom: 0.35rem;
+    border-bottom: 2px solid var(--accent);
+  }
+
+  h3 {
+    font-size: 1.15rem;
+    font-weight: 600;
+    color: var(--heading-fg);
+    margin-top: 2.2rem;
+    margin-bottom: 0.6rem;
+  }
+
+  h4 {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--h4-fg);
+    margin-top: 1.6rem;
+    margin-bottom: 0.4rem;
+  }
+
+  p { margin-bottom: 1rem; }
+
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  /* Code */
+
+  code {
+    font-family: 'SF Mono', 'Fira Code', 'JetBrains Mono', Menlo, Consolas, monospace;
+    font-size: 0.88em;
+    background: var(--code-bg);
+    border: 1px solid var(--code-border);
+    border-radius: 4px;
+    padding: 0.15em 0.4em;
+  }
+
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--code-border);
+    border-radius: 6px;
+    padding: 1.1rem 1.3rem;
+    overflow-x: auto;
+    margin-bottom: 1.2rem;
+    line-height: 1.55;
+  }
+
+  pre code {
+    background: none;
+    border: none;
+    padding: 0;
+    font-size: 0.86rem;
+  }
+
+  /* Keyword colouring (manual spans) */
+  .kw  { color: var(--syn-kw); font-weight: 600; }
+  .typ { color: var(--syn-typ); }
+  .str { color: var(--syn-str); }
+  .cmt { color: var(--syn-cmt); font-style: italic; }
+  .num { color: var(--syn-num); }
+  .fn  { color: var(--syn-fn); }
+
+  /* Tables */
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 1.4rem;
+    font-size: 0.92rem;
+  }
+
+  th, td {
+    text-align: left;
+    padding: 0.55rem 0.9rem;
+    border: 1px solid var(--code-border);
+  }
+
+  th {
+    background: var(--code-bg);
+    font-weight: 600;
+    color: var(--heading-fg);
+  }
+
+  tr:nth-child(even) { background: var(--table-stripe); }
+
+  /* Callout boxes */
+
+  .note, .warning, .tip {
+    border-left: 4px solid;
+    border-radius: 4px;
+    padding: 0.9rem 1.1rem;
+    margin-bottom: 1.2rem;
+    font-size: 0.94rem;
+  }
+
+  .note    { background: var(--note-bg); border-color: var(--note-border); }
+  .warning { background: var(--warn-bg); border-color: var(--warn-border); }
+  .tip     { background: var(--tip-bg); border-color: var(--tip-border); }
+
+  .note strong, .warning strong, .tip strong {
+    display: block;
+    margin-bottom: 0.25rem;
+  }
+
+  /* Lists */
+
+  ul, ol { margin-left: 1.6rem; margin-bottom: 1rem; }
+  li { margin-bottom: 0.3rem; }
+
+  /* Diagram */
+  .diagram {
+    background: var(--diagram-bg);
+    border: 1px solid var(--code-border);
+    border-radius: 6px;
+    padding: 1.5rem;
+    margin-bottom: 1.4rem;
+    overflow-x: auto;
+    text-align: center;
+  }
+
+  .diagram pre {
+    display: inline-block;
+    text-align: left;
+    background: none;
+    border: none;
+    padding: 0;
+    margin: 0;
+    font-size: 0.82rem;
+    line-height: 1.5;
+  }
+
+  /* Theme toggle */
+  .theme-toggle {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 1.5rem;
+    padding: 0.4rem 0.75rem;
+    background: var(--code-bg);
+    border: 1px solid var(--code-border);
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 1.1rem;
+    color: var(--fg);
+    transition: background 0.2s;
+    width: 100%;
+    justify-content: center;
+  }
+  .theme-toggle:hover { background: var(--table-stripe); }
+
+  body, nav.sidebar, pre, code, .note, .warning, .tip, .diagram, th, td {
+    transition: background-color 0.3s, color 0.3s, border-color 0.3s;
+  }
+
+  /* Responsive */
+  @media (max-width: 900px) {
+    nav.sidebar { display: none; }
+    main { padding: 2rem 1.2rem 4rem; }
+  }
+</style>
+<script>
+if (localStorage.getItem('tzpl-docs-theme') === 'light') document.documentElement.classList.add('light');
+</script>
+</head><body>
+
+<!-- ================================================================ -->
+<!--  SIDEBAR                                                         -->
+<!-- ================================================================ -->
+
+<nav class="sidebar">
+  <button class="theme-toggle" id="theme-toggle" aria-label="Toggle theme">
+    <span id="theme-icon">&#9790;</span>
+  </button>
+  <h2>Contents</h2>
+  <ol>
+    <li><a href="#install">Installing</a>
+      <ol>
+        <li><a href="#install-layout">What's in the folder</a></li>
+        <li><a href="#install-gatekeeper">First launch &amp; Gatekeeper</a></li>
+        <li><a href="#install-requirements">Requirements</a></li>
+        <li><a href="#install-updating">Updating</a></li>
+      </ol>
+    </li>
+    <li><a href="#first-run">First Sounds</a></li>
+    <li><a href="#cli">The Command Line</a>
+      <ol>
+        <li><a href="#cli-tzpl">bin/tzpl</a></li>
+        <li><a href="#cli-app">The app, headless</a></li>
+      </ol>
+    </li>
+    <li><a href="#env">Environment Variables</a>
+      <ol>
+        <li><a href="#env-search">Import search order</a></li>
+      </ol>
+    </li>
+    <li><a href="#projects">Projects &amp; Configuration</a>
+      <ol>
+        <li><a href="#config-file">The tzpl-config file</a></li>
+        <li><a href="#config-keys">Configuration keys</a></li>
+        <li><a href="#config-when">When settings apply</a></li>
+        <li><a href="#config-modules">Project modules</a></li>
+      </ol>
+    </li>
+    <li><a href="#editors">Editor Support</a></li>
+    <li><a href="#docs">Where to Go Next</a></li>
+    <li><a href="#troubleshooting">Troubleshooting</a></li>
+  </ol>
+</nav>
+
+<main>
+
+<h1>Tzopilotl &mdash; Getting Started</h1>
+<p class="subtitle">Installing the distribution, setting up your environment, and configuring projects.</p>
+
+<!-- ================================================================ -->
+<h2 id="install">1. Installing</h2>
+
+<p>Tzopilotl ships as a disk image, <code>Tzopilotl-&lt;version&gt;.dmg</code>. Open it and drag the <strong>Tzopilotl</strong> folder anywhere you like &mdash; <code>/Applications</code>, your home directory, a projects drive. There is no installer and nothing is written outside the folder.</p>
+
+<p>The folder is <strong>self-contained and relocatable</strong>: the app and the command-line tool find the standard library and examples relative to their own location. The one rule is to keep the folder together &mdash; don't move <code>Tzopilotl.app</code> out on its own, or it will no longer find its sibling <code>modules/</code> directory.</p>
+
+<h3 id="install-layout">1.1 What's in the folder</h3>
+
+<div class="diagram"><pre>
+Tzopilotl/
+  Tzopilotl.app      the app: editor, notebooks, REPL, audio engine
+  bin/tzpl           command-line interpreter and REPL (language only)
+  modules/           the standard library (std.*, music.*, ugens, ...)
+  examples/          runnable demos -- open one in the app
+  docs/              this guide and the reference documentation
+  editors/           syntax packages for VS Code, TextMate, tree-sitter
+  README.txt
+</pre></div>
+
+<p>Your own work never lives inside this folder (see <a href="#projects">&sect;5</a>); files opened from <code>examples/</code> open as unsaved copies, so the originals stay pristine.</p>
+
+<h3 id="install-gatekeeper">1.2 First launch &amp; Gatekeeper</h3>
+
+<p>Official releases are signed and notarized, so macOS opens them without complaint. If you are running a build that isn't (for example one you built from source without a signing identity), macOS will refuse the first double-click: right-click <code>Tzopilotl.app</code> and choose <strong>Open</strong> once, and it runs normally from then on.</p>
+
+<h3 id="install-requirements">1.3 Requirements</h3>
+
+<ul>
+  <li><strong>macOS.</strong> The app uses CoreAudio; no other audio drivers are needed.</li>
+  <li><strong>Xcode Command Line Tools.</strong> Compiling synth definitions uses the system C++ compiler. If synthdef compilation fails with a missing-compiler error, install the tools with:
+  <pre><code>xcode-select --install</code></pre></li>
+</ul>
+
+<h3 id="install-updating">1.4 Updating</h3>
+
+<p>Replace the whole <code>Tzopilotl/</code> folder with the new version. Nothing of yours is stored inside it, so this is always safe. Never update pieces of it individually &mdash; the app, <code>bin/tzpl</code>, and <code>modules/</code> are matched to each other.</p>
+
+<div class="warning"><strong>Don't edit the stdlib in place.</strong> Anything you change inside the distribution's <code>modules/</code> is lost on the next update. To customize a standard module, copy it into your project's <code>modules/</code> (or a <code>$TZPL_PATH</code> directory) &mdash; those are searched first and <em>shadow</em> the stdlib version (<a href="#env-search">&sect;4.1</a>).</div>
+
+<!-- ================================================================ -->
+<h2 id="first-run">2. First Sounds</h2>
+
+<p>Launch <strong>Tzopilotl.app</strong> and pick <strong>File &gt; Open Example&hellip;</strong>. A good first stop is <code>example_synthdefs.x</code> (a corpus of synths with a <code>playExamples()</code> tour) or <code>ui_synth_controls.x</code> (a synth whose control surface materializes as live widgets).</p>
+
+<p>Evaluation is cursor-driven, like other live-coding environments:</p>
+
+<table>
+  <tr><th>Shortcut</th><th>Action</th></tr>
+  <tr><td><kbd>Cmd+Enter</kbd></td><td>evaluate the selection, or the block under the cursor</td></tr>
+  <tr><td><kbd>Shift+Enter</kbd></td><td>evaluate the current line</td></tr>
+  <tr><td><kbd>Cmd+Shift+Enter</kbd></td><td>evaluate the whole file (in a notebook: run all cells)</td></tr>
+  <tr><td><kbd>Cmd+K</kbd></td><td>clear the console</td></tr>
+</table>
+
+<p>Results and prints land in the console pane. For the notebook document format, widgets, and the full shortcut table, see <em>Live Controls &amp; Notebooks</em> in this docs folder.</p>
+
+<!-- ================================================================ -->
+<h2 id="cli">3. The Command Line</h2>
+
+<h3 id="cli-tzpl">3.1 bin/tzpl</h3>
+
+<p><code>bin/tzpl</code> is the Tzopilotl interpreter on its own: run it with no arguments for a REPL, or pass a <code>.x</code> file to execute it. Arguments after the filename are passed to the script (readable via the <code>programArgs()</code> builtin).</p>
+
+<pre><code>$ tzpl                 <span class="cmt"># interactive REPL</span>
+$ tzpl script.x        <span class="cmt"># run a script</span>
+$ tzpl -I ~/mylibs script.x   <span class="cmt"># add module search paths</span></code></pre>
+
+<p>Useful flags: <code>-I &lt;path&gt;</code> adds module search paths (colon-separated), <code>--rt</code> enables real-time-safety enforcement, and <code>-h</code> lists the rest.</p>
+
+<div class="note"><strong>Language only.</strong> <code>bin/tzpl</code> has no audio engine: it is for scripts, libraries, and learning the language. Modules that talk to the engine (<code>audioEngine</code>, <code>synthdef</code> compilation to a running graph, <code>music.play</code>, the <code>ui</code> widgets) only work inside the app.</div>
+
+<p>To call <code>tzpl</code> from anywhere, add the distribution's <code>bin</code> to your <code>PATH</code> in <code>~/.zshrc</code> (adjust the path to wherever you put the folder):</p>
+
+<pre><code>export PATH="/Applications/Tzopilotl/bin:$PATH"</code></pre>
+
+<p>Symlinking <code>bin/tzpl</code> into a directory already on your <code>PATH</code> also works &mdash; the symlink is resolved before the interpreter looks for its standard library, so it still finds the distribution.</p>
+
+<h3 id="cli-app">3.2 The app, headless</h3>
+
+<p>The app binary itself is scriptable. Launching it from a terminal on a file both opens that file and applies its project's configuration (<a href="#config-when">&sect;5.3</a>):</p>
+
+<pre><code>$ /Applications/Tzopilotl/Tzopilotl.app/Contents/MacOS/Tzopilotl ~/music/mypiece/main.x</code></pre>
+
+<p>With <code>--nogui</code> it runs the same engine without a window, and with <code>--nrt &lt;out.wav&gt;</code> it renders a script offline to a WAV file instead of opening an audio device:</p>
+
+<pre><code>$ .../MacOS/Tzopilotl --nrt out.wav --duration 30 piece.x</code></pre>
+
+<p>All engine settings (<a href="#config-keys">&sect;5.2</a>) have matching command-line flags (<code>--sample-rate</code>, <code>--device</code>, <code>--silos</code>, &hellip;) that override the project config; run with <code>--help</code> for the full list.</p>
+
+<!-- ================================================================ -->
+<h2 id="env">4. Environment Variables</h2>
+
+<p><strong>No environment variables are required.</strong> The distribution is self-locating; the two below exist for customizing where modules come from. Set them in <code>~/.zshrc</code> for terminal use. (The Finder-launched app does not read your shell profile, but it doesn't need to &mdash; it finds everything relative to itself.)</p>
+
+<table>
+  <tr><th>Variable</th><th>Meaning</th></tr>
+  <tr><td><code>TZPL_PATH</code></td><td>Colon-separated list of extra module directories, searched before the standard library. Use it for personal libraries you want available in every script: <code>export TZPL_PATH="$HOME/tzpl-libs"</code></td></tr>
+  <tr><td><code>TZPL_HOME</code></td><td>Explicit path to a distribution root (a folder containing <code>modules/</code>). Overrides the executable-relative discovery. Rarely needed &mdash; only when you want a binary to use a stdlib <em>other</em> than the one it shipped with, e.g. pointing a dev build at an installed distribution or vice versa.</td></tr>
+</table>
+
+<h3 id="env-search">4.1 Import search order</h3>
+
+<p>Each <code>import</code> is resolved by searching, in order:</p>
+
+<ol>
+  <li>the directory of the importing file</li>
+  <li><code>-I</code> paths from the command line</li>
+  <li>the project's <code>modules/</code> directory (<a href="#config-modules">&sect;5.4</a>)</li>
+  <li><code>$TZPL_PATH</code> directories</li>
+  <li>the standard library: <code>$TZPL_HOME/modules</code> if set, otherwise the distribution's <code>modules/</code> found relative to the executable</li>
+  <li>the distribution's <code>examples/</code> (so examples can import each other, and your scripts can <code>import instrument_synthdefs.*</code>)</li>
+</ol>
+
+<p>Earlier entries win, so a file with the same module name in your project shadows the stdlib version. This is the supported way to customize standard modules &mdash; copy, then edit the copy.</p>
+
+<!-- ================================================================ -->
+<h2 id="projects">5. Projects &amp; Configuration</h2>
+
+<p>A <strong>project</strong> is any folder containing a file named <code>tzpl-config</code>. That file is the marker <em>and</em> the engine configuration; the folder may also contain a <code>modules/</code> directory for project-local modules, plus your <code>.x</code> sources and <code>.tzd</code> notebooks laid out however you like.</p>
+
+<p><strong>File &gt; New Project&hellip;</strong> creates one for you: a folder with a commented-out <code>tzpl-config</code> template, an empty <code>modules/</code> directory, and a starter <code>main.tzd</code> notebook. <strong>File &gt; Open Recent Project</strong> reopens a project at its last document.</p>
+
+<p>When you open any file inside a project (the app walks up from the file to the nearest ancestor folder with a <code>tzpl-config</code>), the project is recognized: its <code>modules/</code> joins the import path and its engine settings are applied at launch.</p>
+
+<h3 id="config-file">5.1 The tzpl-config file</h3>
+
+<p>Plain text, one <code>key = value</code> per line; <code>--</code> starts a comment; string values may be quoted. Unknown keys are reported, not fatal. Every key is optional &mdash; an empty file is a valid project marker that changes no settings.</p>
+
+<pre><code><span class="cmt">-- Tzopilotl project config</span>
+sampleRate = 44100
+bufferFrames = 256
+device = <span class="str">"MacBook Pro Speakers"</span>
+inputChannels = 2</code></pre>
+
+<h3 id="config-keys">5.2 Configuration keys</h3>
+
+<table>
+  <tr><th>Key</th><th>Default</th><th>Meaning</th></tr>
+  <tr><td><code>device</code></td><td><code>"default"</code></td><td>Audio output device, by name (as shown in Audio MIDI Setup). <code>"default"</code> follows the system output.</td></tr>
+  <tr><td><code>inputDevice</code></td><td>same as output</td><td>Audio input device, by name.</td></tr>
+  <tr><td><code>sampleRate</code></td><td><code>48000</code></td><td>Sample rate in Hz.</td></tr>
+  <tr><td><code>bufferFrames</code></td><td><code>512</code></td><td>Audio buffer size in frames. Lower is less latency, higher is more headroom.</td></tr>
+  <tr><td><code>channels</code></td><td><code>2</code></td><td>Number of output channels.</td></tr>
+  <tr><td><code>firstChannel</code></td><td><code>0</code></td><td>First output channel on the device (for multichannel interfaces).</td></tr>
+  <tr><td><code>inputChannels</code></td><td><code>0</code></td><td>Number of input channels. <code>0</code> disables audio input.</td></tr>
+  <tr><td><code>firstInputChannel</code></td><td><code>0</code></td><td>First input channel on the device.</td></tr>
+  <tr><td><code>silos</code></td><td><code>4</code></td><td>Number of parallel audio processing units (silos). Each runs its own graph and scheduler.</td></tr>
+  <tr><td><code>tempoClocks</code></td><td><code>1</code></td><td>Number of tempo-clock slots per silo.</td></tr>
+  <tr><td><code>oscPort</code></td><td><code>0</code> (off)</td><td>UDP port for the OSC server, in builds with OSC support.</td></tr>
+  <tr><td><code>natsUrl</code></td><td>off</td><td>NATS server URL (e.g. <code>"nats://127.0.0.1:4222"</code>), in builds with NATS support.</td></tr>
+  <tr><td><code>engineName</code></td><td>none</td><td>Engine name for namespaced NATS subjects when several engines share a server.</td></tr>
+</table>
+
+<h3 id="config-when">5.3 When settings apply</h3>
+
+<p>Engine settings are read <strong>once, at app startup</strong>, from the project of the file the app is launched on. They cannot change while the engine is running, so:</p>
+
+<ul>
+  <li>Opening a project file <em>mid-session</em> (File &gt; Open, drag-and-drop, Finder) adds the project's <code>modules/</code> to the import path immediately, but its engine settings wait until the next launch on that project.</li>
+  <li>After editing <code>tzpl-config</code>, relaunch the app on the project to pick up the changes.</li>
+</ul>
+
+<div class="note"><strong>Finder launches.</strong> Currently, when a double-clicked document <em>starts</em> the app, macOS delivers the file only after the engine is already up, so the project's engine settings are not applied &mdash; module paths are. To launch with a project's engine settings, start the app from the terminal on a file in the project (<a href="#cli-app">&sect;3.2</a>).</div>
+
+<h3 id="config-modules">5.4 Project modules</h3>
+
+<p>Any <code>.x</code> file in the project's <code>modules/</code> directory is importable by name from anywhere in the project. Because project modules are searched before the standard library, this is also where a copied-and-customized stdlib module goes. <strong>File &gt; Reveal Modules Folder</strong> shows the distribution's own <code>modules/</code> when you want to read (or copy) the originals.</p>
+
+<!-- ================================================================ -->
+<h2 id="editors">6. Editor Support</h2>
+
+<p>The <code>editors/</code> folder ships syntax highlighting for external editors:</p>
+
+<ul>
+  <li><code>editors/vscode</code> &mdash; a VS Code extension (highlighting for <code>.x</code> files); see its README for installation.</li>
+  <li><code>editors/Tzopilotl.tmbundle</code> &mdash; a TextMate bundle, also usable by Sublime Text.</li>
+  <li><code>editors/tree-sitter-tzpl</code> &mdash; a tree-sitter grammar for editors that consume one (Neovim, Helix, Zed).</li>
+</ul>
+
+<!-- ================================================================ -->
+<h2 id="docs">7. Where to Go Next</h2>
+
+<table>
+  <tr><th>Document</th><th>What it covers</th></tr>
+  <tr><td><em>Tzopilotl by Example</em></td><td>The language, syntax-first: types, functions, auto-mapping, pattern matching, modules.</td></tr>
+  <tr><td><em>Tzopilotl Music Cookbook</em></td><td>Task-oriented recipes for making sound and music &mdash; the best second stop after this guide.</td></tr>
+  <tr><td><em>Live Controls &amp; Notebooks</em></td><td>The <code>ui</code> widget module and notebook documents in the app.</td></tr>
+  <tr><td><em>Builtin Functions</em></td><td>Reference for every built-in function.</td></tr>
+  <tr><td><em>Coroutines</em></td><td>Coroutines, scheduling, and time.</td></tr>
+  <tr><td><em>FFI Guide</em></td><td>The foreign-function interface, including the audio engine FFI.</td></tr>
+</table>
+
+<!-- ================================================================ -->
+<h2 id="troubleshooting">8. Troubleshooting</h2>
+
+<h4>&ldquo;Tzopilotl.app can't be opened&rdquo; / &ldquo;unverified developer&rdquo;</h4>
+<p>An unsigned (source-built) copy: right-click the app and choose <strong>Open</strong> once. See <a href="#install-gatekeeper">&sect;1.2</a>.</p>
+
+<h4>Synthdef compilation fails with a compiler error</h4>
+<p>Install the Xcode Command Line Tools: <code>xcode-select --install</code>. Synth definitions are compiled to native code with the system C++ compiler.</p>
+
+<h4>An import isn't found, or the wrong version loads</h4>
+<p>Walk the search order in <a href="#env-search">&sect;4.1</a> &mdash; the first match wins. Check for a same-named file earlier in the chain (project <code>modules/</code>, a <code>$TZPL_PATH</code> directory) shadowing the one you expect, and check <code>echo $TZPL_PATH</code> for stale entries.</p>
+
+<h4>Audio imports fail in <code>bin/tzpl</code></h4>
+<p>Expected: the command-line interpreter has no audio engine (<a href="#cli-tzpl">&sect;3.1</a>). Use the app, or its headless mode (<a href="#cli-app">&sect;3.2</a>).</p>
+
+<h4>No sound</h4>
+<p>Check that the <code>device</code> in your project's <code>tzpl-config</code> names an existing output (or leave it at <code>"default"</code>), and remember engine settings apply at launch (<a href="#config-when">&sect;5.3</a>). The console reports the device and sample rate the engine actually opened.</p>
+
+<h4>The app can't find the standard library</h4>
+<p><code>Tzopilotl.app</code> or <code>bin/tzpl</code> was separated from the distribution folder. Put it back next to <code>modules/</code>, or set <code>TZPL_HOME</code> to a distribution root (<a href="#env">&sect;4</a>).</p>
+
+</main>
+<script>
+(function() {
+  var btn = document.getElementById('theme-toggle');
+  var icon = document.getElementById('theme-icon');
+  function update() {
+    var isLight = document.documentElement.classList.contains('light');
+    icon.innerHTML = isLight ? '☀' : '☾';
+  }
+  update();
+  btn.addEventListener('click', function() {
+    document.documentElement.classList.toggle('light');
+    localStorage.setItem('tzpl-docs-theme',
+      document.documentElement.classList.contains('light') ? 'light' : 'dark');
+    update();
+  });
+})();
+</script>
+</body>
+</html>

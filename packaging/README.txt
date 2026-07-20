@@ -15,6 +15,9 @@ together, because the app finds them relative to itself:
   docs/            language and reference documentation (HTML)
   editors/         syntax packages for VS Code, TextMate, tree-sitter
 
+New here? Start with docs/Getting_Started.html -- installing,
+environment variables, and project configuration.
+
 Projects
 --------
 A project is any folder containing a file named `tzpl-config` (engine

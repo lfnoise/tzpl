@@ -106,6 +106,7 @@ install(DIRECTORY integration-tests/scripts/
 
 # Documentation (HTML user-facing docs only)
 install(FILES
+    lang/docs/Getting_Started.html
     lang/docs/Tzopilotl_by_Example.html
     lang/docs/Builtin_Functions.html
     lang/docs/FFI_Guide.html
