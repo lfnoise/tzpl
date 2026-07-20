@@ -34,14 +34,14 @@ voiceBundle(v, "spans_sine") go(0);
 fn d(x Int) Pattern<Pitch> = pure(degree(x));
 
 -- euclidean bass: tresillo on the root, two octaves down
-let bass = d(-14.0) euclid(3, 8) events(0.8, 0.6);
+let bass = d(-14) euclid(3, 8) events(0.8, 0.6);
 
 -- offbeat stab
-let stab = d(2.0) fast(2.0) late(0.25) events(0.35, 0.3);
+let stab = d(2) fast(2.0) late(0.25) events(0.35, 0.3);
 
 -- melody: four degrees, rotating each cycle, reversed every 4th cycle,
 -- with amplitude riding a slow sine
-let melody = fastcat([d(0.0), d(4.0), d(5.0), d(7.0)])
+let melody = [0, 4, 5, 7] d fastcat
     iterp(4)
     every(4, fn(p Pattern<Pitch>) Pattern<Pitch> { p rev })
     events(0.5, 0.9)
