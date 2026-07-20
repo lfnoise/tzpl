@@ -1,11 +1,11 @@
--- hmsl_audible: HMSL-style shapes + hierarchical form, live.
+-- shape_audible: HMSL-inspired shapes + hierarchical form, live.
 -- A form built from shapes with morphological variations; the sel/shuffled
 -- behavior re-rolls at every realize, and three different readings of the
 -- same form are queued back to back on one Player.
 --
 -- Run interactively (Ctrl-C to stop):
 --   ./build/app/tzpl_app --nogui --wait -I lang/modules -I bridge/modules \
---       integration-tests/scripts/hmsl_audible.x
+--       integration-tests/scripts/shape_audible.x
 
 import synthdef.*;
 import common_ugens.*;
@@ -22,14 +22,14 @@ fn sineVoice() S {
     pch nnhz sinosc cb * env * amp
 }
 fn sineSynth() S = voicer(16, sineVoice) sum outlet;
-sineSynth defSynth("hmsl_sine");
+sineSynth defSynth("shape_sine");
 
 engineStart();
 masterGain(0.2);
 setTempo(0, 120.0);
 
 let v = pitchVoice(101);
-voiceBundle(v, "hmsl_sine") go(0);
+voiceBundle(v, "shape_sine") go(0);
 
 randSeed(7);
 
