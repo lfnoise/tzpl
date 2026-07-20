@@ -7,7 +7,7 @@
 --   3. let the tail ring out, then free the node
 --
 -- Run from tzpl_app:
---     ./build/app/tzpl_app --nogui lang/scratch/instrumentTest.x
+--     ./build/app/tzpl_app --nogui examples/instrumentTest.x
 
 import synthdef.*;
 import audio_engine as ae;

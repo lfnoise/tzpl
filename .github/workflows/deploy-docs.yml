@@ -1,0 +1,47 @@
+name: deploy-docs
+
+# Publishes the rendered HTML documentation in lang/docs/ to GitHub Pages.
+# Requires Pages to be enabled with "GitHub Actions" as the source
+# (Settings -> Pages) once the repository is public.
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'lang/docs/**'
+      - '.github/workflows/deploy-docs.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Only the rendered guides are published; Markdown dev notes stay
+      # repo-only.
+      - name: Stage site
+        run: |
+          mkdir -p _site
+          cp lang/docs/*.html _site/
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - id: deployment
+        uses: actions/deploy-pages@v4

@@ -1,5 +1,7 @@
 # synthc M4 Plan -- Voicers + Spectral
 
+> **Historical milestone notes** for the synthc port, retained as a development record.
+
 Status: M4.1 DONE -- **all 8 non-ring-buffer target instruments byte-match**
 (Tier-1 dump + Tier-2 codegen): organ, fmBell, fmBrass, sawLead, pwmPad, kick,
 snare, subBass (plus sineVoice). Only pluck and modalBell remain, and both need

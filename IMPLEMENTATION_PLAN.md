@@ -1,5 +1,7 @@
 # Integration & Product Implementation Plan
 
+> **Working roadmap.** Phase statuses reflect the date of the last update; completed phases are retained as a design record, and later phases may be reordered or dropped.
+
 This document is a step-by-step plan for integrating the three sub-projects (lang, synthdef-compiler, engine) and building the final audio coding application. It is based on an audit of the current state of each project.
 
 **Last updated**: 2026-04-01

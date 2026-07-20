@@ -1,5 +1,7 @@
 # synthc M3 Plan -- Control Flow (if / switch / for, subgraphs, phi)
 
+> **Historical milestone notes** for the synthc port, retained as a development record.
+
 Status: M3 DONE for if_/for_/switch_ -- analysis (M3.1/M3.2/M3.3), codegen
 (M3.4), and parity (M3.5) all complete. The Tier-1 dump and Tier-2 generated C++
 byte-match the C++ compiler, and the Tier-3 render A/B is bit-identical, for

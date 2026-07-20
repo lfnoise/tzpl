@@ -213,12 +213,17 @@ bash run_tests.sh -x              # Stop on first failure
 
 ### Tzopilotl
 
-- [Tzopilotl by Example](lang/docs/Tzopilotl_by_Example.html) — Comprehensive syntax and feature guide
-- [Built-in Functions](lang/docs/Builtin_Functions.html) — Reference for all built-in functions
-- [Coroutines](lang/docs/Coroutines.html) — Coroutine system design and usage
-- [FFI Guide](lang/docs/FFI_Guide.html) — Calling C functions from Tzopilotl
-- [Live Controls and Notebooks](lang/docs/Live_Controls_and_Notebooks.html) — The `ui` widget module and notebook documents in the app
-- [Tzopilotl Music Cookbook](lang/docs/Tzopilotl_Music_Cookbook.html) — Recipes for making music with the platform
+The language and library guides are rendered at **<https://lfnoise.github.io/tzpl/>** (sources in [`lang/docs/`](lang/docs/)):
+
+- [Getting Started](https://lfnoise.github.io/tzpl/Getting_Started.html) — Build the platform, run the app, and make your first sounds
+- [Tzopilotl by Example](https://lfnoise.github.io/tzpl/Tzopilotl_by_Example.html) — Comprehensive syntax and feature guide
+- [Built-in Functions](https://lfnoise.github.io/tzpl/Builtin_Functions.html) — Reference for all built-in functions
+- [Standard Library](https://lfnoise.github.io/tzpl/Standard_Library.html) — The `std.*` module reference
+- [Music Libraries](https://lfnoise.github.io/tzpl/Music_Libraries.html) — The `music.*` namespace: events, tunings, and four composition dialects
+- [Tzopilotl Music Cookbook](https://lfnoise.github.io/tzpl/Tzopilotl_Music_Cookbook.html) — Recipes for making music with the platform
+- [Live Controls and Notebooks](https://lfnoise.github.io/tzpl/Live_Controls_and_Notebooks.html) — The `ui` widget module and notebook documents in the app
+- [Coroutines](https://lfnoise.github.io/tzpl/Coroutines.html) — Coroutine system design and usage
+- [FFI Guide](https://lfnoise.github.io/tzpl/FFI_Guide.html) — Calling C functions from Tzopilotl
 
 ### Architecture
 
@@ -237,4 +242,6 @@ Syntax highlighting for Tzopilotl is available for:
 
 ## License
 
-This project is licensed under the [GNU General Public License v3.0](LICENSE).
+Copyright (C) 2026 James McCartney.
+
+This project is licensed under the [GNU General Public License v3.0](LICENSE). Vendored third-party code (`third_party/`, `lang/third_party/`, `app/vendor/`) retains its original permissive licenses; see the LICENSE files in those directories.

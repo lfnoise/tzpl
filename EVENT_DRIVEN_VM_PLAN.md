@@ -1,5 +1,7 @@
 # Event-Driven VM Plan
 
+> **Historical design note.** The work described here has shipped; this document is retained as a design record and may not reflect the current implementation in every detail.
+
 This document details the design for integrating the Tzopilotl VM into two fundamentally different execution environments: **real-time (RT) audio threads** and **non-real-time (NRT) threads**. These environments share the same VM core but differ in their event sources, constraints, and dispatch mechanisms.
 
 **Last updated**: 2026-03-24

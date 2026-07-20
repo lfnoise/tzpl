@@ -3,6 +3,7 @@ DerivedData/
 tzpl_dir/
 sapf3_dir/
 imgui.ini
+lang/scratch/
 .DS_Store
 *.o
 *.a

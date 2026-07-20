@@ -27,6 +27,7 @@
 #include <thread>
 #include <chrono>
 #include <cassert>
+#include <cstdlib>
 #include <dlfcn.h>
 #include <random>
 
@@ -48,7 +49,8 @@ void loadDef_test()
     AudioStreamParameters asp{.deviceName = "default", .channels = 2, .firstChannel = 0, .bufferFrames = 256, .sampleRate = 48000.};
     auto e = newEngine(config, asp);
 
-    loadDef(e, "/Users/jamesmcc/tzpl-build/dylib", "bubbles");
+    char const* dylibDir = getenv("TZPL_DYLIB_DIR");
+    loadDef(e, dylibDir ? dylibDir : ".", "bubbles");
 }
 
 void test0()

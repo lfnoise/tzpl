@@ -1,5 +1,7 @@
 # Documentation vs Implementation Discrepancies
 
+> **Historical log.** Items below were resolved at the time of writing; retained as a development record.
+
 This file lists examples from `Tzopilotl_by_Example.html` and `Builtin_Functions.html`
 that were broken, required workarounds, or differ from the documented behavior.
 

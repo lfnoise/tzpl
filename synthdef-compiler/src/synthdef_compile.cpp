@@ -236,7 +236,9 @@ void test(string synthName, int seconds, std::function<void()> f)
 #if RUN_EXTERNAL_AUDIO_ENGINE
     try {
     printf("\nbegin run audio engine =====================================================\n");
-        string cmd = "/usr/local/bin/tzpl_audioengine ";
+        char const* enginePath = getenv("TZPL_AUDIOENGINE");
+        string cmd = enginePath ? enginePath : "tzpl_audioengine";
+        cmd += " ";
         cmd += synthName;
         cmd += " ";
         cmd += filepath_dylib;

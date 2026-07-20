@@ -1,5 +1,7 @@
 # synthc M5 Plan -- SIMD, rewrites-on, crash fix, switchover
 
+> **Historical milestone notes** for the synthc port, retained as a development record.
+
 Status: M5.0 DONE. The end-to-end fixups are in:
 - **Engine double-uninit crash FIXED** (the real root cause, engine-wide). Dropped
   the redundant `uninit()` in `engine/src/tzpl_node.cpp` `~Node()` -- the generated

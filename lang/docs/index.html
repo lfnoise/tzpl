@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tzopilotl Documentation</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --fg: #1a1a1a; --bg: #ffffff; --muted: #555; --accent: #0b6e4f;
+    --card: #f6f6f4; --border: #e0e0dc;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --fg: #e8e8e4; --bg: #16181a; --muted: #a0a0a0; --accent: #6fd0ac;
+            --card: #1f2225; --border: #33363a; }
+  }
+  body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI",
+         Helvetica, Arial, sans-serif; color: var(--fg); background: var(--bg);
+         line-height: 1.55; }
+  main { max-width: 46rem; margin: 0 auto; padding: 2.5rem 1.25rem 4rem; }
+  h1 { font-size: 1.9rem; margin-bottom: 0.2rem; }
+  p.tagline { color: var(--muted); margin-top: 0; }
+  h2 { font-size: 1.15rem; margin-top: 2.2rem; border-bottom: 1px solid var(--border);
+       padding-bottom: 0.3rem; }
+  ul.docs { list-style: none; padding: 0; }
+  ul.docs li { background: var(--card); border: 1px solid var(--border);
+       border-radius: 8px; padding: 0.7rem 1rem; margin: 0.55rem 0; }
+  ul.docs a { color: var(--accent); font-weight: 600; text-decoration: none; }
+  ul.docs a:hover { text-decoration: underline; }
+  ul.docs span { display: block; color: var(--muted); font-size: 0.92rem; }
+  footer { margin-top: 3rem; color: var(--muted); font-size: 0.9rem; }
+  footer a { color: var(--accent); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Tzopilotl Documentation</h1>
+  <p class="tagline">The language and libraries of TZPL, an audio coding platform for
+  composing, experimenting with, and performing music.</p>
+
+  <h2>Getting Started</h2>
+  <ul class="docs">
+    <li><a href="Getting_Started.html">Getting Started</a>
+        <span>Build the platform, run the app, and make your first sounds.</span></li>
+    <li><a href="Tzopilotl_by_Example.html">Tzopilotl by Example</a>
+        <span>Comprehensive syntax and feature guide for the language.</span></li>
+  </ul>
+
+  <h2>Reference</h2>
+  <ul class="docs">
+    <li><a href="Builtin_Functions.html">Built-in Functions</a>
+        <span>Reference for all built-in functions.</span></li>
+    <li><a href="Standard_Library.html">Standard Library</a>
+        <span>The <code>std.*</code> module reference.</span></li>
+    <li><a href="Music_Libraries.html">Music Libraries</a>
+        <span>The <code>music.*</code> namespace: events, tunings, and four
+        composition dialects.</span></li>
+  </ul>
+
+  <h2>Guides</h2>
+  <ul class="docs">
+    <li><a href="Tzopilotl_Music_Cookbook.html">Tzopilotl Music Cookbook</a>
+        <span>Task-oriented recipes for making sound and music.</span></li>
+    <li><a href="Live_Controls_and_Notebooks.html">Live Controls and Notebooks</a>
+        <span>The <code>ui</code> widget module and notebook documents in the app.</span></li>
+    <li><a href="Coroutines.html">Coroutines</a>
+        <span>Coroutine system design and usage.</span></li>
+    <li><a href="FFI_Guide.html">FFI Guide</a>
+        <span>Calling C functions from Tzopilotl, including the audio engine FFI.</span></li>
+  </ul>
+
+  <h2>Design Notes</h2>
+  <ul class="docs">
+    <li><a href="Existential_Types_Comparison.html">Existential Types: Tzopilotl vs.
+        Haskell, Rust, Swift, and Go</a>
+        <span>How Tzopilotl's <code>some C</code> compares with existentials in other
+        statically typed languages.</span></li>
+  </ul>
+
+  <footer>
+    Part of the <a href="https://github.com/lfnoise/tzpl">TZPL repository</a>.
+    Doc sources live in <code>lang/docs/</code>.
+  </footer>
+</main>
+</body>
+</html>

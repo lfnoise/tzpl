@@ -23,6 +23,12 @@ evaluate it (Cmd+Return), or paste it into a notebook code cell.
 - `instrument_synthdefs.x` -- ten voicer-based polyphonic instruments
   (organ, FM bell/brass, saw lead, PWM pad, Karplus-Strong pluck, modal
   bell, kick, snare, sub bass), each triggered with `noteOn`/`noteOff`.
-  `lang/scratch/instrumentTest.x` plays a phrase through each one.
+  `instrumentTest.x` plays a phrase through each one.
+- `instrumentTest.x` -- plays a short arpeggio phrase through every
+  instrument in `instrument_synthdefs.x` in sequence. Run with audio on
+  (needs `examples/` on the module path).
+- `rosetta.x` -- programming examples from Rosetta Code written in
+  idiomatic Tzopilotl: pipeline syntax, auto-mapping, lazy lists, no
+  explicit loops. Needs no audio.
 
 The full guide is `lang/docs/Live_Controls_and_Notebooks.html`.

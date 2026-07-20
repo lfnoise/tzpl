@@ -56,6 +56,12 @@ fn inner() {
 
 ## Functions
 
+Top-level declarations (`fn`, `struct`, `enum`, `constraint`, `type`) are
+**order independent** -- a function may be called textually before its
+definition, and mutual recursion needs no forward declarations. Order
+functions for readability, not for scope. (Top-level `let`/`var` initializers
+still run in program order.)
+
 ### Block body (no semicolon after closing brace)
 ```
 fn max(a Int, b Int) Int {
@@ -320,6 +326,15 @@ s contains(2) println;
 
 -- Chaining
 [1, 2, 3] map(fn(x Int) { x * x }) filter(fn(x Int) { x > 2 }) println;
+
+-- Postfix try: unwrap Result/Option, early-return err/none from the
+-- enclosing fn. Requires the fn to declare a matching Result/Option
+-- return type (same error type; no conversion).
+fn addParsed(a String, b String) Option<Int> {
+    let x = parseInt(a) try;             -- none returns immediately
+    let y = parseInt(b) try;
+    Option.some(x + y)
+}
 ```
 
 ## Auto-mapping
