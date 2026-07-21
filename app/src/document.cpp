@@ -402,6 +402,17 @@ static void readWidgetExtras(Reader rw, bridge::UIWidget& w) {
         w.rollEdo = std::max(1, (int)rw.child(14).asInt());
     if (rw.childCount() > 15)
         w.keyChord = std::string(rw.child(15).asStr());
+    if (rw.childCount() > 16)
+        w.momentary = rw.child(16).asBool();
+    if (rw.childCount() > 17) {
+        Reader rl = rw.child(17);
+        if (rl.tag() == Tag::Vec) {
+            w.cellLabels.resize(rl.childCount());
+            for (std::uint32_t i = 0; i < rl.childCount(); ++i)
+                w.cellLabels[i] = std::string(rl.child(i).asStr());
+            w.labelsVersion++;
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -592,6 +603,9 @@ bool saveDocument(DocumentStore const& store, bridge::AppContext& ctx,
                 for (double v : w->values) values.push_back(Value::Float(v));
                 std::vector<Value> notes;
                 for (float v : w->noteData) notes.push_back(Value::Float(v));
+                std::vector<Value> labels;
+                for (auto const& l : w->cellLabels)
+                    labels.push_back(Value::String(l));
                 pv.push_back(Value::Vec({
                     Value::Symbol("widget"),
                     Value::String(w->name),
@@ -610,6 +624,8 @@ bool saveDocument(DocumentStore const& store, bridge::AppContext& ctx,
                     Value::Int(w->rollRows),
                     Value::Int(w->rollEdo),
                     Value::String(w->keyChord),
+                    Value::Bool(w->momentary),
+                    Value::Vec(std::move(labels)),
                 }));
             }
             panels.push_back(Value::Vec(std::move(pv)));
@@ -696,7 +712,7 @@ static bool parseHistory(Reader h, InternPool& pool, LoadedHistory& out) {
         s.panel = std::string(rw.child(1).asStr());
         s.name = std::string(rw.child(2).asStr());
         int kindInt = (int)rw.child(3).asInt();
-        if (kindInt < 0 || kindInt > (int)bridge::UIWidgetKind::Range)
+        if (kindInt < 0 || kindInt > (int)bridge::UIWidgetKind::ButtonMatrix)
             kindInt = 0;
         s.kind = (bridge::UIWidgetKind)kindInt;
         s.spec = readSpec(rw.child(4));
@@ -722,6 +738,13 @@ static bool parseHistory(Reader h, InternPool& pool, LoadedHistory& out) {
         s.rollRows = std::max(1, (int)rw.child(14).asInt());
         s.rollEdo = std::max(1, (int)rw.child(15).asInt());
         s.keyChord = std::string(rw.child(16).asStr());
+        // Trailing children are append-only (older files lack them).
+        if (rw.childCount() > 17) s.momentary = rw.child(17).asBool();
+        if (rw.childCount() > 18) {
+            Reader rl = rw.child(18);
+            for (std::uint32_t j = 0; j < rl.childCount(); ++j)
+                s.cellLabels.push_back(std::string(rl.child(j).asStr()));
+        }
         snaps.push_back(
             pool.snaps.intern(std::make_shared<WidgetSnap const>(std::move(s))));
     }
@@ -944,7 +967,8 @@ SnapshotPtr loadDocument(bridge::AppContext& ctx, std::string const& path,
                 if (rw.tag() != Tag::Vec || rw.childCount() < 6) continue;
                 std::string name{rw.child(1).asStr()};
                 int kindInt = (int)rw.child(2).asInt();
-                if (kindInt < 0 || kindInt > (int)bridge::UIWidgetKind::Range)
+                if (kindInt < 0
+                    || kindInt > (int)bridge::UIWidgetKind::ButtonMatrix)
                     kindInt = 0;
                 auto kind = (bridge::UIWidgetKind)kindInt;
                 bridge::UISpec spec = readSpec(rw.child(3));
@@ -955,7 +979,8 @@ SnapshotPtr loadDocument(bridge::AppContext& ctx, std::string const& path,
                 Reader rv = rw.child(5);
                 if (rv.tag() == Tag::Vec) {
                     if (kind == bridge::UIWidgetKind::MultiSlider
-                        || kind == bridge::UIWidgetKind::Matrix) {
+                        || kind == bridge::UIWidgetKind::Matrix
+                        || kind == bridge::UIWidgetKind::ButtonMatrix) {
                         w->values.assign(rv.childCount(), 0.0);
                     }
                     for (std::uint32_t v = 0;
@@ -1032,6 +1057,8 @@ captureWidgets(bridge::UIState* ui, std::vector<std::string> const& panels,
         s.rollRows = w->rollRows;
         s.rollEdo = w->rollEdo;
         s.keyChord = w->keyChord;
+        s.momentary = w->momentary;
+        s.cellLabels = w->cellLabels;
         // Share the previous capture's element when unchanged, so
         // history nodes duplicate only the widgets that moved.
         std::shared_ptr<WidgetSnap const> reused;
@@ -1092,6 +1119,11 @@ void restoreWidgets(bridge::AppContext& ctx, WidgetSnapList const& target,
                 w->rollRows = s.rollRows;
                 w->rollEdo = s.rollEdo;
                 w->keyChord = s.keyChord;
+                w->momentary = s.momentary;
+                if (w->cellLabels != s.cellLabels) {
+                    w->cellLabels = s.cellLabels;
+                    w->labelsVersion++;
+                }
                 if (w->noteData != s.noteData) {
                     w->noteData = s.noteData;
                     w->dirtyCallback = true;
@@ -1114,7 +1146,8 @@ void restoreWidgets(bridge::AppContext& ctx, WidgetSnapList const& target,
                 bridge::UIWidget* nw =
                     ctx.uiState->upsert(s.panel, s.name, s.kind, s.spec, s.spec2);
                 if (s.kind == bridge::UIWidgetKind::MultiSlider
-                    || s.kind == bridge::UIWidgetKind::Matrix) {
+                    || s.kind == bridge::UIWidgetKind::Matrix
+                    || s.kind == bridge::UIWidgetKind::ButtonMatrix) {
                     nw->values.assign(s.values.size(), 0.0);
                 }
                 for (size_t i = 0; i < nw->values.size() && i < s.values.size(); ++i)
@@ -1128,6 +1161,9 @@ void restoreWidgets(bridge::AppContext& ctx, WidgetSnapList const& target,
                 nw->rollRows = s.rollRows;
                 nw->rollEdo = s.rollEdo;
                 nw->keyChord = s.keyChord;
+                nw->momentary = s.momentary;
+                nw->cellLabels = s.cellLabels;
+                nw->labelsVersion++;
                 nw->dirtyEngine = true;
                 nw->dirtyCallback = true;
             }

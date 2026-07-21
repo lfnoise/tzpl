@@ -103,7 +103,8 @@ static int numValuesFor(UIWidgetKind kind) {
         case UIWidgetKind::XY:    return 2;  // x, y
         case UIWidgetKind::Meter: return 2;  // rms, peak
         case UIWidgetKind::Range: return 2;  // lo, hi
-        // MultiSlider/Matrix are resized by their constructors after upsert.
+        // MultiSlider/Matrix/ButtonMatrix are resized by their
+        // constructors after upsert.
         default:                  return 1;
     }
 }
@@ -130,10 +131,11 @@ UIWidget* UIState::upsert(std::string const& panel, std::string const& name,
         w->seq = nextSeq++;
         // Adopt: keep current values (clamped into the new range), take the
         // new kind/spec, drop stale bindings so the caller rebinds fresh.
-        // Variable-count kinds (MultiSlider/Matrix) keep their sizes; their
-        // constructors adjust the count after the upsert.
+        // Variable-count kinds (MultiSlider/Matrix/ButtonMatrix) keep their
+        // sizes; their constructors adjust the count after the upsert.
         bool variableCount = kind == UIWidgetKind::MultiSlider
-                          || kind == UIWidgetKind::Matrix;
+                          || kind == UIWidgetKind::Matrix
+                          || kind == UIWidgetKind::ButtonMatrix;
         w->kind = kind;
         w->spec = spec;
         w->spec2 = spec2;
@@ -149,6 +151,8 @@ UIWidget* UIState::upsert(std::string const& panel, std::string const& name,
         w->target.reset();
         w->target2.reset();
         w->onChange = nullptr;
+        w->onCell = nullptr;
+        w->cellEvents.clear();
         w->dirtyEngine = false;
         w->dirtyCallback = false;
         return w;

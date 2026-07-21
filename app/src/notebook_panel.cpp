@@ -494,11 +494,12 @@ void NotebookPanel::addCellOutput(std::uint64_t cellId,
 // Presets cells (a matrix of control snapshots)
 // ---------------------------------------------------------------------------
 
-// Kinds whose values a preset stores/recalls: the input widgets.
-// Displays (meter/scope/plot/waveform/label), momentary buttons, and
-// piano rolls (note lists, not values) are left alone.
-static bool presetStorableKind(bridge::UIWidgetKind k) {
-    switch (k) {
+// Widgets whose values a preset stores/recalls: the input widgets.
+// Displays (meter/scope/plot/waveform/label), momentary buttons
+// (including momentary button matrices -- their at-rest state is all
+// zeros), and piano rolls (note lists, not values) are left alone.
+static bool presetStorable(bridge::UIWidget const& w) {
+    switch (w.kind) {
         case bridge::UIWidgetKind::Slider:
         case bridge::UIWidgetKind::Range:
         case bridge::UIWidgetKind::Number:
@@ -507,6 +508,8 @@ static bool presetStorableKind(bridge::UIWidgetKind k) {
         case bridge::UIWidgetKind::MultiSlider:
         case bridge::UIWidgetKind::Matrix:
             return true;
+        case bridge::UIWidgetKind::ButtonMatrix:
+            return !w.momentary;
         default:
             return false;
     }
@@ -534,7 +537,7 @@ doc::Preset NotebookPanel::capturePreset(
     if (!ctx.uiState) return p;
     std::lock_guard<std::mutex> lock(ctx.uiState->mtx);
     for (auto const& w : ctx.uiState->widgets) {
-        if (!presetStorableKind(w->kind)) continue;
+        if (!presetStorable(*w)) continue;
         bool inScope = false;
         for (auto const& root : scope) {
             if (bridge::panelUnderRoot(w->panel, root)) {
@@ -554,7 +557,7 @@ void NotebookPanel::applyPreset(doc::Preset const& p,
     std::lock_guard<std::mutex> lock(ctx.uiState->mtx);
     for (auto const& e : p.entries) {
         bridge::UIWidget* w = ctx.uiState->findByName(e.panel, e.widget);
-        if (!w || !presetStorableKind(w->kind)) continue;
+        if (!w || !presetStorable(*w)) continue;
         for (size_t i = 0; i < w->values.size() && i < e.values.size(); ++i)
             w->values[i] = e.values[i];
         w->dirtyEngine = true;

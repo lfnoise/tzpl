@@ -91,6 +91,13 @@ struct CallbackCall {
     std::vector<double> vec;  // array payload when argc == -1
 };
 
+// One drained cell event for an onCell handler: fn(row, col, value).
+struct CellCall {
+    ts::Obj* fn;
+    int row, col;
+    double v;
+};
+
 } // namespace
 
 void ControlsPanel::dispatch(bridge::UIState& ui, bridge::AppContext& ctx) {
@@ -163,7 +170,8 @@ void ControlsPanel::dispatch(bridge::UIState& ui, bridge::AppContext& ctx) {
             if (w.target) {
                 std::vector<float> vals;
                 if (w.kind == UIWidgetKind::MultiSlider
-                    || w.kind == UIWidgetKind::Matrix) {
+                    || w.kind == UIWidgetKind::Matrix
+                    || w.kind == UIWidgetKind::ButtonMatrix) {
                     vals.assign(w.values.begin(), w.values.end());
                 } else {
                     vals.push_back(static_cast<float>(w.values[0]));
@@ -211,6 +219,7 @@ void ControlsPanel::dispatch(bridge::UIState& ui, bridge::AppContext& ctx) {
         std::lock_guard<std::mutex> lock(ui.mtx);
         bool any = false;
         for (auto& wp : ui.widgets) {
+            if (!wp->cellEvents.empty() && wp->onCell) { any = true; break; }
             if (wp->dirtyCallback && wp->onChange) { any = true; break; }
             if (wp->dirtyCallback && !wp->onChange) wp->dirtyCallback = false;
         }
@@ -223,10 +232,23 @@ void ControlsPanel::dispatch(bridge::UIState& ui, bridge::AppContext& ctx) {
     // Holding nrtvm.mtx: no eval can rebind/remove closures and no GC can
     // run concurrently, so the snapshotted Obj* pointers stay valid.
     std::vector<CallbackCall> calls;
+    std::vector<CellCall> cellCalls;
     {
         std::lock_guard<std::mutex> lock(ui.mtx);
         for (auto& wp : ui.widgets) {
             UIWidget& w = *wp;
+            // Drain per-cell events first: they arrive in interaction
+            // order, and the coalesced whole-state callback below then
+            // reflects the final state.
+            if (!w.cellEvents.empty()) {
+                if (w.onCell) {
+                    int cols = std::max(1, w.cols);
+                    for (auto const& [idx, v] : w.cellEvents)
+                        cellCalls.push_back({w.onCell, idx / cols,
+                                             idx % cols, v});
+                }
+                w.cellEvents.clear();
+            }
             if (!w.dirtyCallback || !w.onChange) continue;
             CallbackCall call{};
             call.fn = w.onChange;
@@ -234,7 +256,8 @@ void ControlsPanel::dispatch(bridge::UIState& ui, bridge::AppContext& ctx) {
                 call.argc = -1;
                 call.vec.assign(w.noteData.begin(), w.noteData.end());
             } else if (w.kind == UIWidgetKind::MultiSlider
-                       || w.kind == UIWidgetKind::Matrix) {
+                       || w.kind == UIWidgetKind::Matrix
+                       || w.kind == UIWidgetKind::ButtonMatrix) {
                 call.argc = -1;
                 call.vec = w.values;
             } else {
@@ -247,9 +270,16 @@ void ControlsPanel::dispatch(bridge::UIState& ui, bridge::AppContext& ctx) {
             w.dirtyCallback = false;
         }
     }
-    if (calls.empty()) return;
+    if (calls.empty() && cellCalls.empty()) return;
 
     ctx.nrtvm->vm.makeCurrent();
+    for (auto const& c : cellCalls) {
+        ts::Word args[3];
+        args[0].i = c.row;
+        args[1].i = c.col;
+        args[2].f = c.v;
+        ctx.nrtvm->vm.callCallable(c.fn, args, 3);
+    }
     for (auto const& c : calls) {
         ts::Word args[2];
         if (c.argc < 0) {
@@ -271,7 +301,8 @@ void ControlsPanel::dispatch(bridge::UIState& ui, bridge::AppContext& ctx) {
 bool ControlsPanel::hasPendingEvents(bridge::UIState& ui) {
     std::lock_guard<std::mutex> lock(ui.mtx);
     for (auto& wp : ui.widgets) {
-        if (wp->dirtyEngine || wp->dirtyCallback) return true;
+        if (wp->dirtyEngine || wp->dirtyCallback || !wp->cellEvents.empty())
+            return true;
     }
     return false;
 }

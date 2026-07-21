@@ -1101,6 +1101,7 @@ static void drawMatrix(UIWidget& w) {
         size_t i = (size_t)r * cols + c;
         if (i < w.values.size()) {
             w.values[i] = w.values[i] > 0.5 ? 0.0 : 1.0;
+            w.pushCellEvent((int)i, w.values[i]);
             markDirty(w);
             w.gestureEnded = true;  // one history commit per toggle
         }
@@ -1128,6 +1129,88 @@ static void drawMatrix(UIWidget& w) {
     for (int r = 0; r <= rows; ++r)
         dl->AddLine(ImVec2(origin.x, origin.y + r * chh),
                     ImVec2(origin.x + width, origin.y + r * chh), gridCol);
+    ImGui::SameLine();
+    ImGui::TextUnformatted(w.name.c_str());
+}
+
+static void drawButtonMatrix(UIWidget& w) {
+    int rows = std::max(1, w.rows), cols = std::max(1, w.cols);
+    const float width = wFrameW(w, cols * 64.0f);
+    const float height = wFrameH(w, rows * 26.0f);
+    ImVec2 origin = ImGui::GetCursorScreenPos();
+    ImGui::InvisibleButton((std::string("##") + w.name).c_str(),
+                           ImVec2(width, height));
+    auto cellAt = [&](ImVec2 m) {
+        int c = std::clamp((int)((m.x - origin.x) / width * cols), 0, cols - 1);
+        int r = std::clamp((int)((m.y - origin.y) / height * rows), 0, rows - 1);
+        return r * cols + c;
+    };
+    if (w.momentary) {
+        // Press = 1, release = 0; both edges dispatch (like drawButton).
+        // Dragging onto another cell releases the held one and presses
+        // the new one. No history commit: values return to rest.
+        if (ImGui::IsItemActivated()) {
+            int i = cellAt(ImGui::GetIO().MousePos);
+            if (i < (int)w.values.size()) {
+                w.activeCell = i;
+                w.values[(size_t)i] = 1.0;
+                w.pushCellEvent(i, 1.0);
+                markDirty(w);
+            }
+        } else if (ImGui::IsItemActive() && w.activeCell >= 0) {
+            int i = cellAt(ImGui::GetIO().MousePos);
+            if (i != w.activeCell && i < (int)w.values.size()) {
+                if (w.activeCell < (int)w.values.size()) {
+                    w.values[(size_t)w.activeCell] = 0.0;
+                    w.pushCellEvent(w.activeCell, 0.0);
+                }
+                w.activeCell = i;
+                w.values[(size_t)i] = 1.0;
+                w.pushCellEvent(i, 1.0);
+                markDirty(w);
+            }
+        }
+        if (ImGui::IsItemDeactivated() && w.activeCell >= 0) {
+            if (w.activeCell < (int)w.values.size()) {
+                w.values[(size_t)w.activeCell] = 0.0;
+                w.pushCellEvent(w.activeCell, 0.0);
+                markDirty(w);
+            }
+            w.activeCell = -1;
+        }
+    } else if (ImGui::IsItemClicked()) {
+        int i = cellAt(ImGui::GetIO().MousePos);
+        if (i < (int)w.values.size()) {
+            double v = w.values[(size_t)i] > 0.5 ? 0.0 : 1.0;
+            w.values[(size_t)i] = v;
+            w.pushCellEvent(i, v);
+            markDirty(w);
+            w.gestureEnded = true;  // one history commit per toggle
+        }
+    }
+    auto* dl = ImGui::GetWindowDrawList();
+    float cw = width / (float)cols, chh = height / (float)rows;
+    ImU32 onCol = ImGui::GetColorU32(ImGuiCol_ButtonActive);
+    ImU32 offCol = ImGui::GetColorU32(ImGuiCol_Button);
+    ImU32 textCol = ImGui::GetColorU32(ImGuiCol_Text);
+    for (int r = 0; r < rows; ++r) {
+        for (int c = 0; c < cols; ++c) {
+            size_t i = (size_t)r * cols + c;
+            ImVec2 p0(origin.x + c * cw + 1, origin.y + r * chh + 1);
+            ImVec2 p1(origin.x + (c + 1) * cw - 1, origin.y + (r + 1) * chh - 1);
+            bool on = i < w.values.size() && w.values[i] > 0.5;
+            dl->AddRectFilled(p0, p1, on ? onCol : offCol, 3.0f);
+            if (i < w.cellLabels.size() && !w.cellLabels[i].empty()) {
+                char const* txt = w.cellLabels[i].c_str();
+                ImVec2 ts = ImGui::CalcTextSize(txt);
+                ImVec2 tp(p0.x + std::max(0.0f, (p1.x - p0.x - ts.x) * 0.5f),
+                          p0.y + std::max(0.0f, (p1.y - p0.y - ts.y) * 0.5f));
+                ImVec4 clip(p0.x, p0.y, p1.x, p1.y);
+                dl->AddText(ImGui::GetFont(), ImGui::GetFontSize(), tp,
+                            textCol, txt, nullptr, 0.0f, &clip);
+            }
+        }
+    }
     ImGui::SameLine();
     ImGui::TextUnformatted(w.name.c_str());
 }
@@ -1259,6 +1342,7 @@ bool drawUIWidget(bridge::UIWidget& w) {
         case UIWidgetKind::Waveform: drawWaveform(w); break;
         case UIWidgetKind::MultiSlider: drawMultiSlider(w); break;
         case UIWidgetKind::Matrix:      drawMatrix(w); break;
+        case UIWidgetKind::ButtonMatrix: drawButtonMatrix(w); break;
         case UIWidgetKind::PianoRoll:   drawPianoRoll(w); break;
         case UIWidgetKind::Label:       drawLabel(w); break;
     }

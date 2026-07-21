@@ -106,6 +106,7 @@ private:
     void paintWaveform(juce::Graphics&, bridge::UIWidget&);
     void paintMultiSlider(juce::Graphics&, bridge::UIWidget&);
     void paintMatrix(juce::Graphics&, bridge::UIWidget&);
+    void paintButtonMatrix(juce::Graphics&, bridge::UIWidget&);
     void paintPianoRoll(juce::Graphics&, bridge::UIWidget&);
     void paintLabel(juce::Graphics&, bridge::UIWidget&);
 

@@ -139,6 +139,7 @@ juce::Point<int> WidgetComponent::preferredSize() const {
         case UIWidgetKind::Waveform: return { 260, 120 };
         case UIWidgetKind::MultiSlider: return { 260, 120 };
         case UIWidgetKind::Matrix: return { 200, 160 };
+        case UIWidgetKind::ButtonMatrix: return { 260, 130 };
         case UIWidgetKind::PianoRoll: return { 320, 200 };
     }
     return { 200, 28 };
@@ -182,6 +183,7 @@ void WidgetComponent::paint(Graphics& g) {
         case UIWidgetKind::Waveform:    paintWaveform(g, w); break;
         case UIWidgetKind::MultiSlider: paintMultiSlider(g, w); break;
         case UIWidgetKind::Matrix:      paintMatrix(g, w); break;
+        case UIWidgetKind::ButtonMatrix: paintButtonMatrix(g, w); break;
         case UIWidgetKind::PianoRoll:   paintPianoRoll(g, w); break;
         case UIWidgetKind::Label:       paintLabel(g, w); break;
     }
@@ -435,6 +437,33 @@ void WidgetComponent::paintMatrix(Graphics& g, UIWidget& w) {
                juce::Justification::centredLeft);
 }
 
+void WidgetComponent::paintButtonMatrix(Graphics& g, UIWidget& w) {
+    auto bb = bodyRect(*this, kLabelH);
+    int rows = std::max(1, w.rows), cols = std::max(1, w.cols);
+    float cw = bb.getWidth() / cols, ch = bb.getHeight() / rows;
+    g.setFont(12.0f);
+    for (int r = 0; r < rows; ++r) {
+        for (int c = 0; c < cols; ++c) {
+            int idx = r * cols + c;
+            bool on = idx < (int)w.values.size() && w.values[idx] != 0.0;
+            auto cell = juce::Rectangle<float>(bb.getX() + c * cw + 1,
+                                               bb.getY() + r * ch + 1,
+                                               cw - 2, ch - 2);
+            g.setColour(on ? juce::Colour(0xff5a9bd4)
+                           : trackColour(*this).withAlpha(0.6f));
+            g.fillRoundedRectangle(cell, 3.0f);
+            if (idx < (int)w.cellLabels.size() && !w.cellLabels[idx].empty()) {
+                g.setColour(juce::Colours::white.withAlpha(on ? 1.0f : 0.85f));
+                g.drawText(String(w.cellLabels[idx]), cell.toNearestInt(),
+                           juce::Justification::centred, true);
+            }
+        }
+    }
+    g.setColour(juce::Colours::grey);
+    g.drawText(name_, 0, getHeight() - kLabelH, getWidth(), kLabelH,
+               juce::Justification::centredLeft);
+}
+
 void WidgetComponent::paintPianoRoll(Graphics& g, UIWidget& w) {
     auto bb = bodyRect(*this, kLabelH);
     g.setColour(juce::Colours::black.withAlpha(0.4f));
@@ -618,6 +647,25 @@ void WidgetComponent::mouseDown(juce::MouseEvent const& e) {
             if (idx >= 0 && idx < (int)w.values.size()) {
                 matrixPaintValue_ = w.values[idx] != 0.0 ? 0 : 1;
                 w.values[idx] = matrixPaintValue_;
+                w.pushCellEvent(idx, matrixPaintValue_);
+                markDirtyAndNotify(w, false);
+            }
+        } break;
+        case UIWidgetKind::ButtonMatrix: {
+            int idx = ui_gesture::matrixCellHit(
+                (float)e.x, (float)e.y, bb.getWidth(), bb.getHeight(),
+                std::max(1, w.rows), std::max(1, w.cols));
+            if (idx >= 0 && idx < (int)w.values.size()) {
+                if (w.momentary) {
+                    // Press = 1; released (or slid off) in mouseUp/Drag.
+                    w.activeCell = idx;
+                    w.values[idx] = 1.0;
+                    w.pushCellEvent(idx, 1.0);
+                } else {
+                    matrixPaintValue_ = w.values[idx] != 0.0 ? 0 : 1;
+                    w.values[idx] = matrixPaintValue_;
+                    w.pushCellEvent(idx, matrixPaintValue_);
+                }
                 markDirtyAndNotify(w, false);
             }
         } break;
@@ -739,6 +787,32 @@ void WidgetComponent::mouseDrag(juce::MouseEvent const& e) {
                 && matrixPaintValue_ >= 0
                 && w.values[idx] != (double)matrixPaintValue_) {
                 w.values[idx] = matrixPaintValue_;
+                w.pushCellEvent(idx, matrixPaintValue_);
+                markDirtyAndNotify(w, false);
+            }
+        } break;
+        case UIWidgetKind::ButtonMatrix: {
+            int idx = ui_gesture::matrixCellHit(
+                (float)e.x, (float)e.y, bb.getWidth(), bb.getHeight(),
+                std::max(1, w.rows), std::max(1, w.cols));
+            if (idx < 0 || idx >= (int)w.values.size()) break;
+            if (w.momentary) {
+                // Slide: release the held cell, press the one under the
+                // pointer.
+                if (w.activeCell >= 0 && idx != w.activeCell) {
+                    if (w.activeCell < (int)w.values.size()) {
+                        w.values[w.activeCell] = 0.0;
+                        w.pushCellEvent(w.activeCell, 0.0);
+                    }
+                    w.activeCell = idx;
+                    w.values[idx] = 1.0;
+                    w.pushCellEvent(idx, 1.0);
+                    markDirtyAndNotify(w, false);
+                }
+            } else if (matrixPaintValue_ >= 0
+                       && w.values[idx] != (double)matrixPaintValue_) {
+                w.values[idx] = matrixPaintValue_;
+                w.pushCellEvent(idx, matrixPaintValue_);
                 markDirtyAndNotify(w, false);
             }
         } break;
@@ -775,6 +849,13 @@ void WidgetComponent::mouseUp(juce::MouseEvent const&) {
     UIWidget& w = *wp;
     if (w.kind == UIWidgetKind::Button) {
         if (!w.values.empty()) w.values[0] = 0.0; // momentary release
+    }
+    if (w.kind == UIWidgetKind::ButtonMatrix && w.momentary) {
+        if (w.activeCell >= 0 && w.activeCell < (int)w.values.size()) {
+            w.values[w.activeCell] = 0.0;
+            w.pushCellEvent(w.activeCell, 0.0);
+        }
+        w.activeCell = -1;
     }
     markDirtyAndNotify(w, true);
 }

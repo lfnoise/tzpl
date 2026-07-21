@@ -38,6 +38,7 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace ts { struct Obj; }
@@ -109,6 +110,7 @@ enum class UIWidgetKind : int {
     PianoRoll,   // noteData = (pitch, startBeat, durBeats) triplets
     Label,       // static text (labelText)
     Range,       // two-ended slider: values[0] = lo, values[1] = hi (mapped)
+    ButtonMatrix,// values = rows*cols labeled buttons (momentary or toggle)
 };
 
 // Engine fast-path binding: on value change the GUI thread sends
@@ -145,6 +147,7 @@ struct UIWidget {
     std::optional<UIEngineTarget> target;   // fast path (X axis for XY)
     std::optional<UIEngineTarget> target2;  // fast path, XY Y axis
     ts::Obj* onChange = nullptr;            // lang closure, GC-rooted by scanner
+    ts::Obj* onCell = nullptr;              // fn(row, col, v), GC-rooted too
 
     // Event state: set by the GUI thread on user interaction, consumed by
     // the per-frame dispatch (fast path) and callback delivery.
@@ -162,8 +165,38 @@ struct UIWidget {
     // in an arranged panel); fw/fh <= 0 = the widget's default size.
     float fx = -1.0f, fy = -1.0f, fw = 0.0f, fh = 0.0f;
 
-    // Matrix dimensions (values is rows*cols, row-major).
+    // Matrix/ButtonMatrix dimensions (values is rows*cols, row-major).
     int rows = 1, cols = 1;
+
+    // ButtonMatrix: momentary cells (1 while held, 0 on release) instead
+    // of click-to-toggle. Document state (saved in .tzd).
+    bool momentary = false;
+
+    // Per-cell labels, row-major; may be shorter than rows*cols (missing
+    // entries draw blank). Document state. labelsVersion bumps on every
+    // label change so retained-mode GUIs know to repaint.
+    std::vector<std::string> cellLabels;
+    std::uint64_t labelsVersion = 0;
+
+    // Per-cell interaction events (Matrix/ButtonMatrix): ordered
+    // (cellIndex, value) press/flip/release edges appended by the GUI
+    // thread, drained in order by the per-frame dispatch into the onCell
+    // callback. Unlike the coalesced dirty flags, these preserve both
+    // edges of a within-frame click and the ordering of multi-cell
+    // changes. Runtime-only.
+    std::vector<std::pair<int, double>> cellEvents;
+
+    // GUI-thread-only: cell currently held during a momentary gesture.
+    int activeCell = -1;
+
+    // Append a cell event (caller holds UIState::mtx). Dropped when no
+    // onCell handler is bound; capped as a safety valve if dispatch
+    // stalls (oldest events go first).
+    void pushCellEvent(int index, double value) {
+        if (!onCell) return;
+        if (cellEvents.size() >= 1024) cellEvents.erase(cellEvents.begin());
+        cellEvents.push_back({index, value});
+    }
 
     // Piano roll: flat (pitch, startBeat, durBeats) triplets + view range.
     // Pitch is in steps of 1/rollEdo octave: edo 12 = MIDI note numbers,

@@ -281,6 +281,45 @@ static void ffi_uiMatrix(ts::VM& vm, u16 dst, u16, u16 argBase) {
     vm.reg(dst).i = (i64)w->id;
 }
 
+// fn uiButtonMatrix(name String, rows Int, cols Int, momentary Bool) Int
+static void ffi_uiButtonMatrix(ts::VM& vm, u16 dst, u16, u16 argBase) {
+    UIState* ui = getUIState(vm);
+    if (!ui) { vm.reg(dst).i = 0; return; }
+    const char* name = regString(vm, argBase);
+    int rows = std::max(1, (int)vm.reg(argBase + 1).i);
+    int cols = std::max(1, (int)vm.reg(argBase + 2).i);
+    bool momentary = vm.reg(argBase + 3).i != 0;
+    UISpec spec;  // 0..1
+
+    std::lock_guard<std::mutex> lock(ui->mtx);
+    UIWidget* w = ui->upsert(ui->currentPanel, name, UIWidgetKind::ButtonMatrix,
+                             spec, UISpec{});
+    if (w->rows != rows || w->cols != cols) {
+        // Dimension change: keep overlapping cells (values AND labels),
+        // zero/blank the rest.
+        std::vector<double> next((size_t)rows * cols, 0.0);
+        std::vector<std::string> nextLabels((size_t)rows * cols);
+        for (int r = 0; r < std::min(rows, w->rows); ++r) {
+            for (int c = 0; c < std::min(cols, w->cols); ++c) {
+                size_t from = (size_t)r * w->cols + c;
+                size_t to = (size_t)r * cols + c;
+                if (from < w->values.size()) next[to] = w->values[from];
+                if (from < w->cellLabels.size())
+                    nextLabels[to] = w->cellLabels[from];
+            }
+        }
+        w->values = std::move(next);
+        if (!w->cellLabels.empty()) w->cellLabels = std::move(nextLabels);
+        w->rows = rows;
+        w->cols = cols;
+        w->labelsVersion++;
+    } else {
+        w->values.resize((size_t)rows * cols, 0.0);
+    }
+    w->momentary = momentary;
+    vm.reg(dst).i = (i64)w->id;
+}
+
 // fn uiPianoRoll(name String, beats Float, edo Int) Int
 static void ffi_uiPianoRoll(ts::VM& vm, u16 dst, u16, u16 argBase) {
     UIState* ui = getUIState(vm);
@@ -353,6 +392,25 @@ static void ffi_uiOnChangeXY(ts::VM& vm, u16, u16, u16 argBase) {
 // per-frame dispatch builds the array argument by widget kind.
 static void ffi_uiOnChangeVec(ts::VM& vm, u16, u16, u16 argBase) {
     storeOnChange(vm, argBase);
+}
+
+// fn uiOnCell(id Int, f fn(Int, Int, Float) Void) Void
+// Per-cell event callback for Matrix/ButtonMatrix: fired once per cell
+// press/flip/release with (row, col, value), in interaction order --
+// unlike uiOnChangeVec, which coalesces to the latest whole array once
+// per GUI frame.
+static void ffi_uiOnCell(ts::VM& vm, u16, u16, u16 argBase) {
+    UIState* ui = getUIState(vm);
+    if (!ui) return;
+    auto id = static_cast<std::uint64_t>(vm.reg(argBase).i);
+    ts::Obj* handler = vm.reg(argBase + 1).o;
+    std::lock_guard<std::mutex> lock(ui->mtx);
+    if (UIWidget* w = ui->findById(id)) {
+        w->onCell = handler;
+    } else {
+        std::fprintf(stderr, "ui.onCell: no widget with id %llu\n",
+                     static_cast<unsigned long long>(id));
+    }
 }
 
 // Resolve a control name on a node to an engine target. Returns tzpl_SErr.
@@ -562,6 +620,63 @@ static void ffi_uiSetValues(ts::VM& vm, u16, u16, u16 argBase) {
             w->values[i] = w->spec.clamp(vals[i]);
         w->dirtyEngine = true;
         w->dirtyCallback = true;
+    }
+}
+
+// fn uiCellLabels(id Int) Array[String]
+static void ffi_uiCellLabels(ts::VM& vm, u16 dst, u16, u16 argBase) {
+    UIState* ui = getUIState(vm);
+    auto id = static_cast<std::uint64_t>(vm.reg(argBase).i);
+    std::vector<std::string> labels;
+    if (ui) {
+        std::lock_guard<std::mutex> lock(ui->mtx);
+        if (UIWidget* w = ui->findById(id)) labels = w->cellLabels;
+    }
+    // Allocate after releasing ui->mtx (allocation may run the GC).
+    auto* arr = new ts::ObjArray(vm.arrayType(vm.stringType()));
+    for (auto const& s : labels) arr->push(new ts::StringObj(s));
+    vm.reg(dst).o = arr;
+}
+
+// fn uiSetCellLabels(id Int, labels Array[String]) Void
+// Row-major; entries beyond rows*cols are dropped, missing ones blank.
+static void ffi_uiSetCellLabels(ts::VM& vm, u16, u16, u16 argBase) {
+    UIState* ui = getUIState(vm);
+    if (!ui) return;
+    auto id = static_cast<std::uint64_t>(vm.reg(argBase).i);
+    // Copy the strings out BEFORE taking ui->mtx (see lock-order rules).
+    std::vector<std::string> labels;
+    auto* arr = vm.reg(argBase + 1).o;
+    auto n = ts::arraySize(arr);
+    labels.reserve(n);
+    for (usize i = 0; i < n; ++i)
+        labels.push_back(ts::stringData(ts::arrayGetObj(arr, i)));
+    std::lock_guard<std::mutex> lock(ui->mtx);
+    if (UIWidget* w = ui->findById(id)) {
+        size_t cells = (size_t)std::max(1, w->rows) * std::max(1, w->cols);
+        if (labels.size() > cells) labels.resize(cells);
+        w->cellLabels = std::move(labels);
+        w->labelsVersion++;
+    }
+}
+
+// fn uiSetCellLabel(id Int, row Int, col Int, label String) Void
+static void ffi_uiSetCellLabel(ts::VM& vm, u16, u16, u16 argBase) {
+    UIState* ui = getUIState(vm);
+    if (!ui) return;
+    auto id = static_cast<std::uint64_t>(vm.reg(argBase).i);
+    int row = (int)vm.reg(argBase + 1).i;
+    int col = (int)vm.reg(argBase + 2).i;
+    std::string label = regString(vm, argBase + 3);
+    std::lock_guard<std::mutex> lock(ui->mtx);
+    if (UIWidget* w = ui->findById(id)) {
+        int cols = std::max(1, w->cols);
+        if (row < 0 || row >= std::max(1, w->rows) || col < 0 || col >= cols)
+            return;
+        size_t idx = (size_t)row * cols + col;
+        if (w->cellLabels.size() <= idx) w->cellLabels.resize(idx + 1);
+        w->cellLabels[idx] = std::move(label);
+        w->labelsVersion++;
     }
 }
 
@@ -1053,6 +1168,11 @@ void registerUIFFI(ts::Compiler& compiler) {
     ts::Type* FnFloat2 = reinterpret_cast<ts::Type*>(compiler.functionType(fArgs2, Void));
     ts::Vec<ts::Type*> fArgsV; fArgsV.push_back(FloatArray);
     ts::Type* FnVec = reinterpret_cast<ts::Type*>(compiler.functionType(fArgsV, Void));
+    // fn(Int, Int, Float) Void for onCell handlers (row, col, value).
+    ts::Vec<ts::Type*> fArgsC;
+    fArgsC.push_back(Int); fArgsC.push_back(Int); fArgsC.push_back(Float);
+    ts::Type* FnCell = reinterpret_cast<ts::Type*>(compiler.functionType(fArgsC, Void));
+    ts::Type* StringArray = reinterpret_cast<ts::Type*>(compiler.arrayType(String));
 
     using R = void (*)(ts::VM&, u16, u16, u16);
     auto reg = [&](const char* name, ts::Type* retType,
@@ -1074,11 +1194,16 @@ void registerUIFFI(ts::Compiler& compiler) {
                                          Float, Float, Float, Int, Float}, ffi_uiXY);
     reg("uiMultiSlider",  Int,  {String, Int, Float, Float, Float, Int, Float}, ffi_uiMultiSlider);
     reg("uiMatrix",       Int,  {String, Int, Int},             ffi_uiMatrix);
+    reg("uiButtonMatrix", Int,  {String, Int, Int, Bool},       ffi_uiButtonMatrix);
     reg("uiPianoRoll",    Int,  {String, Float, Int},           ffi_uiPianoRoll);
     reg("uiLabel",        Int,  {String, String},               ffi_uiLabel);
     reg("uiOnChange",     Void, {Int, FnFloat},                 ffi_uiOnChange);
     reg("uiOnChangeXY",   Void, {Int, FnFloat2},                ffi_uiOnChangeXY);
     reg("uiOnChangeVec",  Void, {Int, FnVec},                   ffi_uiOnChangeVec);
+    reg("uiOnCell",       Void, {Int, FnCell},                  ffi_uiOnCell);
+    reg("uiCellLabels",   StringArray, {Int},                   ffi_uiCellLabels);
+    reg("uiSetCellLabels", Void, {Int, StringArray},            ffi_uiSetCellLabels);
+    reg("uiSetCellLabel", Void, {Int, Int, Int, String},        ffi_uiSetCellLabel);
     reg("uiBindControl",  Int,  {Int, Int, String, Int},        ffi_uiBindControl);
     reg("uiBindControlY", Int,  {Int, Int, String, Int},        ffi_uiBindControlY);
     reg("uiBindKey",      Void, {Int, String},                  ffi_uiBindKey);
@@ -1117,6 +1242,7 @@ void registerUIRootScanner(ts::NRTVM& nrtvm, UIState& ui) {
         std::lock_guard<std::mutex> lock(ui.mtx);
         for (auto& w : ui.widgets) {
             if (w->onChange) gc.mark(static_cast<ts::GCObj*>(w->onChange));
+            if (w->onCell) gc.mark(static_cast<ts::GCObj*>(w->onCell));
         }
     });
 }

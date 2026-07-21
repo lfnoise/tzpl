@@ -70,7 +70,8 @@ tzpl::sbin::Value presetValue(Preset const& p);
 tzpl::sbin::Value cellValue(Cell const& c);
 
 // (wsnap panel name kindInt spec spec2 (v...) (fx fy fw fh) rows cols
-//  (notes...) labelText rollBeats rollLowPitch rollRows rollEdo keyChord)
+//  (notes...) labelText rollBeats rollLowPitch rollRows rollEdo keyChord
+//  momentary (cellLabels...))
 // History-table / hashing record only; the live "panels" section of the
 // .tzd format keeps its own shape.
 tzpl::sbin::Value widgetSnapValue(WidgetSnap const& s);

@@ -388,6 +388,82 @@ static void testMalformedHistory() {
     std::printf("malformed history: ok\n");
 }
 
+static void testButtonMatrix() {
+    // ButtonMatrix document state (momentary flag + per-cell labels)
+    // hashes, saves, and loads through both the live panels section and
+    // the history tables.
+    auto bm = makeSnap("pads", 0.0);
+    bm.kind = bridge::UIWidgetKind::ButtonMatrix;
+    bm.rows = 2;
+    bm.cols = 2;
+    bm.values = {0.0, 1.0, 0.0, 1.0};
+    bm.cellLabels = {"a", "b", "c", "d"};
+    auto bmSame = bm;
+    CHECK(doc::contentHashOf(bm) == doc::contentHashOf(bmSame));
+    CHECK(bm == bmSame);
+    auto bmLabel = bm;
+    bmLabel.cellLabels[3] = "D";
+    CHECK(doc::contentHashOf(bmLabel) != doc::contentHashOf(bm));
+    CHECK(!(bmLabel == bm));
+    auto bmMode = bm;
+    bmMode.momentary = true;
+    CHECK(doc::contentHashOf(bmMode) != doc::contentHashOf(bm));
+    CHECK(!(bmMode == bm));
+
+    // Live widget -> save -> load -> live widget, through a real UIState.
+    bridge::UIState ui;
+    bridge::AppContext ctx;
+    ctx.uiState = &ui;
+    std::vector<double> const vals{1, 0, 0, 0, 1, 0};
+    std::vector<std::string> const labels{"kick", "snare", "hat",
+                                          "tom", "clap", "ride"};
+    {
+        std::lock_guard<std::mutex> lock(ui.mtx);
+        auto* w = ui.upsert("pads", "grid", bridge::UIWidgetKind::ButtonMatrix,
+                            bridge::UISpec{}, bridge::UISpec{});
+        w->rows = 2;
+        w->cols = 3;
+        w->values = vals;
+        w->momentary = true;
+        w->cellLabels = labels;
+    }
+    doc::DocumentStore store;
+    store.rerootHistory("start");
+    store.insertCell(0, doc::CellKind::Panel, "pads");
+    store.setWidgetSnap(doc::captureWidgets(&ui, {"pads"}));
+    store.commit("grid");
+    std::string err;
+    std::string path = tempPath("tzpl_doc_buttonmatrix.tzd");
+    CHECK(doc::saveDocument(store, ctx, path, err));
+
+    bridge::UIState ui2;
+    bridge::AppContext ctx2;
+    ctx2.uiState = &ui2;
+    doc::DocumentStore store2;
+    doc::LoadedHistory hist;
+    auto snap = doc::loadDocument(ctx2, path, err, &store2.interns(), &hist);
+    CHECK(snap);
+    {
+        std::lock_guard<std::mutex> lock(ui2.mtx);
+        auto* w = ui2.findByName("pads", "grid");
+        CHECK(w && w->kind == bridge::UIWidgetKind::ButtonMatrix);
+        CHECK(w->rows == 2 && w->cols == 3);
+        CHECK(w->momentary);
+        CHECK(w->values == vals);
+        CHECK(w->cellLabels == labels);
+    }
+    // The history tables carry the new fields too.
+    CHECK(hist.root && !hist.root->children.empty());
+    auto const* node = hist.root->children[0].get();
+    CHECK(node->snap->widgets && node->snap->widgets->size() == 1);
+    auto const& s = *(*node->snap->widgets)[0];
+    CHECK(s.kind == bridge::UIWidgetKind::ButtonMatrix);
+    CHECK(s.momentary);
+    CHECK(s.values == vals && s.cellLabels == labels);
+    std::filesystem::remove(path);
+    std::printf("button matrix: ok\n");
+}
+
 int main(int argc, char** argv) {
     if (argc == 4 && std::strcmp(argv[1], "resave") == 0) {
         return resave(argv[2], argv[3]);
@@ -399,6 +475,7 @@ int main(int argc, char** argv) {
     testV1Compat();
     testHistorySize();
     testMalformedHistory();
+    testButtonMatrix();
     std::printf("all doc tests passed\n");
     return 0;
 }

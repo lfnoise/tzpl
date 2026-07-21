@@ -87,6 +87,8 @@ Value widgetSnapValue(WidgetSnap const& s) {
     for (double v : s.values) values.push_back(Value::Float(v));
     std::vector<Value> notes;
     for (float v : s.noteData) notes.push_back(Value::Float(v));
+    std::vector<Value> labels;
+    for (auto const& l : s.cellLabels) labels.push_back(Value::String(l));
     return Value::Vec({
         Value::Symbol("wsnap"),
         Value::String(s.panel),
@@ -106,6 +108,8 @@ Value widgetSnapValue(WidgetSnap const& s) {
         Value::Int(s.rollRows),
         Value::Int(s.rollEdo),
         Value::String(s.keyChord),
+        Value::Bool(s.momentary),
+        Value::Vec(std::move(labels)),
     });
 }
 

@@ -574,10 +574,10 @@ bool NotebookView::testPresetsRoundTrip(std::string const& panel) {
 // Presets (mirror of ImGui NotebookPanel)
 // ---------------------------------------------------------------------------
 
-// Input widgets whose values a preset stores. Displays, momentary buttons,
-// and piano rolls are left alone.
-static bool presetStorableKind(bridge::UIWidgetKind k) {
-    switch (k) {
+// Input widgets whose values a preset stores. Displays, momentary buttons
+// (including momentary button matrices), and piano rolls are left alone.
+static bool presetStorable(bridge::UIWidget const& w) {
+    switch (w.kind) {
         case bridge::UIWidgetKind::Slider:
         case bridge::UIWidgetKind::Range:
         case bridge::UIWidgetKind::Number:
@@ -586,6 +586,8 @@ static bool presetStorableKind(bridge::UIWidgetKind k) {
         case bridge::UIWidgetKind::MultiSlider:
         case bridge::UIWidgetKind::Matrix:
             return true;
+        case bridge::UIWidgetKind::ButtonMatrix:
+            return !w.momentary;
         default:
             return false;
     }
@@ -609,7 +611,7 @@ doc::Preset NotebookView::capturePreset(
     if (!appCtx_.uiState) return p;
     std::lock_guard<std::mutex> lock(appCtx_.uiState->mtx);
     for (auto const& w : appCtx_.uiState->widgets) {
-        if (!presetStorableKind(w->kind)) continue;
+        if (!presetStorable(*w)) continue;
         bool inScope = false;
         for (auto const& root : scope) {
             if (bridge::panelUnderRoot(w->panel, root)) { inScope = true; break; }
@@ -625,7 +627,7 @@ void NotebookView::applyPreset(doc::Preset const& p) {
     std::lock_guard<std::mutex> lock(appCtx_.uiState->mtx);
     for (auto const& e : p.entries) {
         bridge::UIWidget* w = appCtx_.uiState->findByName(e.panel, e.widget);
-        if (!w || !presetStorableKind(w->kind)) continue;
+        if (!w || !presetStorable(*w)) continue;
         for (size_t i = 0; i < w->values.size() && i < e.values.size(); ++i)
             w->values[i] = e.values[i];
         w->dirtyEngine = true;

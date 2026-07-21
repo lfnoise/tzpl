@@ -112,6 +112,8 @@ struct WidgetSnap {
     int rollRows = 24;
     int rollEdo = 12;
     std::string keyChord;
+    bool momentary = false;                // ButtonMatrix mode
+    std::vector<std::string> cellLabels;   // ButtonMatrix per-cell labels
     CHash chash;
 
     bool operator==(WidgetSnap const& o) const {
@@ -128,7 +130,8 @@ struct WidgetSnap {
             && noteData == o.noteData && labelText == o.labelText
             && rollBeats == o.rollBeats && rollLowPitch == o.rollLowPitch
             && rollRows == o.rollRows && rollEdo == o.rollEdo
-            && keyChord == o.keyChord;
+            && keyChord == o.keyChord
+            && momentary == o.momentary && cellLabels == o.cellLabels;
     }
 };
 

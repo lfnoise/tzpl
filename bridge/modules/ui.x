@@ -80,6 +80,30 @@ fn multislider(name String, n Int) Widget =
 fn matrix(name String, rows Int, cols Int) Widget =
 	Widget(uiMatrix(name, rows, cols));
 
+-- rows x cols grids of labeled buttons, named to match the single
+-- widgets: buttonMatrix cells are momentary like button() (1 while
+-- held, 0 on release), toggleMatrix cells flip like toggle(). Labels
+-- are row-major and optional, settable at construction or later with
+-- setLabels()/setLabel(). Cell changes deliver per-cell through
+-- onCell() and whole-array through onChangeVec().
+fn buttonMatrix(name String, rows Int, cols Int) Widget =
+	Widget(uiButtonMatrix(name, rows, cols, true));
+
+fn buttonMatrix(name String, rows Int, cols Int, labels [String]) Widget {
+	let w = Widget(uiButtonMatrix(name, rows, cols, true));
+	uiSetCellLabels(w.0, labels);
+	w
+}
+
+fn toggleMatrix(name String, rows Int, cols Int) Widget =
+	Widget(uiButtonMatrix(name, rows, cols, false));
+
+fn toggleMatrix(name String, rows Int, cols Int, labels [String]) Widget {
+	let w = Widget(uiButtonMatrix(name, rows, cols, false));
+	uiSetCellLabels(w.0, labels);
+	w
+}
+
 -- Grid note editor over `beats` beats (16th grid). Notes are read/written
 -- as flat (pitch, startBeat, durBeats) triplets; see notes()/setNotes().
 -- Pitch is in steps of 1/edo octave: edo 12 (default) = MIDI note
@@ -105,6 +129,13 @@ fn onChangeRange(w Widget, f (Float, Float) Void) Void = uiOnChangeXY(w.0, f);
 -- Vector callback for multislider/matrix (all values) and pianoRoll
 -- (note triplets), fired coalesced like onChange.
 fn onChangeVec(w Widget, f ([Float]) Void) Void = uiOnChangeVec(w.0, f);
+
+-- Per-cell event callback for matrix/buttonMatrix: fired once per cell
+-- press, flip, or release with (row, col, value), in interaction order.
+-- Unlike onChangeVec this preserves both edges of a fast click and the
+-- ordering of multi-cell changes. GUI interaction fires it; whole-state
+-- syncs (setValues, preset recall, undo) fire only onChangeVec.
+fn onCell(w Widget, f (Int, Int, Float) Void) Void = uiOnCell(w.0, f);
 
 -- Engine fast path: control resolved by name on the node's def.
 -- Returns an audio_engine error code (0 = ok).
@@ -138,6 +169,12 @@ fn setValues(w Widget, vals [Float]) Void = uiSetValues(w.0, vals);
 -- Piano roll notes: flat (pitch, startBeat, durBeats) triplets.
 fn notes(w Widget) [Float] = uiNotes(w.0);
 fn setNotes(w Widget, ns [Float]) Void = uiSetNotes(w.0, ns);
+
+-- Button-matrix cell labels (row-major). Saved with the document.
+fn labels(w Widget) [String] = uiCellLabels(w.0);
+fn setLabels(w Widget, labels [String]) Void = uiSetCellLabels(w.0, labels);
+fn setLabel(w Widget, row Int, col Int, label String) Void =
+	uiSetCellLabel(w.0, row, col, label);
 
 -- Layout frame within the widget's panel (arrange mode sets this by
 -- dragging; code can too). w/h <= 0 keeps the default size.
