@@ -232,6 +232,32 @@ bool Compiler::registerDynVar(const std::string& name, Type* type, u32& outIndex
     return true;
 }
 
+// Per-dynvar GC root flags. A dynvar that holds an Obj* must be a GC root,
+// else it can be collected while only the dynvar references it (its value
+// survives in registers only by luck), corrupting later marks. Use
+// storesObjPtr(), not isObjType() -- see the global-root fix in declareVar.
+// EVERY CompileResult whose numDynVars extends the VM's dynvar table must
+// carry these flags: VM::install defaults missing entries to "not a root",
+// which silently unroots the dynvar (REPL sessions hit exactly that).
+void Compiler::fillDynVarRootFlags(CompileResult& result) const {
+    result.dynVarIsObj.assign(result.numDynVars, 0);
+    result.dynVarInlineType.assign(result.numDynVars, nullptr);
+    for (auto const& [name, info] : dynamicVars_) {
+        Type* t = info.type;
+        bool inlineMulti = t && t->repr_ == Type::Repr::Inline && t->sizeWords_ > 1;
+        if (info.dynIndex >= result.dynVarIsObj.size()) continue;
+        if (inlineMulti) {
+            // A multi-word inline dynvar embedding Obj* fields: the GC walks its
+            // layout (gcScanPayload) rather than single-word marking.
+            if (inlineHasObjPtr(t)) result.dynVarInlineType[info.dynIndex] = t;
+        } else {
+            // storesObjPtrUnboxed: a 1-word inline dynvar stores its field's raw
+            // word, not an Obj* -- storesObjPtr over-approximates Repr::Inline.
+            result.dynVarIsObj[info.dynIndex] = (t && storesObjPtrUnboxed(t)) ? 1 : 0;
+        }
+    }
+}
+
 const Compiler::DynVarInfo* Compiler::lookupDynVar(const std::string& name) const {
     auto it = dynamicVars_.find(name);
     return it != dynamicVars_.end() ? &it->second : nullptr;
@@ -359,26 +385,7 @@ void Compiler::finalizeResult(CompileResult& result, TypeChecker& typeChecker,
     result.newDataGlobals = std::move(newDataGlobals);
     result.dataBase = dataBase;
     result.numDynVars = numDynVars();
-    // Per-dynvar GC root flags. A dynvar that holds an Obj* must be a GC root,
-    // else it can be collected while only the dynvar references it (its value
-    // survives in registers only by luck), corrupting later marks. Use
-    // storesObjPtr(), not isObjType() -- see the global-root fix in declareVar.
-    result.dynVarIsObj.assign(result.numDynVars, 0);
-    result.dynVarInlineType.assign(result.numDynVars, nullptr);
-    for (auto const& [name, info] : dynamicVars_) {
-        Type* t = info.type;
-        bool inlineMulti = t && t->repr_ == Type::Repr::Inline && t->sizeWords_ > 1;
-        if (info.dynIndex >= result.dynVarIsObj.size()) continue;
-        if (inlineMulti) {
-            // A multi-word inline dynvar embedding Obj* fields: the GC walks its
-            // layout (gcScanPayload) rather than single-word marking.
-            if (inlineHasObjPtr(t)) result.dynVarInlineType[info.dynIndex] = t;
-        } else {
-            // storesObjPtrUnboxed: a 1-word inline dynvar stores its field's raw
-            // word, not an Obj* -- storesObjPtr over-approximates Repr::Inline.
-            result.dynVarIsObj[info.dynIndex] = (t && storesObjPtrUnboxed(t)) ? 1 : 0;
-        }
-    }
+    fillDynVarRootFlags(result);
     result.target = target;
 
     // Populate exported function metadata for host-to-VM calling

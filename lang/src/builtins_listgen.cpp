@@ -793,7 +793,10 @@ static void syncResumeCoroutineInto(VM& vm, CoroutineObj* coro, Word* out) {
             vm.regsBase()[newBase + i] = coro->args_[i];
         }
 
-        vm.pushFrame(nullptr, callee, newBase, callee->numRegs, 0);
+        // gcReturnPC = syncCallerPC: keep the frame below scannable while the
+        // coroutine body runs (this drive is entered from a C++ builtin).
+        vm.pushFrame(nullptr, callee, newBase, callee->numRegs, 0,
+                     vm.syncCallerPC());
 
         if (!callee->defaultEntryOffsets.empty()) {
             u16 idx = coro->numArgs_ - callee->minArity;
@@ -811,7 +814,8 @@ static void syncResumeCoroutineInto(VM& vm, CoroutineObj* coro, Word* out) {
             vm.regsBase()[newBase + i] = frame->regs_[i];
         }
 
-        vm.pushFrame(nullptr, frame->codeBlock_, newBase, frame->numRegs_, 0);
+        vm.pushFrame(nullptr, frame->codeBlock_, newBase, frame->numRegs_, 0,
+                     vm.syncCallerPC());
 
         entry = coro->resumePC_;
     }

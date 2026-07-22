@@ -4875,8 +4875,12 @@ void op_coro_resume(VM& vm, Code* pc) {
             vm.regsBase()[newBase + i] = coro->args_[i];
         }
 
-        // Push flat frame for coro body
-        vm.pushFrame(nullptr, callee, newBase, callee->numRegs, 0);
+        // Push flat frame for coro body. gcReturnPC = pc + 2: the resume
+        // site's return-PC stack map keeps the RESUMER's frame scannable
+        // while the coroutine body runs (returnPC itself is null -- yield/
+        // done switch back manually). Without it the GC root scan skips the
+        // resumer frame entirely and collects objects only it references.
+        vm.pushFrame(nullptr, callee, newBase, callee->numRegs, 0, pc + 2);
 
         // Jump to entry
         Code* entry;
@@ -4899,8 +4903,9 @@ void op_coro_resume(VM& vm, Code* pc) {
 
         frame->gcMapIndex_ = UINT16_MAX;  // nothing retained until next yield
 
-        // Push flat frame for coro body
-        vm.pushFrame(nullptr, frame->codeBlock_, newBase, frame->numRegs_, 0);
+        // Push flat frame for coro body (gcReturnPC: see the Created branch).
+        vm.pushFrame(nullptr, frame->codeBlock_, newBase, frame->numRegs_, 0,
+                     pc + 2);
 
         Code* resumePC = coro->resumePC_;
         [[clang::musttail]] return resumePC->op(vm, resumePC);
@@ -5111,7 +5116,9 @@ void op_async_call(VM& vm, Code* pc) {
     auto* frame = CoroutineFrame::create(nullptr, callee, callee->numRegs);
     vm.setCurrentCoroFrame(frame);         // root the save frame before pushFrame
     for (u16 i = 0; i < coro->numArgWords_; ++i) vm.regsBase()[newBase + i] = coro->args_[i];
-    vm.pushFrame(nullptr, callee, newBase, callee->numRegs, 0);
+    // gcReturnPC = pc + 4: the call site's return-PC stack map keeps the
+    // caller's frame scannable while the async body runs (see op_coro_resume).
+    vm.pushFrame(nullptr, callee, newBase, callee->numRegs, 0, pc + 4);
     Code* entry;
     if (!callee->defaultEntryOffsets.empty()) {
         u16 idx = coro->numArgs_ - callee->minArity;

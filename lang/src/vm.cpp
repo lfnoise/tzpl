@@ -538,6 +538,25 @@ void VM::installData(const CompileResult& result) {
         if (slot.inlineObjType) inlineObjData_.push_back({didx, slot.inlineObjType});
     }
 
+    // Refresh GC-root flags for already-existing dynvar slots: a slot may
+    // have been created by an earlier result that carried no flag vector
+    // (defaulting to "not a root"); a later result that does carry flags is
+    // authoritative for every index it covers.
+    {
+        u32 n = (u32)std::min<size_t>(dynVars_.size(), result.dynVarIsObj.size());
+        for (u32 idx = 0; idx < n; ++idx)
+            dynVarIsObj_[idx] = result.dynVarIsObj[idx];
+        u32 m = (u32)std::min<size_t>(dynVars_.size(), result.dynVarInlineType.size());
+        for (u32 idx = 0; idx < m; ++idx) {
+            Type* it = result.dynVarInlineType[idx];
+            if (!it) continue;
+            bool present = false;
+            for (auto const& [d, t] : inlineObjDynVars_)
+                if (d == idx) { present = true; break; }
+            if (!present) inlineObjDynVars_.push_back({idx, it});
+        }
+    }
+
     // Ensure dynamic variable table is large enough. Carry each new dynvar's
     // GC root flag so dynvars holding Obj* are scanned as roots (and tag/atom
     // dynvars are not). Older results without the vector default to 0.

@@ -281,6 +281,9 @@ public:
     const std::unordered_map<std::string, DynVarInfo>& dynamicVars() const;
     u32 numDynVars() const;
     bool registerDynVar(const std::string& name, Type* type, u32& outIndex);
+    // Populate result.dynVarIsObj / dynVarInlineType (GC root flags) for the
+    // first result.numDynVars dynvars from the registered dynvar types.
+    void fillDynVarRootFlags(CompileResult& result) const;
     const DynVarInfo* lookupDynVar(const std::string& name) const;
     // Replace the stored Type* for an existing dynamic variable. Used to refresh
     // stale Type* pointers left over from a previous TypeChecker instance whose

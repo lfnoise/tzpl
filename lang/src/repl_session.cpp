@@ -102,6 +102,11 @@ struct REPLSession::Impl {
             installResult.newDataGlobals = std::move(newData);
             installResult.dataBase = dataBase;
             installResult.numDynVars = numDynVars;
+            // GC root flags for the dynvars this install creates -- without
+            // them VM::install defaults new slots to "not a root" and the GC
+            // sweeps objects held only by a dynvar (e.g. synthdef.x's
+            // `curGraphExprs during a graph trace).
+            compiler.fillDynVarRootFlags(installResult);
             installResult.target = target;
             vm.install(installResult);
         }

@@ -995,7 +995,41 @@ int main(int argc, const char* argv[]) {
                 bool stayAlive = waitAfterScript || hasActiveListeners
                                  || filename.empty();
 
-                if (isatty(STDIN_FILENO) && stayAlive) {
+                if (std::getenv("TZPL_EVAL_CELLS") && stayAlive) {
+                    // Headless notebook-cell simulation: read stdin, split
+                    // on lines containing only "%%", and evaluate each
+                    // chunk as ONE REPLSession eval (exactly how the app's
+                    // notebook runs a cell). For reproducing notebook bugs.
+                    std::vector<std::string> replPaths(includePaths);
+                    replPaths.insert(replPaths.end(), systemPaths.begin(),
+                                     systemPaths.end());
+                    REPLSession session(compiler, nrtvm.vm, target,
+                                        std::move(replPaths));
+                    std::string cell, line;
+                    int n = 0;
+                    auto evalCell = [&] {
+                        if (cell.find_first_not_of(" \t\n") == std::string::npos)
+                            { cell.clear(); return; }
+                        std::printf("== cell %d ==\n", ++n);
+                        // Same discipline as the app's cell evals: hold the
+                        // VM mutex so scheduler-thread callbacks serialize.
+                        std::lock_guard<std::mutex> lk(nrtvm.mtx);
+                        auto result = session.eval(cell);
+                        if (!result.errors.empty())
+                            printErrors(result.errors, cell, "<cell>");
+                        else if (result.hasValue)
+                            std::printf("\xe2\x86\x92 %s : %s\n",
+                                        result.prettyValue.c_str(),
+                                        result.typeName.c_str());
+                        std::fflush(stdout);
+                        cell.clear();
+                    };
+                    while (std::getline(std::cin, line)) {
+                        if (line == "%%") evalCell();
+                        else { cell += line; cell += '\n'; }
+                    }
+                    evalCell();
+                } else if (isatty(STDIN_FILENO) && stayAlive) {
                     // Interactive terminal: run REPL. Its REPLSession builds
                     // its own ModuleCompiler from one flat list, so merge the
                     // user and system paths (order still user-first).
