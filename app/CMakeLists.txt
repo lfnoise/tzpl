@@ -218,16 +218,88 @@ if(TZPL_BUILD_APP_JUCE)
     )
     FetchContent_MakeAvailable(juce)
 
+    # Document types are declared via PLIST_TO_MERGE rather than
+    # DOCUMENT_EXTENSIONS: JUCE lumps all extensions into one entry sharing
+    # the app icon, whereas .tzd notebooks get their own document icon
+    # (Notebook-Icon.icns, built post-build below).
     juce_add_gui_app(tzpl_app_juce
         PRODUCT_NAME "Tzopilotl"
         COMPANY_NAME "Tzopilotl"
         BUNDLE_ID "com.audiosynth.tzopilotl"
         VERSION "${PROJECT_VERSION}"
         ICON_BIG "${CMAKE_CURRENT_SOURCE_DIR}/Tzopilotl-Icon.png"
-        DOCUMENT_EXTENSIONS x tzd
         MICROPHONE_PERMISSION_ENABLED TRUE
         MICROPHONE_PERMISSION_TEXT
             "Tzopilotl uses the microphone for audio input to the engine."
+        PLIST_TO_MERGE
+[[<plist version="1.0">
+<dict>
+  <key>CFBundleDocumentTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleTypeExtensions</key>
+      <array><string>x</string></array>
+      <key>LSItemContentTypes</key>
+      <array><string>com.audiosynth.tzopilotl.source</string></array>
+      <key>CFBundleTypeName</key>
+      <string>Tzopilotl Source</string>
+      <key>CFBundleTypeRole</key>
+      <string>Editor</string>
+      <key>CFBundleTypeIconFile</key>
+      <string>Icon</string>
+      <key>LSHandlerRank</key>
+      <string>Default</string>
+    </dict>
+    <dict>
+      <key>CFBundleTypeExtensions</key>
+      <array><string>tzd</string></array>
+      <key>LSItemContentTypes</key>
+      <array><string>com.audiosynth.tzopilotl.notebook</string></array>
+      <key>CFBundleTypeName</key>
+      <string>Tzopilotl Notebook</string>
+      <key>CFBundleTypeRole</key>
+      <string>Editor</string>
+      <key>CFBundleTypeIconFile</key>
+      <string>Notebook-Icon</string>
+      <key>LSHandlerRank</key>
+      <string>Default</string>
+    </dict>
+  </array>
+  <key>UTExportedTypeDeclarations</key>
+  <array>
+    <dict>
+      <key>UTTypeIdentifier</key>
+      <string>com.audiosynth.tzopilotl.source</string>
+      <key>UTTypeDescription</key>
+      <string>Tzopilotl Source</string>
+      <key>UTTypeConformsTo</key>
+      <array><string>public.plain-text</string></array>
+      <key>UTTypeIconFile</key>
+      <string>Icon</string>
+      <key>UTTypeTagSpecification</key>
+      <dict>
+        <key>public.filename-extension</key>
+        <array><string>x</string></array>
+      </dict>
+    </dict>
+    <dict>
+      <key>UTTypeIdentifier</key>
+      <string>com.audiosynth.tzopilotl.notebook</string>
+      <key>UTTypeDescription</key>
+      <string>Tzopilotl Notebook</string>
+      <key>UTTypeConformsTo</key>
+      <array><string>public.data</string></array>
+      <key>UTTypeIconFile</key>
+      <string>Notebook-Icon</string>
+      <key>UTTypeTagSpecification</key>
+      <dict>
+        <key>public.filename-extension</key>
+        <array><string>tzd</string></array>
+      </dict>
+    </dict>
+  </array>
+</dict>
+</plist>]]
     )
 
     # Embedded assets (splash / about-box artwork) -> BinaryData.h
@@ -306,7 +378,10 @@ if(TZPL_BUILD_APP_JUCE)
             COMMAND bash "${CMAKE_SOURCE_DIR}/packaging/make_icns.sh"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tzopilotl-Icon.png"
                 "$<TARGET_BUNDLE_DIR:tzpl_app_juce>/Contents/Resources/Icon.icns"
-            COMMENT "Rebuilding Icon.icns with all representations"
+            COMMAND bash "${CMAKE_SOURCE_DIR}/packaging/make_icns.sh"
+                "${CMAKE_CURRENT_SOURCE_DIR}/Tzopilotl-Notebook-Icon.png"
+                "$<TARGET_BUNDLE_DIR:tzpl_app_juce>/Contents/Resources/Notebook-Icon.icns"
+            COMMENT "Rebuilding Icon.icns + Notebook-Icon.icns with all representations"
         )
     endif()
 
