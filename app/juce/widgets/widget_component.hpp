@@ -115,6 +115,7 @@ private:
     ControlsDispatcher& dispatcher_;
     bridge::UIWidgetKind kind_ = bridge::UIWidgetKind::Slider;
     juce::String name_;
+    bool momentary_ = false; // ButtonMatrix: momentary cells are key-inert
 
     // Drag state (message thread only).
     ui_gesture::DragAnchor dragAnchor_;

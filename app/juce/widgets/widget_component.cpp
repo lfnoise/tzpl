@@ -112,6 +112,7 @@ void WidgetComponent::refreshMeta() {
     if (auto* w = ui_.findById(id_)) {
         kind_ = w->kind;
         name_ = w->name;
+        momentary_ = w->momentary;
     }
     // Only slider-likes accept hover-key focus; others never take it.
     setWantsKeyboardFocus(isHoverAdjustable());
@@ -945,12 +946,15 @@ void WidgetComponent::mouseWheelMove(juce::MouseEvent const& e,
 // over a slider-like widget and no text field is focused, typed characters
 // nudge the value: c center, [ / ] rails, 1-9 jump, r randomize, j/J jitter,
 // , / . step, z zero, i init, - negate, / reciprocal. The Range binds the same
-// keys to both of its ends (see hoverRangeChar).
+// keys to both of its ends (see hoverRangeChar); a toggleMatrix binds them to
+// every cell at once (see hoverMatrixChar). A momentary buttonMatrix is
+// key-inert.
 // ---------------------------------------------------------------------------
 
 bool WidgetComponent::isHoverAdjustable() const {
     return kind_ == UIWidgetKind::Slider || kind_ == UIWidgetKind::Range
-        || kind_ == UIWidgetKind::XY || kind_ == UIWidgetKind::MultiSlider;
+        || kind_ == UIWidgetKind::XY || kind_ == UIWidgetKind::MultiSlider
+        || (kind_ == UIWidgetKind::ButtonMatrix && !momentary_);
 }
 
 namespace {
@@ -1054,6 +1058,46 @@ bool hoverRangeChar(unsigned c, bridge::UISpec const& spec, double& lo,
         default: return false;
     }
 }
+
+// The toggleMatrix's hover keys act on every cell at once: z / [ all off,
+// ] all on, r a coin flip per cell, j / J a 5% / 1% chance per cell of
+// toggling, - invert, 1-9 each cell on with 10%..90% probability (else
+// off). Cell events fire only for cells that actually changed.
+bool hoverMatrixChar(unsigned c, bridge::UIWidget& w) {
+    auto each = [&w](auto newState) {
+        for (int i = 0; i < (int)w.values.size(); ++i) {
+            bool on = w.values[(size_t)i] != 0.0;
+            bool nv = newState(on);
+            if (nv == on) continue;
+            w.values[(size_t)i] = nv ? 1.0 : 0.0;
+            w.pushCellEvent(i, nv ? 1.0 : 0.0);
+        }
+    };
+    auto chance = [](float p) { return hoverUniform(0.0f, 1.0f) < p; };
+    switch (c) {
+        case 'z': case 'Z': case '[':
+            each([](bool) { return false; }); return true;
+        case ']':
+            each([](bool) { return true; }); return true;
+        case 'r': case 'R':
+            each([&](bool) { return chance(0.5f); }); return true;
+        case 'j':
+            each([&](bool on) { return chance(0.05f) ? !on : on; });
+            return true;
+        case 'J':
+            each([&](bool on) { return chance(0.01f) ? !on : on; });
+            return true;
+        case '-':
+            each([](bool on) { return !on; }); return true;
+        default:
+            if (c >= '1' && c <= '9') {
+                float p = 0.1f * (float)(c - '0');
+                each([&](bool) { return chance(p); });
+                return true;
+            }
+            return false;
+    }
+}
 }
 
 bool WidgetComponent::keyPressed(juce::KeyPress const& key) {
@@ -1081,6 +1125,8 @@ bool WidgetComponent::keyPressed(juce::KeyPress const& key) {
         bool hx = hoverAxisChar(c, w.spec, w.values[0]);
         bool hy = hoverAxisChar(c, w.spec2, w.values[1]);
         handled = hx || hy;
+    } else if (w.kind == UIWidgetKind::ButtonMatrix && !w.momentary) {
+        handled = hoverMatrixChar(c, w);
     }
 
     if (handled) markDirtyAndNotify(w, true);

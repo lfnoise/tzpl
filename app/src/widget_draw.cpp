@@ -1133,6 +1133,55 @@ static void drawMatrix(UIWidget& w) {
     ImGui::TextUnformatted(w.name.c_str());
 }
 
+// The toggleMatrix's hover keys act on every cell at once: z / [ all off,
+// ] all on, r a coin flip per cell, j / J a 5% / 1% chance per cell of
+// toggling, - invert, 1-9 each cell on with 10%..90% probability (else
+// off). Cell events fire only for cells that actually changed. A
+// momentary buttonMatrix is key-inert.
+static void hoverAdjustMatrix(UIWidget& w) {
+    if (w.momentary) return;
+    if (!hoverAdjustBegin(w)) return;
+
+    auto each = [&](auto newState) {
+        for (int i = 0; i < (int)w.values.size(); ++i) {
+            bool on = w.values[(size_t)i] != 0.0;
+            bool nv = newState(on);
+            if (nv == on) continue;
+            w.values[(size_t)i] = nv ? 1.0 : 0.0;
+            w.pushCellEvent(i, nv ? 1.0 : 0.0);
+        }
+        markDirty(w);
+        w.gestureActive = true;  // ends via the idle timer
+        w.wheelTime = ImGui::GetTime();
+    };
+    auto chance = [](float p) { return hoverUniform(0.0f, 1.0f) < p; };
+
+    hoverChars([&](unsigned c) {
+        switch (c) {
+            case 'z': case 'Z': case '[':
+                each([](bool) { return false; }); break;
+            case ']':
+                each([](bool) { return true; }); break;
+            case 'r': case 'R':
+                each([&](bool) { return chance(0.5f); }); break;
+            case 'j':
+                each([&](bool on) { return chance(0.05f) ? !on : on; });
+                break;
+            case 'J':
+                each([&](bool on) { return chance(0.01f) ? !on : on; });
+                break;
+            case '-':
+                each([](bool on) { return !on; }); break;
+            default:
+                if (c >= '1' && c <= '9') {
+                    float p = 0.1f * (float)(c - '0');
+                    each([&](bool) { return chance(p); });
+                }
+                break;
+        }
+    });
+}
+
 static void drawButtonMatrix(UIWidget& w) {
     int rows = std::max(1, w.rows), cols = std::max(1, w.cols);
     const float width = wFrameW(w, cols * 64.0f);
@@ -1188,6 +1237,7 @@ static void drawButtonMatrix(UIWidget& w) {
             w.gestureEnded = true;  // one history commit per toggle
         }
     }
+    hoverAdjustMatrix(w);
     auto* dl = ImGui::GetWindowDrawList();
     float cw = width / (float)cols, chh = height / (float)rows;
     ImU32 onCol = ImGui::GetColorU32(ImGuiCol_ButtonActive);

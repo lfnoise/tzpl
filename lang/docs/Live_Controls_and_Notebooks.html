@@ -512,9 +512,10 @@ cutoff onChange(<span class="kw">fn</span>(v <span class="typ">Float</span>) <sp
 <tr><td>xy pad</td><td>both axes (independent randoms for <kbd>r</kbd>/<kbd>j</kbd>)</td><td>vertical wheel drives Y, horizontal drives X &mdash; a trackpad plays the pad in 2-D</td></tr>
 <tr><td>multislider</td><td><em>all</em> bars (independent randoms per bar &mdash; <kbd>r</kbd> scatters, held <kbd>j</kbd> makes the whole surface shimmer)</td><td>adjusts the single bar under the cursor</td></tr>
 <tr><td>range slider</td><td>both ends: <kbd>c</kbd>, <kbd>z</kbd>, and <kbd>i</kbd> collapse the range; <kbd>[</kbd> and <kbd>]</kbd> send one end to its rail; <kbd>r</kbd>, <kbd>j</kbd>, and <kbd>J</kbd> randomize or jitter both ends; <kbd>-</kbd> negates and <kbd>/</kbd> inverts the range; <kbd>,</kbd> and <kbd>.</kbd> slide it, width preserved</td><td>slides the whole range</td></tr>
+<tr><td>toggle matrix</td><td><em>every</em> cell at once: <kbd>z</kbd> and <kbd>[</kbd> all off; <kbd>]</kbd> all on; <kbd>r</kbd> a 50/50 coin flip per cell; <kbd>j</kbd> / <kbd>J</kbd> a 5% / 1% chance per cell of toggling (hold <kbd>j</kbd> for a slow churn); <kbd>-</kbd> inverts the pattern; <kbd>1</kbd>&ndash;<kbd>9</kbd> set each cell on with 10%&ndash;90% probability, else off. Other keys do nothing, and a momentary <code>buttonMatrix</code> ignores them all</td><td>&mdash;</td></tr>
 </table>
 
-<div class="note"><p><strong>A hovered control owns the keyboard.</strong> While the pointer rests on a slider, range, xy pad, or multislider, typed keys act on that widget and go nowhere else &mdash; not to a focused cell editor, not to <code>bindKey</code> bindings. To type code or fire key bindings, hover somewhere else. (The one exception: an open cmd-click value edit keeps its keystrokes until you commit or cancel it.)</p></div>
+<div class="note"><p><strong>A hovered control owns the keyboard.</strong> While the pointer rests on a slider, range, xy pad, multislider, or toggle matrix, typed keys act on that widget and go nowhere else &mdash; not to a focused cell editor, not to <code>bindKey</code> bindings. To type code or fire key bindings, hover somewhere else. (The one exception: an open cmd-click value edit keeps its keystrokes until you commit or cancel it.)</p></div>
 
 <h4>Key bindings</h4>
 
