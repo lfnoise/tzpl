@@ -288,6 +288,22 @@ void ControlsDispatcher::tick() {
         }
     }
 
+    // ---- Finished gestures: hand {panel, name} pairs to the host so the
+    // notebook can turn claimed-panel gestures into one history commit.
+    // Runs after the engine sends above so the committed values are the
+    // ones just sent. Buttons are momentary -- no state worth a node.
+    std::vector<std::pair<std::string, std::string>> ended;
+    {
+        std::lock_guard<std::mutex> lock(ui->mtx);
+        for (auto& wp : ui->widgets) {
+            if (!wp->gestureEnded) continue;
+            wp->gestureEnded = false;
+            if (wp->kind != UIWidgetKind::Button)
+                ended.push_back({ wp->panel, wp->name });
+        }
+    }
+    if (!ended.empty() && onGesturesEnded) onGesturesEnded(ended);
+
     // ---- Demand-driven stop: quit after a short idle tail. ---------------
     if (hasWork()) idleTicks_ = 0;
     else if (++idleTicks_ > kIdleTailTicks) stopTimer();

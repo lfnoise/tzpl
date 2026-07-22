@@ -1499,6 +1499,31 @@ int runGui(bridge::AppContext& appCtx) {
             // values are the ones just sent).
             notebookPanel.update(appCtx);
 
+            // TZPL_APP_DEMO=quit-dirty-last: headless repro (mirrors the
+            // JUCE demo) -- edit the last cell ~2s in, request quit ~1s
+            // later; the unsaved-changes alert must appear (the app then
+            // stays alive behind the modal instead of exiting).
+            static char const* kAppDemo = std::getenv("TZPL_APP_DEMO");
+            if (kAppDemo && std::strcmp(kAppDemo, "quit-dirty-last") == 0) {
+                static int demoStage = 0;
+                static double demoT0 = ImGui::GetTime();
+                double t = ImGui::GetTime() - demoT0;
+                if (demoStage == 0 && t > 2.0) {
+                    bool ok = notebookPanel.testEditLastCell("play(5.0)",
+                                                             "play(5.1)");
+                    fprintf(stderr,
+                            "app-demo quit-dirty-last: edited=%d modified=%d\n",
+                            ok ? 1 : 0, notebookPanel.modified() ? 1 : 0);
+                    demoStage = 1;
+                } else if (demoStage == 1 && t > 3.0) {
+                    fprintf(stderr,
+                            "app-demo quit-dirty-last: quitting, modified=%d\n",
+                            notebookPanel.modified() ? 1 : 0);
+                    gWantsToQuit = true;
+                    demoStage = 2;
+                }
+            }
+
             // Toolbar Close button routes through the same confirm-and-
             // close flow as Cmd+W (handled next frame by dispatch).
             if (notebookPanel.takeCloseRequest())

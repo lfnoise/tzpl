@@ -46,7 +46,8 @@ namespace tzplapp {
 class ControlsDispatcher;
 
 class NotebookView : public juce::Component,
-                     private juce::FocusChangeListener {
+                     private juce::FocusChangeListener,
+                     private juce::Timer {
 public:
     NotebookView(bridge::AppContext& appCtx, GuiState& guiState,
                  std::function<ts::REPLSession*()> session,
@@ -101,10 +102,19 @@ public:
     // Panels claimed by this document's panel cells (M4 dispatch skips them).
     std::vector<std::string> claimedPanels() const;
 
+    // ControlsDispatcher reports finished widget gestures as {panel, name}
+    // pairs; gestures on claimed panels become one "adjust ..." history
+    // commit (floating-panel tweaks are performance state, not document).
+    void onWidgetGesturesEnded(
+        std::vector<std::pair<std::string, std::string>> const& widgets);
+
     void setFontSize(float px);
 
     // Test hooks (TZPL_JUCE_SELFTEST).
     void testTypeIntoFocusedCell(juce::String const& text);
+    // Replace cell `index`'s editor text as if typed (fires the document
+    // listener, like real keystrokes). Returns false if it has no editor.
+    bool testTypeIntoCell(int index, juce::String const& text);
     juce::String testFocusedCellOutput() const;
     bool testFocusedCellOutputPaneShown() const {
         auto it = cells_.find(selectedCell_);
@@ -132,12 +142,26 @@ private:
     void rebuildCells();          // reconcile CellComponents against the snapshot
     void relayoutContent();
     CellComponent* cellFor(doc::CellId id);
-    void syncCellTextToModel(doc::CellId id);
+    // Push a cell editor's text into the store; true if the text differed.
+    bool syncCellTextToModel(doc::CellId id);
     void syncAllCellText();
     void selectCell(doc::CellId id);
     void launchCell(doc::CellId id);
     void queueRunOnLoad();
     void globalFocusChanged(juce::Component* focused) override;
+
+    // -- History commits --
+    // One history node: capture the claimed panels' live widgets into the
+    // working snapshot, then commit. Content-interning collapses no-ops.
+    void commitHistory(std::string const& label);
+    // Typing coalesce: a keystroke marks its cell pending and starts the
+    // poll timer; ~1s after the last keystroke the timer syncs the text and
+    // commits one "edit" node (mirrors NotebookPanel::update).
+    void noteCellEdited(doc::CellId id);
+    void timerCallback() override;
+    // Sync all pending typing now and commit it as its own "edit" node --
+    // undo must step back to the pre-typing state, not past it.
+    void flushPendingEdits();
 
     // -- Presets (mirror of ImGui NotebookPanel; UIState-backed) --
     // Panel roots governed by the Presets cell `id`: the Panel cells after
@@ -173,6 +197,9 @@ private:
     doc::CellId selectedCell_ = 0;
     std::deque<doc::CellId> runQueue_;
     float fontSize_ = 14.0f;
+    // Cells with typing the store hasn't seen -> ms timestamp of the last
+    // keystroke (juce::Time::getMillisecondCounterHiRes).
+    std::unordered_map<doc::CellId, double> pendingEdits_;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(NotebookView)
 };

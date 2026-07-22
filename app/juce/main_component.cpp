@@ -54,6 +54,13 @@ MainComponent::MainComponent(bridge::AppContext& appCtx,
         dispatcher_);
     addChildComponent(*notebook_);
 
+    // Finished widget gestures (slider drags, toggle flips, key-bound
+    // widgets) become one history commit when they touch claimed panels.
+    dispatcher_.onGesturesEnded =
+        [this](std::vector<std::pair<std::string, std::string>> const& w) {
+            if (notebook_) notebook_->onWidgetGesturesEnded(w);
+        };
+
     // Horizontal split: center pane | resizer | console column on the right.
     // splitRatio is the editor's width fraction (clamped .2-.9).
     double ratio = settings_.getDoubleValue("splitRatio", 0.7);
@@ -256,6 +263,10 @@ void MainComponent::confirmUnsavedChangesThen(std::function<void()> proceed) {
     // dirty notebook alone must still prompt.
     auto names = editorPane_.unsavedFileNames();
     bool notebookDirty = notebook_ && notebook_->isModified();
+    if (std::getenv("TZPL_JUCE_DEMO") != nullptr)
+        std::fprintf(stderr,
+                     "confirmUnsavedChangesThen: tabs=%d notebookDirty=%d\n",
+                     (int)names.size(), notebookDirty ? 1 : 0);
     if (names.empty() && !notebookDirty) {
         proceed();
         return;
@@ -1418,6 +1429,79 @@ void MainComponent::testShowDemo(String const& which) {
         testTypeIntoEditor("let dirty = 1;");
         juce::Timer::callAfterDelay(300, [] {
             juce::JUCEApplicationBase::getInstance()->systemRequestedQuit();
+        });
+    } else if (which == "quit-dirty-notebook") {
+        // Same, but the unsaved state is a notebook cell edit: quitting
+        // must prompt rather than silently dropping the notebook.
+        showNotebook(true);
+        notebook_->testTypeIntoFocusedCell("notebook text must survive");
+        juce::Timer::callAfterDelay(300, [this] {
+            std::fprintf(stderr, "quit-dirty-notebook: isModified=%d\n",
+                         notebook_ && notebook_->isModified() ? 1 : 0);
+            juce::JUCEApplicationBase::getInstance()->systemRequestedQuit();
+            juce::Timer::callAfterDelay(600, [] {
+                std::fprintf(stderr,
+                             "quit-dirty-notebook: still running (box is up)\n");
+            });
+        });
+    } else if (which == "quit-dirty-notebook-ran") {
+        // Edit a cell, RUN it, then quit: still unsaved work, must prompt.
+        showNotebook(true);
+        notebook_->testTypeIntoFocusedCell("let quitDemo = 42;");
+        notebook_->runFocusedCell();
+        juce::Timer::callAfterDelay(1500, [this] {
+            std::fprintf(stderr, "quit-dirty-notebook-ran: isModified=%d\n",
+                         notebook_ && notebook_->isModified() ? 1 : 0);
+            juce::JUCEApplicationBase::getInstance()->systemRequestedQuit();
+            juce::Timer::callAfterDelay(600, [] {
+                std::fprintf(stderr,
+                             "quit-dirty-notebook-ran: still running (box is up)\n");
+            });
+        });
+    } else if (which == "quit-dirty-last") {
+        // The user's exact repro: open a .tzd (given on the command line),
+        // edit the LAST cell's text, Cmd+Q. Waits out the run-on-load evals
+        // and the typing coalesce, then takes the real quit path.
+        showNotebook(true);
+        juce::Timer::callAfterDelay(2000, [this] {
+            int last = notebook_->testCellCount() - 1;
+            String text = notebook_->testCellEditorText(last);
+            bool edited = notebook_->testTypeIntoCell(
+                last, text.replace("play(5.0)", "play(5.1)"));
+            std::fprintf(stderr, "quit-dirty-last: edited=%d cell=%d\n",
+                         edited ? 1 : 0, last);
+            juce::Timer::callAfterDelay(1500, [this] {
+                std::fprintf(stderr, "quit-dirty-last: isModified=%d\n",
+                             notebook_ && notebook_->isModified() ? 1 : 0);
+                juce::JUCEApplicationBase::getInstance()->systemRequestedQuit();
+                juce::Timer::callAfterDelay(600, [] {
+                    std::fprintf(stderr,
+                                 "quit-dirty-last: still running (box is up)\n");
+                });
+            });
+        });
+    } else if (which == "edit-last-only") {
+        // Edit the last cell and stop -- external harness then delivers a
+        // real Cmd+Q keystroke to test the actual menu/key quit routing.
+        showNotebook(true);
+        juce::Timer::callAfterDelay(2000, [this] {
+            int last = notebook_->testCellCount() - 1;
+            String text = notebook_->testCellEditorText(last);
+            bool edited = notebook_->testTypeIntoCell(
+                last, text.replace("play(5.0)", "play(5.1)"));
+            std::fprintf(stderr, "edit-last-only: edited=%d\n", edited ? 1 : 0);
+        });
+    } else if (which == "history-ops") {
+        // Typing, add cell, delete cell must each land a history node.
+        showNotebook(true);
+        notebook_->testTypeIntoFocusedCell("let a = 1;");
+        juce::Timer::callAfterDelay(1600, [this] {
+            notebook_->testAddCell(doc::CellKind::Prose);
+            notebook_->deleteSelectedCell();
+            juce::String labels;
+            for (auto const& r : notebook_->historyRows())
+                labels << r.label << " | ";
+            std::fprintf(stderr, "history-ops: %s\n", labels.toRawUTF8());
         });
     } else if (which == "quit-dirty-save") {
         // What the box's Save button runs: an untitled tab must get a Save

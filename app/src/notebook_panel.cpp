@@ -41,6 +41,20 @@ NotebookPanel::NotebookPanel()
     : langDef_(EditorPanel::createTzopilotlDef())
 {}
 
+bool NotebookPanel::testEditLastCell(std::string const& from,
+                                     std::string const& to) {
+    auto snap = store_.snapshot();
+    if (snap->cells.empty()) return false;
+    auto it = runtime_.find(snap->cells.back()->id);
+    if (it == runtime_.end() || !it->second.editor) return false;
+    std::string text = it->second.editor->GetText();
+    auto pos = text.find(from);
+    if (pos == std::string::npos) return false;
+    text.replace(pos, from.size(), to);
+    it->second.editor->SetText(text);
+    return true;
+}
+
 // ---------------------------------------------------------------------------
 // Document lifecycle
 // ---------------------------------------------------------------------------

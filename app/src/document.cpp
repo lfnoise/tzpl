@@ -237,6 +237,11 @@ bool DocumentStore::commit(std::string const& label) {
     cursor_->children.push_back(std::move(node));
     cursor_ = cursor_->children.back().get();
 
+    // A new node is unsaved state even when no cell text changed (widget
+    // adjustments, arranges, preset recalls): history is saved in the file,
+    // so quitting now without saving would lose it.
+    modified_ = true;
+
     enforceHistoryCap();
     return true;
 }

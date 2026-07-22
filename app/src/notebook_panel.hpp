@@ -52,6 +52,11 @@ public:
     std::string const& filePath() const { return store_.filePath(); }
     bool modified() const { return store_.modified() || anyEditorDirty(); }
 
+    // Test hook (TZPL_APP_DEMO): replace `from` with `to` in the LAST
+    // cell's live editor, as if typed. False if it has no editor yet or
+    // `from` is absent.
+    bool testEditLastCell(std::string const& from, std::string const& to);
+
     // Document lifecycle. open/save report errors via `err`.
     void newDocument();
     bool open(std::string const& path, bridge::AppContext& ctx, std::string& err);

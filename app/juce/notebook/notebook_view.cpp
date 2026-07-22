@@ -87,6 +87,8 @@ void NotebookView::newDocument() {
     store_.reset(std::make_shared<doc::DocSnapshot const>(), "");
     cells_.clear();
     runQueue_.clear();
+    pendingEdits_.clear();
+    stopTimer();
     selectedCell_ = 0;
     store_.insertCell(0, CellKind::Code);      // something to type into
     store_.clearModified();
@@ -105,6 +107,8 @@ bool NotebookView::openFile(juce::File const& file, String& err) {
     store_.reset(std::move(snap), file.getFullPathName().toStdString());
     cells_.clear();
     runQueue_.clear();
+    pendingEdits_.clear();
+    stopTimer();
     selectedCell_ = 0;
     if (hist.root) {
         store_.setWidgetSnap(doc::captureWidgets(
@@ -202,15 +206,22 @@ void NotebookView::rebuildCells() {
                 syncAllCellText();   // rebuildCells() re-seeds every editor
                 store_.moveCell(cid, delta);
                 rebuildCells();
+                commitHistory("move cell");
             };
+            // Collapse is view state: saved with the document but not its
+            // own history step -- it rides along with the next commit.
             slot->onCollapse = [this, cid](bool c) {
                 store_.setCellCollapsed(cid, c);
                 relayoutContent();
             };
             slot->onRunOnLoad = [this, cid](bool on) {
                 store_.setCellRunOnLoad(cid, on);
+                commitHistory("toggle run-on-load");
             };
-            slot->onTextChanged = [this] { relayoutContent(); };
+            slot->onTextChanged = [this, cid] {
+                noteCellEdited(cid);
+                relayoutContent();
+            };
             // Output lines added/cleared or the output pane resized: the
             // cell's preferred height changed, so re-run the layout (the
             // content component's own resized() is a no-op).
@@ -220,18 +231,15 @@ void NotebookView::rebuildCells() {
             slot->onRenameCell = [this, cid](juce::String name) {
                 auto cell = store_.cell(cid);
                 if (!cell || cell->name == name.toStdString()) return;
+                bool isPanel = cell->kind == CellKind::Panel;
                 syncAllCellText();   // rebuildCells() re-seeds every editor
                 store_.setCellName(cid, name.toStdString());
                 rebuildCells();  // repoints a Panel cell's canvas
+                commitHistory(isPanel ? "rename panel" : "rename cell");
             };
 
             // Arrange: a widget was moved/resized -- commit the new frames.
-            slot->onArrangeCommit = [this] {
-                store_.setWidgetSnap(doc::captureWidgets(
-                    appCtx_.uiState, claimedPanels(),
-                    store_.snapshot()->widgets.get()));
-                store_.commit("arrange");
-            };
+            slot->onArrangeCommit = [this] { commitHistory("arrange"); };
 
             // Presets: capture/recall operate on the live widget registry
             // and commit a history node (recall changes control values).
@@ -246,10 +254,7 @@ void NotebookView::rebuildCells() {
                 if (i < 0 || i >= (int)cell->presets.size()) return;
                 applyPreset(*cell->presets[(size_t)i]);
                 // Recall changed widget values: commit a history node.
-                store_.setWidgetSnap(doc::captureWidgets(
-                    appCtx_.uiState, claimedPanels(),
-                    store_.snapshot()->widgets.get()));
-                store_.commit("recall preset");
+                commitHistory("recall preset");
             };
             slot->onPresetOverwrite = [this, cid](int i) {
                 auto presets = store_.cell(cid)->presets;
@@ -321,6 +326,16 @@ void NotebookView::globalFocusChanged(juce::Component* focused) {
 // Cell operations
 // ---------------------------------------------------------------------------
 
+static char const* addCellLabel(CellKind kind) {
+    switch (kind) {
+        case CellKind::Code:    return "add code cell";
+        case CellKind::Prose:   return "add prose cell";
+        case CellKind::Panel:   return "add panel cell";
+        case CellKind::Presets: return "add presets cell";
+    }
+    return "add cell";
+}
+
 void NotebookView::addCell(CellKind kind) {
     // rebuildCells() re-seeds every editor from the store, so text typed
     // since the last eval/save has to land in the store first or it is lost.
@@ -330,6 +345,7 @@ void NotebookView::addCell(CellKind kind) {
     CellId id = store_.insertCell(index, kind);
     rebuildCells();
     selectCell(id);
+    commitHistory(addCellLabel(kind));
 }
 
 void NotebookView::deleteSelectedCell() {
@@ -345,6 +361,7 @@ void NotebookView::deleteSelectedCell() {
         int pick = juce::jlimit(0, (int)snap->cells.size() - 1, idx);
         selectCell(snap->cells[pick]->id);
     }
+    commitHistory("delete cell");
 }
 
 void NotebookView::setFontSize(float px) {
@@ -357,9 +374,14 @@ void NotebookView::setFontSize(float px) {
 // Eval
 // ---------------------------------------------------------------------------
 
-void NotebookView::syncCellTextToModel(CellId id) {
-    if (auto* cell = cellFor(id); cell && cell->hasEditor())
-        store_.setCellText(id, cell->editorText().toStdString());
+bool NotebookView::syncCellTextToModel(CellId id) {
+    auto* cell = cellFor(id);
+    if (!cell || !cell->hasEditor()) return false;
+    auto text = cell->editorText().toStdString();
+    auto existing = store_.cell(id);
+    if (!existing || existing->text == text) return false;
+    store_.setCellText(id, text);
+    return true;
 }
 
 void NotebookView::syncAllCellText() {
@@ -431,9 +453,7 @@ void NotebookView::onCellEvalDone(CellId cellId,
     }
 
     // One history node per eval (widgets captured under the AppContext).
-    store_.setWidgetSnap(doc::captureWidgets(
-        appCtx_.uiState, claimedPanels(), store_.snapshot()->widgets.get()));
-    store_.commit("run cell");
+    commitHistory("run cell");
 
     pumpRunQueue();
 }
@@ -453,6 +473,15 @@ void NotebookView::addCellOutput(CellId cellId, OutputLine const& line) {
 void NotebookView::testTypeIntoFocusedCell(String const& text) {
     if (auto* cc = cellFor(selectedCell_); cc && cc->editor())
         cc->editor()->getDocument().replaceAllContent(text);
+}
+
+bool NotebookView::testTypeIntoCell(int index, String const& text) {
+    auto snap = store_.snapshot();
+    if (index < 0 || index >= (int)snap->cells.size()) return false;
+    auto* cc = cellFor(snap->cells[(size_t)index]->id);
+    if (!cc || !cc->editor()) return false;
+    cc->editor()->getDocument().replaceAllContent(text);
+    return true;
 }
 
 String NotebookView::testCellEditorText(int index) {
@@ -475,7 +504,59 @@ String NotebookView::testFocusedCellOutput() const {
 // History
 // ---------------------------------------------------------------------------
 
+void NotebookView::commitHistory(std::string const& label) {
+    store_.setWidgetSnap(doc::captureWidgets(
+        appCtx_.uiState, claimedPanels(), store_.snapshot()->widgets.get()));
+    store_.commit(label);
+}
+
+void NotebookView::noteCellEdited(CellId id) {
+    pendingEdits_[id] = juce::Time::getMillisecondCounterHiRes();
+    if (!isTimerRunning()) startTimer(250);
+}
+
+void NotebookView::timerCallback() {
+    double now = juce::Time::getMillisecondCounterHiRes();
+    bool changed = false;
+    for (auto it = pendingEdits_.begin(); it != pendingEdits_.end();) {
+        if (now - it->second > 1000.0) {
+            changed = syncCellTextToModel(it->first) || changed;
+            it = pendingEdits_.erase(it);
+        } else {
+            ++it;
+        }
+    }
+    if (changed) commitHistory("edit");
+    if (pendingEdits_.empty()) stopTimer();
+}
+
+void NotebookView::flushPendingEdits() {
+    bool changed = false;
+    for (auto const& [id, when] : pendingEdits_)
+        changed = syncCellTextToModel(id) || changed;
+    pendingEdits_.clear();
+    stopTimer();
+    if (changed) commitHistory("edit");
+}
+
+void NotebookView::onWidgetGesturesEnded(
+        std::vector<std::pair<std::string, std::string>> const& widgets) {
+    auto claimed = claimedPanels();
+    std::string gestured;
+    for (auto const& [panel, name] : widgets) {
+        for (auto const& root : claimed) {
+            if (bridge::panelUnderRoot(panel, root)) {
+                if (!gestured.empty()) gestured += ", ";
+                gestured += name;
+                break;
+            }
+        }
+    }
+    if (!gestured.empty()) commitHistory("adjust " + gestured);
+}
+
 void NotebookView::undoDocument() {
+    flushPendingEdits();
     auto before = claimedPanels();
     if (auto snap = store_.undo()) {
         doc::restoreWidgets(appCtx_, snap->widgets ? *snap->widgets
@@ -648,9 +729,7 @@ void NotebookView::commitPresets(
     CellId id, std::vector<std::shared_ptr<doc::Preset const>> presets,
     char const* label) {
     store_.setCellPresets(id, std::move(presets));
-    store_.setWidgetSnap(doc::captureWidgets(
-        appCtx_.uiState, claimedPanels(), store_.snapshot()->widgets.get()));
-    store_.commit(label);
+    commitHistory(label);
     if (auto* cc = cellFor(id)) cc->syncFromModel(*store_.cell(id));
     relayoutContent();
 }

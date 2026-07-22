@@ -35,6 +35,7 @@
 #include <juce_events/juce_events.h>
 #include <functional>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace bridge { struct AppContext; }
@@ -61,6 +62,12 @@ public:
     // Called each tick after tap polling so the host can repaint the
     // meter/scope widgets whose data just advanced.
     std::function<void()> onTapsAdvanced;
+
+    // Called with the {panel, name} of each widget whose gesture (slider
+    // drag, XY sweep, toggle flip) finished this tick, buttons excluded --
+    // the notebook turns claimed-panel gestures into one history commit.
+    std::function<void(std::vector<std::pair<std::string, std::string>> const&)>
+        onGesturesEnded;
 
 private:
     // True if any widget still has a pending engine/callback event or a
