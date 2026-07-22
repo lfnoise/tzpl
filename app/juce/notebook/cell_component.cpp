@@ -205,6 +205,12 @@ void CellComponent::syncFromModel(doc::Cell const& cell) {
             panelCanvas_->onArrangeCommit = [this] {
                 if (onArrangeCommit) onArrangeCommit();
             };
+            // Code created/removed widgets: the cell's preferred height
+            // changed, so the notebook must relayout -- the canvas grows
+            // to fit the new controls.
+            panelCanvas_->onContentChanged = [this] {
+                if (onLayoutChanged) onLayoutChanged();
+            };
             panelCanvas_->setArrange(arrangeOn_);
             arrangeButton_.setVisible(true);
             addAndMakeVisible(*panelCanvas_);

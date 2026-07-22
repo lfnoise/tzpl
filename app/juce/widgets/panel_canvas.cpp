@@ -36,11 +36,11 @@ constexpr int kGap = kGrid;
 constexpr int kFullWidthMax = 520; // slider-likes stretch up to this
 constexpr int kTabH = 24;          // sub-panel tab strip height
 
-// One step of the flow layout, rounded up to the grid so that flowing
-// widgets sit at grid-aligned y as well as x. Sizes are untouched; a row
-// just gains up to kGrid-1 extra px of gap.
-int flowAdvance(int widgetHeight) {
-    return (widgetHeight + kGap + kGrid - 1) / kGrid * kGrid;
+// The flow cursor rounds up to the grid so that flowing widgets sit at
+// grid-aligned y as well as x. Sizes are untouched; a row just gains up
+// to kGrid-1 extra px of gap.
+int snapUpGrid(int v) {
+    return (v + kGrid - 1) / kGrid * kGrid;
 }
 }
 
@@ -54,10 +54,13 @@ PanelCanvas::PanelCanvas(bridge::UIState& ui, std::string panel,
 
 PanelCanvas::~PanelCanvas() = default;
 
+void PanelCanvas::notifyHost() {
+    if (onContentChanged) onContentChanged();
+    else if (auto* p = getParentComponent()) p->resized();
+}
+
 void PanelCanvas::timerCallback() {
-    if (reconcile()) {
-        if (auto* p = getParentComponent()) p->resized();
-    }
+    if (reconcile()) notifyHost();
     // Repaint tap-backed widgets (meters/scopes animate) and any widget whose
     // values changed since we last painted it -- catches preset recall,
     // undo/redo and key bindings, which mutate the registry directly.
@@ -167,7 +170,7 @@ void PanelCanvas::rebuildTabs() {
             selectedPage_ = i;
             rebuildTabs();
             layOutWidgets();
-            if (auto* par = getParentComponent()) par->resized();
+            notifyHost();
         };
         addAndMakeVisible(*b);
         tabButtons_.push_back(std::move(b));
@@ -204,23 +207,28 @@ static bool stretchKind(bridge::UIWidgetKind k) {
 }
 
 int PanelCanvas::preferredHeight(int width) const {
+    // Mirrors layOutWidgets' flow rule exactly, so the height it reports
+    // is the height that layout will actually use.
     int top = contentTop();
-    int flowBottom = top, absBottom = top;
+    int flowY = top, bottomMost = top;
     std::lock_guard<std::mutex> lock(ui_.mtx);
     for (auto id : visibleIds()) {
         auto it = widgets_.find(id);
         if (it == widgets_.end()) continue;
         auto pref = it->second->preferredSize();
         auto* uw = ui_.findById(id);
+        int bottom;
         if (uw && uw->fx >= 0.0f) {
-            int fh = uw->fh > 0.0f ? (int)uw->fh : pref.y;
-            absBottom = std::max(absBottom, top + (int)uw->fy + fh);
+            int fh = std::max(uw->fh > 0.0f ? (int)uw->fh : pref.y, 14);
+            bottom = top + (int)uw->fy + fh;
         } else {
-            flowBottom += flowAdvance(pref.y);
+            bottom = flowY + pref.y;
         }
+        bottomMost = std::max(bottomMost, bottom);
+        flowY = std::max(flowY, snapUpGrid(bottom + kGap));
     }
     juce::ignoreUnused(width);
-    return std::max({ 40, flowBottom, absBottom + kGap });
+    return std::max(40, bottomMost + kGap);
 }
 
 void PanelCanvas::resized() { layOutWidgets(); }
@@ -229,7 +237,7 @@ void PanelCanvas::setArrange(bool on) {
     arrange_ = on;
     int top = contentTop();
     for (auto& [id, comp] : widgets_) comp->setArrange(on, top);
-    if (auto* p = getParentComponent()) p->resized();
+    notifyHost();
     repaint();
 }
 
@@ -261,17 +269,24 @@ void PanelCanvas::layOutWidgets() {
         int cw = stretchKind(it->second->kind())
                      ? std::min(w - 2 * kGap, kFullWidthMax) : pref.x;
         auto* uw = ui_.findById(id);
+        int bottom;
         if (uw && uw->fx >= 0.0f) {
             // Placed (arranged): absolute frame, fw/fh default to preferred.
             int fw = uw->fw > 0.0f ? (int)uw->fw : cw;
-            int fh = uw->fh > 0.0f ? (int)uw->fh : pref.y;
+            int fh = std::max(uw->fh > 0.0f ? (int)uw->fh : pref.y, 14);
             it->second->setBounds((int)uw->fx, top + (int)uw->fy,
-                                  std::max(fw, 24), std::max(fh, 14));
+                                  std::max(fw, 24), fh);
+            bottom = top + (int)uw->fy + fh;
         } else {
             // Unplaced: flow top to bottom.
             it->second->setBounds(kGap, flowY, std::max(cw, 40), pref.y);
-            flowY += flowAdvance(pref.y);
+            bottom = flowY + pref.y;
         }
+        // The flow cursor advances past placed widgets too (in seq order),
+        // so a widget added by code AFTER the panel was arranged flows in
+        // below the arranged block instead of overlapping it at the top --
+        // same rule as the ImGui app's autoY.
+        flowY = std::max(flowY, snapUpGrid(bottom + kGap));
     }
 }
 

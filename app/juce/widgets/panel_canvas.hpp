@@ -58,6 +58,12 @@ public:
     // set of widgets changed (host may need to relayout for a new height).
     bool reconcile();
 
+    // Invoked when preferredHeight may have changed (code created/removed
+    // widgets, page switch): the host must re-run ITS layout -- growing a
+    // notebook cell or a viewport -- not just this component's. Unset, the
+    // parent component's resized() is called instead.
+    std::function<void()> onContentChanged;
+
     // Arrange mode: widgets become drag/resizable (writing fx/fy/fw/fh).
     void setArrange(bool on);
     bool isArranging() const { return arrange_; }
@@ -67,6 +73,7 @@ public:
 
 private:
     void timerCallback() override;
+    void notifyHost();
     void layOutWidgets();
     int contentTop() const;   // y where widgets start (below any tab strip)
     void rebuildTabs();

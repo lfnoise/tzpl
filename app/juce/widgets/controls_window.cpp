@@ -31,6 +31,10 @@ ControlsWindow::Content::Content(bridge::UIState& ui, std::string const& panel,
 {
     viewport_.setViewedComponent(&canvas_, false);
     viewport_.setScrollBarsShown(true, false);
+    // Code created/removed widgets: re-size the canvas inside the viewport
+    // (the canvas's parent is the viewport's holder, whose resized() would
+    // do nothing).
+    canvas_.onContentChanged = [this] { resized(); };
     addAndMakeVisible(viewport_);
 }
 
