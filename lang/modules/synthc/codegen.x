@@ -243,7 +243,22 @@ fn _varRef(ctx Ctx, n NIdx, cel String) String {
 			_: {}
 		}
 		if (ctx.chans[n] == 1) { return _simdSplat(t, w, s); }
-		return _simdLoad(t, w, "&%^[%^]" fmt(s, cel));
+		let C = ctx.chans[n];
+		if (C == w) { return _simdLoad(t, w, "&%^[0]" fmt(s)); }
+		if (C > w) {
+			if (C < `cgLoopChans) {
+				-- Narrower than the loop but wider than SIMD: cyclic broadcast.
+				-- chans is a power of two, so wrap the load offset with & (C-1).
+				if (cel == "0") { return _simdLoad(t, w, "&%^[0]" fmt(s)); }
+				return _simdLoad(t, w, "&%^[%^ & %^]" fmt(s, cel, C - 1));
+			}
+			return _simdLoad(t, w, "&%^[%^]" fmt(s, cel));
+		}
+		-- Narrower than the SIMD width (e.g. 2-chan into 4-wide): expand element-wise.
+		var parts [String] = [];
+		var j = 0;
+		while (j < w) { parts push!("%^[%^]" fmt(s, j % C)); j = j + 1; }
+		return "%^{%^}" fmt(_simdType(t, w), parts join(", "));
 	}
 	-- Flat voice mode: per-voice SoA indexing (mirrors the C++ flat-voice
 	-- genVarRef). Voice values index by voice/chan; the voicer output (a non-voice

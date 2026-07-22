@@ -2891,7 +2891,7 @@ string CppCodeGen::genHandleEventsFun() {
 string CppCodeGen::genDelayAdvance(Graph* graph) {
     string s;
     if (inFlatVoiceMode) {
-        for (D delay : graph->delayBufs) {
+        for (D delay : sortedDelays(graph->delayBufs)) {
             if (delay->allocSize != 1) {
                 if (delay->writer.notNull() && delay->writer->rate == eventSignalRate) {
                     continue;
@@ -2903,7 +2903,7 @@ string CppCodeGen::genDelayAdvance(Graph* graph) {
         }
     } else {
         string dp = inVoiceLoop ? "vs." : "p->";
-        for (D delay : graph->delayBufs) {
+        for (D delay : sortedDelays(graph->delayBufs)) {
             if (delay->allocSize != 1) {
                 // Skip event-rate delays — they are advanced in processEvents
                 if (delay->writer.notNull() && delay->writer->rate == eventSignalRate) {
