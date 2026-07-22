@@ -338,6 +338,10 @@ public:
     }
 
     void systemRequestedQuit() override {
+        if (std::getenv("TZPL_JUCE_DEMO") != nullptr)
+            std::fprintf(stderr, "systemRequestedQuit: window=%d main=%d\n",
+                         window_ != nullptr ? 1 : 0,
+                         (window_ && window_->mainComponent()) ? 1 : 0);
         if (window_ && window_->mainComponent()) {
             window_->mainComponent()->confirmUnsavedChangesThen([] { quit(); });
         } else {
@@ -583,15 +587,32 @@ private:
 namespace juce { extern void initialiseNSApplication(); }
 #endif
 
-int runGui(bridge::AppContext& appCtx) {
-    tzplapp::gAppContext = &appCtx;
+namespace tzplapp {
+
+// Register the application factory. MUST run before the first JUCE
+// initialisation (the engine's JUCE audio backend holds a
+// ScopedJuceInitialiser_GUI and comes up before runGui): JUCE's macOS
+// AppDelegate installs itself on NSApp only when isStandaloneApp() --
+// i.e. createInstance is non-null -- at MessageManager creation time.
+// Without it, terminate: (Cmd+Q, Dock Quit, AppleEvent quit) never
+// reaches systemRequestedQuit and the app exits without the
+// unsaved-changes prompt. makeJuceAudioBackend() calls this.
+void registerJuceAppFactory() {
     juce::JUCEApplicationBase::createInstance =
         []() -> juce::JUCEApplicationBase* {
             return new tzplapp::TzplApplication();
         };
 #if JUCE_MAC
+    // The delegate lands on NSApp, so NSApp must exist first.
     juce::initialiseNSApplication();
 #endif
+}
+
+}
+
+int runGui(bridge::AppContext& appCtx) {
+    tzplapp::gAppContext = &appCtx;
+    tzplapp::registerJuceAppFactory();  // no-op if the backend already did
     int rc = juce::JUCEApplicationBase::main();
     tzplapp::gAppContext = nullptr;
     return rc;

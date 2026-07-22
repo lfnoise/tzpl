@@ -212,7 +212,14 @@ private:
 
 }
 
+// Defined in juce_gui_main.cpp. Must run before JuceAudioBackend's
+// ScopedJuceInitialiser_GUI creates the MessageManager: JUCE only installs
+// its NSApp delegate (Cmd+Q / Dock-quit -> systemRequestedQuit routing)
+// when an application factory is registered at that moment.
+void registerJuceAppFactory();
+
 std::unique_ptr<engine::AudioBackend> makeJuceAudioBackend() {
+    registerJuceAppFactory();
     return std::make_unique<JuceAudioBackend>();
 }
 
