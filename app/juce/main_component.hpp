@@ -85,6 +85,13 @@ public:
 
     bool notebookActive() const { return notebookVisible_; }
 
+    // Fresh untitled notebook shown in the center pane. The launch default
+    // (when no startup document is given) and File > New Notebook.
+    void openNewNotebook();
+
+    // About Tzopilotl: splash artwork + version/license, click to dismiss.
+    void showAboutBox();
+
     // Test hooks for the TZPL_JUCE_SELFTEST / TZPL_JUCE_OPEN paths.
     void testTypeIntoEditor(juce::String const& text);
     bool testEvalCollected() const;
@@ -123,6 +130,9 @@ private:
     void noteRecentProject(juce::String const& root, juce::String const& doc);
     void updateSessionDocumentPath();
     juce::File dialogDefaultDir() const;
+    // Persist the directory a completed open/save dialog was used in; it
+    // seeds dialogDefaultDir() across launches when no document anchors it.
+    void rememberDialogDir(juce::File const& chosen);
     juce::File stdlibModulesDir() const;
     juce::File distExamplesDir() const;
     bool isDistExample(juce::File const& file) const;

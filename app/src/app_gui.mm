@@ -787,6 +787,10 @@ int runGui(bridge::AppContext& appCtx) {
         } else {
             workspacePanel.openFile(path);
         }
+    } else {
+        // No startup document: come up in notebook mode with a fresh
+        // untitled document.
+        notebookPanel.newDocument();
     }
 
     // --- Install GLFW callbacks --------------------------------------------

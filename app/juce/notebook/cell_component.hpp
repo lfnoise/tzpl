@@ -73,6 +73,9 @@ public:
     void clearOutput();
     void addOutputLine(OutputLine const& line);
     std::vector<OutputLine> const& outputLines() const { return outputLines_; }
+    bool outputPaneShown() const {
+        return output_.isVisible() && output_.getHeight() > 0;
+    }
     void setErrorMarkers(std::vector<std::pair<int, juce::String>> const& m);
 
     void setFontSize(float px);
@@ -88,8 +91,10 @@ public:
     std::function<void()> onDelete;
     std::function<void(int)> onMove;        // delta -1 / +1
     std::function<void(bool)> onCollapse;   // new collapsed state
+    std::function<void(bool)> onRunOnLoad;  // Code: run-on-load toggled
     std::function<void()> onFocused;        // editor gained focus
     std::function<void()> onTextChanged;
+    std::function<void()> onLayoutChanged;  // preferredHeight changed
     std::function<void()> onArrangeCommit;  // panel arrange gesture ended
     std::function<void(juce::String)> onRenameCell;  // name field committed
 
@@ -126,6 +131,7 @@ private:
     juce::TextEditor nameField_;      // Code label / Panel name (editable)
     void commitCellName();
     juce::TextButton runButton_ { "Run" };
+    juce::ToggleButton runOnLoadToggle_ { "run on load" };
     juce::TextButton arrangeButton_ { "arrange" };
     bool arrangeOn_ = false;
     juce::TextButton collapseButton_ { "-" };
@@ -133,10 +139,38 @@ private:
     juce::TextButton downButton_ { "v" };
     juce::TextButton deleteButton_ { "x" };
 
+    // Drag grip below the output pane: resizes it (session-only, like the
+    // ImGui app's output drag bar).
+    class OutputGrip : public juce::Component {
+    public:
+        OutputGrip() { setMouseCursor(juce::MouseCursor::UpDownResizeCursor); }
+        std::function<void()> onDragStart;
+        std::function<void(int)> onDrag;   // y-delta from drag start
+        void mouseDown(juce::MouseEvent const&) override {
+            if (onDragStart) onDragStart();
+        }
+        void mouseDrag(juce::MouseEvent const& e) override {
+            if (onDrag) onDrag(e.getDistanceFromDragStartY());
+        }
+        void paint(juce::Graphics& g) override {
+            auto bar = getLocalBounds().toFloat()
+                           .withSizeKeepingCentre(36.0f, 3.0f);
+            g.setColour(juce::Colours::white.withAlpha(0.25f));
+            g.fillRoundedRectangle(bar, 1.5f);
+        }
+    };
+
+    // The output pane's height: the user's dragged height, or auto-fit to
+    // the content (capped) when they have not resized it.
+    int outputPaneHeight() const;
+
     // Body
     std::unique_ptr<juce::CodeDocument> codeDoc_;
     std::unique_ptr<TzplCodeEditor> editor_;
     juce::TextEditor output_;          // Code cells
+    OutputGrip outputGrip_;
+    int outputHeight_ = 0;             // 0 = auto-fit
+    int dragStartOutputH_ = 0;
     juce::Label placeholder_;          // panel w/o registry
     std::unique_ptr<PanelCanvas> panelCanvas_; // Panel cells
     std::unique_ptr<PresetsView> presetsView_; // Presets cells
@@ -144,6 +178,7 @@ private:
 
     static constexpr int kHeaderH = 22;
     static constexpr int kPad = 4;
+    static constexpr int kGripH = 7;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(CellComponent)
 };

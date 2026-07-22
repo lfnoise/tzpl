@@ -207,7 +207,14 @@ void NotebookView::rebuildCells() {
                 store_.setCellCollapsed(cid, c);
                 relayoutContent();
             };
+            slot->onRunOnLoad = [this, cid](bool on) {
+                store_.setCellRunOnLoad(cid, on);
+            };
             slot->onTextChanged = [this] { relayoutContent(); };
+            // Output lines added/cleared or the output pane resized: the
+            // cell's preferred height changed, so re-run the layout (the
+            // content component's own resized() is a no-op).
+            slot->onLayoutChanged = [this] { relayoutContent(); };
 
             // Editable cell name (Code label / Panel target name).
             slot->onRenameCell = [this, cid](juce::String name) {

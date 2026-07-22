@@ -80,6 +80,9 @@ enum : juce::CommandID {
     fileOpenExample,
     fileRevealModules,
 
+    // Help (macOS: app menu; elsewhere: File menu)
+    helpAbout,
+
     // Ranges: fontSetBase + i selects font size i, themeSetBase + i selects
     // theme i (see kEditorFontSizes / AppTheme).
     fontSetBase = 100,

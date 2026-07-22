@@ -223,10 +223,16 @@ if(TZPL_BUILD_APP_JUCE)
         COMPANY_NAME "Tzopilotl"
         BUNDLE_ID "com.audiosynth.tzopilotl"
         VERSION "${PROJECT_VERSION}"
+        ICON_BIG "${CMAKE_CURRENT_SOURCE_DIR}/Tzopilotl-Icon.png"
         DOCUMENT_EXTENSIONS x tzd
         MICROPHONE_PERMISSION_ENABLED TRUE
         MICROPHONE_PERMISSION_TEXT
             "Tzopilotl uses the microphone for audio input to the engine."
+    )
+
+    # Embedded assets (splash / about-box artwork) -> BinaryData.h
+    juce_add_binary_data(tzpl_app_juce_assets
+        SOURCES Tzopilotl-Splash.png
     )
 
     target_sources(tzpl_app_juce PRIVATE
@@ -274,6 +280,7 @@ if(TZPL_BUILD_APP_JUCE)
         PRIVATE tzpl_audio_engine_bridge
         PRIVATE tzpl_clock_bridge
         PRIVATE linenoise
+        PRIVATE tzpl_app_juce_assets
         PRIVATE juce::juce_gui_extra
         PRIVATE juce::juce_audio_devices
         PRIVATE juce::juce_audio_utils
@@ -288,6 +295,19 @@ if(TZPL_BUILD_APP_JUCE)
     if(TARGET tzpl_nats_bridge)
         target_link_libraries(tzpl_app_juce PRIVATE tzpl_nats_bridge)
         target_compile_definitions(tzpl_app_juce PRIVATE TZPL_HAS_NATS=1)
+    endif()
+
+    # Replace juceaide's single-representation Icon.icns with the complete
+    # standard set (16..1024): macOS shows the placeholder icon in some
+    # contexts (e.g. the Cmd+Tab switcher) when only the 1024px ic10
+    # representation is present. Runs before signing in the dist pipeline.
+    if(APPLE)
+        add_custom_command(TARGET tzpl_app_juce POST_BUILD
+            COMMAND bash "${CMAKE_SOURCE_DIR}/packaging/make_icns.sh"
+                "${CMAKE_CURRENT_SOURCE_DIR}/Tzopilotl-Icon.png"
+                "$<TARGET_BUNDLE_DIR:tzpl_app_juce>/Contents/Resources/Icon.icns"
+            COMMENT "Rebuilding Icon.icns with all representations"
+        )
     endif()
 
     # The bundle goes at the root of the distribution folder, next to

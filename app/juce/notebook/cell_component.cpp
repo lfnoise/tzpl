@@ -67,6 +67,21 @@ CellComponent::CellComponent(doc::CellId id, TzplTokeniser& tokeniser,
         addAndMakeVisible(b);
     }
 
+    runOnLoadToggle_.onClick = [this] {
+        if (onRunOnLoad) onRunOnLoad(runOnLoadToggle_.getToggleState());
+    };
+    addChildComponent(runOnLoadToggle_);
+
+    // Output resize grip: dragging sets a sticky per-cell height (session
+    // only); until dragged the pane auto-fits its content.
+    outputGrip_.onDragStart = [this] { dragStartOutputH_ = outputPaneHeight(); };
+    outputGrip_.onDrag = [this](int dy) {
+        int lineH = juce::roundToInt(fontSize_ * 1.4f);
+        outputHeight_ = juce::jmax(lineH + kPad, dragStartOutputH_ + dy);
+        if (onLayoutChanged) onLayoutChanged();
+    };
+    addChildComponent(outputGrip_);
+
     arrangeButton_.setColour(juce::TextButton::buttonColourId,
                              juce::Colour(0x30ffffff));
     arrangeButton_.onClick = [this] {
@@ -111,6 +126,7 @@ void CellComponent::buildForKind(doc::CellKind kind) {
     kind_ = kind;
     kindLabel_.setText(kindName(kind), juce::dontSendNotification);
     runButton_.setVisible(kind == doc::CellKind::Code);
+    runOnLoadToggle_.setVisible(kind == doc::CellKind::Code);
     // Code and Panel cells expose an editable name; Prose/Presets don't.
     nameField_.setVisible(kind == doc::CellKind::Code
                           || kind == doc::CellKind::Panel);
@@ -120,6 +136,8 @@ void CellComponent::buildForKind(doc::CellKind kind) {
         codeDoc_ = std::make_unique<juce::CodeDocument>();
         editor_ = std::make_unique<TzplCodeEditor>(*codeDoc_, &tokeniser_);
         editor_->setFont(monoFont(fontSize_));
+        // The cell grows with its content; wheel events scroll the notebook.
+        editor_->setFitToContent(true);
         // Prose cells hide the gutter (the ImGuiColorTextEdit patch's role).
         editor_->setLineNumbersShown(kind == doc::CellKind::Code);
         codeDoc_->addListener(this); // text change -> onTextChanged
@@ -169,6 +187,8 @@ void CellComponent::syncFromModel(doc::Cell const& cell) {
         buildForKind(cell.kind);
 
     collapsed_ = cell.collapsed;
+    runOnLoadToggle_.setToggleState(cell.runOnLoad,
+                                    juce::dontSendNotification);
 
     // Seed the editable name (unless the user is mid-edit in it).
     if (nameField_.isVisible() && !nameField_.hasKeyboardFocus(true)
@@ -217,6 +237,7 @@ void CellComponent::clearOutput() {
     outputLines_.clear();
     output_.clear();
     if (editor_) editor_->clearErrorMarkers();
+    if (onLayoutChanged) onLayoutChanged();
 }
 
 void CellComponent::addOutputLine(OutputLine const& line) {
@@ -231,7 +252,9 @@ void CellComponent::addOutputLine(OutputLine const& line) {
     output_.moveCaretToEnd();
     output_.setColour(juce::TextEditor::textColourId, c);
     output_.insertTextAtCaret(String(line.text) + "\n");
-    if (auto* p = getParentComponent()) p->resized(); // grow to fit output
+    // Grow the cell to fit: the view recomputes preferredHeight and sets
+    // new bounds (the parent component's own resized() is a no-op).
+    if (onLayoutChanged) onLayoutChanged();
 }
 
 void CellComponent::setErrorMarkers(
@@ -248,23 +271,31 @@ void CellComponent::setFontSize(float px) {
     output_.applyFontToAllText(monoFont(px));
 }
 
+int CellComponent::outputPaneHeight() const {
+    if (outputHeight_ > 0) return outputHeight_;   // user-dragged height
+    int lineH = juce::roundToInt(fontSize_ * 1.4f);
+    return juce::jmin(12, (int)outputLines_.size() + 1) * lineH + kPad;
+}
+
 int CellComponent::preferredHeight(int width) const {
     int h = kHeaderH + kPad;
     if (collapsed_) return h + kPad;
 
     // Size the editor from its ACTUAL line height, not a font-based estimate
     // (which overshoots CodeEditorComponent's line height and leaves a gap).
+    // The editor always fits its full content -- the notebook viewport is
+    // the scrolling surface -- including the horizontal-scrollbar strip at
+    // the bottom (without it the last line sits under the scrollbar and the
+    // editor becomes internally scrollable).
     if (editor_) {
         int lh = editor_->getLineHeight();
         if (lh <= 0) lh = juce::roundToInt(fontSize_ * 1.4f);
         int lines = juce::jmax(1, codeDoc_->getNumLines());
-        h += juce::jlimit(lh * 2, lh * 40, lines * lh + kPad);
+        h += juce::jmax(lh * 2,
+                        lines * lh + editor_->getScrollbarThickness() + kPad);
     }
-    if (kind_ == doc::CellKind::Code && !outputLines_.empty()) {
-        int outLineH = juce::roundToInt(fontSize_ * 1.4f);
-        int outLines = juce::jmin(12, (int)outputLines_.size());
-        h += kPad + outLineH * (outLines + 1);
-    }
+    if (kind_ == doc::CellKind::Code && !outputLines_.empty())
+        h += kPad + outputPaneHeight() + kGripH;
     if (kind_ == doc::CellKind::Panel && panelCanvas_)
         h += panelCanvas_->preferredHeight(width);
     else if (kind_ == doc::CellKind::Presets && presetsView_)
@@ -277,12 +308,24 @@ int CellComponent::preferredHeight(int width) const {
 void CellComponent::resized() {
     auto r = getLocalBounds().reduced(kPad, kPad / 2);
     layOutHeader(r);
-    if (collapsed_) return;
 
-    if (kind_ == doc::CellKind::Code && !outputLines_.empty()) {
-        int lineH = juce::roundToInt(fontSize_ * 1.4f);
-        int outH = juce::jmin(12, (int)outputLines_.size() + 1) * lineH + kPad;
-        output_.setBounds(r.removeFromBottom(outH));
+    // Collapsed: hide the body outright -- the children keep their old
+    // bounds, so a sliver of the editor's top rows would otherwise stay
+    // visible under the header.
+    bool body = !collapsed_;
+    if (editor_) editor_->setVisible(body);
+    output_.setVisible(body && kind_ == doc::CellKind::Code);
+    if (panelCanvas_) panelCanvas_->setVisible(body);
+    if (presetsView_) presetsView_->setVisible(body);
+    placeholder_.setVisible(body && kind_ == doc::CellKind::Panel
+                            && !(ui_ && dispatcher_));
+    if (collapsed_) { outputGrip_.setVisible(false); return; }
+
+    bool hasOutput = kind_ == doc::CellKind::Code && !outputLines_.empty();
+    outputGrip_.setVisible(hasOutput);
+    if (hasOutput) {
+        outputGrip_.setBounds(r.removeFromBottom(kGripH));
+        output_.setBounds(r.removeFromBottom(outputPaneHeight()));
         r.removeFromBottom(kPad);
     }
     if (editor_)
@@ -321,8 +364,13 @@ void CellComponent::layOutHeader(juce::Rectangle<int>& r) {
             nw, kHeaderH - 2));
         header.removeFromLeft(4);
     }
-    if (runButton_.isVisible())
+    if (runButton_.isVisible()) {
         runButton_.setBounds(header.removeFromLeft(48));
+        header.removeFromLeft(6);
+    }
+    if (runOnLoadToggle_.isVisible())
+        runOnLoadToggle_.setBounds(
+            header.removeFromLeft(juce::jmin(110, header.getWidth())));
 }
 
 void CellComponent::paintDisclosure(juce::Graphics& g) const {

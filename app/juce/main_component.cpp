@@ -20,6 +20,7 @@
 //
 
 #include "main_component.hpp"
+#include "BinaryData.h"
 #include "tzpl_app_context.hpp"
 #include "nrt_vm.hpp"
 #include "repl_session.hpp"
@@ -194,14 +195,17 @@ void MainComponent::timerCallback() {
     }
 }
 
-// A floating window per ui panel not claimed by the shown notebook. Panels
-// the notebook renders inline (its panel cells) are skipped here.
+// A floating window per ui panel not claimed by the open notebook. Panels
+// claimed by the notebook NEVER float -- not while the notebook is hidden
+// either (closing a floating window deletes its widgets, a trap when they
+// were only borrowed from the document). Hidden notebook = its controls
+// are simply not shown until it returns.
 void MainComponent::refreshControlsWindows() {
     auto* ui = appCtx_.uiState;
     if (!ui) return;
 
     std::vector<std::string> claimed;
-    if (notebookVisible_ && notebook_) claimed = notebook_->claimedPanels();
+    if (notebook_) claimed = notebook_->claimedPanels();
 
     // Distinct root panels present in the registry, minus claimed ones.
     std::vector<std::string> wanted;
@@ -313,6 +317,7 @@ void MainComponent::openFileFlow() {
         [this](juce::FileChooser const& fc) {
             auto file = fc.getResult();
             if (file == juce::File()) return;
+            rememberDialogDir(file);
             openPath(file);
         });
 }
@@ -421,13 +426,78 @@ void MainComponent::openRecentProject(int index) {
             | juce::FileBrowserComponent::canSelectFiles,
         [this](juce::FileChooser const& fc) {
             auto file = fc.getResult();
-            if (file != juce::File()) openPath(file);
+            if (file == juce::File()) return;
+            rememberDialogDir(file);
+            openPath(file);
         });
 }
 
 // ---------------------------------------------------------------------------
 // Notebook file flows
 // ---------------------------------------------------------------------------
+
+void MainComponent::openNewNotebook() {
+    notebook_->newDocument();
+    showNotebook(true);
+}
+
+// ---------------------------------------------------------------------------
+// About box: the splash artwork over black with version + license text
+// beneath it. Click anywhere (or Escape / the close button) dismisses it.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+class AboutBox : public juce::Component {
+public:
+    AboutBox() {
+        image_ = juce::ImageCache::getFromMemory(
+            BinaryData::TzopilotlSplash_png,
+            BinaryData::TzopilotlSplash_pngSize);
+        setSize(440, 520);
+    }
+
+    void paint(juce::Graphics& g) override {
+        g.fillAll(juce::Colours::black);
+        auto area = getLocalBounds();
+        auto imageArea = area.removeFromTop(getWidth());
+        g.drawImage(image_, imageArea.toFloat(),
+                    juce::RectanglePlacement::centred);
+
+        g.setColour(juce::Colours::white);
+        g.setFont(juce::FontOptions(18.0f, juce::Font::bold));
+        auto line = [&](juce::String const& text, int height) {
+            g.drawText(text, area.removeFromTop(height),
+                       juce::Justification::centred);
+        };
+        line("Tzopilotl " JUCE_APPLICATION_VERSION_STRING, 26);
+        g.setColour(juce::Colours::lightgrey);
+        g.setFont(juce::FontOptions(13.0f));
+        line("Copyright (C) 2026 James McCartney", 20);
+        line("Licensed under the GNU General Public License v3", 20);
+    }
+
+    void mouseUp(juce::MouseEvent const&) override {
+        if (auto* dw = findParentComponentOfClass<juce::DialogWindow>())
+            dw->exitModalState(0);
+    }
+
+private:
+    juce::Image image_;
+};
+
+} // namespace
+
+void MainComponent::showAboutBox() {
+    juce::DialogWindow::LaunchOptions opts;
+    opts.content.setOwned(new AboutBox());
+    opts.dialogTitle = "About Tzopilotl";
+    opts.dialogBackgroundColour = juce::Colours::black;
+    opts.escapeKeyTriggersCloseButton = true;
+    opts.useNativeTitleBar = true;
+    opts.resizable = false;
+    opts.launchAsync();
+}
 
 bool MainComponent::openNotebookFile(juce::File const& file) {
     String err;
@@ -511,6 +581,7 @@ void MainComponent::saveNextUntitledTabThen(std::function<void(bool)> done) {
                 done(false);   // cancelled or write failed -- don't proceed
                 return;
             }
+            rememberDialogDir(file);
             // The tab must no longer qualify, or the recursion never ends.
             if (editorPane_.tabModified(idx)
                 && !editorPane_.tabHasFilePath(idx)) {
@@ -551,6 +622,7 @@ void MainComponent::saveNotebookFlow(bool forceDialog,
         [this, write, done](juce::FileChooser const& fc) {
             auto file = fc.getResult();
             bool ok = file != juce::File() && write(file);
+            if (ok) rememberDialogDir(file);
             if (done) done(ok);
         });
 }
@@ -574,6 +646,7 @@ void MainComponent::saveActiveFlow(bool forceDialog,
         [this, done](juce::FileChooser const& fc) {
             auto file = fc.getResult();
             bool ok = file != juce::File() && editorPane_.saveActiveAs(file);
+            if (ok) rememberDialogDir(file);
             if (done) done(ok);
         });
 }
@@ -662,11 +735,21 @@ juce::File MainComponent::dialogDefaultDir() const {
     juce::File doc = notebookVisible_ ? notebook_->currentFile()
                                       : editorPane_.activeFile();
     if (doc != juce::File()) return doc.getParentDirectory();
+    // The directory the last open/save dialog chose from (persisted).
+    juce::File last(settings_.getValue("lastDialogDir"));
+    if (last.isDirectory()) return last;
     if (!appCtx_.projectDir.empty()) {
         juce::File proj(juce::String(appCtx_.projectDir));
         if (proj.isDirectory()) return proj;
     }
     return juce::File::getSpecialLocation(juce::File::userHomeDirectory);
+}
+
+void MainComponent::rememberDialogDir(juce::File const& chosen) {
+    if (chosen == juce::File()) return;
+    juce::File dir = chosen.getParentDirectory();
+    if (dir.isDirectory())
+        settings_.setValue("lastDialogDir", dir.getFullPathName());
 }
 
 // The stdlib modules directory (first existing system search path).
@@ -705,6 +788,7 @@ void MainComponent::newProjectFlow() {
         [this](juce::FileChooser const& fc) {
             auto dir = fc.getResult();
             if (dir == juce::File()) return;
+            rememberDialogDir(dir);
             confirmNotebookDiscardThen([this, dir] { createProject(dir); });
         });
 }
@@ -783,6 +867,7 @@ void MainComponent::getAllCommands(juce::Array<juce::CommandID>& ids) {
     ids.addArray({
         cmd::fileNew, cmd::fileNewNotebook, cmd::fileNewProject,
         cmd::fileOpen, cmd::fileOpenExample, cmd::fileRevealModules,
+        cmd::helpAbout,
         cmd::fileSave, cmd::fileSaveAs, cmd::fileSaveCopy, cmd::fileRevert,
         cmd::fileClose,
 #if !JUCE_MAC
@@ -851,6 +936,9 @@ void MainComponent::getCommandInfo(juce::CommandID id,
     case cmd::fileRevealModules:
         set("Reveal Modules Folder", "File");
         info.setActive(stdlibModulesDir() != juce::File());
+        break;
+    case cmd::helpAbout:
+        set("About Tzopilotl", "Help");
         break;
     case cmd::fileSave:
         set("Save", "File");
@@ -1003,10 +1091,7 @@ bool MainComponent::perform(InvocationInfo const& info) {
         return true;
     case cmd::fileNewNotebook:
         // Only one notebook is open at a time: a new one replaces it.
-        confirmNotebookDiscardThen([this] {
-            notebook_->newDocument();
-            showNotebook(true);
-        });
+        confirmNotebookDiscardThen([this] { openNewNotebook(); });
         return true;
     case cmd::fileOpen:
         openFileFlow();
@@ -1043,6 +1128,9 @@ bool MainComponent::perform(InvocationInfo const& info) {
         }
         return true;
     }
+    case cmd::helpAbout:
+        showAboutBox();
+        return true;
     case cmd::fileSave:
         if (notebookVisible_) saveNotebookFlow(false);
         else saveActiveFlow(false);
@@ -1061,7 +1149,9 @@ bool MainComponent::perform(InvocationInfo const& info) {
                 | juce::FileBrowserComponent::warnAboutOverwriting,
             [this](juce::FileChooser const& fc) {
                 auto file = fc.getResult();
-                if (file != juce::File()) editorPane_.saveCopy(file);
+                if (file == juce::File()) return;
+                rememberDialogDir(file);
+                editorPane_.saveCopy(file);
             });
         return true;
     }
@@ -1205,7 +1295,79 @@ double MainComponent::testDriveFirstSlider() {
 }
 
 void MainComponent::testShowDemo(String const& which) {
-    if (which == "find") {
+    if (which == "about") {
+        showAboutBox();
+    } else if (which == "cell-error-output") {
+        // A cell eval error must make the cell's output pane appear (grow
+        // the cell) without any other user interaction.
+        showNotebook(true);
+        notebook_->testTypeIntoFocusedCell("let nope = ;");
+        notebook_->runFocusedCell();
+        auto poll = std::make_shared<std::function<void(int)>>();
+        *poll = [this, poll](int triesLeft) {
+            if (notebook_->testFocusedCellOutput().isEmpty() && triesLeft > 0) {
+                juce::Timer::callAfterDelay(
+                    200, [poll, triesLeft] { (*poll)(triesLeft - 1); });
+                return;
+            }
+            bool haveLines = notebook_->testFocusedCellOutput().isNotEmpty();
+            bool shown = notebook_->testFocusedCellOutputPaneShown();
+            String verdict = String("cell-error-output: lines=")
+                + (haveLines ? "yes" : "no")
+                + " paneShown=" + (shown ? "1" : "0")
+                + (haveLines && shown ? " OK" : " FAIL");
+            logLine(verdict);
+            std::fprintf(stderr, "%s\n", verdict.toRawUTF8());
+        };
+        (*poll)(50);
+    } else if (which == "collapse-sliver") {
+        // Collapsing a cell must hide its editor completely -- no sliver of
+        // code under the header.
+        showNotebook(true);
+        notebook_->testTypeIntoFocusedCell("import ui.*;\nlet x = 1;\nlet y = 2;");
+        notebook_->testCollapseFocusedCell(true);
+        bool vis = notebook_->testFocusedCellEditorVisible();
+        String verdict = String("collapse-sliver: editorVisible=")
+            + (vis ? "1 FAIL" : "0 OK");
+        logLine(verdict);
+        std::fprintf(stderr, "%s\n", verdict.toRawUTF8());
+    } else if (which.startsWith("dialog-dir")) {
+        // "dialog-dir:<dir>" -- print where dialogs would start, then
+        // remember <dir> as if a chooser completed there. Run twice to
+        // check the directory persists across launches.
+        std::fprintf(stderr, "dialog-dir: start=%s\n",
+                     dialogDefaultDir().getFullPathName().toRawUTF8());
+        auto arg = which.fromFirstOccurrenceOf(":", false, false);
+        if (arg.isNotEmpty()) {
+            rememberDialogDir(juce::File(arg).getChildFile("chosen.x"));
+            settings_.saveIfNeeded();  // the demo runner kills the process
+        }
+    } else if (which == "claimed-never-float") {
+        // Panels claimed by the open notebook must not become floating
+        // controls windows while the notebook is hidden. Wait for the
+        // opened document's widgets, hide the notebook, let the timer's
+        // refreshControlsWindows() run, and report what happened.
+        auto poll = std::make_shared<std::function<void(int)>>();
+        *poll = [this, poll](int triesLeft) {
+            if (testWidgetCount() == 0 && triesLeft > 0) {
+                juce::Timer::callAfterDelay(
+                    200, [poll, triesLeft] { (*poll)(triesLeft - 1); });
+                return;
+            }
+            showNotebook(false);
+            juce::Timer::callAfterDelay(500, [this, poll] {
+                int floats = (int)controlsWindows_.size();
+                showNotebook(true);
+                int widgets = testWidgetCount();
+                String verdict = String("claimed-never-float: floats=")
+                    + String(floats) + " widgets=" + String(widgets)
+                    + (floats == 0 && widgets > 0 ? " OK" : " FAIL");
+                logLine(verdict);
+                std::fprintf(stderr, "%s\n", verdict.toRawUTF8());
+            });
+        };
+        (*poll)(50);
+    } else if (which == "find") {
         editorPane_.showFind("blip");
     } else if (which == "flash") {
         editorPane_.triggerFlash(6, 8);

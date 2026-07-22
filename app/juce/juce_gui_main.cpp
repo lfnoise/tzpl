@@ -31,6 +31,7 @@
 #include "main_component.hpp"
 #include "tzpl_app_context.hpp"
 #include "tzpl_look_and_feel.hpp"
+#include "BinaryData.h"
 #include <juce_gui_extra/juce_gui_extra.h>
 
 namespace tzplapp {
@@ -86,6 +87,8 @@ public:
             m.addSeparator();
             m.addCommandItem(&commands_, cmd::fileClose);
 #if !JUCE_MAC
+            m.addSeparator();
+            m.addCommandItem(&commands_, cmd::helpAbout);
             m.addSeparator();
             m.addCommandItem(&commands_, cmd::quit);
 #endif
@@ -199,6 +202,31 @@ private:
 };
 
 // ---------------------------------------------------------------------------
+// Launch splash: the artwork drawn scaled into a fixed-size window (the
+// source image is 1024px; drawing it down through the graphics context
+// keeps it sharp on retina displays). Deletes itself after a short delay
+// or on a mouse click.
+// ---------------------------------------------------------------------------
+
+class TzplSplash : public juce::SplashScreen {
+public:
+    TzplSplash()
+        : juce::SplashScreen("Tzopilotl", 420, 420, /*useDropShadow=*/true),
+          image_(juce::ImageCache::getFromMemory(
+              BinaryData::TzopilotlSplash_png,
+              BinaryData::TzopilotlSplash_pngSize)) {}
+
+    void paint(juce::Graphics& g) override {
+        g.fillAll(juce::Colours::black);
+        g.drawImage(image_, getLocalBounds().toFloat(),
+                    juce::RectanglePlacement::centred);
+    }
+
+private:
+    juce::Image image_;
+};
+
+// ---------------------------------------------------------------------------
 // Application
 // ---------------------------------------------------------------------------
 
@@ -226,7 +254,10 @@ public:
         menuModel_ = std::make_unique<AppMenuModel>(
             commands_, window_->mainComponent());
 #if JUCE_MAC
-        juce::MenuBarModel::setMacMainMenu(menuModel_.get());
+        // JUCE's standard app menu has no About item; add ours at the top.
+        juce::PopupMenu appleExtras;
+        appleExtras.addCommandItem(&commands_, cmd::helpAbout);
+        juce::MenuBarModel::setMacMainMenu(menuModel_.get(), &appleExtras);
 #else
         window_->setMenuBar(menuModel_.get());
 #endif
@@ -236,6 +267,14 @@ public:
         juce::Process::makeForegroundProcess();
         window_->toFront(true);
 
+        // Brief launch splash (click dismisses; self-deletes). Skipped for
+        // the headless test/demo modes, whose output must not be overlaid.
+        if (!std::getenv("TZPL_JUCE_SELFTEST") && !std::getenv("TZPL_JUCE_OPEN")
+            && !std::getenv("TZPL_JUCE_DEMO")) {
+            auto* splash = new TzplSplash();  // deletes itself
+            splash->deleteAfterDelay(juce::RelativeTime::seconds(2.0), true);
+        }
+
         // Startup document from the command line: a .tzd opens in the
         // notebook (main.cpp never evaluates it); a .x was already evaluated
         // there and is also shown in an editor tab.
@@ -243,6 +282,10 @@ public:
             juce::File doc(juce::String(gAppContext->startupDocument));
             if (doc.existsAsFile())
                 window_->mainComponent()->openPath(doc);
+        } else {
+            // No startup document: come up in notebook mode with a fresh
+            // untitled document.
+            window_->mainComponent()->openNewNotebook();
         }
 
         // TZPL_JUCE_OPEN=<path>: open a file at startup through the real
@@ -319,7 +362,7 @@ public:
             if (id == cmd::fileOpen || id == cmd::fileSave
                 || id == cmd::fileSaveAs || id == cmd::fileSaveCopy
                 || id == cmd::fileNewProject || id == cmd::fileOpenExample
-                || id == cmd::quit || id == cmd::evalSelection
+                || id == cmd::helpAbout || id == cmd::quit || id == cmd::evalSelection
                 || id == cmd::evalLine || id == cmd::evalFile
                 || id == cmd::togglePerform)  // would overlay the eval phases
                 continue;

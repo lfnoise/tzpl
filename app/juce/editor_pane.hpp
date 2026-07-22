@@ -55,10 +55,23 @@ public:
     void setErrorMarkers(std::map<int, juce::String> markers);
     void clearErrorMarkers();
 
+    // Notebook cells size this editor to its content, so internal vertical
+    // scrolling only hides lines: pass vertical wheel events through to the
+    // outer viewport instead. Horizontal wheel still pans long lines.
+    void setFitToContent(bool fit) { fitToContent_ = fit; }
+    void mouseWheelMove(juce::MouseEvent const& e,
+                        juce::MouseWheelDetails const& wheel) override {
+        if (fitToContent_ && std::abs(wheel.deltaY) >= std::abs(wheel.deltaX))
+            juce::Component::mouseWheelMove(e, wheel);
+        else
+            juce::CodeEditorComponent::mouseWheelMove(e, wheel);
+    }
+
 private:
     class Overlay;
     std::unique_ptr<Overlay> overlay_;
     juce::uint32 lastEditMs_ = 0;
+    bool fitToContent_ = false;
 };
 
 class EditorPane : public juce::Component,

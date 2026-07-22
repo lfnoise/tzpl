@@ -106,6 +106,20 @@ public:
     // Test hooks (TZPL_JUCE_SELFTEST).
     void testTypeIntoFocusedCell(juce::String const& text);
     juce::String testFocusedCellOutput() const;
+    bool testFocusedCellOutputPaneShown() const {
+        auto it = cells_.find(selectedCell_);
+        return it != cells_.end() && it->second->outputPaneShown();
+    }
+    void testCollapseFocusedCell(bool collapsed) {
+        store_.setCellCollapsed(selectedCell_, collapsed);
+        if (auto* cc = cellFor(selectedCell_))
+            cc->syncFromModel(*store_.cell(selectedCell_));
+        relayoutContent();
+    }
+    bool testFocusedCellEditorVisible() {
+        auto* cc = cellFor(selectedCell_);
+        return cc && cc->editor() && cc->editor()->isVisible();
+    }
     int testCellCount() const { return store_.cellCount(); }
     void testAddCell(doc::CellKind kind) { addCell(kind); }
     // The live editor text of cell `index` (not the store's copy).
