@@ -120,6 +120,7 @@ public:
         case 3: { // View
             m.addCommandItem(&commands_, cmd::toggleNotebookView);
             m.addCommandItem(&commands_, cmd::togglePerform);
+            m.addCommandItem(&commands_, cmd::togglePluginBrowser);
             m.addSeparator();
             juce::PopupMenu fontMenu;
             for (int i = 0; i < cmd::kNumEditorFontSizes; ++i)

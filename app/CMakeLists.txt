@@ -331,6 +331,8 @@ if(TZPL_BUILD_APP_JUCE)
         juce/widgets/widget_component.cpp
         juce/widgets/panel_canvas.cpp
         juce/widgets/controls_window.cpp
+        juce/plugin_browser_window.cpp
+        src/plugin_tags.cpp
         src/document.cpp
         src/content_hash.cpp
         src/widget_gestures.cpp

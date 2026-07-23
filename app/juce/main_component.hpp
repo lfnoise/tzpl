@@ -33,6 +33,7 @@
 #include "widgets/controls_dispatch.hpp"
 #include "widgets/controls_window.hpp"
 #include "widgets/key_dispatch.hpp"
+#include "plugin_browser_window.hpp"
 #include "perform_view.hpp"
 #include "gui_state.hpp"
 #include "tzpl_look_and_feel.hpp"
@@ -155,6 +156,7 @@ private:
     void saveNextUntitledTabThen(std::function<void(bool)> done);
     void showNotebook(bool show);
     void togglePerform();
+    void togglePluginBrowser();
 
     void launchEval(juce::String const& code, int flashStart, int flashEnd);
     void collectEvalResult();
@@ -182,6 +184,7 @@ private:
     std::unique_ptr<juce::FileChooser> fileChooser_;
     std::map<std::string, std::unique_ptr<ControlsWindow>> controlsWindows_;
     std::unique_ptr<PerformView> performView_;
+    std::unique_ptr<PluginBrowserWindow> pluginBrowser_;
     int fontIndex_ = 0;
     // Throttles the 15 Hz timer's disk-mtime polling down to ~once/second.
     int externalCheckTicks_ = 0;

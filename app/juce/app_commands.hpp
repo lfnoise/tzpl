@@ -69,6 +69,7 @@ enum : juce::CommandID {
     fontDecrease,
     toggleNotebookView,
     togglePerform,
+    togglePluginBrowser,
 
     // Eval (keyboard only, like the ImGui app)
     evalSelection,

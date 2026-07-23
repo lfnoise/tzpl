@@ -158,6 +158,20 @@ void MainComponent::togglePerform() {
     performView_->refreshPanels();
 }
 
+void MainComponent::togglePluginBrowser() {
+    if (!pluginBrowser_) {
+        pluginBrowser_ = std::make_unique<PluginBrowserWindow>(appCtx_);
+        pluginBrowser_->onClose = [this] { commands_.commandStatusChanged(); };
+    } else if (pluginBrowser_->isVisible()) {
+        pluginBrowser_->setVisible(false);
+    } else {
+        pluginBrowser_->setVisible(true);
+        pluginBrowser_->toFront(true);
+        pluginBrowser_->refresh();
+    }
+    commands_.commandStatusChanged();
+}
+
 void MainComponent::saveSplitRatio() {
     if (getWidth() <= 0) return;
     auto* center = notebookVisible_
@@ -890,7 +904,7 @@ void MainComponent::getAllCommands(juce::Array<juce::CommandID>& ids) {
         cmd::findShow, cmd::findNext, cmd::findPrevious,
         cmd::findUseSelection, cmd::findUseSelectionReplace,
         cmd::fontIncrease, cmd::fontDecrease, cmd::toggleNotebookView,
-        cmd::togglePerform,
+        cmd::togglePerform, cmd::togglePluginBrowser,
         cmd::evalSelection, cmd::evalLine, cmd::evalFile,
     });
     for (int i = 0; i < cmd::kNumEditorFontSizes; ++i)
@@ -1055,6 +1069,11 @@ void MainComponent::getCommandInfo(juce::CommandID id,
         set("Perform Mode", "View");
         info.addDefaultKeypress('p', modShift);
         info.setTicked(performView_ != nullptr);
+        break;
+    case cmd::togglePluginBrowser:
+        set("Plugin Browser", "View");
+        info.addDefaultKeypress('b', modShift);
+        info.setTicked(pluginBrowser_ != nullptr && pluginBrowser_->isVisible());
         break;
 
     case cmd::evalSelection:
@@ -1234,6 +1253,9 @@ bool MainComponent::perform(InvocationInfo const& info) {
         return true;
     case cmd::togglePerform:
         togglePerform();
+        return true;
+    case cmd::togglePluginBrowser:
+        togglePluginBrowser();
         return true;
 
     // -- Eval ---------------------------------------------------------------
