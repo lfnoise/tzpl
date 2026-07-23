@@ -651,17 +651,30 @@ Vertical split: editor panel on top, output+REPL panel on bottom, with a draggab
 
 ---
 
-## Phase 12: Plugin & Module Management — NOT STARTED
+## Phase 12: Plugin & Module Management — PARTIAL
 
 **Goal**: Browsing and managing synth plugins and language modules.
 
-### 12.1 Plugin browser panel
+### 12.1 Plugin browser panel — MOSTLY DONE (2026-07-23)
 
-**Tasks**:
-1. List all loaded synth definitions with their port/control info.
-2. Show plugin details: inputs, outputs, controls with specs.
+**Completed tasks**:
+1. List all loaded synth definitions with their port/control info. Done. Both apps: floating "Plugins" window (ImGui: View menu / Cmd+Shift+P; JUCE: View menu / Cmd+Shift+B) listing every registered def with inlet/outlet/control/buffer counts. Auto-refreshes ~1 Hz while open. A second "Available" section lists loadable-but-not-loaded plugins found in the search paths (`AppContext::pluginSearchPaths`: project `synthdefs/dylib` + the synthdef compile cache), with a Load button. The directory scan never dlopens; selecting an available plugin introspects it once via `getPluginFileDesc`, cached engine-side by path + mtime (failures too) so the same plugin is never reloaded.
+2. Show plugin details: inputs, outputs, controls with specs. Done. Selecting a def shows Inlets/Outlets/Controls/Buffers sections with name, channel count, element type, and rate; controls add lo/hi/init from the ControlSpec; buffers add the bufID.
+4. Search/filter functionality. Done (case-insensitive substring filter on the def name).
+
+Supporting work:
+- New engine introspection API: `engine::DefDesc` + `getDefDesc()` / `listDefDescs()` in `tzpl_client_interface.hpp` (copies under `nrt_lock_`, GUI-thread safe). `ControlDesc` gained a `tzpl_SignalType type` field. On-disk discovery: `listPluginFiles()` (filename-stem scan, newest revision per name, earlier dirs shadow later), `getPluginFileDesc()` (transient dlopen introspection with path+mtime cache), and `loadOneDef()` made public for single-file loading.
+- Buffer metadata added to the plugin ABI via the optional `loadBufferDefs` symbol (`tzpl_BufferDef` / `tzpl_BufferDefList` in `tzpl_plugin_abi.h`) — a separate symbol rather than a `tzpl_SynthDef` extension so old plugins/engines stay compatible in both directions. Emitted by both the C++ codegen and the synthc port (byte-identical, differential-tested); stored as `BufferInfo` in `NodeDefInfo`.
+- Plugin ABI version stamp: `TZPL_PLUGIN_ABI_VERSION` (currently 1) in `tzpl_plugin_abi.h`; generated plugins export `extern "C" int64_t tzpl_abi_version`. Missing symbol = version 0 (pre-versioning, layout-compatible). All three loaders (`engine::loadOneDef`, `synthdef::loadDef`, `getPluginFileDesc`) refuse plugins stamped newer than the header they were built against. Bump only for layout/calling-convention breaks; additive changes keep using optional-symbol probing.
+- Heterarchical category tags (three additive layers, union-merged):
+  1. **Embedded**: `(Tags "test" ...)` sexpr clause -> `Synth::tags` -> optional plugin symbol `loadTags` (`tzpl_TagList`, no version bump), emitted byte-identically by both codegens (differential-tested), surfaced as `DefDesc::tags`. Lang side: `defSynth`/`defSynthX` take an optional `tags [String]` argument; `TZPL_DEFAULT_TAGS` (comma-separated env var, read by `defaultSynthTags()` in synthdef.x) is appended to everything compiled in the session -- the test harnesses set `TZPL_DEFAULT_TAGS=test` so their synthdefs are born tagged.
+  2. **Name-pattern rules**: globs implying tags (default `test_*` => test) for legacy untagged dylibs.
+  3. **User-local tags**: added in the browser, keyed by SYNTHDEF NAME (not path -- names are the identity the engine/cache/browser already use, so tags survive folder moves and recompiles).
+  Layers 2-3 + the per-tag filter states persist in one per-user, human-editable file shared by both apps (`~/Library/Application Support/Tzopilotl/plugin_tags.txt`; `app/src/plugin_tags.hpp` `PluginTagStore`). Filtering is tri-state per tag (show / hide / don't-care): hide wins, and a non-empty show set acts as a whitelist -- "show all fx except distortion" = fx:show + distortion:hide; with no show tags, everything not hidden is visible (default: hide `test`). Browser UI: tag chips in the details pane (local tags removable, add-tag input), a "Tags..." dropdown setting each tag's tri-state (with per-tag plugin counts), and a "show hidden (N)" momentary reveal toggle.
+- Fixed `engine::loadOneDef()`: it called the plugin's `load()` through a stale `void(*)(Engine*)` signature (mismatched sret call, def never registered). Precompiled-dylib preloading (`loadPlugins`/project `synthdefs/dylib/`) now actually registers defs.
+
+**Remaining tasks**:
 3. One-click instantiation of a plugin as a new node.
-4. Search/filter functionality.
 
 ### 12.2 Module browser panel
 
@@ -839,7 +852,7 @@ Phase 0 (Build Infrastructure)       ✅ DONE
 | 9 | Language feature completion | 🟢 Mostly done | I/O functions, general function inlining |
 | 10 | UI framework setup | ✅ Done | -- |
 | 11 | Code editor & REPL | ✅ Done | Type info on hover |
-| 12 | Plugin/module management | ⬜ Not started | All tasks |
+| 12 | Plugin/module management | 🟡 Partial | 12.1 plugin browser done (both apps) except one-click instantiation; 12.2 module browser, 12.3 compile UI |
 | 13 | Audio graph visualization | ⬜ Not started | All tasks |
 | 14 | Metering & monitoring | ⬜ Not started | All tasks |
 | 15 | Session management | ⬜ Not started | All tasks |
