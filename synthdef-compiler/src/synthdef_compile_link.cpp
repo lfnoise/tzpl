@@ -201,6 +201,20 @@ optional<LoadedDef> loadDef(std::string path) {
         return {};
     }
 
+    // ABI version stamp: missing symbol = version 0 (pre-versioning,
+    // layout-compatible with 1). Refuse plugins newer than this header.
+    i64 abiVersion = 0;
+    if (void* verPtr = dlsym(handle, "tzpl_abi_version")) {
+        abiVersion = *(int64_t*)verPtr;
+    }
+    if (abiVersion > TZPL_PLUGIN_ABI_VERSION) {
+        fprintf(stderr, "*** ERROR: plugin '%s' ABI version %lld is newer than "
+                "this compiler supports (%d)\n",
+                path_c, (long long)abiVersion, TZPL_PLUGIN_ABI_VERSION);
+        dlclose(handle);
+        return {};
+    }
+
     void *ptr;
 
     ptr = dlsym(handle, "load");
@@ -214,7 +228,18 @@ optional<LoadedDef> loadDef(std::string path) {
 
     tzpl_SynthDef def = (*loadFunc)();
 
-    return LoadedDef{def, handle};
+    LoadedDef loaded{def, handle};
+
+    // Optional symbols: plugins without sample buffers / tags (or compiled
+    // before the symbols existed) don't export them.
+    if (void* bufPtr = dlsym(handle, "loadBufferDefs")) {
+        loaded.bufferDefs = (*(tzpl_LoadBufferDefsFun)bufPtr)();
+    }
+    if (void* tagPtr = dlsym(handle, "loadTags")) {
+        loaded.tagList = (*(tzpl_LoadTagsFun)tagPtr)();
+    }
+
+    return loaded;
 }
 
 } // namespace synthdef

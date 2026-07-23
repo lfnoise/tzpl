@@ -2370,7 +2370,10 @@ fn _warpStepSize(w ControlWarp) Float {
 }
 
 fn genLoad(ctx Ctx, name String) String {
-	var s = "extern \"C\" tzpl_SynthDef load() {\n\ttzpl_SynthDef def;\n";
+	-- ABI version stamp: the version of tzpl_plugin_abi.h the plugin was
+	-- compiled against. Loaders refuse plugins newer than they understand.
+	var s = "extern \"C\" int64_t tzpl_abi_version = TZPL_PLUGIN_ABI_VERSION;\n\n";
+	s = s $ "extern \"C\" tzpl_SynthDef load() {\n\ttzpl_SynthDef def;\n";
 	s = s $ "\tdef.name = \"%^\";\n" fmt(name);
 	s = s $ "\tdef.funs = %^_funs;\n" fmt(name);
 	s = s $ "\tdef.num_ins = %^;\n" fmt(ctx.inlets length);
@@ -2403,6 +2406,62 @@ fn genLoad(ctx Ctx, name String) String {
 		i = i + 1;
 	}
 	s = s $ "\treturn def;\n}\n\n\n";
+	s
+}
+
+-- Companion symbol to load(): describes the synth's sample buffer slots.
+-- Optional in the ABI (old plugins/engines simply lack it); emitted only when
+-- the synth uses buffers. Matches the C++ compiler's emission byte-for-byte:
+-- name "buf<serial>", f64 element type, and the widest channel span any
+-- reader/writer touches.
+fn genLoadBufferDefs(ctx Ctx) String {
+	if (ctx.bufSerials length == 0) { return ""; }
+	var spans = [Int]();
+	for (ser : ctx.bufSerials) { spans push!(1); }
+	var n = 0;
+	for (k : ctx.kind) {
+		match (k) {
+			bufFixReadK(bi, _, rc, sc): { if (sc + rc > spans[bi]) { spans[bi] = sc + rc; } }
+			bufVarReadK(bi, _, rc, sc): { if (sc + rc > spans[bi]) { spans[bi] = sc + rc; } }
+			bufWriteK(bi, wc, sc): {
+				-- writeChans 0 = auto: match the input channel count (BufWrite::calcShape).
+				let w = wc == 0 ? ctx.chans[n] : wc;
+				if (sc + w > spans[bi]) { spans[bi] = sc + w; }
+			}
+			_: {}
+		}
+		n = n + 1;
+	}
+	var s = "extern \"C\" tzpl_BufferDefList loadBufferDefs() {\n";
+	s = s $ "\ttzpl_BufferDefList list;\n";
+	s = s $ "\tlist.num_buffers = %^;\n" fmt(ctx.bufSerials length);
+	s = s $ "\tlist.buffers = (tzpl_BufferDef*)calloc(list.num_buffers, sizeof(tzpl_BufferDef));\n";
+	var i = 0;
+	for (ser : ctx.bufSerials) {
+		s = s $ "\tlist.buffers[%^] = {\"buf%^\", {tzpl_kF64, tzpl_constRate, %^}, %^};\n"
+			fmt(i, ser, spans[i], ser);
+		i = i + 1;
+	}
+	s = s $ "\treturn list;\n}\n\n\n";
+	s
+}
+
+-- Companion symbol to load(): the synth's category tags. Optional in the ABI;
+-- emitted only when tags are present. Matches the C++ compiler's emission
+-- byte-for-byte.
+fn genLoadTags(ctx Ctx) String {
+	if (ctx.tags length == 0) { return ""; }
+	var s = "extern \"C\" tzpl_TagList loadTags() {\n";
+	s = s $ "\tstatic const char* tags[] = {";
+	var i = 0;
+	for (t : ctx.tags) {
+		if (i > 0) { s = s $ ", "; }
+		s = s $ "\"%^\"" fmt(t);
+		i = i + 1;
+	}
+	s = s $ "};\n";
+	s = s $ "\ttzpl_TagList list;\n\tlist.num_tags = %^;\n\tlist.tags = tags;\n" fmt(ctx.tags length);
+	s = s $ "\treturn list;\n}\n\n\n";
 	s
 }
 
@@ -2469,5 +2528,7 @@ fn genCpp(ctx Ctx, name String, simdWidth Int = 0) String {
 	s = s $ genSwapBufferFun(ctx, name);
 	s = s $ genFunPtrs(ctx, name);
 	s = s $ genLoad(ctx, name);
+	s = s $ genLoadBufferDefs(ctx);
+	s = s $ genLoadTags(ctx);
 	s
 }

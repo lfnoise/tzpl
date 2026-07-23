@@ -402,6 +402,7 @@ struct IsoGroup {
 
 struct Ctx {
 	name String,
+	tags [String],            -- category tags for the loadTags emission
 
 	-- per-node parallel arrays, indexed by NIdx
 	kind [NodeKind],
@@ -449,6 +450,7 @@ struct Ctx {
 fn newCtx(name String) Ctx {
 	Ctx {
 		name: name,
+		tags: [String](),
 		kind: [NodeKind](),
 		ins: [[NIdx]](),
 		subs: [[NIdx]](),

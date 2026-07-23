@@ -218,7 +218,8 @@ static void ffi_compileSynthDefAndLoad(ts::VM& vm, u16 dst, u16, u16 argBase) {
         return;
     }
 
-    engine::addSynthDef(eng, optDef->def, optDef->dlHandle);
+    engine::addSynthDef(eng, optDef->def, optDef->dlHandle, &optDef->bufferDefs,
+                        &optDef->tagList);
 
     returnString(vm, dst, "");
 }
@@ -283,7 +284,8 @@ static void ffi_loadSynthDylib(ts::VM& vm, u16 dst, u16, u16 argBase) {
         return;
     }
 
-    engine::addSynthDef(eng, optDef->def, optDef->dlHandle);
+    engine::addSynthDef(eng, optDef->def, optDef->dlHandle, &optDef->bufferDefs,
+                        &optDef->tagList);
     returnString(vm, dst, "");
 }
 

@@ -17,8 +17,10 @@ import synthc.rewrite.*;
 ---------------------------------------------------------------------------
 -- Entry point
 
-fn importGraph(g SignalGraph, name String, applyRewrites Bool = false) Ctx {
+fn importGraph(g SignalGraph, name String, applyRewrites Bool = false,
+               tags [String] = [String]()) Ctx {
 	var `scCtx = newCtx(name);
+	for (t : tags) { `scCtx.tags push!(t); }
 	var `scIdMap [Int: Int] = [:];        -- front-end expr id -> node index
 	var `scDelayIdMap [Int: Int] = [:];   -- front-end DelayVar id -> delay idx
 	var `scBufIdMap [Int: Int] = [:];     -- front-end BufferVar id -> buf idx

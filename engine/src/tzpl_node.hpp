@@ -46,6 +46,13 @@ struct ControlInfo : PortInfo
     tzpl_ControlSpec spec;
 };
 
+struct BufferInfo
+{
+    const char* name;
+    tzpl_SignalType type;
+    i64 bufID;
+};
+
 struct NodeDefInfo
 {
     const char* name;
@@ -56,6 +63,10 @@ struct NodeDefInfo
     PortInfo* ins;
     PortInfo* outs;
     ControlInfo* controls;
+    int num_buffers = 0;
+    BufferInfo* buffers = nullptr;
+    int num_tags = 0;
+    const char** tags = nullptr;
 };
 
 #if DEBUG_NODES

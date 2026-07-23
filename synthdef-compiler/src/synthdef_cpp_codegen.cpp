@@ -3483,6 +3483,7 @@ string CppCodeGen::genClass()
 
     s += genFunPtrs();
     
+    s += "extern \"C\" int64_t tzpl_abi_version = TZPL_PLUGIN_ABI_VERSION;\n\n";
     s += "extern \"C\" tzpl_SynthDef load() {\n";
     s += "\ttzpl_SynthDef def;\n";
     s += "\tdef.name = \"" + name + "\";\n";
@@ -3537,6 +3538,56 @@ string CppCodeGen::genClass()
     }
     s += "\treturn def;\n";
     s += "}\n\n\n";
+
+    // Optional companion symbol to load(): describes the plugin's sample
+    // buffer slots. Engines that predate it never look it up; plugins that
+    // lack it (no buffers, or compiled before the symbol existed) load fine.
+    if (!synth->sampleBufs.empty()) {
+        vector<B> bufs(synth->sampleBufs.begin(), synth->sampleBufs.end());
+        std::sort(bufs.begin(), bufs.end(),
+                  [](B a, B b) { return a->serial < b->serial; });
+        s += "extern \"C\" tzpl_BufferDefList loadBufferDefs() {\n";
+        s += "\ttzpl_BufferDefList list;\n";
+        s += FMT("\tlist.num_buffers = {};\n", bufs.size());
+        s += "\tlist.buffers = (tzpl_BufferDef*)calloc(list.num_buffers, sizeof(tzpl_BufferDef));\n";
+        for (usize i = 0; B buf : bufs) {
+            // Buffers have no user-supplied name; channel count is the widest
+            // span any reader/writer touches (contents are always f64).
+            i64 chans = 1;
+            for (S u : buf->fixReaders) {
+                auto r = u.as<BufFixRead>();
+                chans = std::max(chans, r->startChan + r->readChans);
+            }
+            for (S u : buf->varReaders) {
+                auto r = u.as<BufVarRead>();
+                chans = std::max(chans, r->startChan + r->readChans);
+            }
+            for (S u : buf->writers) {
+                auto w = u.as<BufWrite>();
+                chans = std::max(chans, w->startChan + w->writeChans);
+            }
+            s += FMT("\tlist.buffers[{}] = {{\"buf{}\", {{tzpl_kF64, tzpl_constRate, {}}}, {}}};\n",
+                     i, buf->serial, chans, buf->serial);
+            ++i;
+        }
+        s += "\treturn list;\n";
+        s += "}\n\n\n";
+    }
+
+    // Optional companion symbol to load(): the synth's category tags.
+    if (!synth->tags.empty()) {
+        s += "extern \"C\" tzpl_TagList loadTags() {\n";
+        s += "\tstatic const char* tags[] = {";
+        for (usize i = 0; string const& tag : synth->tags) {
+            if (i++) s += ", ";
+            s += FMT("\"{}\"", tag);
+        }
+        s += "};\n";
+        s += FMT("\ttzpl_TagList list;\n\tlist.num_tags = {};\n\tlist.tags = tags;\n",
+                 synth->tags.size());
+        s += "\treturn list;\n";
+        s += "}\n\n\n";
+    }
 
     return s;
 }

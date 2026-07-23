@@ -23,6 +23,7 @@
 
 #include "tzpl_synthdef_compiler_ffi.hpp"
 #include "tzpl_audio_engine_ffi.hpp"
+#include "synthdef_compile_link.hpp"
 #include "tzpl_clock_ffi.hpp"
 #include "tzpl_app_context.hpp"
 #include "tzpl.hpp"
@@ -33,6 +34,9 @@
 #include <cstdlib>
 #include <string_view>
 #include <chrono>
+#include <filesystem>
+#include <fstream>
+#include <dlfcn.h>
 
 // ---------------------------------------------------------------------------
 // Test runner helpers
@@ -286,6 +290,160 @@ static void test_list_synthdefs() {
     engine::freeEngine(eng);
 }
 
+static void test_def_desc_introspection() {
+    std::print("Test: getDefDesc reports ports, controls, and buffers\n");
+
+    ts::TypeUniverse types;
+    ts::Compiler compiler(types);
+    bridge::registerAudioEngineFFI(compiler);
+    bridge::registerSynthdefCompilerFFI(compiler);
+    bridge::registerClockFFI(compiler);
+
+    engine::Engine* eng = makeTestEngine();
+
+    ts::ModuleCompiler moduleCompiler(compiler, {MODULES_DIR, LANG_MODULES_DIR});
+    auto target = compiler.createTarget();
+    ts::VM vm(16 * 1024 * 1024, types, target);
+    bridge::AppContext appCtx; appCtx.engine = eng;
+    bridge::setAppContextOnVM(&vm, &appCtx);
+
+    FILE* devnull = fopen("/dev/null", "w");
+    vm.setPrintOutput(devnull);
+
+    // A synthdef reading 2 channels from sample buffer 0, with category tags.
+    const char* source = R"LANG(
+        import synthdef.*;
+        let sexpr = "(Synth test_bufdesc (Tags \"demo\" \"test\") (Graph 1 ((0 BufFixRead 0 0 2 0) (1 Outlet \"out\" 0))))";
+        let err = compileSynthDefAndLoad(sexpr);
+        println(err);
+    )LANG";
+
+    bool ok = compileAndRun(compiler, vm, source, "def_desc.x", &moduleCompiler);
+    check(ok, "buffer synthdef compiles and loads");
+
+    engine::DefDesc desc;
+    bool found = engine::getDefDesc(eng, "test_bufdesc", desc);
+    check(found, "getDefDesc finds test_bufdesc");
+    if (found) {
+        check(desc.ins.empty(), "no inlets");
+        check(desc.outs.size() == 1, "one outlet");
+        if (desc.outs.size() == 1) {
+            check(desc.outs[0].name == "out", "outlet named 'out'");
+            check(desc.outs[0].type.chans == 2, "outlet has 2 channels");
+        }
+        check(desc.controls.empty(), "no controls");
+        check(desc.tags.size() == 2 && desc.tags[0] == "demo"
+              && desc.tags[1] == "test",
+              "embedded tags in declaration order");
+        check(desc.buffers.size() == 1, "one buffer");
+        if (desc.buffers.size() == 1) {
+            check(desc.buffers[0].name == "buf0", "buffer named 'buf0'");
+            check(desc.buffers[0].bufID == 0, "buffer id 0");
+            check(desc.buffers[0].type.elem == tzpl_kF64, "buffer elem type f64");
+            check(desc.buffers[0].type.chans == 2, "buffer spans 2 channels");
+        }
+    }
+
+    engine::DefDesc missing;
+    check(!engine::getDefDesc(eng, "no_such_def", missing),
+          "getDefDesc returns false for unknown def");
+
+    // The def also appears in the full listing.
+    std::vector<engine::DefDesc> all;
+    engine::listDefDescs(eng, all);
+    bool listed = false;
+    for (auto const& d : all) {
+        if (d.name == "test_bufdesc" && d.buffers.size() == 1) listed = true;
+    }
+    check(listed, "listDefDescs includes test_bufdesc with its buffer");
+
+    // --- On-disk discovery (plugin browser "Available" section) ---
+    // The compiled dylib now sits in the compile cache.
+    std::string cacheDir = synthdef::getBuildDir() + "dylib";
+    std::vector<engine::PluginFile> files;
+    engine::listPluginFiles({cacheDir}, files);
+    std::string bufdescPath;
+    for (auto const& f : files) {
+        if (f.name == "test_bufdesc") bufdescPath = f.path;
+    }
+    check(!bufdescPath.empty(), "listPluginFiles finds test_bufdesc in the compile cache");
+
+    if (!bufdescPath.empty()) {
+        // The freshly compiled plugin carries the current ABI version stamp.
+        if (void* handle = dlopen(bufdescPath.c_str(), RTLD_NOW | RTLD_LOCAL)) {
+            void* verPtr = dlsym(handle, "tzpl_abi_version");
+            check(verPtr != nullptr, "plugin exports tzpl_abi_version");
+            if (verPtr) {
+                check(*(int64_t*)verPtr == TZPL_PLUGIN_ABI_VERSION,
+                      "tzpl_abi_version matches TZPL_PLUGIN_ABI_VERSION");
+            }
+            dlclose(handle);
+        }
+
+        engine::DefDesc fileDesc;
+        bool fok = engine::getPluginFileDesc(bufdescPath.c_str(), fileDesc);
+        check(fok, "getPluginFileDesc introspects the dylib without an engine");
+        if (fok) {
+            check(fileDesc.name == "test_bufdesc", "file desc name matches");
+            check(fileDesc.buffers.size() == 1
+                  && fileDesc.buffers[0].type.chans == 2,
+                  "file desc reports the buffer metadata");
+        }
+        engine::DefDesc fileDesc2;
+        check(engine::getPluginFileDesc(bufdescPath.c_str(), fileDesc2)
+              && fileDesc2.buffers.size() == 1,
+              "second (cached) introspection matches");
+
+        // loadOneDef registers the file's def into a fresh engine.
+        engine::Engine* eng2 = makeTestEngine();
+        check(engine::loadOneDef(eng2, bufdescPath.c_str()),
+              "loadOneDef loads the dylib");
+        engine::DefDesc desc2;
+        check(engine::getDefDesc(eng2, "test_bufdesc", desc2)
+              && desc2.buffers.size() == 1,
+              "loadOneDef registered the def with buffer metadata");
+        engine::freeEngine(eng2);
+    }
+
+    fclose(devnull);
+    engine::freeEngine(eng);
+}
+
+static void test_abi_version_refusal() {
+    std::print("Test: loaders refuse plugins with a newer ABI version\n");
+    namespace fs = std::filesystem;
+
+    // Fabricate a dylib that claims a future ABI version.
+    fs::path dir = fs::temp_directory_path() / "tzpl_abi_test";
+    std::error_code ec;
+    fs::create_directories(dir, ec);
+    fs::path src = dir / "future.cpp";
+    fs::path dylib = dir / "future_synth.dylib";
+    {
+        std::ofstream out(src);
+        out << "#include <cstdint>\n"
+               "extern \"C\" int64_t tzpl_abi_version = 9999;\n"
+               "extern \"C\" void load() {}\n";
+    }
+    std::string cmd = "clang++ -dynamiclib -o '" + dylib.string() + "' '"
+                      + src.string() + "' 2>/dev/null";
+    if (std::system(cmd.c_str()) != 0) {
+        std::print("  SKIP: could not compile test dylib\n");
+        return;
+    }
+
+    engine::Engine* eng = makeTestEngine();
+    check(!engine::loadOneDef(eng, dylib.string().c_str()),
+          "loadOneDef refuses a newer-ABI plugin");
+    engine::DefDesc desc;
+    check(!engine::getPluginFileDesc(dylib.string().c_str(), desc),
+          "getPluginFileDesc refuses a newer-ABI plugin");
+    check(!synthdef::loadDef(dylib.string()).has_value(),
+          "synthdef::loadDef refuses a newer-ABI plugin");
+    engine::freeEngine(eng);
+    fs::remove_all(dir, ec);
+}
+
 static void test_low_level_ffi() {
     std::print("Test: low-level FFI (synthdefAnalysisDump, synthdefGenCppFromSexpr)\n");
 
@@ -492,6 +650,12 @@ static void test_synthc_compile_and_load() {
     for (auto const& n : names) if (n == "synthc_integ") found = true;
     check(found, "synthc_integ def registered in engine after defSynthX");
 
+    // main() sets TZPL_DEFAULT_TAGS=test, so defSynthX should have tagged it.
+    engine::DefDesc desc;
+    check(engine::getDefDesc(eng, "synthc_integ", desc)
+          && desc.tags.size() == 1 && desc.tags[0] == "test",
+          "defSynthX applied the TZPL_DEFAULT_TAGS session tag via synthc");
+
     fclose(devnull);
     engine::freeEngine(eng);
 }
@@ -503,11 +667,17 @@ static void test_synthc_compile_and_load() {
 int main(int argc, char const* argv[]) {
     std::print("=== Synthdef Compiler FFI Integration Tests ===\n\n");
 
+    // Everything this harness compiles via defSynth/defSynthX is born tagged
+    // "test" so the plugin browser can filter it out of user-facing lists.
+    setenv("TZPL_DEFAULT_TAGS", "test", /*overwrite=*/0);
+
     test_compile_success();
     test_compile_error();
     test_compile_and_load();
     test_caching();
     test_list_synthdefs();
+    test_def_desc_introspection();
+    test_abi_version_refusal();
     test_low_level_ffi();
     test_synthc_analysis_diff();
     test_synthc_rewrite_diff();

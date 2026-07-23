@@ -122,7 +122,11 @@ bool loadDefs(Engine* e, const char* dirPath);
 bool loadDef(Engine* e, const char* dirPath, const char* defName);
 
 // Add a synthdef (from tzpl_plugin_abi) to the engine's def table.
-void addSynthDef(Engine* e, tzpl_SynthDef const& def, void* dlHandle = nullptr);
+// `bufs` / `tags` (optional) carry the plugin's sample buffer descriptors and
+// category tags from its "loadBufferDefs" / "loadTags" symbols.
+void addSynthDef(Engine* e, tzpl_SynthDef const& def, void* dlHandle = nullptr,
+                 tzpl_BufferDefList const* bufs = nullptr,
+                 tzpl_TagList const* tags = nullptr);
 
 // Collect the names of all registered node defs.
 void listNodeDefs(Engine* e, std::vector<std::string>& names);
@@ -132,10 +136,59 @@ struct ControlDesc {
     std::string name;
     i64 controlID;
     tzpl_ControlSpec spec;
+    tzpl_SignalType type{};
 };
 
 // Collect control metadata for def `defName`. Returns false if no such def.
 bool listDefControls(Engine* e, const char* defName, std::vector<ControlDesc>& out);
+
+// Full def metadata for UI/introspection (plugin browser).
+struct PortDesc {
+    std::string name;
+    tzpl_SignalType type{};
+};
+
+struct BufferDesc {
+    std::string name;
+    tzpl_SignalType type{};
+    i64 bufID = 0;
+};
+
+struct DefDesc {
+    std::string name;
+    std::vector<PortDesc> ins;
+    std::vector<PortDesc> outs;
+    std::vector<ControlDesc> controls;
+    std::vector<BufferDesc> buffers;
+    std::vector<std::string> tags;  // embedded category tags (may be empty)
+};
+
+// Copy the full metadata of def `defName`. Returns false if no such def.
+bool getDefDesc(Engine* e, const char* defName, DefDesc& out);
+
+// Copy metadata for all non-superseded defs, sorted by name.
+void listDefDescs(Engine* e, std::vector<DefDesc>& out);
+
+// A loadable plugin dylib discovered on disk (not necessarily loaded).
+struct PluginFile {
+    std::string name;  // derived from the filename stem ("<name>_synth[_rN]")
+    std::string path;  // newest revision found
+};
+
+// Scan `dirs` recursively for plugin dylibs, one entry per name (highest
+// revision wins within a dir; earlier dirs shadow later ones). Sorted by
+// name. Pure directory listing -- never dlopens anything.
+void listPluginFiles(std::vector<std::string> const& dirs,
+                     std::vector<PluginFile>& out);
+
+// Introspect a plugin file without registering it: dlopen, read the def
+// metadata, dlclose. Results (including failures) are cached by path + file
+// mtime, so repeated calls never reload the same plugin. Returns false if
+// the file is missing or does not export a plugin `load` symbol.
+bool getPluginFileDesc(char const* path, DefDesc& out);
+
+// Load one plugin dylib file and register its def with the engine.
+bool loadOneDef(Engine* e, const char* path);
     
 f64 getStreamTime(Engine* e); // audio must be initialized, else exception.
 

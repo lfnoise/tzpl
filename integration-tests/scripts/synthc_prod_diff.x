@@ -57,5 +57,24 @@ fn echo() S {
 checkProd("arith", arith);
 checkProd("echo", echo);
 
+-- category tags: the loadTags emission must byte-match between the two
+-- compilers (tags flow to C++ via the (Tags ...) sexpr clause, to synthc via
+-- the importGraph tags argument).
+fn checkTagged(name String, synthFn GraphFn, tags [String]) Void {
+	let g = makeGraph(synthFn);
+	let sx = g toSynthSexpr(name, tags);
+	let ctx = g importGraph(name, true, tags) analyzeM1;
+	if (ctx.errors length > 0) {
+		`failures = `failures + 1;
+		println("  FAIL " $ name $ " (errors):");
+		for (e : ctx.errors) { println("    " $ e); }
+		return;
+	}
+	let v = voicerCppCompare(genCpp(ctx, name, 4), synthdefGenCppFromSexpr(sx, 4, true));
+	if (v == "PASS") { println("  PASS " $ name $ " (tagged)"); }
+	else { `failures = `failures + 1; println("  FAIL " $ name $ " (tagged)"); println(v); }
+}
+checkTagged("arith_tagged", arith, ["test", "demo"]);
+
 if (`failures == 0) { println("M5 PROD DIFF PASS"); }
 else { println("M5 PROD DIFF FAIL: " $ `failures toString); }

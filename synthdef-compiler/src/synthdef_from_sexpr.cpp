@@ -1263,7 +1263,7 @@ GraphResult synthFromSExpr(sexpr::Item const& sexprRoot, std::string const& synt
 }
 
 GraphResult synthFromSynthExpr(sexpr::ItemVec const& synthList) {
-    // Format: (Synth <name> (Graph <root-id> (<expr-list>)))
+    // Format: (Synth <name> [(Tags <tag>...)] (Graph <root-id> (<expr-list>)))
     if (synthList.size() < 3) {
         return std::unexpected("Synth requires at least 3 elements: (Synth <name> <graph>)");
     }
@@ -1273,13 +1273,50 @@ GraphResult synthFromSynthExpr(sexpr::ItemVec const& synthList) {
     }
     std::string name = synthList[1].get<sexpr::Symbol>().name;
 
-    if (!synthList[2].is<sexpr::ItemVec>()) {
-        return std::unexpected("Synth body must be a Graph list");
+    // Optional clauses before the Graph. Tags are free-form category strings
+    // (deduped, declaration order preserved).
+    std::vector<std::string> tags;
+    sexpr::ItemVec const* graphList = nullptr;
+    for (usize i = 2; i < synthList.size(); ++i) {
+        if (!synthList[i].is<sexpr::ItemVec>()) {
+            return std::unexpected("Synth clauses must be lists");
+        }
+        auto const& clause = synthList[i].get<sexpr::ItemVec>();
+        if (clause.empty() || !clause[0].is<sexpr::Symbol>()) {
+            return std::unexpected("Synth clause must start with a symbol");
+        }
+        std::string const& head = clause[0].get<sexpr::Symbol>().name;
+        if (head == "Tags") {
+            for (usize t = 1; t < clause.size(); ++t) {
+                std::string tag;
+                if (clause[t].is<std::string>()) {
+                    tag = clause[t].get<std::string>();
+                } else if (clause[t].is<sexpr::Symbol>()) {
+                    tag = clause[t].get<sexpr::Symbol>().name;
+                } else {
+                    return std::unexpected("Tags must be strings or symbols");
+                }
+                if (!tag.empty()
+                    && std::find(tags.begin(), tags.end(), tag) == tags.end()) {
+                    tags.push_back(tag);
+                }
+            }
+        } else if (head == "Graph") {
+            graphList = &clause;
+        } else {
+            return std::unexpected(std::format("Unknown Synth clause: {}", head));
+        }
+    }
+    if (!graphList) {
+        return std::unexpected("Synth body must contain a Graph list");
     }
 
-    auto const& graphList = synthList[2].get<sexpr::ItemVec>();
     SExprGraphBuilder builder(name);
-    return builder.buildFromGraph(graphList);
+    auto result = builder.buildFromGraph(*graphList);
+    if (result) {
+        (*result)->tags = std::move(tags);
+    }
+    return result;
 }
 
 } // namespace synthdef

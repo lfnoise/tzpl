@@ -27,7 +27,9 @@
 #include "tzpl_audio_backend_rtaudio.hpp"
 #include "tzpl_hash.hpp"
 #include "tzpl_command_subclasses.hpp"
+#include <algorithm>
 #include <cstring>
+#include <string_view>
 #include <dlfcn.h> // dlopen, dlclose
 #include <filesystem>
 #include <chrono>
@@ -101,12 +103,30 @@ void freeEngine(Engine* e) {
 #endif
 }
 
+// Read a loaded plugin's ABI version stamp. Missing symbol = version 0
+// (built before versioning existed; layout-compatible with version 1).
+static i64 pluginAbiVersion(void* handle) {
+    if (void* ptr = dlsym(handle, "tzpl_abi_version")) {
+        return *(int64_t*)ptr;
+    }
+    return 0;
+}
+
 bool loadOneDef(Engine* e, const char* path) {
     void* handle = dlopen(path, RTLD_NOW);
 
     if (!handle) {
         fprintf(stderr, "*** ERROR: dlopen '%s' err '%s'\n", path, dlerror());
         fprintf(stdout, "*** ERROR: dlopen '%s' err '%s'\n", path, dlerror());
+        dlclose(handle);
+        return false;
+    }
+
+    i64 abiVersion = pluginAbiVersion(handle);
+    if (abiVersion > TZPL_PLUGIN_ABI_VERSION) {
+        fprintf(stderr, "*** ERROR: plugin '%s' ABI version %lld is newer than "
+                "this engine supports (%d)\n",
+                path, (long long)abiVersion, TZPL_PLUGIN_ABI_VERSION);
         dlclose(handle);
         return false;
     }
@@ -120,9 +140,20 @@ bool loadOneDef(Engine* e, const char* path) {
         return false;
     }
 
-    LoadNodeDefFun loadFunc = (LoadNodeDefFun)ptr;
+    tzpl_SynthDef def = (*(tzpl_LoadSynthDefFun)ptr)();
 
-    (*loadFunc)(e);
+    // Optional symbols: absent for plugins without sample buffers / tags (or
+    // built before the symbols existed).
+    tzpl_BufferDefList bufs{0, nullptr};
+    if (void* bufPtr = dlsym(handle, "loadBufferDefs")) {
+        bufs = (*(tzpl_LoadBufferDefsFun)bufPtr)();
+    }
+    tzpl_TagList tags{0, nullptr};
+    if (void* tagPtr = dlsym(handle, "loadTags")) {
+        tags = (*(tzpl_LoadTagsFun)tagPtr)();
+    }
+
+    addSynthDef(e, def, handle, &bufs, &tags);
     return true;
 }
 
@@ -385,7 +416,8 @@ NodeDef* getNodeDef(Engine* e, const char* name) {
     return nullptr;
 }
 
-void addSynthDef(Engine* e, tzpl_SynthDef const& def, void* dlHandle) {
+void addSynthDef(Engine* e, tzpl_SynthDef const& def, void* dlHandle,
+                 tzpl_BufferDefList const* bufs, tzpl_TagList const* tags) {
     // Build a NodeDefInfo from the tzpl_SynthDef.
     NodeDefInfo info{};
     info.name = def.name;
@@ -413,6 +445,17 @@ void addSynthDef(Engine* e, tzpl_SynthDef const& def, void* dlHandle) {
         info.controls = controls;
     } else {
         info.controls = nullptr;
+    }
+
+    // tzpl_BufferDef and BufferInfo have identical layout.
+    if (bufs && bufs->num_buffers > 0) {
+        info.num_buffers = bufs->num_buffers;
+        info.buffers = reinterpret_cast<BufferInfo*>(bufs->buffers);
+    }
+
+    if (tags && tags->num_tags > 0) {
+        info.num_tags = tags->num_tags;
+        info.tags = tags->tags;
     }
 
     addNodeDef(e, info, dlHandle);
@@ -443,8 +486,206 @@ bool listDefControls(Engine* e, const char* defName, std::vector<ControlDesc>& o
     if (!def) return false;
     for (int i = 0; i < def->info_.num_controls; ++i) {
         ControlInfo const& c = def->info_.controls[i];
-        out.push_back({c.name ? c.name : "", c.controlID, c.spec});
+        out.push_back({c.name ? c.name : "", c.controlID, c.spec, c.type});
     }
+    return true;
+}
+
+// Copy a def's full metadata. Caller must hold e->nrt_lock_.
+static void copyDefDesc(NodeDef const* def, DefDesc& out) {
+    NodeDefInfo const& info = def->info_;
+    out.name = info.name;
+    out.ins.clear();
+    out.outs.clear();
+    out.controls.clear();
+    out.buffers.clear();
+    for (int i = 0; i < info.num_ins; ++i) {
+        PortInfo const& p = info.ins[i];
+        out.ins.push_back({p.name ? p.name : "", p.type});
+    }
+    for (int i = 0; i < info.num_outs; ++i) {
+        PortInfo const& p = info.outs[i];
+        out.outs.push_back({p.name ? p.name : "", p.type});
+    }
+    for (int i = 0; i < info.num_controls; ++i) {
+        ControlInfo const& c = info.controls[i];
+        out.controls.push_back({c.name ? c.name : "", c.controlID, c.spec, c.type});
+    }
+    for (int i = 0; i < info.num_buffers; ++i) {
+        BufferInfo const& b = info.buffers[i];
+        out.buffers.push_back({b.name ? b.name : "", b.type, b.bufID});
+    }
+    for (int i = 0; i < info.num_tags; ++i) {
+        out.tags.emplace_back(info.tags[i] ? info.tags[i] : "");
+    }
+}
+
+bool getDefDesc(Engine* e, const char* defName, DefDesc& out) {
+    u64 hash = hash64(defName, kHashStart);
+    u32 bin = hash & kHashMask;
+
+    // Copy while holding the lock so the def can't be released underneath us.
+    std::lock_guard<std::mutex> lck(e->nrt_lock_);
+    NodeDef* def = e->defs_[bin];
+    while (def) {
+        if (def->hash_ == hash && strcmp(def->info_.name, defName) == 0) break;
+        def = def->next_;
+    }
+    if (!def) return false;
+    copyDefDesc(def, out);
+    return true;
+}
+
+void listDefDescs(Engine* e, std::vector<DefDesc>& out) {
+    {
+        std::lock_guard<std::mutex> lck(e->nrt_lock_);
+        for (u32 bin = 0; bin < kHashBins; ++bin) {
+            for (NodeDef* def = e->defs_[bin]; def; def = def->next_) {
+                if (def->superseded_) continue;
+                out.emplace_back();
+                copyDefDesc(def, out.back());
+            }
+        }
+    }
+    std::sort(out.begin(), out.end(),
+              [](DefDesc const& a, DefDesc const& b) { return a.name < b.name; });
+}
+
+// ============================================================================
+// On-disk plugin discovery (plugin browser).
+
+// Split a plugin filename stem into (name, revision): "<name>_synth" -> rev 0,
+// "<name>_synth_rN" -> rev N. Non-conforming stems keep the whole stem as the
+// name (loadDefs loads any dylib, so list them too).
+static void parsePluginStem(std::string const& stem, std::string& name, u64& rev) {
+    name = stem;
+    rev = 0;
+    std::string_view s = stem;
+    if (auto rpos = s.rfind("_r"); rpos != std::string_view::npos
+        && rpos + 2 < s.size()
+        && s.find_first_not_of("0123456789", rpos + 2) == std::string_view::npos) {
+        rev = std::stoull(std::string(s.substr(rpos + 2)));
+        s = s.substr(0, rpos);
+    }
+    constexpr std::string_view kSuffix = "_synth";
+    if (s.size() > kSuffix.size() && s.ends_with(kSuffix)) {
+        s.remove_suffix(kSuffix.size());
+    }
+    name = std::string(s);
+}
+
+void listPluginFiles(std::vector<std::string> const& dirs,
+                     std::vector<PluginFile>& out) {
+    namespace fs = std::filesystem;
+    struct Entry { std::string path; u64 rev; usize dirIndex; };
+    std::unordered_map<std::string, Entry> best;
+
+    for (usize di = 0; di < dirs.size(); ++di) {
+        std::error_code ec;
+        fs::recursive_directory_iterator iter(dirs[di], ec);
+        if (ec) continue;
+        for (auto& p : iter) {
+            if (!p.is_regular_file()
+                || fs::path(p.path()).extension() != kPluginExt) continue;
+            std::string name;
+            u64 rev;
+            parsePluginStem(fs::path(p.path()).stem().string(), name, rev);
+            auto it = best.find(name);
+            if (it == best.end()) {
+                best.emplace(name, Entry{p.path().string(), rev, di});
+            } else if (it->second.dirIndex == di && rev > it->second.rev) {
+                // Same dir, newer revision. An earlier dir always shadows.
+                it->second = Entry{p.path().string(), rev, di};
+            }
+        }
+    }
+
+    for (auto& [name, e] : best) {
+        out.push_back({name, std::move(e.path)});
+    }
+    std::sort(out.begin(), out.end(),
+              [](PluginFile const& a, PluginFile const& b) { return a.name < b.name; });
+}
+
+// Build a DefDesc directly from the ABI structs a plugin's load() returned.
+static void defDescFromSynthDef(tzpl_SynthDef const& def,
+                                tzpl_BufferDefList const& bufs,
+                                tzpl_TagList const& tags, DefDesc& out) {
+    out.name = def.name ? def.name : "";
+    for (int i = 0; i < def.num_ins; ++i) {
+        tzpl_PortDef const& p = def.ins[i];
+        out.ins.push_back({p.name ? p.name : "", p.type});
+    }
+    for (int i = 0; i < def.num_outs; ++i) {
+        tzpl_PortDef const& p = def.outs[i];
+        out.outs.push_back({p.name ? p.name : "", p.type});
+    }
+    for (int i = 0; i < def.num_controls; ++i) {
+        tzpl_ControlDef const& c = def.controls[i];
+        out.controls.push_back({c.name ? c.name : "",
+                                static_cast<i64>(c.id), c.spec, c.type});
+    }
+    for (int i = 0; i < bufs.num_buffers; ++i) {
+        tzpl_BufferDef const& b = bufs.buffers[i];
+        out.buffers.push_back({b.name ? b.name : "", b.type, b.bufID});
+    }
+    for (int i = 0; i < tags.num_tags; ++i) {
+        out.tags.emplace_back(tags.tags[i] ? tags.tags[i] : "");
+    }
+}
+
+bool getPluginFileDesc(char const* path, DefDesc& out) {
+    namespace fs = std::filesystem;
+
+    // Cache by path + mtime (failures too), so browsing never dlopens the
+    // same plugin version twice.
+    struct CacheEntry {
+        fs::file_time_type mtime;
+        bool ok;
+        DefDesc desc;
+    };
+    static std::mutex cacheMtx;
+    static std::unordered_map<std::string, CacheEntry> cache;
+
+    std::error_code ec;
+    auto mtime = fs::last_write_time(path, ec);
+    if (ec) return false;
+
+    std::lock_guard<std::mutex> lck(cacheMtx);
+    auto it = cache.find(path);
+    if (it != cache.end() && it->second.mtime == mtime) {
+        if (!it->second.ok) return false;
+        out = it->second.desc;
+        return true;
+    }
+
+    CacheEntry entry{mtime, false, {}};
+    if (void* handle = dlopen(path, RTLD_NOW | RTLD_LOCAL)) {
+        if (pluginAbiVersion(handle) > TZPL_PLUGIN_ABI_VERSION) {
+            // Newer-ABI plugin: its structs may not match ours; the cached
+            // failure keeps the browser from probing it again.
+            dlclose(handle);
+            cache[path] = std::move(entry);
+            return false;
+        }
+        if (void* ptr = dlsym(handle, "load")) {
+            tzpl_SynthDef def = (*(tzpl_LoadSynthDefFun)ptr)();
+            tzpl_BufferDefList bufs{0, nullptr};
+            if (void* bufPtr = dlsym(handle, "loadBufferDefs")) {
+                bufs = (*(tzpl_LoadBufferDefsFun)bufPtr)();
+            }
+            tzpl_TagList tags{0, nullptr};
+            if (void* tagPtr = dlsym(handle, "loadTags")) {
+                tags = (*(tzpl_LoadTagsFun)tagPtr)();
+            }
+            defDescFromSynthDef(def, bufs, tags, entry.desc);
+            entry.ok = true;
+        }
+        dlclose(handle);
+    }
+    auto& stored = cache[path] = std::move(entry);
+    if (!stored.ok) return false;
+    out = stored.desc;
     return true;
 }
 

@@ -33,6 +33,26 @@
 extern "C" {
 #endif
 
+/* ABI version stamp.
+ *
+ * Generated plugins export the version of the header they were compiled
+ * against as a data symbol:
+ *
+ *     extern "C" int64_t tzpl_abi_version = TZPL_PLUGIN_ABI_VERSION;
+ *
+ * Loaders read it via dlsym; a missing symbol means version 0 (a plugin
+ * built before versioning existed). Versions 0 and 1 share all struct
+ * layouts -- 0 merely predates the optional tzpl_BufferDef metadata and the
+ * version stamp itself. Loaders refuse plugins whose version is NEWER than
+ * the header they were built against, since a newer plugin may assume
+ * changed layouts.
+ *
+ * Bump this ONLY for changes that alter existing struct layouts or calling
+ * conventions. Purely additive changes (new optional symbols, new enum
+ * values in reserved space) must NOT bump it -- handle those by probing for
+ * the symbol, as loadBufferDefs does. */
+#define TZPL_PLUGIN_ABI_VERSION 1
+
 /* Forward declarations */
 struct tzpl_Engine;
 struct tzpl_Node;
@@ -266,6 +286,37 @@ static inline void tzpl_freeBuffer(tzpl_Buffer* buf) {
 
 /* Plugin load function type - returns a SynthDef describing the plugin */
 typedef tzpl_SynthDef (*tzpl_LoadSynthDefFun)(void);
+
+/* Buffer definition - describes one swappable sample buffer slot.
+ * Delivered via the OPTIONAL plugin symbol "loadBufferDefs" (not by growing
+ * tzpl_SynthDef, whose by-value return from "load" would make the struct
+ * size an ABI break): plugins compiled before this addition simply lack the
+ * symbol, which means they declare no buffers. */
+typedef struct tzpl_BufferDef {
+    const char* name;
+    tzpl_SignalType type;  /* element type + minimum channel count the graph uses */
+    int64_t bufID;         /* id to pass to swapBuffer / engine loadBuffer */
+} tzpl_BufferDef;
+
+typedef struct tzpl_BufferDefList {
+    int num_buffers;
+    tzpl_BufferDef* buffers;
+} tzpl_BufferDefList;
+
+/* Optional plugin symbol "loadBufferDefs" */
+typedef tzpl_BufferDefList (*tzpl_LoadBufferDefsFun)(void);
+
+/* Category tags - free-form strings declared in the synthdef source (e.g.
+ * "test", "fx", "percussion"). Delivered via the OPTIONAL plugin symbol
+ * "loadTags"; plugins without tags (or compiled before the symbol existed)
+ * simply lack it. Purely additive -- no ABI version bump. */
+typedef struct tzpl_TagList {
+    int num_tags;
+    const char** tags;
+} tzpl_TagList;
+
+/* Optional plugin symbol "loadTags" */
+typedef tzpl_TagList (*tzpl_LoadTagsFun)(void);
 
 #ifdef __cplusplus
 }

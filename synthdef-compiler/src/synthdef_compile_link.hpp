@@ -52,6 +52,9 @@ string dylibPath(string const& buildDir, string const& synthName);
 struct LoadedDef {
     tzpl_SynthDef def;
     void* dlHandle;
+    tzpl_BufferDefList bufferDefs{0, nullptr};  // empty if the plugin has no
+                                                // "loadBufferDefs" symbol
+    tzpl_TagList tagList{0, nullptr};           // empty if no "loadTags" symbol
 };
 
 // Load a compiled .dylib and return the tzpl_SynthDef and dlopen handle.

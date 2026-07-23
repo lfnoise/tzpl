@@ -99,6 +99,7 @@ namespace synthdef {
     struct Synth {
         Arena arena;
         string name;
+        vector<string> tags;  // category tags from the (Tags ...) sexpr clause
         vector<Graph*> graphs;
         Graph* root_graph;
         Graph* current_graph;

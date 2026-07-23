@@ -24,8 +24,9 @@ enum CompileResult {
 -- stay scalar; only the diff oracle uses width 2). Both are validated byte-for-byte
 -- against the C++ production output (synthc_rewrite_diff.x + the M5 SIMD diff suites;
 -- the full instrument corpus byte-matches at rewrites-on + width-4).
-fn compileToCpp(g SignalGraph, name String, applyRewrites Bool = true, simdWidth Int = 4) String {
-	let ctx = g importGraph(name, applyRewrites) analyzeM1;
+fn compileToCpp(g SignalGraph, name String, applyRewrites Bool = true, simdWidth Int = 4,
+                tags [String] = [String]()) String {
+	let ctx = g importGraph(name, applyRewrites, tags) analyzeM1;
 	if (ctx.errors length > 0) {
 		var msg = "error: " $ name $ " analysis:";
 		for (e : ctx.errors) { msg = msg $ "\n  " $ e; }
@@ -55,9 +56,13 @@ fn compileAndLoadGraph(g SignalGraph, name String) String {
 -- Public entry point: the synthc analogue of defSynth. Builds the graph from a
 -- synth function, compiles it with the Tzopilotl-hosted compiler, loads it, and
 -- reports. Returns the generated C++ source (handy for inspection/testing).
-fn defSynthX(synthFun GraphFn, synthName String) String {
+fn defSynthX(synthFun GraphFn, synthName String) String =
+	defSynthX(synthFun, synthName, [String]());
+
+fn defSynthX(synthFun GraphFn, synthName String, tags [String]) String {
 	let g = makeGraph(synthFun);
-	let cpp = compileToCpp(g, synthName);
+	let cpp = compileToCpp(g, synthName, true, 4,
+	                       mergeSynthTags(tags, defaultSynthTags()));
 	if (cpp startsWith("error:")) {
 		println("ERROR compiling " $ synthName $ " (synthc): " $ cpp);
 		return cpp;

@@ -1105,6 +1105,45 @@ fn makeGraph(synthFun GraphFn) SignalGraph = synthFun _makeTopGraph;
 fn toSynthSexpr(graph SignalGraph, synthName String) String =
 	"(Synth %^ %^)" fmt(synthName, graph toLisp(0));
 
+---------------------------------------------------------------------------
+-- Category tags
+
+-- Session-default tags from the TZPL_DEFAULT_TAGS environment variable
+-- (comma-separated), appended to every synthdef compiled via defSynth /
+-- defSynthX. Test harnesses set TZPL_DEFAULT_TAGS=test so everything they
+-- compile is born tagged and the plugin browser can filter it out.
+fn defaultSynthTags() [String] {
+	match (getEnv("TZPL_DEFAULT_TAGS")) {
+		Option.some(s): {
+			var out [String] = [];
+			for (t : s split(",")) {
+				let tt = t trim;
+				if (tt length > 0 && !(out contains(tt))) { out push!(tt); }
+			}
+			out
+		}
+		Option.none: [String]();
+	}
+}
+
+-- Declared tags followed by session defaults, deduped in first-occurrence
+-- order (mirrors the C++ sexpr parser's dedup).
+fn mergeSynthTags(declared [String], defaults [String]) [String] {
+	var out [String] = [];
+	for (t : declared) { if (t length > 0 && !(out contains(t))) { out push!(t); } }
+	for (t : defaults) { if (t length > 0 && !(out contains(t))) { out push!(t); } }
+	out
+}
+
+-- As toSynthSexpr, with category tags emitted as a (Tags ...) clause. Tags
+-- must not contain quote or backslash characters.
+fn toSynthSexpr(graph SignalGraph, synthName String, tags [String]) String {
+	if (tags length == 0) { return graph toSynthSexpr(synthName); }
+	var ts = "";
+	for (t : tags) { ts = ts $ " \"" $ t $ "\""; }
+	"(Synth %^ (Tags%^) %^)" fmt(synthName, ts, graph toLisp(0))
+}
+
 -- LEGACY / oracle path. Compiles a synth via the S-expression serializer + the C++
 -- compiler (compileSynthDefAndLoad). As of the M5.5 switchover, production synths
 -- compile through synthc instead -- `defSynthX` (synthc/compile.x), the Tzopilotl-
@@ -1112,11 +1151,15 @@ fn toSynthSexpr(graph SignalGraph, synthName String) String =
 -- across the whole corpus and renders bit-identically. `defSynth` (and the `toLisp`/
 -- `toSynthSexpr` serializer + the synthdefGenCppFromSexpr/synthdefAnalysisDump FFIs)
 -- are retained as the differential-test oracle the synthc diff suites compare against.
-fn defSynth(synthFun GraphFn, synthName String) String {
+fn defSynth(synthFun GraphFn, synthName String) String =
+	defSynth(synthFun, synthName, [String]());
+
+fn defSynth(synthFun GraphFn, synthName String, tags [String]) String {
 
 	let graph SignalGraph = synthFun _makeTopGraph;
 
-	let sexprString = graph toSynthSexpr(synthName);
+	let sexprString = graph
+		toSynthSexpr(synthName, mergeSynthTags(tags, defaultSynthTags()));
 
 	let err = sexprString compileSynthDefAndLoad;
 	if (err length > 0) {
