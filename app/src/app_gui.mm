@@ -1545,6 +1545,17 @@ int runGui(bridge::AppContext& appCtx) {
             if (notebookPanel.takeEditorViewRequest())
                 notebookVisible = false;
 
+            // Mirror unsaved work into the close box (macOS documentEdited
+            // dot), matching the quit prompt: a dirty notebook or editor
+            // tab counts.
+            {
+                bool edited = workspacePanel.hasUnsavedChanges()
+                           || (notebookPanel.isOpen()
+                               && notebookPanel.modified());
+                if (edited != nswin.documentEdited)
+                    [nswin setDocumentEdited:edited];
+            }
+
             // All windows have drawn: WantTextInput now reflects any
             // focused text field, including the cell TextEditors that
             // only assert it during their draw. Snapshot for next

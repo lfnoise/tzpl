@@ -188,6 +188,8 @@ private:
     int fontIndex_ = 0;
     // Throttles the 15 Hz timer's disk-mtime polling down to ~once/second.
     int externalCheckTicks_ = 0;
+    // Last unsaved-work state pushed to the native window (close-box dot).
+    bool documentEditedShown_ = false;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MainComponent)
 };

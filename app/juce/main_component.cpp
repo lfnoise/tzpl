@@ -214,6 +214,16 @@ void MainComponent::timerCallback() {
         if (editorPane_.checkExternalChanges())
             commands_.commandStatusChanged();
     }
+
+    // Mirror unsaved work into the close box (macOS documentEdited dot),
+    // matching the quit prompt: a dirty notebook or editor tab counts.
+    bool edited = editorPane_.hasUnsavedChanges()
+               || (notebook_ && notebook_->isModified());
+    if (edited != documentEditedShown_) {
+        documentEditedShown_ = edited;
+        if (auto* peer = getPeer())
+            peer->setDocumentEditedStatus(edited);
+    }
 }
 
 // A floating window per ui panel not claimed by the open notebook. Panels
