@@ -105,6 +105,8 @@ if(TZPL_BUILD_GUI)
         src/document.cpp
         src/content_hash.cpp
         src/notebook_panel.cpp
+        src/plugin_browser_panel.cpp
+        src/plugin_tags.cpp
         src/themes.cpp
     )
     if(APPLE)

@@ -31,6 +31,7 @@
 #include "output_panel.hpp"
 #include "controls_panel.hpp"
 #include "notebook_panel.hpp"
+#include "plugin_browser_panel.hpp"
 #include "widget_draw.hpp"
 #include "themes.hpp"
 
@@ -87,6 +88,7 @@ enum class AppCmd {
     // Swap the center pane between the open notebook and the editor tabs
     // (the notebook document stays alive either way)
     ToggleNotebookView,
+    TogglePluginBrowser,
     // Eval (dispatched by setting GuiState flags; processed after draw)
     EvalSelection, EvalLine, EvalFile,
 };
@@ -209,6 +211,7 @@ static std::string findMonoFont() {
 - (void)editOutdent:(id)sender;
 - (void)findShow:(id)sender;
 - (void)viewToggleNotebook:(id)sender;
+- (void)viewTogglePluginBrowser:(id)sender;
 - (void)findNext:(id)sender;
 - (void)findPrevious:(id)sender;
 - (void)findUseSelection:(id)sender;
@@ -242,6 +245,7 @@ static std::string findMonoFont() {
 - (void)findUseSelection:(id)sender { gCmdQueue.push(AppCmd::FindUseSelection); }
 - (void)findUseSelectionReplace:(id)sender { gCmdQueue.push(AppCmd::FindUseSelectionReplace); }
 - (void)viewToggleNotebook:(id)sender { gCmdQueue.push(AppCmd::ToggleNotebookView); }
+- (void)viewTogglePluginBrowser:(id)sender { gCmdQueue.push(AppCmd::TogglePluginBrowser); }
 - (void)fontSizeAction:(id)sender {
     NSMenuItem* item = (NSMenuItem*)sender;
     int tag = (int)[item tag];
@@ -404,6 +408,10 @@ static void setupNativeMenuBar(const float* fontSizes, int numFontSizes) {
     NSMenuItem* toggleNotebookItem = [viewMenu addItemWithTitle:@"Toggle Notebook / Editor"
         action:@selector(viewToggleNotebook:) keyEquivalent:@"\\"];
     toggleNotebookItem.target = gMenuHandler;
+
+    NSMenuItem* pluginBrowserItem = [viewMenu addItemWithTitle:@"Plugin Browser"
+        action:@selector(viewTogglePluginBrowser:) keyEquivalent:@"P"];
+    pluginBrowserItem.target = gMenuHandler;
 
     [viewMenu addItem:[NSMenuItem separatorItem]];
 
@@ -761,6 +769,7 @@ int runGui(bridge::AppContext& appCtx) {
     OutputPanel outputPanel;
     ControlsPanel controlsPanel;
     NotebookPanel notebookPanel;
+    PluginBrowserPanel pluginBrowserPanel;
     // Which pane the center shows while a notebook is open. Toggled by
     // View > Toggle Notebook / Editor (Cmd+\); the notebook document
     // stays alive (widgets, history, queued runs) while hidden.
@@ -1301,6 +1310,9 @@ int runGui(bridge::AppContext& appCtx) {
                     if (notebookPanel.isOpen())
                         notebookVisible = !notebookVisible;
                     break;
+                case AppCmd::TogglePluginBrowser:
+                    pluginBrowserPanel.toggle();
+                    break;
 
                 // -- Eval (flags processed after draw, when the ImGui tab
                 //    bar has committed the visually selected tab) -----------
@@ -1493,6 +1505,8 @@ int runGui(bridge::AppContext& appCtx) {
                                    claimed.empty() ? nullptr : &claimed);
                 controlsPanel.dispatch(*appCtx.uiState, appCtx);
             }
+
+            pluginBrowserPanel.draw(appCtx);
 
             // Notebook history upkeep: widget gesture commits, typing
             // coalesce, eval/structure commits (after dispatch so committed
