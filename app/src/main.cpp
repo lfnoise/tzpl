@@ -46,6 +46,7 @@
 #include "nrt_tempo_scheduler.hpp"
 #include "tzpl_client_interface.hpp"
 #include "tzpl_test_plugins.hpp"
+#include "synthdef_compile_link.hpp" // getBuildDir, for plugin browser search paths
 #if TZPL_HAS_OSC
 #include "tzpl_osc_ffi.hpp"
 #include "tzpl_osc_vm_handlers.hpp"
@@ -768,6 +769,14 @@ int main(int argc, const char* argv[]) {
         // same built-in defs (and project-loaded plugins) as the live engine.
         std::string projectDylibDir = config.projectDir.empty()
             ? std::string{} : config.projectDir + "/synthdefs/dylib";
+
+        // Where the plugin browser looks for loadable-but-not-loaded plugins:
+        // the project's dylib dir, then the synthdef compile cache.
+        if (!projectDylibDir.empty()) {
+            appCtx.pluginSearchPaths.push_back(projectDylibDir);
+        }
+        appCtx.pluginSearchPaths.push_back(synthdef::getBuildDir() + "dylib");
+
         appCtx.initEngine = [projectDylibDir](engine::Engine* e) {
             registerBuiltinDefs(e);
             if (!projectDylibDir.empty()

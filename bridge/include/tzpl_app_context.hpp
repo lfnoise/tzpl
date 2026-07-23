@@ -108,6 +108,11 @@ struct AppContext {
     // opened file); empty if none. Used by the GUI for dialog defaults.
     std::string projectDir;
 
+    // Directories the plugin browser scans for loadable .dylib plugins:
+    // the project's synthdefs/dylib plus the synthdef compile cache. Earlier
+    // entries shadow later ones for same-named plugins. Set once at startup.
+    std::vector<std::string> pluginSearchPaths;
+
     // Document to open in the GUI once the window is up (absolute path):
     // a .tzd startup argument (notebooks can't be evaluated as source), or
     // a .x argument that was evaluated and should also be visible in a tab.
