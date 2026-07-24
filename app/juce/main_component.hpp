@@ -158,6 +158,11 @@ private:
     void showNotebook(bool show);
     void togglePerform();
     void togglePluginBrowser();
+    // Graph view double-click: float a controls window for a live node.
+    void openNodeControls(long long nodeID, std::string const& defName, int silo);
+    // Buffer "load" button: file dialog -> replaceBuffer + waveform row.
+    void loadBufferFlow(long long nodeID, int silo, std::string const& panel,
+                        long long bufID, std::string const& bufName);
 
     // Which component fills the center pane. `graph` overlays a *document*
     // mode (editor or notebook): document-targeted flows (save, eval,

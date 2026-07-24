@@ -21,7 +21,9 @@
 
 #include "main_component.hpp"
 #include "BinaryData.h"
+#include "graph_edits.hpp"
 #include "tzpl_app_context.hpp"
+#include "tzpl_ui_node_controls.hpp"
 #include "nrt_vm.hpp"
 #include "repl_session.hpp"
 #include "module_compiler.hpp"
@@ -161,6 +163,112 @@ void MainComponent::togglePerform() {
     performView_->refreshPanels();
 }
 
+// Materialize a live node's control interface (from its def's
+// ControlSpecs) as engine-bound widgets in a panel named after the node;
+// the floating controls window for it appears via refreshControlsWindows.
+// Values are write-only for now: widgets start at each spec's init (or
+// keep their value if the panel is already open) -- there is no engine
+// readback of current control values yet.
+//
+// Defs with buffers also get a "load <buffer>" button per buffer slot
+// (file dialog -> replaceBuffer) and, once a file is loaded, a waveform
+// overview row above it.
+void MainComponent::openNodeControls(long long nodeID,
+                                     std::string const& defName, int silo) {
+    if (!appCtx_.uiState || !appCtx_.engine) return;
+    std::string panel = defName + " #" + std::to_string(nodeID);
+    int bound = bridge::materializeNodeControls(appCtx_.uiState, appCtx_.engine,
+                                                panel, nodeID, silo,
+                                                defName.c_str());
+    if (bound < 0) {
+        console_.appendLine({"graph: unknown synthdef \"" + defName + "\"",
+                             LineKind::Error});
+        return;
+    }
+
+    engine::DefDesc def;
+    if (engine::getDefDesc(appCtx_.engine, defName.c_str(), def)) {
+        for (auto const& b : def.buffers) {
+            // Waveform row for an already-loaded file (path recorded by
+            // audio_engine.loadBuffer or a previous Load here).
+            std::string path;
+            {
+                std::lock_guard<std::mutex> lock(appCtx_.bufferPathsMtx);
+                auto it = appCtx_.bufferPaths.find({nodeID, b.bufID});
+                if (it != appCtx_.bufferPaths.end()) path = it->second;
+            }
+            if (!path.empty())
+                bridge::bindWaveformWidget(appCtx_.uiState, panel, b.name,
+                                           path.c_str());
+
+            auto* ui = appCtx_.uiState;
+            std::lock_guard<std::mutex> lock(ui->mtx);
+            bridge::UIWidget* w = ui->upsert(panel, "load " + b.name,
+                                             bridge::UIWidgetKind::Button,
+                                             bridge::UISpec{}, {});
+            w->hostAction = [safe = juce::Component::SafePointer<MainComponent>(this),
+                             nodeID, silo, panel,
+                             bufID = b.bufID, bufName = b.name] {
+                if (safe == nullptr) return;
+                safe->loadBufferFlow(nodeID, silo, panel, bufID, bufName);
+            };
+            ++bound;
+        }
+    }
+
+    if (bound == 0) {
+        console_.appendLine({"graph: " + panel + " has no controls",
+                             LineKind::Info});
+        return;
+    }
+    dispatcher_.ensureRunning();   // push the fresh bindings to the engine
+    refreshControlsWindows();      // float the window now, not next tick
+    if (auto it = controlsWindows_.find(panel); it != controlsWindows_.end())
+        it->second->toFront(true);
+}
+
+// File dialog -> load the chosen audio file into a node's buffer slot and
+// show/refresh its waveform row in the node's control panel.
+void MainComponent::loadBufferFlow(long long nodeID, int silo,
+                                   std::string const& panel,
+                                   long long bufID, std::string const& bufName) {
+    auto chooser = std::make_shared<juce::FileChooser>(
+        "Load audio file into \"" + bufName + "\"", dialogDefaultDir(),
+        "*.wav;*.aif;*.aiff;*.caf;*.mp3;*.m4a;*.flac;*.ogg");
+    chooser->launchAsync(
+        juce::FileBrowserComponent::openMode
+            | juce::FileBrowserComponent::canSelectFiles,
+        [this, nodeID, silo, panel, bufID, bufName, chooser]
+        (juce::FileChooser const& fc) {
+            auto file = fc.getResult();
+            if (file == juce::File{}) return; // cancelled
+            rememberDialogDir(file);
+            std::string path = file.getFullPathName().toStdString();
+
+            long long frames = 0;
+            int err = graph::loadBufferFile(appCtx_.engine, silo, nodeID,
+                                            bufID, path, &frames);
+            if (err != 0) {
+                console_.appendLine({"graph: load \"" + path + "\" failed: "
+                                         + graph::errText(err),
+                                     LineKind::Error});
+                return;
+            }
+            {
+                std::lock_guard<std::mutex> lock(appCtx_.bufferPathsMtx);
+                appCtx_.bufferPaths[{nodeID, bufID}] = path;
+            }
+            bridge::bindWaveformWidget(appCtx_.uiState, panel, bufName,
+                                       path.c_str());
+            console_.appendLine({"graph: loaded \""
+                                     + file.getFileName().toStdString()
+                                     + "\" (" + std::to_string(frames)
+                                     + " frames) into " + panel + " \""
+                                     + bufName + "\"",
+                                 LineKind::Info});
+        });
+}
+
 void MainComponent::togglePluginBrowser() {
     if (!pluginBrowser_) {
         pluginBrowser_ = std::make_unique<PluginBrowserWindow>(appCtx_);
@@ -202,6 +310,10 @@ void MainComponent::setCenterMode(CenterMode m) {
         graphView_->onLog = [this](std::string const& msg, bool isError) {
             console_.appendLine({msg, isError ? LineKind::Error : LineKind::Info});
         };
+        graphView_->onOpenNodeControls =
+            [this](long long nodeID, std::string const& defName, int silo) {
+                openNodeControls(nodeID, defName, silo);
+            };
         addChildComponent(*graphView_);
     }
     notebook_->setVisible(m == CenterMode::notebook);

@@ -27,6 +27,7 @@
 
 #include "tzpl_ui_ffi.hpp"
 #include "tzpl_ui_state.hpp"
+#include "tzpl_ui_node_controls.hpp"
 #include "tzpl_app_context.hpp"
 #include "tzpl.hpp"
 #include "value.hpp"
@@ -79,20 +80,6 @@ static UISpec specFromRegs(ts::VM& vm, u16 base) {
     if (warp < 0 || warp > static_cast<int>(UIWarp::Cubed)) warp = 0;
     spec.warp = static_cast<UIWarp>(warp);
     spec.warpParam = vm.reg(base + 4).f;
-    return spec;
-}
-
-// Convert an ABI control spec (from a loaded synthdef) to a UISpec.
-// ABI warp ordinal = lang ordinal + 1; 0 (None) means unspecified -> linear.
-static UISpec specFromControl(tzpl_ControlSpec const& cs) {
-    UISpec spec;
-    spec.lo = cs.lo;
-    spec.hi = cs.hi;
-    spec.init = cs.init;
-    int warp = static_cast<int>(cs.warp) - 1;
-    if (warp < 0 || warp > static_cast<int>(UIWarp::Cubed)) warp = 0;
-    spec.warp = static_cast<UIWarp>(warp);
-    spec.warpParam = cs.param;
     return spec;
 }
 
@@ -1016,40 +1003,15 @@ static void ffi_uiWaveform(ts::VM& vm, u16 dst, u16, u16 argBase) {
         path = it->second;
     }
 
-    tzpl_Buffer* buffer = tzpl_loadAudioFile(path.c_str(), 0, 0, INT64_MAX);
-    if (!buffer) {
+    std::string panel;
+    {
+        std::lock_guard<std::mutex> lock(ui->mtx);
+        panel = ui->currentPanel;
+    }
+    std::uint64_t id = bindWaveformWidget(ui, panel, name, path.c_str());
+    if (id == 0)
         std::fprintf(stderr, "ui.waveform: cannot read \"%s\"\n", path.c_str());
-        return;
-    }
-
-    // Min/max overview of channel 0.
-    constexpr int kBins = 2048;
-    std::int64_t frames = buffer->length;
-    int bins = static_cast<int>(std::min<std::int64_t>(kBins, frames));
-    std::vector<float> mins(bins, 0.0f), maxs(bins, 0.0f);
-    double const* ch0 = buffer->data[0];
-    for (int b = 0; b < bins; ++b) {
-        std::int64_t i0 = frames * b / bins;
-        std::int64_t i1 = frames * (b + 1) / bins;
-        if (i1 <= i0) i1 = i0 + 1;
-        float lo = static_cast<float>(ch0[i0]), hi = lo;
-        for (std::int64_t i = i0 + 1; i < i1 && i < frames; ++i) {
-            float v = static_cast<float>(ch0[i]);
-            if (v < lo) lo = v;
-            if (v > hi) hi = v;
-        }
-        mins[b] = lo;
-        maxs[b] = hi;
-    }
-    tzpl_freeBuffer(buffer);
-
-    std::lock_guard<std::mutex> lock(ui->mtx);
-    UIWidget* w = ui->upsert(ui->currentPanel, name, UIWidgetKind::Waveform,
-                             UISpec{}, UISpec{});
-    w->waveMin = std::move(mins);
-    w->waveMax = std::move(maxs);
-    w->waveFrames = frames;
-    vm.reg(dst).i = static_cast<i64>(w->id);
+    vm.reg(dst).i = static_cast<i64>(id);
 }
 
 // fn uiMeter(name String, node Int, outlet Int, silo Int) Int
@@ -1074,28 +1036,19 @@ static void ffi_uiScope(ts::VM& vm, u16 dst, u16, u16 argBase) {
 // Synthdef-derived widgets (materialize a node's interface)
 // ---------------------------------------------------------------------------
 
-// Create a widget for one ControlDesc of `nodeID` and bind it fast-path.
-// Requires ui->mtx NOT held. Returns the widget id (0 on failure).
+// Create a widget for one ControlDesc of `nodeID` in the current panel and
+// bind it fast-path (shared logic in tzpl_ui_node_controls). Requires
+// ui->mtx NOT held. Returns the widget id (0 on failure).
 static i64 widgetForControl(ts::VM& vm, i64 nodeID, int silo,
                             engine::ControlDesc const& c) {
     UIState* ui = getUIState(vm);
     if (!ui) return 0;
-
-    UISpec spec = specFromControl(c.spec);
-    UIWidgetKind kind = UIWidgetKind::Slider;
-    switch (c.spec.kind) {
-        case tzpl_ckContinuous: kind = UIWidgetKind::Slider; break;
-        case tzpl_ckTrigger:    kind = UIWidgetKind::Button; break;
-        case tzpl_ckBoolean:    kind = UIWidgetKind::Toggle; break;
-        case tzpl_ckSelect:     kind = UIWidgetKind::Number; break;
+    std::string panel;
+    {
+        std::lock_guard<std::mutex> lock(ui->mtx);
+        panel = ui->currentPanel;
     }
-
-    std::lock_guard<std::mutex> lock(ui->mtx);
-    UIWidget* w = ui->upsert(ui->currentPanel, c.name, kind, spec, {});
-    w->target = UIEngineTarget{static_cast<long>(nodeID),
-                               static_cast<long>(c.controlID), silo};
-    w->dirtyEngine = true;  // push current value through the fresh binding
-    return static_cast<i64>(w->id);
+    return static_cast<i64>(bindControlWidget(ui, panel, c, nodeID, silo));
 }
 
 // fn uiControl(node Int, control String, silo Int) Int

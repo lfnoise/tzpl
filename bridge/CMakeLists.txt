@@ -6,6 +6,7 @@ add_library(tzpl_audio_engine_bridge OBJECT
     src/tzpl_nrt_render.cpp
     src/tzpl_ui_state.cpp
     src/tzpl_ui_ffi.cpp
+    src/tzpl_ui_node_controls.cpp
 )
 
 target_include_directories(tzpl_audio_engine_bridge

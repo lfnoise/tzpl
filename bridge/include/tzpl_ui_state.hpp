@@ -34,6 +34,7 @@
 #define tzpl_ui_state_hpp
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -148,6 +149,10 @@ struct UIWidget {
     std::optional<UIEngineTarget> target2;  // fast path, XY Y axis
     ts::Obj* onChange = nullptr;            // lang closure, GC-rooted by scanner
     ts::Obj* onCell = nullptr;              // fn(row, col, v), GC-rooted too
+    // Host-side click action (Button widgets): set by the app, invoked by
+    // the renderer on press (async, off ui->mtx) -- e.g. the graph view's
+    // buffer "load" buttons open a file dialog. Never serialized.
+    std::function<void()> hostAction;
 
     // Event state: set by the GUI thread on user interaction, consumed by
     // the per-frame dispatch (fast path) and callback delivery.

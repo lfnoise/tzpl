@@ -21,6 +21,8 @@
 
 #include "graph_edits.hpp"
 
+#include "tzpl_audio_file.hpp"
+
 #include <set>
 
 namespace graph {
@@ -108,6 +110,20 @@ int disconnectGraphNode(engine::Engine* e, int silo, long long nodeID) {
     int err = engine::begin(e);
     if (err != tzpl_errNone) return err;
     engine::disconnectNode(nodeID);
+    return engine::go(silo);
+}
+
+int loadBufferFile(engine::Engine* e, int silo, long long nodeID,
+                   long long bufID, std::string const& path,
+                   long long* frames) {
+    if (!e) return tzpl_errInternal;
+    tzpl_Buffer* buffer = tzpl_loadAudioFile(path.c_str(), 0, 0, INT64_MAX);
+    if (!buffer) return tzpl_errInternal; // unreadable / unsupported file
+    if (frames) *frames = buffer->length;
+
+    int err = engine::begin(e);
+    if (err != tzpl_errNone) { tzpl_freeBuffer(buffer); return err; }
+    engine::replaceBuffer(nodeID, bufID, buffer); // cmd owns buffer from here
     return engine::go(silo);
 }
 

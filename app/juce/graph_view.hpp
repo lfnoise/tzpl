@@ -65,10 +65,16 @@ public:
     void mouseWheelMove(juce::MouseEvent const& e,
                         juce::MouseWheelDetails const& wheel) override;
     void mouseMagnify(juce::MouseEvent const& e, float scaleFactor) override;
+    void mouseDoubleClick(juce::MouseEvent const& e) override;
     bool keyPressed(juce::KeyPress const& key) override;
 
     // Edit feedback line for the app console (message, isError).
     std::function<void(std::string const&, bool)> onLog;
+
+    // Open a control panel for a node (double-click / context menu).
+    // Args: nodeID, defName, silo. The owner (MainComponent) materializes
+    // the widgets and floats the controls window.
+    std::function<void(long long, std::string const&, int)> onOpenNodeControls;
 
 private:
     void logLine(juce::String const& msg, bool isError) {

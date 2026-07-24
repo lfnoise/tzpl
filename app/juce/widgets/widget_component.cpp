@@ -617,6 +617,10 @@ void WidgetComponent::mouseDown(juce::MouseEvent const& e) {
             if (w.values.empty()) w.values.resize(1);
             w.values[0] = 1.0;
             markDirtyAndNotify(w, false);
+            // Host-side action (e.g. a buffer "load" button's file dialog):
+            // queue it so it runs off ui_.mtx.
+            if (w.hostAction)
+                juce::MessageManager::callAsync(w.hostAction);
             break;
         case UIWidgetKind::Toggle:
             if (w.values.empty()) w.values.resize(1);

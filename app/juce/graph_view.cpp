@@ -592,12 +592,15 @@ void GraphView::showNodeMenu(int nodeIndex) {
     juce::PopupMenu m;
     m.addSectionHeader(juce::String(vm_.nodes[nodeIndex].defName)
                        + "  #" + juce::String((juce::int64)id));
+    m.addItem(3, "Controls...");
+    m.addSeparator();
     m.addItem(1, "Disconnect All");
     m.addItem(2, "Free Node", !builtin);
 
     juce::Component::SafePointer<GraphView> safe(this);
+    std::string defName = vm_.nodes[nodeIndex].defName;
     m.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(nullptr),
-        [safe, id](int result) {
+        [safe, id, defName](int result) {
             if (safe == nullptr || result <= 0) return;
             auto* self = safe.getComponent();
             if (result == 1)
@@ -609,6 +612,8 @@ void GraphView::showNodeMenu(int nodeIndex) {
                 self->afterEdit(graph::freeGraphNode(self->appCtx_.engine,
                                                      self->silo_, id),
                                 "free node " + juce::String((juce::int64)id));
+            else if (result == 3 && self->onOpenNodeControls)
+                self->onOpenNodeControls(id, defName, self->silo_);
         });
 }
 
@@ -628,6 +633,14 @@ void GraphView::mouseWheelMove(juce::MouseEvent const& e,
 void GraphView::mouseMagnify(juce::MouseEvent const& e, float scaleFactor) {
     zoomAbout(e.position, scaleFactor);
     repaint();
+}
+
+void GraphView::mouseDoubleClick(juce::MouseEvent const& e) {
+    if (e.position.y < kToolbarH) return;
+    int ni = hitNode(toWorld(e.position));
+    if (ni < 0 || !onOpenNodeControls) return;
+    auto const& n = vm_.nodes[ni];
+    onOpenNodeControls(n.nodeID, n.defName, silo_);
 }
 
 void GraphView::zoomAbout(juce::Point<float> screenPt, float factor) {

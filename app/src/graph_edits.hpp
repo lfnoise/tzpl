@@ -74,6 +74,15 @@ int disconnectGraphNode(engine::Engine* e, int silo, long long nodeID);
 int disconnectAllWires(engine::Engine* e, int silo, GraphViewModel const& vm,
                        long long nodeID, double xfadeTime = kUIXFadeTime);
 
+// Load an audio file into a node's buffer slot. Reads the file on the
+// calling thread FIRST (so a bad file reports synchronously -- the
+// engine's own loadBuffer command only discovers read failures on the RT
+// thread), then submits a replaceBuffer bundle. On success `frames` (if
+// non-null) receives the file's frame count.
+int loadBufferFile(engine::Engine* e, int silo, long long nodeID,
+                   long long bufID, std::string const& path,
+                   long long* frames = nullptr);
+
 } // namespace graph
 
 #endif /* graph_edits_hpp */

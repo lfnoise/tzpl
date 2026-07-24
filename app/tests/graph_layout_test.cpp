@@ -27,7 +27,10 @@
 #include "graph_layout.hpp"
 #include "graph_model.hpp"
 #include "tzpl_test_plugins.hpp"
+#include "tzpl_ui_node_controls.hpp"
 
+#include <cmath>
+#include <cstdio>
 #include <map>
 #include <print>
 #include <string>
@@ -313,6 +316,174 @@ static void test_edit_submitters_live() {
     engine::freeEngine(e);
 }
 
+// 13.3: materialize a node's control interface as engine-bound widgets.
+static void test_node_controls_materialize() {
+    std::print("Test: materializeNodeControls\n");
+
+    engine::AudioStreamParameters params{};
+    params.channels = 2;
+    params.bufferFrames = 512;
+    params.sampleRate = 44100.0;
+    params.deviceName = "default";
+    engine::EngineConfig config;
+    config.numSilos = 1;
+    engine::Engine* e = engine::newEngine(config, params);
+
+    // Register a def with a control of each kind, single- and multi-
+    // channel (funs never called: no node is instantiated, only the
+    // def's ControlSpecs are read).
+    tzpl_SignalType ctlType{tzpl_kF32, tzpl_eventRate, 1};
+    tzpl_SignalType ctlType4{tzpl_kF32, tzpl_eventRate, 4};
+    tzpl_SignalType ctlType3{tzpl_kF32, tzpl_eventRate, 3};
+    tzpl_ControlDef ctls[6] = {
+        {"freq", ctlType, 1,
+         {20., 20000., 440., 0., tzpl_cwExponential, tzpl_ckContinuous}},
+        {"gate", ctlType, 2, {0., 1., 0., 0., tzpl_cwLinear, tzpl_ckBoolean}},
+        {"trig", ctlType, 3, {0., 1., 0., 0., tzpl_cwLinear, tzpl_ckTrigger}},
+        {"levels", ctlType4, 4,
+         {0., 1., 0.5, 0., tzpl_cwLinear, tzpl_ckContinuous}},
+        {"mutes", ctlType3, 5, {0., 1., 0., 0., tzpl_cwLinear, tzpl_ckBoolean}},
+        {"trigs", ctlType3, 6, {0., 1., 0., 0., tzpl_cwLinear, tzpl_ckTrigger}},
+    };
+    tzpl_SynthDef def{};
+    def.name = "ctl_test";
+    def.num_controls = 6;
+    def.controls = ctls;
+    engine::addSynthDef(e, def);
+
+    bridge::UIState ui;
+    int n = bridge::materializeNodeControls(&ui, e, "ctl_test #5", 5, 0,
+                                            "ctl_test");
+    check(n == 6, "all controls materialized");
+
+    {
+        std::lock_guard<std::mutex> lock(ui.mtx);
+        auto* freq = ui.findByName("ctl_test #5", "freq");
+        auto* gate = ui.findByName("ctl_test #5", "gate");
+        auto* trig = ui.findByName("ctl_test #5", "trig");
+        check(freq && freq->kind == bridge::UIWidgetKind::Slider,
+              "continuous control becomes a slider");
+        check(gate && gate->kind == bridge::UIWidgetKind::Toggle,
+              "boolean control becomes a toggle");
+        check(trig && trig->kind == bridge::UIWidgetKind::Button,
+              "trigger control becomes a button");
+        check(freq && freq->spec.lo == 20. && freq->spec.hi == 20000.
+                   && freq->spec.init == 440.,
+              "spec lo/hi/init carried through");
+        check(freq && freq->spec.warp == bridge::UIWarp::Exponential,
+              "ABI warp ordinal mapped to UIWarp");
+        check(freq && freq->target
+                   && freq->target->nodeID == 5 && freq->target->controlID == 1
+                   && freq->target->silo == 0,
+              "widget bound to (node, controlID, silo)");
+        check(freq && freq->dirtyEngine,
+              "fresh binding marked for engine push");
+
+        // Multichannel: one widget carrying all channels (the dispatcher
+        // sends the full value vector as one setControl).
+        auto* levels = ui.findByName("ctl_test #5", "levels");
+        check(levels && levels->kind == bridge::UIWidgetKind::MultiSlider
+                     && levels->values.size() == 4,
+              "multichannel continuous becomes a 4-bar multislider");
+        check(levels && levels->values[0] == 0.5 && levels->values[3] == 0.5,
+              "multislider bars start at spec init");
+        auto* mutes = ui.findByName("ctl_test #5", "mutes");
+        check(mutes && mutes->kind == bridge::UIWidgetKind::ButtonMatrix
+                    && mutes->rows == 1 && mutes->cols == 3
+                    && mutes->values.size() == 3 && !mutes->momentary,
+              "multichannel boolean becomes a 1x3 toggle row");
+        auto* trigs = ui.findByName("ctl_test #5", "trigs");
+        check(trigs && trigs->kind == bridge::UIWidgetKind::ButtonMatrix
+                    && trigs->rows == 1 && trigs->cols == 3
+                    && trigs->momentary,
+              "multichannel trigger becomes a 1x3 momentary row");
+        check(levels && levels->target && levels->target->controlID == 4
+                     && levels->dirtyEngine,
+              "multichannel widget bound and marked for push");
+    }
+
+    // Idempotent: reopening rebinds without duplicating widgets.
+    size_t before;
+    { std::lock_guard<std::mutex> lock(ui.mtx); before = ui.widgets.size(); }
+    check(bridge::materializeNodeControls(&ui, e, "ctl_test #5", 5, 0,
+                                          "ctl_test") == 6,
+          "second materialize rebinds");
+    { std::lock_guard<std::mutex> lock(ui.mtx);
+      check(ui.widgets.size() == before, "no duplicate widgets"); }
+
+    check(bridge::materializeNodeControls(&ui, e, "x", 1, 0, "no_such") == -1,
+          "unknown def reports -1");
+
+    engine::freeEngine(e);
+}
+
+// Write a minimal 16-bit mono PCM WAV so the waveform/buffer paths can be
+// tested without repo audio assets.
+static std::string writeTestWav(int frames) {
+    std::string path = "/tmp/tzpl_graph_test.wav";
+    std::vector<std::int16_t> samples(frames);
+    for (int i = 0; i < frames; ++i)
+        samples[i] = (std::int16_t)(30000 * std::sin(i * 0.05));
+
+    std::uint32_t dataBytes = (std::uint32_t)(samples.size() * 2);
+    std::uint32_t riffBytes = 36 + dataBytes;
+    std::uint32_t rate = 44100, byteRate = rate * 2;
+    std::uint16_t fmt = 1, chans = 1, align = 2, bits = 16;
+    std::uint32_t fmtSize = 16;
+
+    FILE* f = fopen(path.c_str(), "wb");
+    if (!f) return {};
+    fwrite("RIFF", 1, 4, f); fwrite(&riffBytes, 4, 1, f);
+    fwrite("WAVEfmt ", 1, 8, f); fwrite(&fmtSize, 4, 1, f);
+    fwrite(&fmt, 2, 1, f); fwrite(&chans, 2, 1, f);
+    fwrite(&rate, 4, 1, f); fwrite(&byteRate, 4, 1, f);
+    fwrite(&align, 2, 1, f); fwrite(&bits, 2, 1, f);
+    fwrite("data", 1, 4, f); fwrite(&dataBytes, 4, 1, f);
+    fwrite(samples.data(), 2, samples.size(), f);
+    fclose(f);
+    return path;
+}
+
+static void test_buffer_helpers() {
+    std::print("Test: waveform widget + buffer file loading\n");
+
+    std::string wav = writeTestWav(5000);
+    check(!wav.empty(), "test wav written");
+
+    bridge::UIState ui;
+    auto id = bridge::bindWaveformWidget(&ui, "p", "sample", wav.c_str());
+    check(id != 0, "waveform widget built from file");
+    {
+        std::lock_guard<std::mutex> lock(ui.mtx);
+        auto* w = ui.findByName("p", "sample");
+        check(w && w->kind == bridge::UIWidgetKind::Waveform
+                && w->waveFrames == 5000
+                && !w->waveMin.empty()
+                && w->waveMin.size() == w->waveMax.size(),
+              "waveform overview populated");
+    }
+    check(bridge::bindWaveformWidget(&ui, "p", "x", "/no/such/file.wav") == 0,
+          "unreadable file reports 0");
+
+    engine::AudioStreamParameters params{};
+    params.channels = 2;
+    params.bufferFrames = 512;
+    params.sampleRate = 44100.0;
+    params.deviceName = "default";
+    engine::EngineConfig config;
+    config.numSilos = 1;
+    engine::Engine* e = engine::newEngine(config, params);
+
+    long long frames = 0;
+    check(loadBufferFile(e, 0, 10, 0, "/no/such/file.wav", &frames) != 0,
+          "loadBufferFile reports unreadable file synchronously");
+    check(loadBufferFile(e, 0, 10, 0, wav, &frames) == 0 && frames == 5000,
+          "loadBufferFile submits and reports frame count");
+
+    engine::freeEngine(e);
+    remove(wav.c_str());
+}
+
 static void test_determinism() {
     std::print("Test: layout determinism\n");
     DefTable t;
@@ -346,6 +517,8 @@ int main() {
     test_store_overrides();
     test_edit_helpers();
     test_edit_submitters_live();
+    test_node_controls_materialize();
+    test_buffer_helpers();
     test_determinism();
     std::print("\n=== {} passed, {} failed ===\n", gPassed, gFailed);
     return gFailed == 0 ? 0 : 1;
