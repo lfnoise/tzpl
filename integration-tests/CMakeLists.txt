@@ -23,6 +23,15 @@ target_compile_definitions(test_audio_engine_ffi PRIVATE
     MODULES_DIR="${CMAKE_SOURCE_DIR}/bridge/modules"
 )
 
+add_executable(test_graph_shadow
+    src/test_graph_shadow.cpp
+    ${CMAKE_SOURCE_DIR}/engine/src/tzpl_test_plugins.cpp
+)
+
+target_link_libraries(test_graph_shadow
+    PRIVATE audio_engine_lib
+)
+
 if(TARGET tzpl_synthdef_compiler_bridge)
     add_executable(test_synthdef_compiler_ffi
         src/test_synthdef_compiler_ffi.cpp

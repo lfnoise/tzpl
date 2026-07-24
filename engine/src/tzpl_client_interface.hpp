@@ -169,6 +169,37 @@ bool getDefDesc(Engine* e, const char* defName, DefDesc& out);
 // Copy metadata for all non-superseded defs, sorted by name.
 void listDefDescs(Engine* e, std::vector<DefDesc>& out);
 
+// Live-graph snapshot (graph view). Copies the engine's NRT topology
+// shadow, which tracks bundles as they EXECUTE (not as they are
+// submitted): scheduled bundles appear when their beat fires. Hidden
+// helper nodes (mixers/xfaders) never appear; fan-in shows as multiple
+// conns into the same inlet.
+struct LiveNodeDesc {
+    i64 nodeID = 0;
+    std::string defName;
+};
+
+struct ConnDesc {
+    i64 srcNode = 0; int srcPort = 0;
+    i64 dstNode = 0; int dstPort = 0;
+};
+
+struct GraphDesc {
+    u64 generation = 0;             // graphGeneration() sampled with the copy
+    std::vector<LiveNodeDesc> nodes; // sorted by nodeID
+    std::vector<ConnDesc> conns;
+};
+
+// Monotonic counter, bumped whenever any silo's topology changes or a def
+// is (re)registered. Lock-free; poll cheaply and re-snapshot on change.
+u64 graphGeneration(Engine* e);
+
+// Number of parallel silos (graph views are per-silo).
+int numSilos(Engine* e);
+
+// Deep-copy silo `silo`'s topology shadow. Returns false if out of range.
+bool getGraphDesc(Engine* e, int silo, GraphDesc& out);
+
 // A loadable plugin dylib discovered on disk (not necessarily loaded).
 struct PluginFile {
     std::string name;  // derived from the filename stem ("<name>_synth[_rN]")

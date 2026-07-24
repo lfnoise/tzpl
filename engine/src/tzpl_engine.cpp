@@ -214,6 +214,7 @@ void Engine::defOutputNode(int numChannels) {
     for (Silo& s : silos_) {
         s.outputNode_ = new Node(this, &s, def, 0);
         s.addNode(s.outputNode_);
+        s.shadow_.nodes[0] = "Audio Out"; // Engine ctor: no locking needed yet
     }
 }
 
@@ -259,6 +260,7 @@ void Engine::defInputNode(int inputChannels) {
     for (Silo& s : silos_) {
         s.inputNode_ = new Node(this, &s, def, 1);
         s.addNode(s.inputNode_);
+        s.shadow_.nodes[1] = "Audio In"; // Engine ctor: no locking needed yet
     }
 }
 
@@ -316,9 +318,17 @@ void Engine::drainNRTQueues() {
             Command* cmd = head;
             while (cmd) {
                 Command* next = cmd->next_;
-                bool done = cmd->run(&s);
-                if (done) delete cmd;
-                else toNRTList.add(cmd);
+                if (cmd->stage_ == 0 && cmd->err_ != tzpl_errNone) {
+                    // Dropped before doRT ever ran (schedOnTimeOnly too
+                    // late). Running it here would execute the command on
+                    // the NRT thread; destroy it instead (the stage_ == 0
+                    // dtor guards free anything it pre-allocated).
+                    delete cmd;
+                } else {
+                    bool done = cmd->run(&s);
+                    if (done) delete cmd;
+                    else toNRTList.add(cmd);
+                }
                 cmd = next;
             }
             if (toNRTList.head) s.from_nrt_.push(toNRTList.head);
@@ -343,9 +353,15 @@ void Engine::processNRTCommands(Engine* e) {
                     Command* cmd = head;
                     while (cmd) {
                         Command* next = cmd->next_;
-                        bool done = cmd->run(&s);
-                        if (done) delete cmd;
-                        else toNRTList.add(cmd);
+                        if (cmd->stage_ == 0 && cmd->err_ != tzpl_errNone) {
+                            // Dropped before doRT ever ran (schedOnTimeOnly
+                            // too late) -- destroy, never run on this thread.
+                            delete cmd;
+                        } else {
+                            bool done = cmd->run(&s);
+                            if (done) delete cmd;
+                            else toNRTList.add(cmd);
+                        }
                         cmd = next;
                     }
                     if (toNRTList.head) s.from_nrt_.push(toNRTList.head);

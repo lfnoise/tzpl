@@ -197,6 +197,17 @@ struct Engine
 	// a silo's RT tap table by TapOutletCmd, and freed by UntapCmd::doNRT
 	// (which runs under nrt_lock_ in the NRT drain loop).
 	std::unordered_map<i64, std::unique_ptr<TapSlot>> taps_;
+
+	// Guards every Silo's GraphShadow. Separate from nrt_lock_ because a
+	// ShadowCommitCmd's doNRT can run inline (audio stopped) while sched()
+	// holds nrt_lock_. Lock order: shadowMtx_ may be acquired while holding
+	// nrt_lock_, never the reverse.
+	std::mutex shadowMtx_;
+	// Bumped (release) whenever a shadow commit lands or a def is
+	// (re)registered. GUI pollers read this lock-free and re-snapshot only
+	// on change. Starts at 1 so a poller initialized with lastGen = 0
+	// unconditionally takes its first snapshot.
+	std::atomic<u64> graphGeneration_{1};
 	// Audio device backend (RtAudio, JUCE, ...). Null in NRT mode.
 	std::unique_ptr<AudioBackend> backend_;
 

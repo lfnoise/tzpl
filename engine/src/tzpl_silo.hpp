@@ -30,6 +30,8 @@
 #include "tzpl_tempo_clock.hpp"
 #include "tzpl_tap.hpp"
 #include <atomic>
+#include <string>
+#include <unordered_map>
 #ifdef __APPLE__
 #include <dispatch/dispatch.h>
 #else
@@ -57,6 +59,28 @@ struct Semaphore {
 };
 
 //=============================================================================================
+#pragma mark GRAPH SHADOW
+
+// NRT topology shadow for the graph view. Guarded by Engine::shadowMtx_
+// (NOT nrt_lock_: with audio stopped, commands run inline while sched()
+// holds nrt_lock_, so the commit cannot retake it). Shadow edits are
+// journaled at bundle submit but applied when the bundle EXECUTES
+// (ShadowCommitCmd::doNRT, ordered by the to_nrt_ FIFO), so the shadow
+// tracks RT execution order even when bundles are scheduled to run out
+// of submission order or tempo changes reorder clock-scheduled bundles.
+// Hidden helper nodes (mixers/xfaders, nodeID < 0) never appear here.
+struct ShadowConn {
+    i64 srcNode; i32 srcPort;
+    i64 dstNode; i32 dstPort;
+    bool operator==(ShadowConn const&) const = default;
+};
+
+struct GraphShadow {
+    std::unordered_map<i64, std::string> nodes; // nodeID -> defName
+    std::vector<ShadowConn> conns;   // duplicates allowed (fan-in summed twice)
+};
+
+//=============================================================================================
 #pragma mark SILO
 
 class Engine;
@@ -80,6 +104,7 @@ struct Silo
     SchedulerQueue sched_;
     std::vector<Node*> nrt_nodeTable_;
     std::vector<Node*> rt_nodeTable_;
+    GraphShadow shadow_; // guarded by engine_->shadowMtx_
     Node* rt_sortedNodeList_ = nullptr;
     Node* inputNode_ = nullptr;
     Node* outputNode_ = nullptr;

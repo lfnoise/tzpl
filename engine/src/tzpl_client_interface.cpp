@@ -459,6 +459,9 @@ void addSynthDef(Engine* e, tzpl_SynthDef const& def, void* dlHandle,
     }
 
     addNodeDef(e, info, dlHandle);
+    // Def registration changes the port/control metadata graph pollers join
+    // by name (hot-reload), so force them to re-snapshot.
+    e->graphGeneration_.fetch_add(1, std::memory_order_release);
 }
 
 void listNodeDefs(Engine* e, std::vector<std::string>& names) {
@@ -549,6 +552,43 @@ void listDefDescs(Engine* e, std::vector<DefDesc>& out) {
     }
     std::sort(out.begin(), out.end(),
               [](DefDesc const& a, DefDesc const& b) { return a.name < b.name; });
+}
+
+// ============================================================================
+// Live-graph snapshot (graph view). Reads only the NRT topology shadow --
+// never Node* -- under shadowMtx_, so it cannot race node deletion.
+
+u64 graphGeneration(Engine* e) {
+    return e->graphGeneration_.load(std::memory_order_acquire);
+}
+
+int numSilos(Engine* e) {
+    return (int)e->silos_.size();
+}
+
+bool getGraphDesc(Engine* e, int silo, GraphDesc& out) {
+    if (silo < 0 || silo >= (int)e->silos_.size()) return false;
+    Silo const& s = e->silos_[silo];
+
+    out.nodes.clear();
+    out.conns.clear();
+    {
+        std::lock_guard<std::mutex> lck(e->shadowMtx_);
+        // Sample the generation inside the lock so it is coherent with the
+        // copied content (a commit bumps it under the same lock's edits).
+        out.generation = e->graphGeneration_.load(std::memory_order_acquire);
+        out.nodes.reserve(s.shadow_.nodes.size());
+        for (auto const& [nodeID, defName] : s.shadow_.nodes)
+            out.nodes.push_back({nodeID, defName});
+        out.conns.reserve(s.shadow_.conns.size());
+        for (ShadowConn const& c : s.shadow_.conns)
+            out.conns.push_back({c.srcNode, c.srcPort, c.dstNode, c.dstPort});
+    }
+    std::sort(out.nodes.begin(), out.nodes.end(),
+              [](LiveNodeDesc const& a, LiveNodeDesc const& b) {
+                  return a.nodeID < b.nodeID;
+              });
+    return true;
 }
 
 // ============================================================================
@@ -703,13 +743,144 @@ bool getPluginFileDesc(char const* path, DefDesc& out) {
 // bundle, success or failure.
 // ============================================================================
 
+// ============================================================================
+// Graph shadow journal (graph view). Topology-mutating ops record ShadowEdits
+// while they validate at submit; on success sched() appends one
+// ShadowCommitCmd carrying the journal as the bundle's LAST command. The
+// commit applies its edits to the silo's GraphShadow in doNRT -- after the
+// bundle actually executed -- so the shadow follows RT execution order even
+// when bundles are scheduled to run out of submission order, or tempo
+// changes on the per-silo clocks reorder clock-scheduled bundles. A bundle
+// that fails validation discards its journal with its commands (atomic
+// abort); a schedOnTimeOnly bundle dropped for lateness never fires its
+// commit (fired_ guard).
+// ============================================================================
+
+struct ShadowEdit {
+    enum Op : u8 {
+        AddNode,             // nodeID, defName
+        RemoveNode,          // nodeID
+        AddConn,             // conn (skipped if either endpoint is gone)
+        DisconnectSrc,       // conn: mirrors DisconnectSourceCmd (see commit)
+        RemoveConnsToDst,    // conn.dstNode/dstPort
+        RemoveConnsFromSrc,  // conn.srcNode/srcPort
+        RemoveConnsTouching, // nodeID
+        RewriteSrc,          // conn: (srcNode,srcPort)=old, (dstNode,dstPort)=new
+        Clear,               // keep nodes 0/1 and conns between them
+    };
+    Op op;
+    ShadowConn conn{};
+    i64 nodeID = 0;
+    std::string defName;
+};
+using ShadowEdits = std::vector<ShadowEdit>;
+
+// Apply journaled edits to a silo's shadow. Caller holds Engine::shadowMtx_.
+// Deliberately tolerant of stale state (mirroring the RT side's silent
+// no-ops when a scheduled command's target vanished before it executed).
+static void commitShadowEdits(GraphShadow& sh, ShadowEdits const& edits) {
+    for (ShadowEdit const& ed : edits) {
+        switch (ed.op) {
+            case ShadowEdit::AddNode:
+                sh.nodes[ed.nodeID] = ed.defName;
+                break;
+            case ShadowEdit::RemoveNode:
+                sh.nodes.erase(ed.nodeID);
+                break;
+            case ShadowEdit::AddConn:
+                // Mirror ConnectCmd::doRT: no-op if either node is gone by
+                // the time the bundle executes.
+                if (sh.nodes.count(ed.conn.srcNode) && sh.nodes.count(ed.conn.dstNode))
+                    sh.conns.push_back(ed.conn);
+                break;
+            case ShadowEdit::DisconnectSrc: {
+                // Mirror DisconnectSourceCmd::doRT: with fan-in (2+ sources
+                // into the inlet) remove one slot matching src; with a single
+                // direct connection RT disconnects the inlet regardless of
+                // which source is named.
+                auto toDst = [&](ShadowConn const& c) {
+                    return c.dstNode == ed.conn.dstNode && c.dstPort == ed.conn.dstPort;
+                };
+                auto n = std::count_if(sh.conns.begin(), sh.conns.end(), toDst);
+                if (n >= 2) {
+                    auto it = std::find(sh.conns.begin(), sh.conns.end(), ed.conn);
+                    if (it != sh.conns.end()) sh.conns.erase(it);
+                } else {
+                    std::erase_if(sh.conns, toDst);
+                }
+                break;
+            }
+            case ShadowEdit::RemoveConnsToDst:
+                std::erase_if(sh.conns, [&](ShadowConn const& c) {
+                    return c.dstNode == ed.conn.dstNode && c.dstPort == ed.conn.dstPort;
+                });
+                break;
+            case ShadowEdit::RemoveConnsFromSrc:
+                std::erase_if(sh.conns, [&](ShadowConn const& c) {
+                    return c.srcNode == ed.conn.srcNode && c.srcPort == ed.conn.srcPort;
+                });
+                break;
+            case ShadowEdit::RemoveConnsTouching:
+                std::erase_if(sh.conns, [&](ShadowConn const& c) {
+                    return c.srcNode == ed.nodeID || c.dstNode == ed.nodeID;
+                });
+                break;
+            case ShadowEdit::RewriteSrc:
+                for (ShadowConn& c : sh.conns) {
+                    if (c.srcNode == ed.conn.srcNode && c.srcPort == ed.conn.srcPort) {
+                        c.srcNode = ed.conn.dstNode;
+                        c.srcPort = ed.conn.dstPort;
+                    }
+                }
+                break;
+            case ShadowEdit::Clear:
+                // Mirror Silo::removeAllNodes: nodes 0/1 survive, and so does
+                // any direct wire between them.
+                std::erase_if(sh.nodes, [](auto const& kv) {
+                    return kv.first != 0 && kv.first != 1;
+                });
+                std::erase_if(sh.conns, [](ShadowConn const& c) {
+                    return !((c.srcNode == 0 || c.srcNode == 1) &&
+                             (c.dstNode == 0 || c.dstNode == 1));
+                });
+                break;
+        }
+    }
+}
+
+struct ShadowCommitCmd : Command
+{
+    ShadowEdits edits_;
+    bool fired_ = false;
+
+    explicit ShadowCommitCmd(ShadowEdits&& edits) : edits_(std::move(edits)) {}
+
+    void doRT(Silo*) override {
+        // err_ is already tzpl_errTooLate when a schedOnTimeOnly bundle was
+        // dropped without running -- in that case never commit.
+        if (err_ == tzpl_errNone) fired_ = true;
+    }
+    bool doNRT(Silo* s) override {
+        if (fired_) {
+            Engine* e = s->engine_;
+            std::lock_guard<std::mutex> lck(e->shadowMtx_);
+            commitShadowEdits(s->shadow_, edits_);
+            // Bump inside the lock so getGraphDesc (which samples the
+            // generation under the same lock) stays coherent with content.
+            e->graphGeneration_.fetch_add(1, std::memory_order_release);
+        }
+        return true;
+    }
+};
+
 struct BundleOp
 {
     BundleOp* next_ = nullptr;
     virtual ~BundleOp() = default;
-    // Validate against the chosen silo and append the materialized
-    // Command(s) to `out`. Runs on the submitting (NRT) thread.
-    virtual tzpl_SErr apply(Engine* e, Silo* s, CommandList& out) = 0;
+    // Validate against the chosen silo, append the materialized Command(s)
+    // to `out`, and journal any topology changes into `edits`. Runs on the
+    // submitting (NRT) thread.
+    virtual tzpl_SErr apply(Engine* e, Silo* s, CommandList& out, ShadowEdits& edits) = 0;
 };
 
 struct CmdBundle
@@ -761,6 +932,7 @@ void sendCmds(Engine* e, Silo* s, Command* cmd) noexcept {
 // ----------------------------------------------------------------------------
 
 static tzpl_SErr applyNewNode(Engine* e, Silo* s, CommandList& out,
+                              ShadowEdits& edits,
                               char const* name, i64 nodeID) {
     NodeDef* def = getNodeDef(e, name); // getNodeDef has its own lock.
     if (!def) return tzpl_errNodeDefNotFound;
@@ -779,10 +951,12 @@ static tzpl_SErr applyNewNode(Engine* e, Silo* s, CommandList& out,
     }
 
     out.add(new AddNodeCmd{node});
+    edits.push_back({ShadowEdit::AddNode, {}, nodeID, def->info_.name});
     return tzpl_errNone;
 }
 
 static tzpl_SErr applyConnect(Engine* e, Silo* s, CommandList& out,
+                              ShadowEdits& edits,
                               PortAddr src, PortAddr dst,
                               f64 xfadeTime, FadeCurve curve) {
     tzpl_SErr err;
@@ -820,10 +994,13 @@ static tzpl_SErr applyConnect(Engine* e, Silo* s, CommandList& out,
         xfaderNode = newXFaderNode(e, s, xfadeTime, curve, srcPort->type_);
     }
     out.add(new ConnectCmd(src, dst, xfaderNode, curve, mixerNode, -1));
+    edits.push_back({ShadowEdit::AddConn,
+                     {src.nodeID, src.index, dst.nodeID, dst.index}});
     return tzpl_errNone;
 }
 
 static tzpl_SErr applyReconnectOutput(Engine* e, Silo* s, CommandList& out,
+                                      ShadowEdits& edits,
                                       PortAddr oldSrc, PortAddr newSrc,
                                       f64 xfadeTime, FadeCurve curve) {
     tzpl_SErr err;
@@ -844,10 +1021,27 @@ static tzpl_SErr applyReconnectOutput(Engine* e, Silo* s, CommandList& out,
         xfaderNode = newXFaderNode(e, s, xfadeTime, curve, type);
     }
     out.add(new ReconnectOutputCmd(oldSrc, newSrc, xfaderNode, curve));
+    edits.push_back({ShadowEdit::RewriteSrc,
+                     {oldSrc.nodeID, oldSrc.index, newSrc.nodeID, newSrc.index}});
     return tzpl_errNone;
 }
 
+// True when inlet `dst` is already fed by `src` -- directly or through its
+// fan-in mixer. Used by applyReplaceNode to make the input copy idempotent:
+// without this, replacing back to a node whose inputs were never
+// disconnected re-adds the same connection as a second mixer slot, silently
+// double-summing the signal (and again on every subsequent swap).
+static bool inletHasSource(InPort const& dst, OutPort const* src) {
+    if (dst.srcPort_ == src) return true;
+    if (dst.mixerNode_) {
+        for (auto const& mixerIn : dst.mixerNode_->ins)
+            if (mixerIn.srcPort_ == src) return true;
+    }
+    return false;
+}
+
 static tzpl_SErr applyReplaceNode(Engine* e, Silo* s, CommandList& out,
+                                  ShadowEdits& edits,
                                   i64 oldNodeID, i64 newNodeID,
                                   f64 xfadeTime, FadeCurve curve) {
     Node* oldNode = s->nrt_getNode(oldNodeID);
@@ -877,16 +1071,18 @@ static tzpl_SErr applyReplaceNode(Engine* e, Silo* s, CommandList& out,
         if (oldNode->ins[i].mixerNode_) {
             Node* mixer = oldNode->ins[i].mixerNode_;
             for (auto& mixerIn : mixer->ins) {
-                if (mixerIn.srcPort_ && mixerIn.srcPort_->node_->nodeID >= 0) {
-                    applyConnect(e, s, out,
+                if (mixerIn.srcPort_ && mixerIn.srcPort_->node_->nodeID >= 0
+                    && !inletHasSource(newNode->ins[i], mixerIn.srcPort_)) {
+                    applyConnect(e, s, out, edits,
                             {mixerIn.srcPort_->node_->nodeID, mixerIn.srcPort_->index_},
                             {newNodeID, i}, 0., fadeLinear);
                 }
             }
         } else {
             OutPort* src = oldNode->ins[i].srcPort_;
-            if (src && src->node_->nodeID >= 0) {
-                applyConnect(e, s, out,
+            if (src && src->node_->nodeID >= 0
+                && !inletHasSource(newNode->ins[i], src)) {
+                applyConnect(e, s, out, edits,
                         {src->node_->nodeID, src->index_}, {newNodeID, i},
                         0., fadeLinear);
             }
@@ -895,13 +1091,14 @@ static tzpl_SErr applyReplaceNode(Engine* e, Silo* s, CommandList& out,
 
     // reconnect all outputs
     for (int i = 0; i < oldNode->outs.size(); ++i) {
-        applyReconnectOutput(e, s, out, {oldNodeID, i}, {newNodeID, i}, xfadeTime, curve);
+        applyReconnectOutput(e, s, out, edits, {oldNodeID, i}, {newNodeID, i}, xfadeTime, curve);
     }
 
     return tzpl_errNone;
 }
 
 static tzpl_SErr applyDisconnectInput(Engine* e, Silo* s, CommandList& out,
+                                      ShadowEdits& edits,
                                       PortAddr dst, f64 xfadeTime, FadeCurve curve) {
     InPort* port;
     tzpl_SErr err = s->nrt_getInPort(dst, port);
@@ -913,10 +1110,12 @@ static tzpl_SErr applyDisconnectInput(Engine* e, Silo* s, CommandList& out,
         xfaderNode = newXFaderNode(e, s, xfadeTime, curve, type);
     }
     out.add(new DisconnectInputCmd(dst, xfaderNode, curve));
+    edits.push_back({ShadowEdit::RemoveConnsToDst, {0, 0, dst.nodeID, dst.index}});
     return tzpl_errNone;
 }
 
 static tzpl_SErr applyDisconnectSource(Engine* e, Silo* s, CommandList& out,
+                                       ShadowEdits& edits,
                                        PortAddr src, PortAddr dst,
                                        f64 xfadeTime, FadeCurve curve) {
     OutPort* srcPort;
@@ -933,15 +1132,19 @@ static tzpl_SErr applyDisconnectSource(Engine* e, Silo* s, CommandList& out,
         xfaderNode = newXFaderNode(e, s, xfadeTime, curve, type);
     }
     out.add(new DisconnectSourceCmd(src, dst, xfaderNode, curve));
+    edits.push_back({ShadowEdit::DisconnectSrc,
+                     {src.nodeID, src.index, dst.nodeID, dst.index}});
     return tzpl_errNone;
 }
 
-static tzpl_SErr applyDisconnectOutput(Engine*, Silo* s, CommandList& out, PortAddr src) {
+static tzpl_SErr applyDisconnectOutput(Engine*, Silo* s, CommandList& out,
+                                       ShadowEdits& edits, PortAddr src) {
     OutPort* port;
     tzpl_SErr err = s->nrt_getOutPort(src, port);
     if (err != tzpl_errNone) return err;
 
     out.add(new DisconnectOutputCmd(src));
+    edits.push_back({ShadowEdit::RemoveConnsFromSrc, {src.nodeID, src.index, 0, 0}});
     return tzpl_errNone;
 }
 
@@ -974,6 +1177,7 @@ static std::vector<T> convertValues(tzpl_ElemType srcElem, void const* bytes, in
 }
 
 static tzpl_SErr applySetInput(Engine* e, Silo* s, CommandList& out,
+                               ShadowEdits&, // setInput never unlinks a wire
                                PortAddr dst, tzpl_ElemType srcElem,
                                void const* bytes, int numValues,
                                f64 xfadeTime, FadeCurve curve) {
@@ -1006,6 +1210,7 @@ static tzpl_SErr applySetInput(Engine* e, Silo* s, CommandList& out,
 }
 
 static tzpl_SErr applyTapOutlet(Engine* e, Silo* s, CommandList& out,
+                                ShadowEdits&,
                                 i64 nodeID, int outlet, i64 tapID, int mode) {
     OutPort* port;
     tzpl_SErr err = s->nrt_getOutPort(PortAddr{nodeID, outlet}, port);
@@ -1028,7 +1233,8 @@ static tzpl_SErr applyTapOutlet(Engine* e, Silo* s, CommandList& out,
     return tzpl_errNone;
 }
 
-static tzpl_SErr applyUntap(Engine* e, Silo*, CommandList& out, i64 tapID) {
+static tzpl_SErr applyUntap(Engine* e, Silo*, CommandList& out,
+                            ShadowEdits&, i64 tapID) {
     {
         std::lock_guard<std::mutex> lck(e->nrt_lock_);
         if (!e->taps_.count(tapID)) return tzpl_errNodeNotFound;
@@ -1038,6 +1244,7 @@ static tzpl_SErr applyUntap(Engine* e, Silo*, CommandList& out, i64 tapID) {
 }
 
 static tzpl_SErr applySetControl(Engine*, Silo* s, CommandList& out,
+                                 ShadowEdits&,
                                  i64 nodeID, i64 controlID,
                                  tzpl_ElemType srcElem, void const* bytes, int numValues) {
     Node* node = s->nrt_getNode(nodeID);
@@ -1082,7 +1289,7 @@ struct PrebuiltCmdOp : BundleOp
     explicit PrebuiltCmdOp(Command* cmd) : cmd_(cmd) {}
     ~PrebuiltCmdOp() override { delete cmd_; } // owned until applied
 
-    tzpl_SErr apply(Engine*, Silo*, CommandList& out) override {
+    tzpl_SErr apply(Engine*, Silo*, CommandList& out, ShadowEdits&) override {
         out.add(cmd_);
         cmd_ = nullptr;
         return tzpl_errNone;
@@ -1090,8 +1297,7 @@ struct PrebuiltCmdOp : BundleOp
 };
 
 // A command that was fully built at record time and whose only silo-side
-// validation is that the target node exists (freeNode, disconnectNode, and
-// the note/voice commands).
+// validation is that the target node exists (the note/voice commands).
 struct NodeCheckedCmdOp : BundleOp
 {
     i64 nodeID_;
@@ -1100,10 +1306,64 @@ struct NodeCheckedCmdOp : BundleOp
     NodeCheckedCmdOp(i64 nodeID, Command* cmd) : nodeID_(nodeID), cmd_(cmd) {}
     ~NodeCheckedCmdOp() override { delete cmd_; } // owned until applied
 
-    tzpl_SErr apply(Engine*, Silo* s, CommandList& out) override {
+    tzpl_SErr apply(Engine*, Silo* s, CommandList& out, ShadowEdits&) override {
         if (!s->nrt_getNode(nodeID_)) return tzpl_errNodeNotFound;
         out.add(cmd_);
         cmd_ = nullptr;
+        return tzpl_errNone;
+    }
+};
+
+// freeNode: node-existence check + shadow edits (purge the node and every
+// wire touching it, mirroring Silo::removeNode -> disconnectNode).
+struct FreeNodeOp : BundleOp
+{
+    i64 nodeID_;
+    Command* cmd_;
+
+    FreeNodeOp(i64 nodeID, Command* cmd) : nodeID_(nodeID), cmd_(cmd) {}
+    ~FreeNodeOp() override { delete cmd_; } // owned until applied
+
+    tzpl_SErr apply(Engine*, Silo* s, CommandList& out, ShadowEdits& edits) override {
+        if (!s->nrt_getNode(nodeID_)) return tzpl_errNodeNotFound;
+        out.add(cmd_);
+        cmd_ = nullptr;
+        edits.push_back({ShadowEdit::RemoveConnsTouching, {}, nodeID_});
+        edits.push_back({ShadowEdit::RemoveNode, {}, nodeID_});
+        return tzpl_errNone;
+    }
+};
+
+// disconnectNode: node-existence check + purge every wire touching it.
+struct DisconnectNodeOp : BundleOp
+{
+    i64 nodeID_;
+    Command* cmd_;
+
+    DisconnectNodeOp(i64 nodeID, Command* cmd) : nodeID_(nodeID), cmd_(cmd) {}
+    ~DisconnectNodeOp() override { delete cmd_; } // owned until applied
+
+    tzpl_SErr apply(Engine*, Silo* s, CommandList& out, ShadowEdits& edits) override {
+        if (!s->nrt_getNode(nodeID_)) return tzpl_errNodeNotFound;
+        out.add(cmd_);
+        cmd_ = nullptr;
+        edits.push_back({ShadowEdit::RemoveConnsTouching, {}, nodeID_});
+        return tzpl_errNone;
+    }
+};
+
+// freeAllNodes: prebuilt command + shadow Clear.
+struct FreeAllNodesOp : BundleOp
+{
+    Command* cmd_;
+
+    explicit FreeAllNodesOp(Command* cmd) : cmd_(cmd) {}
+    ~FreeAllNodesOp() override { delete cmd_; } // owned until applied
+
+    tzpl_SErr apply(Engine*, Silo*, CommandList& out, ShadowEdits& edits) override {
+        out.add(cmd_);
+        cmd_ = nullptr;
+        edits.push_back({ShadowEdit::Clear});
         return tzpl_errNone;
     }
 };
@@ -1115,8 +1375,8 @@ struct NewNodeOp : BundleOp
 
     NewNodeOp(char const* defName, i64 nodeID) : defName_(defName), nodeID_(nodeID) {}
 
-    tzpl_SErr apply(Engine* e, Silo* s, CommandList& out) override {
-        return applyNewNode(e, s, out, defName_.c_str(), nodeID_);
+    tzpl_SErr apply(Engine* e, Silo* s, CommandList& out, ShadowEdits& edits) override {
+        return applyNewNode(e, s, out, edits, defName_.c_str(), nodeID_);
     }
 };
 
@@ -1129,8 +1389,8 @@ struct ConnectOp : BundleOp
     ConnectOp(PortAddr src, PortAddr dst, f64 xfadeTime, FadeCurve curve)
         : src_(src), dst_(dst), xfadeTime_(xfadeTime), curve_(curve) {}
 
-    tzpl_SErr apply(Engine* e, Silo* s, CommandList& out) override {
-        return applyConnect(e, s, out, src_, dst_, xfadeTime_, curve_);
+    tzpl_SErr apply(Engine* e, Silo* s, CommandList& out, ShadowEdits& edits) override {
+        return applyConnect(e, s, out, edits, src_, dst_, xfadeTime_, curve_);
     }
 };
 
@@ -1143,8 +1403,8 @@ struct ReconnectOutputOp : BundleOp
     ReconnectOutputOp(PortAddr oldSrc, PortAddr newSrc, f64 xfadeTime, FadeCurve curve)
         : oldSrc_(oldSrc), newSrc_(newSrc), xfadeTime_(xfadeTime), curve_(curve) {}
 
-    tzpl_SErr apply(Engine* e, Silo* s, CommandList& out) override {
-        return applyReconnectOutput(e, s, out, oldSrc_, newSrc_, xfadeTime_, curve_);
+    tzpl_SErr apply(Engine* e, Silo* s, CommandList& out, ShadowEdits& edits) override {
+        return applyReconnectOutput(e, s, out, edits, oldSrc_, newSrc_, xfadeTime_, curve_);
     }
 };
 
@@ -1157,8 +1417,8 @@ struct ReplaceNodeOp : BundleOp
     ReplaceNodeOp(i64 oldNodeID, i64 newNodeID, f64 xfadeTime, FadeCurve curve)
         : oldNodeID_(oldNodeID), newNodeID_(newNodeID), xfadeTime_(xfadeTime), curve_(curve) {}
 
-    tzpl_SErr apply(Engine* e, Silo* s, CommandList& out) override {
-        return applyReplaceNode(e, s, out, oldNodeID_, newNodeID_, xfadeTime_, curve_);
+    tzpl_SErr apply(Engine* e, Silo* s, CommandList& out, ShadowEdits& edits) override {
+        return applyReplaceNode(e, s, out, edits, oldNodeID_, newNodeID_, xfadeTime_, curve_);
     }
 };
 
@@ -1171,8 +1431,8 @@ struct DisconnectInputOp : BundleOp
     DisconnectInputOp(PortAddr dst, f64 xfadeTime, FadeCurve curve)
         : dst_(dst), xfadeTime_(xfadeTime), curve_(curve) {}
 
-    tzpl_SErr apply(Engine* e, Silo* s, CommandList& out) override {
-        return applyDisconnectInput(e, s, out, dst_, xfadeTime_, curve_);
+    tzpl_SErr apply(Engine* e, Silo* s, CommandList& out, ShadowEdits& edits) override {
+        return applyDisconnectInput(e, s, out, edits, dst_, xfadeTime_, curve_);
     }
 };
 
@@ -1185,8 +1445,8 @@ struct DisconnectSourceOp : BundleOp
     DisconnectSourceOp(PortAddr src, PortAddr dst, f64 xfadeTime, FadeCurve curve)
         : src_(src), dst_(dst), xfadeTime_(xfadeTime), curve_(curve) {}
 
-    tzpl_SErr apply(Engine* e, Silo* s, CommandList& out) override {
-        return applyDisconnectSource(e, s, out, src_, dst_, xfadeTime_, curve_);
+    tzpl_SErr apply(Engine* e, Silo* s, CommandList& out, ShadowEdits& edits) override {
+        return applyDisconnectSource(e, s, out, edits, src_, dst_, xfadeTime_, curve_);
     }
 };
 
@@ -1196,8 +1456,8 @@ struct DisconnectOutputOp : BundleOp
 
     explicit DisconnectOutputOp(PortAddr src) : src_(src) {}
 
-    tzpl_SErr apply(Engine* e, Silo* s, CommandList& out) override {
-        return applyDisconnectOutput(e, s, out, src_);
+    tzpl_SErr apply(Engine* e, Silo* s, CommandList& out, ShadowEdits& edits) override {
+        return applyDisconnectOutput(e, s, out, edits, src_);
     }
 };
 
@@ -1219,8 +1479,8 @@ struct SetInputOp : BundleOp
         memcpy(bytes_.data(), values, bytes_.size());
     }
 
-    tzpl_SErr apply(Engine* e, Silo* s, CommandList& out) override {
-        return applySetInput(e, s, out, dst_, elem_, bytes_.data(), numValues_,
+    tzpl_SErr apply(Engine* e, Silo* s, CommandList& out, ShadowEdits& edits) override {
+        return applySetInput(e, s, out, edits, dst_, elem_, bytes_.data(), numValues_,
                              xfadeTime_, curve_);
     }
 };
@@ -1240,8 +1500,8 @@ struct SetControlOp : BundleOp
         memcpy(bytes_.data(), values, bytes_.size());
     }
 
-    tzpl_SErr apply(Engine* e, Silo* s, CommandList& out) override {
-        return applySetControl(e, s, out, nodeID_, controlID_, elem_,
+    tzpl_SErr apply(Engine* e, Silo* s, CommandList& out, ShadowEdits& edits) override {
+        return applySetControl(e, s, out, edits, nodeID_, controlID_, elem_,
                                bytes_.data(), numValues_);
     }
 };
@@ -1257,8 +1517,8 @@ struct TapOutletOp : BundleOp
         : nodeID_(nodeID), outlet_(outlet), tapID_(tapID), mode_(mode)
     {}
 
-    tzpl_SErr apply(Engine* e, Silo* s, CommandList& out) override {
-        return applyTapOutlet(e, s, out, nodeID_, outlet_, tapID_, mode_);
+    tzpl_SErr apply(Engine* e, Silo* s, CommandList& out, ShadowEdits& edits) override {
+        return applyTapOutlet(e, s, out, edits, nodeID_, outlet_, tapID_, mode_);
     }
 };
 
@@ -1268,8 +1528,8 @@ struct UntapOp : BundleOp
 
     UntapOp(i64 tapID) : tapID_(tapID) {}
 
-    tzpl_SErr apply(Engine* e, Silo* s, CommandList& out) override {
-        return applyUntap(e, s, out, tapID_);
+    tzpl_SErr apply(Engine* e, Silo* s, CommandList& out, ShadowEdits& edits) override {
+        return applyUntap(e, s, out, edits, tapID_);
     }
 };
 
@@ -1308,10 +1568,12 @@ tzpl_SErr sched(int silo, int clock, f64 beat, SchedPolicy policy) {
     // Materialize the recorded ops against the chosen silo, in order.
     // On the first error the whole bundle is discarded: deleting the
     // never-run commands (stage_ == 0) frees everything they pre-allocated,
-    // including nodes already inserted into the silo's NRT table.
+    // including nodes already inserted into the silo's NRT table. The
+    // shadow journal is discarded with them (nothing was committed).
     CommandList cmds;
+    ShadowEdits edits;
     for (BundleOp* op = tBundle.head; op; op = op->next_) {
-        tzpl_SErr err = op->apply(e, s, cmds);
+        tzpl_SErr err = op->apply(e, s, cmds, edits);
         if (err != tzpl_errNone) {
             {
                 // ~Node runs releaseNodeDef and unlinks the NRT table,
@@ -1324,6 +1586,11 @@ tzpl_SErr sched(int silo, int clock, f64 beat, SchedPolicy policy) {
         }
     }
     tBundle.reset();
+
+    // The shadow commit travels as the bundle's LAST command: it executes
+    // when the bundle does (wherever scheduling lands it), so the graph
+    // shadow tracks RT execution order.
+    if (!edits.empty()) cmds.add(new ShadowCommitCmd(std::move(edits)));
 
     Command* head = cmds.popAll();
     if (!head) return tzpl_errNone; // empty bundle: closed, nothing to do.
@@ -1397,13 +1664,13 @@ tzpl_SErr newNode(const char* name, i64 nodeID) {
 
 tzpl_SErr freeNode(i64 nodeID) {
     if (!tBundle.engine) return tzpl_errNoActiveBundle;
-    tBundle.add(new NodeCheckedCmdOp(nodeID, new RemoveNodeCmd{nodeID}));
+    tBundle.add(new FreeNodeOp(nodeID, new RemoveNodeCmd{nodeID}));
     return tzpl_errNone;
 }
 
 tzpl_SErr freeAllNodes() {
     if (!tBundle.engine) return tzpl_errNoActiveBundle;
-    tBundle.add(new PrebuiltCmdOp(new RemoveAllNodesCmd{}));
+    tBundle.add(new FreeAllNodesOp(new RemoveAllNodesCmd{}));
     return tzpl_errNone;
 }
 
@@ -1451,7 +1718,7 @@ tzpl_SErr disconnectOutput(PortAddr src) {
 
 tzpl_SErr disconnectNode(i64 nodeID) {
     if (!tBundle.engine) return tzpl_errNoActiveBundle;
-    tBundle.add(new NodeCheckedCmdOp(nodeID, new DisconnectNodeCmd(nodeID)));
+    tBundle.add(new DisconnectNodeOp(nodeID, new DisconnectNodeCmd(nodeID)));
     return tzpl_errNone;
 }
 
