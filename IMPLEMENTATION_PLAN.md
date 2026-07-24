@@ -692,31 +692,41 @@ Supporting work:
 
 ---
 
-## Phase 13: Audio Graph Visualization — NOT STARTED
+## Phase 13: Audio Graph Visualization — IN PROGRESS
 
-**Goal**: Visual representation of the running audio graph.
+**Goal**: Visual representation of the running audio graph. Implemented as a **third center-pane mode** of the app alongside the text editor and notebook. JUCE-first: the core (engine snapshot, view-model, layout) is toolkit-free; an ImGui/imnodes view can follow later if wanted.
 
-### 13.1 Node graph display
+### 13.1 Node graph display — DONE (JUCE, 2026-07-23)
 
-**Tasks**:
-1. Integrate an ImGui node graph library (e.g., imnodes).
-2. Display running nodes as boxes with input/output ports.
-3. Display connections as wires between ports.
-4. Update in real-time as nodes are added/removed/connected.
+**Engine: NRT topology shadow + snapshot API.** Connection state previously existed only in RT-thread-owned port linked lists with no NRT mirror or change notification. Added:
+- `GraphShadow` per Silo (`tzpl_silo.hpp`): `nodeID -> defName` map + `ShadowConn` list, guarded by a new `Engine::shadowMtx_` (NOT `nrt_lock_`: inline command execution runs while `sched()` holds `nrt_lock_`; lock order is `shadowMtx_` inside `nrt_lock_`, never the reverse). Seeded with nodes 0/1 in the Engine ctor.
+- **Journal at submit, commit at execution**: topology-mutating `BundleOp`s record `ShadowEdit`s during submit-time validation (atomic abort discards them); `sched()` appends a `ShadowCommitCmd` as the bundle's last command, whose `doNRT` (stage 2, after the bundle actually executed on RT) applies the edits and bumps `Engine::graphGeneration_`. The shadow therefore follows RT **execution order** — correct even when bundles are scheduled to run out of submission order or tempo changes on the per-silo clocks reorder clock-scheduled bundles (late-bound beat scheduling; the commit rides with its bundle). A `fired_` flag set in `doRT` keeps late-dropped `schedOnTimeOnly` bundles from committing. Fan-in shows as duplicate conns; hidden mixers/xfaders (nodeID -1) never appear; `commitShadowEdits` mirrors RT's silent no-ops for stale scheduled commands.
+- Snapshot API (`tzpl_client_interface.hpp`, DefDesc copy-under-lock pattern): `GraphDesc {generation, nodes, conns}`, `getGraphDesc(e, silo, out)`, lock-free `graphGeneration(e)` for cheap dirty-polling, `numSilos(e)`. `addSynthDef` also bumps the generation (def hot-reload changes port metadata).
+- Fixed a pre-existing bug found during this work: the NRT drain loops ran `run()` on stage-0 commands whose `err_` was already set (late-dropped `schedOnTimeOnly`), executing them on the NRT thread; they are now destroyed unrun.
+- Tests: `integration-tests/src/test_graph_shadow.cpp` (43 checks) — per-op shadow effects, generation gating, atomic abort, per-silo isolation, and an NRT-rendered out-of-submission-order scheduling test.
+
+**Toolkit-free core** (`app/src/`, no GUI includes): `graph_model.{hpp,cpp}` — `GraphPoller` (generation-gated poll, DefDesc join with def cache, defMissing pin synthesis) + `buildViewModel` split out for testing; `graph_layout.{hpp,cpp}` — `LayoutStore` (session positions keyed by (silo, nodeID)) + `autoLayout` (longest-path layering toward Audio Out via reverse DFS with cycle-neutral back edges, per-column x from max widths, one barycenter row-ordering pass, deterministic). Tests: `app/tests/graph_layout_test.cpp` (`tzpl_graph_tests`, 20 checks).
+
+**JUCE UI**: `app/juce/graph_view.{hpp,cpp}` — canvas with world transform (pan/zoom: drag background, wheel, cmd-wheel + pinch about cursor, zoom-to-fit on first show), node boxes (title + #nodeID, inlet pins left / outlet pins right with name/chans/elem-rate glyphs, Audio In/Out tinted, defMissing dimmed), bezier wires, click-select node/edge, drag nodes (session-sticky via LayoutStore), toolbar (silo selector, Re-layout, Fit), 8 Hz poll timer while showing (one atomic read per tick when unchanged), empty-state hint. Theme colors via LookAndFeel ids.
+
+**Mode switching**: `MainComponent`'s `bool notebookVisible_` replaced by `enum CenterMode { editor, notebook, graph }` + `setCenterMode()`; `showNotebook(bool)` kept as a wrapper so call sites didn't change. Graph mode overlays a *document* mode: save/eval/undo/revert route via `lastDocMode_` (`docModeIsNotebook()`), and closing the graph returns to it. Command: `cmd::toggleGraphView`, View menu, **Cmd+Shift+\\** (pairs with Cmd+\\ notebook toggle).
+
+**Remaining 13.1 ideas**: ImGui/imnodes view over the same core; resync-from-engine hook if shadow drift is ever observed in practice.
 
 ### 13.2 Interactive editing
 
 **Tasks**:
-1. Drag to create new connections (generates `connect` commands).
-2. Click to delete connections (generates `disconnect` commands).
-3. Right-click context menu to add/remove nodes.
-4. Double-click a node to open its controls.
+1. Drag to create new connections (generates `connect` commands). Rubber-band from an outlet pin; highlight type-compatible inlets from DefDesc (relaxed rules for node 0). Submit `begin/connect/go` on the message thread; no optimistic UI — the commit bumps the generation and the next poll redraws.
+2. Click to delete connections (generates `disconnectSource` commands).
+3. Right-click context menu to add/remove nodes (palette from `listDefDescs`, reuse plugin-browser tag grouping; smallest unused nodeID >= 2, pre-seed LayoutStore at the click point; guard nodes 0/1).
+4. Double-click a node to open its controls (13.3).
+5. Keep submission helpers toolkit-free (`app/src/graph_edits.hpp`) for a future ImGui view.
 
 ### 13.3 Control surfaces
 
 **Tasks**:
-1. For each node, show its controls as sliders/knobs.
-2. Changes immediately sent as `setControl` commands.
+1. For each node, show its controls as sliders/knobs (from `DefDesc::controls`; factor the `tzpl_ControlSpec` -> widget-kind mapping out of `specFromControl()`/`widgetForControl()` in `tzpl_ui_ffi.cpp` into a shared helper).
+2. Changes immediately sent as `setControl` commands (coalesced to ~30 Hz during gestures). Write-only initially: no current-value readback exists (control data is RT-owned); init from `spec.init`, cache last sent values. Readback pairs naturally with Phase 14 metering (tap-like mirror or a getControl command).
 3. Support MIDI mapping to controls (future).
 
 ---
@@ -853,7 +863,7 @@ Phase 0 (Build Infrastructure)       ✅ DONE
 | 10 | UI framework setup | ✅ Done | -- |
 | 11 | Code editor & REPL | ✅ Done | Type info on hover |
 | 12 | Plugin/module management | 🟡 Partial | 12.1 plugin browser done (both apps) except one-click instantiation; 12.2 module browser, 12.3 compile UI |
-| 13 | Audio graph visualization | ⬜ Not started | All tasks |
+| 13 | Audio graph visualization | 🟡 In progress | 13.1 done (JUCE; engine topology shadow + GraphView center-pane mode); 13.2 interactive editing, 13.3 control surfaces |
 | 14 | Metering & monitoring | ⬜ Not started | All tasks |
 | 15 | Session management | ⬜ Not started | All tasks |
 | 16 | Future extensions | ⬜ Not started | All tasks |
