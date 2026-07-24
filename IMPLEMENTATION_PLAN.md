@@ -713,14 +713,18 @@ Supporting work:
 
 **Remaining 13.1 ideas**: ImGui/imnodes view over the same core; resync-from-engine hook if shadow drift is ever observed in practice.
 
-### 13.2 Interactive editing
+### 13.2 Interactive editing — MOSTLY DONE (2026-07-24)
 
-**Tasks**:
-1. Drag to create new connections (generates `connect` commands). Rubber-band from an outlet pin; highlight type-compatible inlets from DefDesc (relaxed rules for node 0). Submit `begin/connect/go` on the message thread; no optimistic UI — the commit bumps the generation and the next poll redraws.
-2. Click to delete connections (generates `disconnectSource` commands).
-3. Right-click context menu to add/remove nodes (palette from `listDefDescs`, reuse plugin-browser tag grouping; smallest unused nodeID >= 2, pre-seed LayoutStore at the click point; guard nodes 0/1).
-4. Double-click a node to open its controls (13.3).
-5. Keep submission helpers toolkit-free (`app/src/graph_edits.hpp`) for a future ImGui view.
+**Completed**:
+1. Drag-to-connect. Done. Drag from any pin (either direction); every type-compatible opposite pin shows an accent ring (rules mirror `compatibleTypes`/`relaxedCompatibleTypes` — relaxed channel count for Audio Out; unknown defs pass and the engine decides), the hovered target snaps the rubber band. Drop submits `begin/connect/go` on the message thread; no optimistic UI — the accepted bundle's shadow commit bumps the generation and the view re-snapshots.
+2. Delete connections. Done. Click a wire to select, Delete/Backspace sends `disconnectSource`. Delete on a selected node (id >= 2) frees it; Esc clears selection.
+3. Right-click menus. Done. Background: "New Node" palette from `listDefDescs` (Audio In/Out excluded), new node gets the smallest unused nodeID >= 2 and drops at the click point (LayoutStore pre-seeded). Node: Disconnect All / Free Node (Free disabled for nodes 0/1).
+3b. Click-free audio: every UI connect/disconnect passes a 0.1 s crossfade (`graph::kUIXFadeTime`); the engine splices an xfader only for float-element ports, so integer/event connections stay hard. "Disconnect All" fades too -- it bundles per-wire `disconnectSource` commands built from the view (`disconnectAllWires`) instead of the hard-cut `disconnectNode`. Free Node remains an immediate cut.
+4. Submission helpers are toolkit-free in `app/src/graph_edits.{hpp,cpp}` (`canConnect`, `nextFreeNodeID`, `errText`, connect/disconnect/create/free/disconnectNode submitters) for a future ImGui view. Errors surface in the app console via `GraphView::onLog`.
+5. Tests: `tzpl_graph_tests` grew unit checks (`canConnect` rule matrix, `nextFreeNodeID`) and a live-engine end-to-end pass driving every submitter through `GraphPoller` (50 checks total).
+
+**Remaining**:
+- Double-click a node to open its controls (lands with 13.3).
 
 ### 13.3 Control surfaces
 
@@ -863,7 +867,7 @@ Phase 0 (Build Infrastructure)       ✅ DONE
 | 10 | UI framework setup | ✅ Done | -- |
 | 11 | Code editor & REPL | ✅ Done | Type info on hover |
 | 12 | Plugin/module management | 🟡 Partial | 12.1 plugin browser done (both apps) except one-click instantiation; 12.2 module browser, 12.3 compile UI |
-| 13 | Audio graph visualization | 🟡 In progress | 13.1 done (JUCE; engine topology shadow + GraphView center-pane mode); 13.2 interactive editing, 13.3 control surfaces |
+| 13 | Audio graph visualization | 🟡 In progress | 13.1 + 13.2 done (JUCE; engine topology shadow, GraphView mode, drag-connect/delete/palette editing); 13.3 control surfaces |
 | 14 | Metering & monitoring | ⬜ Not started | All tasks |
 | 15 | Session management | ⬜ Not started | All tasks |
 | 16 | Future extensions | ⬜ Not started | All tasks |

@@ -191,11 +191,15 @@ if(TZPL_BUILD_GUI)
         PRIVATE tzpl_audio_engine_bridge
     )
 
-    # Headless graph view-model + auto-layout tests (graph editor mode).
+    # Headless graph view-model + auto-layout + edit-helper tests
+    # (graph editor mode). Links the engine test plugins so the edit
+    # submitters can run against a real (audio-stopped) engine.
     add_executable(tzpl_graph_tests
         tests/graph_layout_test.cpp
         src/graph_model.cpp
         src/graph_layout.cpp
+        src/graph_edits.cpp
+        ${CMAKE_SOURCE_DIR}/engine/src/tzpl_test_plugins.cpp
     )
     target_include_directories(tzpl_graph_tests PRIVATE src)
     target_link_libraries(tzpl_graph_tests
@@ -350,6 +354,7 @@ if(TZPL_BUILD_APP_JUCE)
         src/widget_gestures.cpp
         src/graph_model.cpp
         src/graph_layout.cpp
+        src/graph_edits.cpp
     )
     target_include_directories(tzpl_app_juce PRIVATE src juce)
 

@@ -23,8 +23,10 @@
 //  overrides, and defMissing pin synthesis. No engine instance needed.
 //
 
+#include "graph_edits.hpp"
 #include "graph_layout.hpp"
 #include "graph_model.hpp"
+#include "tzpl_test_plugins.hpp"
 
 #include <map>
 #include <print>
@@ -227,6 +229,90 @@ static void test_store_overrides() {
     check(node(vm, 10)->x != 1.f, "other silo's stored position ignored");
 }
 
+static void test_edit_helpers() {
+    std::print("Test: edit helpers (canConnect, nextFreeNodeID)\n");
+
+    PortVM f32a2{"out", 2, tzpl_kF32, tzpl_audioRate};
+    PortVM f32a2in{"in", 2, tzpl_kF32, tzpl_audioRate};
+    PortVM f32a1in{"in", 1, tzpl_kF32, tzpl_audioRate};
+    PortVM i64a2in{"in", 2, tzpl_kI64, tzpl_audioRate};
+    PortVM f32e2in{"in", 2, tzpl_kF32, tzpl_eventRate};
+
+    check(canConnect(f32a2, f32a2in, 5), "matching type/rate/chans connects");
+    check(!canConnect(f32a2, f32a1in, 5), "channel mismatch rejected");
+    check(canConnect(f32a2, f32a1in, 0), "Audio Out relaxes channel count");
+    check(!canConnect(f32a2, i64a2in, 5), "element type mismatch rejected");
+    check(!canConnect(f32a2, i64a2in, 0), "Audio Out still checks element type");
+    check(!canConnect(f32a2, f32e2in, 5), "rate mismatch rejected");
+
+    GraphViewModel vm;
+    vm.nodes.push_back({.nodeID = 0});
+    vm.nodes.push_back({.nodeID = 1});
+    check(nextFreeNodeID(vm) == 2, "first free ID is 2");
+    vm.nodes.push_back({.nodeID = 2});
+    vm.nodes.push_back({.nodeID = 3});
+    vm.nodes.push_back({.nodeID = 5});
+    check(nextFreeNodeID(vm) == 4, "gaps are reused");
+}
+
+// End-to-end: the edit submitters against a real (audio-stopped) engine,
+// observed through GraphPoller -- the exact pipeline the GraphView uses.
+static void test_edit_submitters_live() {
+    std::print("Test: edit submitters against a live engine\n");
+
+    engine::AudioStreamParameters params{};
+    params.channels = 2;
+    params.bufferFrames = 512;
+    params.sampleRate = 44100.0;
+    params.deviceName = "default";
+    engine::EngineConfig config;
+    config.numSilos = 1;
+    engine::Engine* e = engine::newEngine(config, params);
+    engine::createSineNode(e);
+
+    GraphPoller poller(e);
+    GraphViewModel vm;
+    check(poller.poll(0, vm), "first poll snapshots");
+    check(!poller.poll(0, vm), "second poll is a no-op");
+
+    long long id = nextFreeNodeID(vm);
+    check(createNode(e, 0, "sinosc", id) == 0, "createNode succeeds");
+    check(poller.poll(0, vm), "poll sees the new node");
+    check(vm.indexOfNode(id) >= 0, "new node in the view-model");
+
+    check(connectNodes(e, 0, id, 0, 0, 0) == 0, "connectNodes succeeds");
+    check(poller.poll(0, vm) && vm.edges.size() == 1, "poll sees the wire");
+
+    check(disconnectWire(e, 0, id, 0, 0, 0) == 0, "disconnectWire succeeds");
+    check(poller.poll(0, vm) && vm.edges.empty(), "wire gone");
+
+    check(connectNodes(e, 0, id, 0, 0, 0) == 0, "reconnect for disconnectNode");
+    poller.poll(0, vm);
+    check(disconnectGraphNode(e, 0, id) == 0, "disconnectGraphNode succeeds");
+    check(poller.poll(0, vm) && vm.edges.empty(), "node's wires gone");
+
+    // The fading variant used by the node context menu: one bundle of
+    // per-wire disconnectSource commands built from the view-model.
+    check(connectNodes(e, 0, id, 0, 0, 0) == 0, "reconnect for disconnectAllWires");
+    poller.poll(0, vm);
+    check(disconnectAllWires(e, 0, vm, id) == 0, "disconnectAllWires succeeds");
+    check(poller.poll(0, vm) && vm.edges.empty(), "faded wires gone from shadow");
+    check(disconnectAllWires(e, 0, vm, 999) == tzpl_errNodeNotFound,
+          "disconnectAllWires rejects unknown node");
+
+    check(freeGraphNode(e, 0, id) == 0, "freeGraphNode succeeds");
+    check(poller.poll(0, vm) && vm.indexOfNode(id) < 0, "node gone");
+
+    // Failed edits report the engine error and leave the graph untouched.
+    check(createNode(e, 0, "no_such_def", 7) != 0, "bad def reports error");
+    check(connectNodes(e, 0, 99, 0, 0, 0) != 0, "bad connect reports error");
+    check(!poller.poll(0, vm), "failed edits do not bump the generation");
+    check(errText(tzpl_errChanMismatch) == "channel count mismatch",
+          "errText maps codes");
+
+    engine::freeEngine(e);
+}
+
 static void test_determinism() {
     std::print("Test: layout determinism\n");
     DefTable t;
@@ -258,6 +344,8 @@ int main() {
     test_fan_in_and_cycle();
     test_unreachable_placed_after_sources();
     test_store_overrides();
+    test_edit_helpers();
+    test_edit_submitters_live();
     test_determinism();
     std::print("\n=== {} passed, {} failed ===\n", gPassed, gFailed);
     return gFailed == 0 ? 0 : 1;

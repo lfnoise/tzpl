@@ -18,13 +18,22 @@
 //  graph_view.hpp
 //  app (JUCE)
 //
-//  The audio graph display: the third center-pane mode alongside the
-//  text editor and notebook. Shows one silo's running nodes as boxes
-//  (inlet pins left, outlet pins right) and connections as wires,
-//  polling the engine's topology shadow at ~8 Hz while visible (one
-//  atomic read per tick when nothing changed). Nodes auto-lay out
-//  left-to-right toward Audio Out; dragged nodes keep their position
-//  for the session. Toolbar: silo selector, Re-layout, Fit.
+//  The audio graph display and editor: the third center-pane mode
+//  alongside the text editor and notebook. Shows one silo's running
+//  nodes as boxes (inlet pins left, outlet pins right) and connections
+//  as wires, polling the engine's topology shadow at ~8 Hz while
+//  visible (one atomic read per tick when nothing changed). Nodes
+//  auto-lay out left-to-right toward Audio Out; dragged nodes keep
+//  their position for the session. Toolbar: silo selector, Re-layout,
+//  Fit.
+//
+//  Editing: drag from a pin to a compatible pin to connect (legal drop
+//  targets highlight; the engine revalidates at submit); Delete removes
+//  the selected wire or frees the selected node; right-click the
+//  background for a new-node palette, right-click a node to disconnect
+//  or free it. Edits submit begin/../go bundles on the message thread;
+//  there is no optimistic UI -- the commit bumps the graph generation
+//  and the next poll redraws. Errors go to `onLog` (the app console).
 //
 
 #ifndef graph_view_hpp
@@ -56,8 +65,35 @@ public:
     void mouseWheelMove(juce::MouseEvent const& e,
                         juce::MouseWheelDetails const& wheel) override;
     void mouseMagnify(juce::MouseEvent const& e, float scaleFactor) override;
+    bool keyPressed(juce::KeyPress const& key) override;
+
+    // Edit feedback line for the app console (message, isError).
+    std::function<void(std::string const&, bool)> onLog;
 
 private:
+    void logLine(juce::String const& msg, bool isError) {
+        if (onLog) onLog(msg.toStdString(), isError);
+    }
+
+    // A pin reference: index into vm_.nodes + port index + direction.
+    struct PinRef {
+        int node = -1;
+        int port = 0;
+        bool input = false;
+        bool valid() const { return node >= 0; }
+        bool operator==(PinRef const&) const = default;
+    };
+
+    PinRef hitPin(juce::Point<float> worldPt) const;
+    // True when connecting srcPin (an outlet) to dstPin (an inlet) passes
+    // the engine's type rules as far as we can tell (unknown defs pass --
+    // the engine is the authority at submit).
+    bool dropIsCompatible(PinRef srcPin, PinRef dstPin) const;
+    void finishWireDrag(juce::Point<float> worldPt);
+    void showBackgroundMenu(juce::Point<float> worldPt);
+    void showNodeMenu(int nodeIndex);
+    // Log err to the console if nonzero, else re-snapshot immediately.
+    void afterEdit(int err, juce::String const& what);
     void timerCallback() override;
     void pollNow();
     void rebuildLayout();   // measure node boxes, then autoLayout
@@ -99,6 +135,11 @@ private:
     bool panning_ = false;
     juce::Point<float> panAnchor_;       // pan_ value at mouseDown
     juce::Point<float> panMouseStart_;   // screen position at mouseDown
+
+    // Wire drag (started on a pin; may run in either direction).
+    PinRef wireFrom_;                    // invalid when not wire-dragging
+    juce::Point<float> wireMouseWorld_;
+    PinRef wireHover_;                   // compatible pin under the mouse
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(GraphView)
 };

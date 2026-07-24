@@ -21,6 +21,7 @@
 
 #include "graph_view.hpp"
 
+#include "graph_edits.hpp"
 #include "tzpl_app_context.hpp"
 #include "tzpl_client_interface.hpp"
 
@@ -100,6 +101,8 @@ GraphView::GraphView(bridge::AppContext& appCtx)
 
     fitButton_.onClick = [this] { zoomToFit(); repaint(); };
     addAndMakeVisible(fitButton_);
+
+    setWantsKeyboardFocus(true); // Delete removes the selected wire/node
 }
 
 void GraphView::selectSilo(int s) {
@@ -199,6 +202,24 @@ int GraphView::hitNode(juce::Point<float> worldPt) const {
             return i;
     }
     return -1;
+}
+
+GraphView::PinRef GraphView::hitPin(juce::Point<float> worldPt) const {
+    float const tol = 9.f / zoom_;
+    PinRef best;
+    float bestDist = tol;
+    for (int i = 0; i < (int)vm_.nodes.size(); ++i) {
+        auto const& n = vm_.nodes[i];
+        for (int p = 0; p < (int)n.ins.size(); ++p) {
+            float d = pinCentre(n, true, p).getDistanceFrom(worldPt);
+            if (d < bestDist) { bestDist = d; best = {i, p, true}; }
+        }
+        for (int p = 0; p < (int)n.outs.size(); ++p) {
+            float d = pinCentre(n, false, p).getDistanceFrom(worldPt);
+            if (d < bestDist) { bestDist = d; best = {i, p, false}; }
+        }
+    }
+    return best;
 }
 
 int GraphView::hitEdge(juce::Point<float> worldPt) const {
@@ -313,6 +334,41 @@ void GraphView::paint(juce::Graphics& g) {
         }
     }
 
+    // Wire drag: rubber band + rings on every compatible drop target.
+    if (wireFrom_.valid()) {
+        PinRef probe; // candidate in normalized (outlet -> inlet) order
+        for (int i = 0; i < (int)vm_.nodes.size(); ++i) {
+            auto const& n = vm_.nodes[i];
+            int numPins = wireFrom_.input ? (int)n.outs.size()
+                                          : (int)n.ins.size();
+            for (int p = 0; p < numPins; ++p) {
+                probe = {i, p, !wireFrom_.input};
+                bool ok = wireFrom_.input ? dropIsCompatible(probe, wireFrom_)
+                                          : dropIsCompatible(wireFrom_, probe);
+                if (!ok) continue;
+                auto c = pinCentre(n, probe.input, p);
+                bool hovered = probe == wireHover_;
+                g.setColour(accent.withAlpha(hovered ? 1.f : 0.5f));
+                float r = kPinR + (hovered ? 4.f : 2.5f);
+                g.drawEllipse(c.x - r, c.y - r, 2 * r, 2 * r,
+                              (hovered ? 2.f : 1.2f) / zoom_);
+            }
+        }
+        auto p1 = pinCentre(vm_.nodes[wireFrom_.node], wireFrom_.input,
+                            wireFrom_.port);
+        auto p2 = wireHover_.valid()
+            ? pinCentre(vm_.nodes[wireHover_.node], wireHover_.input,
+                        wireHover_.port)
+            : wireMouseWorld_;
+        float dx = std::max(30.f, std::abs(p2.x - p1.x) * 0.5f);
+        float dir = wireFrom_.input ? -1.f : 1.f;
+        juce::Path band;
+        band.startNewSubPath(p1);
+        band.cubicTo(p1.x + dir * dx, p1.y, p2.x - dir * dx, p2.y, p2.x, p2.y);
+        g.setColour(accent);
+        g.strokePath(band, selStroke);
+    }
+
     g.restoreState();
 
     // Empty-state hint: only the built-in Audio In / Audio Out present.
@@ -346,7 +402,26 @@ void GraphView::resized() {
 
 void GraphView::mouseDown(juce::MouseEvent const& e) {
     if (e.position.y < kToolbarH) return;
+    grabKeyboardFocus();
     auto w = toWorld(e.position);
+
+    if (e.mods.isPopupMenu()) {
+        int ni = hitNode(w);
+        if (ni >= 0) showNodeMenu(ni);
+        else showBackgroundMenu(w);
+        return;
+    }
+
+    PinRef pin = hitPin(w);
+    if (pin.valid()) {
+        wireFrom_ = pin;
+        wireMouseWorld_ = w;
+        wireHover_ = {};
+        selectedNode_ = -1;
+        selectedEdge_ = -1;
+        repaint();
+        return;
+    }
 
     int ni = hitNode(w);
     if (ni >= 0) {
@@ -373,7 +448,15 @@ void GraphView::mouseDown(juce::MouseEvent const& e) {
 }
 
 void GraphView::mouseDrag(juce::MouseEvent const& e) {
-    if (draggingNode_ >= 0 && draggingNode_ < (int)vm_.nodes.size()) {
+    if (wireFrom_.valid()) {
+        wireMouseWorld_ = toWorld(e.position);
+        PinRef over = hitPin(wireMouseWorld_);
+        wireHover_ = over.valid() && over.input != wireFrom_.input
+                         && dropIsCompatible(wireFrom_.input ? over : wireFrom_,
+                                             wireFrom_.input ? wireFrom_ : over)
+                     ? over : PinRef{};
+        repaint();
+    } else if (draggingNode_ >= 0 && draggingNode_ < (int)vm_.nodes.size()) {
         auto w = toWorld(e.position);
         auto& n = vm_.nodes[draggingNode_];
         n.x = w.x - dragGrabOffset_.x;
@@ -387,9 +470,146 @@ void GraphView::mouseDrag(juce::MouseEvent const& e) {
     }
 }
 
-void GraphView::mouseUp(juce::MouseEvent const&) {
+void GraphView::mouseUp(juce::MouseEvent const& e) {
+    if (wireFrom_.valid()) finishWireDrag(toWorld(e.position));
     draggingNode_ = -1;
     panning_ = false;
+}
+
+// ---------------------------------------------------------------------------
+// Editing
+// ---------------------------------------------------------------------------
+
+bool GraphView::dropIsCompatible(PinRef srcPin, PinRef dstPin) const {
+    if (!srcPin.valid() || !dstPin.valid()) return false;
+    if (srcPin.input || !dstPin.input) return false;
+    auto const& sn = vm_.nodes[srcPin.node];
+    auto const& dn = vm_.nodes[dstPin.node];
+    // Unknown defs: let the engine decide at submit.
+    if (sn.defMissing || dn.defMissing) return true;
+    return graph::canConnect(sn.outs[srcPin.port], dn.ins[dstPin.port],
+                             dn.nodeID);
+}
+
+void GraphView::afterEdit(int err, juce::String const& what) {
+    if (err != 0) {
+        logLine("graph: " + what + " failed: " + graph::errText(err), true);
+    } else {
+        // No optimistic UI: the accepted bundle's commit bumps the graph
+        // generation; re-snapshot now (inline when audio is stopped, next
+        // poll tick otherwise).
+        poller_.invalidate();
+        pollNow();
+    }
+}
+
+void GraphView::finishWireDrag(juce::Point<float> worldPt) {
+    PinRef from = wireFrom_;
+    wireFrom_ = {};
+    wireHover_ = {};
+    repaint();
+
+    PinRef over = hitPin(worldPt);
+    if (!over.valid() || over.input == from.input) return; // dropped on air
+    PinRef src = from.input ? over : from;
+    PinRef dst = from.input ? from : over;
+
+    auto const& sn = vm_.nodes[src.node];
+    auto const& dn = vm_.nodes[dst.node];
+    int err = graph::connectNodes(appCtx_.engine, silo_,
+                                  sn.nodeID, src.port, dn.nodeID, dst.port);
+    afterEdit(err, juce::String("connect ") + juce::String((juce::int64)sn.nodeID)
+                       + "." + juce::String(src.port) + " -> "
+                       + juce::String((juce::int64)dn.nodeID) + "."
+                       + juce::String(dst.port));
+}
+
+bool GraphView::keyPressed(juce::KeyPress const& key) {
+    if (key == juce::KeyPress::deleteKey || key == juce::KeyPress::backspaceKey) {
+        if (selectedEdge_ >= 0 && selectedEdge_ < (int)vm_.edges.size()) {
+            auto const& ed = vm_.edges[selectedEdge_];
+            auto const& sn = vm_.nodes[ed.srcNode];
+            auto const& dn = vm_.nodes[ed.dstNode];
+            selectedEdge_ = -1;
+            afterEdit(graph::disconnectWire(appCtx_.engine, silo_,
+                                            sn.nodeID, ed.srcPort,
+                                            dn.nodeID, ed.dstPort),
+                      "disconnect");
+            return true;
+        }
+        if (selectedNode_ >= 2) { // never delete Audio Out / Audio In
+            long long id = selectedNode_;
+            selectedNode_ = -1;
+            afterEdit(graph::freeGraphNode(appCtx_.engine, silo_, id),
+                      "free node " + juce::String((juce::int64)id));
+            return true;
+        }
+    }
+    if (key == juce::KeyPress::escapeKey
+        && (selectedNode_ >= 0 || selectedEdge_ >= 0)) {
+        selectedNode_ = -1;
+        selectedEdge_ = -1;
+        repaint();
+        return true;
+    }
+    return false;
+}
+
+void GraphView::showBackgroundMenu(juce::Point<float> worldPt) {
+    if (!appCtx_.engine) return;
+    std::vector<engine::DefDesc> defs;
+    engine::listDefDescs(appCtx_.engine, defs);
+
+    juce::PopupMenu m;
+    m.addSectionHeader("New Node");
+    std::vector<std::string> names;
+    for (auto const& d : defs) {
+        if (d.name == "Audio Out" || d.name == "Audio In") continue;
+        names.push_back(d.name);
+        m.addItem((int)names.size(), juce::String(d.name));
+    }
+    if (names.empty()) m.addItem(-1, "(no synthdefs loaded)", false);
+
+    juce::Component::SafePointer<GraphView> safe(this);
+    m.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(nullptr),
+        [safe, names = std::move(names), worldPt](int result) {
+            if (safe == nullptr || result <= 0) return;
+            auto* self = safe.getComponent();
+            long long id = graph::nextFreeNodeID(self->vm_);
+            // Drop the new node where the user clicked.
+            self->layoutStore_.set(self->silo_, id, worldPt.x, worldPt.y);
+            self->afterEdit(graph::createNode(self->appCtx_.engine, self->silo_,
+                                              names[(size_t)result - 1], id),
+                            "new node " + juce::String(names[(size_t)result - 1]));
+        });
+}
+
+void GraphView::showNodeMenu(int nodeIndex) {
+    if (nodeIndex < 0 || nodeIndex >= (int)vm_.nodes.size()) return;
+    long long id = vm_.nodes[nodeIndex].nodeID;
+    bool builtin = id == 0 || id == 1;
+
+    juce::PopupMenu m;
+    m.addSectionHeader(juce::String(vm_.nodes[nodeIndex].defName)
+                       + "  #" + juce::String((juce::int64)id));
+    m.addItem(1, "Disconnect All");
+    m.addItem(2, "Free Node", !builtin);
+
+    juce::Component::SafePointer<GraphView> safe(this);
+    m.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(nullptr),
+        [safe, id](int result) {
+            if (safe == nullptr || result <= 0) return;
+            auto* self = safe.getComponent();
+            if (result == 1)
+                self->afterEdit(graph::disconnectAllWires(self->appCtx_.engine,
+                                                          self->silo_,
+                                                          self->vm_, id),
+                                "disconnect node " + juce::String((juce::int64)id));
+            else if (result == 2)
+                self->afterEdit(graph::freeGraphNode(self->appCtx_.engine,
+                                                     self->silo_, id),
+                                "free node " + juce::String((juce::int64)id));
+        });
 }
 
 void GraphView::mouseWheelMove(juce::MouseEvent const& e,

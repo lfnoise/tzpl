@@ -199,6 +199,9 @@ void MainComponent::setCenterMode(CenterMode m) {
     centerMode_ = m;
     if (m == CenterMode::graph && !graphView_) {
         graphView_ = std::make_unique<GraphView>(appCtx_);
+        graphView_->onLog = [this](std::string const& msg, bool isError) {
+            console_.appendLine({msg, isError ? LineKind::Error : LineKind::Info});
+        };
         addChildComponent(*graphView_);
     }
     notebook_->setVisible(m == CenterMode::notebook);
