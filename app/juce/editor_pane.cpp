@@ -34,6 +34,23 @@ juce::int64 fileModMs(juce::File const& f) {
     if (f == juce::File() || !f.existsAsFile()) return 0;
     return f.getLastModificationTime().toMilliseconds();
 }
+
+// Source files are LF, on disk and in memory. Both halves of that need saying
+// explicitly: CodeDocument defaults its newline to CRLF (so the return key
+// would type one), and File::replaceWithText defaults its line ending to CRLF
+// (so every save would rewrite the whole file, not just the edited lines).
+constexpr char const* kLineEnding = "\n";
+
+std::unique_ptr<CodeDocument> makeDocument() {
+    auto doc = std::make_unique<CodeDocument>();
+    doc->setNewLineCharacters(kLineEnding);
+    return doc;
+}
+
+bool writeTextFile(juce::File const& f, String const& text) {
+    return f.replaceWithText(text, /*asUnicode=*/false,
+                             /*writeUnicodeHeaderBytes=*/false, kLineEnding);
+}
 }  // namespace
 
 // ---------------------------------------------------------------------------
@@ -209,7 +226,7 @@ void EditorPane::addTabInternal(std::unique_ptr<Tab> tab) {
 void EditorPane::newTab(String const& name) {
     auto tab = std::make_unique<Tab>();
     tab->name = name;
-    tab->doc = std::make_unique<CodeDocument>();
+    tab->doc = makeDocument();
     tab->doc->setSavePoint();
     tab->editor = std::make_unique<TzplCodeEditor>(*tab->doc, &tokeniser_);
     addTabInternal(std::move(tab));
@@ -227,7 +244,7 @@ bool EditorPane::openFile(juce::File const& file) {
     auto tab = std::make_unique<Tab>();
     tab->name = file.getFileName();
     tab->file = file;
-    tab->doc = std::make_unique<CodeDocument>();
+    tab->doc = makeDocument();
     tab->doc->replaceAllContent(file.loadFileAsString());
     tab->doc->setSavePoint();
     tab->doc->clearUndoHistory();
@@ -241,7 +258,7 @@ bool EditorPane::openFileAsCopy(juce::File const& file) {
     if (!file.existsAsFile()) return false;
     auto tab = std::make_unique<Tab>();
     tab->name = file.getFileName();
-    tab->doc = std::make_unique<CodeDocument>();
+    tab->doc = makeDocument();
     tab->doc->replaceAllContent(file.loadFileAsString());
     tab->doc->clearUndoHistory();
     // No file path and no save point: the tab is an untitled copy that
@@ -286,7 +303,7 @@ juce::File EditorPane::tabFile(int index) const {
 bool EditorPane::saveTab(int index) {
     auto* tab = tabAt(index);
     if (!tab || tab->file == juce::File()) return false;
-    if (!tab->file.replaceWithText(tab->doc->getAllContent())) return false;
+    if (!writeTextFile(tab->file, tab->doc->getAllContent())) return false;
     tab->doc->setSavePoint();
     tab->diskModTime = fileModMs(tab->file);
     tab->externallyChanged = false;
@@ -297,7 +314,7 @@ bool EditorPane::saveTab(int index) {
 bool EditorPane::saveTabAs(int index, juce::File const& f) {
     auto* tab = tabAt(index);
     if (!tab) return false;
-    if (!f.replaceWithText(tab->doc->getAllContent())) return false;
+    if (!writeTextFile(f, tab->doc->getAllContent())) return false;
     tab->file = f;
     tab->name = f.getFileName();
     tab->doc->setSavePoint();
@@ -309,7 +326,7 @@ bool EditorPane::saveTabAs(int index, juce::File const& f) {
 
 bool EditorPane::saveCopy(juce::File const& f) const {
     auto* tab = activeTab();
-    return tab && f.replaceWithText(tab->doc->getAllContent());
+    return tab && writeTextFile(f, tab->doc->getAllContent());
 }
 
 int EditorPane::saveAll() {

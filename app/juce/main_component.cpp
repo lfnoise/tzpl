@@ -974,7 +974,8 @@ void MainComponent::createProject(juce::File const& dir) {
             "-- silos = 2\n"
             "-- sampleRate = 48000\n"
             "-- bufferFrames = 512\n"
-            "-- channels = 2\n");
+            "-- channels = 2\n",
+            /*asUnicode=*/false, /*writeUnicodeHeaderBytes=*/false, "\n");
     }
     juce::File doc = dir.getChildFile("main.tzd");
     if (doc.existsAsFile()) {  // re-running over an existing project

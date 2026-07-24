@@ -402,6 +402,7 @@ public:
         // (The command loop left the notebook shown and mutated the active
         // tab via the edit commands -- switch back and start on a clean tab.)
         main->testShowNotebook(false);
+        runSaveLineEndingSelfTest();
         runRevertSelfTest();
         main->testEditorPane().newTab("evaltest.x");
         evalPhase_ = 0;
@@ -523,13 +524,51 @@ public:
         std::fflush(stdout);
     }
 
+    // Saving must leave the file LF-only, including the lines the return key
+    // typed. JUCE defaults both CodeDocument's newline and replaceWithText's
+    // line ending to CRLF, so getting this wrong rewrites a whole source file
+    // on the first save.
+    void runSaveLineEndingSelfTest() {
+        auto& pane = window_->mainComponent()->testEditorPane();
+        auto tmp = juce::File::getSpecialLocation(juce::File::tempDirectory)
+                       .getChildFile("tzpl_lineending_selftest.x");
+        tmp.replaceWithText("let a = 1;\nlet b = 2;\n", false, false, "\n");
+
+        bool opened = pane.openFile(tmp);
+        int idx = pane.activeTabIndex();
+        // Type a line the way a user would: the newline via the return key,
+        // which is what picks up CodeDocument's newline setting.
+        if (auto* ed = pane.activeEditor()) {
+            ed->moveCaretToEnd(false);
+            ed->keyPressed(juce::KeyPress(juce::KeyPress::returnKey));
+        }
+        window_->mainComponent()->testTypeIntoEditor("let c = 3;");
+        // The document itself has to stay clean too -- eval runs off this
+        // text directly, without a trip through the file.
+        bool docNoCR = !pane.getAllText().containsChar('\r');
+        bool saved = pane.saveActive();
+
+        auto bytes = tmp.loadFileAsString();
+        bool fileNoCR = !bytes.containsChar('\r');
+        bool contentOk = bytes.contains("let c = 3;");
+
+        bool ok = opened && saved && docNoCR && fileNoCR && contentOk;
+        std::printf("SELFTEST LINEENDINGS %s: saved=%d docNoCR=%d fileNoCR=%d "
+                    "content=%d\n", ok ? "OK" : "FAILED", (int)saved,
+                    (int)docNoCR, (int)fileNoCR, (int)contentOk);
+        std::fflush(stdout);
+
+        pane.closeTab(idx);
+        tmp.deleteFile();
+    }
+
     // Revert + external-change detection: open a temp file, edit it on disk
     // behind the app's back, confirm the tab is flagged, then reload it.
     void runRevertSelfTest() {
         auto& pane = window_->mainComponent()->testEditorPane();
         auto tmp = juce::File::getSpecialLocation(juce::File::tempDirectory)
                        .getChildFile("tzpl_revert_selftest.x");
-        tmp.replaceWithText("let a = 1;\n");
+        tmp.replaceWithText("let a = 1;\n", false, false, "\n");
 
         bool opened = pane.openFile(tmp);
         int idx = pane.activeTabIndex();
@@ -537,7 +576,7 @@ public:
 
         // Rewrite on disk with a guaranteed-later mtime so the poll sees it
         // regardless of filesystem timestamp granularity.
-        tmp.replaceWithText("let a = 2;\n");
+        tmp.replaceWithText("let a = 2;\n", false, false, "\n");
         tmp.setLastModificationTime(tmp.getLastModificationTime()
                                     + juce::RelativeTime::seconds(2));
 
