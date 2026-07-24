@@ -259,9 +259,10 @@ A single plugin can also be loaded by name via `loadDef(engine, dirPath, defName
 Connections require type compatibility:
 
 - **Strict** (`compatibleTypes`): Exact match of rate, element type, and channel count.
-- **Relaxed** (`relaxedCompatibleTypes`): Allows channel count mismatch. Used for
-  connections to the output node (ID 0). Extra channels are zero-filled; fewer channels
-  are truncated.
+  Applies to the direct port-to-port links the engine builds internally.
+- **Relaxed** (`relaxedCompatibleTypes`): Rate and element type only. This is what
+  `connect()` requires of a user connection -- differing channel counts are adapted
+  rather than rejected (see *Channel Adaptation*).
 
 Type checking happens before any link is broken, so a rejected connect leaves whatever
 was already feeding the inlet in place.
@@ -383,11 +384,13 @@ Seven interpolation curves are available:
 | `fadeEaseOutCubic` | Fast start, slow end |
 
 
-## 6a. Fan-In Mixers (`tzpl_mixer.hpp/cpp`)
+## 6a. Hidden Helper Nodes
 
-Mixers, like crossfaders, are created by the engine itself: they have `nodeID == -1`,
-live in no hash table, and never appear in the topology shadow -- the graph view shows
-the user's connection, not the machinery behind it.
+Besides crossfaders, two other node kinds are created by the engine itself. All of them
+have `nodeID == -1`, live in no hash table, and never appear in the topology shadow --
+the graph view shows the user's connection, not the machinery behind it.
+
+### Fan-In Mixers (`tzpl_mixer.hpp/cpp`)
 
 Connecting a second source to an occupied inlet splices in a mixer that sums its inputs
 and drives the destination; `InPort::mixerNode_` points at it. A mixer has a fixed number
@@ -397,6 +400,26 @@ Chaining never moves an existing link, which is what makes it safe while crossfa
 running into slots. When one source is left the chain collapses back to a direct
 connection (deferred while a fade is still in flight, since the fader reads a slot's
 buffer).
+
+### Channel Adaptation (`tzpl_chanadapt.hpp/cpp`)
+
+Any outlet can drive any inlet of the same element type and rate. If the channel counts
+differ, an adapter node is spliced in immediately after the source, so everything
+downstream of it -- crossfader, mixer, destination -- sees matching types:
+
+- **Widening** (src < dst): `out[c] = in[c & (srcChans-1)]`. A mono source fills every
+  destination channel; stereo into a quad inlet lands as (L, R, L, R).
+- **Narrowing** (src > dst): `out[c] = sum of in[j] for all j & (dstChans-1) == c`. An
+  8-channel source into a stereo inlet mixes down to (a0+a2+a4+a6, a1+a3+a5+a7).
+
+Channel counts are required to be powers of two, so the index wrap is a mask -- the same
+assumption the synthdef compiler's codegen makes when it wraps channel indices.
+
+An adapter belongs to exactly one connection and retires itself (disconnects and goes to
+the dead-node queue) as soon as either end is unlinked. `Silo::unlink` is the single
+funnel where that is detected, which imposes one rule on the rest of the engine: when
+re-routing a source, **connect the new link before breaking the old one**, or an adapter
+in that source's path will retire out from under the rewire.
 
 
 ## 7. Polyphonic Voice Management (`main.cpp` — Voicer template)

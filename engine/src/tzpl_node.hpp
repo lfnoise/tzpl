@@ -182,10 +182,12 @@ struct Node {
     bool rt_active = false;
     bool triggered = false;
     // Which kind of hidden helper node this is, if any (see tzpl_mixer.hpp /
-    // tzpl_xfader.hpp). Both kinds have nodeID < 0, and the fan-in code has
-    // to tell them apart.
+    // tzpl_xfader.hpp / tzpl_chanadapt.hpp). All of them have nodeID < 0, and
+    // the connection code has to tell them apart.
     bool isMixer_ = false;
     bool isXFader_ = false;
+    bool isAdapter_ = false;
+    bool retiring_ = false; // adapter is being reclaimed (see retireAdapter)
     
     Node(Engine* e, Silo* silo, NodeDefInfo const& inInfo); // subnode
     Node(Engine* e, Silo* silo, NodeDef* def, i64 nodeID);

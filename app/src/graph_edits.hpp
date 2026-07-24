@@ -35,12 +35,12 @@
 
 namespace graph {
 
-// Mirror of the engine's connection type rules (Silo::compatibleTypes /
-// relaxedCompatibleTypes): rate and element type must match; channel
-// counts must match too unless the destination is the Audio Out node
-// (nodeID 0), which accepts any channel count. Used to highlight legal
-// drop targets while dragging a wire -- the engine still revalidates at
-// submit.
+// Mirror of the engine's connection type rules
+// (Silo::relaxedCompatibleTypes): rate and element type must match.
+// Channel counts need not -- the engine adapts them with a hidden node
+// (wrapping a narrower source across the destination's channels, folding a
+// wider one down). Used to highlight legal drop targets while dragging a
+// wire -- the engine still revalidates at submit.
 bool canConnect(PortVM const& src, PortVM const& dst, long long dstNodeID);
 
 // Smallest nodeID >= 2 not used by any node in `vm` (0/1 are the

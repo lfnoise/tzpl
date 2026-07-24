@@ -14,6 +14,7 @@
 //
 
 #include "tzpl_mixer.hpp"
+#include "tzpl_chanadapt.hpp"
 #include "tzpl_engine.hpp"
 
 namespace engine {
@@ -153,7 +154,9 @@ MixerSlot findFreeMixerSlot(Node* head) {
 MixerSlot findMixerSlot(Node* head, OutPort* src) {
     for (Node* m = head; m; m = mixerLink(m)) {
         for (int i = 0; i < (int)m->ins.size(); ++i) {
-            if (m->ins[i].srcPort_ == src) return {m, i};
+            // adaptedFrom(): a slot fed through a hidden channel adapter
+            // still belongs to the source behind it.
+            if (adaptedFrom(m->ins[i].srcPort_) == src) return {m, i};
         }
     }
     return {};
@@ -174,7 +177,7 @@ int collectMixerSources(Node* head, OutPort** out, int max) {
     for (Node* m = head; m; m = mixerLink(m)) {
         for (auto& in : m->ins) {
             if (!in.srcPort_ || in.srcPort_->node_->isMixer_) continue;
-            if (count < max) out[count++] = in.srcPort_;
+            if (count < max) out[count++] = adaptedFrom(in.srcPort_);
         }
     }
     return count;
@@ -248,31 +251,37 @@ bool removeFromMixer(Silo* s, Node* head, OutPort* src) {
     return true;
 }
 
-// Unlink and kill every mixer in the chain. Returns the one remaining real
-// source, if any (the caller decides what to do with it).
-static OutPort* teardownChain(Silo* s, InPort* dst, bool freeFaders) {
-    OutPort* remaining = nullptr;
+// The first real source feeding the chain, ignoring chain links.
+static OutPort* firstChainSource(Node* head) {
+    for (Node* m = head; m; m = mixerLink(m)) {
+        for (auto& in : m->ins) {
+            if (in.srcPort_ && !in.srcPort_->node_->isMixer_) return in.srcPort_;
+        }
+    }
+    return nullptr;
+}
+
+// Unlink and kill every mixer in the chain.
+static void teardownChain(Silo* s, InPort* dst, bool freeFaders) {
     Node* m = dst->mixerNode_;
     while (m) {
         Node* next = mixerLink(m); // before disconnecting clears the link
-        for (auto& in : m->ins) {
-            Node* src = in.srcPort_ ? in.srcPort_->node_ : nullptr;
-            if (!src || src->isMixer_) continue;
-            if (freeFaders && src->isXFader_) {
-                // A crossfader fading into this chain: once the chain is
-                // gone nothing reaches it, so it would never self-remove.
-                s->disconnectNode(src);
-                s->pushDeadNode(src);
-                continue;
+        if (freeFaders) {
+            for (auto& in : m->ins) {
+                Node* src = in.srcPort_ ? in.srcPort_->node_ : nullptr;
+                if (src && src->isXFader_) {
+                    // A crossfader fading into this chain: once the chain is
+                    // gone nothing reaches it, so it would never self-remove.
+                    s->disconnectNode(src);
+                    s->pushDeadNode(src);
+                }
             }
-            if (!remaining) remaining = in.srcPort_;
         }
         s->disconnectNode(m);
         s->pushDeadNode(m);
         m = next;
     }
     dst->mixerNode_ = nullptr;
-    return remaining;
 }
 
 void collapseMixer(Silo* s, InPort* dst) {
@@ -283,12 +292,14 @@ void collapseMixer(Silo* s, InPort* dst) {
     // chain in place is harmless -- a lone source just sums with zeroes.
     if (hasPendingFade(head)) return;
 
-    OutPort* remaining = teardownChain(s, dst, /*freeFaders=*/false);
-
-    // Restore direct connection (or leave disconnected if no source remains)
+    // Restore the direct connection BEFORE tearing the chain down. The
+    // survivor may reach the mixer through a hidden channel adapter, and an
+    // adapter that momentarily loses every destination retires itself.
+    OutPort* remaining = firstChainSource(head);
     if (remaining) {
         s->connect(remaining, dst);
     }
+    teardownChain(s, dst, /*freeFaders=*/false);
 }
 
 void freeMixerChain(Silo* s, InPort* dst) {

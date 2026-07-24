@@ -670,6 +670,241 @@ static void test_fan_in_free_and_replace() {
     freeEngine(e);
 }
 
+// ---------------------------------------------------------------------------
+// Channel adaptation: any outlet drives any inlet of the same element type
+// and rate. Widening wraps the source's channels; narrowing folds them.
+// ---------------------------------------------------------------------------
+
+// An unconnected pass node with its inlet set to `vals`: a DC source of
+// exactly `chans` channels.
+static void addWideDCSource(Engine* e, i64 id, char const* def,
+                            int chans, f32 const* vals) {
+    begin(e);
+    newNode(def, id);
+    setInput({id, 0}, chans, vals);
+    go(0);
+}
+
+// Render one block and return the first frame (all frames are equal here).
+static std::vector<f32> renderFrame(Engine* e, AudioStreamParameters const& p) {
+    std::vector<f32> buf(p.bufferFrames * p.channels);
+    for (int i = 0; i < 4; ++i) renderNRTBlock(e, buf.data());
+    return std::vector<f32>(buf.begin(), buf.begin() + p.channels);
+}
+
+static Engine* newAdaptEngine(AudioStreamParameters& params, int outChannels) {
+    params.channels = outChannels;
+    params.bufferFrames = 64;
+    params.sampleRate = 44100.0;
+    EngineConfig config;
+    config.numSilos = 1;
+    Engine* e = newEngineNRT(config, params);
+    createPassNode(e, "pass1", 1);
+    createPassNode(e, "pass2", 2);
+    createPassNode(e, "pass4", 4);
+    createPassNode(e, "pass8", 8);
+    safetyLimiter(e, kOff);
+    masterGain(e, 1.f);
+    return e;
+}
+
+static void test_channel_widening() {
+    std::print("Test: connecting a narrower source to a wider inlet\n");
+
+    AudioStreamParameters params{};
+    Engine* e = newAdaptEngine(params, 4); // 4-channel Audio Out
+
+    // Mono -> quad: the one channel reaches all four.
+    f32 mono[1] = {3.f};
+    addWideDCSource(e, 10, "pass1", 1, mono);
+    begin(e); connect({10, 0}, {0, 0}); go(0);
+    auto f = renderFrame(e, params);
+    check(f[0] == 3.f && f[1] == 3.f && f[2] == 3.f && f[3] == 3.f,
+          std::format("mono fills every channel ({}, {}, {}, {})",
+                      f[0], f[1], f[2], f[3]));
+
+    begin(e); disconnectInput({0, 0}); go(0);
+
+    // Stereo -> quad: (L, R) repeats as (L, R, L, R).
+    f32 stereo[2] = {1.f, 2.f};
+    addWideDCSource(e, 11, "pass2", 2, stereo);
+    begin(e); connect({11, 0}, {0, 0}); go(0);
+    f = renderFrame(e, params);
+    check(f[0] == 1.f && f[1] == 2.f && f[2] == 1.f && f[3] == 2.f,
+          std::format("stereo wraps around the quad inlet ({}, {}, {}, {})",
+                      f[0], f[1], f[2], f[3]));
+
+    freeEngine(e);
+}
+
+static void test_channel_narrowing() {
+    std::print("Test: connecting a wider source to a narrower inlet\n");
+
+    AudioStreamParameters params{};
+    Engine* e = newAdaptEngine(params, 2); // stereo Audio Out
+
+    // 8 -> 2: (a0+a2+a4+a6, a1+a3+a5+a7).
+    f32 eight[8] = {1.f, 2.f, 4.f, 8.f, 16.f, 32.f, 64.f, 128.f};
+    addWideDCSource(e, 10, "pass8", 8, eight);
+    begin(e); connect({10, 0}, {0, 0}); go(0);
+    auto f = renderFrame(e, params);
+    check(f[0] == 1.f + 4.f + 16.f + 64.f && f[1] == 2.f + 8.f + 32.f + 128.f,
+          std::format("8 channels fold onto 2 ({}, {})", f[0], f[1]));
+
+    // ... and through a plugin inlet, not just Audio Out: 8 -> 4 -> 2.
+    begin(e); disconnectInput({0, 0}); go(0);
+    f32 zero4[4] = {0.f, 0.f, 0.f, 0.f};
+    addWideDCSource(e, 20, "pass4", 4, zero4);
+    begin(e);
+    connect({10, 0}, {20, 0});   // 8 -> 4 inlet: (a0+a4, a1+a5, a2+a6, a3+a7)
+    connect({20, 0}, {0, 0});    // 4 -> 2 out:   fold again
+    go(0);
+    f = renderFrame(e, params);
+    check(f[0] == 1.f + 16.f + 4.f + 64.f && f[1] == 2.f + 32.f + 8.f + 128.f,
+          std::format("fold composes across two hops ({}, {})", f[0], f[1]));
+
+    freeEngine(e);
+}
+
+static void test_channel_mixed_fan_in() {
+    std::print("Test: fan-in of mixed channel counts\n");
+
+    AudioStreamParameters params{};
+    Engine* e = newAdaptEngine(params, 2);
+
+    f32 mono[1] = {1.f};
+    f32 stereo[2] = {10.f, 20.f};
+    f32 quad[4] = {100.f, 200.f, 400.f, 800.f};
+
+    addWideDCSource(e, 10, "pass1", 1, mono);
+    addWideDCSource(e, 11, "pass2", 2, stereo);
+    addWideDCSource(e, 12, "pass4", 4, quad);
+
+    // Each adapts to the outlet's 2 channels, then they sum:
+    //   mono   -> (1, 1)
+    //   stereo -> (10, 20)
+    //   quad   -> (100+400, 200+800)
+    for (i64 id : {10, 11, 12}) { begin(e); connect({id, 0}, {0, 0}); go(0); }
+    auto f = renderFrame(e, params);
+    check(f[0] == 1.f + 10.f + 500.f && f[1] == 1.f + 20.f + 1000.f,
+          std::format("mixed widths sum after adaptation ({}, {})", f[0], f[1]));
+
+    // Removing the widest one leaves the others exactly as they were.
+    begin(e); disconnectSource({12, 0}, {0, 0}); go(0);
+    f = renderFrame(e, params);
+    check(f[0] == 11.f && f[1] == 21.f,
+          std::format("disconnecting an adapted source leaves the rest ({}, {})",
+                      f[0], f[1]));
+
+    // Down to one source the fan-in collapses, but the adapter must stay.
+    begin(e); disconnectSource({11, 0}, {0, 0}); go(0);
+    f = renderFrame(e, params);
+    check(f[0] == 1.f && f[1] == 1.f,
+          std::format("lone mono source still fills both channels ({}, {})",
+                      f[0], f[1]));
+
+    begin(e); disconnectSource({10, 0}, {0, 0}); go(0);
+    f = renderFrame(e, params);
+    check(f[0] == 0.f && f[1] == 0.f, "inlet silent once the last source goes");
+
+    // Everything reconnects cleanly afterwards.
+    begin(e); connect({11, 0}, {0, 0}); go(0);
+    f = renderFrame(e, params);
+    check(f[0] == 10.f && f[1] == 20.f, "inlet reusable after adapters retire");
+
+    freeEngine(e);
+}
+
+static void test_channel_adapt_with_xfades() {
+    std::print("Test: crossfaded connects and disconnects across widths\n");
+
+    AudioStreamParameters params{};
+    Engine* e = newAdaptEngine(params, 2);
+
+    f64 const xfade = 0.1;
+    int const blocksPerFade =
+        int(xfade * params.sampleRate / params.bufferFrames) + 4;
+    std::vector<f32> buf(params.bufferFrames * params.channels);
+
+    f32 mono[1] = {5.f};
+    f32 quad[4] = {1.f, 2.f, 4.f, 8.f};
+    addWideDCSource(e, 10, "pass1", 1, mono);
+    addWideDCSource(e, 11, "pass4", 4, quad);
+
+    begin(e); connect({10, 0}, {0, 0}, xfade); go(0);
+    for (int b = 0; b < blocksPerFade; ++b) renderNRTBlock(e, buf.data());
+    begin(e); connect({11, 0}, {0, 0}, xfade); go(0);
+    for (int b = 0; b < blocksPerFade; ++b) renderNRTBlock(e, buf.data());
+
+    auto f = renderFrame(e, params);
+    check(f[0] == 5.f + 5.f && f[1] == 5.f + 10.f,
+          std::format("both faded-in sources landed adapted ({}, {})", f[0], f[1]));
+
+    begin(e); disconnectSource({11, 0}, {0, 0}, xfade); go(0);
+    for (int b = 0; b < blocksPerFade; ++b) renderNRTBlock(e, buf.data());
+    f = renderFrame(e, params);
+    check(f[0] == 5.f && f[1] == 5.f,
+          std::format("faded-out source is gone ({}, {})", f[0], f[1]));
+
+    freeEngine(e);
+}
+
+// Adapters are hidden nodes owned by a single connection. Whatever removes
+// that connection has to take the adapter with it.
+static void test_channel_adapt_lifetime() {
+    std::print("Test: hidden adapters do not outlive their connection\n");
+
+    AudioStreamParameters params{};
+    Engine* e = newAdaptEngine(params, 2);
+
+    f32 mono[1] = {7.f};
+    f32 quad[4] = {1.f, 2.f, 4.f, 8.f};
+    f64 const xfade = 0.05;
+    int const blocksPerFade =
+        int(xfade * params.sampleRate / params.bufferFrames) + 4;
+    std::vector<f32> buf(params.bufferFrames * params.channels);
+
+    // Every teardown route, over and over: whatever leaks or double-frees
+    // shows up under ASan, and a stale adapter shows up as leftover signal.
+    for (int round = 0; round < 8; ++round) {
+        addWideDCSource(e, 10, "pass1", 1, mono);
+        addWideDCSource(e, 11, "pass4", 4, quad);
+
+        begin(e); connect({10, 0}, {0, 0}); connect({11, 0}, {0, 0}); go(0);
+        auto f = renderFrame(e, params);
+        check(f[0] == 7.f + 5.f && f[1] == 7.f + 10.f,
+              std::format("round {}: adapted fan-in", round));
+
+        switch (round % 4) {
+            case 0: // free the source nodes outright
+                begin(e); freeNode(10); freeNode(11); go(0);
+                break;
+            case 1: // disconnect the destination inlet
+                begin(e); disconnectInput({0, 0}); go(0);
+                begin(e); freeNode(10); freeNode(11); go(0);
+                break;
+            case 2: // disconnect each source's outlet
+                begin(e); disconnectOutput({10, 0}); disconnectOutput({11, 0}); go(0);
+                begin(e); freeNode(10); freeNode(11); go(0);
+                break;
+            case 3: // fade both out, then drop the nodes
+                begin(e);
+                disconnectSource({10, 0}, {0, 0}, xfade);
+                disconnectSource({11, 0}, {0, 0}, xfade);
+                go(0);
+                for (int b = 0; b < blocksPerFade; ++b) renderNRTBlock(e, buf.data());
+                begin(e); freeNode(10); freeNode(11); go(0);
+                break;
+        }
+
+        f = renderFrame(e, params);
+        check(f[0] == 0.f && f[1] == 0.f,
+              std::format("round {}: nothing left behind", round));
+    }
+
+    freeEngine(e);
+}
+
 int main() {
     std::print("=== Graph shadow tests ===\n\n");
 
@@ -686,6 +921,11 @@ int main() {
     test_fan_in_disconnect_input_teardown();
     test_fan_in_with_xfades();
     test_fan_in_free_and_replace();
+    test_channel_widening();
+    test_channel_narrowing();
+    test_channel_mixed_fan_in();
+    test_channel_adapt_with_xfades();
+    test_channel_adapt_lifetime();
 
     std::print("\n=== {} passed, {} failed ===\n", gTestsPassed, gTestsFailed);
     return gTestsFailed == 0 ? 0 : 1;

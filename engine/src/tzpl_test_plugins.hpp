@@ -54,6 +54,12 @@ void createAddOpNode(Engine* e);
 void createMulOpNode(Engine* e);
 void createVoicerTestNode(Engine* e);
 
+// A pass-through node with `numChannels` channels in and out (out = in).
+// Left unconnected with its inlet set via setInput it is an exact DC source
+// of a chosen width -- what the channel-adaptation tests are built from.
+// Registered under `name`; numChannels must be 1, 2, 4 or 8.
+void createPassNode(Engine* e, char const* name, int numChannels);
+
 } // namespace engine
 
 #endif // tzpl_test_plugins_h

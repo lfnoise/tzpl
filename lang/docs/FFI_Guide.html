@@ -3670,7 +3670,7 @@ collector <span class="fn">spawn</span>(Msg.int(<span class="num">0</span>)) <sp
   <tr><td><code>errCyclicConnection</code></td><td>Connection would create a cycle</td></tr>
   <tr><td><code>errTypeMismatch</code></td><td>Port element types do not match</td></tr>
   <tr><td><code>errRateMismatch</code></td><td>Port signal rates do not match</td></tr>
-  <tr><td><code>errChanMismatch</code></td><td>Port channel counts do not match</td></tr>
+  <tr><td><code>errChanMismatch</code></td><td>Port channel counts do not match (<code>connect</code> adapts them instead; this is for <code>setInput</code>/<code>replaceNode</code>, which do not)</td></tr>
   <tr><td><code>errNumPortsMismatch</code></td><td>Number of ports does not match</td></tr>
   <tr><td><code>errNotImplemented</code></td><td>Feature not yet implemented</td></tr>
   <tr><td><code>errTooLate</code></td><td>Scheduled event missed its deadline</td></tr>

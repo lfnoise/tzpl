@@ -36,6 +36,7 @@ set(LIB_SOURCES
     src/tzpl_node.cpp
     src/tzpl_xfader.cpp
     src/tzpl_mixer.cpp
+    src/tzpl_chanadapt.cpp
     src/tzpl_test_plugins.cpp
     src/tzpl_audio_file_writer.cpp
 )

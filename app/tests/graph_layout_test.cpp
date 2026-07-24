@@ -242,8 +242,8 @@ static void test_edit_helpers() {
     PortVM f32e2in{"in", 2, tzpl_kF32, tzpl_eventRate};
 
     check(canConnect(f32a2, f32a2in, 5), "matching type/rate/chans connects");
-    check(!canConnect(f32a2, f32a1in, 5), "channel mismatch rejected");
-    check(canConnect(f32a2, f32a1in, 0), "Audio Out relaxes channel count");
+    check(canConnect(f32a2, f32a1in, 5), "channel mismatch is adapted, not rejected");
+    check(canConnect(f32a2, f32a1in, 0), "Audio Out takes any channel count");
     check(!canConnect(f32a2, i64a2in, 5), "element type mismatch rejected");
     check(!canConnect(f32a2, i64a2in, 0), "Audio Out still checks element type");
     check(!canConnect(f32a2, f32e2in, 5), "rate mismatch rejected");

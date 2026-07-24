@@ -144,8 +144,11 @@ void XFadeTwo_processAudio(tzpl_SynthData* synth) {
         Silo* s = sub->silo_;
         InPort* dstPort = sub->outs[0].dstList_;
         OutPort* srcPort = sub->ins[1].srcPort_;
+        // Splice the new source around self first, then unlink: a hidden
+        // channel adapter feeding this fade retires itself the moment it has
+        // no destination left, so it must never be left without one.
+        s->connect(srcPort, dstPort);
         s->disconnectNode(sub); // unlink self.
-        s->connect(srcPort, dstPort); // splice new source around self directly to destination.
         s->pushDeadNode(sub);
     } else {
         o->xfade += o->slope;
@@ -165,8 +168,11 @@ void XFadeIn_processAudio(tzpl_SynthData* synth) {
         Silo* s = sub->silo_;
         InPort* dstPort = sub->outs[0].dstList_;
         OutPort* srcPort = sub->ins[1].srcPort_;
+        // Splice the new source around self first, then unlink: a hidden
+        // channel adapter feeding this fade retires itself the moment it has
+        // no destination left, so it must never be left without one.
+        s->connect(srcPort, dstPort);
         s->disconnectNode(sub); // unlink self.
-        s->connect(srcPort, dstPort); // splice new source around self directly to destination.
         s->pushDeadNode(sub);
     } else {
         o->xfade += o->slope;
@@ -226,37 +232,25 @@ Node* newXFaderNodeT(Engine* e, Silo* silo, f64 xfadeTime, tzpl_SignalType type)
     info.name = "xfader";
     info.num_ins = 2;
     info.num_outs = 1;
-    
-    PortInfo a{"a", {type.elem, tzpl_audioRate, 2}};
-    PortInfo b{"b", {type.elem, tzpl_audioRate, 2}};
+
+    // Ports carry the connection's own type: the fade runs over however many
+    // channels the signal has, and the port buffers are sized to match.
+    PortInfo a{"a", type};
+    PortInfo b{"b", type};
     info.ins = (PortInfo*)calloc(info.num_ins, sizeof(PortInfo));
     info.ins[0] = a;
     info.ins[1] = b;
-    
-    PortInfo out{"out", {type.elem, tzpl_audioRate, 2}};
+
+    PortInfo out{"out", type};
     info.outs = (PortInfo*)calloc(info.num_outs, sizeof(PortInfo));
     info.outs[0] = out;
     info.funs = funs;
-    
+
     Node* sub = new Node(e, silo, info);
     sub->isXFader_ = true;
 
     free(info.ins);
     free(info.outs);
-
-    InPort srcA, srcB;
-    srcA.node_ = srcB.node_ = sub;
-    srcA.type_ = srcB.type_ = type;
-    srcA.index_ = 0;
-    srcB.index_ = 1;
-
-    OutPort outPort;
-    outPort.node_  = sub;
-    outPort.index_ = 0;
-
-    sub->ins.push_back(srcA);
-    sub->ins.push_back(srcB);
-    sub->outs.push_back(outPort);    
 
     XFader<T,F>* xfader = (XFader<T,F>*)sub->synth;
 
@@ -301,8 +295,14 @@ tzpl_SErr setupXFaderT(Silo* s, Node* sub, OutPort* newSrc, InPort* dst, void* v
     sub->ins[0].type_ = sub->ins[1].type_ = sub->outs[0].type_ = dst->type_;
 
     OutPort* oldSrc = dst->srcPort_;
+    // Connect before disconnecting: if the old source reaches dst through a
+    // hidden channel adapter, the adapter must keep a destination at all
+    // times or it retires itself out from under this fade.
+    if (oldSrc) {
+        s->connect(oldSrc, &sub->ins[0]);
+    }
     s->disconnect(dst);
-    
+
     int byteSize = calcByteSize(dst->type_);
     if (newSrc) {
         if (oldSrc) {
@@ -323,9 +323,6 @@ tzpl_SErr setupXFaderT(Silo* s, Node* sub, OutPort* newSrc, InPort* dst, void* v
         }
     }
     
-    if (oldSrc) {
-        s->connect(oldSrc, &sub->ins[0]);
-    }
     if (newSrc) {
         s->connect(newSrc, &sub->ins[1]);
     }

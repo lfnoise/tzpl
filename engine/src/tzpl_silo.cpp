@@ -23,6 +23,7 @@
 
 #include "tzpl_silo.hpp"
 #include "tzpl_engine.hpp"
+#include "tzpl_chanadapt.hpp"
 #include <cmath>
 
 namespace engine {
@@ -355,6 +356,12 @@ void Silo::unlink(InPort* dst) {
     dst->node_->synth->inlets[dst->index_] = dst->dataBuffer_;
 
     needsSort_ = true;
+
+    // A hidden channel adapter exists only for the connection it was made
+    // for. Cutting either end -- here, the only place a link is ever broken
+    // -- retires it, so no orphan is left summing into a dead inlet.
+    retireAdapter(this, dst->node_);
+    retireAdapter(this, src->node_);
 }
 
 tzpl_SErr Silo::addNode(Node* node) {

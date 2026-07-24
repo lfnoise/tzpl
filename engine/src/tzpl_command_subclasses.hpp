@@ -28,6 +28,7 @@
 #include "tzpl_engine.hpp"
 #include "tzpl_xfader.hpp"
 #include "tzpl_mixer.hpp"
+#include "tzpl_chanadapt.hpp"
 #include "tzpl_audio_file.hpp"
 
 namespace engine {
@@ -126,12 +127,13 @@ struct ConnectCmd : Command
     PortAddr dst_;
     Node* xfaderNode_;
     Node* mixerNode_;      // pre-allocated mixer (null if not needed)
+    Node* adaptNode_;      // pre-allocated channel adapter (null if types match)
     FadeCurve curve_;
 
     ConnectCmd(PortAddr src, PortAddr dst, Node* xfaderNode, FadeCurve curve,
-               Node* mixerNode = nullptr)
+               Node* mixerNode = nullptr, Node* adaptNode = nullptr)
         : src_(src), dst_(dst), xfaderNode_(xfaderNode),
-          mixerNode_(mixerNode), curve_(curve)
+          mixerNode_(mixerNode), adaptNode_(adaptNode), curve_(curve)
     {}
 
     // Never ran: hidden nodes (nodeID -1) are in no table; plain delete.
@@ -139,6 +141,7 @@ struct ConnectCmd : Command
         if (stage_ == 0) {
             delete xfaderNode_;
             delete mixerNode_;
+            delete adaptNode_;
         }
     }
 
@@ -150,6 +153,36 @@ struct ConnectCmd : Command
         InPort* dst;
         s->rt_getInPort(dst_, dst);
         if (err_ != tzpl_errNone) return;
+
+        // Differing channel counts: splice the adapter in right at the
+        // source, and let everything downstream see the destination's type.
+        Node* adapter = nullptr;
+        if (adaptNode_) {
+            if (src->type_.chans != dst->type_.chans) {
+                err_ = s->connect(src, &adaptNode_->ins[0]);
+                if (err_ != tzpl_errNone) {
+                    s->pushDeadNode(adaptNode_);
+                    adaptNode_ = nullptr;
+                    return;
+                }
+                adapter = adaptNode_;
+                src = &adapter->outs[0];
+            } else {
+                s->pushDeadNode(adaptNode_);
+            }
+            adaptNode_ = nullptr; // consumed either way
+        }
+        // An adapter that never reached its destination (a later step failed)
+        // has to be taken back out -- nothing else can see it yet.
+        struct AdapterGuard {
+            Silo* s; Node* n; tzpl_SErr const* err;
+            ~AdapterGuard() {
+                if (n && *err != tzpl_errNone && !n->outs[0].dstList_) {
+                    s->disconnectNode(n);
+                    s->pushDeadNode(n);
+                }
+            }
+        } guard{s, adapter, &err_};
 
         // RT decides based on actual connection state whether fan-in is needed.
         bool needsFanIn = dst->srcPort_ != nullptr || dst->mixerNode_ != nullptr;
@@ -181,10 +214,12 @@ struct ConnectCmd : Command
         } else if (needsFanIn && mixerNode_) {
             // Transition from 1 source to 2: splice in the pre-allocated mixer.
             if (xfaderNode_) {
+                // Move the existing source into the mixer before taking over
+                // the destination, so an adapter in its path always has one.
                 OutPort* oldSrc = dst->srcPort_;
+                if (oldSrc) s->connect(oldSrc, &mixerNode_->ins[0]);
                 err_ = s->connect(&mixerNode_->outs[0], dst);
                 if (err_ != tzpl_errNone) { s->pushDeadNode(mixerNode_); return; }
-                if (oldSrc) s->connect(oldSrc, &mixerNode_->ins[0]);
                 dst->mixerNode_ = mixerNode_;
                 err_ = setupXFader(s, xfaderNode_, src, &mixerNode_->ins[1], curve_, nullptr);
             } else {

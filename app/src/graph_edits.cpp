@@ -27,11 +27,10 @@
 
 namespace graph {
 
-bool canConnect(PortVM const& src, PortVM const& dst, long long dstNodeID) {
+bool canConnect(PortVM const& src, PortVM const& dst, long long) {
     if (src.rate != dst.rate) return false;
     if (src.elem != dst.elem) return false;
-    if (dstNodeID != 0 && src.chans != dst.chans) return false;
-    return true;
+    return true; // channel counts are adapted by the engine
 }
 
 long long nextFreeNodeID(GraphViewModel const& vm) {

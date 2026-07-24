@@ -410,3 +410,45 @@ void engine::createSineNode(Engine* e)
 
     addNodeDef(e, info);
 }
+
+// ===========================================================================
+// Pass plugin -- out = in, at a chosen channel width
+// ===========================================================================
+
+template <int N>
+static void Pass_processAudio(tzpl_SynthData* synth)
+{
+    f32 const* in = (f32 const*)getInput(synth, 0);
+    f32* out = getOut<f32>(synth, 0);
+    for (int c = 0; c < N; ++c) out[c] = in[c];
+}
+
+void engine::createPassNode(Engine* e, char const* name, int numChannels)
+{
+    NodeDefInfo info;
+    memset(&info, 0, sizeof(info));
+
+    info.name = name;
+    info.num_ins = 1;
+    info.num_outs = 1;
+
+    tzpl_SignalType type{tzpl_kF32, tzpl_audioRate, numChannels};
+
+    info.ins = (PortInfo*)calloc(info.num_ins, sizeof(PortInfo));
+    info.ins[0] = PortInfo{"in", type};
+
+    info.outs = (PortInfo*)calloc(info.num_outs, sizeof(PortInfo));
+    info.outs[0] = PortInfo{"out", type};
+
+    info.funs.alloc  = []() -> tzpl_SynthData* { return new tzpl_SynthData(); };
+    info.funs.free   = [](tzpl_SynthData* s) -> tzpl_SErr { delete s; return tzpl_errNone; };
+    switch (numChannels) {
+        case 1: info.funs.processAudio = Pass_processAudio<1>; break;
+        case 2: info.funs.processAudio = Pass_processAudio<2>; break;
+        case 4: info.funs.processAudio = Pass_processAudio<4>; break;
+        case 8: info.funs.processAudio = Pass_processAudio<8>; break;
+        default: info.funs.processAudio = nullptr; break;
+    }
+
+    addNodeDef(e, info);
+}

@@ -968,32 +968,36 @@ static tzpl_SErr applyConnect(Engine* e, Silo* s, CommandList& out,
     err = s->nrt_getInPort(dst, dstPort);
     if (err != tzpl_errNone) return err;
 
-    if (dstPort->node_->nodeID == 0) {
+    // Element type and rate must match exactly; differing channel counts are
+    // adapted by a hidden node (see tzpl_chanadapt.hpp).
+    {
         tzpl_SErr err = relaxedCompatibleTypes(srcPort->type_, dstPort->type_);
-        if (err != tzpl_errNone) return err;
-    } else {
-        tzpl_SErr err = compatibleTypes(srcPort->type_, dstPort->type_);
         if (err != tzpl_errNone) return err;
     }
 
-    // Always pre-allocate a mixer in NRT (cheap). The RT thread decides
+    // Pre-allocate the hidden nodes this connection may need. All of them are
+    // built in NRT (allocation is forbidden on the RT thread) and whichever
+    // the RT thread does not use is handed straight back for reclamation.
+    //
+    // The adapter sits closest to the source, so everything downstream of it
+    // -- crossfader, mixer, destination -- speaks the destination's type.
+    tzpl_SignalType type = dstPort->type_;
+    Node* adaptNode = nullptr;
+    if (srcPort->type_.chans != type.chans) {
+        adaptNode = newChanAdaptNode(e, s, srcPort->type_, type);
+    }
+
+    // The mixer is always pre-allocated (cheap). The RT thread decides
     // whether to use it based on the actual connection state at execution
     // time. This avoids NRT/RT race conditions -- the NRT thread cannot
     // reliably know whether previous connects have been applied yet.
-    //
-    // Use the SOURCE's type for the mixer, not the destination's. The source
-    // determines the actual channel count; the mixer-to-destination connect
-    // uses relaxed type checking (for the output node) which allows channel
-    // mismatch. If we used the destination's type, connecting a mono source
-    // to a stereo mixer input would fail strict type checking.
-    tzpl_SignalType type = srcPort->type_;
     Node* mixerNode = newMixerNode(e, s, type, 4);
 
     Node* xfaderNode = nullptr;
-    if (xfadeTime > 0. && isFloat(srcPort->type_.elem)) {
-        xfaderNode = newXFaderNode(e, s, xfadeTime, curve, srcPort->type_);
+    if (xfadeTime > 0. && isFloat(type.elem)) {
+        xfaderNode = newXFaderNode(e, s, xfadeTime, curve, type);
     }
-    out.add(new ConnectCmd(src, dst, xfaderNode, curve, mixerNode));
+    out.add(new ConnectCmd(src, dst, xfaderNode, curve, mixerNode, adaptNode));
     edits.push_back({ShadowEdit::AddConn,
                      {src.nodeID, src.index, dst.nodeID, dst.index}});
     return tzpl_errNone;
@@ -1032,7 +1036,7 @@ static tzpl_SErr applyReconnectOutput(Engine* e, Silo* s, CommandList& out,
 // disconnected re-adds the same connection as a second mixer slot, silently
 // double-summing the signal (and again on every subsequent swap).
 static bool inletHasSource(InPort const& dst, OutPort const* src) {
-    if (dst.srcPort_ == src) return true;
+    if (adaptedFrom(dst.srcPort_) == src) return true;
     if (dst.mixerNode_) {
         return (bool)findMixerSlot(dst.mixerNode_, const_cast<OutPort*>(src));
     }
@@ -1081,7 +1085,7 @@ static tzpl_SErr applyReplaceNode(Engine* e, Silo* s, CommandList& out,
                 }
             }
         } else {
-            OutPort* src = oldNode->ins[i].srcPort_;
+            OutPort* src = adaptedFrom(oldNode->ins[i].srcPort_);
             if (src && src->node_->nodeID >= 0
                 && !inletHasSource(newNode->ins[i], src)) {
                 applyConnect(e, s, out, edits,
