@@ -263,6 +263,9 @@ Connections require type compatibility:
   connections to the output node (ID 0). Extra channels are zero-filled; fewer channels
   are truncated.
 
+Type checking happens before any link is broken, so a rejected connect leaves whatever
+was already feeding the inlet in place.
+
 
 ## 5. Commands (`tzpl_command.hpp`, `tzpl_command_subclasses.hpp`)
 
@@ -378,6 +381,22 @@ Seven interpolation curves are available:
 | `fadeOutIn` | Fade out first, then fade in (V-shaped dip) |
 | `fadeEaseInCubic` | Slow start, fast end |
 | `fadeEaseOutCubic` | Fast start, slow end |
+
+
+## 6a. Fan-In Mixers (`tzpl_mixer.hpp/cpp`)
+
+Mixers, like crossfaders, are created by the engine itself: they have `nodeID == -1`,
+live in no hash table, and never appear in the topology shadow -- the graph view shows
+the user's connection, not the machinery behind it.
+
+Connecting a second source to an occupied inlet splices in a mixer that sums its inputs
+and drives the destination; `InPort::mixerNode_` points at it. A mixer has a fixed number
+of input slots (4). When they are all taken, a further connect *chains* another mixer in
+front as the new head, holding the old head in one of its slots -- fan-in is unbounded.
+Chaining never moves an existing link, which is what makes it safe while crossfaders are
+running into slots. When one source is left the chain collapses back to a direct
+connection (deferred while a fade is still in flight, since the fader reads a slot's
+buffer).
 
 
 ## 7. Polyphonic Voice Management (`main.cpp` — Voicer template)

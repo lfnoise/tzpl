@@ -277,10 +277,9 @@ tzpl_SErr relaxedCompatibleTypes(tzpl_SignalType& a, tzpl_SignalType& b) {
 
 tzpl_SErr Silo::connect(OutPort* src, InPort* dst) {
     if (!src || !dst) return tzpl_errNodeNotFound;
-    if (dst->srcPort_) {
-        unlink(dst);
-    }
 
+    // Type-check before unlinking: a rejected connect must leave whatever
+    // was already feeding the inlet alone rather than silently cutting it.
     if (dst->node_->nodeID == 0) { // destination is the output node. It deals with channel mismatch.
         tzpl_SErr err = relaxedCompatibleTypes(src->type_, dst->type_);
         if (err != tzpl_errNone) return err;
@@ -288,7 +287,11 @@ tzpl_SErr Silo::connect(OutPort* src, InPort* dst) {
         tzpl_SErr err = compatibleTypes(src->type_, dst->type_);
         if (err != tzpl_errNone) return err;
     }
-        
+
+    if (dst->srcPort_) {
+        unlink(dst);
+    }
+
     // link onto source port list.
     if (src->dstList_) src->dstList_->prev_ = dst;
     dst->prev_ = NULL;
@@ -346,12 +349,12 @@ void Silo::unlink(InPort* dst) {
     if (dst->next_) dst->next_->prev_ = dst->prev_;
     if (dst->prev_) dst->prev_->next_ = dst->next_;
     else src->dstList_ = dst->next_;
-    
+
     // set to disconnected
     dst->srcPort_ = nullptr;
     dst->node_->synth->inlets[dst->index_] = dst->dataBuffer_;
 
-    needsSort_ = true; 
+    needsSort_ = true;
 }
 
 tzpl_SErr Silo::addNode(Node* node) {

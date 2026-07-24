@@ -239,7 +239,8 @@ Node* newXFaderNodeT(Engine* e, Silo* silo, f64 xfadeTime, tzpl_SignalType type)
     info.funs = funs;
     
     Node* sub = new Node(e, silo, info);
-    
+    sub->isXFader_ = true;
+
     free(info.ins);
     free(info.outs);
 

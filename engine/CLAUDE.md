@@ -50,6 +50,7 @@ The shared plugin ABI header lives in `../shared/tzpl_plugin_abi.h`.
 - **Two-stage commands**: Stage 1 (`doRT`) runs on the RT thread; stage 2 (`doNRT`) runs on a background thread for cleanup/deallocation. Commands are bundled atomically via `begin()`/`go(silo)`/`sched(silo, ...)` -- the target silo is chosen at submit, where the whole bundle is validated and materialized; an invalid bundle is discarded in its entirety (atomic abort).
 - **Lock-free FIFOs**: All RT <-> NRT communication uses `AtomicFifo` (SPSC). No locks or allocations on the audio thread.
 - **Zero-copy connections**: Connecting an InPort to an OutPort redirects the inlet pointer to the outlet's buffer. No data copying during audio processing.
+- **Hidden helper nodes** (`nodeID == -1`, invisible to the topology shadow): crossfaders for smooth transitions, and mixers for fan-in -- chained when a mixer fills up, so fan-in is unbounded.
 - **Sample-by-sample processing**: Nodes process one sample at a time, enabling sample-accurate scheduling.
 - **Crossfaders**: Temporary nodes spliced into the signal graph for smooth transitions. They self-remove when the fade completes.
 - **Topological sort**: Depth-first from the output node. Re-sorted only when connections change. Cycles cause one-sample delay rather than failure.

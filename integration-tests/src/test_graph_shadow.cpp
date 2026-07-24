@@ -26,6 +26,8 @@
 
 #include "tzpl_client_interface.hpp"
 #include "tzpl_test_plugins.hpp"
+#include <cmath>
+#include <format>
 #include <print>
 #include <string_view>
 #include <vector>
@@ -452,6 +454,222 @@ static void test_scheduled_out_of_order() {
     freeEngine(e);
 }
 
+// ---------------------------------------------------------------------------
+// Fan-in past the hidden mixer's slot count: every source must be audible,
+// and every source must still be removable. Measured on rendered audio, not
+// just on the shadow -- the shadow records the wire either way.
+// ---------------------------------------------------------------------------
+
+// A DC source: an unconnected "+" node whose two inlets hold constants, so
+// its output is an exact, phase-free value we can sum and decode.
+static i64 addDCSource(Engine* e, i64 id, f32 value) {
+    f32 v[2] = {value, value};
+    f32 zero[2] = {0.f, 0.f};
+    begin(e);
+    newNode("+", id);
+    setInput({id, 0}, 2, v);
+    setInput({id, 1}, 2, zero);
+    connect({id, 0}, {0, 0});
+    go(0);
+    return id;
+}
+
+// Render a few blocks and return the (constant) output sample value.
+static f32 renderDC(Engine* e, int numSamples) {
+    std::vector<f32> buf(numSamples);
+    for (int i = 0; i < 4; ++i) renderNRTBlock(e, buf.data());
+    return buf[0];
+}
+
+static Engine* newDCEngine(AudioStreamParameters& params) {
+    params.channels = 2;
+    params.bufferFrames = 64;
+    params.sampleRate = 44100.0;
+    EngineConfig config;
+    config.numSilos = 1;
+    Engine* e = newEngineNRT(config, params);
+    createAddOpNode(e);
+    safetyLimiter(e, kOff); // measure the raw sum
+    masterGain(e, 1.f);
+    return e;
+}
+
+static void test_fan_in_beyond_mixer_capacity() {
+    std::print("Test: fan-in beyond the hidden mixer's slot count\n");
+
+    AudioStreamParameters params{};
+    Engine* e = newDCEngine(params);
+
+    int const numSources = 12;
+    int const numSamples = params.bufferFrames * params.channels;
+
+    // Source i contributes 2^i, so the summed output names exactly which
+    // sources reached the outlet.
+    f32 want = 0.f;
+    for (int i = 0; i < numSources; ++i) {
+        want += f32(1 << i);
+        addDCSource(e, 10 + i, f32(1 << i));
+        f32 got = renderDC(e, numSamples);
+        check(got == want,
+              std::format("{} sources sum at the output (got {}, want {})",
+                          i + 1, got, want));
+    }
+
+    GraphDesc g;
+    getGraphDesc(e, 0, g);
+    check((int)g.conns.size() == numSources, "shadow has one wire per source");
+
+    // Remove them one at a time, front to back: each disconnect must remove
+    // exactly that source's contribution, wherever it sits.
+    for (int i = 0; i < numSources; ++i) {
+        want -= f32(1 << i);
+        begin(e);
+        disconnectSource({10 + i, 0}, {0, 0});
+        go(0);
+        f32 got = renderDC(e, numSamples);
+        check(got == want,
+              std::format("{} sources left after disconnect (got {}, want {})",
+                          numSources - i - 1, got, want));
+    }
+
+    freeEngine(e);
+}
+
+// Same fan-in, torn down with disconnectInput (which frees the whole hidden
+// mixer structure) and then rebuilt -- the inlet must come back cleanly.
+static void test_fan_in_disconnect_input_teardown() {
+    std::print("Test: disconnectInput tears down a full mixer chain\n");
+
+    AudioStreamParameters params{};
+    Engine* e = newDCEngine(params);
+
+    int const numSources = 10;
+    int const numSamples = params.bufferFrames * params.channels;
+
+    for (int pass = 0; pass < 2; ++pass) {
+        f32 want = 0.f;
+        for (int i = 0; i < numSources; ++i) {
+            want += f32(1 << i);
+            addDCSource(e, 10 + i, f32(1 << i));
+        }
+        check(renderDC(e, numSamples) == want,
+              std::format("pass {}: all {} sources audible", pass, numSources));
+
+        begin(e);
+        disconnectInput({0, 0});
+        go(0);
+        check(renderDC(e, numSamples) == 0.f,
+              std::format("pass {}: inlet silent after disconnectInput", pass));
+
+        begin(e);
+        for (int i = 0; i < numSources; ++i) freeNode(10 + i);
+        go(0);
+        renderDC(e, numSamples); // let the dead-node queue drain
+    }
+
+    freeEngine(e);
+}
+
+// Fan-in built with crossfaded connects (what the graph editor UI submits):
+// the fades must all complete and leave every source connected.
+static void test_fan_in_with_xfades() {
+    std::print("Test: crossfaded fan-in past the mixer's slot count\n");
+
+    AudioStreamParameters params{};
+    Engine* e = newDCEngine(params);
+
+    int const numSources = 10;
+    int const numSamples = params.bufferFrames * params.channels;
+    f64 const xfade = 0.1; // graph::kUIXFadeTime
+    int const blocksPerFade =
+        int(xfade * params.sampleRate / params.bufferFrames) + 4;
+
+    std::vector<f32> buf(numSamples);
+    f32 want = 0.f;
+    for (int i = 0; i < numSources; ++i) {
+        want += f32(1 << i);
+        f32 v[2] = {f32(1 << i), f32(1 << i)};
+        f32 zero[2] = {0.f, 0.f};
+        begin(e);
+        newNode("+", 10 + i);
+        setInput({10 + i, 0}, 2, v);
+        setInput({10 + i, 1}, 2, zero);
+        connect({10 + i, 0}, {0, 0}, xfade);
+        go(0);
+        for (int b = 0; b < blocksPerFade; ++b) renderNRTBlock(e, buf.data());
+    }
+    check(renderDC(e, numSamples) == want,
+          std::format("all {} crossfaded sources reached the outlet", numSources));
+
+    // And fade them all back out.
+    for (int i = 0; i < numSources; ++i) {
+        begin(e);
+        disconnectSource({10 + i, 0}, {0, 0}, xfade);
+        go(0);
+        for (int b = 0; b < blocksPerFade; ++b) renderNRTBlock(e, buf.data());
+    }
+    check(renderDC(e, numSamples) == 0.f, "all crossfaded sources faded out");
+
+    freeEngine(e);
+}
+
+// Freeing and replacing nodes that feed a wide fan-in: the engine has to
+// find the owning inlet from a node buried in the middle of the chain.
+static void test_fan_in_free_and_replace() {
+    std::print("Test: freeNode / replaceNode within a wide fan-in\n");
+
+    AudioStreamParameters params{};
+    Engine* e = newDCEngine(params);
+
+    int const numSources = 9;
+    int const numSamples = params.bufferFrames * params.channels;
+
+    f32 want = 0.f;
+    for (int i = 0; i < numSources; ++i) {
+        want += f32(1 << i);
+        addDCSource(e, 10 + i, f32(1 << i));
+    }
+    check(renderDC(e, numSamples) == want, "all sources audible before free");
+
+    // Free a source in the middle of the chain.
+    want -= f32(1 << 5);
+    begin(e);
+    freeNode(15);
+    go(0);
+    check(renderDC(e, numSamples) == want, "freeNode drops just that source");
+
+    // Replace another one with a node carrying a different value: the
+    // replacement inherits the connection to the shared inlet.
+    {
+        f32 v[2] = {4096.f, 4096.f};
+        f32 zero[2] = {0.f, 0.f};
+        begin(e);
+        newNode("+", 100);
+        setInput({100, 0}, 2, v);
+        setInput({100, 1}, 2, zero);
+        replaceNode(13, 100);
+        go(0);
+    }
+    want += 4096.f - f32(1 << 3);
+    check(renderDC(e, numSamples) == want, "replaceNode swaps a mid-chain source");
+
+    // Free everything: the inlet must end up silent and mixer-free.
+    // (15 is already gone, and 13 was replaced by 100.)
+    begin(e);
+    for (int i = 0; i < numSources; ++i) {
+        if (i != 5) freeNode(10 + i);
+    }
+    freeNode(100);
+    go(0);
+    check(renderDC(e, numSamples) == 0.f, "inlet silent once every source is gone");
+
+    // And it still accepts a fresh connection afterwards.
+    addDCSource(e, 200, 7.f);
+    check(renderDC(e, numSamples) == 7.f, "inlet reconnects after the chain is gone");
+
+    freeEngine(e);
+}
+
 int main() {
     std::print("=== Graph shadow tests ===\n\n");
 
@@ -464,6 +682,10 @@ int main() {
     test_replace_node_fan_in_swap_back();
     test_per_silo_isolation();
     test_scheduled_out_of_order();
+    test_fan_in_beyond_mixer_capacity();
+    test_fan_in_disconnect_input_teardown();
+    test_fan_in_with_xfades();
+    test_fan_in_free_and_replace();
 
     std::print("\n=== {} passed, {} failed ===\n", gTestsPassed, gTestsFailed);
     return gTestsFailed == 0 ? 0 : 1;

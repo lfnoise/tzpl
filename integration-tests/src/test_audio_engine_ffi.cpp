@@ -462,10 +462,10 @@ static void test_mixer_fanin() {
         spliceMixer(&silo, mixer, &B->outs[0], dst);
 
         // Third source: add to existing mixer
-        int slot = findFreeMixerSlot(mixer);
-        check(slot >= 0, "3rd connect: free slot found");
-        addToMixer(&silo, mixer, &C->outs[0], slot);
-        check(mixer->ins[slot].srcPort_ == &C->outs[0], "3rd connect: mixer.in[slot] = C");
+        MixerSlot slot = findFreeMixerSlot(mixer);
+        check((bool)slot, "3rd connect: free slot found");
+        addToMixer(&silo, slot.mixer, &C->outs[0], slot.slot);
+        check(mixer->ins[slot.slot].srcPort_ == &C->outs[0], "3rd connect: mixer.in[slot] = C");
         check(countActiveMixerInputs(mixer) == 3, "3rd connect: 3 active inputs");
 
         silo.disconnectNode(mixer);
@@ -566,16 +566,16 @@ static void test_mixer_fanin() {
 
         Node* mixer = newMixerNode(eng, &silo, stereoF32, 4);
         check(countActiveMixerInputs(mixer) == 0, "new mixer: 0 active");
-        check(findFreeMixerSlot(mixer) == 0, "new mixer: slot 0 free");
+        check(findFreeMixerSlot(mixer).slot == 0, "new mixer: slot 0 free");
 
         silo.connect(&A->outs[0], &mixer->ins[0]);
         silo.connect(&B->outs[0], &mixer->ins[1]);
         check(countActiveMixerInputs(mixer) == 2, "2 connected: 2 active");
-        check(findFreeMixerSlot(mixer) == 2, "2 connected: slot 2 free");
+        check(findFreeMixerSlot(mixer).slot == 2, "2 connected: slot 2 free");
 
         silo.disconnect(&mixer->ins[0]);
         check(countActiveMixerInputs(mixer) == 1, "1 disconnected: 1 active");
-        check(findFreeMixerSlot(mixer) == 0, "1 disconnected: slot 0 free (reused)");
+        check(findFreeMixerSlot(mixer).slot == 0, "1 disconnected: slot 0 free (reused)");
 
         silo.disconnectNode(mixer);
         silo.disconnectNode(A);

@@ -179,8 +179,13 @@ struct Node {
     std::vector<OutPort> outs;
     std::vector<InPort> ins;
     std::vector<Control> controls;
-    bool rt_active = false; 
+    bool rt_active = false;
     bool triggered = false;
+    // Which kind of hidden helper node this is, if any (see tzpl_mixer.hpp /
+    // tzpl_xfader.hpp). Both kinds have nodeID < 0, and the fan-in code has
+    // to tell them apart.
+    bool isMixer_ = false;
+    bool isXFader_ = false;
     
     Node(Engine* e, Silo* silo, NodeDefInfo const& inInfo); // subnode
     Node(Engine* e, Silo* silo, NodeDef* def, i64 nodeID);

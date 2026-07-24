@@ -105,6 +105,7 @@ Node* newMixerNode(Engine* e, Silo* silo, tzpl_SignalType type, int capacity) {
     info.outs[0] = PortInfo{"out", type};
 
     Node* mixer = new Node(e, silo, info);
+    mixer->isMixer_ = true;
 
     free(info.ins);
     free(info.outs);
@@ -116,7 +117,84 @@ Node* newMixerNode(Engine* e, Silo* silo, tzpl_SignalType type, int capacity) {
 }
 
 // ---------------------------------------------------------------------------
-// Splice / Add / Remove / Collapse
+// Chain walking
+// ---------------------------------------------------------------------------
+
+// The next mixer down the chain (the one whose output this mixer sums), or
+// null at the end of the chain. Only mixers ever feed mixers, so the source
+// node's isMixer_ flag identifies a chain link.
+static Node* mixerLink(Node* mixer) {
+    for (auto& in : mixer->ins) {
+        if (in.srcPort_ && in.srcPort_->node_->isMixer_) return in.srcPort_->node_;
+    }
+    return nullptr;
+}
+
+// True if a crossfader is still fading into one of the chain's slots. The
+// crossfader reads the slot's fallback buffer, so the chain must outlive it.
+static bool hasPendingFade(Node* head) {
+    for (Node* m = head; m; m = mixerLink(m)) {
+        for (auto& in : m->ins) {
+            if (in.srcPort_ && in.srcPort_->node_->isXFader_) return true;
+        }
+    }
+    return false;
+}
+
+MixerSlot findFreeMixerSlot(Node* head) {
+    for (Node* m = head; m; m = mixerLink(m)) {
+        for (int i = 0; i < (int)m->ins.size(); ++i) {
+            if (!m->ins[i].srcPort_) return {m, i};
+        }
+    }
+    return {};
+}
+
+MixerSlot findMixerSlot(Node* head, OutPort* src) {
+    for (Node* m = head; m; m = mixerLink(m)) {
+        for (int i = 0; i < (int)m->ins.size(); ++i) {
+            if (m->ins[i].srcPort_ == src) return {m, i};
+        }
+    }
+    return {};
+}
+
+int countActiveMixerInputs(Node* head) {
+    int count = 0;
+    for (Node* m = head; m; m = mixerLink(m)) {
+        for (auto& in : m->ins) {
+            if (in.srcPort_ && !in.srcPort_->node_->isMixer_) ++count;
+        }
+    }
+    return count;
+}
+
+int collectMixerSources(Node* head, OutPort** out, int max) {
+    int count = 0;
+    for (Node* m = head; m; m = mixerLink(m)) {
+        for (auto& in : m->ins) {
+            if (!in.srcPort_ || in.srcPort_->node_->isMixer_) continue;
+            if (count < max) out[count++] = in.srcPort_;
+        }
+    }
+    return count;
+}
+
+InPort* mixerChainOwner(Node* hidden) {
+    // Hidden nodes have a single output feeding a single destination, so
+    // walking up is a straight line. The bound is paranoia, not topology.
+    for (int depth = 0; hidden && hidden->nodeID < 0 && depth < 64; ++depth) {
+        if (hidden->outs.empty()) return nullptr;
+        InPort* dst = hidden->outs[0].dstList_;
+        if (!dst) return nullptr;
+        if (dst->mixerNode_) return dst;
+        hidden = dst->node_;
+    }
+    return nullptr;
+}
+
+// ---------------------------------------------------------------------------
+// Splice / Chain / Add / Remove / Collapse
 // ---------------------------------------------------------------------------
 
 tzpl_SErr spliceMixer(Silo* s, Node* mixer, OutPort* newSrc, InPort* dst) {
@@ -139,58 +217,83 @@ tzpl_SErr spliceMixer(Silo* s, Node* mixer, OutPort* newSrc, InPort* dst) {
     return tzpl_errNone;
 }
 
+tzpl_SErr chainMixer(Silo* s, InPort* dst, Node* newHead) {
+    Node* oldHead = dst->mixerNode_;
+    if (!oldHead) return tzpl_errInternal;
+
+    // The old head's output now feeds the new head as well as dst; the
+    // second connect unlinks it from dst. Nothing already connected moves,
+    // so any crossfader running into the old chain keeps its buffers.
+    tzpl_SErr err = s->connect(&oldHead->outs[0], &newHead->ins[0]);
+    if (err != tzpl_errNone) return err;
+
+    err = s->connect(&newHead->outs[0], dst);
+    if (err != tzpl_errNone) {
+        s->disconnect(&newHead->ins[0]); // leave the old chain as it was
+        return err;
+    }
+
+    dst->mixerNode_ = newHead;
+    return tzpl_errNone;
+}
+
 tzpl_SErr addToMixer(Silo* s, Node* mixer, OutPort* newSrc, int slot) {
     return s->connect(newSrc, &mixer->ins[slot]);
 }
 
-int removeFromMixer(Silo* s, Node* mixer, OutPort* src) {
-    for (int i = 0; i < (int)mixer->ins.size(); ++i) {
-        if (mixer->ins[i].srcPort_ == src) {
-            s->disconnect(&mixer->ins[i]);
-            return i;
+bool removeFromMixer(Silo* s, Node* head, OutPort* src) {
+    MixerSlot found = findMixerSlot(head, src);
+    if (!found) return false;
+    s->disconnect(&found.mixer->ins[found.slot]);
+    return true;
+}
+
+// Unlink and kill every mixer in the chain. Returns the one remaining real
+// source, if any (the caller decides what to do with it).
+static OutPort* teardownChain(Silo* s, InPort* dst, bool freeFaders) {
+    OutPort* remaining = nullptr;
+    Node* m = dst->mixerNode_;
+    while (m) {
+        Node* next = mixerLink(m); // before disconnecting clears the link
+        for (auto& in : m->ins) {
+            Node* src = in.srcPort_ ? in.srcPort_->node_ : nullptr;
+            if (!src || src->isMixer_) continue;
+            if (freeFaders && src->isXFader_) {
+                // A crossfader fading into this chain: once the chain is
+                // gone nothing reaches it, so it would never self-remove.
+                s->disconnectNode(src);
+                s->pushDeadNode(src);
+                continue;
+            }
+            if (!remaining) remaining = in.srcPort_;
         }
+        s->disconnectNode(m);
+        s->pushDeadNode(m);
+        m = next;
     }
-    return -1;
+    dst->mixerNode_ = nullptr;
+    return remaining;
 }
 
 void collapseMixer(Silo* s, InPort* dst) {
-    Node* mixer = dst->mixerNode_;
-    if (!mixer) return;
+    Node* head = dst->mixerNode_;
+    if (!head) return;
+    // Deferred while a fade is in flight: the crossfader reads a slot's
+    // fallback buffer, which dies with the mixer that owns it. Leaving the
+    // chain in place is harmless -- a lone source just sums with zeroes.
+    if (hasPendingFade(head)) return;
 
-    // Find the one remaining active source
-    OutPort* remaining = nullptr;
-    for (auto& in : mixer->ins) {
-        if (in.srcPort_) {
-            remaining = in.srcPort_;
-            break;
-        }
-    }
-
-    // Disconnect mixer from the graph
-    s->disconnectNode(mixer);
+    OutPort* remaining = teardownChain(s, dst, /*freeFaders=*/false);
 
     // Restore direct connection (or leave disconnected if no source remains)
     if (remaining) {
         s->connect(remaining, dst);
     }
-
-    dst->mixerNode_ = nullptr;
-    s->pushDeadNode(mixer);
 }
 
-int findFreeMixerSlot(Node* mixer) {
-    for (int i = 0; i < (int)mixer->ins.size(); ++i) {
-        if (!mixer->ins[i].srcPort_) return i;
-    }
-    return -1;
-}
-
-int countActiveMixerInputs(Node* mixer) {
-    int count = 0;
-    for (auto& in : mixer->ins) {
-        if (in.srcPort_) ++count;
-    }
-    return count;
+void freeMixerChain(Silo* s, InPort* dst) {
+    if (!dst->mixerNode_) return;
+    teardownChain(s, dst, /*freeFaders=*/true);
 }
 
 } // namespace engine

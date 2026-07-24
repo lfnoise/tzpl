@@ -993,7 +993,7 @@ static tzpl_SErr applyConnect(Engine* e, Silo* s, CommandList& out,
     if (xfadeTime > 0. && isFloat(srcPort->type_.elem)) {
         xfaderNode = newXFaderNode(e, s, xfadeTime, curve, srcPort->type_);
     }
-    out.add(new ConnectCmd(src, dst, xfaderNode, curve, mixerNode, -1));
+    out.add(new ConnectCmd(src, dst, xfaderNode, curve, mixerNode));
     edits.push_back({ShadowEdit::AddConn,
                      {src.nodeID, src.index, dst.nodeID, dst.index}});
     return tzpl_errNone;
@@ -1034,8 +1034,7 @@ static tzpl_SErr applyReconnectOutput(Engine* e, Silo* s, CommandList& out,
 static bool inletHasSource(InPort const& dst, OutPort const* src) {
     if (dst.srcPort_ == src) return true;
     if (dst.mixerNode_) {
-        for (auto const& mixerIn : dst.mixerNode_->ins)
-            if (mixerIn.srcPort_ == src) return true;
+        return (bool)findMixerSlot(dst.mixerNode_, const_cast<OutPort*>(src));
     }
     return false;
 }
@@ -1069,12 +1068,15 @@ static tzpl_SErr applyReplaceNode(Engine* e, Silo* s, CommandList& out,
     // would append ops to the bundle being replayed).
     for (int i = 0; i < (int)oldNode->ins.size(); ++i) {
         if (oldNode->ins[i].mixerNode_) {
-            Node* mixer = oldNode->ins[i].mixerNode_;
-            for (auto& mixerIn : mixer->ins) {
-                if (mixerIn.srcPort_ && mixerIn.srcPort_->node_->nodeID >= 0
-                    && !inletHasSource(newNode->ins[i], mixerIn.srcPort_)) {
+            // Every source in the inlet's mixer chain, not just the head's.
+            static constexpr int kMaxFanIn = 256;
+            OutPort* srcs[kMaxFanIn];
+            int n = collectMixerSources(oldNode->ins[i].mixerNode_, srcs, kMaxFanIn);
+            for (int k = 0; k < n; ++k) {
+                if (srcs[k]->node_->nodeID >= 0
+                    && !inletHasSource(newNode->ins[i], srcs[k])) {
                     applyConnect(e, s, out, edits,
-                            {mixerIn.srcPort_->node_->nodeID, mixerIn.srcPort_->index_},
+                            {srcs[k]->node_->nodeID, srcs[k]->index_},
                             {newNodeID, i}, 0., fadeLinear);
                 }
             }
