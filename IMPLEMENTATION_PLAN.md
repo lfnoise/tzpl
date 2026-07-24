@@ -726,12 +726,22 @@ Supporting work:
 **Remaining**:
 - Double-click a node to open its controls (lands with 13.3).
 
-### 13.3 Control surfaces
+### 13.3 Control surfaces — DONE (2026-07-24, MIDI deferred)
 
-**Tasks**:
-1. For each node, show its controls as sliders/knobs (from `DefDesc::controls`; factor the `tzpl_ControlSpec` -> widget-kind mapping out of `specFromControl()`/`widgetForControl()` in `tzpl_ui_ffi.cpp` into a shared helper).
-2. Changes immediately sent as `setControl` commands (coalesced to ~30 Hz during gestures). Write-only initially: no current-value readback exists (control data is RT-owned); init from `spec.init`, cache last sent values. Readback pairs naturally with Phase 14 metering (tap-like mirror or a getControl command).
-3. Support MIDI mapping to controls (future).
+Implemented by reusing the live-controls widget system rather than building a parallel panel: double-click a node in the graph view (or right-click > "Controls...") materializes the node's control interface as engine-bound `UIState` widgets in a panel named "<def> #<id>", and the existing floating `ControlsWindow` machinery displays it. Everything downstream was already built: per-ControlSpec widget kinds and warps, coalesced `setControl` delivery via `ControlsDispatcher` (~30 Hz while active), presets, arrange mode, key bindings, and both apps' renderers.
+
+**Completed**:
+1. Shared bridge helper `bridge/tzpl_ui_node_controls.{hpp,cpp}`: `specFromControl` (ABI spec -> UISpec, warp ordinal mapping), `widgetKindForControl` (Continuous -> Slider, Trigger -> Button, Boolean -> Toggle, Select -> Number), `bindControlWidget`, and `materializeNodeControls(ui, engine, panel, nodeID, silo, defName)`. `ui.control`/`ui.controls` in `tzpl_ui_ffi.cpp` now use the same helpers (previously file-static duplicates); the graph-view path resolves the def name from the topology shadow, so it works for nodes created by any client (the FFI path still uses `AppContext::nodeDefNames`).
+2. `GraphView::onOpenNodeControls` -> `MainComponent::openNodeControls()`: materialize, `dispatcher_.ensureRunning()`, `refreshControlsWindows()` immediately, window to front. Closing the window removes the panel's widgets (existing behavior). No-control and unknown-def cases report to the console.
+3. Write-only, as planned: widgets start at each spec's `init` (an already-open panel keeps its tweaked values -- `UIState::upsert` semantics); no engine readback of current control values yet. Readback pairs naturally with Phase 14 metering (tap-like mirror or a getControl command).
+3b. Buffers: defs with sample buffers get a "load <buffer>" button per slot in the node's panel. Buttons carry a new `UIWidget::hostAction` (host-side click action, invoked async off `ui->mtx` by the JUCE renderer; never serialized) that opens a file dialog; the chosen file is read on the message thread (`graph::loadBufferFile` -- pre-reads via `tzpl_loadAudioFile` so bad files report synchronously, unlike the engine's `loadBuffer` command which only fails on RT) and submitted as a `replaceBuffer` bundle. The path is recorded in `AppContext::bufferPaths` (same as `audio_engine.loadBuffer`), and a waveform overview row (shared `bindWaveformWidget`, also now used by `ui.waveform`) appears/refreshes above the button; already-loaded buffers show their waveform when the panel opens.
+4. Tests: `tzpl_graph_tests` (65 checks) covers `materializeNodeControls` end-to-end against a registered def -- widget kinds, spec/warp mapping, `(node, controlID, silo)` binding, `dirtyEngine` push flag, idempotent reopen, unknown def.
+
+5. Control kinds are now authorable (2026-07-24). The ABI's `tzpl_ControlKind` (Continuous/Trigger/Boolean/Select) previously had no authoring path -- the codegen hard-coded Continuous. Now: DSL sugar constructors in `synthdef.x` (`control()` = continuous; `trigger(name)` = momentary button; `toggle(name, init)` = latched 0/1 toggle; `choice(name, numChoices, init)` = integer select, step warp), carried as a `ControlKind` on the `SignalExprKind.control` payload, emitted as an optional 6th `(ControlSpec ...)` field (omitted for continuous, so existing defs/goldens are byte-identical), parsed into the compiler's `ControlSpec` (now in its hash/equality), and emitted as `.kind = (tzpl_ControlKind)N` by BOTH codegens (C++ + synthc, differential tests green). Node control panels and `ui.controls` now produce buttons/toggles/number boxes for real. End-to-end test: `test_control_kinds` in `test_synthdef_compiler_ffi` (DSL -> sexpr -> compile -> DefDesc -> widget kinds).
+
+6. Multichannel controls (2026-07-24): a control with `chans > 1` gets ONE widget carrying all channels -- Continuous/Select -> a MultiSlider with one bar per channel (all mapped through the spec, starting at init); Boolean/Trigger -> a 1 x chans ButtonMatrix row (toggle / momentary). One widget per control is structural, not just cosmetic: the dispatcher sends the whole value vector as a single `setControl(node, controlID, N, vals)`, and there is no per-element setControl form for independent per-channel widgets to bind to. (Previously a multichannel control got a single slider that wrote only channel 0.)
+
+**Deferred**: MIDI mapping to controls (per plan); docs for the new constructors in the synthdef guide.
 
 ---
 
@@ -867,7 +877,7 @@ Phase 0 (Build Infrastructure)       ✅ DONE
 | 10 | UI framework setup | ✅ Done | -- |
 | 11 | Code editor & REPL | ✅ Done | Type info on hover |
 | 12 | Plugin/module management | 🟡 Partial | 12.1 plugin browser done (both apps) except one-click instantiation; 12.2 module browser, 12.3 compile UI |
-| 13 | Audio graph visualization | 🟡 In progress | 13.1 + 13.2 done (JUCE; engine topology shadow, GraphView mode, drag-connect/delete/palette editing); 13.3 control surfaces |
+| 13 | Audio graph visualization | 🟢 Mostly done | 13.1-13.3 done (JUCE): topology shadow, GraphView mode, interactive editing, node control panels. Future: ImGui view, MIDI mapping, control readback |
 | 14 | Metering & monitoring | ⬜ Not started | All tasks |
 | 15 | Session management | ⬜ Not started | All tasks |
 | 16 | Future extensions | ⬜ Not started | All tasks |
