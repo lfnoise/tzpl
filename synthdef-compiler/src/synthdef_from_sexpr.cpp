@@ -1050,7 +1050,18 @@ static std::expected<ControlSpec, std::string> parseControlSpec(sexpr::ItemVec c
         warpParam = *wp;
     }
 
-    return ControlSpec{*lo, *hi, *init, warp, warpParam};
+    // Optional control kind (tzpl_ControlKind ordinal); omitted means
+    // continuous -- emitters only append it for non-continuous controls.
+    int kind = 0;
+    if (specList.size() > 6) {
+        if (!specList[6].is<int64_t>())
+            return std::unexpected("ControlSpec kind must be integer");
+        kind = (int)specList[6].get<int64_t>();
+        if (kind < 0 || kind > 3)
+            return std::unexpected("ControlSpec kind out of range");
+    }
+
+    return ControlSpec{*lo, *hi, *init, warp, warpParam, kind};
 }
 
 std::expected<S, std::string> SExprGraphBuilder::parseControl(sexpr::ItemVec const& list) {

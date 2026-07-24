@@ -71,7 +71,7 @@ fn calcShapeOf(ctx Ctx, n NIdx) Int {
 		constant(v, _):      v constSize;
 		sampleRate:          1;
 		sampleDur:           1;
-		control(_, _, _):    ctx.chans[n];     -- fixed at import
+		control(_, _, _, _): ctx.chans[n];     -- fixed at import
 		noteParamK(_, _, _): ctx.chans[n];
 		inletK(_, _):        ctx.chans[n];
 		outletK(_, _):       ctx.chans[ins[0]];

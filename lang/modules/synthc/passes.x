@@ -484,7 +484,7 @@ fn _setCut(ctx Ctx, n NIdx, c GraphCut) Void {
 
 fn _isInputKind(k NodeKind) Bool = match (k) {
 	inletK(_, _):        true;
-	control(_, _, _):    true;
+	control(_, _, _, _): true;
 	noteParamK(_, _, _): true;
 	_:                   false;
 };
@@ -818,7 +818,7 @@ fn _intListHas(lst [Int], x Int) Bool {
 -- becomes its own set of event loops; processEvents runs only the groups whose
 -- controls changed. Runs after sortTrees, before treesToLoops.
 
-fn _isControlNode(ctx Ctx, n NIdx) Bool = match (ctx.kind[n]) { control(_, _, _): true; _: false; };
+fn _isControlNode(ctx Ctx, n NIdx) Bool = match (ctx.kind[n]) { control(_, _, _, _): true; _: false; };
 
 -- Insert control node index x into a sorted-unique list (set semantics).
 fn _ctrlInsert(lst [Int], x Int) Void {

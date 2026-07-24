@@ -361,7 +361,7 @@ fn _inlineExpr(ctx Ctx, n NIdx, cel String) String {
 		sampleDur:      (`cgSimdW > 0)
 			? _simdSplat(ctx.typ[n], `cgSimdW, (ctx.typ[n].0 == 8) ? "p->sd" : "(%^)(p->sd)" fmt(cppType(ctx.typ[n])))
 			: ((ctx.typ[n].0 == 8) ? "p->sd" : "(%^)(p->sd)" fmt(cppType(ctx.typ[n])));
-		control(_, _, sn): (ctx.chans[n] == 1)
+		control(_, _, sn, _): (ctx.chans[n] == 1)
 			? "(*(%^*)p->controls[%^])" fmt(cppType(ctx.typ[n]), sn)
 			: "((%^*)p->controls[%^])[%^]" fmt(cppType(ctx.typ[n]), sn, cel);
 		-- NoteParam: gather the voice's parameter from the voicer_params matrix.
@@ -1786,7 +1786,7 @@ fn genDeclInstVars(ctx Ctx) String {
 	}
 	-- control activation flags
 	for (cn : ctx.controls) {
-		match (ctx.kind[cn]) { control(_, _, sn): { s = s $ "\tbool ctrl%^_active;\n" fmt(sn); } _: {} }
+		match (ctx.kind[cn]) { control(_, _, sn, _): { s = s $ "\tbool ctrl%^_active;\n" fmt(sn); } _: {} }
 	}
 	if (s length > 0) { s = "\t// instance variables\n" $ s $ "\n"; }
 	s = s $ genVoicerDecls(ctx);
@@ -2197,7 +2197,7 @@ fn genEventFun(ctx Ctx, name String) String {
 		s = s $ "\tswitch (id) {\n";
 		for (cn : ctx.controls) {
 			match (ctx.kind[cn]) {
-				control(_, _, sn): {
+				control(_, _, sn, _): {
 					s = s $ "\t\tcase %^:\n" fmt(sn);
 					s = s $ "\t\t\tmemcpy(p->controls[%^], data.data, sizeof(%^) * %^);\n" fmt(sn, cppType(ctx.typ[cn]), ctx.chans[cn]);
 					s = s $ "\t\t\tp->ctrl%^_active = true;\n" fmt(sn);
@@ -2212,7 +2212,7 @@ fn genEventFun(ctx Ctx, name String) String {
 	s
 }
 
-fn _ctrlSerialOf(ctx Ctx, n NIdx) Int = match (ctx.kind[n]) { control(_, _, sn): sn; _: NONE; };
+fn _ctrlSerialOf(ctx Ctx, n NIdx) Int = match (ctx.kind[n]) { control(_, _, sn, _): sn; _: NONE; };
 
 fn _isoHasControl(ctx Ctx, groupIdx Int, ctrlNode NIdx) Bool {
 	for (c : ctx.isoGroups[groupIdx].controls) { if (c == ctrlNode) { return true; } }
@@ -2389,17 +2389,17 @@ fn genLoad(ctx Ctx, name String) String {
 	i = 0;
 	for (n : ctx.controls) {
 		match (ctx.kind[n]) {
-			control(spec, cname, sn): {
+			control(spec, cname, sn, ckind): {
 				-- Emit the full control spec: the engine seeds the control
 				-- buffer from init; UI clients derive widgets from
 				-- lo/hi/param/warp/kind. Matches the C++ emission: the ABI
 				-- warp ordinal is the lang ControlWarp ordinal + 1 (0 is
 				-- reserved for tzpl_cwNone), and `param` carries the warp
 				-- payload (step size for the step warp).
-				s = s $ "\tdef.controls[%^] = {\"%^\", {%^, %^, %^}, %^, {.lo = %^, .hi = %^, .init = %^, .param = %^, .warp = (tzpl_ControlWarp)%^, .kind = tzpl_ckContinuous}};\n"
+				s = s $ "\tdef.controls[%^] = {\"%^\", {%^, %^, %^}, %^, {.lo = %^, .hi = %^, .init = %^, .param = %^, .warp = (tzpl_ControlWarp)%^, .kind = (tzpl_ControlKind)%^}};\n"
 					fmt(i, cname, _typeTag(ctx.typ[n]), _rateCode(ctx.nrate[n]), ctx.chans[n], sn,
 					    ftosF64(spec.lo), ftosF64(spec.hi), ftosF64(spec.init),
-					    ftosF64(spec.warp _warpStepSize), spec.warp ordinal + 1);
+					    ftosF64(spec.warp _warpStepSize), spec.warp ordinal + 1, ckind ordinal);
 			}
 			_: {}
 		}

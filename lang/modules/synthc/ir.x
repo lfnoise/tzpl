@@ -156,7 +156,7 @@ enum NodeKind {
 	sampleRate,
 	sampleDur,
 
-	control(ControlSpec, String, Int),   -- spec, name, serial
+	control(ControlSpec, String, Int, ControlKind),   -- spec, name, serial, kind
 	noteParamK(ControlSpec, String, Int),
 	inletK(String, Int),                 -- name, serial
 	outletK(String, Int),                -- name, serial
@@ -631,7 +631,7 @@ fn nodeStr(ctx Ctx, n NIdx) String {
 		constant(v, _):      constStr(v, ctx.typ[n]);
 		sampleRate:          "fs";
 		sampleDur:           "sd";
-		control(_, _, _):    "control";
+		control(_, _, _, _): "control";
 		noteParamK(_, _, _): "noteParam";
 		inletK(_, _):        "inlet";
 		outletK(_, _):       "outlet";

@@ -135,7 +135,7 @@ fn _kindKey(kind NodeKind) String = match (kind) {
 	constant(v, t):       "K|" $ v _constValKey $ "|" $ t.0 toString;
 	sampleRate:           "SR";
 	sampleDur:            "SD";
-	control(spec, _, sn): "CTL|" $ spec _specKey $ "|" $ sn toString;
+	control(spec, _, sn, kind): "CTL|" $ spec _specKey $ "|" $ kind ordinal toString $ "|" $ sn toString;
 	noteParamK(spec, _, sn): "NP|" $ spec _specKey $ "|" $ sn toString;
 	inletK(_, sn):        "IN|" $ sn toString;
 	outletK(_, sn):       "OUT|" $ sn toString;
@@ -200,7 +200,7 @@ fn _appendNode(kind NodeKind, ins [Int], serial Int, r Rate, t NumType, ch Int) 
 	match (kind) {
 		inletK(_, _):        ctx.inlets push!(idx);
 		outletK(_, _):       ctx.outlets push!(idx);
-		control(_, _, _):    ctx.controls push!(idx);
+		control(_, _, _, _): ctx.controls push!(idx);
 		noteParamK(_, _, _): ctx.noteParams push!(idx);
 		delayInitK(d, _):    ctx.delays[d].initters push!(idx);
 		delayFixReadK(d, _): ctx.delays[d].fixReaders push!(idx);
@@ -579,10 +579,10 @@ fn _importExpr(e SignalExpr) Void {
 		sampleDur: {
 			_mapId(e.id, _addExprNode(NodeKind.sampleDur, [Int](), Rate.init, ANY_NUM, 1));
 		}
-		control(spec, chans, name): {
+		control(spec, chans, name, kind): {
 			let sn Int = `scControlSerials;
 			`scControlSerials = sn + 1;
-			_mapId(e.id, _addExprNode(NodeKind.control(spec, name, sn), [Int](),
+			_mapId(e.id, _addExprNode(NodeKind.control(spec, name, sn, kind), [Int](),
 				Rate.event, FLOAT32, chans));
 		}
 		noteParam(spec, chans, name): {

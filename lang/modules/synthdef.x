@@ -124,6 +124,17 @@ struct ControlSpec {
 	warp ControlWarp,
 }
 
+-- How a control behaves, and which widget UIs derive for it. Matches
+-- tzpl_ControlKind in the plugin ABI. Authored via the control
+-- constructors: control() is continuous; trigger()/toggle()/choice()
+-- produce the other kinds.
+enum ControlKind {
+	continuous,   -- ranged value -> slider
+	trigger,      -- momentary event; nonzero arrival = one-shot edge -> button
+	boolean,      -- latched 0/1 state -> toggle
+	select,       -- integer choice -> number box
+}
+
 ---------------------------------------------------------------------------
 -- SignalExpr
 
@@ -427,7 +438,7 @@ enum SignalExprKind {
 	inlet(NumType, Chans, String),
 	outlet(String),
 
-	control(ControlSpec, Chans, String),
+	control(ControlSpec, Chans, String, ControlKind),
 	noteParam(ControlSpec, Chans, String),
 
 	delay(DelayVar, DelayOp),
@@ -468,7 +479,32 @@ fn outlet(a S, name String = "out") S {
 }
 
 fn control(name String, spec ControlSpec, chans Chans = 1) S {
-    SignalExprKind.control(spec, chans asChans, name) _newSignalExpr
+    SignalExprKind.control(spec, chans asChans, name, ControlKind.continuous) _newSignalExpr
+}
+
+-- Momentary event control (0..1, init 0): the synth treats a nonzero
+-- arrival as a one-shot edge (retrigger an envelope, reset a phase).
+-- UIs render a button.
+fn trigger(name String, chans Chans = 1) S {
+    SignalExprKind.control(
+        ControlSpec { lo: 0.0, hi: 1.0, init: 0.0, warp: ControlWarp.linear },
+        chans asChans, name, ControlKind.trigger) _newSignalExpr
+}
+
+-- Latched on/off control (0 or 1). UIs render a toggle.
+fn toggle(name String, init Float = 0.0, chans Chans = 1) S {
+    SignalExprKind.control(
+        ControlSpec { lo: 0.0, hi: 1.0, init: init, warp: ControlWarp.linear },
+        chans asChans, name, ControlKind.boolean) _newSignalExpr
+}
+
+-- Integer choice control: 0 .. numChoices-1 in unit steps. UIs render a
+-- number box.
+fn choice(name String, numChoices Int, init Int = 0, chans Chans = 1) S {
+    SignalExprKind.control(
+        ControlSpec { lo: 0.0, hi: (numChoices - 1) toFloat, init: init toFloat,
+                      warp: ControlWarp.step(1.0) },
+        chans asChans, name, ControlKind.select) _newSignalExpr
 }
 
 fn noteParam(name String, spec ControlSpec, chans Chans = 1) S {
@@ -979,6 +1015,18 @@ fn toLisp(o ControlSpec) String {
     "(ControlSpec %^ %^ %^ %^ %^)" fmt(o.lo, o.hi, o.init, o.warp ordinal, o.warp _warpParam)
 }
 
+-- ControlSpec with a control kind: appends the kind ordinal as an
+-- optional 6th field. Omitted for continuous so existing defs and
+-- golden dumps are byte-identical.
+fn _specToLisp(o ControlSpec, kind ControlKind) String {
+    match (kind) {
+        continuous : o toLisp;
+        _ : "(ControlSpec %^ %^ %^ %^ %^ %^)"
+                fmt(o.lo, o.hi, o.init, o.warp ordinal, o.warp _warpParam,
+                    kind ordinal);
+    }
+}
+
 fn numTypeInt(op CastOp) Int {
 	match (op) {
 		i32 : 1;
@@ -1042,8 +1090,8 @@ fn toLisp(o S, indentLevel Int) String {
         inlet(typ, chans, name) : "(%^ Inlet \"%^\" %^ %^)" fmt(o.id, name, chans asChans, typ.0);
         outlet(name) : "(%^ Outlet \"%^\" %^)" fmt(o.id, name, o.ins.id separatedString);
 
-        control(spec, chans, name) :
-            "(%^ Control \"%^\" %^ %^)" fmt(o.id, name, chans asChans, spec toLisp);
+        control(spec, chans, name, kind) :
+            "(%^ Control \"%^\" %^ %^)" fmt(o.id, name, chans asChans, spec _specToLisp(kind));
 
         noteParam(spec, chans, name) :
             "(%^ NoteParam \"%^\" %^ %^)" fmt(o.id, name, chans asChans, spec toLisp);

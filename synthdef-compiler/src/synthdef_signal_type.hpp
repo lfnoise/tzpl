@@ -195,6 +195,7 @@ namespace synthdef {
         f64 lo, hi, param;      // param holds the init value
         int warp;               // lang ControlWarp ordinal (ABI ordinal - 1)
         f64 warpParam = 0.0;    // warp payload (step size for step warp)
+        int kind = 0;           // tzpl_ControlKind ordinal (0 = continuous)
 
         u64 hash() const;
         bool operator==(ControlSpec const& that) const {
@@ -202,7 +203,8 @@ namespace synthdef {
                 && hi == that.hi
                 && param == that.param
                 && warp == that.warp
-                && warpParam == that.warpParam;
+                && warpParam == that.warpParam
+                && kind == that.kind;
         }
     };
 

@@ -3530,10 +3530,10 @@ string CppCodeGen::genClass()
         // payload -- the step size for the step warp.)
         s += FMT("\tdef.controls[{}] = {{\"{}\", {{{}, {}, {}}}, {}, "
                  "{{.lo = {}, .hi = {}, .init = {}, .param = {}, "
-                 ".warp = (tzpl_ControlWarp){}, .kind = tzpl_ckContinuous}}}};\n",
+                 ".warp = (tzpl_ControlWarp){}, .kind = (tzpl_ControlKind){}}}}};\n",
             i, control->name, genTypeTag(u), u->rate.codeStr(), u->chans, control->serial,
             ftos(control->spec.lo), ftos(control->spec.hi), ftos(control->spec.param),
-            ftos(control->spec.warpParam), control->spec.warp + 1);
+            ftos(control->spec.warpParam), control->spec.warp + 1, control->spec.kind);
         ++i;
     }
     s += "\treturn def;\n";

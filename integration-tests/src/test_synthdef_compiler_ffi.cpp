@@ -30,6 +30,7 @@
 #include "module_compiler.hpp"
 #include "tzpl_client_interface.hpp"
 #include "tzpl_test_plugins.hpp"
+#include "tzpl_ui_node_controls.hpp"
 #include <print>
 #include <cstdlib>
 #include <string_view>
@@ -409,6 +410,86 @@ static void test_def_desc_introspection() {
     engine::freeEngine(eng);
 }
 
+static void test_control_kinds() {
+    std::print("Test: control kinds flow from DSL sugar to DefDesc widgets\n");
+
+    ts::TypeUniverse types;
+    ts::Compiler compiler(types);
+    bridge::registerAudioEngineFFI(compiler);
+    bridge::registerSynthdefCompilerFFI(compiler);
+    bridge::registerClockFFI(compiler);
+
+    engine::Engine* eng = makeTestEngine();
+
+    ts::ModuleCompiler moduleCompiler(compiler, {MODULES_DIR, LANG_MODULES_DIR});
+    auto target = compiler.createTarget();
+    ts::VM vm(16 * 1024 * 1024, types, target);
+    bridge::AppContext appCtx; appCtx.engine = eng;
+    bridge::setAppContextOnVM(&vm, &appCtx);
+
+    FILE* devnull = fopen("/dev/null", "w");
+    vm.setPrintOutput(devnull);
+
+    // Author one control of each kind through the DSL sugar constructors
+    // and compile via the sexpr path -- exercising DSL -> sexpr (optional
+    // kind field) -> parser -> codegen -> plugin ABI in one shot.
+    const char* source = R"LANG(
+        import synthdef.*;
+        fn kt() S {
+            let freq = control("freq", ControlSpec {
+                lo: 20.0, hi: 8000.0, init: 440.0,
+                warp: ControlWarp.exponential });
+            let trig = trigger("trig");
+            let mute = toggle("mute");
+            let mode = choice("mode", 4);
+            outlet(freq + trig + mute + mode)
+        }
+        let err = kt makeGraph toSynthSexpr("test_ctl_kinds")
+                     compileSynthDefAndLoad;
+        println(err);
+    )LANG";
+
+    bool ok = compileAndRun(compiler, vm, source, "ctl_kinds.x", &moduleCompiler);
+    check(ok, "kind synthdef compiles and loads");
+
+    engine::DefDesc desc;
+    bool found = engine::getDefDesc(eng, "test_ctl_kinds", desc);
+    check(found, "getDefDesc finds test_ctl_kinds");
+    if (found && desc.controls.size() == 4) {
+        auto kindOf = [&](char const* name) -> int {
+            for (auto const& c : desc.controls)
+                if (c.name == name) return (int)c.spec.kind;
+            return -1;
+        };
+        check(kindOf("freq") == tzpl_ckContinuous, "control() is continuous");
+        check(kindOf("trig") == tzpl_ckTrigger, "trigger() is a trigger");
+        check(kindOf("mute") == tzpl_ckBoolean, "toggle() is boolean");
+        check(kindOf("mode") == tzpl_ckSelect, "choice() is select");
+
+        // And the UI derives the right widgets from them.
+        using bridge::UIWidgetKind;
+        check(bridge::widgetKindForControl(tzpl_ckContinuous) == UIWidgetKind::Slider
+              && bridge::widgetKindForControl(tzpl_ckTrigger) == UIWidgetKind::Button
+              && bridge::widgetKindForControl(tzpl_ckBoolean) == UIWidgetKind::Toggle
+              && bridge::widgetKindForControl(tzpl_ckSelect) == UIWidgetKind::Number,
+              "widget kinds derived per control kind");
+
+        // choice() spec: 0..numChoices-1 in unit steps.
+        for (auto const& c : desc.controls) {
+            if (c.name == "mode") {
+                check(c.spec.lo == 0.0 && c.spec.hi == 3.0
+                      && c.spec.warp == tzpl_cwStep && c.spec.param == 1.0,
+                      "choice() spec is 0..n-1 step 1");
+            }
+        }
+    } else {
+        check(false, "test_ctl_kinds has 4 controls");
+    }
+
+    fclose(devnull);
+    engine::freeEngine(eng);
+}
+
 static void test_abi_version_refusal() {
     std::print("Test: loaders refuse plugins with a newer ABI version\n");
     namespace fs = std::filesystem;
@@ -677,6 +758,7 @@ int main(int argc, char const* argv[]) {
     test_caching();
     test_list_synthdefs();
     test_def_desc_introspection();
+    test_control_kinds();
     test_abi_version_refusal();
     test_low_level_ffi();
     test_synthc_analysis_diff();
