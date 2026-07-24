@@ -49,6 +49,33 @@ char const* rateName(tzpl_Rate r) {
     return "?";
 }
 
+// Cheap change detection for the 1 Hz re-query: names + section counts +
+// embedded tags (tags feed row hidden state and are tiny). Avoids rebuilding
+// the row model when nothing changed.
+bool sameDefs(std::vector<engine::DefDesc> const& a,
+              std::vector<engine::DefDesc> const& b) {
+    if (a.size() != b.size()) return false;
+    for (size_t i = 0; i < a.size(); ++i) {
+        if (a[i].name != b[i].name
+            || a[i].ins.size() != b[i].ins.size()
+            || a[i].outs.size() != b[i].outs.size()
+            || a[i].controls.size() != b[i].controls.size()
+            || a[i].buffers.size() != b[i].buffers.size()
+            || a[i].tags != b[i].tags)
+            return false;
+    }
+    return true;
+}
+
+bool sameFiles(std::vector<engine::PluginFile> const& a,
+               std::vector<engine::PluginFile> const& b) {
+    if (a.size() != b.size()) return false;
+    for (size_t i = 0; i < a.size(); ++i)
+        if (a[i].name != b[i].name || a[i].path != b[i].path)
+            return false;
+    return true;
+}
+
 bool containsCaseless(std::string const& hay, char const* needle) {
     if (!needle[0]) return true;
     auto it = std::search(hay.begin(), hay.end(), needle,
@@ -138,15 +165,20 @@ void PluginBrowserPanel::setOpen(bool open) {
 
 void PluginBrowserPanel::drawTagsEditor(std::string const& name,
                                         std::vector<std::string> const& embedded) {
-    auto effective = store_.effectiveTags(name, embedded);
-    auto local = store_.localTags(name);
-    auto isLocal = [&local](std::string const& t) {
-        return std::find(local.begin(), local.end(), t) != local.end();
+    if (!tagEdValid_ || tagEdName_ != name) {
+        tagEdEffective_ = store_.effectiveTags(name, embedded);
+        tagEdLocal_ = store_.localTags(name);
+        tagEdName_ = name;
+        tagEdValid_ = true;
+    }
+    auto isLocal = [this](std::string const& t) {
+        return std::find(tagEdLocal_.begin(), tagEdLocal_.end(), t)
+            != tagEdLocal_.end();
     };
 
     ImGui::TextDisabled("tags:");
     std::string toRemove;
-    for (auto const& t : effective) {
+    for (auto const& t : tagEdEffective_) {
         ImGui::SameLine();
         ImGui::TextUnformatted(t.c_str());
         if (isLocal(t)) {  // only user-local tags are removable
@@ -156,12 +188,15 @@ void PluginBrowserPanel::drawTagsEditor(std::string const& name,
                 toRemove = t;
         }
     }
-    if (effective.empty()) {
+    if (tagEdEffective_.empty()) {
         ImGui::SameLine();
         ImGui::TextDisabled("(none)");
     }
-    if (!toRemove.empty())
-        store_.removeLocalTag(name, toRemove);  // effectiveTags re-read next frame
+    if (!toRemove.empty()) {
+        store_.removeLocalTag(name, toRemove);
+        tagEdValid_ = false;  // re-read next frame
+        rebuildRows();
+    }
 
     ImGui::SetNextItemWidth(ImGui::GetFontSize() * 8.0f);
     bool submit = ImGui::InputTextWithHint("##addtag", "add tag...",
@@ -175,28 +210,76 @@ void PluginBrowserPanel::drawTagsEditor(std::string const& name,
         auto b = tag.find_first_not_of(" \t");
         auto e = tag.find_last_not_of(" \t");
         tag = b == std::string::npos ? std::string{} : tag.substr(b, e - b + 1);
-        if (!tag.empty())
+        if (!tag.empty()) {
             store_.addLocalTag(name, tag);
+            tagEdValid_ = false;
+            rebuildRows();
+        }
         tagInput_[0] = '\0';
     }
 }
 
+std::vector<std::string> const&
+PluginBrowserPanel::availEmbedded(engine::PluginFile const& f) const {
+    static std::vector<std::string> const kNoTags;
+    if (fileDescFetched_ && fileDescOk_ && f.path == selectedPath_)
+        return fileDesc_.tags;
+    return kNoTags;
+}
+
+void PluginBrowserPanel::rebuildRows() {
+    loadedRows_.clear();
+    availRows_.clear();
+    hiddenCount_ = 0;
+    for (auto const& d : defs_) {
+        if (!containsCaseless(d.name, filter_)) continue;
+        bool hidden = store_.shouldHide(d.name, d.tags);
+        if (hidden) {
+            ++hiddenCount_;
+            if (!showHidden_) continue;
+        }
+        char label[512];
+        std::snprintf(label, sizeof(label),
+                      "%s  (%zu in, %zu out, %zu ctl, %zu buf)",
+                      d.name.c_str(), d.ins.size(), d.outs.size(),
+                      d.controls.size(), d.buffers.size());
+        loadedRows_.push_back({d.name, label, {}, false, hidden});
+    }
+    for (auto const& f : available_) {
+        if (!containsCaseless(f.name, filter_)) continue;
+        bool hidden = store_.shouldHide(f.name, availEmbedded(f));
+        if (hidden) {
+            ++hiddenCount_;
+            if (!showHidden_) continue;
+        }
+        availRows_.push_back({f.name, f.name, f.path, true, hidden});
+    }
+}
+
 void PluginBrowserPanel::refresh(bridge::AppContext& ctx) {
-    defs_.clear();
-    if (ctx.engine) engine::listDefDescs(ctx.engine, defs_);
+    std::vector<engine::DefDesc> defs;
+    if (ctx.engine) engine::listDefDescs(ctx.engine, defs);
 
     // Available = on-disk plugins whose name is not a loaded def. The scan
     // never dlopens, so the 1s cadence is fine.
     std::vector<engine::PluginFile> files;
     engine::listPluginFiles(ctx.pluginSearchPaths, files);
-    available_.clear();
+    std::vector<engine::PluginFile> avail;
     for (auto& f : files) {
-        bool loaded = std::any_of(defs_.begin(), defs_.end(),
+        bool loaded = std::any_of(defs.begin(), defs.end(),
                                   [&f](engine::DefDesc const& d) {
                                       return d.name == f.name;
                                   });
-        if (!loaded) available_.push_back(std::move(f));
+        if (!loaded) avail.push_back(std::move(f));
     }
+
+    lastRefresh_ = ImGui::GetTime();
+    if (sameDefs(defs, defs_) && sameFiles(avail, available_))
+        return;  // routine 1 Hz tick, nothing changed: keep cached rows
+
+    defs_ = std::move(defs);
+    available_ = std::move(avail);
+    tagEdValid_ = false;
 
     // A selected available plugin that vanished from the list was either
     // loaded (selection follows it by name into Loaded) or removed from
@@ -213,7 +296,7 @@ void PluginBrowserPanel::refresh(bridge::AppContext& ctx) {
         }
     }
 
-    lastRefresh_ = ImGui::GetTime();
+    rebuildRows();
 }
 
 void PluginBrowserPanel::draw(bridge::AppContext& ctx) {
@@ -238,33 +321,18 @@ void PluginBrowserPanel::draw(bridge::AppContext& ctx) {
                    + ImGui::GetStyle().FramePadding.x * 2.0f;
     ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - refreshW
                             - ImGui::GetStyle().ItemSpacing.x);
-    ImGui::InputTextWithHint("##filter", "filter", filter_, sizeof(filter_));
+    if (ImGui::InputTextWithHint("##filter", "filter", filter_,
+                                 sizeof(filter_)))
+        rebuildRows();
     ImGui::SameLine();
     if (ImGui::SmallButton("Refresh"))
         refresh(ctx);
 
-    // Embedded tags for an available plugin: known only for the selected one
-    // after introspection; name-pattern rules still apply to the rest.
-    auto availEmbedded = [this](engine::PluginFile const& f)
-        -> std::vector<std::string> const& {
-        static std::vector<std::string> const kNoTags;
-        if (fileDescFetched_ && fileDescOk_ && f.path == selectedPath_)
-            return fileDesc_.tags;
-        return kNoTags;
-    };
-
-    // Hidden-tag count under the current text filter (checkbox label).
-    int hiddenN = 0;
-    for (auto const& d : defs_)
-        if (containsCaseless(d.name, filter_)
-            && store_.shouldHide(d.name, d.tags)) ++hiddenN;
-    for (auto const& f : available_)
-        if (containsCaseless(f.name, filter_)
-            && store_.shouldHide(f.name, availEmbedded(f))) ++hiddenN;
     char showLabel[48];
     std::snprintf(showLabel, sizeof(showLabel),
-                  "Show hidden (%d)###showhidden", hiddenN);
-    ImGui::Checkbox(showLabel, &showHidden_);
+                  "Show hidden (%d)###showhidden", hiddenCount_);
+    if (ImGui::Checkbox(showLabel, &showHidden_))
+        rebuildRows();
 
     ImGui::SameLine();
     if (ImGui::SmallButton("Tags..."))
@@ -289,13 +357,16 @@ void PluginBrowserPanel::draw(bridge::AppContext& ctx) {
             ImGui::TextDisabled("no tags");
         } else {
             using TagFilter = tzplapp::PluginTagStore::TagFilter;
+            bool tagsChanged = false;
             for (auto const& [tag, count] : tagCounts) {
                 TagFilter f = store_.filterFor(tag);
                 auto radio = [&](char const* label, TagFilter state) {
                     std::string id = std::string(label) + "##" + tag;
                     if (ImGui::RadioButton(id.c_str(), f == state)
-                        && f != state)
-                        store_.setFilter(tag, state);  // persists; re-filters next frame
+                        && f != state) {
+                        store_.setFilter(tag, state);  // persists
+                        tagsChanged = true;
+                    }
                     ImGui::SameLine();
                 };
                 radio("S", TagFilter::Show);
@@ -305,56 +376,59 @@ void PluginBrowserPanel::draw(bridge::AppContext& ctx) {
                 ImGui::SameLine();
                 ImGui::TextDisabled("(%d)", count);
             }
+            if (tagsChanged)
+                rebuildRows();
         }
         ImGui::EndPopup();
     }
 
+    // Rows are precomputed (rebuildRows); the clipper keeps per-frame work
+    // to the visible Selectables only.
     ImGui::BeginChild("##pluginListScroll");
     ImGui::SeparatorText("Loaded");
     if (!ctx.engine) {
         ImGui::TextDisabled("engine not running");
     } else {
-        for (auto const& d : defs_) {
-            if (!containsCaseless(d.name, filter_)) continue;
-            bool hidden = store_.shouldHide(d.name, d.tags);
-            if (hidden && !showHidden_) continue;
-            char label[512];
-            std::snprintf(label, sizeof(label),
-                          "%s  (%zu in, %zu out, %zu ctl, %zu buf)",
-                          d.name.c_str(), d.ins.size(), d.outs.size(),
-                          d.controls.size(), d.buffers.size());
-            bool sel = !selectedIsFile_ && d.name == selectedName_;
-            if (hidden)
-                ImGui::PushStyleColor(ImGuiCol_Text,
-                    ImGui::GetStyle().Colors[ImGuiCol_TextDisabled]);
-            if (ImGui::Selectable(label, sel) && !sel) {
-                selectedName_ = d.name;
-                selectedIsFile_ = false;
-                selectedPath_.clear();
-                fileDescFetched_ = false;
-                loadError_.clear();
+        ImGuiListClipper clipper;
+        clipper.Begin((int)loadedRows_.size());
+        while (clipper.Step()) {
+            for (int i = clipper.DisplayStart; i < clipper.DisplayEnd; ++i) {
+                Row const& r = loadedRows_[(size_t)i];
+                bool sel = !selectedIsFile_ && r.name == selectedName_;
+                if (r.hidden)
+                    ImGui::PushStyleColor(ImGuiCol_Text,
+                        ImGui::GetStyle().Colors[ImGuiCol_TextDisabled]);
+                if (ImGui::Selectable(r.label.c_str(), sel) && !sel) {
+                    selectedName_ = r.name;
+                    selectedIsFile_ = false;
+                    selectedPath_.clear();
+                    fileDescFetched_ = false;
+                    loadError_.clear();
+                }
+                if (r.hidden)
+                    ImGui::PopStyleColor();
             }
-            if (hidden)
-                ImGui::PopStyleColor();
         }
     }
-    if (!available_.empty()) {
+    if (!availRows_.empty()) {
         ImGui::SeparatorText("Available");
         ImGui::PushStyleColor(ImGuiCol_Text,
                               ImGui::GetStyle().Colors[ImGuiCol_TextDisabled]);
-        for (auto const& f : available_) {
-            if (!containsCaseless(f.name, filter_)) continue;
-            if (!showHidden_ && store_.shouldHide(f.name, availEmbedded(f)))
-                continue;
-            bool sel = selectedIsFile_ && f.path == selectedPath_;
-            if (ImGui::Selectable(f.name.c_str(), sel) && !sel) {
-                selectedName_ = f.name;
-                selectedIsFile_ = true;
-                selectedPath_ = f.path;
-                fileDescFetched_ = false;
-                loadError_.clear();
+        ImGuiListClipper clipper;
+        clipper.Begin((int)availRows_.size());
+        while (clipper.Step()) {
+            for (int i = clipper.DisplayStart; i < clipper.DisplayEnd; ++i) {
+                Row const& r = availRows_[(size_t)i];
+                bool sel = selectedIsFile_ && r.path == selectedPath_;
+                if (ImGui::Selectable(r.label.c_str(), sel) && !sel) {
+                    selectedName_ = r.name;
+                    selectedIsFile_ = true;
+                    selectedPath_ = r.path;
+                    fileDescFetched_ = false;
+                    loadError_.clear();
+                }
+                ImGui::SetItemTooltip("%s", r.path.c_str());
             }
-            ImGui::SetItemTooltip("%s", f.path.c_str());
         }
         ImGui::PopStyleColor();
     }
@@ -374,6 +448,10 @@ void PluginBrowserPanel::draw(bridge::AppContext& ctx) {
             fileDescOk_ = engine::getPluginFileDesc(selectedPath_.c_str(),
                                                     fileDesc_);
             fileDescFetched_ = true;
+            // Embedded tags just became known; the row's hidden state (and
+            // the tags line) may change.
+            tagEdValid_ = false;
+            rebuildRows();
         }
         if (fileDescOk_) sel = &fileDesc_;
     } else {

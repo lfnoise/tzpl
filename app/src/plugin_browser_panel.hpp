@@ -48,7 +48,23 @@ public:
     void draw(bridge::AppContext& ctx);
 
 private:
+    // A precomputed list row: text filter, tag rules, and label formatting
+    // are applied in rebuildRows(), so draw() only emits Selectables.
+    struct Row {
+        std::string name;
+        std::string label;   // fully formatted display string
+        std::string path;    // available rows only
+        bool isFile = false;
+        bool hidden = false; // by tag rules (drawn dimmed when shown)
+    };
+
     void refresh(bridge::AppContext& ctx);
+    // Rebuild loadedRows_/availRows_/hiddenCount_ from defs_/available_ +
+    // filter_/showHidden_/tag store. Call on input changes, not per frame.
+    void rebuildRows();
+    // Embedded tags for an available plugin: known only for the selected one
+    // after introspection; name-pattern rules still apply to the rest.
+    std::vector<std::string> const& availEmbedded(engine::PluginFile const& f) const;
     // Effective-tags line (local tags removable) + add-tag input for `name`.
     void drawTagsEditor(std::string const& name,
                         std::vector<std::string> const& embedded);
@@ -70,6 +86,15 @@ private:
     char tagInput_[64] = {};
     char filter_[128] = {};
     double lastRefresh_ = -1.0;      // ImGui::GetTime() of last query; -1 = never
+
+    // Cached row model (see Row). Rows already reflect filter/tag rules.
+    std::vector<Row> loadedRows_, availRows_;
+    int hiddenCount_ = 0;            // tag-hidden candidates after text filter
+
+    // Cached tag-editor content for the current selection (one plugin).
+    std::string tagEdName_;
+    bool tagEdValid_ = false;
+    std::vector<std::string> tagEdEffective_, tagEdLocal_;
 };
 
 #endif /* plugin_browser_panel_hpp */

@@ -26,6 +26,7 @@
 #include "tzpl_fonts.hpp"
 #include <algorithm>
 #include <format>
+#include <iterator>
 #include <map>
 #include <vector>
 
@@ -176,6 +177,14 @@ public:
             juce::ResizableWindow::backgroundColourId));
     }
 
+    // The cached row fonts only depend on monoFont() today, but rebuild
+    // them on look-and-feel changes so a future themed/embedded typeface
+    // is picked up.
+    void lookAndFeelChanged() override {
+        rowFont_ = juce::Font { monoFont(14.0f) };
+        rowSmallFont_ = juce::Font { monoFont(11.0f) };
+    }
+
     void resized() override {
         auto r = getLocalBounds().reduced(8);
         auto filterRow = r.removeFromTop(24);
@@ -206,12 +215,16 @@ public:
     }
 
     // One flat row model over both sections. Header rows are painted but
-    // never selectable.
+    // never selectable. Display strings are pre-built in applyFilter() so
+    // scrolling repaints touch only this cached data.
     struct Row {
         enum Kind { kLoadedHeader, kLoaded, kAvailHeader, kAvail };
         Kind kind;
         int index;  // into defs_ (kLoaded) or avail_ (kAvail); -1 for headers
         bool hidden = false;  // filtered out by tag rules, shown via "show hidden"
+        String primary;    // name, or the section header text
+        String secondary;  // loaded rows: the dim counts line
+        String tooltip;    // available rows: the file path
     };
 
     static bool isHeader(Row const& r) {
@@ -221,6 +234,8 @@ public:
     // ListBoxModel
     int getNumRows() override { return (int)rows_.size(); }
 
+    // Paints only from the cached Row (no formatting, store or defs_/avail_
+    // access) so scrolling stays cheap.
     void paintListBoxItem(int row, juce::Graphics& g, int w, int h,
                           bool selected) override {
         if (row < 0 || row >= (int)rows_.size()) return;
@@ -228,9 +243,8 @@ public:
         auto text = getLookAndFeel().findColour(juce::TextEditor::textColourId);
         if (isHeader(r)) {
             g.setColour(text.withAlpha(0.45f));
-            g.setFont(monoFont(11.0f));
-            g.drawText(r.kind == Row::kLoadedHeader ? "Loaded" : "Available",
-                       8, 0, w - 12, h - 4,
+            g.setFont(rowSmallFont_);
+            g.drawText(r.primary, 8, 0, w - 12, h - 4,
                        juce::Justification::bottomLeft, true);
             return;
         }
@@ -239,35 +253,25 @@ public:
                           .findColour(juce::TextEditor::highlightColourId));
         float hid = r.hidden ? 0.45f : 1.0f;  // tag-filtered rows extra-dim
         if (r.kind == Row::kAvail) {
-            // Counts are unknown without introspecting the file.
             g.setColour(text.withAlpha(0.7f).withMultipliedAlpha(hid));
-            g.setFont(monoFont(14.0f));
-            g.drawText(String(avail_[(std::size_t)r.index].name), 8, 0,
-                       w - 12, h, juce::Justification::centredLeft, true);
+            g.setFont(rowFont_);
+            g.drawText(r.primary, 8, 0, w - 12, h,
+                       juce::Justification::centredLeft, true);
             return;
         }
-        auto const& d = defs_[(std::size_t)r.index];
         g.setColour(text.withMultipliedAlpha(hid));
-        g.setFont(monoFont(14.0f));
-        g.drawText(String(d.name), 8, 3, w - 12, 16,
+        g.setFont(rowFont_);
+        g.drawText(r.primary, 8, 3, w - 12, 16,
                    juce::Justification::centredLeft, true);
-        static String const dot = String::fromUTF8(" \xc2\xb7 ");
-        String counts = String((int)d.ins.size()) + " in" + dot
-                      + String((int)d.outs.size()) + " out" + dot
-                      + String((int)d.controls.size()) + " ctl" + dot
-                      + String((int)d.buffers.size()) + " buf";
         g.setColour(text.withAlpha(0.55f).withMultipliedAlpha(hid));
-        g.setFont(monoFont(11.0f));
-        g.drawText(counts, 8, h - 16, w - 12, 13,
+        g.setFont(rowSmallFont_);
+        g.drawText(r.secondary, 8, h - 16, w - 12, 13,
                    juce::Justification::centredLeft, true);
     }
 
     juce::String getTooltipForRow(int row) override {
-        if (row >= 0 && row < (int)rows_.size()) {
-            auto const& r = rows_[(std::size_t)row];
-            if (r.kind == Row::kAvail)
-                return String(avail_[(std::size_t)r.index].path);
-        }
+        if (row >= 0 && row < (int)rows_.size())
+            return rows_[(std::size_t)row].tooltip;  // available rows: path
         return {};
     }
 
@@ -310,13 +314,26 @@ private:
         };
         bool showHidden = showHidden_.getToggleState();
         int hiddenCount = 0;
-        rows_.push_back({ Row::kLoadedHeader, -1 });
+        static String const dot = String::fromUTF8(" \xc2\xb7 ");
+        auto header = [](Row::Kind k, char const* label) {
+            Row r; r.kind = k; r.index = -1; r.primary = label; return r;
+        };
+        rows_.push_back(header(Row::kLoadedHeader, "Loaded"));
         for (int i = 0; i < (int)defs_.size(); ++i) {
             auto const& d = defs_[(std::size_t)i];
             if (!matches(d.name)) continue;
             bool hid = store_.shouldHide(d.name, d.tags);
             if (hid) { ++hiddenCount; if (!showHidden) continue; }
-            rows_.push_back({ Row::kLoaded, i, hid });
+            Row row;
+            row.kind = Row::kLoaded;
+            row.index = i;
+            row.hidden = hid;
+            row.primary = String(d.name);
+            row.secondary = String((int)d.ins.size()) + " in" + dot
+                          + String((int)d.outs.size()) + " out" + dot
+                          + String((int)d.controls.size()) + " ctl" + dot
+                          + String((int)d.buffers.size()) + " buf";
+            rows_.push_back(std::move(row));
         }
         std::vector<Row> availRows;
         for (int i = 0; i < (int)avail_.size(); ++i) {
@@ -324,11 +341,19 @@ private:
             if (!matches(f.name)) continue;
             bool hid = store_.shouldHide(f.name, availEmbedded(f));
             if (hid) { ++hiddenCount; if (!showHidden) continue; }
-            availRows.push_back({ Row::kAvail, i, hid });
+            Row row;
+            row.kind = Row::kAvail;
+            row.index = i;
+            row.hidden = hid;
+            row.primary = String(f.name);
+            row.tooltip = String(f.path);
+            availRows.push_back(std::move(row));
         }
         if (!availRows.empty()) {
-            rows_.push_back({ Row::kAvailHeader, -1 });
-            rows_.insert(rows_.end(), availRows.begin(), availRows.end());
+            rows_.push_back(header(Row::kAvailHeader, "Available"));
+            rows_.insert(rows_.end(),
+                         std::make_move_iterator(availRows.begin()),
+                         std::make_move_iterator(availRows.end()));
         }
         showHidden_.setButtonText("show hidden (" + String(hiddenCount) + ")");
 
@@ -677,6 +702,9 @@ private:
 
     bridge::AppContext& appCtx_;
     PluginTagStore store_;
+    // Row-paint fonts, constructed once (see lookAndFeelChanged).
+    juce::Font rowFont_ { monoFont(14.0f) };
+    juce::Font rowSmallFont_ { monoFont(11.0f) };
     juce::TextEditor filter_;
     juce::ToggleButton showHidden_ { "show hidden" };
     juce::TextButton tagsButton_ { "tags..." };
