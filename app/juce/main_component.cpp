@@ -133,8 +133,11 @@ void MainComponent::resized() {
         performView_->setBounds(getLocalBounds());
         return;
     }
-    juce::Component* center = notebookVisible_
+    juce::Component* center =
+          centerMode_ == CenterMode::notebook
         ? static_cast<juce::Component*>(notebook_.get())
+        : centerMode_ == CenterMode::graph
+        ? static_cast<juce::Component*>(graphView_.get())
         : static_cast<juce::Component*>(&editorPane_);
     juce::Component* comps[] = { center, resizer_.get(), &console_ };
     layout_.layOutComponents(comps, 3, 0, 0, getWidth(), getHeight(),
@@ -174,8 +177,11 @@ void MainComponent::togglePluginBrowser() {
 
 void MainComponent::saveSplitRatio() {
     if (getWidth() <= 0) return;
-    auto* center = notebookVisible_
+    auto* center =
+          centerMode_ == CenterMode::notebook
         ? static_cast<juce::Component*>(notebook_.get())
+        : centerMode_ == CenterMode::graph
+        ? static_cast<juce::Component*>(graphView_.get())
         : static_cast<juce::Component*>(&editorPane_);
     double ratio = (double)center->getWidth() / getWidth();
     if (ratio > 0.05 && ratio < 0.95)
@@ -183,13 +189,25 @@ void MainComponent::saveSplitRatio() {
 }
 
 void MainComponent::showNotebook(bool show) {
-    if (notebookVisible_ == show) return;
-    notebookVisible_ = show;
-    notebook_->setVisible(show);
-    editorPane_.setVisible(!show);
+    setCenterMode(show ? CenterMode::notebook : CenterMode::editor);
+}
+
+void MainComponent::setCenterMode(CenterMode m) {
+    if (centerMode_ == m) return;
+    if (centerMode_ != CenterMode::graph)
+        lastDocMode_ = centerMode_; // where to return when the graph closes
+    centerMode_ = m;
+    if (m == CenterMode::graph && !graphView_) {
+        graphView_ = std::make_unique<GraphView>(appCtx_);
+        addChildComponent(*graphView_);
+    }
+    notebook_->setVisible(m == CenterMode::notebook);
+    editorPane_.setVisible(m == CenterMode::editor);
+    if (graphView_) graphView_->setVisible(m == CenterMode::graph);
     resized();
     commands_.commandStatusChanged();
 }
+
 
 // Route VM prints and result summaries to the console; drain from a timer
 // since prints can arrive from any thread (scheduler, actors, engine).
@@ -757,7 +775,7 @@ void MainComponent::updateSessionDocumentPath() {
     // eval also means no new eval will launch, so skipping is safe -- the
     // next successful launch re-anchors.
     if (guiState_.asyncEval.busy()) return;
-    juce::File doc = notebookVisible_ ? notebook_->currentFile()
+    juce::File doc = docModeIsNotebook() ? notebook_->currentFile()
                                       : editorPane_.activeFile();
     session_->setDocumentPath(
         doc == juce::File() ? std::string{}
@@ -767,7 +785,7 @@ void MainComponent::updateSessionDocumentPath() {
 // Where file dialogs should start: the visible document's directory, else
 // the project, else home.
 juce::File MainComponent::dialogDefaultDir() const {
-    juce::File doc = notebookVisible_ ? notebook_->currentFile()
+    juce::File doc = docModeIsNotebook() ? notebook_->currentFile()
                                       : editorPane_.activeFile();
     if (doc != juce::File()) return doc.getParentDirectory();
     // The directory the last open/save dialog chose from (persisted).
@@ -913,7 +931,8 @@ void MainComponent::getAllCommands(juce::Array<juce::CommandID>& ids) {
         cmd::editToggleComment, cmd::editIndent, cmd::editOutdent,
         cmd::findShow, cmd::findNext, cmd::findPrevious,
         cmd::findUseSelection, cmd::findUseSelectionReplace,
-        cmd::fontIncrease, cmd::fontDecrease, cmd::toggleNotebookView,
+        cmd::fontIncrease, cmd::fontDecrease,
+        cmd::viewEditor, cmd::viewNotebook, cmd::viewGraph, cmd::viewRotate,
         cmd::togglePerform, cmd::togglePluginBrowser,
         cmd::evalSelection, cmd::evalLine, cmd::evalFile,
     });
@@ -990,7 +1009,7 @@ void MainComponent::getCommandInfo(juce::CommandID id,
         set("Revert to Saved", "File");
         // Only meaningful for a file-backed editor tab; the notebook keeps
         // its own history.
-        info.setActive(!notebookVisible_ && editorPane_.activeHasFilePath());
+        info.setActive(!docModeIsNotebook() && editorPane_.activeHasFilePath());
         break;
     case cmd::fileClose:
         set("Close Tab", "File");
@@ -1071,8 +1090,23 @@ void MainComponent::getCommandInfo(juce::CommandID id,
         set("Decrease Font Size", "View");
         info.addDefaultKeypress('-', mod);
         break;
-    case cmd::toggleNotebookView:
-        set("Toggle Notebook / Editor", "View");
+    case cmd::viewEditor:
+        set("Text Editor", "View");
+        info.addDefaultKeypress('1', mod);
+        info.setTicked(centerMode_ == CenterMode::editor);
+        break;
+    case cmd::viewNotebook:
+        set("Notebook", "View");
+        info.addDefaultKeypress('2', mod);
+        info.setTicked(centerMode_ == CenterMode::notebook);
+        break;
+    case cmd::viewGraph:
+        set("Node Graph", "View");
+        info.addDefaultKeypress('3', mod);
+        info.setTicked(centerMode_ == CenterMode::graph);
+        break;
+    case cmd::viewRotate:
+        set("Next View", "View");
         info.addDefaultKeypress('\\', mod);
         break;
     case cmd::togglePerform:
@@ -1172,11 +1206,11 @@ bool MainComponent::perform(InvocationInfo const& info) {
         showAboutBox();
         return true;
     case cmd::fileSave:
-        if (notebookVisible_) saveNotebookFlow(false);
+        if (docModeIsNotebook()) saveNotebookFlow(false);
         else saveActiveFlow(false);
         return true;
     case cmd::fileSaveAs:
-        if (notebookVisible_) saveNotebookFlow(true);
+        if (docModeIsNotebook()) saveNotebookFlow(true);
         else saveActiveFlow(true);
         return true;
     case cmd::fileSaveCopy: {
@@ -1212,11 +1246,11 @@ bool MainComponent::perform(InvocationInfo const& info) {
     // In the notebook, undo/redo drive the document history tree; the
     // per-cell editors keep their own native character-level undo.
     case cmd::editUndo:
-        if (notebookVisible_) notebook_->undoDocument();
+        if (docModeIsNotebook()) notebook_->undoDocument();
         else editorPane_.undo();
         return true;
     case cmd::editRedo:
-        if (notebookVisible_) notebook_->redoDocument();
+        if (docModeIsNotebook()) notebook_->redoDocument();
         else editorPane_.redo();
         return true;
     case cmd::editCut:    editorPane_.cutToClipboard(); return true;
@@ -1258,8 +1292,19 @@ bool MainComponent::perform(InvocationInfo const& info) {
     case cmd::fontDecrease:
         applyFontIndex(fontIndex_ - 1);
         return true;
-    case cmd::toggleNotebookView:
-        showNotebook(!notebookVisible_);
+    case cmd::viewEditor:
+        setCenterMode(CenterMode::editor);
+        return true;
+    case cmd::viewNotebook:
+        setCenterMode(CenterMode::notebook);
+        return true;
+    case cmd::viewGraph:
+        setCenterMode(CenterMode::graph);
+        return true;
+    case cmd::viewRotate:
+        setCenterMode(centerMode_ == CenterMode::editor   ? CenterMode::notebook
+                    : centerMode_ == CenterMode::notebook ? CenterMode::graph
+                                                          : CenterMode::editor);
         return true;
     case cmd::togglePerform:
         togglePerform();
@@ -1272,7 +1317,7 @@ bool MainComponent::perform(InvocationInfo const& info) {
     // With the notebook shown, Cmd+Enter / Shift+Enter run the focused cell
     // and Cmd+Shift+Enter runs every cell, matching the ImGui app.
     case cmd::evalSelection: {
-        if (notebookVisible_) { notebook_->runFocusedCell(); return true; }
+        if (docModeIsNotebook()) { notebook_->runFocusedCell(); return true; }
         String code = editorPane_.getSelectedText();
         int startLine, endLine;
         if (code.isEmpty()) {
@@ -1284,14 +1329,14 @@ bool MainComponent::perform(InvocationInfo const& info) {
         return true;
     }
     case cmd::evalLine:
-        if (notebookVisible_) { notebook_->runFocusedCell(); return true; }
+        if (docModeIsNotebook()) { notebook_->runFocusedCell(); return true; }
         {
             int line = editorPane_.cursorLine();
             launchEval(editorPane_.getCurrentLineText(), line, line);
         }
         return true;
     case cmd::evalFile:
-        if (notebookVisible_) { notebook_->runAll(); return true; }
+        if (docModeIsNotebook()) { notebook_->runAll(); return true; }
         launchEval(editorPane_.getAllText(), 0, editorPane_.cursorLine());
         return true;
     }

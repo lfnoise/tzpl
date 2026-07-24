@@ -118,7 +118,11 @@ public:
             m.addCommandItem(&commands_, cmd::findUseSelectionReplace);
             break;
         case 3: { // View
-            m.addCommandItem(&commands_, cmd::toggleNotebookView);
+            m.addCommandItem(&commands_, cmd::viewEditor);
+            m.addCommandItem(&commands_, cmd::viewNotebook);
+            m.addCommandItem(&commands_, cmd::viewGraph);
+            m.addCommandItem(&commands_, cmd::viewRotate);
+            m.addSeparator();
             m.addCommandItem(&commands_, cmd::togglePerform);
             m.addCommandItem(&commands_, cmd::togglePluginBrowser);
             m.addSeparator();

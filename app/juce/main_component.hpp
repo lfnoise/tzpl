@@ -35,6 +35,7 @@
 #include "widgets/key_dispatch.hpp"
 #include "plugin_browser_window.hpp"
 #include "perform_view.hpp"
+#include "graph_view.hpp"
 #include "gui_state.hpp"
 #include "tzpl_look_and_feel.hpp"
 #include <map>
@@ -84,7 +85,7 @@ public:
     int currentTheme() const { return lookAndFeel_.currentTheme(); }
     int currentFontIndex() const { return fontIndex_; }
 
-    bool notebookActive() const { return notebookVisible_; }
+    bool notebookActive() const { return centerMode_ == CenterMode::notebook; }
 
     // Fresh untitled notebook shown in the center pane. The launch default
     // (when no startup document is given) and File > New Notebook.
@@ -158,6 +159,18 @@ private:
     void togglePerform();
     void togglePluginBrowser();
 
+    // Which component fills the center pane. `graph` overlays a *document*
+    // mode (editor or notebook): document-targeted flows (save, eval,
+    // undo, revert) keep routing to lastDocMode_'s target while the graph
+    // is up, and closing the graph returns to it.
+    enum class CenterMode { editor, notebook, graph };
+    void setCenterMode(CenterMode m);
+    // The document mode currently in effect (sees through graph mode).
+    bool docModeIsNotebook() const {
+        auto m = centerMode_ == CenterMode::graph ? lastDocMode_ : centerMode_;
+        return m == CenterMode::notebook;
+    }
+
     void launchEval(juce::String const& code, int flashStart, int flashEnd);
     void collectEvalResult();
     void timerCallback() override; // print-drain coordinator
@@ -176,7 +189,9 @@ private:
 
     EditorPane editorPane_;
     std::unique_ptr<NotebookView> notebook_;
-    bool notebookVisible_ = false;
+    CenterMode centerMode_ = CenterMode::editor;
+    CenterMode lastDocMode_ = CenterMode::editor;
+    std::unique_ptr<GraphView> graphView_; // lazily created on first entry
     OutputConsole console_;
     juce::StretchableLayoutManager layout_;
     std::unique_ptr<juce::StretchableLayoutResizerBar> resizer_;

@@ -67,7 +67,10 @@ enum : juce::CommandID {
     // View
     fontIncrease,
     fontDecrease,
-    toggleNotebookView,
+    viewEditor,     // Cmd+1
+    viewNotebook,   // Cmd+2
+    viewGraph,      // Cmd+3
+    viewRotate,     // Cmd+\ : editor -> notebook -> graph -> editor
     togglePerform,
     togglePluginBrowser,
 
