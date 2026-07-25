@@ -26,7 +26,9 @@ This document is a step-by-step plan for integrating the three sub-projects (lan
 - Full FFI bridge to Tzopilotl (32 functions, 19 marked rtSafe)
 - OSC support via vendored oscpack library (UDP server/client, engine command dispatch, bundle/timetag scheduling, FFI bridge with local and remote send, reply routing)
 - NATS support via `nats_lib` (cnats C client): NatsClient, NatsDispatcher, engine command mapping, VM eval/call handlers, FFI bridge with pub/sub/request
-- **Remaining**: buffer operations (declared but not implemented), binary s-expression serialization (commented-out skeleton), distributed engine communication via NATS (Phase 6.3)
+- Sample buffers: declared inside a synthdef, filled by the engine's resize/load/replace commands via the plugin's `swapBuffer` (no engine-side buffer pool); audio file loading via ExtAudioFile / libsndfile
+- Binary message serialization (TZB) shared with the language and the app's `.tzd` documents
+- **Remaining**: buffer readback and buffer-to-file writing (Phase 7.1); Linux audio file loading is unbuilt (no libsndfile in CMake)
 
 ### synthdef-compiler
 - Two front-ends: S-expression parser and C++ DSL
@@ -435,19 +437,29 @@ C++ integration tests (`integration-tests/src/test_osc.cpp`): server lifecycle, 
 
 ---
 
-## Phase 7: Finish Remaining Engine Features — PARTIAL
+## Phase 7: Finish Remaining Engine Features — DONE
 
 **Goal**: Complete engine functionality gaps.
 
-### 7.1 Buffer operations
+### 7.1 Buffer operations -- DONE
 
-The engine declares but doesn't implement: `newBuffer`, `freeBuffer`, `resizeBuffer`, `loadBuffer`, `zeroBuffer`. Function signatures exist in `tzpl_client_interface.hpp` but no implementation in the .cpp file.
+Shipped under a different design than the original tasks assumed. **A buffer is internal to a synthdef, not an engine-owned resource.** The synthdef declares it (`bufferVar()` in `lang/modules/synthdef.x`), the compiler turns it into a `tzpl_Buffer*` field on the generated plugin struct (null until filled), and the plugin advertises its slots through the optional `loadBufferDefs` symbol. The engine owns no buffers and has no buffer pool or registry: it only swaps a pointer into a plugin instance via `funs.swapBuffer(synth, bufID, newBuf)`, addressed by `(nodeID, bufID)`. The old pointer comes back for the NRT thread to free. Allocation and file I/O happen at record/submit time on the caller's thread, so the RT thread does nothing but a pointer store.
 
-**Tasks**:
-1. Implement a buffer pool (pre-allocated memory blocks for audio data).
-2. Implement buffer loading from audio files (libsndfile or similar).
-3. Add buffer read/write operations accessible from plugins.
-4. Add buffer-related commands to the command system.
+Consequently the originally listed `newBuffer` / `freeBuffer` / `zeroBuffer` engine entry points no longer exist and are not coming: `resizeBuffer` covers zeroing (`tzpl_createBuffer` callocs), and freeing a slot is `replaceBuffer` with a null pointer.
+
+**Completed tasks**:
+1. ~~Buffer pool~~ -- obsolete under the swap design; there is nothing to pool.
+2. Loading from audio files. Done. `engine/src/tzpl_audio_file.hpp`: ExtAudioFile (AudioToolbox) on macOS, libsndfile on Linux, honoring `channelOffset` / `frameOffset` / `numFrames` and converting to non-interleaved f64.
+3. Buffer read/write operations accessible from plugins. Done. `BufFixRead`, `BufVarRead` (interpolated), `BufWrite`, `BufLength` -- expression graph, s-expression parsing, and C++ codegen including SIMD paths. Reads compile to `buf ? ... : 0.0` and writes are wrapped in `if (buf)`, so an unfilled slot is safe. DSL surface: `bufferVar` / `read` / `vread` / `write` / `length`; mirrored in synthc; 7 tests in `synthdef-compiler --test`.
+4. Buffer commands in the command system. Done. `ResizeBufferCmd`, `ReplaceBufferCmd`, `LoadBufferCmd` -- all two-stage, freeing the displaced buffer on the NRT thread.
+5. Beyond the original scope: `resizeBuffer` / `loadBuffer` exposed to Tzopilotl via the FFI bridge; the plugin browser shows a Buffers section per def; node control panels get a per-slot "load <buffer>" button feeding the `waveform` widget (see 13.3).
+
+**Remaining gaps** (none blocking; buffers work end to end on macOS):
+- No readback. Nothing reads buffer contents back out of the engine -- the waveform overview re-reads the file from the path the app recorded at load time. No buffer-to-file write either, so a buffer written by a synth cannot be saved.
+- `replaceBuffer` is C++-only (it takes a `tzpl_Buffer*`), and clearing a slot by swapping in null is neither exposed nor tested, though the null guards make it safe.
+- The FFI `loadBuffer` is 3-arg (`nodeID`, `bufID`, `path`) -- it does not expose the engine function's channel/frame offsets.
+- Linux would not link: `tzpl_audio_file.hpp` includes `<sndfile.h>` on non-Apple, but no CMakeLists finds or links libsndfile.
+- Undocumented from the language: the FFI Guide's audio-engine section never mentions `loadBuffer` / `resizeBuffer`, no example `.x` calls them, and there is no end-to-end test that loads a file and plays it (`graph_layout_test` covers submit plus frame count only).
 
 ### 7.2 Audio input support -- DONE
 
@@ -847,7 +859,7 @@ Phase 0 (Build Infrastructure)       ✅ DONE
         │           └─> Phase 4 (Lang Features)  ✅ DONE
         │                 └─> Phase 5 (OSC)       ✅ DONE
         │                       └─> Phase 6 (NATS) ✅ DONE
-        ├─> Phase 7 (Engine Features)              🟡 PARTIAL ─────────────────┐
+        ├─> Phase 7 (Engine Features)              ✅ DONE ────────────────────┐
         ├─> Phase 8 (Compiler Features)            ✅ DONE ────────────────┤
         └─> Phase 9 (Language Features cont.)      🟢 MOSTLY DONE ───────────┤
                                                                               v
@@ -878,7 +890,7 @@ Phase 0 (Build Infrastructure)       ✅ DONE
 | 4 | Critical language features | ✅ Done | -- |
 | 5 | OSC support | ✅ Done | -- |
 | 6 | NATS support | ✅ Done | -- |
-| 7 | Engine feature completion | 🟡 Partial | Buffers, binary sexpr. Audio input, master gain/channel offset done |
+| 7 | Engine feature completion | ✅ Done | 7.1-7.4 all done. Follow-ups: buffer readback / buffer-to-file, engine commands over TZB instead of text |
 | 8 | Compiler feature completion | ✅ Done | -- |
 | 9 | Language feature completion | 🟢 Mostly done | I/O functions, general function inlining |
 | 10 | UI framework setup | ✅ Done | -- |
