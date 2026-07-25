@@ -22,6 +22,8 @@
 //
 //  Every hashable object (Preset, WidgetSnap, Cell, DocSnapshot) has ONE
 //  canonical representation: its TZB (tzpl::sbin) Value tree, built by the
+//  -- TZB is the binary message format documented in lang/docs/FFI_Guide.html
+//  section 15, with the layout defined in shared/tzpl_sexpr_bin.hpp --
 //  toValue functions below. The content hash is a 64-bit FNV-1a over the
 //  encoded bytes of that tree, lazily cached in the object (doc::CHash).
 //  The .tzd writer consumes the same builders, so the hash, the equality

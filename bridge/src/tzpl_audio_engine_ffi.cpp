@@ -612,7 +612,9 @@ static thread_local engine::Silo* gCurrentSilo = nullptr;
 // actor). A message whose encoded payload exceeds kMaxBytes is REJECTED by
 // siloOutbox (it returns an error, not enqueued) -- never truncated.
 struct OutboxMsg {
-    // Max encoded-Msg (TZB) payload per message. At ~9 bytes per immediate
+    // Max encoded-Msg (TZB -- see shared/tzpl_sexpr_bin.hpp for the layout and
+    // lang/docs/FFI_Guide.html section 15 for the format) payload per message.
+    // At ~9 bytes per immediate
     // value (1 tag + 8 data) this holds a few hundred elements, e.g. a control
     // vector or a chord, with headroom. Sized to the outbox ring: kOutboxCap
     // entries are preallocated, so this is the per-slot cost (see kOutboxCap).

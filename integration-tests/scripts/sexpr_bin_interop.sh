@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Proves the C++ encoder (shared/tzpl_sexpr_bin.hpp) and the Tzopilotl encoder
-# (lang/modules/message.x) agree byte-for-byte on the TZB wire format: both
+# (lang/modules/std/messageEncoding.x) agree byte-for-byte on the TZB wire
+# format (documented in lang/docs/FFI_Guide.html section 15.5): both
 # encode the same Msg value and their byte dumps are diffed.
 set -u
 

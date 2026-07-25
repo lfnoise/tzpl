@@ -19,9 +19,13 @@
 //  shared
 //
 //  The "TZB" binary message format -- canonical wire layout for serializing an
-//  Msg value (message.x) to a flat byte buffer. This C++ header is the single
-//  source of truth for the layout and is mirrored, byte for byte, by the
-//  Tzopilotl implementation in lang/modules/message.x. Keep the two in sync.
+//  Msg value (lang/modules/std/message.x) to a flat byte buffer. This C++ header
+//  is the single source of truth for the layout and is mirrored, byte for byte,
+//  by the Tzopilotl implementation in lang/modules/std/messageEncoding.x. Keep
+//  the two in sync.
+//
+//  Prose documentation: lang/docs/FFI_Guide.html section 15 (Binary Messages);
+//  the wire format is section 15.5, the C++ API section 15.7.
 //
 //  It provides a zero-copy `Reader` (random access into a received buffer with
 //  no allocation -- intended for the silo / cross-language consumer side) and a

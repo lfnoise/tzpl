@@ -837,7 +837,7 @@ event loop is single-threaded per VM, so thousands of these can interleave
 cheaply.</p>
 <pre><code><span class="cmt">-- A silo module: a generative arpeggio that walks a chord and drifts upward.</span>
 <span class="kw">import</span> audio_engine.*;
-<span class="kw">import</span> message.*;
+<span class="kw">import</span> std.message.*;
 
 <span class="kw">async</span> <span class="kw">fn</span> <span class="fn">arp</span>(self <span class="typ">Actor&lt;Msg&gt;</span>, init <span class="typ">Msg</span>) <span class="typ">Void</span> {
     <span class="kw">let</span> chord = [<span class="num">0.0</span>, <span class="num">4.0</span>, <span class="num">7.0</span>, <span class="num">11.0</span>];   <span class="cmt">-- semitone offsets</span>
@@ -895,7 +895,7 @@ actors interleave on one VM; they run at NRT, in silos, and &mdash; over NATS
   <tr><td><code>serveActors()</code></td><td>Like <code>runActors</code> but parks when idle, woken by cross-thread delivery.</td></tr>
 </table>
 <p>Two actors bouncing a counter (from <code>lang/tests/actors/pingpong.x</code>):</p>
-<pre><code><span class="kw">import</span> message.*;
+<pre><code><span class="kw">import</span> std.message.*;
 
 <span class="cmt">-- Seed a Ref so `ping` can refer to `pong`, which is spawned after it.</span>
 <span class="kw">let</span> dummy = <span class="fn">spawn</span>(<span class="kw">async</span> <span class="kw">fn</span>(s <span class="typ">Actor&lt;Msg&gt;</span>, i <span class="typ">Msg</span>) <span class="typ">Void</span> {}, Msg.int(<span class="num">0</span>));
@@ -936,13 +936,14 @@ runnable. <code>runActors</code> turns that crank until everyone is parked again
 <h3 id="actors-messages">8.2 Msg messages</h3>
 <p>Messages are <code>Msg</code> values &mdash; a small universal tree
 (<code>bool</code>, <code>int</code>, <code>float</code>, <code>symbol</code>,
-<code>string</code>, <code>vec</code>) from <code>lang/modules/message.x</code>. The
-same type serializes to a compact binary form via <code>messageEncoding.x</code>
-(<code>encode</code> / <code>decode</code>), which is what makes a message
+<code>string</code>, <code>vec</code>) from <code>std.message</code>. The
+same type serializes to a compact binary form (TZB) via
+<code>std.messageEncoding</code> (<code>encode</code> / <code>decode</code>,
+documented in <a href="FFI_Guide.html#messages">FFI Guide &sect;15</a>), which is what makes a message
 location-transparent: the identical value can be delivered locally, to a silo, or
 across a process boundary.</p>
-<pre><code><span class="kw">import</span> message.*;
-<span class="kw">import</span> messageEncoding.*;
+<pre><code><span class="kw">import</span> std.message.*;
+<span class="kw">import</span> std.messageEncoding.*;
 
 <span class="kw">let</span> m = Msg.vec([Msg.int(<span class="num">60</span>), Msg.float(<span class="num">0.5</span>), Msg.symbol(<span class="str">'hit</span>)]);
 m toString println;          <span class="cmt">-- [60, 0.5, hit]</span>
@@ -1044,8 +1045,8 @@ subscription bridges a subject to a local actor, and publishing encodes a messag
 onto that subject (from
 <code>integration-tests/scripts/actor_nats_loopback.x</code>):</p>
 <pre><code><span class="kw">import</span> nats.*;
-<span class="kw">import</span> messageEncoding.*;   <span class="cmt">-- encode (for publishing)</span>
-<span class="kw">import</span> message.*;
+<span class="kw">import</span> std.messageEncoding.*;   <span class="cmt">-- encode (for publishing)</span>
+<span class="kw">import</span> std.message.*;
 
 <span class="cmt">-- a worker actor, named 'w by its spawner (as in 8.3)</span>
 worker <span class="fn">spawn</span>(Msg.int(<span class="num">0</span>)) <span class="fn">register</span>(<span class="str">'w</span>);

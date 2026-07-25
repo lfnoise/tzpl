@@ -284,7 +284,8 @@ public:
 
 // Bytes object -- a growable, length-based binary buffer. Unlike StringObj it
 // makes no UTF-8 assumptions and may hold embedded NUL bytes; it is the carrier
-// for the Msg binary message format (see lang/modules/messageEncoding.x). A leaf
+// for the Msg binary message format (TZB, documented in lang/docs/FFI_Guide.html
+// section 15; encoder in lang/modules/std/messageEncoding.x). A leaf
 // object: it holds no Obj* children, so GC scanning is a no-op (GCTag::None).
 class BytesObj : public Obj {
 public:

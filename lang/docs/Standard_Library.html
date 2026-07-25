@@ -510,7 +510,7 @@ t force println;    <span class="cmt">-- cached</span></code></pre>
         <!-- ============================================================ -->
         <div class="section" id="std-message">
             <h2>std.message / std.messageEncoding</h2>
-            <p><code>Msg</code> is the dynamic message value type (bool/int/float/symbol/string/vec) with <code>asMsg</code> constructors; <code>std.messageEncoding</code> provides the TZB binary codec: <code>encode(Msg) &rarr; Bytes</code>, <code>decode(Bytes) &rarr; Msg</code>, <code>isMessage</code>, and a zero-copy <code>Reader</code> with O(1) child access for columnar vectors. Used by the actor system and the NATS bridge.</p>
+            <p><code>Msg</code> is the dynamic message value type (bool/int/float/symbol/string/vec) with <code>asMsg</code> constructors; <code>std.messageEncoding</code> provides the TZB binary codec: <code>encode(Msg) &rarr; Bytes</code>, <code>decode(Bytes) &rarr; Msg</code>, <code>isMessage</code>, and a zero-copy <code>Reader</code> with O(1) child access for columnar vectors. Used by the actor system and the NATS bridge. The TZB format itself &mdash; the wire layout and the matching C++ API &mdash; is documented in <a href="FFI_Guide.html#messages">FFI Guide &sect;15, Binary Messages</a>.</p>
             <a href="#top" class="back-to-top">&uarr; Back to top</a>
         </div>
 

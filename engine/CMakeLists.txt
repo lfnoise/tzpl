@@ -27,7 +27,6 @@ endif()
 
 set(LIB_SOURCES
     src/tzpl_sexpr.cpp
-    src/tzpl_sexpr_binary_buffer.cpp
     src/tzpl_command.cpp
     src/tzpl_audio_backend_rtaudio.cpp
     src/tzpl_client_interface.cpp
@@ -84,7 +83,6 @@ install(FILES
     src/tzpl_silo.hpp
     src/tzpl_xfader.hpp
     src/tzpl_mixer.hpp
-    src/tzpl_sexpr_binary_buffer.hpp
     src/tzpl_test_plugins.hpp
     src/tzpl_audio_file_writer.hpp
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/tzpl

@@ -1,7 +1,7 @@
 // Standalone self-test for shared/tzpl_sexpr_bin.hpp.
 //
 // Verifies the C++ encoder/Reader round-trips, and prints the encoded bytes as
-// a decimal sequence so it can be diffed against lang/modules/message.x's
+// a decimal sequence so it can be diffed against lang/modules/std/messageEncoding.x's
 // encoding of the same value (proving the two implementations agree on the
 // wire format). See integration-tests/scripts/sexpr_bin_interop.sh.
 //

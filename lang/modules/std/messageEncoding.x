@@ -5,8 +5,11 @@
 -- materializing a Msg tree. The same buffer is the carrier for inter-thread
 -- (silo) and inter-process (e.g. NATS) messaging.
 --
+-- Documented in lang/docs/FFI_Guide.html section 15 (Binary Messages).
+--
 -- Wire layout (little-endian) -- mirrored by the C++ reader/writer in
--- shared/tzpl_sexpr_bin.hpp; keep the two in sync.
+-- shared/tzpl_sexpr_bin.hpp, which is the canonical definition of the layout;
+-- keep the two in sync.
 --
 --   header:  'T' 'Z' 'B' version(=2)        (4 bytes)
 --            u32 rootOffset                  (offset of the root value slot)

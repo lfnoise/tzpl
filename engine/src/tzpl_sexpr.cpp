@@ -22,7 +22,6 @@
 //
 
 #include "tzpl_sexpr.hpp"
-#include "tzpl_sexpr_binary_buffer.hpp"
 #include <iostream>
 
 namespace sexpr {

@@ -334,7 +334,8 @@ SnapshotPtr DocumentStore::jumpTo(HistNode* node) {
 // ---------------------------------------------------------------------------
 // Persistence
 //
-// Layout (TZB Vec trees, first child a Symbol discriminator):
+// Layout (TZB Vec trees, first child a Symbol discriminator; the TZB format
+// itself is documented in lang/docs/FFI_Guide.html section 15):
 //   (doc 1 nextCellId (cells cell...) (panels panel...))
 //   cell   = (cell id kindInt name text runOnLoad)
 //   panel  = (panel name widget...)

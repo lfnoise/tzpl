@@ -464,12 +464,19 @@ The engine declares but doesn't implement: `newBuffer`, `freeBuffer`, `resizeBuf
 1. Implement master gain control (applied after safety limiter or integrated into it). Done.
 2. Implement channel offset for routing to specific hardware output channels. Done.
 
-### 7.4 Binary s-expression serialization
+### 7.4 Binary s-expression serialization -- DONE
 
-File `tzpl_sexpr_binary_buffer.hpp` exists but contains only commented-out skeleton code. Text-based s-expression parsing is fully implemented.
+Shipped as the **TZB binary message format**, not in the originally planned file. The `Msg` type (renamed from `SExpr` on 2026-06-29) is the serialized value. The originally planned `engine/src/tzpl_sexpr_binary_buffer.{hpp,cpp}` never got past a commented-out skeleton and has been deleted.
 
-**Tasks**:
-1. Complete the binary parser/serializer for efficient network transport of commands (useful with NATS).
+**Completed tasks**:
+0. **Documentation**: `lang/docs/FFI_Guide.html` §15 (Binary Messages) is the reference for TZB -- §15.5 the wire format, §15.7 the C++ API. `shared/tzpl_sexpr_bin.hpp`'s header comment is the normative layout definition that both implementations follow.
+1. `shared/tzpl_sexpr_bin.hpp` -- the canonical wire layout (`namespace tzpl::sbin`, magic `TZB`, version 2, little-endian). Provides a zero-copy bounds-checked `Reader` (random access, no allocation -- safe for the silo / consumer side), plus `Writer`/`encode` over a small `Value` variant. Parallel tag/payload arrays give O(1) child access into vectors.
+2. Tzopilotl side: `Bytes` type (`lang/src/builtins_bytes.cpp`), `lang/modules/std/message.x` (the `Msg` type) and `lang/modules/std/messageEncoding.x` (`encode`/`decode`/`Reader`), mirroring the C++ layout byte for byte.
+3. NATS transport: `natsPubMsg(subject, Bytes)` and `onMessageMsg(subject, fn(Bytes))` in `bridge/src/tzpl_nats_ffi.cpp`; `bridge/modules/nats.x` wraps them to deliver messages into an actor mailbox.
+4. Cross-language conformance test: `integration-tests/scripts/sexpr_bin_interop.sh` encodes the same value with the C++ encoder and with `messageEncoding.x` and diffs the byte dumps (passing). Also `tools/sexpr_bin_selftest.cpp`.
+5. Second consumer beyond networking: the app's content-addressed notebook history hashes canonical sbin bytes (`app/src/content_hash.hpp`, `app/src/document.cpp`), with `app/tests/doc_roundtrip_test.cpp` covering it.
+
+**Not done** (deliberate): engine command payloads over NATS are still space-separated text (see 6.1/6.3). Moving them onto TZB is a possible follow-up, not a gap in the serializer.
 
 ---
 

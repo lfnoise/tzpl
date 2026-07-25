@@ -3140,8 +3140,8 @@ nats.<span class="fn">onMessageS</span>(<span class="str">"nodes.piano.chords"</
 
 <p>Two ways to read an encoded message are provided: a full <code>decode</code> into a <code>Msg</code> tree, and a <strong>zero-copy <code>Reader</code></strong> that reads fields and walks children directly off the buffer with no tree allocation. List children are stored columnarly, so reaching the <em>i</em>-th child is O(1).</p>
 
-<pre><code><span class="kw">import</span> messageEncoding.*;
-<span class="kw">import</span> message.*;</code></pre>
+<pre><code><span class="kw">import</span> std.messageEncoding.*;
+<span class="kw">import</span> std.message.*;</code></pre>
 
 <div class="note">
   <strong>Note:</strong> <code>symbol</code> and <code>string</code> are distinct cases that both carry text: a <code>symbol</code> is an interned <code>Symbol</code> (renders bare, e.g. <code>note</code>); a <code>string</code> is text (renders quoted, e.g. <code>"note"</code>). The format preserves the distinction with separate tags, and round-trips a symbol back to an interned <code>Symbol</code>.
@@ -3176,8 +3176,8 @@ nats.<span class="fn">onMessageS</span>(<span class="str">"nodes.piano.chords"</
   <tr><td><code>isMessage(b Bytes) Bool</code></td><td>True if <code>b</code> carries a valid TZB header.</td></tr>
 </table>
 
-<pre><code><span class="kw">import</span> messageEncoding.*;
-<span class="kw">import</span> message.*;
+<pre><code><span class="kw">import</span> std.messageEncoding.*;
+<span class="kw">import</span> std.message.*;
 
 <span class="kw">let</span> msg = <span class="fn">encode</span>(Msg.<span class="fn">vec</span>([
     Msg.<span class="fn">symbol</span>(<span class="fn">toSymbol</span>(<span class="str">"note"</span>)),
@@ -3244,7 +3244,7 @@ nats.<span class="fn">onMessageS</span>(<span class="str">"nodes.piano.chords"</
   <li>A <strong>list node</strong> is <code>u32 count</code> + <code>u32 tagsOffset</code> + <code>u32 payloadsOffset</code>. The tag bytes and the 8-byte payloads of the children are stored in two parallel arrays, so child <em>i</em> is <code>tags[i]</code> and <code>payloads[i*8]</code> &mdash; <strong>O(1) random access</strong>, no walking.</li>
 </ul>
 
-<p>The format is defined once in <code>shared/tzpl_sexpr_bin.hpp</code> and mirrored byte-for-byte by <code>lang/modules/messageEncoding.x</code>.</p>
+<p>The format is defined once in <code>shared/tzpl_sexpr_bin.hpp</code> and mirrored byte-for-byte by <code>lang/modules/std/messageEncoding.x</code>. This section is the reference documentation for TZB; <code>integration-tests/scripts/sexpr_bin_interop.sh</code> checks that the two implementations still agree byte for byte.</p>
 
 <!-- -------------------------------- -->
 <h3 id="messages-nats">15.6 Sending over NATS</h3>
@@ -3252,8 +3252,8 @@ nats.<span class="fn">onMessageS</span>(<span class="str">"nodes.piano.chords"</
 <p><a href="#nats">NATS</a> carries these buffers verbatim. Publish with <code>natsPubMsg</code> and receive with <code>onMessageMsg</code>, whose handler gets the raw payload as <code>Bytes</code>:</p>
 
 <pre><code><span class="kw">import</span> nats.*;
-<span class="kw">import</span> messageEncoding.*;
-<span class="kw">import</span> message.*;
+<span class="kw">import</span> std.messageEncoding.*;
+<span class="kw">import</span> std.message.*;
 
 <span class="cmt">-- receive: decode each incoming message</span>
 nats.<span class="fn">onMessageMsg</span>(<span class="str">"part.cmd"</span>, <span class="kw">fn</span>(m <span class="typ">Bytes</span>) {
@@ -3331,7 +3331,7 @@ std::vector&lt;<span class="kw">uint8_t</span>&gt; buf = <span class="fn">encode
 
 <h3 id="actors-example">16.4 Example</h3>
 <p>Two NRT actors addressed by name (from <code>lang/tests/actors/nrt_byname.x</code>):</p>
-<pre><code><span class="kw">import</span> message.*;
+<pre><code><span class="kw">import</span> std.message.*;
 
 <span class="kw">async</span> <span class="kw">fn</span> <span class="fn">relay</span>(self <span class="typ">Actor&lt;Msg&gt;</span>, init <span class="typ">Msg</span>) <span class="typ">Void</span> {
     <span class="kw">while</span> (<span class="kw">true</span>) {
@@ -3442,7 +3442,7 @@ collector <span class="fn">spawn</span>(Msg.int(<span class="num">0</span>)) <sp
 <p>A silo sender emitting a line to an NRT <code>conductor</code> (from <code>integration-tests/scripts/silo_to_nrt.x</code>):</p>
 <pre><code><span class="cmt">-- inside the silo module</span>
 <span class="kw">import</span> silo_actors.*;
-<span class="kw">import</span> message.*;
+<span class="kw">import</span> std.message.*;
 
 <span class="kw">async</span> <span class="kw">fn</span> <span class="fn">sender</span>(self <span class="typ">Actor&lt;Msg&gt;</span>, init <span class="typ">Msg</span>) <span class="typ">Void</span> {
     <span class="kw">let</span> scale = [<span class="num">60.0</span>, <span class="num">64.0</span>, <span class="num">67.0</span>, <span class="num">72.0</span>];

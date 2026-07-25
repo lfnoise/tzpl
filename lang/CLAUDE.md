@@ -123,7 +123,7 @@ in `docs/Standard_Library.html`.
 - `std/test.x` -- assertions with stable PASS/FAIL output + testSummary
 - `std/json.x` -- Json value enum and printer
 - `std/message.x` -- the Msg message value type and `asMsg` constructors
-- `std/messageEncoding.x` -- TZB binary encode/decode + zero-copy Reader for `Msg`
+- `std/messageEncoding.x` -- TZB binary encode/decode + zero-copy Reader for `Msg` (format documented in `docs/FFI_Guide.html` §15; layout mirrored from `shared/tzpl_sexpr_bin.hpp`)
 - `std/futures.x` -- awaitAll / gather combinators
 - `std/thunk.x` -- memoized lazy values (thunk / force)
 

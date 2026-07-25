@@ -677,7 +677,7 @@ panel(<span class="str">""</span>);               <span class="cmt">-- back to t
 <!-- -------------------------------- -->
 <h3 id="nb-save">4.5 Saving &amp; Loading</h3>
 
-<p><kbd>Cmd+S</kbd> saves the notebook to a <code>.tzd</code> file (a compact TZB binary container). Saved: the cells (kind, text, order, run-on-load flags), for each panel cell its widgets' <strong>names, kinds, ranges, and current values</strong> &mdash; and the whole <strong>undo history tree</strong> (<a href="#nb-history">&sect;4.6</a>). Not saved: bindings, eval outputs, scope data &mdash; anything that is behavior or transient display.</p>
+<p><kbd>Cmd+S</kbd> saves the notebook to a <code>.tzd</code> file (a compact binary container in the TZB format, documented in <a href="FFI_Guide.html#messages">FFI Guide &sect;15</a>). Saved: the cells (kind, text, order, run-on-load flags), for each panel cell its widgets' <strong>names, kinds, ranges, and current values</strong> &mdash; and the whole <strong>undo history tree</strong> (<a href="#nb-history">&sect;4.6</a>). Not saved: bindings, eval outputs, scope data &mdash; anything that is behavior or transient display.</p>
 
 <p>On open, widgets reappear immediately with their saved positions and values, but <strong>unbound</strong> &mdash; they drive nothing until their creating code runs again. Because constructors are upserts, re-running the setup cell adopts each saved widget (keeping its saved value, which is pushed through the fresh binding) rather than resetting it. So the loading ritual is simply:</p>
 

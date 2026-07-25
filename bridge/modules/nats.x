@@ -8,7 +8,8 @@ export nats_ffi.*;
 import std.messageEncoding.*;   -- isMessage / decode
 import std.message.*;    -- Msg
 
--- Bridge a NATS subject to a local actor: every TZB-encoded message published to
+-- Bridge a NATS subject to a local actor: every TZB-encoded message (the binary
+-- message format -- see lang/docs/FFI_Guide.html section 15) published to
 -- `subject` (by this or any other process) is decoded and delivered into the
 -- mailbox of the actor registered as `name`. Wraps the onMessageMsg + isMessage +
 -- decode + sendByName pattern. Drive the actor with runActors()/serveActors() so

@@ -23,7 +23,8 @@
 //  path copying -- unchanged cells are shared between snapshots, so a
 //  snapshot is one root pointer (the persistent-history substrate for M4).
 //
-//  Persistence is the .tzd container (TZB binary, tzpl_sexpr_bin.hpp):
+//  Persistence is the .tzd container (TZB binary -- layout in
+//  shared/tzpl_sexpr_bin.hpp, documented in lang/docs/FFI_Guide.html section 15):
 //  the cell list plus, for each panel cell, that panel's widgets
 //  (name/kind/spec/values/frame) snapshotted from the ui registry.
 //  Bindings are never saved: a loaded document's widgets are unbound
