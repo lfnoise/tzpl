@@ -306,8 +306,81 @@ tzpl_SErr setControl(i64 nodeID, i64 controlID, int numValues, i64 const* values
 // `nodeID`. mode 0 = meter (peak/rms only), 1 = scope (peak/rms + a sample
 // FIFO of channel 0). The outlet's element type must be f32. untap removes
 // the tap and frees it.
+// Each silo's RT tap table holds Silo::kMaxTaps taps; tapOutlet returns
+// tzpl_errResourceLimit from go()/sched() when the target silo is full.
 tzpl_SErr tapOutlet(i64 nodeID, int outlet, i64 tapID, int mode);
+// Tap the master output bus -- post safety-limiter, post master gain, i.e.
+// what the device plays. No node required, so this reaches signal that
+// tapOutlet cannot (node 0 "Audio Out" has no outlets). Must be submitted to
+// SILO 0: that silo's thread runs the post-limiter section. untap likewise.
+// Limited to Engine::kMaxMasterTaps; returns tzpl_errResourceLimit past that.
+tzpl_SErr tapMaster(i64 tapID, int mode);
 tzpl_SErr untap(i64 tapID);
+
+// Allocate a process-unique tapID. Use this rather than a private counter so
+// independent features (ui widgets, the graph view) can never collide.
+i64 allocTapID(Engine* e);
+
+// ---------------------------------------------------------------------------
+// Metering & monitoring
+// ---------------------------------------------------------------------------
+
+// Master output level, measured post-limiter and post-gain -- what the device
+// actually plays. Always available: no tap, node or widget required. `ch` < 0
+// asks for the summary across channels. All lock-free; callable from any
+// thread. Note that with the safety limiter ENABLED these trail the node taps
+// by one block (the limiter carries a block of latency).
+int  masterChans(Engine* e);
+f32  masterPeak(Engine* e, int ch);
+f32  masterRms(Engine* e, int ch);
+// Peak with a ~1.5s fall, so a reader polling at any rate sees the true
+// maximum instead of whichever block it happened to sample.
+f32  masterPeakHold(Engine* e, int ch);
+// Monotone count of samples at or over full scale. Latch on a change rather
+// than reading and clearing -- there may be several readers.
+u32  masterClipCount(Engine* e);
+
+struct SiloStatsSnap {
+    int index = 0;
+    u64 blockCount = 0;
+    f64 lastMs = 0, avgMs = 0, maxMs = 0, mixWaitMs = 0;
+    f64 loadPercent = 0;          // avgMs as a share of one block's budget
+    int numTaps = 0;
+    int toNrtDepth = 0, fromNrtDepth = 0, deadNodesDepth = 0;
+    bool hasVM = false;
+    // Monotone GC counters from the silo's attached VM; take deltas.
+    u64 gcStepCount = 0, gcCycles = 0, gcRtStepCount = 0, gcRtMaxNanos = 0;
+};
+
+struct EngineStats {
+    bool audioRunning = false;
+    f64 sampleRate = 0;
+    int bufferFrames = 0, channels = 0;
+    u64 blockCount = 0;
+    f64 blockBudgetMs = 0, blockLastMs = 0, blockAvgMs = 0, blockMaxMs = 0;
+    f64 loadPercent = 0, loadPeakPercent = 0;
+    u64 overBudgetCount = 0;
+    // RT-counted: over-budget blocks, wrong-size blocks, escaped exceptions,
+    // and device-reported under/overflows.
+    u64 engineDropouts = 0;
+    u64 badBlockSizeCount = 0, rtExceptionCount = 0;
+    // Device-reported, polled from the backend. Kept separate from
+    // engineDropouts: they measure different things, and deviceCpu includes
+    // the backend's own per-block work, so it reads higher than loadPercent.
+    u64 deviceXruns = 0;
+    f64 deviceCpu = 0;
+    bool deviceTelemetry = false;
+    u32 clipCount = 0;
+    f32 limiterGain = 1.f;        // < 1 while the safety limiter is pulling down
+    std::vector<SiloStatsSnap> silos;
+};
+
+// Snapshot everything under nrt_lock_ (the audio thread never takes it, so a
+// GUI poll cannot block audio). Do not call with UIState::mtx held.
+void getEngineStats(Engine* e, EngineStats& out);
+// Restart every max-since-read and latched counter. blockCount and the GC
+// counters stay monotone.
+void resetEngineStats(Engine* e);
 
 // Tap reads (any thread). Unknown tapIDs read as false / 0 / no samples.
 bool tapExists(Engine* e, i64 tapID);

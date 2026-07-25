@@ -707,14 +707,50 @@ struct TapOutletCmd : Command
     }
 };
 
+// Install a tap on the master output bus. Submitted to silo 0, whose RT
+// thread is the one that runs the post-limiter section in processAudioBlock.
+struct TapMasterCmd : Command
+{
+    Engine* engine_;
+    i64 tapID_;
+    TapSlot* slot_;  // owned by engine_->taps_
+
+    TapMasterCmd(Engine* e, i64 tapID, TapSlot* slot)
+        : engine_(e), tapID_(tapID), slot_(slot)
+    {}
+
+    // Never ran: the bundle was aborted after the registry entry was created
+    // at submit; remove it again. Caller holds nrt_lock_.
+    ~TapMasterCmd() override {
+        if (stage_ == 0) engine_->taps_.erase(tapID_);
+    }
+
+    void doRT(Silo*) override {
+        err_ = engine_->installMasterTap(slot_);
+    }
+
+    bool doNRT(Silo* s) override {
+        if (err_ != tzpl_errNone) {
+            s->engine_->taps_.erase(tapID_);
+        }
+        return true;
+    }
+};
+
 struct UntapCmd : Command
 {
     i64 tapID_;
+    // Master taps live in the Engine's table, not the silo's. applyUntap
+    // resolves which at submit and forces master untaps onto silo 0, so this
+    // always runs on the thread that owns the table it touches.
+    bool isMaster_;
 
-    UntapCmd(i64 tapID) : tapID_(tapID) {}
+    UntapCmd(i64 tapID, bool isMaster = false)
+        : tapID_(tapID), isMaster_(isMaster) {}
 
     void doRT(Silo* s) override {
-        s->removeTap(tapID_);
+        if (isMaster_) s->engine_->removeMasterTap(tapID_);
+        else s->removeTap(tapID_);
     }
 
     bool doNRT(Silo* s) override {

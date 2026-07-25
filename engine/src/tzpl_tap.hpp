@@ -60,6 +60,22 @@ struct TapSlot {
     int chans = 1;
     static constexpr int kMaxScopeChans = 16;
 
+    // The registry key, mirrored here so the RT tables can identify a slot
+    // without a reverse lookup. Set at bundle submit.
+    i64 tapID = 0;
+
+    // Silo this tap was submitted to (set at bundle submit). Only used on the
+    // NRT side, to count a silo's live taps against Silo::kMaxTaps before
+    // accepting another one.
+    int silo = 0;
+
+    // Set for taps on the master output bus rather than a node outlet. These
+    // live in the Engine's own small table (not a silo's) and are accumulated
+    // once per BLOCK from processAudioBlock, after the safety limiter. Master
+    // taps are silo-0-only: silo 0's thread is the one that runs the
+    // post-limiter section. No node owns them, so untap is the only teardown.
+    bool isMaster = false;
+
     // RT-thread-only accumulation state.
     f32 accumPeak = 0.0f;
     f32 accumSq = 0.0f;

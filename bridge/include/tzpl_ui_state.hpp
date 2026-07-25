@@ -112,6 +112,11 @@ enum class UIWidgetKind : int {
     Label,       // static text (labelText)
     Range,       // two-ended slider: values[0] = lo, values[1] = hi (mapped)
     ButtonMatrix,// values = rows*cols labeled buttons (momentary or toggle)
+    Spectrum,    // engine tap: scopeRing analyzed into `spectrum` (dB bins)
+    // NOTE: these ordinals are persisted verbatim in .tzd documents. Only
+    // ever APPEND -- reordering or inserting silently reinterprets every
+    // saved widget. document.cpp clamps unknown ordinals to Slider, so an
+    // older build opening a newer document degrades instead of crashing.
 };
 
 // Engine fast-path binding: on value change the GUI thread sends
@@ -221,17 +226,29 @@ struct UIWidget {
     // has input focus. Empty = unbound. Document state (saved in .tzd).
     std::string keyChord;
 
-    // Engine tap (Meter/Scope). tapID 0 = none. The tap is installed on
-    // tapSilo's RT tap table; removing the widget untaps it.
+    // Engine tap (Meter/Scope/Spectrum). tapID 0 = none. The tap is installed
+    // on tapSilo's RT tap table; removing the widget untaps it. A tap on the
+    // master bus rather than a node outlet is created with tapSilo 0 and is
+    // otherwise indistinguishable here.
     long tapID = 0;
     int tapSilo = 0;
 
     // GUI-thread-only scope display state. scopeRing holds interleaved
     // frames of scopeChans channels (frame-aligned from tap creation);
     // scopeChannel selects the displayed channel (-1 = all, stacked).
+    // Spectrum widgets fill the same ring and analyze it.
     std::vector<float> scopeRing;
     int scopeChans = 1;
     int scopeChannel = -1;
+
+    // Spectrum display state (Spectrum kind, dispatcher thread only):
+    // magnitudes in dBFS, SpectrumEngine::numBins(fftSize) of them, computed
+    // in the control dispatcher's tick. spectrumSampleRate is stamped from
+    // the engine so the renderer can label/scale the frequency axis.
+    // Session-only: none of this is document state.
+    std::vector<float> spectrum;
+    int fftSize = 2048;
+    float spectrumSampleRate = 44100.f;
 
     // Plot data (Plot kind), set by ui.plot / ui.setData.
     std::vector<float> plotData;
@@ -259,8 +276,8 @@ struct UIState {
     // "" = the default Controls panel.
     std::string currentPanel;
 
-    // Engine tap id allocator (Meter/Scope widgets).
-    std::uint64_t nextTapId = 1;
+    // Tap ids come from engine::allocTapID() -- process-wide, so widget taps
+    // and the graph view's node meters can never collide.
 
     // ---- All methods below require mtx to be held by the caller. ----
 

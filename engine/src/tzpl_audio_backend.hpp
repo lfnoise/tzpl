@@ -45,6 +45,16 @@ struct AudioBackend {
     virtual void stop() = 0;
     virtual f64 streamTime() = 0;
     virtual void printDevices() = 0;
+
+    // Device-reported telemetry for the performance monitor, polled from the
+    // GUI thread at a few Hz. Defaulted so a backend that has none compiles
+    // unchanged; hasTelemetry() distinguishes "0 xruns" from "can't tell".
+    // Note deviceCpu covers the whole device callback, including the
+    // backend's own de/interleaving, so it reads higher than the engine's own
+    // loadPercent -- report them separately rather than reconciling them.
+    virtual u64  deviceXruns() const { return 0; }
+    virtual f64  deviceCpu() const { return 0.; }
+    virtual bool hasTelemetry() const { return false; }
 };
 
 // Process one block of audio through the silos: signals worker silos, runs

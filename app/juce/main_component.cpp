@@ -40,10 +40,19 @@ MainComponent::MainComponent(bridge::AppContext& appCtx,
                              TzplLookAndFeel& lookAndFeel,
                              juce::PropertiesFile& settings)
     : appCtx_(appCtx), commands_(commands), lookAndFeel_(lookAndFeel),
-      settings_(settings)
+      statusBar_(appCtx), settings_(settings)
 {
     addAndMakeVisible(editorPane_);
     addAndMakeVisible(console_);
+    addAndMakeVisible(statusBar_);
+
+    // Dropouts are otherwise invisible: surface each one in the console
+    // (the status bar rate-limits, so a storm can't flood it).
+    statusBar_.onDropout = [this](std::string const& msg) {
+        console_.appendLine({msg, LineKind::Error});
+    };
+    // Expanding the detail panel changes our height.
+    statusBar_.onHeightChanged = [this] { resized(); };
 
     notebook_ = std::make_unique<NotebookView>(
         appCtx_, guiState_,
@@ -132,9 +141,15 @@ MainComponent::~MainComponent() {
 
 void MainComponent::resized() {
     if (performView_) {
+        // Perform mode is deliberately chromeless.
+        statusBar_.setVisible(false);
         performView_->setBounds(getLocalBounds());
         return;
     }
+    statusBar_.setVisible(true);
+    auto area = getLocalBounds();
+    statusBar_.setBounds(area.removeFromBottom(statusBar_.preferredHeight()));
+
     juce::Component* center =
           centerMode_ == CenterMode::notebook
         ? static_cast<juce::Component*>(notebook_.get())
@@ -142,7 +157,8 @@ void MainComponent::resized() {
         ? static_cast<juce::Component*>(graphView_.get())
         : static_cast<juce::Component*>(&editorPane_);
     juce::Component* comps[] = { center, resizer_.get(), &console_ };
-    layout_.layOutComponents(comps, 3, 0, 0, getWidth(), getHeight(),
+    layout_.layOutComponents(comps, 3, area.getX(), area.getY(),
+                             area.getWidth(), area.getHeight(),
                              /*vertically=*/false, /*resizeOther=*/true);
     saveSplitRatio();
 }

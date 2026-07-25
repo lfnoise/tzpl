@@ -82,8 +82,18 @@ public:
 		pfront = front_.load(std::memory_order_acquire);
 		return pfront + size_ - b;
 	}
-//	int numPushed() const { return back_.load(); }
-//	int numPopped() const { return front_.load(); }
+
+	// Pending element count, for monitoring. Callable from any thread; the
+	// two loads are not atomic together, so the result is a snapshot that may
+	// be off by whatever the producer/consumer did in between -- fine for a
+	// queue-depth readout, not for control flow.
+	// back_/front_ are monotone counters that wrap; the subtraction is done
+	// unsigned so it stays defined once they pass INT_MAX.
+	int depth() const {
+		auto b = static_cast<unsigned>(back_.load(std::memory_order_relaxed));
+		auto f = static_cast<unsigned>(front_.load(std::memory_order_relaxed));
+		return static_cast<int>(b - f);
+	}
 };
 
 

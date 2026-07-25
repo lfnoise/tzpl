@@ -150,10 +150,17 @@ static void errorCallback(RtAudioErrorType type, const std::string& errorText) {
 static int audioCallback(void* outputBuffer, void* inputBuffer,
                          unsigned int numFrames,
                          double streamTime,
-                         RtAudioStreamStatus /*status*/,
+                         RtAudioStreamStatus status,
                          void* userData)
 {
     RtAudioBackend* b = (RtAudioBackend*)userData;
+
+    // RTAUDIO_OUTPUT_UNDERFLOW / RTAUDIO_INPUT_OVERFLOW: the device ran dry or
+    // overran. This is the only place a real dropout is visible, so record it
+    // rather than discarding the status as this callback used to.
+    if (status) {
+        b->engine_->stats_.dropoutCount.fetch_add(1, std::memory_order_relaxed);
+    }
 
     try {
         // For duplex mode, inputBuffer comes from the callback.

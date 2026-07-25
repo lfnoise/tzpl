@@ -876,6 +876,58 @@ static void drawScope(UIWidget& w) {
     ImGui::EndGroup();
 }
 
+// Log-frequency spectrum. The analyzer (bridge::SpectrumEngine, run in the
+// control dispatcher) leaves linear bins in w.spectrum; mapping them onto a
+// log axis is the renderer's job. Each pixel column takes the MAX over the
+// bins it covers, so the top end -- where dozens of bins collapse into one
+// column -- doesn't alias to whichever bin happened to land there.
+static void drawSpectrum(UIWidget& w) {
+    float const specW = wFrameW(w, 320.0f);
+    float const specH = wFrameH(w, 100.0f);
+    float const floorDb = -96.0f, ceilDb = 6.0f;
+    float const fLo = 20.0f;
+
+    ImVec2 p0 = ImGui::GetCursorScreenPos();
+    ImGui::InvisibleButton(("##spec" + w.name).c_str(), ImVec2(specW, specH));
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    ImVec2 p1 = ImVec2(p0.x + specW, p0.y + specH);
+    dl->AddRectFilled(p0, p1, ImGui::GetColorU32(ImGuiCol_FrameBg));
+
+    int const bins = (int)w.spectrum.size();
+    float const sr = w.spectrumSampleRate > 0.f ? w.spectrumSampleRate : 44100.f;
+    float const fHi = std::min(20000.0f, sr * 0.5f);
+    if (bins > 1 && fHi > fLo) {
+        float const binHz = (sr * 0.5f) / (float)(bins - 1);
+        float const ratio = fHi / fLo;
+        auto colX = [&](int x) { return fLo * std::pow(ratio, (float)x / specW); };
+
+        // Decade gridlines.
+        ImU32 grid = ImGui::GetColorU32(ImGuiCol_Separator);
+        for (float f = 100.f; f < fHi; f *= 10.f) {
+            float x = specW * std::log(f / fLo) / std::log(ratio);
+            dl->AddLine(ImVec2(p0.x + x, p0.y), ImVec2(p0.x + x, p1.y), grid);
+        }
+
+        ImU32 col = ImGui::GetColorU32(ImGuiCol_PlotHistogram);
+        for (int x = 0; x < (int)specW; ++x) {
+            int b0 = (int)std::floor(colX(x) / binHz);
+            int b1 = (int)std::floor(colX(x + 1) / binHz);
+            b0 = std::clamp(b0, 0, bins - 1);
+            b1 = std::clamp(std::max(b1, b0 + 1), 1, bins);
+            float db = floorDb;
+            for (int b = b0; b < b1; ++b) db = std::max(db, w.spectrum[(size_t)b]);
+            float t = (db - floorDb) / (ceilDb - floorDb);
+            t = std::clamp(t, 0.0f, 1.0f);
+            float y = p1.y - t * specH;
+            dl->AddLine(ImVec2(p0.x + x, y), ImVec2(p0.x + x, p1.y), col);
+        }
+    }
+    dl->AddRect(p0, p1, ImGui::GetColorU32(ImGuiCol_Border));
+
+    ImGui::SameLine();
+    ImGui::TextUnformatted(w.name.c_str());
+}
+
 static void drawPlot(UIWidget& w) {
     if (w.plotData.size() > 1) {
         float lo = w.plotData[0], hi = w.plotData[0];
@@ -1388,6 +1440,7 @@ bool drawUIWidget(bridge::UIWidget& w) {
         case UIWidgetKind::XY:       drawXY(w); break;
         case UIWidgetKind::Meter:    drawMeter(w); tap = true; break;
         case UIWidgetKind::Scope:    drawScope(w); tap = true; break;
+        case UIWidgetKind::Spectrum: drawSpectrum(w); tap = true; break;
         case UIWidgetKind::Plot:     drawPlot(w); break;
         case UIWidgetKind::Waveform: drawWaveform(w); break;
         case UIWidgetKind::MultiSlider: drawMultiSlider(w); break;

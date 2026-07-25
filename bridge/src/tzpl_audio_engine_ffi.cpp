@@ -99,6 +99,7 @@ static char const* errName(tzpl_SErr err) {
         case tzpl_errNotImplemented:         return "errNotImplemented";
         case tzpl_errTooLate:                return "errTooLate";
         case tzpl_errClockOutOfRange:        return "errClockOutOfRange";
+        case tzpl_errResourceLimit:          return "errResourceLimit";
     }
     return "errUnknown";
 }

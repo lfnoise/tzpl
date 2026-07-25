@@ -7,6 +7,8 @@ add_library(tzpl_audio_engine_bridge OBJECT
     src/tzpl_ui_state.cpp
     src/tzpl_ui_ffi.cpp
     src/tzpl_ui_node_controls.cpp
+    src/tzpl_ui_taps.cpp
+    src/tzpl_spectrum.cpp
 )
 
 target_include_directories(tzpl_audio_engine_bridge
@@ -17,6 +19,12 @@ target_link_libraries(tzpl_audio_engine_bridge
     PUBLIC  tzpl_lib
     PUBLIC  audio_engine_lib
 )
+
+# Spectrum widgets run shared/tzpl_fft.hpp host-side; on Apple that is vDSP.
+# PUBLIC so every consumer of this object library gets the framework too.
+if(APPLE)
+    target_link_libraries(tzpl_audio_engine_bridge PUBLIC "-framework Accelerate")
+endif()
 
 # Match tzpl_lib optimization flags to avoid ODR/inline mismatches
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")

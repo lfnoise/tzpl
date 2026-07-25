@@ -25,6 +25,7 @@
 
 #include "graph_edits.hpp"
 #include "graph_layout.hpp"
+#include "graph_meters.hpp"
 #include "graph_model.hpp"
 #include "tzpl_test_plugins.hpp"
 #include "tzpl_ui_node_controls.hpp"
@@ -417,6 +418,80 @@ static void test_node_controls_materialize() {
     engine::freeEngine(e);
 }
 
+// ---------------------------------------------------------------------------
+// Graph-view per-node meters (MeterStore): tap ownership and lifetime.
+// ---------------------------------------------------------------------------
+
+static void test_graph_meters() {
+    std::print("Test: graph-view node meters\n");
+
+    engine::AudioStreamParameters params{};
+    params.channels = 2;
+    params.bufferFrames = 512;
+    params.sampleRate = 44100.0;
+    params.deviceName = "default";
+    engine::EngineConfig config;
+    config.numSilos = 1;
+    engine::Engine* e = engine::newEngine(config, params);
+    engine::createSineNode(e);
+
+    GraphPoller poller(e);
+    GraphViewModel vm;
+    poller.poll(0, vm);
+    long long id = nextFreeNodeID(vm);
+    createNode(e, 0, "sinosc", id);
+    poller.poll(0, vm);
+
+    MeterStore meters;
+    MeterKey k{0, id, 0};
+
+    check(meters.enable(e, k) == 0, "enable installs a tap");
+    check(meters.enabled(k), "the meter is registered");
+    check(meters.count() == 1, "one meter");
+    check(engine::tapExists(e, meters.find(k)->tapID), "the engine tap exists");
+
+    check(meters.enable(e, k) == 0 && meters.count() == 1,
+          "enabling twice is idempotent");
+
+    long long tapID = meters.find(k)->tapID;
+    meters.disable(e, k);
+    check(!meters.enabled(k) && meters.count() == 0, "disable removes the meter");
+    check(!engine::tapExists(e, tapID), "and untaps the engine");
+
+    // Whole node: one tap per f32 outlet.
+    check(meters.enableNode(e, 0, vm, id) == 0, "enableNode succeeds");
+    int outs = (int)vm.nodes[(size_t)vm.indexOfNode(id)].outs.size();
+    check(meters.count() == outs,
+          std::format("one meter per outlet (got {}, want {})",
+                      meters.count(), outs));
+    check(meters.nodeEnabled(0, id), "nodeEnabled reports the node");
+    check(!meters.nodeEnabled(0, 0), "an unmetered node reports false");
+
+    // prune() must clean up after a node disappears: the engine drops the
+    // dead node's RT tap entry but leaves the registry slot alive, so nothing
+    // else would ever free it.
+    long long orphan = meters.find({0, id, 0})->tapID;
+    check(freeGraphNode(e, 0, id) == 0, "free the metered node");
+    poller.poll(0, vm);
+    meters.prune(e, vm);
+    check(meters.count() == 0, "prune drops meters on the freed node");
+    check(!engine::tapExists(e, orphan), "and untaps them");
+
+    // clear() releases everything (what GraphView's destructor relies on).
+    long long id2 = nextFreeNodeID(vm);
+    createNode(e, 0, "sinosc", id2);
+    poller.poll(0, vm);
+    meters.enableNode(e, 0, vm, id2);
+    check(meters.count() > 0, "meters re-enabled on a new node");
+    meters.clear(e);
+    check(meters.count() == 0, "clear releases every meter");
+
+    check(meters.enableNode(e, 0, vm, 4242) == tzpl_errNodeNotFound,
+          "enableNode on an unknown node reports not-found");
+
+    engine::freeEngine(e);
+}
+
 // Write a minimal 16-bit mono PCM WAV so the waveform/buffer paths can be
 // tested without repo audio assets.
 static std::string writeTestWav(int frames) {
@@ -518,6 +593,7 @@ int main() {
     test_edit_helpers();
     test_edit_submitters_live();
     test_node_controls_materialize();
+    test_graph_meters();
     test_buffer_helpers();
     test_determinism();
     std::print("\n=== {} passed, {} failed ===\n", gPassed, gFailed);

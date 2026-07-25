@@ -24,6 +24,7 @@
 #include "tzpl_silo.hpp"
 #include "tzpl_engine.hpp"
 #include "tzpl_chanadapt.hpp"
+#include <chrono>
 #include <cmath>
 
 namespace engine {
@@ -64,50 +65,54 @@ void Silo::mixDown(int numFrames, f32* out) {
 }
 
 tzpl_SErr Silo::installTap(TapSlot* slot, Node* node, int outlet, i64 tapID) {
-    for (RTTap& t : rt_taps_) {
-        if (t.slot) continue;
-        t.slot = slot;
-        t.node = node;
-        t.buf = static_cast<f32 const*>(node->synth->outlets[outlet]);
-        // slot->chans was set at bundle submit (capped for scope capture).
-        t.chans = slot->chans;
-        t.tapID = tapID;
-        anyTaps_ = true;
-        return tzpl_errNone;
-    }
-    return tzpl_errInternal; // tap table full
+    // The NRT side prechecks the budget, so a full table here means the
+    // registry and the RT table disagreed; TapOutletCmd::doNRT cleans up.
+    if (numTaps_ >= kMaxTaps) return tzpl_errInternal;
+    RTTap& t = rt_taps_[numTaps_];
+    t.slot = slot;
+    t.node = node;
+    t.buf = static_cast<f32 const*>(node->synth->outlets[outlet]);
+    // slot->chans was set at bundle submit (capped for scope capture).
+    t.chans = slot->chans;
+    t.tapID = tapID;
+    ++numTaps_;
+    return tzpl_errNone;
+}
+
+// Drop entry i by moving the last live entry into the hole. Keeps [0, numTaps_)
+// dense; the caller must NOT advance its index afterwards.
+void Silo::eraseTapAt(int i) {
+    rt_taps_[i] = rt_taps_[numTaps_ - 1];
+    rt_taps_[numTaps_ - 1] = RTTap{};
+    --numTaps_;
 }
 
 void Silo::removeTap(i64 tapID) {
-    bool any = false;
-    for (RTTap& t : rt_taps_) {
-        if (t.slot && t.tapID == tapID) t = RTTap{};
-        if (t.slot) any = true;
+    for (int i = 0; i < numTaps_; ) {
+        if (rt_taps_[i].tapID == tapID) eraseTapAt(i);
+        else ++i;
     }
-    anyTaps_ = any;
 }
 
 void Silo::clearTapsForNode(Node* node) {
-    if (!anyTaps_) return;
-    bool any = false;
-    for (RTTap& t : rt_taps_) {
-        if (t.slot && t.node == node) {
+    for (int i = 0; i < numTaps_; ) {
+        if (rt_taps_[i].node == node) {
             // Zero the published levels so a meter on a dead node reads
-            // silence rather than freezing at its last value.
-            t.slot->peak.store(0.0f, std::memory_order_relaxed);
-            t.slot->rms.store(0.0f, std::memory_order_relaxed);
-            t = RTTap{};
+            // silence rather than freezing at its last value. The registry
+            // slot itself stays alive until someone calls untap.
+            rt_taps_[i].slot->peak.store(0.0f, std::memory_order_relaxed);
+            rt_taps_[i].slot->rms.store(0.0f, std::memory_order_relaxed);
+            eraseTapAt(i);
+        } else {
+            ++i;
         }
-        if (t.slot) any = true;
     }
-    anyTaps_ = any;
 }
 
 void Silo::processTaps() {
-    if (!anyTaps_) return;
-    for (RTTap& t : rt_taps_) {
+    for (int i = 0; i < numTaps_; ++i) {
+        RTTap& t = rt_taps_[i];
         TapSlot* ts = t.slot;
-        if (!ts) continue;
 
         f32 sq = 0.0f;
         f32 pk = ts->accumPeak;
@@ -154,6 +159,15 @@ void Silo::runNodes() {
 }
 
 void Silo::processFrames() {
+    // Two clock reads per block (commpage on macOS, vDSO on Linux -- no
+    // syscall, ~20ns each) against a multi-millisecond block. The split at
+    // mixDown matters: silo 0's mixDown blocks on the worker silos' semaphores,
+    // so folding that wait into the DSP figure would make silo 0 look
+    // pathologically slow.
+    bool timing = engine_->statsEnabled_.load(std::memory_order_relaxed);
+    auto t0 = timing ? std::chrono::steady_clock::now()
+                     : std::chrono::steady_clock::time_point{};
+
     f32* out = index_ > 0 ? outbuf_ : engine_->out_;
 
     auto& streamParams = engine_->streamParams_;
@@ -223,12 +237,32 @@ void Silo::processFrames() {
     }
     // Per-buffer GC heartbeat: drain deferred-delete queue for the attached VM.
     if (heartbeatFn_ && vm_) {
-        heartbeatFn_(vm_);
+        heartbeatFn_(vm_, this);
     }
+
+    auto t1 = timing ? std::chrono::steady_clock::now()
+                     : std::chrono::steady_clock::time_point{};
 
     mixDown(numFrames, out);
     done_sem_.signal();
     sortNodes(); // Why is this needed? Without it, there are glitches.
+
+    if (timing) {
+        auto t2 = std::chrono::steady_clock::now();
+        using ns = std::chrono::nanoseconds;
+        u32 epoch = engine_->stats_.statsEpoch.load(std::memory_order_relaxed);
+        publishBlockNanos(stats_,
+                          (u64)std::chrono::duration_cast<ns>(t1 - t0).count(),
+                          epoch);
+        stats_.mixWaitNanos.store(
+            (u64)std::chrono::duration_cast<ns>(t2 - t1).count(),
+            std::memory_order_relaxed);
+        stats_.blockCount.fetch_add(1, std::memory_order_relaxed);
+        stats_.toNrtDepth.store(to_nrt_.depth(), std::memory_order_relaxed);
+        stats_.fromNrtDepth.store(from_nrt_.depth(), std::memory_order_relaxed);
+        stats_.deadNodesDepth.store(dead_nodes_.depth(), std::memory_order_relaxed);
+        stats_.numTaps.store(numTaps_, std::memory_order_relaxed);
+    }
 }
 
 void make_this_thread_realtime() {

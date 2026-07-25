@@ -119,6 +119,16 @@ public:
              / engine_->streamParams_.sampleRate;
     }
 
+    engine::u64 deviceXruns() const override {
+        // JUCE returns -1 when the device type can't report xruns.
+        int n = deviceManager_.getXRunCount();
+        return n < 0 ? 0 : (engine::u64)n;
+    }
+
+    engine::f64 deviceCpu() const override { return deviceManager_.getCpuUsage(); }
+
+    bool hasTelemetry() const override { return true; }
+
     void printDevices() override {
         for (auto* type : deviceManager_.getAvailableDeviceTypes()) {
             type->scanForDevices();
@@ -161,6 +171,10 @@ private:
         // block, so a block of any other size must not reach it.
         if (numSamples != (int)engine_->streamParams_.bufferFrames
             || (size_t)numSamples * numOutputChannels > outScratch_.size()) {
+            // Silence for a whole block. Count it: this used to be an
+            // undetectable dropout.
+            engine_->stats_.badBlockSizeCount.fetch_add(1, std::memory_order_relaxed);
+            engine_->stats_.dropoutCount.fetch_add(1, std::memory_order_relaxed);
             zeroOutput();
             return;
         }
@@ -194,6 +208,8 @@ private:
             }
         } catch (...) {
             fprintf(stderr, "exception on real time thread");
+            engine_->stats_.rtExceptionCount.fetch_add(1, std::memory_order_relaxed);
+            engine_->stats_.dropoutCount.fetch_add(1, std::memory_order_relaxed);
             zeroOutput();
         }
     }

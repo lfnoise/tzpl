@@ -26,6 +26,7 @@
 
 #include "tzpl_audio_backend.hpp"
 #include "tzpl_client_interface.hpp"
+#include "tzpl_engine_stats.hpp"
 #include "tzpl_silo.hpp"
 #include "tzpl_tap.hpp"
 #include <atomic>
@@ -197,6 +198,10 @@ struct Engine
 	// a silo's RT tap table by TapOutletCmd, and freed by UntapCmd::doNRT
 	// (which runs under nrt_lock_ in the NRT drain loop).
 	std::unordered_map<i64, std::unique_ptr<TapSlot>> taps_;
+	// Source of unique tapIDs. Callers may still choose their own IDs, but
+	// every in-tree client (ui widgets, the graph view) draws from here so
+	// two independent features can never collide on one ID.
+	std::atomic<i64> nextTapID_{1};
 
 	// Guards every Silo's GraphShadow. Separate from nrt_lock_ because a
 	// ShadowCommitCmd's doNRT can run inline (audio stopped) while sched()
@@ -226,6 +231,28 @@ struct Engine
 	std::thread nrt_cmd_thread_;
 	std::thread dead_node_thread_;
 
+	// Master-bus taps (meters/scopes on the post-limiter output). Dense
+	// prefix, touched only by the audio thread -- installed and removed by
+	// TapMasterCmd/UntapCmd running on silo 0, accumulated once per block by
+	// processMasterTaps. The TapSlots are owned by taps_ like any other.
+	static constexpr int kMaxMasterTaps = 8;
+	TapSlot* rt_masterTaps_[kMaxMasterTaps] = {};
+	int numMasterTaps_ = 0;
+
+	tzpl_SErr installMasterTap(TapSlot* slot);
+	void removeMasterTap(i64 tapID);
+	// Block-rate peak/rms accumulation and scope capture on the master bus.
+	void processMasterTaps(f32 const* out, int frames, int outChans);
+
+	// ---- Metering & monitoring (see tzpl_engine_stats.hpp). ----
+	// Master output level, measured post-limiter/post-gain in
+	// processAudioBlock. Always on: no tap or widget required.
+	MasterMeter masterMeter_;
+	// Engine-wide block timing and dropout counters.
+	EngineStatsRT stats_;
+	// Cleared to skip all timing instrumentation (offline renders, profiling).
+	std::atomic<bool> statsEnabled_{true};
+
 	std::unique_ptr<SafetyLimiter> safetyLimiter_;
 	Enable enableSafetyLimiter_ = kOn;
 	f32 masterGain_ = 1.f;
@@ -246,6 +273,10 @@ struct Engine
 
     // Internal helper: starts worker threads and runs initial setup. Called by both ctors.
     void postInit();
+    // Internal helper: sizes the master meter's publish window / fall rate and
+    // the per-block time budget from streamParams_. Called once the stream
+    // format is final (after the backend has negotiated it).
+    void configureStats();
     // Internal helper: drains NRT command + dead-node queues. In NRT mode, the
     // background threads are no-ops and the renderer calls this between blocks.
     void drainNRTQueues();

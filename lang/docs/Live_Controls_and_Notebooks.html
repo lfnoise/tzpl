@@ -357,6 +357,12 @@ if (localStorage.getItem('tzpl-docs-theme') === 'light') document.documentElemen
       </ol>
     </li>
     <li><a href="#shortcuts">Keyboard Shortcuts</a></li>
+    <li><a href="#monitoring">Monitoring the Engine</a>
+      <ol>
+        <li><a href="#mon-status">The Status Bar</a></li>
+        <li><a href="#mon-graph">Meters in the Graph View</a></li>
+      </ol>
+    </li>
     <li><a href="#limitations">Current Limitations</a></li>
   </ol>
 </nav>
@@ -369,7 +375,7 @@ if (localStorage.getItem('tzpl-docs-theme') === 'light') document.documentElemen
 <!-- ================================================================ -->
 <h2 id="overview">1. Overview</h2>
 
-<p>The app is both a code editor and a host for <strong>live control surfaces</strong>. The <code>ui</code> module creates widgets &mdash; sliders, XY pads, meters, scopes &mdash; from code, and binds them to running audio. There are two places widgets can live:</p>
+<p>The app is both a code editor and a host for <strong>live control surfaces</strong>. The <code>ui</code> module creates widgets &mdash; sliders, XY pads, meters, scopes, spectrum analyzers &mdash; from code, and binds them to running audio. There are two places widgets can live:</p>
 
 <ul>
   <li><strong>Floating panel windows.</strong> Evaluate <code>ui</code> code from any <code>.x</code> editor tab (or the REPL) and widgets appear in floating windows over the editor. Nothing else changes; this works exactly like the editor always has.</li>
@@ -430,6 +436,10 @@ scope(<span class="str">"out"</span>, node);</code></pre>
 <tr><td><code>xy(name, xspec, yspec)</code></td><td>2-D pad</td><td>two ControlSpecs; bind each axis separately</td></tr>
 <tr><td><code>meter(name, node)</code></td><td>level meter</td><td>rms bar + peak marker, &minus;60..0 dB; reads an engine tap</td></tr>
 <tr><td><code>scope(name, node)</code></td><td>oscilloscope</td><td>all channels of a node outlet, zero-cross triggered; the <em>ch</em> button cycles all / single channel (stacked lanes in &ldquo;all&rdquo; view share one trigger, preserving phase)</td></tr>
+<tr><td><code>spectrum(name, node)</code></td><td>spectrum analyzer</td><td>magnitudes in dBFS on a log frequency axis (20&nbsp;Hz&ndash;20&nbsp;kHz), 2048-point Hann FFT; peaks fall ~21&nbsp;dB/s so they stay readable. A full-scale sine reads 0&nbsp;dB</td></tr>
+<tr><td><code>masterMeter(name)</code></td><td>master level meter</td><td>the master output bus &mdash; what the device actually plays</td></tr>
+<tr><td><code>masterScope(name)</code></td><td>master oscilloscope</td><td>as <code>scope</code>, on the master bus</td></tr>
+<tr><td><code>masterSpectrum(name)</code></td><td>master spectrum</td><td>as <code>spectrum</code>, on the master bus</td></tr>
 <tr><td><code>multislider(name, n, spec?)</code></td><td>N vertical bars</td><td>drag across to paint; values mapped through the spec (default 0..1)</td></tr>
 <tr><td><code>matrix(name, rows, cols)</code></td><td>toggle grid</td><td>click cells on/off; a step-sequencer surface (values are 0/1, row-major)</td></tr>
 <tr><td><code>buttonMatrix(name, rows, cols, labels?)</code></td><td>labeled momentary grid</td><td>momentary buttons, like <code>button()</code>: a cell reads 1 while held, 0 on release (both edges dispatch); dragging onto another cell releases the held one and presses the new one. Per-cell labels are optional at construction and settable any time with <code>setLabels(w, labels)</code> / <code>setLabel(w, row, col, label)</code>; read them back with <code>labels(w)</code>. Cell changes deliver per-cell through <code>onCell</code> and whole-array through <code>onChangeVec</code>. Not stored by presets (its at-rest state is all zeros)</td></tr>
@@ -441,6 +451,13 @@ scope(<span class="str">"out"</span>, node);</code></pre>
 </table>
 
 <p>Every constructor returns a <code>Widget</code> handle used by the binding and value functions below.</p>
+
+<div class="note"><p><strong>Metering the master bus.</strong> <code>meter</code>, <code>scope</code> and <code>spectrum</code> tap a <em>node outlet</em>, which cannot reach the final mix: the built-in <strong>Audio&nbsp;Out</strong> node (node&nbsp;0) has only an inlet, and the master gain and safety limiter are applied after the graph has run. The <code>master&hellip;</code> constructors tap the master bus itself &mdash; post-limiter, post-gain &mdash; so they show what leaves the application. They take a name only; there is no node, outlet or silo to choose:</p>
+<pre><code>masterMeter(<span class="str">"out"</span>);
+masterSpectrum(<span class="str">"spec"</span>);</code></pre>
+<p>Because they read <em>after</em> the safety limiter, a master meter also tells you when the limiter is pulling the mix down &mdash; the level stops rising while a node meter upstream keeps climbing. The trade-off is that the limiter holds one audio block, so with it enabled the master readings lag node taps by one block (a few milliseconds, invisible in practice).</p></div>
+
+<div class="tip"><p>The app also has metering you don't have to write code for: the <strong>status bar</strong> along the bottom of the window carries a master level meter, DSP load, and a dropout indicator (see <a href="#monitoring">&sect;6</a>), and in the graph view you can right-click any node and choose <strong>Meter</strong> to hang level bars off its outlets. Use the <code>ui</code> constructors when you want metering laid out as part of a notebook or control surface.</p></div>
 
 <!-- -------------------------------- -->
 <h3 id="ui-binding">3.2 Binding to Sound</h3>
@@ -556,9 +573,15 @@ m peakLevel;
 <span class="kw">let</span> s = scope(<span class="str">"sc"</span>, node);
 s tapChannels;           <span class="cmt">-- channels captured by the scope</span>
 <span class="kw">let</span> xs = s samples(<span class="num">4096</span>);   <span class="cmt">-- raw samples: interleaved frames of</span>
-                         <span class="cmt">-- tapChannels(s) channels, whole frames only</span></code></pre>
+                         <span class="cmt">-- tapChannels(s) channels, whole frames only</span>
 
-<div class="warn"><p><strong>One consumer per scope stream.</strong> The scope's sample FIFO feeds either the on-screen display or <code>samples()</code> &mdash; whatever one drains, the other doesn't see. Meters (<code>rmsLevel</code>/<code>peakLevel</code>) are fine to read from both places.</p></div>
+<span class="cmt">-- The master widgets read the same way.</span>
+<span class="kw">let</span> out = masterMeter(<span class="str">"out"</span>);
+<span class="kw">if</span> (out peakLevel &gt; <span class="num">0.99</span>) { println(<span class="str">"clipping!"</span>); }</code></pre>
+
+<p>All of these read a widget, so metering from a script means creating one. A script that wants a level but no visible display can park the widget in its own panel and leave that panel closed.</p>
+
+<div class="warn"><p><strong>One consumer per sample stream.</strong> A scope's or spectrum's sample FIFO feeds either the on-screen display or <code>samples()</code> &mdash; whatever one drains, the other doesn't see. Levels (<code>rmsLevel</code>/<code>peakLevel</code>) are fine to read from both places. If you need both a display and script access to the same signal, make two widgets: each gets its own tap.</p></div>
 
 <!-- -------------------------------- -->
 <h3 id="ui-panels">3.6 Panels</h3>
@@ -588,6 +611,8 @@ panel(<span class="str">""</span>);               <span class="cmt">-- back to t
 <tr><td><code>xy(name, xspec, yspec) Widget</code></td><td>2-D pad</td></tr>
 <tr><td><code>meter(name, node, outlet = 0, silo = 0) Widget</code></td><td>level meter (engine tap)</td></tr>
 <tr><td><code>scope(name, node, outlet = 0, silo = 0) Widget</code></td><td>oscilloscope (engine tap)</td></tr>
+<tr><td><code>spectrum(name, node, outlet = 0, silo = 0) Widget</code></td><td>spectrum analyzer, dBFS on a log frequency axis (engine tap)</td></tr>
+<tr><td><code>masterMeter(name) Widget</code><br><code>masterScope(name) Widget</code><br><code>masterSpectrum(name) Widget</code></td><td>the same three displays on the master output bus (post-limiter, post-gain) rather than a node outlet</td></tr>
 <tr><td><code>plot(name, data [Float]) Widget</code> / <code>setData(w, data)</code></td><td>static plot / replace its data</td></tr>
 <tr><td><code>waveform(name, node, buf) Widget</code></td><td>overview of the file loaded into a buffer slot</td></tr>
 <tr><td><code>bindControl(w, node, control String, silo = 0) Int</code></td><td>fast-path engine binding, by control name</td></tr>
@@ -631,7 +656,7 @@ panel(<span class="str">""</span>);               <span class="cmt">-- back to t
   <li><strong>code</strong> &mdash; a Tzopilotl editor with syntax highlighting, an editable name (purely descriptive, saved with the document), a <strong>Run</strong> button, a <strong>run on load</strong> checkbox, and its own output area underneath. The colored dot at the left of the header shows status: <span style="color:#8b949e">&#9679;</span> never ran, <span style="color:#22c55e">&#9679;</span> ran clean, <span style="color:#f59e0b">&#9679;</span> edited since it last ran (stale), <span style="color:#ef4444">&#9679;</span> last run errored.</li>
   <li><strong>prose</strong> &mdash; free text for notes and titles; drawn without line numbers, in a distinct color. Not evaluated.</li>
   <li><strong>panel</strong> &mdash; an embedded control surface; see below.</li>
-  <li><strong>presets</strong> &mdash; a matrix of stored control snapshots. A presets cell governs the panel cells <em>after</em> it, up to the next presets cell: <strong>+ store</strong> snapshots the current values of every input widget in those panels into a new slot; <strong>click</strong> a slot to recall (audible, one undoable step); <strong>right-click or cmd-click</strong> a slot for its menu &mdash; name it, overwrite it with the current values, or delete it &mdash; without recalling; the <strong>overwrite</strong> button does the same for the selected slot. Presets store the values of sliders, range sliders, numbers, toggles, xy pads, multisliders, matrices, and toggle matrices &mdash; not meters/scopes, buttons, button matrices (momentary), or piano-roll notes. Saved with the document; collapse the cell to a single strip when performing without it.</li>
+  <li><strong>presets</strong> &mdash; a matrix of stored control snapshots. A presets cell governs the panel cells <em>after</em> it, up to the next presets cell: <strong>+ store</strong> snapshots the current values of every input widget in those panels into a new slot; <strong>click</strong> a slot to recall (audible, one undoable step); <strong>right-click or cmd-click</strong> a slot for its menu &mdash; name it, overwrite it with the current values, or delete it &mdash; without recalling; the <strong>overwrite</strong> button does the same for the selected slot. Presets store the values of sliders, range sliders, numbers, toggles, xy pads, multisliders, matrices, and toggle matrices &mdash; not meters/scopes/spectrums, buttons, button matrices (momentary), or piano-roll notes. Saved with the document; collapse the cell to a single strip when performing without it.</li>
 </ul>
 
 <p>Every cell header starts with a <strong>collapse triangle</strong> that hides the body (code, output, or panel canvas), leaving just the header strip &mdash; collapsed state is saved with the document. Each header also has <strong>&uarr; / &darr;</strong> (move) and <strong>x</strong> (delete) on the right. Collapsed code cells still run (Run, Run All, run-on-load).</p>
@@ -677,7 +702,7 @@ panel(<span class="str">""</span>);               <span class="cmt">-- back to t
 <!-- -------------------------------- -->
 <h3 id="nb-save">4.5 Saving &amp; Loading</h3>
 
-<p><kbd>Cmd+S</kbd> saves the notebook to a <code>.tzd</code> file (a compact binary container in the TZB format, documented in <a href="FFI_Guide.html#messages">FFI Guide &sect;15</a>). Saved: the cells (kind, text, order, run-on-load flags), for each panel cell its widgets' <strong>names, kinds, ranges, and current values</strong> &mdash; and the whole <strong>undo history tree</strong> (<a href="#nb-history">&sect;4.6</a>). Not saved: bindings, eval outputs, scope data &mdash; anything that is behavior or transient display.</p>
+<p><kbd>Cmd+S</kbd> saves the notebook to a <code>.tzd</code> file (a compact binary container in the TZB format, documented in <a href="FFI_Guide.html#messages">FFI Guide &sect;15</a>). Saved: the cells (kind, text, order, run-on-load flags), for each panel cell its widgets' <strong>names, kinds, ranges, and current values</strong> &mdash; and the whole <strong>undo history tree</strong> (<a href="#nb-history">&sect;4.6</a>). Not saved: bindings, eval outputs, scope and spectrum data &mdash; anything that is behavior or transient display. A meter, scope or spectrum widget is saved (so the panel comes back with it in place) but reconnects to the engine only when the code that created it runs again.</p>
 
 <p>On open, widgets reappear immediately with their saved positions and values, but <strong>unbound</strong> &mdash; they drive nothing until their creating code runs again. Because constructors are upserts, re-running the setup cell adopts each saved widget (keeping its saved value, which is pushed through the fresh binding) rather than resetting it. So the loading ritual is simply:</p>
 
@@ -725,14 +750,47 @@ panel(<span class="str">""</span>);               <span class="cmt">-- back to t
 <p>The <strong>View</strong> menu also holds the editor font size and the color theme (<strong>View &gt; Theme</strong>: Dark, Corporate Gray, Dark 2, Cherry, Dark Grey).</p>
 
 <!-- ================================================================ -->
-<h2 id="limitations">6. Current Limitations</h2>
+<h2 id="monitoring">6. Monitoring the Engine</h2>
+
+<p>Three surfaces show what the audio engine is doing. The <code>ui</code> constructors of <a href="#ui-widgets">&sect;3.1</a> are the one you compose yourself; the other two are always there.</p>
+
+<h3 id="mon-status">6.1 The Status Bar</h3>
+
+<p>A strip along the bottom of the window, always visible except in perform mode:</p>
+
+<ul>
+  <li><strong>Device format</strong> &mdash; sample rate and buffer size, or <em>(stopped)</em> when audio isn't running.</li>
+  <li><strong>CPU</strong> &mdash; the engine's own DSP time as a share of one audio block's budget, averaged. Green under 50%, amber under 80%, red above. This is the number that predicts dropouts: at 100% the engine is taking longer to compute a block than the block lasts.</li>
+  <li><strong>Master level</strong> &mdash; peak-hold bars for the master bus, with a clip square that <strong>latches red</strong> the first time a sample hits full scale.</li>
+  <li><strong>XRUN</strong> &mdash; a dropout counter. Hidden while zero; once audio has broken it <strong>stays lit</strong> until you clear it. New dropouts also flash the strip and log one line to the console (rate-limited, so a burst can't flood it).</li>
+</ul>
+
+<p><strong>Click the XRUN readout to reset</strong> the counters and clear the latches. That is deliberately the only way &mdash; a dropout should never quietly disappear while you're looking away.</p>
+
+<p>Click anywhere else on the strip to expand a detail panel:</p>
+
+<ul>
+  <li><strong>Per silo</strong> &mdash; DSP time (average and worst-case), share of budget, time spent waiting to mix, live tap count, and the depths of the three command queues.</li>
+  <li><strong>Garbage collection</strong> &mdash; step counts and the worst audio-thread pause, per silo VM and for the main (NRT) VM. The audio-thread figure is the one that matters for real-time safety.</li>
+  <li><strong>Device</strong> &mdash; the driver's own xrun and CPU figures alongside the engine's. These are reported separately on purpose: the device figure covers work the engine doesn't do (and doesn't control), so it normally reads a little higher. Also here: dropped blocks, real-time exceptions, clipped samples, and how far the safety limiter is pulling the mix down.</li>
+</ul>
+
+<h3 id="mon-graph">6.2 Meters in the Graph View</h3>
+
+<p>In the graph view (<kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>\</kbd>), <strong>right-click a node &gt; Meter</strong> to hang a level bar off each of its outlets. A node with several outlets gets a submenu so you can meter just one; outlets carrying something other than audio are greyed out, since only audio can be metered. A dot in the node's title bar marks it as metered when you're zoomed too far out to read the bars.</p>
+
+<p>Meters are per node and opt-in because each one costs a little real-time work, and each silo can carry only so many at once &mdash; if you hit the limit the console says so, and turning one off frees a slot. They last for the session: switching silos or leaving the graph view drops them, and they are not saved with a document.</p>
+
+<!-- ================================================================ -->
+<h2 id="limitations">7. Current Limitations</h2>
 
 <ul>
   <li><strong>Floating panel windows stack widgets top-to-bottom</strong>; arrange mode (drag/resize) applies to notebook panel cells, where layout is document state.</li>
   <li><strong>Piano roll is a fixed 16th grid</strong>: click to add/remove quarter-beat notes; no velocity lanes, note dragging, or CC curves. Longer notes and fractional pitches via <code>setNotes()</code>.</li>
   <li><strong>One notebook at a time.</strong> Opening or creating another replaces the current one (with a save prompt if modified).</li>
   <li><strong>Prose cells are plain (monospaced) text</strong> &mdash; styled without line numbers, but no markdown rendering or proportional font yet.</li>
-  <li><strong>Scopes/waveforms:</strong> scope taps read f32 outlets (up to 16 channels captured); waveforms show file-loaded buffer contents (not live-recorded audio).</li>
+  <li><strong>Scopes/spectrums/waveforms:</strong> taps read audio (f32) outlets only, up to 16 channels captured; waveforms show file-loaded buffer contents (not live-recorded audio). The spectrum analyzer is a fixed 2048-point Hann FFT &mdash; no adjustable size, window, or averaging yet.</li>
+  <li><strong>Graph-view meters are session state:</strong> they are not saved with a document, and they are dropped when you switch silos or leave the graph view.</li>
 </ul>
 
 </main>

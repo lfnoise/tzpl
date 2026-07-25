@@ -30,6 +30,7 @@
 #include "tzpl_silo.hpp"
 #include "vm.hpp"
 #include "value.hpp"
+#include "tracing_gc.hpp"
 
 namespace bridge {
 
@@ -155,7 +156,7 @@ struct CodeInstallCmd : engine::Command {
 // explicitly. For a 5.8 ms audio block (256 frames @ 44.1 kHz), 200 us
 // is ~3% of the block -- generous for DSP, still meaningful GC progress.
 inline constexpr u64 kRTGCBudgetNanos = 200'000;
-inline void rtVMHeartbeat(void* vm) {
+inline void rtVMHeartbeat(void* vm, engine::Silo* s) {
     auto* v = static_cast<ts::VM*>(vm);
     // Prefer the VM's configured budget if it has been set tighter than
     // the NRT default; otherwise use the conservative RT default. Picking
@@ -164,6 +165,20 @@ inline void rtVMHeartbeat(void* vm) {
     u64 budget = v->gcStepBudgetNanos();
     if (budget > kRTGCBudgetNanos) budget = kRTGCBudgetNanos;
     v->rtTick(ts::gcMonoNanos() + budget);
+
+    // Republish the collector's counters for the performance monitor. They
+    // are plain members owned by this thread, so reading them here is free
+    // and race-free; the host only ever sees the atomics. Monotone -- the
+    // host takes deltas rather than resetting from another thread.
+    auto& gc = v->tracingGC();
+    auto& st = s->stats_;
+    st.hasVM.store(1, std::memory_order_relaxed);
+    st.gcStepCount.store(gc.stepCount(), std::memory_order_relaxed);
+    st.gcCycles.store(gc.cyclesCompleted(), std::memory_order_relaxed);
+    st.gcRtStepCount.store(gc.stepCountBySource(ts::GCStepSource::RtTick),
+                           std::memory_order_relaxed);
+    st.gcRtMaxNanos.store(gc.stepMaxNanosBySource(ts::GCStepSource::RtTick),
+                          std::memory_order_relaxed);
 }
 
 // Attaches a VM to a Silo. The VM must be fully initialized before sending.

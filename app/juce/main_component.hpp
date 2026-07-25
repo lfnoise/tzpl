@@ -36,6 +36,7 @@
 #include "plugin_browser_window.hpp"
 #include "perform_view.hpp"
 #include "graph_view.hpp"
+#include "status_bar.hpp"
 #include "gui_state.hpp"
 #include "tzpl_look_and_feel.hpp"
 #include <map>
@@ -198,6 +199,10 @@ private:
     CenterMode lastDocMode_ = CenterMode::editor;
     std::unique_ptr<GraphView> graphView_; // lazily created on first entry
     OutputConsole console_;
+    // Bottom chrome: DSP load, master level, latching dropout indicator.
+    // Not a center-mode component -- it sits below everything and is only
+    // hidden in perform mode.
+    StatusBar statusBar_;
     juce::StretchableLayoutManager layout_;
     std::unique_ptr<juce::StretchableLayoutResizerBar> resizer_;
 

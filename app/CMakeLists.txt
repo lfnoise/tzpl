@@ -199,10 +199,20 @@ if(TZPL_BUILD_GUI)
         src/graph_model.cpp
         src/graph_layout.cpp
         src/graph_edits.cpp
+        src/graph_meters.cpp
         ${CMAKE_SOURCE_DIR}/engine/src/tzpl_test_plugins.cpp
     )
     target_include_directories(tzpl_graph_tests PRIVATE src)
     target_link_libraries(tzpl_graph_tests
+        PRIVATE tzpl_audio_engine_bridge
+    )
+
+    # Host-side spectrum analyzer (Spectrum widgets). Pure math over a
+    # vector -- no engine, no GUI.
+    add_executable(tzpl_spectrum_tests
+        tests/spectrum_test.cpp
+    )
+    target_link_libraries(tzpl_spectrum_tests
         PRIVATE tzpl_audio_engine_bridge
     )
 endif()
@@ -348,6 +358,7 @@ if(TZPL_BUILD_APP_JUCE)
         juce/widgets/controls_window.cpp
         juce/plugin_browser_window.cpp
         juce/graph_view.cpp
+        juce/status_bar.cpp
         src/plugin_tags.cpp
         src/document.cpp
         src/content_hash.cpp
@@ -355,6 +366,7 @@ if(TZPL_BUILD_APP_JUCE)
         src/graph_model.cpp
         src/graph_layout.cpp
         src/graph_edits.cpp
+        src/graph_meters.cpp
     )
     target_include_directories(tzpl_app_juce PRIVATE src juce)
 

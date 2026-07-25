@@ -119,7 +119,8 @@ void WidgetComponent::refreshMeta() {
 }
 
 bool WidgetComponent::isTapBacked() const {
-    return kind_ == UIWidgetKind::Meter || kind_ == UIWidgetKind::Scope;
+    return kind_ == UIWidgetKind::Meter || kind_ == UIWidgetKind::Scope
+        || kind_ == UIWidgetKind::Spectrum;
 }
 
 juce::Point<int> WidgetComponent::preferredSize() const {
@@ -136,6 +137,7 @@ juce::Point<int> WidgetComponent::preferredSize() const {
         case UIWidgetKind::Meter:  return { 200, 28 };
         case UIWidgetKind::XY:     return { 160, 160 };
         case UIWidgetKind::Scope:
+        case UIWidgetKind::Spectrum:
         case UIWidgetKind::Plot:
         case UIWidgetKind::Waveform: return { 260, 120 };
         case UIWidgetKind::MultiSlider: return { 260, 120 };
@@ -180,6 +182,7 @@ void WidgetComponent::paint(Graphics& g) {
         case UIWidgetKind::XY:          paintXY(g, w); break;
         case UIWidgetKind::Meter:       paintMeter(g, w); break;
         case UIWidgetKind::Scope:       paintScope(g, w); break;
+        case UIWidgetKind::Spectrum:    paintSpectrum(g, w); break;
         case UIWidgetKind::Plot:        paintPlot(g, w); break;
         case UIWidgetKind::Waveform:    paintWaveform(g, w); break;
         case UIWidgetKind::MultiSlider: paintMultiSlider(g, w); break;
@@ -351,6 +354,52 @@ void WidgetComponent::paintScope(Graphics& g, UIWidget& w) {
         g.setColour(juce::Colour(0xff8fd0ff));
         g.strokePath(p, juce::PathStrokeType(1.0f));
     }
+    g.setColour(juce::Colours::grey);
+    g.drawText(name_, 0, getHeight() - kLabelH, getWidth(), kLabelH,
+               juce::Justification::centredLeft);
+}
+
+// Log-frequency spectrum. bridge::SpectrumEngine (run in ControlsDispatcher)
+// leaves linear dB bins in w.spectrum; the log-axis mapping is the renderer's
+// job. Each pixel column takes the MAX over the bins it covers so the top
+// end, where many bins collapse into one column, doesn't alias.
+void WidgetComponent::paintSpectrum(Graphics& g, UIWidget& w) {
+    auto bb = bodyRect(*this, kLabelH);
+    g.setColour(juce::Colours::black.withAlpha(0.6f));
+    g.fillRect(bb);
+
+    int const bins = (int)w.spectrum.size();
+    float const sr = w.spectrumSampleRate > 0.f ? w.spectrumSampleRate : 44100.f;
+    float const fLo = 20.0f;
+    float const fHi = std::min(20000.0f, sr * 0.5f);
+    float const floorDb = -96.0f, ceilDb = 6.0f;
+
+    if (bins > 1 && fHi > fLo && bb.getWidth() >= 2.0f) {
+        float const binHz = (sr * 0.5f) / (float)(bins - 1);
+        float const ratio = fHi / fLo;
+        float const logRatio = std::log(ratio);
+
+        g.setColour(juce::Colour(0x30ffffff));
+        for (float f = 100.f; f < fHi; f *= 10.f) {
+            float x = bb.getX() + bb.getWidth() * std::log(f / fLo) / logRatio;
+            g.drawVerticalLine((int)x, bb.getY(), bb.getBottom());
+        }
+
+        g.setColour(juce::Colour(0xff8fd0ff));
+        int const cols = (int)bb.getWidth();
+        for (int x = 0; x < cols; ++x) {
+            float f0 = fLo * std::pow(ratio, (float)x / bb.getWidth());
+            float f1 = fLo * std::pow(ratio, (float)(x + 1) / bb.getWidth());
+            int b0 = juce::jlimit(0, bins - 1, (int)std::floor(f0 / binHz));
+            int b1 = juce::jlimit(1, bins, std::max((int)std::floor(f1 / binHz), b0 + 1));
+            float db = floorDb;
+            for (int b = b0; b < b1; ++b) db = std::max(db, w.spectrum[(size_t)b]);
+            float t = juce::jlimit(0.0f, 1.0f, (db - floorDb) / (ceilDb - floorDb));
+            float y = bb.getBottom() - t * bb.getHeight();
+            g.drawVerticalLine((int)(bb.getX() + x), y, bb.getBottom());
+        }
+    }
+
     g.setColour(juce::Colours::grey);
     g.drawText(name_, 0, getHeight() - kLabelH, getWidth(), kLabelH,
                juce::Justification::centredLeft);

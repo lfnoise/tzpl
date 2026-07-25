@@ -28,6 +28,7 @@
 #include "tzpl_ui_ffi.hpp"
 #include "tzpl_ui_state.hpp"
 #include "tzpl_ui_node_controls.hpp"
+#include "tzpl_ui_taps.hpp"
 #include "tzpl_app_context.hpp"
 #include "tzpl.hpp"
 #include "value.hpp"
@@ -569,15 +570,8 @@ static void ffi_uiSetRange(ts::VM& vm, u16, u16, u16 argBase) {
 // Remove an engine tap (best-effort; logs on failure). Must be called
 // WITHOUT ui->mtx held: bundle submission takes the engine's NRT lock.
 static void untapWidget(AppContext* ctx, long tapID, int silo) {
-    if (!ctx || !ctx->engine || tapID == 0) return;
-    tzpl_SErr err = engine::begin(ctx->engine);
-    if (err == tzpl_errNone) {
-        engine::untap(tapID);
-        err = engine::go(silo);
-    }
-    if (err != tzpl_errNone) {
-        std::fprintf(stderr, "ui: untap %ld failed (%d)\n", tapID, (int)err);
-    }
+    if (!ctx) return;
+    bridge::untapWidget(ctx->engine, tapID, silo);
 }
 
 // fn uiValues(id Int) Array[Float]
@@ -836,41 +830,53 @@ static void ffi_uiClear(ts::VM& vm, u16, u16, u16) {
 // Tap widgets (meters/scopes)
 // ---------------------------------------------------------------------------
 
-// Shared body for uiMeter / uiScope: upsert the widget, allocate a tap id,
-// and install the engine tap in its own bundle. Engine calls happen outside
-// ui->mtx (bundle submit takes the engine's NRT lock).
+// Shared body for uiMeter / uiScope / uiMasterTap: upsert the widget,
+// allocate a tap id, and install the engine tap in its own bundle. Engine
+// calls happen outside ui->mtx (bundle submit takes the engine's NRT lock).
+//
+// nodeID < 0 means the master output bus: the tap goes on silo 0 via
+// tapMaster instead of tapOutlet. Everything downstream -- the per-frame
+// poll, untap on panel close, document restore, ui.peakLevel -- is unchanged,
+// because a master tap is an ordinary entry in the engine's tap registry.
 static i64 makeTapWidget(ts::VM& vm, const char* name, UIWidgetKind kind,
                          i64 nodeID, int outlet, int silo) {
     UIState* ui = getUIState(vm);
     auto* ctx = getAppContext(vm);
     if (!ui || !ctx || !ctx->engine) return 0;
 
+    bool master = nodeID < 0;
+    if (master) silo = 0; // master taps are silo-0-only
+
     long oldTap = 0;
     int oldSilo = 0;
-    long tapID = 0;
+    long tapID = static_cast<long>(engine::allocTapID(ctx->engine));
     i64 widgetID = 0;
     {
         std::lock_guard<std::mutex> lock(ui->mtx);
         UIWidget* w = ui->upsert(ui->currentPanel, name, kind, UISpec{}, UISpec{});
         oldTap = w->tapID;
         oldSilo = w->tapSilo;
-        tapID = static_cast<long>(ui->nextTapId++);
         w->tapID = tapID;
         w->tapSilo = silo;
         widgetID = static_cast<i64>(w->id);
     }
     if (oldTap) untapWidget(ctx, oldTap, oldSilo);
 
-    int mode = (kind == UIWidgetKind::Scope) ? engine::tapScope : engine::tapMeter;
+    int mode = (kind == UIWidgetKind::Meter) ? engine::tapMeter : engine::tapScope;
     tzpl_SErr err = engine::begin(ctx->engine);
     if (err == tzpl_errNone) {
-        engine::tapOutlet(nodeID, outlet, tapID, mode);
+        if (master) engine::tapMaster(tapID, mode);
+        else engine::tapOutlet(nodeID, outlet, tapID, mode);
         err = engine::go(silo);
     }
     if (err != tzpl_errNone) {
-        std::fprintf(stderr,
-                     "ui: tap on node %lld outlet %d failed (%d)\n",
-                     static_cast<long long>(nodeID), outlet, (int)err);
+        if (master) {
+            std::fprintf(stderr, "ui: master tap failed (%d)\n", (int)err);
+        } else {
+            std::fprintf(stderr,
+                         "ui: tap on node %lld outlet %d failed (%d)\n",
+                         static_cast<long long>(nodeID), outlet, (int)err);
+        }
         std::lock_guard<std::mutex> lock(ui->mtx);
         if (UIWidget* w = ui->findById(static_cast<std::uint64_t>(widgetID)))
             w->tapID = 0;
@@ -1032,6 +1038,27 @@ static void ffi_uiScope(ts::VM& vm, u16 dst, u16, u16 argBase) {
     vm.reg(dst).i = makeTapWidget(vm, name, UIWidgetKind::Scope, node, outlet, silo);
 }
 
+// fn uiSpectrum(name String, node Int, outlet Int, silo Int) Int
+static void ffi_uiSpectrum(ts::VM& vm, u16 dst, u16, u16 argBase) {
+    const char* name = regString(vm, argBase);
+    i64 node = vm.reg(argBase + 1).i;
+    int outlet = static_cast<int>(vm.reg(argBase + 2).i);
+    int silo = static_cast<int>(vm.reg(argBase + 3).i);
+    vm.reg(dst).i = makeTapWidget(vm, name, UIWidgetKind::Spectrum, node, outlet, silo);
+}
+
+// fn uiMasterTap(name String, kind Int) Int
+// kind: 0 = Meter, 1 = Scope, 2 = Spectrum. Taps the master output bus
+// (post-limiter, post-gain) instead of a node outlet.
+static void ffi_uiMasterTap(ts::VM& vm, u16 dst, u16, u16 argBase) {
+    const char* name = regString(vm, argBase);
+    i64 which = vm.reg(argBase + 1).i;
+    UIWidgetKind kind = which == 0 ? UIWidgetKind::Meter
+                      : which == 1 ? UIWidgetKind::Scope
+                                   : UIWidgetKind::Spectrum;
+    vm.reg(dst).i = makeTapWidget(vm, name, kind, /*nodeID=*/-1, 0, 0);
+}
+
 // ---------------------------------------------------------------------------
 // Synthdef-derived widgets (materialize a node's interface)
 // ---------------------------------------------------------------------------
@@ -1179,6 +1206,8 @@ void registerUIFFI(ts::Compiler& compiler) {
     reg("uiClear",        Void, {},                             ffi_uiClear);
     reg("uiMeter",        Int,  {String, Int, Int, Int},        ffi_uiMeter);
     reg("uiScope",        Int,  {String, Int, Int, Int},        ffi_uiScope);
+    reg("uiSpectrum",     Int,  {String, Int, Int, Int},        ffi_uiSpectrum);
+    reg("uiMasterTap",    Int,  {String, Int},                  ffi_uiMasterTap);
     reg("uiPlot",         Int,  {String, FloatArray},           ffi_uiPlot);
     reg("uiSetData",      Void, {Int, FloatArray},              ffi_uiSetData);
     reg("uiWaveform",     Int,  {String, Int, Int},             ffi_uiWaveform);

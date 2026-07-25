@@ -764,32 +764,76 @@ Implemented by reusing the live-controls widget system rather than building a pa
 
 ---
 
-## Phase 14: Metering & Monitoring — NOT STARTED
+## Phase 14: Metering & Monitoring — DONE (2026-07-24)
 
 **Goal**: Audio level meters, scope displays, and performance monitoring.
 
-### 14.1 Level meters
+**Note on prior work**: node-outlet taps (`engine/src/tzpl_tap.hpp`, `Silo::processTaps`, `tapOutlet`/`untap`/`tapPeak`/`tapRms`/`tapDrain`), the `ui.meter`/`ui.scope` lang surface, and Meter/Scope widgets in both frontends predated this phase — they landed alongside the live-controls work. So 14.1.2, 14.1.3, 14.2.1 and 14.2.2 were already done when the phase opened. This phase built the master bus path, the spectrum display, graph-view metering, and all of 14.3.
 
-**Tasks**:
-1. Add peak/RMS metering on the master output.
-2. Per-node output level meters (opt-in, since it adds overhead).
-3. Visual meter widgets in ImGui.
+### 14.0 Tap plumbing (prerequisite) — DONE
 
-### 14.2 Oscilloscope / waveform display
+- **Dense tap table**: `Silo::rt_taps_` keeps live entries in the prefix `[0, numTaps_)`; removal moves the last entry into the hole. `processTaps` (per **sample**) now only touches live taps, which made raising `kMaxTaps` from 32 to 128 affordable. `Silo::eraseTapAt` is the single removal primitive.
+- **Synchronous budget**: `applyTapOutlet` counts a silo's live registry slots and returns the new `tzpl_errResourceLimit` (appended to `tzpl_SErr`; ABI values are append-only) at the cap. Previously a full table let `go()` return `errNone` and handed the caller a tapID that read silence forever.
+- **`engine::allocTapID`** (`Engine::nextTapID_`) replaces `UIState::nextTapId`, so widget taps and graph-view meters draw from one process-wide sequence and can never collide.
+- **`AtomicFifo::depth()`** replaces the commented-out `numPushed`/`numPopped`, using unsigned subtraction (the counters are monotone and wrap).
+- **De-duplication**: the tap-poll loop was byte-identical in `app/src/controls_panel.cpp` and `app/juce/widgets/controls_dispatch.cpp` and had already drifted (only the JUCE copy guarded `values.size() < 2`, so a restored Meter snapshot could write out of bounds in the ImGui path). Extracted to `bridge/tzpl_ui_taps.{hpp,cpp}`: `pollWidgetTaps`, `removePanelWidgets`, `untapWidget`/`untapWidgets` — the latter replacing four copies.
+- **Fixed a pre-existing teardown use-after-free**: `~Engine` destroys members in reverse declaration order, so `taps_` (declared after `silos_`) was freed *before* `~Silo` → `removeAllNodes` → `removeNode` → `clearTapsForNode`, which then wrote published levels through dangling `TapSlot` pointers. Latent UB whenever an engine was freed with a live tap; the changed `TapSlot` size made it reproducible. `~Engine` now clears the RT tables and the registry up front. Found with AddressSanitizer.
 
-**Tasks**:
-1. Ring buffer capture of audio output.
-2. Waveform display widget (time domain).
-3. Optional FFT spectrum display (frequency domain).
+### 14.1 Level meters — DONE
 
-### 14.3 Performance monitoring
+1. **Master output metering**: `MasterMeter` in the new `engine/src/tzpl_engine_stats.hpp`, accumulated in `processAudioBlock` immediately after `safetyLimiter_->process()` — so it measures exactly what the device plays (post-limiter, post-gain). Per-channel `peak`/`rms`/`peakHold` plus across-channel summaries and a clip counter; RMS uses the same mean-square-across-channels convention as `processTaps`, so master and node meters are comparable. `peakHold` falls over ~1.5 s, which makes the reading independent of the GUI's poll rate and safe for multiple readers (no read-and-reset). Public API: `masterChans` / `masterPeak` / `masterRms` / `masterPeakHold` / `masterClipCount`, all lock-free.
+   - `SafetyLimiter::prevMaxPeak` turned out to be useless for this: the limiter's enabled path ends in `std::swap_ranges`, i.e. it carries a block of latency, and `maxAbsPeak` describes the *incoming* pre-gain block. Documented consequence: with the limiter on, the master meter trails node taps by one block (~5.8 ms).
+2. Per-node meters: already shipped (`tapOutlet` + `ui.meter`); this phase added the graph-view surface (14.4).
+3. Widgets: already shipped in both renderers.
 
-**Tasks**:
-1. Display audio thread CPU usage.
-2. Display per-silo load.
-3. Display GC statistics from Tzopilotl VM.
-4. Display command queue depth.
-5. Alert on audio dropouts (buffer underruns).
+### 14.2 Oscilloscope / spectrum — DONE
+
+1-2. Ring capture and time-domain display: already shipped (`tapScope` + the Scope widget).
+3. **Spectrum display**: new `UIWidgetKind::Spectrum` (**appended** — ordinal 15; the enum is persisted as a raw ordinal in `.tzd`, so it is append-only forever, and `document.cpp`'s clamp degrades an unknown kind to Slider so an older build opens a newer document without crashing). Reuses `tapScope` — no new `TapMode`.
+   - Analysis lives in `bridge/tzpl_spectrum.{hpp,cpp}` (`SpectrumEngine`), run from the control dispatcher's fixed 30 Hz tick rather than from `paint()`: the decay needs a known tick rate, and repaints happen at whatever rate the toolkit decides. FFT setups and Hann windows are cached **by size**, so N widgets at 2048 share one `vDSP_create_fftsetup`.
+   - Normalization is `2/(N·cg)` with Hann coherent gain 0.5 (halved for DC and Nyquist, which have no mirror bin), so a full-scale sine reads 0 dBFS. Peak-with-fall at 0.7 dB/tick (~21 dB/s), floor −96 dB.
+   - The **log-frequency axis is the renderer's job**: each pixel column takes the max over the bins it covers, so the top end (dozens of bins per column) doesn't alias to an arbitrary bin. Implemented in both `widget_draw.cpp` and `widget_component.cpp`.
+   - **`shared/tzpl_fft.hpp` gained a portable fallback**: the non-Apple branch was a `// TODO: PFFFT` stub, so the widget would have silently drawn a flat line off macOS. Now a radix-2 real FFT (half-length complex transform + untangle) producing the identical packed layout, forward and inverse, no VLAs. Benefits synthdefs too, since they share the header.
+4. **Master-bus taps**: `tapMaster(tapID, mode)` routes master capture through the *existing* tap registry rather than a bespoke path — installed into `Engine::rt_masterTaps_` by `TapMasterCmd`, accumulated at **block** rate by `Engine::processMasterTaps`. This is why `tapExists`/`tapPeak`/`tapRms`/`tapChans`/`tapDrain`, the widget poll loop, panel-close untapping and document restore all needed **zero** changes: a master tap is an ordinary registry entry. Silo-0-only by construction (`applyTapMaster` and `applyUntap` reject other silos) — silo 0's thread is the one that runs the post-limiter section.
+   - Lang surface: `ui.spectrum(name, node, outlet, silo)`, plus `ui.masterMeter` / `ui.masterScope` / `ui.masterSpectrum`. Dedicated names rather than a `node = -1` overload of `ui.meter` (whose `outlet`/`silo` arguments are meaningless for the master bus), but internally one `makeTapWidget` with a `nodeID < 0` sentinel.
+
+### 14.3 Performance monitoring — DONE
+
+All of this was new: the engine had **zero** instrumentation before.
+
+- `engine/src/tzpl_engine_stats.hpp`: `MasterMeter`, `SiloStats`, `EngineStatsRT`. Every field is single-writer (the thread that owns the block) with any number of lock-free readers, so all accesses are `memory_order_relaxed` — nothing depends on two fields agreeing.
+- **Max-since-read without a CAS**: `resetEngineStats` bumps `statsEpoch`; each writer keeps its running maximum in a plain non-atomic member and restarts it when it notices the epoch changed. One relaxed load per block.
+- **Timing**: `steady_clock::now()` three times in `Silo::processFrames` and twice around `processAudioBlock`. The split at `mixDown` is deliberate — silo 0's `mixDown` blocks on the worker silos' semaphores, so folding that wait into the DSP figure would make silo 0 look pathologically slow (`mixWaitNanos` is reported separately). Cost is ~5 commpage/vDSO clock reads per block against a multi-millisecond block; gated on `Engine::statsEnabled_` regardless.
+- **Queue depths** (`from_nrt_`/`to_nrt_`/`dead_nodes_`) and live tap count sampled once per block.
+- **GC statistics**: `HeartbeatFn` became `void(*)(void* vm, Silo* s)` so `rtVMHeartbeat` can republish the collector's counters (`stepCount`, `cyclesCompleted`, and the `GCStepSource::RtTick` bucket — the number that determines RT safety) into `SiloStats`. The counters already existed and the RT thread already owns them, so this is six plain loads and five relaxed stores per block. They stay monotone; the host takes deltas rather than resetting cross-thread. The NRT VM's collector is read directly under `nrtvm.mtx`.
+- **Dropout detection**, all previously invisible:
+  - RtAudio's `RtAudioStreamStatus` was being discarded in the callback signature; underflow/overflow now increments `dropoutCount`.
+  - The JUCE backend's wrong-block-size bail (which silences a whole block) and its `catch (...)` now increment `badBlockSizeCount` / `rtExceptionCount` plus a dropout.
+  - Over-budget blocks count too.
+  - New `AudioBackend` virtuals `deviceXruns` / `deviceCpu` / `hasTelemetry`, defaulted so both backends compile unchanged; JUCE overrides them from `AudioDeviceManager` (clamping its −1 "unsupported"). Device- and engine-side counters are reported **separately** — they measure different things, and `deviceCpu` includes the backend's own de/interleaving so it reads higher than `loadPercent`.
+- **Snapshot API**: `EngineStats` / `SiloStatsSnap` + `getEngineStats` / `resetEngineStats`, copied under `nrt_lock_` following the `getGraphDesc`/`DefDesc` convention. Safe and non-inverting because the audio thread never takes `nrt_lock_`, so a GUI poll cannot block audio.
+- **UI**: `app/juce/status_bar.{hpp,cpp}` — a bottom strip in `MainComponent` showing device format, DSP load (colour-coded bar), a master peak-hold meter with a latching clip square, and a **latching** XRUN readout. Expands into a detail grid: per-silo DSP/max/load/mix-wait/taps/queue-depths/GC, an NRT-VM GC row (read with `try_lock` so a long compile never stalls the message thread), and a device row. Clicking XRUN calls `resetEngineStats` — the only way to clear the latch, so a dropout can never quietly disappear. New dropouts also flash the strip and append **one** rate-limited console line. The bar takes no keyboard focus (it sits under a text editor) and is hidden in perform mode; it is not a center-mode component, so mode switching was untouched.
+
+### 14.4 Graph-view metering — DONE
+
+Per-node **opt-in** via the node context menu ("Meter Node", or a "Meter" submenu with per-outlet items when a node has several outlets; non-f32 outlets are greyed because the engine only taps f32).
+
+- Toolkit-free core `app/src/graph_meters.{hpp,cpp}`: `MeterStore` owns the tap lifetime (`enable`/`disable`/`enableNode`/`disableNode`/`prune`/`clearSilo`/`clear`/`poll`). No GUI includes, so a future ImGui graph view can reuse it.
+- **Session-only, never persisted**: taps are a scarce RT resource tied to live audio, and restoring them from a document would mean tapping nodes that may not exist yet. Cleared on silo switch and on `GraphView` destruction; **pruned on every topology change**, which is required — the engine clears a dead node's RT tap entry but leaves the registry slot alive reading silence, so nothing else would free it.
+- `GraphView` became a `juce::MultiTimer`: topology stays at 8 Hz (a deep snapshot under `shadowMtx_`), meters run at 25 Hz and **only while meters exist**, so an unmetered graph costs exactly what it did before. Repaints are per metered node's screen rect — a full 25 Hz repaint would re-stroke every bezier wire.
+- Bars are drawn in a gutter **outside** the node box, at `pinCentre(n, false, port)`, using the same −60..0 dB curve as the widget meters. Inside-the-box bars would require widening metered nodes in `rebuildLayout()`, making the graph jump on every toggle. A dot in the title bar keeps the state legible when zoomed out.
+
+### Tests
+
+- `integration-tests/src/test_metering.cpp` (new target `test_metering`, 85 checks), driven by `renderNRTBlock` so it is fully deterministic with no audio device: tap install/read/remove, scope capture, **tap-table compaction with a middle removal** (the regression guard for 14.0), taps on freed nodes, the per-silo and per-master budgets, master meter post-gain and post-limiter, peak hold, master taps agreeing with the always-on meter, the silo-0 rule, stats plumbing, and the reset epoch handshake. Stats assertions check counts, positivity and finiteness only — never absolute wall times.
+- `app/tests/spectrum_test.cpp` (new target `tzpl_spectrum_tests`, 17 checks): bin placement, 0 dBFS / −6 dB levels, silence, de-interleaving and channel-mean, exact per-tick decay and floor clamping, DC/Nyquist unpacking. (A pure Nyquist tone spreads evenly over the top two bins under a Hann window — the test asserts placement *and level* rather than pinning one bin.)
+- `tzpl_graph_tests` grew `test_graph_meters` (93 checks total): tap ownership, idempotent enable, per-outlet expansion, prune-after-free, and `clear()`.
+
+### Docs — DONE
+
+`lang/docs/Live_Controls_and_Notebooks.html`: `spectrum` / `masterMeter` / `masterScope` / `masterSpectrum` added to the §3.1 widget catalogue and the §3.7 function reference, with a callout explaining *why* the master constructors exist (node 0 has no outlets, and gain/limiting happen after the graph runs) and the one-block limiter lag. §3.5 gained a master read example and a sharper one-consumer-per-stream warning. New **§6 Monitoring the Engine** documents the status bar (including that the XRUN latch clears only by clicking it) and graph-view node meters; §6 was inserted before Current Limitations, which became §7. Limitations, presets and save/load notes updated for the new kind. Every code example was executed against the built app.
+
+**Deferred**: lifting the tap API off the `ui` module onto `audio_engine` so scripts/headless can meter without creating a widget.
 
 ---
 
@@ -897,7 +941,7 @@ Phase 0 (Build Infrastructure)       ✅ DONE
 | 11 | Code editor & REPL | ✅ Done | Type info on hover |
 | 12 | Plugin/module management | 🟡 Partial | 12.1 plugin browser done (both apps) except one-click instantiation; 12.2 module browser, 12.3 compile UI |
 | 13 | Audio graph visualization | 🟢 Mostly done | 13.1-13.3 done (JUCE): topology shadow, GraphView mode, interactive editing, node control panels. Future: ImGui view, MIDI mapping, control readback |
-| 14 | Metering & monitoring | ⬜ Not started | All tasks |
+| 14 | Metering & monitoring | ✅ Done | 14.1-14.4 done: master meter + master taps, Spectrum widget + portable FFT, graph-view node meters, engine perf counters + JUCE status bar; user docs in the Live Controls guide (new §6 Monitoring the Engine). Deferred: engine-level (non-widget) tap FFI |
 | 15 | Session management | ⬜ Not started | All tasks |
 | 16 | Future extensions | ⬜ Not started | All tasks |
 
