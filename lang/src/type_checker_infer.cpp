@@ -131,9 +131,25 @@ Type* TypeChecker::inferExpr(Expr* expr, Type* expectedType) {
                 }
                 result = compiler_.listType(exElem);
             } else {
-                Type* elemType = inferExpr(static_cast<Expr*>(lit->elements[0].get()));
+                // Empty collection literals among the elements are inferred in a
+                // second pass, once the element type is known from the annotated
+                // List<T> sink or from a sibling element.
+                Type* exElemT = expectedElemType(expectedType);
+                std::vector<Type*> elemTypes(lit->elements.size(), nullptr);
+                std::vector<bool> pending(lit->elements.size(), false);
+                for (size_t i = 0; i < lit->elements.size(); ++i) {
+                    Expr* el = static_cast<Expr*>(lit->elements[i].get());
+                    if (isEmptyCollectionLiteral(el)) { pending[i] = true; continue; }
+                    elemTypes[i] = inferExpr(el);
+                    if (!exElemT) exElemT = elemTypes[i];
+                }
+                for (size_t i = 0; i < lit->elements.size(); ++i) {
+                    if (!pending[i]) continue;
+                    elemTypes[i] = inferExpr(static_cast<Expr*>(lit->elements[i].get()), exElemT);
+                }
+                Type* elemType = elemTypes[0];
                 for (size_t i = 1; i < lit->elements.size(); ++i) {
-                    Type* t = inferExpr(static_cast<Expr*>(lit->elements[i].get()));
+                    Type* t = elemTypes[i];
                     if (isNumeric(elemType) && isNumeric(t)) {
                         elemType = commonNumericType(elemType, t);
                     } else if (elemType != t) {
@@ -160,7 +176,8 @@ Type* TypeChecker::inferExpr(Expr* expr, Type* expectedType) {
                 Type* elemType = resolveTypeExpr(lit->elemTypeExpr.get());
                 auto* exElem = dynamic_cast<ExistentialType*>(elemType);
                 for (auto& elem : lit->elements) {
-                    Type* et = inferExpr(static_cast<Expr*>(elem.get()));
+                    Expr* el = static_cast<Expr*>(elem.get());
+                    Type* et = inferExpr(el, expectedForEmptyLiteral(el, elemType));
                     if (et && !isAssignable(et, elemType)) {
                         if (isNumeric(et) && isNumeric(elemType)) {
                             // Allow numeric promotion (e.g. Int -> Float)
@@ -203,10 +220,22 @@ Type* TypeChecker::inferExpr(Expr* expr, Type* expectedType) {
                     }
                 }
 
-                // Infer all element types
-                std::vector<Type*> elemTypes;
+                // Infer all element types. An empty collection literal among
+                // them has no type of its own, so it goes in a second pass: by
+                // then the element type is known, either from an annotated
+                // array/#[] sink or from a sibling element.
+                Type* exElemT = expectedElemType(expectedType);
+                std::vector<Type*> elemTypes(lit->elements.size(), nullptr);
+                std::vector<bool> pending(lit->elements.size(), false);
                 for (size_t i = 0; i < lit->elements.size(); ++i) {
-                    elemTypes.push_back(inferExpr(static_cast<Expr*>(lit->elements[i].get())));
+                    Expr* el = static_cast<Expr*>(lit->elements[i].get());
+                    if (isEmptyCollectionLiteral(el)) { pending[i] = true; continue; }
+                    elemTypes[i] = inferExpr(el);
+                    if (!exElemT) exElemT = elemTypes[i];
+                }
+                for (size_t i = 0; i < lit->elements.size(); ++i) {
+                    if (!pending[i]) continue;
+                    elemTypes[i] = inferExpr(static_cast<Expr*>(lit->elements[i].get()), exElemT);
                 }
 
                 if (anyAutoMap) {
@@ -305,11 +334,40 @@ Type* TypeChecker::inferExpr(Expr* expr, Type* expectedType) {
                     result = compiler_.intType();
                 }
             } else {
-                Type* keyType = inferExpr(static_cast<Expr*>(lit->entries[0].key.get()));
-                Type* valType = inferExpr(static_cast<Expr*>(lit->entries[0].value.get()));
-                for (size_t i = 1; i < lit->entries.size(); ++i) {
-                    Type* kt = inferExpr(static_cast<Expr*>(lit->entries[i].key.get()));
-                    Type* vt = inferExpr(static_cast<Expr*>(lit->entries[i].value.get()));
+                // Empty collection literals used as keys or values have no type
+                // of their own; an annotated map's [K:V] supplies it.
+                Type* exKey = nullptr;
+                Type* exVal = nullptr;
+                if (auto* mt = dynamic_cast<MapType*>(expectedType)) {
+                    exKey = mt->keyType_; exVal = mt->valueType_;
+                } else if (auto* pm = dynamic_cast<PersistentMapType*>(expectedType)) {
+                    exKey = pm->keyType_; exVal = pm->valueType_;
+                }
+                // Two passes, as for array elements: the empty literals are
+                // inferred once the key/value types are known, whether from the
+                // annotation or from a sibling entry.
+                size_t n = lit->entries.size();
+                std::vector<Type*> keyTypes(n, nullptr), valTypes(n, nullptr);
+                std::vector<bool> keyPending(n, false), valPending(n, false);
+                for (size_t i = 0; i < n; ++i) {
+                    Expr* k = static_cast<Expr*>(lit->entries[i].key.get());
+                    Expr* v = static_cast<Expr*>(lit->entries[i].value.get());
+                    if (isEmptyCollectionLiteral(k)) keyPending[i] = true;
+                    else { keyTypes[i] = inferExpr(k); if (!exKey) exKey = keyTypes[i]; }
+                    if (isEmptyCollectionLiteral(v)) valPending[i] = true;
+                    else { valTypes[i] = inferExpr(v); if (!exVal) exVal = valTypes[i]; }
+                }
+                for (size_t i = 0; i < n; ++i) {
+                    if (keyPending[i])
+                        keyTypes[i] = inferExpr(static_cast<Expr*>(lit->entries[i].key.get()), exKey);
+                    if (valPending[i])
+                        valTypes[i] = inferExpr(static_cast<Expr*>(lit->entries[i].value.get()), exVal);
+                }
+                Type* keyType = keyTypes[0];
+                Type* valType = valTypes[0];
+                for (size_t i = 1; i < n; ++i) {
+                    Type* kt = keyTypes[i];
+                    Type* vt = valTypes[i];
                     if (isNumeric(keyType) && isNumeric(kt)) {
                         keyType = commonNumericType(keyType, kt);
                     } else if (keyType != kt) {
@@ -336,9 +394,25 @@ Type* TypeChecker::inferExpr(Expr* expr, Type* expectedType) {
                     result = compiler_.intType();
                 }
             } else {
-                Type* elemType = inferExpr(static_cast<Expr*>(lit->elements[0].get()));
+                // Empty collection literals among the elements are inferred in a
+                // second pass, once the element type is known from the annotated
+                // Set<T> sink or from a sibling element.
+                Type* exElemT = expectedElemType(expectedType);
+                std::vector<Type*> elemTypes(lit->elements.size(), nullptr);
+                std::vector<bool> pending(lit->elements.size(), false);
+                for (size_t i = 0; i < lit->elements.size(); ++i) {
+                    Expr* el = static_cast<Expr*>(lit->elements[i].get());
+                    if (isEmptyCollectionLiteral(el)) { pending[i] = true; continue; }
+                    elemTypes[i] = inferExpr(el);
+                    if (!exElemT) exElemT = elemTypes[i];
+                }
+                for (size_t i = 0; i < lit->elements.size(); ++i) {
+                    if (!pending[i]) continue;
+                    elemTypes[i] = inferExpr(static_cast<Expr*>(lit->elements[i].get()), exElemT);
+                }
+                Type* elemType = elemTypes[0];
                 for (size_t i = 1; i < lit->elements.size(); ++i) {
-                    Type* t = inferExpr(static_cast<Expr*>(lit->elements[i].get()));
+                    Type* t = elemTypes[i];
                     if (isNumeric(elemType) && isNumeric(t)) {
                         elemType = commonNumericType(elemType, t);
                     } else if (elemType != t) {
@@ -367,10 +441,15 @@ Type* TypeChecker::inferExpr(Expr* expr, Type* expectedType) {
                 }
             }
 
-            // Infer all element types
+            // Infer all element types. An empty collection literal in one
+            // position takes that field's type from an annotated tuple sink.
+            auto* exTuple = dynamic_cast<TupleType*>(expectedType);
             Vec<Type*> fieldTypes(rt::STLAllocator<Type*>(nullptr));
-            for (auto& elem : lit->elements) {
-                fieldTypes.push_back(inferExpr(static_cast<Expr*>(elem.get())));
+            for (size_t i = 0; i < lit->elements.size(); ++i) {
+                Expr* el = static_cast<Expr*>(lit->elements[i].get());
+                Type* exField = (exTuple && i < exTuple->fields_.size())
+                    ? exTuple->fields_[i] : nullptr;
+                fieldTypes.push_back(inferExpr(el, expectedForEmptyLiteral(el, exField)));
             }
 
             if (anyAutoMap) {

@@ -1,5 +1,9 @@
 [Bob: 25, Alice: 30, Carol: 35]
 [math: 95, science: 88]
+0
+0
+Counts { m: [:] }
+[[1: 2], [:]]
 2
 99
 true

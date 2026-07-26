@@ -1,0 +1,15 @@
+Type error [tests/errors/empty_literal_ambiguous.x:8:13]
+  |
+8 | println(amb([:]));
+  |             ^
+  Cannot infer type of empty map literal [:]
+
+Type error [tests/errors/empty_literal_ambiguous.x:8:9]
+  |
+8 | println(amb([:]));
+  |         ^^^
+  No matching overload for 'amb'
+    Supplied types: (Int)
+    Available overloads:
+      amb([Int:Int]) -> String
+      amb([String:String]) -> String

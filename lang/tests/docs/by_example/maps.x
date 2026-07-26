@@ -8,6 +8,15 @@ ages println;
 let scores [String:Int] = ["math": 95, "science": 88];
 scores println;
 
+-- The empty map takes its type from whatever surrounds it
+let empty [Int:Int] = [:];
+fn tally(m [Int:Int]) Int { m length }
+[:] tally println;
+tally([:]) println;
+struct Counts { m [Int:Int] }
+Counts { m: [:] } println;
+[[1: 2], [:]] println;
+
 -- Accessing values
 let m = ["a": 1, "b": 2, "c": 3];
 m get("b") unwrap println;

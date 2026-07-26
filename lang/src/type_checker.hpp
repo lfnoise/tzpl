@@ -625,6 +625,28 @@ private:
     // accept the same operand types. Returns nullptr when no rule applies (the
     // caller then falls through to operator-overload lookup).
     Type* concatResultType(Type* leftType, Type* rightType, SourceRange loc);
+    // An empty collection literal -- [], #[], [:], #[:], Set(), List(). These
+    // carry no element type of their own, so wherever one appears in a position
+    // whose type is already known -- a call argument, a struct field, an
+    // element of an annotated literal -- that type is handed to it as the
+    // expected type instead of letting it fail to infer.
+    static bool isEmptyCollectionLiteral(Expr* expr);
+    // `inner` if `child` is an empty collection literal, else nullptr -- the
+    // expected type to pass down when inferring a nested literal's part.
+    static Type* expectedForEmptyLiteral(Expr* child, Type* inner) {
+        return (inner && isEmptyCollectionLiteral(child)) ? inner : nullptr;
+    }
+    // Element type of an expected Array / persistent vector / List / Set type,
+    // or nullptr when the expected type is something else (or absent).
+    static Type* expectedElemType(Type* expectedType);
+    // The type an empty collection literal ([], [:], #[], #[:], Set(), List())
+    // must have to be the argument at holeIndex of a call to `name`: the type
+    // every overload that fits the other arguments expects there. Returns
+    // nullptr when no overload fits or the candidates disagree, leaving the
+    // literal to report that its own type cannot be inferred.
+    Type* deduceEmptyLiteralParamType(std::string const& name,
+                                      std::vector<Type*> const& argTypes,
+                                      size_t holeIndex);
 
     void error(SourceRange loc, const std::string& msg);
 

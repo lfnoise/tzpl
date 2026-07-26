@@ -429,6 +429,15 @@ Type* TypeChecker::detectStructLiteralAutoMap(StructLiteralExpr* lit, StructType
     bool anyAutoMap = false;
     std::vector<AutoMapArg> autoMap(lit->fields.size());
 
+    // The declared type of a field, by name -- nullptr if the struct has no
+    // such field (reported as an unknown field below).
+    auto declaredFieldType = [&](std::string const& name) -> Type* {
+        for (size_t j = 0; j < stype->fields_.size(); ++j) {
+            if (stype->fields_[j].name->str() == name) return stype->fields_[j].type;
+        }
+        return nullptr;
+    };
+
     for (size_t i = 0; i < lit->fields.size(); ++i) {
         // Check for an explicit @-annotation on the field value.
         Expr* fieldExpr = static_cast<Expr*>(lit->fields[i].value.get());
@@ -439,7 +448,10 @@ Type* TypeChecker::detectStructLiteralAutoMap(StructLiteralExpr* lit, StructType
             explicitAM.cartesianIndex = am->cartesianIndex;
         }
 
-        Type* fieldType = inferExpr(fieldExpr);
+        // An empty collection literal takes the declared field type.
+        Type* expected = isEmptyCollectionLiteral(fieldExpr)
+            ? declaredFieldType(lit->fields[i].name) : nullptr;
+        Type* fieldType = inferExpr(fieldExpr, expected);
 
         // Find the field in the struct type by name.
         bool found = false;
@@ -1000,6 +1012,30 @@ Type* TypeChecker::inferIndirectCall(CallExpr_* expr) {
 }
 
 // Step 7b: Handle variable call (deferred lambda, template lambda, FunctionType, callable-object).
+Type* TypeChecker::expectedElemType(Type* expectedType) {
+    if (auto* at = dynamic_cast<ArrayType*>(expectedType)) return at->elemType_;
+    if (auto* pv = dynamic_cast<PersistentVectorType*>(expectedType)) return pv->elemType_;
+    if (auto* lt = dynamic_cast<ListType*>(expectedType)) return lt->elemType_;
+    if (auto* st = dynamic_cast<SetType*>(expectedType)) return st->elemType_;
+    return nullptr;
+}
+
+bool TypeChecker::isEmptyCollectionLiteral(Expr* expr) {
+    switch (expr->kind) {
+        case ASTNode::ArrayLiteral:
+            return static_cast<ArrayLiteralExpr*>(expr)->elements.empty()
+                && !static_cast<ArrayLiteralExpr*>(expr)->elemTypeExpr;
+        case ASTNode::MapLiteral:
+            return static_cast<MapLiteralExpr*>(expr)->entries.empty();
+        case ASTNode::SetLiteral:
+            return static_cast<SetLiteralExpr*>(expr)->elements.empty();
+        case ASTNode::ListLiteral:
+            return static_cast<ListLiteralExpr*>(expr)->elements.empty();
+        default:
+            return false;
+    }
+}
+
 Type* TypeChecker::tryInferVariableCall(CallExpr_* expr, IdentifierExpr* ident) {
     VarInfo* calleeVar = lookupVar(ident->name);
     if (!calleeVar) return nullptr;
@@ -1069,7 +1105,11 @@ Type* TypeChecker::tryInferVariableCall(CallExpr_* expr, IdentifierExpr* ident) 
                 explicitAutoMap[i].cartesianIndex = am->cartesianIndex;
                 hasExplicitAutoMap = true;
             }
-            argTypes.push_back(inferExpr(arg));
+            // An empty collection literal takes its type from the parameter,
+            // which a lambda states outright -- no overload set to weigh.
+            Type* expected = (i < funcType->argTypes_.size() && isEmptyCollectionLiteral(arg))
+                ? funcType->argTypes_[i] : nullptr;
+            argTypes.push_back(inferExpr(arg, expected));
         }
 
         // Handle explicit @ auto-mapping on lambda calls
@@ -1254,6 +1294,35 @@ Type* TypeChecker::tryInferVariableCall(CallExpr_* expr, IdentifierExpr* ident) 
     return nullptr;
 }
 
+Type* TypeChecker::deduceEmptyLiteralParamType(std::string const& name,
+                                               std::vector<Type*> const& argTypes,
+                                               size_t holeIndex) {
+    auto it = functions_.find(name);
+    if (it == functions_.end()) return nullptr;
+    Type* deduced = nullptr;
+    for (auto& fi : it->second) {
+        // Templates are skipped: the parameter may be a type variable, which
+        // says nothing about the literal's element type.
+        if (fi.isTemplate) continue;
+        if (fi.paramTypes.size() != argTypes.size()) continue;
+        if (holeIndex >= fi.paramTypes.size()) continue;
+        bool fits = true;
+        for (size_t j = 0; j < argTypes.size(); ++j) {
+            if (j == holeIndex || !argTypes[j]) continue;  // the hole, or another one
+            if (argTypes[j] == fi.paramTypes[j]) continue;
+            if (isAssignable(argTypes[j], fi.paramTypes[j])) continue;
+            if (isNumeric(argTypes[j]) && isNumeric(fi.paramTypes[j])) continue;
+            fits = false;
+            break;
+        }
+        if (!fits) continue;
+        Type* candidate = fi.paramTypes[holeIndex];
+        if (deduced && deduced != candidate) return nullptr;  // overloads disagree
+        deduced = candidate;
+    }
+    return deduced;
+}
+
 // ============================================================================
 // Main inferCall -- now delegates to extracted helpers
 // ============================================================================
@@ -1433,6 +1502,7 @@ Type* TypeChecker::inferCall(CallExpr_* expr) {
     std::vector<AutoMapArg> explicitAutoMap(expr->args.size());
 
     bool hasDeferredLambda = false;
+    bool hasEmptyLiteral = false;
     for (size_t i = 0; i < expr->args.size(); ++i) {
         Expr* arg = static_cast<Expr*>(expr->args[i].get());
         if (arg->kind == ASTNode::AutoMap) {
@@ -1500,8 +1570,26 @@ Type* TypeChecker::inferCall(CallExpr_* expr) {
         if (isUntypedLambda || isTemplateFuncRef || isTemplateLambdaRef) {
             argTypes.push_back(nullptr);  // defer -- will resolve after backward inference
             hasDeferredLambda = true;
+        } else if (isEmptyCollectionLiteral(arg)) {
+            argTypes.push_back(nullptr);  // defer -- the parameter supplies the type
+            hasEmptyLiteral = true;
         } else {
             argTypes.push_back(inferExpr(arg));
+        }
+    }
+
+    // An empty collection literal has no type of its own, so take it from the
+    // parameter it is being passed to -- the same way C++ types a braced
+    // initializer from the parameter rather than deducing it from the argument.
+    // Done before the lambda pass below so those holes see complete types.
+    if (hasEmptyLiteral) {
+        for (size_t i = 0; i < argTypes.size(); ++i) {
+            if (argTypes[i]) continue;
+            Expr* arg = static_cast<Expr*>(expr->args[i].get());
+            if (!isEmptyCollectionLiteral(arg)) continue;
+            // With no deducible parameter type this re-infers with no expected
+            // type, which reports the literal's own "cannot infer" error.
+            argTypes[i] = inferExpr(arg, deduceEmptyLiteralParamType(ident->name, argTypes, i));
         }
     }
 

@@ -2130,6 +2130,27 @@ iter(<span class="str">"a"</span>, <span class="kw">fn</span>(s <span class="kw"
 <span class="cmt">-- Map type annotation: [K:V]</span>
 <span class="kw">let</span> scores [<span class="kw">String</span>:<span class="kw">Int</span>] = [<span class="str">"math"</span>: <span class="num">95</span>, <span class="str">"science"</span>: <span class="num">88</span>];</code></pre>
 
+<p>The empty map <code>[:]</code> names no key or value type, so it takes one from
+whatever surrounds it: an annotation, the parameter it is passed to, the struct
+field it fills, or the literal it sits inside &mdash; and within a literal, from a
+sibling element when there is no annotation. The other empty collection literals
+(<code>[]</code>, <code>Set()</code>, <code>List()</code>, <code>#[]</code>,
+<code>#[:]</code>) work the same way.</p>
+<pre><code><span class="kw">let</span> empty [<span class="kw">Int</span>:<span class="kw">Int</span>] = [:];      <span class="cmt">-- from the annotation</span>
+
+<span class="kw">fn</span> tally(m [<span class="kw">Int</span>:<span class="kw">Int</span>]) <span class="kw">Int</span> { m length }
+[:] tally println;                <span class="cmt">-- 0    (from the parameter)</span>
+tally([:]) println;               <span class="cmt">-- 0</span>
+
+<span class="kw">struct</span> Counts { m [<span class="kw">Int</span>:<span class="kw">Int</span>] }
+Counts { m: [:] } println;        <span class="cmt">-- from the field's declared type</span>
+
+[[<span class="num">1</span>: <span class="num">2</span>], [:]] println;           <span class="cmt">-- from the sibling entry: [[1: 2], [:]]</span></code></pre>
+
+<p>With several overloads in play, the ones that fit the <em>other</em> arguments
+decide. If those still disagree about this parameter &mdash; or nothing in the
+context pins the type down, as in <code>[[], []]</code> &mdash; annotate instead.</p>
+
 <h3 id="accessing-values">14.2 Accessing Values</h3>
 <pre><code><span class="kw">let</span> m = [<span class="str">"a"</span>: <span class="num">1</span>, <span class="str">"b"</span>: <span class="num">2</span>, <span class="str">"c"</span>: <span class="num">3</span>];
 
