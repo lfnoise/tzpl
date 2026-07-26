@@ -214,6 +214,15 @@ int64_t renderNRTAsync(RenderJobOpts const& opts,
         std::cerr << "renderNRT: empty output path\n";
         return 0;
     }
+    // Every render needs an NRT VM to drive its tempo scheduler and run the
+    // setup closure. A host that never installed one (a bare test harness,
+    // say) used to reach NRTTempoScheduler's ctor with null and crash there;
+    // report and decline instead.
+    if (!appCtx || !appCtx->nrtvm) {
+        std::cerr << "renderNRT: no NRT VM in the AppContext -- "
+                     "offline rendering is unavailable in this host\n";
+        return 0;
+    }
 
     auto job = std::make_unique<RenderJob>();
     job->opts = opts;

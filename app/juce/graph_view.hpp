@@ -40,6 +40,7 @@
 #define graph_view_hpp
 
 #include "graph_layout.hpp"
+#include "graph_meters.hpp"
 #include "graph_model.hpp"
 
 #include <juce_gui_basics/juce_gui_basics.h>
@@ -48,9 +49,10 @@ namespace bridge { struct AppContext; }
 
 namespace tzplapp {
 
-class GraphView : public juce::Component, private juce::Timer {
+class GraphView : public juce::Component, private juce::MultiTimer {
 public:
     explicit GraphView(bridge::AppContext& appCtx);
+    ~GraphView() override;
 
     // Drop the poller cache and re-snapshot immediately (mode entry).
     void refreshNow();
@@ -100,8 +102,18 @@ private:
     void showNodeMenu(int nodeIndex);
     // Log err to the console if nonzero, else re-snapshot immediately.
     void afterEdit(int err, juce::String const& what);
-    void timerCallback() override;
+    // Two independent rates: topology at 8 Hz (a deep snapshot under the
+    // engine's shadow mutex) and, only while meters exist, levels at 25 Hz.
+    enum TimerID { kTopologyTimer = 0, kMeterTimer = 1 };
+    void timerCallback(int timerID) override;
     void pollNow();
+    void pollMeters();
+    // Start/stop the meter timer to match meters_.count().
+    void syncMeterTimer();
+    // Screen-space rect of a node's meter gutter, for targeted repaints.
+    juce::Rectangle<int> meterRepaintArea(graph::NodeVM const& n) const;
+    void toggleNodeMeters(int nodeIndex);
+    void toggleOutletMeter(int nodeIndex, int outlet);
     void rebuildLayout();   // measure node boxes, then autoLayout
     void zoomToFit();
     void zoomAbout(juce::Point<float> screenPt, float factor);
@@ -120,6 +132,9 @@ private:
     graph::GraphPoller poller_;
     graph::GraphViewModel vm_;
     graph::LayoutStore layoutStore_;
+    // Per-outlet level meters, opt-in via the node context menu. Owns its
+    // engine taps; session-only (never persisted).
+    graph::MeterStore meters_;
 
     // Silo selector: a segmented row of toggle buttons for small silo
     // counts, a dropdown only when there are many silos.

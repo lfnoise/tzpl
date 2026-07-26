@@ -19,6 +19,7 @@
 
 #include "tzpl_app_context.hpp"
 #include "tzpl_ui_state.hpp"
+#include "tzpl_ui_taps.hpp"
 #include "tzpl_client_interface.hpp"
 #include "tzpl_sexpr_bin.hpp"
 
@@ -668,11 +669,7 @@ bool saveDocument(DocumentStore const& store, bridge::AppContext& ctx,
 
 // Remove an engine tap (GUI/caller thread; bundles are thread-local).
 static void untapWidget(bridge::AppContext& ctx, long tapID, int silo) {
-    if (!ctx.engine || tapID == 0) return;
-    if (engine::begin(ctx.engine) == tzpl_errNone) {
-        engine::untap(tapID);
-        engine::go(silo);
-    }
+    bridge::untapWidget(ctx.engine, tapID, silo);
 }
 
 // ---------------------------------------------------------------------------
@@ -973,8 +970,11 @@ SnapshotPtr loadDocument(bridge::AppContext& ctx, std::string const& path,
                 if (rw.tag() != Tag::Vec || rw.childCount() < 6) continue;
                 std::string name{rw.child(1).asStr()};
                 int kindInt = (int)rw.child(2).asInt();
+                // Kinds are persisted as raw ordinals, so a document written
+                // by a NEWER build can name a kind this one doesn't have.
+                // Degrade to Slider rather than reinterpreting garbage.
                 if (kindInt < 0
-                    || kindInt > (int)bridge::UIWidgetKind::ButtonMatrix)
+                    || kindInt > (int)bridge::UIWidgetKind::Spectrum)
                     kindInt = 0;
                 auto kind = (bridge::UIWidgetKind)kindInt;
                 bridge::UISpec spec = readSpec(rw.child(3));
@@ -1052,7 +1052,8 @@ captureWidgets(bridge::UIState* ui, std::vector<std::string> const& panels,
         // node, stop a coroutine) doesn't read as a document change and
         // pollute history.
         if (w->kind == bridge::UIWidgetKind::Meter
-            || w->kind == bridge::UIWidgetKind::Scope)
+            || w->kind == bridge::UIWidgetKind::Scope
+            || w->kind == bridge::UIWidgetKind::Spectrum)
             std::fill(s.values.begin(), s.values.end(), 0.0);
         s.fx = w->fx; s.fy = w->fy; s.fw = w->fw; s.fh = w->fh;
         s.rows = w->rows; s.cols = w->cols;
@@ -1137,7 +1138,8 @@ void restoreWidgets(bridge::AppContext& ctx, WidgetSnapList const& target,
                 // Tap-backed displays keep their live values (captured
                 // as zeros; see captureWidgets).
                 bool tapKind = s.kind == bridge::UIWidgetKind::Meter
-                            || s.kind == bridge::UIWidgetKind::Scope;
+                            || s.kind == bridge::UIWidgetKind::Scope
+                            || s.kind == bridge::UIWidgetKind::Spectrum;
                 if (!tapKind && w->values != s.values) {
                     w->values = s.values;
                     w->dirtyEngine = true;

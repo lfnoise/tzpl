@@ -33,6 +33,8 @@
 #define controls_dispatch_hpp
 
 #include <juce_events/juce_events.h>
+
+#include "tzpl_spectrum.hpp"
 #include <functional>
 #include <string>
 #include <utility>
@@ -78,6 +80,9 @@ private:
     std::vector<std::string> pendingClosedPanels_;
     int idleTicks_ = 0;
     bool tapsVisibleLastTick_ = false;
+    // FFT setups + scratch for Spectrum widgets, shared across all of them
+    // (cached by size). Used only from tick(), on the message thread.
+    bridge::SpectrumEngine spectrum_;
 };
 
 }

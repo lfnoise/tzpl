@@ -29,6 +29,145 @@
 namespace engine {
 
 //=============================================================================================
+#pragma mark MASTER METER
+
+// One extra pass over the block, on the audio thread, right after the safety
+// limiter. Peak/RMS are integrated over publishFrames so a master meter and a
+// node tap read the same way; peakHold falls slowly so a GUI polling at any
+// rate sees the true maximum rather than whichever block it landed on.
+void MasterMeter::processBlock(f32 const* out, int frames, int outChans) {
+    int n = std::min(outChans, kMaxMasterChans);
+    if (n < 1 || frames < 1) return;
+    chans.store(n, std::memory_order_relaxed);
+
+    f32 blockPeak[kMaxMasterChans];
+    for (int c = 0; c < n; ++c) blockPeak[c] = 0.f;
+    u32 clips = 0;
+
+    for (int i = 0; i < frames; ++i) {
+        f32 const* frame = out + (size_t)i * outChans;
+        for (int c = 0; c < n; ++c) {
+            f32 v = frame[c];
+            f32 a = std::fabs(v);
+            if (a > blockPeak[c]) blockPeak[c] = a;
+            accumSq[c] += (f64)v * (f64)v;
+            if (a >= 0.999f) ++clips;
+        }
+    }
+    accumFrames += frames;
+
+    f32 holdAll = 0.f;
+    for (int c = 0; c < n; ++c) {
+        if (blockPeak[c] > accumPeak[c]) accumPeak[c] = blockPeak[c];
+        f32 h = peakHold[c].load(std::memory_order_relaxed) * holdDecayPerBlock;
+        if (blockPeak[c] > h) h = blockPeak[c];
+        peakHold[c].store(h, std::memory_order_relaxed);
+        if (h > holdAll) holdAll = h;
+    }
+    peakHoldAll.store(holdAll, std::memory_order_relaxed);
+    if (clips) clipCount.fetch_add(clips, std::memory_order_relaxed);
+
+    if (accumFrames < publishFrames) return;
+
+    f32 peakAllV = 0.f;
+    f64 msSum = 0.;
+    for (int c = 0; c < n; ++c) {
+        peak[c].store(accumPeak[c], std::memory_order_relaxed);
+        f64 ms = accumSq[c] / (f64)accumFrames;
+        rms[c].store((f32)std::sqrt(ms), std::memory_order_relaxed);
+        msSum += ms;
+        if (accumPeak[c] > peakAllV) peakAllV = accumPeak[c];
+        accumPeak[c] = 0.f;
+        accumSq[c] = 0.;
+    }
+    peakAll.store(peakAllV, std::memory_order_relaxed);
+    // Mean square across channels, then root -- the same convention
+    // Silo::processTaps uses, so master and node meters are comparable.
+    rmsAll.store((f32)std::sqrt(msSum / (f64)n), std::memory_order_relaxed);
+    accumFrames = 0;
+}
+
+//=============================================================================================
+#pragma mark MASTER TAPS
+
+tzpl_SErr Engine::installMasterTap(TapSlot* slot) {
+    if (numMasterTaps_ >= kMaxMasterTaps) return tzpl_errResourceLimit;
+    rt_masterTaps_[numMasterTaps_++] = slot;
+    return tzpl_errNone;
+}
+
+TapSlot* Engine::rt_findMasterTap(i64 tapID) {
+    for (int i = 0; i < numMasterTaps_; ++i) {
+        if (rt_masterTaps_[i]->tapID == tapID) return rt_masterTaps_[i];
+    }
+    return nullptr;
+}
+
+void Engine::removeMasterTap(i64 tapID) {
+    for (int i = 0; i < numMasterTaps_; ) {
+        if (rt_masterTaps_[i]->tapID == tapID) {
+            rt_masterTaps_[i] = rt_masterTaps_[numMasterTaps_ - 1];
+            rt_masterTaps_[numMasterTaps_ - 1] = nullptr;
+            --numMasterTaps_;
+        } else {
+            ++i;
+        }
+    }
+}
+
+// Block-rate, unlike Silo::processTaps which runs per sample -- here the whole
+// block is already in memory. Same accumulation convention, so a master tap
+// and a node tap on the same signal read identically.
+void Engine::processMasterTaps(f32 const* out, int frames, int outChans) {
+    if (numMasterTaps_ == 0) return;
+
+    for (int t = 0; t < numMasterTaps_; ++t) {
+        TapSlot* ts = rt_masterTaps_[t];
+        int chans = std::min(ts->chans, outChans);
+        if (chans < 1) continue;
+
+        for (int i = 0; i < frames; ++i) {
+            f32 const* frame = out + (size_t)i * outChans;
+            f32 sq = 0.f;
+            f32 pk = ts->accumPeak;
+            for (int c = 0; c < chans; ++c) {
+                f32 v = frame[c];
+                f32 a = std::fabs(v);
+                if (a > pk) pk = a;
+                sq += v * v;
+            }
+            ts->accumPeak = pk;
+            ts->accumSq += sq / (f32)chans;
+            if (++ts->accumCount >= ts->publishPeriod) {
+                ts->peak.store(ts->accumPeak, std::memory_order_relaxed);
+                ts->rms.store(std::sqrt(ts->accumSq / (f32)ts->accumCount),
+                              std::memory_order_relaxed);
+                ts->accumPeak = 0.f;
+                ts->accumSq = 0.f;
+                ts->accumCount = 0;
+            }
+            if (ts->mode == tapScope) {
+                // Whole interleaved frames or nothing, so a full FIFO drops
+                // frames without slipping channel alignment.
+                if (ts->fifo.space() >= chans) {
+                    for (int c = 0; c < chans; ++c) ts->fifo.push(frame[c]);
+                }
+            }
+        }
+    }
+}
+
+void Engine::configureStats() {
+    masterMeter_.configure(streamParams_.sampleRate, streamParams_.bufferFrames);
+    u64 budget = 0;
+    if (streamParams_.sampleRate > 0.) {
+        budget = (u64)(1e9 * (f64)streamParams_.bufferFrames
+                       / streamParams_.sampleRate);
+    }
+    stats_.budgetNanos.store(budget, std::memory_order_relaxed);
+}
+
+//=============================================================================================
 #pragma mark NON REAL TIME ENGINE METHODS
 
 void initAudio(Engine* e);
@@ -88,6 +227,8 @@ Engine::Engine(EngineConfig const& config, AudioStreamParameters& asp, bool /*nr
             s.outbuf_ = (f32*)malloc(byteSize);
         }
     }
+    configureStats();
+
     // Mark as running so sendCmds() routes commands through the FIFO instead
     // of executing synchronously -- the renderer dispatches them sample-accurately.
     audioState_ = AudioState::running;
@@ -139,7 +280,17 @@ Engine::~Engine() {
             fprintf(stderr, "If terrible things happen now, I told you so..\n");
         }
     }
-    
+
+    // Drop every tap BEFORE any member is destroyed. Members go in reverse
+    // declaration order, so taps_ (declared after silos_) would otherwise be
+    // freed first -- and then ~Silo -> removeAllNodes -> removeNode ->
+    // clearTapsForNode would write published levels through dangling TapSlot
+    // pointers. Clearing the RT tables first makes that loop a no-op.
+    for (Silo& s : silos_) s.numTaps_ = 0;
+    numMasterTaps_ = 0;
+    taps_.clear();
+
+
 //    printf("from_nrt_.numPushed %d\n", from_nrt_.numPushed());
 //    printf("from_nrt_.numPopped %d\n", from_nrt_.numPopped());
 //    

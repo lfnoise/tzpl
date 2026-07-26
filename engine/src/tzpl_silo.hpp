@@ -27,6 +27,7 @@
 #include "tzpl_atomic_fifo.hpp"
 #include "tzpl_node.hpp"
 #include "tzpl_command.hpp"
+#include "tzpl_engine_stats.hpp"
 #include "tzpl_tempo_clock.hpp"
 #include "tzpl_tap.hpp"
 #include <atomic>
@@ -124,8 +125,11 @@ struct Silo
     std::vector<TempoClock> tempoClocks_;
 
     // Per-buffer heartbeat callback for VM GC. Called once per audio buffer
-    // to drain the deferred-delete queue and reclaim dead objects.
-    using HeartbeatFn = void (*)(void* vm);
+    // to drain the deferred-delete queue and reclaim dead objects. Takes the
+    // Silo so it can republish the VM's GC counters into stats_ -- the RT
+    // thread owns those counters, so this is the only place they can be read
+    // without racing the collector.
+    using HeartbeatFn = void (*)(void* vm, Silo* s);
     HeartbeatFn heartbeatFn_ = nullptr;
 
     // Per-sample task-scheduler tick. Drives the bridge-side silo task pool
@@ -140,7 +144,11 @@ struct Silo
     // and removed by Tap commands, scanned once per sample by processTaps.
     // The TapSlot objects are owned by the Engine's tap registry; entries
     // whose node dies are cleared by removeNode.
-    static constexpr int kMaxTaps = 32;
+    // Live entries occupy the DENSE PREFIX [0, numTaps_): removal moves the
+    // last entry down into the hole, so processTaps only ever touches live
+    // taps and the table can be large without costing per-sample work.
+    // Entry order is therefore not stable -- nothing depends on it.
+    static constexpr int kMaxTaps = 128;
     struct RTTap {
         TapSlot* slot = nullptr;
         Node* node = nullptr;
@@ -149,7 +157,11 @@ struct Silo
         i64 tapID = 0;
     };
     RTTap rt_taps_[kMaxTaps];
-    bool anyTaps_ = false;
+    int numTaps_ = 0;
+
+    // Block timing, queue depths and (when a VM is attached) GC counters for
+    // this silo. Written only by this silo's processing thread.
+    SiloStats stats_;
 
     Silo();
     ~Silo();
@@ -189,6 +201,16 @@ struct Silo
 
     // Taps (RT thread).
     tzpl_SErr installTap(TapSlot* slot, Node* node, int outlet, i64 tapID);
+    // Resolve a tapID through THIS silo's RT table. Callable with no lock and
+    // no map lookup, because rt_taps_ is owned by this silo's processing
+    // thread -- and the only legal caller is that same thread, which is also
+    // the thread that publishes the values. Finds only taps installed on this
+    // silo; silo 0 additionally sees the engine's master taps, since silo 0's
+    // thread is the one that runs the post-limiter section. Returns null for
+    // a tap on another silo -- cross-silo reads must go through the NRT
+    // accessors, which take the engine lock.
+    TapSlot* rt_findTap(i64 tapID);
+    void eraseTapAt(int i);
     void removeTap(i64 tapID);
     void clearTapsForNode(Node* node);
     void processTaps();

@@ -33,6 +33,24 @@ static constexpr float kPinRowH = 16.f;
 static constexpr float kBoxPadX = 10.f;
 static constexpr float kMinBoxW = 90.f;
 static constexpr float kPinR = 4.f;
+
+// Node context menu: per-outlet meter items start here, so they can't
+// collide with the fixed items (1..4).
+static constexpr int kMeterMenuBase = 100;
+
+// Outlet level-meter gutter (world units), drawn to the right of the box.
+static constexpr float kMeterGap = 3.f;
+static constexpr float kMeterW = 6.f;
+static constexpr float kMeterH = kPinRowH - 4.f;
+
+// Amplitude -> 0..1 bar fill over a -60..0 dB range. Matches the widget
+// meters (app/src/widget_draw.cpp, widget_component.cpp) so a node reads the
+// same in the graph as in its control panel.
+static float db01(float lin) {
+    if (lin <= 1e-6f) return 0.f;
+    float db = 20.0f * std::log10(lin);
+    return juce::jlimit(0.0f, 1.0f, (db + 60.0f) / 60.0f);
+}
 static constexpr int kToolbarH = 34;
 static constexpr float kMinZoom = 0.25f;
 static constexpr float kMaxZoom = 2.5f;
@@ -105,8 +123,17 @@ GraphView::GraphView(bridge::AppContext& appCtx)
     setWantsKeyboardFocus(true); // Delete removes the selected wire/node
 }
 
+GraphView::~GraphView() {
+    // Taps are a scarce RT resource and nothing else owns them.
+    meters_.clear(appCtx_.engine);
+}
+
 void GraphView::selectSilo(int s) {
     if (s == silo_ || s < 0) return;
+    // Meters belong to the silo they were opened on; switching away drops
+    // them rather than leaving invisible taps running.
+    meters_.clearSilo(appCtx_.engine, silo_);
+    syncMeterTimer();
     silo_ = s;
     didInitialFit_ = false;
     refreshNow();
@@ -120,21 +147,48 @@ void GraphView::refreshNow() {
 void GraphView::visibilityChanged() {
     if (isVisible()) {
         refreshNow();
-        startTimerHz(8);
+        startTimer(kTopologyTimer, 1000 / 8);
+        syncMeterTimer();
     } else {
-        stopTimer();
+        // Keep the taps: hiding the view is cheap to undo and the user
+        // expects their meters back. Only the polling stops.
+        stopTimer(kTopologyTimer);
+        stopTimer(kMeterTimer);
     }
 }
 
-void GraphView::timerCallback() {
-    if (isShowing()) pollNow();
+void GraphView::timerCallback(int timerID) {
+    if (!isShowing()) return;
+    if (timerID == kTopologyTimer) pollNow();
+    else pollMeters();
 }
 
 void GraphView::pollNow() {
     if (poller_.poll(silo_, vm_)) {
+        // A freed node's tap keeps its registry slot (reading silence) until
+        // someone untaps it, so every topology change has to sweep.
+        meters_.prune(appCtx_.engine, vm_);
+        syncMeterTimer();
         rebuildLayout();
         repaint();
     }
+}
+
+void GraphView::pollMeters() {
+    if (meters_.count() == 0) return;
+    // ~1.5s fall at 25 Hz.
+    meters_.poll(appCtx_.engine, 0.9f);
+    // Repaint only the metered nodes' gutters: a full repaint at 25 Hz would
+    // re-stroke every bezier wire in the graph.
+    for (auto const& n : vm_.nodes) {
+        if (meters_.nodeEnabled(silo_, n.nodeID)) repaint(meterRepaintArea(n));
+    }
+}
+
+void GraphView::syncMeterTimer() {
+    bool want = isShowing() && meters_.count() > 0;
+    if (want && !isTimerRunning(kMeterTimer)) startTimer(kMeterTimer, 1000 / 25);
+    else if (!want && isTimerRunning(kMeterTimer)) stopTimer(kMeterTimer);
 }
 
 void GraphView::rebuildLayout() {
@@ -331,6 +385,31 @@ void GraphView::paint(juce::Graphics& g) {
                                               c.y - kPinRowH / 2,
                                               n.w * 0.6f, kPinRowH),
                        juce::Justification::centredRight, true);
+
+            // Level meter, drawn in a gutter OUTSIDE the box. Inside would
+            // mean widening metered nodes in rebuildLayout(), which makes
+            // the whole graph jump every time one is toggled.
+            auto const* m = meters_.find({silo_, n.nodeID, p});
+            if (!m) continue;
+            juce::Rectangle<float> bar(c.x + kMeterGap, c.y - kMeterH * 0.5f,
+                                       kMeterW, kMeterH);
+            g.setColour(juce::Colours::black.withAlpha(0.55f));
+            g.fillRect(bar);
+            g.setColour(m->peak >= 1.0f ? juce::Colours::red
+                                        : juce::Colour(0xff4caf50));
+            float fill = db01(m->rms) * bar.getHeight();
+            g.fillRect(bar.withTrimmedTop(bar.getHeight() - fill));
+            float hy = bar.getBottom() - db01(m->peakHold) * bar.getHeight();
+            g.setColour(juce::Colours::orange);
+            g.drawLine(bar.getX(), hy, bar.getRight(), hy, 1.0f / zoom_);
+        }
+
+        // A dot in the title bar keeps "this node is metered" legible when
+        // zoomed too far out to see the bars.
+        if (meters_.nodeEnabled(silo_, n.nodeID)) {
+            g.setColour(juce::Colour(0xff4caf50));
+            g.fillEllipse(n.x + n.w - kBoxPadX - 4.f, n.y + kTitleH * 0.5f - 2.f,
+                          4.f, 4.f);
         }
     }
 
@@ -584,15 +663,74 @@ void GraphView::showBackgroundMenu(juce::Point<float> worldPt) {
         });
 }
 
+juce::Rectangle<int> GraphView::meterRepaintArea(graph::NodeVM const& n) const {
+    juce::Rectangle<float> r(n.x, n.y, n.w + kMeterGap + kMeterW + 2.f, n.h);
+    return r.transformedBy(worldTransform()).getSmallestIntegerContainer()
+            .expanded(2);
+}
+
+void GraphView::toggleNodeMeters(int nodeIndex) {
+    if (nodeIndex < 0 || nodeIndex >= (int)vm_.nodes.size()) return;
+    long long id = vm_.nodes[(size_t)nodeIndex].nodeID;
+    if (meters_.nodeEnabled(silo_, id)) {
+        meters_.disableNode(appCtx_.engine, silo_, id);
+    } else {
+        int err = meters_.enableNode(appCtx_.engine, silo_, vm_, id);
+        if (err != tzpl_errNone) {
+            logLine("meter: " + juce::String(graph::errText(err))
+                        + " (each silo holds a limited number of taps)", true);
+        }
+    }
+    syncMeterTimer();
+    repaint();
+}
+
+void GraphView::toggleOutletMeter(int nodeIndex, int outlet) {
+    if (nodeIndex < 0 || nodeIndex >= (int)vm_.nodes.size()) return;
+    graph::MeterKey k{silo_, vm_.nodes[(size_t)nodeIndex].nodeID, outlet};
+    if (meters_.enabled(k)) {
+        meters_.disable(appCtx_.engine, k);
+    } else {
+        int err = meters_.enable(appCtx_.engine, k);
+        if (err != tzpl_errNone) {
+            logLine("meter: " + juce::String(graph::errText(err))
+                        + " (each silo holds a limited number of taps)", true);
+        }
+    }
+    syncMeterTimer();
+    repaint();
+}
+
 void GraphView::showNodeMenu(int nodeIndex) {
     if (nodeIndex < 0 || nodeIndex >= (int)vm_.nodes.size()) return;
     long long id = vm_.nodes[nodeIndex].nodeID;
     bool builtin = id == 0 || id == 1;
 
+    auto const& node = vm_.nodes[nodeIndex];
     juce::PopupMenu m;
-    m.addSectionHeader(juce::String(vm_.nodes[nodeIndex].defName)
+    m.addSectionHeader(juce::String(node.defName)
                        + "  #" + juce::String((juce::int64)id));
     m.addItem(3, "Controls...");
+
+    // Metering is opt-in per node. Only f32 outlets can be tapped, so the
+    // rest are greyed rather than silently doing nothing.
+    bool anyF32 = false;
+    for (auto const& o : node.outs) if (o.elem == tzpl_kF32) anyF32 = true;
+    m.addSeparator();
+    if (node.outs.size() <= 1) {
+        m.addItem(4, "Meter Node", anyF32, meters_.nodeEnabled(silo_, id));
+    } else {
+        juce::PopupMenu sub;
+        sub.addItem(4, "All Outlets", anyF32, meters_.nodeEnabled(silo_, id));
+        sub.addSeparator();
+        for (int o = 0; o < (int)node.outs.size(); ++o) {
+            sub.addItem(kMeterMenuBase + o, portLabel(node.outs[(size_t)o]),
+                        node.outs[(size_t)o].elem == tzpl_kF32,
+                        meters_.enabled({silo_, id, o}));
+        }
+        m.addSubMenu("Meter", sub);
+    }
+
     m.addSeparator();
     m.addItem(1, "Disconnect All");
     m.addItem(2, "Free Node", !builtin);
@@ -600,9 +738,17 @@ void GraphView::showNodeMenu(int nodeIndex) {
     juce::Component::SafePointer<GraphView> safe(this);
     std::string defName = vm_.nodes[nodeIndex].defName;
     m.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(nullptr),
-        [safe, id, defName](int result) {
+        [safe, id, defName, nodeIndex](int result) {
             if (safe == nullptr || result <= 0) return;
             auto* self = safe.getComponent();
+            if (result == 4) {
+                self->toggleNodeMeters(nodeIndex);
+                return;
+            }
+            if (result >= kMeterMenuBase) {
+                self->toggleOutletMeter(nodeIndex, result - kMeterMenuBase);
+                return;
+            }
             if (result == 1)
                 self->afterEdit(graph::disconnectAllWires(self->appCtx_.engine,
                                                           self->silo_,

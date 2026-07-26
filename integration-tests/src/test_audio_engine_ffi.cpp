@@ -121,6 +121,52 @@ static void test_constants() {
     check(ok, "Enum constants compile and run via module import");
 }
 
+// Silo VMs compile against an RT-restricted target, which rejects any FFI
+// function not registered rtSafe. The tap API has to pass that gate, or a
+// silo script could never read a level.
+static void test_taps_are_rt_safe() {
+    std::print("Test: tap API compiles for a real-time VM\n");
+
+    ts::TypeUniverse types;
+    ts::Compiler compiler(types);
+    bridge::registerAudioEngineFFI(compiler);
+    ts::ModuleCompiler moduleCompiler(compiler, {MODULES_DIR});
+
+    auto rtTarget = compiler.createTarget(/*rtRestricted=*/true);
+    ts::VM vm(16 * 1024 * 1024, types, rtTarget);
+
+    const char* source = R"(
+        import audio_engine.*;
+        fn readLevels(id Int) Float {
+            let ok = tapExists(id);
+            let c  = tapChans(id);
+            let xs = tapSamples(id, 64);
+            tapPeak(id) + tapRms(id)
+        }
+        fn makeTap(node Int) Int {
+            let id = allocTapID();
+            begin();
+            tapOutlet(node, 0, id, TapMode.tapMeter);
+            go(0);
+            id
+        }
+        fn dropTap(id Int) Int { begin(); untap(id); go(0) }
+    )";
+
+    auto result = compiler.compile(source, "rt_taps.x", rtTarget, &moduleCompiler);
+    if (!result.success) {
+        for (auto& err : result.errors) std::print("    {}\n", err.message);
+    }
+    check(result.success, "tap create/read/untap are all callable from a silo VM");
+
+    // Control: a function that is NOT rtSafe must still be rejected, so this
+    // test would notice if the RT gate stopped working altogether.
+    auto rtTarget2 = compiler.createTarget(/*rtRestricted=*/true);
+    auto bad = compiler.compile("import audio_engine.*;\nlet n = listSynthDefs();",
+                                "rt_bad.x", rtTarget2, &moduleCompiler);
+    check(!bad.success, "a non-rtSafe engine function is still rejected for RT");
+}
+
 static void test_engine_lifecycle() {
     std::print("Test: Engine lifecycle FFI functions\n");
 
@@ -723,6 +769,7 @@ static constexpr ScriptTestConfig kScriptTests[] = {
     {"test4.x",    10,    48000.,  256, true, false, false, false},
     {"test3.x",     1,    96000.,  256, false, false, false, true},
     {"bundle_test.x", 1,  48000.,  256, true, false, false, false},
+    {"taps_test.x", 1,    48000.,  256, true, true,  false, false},
 };
 
 // ---------------------------------------------------------------------------
@@ -734,6 +781,7 @@ int main(int argc, char const* argv[]) {
 
     // Quick compilation tests (no audio)
     test_constants();
+    test_taps_are_rt_safe();
     test_engine_lifecycle();
     test_command_bundling();
     test_type_checking();

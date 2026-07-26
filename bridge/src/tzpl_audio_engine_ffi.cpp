@@ -99,6 +99,7 @@ static char const* errName(tzpl_SErr err) {
         case tzpl_errNotImplemented:         return "errNotImplemented";
         case tzpl_errTooLate:                return "errTooLate";
         case tzpl_errClockOutOfRange:        return "errClockOutOfRange";
+        case tzpl_errResourceLimit:          return "errResourceLimit";
     }
     return "errUnknown";
 }
@@ -1144,6 +1145,171 @@ static void ffi_siloStartAt(ts::VM& vm, u16, u16, u16 argBase) {
     vm.makeCurrent();
 }
 
+// ---------------------------------------------------------------------------
+// Signal taps (meters / scopes) -- engine level, no widget required.
+//
+// Creation and removal are ordinary bundled commands. Reads resolve two ways:
+//
+//   * From a silo's RT VM (gCurrentSilo is set) they go through that silo's
+//     own RT tap table -- no lock, no map lookup, and no concurrency at all,
+//     because the thread doing the reading is the thread that publishes the
+//     values. That path sees only taps installed on THAT silo (silo 0 also
+//     sees master taps); a tap belonging to another silo reads as absent.
+//
+//   * From the NRT VM they take the engine lock and see every tap.
+//
+// A tap's samples come from a single-producer/single-consumer FIFO, so each
+// consumer needs its OWN tap. Sharing one tapID between, say, a silo script
+// and a GUI scope is a data race, not merely a split stream.
+// ---------------------------------------------------------------------------
+
+// Largest drain a single tapSamples call can return. Sized so the staging
+// buffer sits on the stack -- an RT caller must not touch the heap for it.
+static constexpr int kMaxTapDrain = 4096;
+
+// fn allocTapID() Int
+// Process-unique tap id. Use this rather than inventing ids, so script taps
+// can never collide with the ones ui widgets and the graph view allocate.
+static void ffi_allocTapID(ts::VM& vm, u16 dst, u16, u16) {
+    vm.reg(dst).i = static_cast<i64>(engine::allocTapID(getEngine(vm)));
+}
+
+// Which VM is calling, for tap ownership. Taps the app creates for its own
+// widgets go in untagged (tapOwnerHost) and are never swept by freeVmTaps.
+// A silo VM's taps are keyed by SILO INDEX, so a siloLoad reload inherits its
+// predecessor's taps rather than stranding them.
+static void callerTapOwner(int& kind, int& silo) {
+    if (engine::Silo* s = gCurrentSilo) {
+        kind = engine::tapOwnerSiloVM;
+        silo = s->index_;
+    } else {
+        kind = engine::tapOwnerNRTVM;
+        silo = 0;
+    }
+}
+
+// fn tapOutlet(node Int, outlet Int, tapID Int, mode Int) Int  -- bundled
+static void ffi_tapOutlet(ts::VM& vm, u16 dst, u16, u16 argBase) {
+    auto node = static_cast<engine::i64>(vm.reg(argBase).i);
+    int outlet = static_cast<int>(vm.reg(argBase + 1).i);
+    auto tapID = static_cast<engine::i64>(vm.reg(argBase + 2).i);
+    int mode = static_cast<int>(vm.reg(argBase + 3).i);
+    int ownerKind, ownerSilo;
+    callerTapOwner(ownerKind, ownerSilo);
+    returnErr(vm, dst,
+              engine::tapOutlet(node, outlet, tapID, mode, ownerKind, ownerSilo),
+              __func__);
+}
+
+// fn tapMaster(tapID Int, mode Int) Int  -- bundled; submit to silo 0
+static void ffi_tapMaster(ts::VM& vm, u16 dst, u16, u16 argBase) {
+    auto tapID = static_cast<engine::i64>(vm.reg(argBase).i);
+    int mode = static_cast<int>(vm.reg(argBase + 1).i);
+    int ownerKind, ownerSilo;
+    callerTapOwner(ownerKind, ownerSilo);
+    returnErr(vm, dst, engine::tapMaster(tapID, mode, ownerKind, ownerSilo),
+              __func__);
+}
+
+// fn freeVmTaps() Int
+// Remove every tap THIS VM created, and return how many. A silo VM frees its
+// own silo's script taps; the main VM frees its own. Taps belonging to the
+// app's meters and scopes are never touched. Housekeeping, not a per-block
+// operation: it walks the tap registry and submits one bundle per silo.
+static void ffi_freeVmTaps(ts::VM& vm, u16 dst, u16, u16) {
+    int ownerKind, ownerSilo;
+    callerTapOwner(ownerKind, ownerSilo);
+    vm.reg(dst).i = engine::freeTapsByOwner(getEngine(vm), ownerKind, ownerSilo);
+}
+
+// fn freeAllTaps() Int
+// Reset the world: remove EVERY tap regardless of owner, including the ones
+// behind the app's meters and scopes (which will read silence until the code
+// that made them runs again). A debugging escape hatch, not routine cleanup.
+static void ffi_freeAllTaps(ts::VM& vm, u16 dst, u16, u16) {
+    vm.reg(dst).i = engine::freeTapsByOwner(getEngine(vm), engine::tapOwnerAny, 0);
+}
+
+// fn untap(tapID Int) Int  -- bundled
+static void ffi_untap(ts::VM& vm, u16 dst, u16, u16 argBase) {
+    auto tapID = static_cast<engine::i64>(vm.reg(argBase).i);
+    returnErr(vm, dst, engine::untap(tapID), __func__);
+}
+
+// fn tapExists(tapID Int) Bool
+static void ffi_tapExists(ts::VM& vm, u16 dst, u16, u16 argBase) {
+    auto tapID = static_cast<engine::i64>(vm.reg(argBase).i);
+    if (engine::Silo* s = gCurrentSilo) {
+        vm.reg(dst).i = engine::rtTapExists(s, tapID) ? 1 : 0;
+        return;
+    }
+    engine::Engine* e = getEngine(vm);
+    vm.reg(dst).i = (e && engine::tapExists(e, tapID)) ? 1 : 0;
+}
+
+// fn tapPeak(tapID Int) Float
+static void ffi_tapPeak(ts::VM& vm, u16 dst, u16, u16 argBase) {
+    auto tapID = static_cast<engine::i64>(vm.reg(argBase).i);
+    if (engine::Silo* s = gCurrentSilo) {
+        vm.reg(dst).f = engine::rtTapPeak(s, tapID);
+        return;
+    }
+    engine::Engine* e = getEngine(vm);
+    vm.reg(dst).f = e ? engine::tapPeak(e, tapID) : 0.0;
+}
+
+// fn tapRms(tapID Int) Float
+static void ffi_tapRms(ts::VM& vm, u16 dst, u16, u16 argBase) {
+    auto tapID = static_cast<engine::i64>(vm.reg(argBase).i);
+    if (engine::Silo* s = gCurrentSilo) {
+        vm.reg(dst).f = engine::rtTapRms(s, tapID);
+        return;
+    }
+    engine::Engine* e = getEngine(vm);
+    vm.reg(dst).f = e ? engine::tapRms(e, tapID) : 0.0;
+}
+
+// fn tapChans(tapID Int) Int
+static void ffi_tapChans(ts::VM& vm, u16 dst, u16, u16 argBase) {
+    auto tapID = static_cast<engine::i64>(vm.reg(argBase).i);
+    if (engine::Silo* s = gCurrentSilo) {
+        vm.reg(dst).i = engine::rtTapChans(s, tapID);
+        return;
+    }
+    engine::Engine* e = getEngine(vm);
+    vm.reg(dst).i = e ? engine::tapChans(e, tapID) : 0;
+}
+
+// fn tapSamples(tapID Int, max Int) [Float]
+// Interleaved frames of tapChans(tapID) channels. The count is clamped to a
+// whole number of frames so repeated drains stay frame-aligned, and to
+// kMaxTapDrain so the staging buffer can live on the stack.
+static void ffi_tapSamples(ts::VM& vm, u16 dst, u16, u16 argBase) {
+    auto tapID = static_cast<engine::i64>(vm.reg(argBase).i);
+    int maxSamples = static_cast<int>(vm.reg(argBase + 1).i);
+    maxSamples = std::min(std::max(maxSamples, 0), kMaxTapDrain);
+
+    engine::Silo* s = gCurrentSilo;
+    engine::Engine* e = s ? nullptr : getEngine(vm);
+
+    int chans = s ? engine::rtTapChans(s, tapID)
+                  : (e ? engine::tapChans(e, tapID) : 0);
+    if (chans < 1) chans = 1;
+    maxSamples -= maxSamples % chans;
+
+    f32 buf[kMaxTapDrain];
+    int n = 0;
+    if (maxSamples > 0) {
+        n = s ? engine::rtTapDrain(s, tapID, buf, maxSamples)
+              : (e ? engine::tapDrain(e, tapID, buf, maxSamples) : 0);
+    }
+
+    auto* arr = new ts::PodArray<f64>(vm.arrayType(vm.floatType()));
+    arr->v.reserve(n);
+    for (int i = 0; i < n; ++i) arr->v.push_back(buf[i]);
+    vm.reg(dst).o = arr;
+}
+
 // fn _scheduleTask(clock Int, handler Fn() Float) Int  -- silo-side primitive
 //
 // Adds a beat task to the CURRENT silo's scheduler (gCurrentSilo), scheduled at
@@ -1439,6 +1605,21 @@ void registerAudioEngineFFI(ts::Compiler& compiler) {
     reg("channelOffset",    Int, {Int},            ffi_channelOffset, true);
 
     // Buffers (bundled; loadBuffer reads the file at submit on the caller)
+    // Signal taps. Creation/removal are bundled commands like any other edit;
+    // the reads are RT-safe because a silo resolves them through its own tap
+    // table (see the section comment above ffi_allocTapID).
+    reg("allocTapID",       Int,   {},                    ffi_allocTapID,  true);
+    reg("tapOutlet",        Int,   {Int, Int, Int, Int},  ffi_tapOutlet,   true);
+    reg("tapMaster",        Int,   {Int, Int},            ffi_tapMaster,   true);
+    reg("untap",            Int,   {Int},                 ffi_untap,       true);
+    reg("freeVmTaps",       Int,   {},                    ffi_freeVmTaps,  true);
+    reg("freeAllTaps",      Int,   {},                    ffi_freeAllTaps, true);
+    reg("tapExists",        Bool,  {Int},                 ffi_tapExists,   true);
+    reg("tapPeak",          Float, {Int},                 ffi_tapPeak,     true);
+    reg("tapRms",           Float, {Int},                 ffi_tapRms,      true);
+    reg("tapChans",         Int,   {Int},                 ffi_tapChans,    true);
+    reg("tapSamples",       FloatArray, {Int, Int},       ffi_tapSamples,  true);
+
     reg("resizeBuffer",     Int, {Int, Int, Int, Int},    ffi_resizeBuffer, true);
     reg("loadBuffer",       Int, {Int, Int, String},      ffi_loadBuffer);
 

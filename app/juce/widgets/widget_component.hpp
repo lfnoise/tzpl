@@ -102,6 +102,7 @@ private:
     void paintXY(juce::Graphics&, bridge::UIWidget&);
     void paintMeter(juce::Graphics&, bridge::UIWidget&);
     void paintScope(juce::Graphics&, bridge::UIWidget&);
+    void paintSpectrum(juce::Graphics&, bridge::UIWidget&);
     void paintPlot(juce::Graphics&, bridge::UIWidget&);
     void paintWaveform(juce::Graphics&, bridge::UIWidget&);
     void paintMultiSlider(juce::Graphics&, bridge::UIWidget&);

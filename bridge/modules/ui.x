@@ -208,6 +208,19 @@ fn meter(name String, node Int, outlet Int = 0, silo Int = 0) Widget =
 fn scope(name String, node Int, outlet Int = 0, silo Int = 0) Widget =
 	Widget(uiScope(name, node, outlet, silo));
 
+-- The master output bus: post safety-limiter, post master gain -- what the
+-- audio device actually plays. No node needed (node 0 "Audio Out" has no
+-- outlets, so `meter`/`scope` cannot reach it). Note that with the safety
+-- limiter enabled these trail node taps by one audio block.
+fn masterMeter(name String) Widget = Widget(uiMasterTap(name, 0));
+fn masterScope(name String) Widget = Widget(uiMasterTap(name, 1));
+fn masterSpectrum(name String) Widget = Widget(uiMasterTap(name, 2));
+
+-- Spectrum analyzer on a node outlet: magnitudes in dBFS on a log frequency
+-- axis, with a slow fall so peaks stay readable.
+fn spectrum(name String, node Int, outlet Int = 0, silo Int = 0) Widget =
+	Widget(uiSpectrum(name, node, outlet, silo));
+
 -- Tap reads for scripts (bypass the GUI display mirror). Note the scope
 -- FIFO has one consumer stream: samples taken here don't also reach the
 -- GUI scope display.

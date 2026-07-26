@@ -52,6 +52,13 @@ enum Err {
     errNotImplemented,
     errTooLate,
     errClockOutOfRange,
+    errResourceLimit,
+}
+
+-- Signal tap modes (see tapOutlet / tapMaster).
+enum TapMode {
+    tapMeter,   -- peak/rms only
+    tapScope,   -- peak/rms plus a sample FIFO, read with tapSamples
 }
 
 -- Spawn a coroutine task on slot `clock` of the CURRENT silo (call from silo

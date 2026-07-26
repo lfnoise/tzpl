@@ -29,7 +29,9 @@
 #include "tzpl_command_subclasses.hpp"
 #include <algorithm>
 #include <cstring>
+#include <map>
 #include <string_view>
+#include <vector>
 #include <dlfcn.h> // dlopen, dlclose
 #include <filesystem>
 #include <chrono>
@@ -209,6 +211,10 @@ void safetyLimiter(Engine* e, Enable onoff) {
 // the backend RT callbacks and the NRT renderer.
 void processAudioBlock(Engine* e, f32 const* in, f32* out,
                        unsigned int numFrames, f64 streamTime) {
+    bool timing = e->statsEnabled_.load(std::memory_order_relaxed);
+    auto t0 = timing ? std::chrono::steady_clock::now()
+                     : std::chrono::steady_clock::time_point{};
+
     e->in_ = in;
     e->out_ = out;
     e->anchorStreamTime_ = streamTime;
@@ -226,7 +232,29 @@ void processAudioBlock(Engine* e, f32 const* in, f32* out,
 
     f32 gain = e->masterGain_ * e->muteGain_;
     e->safetyLimiter_->process(out, e->enableSafetyLimiter_, gain);
+
+    // Measured on `out` AFTER the limiter, so this is what the device plays.
+    // Note the limiter's enabled path swaps in the previous block, so with the
+    // limiter on the master meter trails the node taps by exactly one block.
+    e->masterMeter_.processBlock(out, (int)numFrames, e->streamParams_.channels);
+    e->processMasterTaps(out, (int)numFrames, e->streamParams_.channels);
+
     e->anchorSampleTime_ += numFrames;
+
+    if (timing) {
+        auto t1 = std::chrono::steady_clock::now();
+        auto nanos = (u64)std::chrono::duration_cast<std::chrono::nanoseconds>(
+            t1 - t0).count();
+        auto& st = e->stats_;
+        u32 epoch = st.statsEpoch.load(std::memory_order_relaxed);
+        publishBlockNanos(st, nanos, epoch);
+        st.blockCount.fetch_add(1, std::memory_order_relaxed);
+        u64 budget = st.budgetNanos.load(std::memory_order_relaxed);
+        if (budget && nanos > budget) {
+            st.overBudgetCount.fetch_add(1, std::memory_order_relaxed);
+            st.dropoutCount.fetch_add(1, std::memory_order_relaxed);
+        }
+    }
 }
 
 void renderNRTBlock(Engine* e, f32* outBuffer) {
@@ -255,6 +283,9 @@ void initAudio(Engine* e) {
             s.outbuf_ = (f32*)malloc(byteSize);
         }
     }
+
+    // Sized from the format the backend actually negotiated.
+    e->configureStats();
 
     e->audioState_ = AudioState::initted;
 }
@@ -1217,7 +1248,8 @@ static tzpl_SErr applySetInput(Engine* e, Silo* s, CommandList& out,
 
 static tzpl_SErr applyTapOutlet(Engine* e, Silo* s, CommandList& out,
                                 ShadowEdits&,
-                                i64 nodeID, int outlet, i64 tapID, int mode) {
+                                i64 nodeID, int outlet, i64 tapID, int mode,
+                                int ownerKind, int ownerSilo) {
     OutPort* port;
     tzpl_SErr err = s->nrt_getOutPort(PortAddr{nodeID, outlet}, port);
     if (err != tzpl_errNone) return err;
@@ -1227,10 +1259,25 @@ static tzpl_SErr applyTapOutlet(Engine* e, Silo* s, CommandList& out,
     TapSlot* slot;
     {
         std::lock_guard<std::mutex> lck(e->nrt_lock_);
+        // Refuse here rather than letting installTap fail on RT: a failed
+        // install returns errNone from go(), leaving the caller holding a
+        // tapID that reads silence forever. Counting registry entries is
+        // conservative -- a tap whose untap is submitted but not yet executed
+        // still counts -- which is the right side to err on.
+        int live = 0;
+        for (auto const& [id, ts] : e->taps_) {
+            if (ts->silo == s->index_) ++live;
+        }
+        if (live >= Silo::kMaxTaps) return tzpl_errResourceLimit;
+
         auto [it, inserted] = e->taps_.try_emplace(
             tapID, std::make_unique<TapSlot>(static_cast<TapMode>(mode)));
         if (!inserted) return tzpl_errAlreadyAdded;
         slot = it->second.get();
+        slot->tapID = tapID;
+        slot->silo = s->index_;
+        slot->ownerKind = (TapOwnerKind)ownerKind;
+        slot->ownerSilo = ownerSilo;
         slot->chans = std::min(port->type_.chans,
                                (decltype(port->type_.chans))TapSlot::kMaxScopeChans);
         if (slot->chans < 1) slot->chans = 1;
@@ -1239,13 +1286,58 @@ static tzpl_SErr applyTapOutlet(Engine* e, Silo* s, CommandList& out,
     return tzpl_errNone;
 }
 
-static tzpl_SErr applyUntap(Engine* e, Silo*, CommandList& out,
-                            ShadowEdits&, i64 tapID) {
+static tzpl_SErr applyTapMaster(Engine* e, Silo* s, CommandList& out,
+                                ShadowEdits&, i64 tapID, int mode,
+                                int ownerKind, int ownerSilo) {
+    // The master bus is summed and limited on silo 0's thread, so that is the
+    // only thread allowed to touch the master tap table.
+    if (s->index_ != 0) return tzpl_errSiloOutOfRange;
+    if (mode != tapMeter && mode != tapScope) return tzpl_errNotImplemented;
+
+    TapSlot* slot;
     {
         std::lock_guard<std::mutex> lck(e->nrt_lock_);
-        if (!e->taps_.count(tapID)) return tzpl_errNodeNotFound;
+        int live = 0;
+        for (auto const& [id, ts] : e->taps_) {
+            if (ts->isMaster) ++live;
+        }
+        if (live >= Engine::kMaxMasterTaps) return tzpl_errResourceLimit;
+
+        auto [it, inserted] = e->taps_.try_emplace(
+            tapID, std::make_unique<TapSlot>(static_cast<TapMode>(mode)));
+        if (!inserted) return tzpl_errAlreadyAdded;
+        slot = it->second.get();
+        slot->tapID = tapID;
+        slot->silo = 0;
+        slot->isMaster = true;
+        slot->ownerKind = (TapOwnerKind)ownerKind;
+        slot->ownerSilo = ownerSilo;
+        slot->chans = std::min(e->streamParams_.channels,
+                               TapSlot::kMaxScopeChans);
+        if (slot->chans < 1) slot->chans = 1;
     }
-    out.add(new UntapCmd(tapID));
+    out.add(new TapMasterCmd(e, tapID, slot));
+    return tzpl_errNone;
+}
+
+static tzpl_SErr applyUntap(Engine* e, Silo* s, CommandList& out,
+                            ShadowEdits&, i64 tapID) {
+    bool isMaster = false;
+    int tapSilo = 0;
+    {
+        std::lock_guard<std::mutex> lck(e->nrt_lock_);
+        auto it = e->taps_.find(tapID);
+        if (it == e->taps_.end()) return tzpl_errNodeNotFound;
+        isMaster = it->second->isMaster;
+        tapSilo = it->second->silo;
+    }
+    // The removal must run on the thread that owns the table holding this
+    // tap: master taps live in the Engine's table, which only silo 0's thread
+    // touches; node taps live in their own silo's. Removing from anywhere
+    // else would find nothing on RT, then free the slot in doNRT -- leaving
+    // the owning silo's tap table pointing at freed memory.
+    if (s->index_ != (isMaster ? 0 : tapSilo)) return tzpl_errSiloOutOfRange;
+    out.add(new UntapCmd(tapID, isMaster));
     return tzpl_errNone;
 }
 
@@ -1518,13 +1610,34 @@ struct TapOutletOp : BundleOp
     int outlet_;
     i64 tapID_;
     int mode_;
+    int ownerKind_;
+    int ownerSilo_;
 
-    TapOutletOp(i64 nodeID, int outlet, i64 tapID, int mode)
-        : nodeID_(nodeID), outlet_(outlet), tapID_(tapID), mode_(mode)
+    TapOutletOp(i64 nodeID, int outlet, i64 tapID, int mode,
+                int ownerKind, int ownerSilo)
+        : nodeID_(nodeID), outlet_(outlet), tapID_(tapID), mode_(mode),
+          ownerKind_(ownerKind), ownerSilo_(ownerSilo)
     {}
 
     tzpl_SErr apply(Engine* e, Silo* s, CommandList& out, ShadowEdits& edits) override {
-        return applyTapOutlet(e, s, out, edits, nodeID_, outlet_, tapID_, mode_);
+        return applyTapOutlet(e, s, out, edits, nodeID_, outlet_, tapID_, mode_,
+                              ownerKind_, ownerSilo_);
+    }
+};
+
+struct TapMasterOp : BundleOp
+{
+    i64 tapID_;
+    int mode_;
+    int ownerKind_;
+    int ownerSilo_;
+
+    TapMasterOp(i64 tapID, int mode, int ownerKind, int ownerSilo)
+        : tapID_(tapID), mode_(mode), ownerKind_(ownerKind), ownerSilo_(ownerSilo) {}
+
+    tzpl_SErr apply(Engine* e, Silo* s, CommandList& out, ShadowEdits& edits) override {
+        return applyTapMaster(e, s, out, edits, tapID_, mode_,
+                              ownerKind_, ownerSilo_);
     }
 };
 
@@ -1772,9 +1885,16 @@ tzpl_SErr setControl(i64 nodeID, i64 controlID, int numValues, i64 const* values
     return recordSetControl(nodeID, controlID, tzpl_kI64, numValues, values);
 }
 
-tzpl_SErr tapOutlet(i64 nodeID, int outlet, i64 tapID, int mode) {
+tzpl_SErr tapOutlet(i64 nodeID, int outlet, i64 tapID, int mode,
+                    int ownerKind, int ownerSilo) {
     if (!tBundle.engine) return tzpl_errNoActiveBundle;
-    tBundle.add(new TapOutletOp(nodeID, outlet, tapID, mode));
+    tBundle.add(new TapOutletOp(nodeID, outlet, tapID, mode, ownerKind, ownerSilo));
+    return tzpl_errNone;
+}
+
+tzpl_SErr tapMaster(i64 tapID, int mode, int ownerKind, int ownerSilo) {
+    if (!tBundle.engine) return tzpl_errNoActiveBundle;
+    tBundle.add(new TapMasterOp(tapID, mode, ownerKind, ownerSilo));
     return tzpl_errNone;
 }
 
@@ -1782,6 +1902,186 @@ tzpl_SErr untap(i64 tapID) {
     if (!tBundle.engine) return tzpl_errNoActiveBundle;
     tBundle.add(new UntapOp(tapID));
     return tzpl_errNone;
+}
+
+int freeTapsByOwner(Engine* e, int ownerKind, int ownerSilo) {
+    if (!e) return 0;
+    // We open our own bundles, so a caller mid-bundle would have theirs
+    // clobbered. begin() refuses in that case; bail before touching anything.
+    if (begin(e) != tzpl_errNone) return 0;
+    go(0);  // discard the probe bundle
+
+    // Group by the silo that must do the removal: a tap can only be untapped
+    // from the silo whose table holds it (see applyUntap).
+    std::map<int, std::vector<i64>> bySilo;
+    {
+        std::lock_guard<std::mutex> lck(e->nrt_lock_);
+        for (auto const& [id, slot] : e->taps_) {
+            if (ownerKind != tapOwnerAny) {
+                if (slot->ownerKind != ownerKind) continue;
+                if (ownerKind == tapOwnerSiloVM && slot->ownerSilo != ownerSilo)
+                    continue;
+            }
+            bySilo[slot->isMaster ? 0 : slot->silo].push_back(id);
+        }
+    }
+
+    int removed = 0;
+    for (auto const& [silo, ids] : bySilo) {
+        if (begin(e) != tzpl_errNone) break;
+        for (i64 id : ids) untap(id);
+        if (go(silo) == tzpl_errNone) removed += (int)ids.size();
+    }
+    return removed;
+}
+
+// ---- RT-safe reads (silo's own thread; see the header for the rules). ----
+
+bool rtTapExists(Silo* s, i64 tapID) {
+    return s && s->rt_findTap(tapID) != nullptr;
+}
+
+f32 rtTapPeak(Silo* s, i64 tapID) {
+    TapSlot* t = s ? s->rt_findTap(tapID) : nullptr;
+    return t ? t->peak.load(std::memory_order_relaxed) : 0.f;
+}
+
+f32 rtTapRms(Silo* s, i64 tapID) {
+    TapSlot* t = s ? s->rt_findTap(tapID) : nullptr;
+    return t ? t->rms.load(std::memory_order_relaxed) : 0.f;
+}
+
+int rtTapChans(Silo* s, i64 tapID) {
+    TapSlot* t = s ? s->rt_findTap(tapID) : nullptr;
+    return t ? t->chans : 0;
+}
+
+int rtTapDrain(Silo* s, i64 tapID, f32* dst, int maxSamples) {
+    TapSlot* t = s ? s->rt_findTap(tapID) : nullptr;
+    if (!t) return 0;
+    int n = 0;
+    f32 v;
+    while (n < maxSamples && t->fifo.pop(v)) dst[n++] = v;
+    return n;
+}
+
+i64 allocTapID(Engine* e) {
+    if (!e) return 0;
+    return e->nextTapID_.fetch_add(1, std::memory_order_relaxed);
+}
+
+// ---------------------------------------------------------------------------
+// Metering & monitoring
+// ---------------------------------------------------------------------------
+
+int masterChans(Engine* e) {
+    return e ? e->masterMeter_.chans.load(std::memory_order_relaxed) : 0;
+}
+
+// Shared accessor shape: ch < 0 selects the across-channels summary, an
+// out-of-range channel reads 0.
+template <class Sum, class Per>
+static f32 masterLevel(Engine* e, int ch, Sum sum, Per per) {
+    if (!e) return 0.f;
+    MasterMeter& m = e->masterMeter_;
+    if (ch < 0) return sum(m).load(std::memory_order_relaxed);
+    int n = m.chans.load(std::memory_order_relaxed);
+    if (ch >= n || ch >= kMaxMasterChans) return 0.f;
+    return per(m)[ch].load(std::memory_order_relaxed);
+}
+
+f32 masterPeak(Engine* e, int ch) {
+    return masterLevel(e, ch,
+                       [](MasterMeter& m) -> std::atomic<f32>& { return m.peakAll; },
+                       [](MasterMeter& m) { return m.peak; });
+}
+
+f32 masterRms(Engine* e, int ch) {
+    return masterLevel(e, ch,
+                       [](MasterMeter& m) -> std::atomic<f32>& { return m.rmsAll; },
+                       [](MasterMeter& m) { return m.rms; });
+}
+
+f32 masterPeakHold(Engine* e, int ch) {
+    return masterLevel(e, ch,
+                       [](MasterMeter& m) -> std::atomic<f32>& { return m.peakHoldAll; },
+                       [](MasterMeter& m) { return m.peakHold; });
+}
+
+u32 masterClipCount(Engine* e) {
+    return e ? e->masterMeter_.clipCount.load(std::memory_order_relaxed) : 0;
+}
+
+static f64 msOf(u64 nanos) { return (f64)nanos / 1e6; }
+
+void getEngineStats(Engine* e, EngineStats& out) {
+    out = EngineStats{};
+    if (!e) return;
+
+    std::lock_guard<std::mutex> lck(e->nrt_lock_);
+
+    out.audioRunning = e->audioState_ == AudioState::running;
+    out.sampleRate = e->streamParams_.sampleRate;
+    out.bufferFrames = e->streamParams_.bufferFrames;
+    out.channels = e->streamParams_.channels;
+
+    auto& st = e->stats_;
+    out.blockCount = st.blockCount.load(std::memory_order_relaxed);
+    u64 budget = st.budgetNanos.load(std::memory_order_relaxed);
+    out.blockBudgetMs = msOf(budget);
+    out.blockLastMs = msOf(st.lastNanos.load(std::memory_order_relaxed));
+    out.blockAvgMs = msOf(st.ewmaNanos.load(std::memory_order_relaxed));
+    out.blockMaxMs = msOf(st.maxNanos.load(std::memory_order_relaxed));
+    if (out.blockBudgetMs > 0.) {
+        out.loadPercent = 100. * out.blockAvgMs / out.blockBudgetMs;
+        out.loadPeakPercent = 100. * out.blockMaxMs / out.blockBudgetMs;
+    }
+    out.overBudgetCount = st.overBudgetCount.load(std::memory_order_relaxed);
+    out.engineDropouts = st.dropoutCount.load(std::memory_order_relaxed);
+    out.badBlockSizeCount = st.badBlockSizeCount.load(std::memory_order_relaxed);
+    out.rtExceptionCount = st.rtExceptionCount.load(std::memory_order_relaxed);
+
+    if (e->backend_) {
+        out.deviceTelemetry = e->backend_->hasTelemetry();
+        out.deviceXruns = e->backend_->deviceXruns();
+        out.deviceCpu = e->backend_->deviceCpu();
+    }
+
+    out.clipCount = e->masterMeter_.clipCount.load(std::memory_order_relaxed);
+    if (e->safetyLimiter_) out.limiterGain = e->safetyLimiter_->nextGain;
+
+    out.silos.reserve(e->silos_.size());
+    for (Silo& s : e->silos_) {
+        SiloStatsSnap snap;
+        snap.index = s.index_;
+        snap.blockCount = s.stats_.blockCount.load(std::memory_order_relaxed);
+        snap.lastMs = msOf(s.stats_.lastNanos.load(std::memory_order_relaxed));
+        snap.avgMs = msOf(s.stats_.ewmaNanos.load(std::memory_order_relaxed));
+        snap.maxMs = msOf(s.stats_.maxNanos.load(std::memory_order_relaxed));
+        snap.mixWaitMs = msOf(s.stats_.mixWaitNanos.load(std::memory_order_relaxed));
+        if (out.blockBudgetMs > 0.)
+            snap.loadPercent = 100. * snap.avgMs / out.blockBudgetMs;
+        snap.numTaps = s.stats_.numTaps.load(std::memory_order_relaxed);
+        snap.toNrtDepth = s.stats_.toNrtDepth.load(std::memory_order_relaxed);
+        snap.fromNrtDepth = s.stats_.fromNrtDepth.load(std::memory_order_relaxed);
+        snap.deadNodesDepth = s.stats_.deadNodesDepth.load(std::memory_order_relaxed);
+        snap.hasVM = s.stats_.hasVM.load(std::memory_order_relaxed) != 0;
+        snap.gcStepCount = s.stats_.gcStepCount.load(std::memory_order_relaxed);
+        snap.gcCycles = s.stats_.gcCycles.load(std::memory_order_relaxed);
+        snap.gcRtStepCount = s.stats_.gcRtStepCount.load(std::memory_order_relaxed);
+        snap.gcRtMaxNanos = s.stats_.gcRtMaxNanos.load(std::memory_order_relaxed);
+        out.silos.push_back(std::move(snap));
+    }
+}
+
+void resetEngineStats(Engine* e) {
+    if (!e) return;
+    std::lock_guard<std::mutex> lck(e->nrt_lock_);
+    // Bumps statsEpoch, which each RT writer notices on its next block and
+    // restarts its running maximum from -- no CAS, no torn reset.
+    e->stats_.reset();
+    for (Silo& s : e->silos_) s.stats_.reset();
+    e->masterMeter_.clipCount.store(0, std::memory_order_relaxed);
 }
 
 bool tapExists(Engine* e, i64 tapID) {

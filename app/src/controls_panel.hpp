@@ -27,6 +27,8 @@
 #ifndef controls_panel_hpp
 #define controls_panel_hpp
 
+#include "tzpl_spectrum.hpp"
+
 #include <string>
 #include <vector>
 
@@ -71,6 +73,9 @@ private:
     // Panels whose floating window was closed this frame; dispatch()
     // removes their widgets (and releases engine taps).
     std::vector<std::string> pendingClosedPanels_;
+    // FFT setups + scratch for Spectrum widgets, shared across all of them
+    // (cached by size). Used only from dispatch(), on the GUI thread.
+    bridge::SpectrumEngine spectrum_;
 };
 
 #endif /* controls_panel_hpp */

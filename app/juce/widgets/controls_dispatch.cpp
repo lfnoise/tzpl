@@ -21,6 +21,7 @@
 
 #include "controls_dispatch.hpp"
 #include "tzpl_ui_state.hpp"
+#include "tzpl_ui_taps.hpp"
 #include "tzpl_app_context.hpp"
 #include "tzpl_client_interface.hpp"
 #include "nrt_vm.hpp"
@@ -98,59 +99,13 @@ void ControlsDispatcher::tick() {
 
     // ---- Remove widgets of panels whose window was closed. ---------------
     if (!pendingClosedPanels_.empty()) {
-        std::vector<std::pair<long, int>> taps;
-        {
-            std::lock_guard<std::mutex> lock(ui->mtx);
-            for (auto const& panel : pendingClosedPanels_) {
-                for (auto& w : ui->widgets)
-                    if (bridge::panelUnderRoot(w->panel, panel) && w->tapID)
-                        taps.push_back({ w->tapID, w->tapSilo });
-                std::erase_if(ui->widgets, [&](auto const& w) {
-                    return bridge::panelUnderRoot(w->panel, panel);
-                });
-            }
-        }
+        auto taps = bridge::removePanelWidgets(*ui, pendingClosedPanels_);
         pendingClosedPanels_.clear();
-        for (auto [tapID, silo] : taps) {
-            if (!ctx.engine) break;
-            if (engine::begin(ctx.engine) == tzpl_errNone) {
-                engine::untap(tapID);
-                engine::go(silo);
-            }
-        }
+        bridge::untapWidgets(ctx.engine, taps);
     }
 
     // ---- Poll engine taps into meter values / scope rings. ---------------
-    bool tapsVisible = false;
-    if (ctx.engine) {
-        std::lock_guard<std::mutex> lock(ui->mtx);
-        for (auto& wp : ui->widgets) {
-            UIWidget& w = *wp;
-            if (w.tapID == 0) continue;
-            tapsVisible = true;
-            if (w.kind == UIWidgetKind::Meter) {
-                if (w.values.size() < 2) w.values.resize(2, 0.0);
-                w.values[0] = engine::tapRms(ctx.engine, w.tapID);
-                w.values[1] = engine::tapPeak(ctx.engine, w.tapID);
-            } else if (w.kind == UIWidgetKind::Scope) {
-                int chans = std::max(1, engine::tapChans(ctx.engine, w.tapID));
-                w.scopeChans = chans;
-                float buf[4096];
-                int want = (4096 / chans) * chans;
-                int n = engine::tapDrain(ctx.engine, w.tapID, buf, want);
-                if (n > 0) {
-                    w.scopeRing.insert(w.scopeRing.end(), buf, buf + n);
-                    size_t maxRing = (size_t)8192 * chans;
-                    if (w.scopeRing.size() > maxRing) {
-                        size_t excess = w.scopeRing.size() - maxRing;
-                        excess = ((excess + chans - 1) / chans) * chans;
-                        w.scopeRing.erase(w.scopeRing.begin(),
-                                          w.scopeRing.begin() + excess);
-                    }
-                }
-            }
-        }
-    }
+    bool tapsVisible = bridge::pollWidgetTaps(*ui, ctx.engine, &spectrum_);
     if (tapsVisible && onTapsAdvanced) onTapsAdvanced();
     tapsVisibleLastTick_ = tapsVisible;
 

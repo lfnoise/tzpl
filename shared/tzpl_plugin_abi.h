@@ -89,6 +89,10 @@ typedef enum tzpl_SErr {
 
     tzpl_errTooLate,
     tzpl_errClockOutOfRange,
+
+    /* A fixed-size engine resource is full (e.g. a silo's signal-tap table).
+       Append new codes at the end only -- these values cross the ABI. */
+    tzpl_errResourceLimit,
 } tzpl_SErr;
 
 /* Signal rate - defines how signals are processed */
