@@ -779,6 +779,8 @@ panel(<span class="str">""</span>);               <span class="cmt">-- back to t
 
 <p>In the graph view (<kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>\</kbd>), <strong>right-click a node &gt; Meter</strong> to hang a level bar off each of its outlets. A node with several outlets gets a submenu so you can meter just one; outlets carrying something other than audio are greyed out, since only audio can be metered. A dot in the node's title bar marks it as metered when you're zoomed too far out to read the bars.</p>
 
+<p>The bars sit under the node, one per metered outlet, running left to right the width of the box &mdash; the same orientation as the master meter in the status bar. Each carries the outlet's name at the left and a peak-hold reading in dB at the right, faint ticks every 12&nbsp;dB across a &minus;60..0&nbsp;dB span, a green fill for RMS (red when the outlet clips), and an orange peak-hold marker. The labels drop out when you zoom out far enough that they would be unreadable; the bars themselves stay.</p>
+
 <p>Meters are per node and opt-in because each one costs a little real-time work, and each silo can carry only so many at once &mdash; if you hit the limit the console says so, and turning one off frees a slot. They last for the session: switching silos or leaving the graph view drops them, and they are not saved with a document.</p>
 
 <!-- ================================================================ -->

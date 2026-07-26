@@ -38,10 +38,14 @@ static constexpr float kPinR = 4.f;
 // collide with the fixed items (1..4).
 static constexpr int kMeterMenuBase = 100;
 
-// Outlet level-meter gutter (world units), drawn to the right of the box.
-static constexpr float kMeterGap = 3.f;
-static constexpr float kMeterW = 6.f;
-static constexpr float kMeterH = kPinRowH - 4.f;
+// Level meters: horizontal bars the width of the node, stacked under the box,
+// one per metered outlet -- the same orientation as the status bar's master
+// meter. They hang OUTSIDE the box because inlet and outlet rows share a row
+// (pinCentre), so there is no free strip under an outlet, and because growing
+// the box would re-layout the whole graph every time a meter is toggled.
+static constexpr float kMeterTop = 3.f;    // box bottom -> first bar
+static constexpr float kMeterBarH = 10.f;
+static constexpr float kMeterBarGap = 1.f;
 
 // Amplitude -> 0..1 bar fill over a -60..0 dB range. Matches the widget
 // meters (app/src/widget_draw.cpp, widget_component.cpp) so a node reads the
@@ -50,6 +54,15 @@ static float db01(float lin) {
     if (lin <= 1e-6f) return 0.f;
     float db = 20.0f * std::log10(lin);
     return juce::jlimit(0.0f, 1.0f, (db + 60.0f) / 60.0f);
+}
+
+static juce::String dbText(float lin) {
+    if (lin <= 1e-6f) return "-inf";
+    return juce::String(20.0f * std::log10(lin), 1);
+}
+
+static juce::Font meterFont() {
+    return juce::Font(juce::FontOptions(8.f));
 }
 static constexpr int kToolbarH = 34;
 static constexpr float kMinZoom = 0.25f;
@@ -385,23 +398,52 @@ void GraphView::paint(juce::Graphics& g) {
                                               c.y - kPinRowH / 2,
                                               n.w * 0.6f, kPinRowH),
                        juce::Justification::centredRight, true);
+        }
 
-            // Level meter, drawn in a gutter OUTSIDE the box. Inside would
-            // mean widening metered nodes in rebuildLayout(), which makes
-            // the whole graph jump every time one is toggled.
-            auto const* m = meters_.find({silo_, n.nodeID, p});
-            if (!m) continue;
-            juce::Rectangle<float> bar(c.x + kMeterGap, c.y - kMeterH * 0.5f,
-                                       kMeterW, kMeterH);
-            g.setColour(juce::Colours::black.withAlpha(0.55f));
-            g.fillRect(bar);
-            g.setColour(m->peak >= 1.0f ? juce::Colours::red
-                                        : juce::Colour(0xff4caf50));
-            float fill = db01(m->rms) * bar.getHeight();
-            g.fillRect(bar.withTrimmedTop(bar.getHeight() - fill));
-            float hy = bar.getBottom() - db01(m->peakHold) * bar.getHeight();
-            g.setColour(juce::Colours::orange);
-            g.drawLine(bar.getX(), hy, bar.getRight(), hy, 1.0f / zoom_);
+        // Level meters: a skirt of node-wide horizontal bars below the box,
+        // in outlet order. Labelled with the outlet name and a peak-hold dB
+        // readout, so a bar can be read as a number and not just a colour.
+        {
+            float my = n.y + n.h + kMeterTop;
+            bool labels = kMeterBarH * zoom_ >= 9.f;
+            for (int p = 0; p < (int)n.outs.size(); ++p) {
+                auto const* m = meters_.find({silo_, n.nodeID, p});
+                if (!m) continue;
+                juce::Rectangle<float> bar(n.x, my, n.w, kMeterBarH);
+                my += kMeterBarH + kMeterBarGap;
+
+                g.setColour(juce::Colours::black.withAlpha(0.65f));
+                g.fillRect(bar);
+
+                // Scale ticks every 12 dB, so the bar reads as a scale.
+                g.setColour(juce::Colours::white.withAlpha(0.18f));
+                for (int db = -48; db < 0; db += 12) {
+                    float tx = bar.getX() + (float)(db + 60) / 60.f * bar.getWidth();
+                    g.fillRect(tx, bar.getY(), 1.f / zoom_, bar.getHeight());
+                }
+
+                g.setColour(m->peak >= 1.0f ? juce::Colours::red
+                                            : juce::Colour(0xff4caf50));
+                g.fillRect(bar.withWidth(db01(m->rms) * bar.getWidth()));
+
+                float hx = bar.getX() + db01(m->peakHold) * bar.getWidth();
+                g.setColour(juce::Colours::orange);
+                g.fillRect(hx - 0.75f / zoom_, bar.getY(), 1.5f / zoom_,
+                           bar.getHeight());
+
+                g.setColour(outline.withAlpha(0.5f));
+                g.drawRect(bar, 1.f / zoom_);
+
+                if (!labels) continue;
+                g.setFont(meterFont());
+                auto inner = bar.reduced(3.f, 0.f);
+                g.setColour(juce::Colours::white.withAlpha(0.9f));
+                g.drawText(juce::String(n.outs[(size_t)p].name), inner,
+                           juce::Justification::centredLeft, false);
+                g.drawText(dbText(m->peakHold), inner,
+                           juce::Justification::centredRight, false);
+            }
+            g.setFont(pf);
         }
 
         // A dot in the title bar keeps "this node is metered" legible when
@@ -664,7 +706,11 @@ void GraphView::showBackgroundMenu(juce::Point<float> worldPt) {
 }
 
 juce::Rectangle<int> GraphView::meterRepaintArea(graph::NodeVM const& n) const {
-    juce::Rectangle<float> r(n.x, n.y, n.w + kMeterGap + kMeterW + 2.f, n.h);
+    int bars = 0;
+    for (int p = 0; p < (int)n.outs.size(); ++p)
+        if (meters_.find({silo_, n.nodeID, p})) ++bars;
+    float skirt = bars ? kMeterTop + bars * (kMeterBarH + kMeterBarGap) : 0.f;
+    juce::Rectangle<float> r(n.x, n.y, n.w, n.h + skirt);
     return r.transformedBy(worldTransform()).getSmallestIntegerContainer()
             .expanded(2);
 }
