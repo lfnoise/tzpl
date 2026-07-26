@@ -1946,22 +1946,38 @@ Box { v: [[<span class="num">1</span>, <span class="num">2</span>], [<span class
 nested @@ process println;           <span class="cmt">-- [[10, 20], [30, 40]]</span></code></pre>
 
 <h3 id="at-binary-operators">12.4 <code>@</code> on Binary Operators</h3>
-<pre><code><span class="cmt">-- scalar + array @</span>
-println(<span class="num">10</span> + [<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>] @);       <span class="cmt">-- [11, 12, 13]</span>
+<p>On a binary operator <code>@</code> means what it means on a function argument: unwrap
+one level of that operand before the operator is applied. Arithmetic and comparison
+operators already auto-map implicitly, so there an <code>@</code> is legal but adds
+nothing &mdash; both of these print the same result:</p>
+<pre><code>println(<span class="num">10</span> + [<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>]);         <span class="cmt">-- [11, 12, 13]  (implicit auto-mapping)</span>
+println(<span class="num">10</span> + [<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>] @);       <span class="cmt">-- [11, 12, 13]  (same -- the @ is redundant)</span></code></pre>
 
-<span class="cmt">-- array @ + scalar</span>
-println([<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>] @ + <span class="num">10</span>);       <span class="cmt">-- [11, 12, 13]</span>
+<p>The <code>@</code> earns its keep when the operator already has a meaning for the whole
+container, because then implicit auto-mapping never gets a chance. Equality compares
+arrays structurally; <code>@</code> asks for the element-wise comparison instead:</p>
+<pre><code>println([<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>] == [<span class="num">1</span>, <span class="num">9</span>, <span class="num">3</span>]);       <span class="cmt">-- false</span>
+println([<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>] @ == [<span class="num">1</span>, <span class="num">9</span>, <span class="num">3</span>] @);   <span class="cmt">-- [true, false, true]</span>
+println([<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>] @ == <span class="num">2</span>);             <span class="cmt">-- [false, true, false]</span></code></pre>
 
-<span class="cmt">-- Zip: both operands auto-mapped</span>
-println([<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>] @ + [<span class="num">10</span>, <span class="num">20</span>, <span class="num">30</span>] @);  <span class="cmt">-- [11, 22, 33]</span>
+<p>Concatenation is the same story: <code>$</code> joins the containers themselves, and
+<code>@</code> asks for it one level down. Everything the scalar <code>$</code> accepts
+&mdash; strings, arrays, lists, persistent vectors, tuples &mdash; concatenates
+elementwise this way:</p>
+<pre><code>println([<span class="str">"a"</span>, <span class="str">"b"</span>] $ [<span class="str">"c"</span>, <span class="str">"d"</span>]);        <span class="cmt">-- [a, b, c, d]</span>
+println([<span class="str">"a"</span>, <span class="str">"b"</span>] @ $ [<span class="str">"c"</span>, <span class="str">"d"</span>] @);    <span class="cmt">-- [ac, bd]</span>
+println([<span class="str">"a"</span>, <span class="str">"b"</span>] @ $ <span class="str">"!"</span>);            <span class="cmt">-- [a!, b!]</span>
+println([[<span class="num">1</span>, <span class="num">2</span>], [<span class="num">3</span>]] @ $ [<span class="num">9</span>]);        <span class="cmt">-- [[1, 2, 9], [3, 9]]</span></code></pre>
 
-<span class="cmt">-- Comparison</span>
-println([<span class="num">1</span>, <span class="num">5</span>, <span class="num">3</span>] @ > <span class="num">2</span>);        <span class="cmt">-- [false, true, true]</span>
+<p>It also chooses the depth at which nested operands line up. Implicitly one level of each
+operand is peeled, so row <em>i</em> pairs with element <em>i</em>; peeling two levels of
+the nested operand instead pairs each row's elements with the array:</p>
+<pre><code><span class="kw">let</span> m = [[<span class="num">1</span>, <span class="num">2</span>], [<span class="num">3</span>, <span class="num">4</span>]];
+println(m + [<span class="num">10</span>, <span class="num">20</span>]);         <span class="cmt">-- [[11, 12], [23, 24]]  (row i + element i)</span>
+println(m @@ + [<span class="num">10</span>, <span class="num">20</span>] @);    <span class="cmt">-- [[11, 22], [13, 24]]  (element j + element j)</span></code></pre>
 
-<span class="cmt">-- Deep map with @@</span>
-println([[<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>], [<span class="num">4</span>, <span class="num">5</span>, <span class="num">6</span>]] @@ + <span class="num">10</span>);  <span class="cmt">-- [[11, 12, 13], [14, 15, 16]]</span>
-
-<span class="cmt">-- Tuple + array @</span>
+<p>And it distinguishes a tuple mapped over an array from a tuple of arrays:</p>
+<pre><code>println((<span class="num">10</span>, <span class="num">20</span>) + [<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>]);    <span class="cmt">-- ([11, 12, 13], [21, 22, 23])</span>
 println((<span class="num">10</span>, <span class="num">20</span>) + [<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>] @);  <span class="cmt">-- [(11, 21), (12, 22), (13, 23)]</span></code></pre>
 
 <h3 id="cartesian-product">12.5 Cartesian Products with <code>@1</code>, <code>@2</code>, &hellip;</h3>

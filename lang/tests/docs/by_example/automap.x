@@ -40,18 +40,28 @@ fn process(arr [Int]) Int = arr[0];
 let nested2 = [[1, 2], [3, 4]];
 nested2 @@ process println;
 
--- @ on binary operators
+-- @ on binary operators: redundant on arithmetic, which already auto-maps
+println(10 + [1, 2, 3]);
 println(10 + [1, 2, 3] @);
-println([1, 2, 3] @ + 10);
-println([1, 2, 3] @ + [10, 20, 30] @);
 
--- Comparison
-println([1, 5, 3] @ > 2);
+-- Equality has a whole-array meaning, so @ changes the result
+println([1, 2, 3] == [1, 9, 3]);
+println([1, 2, 3] @ == [1, 9, 3] @);
+println([1, 2, 3] @ == 2);
 
--- Deep map with @@
-println([[1, 2, 3], [4, 5, 6]] @@ + 10);
+-- '$' likewise joins containers, or elements one level down
+println(["a", "b"] $ ["c", "d"]);
+println(["a", "b"] @ $ ["c", "d"] @);
+println(["a", "b"] @ $ "!");
+println([[1, 2], [3]] @ $ [9]);
 
--- Tuple + array @
+-- @ chooses the depth at which nested operands line up
+let m = [[1, 2], [3, 4]];
+println(m + [10, 20]);
+println(m @@ + [10, 20] @);
+
+-- Tuple mapped over an array vs tuple of arrays
+println((10, 20) + [1, 2, 3]);
 println((10, 20) + [1, 2, 3] @);
 
 -- Cartesian product with @1, @2

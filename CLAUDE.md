@@ -101,7 +101,7 @@ Syntax essentials for reading and writing `.x` files:
     enum Option<T> { case Some(T); case None; }
 
     -- Lambdas
-    let f = |x Int| x * 2;
+    let f = fn(x Int) Int { x * 2 };
 
     -- Template functions
     fn identity<T>(x T) T { x }
