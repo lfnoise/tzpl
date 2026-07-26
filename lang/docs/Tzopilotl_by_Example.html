@@ -1887,11 +1887,11 @@ arr double println;
 
 <span class="cmt">-- Mixed: one auto-mapped arg, one scalar</span>
 <span class="kw">fn</span> add(a <span class="kw">Int</span>, b <span class="kw">Int</span>) <span class="kw">Int</span> = a + b;
-println(add(arr, <span class="num">10</span>));
+arr add(<span class="num">10</span>) println;
 <span class="cmt">-- [11, 12, 13, 14, 15]</span>
 
 <span class="cmt">-- Multiple auto-mapped args (zip semantics, shortest length)</span>
-println(add(arr, [<span class="num">10</span>, <span class="num">20</span>, <span class="num">30</span>, <span class="num">40</span>, <span class="num">50</span>]));
+arr add([<span class="num">10</span>, <span class="num">20</span>, <span class="num">30</span>, <span class="num">40</span>, <span class="num">50</span>]) println;
 <span class="cmt">-- [11, 22, 33, 44, 55]</span>
 
 <span class="cmt">-- Deep auto-mapping: nested arrays unwrap to any depth</span>
@@ -1985,7 +1985,7 @@ println((<span class="num">10</span>, <span class="num">20</span>) + [<span clas
 <pre><code><span class="cmt">-- Ordered @ operators produce nested loops (outer product)</span>
 <span class="kw">fn</span> add(a <span class="kw">Int</span>, b <span class="kw">Int</span>) <span class="kw">Int</span> = a + b;
 
-println(add([<span class="num">1</span>, <span class="num">2</span>] @1, [<span class="num">10</span>, <span class="num">20</span>] @2));
+add([<span class="num">1</span>, <span class="num">2</span>] @1, [<span class="num">10</span>, <span class="num">20</span>] @2) println;
 <span class="cmt">-- [[11, 21], [12, 22]]</span>
 
 <span class="cmt">-- Works on binary operators too</span>
@@ -1993,23 +1993,23 @@ println([<span class="num">1</span>, <span class="num">2</span>] @1 + [<span cla
 <span class="cmt">-- [[11, 21], [12, 22]]</span>
 
 <span class="kw">fn</span> mul(a <span class="kw">Int</span>, b <span class="kw">Int</span>) <span class="kw">Int</span> = a * b;
-println(mul([<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>] @1, [<span class="num">10</span>, <span class="num">100</span>] @2));
+mul([<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>] @1, [<span class="num">10</span>, <span class="num">100</span>] @2) println;
 <span class="cmt">-- [[10, 100], [20, 200], [30, 300]]</span></code></pre>
 
 <p>The depth is not limited to two: any number of dimensions (<code>@1</code> through <code>@9</code>) nest to the corresponding depth.</p>
 <pre><code><span class="cmt">-- Three dimensions -> a 2x2x2 nested result</span>
 <span class="kw">fn</span> add3(x <span class="kw">Int</span>, y <span class="kw">Int</span>, z <span class="kw">Int</span>) <span class="kw">Int</span> = x + y + z;
-println(add3([<span class="num">1</span>, <span class="num">2</span>] @1, [<span class="num">10</span>, <span class="num">20</span>] @2, [<span class="num">100</span>, <span class="num">200</span>] @3));
+add3([<span class="num">1</span>, <span class="num">2</span>] @1, [<span class="num">10</span>, <span class="num">20</span>] @2, [<span class="num">100</span>, <span class="num">200</span>] @3) println;
 <span class="cmt">-- [[[111, 211], [121, 221]], [[112, 212], [122, 222]]]</span>
 
 <span class="cmt">-- A non-mapped argument is broadcast across every combination</span>
-println(add3([<span class="num">1</span>, <span class="num">2</span>] @1, [<span class="num">10</span>, <span class="num">20</span>] @2, <span class="num">1000</span>));
+add3([<span class="num">1</span>, <span class="num">2</span>] @1, [<span class="num">10</span>, <span class="num">20</span>] @2, <span class="num">1000</span>) println;
 <span class="cmt">-- [[1011, 1021], [1012, 1022]]</span></code></pre>
 
 <div class="note">
 <h4>Cartesian mapping over persistent vectors</h4>
 <p>Cartesian mapping applies uniformly to persistent vectors (and mixtures of arrays and persistent vectors). When any operand is a persistent vector the nested result is built from persistent vectors:</p>
-<pre><code>println(add3(#[<span class="num">1</span>, <span class="num">2</span>] @1, #[<span class="num">10</span>, <span class="num">20</span>] @2, #[<span class="num">100</span>, <span class="num">200</span>] @3));
+<pre><code>add3(#[<span class="num">1</span>, <span class="num">2</span>] @1, #[<span class="num">10</span>, <span class="num">20</span>] @2, #[<span class="num">100</span>, <span class="num">200</span>] @3) println;
 <span class="cmt">-- #[#[#[111, 211], #[121, 221]], #[#[112, 212], #[122, 222]]]</span></code></pre>
 </div>
 

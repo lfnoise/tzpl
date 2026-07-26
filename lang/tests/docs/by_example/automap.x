@@ -8,10 +8,10 @@ arr double println;
 
 -- Mixed: one auto-mapped arg, one scalar
 fn add(a Int, b Int) Int = a + b;
-println(add(arr, 10));
+arr add(10) println;
 
 -- Multiple auto-mapped args (zip semantics)
-println(add(arr, [10, 20, 30, 40, 50]));
+arr add([10, 20, 30, 40, 50]) println;
 
 -- Deep auto-mapping: nested arrays
 let nested = [[1, 2, 3], [4, 5, 6]];
@@ -65,11 +65,11 @@ println((10, 20) + [1, 2, 3]);
 println((10, 20) + [1, 2, 3] @);
 
 -- Cartesian product with @1, @2
-println(add([1, 2] @1, [10, 20] @2));
+add([1, 2] @1, [10, 20] @2) println;
 println([1, 2] @1 + [10, 20] @2);
 
 fn mul(a Int, b Int) Int = a * b;
-println(mul([1, 2, 3] @1, [10, 100] @2));
+mul([1, 2, 3] @1, [10, 100] @2) println;
 
 -- Auto-map field access
 let points = [Point{1, 2}, Point{3, 4}, Point{5, 6}];
