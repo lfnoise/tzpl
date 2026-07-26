@@ -1010,7 +1010,7 @@ Dynamic scope variables use backtick syntax (`` `varName ``) and are visible acr
 ```
 var `sampleRate = 48000;
 
-fn nyquist() Float { `sampleRate toFloat / 2.0; }
+fn nyquist() Float { `sampleRate toFloat / 2.0 }
 ```
 
 ### Implementation

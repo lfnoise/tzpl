@@ -182,8 +182,13 @@ fn foo(x Int, y Float) String { ... }
 let a = 10;
 var b = 20;
 
+-- A function returns its trailing expression, which carries NO semicolon.
+-- `{ x; }` is a statement, so that body returns Void.
+fn double(x Int) Int { x * 2 }
+fn triple(x Int) Int = x * 3;      -- expression-body form
+
 -- Template functions
-fn identity<T>(x T) T { x; }
+fn identity<T>(x T) T { x }
 
 -- Structs (optional trailing semicolon)
 struct Point { x Float; y Float; }
@@ -192,7 +197,7 @@ struct Point { x Float; y Float; }
 enum Option<T> { case Some(T); case None; }
 
 -- Private functions start with underscore
-fn _helper(x Int) Int { x * 2; }
+fn _helper(x Int) Int { x * 2 }
 
 -- Modules
 import math.*;

@@ -51,10 +51,13 @@ Syntax essentials for reading and writing `.x` files:
     var y = 0;                     -- mutable local
 
     -- Functions: no colon between name and type, no -> before return type
-    fn add(a Int, b Int) Int { a + b; }
+    fn add(a Int, b Int) Int { a + b }        -- trailing expr: no semicolon
+    fn add2(a Int, b Int) Int = a + b;        -- expression-body form
     fn greet(name String) Void { print(name); }
 
     -- Statements end with semicolons
+    -- A function's return value is its trailing expression, which has NO
+    -- semicolon; `{ a + b; }` is a statement, so the body returns Void
     -- Semicolons after struct/enum closing braces are optional
 
     -- Types: Bool, Int, Float, Symbol, String, Fraction, Complex,
@@ -101,7 +104,7 @@ Syntax essentials for reading and writing `.x` files:
     let f = |x Int| x * 2;
 
     -- Template functions
-    fn identity<T>(x T) T { x; }
+    fn identity<T>(x T) T { x }
 
 ## C++ Coding Conventions
 
