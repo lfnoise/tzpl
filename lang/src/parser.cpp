@@ -1384,7 +1384,8 @@ int Parser::getPrecedence(TokenKind kind) const {
 // unambiguous. Unary-only operators (!, ~) desugar to fn(a) { op a };
 // dual-arity operators (+, -) desugar to their binary form here (arity is
 // inferred from sibling arguments, which cannot see the callee's signature).
-// Pipeline / assignment arrows are excluded -- they are not functions.
+// Only `|>` is excluded -- it is pure syntax, not an overloadable function.
+// The arrows `<-` and `->` sit at precedence 0, so the test is `>= 0`.
 ExprPtr Parser::parseCallArgument() {
     TokenKind k = current_.kind;
     TokenKind next = lexer_.peek().kind;
@@ -1413,9 +1414,7 @@ ExprPtr Parser::parseCallArgument() {
             return std::make_unique<LambdaExprNode>(loc, std::move(params),
                 nullptr, makeBody(std::move(body)));
         }
-        if (getPrecedence(k) > 0 &&
-            k != TokenKind::PipeGreater && k != TokenKind::LeftArrow &&
-            k != TokenKind::Arrow) {
+        if (getPrecedence(k) >= 0 && k != TokenKind::PipeGreater) {
             advance();
             auto body = std::make_unique<BinaryOpExpr>(loc, getBinaryOp(k),
                 std::make_unique<IdentifierExpr>(loc, "a"),

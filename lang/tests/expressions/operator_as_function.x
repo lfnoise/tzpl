@@ -48,3 +48,10 @@ max(1, -2) println;
 let x = 7;
 min(3, -x) println;
 min(3, -x + 1) println;
+
+-- the assignment arrows are overloadable functions, so they pass too
+fn <-(a Int, b Int) Int { a * 10 + b }
+fn ->(a Int, b Int) Int { a + b * 10 }
+[1, 2, 3] fold(0, <-) println;
+[1, 2, 3] fold(0, ->) println;
+[1, 2, 3, 4] fold1(<-) println;

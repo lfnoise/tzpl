@@ -1035,7 +1035,11 @@ unaffected: <code>max(1, -2)</code> and <code>min(3, -x + 1)</code> parse as usu
     mean their <em>binary</em> form in this position. For unary negation pass a
     lambda: <code>map(fn(x <span class="kw">Int</span>) { -x })</code>. The unary-only
     operators <code>!</code> and <code>~</code> desugar to their unary form.</li>
-<li><code>|&gt;</code>, <code>&lt;-</code>, and <code>-&gt;</code> are not functions and are excluded.</li>
+<li><code>|&gt;</code> is pure syntax rather than a function, so it is excluded. The
+    assignment arrows <code>&lt;-</code> and <code>-&gt;</code> <em>are</em>
+    functions (they are overloadable with <code><span class="kw">fn</span> &lt;-(a, b)</code>),
+    so they may be passed like any other operator; the desugared lambda keeps
+    the built-in <code>Ref</code> meaning when the operand is a <code>Ref</code>.</li>
 <li><code>&amp;&amp;</code> and <code>||</code> work, but as functions they are
     eager -- both operands are evaluated before the call, so there is no
     short-circuiting.</li>
