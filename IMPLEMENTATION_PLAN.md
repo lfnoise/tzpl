@@ -833,7 +833,30 @@ Per-node **opt-in** via the node context menu ("Meter Node", or a "Meter" submen
 
 `lang/docs/Live_Controls_and_Notebooks.html`: `spectrum` / `masterMeter` / `masterScope` / `masterSpectrum` added to the §3.1 widget catalogue and the §3.7 function reference, with a callout explaining *why* the master constructors exist (node 0 has no outlets, and gain/limiting happen after the graph runs) and the one-block limiter lag. §3.5 gained a master read example and a sharper one-consumer-per-stream warning. New **§6 Monitoring the Engine** documents the status bar (including that the XRUN latch clears only by clicking it) and graph-view node meters; §6 was inserted before Current Limitations, which became §7. Limitations, presets and save/load notes updated for the new kind. Every code example was executed against the built app.
 
-**Deferred**: lifting the tap API off the `ui` module onto `audio_engine` so scripts/headless can meter without creating a widget.
+### 14.5 Scriptable taps (`audio_engine`) — DONE
+
+Taps were previously reachable only by creating a `ui` widget. Headless mode does have a `UIState`, so that worked — but it meant allocating a GUI object to read a level, routing through `UIState::mtx` and the `(panel, name)` keyspace, and, more seriously, the `ui` tap functions resolve the engine via `AppContext::engine` rather than `getEngine(vm)`, so during an offline `renderNRT` they target the **live** engine instead of the render's.
+
+- **FFI** (`bridge/src/tzpl_audio_engine_ffi.cpp`): `allocTapID`, `tapOutlet`, `tapMaster`, `untap`, `tapExists`, `tapPeak`, `tapRms`, `tapChans`, `tapSamples`. Create/remove are ordinary bundled commands; everything routes through `getEngine(vm)`, so it follows the render context. Module surface + `TapMode` enum in `bridge/modules/audio_engine.x` (whose `Err` enum also gained the `errResourceLimit` case added to the ABI in 14.0 — it had been missed).
+- **Ownership is explicit `untap`.** A script tap has no other owner; the finite per-silo budget is surfaced through `errResourceLimit` at submit and `EngineStats::silos[].numTaps`.
+- **RT reads, silo-local.** `Silo::rt_findTap` resolves a tapID through that silo's own RT table: no lock, no map, and no concurrency at all, because the thread reading is the thread that publishes in `processTaps`. That removes the tearing and reclamation problems by construction rather than by machinery — no seqlock, no handle map, no deferred reclamation. `rtTapExists/Peak/Rms/Chans/Drain` in `tzpl_client_interface.hpp` wrap it; the FFI picks the RT path when `gCurrentSilo` is set and the locking path otherwise. All nine functions are registered `rtSafe=true`.
+  - **Cross-silo reads are deliberately out of scope**: a tap on another silo reads exactly as an unknown id does. Silo 0 additionally sees master taps, since silo 0's thread runs the post-limiter section. Reading another silo's taps means using the locking accessors from a non-RT thread.
+  - `tapSamples` drains into a fixed 4096-sample stack buffer (no heap staging) and allocates its result through the VM's TLSF allocator, so it is RT-safe like the other array-returning builtins.
+- **Fixed while testing**: `renderNRTAsync` dereferenced a null `AppContext::nrtvm` and segfaulted in `NRTTempoScheduler`'s constructor. Any host without an NRT VM (a bare test harness) crashed rather than declining; it now reports and returns 0.
+- **Tests**: `test_metering` 85 -> 103 (RT reads agree with the locking forms; RT reads are silo-local, including the master-tap-from-silo-0 case). `test_audio_engine_ffi` 60 -> 65: a new `taps_test.x` script covering the whole lang surface and its error codes, plus a compile test asserting the tap API passes the RT-restricted type checker *and* that a non-`rtSafe` engine function is still rejected (so the gate itself is guarded).
+- **Docs**: new **FFI Guide §18.9 Signal Taps** — the function table, the one-consumer-per-tap rule, the finite-budget rule, and the silo-local read model.
+
+### 14.6 Tap ownership and bulk cleanup — DONE
+
+Explicit `untap` leaks a finite slot if a script forgets, so taps now record who made them.
+
+- `TapOwnerKind` (`tzpl_tap.hpp`): `tapOwnerHost` / `tapOwnerNRTVM` / `tapOwnerSiloVM` (+ `tapOwnerAny` as a filter), plus `ownerSilo`. Threaded through `tapOutlet`/`tapMaster` as **defaulted** parameters, so the ui widgets and `graph::MeterStore` are unchanged and land on `tapOwnerHost` — being sweepable is opt-in, and the safe answer is what you get by doing nothing.
+- `freeTapsByOwner(e, kind, silo)` walks the registry under `nrt_lock_` and submits **one untap bundle per owning silo**. Exposed as `audio_engine.freeVmTaps()` (the caller's own taps: silo VM by silo index, main VM otherwise) and `audio_engine.freeAllTaps()` (everything, app taps included). Both decline and return 0 if the caller has a bundle open, rather than clobbering it — `begin()` already refuses to nest, so the guard is free.
+- A silo VM's taps are keyed by **silo index, not VM identity**: `siloLoad` replaces a silo's VM, and keying on the VM would strand its predecessor's taps with nothing able to reclaim them. The trade — a reloaded VM inherits and can free the previous one's taps — is the desirable direction.
+
+**Fixed a second latent use-after-free.** `applyUntap` validated the submitting silo only for master taps, so `untap` of a silo-1 tap submitted to silo 0 succeeded at submit, no-op'd on RT (silo 0's table doesn't hold it), then freed the slot in `doNRT` — leaving silo 1's `rt_taps_` pointing at freed memory. Reachable from a script via the API added in 14.5. `TapSlot::silo` already recorded the owner, so the fix is one line; it also had to be right before the per-silo fan-out above could be. **Reproduced under ASan** with the guard removed (heap-use-after-free in `Silo::processTaps` on the worker thread), then confirmed fixed.
+
+Tests: `test_metering` 103 -> 127 — the wrong-silo rejection, owner-scoped sweeps across five taps and three owners on two silos, the app's tap outliving every `freeVmTaps`, master taps included in a sweep, and the mid-bundle decline. `taps_test.x` covers the lang surface.
 
 ---
 
@@ -941,7 +964,7 @@ Phase 0 (Build Infrastructure)       ✅ DONE
 | 11 | Code editor & REPL | ✅ Done | Type info on hover |
 | 12 | Plugin/module management | 🟡 Partial | 12.1 plugin browser done (both apps) except one-click instantiation; 12.2 module browser, 12.3 compile UI |
 | 13 | Audio graph visualization | 🟢 Mostly done | 13.1-13.3 done (JUCE): topology shadow, GraphView mode, interactive editing, node control panels. Future: ImGui view, MIDI mapping, control readback |
-| 14 | Metering & monitoring | ✅ Done | 14.1-14.4 done: master meter + master taps, Spectrum widget + portable FFT, graph-view node meters, engine perf counters + JUCE status bar; user docs in the Live Controls guide (new §6 Monitoring the Engine). Deferred: engine-level (non-widget) tap FFI |
+| 14 | Metering & monitoring | ✅ Done | 14.1-14.4 done: master meter + master taps, Spectrum widget + portable FFT, graph-view node meters, engine perf counters + JUCE status bar; scriptable taps on `audio_engine` with silo-local RT reads + owner-scoped `freeVmTaps`/`freeAllTaps`; user docs in the Live Controls guide (§6) and FFI Guide (§18.9) |
 | 15 | Session management | ⬜ Not started | All tasks |
 | 16 | Future extensions | ⬜ Not started | All tasks |
 

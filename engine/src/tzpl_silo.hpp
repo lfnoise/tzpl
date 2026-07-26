@@ -201,6 +201,15 @@ struct Silo
 
     // Taps (RT thread).
     tzpl_SErr installTap(TapSlot* slot, Node* node, int outlet, i64 tapID);
+    // Resolve a tapID through THIS silo's RT table. Callable with no lock and
+    // no map lookup, because rt_taps_ is owned by this silo's processing
+    // thread -- and the only legal caller is that same thread, which is also
+    // the thread that publishes the values. Finds only taps installed on this
+    // silo; silo 0 additionally sees the engine's master taps, since silo 0's
+    // thread is the one that runs the post-limiter section. Returns null for
+    // a tap on another silo -- cross-silo reads must go through the NRT
+    // accessors, which take the engine lock.
+    TapSlot* rt_findTap(i64 tapID);
     void eraseTapAt(int i);
     void removeTap(i64 tapID);
     void clearTapsForNode(Node* node);

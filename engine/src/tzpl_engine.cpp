@@ -96,6 +96,13 @@ tzpl_SErr Engine::installMasterTap(TapSlot* slot) {
     return tzpl_errNone;
 }
 
+TapSlot* Engine::rt_findMasterTap(i64 tapID) {
+    for (int i = 0; i < numMasterTaps_; ++i) {
+        if (rt_masterTaps_[i]->tapID == tapID) return rt_masterTaps_[i];
+    }
+    return nullptr;
+}
+
 void Engine::removeMasterTap(i64 tapID) {
     for (int i = 0; i < numMasterTaps_; ) {
         if (rt_masterTaps_[i]->tapID == tapID) {

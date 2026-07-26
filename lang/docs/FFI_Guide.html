@@ -494,6 +494,7 @@ if (localStorage.getItem('tzpl-docs-theme') === 'light') document.documentElemen
         <li><a href="#ae-connections">Connections</a></li>
         <li><a href="#ae-params">Parameter Control</a></li>
         <li><a href="#ae-notes">Note / Voice Management</a></li>
+        <li><a href="#ae-taps">Signal Taps</a></li>
         <li><a href="#ae-introspection">Introspection &amp; Utilities</a></li>
         <li><a href="#ae-enums">Enums</a></li>
         <li><a href="#ae-example">Example</a></li>
@@ -3612,7 +3613,62 @@ collector <span class="fn">spawn</span>(Msg.int(<span class="num">0</span>)) <sp
 </div>
 
 <!-- -------------------------------- -->
-<h3 id="ae-introspection">18.9 Introspection &amp; Utilities</h3>
+<h3 id="ae-taps">18.9 Signal Taps</h3>
+
+<p>A <em>tap</em> reads a running signal back out of the engine: a node outlet, or the master output bus. It is the engine-level primitive behind the app's meters and scopes, and it needs no GUI &mdash; headless scripts, tests, and silo code all use the same functions.</p>
+
+<table>
+  <tr><th>Function</th><th>Description</th></tr>
+  <tr><td><code>allocTapID() Int</code></td><td>A process-unique tap id. Use this rather than inventing ids: the same allocator hands out ids to the <code>ui</code> widgets and the graph view, so drawing from it makes collisions impossible.</td></tr>
+  <tr><td><code>tapOutlet(node Int, outlet Int, tapID Int, mode Int) Int</code></td><td><strong>Bundled.</strong> Tap an outlet. <code>mode</code> is a <code>TapMode</code>. The outlet must carry audio (f32); anything else is rejected with <code>errTypeMismatch</code>.</td></tr>
+  <tr><td><code>tapMaster(tapID Int, mode Int) Int</code></td><td><strong>Bundled.</strong> Tap the master output bus &mdash; post safety-limiter, post master gain, i.e. what the device plays. Must be submitted to <strong>silo 0</strong>. Node 0 (Audio Out) has no outlets, so this is the only way to reach the final mix.</td></tr>
+  <tr><td><code>untap(tapID Int) Int</code></td><td><strong>Bundled.</strong> Remove a tap and free its slot. Must be submitted to the <strong>same silo</strong> the tap was installed on (master taps: silo 0); anything else is rejected with <code>errSiloOutOfRange</code>, because the removal has to run on the thread that owns the table holding it.</td></tr>
+  <tr><td><code>freeVmTaps() Int</code></td><td>Remove every tap <em>this VM</em> created, and return how many. A silo VM sweeps its own silo's script taps; the main VM sweeps its own. Taps behind the app's own meters and scopes are never touched.</td></tr>
+  <tr><td><code>freeAllTaps() Int</code></td><td>Remove <strong>every</strong> tap regardless of owner &mdash; including the app's. A reset-the-world escape hatch, not routine cleanup.</td></tr>
+  <tr><td><code>tapExists(tapID Int) Bool</code></td><td>Whether the tap is live. Unknown ids read <code>false</code> rather than failing.</td></tr>
+  <tr><td><code>tapPeak(tapID Int) Float</code> / <code>tapRms(tapID Int) Float</code></td><td>Level over the last publish window (512 samples), collapsed across channels. Unknown ids read <code>0.0</code>.</td></tr>
+  <tr><td><code>tapChans(tapID Int) Int</code></td><td>Channel count captured by the tap.</td></tr>
+  <tr><td><code>tapSamples(tapID Int, max Int) [Float]</code></td><td>Drain captured samples (<code>tapScope</code> mode only): interleaved frames of <code>tapChans</code> channels. The count is clamped to whole frames and to 4096 samples; call repeatedly for more.</td></tr>
+</table>
+
+<pre><code><span class="kw">let</span> id = allocTapID();
+begin();
+tapOutlet(<span class="num">700</span>, <span class="num">0</span>, id, TapMode.tapMeter);
+go(<span class="num">0</span>);
+
+<span class="cmt">-- ... later ...</span>
+<span class="kw">if</span> (tapPeak(id) &gt; <span class="num">0.99</span>) { println(<span class="str">"clipping"</span>); }
+
+begin(); untap(id); go(<span class="num">0</span>);</code></pre>
+
+<div class="warn"><p><strong>One consumer per tap.</strong> A tap's samples come from a single-producer/single-consumer queue. Two readers draining the same <code>tapID</code> &mdash; a silo script and a GUI scope, say &mdash; is a data race, not merely a split stream. Give each consumer its own tap; that is what the <code>ui</code> widgets do.</p>
+<p><strong>Taps are a finite resource.</strong> Each silo's table holds a bounded number (128), shared with any <code>ui</code> meters and graph-view meters. Past that, <code>tapOutlet</code> fails at submit with <code>errResourceLimit</code> &mdash; reported immediately rather than handing back an id that would silently read silence. Untap what you no longer need; <code>getEngineStats</code> reports each silo's live tap count.</p></div>
+
+<h4>Bulk cleanup</h4>
+
+<p>Every tap records who made it, so a script can clean up after itself without tracking ids:</p>
+
+<pre><code><span class="cmt">-- at the end of a piece, or before reloading silo code</span>
+freeVmTaps();</code></pre>
+
+<p><code>freeVmTaps()</code> removes only the calling VM's taps. The app's own taps &mdash; those behind <code>ui.meter</code>/<code>ui.scope</code> widgets and the graph view's node meters &mdash; are tagged to the host and are never swept by it; being sweepable is opt-in, so anything that does not ask is safe. <code>freeAllTaps()</code> ignores ownership entirely and takes those too, which leaves the app's meters reading silence until the code that created them runs again &mdash; use it to recover from a leak, not as routine teardown.</p>
+
+<div class="note"><p>A silo VM's taps are keyed by <strong>silo index</strong>, not by VM identity. <code>siloLoad</code> replaces a silo's VM, and keying on the VM would strand the previous one's taps with nothing able to reclaim them; the trade is that a reloaded VM inherits, and can free, its predecessor's taps on that silo &mdash; usually what you want when reloading.</p>
+<p>Both are housekeeping calls, not per-block ones: they walk the tap registry and submit one bundle per silo. Neither joins a bundle you have open &mdash; called between <code>begin()</code> and <code>go()</code> they remove nothing and return 0, rather than clobbering it.</p></div>
+
+<h4>Reading from a silo VM</h4>
+
+<p>All the read functions, and the bundled create/remove commands, are RT-safe, so silo code (&sect;<a href="#silo-vm">13</a>) can meter its own signal:</p>
+
+<pre><code><span class="cmt">-- inside code loaded onto a silo with siloLoad</span>
+<span class="kw">fn</span> watch(id Int) Void {
+    <span class="kw">if</span> (tapRms(id) &lt; <span class="num">0.001</span>) { <span class="cmt">-- the voice has died away</span> }
+}</code></pre>
+
+<p>From a silo, a read resolves through <strong>that silo's own tap table</strong>: no lock and no shared map, because the thread doing the reading is the thread that publishes the values. The cost is scope &mdash; a silo sees only its own taps (silo 0 additionally sees master taps). <strong>Cross-silo reads are not supported</strong>: a tap belonging to another silo reads exactly as an unknown id does, <code>false</code> / <code>0.0</code> / no samples. Read another silo's taps from the main VM instead, where the locking path sees every tap.</p>
+
+<!-- -------------------------------- -->
+<h3 id="ae-introspection">18.10 Introspection &amp; Utilities</h3>
 
 <table>
   <tr><th>Function</th><th>Description</th></tr>
@@ -3622,7 +3678,7 @@ collector <span class="fn">spawn</span>(Msg.int(<span class="num">0</span>)) <sp
 </table>
 
 <!-- -------------------------------- -->
-<h3 id="ae-enums">18.10 Enums</h3>
+<h3 id="ae-enums">18.11 Enums</h3>
 
 <p>Defined in the wrapper module <code>bridge/modules/audio_engine.x</code>; <code>import audio_engine.*;</code> brings them in together with the foreign functions. Pass the enum case directly wherever a function takes the corresponding <code>Int</code> parameter.</p>
 
@@ -3686,7 +3742,7 @@ collector <span class="fn">spawn</span>(Msg.int(<span class="num">0</span>)) <sp
 </table>
 
 <!-- -------------------------------- -->
-<h3 id="ae-example">18.11 Example</h3>
+<h3 id="ae-example">18.12 Example</h3>
 
 <p>Create a 440&nbsp;Hz sine oscillator, fade it in, hold it, then fade it out:</p>
 

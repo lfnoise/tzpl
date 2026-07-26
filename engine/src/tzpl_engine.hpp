@@ -241,6 +241,8 @@ struct Engine
 
 	tzpl_SErr installMasterTap(TapSlot* slot);
 	void removeMasterTap(i64 tapID);
+	// RT thread only, and only silo 0's -- see Silo::rt_findTap.
+	TapSlot* rt_findMasterTap(i64 tapID);
 	// Block-rate peak/rms accumulation and scope capture on the master bus.
 	void processMasterTaps(f32 const* out, int frames, int outChans);
 

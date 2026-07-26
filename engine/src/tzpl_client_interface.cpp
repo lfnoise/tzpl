@@ -29,7 +29,9 @@
 #include "tzpl_command_subclasses.hpp"
 #include <algorithm>
 #include <cstring>
+#include <map>
 #include <string_view>
+#include <vector>
 #include <dlfcn.h> // dlopen, dlclose
 #include <filesystem>
 #include <chrono>
@@ -1246,7 +1248,8 @@ static tzpl_SErr applySetInput(Engine* e, Silo* s, CommandList& out,
 
 static tzpl_SErr applyTapOutlet(Engine* e, Silo* s, CommandList& out,
                                 ShadowEdits&,
-                                i64 nodeID, int outlet, i64 tapID, int mode) {
+                                i64 nodeID, int outlet, i64 tapID, int mode,
+                                int ownerKind, int ownerSilo) {
     OutPort* port;
     tzpl_SErr err = s->nrt_getOutPort(PortAddr{nodeID, outlet}, port);
     if (err != tzpl_errNone) return err;
@@ -1273,6 +1276,8 @@ static tzpl_SErr applyTapOutlet(Engine* e, Silo* s, CommandList& out,
         slot = it->second.get();
         slot->tapID = tapID;
         slot->silo = s->index_;
+        slot->ownerKind = (TapOwnerKind)ownerKind;
+        slot->ownerSilo = ownerSilo;
         slot->chans = std::min(port->type_.chans,
                                (decltype(port->type_.chans))TapSlot::kMaxScopeChans);
         if (slot->chans < 1) slot->chans = 1;
@@ -1282,7 +1287,8 @@ static tzpl_SErr applyTapOutlet(Engine* e, Silo* s, CommandList& out,
 }
 
 static tzpl_SErr applyTapMaster(Engine* e, Silo* s, CommandList& out,
-                                ShadowEdits&, i64 tapID, int mode) {
+                                ShadowEdits&, i64 tapID, int mode,
+                                int ownerKind, int ownerSilo) {
     // The master bus is summed and limited on silo 0's thread, so that is the
     // only thread allowed to touch the master tap table.
     if (s->index_ != 0) return tzpl_errSiloOutOfRange;
@@ -1304,6 +1310,8 @@ static tzpl_SErr applyTapMaster(Engine* e, Silo* s, CommandList& out,
         slot->tapID = tapID;
         slot->silo = 0;
         slot->isMaster = true;
+        slot->ownerKind = (TapOwnerKind)ownerKind;
+        slot->ownerSilo = ownerSilo;
         slot->chans = std::min(e->streamParams_.channels,
                                TapSlot::kMaxScopeChans);
         if (slot->chans < 1) slot->chans = 1;
@@ -1315,14 +1323,20 @@ static tzpl_SErr applyTapMaster(Engine* e, Silo* s, CommandList& out,
 static tzpl_SErr applyUntap(Engine* e, Silo* s, CommandList& out,
                             ShadowEdits&, i64 tapID) {
     bool isMaster = false;
+    int tapSilo = 0;
     {
         std::lock_guard<std::mutex> lck(e->nrt_lock_);
         auto it = e->taps_.find(tapID);
         if (it == e->taps_.end()) return tzpl_errNodeNotFound;
         isMaster = it->second->isMaster;
+        tapSilo = it->second->silo;
     }
-    // A master tap can only be removed from silo 0 -- see applyTapMaster.
-    if (isMaster && s->index_ != 0) return tzpl_errSiloOutOfRange;
+    // The removal must run on the thread that owns the table holding this
+    // tap: master taps live in the Engine's table, which only silo 0's thread
+    // touches; node taps live in their own silo's. Removing from anywhere
+    // else would find nothing on RT, then free the slot in doNRT -- leaving
+    // the owning silo's tap table pointing at freed memory.
+    if (s->index_ != (isMaster ? 0 : tapSilo)) return tzpl_errSiloOutOfRange;
     out.add(new UntapCmd(tapID, isMaster));
     return tzpl_errNone;
 }
@@ -1596,13 +1610,18 @@ struct TapOutletOp : BundleOp
     int outlet_;
     i64 tapID_;
     int mode_;
+    int ownerKind_;
+    int ownerSilo_;
 
-    TapOutletOp(i64 nodeID, int outlet, i64 tapID, int mode)
-        : nodeID_(nodeID), outlet_(outlet), tapID_(tapID), mode_(mode)
+    TapOutletOp(i64 nodeID, int outlet, i64 tapID, int mode,
+                int ownerKind, int ownerSilo)
+        : nodeID_(nodeID), outlet_(outlet), tapID_(tapID), mode_(mode),
+          ownerKind_(ownerKind), ownerSilo_(ownerSilo)
     {}
 
     tzpl_SErr apply(Engine* e, Silo* s, CommandList& out, ShadowEdits& edits) override {
-        return applyTapOutlet(e, s, out, edits, nodeID_, outlet_, tapID_, mode_);
+        return applyTapOutlet(e, s, out, edits, nodeID_, outlet_, tapID_, mode_,
+                              ownerKind_, ownerSilo_);
     }
 };
 
@@ -1610,11 +1629,15 @@ struct TapMasterOp : BundleOp
 {
     i64 tapID_;
     int mode_;
+    int ownerKind_;
+    int ownerSilo_;
 
-    TapMasterOp(i64 tapID, int mode) : tapID_(tapID), mode_(mode) {}
+    TapMasterOp(i64 tapID, int mode, int ownerKind, int ownerSilo)
+        : tapID_(tapID), mode_(mode), ownerKind_(ownerKind), ownerSilo_(ownerSilo) {}
 
     tzpl_SErr apply(Engine* e, Silo* s, CommandList& out, ShadowEdits& edits) override {
-        return applyTapMaster(e, s, out, edits, tapID_, mode_);
+        return applyTapMaster(e, s, out, edits, tapID_, mode_,
+                              ownerKind_, ownerSilo_);
     }
 };
 
@@ -1862,15 +1885,16 @@ tzpl_SErr setControl(i64 nodeID, i64 controlID, int numValues, i64 const* values
     return recordSetControl(nodeID, controlID, tzpl_kI64, numValues, values);
 }
 
-tzpl_SErr tapOutlet(i64 nodeID, int outlet, i64 tapID, int mode) {
+tzpl_SErr tapOutlet(i64 nodeID, int outlet, i64 tapID, int mode,
+                    int ownerKind, int ownerSilo) {
     if (!tBundle.engine) return tzpl_errNoActiveBundle;
-    tBundle.add(new TapOutletOp(nodeID, outlet, tapID, mode));
+    tBundle.add(new TapOutletOp(nodeID, outlet, tapID, mode, ownerKind, ownerSilo));
     return tzpl_errNone;
 }
 
-tzpl_SErr tapMaster(i64 tapID, int mode) {
+tzpl_SErr tapMaster(i64 tapID, int mode, int ownerKind, int ownerSilo) {
     if (!tBundle.engine) return tzpl_errNoActiveBundle;
-    tBundle.add(new TapMasterOp(tapID, mode));
+    tBundle.add(new TapMasterOp(tapID, mode, ownerKind, ownerSilo));
     return tzpl_errNone;
 }
 
@@ -1878,6 +1902,67 @@ tzpl_SErr untap(i64 tapID) {
     if (!tBundle.engine) return tzpl_errNoActiveBundle;
     tBundle.add(new UntapOp(tapID));
     return tzpl_errNone;
+}
+
+int freeTapsByOwner(Engine* e, int ownerKind, int ownerSilo) {
+    if (!e) return 0;
+    // We open our own bundles, so a caller mid-bundle would have theirs
+    // clobbered. begin() refuses in that case; bail before touching anything.
+    if (begin(e) != tzpl_errNone) return 0;
+    go(0);  // discard the probe bundle
+
+    // Group by the silo that must do the removal: a tap can only be untapped
+    // from the silo whose table holds it (see applyUntap).
+    std::map<int, std::vector<i64>> bySilo;
+    {
+        std::lock_guard<std::mutex> lck(e->nrt_lock_);
+        for (auto const& [id, slot] : e->taps_) {
+            if (ownerKind != tapOwnerAny) {
+                if (slot->ownerKind != ownerKind) continue;
+                if (ownerKind == tapOwnerSiloVM && slot->ownerSilo != ownerSilo)
+                    continue;
+            }
+            bySilo[slot->isMaster ? 0 : slot->silo].push_back(id);
+        }
+    }
+
+    int removed = 0;
+    for (auto const& [silo, ids] : bySilo) {
+        if (begin(e) != tzpl_errNone) break;
+        for (i64 id : ids) untap(id);
+        if (go(silo) == tzpl_errNone) removed += (int)ids.size();
+    }
+    return removed;
+}
+
+// ---- RT-safe reads (silo's own thread; see the header for the rules). ----
+
+bool rtTapExists(Silo* s, i64 tapID) {
+    return s && s->rt_findTap(tapID) != nullptr;
+}
+
+f32 rtTapPeak(Silo* s, i64 tapID) {
+    TapSlot* t = s ? s->rt_findTap(tapID) : nullptr;
+    return t ? t->peak.load(std::memory_order_relaxed) : 0.f;
+}
+
+f32 rtTapRms(Silo* s, i64 tapID) {
+    TapSlot* t = s ? s->rt_findTap(tapID) : nullptr;
+    return t ? t->rms.load(std::memory_order_relaxed) : 0.f;
+}
+
+int rtTapChans(Silo* s, i64 tapID) {
+    TapSlot* t = s ? s->rt_findTap(tapID) : nullptr;
+    return t ? t->chans : 0;
+}
+
+int rtTapDrain(Silo* s, i64 tapID, f32* dst, int maxSamples) {
+    TapSlot* t = s ? s->rt_findTap(tapID) : nullptr;
+    if (!t) return 0;
+    int n = 0;
+    f32 v;
+    while (n < maxSamples && t->fifo.pop(v)) dst[n++] = v;
+    return n;
 }
 
 i64 allocTapID(Engine* e) {

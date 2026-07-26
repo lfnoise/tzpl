@@ -79,6 +79,14 @@ tzpl_SErr Silo::installTap(TapSlot* slot, Node* node, int outlet, i64 tapID) {
     return tzpl_errNone;
 }
 
+TapSlot* Silo::rt_findTap(i64 tapID) {
+    for (int i = 0; i < numTaps_; ++i) {
+        if (rt_taps_[i].tapID == tapID) return rt_taps_[i].slot;
+    }
+    if (index_ == 0) return engine_->rt_findMasterTap(tapID);
+    return nullptr;
+}
+
 // Drop entry i by moving the last live entry into the hole. Keeps [0, numTaps_)
 // dense; the caller must NOT advance its index afterwards.
 void Silo::eraseTapAt(int i) {

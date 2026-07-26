@@ -107,6 +107,13 @@ static tzpl_SErr tapNode(Engine* e, i64 nodeID, i64 tapID, int mode, int silo = 
     return go(silo);
 }
 
+static tzpl_SErr tapMasterID(Engine* e, i64 tapID, int mode, int silo = 0) {
+    tzpl_SErr err = begin(e);
+    if (err != tzpl_errNone) return err;
+    tapMaster(tapID, mode);
+    return go(silo);
+}
+
 // UntapCmd frees the registry entry in its stage-2 doNRT, which an NRT engine
 // runs from drainNRTQueues() inside renderNRTBlock -- so the entry survives
 // until the next rendered block. Callers that assert on tapExists must render.
@@ -306,6 +313,200 @@ static void test_alloc_tap_id() {
 }
 
 // ---------------------------------------------------------------------------
+// RT-safe reads
+//
+// These resolve through a silo's own RT tap table instead of the engine's
+// locked registry. Calling them from the test's main thread is legitimate for
+// silo 0 of an NRT engine: renderNRTBlock runs silo 0 on the calling thread,
+// so this IS that silo's processing thread.
+// ---------------------------------------------------------------------------
+
+static void test_rt_reads() {
+    std::print("Test: RT-safe tap reads\n");
+
+    AudioStreamParameters params{};
+    Engine* e = newTapEngine(params);
+    addDCSource(e, 10, 0.5f);
+    tapNode(e, 10, 1, tapMeter);
+    render(e, params);
+
+    Silo* s0 = &e->silos_[0];
+    check(rtTapExists(s0, 1), "the tap resolves through the silo's own table");
+    check(near(rtTapPeak(s0, 1), 0.5f),
+          std::format("rtTapPeak matches the locking form (got {})", rtTapPeak(s0, 1)));
+    check(near(rtTapPeak(s0, 1), tapPeak(e, 1)), "rt and nrt reads agree");
+    check(near(rtTapRms(s0, 1), tapRms(e, 1)), "rtTapRms agrees");
+    check(rtTapChans(s0, 1) == tapChans(e, 1), "rtTapChans agrees");
+
+    check(!rtTapExists(s0, 4242), "an unknown tapID resolves as absent");
+    check(rtTapPeak(s0, 4242) == 0.f, "and reads 0");
+    check(rtTapPeak(nullptr, 1) == 0.f, "a null silo is safe");
+
+    // Scope drain through the RT path.
+    tapNode(e, 10, 2, tapScope);
+    render(e, params, 1);
+    f32 buf[512];
+    int n = rtTapDrain(s0, 2, buf, 512);
+    check(n > 0, std::format("rtTapDrain returns samples (got {})", n));
+    bool allDC = true;
+    for (int i = 0; i < n; ++i) if (!near(buf[i], 0.5f)) allDC = false;
+    check(allDC, "and they are the expected DC value");
+
+    freeEngine(e);
+}
+
+// A silo only sees its OWN taps -- cross-silo reads are deliberately out of
+// scope, and resolve as absent rather than reaching into another thread's
+// table. Silo 0 additionally sees master taps, because silo 0's thread is the
+// one that runs the post-limiter section.
+static void test_rt_reads_are_silo_local() {
+    std::print("Test: RT reads are silo-local\n");
+
+    AudioStreamParameters params{};
+    Engine* e = newTapEngine(params, /*numSilos=*/2);
+    addDCSource(e, 10, 0.5f, /*silo=*/0);
+    addDCSource(e, 20, 0.25f, /*silo=*/1);
+    tapNode(e, 10, 1, tapMeter, 0);
+    tapNode(e, 20, 2, tapMeter, 1);
+    tapMasterID(e, 3, tapMeter);
+    render(e, params, 4);
+
+    Silo* s0 = &e->silos_[0];
+    Silo* s1 = &e->silos_[1];
+
+    check(rtTapExists(s0, 1), "silo 0 sees its own tap");
+    check(!rtTapExists(s0, 2), "silo 0 does NOT see silo 1's tap");
+    check(rtTapExists(s1, 2), "silo 1 sees its own tap");
+    check(!rtTapExists(s1, 1), "silo 1 does NOT see silo 0's tap");
+
+    check(rtTapExists(s0, 3), "silo 0 sees master taps");
+    check(!rtTapExists(s1, 3), "a worker silo does not see master taps");
+    check(near(rtTapPeak(s0, 3), masterPeak(e, -1), 1e-3f),
+          "the master tap read through silo 0 matches the master meter");
+
+    // Both taps are still reachable the locking way, from any thread.
+    check(tapExists(e, 1) && tapExists(e, 2) && tapExists(e, 3),
+          "all three remain visible through the locking accessors");
+
+    freeEngine(e);
+}
+
+// ---------------------------------------------------------------------------
+// Tap ownership and bulk cleanup
+// ---------------------------------------------------------------------------
+
+static tzpl_SErr tapNodeOwned(Engine* e, i64 nodeID, i64 tapID, int ownerKind,
+                              int ownerSilo, int silo = 0) {
+    tzpl_SErr err = begin(e);
+    if (err != tzpl_errNone) return err;
+    tapOutlet(nodeID, 0, tapID, tapMeter, ownerKind, ownerSilo);
+    return go(silo);
+}
+
+// A tap may only be removed from the silo whose table holds it. Removing it
+// from another silo used to succeed at submit, no-op on RT, and then free the
+// slot -- leaving the owning silo's table pointing at freed memory.
+static void test_untap_wrong_silo_rejected() {
+    std::print("Test: untap from the wrong silo is rejected\n");
+
+    AudioStreamParameters params{};
+    Engine* e = newTapEngine(params, /*numSilos=*/2);
+    addDCSource(e, 20, 0.5f, /*silo=*/1);
+    check(tapNode(e, 20, 1, tapMeter, /*silo=*/1) == tzpl_errNone,
+          "tap installs on silo 1");
+
+    check(untapID(e, 1, /*silo=*/0) == tzpl_errSiloOutOfRange,
+          "untapping a silo-1 tap from silo 0 is refused");
+    render(e, params);
+    check(tapExists(e, 1), "the tap survives the refused untap");
+    check(rtTapExists(&e->silos_[1], 1), "and is still installed on silo 1");
+
+    check(untapID(e, 1, /*silo=*/1) == tzpl_errNone, "untapping from silo 1 works");
+    render(e, params);
+    check(!tapExists(e, 1), "and removes it");
+
+    freeEngine(e);
+}
+
+// freeVmTaps sweeps only the caller's own taps; the app's (tapOwnerHost) are
+// never touched, and one VM never frees another's.
+static void test_free_vm_taps() {
+    std::print("Test: freeVmTaps is owner-scoped\n");
+
+    AudioStreamParameters params{};
+    Engine* e = newTapEngine(params, /*numSilos=*/2);
+    addDCSource(e, 10, 0.5f, 0);
+    addDCSource(e, 20, 0.5f, 1);
+
+    // Three owners, deliberately overlapping silos.
+    tapNodeOwned(e, 10, 1, tapOwnerHost, 0, 0);        // a ui widget
+    tapNodeOwned(e, 10, 2, tapOwnerNRTVM, 0, 0);       // main VM script
+    tapNodeOwned(e, 20, 3, tapOwnerNRTVM, 0, 1);       // main VM, on silo 1
+    tapNodeOwned(e, 10, 4, tapOwnerSiloVM, 0, 0);      // silo 0's VM
+    tapNodeOwned(e, 20, 5, tapOwnerSiloVM, 1, 1);      // silo 1's VM
+    check(tapExists(e, 1) && tapExists(e, 2) && tapExists(e, 3)
+              && tapExists(e, 4) && tapExists(e, 5),
+          "five taps across three owners");
+
+    // Silo 1's VM cleans up: only tap 5.
+    check(freeTapsByOwner(e, tapOwnerSiloVM, 1) == 1, "silo 1's VM frees one tap");
+    render(e, params);
+    check(!tapExists(e, 5), "its own tap is gone");
+    check(tapExists(e, 1) && tapExists(e, 2) && tapExists(e, 3) && tapExists(e, 4),
+          "every other owner's taps survive");
+
+    // The main VM cleans up: taps 2 and 3, across two silos.
+    check(freeTapsByOwner(e, tapOwnerNRTVM, 0) == 2,
+          "the main VM frees both of its taps, on either silo");
+    render(e, params);
+    check(!tapExists(e, 2) && !tapExists(e, 3), "both are gone");
+    check(tapExists(e, 1), "the app's tap is still untouched");
+    check(tapExists(e, 4), "silo 0's VM tap is still untouched");
+
+    // Silo 0's VM cleans up.
+    check(freeTapsByOwner(e, tapOwnerSiloVM, 0) == 1, "silo 0's VM frees its tap");
+    render(e, params);
+    check(tapExists(e, 1), "the app's tap outlives every freeVmTaps");
+
+    // Nuclear option: everything, app taps included.
+    check(freeTapsByOwner(e, tapOwnerAny, 0) == 1, "freeAllTaps takes the last one");
+    render(e, params);
+    check(!tapExists(e, 1), "including the app's");
+    check(freeTapsByOwner(e, tapOwnerAny, 0) == 0, "and is idempotent");
+
+    freeEngine(e);
+}
+
+static void test_free_taps_master_and_bundle() {
+    std::print("Test: freeVmTaps covers master taps and declines mid-bundle\n");
+
+    AudioStreamParameters params{};
+    Engine* e = newTapEngine(params);
+    addDCSource(e, 10, 0.5f);
+
+    begin(e);
+    tapMaster(50, tapMeter, tapOwnerNRTVM, 0);
+    go(0);
+    tapNodeOwned(e, 10, 51, tapOwnerNRTVM, 0, 0);
+    check(tapExists(e, 50) && tapExists(e, 51), "a master tap and a node tap");
+
+    // A caller with a bundle open would have it clobbered, so the sweep
+    // declines rather than interfering.
+    begin(e);
+    newNode("+", 11);
+    check(freeTapsByOwner(e, tapOwnerNRTVM, 0) == 0, "declines while a bundle is open");
+    check(tapExists(e, 50) && tapExists(e, 51), "and removes nothing");
+    go(0);
+
+    check(freeTapsByOwner(e, tapOwnerNRTVM, 0) == 2,
+          "with no bundle open it frees both, master included");
+    render(e, params);
+    check(!tapExists(e, 50) && !tapExists(e, 51), "both gone");
+
+    freeEngine(e);
+}
+
+// ---------------------------------------------------------------------------
 // Master meter
 // ---------------------------------------------------------------------------
 
@@ -387,13 +588,6 @@ static void test_master_peak_hold() {
 // ---------------------------------------------------------------------------
 // Master taps
 // ---------------------------------------------------------------------------
-
-static tzpl_SErr tapMasterID(Engine* e, i64 tapID, int mode, int silo = 0) {
-    tzpl_SErr err = begin(e);
-    if (err != tzpl_errNone) return err;
-    tapMaster(tapID, mode);
-    return go(silo);
-}
 
 static void test_master_tap_meter() {
     std::print("Test: master meter tap\n");
@@ -565,6 +759,11 @@ int main() {
     test_tap_budget();
     test_tap_budget_is_per_silo();
     test_alloc_tap_id();
+    test_rt_reads();
+    test_rt_reads_are_silo_local();
+    test_untap_wrong_silo_rejected();
+    test_free_vm_taps();
+    test_free_taps_master_and_bundle();
     test_master_meter_post_gain();
     test_master_meter_post_limiter();
     test_master_peak_hold();

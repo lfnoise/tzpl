@@ -43,6 +43,22 @@ enum TapMode : int {
     tapScope = 1,  // peak/rms + sample FIFO
 };
 
+// Who created a tap, for bulk cleanup (freeTapsByOwner). The DEFAULT is
+// tapOwnerHost, so anything that does not opt in -- ui widgets, the graph
+// view's node meters -- is never swept by a script's freeVmTaps(). Only
+// freeAllTaps() ignores ownership.
+//
+// A silo VM's taps are keyed by SILO INDEX, not by VM identity: siloLoad
+// replaces a silo's VM, and keying on the VM would strand the previous one's
+// taps with nothing able to reclaim them. The trade is that a reloaded VM
+// inherits (and can free) its predecessor's taps on that silo.
+enum TapOwnerKind : int {
+    tapOwnerHost   = 0,  // the app: ui widgets, graph-view meters
+    tapOwnerNRTVM  = 1,  // script code on the main VM
+    tapOwnerSiloVM = 2,  // script code on a silo's RT VM (ownerSilo says which)
+    tapOwnerAny    = -1, // filter-only: matches every owner
+};
+
 struct TapSlot {
     // Published by the RT thread every publishPeriod samples; read anywhere.
     std::atomic<f32> peak{0.0f};
@@ -64,10 +80,15 @@ struct TapSlot {
     // without a reverse lookup. Set at bundle submit.
     i64 tapID = 0;
 
-    // Silo this tap was submitted to (set at bundle submit). Only used on the
-    // NRT side, to count a silo's live taps against Silo::kMaxTaps before
-    // accepting another one.
+    // Silo this tap was submitted to (set at bundle submit). Counts the
+    // silo's live taps against Silo::kMaxTaps before accepting another, and
+    // pins which silo may untap it -- removing a tap from the wrong silo
+    // would free the slot while that silo's RT table still pointed at it.
     int silo = 0;
+
+    // Creator, for bulk cleanup. Set at bundle submit; never changes.
+    TapOwnerKind ownerKind = tapOwnerHost;
+    int ownerSilo = 0;  // meaningful only for tapOwnerSiloVM
 
     // Set for taps on the master output bus rather than a node outlet. These
     // live in the Engine's own small table (not a silo's) and are accumulated

@@ -27,6 +27,7 @@
 #include "tzpl_plugin_abi.h"
 #include "tzpl_common.hpp"
 #include "tzpl_audio_backend.hpp"
+#include "tzpl_tap.hpp"   // TapMode, TapOwnerKind (used in default arguments)
 #include <memory>
 
 namespace engine {
@@ -52,6 +53,7 @@ enum FadeCurve {
 
 struct Engine;
 struct NodeDef;
+struct Silo;
 // struct Buffer removed -- use tzpl_Buffer from plugin ABI
 
 using LoadNodeDefFun = void (*)(Engine* e);
@@ -308,14 +310,34 @@ tzpl_SErr setControl(i64 nodeID, i64 controlID, int numValues, i64 const* values
 // the tap and frees it.
 // Each silo's RT tap table holds Silo::kMaxTaps taps; tapOutlet returns
 // tzpl_errResourceLimit from go()/sched() when the target silo is full.
-tzpl_SErr tapOutlet(i64 nodeID, int outlet, i64 tapID, int mode);
+// `ownerKind`/`ownerSilo` tag the creator for bulk cleanup; the default
+// (tapOwnerHost) is never swept by freeTapsByOwner's per-VM forms.
+tzpl_SErr tapOutlet(i64 nodeID, int outlet, i64 tapID, int mode,
+                    int ownerKind = tapOwnerHost, int ownerSilo = 0);
 // Tap the master output bus -- post safety-limiter, post master gain, i.e.
 // what the device plays. No node required, so this reaches signal that
 // tapOutlet cannot (node 0 "Audio Out" has no outlets). Must be submitted to
 // SILO 0: that silo's thread runs the post-limiter section. untap likewise.
 // Limited to Engine::kMaxMasterTaps; returns tzpl_errResourceLimit past that.
-tzpl_SErr tapMaster(i64 tapID, int mode);
+tzpl_SErr tapMaster(i64 tapID, int mode,
+                    int ownerKind = tapOwnerHost, int ownerSilo = 0);
+// Must be submitted to the SAME silo the tap was installed on: the removal
+// runs on that silo's RT thread, and freeing the slot from anywhere else
+// would leave that silo's tap table holding a dangling pointer. Mismatches
+// are rejected with tzpl_errSiloOutOfRange.
 tzpl_SErr untap(i64 tapID);
+
+// Remove every tap matching an owner filter, submitting one untap bundle per
+// owning silo. Returns the number removed.
+//
+// This is NOT part of a bundle the caller is building -- it opens its own.
+// Calling it with a bundle already open removes nothing and returns 0.
+//
+// `ownerKind` is a TapOwnerKind; tapOwnerAny matches everything, which is the
+// "reset the world" form and will also drop taps the app owns (ui widgets,
+// graph-view meters), leaving them reading silence until they are recreated.
+// tapOwnerSiloVM additionally matches on `ownerSilo`.
+int freeTapsByOwner(Engine* e, int ownerKind, int ownerSilo);
 
 // Allocate a process-unique tapID. Use this rather than a private counter so
 // independent features (ui widgets, the graph view) can never collide.
@@ -392,6 +414,27 @@ int tapChans(Engine* e, i64 tapID);
 // Scope data is interleaved frames of tapChans() channels; drain in
 // multiples of the channel count to keep frame alignment across drains.
 int tapDrain(Engine* e, i64 tapID, f32* dst, int maxSamples);
+
+// Real-time-safe tap reads, for a VM running on a silo's own RT thread.
+//
+// These take no lock and touch no map: the tap is resolved through `s`'s own
+// RT tap table (Silo::rt_findTap), which is owned by the calling thread. That
+// same thread publishes the values in processTaps, so there is no concurrency
+// to guard against -- no torn multichannel read, and no chance of the slot
+// being freed underneath the reader.
+//
+// The cost is scope: a silo sees only ITS OWN taps (silo 0 additionally sees
+// master taps). A tap belonging to another silo reads as absent, exactly as
+// an unknown tapID does. Cross-silo reads must use the locking forms above,
+// from a non-RT thread.
+//
+// rtTapDrain has the same single-consumer requirement as tapDrain: give each
+// consumer its own tap rather than sharing one, or the SPSC FIFO races.
+bool rtTapExists(Silo* s, i64 tapID);
+f32  rtTapPeak(Silo* s, i64 tapID);
+f32  rtTapRms(Silo* s, i64 tapID);
+int  rtTapChans(Silo* s, i64 tapID);
+int  rtTapDrain(Silo* s, i64 tapID, f32* dst, int maxSamples);
 
 // notes
 tzpl_SErr allNotesOff(i64 nodeID);
