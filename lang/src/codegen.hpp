@@ -228,6 +228,14 @@ private:
                          u16 leftElemReg, Type* leftElemType,
                          u16 rightElemReg, Type* rightElemType,
                          Type* scalarResultType);
+    // Emit one '$' concatenation (string, array, list, persistent vector or
+    // tuple) selected by the result type, returning the register holding it.
+    // Returns UINT16_MAX for a result type that concatenates as none of those.
+    // Shared by the plain and the auto-mapped (per-element) paths.
+    u16 emitConcatOp(u16 leftReg, Type* leftType, u16 rightReg, Type* rightType,
+                     Type* resultType);
+    // Whether emitConcatOp has an opcode for this result type.
+    bool emitsConcat(Type* resultType) const;
     u16 genArrayLiteral(ArrayLiteralExpr* expr);
     u16 genAutoMapArrayLiteral(ArrayLiteralExpr* expr);
     u16 genCartesianArrayLiteral(ArrayLiteralExpr* expr);

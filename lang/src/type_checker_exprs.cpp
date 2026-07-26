@@ -685,6 +685,50 @@ static const char* unaryOpToFuncName(UnaryOpExpr::Op op) {
     }
 }
 
+// Scalar '$' rules. Both the plain path and the @-auto-mapped path go through
+// here so that whatever concatenates as a scalar also concatenates elementwise.
+Type* TypeChecker::concatResultType(Type* leftType, Type* rightType, SourceRange loc) {
+    if (leftType == compiler_.stringType() && rightType == compiler_.stringType()) {
+        return compiler_.stringType();
+    }
+    if (auto* arrL = dynamic_cast<ArrayType*>(leftType)) {
+        if (auto* arrR = dynamic_cast<ArrayType*>(rightType)) {
+            if (typesEqual(arrL->elemType_, arrR->elemType_)) {
+                return leftType;
+            }
+            error(loc, "'$' requires arrays with the same element type");
+            return leftType;
+        }
+    }
+    if (auto* listL = dynamic_cast<ListType*>(leftType)) {
+        if (auto* listR = dynamic_cast<ListType*>(rightType)) {
+            if (typesEqual(listL->elemType_, listR->elemType_)) {
+                return leftType;
+            }
+            error(loc, "'$' requires lists with the same element type");
+            return leftType;
+        }
+    }
+    if (auto* pvL = dynamic_cast<PersistentVectorType*>(leftType)) {
+        if (auto* pvR = dynamic_cast<PersistentVectorType*>(rightType)) {
+            if (typesEqual(pvL->elemType_, pvR->elemType_)) {
+                return leftType;
+            }
+            error(loc, "'$' requires persistent vectors with the same element type");
+            return leftType;
+        }
+    }
+    if (auto* tupL = dynamic_cast<TupleType*>(leftType)) {
+        if (auto* tupR = dynamic_cast<TupleType*>(rightType)) {
+            Vec<Type*> fields(rt::STLAllocator<Type*>(nullptr));
+            for (Type* f : tupL->fields_) fields.push_back(f);
+            for (Type* f : tupR->fields_) fields.push_back(f);
+            return compiler_.tupleType(fields);
+        }
+    }
+    return nullptr;
+}
+
 Type* TypeChecker::inferBinaryOp(BinaryOpExpr* expr) {
     // Check for explicit @ on operands
     AutoMapArg leftAM = extractAutoMapAnnotation(static_cast<Expr*>(expr->left.get()));
@@ -735,6 +779,16 @@ Type* TypeChecker::inferBinaryOp(BinaryOpExpr* expr) {
             }
         }
 
+        // '$' concatenates elementwise for every operand pair the scalar
+        // operator accepts (strings, arrays, lists, persistent vectors,
+        // tuples). Checked before the numeric rules below, since a pair of
+        // numeric arrays or tuples satisfies isNumeric as well.
+        if (expr->op == BinaryOpExpr::Concat) {
+            if (Type* scalarResult = concatResultType(unwrappedLeft, unwrappedRight, expr->loc)) {
+                return wrapAutoMapResult(scalarResult, leftAM, rightAM, anyList, anyPVec);
+            }
+        }
+
         // Try built-in numeric ops with unwrapped types
         bool isDiv = (expr->op == BinaryOpExpr::Div);
         if (isNumeric(unwrappedLeft) && isNumeric(unwrappedRight)) {
@@ -770,17 +824,6 @@ Type* TypeChecker::inferBinaryOp(BinaryOpExpr* expr) {
                     break;
             }
             return wrapAutoMapResult(scalarResult, leftAM, rightAM, anyList, anyPVec);
-        }
-
-        // Non-numeric unwrapped types with @ — try generic binary op rules
-        // (e.g. String $ String @, etc.)
-        // For now, compute scalar result via the normal path
-        // Fall through to the normal path but with unwrapped types isn't clean,
-        // so just handle string concat specially
-        if (expr->op == BinaryOpExpr::Concat) {
-            if (unwrappedLeft == compiler_.stringType() && unwrappedRight == compiler_.stringType()) {
-                return wrapAutoMapResult(compiler_.stringType(), leftAM, rightAM, anyList);
-            }
         }
 
         error(expr->loc, "Cannot apply '@' auto-map to this operator with these types");
@@ -850,43 +893,8 @@ Type* TypeChecker::inferBinaryOp(BinaryOpExpr* expr) {
             break;  // Fall through to operator overload lookup
 
         case BinaryOpExpr::Concat:
-            if (leftType == compiler_.stringType() && rightType == compiler_.stringType()) {
-                return compiler_.stringType();
-            }
-            if (auto* arrL = dynamic_cast<ArrayType*>(leftType)) {
-                if (auto* arrR = dynamic_cast<ArrayType*>(rightType)) {
-                    if (typesEqual(arrL->elemType_, arrR->elemType_)) {
-                        return leftType;
-                    }
-                    error(expr->loc, "'$' requires arrays with the same element type");
-                    return leftType;
-                }
-            }
-            if (auto* listL = dynamic_cast<ListType*>(leftType)) {
-                if (auto* listR = dynamic_cast<ListType*>(rightType)) {
-                    if (typesEqual(listL->elemType_, listR->elemType_)) {
-                        return leftType;
-                    }
-                    error(expr->loc, "'$' requires lists with the same element type");
-                    return leftType;
-                }
-            }
-            if (auto* pvL = dynamic_cast<PersistentVectorType*>(leftType)) {
-                if (auto* pvR = dynamic_cast<PersistentVectorType*>(rightType)) {
-                    if (typesEqual(pvL->elemType_, pvR->elemType_)) {
-                        return leftType;
-                    }
-                    error(expr->loc, "'$' requires persistent vectors with the same element type");
-                    return leftType;
-                }
-            }
-            if (auto* tupL = dynamic_cast<TupleType*>(leftType)) {
-                if (auto* tupR = dynamic_cast<TupleType*>(rightType)) {
-                    Vec<Type*> fields(rt::STLAllocator<Type*>(nullptr));
-                    for (Type* f : tupL->fields_) fields.push_back(f);
-                    for (Type* f : tupR->fields_) fields.push_back(f);
-                    return compiler_.tupleType(fields);
-                }
+            if (Type* concatType = concatResultType(leftType, rightType, expr->loc)) {
+                return concatType;
             }
             break;  // Fall through to operator overload lookup
 

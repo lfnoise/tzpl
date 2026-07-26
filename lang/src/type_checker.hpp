@@ -621,6 +621,10 @@ private:
                               bool* isPVec = nullptr);
     Type* wrapAutoMapResult(Type* scalarResult, const AutoMapArg& leftAM,
                             const AutoMapArg& rightAM, bool anyList, bool anyPVec = false);
+    // Scalar '$' rules, shared by the plain and the @-auto-mapped paths so both
+    // accept the same operand types. Returns nullptr when no rule applies (the
+    // caller then falls through to operator-overload lookup).
+    Type* concatResultType(Type* leftType, Type* rightType, SourceRange loc);
 
     void error(SourceRange loc, const std::string& msg);
 

@@ -3666,12 +3666,11 @@ u16 CodeGen::genBinaryOp(BinaryOpExpr* expr) {
 
     // String operations
     if (leftType == compiler_.stringType() && rightType == compiler_.stringType()) {
+        if (expr->op == BinaryOpExpr::Concat) {
+            return emitConcatOp(leftReg, leftType, rightReg, rightType, resultType);
+        }
         u16 dst = allocReg();
         switch (expr->op) {
-            case BinaryOpExpr::Concat:
-                emitOp(op_concat_str);
-                emitRegs(dst, leftReg, rightReg);
-                return dst;
             case BinaryOpExpr::Eq:
             case BinaryOpExpr::Ne:
             case BinaryOpExpr::Lt:
@@ -3687,43 +3686,10 @@ u16 CodeGen::genBinaryOp(BinaryOpExpr* expr) {
         }
     }
 
-    // Array/List/Tuple concatenation
+    // Array/List/PVec/Tuple concatenation
     if (expr->op == BinaryOpExpr::Concat) {
-        if (auto* arrType = dynamic_cast<ArrayType*>(resultType)) {
-            u16 dst = allocReg();
-            emitOp(op_concat_array);
-            emitRegs(dst, leftReg, rightReg);
-            emitPtr(arrType);
-            return dst;
-        }
-        if (auto* listType = dynamic_cast<ListType*>(resultType)) {
-            u16 dst = allocReg();
-            emitOp(op_concat_list);
-            emitRegs(dst, leftReg, rightReg);
-            emitPtr(listType);
-            return dst;
-        }
-        if (auto* pvType = dynamic_cast<PersistentVectorType*>(resultType)) {
-            u16 dst = allocReg();
-            emitOp(op_concat_pvec);
-            emitRegs(dst, leftReg, rightReg);
-            emitPtr(pvType);
-            return dst;
-        }
-        if (auto* tupType = dynamic_cast<TupleType*>(resultType)) {
-            auto* leftTupType = dynamic_cast<TupleType*>(leftType);
-            auto* rightTupType = dynamic_cast<TupleType*>(rightType);
-            // Phase 4g.16: op_concat_tuple accepts Inline operands natively
-            // (no boxing). Result is built directly into the multi-word dst
-            // slot when resultType is Inline, or a heap Tuple* otherwise.
-            u16 outReg = allocSlot(tupType);
-            emitOp(op_concat_tuple);
-            emitRegs(outReg, leftReg, rightReg);
-            emitPtr(tupType);
-            emitPtr(leftTupType);
-            emitPtr(rightTupType);
-            return outReg;
-        }
+        u16 concatReg = emitConcatOp(leftReg, leftType, rightReg, rightType, resultType);
+        if (concatReg != UINT16_MAX) return concatReg;
     }
 
     // Phase 4f: result slot must be sized for the type (Complex/Fraction = 2 words).
@@ -5053,6 +5019,58 @@ u16 CodeGen::emitVariadicPack(CallExpr_* expr, u16 callArgBase, u16 argc) {
     return (u16)expr->variadicPackStart + 1;
 }
 
+bool CodeGen::emitsConcat(Type* resultType) const {
+    return resultType == compiler_.stringType()
+        || dynamic_cast<ArrayType*>(resultType)
+        || dynamic_cast<ListType*>(resultType)
+        || dynamic_cast<PersistentVectorType*>(resultType)
+        || dynamic_cast<TupleType*>(resultType);
+}
+
+u16 CodeGen::emitConcatOp(u16 leftReg, Type* leftType, u16 rightReg, Type* rightType,
+                          Type* resultType) {
+    if (resultType == compiler_.stringType()) {
+        u16 dst = allocReg();
+        emitOp(op_concat_str);
+        emitRegs(dst, leftReg, rightReg);
+        return dst;
+    }
+    if (auto* arrType = dynamic_cast<ArrayType*>(resultType)) {
+        u16 dst = allocReg();
+        emitOp(op_concat_array);
+        emitRegs(dst, leftReg, rightReg);
+        emitPtr(arrType);
+        return dst;
+    }
+    if (auto* listType = dynamic_cast<ListType*>(resultType)) {
+        u16 dst = allocReg();
+        emitOp(op_concat_list);
+        emitRegs(dst, leftReg, rightReg);
+        emitPtr(listType);
+        return dst;
+    }
+    if (auto* pvType = dynamic_cast<PersistentVectorType*>(resultType)) {
+        u16 dst = allocReg();
+        emitOp(op_concat_pvec);
+        emitRegs(dst, leftReg, rightReg);
+        emitPtr(pvType);
+        return dst;
+    }
+    if (auto* tupType = dynamic_cast<TupleType*>(resultType)) {
+        // Phase 4g.16: op_concat_tuple accepts Inline operands natively
+        // (no boxing). Result is built directly into the multi-word dst
+        // slot when resultType is Inline, or a heap Tuple* otherwise.
+        u16 outReg = allocSlot(tupType);
+        emitOp(op_concat_tuple);
+        emitRegs(outReg, leftReg, rightReg);
+        emitPtr(tupType);
+        emitPtr(dynamic_cast<TupleType*>(leftType));
+        emitPtr(dynamic_cast<TupleType*>(rightType));
+        return outReg;
+    }
+    return UINT16_MAX;
+}
+
 u16 CodeGen::emitBinaryOpElem(BinaryOpExpr* expr,
                               u16 leftElemReg, Type* leftElemType,
                               u16 rightElemReg, Type* rightElemType,
@@ -5087,6 +5105,16 @@ u16 CodeGen::emitBinaryOpElem(BinaryOpExpr* expr,
             elemResultReg = emitUnboxIfInline(elemResultReg, scalarResultType);
         }
         return elemResultReg;
+    }
+
+    // Elementwise '$' concatenates the two elements (strings, arrays, lists,
+    // persistent vectors, tuples). This has to precede the numeric paths below:
+    // a pair of numeric arrays or tuples is also a composite-arithmetic operand
+    // pair, and would otherwise be added elementwise instead of concatenated.
+    if (expr->op == BinaryOpExpr::Concat) {
+        u16 concatReg = emitConcatOp(leftElemReg, leftElemType, rightElemReg,
+                                     rightElemType, scalarResultType);
+        if (concatReg != UINT16_MAX) return concatReg;
     }
 
     bool isCmp = (expr->op >= BinaryOpExpr::Eq && expr->op <= BinaryOpExpr::Ge);
@@ -5434,6 +5462,12 @@ u16 CodeGen::genAutoMapBinaryOpList(BinaryOpExpr* expr) {
         emitRegs(elemResultReg, 2, argBase);
         emitInt(expr->resolvedFuncGlobalIndex);
         emitReturnPcStackMap(elemResultReg, scalarResultType);
+    } else if (expr->op == BinaryOpExpr::Concat
+               && emitsConcat(scalarResultType)) {
+        // Elementwise '$' over a list. Checked before the composite-numeric
+        // branch: numeric array/tuple elements match both, and '$' joins them.
+        elemResultReg = emitConcatOp(leftElemReg, leftElemType, rightElemReg,
+                                     rightElemType, scalarResultType);
     } else if (isCompositeNumeric(scalarResultType)) {
         elemResultReg = allocReg();
         emitOp(getCompositeArithOp(expr->op));
