@@ -206,6 +206,14 @@ void safetyLimiter(Engine* e, Enable onoff) {
     e->enableSafetyLimiter_ = onoff;
 }
 
+f32 masterGain(Engine* e) {
+    return e ? e->masterGain_ : 1.f;
+}
+
+bool safetyLimiterEnabled(Engine* e) {
+    return e ? e->enableSafetyLimiter_ == kOn : true;
+}
+
 // Shared dispatch: signals worker silos, runs silo 0 on the calling thread,
 // applies the safety limiter, and advances anchorSampleTime_. Used by both
 // the backend RT callbacks and the NRT renderer.

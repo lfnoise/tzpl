@@ -53,6 +53,10 @@ struct NodeVM {
     // Def lookup failed (e.g. superseded without replacement). The node is
     // still drawn; pins are synthesized from edge endpoints.
     bool defMissing = false;
+    // Widgets a control panel would hold: the def's controls plus one load
+    // button per buffer slot. Zero means "Controls..." would open nothing,
+    // so the view greys the menu item out.
+    int numControls = 0;
 
     // Layout slots. The view measures w/h from its font; autoLayout (or a
     // stored user position) fills x/y.

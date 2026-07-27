@@ -47,6 +47,10 @@ void buildViewModel(engine::GraphDesc const& g, int silo,
             for (auto const& p : def.ins) node.ins.push_back(portVM(p));
             node.outs.reserve(def.outs.size());
             for (auto const& p : def.outs) node.outs.push_back(portVM(p));
+            // Mirrors what openNodeControls materializes: one widget per
+            // control (bindControlWidget never declines) plus a load button
+            // per buffer slot.
+            node.numControls = (int)(def.controls.size() + def.buffers.size());
         } else {
             node.defMissing = true;
         }

@@ -361,6 +361,7 @@ if (localStorage.getItem('tzpl-docs-theme') === 'light') document.documentElemen
       <ol>
         <li><a href="#mon-status">The Status Bar</a></li>
         <li><a href="#mon-graph">Meters in the Graph View</a></li>
+        <li><a href="#mon-master">Master Output in the Graph View</a></li>
       </ol>
     </li>
     <li><a href="#limitations">Current Limitations</a></li>
@@ -782,6 +783,19 @@ panel(<span class="str">""</span>);               <span class="cmt">-- back to t
 <p>The bars sit under the node, one per metered outlet, running left to right the width of the box &mdash; the same orientation as the master meter in the status bar. Each carries the outlet's name at the left and a peak-hold reading in dB at the right, faint ticks every 12&nbsp;dB across a &minus;60..0&nbsp;dB span, a green fill for RMS (red when the outlet clips), and an orange peak-hold marker. The labels drop out when you zoom out far enough that they would be unreadable; the bars themselves stay.</p>
 
 <p>Meters are per node and opt-in because each one costs a little real-time work, and each silo can carry only so many at once &mdash; if you hit the limit the console says so, and turning one off frees a slot. They last for the session: switching silos or leaving the graph view drops them, and they are not saved with a document.</p>
+
+<p>The same context menu opens a node's <strong>Controls&hellip;</strong> panel (so does double-clicking the node). It is greyed out for a node whose synthdef declares no controls and no buffer slots &mdash; there would be nothing to put in the window.</p>
+
+<h3 id="mon-master">6.3 Master Output in the Graph View</h3>
+
+<p>The right of the graph view's toolbar carries the two engine-wide output settings, next to the per-silo controls on the left:</p>
+
+<ul>
+  <li><strong>Master</strong> &mdash; output gain in dB, applied to the summed output of every silo <em>after</em> the safety limiter. Double-click the slider for unity; the bottom of its travel is silence, not &minus;60&nbsp;dB, so it can mute.</li>
+  <li><strong>Limiter</strong> &mdash; the safety limiter. On by default. Turning it off removes its one block of latency along with its protection; the status bar's detail panel shows how far it is pulling the mix down while it is on.</li>
+</ul>
+
+<p>Both are the same settings the <code>masterGain</code> and <code>safetyLimiter</code> functions write, and both live in the engine rather than in the window: the controls re-read the engine's values each time the graph view is shown, so a script that changes either is reflected here. They are engine-wide, so the silo selector does not affect them. On a narrow window the section is hidden rather than crowding the silo buttons.</p>
 
 <!-- ================================================================ -->
 <h2 id="limitations">7. Current Limitations</h2>

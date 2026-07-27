@@ -25,7 +25,8 @@
 //  visible (one atomic read per tick when nothing changed). Nodes
 //  auto-lay out left-to-right toward Audio Out; dragged nodes keep
 //  their position for the session. Toolbar: silo selector, Re-layout,
-//  Fit.
+//  Fit, and -- engine-wide, at the right -- master gain and the safety
+//  limiter toggle.
 //
 //  Editing: drag from a pin to a compatible pin to connect (legal drop
 //  targets highlight; the engine revalidates at submit); Delete removes
@@ -143,6 +144,16 @@ private:
     juce::ComboBox siloBox_; // used only when the count is large
     juce::TextButton relayoutButton_{"Re-layout"}, fitButton_{"Fit"};
     void selectSilo(int s);
+
+    // Master output section, at the right of the toolbar. Engine-wide, not
+    // per silo: this is the post-limiter gain and the safety limiter itself,
+    // applied once to the summed output of every silo. The engine owns the
+    // values -- a script or an OSC message can change either -- so the
+    // controls re-read them whenever the view is shown.
+    juce::Label masterLabel_{{}, "Master"};
+    juce::Slider masterGainSlider_;
+    juce::ToggleButton limiterButton_{"Limiter"};
+    void syncMasterControls();
 
     int silo_ = 0;
     float zoom_ = 1.f;

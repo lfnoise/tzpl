@@ -64,6 +64,20 @@ static juce::String dbText(float lin) {
 static juce::Font meterFont() {
     return juce::Font(juce::FontOptions(8.f));
 }
+
+// Master gain slider range. The bottom of the travel is silence, not -60 dB,
+// so the slider can actually mute the output.
+static constexpr double kMinGainDb = -60.0;
+static constexpr double kMaxGainDb = 6.0;
+
+static float gainFromDb(float db) {
+    return db <= (float)kMinGainDb ? 0.f : std::pow(10.f, db / 20.f);
+}
+static double dbFromGain(float gain) {
+    if (gain <= 0.f) return kMinGainDb;
+    return juce::jlimit(kMinGainDb, kMaxGainDb,
+                        (double)(20.f * std::log10(gain)));
+}
 static constexpr int kToolbarH = 34;
 static constexpr float kMinZoom = 0.25f;
 static constexpr float kMaxZoom = 2.5f;
@@ -133,7 +147,45 @@ GraphView::GraphView(bridge::AppContext& appCtx)
     fitButton_.onClick = [this] { zoomToFit(); repaint(); };
     addAndMakeVisible(fitButton_);
 
+    masterLabel_.setJustificationType(juce::Justification::centredRight);
+    addAndMakeVisible(masterLabel_);
+
+    masterGainSlider_.setSliderStyle(juce::Slider::LinearHorizontal);
+    masterGainSlider_.setTextBoxStyle(juce::Slider::TextBoxRight, false, 58, 20);
+    masterGainSlider_.setRange(kMinGainDb, kMaxGainDb, 0.1);
+    masterGainSlider_.setTextValueSuffix(" dB");
+    masterGainSlider_.setDoubleClickReturnValue(true, 0.0); // unity
+    masterGainSlider_.setTooltip("Master output gain, applied after the safety"
+                                 " limiter. Double-click for unity.");
+    masterGainSlider_.onValueChange = [this] {
+        if (appCtx_.engine)
+            engine::masterGain(appCtx_.engine,
+                               gainFromDb((float)masterGainSlider_.getValue()));
+    };
+    addAndMakeVisible(masterGainSlider_);
+
+    limiterButton_.setTooltip("Safety limiter on the summed output of every"
+                              " silo. Off removes its one block of latency,"
+                              " and its protection.");
+    limiterButton_.onClick = [this] {
+        if (appCtx_.engine)
+            engine::safetyLimiter(appCtx_.engine,
+                                  limiterButton_.getToggleState() ? engine::kOn
+                                                                  : engine::kOff);
+    };
+    addAndMakeVisible(limiterButton_);
+    syncMasterControls();
+
     setWantsKeyboardFocus(true); // Delete removes the selected wire/node
+}
+
+// Show what the engine currently holds, without echoing it back as a set.
+void GraphView::syncMasterControls() {
+    if (!appCtx_.engine) return;
+    masterGainSlider_.setValue(dbFromGain(engine::masterGain(appCtx_.engine)),
+                               juce::dontSendNotification);
+    limiterButton_.setToggleState(engine::safetyLimiterEnabled(appCtx_.engine),
+                                  juce::dontSendNotification);
 }
 
 GraphView::~GraphView() {
@@ -160,6 +212,8 @@ void GraphView::refreshNow() {
 void GraphView::visibilityChanged() {
     if (isVisible()) {
         refreshNow();
+        // A script may have set either while the view was away.
+        syncMasterControls();
         startTimer(kTopologyTimer, 1000 / 8);
         syncMeterTimer();
     } else {
@@ -515,6 +569,23 @@ void GraphView::resized() {
     relayoutButton_.setBounds(bar.removeFromLeft(84));
     bar.removeFromLeft(6);
     fitButton_.setBounds(bar.removeFromLeft(50));
+
+    // Master section right-aligned, so it keeps its place as the window
+    // widens and the graph controls keep theirs on the left.
+    if (bar.getWidth() > 260) {
+        limiterButton_.setBounds(bar.removeFromRight(74));
+        bar.removeFromRight(4);
+        masterGainSlider_.setBounds(bar.removeFromRight(150));
+        masterLabel_.setBounds(bar.removeFromRight(48));
+        masterLabel_.setVisible(true);
+        masterGainSlider_.setVisible(true);
+        limiterButton_.setVisible(true);
+    } else {
+        // Too narrow to show it without colliding with the silo buttons.
+        masterLabel_.setVisible(false);
+        masterGainSlider_.setVisible(false);
+        limiterButton_.setVisible(false);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -756,7 +827,9 @@ void GraphView::showNodeMenu(int nodeIndex) {
     juce::PopupMenu m;
     m.addSectionHeader(juce::String(node.defName)
                        + "  #" + juce::String((juce::int64)id));
-    m.addItem(3, "Controls...");
+    // Greyed when the def has neither controls nor buffer slots: opening the
+    // panel would produce an empty window and a console line saying so.
+    m.addItem(3, "Controls...", node.numControls > 0);
 
     // Metering is opt-in per node. Only f32 outlets can be tapped, so the
     // rest are greyed rather than silently doing nothing.

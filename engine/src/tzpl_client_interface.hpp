@@ -115,6 +115,12 @@ bool isAudioRunning(Engine* e);
 void masterGain(Engine* e, f32 gain); // post safety limiter
 void safetyLimiter(Engine* e, Enable onoff); // default is on.
 
+// Current values, for UI that has to show what the engine is doing (a script
+// or an OSC message can set either at any time). Read-only and unsynchronized
+// -- fine for display, not for RT decisions.
+f32 masterGain(Engine* e);
+bool safetyLimiterEnabled(Engine* e);
+
 // Set the channel offset for a silo's output in the hardware buffer.
 // Must be called inside a begin()/go() bundle.
 tzpl_SErr channelOffset(i32 offset);
