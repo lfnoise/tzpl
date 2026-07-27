@@ -830,56 +830,36 @@ static void ffi_uiClear(ts::VM& vm, u16, u16, u16) {
 // Tap widgets (meters/scopes)
 // ---------------------------------------------------------------------------
 
-// Shared body for uiMeter / uiScope / uiMasterTap: upsert the widget,
-// allocate a tap id, and install the engine tap in its own bundle. Engine
-// calls happen outside ui->mtx (bundle submit takes the engine's NRT lock).
+// Shared body for uiMeter / uiScope / uiMasterTap: place a tap widget in the
+// current panel. The widget/tap lifecycle itself lives in bindTapWidget --
+// the graph view's Scope/Spectrum menu goes through the same code.
 //
-// nodeID < 0 means the master output bus: the tap goes on silo 0 via
-// tapMaster instead of tapOutlet. Everything downstream -- the per-frame
-// poll, untap on panel close, document restore, ui.peakLevel -- is unchanged,
-// because a master tap is an ordinary entry in the engine's tap registry.
+// nodeID < 0 means the master output bus. Everything downstream -- the
+// per-frame poll, untap on panel close, document restore, ui.peakLevel -- is
+// unchanged, because a master tap is an ordinary entry in the tap registry.
 static i64 makeTapWidget(ts::VM& vm, const char* name, UIWidgetKind kind,
                          i64 nodeID, int outlet, int silo) {
     UIState* ui = getUIState(vm);
     auto* ctx = getAppContext(vm);
     if (!ui || !ctx || !ctx->engine) return 0;
 
-    bool master = nodeID < 0;
-    if (master) silo = 0; // master taps are silo-0-only
-
-    long oldTap = 0;
-    int oldSilo = 0;
-    long tapID = static_cast<long>(engine::allocTapID(ctx->engine));
-    i64 widgetID = 0;
+    std::string panel;
     {
         std::lock_guard<std::mutex> lock(ui->mtx);
-        UIWidget* w = ui->upsert(ui->currentPanel, name, kind, UISpec{}, UISpec{});
-        oldTap = w->tapID;
-        oldSilo = w->tapSilo;
-        w->tapID = tapID;
-        w->tapSilo = silo;
-        widgetID = static_cast<i64>(w->id);
+        panel = ui->currentPanel;
     }
-    if (oldTap) untapWidget(ctx, oldTap, oldSilo);
-
-    int mode = (kind == UIWidgetKind::Meter) ? engine::tapMeter : engine::tapScope;
-    tzpl_SErr err = engine::begin(ctx->engine);
-    if (err == tzpl_errNone) {
-        if (master) engine::tapMaster(tapID, mode);
-        else engine::tapOutlet(nodeID, outlet, tapID, mode);
-        err = engine::go(silo);
-    }
+    int err = tzpl_errNone;
+    i64 widgetID = static_cast<i64>(
+        bindTapWidget(ui, ctx->engine, panel, name, kind, nodeID, outlet,
+                      silo, &err));
     if (err != tzpl_errNone) {
-        if (master) {
-            std::fprintf(stderr, "ui: master tap failed (%d)\n", (int)err);
+        if (nodeID < 0) {
+            std::fprintf(stderr, "ui: master tap failed (%d)\n", err);
         } else {
             std::fprintf(stderr,
                          "ui: tap on node %lld outlet %d failed (%d)\n",
-                         static_cast<long long>(nodeID), outlet, (int)err);
+                         static_cast<long long>(nodeID), outlet, err);
         }
-        std::lock_guard<std::mutex> lock(ui->mtx);
-        if (UIWidget* w = ui->findById(static_cast<std::uint64_t>(widgetID)))
-            w->tapID = 0;
     }
     return widgetID;
 }

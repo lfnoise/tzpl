@@ -34,9 +34,11 @@ static constexpr float kBoxPadX = 10.f;
 static constexpr float kMinBoxW = 90.f;
 static constexpr float kPinR = 4.f;
 
-// Node context menu: per-outlet meter items start here, so they can't
-// collide with the fixed items (1..4).
+// Node context menu: per-outlet tap items start at these bases, so they
+// can't collide with the fixed items (1..6) or each other.
 static constexpr int kMeterMenuBase = 100;
+static constexpr int kScopeMenuBase = 200;
+static constexpr int kSpectrumMenuBase = 300;
 
 // Level meters: horizontal bars the width of the node, stacked under the box,
 // one per metered outlet -- the same orientation as the status bar's master
@@ -550,7 +552,13 @@ void GraphView::paint(juce::Graphics& g) {
     if (vm_.nodes.size() <= 2 && vm_.edges.empty()) {
         g.setColour(text.withAlpha(0.45f));
         g.setFont(juce::Font(juce::FontOptions(14.f)));
-        g.drawText("No nodes yet — evaluate some code that plays audio",
+        // fromUTF8, not a bare literal: passing char* here would build the
+        // String through its CharPointer_ASCII constructor, which maps each
+        // byte to a code point (Latin-1) and turns the em dash into "a EUR".
+        // String's operator<< / += decode UTF-8, which is why the non-ASCII
+        // glyphs appended that way elsewhere are fine.
+        g.drawText(juce::String::fromUTF8(
+                       "No nodes yet \xe2\x80\x94 evaluate some code that plays audio"),
                    canvas, juce::Justification::centred, true);
     }
 }
@@ -818,6 +826,14 @@ void GraphView::toggleOutletMeter(int nodeIndex, int outlet) {
     repaint();
 }
 
+void GraphView::openOutletTap(int nodeIndex, int outlet, bool spectrum) {
+    if (nodeIndex < 0 || nodeIndex >= (int)vm_.nodes.size()) return;
+    if (!onOpenNodeTap) return;
+    auto const& n = vm_.nodes[(size_t)nodeIndex];
+    if (outlet < 0 || outlet >= (int)n.outs.size()) return;
+    onOpenNodeTap(n.nodeID, n.defName, silo_, outlet, spectrum);
+}
+
 void GraphView::showNodeMenu(int nodeIndex) {
     if (nodeIndex < 0 || nodeIndex >= (int)vm_.nodes.size()) return;
     long long id = vm_.nodes[nodeIndex].nodeID;
@@ -850,6 +866,25 @@ void GraphView::showNodeMenu(int nodeIndex) {
         m.addSubMenu("Meter", sub);
     }
 
+    // Scope and spectrum are full ui widgets, not in-graph drawing: they open
+    // in the node's panel window alongside its controls. Not toggles -- the
+    // panel's own close button removes them (and their taps).
+    auto tapItems = [&](juce::PopupMenu& into, char const* label, int base,
+                        int singleID) {
+        if (node.outs.size() <= 1) {
+            into.addItem(singleID, label, anyF32);
+            return;
+        }
+        juce::PopupMenu sub;
+        for (int o = 0; o < (int)node.outs.size(); ++o) {
+            sub.addItem(base + o, portLabel(node.outs[(size_t)o]),
+                        node.outs[(size_t)o].elem == tzpl_kF32);
+        }
+        into.addSubMenu(label, sub);
+    };
+    tapItems(m, "Scope", kScopeMenuBase, 5);
+    tapItems(m, "Spectrum", kSpectrumMenuBase, 6);
+
     m.addSeparator();
     m.addItem(1, "Disconnect All");
     m.addItem(2, "Free Node", !builtin);
@@ -862,6 +897,18 @@ void GraphView::showNodeMenu(int nodeIndex) {
             auto* self = safe.getComponent();
             if (result == 4) {
                 self->toggleNodeMeters(nodeIndex);
+                return;
+            }
+            if (result == 5 || result == 6) {
+                self->openOutletTap(nodeIndex, 0, result == 6);
+                return;
+            }
+            if (result >= kSpectrumMenuBase) {
+                self->openOutletTap(nodeIndex, result - kSpectrumMenuBase, true);
+                return;
+            }
+            if (result >= kScopeMenuBase) {
+                self->openOutletTap(nodeIndex, result - kScopeMenuBase, false);
                 return;
             }
             if (result >= kMeterMenuBase) {

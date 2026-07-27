@@ -243,6 +243,42 @@ void MainComponent::openNodeControls(long long nodeID,
         it->second->toFront(true);
 }
 
+// A scope/spectrum for one node outlet, in the same panel as that node's
+// controls -- so a node ends up with one window holding its sliders and its
+// displays. The widget is exactly what ui.scope / ui.spectrum build; closing
+// the panel window releases it and its tap, as for any other tap widget.
+void MainComponent::openNodeTap(long long nodeID, std::string const& defName,
+                                int silo, int outlet, bool spectrum) {
+    if (!appCtx_.uiState || !appCtx_.engine) return;
+    std::string panel = defName + " #" + std::to_string(nodeID);
+
+    // Name it after the outlet, so a second outlet gets its own display
+    // instead of retapping the first one's widget.
+    std::string outName = std::to_string(outlet);
+    engine::DefDesc def;
+    if (engine::getDefDesc(appCtx_.engine, defName.c_str(), def)
+        && outlet < (int)def.outs.size() && !def.outs[(size_t)outlet].name.empty())
+        outName = def.outs[(size_t)outlet].name;
+
+    int err = tzpl_errNone;
+    bridge::bindTapWidget(appCtx_.uiState, appCtx_.engine, panel,
+                          (spectrum ? "spectrum " : "scope ") + outName,
+                          spectrum ? bridge::UIWidgetKind::Spectrum
+                                   : bridge::UIWidgetKind::Scope,
+                          nodeID, outlet, silo, &err);
+    if (err != tzpl_errNone) {
+        console_.appendLine({"graph: could not tap " + panel + " outlet "
+                                 + outName
+                                 + " (each silo holds a limited number of taps)",
+                             LineKind::Error});
+        return;
+    }
+    dispatcher_.ensureRunning();   // the tap poll runs on the dispatch tick
+    refreshControlsWindows();
+    if (auto it = controlsWindows_.find(panel); it != controlsWindows_.end())
+        it->second->toFront(true);
+}
+
 // File dialog -> load the chosen audio file into a node's buffer slot and
 // show/refresh its waveform row in the node's control panel.
 void MainComponent::loadBufferFlow(long long nodeID, int silo,
@@ -329,6 +365,11 @@ void MainComponent::setCenterMode(CenterMode m) {
         graphView_->onOpenNodeControls =
             [this](long long nodeID, std::string const& defName, int silo) {
                 openNodeControls(nodeID, defName, silo);
+            };
+        graphView_->onOpenNodeTap =
+            [this](long long nodeID, std::string const& defName, int silo,
+                   int outlet, bool spectrum) {
+                openNodeTap(nodeID, defName, silo, outlet, spectrum);
             };
         addChildComponent(*graphView_);
     }

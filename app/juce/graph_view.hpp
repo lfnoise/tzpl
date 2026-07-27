@@ -32,7 +32,10 @@
 //  targets highlight; the engine revalidates at submit); Delete removes
 //  the selected wire or frees the selected node; right-click the
 //  background for a new-node palette, right-click a node to disconnect
-//  or free it. Edits submit begin/../go bundles on the message thread;
+//  or free it, meter it, or open a scope/spectrum/controls panel for it
+//  (those three are built by the owner, via the onOpen* callbacks --
+//  this view owns only the meters). Edits submit begin/../go bundles on
+//  the message thread;
 //  there is no optimistic UI -- the commit bumps the graph generation
 //  and the next poll redraws. Errors go to `onLog` (the app console).
 //
@@ -79,6 +82,12 @@ public:
     // the widgets and floats the controls window.
     std::function<void(long long, std::string const&, int)> onOpenNodeControls;
 
+    // Open a scope (or spectrum, when the last arg is true) on one of a
+    // node's outlets. Args: nodeID, defName, silo, outlet, spectrum. Lands in
+    // the same panel as that node's controls.
+    std::function<void(long long, std::string const&, int, int, bool)>
+        onOpenNodeTap;
+
 private:
     void logLine(juce::String const& msg, bool isError) {
         if (onLog) onLog(msg.toStdString(), isError);
@@ -115,6 +124,7 @@ private:
     juce::Rectangle<int> meterRepaintArea(graph::NodeVM const& n) const;
     void toggleNodeMeters(int nodeIndex);
     void toggleOutletMeter(int nodeIndex, int outlet);
+    void openOutletTap(int nodeIndex, int outlet, bool spectrum);
     void rebuildLayout();   // measure node boxes, then autoLayout
     void zoomToFit();
     void zoomAbout(juce::Point<float> screenPt, float factor);

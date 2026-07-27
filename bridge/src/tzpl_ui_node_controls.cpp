@@ -21,6 +21,9 @@
 
 #include "tzpl_ui_node_controls.hpp"
 
+#include "tzpl_tap.hpp"
+#include "tzpl_ui_taps.hpp"
+
 #include "tzpl_audio_file.hpp"
 
 #include <algorithm>
@@ -104,6 +107,50 @@ int materializeNodeControls(UIState* ui, engine::Engine* e,
     for (auto const& c : controls)
         if (bindControlWidget(ui, panel, c, nodeID, silo)) ++bound;
     return bound;
+}
+
+std::uint64_t bindTapWidget(UIState* ui, engine::Engine* e,
+                            std::string const& panel, std::string const& name,
+                            UIWidgetKind kind, long long nodeID, int outlet,
+                            int silo, int* engineErr) {
+    if (engineErr) *engineErr = tzpl_errNone;
+    if (!ui || !e) return 0;
+
+    bool master = nodeID < 0;
+    if (master) silo = 0; // the post-limiter section runs on silo 0
+
+    // Claim the tap id and hand it to the widget first, so a retap can
+    // release the old tap after the lock is dropped.
+    long oldTap = 0;
+    int oldSilo = 0;
+    long tapID = (long)engine::allocTapID(e);
+    std::uint64_t widgetID = 0;
+    {
+        std::lock_guard<std::mutex> lock(ui->mtx);
+        UIWidget* w = ui->upsert(panel, name, kind, UISpec{}, UISpec{});
+        oldTap = w->tapID;
+        oldSilo = w->tapSilo;
+        w->tapID = tapID;
+        w->tapSilo = silo;
+        widgetID = w->id;
+    }
+    if (oldTap) untapWidget(e, oldTap, oldSilo);
+
+    // Scope and Spectrum both need the sample FIFO; a meter only needs the
+    // running peak/rms.
+    int mode = kind == UIWidgetKind::Meter ? engine::tapMeter : engine::tapScope;
+    tzpl_SErr err = engine::begin(e);
+    if (err == tzpl_errNone) {
+        if (master) engine::tapMaster(tapID, mode);
+        else engine::tapOutlet(nodeID, outlet, tapID, mode);
+        err = engine::go(silo);
+    }
+    if (err != tzpl_errNone) {
+        if (engineErr) *engineErr = (int)err;
+        std::lock_guard<std::mutex> lock(ui->mtx);
+        if (UIWidget* w = ui->findById(widgetID)) w->tapID = 0;
+    }
+    return widgetID;
 }
 
 std::uint64_t bindWaveformWidget(UIState* ui, std::string const& panel,

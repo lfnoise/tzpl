@@ -161,6 +161,10 @@ private:
     void togglePluginBrowser();
     // Graph view double-click: float a controls window for a live node.
     void openNodeControls(long long nodeID, std::string const& defName, int silo);
+    // Graph view context menu: add a scope (or spectrum) on a node outlet to
+    // that node's panel, and float it.
+    void openNodeTap(long long nodeID, std::string const& defName, int silo,
+                     int outlet, bool spectrum);
     // Buffer "load" button: file dialog -> replaceBuffer + waveform row.
     void loadBufferFlow(long long nodeID, int silo, std::string const& panel,
                         long long bufID, std::string const& bufName);

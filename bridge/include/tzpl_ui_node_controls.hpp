@@ -62,6 +62,21 @@ int materializeNodeControls(UIState* ui, engine::Engine* e,
                             long long nodeID, int silo,
                             char const* defName);
 
+// Upsert a tap-backed widget (Meter, Scope or Spectrum) in `panel` and
+// install the engine tap behind it. `nodeID` < 0 taps the master output bus
+// instead of a node outlet (silo is then forced to 0). An existing widget of
+// the same (panel, name) is retapped, its old tap released. Requires
+// ui->mtx NOT held (bundle submit takes the engine's NRT lock).
+//
+// Returns the widget id, 0 only when `ui` or `e` is null. If the engine
+// refuses the tap -- tzpl_errResourceLimit when the silo's tap table is full
+// -- the widget still exists but holds no tap, and *engineErr (when given)
+// carries the error for the caller to surface.
+std::uint64_t bindTapWidget(UIState* ui, engine::Engine* e,
+                            std::string const& panel, std::string const& name,
+                            UIWidgetKind kind, long long nodeID, int outlet,
+                            int silo, int* engineErr = nullptr);
+
 // Upsert a Waveform widget showing a min/max overview of the audio file
 // at `path` (channel 0). Used for buffer displays (ui.waveform and the
 // graph view's buffer rows). Requires ui->mtx NOT held. Returns the
