@@ -88,6 +88,10 @@ public:
     std::function<void(long long, std::string const&, int, int, bool)>
         onOpenNodeTap;
 
+    // Open the engine settings (the only place an idle Audio In can be
+    // given input channels). Offered on that node; null disables the offer.
+    std::function<void()> onOpenAudioSettings;
+
 private:
     void logLine(juce::String const& msg, bool isError) {
         if (onLog) onLog(msg.toStdString(), isError);

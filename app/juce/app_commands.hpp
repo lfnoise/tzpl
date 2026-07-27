@@ -83,6 +83,9 @@ enum : juce::CommandID {
     fileNewProject,
     fileOpenExample,
     fileRevealModules,
+    // Engine settings (tzpl-config); macOS puts it in the app menu as
+    // Preferences, Cmd+,
+    engineSettings,
 
     // Help (macOS: app menu; elsewhere: File menu)
     helpAbout,

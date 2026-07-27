@@ -128,6 +128,11 @@ private:
 
     void openFileFlow();
     void newProjectFlow();
+    // Engine Settings window (tzpl-config), and the restart that applies it:
+    // asks about unsaved work, spawns a watcher that relaunches once this
+    // process is gone, then quits.
+    void showEngineSettingsFlow();
+    void relaunchApp();
     void createProject(juce::File const& dir);
     void registerProjectFor(juce::File const& file);
     void noteRecentProject(juce::String const& root, juce::String const& doc);

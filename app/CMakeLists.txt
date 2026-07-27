@@ -91,7 +91,7 @@ endif()
 
 if(TZPL_BUILD_APP)
 
-set(APP_SOURCES src/main.cpp src/project_paths.cpp)
+set(APP_SOURCES src/main.cpp src/project_paths.cpp src/app_config.cpp)
 
 if(TZPL_BUILD_GUI)
     list(APPEND APP_SOURCES
@@ -177,6 +177,14 @@ if(TZPL_BUILD_GUI)
         PRIVATE tzpl_audio_engine_bridge
         PRIVATE tzpl_clock_bridge
     )
+
+    # tzpl-config reader/writer (startup path + Engine Settings dialog).
+    # Pure file I/O -- no engine, no GUI.
+    add_executable(tzpl_config_tests
+        tests/app_config_test.cpp
+        src/app_config.cpp
+    )
+    target_include_directories(tzpl_config_tests PRIVATE src)
 
     # Headless widget-interaction tests: an ImGui context with no
     # rendering backend, driven by injected IO events (slider drags,
@@ -337,8 +345,10 @@ if(TZPL_BUILD_APP_JUCE)
     target_sources(tzpl_app_juce PRIVATE
         src/main.cpp
         src/project_paths.cpp
+        src/app_config.cpp
         src/gui_state.cpp
         juce/juce_gui_main.cpp
+        juce/settings_dialog.cpp
         juce/juce_audio_backend.cpp
         juce/main_component.cpp
         juce/tzpl_look_and_feel.cpp

@@ -112,6 +112,16 @@ static juce::String portLabel(graph::PortVM const& p) {
 // Above this many silos the segmented buttons give way to a dropdown.
 static constexpr int kMaxSiloButtons = 8;
 
+// Audio In (node 1) has an outlet only when the engine opened input
+// channels -- `inputChannels` defaults to 0, so the usual state is a node
+// with no pins at all. Drawn with a hint instead of an empty box, and its
+// menu offers the setting that fixes it.
+static bool isIdleAudioIn(graph::NodeVM const& n) {
+    return n.nodeID == 1 && !n.defMissing && n.ins.empty() && n.outs.empty();
+}
+
+static constexpr char const* kNoInputHint = "no input channels configured";
+
 GraphView::GraphView(bridge::AppContext& appCtx)
     : appCtx_(appCtx), poller_(appCtx.engine)
 {
@@ -276,6 +286,12 @@ void GraphView::rebuildLayout() {
                 rowW += pf.getStringWidthFloat(portLabel(n.outs[r]));
             w = std::max(w, rowW);
         }
+        // A pinless Audio In gets a body row for its hint line, so the box
+        // is not an empty rectangle the user has to guess at.
+        if (isIdleAudioIn(n)) {
+            rows = 1;
+            w = std::max(w, pf.getStringWidthFloat(kNoInputHint) + 2 * kBoxPadX);
+        }
         n.w = std::max(kMinBoxW, w);
         n.h = kTitleH + rows * kPinRowH + 6.f;
     }
@@ -409,17 +425,20 @@ void GraphView::paint(juce::Graphics& g) {
         juce::Rectangle<float> box(n.x, n.y, n.w, n.h);
         bool builtin = n.nodeID == 0 || n.nodeID == 1;
         bool sel = n.nodeID == selectedNode_;
+        // Dimmed like a missing def: present, but nothing to patch.
+        bool idle = isIdleAudioIn(n);
 
         auto fill = builtin ? boxBg.interpolatedWith(accent, 0.12f) : boxBg;
-        if (n.defMissing) fill = fill.withAlpha(0.6f);
+        if (n.defMissing || idle) fill = fill.withAlpha(0.6f);
         g.setColour(fill);
         g.fillRoundedRectangle(box, 5.f);
-        g.setColour(sel ? accent : outline.withAlpha(n.defMissing ? 0.3f : 0.6f));
+        g.setColour(sel ? accent
+                        : outline.withAlpha(n.defMissing || idle ? 0.3f : 0.6f));
         g.drawRoundedRectangle(box, 5.f, sel ? 2.f : 1.f);
 
         // Title bar: def name left, #nodeID right.
         auto titleArea = box.withHeight(kTitleH).reduced(kBoxPadX, 0);
-        auto tcol = n.defMissing ? text.withAlpha(0.5f) : text;
+        auto tcol = n.defMissing || idle ? text.withAlpha(0.5f) : text;
         g.setColour(tcol);
         g.setFont(tf);
         g.drawText(juce::String(n.defName), titleArea,
@@ -432,6 +451,12 @@ void GraphView::paint(juce::Graphics& g) {
 
         // Pins + labels.
         g.setFont(pf);
+        if (idle) {
+            g.setColour(tcol.withAlpha(0.8f));
+            g.drawText(kNoInputHint,
+                       box.withTop(n.y + kTitleH).reduced(kBoxPadX * 0.5f, 0),
+                       juce::Justification::centred, true);
+        }
         for (int p = 0; p < (int)n.ins.size(); ++p) {
             auto c = pinCentre(n, true, p);
             g.setColour(accent.withAlpha(0.9f));
@@ -885,6 +910,13 @@ void GraphView::showNodeMenu(int nodeIndex) {
     tapItems(m, "Scope", kScopeMenuBase, 5);
     tapItems(m, "Spectrum", kSpectrumMenuBase, 6);
 
+    // The only fix for a pinless Audio In is a config change + relaunch,
+    // so put that where the user is looking when they notice it.
+    if (isIdleAudioIn(node) && onOpenAudioSettings) {
+        m.addSeparator();
+        m.addItem(7, "Engine Settings...");
+    }
+
     m.addSeparator();
     m.addItem(1, "Disconnect All");
     m.addItem(2, "Free Node", !builtin);
@@ -901,6 +933,10 @@ void GraphView::showNodeMenu(int nodeIndex) {
             }
             if (result == 5 || result == 6) {
                 self->openOutletTap(nodeIndex, 0, result == 6);
+                return;
+            }
+            if (result == 7) {
+                if (self->onOpenAudioSettings) self->onOpenAudioSettings();
                 return;
             }
             if (result >= kSpectrumMenuBase) {
@@ -950,9 +986,15 @@ void GraphView::mouseMagnify(juce::MouseEvent const& e, float scaleFactor) {
 void GraphView::mouseDoubleClick(juce::MouseEvent const& e) {
     if (e.position.y < kToolbarH) return;
     int ni = hitNode(toWorld(e.position));
-    if (ni < 0 || !onOpenNodeControls) return;
+    if (ni < 0) return;
     auto const& n = vm_.nodes[ni];
-    onOpenNodeControls(n.nodeID, n.defName, silo_);
+    // A pinless Audio In has no controls to open; the hint it draws points
+    // at the settings, so honour that instead.
+    if (isIdleAudioIn(n) && onOpenAudioSettings) {
+        onOpenAudioSettings();
+        return;
+    }
+    if (onOpenNodeControls) onOpenNodeControls(n.nodeID, n.defName, silo_);
 }
 
 void GraphView::zoomAbout(juce::Point<float> screenPt, float factor) {

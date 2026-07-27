@@ -113,8 +113,34 @@ void autoLayout(GraphViewModel& vm, LayoutStore const& store,
         }
     }
 
-    int numCols = 1;
-    for (int i = 0; i < n; ++i) numCols = std::max(numCols, col[i] + 1);
+    // A sink with nothing plugged into it -- an idle Audio Out is the
+    // common case -- has no path to constrain it, so both passes above put
+    // it in column 0, on the wrong side of everything the user is about to
+    // wire into it. Park those in a column of their own past the right
+    // edge, where their first wire will already run left-to-right. Only
+    // structural sinks (no outlets at all) qualify; an unconnected source
+    // such as Audio In still belongs on the left.
+    std::vector<char> parked(n, 0);
+    bool anyParked = false;
+    for (int i = 0; i < n; ++i) {
+        if (!inAdj[i].empty() || !outAdj[i].empty()) continue;
+        if (!vm.nodes[i].outs.empty() || vm.nodes[i].defMissing) continue;
+        // Audio In (node 1) is a source by role even when it has no outlet
+        // to show for it -- the engine gives it none until the device is
+        // opened with input channels. Parking it right would put the whole
+        // graph on the wrong side of the one node everything starts from.
+        if (vm.nodes[i].nodeID == 1) continue;
+        parked[i] = 1;
+        anyParked = true;
+    }
+
+    int numCols = 0;
+    for (int i = 0; i < n; ++i)
+        if (!parked[i]) numCols = std::max(numCols, col[i] + 1);
+    for (int i = 0; i < n; ++i)
+        if (parked[i]) col[i] = numCols;    // rightmost, empty of anything else
+    if (anyParked) ++numCols;               // all-parked graph: still column 0
+    numCols = std::max(numCols, 1);
 
     std::vector<std::vector<int>> cols(numCols);
     for (int i = 0; i < n; ++i)

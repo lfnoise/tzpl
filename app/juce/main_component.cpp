@@ -28,8 +28,10 @@
 #include "repl_session.hpp"
 #include "module_compiler.hpp"
 #include "project_paths.hpp"
+#include "settings_dialog.hpp"
 #include <cstdio>
 #include <cstdlib>
+#include <unistd.h>  // getpid, for the relaunch watcher
 
 namespace tzplapp {
 
@@ -371,6 +373,9 @@ void MainComponent::setCenterMode(CenterMode m) {
                    int outlet, bool spectrum) {
                 openNodeTap(nodeID, defName, silo, outlet, spectrum);
             };
+        // An Audio In node with no outlet means the engine opened no input
+        // channels; the graph offers the settings that fix that.
+        graphView_->onOpenAudioSettings = [this] { showEngineSettingsFlow(); };
         addChildComponent(*graphView_);
     }
     notebook_->setVisible(m == CenterMode::notebook);
@@ -1051,6 +1056,77 @@ void MainComponent::createProject(juce::File const& dir) {
     logLine("project created: " + dir.getFullPathName());
 }
 
+// ---------------------------------------------------------------------------
+// Engine settings + relaunch
+//
+// Everything in tzpl-config is consumed while the engine is being built, so
+// there is nothing to apply live: the dialog writes the file and the app
+// restarts itself to pick it up.
+// ---------------------------------------------------------------------------
+
+void MainComponent::showEngineSettingsFlow() {
+    showEngineSettings(appCtx_.projectDir,
+                       [this](String const& msg) { logLine(msg); },
+                       [this] { relaunchApp(); });
+}
+
+namespace {
+
+// Single-quote a path for /bin/sh.
+String shQuote(String const& s) {
+    return "'" + s.replace("'", "'\\''") + "'";
+}
+
+}  // namespace
+
+void MainComponent::relaunchApp() {
+    // Reopen whatever document is showing, so the relaunch lands back in the
+    // same project (the project is auto-detected from the opened file).
+    juce::File doc = docModeIsNotebook() ? notebook_->currentFile()
+                                         : editorPane_.activeFile();
+
+    confirmUnsavedChangesThen([this, doc] {
+#if JUCE_MAC || JUCE_LINUX
+        juce::File exe =
+            juce::File::getSpecialLocation(juce::File::currentExecutableFile);
+        String launch;
+#if JUCE_MAC
+        // Launch the bundle, not the inner binary: LaunchServices gives the
+        // new instance a proper activation, Dock tile and Finder identity.
+        juce::File bundle = exe;
+        while (bundle != juce::File() && !bundle.hasFileExtension("app"))
+            bundle = bundle.getParentDirectory();
+        if (bundle != juce::File() && bundle.hasFileExtension("app")) {
+            launch = "open -n " + shQuote(bundle.getFullPathName());
+            if (doc.existsAsFile())
+                launch += " --args " + shQuote(doc.getFullPathName());
+        }
+#endif
+        if (launch.isEmpty()) {
+            launch = "exec " + shQuote(exe.getFullPathName());
+            if (doc.existsAsFile()) launch += " " + shQuote(doc.getFullPathName());
+        }
+
+        // Wait for THIS process to exit before starting the next one: two
+        // instances must not fight over the audio device. The watcher is
+        // backgrounded so the shell we spawn returns immediately.
+        String script = "while kill -0 " + String((int)getpid())
+                      + " 2>/dev/null; do sleep 0.2; done; " + launch;
+        String command = "/bin/sh -c " + shQuote(script) + " &";
+        if (std::system(command.toRawUTF8()) != 0) {
+            logLine("relaunch: could not spawn the restart watcher");
+            return;
+        }
+        // Unsaved work is already handled, so take the direct exit rather
+        // than systemRequestedQuit's second round of prompts.
+        juce::JUCEApplicationBase::getInstance()->quit();
+#else
+        logLine("relaunch is not supported on this platform --"
+                " quit and start the app again to apply the settings");
+#endif
+    });
+}
+
 void MainComponent::collectEvalResult() {
     auto& ae = guiState_.asyncEval;
     if (ae.busy() || !ae.finished()) return;
@@ -1093,7 +1169,7 @@ void MainComponent::getAllCommands(juce::Array<juce::CommandID>& ids) {
     ids.addArray({
         cmd::fileNew, cmd::fileNewNotebook, cmd::fileNewProject,
         cmd::fileOpen, cmd::fileOpenExample, cmd::fileRevealModules,
-        cmd::helpAbout,
+        cmd::engineSettings, cmd::helpAbout,
         cmd::fileSave, cmd::fileSaveAs, cmd::fileSaveCopy, cmd::fileRevert,
         cmd::fileClose,
 #if !JUCE_MAC
@@ -1163,6 +1239,10 @@ void MainComponent::getCommandInfo(juce::CommandID id,
     case cmd::fileRevealModules:
         set("Reveal Modules Folder", "File");
         info.setActive(stdlibModulesDir() != juce::File());
+        break;
+    case cmd::engineSettings:
+        set("Engine Settings...", "File");
+        info.addDefaultKeypress(',', mod);
         break;
     case cmd::helpAbout:
         set("About Tzopilotl", "Help");
@@ -1375,6 +1455,9 @@ bool MainComponent::perform(InvocationInfo const& info) {
         }
         return true;
     }
+    case cmd::engineSettings:
+        showEngineSettingsFlow();
+        return true;
     case cmd::helpAbout:
         showAboutBox();
         return true;
@@ -1633,6 +1716,10 @@ void MainComponent::testShowDemo(String const& which) {
     } else if (which == "flash") {
         editorPane_.triggerFlash(6, 8);
         editorPane_.setErrorMarkersFromEval({ { 12, "example error marker" } });
+    } else if (which == "graph") {
+        setCenterMode(CenterMode::graph);
+    } else if (which == "settings") {
+        showEngineSettingsFlow();
     } else if (which == "history") {
         showNotebook(true);
         notebook_->toggleHistoryWindow();

@@ -203,6 +203,52 @@ static void test_unreachable_placed_after_sources() {
           "unreachable chain continues rightward");
 }
 
+static void test_unconnected_sink_parks_right() {
+    std::print("Test: an unconnected sink parks on the right\n");
+    DefTable t;
+    t.def("Audio Out", 1, 0);
+    t.def("Audio In", 0, 1);
+    t.def("osc", 0, 1);
+    t.def("fx", 1, 1);
+
+    // Nothing reaches Audio Out: it must still sit right of every node,
+    // so the user's first wire runs left-to-right instead of backwards.
+    engine::GraphDesc g;
+    g.nodes = {{0, "Audio Out"}, {1, "Audio In"}, {10, "osc"}, {20, "fx"}};
+    g.conns = {{10, 0, 20, 0}};
+
+    auto vm = build(g, t);
+    LayoutStore store;
+    autoLayout(vm, store);
+
+    auto *out = node(vm, 0), *in = node(vm, 1);
+    auto *osc = node(vm, 10), *fx = node(vm, 20);
+    check(out->x > osc->x && out->x > fx->x && out->x > in->x,
+          "unconnected Audio Out parks right of everything");
+    check(osc->x < fx->x, "the rest of the graph still flows left to right");
+    check(in->x <= osc->x, "an unconnected source stays leftmost");
+
+    // A lone Audio Out has nothing to sit right of: no empty gutter.
+    engine::GraphDesc solo;
+    solo.nodes = {{0, "Audio Out"}};
+    auto vm2 = build(solo, t);
+    autoLayout(vm2, store);
+    check(node(vm2, 0)->x == LayoutMetrics{}.margin,
+          "a lone Audio Out sits at the left margin");
+
+    // The launch state with no input channels configured: Audio In has no
+    // outlet either, so it looks like a sink. It is still the source side.
+    DefTable noIn;
+    noIn.def("Audio Out", 1, 0);
+    noIn.def("Audio In", 0, 0);
+    engine::GraphDesc pair;
+    pair.nodes = {{0, "Audio Out"}, {1, "Audio In"}};
+    auto vm3 = build(pair, noIn);
+    autoLayout(vm3, store);
+    check(node(vm3, 1)->x < node(vm3, 0)->x,
+          "a pinless Audio In stays left of an idle Audio Out");
+}
+
 static void test_store_overrides() {
     std::print("Test: user-position overrides\n");
     DefTable t;
@@ -589,6 +635,7 @@ int main() {
     test_chain_layout();
     test_fan_in_and_cycle();
     test_unreachable_placed_after_sources();
+    test_unconnected_sink_parks_right();
     test_store_overrides();
     test_edit_helpers();
     test_edit_submitters_live();

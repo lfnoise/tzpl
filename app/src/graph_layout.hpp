@@ -71,7 +71,9 @@ struct LayoutMetrics {
 // one-sample delay). Nodes with no path to Audio Out are placed by a
 // forward pass instead: one column right of their rightmost source, so
 // their input edges never run backwards; unconnected sources land in the
-// leftmost column. Columns run left-to-right toward Audio Out; rows are
+// leftmost column, while an unconnected sink (an idle Audio Out) is
+// parked in its own column past the right edge. Columns run
+// left-to-right toward Audio Out; rows are
 // ordered by one barycenter pass over the previous column, ties broken
 // by nodeID.
 void autoLayout(GraphViewModel& vm, LayoutStore const& store,

@@ -32,6 +32,7 @@
 #include <optional>
 #include <filesystem>
 #include "tzpl.hpp"
+#include "app_config.hpp"
 #include "module_compiler.hpp"
 #include "module_paths.hpp"
 #include "project_paths.hpp"
@@ -73,77 +74,17 @@ namespace fs = std::filesystem;
 // Configuration
 // ---------------------------------------------------------------------------
 
-struct Config {
-    std::string deviceName = "default";
-    std::string inputDeviceName; // empty = same as output device
-    int channels = 2;
-    int firstChannel = 0;
-    int inputChannels = 0;
-    int firstInputChannel = 0;
-    int bufferFrames = 512;
-    double sampleRate = 48000.0;
-    int numSilos = 4;
-    int numTempoClocks = 1;
-    int oscPort = 0;  // 0 = disabled
-    std::string natsUrl;  // empty = disabled
-    std::string engineName;  // empty = single-instance mode (flat subjects only)
+// The engine settings (tzpl-config keys) plus the project they came from.
+// The keys themselves live in app_config.hpp -- shared with the app's
+// settings dialog, which writes the same files this reads.
+struct Config : tzplapp::AppConfig {
     std::string projectDir;
 };
 
-static std::string trim(const std::string& s) {
-    size_t start = s.find_first_not_of(" \t\r\n");
-    if (start == std::string::npos) return "";
-    size_t end = s.find_last_not_of(" \t\r\n");
-    return s.substr(start, end - start + 1);
-}
-
-static std::string stripQuotes(const std::string& s) {
-    if (s.size() >= 2 && s.front() == '"' && s.back() == '"')
-        return s.substr(1, s.size() - 2);
-    return s;
-}
-
 static bool parseConfigFile(const std::string& path, Config& config) {
-    std::ifstream file(path);
-    if (!file.is_open()) return false;
-
-    std::string line;
-    int lineNum = 0;
-    while (std::getline(file, line)) {
-        ++lineNum;
-        std::string trimmed = trim(line);
-        if (trimmed.empty() || trimmed.starts_with("--")) continue;
-
-        auto eq = trimmed.find('=');
-        if (eq == std::string::npos) {
-            std::cerr << path << ":" << lineNum << ": expected 'key = value'\n";
-            continue;
-        }
-
-        std::string key = trim(trimmed.substr(0, eq));
-        std::string value = trim(trimmed.substr(eq + 1));
-
-        try {
-            if (key == "silos")            config.numSilos = std::stoi(value);
-            else if (key == "tempoClocks") config.numTempoClocks = std::stoi(value);
-            else if (key == "sampleRate")  config.sampleRate = std::stod(value);
-            else if (key == "bufferFrames") config.bufferFrames = std::stoi(value);
-            else if (key == "channels")    config.channels = std::stoi(value);
-            else if (key == "firstChannel") config.firstChannel = std::stoi(value);
-            else if (key == "device")      config.deviceName = stripQuotes(value);
-            else if (key == "inputChannels") config.inputChannels = std::stoi(value);
-            else if (key == "firstInputChannel") config.firstInputChannel = std::stoi(value);
-            else if (key == "inputDevice") config.inputDeviceName = stripQuotes(value);
-            else if (key == "oscPort")     config.oscPort = std::stoi(value);
-            else if (key == "natsUrl")     config.natsUrl = stripQuotes(value);
-            else if (key == "engineName") config.engineName = stripQuotes(value);
-            else std::cerr << path << ":" << lineNum
-                           << ": unknown config key '" << key << "'\n";
-        } catch (const std::exception& e) {
-            std::cerr << path << ":" << lineNum
-                      << ": invalid value for '" << key << "': " << e.what() << "\n";
-        }
-    }
+    std::vector<std::string> problems;
+    if (!tzplapp::loadConfigFile(path, config, &problems)) return false;
+    for (auto const& p : problems) std::cerr << p << "\n";
     return true;
 }
 
@@ -555,6 +496,10 @@ static void printHelp() {
         "                          (key = value per line, -- comments)\n"
         "    modules/              Project modules (searched before the stdlib)\n"
         "    synthdefs/dylib/      Plugins auto-loaded at startup (optional)\n"
+        "\n"
+        "  Per-user defaults for every project (same keys) are read first from\n"
+        "  ~/Library/Application Support/Tzopilotl/tzpl-config on macOS,\n"
+        "  $XDG_CONFIG_HOME/tzpl/tzpl-config elsewhere.\n"
 #if TZPL_HAS_GUI
         "\n"
         "By default, launches the GUI. Use --nogui for headless mode.\n"
@@ -684,7 +629,12 @@ int main(int argc, const char* argv[]) {
             }
         }
 
-        // --- Load config file from project directory ---
+        // --- Load the per-user config, then let the project's override it ---
+        // The user file is where the settings dialog writes when no project
+        // is open, so a scratch session can still configure audio input.
+        if (std::string userCfg = tzplapp::userConfigFile(); !userCfg.empty()) {
+            parseConfigFile(userCfg, config);
+        }
         if (!config.projectDir.empty()) {
             std::string configPath = tzplapp::projectConfigFile(config.projectDir);
             if (!configPath.empty()) {

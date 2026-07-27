@@ -29,6 +29,7 @@
 #include "app_gui.hpp"
 #include "app_commands.hpp"
 #include "main_component.hpp"
+#include "settings_dialog.hpp"
 #include "tzpl_app_context.hpp"
 #include "tzpl_look_and_feel.hpp"
 #include "BinaryData.h"
@@ -87,6 +88,8 @@ public:
             m.addSeparator();
             m.addCommandItem(&commands_, cmd::fileClose);
 #if !JUCE_MAC
+            m.addSeparator();
+            m.addCommandItem(&commands_, cmd::engineSettings);
             m.addSeparator();
             m.addCommandItem(&commands_, cmd::helpAbout);
             m.addSeparator();
@@ -262,6 +265,8 @@ public:
         // JUCE's standard app menu has no About item; add ours at the top.
         juce::PopupMenu appleExtras;
         appleExtras.addCommandItem(&commands_, cmd::helpAbout);
+        appleExtras.addSeparator();
+        appleExtras.addCommandItem(&commands_, cmd::engineSettings);
         juce::MenuBarModel::setMacMainMenu(menuModel_.get(), &appleExtras);
 #else
         window_->setMenuBar(menuModel_.get());
@@ -313,7 +318,8 @@ public:
                 });
         }
 
-        // TZPL_JUCE_DEMO=find|flash|history|perform|quit-dirty: open a visual
+        // TZPL_JUCE_DEMO=find|flash|graph|settings|history|perform|quit-dirty:
+        // open a visual
         // state at startup so it can be screenshotted without injecting
         // global keystrokes.
         if (auto* d = std::getenv("TZPL_JUCE_DEMO"))
@@ -330,6 +336,8 @@ public:
     }
 
     void shutdown() override {
+        // A settings window left open outlives the main window otherwise.
+        closeEngineSettings();
 #if JUCE_MAC
         juce::MenuBarModel::setMacMainMenu(nullptr);
 #else
