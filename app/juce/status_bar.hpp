@@ -65,6 +65,8 @@ private:
     void refreshStats();
     juce::Rectangle<int> compactRow() const;
     juce::Rectangle<int> xrunArea() const;
+    // The master meter's clip square: click it to clear the clip latch.
+    juce::Rectangle<int> clipArea() const;
 
     bridge::AppContext& appCtx_;
     engine::EngineStats stats_;

@@ -252,6 +252,11 @@ struct Engine
 	MasterMeter masterMeter_;
 	// Engine-wide block timing and dropout counters.
 	EngineStatsRT stats_;
+	// The device's own xrun counter is free-running and belongs to the driver,
+	// so resetEngineStats cannot zero it -- it records the current value here
+	// instead, and getEngineStats reports the difference. Guarded by
+	// nrt_lock_, like everything else the stats path touches.
+	u64 deviceXrunBase_ = 0;
 	// Cleared to skip all timing instrumentation (offline renders, profiling).
 	std::atomic<bool> statsEnabled_{true};
 

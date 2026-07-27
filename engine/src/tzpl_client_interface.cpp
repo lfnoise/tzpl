@@ -2020,6 +2020,10 @@ u32 masterClipCount(Engine* e) {
     return e ? e->masterMeter_.clipCount.load(std::memory_order_relaxed) : 0;
 }
 
+void resetMasterClip(Engine* e) {
+    if (e) e->masterMeter_.clipCount.store(0, std::memory_order_relaxed);
+}
+
 static f64 msOf(u64 nanos) { return (f64)nanos / 1e6; }
 
 void getEngineStats(Engine* e, EngineStats& out) {
@@ -2051,7 +2055,13 @@ void getEngineStats(Engine* e, EngineStats& out) {
 
     if (e->backend_) {
         out.deviceTelemetry = e->backend_->hasTelemetry();
-        out.deviceXruns = e->backend_->deviceXruns();
+        // Report the device counter relative to the last reset. A raw value
+        // BELOW the baseline means the driver's counter restarted (a device
+        // change reopens it at zero), so drop the stale baseline rather than
+        // wrapping into a huge number.
+        u64 raw = e->backend_->deviceXruns();
+        if (raw < e->deviceXrunBase_) e->deviceXrunBase_ = 0;
+        out.deviceXruns = raw - e->deviceXrunBase_;
         out.deviceCpu = e->backend_->deviceCpu();
     }
 
@@ -2090,6 +2100,10 @@ void resetEngineStats(Engine* e) {
     e->stats_.reset();
     for (Silo& s : e->silos_) s.stats_.reset();
     e->masterMeter_.clipCount.store(0, std::memory_order_relaxed);
+    // The driver's xrun counter isn't ours to zero, so re-baseline instead:
+    // without this, a reset leaves the device's lifetime total in place and
+    // the next stats read looks like a fresh burst of dropouts.
+    if (e->backend_) e->deviceXrunBase_ = e->backend_->deviceXruns();
 }
 
 bool tapExists(Engine* e, i64 tapID) {

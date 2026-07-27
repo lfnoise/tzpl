@@ -762,11 +762,11 @@ panel(<span class="str">""</span>);               <span class="cmt">-- back to t
 <ul>
   <li><strong>Device format</strong> &mdash; sample rate and buffer size, or <em>(stopped)</em> when audio isn't running.</li>
   <li><strong>CPU</strong> &mdash; the engine's own DSP time as a share of one audio block's budget, averaged. Green under 50%, amber under 80%, red above. This is the number that predicts dropouts: at 100% the engine is taking longer to compute a block than the block lasts.</li>
-  <li><strong>Master level</strong> &mdash; peak-hold bars for the master bus, with a clip square that <strong>latches red</strong> the first time a sample hits full scale.</li>
+  <li><strong>Master level</strong> &mdash; peak-hold bars for the master bus, with a clip square that <strong>latches red</strong> the first time a sample hits full scale. <strong>Click the red square to clear it</strong> (and only it &mdash; the dropout counters are left alone).</li>
   <li><strong>XRUN</strong> &mdash; a dropout counter. Hidden while zero; once audio has broken it <strong>stays lit</strong> until you clear it. New dropouts also flash the strip and log one line to the console (rate-limited, so a burst can't flood it).</li>
 </ul>
 
-<p><strong>Click the XRUN readout to reset</strong> the counters and clear the latches. That is deliberately the only way &mdash; a dropout should never quietly disappear while you're looking away.</p>
+<p><strong>Click the XRUN readout to reset</strong> the counters and clear both latches; clicking the clip square clears just that one. Nothing else resets them &mdash; a dropout should never quietly disappear while you're looking away. Note that the device's own xrun counter belongs to the driver and cannot be zeroed, so what you see after a reset is the number of xruns <em>since</em> it.</p>
 
 <p>Click anywhere else on the strip to expand a detail panel:</p>
 

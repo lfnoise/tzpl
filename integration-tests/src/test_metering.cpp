@@ -749,6 +749,67 @@ static void test_reset_engine_stats() {
     freeEngine(e);
 }
 
+// A backend reporting a device xrun count we control, and touching no
+// hardware. Everything else in this file runs NRT (no backend at all), but
+// the device counter only exists on the backend seam.
+namespace {
+struct FakeXrunBackend : AudioBackend {
+    u64 xruns = 0;
+    void init(Engine*) override {}
+    void uninit() override {}
+    void start() override {}
+    void stop() override {}
+    f64 streamTime() override { return 0.; }
+    void printDevices() override {}
+    u64 deviceXruns() const override { return xruns; }
+    bool hasTelemetry() const override { return true; }
+};
+} // namespace
+
+// The driver owns its xrun counter and it never goes back to zero on demand,
+// so the engine reports it relative to the last reset. Without that, clicking
+// "reset" in a monitor leaves the device's lifetime total standing and the
+// very next poll reads as a fresh burst of dropouts.
+static void test_device_xrun_reset() {
+    std::print("Test: device xruns count from the last reset\n");
+
+    AudioStreamParameters params{};
+    params.channels = 2;
+    params.bufferFrames = 1024;
+    params.sampleRate = 44100.0;
+    params.deviceName = "default";
+    params.firstChannel = 0;
+
+    EngineConfig config;
+    config.numSilos = 1;
+    auto owned = std::make_unique<FakeXrunBackend>();
+    FakeXrunBackend* fake = owned.get();
+    Engine* e = newEngine(config, params, std::move(owned));
+
+    fake->xruns = 8;
+    EngineStats s;
+    getEngineStats(e, s);
+    check(s.deviceXruns == 8, "the device count is reported before any reset");
+
+    resetEngineStats(e);
+    getEngineStats(e, s);
+    check(s.deviceXruns == 0, "a reset clears the device count");
+    getEngineStats(e, s);
+    check(s.deviceXruns == 0, "it stays clear while the device is quiet");
+
+    fake->xruns = 11;
+    getEngineStats(e, s);
+    check(s.deviceXruns == 3, "only xruns since the reset are counted");
+
+    // Reopening a device restarts the driver's counter at zero; the stale
+    // baseline must not wrap the difference into a huge number.
+    fake->xruns = 2;
+    getEngineStats(e, s);
+    check(s.deviceXruns == 2, "a restarted device counter drops the baseline");
+
+    freeEngine(e);
+}
+
 int main() {
     std::print("=== Metering & monitoring tests ===\n\n");
 
@@ -773,6 +834,7 @@ int main() {
     test_master_tap_budget();
     test_engine_stats();
     test_reset_engine_stats();
+    test_device_xrun_reset();
 
     std::print("\n=== {} passed, {} failed ===\n", gTestsPassed, gTestsFailed);
     return gTestsFailed == 0 ? 0 : 1;

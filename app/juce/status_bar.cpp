@@ -37,6 +37,14 @@ constexpr int kFlashTicks = 16;      // ~800 ms
 constexpr int kLogCooldownTicks = kHz; // one console line per second, at most
 constexpr int kPad = 8;
 
+// Compact-row cell widths, left to right. Shared by paint and hit testing so
+// the clip square's rect can't drift from where it is drawn.
+constexpr int kTriangleW = 14;
+constexpr int kDeviceW = 120;
+constexpr int kCpuW = 96;
+constexpr int kMasterW = 70;
+constexpr int kClipW = 14;
+
 juce::String fmt1(double v) { return juce::String(v, 1); }
 
 // Amplitude -> 0..1 over -60..0 dB, matching the widget and graph meters.
@@ -93,6 +101,10 @@ void StatusBar::refreshStats() {
     // Both dropout sources rolled into one "did audio break" signal; the
     // detail panel breaks them apart again.
     unsigned long long total = stats_.engineDropouts + stats_.deviceXruns;
+    // A total that went DOWN means the counters were reset behind us (not
+    // only by our own click). Follow it down, or the next real dropout goes
+    // unreported until it climbs back past the old high-water mark.
+    if (total < lastDropoutTotal_) lastDropoutTotal_ = total;
     if (total > lastDropoutTotal_) {
         unsigned long long added = total - lastDropoutTotal_;
         lastDropoutTotal_ = total;
@@ -105,6 +117,9 @@ void StatusBar::refreshStats() {
             logCooldown_ = kLogCooldownTicks;
         }
     }
+    // Same rule as the dropout total: follow the counter down when something
+    // else resets it, or the next clip goes unlatched.
+    if (stats_.clipCount < lastClipCount_) lastClipCount_ = stats_.clipCount;
     if (stats_.clipCount > lastClipCount_) {
         lastClipCount_ = stats_.clipCount;
         clipLatched_ = true;
@@ -135,7 +150,29 @@ juce::Rectangle<int> StatusBar::xrunArea() const {
     return r.removeFromRight(110).withTrimmedRight(20);
 }
 
+// The clip square, at its full cell width -- the drawn 8x8 dot is too small
+// to ask anyone to hit.
+juce::Rectangle<int> StatusBar::clipArea() const {
+    auto r = compactRow().reduced(kPad, 3);
+    r.removeFromLeft(kTriangleW);
+    r.removeFromLeft(kDeviceW);
+    r.removeFromLeft(kCpuW);
+    r.removeFromLeft(kMasterW);
+    return r.removeFromLeft(kClipW);
+}
+
 void StatusBar::mouseDown(juce::MouseEvent const& e) {
+    // The clip latch clears on its own click, without disturbing the dropout
+    // counters -- checked first, since it sits inside the compact row. Only
+    // while it is lit: an unlit square shouldn't be a dead spot in a row that
+    // otherwise expands the detail panel wherever you click it.
+    if (clipLatched_ && clipArea().contains(e.getPosition()) && appCtx_.engine) {
+        engine::resetMasterClip(appCtx_.engine);
+        clipLatched_ = false;
+        lastClipCount_ = 0;
+        repaint();
+        return;
+    }
     if (xrunArea().contains(e.getPosition()) && appCtx_.engine) {
         engine::resetEngineStats(appCtx_.engine);
         dropoutLatched_ = false;
@@ -170,7 +207,7 @@ void StatusBar::paint(juce::Graphics& g) {
 
     // Disclosure triangle.
     {
-        auto tri = r.removeFromLeft(14);
+        auto tri = r.removeFromLeft(kTriangleW);
         juce::Path p;
         float cx = (float)tri.getCentreX(), cy = (float)tri.getCentreY();
         if (expanded_) { p.addTriangle(cx - 4, cy + 2, cx + 4, cy + 2, cx, cy - 3); }
@@ -189,11 +226,11 @@ void StatusBar::paint(juce::Graphics& g) {
     } else {
         dev << "no audio";
     }
-    g.drawText(dev, r.removeFromLeft(120), juce::Justification::centredLeft, true);
+    g.drawText(dev, r.removeFromLeft(kDeviceW), juce::Justification::centredLeft, true);
 
     // DSP load: number + bar.
     {
-        auto cpu = r.removeFromLeft(96);
+        auto cpu = r.removeFromLeft(kCpuW);
         g.setColour(text);
         g.drawText("CPU " + juce::String((int)std::lround(stats_.loadPercent)) + "%",
                    cpu.removeFromLeft(54), juce::Justification::centredLeft, true);
@@ -208,7 +245,7 @@ void StatusBar::paint(juce::Graphics& g) {
     // Master level (peak hold), one lane per channel, plus a clip square.
     if (appCtx_.engine) {
         int chans = juce::jlimit(1, 2, engine::masterChans(appCtx_.engine));
-        auto meter = r.removeFromLeft(70).withSizeKeepingCentre(60, 12);
+        auto meter = r.removeFromLeft(kMasterW).withSizeKeepingCentre(60, 12);
         g.setColour(juce::Colours::black.withAlpha(0.5f));
         g.fillRect(meter);
         int laneH = std::max(2, meter.getHeight() / chans);
@@ -218,7 +255,7 @@ void StatusBar::paint(juce::Graphics& g) {
             g.setColour(v >= 1.0f ? juce::Colours::red : juce::Colour(0xff4caf50));
             g.fillRect(lane.withWidth((int)std::lround(db01(v) * lane.getWidth())));
         }
-        auto clip = r.removeFromLeft(14).withSizeKeepingCentre(8, 8);
+        auto clip = r.removeFromLeft(kClipW).withSizeKeepingCentre(8, 8);
         g.setColour(clipLatched_ ? juce::Colours::red : text.withAlpha(0.15f));
         g.fillRect(clip);
     }

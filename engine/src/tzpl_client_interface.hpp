@@ -367,6 +367,9 @@ f32  masterPeakHold(Engine* e, int ch);
 // Monotone count of samples at or over full scale. Latch on a change rather
 // than reading and clearing -- there may be several readers.
 u32  masterClipCount(Engine* e);
+// Clear that count (a monitor's clip indicator being reset). Narrower than
+// resetEngineStats, which restarts the timing and dropout counters too.
+void resetMasterClip(Engine* e);
 
 struct SiloStatsSnap {
     int index = 0;
@@ -395,6 +398,9 @@ struct EngineStats {
     // Device-reported, polled from the backend. Kept separate from
     // engineDropouts: they measure different things, and deviceCpu includes
     // the backend's own per-block work, so it reads higher than loadPercent.
+    // Counted from the last resetEngineStats: the driver's own counter is
+    // free-running and cannot be zeroed, so this is a difference from the
+    // value it held then.
     u64 deviceXruns = 0;
     f64 deviceCpu = 0;
     bool deviceTelemetry = false;
