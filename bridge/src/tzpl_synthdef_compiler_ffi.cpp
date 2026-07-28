@@ -191,7 +191,8 @@ static void ffi_compileSynthDefAndLoad(ts::VM& vm, u16 dst, u16, u16 argBase) {
     // Check cache (use sexpr as key since name is embedded in it)
     std::string key = cacheKey("", sexpr);
     auto it = compilationCache().find(key);
-    if (it != compilationCache().end()) {
+    bool fromCache = it != compilationCache().end();
+    if (fromCache) {
         dylibPath = it->second.dylibPath;
     } else {
         // Compile
@@ -205,6 +206,20 @@ static void ffi_compileSynthDefAndLoad(ts::VM& vm, u16 dst, u16, u16 argBase) {
 
     // Load the .dylib
     auto optDef = synthdef::loadDef(dylibPath);
+    if (!optDef.has_value() && fromCache) {
+        // The cached revision is gone -- pruned after enough later builds of
+        // the same name. The cache records a path, not the code, so recompile
+        // and re-point it. Only worth retrying on a cache hit: a load failure
+        // on a dylib we just built is a real failure, not a stale path.
+        compilationCache().erase(key);
+        std::string error = compileSynthDefPipeline(sexpr, synthName, dylibPath);
+        if (!error.empty()) {
+            returnErrString(vm, dst, error, __func__);
+            return;
+        }
+        compilationCache()[key] = CacheEntry{dylibPath};
+        optDef = synthdef::loadDef(dylibPath);
+    }
     if (!optDef.has_value()) {
         returnErrString(vm, dst, std::string("failed to load plugin: ") + dylibPath,
                         __func__);

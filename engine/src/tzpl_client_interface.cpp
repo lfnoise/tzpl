@@ -656,7 +656,12 @@ static void parsePluginStem(std::string const& stem, std::string& name, u64& rev
 void listPluginFiles(std::vector<std::string> const& dirs,
                      std::vector<PluginFile>& out) {
     namespace fs = std::filesystem;
-    struct Entry { std::string path; u64 rev; usize dirIndex; };
+    struct Entry {
+        std::string path;
+        fs::file_time_type mtime;
+        u64 rev;
+        usize dirIndex;
+    };
     std::unordered_map<std::string, Entry> best;
 
     for (usize di = 0; di < dirs.size(); ++di) {
@@ -669,12 +674,23 @@ void listPluginFiles(std::vector<std::string> const& dirs,
             std::string name;
             u64 rev;
             parsePluginStem(fs::path(p.path()).stem().string(), name, rev);
+            std::error_code mec;
+            auto mtime = fs::last_write_time(p.path(), mec);
+            if (mec) mtime = fs::file_time_type::min();
+            Entry cand{p.path().string(), mtime, rev, di};
             auto it = best.find(name);
             if (it == best.end()) {
-                best.emplace(name, Entry{p.path().string(), rev, di});
-            } else if (it->second.dirIndex == di && rev > it->second.rev) {
-                // Same dir, newer revision. An earlier dir always shadows.
-                it->second = Entry{p.path().string(), rev, di};
+                best.emplace(name, std::move(cand));
+            } else if (it->second.dirIndex == di
+                       && (mtime > it->second.mtime
+                           || (mtime == it->second.mtime
+                               && rev > it->second.rev))) {
+                // Same dir, newer build. Mtime decides, not the revision
+                // number: revisions only order builds within one process, so a
+                // higher revision left by an earlier session is not newer.
+                // Rev breaks ties when timestamps are identical.
+                // An earlier dir always shadows.
+                it->second = std::move(cand);
             }
         }
     }

@@ -490,6 +490,207 @@ static void test_control_kinds() {
     engine::freeEngine(eng);
 }
 
+// A revision number only orders builds within one process. Before the fix,
+// the counter restarted at 0 every launch (so each run rewrote _r1) while
+// listPluginFiles picked the highest revision -- resolving to whatever stale
+// dylib an earlier session happened to leave behind at a higher revision.
+static void test_plugin_revision_recency() {
+    std::print("Test: plugin discovery resolves to the newest build, not the "
+               "highest revision\n");
+    namespace fs = std::filesystem;
+
+    fs::path dir = fs::temp_directory_path() / "tzpl_rev_recency_test";
+    fs::remove_all(dir);
+    fs::create_directories(dir);
+
+    // listPluginFiles never dlopens, so empty files with the right names and
+    // timestamps are enough to exercise the selection rule.
+    auto touch = [&](char const* stem, int hoursAgo) {
+        fs::path p = dir / (std::string(stem) + ".dylib");
+        std::ofstream(p).close();
+        fs::last_write_time(p, fs::file_time_type::clock::now()
+                                   - std::chrono::hours(hoursAgo));
+        return p;
+    };
+
+    // _r2 is the fossil from an older session; _r1 is today's build.
+    touch("revtest_synth_r2", 96);
+    fs::path fresh = touch("revtest_synth_r1", 0);
+
+    std::vector<engine::PluginFile> files;
+    engine::listPluginFiles({dir.string()}, files);
+
+    std::string picked;
+    int matches = 0;
+    for (auto const& f : files) {
+        if (f.name == "revtest") { picked = f.path; ++matches; }
+    }
+    check(matches == 1, "revisions of one name collapse to a single entry");
+    check(picked == fresh.string(),
+          "newer mtime wins over the higher revision number");
+
+    // Ties on mtime fall back to the revision number.
+    auto sameTime = fs::file_time_type::clock::now() - std::chrono::hours(3);
+    fs::path lo = touch("tietest_synth_r4", 0);
+    fs::path hi = touch("tietest_synth_r7", 0);
+    fs::last_write_time(lo, sameTime);
+    fs::last_write_time(hi, sameTime);
+
+    files.clear();
+    engine::listPluginFiles({dir.string()}, files);
+    std::string tiePicked;
+    for (auto const& f : files) {
+        if (f.name == "tietest") tiePicked = f.path;
+    }
+    check(tiePicked == hi.string(),
+          "equal mtimes fall back to the higher revision");
+
+    // compileAndLink seeds from disk, so a fresh process still advances past
+    // revisions an earlier session left behind.
+    std::string buildDir = synthdef::getBuildDir();
+    fs::create_directories(buildDir + "dylib");
+    fs::path fossil = fs::path(buildDir + "dylib") / "revseed_synth_r9.dylib";
+    std::ofstream(fossil).close();
+    // Nothing has compiled "revseed" in this process, so its counter is unset
+    // exactly as it would be right after a restart. The compile itself fails
+    // (no .cpp to build) and prints clang's error -- expected; the revision is
+    // seeded and bumped before clang runs, which is what is under test.
+    (void)synthdef::compileAndLink(buildDir, "revseed");
+    check(synthdef::dylibPath(buildDir, "revseed")
+              == buildDir + "dylib/revseed_synth_r10.dylib",
+          "revision counter seeds past dylibs left by an earlier session");
+    fs::remove(fossil);
+
+    fs::remove_all(dir);
+}
+
+// Old revisions are dropped as later ones are built, so the compile cache stays
+// bounded across a long session instead of growing one dylib per rebuild.
+static void test_plugin_revision_pruning() {
+    std::print("Test: compiling prunes all but the newest revisions\n");
+    namespace fs = std::filesystem;
+
+    std::string buildDir = synthdef::getBuildDir();
+    std::string dylibDir = buildDir + "dylib";
+    fs::create_directories(dylibDir);
+
+    auto revsOnDisk = [&] {
+        std::vector<unsigned long long> revs;
+        std::string prefix = "prunetest_synth_r";
+        for (auto const& e : fs::directory_iterator(dylibDir)) {
+            std::string stem = e.path().stem().string();
+            if (e.path().extension() == ".dylib" && stem.starts_with(prefix))
+                revs.push_back(std::stoull(stem.substr(prefix.size())));
+        }
+        std::sort(revs.begin(), revs.end());
+        return revs;
+    };
+
+    // A session's worth of accumulated revisions, and a foreign unrevisioned
+    // artifact that pruning must not touch.
+    for (int r = 1; r <= 6; ++r) {
+        std::ofstream(fs::path(dylibDir)
+                      / ("prunetest_synth_r" + std::to_string(r) + ".dylib"))
+            .close();
+    }
+    fs::path unrevisioned = fs::path(dylibDir) / "prunetest_synth.dylib";
+    std::ofstream(unrevisioned).close();
+
+    // Pruning runs only after a successful compile+link, so this needs source
+    // that actually builds -- but not a working plugin, since nothing dlopens
+    // it here.
+    synthdef::ensureBuildDirs(buildDir);
+    synthdef::writeCodeToFile(buildDir, "prunetest",
+                              "extern \"C\" int tzpl_prunetest() { return 0; }\n");
+    int err = synthdef::compileAndLink(buildDir, "prunetest");
+    check(err == 0, "prunetest compiles and links");
+
+    if (err == 0) {
+        // Seeded to 6, so this build is r7; TZPL_KEEP_REVISIONS is unset in
+        // the harness, so the default of 3 keeps r5, r6, r7.
+        auto revs = revsOnDisk();
+        check(revs.size() == 3, "only the newest 3 revisions survive");
+        check(revs.size() == 3 && revs.back() == 7, "the fresh build is kept");
+        check(revs.size() == 3 && revs.front() == 5,
+              "the kept window is the newest revisions, not the oldest");
+        check(fs::exists(synthdef::dylibPath(buildDir, "prunetest")),
+              "the path dylibPath reports still exists");
+        check(fs::exists(unrevisioned), "an unrevisioned dylib is left alone");
+    }
+
+    for (auto r : revsOnDisk()) {
+        fs::remove(fs::path(dylibDir)
+                   / ("prunetest_synth_r" + std::to_string(r) + ".dylib"));
+    }
+    fs::remove(unrevisioned);
+    fs::remove(fs::path(buildDir) / "cpp" / "prunetest_synth.cpp");
+    fs::remove(fs::path(buildDir) / "obj" / "prunetest_synth.o");
+}
+
+// The compilation cache records a dylib path, not the code behind it, so a
+// pruned revision must send the cache back to the compiler rather than fail.
+static void test_cached_path_recompile_fallback() {
+    std::print("Test: a cache hit on a deleted dylib recompiles instead of "
+               "failing\n");
+    namespace fs = std::filesystem;
+
+    char const* source = R"LANG(
+        import synthdef.*;
+        let sexpr = "(Synth fallback_test (Graph 1 ((0 Constant 1 12 (440.0)) (1 Outlet \"out\" 0))))";
+        compileSynthDefAndLoad(sexpr);
+    )LANG";
+
+    auto runOnce = [&](engine::Engine* eng) {
+        ts::TypeUniverse types;
+        ts::Compiler compiler(types);
+        bridge::registerAudioEngineFFI(compiler);
+        bridge::registerSynthdefCompilerFFI(compiler);
+        bridge::registerClockFFI(compiler);
+        ts::ModuleCompiler moduleCompiler(compiler, {MODULES_DIR, LANG_MODULES_DIR});
+        auto target = compiler.createTarget();
+        ts::VM vm(16 * 1024 * 1024, types, target);
+        bridge::AppContext appCtx; appCtx.engine = eng;
+        bridge::setAppContextOnVM(&vm, &appCtx);
+        FILE* devnull = fopen("/dev/null", "w");
+        vm.setPrintOutput(devnull);
+        bool ok = compileAndRun(compiler, vm, source, "fallback.x", &moduleCompiler);
+        fclose(devnull);
+        return ok;
+    };
+
+    // First run populates the process-wide compilation cache with a path.
+    engine::Engine* eng1 = makeTestEngine();
+    check(runOnce(eng1), "fallback_test compiles and loads");
+    engine::freeEngine(eng1);
+
+    // Simulate that path having been pruned by later builds of the same name.
+    std::string dylibDir = synthdef::getBuildDir() + "dylib";
+    int deleted = 0;
+    for (auto const& e : fs::directory_iterator(dylibDir)) {
+        if (e.path().extension() == ".dylib"
+            && e.path().stem().string().starts_with("fallback_test_synth")) {
+            fs::remove(e.path());
+            ++deleted;
+        }
+    }
+    check(deleted > 0, "the cached dylib was on disk to delete");
+
+    // Second run hits the cache, finds nothing to load, and recompiles. A
+    // fresh engine means the def can only be present if the load succeeded.
+    engine::Engine* eng2 = makeTestEngine();
+    check(runOnce(eng2), "the run with a stale cached path still succeeds");
+    engine::DefDesc desc;
+    check(engine::getDefDesc(eng2, "fallback_test", desc),
+          "the def is registered, so the recompiled dylib loaded");
+    engine::freeEngine(eng2);
+
+    for (auto const& e : fs::directory_iterator(dylibDir)) {
+        if (e.path().extension() == ".dylib"
+            && e.path().stem().string().starts_with("fallback_test_synth"))
+            fs::remove(e.path());
+    }
+}
+
 static void test_abi_version_refusal() {
     std::print("Test: loaders refuse plugins with a newer ABI version\n");
     namespace fs = std::filesystem;
@@ -759,6 +960,9 @@ int main(int argc, char const* argv[]) {
     test_list_synthdefs();
     test_def_desc_introspection();
     test_control_kinds();
+    test_plugin_revision_recency();
+    test_plugin_revision_pruning();
+    test_cached_path_recompile_fallback();
     test_abi_version_refusal();
     test_low_level_ffi();
     test_synthc_analysis_diff();

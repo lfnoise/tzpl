@@ -23,6 +23,7 @@
 //
 
 #include "synthdef_compile_link.hpp"
+#include <algorithm>
 #include <dlfcn.h>
 #include <filesystem>
 #include <fstream>
@@ -44,6 +45,96 @@ static std::unordered_map<string, u64>& revisionCounters() {
 }
 
 static string synthNameSuffix = "_synth";
+
+// Every {name}_synth_rN.dylib in {buildDir}/dylib, as (revision, path).
+// Unrevisioned {name}_synth.dylib files are ignored: compileAndLink has never
+// produced one, so any that exist are foreign artifacts and not ours to touch.
+static vector<std::pair<u64, fs::path>>
+scanRevisions(string const& buildDir, string const& synthName) {
+    vector<std::pair<u64, fs::path>> revs;
+    string const prefix = synthName + synthNameSuffix + "_r";
+    std::error_code ec;
+    // On error the iterator compares equal to end(), so this loop just skips.
+    for (auto const& entry : fs::directory_iterator(buildDir + "dylib", ec)) {
+        if (!entry.is_regular_file() || entry.path().extension() != ".dylib")
+            continue;
+        string stem = entry.path().stem().string();
+        if (!stem.starts_with(prefix)) continue;
+        string digits = stem.substr(prefix.size());
+        if (digits.empty()
+            || digits.find_first_not_of("0123456789") != string::npos)
+            continue;
+        u64 rev = 0;
+        try {
+            rev = std::stoull(digits);
+        } catch (std::exception const&) {  // absurdly long digit run
+            continue;
+        }
+        revs.emplace_back(rev, entry.path());
+    }
+    return revs;
+}
+
+// Seed a name's counter from the dylibs already on disk, so revisions keep
+// increasing across process restarts.
+//
+// The counter is process-lifetime state. Without seeding, every launch starts
+// at 0 and the first compile of a name rewrites {name}_synth_r1.dylib -- so a
+// higher revision left by an earlier session outlives the build that replaced
+// it, and anything that reads the revision as "newest" (the plugin browser)
+// resolves to the stale file. Seeding also restores the invariant that a
+// compile never overwrites a dylib some node may still be running.
+//
+// No-ops once the name has a counter, so it costs one directory scan per name
+// per process.
+static void seedRevisionFromDisk(string const& buildDir, string const& synthName) {
+    auto& counters = revisionCounters();
+    if (counters.find(synthName) != counters.end()) return;
+
+    u64 maxRev = 0;
+    for (auto const& [rev, path] : scanRevisions(buildDir, synthName))
+        if (rev > maxRev) maxRev = rev;
+    counters[synthName] = maxRev;
+}
+
+// How many revisions of a name to keep on disk. $TZPL_KEEP_REVISIONS, else 3.
+static u64 keepRevisions() {
+    static u64 const keep = [] {
+        char const* env = getenv("TZPL_KEEP_REVISIONS");
+        if (!env || !env[0]) return u64{3};
+        errno = 0;
+        char* end = nullptr;
+        unsigned long long v = strtoull(env, &end, 10);
+        if (errno || end == env || v == 0) return u64{3};  // keep at least one
+        return static_cast<u64>(v);
+    }();
+    return keep;
+}
+
+// Drop all but the newest keepRevisions() revisions of a name.
+//
+// Deleting a dylib that is currently dlopen'd is safe: unlink drops the
+// directory entry while the mapping holds the inode, so nodes running that
+// revision keep valid function pointers. What a deletion can break is opening
+// it *again* by path -- which is why callers that cache a dylib path must fall
+// back to recompiling when the load fails.
+static void pruneOldRevisions(string const& buildDir, string const& synthName) {
+    auto revs = scanRevisions(buildDir, synthName);
+    u64 keep = keepRevisions();
+    if (revs.size() <= keep) return;
+
+    // Newest first; everything past the keep window goes.
+    std::sort(revs.begin(), revs.end(),
+              [](auto const& a, auto const& b) { return a.first > b.first; });
+
+    usize removed = 0;
+    for (usize i = keep; i < revs.size(); ++i) {
+        std::error_code ec;
+        if (fs::remove(revs[i].second, ec) && !ec) ++removed;
+    }
+    if (removed)
+        std::println("pruned {} old revision(s) of {}", removed, synthName);
+}
 
 static int compile(string const& filepath_c, string const& filepath_o, string const& includeDir)
 {
@@ -163,7 +254,10 @@ void writeCodeToFile(string const& buildDir, string const& synthName, string con
 
 string dylibPath(string const& buildDir, string const& synthName) {
     auto& counters = revisionCounters();
-    u64 rev = counters[synthName];
+    // find, not operator[]: inserting a 0 here would make the name look
+    // already-seeded to seedRevisionFromDisk.
+    auto it = counters.find(synthName);
+    u64 rev = it == counters.end() ? 0 : it->second;
     if (rev == 0)
         return buildDir + "dylib/" + synthName + synthNameSuffix + ".dylib";
     return buildDir + "dylib/" + synthName + synthNameSuffix + "_r" + std::to_string(rev) + ".dylib";
@@ -173,6 +267,8 @@ int compileAndLink(string const& buildDir, string const& synthName) {
     // Bump revision so this compilation produces a unique dylib path.
     // Old dylibs stay on disk (and in memory via dlopen) so that
     // nodes still running the previous version keep valid function pointers.
+    // Seeding first makes that hold across restarts too, not just within a run.
+    seedRevisionFromDisk(buildDir, synthName);
     revisionCounters()[synthName]++;
 
     string filename = synthName + synthNameSuffix;
@@ -186,6 +282,11 @@ int compileAndLink(string const& buildDir, string const& synthName) {
 
     err = link(filepath_o, filepath_dylib);
     if (err) return err;
+
+    // Bound the cache here rather than at shutdown: this runs whatever way the
+    // process exits, and it keeps a long live-coding session from growing
+    // without limit instead of only cleaning up on the next launch.
+    pruneOldRevisions(buildDir, synthName);
 
     return 0;
 }
