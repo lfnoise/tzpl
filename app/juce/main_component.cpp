@@ -184,7 +184,10 @@ void MainComponent::resized() {
 
     // Sidebar | resizer | everything else. The third slot is a gap in the
     // layout (nullptr): the document/console split below fills it.
-    bool showSide = sidebarVisible_ && sidebar_.hasFolders();
+    // A file tree is only useful next to the editor tabs it feeds, so the
+    // notebook and graph modes get the full width.
+    bool showSide = sidebarVisible_ && sidebar_.hasFolders()
+                 && centerMode_ == CenterMode::editor;
     sidebar_.setVisible(showSide);
     sideResizer_->setVisible(showSide);
     if (showSide) {
@@ -621,6 +624,9 @@ void MainComponent::openFolderFlow() {
 
 void MainComponent::addSidebarFolder(juce::File const& dir) {
     sidebar_.addFolder(dir);
+    // The tree only shows next to the editor tabs: switch there, or opening
+    // a folder from the notebook/graph would appear to do nothing.
+    setCenterMode(CenterMode::editor);
     setSidebarVisible(true);
     logLine("folder: " + dir.getFullPathName());
 }
@@ -1450,7 +1456,10 @@ void MainComponent::getCommandInfo(juce::CommandID id,
     case cmd::toggleSidebar:
         set("File Sidebar", "View");
         info.addDefaultKeypress('d', modShift);
-        info.setTicked(sidebarVisible_ && sidebar_.hasFolders());
+        // Only the editor shows it, so the toggle means nothing elsewhere.
+        info.setActive(centerMode_ == CenterMode::editor);
+        info.setTicked(sidebarVisible_ && sidebar_.hasFolders()
+                       && centerMode_ == CenterMode::editor);
         break;
     case cmd::togglePerform:
         set("Perform Mode", "View");
@@ -1817,13 +1826,19 @@ void MainComponent::testShowDemo(String const& which) {
         if (dir.isNotEmpty()) addSidebarFolder(juce::File(dir));
         juce::Timer::callAfterDelay(300, [this] {
             juce::File opened = sidebar_.testClickFirstDocument();
-            bool ok = sidebar_.testRootCount() > 0 && sidebar_.isVisible()
+            bool inEditor = sidebar_.isVisible();
+            // ...and it must get out of the way of the other center modes.
+            setCenterMode(CenterMode::notebook);
+            bool inNotebook = sidebar_.isVisible();
+            setCenterMode(CenterMode::editor);
+            bool ok = sidebar_.testRootCount() > 0 && inEditor && !inNotebook
                    && opened != juce::File()
                    && editorPane_.activeFile() == opened;
             String verdict = String("sidebar: roots=")
                 + String(sidebar_.testRootCount())
                 + " rows=" + String(sidebar_.testRowCount())
-                + " visible=" + (sidebar_.isVisible() ? "1" : "0")
+                + " visibleInEditor=" + (inEditor ? "1" : "0")
+                + " visibleInNotebook=" + (inNotebook ? "1" : "0")
                 + " opened=" + opened.getFileName()
                 + " tab=" + editorPane_.activeTabName()
                 + (ok ? " OK" : " FAIL");
