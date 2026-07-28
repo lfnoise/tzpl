@@ -62,6 +62,11 @@ public:
     void setFontSize(float px);
     float fontSize() const { return fontSize_; }
     int rowHeight() const;
+    // Prebuilt row fonts -- building one per paint would re-resolve the
+    // typeface on every row of every repaint.
+    juce::Font const& rowFont(bool bold) const {
+        return bold ? rootFont_ : fileFont_;
+    }
 
     // A file row was activated (click or Return).
     std::function<void(juce::File)> onOpenFile;
@@ -91,9 +96,13 @@ private:
     void refreshItemAt(juce::File const& path);
     void openFile(juce::File const& file);
 
+    void rebuildFonts();
+
     std::unique_ptr<FileTree> tree_;
     std::unique_ptr<RootHolder> root_;   // hidden holder for the roots
     float fontSize_ = 14.0f;
+    juce::Font fileFont_ { juce::FontOptions(14.0f) };
+    juce::Font rootFont_ { juce::FontOptions(14.0f) };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(SidebarPanel)
 };

@@ -29,6 +29,7 @@
 #include "module_compiler.hpp"
 #include "project_paths.hpp"
 #include "settings_dialog.hpp"
+#include "tzpl_fonts.hpp"
 #include <cstdio>
 #include <cstdlib>
 #include <unistd.h>  // getpid, for the relaunch watcher
@@ -1876,6 +1877,39 @@ void MainComponent::testShowDemo(String const& which) {
                 + (ok ? " OK" : " FAIL");
             logLine(verdict);
             std::fprintf(stderr, "%s\n", verdict.toRawUTF8());
+        });
+    } else if (which.startsWith("tabswitch")) {
+        // "tabswitch:<fileA>;<fileB>" -- open both, then time repeated tab
+        // switches including the repaint they force.
+        auto arg = which.fromFirstOccurrenceOf(":", false, false);
+        auto paths = juce::StringArray::fromTokens(arg, ";", "");
+        for (auto& p : paths) editorPane_.openFile(juce::File(p));
+        setCenterMode(CenterMode::editor);
+        juce::Timer::callAfterDelay(800, [this] {
+            double worst = 0.0, total = 0.0;
+            int const n = 12;
+            for (int i = 0; i < n; ++i) {
+                double t0 = juce::Time::getMillisecondCounterHiRes();
+                editorPane_.selectTab(i % 2);
+                if (auto* peer = getPeer())
+                    peer->performAnyPendingRepaintsNow();
+                double dt = juce::Time::getMillisecondCounterHiRes() - t0;
+                total += dt;
+                worst = juce::jmax(worst, dt);
+            }
+            double t1 = juce::Time::getMillisecondCounterHiRes();
+            sidebar_.repaint();
+            if (auto* peer = getPeer()) peer->performAnyPendingRepaintsNow();
+            double sideMs = juce::Time::getMillisecondCounterHiRes() - t1;
+
+            double t2 = juce::Time::getMillisecondCounterHiRes();
+            auto name = monoFontName();
+            double fontMs = juce::Time::getMillisecondCounterHiRes() - t2;
+
+            std::fprintf(stderr,
+                         "tabswitch: avg=%.1fms worst=%.1fms "
+                         "sidebarRepaint=%.1fms monoFontName=%.1fms (%s)\n",
+                         total / n, worst, sideMs, fontMs, name.toRawUTF8());
         });
     } else if (which.startsWith("drop")) {
         // "drop:<path>" -- a Finder drop of a folder (sidebar) or file.

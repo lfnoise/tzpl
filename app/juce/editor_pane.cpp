@@ -207,6 +207,11 @@ int EditorPane::activeTabIndex() const {
     return tabsUI_.getCurrentTabIndex();
 }
 
+void EditorPane::selectTab(int index) {
+    if (index >= 0 && index < (int)tabs_.size())
+        tabsUI_.setCurrentTabIndex(index);
+}
+
 int EditorPane::indexOfDocument(CodeDocument const* doc) const {
     for (int i = 0; i < (int)tabs_.size(); ++i)
         if (tabs_[i]->doc.get() == doc) return i;

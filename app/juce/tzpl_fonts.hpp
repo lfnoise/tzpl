@@ -34,17 +34,26 @@ namespace tzplapp {
 // The preferred monospaced family per platform, falling back to whatever
 // JUCE reports as the system monospaced font. Consolas (Windows) and
 // DejaVu Sans Mono (Linux) ship with their platforms; Menlo on macOS.
+//
+// Resolved once per run: Font::findAllTypefaceNames() enumerates every
+// installed font through CoreText, which costs ~25 ms here -- ruinous from a
+// paint routine, and the answer cannot usefully change mid-session. Call it
+// from the message thread first (the initializer is not re-entrant-safe
+// against JUCE's font machinery, though the static itself is thread-safe).
 inline juce::String monoFontName() {
-   #if JUCE_MAC
-    juce::String preferred = "Menlo";
-   #elif JUCE_WINDOWS
-    juce::String preferred = "Consolas";
-   #else
-    juce::String preferred = "DejaVu Sans Mono";
-   #endif
-    auto const& available = juce::Font::findAllTypefaceNames();
-    if (available.contains(preferred)) return preferred;
-    return juce::Font::getDefaultMonospacedFontName();
+    static juce::String const resolved = [] {
+       #if JUCE_MAC
+        juce::String preferred = "Menlo";
+       #elif JUCE_WINDOWS
+        juce::String preferred = "Consolas";
+       #else
+        juce::String preferred = "DejaVu Sans Mono";
+       #endif
+        auto const& available = juce::Font::findAllTypefaceNames();
+        if (available.contains(preferred)) return preferred;
+        return juce::Font::getDefaultMonospacedFontName();
+    }();
+    return resolved;
 }
 
 // A monospaced FontOptions at the given pixel size. To embed a font, build a

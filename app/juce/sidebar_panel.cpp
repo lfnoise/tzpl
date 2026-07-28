@@ -91,9 +91,7 @@ public:
         if (!isDir_ && !isDocumentFile(file_))
             text = text.withMultipliedAlpha(0.55f);
         g.setColour(text);
-        g.setFont(juce::Font(juce::FontOptions(
-            monoFontName(), owner_.fontSize(),
-            isRoot_ ? juce::Font::bold : juce::Font::plain)));
+        g.setFont(owner_.rowFont(isRoot_));
         g.drawText(file_.getFileName(), 2, 0, width - 4, height,
                    juce::Justification::centredLeft, true);
     }
@@ -215,6 +213,7 @@ SidebarPanel::SidebarPanel() {
     tree_->setMultiSelectEnabled(false);
     tree_->setOpenCloseButtonsVisible(true);
     addAndMakeVisible(*tree_);
+    rebuildFonts();
     lookAndFeelChanged();
 }
 
@@ -249,8 +248,16 @@ void SidebarPanel::lookAndFeelChanged() {
     repaint();
 }
 
+void SidebarPanel::rebuildFonts() {
+    fileFont_ = juce::Font(
+        juce::FontOptions(monoFontName(), fontSize_, juce::Font::plain));
+    rootFont_ = juce::Font(
+        juce::FontOptions(monoFontName(), fontSize_, juce::Font::bold));
+}
+
 void SidebarPanel::setFontSize(float px) {
     fontSize_ = px;
+    rebuildFonts();
     // Row heights come from getItemHeight(), which the tree caches.
     root_->treeHasChanged();
     repaint();

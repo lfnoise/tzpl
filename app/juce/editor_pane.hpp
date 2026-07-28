@@ -94,6 +94,7 @@ public:
     int tabCount() const { return (int)tabs_.size(); }
     int activeTabIndex() const;
 
+    void selectTab(int index);
     juce::String tabName(int index) const;
     bool tabModified(int index) const;
     bool tabHasFilePath(int index) const;
