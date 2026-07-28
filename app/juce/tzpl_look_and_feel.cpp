@@ -20,9 +20,13 @@
 //
 
 #include "tzpl_look_and_feel.hpp"
+#include "tzpl_fonts.hpp"
 #include <juce_gui_extra/juce_gui_extra.h> // CodeEditorComponent colour IDs
 
 namespace tzplapp {
+
+// Space either side of a tab label, so filenames do not run together.
+static constexpr int kTabPadding = 14;
 
 namespace {
 
@@ -116,6 +120,79 @@ void TzplLookAndFeel::applyTheme(int t) {
               c.windowBg.darker(0.15f));
     setColour(juce::CodeEditorComponent::lineNumberTextId,
               c.dimText);
+
+    // Editor tabs. The front tab gets full-strength text over the editor
+    // background; the rest are dimmed and sit on a slightly offset fill.
+    tabBg_ = c.windowBg;
+    tabOutline_ = c.outline;
+    tabAccent_ = c.accent;
+    setColour(juce::TabbedComponent::backgroundColourId, c.windowBg);
+    setColour(juce::TabbedComponent::outlineColourId, c.outline.withAlpha(0.5f));
+    setColour(juce::TabbedButtonBar::tabOutlineColourId,
+              c.outline.withAlpha(0.4f));
+    setColour(juce::TabbedButtonBar::frontOutlineColourId, c.accent);
+    setColour(juce::TabbedButtonBar::tabTextColourId,
+              c.text.withMultipliedAlpha(0.6f));
+    setColour(juce::TabbedButtonBar::frontTextColourId, c.text);
+}
+
+void TzplLookAndFeel::drawTabButton(juce::TabBarButton& button,
+                                    juce::Graphics& g,
+                                    bool isMouseOver, bool isMouseDown) {
+    auto const orientation = button.getTabbedButtonBar().getOrientation();
+    bool const front = button.getToggleState();
+
+    // contrasting() moves away from the fill in whichever direction the theme
+    // allows, so this reads on both the near-black and the grey themes.
+    auto fill = front ? tabBg_
+              : (isMouseOver || isMouseDown) ? tabBg_.contrasting(0.10f)
+                                             : tabBg_.contrasting(0.05f);
+    auto area = button.getActiveArea();
+    g.setColour(fill);
+    g.fillRect(area);
+
+    // Hairline between neighbouring tabs.
+    auto edge = area;
+    g.setColour(tabOutline_.withAlpha(0.4f));
+    if (button.getTabbedButtonBar().isVertical())
+        g.fillRect(edge.removeFromBottom(1));
+    else
+        g.fillRect(edge.removeFromRight(1));
+
+    // The accent bar on the outer edge is what actually says "this one".
+    if (front) {
+        auto bar = area;
+        g.setColour(tabAccent_);
+        switch (orientation) {
+        case juce::TabbedButtonBar::TabsAtTop:
+            g.fillRect(bar.removeFromTop(2));    break;
+        case juce::TabbedButtonBar::TabsAtBottom:
+            g.fillRect(bar.removeFromBottom(2)); break;
+        case juce::TabbedButtonBar::TabsAtLeft:
+            g.fillRect(bar.removeFromLeft(2));   break;
+        case juce::TabbedButtonBar::TabsAtRight:
+            g.fillRect(bar.removeFromRight(2));  break;
+        }
+    }
+
+    drawTabButtonText(button, g, isMouseOver, isMouseDown);
+}
+
+juce::Font TzplLookAndFeel::getTabButtonFont(juce::TabBarButton&, float height) {
+    return juce::Font(monoFont(juce::jmin(13.0f, height * 0.5f)));
+}
+
+int TzplLookAndFeel::getTabButtonBestWidth(juce::TabBarButton& button,
+                                           int tabDepth) {
+    auto font = getTabButtonFont(button, (float)tabDepth);
+    int width = juce::GlyphArrangement::getStringWidthInt(
+                    font, button.getButtonText().trim())
+              + kTabPadding * 2;
+
+    if (auto* extra = button.getExtraComponent())
+        width += button.getTabbedButtonBar().isVertical() ? extra->getHeight()
+                                                          : extra->getWidth();
+    return juce::jlimit(tabDepth * 2, tabDepth * 10, width);
 }
 
 }

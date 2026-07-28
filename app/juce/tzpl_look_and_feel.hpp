@@ -41,8 +41,20 @@ public:
 
     int currentTheme() const { return theme_; }
 
+    // Editor tabs: JUCE's default draws every tab in the (transparent) colour
+    // the tab was added with, so the active one is invisible. Fill the front
+    // tab with the editor background and mark it with an accent bar.
+    void drawTabButton(juce::TabBarButton& button, juce::Graphics& g,
+                       bool isMouseOver, bool isMouseDown) override;
+    // Tab labels are filenames: monospaced like the editor, and wide enough
+    // not to run into the next tab.
+    juce::Font getTabButtonFont(juce::TabBarButton&, float height) override;
+    int getTabButtonBestWidth(juce::TabBarButton&, int tabDepth) override;
+
 private:
     int theme_ = themeDark;
+    // Kept from the last applyTheme for the drawing overrides above.
+    juce::Colour tabBg_, tabOutline_, tabAccent_;
 };
 
 }
