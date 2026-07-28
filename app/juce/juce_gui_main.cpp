@@ -69,6 +69,7 @@ public:
             m.addCommandItem(&commands_, cmd::fileNewProject);
             m.addSeparator();
             m.addCommandItem(&commands_, cmd::fileOpen);
+            m.addCommandItem(&commands_, cmd::fileOpenFolder);
             m.addCommandItem(&commands_, cmd::fileOpenExample);
             if (main_) {
                 juce::PopupMenu recent;
@@ -125,6 +126,8 @@ public:
             m.addCommandItem(&commands_, cmd::viewNotebook);
             m.addCommandItem(&commands_, cmd::viewGraph);
             m.addCommandItem(&commands_, cmd::viewRotate);
+            m.addSeparator();
+            m.addCommandItem(&commands_, cmd::toggleSidebar);
             m.addSeparator();
             m.addCommandItem(&commands_, cmd::togglePerform);
             m.addCommandItem(&commands_, cmd::togglePluginBrowser);
@@ -376,7 +379,8 @@ public:
             // Skip commands that open dialogs or quit (they don't return),
             // and the eval commands (they launch async evals that would
             // race the dedicated eval phases below).
-            if (id == cmd::fileOpen || id == cmd::fileSave
+            if (id == cmd::fileOpen || id == cmd::fileOpenFolder
+                || id == cmd::fileSave
                 || id == cmd::fileSaveAs || id == cmd::fileSaveCopy
                 || id == cmd::fileNewProject || id == cmd::fileOpenExample
                 || id == cmd::helpAbout || id == cmd::quit || id == cmd::evalSelection

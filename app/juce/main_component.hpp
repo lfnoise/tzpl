@@ -36,6 +36,7 @@
 #include "plugin_browser_window.hpp"
 #include "perform_view.hpp"
 #include "graph_view.hpp"
+#include "sidebar_panel.hpp"
 #include "status_bar.hpp"
 #include "gui_state.hpp"
 #include "tzpl_look_and_feel.hpp"
@@ -127,6 +128,10 @@ private:
     void saveSplitRatio();
 
     void openFileFlow();
+    // File > Open Folder...: adds a folder to the sidebar file tree.
+    void openFolderFlow();
+    void addSidebarFolder(juce::File const& dir);
+    void setSidebarVisible(bool show);
     void newProjectFlow();
     // Engine Settings window (tzpl-config), and the restart that applies it:
     // asks about unsaved work, spawns a watcher that relaunches once this
@@ -203,6 +208,12 @@ private:
     std::unique_ptr<KeyDispatch> keyDispatch_;   // ui.bindKey polling
 
     EditorPane editorPane_;
+    // Folder trees to the left of the center pane. Shown only while it holds
+    // folders and the View toggle is on; its width persists like splitRatio.
+    SidebarPanel sidebar_;
+    bool sidebarVisible_ = true;
+    juce::StretchableLayoutManager sideLayout_;
+    std::unique_ptr<juce::StretchableLayoutResizerBar> sideResizer_;
     std::unique_ptr<NotebookView> notebook_;
     CenterMode centerMode_ = CenterMode::editor;
     CenterMode lastDocMode_ = CenterMode::editor;

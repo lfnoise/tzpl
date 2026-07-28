@@ -38,6 +38,7 @@ enum : juce::CommandID {
     fileNew = 1,
     fileNewNotebook,
     fileOpen,
+    fileOpenFolder,
     fileSave,
     fileSaveAs,
     fileSaveCopy,
@@ -71,6 +72,7 @@ enum : juce::CommandID {
     viewNotebook,   // Cmd+2
     viewGraph,      // Cmd+3
     viewRotate,     // Cmd+\ : editor -> notebook -> graph -> editor
+    toggleSidebar,  // folder tree on the left of the center pane
     togglePerform,
     togglePluginBrowser,
 

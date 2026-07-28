@@ -48,6 +48,33 @@ MainComponent::MainComponent(bridge::AppContext& appCtx,
     addAndMakeVisible(console_);
     addAndMakeVisible(statusBar_);
 
+    // Folder sidebar: the folders it holds persist across launches, and a
+    // click on a file row opens it in the editor (switching away from the
+    // notebook/graph, which would otherwise hide the tab that just opened).
+    addChildComponent(sidebar_);
+    sidebar_.onOpenFile = [this](juce::File f) {
+        openPath(f);
+        if (!f.hasFileExtension("tzd")) setCenterMode(CenterMode::editor);
+    };
+    sidebar_.onFoldersChanged = [this] {
+        settings_.setValue("sidebarFolders",
+                           sidebar_.folderPaths().joinIntoString("\n"));
+        resized();
+    };
+    sidebar_.onMessage = [this](juce::String msg) { logLine(msg); };
+    sidebarVisible_ = settings_.getBoolValue("sidebarVisible", true);
+    sidebar_.setFolderPaths(juce::StringArray::fromLines(
+        settings_.getValue("sidebarFolders")));
+
+    double sideRatio = juce::jlimit(0.1, 0.5,
+                                    settings_.getDoubleValue("sidebarRatio", 0.2));
+    sideLayout_.setItemLayout(0, 120.0, -0.5, -sideRatio);        // sidebar
+    sideLayout_.setItemLayout(1, 6.0, 6.0, 6.0);                  // resizer
+    sideLayout_.setItemLayout(2, 240.0, -0.9, -(1.0 - sideRatio));// the rest
+    sideResizer_ = std::make_unique<juce::StretchableLayoutResizerBar>(
+        &sideLayout_, 1, /*vertical bar=*/true);
+    addChildComponent(*sideResizer_);
+
     // Dropouts are otherwise invisible: surface each one in the console
     // (the status bar rate-limits, so a storm can't flood it).
     statusBar_.onDropout = [this](std::string const& msg) {
@@ -142,15 +169,36 @@ MainComponent::~MainComponent() {
 }
 
 void MainComponent::resized() {
+    if (sideResizer_ == nullptr) return;   // still constructing
     if (performView_) {
         // Perform mode is deliberately chromeless.
         statusBar_.setVisible(false);
+        sidebar_.setVisible(false);
+        sideResizer_->setVisible(false);
         performView_->setBounds(getLocalBounds());
         return;
     }
     statusBar_.setVisible(true);
     auto area = getLocalBounds();
     statusBar_.setBounds(area.removeFromBottom(statusBar_.preferredHeight()));
+
+    // Sidebar | resizer | everything else. The third slot is a gap in the
+    // layout (nullptr): the document/console split below fills it.
+    bool showSide = sidebarVisible_ && sidebar_.hasFolders();
+    sidebar_.setVisible(showSide);
+    sideResizer_->setVisible(showSide);
+    if (showSide) {
+        juce::Component* sideComps[] = { &sidebar_, sideResizer_.get(),
+                                         nullptr };
+        sideLayout_.layOutComponents(sideComps, 3, area.getX(), area.getY(),
+                                     area.getWidth(), area.getHeight(),
+                                     /*vertically=*/false,
+                                     /*resizeOther=*/true);
+        area.setLeft(sideResizer_->getRight());
+        if (getWidth() > 0)
+            settings_.setValue("sidebarRatio",
+                               sidebar_.getWidth() / (double)getWidth());
+    }
 
     juce::Component* center =
           centerMode_ == CenterMode::notebook
@@ -408,6 +456,9 @@ void MainComponent::timerCallback() {
         externalCheckTicks_ = 0;
         if (editorPane_.checkExternalChanges())
             commands_.commandStatusChanged();
+        // Same idea for the sidebar: re-list only the open directories whose
+        // modification time moved (files added/removed outside the app).
+        if (sidebar_.isVisible()) sidebar_.refreshChangedFolders();
     }
 
     // Mirror unsaved work into the close box (macOS documentEdited dot),
@@ -550,6 +601,35 @@ void MainComponent::openFileFlow() {
             rememberDialogDir(file);
             openPath(file);
         });
+}
+
+// Folders only: with files selectable too, macOS "Open" on a highlighted
+// folder navigates into it instead of choosing it.
+void MainComponent::openFolderFlow() {
+    fileChooser_ = std::make_unique<juce::FileChooser>(
+        "Open Folder", dialogDefaultDir());
+    fileChooser_->launchAsync(
+        juce::FileBrowserComponent::openMode
+            | juce::FileBrowserComponent::canSelectDirectories,
+        [this](juce::FileChooser const& fc) {
+            auto dir = fc.getResult();
+            if (dir == juce::File() || !dir.isDirectory()) return;
+            rememberDialogDir(dir);   // records the folder the dialog was in
+            addSidebarFolder(dir);
+        });
+}
+
+void MainComponent::addSidebarFolder(juce::File const& dir) {
+    sidebar_.addFolder(dir);
+    setSidebarVisible(true);
+    logLine("folder: " + dir.getFullPathName());
+}
+
+void MainComponent::setSidebarVisible(bool show) {
+    sidebarVisible_ = show;
+    settings_.setValue("sidebarVisible", show);
+    resized();
+    commands_.commandStatusChanged();
 }
 
 void MainComponent::openPath(juce::File const& file) {
@@ -1168,7 +1248,8 @@ void MainComponent::collectEvalResult() {
 void MainComponent::getAllCommands(juce::Array<juce::CommandID>& ids) {
     ids.addArray({
         cmd::fileNew, cmd::fileNewNotebook, cmd::fileNewProject,
-        cmd::fileOpen, cmd::fileOpenExample, cmd::fileRevealModules,
+        cmd::fileOpen, cmd::fileOpenFolder, cmd::fileOpenExample,
+        cmd::fileRevealModules,
         cmd::engineSettings, cmd::helpAbout,
         cmd::fileSave, cmd::fileSaveAs, cmd::fileSaveCopy, cmd::fileRevert,
         cmd::fileClose,
@@ -1182,7 +1263,7 @@ void MainComponent::getAllCommands(juce::Array<juce::CommandID>& ids) {
         cmd::findUseSelection, cmd::findUseSelectionReplace,
         cmd::fontIncrease, cmd::fontDecrease,
         cmd::viewEditor, cmd::viewNotebook, cmd::viewGraph, cmd::viewRotate,
-        cmd::togglePerform, cmd::togglePluginBrowser,
+        cmd::toggleSidebar, cmd::togglePerform, cmd::togglePluginBrowser,
         cmd::evalSelection, cmd::evalLine, cmd::evalFile,
     });
     for (int i = 0; i < cmd::kNumEditorFontSizes; ++i)
@@ -1228,6 +1309,10 @@ void MainComponent::getCommandInfo(juce::CommandID id,
     case cmd::fileOpen:
         set("Open...", "File");
         info.addDefaultKeypress('o', mod);
+        break;
+    case cmd::fileOpenFolder:
+        set("Open Folder...", "File");
+        info.addDefaultKeypress('o', modShift);
         break;
     case cmd::fileNewProject:
         set("New Project...", "File");
@@ -1362,6 +1447,11 @@ void MainComponent::getCommandInfo(juce::CommandID id,
         set("Next View", "View");
         info.addDefaultKeypress('\\', mod);
         break;
+    case cmd::toggleSidebar:
+        set("File Sidebar", "View");
+        info.addDefaultKeypress('d', modShift);
+        info.setTicked(sidebarVisible_ && sidebar_.hasFolders());
+        break;
     case cmd::togglePerform:
         set("Perform Mode", "View");
         info.addDefaultKeypress('p', modShift);
@@ -1422,6 +1512,9 @@ bool MainComponent::perform(InvocationInfo const& info) {
         return true;
     case cmd::fileOpen:
         openFileFlow();
+        return true;
+    case cmd::fileOpenFolder:
+        openFolderFlow();
         return true;
     case cmd::fileNewProject:
         newProjectFlow();
@@ -1561,6 +1654,12 @@ bool MainComponent::perform(InvocationInfo const& info) {
         setCenterMode(centerMode_ == CenterMode::editor   ? CenterMode::notebook
                     : centerMode_ == CenterMode::notebook ? CenterMode::graph
                                                           : CenterMode::editor);
+        return true;
+    case cmd::toggleSidebar:
+        // Toggling it on with nothing to show would be a no-op: ask for a
+        // folder instead.
+        if (!sidebar_.hasFolders()) openFolderFlow();
+        else setSidebarVisible(!sidebarVisible_);
         return true;
     case cmd::togglePerform:
         togglePerform();
@@ -1711,6 +1810,26 @@ void MainComponent::testShowDemo(String const& which) {
             });
         };
         (*poll)(50);
+    } else if (which.startsWith("sidebar")) {
+        // "sidebar:<dir>" -- open <dir> in the sidebar, then activate its
+        // first .x/.tzd row and check the editor really opened that file.
+        auto dir = which.fromFirstOccurrenceOf(":", false, false);
+        if (dir.isNotEmpty()) addSidebarFolder(juce::File(dir));
+        juce::Timer::callAfterDelay(300, [this] {
+            juce::File opened = sidebar_.testClickFirstDocument();
+            bool ok = sidebar_.testRootCount() > 0 && sidebar_.isVisible()
+                   && opened != juce::File()
+                   && editorPane_.activeFile() == opened;
+            String verdict = String("sidebar: roots=")
+                + String(sidebar_.testRootCount())
+                + " rows=" + String(sidebar_.testRowCount())
+                + " visible=" + (sidebar_.isVisible() ? "1" : "0")
+                + " opened=" + opened.getFileName()
+                + " tab=" + editorPane_.activeTabName()
+                + (ok ? " OK" : " FAIL");
+            logLine(verdict);
+            std::fprintf(stderr, "%s\n", verdict.toRawUTF8());
+        });
     } else if (which == "find") {
         editorPane_.showFind("blip");
     } else if (which == "flash") {
@@ -1878,6 +1997,7 @@ void MainComponent::applyFontIndex(int idx) {
     editorPane_.setFontSize(px);
     console_.setFontSize(px);
     if (notebook_) notebook_->setFontSize(px);  // cells + relayout
+    sidebar_.setFontSize(px);
     commands_.commandStatusChanged();
 }
 

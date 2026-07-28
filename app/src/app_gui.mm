@@ -74,8 +74,8 @@ extern volatile sig_atomic_t gShouldQuit;
 enum class AppCmd {
     Quit,
     // File
-    FileNew, FileNewNotebook, FileOpen, FileSave, FileSaveAs, FileSaveCopy,
-    FileClose,
+    FileNew, FileNewNotebook, FileOpen, FileOpenFolder, FileSave, FileSaveAs,
+    FileSaveCopy, FileClose,
     // Edit
     EditUndo, EditRedo, EditCut, EditCopy, EditPaste, EditSelectAll,
     EditClearOutput, EditToggleComment, EditIndent, EditOutdent,
@@ -195,6 +195,7 @@ static std::string findMonoFont() {
 - (void)fileNew:(id)sender;
 - (void)fileNewNotebook:(id)sender;
 - (void)fileOpen:(id)sender;
+- (void)fileOpenFolder:(id)sender;
 - (void)fileSave:(id)sender;
 - (void)fileSaveAs:(id)sender;
 - (void)fileSaveCopy:(id)sender;
@@ -225,6 +226,7 @@ static std::string findMonoFont() {
 - (void)fileNew:(id)sender     { gCmdQueue.push(AppCmd::FileNew); }
 - (void)fileNewNotebook:(id)sender { gCmdQueue.push(AppCmd::FileNewNotebook); }
 - (void)fileOpen:(id)sender    { gCmdQueue.push(AppCmd::FileOpen); }
+- (void)fileOpenFolder:(id)sender { gCmdQueue.push(AppCmd::FileOpenFolder); }
 - (void)fileSave:(id)sender    { gCmdQueue.push(AppCmd::FileSave); }
 - (void)fileSaveAs:(id)sender  { gCmdQueue.push(AppCmd::FileSaveAs); }
 - (void)fileSaveCopy:(id)sender { gCmdQueue.push(AppCmd::FileSaveCopy); }
@@ -293,6 +295,10 @@ static void setupNativeMenuBar(const float* fontSizes, int numFontSizes) {
     NSMenuItem* openItem = [fileMenu addItemWithTitle:@"Open..."
         action:@selector(fileOpen:) keyEquivalent:@"o"];
     openItem.target = gMenuHandler;
+
+    NSMenuItem* openFolderItem = [fileMenu addItemWithTitle:@"Open Folder..."
+        action:@selector(fileOpenFolder:) keyEquivalent:@"O"];
+    openFolderItem.target = gMenuHandler;
 
     [fileMenu addItem:[NSMenuItem separatorItem]];
 
@@ -472,9 +478,28 @@ static std::string nativeOpenFileDialog() {
     NSMutableArray* types = [NSMutableArray array];
     if (tzplType) [types addObject:tzplType];
     if (notebookType) [types addObject:notebookType];
+    // A folder must be in the allowed types too, or Open on a selected folder
+    // only navigates into it instead of returning it as a workspace root.
+    [types addObject:UTTypeFolder];
     panel.allowedContentTypes = types;
     panel.allowsOtherFileTypes = YES;
     panel.canChooseDirectories = YES;
+    if ([panel runModal] == NSModalResponseOK) {
+        return std::string([[panel URL] fileSystemRepresentation]);
+    }
+    return "";
+}
+
+// Folders only: File > Open Folder... opens a directory as a sidebar
+// workspace. Files stay unselectable so a single click + Open picks the
+// folder itself (double-click still navigates, as everywhere in macOS).
+static std::string nativeOpenFolderDialog() {
+    NSOpenPanel* panel = [NSOpenPanel openPanel];
+    panel.canChooseFiles = NO;
+    panel.canChooseDirectories = YES;
+    panel.allowsMultipleSelection = NO;
+    panel.prompt = @"Open Folder";
+    panel.message = @"Choose a folder to open as a workspace.";
     if ([panel runModal] == NSModalResponseOK) {
         return std::string([[panel URL] fileSystemRepresentation]);
     }
@@ -1105,6 +1130,13 @@ int runGui(bridge::AppContext& appCtx) {
                         else
                             workspacePanel.openFile(path);
                     }
+                    afterNativeDialog();
+                    break;
+                }
+                case AppCmd::FileOpenFolder: {
+                    std::string path = nativeOpenFolderDialog();
+                    if (!path.empty() && std::filesystem::is_directory(path))
+                        workspacePanel.addWorkspace(path);
                     afterNativeDialog();
                     break;
                 }
