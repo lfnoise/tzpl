@@ -595,14 +595,20 @@ void MainComponent::confirmUnsavedChangesThen(std::function<void()> proceed) {
 void MainComponent::openFileFlow() {
     fileChooser_ = std::make_unique<juce::FileChooser>(
         "Open", dialogDefaultDir(), "*.x;*.tzd");
+    // Directories are selectable here too, so choosing one opens it in the
+    // sidebar instead of failing. (macOS still descends into a highlighted
+    // folder when files are selectable as well -- File > Open Folder... is
+    // the unambiguous way in.)
     fileChooser_->launchAsync(
         juce::FileBrowserComponent::openMode
-            | juce::FileBrowserComponent::canSelectFiles,
+            | juce::FileBrowserComponent::canSelectFiles
+            | juce::FileBrowserComponent::canSelectDirectories,
         [this](juce::FileChooser const& fc) {
             auto file = fc.getResult();
             if (file == juce::File()) return;
             rememberDialogDir(file);
-            openPath(file);
+            if (file.isDirectory()) addSidebarFolder(file);
+            else openPath(file);
         });
 }
 
@@ -616,10 +622,36 @@ void MainComponent::openFolderFlow() {
             | juce::FileBrowserComponent::canSelectDirectories,
         [this](juce::FileChooser const& fc) {
             auto dir = fc.getResult();
-            if (dir == juce::File() || !dir.isDirectory()) return;
+            if (dir == juce::File()) {
+                logLine("open folder: nothing chosen");
+                return;
+            }
+            if (!dir.isDirectory()) {
+                logLine("open folder: not a folder: " + dir.getFullPathName());
+                return;
+            }
             rememberDialogDir(dir);   // records the folder the dialog was in
             addSidebarFolder(dir);
         });
+}
+
+// Finder drag and drop: the dialog-free way to open a folder (macOS decides
+// what "Open" does to a highlighted folder in a chooser; a drop is
+// unambiguous). Folders land in the sidebar, files in the editor/notebook.
+bool MainComponent::isInterestedInFileDrag(juce::StringArray const& files) {
+    for (auto const& p : files) {
+        juce::File f(p);
+        if (f.isDirectory() || f.existsAsFile()) return true;
+    }
+    return false;
+}
+
+void MainComponent::filesDropped(juce::StringArray const& files, int, int) {
+    for (auto const& p : files) {
+        juce::File f(p);
+        if (f.isDirectory()) addSidebarFolder(f);
+        else if (f.existsAsFile()) openPath(f);
+    }
 }
 
 void MainComponent::addSidebarFolder(juce::File const& dir) {
@@ -1843,6 +1875,34 @@ void MainComponent::testShowDemo(String const& which) {
                 + " tab=" + editorPane_.activeTabName()
                 + (ok ? " OK" : " FAIL");
             logLine(verdict);
+            std::fprintf(stderr, "%s\n", verdict.toRawUTF8());
+        });
+    } else if (which.startsWith("drop")) {
+        // "drop:<path>" -- a Finder drop of a folder (sidebar) or file.
+        auto p = which.fromFirstOccurrenceOf(":", false, false);
+        bool interested = isInterestedInFileDrag(juce::StringArray(p));
+        filesDropped(juce::StringArray(p), 0, 0);
+        juce::Timer::callAfterDelay(300, [this, interested] {
+            bool ok = interested && sidebar_.testRootCount() > 0
+                   && sidebar_.isVisible();
+            String verdict = String("drop: interested=")
+                + (interested ? "1" : "0")
+                + " roots=" + String(sidebar_.testRootCount())
+                + " visible=" + (sidebar_.isVisible() ? "1" : "0")
+                + (ok ? " OK" : " FAIL");
+            std::fprintf(stderr, "%s\n", verdict.toRawUTF8());
+        });
+    } else if (which == "open-folder") {
+        // File > Open Folder... must reach openFolderFlow and put a folder
+        // chooser up (the panel itself is native, so this is as far as a
+        // headless check can go).
+        juce::ApplicationCommandTarget::InvocationInfo info(cmd::fileOpenFolder);
+        bool performed = perform(info);
+        juce::Timer::callAfterDelay(300, [this, performed] {
+            String verdict = String("open-folder: performed=")
+                + (performed ? "1" : "0")
+                + " chooser=" + (fileChooser_ != nullptr ? "1" : "0")
+                + (performed && fileChooser_ != nullptr ? " OK" : " FAIL");
             std::fprintf(stderr, "%s\n", verdict.toRawUTF8());
         });
     } else if (which == "find") {

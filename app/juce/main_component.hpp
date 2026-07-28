@@ -51,6 +51,7 @@ namespace tzplapp {
 
 class MainComponent : public juce::Component,
                       public juce::ApplicationCommandTarget,
+                      public juce::FileDragAndDropTarget,
                       private juce::Timer {
 public:
     MainComponent(bridge::AppContext& appCtx,
@@ -60,6 +61,11 @@ public:
     ~MainComponent() override;
 
     void resized() override;
+
+    // FileDragAndDropTarget: dropping a folder from Finder anywhere on the
+    // window opens it in the sidebar; dropping files opens them.
+    bool isInterestedInFileDrag(juce::StringArray const& files) override;
+    void filesDropped(juce::StringArray const& files, int x, int y) override;
 
     // ApplicationCommandTarget
     juce::ApplicationCommandTarget* getNextCommandTarget() override { return nullptr; }
