@@ -729,6 +729,32 @@ Type* TypeChecker::concatResultType(Type* leftType, Type* rightType, SourceRange
     return nullptr;
 }
 
+// Explanatory note appended to '<-' / '->' Ref-element mismatches. Template
+// lambdas make the plain message misleading: every generic lambda prints as
+// 'fn<A>(...) -> ...' yet each lambda literal with untyped (or template-typed)
+// parameters is its own distinct type, so the two sides can print identically
+// and still not match. Also flags the general identical-printing case so a
+// mismatch never reads as "'X' is not 'X'".
+static std::string refMismatchNote(Type* held, Type* assigned) {
+    bool heldTmpl = dynamic_cast<TemplateLambdaType*>(held) != nullptr;
+    bool assignedTmpl = dynamic_cast<TemplateLambdaType*>(assigned) != nullptr;
+    if (heldTmpl || assignedTmpl) {
+        return "\nA lambda with untyped parameters is a generic template, not a "
+               "concrete function type; each template lambda literal is its own "
+               "distinct type, so two can print alike yet never match. Give the "
+               "lambdas concrete parameter and return types, e.g. "
+               "'fn(x Int) Int { ... }' -- lambdas with the same concrete "
+               "signature share one function type.";
+    }
+    VMString heldStr = held->str();
+    VMString assignedStr = assigned->str();
+    if (std::string_view(heldStr.data(), heldStr.size()) ==
+        std::string_view(assignedStr.data(), assignedStr.size())) {
+        return "\nThe two types print alike but are distinct types.";
+    }
+    return "";
+}
+
 Type* TypeChecker::inferBinaryOp(BinaryOpExpr* expr) {
     // Check for explicit @ on operands
     AutoMapArg leftAM = extractAutoMapAnnotation(static_cast<Expr*>(expr->left.get()));
@@ -1034,7 +1060,8 @@ Type* TypeChecker::inferBinaryOp(BinaryOpExpr* expr) {
                         error(expr->loc, "Type mismatch in '<-': Ref holds '" +
                               std::string(refType->elemType_->str().data(), refType->elemType_->str().size()) +
                               "' but assigned '" +
-                              std::string(rightType->str().data(), rightType->str().size()) + "'");
+                              std::string(rightType->str().data(), rightType->str().size()) + "'" +
+                              refMismatchNote(refType->elemType_, rightType));
                     }
                 }
                 return refType->elemType_;
@@ -1051,7 +1078,8 @@ Type* TypeChecker::inferBinaryOp(BinaryOpExpr* expr) {
                         error(expr->loc, "Type mismatch in '->': Ref holds '" +
                               std::string(refType->elemType_->str().data(), refType->elemType_->str().size()) +
                               "' but assigned '" +
-                              std::string(leftType->str().data(), leftType->str().size()) + "'");
+                              std::string(leftType->str().data(), leftType->str().size()) + "'" +
+                              refMismatchNote(refType->elemType_, leftType));
                     }
                 }
                 return refType->elemType_;

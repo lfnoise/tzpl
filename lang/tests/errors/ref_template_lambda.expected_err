@@ -1,0 +1,6 @@
+Type error [tests/errors/ref_template_lambda.x:5:3]
+  |
+5 | r <- fn(x) { x - 1 };
+  |   ^^
+  Type mismatch in '<-': Ref holds 'fn<A>(...) -> ...' but assigned 'fn<A>(...) -> ...'
+  A lambda with untyped parameters is a generic template, not a concrete function type; each template lambda literal is its own distinct type, so two can print alike yet never match. Give the lambdas concrete parameter and return types, e.g. 'fn(x Int) Int { ... }' -- lambdas with the same concrete signature share one function type.
