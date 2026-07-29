@@ -192,8 +192,16 @@ public:
     void setCellPresets(CellId id,
                         std::vector<std::shared_ptr<Preset const>> presets);
 
-    bool modified() const { return modified_; }
-    void clearModified() { modified_ = false; }
+    // True when the document's state differs from what the file holds.
+    // Everything compared here is persisted: the working snapshot's
+    // content, the history cursor, and the shape of the history tree. So
+    // undoing (or jumping) back to the state the file was saved at clears
+    // the flag again, while a committed node keeps it set -- the node
+    // itself would be lost.
+    bool modified() const;
+    // Record the current state as the one the file holds (after save,
+    // open or new).
+    void clearModified();
     std::string const& filePath() const { return filePath_; }
     void setFilePath(std::string path) { filePath_ = std::move(path); }
 
@@ -262,7 +270,15 @@ private:
     void enforceHistoryCap();
     SnapshotPtr snap_;
     std::string filePath_;
-    bool modified_ = false;
+
+    // Baseline for modified(): the state as of the last save/open/new.
+    // savedCursor_ is null when the tree was replaced wholesale (reroot,
+    // adopt) without a new baseline being taken -- never dereferenced,
+    // only compared. treeDirty_ is sticky because a committed node cannot
+    // be navigated back out of existence.
+    SnapshotPtr savedSnap_;
+    HistNode const* savedCursor_ = nullptr;
+    bool treeDirty_ = false;
 
     std::unique_ptr<HistNode> root_;
     HistNode* cursor_ = nullptr;

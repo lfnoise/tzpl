@@ -269,6 +269,76 @@ static void testHistoryRoundTrip() {
     std::printf("history round trip: ok\n");
 }
 
+// The dirty flag tracks the state the FILE holds, not "something
+// happened": navigating history (or typing an edit back out) returns the
+// document to its saved state and must clear it again.
+static void testDirtyFlag() {
+    bridge::AppContext ctx;
+    std::string err;
+    std::string path = tempPath("tzpl_doc_dirty.tzd");
+
+    doc::DocumentStore store;
+    store.rerootHistory("start");
+    store.clearModified();
+    CHECK(!store.modified());
+    auto id = store.insertCell(0, doc::CellKind::Code, "", "a();");
+    CHECK(store.modified());
+    store.commit("add cell");
+    store.setCellText(id, "b();");
+    store.commit("edit b");
+    CHECK(store.modified());
+    CHECK(doc::saveDocument(store, ctx, path, err));
+    store.clearModified();
+    CHECK(!store.modified());
+
+    // Reload, emulating NotebookView::openFile.
+    doc::DocumentStore store2;
+    doc::LoadedHistory hist;
+    auto snap = doc::loadDocument(ctx, path, err, &store2.interns(), &hist);
+    CHECK(snap);
+    store2.reset(std::move(snap), path);
+    CHECK(hist.root && hist.cursor);
+    store2.adoptHistory(std::move(hist.root), hist.cursor);
+    store2.clearModified();
+    CHECK(!store2.modified());
+
+    // History window: jump to an earlier state, then back to the one the
+    // file was saved at.
+    auto* root = store2.historyRoot();
+    auto* tip = root->children[0]->children[0].get();
+    CHECK(store2.historyCursor() == tip);
+    CHECK(store2.jumpTo(root));
+    CHECK(store2.modified());
+    CHECK(store2.jumpTo(tip));
+    CHECK(!store2.modified());
+
+    // Same for undo/redo.
+    CHECK(store2.undo());
+    CHECK(store2.modified());
+    CHECK(store2.redo());
+    CHECK(!store2.modified());
+
+    // An edit typed back out is not a change either.
+    std::string const original = store2.cell(id)->text;
+    store2.setCellText(id, original + " -- typo");
+    CHECK(store2.modified());
+    store2.setCellText(id, original);
+    CHECK(!store2.modified());
+
+    // But a committed node IS unsaved state even back at the saved cursor
+    // with the saved content: the node itself lives in the file.
+    store2.setCellText(id, "c();");
+    store2.commit("edit c");
+    CHECK(store2.modified());
+    CHECK(store2.undo());
+    CHECK(store2.historyCursor() == tip);
+    CHECK(store2.snapshot() == tip->snap);
+    CHECK(store2.modified());
+
+    std::filesystem::remove(path);
+    std::printf("dirty flag: ok\n");
+}
+
 static void testV1Compat() {
     bridge::AppContext ctx;
     std::string err;
@@ -472,6 +542,7 @@ int main(int argc, char** argv) {
     testInterner();
     testStoreDedup();
     testHistoryRoundTrip();
+    testDirtyFlag();
     testV1Compat();
     testHistorySize();
     testMalformedHistory();

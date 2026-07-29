@@ -79,7 +79,6 @@ CellId DocumentStore::insertCell(int index, CellKind kind, std::string name,
     next->cells.insert(next->cells.begin() + index, std::move(cell));
     CellId id = next->cells[index]->id;
     snap_ = std::move(next);
-    modified_ = true;
     return id;
 }
 
@@ -89,7 +88,6 @@ void DocumentStore::removeCell(CellId id) {
     auto next = std::make_shared<DocSnapshot>(*snap_);
     next->cells.erase(next->cells.begin() + i);
     snap_ = std::move(next);
-    modified_ = true;
 }
 
 void DocumentStore::moveCell(CellId id, int delta) {
@@ -102,7 +100,6 @@ void DocumentStore::moveCell(CellId id, int delta) {
     next->cells.erase(next->cells.begin() + i);
     next->cells.insert(next->cells.begin() + j, std::move(cell));
     snap_ = std::move(next);
-    modified_ = true;
 }
 
 Cell* DocumentStore::mutableCell(CellId id) {
@@ -113,7 +110,6 @@ Cell* DocumentStore::mutableCell(CellId id) {
     Cell* raw = copy.get();
     next->cells[i] = std::move(copy);
     snap_ = std::move(next);
-    modified_ = true;
     return raw;
 }
 
@@ -159,8 +155,31 @@ void DocumentStore::setCellPresets(
 void DocumentStore::reset(SnapshotPtr snap, std::string filePath) {
     snap_ = std::move(snap);
     filePath_ = std::move(filePath);
-    modified_ = false;
     rerootHistory("open");
+    clearModified();
+}
+
+// ---------------------------------------------------------------------------
+// Modified state
+// ---------------------------------------------------------------------------
+
+bool DocumentStore::modified() const {
+    // The history tree grew (or was replaced) since the baseline: those
+    // nodes live in the file, so they are unsaved state no matter where
+    // the cursor now sits.
+    if (treeDirty_ || cursor_ != savedCursor_) return true;
+    // Working snapshot: pointer-equal is the common case (interning and
+    // history navigation reinstall the very object that was saved).
+    if (snap_ == savedSnap_) return false;
+    if (!snap_ || !savedSnap_) return true;
+    return contentHashOf(*snap_) != contentHashOf(*savedSnap_)
+        || !sameSnapshot(*snap_, *savedSnap_);
+}
+
+void DocumentStore::clearModified() {
+    savedSnap_ = snap_;
+    savedCursor_ = cursor_;
+    treeDirty_ = false;
 }
 
 // ---------------------------------------------------------------------------
@@ -240,8 +259,9 @@ bool DocumentStore::commit(std::string const& label) {
 
     // A new node is unsaved state even when no cell text changed (widget
     // adjustments, arranges, preset recalls): history is saved in the file,
-    // so quitting now without saving would lose it.
-    modified_ = true;
+    // so quitting now without saving would lose it. Sticky: undoing past
+    // the node does not remove it from the tree.
+    treeDirty_ = true;
 
     enforceHistoryCap();
     return true;
@@ -272,6 +292,10 @@ void DocumentStore::rerootHistory(std::string const& label) {
     root_->snap = snap_;
     root_->label = label;
     cursor_ = root_.get();
+    // The old tree (and the baseline node inside it) is gone. Callers that
+    // are establishing a saved state -- open, new -- call clearModified()
+    // after this.
+    savedCursor_ = nullptr;
 }
 
 void DocumentStore::adoptHistory(std::unique_ptr<HistNode> root,
@@ -279,6 +303,7 @@ void DocumentStore::adoptHistory(std::unique_ptr<HistNode> root,
     if (!root || !cursor) return;
     root_ = std::move(root);
     cursor_ = cursor;
+    savedCursor_ = nullptr;   // see rerootHistory
     // Unify the working snapshot with the cursor's when content-equal, so
     // the first post-load commit's pointer compare doesn't record a
     // phantom node. (They differ legitimately when the file was saved
@@ -303,7 +328,6 @@ SnapshotPtr DocumentStore::undo() {
     }
     cursor_ = parent;
     snap_ = cursor_->snap;
-    modified_ = true;
     return snap_;
 }
 
@@ -311,7 +335,6 @@ SnapshotPtr DocumentStore::redo() {
     if (!canRedo()) return nullptr;
     cursor_ = cursor_->children[cursor_->activeChild].get();
     snap_ = cursor_->snap;
-    modified_ = true;
     return snap_;
 }
 
@@ -328,7 +351,6 @@ SnapshotPtr DocumentStore::jumpTo(HistNode* node) {
     }
     cursor_ = node;
     snap_ = cursor_->snap;
-    modified_ = true;
     return snap_;
 }
 

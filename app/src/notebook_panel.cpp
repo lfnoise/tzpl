@@ -67,8 +67,8 @@ void NotebookPanel::newDocument() {
     open_ = true;
     // Start with one code cell so there's something to type into.
     store_.insertCell(0, CellKind::Code);
-    store_.clearModified();
     store_.rerootHistory("new");
+    store_.clearModified();   // after the reroot: it is the baseline node
 }
 
 bool NotebookPanel::open(std::string const& path, bridge::AppContext& ctx,
@@ -94,6 +94,8 @@ bool NotebookPanel::open(std::string const& path, bridge::AppContext& ctx,
     } else {
         rerootHistory("open", ctx);
     }
+    // The tree and cursor now installed are the ones the file holds.
+    store_.clearModified();
     return true;
 }
 

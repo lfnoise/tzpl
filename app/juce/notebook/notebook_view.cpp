@@ -91,8 +91,8 @@ void NotebookView::newDocument() {
     stopTimer();
     selectedCell_ = 0;
     store_.insertCell(0, CellKind::Code);      // something to type into
-    store_.clearModified();
     store_.rerootHistory("new");
+    store_.clearModified();   // after the reroot: it is the baseline node
     rebuildCells();
     if (!store_.snapshot()->cells.empty())
         selectCell(store_.snapshot()->cells.front()->id);
@@ -119,6 +119,8 @@ bool NotebookView::openFile(juce::File const& file, String& err) {
             appCtx_.uiState, claimedPanels(), store_.snapshot()->widgets.get()));
         store_.rerootHistory("open");
     }
+    // The tree and cursor now installed are the ones the file holds.
+    store_.clearModified();
     rebuildCells();
     if (!store_.snapshot()->cells.empty())
         selectCell(store_.snapshot()->cells.front()->id);
