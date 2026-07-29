@@ -6,6 +6,11 @@ import common_ugens.*;
 
 let tags = ["example"];
 
+fn gainOutlet(x S) S {
+	let gain = control("gain", ControlSpec{0.001, 1.0, 0.2, ControlWarp.exponential}) lag(0.1);
+	x * gain |> outlet
+}
+
 fn init_urand_test() S {
 	let chans = 16;
 	let detune = [-1, 1] vec;
@@ -24,8 +29,8 @@ fn bubbles() S =
 	0.4 lfsaw * 24
 	+ [8, 7.23] lfsaw * 3
 	+ 81
-	|> nnhz sinosc * 0.04
-	|> combn(0.2, 4) outlet;
+	|> nnhz sinosc * 0.1
+	|> combn(0.2, 4) gainOutlet;
 
 bubbles defSynthX("bubbles", tags);
 
@@ -39,16 +44,15 @@ fn seqTest() S {
 		  (1 lfimp seq(pattern * 0.25, 8) + detune) smoothSaw(5) * 1.4
 		+ (2 lfimp seq(pattern * 1.0,  8) + detune) smoothSaw(4) 
 		+ (4 lfimp seq(pattern * 2.0,  8) + detune) smoothSaw(3) * 0.7 
-	)
-	* 0.2 |> combn(3/8, 4) outlet
+	) combn(3/8, 4) gainOutlet
 }
 
-seqTest defSynthX("seqTest", tags) println;
+seqTest defSynthX("seqTest", tags);
 
 
 fn blipTest() S {
 	let h = 1/20 sinosc(0.75) bilin(1, 48);
-	[36, 36.13] blip(0, h) mul(0.2) fadein(0.1) outlet
+	[36, 36.13] blip(0, h) fadein(0.1) gainOutlet
 }
 
 blipTest defSynthX("blipTest", tags);
@@ -56,7 +60,7 @@ blipTest defSynthX("blipTest", tags);
 
 fn smoothSawTest() S {
 	let s = 1/5 sinosc(0.75) bilin(1, 8);
-	[100, 100.13] smoothSaw(s) mul(0.2) fadein(0.1) outlet
+	[100, 100.13] smoothSaw(s) fadein(0.1) gainOutlet
 }
 
 smoothSawTest defSynthX("smoothSawTest", tags);
@@ -64,7 +68,7 @@ smoothSawTest defSynthX("smoothSawTest", tags);
 
 fn smoothSquareTest() S {
 	let s = 1/5 sinosc(0.75) bilin(1, 8);
-	[100, 100.13] smoothSquare(s) mul(0.2) fadein(0.1) outlet
+	[100, 100.13] smoothSquare(s) fadein(0.1) gainOutlet
 }
 
 smoothSquareTest defSynthX("smoothSquareTest", tags);
@@ -72,7 +76,7 @@ smoothSquareTest defSynthX("smoothSquareTest", tags);
 
 fn usinWinUsinTest() S {
 	let s = 1/5 sinosc(0.75) bilin(1, 16);
-	[100, 100.13] usinWinUsin(s) mul(0.2) fadein(0.1) outlet
+	[100, 100.13] usinWinUsin(s) fadein(0.1) gainOutlet
 
 }
 
@@ -80,7 +84,7 @@ usinWinUsinTest defSynthX("usinWinUsinTest", tags);
 
 fn usinWinSinTest() S {
 	let s = 1/5 sinosc(0.75) bilin(1, 16);
-	[100, 100.13] usinWinSin(s) mul(0.2) fadein(0.1) outlet
+	[100, 100.13] usinWinSin(s) fadein(0.1) gainOutlet
 
 }
 
@@ -89,7 +93,7 @@ usinWinSinTest defSynthX("usinWinSinTest", tags);
 
 fn sawWinUsinTest() S {
 	let s = 1/5 sinosc(0.75) bilin(1, 16);
-	[100, 100.13] sawWinUsin(s) mul(0.2) fadein(0.1) outlet
+	[100, 100.13] sawWinUsin(s) fadein(0.1) gainOutlet
 
 }
 
@@ -98,22 +102,22 @@ sawWinUsinTest defSynthX("sawWinUsinTest", tags);
 
 fn sawWinSinTest() S {
 	let s = 1/5 sinosc(0.75) bilin(1, 16);
-	[100, 100.13] sawWinSin(s) mul(0.2) fadein(0.1) outlet
+	[100, 100.13] sawWinSin(s) fadein(0.1) gainOutlet
 
 }
 
 sawWinSinTest defSynthX("sawWinSinTest", tags);
 
-fn() S { 0.3 sinosc biexp(100, 6000) velvet(2) * 0.2 |> outlet } defSynthX("dust1", tags);
+fn() S { 0.3 sinosc biexp(100, 6000) velvet(2) gainOutlet } defSynthX("dust1", tags);
 
-fn dustone() = 0.2 * decay2(dust(4, 2), 0.04, 0.3) * 800 fsinxosc |> outlet;
+fn dustone() = decay2(dust(4, 2), 0.04, 0.3) * 800 fsinxosc |> gainOutlet;
 
 dustone defSynthX("dustone", tags);
 
 fn apverbTest() S {
 	let chans = 16;
 	let freqs = exprand(100, 5000, chans, Rate.init);
-	(3/chans) pandust(chans) decay2(0.004, 0.2) * freqs sinosc |> transpose(chans) sum(2) * 0.5 |> apverb(0.02, 6, 8) outlet
+	(3/chans) pandust(chans) decay2(0.004, 0.2) * freqs sinosc |> transpose(chans) sum(2) apverb(0.02, 6, 8) gainOutlet
 }
 
 apverbTest defSynthX("apverbTest", tags);
@@ -122,9 +126,9 @@ fn pause_bubbles() S {
     let gate = 0.5 sinosc - 0.5;
     let out = gate pause(fn(){   
         let freq = nnhz(0.4 lfsaw * 24 + [8, 7.23] lfsaw * 3 + 81);
-        0.05 * freq fsinosc 
+        0.1 * freq fsinosc 
 	});
-    out fadein(0.1) combn(0.2, 4) outlet
+    out fadein(0.1) combn(0.2, 4) gainOutlet
 }
 
 pause_bubbles defSynthX("pause_bubbles", tags);
@@ -133,8 +137,8 @@ fn tog_pause() S {
     let s0 = 1 lfusqr;
     let s0f = s0      lag(0.05) - 0.01;
     let s1f = s0 cmpl lag(0.05) - 0.01;
-    let out = s0f pause(fn(){ 0.1 * 2 blue }) + s1f pause(fn(){ fsinxosc(100 + 2 white) max(-0.2) cb * 0.15  });
-    out fadein(0.1) combn(0.2, 2) outlet
+    let out = s0f pause(fn(){ 0.1 * 2 blue }) + s1f pause(fn(){ fsinxosc(100 + 2 white) max(-0.2) cb * 0.6  });
+    out fadein(0.1) combn(0.2, 2) gainOutlet
 }
 
 tog_pause defSynthX("tog_pause")
@@ -146,11 +150,11 @@ fn pull_nested() S {
         let gate2 = 2 fsinosc max0;
         let out = gate2 pause(fn(){
        		let freq = nnhz(81 + 24 * 0.4 lfsaw + 3 * [8, 7.23] lfsaw);
-            0.04 * freq fsinxosc
+            0.1 * freq fsinxosc
 		});
         out fadein(0.1) combn(0.2, 4)
 	});
-    out outlet
+    out gainOutlet
 }
 
 pull_nested defSynthX("pull_nested", tags);
@@ -158,17 +162,17 @@ pull_nested defSynthX("pull_nested", tags);
 
 fn pulltwo() S {
     let pullFun1 = fn(){
-        let amp = 0.2 * dust(4, 2) decay2(0.04, 0.3);
+        let amp = dust(4, 2) decay2(0.04, 0.3);
         amp * 800 fsinxosc
     };
     let pullFun2 = fn(){
        	let freq = nnhz(81 + 24 * 0.4 lfsaw + 3 * [8, 7.23] lfsaw);
-        0.04 * fsinxosc(freq) fadein(0.1) combn(0.2, 4)
+        0.1 * fsinxosc(freq) fadein(0.1) combn(0.2, 4)
     };
     let gate1 = 2.71828 fsinosc max0;
     let gate2 = 3.14159 fsinosc max0;
     let out = gate1 pause(pullFun1) + gate2 pause(pullFun2);
-    out outlet
+    out gainOutlet
 }
 
 pulltwo defSynthX("pulltwo", tags);
@@ -177,7 +181,7 @@ pulltwo defSynthX("pulltwo", tags);
 fn pch_seq() S {
     let pch = 3 lfimp pull(200, fn(){ exprand(125, 1000) });
     let out = 0.1 * fsinxosc(pch lag(0.05) + [0,1]) cb;
-    out fadein(0.1) combn(0.2, 4) outlet
+    out fadein(0.1) combn(0.2, 4) gainOutlet
 }
 
 
