@@ -29,10 +29,12 @@
 
 #include "vm.hpp"
 #include "compiler.hpp"
+#include "async_io.hpp"
 #include <mutex>
 #include <condition_variable>
 #include <atomic>
 #include <thread>
+#include <memory>
 #include <string>
 #include <unordered_map>
 #include <chrono>
@@ -83,6 +85,12 @@ struct NRTVM {
     std::thread heartbeatThread_;
     std::atomic<bool> heartbeatRunning_{false};
 
+    // Async I/O worker for the readFileAsync-family builtins. Lazily created
+    // on first submit (VMs that never touch async I/O pay nothing). Declared
+    // after vm/mtx/cv so member destruction drains and joins the worker
+    // before the VM and mutex it uses are torn down.
+    std::unique_ptr<AsyncIOExecutor> ioExec_;
+
     // Constructors: same args as VM (legacy poolSize form and full VMConfig
     // form). Registers the HandlerTable as a GC root scanner so Obj* pointers
     // stored in oscHandlers / natsHandlers stay alive across cycles.
@@ -118,6 +126,14 @@ struct NRTVM {
         // Wake a thread parked in serveActors / a blocking await when another
         // thread (a NATS handler, a future resolver) makes async progress.
         vm.setNotifyAsyncProgress([this]() { cv.notify_all(); });
+
+        // Async I/O executor hook. Lazy creation is race-free: builtins only
+        // run with mtx held, so two first-submits cannot interleave.
+        vm.setSubmitAsyncIO([this](AsyncIOJob&& job) {
+            if (!ioExec_) ioExec_ = std::make_unique<AsyncIOExecutor>(vm, mtx, cv);
+            ioExec_->submit(std::move(job));
+            return true;
+        });
     }
 
     ~NRTVM() {

@@ -396,7 +396,7 @@ joinPath(<span class="hl-str">"samples"</span>, <span class="hl-str">"kick.wav"<
         <!-- ============================================================ -->
         <div class="section" id="std-fs">
             <h2>std.fs <span style="font-size: 0.7em; background: #c0392b; color: #fff; padding: 2px 8px; border-radius: 4px; vertical-align: middle;">NRT</span></h2>
-            <p>Ergonomic wrappers over the NRT file built-ins (<code>readFile</code>, <code>writeFile</code>, <code>listDir</code>, &hellip;). Everything here blocks on syscalls and is rejected in real-time code. The <code>Result</code> variants carry a path-bearing error message via <code>std.result</code>.</p>
+            <p>Ergonomic wrappers over the NRT file built-ins (<code>readFile</code>, <code>writeFile</code>, <code>listDir</code>, &hellip;). Nothing here is real-time safe: the plain wrappers block on syscalls, and the <code>Async</code> wrappers &mdash; non-blocking, built on the <code>readFileAsync</code>-family built-ins &mdash; are still rejected in real-time code. The <code>Result</code> variants carry a path-bearing error message via <code>std.result</code>.</p>
             <table>
                 <tr><th>Function</th><th>Description</th></tr>
                 <tr><td><code>readFileOr(path, default)</code></td><td>Contents, or <code>default</code> if unreadable.</td></tr>
@@ -406,6 +406,9 @@ joinPath(<span class="hl-str">"samples"</span>, <span class="hl-str">"kick.wav"<
                 <tr><td><code>readFileBytesResult(path) &rarr; Result[Bytes, String]</code></td><td><code>readFileBytes</code> with an error message.</td></tr>
                 <tr><td><code>writeFileResult(path, s) &rarr; Result[Bool, String]</code></td><td><code>writeFile</code> with an error message.</td></tr>
                 <tr><td><code>listDirResult(path) &rarr; Result[[String], String]</code></td><td><code>listDir</code> with an error message.</td></tr>
+                <tr><td><code>readFileAsyncResult(path) &rarr; Future[Result[String, String]]</code></td><td>Async <code>readFileResult</code>; <code>await</code> it, then <code>try</code> composes.</td></tr>
+                <tr><td><code>readFileBytesAsyncResult(path) &rarr; Future[Result[Bytes, String]]</code></td><td>Async <code>readFileBytesResult</code>.</td></tr>
+                <tr><td><code>writeFileAsyncResult(path, s) &rarr; Future[Result[Bool, String]]</code></td><td>Async <code>writeFileResult</code>.</td></tr>
             </table>
             <pre><code><span class="hl-kw">import</span> std.fs.*;
 

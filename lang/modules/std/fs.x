@@ -1,10 +1,12 @@
 -- fs.x -- ergonomic wrappers over the NRT file builtins (readFile,
--- writeFile, listDir, ...). Everything in this module performs blocking
--- syscalls and is NOT real-time safe. Pure path-string helpers live in
--- std.path (RT-safe).
+-- writeFile, listDir, ...). Nothing in this module is real-time safe: the
+-- plain wrappers perform blocking syscalls, and the *Async* wrappers, while
+-- non-blocking (the syscall runs on the host's I/O worker and the returned
+-- Future resolves when it lands), are still NRT-only. Pure path-string
+-- helpers live in std.path (RT-safe).
 --
--- Builtins return Option; the Result variants here add a path-bearing
--- error message.
+-- Builtins return Option (or Future<Option<...>> / Future<Bool> for the
+-- async forms); the Result variants here add a path-bearing error message.
 
 import std.result.*;
 import std.strings.*;   -- splitLines
@@ -55,4 +57,28 @@ fn listDirResult(path String) Result<[String], String> {
         Option.some(names): Result<[String], String>.ok(names);
         Option.none: Result<[String], String>.err("cannot list directory: " $ path);
     }
+}
+
+-- Async Result variants: `await readFileAsyncResult(p)` yields the Result
+-- (an async fn call returns Future<Result<...>>), so `try` composes:
+--     let s = (await readFileAsyncResult(p)) try;
+
+async fn readFileAsyncResult(path String) Result<String, String> {
+    match (await readFileAsync(path)) {
+        Option.some(s): Result<String, String>.ok(s);
+        Option.none: Result<String, String>.err("cannot read file: " $ path);
+    }
+}
+
+async fn readFileBytesAsyncResult(path String) Result<Bytes, String> {
+    match (await readFileBytesAsync(path)) {
+        Option.some(b): Result<Bytes, String>.ok(b);
+        Option.none: Result<Bytes, String>.err("cannot read file: " $ path);
+    }
+}
+
+async fn writeFileAsyncResult(path String, contents String) Result<Bool, String> {
+    (await writeFileAsync(path, contents))
+        ? Result<Bool, String>.ok(true)
+        : Result<Bool, String>.err("cannot write file: " $ path)
 }

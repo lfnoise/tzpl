@@ -518,6 +518,26 @@ Whole-file granularity only — no streaming handles (Bytes accessors cover
 structured binary reads). Ergonomic wrappers in `std.fs`; pure path helpers
 in `std.path`. Tested in `tests/stdlib/fs.x`.
 
+**Done July 2026 — async variants**: `readFileAsync`, `readFileBytesAsync`,
+`writeFileAsync`/`appendFileAsync` (String and Bytes overloads) return
+`Future<Option<...>>` / `Future<Bool>`; the syscall runs on an I/O worker
+owned by `NRTVM` (`async_io.hpp`, single FIFO thread, lazily started) and the
+Future is resolved through the external-future path (`registerExternalFuture`
+/ `resolveExternalFuture`) under the host mutex — the same discipline as
+`renderDone`/`siloLoad`. Builtins submit jobs via the `VM::submitAsyncIO`
+host hook; hosts without an executor (bare-VM embedders, the CLI REPL) run
+the job inline (synchronous fallback, identical semantics). The CLI's script
+mode now runs on an `NRTVM` so top-level `await` can park. `std.fs` adds
+`readFileAsyncResult`/`readFileBytesAsyncResult`/`writeFileAsyncResult`.
+Still `rtSafe=false`: a Pending Future is RT-compatible, but resolving one
+with file contents on the audio thread is not. A future RT path would mirror
+the silo command pattern — an RT-safe builtin posts a request to the NRT
+side; completion rides the silo's ordered command FIFO as a command that
+rebuilds the payload as a `BytesObj` in the silo's TLSF heap (size-capped,
+chunked between samples), with audio-file loads staying on the engine-buffer
+path — recorded here, not designed. Tested in `tests/async/async_fileio.x`,
+`tests/async/async_fileio_try.x`.
+
 ### 13.5 Standard Library Expansion (July 2026: P0 done; P1/P2 roadmap)
 
 **P0 — shipped July 2026**:

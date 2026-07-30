@@ -1,0 +1,8 @@
+true
+true
+got: content
+cannot read file: /tmp/tzpl_test_async_fileio_try/missing.txt
+true
+cannot write file: /tmp/tzpl_test_async_fileio_try/no_such_dir/w.txt
+true
+true

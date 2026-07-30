@@ -29,6 +29,7 @@
 #include "linenoise.h"
 #include "tzpl.hpp"
 #include "builtins.hpp"
+#include "nrt_vm.hpp"
 #include "module_compiler.hpp"
 #include "module_paths.hpp"
 #include "diagnostic.hpp"
@@ -44,22 +45,22 @@ static void printErrors(const std::vector<CompileError>& errors,
     printDiagnostics(errors, source, filename, std::cerr, useColor);
 }
 
-// Run source code through the compile -> install -> execute pipeline
-static int runSource(VM& vm, Compiler& compiler, const VMTarget& target,
+// Run source code through the compile -> install -> execute pipeline.
+// Scripts run on an NRTVM (not a bare VM) so the async I/O builtins have a
+// host mutex + worker to complete against and a top-level `await` on a
+// cross-thread future can park instead of hanging. The heartbeat thread is
+// NOT started: the GC advances at safepoints as before, keeping script runs
+// single-threaded unless a script actually uses async I/O.
+static int runSource(NRTVM& nrtvm, Compiler& compiler, const VMTarget& target,
                      const std::string& source, const std::string& filename,
                      ModuleCompiler* moduleCompiler = nullptr) {
-    // Compile (handles makeCurrent/endCurrent internally)
-    CompileResult result = compiler.compile(source, filename, target, moduleCompiler);
+    CompileResult result = nrtvm.compileAndInstall(compiler, source, filename,
+                                                   target, moduleCompiler);
     if (!result.success) {
         printErrors(result.errors, source, filename);
         return 1;
     }
-
-    // Switch to VM context, install, and execute
-    vm.makeCurrent();
-    vm.install(result);
-    vm.execute(result.mainBlock);
-
+    nrtvm.execute(result.mainBlock);
     return 0;
 }
 
@@ -397,17 +398,19 @@ int main(int argc, const char* argv[]) {
 
         // Create target and VM after parsing args (so rtRestricted is known)
         VMTarget target = compiler.createTarget(rtRestricted);
-        VM vm(64 * 1024 * 1024, types, target);
 
         if (!filename.empty()) {
             // Run file with module support
             std::string source = readFile(filename);
             if (source.empty()) return 1;
             ModuleCompiler moduleCompiler(compiler, std::move(includePaths));
-            return runSource(vm, compiler, target, source, filename, &moduleCompiler);
+            NRTVM nrtvm(64 * 1024 * 1024, types, target);
+            return runSource(nrtvm, compiler, target, source, filename, &moduleCompiler);
         }
 
-        // No file argument: run REPL
+        // No file argument: run REPL (bare VM; async builtins fall back to
+        // synchronous completion until the REPL is wired through NRTVM)
+        VM vm(64 * 1024 * 1024, types, target);
         runREPL(vm, compiler, target, std::move(includePaths));
         return 0;
 

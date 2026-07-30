@@ -30,11 +30,13 @@
 //
 
 #include "builtins_internal.hpp"
+#include "async_io.hpp"
 
 #include <algorithm>
 #include <cerrno>
 #include <cstdio>
 #include <cstring>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -73,8 +75,10 @@ static const VMString& argString(VM& vm, u16 r) {
 // ---------------------------------------------------------------------------
 
 // Read the entire file at path into out. False on any error.
-static bool readWholeFile(const VMString& path, std::string& out) {
-    FILE* f = std::fopen(path.c_str(), "rb");
+// Takes a plain C string so the async worker thread can call it on a
+// system-allocated copy of the path (never a VM-heap VMString).
+static bool readWholeFile(const char* path, std::string& out) {
+    FILE* f = std::fopen(path, "rb");
     if (!f) return false;
     bool ok = false;
     if (std::fseek(f, 0, SEEK_END) == 0) {
@@ -91,14 +95,14 @@ static bool readWholeFile(const VMString& path, std::string& out) {
 // readFile(path String) Option<String>
 static void builtin_read_file(VM& vm, u16 dst, u16, u16 ab) {
     std::string data;
-    vm.reg(dst).o = readWholeFile(argString(vm, ab), data)
+    vm.reg(dst).o = readWholeFile(argString(vm, ab).c_str(), data)
                   ? makeString(data.data(), data.size()) : nullptr;
 }
 
 // readFileBytes(path String) Option<Bytes>
 static void builtin_read_file_bytes(VM& vm, u16 dst, u16, u16 ab) {
     std::string data;
-    if (readWholeFile(argString(vm, ab), data)) {
+    if (readWholeFile(argString(vm, ab).c_str(), data)) {
         vm.reg(dst).o = new BytesObj(reinterpret_cast<const u8*>(data.data()),
                                      data.size());
     } else {
@@ -110,9 +114,9 @@ static void builtin_read_file_bytes(VM& vm, u16 dst, u16, u16 ab) {
 // Whole-file writes
 // ---------------------------------------------------------------------------
 
-static bool writeWholeFile(const VMString& path, const char* data, size_t n,
+static bool writeWholeFile(const char* path, const char* data, size_t n,
                            const char* mode) {
-    FILE* f = std::fopen(path.c_str(), mode);
+    FILE* f = std::fopen(path, mode);
     if (!f) return false;
     bool ok = n == 0 || std::fwrite(data, 1, n, f) == n;
     ok = (std::fclose(f) == 0) && ok;
@@ -122,27 +126,156 @@ static bool writeWholeFile(const VMString& path, const char* data, size_t n,
 // writeFile(path String, s String) Bool
 static void builtin_write_file_string(VM& vm, u16 dst, u16, u16 ab) {
     const VMString& s = argString(vm, (u16)(ab + 1));
-    vm.reg(dst).i = writeWholeFile(argString(vm, ab), s.data(), s.size(), "wb");
+    vm.reg(dst).i = writeWholeFile(argString(vm, ab).c_str(), s.data(), s.size(), "wb");
 }
 
 // writeFile(path String, b Bytes) Bool
 static void builtin_write_file_bytes(VM& vm, u16 dst, u16, u16 ab) {
     auto* b = static_cast<BytesObj*>(vm.reg((u16)(ab + 1)).o);
-    vm.reg(dst).i = writeWholeFile(argString(vm, ab),
+    vm.reg(dst).i = writeWholeFile(argString(vm, ab).c_str(),
         reinterpret_cast<const char*>(b->data.data()), b->data.size(), "wb");
 }
 
 // appendFile(path String, s String) Bool
 static void builtin_append_file_string(VM& vm, u16 dst, u16, u16 ab) {
     const VMString& s = argString(vm, (u16)(ab + 1));
-    vm.reg(dst).i = writeWholeFile(argString(vm, ab), s.data(), s.size(), "ab");
+    vm.reg(dst).i = writeWholeFile(argString(vm, ab).c_str(), s.data(), s.size(), "ab");
 }
 
 // appendFile(path String, b Bytes) Bool
 static void builtin_append_file_bytes(VM& vm, u16 dst, u16, u16 ab) {
     auto* b = static_cast<BytesObj*>(vm.reg((u16)(ab + 1)).o);
-    vm.reg(dst).i = writeWholeFile(argString(vm, ab),
+    vm.reg(dst).i = writeWholeFile(argString(vm, ab).c_str(),
         reinterpret_cast<const char*>(b->data.data()), b->data.size(), "ab");
+}
+
+// ---------------------------------------------------------------------------
+// Async variants
+//
+// Each builtin copies its arguments out of the VM heap into system-allocated
+// strings, creates a Pending Future (rooted via registerExternalFuture), and
+// submits a job to the host's I/O executor (async_io.hpp). The job's `work`
+// step does the blocking syscall on the worker thread; its `complete` step
+// runs under the host mutex with the VM current, builds the result value in
+// the VM heap, and resolves the Future -- the same cross-thread discipline
+// as renderDone / siloLoad. Hosts with no executor (bare VM) run the job
+// inline: identical semantics, just synchronous.
+// ---------------------------------------------------------------------------
+
+// State shared between an async job's work and complete steps.
+// System-allocated on purpose: the worker thread must never touch the VM heap.
+struct AsyncFileIOState {
+    std::string path;
+    std::string data;   // read result, or the contents to write
+    bool ok = false;
+};
+
+// Create a Pending Future<valueT>, root it while in flight, return it.
+static Future* makePendingFuture(VM& vm, Type* valueT) {
+    FutureType* futT = vm.typeUniverse().futureType(valueT);
+    u16 vw = (u16)((valueT && valueT->sizeWords_ > 0) ? valueT->sizeWords_ : 1);
+    Future* fut = Future::create(futT, valueT, vw);
+    vm.registerExternalFuture(fut);
+    return fut;
+}
+
+// Submit to the host executor; with no executor installed, run both steps
+// inline (submitAsyncIO leaves the job untouched when it returns false).
+static void submitOrRunInline(VM& vm, AsyncIOJob&& job) {
+    if (!vm.submitAsyncIO(std::move(job))) {
+        job.work();
+        job.complete(vm);
+    }
+}
+
+// Shared body of readFileAsync / readFileBytesAsync; `asBytes` picks the
+// result representation. Reads args BEFORE writing dst (dst may alias ab).
+static void asyncReadCommon(VM& vm, u16 dst, u16 ab, bool asBytes) {
+    auto st = std::make_shared<AsyncFileIOState>();
+    const VMString& p = argString(vm, ab);
+    st->path.assign(p.data(), p.size());
+
+    Type* elemT = asBytes ? vm.typeUniverse().types().bytesType : vm.stringType();
+    Future* fut = makePendingFuture(vm, vm.typeUniverse().optionType(elemT));
+    vm.reg(dst).o = fut;
+
+    AsyncIOJob job;
+    job.work = [st] { st->ok = readWholeFile(st->path.c_str(), st->data); };
+    job.complete = [st, fut, asBytes](VM& v) {
+        Word w;
+        if (!st->ok) {
+            w.o = nullptr;
+        } else if (asBytes) {
+            w.o = new BytesObj(reinterpret_cast<const u8*>(st->data.data()),
+                               st->data.size());
+        } else {
+            w.o = makeString(st->data.data(), st->data.size());
+        }
+        v.resolveExternalFuture(fut, &w, 1);
+    };
+    submitOrRunInline(vm, std::move(job));
+}
+
+// readFileAsync(path String) Future<Option<String>>
+static void builtin_read_file_async(VM& vm, u16 dst, u16, u16 ab) {
+    asyncReadCommon(vm, dst, ab, /*asBytes=*/false);
+}
+
+// readFileBytesAsync(path String) Future<Option<Bytes>>
+static void builtin_read_file_bytes_async(VM& vm, u16 dst, u16, u16 ab) {
+    asyncReadCommon(vm, dst, ab, /*asBytes=*/true);
+}
+
+// Shared body of the four async write/append builtins. `mode` must be a
+// string literal (captured by pointer into the worker closure).
+static void asyncWriteCommon(VM& vm, u16 dst, u16 ab, bool bytesArg,
+                             const char* mode) {
+    auto st = std::make_shared<AsyncFileIOState>();
+    const VMString& p = argString(vm, ab);
+    st->path.assign(p.data(), p.size());
+    if (bytesArg) {
+        auto* b = static_cast<BytesObj*>(vm.reg((u16)(ab + 1)).o);
+        st->data.assign(reinterpret_cast<const char*>(b->data.data()),
+                        b->data.size());
+    } else {
+        const VMString& s = argString(vm, (u16)(ab + 1));
+        st->data.assign(s.data(), s.size());
+    }
+
+    Future* fut = makePendingFuture(vm, vm.typeUniverse().types().boolType);
+    vm.reg(dst).o = fut;
+
+    AsyncIOJob job;
+    job.work = [st, mode] {
+        st->ok = writeWholeFile(st->path.c_str(), st->data.data(),
+                                st->data.size(), mode);
+    };
+    job.complete = [st, fut](VM& v) {
+        Word w;
+        w.i = st->ok ? 1 : 0;
+        v.resolveExternalFuture(fut, &w, 1);
+    };
+    submitOrRunInline(vm, std::move(job));
+}
+
+// writeFileAsync(path String, s String) Future<Bool>
+static void builtin_write_file_string_async(VM& vm, u16 dst, u16, u16 ab) {
+    asyncWriteCommon(vm, dst, ab, /*bytesArg=*/false, "wb");
+}
+
+// writeFileAsync(path String, b Bytes) Future<Bool>
+static void builtin_write_file_bytes_async(VM& vm, u16 dst, u16, u16 ab) {
+    asyncWriteCommon(vm, dst, ab, /*bytesArg=*/true, "wb");
+}
+
+// appendFileAsync(path String, s String) Future<Bool>
+static void builtin_append_file_string_async(VM& vm, u16 dst, u16, u16 ab) {
+    asyncWriteCommon(vm, dst, ab, /*bytesArg=*/false, "ab");
+}
+
+// appendFileAsync(path String, b Bytes) Future<Bool>
+static void builtin_append_file_bytes_async(VM& vm, u16 dst, u16, u16 ab) {
+    asyncWriteCommon(vm, dst, ab, /*bytesArg=*/true, "ab");
 }
 
 // ---------------------------------------------------------------------------
@@ -286,6 +419,21 @@ void registerIoBuiltins(Compiler& compiler, FuncMap& functions) {
     registerOne(compiler, functions, "makeDir",       Bool,     {Str},        builtin_make_dir,           /*pure=*/false, /*rtSafe=*/false);
     registerOne(compiler, functions, "removeFile",    Bool,     {Str},        builtin_remove_file,        /*pure=*/false, /*rtSafe=*/false);
     registerOne(compiler, functions, "renameFile",    Bool,     {Str, Str},   builtin_rename_file,        /*pure=*/false, /*rtSafe=*/false);
+
+    // Async variants: same operations, run on the host's I/O worker; the
+    // returned Future resolves when the I/O lands. Still rtSafe=false --
+    // NRT-only until the RT payload-delivery path is designed (a Pending
+    // Future is RT-compatible, but resolving one with file contents on the
+    // audio thread is not; see IMPLEMENTATION_PLAN.md).
+    Type* FutOptStr   = compiler.futureType(OptStr);
+    Type* FutOptBytes = compiler.futureType(OptBytes);
+    Type* FutBool     = compiler.futureType(Bool);
+    registerOne(compiler, functions, "readFileAsync",      FutOptStr,   {Str},        builtin_read_file_async,         /*pure=*/false, /*rtSafe=*/false);
+    registerOne(compiler, functions, "readFileBytesAsync", FutOptBytes, {Str},        builtin_read_file_bytes_async,   /*pure=*/false, /*rtSafe=*/false);
+    registerOne(compiler, functions, "writeFileAsync",     FutBool,     {Str, Str},   builtin_write_file_string_async, /*pure=*/false, /*rtSafe=*/false);
+    registerOne(compiler, functions, "writeFileAsync",     FutBool,     {Str, Bytes}, builtin_write_file_bytes_async,  /*pure=*/false, /*rtSafe=*/false);
+    registerOne(compiler, functions, "appendFileAsync",    FutBool,     {Str, Str},   builtin_append_file_string_async,/*pure=*/false, /*rtSafe=*/false);
+    registerOne(compiler, functions, "appendFileAsync",    FutBool,     {Str, Bytes}, builtin_append_file_bytes_async, /*pure=*/false, /*rtSafe=*/false);
 
     registerOne(compiler, functions, "getEnv",        OptStr,   {Str},        builtin_get_env,            /*pure=*/false, /*rtSafe=*/false);
     registerOne(compiler, functions, "programArgs",   ArrayStr, {},           builtin_program_args,       /*pure=*/false, /*rtSafe=*/false);

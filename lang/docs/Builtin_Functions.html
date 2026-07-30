@@ -364,7 +364,7 @@
                 <li><a href="#operators">Built-in Operators</a> &mdash; arithmetic, comparison, bitwise, logical, string</li>
                 <li><a href="#type-conversions">Type Conversions</a> &mdash; toInt, toFloat, toFraction, toComplex</li>
                 <li><a href="#io">I/O Functions</a> &mdash; print, println, toString, prettyString, prettyPrint, getListPrintLimit, setListPrintLimit, setGraphMaxDepth, setLazyForceLimit, setPrintMaxDepth</li>
-                <li><a href="#file-os">File &amp; OS Functions (NRT)</a> &mdash; readFile, readFileBytes, writeFile, appendFile, fileExists, isDirectory, fileSize, fileModTime, listDir, makeDir, removeFile, renameFile, getEnv, programArgs, currentDir</li>
+                <li><a href="#file-os">File &amp; OS Functions (NRT)</a> &mdash; readFile, readFileBytes, writeFile, appendFile (+ Async variants), fileExists, isDirectory, fileSize, fileModTime, listDir, makeDir, removeFile, renameFile, getEnv, programArgs, currentDir</li>
                 <li><a href="#introspection">Introspection</a> &mdash; disassemble, typeName&lt;T&gt;, typeRepr</li>
             </ul>
         </div>
@@ -2697,6 +2697,21 @@ setGraphMaxDepth(old);         <span class="cmt">-- restore previous limit</span
 appendFile(<span class="hl-str">"/tmp/notes.txt"</span>, <span class="hl-str">"world\n"</span>);
 readFile(<span class="hl-str">"/tmp/notes.txt"</span>) unwrapOr(<span class="hl-str">""</span>) print;   <span class="cmt">-- hello\nworld\n</span>
 readFile(<span class="hl-str">"/missing"</span>) isNone;                      <span class="cmt">-- true</span></code></pre>
+
+            <h3>Async Variants</h3>
+            <p>Each read/write builtin has an <code>Async</code> variant returning a <code>Future</code>. The builtin returns immediately; the syscall runs on the host's I/O worker thread and the Future resolves when it lands, so a long read no longer stalls the VM (actor service, OSC/NATS handlers, UI callbacks keep running). <code>await</code> the Future for the same value the synchronous form returns. Completion order is unobservable &mdash; awaited values arrive in program order &mdash; and in a host with no I/O worker (an embedded bare VM) the variants degrade to synchronous execution with identical semantics. They are still <strong>NRT</strong>: a Pending Future is cheap, but resolving one with file contents on the audio thread is not, so real-time VMs reject them at compile time like the rest of this section.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>readFileAsync(String) &rarr; Future[Option[String]]</code></td><td>Off-thread <code>readFile</code>.</td></tr>
+                <tr><td><code>readFileBytesAsync(String) &rarr; Future[Option[Bytes]]</code></td><td>Off-thread <code>readFileBytes</code>.</td></tr>
+                <tr><td><code>writeFileAsync(String, String) &rarr; Future[Bool]</code><br><code>writeFileAsync(String, Bytes) &rarr; Future[Bool]</code></td><td>Off-thread <code>writeFile</code>.</td></tr>
+                <tr><td><code>appendFileAsync(String, String) &rarr; Future[Bool]</code><br><code>appendFileAsync(String, Bytes) &rarr; Future[Bool]</code></td><td>Off-thread <code>appendFile</code>.</td></tr>
+            </table>
+            <pre><code><span class="cmt">-- Start both reads, then await: the files load concurrently.</span>
+<span class="kw">let</span> a = readFileAsync(<span class="hl-str">"/tmp/one.txt"</span>);
+<span class="kw">let</span> b = readFileAsync(<span class="hl-str">"/tmp/two.txt"</span>);
+(<span class="kw">await</span> a) unwrapOr(<span class="hl-str">""</span>) println;
+(<span class="kw">await</span> b) unwrapOr(<span class="hl-str">""</span>) println;</code></pre>
 
             <h3>Metadata and Directories</h3>
             <table>

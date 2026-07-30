@@ -32,6 +32,7 @@
 #include "tracing_gc.hpp"   // for gcMonoNanos() used by gcHeartbeat()
 #include "type_universe.hpp"
 #include "vm_config.hpp"
+#include "async_io.hpp"     // AsyncIOJob for the submitAsyncIO host hook
 #include <algorithm>
 #include <atomic>
 #include <cstdio>
@@ -350,6 +351,12 @@ private:
     // changed (e.g. a NATS handler delivered a message on another thread). The
     // host (NRTVM) wires this to its condition variable's notify_all.
     std::function<void()> notifyAsyncProgress_;
+    // Host-provided async I/O executor (async_io.hpp). The async NRT I/O
+    // builtins (readFileAsync & co) submit {work, complete} jobs: `work` runs
+    // on the host's worker thread with no VM access, `complete` under the host
+    // mutex with the VM current. Unset for bare-VM hosts -- builtins then run
+    // the job inline (synchronous fallback).
+    std::function<bool(AsyncIOJob&&)> hostSubmitAsyncIO_;
     // Execution snapshots of main threads parked in a cross-thread await. While
     // parked, the live frame stack is reset to empty and belongs to whoever runs
     // lang code next (e.g. the render thread); the parked context lives here and
@@ -633,6 +640,15 @@ public:
     }
     void setHostBlockingWait(std::function<void(std::function<bool()> const&)> fn) {
         hostBlockingWait_ = std::move(fn);
+    }
+    // Install / use the host async-I/O executor. submitAsyncIO returns false
+    // -- with the job untouched, so the caller may still run it inline --
+    // when no host installed an executor.
+    void setSubmitAsyncIO(std::function<bool(AsyncIOJob&&)> fn) {
+        hostSubmitAsyncIO_ = std::move(fn);
+    }
+    bool submitAsyncIO(AsyncIOJob&& j) {
+        return hostSubmitAsyncIO_ ? hostSubmitAsyncIO_(std::move(j)) : false;
     }
     // Save/restore the execution context across a cross-thread await park.
     void saveExecSnapshot(ExecSnapshot& s);
