@@ -770,9 +770,36 @@ int main(int argc, const char* argv[]) {
         // heartbeat runs until the NRTVM destructor stops it.
         bridge::UIState uiState;
 
+        // Advanced language settings -> per-VM construction configs. Shared
+        // knobs (stack limits, GC tuning, graph limits) apply to both the NRT
+        // VM and the silo VMs; pool size and the MMU governor differ per kind.
+        auto langVMConfig = [&config](bool rtSilo) {
+            ts::VMConfig c;
+            c.poolSize = (usize)std::max(rtSilo ? config.langSiloHeapMB
+                                                : config.langNrtHeapMB, 1) << 20;
+            c.growthChunkMin = (usize)std::max(config.langHeapChunkMinMB, 1) << 20;
+            c.growthChunkMax = (usize)std::max(config.langHeapChunkMaxMB,
+                                               config.langHeapChunkMinMB) << 20;
+            c.maxRegs = (u32)std::max(config.langMaxRegisters, 256);
+            c.maxFrames = (u32)std::max(config.langMaxCallDepth, 16);
+            c.maxDynStack = (u32)std::max(config.langMaxDynScope, 16);
+            c.maxDynStackPayload = (u32)std::max(config.langMaxDynScopeWords, 16);
+            c.gcStepBudgetNanos = (u64)std::max(config.langGcStepBudgetUs, 1) * 1000;
+            c.gcMinTriggerAllocs = (u32)std::max(config.langGcMinTriggerAllocs, 1);
+            c.gcGrowthFactor = (u32)std::max(config.langGcGrowthFactor, 1);
+            c.mmuEnabled = rtSilo && config.langSiloMmu != 0;
+            c.mmuMutatorPermille = (u32)std::clamp(config.langSiloMmuMutatorPct, 0, 100) * 10;
+            c.mmuWindowNanos = (u64)std::max(config.langSiloMmuWindowMs, 1) * 1'000'000;
+            c.graphMaxDepth = (u32)std::max(config.langGraphMaxDepth, 1);
+            c.lazyForceLimit = std::max(config.langLazyForceLimit, 1);
+            c.printMaxDepth = (u32)std::max(config.langPrintMaxDepth, 1);
+            c.listPrintLimit = std::max(config.langListPrintLimit, 1);
+            return c;
+        };
+
         // Use NRTVM for mutex-serialized access from multiple threads
         // (main thread for REPL/script, scheduler thread for timed events).
-        NRTVM nrtvm(256 * 1024 * 1024, types, target);
+        NRTVM nrtvm(langVMConfig(/*rtSilo=*/false), types, target);
 
         // Live tempo scheduler (60 BPM default, 50ms latency). Wall-clock
         // driven on its own thread. Each NRT render creates and drives its
@@ -790,8 +817,10 @@ int main(int argc, const char* argv[]) {
                                       std::vector<std::string>(systemPaths));
         appCtx.moduleCompiler = &moduleCompiler;
 
-        // Initialize per-silo VM slots (populated later by attachVM())
+        // Initialize per-silo VM slots (populated later by attachVM()),
+        // and the construction config attachVM applies to each silo VM.
         appCtx.siloVMs.resize(config.numSilos);
+        appCtx.siloVMConfig = langVMConfig(/*rtSilo=*/true);
 
         // Wire up the `ui` widget registry. Present in both GUI and headless
         // modes (headless scripts can build widgets; nothing renders them).

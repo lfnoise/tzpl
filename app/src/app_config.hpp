@@ -56,6 +56,30 @@ struct AppConfig {
     int oscPort = 0;      // 0 = disabled
     std::string natsUrl;  // empty = disabled
     std::string engineName;  // empty = single-instance mode
+
+    // --- Advanced language (VM) settings; mirror ts::VMConfig, whose field
+    // comments explain each knob. Defaults here must equal the VMConfig
+    // defaults (asserted where they are applied in main.cpp) so an absent
+    // key changes nothing. All are read at VM construction: the NRT VM at
+    // launch, silo VMs at attach.
+    int langNrtHeapMB = 256;         // NRT VM initial TLSF pool (MB)
+    int langSiloHeapMB = 16;         // per-silo RT VM initial TLSF pool (MB)
+    int langHeapChunkMinMB = 64;     // heap-growth chunk floor (MB)
+    int langHeapChunkMaxMB = 4096;   // heap-growth chunk ceiling (MB)
+    int langMaxRegisters = 4096;     // register file (Words)
+    int langMaxCallDepth = 512;      // call-frame stack depth
+    int langMaxDynScope = 256;       // dynamic-scope save entries
+    int langMaxDynScopeWords = 1024; // inline-composite dynvar save buffer
+    int langGcStepBudgetUs = 2000;   // GC step budget (microseconds)
+    int langGcMinTriggerAllocs = 4096;  // GC cycle-trigger floor (allocations)
+    int langGcGrowthFactor = 4;      // GC heap-growth trigger multiplier
+    int langSiloMmu = 1;             // MMU governor on silo VMs (0/1)
+    int langSiloMmuMutatorPct = 90;  // MMU mutator share target (%)
+    int langSiloMmuWindowMs = 15;    // MMU trailing window (ms)
+    int langGraphMaxDepth = 10000;   // ==/hash/serialize nesting limit
+    int langLazyForceLimit = 10000;  // lazy forces per graph traversal
+    int langPrintMaxDepth = 200;     // print nesting before "..." elision
+    int langListPrintLimit = 10;     // list elements printed before "..."
 };
 
 // Overwrite the keys `path` mentions, leaving the rest of `cfg` alone.

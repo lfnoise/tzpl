@@ -29,6 +29,7 @@
 #include "module_compiler.hpp"
 #include "project_paths.hpp"
 #include "settings_dialog.hpp"
+#include "language_settings_dialog.hpp"
 #include "tzpl_fonts.hpp"
 #include <cstdio>
 #include <cstdlib>
@@ -1189,6 +1190,12 @@ void MainComponent::showEngineSettingsFlow() {
                        [this] { relaunchApp(); });
 }
 
+void MainComponent::showLanguageSettingsFlow() {
+    showLanguageSettings(appCtx_.projectDir,
+                         [this](String const& msg) { logLine(msg); },
+                         [this] { relaunchApp(); });
+}
+
 namespace {
 
 // Single-quote a path for /bin/sh.
@@ -1289,7 +1296,7 @@ void MainComponent::getAllCommands(juce::Array<juce::CommandID>& ids) {
         cmd::fileNew, cmd::fileNewNotebook, cmd::fileNewProject,
         cmd::fileOpen, cmd::fileOpenFolder, cmd::fileOpenExample,
         cmd::fileRevealModules,
-        cmd::engineSettings, cmd::helpAbout,
+        cmd::engineSettings, cmd::languageSettings, cmd::helpAbout,
         cmd::fileSave, cmd::fileSaveAs, cmd::fileSaveCopy, cmd::fileRevert,
         cmd::fileClose,
 #if !JUCE_MAC
@@ -1367,6 +1374,11 @@ void MainComponent::getCommandInfo(juce::CommandID id,
     case cmd::engineSettings:
         set("Engine Settings...", "File");
         info.addDefaultKeypress(',', mod);
+        break;
+    case cmd::languageSettings:
+        // Advanced settings: no keyboard shortcut on purpose -- opening the
+        // dialog should take deliberate menu navigation.
+        set("Language Settings (Advanced)...", "File");
         break;
     case cmd::helpAbout:
         set("About Tzopilotl", "Help");
@@ -1592,6 +1604,9 @@ bool MainComponent::perform(InvocationInfo const& info) {
     }
     case cmd::engineSettings:
         showEngineSettingsFlow();
+        return true;
+    case cmd::languageSettings:
+        showLanguageSettingsFlow();
         return true;
     case cmd::helpAbout:
         showAboutBox();

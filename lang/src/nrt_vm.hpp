@@ -83,12 +83,17 @@ struct NRTVM {
     std::thread heartbeatThread_;
     std::atomic<bool> heartbeatRunning_{false};
 
-    // Constructor: same args as VM. Registers the HandlerTable as a GC
-    // root scanner so Obj* pointers stored in oscHandlers / natsHandlers
-    // stay alive across cycles.
+    // Constructors: same args as VM (legacy poolSize form and full VMConfig
+    // form). Registers the HandlerTable as a GC root scanner so Obj* pointers
+    // stored in oscHandlers / natsHandlers stay alive across cycles.
     explicit NRTVM(usize poolSize, TypeUniverse& typeUniverse,
                    const VMTarget& target = {})
-        : vm(poolSize, typeUniverse, target)
+        : NRTVM(VMConfig{.poolSize = poolSize}, typeUniverse, target)
+    {}
+
+    explicit NRTVM(VMConfig const& config, TypeUniverse& typeUniverse,
+                   const VMTarget& target = {})
+        : vm(config, typeUniverse, target)
     {
         vm.addExtraRootScanner([this](TracingGC& gc) {
             for (auto& kv : handlers.oscHandlers) {

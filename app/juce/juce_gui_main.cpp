@@ -30,6 +30,7 @@
 #include "app_commands.hpp"
 #include "main_component.hpp"
 #include "settings_dialog.hpp"
+#include "language_settings_dialog.hpp"
 #include "tzpl_app_context.hpp"
 #include "tzpl_look_and_feel.hpp"
 #include "BinaryData.h"
@@ -91,6 +92,7 @@ public:
 #if !JUCE_MAC
             m.addSeparator();
             m.addCommandItem(&commands_, cmd::engineSettings);
+            m.addCommandItem(&commands_, cmd::languageSettings);
             m.addSeparator();
             m.addCommandItem(&commands_, cmd::helpAbout);
             m.addSeparator();
@@ -270,6 +272,7 @@ public:
         appleExtras.addCommandItem(&commands_, cmd::helpAbout);
         appleExtras.addSeparator();
         appleExtras.addCommandItem(&commands_, cmd::engineSettings);
+        appleExtras.addCommandItem(&commands_, cmd::languageSettings);
         juce::MenuBarModel::setMacMainMenu(menuModel_.get(), &appleExtras);
 #else
         window_->setMenuBar(menuModel_.get());
@@ -341,6 +344,7 @@ public:
     void shutdown() override {
         // A settings window left open outlives the main window otherwise.
         closeEngineSettings();
+        closeLanguageSettings();
 #if JUCE_MAC
         juce::MenuBarModel::setMacMainMenu(nullptr);
 #else

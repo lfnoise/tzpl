@@ -363,7 +363,7 @@
                 <li><a href="#enum-functions">Enum Functions</a> &mdash; ordinal, tag</li>
                 <li><a href="#operators">Built-in Operators</a> &mdash; arithmetic, comparison, bitwise, logical, string</li>
                 <li><a href="#type-conversions">Type Conversions</a> &mdash; toInt, toFloat, toFraction, toComplex</li>
-                <li><a href="#io">I/O Functions</a> &mdash; print, println, toString, prettyString, prettyPrint, getListPrintLimit, setListPrintLimit</li>
+                <li><a href="#io">I/O Functions</a> &mdash; print, println, toString, prettyString, prettyPrint, getListPrintLimit, setListPrintLimit, setGraphMaxDepth, setLazyForceLimit, setPrintMaxDepth</li>
                 <li><a href="#file-os">File &amp; OS Functions (NRT)</a> &mdash; readFile, readFileBytes, writeFile, appendFile, fileExists, isDirectory, fileSize, fileModTime, listDir, makeDir, removeFile, renameFile, getEnv, programArgs, currentDir</li>
                 <li><a href="#introspection">Introspection</a> &mdash; disassemble, typeName&lt;T&gt;, typeRepr</li>
             </ul>
@@ -2652,6 +2652,27 @@ a println;                     <span class="cmt">-- [Tree.leaf(1), Tree.node(^1^
 (1..10) toList println;        <span class="cmt">-- List(1, 2, 3, ...)</span>
 setListPrintLimit(old);        <span class="cmt">-- restore previous limit</span>
 getListPrintLimit();           <span class="cmt">-- check current limit</span></code></pre>
+
+            <h3>Graph-Traversal Limits</h3>
+            <p>Per-VM safety limits on the cycle-safe <code>==</code> / <code>hash</code> /
+            print / serialize traversals. Each limit guards against a runaway
+            traversal (a C++ stack overflow, or forcing an unbounded lazy list
+            forever); a valid program that legitimately exceeds one can raise it
+            at runtime. Setters return the previous value and clamp to
+            <code>&gt;= 1</code>. Initial values come from the host's VM
+            configuration (in the app: Language Settings).</p>
+            <table>
+                <tr><th>Function</th><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>getGraphMaxDepth()</code></td><td><code>() &rarr; Int</code></td><td>Current nesting-depth limit for <code>==</code>, <code>hash</code>, and <code>serialize</code> traversals (default 10000). Exceeding it raises a runtime error.</td></tr>
+                <tr><td><code>setGraphMaxDepth(n)</code></td><td><code>Int &rarr; Int</code></td><td>Set the traversal depth limit. Returns the previous limit.</td></tr>
+                <tr><td><code>getLazyForceLimit()</code></td><td><code>() &rarr; Int</code></td><td>Current cap on lazy list-node forces per <code>==</code>/<code>hash</code>/<code>serialize</code> traversal (default 10000), so an unbounded lazy list raises instead of hanging.</td></tr>
+                <tr><td><code>setLazyForceLimit(n)</code></td><td><code>Int &rarr; Int</code></td><td>Set the lazy force cap. Returns the previous limit.</td></tr>
+                <tr><td><code>getPrintMaxDepth()</code></td><td><code>() &rarr; Int</code></td><td>Current container-nesting depth at which printing elides with <code>...</code> (default 200).</td></tr>
+                <tr><td><code>setPrintMaxDepth(n)</code></td><td><code>Int &rarr; Int</code></td><td>Set the print-depth limit. Returns the previous limit.</td></tr>
+            </table>
+            <pre><code>let old = setGraphMaxDepth(50000);
+deepA == deepB;                <span class="cmt">-- a 20000-deep compare now succeeds</span>
+setGraphMaxDepth(old);         <span class="cmt">-- restore previous limit</span></code></pre>
 
             <a href="#top" class="back-to-top">&uarr; Back to top</a>
         </div>

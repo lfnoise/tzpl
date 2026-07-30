@@ -532,9 +532,9 @@ u32 TracingGC::step_sweep(u64 deadlineNanos) {
         // builds many short-lived nodes will see lastBlackCount stay low
         // and cycle frequently; a program holding a large stable tree
         // will see lastBlackCount large and cycle rarely. Bottom-bounded
-        // by kMinTriggerAllocs so we don't churn on very small heaps.
-        u64 want = (u64)lastBlackCount_ * (u64)kGrowthFactor;
-        if (want < kMinTriggerAllocs) want = kMinTriggerAllocs;
+        // by minTriggerAllocs_ so we don't churn on very small heaps.
+        u64 want = (u64)lastBlackCount_ * (u64)growthFactor_;
+        if (want < minTriggerAllocs_) want = minTriggerAllocs_;
         if (want > UINT32_MAX) want = UINT32_MAX;
         nextTriggerAllocs_ = (u32)want;
     }

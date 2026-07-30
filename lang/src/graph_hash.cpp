@@ -46,7 +46,7 @@ namespace {
 struct DepthGuard {
     GraphHashCtx& ctx;
     explicit DepthGuard(GraphHashCtx& c) : ctx(c) {
-        if (++ctx.depth > kGraphMaxDepth) {
+        if (++ctx.depth > gCurrentVM->graphMaxDepth()) {
             throw std::runtime_error("hash: value graph nesting too deep");
         }
     }

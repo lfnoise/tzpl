@@ -40,7 +40,7 @@ namespace {
 struct DepthGuard {
     GraphEqCtx& ctx;
     explicit DepthGuard(GraphEqCtx& c) : ctx(c) {
-        if (++ctx.depth > kGraphMaxDepth) {
+        if (++ctx.depth > gCurrentVM->graphMaxDepth()) {
             throw std::runtime_error("==: value graph nesting too deep");
         }
     }

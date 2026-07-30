@@ -891,10 +891,12 @@ static void ffi_attachVM(ts::VM& vm, u16 dst, u16, u16 argBase) {
         return;
     }
 
-    // Create rt_restricted target and VM (16 MB TLSF pool)
+    // Create rt_restricted target and VM. Construction config (pool size,
+    // stack limits, GC/MMU tuning) comes from the app's language settings via
+    // AppContext::siloVMConfig; its defaults are the RT preset.
     state.target = ctx->compiler->createTarget(/*rtRestricted=*/true);
     ts::TypeUniverse& types = ctx->nrtvm->vm.typeUniverse();
-    state.vm = new ts::VM(16 * 1024 * 1024, types, state.target);
+    state.vm = new ts::VM(ctx->siloVMConfig, types, state.target);
     state.vm->setUserData(ctx);
 
     // Create a separate module compiler so modules compiled for this

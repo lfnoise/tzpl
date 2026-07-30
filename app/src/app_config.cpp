@@ -59,6 +59,25 @@ constexpr KeyRef kKeys[] = {
     {"oscPort",           &AppConfig::oscPort, nullptr, nullptr},
     {"natsUrl",           nullptr, nullptr, &AppConfig::natsUrl},
     {"engineName",        nullptr, nullptr, &AppConfig::engineName},
+    // Advanced language (VM) settings -- see AppConfig's field comments.
+    {"langNrtHeapMB",          &AppConfig::langNrtHeapMB, nullptr, nullptr},
+    {"langSiloHeapMB",         &AppConfig::langSiloHeapMB, nullptr, nullptr},
+    {"langHeapChunkMinMB",     &AppConfig::langHeapChunkMinMB, nullptr, nullptr},
+    {"langHeapChunkMaxMB",     &AppConfig::langHeapChunkMaxMB, nullptr, nullptr},
+    {"langMaxRegisters",       &AppConfig::langMaxRegisters, nullptr, nullptr},
+    {"langMaxCallDepth",       &AppConfig::langMaxCallDepth, nullptr, nullptr},
+    {"langMaxDynScope",        &AppConfig::langMaxDynScope, nullptr, nullptr},
+    {"langMaxDynScopeWords",   &AppConfig::langMaxDynScopeWords, nullptr, nullptr},
+    {"langGcStepBudgetUs",     &AppConfig::langGcStepBudgetUs, nullptr, nullptr},
+    {"langGcMinTriggerAllocs", &AppConfig::langGcMinTriggerAllocs, nullptr, nullptr},
+    {"langGcGrowthFactor",     &AppConfig::langGcGrowthFactor, nullptr, nullptr},
+    {"langSiloMmu",            &AppConfig::langSiloMmu, nullptr, nullptr},
+    {"langSiloMmuMutatorPct",  &AppConfig::langSiloMmuMutatorPct, nullptr, nullptr},
+    {"langSiloMmuWindowMs",    &AppConfig::langSiloMmuWindowMs, nullptr, nullptr},
+    {"langGraphMaxDepth",      &AppConfig::langGraphMaxDepth, nullptr, nullptr},
+    {"langLazyForceLimit",     &AppConfig::langLazyForceLimit, nullptr, nullptr},
+    {"langPrintMaxDepth",      &AppConfig::langPrintMaxDepth, nullptr, nullptr},
+    {"langListPrintLimit",     &AppConfig::langListPrintLimit, nullptr, nullptr},
 };
 
 std::string trim(std::string const& s) {

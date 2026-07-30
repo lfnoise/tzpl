@@ -241,11 +241,15 @@ CodeBlock* VM::currentCodeBlock() const {
 // VM implementation
 
 VM::VM(usize poolSize, TypeUniverse& typeUniverse, const VMTarget& target)
-    : allocator_(poolSize)
+    : VM(VMConfig{.poolSize = poolSize}, typeUniverse, target)
+{}
+
+VM::VM(VMConfig const& config, TypeUniverse& typeUniverse, const VMTarget& target)
+    : allocator_(config.poolSize)
     , regs_(nullptr)
-    , maxRegs_(4096)
+    , maxRegs_(config.maxRegs)
     , frames_(nullptr)
-    , maxFrames_(512)
+    , maxFrames_(config.maxFrames)
     , frameCount_(0)
     , baseReg_(0)
     , pc_(nullptr)
@@ -255,17 +259,23 @@ VM::VM(usize poolSize, TypeUniverse& typeUniverse, const VMTarget& target)
     , dynVarIsObj_(rt::STLAllocator<u8>(&allocator_))
     , dynStack_(nullptr)
     , dynStackTop_(0)
-    , maxDynStack_(256)
+    , maxDynStack_(config.maxDynStack)
     , dynStackPayload_(nullptr)
     , dynStackPayloadTop_(0)
-    , maxDynStackPayload_(1024)
+    , maxDynStackPayload_(config.maxDynStackPayload)
     , halted_(false)
     , typeUniverse_(typeUniverse)
     , currentPrimitive_(nullptr)
     , printOutput_(stdout)
-    , listPrintLimit_(10)
+    , listPrintLimit_(config.listPrintLimit)
+    , graphMaxDepth_(config.graphMaxDepth)
+    , lazyForceLimit_(config.lazyForceLimit)
+    , printMaxDepth_(config.printMaxDepth)
+    , growthChunkMin_(config.growthChunkMin)
+    , growthChunkMax_(config.growthChunkMax)
     , target_(target)
 {
+    gcStepBudgetNanos_ = config.gcStepBudgetNanos;
     // Seed the RNG from std::random_device (unique per VM instance)
     std::random_device rd;
     rng_.seed(((u64)rd() << 32) | rd());
@@ -289,14 +299,14 @@ VM::VM(usize poolSize, TypeUniverse& typeUniverse, const VMTarget& target)
             // accumulate dozens of 64 MB chunks and hit the per-allocator
             // region-count cap (kMaxRegions) before they hit real OOM. With
             // doubling, the chunk count stays log(total) and the cap is
-            // unreachable in practice.
-            constexpr usize kMinChunk = 64ULL * 1024 * 1024;
-            constexpr usize kMaxChunk = 4ULL * 1024 * 1024 * 1024;
-            auto* alloc = static_cast<rt::TLSFAllocator*>(userData);
-            usize current = alloc->getPoolSize();
+            // unreachable in practice. Chunk bounds come from VMConfig.
+            auto* vm = static_cast<VM*>(userData);
+            usize minChunk = vm->growthChunkMin_;
+            usize maxChunk = vm->growthChunkMax_;
+            usize current = vm->allocator_.getPoolSize();
             usize wanted = needed + 4096;
-            usize chunk = std::max(kMinChunk, std::max(current, wanted));
-            if (chunk > kMaxChunk && wanted <= kMaxChunk) chunk = kMaxChunk;
+            usize chunk = std::max(minChunk, std::max(current, wanted));
+            if (chunk > maxChunk && wanted <= maxChunk) chunk = maxChunk;
             void* p = std::malloc(chunk);
             // If the optimistic chunk failed, fall back halving until we can
             // at least satisfy `wanted`.
@@ -308,7 +318,7 @@ VM::VM(usize poolSize, TypeUniverse& typeUniverse, const VMTarget& target)
             if (p) *outSize = chunk;
             return p;
         },
-        &allocator_
+        this
     );
 
     // Start with an empty (system-heap) code image; install/swap fills it.
@@ -320,6 +330,9 @@ VM::VM(usize poolSize, TypeUniverse& typeUniverse, const VMTarget& target)
 
     // Phase 3b: lazy-init the tracing GC. unique_ptr keeps the header light.
     tracingGC_ = std::make_unique<TracingGC>(*this);
+    tracingGC_->setTriggerConfig(config.gcMinTriggerAllocs, config.gcGrowthFactor);
+    tracingGC_->mmuGovernor().setTarget(config.mmuMutatorPermille, config.mmuWindowNanos);
+    tracingGC_->mmuGovernor().setEnabled(config.mmuEnabled);
     std::memset(regs_, 0, maxRegs_ * sizeof(Word));
 
     // Allocate frame stack from TLSF

@@ -111,7 +111,7 @@ PrintCycleScope::PrintCycleScope(Obj const* o) {
             return;
         }
     }
-    if (anc.size() >= kPrintMaxDepth) {
+    if (anc.size() >= gCurrentVM->printMaxDepth()) {
         tooDeep = true;
         return;
     }
@@ -126,10 +126,10 @@ PrintCycleScope::~PrintCycleScope() {
 
 void graphForceListNode(ListNode* node, i64& forces, char const* op) {
     if (!node->isLazy_) return;
-    if (++forces > kLazyForceLimit) {
+    if (++forces > gCurrentVM->lazyForceLimit()) {
         throw std::runtime_error(std::format(
             "{}: lazy List exceeded the {} element force limit "
-            "(unbounded list?)", op, kLazyForceLimit));
+            "(unbounded list?)", op, gCurrentVM->lazyForceLimit()));
     }
     // The generator is arbitrary user code; it must not see (or corrupt)
     // the traversal in flight.

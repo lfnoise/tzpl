@@ -218,8 +218,22 @@ public:
     void recordAllocation() { ++allocsSinceLastCycle_; }
     u32  allocsSinceLastCycle() const { return allocsSinceLastCycle_; }
     u32  cycleTriggerAllocs() const { return nextTriggerAllocs_; }
-    static constexpr u32 kMinTriggerAllocs = 4096;
-    static constexpr u32 kGrowthFactor = 4;  // trigger at 5x post-cycle live
+    static constexpr u32 kMinTriggerAllocs = 4096;   // default (see VMConfig)
+    static constexpr u32 kGrowthFactor = 4;  // default; trigger at 5x post-cycle live
+
+    // Configure the proportional trigger (VMConfig / host tuning). Resets the
+    // pending threshold so the new floor takes effect for the next cycle; a
+    // completed cycle recomputes it from the live set as usual.
+    void setTriggerConfig(u32 minTriggerAllocs, u32 growthFactor) {
+        minTriggerAllocs_ = minTriggerAllocs < 1 ? 1 : minTriggerAllocs;
+        growthFactor_ = growthFactor < 1 ? 1 : growthFactor;
+        u64 want = (u64)lastBlackCount_ * (u64)growthFactor_;
+        if (want < minTriggerAllocs_) want = minTriggerAllocs_;
+        if (want > ~u32{0}) want = ~u32{0};
+        nextTriggerAllocs_ = (u32)want;
+    }
+    u32 minTriggerAllocs() const { return minTriggerAllocs_; }
+    u32 growthFactor() const { return growthFactor_; }
 
 private:
     VM& vm_;
@@ -246,6 +260,8 @@ private:
     u32 currentBlackCount_ = 0;
     u32 allocsSinceLastCycle_ = 0;
     u32 nextTriggerAllocs_ = kMinTriggerAllocs;
+    u32 minTriggerAllocs_ = kMinTriggerAllocs;
+    u32 growthFactor_ = kGrowthFactor;
 
     // MMU scheduler. record() is fed from step(); permittedNanos()/urgency
     // are driven via mmuPermittedNanos() above. Disabled until configured.

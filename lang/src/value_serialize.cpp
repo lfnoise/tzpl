@@ -225,7 +225,7 @@ struct CanonCtx {
 struct CanonDepth {
     CanonCtx& c;
     explicit CanonDepth(CanonCtx& c_) : c(c_) {
-        if (++c.depth > kGraphMaxDepth) failEnc("value graph nesting too deep");
+        if (++c.depth > gCurrentVM->graphMaxDepth()) failEnc("value graph nesting too deep");
     }
     ~CanonDepth() { --c.depth; }
 };

@@ -190,16 +190,16 @@ struct AttachVMCmd : engine::Command {
     void doRT(engine::Silo* s) override {
         s->vm_ = vm_;
         s->heartbeatFn_ = &rtVMHeartbeat;
-        // MMU: on the audio thread, guarantee the mutator a minimum share by
-        // default so the collector can't take an unbounded slice of any short
-        // window. 90% mutator over any 15 ms window; the per-step 200 us pause
-        // bound (rtVMHeartbeat) still applies, and the allocation-ratio safety
-        // valve lifts the cap if a cycle falls behind. Config is set here
-        // (single-writer: this runs on the silo's own RT thread) before the
-        // VM begins stepping. A host that wants different behavior can call
-        // setMMUEnabled/setMMUTarget after attach.
-        vm_->setMMUTarget(900, 15'000'000);
-        vm_->setMMUEnabled(true);
+        // MMU: on the audio thread, the mutator is guaranteed a minimum share
+        // by default so the collector can't take an unbounded slice of any
+        // short window (90% mutator over any 15 ms window; the per-step 200 us
+        // pause bound in rtVMHeartbeat still applies, and the allocation-ratio
+        // safety valve lifts the cap if a cycle falls behind). The governor is
+        // configured at VM construction from AppContext::siloVMConfig (whose
+        // defaults are that RT preset); publication through the command FIFO
+        // makes those writes visible here before the VM begins stepping. A
+        // host that wants different behavior can call setMMUEnabled/
+        // setMMUTarget after attach.
     }
 };
 

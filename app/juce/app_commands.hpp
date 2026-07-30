@@ -88,6 +88,9 @@ enum : juce::CommandID {
     // Engine settings (tzpl-config); macOS puts it in the app menu as
     // Preferences, Cmd+,
     engineSettings,
+    // Advanced language (VM) settings (lang* tzpl-config keys). Deliberately
+    // no keyboard shortcut: opening it should take intent.
+    languageSettings,
 
     // Help (macOS: app menu; elsewhere: File menu)
     helpAbout,

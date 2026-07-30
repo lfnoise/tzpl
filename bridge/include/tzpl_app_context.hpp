@@ -39,6 +39,8 @@
 // Complete type needed: SiloVMState holds a unique_ptr<IncrementalCompiler>, so
 // every TU that destroys an AppContext must see its (pimpl, lightweight) decl.
 #include "incremental_compiler.hpp"
+// Lightweight (no vm.hpp): per-VM construction config held by value below.
+#include "vm_config.hpp"
 
 namespace engine { struct Engine; }
 namespace ts {
@@ -103,6 +105,12 @@ struct AppContext {
     nats::NatsDispatcher* natsDispatcher = nullptr;
     std::string engineName;  // empty = single-instance mode
     std::vector<SiloVMState> siloVMs;  // indexed by silo number
+
+    // Construction config for per-silo RT VMs, applied by attachVM. The app
+    // populates this from its language settings at startup; the defaults here
+    // are the RT preset (16 MB pool, MMU governor on, tight GC step budget is
+    // still driven by rtVMHeartbeat's deadline).
+    ts::VMConfig siloVMConfig{.poolSize = 16 * 1024 * 1024, .mmuEnabled = true};
 
     // Project directory resolved at startup (-P or auto-detected from the
     // opened file); empty if none. Used by the GUI for dialog defaults.

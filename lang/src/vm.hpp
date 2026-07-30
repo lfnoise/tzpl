@@ -31,6 +31,8 @@
 #include "gc.hpp"
 #include "tracing_gc.hpp"   // for gcMonoNanos() used by gcHeartbeat()
 #include "type_universe.hpp"
+#include "vm_config.hpp"
+#include <algorithm>
 #include <atomic>
 #include <cstdio>
 #include <functional>
@@ -374,6 +376,19 @@ private:
     // List print limit (default 10 elements before showing "...")
     i64 listPrintLimit_;
 
+    // Cycle-safe graph-traversal limits. Seeded from VMConfig (defaults match
+    // the historical value_graph.hpp constants); adjustable at runtime via
+    // the setGraphMaxDepth / setLazyForceLimit / setPrintMaxDepth builtins so
+    // a valid program that trips a limit can raise it for itself.
+    u32 graphMaxDepth_;
+    i64 lazyForceLimit_;
+    u32 printMaxDepth_;
+
+    // Heap-growth chunk bounds used by the backup allocator installed in the
+    // constructor (see VMConfig).
+    usize growthChunkMin_;
+    usize growthChunkMax_;
+
     // Per-VM random number generator (xoshiro256**, seeded per instance)
     Xoshiro256 rng_;
 
@@ -492,6 +507,8 @@ public:
     class TracingGC& tracingGC();
 
     // Constructor with pool size, shared type universe, and optional target
+    explicit VM(VMConfig const& config, TypeUniverse& typeUniverse, const VMTarget& target = {});
+    // Legacy convenience: all-default config with a custom pool size.
     explicit VM(usize poolSize, TypeUniverse& typeUniverse, const VMTarget& target = {});
 
     ~VM();
@@ -806,6 +823,15 @@ public:
     // List print limit
     i64 listPrintLimit() const { return listPrintLimit_; }
     void setListPrintLimit(i64 n) { listPrintLimit_ = n; }
+
+    // Graph-traversal limits (see VMConfig). Setters clamp to >= 1 so a
+    // program can't wedge every ==/hash/print into an instant error.
+    u32 graphMaxDepth() const { return graphMaxDepth_; }
+    void setGraphMaxDepth(i64 n) { graphMaxDepth_ = (u32)std::clamp<i64>(n, 1, 0x7FFFFFFF); }
+    i64 lazyForceLimit() const { return lazyForceLimit_; }
+    void setLazyForceLimit(i64 n) { lazyForceLimit_ = n < 1 ? 1 : n; }
+    u32 printMaxDepth() const { return printMaxDepth_; }
+    void setPrintMaxDepth(i64 n) { printMaxDepth_ = (u32)std::clamp<i64>(n, 1, 0x7FFFFFFF); }
 
     // Current primitive (set during op_call_primitive for builtins that need type info)
     Primitive* currentPrimitive() const { return currentPrimitive_; }

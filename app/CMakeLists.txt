@@ -349,6 +349,7 @@ if(TZPL_BUILD_APP_JUCE)
         src/gui_state.cpp
         juce/juce_gui_main.cpp
         juce/settings_dialog.cpp
+        juce/language_settings_dialog.cpp
         juce/juce_audio_backend.cpp
         juce/main_component.cpp
         juce/tzpl_look_and_feel.cpp

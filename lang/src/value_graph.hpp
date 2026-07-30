@@ -53,16 +53,20 @@ inline constexpr i64 kEqualFastFuel = 4096;
 inline constexpr i64 kHashFastFuel  = 4096;
 
 // Slow-path recursion depth limit: deeper graphs raise a runtime error
-// instead of overflowing the C++ stack.
+// instead of overflowing the C++ stack. Default only -- the live value is a
+// VM member (VMConfig.graphMaxDepth, setGraphMaxDepth builtin).
 inline constexpr u32 kGraphMaxDepth = 10000;
 
 // Cap on LAZY ListNode forces per ==/hash/serialize traversal, so an
 // unbounded lazy list raises a runtime error instead of hanging. Walking
-// already-forced nodes is not charged.
+// already-forced nodes is not charged. Default only -- the live value is a
+// VM member (VMConfig.lazyForceLimit, setLazyForceLimit builtin).
 inline constexpr i64 kLazyForceLimit = 10000;
 
 // Max nesting of cycle-capable containers while printing before eliding
 // with "..." (stack-overflow guard; ordinary values never get near it).
+// Default only -- the live value is a VM member (VMConfig.printMaxDepth,
+// setPrintMaxDepth builtin).
 inline constexpr u32 kPrintMaxDepth = 200;
 
 // Returns `defaultFuel`, or TZPL_GRAPH_FUEL from the environment if set.

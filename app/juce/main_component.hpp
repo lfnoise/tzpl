@@ -143,6 +143,7 @@ private:
     // asks about unsaved work, spawns a watcher that relaunches once this
     // process is gone, then quits.
     void showEngineSettingsFlow();
+    void showLanguageSettingsFlow();
     void relaunchApp();
     void createProject(juce::File const& dir);
     void registerProjectFor(juce::File const& file);

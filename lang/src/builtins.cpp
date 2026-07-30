@@ -3073,6 +3073,36 @@ static void builtin_gc_mmu_reset(VM& vm, u16 dst, u16, u16) {
     vm.reg(dst).i = 0;
 }
 
+// ---- Graph-traversal limit knobs ------------------------------------------
+// Per-VM limits on cycle-safe ==/hash/print/serialize traversals (see
+// VMConfig). Public builtins in the setListPrintLimit family: getters return
+// the current value, setters return the PREVIOUS value (handy for scoped
+// save/restore). Setters clamp to >= 1.
+static void builtin_get_graph_max_depth(VM& vm, u16 dst, u16, u16) {
+    vm.reg(dst).i = (i64)vm.graphMaxDepth();
+}
+static void builtin_set_graph_max_depth(VM& vm, u16 dst, u16, u16 argBase) {
+    i64 old = (i64)vm.graphMaxDepth();
+    vm.setGraphMaxDepth(vm.reg(argBase).i);
+    vm.reg(dst).i = old;
+}
+static void builtin_get_lazy_force_limit(VM& vm, u16 dst, u16, u16) {
+    vm.reg(dst).i = vm.lazyForceLimit();
+}
+static void builtin_set_lazy_force_limit(VM& vm, u16 dst, u16, u16 argBase) {
+    i64 old = vm.lazyForceLimit();
+    vm.setLazyForceLimit(vm.reg(argBase).i);
+    vm.reg(dst).i = old;
+}
+static void builtin_get_print_max_depth(VM& vm, u16 dst, u16, u16) {
+    vm.reg(dst).i = (i64)vm.printMaxDepth();
+}
+static void builtin_set_print_max_depth(VM& vm, u16 dst, u16, u16 argBase) {
+    i64 old = (i64)vm.printMaxDepth();
+    vm.setPrintMaxDepth(vm.reg(argBase).i);
+    vm.reg(dst).i = old;
+}
+
 // Legacy name retained for .x tests written against the ARC era. Under the
 // tracing GC there is no auto-release pool; just run a full cycle.
 static void builtin_gc_drain_pool(VM& vm, u16 dst, u16, u16) {
@@ -4204,6 +4234,15 @@ void registerBuiltinFunctions(Compiler& compiler,
     registerOne(compiler, functions, "__gc_mmu_min_mutator_permille",  compiler.intType(), {},                                       builtin_gc_mmu_min_mutator_permille,  /*pure=*/false, /*rtSafe=*/false);
     registerOne(compiler, functions, "__gc_mmu_escalations",           compiler.intType(), {},                                       builtin_gc_mmu_escalations,           /*pure=*/false, /*rtSafe=*/false);
     registerOne(compiler, functions, "__gc_mmu_reset",                 compiler.intType(), {},                                       builtin_gc_mmu_reset,                 /*pure=*/false, /*rtSafe=*/false);
+
+    // Graph-traversal limit knobs (public, setListPrintLimit family).
+    // Setters return the previous value.
+    registerOne(compiler, functions, "getGraphMaxDepth",  compiler.intType(), {},                   builtin_get_graph_max_depth,  /*pure=*/false, /*rtSafe=*/true);
+    registerOne(compiler, functions, "setGraphMaxDepth",  compiler.intType(), {compiler.intType()}, builtin_set_graph_max_depth,  /*pure=*/false, /*rtSafe=*/true);
+    registerOne(compiler, functions, "getLazyForceLimit", compiler.intType(), {},                   builtin_get_lazy_force_limit, /*pure=*/false, /*rtSafe=*/true);
+    registerOne(compiler, functions, "setLazyForceLimit", compiler.intType(), {compiler.intType()}, builtin_set_lazy_force_limit, /*pure=*/false, /*rtSafe=*/true);
+    registerOne(compiler, functions, "getPrintMaxDepth",  compiler.intType(), {},                   builtin_get_print_max_depth,  /*pure=*/false, /*rtSafe=*/true);
+    registerOne(compiler, functions, "setPrintMaxDepth",  compiler.intType(), {compiler.intType()}, builtin_set_print_max_depth,  /*pure=*/false, /*rtSafe=*/true);
 
     // --- Ref builtins ---
     // Phase 4g.6: ref / deref / setref read inline-composite args directly
