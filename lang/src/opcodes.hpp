@@ -201,6 +201,11 @@ void op_call_primitive(VM& vm, Code* pc);
 void op_return(VM& vm, Code* pc);             // RETURN Ra (2 words)
 void op_return_void(VM& vm, Code* pc);        // RETURN_VOID (1 word)
 void op_halt(VM& vm, Code* pc);               // HALT (1 word)
+// UNDEFINED_FUNCTION (1 word). The body of the shared poison CodeBlock that
+// every code global holds until real code is written into it -- see
+// Compiler::poisonCodeBlock(). Reaching it means a call resolved to a
+// function whose definition never compiled.
+void op_undefined_function(VM& vm, Code* pc);
 
 // --- Debug/Print ---
 void op_print_int(VM& vm, Code* pc);          // PRINT_INT Ra (2 words)

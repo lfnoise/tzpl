@@ -625,6 +625,58 @@ static void test_repl_document_relative_import() {
     std::filesystem::remove_all(tmpDir);
 }
 
+// A REPL cell whose function body fails to type-check leaves the function
+// declared with a code global allocated but never filled (codegen is skipped
+// wholesale when the cell has type errors, yet the pending globals are still
+// installed). A later cell may then resolve a call to that slot. The slot
+// holds Compiler::poisonCodeBlock() rather than null, so every call form
+// fails with a diagnostic instead of dereferencing null.
+//
+// Regression: crashed the app at ts::op_tail_call on 2026-07-26. op_call was
+// the only guarded call site; op_tail_call / op_coro_create / op_async_call
+// all segfaulted at offsetof(CodeBlock, funcType).
+static void test_repl_failed_body_is_not_callable() {
+    std::print("Test: calling a function whose body failed to compile\n");
+
+    ts::TypeUniverse types;
+    ts::Compiler compiler(types);
+    auto target = compiler.createTarget();
+    ts::VM vm(64 * 1024 * 1024, types, target);
+    ts::REPLSession session(compiler, vm, target);
+
+    auto bad = session.eval("fn broken() Int { nonexistentFn() }");
+    check(!bad.success, "a body with an undeclared call fails to compile");
+
+    // Tail call -- the shape that crashed.
+    check(session.eval("fn viaTail() Int { broken() }").success,
+          "a caller of the broken function still compiles");
+    check(!session.eval("viaTail()").success,
+          "tail-calling a function that failed to compile errors cleanly");
+
+    // Direct (non-tail) call.
+    check(!session.eval("let x = broken(); x").success,
+          "directly calling a function that failed to compile errors cleanly");
+
+    // Coroutine and async entry points read the CodeBlock the same way.
+    check(!session.eval("coro fn brokenCoro(n Int) Int { nonexistentFn() }").success,
+          "a coroutine body with an undeclared call fails to compile");
+    check(!session.eval("let c = brokenCoro(3); c next").success,
+          "resuming a coroutine that failed to compile errors cleanly");
+
+    check(!session.eval("async fn brokenAsync() Int { nonexistentFn() }").success,
+          "an async body with an undeclared call fails to compile");
+    check(!session.eval("await brokenAsync()").success,
+          "awaiting an async fn that failed to compile errors cleanly");
+
+    // Redefining the function correctly must repair the slot.
+    check(session.eval("fn broken() Int { 42 }").success,
+          "the function can be redefined correctly");
+    auto fixed = session.eval("viaTail()");
+    check(fixed.success && fixed.formattedValue == "42",
+          "the previously-broken call works after redefinition (got '"
+              + fixed.formattedValue + "')");
+}
+
 // Main
 // ---------------------------------------------------------------------------
 
@@ -643,6 +695,7 @@ int main() {
     test_dynvar_recompile_no_stale_cascade();
     test_cascade_invalidate_transitive_dependency();
     test_repl_document_relative_import();
+    test_repl_failed_body_is_not_callable();
 
     std::print("\n=== Results: {} passed, {} failed ===\n",
                gTestsPassed, gTestsFailed);

@@ -118,10 +118,31 @@ void Compiler::trackObject(GCObj* obj) {
 
 // --- Global variable management (per-VMTarget layout, two index spaces) ---
 
+CodeBlock* Compiler::poisonCodeBlock() {
+    if (!poisonCode_) {
+        poisonCode_ = new CodeBlock();
+        // No args and no registers: every caller's arg-copy loop is bounded by
+        // funcType->argTypes_ (empty) or writes only into the caller's own
+        // window, and pushFrame with numRegs 0 is fine because the first
+        // instruction throws before anything reads a register.
+        poisonCode_->numRegs = 0;
+        poisonCode_->numArgs = 0;
+        poisonCode_->name = intern("<undefined function>");
+        Vec<Type*> noArgs(rt::STLAllocator<Type*>(nullptr));
+        poisonCode_->funcType = typeUniverse_.functionType(noArgs, typeUniverse_.types().voidType);
+        poisonCode_->emit(Code(op_undefined_function));
+    }
+    return poisonCode_;
+}
+
 u32 Compiler::addCodeGlobal() {
     assert(currentTarget_ && "No current target set (call makeCurrent first)");
     u32 local = (u32)currentTarget_->codeGlobals.size();
-    currentTarget_->codeGlobals.push_back({Word(), false});
+    // Seed with the poison block, never null: a slot whose function is
+    // declared but never codegen'd (a REPL cell whose body failed to
+    // type-check) stays callable-but-diagnosing instead of crashing every
+    // call site that dereferences the CodeBlock without checking.
+    currentTarget_->codeGlobals.push_back({Word((void*)poisonCodeBlock()), false});
     return kCodeGlobalBase + local;
 }
 

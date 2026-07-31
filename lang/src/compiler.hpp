@@ -220,8 +220,18 @@ public:
     // Allocation chooses the space; global(idx) dispatches by range thereafter.
 
     // Allocate an immutable CODE slot (function CodeBlock* / builtin Primitive*).
-    // Returns an absolute (ranged) index >= kCodeGlobalBase.
+    // Returns an absolute (ranged) index >= kCodeGlobalBase. The slot is seeded
+    // with poisonCodeBlock() rather than null, so a slot that never receives
+    // real code fails with a diagnostic instead of a null dereference.
     u32 addCodeGlobal();
+    // Shared immortal CodeBlock whose single instruction raises "definition
+    // failed to compile". Every code global starts out holding it; declaring a
+    // function allocates the slot, and only codegen overwrites it -- so a cell
+    // whose body fails to type-check leaves the poison behind, reachable from
+    // any later call. Trivially shaped (no args, no registers) so the arg-copy
+    // loops in op_tail_call / op_coro_create / op_async_call are all no-ops
+    // before control reaches the poison instruction.
+    CodeBlock* poisonCodeBlock();
     // Allocate a mutable DATA slot (var/let). Returns an index < kCodeGlobalBase.
     u32 addDataGlobal(bool isObj = false);
     // Phase 4g.5: allocate sizeWords consecutive DATA slots for an inline-
@@ -291,6 +301,10 @@ public:
     void refreshDynVarType(const std::string& name, Type* newType);
 
 private:
+    // Lazily built by poisonCodeBlock(); one per Compiler, never freed (code
+    // blocks are immortal, and every code global may point at this one).
+    CodeBlock* poisonCode_ = nullptr;
+
     TypeUniverse& typeUniverse_;
     u32 numTrackedObjects_ = 0;
 

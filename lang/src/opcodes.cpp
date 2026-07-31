@@ -27,6 +27,7 @@
 #include "persistent_vector.hpp"
 #include "persistent_map.hpp"
 #include "type_system.hpp"
+#include "compiler.hpp"   // VMTargetData (op_undefined_function's RT check)
 #include <cstdio>
 #include <algorithm>
 #include <stdexcept>
@@ -1097,6 +1098,30 @@ void op_return_void(VM& vm, Code* pc) {
 void op_halt(VM& vm, Code* pc) {
     vm.setHalted(true);
     // Simply return - breaks out of the direct-threaded chain
+}
+
+// The body of the poison CodeBlock seeded into every freshly allocated code
+// global (Compiler::poisonCodeBlock). Executing it means a call resolved to a
+// slot that never received real code -- e.g. a REPL cell declared a function
+// and its body then failed to type-check, so codegen never ran for it, but a
+// later cell called it anyway. Before this existed the slot held null and
+// every caller dereferenced it (op_tail_call / op_coro_create / op_async_call
+// / op_call_witness all read callee->funcType or ->numRegs immediately).
+//
+// On a real-time VM we halt instead of throwing: nothing catches an exception
+// on the audio thread, so unwinding out of a silo's doRT would terminate the
+// process. Halting stops this VM and leaves the engine running.
+void op_undefined_function(VM& vm, Code* pc) {
+    (void)pc;
+    if (vm.target() && vm.target()->rtRestricted) {
+        fprintf(stderr, "*** ERROR: real-time VM called a function whose "
+                        "definition failed to compile; halting this VM\n");
+        vm.setHalted(true);
+        return;
+    }
+    throw std::runtime_error(
+        "called a function whose definition failed to compile -- fix the "
+        "earlier error and redefine it before calling");
 }
 
 // --- Debug/Print ---
