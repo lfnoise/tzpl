@@ -40,17 +40,28 @@ extern "C" {
  *
  *     extern "C" int64_t tzpl_abi_version = TZPL_PLUGIN_ABI_VERSION;
  *
- * Loaders read it via dlsym; a missing symbol means version 0 (a plugin
- * built before versioning existed). Versions 0 and 1 share all struct
- * layouts -- 0 merely predates the optional tzpl_BufferDef metadata and the
- * version stamp itself. Loaders refuse plugins whose version is NEWER than
- * the header they were built against, since a newer plugin may assume
- * changed layouts.
+ * Loaders read it via dlsym. A MISSING symbol is not a version -- it means
+ * the plugin predates versioning, and such a plugin is REFUSED. It cannot be
+ * loaded safely: plugins built before 2026-04-03 use a tzpl_SynthDef whose
+ * fields after `funs` sit 8 bytes earlier (sizeof 176 rather than 184),
+ * because swapBuffer was appended to tzpl_SynthFuns -- which tzpl_SynthDef
+ * embeds BY VALUE -- without a version bump. Read through today's layout such
+ * a plugin yields non-zero port counts paired with NULL array pointers, so
+ * walking its ports dereferences null. There is no symbol that distinguishes
+ * the two pre-versioning layouts, hence the blanket refusal. Rebuild any
+ * plugin that is refused.
  *
- * Bump this ONLY for changes that alter existing struct layouts or calling
- * conventions. Purely additive changes (new optional symbols, new enum
- * values in reserved space) must NOT bump it -- handle those by probing for
- * the symbol, as loadBufferDefs does. */
+ * Loaders also refuse plugins whose version is NEWER than the header they
+ * were built against, since a newer plugin may assume changed layouts.
+ *
+ * Bump this for ANY change to the layout of these structs or to calling
+ * conventions -- INCLUDING appending a field to a struct that another struct
+ * embeds by value. Appending to tzpl_SynthFuns or tzpl_PortDef is NOT an
+ * additive change, because it relocates every field after them in their
+ * embedding struct; that is exactly the mistake this comment now documents.
+ * Only genuinely additive changes may skip the bump: new optional exported
+ * symbols (probe with dlsym, as loadBufferDefs does) and new enum values in
+ * reserved space. */
 #define TZPL_PLUGIN_ABI_VERSION 1
 
 /* Forward declarations */

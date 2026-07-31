@@ -302,11 +302,19 @@ optional<LoadedDef> loadDef(std::string path) {
         return {};
     }
 
-    // ABI version stamp: missing symbol = version 0 (pre-versioning,
-    // layout-compatible with 1). Refuse plugins newer than this header.
+    // ABI version stamp. A MISSING symbol means the plugin predates
+    // versioning: its tzpl_SynthDef layout is unknowable (see the header), so
+    // refuse it rather than reading its structs. Also refuse anything newer
+    // than this header.
     i64 abiVersion = 0;
     if (void* verPtr = dlsym(handle, "tzpl_abi_version")) {
         abiVersion = *(int64_t*)verPtr;
+    } else {
+        fprintf(stderr, "*** ERROR: plugin '%s' predates ABI versioning "
+                "(no tzpl_abi_version symbol) and cannot be loaded safely; "
+                "rebuild it\n", path_c);
+        dlclose(handle);
+        return {};
     }
     if (abiVersion > TZPL_PLUGIN_ABI_VERSION) {
         fprintf(stderr, "*** ERROR: plugin '%s' ABI version %lld is newer than "

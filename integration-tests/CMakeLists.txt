@@ -58,6 +58,8 @@ if(TARGET tzpl_synthdef_compiler_bridge)
         MODULES_DIR="${CMAKE_SOURCE_DIR}/bridge/modules"
         LANG_MODULES_DIR="${CMAKE_SOURCE_DIR}/lang/modules"
         EXAMPLES_DIR="${CMAKE_SOURCE_DIR}/examples"
+        # Lets the ABI tests compile a throwaway plugin against the real header.
+        SHARED_INCLUDE_DIR="${CMAKE_SOURCE_DIR}/shared"
     )
 endif()
 

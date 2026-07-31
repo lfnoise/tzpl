@@ -105,13 +105,72 @@ void freeEngine(Engine* e) {
 #endif
 }
 
-// Read a loaded plugin's ABI version stamp. Missing symbol = version 0
-// (built before versioning existed; layout-compatible with version 1).
-static i64 pluginAbiVersion(void* handle) {
+// Read a loaded plugin's ABI version stamp into `out`. Returns false when the
+// symbol is absent: that is NOT version 0, it means the plugin predates
+// versioning and its tzpl_SynthDef layout is unknowable (see the header).
+// Callers must refuse those rather than reading their structs.
+static bool pluginAbiVersion(void* handle, i64& out) {
     if (void* ptr = dlsym(handle, "tzpl_abi_version")) {
-        return *(int64_t*)ptr;
+        out = *(int64_t*)ptr;
+        return true;
     }
-    return 0;
+    return false;
+}
+
+// Shared gate for both load paths. Returns false (and explains) for a plugin
+// this engine must not read. `path` is used only for diagnostics.
+static bool pluginAbiAcceptable(void* handle, char const* path, bool verbose) {
+    i64 version = 0;
+    if (!pluginAbiVersion(handle, version)) {
+        if (verbose) {
+            fprintf(stderr, "*** ERROR: plugin '%s' predates ABI versioning "
+                    "(no tzpl_abi_version symbol) and cannot be loaded safely; "
+                    "rebuild it\n", path);
+        }
+        return false;
+    }
+    if (version > TZPL_PLUGIN_ABI_VERSION) {
+        if (verbose) {
+            fprintf(stderr, "*** ERROR: plugin '%s' ABI version %lld is newer than "
+                    "this engine supports (%d)\n",
+                    path, (long long)version, TZPL_PLUGIN_ABI_VERSION);
+        }
+        return false;
+    }
+    return true;
+}
+
+// Validate one count/array pair coming from a plugin before walking it. The
+// counts and base pointers are plugin-supplied and entirely untrusted: the ABI
+// admits hand-written plugins, and a stale or corrupt one can present a
+// non-zero count beside a null base. `what` names the array for diagnostics.
+static bool validPluginArray(int count, void const* base, char const* what,
+                             char const* name) {
+    constexpr int kMaxPluginArray = 4096;
+    if (count < 0 || count > kMaxPluginArray) {
+        fprintf(stderr, "*** ERROR: plugin def '%s' reports %d %s (out of range)\n",
+                name ? name : "?", count, what);
+        return false;
+    }
+    if (count > 0 && !base) {
+        fprintf(stderr, "*** ERROR: plugin def '%s' reports %d %s but a null array\n",
+                name ? name : "?", count, what);
+        return false;
+    }
+    return true;
+}
+
+// Every count/array pair a tzpl_SynthDef (plus its optional buffer and tag
+// lists) exposes. Checked up front so no walk can run off a null base.
+static bool validSynthDefArrays(tzpl_SynthDef const& def,
+                                tzpl_BufferDefList const* bufs,
+                                tzpl_TagList const* tags) {
+    char const* n = def.name;
+    return validPluginArray(def.num_ins, def.ins, "inputs", n)
+        && validPluginArray(def.num_outs, def.outs, "outputs", n)
+        && validPluginArray(def.num_controls, def.controls, "controls", n)
+        && (!bufs || validPluginArray(bufs->num_buffers, bufs->buffers, "buffers", n))
+        && (!tags || validPluginArray(tags->num_tags, tags->tags, "tags", n));
 }
 
 bool loadOneDef(Engine* e, const char* path) {
@@ -124,11 +183,7 @@ bool loadOneDef(Engine* e, const char* path) {
         return false;
     }
 
-    i64 abiVersion = pluginAbiVersion(handle);
-    if (abiVersion > TZPL_PLUGIN_ABI_VERSION) {
-        fprintf(stderr, "*** ERROR: plugin '%s' ABI version %lld is newer than "
-                "this engine supports (%d)\n",
-                path, (long long)abiVersion, TZPL_PLUGIN_ABI_VERSION);
+    if (!pluginAbiAcceptable(handle, path, /*verbose=*/true)) {
         dlclose(handle);
         return false;
     }
@@ -153,6 +208,16 @@ bool loadOneDef(Engine* e, const char* path) {
     tzpl_TagList tags{0, nullptr};
     if (void* tagPtr = dlsym(handle, "loadTags")) {
         tags = (*(tzpl_LoadTagsFun)tagPtr)();
+    }
+
+    // Refuse a def whose counts and arrays disagree rather than registering
+    // bogus pointers with the engine -- addSynthDef reinterpret_casts ins/outs
+    // straight into NodeDefInfo, so a bad one would fault on the RT thread
+    // long after this call.
+    if (!validSynthDefArrays(def, &bufs, &tags)) {
+        fprintf(stderr, "*** ERROR: refusing malformed plugin '%s'\n", path);
+        dlclose(handle);
+        return false;
     }
 
     addSynthDef(e, def, handle, &bufs, &tags);
@@ -703,6 +768,8 @@ void listPluginFiles(std::vector<std::string> const& dirs,
 }
 
 // Build a DefDesc directly from the ABI structs a plugin's load() returned.
+// Callers must have run validSynthDefArrays first: every loop below trusts
+// the count/base pair it walks.
 static void defDescFromSynthDef(tzpl_SynthDef const& def,
                                 tzpl_BufferDefList const& bufs,
                                 tzpl_TagList const& tags, DefDesc& out) {
@@ -756,9 +823,11 @@ bool getPluginFileDesc(char const* path, DefDesc& out) {
 
     CacheEntry entry{mtime, false, {}};
     if (void* handle = dlopen(path, RTLD_NOW | RTLD_LOCAL)) {
-        if (pluginAbiVersion(handle) > TZPL_PLUGIN_ABI_VERSION) {
-            // Newer-ABI plugin: its structs may not match ours; the cached
-            // failure keeps the browser from probing it again.
+        // Unstamped (pre-versioning) or newer-ABI plugin: its structs may not
+        // match ours, so we must not read them. The cached failure keeps the
+        // browser from probing it again on every selection change. Quiet here:
+        // browsing a directory of mixed plugins should not spam the log.
+        if (!pluginAbiAcceptable(handle, path, /*verbose=*/false)) {
             dlclose(handle);
             cache[path] = std::move(entry);
             return false;
@@ -773,8 +842,10 @@ bool getPluginFileDesc(char const* path, DefDesc& out) {
             if (void* tagPtr = dlsym(handle, "loadTags")) {
                 tags = (*(tzpl_LoadTagsFun)tagPtr)();
             }
-            defDescFromSynthDef(def, bufs, tags, entry.desc);
-            entry.ok = true;
+            if (validSynthDefArrays(def, &bufs, &tags)) {
+                defDescFromSynthDef(def, bufs, tags, entry.desc);
+                entry.ok = true;
+            }
         }
         dlclose(handle);
     }

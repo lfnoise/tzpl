@@ -726,6 +726,87 @@ static void test_abi_version_refusal() {
     fs::remove_all(dir, ec);
 }
 
+// A plugin built before the version stamp existed cannot be read safely: its
+// tzpl_SynthDef predates swapBuffer being appended to tzpl_SynthFuns, so every
+// field after `funs` sits 8 bytes earlier and the port arrays come out null
+// beside non-zero counts. Absence of tzpl_abi_version must be a refusal, not
+// "version 0". (Regression: crashed the plugin browser on 2026-07-23.)
+static void test_unstamped_plugin_refusal() {
+    std::print("Test: loaders refuse plugins with no ABI version stamp\n");
+    namespace fs = std::filesystem;
+
+    fs::path dir = fs::temp_directory_path() / "tzpl_abi_unstamped_test";
+    std::error_code ec;
+    fs::create_directories(dir, ec);
+    fs::path src = dir / "unstamped.cpp";
+    fs::path dylib = dir / "unstamped_synth.dylib";
+    {
+        std::ofstream out(src);
+        // No tzpl_abi_version symbol at all -- the pre-versioning shape.
+        out << "#include <cstdint>\n"
+               "extern \"C\" void load() {}\n";
+    }
+    std::string cmd = "clang++ -dynamiclib -o '" + dylib.string() + "' '"
+                      + src.string() + "' 2>/dev/null";
+    if (std::system(cmd.c_str()) != 0) {
+        std::print("  SKIP: could not compile test dylib\n");
+        return;
+    }
+
+    engine::Engine* eng = makeTestEngine();
+    check(!engine::loadOneDef(eng, dylib.string().c_str()),
+          "loadOneDef refuses an unstamped plugin");
+    engine::DefDesc desc;
+    check(!engine::getPluginFileDesc(dylib.string().c_str(), desc),
+          "getPluginFileDesc refuses an unstamped plugin");
+    check(!synthdef::loadDef(dylib.string()).has_value(),
+          "synthdef::loadDef refuses an unstamped plugin");
+    engine::freeEngine(eng);
+    fs::remove_all(dir, ec);
+}
+
+// A correctly stamped but malformed plugin: a non-zero port count beside a
+// null array base. The ABI admits hand-written plugins, so the loaders must
+// reject this rather than walking the null array.
+static void test_malformed_def_refusal() {
+    std::print("Test: loaders refuse a def whose counts and arrays disagree\n");
+    namespace fs = std::filesystem;
+
+    fs::path dir = fs::temp_directory_path() / "tzpl_abi_malformed_test";
+    std::error_code ec;
+    fs::create_directories(dir, ec);
+    fs::path src = dir / "malformed.cpp";
+    fs::path dylib = dir / "malformed_synth.dylib";
+    {
+        std::ofstream out(src);
+        out << "#include \"tzpl_plugin_abi.h\"\n"
+               "extern \"C\" int64_t tzpl_abi_version = TZPL_PLUGIN_ABI_VERSION;\n"
+               "extern \"C\" tzpl_SynthDef load() {\n"
+               "    tzpl_SynthDef d{};\n"
+               "    d.name = \"malformed\";\n"
+               "    d.num_outs = 1;   /* claims one output... */\n"
+               "    d.outs = nullptr; /* ...but supplies no array */\n"
+               "    return d;\n"
+               "}\n";
+    }
+    std::string cmd = "clang++ -std=c++23 -dynamiclib -I'"
+                      + std::string(SHARED_INCLUDE_DIR) + "' -o '"
+                      + dylib.string() + "' '" + src.string() + "' 2>/dev/null";
+    if (std::system(cmd.c_str()) != 0) {
+        std::print("  SKIP: could not compile test dylib\n");
+        return;
+    }
+
+    engine::Engine* eng = makeTestEngine();
+    engine::DefDesc desc;
+    check(!engine::getPluginFileDesc(dylib.string().c_str(), desc),
+          "getPluginFileDesc refuses a null port array");
+    check(!engine::loadOneDef(eng, dylib.string().c_str()),
+          "loadOneDef refuses a null port array");
+    engine::freeEngine(eng);
+    fs::remove_all(dir, ec);
+}
+
 static void test_low_level_ffi() {
     std::print("Test: low-level FFI (synthdefAnalysisDump, synthdefGenCppFromSexpr)\n");
 
@@ -964,6 +1045,8 @@ int main(int argc, char const* argv[]) {
     test_plugin_revision_pruning();
     test_cached_path_recompile_fallback();
     test_abi_version_refusal();
+    test_unstamped_plugin_refusal();
+    test_malformed_def_refusal();
     test_low_level_ffi();
     test_synthc_analysis_diff();
     test_synthc_rewrite_diff();
