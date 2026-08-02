@@ -1,0 +1,1473 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Writing SynthDefs</title>
+    <style>
+        :root {
+            --bg: #1a1b26;
+            --fg: #c9d1d9;
+            --container-bg: #21222c;
+            --accent: #58a6ff;
+            --heading-fg: #e6edf3;
+            --heading2-fg: #b0bec5;
+            --heading2-border: #30363d;
+            --intro-bg: #0d2137;
+            --intro-border: #58a6ff;
+            --intro-fg: #b0bec5;
+            --toc-bg: #1f2028;
+            --toc-border: #30363d;
+            --toc-hover: #2a2d3a;
+            --code-bg: #30363d;
+            --code-fg: #c9d1d9;
+            --pre-bg: #161b22;
+            --pre-fg: #e6edf3;
+            --pre-border: #58a6ff;
+            --table-th-bg: #2a2d3a;
+            --table-th-fg: #e6edf3;
+            --table-border: #30363d;
+            --table-hover: #1f2028;
+            --highlight-bg: #2d2308;
+            --highlight-border: #ffc107;
+            --note-bg: #0d2818;
+            --note-border: #27ae60;
+            --badge-bg: #58a6ff;
+            --badge-fg: #fff;
+            --shadow: rgba(0,0,0,0.3);
+            --syn-cmt: #6a737d;
+            --syn-num: #e5a537;
+            --syn-str: #4ec970;
+            --syn-kw: #c678dd;
+            --back-to-top: #58a6ff;
+        }
+
+        html.light {
+            --bg: #f5f5f5;
+            --fg: #333;
+            --container-bg: white;
+            --accent: #3498db;
+            --heading-fg: #2c3e50;
+            --heading2-fg: #34495e;
+            --heading2-border: #ecf0f1;
+            --intro-bg: #f8f9fa;
+            --intro-border: #3498db;
+            --intro-fg: #555;
+            --toc-bg: #f8f9fa;
+            --toc-border: #bdc3c7;
+            --toc-hover: #e8f4f8;
+            --code-bg: #ecf0f1;
+            --code-fg: #2c3e50;
+            --pre-bg: #2c3e50;
+            --pre-fg: #ecf0f1;
+            --pre-border: #3498db;
+            --table-th-bg: #34495e;
+            --table-th-fg: white;
+            --table-border: #ecf0f1;
+            --table-hover: #f8f9fa;
+            --highlight-bg: #fff3cd;
+            --highlight-border: #ffc107;
+            --note-bg: #e8f5e8;
+            --note-border: #27ae60;
+            --badge-bg: #3498db;
+            --badge-fg: white;
+            --shadow: rgba(0,0,0,0.1);
+            --syn-cmt: #95a5a6;
+            --syn-num: #e67e22;
+            --syn-str: #27ae60;
+            --syn-kw: #e74c3c;
+            --back-to-top: #3498db;
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            line-height: 1.6;
+            margin: 0;
+            padding: 20px;
+            background-color: var(--bg);
+            color: var(--fg);
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background-color: var(--container-bg);
+            padding: 40px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px var(--shadow);
+        }
+
+        h1 {
+            color: var(--heading-fg);
+            border-bottom: 3px solid var(--accent);
+            padding-bottom: 10px;
+            margin-bottom: 30px;
+        }
+
+        h2 {
+            color: var(--heading2-fg);
+            border-bottom: 2px solid var(--heading2-border);
+            padding-bottom: 8px;
+            margin-top: 40px;
+            margin-bottom: 20px;
+        }
+
+        h3 {
+            color: var(--heading-fg);
+            margin-top: 30px;
+            margin-bottom: 15px;
+        }
+
+        h4 {
+            color: var(--heading-fg);
+            margin-top: 25px;
+            margin-bottom: 10px;
+        }
+
+        .intro {
+            font-size: 1.1em;
+            color: var(--intro-fg);
+            background-color: var(--intro-bg);
+            padding: 20px;
+            border-left: 4px solid var(--intro-border);
+            margin-bottom: 30px;
+        }
+
+        .toc {
+            background-color: var(--toc-bg);
+            padding: 20px;
+            border-radius: 5px;
+            margin-bottom: 30px;
+        }
+
+        .toc h2 {
+            margin-top: 0;
+            color: var(--heading-fg);
+            border-bottom: 1px solid var(--toc-border);
+        }
+
+        .toc ul {
+            list-style: none;
+            padding-left: 0;
+        }
+
+        .toc ul ul {
+            padding-left: 22px;
+        }
+
+        .toc li {
+            margin: 4px 0;
+        }
+
+        .toc a {
+            color: var(--accent);
+            text-decoration: none;
+            padding: 3px 10px;
+            display: block;
+            border-radius: 3px;
+            transition: background-color 0.2s;
+        }
+
+        .toc a:hover {
+            background-color: var(--toc-hover);
+        }
+
+        code {
+            background-color: var(--code-bg);
+            color: var(--code-fg);
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Monaco', 'Consolas', 'Courier New', monospace;
+        }
+
+        pre {
+            background-color: var(--pre-bg);
+            color: var(--pre-fg);
+            padding: 20px;
+            border-radius: 5px;
+            overflow-x: auto;
+            margin: 15px 0;
+            border-left: 4px solid var(--pre-border);
+        }
+
+        pre code {
+            background-color: transparent;
+            color: inherit;
+            padding: 0;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 15px 0 25px 0;
+        }
+
+        th {
+            background-color: var(--table-th-bg);
+            color: var(--table-th-fg);
+            padding: 12px 15px;
+            text-align: left;
+            font-weight: 600;
+        }
+
+        td {
+            padding: 10px 15px;
+            border-bottom: 1px solid var(--table-border);
+            vertical-align: top;
+        }
+
+        tr:hover {
+            background-color: var(--table-hover);
+        }
+
+        td code {
+            font-size: 0.95em;
+        }
+
+        .section {
+            margin-bottom: 40px;
+        }
+
+        .highlight {
+            background-color: var(--highlight-bg);
+            padding: 15px;
+            border-left: 4px solid var(--highlight-border);
+            margin: 15px 0;
+            border-radius: 0 5px 5px 0;
+        }
+
+        .note {
+            background-color: var(--note-bg);
+            padding: 15px;
+            border-left: 4px solid var(--note-border);
+            margin: 15px 0;
+            border-radius: 0 5px 5px 0;
+        }
+
+        .back-to-top {
+            display: inline-block;
+            margin-top: 10px;
+            color: var(--back-to-top);
+            text-decoration: none;
+            font-size: 0.9em;
+        }
+
+        .back-to-top:hover {
+            text-decoration: underline;
+        }
+
+        /* Syntax highlight classes for code examples */
+        .cmt { color: var(--syn-cmt); }
+        .hl-num { color: var(--syn-num); }
+        .hl-str { color: var(--syn-str); }
+        .hl-kw { color: var(--syn-kw); }
+
+        /* Theme toggle */
+        .theme-toggle {
+            position: fixed;
+            top: 1rem;
+            right: 1rem;
+            z-index: 1000;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.4rem 0.75rem;
+            background: var(--container-bg);
+            border: 1px solid var(--table-border);
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 1.1rem;
+            color: var(--fg);
+            box-shadow: 0 2px 6px var(--shadow);
+            transition: background 0.2s;
+        }
+        .theme-toggle:hover { background: var(--toc-hover); }
+
+        body, .container, pre, code, .note, .highlight, .intro, .toc, th, td {
+            transition: background-color 0.3s, color 0.3s, border-color 0.3s;
+        }
+    </style>
+    <script>
+    if (localStorage.getItem('tzpl-docs-theme') === 'light') document.documentElement.classList.add('light');
+    </script>
+</head>
+<body>
+    <button class="theme-toggle" id="theme-toggle" aria-label="Toggle theme">
+        <span id="theme-icon">&#9790;</span>
+    </button>
+    <div class="container">
+        <h1 id="top">Writing SynthDefs</h1>
+
+        <div class="intro">
+            A <strong>synthdef</strong> is a description of an audio signal-flow graph, written as ordinary
+            Tzopilotl code, that the synthdef compiler turns into an optimized native plugin the audio engine
+            can instantiate as nodes. This guide covers the whole authoring surface: the graph-construction
+            model, signal rates, element types, channel counts and broadcasting, controls and note
+            parameters, delays, buffers, control flow, polyphonic voicers, and a reference for the three
+            modules involved &mdash; <code>synthdef</code> (the building blocks), <code>common_ugens</code>
+            (unit generators built from them), and <code>filters</code> (biquad filters).
+            <p style="margin-top: 0.6em;">For a task-oriented introduction with engine and scheduling recipes, see the
+            <a href="Tzopilotl_Music_Cookbook.html">Music Cookbook</a>. For the compiler internals
+            (the 14-pass pipeline, codegen, SIMD) see <code>synthdef-compiler/ARCHITECTURE.md</code> in the
+            repository.</p>
+        </div>
+
+        <div class="toc">
+            <h2>Table of Contents</h2>
+            <ul>
+                <li><a href="#model">1. How SynthDefs Work</a></li>
+                <li><a href="#types">2. The Signal Type: Rate, Element Type, Channels</a>
+                    <ul>
+                        <li><a href="#rates">2.1 Signal rates</a></li>
+                        <li><a href="#numtypes">2.2 Element types</a></li>
+                        <li><a href="#chans">2.3 Channel counts</a></li>
+                        <li><a href="#broadcast">2.4 Channel broadcasting</a></li>
+                    </ul></li>
+                <li><a href="#constants">3. Constants and Conversion to Signals</a></li>
+                <li><a href="#operators">4. Signal Operators</a></li>
+                <li><a href="#vecops">5. Channel (Vector) Operations</a></li>
+                <li><a href="#units">6. Basic Units: fs, T, inlet, outlet, debug</a></li>
+                <li><a href="#controls">7. Controls</a></li>
+                <li><a href="#random">8. Random Signals</a></li>
+                <li><a href="#delays">9. Delays and Feedback</a></li>
+                <li><a href="#buffers">10. Sample Buffers</a></li>
+                <li><a href="#controlflow">11. Control Flow</a></li>
+                <li><a href="#voicer">12. Polyphony: voicer, noteParam, gate</a></li>
+                <li><a href="#spectral">13. Spectral Processing</a></li>
+                <li><a href="#compile">14. Compiling, Tagging, and Playing</a></li>
+                <li><a href="#ugens">15. common_ugens Reference</a>
+                    <ul>
+                        <li><a href="#ug-math">15.1 Math helpers</a></li>
+                        <li><a href="#ug-clip">15.2 Clipping, wrapping, folding</a></li>
+                        <li><a href="#ug-sigmoid">15.3 Sigmoids and soft clipping</a></li>
+                        <li><a href="#ug-range">15.4 Range mapping</a></li>
+                        <li><a href="#ug-warp">15.5 Warp functions</a></li>
+                        <li><a href="#ug-convert">15.6 Musical unit conversions</a></li>
+                        <li><a href="#ug-combine">15.7 Ring modulation and signal combining</a></li>
+                        <li><a href="#ug-noise">15.8 Noise generators</a></li>
+                        <li><a href="#ug-trig">15.9 Triggers, logic, and sequencing</a></li>
+                        <li><a href="#ug-env">15.10 Envelopes and smoothing</a></li>
+                        <li><a href="#ug-integ">15.11 Differentiation and integration</a></li>
+                        <li><a href="#ug-shape">15.12 Phase shapers and window functions</a></li>
+                        <li><a href="#ug-osc">15.13 Phasor and oscillators</a></li>
+                        <li><a href="#ug-comb">15.14 Comb and allpass delays</a></li>
+                        <li><a href="#ug-pan">15.15 Panning</a></li>
+                        <li><a href="#ug-gated">15.16 Gated subgraphs and chains</a></li>
+                    </ul></li>
+                <li><a href="#filters">16. filters Reference</a></li>
+            </ul>
+        </div>
+
+        <!-- ============================================================ -->
+        <div class="section" id="model">
+            <h2>1. How SynthDefs Work</h2>
+
+            <p>A synthdef is written as a Tzopilotl function of no arguments returning <code>S</code>
+            (short for <code>SignalExpr</code>). The function does not process audio when it runs.
+            Instead, it <em>runs once at definition time to build a graph</em>: every operation on an
+            <code>S</code> value &mdash; <code>+</code>, <code>sinosc</code>, <code>lag</code>,
+            <code>outlet</code> &mdash; appends a node to the graph under construction and returns a new
+            <code>S</code> referring to it. The finished graph is handed to the synthdef compiler, which
+            analyzes it (rates, types, channel counts, common subexpressions, SIMD) and generates a native
+            <code>.dylib</code> plugin that the engine loads and can instantiate as nodes.</p>
+
+<pre><code>your synth fn (.x) &mdash;runs once&rarr; SignalGraph &mdash;defSynthX&rarr; compiled .dylib plugin
+                                                        &darr;
+                                       engine loads it; newNode() makes instances</code></pre>
+
+            <p>Two consequences of this staging model are worth internalizing:</p>
+            <ul>
+                <li><strong>Every unit generator is a graph macro.</strong> All of
+                <code>common_ugens.x</code> and <code>filters.x</code> is ordinary Tzopilotl code that
+                manipulates <code>S</code> values. Calling <code>lpf(x, 800)</code> inlines a biquad's
+                worth of nodes into your graph. There is no overhead for building abstractions out of
+                small functions &mdash; the compiler sees only the resulting flat graph and optimizes it
+                as a whole (constant folding, common-subexpression elimination, rate factoring).</li>
+                <li><strong>Ordinary language features are compile-time constructs.</strong> A Tzopilotl
+                <code>for</code> loop, array comprehension, or recursive function that builds signal
+                expressions unrolls into the graph. Use them freely to generate banks of oscillators,
+                filter cascades, etc. (For a loop that must exist <em>in</em> the generated code, see
+                <a href="#controlflow"><code>for_</code></a>.)</li>
+            </ul>
+
+            <p>A minimal synthdef, defined and played:</p>
+
+<pre><code><span class="hl-kw">import</span> synthdef.*;
+<span class="hl-kw">import</span> synthc.compile.*;   <span class="cmt">-- provides defSynthX, the production compile path</span>
+<span class="hl-kw">import</span> common_ugens.*;
+
+<span class="hl-kw">fn</span> beep() S =
+    [<span class="hl-num">330.0</span>, <span class="hl-num">331.0</span>] sinosc          <span class="cmt">-- 2-channel sine (slightly detuned)</span>
+    * (<span class="hl-num">1.0</span> lfimp decay(<span class="hl-num">0.25</span>))      <span class="cmt">-- 1 Hz impulse -&gt; exponential decay envelope</span>
+    * <span class="hl-num">0.2</span>
+    |&gt; outlet;                     <span class="cmt">-- the graph's output sink</span>
+
+beep defSynthX(<span class="hl-str">"beep"</span>);            <span class="cmt">-- compile + load into the engine</span>
+<span class="hl-str">"beep"</span> play;                       <span class="cmt">-- make a node and connect it to audio out</span></code></pre>
+
+            <p>Synthdef code leans on two pieces of Tzopilotl syntax used heavily below: the
+            space-separated pipeline (<code>x sinosc sq</code> is <code>sq(sinosc(x))</code>) and the
+            <code>|&gt;</code> pipe operator, which forwards the whole expression to its left into the
+            function on its right. Many ugens are written with untyped parameters; they are generic over
+            anything convertible to a signal (see <a href="#constants">&sect;3</a>).</p>
+
+            <a href="#top" class="back-to-top">&uarr; Back to top</a>
+        </div>
+
+        <!-- ============================================================ -->
+        <div class="section" id="types">
+            <h2>2. The Signal Type: Rate, Element Type, Channels</h2>
+
+            <p>Every expression in the graph has a <strong>signal type</strong> with three components,
+            inferred by the compiler &mdash; you rarely write any of them explicitly:</p>
+
+            <table>
+                <tr><th>Component</th><th>What it is</th><th>Values</th></tr>
+                <tr><td><strong>rate</strong></td><td>When the expression is computed</td>
+                    <td><code>constant</code>, <code>init</code>, <code>reset</code>, <code>event</code>, <code>audio</code></td></tr>
+                <tr><td><strong>element type</strong></td><td>The numeric type of each channel value</td>
+                    <td><code>i32</code>, <code>i64</code>, <code>f32</code>, <code>f64</code></td></tr>
+                <tr><td><strong>channels</strong></td><td>How many parallel values it carries per sample</td>
+                    <td>a power of two: 1, 2, 4, 8, &hellip;</td></tr>
+            </table>
+
+            <h3 id="rates">2.1 Signal rates</h3>
+
+            <p>Rates say how often a value needs to be recomputed. From slowest to fastest:</p>
+
+            <table>
+                <tr><th>Rate</th><th>When computed</th><th>Typical examples</th></tr>
+                <tr><td><code>Rate.constant</code></td><td>At compile time; folded away entirely</td>
+                    <td>Literals, arithmetic on literals</td></tr>
+                <tr><td><code>Rate.init</code></td><td>Once, when a synth instance is allocated</td>
+                    <td><code>fs()</code>, <code>T()</code>, random values with <code>rate: Rate.init</code>, delay allocation</td></tr>
+                <tr><td><code>Rate.reset</code></td><td>Once per note-on / reset</td>
+                    <td>Per-note setup inside a voicer</td></tr>
+                <tr><td><code>Rate.event</code></td><td>When a parameter change arrives</td>
+                    <td><code>control(...)</code> values and math derived only from them</td></tr>
+                <tr><td><code>Rate.audio</code></td><td>Every sample</td>
+                    <td>Oscillators, filters, anything downstream of an audio signal</td></tr>
+            </table>
+
+            <p><strong>Rate propagation.</strong> The rate of a derived expression is the
+            <em>maximum</em> of its inputs' rates. Multiplying an audio-rate oscillator by an event-rate
+            control gives an audio-rate result; adding two constants gives a constant that never reaches
+            the generated code at all. You do not choose rates for computed expressions &mdash; the
+            compiler infers them, and its rewrite passes actively factor low-rate subexpressions out of
+            audio-rate code so that, e.g., <code>freq * <span class="hl-num">2</span> * pi * T()</code>
+            driven by an event-rate control is recomputed only when the control changes.</p>
+
+            <p>The places you <em>do</em> state a rate are source nodes whose rate is a free choice
+            &mdash; the random generators (<a href="#random">&sect;8</a>) take a
+            <code>rate</code> argument. <code>frand(<span class="hl-num">100</span>, <span class="hl-num">600</span>, <span class="hl-num">8</span>, Rate.init)</code>
+            picks 8 random frequencies once per synth instance;
+            with the default <code>Rate.audio</code> it would be white noise.</p>
+
+            <p><code>Rate</code> values are ordered (<code>&lt;</code>, <code>&lt;=</code>,
+            <code>min</code>, <code>max</code> are defined on them) with
+            <code>constant &lt; init &lt; reset &lt; event &lt; audio</code>.</p>
+
+            <h3 id="numtypes">2.2 Element types</h3>
+
+            <p>Each signal's per-channel values have one of four concrete numeric types:
+            <code>i32</code>, <code>i64</code>, <code>f32</code> (the usual audio sample type), and
+            <code>f64</code>. During graph construction, types are tracked as <em>constraint sets</em>
+            (<code>NumType</code> bit-sets such as <code>ANY_NUM</code>, <code>ANY_FLOAT</code>,
+            <code>ANY_INT</code>) and iteratively narrowed to a concrete type by the compiler's type
+            inference:</p>
+
+            <ul>
+                <li>Integer literals and integer-valued float literals enter the graph as
+                <code>ANY_NUM</code> &mdash; they adapt to whatever consumes them.
+                <code>440</code> becomes an <code>f32</code> when fed to <code>sinosc</code> and an
+                <code>i64</code> when used as a bit mask.</li>
+                <li>Non-integer float literals are <code>ANY_FLOAT</code>.</li>
+                <li>Transcendental functions (<code>sin</code>, <code>exp</code>, &hellip;) constrain
+                their operand to float; bit operations (<code>&amp;</code>, <code>&lt;&lt;</code>,
+                <code>popCount</code>, &hellip;) constrain theirs to integer.</li>
+                <li>When two types meet in a binary operation, the common type is the wider one, floats
+                winning over ints (<code>i32</code>+<code>f32</code> &rarr; <code>f32</code>,
+                <code>f32</code>+<code>f64</code> &rarr; <code>f64</code>).</li>
+            </ul>
+
+            <p>When you need a specific width, use the <strong>cast operators</strong>
+            <code>i32</code>, <code>i64</code>, <code>f32</code>, <code>f64</code> (postfix, like any
+            ugen). The main practical uses:</p>
+
+<pre><code><span class="cmt">-- Phase accumulators: accumulate in f64 for precision, read out in f32.</span>
+<span class="hl-kw">fn</span> phasor(fm AsSignal) S {
+    <span class="hl-kw">let</span> phase = delayVar();
+    phase &lt;- frac(phase(<span class="hl-num">1</span>) + fm f64 * T() f64);
+    phase(<span class="hl-num">1</span>) f32
+}
+
+<span class="cmt">-- Integer arithmetic: force a counter to integer before %.</span>
+c &lt;- (c1 + t) i32 % n;</code></pre>
+
+            <h3 id="chans">2.3 Channel counts</h3>
+
+            <p>A signal carries <code>chans</code> parallel values per sample &mdash; its channels. A
+            plain oscillator is 1-channel; <code>[<span class="hl-num">330.0</span>, <span class="hl-num">331.0</span>] sinosc</code>
+            is a 2-channel signal (two sines computed in lockstep). Multichannel expansion is how you get
+            stereo, oscillator banks, and SIMD-friendly parallelism.</p>
+
+            <p>Channel counts are always <strong>rounded up to a power of two</strong>
+            (<code>asChans(n) = max(n,1) bitCeil</code>): a 3-element vector becomes a 4-channel signal
+            (the 4th channel duplicates cyclically). This lets generated code index channels with a
+            bit-mask instead of a modulo, and makes all channel counts broadcast-compatible. Functions
+            that create multichannel signals &mdash; <code>vec</code>, <code>fill</code>,
+            <code>control</code>, the random generators, <code>take</code>, <code>stutter</code>,
+            &hellip; &mdash; apply this rounding to their channel argument.</p>
+
+            <h3 id="broadcast">2.4 Channel broadcasting</h3>
+
+            <p>When a binary operation combines signals of different widths, the result has
+            <code>max(a.chans, b.chans)</code> channels, and the narrower signal's channels are
+            <strong>repeated cyclically</strong>: channel <code>i</code> of the result reads channel
+            <code>i mod chans</code> of each input. Because all widths are powers of two, this is always
+            well-defined &mdash; a 2-channel signal against an 8-channel one repeats its pair four
+            times.</p>
+
+<pre><code><span class="cmt">-- scalar against stereo: the scalar applies to both channels</span>
+[<span class="hl-num">330.0</span>, <span class="hl-num">331.0</span>] sinosc * <span class="hl-num">0.2</span>              <span class="cmt">-- 2 chans</span>
+
+<span class="cmt">-- stereo against 8 channels: the [-1, 1] detune alternates across all 8</span>
+<span class="hl-kw">let</span> detune = [-<span class="hl-num">1</span>, <span class="hl-num">1</span>] vec;                <span class="cmt">-- 2 chans</span>
+<span class="hl-kw">let</span> freqs = exprand(<span class="hl-num">100</span>, <span class="hl-num">600</span>, <span class="hl-num">8</span>, Rate.init) + detune;   <span class="cmt">-- 8 chans</span>
+
+<span class="cmt">-- unary ops and ugens are per-channel: this filters both channels</span>
+[<span class="hl-num">200</span>, <span class="hl-num">300</span>] smoothSaw(<span class="hl-num">4</span>) lpf(<span class="hl-num">1200</span>)</code></pre>
+
+            <p>Broadcasting composes with every ugen in the library, because ugens are built from these
+            same per-channel operators &mdash; feeding a 2-channel frequency into <code>sinosc</code>
+            gives a stereo oscillator whose internal phase accumulator is itself 2-channel. Delays
+            declared inside a ugen widen the same way, so <code>[<span class="hl-num">0.2</span>, <span class="hl-num">0.3</span>] vec</code>
+            of delay times gives two independent delay lines.</p>
+
+            <div class="note">
+                <strong>Reducing width back down.</strong> Broadcasting only ever widens. To mix
+                channels down, use the reductions in <a href="#vecops">&sect;5</a>:
+                <code>sum</code> mixes to 1 channel, <code>sum(<span class="hl-num">2</span>)</code>
+                mixes to stereo by summing every other channel, and
+                <code>transpose(n)</code> reorders channels so related groups are adjacent first.
+                A typical bank-of-oscillators pattern is
+                <code>oscs sum(<span class="hl-num">2</span>) * <span class="hl-num">0.1</span> |&gt; outlet</code>.
+            </div>
+
+            <a href="#top" class="back-to-top">&uarr; Back to top</a>
+        </div>
+
+        <!-- ============================================================ -->
+        <div class="section" id="constants">
+            <h2>3. Constants and Conversion to Signals</h2>
+
+            <p>Plain Tzopilotl numbers become constant signal nodes on demand. Three
+            <em>constraints</em> (type sets) describe what converts:</p>
+
+            <table>
+                <tr><th>Constraint</th><th>Members</th><th>Meaning</th></tr>
+                <tr><td><code>BasicValues</code></td><td><code>Bool | Int | Fraction | Float</code></td>
+                    <td>Scalars that convert to 1-channel constants</td></tr>
+                <tr><td><code>AsConstantSignal</code></td><td><code>BasicValues | [BasicValues]</code></td>
+                    <td>Scalars or arrays of them (arrays become multichannel constants)</td></tr>
+                <tr><td><code>AsSignal</code></td><td><code>SignalExpr | AsConstantSignal</code></td>
+                    <td>Anything usable as a signal input</td></tr>
+            </table>
+
+            <p>All the operators in <a href="#operators">&sect;4</a> have overloads accepting
+            <code>AsConstantSignal</code> on either side, so mixed expressions like
+            <code>x * <span class="hl-num">0.5</span></code> and <code>[<span class="hl-num">8</span>, <span class="hl-num">7.23</span>] lfsaw</code>
+            just work. When writing your own ugens, declare parameters as <code>AsSignal</code> (or leave
+            them untyped) and call <code>asSignal</code> where you need an <code>S</code>
+            explicitly.</p>
+
+            <table>
+                <tr><th>Function</th><th>Description</th></tr>
+                <tr><td><code>asSignal(x)</code></td><td>Convert a scalar, array, or signal to <code>S</code>. Identity on signals.</td></tr>
+                <tr><td><code>scalar(x)</code></td><td>1-channel constant from a <code>Bool</code>/<code>Int</code>/<code>Fraction</code>/<code>Float</code>.</td></tr>
+                <tr><td><code>vec(v)</code></td><td>Multichannel constant from an array; width = <code>v length asChans</code>, elements repeat cyclically to fill.</td></tr>
+                <tr><td><code>fill(chans, x)</code></td><td>Constant with <code>x</code> replicated across <code>chans</code> channels.</td></tr>
+            </table>
+
+            <p><code>Fraction</code> literals (e.g. <code>3/2</code> in contexts where the language
+            keeps them exact) convert via <code>toFloat</code>; integer-valued constants stay
+            type-flexible (<a href="#numtypes">&sect;2.2</a>).</p>
+
+            <a href="#top" class="back-to-top">&uarr; Back to top</a>
+        </div>
+
+        <!-- ============================================================ -->
+        <div class="section" id="operators">
+            <h2>4. Signal Operators</h2>
+
+            <p>These are the primitive per-channel operations on signals, defined in
+            <code>synthdef.x</code>. All are elementwise across channels with broadcasting
+            (<a href="#broadcast">&sect;2.4</a>).</p>
+
+            <h3>Unary operators and functions</h3>
+            <table>
+                <tr><th>Group</th><th>Operations</th></tr>
+                <tr><td>Prefix operators</td><td><code>-a</code> (negate), <code>!a</code> (logical not), <code>~a</code> (bitwise not)</td></tr>
+                <tr><td>Basic</td><td><code>abs</code>, <code>sign</code></td></tr>
+                <tr><td>Rounding</td><td><code>floor</code>, <code>ceil</code>, <code>trunc</code>, <code>round</code></td></tr>
+                <tr><td>Roots</td><td><code>sqrt</code>, <code>cbrt</code></td></tr>
+                <tr><td>Logarithms</td><td><code>log</code>, <code>log2</code>, <code>log10</code>, <code>log1p</code></td></tr>
+                <tr><td>Exponentials</td><td><code>exp</code>, <code>exp2</code>, <code>exp10</code>, <code>expm1</code></td></tr>
+                <tr><td>Trigonometric</td><td><code>sin</code>, <code>cos</code>, <code>tan</code>, <code>asin</code>, <code>acos</code>, <code>atan</code></td></tr>
+                <tr><td>Hyperbolic</td><td><code>sinh</code>, <code>cosh</code>, <code>tanh</code>, <code>asinh</code>, <code>acosh</code>, <code>atanh</code></td></tr>
+                <tr><td>&pi;-scaled trig</td><td><code>sinpi</code>, <code>cospi</code>, <code>tanpi</code> &mdash; <code>sinpi(x) = sin(&pi;x)</code>; cheaper and exact at integer arguments</td></tr>
+                <tr><td>Special</td><td><code>lgamma</code>, <code>tgamma</code>, <code>erf</code>, <code>erfc</code></td></tr>
+                <tr><td>Bit counting</td><td><code>clz</code>, <code>ctz</code>, <code>clo</code>, <code>cto</code>, <code>popCount</code>, <code>bitWidth</code>, <code>hasSingleBit</code></td></tr>
+                <tr><td>Bit shaping</td><td><code>rotr</code>, <code>rtol</code> (rotate left), <code>bitCeil</code>, <code>bitFloor</code></td></tr>
+            </table>
+
+            <h3>Binary operators</h3>
+            <table>
+                <tr><th>Group</th><th>Operations</th></tr>
+                <tr><td>Arithmetic</td><td><code>+</code> <code>-</code> <code>*</code> <code>/</code> <code>//</code> (integer divide) <code>%</code> (mod)</td></tr>
+                <tr><td>Bitwise</td><td><code>&amp;</code> <code>|</code> <code>^</code> <code>&lt;&lt;</code> <code>&gt;&gt;</code> <code>&gt;&gt;&gt;</code> (unsigned shift right)</td></tr>
+                <tr><td>Named math</td><td><code>min</code>, <code>max</code>, <code>pow</code>, <code>atan2</code>, <code>hypot</code>, <code>copysign</code></td></tr>
+                <tr><td>Pipeline aliases</td><td><code>add</code>, <code>sub</code>, <code>mul</code>, <code>div</code>, <code>mod</code> &mdash; the arithmetic operators as named
+                    functions, for space-pipeline style: <code>x mul(<span class="hl-num">0.5</span>) add(<span class="hl-num">1</span>)</code></td></tr>
+            </table>
+
+            <h3>Comparison operators</h3>
+            <p><code>&lt;</code> <code>&lt;=</code> <code>==</code> <code>!=</code> <code>&gt;=</code>
+            <code>&gt;</code> compare per channel and produce a numeric <strong>0/1 signal</strong>, not
+            a Bool. This is the idiomatic building block for gates and masks &mdash; multiply by a
+            comparison to zero out a signal, or feed one to <code>select2</code>:</p>
+
+<pre><code>(x &gt; <span class="hl-num">0</span>)                <span class="cmt">-- 1 where positive, else 0</span>
+x * (phase &lt; pwm)       <span class="cmt">-- gate x by a pulse</span>
+urand() &lt; prob          <span class="cmt">-- Bernoulli trigger (see coin)</span></code></pre>
+
+            <h3>Cast operators</h3>
+            <p><code>i32</code>, <code>i64</code>, <code>f32</code>, <code>f64</code> force the element
+            type (<a href="#numtypes">&sect;2.2</a>). They accept any <code>AsSignal</code>.</p>
+
+            <a href="#top" class="back-to-top">&uarr; Back to top</a>
+        </div>
+
+        <!-- ============================================================ -->
+        <div class="section" id="vecops">
+            <h2>5. Channel (Vector) Operations</h2>
+
+            <p>These operate on the channel dimension itself: indexing, rearranging, and reducing.
+            Remember that channel counts round to powers of two, and indexing is cyclic
+            (<code>index &amp; (chans-1)</code>).</p>
+
+            <table>
+                <tr><th>Function</th><th>Description</th></tr>
+                <tr><td><code>at(a, i)</code></td><td>Select channel <code>i</code> (a signal or constant; cyclic). 1-channel result per index channel.</td></tr>
+                <tr><td><code>put(a, i, v)</code></td><td>Replace channel <code>i</code> of <code>a</code> with <code>v</code>.</td></tr>
+                <tr><td><code>take(a, n)</code></td><td>First <code>n</code> channels (widened to a power of two, cyclic fill).</td></tr>
+                <tr><td><code>drop(a, n)</code></td><td>Drop the first <code>n</code> channels.</td></tr>
+                <tr><td><code>stride(a, n)</code></td><td>Every <code>n</code>th channel: channels 0, n, 2n, &hellip;</td></tr>
+                <tr><td><code>stutter(a, n)</code></td><td>Repeat each channel <code>n</code> times: <code>[a b] stutter(2)</code> &rarr; <code>[a a b b]</code>.</td></tr>
+                <tr><td><code>ncyc(a, n)</code></td><td>Cycle the whole channel array <code>n</code> times: <code>[a b] ncyc(2)</code> &rarr; <code>[a b a b]</code>.</td></tr>
+                <tr><td><code>rotate(a, k)</code></td><td>Rotate channels by <code>k</code> (a signal or constant).</td></tr>
+                <tr><td><code>reverse(a)</code></td><td>Reverse channel order.</td></tr>
+                <tr><td><code>transpose(a, n)</code></td><td>Treat the channels as an <code>n</code>-column matrix and transpose it &mdash; converts between interleaved and grouped channel layouts.</td></tr>
+                <tr><td><code>join([a, b, ...])</code></td><td>Concatenate an array of signals along the channel dimension.</td></tr>
+                <tr><td><code>reduce(a, op, chans = 1)</code></td><td>Fold the channels down to <code>chans</code> with a <code>BinaryOp</code>; channel <code>i</code> of the result combines input channels <code>i</code>, <code>i+chans</code>, <code>i+2&middot;chans</code>, &hellip;</td></tr>
+                <tr><td><code>sum(a, chans = 1)</code></td><td><code>reduce</code> with add &mdash; the standard mixdown. <code>sum(2)</code> mixes an even/odd split to stereo.</td></tr>
+                <tr><td><code>product(a, chans = 1)</code></td><td><code>reduce</code> with multiply.</td></tr>
+                <tr><td><code>minOf(a, chans = 1)</code> / <code>maxOf(a, chans = 1)</code></td><td><code>reduce</code> with min / max.</td></tr>
+            </table>
+
+<pre><code><span class="cmt">-- 16 random-frequency sines, mixed to stereo</span>
+<span class="hl-kw">fn</span> shimmer() S {
+    <span class="hl-kw">let</span> freqs = exprand(<span class="hl-num">200</span>, <span class="hl-num">2000</span>, <span class="hl-num">16</span>, Rate.init);
+    freqs sinosc sum(<span class="hl-num">2</span>) * <span class="hl-num">0.05</span> |&gt; outlet
+}
+
+<span class="cmt">-- 16 random sine plinks, each randomly panned, mixed to stereo.</span>
+<span class="cmt">-- pandust(density, 16) emits 32 chans grouped by side [L0..L15, R0..R15];</span>
+<span class="cmt">-- transpose(16) interleaves them to [L0 R0 L1 R1 ...], so sum(2) mixes</span>
+<span class="cmt">-- even channels to the left output and odd channels to the right.</span>
+<span class="hl-kw">fn</span> dustCloud() S {
+    <span class="hl-kw">let</span> freqs = exprand(<span class="hl-num">100</span>, <span class="hl-num">5000</span>, <span class="hl-num">16</span>, Rate.init);
+    <span class="hl-kw">let</span> ticks = pandust(<span class="hl-num">3</span>/<span class="hl-num">16</span>, <span class="hl-num">16</span>) decay2(<span class="hl-num">0.004</span>, <span class="hl-num">0.2</span>);
+    ticks * freqs sinosc |&gt; transpose(<span class="hl-num">16</span>) sum(<span class="hl-num">2</span>) outlet
+}</code></pre>
+
+            <a href="#top" class="back-to-top">&uarr; Back to top</a>
+        </div>
+
+        <!-- ============================================================ -->
+        <div class="section" id="units">
+            <h2>6. Basic Units: fs, T, inlet, outlet, debug</h2>
+
+            <table>
+                <tr><th>Function</th><th>Description</th></tr>
+                <tr><td><code>fs()</code></td><td>The sample rate, as an init-rate signal. Never hard-code 44100/48000 &mdash; graphs are compiled independent of the device rate.</td></tr>
+                <tr><td><code>T()</code></td><td>The sample duration, <code>1/fs()</code>. The natural increment for phase accumulators: <code>freq * T()</code> is cycles per sample.</td></tr>
+                <tr><td><code>inlet(typ, chans = 1, name = "in")</code></td><td>Declare an audio input port. <code>typ</code> is a <code>NumType</code> (usually <code>FLOAT32</code>). A synthdef with inlets is an effect: the engine patches other nodes' outputs into it with <code>connect</code>.</td></tr>
+                <tr><td><code>outlet(a, name = "out")</code></td><td>Declare an output port carrying <code>a</code>. Every synthdef needs at least one; multiple named outlets are allowed. The outlet's channel count is the signal's.</td></tr>
+                <tr><td><code>debug(input, label = "debug", period = 4096, consecutive = 1)</code></td><td>Periodically dump the signal's value(s) to stderr: every <code>period</code> samples, print the next <code>consecutive</code> samples of all channels with the absolute sample time and <code>label</code>. Returns its input unchanged, so it drops into a pipeline: <code>x debug(<span class="hl-str">"x"</span>, <span class="hl-num">1024</span>, <span class="hl-num">4</span>)</code>.</td></tr>
+            </table>
+
+<pre><code><span class="cmt">-- A stereo effect: soft-clip whatever is patched in</span>
+<span class="hl-kw">fn</span> warmth() S {
+    <span class="hl-kw">let</span> x = inlet(FLOAT32, <span class="hl-num">2</span>);
+    <span class="hl-kw">let</span> drive = control(<span class="hl-str">"drive"</span>, ControlSpec { lo: <span class="hl-num">1.0</span>, hi: <span class="hl-num">20.0</span>, init: <span class="hl-num">2.0</span>, warp: ControlWarp.exponential });
+    (x * drive) distort |&gt; outlet
+}</code></pre>
+
+            <a href="#top" class="back-to-top">&uarr; Back to top</a>
+        </div>
+
+        <!-- ============================================================ -->
+        <div class="section" id="controls">
+            <h2>7. Controls</h2>
+
+            <p>A <strong>control</strong> is a named, settable parameter of the synth. Controls are
+            <em>event-rate</em> sources: the engine delivers value changes as events, and only the
+            subgraph that depends on a changed control recomputes. Set them from Tzopilotl with the
+            <code>audio_engine</code> bridge &mdash; <code>setControl(nodeID, controlID, value)</code>,
+            where <code>controlID</code> is the control's index in declaration order &mdash; or let the
+            app's UI generate widgets from them &mdash; the control's spec and kind determine the widget
+            (see <a href="Live_Controls_and_Notebooks.html">Live Controls and Notebooks</a>).</p>
+
+            <h3>Constructors</h3>
+            <table>
+                <tr><th>Function</th><th>Kind</th><th>Description</th></tr>
+                <tr><td><code>control(name, spec, chans = 1)</code></td><td>continuous</td>
+                    <td>Ranged value; UIs render a slider.</td></tr>
+                <tr><td><code>trigger(name, chans = 1)</code></td><td>trigger</td>
+                    <td>Momentary event (0..1, init 0). A nonzero arrival is a one-shot edge &mdash; retrigger an envelope, reset a phase. UIs render a button.</td></tr>
+                <tr><td><code>toggle(name, init = 0.0, chans = 1)</code></td><td>boolean</td>
+                    <td>Latched 0/1 state. UIs render a toggle.</td></tr>
+                <tr><td><code>choice(name, numChoices, init = 0, chans = 1)</code></td><td>select</td>
+                    <td>Integer choice 0 .. numChoices-1 in unit steps. UIs render a number box. Pairs naturally with <code>switch</code> (<a href="#controlflow">&sect;11</a>).</td></tr>
+                <tr><td><code>noteParam(name, spec, chans = 1)</code></td><td>&mdash;</td>
+                    <td>Per-note parameter inside a voicer body (<a href="#voicer">&sect;12</a>).</td></tr>
+                <tr><td><code>gate()</code></td><td>&mdash;</td>
+                    <td>The implicit per-note gate: <code>noteParam(<span class="hl-str">"gate"</span>, &hellip;)</code>, high while the note is held.</td></tr>
+            </table>
+
+            <h3>ControlSpec and warps</h3>
+
+<pre><code><span class="hl-kw">struct</span> ControlSpec { lo Float, hi Float, init Float, warp ControlWarp }
+
+<span class="hl-kw">enum</span> ControlWarp { linear, exponential, step Float, signedSquare, cubed }</code></pre>
+
+            <p>The spec gives the control's range, initial value, and <strong>warp</strong> &mdash; the
+            curve a UI uses to map slider position to value (<code>exponential</code> for frequencies
+            and gains, <code>step(sz)</code> for quantized values, <code>signedSquare</code> /
+            <code>cubed</code> for finer resolution near zero). The warp does not change what your graph
+            receives; it shapes the widget.</p>
+
+            <div class="note">
+                <strong>Smoothing.</strong> Control changes arrive as steps. For anything audible
+                (gains, frequencies, filter cutoffs), smooth the control with <code>lag</code> to avoid
+                zipper noise. This is the standard output-gain idiom used by the examples:
+<pre style="margin-bottom: 0;"><code><span class="hl-kw">fn</span> gainOutlet(x S) S {
+    <span class="hl-kw">let</span> gain = control(<span class="hl-str">"gain"</span>,
+        ControlSpec{<span class="hl-num">0.001</span>, <span class="hl-num">1.0</span>, <span class="hl-num">0.2</span>, ControlWarp.exponential}) lag(<span class="hl-num">0.1</span>);
+    x * gain |&gt; outlet
+}</code></pre>
+            </div>
+
+            <a href="#top" class="back-to-top">&uarr; Back to top</a>
+        </div>
+
+        <!-- ============================================================ -->
+        <div class="section" id="random">
+            <h2>8. Random Signals</h2>
+
+            <p>Random sources take a channel count and a rate. At <code>Rate.audio</code> (the default)
+            they produce a new value every sample per channel &mdash; noise. At <code>Rate.init</code>
+            they produce values once per synth instance &mdash; randomized fixed parameters, different in
+            every node you create. Each synth instance seeds its own RNG.</p>
+
+            <table>
+                <tr><th>Function</th><th>Description</th></tr>
+                <tr><td><code>frand(lo, hi, chans = 1, rate = Rate.audio)</code></td><td>Uniform floats in [lo, hi).</td></tr>
+                <tr><td><code>irand(lo, hi, chans = 1, rate = Rate.audio)</code></td><td>Uniform integers in [lo, hi].</td></tr>
+                <tr><td><code>urand(chans = 1, rate = Rate.audio)</code></td><td>Uniform unipolar floats in [0, 1).</td></tr>
+                <tr><td><code>birand(chans = 1, rate = Rate.audio)</code></td><td>Uniform bipolar floats in [-1, 1) &mdash; this is white noise at audio rate (see <code>white</code>).</td></tr>
+                <tr><td><code>rand64(chans = 1, rate = Rate.audio)</code></td><td>Raw random 64-bit integers.</td></tr>
+                <tr><td><code>exprand(a, b, chans = 1, rate = Rate.audio)</code></td><td>(common_ugens) Exponentially distributed between <code>a</code> and <code>b</code> &mdash; the right distribution for frequencies.</td></tr>
+            </table>
+
+<pre><code><span class="cmt">-- Eight oscillators at random frequencies, fixed per instance,</span>
+<span class="cmt">-- with slowly moving random amplitudes:</span>
+<span class="hl-kw">let</span> freqs    = exprand(<span class="hl-num">100</span>, <span class="hl-num">600</span>, <span class="hl-num">8</span>, Rate.init);
+<span class="hl-kw">let</span> ampFreqs = exprand(<span class="hl-num">0.1</span>, <span class="hl-num">0.5</span>, <span class="hl-num">8</span>, Rate.init);
+<span class="hl-kw">let</span> amps     = ampFreqs fsinosc(urand(<span class="hl-num">8</span>, Rate.init)) uni;
+freqs fsinosc * amps |&gt; sum(<span class="hl-num">2</span>) * <span class="hl-num">0.1</span> outlet</code></pre>
+
+            <p>For noise colors and random event generators built on these (pink, dust, velvet, &hellip;)
+            see <a href="#ug-noise">&sect;15.8</a>.</p>
+
+            <a href="#top" class="back-to-top">&uarr; Back to top</a>
+        </div>
+
+        <!-- ============================================================ -->
+        <div class="section" id="delays">
+            <h2>9. Delays and Feedback</h2>
+
+            <p>A <code>DelayVar</code> is the graph's memory primitive: a ring buffer with one writer
+            and any number of readers. Everything stateful &mdash; one-sample feedback, filters,
+            envelopes, comb delays, phase accumulators, counters &mdash; is built on it.</p>
+
+            <h3>API</h3>
+            <table>
+                <tr><th>Function</th><th>Description</th></tr>
+                <tr><td><code>delayVar()</code></td><td>Declare a delay line. Its length is inferred from the largest fixed read index.</td></tr>
+                <tr><td><code>delayVar(maxDelay)</code></td><td>Declare a delay line sized for variable reads: <code>maxDelay</code> is the maximum delay <em>in samples</em> (an <code>AsSignal</code>; usually <code>maxSeconds * fs()</code>).</td></tr>
+                <tr><td><code>d &lt;- x</code> &nbsp;/&nbsp; <code>x -&gt; d</code> &nbsp;/&nbsp; <code>d write(x)</code></td><td>Write <code>x</code> into the line (once per sample). Returns <code>x</code>, so a write can sit inside an expression. Each delay has exactly one writer.</td></tr>
+                <tr><td><code>d read(n)</code> &nbsp;/&nbsp; <code>d at(n)</code> &nbsp;/&nbsp; <code>d(n)</code></td><td>Read the value written <code>n</code> samples ago (fixed integer <code>n</code>). <code>d(1)</code> is the previous sample's write &mdash; a unit delay. <code>d(0)</code> (or <code>d()</code>) reads the value written <em>this</em> sample.</td></tr>
+                <tr><td><code>d vread(index, interp = Interpolation.cubic)</code> &nbsp;/&nbsp; <code>d(indexSignal)</code></td><td>Variable (modulated) read at a signal-valued delay in samples, with interpolation. Requires <code>delayVar(maxDelay)</code>.</td></tr>
+                <tr><td><code>d init(n, x)</code></td><td>Set the initial content at offset <code>n</code> (evaluated at init rate), so the first reads see <code>x</code> instead of 0.</td></tr>
+            </table>
+
+            <p><strong>Interpolation</strong> for variable reads:
+            <code>Interpolation.none</code> (nearest), <code>linear</code> (2-point),
+            <code>cubic</code> (4-point), <code>lagrange</code> (8-point), <code>sinc</code>
+            (8-point).</p>
+
+            <h3>Feedback</h3>
+
+            <p>Reads at index &ge; 1 see <em>previous</em> samples, so a delay can be read and written
+            in the same graph &mdash; that is how feedback works. The canonical one-pole filter:</p>
+
+<pre><code><span class="hl-kw">fn</span> onepole(x S, a AsSignal) S {
+    <span class="hl-kw">let</span> y = delayVar();
+    y &lt;- x + a * (y(<span class="hl-num">1</span>) - x)     <span class="cmt">-- y[n] = x + a*(y[n-1] - x); the write is the result</span>
+}</code></pre>
+
+            <p>Since <code>write</code> returns the written value, the whole function body is both "update
+            the state" and "the output". The unit-delay ugens <code>z1</code> / <code>z2</code>
+            (<a href="#ug-integ">&sect;15.11</a>) package the common cases: <code>x z1</code> is
+            <code>x</code> delayed one sample.</p>
+
+            <p>A delay declared with a multichannel writer widens per channel &mdash; each channel gets
+            its own line. Delay times in <em>seconds</em> must be converted:
+            <code>delayTime * fs()</code> is the read index in samples (see <code>comb</code> in
+            <a href="#ug-comb">&sect;15.14</a> for the full pattern).</p>
+
+<pre><code><span class="cmt">-- variable-delay chorus voice: 0..10 ms modulated cubic read</span>
+<span class="hl-kw">fn</span> chorusTap(x S, rate AsSignal) S {
+    <span class="hl-kw">let</span> maxSamps = <span class="hl-num">0.01</span> * fs();
+    <span class="hl-kw">let</span> d = delayVar(maxSamps);
+    d &lt;- x;
+    d(rate sinosc uni * maxSamps)      <span class="cmt">-- d(S) = vread, cubic by default</span>
+}</code></pre>
+
+            <a href="#top" class="back-to-top">&uarr; Back to top</a>
+        </div>
+
+        <!-- ============================================================ -->
+        <div class="section" id="buffers">
+            <h2>10. Sample Buffers</h2>
+
+            <p>A <code>BufferVar</code> is a slot for an <em>externally provided</em> block of sample
+            data &mdash; a loaded sound file, a wavetable, recorded audio. Unlike delays, buffer
+            contents are owned by the engine and can be swapped at runtime without recompiling the
+            synth. Buffers are multichannel; frames are indexed from 0 and indices wrap (the engine
+            allocates power-of-two lengths and masks the index).</p>
+
+            <h3>Graph-side API</h3>
+            <table>
+                <tr><th>Function</th><th>Description</th></tr>
+                <tr><td><code>bufferVar()</code></td><td>Declare a buffer slot. Slots are numbered in declaration order: the first <code>bufferVar()</code> is <code>bufID</code> 0, the next is 1, &hellip;</td></tr>
+                <tr><td><code>b read(index, chans = 1, startChan = 0)</code></td><td>Read <code>chans</code> channels starting at channel <code>startChan</code>, at fixed integer frame <code>index</code>.</td></tr>
+                <tr><td><code>b vread(index, interp = Interpolation.cubic, chans = 1, startChan = 0)</code></td><td>Interpolated read at a signal-valued frame index &mdash; the basis of sample playback and wavetable oscillators.</td></tr>
+                <tr><td><code>b write(value, index, chans = 0, startChan = 0)</code> &nbsp;/&nbsp; <code>value write(b, index, ...)</code></td><td>Write <code>value</code> at frame <code>index</code> (for recording / live-buffer effects).</td></tr>
+                <tr><td><code>b length</code></td><td>The buffer's content length in frames, as an init-rate signal.</td></tr>
+            </table>
+
+            <h3>Filling buffers from the engine</h3>
+
+            <p>After creating a node, bind data to its buffer slots with the <code>audio_engine</code>
+            bridge: <code>loadBuffer(nodeID, bufID, path)</code> loads an audio file (read on the
+            non-real-time side, swapped in sample-accurately), and
+            <code>resizeBuffer(nodeID, bufID, numChannels, length)</code> allocates an empty buffer for
+            recording. Until a buffer is bound, reads return 0. The plugin exports its buffer slots
+            (name, element type, expected channels) so browsers and tools can inspect them.</p>
+
+<pre><code><span class="cmt">-- one-shot sample player: trigger restarts the playhead</span>
+<span class="hl-kw">fn</span> samplePlayer() S {
+    <span class="hl-kw">let</span> buf = bufferVar();
+    <span class="hl-kw">let</span> t = trigger(<span class="hl-str">"play"</span>);
+    <span class="hl-kw">let</span> speed = control(<span class="hl-str">"speed"</span>, ControlSpec { lo: <span class="hl-num">0.25</span>, hi: <span class="hl-num">4.0</span>, init: <span class="hl-num">1.0</span>, warp: ControlWarp.exponential });
+    <span class="hl-kw">let</span> pos = delayVar();
+    <span class="hl-kw">let</span> newPos = select2(t &gt; <span class="hl-num">0</span>, <span class="hl-num">0</span>, min(pos(<span class="hl-num">1</span>) + speed, buf length f32));
+    pos &lt;- newPos;
+    buf vread(newPos, Interpolation.cubic, <span class="hl-num">2</span>) |&gt; outlet
+}
+samplePlayer defSynthX(<span class="hl-str">"samplePlayer"</span>);
+
+<span class="cmt">-- engine side, after newNode("samplePlayer", 100):</span>
+loadBuffer(<span class="hl-num">100</span>, <span class="hl-num">0</span>, <span class="hl-str">"samples/kick.wav"</span>);</code></pre>
+
+            <a href="#top" class="back-to-top">&uarr; Back to top</a>
+        </div>
+
+        <!-- ============================================================ -->
+        <div class="section" id="controlflow">
+            <h2>11. Control Flow</h2>
+
+            <p>Two kinds of conditional exist, and choosing between them matters:</p>
+            <ul>
+                <li><code>select2</code> / <code>select</code> compute <em>all</em> their inputs every
+                sample and pick one value per channel. Cheap, branch-free, and the right choice for
+                per-sample decisions (they are used throughout <code>common_ugens</code>).</li>
+                <li><code>if_</code> / <code>switch</code> generate <em>actual branches</em> in the
+                compiled code: only the taken branch's subgraph runs. Use them when the branches are
+                expensive (whole alternative signal chains) and the condition changes rarely (e.g. a
+                <code>choice</code> control).</li>
+            </ul>
+
+            <table>
+                <tr><th>Function</th><th>Description</th></tr>
+                <tr><td><code>select2(test, ifOne, ifZero)</code></td><td>Per-channel: <code>ifOne</code> where <code>test</code> is nonzero, else <code>ifZero</code>. All three evaluate every sample.</td></tr>
+                <tr><td><code>select(test, exprs)</code></td><td>Per-channel N-way select: <code>exprs[test]</code>. All inputs evaluate every sample.</td></tr>
+                <tr><td><code>if_(test, thenFn, elseFn?)</code></td><td>Branching conditional. The branches are zero-argument functions (<code>fn() S { ... }</code>) built as subgraphs; only the taken branch executes. Missing else yields 0. An overload on a plain <code>Bool</code> test resolves at graph-build time.</td></tr>
+                <tr><td><code>switch(test, funs)</code></td><td>N-way branching conditional over an array of subgraph functions, indexed by <code>test</code>.</td></tr>
+                <tr><td><code>for_(varname, count, bodyFn)</code></td><td>A loop in the <em>generated</em> code: the body subgraph (a <code>fn(S) S</code> receiving the loop variable) runs <code>count</code> times per sample. Prefer ordinary Tzopilotl loops (which unroll into the graph) unless you specifically need a runtime loop.</td></tr>
+            </table>
+
+<pre><code><span class="cmt">-- select2: per-sample, both sides always computed</span>
+<span class="hl-kw">fn</span> divz(numer, denom, otherwise) = select2(denom == <span class="hl-num">0.0</span>, otherwise, numer / denom);
+
+<span class="cmt">-- switch: only the chosen oscillator chain runs</span>
+<span class="hl-kw">fn</span> multiOsc() S {
+    <span class="hl-kw">let</span> f = control(<span class="hl-str">"freq"</span>, ControlSpec { lo: <span class="hl-num">20.0</span>, hi: <span class="hl-num">5000.0</span>, init: <span class="hl-num">220.0</span>, warp: ControlWarp.exponential });
+    <span class="hl-kw">let</span> w = choice(<span class="hl-str">"wave"</span>, <span class="hl-num">3</span>);
+    switch(w, [
+        <span class="hl-kw">fn</span>() S { f sinosc },
+        <span class="hl-kw">fn</span>() S { f smoothSaw(<span class="hl-num">4</span>) },
+        <span class="hl-kw">fn</span>() S { f lfbpulse(<span class="hl-num">0.5</span>) },
+    ]) * <span class="hl-num">0.2</span> |&gt; outlet
+}</code></pre>
+
+            <a href="#top" class="back-to-top">&uarr; Back to top</a>
+        </div>
+
+        <!-- ============================================================ -->
+        <div class="section" id="voicer">
+            <h2>12. Polyphony: voicer, noteParam, gate</h2>
+
+            <p><code>voicer(maxVoices, voiceFn)</code> instantiates <code>maxVoices</code> copies of the
+            voice subgraph, each with independent state (delays, envelopes, random values) and per-note
+            parameters. The voicer's output carries the voices as channels; <code>sum</code> mixes them.
+            The engine handles voice allocation, stealing, and note lifetimes.</p>
+
+            <ul>
+                <li><strong><code>noteParam(name, spec)</code></strong> declares a per-note parameter
+                inside the voice body. When a note starts, the note's parameter values are latched into
+                that voice.</li>
+                <li><strong><code>gate()</code></strong> reads the implicit per-note gate: 1 while the
+                note is held, 0 after note-off. Drive an <code>asr</code>/<code>adsr</code> release from
+                it, or ignore it for one-shot percussive voices (use <code>gate() tr</code> as a
+                trigger and let a <code>decay2</code> ring out).</li>
+            </ul>
+
+            <p>Trigger notes from Tzopilotl with the <code>audio_engine</code> bridge:
+            <code>noteOn(nodeID, noteID, params)</code> and <code>noteOff(nodeID, noteID)</code>.
+            The <code>params</code> array matches <strong>the order in which <code>noteParam</code> is
+            declared in the voice body</strong>; <code>gate</code> is implicit and always last. The
+            music libraries' player and the app's piano roll drive voicers the same way.</p>
+
+<pre><code><span class="hl-kw">import</span> synthdef.*;
+<span class="hl-kw">import</span> synthc.compile.*;
+<span class="hl-kw">import</span> common_ugens.*;
+
+<span class="hl-kw">fn</span> organVoice() S {
+    <span class="hl-kw">let</span> f = noteParam(<span class="hl-str">"freq"</span>, ControlSpec { lo: <span class="hl-num">20.0</span>, hi: <span class="hl-num">12000.0</span>, init: <span class="hl-num">440.0</span>, warp: ControlWarp.exponential });
+    <span class="hl-kw">let</span> a = noteParam(<span class="hl-str">"amp"</span>,  ControlSpec { lo: <span class="hl-num">0.0</span>,  hi: <span class="hl-num">1.0</span>,     init: <span class="hl-num">0.5</span>,   warp: ControlWarp.linear });
+    <span class="hl-kw">let</span> g = gate();
+
+    <span class="hl-kw">let</span> env = adsr(g, <span class="hl-num">0.02</span>, <span class="hl-num">0.1</span>, <span class="hl-num">0.9</span>, <span class="hl-num">0.25</span>);
+
+    <span class="hl-kw">let</span> harms = [<span class="hl-num">1</span>, <span class="hl-num">2</span>, <span class="hl-num">3</span>, <span class="hl-num">4</span>, <span class="hl-num">5</span>, <span class="hl-num">6</span>, <span class="hl-num">8</span>] vec;
+    <span class="hl-kw">let</span> amps  = [<span class="hl-num">1.0</span>, <span class="hl-num">0.7</span>, <span class="hl-num">0.5</span>, <span class="hl-num">0.4</span>, <span class="hl-num">0.25</span>, <span class="hl-num">0.2</span>, <span class="hl-num">0.15</span>] vec;
+    (f * harms) sinosc * amps |&gt; sum * env * a * <span class="hl-num">0.18</span>
+}
+
+<span class="hl-kw">fn</span> organ() S = voicer(<span class="hl-num">8</span>, organVoice) sum outlet;
+organ defSynthX(<span class="hl-str">"organ"</span>);
+
+<span class="cmt">-- engine side: params are [freq, amp, gate] -- declaration order, gate last</span>
+newNode(<span class="hl-str">"organ"</span>, <span class="hl-num">100</span>); connect(<span class="hl-num">100</span>, <span class="hl-num">0</span>, <span class="hl-num">0</span>, <span class="hl-num">0</span>);
+noteOn(<span class="hl-num">100</span>, <span class="hl-num">1</span>, [<span class="hl-num">261.6</span>, <span class="hl-num">0.5</span>, <span class="hl-num">1.0</span>]);
+noteOff(<span class="hl-num">100</span>, <span class="hl-num">1</span>);</code></pre>
+
+            <div class="note">
+                Voice bodies are ordinary subgraphs: they can contain delays, filters, random init-rate
+                values (different per voice), and controls declared <em>outside</em> the voicer are
+                shared across voices. See <code>examples/instrument_synthdefs.x</code> for a set of ten
+                voicer-based instruments (FM bell, pluck, modal bell, kick, snare, &hellip;).
+            </div>
+
+            <a href="#top" class="back-to-top">&uarr; Back to top</a>
+        </div>
+
+        <!-- ============================================================ -->
+        <div class="section" id="spectral">
+            <h2>13. Spectral Processing</h2>
+
+            <p><code>spectralChain(input, fftSize, hopSize, bodyFn)</code> windows and FFTs
+            <code>input</code>, hands each spectral frame to <code>bodyFn</code> (a
+            <code>fn(S) S</code> whose argument is the frame signal), and overlap-adds the processed
+            frames back to a time-domain output. <code>fftSize</code> is the frame length in samples
+            (a power of two); <code>hopSize</code> is the analysis stride. Operations inside the body
+            apply to the frame's bins.</p>
+
+<pre><code><span class="cmt">-- process the spectrum: the body maps each analysis frame</span>
+<span class="hl-kw">fn</span> spectralFx() S {
+    <span class="hl-kw">let</span> x = inlet(FLOAT32);
+    spectralChain(x, <span class="hl-num">1024</span>, <span class="hl-num">256</span>, <span class="hl-kw">fn</span>(frame S) S {
+        frame * frame        <span class="cmt">-- e.g. square the bins (spectral contrast)</span>
+    }) |&gt; outlet
+}</code></pre>
+
+            <a href="#top" class="back-to-top">&uarr; Back to top</a>
+        </div>
+
+        <!-- ============================================================ -->
+        <div class="section" id="compile">
+            <h2>14. Compiling, Tagging, and Playing</h2>
+
+            <h3>defSynthX</h3>
+
+            <p><code>defSynthX(synthFun, name)</code> and
+            <code>defSynthX(synthFun, name, tags)</code> (from <code>synthc.compile</code>) run your
+            graph function, compile the graph with <strong>synthc</strong> &mdash; the Tzopilotl-hosted
+            synthdef compiler &mdash; and load the resulting plugin into the engine under
+            <code>name</code>. This is the production path. Compilation invokes <code>clang</code> to
+            build the <code>.dylib</code>, so it happens on the non-real-time side and never glitches
+            running audio; re-evaluating a <code>defSynthX</code> call recompiles and reloads the def,
+            so you can iterate on a synth live.</p>
+
+            <p><code>defSynth</code> (in <code>synthdef.x</code>) is the legacy path through the C++
+            compiler via the S-expression serializer. It byte-matches <code>defSynthX</code>'s output
+            and is retained as the differential-test oracle; new code should use
+            <code>defSynthX</code>.</p>
+
+            <h3>Tags</h3>
+
+            <p>Tags are free-form category strings attached to a def
+            (<code>defSynthX(f, <span class="hl-str">"name"</span>, [<span class="hl-str">"example"</span>])</code>)
+            that the plugin browser uses for filtering. The <code>TZPL_DEFAULT_TAGS</code> environment
+            variable (comma-separated) appends session-wide default tags to everything compiled &mdash;
+            test harnesses set <code>TZPL_DEFAULT_TAGS=test</code> so their defs are born filtered
+            out.</p>
+
+            <h3>Playing</h3>
+
+            <table>
+                <tr><th>Function</th><th>Description</th></tr>
+                <tr><td><code>play(defName)</code> / <code>play(defName, nodeID)</code></td><td>Create a node of the def, connect its output to audio out, return the node ID.</td></tr>
+                <tr><td><code>stop(nodeID)</code></td><td>Free the node.</td></tr>
+                <tr><td><code>playFor(defName, seconds)</code></td><td>Coroutine: play, yield for <code>seconds</code>, stop. Useful in scheduled/scripted contexts.</td></tr>
+            </table>
+
+            <p>These are conveniences over the <code>audio_engine</code> bridge
+            (<code>begin</code>/<code>newNode</code>/<code>connect</code>/<code>sched</code>); for full
+            graph patching, silos, and scheduling see the
+            <a href="Tzopilotl_Music_Cookbook.html">Music Cookbook</a>.</p>
+
+            <h3>Inspecting graphs without compiling</h3>
+
+            <table>
+                <tr><th>Function</th><th>Description</th></tr>
+                <tr><td><code>makeGraph(synthFun)</code></td><td>Run the function and return the in-memory <code>SignalGraph</code> (no compile).</td></tr>
+                <tr><td><code>toSynthSexpr(graph, name)</code></td><td>The <code>(Synth name ...)</code> S-expression for a graph &mdash; the exchange format both compilers consume. Handy for debugging what your code actually built.</td></tr>
+            </table>
+
+            <a href="#top" class="back-to-top">&uarr; Back to top</a>
+        </div>
+
+        <!-- ============================================================ -->
+        <div class="section" id="ugens">
+            <h2>15. common_ugens Reference</h2>
+
+            <p><code>import common_ugens.*;</code> (it re-imports <code>synthdef</code>'s graph API).
+            Everything here is built from the primitives above and inlines into your graph. Most
+            functions are written with untyped parameters and accept any <code>AsSignal</code>; where a
+            parameter must be a signal it is typed <code>S</code>. The module also defines the constants
+            <code>pi</code> and <code>twopi</code>.</p>
+
+            <p>Conventions used below: <em>unipolar</em> means the 0..1 range, <em>bipolar</em> means
+            -1..+1. A <em>phase</em> argument is a unipolar ramp position (as produced by
+            <code>phasor</code>), measured in cycles, not radians. A <em>trigger</em> is a signal whose
+            transition from &le;0 to &gt;0 marks an event.</p>
+
+            <h3 id="ug-math">15.1 Math helpers</h3>
+            <table>
+                <tr><th>Function</th><th>Description</th></tr>
+                <tr><td><code>divz(numer, denom, otherwise)</code></td><td>Safe division: <code>otherwise</code> where <code>denom == 0</code>.</td></tr>
+                <tr><td><code>sign(x)</code> / <code>cmp(a, b)</code></td><td>-1/0/+1 sign of <code>x</code>; sign of <code>a - b</code>.</td></tr>
+                <tr><td><code>ustep(x)</code></td><td>Unit step: 1 where <code>x &gt; 0</code>, else 0.</td></tr>
+                <tr><td><code>cmpl(x)</code></td><td>Complement, <code>1 - x</code>.</td></tr>
+                <tr><td><code>frac(x)</code></td><td>Fractional part, <code>x - floor(x)</code> &mdash; also the unipolar wrap.</td></tr>
+                <tr><td><code>round(x)</code> / <code>round(x, q)</code> / <code>floor(x, q)</code> / <code>ceil(x, q)</code></td><td>Round to nearest; round/floor/ceil to a multiple of quantum <code>q</code> (<code>q == 0</code> passes through).</td></tr>
+                <tr><td><code>princ1(x)</code></td><td>Principal value in [-0.5, 0.5): <code>x - round(x)</code>.</td></tr>
+                <tr><td><code>sq(x)</code> / <code>cb(x)</code> / <code>qu(x)</code></td><td>Square, cube, fourth power.</td></tr>
+                <tr><td><code>ssq(x)</code> / <code>ssqrt(x)</code> / <code>spow(x, y)</code></td><td>Sign-preserving square, square root, and power.</td></tr>
+                <tr><td><code>sin2pi(x)</code> / <code>cos2pi(x)</code> / <code>tan2pi(x)</code></td><td>Trig with the argument in cycles: <code>sin(2&pi;x)</code> etc. The natural form for phases.</td></tr>
+                <tr><td><code>usin(x)</code> / <code>usinpi(x)</code> / <code>usin2pi(x)</code></td><td>Unipolar sine (0..1) of radians / half-cycles / cycles.</td></tr>
+                <tr><td><code>sinc(x)</code> / <code>sincpi(x)</code></td><td>sin(x)/x (value 1 at 0); cycle-argument variant.</td></tr>
+                <tr><td><code>fsin(x)</code> / <code>fsinx(x)</code></td><td>Fast parabolic sine approximations of a <em>cycles</em> argument; <code>fsinx</code> adds a correction term for extra precision.</td></tr>
+                <tr><td><code>fcos(x)</code> / <code>fcosx(x)</code></td><td>Fast cosine approximations (phase-shifted <code>fsin</code>/<code>fsinx</code>).</td></tr>
+                <tr><td><code>smoothStep(x)</code> / <code>smoothStep2(x)</code></td><td>Hermite smoothstep 3t&sup2;-2t&sup3; (and the 5th-order variant), input clipped to 0..1.</td></tr>
+                <tr><td><code>bsmoothStep(x)</code></td><td>Bipolar-in, bipolar-out smoothstep.</td></tr>
+                <tr><td><code>smoothMin(a, b, k)</code> / <code>smoothMax(a, b, k)</code></td><td>Min/max with a smooth blend of width <code>k</code> around the crossover.</td></tr>
+                <tr><td><code>chebyv(x, n)</code></td><td>Variable-order Chebyshev polynomial <code>cos(n&middot;acos(x))</code> &mdash; waveshaping to the nth harmonic.</td></tr>
+                <tr><td><code>invert(x, a)</code> / <code>invert(x, a, b)</code></td><td>Reflect about <code>y = a</code>; reflect within the range [a, b].</td></tr>
+                <tr><td><code>isuni(x)</code> / <code>isbi(x)</code> / <code>isint(x)</code></td><td>Range/integrality predicates (0/1 signals).</td></tr>
+                <tr><td><code>decayCoeff(n, amp)</code> / <code>decay40dB(n)</code> / <code>decay60dB(n)</code></td><td>One-pole feedback coefficient that decays to <code>amp</code> (or -40 dB / -60 dB) in <code>n</code> samples. The building block of the lag/decay/comb family.</td></tr>
+            </table>
+
+            <h3 id="ug-clip">15.2 Clipping, wrapping, folding</h3>
+            <p>Three families for confining a signal to a range: <em>clip</em> saturates at the edges,
+            <em>wrap</em> jumps back around (modulo), <em>fold</em> reflects off the edges
+            (triangle-style). Each has range, zero-based, symmetric, unipolar, and bipolar forms.</p>
+            <table>
+                <tr><th>Function</th><th>Description</th></tr>
+                <tr><td><code>max0(x)</code></td><td><code>max(x, 0)</code> &mdash; a.k.a. ReLU.</td></tr>
+                <tr><td><code>clip(x, a, b)</code> / <code>clip0(x, a)</code> / <code>clip2(x, a)</code></td><td>Clip to [a, b] / [0, a] / [-a, a].</td></tr>
+                <tr><td><code>uclip(x)</code> / <code>bclip(x)</code></td><td>Clip to 0..1 / -1..1.</td></tr>
+                <tr><td><code>wrap(x, a, b)</code> / <code>wrap0(x, a)</code> / <code>wrap2(x, a)</code></td><td>Wrap into [a, b) / [0, a) / [-a, a).</td></tr>
+                <tr><td><code>uwrap(x)</code> / <code>bwrap(x)</code></td><td>Wrap to 0..1 (= <code>frac</code>) / -1..1.</td></tr>
+                <tr><td><code>fold(x, a, b)</code> / <code>fold0(x, a)</code> / <code>fold2(x, a)</code></td><td>Fold (reflect) into [a, b] / [0, a] / [-a, a].</td></tr>
+                <tr><td><code>ufold(x)</code> / <code>bfold(x)</code></td><td>Fold to 0..1 / -1..1.</td></tr>
+                <tr><td><code>bfold_cheap(x)</code> / <code>bfold_cheaper(x)</code></td><td>Cheaper bipolar folds valid for inputs bounded in [-3, 5] / [-2, 2].</td></tr>
+                <tr><td><code>excess(x, b)</code></td><td>What clipping removed: <code>x - clip2(x, b)</code>.</td></tr>
+            </table>
+
+            <h3 id="ug-sigmoid">15.3 Sigmoids and soft clipping</h3>
+            <table>
+                <tr><th>Function</th><th>Description</th></tr>
+                <tr><td><code>distort(x)</code></td><td><code>x / (1 + |x|)</code> &mdash; gentle saturation, never quite reaches &plusmn;1.</td></tr>
+                <tr><td><code>softclip(x)</code></td><td>Linear below |x| &lt; 0.5, then smoothly saturating.</td></tr>
+                <tr><td><code>sigmoid0(x)</code> &hellip; <code>sigmoid8(x)</code></td><td>A palette of sigmoid waveshapers with different knees and costs: cubic-clipped (0), <code>erf</code> (1), rational (2, 3, 5, 8), <code>tanh</code> (4), <code>x/&radic;(x&sup2;+1)</code> (6), <code>atan</code> (7). Try them as distortion curves.</td></tr>
+            </table>
+
+            <h3 id="ug-range">15.4 Range mapping</h3>
+            <p>The naming scheme is <em>from-to</em>: <code>uni</code> = unipolar 0..1,
+            <code>bi</code> = bipolar -1..1, <code>lin</code> = a linear range [a, b],
+            <code>exp</code> = an exponential range [a, b]. So <code>linexp</code> maps a linear input
+            range to an exponential output range. The oscillator-to-parameter workhorses are
+            <code>bilin</code> and <code>biexp</code> (bipolar oscillator output &rarr; parameter
+            range).</p>
+            <table>
+                <tr><th>Function</th><th>Description</th></tr>
+                <tr><td><code>uni(x)</code> / <code>bi(x)</code></td><td>Bipolar &rarr; unipolar (<code>0.5 + 0.5x</code>); unipolar &rarr; bipolar (<code>2x - 1</code>).</td></tr>
+                <tr><td><code>lin(x, m, b)</code></td><td>The line formula <code>m&middot;x + b</code>.</td></tr>
+                <tr><td><code>axb(x, a, b)</code></td><td>The power formula <code>a&middot;x&#7495;</code>.</td></tr>
+                <tr><td><code>unilin(x, a, b)</code> / <code>lerp(x, a, b)</code></td><td>Unipolar &rarr; linear range [a, b].</td></tr>
+                <tr><td><code>uniexp(x, a, b)</code></td><td>Unipolar &rarr; exponential range [a, b] (both same sign, nonzero).</td></tr>
+                <tr><td><code>linuni(x, a, b)</code> / <code>expuni(x, a, b)</code></td><td>Linear / exponential range &rarr; unipolar (the inverses).</td></tr>
+                <tr><td><code>bilin(x, a, b)</code> / <code>biexp(x, a, b)</code></td><td>Bipolar &rarr; linear / exponential range. E.g. <code>sinosc(<span class="hl-num">0.2</span>) biexp(<span class="hl-num">200</span>, <span class="hl-num">2000</span>)</code> is a smooth frequency sweep.</td></tr>
+                <tr><td><code>linbi(x, a, b)</code> / <code>expbi(x, a, b)</code></td><td>Linear / exponential range &rarr; bipolar.</td></tr>
+                <tr><td><code>linlin(x, a, b, c, d)</code> / <code>linexp</code> / <code>explin</code> / <code>expexp</code></td><td>Map range [a, b] to range [c, d], each side linear or exponential.</td></tr>
+            </table>
+
+            <h3 id="ug-warp">15.5 Warp functions</h3>
+            <p>Unipolar-to-unipolar (and bipolar-to-bipolar) curve shapers, useful for envelope curves,
+            crossfade laws, and control response. The <code>_r</code> variants are the same curve
+            rotated 180&deg; about (0.5, 0.5); the <code>s</code>-prefixed variants are S-curves
+            (symmetric about the midpoint).</p>
+            <table>
+                <tr><th>Function</th><th>Description</th></tr>
+                <tr><td><code>warp_pow(x, p)</code> / <code>warp_pow_r(x, p)</code></td><td>Power curve <code>x&#7510;</code> and its reflection; <code>1/p</code> inverts the curve about <code>y = x</code>.</td></tr>
+                <tr><td><code>warp_sin(x)</code> / <code>warp_asin(x)</code> (and <code>_r</code>)</td><td>Quarter-sine ease-out and its inverse (ease-in).</td></tr>
+                <tr><td><code>swarp_pow(x, p)</code>, <code>swarp_sin(x)</code>, <code>swarp_asin(x)</code> (and <code>_r</code>)</td><td>S-curve versions: ease-in-out (or the reflected out-in).</td></tr>
+                <tr><td><code>warp(x, w)</code> / <code>swarp(x, w)</code></td><td>General-purpose rational warp / S-warp with a continuously variable curvature parameter <code>w</code>.</td></tr>
+                <tr><td><code>bwarp(x, w)</code> / <code>bswarp(x, w)</code></td><td>Bipolar-to-bipolar warp and S-warp.</td></tr>
+            </table>
+
+            <h3 id="ug-convert">15.6 Musical unit conversions</h3>
+            <p>All pure math, so they run at whatever rate their input has &mdash; use them freely on
+            controls. The naming is <em>from-to</em>: <code>nnhz</code> converts note number to
+            Hertz. Units: <code>nn</code> = MIDI-style note number (69 = A440), <code>oct</code> =
+            octaves (5.75 = A440), <code>cents</code>, <code>hz</code>, <code>sec</code> = period in
+            seconds, <code>bpm</code>, <code>ratio</code> = frequency ratio, <code>st</code> =
+            semitones, <code>rad</code>/<code>deg</code>/<code>cyc</code> = angle units,
+            <code>db</code>/<code>amp</code> = decibels / linear amplitude, <code>w</code> = radians
+            per sample.</p>
+            <table>
+                <tr><th>Group</th><th>Functions</th></tr>
+                <tr><td>Pitch &harr; frequency</td><td><code>nnhz</code> / <code>hznn</code>, <code>octhz</code> / <code>hzoct</code>, <code>centshz</code> / <code>hzcents</code></td></tr>
+                <tr><td>Pitch unit conversions</td><td><code>octnn</code> / <code>nnoct</code>, <code>nncents</code> / <code>centsnn</code>, <code>octcents</code> / <code>centsoct</code></td></tr>
+                <tr><td>Intervals &harr; ratios</td><td><code>centsratio</code> / <code>ratiocents</code>, <code>stratio</code> / <code>ratiost</code>, <code>octratio</code> / <code>ratiooct</code></td></tr>
+                <tr><td>Amplitude</td><td><code>dbamp</code> / <code>ampdb</code></td></tr>
+                <tr><td>Tempo and period</td><td><code>bpmhz</code> / <code>hzbpm</code>, <code>bpmsec</code> / <code>secbpm</code>, <code>hzsec</code> / <code>sechz</code></td></tr>
+                <tr><td>Angles</td><td><code>degrad</code> / <code>raddeg</code>, <code>cycrad</code> / <code>radcyc</code>, <code>cycdeg</code> / <code>degcyc</code></td></tr>
+                <tr><td>Radian frequency</td><td><code>hzw</code> / <code>whz</code> &mdash; Hertz &harr; radians per sample (these two involve <code>fs()</code>)</td></tr>
+                <tr><td>Composed</td><td><code>secnn</code>, <code>secoct</code>, <code>seccents</code>, <code>nnsec</code>, <code>octsec</code>, <code>centssec</code>, <code>bpmnn</code>, <code>bpmoct</code>, <code>bpmcents</code>, <code>nnbpm</code>, <code>octbpm</code>, <code>centsbpm</code></td></tr>
+            </table>
+
+<pre><code><span class="cmt">-- LFO-modulated pitch in note-number space, converted once at the end</span>
+(<span class="hl-num">60</span> + <span class="hl-num">0.3</span> * <span class="hl-num">5</span> sinosc) nnhz sinosc</code></pre>
+
+            <h3 id="ug-combine">15.7 Ring modulation and signal combining</h3>
+            <table>
+                <tr><th>Function</th><th>Description</th></tr>
+                <tr><td><code>ring1(a, b)</code> &hellip; <code>ring4(a, b)</code></td><td>Ring-modulation variants: <code>a&middot;b + a</code>, <code>a&middot;b + a + b</code>, <code>a&sup2;b</code>, <code>a&middot;b&middot;(a-b)</code>.</td></tr>
+                <tr><td><code>sumsq</code> / <code>sqsum</code> / <code>difsq</code> / <code>sqdif</code></td><td><code>a&sup2;+b&sup2;</code>, <code>(a+b)&sup2;</code>, <code>a&sup2;-b&sup2;</code>, <code>(a-b)&sup2;</code>.</td></tr>
+                <tr><td><code>absdif(a, b)</code></td><td><code>|a - b|</code>.</td></tr>
+                <tr><td><code>vca(x, a)</code></td><td>Amplitude control that ignores negative gain: <code>x * max(0, a)</code>.</td></tr>
+                <tr><td><code>scaleneg(x, a)</code> / <code>scalepos(x, a)</code> / <code>scalenegpos(x, a, b)</code></td><td>Scale only the negative / positive part / both independently &mdash; asymmetric waveshaping.</td></tr>
+                <tr><td><code>above(x, a)</code> / <code>below(x, a)</code></td><td>Pass <code>x</code> only where above/below the threshold, else 0.</td></tr>
+                <tr><td><code>absabove(x, a)</code> / <code>absbelow(x, a)</code></td><td>Threshold on <code>|x|</code> &mdash; gating / center clipping.</td></tr>
+                <tr><td><code>zapgremlins(x)</code></td><td>Flush denormals, NaNs, and infinities to 0 &mdash; hygiene for feedback paths.</td></tr>
+            </table>
+
+            <h3 id="ug-noise">15.8 Noise generators</h3>
+            <table>
+                <tr><th>Function</th><th>Description</th></tr>
+                <tr><td><code>white(chans = 1)</code></td><td>White noise (= <code>birand(chans)</code>).</td></tr>
+                <tr><td><code>pinkf(chans = 1)</code> / <code>pinkfe(chans = 1)</code></td><td>Pink noise via the Paul Kellett filter (7-stage accurate / 3-stage economy).</td></tr>
+                <tr><td><code>violet(chans = 1)</code></td><td>Violet noise (differentiated white, +6 dB/8ve).</td></tr>
+                <tr><td><code>blue(chans = 1)</code></td><td>Blue noise (differentiated pink, +3 dB/8ve).</td></tr>
+                <tr><td><code>red(chans = 1, a = 0.05)</code></td><td>Red/brown noise: a folded random walk with step size <code>a</code>.</td></tr>
+                <tr><td><code>gray(chans = 1)</code></td><td>Gray noise: random single-bit flips of a 64-bit word.</td></tr>
+                <tr><td><code>coin(prob, chans = 1)</code></td><td>1 with probability <code>prob</code> each sample, else 0.</td></tr>
+                <tr><td><code>velvet(density, chans = 1)</code></td><td>Velvet noise: on average <code>density</code> ones per second, else zero.</td></tr>
+                <tr><td><code>dust(density, chans = 1)</code> / <code>dust2(density, chans = 1)</code></td><td>Random-amplitude impulses at <code>density</code> per second; unipolar / bipolar amplitudes.</td></tr>
+                <tr><td><code>pandust(density, chans = 1)</code></td><td><code>chans</code> dust generators, each randomly panned to a stereo pair. Output is 2&middot;<code>chans</code> wide, grouped by side [all L, all R] &mdash; <code>transpose(chans) sum(2)</code> mixes it to stereo (see the example in <a href="#vecops">&sect;5</a>).</td></tr>
+                <tr><td><code>dustep(freq, chans = 1)</code></td><td>Stepped noise: white noise sampled-and-held at velvet-noise times, <code>freq</code> steps per second on average.</td></tr>
+                <tr><td><code>exprand(a, b, chans = 1, rate = Rate.audio)</code></td><td>Exponentially distributed random values in [a, b] (see <a href="#random">&sect;8</a>).</td></tr>
+            </table>
+
+            <h3 id="ug-trig">15.9 Triggers, logic, and sequencing</h3>
+            <p>A <em>trigger</em> is the transition of a signal from &le;0 to &gt;0. These ugens turn
+            signals into triggers, count them, divide them, and drive sequences from them.</p>
+            <table>
+                <tr><th>Function</th><th>Description</th></tr>
+                <tr><td><code>tr(x)</code></td><td>"Triggerization": 1 for exactly one sample when <code>x</code> crosses from &le;0 to &gt;0.</td></tr>
+                <tr><td><code>eoc(x)</code></td><td>End of cycle: emits a trigger when a phasor wraps.</td></tr>
+                <tr><td><code>init()</code></td><td>A single impulse on the first sample, then 0 forever.</td></tr>
+                <tr><td><code>sampleAndHold(x, t)</code></td><td>Hold the value of <code>x</code>, updating where <code>t &gt; 0</code>.</td></tr>
+                <tr><td><code>once(x)</code></td><td>Latches to 1 the first time <code>x &gt; 0</code>.</td></tr>
+                <tr><td><code>toggle(x)</code></td><td>Flip-flop: output inverts on each nonzero <code>x</code>. (The signal function; distinct from the <code>toggle</code> control constructor, which takes a <code>String</code> name.)</td></tr>
+                <tr><td><code>setReset(s, r)</code></td><td>SR flip-flop: set to 1 by <code>s</code>, cleared by <code>r</code> (reset wins).</td></tr>
+                <tr><td><code>setResetToggle(s, r, t)</code></td><td>SR flip-flop with an additional toggle input.</td></tr>
+                <tr><td><code>trDiv(x, n, offset = 0)</code></td><td>Trigger divider: passes every <code>n</code>th trigger (phase <code>offset</code>).</td></tr>
+                <tr><td><code>trCount(x)</code> / <code>trCount(x, reset)</code></td><td>Count triggers, optionally reset to 0 by <code>reset</code>.</td></tr>
+                <tr><td><code>oneshot1(trig, dur)</code></td><td>On trigger, a line from 1 to 0 over <code>dur</code> seconds (then holds at 0) &mdash; a timer.</td></tr>
+                <tr><td><code>oneshot(trig, dur)</code></td><td>On trigger, a line from 0 to 1 over <code>dur</code> seconds &mdash; a one-shot phasor for envelopes and grain windows.</td></tr>
+                <tr><td><code>timedGate(trig, dur)</code></td><td>A gate that stays high for <code>dur</code> seconds after each trigger.</td></tr>
+                <tr><td><code>burst(trig, dur, n)</code> / <code>burst(trig, dur, n, w)</code></td><td>A burst of <code>n</code> impulses over <code>dur</code> seconds per trigger; <code>w</code> warps the impulse timing.</td></tr>
+                <tr><td><code>seq(trigger, pattern, length)</code></td><td>Step sequencer: on each trigger, advance through the channels of <code>pattern</code> (cyclic, <code>length</code> steps) and hold the current value.</td></tr>
+                <tr><td><code>iseq(trigger, pattern, length)</code></td><td>Impulse sequencer: like <code>seq</code> but outputs the value only during the trigger sample, 0 otherwise.</td></tr>
+                <tr><td><code>rising(x)</code> / <code>falling(x)</code> / <code>changing(x)</code> / <code>nochange(x)</code></td><td>Sample-to-sample movement predicates (0/1).</td></tr>
+                <tr><td><code>localmax(x)</code> / <code>localmin(x)</code></td><td>1 at local peaks / troughs of the signal.</td></tr>
+                <tr><td><code>minfollow(x, r)</code> / <code>maxfollow(x, r)</code></td><td>Running min/max since the last reset trigger <code>r</code>.</td></tr>
+            </table>
+
+<pre><code><span class="cmt">-- classic step-sequenced melody: an impulse train clocks a pitch pattern</span>
+<span class="hl-kw">let</span> pattern = [<span class="hl-num">1</span>/<span class="hl-num">1</span>, <span class="hl-num">6</span>/<span class="hl-num">5</span>, <span class="hl-num">3</span>/<span class="hl-num">2</span>, <span class="hl-num">9</span>/<span class="hl-num">5</span>, <span class="hl-num">2</span>/<span class="hl-num">1</span>, <span class="hl-num">12</span>/<span class="hl-num">5</span>, <span class="hl-num">3</span>, <span class="hl-num">18</span>/<span class="hl-num">5</span>] * <span class="hl-num">256</span>;
+(<span class="hl-num">4</span> lfimp seq(pattern, <span class="hl-num">8</span>) + [-<span class="hl-num">0.04</span>, <span class="hl-num">0.04</span>]) smoothSaw(<span class="hl-num">4</span>)</code></pre>
+
+            <h3 id="ug-env">15.10 Envelopes and smoothing</h3>
+            <table>
+                <tr><th>Function</th><th>Description</th></tr>
+                <tr><td><code>asr(gate, a, s, r)</code></td><td>Attack-sustain-release envelope driven by a gate: exponential attack over <code>a</code> samples toward sustain level <code>s</code>; exponential release over <code>r</code> samples when the gate falls. (Times are in cycles of decay-to--40 dB; see <code>decay40dB</code>.)</td></tr>
+                <tr><td><code>adsr(gate, a, d, s, r)</code></td><td>Attack-decay-sustain-release: full-scale attack, decay to sustain <code>s</code>, release on gate-off.</td></tr>
+                <tr><td><code>lag(x, t)</code> / <code>lag2</code> / <code>lag3</code></td><td>Exponential smoothing toward <code>x</code> with time constant <code>t</code> seconds (one, two, or three cascaded stages &mdash; higher orders are smoother). The standard control de-zipper.</td></tr>
+                <tr><td><code>lag(x, u, d)</code> / <code>lag2(x, u, d)</code> / <code>lag3(x, u, d)</code></td><td>Lag with separate up/down time constants &mdash; envelope followers, attack/release ballistics.</td></tr>
+                <tr><td><code>onepole(x, a)</code></td><td>One-pole lowpass with raw coefficient <code>a</code> (0..1; higher = slower).</td></tr>
+                <tr><td><code>onezero(x, a)</code></td><td>One-zero filter <code>x + a&middot;(z1(x) - x)</code>.</td></tr>
+                <tr><td><code>leaky(x, a)</code></td><td>Leaky integrator <code>y = x + a&middot;y(1)</code>.</td></tr>
+                <tr><td><code>leakdc(x, k)</code></td><td>DC blocker (differentiator + leaky integrator, leak <code>k</code> &asymp; 0.995).</td></tr>
+                <tr><td><code>decay(x, t)</code></td><td>Exponential decay of impulses over <code>t</code> seconds &mdash; feed it triggers to get percussive envelopes.</td></tr>
+                <tr><td><code>decay2(x, atk, dcy)</code></td><td>Attack-decay envelope from impulses: difference of two <code>decay</code>s.</td></tr>
+                <tr><td><code>fadein(x, fadeinTime)</code></td><td>Fade the signal in from silence over <code>fadeinTime</code> seconds at synth start (cubic curve).</td></tr>
+            </table>
+
+<pre><code><span class="cmt">-- percussive: no gate needed, just triggers</span>
+dust(<span class="hl-num">4</span>) decay2(<span class="hl-num">0.005</span>, <span class="hl-num">0.3</span>) * <span class="hl-num">800</span> fsinxosc
+
+<span class="cmt">-- sustained: gate-driven ADSR inside a voicer</span>
+adsr(gate(), <span class="hl-num">0.02</span>, <span class="hl-num">0.1</span>, <span class="hl-num">0.9</span>, <span class="hl-num">0.25</span>)</code></pre>
+
+            <h3 id="ug-integ">15.11 Differentiation and integration</h3>
+            <table>
+                <tr><th>Function</th><th>Description</th></tr>
+                <tr><td><code>z1(x)</code> / <code>z1(x, i)</code></td><td>One-sample delay (optionally with initial value <code>i</code>).</td></tr>
+                <tr><td><code>z2(x)</code></td><td>Two-sample delay.</td></tr>
+                <tr><td><code>diff(x)</code></td><td>Unscaled first difference <code>x - z1(x)</code>.</td></tr>
+                <tr><td><code>slope(x)</code></td><td>Derivative in units per second: <code>diff(x) * fs()</code>.</td></tr>
+                <tr><td><code>accel(x)</code> / <code>jerk(x)</code></td><td>Second / third derivative.</td></tr>
+                <tr><td><code>unscaledIntegrator(x)</code></td><td>Running sum.</td></tr>
+                <tr><td><code>backwardIntegrator(x)</code> / <code>forwardIntegrator(x)</code> / <code>trapezoidalIntegrator(x)</code></td><td>Time-scaled integrators (backward / forward Euler, trapezoidal rule) &mdash; each also has a 2-argument form with a reset trigger.</td></tr>
+            </table>
+
+            <h3 id="ug-shape">15.12 Phase shapers and window functions</h3>
+            <p>These map a unipolar phase (0..1, from <code>phasor</code> or <code>oneshot</code>) to a
+            waveform or window. Numbered variants differ in initial phase: 0 / 90 / 180 / 270 degrees.
+            <code>u</code>-prefixed outputs are unipolar, <code>b</code>-prefixed bipolar.</p>
+            <table>
+                <tr><th>Function</th><th>Description</th></tr>
+                <tr><td><code>sawshift(x, shift)</code> / <code>quadrature(x)</code></td><td>Phase-shift a unipolar ramp; shift by a quarter cycle.</td></tr>
+                <tr><td><code>btri(x)</code>, <code>btri0..btri3(x)</code></td><td>Bipolar triangle from a ramp, at the four phases.</td></tr>
+                <tr><td><code>utri0..utri3(x)</code></td><td>Unipolar triangles at the four phases (<code>utri1</code> = &or;, <code>utri3</code> = &and;).</td></tr>
+                <tr><td><code>trapez0..trapez3(x)</code></td><td>Bipolar trapezoids at the four phases.</td></tr>
+                <tr><td><code>upulse(x, pwm)</code> / <code>bpulse(x, pwm)</code> / <code>zpulse(x, pwm)</code></td><td>Pulse waves with width <code>pwm</code>: unipolar / bipolar / zero-DC.</td></tr>
+                <tr><td><code>upulse1</code> / <code>bpulse1</code> / <code>zpulse1</code></td><td>Pulse variants guaranteed to emit at least one opposite-polarity sample per cycle (as in SuperCollider), so extreme widths still oscillate.</td></tr>
+                <tr><td><code>izigzag(x)</code> / <code>ozigzag(x)</code></td><td>Zigzag shapes moving inward / outward (after the Intellijel Rubicon).</td></tr>
+                <tr><td><code>bbtri(x)</code></td><td>Bipolar ramp &rarr; bipolar triangle.</td></tr>
+                <tr><td><code>par(x)</code></td><td>Unipolar ramp &rarr; parabola.</td></tr>
+                <tr><td><code>vartri(x, pwm)</code> / <code>varsaw(x, pwm)</code></td><td>Variable-symmetry triangle/saw: <code>pwm</code> morphs saw-up &harr; triangle &harr; saw-down.</td></tr>
+                <tr><td><code>usquare(x)</code> / <code>bsquare(x)</code></td><td>50% square waves, unipolar / bipolar.</td></tr>
+                <tr><td>Windows: <code>han</code>, <code>ham</code>, <code>sinwin</code>, <code>sincwin</code>, <code>triwin</code>, <code>welwin</code>, <code>quadwin</code>, <code>octwin</code>, <code>trapezwin</code></td><td>Hanning, Hamming, sine (cosine), sinc, triangle, Welch, quartic, octic, and trapezoid windows over a 0..1 phase &mdash; grain envelopes, spectral windows.</td></tr>
+            </table>
+
+            <h3 id="ug-osc">15.13 Phasor and oscillators</h3>
+            <p><code>phasor</code> is the core of nearly every oscillator: a wrap-around phase
+            accumulator producing a unipolar ramp at frequency <code>fm</code> Hz (accumulated in f64
+            for precision). The <code>lf*</code> oscillators shape that ramp directly &mdash; they are
+            <em>not band-limited</em>, so they alias at high frequencies; they shine as LFOs and for
+            deliberately raw tones. The band-limited/smooth options are <code>blip</code>,
+            <code>smoothSaw</code>, <code>smoothSquare</code>, and the sine oscillators. In all of
+            these, <code>fm</code> is the frequency in Hz (a modulatable signal) and <code>pm</code> is
+            a phase offset in cycles.</p>
+            <table>
+                <tr><th>Function</th><th>Description</th></tr>
+                <tr><td><code>phasor(fm)</code> / <code>phasor(fm, pm)</code></td><td>Unipolar ramp 0..1 at <code>fm</code> Hz; <code>pm</code> is a signal phase modulation, or a constant initial phase.</td></tr>
+                <tr><td><code>sinosc(fm, pm = 0)</code></td><td>Sine oscillator. Phase modulation via <code>pm</code> gives classic PM/FM synthesis: <code>f sinosc(modulator)</code>.</td></tr>
+                <tr><td><code>fsinosc</code> / <code>fsinxosc(fm, pm = 0)</code></td><td>Fast approximate sine oscillators (parabolic; <code>fsinx</code> more precise). Cheap for big banks.</td></tr>
+                <tr><td><code>lfsaw(fm, pm = 0)</code></td><td>Bipolar sawtooth.</td></tr>
+                <tr><td><code>lfimp(fm, pm = 0.999999)</code></td><td>Impulse train (single-sample 1s). The default initial phase makes it fire immediately at t = 0.</td></tr>
+                <tr><td><code>lftri</code> / <code>lfpar</code> / <code>lfupar</code> / <code>lftrap</code> / <code>lfzig</code> / <code>lfzag(fm, pm = 0)</code></td><td>Triangle, parabola (bipolar/unipolar), trapezoid, and zigzag LFOs.</td></tr>
+                <tr><td><code>lfusqr</code> / <code>lfsqr(fm, pm = 0)</code></td><td>Unipolar / bipolar square.</td></tr>
+                <tr><td><code>lfvsaw(fm, pwm, pm = 0)</code></td><td>Variable-symmetry saw/tri (see <code>varsaw</code>).</td></tr>
+                <tr><td><code>lfupulse</code> / <code>lfbpulse</code> / <code>lfzpulse(fm, pwm, pm = 0)</code></td><td>Pulse-width-modulated pulse waves (unipolar / bipolar / zero-DC).</td></tr>
+                <tr><td><code>blip(fm, pm, numHarmonics)</code></td><td>Band-limited impulse oscillator with a modulatable number of harmonics (capped at Nyquist; smooth harmonic-count changes).</td></tr>
+                <tr><td><code>smoothSaw(fm, sharpness)</code> / <code>smoothSaw(fm, pm, sharpness)</code></td><td>Variable-sharpness sawtooth: <code>sharpness</code> (in octaves of the corner exponent) morphs sine-like &rarr; saw.</td></tr>
+                <tr><td><code>smoothSquare(fm, sharpness)</code> / <code>smoothSquare(fm, pm, sharpness)</code></td><td>Variable-sharpness square.</td></tr>
+                <tr><td><code>sawWinSin</code> / <code>sawWinUsin</code> / <code>usinWinSin</code> / <code>usinWinUsin(fm, freqScale)</code></td><td>Windowed-sine oscillators (VOSIM/formant-flavored): a sine at <code>fm * freqScale</code> windowed by a saw or unipolar-sine window each cycle of <code>fm</code>.</td></tr>
+            </table>
+
+<pre><code><span class="cmt">-- FM: modulator phase-modulates the carrier</span>
+<span class="hl-kw">let</span> modulator = (f * <span class="hl-num">3.5</span>) sinosc * idx;
+<span class="hl-kw">let</span> car = f sinosc(modulator);
+
+<span class="cmt">-- morphing saw pad, stereo detune</span>
+[<span class="hl-num">110</span>, <span class="hl-num">110.3</span>] smoothSaw(<span class="hl-num">1</span>/<span class="hl-num">5</span> sinosc bilin(<span class="hl-num">1</span>, <span class="hl-num">8</span>))</code></pre>
+
+            <h3 id="ug-comb">15.14 Comb and allpass delays</h3>
+            <p>Recirculating delays. <code>delayTime</code> and <code>maxDelayTime</code> are in
+            seconds; <code>decayTime</code> is the -60 dB decay time in seconds. The suffix picks the
+            interpolation: <code>n</code>one (fixed delay only, cheapest), <code>l</code>inear,
+            <code>c</code>ubic; the base functions take an explicit <code>Interpolation</code>
+            (default lagrange).</p>
+            <table>
+                <tr><th>Function</th><th>Description</th></tr>
+                <tr><td><code>comb(x, delayTime, maxDelayTime, decayTime, interp = lagrange)</code></td><td>Feedback comb filter &mdash; echoes / Karplus-Strong-style resonance.</td></tr>
+                <tr><td><code>combn(x, delayTime, decayTime)</code></td><td>Non-interpolated comb (fixed delay).</td></tr>
+                <tr><td><code>combl</code> / <code>combc(x, delayTime, maxDelayTime, decayTime)</code></td><td>Linear / cubic interpolated combs (modulatable delay).</td></tr>
+                <tr><td><code>alpas(x, delayTime, maxDelayTime, decayTime, interp = lagrange)</code></td><td>Schroeder allpass delay &mdash; flat magnitude response, dense echoes; the reverb building block.</td></tr>
+                <tr><td><code>alpasn(x, delayTime, decayTime)</code>, <code>alpasl</code>, <code>alpasc(...)</code></td><td>Interpolation variants, as with comb.</td></tr>
+                <tr><td><code>apverb(x, delayTime, decayTime, n = 6)</code></td><td>A quick random reverb: <code>n</code> chained allpass delays with random times up to <code>delayTime</code>.</td></tr>
+            </table>
+
+            <h3 id="ug-pan">15.15 Panning</h3>
+            <table>
+                <tr><th>Function</th><th>Description</th></tr>
+                <tr><td><code>pan(x, pos)</code></td><td>Equal-power pan of <code>x</code> to a stereo pair; <code>pos</code> is bipolar (-1 left &hellip; +1 right). Returns <code>[S]</code> &mdash; apply <code>join</code> to get a 2-channel signal.</td></tr>
+                <tr><td><code>panfun(x)</code> / <code>panfuns(x)</code></td><td>The underlying cubic equal-power gain law for a unipolar position (max error &plusmn;0.0006 dB from true constant power); <code>panfuns</code> gives the [left, right] gain pair.</td></tr>
+            </table>
+
+            <h3 id="ug-gated">15.16 Gated subgraphs and chains</h3>
+            <table>
+                <tr><th>Function</th><th>Description</th></tr>
+                <tr><td><code>pull(gate, initVal, gatedFun)</code></td><td>Evaluate the subgraph <code>gatedFun</code> only while <code>gate &gt; 0</code>, holding its last value (initially <code>initVal</code>) while off &mdash; a compute-saving sample-and-hold around a whole subgraph.</td></tr>
+                <tr><td><code>pause(gate, gatedFun)</code></td><td>Evaluate the subgraph only while <code>gate &gt; 0</code>, outputting 0 while off.</td></tr>
+                <tr><td><code>chain(x, n, f)</code></td><td>Apply <code>f</code> to <code>x</code> <code>n</code> times (unrolled at build time): <code>x chain(<span class="hl-num">6</span>, stage)</code> builds a 6-stage cascade.</td></tr>
+            </table>
+
+            <a href="#top" class="back-to-top">&uarr; Back to top</a>
+        </div>
+
+        <!-- ============================================================ -->
+        <div class="section" id="filters">
+            <h2>16. filters Reference</h2>
+
+            <p><code>import filters.*;</code> &mdash; biquad filters after Robert Bristow-Johnson's
+            Audio EQ Cookbook, plus a ringing filter. Parameter conventions:</p>
+
+            <table>
+                <tr><th>Parameter</th><th>Meaning</th></tr>
+                <tr><td><code>fc</code></td><td>Cutoff or center frequency in Hz</td></tr>
+                <tr><td><code>bw</code></td><td>Bandwidth in octaves</td></tr>
+                <tr><td><code>rq</code></td><td>Reciprocal of Q (1/Q) &mdash; smaller = more resonant; <code>&radic;0.5 &asymp; 0.707</code> is the flat (Butterworth) response</td></tr>
+                <tr><td><code>db</code></td><td>Gain in dB (shelving and parametric EQ)</td></tr>
+            </table>
+
+            <p>All parameters are modulatable signals; the coefficient math runs at the rate of its
+            inputs, so filters driven by event-rate controls recompute coefficients only on control
+            changes.</p>
+
+            <h3>Filter unit generators (12 dB/8ve)</h3>
+            <table>
+                <tr><th>Function</th><th>Description</th></tr>
+                <tr><td><code>lpf(in, fc)</code> / <code>hpf(in, fc)</code></td><td>Butterworth lowpass / highpass (rq = &radic;0.5).</td></tr>
+                <tr><td><code>rlpf(in, fc, rq)</code> / <code>rhpf(in, fc, rq)</code></td><td>Resonant lowpass / highpass.</td></tr>
+                <tr><td><code>bpf(in, fc, bw)</code></td><td>Bandpass (constant 0 dB peak gain).</td></tr>
+                <tr><td><code>brf(in, fc, bw)</code></td><td>Band reject (notch).</td></tr>
+                <tr><td><code>apf(in, fc, rq)</code></td><td>Allpass (flat magnitude, frequency-dependent phase).</td></tr>
+                <tr><td><code>lowShelf(in, fc, db, rq)</code> / <code>highShelf(in, fc, db, rq)</code></td><td>Shelving EQ.</td></tr>
+                <tr><td><code>peakEQ(in, fc, db, bw)</code></td><td>Parametric (peaking) EQ.</td></tr>
+            </table>
+
+            <h3>Steeper and split variants</h3>
+            <table>
+                <tr><th>Function</th><th>Description</th></tr>
+                <tr><td><code>lpf2</code>, <code>hpf2</code>, <code>rlpf2</code>, <code>rhpf2</code>, <code>apf2</code></td><td>24 dB/8ve versions: two identical cascaded biquads.</td></tr>
+                <tr><td><code>crossover(in, freq)</code></td><td>Returns the tuple <code>(lows, highs)</code> = <code>(in lpf2(freq), in hpf2(freq))</code> &mdash; multiband processing.</td></tr>
+                <tr><td><code>ring(x, freq, ringTime)</code></td><td>Ringing (two-pole resonant) filter: impulses ring at <code>freq</code> for <code>ringTime</code> seconds &mdash; feed it clicks or noise bursts for modal/percussive tones.</td></tr>
+                <tr><td><code>pling(x, freq, atkTime, dcyTime)</code></td><td>Difference of two <code>ring</code>s: a ringing tone with a shaped attack.</td></tr>
+            </table>
+
+            <h3>Coefficient layer</h3>
+            <p>The ugens above are thin wrappers over coefficient functions returning
+            <code>BiquadCoeffs</code> (a tuple <code>(b0, b1, b2, a1, a2)</code>, normalized by a0),
+            applied by the transposed-direct-form-II kernel. Use this layer to share one coefficient
+            computation across several filters, or to build your own responses:</p>
+            <table>
+                <tr><th>Function</th><th>Description</th></tr>
+                <tr><td><code>biquad(in, coeffs)</code></td><td>One TDF-II biquad stage.</td></tr>
+                <tr><td><code>biquad2(in, coeffs)</code></td><td>Two cascaded stages with the same coefficients.</td></tr>
+                <tr><td><code>lpfCoeffs(fc)</code>, <code>hpfCoeffs(fc)</code>, <code>rlpfCoeffs(fc, rq)</code>, <code>rhpfCoeffs(fc, rq)</code>, <code>bpfCoeffs(fc, bw)</code>, <code>brfCoeffs(fc, bw)</code>, <code>apfCoeffs(fc, rq)</code>, <code>lowShelfCoeffs(fc, db, rq)</code>, <code>highShelfCoeffs(fc, db, rq)</code>, <code>peakEQCoeffs(fc, db, bw)</code></td><td>RBJ cookbook coefficient computations for each response.</td></tr>
+            </table>
+
+<pre><code><span class="cmt">-- one coefficient computation, two channels of filtering for free</span>
+<span class="cmt">-- (a stereo `in` broadcasts through a single biquad's state pair), or</span>
+<span class="cmt">-- share coeffs across distinct signals explicitly:</span>
+<span class="hl-kw">let</span> coeffs = rlpfCoeffs(cutoff, <span class="hl-num">0.3</span>);
+<span class="hl-kw">let</span> a = dry biquad(coeffs);
+<span class="hl-kw">let</span> b = wet biquad(coeffs);</code></pre>
+
+            <a href="#top" class="back-to-top">&uarr; Back to top</a>
+        </div>
+
+    </div>
+<script>
+(function() {
+  var btn = document.getElementById('theme-toggle');
+  var icon = document.getElementById('theme-icon');
+  function update() {
+    var isLight = document.documentElement.classList.contains('light');
+    icon.innerHTML = isLight ? '☀' : '☾';
+  }
+  update();
+  btn.addEventListener('click', function() {
+    document.documentElement.classList.toggle('light');
+    localStorage.setItem('tzpl-docs-theme',
+      document.documentElement.classList.contains('light') ? 'light' : 'dark');
+    update();
+  });
+})();
+</script>
+</body>
+</html>

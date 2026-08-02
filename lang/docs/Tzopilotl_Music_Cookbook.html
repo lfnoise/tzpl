@@ -506,7 +506,10 @@ channels &mdash; so <code>[440.0, 441.0] sinosc</code> is a two-channel detuned
 pair. The UGen library lives in <code>lang/modules/common_ugens.x</code>
 (oscillators, noise, envelopes) and <code>lang/modules/filters.x</code> (filters);
 the compiler internals are described in
-<code>synthdef-compiler/ARCHITECTURE.md</code>.</p>
+<code>synthdef-compiler/ARCHITECTURE.md</code>. This chapter is a quick tour;
+the full guide &mdash; signal rates, element types, channel broadcasting,
+delays, buffers, voicers, and a complete UGen reference &mdash; is
+<a href="Writing_SynthDefs.html">Writing SynthDefs</a>.</p>
 <div class="note"><strong>Two compile paths</strong>
 <code>defSynthX</code> is the production compiler (the Tzopilotl-hosted
 <code>synthc</code>). An older <code>defSynth</code> calls the legacy C++ compiler

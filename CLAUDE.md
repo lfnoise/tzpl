@@ -153,6 +153,7 @@ Each sub-project has its own CLAUDE.md with detailed file layouts and convention
 - `lang/docs/Builtin_Functions.html` -- Built-in function reference
 - `lang/docs/Standard_Library.html` -- Standard library module reference (std.* namespace)
 - `lang/docs/Music_Libraries.html` -- Music library reference (music.* namespace: events, tunings, four composition dialects)
+- `lang/docs/Writing_SynthDefs.html` -- SynthDef authoring guide (rates, element types, channel broadcasting, delays, buffers, voicers) + `synthdef`/`common_ugens`/`filters` reference
 - `lang/docs/Tzopilotl_Music_Cookbook.html` -- Task-oriented recipes for making sound and music (ch. 11 tours the music libraries)
 - `lang/docs/FFI_Guide.html` -- Foreign function interface guide (includes the audio engine FFI)
 - `lang/docs/Live_Controls_and_Notebooks.html` -- User guide: the `ui` widget module and notebook documents in the app
