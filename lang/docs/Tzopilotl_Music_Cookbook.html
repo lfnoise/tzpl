@@ -355,7 +355,7 @@ if (localStorage.getItem('tzpl-docs-theme') === 'light') document.documentElemen
     <li><a href="#synthdef">Writing a SynthDef</a>
       <ol>
         <li><a href="#synthdef-concepts">Signal graphs</a></li>
-        <li><a href="#synthdef-stateless">A stateless synth</a></li>
+        <li><a href="#synthdef-freerun">A free-running synth</a></li>
         <li><a href="#synthdef-voice">A polyphonic voice</a></li>
       </ol>
     </li>
@@ -517,9 +517,11 @@ and exists mainly as a differential oracle. Prefer <code>defSynthX</code>. Both
 need a working <code>clang</code> toolchain on <code>PATH</code> &mdash; they emit
 C++, compile it to a <code>.dylib</code>, and <code>dlopen</code> it.</div>
 
-<h3 id="synthdef-stateless">2.2 A stateless synth</h3>
-<p>The simplest synth runs continuously with no note state. Here is a burbling
-sine, compiled and registered as <code>"bubbles"</code>:</p>
+<h3 id="synthdef-freerun">2.2 A free-running synth</h3>
+<p>The simplest kind of synth is free-running: it sounds continuously from the
+moment its node is created, with no notes to trigger &mdash; the contrast with
+the polyphonic voice in the next section. Here is a burbling sine, compiled and
+registered as <code>"bubbles"</code>:</p>
 <pre><code><span class="kw">import</span> synthdef.*;
 <span class="kw">import</span> synthc.compile.*;   <span class="cmt">-- defSynthX</span>
 <span class="kw">import</span> common_ugens.*;
