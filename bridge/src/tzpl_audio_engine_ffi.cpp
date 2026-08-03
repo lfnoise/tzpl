@@ -491,6 +491,46 @@ static void ffi_loadBuffer(ts::VM& vm, u16 dst, u16, u16 argBase) {
     returnErr(vm, dst, err, __func__);
 }
 
+// fn fillBuffer(nodeID: Int, bufID: Int, numChans: Int, data: Array[Float]) -> Int
+// Replaces a node's buffer slot with computed data (bundled command; the
+// tzpl_Buffer is built at bundle record time on the calling thread, swapped
+// in sample-accurately on the RT thread, and the old buffer is freed on the
+// NRT thread). data is channel-concatenated (planar, matching tzpl_Buffer):
+// data[c*frames + i], with frames = data length / numChans.
+static void ffi_fillBuffer(ts::VM& vm, u16 dst, u16, u16 argBase) {
+    auto nodeID = static_cast<engine::i64>(vm.reg(argBase).i);
+    auto bufID = static_cast<engine::i64>(vm.reg(argBase + 1).i);
+    int numChans = static_cast<int>(vm.reg(argBase + 2).i);
+    auto* arr = vm.reg(argBase + 3).o;
+    auto total = static_cast<engine::i64>(ts::arraySize(arr));
+    if (numChans < 1 || total <= 0 || total % numChans != 0) {
+        returnErr(vm, dst, tzpl_errInternal, __func__);
+        return;
+    }
+    engine::i64 frames = total / numChans;
+    tzpl_Buffer* buffer = tzpl_createBuffer(numChans, frames);
+    if (!buffer) { returnErr(vm, dst, tzpl_errInternal, __func__); return; }
+    for (int c = 0; c < numChans; ++c) {
+        for (engine::i64 i = 0; i < frames; ++i) {
+            buffer->data[c][i] = ts::arrayGetFloat(arr, (size_t)(c * frames + i));
+        }
+    }
+    tzpl_SErr err = engine::replaceBuffer(nodeID, bufID, buffer);
+    if (err != tzpl_errNone) {
+        // Not enqueued: the command never took ownership.
+        tzpl_freeBuffer(buffer);
+    } else if (!bridge::currentRenderContext()) {
+        // The buffer no longer reflects any file: drop the stale path so
+        // ui.waveform doesn't display outdated contents.
+        if (auto* ctx = getAppContext(vm)) {
+            std::lock_guard<std::mutex> lock(ctx->bufferPathsMtx);
+            ctx->bufferPaths.erase({static_cast<std::int64_t>(nodeID),
+                                    static_cast<std::int64_t>(bufID)});
+        }
+    }
+    returnErr(vm, dst, err, __func__);
+}
+
 // ---------------------------------------------------------------------------
 // Note / voice management
 // ---------------------------------------------------------------------------
@@ -1624,6 +1664,7 @@ void registerAudioEngineFFI(ts::Compiler& compiler) {
 
     reg("resizeBuffer",     Int, {Int, Int, Int, Int},    ffi_resizeBuffer, true);
     reg("loadBuffer",       Int, {Int, Int, String},      ffi_loadBuffer);
+    reg("fillBuffer",       Int, {Int, Int, Int, FloatArray}, ffi_fillBuffer);
 
     // Connections (rtSafe)
     reg("connect",          Int, {Int, Int, Int, Int},             ffi_connect,          true);

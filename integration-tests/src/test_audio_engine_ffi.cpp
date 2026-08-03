@@ -254,6 +254,57 @@ static void test_command_bundling() {
     engine::freeEngine(eng);
 }
 
+// fillBuffer outside a bundle must return errNoActiveBundle (and free the
+// staged buffer); malformed shapes (numChans < 1, or a data length not
+// divisible by numChans) must return errInternal. The script prints one
+// bool per case; the captured output must be all-true.
+static void test_fill_buffer_args() {
+    std::print("Test: fillBuffer FFI argument and bundle checking\n");
+
+    ts::TypeUniverse types;
+    ts::Compiler compiler(types);
+    bridge::registerAudioEngineFFI(compiler);
+
+    engine::AudioStreamParameters params{};
+    params.channels = 2;
+    params.bufferFrames = 512;
+    params.sampleRate = 44100.0;
+    params.deviceName = "default";
+    params.firstChannel = 0;
+
+    engine::EngineConfig config;
+    config.numSilos = 1;
+
+    engine::Engine* eng = engine::newEngine(config, params);
+
+    ts::ModuleCompiler moduleCompiler(compiler, {MODULES_DIR});
+    auto target = compiler.createTarget();
+    ts::VM vm(16 * 1024 * 1024, types, target);
+    bridge::AppContext appCtx; appCtx.engine = eng;
+    bridge::setAppContextOnVM(&vm, &appCtx);
+
+    char* outBuf = nullptr;
+    size_t outLen = 0;
+    FILE* mem = open_memstream(&outBuf, &outLen);
+    vm.setPrintOutput(mem);
+
+    const char* source = R"(
+        import audio_engine.*;
+        println(fillBuffer(1, 0, 1, [0.0, 0.0]) == ordinal(Err.errNoActiveBundle));
+        println(fillBuffer(1, 0, 3, [0.0, 0.0]) == ordinal(Err.errInternal));
+        println(fillBuffer(1, 0, 0, [0.0, 0.0]) == ordinal(Err.errInternal));
+    )";
+
+    bool ok = compileAndRun(compiler, vm, source, "fill_buffer_args.x", &moduleCompiler);
+    fflush(mem);
+    fclose(mem);
+    check(ok && outBuf && std::string_view(outBuf) == "true\ntrue\ntrue\n",
+          "fillBuffer rejects no-bundle and malformed-shape calls");
+    free(outBuf);
+
+    engine::freeEngine(eng);
+}
+
 static void test_type_checking() {
     std::print("Test: FFI type checking\n");
 
@@ -784,6 +835,7 @@ int main(int argc, char const* argv[]) {
     test_taps_are_rt_safe();
     test_engine_lifecycle();
     test_command_bundling();
+    test_fill_buffer_args();
     test_type_checking();
     test_node_and_connect();
     test_atomic_abort();
