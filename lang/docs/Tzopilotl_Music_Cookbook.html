@@ -357,6 +357,7 @@ if (localStorage.getItem('tzpl-docs-theme') === 'light') document.documentElemen
         <li><a href="#synthdef-concepts">Signal graphs</a></li>
         <li><a href="#synthdef-freerun">A free-running synth</a></li>
         <li><a href="#synthdef-voice">A polyphonic voice</a></li>
+        <li><a href="#synthdef-wavetable">A band-limited wavetable oscillator</a></li>
       </ol>
     </li>
     <li><a href="#nodegraph">Engine &amp; node graph</a>
@@ -584,6 +585,58 @@ skip that while prototyping note logic, use the engine's built-in
 <code>"voicer"</code> node def (used throughout the silo recipes below) &mdash; it
 needs no compilation. Its note params are
 <code>[pitch, amp, drive, pan, attack, release]</code>.</div>
+
+<h3 id="synthdef-wavetable">2.4 A band-limited wavetable oscillator</h3>
+<p>The <code>lf*</code> oscillators alias at high frequencies, and
+<code>blip</code> only makes impulse spectra. For an arbitrary waveform that is
+alias-free at <em>any</em> pitch, use <code>osc</code>: a wavetable oscillator
+that reads from a <em>bank</em> of 30 tables, one per 1/3 octave, each holding a
+progressively band-limited copy of the wave (after SAPF's <code>Osc</code>).
+The synth declares a <code>bufferVar()</code> slot; the bank itself is computed
+on the engine side by the <code>wavetables</code> module and pushed in with
+<code>fillBuffer</code>:</p>
+<pre><code><span class="kw">import</span> synthdef.*;
+<span class="kw">import</span> synthc.compile.*;
+<span class="kw">import</span> common_ugens.*;
+<span class="kw">import</span> wavetables.*;
+<span class="kw">import</span> audio_engine.*;
+
+<span class="cmt">-- a saw that never aliases: table choice follows the frequency</span>
+<span class="kw">fn</span> <span class="fn">wtsaw</span>() <span class="typ">S</span> {
+    <span class="kw">let</span> b = bufferVar();
+    <span class="kw">let</span> f = control(<span class="str">"freq"</span>, ControlSpec { lo: <span class="num">20.0</span>, hi: <span class="num">8000.0</span>, init: <span class="num">110.0</span>, warp: ControlWarp.exponential });
+    b <span class="fn">osc</span>(f) * <span class="num">0.2</span> |&gt; outlet
+}
+wtsaw <span class="fn">defSynthX</span>(<span class="str">"wtsaw"</span>);
+
+<span class="fn">engineStart</span>();
+<span class="fn">begin</span>();
+<span class="fn">newNode</span>(<span class="str">"wtsaw"</span>, <span class="num">102</span>);
+<span class="fn">fillBuffer</span>(<span class="num">102</span>, <span class="num">0</span>, <span class="num">1</span>, <span class="fn">sawTables</span>());   <span class="cmt">-- compute the bank, swap it in</span>
+<span class="fn">connect</span>(<span class="num">102</span>, <span class="num">0</span>, <span class="num">0</span>, <span class="num">0</span>);
+<span class="fn">sched</span>(<span class="num">0</span>);</code></pre>
+<p>Sweep the <code>freq</code> control up and down: unlike <code>lfsaw</code>, the
+top of the spectrum stays clean because <code>osc</code> re-selects (and
+crossfades between) tables as the frequency moves, keeping every partial below
+Nyquist.</p>
+<p><strong>How it works.</strong> <code>sawTables()</code> builds each table by
+writing a band-limited slice of the 1/i harmonic series into a spectrum and
+running it through the <code>ifft</code> builtin (any partial recipe works:
+<code>squareTables()</code>, <code>triTables()</code>, or your own amplitudes and
+phases via <code>oscTables(amps, phases, smooth)</code>). The <code>smooth</code>
+argument counters the Gibbs phenomenon: a hard truncation of the harmonic series
+(<code>smooth = 0</code>) overshoots and rings at the waveform's sharp edges, and
+<code>smooth &gt; 0</code> fades the top of the series out with a
+<code>cos^smooth</code> rolloff instead &mdash; less ripple, slightly mellower
+top end (see <a href="Writing_SynthDefs.html#ug-osc">Writing SynthDefs
+&sect;15.13</a> for the details).
+<code>fillBuffer</code> hands the finished <code>[Float]</code> to the engine
+inside the bundle, so the swap lands sample-accurately on the RT thread. With a
+<em>constant</em> frequency the table choice folds to a one-time computation, like
+SAPF picking its <code>Osc</code> implementation; a moving frequency (as here,
+since <code>freq</code> is a control) takes the crossfading path. Details and the
+phase-modulation forms are in
+<a href="Writing_SynthDefs.html#ug-osc">Writing SynthDefs &sect;15.13</a>.</p>
 
 <!-- ================================================================ -->
 <h2 id="nodegraph">3. Starting the engine &amp; building a node graph</h2>
@@ -1339,6 +1392,8 @@ run command. The pure layers are golden-tested in <code>lang/tests/music/</code>
   <tr><td><code>setTempo(clock,bpm) / clockBeats / clockTempo</code></td><td>audio_engine</td><td>NRT</td></tr>
   <tr><td><code>attachVM / siloLoad / siloStartAt / detachVM</code></td><td>audio_engine</td><td>NRT</td></tr>
   <tr><td><code>defSynthX / defSynth / listSynthDefs</code></td><td>synthc.compile / synthdef</td><td>NRT</td></tr>
+  <tr><td><code>loadBuffer / fillBuffer / resizeBuffer</code></td><td>audio_engine</td><td>NRT</td></tr>
+  <tr><td><code>oscTables / sawTables / squareTables / triTables</code></td><td>wavetables</td><td>NRT</td></tr>
   <tr><td><code>sched / after / at / setTempo / getBeats / cancel</code></td><td>clock</td><td>NRT</td></tr>
   <tr><td><code>bind / merge / takeDur / perform / realize / patEvents</code></td><td>music.*</td><td>NRT / silo</td></tr>
   <tr><td><code>play / stop / replace / enqueue / voiceBundle / render</code></td><td>music.play</td><td>NRT</td></tr>
