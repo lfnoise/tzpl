@@ -255,11 +255,16 @@ typedef struct tzpl_SynthData {
     /* Custom data follows in derived structs... */
 } tzpl_SynthData;
 
-/* Sample buffer -- externally managed, swappable at runtime */
+/* Sample buffer -- externally managed, swappable at runtime.
+ * Buffers may be any length: generated code wraps sample indices at the
+ * actual `length` (see tzpl_buf_* in tzpl_delay_interp.hpp). The allocation
+ * is still rounded up to a power of two and `mask` kept valid so plugins
+ * compiled before the wrap-at-length change (which emit `index & mask`)
+ * remain memory-safe against new buffers. */
 typedef struct tzpl_Buffer {
     double** data;     /* one allocation per channel */
-    int64_t length;    /* actual content length in frames */
-    int64_t mask;      /* nextPowerOfTwo(length) - 1, for index wrapping */
+    int64_t length;    /* actual content length in frames; sample indices wrap here */
+    int64_t mask;      /* nextPowerOfTwo(length) - 1: allocation bound, legacy wrap */
     int64_t chans;     /* channel count (power of 2) */
 } tzpl_Buffer;
 
@@ -267,7 +272,9 @@ typedef struct tzpl_Buffer {
 static inline tzpl_Buffer* tzpl_createBuffer(int64_t numChannels, int64_t length) {
     tzpl_Buffer* buf = (tzpl_Buffer*)calloc(1, sizeof(tzpl_Buffer));
     if (!buf) return NULL;
-    /* Round length up to power of 2 for mask-based wrapping */
+    /* Allocation is rounded up to a power of two (index wrap happens at
+     * `length`; the rounding keeps `mask` valid for legacy plugins and
+     * guarantees at least one frame per channel). */
     int64_t allocLen = 1;
     while (allocLen < length) allocLen <<= 1;
     buf->length = length;

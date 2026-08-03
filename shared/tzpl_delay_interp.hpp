@@ -212,59 +212,94 @@ inline T tzpl_delay_sinc(T const* buf, uint64_t wrpos, uint64_t mask, T delay) {
 
 // ===========================================================================
 // Sample buffer read functions -- gather from flat buffer + kernel.
-// Like tzpl_delay_*, but index goes forward: (di + offset) & mask.
-// No wrpos -- buffers are not ring buffers.
+// Like tzpl_delay_*, but the index goes forward and wraps at the buffer's
+// ACTUAL length: sample buffers, unlike delay ring buffers, are not required
+// to be power-of-two sized. The fractional index is wrapped cyclically into
+// [0, length); interpolation taps near the edges wrap to the other end.
+// A length <= 0 buffer reads element 0 (tzpl_createBuffer always allocates
+// at least one frame per channel).
 // ===========================================================================
 
+// Wrap an integer tap index into [0, length). After the base index has been
+// wrapped, neighboring taps are at most the interpolation span out of range,
+// so the single add/sub path covers any buffer longer than that span; the
+// modulo path only runs for pathologically short buffers.
+inline int64_t tzpl_buf_tap(int64_t i, int64_t length) {
+    if (length <= 0) return 0;
+    if (i >= length) {
+        i -= length;
+        if (i >= length) i %= length;
+    } else if (i < 0) {
+        i += length;
+        if (i < 0) { i %= length; if (i < 0) i += length; }
+    }
+    return i;
+}
+
+// Wrap a fractional index into [0, length). In-range indices (the common
+// case) skip the division.
 template<typename T>
-inline T tzpl_buf_none(T const* buf, uint64_t mask, T index) {
-    return buf[uint64_t(index) & mask];
+inline T tzpl_buf_wrap(T index, int64_t length) {
+    if (length <= 0) return T(0);
+    T len = T(length);
+    if (index >= T(0) && index < len) return index;
+    T w = index - std::floor(index / len) * len;
+    return w < len ? w : T(0);
 }
 
 template<typename T>
-inline T tzpl_buf_linear(T const* buf, uint64_t mask, T index) {
-    uint64_t di = uint64_t(index);
-    T s0 = buf[di & mask];
-    T s1 = buf[(di + 1) & mask];
-    return tzpl_interp_linear(s0, s1, index - T(di));
+inline T tzpl_buf_none(T const* buf, int64_t length, T index) {
+    return buf[int64_t(tzpl_buf_wrap(index, length))];
 }
 
 template<typename T>
-inline T tzpl_buf_cubic(T const* buf, uint64_t mask, T index) {
-    uint64_t di = uint64_t(index);
-    T ym1 = buf[(di - 1) & mask];
-    T y0  = buf[di & mask];
-    T y1  = buf[(di + 1) & mask];
-    T y2  = buf[(di + 2) & mask];
-    return tzpl_interp_cubic(ym1, y0, y1, y2, index - T(di));
+inline T tzpl_buf_linear(T const* buf, int64_t length, T index) {
+    T w = tzpl_buf_wrap(index, length);
+    int64_t di = int64_t(w);
+    T s0 = buf[di];
+    T s1 = buf[tzpl_buf_tap(di + 1, length)];
+    return tzpl_interp_linear(s0, s1, w - T(di));
 }
 
 template<typename T>
-inline T tzpl_buf_lagrange(T const* buf, uint64_t mask, T index) {
-    uint64_t di = uint64_t(index);
-    T s0 = buf[(di - 3) & mask];
-    T s1 = buf[(di - 2) & mask];
-    T s2 = buf[(di - 1) & mask];
-    T s3 = buf[di & mask];
-    T s4 = buf[(di + 1) & mask];
-    T s5 = buf[(di + 2) & mask];
-    T s6 = buf[(di + 3) & mask];
-    T s7 = buf[(di + 4) & mask];
-    return tzpl_interp_lagrange(s0, s1, s2, s3, s4, s5, s6, s7, index - T(di));
+inline T tzpl_buf_cubic(T const* buf, int64_t length, T index) {
+    T w = tzpl_buf_wrap(index, length);
+    int64_t di = int64_t(w);
+    T ym1 = buf[tzpl_buf_tap(di - 1, length)];
+    T y0  = buf[di];
+    T y1  = buf[tzpl_buf_tap(di + 1, length)];
+    T y2  = buf[tzpl_buf_tap(di + 2, length)];
+    return tzpl_interp_cubic(ym1, y0, y1, y2, w - T(di));
 }
 
 template<typename T>
-inline T tzpl_buf_sinc(T const* buf, uint64_t mask, T index) {
-    uint64_t di = uint64_t(index);
-    T s0 = buf[(di - 3) & mask];
-    T s1 = buf[(di - 2) & mask];
-    T s2 = buf[(di - 1) & mask];
-    T s3 = buf[di & mask];
-    T s4 = buf[(di + 1) & mask];
-    T s5 = buf[(di + 2) & mask];
-    T s6 = buf[(di + 3) & mask];
-    T s7 = buf[(di + 4) & mask];
-    auto sc = tzpl_sinc_coeffs(double(index - T(di)));
+inline T tzpl_buf_lagrange(T const* buf, int64_t length, T index) {
+    T w = tzpl_buf_wrap(index, length);
+    int64_t di = int64_t(w);
+    T s0 = buf[tzpl_buf_tap(di - 3, length)];
+    T s1 = buf[tzpl_buf_tap(di - 2, length)];
+    T s2 = buf[tzpl_buf_tap(di - 1, length)];
+    T s3 = buf[di];
+    T s4 = buf[tzpl_buf_tap(di + 1, length)];
+    T s5 = buf[tzpl_buf_tap(di + 2, length)];
+    T s6 = buf[tzpl_buf_tap(di + 3, length)];
+    T s7 = buf[tzpl_buf_tap(di + 4, length)];
+    return tzpl_interp_lagrange(s0, s1, s2, s3, s4, s5, s6, s7, w - T(di));
+}
+
+template<typename T>
+inline T tzpl_buf_sinc(T const* buf, int64_t length, T index) {
+    T w = tzpl_buf_wrap(index, length);
+    int64_t di = int64_t(w);
+    T s0 = buf[tzpl_buf_tap(di - 3, length)];
+    T s1 = buf[tzpl_buf_tap(di - 2, length)];
+    T s2 = buf[tzpl_buf_tap(di - 1, length)];
+    T s3 = buf[di];
+    T s4 = buf[tzpl_buf_tap(di + 1, length)];
+    T s5 = buf[tzpl_buf_tap(di + 2, length)];
+    T s6 = buf[tzpl_buf_tap(di + 3, length)];
+    T s7 = buf[tzpl_buf_tap(di + 4, length)];
+    auto sc = tzpl_sinc_coeffs(double(w - T(di)));
     return tzpl_interp_sinc(s0, s1, s2, s3, s4, s5, s6, s7,
                             T(sc.c[0]), T(sc.c[1]), T(sc.c[2]), T(sc.c[3]),
                             T(sc.c[4]), T(sc.c[5]), T(sc.c[6]), T(sc.c[7]));

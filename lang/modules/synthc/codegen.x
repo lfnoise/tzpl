@@ -981,26 +981,26 @@ fn _bufFixReadExpr(ctx Ctx, n NIdx, bi Int, index Int, readChans Int, startChan 
 		let t = ctx.typ[n];
 		let lc = `cgLoopChans;
 		if (readChans == 1) {
-			return _simdSplat(t, w, "%^ ? %^->data[%^][%^ & %^->mask] : 0.0" fmt(bp, bp, startChan, index, bp));
+			return _simdSplat(t, w, "(%^ ? %^->data[%^][tzpl_buf_tap(%^, %^->length)] : 0.0)" fmt(bp, bp, startChan, index, bp));
 		}
 		var parts [String] = [];
 		var j = 0;
 		while (j < w) {
 			let chan = _bufSimdChanExpr(readChans, startChan, _simdLaneChanIdx(cel, j, readChans, lc), bp);
-			parts push!("%^ ? %^->data[%^][%^ & %^->mask] : 0.0" fmt(bp, bp, chan, index, bp));
+			parts push!("(%^ ? %^->data[%^][tzpl_buf_tap(%^, %^->length)] : 0.0)" fmt(bp, bp, chan, index, bp));
 			j = j + 1;
 		}
 		return "%^{%^}" fmt(_simdType(t, w), parts join(", "));
 	}
 	let chan = _bufChanExpr(readChans, startChan, cel, bp);
-	"%^ ? %^->data[%^][%^ & %^->mask] : 0.0" fmt(bp, bp, chan, index, bp)
+	"(%^ ? %^->data[%^][tzpl_buf_tap(%^, %^->length)] : 0.0)" fmt(bp, bp, chan, index, bp)
 }
 
 -- A single guarded buffer read (the C++ genRead form), against the buffer reference
 -- `bref` (p->bufN or the cached _b).
 fn _bufGenRead(interp Interpolation, bref String, chan String, off String) String = match (interp) {
-	none: "%^ ? %^->data[%^][u64(%^) & %^->mask] : 0.0" fmt(bref, bref, chan, off, bref);
-	_:    "%^ ? %^(%^->data[%^], %^->mask, %^) : 0.0" fmt(bref, _bufInterpFunc(interp), bref, chan, bref, off);
+	none: "(%^ ? %^->data[%^][tzpl_buf_tap(i64(%^), %^->length)] : 0.0)" fmt(bref, bref, chan, off, bref);
+	_:    "(%^ ? %^(%^->data[%^], %^->length, %^) : 0.0)" fmt(bref, _bufInterpFunc(interp), bref, chan, bref, off);
 };
 
 -- BufVarRead (M5.4 SIMD): a scalar-offset single-channel read splats; otherwise a
@@ -1031,14 +1031,14 @@ fn _bufVarReadExpr(ctx Ctx, n NIdx, bi Int, interp Interpolation, readChans Int,
 	let chan = _bufChanExpr(readChans, startChan, cel, bp);
 	let idx = genExpr(ctx, ctx.ins[n][0], cel);
 	match (interp) {
-		none: "%^ ? %^->data[%^][u64(%^) & %^->mask] : 0.0" fmt(bp, bp, chan, idx, bp);
-		_:    "%^ ? %^(%^->data[%^], %^->mask, %^) : 0.0" fmt(bp, _bufInterpFunc(interp), bp, chan, bp, idx);
+		none: "(%^ ? %^->data[%^][tzpl_buf_tap(i64(%^), %^->length)] : 0.0)" fmt(bp, bp, chan, idx, bp);
+		_:    "(%^ ? %^(%^->data[%^], %^->length, %^) : 0.0)" fmt(bp, _bufInterpFunc(interp), bp, chan, bp, idx);
 	}
 }
 
 fn _bufLengthExpr(ctx Ctx, n NIdx, bi Int) String {
 	let bp = ctx _bufPtr(bi);
-	let scalar = "%^ ? (f64)(%^->length) : 0.0" fmt(bp, bp);
+	let scalar = "(%^ ? (f64)(%^->length) : 0.0)" fmt(bp, bp);
 	`cgSimdW > 0 ? _simdSplat(ctx.typ[n], `cgSimdW, scalar) : scalar
 }
 
@@ -1053,7 +1053,7 @@ fn _bufWriteStmt(ctx Ctx, n NIdx, bi Int, writeChans Int, startChan Int, cel Str
 	let i1 = _tabs(`cgIndent + 1);
 	let i0 = _tabs(`cgIndent);
 	"if (%^) {\n" fmt(bp)
-		$ i1 $ "u64 _idx = u64(%^) & %^->mask;\n" fmt(index, bp)
+		$ i1 $ "u64 _idx = u64(tzpl_buf_tap(i64(%^), %^->length));\n" fmt(index, bp)
 		$ i1 $ "%^->data[%^][_idx] = %^;\n" fmt(bp, chan, value)
 		$ i0 $ "} // %^ BufWrite\n" fmt(treeSerial)
 }

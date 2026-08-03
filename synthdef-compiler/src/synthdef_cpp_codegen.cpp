@@ -1450,7 +1450,7 @@ struct ExprCodegenVisitor : ExprVisitor {
             int loopChans = g.current_loop->chans;
             if (p->readChans == 1) {
                 // Single channel: splat
-                string scalar = FMT("{0} ? {0}->data[{1}][{2} & {0}->mask] : 0.0",
+                string scalar = FMT("({0} ? {0}->data[{1}][tzpl_buf_tap({2}, {0}->length)] : 0.0)",
                     bufPtr, p->startChan, p->index);
                 s += simdSplat(p->type, width, scalar);
             } else {
@@ -1459,7 +1459,7 @@ struct ExprCodegenVisitor : ExprVisitor {
                 for (int j = 0; j < width; ++j) {
                     if (j > 0) s += ", ";
                     string ci = simdLaneChanIdx(cel, j, (int)p->readChans, loopChans);
-                    s += FMT("{0} ? {0}->data[({1} + {2}) & ({0}->chans - 1)][{3} & {0}->mask] : 0.0",
+                    s += FMT("({0} ? {0}->data[({1} + {2}) & ({0}->chans - 1)][tzpl_buf_tap({3}, {0}->length)] : 0.0)",
                         bufPtr, p->startChan, ci, p->index);
                 }
                 s += "}";
@@ -1472,7 +1472,7 @@ struct ExprCodegenVisitor : ExprVisitor {
                 chanExpr = FMT("({} + {}) & ({} - 1)",
                     p->startChan, vxstr(cel), FMT("{}->chans", bufPtr));
             }
-            s += FMT("{0} ? {0}->data[{1}][{2} & {0}->mask] : 0.0",
+            s += FMT("({0} ? {0}->data[{1}][tzpl_buf_tap({2}, {0}->length)] : 0.0)",
                 bufPtr, chanExpr, p->index);
         }
     }
@@ -1498,14 +1498,14 @@ struct ExprCodegenVisitor : ExprVisitor {
                 // Scalar offset, single channel: splat
                 string scalar;
                 if (p->interp == interpNone) {
-                    scalar = FMT("{0} ? {0}->data[{1}][u64({2}) & {0}->mask] : 0.0",
+                    scalar = FMT("({0} ? {0}->data[{1}][tzpl_buf_tap(i64({2}), {0}->length)] : 0.0)",
                         bufPtr, p->startChan, offsetExpr);
                 } else {
                     static const char* funcNames[] = {
                         "tzpl_buf_none", "tzpl_buf_linear", "tzpl_buf_cubic",
                         "tzpl_buf_lagrange", "tzpl_buf_sinc"
                     };
-                    scalar = FMT("{0} ? {1}({0}->data[{2}], {0}->mask, {3}) : 0.0",
+                    scalar = FMT("({0} ? {1}({0}->data[{2}], {0}->length, {3}) : 0.0)",
                         bufPtr, funcNames[p->interp], p->startChan, offsetExpr);
                 }
                 s += simdSplat(p->type, width, scalar);
@@ -1523,13 +1523,13 @@ struct ExprCodegenVisitor : ExprVisitor {
                     }
                     string off = scalarOffset ? offsetExpr : FMT("({})[{}]", offsetExpr, j);
                     if (p->interp == interpNone) {
-                        s += FMT("_b ? _b->data[{}][u64({}) & _b->mask] : 0.0", ci, off);
+                        s += FMT("(_b ? _b->data[{}][tzpl_buf_tap(i64({}), _b->length)] : 0.0)", ci, off);
                     } else {
                         static const char* funcNames[] = {
                             "tzpl_buf_none", "tzpl_buf_linear", "tzpl_buf_cubic",
                             "tzpl_buf_lagrange", "tzpl_buf_sinc"
                         };
-                        s += FMT("_b ? {}(_b->data[{}], _b->mask, {}) : 0.0",
+                        s += FMT("(_b ? {}(_b->data[{}], _b->length, {}) : 0.0)",
                             funcNames[p->interp], ci, off);
                     }
                 }
@@ -1549,14 +1549,14 @@ struct ExprCodegenVisitor : ExprVisitor {
             }
             string indexExpr = g.genExpr(p->in0(), cel);
             if (p->interp == interpNone) {
-                s += FMT("{0} ? {0}->data[{1}][u64({2}) & {0}->mask] : 0.0",
+                s += FMT("({0} ? {0}->data[{1}][tzpl_buf_tap(i64({2}), {0}->length)] : 0.0)",
                     bufPtr, chanExpr, indexExpr);
             } else {
                 static const char* funcNames[] = {
                     "tzpl_buf_none", "tzpl_buf_linear", "tzpl_buf_cubic",
                     "tzpl_buf_lagrange", "tzpl_buf_sinc"
                 };
-                s += FMT("{0} ? {1}({0}->data[{2}], {0}->mask, {3}) : 0.0",
+                s += FMT("({0} ? {1}({0}->data[{2}], {0}->length, {3}) : 0.0)",
                     bufPtr, funcNames[p->interp], chanExpr, indexExpr);
             }
         }
@@ -1565,7 +1565,7 @@ struct ExprCodegenVisitor : ExprVisitor {
     void visit(BufLength* p) override {
         int ser = p->sampleBuf->serial;
         string bufPtr = FMT("p->buf{}", ser);
-        string scalar = FMT("{0} ? (f64)({0}->length) : 0.0", bufPtr);
+        string scalar = FMT("({0} ? (f64)({0}->length) : 0.0)", bufPtr);
         if (g.inSimdMode) {
             s += simdSplat(p->type, g.currentSimdWidth, scalar);
         } else {
@@ -2057,7 +2057,7 @@ struct Rank1GenTreeExprVisitor : GenTreeExprVisitor {
         }
         s += FMT("if ({0}) {{\n", bufPtr);
         tabIndent(s, g.indent + 1);
-        s += FMT("u64 _idx = u64({}) & {}->mask;\n", indexExpr, bufPtr);
+        s += FMT("u64 _idx = u64(tzpl_buf_tap(i64({}), {}->length));\n", indexExpr, bufPtr);
         tabIndent(s, g.indent + 1);
         s += FMT("{}->data[{}][_idx] = {};\n", bufPtr, chanExpr, valueExpr);
         tabIndent(s, g.indent);
