@@ -342,6 +342,7 @@
                 <li><a href="#std-futures">std.futures</a> &mdash; async combinators (awaitAll, gather)</li>
                 <li><a href="#std-json">std.json</a> &mdash; Json value type and printer</li>
                 <li><a href="#std-message">std.message / std.messageEncoding</a> &mdash; Msg dynamic values and the TZB binary codec</li>
+                <li><a href="#std-notebook">std.notebook</a> &mdash; generate .tzd notebook documents from code (NRT)</li>
             </ul>
         </div>
 
@@ -514,6 +515,30 @@ t force println;    <span class="cmt">-- cached</span></code></pre>
         <div class="section" id="std-message">
             <h2>std.message / std.messageEncoding</h2>
             <p><code>Msg</code> is the dynamic message value type (bool/int/float/symbol/string/vec) with <code>asMsg</code> constructors; <code>std.messageEncoding</code> provides the TZB binary codec: <code>encode(Msg) &rarr; Bytes</code>, <code>decode(Bytes) &rarr; Msg</code>, <code>isMessage</code>, and a zero-copy <code>Reader</code> with O(1) child access for columnar vectors. Used by the actor system and the NATS bridge. The TZB format itself &mdash; the wire layout and the matching C++ API &mdash; is documented in <a href="FFI_Guide.html#messages">FFI Guide &sect;15, Binary Messages</a>.</p>
+            <a href="#top" class="back-to-top">&uarr; Back to top</a>
+        </div>
+
+        <!-- ============================================================ -->
+        <div class="section" id="std-notebook">
+            <h2>std.notebook <span style="font-size: 0.7em; background: #c0392b; color: #fff; padding: 2px 8px; border-radius: 4px; vertical-align: middle;">NRT</span></h2>
+            <p>Builds the app's <code>.tzd</code> notebook documents (<a href="Live_Controls_and_Notebooks.html">Live Controls &amp; Notebooks</a>) programmatically &mdash; a <code>.tzd</code> file is a TZB-encoded <code>Msg</code> tree, so this module assembles the document records and hands them to <code>std.messageEncoding</code>. Cells are described with <code>NotebookCell</code> values, normally via the constructors below. Generated documents contain no widget records &mdash; give the notebook a run-on-load code cell and its <code>ui</code> constructors recreate the widgets on open &mdash; and no undo history, so the file opens with a fresh history tree.</p>
+            <table>
+                <tr><th>Function</th><th>Description</th></tr>
+                <tr><td><code>proseCell(text)</code></td><td>A prose (text) cell.</td></tr>
+                <tr><td><code>codeCell(text, runOnLoad = false, name = "")</code></td><td>A code cell; <code>name</code> is the optional header label.</td></tr>
+                <tr><td><code>panelCell(name, height = 240.0)</code></td><td>A panel cell claiming widget panel <code>name</code>.</td></tr>
+                <tr><td><code>presetsCell(name = "")</code></td><td>An empty presets cell; slots are captured in the GUI.</td></tr>
+                <tr><td><code>saveNotebook(path, [NotebookCell]) &rarr; Bool</code></td><td>Encode and write the document to <code>path</code>.</td></tr>
+                <tr><td><code>notebookBytes([NotebookCell]) &rarr; Bytes</code></td><td>The encoded document, without writing a file.</td></tr>
+                <tr><td><code>notebookMsg([NotebookCell]) &rarr; Msg</code></td><td>The document as a <code>Msg</code> tree, for inspection.</td></tr>
+            </table>
+            <pre><code><span class="hl-kw">import</span> std.notebook.*;
+
+saveNotebook(<span class="hl-str">"demo.tzd"</span>, [
+    proseCell(<span class="hl-str">"# Sine demo"</span>),
+    panelCell(<span class="hl-str">"main"</span>),
+    codeCell(<span class="hl-str">"import ui.*;\npanel(\"main\");\nslider(\"freq\", 20.0, 2000.0, 440.0);"</span>, <span class="hl-kw">true</span>),
+]);</code></pre>
             <a href="#top" class="back-to-top">&uarr; Back to top</a>
         </div>
 

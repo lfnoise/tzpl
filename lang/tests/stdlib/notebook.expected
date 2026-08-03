@@ -1,0 +1,9 @@
+[doc, 2, 6, [cells, [cell, 1, 0, "", "# Demo
+A generated notebook.", #f, 240.0, #f, [presets]], [cell, 2, 1, "setup", "import ui.*;
+panel("main");
+slider("freq", 20.0, 2000.0, 440.0);", #t, 240.0, #f, [presets]], [cell, 3, 2, "main", "", #f, 160.0, #f, [presets]], [cell, 4, 1, "", "println("hello");", #f, 240.0, #f, [presets]], [cell, 5, 3, "bank", "", #f, 240.0, #f, [presets]]], [panels]]
+true
+true
+true
+true
+true
