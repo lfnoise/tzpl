@@ -563,6 +563,7 @@ void registerListGenBuiltins(Compiler& compiler, FuncMap& functions);
 void registerBytesBuiltins(Compiler& compiler, FuncMap& functions);
 void registerActorBuiltins(Compiler& compiler, FuncMap& functions);
 void registerIoBuiltins(Compiler& compiler, FuncMap& functions);
+void registerFftBuiltins(Compiler& compiler, FuncMap& functions);
 
 // ============================================================================
 // Forward declarations of exported builtin functions

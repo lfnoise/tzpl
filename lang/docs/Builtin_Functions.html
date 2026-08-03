@@ -326,7 +326,7 @@
         <h1 id="top">Built-in Functions Reference</h1>
 
         <div class="intro">
-            This document lists all built-in functions available in the language. Functions are overloaded on their argument types &mdash; many function names accept multiple type signatures. Built-in functions are real-time safe unless marked <strong>NRT</strong> (currently the <a href="#file-os">File &amp; OS</a> section); calling an NRT function in code compiled for a real-time VM is a compile-time error.
+            This document lists all built-in functions available in the language. Functions are overloaded on their argument types &mdash; many function names accept multiple type signatures. Built-in functions are real-time safe unless marked <strong>NRT</strong> (currently the <a href="#file-os">File &amp; OS</a> and <a href="#fft">FFT</a> sections); calling an NRT function in code compiled for a real-time VM is a compile-time error.
             <p style="margin-top: 0.6em;"><strong>Mutating-function convention.</strong> Function names ending in <code>!</code> mutate their first argument in place; names without <code>!</code> return new values and leave their inputs untouched. <code>!</code> is part of the identifier &mdash; <code>push</code> and <code>push!</code> are different functions. The convention is not enforced; users may name a mutating function with or without <code>!</code> as they prefer.</p>
         </div>
 
@@ -365,6 +365,7 @@
                 <li><a href="#type-conversions">Type Conversions</a> &mdash; toInt, toFloat, toFraction, toComplex</li>
                 <li><a href="#io">I/O Functions</a> &mdash; print, println, toString, prettyString, prettyPrint, getListPrintLimit, setListPrintLimit, setGraphMaxDepth, setLazyForceLimit, setPrintMaxDepth</li>
                 <li><a href="#file-os">File &amp; OS Functions (NRT)</a> &mdash; readFile, readFileBytes, writeFile, appendFile (+ Async variants), fileExists, isDirectory, fileSize, fileModTime, listDir, makeDir, removeFile, renameFile, getEnv, programArgs, currentDir</li>
+                <li><a href="#fft">FFT Functions (NRT)</a> &mdash; fft, ifft</li>
                 <li><a href="#introspection">Introspection</a> &mdash; disassemble, typeName&lt;T&gt;, typeRepr</li>
             </ul>
         </div>
@@ -2743,6 +2744,29 @@ programArgs() println;</code></pre>
         </div>
 
         <!-- ============================================================ -->
+        <div class="section" id="fft">
+            <h2>FFT Functions <span style="font-size: 0.7em; background: #c0392b; color: #fff; padding: 2px 8px; border-radius: 4px; vertical-align: middle;">NRT</span></h2>
+
+            <p>Real FFT over <code>[Float]</code> in double precision. The input length must be a power of two &ge; 4; anything else returns <code>none</code>. Spectra use a <em>packed split-complex</em> layout of the same length N as the signal: <code>[re[0], re[1], &hellip;, re[N/2-1], im[0], im[1], &hellip;, im[N/2-1]]</code>, where <code>re[0]</code> is the DC component and <code>im[0]</code> carries the (purely real) Nyquist component. <code>fft</code> produces the standard unnormalized DFT (a full-scale cosine at bin k yields <code>re[k] = N/2</code>); <code>ifft</code> is its exact inverse: <code>ifft(fft(x)) unwrap == x</code> to double precision.</p>
+
+            <p><strong>Not real-time safe</strong> (FFT setups are cached with the system allocator): calling either in a program compiled for a real-time VM is a compile-time type error. Typical uses &mdash; wavetable generation (see <code>wavetables.x</code> and the oscillators chapter of <a href="Writing_SynthDefs.html">Writing SynthDefs</a>), offline analysis &mdash; run at patch-build time.</p>
+
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>fft([Float]) &rarr; Option[[Float]]</code></td><td>Forward real FFT: N time samples &rarr; packed split spectrum. <code>none</code> unless N is a power of two &ge; 4.</td></tr>
+                <tr><td><code>ifft([Float]) &rarr; Option[[Float]]</code></td><td>Inverse real FFT: packed split spectrum &rarr; N time samples. Exact inverse of <code>fft</code>.</td></tr>
+            </table>
+            <pre><code><span class="cmt">-- Build one period of a unit-amplitude sine directly in the spectrum:</span>
+<span class="cmt">-- partial k at amplitude a is im[k] = -a*N/2 (sine) / re[k] = a*N/2 (cosine).</span>
+<span class="kw">let</span> n = <span class="hl-num">512</span>;
+<span class="kw">var</span> spec = [Float]();
+<span class="kw">for</span> (i : (<span class="hl-num">1</span> .. n)) { spec push!(<span class="hl-num">0.0</span>); }
+spec[n // <span class="hl-num">2</span> + <span class="hl-num">1</span>] = -(n toFloat) / <span class="hl-num">2.0</span>;   <span class="cmt">-- im[1]: sin(2*pi*x)</span>
+<span class="kw">let</span> table = ifft(spec) unwrap;
+
+fft([<span class="hl-num">1.0</span>, <span class="hl-num">2.0</span>, <span class="hl-num">3.0</span>]) isNone;             <span class="cmt">-- true: not a power of two</span></code></pre>
+        </div>
+
         <div class="section" id="introspection">
             <h2>Introspection</h2>
 

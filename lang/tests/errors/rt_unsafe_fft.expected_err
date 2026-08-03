@@ -1,0 +1,5 @@
+Type error [tests/errors/rt_unsafe_fft.x:2:1]
+  |
+2 | fft([0.0, 0.0, 0.0, 0.0]);
+  | ^^^
+  Function 'fft' is not real-time safe and cannot be called when compiling for a real-time VM

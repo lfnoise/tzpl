@@ -32,10 +32,10 @@
 #include <cmath>
 #include <cassert>
 
+#include <vector>
+
 #ifdef __APPLE__
 #include <Accelerate/Accelerate.h>
-#else
-#include <vector>
 #endif
 
 namespace synthdef {
@@ -228,8 +228,11 @@ inline void tzpl_fft_inverse(JscsFFTSetup* s, const float* input, float* output)
     float const* realp = input;
     float const* imagp = input + halfN;
 
-    s->re[0] = realp[0] + imagp[0];
-    s->im[0] = realp[0] - imagp[0];
+    // Z[0] packs DC and Nyquist: Xe[0] = (DC + Nyq)/2, Xo[0] = (DC - Nyq)/2.
+    // (Without the 0.5 the DC/Nyquist bins came out doubled relative to the
+    // other bins -- a shape distortion, not a gain difference.)
+    s->re[0] = 0.5f * (realp[0] + imagp[0]);
+    s->im[0] = 0.5f * (realp[0] - imagp[0]);
     for (int k = 1; k < halfN; ++k) {
         int const nk = halfN - k;
         float er = 0.5f * (realp[k] + realp[nk]);
@@ -245,9 +248,225 @@ inline void tzpl_fft_inverse(JscsFFTSetup* s, const float* input, float* output)
     }
     tzpl_fft_complex_(s, /*inverse=*/true);
 
+    // Scale so this branch matches the Apple branch above bit-for-bit in
+    // convention: the vDSP path returns 2x the standard IDFT of the packed
+    // spectrum (raw N x, scaled by 1/(N/2)); the unnormalized half-length
+    // inverse here returns (N/2) x, so 2/(N/2) lands on the same 2x.
+    float const scale = 2.0f / (float)halfN;
     for (int k = 0; k < halfN; ++k) {
-        output[2 * k]     = s->re[(size_t)k];
-        output[2 * k + 1] = s->im[(size_t)k];
+        output[2 * k]     = scale * s->re[(size_t)k];
+        output[2 * k + 1] = scale * s->im[(size_t)k];
+    }
+#endif
+}
+
+// ===========================================================================
+// Double-precision real FFT -- same packed split-complex layout and scaling
+// conventions as the float API above (real[0] = DC, imag[0] = Nyquist;
+// tzpl_fft_inverse_d(tzpl_fft_forward_d(x)) == x). Used by the lang fft/ifft
+// builtins, where [Float] is f64 end to end. The float API stays as is for
+// the spectrum analyzer and generated plugin code.
+// ===========================================================================
+
+struct JscsFFTSetupD {
+    int fftSize;
+    int log2n;
+#ifdef __APPLE__
+    FFTSetupD vdspSetup;
+    // Heap scratch for the inverse de-interleave (the float path uses a VLA,
+    // which at wavetable sizes would be an oversized stack allocation).
+    std::vector<double> tmpR, tmpI;
+#else
+    std::vector<int> rev;
+    std::vector<double> cosTab, sinTab;
+    std::vector<double> re, im;
+#endif
+};
+
+inline JscsFFTSetupD* tzpl_fft_create_d(int fftSize) {
+    assert(fftSize > 0 && (fftSize & (fftSize - 1)) == 0); // must be power of 2
+    auto* s = new JscsFFTSetupD();
+    s->fftSize = fftSize;
+    s->log2n = 0;
+    int tmp = fftSize;
+    while (tmp > 1) { tmp >>= 1; s->log2n++; }
+    int const halfN = fftSize / 2;
+#ifdef __APPLE__
+    s->vdspSetup = vDSP_create_fftsetupD(s->log2n, FFT_RADIX2);
+    s->tmpR.resize((size_t)halfN);
+    s->tmpI.resize((size_t)halfN);
+#else
+    s->rev.resize((size_t)halfN);
+    int bits = s->log2n - 1;
+    for (int i = 0; i < halfN; ++i) {
+        int r = 0;
+        for (int b = 0; b < bits; ++b) if (i & (1 << b)) r |= 1 << (bits - 1 - b);
+        s->rev[(size_t)i] = r;
+    }
+    s->cosTab.resize((size_t)halfN);
+    s->sinTab.resize((size_t)halfN);
+    for (int k = 0; k < halfN; ++k) {
+        double a = -2.0 * M_PI * (double)k / (double)halfN;
+        s->cosTab[(size_t)k] = std::cos(a);
+        s->sinTab[(size_t)k] = std::sin(a);
+    }
+    s->re.resize((size_t)halfN);
+    s->im.resize((size_t)halfN);
+#endif
+    return s;
+}
+
+inline void tzpl_fft_destroy_d(JscsFFTSetupD* s) {
+    if (!s) return;
+#ifdef __APPLE__
+    vDSP_destroy_fftsetupD(s->vdspSetup);
+#endif
+    delete s;
+}
+
+#ifndef __APPLE__
+// In-place complex FFT of length halfN over s->re / s->im (double version of
+// tzpl_fft_complex_).
+inline void tzpl_fft_complex_d_(JscsFFTSetupD* s, bool inverse) {
+    int const n = s->fftSize / 2;
+    double* re = s->re.data();
+    double* im = s->im.data();
+
+    for (int i = 0; i < n; ++i) {
+        int j = s->rev[(size_t)i];
+        if (j > i) { std::swap(re[i], re[j]); std::swap(im[i], im[j]); }
+    }
+    for (int len = 2; len <= n; len <<= 1) {
+        int const step = n / len;
+        for (int i = 0; i < n; i += len) {
+            for (int k = 0; k < len / 2; ++k) {
+                double wr = s->cosTab[(size_t)(k * step)];
+                double wi = s->sinTab[(size_t)(k * step)];
+                if (inverse) wi = -wi;
+                int a = i + k, b = a + len / 2;
+                double tr = re[b] * wr - im[b] * wi;
+                double ti = re[b] * wi + im[b] * wr;
+                re[b] = re[a] - tr; im[b] = im[a] - ti;
+                re[a] += tr;        im[a] += ti;
+            }
+        }
+    }
+}
+#endif
+
+// Forward real FFT (double): time-domain (fftSize doubles) -> split-complex
+// packed (fftSize doubles). Same layout and scaling as tzpl_fft_forward.
+inline void tzpl_fft_forward_d(JscsFFTSetupD* s, const double* input, double* output) {
+    int N = s->fftSize;
+    int halfN = N / 2;
+
+#ifdef __APPLE__
+    double* realp = output;
+    double* imagp = output + halfN;
+    for (int k = 0; k < halfN; ++k) {
+        realp[k] = input[2 * k];
+        imagp[k] = input[2 * k + 1];
+    }
+
+    DSPDoubleSplitComplex sc = { realp, imagp };
+    vDSP_fft_zripD(s->vdspSetup, &sc, 1, s->log2n, FFT_FORWARD);
+
+    // vDSP forward FFT returns 2x the standard DFT; scale by 0.5
+    double scale = 0.5;
+    vDSP_vsmulD(realp, 1, &scale, realp, 1, halfN);
+    vDSP_vsmulD(imagp, 1, &scale, imagp, 1, halfN);
+#else
+    for (int k = 0; k < halfN; ++k) {
+        s->re[(size_t)k] = input[2 * k];
+        s->im[(size_t)k] = input[2 * k + 1];
+    }
+    tzpl_fft_complex_d_(s, /*inverse=*/false);
+
+    double* realp = output;
+    double* imagp = output + halfN;
+    double const* fr = s->re.data();
+    double const* fi = s->im.data();
+
+    realp[0] = fr[0] + fi[0];
+    imagp[0] = fr[0] - fi[0];
+
+    for (int k = 1; k < halfN; ++k) {
+        int const nk = halfN - k;
+        double er = 0.5 * (fr[k] + fr[nk]);
+        double ei = 0.5 * (fi[k] - fi[nk]);
+        double or_ = 0.5 * (fi[k] + fi[nk]);
+        double oi = -0.5 * (fr[k] - fr[nk]);
+        double a = -2.0 * M_PI * (double)k / (double)N;
+        double wr = std::cos(a), wi = std::sin(a);
+        realp[k] = er + (or_ * wr - oi * wi);
+        imagp[k] = ei + (or_ * wi + oi * wr);
+    }
+#endif
+}
+
+// Inverse real FFT (double): split-complex packed (fftSize doubles) ->
+// time-domain (fftSize doubles). Exact inverse of tzpl_fft_forward_d.
+inline void tzpl_fft_inverse_d(JscsFFTSetupD* s, const double* input, double* output) {
+    int N = s->fftSize;
+    int halfN = N / 2;
+
+#ifdef __APPLE__
+    double* realp = output;
+    double* imagp = output + halfN;
+    for (int k = 0; k < halfN; ++k) {
+        realp[k] = input[k];
+        imagp[k] = input[halfN + k];
+    }
+
+    DSPDoubleSplitComplex sc = { realp, imagp };
+    vDSP_fft_zripD(s->vdspSetup, &sc, 1, s->log2n, FFT_INVERSE);
+
+    // Unpack split-complex to interleaved real output
+    double* tmpR = s->tmpR.data();
+    double* tmpI = s->tmpI.data();
+    for (int k = 0; k < halfN; ++k) {
+        tmpR[k] = realp[k];
+        tmpI[k] = imagp[k];
+    }
+    for (int k = 0; k < halfN; ++k) {
+        output[2 * k]     = tmpR[k];
+        output[2 * k + 1] = tmpI[k];
+    }
+
+    // The raw vDSP inverse of our 0.5-scaled forward is N x the input;
+    // scale by 1/N so tzpl_fft_inverse_d is the exact inverse of
+    // tzpl_fft_forward_d.
+    double scale = 1.0 / (double)N;
+    vDSP_vsmulD(output, 1, &scale, output, 1, N);
+#else
+    double const* realp = input;
+    double const* imagp = input + halfN;
+
+    // Z[0] packs DC and Nyquist: Xe[0] = (DC + Nyq)/2, Xo[0] = (DC - Nyq)/2.
+    s->re[0] = 0.5 * (realp[0] + imagp[0]);
+    s->im[0] = 0.5 * (realp[0] - imagp[0]);
+    for (int k = 1; k < halfN; ++k) {
+        int const nk = halfN - k;
+        double er = 0.5 * (realp[k] + realp[nk]);
+        double ei = 0.5 * (imagp[k] - imagp[nk]);
+        double xr = 0.5 * (realp[k] - realp[nk]);
+        double xi = 0.5 * (imagp[k] + imagp[nk]);
+        double a = 2.0 * M_PI * (double)k / (double)N;
+        double wr = std::cos(a), wi = std::sin(a);
+        double or_ = xr * wr - xi * wi;
+        double oi = xr * wi + xi * wr;
+        s->re[(size_t)k] = er - oi;
+        s->im[(size_t)k] = ei + or_;
+    }
+    tzpl_fft_complex_d_(s, /*inverse=*/true);
+
+    // The unnormalized half-length inverse returns (N/2) x the packed time
+    // samples; scale by 1/(N/2) for the exact inverse (matching the Apple
+    // branch above).
+    double const scale = 1.0 / (double)halfN;
+    for (int k = 0; k < halfN; ++k) {
+        output[2 * k]     = scale * s->re[(size_t)k];
+        output[2 * k + 1] = scale * s->im[(size_t)k];
     }
 #endif
 }
