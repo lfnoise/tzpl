@@ -131,6 +131,7 @@ Flat (audio-domain):
 
 - `common_ugens.x` -- Audio unit generators (oscillators, noise, envelopes)
 - `synthdef.x` -- SynthDef integration framework
+- `wavetables.x` -- Band-limited wavetable bank generation (for the `osc` family; NRT, uses the fft builtins)
 - `dsp_math.x` -- DSP math utilities
 - `filters.x` -- IIR/FIR filter implementations
 - `complex_signal.x` -- complex arithmetic over signals

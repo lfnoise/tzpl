@@ -1,0 +1,8 @@
+[1, 1, 1, 2, 8, 812]
+bank length: PASS
+table 0 pure sine: PASS
+guard samples: PASS
+normalized peaks: PASS
+table 3 band-limited saw: PASS
+square/tri lengths: PASS
+smooth rolloff: PASS
