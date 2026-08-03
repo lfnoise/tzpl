@@ -656,6 +656,15 @@ trigger and release voices by a <em>note id</em> you choose:</p>
   <tr><td><code>noteOn(node, noteId, params)</code></td><td><code>playNote(node, noteId, params)</code></td><td>Start a voice.</td></tr>
   <tr><td><code>noteOff(node, noteId)</code></td><td><code>releaseNote(node, noteId)</code></td><td>Release that voice.</td></tr>
 </table>
+<p>The two columns differ in more than where they run. <code>noteOn</code> /
+<code>noteOff</code> are <em>bundle commands</em>: they must appear between
+<code>begin()</code> and <code>sched()</code>/<code>go()</code> (outside a bundle
+they return an error), and they do nothing until the bundle is dispatched &mdash;
+which is what lets them be beat-scheduled along with any other graph changes.
+<code>playNote</code> / <code>releaseNote</code> bypass bundling entirely: called
+from a task running <em>inside</em> a silo, they act on the voicer node
+immediately, at the silo's current sample time, and they only work there (there is
+no bundle and no scheduling &mdash; the running task <em>is</em> the schedule).</p>
 <p><code>params</code> is a <code>[Float]</code> of the voice's
 <code>noteParam</code>s, in declaration order. For your <code>sine_voice</code> it
 is <code>[pitch, amp]</code>. The engine's built-in <code>"voicer"</code> takes
