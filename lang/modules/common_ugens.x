@@ -989,6 +989,77 @@ fn usinWinUsin(fm AsSignal, freqScale AsSignal) S {
 }
 
 
+-- band-limited wavetable oscillator (after SAPF's Osc/OscPM/OscFM/OscFMPM)
+--
+-- b is a bufferVar bound to a wavetable bank built by wavetables.oscTables:
+-- numTables tables of tableLen samples, one per 1/3 octave, laid out at a
+-- stride of tableLen + 4 with cyclic guard samples (so interp must be
+-- none, linear, or cubic -- lagrange/sinc need wider guards). Fill the
+-- bank with e.g. fillBuffer(nodeID, 0, 1, sawTables()).
+--
+-- The table is chosen from the playback frequency so the top partial stays
+-- below Nyquist. Like SAPF, one `osc` front end dispatches on its inputs:
+-- with a constant freq the selection math is constant rate (evaluated once
+-- at init) and one table is read; with a moving freq the table is
+-- re-selected per sample and the two adjacent tables are crossfaded
+-- through a smoothStep so table switches don't tick. A constant pm becomes
+-- the initial phase; a signal pm is per-sample phase modulation in cycles.
+
+-- fractional table index for |freq|: 3 * log2(nyquist/|freq|), clipped
+fn _oscTableF(fm S, numTables Int) S =
+	(3.0 * log2(fs() * 0.5 / (fm abs max(0.000001)))) clip(0.0, (numTables - 1) toFloat);
+
+-- f64 phase in [0,1): const pm is the initial phase, signal pm is added
+fn _oscPhase(fm S, pm AsConstantSignal) S {
+	let phase = delayVar() init(1, pm);
+	phase <- frac(phase(1) + fm f64 * T() f64);
+	phase(1)
+}
+fn _oscPhase(fm S, pm S) S {
+	let phase = delayVar();
+	phase <- frac(phase(1) + fm f64 * T() f64);
+	frac(phase(1) + pm f64)
+}
+
+-- single-table read: constant freq, selection folds to constant rate
+fn _oscFix(b BufferVar, fm S, ph S, tableLen Int, numTables Int, interp Interpolation) S {
+	let stride = (tableLen + 4) toFloat;
+	let k = _oscTableF(fm, numTables) floor;
+	b vread(k * stride + 1.0 + ph * tableLen toFloat, interp) f32
+}
+
+-- dual-table crossfaded read: moving freq re-selects per sample
+fn _oscXfade(b BufferVar, fm S, ph S, tableLen Int, numTables Int, interp Interpolation) S {
+	let stride = (tableLen + 4) toFloat;
+	let tf = _oscTableF(fm, numTables) f64;
+	let k = tf floor;
+	let xf = smoothStep(tf - k);
+	let offs = ph * tableLen toFloat + 1.0;
+	let a = b vread(k * stride + offs, interp);
+	let c = b vread((k + 1.0) * stride + offs, interp);
+	(a + xf * (c - a)) f32
+}
+
+fn osc(b BufferVar, fm AsConstantSignal, pm AsConstantSignal = 0,
+       tableLen Int = 16384, numTables Int = 30,
+       interp Interpolation = Interpolation.linear) S =
+	b _oscFix(fm asSignal, _oscPhase(fm asSignal, pm), tableLen, numTables, interp);
+
+fn osc(b BufferVar, fm AsConstantSignal, pm S,
+       tableLen Int = 16384, numTables Int = 30,
+       interp Interpolation = Interpolation.linear) S =
+	b _oscFix(fm asSignal, _oscPhase(fm asSignal, pm), tableLen, numTables, interp);
+
+fn osc(b BufferVar, fm S, pm AsConstantSignal = 0,
+       tableLen Int = 16384, numTables Int = 30,
+       interp Interpolation = Interpolation.linear) S =
+	b _oscXfade(fm, _oscPhase(fm, pm), tableLen, numTables, interp);
+
+fn osc(b BufferVar, fm S, pm S,
+       tableLen Int = 16384, numTables Int = 30,
+       interp Interpolation = Interpolation.linear) S =
+	b _oscXfade(fm, _oscPhase(fm, pm), tableLen, numTables, interp);
+
 
 -- comb delays
 
