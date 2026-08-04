@@ -44,5 +44,8 @@ async fn prepare(silo Int, source String) LoadResult {
 -- (await it like siloLoad). The file should define the task coroutine(s) and a
 -- start() entry, and `import audio_engine.*` for spawn / playNote / releaseNote.
 fn siloLoadFile(silo Int, path String) Future<String> {
-    siloLoad(silo, readFile(path))
+    match (readFile(path)) {
+        Option.some(src): siloLoad(silo, src);
+        Option.none: ready("siloLoadFile: cannot read " $ path);
+    }
 }

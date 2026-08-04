@@ -3564,7 +3564,7 @@ that time arrives, so a beat-based sequence reads top to bottom.</p>
 <code>awaitAll</code> is a barrier &mdash; it returns once every future has
 resolved. <code>gather</code> also collects their values, in argument order
 (independent of the order they resolved in).</p>
-<pre><code><span class="kw">import</span> futures.*;
+<pre><code><span class="kw">import</span> std.futures.*;
 
 <span class="cmt">-- awaitAll: wait for all of them (a barrier)</span>
 <span class="kw">await</span> awaitAll([afterDelay(<span class="str">"x"</span>, <span class="num">1.0</span>), afterDelay(<span class="str">"y"</span>, <span class="num">2.0</span>)]);

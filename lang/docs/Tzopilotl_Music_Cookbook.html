@@ -526,6 +526,7 @@ registered as <code>"bubbles"</code>:</p>
 <pre><code><span class="kw">import</span> synthdef.*;
 <span class="kw">import</span> synthc.compile.*;   <span class="cmt">-- defSynthX</span>
 <span class="kw">import</span> common_ugens.*;
+<span class="kw">import</span> audio_engine.*;     <span class="cmt">-- listSynthDefs</span>
 
 <span class="cmt">-- An LFO-driven sine through a comb filter. `nnhz` converts a MIDI-style</span>
 <span class="cmt">-- note number to Hz; `|&gt;` pipes the left value in as the last argument.</span>
@@ -768,7 +769,7 @@ real-time-safe builtins.</p>
 triple-quoted multi-line string. A conventional <code>start()</code> entry point
 kicks off the music; <code>siloStartAt</code> calls it on the grid.</p>
 <pre><code><span class="kw">import</span> audio_engine.*;
-<span class="kw">import</span> futures.*;
+<span class="kw">import</span> std.futures.*;
 
 <span class="cmt">-- The silo module: an actor that plays a six-note scale, advancing time with</span>
 <span class="cmt">-- `await delay`. (Actors are covered in section 8; here just note that the silo</span>
@@ -849,7 +850,9 @@ clock and beat so they fire sample-accurately:</p>
   <tr><td><code>sched(silo <span class="typ">Int</span>, clock <span class="typ">Int</span>, beat <span class="typ">Float</span>)</code></td><td>Dispatch the current bundle to <code>silo</code> at that beat.</td></tr>
   <tr><td><code>schedTempoChange(clock, atBeat, targetBPM, rampBeats)</code></td><td>Ramp tempo over <code>rampBeats</code>.</td></tr>
 </table>
-<pre><code><span class="cmt">-- Schedule a note exactly two beats from now on clock 0.</span>
+<pre><code><span class="kw">import</span> audio_engine.*;
+
+<span class="cmt">-- Schedule a note exactly two beats from now on clock 0.</span>
 <span class="kw">let</span> now = <span class="fn">clockBeats</span>(<span class="num">0</span>);
 <span class="fn">begin</span>();
 <span class="fn">noteOn</span>(<span class="num">200</span>, <span class="num">0</span>, [<span class="num">60.0</span>, <span class="num">0.4</span>]);
@@ -1034,6 +1037,9 @@ then addresses it with <code>siloSend</code> (immediate) or <code>siloSendAt</co
 receives; the module names it <code>'voice</code> at the spawn site &mdash; the
 behavior itself stays name-agnostic:</p>
 <pre><code><span class="cmt">-- silo module source</span>
+<span class="kw">import</span> audio_engine.*;   <span class="cmt">-- playNote</span>
+<span class="kw">import</span> std.message.*;
+
 <span class="kw">async</span> <span class="kw">fn</span> <span class="fn">voice</span>(self <span class="typ">Actor&lt;Msg&gt;</span>, init <span class="typ">Msg</span>) <span class="typ">Void</span> {
     <span class="kw">var</span> id = <span class="num">0</span>;
     <span class="kw">while</span> (<span class="kw">true</span>) {
@@ -1047,7 +1053,11 @@ behavior itself stays name-agnostic:</p>
 voice <span class="fn">spawn</span>(Msg.int(<span class="num">0</span>)) <span class="fn">register</span>(<span class="str">'voice</span>);   <span class="cmt">-- spawn, then name it</span></code></pre>
 <p>The NRT conductor, after <code>siloLoad</code>ing that module, schedules a rising
 line one note per beat:</p>
-<pre><code><span class="kw">let</span> now = <span class="fn">clockBeats</span>(<span class="num">0</span>);
+<pre><code><span class="kw">import</span> actors.*;         <span class="cmt">-- siloSendAt</span>
+<span class="kw">import</span> audio_engine.*;   <span class="cmt">-- clockBeats</span>
+<span class="kw">import</span> std.message.*;
+
+<span class="kw">let</span> now = <span class="fn">clockBeats</span>(<span class="num">0</span>);
 <span class="fn">siloSendAt</span>(<span class="num">0</span>, <span class="num">0</span>, now + <span class="num">1.0</span>, <span class="str">'voice</span>, Msg.float(<span class="num">60.0</span>));
 <span class="fn">siloSendAt</span>(<span class="num">0</span>, <span class="num">0</span>, now + <span class="num">2.0</span>, <span class="str">'voice</span>, Msg.float(<span class="num">64.0</span>));
 <span class="fn">siloSendAt</span>(<span class="num">0</span>, <span class="num">0</span>, now + <span class="num">3.0</span>, <span class="str">'voice</span>, Msg.float(<span class="num">67.0</span>));
@@ -1115,7 +1125,13 @@ onto that subject (from
 <span class="kw">import</span> std.messageEncoding.*;   <span class="cmt">-- encode (for publishing)</span>
 <span class="kw">import</span> std.message.*;
 
-<span class="cmt">-- a worker actor, named 'w by its spawner (as in 8.3)</span>
+<span class="cmt">-- a worker actor, named 'w by its spawner</span>
+<span class="kw">async</span> <span class="kw">fn</span> <span class="fn">worker</span>(self <span class="typ">Actor&lt;Msg&gt;</span>, init <span class="typ">Msg</span>) <span class="typ">Void</span> {
+    <span class="kw">while</span> (<span class="kw">true</span>) {
+        <span class="kw">let</span> m = <span class="kw">await</span> <span class="fn">receive</span>(self);
+        <span class="fn">println</span>(<span class="str">"got "</span> $ (m toString));
+    }
+}
 worker <span class="fn">spawn</span>(Msg.int(<span class="num">0</span>)) <span class="fn">register</span>(<span class="str">'w</span>);
 
 <span class="cmt">-- bridge subject "actors.w" -&gt; the local actor named 'w. natsBridgeActor wraps</span>
@@ -1150,7 +1166,7 @@ completion.</p>
 <span class="kw">import</span> synthc.compile.*;
 <span class="kw">import</span> common_ugens.*;
 <span class="kw">import</span> audio_engine.*;
-<span class="kw">import</span> futures.*;
+<span class="kw">import</span> std.futures.*;
 
 <span class="kw">fn</span> <span class="fn">beep</span>() <span class="typ">S</span> = [<span class="num">330.0</span>, <span class="num">331.0</span>] sinosc * (<span class="num">1.0</span> lfimp decay(<span class="num">0.25</span>)) * <span class="num">0.2</span> |&gt; outlet;
 beep <span class="fn">defSynthX</span>(<span class="str">"beep"</span>);
@@ -1180,7 +1196,7 @@ sequences inside the setup, exactly as in the live recipes.</p>
 all loaded in parallel and started together on a downbeat. This mirrors
 <code>integration-tests/scripts/silo_scenario1_audible.x</code>.</p>
 <pre><code><span class="kw">import</span> audio_engine.*;
-<span class="kw">import</span> futures.*;
+<span class="kw">import</span> std.futures.*;
 <span class="kw">import</span> silo.*;          <span class="cmt">-- quantizeUp</span>
 
 <span class="kw">let</span> bass = <span class="str">"""</span>
@@ -1213,10 +1229,10 @@ all loaded in parallel and started together on a downbeat. This mirrors
 
 <span class="cmt">-- Set up one part on a silo: a voicer node + the loaded module.</span>
 <span class="kw">fn</span> <span class="fn">preparePart</span>(silo <span class="typ">Int</span>, node <span class="typ">Int</span>, code <span class="typ">String</span>) <span class="typ">Future&lt;String&gt;</span> {
-    <span class="fn">begin</span>(silo);
+    <span class="fn">begin</span>();
     <span class="fn">newNode</span>(<span class="str">"voicer"</span>, node);
     <span class="fn">connect</span>(node, <span class="num">0</span>, <span class="num">0</span>, <span class="num">0</span>);
-    <span class="fn">sched</span>(<span class="num">0</span>);
+    <span class="fn">sched</span>(silo);
     <span class="fn">attachVM</span>(silo);
     <span class="fn">siloLoad</span>(silo, code)
 }
@@ -1392,7 +1408,7 @@ run command. The pure layers are golden-tested in <code>lang/tests/music/</code>
   <tr><td><code>setControl / setInput</code></td><td>audio_engine</td><td>NRT / silo</td></tr>
   <tr><td><code>setTempo(clock,bpm) / clockBeats / clockTempo</code></td><td>audio_engine</td><td>NRT</td></tr>
   <tr><td><code>attachVM / siloLoad / siloStartAt / detachVM</code></td><td>audio_engine</td><td>NRT</td></tr>
-  <tr><td><code>defSynthX / defSynth / listSynthDefs</code></td><td>synthc.compile / synthdef</td><td>NRT</td></tr>
+  <tr><td><code>defSynthX / defSynth / listSynthDefs</code></td><td>synthc.compile / synthdef / audio_engine</td><td>NRT</td></tr>
   <tr><td><code>loadBuffer / fillBuffer / resizeBuffer</code></td><td>audio_engine</td><td>NRT</td></tr>
   <tr><td><code>oscTables / sawTables / squareTables / triTables</code></td><td>wavetables</td><td>NRT</td></tr>
   <tr><td><code>sched / after / at / setTempo / getBeats / cancel</code></td><td>clock</td><td>NRT</td></tr>
