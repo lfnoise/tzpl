@@ -144,6 +144,26 @@ fn stopAll() Void {
     while (_players length > 0) { _players pop!; }
 }
 
+-- Stop the OLDEST still-running player (FIFO -- peel off from the start).
+-- Returns true if a player was stopped, false if none were running.
+fn stopFirst() Bool {
+    _prunePlayers();
+    if (_players length == 0) { return false; }
+    _players[0] stop;
+    _prunePlayers();
+    true
+}
+
+-- Stop the NEWEST still-running player (LIFO -- undo the latest play).
+-- Returns true if a player was stopped, false if none were running.
+fn stopLast() Bool {
+    _prunePlayers();
+    if (_players length == 0) { return false; }
+    let q = _players pop!;
+    q stop;
+    true
+}
+
 -- Stop at the next wake and release everything the voice is holding.
 fn stop(p Player) Void {
     p.state <- PlayerState { ...(*p.state), stopped: true };

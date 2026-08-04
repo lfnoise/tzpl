@@ -1443,7 +1443,8 @@ chords atomic, timing sample-accurate. The returned <code>Player</code> is a liv
 handle: <code>replace</code> swaps what's playing, <code>enqueue</code> queues what
 follows, <code>stop</code> releases everything, and <code>stopAll()</code> stops
 every player started so far &mdash; the recovery when the <code>p</code> binding
-was overwritten by re-running the play block. The first block defines the
+was overwritten by re-running the play block (<code>stopFirst()</code> and
+<code>stopLast()</code> peel off one player at a time, oldest or newest first). The first block defines the
 section&nbsp;2.3 sine voice inline, so this chapter sounds on its own.</p>
 <pre><code><span class="kw">import</span> music.play.*;
 <span class="kw">import</span> audio_engine.*;
@@ -1509,7 +1510,7 @@ run command. The pure layers are golden-tested in <code>lang/tests/music/</code>
   <tr><td><code>oscTables / sawTables / squareTables / triTables</code></td><td>wavetables</td><td>NRT</td></tr>
   <tr><td><code>sched / after / at / setTempo / getBeats / cancel</code></td><td>clock</td><td>NRT</td></tr>
   <tr><td><code>bind / merge / takeDur / perform / realize / patEvents</code></td><td>music.*</td><td>NRT / silo</td></tr>
-  <tr><td><code>play / stop / stopAll / replace / enqueue / voiceBundle / render</code></td><td>music.play</td><td>NRT</td></tr>
+  <tr><td><code>play / stop / stopAll / stopFirst / stopLast / replace / enqueue / voiceBundle / render</code></td><td>music.play</td><td>NRT</td></tr>
   <tr><td><code>scorePlayer</code></td><td>music.play</td><td>silo</td></tr>
   <tr><td><code>renderNRT / renderDone / stopRender / endRender</code></td><td>audio_engine</td><td>NRT</td></tr>
   <tr><td><code>spawn / send / receive / register / sendByName</code></td><td>(builtin)</td><td>NRT / silo</td></tr>
