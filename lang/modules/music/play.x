@@ -8,6 +8,7 @@
 -- and sleeps between onsets.
 --
 --     import music.play.*;
+--     import audio_engine.*;
 --     engineStart();
 --     voiceBundle(freqVoice(101), "myvoicer") go(0);
 --     let p = play(bind(...), freqVoice(101));

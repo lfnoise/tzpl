@@ -1352,6 +1352,7 @@ chords atomic, timing sample-accurate. The returned <code>Player</code> is a liv
 handle: <code>replace</code> swaps what's playing, <code>enqueue</code> queues what
 follows, <code>stop</code> releases everything.</p>
 <pre><code><span class="kw">import</span> music.play.*;
+<span class="kw">import</span> audio_engine.*;
 
 engineStart();
 <span class="kw">let</span> v = pitchVoice(<span class="num">101</span>);              <span class="cmt">-- a voice: node, param order, pool size</span>
