@@ -1303,7 +1303,7 @@ then <code>perform</code>ed into events:</p>
 <span class="kw">fn</span> <span class="fn">deg</span>(d <span class="typ">Int</span>, dur <span class="typ">Float</span>) <span class="typ">Music&lt;Pitch&gt;</span> = note(dur, degree(d));
 <span class="kw">let</span> theme = line([deg(<span class="num">0</span>, <span class="num">1.0</span>), deg(<span class="num">1</span>, <span class="num">1.0</span>), deg(<span class="num">2</span>, <span class="num">0.5</span>), deg(<span class="num">4</span>, <span class="num">1.5</span>)]);
 <span class="kw">let</span> canon = theme | (mrest(<span class="num">2.0</span>) $ (theme dyn(<span class="num">0.7</span>) trans(-<span class="num">4</span>)));
-<span class="kw">let</span> events = canon perform;    <span class="cmt">-- List&lt;Event&gt;, same as bind produces</span></code></pre>
+<span class="kw">let</span> canonEvents = canon perform;    <span class="cmt">-- List&lt;Event&gt;, same as bind produces</span></code></pre>
 
 <h3 id="musiclibs-hmsl">11.4 Shapes and forms: music.shape / music.job</h3>
 <p>Inspired by HMSL (the Hierarchical Music Specification Language). A
@@ -1320,7 +1320,7 @@ hierarchy (<code>Coll</code>) whose selection behaviors roll at realize time
              Coll.leaf(theme retrograde),
              Coll.leaf(theme invertDim('degree, <span class="num">2.0</span>))];
 <span class="kw">let</span> form = Coll.rpt((<span class="num">4</span>, Coll.sel((Behavior.shuffled, riffs))));
-<span class="kw">let</span> events = realize(form);    <span class="cmt">-- a different reading every call</span></code></pre>
+<span class="kw">let</span> reading = realize(form);    <span class="cmt">-- a different reading every call</span></code></pre>
 
 <h3 id="musiclibs-spans">11.5 Patterns as functions of time: music.spans</h3>
 <p>Inspired by Tidal Cycles. A <code>Pattern&lt;T&gt;</code> is a callable value:
@@ -1333,7 +1333,7 @@ cycles to the shared event list:</p>
 <pre><code><span class="kw">import</span> music.spans.*;
 
 <span class="kw">fn</span> <span class="fn">d</span>(x <span class="typ">Int</span>) <span class="typ">Pattern&lt;Pitch&gt;</span> = pure(degree(x));
-<span class="kw">let</span> tune = stack([
+<span class="kw">let</span> spanTune = stack([
     d(-<span class="num">14</span>) euclid(<span class="num">3</span>, <span class="num">8</span>) events(<span class="num">0.8</span>, <span class="num">0.6</span>),
     fastcat([d(<span class="num">0</span>), d(<span class="num">4</span>), d(<span class="num">5</span>), d(<span class="num">7</span>)])
         iterp(<span class="num">4</span>)
@@ -1341,7 +1341,7 @@ cycles to the shared event list:</p>
         events(<span class="num">0.5</span>, <span class="num">0.9</span>)
         withAmp(sinePat() slow(<span class="num">4.0</span>) range(<span class="num">0.25</span>, <span class="num">0.6</span>) segment(<span class="num">4</span>)),
 ]);
-<span class="kw">let</span> events = patEvents(tune, <span class="num">16.0</span>, <span class="num">2.0</span>);   <span class="cmt">-- 16 cycles, 2 beats per cycle</span></code></pre>
+<span class="kw">let</span> spanEvents = patEvents(spanTune, <span class="num">16.0</span>, <span class="num">2.0</span>);   <span class="cmt">-- 16 cycles, 2 beats per cycle</span></code></pre>
 
 <h3 id="musiclibs-play">11.6 Playing and rendering: music.play</h3>
 <p>Whichever dialect produced the events, one player takes them from there.
