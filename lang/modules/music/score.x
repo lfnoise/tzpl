@@ -87,7 +87,8 @@ fn _minIdx(ts [Float]) Int {
     m
 }
 
-coro fn _scoreCo(events List<Event>, v Voice, t Tuning, s Scale) (Float, NoteCmd) {
+coro fn _scoreCo(events List<Event>, v Voice, t Tuning, s Scale,
+                 idBase Int) (Float, NoteCmd) {
     var es = events;
     var relT = [Float]();   -- pending release times (unsorted; min-scanned)
     var relI = [Int]();     -- matching noteIDs
@@ -103,7 +104,7 @@ coro fn _scoreCo(events List<Event>, v Voice, t Tuning, s Scale) (Float, NoteCmd
             relI[m] = relI[relI length - 1]; relI pop!;
         }
         if (!(e isRest)) {
-            let id = next % v.poly;
+            let id = idBase + (next % v.poly);
             next = next + 1;
             yield (e.t, NoteCmd.noteOn(v.node, id, eventParams(e, v, t, s)));
             relT push!(e.t + e.sustain);
@@ -123,9 +124,13 @@ coro fn _scoreCo(events List<Event>, v Voice, t Tuning, s Scale) (Float, NoteCmd
 -- Lower an onset-ordered event stream to a time-ordered command stream.
 -- Lazy: works on infinite streams (releases are interleaved as their times
 -- come due). This is the golden-test surface for the player pipeline.
-fn score(events List<Event>, v Voice, t Tuning = et12, s Scale = major)
-        List<(Float, NoteCmd)> =
-    _scoreCo(events, v, t, s) toList;
+-- `idBase` offsets the round-robin noteID range: streams playing at the same
+-- time on the same node must use disjoint ranges, or a noteOff can find the
+-- other stream's voice and leave its own stuck on (music.play passes a fresh
+-- base per player).
+fn score(events List<Event>, v Voice, t Tuning = et12, s Scale = major,
+         idBase Int = 0) List<(Float, NoteCmd)> =
+    _scoreCo(events, v, t, s, idBase) toList;
 
 ---------------------------------------------------------------------------
 -- Stable formatting (mirrors bundles.x toString style)

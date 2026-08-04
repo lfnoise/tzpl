@@ -113,6 +113,19 @@ coro fn _playerCo(st Ref<PlayerState>, silo Int, clock Int) Float {
 -- the old player plays on.
 var _players = [Player]();
 
+-- Next free noteID range. Every score stream a player starts (play /
+-- replace / enqueue) takes a fresh range of `poly` ids, so streams sounding
+-- at the same time on the same node can never collide note ids -- a
+-- collision lets one stream's noteOff find the other stream's voice, and
+-- the voice that missed its release stays stuck on.
+let _nextIdBase = &0;
+
+fn _takeIdBase(poly Int) Int {
+    let base = *_nextIdBase;
+    _nextIdBase <- base + poly;
+    base
+}
+
 fn _prunePlayers() Void {
     var live = [Player]();
     for (q : _players) { if (!(*q.state).stopped) { live push!(q); } }
@@ -125,7 +138,7 @@ fn _prunePlayers() Void {
 fn play(events List<Event>, v Voice, t Tuning = et12, s Scale = major,
         silo Int = 0, clock Int = 0) Player {
     let st = &PlayerState {
-        cur: score(events, v, t, s),
+        cur: score(events, v, t, s, _takeIdBase(v.poly)),
         queue: [List<(Float, NoteCmd)>](),
         origin: 0.0,
         stopped: false,
@@ -175,15 +188,20 @@ fn stop(p Player) Void {
 fn replace(p Player, events List<Event>) Void {
     p.state <- PlayerState {
         ...(*p.state),
-        cur: score(events, p.voice, p.tuning, p.scale),
+        cur: score(events, p.voice, p.tuning, p.scale,
+                   _takeIdBase(p.voice.poly)),
         origin: getBeats(),
     };
+    -- The old score's pending noteOffs are dropped with it; release what the
+    -- voice holds so the swapped-out notes don't stay stuck on.
+    bundle() allNotesOff(p.voice.node) go(p.silo);
 }
 
 -- Append a sequence to play after the current one ends.
 fn enqueue(p Player, events List<Event>) Void {
     let s = *p.state;
-    s.queue push!(score(events, p.voice, p.tuning, p.scale));
+    s.queue push!(score(events, p.voice, p.tuning, p.scale,
+                        _takeIdBase(p.voice.poly)));
 }
 
 ---------------------------------------------------------------------------
