@@ -467,6 +467,12 @@ void CellComponent::layOutHeader(juce::Rectangle<int>& r) {
     // Disclosure triangle on the far left.
     collapseButton_.setBounds(header.removeFromLeft(20));
     header.removeFromLeft(2);
+    // Run-status glyph slot (Code cells; paintStatusGlyph draws it).
+    statusArea_ = {};
+    if (kind_ == doc::CellKind::Code) {
+        statusArea_ = header.removeFromLeft(16);
+        header.removeFromLeft(2);
+    }
     // Right cluster: delete / down / up (+ arrange for panels).
     deleteButton_.setBounds(header.removeFromRight(24));
     header.removeFromRight(2);
@@ -496,6 +502,49 @@ void CellComponent::layOutHeader(juce::Rectangle<int>& r) {
             header.removeFromLeft(juce::jmin(110, header.getWidth())));
 }
 
+void CellComponent::noteRunResult(bool errored, String const& runText) {
+    everRan_ = true;
+    lastErrored_ = errored;
+    if (!errored) ranText_ = runText;
+    repaint(statusArea_);
+}
+
+// Shape-coded run status (colour is reinforcement only; see the header).
+void CellComponent::paintStatusGlyph(juce::Graphics& g) const {
+    if (kind_ != doc::CellKind::Code || statusArea_.isEmpty()) return;
+    auto b = statusArea_.toFloat();
+    float cx = b.getCentreX(), cy = b.getCentreY(), s = 4.5f;
+
+    if (!everRan_) {                       // hollow circle: never ran
+        g.setColour(juce::Colour(0xff8a8a8a));
+        g.drawEllipse(cx - s, cy - s, 2 * s, 2 * s, 1.4f);
+        return;
+    }
+    if (lastErrored_) {                    // cross: last run errored
+        g.setColour(juce::Colour(0xffff6b6b));
+        juce::Path p;
+        p.startNewSubPath(cx - s, cy - s); p.lineTo(cx + s, cy + s);
+        p.startNewSubPath(cx + s, cy - s); p.lineTo(cx - s, cy + s);
+        g.strokePath(p, juce::PathStrokeType(1.8f));
+        return;
+    }
+    bool stale = editorText() != ranText_;
+    if (stale) {                           // triangle: edited since it ran
+        g.setColour(juce::Colour(0xffe0a020));
+        juce::Path tri;
+        tri.addTriangle(cx, cy - s, cx + s, cy + s * 0.8f,
+                        cx - s, cy + s * 0.8f);
+        g.fillPath(tri);
+        return;
+    }
+    g.setColour(juce::Colour(0xff4c9be8));  // check: ran clean
+    juce::Path p;
+    p.startNewSubPath(cx - s, cy + 0.5f);
+    p.lineTo(cx - s * 0.25f, cy + s);
+    p.lineTo(cx + s, cy - s);
+    g.strokePath(p, juce::PathStrokeType(1.8f));
+}
+
 void CellComponent::paintDisclosure(juce::Graphics& g) const {
     auto b = collapseButton_.getBounds().toFloat();
     float cx = b.getCentreX(), cy = b.getCentreY(), s = 5.0f;
@@ -522,6 +571,7 @@ void CellComponent::paint(juce::Graphics& g) {
     g.drawLine(0.0f, (float)getHeight() - 0.5f, (float)getWidth(),
                (float)getHeight() - 0.5f);
     paintDisclosure(g);
+    paintStatusGlyph(g);
 }
 
 }

@@ -726,11 +726,37 @@ void NotebookPanel::drawPresetsCell(
 // fine -- and move/resize can never both be active.
 static ImVec2 gArrangeAnchor(0.0f, 0.0f);
 
-static ImVec4 kindColor(bool everRan, bool errored, bool stale) {
-    if (errored) return ImVec4(0.90f, 0.30f, 0.30f, 1.0f);   // red
-    if (!everRan) return ImVec4(0.45f, 0.45f, 0.45f, 1.0f);  // hollow gray
-    if (stale) return ImVec4(0.95f, 0.75f, 0.25f, 1.0f);     // amber
-    return ImVec4(0.35f, 0.75f, 0.40f, 1.0f);                // green
+// Run status is SHAPE-coded (a colour-blind user cannot tell a red dot
+// from a green one): hollow circle = never ran, check = ran clean,
+// triangle = edited since it ran, cross = errored. Colour reinforces the
+// shape but never carries the meaning alone (blue for clean, not green).
+static void drawStatusGlyph(ImDrawList* dl, ImVec2 c, float s,
+                            bool everRan, bool errored, bool stale) {
+    if (!everRan) {
+        dl->AddCircle(c, s, ImGui::GetColorU32(
+                          ImVec4(0.54f, 0.54f, 0.54f, 1.0f)), 0, 1.4f);
+        return;
+    }
+    if (errored) {
+        ImU32 col = ImGui::GetColorU32(ImVec4(1.0f, 0.42f, 0.42f, 1.0f));
+        dl->AddLine(ImVec2(c.x - s, c.y - s), ImVec2(c.x + s, c.y + s),
+                    col, 1.8f);
+        dl->AddLine(ImVec2(c.x + s, c.y - s), ImVec2(c.x - s, c.y + s),
+                    col, 1.8f);
+        return;
+    }
+    if (stale) {
+        dl->AddTriangleFilled(
+            ImVec2(c.x, c.y - s), ImVec2(c.x + s, c.y + s * 0.8f),
+            ImVec2(c.x - s, c.y + s * 0.8f),
+            ImGui::GetColorU32(ImVec4(0.88f, 0.63f, 0.13f, 1.0f)));
+        return;
+    }
+    ImU32 col = ImGui::GetColorU32(ImVec4(0.30f, 0.61f, 0.91f, 1.0f));
+    dl->AddLine(ImVec2(c.x - s, c.y + 0.1f * s),
+                ImVec2(c.x - 0.25f * s, c.y + s), col, 1.8f);
+    dl->AddLine(ImVec2(c.x - 0.25f * s, c.y + s),
+                ImVec2(c.x + s, c.y - s), col, 1.8f);
 }
 
 void NotebookPanel::drawCellOutput(CellRuntime& rt, float width) {
@@ -810,12 +836,12 @@ void NotebookPanel::drawCell(std::shared_ptr<Cell const> const& cell,
         ImGui::SameLine();
     }
 
-    // Staleness / status dot
+    // Run-status glyph (shape-coded; see drawStatusGlyph)
     ImVec2 dotPos = ImGui::GetCursorScreenPos();
     float lineH = ImGui::GetTextLineHeight();
-    ImGui::GetWindowDrawList()->AddCircleFilled(
-        ImVec2(dotPos.x + lineH * 0.5f, dotPos.y + lineH * 0.6f),
-        3.5f, ImGui::GetColorU32(kindColor(rt.everRan, rt.lastErrored, stale)));
+    drawStatusGlyph(ImGui::GetWindowDrawList(),
+                    ImVec2(dotPos.x + lineH * 0.5f, dotPos.y + lineH * 0.6f),
+                    4.5f, rt.everRan, rt.lastErrored, stale);
     ImGui::Dummy(ImVec2(lineH, lineH));
     ImGui::SameLine();
     ImGui::TextDisabled("%s", kindName);

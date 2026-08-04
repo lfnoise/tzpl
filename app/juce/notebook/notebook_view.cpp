@@ -433,6 +433,8 @@ void NotebookView::onCellEvalDone(CellId cellId,
     auto* cc = cellFor(cellId);
     if (!cell || !cc) return;
 
+    cc->noteRunResult(!result.errors.empty(), String(code));
+
     if (!result.errors.empty()) {
         if (!runQueue_.empty()) {
             cc->addOutputLine({ "Run All stopped here -- "

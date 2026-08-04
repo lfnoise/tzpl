@@ -77,6 +77,10 @@ public:
     bool isSelected() const { return selected_; }
     void setSelected(bool sel);
 
+    // Record an eval result for the header's run-status glyph. `runText`
+    // is the code that ran; a later text edit makes the cell "stale".
+    void noteRunResult(bool errored, juce::String const& runText);
+
     // Per-cell eval output.
     void clearOutput();
     void addOutputLine(OutputLine const& line);
@@ -117,10 +121,17 @@ private:
     void buildForKind(doc::CellKind kind);
     void layOutHeader(juce::Rectangle<int>& r);
     void paintDisclosure(juce::Graphics& g) const;
+    // Run status is drawn as a SHAPE, not just a colour (colour-blind
+    // users cannot rely on a red/green hue pair): hollow circle = never
+    // ran, check = ran clean, triangle = edited since it ran, cross =
+    // errored. Colour reinforces the shape but never carries it alone.
+    void paintStatusGlyph(juce::Graphics& g) const;
     void codeDocumentTextInserted(juce::String const&, int) override {
+        repaint(statusArea_);   // staleness may have flipped
         if (onTextChanged) onTextChanged();
     }
     void codeDocumentTextDeleted(int, int) override {
+        repaint(statusArea_);
         if (onTextChanged) onTextChanged();
     }
 
@@ -133,6 +144,12 @@ private:
     juce::String panelName_;           // Panel cells: canvas panel name
     bool collapsed_ = false;
     bool selected_ = false;
+
+    // Run status (Code cells; session state, not saved).
+    bool everRan_ = false;
+    bool lastErrored_ = false;
+    juce::String ranText_;             // text at the last clean run
+    juce::Rectangle<int> statusArea_;  // glyph slot in the header
 
     // Header
     juce::Label kindLabel_;
