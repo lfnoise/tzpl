@@ -360,6 +360,8 @@ if(TZPL_BUILD_APP_JUCE)
         juce/perform_view.cpp
         juce/sidebar_panel.cpp
         juce/notebook/cell_component.cpp
+        juce/notebook/markdown_view.cpp
+        vendor/md4c/md4c.c
         juce/notebook/notebook_view.cpp
         juce/notebook/presets_view.cpp
         juce/notebook/history_window.cpp

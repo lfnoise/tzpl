@@ -167,13 +167,23 @@ void CellComponent::buildForKind(doc::CellKind kind) {
                 proseHeight_ = 0;   // wrapped height is stale
                 if (onTextChanged) onTextChanged();
             };
-            addAndMakeVisible(*proseEd_);
+            // Prose edits commit on blur or Escape, like the rest of the
+            // document's fields; the rendered Markdown view returns.
+            proseEd_->onEscapeKey = [this] { setProseEditing(false); };
+            proseEd_->onFocusLost = [this] { setProseEditing(false); };
+            addChildComponent(*proseEd_);
+
+            mdView_ = std::make_unique<MarkdownView>();
+            mdView_->setFontSize(fontSize_);
+            mdView_->onEditRequested = [this] { setProseEditing(true); };
+            addAndMakeVisible(*mdView_);
         }
     } else {
         if (codeDoc_) codeDoc_->removeListener(this);
         editor_.reset();
         codeDoc_.reset();
         proseEd_.reset();
+        mdView_.reset();
         proseHeight_ = 0;
     }
     if (kind == doc::CellKind::Code) addAndMakeVisible(output_);
@@ -263,7 +273,24 @@ void CellComponent::syncFromModel(doc::Cell const& cell) {
     else if (proseEd_ && proseEd_->getText() != String(cell.text)) {
         proseEd_->setText(cell.text, false);
         proseHeight_ = 0;   // remeasure on next layout
+        if (mdView_) mdView_->setMarkdown(cell.text);
     }
+    // A prose cell with no text starts in edit mode (a fresh "+ Prose"
+    // cell should take typing immediately); otherwise it renders.
+    if (proseEd_ && cell.text.empty() && !proseEditing_)
+        setProseEditing(true);
+}
+
+// Swap a prose cell between its rendered Markdown view and the plain-text
+// editor. Entering grabs keyboard focus; leaving re-renders from the
+// editor's current text (the store sync rides the normal edit path).
+void CellComponent::setProseEditing(bool editing) {
+    if (!proseEd_ || proseEditing_ == editing) return;
+    proseEditing_ = editing;
+    if (mdView_ && !editing) mdView_->setMarkdown(proseEd_->getText());
+    resized();
+    if (editing) proseEd_->grabKeyboardFocus();
+    if (onLayoutChanged) onLayoutChanged();
 }
 
 String CellComponent::editorText() const {
@@ -274,7 +301,10 @@ String CellComponent::editorText() const {
 
 void CellComponent::setEditorText(String const& text) {
     if (codeDoc_) codeDoc_->replaceAllContent(text);
-    else if (proseEd_) proseEd_->setText(text);   // fires onTextChange
+    else if (proseEd_) {
+        proseEd_->setText(text);   // fires onTextChange
+        if (mdView_) mdView_->setMarkdown(text);
+    }
 }
 
 void CellComponent::setSelected(bool sel) {
@@ -322,6 +352,7 @@ void CellComponent::setFontSize(float px) {
         proseEd_->applyFontToAllText(monoFont(px));
         proseHeight_ = 0;   // remeasure on next layout
     }
+    if (mdView_) mdView_->setFontSize(px);
     output_.applyFontToAllText(monoFont(px));
 }
 
@@ -376,7 +407,9 @@ int CellComponent::preferredHeight(int width) const {
         h += juce::jmax(lh * 2,
                         lines * lh + editor_->getScrollbarThickness() + kPad);
     } else if (proseEd_) {
-        h += proseTextHeight(width - 2 * kPad);
+        h += proseEditing_ || !mdView_
+                 ? proseTextHeight(width - 2 * kPad)
+                 : mdView_->heightForWidth(width - 2 * kPad);
     }
     if (kind_ == doc::CellKind::Code && !outputLines_.empty())
         h += kPad + outputPaneHeight() + kGripH;
@@ -398,7 +431,8 @@ void CellComponent::resized() {
     // visible under the header.
     bool body = !collapsed_;
     if (editor_) editor_->setVisible(body);
-    if (proseEd_) proseEd_->setVisible(body);
+    if (proseEd_) proseEd_->setVisible(body && proseEditing_);
+    if (mdView_) mdView_->setVisible(body && !proseEditing_);
     output_.setVisible(body && kind_ == doc::CellKind::Code);
     if (panelCanvas_) panelCanvas_->setVisible(body);
     if (presetsView_) presetsView_->setVisible(body);
@@ -415,8 +449,10 @@ void CellComponent::resized() {
     }
     if (editor_)
         editor_->setBounds(r);
-    else if (proseEd_)
+    else if (proseEd_) {
         proseEd_->setBounds(r);
+        if (mdView_) mdView_->setBounds(r);
+    }
     else if (panelCanvas_)
         panelCanvas_->setBounds(r);
     else if (presetsView_)

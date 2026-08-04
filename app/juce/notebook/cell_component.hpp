@@ -34,6 +34,7 @@
 #include "../editor_pane.hpp"      // TzplCodeEditor
 #include "../tzpl_tokeniser.hpp"
 #include "../widgets/panel_canvas.hpp"
+#include "markdown_view.hpp"
 #include "presets_view.hpp"
 #include <juce_gui_extra/juce_gui_extra.h>
 #include <functional>
@@ -175,6 +176,9 @@ private:
     std::unique_ptr<juce::CodeDocument> codeDoc_;
     std::unique_ptr<TzplCodeEditor> editor_;   // Code cells
     std::unique_ptr<juce::TextEditor> proseEd_; // Prose cells (word wrap)
+    std::unique_ptr<MarkdownView> mdView_;      // Prose cells, rendered mode
+    bool proseEditing_ = false;   // editor shown instead of rendered view
+    void setProseEditing(bool editing);
     int proseTextHeight(int edWidth) const;   // measured, never read back
     mutable int proseHeight_ = 0;             // cache (0 = dirty)
     mutable int proseHeightWidth_ = 0;        // width the cache was built at
