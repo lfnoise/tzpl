@@ -1,0 +1,75 @@
+-- Regression scenario for commit eec3f1d: notebook cell stream that used to
+-- segfault the VM on the `p enqueue(canon perform)` cell (match fail-jumps
+-- resolving one past the CodeBlock end, triggered by cell 11.4's
+-- type-changing rebind of `theme` clobbering the neighboring `canon` slot).
+-- Cells are separated by %% lines, in the app's headless cell runner:
+--
+--   TZPL_EVAL_CELLS=1 ./build/app/tzpl_app --nogui \
+--       -I lang/modules -I bridge/modules < enqueue_crash_repro_cells.txt
+--
+-- Expect all 15 cells to run with no "no case of a match" error.
+import synthdef.*;
+import synthc.compile.*;
+import common_ugens.*;
+import audio_engine.*;
+
+-- One voice: pitch + amp note params, an ADSR envelope driven by the gate.
+fn sineVoice() S {
+    let pch = noteParam("pitch", ControlSpec { lo: 0.0, hi: 127.0, init: 60.0, warp: ControlWarp.linear });
+    let amp = noteParam("amp",   ControlSpec { lo: 0.0, hi: 1.0,   init: 0.5,  warp: ControlWarp.linear });
+    let env = gate() adsr(0.01, 0.1, 0.7, 0.3);
+    pch nnhz sinosc * env * amp
+}
+
+-- 16-voice polyphonic synth; `sum` mixes the voices, `outlet` is the sink.
+fn sineSynth() S = voicer(16, sineVoice) sum outlet;
+
+sineSynth defSynthX("sine_voice");
+
+%%
+import audio_engine.*;
+engineStart();
+masterGain(0.0);
+%%
+import music.pat.*;
+randSeed(2026);                                -- reproducible randomness
+
+let melody = bind(
+    wpicks([0, 1, 2, 4], [4.0, 2.0, 3.0, 1.0]) degree,
+    List(0.5, 0.25, 0.25) cyc,
+    rands(0.2, 0.6));
+let bass = bind(List(-7, -5) cyc degree, List(2.0) cyc);
+let tune = merge(melody, bass) takeDur(32.0);  -- polyphony is a lazy merge
+
+%%
+import music.media.*;
+
+fn deg(d Int, dur Float) Music<Pitch> = note(dur, degree(d));
+let theme = line([deg(0, 1.0), deg(1, 1.0), deg(2, 0.5), deg(4, 1.5)]);
+let canon = theme | (mrest(2.0) $ (theme dyn(0.7) trans(-4)));
+let canonEvents = canon perform;    -- List<Event>, same as bind produces
+
+%%
+import music.job.*;
+
+let theme = shape([[0.5, 0.0, 0.5], [0.25, 1.0, 0.4], [0.5, 3.0, 0.5]]);
+let riffs = [Coll.leaf(theme),
+             Coll.leaf(theme retrograde),
+             Coll.leaf(theme invertDim('degree, 2.0))];
+let form = Coll.rpt((4, Coll.sel((Behavior.shuffled, riffs))));
+let reading = realize(form);    -- a different reading every call
+
+%%
+import music.play.*;
+import audio_engine.*;
+engineStart();
+%%
+let v = pitchVoice(101);
+%%
+voiceBundle(v, "sine_voice") go(0);
+%%
+let p = play(tune, v, et12, pentMinor);
+%%
+p replace(realize(form));
+%%
+p enqueue(canon perform);
