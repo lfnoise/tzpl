@@ -1124,6 +1124,25 @@ void op_undefined_function(VM& vm, Code* pc) {
         "earlier error and redefine it before calling");
 }
 
+// NO_MATCH (1 word) -- a match used for its value where no case matched at
+// runtime. Same discipline as op_undefined_function: diagnose and stop.
+void op_no_match(VM& vm, Code* pc) {
+    (void)pc;
+    char const* where = "<unknown>";
+    if (vm.frameCount() > 0) {
+        CodeBlock* cb = vm.currentFrameCodeBlock();
+        if (cb && cb->name) where = cb->name->cstr();
+    }
+    if (vm.target() && vm.target()->rtRestricted) {
+        fprintf(stderr, "*** ERROR: no case of a match expression matched "
+                        "the value (in '%s'); halting this VM\n", where);
+        vm.setHalted(true);
+        return;
+    }
+    throw std::runtime_error(std::format(
+        "no case of a match expression matched the value (in '{}')", where));
+}
+
 // --- Debug/Print ---
 
 void op_print_int(VM& vm, Code* pc) {

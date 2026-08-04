@@ -28,6 +28,8 @@
 #include "type_system.hpp"
 #include <unordered_map>
 #include <cstdio>
+#include <format>
+#include <vector>
 
 namespace ts {
 
@@ -53,6 +55,13 @@ struct OpInfo {
     OpFmt fmt;
     u8 nregs;          // Number of meaningful register slots to display (0-4)
 };
+
+// Actual word count of the instruction at `pc` (handles the variable-length
+// ops the fixed size field cannot express).
+static u32 instrWords(Code const* pc, OpInfo const& info) {
+    if (pc->op == op_pack_existential) return 5 + (u32)pc[4].i;
+    return info.size;
+}
 
 static const std::unordered_map<Operation, OpInfo>& opInfoMap() {
     static const std::unordered_map<Operation, OpInfo> table = {
@@ -202,6 +211,27 @@ static const std::unordered_map<Operation, OpInfo>& opInfoMap() {
         { op_return,            { "RETURN",            2, OpFmt::Regs,      2 } },
         { op_return_void,       { "RETURN_VOID",       1, OpFmt::None,      0 } },
         { op_halt,              { "HALT",              1, OpFmt::None,      0 } },
+        { op_no_match,          { "NO_MATCH",          1, OpFmt::None,      0 } },
+        { op_undefined_function,{ "UNDEFINED_FN",      1, OpFmt::None,      0 } },
+
+        // --- Async / futures ---
+        { op_async_call,        { "ASYNC_CALL",        4, OpFmt::Regs_Int_Ptr, 3 } },
+        { op_async_return,      { "ASYNC_RETURN",      2, OpFmt::Regs,      1 } },
+        { op_future_await,      { "FUTURE_AWAIT",      2, OpFmt::Regs,      3 } },
+        { op_future_block,      { "FUTURE_BLOCK",      2, OpFmt::Regs,      2 } },
+        { op_future_ready,      { "FUTURE_READY",      3, OpFmt::Regs_Ptr,  2 } },
+        { op_delay,             { "DELAY",             3, OpFmt::Regs_Ptr,  2 } },
+
+        // --- Upvars / closures ---
+        { op_capture_upvar_local, { "CAPTURE_UPVAR_L", 4, OpFmt::Regs_Int_Ptr, 3 } },
+        { op_load_upvar_n,      { "LOAD_UPVAR_N",      2, OpFmt::Regs,      3 } },
+        { op_store_upvar_n,     { "STORE_UPVAR_N",     3, OpFmt::Regs_Int,  3 } },
+
+        // --- Existentials ---
+        // PACK_EXISTENTIAL is variable-length: 5 + numMethods (pc[4].i)
+        // words; both walkers special-case it via instrWords().
+        { op_pack_existential,  { "PACK_EXISTENTIAL",  5, OpFmt::Regs_Ptr_Ptr, 2 } },
+        { op_call_witness,      { "CALL_WITNESS",      3, OpFmt::Regs_Int,  3 } },
 
         // --- Debug/Print ---
         { op_print_int,         { "PRINT_INT",         2, OpFmt::Regs, 1 } },
@@ -592,8 +622,72 @@ void disassembleCodeBlock(CodeBlock* block, FILE* out) {
         }
 
         std::fprintf(out, "\n");
-        pc += info.size;
+        pc += instrWords(pc, info);
     }
+}
+
+bool verifyCodeBlock(CodeBlock* block, std::string& err) {
+    const auto& table = opInfoMap();
+    Code* base = block->code.data();
+    size_t n = block->code.size();
+    const char* name = block->name ? block->name->cstr() : "<unnamed>";
+
+    // Pass 1: decode the stream, recording instruction boundaries.
+    std::vector<bool> isStart(n, false);
+    size_t i = 0;
+    while (i < n) {
+        auto it = table.find(base[i].op);
+        if (it == table.end()) {
+            err = std::format("{}: unknown op at offset {}", name, i);
+            return false;
+        }
+        if (i + it->second.size > n) {
+            err = std::format("{}: truncated {} at offset {} (size {})",
+                              name, it->second.name, i, n);
+            return false;
+        }
+        isStart[i] = true;
+        i += instrWords(base + i, it->second);
+    }
+    if (i != n) {
+        err = std::format("{}: truncated instruction at offset {} (size {})",
+                          name, i, n);
+        return false;
+    }
+
+    // Pass 2: every jump target must be in-bounds on a boundary.
+    i = 0;
+    while (i < n) {
+        const OpInfo& info = table.at(base[i].op);
+        if (info.fmt == OpFmt::Jump || info.fmt == OpFmt::Regs_Jump) {
+            size_t word = i + (info.fmt == OpFmt::Jump ? 1 : 2);
+            Code* target = static_cast<Code*>(base[word].p);
+            if (target < base || target >= base + n) {
+                err = std::format(
+                    "{}: {} at offset {} targets {:+} words out of block "
+                    "[0, {})", name, info.name, i,
+                    (long long)(target - base), n);
+                return false;
+            }
+            if (!isStart[(size_t)(target - base)]) {
+                err = std::format(
+                    "{}: {} at offset {} targets offset {} inside an "
+                    "instruction", name, info.name, i, (size_t)(target - base));
+                return false;
+            }
+        }
+        i += instrWords(base + i, info);
+    }
+
+    for (size_t k = 0; k < block->defaultEntryOffsets.size(); ++k) {
+        u32 off = block->defaultEntryOffsets[k];
+        if (off >= n || !isStart[off]) {
+            err = std::format("{}: defaultEntryOffsets[{}] = {} invalid "
+                              "(size {})", name, k, off, n);
+            return false;
+        }
+    }
+    return true;
 }
 
 } // namespace ts

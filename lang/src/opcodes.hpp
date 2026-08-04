@@ -206,6 +206,12 @@ void op_halt(VM& vm, Code* pc);               // HALT (1 word)
 // Compiler::poisonCodeBlock(). Reaching it means a call resolved to a
 // function whose definition never compiled.
 void op_undefined_function(VM& vm, Code* pc);
+// NO_MATCH (1 word). The no-case-matched path of a match used for its value
+// (expression / trailing-return position). Matches are not checked for
+// exhaustiveness, so this is reachable at runtime (all guards false, an int
+// match without `_`, ...); there is no value to produce, so it diagnoses and
+// stops instead of running off the end of the block.
+void op_no_match(VM& vm, Code* pc);
 
 // --- Debug/Print ---
 void op_print_int(VM& vm, Code* pc);          // PRINT_INT Ra (2 words)

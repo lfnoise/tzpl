@@ -723,6 +723,7 @@ private:
 
     // Resolve all jump target indices to Code* pointers (called after code emission)
     void resolveJumps(CodeBlock* block);
+    bool jumpTargetsCurrentEnd() const;
 
     // Variadic helpers for auto-map codegen
     Type* getParamType(const FuncInfo* funcInfo, const CallExpr_* expr, size_t i);

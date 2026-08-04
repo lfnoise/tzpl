@@ -689,6 +689,9 @@ public:
 
     // Update current frame's codeBlock (used by tail call opcodes)
     void updateCurrentCodeBlock(CodeBlock* cb) { frames_[frameCount_ - 1].codeBlock = cb; }
+    CodeBlock* currentFrameCodeBlock() const {
+        return frameCount_ ? frames_[frameCount_ - 1].codeBlock : nullptr;
+    }
     void growCurrentFrameNumRegs(u32 n) {
         auto& f = frames_[frameCount_ - 1];
         if (n > f.numRegs) f.numRegs = n;

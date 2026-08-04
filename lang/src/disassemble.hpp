@@ -26,6 +26,7 @@
 
 #include "vm.hpp"
 #include <cstdio>
+#include <string>
 
 namespace ts {
 
@@ -33,6 +34,12 @@ class CodeBlock;
 
 // Disassemble a CodeBlock's instruction stream to the given FILE.
 void disassembleCodeBlock(CodeBlock* block, FILE* out);
+
+// Structural validation of a finished CodeBlock: every instruction decodes,
+// the stream ends exactly at code.size(), every jump target and default
+// entry offset lands in-bounds on an instruction boundary. Returns true if
+// valid; otherwise fills `err` with a description of the first problem.
+bool verifyCodeBlock(CodeBlock* block, std::string& err);
 
 } // namespace ts
 

@@ -143,9 +143,19 @@ void TypeChecker::declareVar(const std::string& name, Type* type, bool isMutable
         // enum like Rate) is stored as an i64 tag and storesObjPtr() is false;
         // flagging such a global as an Obj root makes the GC dereference the
         // tag as a pointer and crash.
-        if (it != globalVars_.end()) {
+        //
+        // Reuse the slot ONLY when the re-declared type is the same type
+        // (interned, so pointer equality). A type-CHANGING rebind must get a
+        // fresh slot: the VM's per-slot GC root flags are installed once and
+        // never re-synced for pre-existing slots, so flipping obj-ness in the
+        // compiler alone leaves the VM marking a scalar word as a root (or
+        // vice versa); and a rebind to a multi-word inline composite would
+        // write sizeWords words over a one-slot global, clobbering whichever
+        // globals happen to live in the neighboring slots. The old slot keeps
+        // its old flag and value (compiled code that captured the old binding
+        // still reads a type-consistent slot).
+        if (it != globalVars_.end() && it->second.type == type) {
             globalIdx = it->second.globalIndex;
-            compiler_.setDataGlobalIsObj(globalIdx, type ? storesObjPtrUnboxed(type) : true);
         } else if (inlineMulti) {
             globalIdx = compiler_.addInlineDataGlobal((u32)type->sizeWords_, type);
         } else {

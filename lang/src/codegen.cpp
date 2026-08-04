@@ -22,6 +22,7 @@
 //
 
 #include "codegen.hpp"
+#include "disassemble.hpp"
 #include "module_compiler.hpp"
 
 namespace ts {
@@ -369,13 +370,51 @@ void CodeGen::emitSafepointWithStackMap() {
     emitOp(op_safepoint);
 }
 
+// True if any pending jump fixup targets the current end of code -- i.e.
+// expects an epilogue instruction to be emitted at this position. A branch
+// construct whose taken paths all end in an explicit return patches its
+// exit jumps here (statement-form match/if as the last statement, an
+// else-if chain in return position, ...); the function epilogue must then
+// emit a terminator even though the last *emitted* op is already a return,
+// or those jumps would resolve one past the end of the block.
+bool CodeGen::jumpTargetsCurrentEnd() const {
+    size_t end = currentBlock_->code.size();
+    if (end == 0) return false;
+    for (u32 fp : jumpFixups_) {
+        if ((size_t)currentBlock_->code[fp].i == end) return true;
+    }
+    return false;
+}
+
 void CodeGen::resolveJumps(CodeBlock* block) {
+    // Safety net for the jumpTargetsCurrentEnd() epilogue rule: a jump
+    // resolving one past the end would send the VM off the rails; if a
+    // codegen path missed the rule, pin the end with a NO_MATCH trap so
+    // the failure is diagnosed instead of undefined.
+    for (u32 fixupPos : jumpFixups_) {
+        if ((size_t)block->code[fixupPos].i == block->code.size()) {
+            block->emit(Code(op_no_match));
+            break;
+        }
+    }
     Code* base = block->code.data();
     for (u32 fixupPos : jumpFixups_) {
         i64 targetIdx = block->code[fixupPos].i;
         block->code[fixupPos].p = base + targetIdx;
     }
     jumpFixups_.clear();
+
+    // TZPL_VERIFY_CODE=1: structural validation of every finished block
+    // (jump targets in-bounds on instruction boundaries, stream well-formed).
+    static bool verify = std::getenv("TZPL_VERIFY_CODE") != nullptr;
+    if (verify) {
+        std::string err;
+        if (!verifyCodeBlock(block, err)) {
+            std::fprintf(stderr, "TZPL_VERIFY_CODE: %s\n", err.c_str());
+            disassembleCodeBlock(block, stderr);
+            std::abort();
+        }
+    }
 }
 
 // --- Insert conversions ---
@@ -1245,6 +1284,9 @@ void CodeGen::genFnDecl(FnDeclNode* decl) {
                 && !(inAsyncFn_ && lastOp == op_async_return)
                 && !(inCoroutineFn_ && lastOp == op_coro_done);
         }
+        // Even a return-terminated body needs the epilogue if some branch
+        // jump targets the current end of code (see jumpTargetsCurrentEnd).
+        if (!needsTerminator) needsTerminator = jumpTargetsCurrentEnd();
         if (needsTerminator) {
             if (inCoroutineFn_) {
                 emitOp(op_coro_done);
@@ -1451,6 +1493,9 @@ void CodeGen::genMonoInstance(FuncInfo& monoInfo) {
                 && !(inAsyncFn_ && lastOp == op_async_return)
                 && !(inCoroutineFn_ && lastOp == op_coro_done);
         }
+        // Even a return-terminated body needs the epilogue if some branch
+        // jump targets the current end of code (see jumpTargetsCurrentEnd).
+        if (!needsTerminator) needsTerminator = jumpTargetsCurrentEnd();
         if (needsTerminator) {
             if (inCoroutineFn_) {
                 emitOp(op_coro_done);
@@ -10501,12 +10546,14 @@ u16 CodeGen::genLambdaExpr(LambdaExprNode* expr) {
             }
             genNode(stmt);
         }
-        if (!emittedReturn) {
+        {
             auto lastOp = currentBlock_->code.empty() ? nullptr : currentBlock_->code.back().op;
-            bool terminated = (lastOp == op_return)
+            bool terminated = emittedReturn || (lastOp == op_return)
                 || (inAsyncFn_ && lastOp == op_async_return)
                 || (inCoroutineFn_ && lastOp == op_coro_done);
-            if (!terminated) {
+            // Even a return-terminated body needs the epilogue if some branch
+            // jump targets the current end of code (see jumpTargetsCurrentEnd).
+            if (!terminated || jumpTargetsCurrentEnd()) {
                 if (inCoroutineFn_) {
                     emitOp(op_coro_done);
                 } else if (inAsyncFn_) {
@@ -10786,9 +10833,12 @@ void CodeGen::compileTemplateLambdaBody(LambdaExprNode* expr, LambdaType* lambda
         }
         if (!emittedReturn) {
             if (currentBlock_->code.empty() ||
-                currentBlock_->code.back().op != op_return) {
+                currentBlock_->code.back().op != op_return ||
+                jumpTargetsCurrentEnd()) {
                 emitOp(op_return_void);
             }
+        } else if (jumpTargetsCurrentEnd()) {
+            emitOp(op_return_void);
         }
     } else {
         emitOp(op_return_void);
@@ -10946,8 +10996,18 @@ void CodeGen::genSwitchStmtForValue(SwitchStmtNode* stmt, u16 resultReg) {
 
         popScope();
 
-        for (u32 fj : failJumps) {
-            patchJump(fj);
+        // Route the last case's fail jumps to a NO_MATCH trap: falling into
+        // the join would continue with resultReg never written (a garbage
+        // value, and a stale-typed GC root if the result is object-typed).
+        if (i + 1 < stmt->cases.size()) {
+            for (u32 fj : failJumps) {
+                patchJump(fj);
+            }
+        } else if (!failJumps.empty()) {
+            for (u32 fj : failJumps) {
+                patchJump(fj);
+            }
+            emitOp(op_no_match);
         }
     }
 
@@ -11078,8 +11138,21 @@ void CodeGen::genSwitchStmtAsReturn(SwitchStmtNode* stmt) {
 
         popScope();
 
-        for (u32 fj : failJumps) {
-            patchJump(fj);
+        // The last case's fail jumps cannot land after the final body: every
+        // body ends in a return, so nothing is emitted there and the target
+        // would resolve one-past-the-end of the block. Route them to a
+        // NO_MATCH trap instead (matches are not exhaustiveness-checked, so
+        // the path is reachable -- all guards false, an int match without
+        // `_`, ...).
+        if (i + 1 < stmt->cases.size()) {
+            for (u32 fj : failJumps) {
+                patchJump(fj);
+            }
+        } else if (!failJumps.empty()) {
+            for (u32 fj : failJumps) {
+                patchJump(fj);
+            }
+            emitOp(op_no_match);
         }
     }
 
