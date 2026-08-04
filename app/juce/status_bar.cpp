@@ -44,6 +44,9 @@ constexpr int kDeviceW = 120;
 constexpr int kCpuW = 96;
 constexpr int kMasterW = 70;
 constexpr int kClipW = 14;
+constexpr int kGainW = 104;
+constexpr int kMuteW = 52;
+constexpr int kPanicBtnH = 18;
 
 juce::String fmt1(double v) { return juce::String(v, 1); }
 
@@ -72,8 +75,8 @@ StatusBar::StatusBar(bridge::AppContext& appCtx) : appCtx_(appCtx) {
 int StatusBar::preferredHeight() const {
     if (!expanded_) return kRowH;
     int silos = (int)stats_.silos.size();
-    // Header + one row per silo + NRT-VM row + device row.
-    return kRowH + kDetailRowH * (silos + 3) + kPad;
+    // Panic row + header + one row per silo + NRT-VM row + device row.
+    return kRowH + kPanicBtnH + kDetailRowH * (silos + 3) + kPad;
 }
 
 void StatusBar::visibilityChanged() {
@@ -161,7 +164,79 @@ juce::Rectangle<int> StatusBar::clipArea() const {
     return r.removeFromLeft(kClipW);
 }
 
+juce::Rectangle<int> StatusBar::gainArea() const {
+    auto r = compactRow().reduced(kPad, 3);
+    r.removeFromLeft(kTriangleW + kDeviceW + kCpuW + kMasterW + kClipW);
+    return r.removeFromLeft(kGainW);
+}
+
+juce::Rectangle<int> StatusBar::muteArea() const {
+    auto r = compactRow().reduced(kPad, 3);
+    r.removeFromLeft(kTriangleW + kDeviceW + kCpuW + kMasterW + kClipW + kGainW);
+    return r.removeFromLeft(kMuteW).reduced(3, 1);
+}
+
+juce::Rectangle<int> StatusBar::panicRow() const {
+    return getLocalBounds().withTrimmedBottom(kRowH).reduced(kPad, 2)
+        .removeFromTop(kPanicBtnH);
+}
+
+void StatusBar::panicButtonRects(juce::Rectangle<int>* out3) const {
+    auto row = panicRow();
+    row.removeFromLeft(48);   // "panic" caption
+    out3[0] = row.removeFromLeft(96).reduced(2, 1);
+    out3[1] = row.removeFromLeft(122).reduced(2, 1);
+    out3[2] = row.removeFromLeft(100).reduced(2, 1);
+}
+
+void StatusBar::setGainFromX(int x) {
+    if (!appCtx_.engine) return;
+    auto track = gainArea().withTrimmedLeft(30);   // past the "gain" label
+    float frac = juce::jlimit(0.0f, 1.0f,
+        (float)(x - track.getX()) / (float)std::max(1, track.getWidth()));
+    engine::masterGain(appCtx_.engine, frac);
+    repaint();
+}
+
+void StatusBar::forEachSiloBundle(std::function<void()> const& queueOps) {
+    if (!appCtx_.engine) return;
+    int n = engine::numSilos(appCtx_.engine);
+    for (int i = 0; i < n; ++i) {
+        engine::begin(appCtx_.engine);
+        queueOps();
+        engine::go(i);
+    }
+}
+
 void StatusBar::mouseDown(juce::MouseEvent const& e) {
+    // Master gain and mute live in the compact row and always win their
+    // clicks: the row's expand-anywhere behavior must not swallow them.
+    if (gainArea().contains(e.getPosition()) && appCtx_.engine) {
+        draggingGain_ = true;
+        setGainFromX(e.getPosition().x);
+        return;
+    }
+    if (muteArea().contains(e.getPosition()) && appCtx_.engine) {
+        engine::masterMute(appCtx_.engine, !engine::masterMuted(appCtx_.engine));
+        repaint();
+        return;
+    }
+    if (expanded_ && appCtx_.engine) {
+        juce::Rectangle<int> btns[3];
+        panicButtonRects(btns);
+        if (btns[0].contains(e.getPosition())) {           // all notes off
+            forEachSiloBundle([] { engine::allNotesOffAll(); });
+            return;
+        }
+        if (btns[1].contains(e.getPosition())) {           // disconnect output
+            forEachSiloBundle([] { engine::disconnectNode(0); });
+            return;
+        }
+        if (btns[2].contains(e.getPosition())) {           // free all nodes
+            forEachSiloBundle([] { engine::freeAllNodes(); });
+            return;
+        }
+    }
     // The clip latch clears on its own click, without disturbing the dropout
     // counters -- checked first, since it sits inside the compact row. Only
     // while it is lit: an unlit square shouldn't be a dead spot in a row that
@@ -189,6 +264,14 @@ void StatusBar::mouseDown(juce::MouseEvent const& e) {
         if (onHeightChanged) onHeightChanged();
         repaint();
     }
+}
+
+void StatusBar::mouseDrag(juce::MouseEvent const& e) {
+    if (draggingGain_) setGainFromX(e.getPosition().x);
+}
+
+void StatusBar::mouseUp(juce::MouseEvent const&) {
+    draggingGain_ = false;
 }
 
 void StatusBar::paint(juce::Graphics& g) {
@@ -260,6 +343,36 @@ void StatusBar::paint(juce::Graphics& g) {
         g.fillRect(clip);
     }
 
+    // Master gain: label + draggable track + numeric value.
+    if (appCtx_.engine) {
+        auto cell = r.removeFromLeft(kGainW);
+        float gain = engine::masterGain(appCtx_.engine);
+        g.setColour(text.withAlpha(0.7f));
+        g.drawText("gain", cell.removeFromLeft(30), juce::Justification::centredLeft, true);
+        auto track = cell.withSizeKeepingCentre(cell.getWidth() - 4, 8);
+        g.setColour(text.withAlpha(0.2f));
+        g.fillRect(track);
+        g.setColour(text.withAlpha(0.8f));
+        int w = (int)std::lround(juce::jlimit(0.0f, 1.0f, gain) * track.getWidth());
+        g.fillRect(track.withWidth(w));
+        // Handle tick so the position reads even when the fill is tiny.
+        g.fillRect(track.getX() + std::max(0, w - 1), track.getY() - 2, 2, track.getHeight() + 4);
+
+        // Mute button: state carried by the label and fill, not colour alone.
+        bool muted = engine::masterMuted(appCtx_.engine);
+        auto mute = muteArea();
+        if (muted) {
+            g.setColour(juce::Colours::red.withAlpha(0.85f));
+            g.fillRoundedRectangle(mute.toFloat(), 3.0f);
+            g.setColour(juce::Colours::white);
+            g.drawText("MUTED", mute, juce::Justification::centred, true);
+        } else {
+            g.setColour(text.withAlpha(0.5f));
+            g.drawRoundedRectangle(mute.toFloat(), 3.0f, 1.0f);
+            g.drawText("mute", mute, juce::Justification::centred, true);
+        }
+    }
+
     // Dropouts: latching, cleared only by an explicit click.
     unsigned long long drops = stats_.engineDropouts + stats_.deviceXruns;
     if (dropoutLatched_ || drops > 0) {
@@ -272,6 +385,23 @@ void StatusBar::paint(juce::Graphics& g) {
 
     // ---- Detail panel -----------------------------------------------------
     auto d = getLocalBounds().withTrimmedBottom(kRowH).reduced(kPad, 2);
+
+    // Panic row: three plain buttons that take effect on every silo.
+    {
+        auto row2 = d.removeFromTop(kPanicBtnH);
+        g.setColour(text.withAlpha(0.7f));
+        g.drawText("panic", row2.removeFromLeft(48), juce::Justification::centredLeft, true);
+        juce::Rectangle<int> btns[3];
+        panicButtonRects(btns);
+        char const* labels[3] = { "all notes off", "disconnect output", "free all nodes" };
+        for (int i = 0; i < 3; ++i) {
+            g.setColour(text.withAlpha(0.5f));
+            g.drawRoundedRectangle(btns[i].toFloat(), 3.0f, 1.0f);
+            g.setColour(text.withAlpha(0.85f));
+            g.drawText(labels[i], btns[i], juce::Justification::centred, true);
+        }
+    }
+
     auto line = [&](juce::String const& s, juce::Colour c) {
         g.setColour(c);
         g.drawText(s, d.removeFromTop(kDetailRowH),

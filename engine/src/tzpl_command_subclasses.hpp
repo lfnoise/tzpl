@@ -511,6 +511,17 @@ struct AllNotesOffCmd : Command {
     }
 };
 
+// Panic variant: every note-capable node in the silo releases everything it
+// holds. Non-voicer synths leave funs.allNotesOff null and are skipped.
+struct AllNotesOffAllCmd : Command {
+    void doRT(Silo* s) override {
+        i64 now = s->sampleTime_;
+        for (Node* n = s->rt_sortedNodeList_; n; n = n->sorted_next) {
+            if (n->funs.allNotesOff) n->funs.allNotesOff(n->synth, now);
+        }
+    }
+};
+
 struct NoteSetParamRangeCmd : Command {
     i64 nodeID_;
     int noteID_;

@@ -51,6 +51,8 @@ public:
 
     void paint(juce::Graphics& g) override;
     void mouseDown(juce::MouseEvent const& e) override;
+    void mouseDrag(juce::MouseEvent const& e) override;
+    void mouseUp(juce::MouseEvent const& e) override;
     void visibilityChanged() override;
 
     // Called with one line when a new dropout is detected (rate-limited to
@@ -67,10 +69,22 @@ private:
     juce::Rectangle<int> xrunArea() const;
     // The master meter's clip square: click it to clear the clip latch.
     juce::Rectangle<int> clipArea() const;
+    // Master gain slider track and the mute button, always in the compact row.
+    juce::Rectangle<int> gainArea() const;
+    juce::Rectangle<int> muteArea() const;
+    // Panic buttons in the expanded detail panel: all notes off (all nodes),
+    // disconnect the output node, free all nodes.
+    juce::Rectangle<int> panicRow() const;
+    void panicButtonRects(juce::Rectangle<int>* out3) const;
+    void setGainFromX(int x);
+    // Run a queued engine op (allNotesOffAll / disconnectNode / freeAllNodes)
+    // as one bundle per silo, dispatched immediately.
+    void forEachSiloBundle(std::function<void()> const& queueOps);
 
     bridge::AppContext& appCtx_;
     engine::EngineStats stats_;
     bool expanded_ = false;
+    bool draggingGain_ = false;
 
     // Dropout latch: once tripped it stays lit until the user clicks to
     // reset. A dropout must never quietly disappear.

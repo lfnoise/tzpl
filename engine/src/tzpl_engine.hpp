@@ -264,6 +264,9 @@ struct Engine
 	Enable enableSafetyLimiter_ = kOn;
 	f32 masterGain_ = 1.f;
 	f32 muteGain_ = 1.f;
+	// Panic mute: forces the master stage to zero without touching
+	// masterGain_, so unmuting restores the previous level exactly.
+	bool masterMuted_ = false;
 	AudioStreamParameters streamParams_;
 	
 	f32 const* in_ = nullptr;

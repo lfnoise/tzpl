@@ -113,6 +113,10 @@ void printDevices(Engine* e);
 bool isAudioRunning(Engine* e);
 
 void masterGain(Engine* e, f32 gain); // post safety limiter
+// Panic mute: forces the master stage to zero without touching the gain, so
+// unmuting restores the previous level exactly.
+void masterMute(Engine* e, bool mute);
+bool masterMuted(Engine* e);
 void safetyLimiter(Engine* e, Enable onoff); // default is on.
 
 // Current values, for UI that has to show what the engine is doing (a script
@@ -450,6 +454,8 @@ int  rtTapDrain(Silo* s, i64 tapID, f32* dst, int maxSamples);
 
 // notes
 tzpl_SErr allNotesOff(i64 nodeID);
+// Panic: allNotesOff on every note-capable node in the target silo.
+tzpl_SErr allNotesOffAll();
 tzpl_SErr noteOn(i64 nodeID, int noteID, int length, f32* paramValues);
 tzpl_SErr noteOff(i64 nodeID, int noteID);
 tzpl_SErr noteSetParams(i64 nodeID, int noteID, int n, tzpl_ParamPair* params);

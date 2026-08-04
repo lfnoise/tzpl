@@ -267,6 +267,14 @@ void masterGain(Engine* e, f32 gain) {
     e->masterGain_ = gain;
 }
 
+void masterMute(Engine* e, bool mute) {
+    if (e) e->masterMuted_ = mute;
+}
+
+bool masterMuted(Engine* e) {
+    return e && e->masterMuted_;
+}
+
 void safetyLimiter(Engine* e, Enable onoff) {
     e->enableSafetyLimiter_ = onoff;
 }
@@ -303,7 +311,7 @@ void processAudioBlock(Engine* e, f32 const* in, f32* out,
 
     e->silos_[0].processFrames(); // silo 0 runs on the calling (audio/render) thread.
 
-    f32 gain = e->masterGain_ * e->muteGain_;
+    f32 gain = (e->masterMuted_ ? 0.f : e->masterGain_) * e->muteGain_;
     e->safetyLimiter_->process(out, e->enableSafetyLimiter_, gain);
 
     // Measured on `out` AFTER the limiter, so this is what the device plays.
@@ -2243,6 +2251,12 @@ int tapDrain(Engine* e, i64 tapID, f32* dst, int maxSamples) {
 tzpl_SErr allNotesOff(i64 nodeID) {
     if (!tBundle.engine) return tzpl_errNoActiveBundle;
     tBundle.add(new NodeCheckedCmdOp(nodeID, new AllNotesOffCmd(nodeID)));
+    return tzpl_errNone;
+}
+
+tzpl_SErr allNotesOffAll() {
+    if (!tBundle.engine) return tzpl_errNoActiveBundle;
+    tBundle.add(new PrebuiltCmdOp(new AllNotesOffAllCmd{}));
     return tzpl_errNone;
 }
 
