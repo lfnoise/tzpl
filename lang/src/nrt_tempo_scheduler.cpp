@@ -197,6 +197,17 @@ bool NRTTempoScheduler::cancel(i64 timerID) {
     return found;
 }
 
+int NRTTempoScheduler::clearAll() {
+    std::lock_guard lock(schedMtx_);
+    int dropped = (int)queue_.size();
+    while (!queue_.empty()) queue_.pop();
+    // Wake the run loop so it re-evaluates its (now empty) queue instead of
+    // sleeping toward an entry that no longer exists.
+    queueChanged_.store(true);
+    cv_.notify_all();
+    return dropped;
+}
+
 bool NRTTempoScheduler::isIdle() const {
     std::lock_guard lock(schedMtx_);
     return queue_.empty();

@@ -185,12 +185,13 @@ juce::Rectangle<int> StatusBar::panicRow() const {
         .removeFromTop(kPanicBtnH);
 }
 
-void StatusBar::panicButtonRects(juce::Rectangle<int>* out3) const {
+void StatusBar::panicButtonRects(juce::Rectangle<int>* out4) const {
     auto row = panicRow();
     row.removeFromLeft(48);   // "panic" caption
-    out3[0] = row.removeFromLeft(96).reduced(2, 1);
-    out3[1] = row.removeFromLeft(122).reduced(2, 1);
-    out3[2] = row.removeFromLeft(100).reduced(2, 1);
+    out4[0] = row.removeFromLeft(96).reduced(2, 1);
+    out4[1] = row.removeFromLeft(112).reduced(2, 1);
+    out4[2] = row.removeFromLeft(122).reduced(2, 1);
+    out4[3] = row.removeFromLeft(100).reduced(2, 1);
 }
 
 void StatusBar::setGainFromX(int x) {
@@ -226,17 +227,21 @@ void StatusBar::mouseDown(juce::MouseEvent const& e) {
         return;
     }
     if (expanded_ && appCtx_.engine) {
-        juce::Rectangle<int> btns[3];
+        juce::Rectangle<int> btns[4];
         panicButtonRects(btns);
         if (btns[0].contains(e.getPosition())) {           // all notes off
             forEachSiloBundle([] { engine::allNotesOffAll(); });
             return;
         }
-        if (btns[1].contains(e.getPosition())) {           // disconnect output
+        if (btns[1].contains(e.getPosition())) {           // clear schedulers
+            bridge::panicClearSchedulers(appCtx_);
+            return;
+        }
+        if (btns[2].contains(e.getPosition())) {           // disconnect output
             forEachSiloBundle([] { engine::disconnectNode(0); });
             return;
         }
-        if (btns[2].contains(e.getPosition())) {           // free all nodes
+        if (btns[3].contains(e.getPosition())) {           // free all nodes
             forEachSiloBundle([] { engine::freeAllNodes(); });
             return;
         }
@@ -395,10 +400,11 @@ void StatusBar::paint(juce::Graphics& g) {
         auto row2 = d.removeFromTop(kPanicBtnH);
         g.setColour(text.withAlpha(0.7f));
         g.drawText("panic", row2.removeFromLeft(48), juce::Justification::centredLeft, true);
-        juce::Rectangle<int> btns[3];
+        juce::Rectangle<int> btns[4];
         panicButtonRects(btns);
-        char const* labels[3] = { "all notes off", "disconnect output", "free all nodes" };
-        for (int i = 0; i < 3; ++i) {
+        char const* labels[4] = { "all notes off", "clear schedulers",
+                                  "disconnect output", "free all nodes" };
+        for (int i = 0; i < 4; ++i) {
             g.setColour(text.withAlpha(0.5f));
             g.drawRoundedRectangle(btns[i].toFloat(), 3.0f, 1.0f);
             g.setColour(text.withAlpha(0.85f));

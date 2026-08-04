@@ -711,6 +711,15 @@ struct SiloTaskScheduler {
         return false;
     }
 
+    // Panic: return every active task entry to the free pool. Pool storage
+    // only -- safe on the RT thread.
+    void clearAll() {
+        while (active_) {
+            Entry* e = active_; active_ = e->next;
+            e->handler = nullptr; e->next = free_; free_ = e;
+        }
+    }
+
     // Called per sample from the silo loop (gCurrentSilo already set by the
     // tick wrapper). Fires due tasks and reschedules them.
     void tick(i64 sampleTime, engine::Silo* s) {
@@ -866,6 +875,15 @@ struct SiloRunStartCmd : engine::Command {
             vm->gcHeartbeat();
             gCurrentSilo = prev;
         }
+    }
+    bool doNRT(engine::Silo*) override { return true; }
+};
+
+// Panic: clear the silo's task scheduler (delay()-parked silo tasks stop
+// getting woken; their coroutines become garbage for the silo VM's GC).
+struct ClearSiloTasksCmd : engine::Command {
+    void doRT(engine::Silo* s) override {
+        if (s->taskSched_) static_cast<SiloTaskScheduler*>(s->taskSched_)->clearAll();
     }
     bool doNRT(engine::Silo*) override { return true; }
 };
@@ -1729,6 +1747,25 @@ void registerAudioEngineFFI(ts::Compiler& compiler) {
 void setAppContextOnVM(void* vm_ptr, AppContext* ctx) {
     auto* vm = static_cast<ts::VM*>(vm_ptr);
     vm->setUserData(ctx);
+}
+
+int panicClearSchedulers(AppContext& ctx) {
+    // NRT tempo scheduler: player coroutines, sched() callbacks, pending
+    // tempo changes. Its own mutex serializes against the scheduler thread.
+    int dropped = 0;
+    if (ctx.tempoScheduler) dropped = ctx.tempoScheduler->clearAll();
+
+    // Per silo: pending beat-scheduled bundles + the silo task scheduler.
+    if (ctx.engine) {
+        int n = engine::numSilos(ctx.engine);
+        for (int i = 0; i < n; ++i) {
+            engine::begin(ctx.engine);
+            engine::clearSched();
+            engine::sendCommand(new ClearSiloTasksCmd{});
+            engine::go(i);
+        }
+    }
+    return dropped;
 }
 
 } // namespace bridge

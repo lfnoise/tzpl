@@ -522,6 +522,25 @@ struct AllNotesOffAllCmd : Command {
     }
 };
 
+// Panic: drop every beat-scheduled command still waiting in the silo's
+// scheduler queue. doRT unlinks them (no deletion on the RT thread); doNRT
+// disposes of the chain, the same way an aborted bundle deletes never-run
+// commands.
+struct ClearSchedCmd : Command {
+    Command* taken_ = nullptr;
+    void doRT(Silo* s) override {
+        taken_ = s->sched_.takeAll();
+    }
+    bool doNRT(Silo*) override {
+        while (taken_) {
+            Command* next = taken_->next_;
+            delete taken_;
+            taken_ = next;
+        }
+        return true;
+    }
+};
+
 struct NoteSetParamRangeCmd : Command {
     i64 nodeID_;
     int noteID_;

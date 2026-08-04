@@ -162,6 +162,13 @@ struct AppContext {
     std::function<void(engine::Engine*)> initEngine;
 };
 
+// Panic: drop everything scheduled, everywhere -- the NRT tempo scheduler's
+// queue (player coroutines, sched() callbacks, pending tempo changes), every
+// silo's beat-scheduled command queue, and every silo's task scheduler.
+// Sounding notes are NOT released; pair with allNotesOffAll for silence.
+// Returns the number of NRT tempo-scheduler entries dropped.
+int panicClearSchedulers(AppContext& ctx);
+
 } // namespace bridge
 
 #endif /* tzpl_app_context_hpp */

@@ -1441,7 +1441,9 @@ spanEvents take(<span class="num">4</span>) showEvents;</code></pre>
 (section&nbsp;3.2) scheduled at absolute beats on the engine's TempoClock &mdash;
 chords atomic, timing sample-accurate. The returned <code>Player</code> is a live
 handle: <code>replace</code> swaps what's playing, <code>enqueue</code> queues what
-follows, <code>stop</code> releases everything. The first block defines the
+follows, <code>stop</code> releases everything, and <code>stopAll()</code> stops
+every player started so far &mdash; the recovery when the <code>p</code> binding
+was overwritten by re-running the play block. The first block defines the
 section&nbsp;2.3 sine voice inline, so this chapter sounds on its own.</p>
 <pre><code><span class="kw">import</span> music.play.*;
 <span class="kw">import</span> audio_engine.*;
@@ -1468,8 +1470,8 @@ voiceBundle(v, <span class="str">"sine_voice"</span>) go(<span class="num">0</sp
 <p>Live-swap and queue while it plays:</p>
 <pre><code>p replace(realize(form));    <span class="cmt">-- live-swap in an 11.4 reading</span>
 p enqueue(canon perform);    <span class="cmt">-- the 11.3 canon follows when it ends</span></code></pre>
-<p>And stop, releasing every note the voice holds:</p>
-<pre><code>p stop;    <span class="cmt">-- stop the player and release every note the voice holds</span></code></pre>
+<p>And stop, releasing every note the voices hold:</p>
+<pre><code><span class="fn">stopAll</span>();    <span class="cmt">-- stop every player (however many times the play block ran)</span></code></pre>
 <p>The same events also render offline, through any tuning:</p>
 <pre><code><span class="cmt">-- the same events, offline, in a tritave tuning:</span>
 <span class="kw">let</span> h = render(tune, v, <span class="str">"sine_voice"</span>, <span class="str">"/tmp/take.wav"</span>, <span class="num">20.0</span>,
@@ -1507,7 +1509,7 @@ run command. The pure layers are golden-tested in <code>lang/tests/music/</code>
   <tr><td><code>oscTables / sawTables / squareTables / triTables</code></td><td>wavetables</td><td>NRT</td></tr>
   <tr><td><code>sched / after / at / setTempo / getBeats / cancel</code></td><td>clock</td><td>NRT</td></tr>
   <tr><td><code>bind / merge / takeDur / perform / realize / patEvents</code></td><td>music.*</td><td>NRT / silo</td></tr>
-  <tr><td><code>play / stop / replace / enqueue / voiceBundle / render</code></td><td>music.play</td><td>NRT</td></tr>
+  <tr><td><code>play / stop / stopAll / replace / enqueue / voiceBundle / render</code></td><td>music.play</td><td>NRT</td></tr>
   <tr><td><code>scorePlayer</code></td><td>music.play</td><td>silo</td></tr>
   <tr><td><code>renderNRT / renderDone / stopRender / endRender</code></td><td>audio_engine</td><td>NRT</td></tr>
   <tr><td><code>spawn / send / receive / register / sendByName</code></td><td>(builtin)</td><td>NRT / silo</td></tr>

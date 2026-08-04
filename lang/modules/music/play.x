@@ -106,6 +106,20 @@ coro fn _playerCo(st Ref<PlayerState>, silo Int, clock Int) Float {
     }
 }
 
+-- Every player started by play() and not yet stopped. Module functions share
+-- the one array object (top-level vars are snapshotted into functions by
+-- value, so it is mutated in place and never reassigned). stopAll() stops
+-- and drops them all -- the recovery when a Player handle was rebound and
+-- the old player plays on.
+var _players = [Player]();
+
+fn _prunePlayers() Void {
+    var live = [Player]();
+    for (q : _players) { if (!(*q.state).stopped) { live push!(q); } }
+    while (_players length > 0) { _players pop!; }
+    for (q : live) { _players push!(q); }
+}
+
 -- Compile events through the tuning and start playing on `silo`/`clock`.
 -- Returns the Player handle.
 fn play(events List<Event>, v Voice, t Tuning = et12, s Scale = major,
@@ -117,7 +131,17 @@ fn play(events List<Event>, v Voice, t Tuning = et12, s Scale = major,
         stopped: false,
     };
     go(_playerCo(st, silo, clock));
-    Player { state: st, voice: v, tuning: t, scale: s, silo: silo, clock: clock }
+    let p = Player { state: st, voice: v, tuning: t, scale: s, silo: silo, clock: clock };
+    _prunePlayers();
+    _players push!(p);
+    p
+}
+
+-- Stop every player play() has started and not yet stopped, releasing what
+-- their voices hold. Safe to run any number of times.
+fn stopAll() Void {
+    for (q : _players) { q stop; }
+    while (_players length > 0) { _players pop!; }
 }
 
 -- Stop at the next wake and release everything the voice is holding.

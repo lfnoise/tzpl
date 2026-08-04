@@ -456,6 +456,8 @@ int  rtTapDrain(Silo* s, i64 tapID, f32* dst, int maxSamples);
 tzpl_SErr allNotesOff(i64 nodeID);
 // Panic: allNotesOff on every note-capable node in the target silo.
 tzpl_SErr allNotesOffAll();
+// Panic: drop every beat-scheduled command still pending in the target silo.
+tzpl_SErr clearSched();
 tzpl_SErr noteOn(i64 nodeID, int noteID, int length, f32* paramValues);
 tzpl_SErr noteOff(i64 nodeID, int noteID);
 tzpl_SErr noteSetParams(i64 nodeID, int noteID, int n, tzpl_ParamPair* params);

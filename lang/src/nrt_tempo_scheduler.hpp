@@ -97,6 +97,12 @@ public:
 
     bool cancel(i64 timerID);
 
+    // Panic: drop every queued entry -- handlers (players, sched()
+    // callbacks) and scheduled tempo changes alike. An in-flight handler
+    // finishes on its own; anything it schedules afterwards lands in the
+    // now-empty queue. Returns the number of entries dropped.
+    int clearAll();
+
     // Current state (thread-safe reads)
     f64 tempo() const;     // current tempo in beats per second
     f64 tempoBPM() const;  // current tempo in BPM

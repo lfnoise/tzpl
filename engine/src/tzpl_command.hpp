@@ -238,6 +238,25 @@ public:
 			list.clear();
 		}
 	}
+
+	// Unlink every queued command and return them as one next_-linked chain
+	// for NRT-side disposal. No allocation or deletion happens here, so it
+	// is safe to call from the RT thread (unlike clear(), which deletes).
+	Command* takeAll() {
+		Command* out = nullptr;
+		for (auto& list : queue_) {
+			Command* cmd = list.head;
+			while (cmd) {
+				Command* next = cmd->next_;
+				cmd->prev_ = nullptr;
+				cmd->next_ = out;
+				out = cmd;
+				cmd = next;
+			}
+			list.head = list.tail = nullptr;
+		}
+		return out;
+	}
 };
 
 

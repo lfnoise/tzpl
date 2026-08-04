@@ -73,9 +73,9 @@ private:
     juce::Rectangle<int> gainArea() const;
     juce::Rectangle<int> muteArea() const;
     // Panic buttons in the expanded detail panel: all notes off (all nodes),
-    // disconnect the output node, free all nodes.
+    // clear all schedulers, disconnect the output node, free all nodes.
     juce::Rectangle<int> panicRow() const;
-    void panicButtonRects(juce::Rectangle<int>* out3) const;
+    void panicButtonRects(juce::Rectangle<int>* out4) const;
     void setGainFromX(int x);
     // Run a queued engine op (allNotesOffAll / disconnectNode / freeAllNodes)
     // as one bundle per silo, dispatched immediately.

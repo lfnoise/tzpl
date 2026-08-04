@@ -2260,6 +2260,12 @@ tzpl_SErr allNotesOffAll() {
     return tzpl_errNone;
 }
 
+tzpl_SErr clearSched() {
+    if (!tBundle.engine) return tzpl_errNoActiveBundle;
+    tBundle.add(new PrebuiltCmdOp(new ClearSchedCmd{}));
+    return tzpl_errNone;
+}
+
 tzpl_SErr noteOn(i64 nodeID, int noteID, int length, f32* paramValues) {
     if (!tBundle.engine) return tzpl_errNoActiveBundle;
     // NoteOnCmd copies paramValues into its own vector.
