@@ -22,6 +22,8 @@
 #include "cell_component.hpp"
 #include "../tzpl_fonts.hpp"
 
+#include <cmath>
+
 namespace tzplapp {
 
 using juce::String;
@@ -131,17 +133,48 @@ void CellComponent::buildForKind(doc::CellKind kind) {
     nameField_.setVisible(kind == doc::CellKind::Code
                           || kind == doc::CellKind::Panel);
 
-    bool wantsEditor = (kind == doc::CellKind::Prose || kind == doc::CellKind::Code);
-    if (wantsEditor && !editor_) {
-        codeDoc_ = std::make_unique<juce::CodeDocument>();
-        editor_ = std::make_unique<TzplCodeEditor>(*codeDoc_, &tokeniser_);
-        editor_->setFont(monoFont(fontSize_));
-        // The cell grows with its content; wheel events scroll the notebook.
-        editor_->setFitToContent(true);
-        // Prose cells hide the gutter (the ImGuiColorTextEdit patch's role).
-        editor_->setLineNumbersShown(kind == doc::CellKind::Code);
-        codeDoc_->addListener(this); // text change -> onTextChanged
-        addAndMakeVisible(*editor_);
+    // Code cells get the syntax-highlighting TzplCodeEditor; Prose cells a
+    // word-wrapping TextEditor. Tear down the other kind's editor so a
+    // kind change (view rebuild) swaps cleanly.
+    if (kind == doc::CellKind::Code) {
+        proseEd_.reset();
+        proseHeight_ = 0;
+        if (!editor_) {
+            codeDoc_ = std::make_unique<juce::CodeDocument>();
+            editor_ = std::make_unique<TzplCodeEditor>(*codeDoc_, &tokeniser_);
+            editor_->setFont(monoFont(fontSize_));
+            // The cell grows with its content; wheel scrolls the notebook.
+            editor_->setFitToContent(true);
+            codeDoc_->addListener(this); // text change -> onTextChanged
+            addAndMakeVisible(*editor_);
+        }
+    } else if (kind == doc::CellKind::Prose) {
+        if (codeDoc_) codeDoc_->removeListener(this);
+        editor_.reset();
+        codeDoc_.reset();
+        if (!proseEd_) {
+            proseEd_ = std::make_unique<juce::TextEditor>();
+            proseEd_->setMultiLine(true, /*wordWrap*/ true);
+            proseEd_->setReturnKeyStartsNewLine(true);
+            proseEd_->setTabKeyUsedAsCharacter(true);
+            proseEd_->setScrollbarsShown(false);
+            proseEd_->setFont(monoFont(fontSize_));
+            proseEd_->setColour(juce::TextEditor::outlineColourId,
+                                juce::Colours::transparentBlack);
+            proseEd_->setColour(juce::TextEditor::focusedOutlineColourId,
+                                juce::Colours::transparentBlack);
+            proseEd_->onTextChange = [this] {
+                proseHeight_ = 0;   // wrapped height is stale
+                if (onTextChanged) onTextChanged();
+            };
+            addAndMakeVisible(*proseEd_);
+        }
+    } else {
+        if (codeDoc_) codeDoc_->removeListener(this);
+        editor_.reset();
+        codeDoc_.reset();
+        proseEd_.reset();
+        proseHeight_ = 0;
     }
     if (kind == doc::CellKind::Code) addAndMakeVisible(output_);
     else                            output_.setVisible(false);
@@ -227,10 +260,21 @@ void CellComponent::syncFromModel(doc::Cell const& cell) {
     // NotebookView::rebuildCells).
     if (editor_ && codeDoc_->getAllContent() != String(cell.text))
         codeDoc_->replaceAllContent(cell.text);
+    else if (proseEd_ && proseEd_->getText() != String(cell.text)) {
+        proseEd_->setText(cell.text, false);
+        proseHeight_ = 0;   // remeasure on next layout
+    }
 }
 
 String CellComponent::editorText() const {
-    return codeDoc_ ? codeDoc_->getAllContent() : String();
+    if (codeDoc_) return codeDoc_->getAllContent();
+    if (proseEd_) return proseEd_->getText();
+    return {};
+}
+
+void CellComponent::setEditorText(String const& text) {
+    if (codeDoc_) codeDoc_->replaceAllContent(text);
+    else if (proseEd_) proseEd_->setText(text);   // fires onTextChange
 }
 
 void CellComponent::setSelected(bool sel) {
@@ -274,7 +318,39 @@ void CellComponent::setErrorMarkers(
 void CellComponent::setFontSize(float px) {
     fontSize_ = px;
     if (editor_) editor_->setFont(monoFont(px));
+    if (proseEd_) {
+        proseEd_->applyFontToAllText(monoFont(px));
+        proseHeight_ = 0;   // remeasure on next layout
+    }
     output_.applyFontToAllText(monoFont(px));
+}
+
+// Height of the prose editor's wrapped text at `edWidth`, measured with an
+// independent TextLayout over the same text/font/wrap-width. Deliberately
+// NOT read back from the TextEditor: deriving the cell height from the
+// editor's own layout while the editor's size derives from the cell height
+// is a feedback loop (it ratcheted one line per layout pass). Cached per
+// (text state, width); onTextChange and setFontSize reset the cache.
+int CellComponent::proseTextHeight(int edWidth) const {
+    if (proseHeight_ > 0 && proseHeightWidth_ == edWidth)
+        return proseHeight_;
+    // The editor wraps at: width - border(l+r) - leftIndent - rightEdgeSpace.
+    // Defaults: border 1+3, leftIndent 4, rightEdgeSpace 2. Measure a touch
+    // narrower so rounding can only make us taller, never shorter (shorter
+    // would scroll inside the editor).
+    float wrapW = (float)juce::jmax(40, edWidth - 12);
+    juce::String text = proseEd_->getText();
+    if (text.isEmpty()) text = " ";
+    if (text.endsWithChar('\n')) text += " ";   // count the trailing line
+    juce::AttributedString as;
+    as.append(text, monoFont(fontSize_));
+    juce::TextLayout tl;
+    tl.createLayout(as, wrapW);
+    int lineH = juce::roundToInt(fontSize_ * 1.4f);
+    int h = (int)std::ceil(tl.getHeight()) + 2 * proseEd_->getTopIndent();
+    proseHeight_ = juce::jmax(lineH * 2, h + kPad);
+    proseHeightWidth_ = edWidth;
+    return proseHeight_;
 }
 
 int CellComponent::outputPaneHeight() const {
@@ -299,6 +375,8 @@ int CellComponent::preferredHeight(int width) const {
         int lines = juce::jmax(1, codeDoc_->getNumLines());
         h += juce::jmax(lh * 2,
                         lines * lh + editor_->getScrollbarThickness() + kPad);
+    } else if (proseEd_) {
+        h += proseTextHeight(width - 2 * kPad);
     }
     if (kind_ == doc::CellKind::Code && !outputLines_.empty())
         h += kPad + outputPaneHeight() + kGripH;
@@ -320,6 +398,7 @@ void CellComponent::resized() {
     // visible under the header.
     bool body = !collapsed_;
     if (editor_) editor_->setVisible(body);
+    if (proseEd_) proseEd_->setVisible(body);
     output_.setVisible(body && kind_ == doc::CellKind::Code);
     if (panelCanvas_) panelCanvas_->setVisible(body);
     if (presetsView_) presetsView_->setVisible(body);
@@ -336,6 +415,8 @@ void CellComponent::resized() {
     }
     if (editor_)
         editor_->setBounds(r);
+    else if (proseEd_)
+        proseEd_->setBounds(r);
     else if (panelCanvas_)
         panelCanvas_->setBounds(r);
     else if (presetsView_)

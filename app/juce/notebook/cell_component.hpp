@@ -18,10 +18,12 @@
 //  cell_component.hpp
 //  app (JUCE)
 //
-//  One notebook cell. Prose/Code cells embed a TzplCodeEditor; Code cells
-//  add a per-cell output area below it. Panel/Presets cells are labeled
-//  placeholders until the widget set lands (M4/M5). The cell owns view and
-//  runtime state; document structure lives in doc::DocumentStore.
+//  One notebook cell. Code cells embed a TzplCodeEditor with a per-cell
+//  output area below it; Prose cells use a word-wrapping juce::TextEditor
+//  (CodeEditorComponent cannot wrap, and prose with paragraph-long lines
+//  is unreadable behind a horizontal scrollbar). Panel/Presets cells are
+//  labeled placeholders until the widget set lands (M4/M5). The cell owns
+//  view and runtime state; document structure lives in doc::DocumentStore.
 //
 
 #ifndef cell_component_hpp
@@ -63,8 +65,13 @@ public:
 
     // Editor text (Prose/Code). Empty for Panel/Presets.
     juce::String editorText() const;
-    bool hasEditor() const { return editor_ != nullptr; }
-    TzplCodeEditor* editor() { return editor_.get(); }
+    void setEditorText(juce::String const& text);
+    bool hasEditor() const { return editor_ != nullptr || proseEd_ != nullptr; }
+    bool editorVisible() const {
+        return (editor_ && editor_->isVisible())
+            || (proseEd_ && proseEd_->isVisible());
+    }
+    TzplCodeEditor* editor() { return editor_.get(); }   // Code cells only
 
     bool isSelected() const { return selected_; }
     void setSelected(bool sel);
@@ -166,7 +173,11 @@ private:
 
     // Body
     std::unique_ptr<juce::CodeDocument> codeDoc_;
-    std::unique_ptr<TzplCodeEditor> editor_;
+    std::unique_ptr<TzplCodeEditor> editor_;   // Code cells
+    std::unique_ptr<juce::TextEditor> proseEd_; // Prose cells (word wrap)
+    int proseTextHeight(int edWidth) const;   // measured, never read back
+    mutable int proseHeight_ = 0;             // cache (0 = dirty)
+    mutable int proseHeightWidth_ = 0;        // width the cache was built at
     juce::TextEditor output_;          // Code cells
     OutputGrip outputGrip_;
     int outputHeight_ = 0;             // 0 = auto-fit

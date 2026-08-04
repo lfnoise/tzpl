@@ -128,7 +128,7 @@ public:
     }
     bool testFocusedCellEditorVisible() {
         auto* cc = cellFor(selectedCell_);
-        return cc && cc->editor() && cc->editor()->isVisible();
+        return cc && cc->editorVisible();
     }
     int testCellCount() const { return store_.cellCount(); }
     void testAddCell(doc::CellKind kind) { addCell(kind); }

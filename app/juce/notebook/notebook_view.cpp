@@ -473,16 +473,16 @@ void NotebookView::addCellOutput(CellId cellId, OutputLine const& line) {
 // ---------------------------------------------------------------------------
 
 void NotebookView::testTypeIntoFocusedCell(String const& text) {
-    if (auto* cc = cellFor(selectedCell_); cc && cc->editor())
-        cc->editor()->getDocument().replaceAllContent(text);
+    if (auto* cc = cellFor(selectedCell_); cc && cc->hasEditor())
+        cc->setEditorText(text);
 }
 
 bool NotebookView::testTypeIntoCell(int index, String const& text) {
     auto snap = store_.snapshot();
     if (index < 0 || index >= (int)snap->cells.size()) return false;
     auto* cc = cellFor(snap->cells[(size_t)index]->id);
-    if (!cc || !cc->editor()) return false;
-    cc->editor()->getDocument().replaceAllContent(text);
+    if (!cc || !cc->hasEditor()) return false;
+    cc->setEditorText(text);
     return true;
 }
 
