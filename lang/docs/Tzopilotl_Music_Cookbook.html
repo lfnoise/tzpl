@@ -1267,7 +1267,7 @@ in between. To move a whole performance up a fifth, re-anchor the tuning
 <pre><code><span class="kw">import</span> music.core.*;
 
 <span class="kw">let</span> t = bp() root(<span class="num">220.0</span>, <span class="num">0.0</span>);   <span class="cmt">-- 13 equal divisions of the tritave, 220 Hz root</span>
-stepHz(t, <span class="num">6.5</span>)                   <span class="cmt">-- halfway up the tritave, a legal step</span>
+stepHz(t, <span class="num">6.5</span>);                  <span class="cmt">-- halfway up the tritave, a legal step</span>
 degreeStep(major, -<span class="num">1</span>)            <span class="cmt">-- degrees wrap below the root too</span></code></pre>
 <p>Because the events stay symbolic, the <em>same</em> phrase plays in 12ED2, in a
 tritave tuning, or in a just-intonation table by changing one argument to the

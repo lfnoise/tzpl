@@ -394,13 +394,13 @@
 
 <span class="cmt">-- 13 equal divisions of the tritave, anchored at 220 Hz</span>
 <span class="hl-kw">let</span> t = bp() root(<span class="hl-num">220.0</span>, <span class="hl-num">0.0</span>);
-stepHz(t, <span class="hl-num">13.0</span>)                      <span class="cmt">-- 660.0 (one tritave up)</span>
+stepHz(t, <span class="hl-num">13.0</span>);                     <span class="cmt">-- 660.0 (one tritave up)</span>
 
 <span class="cmt">-- 8.5 equal divisions of the octave; fractional steps are ordinary</span>
-stepHz(edo(<span class="hl-num">8.5</span>), <span class="hl-num">4.25</span>)              <span class="cmt">-- halfway up the octave</span>
+stepHz(edo(<span class="hl-num">8.5</span>), <span class="hl-num">4.25</span>);             <span class="cmt">-- halfway up the octave</span>
 
 <span class="cmt">-- degrees resolve through a scale, wrapping below the root</span>
-degreeStep(major, <span class="hl-num">9</span>)                 <span class="cmt">-- 16.0 (a tenth: octave + third)</span>
+degreeStep(major, <span class="hl-num">9</span>);                <span class="cmt">-- 16.0 (a tenth: octave + third)</span>
 degreeStep(major, -<span class="hl-num">1</span>)                <span class="cmt">-- -1.0 (leading tone below)</span></code></pre>
             <a href="#top" class="back-to-top">&uarr; Back to top</a>
         </div>
@@ -498,7 +498,7 @@ p stop;
 <span class="cmt">-- the theme against itself: two beats late, a fifth down, quieter</span>
 <span class="hl-kw">let</span> canon = theme | (mrest(<span class="hl-num">2.0</span>) $ (theme dyn(<span class="hl-num">0.7</span>) trans(-<span class="hl-num">4</span>)));
 
-canon mdur                       <span class="cmt">-- 6.0</span>
+canon mdur;                      <span class="cmt">-- 6.0</span>
 canon retro perform showEvents;  <span class="cmt">-- reversed, as events</span>
 canon perform play(v);           <span class="cmt">-- or straight to the player</span></code></pre>
             <a href="#top" class="back-to-top">&uarr; Back to top</a>
