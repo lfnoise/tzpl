@@ -6,7 +6,7 @@ A cross-platform audio coding platform combining three integrated C++23 sub-proj
 - **`synthdef-compiler/`** -- Compiles audio signal flow graphs (from S-expressions or C++ DSL) into optimized `.dylib` plugins via a 14-pass analysis pipeline.
 - **`engine/`** -- Real-time audio engine with dynamic graph patching, lock-free threading, multi-silo parallelism, crossfading, and sample-accurate scheduling.
 - **`bridge/`** -- FFI bridges connecting Tzopilotl to the engine and synthdef-compiler, plus optional OSC and NATS support.
-- **`app/`** -- Dear ImGui GUI application integrating all components: multi-tab code editor, output panel, REPL.
+- **`app/`** -- GUI application integrating all components: multi-tab code editor, output panel, REPL, notebooks. The JUCE version (`app/juce/`, target `tzpl_app_juce`) is preferred; the original Dear ImGui version (`tzpl_app`) is still available.
 - **`shared/`** -- Common headers: plugin ABI (`tzpl_plugin_abi.h`), SIMD, RNG, matrix ops.
 
 ## Building

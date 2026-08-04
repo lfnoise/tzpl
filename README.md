@@ -60,7 +60,7 @@ Connects Tzopilotl to the engine and synthdef-compiler via the language's foreig
 
 ### Application (`app/`)
 
-A Dear ImGui desktop application integrating all the sub-projects: multi-tab code editor with syntax highlighting, output panel, REPL, and live documents (notebooks) with interactive UI widgets. A JUCE-based port (`tzpl_app_juce`, in `app/juce/`) is in progress.
+A desktop application integrating all the sub-projects: multi-tab code editor with syntax highlighting, output panel, REPL, and live documents (notebooks) with interactive UI widgets. The preferred version is the JUCE-based app (`tzpl_app_juce`, in `app/juce/`); the original Dear ImGui app (`tzpl_app`) is still available.
 
 ## Directory Structure
 
@@ -87,7 +87,7 @@ tzpl/
 ├── nats/                       NATS messaging support library
 ├── app/                        Desktop application
 │   ├── src/                    Dear ImGui application source
-│   └── juce/                   JUCE application port (in progress)
+│   └── juce/                   JUCE application source (preferred version)
 ├── examples/                   Example scripts and live documents
 ├── integration-tests/          Cross-project integration tests
 ├── benchmarks/                 Performance benchmarks
@@ -133,8 +133,8 @@ cmake --build build -j$(sysctl -n hw.ncpu)
 | `TZPL_BUILD_AUDIO_ENGINE` | `ON` | Build the audio engine |
 | `TZPL_BUILD_SYNTHDEF_COMPILER` | `ON` | Build the synthdef compiler |
 | `TZPL_BUILD_BRIDGE` | `ON` | Build the FFI bridge libraries |
-| `TZPL_BUILD_APP` | `OFF` | Build the audio coding application |
-| `TZPL_BUILD_APP_JUCE` | `OFF` | Build the JUCE GUI application (`tzpl_app_juce`) |
+| `TZPL_BUILD_APP` | `OFF` | Build the Dear ImGui application (`tzpl_app`) |
+| `TZPL_BUILD_APP_JUCE` | `OFF` | Build the JUCE GUI application (`tzpl_app_juce`, preferred) |
 | `TZPL_BUILD_GUI` | `ON` | Build with GUI support (Dear ImGui + GLFW) |
 | `TZPL_BUILD_OSC` | `OFF` | Build OSC (Open Sound Control) support |
 | `TZPL_BUILD_NATS` | `OFF` | Build NATS messaging support |
@@ -161,7 +161,7 @@ cmake --build build
 | `tzpl_audio_engine_bridge` | FFI bridge: Tzopilotl ↔ audio engine |
 | `tzpl_synthdef_compiler_bridge` | FFI bridge: Tzopilotl ↔ synthdef compiler |
 | `tzpl_app` | Dear ImGui desktop application (requires `-DTZPL_BUILD_APP=ON`) |
-| `tzpl_app_juce` | JUCE desktop application (requires `-DTZPL_BUILD_APP_JUCE=ON`) |
+| `tzpl_app_juce` | JUCE desktop application, the preferred version (requires `-DTZPL_BUILD_APP_JUCE=ON`) |
 | `test_audio_engine_ffi` | Audio engine FFI test executable |
 | `test_synthdef_compiler_ffi` | Synthdef compiler FFI test executable |
 
