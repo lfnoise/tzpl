@@ -49,7 +49,10 @@ struct VoicerTest : tzpl_SynthData
     } voices[kNumVoices] = {0};
     f64 freqmul;
     f64 amplag;
-    f32 params[kNumVoices][kNumParams];
+    // Voicer's row layout is [gate | params]: 1+kNumParams floats per voice.
+    // Sized kNumParams wide, every full-voice walk (allocVoice, allOff,
+    // processAudio) read and wrote past the end of the array.
+    f32 params[kNumVoices][kNumParams + 1];
 };
 
 tzpl_SynthData* VoicerTest_alloc() {
@@ -64,7 +67,6 @@ tzpl_SErr VoicerTest_free(VoicerTest* o) {
 tzpl_SErr VoicerTest_init(VoicerTest* o) {
     printf("VoicerTest_init %p\n", o);
     o->voicer.setParams((f32*)o->params);
-    o->voicer.setParams((f32*)&o->params);
     o->freqmul = 2. * M_PI / o->fs;
     o->amplag = calcDecay(.01, .01, o->fs);
     return tzpl_errNone;

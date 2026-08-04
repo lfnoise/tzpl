@@ -686,6 +686,10 @@ it to the speakers.</p>
 <span class="fn">newNode</span>(<span class="str">"bubbles"</span>, <span class="num">101</span>);   <span class="cmt">-- instantiate the synth from section 2 as node 101</span>
 <span class="fn">connect</span>(<span class="num">101</span>, <span class="num">0</span>, <span class="num">0</span>, <span class="num">0</span>);    <span class="cmt">-- node 101 out 0  ->  output (node 0) in 0</span>
 <span class="fn">sched</span>(<span class="num">0</span>);                   <span class="cmt">-- dispatch the bundle now</span></code></pre>
+<p>And to stop it, free the node:</p>
+<pre><code><span class="fn">begin</span>();
+<span class="fn">freeNode</span>(<span class="num">101</span>);    <span class="cmt">-- remove the bubbles node -- silence</span>
+<span class="fn">sched</span>(<span class="num">0</span>);</code></pre>
 <p>Evaluate it and you hear the <code>bubbles</code> synth &mdash; the engine keeps
 playing for as long as the app is open. (You can use the engine's built-in
 <code>"sinosc"</code> def the same way without compiling anything.)</p>
@@ -738,6 +742,10 @@ is <code>[pitch, amp]</code>. The engine's built-in <code>"voicer"</code> takes
 <span class="fn">noteOn</span>(<span class="num">200</span>, <span class="num">0</span>, [<span class="num">60.0</span>, <span class="num">0.4</span>]);
 <span class="fn">noteOn</span>(<span class="num">200</span>, <span class="num">1</span>, [<span class="num">64.0</span>, <span class="num">0.4</span>]);
 <span class="fn">noteOn</span>(<span class="num">200</span>, <span class="num">2</span>, [<span class="num">67.0</span>, <span class="num">0.4</span>]);
+<span class="fn">sched</span>(<span class="num">0</span>);</code></pre>
+<p>The chord holds until released &mdash; stop it with:</p>
+<pre><code><span class="fn">begin</span>();
+<span class="fn">allNotesOff</span>(<span class="num">200</span>);   <span class="cmt">-- release all held voices on the synth</span>
 <span class="fn">sched</span>(<span class="num">0</span>);</code></pre>
 <p><strong>How it works.</strong> Each <code>noteOn</code> claims a free voice in the
 node's pool, keyed by the note id, and feeds it the param array (filling any
@@ -808,6 +816,12 @@ kicks off the music; <code>siloStartAt</code> calls it on the grid.</p>
 <span class="str">"load err=["</span> print; err print; <span class="str">"]"</span> println;
 
 <span class="fn">siloStartAt</span>(<span class="fn">clockBeats</span>(<span class="num">0</span>), [<span class="num">0</span>]);   <span class="cmt">-- begin now (current beat)</span></code></pre>
+<p>To stop it, tear down the silo's VM (which ends the melody task) and release
+anything still sounding:</p>
+<pre><code><span class="fn">detachVM</span>(<span class="num">0</span>);        <span class="cmt">-- stop the silo's melody task (tears down the silo VM)</span>
+<span class="fn">begin</span>();
+<span class="fn">allNotesOff</span>(<span class="num">101</span>);   <span class="cmt">-- release anything still sounding</span>
+<span class="fn">sched</span>(<span class="num">0</span>);</code></pre>
 <p><strong>How it works.</strong> <code>siloLoad</code> compiles the module on the
 calling thread against the silo's rt-restricted target, then hands the installed
 code to the silo's RT thread; the returned <code>Future&lt;String&gt;</code> lets you
@@ -857,6 +871,10 @@ clock and beat so they fire sample-accurately:</p>
 <span class="fn">begin</span>();
 <span class="fn">noteOn</span>(<span class="num">200</span>, <span class="num">0</span>, [<span class="num">60.0</span>, <span class="num">0.4</span>]);
 <span class="fn">sched</span>(<span class="num">0</span>, <span class="num">0</span>, now + <span class="num">2.0</span>);   <span class="cmt">-- silo 0; fires when clock 0 reaches now+2</span></code></pre>
+<p>The note has no scheduled release &mdash; stop it with:</p>
+<pre><code><span class="fn">begin</span>();
+<span class="fn">allNotesOff</span>(<span class="num">200</span>);   <span class="cmt">-- release the scheduled note</span>
+<span class="fn">sched</span>(<span class="num">0</span>);</code></pre>
 
 <h4>The NRT clock module (timed callbacks on the main thread)</h4>
 <p>For orchestration logic that runs on the main VM, <code>import clock.*;</code>
@@ -905,28 +923,49 @@ to advance musical time. Inside a silo the delay resolves on the audio beat, so 
 sequence is sample-accurate and naturally polyphonic with other silo sequences. The
 event loop is single-threaded per VM, so thousands of these can interleave
 cheaply.</p>
-<pre><code><span class="cmt">-- A silo module: a generative arpeggio that walks a chord and drifts upward.</span>
-<span class="kw">import</span> audio_engine.*;
-<span class="kw">import</span> std.message.*;
+<pre><code><span class="kw">import</span> audio_engine.*;
+<span class="kw">import</span> std.futures.*;
 
-<span class="kw">async</span> <span class="kw">fn</span> <span class="fn">arp</span>(self <span class="typ">Actor&lt;Msg&gt;</span>, init <span class="typ">Msg</span>) <span class="typ">Void</span> {
-    <span class="kw">let</span> chord = [<span class="num">0.0</span>, <span class="num">4.0</span>, <span class="num">7.0</span>, <span class="num">11.0</span>];   <span class="cmt">-- semitone offsets</span>
-    <span class="kw">var</span> root = <span class="num">48.0</span>;
-    <span class="kw">var</span> i = <span class="num">0</span>;
-    <span class="kw">while</span> (<span class="kw">true</span>) {
-        <span class="kw">let</span> pitch = root + chord[i % <span class="num">4</span>];
-        <span class="fn">playNote</span>(<span class="num">101</span>, i % <span class="num">16</span>, [pitch, <span class="num">0.3</span>, <span class="num">4.5</span>, <span class="num">0.0</span>, <span class="num">0.005</span>, <span class="num">0.2</span>]);
-        <span class="kw">await</span> <span class="fn">delay</span>(<span class="num">0.25</span>);
-        <span class="fn">releaseNote</span>(<span class="num">101</span>, i % <span class="num">16</span>);
-        i = i + <span class="num">1</span>;
-        <span class="kw">if</span> (i % <span class="num">8</span> == <span class="num">0</span>) { root = root + <span class="num">2.0</span>; }   <span class="cmt">-- drift up a step every 8 notes</span>
-    }
-}
-<span class="kw">fn</span> <span class="fn">start</span>() <span class="typ">Void</span> { <span class="fn">spawn</span>(arp, Msg.int(<span class="num">0</span>)); }</code></pre>
-<p>Load it onto a silo as in section&nbsp;5: save it as a <code>.x</code> file and
-<code>await siloLoadFile(0, "parts/arp.x")</code>, or wrap it in a triple-quoted
-string and pass it to <code>siloLoad</code>. Either way, <code>siloStartAt</code>
-launches its <code>start()</code> on the beat. The same shape generates
+<span class="cmt">-- A silo module: a generative arpeggio that walks a chord and drifts upward.</span>
+<span class="kw">let</span> arpCode = <span class="str">"""</span>
+<span class="str">import audio_engine.*;</span>
+<span class="str">import std.message.*;</span>
+
+<span class="str">async fn arp(self Actor&lt;Msg&gt;, init Msg) Void {</span>
+<span class="str">    let chord = [0.0, 4.0, 7.0, 11.0];   -- semitone offsets</span>
+<span class="str">    var root = 48.0;</span>
+<span class="str">    var i = 0;</span>
+<span class="str">    while (true) {</span>
+<span class="str">        let pitch = root + chord[i % 4];</span>
+<span class="str">        playNote(101, i % 16, [pitch, 0.3, 4.5, 0.0, 0.005, 0.2]);</span>
+<span class="str">        await delay(0.25);</span>
+<span class="str">        releaseNote(101, i % 16);</span>
+<span class="str">        i = i + 1;</span>
+<span class="str">        if (i % 8 == 0) { root = root + 2.0; }   -- drift up a step every 8 notes</span>
+<span class="str">    }</span>
+<span class="str">}</span>
+<span class="str">fn start() Void { spawn(arp, Msg.int(0)); }</span>
+<span class="str">"""</span>;
+
+<span class="fn">engineStart</span>();
+<span class="fn">masterGain</span>(<span class="num">0.2</span>);
+<span class="fn">setTempo</span>(<span class="num">0</span>, <span class="num">120.0</span>);
+<span class="fn">begin</span>();
+<span class="fn">newNode</span>(<span class="str">"voicer"</span>, <span class="num">101</span>);
+<span class="fn">connect</span>(<span class="num">101</span>, <span class="num">0</span>, <span class="num">0</span>, <span class="num">0</span>);
+<span class="fn">sched</span>(<span class="num">0</span>);
+
+<span class="fn">attachVM</span>(<span class="num">0</span>);
+<span class="kw">let</span> err = <span class="kw">await</span> <span class="fn">siloLoad</span>(<span class="num">0</span>, arpCode);
+<span class="str">"load err=["</span> print; err print; <span class="str">"]"</span> println;
+<span class="fn">siloStartAt</span>(<span class="fn">clockBeats</span>(<span class="num">0</span>), [<span class="num">0</span>]);   <span class="cmt">-- audible now</span></code></pre>
+<p>And to stop it:</p>
+<pre><code><span class="fn">detachVM</span>(<span class="num">0</span>);        <span class="cmt">-- stop the arpeggio task</span>
+<span class="fn">begin</span>();
+<span class="fn">allNotesOff</span>(<span class="num">101</span>);
+<span class="fn">sched</span>(<span class="num">0</span>);</code></pre>
+<p>A module like this can also live in its own <code>.x</code> file and load with
+<code>await siloLoadFile(0, "parts/arp.x")</code>. The same shape generates
 <em>control</em> automation rather than notes &mdash; sweep a filter cutoff by
 calling <code>setControl(node, ctl, value)</code> (or <code>setInput</code>) each
 step instead of <code>playNote</code>.</p>
@@ -1036,21 +1075,37 @@ then addresses it with <code>siloSend</code> (immediate) or <code>siloSendAt</co
 <code>integration-tests/scripts/silo_actor_scheduled.x</code>) plays each pitch it
 receives; the module names it <code>'voice</code> at the spawn site &mdash; the
 behavior itself stays name-agnostic:</p>
-<pre><code><span class="cmt">-- silo module source</span>
-<span class="kw">import</span> audio_engine.*;   <span class="cmt">-- playNote</span>
-<span class="kw">import</span> std.message.*;
+<pre><code><span class="kw">import</span> audio_engine.*;
+<span class="kw">import</span> std.futures.*;
 
-<span class="kw">async</span> <span class="kw">fn</span> <span class="fn">voice</span>(self <span class="typ">Actor&lt;Msg&gt;</span>, init <span class="typ">Msg</span>) <span class="typ">Void</span> {
-    <span class="kw">var</span> id = <span class="num">0</span>;
-    <span class="kw">while</span> (<span class="kw">true</span>) {
-        <span class="kw">let</span> m = <span class="kw">await</span> <span class="fn">receive</span>(self);
-        <span class="kw">match</span> (m) {
-            Msg.float(pitch): { <span class="fn">playNote</span>(<span class="num">101</span>, id % <span class="num">16</span>, [pitch, <span class="num">0.6</span>, <span class="num">4.7</span>, <span class="num">0.0</span>, <span class="num">0.01</span>, <span class="num">0.2</span>]); id = id + <span class="num">1</span>; }
-            _: {}
-        }
-    }
-}
-voice <span class="fn">spawn</span>(Msg.int(<span class="num">0</span>)) <span class="fn">register</span>(<span class="str">'voice</span>);   <span class="cmt">-- spawn, then name it</span></code></pre>
+<span class="cmt">-- Load the voice module into silo 0; the actor spawns and registers at load.</span>
+<span class="kw">let</span> voiceModule = <span class="str">"""</span>
+<span class="str">import audio_engine.*;</span>
+<span class="str">import std.message.*;</span>
+
+<span class="str">async fn voice(self Actor&lt;Msg&gt;, init Msg) Void {</span>
+<span class="str">    var id = 0;</span>
+<span class="str">    while (true) {</span>
+<span class="str">        let m = await receive(self);</span>
+<span class="str">        match (m) {</span>
+<span class="str">            Msg.float(pitch): { playNote(101, id % 16, [pitch, 0.6, 4.7, 0.0, 0.01, 0.2]); id = id + 1; }</span>
+<span class="str">            _: {}</span>
+<span class="str">        }</span>
+<span class="str">    }</span>
+<span class="str">}</span>
+<span class="str">voice spawn(Msg.int(0)) register('voice);   -- spawn, then name it</span>
+<span class="str">"""</span>;
+
+<span class="fn">engineStart</span>();
+<span class="fn">masterGain</span>(<span class="num">0.2</span>);
+<span class="fn">begin</span>();
+<span class="fn">newNode</span>(<span class="str">"voicer"</span>, <span class="num">101</span>);
+<span class="fn">connect</span>(<span class="num">101</span>, <span class="num">0</span>, <span class="num">0</span>, <span class="num">0</span>);
+<span class="fn">sched</span>(<span class="num">0</span>);
+
+<span class="fn">attachVM</span>(<span class="num">0</span>);
+<span class="kw">let</span> err = <span class="kw">await</span> <span class="fn">siloLoad</span>(<span class="num">0</span>, voiceModule);
+<span class="str">"load err=["</span> print; err print; <span class="str">"]"</span> println;</code></pre>
 <p>The NRT conductor, after <code>siloLoad</code>ing that module, schedules a rising
 line one note per beat:</p>
 <pre><code><span class="kw">import</span> actors.*;         <span class="cmt">-- siloSendAt</span>
@@ -1062,6 +1117,11 @@ line one note per beat:</p>
 <span class="fn">siloSendAt</span>(<span class="num">0</span>, <span class="num">0</span>, now + <span class="num">2.0</span>, <span class="str">'voice</span>, Msg.float(<span class="num">64.0</span>));
 <span class="fn">siloSendAt</span>(<span class="num">0</span>, <span class="num">0</span>, now + <span class="num">3.0</span>, <span class="str">'voice</span>, Msg.float(<span class="num">67.0</span>));
 <span class="fn">siloSendAt</span>(<span class="num">0</span>, <span class="num">0</span>, now + <span class="num">4.0</span>, <span class="str">'voice</span>, Msg.float(<span class="num">72.0</span>));</code></pre>
+<p>And to stop:</p>
+<pre><code><span class="fn">detachVM</span>(<span class="num">0</span>);        <span class="cmt">-- stop the silo (the voice actor lives there)</span>
+<span class="fn">begin</span>();
+<span class="fn">allNotesOff</span>(<span class="num">101</span>);
+<span class="fn">sched</span>(<span class="num">0</span>);</code></pre>
 <p><strong>How it works.</strong> The message is <code>encode</code>d to bytes on the
 NRT side and carried across the silo's command FIFO; the silo decodes it and
 <code>sendByName</code>s it into the actor's mailbox. <code>siloSendAt</code> uses
@@ -1250,6 +1310,10 @@ all loaded in parallel and started together on a downbeat. This mirrors
 <span class="fn">setTempo</span>(<span class="num">0</span>, <span class="num">110.0</span>);
 <span class="kw">await</span> <span class="fn">startSession</span>();
 <span class="str">"ensemble running"</span> println;</code></pre>
+<p>And to stop both parts:</p>
+<pre><code><span class="fn">detachVM</span>(<span class="num">0</span>); <span class="fn">detachVM</span>(<span class="num">1</span>);        <span class="cmt">-- stop both parts</span>
+<span class="fn">begin</span>(); <span class="fn">allNotesOff</span>(<span class="num">101</span>); <span class="fn">sched</span>(<span class="num">0</span>);
+<span class="fn">begin</span>(); <span class="fn">allNotesOff</span>(<span class="num">301</span>); <span class="fn">sched</span>(<span class="num">1</span>);</code></pre>
 <p><strong>How it works.</strong> Each part builds its own voicer node on its own
 silo and loads an actor that sequences notes with <code>await delay</code>.
 <code>awaitAll</code> (from <code>futures.x</code>) waits for both
@@ -1304,7 +1368,10 @@ randSeed(<span class="num">2026</span>);                                <span cl
     List(<span class="num">0.5</span>, <span class="num">0.25</span>, <span class="num">0.25</span>) cyc,
     rands(<span class="num">0.2</span>, <span class="num">0.6</span>));
 <span class="kw">let</span> bass = bind(List(-<span class="num">7</span>, -<span class="num">5</span>) cyc degree, List(<span class="num">2.0</span>) cyc);
-<span class="kw">let</span> tune = merge(melody, bass) takeDur(<span class="num">32.0</span>);  <span class="cmt">-- polyphony is a lazy merge</span></code></pre>
+<span class="kw">let</span> tune = merge(melody, bass) takeDur(<span class="num">32.0</span>);  <span class="cmt">-- polyphony is a lazy merge</span>
+
+tune length println;
+tune take(<span class="num">3</span>) showEvents;                       <span class="cmt">-- (t, dur, sustain, amp, pitch)</span></code></pre>
 
 <h3 id="musiclibs-media">11.3 An algebra of pieces: music.media</h3>
 <p>Inspired by Paul Hudak's Haskore and the temporal-media algebra of the
@@ -1319,7 +1386,10 @@ then <code>perform</code>ed into events:</p>
 <span class="kw">fn</span> <span class="fn">deg</span>(d <span class="typ">Int</span>, dur <span class="typ">Float</span>) <span class="typ">Music&lt;Pitch&gt;</span> = note(dur, degree(d));
 <span class="kw">let</span> theme = line([deg(<span class="num">0</span>, <span class="num">1.0</span>), deg(<span class="num">1</span>, <span class="num">1.0</span>), deg(<span class="num">2</span>, <span class="num">0.5</span>), deg(<span class="num">4</span>, <span class="num">1.5</span>)]);
 <span class="kw">let</span> canon = theme | (mrest(<span class="num">2.0</span>) $ (theme dyn(<span class="num">0.7</span>) trans(-<span class="num">4</span>)));
-<span class="kw">let</span> canonEvents = canon perform;    <span class="cmt">-- List&lt;Event&gt;, same as bind produces</span></code></pre>
+<span class="kw">let</span> canonEvents = canon perform;    <span class="cmt">-- List&lt;Event&gt;, same as bind produces</span>
+
+canon mdur println;                 <span class="cmt">-- 6.0 beats end to end</span>
+canonEvents showEvents;             <span class="cmt">-- the second voice enters at beat 2</span></code></pre>
 
 <h3 id="musiclibs-hmsl">11.4 Shapes and forms: music.shape / music.job</h3>
 <p>Inspired by HMSL (the Hierarchical Music Specification Language). A
@@ -1336,7 +1406,9 @@ hierarchy (<code>Coll</code>) whose selection behaviors roll at realize time
              Coll.leaf(theme retrograde),
              Coll.leaf(theme invertDim('degree, <span class="num">2.0</span>))];
 <span class="kw">let</span> form = Coll.rpt((<span class="num">4</span>, Coll.sel((Behavior.shuffled, riffs))));
-<span class="kw">let</span> reading = realize(form);    <span class="cmt">-- a different reading every call</span></code></pre>
+<span class="kw">let</span> reading = realize(form);    <span class="cmt">-- a different reading every call</span>
+
+reading take(<span class="num">3</span>) showEvents;     <span class="cmt">-- run it again for another reading</span></code></pre>
 
 <h3 id="musiclibs-spans">11.5 Patterns as functions of time: music.spans</h3>
 <p>Inspired by Tidal Cycles. A <code>Pattern&lt;T&gt;</code> is a callable value:
@@ -1357,7 +1429,10 @@ cycles to the shared event list:</p>
         events(<span class="num">0.5</span>, <span class="num">0.9</span>)
         withAmp(sinePat() slow(<span class="num">4.0</span>) range(<span class="num">0.25</span>, <span class="num">0.6</span>) segment(<span class="num">4</span>)),
 ]);
-<span class="kw">let</span> spanEvents = patEvents(spanTune, <span class="num">16.0</span>, <span class="num">2.0</span>);   <span class="cmt">-- 16 cycles, 2 beats per cycle</span></code></pre>
+<span class="kw">let</span> spanEvents = patEvents(spanTune, <span class="num">16.0</span>, <span class="num">2.0</span>);   <span class="cmt">-- 16 cycles, 2 beats per cycle</span>
+
+spanEvents length println;
+spanEvents take(<span class="num">4</span>) showEvents;</code></pre>
 
 <h3 id="musiclibs-play">11.6 Playing and rendering: music.play</h3>
 <p>Whichever dialect produced the events, one player takes them from there.
@@ -1366,22 +1441,41 @@ cycles to the shared event list:</p>
 (section&nbsp;3.2) scheduled at absolute beats on the engine's TempoClock &mdash;
 chords atomic, timing sample-accurate. The returned <code>Player</code> is a live
 handle: <code>replace</code> swaps what's playing, <code>enqueue</code> queues what
-follows, <code>stop</code> releases everything.</p>
+follows, <code>stop</code> releases everything. The first block defines the
+section&nbsp;2.3 sine voice inline, so this chapter sounds on its own.</p>
 <pre><code><span class="kw">import</span> music.play.*;
 <span class="kw">import</span> audio_engine.*;
+<span class="kw">import</span> synthdef.*;
+<span class="kw">import</span> synthc.compile.*;
+<span class="kw">import</span> common_ugens.*;
+
+<span class="cmt">-- the polyphonic sine voice from section 2.3, inline so this cell sounds on its own</span>
+<span class="kw">fn</span> <span class="fn">sineVoice</span>() <span class="typ">S</span> {
+    <span class="kw">let</span> pch = noteParam(<span class="str">"pitch"</span>, ControlSpec { lo: <span class="num">0.0</span>, hi: <span class="num">127.0</span>, init: <span class="num">60.0</span>, warp: ControlWarp.linear });
+    <span class="kw">let</span> amp = noteParam(<span class="str">"amp"</span>,   ControlSpec { lo: <span class="num">0.0</span>, hi: <span class="num">1.0</span>,   init: <span class="num">0.5</span>,  warp: ControlWarp.linear });
+    <span class="kw">let</span> env = gate() adsr(<span class="num">0.01</span>, <span class="num">0.1</span>, <span class="num">0.7</span>, <span class="num">0.3</span>);
+    pch nnhz sinosc * env * amp
+}
+<span class="kw">fn</span> <span class="fn">sineSynth</span>() <span class="typ">S</span> = voicer(<span class="num">16</span>, sineVoice) sum outlet;
+sineSynth <span class="fn">defSynthX</span>(<span class="str">"sine_voice"</span>);
 
 engineStart();
+masterGain(<span class="num">0.2</span>);
 <span class="kw">let</span> v = pitchVoice(<span class="num">101</span>);              <span class="cmt">-- a voice: node, param order, pool size</span>
-voiceBundle(v, <span class="str">"sine_voice"</span>) go(<span class="num">0</span>);   <span class="cmt">-- build the node graph (section 2's synth)</span>
+voiceBundle(v, <span class="str">"sine_voice"</span>) go(<span class="num">0</span>);   <span class="cmt">-- build the node graph</span>
 
-<span class="kw">let</span> p = play(tune, v, et12, pentMinor);
-p replace(realize(form));             <span class="cmt">-- live-swap in an 11.4 reading</span>
-p enqueue(canon perform);             <span class="cmt">-- follow it with the 11.3 canon</span>
-
-<span class="cmt">-- the same events, offline, in a tritave tuning:</span>
+<span class="kw">let</span> p = play(tune, v, et12, pentMinor);   <span class="cmt">-- the 11.2 stream -- audible now</span></code></pre>
+<p>Live-swap and queue while it plays:</p>
+<pre><code>p replace(realize(form));    <span class="cmt">-- live-swap in an 11.4 reading</span>
+p enqueue(canon perform);    <span class="cmt">-- the 11.3 canon follows when it ends</span></code></pre>
+<p>And stop, releasing every note the voice holds:</p>
+<pre><code>p stop;    <span class="cmt">-- stop the player and release every note the voice holds</span></code></pre>
+<p>The same events also render offline, through any tuning:</p>
+<pre><code><span class="cmt">-- the same events, offline, in a tritave tuning:</span>
 <span class="kw">let</span> h = render(tune, v, <span class="str">"sine_voice"</span>, <span class="str">"/tmp/take.wav"</span>, <span class="num">20.0</span>,
                bp() root(<span class="num">220.0</span>, <span class="num">0.0</span>), chromatic(<span class="num">13</span>));
-<span class="kw">await</span> renderDone(h);</code></pre>
+<span class="kw">await</span> renderDone(h);
+<span class="str">"wrote /tmp/take.wav"</span> println;</code></pre>
 <p>For code running <em>inside</em> a silo (section&nbsp;5), use
 <code>scorePlayer</code> with <code>spawn</code> instead &mdash; it walks the same
 score with immediate <code>playNote</code>/<code>releaseNote</code> on the silo's

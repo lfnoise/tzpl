@@ -848,9 +848,15 @@ struct SiloLoadCompleteCmd : engine::Command {
 // immortal CodeBlock (functions aren't GC objects), so no rooting is needed.
 struct SiloRunStartCmd : engine::Command {
     int startIdx_;
-    explicit SiloRunStartCmd(int startIdx) : startIdx_(startIdx) {}
+    void* expectedVm_;   // the VM startIdx_ was recorded against
+    SiloRunStartCmd(int startIdx, void* expectedVm)
+        : startIdx_(startIdx), expectedVm_(expectedVm) {}
     void doRT(engine::Silo* s) override {
         auto* vm = static_cast<ts::VM*>(s->vm_);
+        // A detach (or detach + re-attach) between scheduling and this beat
+        // invalidates startIdx_: it indexes the OLD VM's globals. Run only
+        // against the exact VM it was recorded for.
+        if (vm != expectedVm_) return;
         if (vm && startIdx_ >= 0) {
             engine::Silo* prev = gCurrentSilo;
             gCurrentSilo = s;                 // so start() -> spawn targets this silo
@@ -1180,7 +1186,7 @@ static void ffi_siloStartAt(ts::VM& vm, u16, u16, u16 argBase) {
         // the user's bundle -- pre-existing hazard, unchanged by the
         // silo-at-submit refactor.
         engine::begin(eng);
-        engine::sendCommand(new SiloRunStartCmd(state.startGlobalIndex));
+        engine::sendCommand(new SiloRunStartCmd(state.startGlobalIndex, state.vm));
         engine::sched(siloIndex, 0, beat, engine::schedBetterLateThanNever);
     }
     // When audio is stopped the scheduled start() ran inline on the silo VM
