@@ -45,6 +45,9 @@ constexpr int kCpuW = 96;
 constexpr int kMasterW = 70;
 constexpr int kClipW = 14;
 constexpr int kGainW = 104;
+// Dead space between the gain slider and the mute button, so a slightly
+// missed drag at the top of the slider can't toggle mute.
+constexpr int kGainMuteGap = 14;
 constexpr int kMuteW = 52;
 constexpr int kPanicBtnH = 18;
 
@@ -172,7 +175,8 @@ juce::Rectangle<int> StatusBar::gainArea() const {
 
 juce::Rectangle<int> StatusBar::muteArea() const {
     auto r = compactRow().reduced(kPad, 3);
-    r.removeFromLeft(kTriangleW + kDeviceW + kCpuW + kMasterW + kClipW + kGainW);
+    r.removeFromLeft(kTriangleW + kDeviceW + kCpuW + kMasterW + kClipW + kGainW
+                     + kGainMuteGap);
     return r.removeFromLeft(kMuteW).reduced(3, 1);
 }
 
