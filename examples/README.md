@@ -30,5 +30,11 @@ evaluate it (Cmd+Return), or paste it into a notebook code cell.
 - `rosetta.x` -- programming examples from Rosetta Code written in
   idiomatic Tzopilotl: pipeline syntax, auto-mapping, lazy lists, no
   explicit loops. Needs no audio.
+- `cookbook/` -- the Tzopilotl Music Cookbook as notebooks, one `.tzd`
+  per chapter (2-11): every example from
+  `lang/docs/Tzopilotl_Music_Cookbook.html` as a runnable code cell,
+  with the chapter's text as prose cells. Nothing runs on open;
+  run cells with their Run button. Generated from the cookbook
+  HTML via `std.notebook`.
 
 The full guide is `lang/docs/Live_Controls_and_Notebooks.html`.
