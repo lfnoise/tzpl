@@ -1193,23 +1193,29 @@ fn toSynthSexpr(graph SignalGraph, synthName String, tags [String]) String {
 }
 
 -- LEGACY / oracle path. Compiles a synth via the S-expression serializer + the C++
--- compiler (compileSynthDefAndLoad). As of the M5.5 switchover, production synths
+-- compiler (compileSynthDefAndLoadAsync). As of the M5.5 switchover, production synths
 -- compile through synthc instead -- `defSynthX` (synthc/compile.x), the Tzopilotl-
 -- hosted compiler, which byte-matches this path's output (rewrites-on + SIMD width 4)
 -- across the whole corpus and renders bit-identically. `defSynth` (and the `toLisp`/
 -- `toSynthSexpr` serializer + the synthdefGenCppFromSexpr/synthdefAnalysisDump FFIs)
 -- are retained as the differential-test oracle the synthc diff suites compare against.
-fn defSynth(synthFun GraphFn, synthName String) String =
+--
+-- Async: the clang compile runs on a worker thread so playing sequences keep
+-- running. Await the returned future before the def's FIRST play; when
+-- redefining a def that is already playing, fire-and-forget is fine -- players
+-- keep the old def and hot-swap when the new one loads. (Inside an NRT render
+-- the compile runs synchronously, so the future is already resolved.)
+fn defSynth(synthFun GraphFn, synthName String) Future<String> =
 	defSynth(synthFun, synthName, [String]());
 
-fn defSynth(synthFun GraphFn, synthName String, tags [String]) String {
+async fn defSynth(synthFun GraphFn, synthName String, tags [String]) String {
 
 	let graph SignalGraph = synthFun _makeTopGraph;
 
 	let sexprString = graph
 		toSynthSexpr(synthName, mergeSynthTags(tags, defaultSynthTags()));
 
-	let err = sexprString compileSynthDefAndLoad;
+	let err = sexprString compileSynthDefAndLoadAsync await;
 	if (err length > 0) {
 		println("ERROR compiling " $ synthName $ ": " $ err);
 	} else {

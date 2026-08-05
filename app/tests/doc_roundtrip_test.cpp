@@ -27,6 +27,14 @@
 //      tzpl_doc_tests                 run all tests (asserts; exit 0 = pass)
 //      tzpl_doc_tests resave IN OUT   load IN headlessly, save to OUT
 //                                     (byte-identity instrumentation)
+//      tzpl_doc_tests filtercells IN OUT CMD
+//                                     pipe each prose/code cell's text
+//                                     through shell command CMD (text on
+//                                     stdin, result on stdout) and save the
+//                                     result. For batch source edits across
+//                                     notebooks (API migrations etc.).
+//      tzpl_doc_tests dumpcells IN    print code cells separated by %% lines
+//                                     (the TZPL_EVAL_CELLS cell-runner format)
 //
 
 #include "content_hash.hpp"
@@ -69,6 +77,90 @@ static int resave(char const* inPath, char const* outPath) {
         return 1;
     }
     std::printf("resaved %s -> %s\n", inPath, outPath);
+    return 0;
+}
+
+// Run one cell's text through the filter command via temp files. Returns
+// false on a filter failure.
+static bool runCellFilter(std::string const& cmd, std::string const& text,
+                          std::string& out) {
+    namespace fs = std::filesystem;
+    fs::path tmpIn  = fs::temp_directory_path() / "tzpl_doc_cell_in.txt";
+    fs::path tmpOut = fs::temp_directory_path() / "tzpl_doc_cell_out.txt";
+    {
+        std::ofstream f(tmpIn, std::ios::binary);
+        f << text;
+    }
+    std::string sh = cmd + " < \"" + tmpIn.string() + "\" > \""
+                   + tmpOut.string() + "\"";
+    if (std::system(sh.c_str()) != 0) return false;
+    std::ifstream f(tmpOut, std::ios::binary);
+    out.assign(std::istreambuf_iterator<char>(f),
+               std::istreambuf_iterator<char>());
+    // Line filters (sed & co) append a final newline the cell may not have
+    // had; don't let that count as (or pollute) a real edit.
+    if (!out.empty() && out.back() == '\n'
+        && (text.empty() || text.back() != '\n')) {
+        out.pop_back();
+    }
+    return true;
+}
+
+static int filterCells(char const* inPath, char const* outPath,
+                       char const* cmd) {
+    bridge::AppContext ctx;   // all subsystem pointers null: headless
+    std::string err;
+    doc::DocumentStore store;
+    doc::LoadedHistory hist;
+    auto snap = doc::loadDocument(ctx, inPath, err, &store.interns(), &hist);
+    if (!snap) {
+        std::fprintf(stderr, "load failed: %s\n", err.c_str());
+        return 1;
+    }
+    store.reset(std::move(snap), inPath);
+    if (hist.root) store.adoptHistory(std::move(hist.root), hist.cursor);
+
+    int changed = 0;
+    for (int i = 0; i < store.cellCount(); ++i) {
+        auto cell = store.cellAt(i);
+        if (cell->kind != doc::CellKind::Code
+            && cell->kind != doc::CellKind::Prose) continue;
+        std::string out;
+        if (!runCellFilter(cmd, cell->text, out)) {
+            std::fprintf(stderr, "filter failed on cell %d of %s\n", i, inPath);
+            return 1;
+        }
+        if (out != cell->text) {
+            store.setCellText(cell->id, out);
+            ++changed;
+        }
+    }
+
+    if (!doc::saveDocument(store, ctx, outPath, err)) {
+        std::fprintf(stderr, "save failed: %s\n", err.c_str());
+        return 1;
+    }
+    std::printf("filtered %s -> %s: %d cell(s) changed\n", inPath, outPath,
+                changed);
+    return 0;
+}
+
+// Print a document's code cells in the TZPL_EVAL_CELLS cell-runner format
+// (cells separated by lines containing only "%%"), so notebooks can be
+// evaluated headlessly:  tzpl_doc_tests dumpcells nb.tzd | TZPL_EVAL_CELLS=1 tzpl_app ...
+static int dumpCells(char const* inPath) {
+    bridge::AppContext ctx;
+    std::string err;
+    doc::InternPool pool;
+    auto snap = doc::loadDocument(ctx, inPath, err, &pool, nullptr);
+    if (!snap) {
+        std::fprintf(stderr, "load failed: %s\n", err.c_str());
+        return 1;
+    }
+    for (auto const& cell : snap->cells) {
+        if (cell->kind != doc::CellKind::Code) continue;
+        std::printf("%s\n%%%%\n", cell->text.c_str());
+    }
     return 0;
 }
 
@@ -535,6 +627,12 @@ static void testButtonMatrix() {
 }
 
 int main(int argc, char** argv) {
+    if (argc == 5 && std::strcmp(argv[1], "filtercells") == 0) {
+        return filterCells(argv[2], argv[3], argv[4]);
+    }
+    if (argc == 3 && std::strcmp(argv[1], "dumpcells") == 0) {
+        return dumpCells(argv[2]);
+    }
     if (argc == 4 && std::strcmp(argv[1], "resave") == 0) {
         return resave(argv[2], argv[3]);
     }

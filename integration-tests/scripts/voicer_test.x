@@ -31,7 +31,7 @@ fn sineVoice() S {
 
 fn sineSynth() S = voicer(32, sineVoice) sum outlet;
 
-sineSynth defSynth("sine_voice");
+sineSynth defSynth("sine_voice") await;
 
 println("compiled sine_voice");
 println(listSynthDefs());

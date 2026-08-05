@@ -405,7 +405,7 @@ if (localStorage.getItem('tzpl-docs-theme') === 'light') document.documentElemen
     freq sinosc(<span class="num">0</span>) mul(amp) outlet
 }
 
-demo defSynthX(<span class="str">"demo"</span>);
+demo defSynthX(<span class="str">"demo"</span>) await;
 <span class="kw">let</span> node = play(<span class="str">"demo"</span>);
 
 <span class="cmt">-- One line: a slider per control, named, ranged, warped, and bound</span>

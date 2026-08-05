@@ -516,7 +516,12 @@ delays, buffers, voicers, and a complete UGen reference &mdash; is
 <code>synthc</code>). An older <code>defSynth</code> calls the legacy C++ compiler
 and exists mainly as a differential oracle. Prefer <code>defSynthX</code>. Both
 need a working <code>clang</code> toolchain on <code>PATH</code> &mdash; they emit
-C++, compile it to a <code>.dylib</code>, and <code>dlopen</code> it.</div>
+C++, compile it to a <code>.dylib</code>, and <code>dlopen</code> it. Both are
+<strong>async</strong>: the clang step runs in the background so music that is
+already playing never pauses. Write <code>mySynth defSynthX(<span
+class="str">"mySynth"</span>) await;</code> when the next line needs the def (its
+first play); when redefining a def that is already playing, drop the
+<code>await</code> &mdash; players hot-swap to the new version when it loads.</div>
 
 <h3 id="synthdef-freerun">2.2 A free-running synth</h3>
 <p>The simplest kind of synth is free-running: it sounds continuously from the
@@ -537,7 +542,7 @@ registered as <code>"bubbles"</code>:</p>
     |&gt; nnhz sinosc * <span class="num">0.04</span>
     |&gt; combn(<span class="num">0.2</span>, <span class="num">4</span>) outlet;
 
-bubbles <span class="fn">defSynthX</span>(<span class="str">"bubbles"</span>);
+bubbles <span class="fn">defSynthX</span>(<span class="str">"bubbles"</span>) await;
 <span class="str">"defs: "</span> print; <span class="fn">listSynthDefs</span>() println;</code></pre>
 <p>Evaluating this (<kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>Enter</kbd>) prints the
 compile/link commands to the output panel and then:</p>
@@ -572,7 +577,7 @@ trigger with <code>gate()</code> (gate is voice input 0, injected automatically)
 <span class="cmt">-- 16-voice polyphonic synth; `sum` mixes the voices, `outlet` is the sink.</span>
 <span class="kw">fn</span> <span class="fn">sineSynth</span>() <span class="typ">S</span> = <span class="fn">voicer</span>(<span class="num">16</span>, sineVoice) sum outlet;
 
-sineSynth <span class="fn">defSynthX</span>(<span class="str">"sine_voice"</span>);</code></pre>
+sineSynth <span class="fn">defSynthX</span>(<span class="str">"sine_voice"</span>) await;</code></pre>
 <p><strong>How it works.</strong> <code>voicer(16, sineVoice)</code> instantiates the
 voice graph 16 times with independent note state; <code>sum</code> reduces them to
 one stereo signal. <code>noteParam</code> values arrive in the order they are
@@ -608,7 +613,7 @@ on the engine side by the <code>wavetables</code> module and pushed in with
     <span class="kw">let</span> f = control(<span class="str">"freq"</span>, ControlSpec { lo: <span class="num">20.0</span>, hi: <span class="num">8000.0</span>, init: <span class="num">110.0</span>, warp: ControlWarp.exponential });
     b <span class="fn">osc</span>(f) * <span class="num">0.2</span> |&gt; outlet
 }
-wtsaw <span class="fn">defSynthX</span>(<span class="str">"wtsaw"</span>);
+wtsaw <span class="fn">defSynthX</span>(<span class="str">"wtsaw"</span>) await;
 
 <span class="fn">engineStart</span>();
 <span class="fn">begin</span>();
@@ -1229,7 +1234,7 @@ completion.</p>
 <span class="kw">import</span> std.futures.*;
 
 <span class="kw">fn</span> <span class="fn">beep</span>() <span class="typ">S</span> = [<span class="num">330.0</span>, <span class="num">331.0</span>] sinosc * (<span class="num">1.0</span> lfimp decay(<span class="num">0.25</span>)) * <span class="num">0.2</span> |&gt; outlet;
-beep <span class="fn">defSynthX</span>(<span class="str">"beep"</span>);
+beep <span class="fn">defSynthX</span>(<span class="str">"beep"</span>) await;
 
 <span class="cmt">-- Render two seconds of beeps to a WAV file.</span>
 <span class="kw">let</span> h = <span class="fn">renderNRT</span>(<span class="str">"out.wav"</span>, <span class="num">2.0</span>, <span class="kw">fn</span>() <span class="typ">Void</span> {
@@ -1460,7 +1465,7 @@ section&nbsp;2.3 sine voice inline, so this chapter sounds on its own.</p>
     pch nnhz sinosc * env * amp
 }
 <span class="kw">fn</span> <span class="fn">sineSynth</span>() <span class="typ">S</span> = voicer(<span class="num">16</span>, sineVoice) sum outlet;
-sineSynth <span class="fn">defSynthX</span>(<span class="str">"sine_voice"</span>);
+sineSynth <span class="fn">defSynthX</span>(<span class="str">"sine_voice"</span>) await;
 
 engineStart();
 masterGain(<span class="num">0.2</span>);

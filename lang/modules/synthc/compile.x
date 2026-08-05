@@ -56,10 +56,17 @@ fn compileAndLoadGraph(g SignalGraph, name String) String {
 -- Public entry point: the synthc analogue of defSynth. Builds the graph from a
 -- synth function, compiles it with the Tzopilotl-hosted compiler, loads it, and
 -- reports. Returns the generated C++ source (handy for inspection/testing).
-fn defSynthX(synthFun GraphFn, synthName String) String =
+--
+-- Async: the graph analysis and C++ generation run here (fast), but the clang
+-- compile + dylib load run on a worker thread so playing sequences keep
+-- running. Await the returned future before the def's FIRST play; when
+-- redefining a def that is already playing, fire-and-forget is fine -- players
+-- keep the old def and hot-swap when the new one loads. (Inside an NRT render
+-- the compile runs synchronously, so the future is already resolved.)
+fn defSynthX(synthFun GraphFn, synthName String) Future<String> =
 	defSynthX(synthFun, synthName, [String]());
 
-fn defSynthX(synthFun GraphFn, synthName String, tags [String]) String {
+async fn defSynthX(synthFun GraphFn, synthName String, tags [String]) String {
 	let g = makeGraph(synthFun);
 	let cpp = compileToCpp(g, synthName, true, 4,
 	                       mergeSynthTags(tags, defaultSynthTags()));
@@ -67,14 +74,9 @@ fn defSynthX(synthFun GraphFn, synthName String, tags [String]) String {
 		println("ERROR compiling " $ synthName $ " (synthc): " $ cpp);
 		return cpp;
 	}
-	let path = writeAndCompileCpp(synthName, cpp);
-	if (path startsWith("error:")) {
-		println("ERROR compiling " $ synthName $ " (synthc): " $ path);
-		return cpp;
-	}
-	let err = loadSynthDylib(path);
+	let err = writeCompileAndLoadAsync(synthName, cpp) await;
 	if (err length > 0) {
-		println("ERROR loading " $ synthName $ " (synthc): " $ err);
+		println("ERROR compiling " $ synthName $ " (synthc): " $ err);
 	} else {
 		println(synthName $ " compiled successfully (synthc).");
 	}

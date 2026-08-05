@@ -404,8 +404,15 @@
     * <span class="hl-num">0.2</span>
     |&gt; outlet;                     <span class="cmt">-- the graph's output sink</span>
 
-beep defSynthX(<span class="hl-str">"beep"</span>);            <span class="cmt">-- compile + load into the engine</span>
+beep defSynthX(<span class="hl-str">"beep"</span>) await;      <span class="cmt">-- compile + load into the engine</span>
 <span class="hl-str">"beep"</span> play;                       <span class="cmt">-- make a node and connect it to audio out</span></code></pre>
+
+            <p>The compile itself runs in the background, so any music already playing keeps
+            running while clang works. The <code>await</code> waits until the def is loaded into
+            the engine &mdash; needed here because the next line plays it. When you re-evaluate a
+            <code>defSynthX</code> call for a def that is already playing you can drop the
+            <code>await</code>: players keep using the old version and switch to the new one the
+            moment it finishes loading.</p>
 
             <p>Synthdef code leans on two pieces of Tzopilotl syntax used heavily below: the
             space-separated pipeline (<code>x sinosc sq</code> is <code>sq(sinosc(x))</code>) and the
@@ -907,7 +914,7 @@ freqs fsinosc * amps |&gt; sum(<span class="hl-num">2</span>) * <span class="hl-
     pos &lt;- newPos;
     buf vread(newPos, Interpolation.cubic, <span class="hl-num">2</span>) |&gt; outlet
 }
-samplePlayer defSynthX(<span class="hl-str">"samplePlayer"</span>);
+samplePlayer defSynthX(<span class="hl-str">"samplePlayer"</span>) await;
 
 <span class="cmt">-- engine side, after newNode("samplePlayer", 100):</span>
 loadBuffer(<span class="hl-num">100</span>, <span class="hl-num">0</span>, <span class="hl-str">"samples/kick.wav"</span>);</code></pre>
@@ -998,7 +1005,7 @@ loadBuffer(<span class="hl-num">100</span>, <span class="hl-num">0</span>, <span
 }
 
 <span class="hl-kw">fn</span> organ() S = voicer(<span class="hl-num">8</span>, organVoice) sum outlet;
-organ defSynthX(<span class="hl-str">"organ"</span>);
+organ defSynthX(<span class="hl-str">"organ"</span>) await;
 
 <span class="cmt">-- engine side: params are [freq, amp, gate] -- declaration order, gate last</span>
 newNode(<span class="hl-str">"organ"</span>, <span class="hl-num">100</span>); connect(<span class="hl-num">100</span>, <span class="hl-num">0</span>, <span class="hl-num">0</span>, <span class="hl-num">0</span>);
@@ -1047,15 +1054,32 @@ noteOff(<span class="hl-num">100</span>, <span class="hl-num">1</span>);</code><
             <code>defSynthX(synthFun, name, tags)</code> (from <code>synthc.compile</code>) run your
             graph function, compile the graph with <strong>synthc</strong> &mdash; the Tzopilotl-hosted
             synthdef compiler &mdash; and load the resulting plugin into the engine under
-            <code>name</code>. This is the production path. Compilation invokes <code>clang</code> to
-            build the <code>.dylib</code>, so it happens on the non-real-time side and never glitches
-            running audio; re-evaluating a <code>defSynthX</code> call recompiles and reloads the def,
-            so you can iterate on a synth live.</p>
+            <code>name</code>. This is the production path.</p>
+
+            <p><code>defSynthX</code> is <strong>async</strong>: the <code>clang</code> invocation
+            that builds the <code>.dylib</code> runs on a background worker, so sequences that are
+            already playing keep playing while a def compiles. The call returns a
+            <code>Future&lt;String&gt;</code> holding the generated C++ source; when it resolves, the
+            def has been compiled, loaded, and registered (a success or error line is printed
+            either way). Two usage patterns:</p>
+
+            <ul>
+                <li><strong>First definition:</strong> <code>await</code> before playing the def
+                &mdash; <code>mySynth defSynthX(<span class="hl-str">"mySynth"</span>) await;</code> &mdash;
+                so the def exists when the first note asks for it.</li>
+                <li><strong>Redefinition:</strong> just call it, no <code>await</code>. Players keep
+                the old version of the def and hot-swap to the new one when it loads &mdash; live
+                iteration on a synth never interrupts the music.</li>
+            </ul>
+
+            <p>Inside a non-real-time render script the compile runs synchronously (the render
+            cannot proceed without the def), so the returned future is already resolved.</p>
 
             <p><code>defSynth</code> (in <code>synthdef.x</code>) is the legacy path through the C++
             compiler via the S-expression serializer. It byte-matches <code>defSynthX</code>'s output
             and is retained as the differential-test oracle; new code should use
-            <code>defSynthX</code>.</p>
+            <code>defSynthX</code>. It is async in the same way and returns the synthdef's
+            S-expression text.</p>
 
             <h3>Tags</h3>
 
@@ -1406,7 +1430,7 @@ adsr(gate(), <span class="hl-num">0.02</span>, <span class="hl-num">0.1</span>, 
     <span class="hl-kw">let</span> f = control(<span class="hl-str">"freq"</span>, ControlSpec { lo: <span class="hl-num">20.0</span>, hi: <span class="hl-num">10000.0</span>, init: <span class="hl-num">110.0</span>, warp: ControlWarp.exponential });
     b osc(f) * <span class="hl-num">0.2</span> |&gt; outlet
 }
-sawOsc defSynthX(<span class="hl-str">"sawOsc"</span>);
+sawOsc defSynthX(<span class="hl-str">"sawOsc"</span>) await;
 
 <span class="cmt">-- engine side, after newNode("sawOsc", 100):</span>
 <span class="hl-kw">import</span> wavetables.*;

@@ -160,6 +160,12 @@ struct NRTVM {
         if (heartbeatThread_.joinable()) heartbeatThread_.join();
     }
 
+    // Drain and join the async I/O worker now. Queued jobs' complete steps
+    // may touch host-owned state (the audio engine, via the async synthdef
+    // compile FFIs) -- hosts must call this before destroying that state.
+    // Safe with no executor; a later submit would lazily recreate one.
+    void drainAsyncIO() { ioExec_.reset(); }
+
     // Call a compiled function under the mutex. Any thread may call this.
     Word call(CodeBlock* block, const Word* args, u16 argc) {
         std::lock_guard lock(mtx);

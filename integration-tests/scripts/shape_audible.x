@@ -22,7 +22,7 @@ fn sineVoice() S {
     pch nnhz sinosc cb * env * amp
 }
 fn sineSynth() S = voicer(16, sineVoice) sum outlet;
-sineSynth defSynth("hmsl_sine");
+sineSynth defSynth("hmsl_sine") await;
 
 engineStart();
 masterGain(0.2);

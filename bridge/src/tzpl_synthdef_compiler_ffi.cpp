@@ -35,6 +35,7 @@
 #include "synthdef_str_util.hpp"
 #include <dlfcn.h>
 #include <memory>
+#include <mutex>
 #include <unordered_map>
 #include <functional>
 #include <vector>
@@ -112,6 +113,14 @@ static std::string cacheKey(std::string const& name, std::string const& sexpr) {
 // Core compilation pipeline
 // ---------------------------------------------------------------------------
 
+// Serializes users of the C++ compiler's process-wide state (PushSynth's
+// current-synth stack, gApplyRewrites, the build dir's revision scan) between
+// the VM thread's synchronous FFIs and the async compile worker.
+static std::mutex& compileMtx() {
+    static std::mutex m;
+    return m;
+}
+
 // Runs the full synthdef compilation pipeline.
 // The sexpr should be in (Synth <name> (Graph ...)) format.
 // Returns "" on success, error message on failure.
@@ -119,6 +128,8 @@ static std::string cacheKey(std::string const& name, std::string const& sexpr) {
 static std::string compileSynthDefPipeline(std::string const& sexpr,
                                             std::string& synthName,
                                             std::string& dylibPath) {
+    std::lock_guard<std::mutex> lock(compileMtx());
+
     // Parse s-expression and build synth graph (name extracted from Synth wrapper)
     auto result = synthdef::synthFromSExprText(sexpr);
     if (!result) {
@@ -157,6 +168,24 @@ static std::string compileSynthDefPipeline(std::string const& sexpr,
     }
 
     dylibPath = synthdef::dylibPath(dir, synthName);
+    return "";
+}
+
+// Load a compiled plugin dylib and register its def with the VM's engine.
+// Returns "" on success, error message on failure.
+static std::string loadAndRegister(ts::VM& vm, std::string const& path) {
+    auto optDef = synthdef::loadDef(path);
+    if (!optDef.has_value()) {
+        return std::string("failed to load plugin: ") + path;
+    }
+
+    engine::Engine* eng = getEngine(vm);
+    if (!eng) {
+        return "no engine attached to VM";
+    }
+
+    engine::addSynthDef(eng, optDef->def, optDef->dlHandle, &optDef->bufferDefs,
+                        &optDef->tagList);
     return "";
 }
 
@@ -259,6 +288,8 @@ static void ffi_writeAndCompileCpp(ts::VM& vm, u16 dst, u16, u16 argBase) {
     std::string name = regString(vm, argBase);
     std::string cppCode = regString(vm, argBase + 1);
 
+    std::lock_guard<std::mutex> lock(compileMtx());
+
     std::string dir = synthdef::getBuildDir();
     synthdef::ensureBuildDirs(dir);
     try {
@@ -285,23 +316,141 @@ static void ffi_writeAndCompileCpp(ts::VM& vm, u16 dst, u16, u16 argBase) {
 // Returns "" on success, error message on failure.
 static void ffi_loadSynthDylib(ts::VM& vm, u16 dst, u16, u16 argBase) {
     std::string path = regString(vm, argBase);
+    returnErrString(vm, dst, loadAndRegister(vm, path), __func__);
+}
 
-    auto optDef = synthdef::loadDef(path);
-    if (!optDef.has_value()) {
-        returnErrString(vm, dst, std::string("failed to load plugin: ") + path,
-                        __func__);
-        return;
+// ---------------------------------------------------------------------------
+// Async compile FFIs
+//
+// The clang subprocess behind defSynth/defSynthX takes on the order of a
+// second and used to run on the VM thread, stalling the NRT scheduler -- an
+// audible pause in any playing sequence. These variants run the compile on
+// the host's async I/O worker (async_io.hpp); the completion step loads the
+// dylib, registers the def, and resolves a Future<String> ("" on success)
+// under the host mutex with the VM current -- the same cross-thread
+// discipline as readFileAsync / siloLoad / renderDone.
+// ---------------------------------------------------------------------------
+
+// State shared between an async compile job's work and complete steps.
+// System-allocated on purpose: the worker thread must never touch the VM heap.
+struct AsyncCompileState {
+    std::string sexpr;      // pipeline input (compileSynthDefAndLoadAsync)
+    std::string name;       // synth name
+    std::string cpp;        // generated C++ source (writeCompileAndLoadAsync)
+    std::string dylibPath;
+    std::string error;
+};
+
+// Create a Pending Future<String>, root it while in flight, return it.
+static ts::Future* makePendingStringFuture(ts::VM& vm) {
+    ts::Type* strT = vm.stringType();
+    auto* fut = ts::Future::create(vm.typeUniverse().futureType(strT), strT, 1);
+    vm.registerExternalFuture(fut);
+    return fut;
+}
+
+// Submit to the host executor. Runs the job inline instead when (a) an NRT
+// render is in progress -- currentRenderContext() is thread-local and the def
+// must land in the per-render engine before the script continues -- or (b)
+// the host has no executor (submitAsyncIO then leaves the job untouched).
+static void submitOrRunInline(ts::VM& vm, ts::AsyncIOJob&& job) {
+    if (currentRenderContext() != nullptr || !vm.submitAsyncIO(std::move(job))) {
+        job.work();
+        job.complete(vm);
+    }
+}
+
+// Complete-step tail shared by both async FFIs: load + register the freshly
+// compiled dylib (unless compilation already failed), then resolve the
+// Future. Runs with the host mutex held and the VM current.
+static void finishAsyncCompile(ts::VM& vm,
+                               std::shared_ptr<AsyncCompileState> const& st,
+                               ts::Future* fut, char const* fnName) {
+    std::string err = st->error;
+    if (err.empty()) {
+        err = loadAndRegister(vm, st->dylibPath);
+    }
+    if (!err.empty()) {
+        std::fprintf(stderr, "synthdef.%s: %s\n", fnName, err.c_str());
+    }
+    ts::Word w;
+    w.o = new ts::StringObj(err);
+    vm.resolveExternalFuture(fut, &w, 1);
+}
+
+// fn compileSynthDefAndLoadAsync(sexpr String) Future<String>
+// Async backend of defSynth: the full C++ pipeline (parse, analysis, codegen,
+// clang) runs on the worker thread. Resolves to "" on success.
+static void ffi_compileSynthDefAndLoadAsync(ts::VM& vm, u16 dst, u16, u16 argBase) {
+    auto st = std::make_shared<AsyncCompileState>();
+    st->sexpr = regString(vm, argBase);
+
+    ts::Future* fut = makePendingStringFuture(vm);
+    vm.reg(dst).o = fut;
+
+    // Cache hit: nothing to compile -- load and resolve right away. A stale
+    // path (revision pruned since it was cached) falls through to a fresh
+    // compile, mirroring the synchronous version's retry.
+    std::string key = cacheKey("", st->sexpr);
+    auto it = compilationCache().find(key);
+    if (it != compilationCache().end()) {
+        std::string err = loadAndRegister(vm, it->second.dylibPath);
+        if (err.empty()) {
+            ts::Word w;
+            w.o = new ts::StringObj("");
+            vm.resolveExternalFuture(fut, &w, 1);
+            return;
+        }
+        compilationCache().erase(it);
     }
 
-    engine::Engine* eng = getEngine(vm);
-    if (!eng) {
-        returnErrString(vm, dst, "no engine attached to VM", __func__);
-        return;
-    }
+    ts::AsyncIOJob job;
+    job.work = [st] {
+        st->error = compileSynthDefPipeline(st->sexpr, st->name, st->dylibPath);
+    };
+    job.complete = [st, fut](ts::VM& v) {
+        if (st->error.empty()) {
+            // Host-mutex-held, so the cache access can't race the VM thread.
+            compilationCache()[cacheKey("", st->sexpr)] = CacheEntry{st->dylibPath};
+        }
+        finishAsyncCompile(v, st, fut, "compileSynthDefAndLoadAsync");
+    };
+    submitOrRunInline(vm, std::move(job));
+}
 
-    engine::addSynthDef(eng, optDef->def, optDef->dlHandle, &optDef->bufferDefs,
-                        &optDef->tagList);
-    returnString(vm, dst, "");
+// fn writeCompileAndLoadAsync(name String, cppSource String) Future<String>
+// Async backend of defSynthX: writes the synthc-generated C++, compiles and
+// links it on the worker thread. Resolves to "" on success.
+static void ffi_writeCompileAndLoadAsync(ts::VM& vm, u16 dst, u16, u16 argBase) {
+    auto st = std::make_shared<AsyncCompileState>();
+    st->name = regString(vm, argBase);
+    st->cpp = regString(vm, argBase + 1);
+
+    ts::Future* fut = makePendingStringFuture(vm);
+    vm.reg(dst).o = fut;
+
+    ts::AsyncIOJob job;
+    job.work = [st] {
+        std::lock_guard<std::mutex> lock(compileMtx());
+        std::string dir = synthdef::getBuildDir();
+        synthdef::ensureBuildDirs(dir);
+        try {
+            synthdef::writeCodeToFile(dir, st->name, st->cpp);
+        } catch (std::exception const& e) {
+            st->error = std::string("write failed: ") + e.what();
+            return;
+        }
+        int err = synthdef::compileAndLink(dir, st->name);
+        if (err) {
+            st->error = "compile/link failed with exit code " + std::to_string(err);
+            return;
+        }
+        st->dylibPath = synthdef::dylibPath(dir, st->name);
+    };
+    job.complete = [st, fut](ts::VM& v) {
+        finishAsyncCompile(v, st, fut, "writeCompileAndLoadAsync");
+    };
+    submitOrRunInline(vm, std::move(job));
 }
 
 // fn synthdefGenCppFromSexpr(sexpr String, maxSimdWidth Int, applyRewrites Bool) String
@@ -315,6 +464,7 @@ static void ffi_synthdefGenCppFromSexpr(ts::VM& vm, u16 dst, u16, u16 argBase) {
     int simdWidth = static_cast<int>(vm.reg(argBase + 1).i);
     bool applyRewrites = vm.reg(argBase + 2).i != 0;
 
+    std::lock_guard<std::mutex> lock(compileMtx());
     RewriteGuard guard(applyRewrites);
 
     auto result = synthdef::synthFromSExprText(sexpr);
@@ -344,6 +494,7 @@ static void ffi_synthdefAnalysisDump(ts::VM& vm, u16 dst, u16, u16 argBase) {
     std::string sexpr = regString(vm, argBase);
     bool applyRewrites = vm.reg(argBase + 1).i != 0;
 
+    std::lock_guard<std::mutex> lock(compileMtx());
     RewriteGuard guard(applyRewrites);
 
     auto result = synthdef::synthFromSExprText(sexpr);
@@ -444,6 +595,7 @@ void registerSynthdefCompilerFFI(ts::Compiler& compiler) {
     auto* Bool   = compiler.boolType();
     auto* Float  = compiler.floatType();
     ts::Type* StringArray = reinterpret_cast<ts::Type*>(compiler.arrayType(String));
+    ts::Type* FutureString = reinterpret_cast<ts::Type*>(compiler.futureType(String));
 
     using R = void (*)(ts::VM&, u16, u16, u16);
 
@@ -459,6 +611,13 @@ void registerSynthdefCompilerFFI(ts::Compiler& compiler) {
 
     reg("compileSynthDef",        String,      {String}, ffi_compileSynthDef);
     reg("compileSynthDefAndLoad", String,      {String}, ffi_compileSynthDefAndLoad);
+
+    // Async backends of defSynth / defSynthX: the compile runs on the host's
+    // async I/O worker so the NRT scheduler keeps dispatching while clang runs.
+    reg("compileSynthDefAndLoadAsync", FutureString, {String},
+        ffi_compileSynthDefAndLoadAsync);
+    reg("writeCompileAndLoadAsync",    FutureString, {String, String},
+        ffi_writeCompileAndLoadAsync);
 
     // Low-level functions for the Tzopilotl-hosted compiler (synthc modules)
     // and its differential test harness.

@@ -21,7 +21,7 @@ fn sineVoice() S {
     pch nnhz sinosc cb * env * amp
 }
 fn sineSynth() S = voicer(16, sineVoice) sum outlet;
-sineSynth defSynth("pat_sine");
+sineSynth defSynth("pat_sine") await;
 
 randSeed(42);
 

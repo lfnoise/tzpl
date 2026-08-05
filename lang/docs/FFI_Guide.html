@@ -2661,6 +2661,8 @@ nats.<span class="fn">onMessageS</span>(<span class="str">"nodes.piano.chords"</
   <tr><th>Function</th><th>Description</th></tr>
   <tr><td><code>compileSynthDef(sexpr String) String</code></td><td>Compile a synth definition from an s-expression string. Generates C++ code and compiles it to a <code>.dylib</code>, but does <em>not</em> load it into the engine. Returns <code>""</code> on success, or an error message on failure. The result is cached for subsequent calls.</td></tr>
   <tr><td><code>compileSynthDefAndLoad(sexpr String) String</code></td><td>Compile a synth definition and load it into the running audio engine. Performs the same compilation as <code>compileSynthDef</code>, then loads the resulting <code>.dylib</code> and registers the definition with the engine. Returns <code>""</code> on success, or an error message on failure. Requires an engine to be attached to the VM.</td></tr>
+  <tr><td><code>compileSynthDefAndLoadAsync(sexpr String) Future&lt;String&gt;</code></td><td>Async variant of <code>compileSynthDefAndLoad</code>: the compile runs on the VM's background I/O worker, so scheduled music keeps playing while clang runs. The future resolves to <code>""</code> on success or an error message; when it resolves, the def has been loaded and registered. This is the backend of the synthdef module's <code>defSynth</code>. Inside an NRT render the job runs synchronously and the future is returned already resolved.</td></tr>
+  <tr><td><code>writeCompileAndLoadAsync(name String, cppSource String) Future&lt;String&gt;</code></td><td>Async backend of synthc's <code>defSynthX</code>: writes already-generated C++ source, compiles and links it on the background worker, then loads and registers the def. Same resolution semantics as <code>compileSynthDefAndLoadAsync</code>.</td></tr>
 </table>
 
 <p>The <code>sexpr</code> argument must be in the format <code>(Synth &lt;name&gt; (Graph ...))</code>. The synth name is extracted from the s-expression.</p>
@@ -2694,11 +2696,11 @@ nats.<span class="fn">onMessageS</span>(<span class="str">"nodes.piano.chords"</
 
 <h4>High-level: using the synthdef module's <code>defSynth</code></h4>
 
-<p>The <code>synthdef</code> Tzopilotl module provides <code>defSynth</code>, which builds the graph from a function, converts it to an s-expression, and calls <code>compileSynthDefAndLoad</code> automatically:</p>
+<p>The <code>synthdef</code> Tzopilotl module provides <code>defSynth</code>, which builds the graph from a function, converts it to an s-expression, and calls <code>compileSynthDefAndLoadAsync</code> automatically. It is an async function; <code>await</code> it when the following code needs the def to be loaded:</p>
 
 <pre><code><span class="kw">import</span> synthdef.*;
 
-<span class="fn">defSynth</span>(<span class="kw">fn</span>() { <span class="num">440.0</span> <span class="fn">sinosc</span> <span class="fn">outlet</span> }, <span class="str">"mySine"</span>);</code></pre>
+<span class="fn">defSynth</span>(<span class="kw">fn</span>() { <span class="num">440.0</span> <span class="fn">sinosc</span> <span class="fn">outlet</span> }, <span class="str">"mySine"</span>) <span class="kw">await</span>;</code></pre>
 
 <h4>Compile only (without loading)</h4>
 

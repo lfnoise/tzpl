@@ -1058,6 +1058,11 @@ int main(int argc, const char* argv[]) {
         oscServer.stop();
 #endif
 
+        // Drain in-flight async I/O jobs while the engine is still alive: a
+        // queued background synthdef compile's completion step loads the
+        // dylib and registers the def with the engine.
+        nrtvm.drainAsyncIO();
+
         if (startAudio) {
             engine::stopAudio(eng);
         }
