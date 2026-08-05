@@ -86,10 +86,16 @@ namespace synthdef {
         chans = ichans;
     }
 
-    Rand64Expr::Rand64Expr(usize ichans, SignalRate rate) 
-        : Expr(rate, {}), serial(nextRandSerialNo()) 
+    Rand64Expr::Rand64Expr(usize ichans, SignalRate rate)
+        : Expr(rate, {}), serial(nextRandSerialNo())
     {
         chans = ichans;
+    }
+
+    SharedInExpr::SharedInExpr(u64 slot, SignalRate rate)
+        : Expr(rate, {}), slot(slot)
+    {
+        chans = 1;
     }
 
     DelayBuf::DelayBuf() 

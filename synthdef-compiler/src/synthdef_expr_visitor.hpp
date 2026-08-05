@@ -35,6 +35,7 @@ struct ExprVisitor {
     virtual void visit(Constant* e) = 0;
     virtual void visit(SampleRate* e) = 0;
     virtual void visit(SampleDur* e) = 0;
+    virtual void visit(SharedInExpr* e) = 0;
     virtual void visit(Control* e) = 0;
     virtual void visit(NoteParam* e) = 0;
     virtual void visit(Inlet* e) = 0;

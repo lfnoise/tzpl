@@ -832,6 +832,17 @@ struct ExprCodegenVisitor : ExprVisitor {
             s += FMT("({})(p->sd)", p->type.str());
         }
     }
+    void visit(SharedInExpr* p) override {
+        // The table stores volatile f32; cast to the expression's inferred type.
+        if (g.inSimdMode) {
+            s += simdSplat(p->type, g.currentSimdWidth,
+                FMT("({})(tzpl_sharedInput->vals[{}])", p->type.str(), p->slot));
+        } else if (p->type == NumType::f32) {
+            s += FMT("tzpl_sharedInput->vals[{}]", p->slot);
+        } else {
+            s += FMT("({})(tzpl_sharedInput->vals[{}])", p->type.str(), p->slot);
+        }
+    }
     void visit(Control* p) override {
         if (g.inSimdMode) {
             if (p->chans == 1) {
@@ -1601,6 +1612,7 @@ struct GenTreeExprVisitor : ExprVisitor {
     void visit(Constant* p) override {}
     void visit(SampleRate* p) override {}
     void visit(SampleDur* p) override {}
+    void visit(SharedInExpr* p) override {}
     void visit(Control* p) override {}
     void visit(NoteParam* p) override {}
     void visit(Inlet* p) override {}
@@ -2127,6 +2139,7 @@ struct GenLoopExprVisitor : ExprVisitor {
     void visit(Constant* p) override {}
     void visit(SampleRate* p) override {}
     void visit(SampleDur* p) override {}
+    void visit(SharedInExpr* p) override {}
     void visit(Control* p) override {}
     void visit(NoteParam* p) override {}
     void visit(Inlet* p) override {}
@@ -3443,6 +3456,20 @@ string CppCodeGen::genClass()
         s += "#include \"tzpl_voicer.hpp\"\n";
     }
     s += "\n";
+
+    // Shared-input pointer: exported so the loader can repoint it (via dlsym
+    // "tzpl_sharedInput") at the engine's process-global table. If never
+    // bound (e.g. loaded by an engine that predates shared input), the graph
+    // reads the all-zero fallback.
+    for (S expr : synth->sorted) {
+        if (expr.as<SharedInExpr>()) {
+            s += "static tzpl_SharedInput tzpl_sharedInputFallback = {};\n";
+            s += "extern \"C\" tzpl_SharedInput const* tzpl_sharedInput = &tzpl_sharedInputFallback;\n";
+            s += "\n";
+            break;
+        }
+    }
+
     s += "extern tzpl_SynthFuns " + name + "_funs;\n";
 
     s += "\n";

@@ -135,6 +135,7 @@ fn _kindKey(kind NodeKind) String = match (kind) {
 	constant(v, t):       "K|" $ v _constValKey $ "|" $ t.0 toString;
 	sampleRate:           "SR";
 	sampleDur:            "SD";
+	sharedInK(slot, r):   "SI|" $ slot toString $ "|" $ r ordinal toString;
 	control(spec, _, sn, kind): "CTL|" $ spec _specKey $ "|" $ kind ordinal toString $ "|" $ sn toString;
 	noteParamK(spec, _, sn): "NP|" $ spec _specKey $ "|" $ sn toString;
 	inletK(_, sn):        "IN|" $ sn toString;
@@ -578,6 +579,17 @@ fn _importExpr(e SignalExpr) Void {
 		}
 		sampleDur: {
 			_mapId(e.id, _addExprNode(NodeKind.sampleDur, [Int](), Rate.init, ANY_NUM, 1));
+		}
+		sharedIn(slot, srate): {
+			-- Mirrors the C++ sharedIn() factory validation.
+			if (slot < 0 || slot >= 16) { _impError("sharedIn: slot out of range"); }
+			match (srate) {
+				init: {}
+				audio: {}
+				_: { _impError("sharedIn: only init and audio rate supported"); }
+			}
+			_mapId(e.id, _addExprNode(NodeKind.sharedInK(slot, srate), [Int](),
+				srate, ANY_FLOAT, 1));
 		}
 		control(spec, chans, name, kind): {
 			let sn Int = `scControlSerials;

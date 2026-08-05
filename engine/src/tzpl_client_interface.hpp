@@ -306,6 +306,16 @@ tzpl_SErr setInput(PortAddr inPort, int numValues, f64 const* values, f64 xfadeT
 tzpl_SErr setInput(PortAddr inPort, int numValues, i32 const* values, f64 xfadeTime = 0., FadeCurve curve = fadeLinear);
 tzpl_SErr setInput(PortAddr inPort, int numValues, i64 const* values, f64 xfadeTime = 0., FadeCurve curve = fadeLinear);
 
+// Shared input: one process-global table of continuously varying values
+// (mouse position in the reserved slots, free slots for user values). Write
+// from any non-RT thread; plugin graphs read it at audio rate via the
+// sharedIn ugen -- no command traffic, no scheduling. Unlike setControl,
+// changes are NOT sample-accurately scheduled and are not bundled. See
+// tzpl_SharedInput in tzpl_plugin_abi.h for slot assignments.
+tzpl_SharedInput* sharedInput();
+tzpl_SErr setSharedInput(int slot, f32 value);
+f32 getSharedInput(int slot);
+
 // controls
 tzpl_SErr setControl(i64 nodeID, i64 controlID, int numValues, f32 const* values);
 tzpl_SErr setControl(i64 nodeID, i64 controlID, int numValues, f64 const* values);

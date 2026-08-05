@@ -155,6 +155,7 @@ enum NodeKind {
 	constant(ConstVal, NumType),         -- value, init_type
 	sampleRate,
 	sampleDur,
+	sharedInK(Int, Rate),                -- slot, rate (both are in the cons key)
 
 	control(ControlSpec, String, Int, ControlKind),   -- spec, name, serial, kind
 	noteParamK(ControlSpec, String, Int),
@@ -631,6 +632,7 @@ fn nodeStr(ctx Ctx, n NIdx) String {
 		constant(v, _):      constStr(v, ctx.typ[n]);
 		sampleRate:          "fs";
 		sampleDur:           "sd";
+		sharedInK(_, _):     "sharedin";
 		control(_, _, _, _): "control";
 		noteParamK(_, _, _): "noteParam";
 		inletK(_, _):        "inlet";

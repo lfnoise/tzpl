@@ -49,6 +49,7 @@ struct SExprGraphBuilder {
     std::expected<S, std::string> parseConstant(sexpr::ItemVec const& list);
     std::expected<S, std::string> parseSampleRate(sexpr::ItemVec const& list);
     std::expected<S, std::string> parseSampleDur(sexpr::ItemVec const& list);
+    std::expected<S, std::string> parseSharedIn(sexpr::ItemVec const& list);
     std::expected<S, std::string> parseURand(sexpr::ItemVec const& list);
     std::expected<S, std::string> parseBiRand(sexpr::ItemVec const& list);
     std::expected<S, std::string> parseRand64(sexpr::ItemVec const& list);

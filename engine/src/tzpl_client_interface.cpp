@@ -105,6 +105,27 @@ void freeEngine(Engine* e) {
 #endif
 }
 
+// Shared input -- one process-global table (there is one mouse per machine),
+// shared by every Engine including NRT render engines. Non-RT threads write
+// slots with plain stores; plugin graphs read them at audio rate. Aligned
+// 32-bit accesses are tear-free, so no locks or FIFOs are involved.
+static tzpl_SharedInput gSharedInput; // zero-initialized
+
+tzpl_SharedInput* sharedInput() {
+    return &gSharedInput;
+}
+
+tzpl_SErr setSharedInput(int slot, f32 value) {
+    if (slot < 0 || slot >= TZPL_SHARED_INPUT_SLOTS) return tzpl_errInputOutOfRange;
+    gSharedInput.vals[slot] = value;
+    return tzpl_errNone;
+}
+
+f32 getSharedInput(int slot) {
+    if (slot < 0 || slot >= TZPL_SHARED_INPUT_SLOTS) return 0.f;
+    return gSharedInput.vals[slot];
+}
+
 // Read a loaded plugin's ABI version stamp into `out`. Returns false when the
 // symbol is absent: that is NOT version 0, it means the plugin predates
 // versioning and its tzpl_SynthDef layout is unknowable (see the header).
@@ -530,6 +551,16 @@ NodeDef* getNodeDef(Engine* e, const char* name) {
 
 void addSynthDef(Engine* e, tzpl_SynthDef const& def, void* dlHandle,
                  tzpl_BufferDefList const* bufs, tzpl_TagList const* tags) {
+    // Optional shared-input symbol: repoint the plugin's all-zero fallback at
+    // the process-global table so its graph reads live values. This is the
+    // one choke point every plugin handle passes through (loadOneDef and the
+    // bridge's compile-and-register paths both land here). Idempotent.
+    if (dlHandle) {
+        if (void* siPtr = dlsym(dlHandle, "tzpl_sharedInput")) {
+            *(tzpl_SharedInput const**)siPtr = &gSharedInput;
+        }
+    }
+
     // Build a NodeDefInfo from the tzpl_SynthDef.
     NodeDefInfo info{};
     info.name = def.name;

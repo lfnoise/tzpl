@@ -31,6 +31,12 @@
 #include <csignal>
 #include <optional>
 #include <filesystem>
+#include <thread>
+#include <atomic>
+#include <chrono>
+#ifdef __APPLE__
+#include <CoreGraphics/CoreGraphics.h>
+#endif
 #include "tzpl.hpp"
 #include "app_config.hpp"
 #include "module_compiler.hpp"
@@ -407,6 +413,55 @@ static void registerBuiltinDefs(engine::Engine* e) {
     engine::createMulOpNode(e);
     engine::createVoicerTestNode(e);
 }
+
+// ---------------------------------------------------------------------------
+// Mouse poller
+// ---------------------------------------------------------------------------
+// Polls the global mouse position and primary button ~60x per second into the
+// engine's process-global shared-input table, where playing synths read them
+// via the sharedIn / mouseX / mouseY / mouseButton ugens -- no control-message
+// traffic. CGEvent needs no window and no special permissions, so this works
+// identically under both GUIs and --nogui. RAII: the destructor joins.
+class MousePoller {
+public:
+    MousePoller() {
+#ifdef __APPLE__
+        thread_ = std::thread([this] {
+            while (!stop_.load(std::memory_order_relaxed)) {
+                pollOnce();
+                std::this_thread::sleep_for(std::chrono::milliseconds(16));
+            }
+        });
+#endif
+    }
+    ~MousePoller() {
+        stop_.store(true, std::memory_order_relaxed);
+        if (thread_.joinable()) thread_.join();
+    }
+private:
+#ifdef __APPLE__
+    static void pollOnce() {
+        CGEventRef ev = CGEventCreate(nullptr);
+        if (!ev) return;
+        CGPoint pos = CGEventGetLocation(ev); // global coords, origin top-left
+        CFRelease(ev);
+        CGRect b = CGDisplayBounds(CGMainDisplayID());
+        auto clamp01 = [](double v) {
+            return v < 0. ? 0.f : v > 1. ? 1.f : (float)v;
+        };
+        float x = clamp01((pos.x - b.origin.x) / b.size.width);
+        // CG y grows downward; the mouse slots are bottom-up (up = larger).
+        float y = clamp01(1. - (pos.y - b.origin.y) / b.size.height);
+        bool down = CGEventSourceButtonState(
+            kCGEventSourceStateCombinedSessionState, kCGMouseButtonLeft);
+        engine::setSharedInput(tzpl_sharedMouseX, x);
+        engine::setSharedInput(tzpl_sharedMouseY, y);
+        engine::setSharedInput(tzpl_sharedMouseButton, down ? 1.f : 0.f);
+    }
+#endif
+    std::atomic<bool> stop_{false};
+    std::thread thread_;
+};
 
 static engine::Engine* createEngine(const Config& config, bool nrt = false) {
     engine::AudioStreamParameters params{};
@@ -832,6 +887,11 @@ int main(int argc, const char* argv[]) {
         bridge::setAppContextOnVM(&nrtvm.vm, &appCtx);
         nrtvm.startHeartbeat();  // drain deferred deletes at ~50Hz
         tempoScheduler.start();
+
+        // Feed the shared-input mouse slots (GUI and headless alike). The
+        // poller writes a process-global, never the engine, so its lifetime
+        // is independent of the engine's.
+        MousePoller mousePoller;
 
         if (startAudio) {
             engine::startAudio(eng);

@@ -760,6 +760,35 @@ fn dustep(freq AsSignal, chans Int = 1) S = white(chans) sampleAndHold(velvet(fr
 fn exprand(a AsSignal, b AsSignal, chans Int = 1, rate = Rate.audio) S = urand(chans, rate) uniexp(a, b);
 
 
+-- mouse input
+--
+-- The app polls the mouse position into the engine's shared-input table
+-- (sharedIn slots 0..2) about 60 times a second; these ugens read it at
+-- audio rate. No control messages are involved, so any number of playing
+-- synths can follow the mouse at once. The lag smooths the stair-steps of
+-- the poll rate; pass a smaller lagTime for a snappier response.
+
+-- Mouse x position mapped linearly: lo at the left screen edge, hi at the right.
+fn mouseX(lo AsSignal = 0.0, hi AsSignal = 1.0, lagTime AsSignal = 0.2) S =
+	sharedIn(0) lag(lagTime) unilin(lo, hi);
+
+-- Mouse y position mapped linearly: lo at the bottom of the screen, hi at the top.
+fn mouseY(lo AsSignal = 0.0, hi AsSignal = 1.0, lagTime AsSignal = 0.2) S =
+	sharedIn(1) lag(lagTime) unilin(lo, hi);
+
+-- Exponential variants (lo and hi must be nonzero and the same sign),
+-- for frequencies and amplitudes.
+fn mouseXExp(lo AsSignal, hi AsSignal, lagTime AsSignal = 0.2) S =
+	sharedIn(0) lag(lagTime) uniexp(lo, hi);
+
+fn mouseYExp(lo AsSignal, hi AsSignal, lagTime AsSignal = 0.2) S =
+	sharedIn(1) lag(lagTime) uniexp(lo, hi);
+
+-- Primary mouse button: 1 while held, else 0. Lag it (or use decay) to
+-- soften the edges, e.g. `mouseButton() lag(0.05)`.
+fn mouseButton() S = sharedIn(2);
+
+
 -- unipolar waveshapers
 
 fn sawshift(x, shift) = frac(x + shift); -- phase shift a unipolar sawtooth.

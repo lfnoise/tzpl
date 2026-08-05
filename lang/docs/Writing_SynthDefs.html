@@ -778,6 +778,47 @@ urand() &lt; prob          <span class="cmt">-- Bernoulli trigger (see coin)</sp
 }</code></pre>
             </div>
 
+            <h3 id="sharedin">Shared input: the mouse without messages</h3>
+
+            <p>A control change is a message: it is bundled, scheduled, and delivered to one node.
+            For values that change continuously and matter to <em>every</em> playing synth &mdash; the
+            mouse position &mdash; the engine keeps a small <strong>shared-input table</strong> instead:
+            the app writes it in the background (~60&times; a second for the mouse), and any graph
+            reads it at audio rate with <code>sharedIn</code>. No messages are sent at all.</p>
+
+            <table>
+                <tr><th>Function</th><th>Description</th></tr>
+                <tr><td><code>sharedIn(slot, rate = Rate.audio)</code></td>
+                    <td>Reads one table slot (a single f32 channel). <code>Rate.init</code> samples it
+                    once at synth start. Slots 0..2 are the mouse (x, y, button); slots 3..15 are free
+                    for your own values.</td></tr>
+                <tr><td><code>mouseX(lo = 0.0, hi = 1.0, lagTime = 0.2)</code></td>
+                    <td>(common_ugens) Mouse x mapped linearly: <code>lo</code> at the left screen
+                    edge, <code>hi</code> at the right.</td></tr>
+                <tr><td><code>mouseY(lo = 0.0, hi = 1.0, lagTime = 0.2)</code></td>
+                    <td>(common_ugens) Mouse y mapped linearly: <code>lo</code> at the bottom of the
+                    screen, <code>hi</code> at the top.</td></tr>
+                <tr><td><code>mouseXExp(lo, hi, lagTime = 0.2)</code><br>
+                        <code>mouseYExp(lo, hi, lagTime = 0.2)</code></td>
+                    <td>(common_ugens) Exponential mapping, for frequencies and gains.
+                    <code>lo</code> and <code>hi</code> must be nonzero and the same sign.</td></tr>
+                <tr><td><code>mouseButton()</code></td>
+                    <td>(common_ugens) 1 while the primary button is held, else 0. Lag it to soften
+                    the edges.</td></tr>
+            </table>
+
+<pre><code><span class="cmt">-- theremin: x = pitch, y = amplitude; every instance follows the mouse</span>
+<span class="hl-kw">fn</span> theremin() S =
+    sinosc(mouseXExp(<span class="hl-num">110.0</span>, <span class="hl-num">1760.0</span>)) * mouseY(<span class="hl-num">0.0</span>, <span class="hl-num">0.5</span>) |&gt; outlet;</code></pre>
+
+            <p>From the language side, <code>setSharedInput(slot, value)</code> writes a free slot and
+            <code>getSharedInput(slot)</code> reads one back (audio_engine module) &mdash; a lightweight
+            channel for any continuously varying value that would otherwise be a stream of
+            <code>setControl</code> messages. Two things to keep in mind: shared-input changes are
+            <em>not</em> sample-accurately scheduled (use controls when timing must be exact), and the
+            raw value steps at the writer's update rate, so smooth it with <code>lag</code> as the
+            mouse ugens do.</p>
+
             <a href="#top" class="back-to-top">&uarr; Back to top</a>
         </div>
 

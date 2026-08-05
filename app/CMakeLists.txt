@@ -125,6 +125,12 @@ target_link_libraries(tzpl_app
     PRIVATE linenoise
 )
 
+if(APPLE)
+    # CoreGraphics for the mouse poller (main.cpp); needed explicitly when
+    # building without a GUI (the GUI stacks pull it in transitively).
+    target_link_libraries(tzpl_app PRIVATE "-framework CoreGraphics")
+endif()
+
 if(TZPL_BUILD_GUI)
     target_link_libraries(tzpl_app PRIVATE imgui_lib)
     target_compile_definitions(tzpl_app PRIVATE

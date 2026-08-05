@@ -340,6 +340,40 @@ typedef struct tzpl_TagList {
 /* Optional plugin symbol "loadTags" */
 typedef tzpl_TagList (*tzpl_LoadTagsFun)(void);
 
+/* Shared input -- a small table of continuously varying values (mouse
+ * position, user-defined slots) written by a non-real-time thread and read
+ * by plugins at audio rate, with no per-update command traffic.
+ *
+ * A plugin whose graph reads shared input exports the OPTIONAL data symbol
+ *
+ *     extern "C" tzpl_SharedInput const* tzpl_sharedInput;
+ *
+ * initialized to point at a private all-zero fallback inside the plugin.
+ * The loader probes the symbol with dlsym and repoints it at the engine's
+ * process-global instance. Plugins without the symbol are unaffected, and a
+ * new plugin loaded by an old engine reads zeros -- purely additive, no ABI
+ * version bump (see the versioning rules above).
+ *
+ * Concurrency: slots are written by non-RT threads with plain stores and
+ * read by the audio thread; aligned 32-bit accesses are tear-free on all
+ * supported targets. `volatile` keeps reads from being cached across
+ * samples. Values are NOT sample-accurately scheduled -- this is for
+ * asynchronous continuous input, not for scheduled control changes. */
+#define TZPL_SHARED_INPUT_SLOTS 16
+
+/* Reserved slot indices. Slots after the reserved block are free for user
+ * values written via the engine's setSharedInput API. */
+enum {
+    tzpl_sharedMouseX = 0,      /* 0..1 across the main display, left to right */
+    tzpl_sharedMouseY = 1,      /* 0..1, bottom to top (up = larger) */
+    tzpl_sharedMouseButton = 2, /* 0 or 1, primary button held */
+    tzpl_sharedUserSlot0 = 3,   /* first non-reserved slot */
+};
+
+typedef struct tzpl_SharedInput {
+    volatile float vals[TZPL_SHARED_INPUT_SLOTS];
+} tzpl_SharedInput;
+
 #ifdef __cplusplus
 }
 #endif

@@ -175,6 +175,31 @@ namespace synthdef {
         void accept(ExprVisitor& visitor) override;
     };
 
+    // Reads one slot of the engine's shared-input table (mouse position,
+    // user slots) -- see tzpl_SharedInput in tzpl_plugin_abi.h. The value is
+    // written asynchronously by a non-RT thread; init rate samples it once at
+    // synth start, audio rate reads it every sample.
+    struct SharedInExpr : Expr {
+        u64 slot;
+
+        SharedInExpr(u64 slot, SignalRate rate = audioSignalRate);
+        string typeName() const override { return "SharedInExpr"; }
+        string str() const override { return "sharedin"; }
+
+        u64 hash() const override {
+            return hash_combine(Expr::hash(), slot, rate.hash(), 0xB40C5AD2F17E6D89);
+        }
+        bool equals_(Expr const& that) const override {
+            auto& c = static_cast<SharedInExpr const&>(that);
+            return slot == c.slot && rate == c.rate;
+        }
+        NumType initial_type() const override { return NumType::any_float; }
+        void update_type(ExprIdentitySet& worklist) override {}
+        void calcShape() override {}
+
+        void accept(ExprVisitor& visitor) override;
+    };
+
     struct Control : Expr {
         ControlSpec spec;
         u64 serial;

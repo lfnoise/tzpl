@@ -24,6 +24,7 @@
 #include "synthdef_from_sexpr.hpp"
 #include "synthdef_value.hpp"
 #include "synthdef_builtin_ops.hpp"
+#include "tzpl_plugin_abi.h"
 #include <print>
 
 namespace synthdef {
@@ -142,6 +143,33 @@ std::expected<S, std::string> SExprGraphBuilder::parseSampleDur(sexpr::ItemVec c
     int64_t id = list[0].get<int64_t>();
 
     S expr = addExpr(new SampleDur());
+    exprMap[id] = expr;
+    return expr;
+}
+
+std::expected<S, std::string> SExprGraphBuilder::parseSharedIn(sexpr::ItemVec const& list) {
+    // Format: (id SharedIn rate slot)
+    if (list.size() < 4) {
+        return std::unexpected("SharedIn requires 4 elements");
+    }
+
+    if (!list[0].is<int64_t>()) return std::unexpected("ID must be integer");
+    int64_t id = list[0].get<int64_t>();
+
+    if (!list[2].is<int64_t>()) return std::unexpected("Rate must be integer");
+    int64_t rateIndex = list[2].get<int64_t>();
+    auto rate = SignalRate(static_cast<SignalRate::RateEnum>(rateIndex));
+    if (rate != initSignalRate && rate != audioSignalRate) {
+        return std::unexpected("SharedIn rate must be init or audio");
+    }
+
+    if (!list[3].is<int64_t>()) return std::unexpected("Slot must be integer");
+    int64_t slot = list[3].get<int64_t>();
+    if (slot < 0 || slot >= TZPL_SHARED_INPUT_SLOTS) {
+        return std::unexpected("SharedIn slot out of range");
+    }
+
+    S expr = addExpr(new SharedInExpr(slot, rate));
     exprMap[id] = expr;
     return expr;
 }
@@ -1155,6 +1183,7 @@ std::expected<S, std::string> SExprGraphBuilder::parseExpr(sexpr::Item const& it
     if (type == "Constant") return parseConstant(list);
     else if (type == "SampleRate") return parseSampleRate(list);
     else if (type == "SampleDur") return parseSampleDur(list);
+    else if (type == "SharedIn") return parseSharedIn(list);
     else if (type == "URand") return parseURand(list);
     else if (type == "BiRand") return parseBiRand(list);
     else if (type == "Rand64") return parseRand64(list);

@@ -28,6 +28,7 @@ namespace synthdef {
 void Constant::accept(ExprVisitor& visitor) { visitor.visit(this); }
 void SampleRate::accept(ExprVisitor& visitor) { visitor.visit(this); }
 void SampleDur::accept(ExprVisitor& visitor) { visitor.visit(this); }
+void SharedInExpr::accept(ExprVisitor& visitor) { visitor.visit(this); }
 void Control::accept(ExprVisitor& visitor) { visitor.visit(this); }
 void NoteParam::accept(ExprVisitor& visitor) { visitor.visit(this); }
 void Inlet::accept(ExprVisitor& visitor) { visitor.visit(this); }

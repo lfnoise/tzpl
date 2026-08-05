@@ -424,6 +424,7 @@ enum BufferOp {
 enum SignalExprKind {
 	sampleRate,
 	sampleDur,
+	sharedIn(Int, Rate),
 
 	int ([Int], NumType),
 	float ([Float], NumType),
@@ -468,6 +469,17 @@ fn fs() S {
 -- T = sample duration = 1/fs
 fn T() S {
     SignalExprKind.sampleDur _newSignalExpr
+}
+
+-- Read one slot of the engine's shared-input table: a small set of values
+-- (mouse position, free user slots) written continuously by the app and read
+-- by every playing synth with no control-message traffic. Slots 0..2 are the
+-- mouse (see the mouseX/mouseY/mouseButton ugens); slots 3 and up are free
+-- for your own values via setSharedInput. Audio rate reads the value every
+-- sample; Rate.init samples it once when the synth starts. Changes are NOT
+-- sample-accurately scheduled -- use a control for scheduled changes.
+fn sharedIn(slot Int, rate Rate = Rate.audio) S {
+    SignalExprKind.sharedIn(slot, rate) _newSignalExpr
 }
 
 fn inlet(typ NumType, chans Chans = 1, name String = "in") S {
@@ -1054,6 +1066,7 @@ fn toLisp(o S, indentLevel Int) String {
     match (o.kind) {
         sampleRate : "(%^ SampleRate)" fmt(o.id);
         sampleDur : "(%^ SampleDur)" fmt(o.id);
+        sharedIn(slot, rate) : "(%^ SharedIn %^ %^)" fmt(o.id, rate ordinal, slot);
         int(a, typ) : "(%^ Constant %^ %^ %^)" fmt(o.id, a length, typ.0, a separatedString parens);
         float(a, typ) : "(%^ Constant %^ %^ %^)" fmt(o.id, a length, typ.0, a separatedString parens);
         unop(op) : "(%^ UnaryOp %^ %^)" fmt(o.id, op tag toString, o inputsToLisp);

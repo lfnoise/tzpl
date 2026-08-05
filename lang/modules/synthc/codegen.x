@@ -361,6 +361,12 @@ fn _inlineExpr(ctx Ctx, n NIdx, cel String) String {
 		sampleDur:      (`cgSimdW > 0)
 			? _simdSplat(ctx.typ[n], `cgSimdW, (ctx.typ[n].0 == 8) ? "p->sd" : "(%^)(p->sd)" fmt(cppType(ctx.typ[n])))
 			: ((ctx.typ[n].0 == 8) ? "p->sd" : "(%^)(p->sd)" fmt(cppType(ctx.typ[n])));
+		-- Shared input: the table stores volatile f32; cast to the inferred type.
+		sharedInK(slot, _): (`cgSimdW > 0)
+			? _simdSplat(ctx.typ[n], `cgSimdW, "(%^)(tzpl_sharedInput->vals[%^])" fmt(cppType(ctx.typ[n]), slot))
+			: (ctx.typ[n] _isF32
+				? "tzpl_sharedInput->vals[%^]" fmt(slot)
+				: "(%^)(tzpl_sharedInput->vals[%^])" fmt(cppType(ctx.typ[n]), slot));
 		control(_, _, sn, _): (ctx.chans[n] == 1)
 			? "(*(%^*)p->controls[%^])" fmt(cppType(ctx.typ[n]), sn)
 			: "((%^*)p->controls[%^])[%^]" fmt(cppType(ctx.typ[n]), sn, cel);
@@ -1072,6 +1078,13 @@ fn _voicerNodes(ctx Ctx) [Int] {
 	var out [Int] = [];
 	for (n : ctx.sorted) { match (ctx.kind[n]) { voicerK(_): out push!(n); _: {} } }
 	out
+}
+
+-- Does any node read the shared-input table? Gates the exported
+-- tzpl_sharedInput pointer (mirrors the C++ genClass sorted-exprs scan).
+fn _usesSharedInput(ctx Ctx) Bool {
+	for (n : ctx.sorted) { match (ctx.kind[n]) { sharedInK(_, _): { return true; } _: {} } }
+	false
 }
 
 fn _voicerMaxVoices(ctx Ctx, n NIdx) Int = match (ctx.kind[n]) { voicerK(mv): mv; _: 1; };
@@ -2507,6 +2520,14 @@ fn genCpp(ctx Ctx, name String, simdWidth Int = 0) String {
 		s = s $ "#define TZPL_VOICER_TYPES_DEFINED\n#include \"tzpl_voicer.hpp\"\n";
 	}
 	s = s $ "\n";
+
+	-- Shared-input pointer (mirrors the C++ genClass emission): exported so
+	-- the loader can repoint it at the engine's process-global table.
+	if (ctx _usesSharedInput) {
+		s = s $ "static tzpl_SharedInput tzpl_sharedInputFallback = {};\n";
+		s = s $ "extern \"C\" tzpl_SharedInput const* tzpl_sharedInput = &tzpl_sharedInputFallback;\n\n";
+	}
+
 	s = s $ "extern tzpl_SynthFuns %^_funs;\n\n" fmt(name);
 	s = s $ "typedef struct %^ {\n" fmt(name);
 	s = s $ "\ttzpl_SynthFuns funs;\n\tstruct tzpl_Engine* engine;\n\tstruct tzpl_Node* node;\n";

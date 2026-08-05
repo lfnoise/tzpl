@@ -89,6 +89,10 @@ namespace synthdef {
     S birand(usize chans, SignalRate rate = audioSignalRate);
     S rand64(usize chans, SignalRate rate = audioSignalRate);
 
+    // Read one slot of the engine's shared-input table (mouse position, user
+    // slots -- see tzpl_SharedInput in tzpl_plugin_abi.h). Init or audio rate.
+    S sharedIn(usize slot, SignalRate rate = audioSignalRate);
+
     // Expr math functions.
     S abs(S a);
     S neg(S a);

@@ -24,6 +24,7 @@
 #include "synthdef_builtin_ops.hpp"
 #include "synthdef_synth.hpp"
 #include "tzpl_random.hpp"
+#include "tzpl_plugin_abi.h"
 #include "synthdef_matrix.hpp"
 
 namespace synthdef {
@@ -153,6 +154,16 @@ namespace synthdef {
             return addConstantExpr(new Constant(v));
         }
         return addExpr(new Rand64Expr{chans, rate});
+    }
+
+    S sharedIn(usize slot, SignalRate rate) {
+        if (slot >= TZPL_SHARED_INPUT_SLOTS) {
+            throw std::runtime_error("sharedIn: slot out of range.");
+        }
+        if (rate != initSignalRate && rate != audioSignalRate) {
+            throw std::runtime_error("sharedIn: only init and audio rate supported.");
+        }
+        return addExpr(new SharedInExpr{slot, rate});
     }
 
     // Expr math functions.

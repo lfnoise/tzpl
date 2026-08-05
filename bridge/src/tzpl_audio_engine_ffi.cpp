@@ -458,6 +458,24 @@ static void ffi_setControl(ts::VM& vm, u16 dst, u16, u16 argBase) {
     returnErr(vm, dst, engine::setControl(nodeID, controlID, 1, &val), __func__);
 }
 
+// fn setSharedInput(slot: Int, value: Float) -> Int
+// Writes one slot of the process-global shared-input table, read by synths
+// via the sharedIn ugen. Slots 0..2 are the mouse (owned by the app's
+// poller); slots 3+ are free for user values. Plain store, no bundle, no
+// scheduling -- takes effect within one sample.
+static void ffi_setSharedInput(ts::VM& vm, u16 dst, u16, u16 argBase) {
+    int slot = static_cast<int>(vm.reg(argBase).i);
+    engine::f32 val = static_cast<engine::f32>(vm.reg(argBase + 1).f);
+    returnErr(vm, dst, engine::setSharedInput(slot, val), __func__);
+}
+
+// fn getSharedInput(slot: Int) -> Float
+// Reads one slot of the shared-input table (0.0 for out-of-range slots).
+static void ffi_getSharedInput(ts::VM& vm, u16 dst, u16, u16 argBase) {
+    int slot = static_cast<int>(vm.reg(argBase).i);
+    vm.reg(dst).f = static_cast<f64>(engine::getSharedInput(slot));
+}
+
 // ---------------------------------------------------------------------------
 // Buffers
 // ---------------------------------------------------------------------------
@@ -1707,6 +1725,8 @@ void registerAudioEngineFFI(ts::Compiler& compiler) {
     reg("setInput",         Int, {Int, Int, Float},             ffi_setInput,    true);
     reg("setInputX",        Int, {Int, Int, Float, Float, Int}, ffi_setInputX,   true);
     reg("setControl",       Int, {Int, Int, Float},             ffi_setControl,  true);
+    reg("setSharedInput",   Int, {Int, Float},                  ffi_setSharedInput, true);
+    reg("getSharedInput",   Float, {Int},                       ffi_getSharedInput, true);
 
     // Note / voice management (rtSafe)
     reg("noteOn",           Int, {Int, Int, FloatArray},  ffi_noteOn,       true);
