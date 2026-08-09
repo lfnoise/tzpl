@@ -295,17 +295,17 @@ void Compiler::refreshDynVarType(const std::string& name, Type* newType) {
 
 void Compiler::registerForeignFunction(const std::string& name, Type* returnType,
                                         std::vector<Type*> paramTypes, CFun cfun,
-                                        bool pure, bool rtSafe) {
-    foreignFunctions_.push_back({name, returnType, std::move(paramTypes), cfun, pure, rtSafe});
+                                        bool pure, bool rtSafe, bool rtOnly) {
+    foreignFunctions_.push_back({name, returnType, std::move(paramTypes), cfun, pure, rtSafe, rtOnly});
 }
 
 void Compiler::registerForeignModuleFunction(const std::string& moduleName,
                                               const std::string& funcName,
                                               Type* returnType,
                                               std::vector<Type*> paramTypes, CFun cfun,
-                                              bool pure, bool rtSafe) {
+                                              bool pure, bool rtSafe, bool rtOnly) {
     foreignModuleFunctions_[moduleName].push_back(
-        {funcName, returnType, std::move(paramTypes), cfun, pure, rtSafe});
+        {funcName, returnType, std::move(paramTypes), cfun, pure, rtSafe, rtOnly});
 }
 
 const std::vector<Compiler::ForeignFuncEntry>* Compiler::foreignModuleFunctions(

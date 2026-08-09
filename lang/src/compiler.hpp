@@ -256,12 +256,14 @@ public:
         CFun cfun;
         bool pure;
         bool rtSafe;
+        bool rtOnly = false;      // Callable ONLY from an RT-restricted (silo) target
         void* ffiData = nullptr;  // Opaque data stored on the Primitive (e.g. C callback pointer)
     };
 
     void registerForeignFunction(const std::string& name, Type* returnType,
                                   std::vector<Type*> paramTypes, CFun cfun,
-                                  bool pure = false, bool rtSafe = false);
+                                  bool pure = false, bool rtSafe = false,
+                                  bool rtOnly = false);
 
     const std::vector<ForeignFuncEntry>& foreignFunctions() const { return foreignFunctions_; }
 
@@ -272,7 +274,8 @@ public:
                                         const std::string& funcName,
                                         Type* returnType,
                                         std::vector<Type*> paramTypes, CFun cfun,
-                                        bool pure = false, bool rtSafe = false);
+                                        bool pure = false, bool rtSafe = false,
+                                        bool rtOnly = false);
 
     // Look up foreign functions for a module. Returns nullptr if no foreign module registered.
     const std::vector<ForeignFuncEntry>* foreignModuleFunctions(const std::string& moduleName) const;

@@ -1645,12 +1645,16 @@ void registerAudioEngineFFI(ts::Compiler& compiler) {
     // All functions go into the "audio_engine_ffi" module namespace.
     // The script wrapper `bridge/modules/audio_engine.x` re-exports these as
     // `audio_engine.*` so users can write `import audio_engine.*;`.
-    // pure=false for all (side-effecting), rtSafe varies.
+    // pure=false for all (side-effecting), rtSafe varies. rtOnly marks the
+    // silo-side primitives that need gCurrentSilo: calling one (or a wrapper
+    // that transitively calls one, e.g. spawn) from NRT-compiled code is a
+    // compile error instead of a silent runtime failure.
     auto reg = [&](const char* name, ts::Type* retType,
-                   std::vector<ts::Type*> params, R fn, bool rtSafe = false) {
+                   std::vector<ts::Type*> params, R fn, bool rtSafe = false,
+                   bool rtOnly = false) {
         compiler.registerForeignModuleFunction("audio_engine_ffi", name, retType,
                                                std::move(params), fn,
-                                               /*pure=*/false, rtSafe);
+                                               /*pure=*/false, rtSafe, rtOnly);
     };
 
     // Engine lifecycle
@@ -1747,16 +1751,16 @@ void registerAudioEngineFFI(ts::Compiler& compiler) {
     reg("siloStartAt",      Void, {Float, IntArray},      ffi_siloStartAt);
     reg("siloDeliverBytes",   Int, {Int, Symbol, Bytes},              ffi_siloDeliverBytes);
     reg("siloDeliverBytesAt", Int, {Int, Int, Float, Symbol, Bytes},  ffi_siloDeliverBytesAt);
-    reg("siloOutbox",         Int,  {Int, Symbol, Bytes},             ffi_siloOutbox, true);
+    reg("siloOutbox",         Int,  {Int, Symbol, Bytes},             ffi_siloOutbox, true, /*rtOnly=*/true);
     reg("pumpSiloOutboxes",   Int,  {},                               ffi_pumpSiloOutboxes);
     reg("nrtActorMsgCount",   Int,    {},                             ffi_nrtActorMsgCount);
     reg("nrtActorMsgName",    Symbol, {},                             ffi_nrtActorMsgName);
     reg("nrtActorMsgTake",    Bytes,  {},                             ffi_nrtActorMsgTake);
     reg("sleepMs",            Void, {Int},                            ffi_sleepMs);
     reg("readFile",         String, {String},             ffi_readFile);
-    reg("scheduleTask",     Int,  {Int, FnFloat},         ffi_scheduleTask, true);
-    reg("playNote",         Int,  {Int, Int, FloatArray}, ffi_playNote,     true);
-    reg("releaseNote",      Int,  {Int, Int},             ffi_releaseNote,  true);
+    reg("scheduleTask",     Int,  {Int, FnFloat},         ffi_scheduleTask, true, /*rtOnly=*/true);
+    reg("playNote",         Int,  {Int, Int, FloatArray}, ffi_playNote,     true, /*rtOnly=*/true);
+    reg("releaseNote",      Int,  {Int, Int},             ffi_releaseNote,  true, /*rtOnly=*/true);
 
     // Enum constants (SchedPolicy, FadeCurve, Err, Enable) are defined
     // in the Tzopilotl module: bridge/modules/audio_engine.x

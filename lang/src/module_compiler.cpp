@@ -128,6 +128,7 @@ static void materializeForeignFunctions(
         prim->cfun_ = entry.cfun;
         prim->pure_ = entry.pure;
         prim->rtSafe_ = entry.rtSafe;
+        prim->rtOnly_ = entry.rtOnly;
         prim->ffiData_ = entry.ffiData;
         compiler.global(idx).o = prim;
 
@@ -139,6 +140,7 @@ static void materializeForeignFunctions(
         info.isBuiltin = true;
         info.isForeign = true;
         info.rtSafe = entry.rtSafe;
+        info.rtOnly = entry.rtOnly;
         functions[entry.name].push_back(info);
     }
 }

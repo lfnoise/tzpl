@@ -1506,6 +1506,7 @@ class Primitive : public Callable {
 public:
     bool pure_ = true;    // Pure functions can be constant-folded; impure (e.g. RNG) cannot.
     bool rtSafe_ = true;  // Safe to call from a real-time VM.
+    bool rtOnly_ = false; // Callable ONLY from an RT-restricted (silo) VM.
     void* ffiData_ = nullptr;  // Opaque data for FFI trampolines (e.g. C callback pointer).
 
     Primitive(Type* type);

@@ -116,6 +116,19 @@ bool TypeChecker::checkRTSafety(const FuncInfo* func, const std::string& name, S
                    "called when compiling for a real-time VM");
         return false;
     }
+    if (!rtRestricted_ && func && func->rtOnly) {
+        if (fnBodyDepth_ > 0) {
+            // Inside a function body: defining a silo-only wrapper is legal in
+            // any module -- taint the enclosing function; the error fires at
+            // its own call sites instead.
+            bodySawRTOnly_ = true;
+            return true;
+        }
+        error(loc, "Function '" + name + "' is silo-only: it needs the real-time "
+                   "silo context and can only be called from code compiled for a "
+                   "silo VM (siloLoad/siloEval)");
+        return false;
+    }
     return true;
 }
 
@@ -239,6 +252,7 @@ void TypeChecker::registerBuiltins() {
         prim->cfun_ = entry.cfun;
         prim->pure_ = entry.pure;
         prim->rtSafe_ = entry.rtSafe;
+        prim->rtOnly_ = entry.rtOnly;
         prim->ffiData_ = entry.ffiData;
         compiler_.global(idx).o = prim;
 
@@ -249,6 +263,7 @@ void TypeChecker::registerBuiltins() {
         info.bodyChecked = true;
         info.isBuiltin = true;
         info.rtSafe = entry.rtSafe;
+        info.rtOnly = entry.rtOnly;
         functions_[entry.name].push_back(info);
     }
 

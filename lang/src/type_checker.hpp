@@ -131,6 +131,11 @@ struct FuncInfo {
     // (the type checker transitively prevents them from calling non-RT-safe functions).
     bool rtSafe = true;
 
+    // RT-only: callable ONLY when compiling for an RT-restricted (silo) target --
+    // the function needs silo context (gCurrentSilo) that never exists on the NRT
+    // VM. Mirror of !rtSafe; enforced by checkRTSafety.
+    bool rtOnly = false;
+
     // Source module for imported template functions (needed for body re-checking)
     struct ModuleInfo* sourceModule = nullptr;
     // Canonical path of the source module. Stable across re-compilations of
@@ -375,6 +380,16 @@ private:
 
     // RT safety enforcement
     bool rtRestricted_ = false;  // Set from compiler_.isRTRestricted() in constructor
+
+    // rtOnly taint tracking (non-RT targets only). While checking inside a
+    // function body (depth > 0), a resolved call to an rtOnly function taints
+    // the enclosing function instead of erroring -- DEFINING a silo-only
+    // wrapper (e.g. audio_engine.x spawn) is legal in any module; the error
+    // fires when top-level non-RT code CALLS it. The taint is written to the
+    // function's FuncInfo when its body check completes, and nested checks
+    // (lambdas, local fns, on-demand inference) accumulate into the outermost.
+    int  fnBodyDepth_ = 0;
+    bool bodySawRTOnly_ = false;
     bool checkRTSafety(const FuncInfo* func, const std::string& name, SourceRange loc);
 
     // Synthetic Option<T> template declaration (built-in, not from source)

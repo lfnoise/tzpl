@@ -668,7 +668,9 @@ void TypeChecker::inferFunctionReturnType(FnDeclNode* fn, FuncInfo* fi, bool isL
     inferredReturnType_ = nullptr;
 
     // Check the body
+    ++fnBodyDepth_;
     checkNode(fn->body.get());
+    --fnBodyDepth_;
 
     // Extract trailing expression type from block
     Type* trailingType = getBlockTrailingType(fn->body.get());
@@ -712,6 +714,8 @@ void TypeChecker::inferFunctionReturnType(FnDeclNode* fn, FuncInfo* fi, bool isL
     fi->returnType = resultType;
     fi->bodyChecked = true;
     fi->inferring = false;
+    fi->rtOnly = fi->rtOnly || bodySawRTOnly_;
+    if (fnBodyDepth_ == 0) bodySawRTOnly_ = false;
     fn->resolvedType = resultType;
 
     // Restore state
@@ -925,7 +929,25 @@ void TypeChecker::checkFnDecl(FnDeclNode* decl) {
     decl->resolvedType = returnType;
 
     // Check body (may invalidate funcPtr/func via same-name local fn push_back)
+    ++fnBodyDepth_;
     checkNode(decl->body.get());
+    --fnBodyDepth_;
+
+    // Write rtOnly taint from the body check. funcPtr may have been
+    // invalidated -- re-find the entry by globalIndex.
+    if (bodySawRTOnly_) {
+        auto itT = functions_.find(decl->name);
+        if (itT != functions_.end()) {
+            for (auto& fiT : itT->second) {
+                if (fiT.canonicalFunc) continue;
+                if ((i32)fiT.globalIndex == decl->resolvedFuncGlobalIndex) {
+                    fiT.rtOnly = true;
+                    break;
+                }
+            }
+        }
+    }
+    if (fnBodyDepth_ == 0) bodySawRTOnly_ = false;
 
     // Validate body against declared return type (non-coroutine, non-void functions).
     // Coroutines yield values rather than returning them through the block's trailing

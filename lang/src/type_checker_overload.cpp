@@ -958,6 +958,7 @@ FuncInfo* TypeChecker::tryResolveTemplate(const std::string& name,
                 auto* prim = new Primitive(primTupleType);
                 prim->cfun_ = cfun;
                 prim->rtSafe_ = fi.rtSafe;
+                prim->rtOnly_ = fi.rtOnly;
                 compiler_.global(globalIdx).o = prim;
 
                 auto monoPtr = std::make_unique<FuncInfo>();
@@ -967,6 +968,7 @@ FuncInfo* TypeChecker::tryResolveTemplate(const std::string& name,
                 monoPtr->isBuiltin = true;
                 monoPtr->bodyChecked = true;
                 monoPtr->rtSafe = fi.rtSafe;
+                monoPtr->rtOnly = fi.rtOnly;
                 monoPtr->acceptsInlineArgs = fi.acceptsInlineArgs;
                 monoPtr->builtinVariadicPacked = builtinVariadic;
 
@@ -1143,6 +1145,7 @@ FuncInfo* TypeChecker::tryResolveModuleTemplate(
                 auto* prim = new Primitive(compiler_.voidType());
                 prim->cfun_ = cfun;
                 prim->rtSafe_ = fi.rtSafe;
+                prim->rtOnly_ = fi.rtOnly;
                 compiler_.global(globalIdx).o = prim;
 
                 auto monoPtr = std::make_unique<FuncInfo>();
@@ -1152,6 +1155,7 @@ FuncInfo* TypeChecker::tryResolveModuleTemplate(
                 monoPtr->isBuiltin = true;
                 monoPtr->bodyChecked = true;
                 monoPtr->rtSafe = fi.rtSafe;
+                monoPtr->rtOnly = fi.rtOnly;
                 monoPtr->acceptsInlineArgs = fi.acceptsInlineArgs;
 
                 FuncInfo* result = monoPtr.get();

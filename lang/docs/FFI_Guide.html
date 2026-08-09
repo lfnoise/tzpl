@@ -2563,6 +2563,8 @@ nats.<span class="fn">onMessageS</span>(<span class="str">"nodes.piano.chords"</
 
 <p>The orchestration side (main / NRT VM) loads parts and starts them together via <code>attachVM</code>, <code>siloLoad</code> (an awaitable load barrier returning <code>Future&lt;String&gt;</code>), and <code>siloStartAt(beat, silos)</code>. See &sect;13 (Silo VM) for the full lifecycle.</p>
 
+<p class="note"><strong>Silo-only enforcement.</strong> The silo-side primitives &mdash; <code>spawn(clock, c)</code>, <code>scheduleTask</code>, <code>playNote</code>, <code>releaseNote</code> &mdash; need the real-time silo context and are rejected <em>at compile time</em> if called from code compiled for the main/NRT VM (a script, the REPL, a notebook cell): &ldquo;Function &hellip; is silo-only&rdquo;. This is the mirror of the rule that keeps non-RT-safe functions out of silo code. Defining a wrapper around one in a shared module is fine; the wrapper itself becomes silo-only.</p>
+
 <!-- -------------------------------- -->
 <h3 id="clock-examples">11.9 Examples</h3>
 
