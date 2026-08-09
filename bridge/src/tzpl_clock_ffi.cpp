@@ -112,6 +112,69 @@ static void ffi_at(ts::VM& vm, u16 dst, u16, u16 argBase) {
     vm.reg(dst).i = sched->schedAbs(beat, handler);
 }
 
+// fn delayReal(seconds Float) Future<Void>
+//
+// Awaitable WALL-CLOCK delay. The core `delay(beats)` builtin lives on the
+// VM's virtual-beat timeline, which a top-level await fast-forwards without
+// waiting; `await delayReal(1.0)` instead parks the caller (releasing the
+// NRTVM mutex via the host-wait hook) until the scheduler thread resolves
+// the future one real second later. The deadline is a fixed wall-clock time
+// in the scheduler's separate delay queue: tempo changes cannot move it, and
+// it survives clearAll() (panic clears handlers, not awaits). In a render
+// context the resolution rides the render's manual clock, i.e. logical audio
+// time. For musical (beat) scheduling use sched/after.
+static void ffi_delayReal(ts::VM& vm, u16 dst, u16, u16 argBase) {
+    f64 seconds = vm.reg(argBase).f;
+
+    auto& tu = vm.typeUniverse();
+    ts::Type* voidT = tu.types().voidType;
+    ts::FutureType* futT = tu.futureType(voidT);
+    u16 vw = (u16)((voidT && voidT->sizeWords_ > 0) ? voidT->sizeWords_ : 1);
+    auto* future = ts::Future::create(futT, voidT, vw);
+    vm.registerExternalFuture(future);   // GC-root it while in flight
+    vm.reg(dst).o = future;
+
+    auto* sched = getScheduler(vm);
+    if (!sched || !(seconds > 0.)) {
+        // Nothing to wait for, or no scheduler to drive the resolution:
+        // resolve now so a top-level await doesn't hang.
+        vm.resolveExternalFuture(future);
+        return;
+    }
+    sched->schedResolveFutureSecs(seconds, future);
+}
+
+// fn delayBeats(beats Float) Future<Void>
+//
+// Awaitable MUSICAL delay on the live tempo clock: the future resolves when
+// the clock reaches now + beats, tracking tempo changes and ramps exactly
+// like a sched() handler (the entry rides the same beat queue, and fires
+// latency-early the same way, so resumed code can submit engine commands
+// that land on the beat). Like sched(), a call from within a clock handler
+// is relative to the handler's beat. The pending entry survives clearAll()
+// (panic clears handlers, not awaits). In a render context it resolves at
+// the render's logical beat. For a tempo-independent wait use delayReal.
+static void ffi_delayBeats(ts::VM& vm, u16 dst, u16, u16 argBase) {
+    f64 beats = vm.reg(argBase).f;
+
+    auto& tu = vm.typeUniverse();
+    ts::Type* voidT = tu.types().voidType;
+    ts::FutureType* futT = tu.futureType(voidT);
+    u16 vw = (u16)((voidT && voidT->sizeWords_ > 0) ? voidT->sizeWords_ : 1);
+    auto* future = ts::Future::create(futT, voidT, vw);
+    vm.registerExternalFuture(future);   // GC-root it while in flight
+    vm.reg(dst).o = future;
+
+    auto* sched = getScheduler(vm);
+    if (!sched || !(beats > 0.)) {
+        // Nothing to wait for, or no scheduler to drive the resolution:
+        // resolve now so a top-level await doesn't hang.
+        vm.resolveExternalFuture(future);
+        return;
+    }
+    sched->schedResolveFutureBeats(beats, future);
+}
+
 // fn cancel(timerID Int) Void
 static void ffi_cancel(ts::VM& vm, u16 dst, u16, u16 argBase) {
     auto* sched = getScheduler(vm);
@@ -215,6 +278,11 @@ void registerClockFFI(ts::Compiler& compiler) {
     // Scheduling (one-shot -- handler returns Void)
     reg("after",    Int, {Float, FnVoid},   ffi_after);
     reg("at",       Int, {Float, FnVoid},   ffi_at);
+
+    // Awaitable delays: wall-clock seconds and tempo-clock beats
+    ts::Type* FutureVoid = reinterpret_cast<ts::Type*>(compiler.futureType(Void));
+    reg("delayReal",  FutureVoid, {Float},  ffi_delayReal);
+    reg("delayBeats", FutureVoid, {Float},  ffi_delayBeats);
 
     // Cancel
     reg("cancel",   Void, {Int},            ffi_cancel);

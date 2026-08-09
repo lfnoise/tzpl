@@ -3547,6 +3547,17 @@ context, or in tests.</p>
 <p><code>delay(beats)</code> returns a <code>Future&lt;Void&gt;</code> that resolves
 after the given number of beats. Awaiting it suspends the async function until
 that time arrives, so a beat-based sequence reads top to bottom.</p>
+
+<p>The beats are <em>logical</em> time. On a silo VM the audio clock drives them, so
+<code>await delay</code> there waits in real, sample-accurate time. On the main (NRT)
+VM a top-level <code>await</code> advances the timeline straight to the next timer, so
+the sequence above prints immediately in the right <em>order</em> without taking three
+beats of wall-clock time &mdash; which is also what lets offline renders run faster
+than real time. When code really must wait in wall-clock time (pacing a script
+against the outside world), use <code>await delayReal(seconds)</code> from the
+<code>clock</code> module; to await beats on the live tempo clock (tracking tempo
+changes and ramps like a <code>sched</code> callback), use
+<code>await delayBeats(beats)</code> (see the FFI Guide, &sect;11.7).</p>
 <pre><code><span class="kw">async fn</span> afterDelay(tag <span class="kw">String</span>, beats <span class="kw">Float</span>) <span class="kw">Void</span> {
     <span class="kw">await</span> delay(beats);
     tag println;

@@ -53,6 +53,10 @@ void NRTTempoScheduler::markRoots(TracingGC& gc) {
                                         std::greater<Entry>>::get(queue_);
     for (auto const& e : vec) {
         if (e.handler) gc.mark(static_cast<GCObj*>(e.handler));
+        if (e.resolveFut) gc.mark(reinterpret_cast<GCObj*>(e.resolveFut));
+    }
+    for (auto const& w : wallQueue_) {
+        if (w.fut) gc.mark(reinterpret_cast<GCObj*>(w.fut));
     }
     if (inFlightHandler_) gc.mark(static_cast<GCObj*>(inFlightHandler_));
 }
@@ -143,6 +147,43 @@ i64 NRTTempoScheduler::sched(f64 deltaBeats, Obj* handler) {
     return schedAbs(base + deltaBeats, handler);
 }
 
+i64 NRTTempoScheduler::schedResolveFutureSecs(f64 seconds, Future* fut) {
+    if (!(seconds > 0.)) seconds = 0.;
+    i64 id = nextTimerID_.fetch_add(1, std::memory_order_relaxed);
+
+    {
+        std::lock_guard lock(schedMtx_);
+        // Deadline in seconds since epoch: tempo-independent, no scheduling
+        // latency -- the future resolves at the actual wall deadline.
+        wallQueue_.push_back(WallEntry{elapsedSeconds() + seconds, fut, id});
+    }
+    queueChanged_.store(true, std::memory_order_relaxed);
+    cv_.notify_one();
+    return id;
+}
+
+i64 NRTTempoScheduler::schedResolveFutureBeats(f64 deltaBeats, Future* fut) {
+    if (!(deltaBeats > 0.)) deltaBeats = 0.;
+    i64 id = nextTimerID_.fetch_add(1, std::memory_order_relaxed);
+
+    Entry entry{};
+    entry.handler = nullptr;
+    entry.resolveFut = fut;
+    entry.timerID = id;
+    // Same base as sched(): the handler's beat when called from within a
+    // clock callback, else the current wall-clock beat.
+    f64 base = (logicalBeat_ >= 0.) ? logicalBeat_ : beats();
+    entry.beatTime = base + deltaBeats;
+
+    {
+        std::lock_guard lock(schedMtx_);
+        queue_.push(entry);
+    }
+    queueChanged_.store(true, std::memory_order_relaxed);
+    cv_.notify_one();
+    return id;
+}
+
 i64 NRTTempoScheduler::schedTempoChange(f64 beat, f64 targetTempo,
                                           f64 rampBeats) {
     i64 id = nextTimerID_.fetch_add(1, std::memory_order_relaxed);
@@ -164,10 +205,16 @@ i64 NRTTempoScheduler::schedTempoChange(f64 beat, f64 targetTempo,
 }
 
 void NRTTempoScheduler::setTempo(f64 beatsPerSecond) {
-    std::lock_guard lock(schedMtx_);
-    f64 now = elapsedSeconds();
-    f64 currentBeat = ramp_.secondsToBeats(now);
-    ramp_ = TempoRamp(beatsPerSecond, currentBeat, now);
+    {
+        std::lock_guard lock(schedMtx_);
+        f64 now = elapsedSeconds();
+        f64 currentBeat = ramp_.secondsToBeats(now);
+        ramp_ = TempoRamp(beatsPerSecond, currentBeat, now);
+    }
+    // Pass the run loop's wake predicate so it recomputes its sleep deadline
+    // from the NEW ramp -- without this, a sped-up tempo would leave the loop
+    // sleeping toward the old (later) fire time and fire entries late.
+    queueChanged_.store(true, std::memory_order_relaxed);
     cv_.notify_one();
 }
 
@@ -199,9 +246,19 @@ bool NRTTempoScheduler::cancel(i64 timerID) {
 
 int NRTTempoScheduler::clearAll() {
     std::lock_guard lock(schedMtx_);
-    int dropped = (int)queue_.size();
-    while (!queue_.empty()) queue_.pop();
-    // Wake the run loop so it re-evaluates its (now empty) queue instead of
+    // Awaitable delays survive the panic: wallQueue_ (delayReal) is untouched
+    // and delayBeats entries (resolveFut) are kept when rebuilding the beat
+    // queue. Dropping either would strand a thread parked in an await forever;
+    // a pending wait makes no sound -- panic silences handlers, not awaits.
+    std::priority_queue<Entry, std::vector<Entry>, std::greater<Entry>> keep;
+    int dropped = 0;
+    while (!queue_.empty()) {
+        Entry e = queue_.top();
+        queue_.pop();
+        if (e.resolveFut) keep.push(e); else ++dropped;
+    }
+    queue_ = std::move(keep);
+    // Wake the run loop so it re-evaluates the rebuilt queue instead of
     // sleeping toward an entry that no longer exists.
     queueChanged_.store(true);
     cv_.notify_all();
@@ -210,7 +267,9 @@ int NRTTempoScheduler::clearAll() {
 
 bool NRTTempoScheduler::isIdle() const {
     std::lock_guard lock(schedMtx_);
-    return queue_.empty();
+    // A pending delayReal deadline is work: in manual mode the renderer must
+    // keep ticking so the await inside the render can resolve.
+    return queue_.empty() && wallQueue_.empty();
 }
 
 void NRTTempoScheduler::tickTo(f64 seconds) {
@@ -226,23 +285,70 @@ void NRTTempoScheduler::tickTo(f64 seconds) {
     // schedule new entries (e.g. SuperCollider-style reschedule via a positive
     // return value) that may also be due immediately.
     while (true) {
-        Entry next;
+        // Pick the earliest due event across the wall-clock delay queue and
+        // the beat queue. Beat entries fire latency-early (their job is to
+        // send engine commands ahead of their beat); wall-clock delay
+        // deadlines fire exactly, in logical seconds, independent of the
+        // tempo ramp. In manual mode, "wall-clock" is manualSeconds_.
+        bool fireWall = false;
+        Future* wallFut = nullptr;
+        Entry next{};
         {
             std::lock_guard lock(schedMtx_);
-            if (queue_.empty()) return;
-            next = queue_.top();
-            // beatToFireTime returns the wall-clock time in seconds at which
-            // this entry should fire (with latency compensation). In manual
-            // mode, "wall-clock" is manualSeconds_.
-            f64 fireSeconds = ramp_.beatsToSeconds(next.beatTime) - latencySeconds_;
-            if (fireSeconds > manualSeconds_) return;
-            queue_.pop();
-            inFlightHandler_ = next.handler;
+
+            size_t wallIdx = 0;
+            bool haveWall = !wallQueue_.empty();
+            for (size_t i = 1; i < wallQueue_.size(); ++i) {
+                if (wallQueue_[i].deadlineSeconds < wallQueue_[wallIdx].deadlineSeconds)
+                    wallIdx = i;
+            }
+            f64 wallFire = haveWall ? wallQueue_[wallIdx].deadlineSeconds : 0.;
+            if (haveWall && wallFire > manualSeconds_) haveWall = false;
+
+            bool haveBeat = false;
+            f64 beatFire = 0.;
+            if (!queue_.empty()) {
+                next = queue_.top();
+                beatFire = ramp_.beatsToSeconds(next.beatTime) - latencySeconds_;
+                haveBeat = beatFire <= manualSeconds_;
+            }
+
+            if (haveWall && (!haveBeat || wallFire <= beatFire)) {
+                wallFut = wallQueue_[wallIdx].fut;
+                wallQueue_.erase(wallQueue_.begin() + (std::ptrdiff_t)wallIdx);
+                fireWall = true;
+            } else if (haveBeat) {
+                queue_.pop();
+                inFlightHandler_ = next.handler;
+            } else {
+                return;   // nothing due
+            }
+        }
+
+        if (fireWall) {
+            // Wall-clock delay (delayReal): resolve under the VM mutex and
+            // wake any thread parked in a top-level await.
+            std::lock_guard vmLock(vm_->mtx);
+            vm_->vm.makeCurrent();
+            vm_->vm.resolveExternalFuture(wallFut);
+            vm_->cv.notify_all();
+            continue;
         }
 
         logicalBeat_ = next.beatTime;
 
-        if (next.handler == nullptr) {
+        if (next.resolveFut) {
+            // Musical delay (delayBeats): resolve under the VM mutex and wake
+            // any thread parked in a top-level await.
+            {
+                std::lock_guard vmLock(vm_->mtx);
+                vm_->vm.makeCurrent();
+                vm_->vm.resolveExternalFuture(next.resolveFut);
+                vm_->cv.notify_all();
+            }
+            std::lock_guard lock2(schedMtx_);
+            inFlightHandler_ = nullptr;
+        } else if (next.handler == nullptr) {
             // Tempo-change event: install new ramp.
             f64 epochSec = ramp_.beatsToSeconds(next.beatTime);
             f64 currentTempo = ramp_.beatsToTempo(next.beatTime);
@@ -276,16 +382,38 @@ void NRTTempoScheduler::run() {
     while (running_.load(std::memory_order_relaxed)) {
         std::unique_lock lock(schedMtx_);
 
-        if (queue_.empty()) {
+        if (queue_.empty() && wallQueue_.empty()) {
             cv_.wait(lock, [this] {
-                return !running_.load(std::memory_order_relaxed) || !queue_.empty();
+                return !running_.load(std::memory_order_relaxed)
+                    || !queue_.empty() || !wallQueue_.empty();
             });
             if (!running_.load(std::memory_order_relaxed)) break;
-            if (queue_.empty()) continue;
+            continue;
         }
 
-        auto next = queue_.top();
-        auto fireTime = beatToFireTime(next.beatTime);
+        // Earliest pending deadline across both queues. Beat entries convert
+        // through the CURRENT ramp on every pass (a tempo change notifies the
+        // cv below, so the sleep re-targets); wall-clock delay deadlines are
+        // fixed TimePoints a tempo change cannot move.
+        size_t wallIdx = 0;
+        bool haveWall = !wallQueue_.empty();
+        for (size_t i = 1; i < wallQueue_.size(); ++i) {
+            if (wallQueue_[i].deadlineSeconds < wallQueue_[wallIdx].deadlineSeconds)
+                wallIdx = i;
+        }
+        bool wallFirst = false;
+        TimePoint fireTime{};
+        if (!queue_.empty()) {
+            fireTime = beatToFireTime(queue_.top().beatTime);
+        }
+        if (haveWall) {
+            TimePoint wallFire = epoch_ + std::chrono::duration_cast<Clock::duration>(
+                std::chrono::duration<f64>(wallQueue_[wallIdx].deadlineSeconds));
+            if (queue_.empty() || wallFire < fireTime) {
+                fireTime = wallFire;
+                wallFirst = true;
+            }
+        }
         auto now = Clock::now();
 
         if (fireTime > now) {
@@ -298,6 +426,21 @@ void NRTTempoScheduler::run() {
             continue;
         }
 
+        if (wallFirst) {
+            // Wall-clock delay (delayReal): resolve the external future under
+            // the VM mutex and wake a thread parked in a top-level await (the
+            // host-wait hook sleeps on the NRTVM cv).
+            Future* fut = wallQueue_[wallIdx].fut;
+            wallQueue_.erase(wallQueue_.begin() + (std::ptrdiff_t)wallIdx);
+            lock.unlock();
+            std::lock_guard vmLock(vm_->mtx);
+            vm_->vm.makeCurrent();
+            vm_->vm.resolveExternalFuture(fut);
+            vm_->cv.notify_all();
+            continue;
+        }
+
+        auto next = queue_.top();
         queue_.pop();
         // Keep the popped handler reachable for GC across the call.
         inFlightHandler_ = next.handler;
@@ -307,7 +450,18 @@ void NRTTempoScheduler::run() {
         // Reset to -1 after handler returns (signals "not in a callback").
         logicalBeat_ = next.beatTime;
 
-        if (next.handler == nullptr) {
+        if (next.resolveFut) {
+            // Musical delay (delayBeats): resolve the external future under
+            // the VM mutex and wake a thread parked in a top-level await.
+            {
+                std::lock_guard vmLock(vm_->mtx);
+                vm_->vm.makeCurrent();
+                vm_->vm.resolveExternalFuture(next.resolveFut);
+                vm_->cv.notify_all();
+            }
+            std::lock_guard lock2(schedMtx_);
+            inFlightHandler_ = nullptr;
+        } else if (next.handler == nullptr) {
             // Tempo-change event: install new ramp
             f64 seconds = ramp_.beatsToSeconds(next.beatTime);
             f64 currentTempo = ramp_.beatsToTempo(next.beatTime);

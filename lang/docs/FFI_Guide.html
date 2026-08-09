@@ -2538,6 +2538,8 @@ nats.<span class="fn">onMessageS</span>(<span class="str">"nodes.piano.chords"</
 <table>
   <tr><th>Function</th><th>Description</th></tr>
   <tr><td><code>delay(beats Float) Future&lt;Void&gt;</code></td><td>Return a pending future that resolves after <code>beats</code> have elapsed on the async event loop's virtual-beat timeline.</td></tr>
+  <tr><td><code>delayReal(seconds Float) Future&lt;Void&gt;</code></td><td>(clock module) Return a pending future resolved by the live scheduler thread after <code>seconds</code> of <em>wall-clock</em> time, independent of tempo. In a render context it resolves at logical render time instead.</td></tr>
+  <tr><td><code>delayBeats(beats Float) Future&lt;Void&gt;</code></td><td>(clock module) Return a pending future resolved when the live tempo clock reaches now + <code>beats</code> &mdash; tracking tempo changes and ramps, and firing latency-early, exactly like a <code>sched()</code> handler. From within a clock handler, relative to the handler's beat.</td></tr>
 </table>
 
 <pre><code><span class="kw">async fn</span> <span class="fn">part</span>() Void {
@@ -2548,6 +2550,7 @@ nats.<span class="fn">onMessageS</span>(<span class="str">"nodes.piano.chords"</
 
 <div class="note">
   <strong>Note:</strong> <code>delay</code> drives the async/await event loop (the orchestration layer on the NRT VM), which is distinct from the engine TempoClock slots that schedule audio-thread commands. See the &ldquo;Async and Await&rdquo; section of <em>Tzopilotl by Example</em> for the full async model (<code>async fn</code>, <code>await</code>, <code>Future&lt;T&gt;</code>, <code>awaitAll</code> / <code>gather</code>).
+  Timelines: on a SILO VM the per-sample tick fires <code>delay</code> timers against the audio tempo clock, so <code>await delay</code> there is sample-accurate real time. On the NRT VM the timeline is <em>logical</em>: a top-level <code>await</code> pumps the loop by jumping the virtual beat to the earliest timer, so <code>await delay(4.0)</code> in a script or notebook cell resolves without waiting any wall-clock time (this is what lets NRT renders run faster than real time). When a script really must pace itself against the outside world, use <code>await delayReal(seconds)</code> from the clock module: the future is resolved by the live scheduler&rsquo;s wall-clock thread, and the wait survives the clear-schedulers panic (which drops handlers, not pending awaits). To await <em>musical</em> time on the same tempo clock that drives <code>sched</code>/<code>go</code> &mdash; ramps and all &mdash; use <code>await delayBeats(beats)</code>, the awaitable sibling of a <code>sched()</code> callback.
 </div>
 
 <!-- -------------------------------- -->

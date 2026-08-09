@@ -60,6 +60,15 @@ public:
         f64 targetTempo;         // end tempo (beats per second)
         f64 rampBeats;           // duration of ramp in beats (0 = instant)
 
+        // For musical awaitable delays (delayBeats): the external Future to
+        // resolve when this beat arrives. Rides the beat queue ON PURPOSE --
+        // unlike a wall-clock delayReal deadline, a musical delay must move
+        // with tempo changes and ramps. Checked BEFORE the handler==nullptr
+        // tempo-change test. Rooted by the VM's external-future list and by
+        // markRoots while queued; clearAll() keeps these entries (dropping
+        // one would strand a parked await).
+        Future* resolveFut = nullptr;
+
         // Priority queue: earliest beat first
         bool operator>(const Entry& other) const {
             return beatTime > other.beatTime;
@@ -81,6 +90,24 @@ public:
 
     // Schedule a handler relative to the current logical beat.
     i64 sched(f64 deltaBeats, Obj* handler);
+
+    // Schedule the resolution of an external (registered) Future a number of
+    // WALL-CLOCK seconds from now -- the engine of the awaitable delayReal().
+    // Deadlines live in their own queue in seconds-since-epoch, never in
+    // beats, so tempo changes during the wait cannot move them (the run loop
+    // recomputes its sleep from both queues on every wake). No scheduling
+    // latency is applied: the future resolves at the actual deadline. In
+    // manual mode "wall-clock" is the logical tickTo() clock.
+    i64 schedResolveFutureSecs(f64 seconds, Future* fut);
+
+    // Schedule the resolution of an external (registered) Future a number of
+    // BEATS from the current logical beat -- the engine of the awaitable
+    // delayBeats(). The entry rides the beat queue like a sched() handler:
+    // tempo changes and ramps move it, and it fires latency-early exactly as
+    // handlers do (so code resumed by the await can submit engine commands
+    // that land on the beat). Like sched(), calling from within a handler
+    // schedules relative to the handler's beat.
+    i64 schedResolveFutureBeats(f64 deltaBeats, Future* fut);
 
     // Schedule a tempo change at an absolute beat.
     // Installs a new TempoRamp starting at that beat, ramping to
@@ -144,6 +171,19 @@ private:
     // Convert wall-clock now to seconds since epoch.
     f64 elapsedSeconds() const;
 
+    // Wall-clock delay entries (delayReal): deadline in seconds since epoch_
+    // (elapsedSeconds() units, so manual mode works too). Kept OUT of the
+    // beat queue: these fire at their wall deadline regardless of tempo, and
+    // clearAll() (panic) leaves them alone -- dropping one would strand a
+    // thread parked in `await delayReal` forever. Unsorted vector, min-scanned
+    // (delays in flight are few). The futures are rooted by the VM's
+    // external-future list and by markRoots.
+    struct WallEntry {
+        f64 deadlineSeconds;
+        Future* fut;
+        i64 timerID;
+    };
+
     NRTVM* vm_;
     TempoRamp ramp_;
     TimePoint epoch_;          // wall-clock time corresponding to ramp start
@@ -153,6 +193,7 @@ private:
     mutable std::mutex schedMtx_;
     std::condition_variable cv_;
     std::priority_queue<Entry, std::vector<Entry>, std::greater<Entry>> queue_;
+    std::vector<WallEntry> wallQueue_;  // wall-clock delay deadlines (see WallEntry)
     // Handler popped from the queue but not yet fired (or currently firing).
     // Guarded by schedMtx_; the run loop sets this before releasing schedMtx_
     // and clears it after firing returns.
