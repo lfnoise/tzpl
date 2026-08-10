@@ -30,8 +30,17 @@ namespace synthdef {
         S root;
         vector<S> exprs;
 
-        // boolean indicates a separate loop constraint.
-        unordered_map<ExprTree*, bool> antecedents;
+        // boolean indicates a separate loop constraint. Insertion-ordered
+        // (NOT a hash map): sortTrees recursion follows this order, so it
+        // must be deterministic and match synthc's antecedent arrays.
+        vector<std::pair<ExprTree*, bool>> antecedents;
+
+        void addAntecedent(ExprTree* antecedent, bool separateLoopConstraint) {
+            for (auto& [ant, sep] : antecedents) {
+                if (ant == antecedent) { sep = sep || separateLoopConstraint; return; }
+            }
+            antecedents.push_back({antecedent, separateLoopConstraint});
+        }
         usize serial = 0;
         mutable optional<bool> is_consumed_in_loop_;
 

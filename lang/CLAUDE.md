@@ -133,6 +133,10 @@ Flat (audio-domain):
 - `synthdef.x` -- SynthDef integration framework
 - `wavetables.x` -- Band-limited wavetable bank generation (for the `osc` family; NRT, uses the fft builtins)
 - `dsp_math.x` -- DSP math utilities
+- `effects.x` -- Common audio effects: ugen-layer functions (tremolo, chorus,
+  phaser, delays, reverb, dynamics, distortion, pitch shift, granulator,
+  formant, ...) plus ready-made `fx*()` stereo synthdef graph functions
+  (registered by `examples/effect_synthdefs.x`)
 - `filters.x` -- IIR/FIR filter implementations
 - `complex_signal.x` -- complex arithmetic over signals
 - `actors.x`, `silo.x`, `silo_actors.x` -- engine-coupled concurrency helpers

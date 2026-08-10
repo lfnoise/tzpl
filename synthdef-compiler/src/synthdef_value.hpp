@@ -184,6 +184,27 @@ namespace synthdef {
 
     using ExprSet = unordered_set<S, ExprHasher, ExprEquals>;
     using ExprIdentitySet = unordered_set<S, ExprIdentityHasher, ExprIdentical>;
+
+    // Deterministic worklist for the shape/type inference fixpoints: LIFO
+    // stack with an in-queue membership set. Hash-set iteration order must
+    // not leak into inference order (and thus codegen) -- synthc's WorkList
+    // mirrors this exact push/pop discipline, and the two compilers must
+    // resolve inference ties identically to stay byte-identical.
+    struct ExprWorkList {
+        vector<S> items;
+        ExprIdentitySet inq;
+
+        void insert(S expr) {
+            if (inq.insert(expr).second) items.push_back(expr);
+        }
+        bool empty() const { return items.empty(); }
+        S pop() {
+            S expr = items.back();
+            items.pop_back();
+            inq.erase(expr);
+            return expr;
+        }
+    };
     
 class ExprIdentityBag {
     unordered_map<S, usize, ExprIdentityHasher, ExprIdentical> map;

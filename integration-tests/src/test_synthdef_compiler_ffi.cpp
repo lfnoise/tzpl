@@ -971,6 +971,13 @@ static void test_synthc_prod_diff() {
         "synthc production output (defSynthX: rewrites-on, width 4) byte-matches the C++ compiler");
 }
 
+static void test_effects_prod_diff() {
+    std::print("Test: effects library defs byte-match C++ at production config\n");
+    run_synthc_diff_script(
+        "effects_prod_diff.x", "FX PROD DIFF PASS",
+        "effects library fx* defs compile via synthc and byte-match the C++ compiler");
+}
+
 static void test_synthc_compile_and_load() {
     std::print("Test: synthc defSynthX compiles a synth to a dylib and loads it\n");
 
@@ -1056,6 +1063,7 @@ int main(int argc, char const* argv[]) {
     test_synthc_voicer_simd_diff();
     test_synthc_buffer_simd_diff();
     test_synthc_prod_diff();
+    test_effects_prod_diff();
     test_synthc_compile_and_load();
 
     std::print("\n=== Results: {} passed, {} failed ===\n",

@@ -246,7 +246,7 @@ namespace synthdef {
         }
     }
 
-    void Expr::propagate_input_type(ExprIdentitySet& worklist) {
+    void Expr::propagate_input_type(ExprWorkList& worklist) {
         { int i = 0; for (S input : inputs) {
             auto new_input_type = inputTypeConstraint(i) & input->type;
             if (new_input_type != input->type) {
@@ -256,18 +256,18 @@ namespace synthdef {
             ++i;
         }}
     }
-    void Expr::propagate_output_type(ExprIdentitySet& worklist) {
+    void Expr::propagate_output_type(ExprWorkList& worklist) {
         for (S consumer : consumers.exprs()) {
             worklist.insert(consumer);
         }
     }
-    void Expr::propagate_types(ExprIdentitySet& worklist) 
+    void Expr::propagate_types(ExprWorkList& worklist) 
     {
         propagate_input_type(worklist);
         propagate_output_type(worklist);
     }
 
-    void propagate_delay_types(D delayBuf, ExprIdentitySet& worklist) 
+    void propagate_delay_types(D delayBuf, ExprWorkList& worklist) 
     {
         for (S expr : delayBuf->fixReaders) {
             worklist.insert(expr);
@@ -306,11 +306,11 @@ namespace synthdef {
     }
 
 
-    void Outlet::update_type(ExprIdentitySet& worklist) {
+    void Outlet::update_type(ExprWorkList& worklist) {
         type = in0()->type;
     }
 
-    void DebugExpr::update_type(ExprIdentitySet& worklist) {
+    void DebugExpr::update_type(ExprWorkList& worklist) {
         type = in0()->type;
     }
 
@@ -322,7 +322,7 @@ namespace synthdef {
         return NumType::any_float;
     }
 
-    void SinCosExpr::update_type(ExprIdentitySet& worklist) {
+    void SinCosExpr::update_type(ExprWorkList& worklist) {
         auto new_type = type & in0()->type;
         checkType(new_type);
         if (type != new_type) {
@@ -332,7 +332,7 @@ namespace synthdef {
         
     }
 
-    void SinCosOutputExpr::update_type(ExprIdentitySet& worklist) {
+    void SinCosOutputExpr::update_type(ExprWorkList& worklist) {
         auto new_type = type & in0()->type;
         checkType(new_type);
         if (type != new_type) {
@@ -343,7 +343,7 @@ namespace synthdef {
     }
 #endif
 
-    void UnaryOpExpr::update_type(ExprIdentitySet& worklist) {
+    void UnaryOpExpr::update_type(ExprWorkList& worklist) {
         auto new_type = type & in0()->type;
         checkType(new_type);
         if (type != new_type) {
@@ -353,7 +353,7 @@ namespace synthdef {
         
     }
 
-    void BinaryOpExpr::update_type(ExprIdentitySet& worklist) {
+    void BinaryOpExpr::update_type(ExprWorkList& worklist) {
         auto new_type = type & in0()->type & in1()->type;
         checkType(new_type);
         if (type != new_type) {
@@ -362,7 +362,7 @@ namespace synthdef {
         }
     }
 
-    void CompareOpExpr::update_type(ExprIdentitySet& worklist) {
+    void CompareOpExpr::update_type(ExprWorkList& worklist) {
         auto new_input_type = in0()->type & in1()->type;
         checkType(new_input_type);
         if (input_type != new_input_type) {
@@ -376,7 +376,7 @@ namespace synthdef {
         }
     }
     
-//    void MatMulExpr::update_type(ExprIdentitySet& worklist) {
+//    void MatMulExpr::update_type(ExprWorkList& worklist) {
 //        auto new_type = type & in0()->type & in1()->type;
 //        checkType(new_type);
 //        if (type != new_type) {
@@ -386,7 +386,7 @@ namespace synthdef {
 //    }
 
     
-    void DelayFixRead::update_type(ExprIdentitySet& worklist) {
+    void DelayFixRead::update_type(ExprWorkList& worklist) {
         auto new_type = type & delayBuf->type;
         checkType(new_type);
         if (type != new_type) {
@@ -399,7 +399,7 @@ namespace synthdef {
         }
     }
 
-    void DelayVarRead::update_type(ExprIdentitySet& worklist) {
+    void DelayVarRead::update_type(ExprWorkList& worklist) {
         auto new_type = type & delayBuf->type;
         checkType(new_type);
         if (type != new_type) {
@@ -412,7 +412,7 @@ namespace synthdef {
         }
     }
 
-    void DelayWrite::update_type(ExprIdentitySet& worklist) {
+    void DelayWrite::update_type(ExprWorkList& worklist) {
         auto new_type = type & in0()->type & delayBuf->type;
         checkType(new_type);
 //        printf("DelayWrite::update_type %llu %s -> %s\n", delayBuf->serial, type.str().c_str(), new_type.str().c_str());
@@ -426,7 +426,7 @@ namespace synthdef {
     // -- Vec* update_type --
 
     #define VEC_UPDATE_TYPE_1INPUT(T) \
-    void T::update_type(ExprIdentitySet& worklist) { \
+    void T::update_type(ExprWorkList& worklist) { \
         auto new_type = type & in0()->type; \
         checkType(new_type); \
         if (new_type != type) { type = new_type; propagate_types(worklist); } \
@@ -444,12 +444,12 @@ namespace synthdef {
 
     #undef VEC_UPDATE_TYPE_1INPUT
 
-    void VecPutExpr::update_type(ExprIdentitySet& worklist) {
+    void VecPutExpr::update_type(ExprWorkList& worklist) {
         auto new_type = type & in0()->type & in2()->type;
         checkType(new_type);
         if (new_type != type) { type = new_type; propagate_types(worklist); }
     }
-    void VecJoinExpr::update_type(ExprIdentitySet& worklist) {
+    void VecJoinExpr::update_type(ExprWorkList& worklist) {
         auto new_type = type;
         for (S in : inputs) {
             new_type = new_type & in->type;
@@ -457,7 +457,7 @@ namespace synthdef {
         checkType(new_type);
         if (new_type != type) { type = new_type; propagate_types(worklist); }
     }
-    void ReduceExpr::update_type(ExprIdentitySet& worklist) {
+    void ReduceExpr::update_type(ExprWorkList& worklist) {
         auto new_type = type & in0()->type;
         checkType(new_type);
         if (type != new_type) {
@@ -466,7 +466,7 @@ namespace synthdef {
         }
     }
 
-    void PhiNodeExpr::update_type(ExprIdentitySet& worklist) {
+    void PhiNodeExpr::update_type(ExprWorkList& worklist) {
         auto new_type = type & in0()->type;
         checkType(new_type);
         if (type != new_type) {
@@ -478,7 +478,7 @@ namespace synthdef {
         }
     }
 
-    void SelectExpr::update_type(ExprIdentitySet& worklist) {
+    void SelectExpr::update_type(ExprWorkList& worklist) {
         auto new_type = type;
         for (S in : inputs | stdv::drop(1)) {
             new_type = new_type & in->type;
@@ -489,7 +489,7 @@ namespace synthdef {
             propagate_types(worklist);
         }
     }
-    void IfElseExpr::update_type(ExprIdentitySet& worklist) {
+    void IfElseExpr::update_type(ExprWorkList& worklist) {
         // The test input-type constraint (any_int) is an invariant; apply it on
         // every visit, not only when this node's type narrows. Otherwise the
         // result depends on worklist iteration order (whether this node updates
@@ -511,7 +511,7 @@ namespace synthdef {
             }
         }
     }
-    void SwitchExpr::update_type(ExprIdentitySet& worklist) {
+    void SwitchExpr::update_type(ExprWorkList& worklist) {
 //        std::println("SwitchExpr::update_type {} in0 {}", (void*)this, in0()->type.str());
         propagate_input_type(worklist);   // selector -> any_int, order-independent
         auto new_type = type;
@@ -530,7 +530,7 @@ namespace synthdef {
         }
     }
 
-    void ForLoopExpr::update_type(ExprIdentitySet& worklist) {
+    void ForLoopExpr::update_type(ExprWorkList& worklist) {
         propagate_input_type(worklist);   // count -> any_int, order-independent
         auto new_type = type & loop_body->type;
         checkType(new_type);
@@ -544,7 +544,7 @@ namespace synthdef {
         }
     }
 
-    void SpectralChainExpr::update_type(ExprIdentitySet& worklist) {
+    void SpectralChainExpr::update_type(ExprWorkList& worklist) {
         // SpectralChainExpr always produces f32
         NumType new_type = NumType::f32;
         if (type != new_type) {

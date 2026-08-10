@@ -340,12 +340,7 @@ namespace synthdef {
                         dstExpr->userial, dstExpr->typeName());
             }
             
-            auto p = tree->antecedents.find(antecedent); 
-            if (p != tree->antecedents.end()) {
-                tree->antecedents.insert({antecedent, p->second || separateLoopConstraint});
-            } else {
-                tree->antecedents.insert({antecedent, separateLoopConstraint});
-            }
+            tree->addAntecedent(antecedent, separateLoopConstraint);
         }
     }
     
@@ -444,14 +439,12 @@ namespace synthdef {
         }
     }
 
-    S pop(ExprIdentitySet& worklist) {
-        S expr = *worklist.begin();
-        worklist.erase(expr);
-        return expr;
+    S pop(ExprWorkList& worklist) {
+        return worklist.pop();
     }
-     
+
     void Synth::shapeInference() {
-        ExprIdentitySet worklist;
+        ExprWorkList worklist;
         for (S expr : sorted) {
             worklist.insert(expr);
         }
@@ -492,7 +485,7 @@ namespace synthdef {
     }
 
     void Synth::typeInference() {
-        ExprIdentitySet worklist;
+        ExprWorkList worklist;
         for (S expr : sorted) {
             worklist.insert(expr);
 //            std::println("typeInference expr {} {} {}", 
@@ -532,11 +525,11 @@ namespace synthdef {
 
                 for (S reader : buf->fixReaders) {
                     if (reader->tree == expr->tree) continue; // the reader is in the same statement
-                    tree->antecedents.insert({reader->tree, false});
+                    tree->addAntecedent(reader->tree, false);
                 }
                 for (S reader : buf->varReaders) {
                     if (reader->tree == expr->tree) continue; // the reader is in the same statement
-                    tree->antecedents.insert({reader->tree, false});
+                    tree->addAntecedent(reader->tree, false);
                 }
             }
         }
@@ -546,7 +539,7 @@ namespace synthdef {
         for (S expr : sorted) {
             for (usize i = 0; i < expr->num_subgraphs(); ++i) {
                 S subgraph = expr->get_subgraph(i);
-                expr->tree->antecedents.insert({subgraph->tree, true});
+                expr->tree->addAntecedent(subgraph->tree, true);
             }
         }
     }

@@ -46,8 +46,8 @@ namespace synthdef {
     struct DelayBuf;
     //using D = DelayBuf*;
 
-    void propagate_types(S expr, ExprIdentitySet& worklist);
-    void propagate_types(D delayBuf, ExprIdentitySet& worklist);
+    void propagate_types(S expr, ExprWorkList& worklist);
+    void propagate_types(D delayBuf, ExprWorkList& worklist);
 
     inline bool type_changed(NumType new_type) { return false; }
     
@@ -101,10 +101,10 @@ namespace synthdef {
         //virtual optional<D> get_delay() const { return {}; }
         
         virtual NumType initial_type() const = 0;
-        virtual void update_type(ExprIdentitySet& worklist) = 0;
-        virtual void propagate_types(ExprIdentitySet& worklist);
-        virtual void propagate_input_type(ExprIdentitySet& worklist);
-        virtual void propagate_output_type(ExprIdentitySet& worklist);
+        virtual void update_type(ExprWorkList& worklist) = 0;
+        virtual void propagate_types(ExprWorkList& worklist);
+        virtual void propagate_input_type(ExprWorkList& worklist);
+        virtual void propagate_output_type(ExprWorkList& worklist);
         virtual NumType inputTypeConstraint(int index) const { return type; }
         void checkType(NumType t) {
             if (t.is_empty()) {
@@ -155,7 +155,7 @@ namespace synthdef {
         
         u64 hash() const override { return 0x9C232E8666165C15; }
         NumType initial_type() const override { return NumType::any; }
-        void update_type(ExprIdentitySet& worklist) override {}
+        void update_type(ExprWorkList& worklist) override {}
         void calcShape() override {}
 
         void accept(ExprVisitor& visitor) override;
@@ -169,7 +169,7 @@ namespace synthdef {
         
         u64 hash() const override { return 0x7D4CE94D02C28225; }
         NumType initial_type() const override { return NumType::any; }
-        void update_type(ExprIdentitySet& worklist) override {}
+        void update_type(ExprWorkList& worklist) override {}
         void calcShape() override {}
 
         void accept(ExprVisitor& visitor) override;
@@ -194,7 +194,7 @@ namespace synthdef {
             return slot == c.slot && rate == c.rate;
         }
         NumType initial_type() const override { return NumType::any_float; }
-        void update_type(ExprIdentitySet& worklist) override {}
+        void update_type(ExprWorkList& worklist) override {}
         void calcShape() override {}
 
         void accept(ExprVisitor& visitor) override;
@@ -218,7 +218,7 @@ namespace synthdef {
             return spec == c.spec && type == c.type && serial == c.serial;
         }
         NumType initial_type() const override { return type; }
-        void update_type(ExprIdentitySet& worklist) override {}
+        void update_type(ExprWorkList& worklist) override {}
         void calcShape() override {}
 
         void accept(ExprVisitor& visitor) override;
@@ -244,7 +244,7 @@ namespace synthdef {
             return spec == c.spec && type == c.type && serial == c.serial;
         }
         NumType initial_type() const override { return type; }
-        void update_type(ExprIdentitySet& worklist) override {}
+        void update_type(ExprWorkList& worklist) override {}
         void calcShape() override {}
         bool should_hash_cons() const override { return false; }
 
@@ -268,7 +268,7 @@ namespace synthdef {
             return type == c.type && serial == c.serial;
         }
         NumType initial_type() const override { return type; }
-        void update_type(ExprIdentitySet& worklist) override {}
+        void update_type(ExprWorkList& worklist) override {}
         void calcShape()  override {}
         
         bool should_hash_cons() const override { return false; }
@@ -293,7 +293,7 @@ namespace synthdef {
             return serial == c.serial;
         }
         NumType initial_type() const override { return NumType::any; }
-        void update_type(ExprIdentitySet& worklist) override;
+        void update_type(ExprWorkList& worklist) override;
         void calcShape()  override;
         
         bool should_hash_cons() const override { return false; }
@@ -327,7 +327,7 @@ namespace synthdef {
         }
         bool should_hash_cons() const override { return false; }
         NumType initial_type() const override { return NumType::any; }
-        void update_type(ExprIdentitySet& worklist) override;
+        void update_type(ExprWorkList& worklist) override;
         // The sink itself is single-channel — it produces one print per sample.
         // The codegen reads each channel of the input separately into the
         // generated printf line, so the surrounding loop is always 1-iteration.
@@ -353,7 +353,7 @@ namespace synthdef {
             return op == c.op;
         }
         NumType initial_type() const override;
-        void update_type(ExprIdentitySet& worklist) override;
+        void update_type(ExprWorkList& worklist) override;
         void calcShape()  override;
 
         void accept(ExprVisitor& visitor) override;
@@ -379,7 +379,7 @@ namespace synthdef {
             return op == c.op;
         }
         NumType initial_type() const override;
-        void update_type(ExprIdentitySet& worklist) override;
+        void update_type(ExprWorkList& worklist) override;
         void calcShape()  override;
 
         void accept(ExprVisitor& visitor) override;
@@ -405,7 +405,7 @@ namespace synthdef {
         NumType initial_type() const override {
             return NumType::any;
         }
-        void update_type(ExprIdentitySet& worklist) override;
+        void update_type(ExprWorkList& worklist) override;
         NumType inputTypeConstraint(int i) const override {
             return input_type;
         }
@@ -435,7 +435,7 @@ namespace synthdef {
         NumType inputTypeConstraint(int index) const override {
             return NumType::any;
         }
-        void update_type(ExprIdentitySet& worklist) override {
+        void update_type(ExprWorkList& worklist) override {
 //            std::println("CastOpExpr::update_type {} type {} cast_type {} in {}", 
 //                (void*)this, type.str(), cast_type.str(), in0()->type.str());
 
@@ -457,7 +457,7 @@ namespace synthdef {
         }
 
         NumType initial_type() const override { return NumType::any; }
-        void update_type(ExprIdentitySet& worklist) override;
+        void update_type(ExprWorkList& worklist) override;
         void calcShape()  override;
 
         void accept(ExprVisitor& visitor) override;
@@ -477,7 +477,7 @@ namespace synthdef {
             return hash_combine(Expr::hash(), 0xADD83628A264CCD4);
         }
         NumType initial_type() const override;
-        void update_type(ExprIdentitySet& worklist) override;
+        void update_type(ExprWorkList& worklist) override;
         void calcShape()  override;
     };
     
@@ -499,7 +499,7 @@ namespace synthdef {
             return output_index == c.output_index;
         }
         NumType initial_type() const override;
-        void update_type(ExprIdentitySet& worklist) override;
+        void update_type(ExprWorkList& worklist) override;
         void calcShape()  override;
     };
 #endif
@@ -528,7 +528,7 @@ namespace synthdef {
             return op == c.op && cols == c.cols;
         }
         NumType initial_type() const override { return in0()->type; }
-        void update_type(ExprIdentitySet& worklist) override;
+        void update_type(ExprWorkList& worklist) override;
         void calcShape() override { chans = cols; }
         bool needs_input_temp_var(usize input) const override { return true; }
         bool input_must_be_separate_loop(usize input) const override { return true; }
@@ -560,7 +560,7 @@ namespace synthdef {
             return op == c.op && rows == c.rows;
         }
         NumType initial_type() const override { return in0()->type; }
-        void update_type(ExprIdentitySet& worklist) override;
+        void update_type(ExprWorkList& worklist) override;
         void calcShape() override { chans = in0()->chans; }
 
         void accept(ExprVisitor& visitor) override;
@@ -593,7 +593,7 @@ namespace synthdef {
         
         void calcShape() override {}
         NumType initial_type() const override { return init_type; }
-        void update_type(ExprIdentitySet& worklist) override {}
+        void update_type(ExprWorkList& worklist) override {}
 
         void accept(ExprVisitor& visitor) override;
     };
@@ -617,7 +617,7 @@ namespace synthdef {
         void calcShape() override;
 
         NumType initial_type() const override { return NumType::any; }
-        void update_type(ExprIdentitySet& worklist) override;
+        void update_type(ExprWorkList& worklist) override;
         bool needs_input_temp_var(usize input) const override { return true; }
         bool should_hash_cons() const override { return false; }
 
@@ -634,7 +634,7 @@ namespace synthdef {
         u64 hash() const override {  return hash_combine(Expr::hash(), 0xA1189BD94A4E6E4C); }
 
         NumType initial_type() const override { return NumType::any; }
-        void update_type(ExprIdentitySet& worklist) override;
+        void update_type(ExprWorkList& worklist) override;
         NumType inputTypeConstraint(int index) const override { 
             return index == 0 ? NumType::any_int : type; 
         }
@@ -646,7 +646,7 @@ namespace synthdef {
     struct ControlFlowExpr : Expr {
         using Expr::Expr;
         bool is_control_flow() const override { return true; }
-        virtual void insertPhiNodes(ExprIdentitySet& worklist) = 0;
+        virtual void insertPhiNodes(ExprWorkList& worklist) = 0;
     };
     
     struct IfElseExpr : ControlFlowExpr {
@@ -679,12 +679,12 @@ namespace synthdef {
         }
 
         NumType initial_type() const override { return NumType::any; }
-        void update_type(ExprIdentitySet& worklist) override;
+        void update_type(ExprWorkList& worklist) override;
         NumType inputTypeConstraint(int index) const override { 
             return index == 0 ? NumType::any_int : type; 
         }
         void calcShape()  override;
-        void insertPhiNodes(ExprIdentitySet& worklist) override {
+        void insertPhiNodes(ExprWorkList& worklist) override {
             worklist.insert(then_expr);
             worklist.insert(else_expr);
         }
@@ -723,9 +723,9 @@ namespace synthdef {
             return index == 0 ? NumType::any_int : type; 
         }
         NumType initial_type() const override { return NumType::any; }
-        void update_type(ExprIdentitySet& worklist) override;
+        void update_type(ExprWorkList& worklist) override;
         void calcShape()  override;
-        void insertPhiNodes(ExprIdentitySet& worklist) override {
+        void insertPhiNodes(ExprWorkList& worklist) override {
              for (S c : cases) {
                 auto phi = c.as<PhiNodeExpr>();
                 assert(phi != nullptr);
@@ -761,9 +761,9 @@ namespace synthdef {
         NumType inputTypeConstraint(int index) const override {
             return index == 0 ? NumType::any_int : type;
         }
-        void update_type(ExprIdentitySet& worklist) override;
+        void update_type(ExprWorkList& worklist) override;
         void calcShape() override;
-        void insertPhiNodes(ExprIdentitySet& worklist) override {
+        void insertPhiNodes(ExprWorkList& worklist) override {
             auto phi = loop_body.as<PhiNodeExpr>();
             assert(phi != nullptr);
             worklist.insert(phi);
@@ -797,7 +797,7 @@ namespace synthdef {
         }
 
         NumType initial_type() const override { return NumType::any; }
-        void update_type(ExprIdentitySet& worklist) override {
+        void update_type(ExprWorkList& worklist) override {
             NumType new_type = voice_body->in0()->type;
             if (type_changed(new_type, type)) {
                 type = new_type;
@@ -809,7 +809,7 @@ namespace synthdef {
             usize voiceChans = voice_body->in0()->chans;
             chans = maxVoices * voiceChans;
         }
-        void insertPhiNodes(ExprIdentitySet& worklist) override {
+        void insertPhiNodes(ExprWorkList& worklist) override {
             worklist.insert(voice_body);
         }
         usize num_subgraphs() const override { return 1; }
@@ -841,7 +841,7 @@ namespace synthdef {
         }
 
         NumType initial_type() const override { return NumType::f32; }
-        void update_type(ExprIdentitySet& worklist) override {}
+        void update_type(ExprWorkList& worklist) override {}
         void calcShape() override {} // set externally
         bool should_hash_cons() const override { return false; }
 
@@ -877,9 +877,9 @@ namespace synthdef {
         }
 
         NumType initial_type() const override { return NumType::f32; }
-        void update_type(ExprIdentitySet& worklist) override;
+        void update_type(ExprWorkList& worklist) override;
         void calcShape() override;
-        void insertPhiNodes(ExprIdentitySet& worklist) override {
+        void insertPhiNodes(ExprWorkList& worklist) override {
             worklist.insert(body);
         }
         usize num_subgraphs() const override { return 1; }
@@ -907,7 +907,7 @@ namespace synthdef {
         }
         bool is_reorder() const override { return true; }
         NumType initial_type() const override { return NumType::any; }
-        void update_type(ExprIdentitySet& worklist) override;
+        void update_type(ExprWorkList& worklist) override;
         void calcShape() override;
         bool input_must_be_separate_loop(usize input) const override { return true; }
         bool needs_input_temp_var(usize input) const override { return true; }
@@ -932,7 +932,7 @@ namespace synthdef {
         }
         bool is_reorder() const override { return true; }
         NumType initial_type() const override { return NumType::any; }
-        void update_type(ExprIdentitySet& worklist) override;
+        void update_type(ExprWorkList& worklist) override;
         void calcShape() override;
         bool input_must_be_separate_loop(usize input) const override { return true; }
         bool needs_input_temp_var(usize input) const override { return true; }
@@ -957,7 +957,7 @@ namespace synthdef {
         }
         bool is_reorder() const override { return true; }
         NumType initial_type() const override { return NumType::any; }
-        void update_type(ExprIdentitySet& worklist) override;
+        void update_type(ExprWorkList& worklist) override;
         void calcShape() override;
         bool input_must_be_separate_loop(usize input) const override { return true; }
         bool needs_input_temp_var(usize input) const override { return true; }
@@ -982,7 +982,7 @@ namespace synthdef {
         }
         bool is_reorder() const override { return true; }
         NumType initial_type() const override { return NumType::any; }
-        void update_type(ExprIdentitySet& worklist) override;
+        void update_type(ExprWorkList& worklist) override;
         void calcShape() override;
         bool input_must_be_separate_loop(usize input) const override { return true; }
         bool needs_input_temp_var(usize input) const override { return true; }
@@ -1007,7 +1007,7 @@ namespace synthdef {
         }
         bool is_reorder() const override { return true; }
         NumType initial_type() const override { return NumType::any; }
-        void update_type(ExprIdentitySet& worklist) override;
+        void update_type(ExprWorkList& worklist) override;
         void calcShape() override;
         bool input_must_be_separate_loop(usize input) const override { return true; }
         bool needs_input_temp_var(usize input) const override { return true; }
@@ -1026,7 +1026,7 @@ namespace synthdef {
 
         bool is_reorder() const override { return true; }
         NumType initial_type() const override { return NumType::any; }
-        void update_type(ExprIdentitySet& worklist) override;
+        void update_type(ExprWorkList& worklist) override;
         void calcShape() override;
         bool input_must_be_separate_loop(usize input) const override { return true; }
         bool needs_input_temp_var(usize input) const override { return true; }
@@ -1051,7 +1051,7 @@ namespace synthdef {
         }
         bool is_reorder() const override { return true; }
         NumType initial_type() const override { return NumType::any; }
-        void update_type(ExprIdentitySet& worklist) override;
+        void update_type(ExprWorkList& worklist) override;
         void calcShape() override;
         bool input_must_be_separate_loop(usize input) const override { return true; }
         bool needs_input_temp_var(usize input) const override { return true; }
@@ -1071,7 +1071,7 @@ namespace synthdef {
         }
         bool is_reorder() const override { return true; }
         NumType initial_type() const override { return NumType::any; }
-        void update_type(ExprIdentitySet& worklist) override;
+        void update_type(ExprWorkList& worklist) override;
         NumType inputTypeConstraint(int i) const override {
             return i == 0 ? type : NumType::any_int;
         }
@@ -1093,7 +1093,7 @@ namespace synthdef {
 
         bool is_reorder() const override { return true; }
         NumType initial_type() const override { return NumType::any; }
-        void update_type(ExprIdentitySet& worklist) override;
+        void update_type(ExprWorkList& worklist) override;
         NumType inputTypeConstraint(int i) const override {
             return i == 0 ? type : NumType::any_int;
         }
@@ -1116,7 +1116,7 @@ namespace synthdef {
         bool is_reorder() const override { return true; }
         bool gets_own_loop() const override { return true; }
         NumType initial_type() const override { return NumType::any; }
-        void update_type(ExprIdentitySet& worklist) override;
+        void update_type(ExprWorkList& worklist) override;
         NumType inputTypeConstraint(int i) const override {
             return i == 1 ? NumType::any_int : type;
         }
@@ -1138,7 +1138,7 @@ namespace synthdef {
         bool is_reorder() const override { return true; }
         bool gets_own_loop() const override { return true; }
         NumType initial_type() const override { return NumType::any; }
-        void update_type(ExprIdentitySet& worklist) override;
+        void update_type(ExprWorkList& worklist) override;
         void calcShape() override;
         bool needs_input_temp_var(usize input) const override { return true; }
 
@@ -1158,7 +1158,7 @@ namespace synthdef {
             return serial == c.serial;
         }
         NumType initial_type() const override { return NumType::any_float; }
-        void update_type(ExprIdentitySet& worklist) override {}
+        void update_type(ExprWorkList& worklist) override {}
         void calcShape()  override {}
         bool usesRandomNumberGenerator() const noexcept override { return true; }
 
@@ -1177,7 +1177,7 @@ namespace synthdef {
             return serial == c.serial;
         }
         NumType initial_type() const override { return NumType::any_float; }
-        void update_type(ExprIdentitySet& worklist) override {}
+        void update_type(ExprWorkList& worklist) override {}
         void calcShape()  override {}
         bool usesRandomNumberGenerator() const noexcept override { return true; }
 
@@ -1196,7 +1196,7 @@ namespace synthdef {
             return serial == c.serial;
         }
         NumType initial_type() const override { return NumType::i64; }
-        void update_type(ExprIdentitySet& worklist) override {}
+        void update_type(ExprWorkList& worklist) override {}
         void calcShape()  override {}
         bool usesRandomNumberGenerator() const noexcept override { return true; }
 
@@ -1254,7 +1254,7 @@ namespace synthdef {
             return delayBuf == c.delayBuf;
         }
         NumType initial_type() const override { return NumType::any; }
-        void update_type(ExprIdentitySet& worklist) override {}
+        void update_type(ExprWorkList& worklist) override {}
         void calcShape() override { chans = in0()->chans; }
         bool is_sink() const override { return true; }
 
@@ -1276,7 +1276,7 @@ namespace synthdef {
             return delayBuf == c.delayBuf && delay_samples == c.delay_samples;
         }
         NumType initial_type() const override { return NumType::any; }
-        void update_type(ExprIdentitySet& worklist) override;
+        void update_type(ExprWorkList& worklist) override;
         void calcShape()  override;
 
         void accept(ExprVisitor& visitor) override;
@@ -1297,7 +1297,7 @@ namespace synthdef {
             return delayBuf == c.delayBuf && interp == c.interp;
         }
         NumType initial_type() const override { return NumType::any; }
-        void update_type(ExprIdentitySet& worklist) override;
+        void update_type(ExprWorkList& worklist) override;
         void calcShape()  override;
 
         void accept(ExprVisitor& visitor) override;
@@ -1316,7 +1316,7 @@ namespace synthdef {
             return delayBuf == c.delayBuf;
         }
         NumType initial_type() const override { return NumType::any; }
-        void update_type(ExprIdentitySet& worklist) override;
+        void update_type(ExprWorkList& worklist) override;
         void calcShape()  override;
         bool is_sink() const override { return true; }
 
@@ -1337,7 +1337,7 @@ namespace synthdef {
             return delayBuf == c.delayBuf && offset == c.offset;
         }
         NumType initial_type() const override { return NumType::any; }
-        void update_type(ExprIdentitySet& worklist) override {}
+        void update_type(ExprWorkList& worklist) override {}
         void calcShape()  override {}
         bool is_sink() const override { return true; }
 
@@ -1444,7 +1444,7 @@ namespace synthdef {
                 && readChans == c.readChans && startChan == c.startChan;
         }
         NumType initial_type() const override { return NumType::f64; }
-        void update_type(ExprIdentitySet& worklist) override {}
+        void update_type(ExprWorkList& worklist) override {}
         void calcShape() override { chans = readChans; }
 
         void accept(ExprVisitor& visitor) override;
@@ -1469,7 +1469,7 @@ namespace synthdef {
                 && readChans == c.readChans && startChan == c.startChan;
         }
         NumType initial_type() const override { return NumType::f64; }
-        void update_type(ExprIdentitySet& worklist) override {}
+        void update_type(ExprWorkList& worklist) override {}
         void calcShape() override { chans = readChans; }
 
         void accept(ExprVisitor& visitor) override;
@@ -1493,7 +1493,7 @@ namespace synthdef {
                 && writeChans == c.writeChans && startChan == c.startChan;
         }
         NumType initial_type() const override { return NumType::f64; }
-        void update_type(ExprIdentitySet& worklist) override {}
+        void update_type(ExprWorkList& worklist) override {}
         void calcShape() override {
             chans = in0()->chans;
             if (writeChans == 0) writeChans = chans; // 0 = auto: match input channels
@@ -1516,7 +1516,7 @@ namespace synthdef {
             return sampleBuf == c.sampleBuf;
         }
         NumType initial_type() const override { return NumType::f64; }
-        void update_type(ExprIdentitySet& worklist) override {}
+        void update_type(ExprWorkList& worklist) override {}
         void calcShape() override { chans = 1; }
 
         void accept(ExprVisitor& visitor) override;

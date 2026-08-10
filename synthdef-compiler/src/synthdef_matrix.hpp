@@ -482,7 +482,7 @@ struct Constant : Expr {
 
     NumType initial_type() const override { return init_type; }
     
-    void update_type(ExprIdentitySet& worklist) override {}
+    void update_type(ExprWorkList& worklist) override {}
     void calcShape() override { chans = std::visit([](auto&& arg) { return arg.size(); }, value); }
     
     bool is_f64() const {
