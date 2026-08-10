@@ -1902,6 +1902,22 @@ f64 clockTempoBPM(Engine* e, int clock) {
     return s.tempoClocks_[clock].tempoAtSample(s.sampleTime_) * 60.0; // BPS -> BPM
 }
 
+bool clockQuery(Engine* e, int clock, f64 targetBeat,
+                f64& beatsNow, f64& secsUntil) {
+    if (!e || clock < 0 || clock >= e->numTempoClocks_) return false;
+    if (!isAudioRunning(e)) return false;   // clock frozen: follower falls back
+    Silo& s = e->silos_[0];
+    if (clock >= (int)s.tempoClocks_.size()) return false;
+    // Same read discipline as clockBeats/clockTempoBPM: an unlocked snapshot
+    // of silo 0's clock; the follower re-checks near its deadline anyway.
+    TempoClock const& tc = s.tempoClocks_[clock];
+    i64 sampleNow = s.sampleTime_;
+    f64 secondsNow = tc.secondsAtSample(sampleNow);
+    beatsNow = tc.ramp_.secondsToBeats(secondsNow);
+    secsUntil = tc.ramp_.beatsToSeconds(targetBeat) - secondsNow;
+    return true;
+}
+
 // ----------------------------------------------------------------------------
 // Command builders. Each call records an op into the thread-local bundle;
 // all silo-side validation happens when the bundle is submitted with

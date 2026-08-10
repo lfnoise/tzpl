@@ -14,3 +14,11 @@ fn go(c Coroutine<Float>) Int {
         if (result isSome) { result unwrap } else { -1.0 }
     })
 }
+
+-- Same, on engine TempoClock slot `clock` (synchronized across silos).
+fn go(clock Int, c Coroutine<Float>) Int {
+    sched(clock, 0.0, fn() Float {
+        let result = c next;
+        if (result isSome) { result unwrap } else { -1.0 }
+    })
+}

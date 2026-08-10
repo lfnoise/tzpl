@@ -51,6 +51,9 @@ public:
 
     struct Entry {
         f64 beatTime;            // when this event fires (in beats)
+        int clockSlot = 0;       // engine TempoClock slot this beat lives on
+        bool oneShot = false;    // after()/at(): never reschedule, whatever
+                                 // the (Void) handler's return register holds
         Obj* handler;            // Callable (Lambda or Primitive); kept
                                  // reachable by markRoots() while queued.
                                  // nullptr for internal tempo-change events.
@@ -86,10 +89,28 @@ public:
     void markRoots(TracingGC& gc);
 
     // Schedule a handler at an absolute beat.
-    i64 schedAbs(f64 beat, Obj* handler);
+    i64 schedAbs(int slot, f64 beat, Obj* handler, bool oneShot = false);
 
-    // Schedule a handler relative to the current logical beat.
-    i64 sched(f64 deltaBeats, Obj* handler);
+    // Schedule a handler relative to the current logical beat of `slot`.
+    i64 sched(int slot, f64 deltaBeats, Obj* handler, bool oneShot = false);
+
+    // --- Engine clock following -------------------------------------------
+    // When the host installs this hook, beat entries are slaved to the
+    // ENGINE's TempoClock slots: the hook reports slot `slot`'s current beat
+    // and the seconds until it reaches `targetBeat` (under its current ramp),
+    // returning false when the clock cannot advance (no engine, audio not
+    // running) -- entries then fall back to the internal ramp. The run loop
+    // derives wall deadlines from the hook and re-checks on a capped sleep,
+    // so engine-side tempo changes and ramps (scheduled from anywhere, any
+    // slot) move NRT callbacks exactly as they move engine commands, minus
+    // the scheduling latency.
+    using EngineClockFn = std::function<bool(int slot, f64 targetBeat,
+                                             f64& beatsNow, f64& secsUntil)>;
+    void setEngineClockHook(EngineClockFn hook);
+
+    // Current beat of `slot`: the engine clock when the hook can read it,
+    // else the internal ramp.
+    f64 beats(int slot) const;
 
     // Schedule the resolution of an external (registered) Future a number of
     // WALL-CLOCK seconds from now -- the engine of the awaitable delayReal().
@@ -101,13 +122,13 @@ public:
     i64 schedResolveFutureSecs(f64 seconds, Future* fut);
 
     // Schedule the resolution of an external (registered) Future a number of
-    // BEATS from the current logical beat -- the engine of the awaitable
-    // delayBeats(). The entry rides the beat queue like a sched() handler:
-    // tempo changes and ramps move it, and it fires latency-early exactly as
-    // handlers do (so code resumed by the await can submit engine commands
-    // that land on the beat). Like sched(), calling from within a handler
-    // schedules relative to the handler's beat.
-    i64 schedResolveFutureBeats(f64 deltaBeats, Future* fut);
+    // BEATS from the current logical beat of `slot` -- the engine of the
+    // awaitable delayBeats(). The entry rides the beat queue like a sched()
+    // handler: tempo changes and ramps move it, and it fires latency-early
+    // exactly as handlers do (so code resumed by the await can submit engine
+    // commands that land on the beat). Like sched(), calling from within a
+    // handler on the same slot schedules relative to the handler's beat.
+    i64 schedResolveFutureBeats(int slot, f64 deltaBeats, Future* fut);
 
     // Schedule a tempo change at an absolute beat.
     // Installs a new TempoRamp starting at that beat, ramping to
@@ -139,6 +160,7 @@ public:
     // The current logical beat (set before calling a handler, used by
     // sched() for relative scheduling).
     f64 logicalBeat() const { return logicalBeat_; }
+    int logicalSlot() const { return logicalSlot_; }
 
     f64 latency() const { return latencySeconds_; }
     void setLatency(f64 seconds) { latencySeconds_ = seconds; }
@@ -190,10 +212,26 @@ private:
     f64 latencySeconds_;
     f64 logicalBeat_ = -1.;   // current logical beat (-1 = not in a handler callback)
 
+    // Estimated wall fire time of a beat entry (schedMtx_ held). Sets
+    // `engineSynced` when the estimate came from the engine clock hook --
+    // those estimates go stale across engine-side scheduled tempo changes,
+    // so the run loop caps its sleep and re-checks.
+    TimePoint entryFireTime(Entry const& e, bool& engineSynced) const;
+
     mutable std::mutex schedMtx_;
     std::condition_variable cv_;
-    std::priority_queue<Entry, std::vector<Entry>, std::greater<Entry>> queue_;
+    // Beat entries, min-scanned by estimated fire time each pass. A plain
+    // vector rather than a priority queue: entries on different engine clock
+    // slots are not comparable by beat, only by estimated wall time.
+    std::vector<Entry> queue_;
     std::vector<WallEntry> wallQueue_;  // wall-clock delay deadlines (see WallEntry)
+    EngineClockFn engineClock_;         // see setEngineClockHook
+    int logicalSlot_ = -1;              // slot of the handler being fired
+    // Thread currently firing handlers (the run loop, or a tickTo caller).
+    // logicalBeat_/logicalSlot_ are only meaningful ON that thread; sched()
+    // from any other thread must base itself on the clock, never on a
+    // handler's beat it happens to observe mid-fire.
+    std::atomic<std::thread::id> firingThread_{};
     // Handler popped from the queue but not yet fired (or currently firing).
     // Guarded by schedMtx_; the run loop sets this before releasing schedMtx_
     // and clears it after firing returns.

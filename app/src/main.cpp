@@ -863,6 +863,17 @@ int main(int argc, const char* argv[]) {
         ts::NRTTempoScheduler tempoScheduler(&nrtvm);
         appCtx.tempoScheduler = &tempoScheduler;
 
+        // Slave the scheduler's beat entries to the ENGINE's TempoClock
+        // slots: clock-module callbacks and delayBeats fire (latency early)
+        // when the actual engine slot reaches the beat, following tempo
+        // changes and ramps made from anywhere -- the same clocks the silos
+        // run on. Falls back to the scheduler's internal timeline while
+        // audio is not running.
+        tempoScheduler.setEngineClockHook(
+            [eng](int slot, f64 target, f64& beatsNow, f64& secsUntil) {
+                return engine::clockQuery(eng, slot, target, beatsNow, secsUntil);
+            });
+
         appCtx.nrtvm = &nrtvm;
         appCtx.compiler = &compiler;
         appCtx.target = target;

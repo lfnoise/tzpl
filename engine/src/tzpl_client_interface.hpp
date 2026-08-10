@@ -274,6 +274,16 @@ tzpl_SErr schedTempoChange(Engine* e, int clock, f64 atBeat, f64 targetBPM, f64 
 f64 clockBeats(Engine* e, int clock);
 f64 clockTempoBPM(Engine* e, int clock);
 
+// Snapshot engine clock `clock` for an NRT follower (the lang tempo
+// scheduler): current beat position and the seconds until the clock reaches
+// `targetBeat` under its CURRENT ramp (in-flight ramps included; tempo
+// changes still queued for a future beat are not -- followers re-check).
+// Returns false when the clock cannot advance (no engine, slot out of
+// range, audio not running), so the follower can fall back to its own
+// internal timeline.
+bool clockQuery(Engine* e, int clock, f64 targetBeat,
+                f64& beatsNow, f64& secsUntil);
+
 // Add a pre-built Command to the current bundle.
 // The Command must be heap-allocated; ownership is transferred.
 struct Command;

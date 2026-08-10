@@ -78,7 +78,7 @@ static void ffi_sched(ts::VM& vm, u16 dst, u16, u16 argBase) {
     if (!sched) { vm.reg(dst).i = -1; return; }
     f64 deltaBeats = vm.reg(argBase).f;
     ts::Obj* handler = vm.reg(argBase + 1).o;
-    vm.reg(dst).i = sched->sched(deltaBeats, handler);
+    vm.reg(dst).i = sched->sched(kClockSlot, deltaBeats, handler);
 }
 
 // fn schedAbs(beat Float, handler Fn() Float) Int
@@ -88,7 +88,7 @@ static void ffi_schedAbs(ts::VM& vm, u16 dst, u16, u16 argBase) {
     if (!sched) { vm.reg(dst).i = -1; return; }
     f64 beat = vm.reg(argBase).f;
     ts::Obj* handler = vm.reg(argBase + 1).o;
-    vm.reg(dst).i = sched->schedAbs(beat, handler);
+    vm.reg(dst).i = sched->schedAbs(kClockSlot, beat, handler);
 }
 
 // fn after(beats Float, handler Fn() Void) Int
@@ -99,7 +99,7 @@ static void ffi_after(ts::VM& vm, u16 dst, u16, u16 argBase) {
     if (!sched) { vm.reg(dst).i = -1; return; }
     f64 deltaBeats = vm.reg(argBase).f;
     ts::Obj* handler = vm.reg(argBase + 1).o;
-    vm.reg(dst).i = sched->sched(deltaBeats, handler);
+    vm.reg(dst).i = sched->sched(kClockSlot, deltaBeats, handler);
 }
 
 // fn at(beat Float, handler Fn() Void) Int
@@ -109,7 +109,7 @@ static void ffi_at(ts::VM& vm, u16 dst, u16, u16 argBase) {
     if (!sched) { vm.reg(dst).i = -1; return; }
     f64 beat = vm.reg(argBase).f;
     ts::Obj* handler = vm.reg(argBase + 1).o;
-    vm.reg(dst).i = sched->schedAbs(beat, handler);
+    vm.reg(dst).i = sched->schedAbs(kClockSlot, beat, handler);
 }
 
 // fn delayReal(seconds Float) Future<Void>
@@ -172,7 +172,99 @@ static void ffi_delayBeats(ts::VM& vm, u16 dst, u16, u16 argBase) {
         vm.resolveExternalFuture(future);
         return;
     }
-    sched->schedResolveFutureBeats(beats, future);
+    sched->schedResolveFutureBeats(kClockSlot, beats, future);
+}
+
+// Slot-taking forms: identical to the two-argument forms above, but on the
+// engine TempoClock slot given as the FIRST argument (matching the
+// audio_engine convention setTempo(clock, bpm) / sched(silo, clock, beat)).
+// With the engine clock hook installed (the normal live-app case), the
+// handler fires -- latency early -- when THAT engine slot reaches the beat.
+
+// fn sched(clock Int, beats Float, handler Fn() Float) Int
+static void ffi_schedC(ts::VM& vm, u16 dst, u16, u16 argBase) {
+    auto* sched = getScheduler(vm);
+    if (!sched) { vm.reg(dst).i = -1; return; }
+    int clock = (int)vm.reg(argBase).i;
+    f64 deltaBeats = vm.reg(argBase + 1).f;
+    ts::Obj* handler = vm.reg(argBase + 2).o;
+    vm.reg(dst).i = sched->sched(clock, deltaBeats, handler);
+}
+
+// fn schedAbs(clock Int, beat Float, handler Fn() Float) Int
+static void ffi_schedAbsC(ts::VM& vm, u16 dst, u16, u16 argBase) {
+    auto* sched = getScheduler(vm);
+    if (!sched) { vm.reg(dst).i = -1; return; }
+    int clock = (int)vm.reg(argBase).i;
+    f64 beat = vm.reg(argBase + 1).f;
+    ts::Obj* handler = vm.reg(argBase + 2).o;
+    vm.reg(dst).i = sched->schedAbs(clock, beat, handler);
+}
+
+// fn after(clock Int, beats Float, handler Fn() Void) Int
+static void ffi_afterC(ts::VM& vm, u16 dst, u16, u16 argBase) {
+    auto* sched = getScheduler(vm);
+    if (!sched) { vm.reg(dst).i = -1; return; }
+    int clock = (int)vm.reg(argBase).i;
+    f64 deltaBeats = vm.reg(argBase + 1).f;
+    ts::Obj* handler = vm.reg(argBase + 2).o;
+    vm.reg(dst).i = sched->sched(clock, deltaBeats, handler, /*oneShot=*/true);
+}
+
+// fn at(clock Int, beat Float, handler Fn() Void) Int
+static void ffi_atC(ts::VM& vm, u16 dst, u16, u16 argBase) {
+    auto* sched = getScheduler(vm);
+    if (!sched) { vm.reg(dst).i = -1; return; }
+    int clock = (int)vm.reg(argBase).i;
+    f64 beat = vm.reg(argBase + 1).f;
+    ts::Obj* handler = vm.reg(argBase + 2).o;
+    vm.reg(dst).i = sched->schedAbs(clock, beat, handler, /*oneShot=*/true);
+}
+
+// fn delayBeats(clock Int, beats Float) Future<Void>
+static void ffi_delayBeatsC(ts::VM& vm, u16 dst, u16, u16 argBase) {
+    int clock = (int)vm.reg(argBase).i;
+    f64 beats = vm.reg(argBase + 1).f;
+
+    auto& tu = vm.typeUniverse();
+    ts::Type* voidT = tu.types().voidType;
+    ts::FutureType* futT = tu.futureType(voidT);
+    u16 vw = (u16)((voidT && voidT->sizeWords_ > 0) ? voidT->sizeWords_ : 1);
+    auto* future = ts::Future::create(futT, voidT, vw);
+    vm.registerExternalFuture(future);
+    vm.reg(dst).o = future;
+
+    auto* sched = getScheduler(vm);
+    if (!sched || !(beats > 0.)) {
+        vm.resolveExternalFuture(future);
+        return;
+    }
+    sched->schedResolveFutureBeats(clock, beats, future);
+}
+
+// fn getBeats(clock Int) Float -- the ENGINE slot's beat when the clock hook
+// can read it (audio running), else the internal timeline.
+static void ffi_getBeatsC(ts::VM& vm, u16 dst, u16, u16 argBase) {
+    auto* sched = getScheduler(vm);
+    if (!sched) { vm.reg(dst).f = 0.; return; }
+    int clock = (int)vm.reg(argBase).i;
+    f64 lb = sched->logicalBeat();
+    vm.reg(dst).f = (lb >= 0. && sched->logicalSlot() == clock)
+                  ? lb : sched->beats(clock);
+}
+
+// fn getTempo(clock Int) Float -- the ENGINE slot's tempo in BPM when
+// available, else the internal timeline's.
+static void ffi_getTempoC(ts::VM& vm, u16 dst, u16, u16 argBase) {
+    int clock = (int)vm.reg(argBase).i;
+    if (auto* e = getClockEngine(vm)) {
+        if (engine::isAudioRunning(e)) {
+            vm.reg(dst).f = engine::clockTempoBPM(e, clock);
+            return;
+        }
+    }
+    auto* sched = getScheduler(vm);
+    vm.reg(dst).f = sched ? sched->tempoBPM() : 0.;
 }
 
 // fn cancel(timerID Int) Void
@@ -274,15 +366,20 @@ void registerClockFFI(ts::Compiler& compiler) {
     // Scheduling (reschedulable -- handler returns Float)
     reg("sched",    Int, {Float, FnFloat},  ffi_sched);
     reg("schedAbs", Int, {Float, FnFloat},  ffi_schedAbs);
+    reg("sched",    Int, {Int, Float, FnFloat},  ffi_schedC);
+    reg("schedAbs", Int, {Int, Float, FnFloat},  ffi_schedAbsC);
 
     // Scheduling (one-shot -- handler returns Void)
     reg("after",    Int, {Float, FnVoid},   ffi_after);
     reg("at",       Int, {Float, FnVoid},   ffi_at);
+    reg("after",    Int, {Int, Float, FnVoid},   ffi_afterC);
+    reg("at",       Int, {Int, Float, FnVoid},   ffi_atC);
 
     // Awaitable delays: wall-clock seconds and tempo-clock beats
     ts::Type* FutureVoid = reinterpret_cast<ts::Type*>(compiler.futureType(Void));
     reg("delayReal",  FutureVoid, {Float},  ffi_delayReal);
     reg("delayBeats", FutureVoid, {Float},  ffi_delayBeats);
+    reg("delayBeats", FutureVoid, {Int, Float},  ffi_delayBeatsC);
 
     // Cancel
     reg("cancel",   Void, {Int},            ffi_cancel);
@@ -290,9 +387,11 @@ void registerClockFFI(ts::Compiler& compiler) {
     // Tempo control (BPM)
     reg("setTempo", Void, {Float},          ffi_setTempo);
     reg("getTempo", Float, {},              ffi_getTempo);
+    reg("getTempo", Float, {Int},           ffi_getTempoC);
 
     // Beat queries
     reg("getBeats",   Float, {},            ffi_getBeats);
+    reg("getBeats",   Float, {Int},         ffi_getBeatsC);
     reg("getBeatDur", Float, {},            ffi_getBeatDur);
 
     // Tempo ramp scheduling

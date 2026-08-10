@@ -2405,14 +2405,27 @@ nats.<span class="fn">onMessageS</span>(<span class="str">"nodes.piano.chords"</
 
 <pre><code><span class="kw">import</span> clock.*;</code></pre>
 
+<p><strong>Engine clock sync.</strong> Every scheduling function below also has a form
+taking an engine TempoClock <em>slot</em> as its FIRST argument (matching the
+<code>audio_engine</code> convention). While audio is running, all beat scheduling &mdash;
+both forms &mdash; is slaved to the <strong>engine's</strong> TempoClock slots (the clocks the
+silos schedule against, synchronized across silos): a handler fires, latency early, when
+the actual engine slot reaches the beat, following tempo changes and ramps made from
+anywhere &mdash; the <code>clock</code> module, the <code>audio_engine</code> FFI
+(<code>setTempo(clock, bpm)</code> / <code>schedTempoChange</code>), or silo code. The
+slotless forms target slot&nbsp;0. When audio is not running, scheduling falls back to the
+module's internal timeline.</p>
+
 <h4>Reschedulable handlers</h4>
 
 <p>These take a <code>Fn() Float</code> handler. If the handler returns a positive finite number, it is rescheduled that many beats later. Return <code>0.0</code> or a negative number to stop.</p>
 
 <table>
   <tr><th>Function</th><th>Description</th></tr>
-  <tr><td><code>sched(deltaBeats Float, handler Fn() Float) Int</code></td><td>Schedule relative to the current logical beat. Returns a timer ID.</td></tr>
-  <tr><td><code>schedAbs(beat Float, handler Fn() Float) Int</code></td><td>Schedule at an absolute beat position. Returns a timer ID.</td></tr>
+  <tr><td><code>sched(deltaBeats Float, handler Fn() Float) Int</code></td><td>Schedule relative to the current logical beat of slot&nbsp;0. Returns a timer ID.</td></tr>
+  <tr><td><code>sched(clock Int, deltaBeats Float, handler Fn() Float) Int</code></td><td>Same, on engine TempoClock slot <code>clock</code>.</td></tr>
+  <tr><td><code>schedAbs(beat Float, handler Fn() Float) Int</code></td><td>Schedule at an absolute beat position on slot&nbsp;0. Returns a timer ID.</td></tr>
+  <tr><td><code>schedAbs(clock Int, beat Float, handler Fn() Float) Int</code></td><td>Same, on engine TempoClock slot <code>clock</code>.</td></tr>
 </table>
 
 <h4>One-shot handlers</h4>
@@ -2421,14 +2434,16 @@ nats.<span class="fn">onMessageS</span>(<span class="str">"nodes.piano.chords"</
 
 <table>
   <tr><th>Function</th><th>Description</th></tr>
-  <tr><td><code>after(deltaBeats Float, handler Fn() Void) Int</code></td><td>Schedule relative to the current logical beat. Returns a timer ID.</td></tr>
-  <tr><td><code>at(beat Float, handler Fn() Void) Int</code></td><td>Schedule at an absolute beat position. Returns a timer ID.</td></tr>
+  <tr><td><code>after(deltaBeats Float, handler Fn() Void) Int</code></td><td>Schedule relative to the current logical beat of slot&nbsp;0. Returns a timer ID.</td></tr>
+  <tr><td><code>at(beat Float, handler Fn() Void) Int</code></td><td>Schedule at an absolute beat position on slot&nbsp;0. Returns a timer ID.</td></tr>
+  <tr><td><code>after(clock Int, deltaBeats Float, handler Fn() Void) Int</code> / <code>at(clock Int, beat Float, handler Fn() Void) Int</code></td><td>The same, on engine TempoClock slot <code>clock</code>.</td></tr>
 </table>
 
 <h4>Coroutine driver</h4>
 
 <table>
   <tr><th>Function</th><th>Description</th></tr>
+  <tr><td><code>go(clock Int, c Coroutine&lt;Float&gt;) Int</code></td><td>Run a coroutine on engine TempoClock slot <code>clock</code> (below: the slot&nbsp;0 form).</td></tr>
   <tr><td><code>go(c Coroutine&lt;Float&gt;) Int</code></td><td>Run a coroutine on the clock. Each <code>yield</code>ed <code>Float</code> is a beat delta: after yielding, the coroutine is resumed that many beats later; when it finishes, scheduling stops. Returns a timer ID. (Defined in <code>clock.x</code> on top of <code>sched</code>.)</td></tr>
 </table>
 
@@ -2527,7 +2542,7 @@ nats.<span class="fn">onMessageS</span>(<span class="str">"nodes.piano.chords"</
 </table>
 
 <div class="note">
-  <strong>Note:</strong> The NRT <code>clock</code> module (&sect;11.2&ndash;11.5) and engine slot&nbsp;0 are kept in step because <code>clock.setTempo</code> / <code>clock.schedTempoChange</code> also drive slot&nbsp;0. Use the <code>clock</code> module to <em>run code</em> on the beat (NRT callbacks); use the engine slot functions to <em>schedule engine commands</em> on the beat, sample-accurately, possibly on additional slots.
+  <strong>Note:</strong> While audio runs, the NRT <code>clock</code> module (&sect;11.2&ndash;11.5) is slaved directly to the engine's TempoClock slots &mdash; its callbacks fire as the actual engine slot reaches the beat, whichever way the tempo was changed (<code>clock.setTempo</code>, <code>audio_engine.setTempo(clock, bpm)</code>, <code>schedTempoChange</code> ramps). Use the <code>clock</code> module to <em>run code</em> on the beat (NRT callbacks, latency early); use the engine slot functions to <em>schedule engine commands</em> on the beat, sample-accurately. <code>getBeats(clock)</code> / <code>getTempo(clock)</code> read the engine slot itself.
 </div>
 
 <!-- -------------------------------- -->
@@ -2539,7 +2554,8 @@ nats.<span class="fn">onMessageS</span>(<span class="str">"nodes.piano.chords"</
   <tr><th>Function</th><th>Description</th></tr>
   <tr><td><code>delay(beats Float) Future&lt;Void&gt;</code></td><td>Return a pending future that resolves after <code>beats</code> have elapsed on the async event loop's virtual-beat timeline.</td></tr>
   <tr><td><code>delayReal(seconds Float) Future&lt;Void&gt;</code></td><td>(clock module) Return a pending future resolved by the live scheduler thread after <code>seconds</code> of <em>wall-clock</em> time, independent of tempo. In a render context it resolves at logical render time instead.</td></tr>
-  <tr><td><code>delayBeats(beats Float) Future&lt;Void&gt;</code></td><td>(clock module) Return a pending future resolved when the live tempo clock reaches now + <code>beats</code> &mdash; tracking tempo changes and ramps, and firing latency-early, exactly like a <code>sched()</code> handler. From within a clock handler, relative to the handler's beat.</td></tr>
+  <tr><td><code>delayBeats(beats Float) Future&lt;Void&gt;</code></td><td>(clock module) Return a pending future resolved when the live tempo clock reaches now + <code>beats</code> &mdash; tracking tempo changes and ramps, and firing latency-early, exactly like a <code>sched()</code> handler. From within a clock handler on the same slot, relative to the handler's beat.</td></tr>
+  <tr><td><code>delayBeats(clock Int, beats Float) Future&lt;Void&gt;</code></td><td>Same, on engine TempoClock slot <code>clock</code>.</td></tr>
 </table>
 
 <pre><code><span class="kw">async fn</span> <span class="fn">part</span>() Void {

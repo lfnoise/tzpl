@@ -48,10 +48,7 @@ NRTTempoScheduler::NRTTempoScheduler(NRTVM* vm, f64 bpm, f64 latencySeconds)
 
 void NRTTempoScheduler::markRoots(TracingGC& gc) {
     std::lock_guard lock(schedMtx_);
-    auto const& vec = PQContainerAccess<Entry,
-                                        std::vector<Entry>,
-                                        std::greater<Entry>>::get(queue_);
-    for (auto const& e : vec) {
+    for (auto const& e : queue_) {
         if (e.handler) gc.mark(static_cast<GCObj*>(e.handler));
         if (e.resolveFut) gc.mark(reinterpret_cast<GCObj*>(e.resolveFut));
     }
@@ -64,8 +61,41 @@ void NRTTempoScheduler::markRoots(TracingGC& gc) {
 NRTTempoScheduler::~NRTTempoScheduler() {
     stop();
     std::lock_guard lock(schedMtx_);
-    while (!queue_.empty()) queue_.pop();
+    queue_.clear();
     inFlightHandler_ = nullptr;
+}
+
+void NRTTempoScheduler::setEngineClockHook(EngineClockFn hook) {
+    {
+        std::lock_guard lock(schedMtx_);
+        engineClock_ = std::move(hook);
+    }
+    queueChanged_.store(true, std::memory_order_relaxed);
+    cv_.notify_one();
+}
+
+f64 NRTTempoScheduler::beats(int slot) const {
+    if (engineClock_) {
+        f64 beatsNow = 0., secsUntil = 0.;
+        if (engineClock_(slot, 0., beatsNow, secsUntil)) return beatsNow;
+    }
+    return ramp_.secondsToBeats(elapsedSeconds());
+}
+
+NRTTempoScheduler::TimePoint
+NRTTempoScheduler::entryFireTime(Entry const& e, bool& engineSynced) const {
+    if (engineClock_) {
+        f64 beatsNow = 0., secsUntil = 0.;
+        if (engineClock_(e.clockSlot, e.beatTime, beatsNow, secsUntil)) {
+            engineSynced = true;
+            f64 dt = secsUntil - latencySeconds_;
+            if (dt < 0.) dt = 0.;
+            return Clock::now() + std::chrono::duration_cast<Clock::duration>(
+                std::chrono::duration<f64>(dt));
+        }
+    }
+    engineSynced = false;
+    return beatToFireTime(e.beatTime);
 }
 
 void NRTTempoScheduler::start() {
@@ -114,37 +144,43 @@ f64 NRTTempoScheduler::tempoBPM() const {
 }
 
 f64 NRTTempoScheduler::beats() const {
-    return ramp_.secondsToBeats(elapsedSeconds());
+    return beats(0);
 }
 
 f64 NRTTempoScheduler::beatDur() const {
     return 1.0 / tempo();
 }
 
-i64 NRTTempoScheduler::schedAbs(f64 beat, Obj* handler) {
+i64 NRTTempoScheduler::schedAbs(int slot, f64 beat, Obj* handler, bool oneShot) {
     i64 id = nextTimerID_.fetch_add(1, std::memory_order_relaxed);
-
 
     Entry entry{};
     entry.beatTime = beat;
+    entry.clockSlot = slot;
     entry.handler = handler;
+    entry.oneShot = oneShot;
     entry.timerID = id;
 
     {
         std::lock_guard lock(schedMtx_);
-        queue_.push(entry);
+        queue_.push_back(entry);
     }
     queueChanged_.store(true, std::memory_order_relaxed);
     cv_.notify_one();
     return id;
 }
 
-i64 NRTTempoScheduler::sched(f64 deltaBeats, Obj* handler) {
-    // Schedule relative to the current logical beat.
-    // If called from within a handler, logicalBeat_ is the handler's beat.
-    // Otherwise, use the current wall-clock beat.
-    f64 base = (logicalBeat_ >= 0.) ? logicalBeat_ : beats();
-    return schedAbs(base + deltaBeats, handler);
+i64 NRTTempoScheduler::sched(int slot, f64 deltaBeats, Obj* handler, bool oneShot) {
+    // Schedule relative to the current logical beat: the handler's beat when
+    // called from WITHIN a handler firing on the SAME slot (i.e. on the
+    // firing thread), else the slot's current beat. The thread check matters:
+    // logicalBeat_ is set while handlers run, and another thread scheduling
+    // concurrently must not inherit that (possibly stale) beat.
+    bool inHandler = firingThread_.load(std::memory_order_relaxed)
+                         == std::this_thread::get_id()
+                     && logicalBeat_ >= 0. && logicalSlot_ == slot;
+    f64 base = inHandler ? logicalBeat_ : beats(slot);
+    return schedAbs(slot, base + deltaBeats, handler, oneShot);
 }
 
 i64 NRTTempoScheduler::schedResolveFutureSecs(f64 seconds, Future* fut) {
@@ -162,22 +198,27 @@ i64 NRTTempoScheduler::schedResolveFutureSecs(f64 seconds, Future* fut) {
     return id;
 }
 
-i64 NRTTempoScheduler::schedResolveFutureBeats(f64 deltaBeats, Future* fut) {
+i64 NRTTempoScheduler::schedResolveFutureBeats(int slot, f64 deltaBeats, Future* fut) {
     if (!(deltaBeats > 0.)) deltaBeats = 0.;
     i64 id = nextTimerID_.fetch_add(1, std::memory_order_relaxed);
 
     Entry entry{};
     entry.handler = nullptr;
     entry.resolveFut = fut;
+    entry.clockSlot = slot;
     entry.timerID = id;
     // Same base as sched(): the handler's beat when called from within a
-    // clock callback, else the current wall-clock beat.
-    f64 base = (logicalBeat_ >= 0.) ? logicalBeat_ : beats();
+    // clock callback on the same slot (on the firing thread), else the
+    // slot's current beat.
+    bool inHandler = firingThread_.load(std::memory_order_relaxed)
+                         == std::this_thread::get_id()
+                     && logicalBeat_ >= 0. && logicalSlot_ == slot;
+    f64 base = inHandler ? logicalBeat_ : beats(slot);
     entry.beatTime = base + deltaBeats;
 
     {
         std::lock_guard lock(schedMtx_);
-        queue_.push(entry);
+        queue_.push_back(entry);
     }
     queueChanged_.store(true, std::memory_order_relaxed);
     cv_.notify_one();
@@ -197,7 +238,7 @@ i64 NRTTempoScheduler::schedTempoChange(f64 beat, f64 targetTempo,
 
     {
         std::lock_guard lock(schedMtx_);
-        queue_.push(entry);
+        queue_.push_back(entry);
     }
     queueChanged_.store(true, std::memory_order_relaxed);
     cv_.notify_one();
@@ -229,19 +270,13 @@ i64 NRTTempoScheduler::schedTempoChangeBPM(f64 beat, f64 targetBPM,
 
 bool NRTTempoScheduler::cancel(i64 timerID) {
     std::lock_guard lock(schedMtx_);
-    std::priority_queue<Entry, std::vector<Entry>, std::greater<Entry>> newQueue;
-    bool found = false;
-    while (!queue_.empty()) {
-        auto entry = queue_.top();
-        queue_.pop();
-        if (entry.timerID == timerID) {
-            found = true;
-        } else {
-            newQueue.push(entry);
+    for (size_t i = 0; i < queue_.size(); ++i) {
+        if (queue_[i].timerID == timerID) {
+            queue_.erase(queue_.begin() + (std::ptrdiff_t)i);
+            return true;
         }
     }
-    queue_ = std::move(newQueue);
-    return found;
+    return false;
 }
 
 int NRTTempoScheduler::clearAll() {
@@ -250,12 +285,10 @@ int NRTTempoScheduler::clearAll() {
     // and delayBeats entries (resolveFut) are kept when rebuilding the beat
     // queue. Dropping either would strand a thread parked in an await forever;
     // a pending wait makes no sound -- panic silences handlers, not awaits.
-    std::priority_queue<Entry, std::vector<Entry>, std::greater<Entry>> keep;
+    std::vector<Entry> keep;
     int dropped = 0;
-    while (!queue_.empty()) {
-        Entry e = queue_.top();
-        queue_.pop();
-        if (e.resolveFut) keep.push(e); else ++dropped;
+    for (Entry const& e : queue_) {
+        if (e.resolveFut) keep.push_back(e); else ++dropped;
     }
     queue_ = std::move(keep);
     // Wake the run loop so it re-evaluates the rebuilt queue instead of
@@ -274,6 +307,7 @@ bool NRTTempoScheduler::isIdle() const {
 
 void NRTTempoScheduler::tickTo(f64 seconds) {
     if (!manualMode_) return;
+    firingThread_.store(std::this_thread::get_id(), std::memory_order_relaxed);
 
     // Advance the logical clock first so handlers reading beats()/getStreamTime
     // see the new "now" before they execute.
@@ -307,10 +341,14 @@ void NRTTempoScheduler::tickTo(f64 seconds) {
 
             bool haveBeat = false;
             f64 beatFire = 0.;
-            if (!queue_.empty()) {
-                next = queue_.top();
-                beatFire = ramp_.beatsToSeconds(next.beatTime) - latencySeconds_;
-                haveBeat = beatFire <= manualSeconds_;
+            size_t beatIdx = 0;
+            for (size_t i = 0; i < queue_.size(); ++i) {
+                f64 fs = ramp_.beatsToSeconds(queue_[i].beatTime) - latencySeconds_;
+                if (i == 0 || fs < beatFire) { beatFire = fs; beatIdx = i; }
+            }
+            if (!queue_.empty() && beatFire <= manualSeconds_) {
+                next = queue_[beatIdx];
+                haveBeat = true;
             }
 
             if (haveWall && (!haveBeat || wallFire <= beatFire)) {
@@ -318,7 +356,7 @@ void NRTTempoScheduler::tickTo(f64 seconds) {
                 wallQueue_.erase(wallQueue_.begin() + (std::ptrdiff_t)wallIdx);
                 fireWall = true;
             } else if (haveBeat) {
-                queue_.pop();
+                queue_.erase(queue_.begin() + (std::ptrdiff_t)beatIdx);
                 inFlightHandler_ = next.handler;
             } else {
                 return;   // nothing due
@@ -336,6 +374,7 @@ void NRTTempoScheduler::tickTo(f64 seconds) {
         }
 
         logicalBeat_ = next.beatTime;
+        logicalSlot_ = next.clockSlot;
 
         if (next.resolveFut) {
             // Musical delay (delayBeats): resolve under the VM mutex and wake
@@ -364,10 +403,10 @@ void NRTTempoScheduler::tickTo(f64 seconds) {
                 result = vm_->vm.callCallable(next.handler, nullptr, 0);
                 vm_->vm.gcHeartbeat();
             }
-            if (result.f > 0. && std::isfinite(result.f)) {
+            if (!next.oneShot && result.f > 0. && std::isfinite(result.f)) {
                 next.beatTime += result.f;
                 std::lock_guard lock2(schedMtx_);
-                queue_.push(next);
+                queue_.push_back(next);
                 inFlightHandler_ = nullptr;
             } else {
                 std::lock_guard lock2(schedMtx_);
@@ -375,10 +414,12 @@ void NRTTempoScheduler::tickTo(f64 seconds) {
             }
         }
         logicalBeat_ = -1.;
+        logicalSlot_ = -1;
     }
 }
 
 void NRTTempoScheduler::run() {
+    firingThread_.store(std::this_thread::get_id(), std::memory_order_relaxed);
     while (running_.load(std::memory_order_relaxed)) {
         std::unique_lock lock(schedMtx_);
 
@@ -391,21 +432,29 @@ void NRTTempoScheduler::run() {
             continue;
         }
 
-        // Earliest pending deadline across both queues. Beat entries convert
-        // through the CURRENT ramp on every pass (a tempo change notifies the
-        // cv below, so the sleep re-targets); wall-clock delay deadlines are
-        // fixed TimePoints a tempo change cannot move.
+        // Earliest pending deadline across both queues. Beat entries are
+        // estimated per pass -- from the engine clock's slot state when the
+        // hook can read it, else from the internal ramp -- so every wake
+        // re-targets after tempo changes; wall-clock delay deadlines are
+        // fixed TimePoints nothing can move.
         size_t wallIdx = 0;
         bool haveWall = !wallQueue_.empty();
         for (size_t i = 1; i < wallQueue_.size(); ++i) {
             if (wallQueue_[i].deadlineSeconds < wallQueue_[wallIdx].deadlineSeconds)
                 wallIdx = i;
         }
+        size_t beatIdx = 0;
+        bool anyEngineSynced = false;
+        TimePoint beatFire{};
+        for (size_t i = 0; i < queue_.size(); ++i) {
+            bool es = false;
+            TimePoint ft = entryFireTime(queue_[i], es);
+            anyEngineSynced = anyEngineSynced || es;
+            if (i == 0 || ft < beatFire) { beatFire = ft; beatIdx = i; }
+        }
         bool wallFirst = false;
         TimePoint fireTime{};
-        if (!queue_.empty()) {
-            fireTime = beatToFireTime(queue_.top().beatTime);
-        }
+        if (!queue_.empty()) fireTime = beatFire;
         if (haveWall) {
             TimePoint wallFire = epoch_ + std::chrono::duration_cast<Clock::duration>(
                 std::chrono::duration<f64>(wallQueue_[wallIdx].deadlineSeconds));
@@ -417,7 +466,15 @@ void NRTTempoScheduler::run() {
         auto now = Clock::now();
 
         if (fireTime > now) {
-            cv_.wait_until(lock, fireTime, [this] {
+            // Engine-synced estimates go stale across engine-side scheduled
+            // tempo changes (which never notify this thread), so cap the
+            // sleep and re-derive from the live clock on each wake.
+            TimePoint sleepUntil = fireTime;
+            if (anyEngineSynced) {
+                TimePoint cap = now + std::chrono::milliseconds(50);
+                if (cap < sleepUntil) sleepUntil = cap;
+            }
+            cv_.wait_until(lock, sleepUntil, [this] {
                 return !running_.load(std::memory_order_relaxed)
                     || queueChanged_.load(std::memory_order_relaxed);
             });
@@ -440,15 +497,16 @@ void NRTTempoScheduler::run() {
             continue;
         }
 
-        auto next = queue_.top();
-        queue_.pop();
+        Entry next = queue_[beatIdx];
+        queue_.erase(queue_.begin() + (std::ptrdiff_t)beatIdx);
         // Keep the popped handler reachable for GC across the call.
         inFlightHandler_ = next.handler;
         lock.unlock();
 
-        // Set logical beat for relative scheduling from within handlers.
-        // Reset to -1 after handler returns (signals "not in a callback").
+        // Set logical beat/slot for relative scheduling from within handlers.
+        // Reset after the handler returns (signals "not in a callback").
         logicalBeat_ = next.beatTime;
+        logicalSlot_ = next.clockSlot;
 
         if (next.resolveFut) {
             // Musical delay (delayBeats): resolve the external future under
@@ -481,10 +539,10 @@ void NRTTempoScheduler::run() {
 
             // SuperCollider convention: if the handler returns a number,
             // reschedule after that many beats.
-            if (result.f > 0. && std::isfinite(result.f)) {
+            if (!next.oneShot && result.f > 0. && std::isfinite(result.f)) {
                 next.beatTime += result.f;
                 std::lock_guard lock2(schedMtx_);
-                queue_.push(next);
+                queue_.push_back(next);
                 inFlightHandler_ = nullptr;
             } else {
                 std::lock_guard lock2(schedMtx_);
@@ -493,6 +551,7 @@ void NRTTempoScheduler::run() {
         }
 
         logicalBeat_ = -1.;
+        logicalSlot_ = -1;
     }
 }
 
