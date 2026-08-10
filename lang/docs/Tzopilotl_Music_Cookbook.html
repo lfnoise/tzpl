@@ -883,13 +883,21 @@ clock and beat so they fire sample-accurately:</p>
 
 <h4>The NRT clock module (timed callbacks on the main thread)</h4>
 <p>For orchestration logic that runs on the main VM, <code>import clock.*;</code>
-gives a tempo-aware callback scheduler. Its tempo follows engine clock 0.</p>
+gives a tempo-aware callback scheduler. While audio runs it is slaved to the
+<em>engine's</em> TempoClock slots &mdash; the same clocks the silos schedule
+against &mdash; so a handler fires (latency early) as the actual engine slot
+reaches the beat, whichever way the tempo was changed. Every scheduling
+function also takes an optional clock slot as its FIRST argument; the slotless
+forms mean slot&nbsp;0.</p>
 <table>
   <tr><th>Function</th><th>Meaning</th></tr>
-  <tr><td><code>setTempo(bpm <span class="typ">Float</span>)</code> / <code>getTempo()</code></td><td>Global tempo (mirrors onto engine clock 0).</td></tr>
-  <tr><td><code>getBeats() <span class="typ">Float</span></code></td><td>Current logical beat.</td></tr>
-  <tr><td><code>sched(deltaBeats <span class="typ">Float</span>, fn() <span class="typ">Float</span>) <span class="typ">Int</span></code></td><td>Run a handler after <code>deltaBeats</code>; if it returns a positive number, reschedule that many beats later (SuperCollider Routine style).</td></tr>
-  <tr><td><code>after(deltaBeats <span class="typ">Float</span>, fn() <span class="typ">Void</span>)</code> / <code>at(beat, fn() <span class="typ">Void</span>)</code></td><td>One-shot, relative / absolute.</td></tr>
+  <tr><td><code>setTempo(bpm <span class="typ">Float</span>)</code> / <code>getTempo(clock = 0)</code></td><td>Set slot&nbsp;0's tempo / read a slot's tempo. (Other slots: <code>audio_engine.setTempo(clock, bpm)</code>.)</td></tr>
+  <tr><td><code>getBeats(clock = 0) <span class="typ">Float</span></code></td><td>The engine slot's current beat.</td></tr>
+  <tr><td><code>sched([clock,] deltaBeats <span class="typ">Float</span>, fn() <span class="typ">Float</span>) <span class="typ">Int</span></code></td><td>Run a handler after <code>deltaBeats</code>; if it returns a positive number, reschedule that many beats later (SuperCollider Routine style).</td></tr>
+  <tr><td><code>after([clock,] deltaBeats <span class="typ">Float</span>, fn() <span class="typ">Void</span>)</code> / <code>at([clock,] beat, fn() <span class="typ">Void</span>)</code></td><td>One-shot, relative / absolute.</td></tr>
+  <tr><td><code>go([clock,] c <span class="typ">Coroutine&lt;Float&gt;</span>) <span class="typ">Int</span></code></td><td>Drive a coroutine on the clock: each yielded <span class="typ">Float</span> is a beat delta.</td></tr>
+  <tr><td><code>await delayBeats([clock,] beats)</code></td><td>Awaitable form of a one-shot handler: park an <code>async fn</code> (or the top level) until the engine slot reaches now&nbsp;+&nbsp;beats.</td></tr>
+  <tr><td><code>await delayReal(seconds)</code></td><td>Awaitable wall-clock wait, independent of tempo.</td></tr>
   <tr><td><code>cancel(id <span class="typ">Int</span>)</code></td><td>Cancel a scheduled handler.</td></tr>
 </table>
 <pre><code><span class="kw">import</span> audio_engine.*;
@@ -908,12 +916,14 @@ gives a tempo-aware callback scheduler. Its tempo follows engine clock 0.</p>
 });</code></pre>
 <div class="warning"><strong>Two <code>setTempo</code>/<code>sched</code></strong>
 <code>clock</code> and <code>audio_engine</code> both export <code>setTempo</code>
-and <code>sched</code> with different signatures. The <code>clock</code> versions
-take a tempo/delta directly (no clock-slot argument); the <code>audio_engine</code>
-versions take a clock slot. If you <code>import</code> both with <code>*</code>,
-call the one whose argument shape you intend. The <code>clock</code> scheduler's
-logical time advances with the running engine clock, so its repeating callbacks
-fire while audio is playing.</div>
+and <code>sched</code> with different signatures. The rule: a <code>clock</code>
+scheduling call always ends in a <em>handler</em> (it runs code on the beat),
+while <code>audio_engine.sched</code> takes no handler (it submits the pending
+command bundle); <code>clock.setTempo(bpm)</code> is one argument,
+<code>audio_engine.setTempo(clock, bpm)</code> is two. Both drive the same
+engine clocks: tempo changed through either module &mdash; or from silo code
+&mdash; moves <code>clock</code> callbacks and engine-scheduled bundles
+together, since the engine's TempoClock slots are the single timeline.</div>
 
 <!-- ================================================================ -->
 <h2 id="generative">7. Generative sequences</h2>
@@ -1513,7 +1523,7 @@ run command. The pure layers are golden-tested in <code>lang/tests/music/</code>
   <tr><td><code>defSynthX / defSynth / listSynthDefs</code></td><td>synthc.compile / synthdef / audio_engine</td><td>NRT</td></tr>
   <tr><td><code>loadBuffer / fillBuffer / resizeBuffer</code></td><td>audio_engine</td><td>NRT</td></tr>
   <tr><td><code>oscTables / sawTables / squareTables / triTables</code></td><td>wavetables</td><td>NRT</td></tr>
-  <tr><td><code>sched / after / at / setTempo / getBeats / cancel</code></td><td>clock</td><td>NRT</td></tr>
+  <tr><td><code>sched / after / at / go / delayBeats / delayReal / setTempo / getBeats / cancel</code> (scheduling forms take an optional clock slot as first argument)</td><td>clock</td><td>NRT</td></tr>
   <tr><td><code>bind / merge / takeDur / perform / realize / patEvents</code></td><td>music.*</td><td>NRT / silo</td></tr>
   <tr><td><code>play / stop / stopAll / stopFirst / stopLast / replace / enqueue / voiceBundle / render</code></td><td>music.play</td><td>NRT</td></tr>
   <tr><td><code>scorePlayer</code></td><td>music.play</td><td>silo</td></tr>
@@ -1525,7 +1535,7 @@ run command. The pure layers are golden-tested in <code>lang/tests/music/</code>
   <tr><td><code>natsBridgeActor</code></td><td>nats</td><td>NRT</td></tr>
   <tr><td><code>siloOutbox</code></td><td>audio_engine</td><td>silo</td></tr>
   <tr><td><code>encode / decode / isMessage</code></td><td>message</td><td>NRT / silo</td></tr>
-  <tr><td><code>await delay(beats) / awaitAll</code></td><td>(builtin) / futures</td><td>NRT / silo</td></tr>
+  <tr><td><code>await delay(beats) / awaitAll</code></td><td>(builtin) / futures</td><td>NRT / silo (on the NRT VM <code>delay</code> is logical time; for the live clock use <code>delayBeats</code>, for wall-clock <code>delayReal</code>)</td></tr>
 </table>
 
 <h3 id="more">12.2 Where to read more</h3>
