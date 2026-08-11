@@ -58,7 +58,7 @@ fn dampcomb(x S, delaySec AsSignal, maxDelaySec Float, decayTime AsSignal, damp 
 
 -- tremolo: periodic amplitude modulation.
 fn tremolo(x S, rate AsSignal = 5.0, depth AsSignal = 0.6) S =
-	x * (1.0 - depth * usin2pi(phasor(rate)));
+	x * (1.0 - depth * phasor(rate) usin2pi);
 
 -- vibrato: periodic pitch modulation via a modulated delay line.
 -- depth is the peak pitch deviation in semitones. A sine-swept delay of
@@ -72,14 +72,14 @@ fn vibrato(x S, rate AsSignal = 5.0, depth AsSignal = 0.3) S {
 	d <- x;
 	let ratioDev = (depth asSignal stratio - 1.0) max(0.0);
 	let amp = (ratioDev / (twopi * rate asSignal max(0.01))) min(maxA);
-	d vread(2.0 + (amp + amp * sin2pi(phasor(rate))) * fs())
+	d vread(2.0 + (amp + amp * phasor(rate) sin2pi) * fs())
 }
 
 -- flanger: short swept delay with feedback, mixed with the dry signal.
 fn flanger(x S, rate AsSignal = 0.25, depth AsSignal = 1.0,
            fb AsSignal = 0.5, m AsSignal = 0.5) S {
 	let d = delayVar(0.009 * fs());
-	let sweep = usin2pi(phasor(rate));
+	let sweep = phasor(rate) usin2pi;
 	let dly = 2.0 + (0.0005 + 0.005 * depth * sweep) * fs();
 	let tap = d vread(dly);
 	d <- x + fb * tap;
@@ -92,9 +92,9 @@ fn chorus(x S, rate AsSignal = 0.3, depth AsSignal = 0.5, m AsSignal = 0.5) S {
 	d <- x;
 	let base = 0.018 * fs();
 	let sweep = 0.007 * fs() * depth;
-	let t1 = d vread(2.0 + base + sweep * usin2pi(phasor(rate)));
-	let t2 = d vread(2.0 + base + sweep * usin2pi(phasor(rate * 0.87, 0.33)));
-	let t3 = d vread(2.0 + base + sweep * usin2pi(phasor(rate * 1.13, 0.67)));
+	let t1 = d vread(2.0 + base + sweep * phasor(rate) usin2pi);
+	let t2 = d vread(2.0 + base + sweep * phasor(rate * 0.87, 0.33) usin2pi);
+	let t3 = d vread(2.0 + base + sweep * phasor(rate * 1.13, 0.67) usin2pi);
 	x drywet((t1 + t2 + t3) * 0.577, m)
 }
 
@@ -110,7 +110,7 @@ fn apStage(x S, c S) S {
 -- phaser: cascade of swept first-order allpasses summed with the dry signal.
 fn phaser(x S, rate AsSignal = 0.4, minFreq AsSignal = 200.0, maxFreq AsSignal = 2000.0,
           fb AsSignal = 0.2, depth AsSignal = 1.0, stages Int = 6) S {
-	let f = usin2pi(phasor(rate)) uniexp(minFreq, maxFreq) min(0.45 * fs());
+	let f = phasor(rate) usin2pi uniexp(minFreq, maxFreq) min(0.45 * fs());
 	let t = tanpi(f * T());
 	let c = (1.0 - t) / (1.0 + t);
 	let fbv = delayVar();
@@ -128,7 +128,7 @@ fn wah(x S, pos AsSignal) S {
 
 -- auto wah: the pedal follows the input envelope.
 fn autowah(x S, sens AsSignal = 4.0, atk AsSignal = 0.01, rel AsSignal = 0.15) S =
-	x wah((envfollow(x, atk, rel) * sens) uclip);
+	x wah(uclip(x envfollow(atk, rel) * sens));
 
 -- rotary speaker: crossover into a fast horn and slower drum rotor, each
 -- with Doppler (modulated delay), amplitude modulation, and panning.
@@ -141,16 +141,16 @@ fn rotary(x S, speed AsSignal = 0.7, m AsSignal = 1.0) S {
 	let hp = phasor(sp);
 	let hdv = delayVar(0.004 * fs());
 	hdv <- hi;
-	let horn = hdv vread(2.0 + 0.0009 * fs() * usin2pi(hp));
-	let hornT = horn * (0.55 + 0.45 * usin2pi(frac(hp + 0.25)));
-	let hornSt = hornT pan(sin2pi(hp) * 0.85) join;
+	let horn = hdv vread(2.0 + 0.0009 * fs() * hp usin2pi);
+	let hornT = horn * (0.55 + 0.45 * hp quadrature usin2pi);
+	let hornSt = hornT pan(hp sin2pi * 0.85) join;
 
 	let rp = phasor(sp * 0.87);
 	let rdv = delayVar(0.003 * fs());
 	rdv <- lo;
-	let rotor = rdv vread(2.0 + 0.0004 * fs() * usin2pi(rp));
-	let rotorT = rotor * (0.8 + 0.2 * usin2pi(frac(rp + 0.25)));
-	let rotorSt = rotorT pan(sin2pi(rp) * 0.4) join;
+	let rotor = rdv vread(2.0 + 0.0004 * fs() * rp usin2pi);
+	let rotorT = rotor * (0.8 + 0.2 * rp quadrature usin2pi);
+	let rotorSt = rotorT pan(rp sin2pi * 0.4) join;
 
 	x drywet(hornSt + rotorSt, m)
 }
@@ -255,41 +255,43 @@ fn sympathetic(x S, root AsSignal = 110.0, decayTime AsSignal = 4.0,
 -- compressor: reduces gain above threshold by ratio, with makeup gain.
 fn compressor(x S, threshDb AsSignal = -24.0, ratio AsSignal = 4.0,
               atk AsSignal = 0.01, rel AsSignal = 0.12, makeupDb AsSignal = 0.0) S {
-	let env = envfollow(x, atk, rel) max(1e-6);
+	let env = x envfollow(atk, rel) max(1e-6);
 	let overDb = (env ampdb - threshDb) max(0.0);
 	x * dbamp(overDb * (1.0 / ratio - 1.0) + makeupDb)
 }
 
 -- limiter: hard gain ceiling with fast attack.
 fn limiter(x S, ceilDb AsSignal = -1.0, rel AsSignal = 0.05) S {
-	let env = envfollow(x, 0.001, rel) max(1e-9);
-	x * min(1.0, dbamp(ceilDb) / env)
+	let env = x envfollow(0.001, rel) max(1e-9);
+	x * min(1.0, ceilDb dbamp / env)
 }
 
 -- downward expander: reduces gain below threshold by (ratio - 1).
 fn expander(x S, threshDb AsSignal = -45.0, ratio AsSignal = 2.0,
             atk AsSignal = 0.005, rel AsSignal = 0.1) S {
-	let env = envfollow(x, atk, rel) max(1e-6);
+	let env = x envfollow(atk, rel) max(1e-6);
 	let underDb = (threshDb - env ampdb) max(0.0);
 	x * dbamp(underDb * (1.0 - ratio))
 }
 
 -- noise gate: opens above threshold, with attack/release smoothing.
 fn noiseGate(x S, threshDb AsSignal = -50.0, atk AsSignal = 0.005, rel AsSignal = 0.1) S {
-	let env = envfollow(x, 0.001, 0.05) max(1e-6);
+	let env = x envfollow(0.001, 0.05) max(1e-6);
 	x * smooth2(env ampdb > threshDb, atk, rel)
 }
 
--- booster: clean gain.
-fn booster(x S, gainDb AsSignal = 6.0) S = x * gainDb dbamp;
+-- booster: gain maximizer. Drives the signal up by gainDb and limits the
+-- result at ceilDb, raising loudness rather than just amplitude.
+fn booster(x S, gainDb AsSignal = 6.0, ceilDb AsSignal = -0.5, rel AsSignal = 0.08) S =
+	(x * gainDb dbamp) limiter(ceilDb, rel);
 
 -- swell: removes attacks by fading each new note in over atkT seconds
 -- (the "slow gear" effect). The gain is the ratio of a slow-attack envelope
 -- to a fast one, so a fresh transient ducks the gain, which then recovers.
 fn swell(x S, atkT AsSignal = 0.35) S {
-	let fast = envfollow(x, 0.002, 0.05);
-	let slow = envfollow(x, atkT, 0.05);
-	x * min(1.0, divz(slow, fast, 0.0))
+	let fast = x envfollow(0.002, 0.05);
+	let slow = x envfollow(atkT, 0.05);
+	x * divz(slow, fast, 0.0) min(1.0)
 }
 
 ---------------------------------------------------------------------------
@@ -298,17 +300,17 @@ fn swell(x S, atkT AsSignal = 0.35) S {
 -- distortion: DC-blocked drive into tanh, then a tone lowpass and level.
 fn distortion(x S, driveDb AsSignal = 18.0, tone AsSignal = 0.5, level AsSignal = 0.5) S {
 	let f = tone uclip uniexp(500.0, 8000.0);
-	(x leakdc(0.995) * dbamp(driveDb)) tanh lpf(f) * level
+	(x leakdc(0.995) * driveDb dbamp) tanh lpf(f) * level
 }
 
 -- lo fi: sample rate reduction (sample & hold) plus bit depth reduction.
 fn lofi(x S, rateHz AsSignal = 8000.0, bits AsSignal = 8.0) S =
-	x sampleAndHold(lfimp(rateHz)) round(exp2(1.0 - bits));
+	x sampleAndHold(rateHz lfimp) round(exp2(1.0 - bits));
 
 -- Chamberlin state variable filter; returns (lowpass, highpass, bandpass,
 -- notch). rq is 1/Q (smaller = more resonant).
 fn svf(x S, freq AsSignal, rq AsSignal) (S, S, S, S) {
-	let f = 2.0 * sinpi(min(freq * T(), 0.24));
+	let f = 2.0 * min(freq * T(), 0.24) sinpi;
 	let lpv = delayVar();
 	let bpv = delayVar();
 	let lp = lpv(1) + f * bpv(1);
@@ -323,7 +325,7 @@ fn svf(x S, freq AsSignal, rq AsSignal) (S, S, S, S) {
 -- 3 notch.
 fn multiFilter(x S, typ AsSignal, freq AsSignal, rq AsSignal) S {
 	let (lp, hp, bp, br) = x svf(freq, rq);
-	select(typ asSignal, [lp, hp, bp, br])
+	typ asSignal select([lp, hp, bp, br])
 }
 
 ---------------------------------------------------------------------------
@@ -339,16 +341,16 @@ fn pitchShift(x S, semitones AsSignal = 0.0, windowSec Float = 0.1) S {
 	let p1 = phasor(f);
 	let p2 = frac(p1 + 0.5);
 	let w = windowSec * fs();
-	d vread(2.0 + p1 * w) * sinwin(p1) + d vread(2.0 + p2 * w) * sinwin(p2)
+	d vread(2.0 + p1 * w) * p1 sinwin + d vread(2.0 + p2 * w) * p2 sinwin
 }
 
 -- one grain stream for the granulator
 fn _grain(d DelayVar, grainRate S, spreadSamps S, ratio S, maxIdx S, phase0 Float) S {
 	let p = phasor(grainRate, phase0);
-	let off = sampleAndHold(urand() * spreadSamps, p eoc);
+	let off = (urand() * spreadSamps) sampleAndHold(p eoc);
 	let dur = fs() / grainRate;
 	let idx = (off + p * dur * (1.0 - ratio) + 2.0) clip(2.0, maxIdx);
-	d vread(idx) * han(p)
+	d vread(idx) * p han
 }
 
 -- granulator: four overlapping Hann-windowed grain streams reading from a
@@ -399,7 +401,7 @@ let kVowelBws = [
 
 fn _vowelTable(tab [[Float]], vi S, vj S, vf S) S {
 	let vecs = [tab[0] vec, tab[1] vec, tab[2] vec, tab[3] vec, tab[4] vec];
-	lerp(vf, select(vi, vecs), select(vj, vecs))
+	vf lerp(vi select(vecs), vj select(vecs))
 }
 
 -- vocal formant filter: five parallel bandpasses at vowel formants.
@@ -593,8 +595,10 @@ fn fxNoiseGate() S {
 
 fn fxBooster() S {
 	let x = _fxIn();
-	let gain = control("gain", _lin(-12.0, 24.0, 6.0));
-	x booster(gain) outlet
+	let gain = control("gain", _lin(0.0, 24.0, 6.0));
+	let ceilDb = control("ceiling", _lin(-12.0, 0.0, -0.5));
+	let rel = control("release", _exp(0.01, 0.5, 0.08));
+	x booster(gain, ceilDb, rel) outlet
 }
 
 fn fxSwell() S {
