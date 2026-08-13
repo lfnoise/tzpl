@@ -163,6 +163,7 @@ struct SignalGraph {
     exprs [SignalExpr],
 	delays [DelayVar],
 	buffers [BufferVar],
+	sampleBanks [SampleBankVar],
 	root SignalExpr,
 }
 
@@ -200,6 +201,17 @@ fn _nextBufferVarId() ID {
 fn _addToGraph(bv BufferVar) BufferVar {
 	`curGraphBuffers = `curGraphBuffers push(bv);
 	bv
+}
+
+fn _nextSampleBankVarId() ID {
+	let out = `sampleBankVarIds;
+	`sampleBankVarIds = `sampleBankVarIds + 1;
+	out
+}
+
+fn _addToGraph(sb SampleBankVar) SampleBankVar {
+	`curGraphSampleBanks = `curGraphSampleBanks push(sb);
+	sb
 }
 
 fn _newSignalExpr(kind SignalExprKind, ins [S]) S {
@@ -421,6 +433,27 @@ enum BufferOp {
 	length,
 }
 
+-- A sample bank slot: a swappable pitch/velocity-mapped set of samples
+-- (see audio_engine.loadSampleBank). A per-note lookup resolves (pitch,
+-- velocity) to one sample of the bank.
+struct SampleBankVar {
+	id ID,
+}
+
+-- The value of a bank lookup: the sample resolved for this note. Wraps the
+-- lookup expression; read/vread and the metadata accessors reference it.
+struct BankSample {
+	expr S,
+}
+
+enum BankOp {
+	fixRead(Int, Int, Int),         -- index, readChans, startChan
+	vread(Interpolation, Int, Int), -- interp, readChans, startChan
+	rootKey,
+	sampleRate,
+	length,
+}
+
 enum SignalExprKind {
 	sampleRate,
 	sampleDur,
@@ -444,6 +477,8 @@ enum SignalExprKind {
 
 	delay(DelayVar, DelayOp),
 	buffer(BufferVar, BufferOp),
+	bankLookup(SampleBankVar),
+	bank(BankOp),
 
 	if_(SignalGraph, SignalGraph),
 	for_(Int, SignalGraph),
@@ -845,6 +880,46 @@ fn length(b BufferVar) S {
 }
 
 ---------------------------------------------------------------------------
+--- Sample bank operations
+
+fn sampleBankVar() SampleBankVar {
+	SampleBankVar { id: _nextSampleBankVarId() } _addToGraph
+}
+
+-- Resolve (pitch, velocity) to one sample of the bank. Evaluated once per
+-- note-on inside a voicer (Rate.reset) -- the inputs are latched at that
+-- moment, so they must be note params, controls, constants, or init-rate
+-- values. In a non-voicer graph the lookup runs once at init.
+fn lookup(b SampleBankVar, pitch AsSignal, velocity AsSignal) BankSample {
+	BankSample { expr:
+		SignalExprKind.bankLookup(b) _newSignalExpr([pitch asSignal, velocity asSignal]) }
+}
+
+fn read(h BankSample, index Int, chans Int = 1, startChan Int = 0) S {
+	SignalExprKind.bank(BankOp.fixRead(index, chans, startChan)) _newSignalExpr([h.expr])
+}
+
+fn vread(h BankSample, index AsSignal, interp Interpolation = Interpolation.cubic,
+         chans Int = 1, startChan Int = 0) S {
+	SignalExprKind.bank(BankOp.vread(interp, chans, startChan)) _newSignalExpr([h.expr, index asSignal])
+}
+
+-- Metadata of the resolved sample (reset-rate signals): the MIDI note at
+-- which it plays back unshifted, its source-file sample rate, and its
+-- length in frames.
+fn rootKey(h BankSample) S {
+	SignalExprKind.bank(BankOp.rootKey) _newSignalExpr([h.expr])
+}
+
+fn sampleRate(h BankSample) S {
+	SignalExprKind.bank(BankOp.sampleRate) _newSignalExpr([h.expr])
+}
+
+fn length(h BankSample) S {
+	SignalExprKind.bank(BankOp.length) _newSignalExpr([h.expr])
+}
+
+---------------------------------------------------------------------------
 --- Vector operations
 
 fn at(a S, i S) S        = SignalExprKind.vecop(VecOp.at) _newSignalExpr([a asSignal, i asSignal]);
@@ -900,9 +975,11 @@ fn _makeTopGraph(f GraphFn) SignalGraph {
 	var `curGraphExprs [SignalExpr] = [];
 	var `curGraphDelays [DelayVar] = [];
 	var `curGraphBuffers [BufferVar] = [];
+	var `curGraphSampleBanks [SampleBankVar] = [];
 	var `exprIds Int = 0;
 	var `delayVarIds Int = 0;
 	var `bufferVarIds Int = 0;
+	var `sampleBankVarIds Int = 0;
 
 	let root S = f();
 
@@ -910,6 +987,7 @@ fn _makeTopGraph(f GraphFn) SignalGraph {
 	    exprs: `curGraphExprs,
 		delays: `curGraphDelays,
 		buffers: `curGraphBuffers,
+		sampleBanks: `curGraphSampleBanks,
 		root: root,
 	};
 
@@ -921,6 +999,7 @@ fn _makeSubGraph(f GraphFn) SignalGraph {
 	var `curGraphExprs [SignalExpr] = [];
 	var `curGraphDelays [DelayVar] = [];
 	var `curGraphBuffers [BufferVar] = [];
+	var `curGraphSampleBanks [SampleBankVar] = [];
 
 	let root S = f();
 
@@ -928,6 +1007,7 @@ fn _makeSubGraph(f GraphFn) SignalGraph {
 	    exprs: `curGraphExprs,
 		delays: `curGraphDelays,
 		buffers: `curGraphBuffers,
+		sampleBanks: `curGraphSampleBanks,
 		root: root,
 	};
 
@@ -939,6 +1019,7 @@ fn _makeSubGraph1 (f GraphFn1, x S) SignalGraph {
 	var `curGraphExprs [SignalExpr] = [];
 	var `curGraphDelays [DelayVar] = [];
 	var `curGraphBuffers [BufferVar] = [];
+	var `curGraphSampleBanks [SampleBankVar] = [];
 
 	let root = f(x);
 
@@ -946,6 +1027,7 @@ fn _makeSubGraph1 (f GraphFn1, x S) SignalGraph {
 	    exprs: `curGraphExprs,
 		delays: `curGraphDelays,
 		buffers: `curGraphBuffers,
+		sampleBanks: `curGraphSampleBanks,
 		root: root,
 	};
 
@@ -1126,6 +1208,22 @@ fn toLisp(o S, indentLevel Int) String {
                 "(%^ BufWrite %^ %^ %^ %^)" fmt(o.id, bufferVar.id, chans, startChan, o inputsToLisp);
             length :
                 "(%^ BufLength %^)" fmt(o.id, bufferVar.id);
+        }
+
+        bankLookup(bankVar) :
+            "(%^ BankLookup %^ %^)" fmt(o.id, bankVar.id, o inputsToLisp);
+
+        bank(op) : match (op) {
+            fixRead(index, chans, startChan) :
+                "(%^ BankFixRead %^ %^ %^ %^)" fmt(o.id, index, chans, startChan, o inputsToLisp);
+            vread(interpolation, chans, startChan) :
+                "(%^ BankVarRead %^ %^ %^ %^)" fmt(o.id, interpolation toLispString, chans, startChan, o inputsToLisp);
+            rootKey :
+                "(%^ BankRootKey %^)" fmt(o.id, o inputsToLisp);
+            sampleRate :
+                "(%^ BankSampleRate %^)" fmt(o.id, o inputsToLisp);
+            length :
+                "(%^ BankLength %^)" fmt(o.id, o inputsToLisp);
         }
 
         if_(thenGraph, elseGraph) : {

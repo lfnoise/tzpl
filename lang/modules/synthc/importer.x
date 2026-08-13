@@ -24,6 +24,7 @@ fn importGraph(g SignalGraph, name String, applyRewrites Bool = false,
 	var `scIdMap [Int: Int] = [:];        -- front-end expr id -> node index
 	var `scDelayIdMap [Int: Int] = [:];   -- front-end DelayVar id -> delay idx
 	var `scBufIdMap [Int: Int] = [:];     -- front-end BufferVar id -> buf idx
+	var `scBankIdMap [Int: Int] = [:];    -- front-end SampleBankVar id -> bank idx
 	var `scConsMap [String: Int] = [:];   -- hash-cons key -> node index
 	-- Algebraic rewriting (interleaved with fold + hash-cons in _makeOp). Off by
 	-- default so rewrites-off dumps stay byte-identical; the C++ gApplyRewrites
@@ -34,6 +35,7 @@ fn importGraph(g SignalGraph, name String, applyRewrites Bool = false,
 	var `scExprSerials Int = 0;
 	var `scDelaySerials Int = 0;
 	var `scBufSerials Int = 0;
+	var `scBankSerials Int = 0;
 	-- Graph being imported into (0 = root). M3.2's subgraph import pushes/pops
 	-- this; for non-control-flow synths it stays 0.
 	var `scCurGraph Int = 0;
@@ -159,6 +161,12 @@ fn _kindKey(kind NodeKind) String = match (kind) {
 	bufVarReadK(bi, ip, rc, sc):    "BVR|" $ bi toString $ "|" $ ip ordinal toString $ "|" $ rc toString $ "|" $ sc toString;
 	bufWriteK(bi, wc, sc):          "BW|" $ bi toString $ "|" $ wc toString $ "|" $ sc toString;
 	bufLengthK(bi):                 "BL|" $ bi toString;
+	bankLookupK(bi):                "BKL|" $ bi toString;
+	bankFixReadK(index, rc, sc):    "BKF|" $ index toString $ "|" $ rc toString $ "|" $ sc toString;
+	bankVarReadK(ip, rc, sc):       "BKV|" $ ip ordinal toString $ "|" $ rc toString $ "|" $ sc toString;
+	bankRootKeyK:                   "BKR";
+	bankSampleRateK:                "BKS";
+	bankLengthK:                    "BKN";
 	ifK:                  "IF";
 	switchK(nc):          "SW|" $ nc toString;
 	forK:                 "FOR";
@@ -404,6 +412,36 @@ fn _bufIdxFor(bvId Int) Int {
 			let bi = ctx.bufSerials length;
 			ctx.bufSerials push!(serial);
 			m[bvId] = bi;
+			bi
+		}
+	}
+}
+
+-- Mirrors bankLookupInputOK(): true for values readable at note-on time --
+-- constants, note params, controls, and init-rate values.
+fn _bankLookupInputOK(n NIdx) Bool {
+	var ctx Ctx = `scCtx;
+	match (ctx.kind[n]) {
+		constant(_, _):      true;
+		noteParamK(_, _, _): true;
+		control(_, _, _, _): true;
+		_:                   ctx.nrate[n] <= Rate.init;
+	}
+}
+
+-- SampleBankVar id -> bank index, assigning a SampleBank serial on first
+-- reference, mirroring nextSampleBankSerialNo() / getOrCreateSampleBank.
+fn _bankIdxFor(sbId Int) Int {
+	var m [Int: Int] = `scBankIdMap;
+	match (m[sbId]) {
+		some(bi): bi;
+		none: {
+			let serial Int = `scBankSerials;
+			`scBankSerials = serial + 1;
+			var ctx Ctx = `scCtx;
+			let bi = ctx.bankSerials length;
+			ctx.bankSerials push!(serial);
+			m[sbId] = bi;
 			bi
 		}
 	}
@@ -746,6 +784,49 @@ fn _importExpr(e SignalExpr) Void {
 				length: {
 					_mapId(e.id, _addExprNode(NodeKind.bufLengthK(bi), [Int](),
 						Rate.audio, FLOAT64, 1));
+				}
+			}
+		}
+		bankLookup(sb): {
+			let bi = sb.id _bankIdxFor;
+			let ins = e _resolveIns;
+			-- The inputs are latched at note-on: reject anything that cannot
+			-- be evaluated at that moment (mirrors bankLookupInputOK).
+			for (n : ins) {
+				if (!(n _bankLookupInputOK)) {
+					_impError("bank lookup pitch/velocity must be a note param, control, constant, or init-rate value (computable at note-on)");
+				}
+			}
+			-- BankLookup: rate FORCED to Reset (a latch), i32, chans 1, sink.
+			_mapId(e.id, _addExprNode(NodeKind.bankLookupK(bi), ins,
+				Rate.reset, INT32, 1));
+		}
+		bank(op): {
+			match (op) {
+				fixRead(index, readChans, startChan): {
+					let ins = e _resolveIns;
+					_mapId(e.id, _addExprNode(NodeKind.bankFixReadK(index, readChans, startChan), ins,
+						Rate.audio, FLOAT64, readChans));
+				}
+				vread(interp, readChans, startChan): {
+					let ins = e _resolveIns;
+					_mapId(e.id, _addExprNode(NodeKind.bankVarReadK(interp, readChans, startChan), ins,
+						Rate.audio, FLOAT64, readChans));
+				}
+				rootKey: {
+					let ins = e _resolveIns;
+					_mapId(e.id, _addExprNode(NodeKind.bankRootKeyK, ins,
+						Rate.reset, FLOAT32, 1));
+				}
+				sampleRate: {
+					let ins = e _resolveIns;
+					_mapId(e.id, _addExprNode(NodeKind.bankSampleRateK, ins,
+						Rate.reset, FLOAT64, 1));
+				}
+				length: {
+					let ins = e _resolveIns;
+					_mapId(e.id, _addExprNode(NodeKind.bankLengthK, ins,
+						Rate.reset, FLOAT64, 1));
 				}
 			}
 		}

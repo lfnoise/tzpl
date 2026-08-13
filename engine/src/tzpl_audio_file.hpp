@@ -31,8 +31,12 @@
 
 #include <AudioToolbox/AudioToolbox.h>
 
-inline tzpl_Buffer* tzpl_loadAudioFile(const char* path, int channelOffset,
-                                        int64_t frameOffset, int64_t numFrames) {
+// Loads an audio file into a freshly created tzpl_Buffer. If srOut is
+// non-null it receives the source file's sample rate (which tzpl_Buffer
+// itself does not carry).
+inline tzpl_Buffer* tzpl_loadAudioFileSR(const char* path, int channelOffset,
+                                         int64_t frameOffset, int64_t numFrames,
+                                         double* srOut) {
     CFURLRef url = CFURLCreateFromFileSystemRepresentation(
         nullptr, (const UInt8*)path, (CFIndex)strlen(path), false);
     if (!url) return nullptr;
@@ -48,6 +52,7 @@ inline tzpl_Buffer* tzpl_loadAudioFile(const char* path, int channelOffset,
     err = ExtAudioFileGetProperty(audioFile, kExtAudioFileProperty_FileDataFormat,
                                    &propSize, &fileFormat);
     if (err != noErr) { ExtAudioFileDispose(audioFile); return nullptr; }
+    if (srOut) *srOut = fileFormat.mSampleRate;
 
     // Get total frames
     SInt64 totalFrames = 0;
@@ -132,11 +137,16 @@ inline tzpl_Buffer* tzpl_loadAudioFile(const char* path, int channelOffset,
 #include <sndfile.h>
 #include <vector>
 
-inline tzpl_Buffer* tzpl_loadAudioFile(const char* path, int channelOffset,
-                                        int64_t frameOffset, int64_t numFrames) {
+// Loads an audio file into a freshly created tzpl_Buffer. If srOut is
+// non-null it receives the source file's sample rate (which tzpl_Buffer
+// itself does not carry).
+inline tzpl_Buffer* tzpl_loadAudioFileSR(const char* path, int channelOffset,
+                                         int64_t frameOffset, int64_t numFrames,
+                                         double* srOut) {
     SF_INFO sfinfo = {};
     SNDFILE* sf = sf_open(path, SFM_READ, &sfinfo);
     if (!sf) return nullptr;
+    if (srOut) *srOut = (double)sfinfo.samplerate;
 
     int fileChans = sfinfo.channels;
     int64_t totalFrames = sfinfo.frames;
@@ -171,3 +181,8 @@ inline tzpl_Buffer* tzpl_loadAudioFile(const char* path, int channelOffset,
 }
 
 #endif // __APPLE__
+
+inline tzpl_Buffer* tzpl_loadAudioFile(const char* path, int channelOffset,
+                                        int64_t frameOffset, int64_t numFrames) {
+    return tzpl_loadAudioFileSR(path, channelOffset, frameOffset, numFrames, nullptr);
+}

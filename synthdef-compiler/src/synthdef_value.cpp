@@ -389,6 +389,52 @@ namespace synthdef {
 
     u64 B::hash() const { return hash64(u64(sampleBuf)); }
 
+    // -- Bk (SampleBank handle) / BS (bank lookup value) --
+
+    // Lookup inputs are latched at note-on (or init at top level): they must
+    // be readable at that moment without depending on event/audio trees,
+    // whose materialized values are stale or zeroed when a note starts.
+    // Note params and controls read their live sources directly inside the
+    // reset loop; constants and init-rate values are always valid.
+    bool bankLookupInputOK(S in) {
+        return in->is_constant() || in.as<NoteParam>() || in.as<Control>()
+            || in->rate.rate <= SignalRate::Init;
+    }
+
+    Bk::Bk() : sampleBank(new SampleBank()) {
+        sampleBank->graph = gGraph;
+        gGraph->sampleBanks.insert(*this);
+        gSynth->sampleBanks.insert(*this);
+    }
+
+    Bk::Bk(SampleBank* sampleBank) : sampleBank(sampleBank) {}
+
+    Bk::Bk(Bk const& other) : sampleBank(other.sampleBank) {}
+
+    BS Bk::lookup(S pitch, S velocity) const {
+        if (!bankLookupInputOK(pitch) || !bankLookupInputOK(velocity)) {
+            throw std::runtime_error(
+                "bank lookup pitch/velocity must be a note param, control, "
+                "constant, or init-rate value (computable at note-on)");
+        }
+        S lu = addExpr(new BankLookup{sampleBank, pitch, velocity});
+        return BS(lu.as<BankLookup>());
+    }
+
+    S BS::read(i64 index, i64 readChans, i64 startChan) const {
+        return addExpr(new BankFixRead{lookup_, index, readChans, startChan});
+    }
+
+    S BS::vread(S index, Interpolation interp, i64 readChans, i64 startChan) const {
+        return addExpr(new BankVarRead{lookup_, index, interp, readChans, startChan});
+    }
+
+    S BS::rootKey() const { return addExpr(new BankRootKey{lookup_}); }
+    S BS::sampleRate() const { return addExpr(new BankSampleRate{lookup_}); }
+    S BS::length() const { return addExpr(new BankLength{lookup_}); }
+
+    u64 Bk::hash() const { return hash64(u64(sampleBank)); }
+
 //    Expr* hash_cons(Expr* expr) {
 //        auto it = gGraph->hashConsSet.find(expr);
 //        if (it != gGraph->hashConsSet.end()) {

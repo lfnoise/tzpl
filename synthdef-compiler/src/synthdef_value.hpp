@@ -366,5 +366,59 @@ public:
         std::size_t operator()(B buf) const;
     };
 
+    struct SampleBank;
+    struct BankLookup;
+
+    // BS is the value of a bank lookup: a per-note-resolved sample handle.
+    // Wraps the BankLookup expression; read/vread and the metadata accessors
+    // build expressions referencing it.
+    class BS {
+        BankLookup* lookup_;
+    public:
+        BS(BankLookup* lookup) : lookup_(lookup) {}
+
+        BankLookup* get() const { return lookup_; }
+
+        S read(i64 index, i64 readChans = 1, i64 startChan = 0) const;
+        S vread(S index, Interpolation interp = Interpolation(0),
+                i64 readChans = 1, i64 startChan = 0) const;
+        S rootKey() const;
+        S sampleRate() const;
+        S length() const;
+    };
+
+    // Bk is a SampleBank reference type, parallel to B for SampleBuf.
+    class Bk {
+        SampleBank* sampleBank;
+    public:
+        Bk();
+        Bk(SampleBank* sampleBank);
+        Bk(Bk const& other);
+
+        SampleBank* get() const { return sampleBank; }
+
+        SampleBank* operator->() { return sampleBank; }
+        SampleBank const* operator->() const { return sampleBank; }
+
+        bool operator==(Bk that) const { return sampleBank == that.sampleBank; }
+        bool operator!=(Bk that) const { return sampleBank != that.sampleBank; }
+
+        bool isNull() const { return sampleBank == nullptr; }
+        bool notNull() const { return sampleBank != nullptr; }
+
+        // The reset-time (pitch, velocity) -> sample resolution.
+        BS lookup(S pitch, S velocity) const;
+
+        u64 hash() const;
+    };
+
+    struct SampleBankHasher {
+        std::size_t operator()(Bk bank) const;
+    };
+
+    // True if `in` may feed a bank lookup: constants, note params, controls,
+    // and init-rate values -- everything readable at note-on time.
+    bool bankLookupInputOK(S in);
+
 } // namespace synthdef
 

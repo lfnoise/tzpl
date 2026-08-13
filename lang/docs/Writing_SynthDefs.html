@@ -450,8 +450,8 @@ beep defSynthX(<span class="hl-str">"beep"</span>) await;      <span class="cmt"
                     <td>Literals, arithmetic on literals</td></tr>
                 <tr><td><code>Rate.init</code></td><td>Once, when a synth instance is allocated</td>
                     <td><code>fs()</code>, <code>T()</code>, random values with <code>rate: Rate.init</code>, delay allocation</td></tr>
-                <tr><td><code>Rate.reset</code></td><td>Once per note-on / reset</td>
-                    <td>Per-note setup inside a voicer</td></tr>
+                <tr><td><code>Rate.reset</code></td><td>Once per note-on (inside a voicer; once at init otherwise)</td>
+                    <td>Per-note setup: sample bank lookups (<a href="#samplebanks">&sect;10</a>), per-note random values with <code>rate: Rate.reset</code></td></tr>
                 <tr><td><code>Rate.event</code></td><td>When a parameter change arrives</td>
                     <td><code>control(...)</code> values and math derived only from them</td></tr>
                 <tr><td><code>Rate.audio</code></td><td>Every sample</td>
@@ -959,6 +959,67 @@ samplePlayer defSynthX(<span class="hl-str">"samplePlayer"</span>) await;
 
 <span class="cmt">-- engine side, after newNode("samplePlayer", 100):</span>
 loadBuffer(<span class="hl-num">100</span>, <span class="hl-num">0</span>, <span class="hl-str">"samples/kick.wav"</span>);</code></pre>
+
+            <h3 id="samplebanks">Sample banks: pitch/velocity zones</h3>
+
+            <p>A <code>SampleBankVar</code> is a slot for a <em>set</em> of samples with a
+            (pitch, velocity) zone map &mdash; the multi-sample instrument counterpart of a single
+            buffer. The bank is described engine-side as a list of zones, each a sound file
+            covering an inclusive pitch range and velocity range (MIDI 0&ndash;127) with a
+            <em>root key</em> (the note at which the sample plays back unshifted). Each zone's
+            pitch&times;velocity rectangle is a tile: no two tiles may cover the same
+            (pitch, velocity) cell, but zones may share a pitch range when their velocity ranges
+            are disjoint &mdash; the usual way to build velocity layers &mdash; and vice versa.
+            Cells no zone covers read as silence. Like a buffer, the whole bank swaps at runtime
+            without recompiling the synth, and swapping is safe while notes sound.</p>
+
+            <p>In the graph, <code>bank lookup(pitch, velocity)</code> resolves one sample of the
+            bank. The lookup runs at <code>Rate.reset</code> &mdash; once per note-on inside a
+            voicer (once at init in a non-voicer graph). Its inputs are <em>latched</em> at that
+            moment, so they must be note params, controls, constants, or init-rate values. The
+            result is a <code>BankSample</code>: read it with <code>read</code>/<code>vread</code>
+            exactly like a buffer, and use its metadata accessors to compute the playback rate.</p>
+
+            <table>
+                <tr><th>Function</th><th>Description</th></tr>
+                <tr><td><code>sampleBankVar()</code></td><td>Declare a bank slot. Slots are numbered in declaration order (<code>bankID</code> 0, 1, &hellip;).</td></tr>
+                <tr><td><code>bank lookup(pitch, velocity)</code></td><td>Resolve (pitch, velocity) to one sample, once per note-on. Returns a <code>BankSample</code>.</td></tr>
+                <tr><td><code>h read(index, chans = 1, startChan = 0)</code></td><td>Fixed-index read of the resolved sample.</td></tr>
+                <tr><td><code>h vread(index, interp = Interpolation.cubic, chans = 1, startChan = 0)</code></td><td>Interpolated read of the resolved sample &mdash; the sample-playback primitive.</td></tr>
+                <tr><td><code>h rootKey</code></td><td>The resolved sample's root key (MIDI note of unshifted playback).</td></tr>
+                <tr><td><code>h sampleRate</code></td><td>The resolved sample's source-file sample rate.</td></tr>
+                <tr><td><code>h length</code></td><td>The resolved sample's length in frames.</td></tr>
+            </table>
+
+            <p>Engine side, <code>loadSampleBank(nodeID, bankID, zones)</code> binds a bank: the
+            files load and the zones validate on the calling thread at bundle submit (a bad spec
+            or missing file returns <code>errBadSampleBank</code> synchronously), and the built
+            bank is swapped in with a single pointer store. Build zones with
+            <code>sampleZone(path, loKey, hiKey = loKey, loVel = 0, hiVel = 127, rootKey = loKey)</code>.</p>
+
+<pre><code><span class="cmt">-- a voicer sampler: each note picks its sample by (pitch, velocity) and
+-- plays it at the rate implied by the sample's root key and source rate</span>
+<span class="hl-kw">fn</span> sampler() S {
+    <span class="hl-kw">let</span> bank = sampleBankVar();
+    voicer(<span class="hl-num">8</span>, <span class="hl-kw">fn</span>() S {
+        <span class="hl-kw">let</span> g = gate();
+        <span class="hl-kw">let</span> pitch = noteParam(<span class="hl-str">"pitch"</span>, ControlSpec { lo: <span class="hl-num">0.0</span>, hi: <span class="hl-num">127.0</span>, init: <span class="hl-num">60.0</span>, warp: ControlWarp.linear });
+        <span class="hl-kw">let</span> vel = noteParam(<span class="hl-str">"vel"</span>, ControlSpec { lo: <span class="hl-num">0.0</span>, hi: <span class="hl-num">127.0</span>, init: <span class="hl-num">100.0</span>, warp: ControlWarp.linear });
+        <span class="hl-kw">let</span> h = bank lookup(pitch, vel);
+        <span class="hl-kw">let</span> rate = ((pitch f64 - (h rootKey) f64) / <span class="hl-num">12.0</span>) exp2 * (h sampleRate) * (T() f64);
+        <span class="hl-kw">let</span> d = delayVar();               <span class="cmt">-- per-voice playhead, zeroed at note-on</span>
+        <span class="hl-kw">let</span> pos = d read(<span class="hl-num">1</span>);
+        (pos + rate) -&gt; d;
+        h vread(pos, Interpolation.cubic) f32 * g
+    }) sum(<span class="hl-num">1</span>) outlet
+}
+sampler defSynthX(<span class="hl-str">"sampler"</span>) await;
+
+<span class="cmt">-- engine side, after newNode("sampler", 100):</span>
+loadSampleBank(<span class="hl-num">100</span>, <span class="hl-num">0</span>, [
+    sampleZone(<span class="hl-str">"samples/piano_c4.wav"</span>, <span class="hl-num">0</span>, <span class="hl-num">65</span>, <span class="hl-num">0</span>, <span class="hl-num">127</span>, <span class="hl-num">60</span>),
+    sampleZone(<span class="hl-str">"samples/piano_c5.wav"</span>, <span class="hl-num">66</span>, <span class="hl-num">127</span>, <span class="hl-num">0</span>, <span class="hl-num">127</span>, <span class="hl-num">72</span>),
+]);</code></pre>
 
             <a href="#top" class="back-to-top">&uarr; Back to top</a>
         </div>

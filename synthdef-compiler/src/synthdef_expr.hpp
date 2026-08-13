@@ -1522,6 +1522,171 @@ namespace synthdef {
         void accept(ExprVisitor& visitor) override;
     };
 
+    ///////////////////////////////
+    // Sample Banks
+    ///////////////////////////////
+
+    // A swappable pitch/velocity-mapped set of sample buffers (see
+    // tzpl_SampleBank in the plugin ABI). Analogous to SampleBuf: a storage
+    // object referenced by expressions, not an expression itself.
+    struct SampleBank : ArenaObj {
+        struct Graph* graph;
+        vector<S> lookups;
+        u64 serial;
+
+        SampleBank();
+    };
+
+    inline std::size_t SampleBankHasher::operator()(Bk bank) const {
+        return bank.hash();
+    }
+
+    // Resolves (pitch, velocity) -> one sample of the bank. Rate is FORCED
+    // to Reset regardless of its inputs' rates: the inputs are sampled once
+    // per note-on (inside a voicer) or once at init (top level) -- a latch,
+    // deliberately breaking max-of-inputs propagation. Codegen stores the
+    // clamped pitch/velocity and the resolved buffer pointer + metadata in
+    // per-voice slots. A sink so an unread lookup still resolves.
+    struct BankLookup : Expr {
+        Bk sampleBank;
+
+        BankLookup(SampleBank* bank, S pitch, S velocity)
+            : Expr(resetSignalRate, {pitch, velocity}), sampleBank(bank) {}
+
+        string typeName() const override { return "BankLookup"; }
+        string str() const override { return "bank_lookup"; }
+
+        u64 hash() const override;
+        bool equals_(Expr const& that) const override {
+            auto& c = static_cast<BankLookup const&>(that);
+            return sampleBank == c.sampleBank;
+        }
+        NumType initial_type() const override { return NumType::i32; }
+        void update_type(ExprWorkList& worklist) override {}
+        void calcShape() override { chans = 1; }
+        bool is_sink() const override { return true; }
+
+        void accept(ExprVisitor& visitor) override;
+    };
+
+    // Base for expressions reading through a bank lookup's resolved slots.
+    // in0() is always the lookup -- carried as an input for ordering (the
+    // lookup's tree must be scheduled before consumers), never evaluated as
+    // a value by codegen.
+    struct BankExpr : Expr {
+        BankLookup* lookup;
+
+        BankExpr(BankLookup* lu, SignalRate rate, vector<S> inputs)
+            : Expr(rate, std::move(inputs)), lookup(lu) {}
+    };
+
+    struct BankFixRead : BankExpr {
+        i64 index;
+        i64 readChans;
+        i64 startChan;
+
+        BankFixRead(BankLookup* lu, i64 index, i64 readChans, i64 startChan)
+            : BankExpr(lu, audioSignalRate, {S(lu)}), index(index),
+              readChans(readChans), startChan(startChan) {}
+
+        string typeName() const override { return "BankFixRead"; }
+        string str() const override { return "bank_fix_read(" + std::to_string(index) + ")"; }
+
+        u64 hash() const override;
+        bool equals_(Expr const& that) const override {
+            auto& c = static_cast<BankFixRead const&>(that);
+            return lookup == c.lookup && index == c.index
+                && readChans == c.readChans && startChan == c.startChan;
+        }
+        NumType initial_type() const override { return NumType::f64; }
+        void update_type(ExprWorkList& worklist) override {}
+        void calcShape() override { chans = readChans; }
+
+        void accept(ExprVisitor& visitor) override;
+    };
+
+    struct BankVarRead : BankExpr {
+        Interpolation interp;
+        i64 readChans;
+        i64 startChan;
+
+        BankVarRead(BankLookup* lu, S index, Interpolation interp, i64 readChans, i64 startChan)
+            : BankExpr(lu, audioSignalRate, {S(lu), index}), interp(interp),
+              readChans(readChans), startChan(startChan) {}
+
+        // in1() is the sample index.
+        string typeName() const override { return "BankVarRead"; }
+        string str() const override { return "bank_var_read"; }
+
+        u64 hash() const override;
+        bool equals_(Expr const& that) const override {
+            auto& c = static_cast<BankVarRead const&>(that);
+            return lookup == c.lookup && interp == c.interp
+                && readChans == c.readChans && startChan == c.startChan;
+        }
+        NumType initial_type() const override { return NumType::f64; }
+        void update_type(ExprWorkList& worklist) override {}
+        void calcShape() override { chans = readChans; }
+
+        void accept(ExprVisitor& visitor) override;
+    };
+
+    // Metadata accessors on the resolved sample: reset-rate leaf reads of the
+    // lookup's latched slots.
+    struct BankRootKey : BankExpr {
+        BankRootKey(BankLookup* lu) : BankExpr(lu, resetSignalRate, {S(lu)}) {}
+
+        string typeName() const override { return "BankRootKey"; }
+        string str() const override { return "bank_root_key"; }
+
+        u64 hash() const override;
+        bool equals_(Expr const& that) const override {
+            auto& c = static_cast<BankRootKey const&>(that);
+            return lookup == c.lookup;
+        }
+        NumType initial_type() const override { return NumType::f32; }
+        void update_type(ExprWorkList& worklist) override {}
+        void calcShape() override { chans = 1; }
+
+        void accept(ExprVisitor& visitor) override;
+    };
+
+    struct BankSampleRate : BankExpr {
+        BankSampleRate(BankLookup* lu) : BankExpr(lu, resetSignalRate, {S(lu)}) {}
+
+        string typeName() const override { return "BankSampleRate"; }
+        string str() const override { return "bank_sample_rate"; }
+
+        u64 hash() const override;
+        bool equals_(Expr const& that) const override {
+            auto& c = static_cast<BankSampleRate const&>(that);
+            return lookup == c.lookup;
+        }
+        NumType initial_type() const override { return NumType::f64; }
+        void update_type(ExprWorkList& worklist) override {}
+        void calcShape() override { chans = 1; }
+
+        void accept(ExprVisitor& visitor) override;
+    };
+
+    struct BankLength : BankExpr {
+        BankLength(BankLookup* lu) : BankExpr(lu, resetSignalRate, {S(lu)}) {}
+
+        string typeName() const override { return "BankLength"; }
+        string str() const override { return "bank_length"; }
+
+        u64 hash() const override;
+        bool equals_(Expr const& that) const override {
+            auto& c = static_cast<BankLength const&>(that);
+            return lookup == c.lookup;
+        }
+        NumType initial_type() const override { return NumType::f64; }
+        void update_type(ExprWorkList& worklist) override {}
+        void calcShape() override { chans = 1; }
+
+        void accept(ExprVisitor& visitor) override;
+    };
+
     inline bool is_sink(GraphCut cut) {
         return cut == GraphCut::Sink;
     }

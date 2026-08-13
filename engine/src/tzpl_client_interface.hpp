@@ -29,6 +29,7 @@
 #include "tzpl_audio_backend.hpp"
 #include "tzpl_tap.hpp"   // TapMode, TapOwnerKind (used in default arguments)
 #include <memory>
+#include <span>
 
 namespace engine {
 
@@ -134,11 +135,16 @@ bool loadDefs(Engine* e, const char* dirPath);
 bool loadDef(Engine* e, const char* dirPath, const char* defName);
 
 // Add a synthdef (from tzpl_plugin_abi) to the engine's def table.
-// `bufs` / `tags` (optional) carry the plugin's sample buffer descriptors and
-// category tags from its "loadBufferDefs" / "loadTags" symbols.
+// `bufs` / `tags` / `banks` (optional) carry the plugin's sample buffer
+// descriptors, category tags, and sample bank descriptors from its
+// "loadBufferDefs" / "loadTags" / "loadSampleBankDefs" symbols;
+// `swapSampleBank` is its optional "swapSampleBank" symbol (required for the
+// engine to service loadSampleBank/replaceSampleBank on the def's nodes).
 void addSynthDef(Engine* e, tzpl_SynthDef const& def, void* dlHandle = nullptr,
                  tzpl_BufferDefList const* bufs = nullptr,
-                 tzpl_TagList const* tags = nullptr);
+                 tzpl_TagList const* tags = nullptr,
+                 tzpl_SampleBankDefList const* banks = nullptr,
+                 tzpl_SwapSampleBankFun swapSampleBank = nullptr);
 
 // Collect the names of all registered node defs.
 void listNodeDefs(Engine* e, std::vector<std::string>& names);
@@ -166,12 +172,18 @@ struct BufferDesc {
     i64 bufID = 0;
 };
 
+struct SampleBankDesc {
+    std::string name;
+    i64 bankID = 0;
+};
+
 struct DefDesc {
     std::string name;
     std::vector<PortDesc> ins;
     std::vector<PortDesc> outs;
     std::vector<ControlDesc> controls;
     std::vector<BufferDesc> buffers;
+    std::vector<SampleBankDesc> banks;
     std::vector<std::string> tags;  // embedded category tags (may be empty)
 };
 
@@ -488,6 +500,15 @@ tzpl_SErr resizeBuffer(i64 nodeID, i64 bufID, int numChannels, i64 length);
 tzpl_SErr loadBuffer(i64 nodeID, i64 bufID, const char* path,
                      int channelOffset = 0, i64 frameOffset = 0, i64 numFrames = INT64_MAX);
 tzpl_SErr replaceBuffer(i64 nodeID, i64 bufID, tzpl_Buffer* buffer);
+
+// sample banks (see engine/src/tzpl_sample_bank.hpp for the zone spec).
+// loadSampleBank builds the bank at record time -- files load and zones
+// validate on the calling thread, so spec errors (tzpl_errBadSampleBank)
+// return synchronously. Both require an active bundle, like buffers.
+struct SampleBankZoneSpec;
+tzpl_SErr loadSampleBank(i64 nodeID, i64 bankID,
+                         std::span<SampleBankZoneSpec const> zones);
+tzpl_SErr replaceSampleBank(i64 nodeID, i64 bankID, tzpl_SampleBank* bank);
 
 inline bool isFloat(tzpl_ElemType e) {
     switch (e) {

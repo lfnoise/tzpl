@@ -327,7 +327,16 @@ fn genExpr(ctx Ctx, n NIdx, cel String) String {
 	-- never as `p->vN` -- even though it is cut Graph (cross-graph reference).
 	match (ctx.kind[n]) { varK(name): { return name; } _: {} }
 	let inInit Bool = `cgInInit;
-	if (!inInit && ctx _isRootNode(n) && n != `cgRoot) {
+	-- In reset loops, NoteParam/Control roots bypass root factoring: their
+	-- materialized per-sample copies are zeroed/stale at note-on, so read the
+	-- live sources directly (mirrors inResetMode in the C++ genExpr).
+	let inReset Bool = `cgInResetMode;
+	let resetLeaf = inReset && (match (ctx.kind[n]) {
+		noteParamK(_, _, _): true;
+		control(_, _, _, _): true;
+		_: false;
+	});
+	if (!inInit && !resetLeaf && ctx _isRootNode(n) && n != `cgRoot) {
 		return _varRef(ctx, n, cel);
 	}
 	_inlineExpr(ctx, n, cel)
@@ -405,6 +414,11 @@ fn _inlineExpr(ctx Ctx, n NIdx, cel String) String {
 		bufFixReadK(bi, index, rc, sc): _bufFixReadExpr(ctx, n, bi, index, rc, sc, cel);
 		bufVarReadK(bi, ip, rc, sc):    _bufVarReadExpr(ctx, n, bi, ip, rc, sc, cel);
 		bufLengthK(bi):                 _bufLengthExpr(ctx, n, bi);
+		bankFixReadK(index, rc, sc):    _bankFixReadExpr(ctx, n, index, rc, sc, cel);
+		bankVarReadK(ip, rc, sc):       _bankVarReadExpr(ctx, n, ip, rc, sc, cel);
+		bankRootKeyK:                   _bankSlot(ctx, ctx.ins[n][0], "rootKey", cel);
+		bankSampleRateK:                _bankSlot(ctx, ctx.ins[n][0], "sr", cel);
+		bankLengthK:                    _bankSlot(ctx, ctx.ins[n][0], "len", cel);
 		delayFixReadK(d, k): _delayFixReadExpr(ctx, n, d, k, cel);
 		delayVarReadK(d, ip): _delayVarReadExpr(ctx, n, d, ip, cel);
 		_:              "/* FIXME %^ */" fmt(nodeStr(ctx, n));
@@ -1065,6 +1079,69 @@ fn _bufWriteStmt(ctx Ctx, n NIdx, bi Int, writeChans Int, startChan Int, cel Str
 }
 
 ---------------------------------------------------------------------------
+-- Sample bank ops (mirror the Bank* visitors + bankSlot in
+-- synthdef_cpp_codegen.cpp). The lookup latches (pitch, velocity) into
+-- per-voice slots at note-on and resolves a buffer pointer + metadata; reads
+-- and accessors go through those slots. Scalar-only (bank kinds disqualify
+-- SIMD on both sides).
+
+-- Bank lookup nodes in deterministic (topological) order.
+fn _bankLookupNodes(ctx Ctx) [Int] {
+	var v [Int] = [];
+	for (n : ctx.sorted) {
+		match (ctx.kind[n]) { bankLookupK(_): { v push!(n); } _: {} }
+	}
+	v
+}
+
+-- The latched slot `field` of lookup `lu` in the current emission context.
+-- synthc voicers are always flat (SoA), so a voicer-body lookup is a
+-- per-voice array indexed by the voice derived from cel.
+fn _bankSlot(ctx Ctx, lu NIdx, field String, cel String) String {
+	if (ctx _isVoiceGraph(ctx.graphOf[lu])) {
+		let vi = `cgFlatChanShift == 0 ? cel : "(%^ >> %^)" fmt(cel, `cgFlatChanShift);
+		return "p->voice_lu%^_%^[%^]" fmt(ctx.serial[lu], field, vi);
+	}
+	"p->lu%^_%^" fmt(ctx.serial[lu], field)
+}
+
+fn _bankFixReadExpr(ctx Ctx, n NIdx, index Int, readChans Int, startChan Int, cel String) String {
+	let bp = _bankSlot(ctx, ctx.ins[n][0], "buf", cel);
+	let chan = _bufChanExpr(readChans, startChan, cel, bp);
+	"(%^ ? %^->data[%^][tzpl_buf_tap(%^, %^->length)] : 0.0)" fmt(bp, bp, chan, index, bp)
+}
+
+fn _bankVarReadExpr(ctx Ctx, n NIdx, interp Interpolation, readChans Int, startChan Int, cel String) String {
+	let bp = _bankSlot(ctx, ctx.ins[n][0], "buf", cel);
+	let chan = _bufChanExpr(readChans, startChan, cel, bp);
+	let idx = genExpr(ctx, ctx.ins[n][1], cel);
+	match (interp) {
+		none: "(%^ ? %^->data[%^][tzpl_buf_tap(i64(%^), %^->length)] : 0.0)" fmt(bp, bp, chan, idx, bp);
+		_:    "(%^ ? %^(%^->data[%^], %^->length, %^) : 0.0)" fmt(bp, _bufInterpFunc(interp), bp, chan, bp, idx);
+	}
+}
+
+-- BankLookup is a sink: store the clamped pitch/velocity, then resolve the
+-- bank cell (mirrors the Rank1 BankLookup visitor). The caller prepends the
+-- first line's indent.
+fn _bankLookupStmt(ctx Ctx, n NIdx, cel String, treeSerial Int) String {
+	let pitch = genExpr(ctx, ctx.ins[n][0], cel);
+	let vel = genExpr(ctx, ctx.ins[n][1], cel);
+	let pSlot = _bankSlot(ctx, n, "p", cel);
+	let vSlot = _bankSlot(ctx, n, "v", cel);
+	let i0 = _tabs(`cgIndent);
+	var s = "%^ = std::min(std::max((i32)(%^ + 0.5f), 0), 127); // %^ BankLookup\n" fmt(pSlot, pitch, treeSerial);
+	s = s $ i0 $ "%^ = std::min(std::max((i32)(%^ + 0.5f), 0), 127);\n" fmt(vSlot, vel);
+	if (ctx _isVoiceGraph(ctx.graphOf[n])) {
+		let vi = `cgFlatChanShift == 0 ? cel : "(%^ >> %^)" fmt(cel, `cgFlatChanShift);
+		s = s $ i0 $ "%^_lu%^_resolve(p, %^);\n" fmt(ctx.name, ctx.serial[n], vi);
+	} else {
+		s = s $ i0 $ "%^_lu%^_resolve(p);\n" fmt(ctx.name, ctx.serial[n]);
+	}
+	s
+}
+
+---------------------------------------------------------------------------
 -- Voicer emission (M4, flat voice mode -- non-branching body).
 --
 -- A VoicerExpr replicates its voice body across `maxVoices` voices. In flat
@@ -1316,6 +1393,7 @@ fn genTree(ctx Ctx, treeIdx Int, cel String) String {
 		delayInitK(_, _): { return ""; }   -- emitted by genDelayInit
 		maxDelayK(_): { return ""; }
 		bufWriteK(bi, wc, sc): { return _tabs(`cgIndent) $ _bufWriteStmt(ctx, root, bi, wc, sc, cel, tree.serial); }
+		bankLookupK(_): { return _tabs(`cgIndent) $ _bankLookupStmt(ctx, root, cel, tree.serial); }
 		ifK:            { return ctx _genIf(root); }
 		forK:           { return ctx _genFor(root); }
 		switchK(nc):    { return ctx _genSwitch(root, nc); }
@@ -1488,6 +1566,12 @@ fn _exprSimdDisqualified(ctx Ctx, e NIdx) Bool = match (ctx.kind[e]) {
 	bufVarReadK(_, _, _, _): false;                        -- gather (M5.4)
 	bufWriteK(_, _, _):   false;                           -- scalar-form store, vector operands (M5.4)
 	bufLengthK(_):        false;                           -- splat (M5.4)
+	bankLookupK(_):       true;                            -- multi-statement latch, scalar only
+	bankFixReadK(_, _, _): true;                           -- per-voice pointer, scalar only
+	bankVarReadK(_, _, _): true;
+	bankRootKeyK:         true;
+	bankSampleRateK:      true;
+	bankLengthK:          true;
 	_:                    false;
 };
 
@@ -1549,6 +1633,7 @@ fn _flatLoopSimdWidth(ctx Ctx, loop Loop, trip Int) Int {
 	let w = `cgSimdWidth;
 	if (w < 2) { return 0; }
 	if (loop.isControlFlow) { return 0; }
+	if (`cgSingleVoice) { return 0; }   -- noteOn reset loops are scalar
 	if (ctx _loopHasSimdDisqualifier(loop)) { return 0; }
 	_simdWidthForCount(trip)
 }
@@ -1652,7 +1737,17 @@ fn genLoop(ctx Ctx, loopIdx Int) String {
 				code = code $ _tabs(`cgIndent - 1) $ "}\n";
 			}
 		} else {
-			code = code $ _tabs(`cgIndent) $ "for (int i = 0; i < %^; ++i) {\n" fmt(trip);
+			-- Single-voice mode (reset loops in _noteOn): emit for the voice
+			-- `vi` in scope; the usual `i >> shift` derivation then yields vi.
+			if (`cgSingleVoice) {
+				if (loop.chans == 1) {
+					code = code $ _tabs(`cgIndent) $ "{ int i = vi;\n";
+				} else {
+					code = code $ _tabs(`cgIndent) $ "for (int i = vi * %^; i < vi * %^ + %^; ++i) {\n" fmt(loop.chans, loop.chans, loop.chans);
+				}
+			} else {
+				code = code $ _tabs(`cgIndent) $ "for (int i = 0; i < %^; ++i) {\n" fmt(trip);
+			}
 			var `cgIndent Int = `cgIndent + 1;
 			for (t : loop.trees) { code = code $ genTree(ctx, t, "i"); }
 			code = code $ _tabs(`cgIndent - 1) $ "}\n";
@@ -1806,6 +1901,8 @@ fn genDeclInstVars(ctx Ctx) String {
 	s = s $ genSpectralDecls(ctx);
 	s = s $ genDelayDecls(ctx);
 	s = s $ genBufDecls(ctx);
+	s = s $ genBankDecls(ctx);
+	s = s $ genBankSlotDeclsScalar(ctx);
 	s
 }
 
@@ -1857,6 +1954,18 @@ fn genVoicerDecls(ctx Ctx) String {
 		}
 		-- per-voice delay state
 		s = s $ genVoiceDelayDecls(ctx, bg, mv);
+		-- per-voice bank lookup slots (SoA), mirroring genBankSlotDeclsFlat
+		for (lu : ctx _bankLookupNodes) {
+			if (ctx.graphOf[lu] == bg) {
+				let u = ctx.serial[lu];
+				s = s $ "\ti32 voice_lu%^_p[%^];\n" fmt(u, mv);
+				s = s $ "\ti32 voice_lu%^_v[%^];\n" fmt(u, mv);
+				s = s $ "\ttzpl_Buffer* voice_lu%^_buf[%^];\n" fmt(u, mv);
+				s = s $ "\tf32 voice_lu%^_rootKey[%^];\n" fmt(u, mv);
+				s = s $ "\tf64 voice_lu%^_sr[%^];\n" fmt(u, mv);
+				s = s $ "\tf64 voice_lu%^_len[%^];\n" fmt(u, mv);
+			}
+		}
 		let nUser = ctx _numUserParams(bg);
 		s = s $ "\tRowVoicer<%^, %^> voicer;\n" fmt(mv, nUser);
 		s = s $ "\tf32 voicer_params[%^][%^];\n" fmt(mv, 1 + nUser);
@@ -1870,6 +1979,31 @@ fn genVoicerDecls(ctx Ctx) String {
 fn genBufDecls(ctx Ctx) String {
 	var s = "";
 	for (ser : ctx.bufSerials) { s = s $ "\ttzpl_Buffer* buf%^;\n" fmt(ser); }
+	s
+}
+
+-- Sample bank pointers (one per SampleBank), after the buffer decls to match
+-- the C++ genDeclInstVars ordering.
+fn genBankDecls(ctx Ctx) String {
+	var s = "";
+	for (ser : ctx.bankSerials) { s = s $ "\ttzpl_SampleBank* bank%^;\n" fmt(ser); }
+	s
+}
+
+-- Top-level (non-voicer) lookup slots, mirroring genBankSlotDeclsScalar.
+fn genBankSlotDeclsScalar(ctx Ctx) String {
+	var s = "";
+	for (lu : ctx _bankLookupNodes) {
+		if (!(ctx _isVoiceGraph(ctx.graphOf[lu]))) {
+			let u = ctx.serial[lu];
+			s = s $ "\ti32 lu%^_p;\n" fmt(u);
+			s = s $ "\ti32 lu%^_v;\n" fmt(u);
+			s = s $ "\ttzpl_Buffer* lu%^_buf;\n" fmt(u);
+			s = s $ "\tf32 lu%^_rootKey;\n" fmt(u);
+			s = s $ "\tf64 lu%^_sr;\n" fmt(u);
+			s = s $ "\tf64 lu%^_len;\n" fmt(u);
+		}
+	}
 	s
 }
 
@@ -2024,6 +2158,11 @@ fn genInitFun(ctx Ctx, name String) String {
 	s = s $ genSpectralAlloc(ctx);
 	s = s $ genDelayInit(ctx);
 	s = s $ genVoiceDelayAlloc(ctx);
+	-- Buffer pointers start null; the host swaps real buffers in at runtime.
+	-- (Before the voicer block, matching the C++ genInitFun ordering.)
+	for (ser : ctx.bufSerials) { s = s $ "\tp->buf%^ = nullptr;\n" fmt(ser); }
+	-- Sample bank pointers start null; lookup slots fill in the reset loops.
+	for (ser : ctx.bankSerials) { s = s $ "\tp->bank%^ = nullptr;\n" fmt(ser); }
 	-- Voicer: point the voicer at its parameter matrix, zero it, and seed each
 	-- voice's RNG.
 	for (v : ctx _voicerNodes) {
@@ -2037,11 +2176,23 @@ fn genInitFun(ctx Ctx, name String) String {
 			}
 		}
 	}
-	-- Buffer pointers start null; the host swaps real buffers in at runtime.
-	for (ser : ctx.bufSerials) { s = s $ "\tp->buf%^ = nullptr;\n" fmt(ser); }
+	-- Reset-rate loops run once at init so every slot holds a defined value
+	-- before the first note-on. Non-voicer graphs latch here permanently
+	-- (Rate.reset degenerates to init when there are no notes); voicer loops
+	-- run over all voices (genLoop auto-enters flat voice mode).
+	var `cgInResetMode Bool = true;
+	for (li : ctx.resetLoops) {
+		if (!(ctx _isVoiceGraph(_loopRootGraph(ctx, li)))) { s = s $ genLoop(ctx, li); }
+	}
+	for (li : ctx.resetLoops) {
+		if (ctx _isVoiceGraph(_loopRootGraph(ctx, li))) { s = s $ genLoop(ctx, li); }
+	}
 	s = s $ "\treturn tzpl_errNone;\n}\n\n";
 	s
 }
+
+fn _loopRootGraph(ctx Ctx, li Int) Int =
+	ctx.graphOf[ctx.trees[ctx.loops[li].trees[0]].root];
 
 -- The voice note-lifecycle functions (noteOn/noteOff/allNotesOff/setParams/
 -- setParamRange). Mirrors CppCodeGen's note-function emission. noteOn allocates
@@ -2107,6 +2258,23 @@ fn genVoicerNoteFuns(ctx Ctx, name String) String {
 	-- re-seed this voice's RNG
 	for (g : ctx _rngGraphs) {
 		if (g == bg) { s = s $ "\tarc4seedrand(p->voice_rgen%^[vi]);\n" fmt(g); }
+	}
+	-- Reset-rate loops: per-note setup for the newly allocated voice, run
+	-- after the zeroing above so reset-rate inst vars are recomputed for
+	-- this note (mirrors the C++ genNoteFuns emission).
+	var hasReset = false;
+	for (li : ctx.resetLoops) {
+		if (ctx _isVoiceGraph(_loopRootGraph(ctx, li))) { hasReset = true; }
+	}
+	if (hasReset) {
+		var `cgInResetMode Bool = true;
+		var `cgSingleVoice Bool = true;
+		var `cgVoiceCount Int = ctx _voicerMaxVoices(v);
+		var `cgVoiceGraph Int = bg;
+		var `cgVoiceChans Int = ctx _voicerChansForGraph(bg);
+		for (li : ctx.resetLoops) {
+			if (ctx _isVoiceGraph(_loopRootGraph(ctx, li))) { s = s $ genLoop(ctx, li); }
+		}
 	}
 	s = s $ "\treturn tzpl_errNone;\n}\n\n";
 	-- noteOff / allNotesOff
@@ -2198,8 +2366,11 @@ fn genUninitFun(ctx Ctx, name String) String {
 }
 
 fn genResetFun(ctx Ctx, name String) String {
+	-- Rate.reset is per-note: reset loops are emitted into _noteOn (for the
+	-- scheduled voice) and _init (initial values), never here. This whole-
+	-- synth entry point is unused by the engine and left empty. (The FIXME
+	-- comment matches the C++ generator verbatim.)
 	var s = "tzpl_SErr %^_reset(%^* p) {\n\t// FIXME genResetFun\n" fmt(name, name);
-	s = s $ genLoops(ctx, ctx.resetLoops);
 	s = s $ "\treturn tzpl_errNone;\n}\n\n";
 	s
 }
@@ -2365,6 +2536,87 @@ fn genSwapBufferFun(ctx Ctx, name String) String {
 	s
 }
 
+-- One resolver per bank lookup: maps the latched (pitch, velocity) through
+-- the bank's cell table to a buffer pointer + metadata. Called from the
+-- reset loops (noteOn/init) and from swapSampleBank. Mirrors
+-- genSampleBankResolvers byte-for-byte (synthc voicers are flat-only).
+fn genSampleBankResolvers(ctx Ctx, name String) String {
+	var s = "";
+	for (lu : ctx _bankLookupNodes) {
+		let bser = match (ctx.kind[lu]) { bankLookupK(bi): ctx.bankSerials[bi]; _: 0; };
+		let u = ctx.serial[lu];
+		if (ctx _isVoiceGraph(ctx.graphOf[lu])) {
+			s = s $ "static void %^_lu%^_resolve(%^* p, int v) {\n" fmt(name, u, name);
+			s = s $ "\ttzpl_SampleBank* bk = p->bank%^;\n" fmt(bser);
+			s = s $ "\tint idx = bk ? bk->map[p->voice_lu%^_p[v] * 128 + p->voice_lu%^_v[v]] : TZPL_SAMPLEBANK_UNMAPPED;\n" fmt(u, u);
+			s = s $ "\tif (idx == TZPL_SAMPLEBANK_UNMAPPED) {\n";
+			s = s $ "\t\tp->voice_lu%^_buf[v] = nullptr;\n" fmt(u);
+			s = s $ "\t\tp->voice_lu%^_rootKey[v] = 0.0f;\n" fmt(u);
+			s = s $ "\t\tp->voice_lu%^_sr[v] = 0.0;\n" fmt(u);
+			s = s $ "\t\tp->voice_lu%^_len[v] = 0.0;\n" fmt(u);
+			s = s $ "\t} else {\n";
+			s = s $ "\t\ttzpl_SampleBankEntry* e = &bk->samples[idx];\n";
+			s = s $ "\t\tp->voice_lu%^_buf[v] = e->buf;\n" fmt(u);
+			s = s $ "\t\tp->voice_lu%^_rootKey[v] = e->rootKey;\n" fmt(u);
+			s = s $ "\t\tp->voice_lu%^_sr[v] = e->sampleRate;\n" fmt(u);
+			s = s $ "\t\tp->voice_lu%^_len[v] = e->buf ? (f64)e->buf->length : 0.0;\n" fmt(u);
+			s = s $ "\t}\n";
+			s = s $ "}\n\n";
+		} else {
+			s = s $ "static void %^_lu%^_resolve(%^* p) {\n" fmt(name, u, name);
+			s = s $ "\ttzpl_SampleBank* bk = p->bank%^;\n" fmt(bser);
+			s = s $ "\tint idx = bk ? bk->map[p->lu%^_p * 128 + p->lu%^_v] : TZPL_SAMPLEBANK_UNMAPPED;\n" fmt(u, u);
+			s = s $ "\tif (idx == TZPL_SAMPLEBANK_UNMAPPED) {\n";
+			s = s $ "\t\tp->lu%^_buf = nullptr;\n" fmt(u);
+			s = s $ "\t\tp->lu%^_rootKey = 0.0f;\n" fmt(u);
+			s = s $ "\t\tp->lu%^_sr = 0.0;\n" fmt(u);
+			s = s $ "\t\tp->lu%^_len = 0.0;\n" fmt(u);
+			s = s $ "\t} else {\n";
+			s = s $ "\t\ttzpl_SampleBankEntry* e = &bk->samples[idx];\n";
+			s = s $ "\t\tp->lu%^_buf = e->buf;\n" fmt(u);
+			s = s $ "\t\tp->lu%^_rootKey = e->rootKey;\n" fmt(u);
+			s = s $ "\t\tp->lu%^_sr = e->sampleRate;\n" fmt(u);
+			s = s $ "\t\tp->lu%^_len = e->buf ? (f64)e->buf->length : 0.0;\n" fmt(u);
+			s = s $ "\t}\n";
+			s = s $ "}\n\n";
+		}
+	}
+	s
+}
+
+-- The per-def swap entry point plus its exported "swapSampleBank" symbol.
+-- After installing the new bank pointer it re-resolves every lookup on that
+-- bank so cached per-voice buffer pointers never dangle across a swap.
+fn genSwapSampleBankFun(ctx Ctx, name String) String {
+	if (ctx.bankSerials length == 0) { return ""; }
+	let lookups = ctx _bankLookupNodes;
+	var s = "tzpl_SampleBank* %^_swapSampleBank(%^* p, i64 bankID, tzpl_SampleBank* newBank) {\n" fmt(name, name);
+	s = s $ "\ttzpl_SampleBank* old = nullptr;\n\tswitch (bankID) {\n";
+	var bi = 0;
+	for (ser : ctx.bankSerials) {
+		s = s $ "\t\tcase %^:\n" fmt(ser);
+		s = s $ "\t\t\told = p->bank%^; p->bank%^ = newBank;\n" fmt(ser, ser);
+		for (lu : lookups) {
+			let lubi = match (ctx.kind[lu]) { bankLookupK(b): b; _: NONE; };
+			if (lubi == bi) {
+				if (ctx _isVoiceGraph(ctx.graphOf[lu])) {
+					let mv = ctx _voicerMaxForGraph(ctx.graphOf[lu]);
+					s = s $ "\t\t\tfor (int v = 0; v < %^; ++v) %^_lu%^_resolve(p, v);\n" fmt(mv, name, ctx.serial[lu]);
+				} else {
+					s = s $ "\t\t\t%^_lu%^_resolve(p);\n" fmt(name, ctx.serial[lu]);
+				}
+			}
+		}
+		s = s $ "\t\t\tbreak;\n";
+		bi = bi + 1;
+	}
+	s = s $ "\t}\n\treturn old;\n}\n\n";
+	s = s $ "extern \"C\" tzpl_SampleBank* swapSampleBank(tzpl_SynthData* p, int64_t bankID, tzpl_SampleBank* newBank) {\n";
+	s = s $ "\treturn %^_swapSampleBank((%^*)p, bankID, newBank);\n" fmt(name, name);
+	s = s $ "}\n\n";
+	s
+}
+
 fn _portLine(ctx Ctx, n NIdx, i Int, arr String, fallback String, sn Int) String {
 	let nm = match (ctx.kind[n]) {
 		inletK(name, _):  name length == 0 ? "%^%^" fmt(fallback, sn) : name;
@@ -2459,6 +2711,24 @@ fn genLoadBufferDefs(ctx Ctx) String {
 	s
 }
 
+-- Companion symbol to load(): describes the synth's sample bank slots
+-- (same additive pattern as loadBufferDefs). Matches the C++ emission
+-- byte-for-byte.
+fn genLoadSampleBankDefs(ctx Ctx) String {
+	if (ctx.bankSerials length == 0) { return ""; }
+	var s = "extern \"C\" tzpl_SampleBankDefList loadSampleBankDefs() {\n";
+	s = s $ "\ttzpl_SampleBankDefList list;\n";
+	s = s $ "\tlist.num_banks = %^;\n" fmt(ctx.bankSerials length);
+	s = s $ "\tlist.banks = (tzpl_SampleBankDef*)calloc(list.num_banks, sizeof(tzpl_SampleBankDef));\n";
+	var i = 0;
+	for (ser : ctx.bankSerials) {
+		s = s $ "\tlist.banks[%^] = {\"bank%^\", %^};\n" fmt(i, ser, ser);
+		i = i + 1;
+	}
+	s = s $ "\treturn list;\n}\n\n\n";
+	s
+}
+
 -- Companion symbol to load(): the synth's category tags. Optional in the ABI;
 -- emitted only when tags are present. Matches the C++ compiler's emission
 -- byte-for-byte.
@@ -2507,6 +2777,11 @@ fn genCpp(ctx Ctx, name String, simdWidth Int = 0) String {
 	var `cgVoiceChans Int = 1;        -- per-voice channel count (body root chans)
 	var `cgFlatChanShift Int = 0;     -- log2(perVoiceChans) for the current flat loop
 	var `cgFlatChanMask Int = 0;      -- perVoiceChans - 1 for the current flat loop
+	-- Reset-loop emission state (mirrors inResetMode / singleVoiceMode):
+	-- cgInResetMode makes NoteParam/Control roots read their live sources;
+	-- cgSingleVoice makes flat loops run for just the voice `vi` in scope.
+	var `cgInResetMode Bool = false;
+	var `cgSingleVoice Bool = false;
 
 	var s = "\n";
 	s = s $ "#include \"tzpl_plugin_abi.h\"\n";
@@ -2539,6 +2814,7 @@ fn genCpp(ctx Ctx, name String, simdWidth Int = 0) String {
 	s = s $ "} %^;\n\n" fmt(name);
 	s = s $ genAllocFun(ctx, name);
 	s = s $ genFreeFun(ctx, name);
+	s = s $ genSampleBankResolvers(ctx, name);
 	s = s $ genInitFun(ctx, name);
 	s = s $ genUninitFun(ctx, name);
 	s = s $ genResetFun(ctx, name);
@@ -2547,9 +2823,11 @@ fn genCpp(ctx Ctx, name String, simdWidth Int = 0) String {
 	s = s $ genTickFun(ctx, name);
 	s = s $ genVoicerNoteFuns(ctx, name);
 	s = s $ genSwapBufferFun(ctx, name);
+	s = s $ genSwapSampleBankFun(ctx, name);
 	s = s $ genFunPtrs(ctx, name);
 	s = s $ genLoad(ctx, name);
 	s = s $ genLoadBufferDefs(ctx);
+	s = s $ genLoadSampleBankDefs(ctx);
 	s = s $ genLoadTags(ctx);
 	s
 }

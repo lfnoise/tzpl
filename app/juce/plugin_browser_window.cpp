@@ -78,6 +78,7 @@ bool sameDefs(std::vector<engine::DefDesc> const& a,
             || a[i].outs.size() != b[i].outs.size()
             || a[i].controls.size() != b[i].controls.size()
             || a[i].buffers.size() != b[i].buffers.size()
+            || a[i].banks.size() != b[i].banks.size()
             || a[i].tags != b[i].tags) return false;
     }
     return true;
@@ -486,6 +487,12 @@ private:
                 for (auto const& b : d->buffers)
                     details_.rows.push_back({ String(b.name), typeText(b.type),
                         "id " + String(b.bufID), Details::kEntry });
+            }
+            if (!d->banks.empty()) {
+                details_.rows.push_back({ "Sample banks", {}, {}, Details::kHeading });
+                for (auto const& b : d->banks)
+                    details_.rows.push_back({ String(b.name), {},
+                        "id " + String(b.bankID), Details::kEntry });
             }
         } else if (availSelected) {
             details_.rows.push_back({ "not a loadable plugin", {}, {},

@@ -839,6 +839,199 @@ void test_voicer_sexpr_parse() {
     printf("  sexpr parse and codegen succeeded\n");
 }
 
+void test_reset_rate_voicer_codegen() {
+    printf("test_reset_rate_voicer_codegen\n");
+    using namespace synthdef;
+    PushSynth ps(new Synth("test_reset_voicer"));
+
+    // Voicer whose body scales a per-note random value (Rate.reset) by gate.
+    // No branching, so flat voice mode is used.
+    Graph* subgraph = new Graph(gSynth, gGraph);
+    S voiceBody;
+    {
+        PushGraph pg(subgraph);
+        S gate = addExpr(new NoteParam({0, 1, 0, 0}, NumType::f32, 1, "gate"));
+        S r = urand(1, resetSignalRate);
+        voiceBody = addExpr(new PhiNodeExpr(r * gate));
+    }
+    S voicer = addExpr(new VoicerExpr(8, voiceBody));
+    outlet(reduce(voicer, BinaryOp::Add, 1));
+
+    gSynth->graphAnalysis();
+    assert(!gSynth->resetLoops.empty());
+    string code = cppCodeGen(gSynth);
+
+    // _reset stays an empty stub: reset loops are per-note, not whole-synth.
+    assert(code.find("// FIXME genResetFun") != string::npos);
+
+    // _noteOn evaluates the reset loop for the single new voice.
+    assert(code.find("{ int i = vi;") != string::npos);
+
+    // The per-note random draws from the per-voice RNG (SoA flat mode).
+    assert(code.find("urandf(p->voice_rgen") != string::npos);
+
+    // The reset loop is emitted twice: in _init (all voices, defined values
+    // before the first note) and in _noteOn (the new voice only).
+    size_t n = 0;
+    for (size_t pos = 0; (pos = code.find("] Reset 1\n", pos)) != string::npos; ++pos) ++n;
+    assert(n == 2);
+
+    printf("  reset loop emitted in _init (all voices) and _noteOn (voice vi)\n");
+}
+
+void test_reset_rate_voicer_aos_codegen() {
+    printf("test_reset_rate_voicer_aos_codegen\n");
+    using namespace synthdef;
+    PushSynth ps(new Synth("test_reset_voicer_aos"));
+
+    // Branching voice body (AoS per-voice loop mode) with a per-note random.
+    Graph* voicerSubgraph = new Graph(gSynth, gGraph);
+    S voiceBody;
+    {
+        PushGraph pg(voicerSubgraph);
+        S freq = addExpr(new NoteParam({20, 20000, 440, 0}, NumType::f32, 1, "freq"));
+        S gate = addExpr(new NoteParam({0, 1, 0, 0}, NumType::f32, 1, "gate"));
+        S r = urand(1, resetSignalRate);
+
+        S cond = gate > S(0.5f);
+        Graph* thenGraph = new Graph(gSynth, gGraph);
+        S thenBody;
+        {
+            PushGraph pg2(thenGraph);
+            thenBody = addExpr(new PhiNodeExpr(freq * r));
+        }
+        Graph* elseGraph = new Graph(gSynth, gGraph);
+        S elseBody;
+        {
+            PushGraph pg3(elseGraph);
+            elseBody = addExpr(new PhiNodeExpr(S(0.0f)));
+        }
+        S ifExpr = addExpr(new IfElseExpr(cond, thenBody, elseBody));
+        voiceBody = addExpr(new PhiNodeExpr(ifExpr));
+    }
+    S voicer = addExpr(new VoicerExpr(8, voiceBody));
+    outlet(reduce(voicer, BinaryOp::Add, 1));
+
+    gSynth->graphAnalysis();
+    assert(!gSynth->resetLoops.empty());
+    string code = cppCodeGen(gSynth);
+
+    // AoS mode: _noteOn binds the new voice's row/state and evaluates the
+    // reset loop through them.
+    assert(code.find("f32* vparams = p->voicer.getRow(vi);") != string::npos);
+    assert(code.find("auto& vs = p->voice_state[vi];") != string::npos);
+    assert(code.find("urandf(vs.rgen") != string::npos);
+
+    printf("  AoS reset loop bound to voice vi in _noteOn\n");
+}
+
+void test_bank_lookup_voicer_codegen() {
+    printf("test_bank_lookup_voicer_codegen\n");
+    using namespace synthdef;
+    PushSynth ps(new Synth("test_bank_voicer"));
+
+    // Voicer sampler: (pitch, vel) note params drive a bank lookup; the
+    // resolved sample is vread at a rate scaled by rootKey/sampleRate.
+    Bk bank;
+    Graph* subgraph = new Graph(gSynth, gGraph);
+    S voiceBody;
+    {
+        PushGraph pg(subgraph);
+        S pitch = addExpr(new NoteParam({0, 127, 60, 0}, NumType::f32, 1, "pitch"));
+        S vel = addExpr(new NoteParam({0, 127, 100, 0}, NumType::f32, 1, "vel"));
+        S gate = addExpr(new NoteParam({0, 1, 0, 0}, NumType::f32, 1, "gate"));
+        BS h = bank.lookup(pitch, vel);
+        S rate = pow(S(2.0f), (pitch - h.rootKey()) * S(1.0f/12.0f));
+        S idx = cast_f64(rate) * h.sampleRate() * sd() * h.length();
+        S sig = cast_f32(h.vread(idx, interpCubic)) * gate;
+        voiceBody = addExpr(new PhiNodeExpr(sig));
+    }
+    S voicer = addExpr(new VoicerExpr(8, voiceBody));
+    outlet(reduce(voicer, BinaryOp::Add, 1));
+
+    gSynth->graphAnalysis();
+    assert(!gSynth->resetLoops.empty());
+    string code = cppCodeGen(gSynth);
+
+    // Per-voice SoA lookup slots + resolver
+    assert(code.find("voice_lu") != string::npos);
+    assert(code.find("_resolve(p, ") != string::npos);
+    // The lookup latches clamped pitch/vel in _noteOn for the new voice
+    assert(code.find("BankLookup") != string::npos);
+    assert(code.find("{ int i = vi;") != string::npos);
+    // Reads go through the per-voice resolved buffer pointer
+    assert(code.find("_buf[") != string::npos);
+    assert(code.find("tzpl_buf_cubic") != string::npos);
+    // Swap + defs symbols
+    assert(code.find("extern \"C\" tzpl_SampleBank* swapSampleBank") != string::npos);
+    assert(code.find("extern \"C\" tzpl_SampleBankDefList loadSampleBankDefs") != string::npos);
+    // Swap re-resolves all voices
+    assert(code.find("for (int v = 0; v < 8; ++v) test_bank_voicer_lu") != string::npos);
+
+    printf("  bank lookup: per-voice slots, resolver, swap, defs\n");
+}
+
+void test_bank_lookup_input_restriction() {
+    printf("test_bank_lookup_input_restriction\n");
+    using namespace synthdef;
+
+    // Audio-rate computed lookup inputs are rejected: they cannot be
+    // evaluated at note-on.
+    std::string sexprText = R"(
+        ((0 NoteParam "pitch" 1 (ControlSpec 0.0 127.0 60.0 0))
+         (1 Constant 1 12 (12.0))
+         (2 BinaryOp add (0 1))
+         (3 BankLookup 0 (2 0))
+         (4 BankVarRead "cubic" 1 0 (3 0))
+         (5 Outlet "out" 4))
+    )";
+    auto result = synthFromSExprText(sexprText, "test_bank_badinput");
+    assert(!result.has_value());
+    if (result.error().find("note-on") == std::string::npos) {
+        printf("  unexpected error: %s\n", result.error().c_str());
+    }
+    assert(result.error().find("note-on") != std::string::npos);
+
+    printf("  computed audio-rate lookup input rejected\n");
+}
+
+void test_bank_sexpr_parse() {
+    printf("test_bank_sexpr_parse\n");
+    using namespace synthdef;
+
+    // Non-voicer bank: constant pitch/vel lookup, vread + all accessors.
+    std::string sexprText = R"(
+        ((0 Constant 1 12 (60.0))
+         (1 Constant 1 12 (100.0))
+         (2 BankLookup 0 (0 1))
+         (3 URand 4 1)
+         (4 BankVarRead "cubic" 1 0 (2 3))
+         (5 BankRootKey (2))
+         (6 BankSampleRate (2))
+         (7 BankLength (2))
+         (8 BinaryOp mul (4 7))
+         (9 Outlet "out" 8))
+    )";
+    auto result = synthFromSExprText(sexprText, "test_bank_sexpr");
+    if (!result.has_value()) {
+        printf("  parse error: %s\n", result.error().c_str());
+    }
+    assert(result.has_value());
+    Synth* synth = result.value();
+    {
+        PushSynth ps(synth);
+        synth->graphAnalysis();
+        string code = cppCodeGen(synth);
+        // Non-voicer: scalar slots, resolver without voice arg
+        assert(code.find("p->lu") != string::npos);
+        assert(code.find("_resolve(p)") != string::npos);
+        assert(code.find("extern \"C\" tzpl_SampleBank* swapSampleBank") != string::npos);
+        assert(code.find("extern \"C\" tzpl_SampleBankDefList loadSampleBankDefs") != string::npos);
+    }
+
+    printf("  sexpr parse and non-voicer codegen succeeded\n");
+}
+
 void test_switch_codegen() {
     printf("test_switch_codegen\n");
     using namespace synthdef;
@@ -1549,6 +1742,11 @@ void all_tests() {
     test_buf_swap_buffer();
     test_buf_sexpr_parse();
 
+    // Sample bank tests
+    test_bank_lookup_voicer_codegen();
+    test_bank_lookup_input_restriction();
+    test_bank_sexpr_parse();
+
     // Control flow codegen tests
     test_switch_codegen();
     test_for_loop_codegen();
@@ -1568,6 +1766,8 @@ void all_tests() {
     test_voicer_codegen();
     test_branching_voice_stays_looped();
     test_voicer_sexpr_parse();
+    test_reset_rate_voicer_codegen();
+    test_reset_rate_voicer_aos_codegen();
 
     // Spectral chain tests
     test_spectral_chain_codegen();
@@ -1592,6 +1792,45 @@ void all_tests() {
         // Stereo oscillator using phasor (has delay) -- tests SIMD delay codegen
         S sig = fsinosc(vec(440, 550)) * S(0.1f);
         outlet(sig);
+    });
+
+    test("bank_voicer", 2, [](){
+        // Voicer sampler through a bank lookup: verifies the generated
+        // slots, resolvers, reset loops, swap and defs symbols compile and
+        // link. Renders silence (no bank loaded; reads are null-guarded).
+        Bk bank;
+        Graph* subgraph = new Graph(gSynth, gGraph);
+        S voiceBody;
+        {
+            PushGraph pg(subgraph);
+            S pitch = addExpr(new NoteParam({0, 127, 60, 0}, NumType::f32, 1, "pitch"));
+            S vel = addExpr(new NoteParam({0, 127, 100, 0}, NumType::f32, 1, "vel"));
+            S gate = addExpr(new NoteParam({0, 1, 0, 0}, NumType::f32, 1, "gate"));
+            BS h = bank.lookup(pitch, vel);
+            S rate = pow(S(2.0f), (pitch - h.rootKey()) * S(1.0f/12.0f));
+            S idx = cast_f64(rate) * h.sampleRate() * sd() * h.length();
+            S sig = cast_f32(h.vread(idx, interpCubic)) * gate;
+            voiceBody = addExpr(new PhiNodeExpr(sig));
+        }
+        S voicer = addExpr(new VoicerExpr(8, voiceBody));
+        outlet(reduce(voicer, BinaryOp::Add, 1));
+    });
+
+    test("reset_rate_voicer", 2, [](){
+        // Voicer with a per-note random detune (Rate.reset): verifies the
+        // reset-loop emission in _init and _noteOn compiles and links.
+        Graph* subgraph = new Graph(gSynth, gGraph);
+        S voiceBody;
+        {
+            PushGraph pg(subgraph);
+            S freq = addExpr(new NoteParam({20, 20000, 440, 0}, NumType::f32, 1, "freq"));
+            S gate = addExpr(new NoteParam({0, 1, 0, 0}, NumType::f32, 1, "gate"));
+            S r = urand(1, resetSignalRate);
+            S sig = fsinosc(freq * (S(0.99f) + r * S(0.02f))) * gate * S(0.1f);
+            voiceBody = addExpr(new PhiNodeExpr(sig));
+        }
+        S voicer = addExpr(new VoicerExpr(8, voiceBody));
+        outlet(reduce(voicer, BinaryOp::Add, 1));
     });
 
     // Spectral chain compilation tests (compiles and links the generated plugin)

@@ -264,6 +264,11 @@ string dylibPath(string const& buildDir, string const& synthName) {
 }
 
 int compileAndLink(string const& buildDir, string const& synthName) {
+    // Refresh the build dir's header copies (update_existing) so generated
+    // code never compiles against a stale plugin ABI, whichever entry point
+    // (CLI, --test, bridge) got here.
+    ensureBuildDirs(buildDir);
+
     // Bump revision so this compilation produces a unique dylib path.
     // Old dylibs stay on disk (and in memory via dlopen) so that
     // nodes still running the previous version keep valid function pointers.
@@ -339,14 +344,18 @@ optional<LoadedDef> loadDef(std::string path) {
 
     LoadedDef loaded{def, handle};
 
-    // Optional symbols: plugins without sample buffers / tags (or compiled
-    // before the symbols existed) don't export them.
+    // Optional symbols: plugins without sample buffers / tags / sample banks
+    // (or compiled before the symbols existed) don't export them.
     if (void* bufPtr = dlsym(handle, "loadBufferDefs")) {
         loaded.bufferDefs = (*(tzpl_LoadBufferDefsFun)bufPtr)();
     }
     if (void* tagPtr = dlsym(handle, "loadTags")) {
         loaded.tagList = (*(tzpl_LoadTagsFun)tagPtr)();
     }
+    if (void* bankPtr = dlsym(handle, "loadSampleBankDefs")) {
+        loaded.bankDefs = (*(tzpl_LoadSampleBankDefsFun)bankPtr)();
+    }
+    loaded.swapSampleBank = (tzpl_SwapSampleBankFun)dlsym(handle, "swapSampleBank");
 
     return loaded;
 }

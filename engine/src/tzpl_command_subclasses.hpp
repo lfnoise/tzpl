@@ -693,6 +693,37 @@ struct LoadBufferCmd : Command {
     }
 };
 
+// Installs a fully built sample bank (see engine/src/tzpl_sample_bank.hpp)
+// in slot bankID of a node. The bank was built and validated at bundle
+// record time; doRT is a pointer swap via the plugin's "swapSampleBank"
+// symbol, which also re-resolves every cached per-voice buffer pointer, so
+// the swap is safe while notes sound. The old bank is freed NRT.
+struct ReplaceSampleBankCmd : Command {
+    i64 nodeID_;
+    i64 bankID_;
+    tzpl_SampleBank* newBank_;
+    tzpl_SampleBank* oldBank_ = nullptr;
+
+    ReplaceSampleBankCmd(i64 nodeID, i64 bankID, tzpl_SampleBank* bank)
+        : nodeID_(nodeID), bankID_(bankID), newBank_(bank) {}
+
+    ~ReplaceSampleBankCmd() override { if (stage_ == 0) tzpl_freeSampleBank(newBank_); }
+
+    void doRT(Silo* s) override {
+        Node* node = s->rt_getNode(nodeID_);
+        if (!node || !node->def || !node->def->info_.swapSampleBank) {
+            err_ = tzpl_errNodeNotFound;
+            return;
+        }
+        oldBank_ = node->def->info_.swapSampleBank(node->synth, bankID_, newBank_);
+    }
+
+    bool doNRT(Silo* s) override {
+        tzpl_freeSampleBank(oldBank_);
+        return true;
+    }
+};
+
 //=============================================================================================
 #pragma mark TEMPO CLOCK COMMANDS
 

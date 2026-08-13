@@ -95,6 +95,12 @@ fn calcShapeOf(ctx Ctx, n NIdx) Int {
 		bufVarReadK(_, _, readChans, _): readChans;
 		bufWriteK(_, _, _):  ctx.chans[ins[0]];   -- BufWrite::calcShape: in0().chans
 		bufLengthK(_):       1;
+		bankLookupK(_):      1;
+		bankFixReadK(_, readChans, _): readChans;
+		bankVarReadK(_, readChans, _): readChans;
+		bankRootKeyK:        1;
+		bankSampleRateK:     1;
+		bankLengthK:         1;
 		-- Control flow: a control-flow node broadcasts over its branch/body phis
 		-- (the test/selector/count input is scalar and doesn't contribute); a
 		-- phi broadcasts its (current, target, input) channel counts.

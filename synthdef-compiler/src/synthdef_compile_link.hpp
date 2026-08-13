@@ -55,6 +55,10 @@ struct LoadedDef {
     tzpl_BufferDefList bufferDefs{0, nullptr};  // empty if the plugin has no
                                                 // "loadBufferDefs" symbol
     tzpl_TagList tagList{0, nullptr};           // empty if no "loadTags" symbol
+    tzpl_SampleBankDefList bankDefs{0, nullptr};  // empty if no
+                                                  // "loadSampleBankDefs" symbol
+    tzpl_SwapSampleBankFun swapSampleBank = nullptr;  // null if no
+                                                      // "swapSampleBank" symbol
 };
 
 // Load a compiled .dylib and return the tzpl_SynthDef and dlopen handle.

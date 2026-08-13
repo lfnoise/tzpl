@@ -79,6 +79,12 @@ struct ExprVisitor {
     virtual void visit(BufVarRead* e) = 0;
     virtual void visit(BufWrite* e) = 0;
     virtual void visit(BufLength* e) = 0;
+    virtual void visit(BankLookup* e) = 0;
+    virtual void visit(BankFixRead* e) = 0;
+    virtual void visit(BankVarRead* e) = 0;
+    virtual void visit(BankRootKey* e) = 0;
+    virtual void visit(BankSampleRate* e) = 0;
+    virtual void visit(BankLength* e) = 0;
     virtual void visit(DebugExpr* e) = 0;
 };
 

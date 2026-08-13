@@ -174,6 +174,24 @@ Node::~Node() {
     free(synth->outlets);
     free(synth->controls);
 
+    // Swap out and free any installed sample buffers and banks. They are
+    // owned by whoever last swapped them in; the generated `_free` does not
+    // touch them, so without this a node freed with content loaded leaks it.
+    // Runs on the dead-node NRT thread -- freeing here is safe.
+    if (def) {
+        NodeDefInfo const& info = def->info_;
+        if (funs.swapBuffer) {
+            for (int i = 0; i < info.num_buffers; ++i) {
+                tzpl_freeBuffer(funs.swapBuffer(synth, info.buffers[i].bufID, nullptr));
+            }
+        }
+        if (info.swapSampleBank) {
+            for (int i = 0; i < info.num_banks; ++i) {
+                tzpl_freeSampleBank(info.swapSampleBank(synth, info.banks[i].bankID, nullptr));
+            }
+        }
+    }
+
     funs.free(synth);
 
     // Release the def reference. May unload a superseded dylib.

@@ -48,6 +48,19 @@ SampleBuf* SExprGraphBuilder::getOrCreateSampleBuf(int64_t bufId) {
     return buf.get();
 }
 
+SampleBank* SExprGraphBuilder::getOrCreateSampleBank(int64_t bankId) {
+    auto it = sampleBankMap.find(bankId);
+    if (it != sampleBankMap.end()) {
+        return it->second.get();
+    }
+    Bk bank = new SampleBank();
+    bank->graph = gGraph;
+    sampleBankMap.emplace(bankId, bank);
+    gGraph->sampleBanks.insert(bank);
+    synth->sampleBanks.insert(bank);
+    return bank.get();
+}
+
 DelayBuf* SExprGraphBuilder::getOrCreateDelayBuf(int64_t delayId) {
     auto it = delayMap.find(delayId);
     if (it != delayMap.end()) {
@@ -825,6 +838,110 @@ std::expected<S, std::string> SExprGraphBuilder::parseBufLength(sexpr::ItemVec c
     return expr;
 }
 
+std::expected<S, std::string> SExprGraphBuilder::parseBankLookup(sexpr::ItemVec const& list) {
+    // Format: (id BankLookup bankID (pitch_id vel_id))
+    if (list.size() < 4) return std::unexpected("BankLookup requires 4 elements");
+    if (!list[0].is<int64_t>()) return std::unexpected("ID must be integer");
+    int64_t id = list[0].get<int64_t>();
+    if (!list[2].is<int64_t>()) return std::unexpected("Bank ID must be integer");
+    SampleBank* bank = getOrCreateSampleBank(list[2].get<int64_t>());
+    if (!list[3].is<sexpr::ItemVec>()) return std::unexpected("Inputs must be a list");
+    auto inputsResult = resolveInputs(list[3].get<sexpr::ItemVec>());
+    if (!inputsResult) return std::unexpected(inputsResult.error());
+    if (inputsResult->size() != 2)
+        return std::unexpected("BankLookup requires exactly 2 inputs (pitch, velocity)");
+    // The inputs are latched at note-on: they must be readable at that
+    // moment (see bankLookupInputOK).
+    for (S in : *inputsResult) {
+        if (!bankLookupInputOK(in)) {
+            return std::unexpected(
+                "bank lookup pitch/velocity must be a note param, control, "
+                "constant, or init-rate value (computable at note-on)");
+        }
+    }
+    S expr = addExpr(new BankLookup(bank, (*inputsResult)[0], (*inputsResult)[1]));
+    exprMap[id] = expr;
+    return expr;
+}
+
+std::expected<S, std::string> SExprGraphBuilder::parseBankFixRead(sexpr::ItemVec const& list) {
+    // Format: (id BankFixRead index readChans startChan (lookup_id))
+    if (list.size() < 6) return std::unexpected("BankFixRead requires 6 elements");
+    if (!list[0].is<int64_t>()) return std::unexpected("ID must be integer");
+    int64_t id = list[0].get<int64_t>();
+    if (!list[2].is<int64_t>()) return std::unexpected("Index must be integer");
+    int64_t index = list[2].get<int64_t>();
+    if (!list[3].is<int64_t>()) return std::unexpected("readChans must be integer");
+    int64_t readChans = list[3].get<int64_t>();
+    if (!list[4].is<int64_t>()) return std::unexpected("startChan must be integer");
+    int64_t startChan = list[4].get<int64_t>();
+    if (!list[5].is<sexpr::ItemVec>()) return std::unexpected("Inputs must be a list");
+    auto inputsResult = resolveInputs(list[5].get<sexpr::ItemVec>());
+    if (!inputsResult) return std::unexpected(inputsResult.error());
+    if (inputsResult->size() != 1) return std::unexpected("BankFixRead requires exactly 1 input (lookup)");
+    auto lu = (*inputsResult)[0].as<BankLookup>();
+    if (!lu) return std::unexpected("BankFixRead input must be a BankLookup");
+    S expr = addExpr(new BankFixRead(lu, index, readChans, startChan));
+    exprMap[id] = expr;
+    return expr;
+}
+
+std::expected<S, std::string> SExprGraphBuilder::parseBankVarRead(sexpr::ItemVec const& list) {
+    // Format: (id BankVarRead interp readChans startChan (lookup_id index_id))
+    if (list.size() < 6) return std::unexpected("BankVarRead requires 6 elements");
+    if (!list[0].is<int64_t>()) return std::unexpected("ID must be integer");
+    int64_t id = list[0].get<int64_t>();
+    if (!list[2].is<std::string>() && !list[2].is<sexpr::Symbol>())
+        return std::unexpected("Interpolation must be string or symbol");
+    std::string interpName = list[2].is<std::string>()
+        ? list[2].get<std::string>()
+        : list[2].get<sexpr::Symbol>().name;
+    auto interpResult = interpFromString(interpName);
+    if (!interpResult) return std::unexpected(interpResult.error());
+    if (!list[3].is<int64_t>()) return std::unexpected("readChans must be integer");
+    int64_t readChans = list[3].get<int64_t>();
+    if (!list[4].is<int64_t>()) return std::unexpected("startChan must be integer");
+    int64_t startChan = list[4].get<int64_t>();
+    if (!list[5].is<sexpr::ItemVec>()) return std::unexpected("Inputs must be a list");
+    auto inputsResult = resolveInputs(list[5].get<sexpr::ItemVec>());
+    if (!inputsResult) return std::unexpected(inputsResult.error());
+    if (inputsResult->size() != 2) return std::unexpected("BankVarRead requires exactly 2 inputs (lookup, index)");
+    auto lu = (*inputsResult)[0].as<BankLookup>();
+    if (!lu) return std::unexpected("BankVarRead first input must be a BankLookup");
+    S expr = addExpr(new BankVarRead(lu, (*inputsResult)[1], *interpResult, readChans, startChan));
+    exprMap[id] = expr;
+    return expr;
+}
+
+// Shared shape of the three metadata accessors: (id <Type> (lookup_id))
+template <class NodeT>
+static std::expected<S, std::string> parseBankAccessor(
+    SExprGraphBuilder& b, sexpr::ItemVec const& list, char const* what) {
+    if (list.size() < 3) return std::unexpected(std::string(what) + " requires 3 elements");
+    if (!list[0].is<int64_t>()) return std::unexpected("ID must be integer");
+    int64_t id = list[0].get<int64_t>();
+    if (!list[2].is<sexpr::ItemVec>()) return std::unexpected("Inputs must be a list");
+    auto inputsResult = b.resolveInputs(list[2].get<sexpr::ItemVec>());
+    if (!inputsResult) return std::unexpected(inputsResult.error());
+    if (inputsResult->size() != 1)
+        return std::unexpected(std::string(what) + " requires exactly 1 input (lookup)");
+    auto lu = (*inputsResult)[0].as<BankLookup>();
+    if (!lu) return std::unexpected(std::string(what) + " input must be a BankLookup");
+    S expr = addExpr(new NodeT(lu));
+    b.exprMap[id] = expr;
+    return expr;
+}
+
+std::expected<S, std::string> SExprGraphBuilder::parseBankRootKey(sexpr::ItemVec const& list) {
+    return parseBankAccessor<BankRootKey>(*this, list, "BankRootKey");
+}
+std::expected<S, std::string> SExprGraphBuilder::parseBankSampleRate(sexpr::ItemVec const& list) {
+    return parseBankAccessor<BankSampleRate>(*this, list, "BankSampleRate");
+}
+std::expected<S, std::string> SExprGraphBuilder::parseBankLength(sexpr::ItemVec const& list) {
+    return parseBankAccessor<BankLength>(*this, list, "BankLength");
+}
+
 // Control flow - these need special handling for subgraphs
 std::expected<S, std::string> SExprGraphBuilder::parseSelectExpr(sexpr::ItemVec const& list) {
     // Format: (id SelectExpr (input_ids))
@@ -1212,6 +1329,12 @@ std::expected<S, std::string> SExprGraphBuilder::parseExpr(sexpr::Item const& it
     else if (type == "BufVarRead") return parseBufVarRead(list);
     else if (type == "BufWrite") return parseBufWrite(list);
     else if (type == "BufLength") return parseBufLength(list);
+    else if (type == "BankLookup") return parseBankLookup(list);
+    else if (type == "BankFixRead") return parseBankFixRead(list);
+    else if (type == "BankVarRead") return parseBankVarRead(list);
+    else if (type == "BankRootKey") return parseBankRootKey(list);
+    else if (type == "BankSampleRate") return parseBankSampleRate(list);
+    else if (type == "BankLength") return parseBankLength(list);
     else if (type == "SelectExpr") return parseSelectExpr(list);
     else if (type == "IfExpr") return parseIfExpr(list);
     else if (type == "SwitchExpr") return parseSwitchExpr(list);

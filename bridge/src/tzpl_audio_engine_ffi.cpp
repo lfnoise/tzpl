@@ -30,6 +30,7 @@
 #include "value.hpp"
 #include "tzpl_client_interface.hpp"
 #include "tzpl_engine.hpp"
+#include "tzpl_sample_bank.hpp"
 #include "tzpl_vm_commands.hpp"
 #include "nrt_vm.hpp"
 #include "module_compiler.hpp"
@@ -547,6 +548,49 @@ static void ffi_fillBuffer(ts::VM& vm, u16 dst, u16, u16 argBase) {
         }
     }
     returnErr(vm, dst, err, __func__);
+}
+
+// fn loadSampleBank(nodeID: Int, bankID: Int, paths: Array[String],
+//                   loKey: Array[Int], hiKey: Array[Int],
+//                   loVel: Array[Int], hiVel: Array[Int],
+//                   rootKey: Array[Int]) -> Int
+// Loads a pitch/velocity-mapped sample bank into a node's bank slot
+// (bundled command). The parallel arrays describe one zone per element;
+// rootKey -1 means "default to that zone's loKey". Files load and zones
+// validate at record time on the calling thread, so a bad spec or missing
+// file returns tzpl_errBadSampleBank synchronously; the RT-thread swap is a
+// pointer store and is safe while notes sound.
+static void ffi_loadSampleBank(ts::VM& vm, u16 dst, u16, u16 argBase) {
+    auto nodeID = static_cast<engine::i64>(vm.reg(argBase).i);
+    auto bankID = static_cast<engine::i64>(vm.reg(argBase + 1).i);
+    auto* paths = vm.reg(argBase + 2).o;
+    auto* loKey = vm.reg(argBase + 3).o;
+    auto* hiKey = vm.reg(argBase + 4).o;
+    auto* loVel = vm.reg(argBase + 5).o;
+    auto* hiVel = vm.reg(argBase + 6).o;
+    auto* rootKey = vm.reg(argBase + 7).o;
+
+    size_t n = ts::arraySize(paths);
+    if (n == 0 || ts::arraySize(loKey) != n || ts::arraySize(hiKey) != n
+        || ts::arraySize(loVel) != n || ts::arraySize(hiVel) != n
+        || ts::arraySize(rootKey) != n) {
+        returnErr(vm, dst, tzpl_errBadSampleBank, __func__);
+        return;
+    }
+
+    std::vector<engine::SampleBankZoneSpec> zones(n);
+    for (size_t i = 0; i < n; ++i) {
+        ts::Obj* pathObj = ts::arrayGetObj(paths, i);
+        if (!pathObj) { returnErr(vm, dst, tzpl_errBadSampleBank, __func__); return; }
+        zones[i].path = ts::stringData(pathObj);
+        zones[i].loKey = static_cast<int>(ts::arrayGetInt(loKey, i));
+        zones[i].hiKey = static_cast<int>(ts::arrayGetInt(hiKey, i));
+        zones[i].loVel = static_cast<int>(ts::arrayGetInt(loVel, i));
+        zones[i].hiVel = static_cast<int>(ts::arrayGetInt(hiVel, i));
+        zones[i].rootKey = static_cast<int>(ts::arrayGetInt(rootKey, i));
+    }
+
+    returnErr(vm, dst, engine::loadSampleBank(nodeID, bankID, zones), __func__);
 }
 
 // ---------------------------------------------------------------------------
@@ -1712,6 +1756,12 @@ void registerAudioEngineFFI(ts::Compiler& compiler) {
     reg("resizeBuffer",     Int, {Int, Int, Int, Int},    ffi_resizeBuffer, true);
     reg("loadBuffer",       Int, {Int, Int, String},      ffi_loadBuffer);
     reg("fillBuffer",       Int, {Int, Int, Int, FloatArray}, ffi_fillBuffer);
+    {
+        ts::Type* PathArray = reinterpret_cast<ts::Type*>(compiler.arrayType(String));
+        reg("loadSampleBank", Int,
+            {Int, Int, PathArray, IntArray, IntArray, IntArray, IntArray, IntArray},
+            ffi_loadSampleBank);
+    }
 
     // Connections (rtSafe)
     reg("connect",          Int, {Int, Int, Int, Int},             ffi_connect,          true);

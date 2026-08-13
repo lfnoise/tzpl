@@ -27,6 +27,7 @@
 #include "tzpl_audio_backend_rtaudio.hpp"
 #include "tzpl_hash.hpp"
 #include "tzpl_command_subclasses.hpp"
+#include "tzpl_sample_bank.hpp"
 #include <algorithm>
 #include <cstring>
 #include <map>
@@ -181,17 +182,20 @@ static bool validPluginArray(int count, void const* base, char const* what,
     return true;
 }
 
-// Every count/array pair a tzpl_SynthDef (plus its optional buffer and tag
-// lists) exposes. Checked up front so no walk can run off a null base.
+// Every count/array pair a tzpl_SynthDef (plus its optional buffer, tag and
+// sample bank lists) exposes. Checked up front so no walk can run off a null
+// base.
 static bool validSynthDefArrays(tzpl_SynthDef const& def,
                                 tzpl_BufferDefList const* bufs,
-                                tzpl_TagList const* tags) {
+                                tzpl_TagList const* tags,
+                                tzpl_SampleBankDefList const* banks = nullptr) {
     char const* n = def.name;
     return validPluginArray(def.num_ins, def.ins, "inputs", n)
         && validPluginArray(def.num_outs, def.outs, "outputs", n)
         && validPluginArray(def.num_controls, def.controls, "controls", n)
         && (!bufs || validPluginArray(bufs->num_buffers, bufs->buffers, "buffers", n))
-        && (!tags || validPluginArray(tags->num_tags, tags->tags, "tags", n));
+        && (!tags || validPluginArray(tags->num_tags, tags->tags, "tags", n))
+        && (!banks || validPluginArray(banks->num_banks, banks->banks, "sample banks", n));
 }
 
 bool loadOneDef(Engine* e, const char* path) {
@@ -220,8 +224,8 @@ bool loadOneDef(Engine* e, const char* path) {
 
     tzpl_SynthDef def = (*(tzpl_LoadSynthDefFun)ptr)();
 
-    // Optional symbols: absent for plugins without sample buffers / tags (or
-    // built before the symbols existed).
+    // Optional symbols: absent for plugins without sample buffers / tags /
+    // sample banks (or built before the symbols existed).
     tzpl_BufferDefList bufs{0, nullptr};
     if (void* bufPtr = dlsym(handle, "loadBufferDefs")) {
         bufs = (*(tzpl_LoadBufferDefsFun)bufPtr)();
@@ -230,18 +234,23 @@ bool loadOneDef(Engine* e, const char* path) {
     if (void* tagPtr = dlsym(handle, "loadTags")) {
         tags = (*(tzpl_LoadTagsFun)tagPtr)();
     }
+    tzpl_SampleBankDefList banks{0, nullptr};
+    if (void* bankPtr = dlsym(handle, "loadSampleBankDefs")) {
+        banks = (*(tzpl_LoadSampleBankDefsFun)bankPtr)();
+    }
+    auto swapBank = (tzpl_SwapSampleBankFun)dlsym(handle, "swapSampleBank");
 
     // Refuse a def whose counts and arrays disagree rather than registering
     // bogus pointers with the engine -- addSynthDef reinterpret_casts ins/outs
     // straight into NodeDefInfo, so a bad one would fault on the RT thread
     // long after this call.
-    if (!validSynthDefArrays(def, &bufs, &tags)) {
+    if (!validSynthDefArrays(def, &bufs, &tags, &banks)) {
         fprintf(stderr, "*** ERROR: refusing malformed plugin '%s'\n", path);
         dlclose(handle);
         return false;
     }
 
-    addSynthDef(e, def, handle, &bufs, &tags);
+    addSynthDef(e, def, handle, &bufs, &tags, &banks, swapBank);
     return true;
 }
 
@@ -550,7 +559,9 @@ NodeDef* getNodeDef(Engine* e, const char* name) {
 }
 
 void addSynthDef(Engine* e, tzpl_SynthDef const& def, void* dlHandle,
-                 tzpl_BufferDefList const* bufs, tzpl_TagList const* tags) {
+                 tzpl_BufferDefList const* bufs, tzpl_TagList const* tags,
+                 tzpl_SampleBankDefList const* banks,
+                 tzpl_SwapSampleBankFun swapSampleBank) {
     // Optional shared-input symbol: repoint the plugin's all-zero fallback at
     // the process-global table so its graph reads live values. This is the
     // one choke point every plugin handle passes through (loadOneDef and the
@@ -601,6 +612,13 @@ void addSynthDef(Engine* e, tzpl_SynthDef const& def, void* dlHandle,
         info.tags = tags->tags;
     }
 
+    // tzpl_SampleBankDef and SampleBankInfo have identical layout.
+    if (banks && banks->num_banks > 0) {
+        info.num_banks = banks->num_banks;
+        info.banks = reinterpret_cast<SampleBankInfo*>(banks->banks);
+    }
+    info.swapSampleBank = swapSampleBank;
+
     addNodeDef(e, info, dlHandle);
     // Def registration changes the port/control metadata graph pollers join
     // by name (hot-reload), so force them to re-snapshot.
@@ -645,6 +663,7 @@ static void copyDefDesc(NodeDef const* def, DefDesc& out) {
     out.outs.clear();
     out.controls.clear();
     out.buffers.clear();
+    out.banks.clear();
     for (int i = 0; i < info.num_ins; ++i) {
         PortInfo const& p = info.ins[i];
         out.ins.push_back({p.name ? p.name : "", p.type});
@@ -660,6 +679,10 @@ static void copyDefDesc(NodeDef const* def, DefDesc& out) {
     for (int i = 0; i < info.num_buffers; ++i) {
         BufferInfo const& b = info.buffers[i];
         out.buffers.push_back({b.name ? b.name : "", b.type, b.bufID});
+    }
+    for (int i = 0; i < info.num_banks; ++i) {
+        SampleBankInfo const& b = info.banks[i];
+        out.banks.push_back({b.name ? b.name : "", b.bankID});
     }
     for (int i = 0; i < info.num_tags; ++i) {
         out.tags.emplace_back(info.tags[i] ? info.tags[i] : "");
@@ -811,7 +834,8 @@ void listPluginFiles(std::vector<std::string> const& dirs,
 // the count/base pair it walks.
 static void defDescFromSynthDef(tzpl_SynthDef const& def,
                                 tzpl_BufferDefList const& bufs,
-                                tzpl_TagList const& tags, DefDesc& out) {
+                                tzpl_TagList const& tags,
+                                tzpl_SampleBankDefList const& banks, DefDesc& out) {
     out.name = def.name ? def.name : "";
     for (int i = 0; i < def.num_ins; ++i) {
         tzpl_PortDef const& p = def.ins[i];
@@ -829,6 +853,10 @@ static void defDescFromSynthDef(tzpl_SynthDef const& def,
     for (int i = 0; i < bufs.num_buffers; ++i) {
         tzpl_BufferDef const& b = bufs.buffers[i];
         out.buffers.push_back({b.name ? b.name : "", b.type, b.bufID});
+    }
+    for (int i = 0; i < banks.num_banks; ++i) {
+        tzpl_SampleBankDef const& b = banks.banks[i];
+        out.banks.push_back({b.name ? b.name : "", b.bankID});
     }
     for (int i = 0; i < tags.num_tags; ++i) {
         out.tags.emplace_back(tags.tags[i] ? tags.tags[i] : "");
@@ -881,8 +909,12 @@ bool getPluginFileDesc(char const* path, DefDesc& out) {
             if (void* tagPtr = dlsym(handle, "loadTags")) {
                 tags = (*(tzpl_LoadTagsFun)tagPtr)();
             }
-            if (validSynthDefArrays(def, &bufs, &tags)) {
-                defDescFromSynthDef(def, bufs, tags, entry.desc);
+            tzpl_SampleBankDefList banks{0, nullptr};
+            if (void* bankPtr = dlsym(handle, "loadSampleBankDefs")) {
+                banks = (*(tzpl_LoadSampleBankDefsFun)bankPtr)();
+            }
+            if (validSynthDefArrays(def, &bufs, &tags, &banks)) {
+                defDescFromSynthDef(def, bufs, tags, banks, entry.desc);
                 entry.ok = true;
             }
         }
@@ -2359,6 +2391,27 @@ tzpl_SErr loadBuffer(i64 nodeID, i64 bufID, const char* path,
 tzpl_SErr replaceBuffer(i64 nodeID, i64 bufID, tzpl_Buffer* buffer) {
     if (!tBundle.engine) return tzpl_errNoActiveBundle;
     tBundle.add(new PrebuiltCmdOp(new ReplaceBufferCmd(nodeID, bufID, buffer)));
+    return tzpl_errNone;
+}
+
+// -- Sample bank commands --
+
+tzpl_SErr replaceSampleBank(i64 nodeID, i64 bankID, tzpl_SampleBank* bank) {
+    if (!tBundle.engine) return tzpl_errNoActiveBundle;
+    tBundle.add(new PrebuiltCmdOp(new ReplaceSampleBankCmd(nodeID, bankID, bank)));
+    return tzpl_errNone;
+}
+
+tzpl_SErr loadSampleBank(i64 nodeID, i64 bankID,
+                         std::span<SampleBankZoneSpec const> zones) {
+    if (!tBundle.engine) return tzpl_errNoActiveBundle;
+    // The bank is built (files loaded, zones validated) at record time so
+    // spec errors are returned synchronously and the RT swap is a pointer
+    // store.
+    tzpl_SErr err = tzpl_errNone;
+    tzpl_SampleBank* bank = buildSampleBank(zones, &err);
+    if (!bank) return err;
+    tBundle.add(new PrebuiltCmdOp(new ReplaceSampleBankCmd(nodeID, bankID, bank)));
     return tzpl_errNone;
 }
 

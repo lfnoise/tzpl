@@ -104,6 +104,11 @@ typedef enum tzpl_SErr {
     /* A fixed-size engine resource is full (e.g. a silo's signal-tap table).
        Append new codes at the end only -- these values cross the ABI. */
     tzpl_errResourceLimit,
+
+    /* A sample-bank spec is invalid (range out of 0..127, lo > hi, two
+       zones covering the same (pitch, velocity) cell) or one of its sound
+       files failed to load. */
+    tzpl_errBadSampleBank,
 } tzpl_SErr;
 
 /* Signal rate - defines how signals are processed */
@@ -327,6 +332,84 @@ typedef struct tzpl_BufferDefList {
 
 /* Optional plugin symbol "loadBufferDefs" */
 typedef tzpl_BufferDefList (*tzpl_LoadBufferDefsFun)(void);
+
+/* Sample bank -- a set of sample buffers with a (pitch, velocity) zone map
+ * for sample-player instruments. Built on the non-real-time side from a
+ * spec of {file, pitch range, velocity range, root key} entries, then
+ * swapped into a running synth with a single pointer store exactly like a
+ * tzpl_Buffer (the old bank is returned to the NRT thread for freeing).
+ *
+ * map[pitch*128 + velocity] holds the sample index for that cell, or
+ * TZPL_SAMPLEBANK_UNMAPPED for cells no zone covers; generated code treats
+ * an unmapped cell like a null buffer (reads yield 0). Each zone's
+ * (pitch, velocity) rectangle is a tile: no two tiles may cover the same
+ * cell, but zones may share a pitch range when their velocity ranges are
+ * disjoint (velocity layering), and vice versa. Each entry keeps the
+ * source file's sample rate and a root key (the MIDI note at which the
+ * sample plays back unshifted) so graphs can compute playback rate. */
+#define TZPL_SAMPLEBANK_UNMAPPED 0xFFFF
+#define TZPL_SAMPLEBANK_MAP_SIZE (128 * 128)
+
+typedef struct tzpl_SampleBankEntry {
+    struct tzpl_Buffer* buf;  /* owned by the bank; freed by tzpl_freeSampleBank */
+    float rootKey;            /* MIDI note of unshifted playback */
+    double sampleRate;        /* source file sample rate */
+} tzpl_SampleBankEntry;
+
+typedef struct tzpl_SampleBank {
+    int64_t numSamples;
+    tzpl_SampleBankEntry* samples;
+    uint16_t map[TZPL_SAMPLEBANK_MAP_SIZE];  /* [pitch*128 + velocity] -> sample index */
+} tzpl_SampleBank;
+
+static inline tzpl_SampleBank* tzpl_createSampleBank(int64_t numSamples) {
+    tzpl_SampleBank* bank = (tzpl_SampleBank*)calloc(1, sizeof(tzpl_SampleBank));
+    if (!bank) return NULL;
+    bank->numSamples = numSamples;
+    bank->samples = (tzpl_SampleBankEntry*)calloc((size_t)numSamples,
+                                                  sizeof(tzpl_SampleBankEntry));
+    if (!bank->samples) { free(bank); return NULL; }
+    for (int64_t i = 0; i < TZPL_SAMPLEBANK_MAP_SIZE; i++) {
+        bank->map[i] = TZPL_SAMPLEBANK_UNMAPPED;
+    }
+    return bank;
+}
+
+static inline void tzpl_freeSampleBank(tzpl_SampleBank* bank) {
+    if (!bank) return;
+    if (bank->samples) {
+        for (int64_t i = 0; i < bank->numSamples; i++)
+            tzpl_freeBuffer(bank->samples[i].buf);
+        free(bank->samples);
+    }
+    free(bank);
+}
+
+/* Sample bank slot descriptors, delivered via the OPTIONAL plugin symbol
+ * "loadSampleBankDefs" (same additive pattern as "loadBufferDefs"). */
+typedef struct tzpl_SampleBankDef {
+    const char* name;
+    int64_t bankID;  /* id to pass to swapSampleBank / engine loadSampleBank */
+} tzpl_SampleBankDef;
+
+typedef struct tzpl_SampleBankDefList {
+    int num_banks;
+    tzpl_SampleBankDef* banks;
+} tzpl_SampleBankDefList;
+
+/* Optional plugin symbol "loadSampleBankDefs" */
+typedef tzpl_SampleBankDefList (*tzpl_LoadSampleBankDefsFun)(void);
+
+/* Optional plugin symbol "swapSampleBank": installs a new bank in slot
+ * bankID of a synth instance and returns the old one (may be NULL). The
+ * generated implementation also re-resolves every cached per-voice buffer
+ * pointer derived from the bank, so it is safe to call while notes sound;
+ * callers free the returned bank on the NRT side only after this returns.
+ * Delivered as an exported symbol, NOT a tzpl_SynthFuns member -- appending
+ * there would be an ABI break (see the versioning rules above). */
+typedef struct tzpl_SampleBank* (*tzpl_SwapSampleBankFun)(struct tzpl_SynthData*,
+                                                          int64_t bankID,
+                                                          struct tzpl_SampleBank* newBank);
 
 /* Category tags - free-form strings declared in the synthdef source (e.g.
  * "test", "fx", "percussion"). Delivered via the OPTIONAL plugin symbol

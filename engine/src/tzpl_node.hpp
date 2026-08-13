@@ -53,6 +53,12 @@ struct BufferInfo
     i64 bufID;
 };
 
+struct SampleBankInfo
+{
+    const char* name;
+    i64 bankID;
+};
+
 struct NodeDefInfo
 {
     const char* name;
@@ -67,6 +73,11 @@ struct NodeDefInfo
     BufferInfo* buffers = nullptr;
     int num_tags = 0;
     const char** tags = nullptr;
+    int num_banks = 0;
+    SampleBankInfo* banks = nullptr;
+    // From the optional plugin symbol "swapSampleBank" (not a tzpl_SynthFuns
+    // member -- appending there would be an ABI break).
+    tzpl_SwapSampleBankFun swapSampleBank = nullptr;
 };
 
 #if DEBUG_NODES

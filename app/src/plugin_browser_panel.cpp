@@ -156,6 +156,22 @@ void drawBufferSection(std::vector<engine::BufferDesc> const& buffers) {
     }
 }
 
+void drawSampleBankSection(std::vector<engine::SampleBankDesc> const& banks) {
+    if (banks.empty()) return;
+    ImGui::SeparatorText("Sample banks");
+    if (ImGui::BeginTable("##banks", 2, kTableFlags)) {
+        ImGui::TableSetupColumn("name");
+        ImGui::TableSetupColumn("id");
+        ImGui::TableHeadersRow();
+        for (auto const& b : banks) {
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn(); ImGui::TextUnformatted(b.name.c_str());
+            ImGui::TableNextColumn(); ImGui::Text("%lld", (long long)b.bankID);
+        }
+        ImGui::EndTable();
+    }
+}
+
 } // namespace
 
 void PluginBrowserPanel::setOpen(bool open) {
@@ -501,6 +517,7 @@ void PluginBrowserPanel::draw(bridge::AppContext& ctx) {
         drawPortSection("Outlets", "##outlets", sel->outs);
         drawControlSection(sel->controls);
         drawBufferSection(sel->buffers);
+        drawSampleBankSection(sel->banks);
         if (sel->ins.empty() && sel->outs.empty()
             && sel->controls.empty() && sel->buffers.empty())
             ImGui::TextDisabled("no ports, controls, or buffers");

@@ -126,6 +126,8 @@ namespace synthdef {
             u->sampleBuf->writers.push_back(u);
         } else if (auto u = expr.as<BufLength>(); u) {
             u->sampleBuf->lengthReaders.push_back(u);
+        } else if (auto u = expr.as<BankLookup>(); u) {
+            u->sampleBank->lookups.push_back(u);
         }
         if (expr->usesRandomNumberGenerator()) {
             gGraph->usesRandomNumberGenerator = true;

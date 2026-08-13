@@ -185,6 +185,15 @@ enum NodeKind {
 	bufWriteK(Int, Int, Int),                -- buf index, writeChans, startChan
 	bufLengthK(Int),                         -- buf index
 
+	-- Sample banks: the lookup latches (pitch, velocity) per note-on and
+	-- resolves one sample; reads/accessors reference it via ins[0].
+	bankLookupK(Int),                        -- bank index
+	bankFixReadK(Int, Int, Int),             -- index, readChans, startChan
+	bankVarReadK(Interpolation, Int, Int),   -- interp, readChans, startChan (ins = [lookup, index])
+	bankRootKeyK,
+	bankSampleRateK,
+	bankLengthK,
+
 	-- Control flow (M3). Branch/body subgraph roots are held in ctx.subs[node]
 	-- (each a PhiNode index), not in `ins`; `ins` carries the test/selector/count.
 	ifK,                                 -- if_else: subs = [thenPhi, elsePhi]
@@ -206,6 +215,7 @@ fn isSinkKind(k NodeKind) Bool = match (k) {
 	delayInitK(_, _):    true;
 	delayWriteK(_):      true;
 	bufWriteK(_, _, _):  true;
+	bankLookupK(_):      true;
 	debugK(_, _, _, _):  true;
 	_:                   false;
 };
@@ -432,6 +442,7 @@ struct Ctx {
 	delays [DelayInfo],
 	delayAllocs [Int],        -- delay indices needing runtime allocation
 	bufSerials [Int],         -- per-buffer SampleBuf serial (buf index -> serial)
+	bankSerials [Int],        -- per-bank SampleBank serial (bank index -> serial)
 
 	trees [Tree],
 	sortedTrees [Int],        -- tree indices in sorted order
@@ -472,6 +483,7 @@ fn newCtx(name String) Ctx {
 		delays: [DelayInfo](),
 		delayAllocs: [Int](),
 		bufSerials: [Int](),
+		bankSerials: [Int](),
 		trees: [Tree](),
 		sortedTrees: [Int](),
 		isoGroups: [IsoGroup](),
@@ -656,6 +668,12 @@ fn nodeStr(ctx Ctx, n NIdx) String {
 		bufVarReadK(_, _, _, _): "buf_var_read";
 		bufWriteK(_, _, _):  "buf_write";
 		bufLengthK(_):       "buf_length";
+		bankLookupK(_):      "bank_lookup";
+		bankFixReadK(index, _, _): "bank_fix_read(%^)" fmt(index);
+		bankVarReadK(_, _, _): "bank_var_read";
+		bankRootKeyK:        "bank_root_key";
+		bankSampleRateK:     "bank_sample_rate";
+		bankLengthK:         "bank_length";
 		ifK:                 "if_else";
 		switchK(_):          "switch";
 		forK:                "for_loop";

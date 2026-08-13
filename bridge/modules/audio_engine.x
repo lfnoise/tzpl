@@ -53,6 +53,41 @@ enum Err {
     errTooLate,
     errClockOutOfRange,
     errResourceLimit,
+    errBadSampleBank,
+}
+
+-- One zone of a sample bank: a sound file covering an inclusive pitch and
+-- velocity range (MIDI 0-127). rootKey is the note at which the sample
+-- plays back unshifted; -1 means "use loKey". Each zone's (pitch, velocity)
+-- rectangle is a tile: no two tiles may cover the same cell, but two zones
+-- may share a pitch range if their velocity ranges are disjoint (velocity
+-- layering), and vice versa.
+struct SampleZone {
+    path String;
+    loKey Int;
+    hiKey Int;
+    loVel Int;
+    hiVel Int;
+    rootKey Int;
+}
+
+fn sampleZone(path String, loKey Int, hiKey Int = -1, loVel Int = 0,
+              hiVel Int = 127, rootKey Int = -1) SampleZone {
+    SampleZone { path: path, loKey: loKey, hiKey: hiKey < 0 ? loKey : hiKey,
+                 loVel: loVel, hiVel: hiVel, rootKey: rootKey }
+}
+
+-- Loads a sample bank into a node's bank slot (bundled command, like
+-- loadBuffer). Files load and zones validate at submit on the calling
+-- thread; a bad spec or missing file returns errBadSampleBank.
+fn loadSampleBank(nodeID Int, bankID Int, zones [SampleZone]) Int {
+    loadSampleBank(nodeID, bankID,
+        zones map(fn(z SampleZone) String { z.path }),
+        zones map(fn(z SampleZone) Int { z.loKey }),
+        zones map(fn(z SampleZone) Int { z.hiKey }),
+        zones map(fn(z SampleZone) Int { z.loVel }),
+        zones map(fn(z SampleZone) Int { z.hiVel }),
+        zones map(fn(z SampleZone) Int { z.rootKey }))
 }
 
 -- Signal tap modes (see tapOutlet / tapMaster).

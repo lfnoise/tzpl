@@ -185,7 +185,7 @@ static std::string loadAndRegister(ts::VM& vm, std::string const& path) {
     }
 
     engine::addSynthDef(eng, optDef->def, optDef->dlHandle, &optDef->bufferDefs,
-                        &optDef->tagList);
+                        &optDef->tagList, &optDef->bankDefs, optDef->swapSampleBank);
     return "";
 }
 
@@ -263,7 +263,7 @@ static void ffi_compileSynthDefAndLoad(ts::VM& vm, u16 dst, u16, u16 argBase) {
     }
 
     engine::addSynthDef(eng, optDef->def, optDef->dlHandle, &optDef->bufferDefs,
-                        &optDef->tagList);
+                        &optDef->tagList, &optDef->bankDefs, optDef->swapSampleBank);
 
     returnString(vm, dst, "");
 }

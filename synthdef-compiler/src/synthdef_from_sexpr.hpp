@@ -38,6 +38,7 @@ struct SExprGraphBuilder {
     std::unordered_map<int64_t, S> exprMap;  // id -> expression
     std::unordered_map<int64_t, D> delayMap; // delay var id -> DelayBuf
     std::unordered_map<int64_t, B> sampleBufMap; // buffer var id -> SampleBuf
+    std::unordered_map<int64_t, Bk> sampleBankMap; // bank var id -> SampleBank
     std::unordered_map<int64_t, Graph*> graphMap; // graph id -> Graph
 
     SExprGraphBuilder(std::string const& name);
@@ -93,12 +94,21 @@ struct SExprGraphBuilder {
     std::expected<S, std::string> parseBufWrite(sexpr::ItemVec const& list);
     std::expected<S, std::string> parseBufLength(sexpr::ItemVec const& list);
 
+    // Sample bank operations
+    std::expected<S, std::string> parseBankLookup(sexpr::ItemVec const& list);
+    std::expected<S, std::string> parseBankFixRead(sexpr::ItemVec const& list);
+    std::expected<S, std::string> parseBankVarRead(sexpr::ItemVec const& list);
+    std::expected<S, std::string> parseBankRootKey(sexpr::ItemVec const& list);
+    std::expected<S, std::string> parseBankSampleRate(sexpr::ItemVec const& list);
+    std::expected<S, std::string> parseBankLength(sexpr::ItemVec const& list);
+
     // Debug sink
     std::expected<S, std::string> parseDebugExpr(sexpr::ItemVec const& list);
 
     // Helper to get or create delay buffer
     DelayBuf* getOrCreateDelayBuf(int64_t delayId);
     SampleBuf* getOrCreateSampleBuf(int64_t bufId);
+    SampleBank* getOrCreateSampleBank(int64_t bankId);
 
     // Helper to resolve input IDs
     std::expected<vector<S>, std::string> resolveInputs(sexpr::ItemVec const& inputList);

@@ -143,6 +143,30 @@ namespace synthdef {
         return hash_combine(Expr::hash(), sampleBuf.hash(), 0xF1D8E4B5C6A7D9E2);
     }
 
+    // -- SampleBank --
+
+    SampleBank::SampleBank()
+        : graph(gGraph), serial(nextSampleBankSerialNo()) {}
+
+    u64 BankLookup::hash() const {
+        return hash_combine(Expr::hash(), sampleBank.hash(), 0xA1B2C3D4E5F60718);
+    }
+    u64 BankFixRead::hash() const {
+        return hash_combine(Expr::hash(), (u64)index, (u64)readChans, (u64)startChan, 0xB2C3D4E5F6A71829);
+    }
+    u64 BankVarRead::hash() const {
+        return hash_combine(Expr::hash(), (u64)interp, (u64)readChans, (u64)startChan, 0xC3D4E5F6A7B8293A);
+    }
+    u64 BankRootKey::hash() const {
+        return hash_combine(Expr::hash(), 0xD4E5F6A7B8C93A4B);
+    }
+    u64 BankSampleRate::hash() const {
+        return hash_combine(Expr::hash(), 0xE5F6A7B8C9DA4B5C);
+    }
+    u64 BankLength::hash() const {
+        return hash_combine(Expr::hash(), 0xF6A7B8C9DAEB5C6D);
+    }
+
     u64 Expr::hash() const {
         u64 seed = kHashStart;
         for (S expr : inputs) {
