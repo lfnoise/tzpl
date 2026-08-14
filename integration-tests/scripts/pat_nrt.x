@@ -25,14 +25,14 @@ sineSynth defSynth("pat_sine") await;
 
 randSeed(42);
 
--- one full tritave walk, one step per 0.4 beats
-let walk = bind(series(0.0, 1.0) take(14) degree,
+-- one full tritave walk, one step per 0.4 beats (degrees are Ints)
+let walk = bind((0..13) toList degree,
                 List(0.4) cyc,
                 List(0.5) cyc,
                 List(0.8) cyc);
 
 -- tritave drone under it
-let drone = bind(List(0.0, 0.0) degree,
+let drone = bind(List(0, 0) degree,
                  List(2.8) cyc,
                  List(0.3) cyc,
                  List(1.0) cyc);
