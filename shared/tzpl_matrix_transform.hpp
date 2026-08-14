@@ -70,7 +70,7 @@ constexpr T fold(T a, T b) {
 
 template <typename T, usize N>
 T sel(usize n, std::array<T,N> const& a) {
-    return a[mod(n, N-1)];
+    return a[mod(n, N)];
 }
 
 template <typename T, usize Size>
