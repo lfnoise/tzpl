@@ -482,6 +482,12 @@ struct CppCodeGen {
         }
         return false;
     }
+    bool hasVoicerEventLoops() const {
+        for (GenLoop* loop : synth->eventLoops) {
+            if (isVoicerSubgraph(loop->graph)) return true;
+        }
+        return false;
+    }
     string genLoops(vector<GenLoop*> const& loops);
 //    string genLoopsInner(vector<GenLoop*> const& loops);
     int simdWidth(GenLoop const& loop);
@@ -834,7 +840,17 @@ string CppCodeGen::genVarRef(S expr, VarIndex cel) {
             }
             return s;
         } else {
-            // Fallback for other var types
+            // Other non-voice values (e.g. a multichannel constant): index
+            // by CHANNEL, like the non-voice inst var above. The raw element
+            // index spans voices x channels in a flat-voice loop, which would
+            // run off the end of a node-level array -- p->cN has expr->chans
+            // elements (hit by the single-voice event loops in noteOn).
+            if (expr->chans > 1 && flatChanShift != 0) {
+                if (expr->chans == current_loop->chans) {
+                    return s + FMT("[{} & {}]", vxstr(cel), flatChanMask);
+                }
+                return s + FMT("[{} & {}]", vxstr(cel), expr->chans - 1);
+            }
             return s + FMT("[{}]", vxstr(cel));
         }
     }
@@ -3781,6 +3797,43 @@ string CppCodeGen::genNoteFuns() {
             inVoiceLoop = true;
             voiceLoopIndexName = "vi";
             for (GenLoop* loop : synth->resetLoops) {
+                if (isVoicerSubgraph(loop->graph)) s += genLoop(*loop);
+            }
+            voiceLoopIndexName = "v";
+            inVoiceLoop = prevInVoiceLoop;
+        }
+        inResetMode = false;
+    }
+
+    // Event-rate loops: the zeroing above also cleared this voice's
+    // event-rate inst vars -- control-derived values such as envelope and
+    // filter coefficients, which processEvents only recomputes when a
+    // control changes. Without re-running them here the voice reads zeroed
+    // coefficients and stays silent until the next control change. They run
+    // after the reset loops because event-rate exprs read the reset-latched
+    // note values (a coefficient mixing a control with a noteParam), and in
+    // reset mode so Control/NoteParam leaves read their live sources rather
+    // than materialized per-voice copies the zeroing just cleared.
+    if (hasVoicerEventLoops()) {
+        inResetMode = true;
+        if (flatVoiceMode) {
+            inFlatVoiceMode = true;
+            singleVoiceMode = true;
+            flatVoiceCount = voicerExpr->maxVoices;
+            for (GenLoop* loop : synth->eventLoops) {
+                if (isVoicerSubgraph(loop->graph)) s += genLoop(*loop);
+            }
+            singleVoiceMode = false;
+            inFlatVoiceMode = false;
+        } else {
+            if (!hasVoicerResetLoops()) {
+                s += "\tf32* vparams = p->voicer.getRow(vi);\n";
+                s += "\tauto& vs = p->voice_state[vi];\n";
+            }
+            bool prevInVoiceLoop = inVoiceLoop;
+            inVoiceLoop = true;
+            voiceLoopIndexName = "vi";
+            for (GenLoop* loop : synth->eventLoops) {
                 if (isVoicerSubgraph(loop->graph)) s += genLoop(*loop);
             }
             voiceLoopIndexName = "v";

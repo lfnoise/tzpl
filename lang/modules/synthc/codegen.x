@@ -272,14 +272,25 @@ fn _varRef(ctx Ctx, n NIdx, cel String) String {
 			if (`cgFlatChanShift == 0) { return s; }
 			let m = (C == `cgLoopChans) ? `cgFlatChanMask : C - 1;
 			return "%^[%^ & %^]" fmt(s, cel, m);
-		} else if (isVoice) {
+		} else if (ctx.cut[n] isTempVarCut && isVoice) {
 			-- voice temp (local SoA array): mono -> by voice, else full-width [i]
 			if (C == 1) { return `cgFlatChanShift == 0 ? "%^[%^]" fmt(s, cel) : "%^[%^ >> %^]" fmt(s, cel, `cgFlatChanShift); }
 			return "%^[%^]" fmt(s, cel);
-		} else {
+		} else if (ctx.cut[n] isTempVarCut) {
 			-- non-voice temp (e.g. the VoicerExpr output)
 			if (C > 1) { return s $ _indexWrap(C, `cgLoopChans, cel); }
 			return s;
+		} else {
+			-- Other non-voice values (e.g. a multichannel constant): index
+			-- by CHANNEL, like the non-voice inst var above. The raw element
+			-- index spans voices x channels in a flat-voice loop, which
+			-- would run off the end of a node-level array -- p->cN has C
+			-- elements (hit by the single-voice event loops in noteOn).
+			if (C > 1 && `cgFlatChanShift != 0) {
+				let m = (C == `cgLoopChans) ? `cgFlatChanMask : C - 1;
+				return "%^[%^ & %^]" fmt(s, cel, m);
+			}
+			return "%^[%^]" fmt(s, cel);
 		}
 	}
 	let isInlet = match (ctx.kind[n]) { inletK(_, _): true; _: false; };
@@ -2298,6 +2309,29 @@ fn genVoicerNoteFuns(ctx Ctx, name String) String {
 		var `cgVoiceGraph Int = bg;
 		var `cgVoiceChans Int = ctx _voicerChansForGraph(bg);
 		for (li : ctx.resetLoops) {
+			if (ctx _isVoiceGraph(_loopRootGraph(ctx, li))) { s = s $ genLoop(ctx, li); }
+		}
+	}
+	-- Event-rate loops: the zeroing above also cleared this voice's
+	-- event-rate inst vars -- control-derived values such as envelope and
+	-- filter coefficients, which processEvents only recomputes when a
+	-- control changes. Without re-running them here the voice reads zeroed
+	-- coefficients and stays silent until the next control change. They run
+	-- after the reset loops because event-rate exprs read the reset-latched
+	-- note values, and in reset mode so Control/NoteParam leaves read their
+	-- live sources rather than materialized per-voice copies the zeroing
+	-- just cleared (mirrors the C++ genNoteFuns emission).
+	var hasEvent = false;
+	for (li : ctx.eventLoops) {
+		if (ctx _isVoiceGraph(_loopRootGraph(ctx, li))) { hasEvent = true; }
+	}
+	if (hasEvent) {
+		var `cgInResetMode Bool = true;
+		var `cgSingleVoice Bool = true;
+		var `cgVoiceCount Int = ctx _voicerMaxVoices(v);
+		var `cgVoiceGraph Int = bg;
+		var `cgVoiceChans Int = ctx _voicerChansForGraph(bg);
+		for (li : ctx.eventLoops) {
 			if (ctx _isVoiceGraph(_loopRootGraph(ctx, li))) { s = s $ genLoop(ctx, li); }
 		}
 	}
