@@ -553,13 +553,15 @@ static void ffi_fillBuffer(ts::VM& vm, u16 dst, u16, u16 argBase) {
 // fn loadSampleBank(nodeID: Int, bankID: Int, paths: Array[String],
 //                   loKey: Array[Int], hiKey: Array[Int],
 //                   loVel: Array[Int], hiVel: Array[Int],
-//                   rootKey: Array[Int]) -> Int
+//                   rootKey: Array[Int], loopStart: Array[Float],
+//                   loopEnd: Array[Float]) -> Int
 // Loads a pitch/velocity-mapped sample bank into a node's bank slot
 // (bundled command). The parallel arrays describe one zone per element;
-// rootKey -1 means "default to that zone's loKey". Files load and zones
-// validate at record time on the calling thread, so a bad spec or missing
-// file returns tzpl_errBadSampleBank synchronously; the RT-thread swap is a
-// pointer store and is safe while notes sound.
+// negative rootKey / loopStart / loopEnd fall back to the file's instrument
+// metadata (WAV smpl / AIFF INST), then to loKey / no loop. Files load and
+// zones validate at record time on the calling thread, so a bad spec or
+// missing file returns tzpl_errBadSampleBank synchronously; the RT-thread
+// swap is a pointer store and is safe while notes sound.
 static void ffi_loadSampleBank(ts::VM& vm, u16 dst, u16, u16 argBase) {
     auto nodeID = static_cast<engine::i64>(vm.reg(argBase).i);
     auto bankID = static_cast<engine::i64>(vm.reg(argBase + 1).i);
@@ -569,11 +571,14 @@ static void ffi_loadSampleBank(ts::VM& vm, u16 dst, u16, u16 argBase) {
     auto* loVel = vm.reg(argBase + 5).o;
     auto* hiVel = vm.reg(argBase + 6).o;
     auto* rootKey = vm.reg(argBase + 7).o;
+    auto* loopStart = vm.reg(argBase + 8).o;
+    auto* loopEnd = vm.reg(argBase + 9).o;
 
     size_t n = ts::arraySize(paths);
     if (n == 0 || ts::arraySize(loKey) != n || ts::arraySize(hiKey) != n
         || ts::arraySize(loVel) != n || ts::arraySize(hiVel) != n
-        || ts::arraySize(rootKey) != n) {
+        || ts::arraySize(rootKey) != n || ts::arraySize(loopStart) != n
+        || ts::arraySize(loopEnd) != n) {
         returnErr(vm, dst, tzpl_errBadSampleBank, __func__);
         return;
     }
@@ -588,6 +593,8 @@ static void ffi_loadSampleBank(ts::VM& vm, u16 dst, u16, u16 argBase) {
         zones[i].loVel = static_cast<int>(ts::arrayGetInt(loVel, i));
         zones[i].hiVel = static_cast<int>(ts::arrayGetInt(hiVel, i));
         zones[i].rootKey = static_cast<int>(ts::arrayGetInt(rootKey, i));
+        zones[i].loopStart = ts::arrayGetFloat(loopStart, i);
+        zones[i].loopEnd = ts::arrayGetFloat(loopEnd, i);
     }
 
     returnErr(vm, dst, engine::loadSampleBank(nodeID, bankID, zones), __func__);
@@ -1759,7 +1766,8 @@ void registerAudioEngineFFI(ts::Compiler& compiler) {
     {
         ts::Type* PathArray = reinterpret_cast<ts::Type*>(compiler.arrayType(String));
         reg("loadSampleBank", Int,
-            {Int, Int, PathArray, IntArray, IntArray, IntArray, IntArray, IntArray},
+            {Int, Int, PathArray, IntArray, IntArray, IntArray, IntArray, IntArray,
+             FloatArray, FloatArray},
             ffi_loadSampleBank);
     }
 

@@ -989,13 +989,28 @@ loadBuffer(<span class="hl-num">100</span>, <span class="hl-num">0</span>, <span
                 <tr><td><code>h rootKey</code></td><td>The resolved sample's root key (MIDI note of unshifted playback).</td></tr>
                 <tr><td><code>h sampleRate</code></td><td>The resolved sample's source-file sample rate.</td></tr>
                 <tr><td><code>h length</code></td><td>The resolved sample's length in frames.</td></tr>
+                <tr><td><code>h loopStart</code>, <code>h loopEnd</code></td><td>The resolved sample's sustain loop in frames (<code>loopEnd</code> exclusive, possibly fractional). Without a loop the range is 0&hellip;length, so it is always usable.</td></tr>
+                <tr><td><code>h hasLoop</code></td><td>1 if the resolved sample has a sustain loop, else 0.</td></tr>
+                <tr><td><code>loopPhasor(h, rate, sustain)</code></td><td>A per-voice looping playhead: advances <code>rate</code> frames per engine sample from 0 at note-on; while <code>sustain</code> &gt; 0 (and the sample has a loop) it wraps at the loop end, after that it runs on toward the end of the sample. Feed it to <code>vread</code>.</td></tr>
             </table>
+
+            <p>The wrap subtracts the <em>exact</em> loop length rather than resetting to the
+            loop start, so the fractional overshoot carries through and the loop period is
+            sub-sample accurate at any playback rate &mdash; a loop whose length is not a whole
+            number of frames stays phase-locked indefinitely.</p>
 
             <p>Engine side, <code>loadSampleBank(nodeID, bankID, zones)</code> binds a bank: the
             files load and the zones validate on the calling thread at bundle submit (a bad spec
             or missing file returns <code>errBadSampleBank</code> synchronously), and the built
             bank is swapped in with a single pointer store. Build zones with
-            <code>sampleZone(path, loKey, hiKey = loKey, loVel = 0, hiVel = 127, rootKey = loKey)</code>.</p>
+            <code>sampleZone(path, loKey, hiKey = loKey, loVel = 0, hiVel = 127, rootKey = -1,
+            loopStart = -1.0, loopEnd = -1.0)</code>. A negative <code>rootKey</code>,
+            <code>loopStart</code>, or <code>loopEnd</code> means "take it from the file's
+            instrument metadata" &mdash; the WAV <code>smpl</code> chunk or AIFF
+            <code>INST</code>/<code>MARK</code> chunks, as written by most samplers and audio
+            editors; where the file has none either, the root key defaults to the zone's
+            <code>loKey</code> and the zone has no loop. Explicit values always win over the
+            file's.</p>
 
 <pre><code><span class="cmt">-- a voicer sampler: each note picks its sample by (pitch, velocity) and
 -- plays it at the rate implied by the sample's root key and source rate</span>
@@ -1020,6 +1035,25 @@ loadSampleBank(<span class="hl-num">100</span>, <span class="hl-num">0</span>, [
     sampleZone(<span class="hl-str">"samples/piano_c4.wav"</span>, <span class="hl-num">0</span>, <span class="hl-num">65</span>, <span class="hl-num">0</span>, <span class="hl-num">127</span>, <span class="hl-num">60</span>),
     sampleZone(<span class="hl-str">"samples/piano_c5.wav"</span>, <span class="hl-num">66</span>, <span class="hl-num">127</span>, <span class="hl-num">0</span>, <span class="hl-num">127</span>, <span class="hl-num">72</span>),
 ]);</code></pre>
+
+            <p>For sustained instruments, replace the free-running playhead with a
+            <code>loopPhasor</code> driven by the gate: the sample loops its sustain region while
+            the note is held and plays out its natural release when the note is released. With
+            zones like <code>sampleZone("samples/flute_c5.wav", 0, 127)</code> the root key and
+            loop points come straight from the file's metadata:</p>
+
+<pre><code><span class="cmt">-- a looping sampler: sustain loop while the gate is held, run-out on release</span>
+<span class="hl-kw">fn</span> loopSampler() S {
+    <span class="hl-kw">let</span> bank = sampleBankVar();
+    voicer(<span class="hl-num">8</span>, <span class="hl-kw">fn</span>() S {
+        <span class="hl-kw">let</span> g = gate();
+        <span class="hl-kw">let</span> pitch = noteParam(<span class="hl-str">"pitch"</span>, ControlSpec { lo: <span class="hl-num">0.0</span>, hi: <span class="hl-num">127.0</span>, init: <span class="hl-num">60.0</span>, warp: ControlWarp.linear });
+        <span class="hl-kw">let</span> vel = noteParam(<span class="hl-str">"vel"</span>, ControlSpec { lo: <span class="hl-num">0.0</span>, hi: <span class="hl-num">127.0</span>, init: <span class="hl-num">100.0</span>, warp: ControlWarp.linear });
+        <span class="hl-kw">let</span> h = bank lookup(pitch, vel);
+        <span class="hl-kw">let</span> rate = ((pitch f64 - (h rootKey) f64) / <span class="hl-num">12.0</span>) exp2 * (h sampleRate) * (T() f64);
+        h vread(loopPhasor(h, rate, g), Interpolation.cubic) f32 * (g lag(<span class="hl-num">0.005</span>, <span class="hl-num">0.1</span>))
+    }) sum(<span class="hl-num">1</span>) outlet
+}</code></pre>
 
             <a href="#top" class="back-to-top">&uarr; Back to top</a>
         </div>

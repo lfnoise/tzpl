@@ -1687,6 +1687,64 @@ namespace synthdef {
         void accept(ExprVisitor& visitor) override;
     };
 
+    // Sustain loop of the resolved sample: start/end in frames of the source
+    // file, end EXCLUSIVE and possibly fractional. When the entry has no
+    // loop (BankHasLoop 0) the range is still usable -- 0 to the sample's
+    // length -- so a looping playhead needs no validity check.
+    struct BankLoopStart : BankExpr {
+        BankLoopStart(BankLookup* lu) : BankExpr(lu, resetSignalRate, {S(lu)}) {}
+
+        string typeName() const override { return "BankLoopStart"; }
+        string str() const override { return "bank_loop_start"; }
+
+        u64 hash() const override;
+        bool equals_(Expr const& that) const override {
+            auto& c = static_cast<BankLoopStart const&>(that);
+            return lookup == c.lookup;
+        }
+        NumType initial_type() const override { return NumType::f64; }
+        void update_type(ExprWorkList& worklist) override {}
+        void calcShape() override { chans = 1; }
+
+        void accept(ExprVisitor& visitor) override;
+    };
+
+    struct BankLoopEnd : BankExpr {
+        BankLoopEnd(BankLookup* lu) : BankExpr(lu, resetSignalRate, {S(lu)}) {}
+
+        string typeName() const override { return "BankLoopEnd"; }
+        string str() const override { return "bank_loop_end"; }
+
+        u64 hash() const override;
+        bool equals_(Expr const& that) const override {
+            auto& c = static_cast<BankLoopEnd const&>(that);
+            return lookup == c.lookup;
+        }
+        NumType initial_type() const override { return NumType::f64; }
+        void update_type(ExprWorkList& worklist) override {}
+        void calcShape() override { chans = 1; }
+
+        void accept(ExprVisitor& visitor) override;
+    };
+
+    struct BankHasLoop : BankExpr {
+        BankHasLoop(BankLookup* lu) : BankExpr(lu, resetSignalRate, {S(lu)}) {}
+
+        string typeName() const override { return "BankHasLoop"; }
+        string str() const override { return "bank_has_loop"; }
+
+        u64 hash() const override;
+        bool equals_(Expr const& that) const override {
+            auto& c = static_cast<BankHasLoop const&>(that);
+            return lookup == c.lookup;
+        }
+        NumType initial_type() const override { return NumType::i32; }
+        void update_type(ExprWorkList& worklist) override {}
+        void calcShape() override { chans = 1; }
+
+        void accept(ExprVisitor& visitor) override;
+    };
+
     inline bool is_sink(GraphCut cut) {
         return cut == GraphCut::Sink;
     }

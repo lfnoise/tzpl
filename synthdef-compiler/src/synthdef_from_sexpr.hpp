@@ -101,6 +101,9 @@ struct SExprGraphBuilder {
     std::expected<S, std::string> parseBankRootKey(sexpr::ItemVec const& list);
     std::expected<S, std::string> parseBankSampleRate(sexpr::ItemVec const& list);
     std::expected<S, std::string> parseBankLength(sexpr::ItemVec const& list);
+    std::expected<S, std::string> parseBankLoopStart(sexpr::ItemVec const& list);
+    std::expected<S, std::string> parseBankLoopEnd(sexpr::ItemVec const& list);
+    std::expected<S, std::string> parseBankHasLoop(sexpr::ItemVec const& list);
 
     // Debug sink
     std::expected<S, std::string> parseDebugExpr(sexpr::ItemVec const& list);

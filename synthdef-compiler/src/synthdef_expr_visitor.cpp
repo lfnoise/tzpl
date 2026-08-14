@@ -80,6 +80,9 @@ void BankVarRead::accept(ExprVisitor& visitor) { visitor.visit(this); }
 void BankRootKey::accept(ExprVisitor& visitor) { visitor.visit(this); }
 void BankSampleRate::accept(ExprVisitor& visitor) { visitor.visit(this); }
 void BankLength::accept(ExprVisitor& visitor) { visitor.visit(this); }
+void BankLoopStart::accept(ExprVisitor& visitor) { visitor.visit(this); }
+void BankLoopEnd::accept(ExprVisitor& visitor) { visitor.visit(this); }
+void BankHasLoop::accept(ExprVisitor& visitor) { visitor.visit(this); }
 void DebugExpr::accept(ExprVisitor& visitor) { visitor.visit(this); }
 
 }

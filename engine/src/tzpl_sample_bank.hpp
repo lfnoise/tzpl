@@ -26,13 +26,19 @@
 
 #include "tzpl_plugin_abi.h"
 #include "tzpl_audio_file.hpp"
+#include "tzpl_audio_file_meta.hpp"
+#include <algorithm>
 #include <span>
 #include <string>
 
 namespace engine {
 
 // One zone of a sample bank spec: a sound file covering an inclusive
-// pitch/velocity rectangle. rootKey -1 means "default to loKey".
+// pitch/velocity rectangle. Negative rootKey / loopStart / loopEnd mean
+// "take it from the file's instrument metadata (WAV smpl / AIFF INST)";
+// where the file has none either, rootKey defaults to loKey and the zone
+// has no loop. Loop points are frames of the source file, loopEnd
+// exclusive, and may be fractional.
 struct SampleBankZoneSpec {
     std::string path;
     int loKey = 0;
@@ -40,6 +46,8 @@ struct SampleBankZoneSpec {
     int loVel = 0;
     int hiVel = 127;
     int rootKey = -1;
+    double loopStart = -1.0;
+    double loopEnd = -1.0;
 };
 
 // Validates the zones and builds a complete bank: every file loaded, the
@@ -86,9 +94,36 @@ inline tzpl_SampleBank* buildSampleBank(std::span<SampleBankZoneSpec const> zone
         double sr = 0.0;
         tzpl_Buffer* buf = tzpl_loadAudioFileSR(z.path.c_str(), 0, 0, INT64_MAX, &sr);
         if (!buf) return fail(bank);
-        bank->samples[zi].buf = buf;
-        bank->samples[zi].sampleRate = sr;
-        bank->samples[zi].rootKey = (float)(z.rootKey >= 0 ? z.rootKey : z.loKey);
+        tzpl_SampleBankEntry& e = bank->samples[zi];
+        e.buf = buf;
+        e.sampleRate = sr;
+
+        // Fields the spec leaves negative fall back to the file's instrument
+        // metadata, then to the zone defaults (loKey root, no loop).
+        tzpl_AudioFileMeta meta;
+        tzpl_readAudioFileMeta(z.path.c_str(), &meta);
+        e.rootKey = z.rootKey >= 0 ? (float)z.rootKey
+                  : meta.rootKey >= 0.0f ? meta.rootKey
+                  : (float)z.loKey;
+
+        // A loop the USER spelled out must be valid; a bad file loop (some
+        // editors write junk) is just ignored. Giving only loopEnd loops
+        // from the start of the sample.
+        bool userLoop = z.loopStart >= 0.0 || z.loopEnd >= 0.0;
+        double ls = userLoop ? std::max(z.loopStart, 0.0) : meta.loopStart;
+        double le = userLoop ? z.loopEnd : meta.loopEnd;
+        if (userLoop && !(le > ls && le <= (double)buf->length)) return fail(bank);
+        if (ls >= 0.0 && le > ls && le <= (double)buf->length) {
+            e.loopStart = ls;
+            e.loopEnd = le;
+            e.hasLoop = 1;
+        } else {
+            // No loop: still a usable range, so looping playheads built on
+            // these slots need no validity check (they loop the whole sample).
+            e.loopStart = 0.0;
+            e.loopEnd = (double)buf->length;
+            e.hasLoop = 0;
+        }
     }
 
     if (errOut) *errOut = tzpl_errNone;

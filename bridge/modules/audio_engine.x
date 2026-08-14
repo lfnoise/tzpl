@@ -58,10 +58,14 @@ enum Err {
 
 -- One zone of a sample bank: a sound file covering an inclusive pitch and
 -- velocity range (MIDI 0-127). rootKey is the note at which the sample
--- plays back unshifted; -1 means "use loKey". Each zone's (pitch, velocity)
--- rectangle is a tile: no two tiles may cover the same cell, but two zones
--- may share a pitch range if their velocity ranges are disjoint (velocity
--- layering), and vice versa.
+-- plays back unshifted; loopStart/loopEnd are a sustain loop in frames of
+-- the source file (loopEnd exclusive, fractional values allowed). Negative
+-- rootKey / loopStart / loopEnd mean "take it from the file's instrument
+-- metadata" (the WAV smpl or AIFF INST chunk); where the file has none
+-- either, rootKey defaults to loKey and the zone has no loop. Each zone's
+-- (pitch, velocity) rectangle is a tile: no two tiles may cover the same
+-- cell, but two zones may share a pitch range if their velocity ranges are
+-- disjoint (velocity layering), and vice versa.
 struct SampleZone {
     path String;
     loKey Int;
@@ -69,17 +73,23 @@ struct SampleZone {
     loVel Int;
     hiVel Int;
     rootKey Int;
+    loopStart Float;
+    loopEnd Float;
 }
 
 fn sampleZone(path String, loKey Int, hiKey Int = -1, loVel Int = 0,
-              hiVel Int = 127, rootKey Int = -1) SampleZone {
+              hiVel Int = 127, rootKey Int = -1,
+              loopStart Float = -1.0, loopEnd Float = -1.0) SampleZone {
     SampleZone { path: path, loKey: loKey, hiKey: hiKey < 0 ? loKey : hiKey,
-                 loVel: loVel, hiVel: hiVel, rootKey: rootKey }
+                 loVel: loVel, hiVel: hiVel, rootKey: rootKey,
+                 loopStart: loopStart, loopEnd: loopEnd }
 }
 
 -- Loads a sample bank into a node's bank slot (bundled command, like
 -- loadBuffer). Files load and zones validate at submit on the calling
--- thread; a bad spec or missing file returns errBadSampleBank.
+-- thread; a bad spec (including an explicit loop with loopEnd <= loopStart
+-- or loopEnd past the end of the file) or missing file returns
+-- errBadSampleBank.
 fn loadSampleBank(nodeID Int, bankID Int, zones [SampleZone]) Int {
     loadSampleBank(nodeID, bankID,
         zones map(fn(z SampleZone) String { z.path }),
@@ -87,7 +97,9 @@ fn loadSampleBank(nodeID Int, bankID Int, zones [SampleZone]) Int {
         zones map(fn(z SampleZone) Int { z.hiKey }),
         zones map(fn(z SampleZone) Int { z.loVel }),
         zones map(fn(z SampleZone) Int { z.hiVel }),
-        zones map(fn(z SampleZone) Int { z.rootKey }))
+        zones map(fn(z SampleZone) Int { z.rootKey }),
+        zones map(fn(z SampleZone) Float { z.loopStart }),
+        zones map(fn(z SampleZone) Float { z.loopEnd }))
 }
 
 -- Signal tap modes (see tapOutlet / tapMaster).

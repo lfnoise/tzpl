@@ -193,6 +193,9 @@ enum NodeKind {
 	bankRootKeyK,
 	bankSampleRateK,
 	bankLengthK,
+	bankLoopStartK,
+	bankLoopEndK,
+	bankHasLoopK,
 
 	-- Control flow (M3). Branch/body subgraph roots are held in ctx.subs[node]
 	-- (each a PhiNode index), not in `ins`; `ins` carries the test/selector/count.
@@ -674,6 +677,9 @@ fn nodeStr(ctx Ctx, n NIdx) String {
 		bankRootKeyK:        "bank_root_key";
 		bankSampleRateK:     "bank_sample_rate";
 		bankLengthK:         "bank_length";
+		bankLoopStartK:      "bank_loop_start";
+		bankLoopEndK:        "bank_loop_end";
+		bankHasLoopK:        "bank_has_loop";
 		ifK:                 "if_else";
 		switchK(_):          "switch";
 		forK:                "for_loop";

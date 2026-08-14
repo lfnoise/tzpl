@@ -61,8 +61,15 @@ extern "C" {
  * embedding struct; that is exactly the mistake this comment now documents.
  * Only genuinely additive changes may skip the bump: new optional exported
  * symbols (probe with dlsym, as loadBufferDefs does) and new enum values in
- * reserved space. */
-#define TZPL_PLUGIN_ABI_VERSION 1
+ * reserved space.
+ *
+ * Version 2 (2026-08): loop fields appended to tzpl_SampleBankEntry, which
+ * changes the stride of tzpl_SampleBank's samples[] array. Older plugins are
+ * still ACCEPTED in general (loaders only refuse newer-than-header), so
+ * loaders additionally refuse a version-1 plugin that exports
+ * "swapSampleBank" -- only such a plugin indexes bank entries. Version-1
+ * plugins without sample banks keep loading unchanged. */
+#define TZPL_PLUGIN_ABI_VERSION 2
 
 /* Forward declarations */
 struct tzpl_Engine;
@@ -346,7 +353,13 @@ typedef tzpl_BufferDefList (*tzpl_LoadBufferDefsFun)(void);
  * cell, but zones may share a pitch range when their velocity ranges are
  * disjoint (velocity layering), and vice versa. Each entry keeps the
  * source file's sample rate and a root key (the MIDI note at which the
- * sample plays back unshifted) so graphs can compute playback rate. */
+ * sample plays back unshifted) so graphs can compute playback rate.
+ *
+ * Loop points are in frames of the source sample, loopEnd EXCLUSIVE, and
+ * are doubles so a loop boundary may fall between samples (the WAV smpl
+ * chunk can express this). The builder guarantees a usable range even when
+ * hasLoop is 0 -- loopStart 0, loopEnd the buffer length -- so a looping
+ * playhead built on these slots never needs a validity check. */
 #define TZPL_SAMPLEBANK_UNMAPPED 0xFFFF
 #define TZPL_SAMPLEBANK_MAP_SIZE (128 * 128)
 
@@ -354,6 +367,10 @@ typedef struct tzpl_SampleBankEntry {
     struct tzpl_Buffer* buf;  /* owned by the bank; freed by tzpl_freeSampleBank */
     float rootKey;            /* MIDI note of unshifted playback */
     double sampleRate;        /* source file sample rate */
+    double loopStart;         /* sustain loop start, frames (0 when hasLoop == 0) */
+    double loopEnd;           /* sustain loop end, frames, exclusive (buffer
+                                 length when hasLoop == 0) */
+    int32_t hasLoop;          /* 1 if the entry has a sustain loop */
 } tzpl_SampleBankEntry;
 
 typedef struct tzpl_SampleBank {

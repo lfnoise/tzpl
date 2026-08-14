@@ -419,6 +419,9 @@ fn _inlineExpr(ctx Ctx, n NIdx, cel String) String {
 		bankRootKeyK:                   _bankSlot(ctx, ctx.ins[n][0], "rootKey", cel);
 		bankSampleRateK:                _bankSlot(ctx, ctx.ins[n][0], "sr", cel);
 		bankLengthK:                    _bankSlot(ctx, ctx.ins[n][0], "len", cel);
+		bankLoopStartK:                 _bankSlot(ctx, ctx.ins[n][0], "loopStart", cel);
+		bankLoopEndK:                   _bankSlot(ctx, ctx.ins[n][0], "loopEnd", cel);
+		bankHasLoopK:                   _bankSlot(ctx, ctx.ins[n][0], "hasLoop", cel);
 		delayFixReadK(d, k): _delayFixReadExpr(ctx, n, d, k, cel);
 		delayVarReadK(d, ip): _delayVarReadExpr(ctx, n, d, ip, cel);
 		_:              "/* FIXME %^ */" fmt(nodeStr(ctx, n));
@@ -1572,6 +1575,9 @@ fn _exprSimdDisqualified(ctx Ctx, e NIdx) Bool = match (ctx.kind[e]) {
 	bankRootKeyK:         true;
 	bankSampleRateK:      true;
 	bankLengthK:          true;
+	bankLoopStartK:       true;
+	bankLoopEndK:         true;
+	bankHasLoopK:         true;
 	_:                    false;
 };
 
@@ -1964,6 +1970,9 @@ fn genVoicerDecls(ctx Ctx) String {
 				s = s $ "\tf32 voice_lu%^_rootKey[%^];\n" fmt(u, mv);
 				s = s $ "\tf64 voice_lu%^_sr[%^];\n" fmt(u, mv);
 				s = s $ "\tf64 voice_lu%^_len[%^];\n" fmt(u, mv);
+				s = s $ "\tf64 voice_lu%^_loopStart[%^];\n" fmt(u, mv);
+				s = s $ "\tf64 voice_lu%^_loopEnd[%^];\n" fmt(u, mv);
+				s = s $ "\ti32 voice_lu%^_hasLoop[%^];\n" fmt(u, mv);
 			}
 		}
 		let nUser = ctx _numUserParams(bg);
@@ -2002,6 +2011,9 @@ fn genBankSlotDeclsScalar(ctx Ctx) String {
 			s = s $ "\tf32 lu%^_rootKey;\n" fmt(u);
 			s = s $ "\tf64 lu%^_sr;\n" fmt(u);
 			s = s $ "\tf64 lu%^_len;\n" fmt(u);
+			s = s $ "\tf64 lu%^_loopStart;\n" fmt(u);
+			s = s $ "\tf64 lu%^_loopEnd;\n" fmt(u);
+			s = s $ "\ti32 lu%^_hasLoop;\n" fmt(u);
 		}
 	}
 	s
@@ -2554,12 +2566,18 @@ fn genSampleBankResolvers(ctx Ctx, name String) String {
 			s = s $ "\t\tp->voice_lu%^_rootKey[v] = 0.0f;\n" fmt(u);
 			s = s $ "\t\tp->voice_lu%^_sr[v] = 0.0;\n" fmt(u);
 			s = s $ "\t\tp->voice_lu%^_len[v] = 0.0;\n" fmt(u);
+			s = s $ "\t\tp->voice_lu%^_loopStart[v] = 0.0;\n" fmt(u);
+			s = s $ "\t\tp->voice_lu%^_loopEnd[v] = 0.0;\n" fmt(u);
+			s = s $ "\t\tp->voice_lu%^_hasLoop[v] = 0;\n" fmt(u);
 			s = s $ "\t} else {\n";
 			s = s $ "\t\ttzpl_SampleBankEntry* e = &bk->samples[idx];\n";
 			s = s $ "\t\tp->voice_lu%^_buf[v] = e->buf;\n" fmt(u);
 			s = s $ "\t\tp->voice_lu%^_rootKey[v] = e->rootKey;\n" fmt(u);
 			s = s $ "\t\tp->voice_lu%^_sr[v] = e->sampleRate;\n" fmt(u);
 			s = s $ "\t\tp->voice_lu%^_len[v] = e->buf ? (f64)e->buf->length : 0.0;\n" fmt(u);
+			s = s $ "\t\tp->voice_lu%^_loopStart[v] = e->loopStart;\n" fmt(u);
+			s = s $ "\t\tp->voice_lu%^_loopEnd[v] = e->loopEnd;\n" fmt(u);
+			s = s $ "\t\tp->voice_lu%^_hasLoop[v] = e->hasLoop;\n" fmt(u);
 			s = s $ "\t}\n";
 			s = s $ "}\n\n";
 		} else {
@@ -2571,12 +2589,18 @@ fn genSampleBankResolvers(ctx Ctx, name String) String {
 			s = s $ "\t\tp->lu%^_rootKey = 0.0f;\n" fmt(u);
 			s = s $ "\t\tp->lu%^_sr = 0.0;\n" fmt(u);
 			s = s $ "\t\tp->lu%^_len = 0.0;\n" fmt(u);
+			s = s $ "\t\tp->lu%^_loopStart = 0.0;\n" fmt(u);
+			s = s $ "\t\tp->lu%^_loopEnd = 0.0;\n" fmt(u);
+			s = s $ "\t\tp->lu%^_hasLoop = 0;\n" fmt(u);
 			s = s $ "\t} else {\n";
 			s = s $ "\t\ttzpl_SampleBankEntry* e = &bk->samples[idx];\n";
 			s = s $ "\t\tp->lu%^_buf = e->buf;\n" fmt(u);
 			s = s $ "\t\tp->lu%^_rootKey = e->rootKey;\n" fmt(u);
 			s = s $ "\t\tp->lu%^_sr = e->sampleRate;\n" fmt(u);
 			s = s $ "\t\tp->lu%^_len = e->buf ? (f64)e->buf->length : 0.0;\n" fmt(u);
+			s = s $ "\t\tp->lu%^_loopStart = e->loopStart;\n" fmt(u);
+			s = s $ "\t\tp->lu%^_loopEnd = e->loopEnd;\n" fmt(u);
+			s = s $ "\t\tp->lu%^_hasLoop = e->hasLoop;\n" fmt(u);
 			s = s $ "\t}\n";
 			s = s $ "}\n\n";
 		}

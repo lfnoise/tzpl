@@ -101,6 +101,9 @@ fn calcShapeOf(ctx Ctx, n NIdx) Int {
 		bankRootKeyK:        1;
 		bankSampleRateK:     1;
 		bankLengthK:         1;
+		bankLoopStartK:      1;
+		bankLoopEndK:        1;
+		bankHasLoopK:        1;
 		-- Control flow: a control-flow node broadcasts over its branch/body phis
 		-- (the test/selector/count input is scalar and doesn't contribute); a
 		-- phi broadcasts its (current, target, input) channel counts.

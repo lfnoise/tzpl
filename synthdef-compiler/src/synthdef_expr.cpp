@@ -166,6 +166,15 @@ namespace synthdef {
     u64 BankLength::hash() const {
         return hash_combine(Expr::hash(), 0xF6A7B8C9DAEB5C6D);
     }
+    u64 BankLoopStart::hash() const {
+        return hash_combine(Expr::hash(), 0xA7B8C9DAEBFC6D7E);
+    }
+    u64 BankLoopEnd::hash() const {
+        return hash_combine(Expr::hash(), 0xB8C9DAEBFCAD7E8F);
+    }
+    u64 BankHasLoop::hash() const {
+        return hash_combine(Expr::hash(), 0xC9DAEBFCADBE8F91);
+    }
 
     u64 Expr::hash() const {
         u64 seed = kHashStart;

@@ -85,6 +85,9 @@ struct ExprVisitor {
     virtual void visit(BankRootKey* e) = 0;
     virtual void visit(BankSampleRate* e) = 0;
     virtual void visit(BankLength* e) = 0;
+    virtual void visit(BankLoopStart* e) = 0;
+    virtual void visit(BankLoopEnd* e) = 0;
+    virtual void visit(BankHasLoop* e) = 0;
     virtual void visit(DebugExpr* e) = 0;
 };
 

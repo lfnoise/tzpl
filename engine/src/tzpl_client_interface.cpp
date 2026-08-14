@@ -159,6 +159,17 @@ static bool pluginAbiAcceptable(void* handle, char const* path, bool verbose) {
         }
         return false;
     }
+    // Version 2 appended loop fields to tzpl_SampleBankEntry, changing the
+    // samples[] stride. Only plugins that index bank entries are affected, and
+    // exactly those export "swapSampleBank" (see the header's version notes).
+    if (version < 2 && dlsym(handle, "swapSampleBank")) {
+        if (verbose) {
+            fprintf(stderr, "*** ERROR: plugin '%s' (ABI version %lld) uses sample "
+                    "banks, whose entry layout changed in version 2; rebuild it\n",
+                    path, (long long)version);
+        }
+        return false;
+    }
     return true;
 }
 

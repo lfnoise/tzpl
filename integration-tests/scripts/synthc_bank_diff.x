@@ -66,6 +66,20 @@ fn bankVoicer2() S {
 	}) sum(1) outlet
 }
 
+-- voicer sampler with a sustain loop: loopPhasor reads the loopStart/
+-- loopEnd/hasLoop latched slots and wraps by the exact loop length.
+fn bankLoop() S {
+	let bank = sampleBankVar();
+	voicer(8, fn() S {
+		let pitch = noteParam("pitch", fullSpec);
+		let vel = noteParam("vel", velSpec);
+		let gate = noteParam("gate", gateSpec);
+		let h = bank lookup(pitch, vel);
+		let rate = ((pitch f64 - (h rootKey) f64) / 12.0) exp2 * (h sampleRate) * (T() f64);
+		h vread(loopPhasor(h, rate, gate), Interpolation.cubic) f32 * gate
+	}) sum(1) outlet
+}
+
 -- non-voicer bank: constant lookup, latched once at init
 fn bankTop() S {
 	let bank = sampleBankVar();
@@ -103,10 +117,12 @@ fn checkBankProd(name String, synthFn GraphFn) Void {
 
 checkBank("bankVoicer", bankVoicer);
 checkBank("bankVoicer2", bankVoicer2);
+checkBank("bankLoop", bankLoop);
 checkBank("bankTop", bankTop);
 checkBank("resetRand", resetRand);
 checkBankProd("bankVoicerProd", bankVoicer);
 checkBankProd("bankVoicer2Prod", bankVoicer2);
+checkBankProd("bankLoopProd", bankLoop);
 checkBankProd("bankTopProd", bankTop);
 checkBankProd("resetRandProd", resetRand);
 

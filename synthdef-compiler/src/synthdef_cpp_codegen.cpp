@@ -554,6 +554,9 @@ int CppCodeGen::simdWidth(GenLoop const& loop) {
                 expr.as<BankRootKey>() ||
                 expr.as<BankSampleRate>() ||
                 expr.as<BankLength>() ||
+                expr.as<BankLoopStart>() ||
+                expr.as<BankLoopEnd>() ||
+                expr.as<BankHasLoop>() ||
                 expr.as<DebugExpr>())
             {
                 return 0;
@@ -1678,6 +1681,9 @@ struct ExprCodegenVisitor : ExprVisitor {
     void visit(BankRootKey* p) override { s += g.bankSlot(p->lookup, "rootKey", cel); }
     void visit(BankSampleRate* p) override { s += g.bankSlot(p->lookup, "sr", cel); }
     void visit(BankLength* p) override { s += g.bankSlot(p->lookup, "len", cel); }
+    void visit(BankLoopStart* p) override { s += g.bankSlot(p->lookup, "loopStart", cel); }
+    void visit(BankLoopEnd* p) override { s += g.bankSlot(p->lookup, "loopEnd", cel); }
+    void visit(BankHasLoop* p) override { s += g.bankSlot(p->lookup, "hasLoop", cel); }
     void visit(DebugExpr* p) override { shouldBeHandledAsTree(p); }
 };
 
@@ -1754,6 +1760,9 @@ struct GenTreeExprVisitor : ExprVisitor {
     void visit(BankRootKey* p) override {}
     void visit(BankSampleRate* p) override {}
     void visit(BankLength* p) override {}
+    void visit(BankLoopStart* p) override {}
+    void visit(BankLoopEnd* p) override {}
+    void visit(BankHasLoop* p) override {}
     void visit(DebugExpr* p) override {}
 };
 
@@ -2366,6 +2375,9 @@ struct GenLoopExprVisitor : ExprVisitor {
     void visit(BankRootKey* p) override {}
     void visit(BankSampleRate* p) override {}
     void visit(BankLength* p) override {}
+    void visit(BankLoopStart* p) override {}
+    void visit(BankLoopEnd* p) override {}
+    void visit(BankHasLoop* p) override {}
     void visit(DebugExpr* p) override {}
 };
 
@@ -3055,6 +3067,9 @@ string CppCodeGen::genBankSlotDeclsFlat(int maxVoices) {
         s += FMT("\tf32 voice_lu{}_rootKey[{}];\n", lu->userial, maxVoices);
         s += FMT("\tf64 voice_lu{}_sr[{}];\n", lu->userial, maxVoices);
         s += FMT("\tf64 voice_lu{}_len[{}];\n", lu->userial, maxVoices);
+        s += FMT("\tf64 voice_lu{}_loopStart[{}];\n", lu->userial, maxVoices);
+        s += FMT("\tf64 voice_lu{}_loopEnd[{}];\n", lu->userial, maxVoices);
+        s += FMT("\ti32 voice_lu{}_hasLoop[{}];\n", lu->userial, maxVoices);
     }
     return s;
 }
@@ -3069,6 +3084,9 @@ string CppCodeGen::genBankSlotDeclsAoS() {
         s += FMT("\t\tf32 lu{}_rootKey;\n", lu->userial);
         s += FMT("\t\tf64 lu{}_sr;\n", lu->userial);
         s += FMT("\t\tf64 lu{}_len;\n", lu->userial);
+        s += FMT("\t\tf64 lu{}_loopStart;\n", lu->userial);
+        s += FMT("\t\tf64 lu{}_loopEnd;\n", lu->userial);
+        s += FMT("\t\ti32 lu{}_hasLoop;\n", lu->userial);
     }
     return s;
 }
@@ -3083,6 +3101,9 @@ string CppCodeGen::genBankSlotDeclsScalar() {
         s += FMT("\tf32 lu{}_rootKey;\n", lu->userial);
         s += FMT("\tf64 lu{}_sr;\n", lu->userial);
         s += FMT("\tf64 lu{}_len;\n", lu->userial);
+        s += FMT("\tf64 lu{}_loopStart;\n", lu->userial);
+        s += FMT("\tf64 lu{}_loopEnd;\n", lu->userial);
+        s += FMT("\ti32 lu{}_hasLoop;\n", lu->userial);
     }
     return s;
 }
@@ -3105,12 +3126,18 @@ string CppCodeGen::genSampleBankResolvers() {
             s += FMT("\t\tp->voice_lu{0}_rootKey[v] = 0.0f;\n", lu->userial);
             s += FMT("\t\tp->voice_lu{0}_sr[v] = 0.0;\n", lu->userial);
             s += FMT("\t\tp->voice_lu{0}_len[v] = 0.0;\n", lu->userial);
+            s += FMT("\t\tp->voice_lu{0}_loopStart[v] = 0.0;\n", lu->userial);
+            s += FMT("\t\tp->voice_lu{0}_loopEnd[v] = 0.0;\n", lu->userial);
+            s += FMT("\t\tp->voice_lu{0}_hasLoop[v] = 0;\n", lu->userial);
             s += "\t} else {\n";
             s += FMT("\t\ttzpl_SampleBankEntry* e = &bk->samples[idx];\n");
             s += FMT("\t\tp->voice_lu{0}_buf[v] = e->buf;\n", lu->userial);
             s += FMT("\t\tp->voice_lu{0}_rootKey[v] = e->rootKey;\n", lu->userial);
             s += FMT("\t\tp->voice_lu{0}_sr[v] = e->sampleRate;\n", lu->userial);
             s += FMT("\t\tp->voice_lu{0}_len[v] = e->buf ? (f64)e->buf->length : 0.0;\n", lu->userial);
+            s += FMT("\t\tp->voice_lu{0}_loopStart[v] = e->loopStart;\n", lu->userial);
+            s += FMT("\t\tp->voice_lu{0}_loopEnd[v] = e->loopEnd;\n", lu->userial);
+            s += FMT("\t\tp->voice_lu{0}_hasLoop[v] = e->hasLoop;\n", lu->userial);
             s += "\t}\n";
             s += "}\n\n";
         } else if (voicer) {
@@ -3123,12 +3150,18 @@ string CppCodeGen::genSampleBankResolvers() {
             s += FMT("\t\tvs.lu{0}_rootKey = 0.0f;\n", lu->userial);
             s += FMT("\t\tvs.lu{0}_sr = 0.0;\n", lu->userial);
             s += FMT("\t\tvs.lu{0}_len = 0.0;\n", lu->userial);
+            s += FMT("\t\tvs.lu{0}_loopStart = 0.0;\n", lu->userial);
+            s += FMT("\t\tvs.lu{0}_loopEnd = 0.0;\n", lu->userial);
+            s += FMT("\t\tvs.lu{0}_hasLoop = 0;\n", lu->userial);
             s += "\t} else {\n";
             s += FMT("\t\ttzpl_SampleBankEntry* e = &bk->samples[idx];\n");
             s += FMT("\t\tvs.lu{0}_buf = e->buf;\n", lu->userial);
             s += FMT("\t\tvs.lu{0}_rootKey = e->rootKey;\n", lu->userial);
             s += FMT("\t\tvs.lu{0}_sr = e->sampleRate;\n", lu->userial);
             s += FMT("\t\tvs.lu{0}_len = e->buf ? (f64)e->buf->length : 0.0;\n", lu->userial);
+            s += FMT("\t\tvs.lu{0}_loopStart = e->loopStart;\n", lu->userial);
+            s += FMT("\t\tvs.lu{0}_loopEnd = e->loopEnd;\n", lu->userial);
+            s += FMT("\t\tvs.lu{0}_hasLoop = e->hasLoop;\n", lu->userial);
             s += "\t}\n";
             s += "}\n\n";
         } else {
@@ -3140,12 +3173,18 @@ string CppCodeGen::genSampleBankResolvers() {
             s += FMT("\t\tp->lu{0}_rootKey = 0.0f;\n", lu->userial);
             s += FMT("\t\tp->lu{0}_sr = 0.0;\n", lu->userial);
             s += FMT("\t\tp->lu{0}_len = 0.0;\n", lu->userial);
+            s += FMT("\t\tp->lu{0}_loopStart = 0.0;\n", lu->userial);
+            s += FMT("\t\tp->lu{0}_loopEnd = 0.0;\n", lu->userial);
+            s += FMT("\t\tp->lu{0}_hasLoop = 0;\n", lu->userial);
             s += "\t} else {\n";
             s += FMT("\t\ttzpl_SampleBankEntry* e = &bk->samples[idx];\n");
             s += FMT("\t\tp->lu{0}_buf = e->buf;\n", lu->userial);
             s += FMT("\t\tp->lu{0}_rootKey = e->rootKey;\n", lu->userial);
             s += FMT("\t\tp->lu{0}_sr = e->sampleRate;\n", lu->userial);
             s += FMT("\t\tp->lu{0}_len = e->buf ? (f64)e->buf->length : 0.0;\n", lu->userial);
+            s += FMT("\t\tp->lu{0}_loopStart = e->loopStart;\n", lu->userial);
+            s += FMT("\t\tp->lu{0}_loopEnd = e->loopEnd;\n", lu->userial);
+            s += FMT("\t\tp->lu{0}_hasLoop = e->hasLoop;\n", lu->userial);
             s += "\t}\n";
             s += "}\n\n";
         }

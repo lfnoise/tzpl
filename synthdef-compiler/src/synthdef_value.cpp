@@ -432,6 +432,9 @@ namespace synthdef {
     S BS::rootKey() const { return addExpr(new BankRootKey{lookup_}); }
     S BS::sampleRate() const { return addExpr(new BankSampleRate{lookup_}); }
     S BS::length() const { return addExpr(new BankLength{lookup_}); }
+    S BS::loopStart() const { return addExpr(new BankLoopStart{lookup_}); }
+    S BS::loopEnd() const { return addExpr(new BankLoopEnd{lookup_}); }
+    S BS::hasLoop() const { return addExpr(new BankHasLoop{lookup_}); }
 
     u64 Bk::hash() const { return hash64(u64(sampleBank)); }
 

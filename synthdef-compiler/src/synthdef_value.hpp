@@ -385,6 +385,9 @@ public:
         S rootKey() const;
         S sampleRate() const;
         S length() const;
+        S loopStart() const;
+        S loopEnd() const;
+        S hasLoop() const;
     };
 
     // Bk is a SampleBank reference type, parallel to B for SampleBuf.

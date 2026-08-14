@@ -167,6 +167,9 @@ fn _kindKey(kind NodeKind) String = match (kind) {
 	bankRootKeyK:                   "BKR";
 	bankSampleRateK:                "BKS";
 	bankLengthK:                    "BKN";
+	bankLoopStartK:                 "BLS";
+	bankLoopEndK:                   "BLE";
+	bankHasLoopK:                   "BHL";
 	ifK:                  "IF";
 	switchK(nc):          "SW|" $ nc toString;
 	forK:                 "FOR";
@@ -827,6 +830,21 @@ fn _importExpr(e SignalExpr) Void {
 					let ins = e _resolveIns;
 					_mapId(e.id, _addExprNode(NodeKind.bankLengthK, ins,
 						Rate.reset, FLOAT64, 1));
+				}
+				loopStart: {
+					let ins = e _resolveIns;
+					_mapId(e.id, _addExprNode(NodeKind.bankLoopStartK, ins,
+						Rate.reset, FLOAT64, 1));
+				}
+				loopEnd: {
+					let ins = e _resolveIns;
+					_mapId(e.id, _addExprNode(NodeKind.bankLoopEndK, ins,
+						Rate.reset, FLOAT64, 1));
+				}
+				hasLoop: {
+					let ins = e _resolveIns;
+					_mapId(e.id, _addExprNode(NodeKind.bankHasLoopK, ins,
+						Rate.reset, INT32, 1));
 				}
 			}
 		}

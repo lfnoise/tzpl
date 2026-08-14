@@ -452,6 +452,9 @@ enum BankOp {
 	rootKey,
 	sampleRate,
 	length,
+	loopStart,
+	loopEnd,
+	hasLoop,
 }
 
 enum SignalExprKind {
@@ -919,6 +922,40 @@ fn length(h BankSample) S {
 	SignalExprKind.bank(BankOp.length) _newSignalExpr([h.expr])
 }
 
+-- The resolved sample's sustain loop: start/end in frames of the source
+-- file, loopEnd exclusive and possibly fractional. When the sample has no
+-- loop (hasLoop 0) the range is still usable -- 0 to the sample's length --
+-- so loopPhasor needs no validity check.
+fn loopStart(h BankSample) S {
+	SignalExprKind.bank(BankOp.loopStart) _newSignalExpr([h.expr])
+}
+
+fn loopEnd(h BankSample) S {
+	SignalExprKind.bank(BankOp.loopEnd) _newSignalExpr([h.expr])
+}
+
+fn hasLoop(h BankSample) S {
+	SignalExprKind.bank(BankOp.hasLoop) _newSignalExpr([h.expr])
+}
+
+-- A per-voice looping playhead over the resolved sample: advances by `rate`
+-- frames per engine sample (starting from 0 at note-on). While `sustain` is
+-- positive and the sample has a loop, crossing the loop end wraps by
+-- subtracting the exact loop length -- the fractional overshoot carries
+-- through, so the loop period is sub-sample accurate at any rate; feed the
+-- result to vread and the interpolator handles the fractional positions.
+-- When `sustain` falls to 0 (or the sample has no loop) the playhead runs
+-- on past the loop toward the end of the sample. Assumes |rate| is smaller
+-- than the loop length (one subtraction per sample).
+fn loopPhasor(h BankSample, rate AsSignal, sustain AsSignal) S {
+	let d = delayVar();
+	let pos = d read(1);
+	let next = pos + (rate asSignal);
+	let wrap = ((sustain asSignal) > 0.0) * (h hasLoop) * (next >= (h loopEnd));
+	select2(wrap, next - ((h loopEnd) - (h loopStart)), next) -> d;
+	pos
+}
+
 ---------------------------------------------------------------------------
 --- Vector operations
 
@@ -1224,6 +1261,12 @@ fn toLisp(o S, indentLevel Int) String {
                 "(%^ BankSampleRate %^)" fmt(o.id, o inputsToLisp);
             length :
                 "(%^ BankLength %^)" fmt(o.id, o inputsToLisp);
+            loopStart :
+                "(%^ BankLoopStart %^)" fmt(o.id, o inputsToLisp);
+            loopEnd :
+                "(%^ BankLoopEnd %^)" fmt(o.id, o inputsToLisp);
+            hasLoop :
+                "(%^ BankHasLoop %^)" fmt(o.id, o inputsToLisp);
         }
 
         if_(thenGraph, elseGraph) : {

@@ -967,6 +967,13 @@ void test_bank_lookup_voicer_codegen() {
     assert(code.find("extern \"C\" tzpl_SampleBankDefList loadSampleBankDefs") != string::npos);
     // Swap re-resolves all voices
     assert(code.find("for (int v = 0; v < 8; ++v) test_bank_voicer_lu") != string::npos);
+    // Loop slots are declared and filled even when the graph doesn't read
+    // them (they ride the same resolver as rootKey/sr/len)
+    assert(code.find("_loopStart[") != string::npos);
+    assert(code.find("_loopEnd[") != string::npos);
+    assert(code.find("_hasLoop[") != string::npos);
+    assert(code.find("e->loopStart") != string::npos);
+    assert(code.find("e->hasLoop") != string::npos);
 
     printf("  bank lookup: per-voice slots, resolver, swap, defs\n");
 }
@@ -1009,8 +1016,13 @@ void test_bank_sexpr_parse() {
          (5 BankRootKey (2))
          (6 BankSampleRate (2))
          (7 BankLength (2))
-         (8 BinaryOp mul (4 7))
-         (9 Outlet "out" 8))
+         (8 BankLoopStart (2))
+         (9 BankLoopEnd (2))
+         (10 BankHasLoop (2))
+         (11 BinaryOp sub (9 8))
+         (12 BinaryOp mul (7 11))
+         (13 BinaryOp mul (4 12))
+         (14 Outlet "out" 13))
     )";
     auto result = synthFromSExprText(sexprText, "test_bank_sexpr");
     if (!result.has_value()) {
@@ -1027,6 +1039,10 @@ void test_bank_sexpr_parse() {
         assert(code.find("_resolve(p)") != string::npos);
         assert(code.find("extern \"C\" tzpl_SampleBank* swapSampleBank") != string::npos);
         assert(code.find("extern \"C\" tzpl_SampleBankDefList loadSampleBankDefs") != string::npos);
+        // Loop accessors read the scalar latched slots
+        assert(code.find("_loopStart") != string::npos);
+        assert(code.find("_loopEnd") != string::npos);
+        assert(code.find("_hasLoop") != string::npos);
     }
 
     printf("  sexpr parse and non-voicer codegen succeeded\n");

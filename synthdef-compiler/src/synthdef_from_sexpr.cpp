@@ -941,6 +941,15 @@ std::expected<S, std::string> SExprGraphBuilder::parseBankSampleRate(sexpr::Item
 std::expected<S, std::string> SExprGraphBuilder::parseBankLength(sexpr::ItemVec const& list) {
     return parseBankAccessor<BankLength>(*this, list, "BankLength");
 }
+std::expected<S, std::string> SExprGraphBuilder::parseBankLoopStart(sexpr::ItemVec const& list) {
+    return parseBankAccessor<BankLoopStart>(*this, list, "BankLoopStart");
+}
+std::expected<S, std::string> SExprGraphBuilder::parseBankLoopEnd(sexpr::ItemVec const& list) {
+    return parseBankAccessor<BankLoopEnd>(*this, list, "BankLoopEnd");
+}
+std::expected<S, std::string> SExprGraphBuilder::parseBankHasLoop(sexpr::ItemVec const& list) {
+    return parseBankAccessor<BankHasLoop>(*this, list, "BankHasLoop");
+}
 
 // Control flow - these need special handling for subgraphs
 std::expected<S, std::string> SExprGraphBuilder::parseSelectExpr(sexpr::ItemVec const& list) {
@@ -1335,6 +1344,9 @@ std::expected<S, std::string> SExprGraphBuilder::parseExpr(sexpr::Item const& it
     else if (type == "BankRootKey") return parseBankRootKey(list);
     else if (type == "BankSampleRate") return parseBankSampleRate(list);
     else if (type == "BankLength") return parseBankLength(list);
+    else if (type == "BankLoopStart") return parseBankLoopStart(list);
+    else if (type == "BankLoopEnd") return parseBankLoopEnd(list);
+    else if (type == "BankHasLoop") return parseBankHasLoop(list);
     else if (type == "SelectExpr") return parseSelectExpr(list);
     else if (type == "IfExpr") return parseIfExpr(list);
     else if (type == "SwitchExpr") return parseSwitchExpr(list);
