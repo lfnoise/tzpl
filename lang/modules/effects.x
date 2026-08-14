@@ -49,7 +49,7 @@ fn dampcomb(x S, delaySec AsSignal, maxDelaySec Float, decayTime AsSignal, damp 
 	let y = delayVar(maxDelaySec * fs() + 4.0);
 	let tap = y vread(ds, Interpolation.linear);
 	let coef = decay60dB(decayTime / delaySec);
-	y <- x + coef * (tap onepole(damp));
+	y <- x + coef * tap onepole(damp);
 	tap
 }
 

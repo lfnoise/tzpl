@@ -105,7 +105,7 @@ fn ksString(exc S, freq AsSignal, decayTime AsSignal = 3.0, damp AsSignal = 0.35
 	let buf = delayVar(0.05 * fs());
 	let tap = buf vread(fs() / f);
 	let loss = (f * decayTime asSignal) decay60dB;
-	(exc + tap onepole(damp) * loss) write(buf);
+	buf <- exc + tap onepole(damp) * loss;
 	tap
 }
 
@@ -162,7 +162,7 @@ fn smpPerc(maxVoices Int = kMaxVoices) () S {
 			let g = gate();
 			let h = bank lookup(pitch, vel);
 			let pos = h loopPhasor(bankRate(h, pitch), 0.0);
-			h bankRead(pos) * (vel velAmp)
+			h bankRead(pos) * vel velAmp
 		}) sum(2) outlet
 	}
 }
@@ -182,7 +182,7 @@ fn smpLoopTail(maxVoices Int = kMaxVoices) () S {
 			let g = gate();
 			let h = bank lookup(pitch, vel);
 			let pos = h loopPhasor(bankRate(h, pitch), g);
-			h bankRead(pos) * (vel velAmp)
+			h bankRead(pos) * vel velAmp
 		}) sum(2) outlet
 	}
 }
@@ -204,7 +204,7 @@ fn smpLoopEnv(maxVoices Int = kMaxVoices) () S {
 			let h = bank lookup(pitch, vel);
 			let pos = h loopPhasor(bankRate(h, pitch), 1.0);
 			let env = g susrel(1.0, rel);
-			h bankRead(pos) * env * (vel velAmp)
+			h bankRead(pos) * env * vel velAmp
 		}) sum(2) outlet
 	}
 }
@@ -276,7 +276,7 @@ fn ksPluck(maxVoices Int = kMaxVoices) () S {
 			let f = noteFreq();
 			let a = noteAmp();
 			let g = gate();
-			let exc = white() * (g tr decay2(0.0005, pluckT));
+			let exc = white() * g tr decay2(0.0005, pluckT);
 			exc ksString(f, dcy, damp) * a * 0.5
 		}) sum outlet
 	}
