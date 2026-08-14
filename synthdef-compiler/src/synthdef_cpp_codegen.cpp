@@ -398,6 +398,9 @@ struct CppCodeGen {
     int flatVoiceChans = 0;        // per-voice channel count
     int flatChanShift = 0;         // log2(chans) for current loop
     int flatChanMask = 0;          // chans - 1 for current loop
+    usize flatLoopTotal = 0;       // flat element trip count for current loop
+                                   // (voices x chans, or loop chans for a
+                                   // voice-expanded PhiNode loop)
 
     // Single-voice flat mode: emit flat-voice loops for just the voice `vi`
     // (in scope at the emission site). Used for reset-rate loops in _noteOn,
@@ -729,6 +732,13 @@ string CppCodeGen::genVarRef(S expr, VarIndex cel) {
             // Non-voice var in SIMD flat mode
             if (expr->chans == 1) {
                 return simdSplat(expr->type, currentSimdWidth, s);
+            } else if (expr->chans == flatLoopTotal) {
+                // Spans the loop's full flat element range (a voice-expanded
+                // temp, e.g. the PhiNode copy's source/dest): direct load.
+                // The index never wraps, and the voice total need not be a
+                // power of two, so no mask.
+                return simdLoad(expr->type, currentSimdWidth,
+                    FMT("&{}[{}]", s, vxstr(cel)));
             } else if (expr->chans >= (usize)currentSimdWidth) {
                 // Wrap channel index within var's range
                 if (auto* cp = std::get_if<ptrdiff_t>(&cel)) {
@@ -2512,6 +2522,7 @@ string CppCodeGen::genLoop(GenLoop const& loop) {
                     flatChanMask = loop.chans - 1;
                 }
             }
+            flatLoopTotal = totalCount;
             int width = simdWidth(loop);
             if (width > 0) {
                 inSimdMode = true;

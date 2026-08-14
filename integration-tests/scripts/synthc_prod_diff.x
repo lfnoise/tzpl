@@ -56,6 +56,10 @@ checkProd("subBass", subBass);
 -- declaration order).
 checkProd("lib_wtLead", wtLead());
 checkProd("lib_ksPluck", ksPluck());
+-- non-power-of-two voice count: the flat SIMD phi copy loop must index the
+-- voice-expanded temp directly (a `& (voices-1)` wrap mask scrambled/skipped
+-- voices for 12 -- both compilers agreed, so only a non-pow2 case covers it)
+checkProd("lib_ksPluck12", ksPluck(12));
 checkProd("lib_resonBank", resonBank());
 checkProd("lib_smpPerc", smpPerc());
 checkProd("lib_smpLoopTail", smpLoopTail());

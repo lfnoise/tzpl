@@ -39,6 +39,10 @@ render_seeded /tmp/synthc_ab_rng_ref.wav    "$SCRIPTS/synthc_render_ab_rng_ref.x
 render_seeded /tmp/synthc_ab_rng_synthc.wav "$SCRIPTS/synthc_render_ab_rng_synthc.x"
 render /tmp/synthc_ab_cf_ref.wav    "$SCRIPTS/synthc_render_ab_cf_ref.x"
 render /tmp/synthc_ab_cf_synthc.wav "$SCRIPTS/synthc_render_ab_cf_synthc.x"
+# voicer12: NON-power-of-two voice count (12-voice pluck); guards the flat
+# phi-copy indexing where a pow2 wrap mask silenced voices (seeded: noise-excited).
+render_seeded /tmp/synthc_ab_voicer12_ref.wav    "$SCRIPTS/synthc_render_ab_voicer12_ref.x"
+render_seeded /tmp/synthc_ab_voicer12_synthc.wav "$SCRIPTS/synthc_render_ab_voicer12_synthc.x"
 render /tmp/synthc_ab_merge_ref.wav    "$SCRIPTS/synthc_render_ab_merge_ref.x"
 render /tmp/synthc_ab_merge_synthc.wav "$SCRIPTS/synthc_render_ab_merge_synthc.x"
 # Spectral has no C++ reference (the C++ compiler's SIMD spectral codegen is

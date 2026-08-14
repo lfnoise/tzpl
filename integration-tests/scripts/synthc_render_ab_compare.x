@@ -26,6 +26,10 @@ _check("vdelay", "/tmp/synthc_ab_vdelay_ref.wav", "/tmp/synthc_ab_vdelay_synthc.
 _check("bubbles", "/tmp/synthc_ab_bubbles_ref.wav", "/tmp/synthc_ab_bubbles_synthc.wav");
 _check("rng", "/tmp/synthc_ab_rng_ref.wav", "/tmp/synthc_ab_rng_synthc.wav");
 _check("cf", "/tmp/synthc_ab_cf_ref.wav", "/tmp/synthc_ab_cf_synthc.wav");
+-- voicer12: a non-power-of-two voicer (12 voices); the non-silence assert is
+-- the real guard here (a pow2 wrap mask in the flat phi copy silenced voices
+-- in BOTH compilers, so bit-parity alone passed vacuously).
+_check("voicer12", "/tmp/synthc_ab_voicer12_ref.wav", "/tmp/synthc_ab_voicer12_synthc.wav");
 -- merge: synthc collapses two identical delay lines into one (Faust-style); must
 -- render bit-identically to the C++ two-buffer build.
 _check("merge", "/tmp/synthc_ab_merge_ref.wav", "/tmp/synthc_ab_merge_synthc.wav");

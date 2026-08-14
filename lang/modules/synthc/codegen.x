@@ -216,6 +216,13 @@ fn _varRef(ctx Ctx, n NIdx, cel String) String {
 		}
 		-- non-voice var in SIMD flat mode
 		if (C == 1) { return _simdSplat(t, w, s); }
+		if (C == `cgFlatTrip) {
+			-- Spans the loop's full flat element range (a voice-expanded temp,
+			-- e.g. the phi copy loop's source/dest): direct load. The index
+			-- never wraps, and the voice total need not be a power of two,
+			-- so no mask (`& (C-1)` is wrong for e.g. 12 voices).
+			return _simdLoad(t, w, "&%^[%^]" fmt(s, cel));
+		}
 		if (C >= w) {
 			if (cel == "0") { return _simdLoad(t, w, "&%^[%^]" fmt(s, 0 & (C - 1))); }
 			return _simdLoad(t, w, "&%^[%^ & %^]" fmt(s, cel, C - 1));
@@ -1716,6 +1723,7 @@ fn genLoop(ctx Ctx, loopIdx Int) String {
 	var `cgFlatChanShift Int = (flat && perVoiceChans > 1) ? _log2(perVoiceChans) : 0;
 	var `cgFlatChanMask Int = (flat && perVoiceChans > 1) ? perVoiceChans - 1 : 0;
 	let trip = flat ? (isPhi ? loop.chans : `cgVoiceCount * loop.chans) : loop.chans;
+	var `cgFlatTrip Int = flat ? trip : 0;
 
 	-- Sort antecedent serials so the LOOP comment is deterministic (the C++
 	-- loop_antecedents is an unordered_set; both sides sort ascending to match).
@@ -2848,6 +2856,9 @@ fn genCpp(ctx Ctx, name String, simdWidth Int = 0) String {
 	var `cgVoiceChans Int = 1;        -- per-voice channel count (body root chans)
 	var `cgFlatChanShift Int = 0;     -- log2(perVoiceChans) for the current flat loop
 	var `cgFlatChanMask Int = 0;      -- perVoiceChans - 1 for the current flat loop
+	var `cgFlatTrip Int = 0;          -- flat element trip count for the current
+	                                  -- loop (voices x chans, or loop chans for a
+	                                  -- voice-expanded phi loop)
 	-- Reset-loop emission state (mirrors inResetMode / singleVoiceMode):
 	-- cgInResetMode makes NoteParam/Control roots read their live sources;
 	-- cgSingleVoice makes flat loops run for just the voice `vi` in scope.
