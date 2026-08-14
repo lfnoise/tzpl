@@ -505,6 +505,15 @@ fn iseq(trigger S, pattern AsSignal, length AsSignal) S {
 -- Segment times are in seconds: the time to close 99% of the distance to
 -- the segment's goal (a decay40dB interval).
 
+-- sustain-release: jumps straight to sustain level s at gate-on (no attack
+-- segment -- for sources that carry their own attack, e.g. samples),
+-- exponential release over r seconds at gate-off.
+fn susrel(gate S, s, r) S {
+	let coef = decay40dB(r * fs());
+	let y = delayVar();
+	y <- select2(gate > 0, s asSignal, coef * y(1))
+}
+
 fn asr(gate S, a, s, r) S {
 	let a = decay40dB(a * fs());
 	let r = decay40dB(r * fs());

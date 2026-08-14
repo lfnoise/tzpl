@@ -1438,6 +1438,7 @@ noteOff(<span class="hl-num">100</span>, <span class="hl-num">1</span>);</code><
             <h3 id="ug-env">15.10 Envelopes and smoothing</h3>
             <table>
                 <tr><th>Function</th><th>Description</th></tr>
+                <tr><td><code>susrel(gate, s, r)</code></td><td>Sustain-release envelope: jumps straight to sustain level <code>s</code> at gate-on (no attack segment &mdash; for sources that carry their own attack, e.g. samples); exponential release over <code>r</code> seconds when the gate falls.</td></tr>
                 <tr><td><code>asr(gate, a, s, r)</code></td><td>Attack-sustain-release envelope driven by a gate: exponential attack over <code>a</code> seconds toward sustain level <code>s</code>; exponential release over <code>r</code> seconds when the gate falls. (A segment time is the time to close 99% of the distance to its goal; see <code>decay40dB</code>.)</td></tr>
                 <tr><td><code>adsr(gate, a, d, s, r)</code></td><td>Attack-decay-sustain-release: full-scale attack over <code>a</code> seconds, decay to sustain <code>s</code> over <code>d</code> seconds, release over <code>r</code> seconds on gate-off.</td></tr>
                 <tr><td><code>lag(x, t)</code> / <code>lag2</code> / <code>lag3</code></td><td>Exponential smoothing toward <code>x</code> with time constant <code>t</code> seconds (one, two, or three cascaded stages &mdash; higher orders are smoother). The standard control de-zipper.</td></tr>
