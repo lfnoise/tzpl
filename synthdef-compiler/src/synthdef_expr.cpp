@@ -450,6 +450,13 @@ namespace synthdef {
         checkType(new_type);
 //        printf("DelayWrite::update_type %llu %s -> %s\n", delayBuf->serial, type.str().c_str(), new_type.str().c_str());
         type = new_type;
+        // Push the write's type into its input (base inputTypeConstraint), so a
+        // buffer constrained through its readers (e.g. an integer stage variable
+        // whose reads feed select/switch selector inputs) constrains the written
+        // expression too. Mirrors synthc's _updateDelayWrite, which propagates
+        // unconditionally; without this the written expression can stay
+        // unconstrained and default-resolve to a different type than the buffer.
+        propagate_types(worklist);
         if (delayBuf->type != new_type) {
             delayBuf->type = new_type;
             propagate_delay_types(delayBuf, worklist);
