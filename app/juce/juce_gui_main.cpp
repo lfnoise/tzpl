@@ -311,10 +311,11 @@ public:
         if (auto* p = std::getenv("TZPL_JUCE_OPEN")) {
             auto* mc = window_->mainComponent();
             mc->openPath(juce::File(juce::String(p)));
-            std::printf("JUCE OPEN: tabHasPath=%d nbHasPath=%d\n",
+            std::printf("JUCE OPEN: tabHasPath=%d nbHasPath=%d nbActive=%d\n",
                         (int)mc->testEditorPane().activeHasFilePath(),
                         (int)(mc->testNotebook().currentFile()
-                              != juce::File()));
+                              != juce::File()),
+                        (int)mc->notebookActive());
             std::fflush(stdout);
             // TZPL_JUCE_EVAL=1: evaluate the just-opened file (creates ui
             // widgets etc.) shortly after the window is up.

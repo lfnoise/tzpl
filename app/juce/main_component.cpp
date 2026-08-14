@@ -51,13 +51,10 @@ MainComponent::MainComponent(bridge::AppContext& appCtx,
     addAndMakeVisible(statusBar_);
 
     // Folder sidebar: the folders it holds persist across launches, and a
-    // click on a file row opens it in the editor (switching away from the
-    // notebook/graph, which would otherwise hide the tab that just opened).
+    // click on a file row opens it (openPath switches to the mode that
+    // shows the file).
     addChildComponent(sidebar_);
-    sidebar_.onOpenFile = [this](juce::File f) {
-        openPath(f);
-        if (!f.hasFileExtension("tzd")) setCenterMode(CenterMode::editor);
-    };
+    sidebar_.onOpenFile = [this](juce::File f) { openPath(f); };
     sidebar_.onFoldersChanged = [this] {
         settings_.setValue("sidebarFolders",
                            sidebar_.folderPaths().joinIntoString("\n"));
@@ -690,6 +687,7 @@ void MainComponent::openPath(juce::File const& file) {
                 logLine("(example: editing a copy; Save asks for a location)");
             });
         } else if (editorPane_.openFileAsCopy(file)) {
+            setCenterMode(CenterMode::editor);
             logLine("opened a copy of " + file.getFullPathName());
         } else {
             logLine("could not open " + file.getFullPathName());
@@ -701,7 +699,12 @@ void MainComponent::openPath(juce::File const& file) {
         // Opening a notebook replaces the current one.
         confirmNotebookDiscardThen(
             [this, file] { openNotebookFile(file); });
-    else if (!editorPane_.openFile(file))
+    else if (editorPane_.openFile(file))
+        // Switch away from the notebook/graph, which would otherwise hide
+        // the tab that just opened (e.g. a Finder double-click on a .x
+        // lands after startup has already shown a fresh notebook).
+        setCenterMode(CenterMode::editor);
+    else
         logLine("could not open " + file.getFullPathName());
 }
 
