@@ -2388,6 +2388,24 @@ string CppCodeGen::genLoop(GenLoop const& loop) {
     // Skip loops with zero channels (e.g. DelayInit sinks handled by genDelayInit)
     if (loop.chans == 0) return s;
 
+    // Auto-enter flat voice mode for a voicer-body loop reached outside the
+    // voicer (e.g. an event-rate loop emitted from genHandleEventsFun, where
+    // per-voice values like the adsr coefficients recompute on a control
+    // change). Mirrors the auto-enter in synthc's genLoop.
+    if (flatVoiceMode && !inFlatVoiceMode && voicerExpr && !loop.trees.empty()
+        && isVoicerSubgraph(loop.trees[0]->root->graph)) {
+        inFlatVoiceMode = true;
+        int prevCount = flatVoiceCount;
+        int prevChans = flatVoiceChans;
+        flatVoiceCount = voicerExpr->maxVoices;
+        flatVoiceChans = voicerExpr->voice_body->in0()->chans;
+        string out = genLoop(loop);
+        flatVoiceCount = prevCount;
+        flatVoiceChans = prevChans;
+        inFlatVoiceMode = false;
+        return out;
+    }
+
     {
         // DEBUG {
             // loop_antecedents is an unordered_set; sort serials so the comment
@@ -3590,6 +3608,12 @@ string CppCodeGen::genDeclInstVars() {
         s = "\t// instance variables\n" + s + "\n";
     }
 
+    // Voicer state sits between the scalar instance variables and the
+    // spectral/delay/buffer sections, matching synthc's genDeclInstVars
+    // (the orders only diverge when a voicer synth also has scalar
+    // instance variables -- e.g. controls feeding event-rate expressions).
+    s += genDeclVoiceState();
+
     // Spectral chain state
     for (S expr : synth->sorted) {
         if (auto sc = expr.as<SpectralChainExpr>(); sc) {
@@ -3944,7 +3968,6 @@ string CppCodeGen::genClass()
     s += "\n";
 //    s += genDeclPortVars();
     s += genDeclConstVars();
-    s += genDeclVoiceState();
     s += genDeclInstVars();
     s += "} " + name + ";\n\n";
 

@@ -208,42 +208,22 @@ namespace synthdef {
     
 class ExprIdentityBag {
     unordered_map<S, usize, ExprIdentityHasher, ExprIdentical> map;
+    // Distinct members in first-insertion order. exprs() iterates this, NOT
+    // the hash map: type inference enqueues consumers from it, and iterating
+    // a pointer-hashed map there made the inference walk (and therefore
+    // which types the propagation holes leave unnarrowed) depend on arena
+    // addresses -- diverging from the Tzopilotl-hosted compiler, which keeps
+    // consumers in insertion-ordered arrays.
+    vector<S> order_;
     usize total_ = 0;
 public:
-    auto begin() const { return map.cbegin(); }
-    auto end() const { return map.cend(); }
+    auto begin() const { return order_.cbegin(); }
+    auto end() const { return order_.cend(); }
 
-private:
-    template <typename IteratorType>
-    struct ExprIterator {
-        using iterator_category = std::forward_iterator_tag;
-        using value_type = S;
-        using difference_type = usize;
-        using pointer = S*;
-        using reference = S&;
-
-        IteratorType i;
-
-        ExprIterator(IteratorType i) : i(i) {}
-
-        ExprIterator const& operator++() { ++i; return *this; }
-        ExprIterator operator++(int) { auto j = *this; ++i; return j; }
-        bool operator==(ExprIterator that) const { return i == that.i; }
-        bool operator!=(ExprIterator that) const { return i != that.i; }
-        S operator*() const { return i->first; }
-    };
-
-    struct Exprs {
-        ExprIdentityBag const& bag;
-
-        Exprs(ExprIdentityBag const& bag) : bag(bag) {}
-        auto begin() const { return ExprIterator<decltype(bag.map.cbegin())>(bag.map.cbegin()); }
-        auto end() const { return ExprIterator<decltype(bag.map.cend())>(bag.map.cend()); }
-    };
 public:
     ExprIdentityBag() {}
 
-    bool empty() const { return map.empty(); }
+    bool empty() const { return order_.empty(); }
     usize total() const { return total_; }
     usize count(S expr) const {
         auto i = map.find(expr);
@@ -251,10 +231,13 @@ public:
     }
     usize insert(S expr) {
         ++total_;
-        return ++map[expr];
+        auto& c = map[expr];
+        if (c == 0) order_.push_back(expr);
+        return ++c;
     }
     void clear() {
         map.clear();
+        order_.clear();
         total_ = 0;
     }
     bool contains(S expr) const {
@@ -266,11 +249,14 @@ public:
         --total_;
         if (--i->second == 0) {
             map.erase(i);
+            for (auto j = order_.begin(); j != order_.end(); ++j) {
+                if (j->get() == expr.get()) { order_.erase(j); break; }
+            }
             return 0;
         }
         return i->second;
     }
-    Exprs exprs() const { return Exprs(*this); }
+    vector<S> const& exprs() const { return order_; }
 };
 
 

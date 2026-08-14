@@ -12,6 +12,7 @@ import synthdef.*;
 import common_ugens.*;
 import filters.*;
 import instrument_synthdefs.*;
+import instruments.*;
 import synthc.ir.*;
 import synthc.importer.*;
 import synthc.passes.*;
@@ -47,6 +48,18 @@ checkProd("modalBell", modalBell);
 checkProd("kick", kick);
 checkProd("snare", snare);
 checkProd("subBass", subBass);
+
+-- the instruments.x library defs (voicers whose event-rate expressions mix
+-- node-level controls with per-voice values -- wtLead's control-driven adsr
+-- coefficients caught two C++-side bugs the corpus above cannot: the
+-- flat-voice auto-enter for event loops and the voicer-vs-scalar struct
+-- declaration order).
+checkProd("lib_wtLead", wtLead());
+checkProd("lib_ksPluck", ksPluck());
+checkProd("lib_resonBank", resonBank());
+checkProd("lib_smpPerc", smpPerc());
+checkProd("lib_smpLoopTail", smpLoopTail());
+checkProd("lib_smpLoopEnv", smpLoopEnv());
 
 -- a non-voicer audio synth + a delay synth exercising rewrites + SIMD together.
 fn arith() S { (inlet(FLOAT32, 4) * 0.5 + 0.5) sin * [0.1, 0.2, 0.3, 0.4] |> outlet }

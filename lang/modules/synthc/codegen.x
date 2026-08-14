@@ -2239,12 +2239,20 @@ fn genVoicerNoteFuns(ctx Ctx, name String) String {
 		s = s $ "\t\tmemcpy(row + n + 1, defaults + n, (%^ - n) * sizeof(f32));\n" fmt(nUser);
 		s = s $ "\t}\n";
 	}
-	-- zero per-voice audio-rate inst vars (in body loop/tree order)
+	-- zero per-voice audio-rate inst vars (in body loop/tree order); a
+	-- multichannel var (e.g. a ringing-filter bank's per-mode state) clears
+	-- all of its channels, or a reused voice starts with the previous
+	-- note's state in channels 1..N-1
 	for (lp : ctx.loops) {
 		for (t : lp.trees) {
 			let root = ctx.trees[t].root;
 			if (ctx.graphOf[root] == bg && ctx _isInstVar(root) && ctx.nrate[root] != Rate.init) {
-				s = s $ "\tp->voice_v%^[vi] = 0;\n" fmt(ctx.serial[root]);
+				if (ctx.chans[root] == 1) {
+					s = s $ "\tp->voice_v%^[vi] = 0;\n" fmt(ctx.serial[root]);
+				} else {
+					s = s $ "\tfor (int c = 0; c < %^; ++c) p->voice_v%^[vi * %^ + c] = 0;\n"
+						fmt(ctx.chans[root], ctx.serial[root], ctx.chans[root]);
+				}
 			}
 		}
 	}
