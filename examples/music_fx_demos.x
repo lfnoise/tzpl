@@ -2,13 +2,21 @@
 -- and effects libraries together (about 3.5 minutes end to end).
 --
 -- One persistent node graph: three instruments from lang/modules/instruments.x
--- (wtLead, ksPluck, resonBank), each feeding its own effect chain from
--- lang/modules/effects.x, all chains meeting at a shared reverb bus (the
--- engine splices fan-in mixers automatically):
+-- (wtLead, ksPluck, resonBank), each through a gain trim into its own effect
+-- chain from lang/modules/effects.x, all chains meeting at a shared reverb
+-- bus (the engine splices fan-in mixers automatically):
 --
---     wtLead(101)    -> fxChorus(201) -> fxEcho(202) --\
---     ksPluck12(102) -> fxPingPong(203) ---------------+-> fxReverb(205) -> out
---     resonBank(103) -> fxPhaser(204) -----------------/
+--     wtLead(101)    -> gain(211) -> fxChorus(201) -> fxEcho(202) --\
+--     ksPluck12(102) -> gain(212) -> fxPingPong(203) ---------------+-> fxReverb(205) -> out
+--     resonBank(103) -> gain(213) -> fxPhaser(204) -----------------/
+--
+-- When this file is evaluated in the app (GUI), it also builds live
+-- controls: a "mixer" panel with one level slider per chain and an output
+-- meter, plus one spec-derived panel per instrument and per effect
+-- (controls(node) materializes every declared control as a correctly
+-- ranged widget). Drag while the demos play; note that each demo re-dials
+-- the instrument/effect panels at its start. Headless runs are unaffected
+-- (the widgets are just never shown).
 --
 -- Three demos then play different music through that graph, one per
 -- composition dialect, each a multi-section arrangement with several
@@ -42,6 +50,7 @@
 import synthdef.*;
 import synthc.compile.*;
 import wavetables.*;
+import common_ugens.*;
 import instruments.*;
 import effects.*;
 import clock.*;
@@ -50,10 +59,23 @@ import music.pat.*;
 import music.media.*;
 import music.spans.*;
 import music.play.*;
+import ui.*;
+
+---------------------------------------------------------------------------
+-- A per-chain gain trim: stereo in, one smoothed level control, out.
+-- The three instances are the demo's mixer.
+
+fn fxGain() S {
+	let x = inlet(FLOAT32, 2);
+	let lvl = control("level", ControlSpec { lo: 0.0, hi: 2.0, init: 1.0,
+	                                         warp: ControlWarp.linear }) lag(0.02);
+	(x * lvl) outlet
+}
 
 ---------------------------------------------------------------------------
 -- Compile the instrument and effect defs (async; await before first play).
 
+let cGain   = fxGain defSynthX("fxGain");
 let cLead   = wtLead() defSynthX("wtLead");
 let cPluck  = ksPluck(12) defSynthX("ksPluck12");
 let cBank   = resonBank() defSynthX("resonBank");
@@ -62,7 +84,7 @@ let cEcho   = fxEcho defSynthX("fxEcho");
 let cPong   = fxPingPong defSynthX("fxPingPong");
 let cPhase  = fxPhaser defSynthX("fxPhaser");
 let cVerb   = fxReverb defSynthX("fxReverb");
-await cLead; await cPluck; await cBank;
+await cGain; await cLead; await cPluck; await cBank;
 await cChorus; await cEcho; await cPong; await cPhase; await cVerb;
 
 ---------------------------------------------------------------------------
@@ -76,32 +98,47 @@ const kEcho   = 202;
 const kPong   = 203;
 const kPhase  = 204;
 const kVerb   = 205;    -- shared reverb bus
+const kGainLead  = 211; -- per-chain level trims (the mixer)
+const kGainPluck = 212;
+const kGainBank  = 213;
 
 engineStart();
-masterGain(0.2);
+masterGain(0.3);   -- the pad trim takes the mix down; make it back up here
 
 begin();
 newNode("wtLead", kLead);
 fillBuffer(kLead, 0, 1, sawTables(1.0));    -- the bank the oscillator reads
 newNode("ksPluck12", kPluck);
 newNode("resonBank", kBank);
+newNode("fxGain", kGainLead);
+newNode("fxGain", kGainPluck);
+newNode("fxGain", kGainBank);
 newNode("fxChorus", kChorus);
 newNode("fxEcho", kEcho);
 newNode("fxPingPong", kPong);
 newNode("fxPhaser", kPhase);
 newNode("fxReverb", kVerb);
--- lead chain: chorus thickens, echo repeats
-connect(kLead, 0, kChorus, 0);
+-- lead chain: trim, chorus thickens, echo repeats
+connect(kLead, 0, kGainLead, 0);
+connect(kGainLead, 0, kChorus, 0);
 connect(kChorus, 0, kEcho, 0);
 connect(kEcho, 0, kVerb, 0);
--- pluck chain: stereo ping-pong echoes
-connect(kPluck, 0, kPong, 0);
+-- pluck chain: trim, stereo ping-pong echoes
+connect(kPluck, 0, kGainPluck, 0);
+connect(kGainPluck, 0, kPong, 0);
 connect(kPong, 0, kVerb, 0);
--- pad chain: swept phaser
-connect(kBank, 0, kPhase, 0);
+-- pad chain: trim, swept phaser
+connect(kBank, 0, kGainBank, 0);
+connect(kGainBank, 0, kPhase, 0);
 connect(kPhase, 0, kVerb, 0);
 -- everything meets at the reverb, reverb to the speakers
 connect(kVerb, 0, 0, 0);
+-- starting balance: the sustained noise-driven pads dominate at unity and
+-- the low strings vanish, so cut the pads hard and boost the bass; the
+-- mixer sliders trim from here
+setControl(kGainLead, 0, 0.9);
+setControl(kGainPluck, 0, 1.8);
+setControl(kGainBank, 0, 0.4);
 sched(0);
 
 -- The instruments declare [freq, amp] note params -- freqVoice's layout.
@@ -111,6 +148,34 @@ let bankV  = freqVoice(kBank, 8);
 
 -- Anchor degree 0 an octave below A440 so basses have room underneath.
 let keyA = transposeRoot(et12, -12.0);
+
+---------------------------------------------------------------------------
+-- Live controls. In the app GUI this builds a "mixer" panel (per-chain
+-- level sliders bound straight to the gain trims, plus an output meter on
+-- the reverb bus) and one spec-derived panel per instrument and effect --
+-- controls(node) turns every control the def declares into a correctly
+-- ranged, engine-bound widget. Headless, the widgets simply never render.
+
+panel("mixer");
+slider("lead", ControlSpec { lo: 0.0, hi: 2.0, init: 0.9, warp: ControlWarp.linear })
+	bindControl(kGainLead, "level");
+slider("bass", ControlSpec { lo: 0.0, hi: 2.0, init: 1.8, warp: ControlWarp.linear })
+	bindControl(kGainPluck, "level");
+slider("pads", ControlSpec { lo: 0.0, hi: 2.0, init: 0.4, warp: ControlWarp.linear })
+	bindControl(kGainBank, "level");
+meter("mix", kVerb);
+panel("");
+
+-- timbre panels, one per def: wtLead's envelopes/filter, ksPluck's
+-- pluck/decay/damp, resonBank's attack/release/decay, and each effect
+controls(kLead);
+controls(kPluck);
+controls(kBank);
+controls(kChorus);
+controls(kEcho);
+controls(kPong);
+controls(kPhase);
+controls(kVerb);
 
 ---------------------------------------------------------------------------
 -- Shared section plumbing: four event streams played back to back, each
@@ -149,7 +214,7 @@ fn demo1() Void {
     setControl(kLead, 6, 0.25);     -- res (1/Q -- smaller is sharper)
     setControl(kLead, 8, 0.3);      -- fdecay
     setControl(kPluck, 1, 2.2);     -- string decay
-    setControl(kPluck, 2, 0.55);    -- damp: darker strings
+    setControl(kPluck, 2, 0.4);     -- damp: warm but with audible harmonics
     setControl(kBank, 0, 0.4);      -- pad attack swell
     setControl(kBank, 2, 5.0);      -- mode ring-out
     setControl(kEcho, 0, 0.4);      -- echo time (seconds)
@@ -345,7 +410,7 @@ fn demo3() Float {
     setControl(kLead, 4, 1800.0);
     setControl(kLead, 5, 3.0);
     setControl(kPluck, 1, 1.6);
-    setControl(kPluck, 2, 0.45);
+    setControl(kPluck, 2, 0.3);
     setControl(kBank, 0, 0.003);    -- struck, not bowed
     setControl(kBank, 1, 0.03);
     setControl(kBank, 2, 4.0);
@@ -365,11 +430,13 @@ fn demo3() Float {
     let bpScale = chromatic(13);
 
     -- bass (plucked strings): the euclidean pulse thickens across the
-    -- sections -- 5-in-13, walking 6-in-13, a sparse low 3, a full 7
-    let bassA = spd(-13) euclid(5, 13) events(0.7, 0.5);
-    let bassB = fastcat([spd(-13), spd(-11)]) euclid(6, 13) events(0.7, 0.45);
-    let bassC = spd(-13) euclid(3, 13) events(0.75, 0.7);
-    let bassD = fastcat([spd(-13), spd(-9), spd(-11)]) euclid(7, 13, 1) events(0.7, 0.4);
+    -- sections -- 5-in-13, walking 6-in-13, a sparse low 3, a full 7.
+    -- Degrees sit around -6 (about 66 Hz from the 110 Hz root): a full
+    -- tritave down (-13, under 37 Hz) is felt more than heard.
+    let bassA = spd(-6) euclid(5, 13) events(0.7, 0.5);
+    let bassB = fastcat([spd(-6), spd(-4)]) euclid(6, 13) events(0.7, 0.45);
+    let bassC = spd(-8) euclid(3, 13) events(0.75, 0.7);
+    let bassD = fastcat([spd(-6), spd(-2), spd(-4)]) euclid(7, 13, 1) events(0.7, 0.4);
 
     -- bells (filter bank): a rotating six-step figure that reverses on a
     -- cycle count, thins to a slow euclidean toll, then doubles speed

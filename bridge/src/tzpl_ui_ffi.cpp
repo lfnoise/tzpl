@@ -26,6 +26,7 @@
 //
 
 #include "tzpl_ui_ffi.hpp"
+#include "tzpl_nrt_render.hpp"
 #include "tzpl_ui_state.hpp"
 #include "tzpl_ui_node_controls.hpp"
 #include "tzpl_ui_taps.hpp"
@@ -420,6 +421,10 @@ static tzpl_SErr resolveTarget(ts::VM& vm, i64 nodeID, const char* controlName,
 
 // fn uiBindControl(id Int, node Int, control String, silo Int) Int
 static void ffi_uiBindControl(ts::VM& vm, u16 dst, u16, u16 argBase) {
+    // Widgets bind the LIVE engine; inside a render (app-level --nrt or
+    // renderNRT) the named nodes live on the render engine, so a binding
+    // can never resolve. Quiet no-op rather than an error per widget.
+    if (bridge::currentRenderContext()) { vm.reg(dst).i = 0; return; }
     UIState* ui = getUIState(vm);
     auto id = static_cast<std::uint64_t>(vm.reg(argBase).i);
     i64 nodeID = vm.reg(argBase + 1).i;
@@ -839,6 +844,9 @@ static void ffi_uiClear(ts::VM& vm, u16, u16, u16) {
 // unchanged, because a master tap is an ordinary entry in the tap registry.
 static i64 makeTapWidget(ts::VM& vm, const char* name, UIWidgetKind kind,
                          i64 nodeID, int outlet, int silo) {
+    // Taps read the LIVE engine; quiet no-op inside a render (see
+    // ffi_uiBindControl).
+    if (bridge::currentRenderContext()) return 0;
     UIState* ui = getUIState(vm);
     auto* ctx = getAppContext(vm);
     if (!ui || !ctx || !ctx->engine) return 0;
@@ -1062,6 +1070,7 @@ static i64 widgetForControl(ts::VM& vm, i64 nodeID, int silo,
 // Widget named, specced, and bound entirely from the def's ControlDef.
 // Returns the widget id, or 0 if the node/control is unknown.
 static void ffi_uiControl(ts::VM& vm, u16 dst, u16, u16 argBase) {
+    if (bridge::currentRenderContext()) { vm.reg(dst).i = 0; return; }
     i64 nodeID = vm.reg(argBase).i;
     const char* control = regString(vm, argBase + 1);
     int silo = static_cast<int>(vm.reg(argBase + 2).i);
@@ -1091,7 +1100,9 @@ static void ffi_uiControls(ts::VM& vm, u16 dst, u16, u16 argBase) {
 
     std::vector<engine::ControlDesc> controls;
     std::vector<i64> ids;
-    if (controlsForNode(getAppContext(vm), nodeID, controls)) {
+    if (bridge::currentRenderContext()) {
+        // Widgets bind the LIVE engine; quiet no-op inside a render.
+    } else if (controlsForNode(getAppContext(vm), nodeID, controls)) {
         for (auto const& c : controls) {
             if (i64 id = widgetForControl(vm, nodeID, silo, c))
                 ids.push_back(id);
