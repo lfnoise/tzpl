@@ -1948,7 +1948,11 @@ f64 clockTempoBPM(Engine* e, int clock) {
 bool clockQuery(Engine* e, int clock, f64 targetBeat,
                 f64& beatsNow, f64& secsUntil) {
     if (!e || clock < 0 || clock >= e->numTempoClocks_) return false;
-    if (!isAudioRunning(e)) return false;   // clock frozen: follower falls back
+    // An NRT engine never reaches AudioState::running (startAudio no-ops)
+    // but its clocks DO advance -- the render pump drives sampleTime_ -- so
+    // a follower may read them. Only a live engine with audio stopped is a
+    // frozen clock.
+    if (!e->nrtMode_ && !isAudioRunning(e)) return false;   // clock frozen: follower falls back
     Silo& s = e->silos_[0];
     if (clock >= (int)s.tempoClocks_.size()) return false;
     // Same read discipline as clockBeats/clockTempoBPM: an unlocked snapshot

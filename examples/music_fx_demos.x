@@ -1,5 +1,5 @@
 -- music_fx_demos.x -- three demonstrations tying the music, instruments,
--- and effects libraries together.
+-- and effects libraries together (about 3.5 minutes end to end).
 --
 -- One persistent node graph: three instruments from lang/modules/instruments.x
 -- (wtLead, ksPluck, resonBank), each feeding its own effect chain from
@@ -11,20 +11,29 @@
 --     resonBank(103) -> fxPhaser(204) -----------------/
 --
 -- Three demos then play different music through that graph, one per
--- composition dialect, each with several simultaneous parts and
--- beat-scheduled effect-control moves:
+-- composition dialect, each a multi-section arrangement with several
+-- simultaneous parts and beat-scheduled effect-control moves:
 --
---   1. music.pat    -- a groove: weighted-random melody with rests, a
---                      tresillo bass, and slow pad triads (three players
---                      on one clock); at beat 16 the lead filter opens and
---                      the echo regenerates harder.
---   2. music.media  -- a canon: the theme against its own retrograde, an
---                      answer a fourth down entering two beats late over a
---                      drone, and a double-speed statement on the lead.
---   3. music.spans  -- Bohlen-Pierce (13 divisions of the tritave):
---                      a 5-in-13 euclidean bass, bell figures that reverse
---                      every third cycle with amp riding a slow sine, and
---                      offbeat stabs; the phaser and delays deepen as it runs.
+--   1. music.pat    -- a 128-beat groove in four 32-beat sections: the
+--                      weighted-random melody, tresillo bass, and pad triads
+--                      open low (A), climb an octave and busier (B), thin to
+--                      a breakdown with the filter closed and long echoes (C),
+--                      and reprise the opening with the filter open and a
+--                      fourth pad voice (D). Panel moves land at every
+--                      section boundary.
+--   2. music.media  -- a 104-beat canon in six sections built from ONE
+--                      six-beat theme by the temporal-media algebra:
+--                      exposition (theme against its retrograde), canon at
+--                      the fourth below two beats late, the theme INVERTED
+--                      on the bells, a stretto with entries one beat apart,
+--                      a recap of the canon, and a coda of rung chords.
+--   3. music.spans  -- 128 beats of Bohlen-Pierce (13 divisions of the
+--                      tritave) in four 8-cycle sections: the euclidean
+--                      bass thickens 5-in-13 -> 6 -> 3 -> 7, the bell
+--                      figures rotate, reverse, thin out, then double speed,
+--                      and the offbeat stabs drop away for the sparse third
+--                      section and pile up for the last; the phaser and
+--                      delays deepen section by section.
 --
 -- Run interactively (Ctrl-C to stop; the driver stops each demo itself):
 --   ./build/app/tzpl_app --nogui --wait -I lang/modules -I bridge/modules \
@@ -104,13 +113,29 @@ let bankV  = freqVoice(kBank, 8);
 let keyA = transposeRoot(et12, -12.0);
 
 ---------------------------------------------------------------------------
--- Demo 1: music.pat -- a three-layer groove in A dorian.
+-- Shared section plumbing: four event streams played back to back, each
+-- cut to `span` beats and shifted onto its section start.
 
-fn padLayer(off Int) List<Event> =
-    bind(List(0, -1, 1, -3) cyc map(fn(d Int) Int { d + off }) degree,
-         List(4.0) cyc,
-         List(0.26) cyc,
+fn seq4(a List<Event>, b List<Event>, c List<Event>, d List<Event>,
+        span Float) List<Event> =
+    cat(a takeDur(span),
+    cat((b takeDur(span)) offset(span),
+    cat((c takeDur(span)) offset(2.0 * span),
+        (d takeDur(span)) offset(3.0 * span))));
+
+---------------------------------------------------------------------------
+-- Demo 1: music.pat -- a four-section groove in A dorian (128 beats).
+
+fn padLayer(roots List<Int>, off Int, dur Float, amp Float) List<Event> =
+    bind(roots map(fn(d Int) Int { d + off }) degree,
+         List(dur) cyc,
+         List(amp) cyc,
          List(0.95) cyc);
+
+-- a triad every `dur` beats: the same root stream stacked at 0 / +2 / +4
+fn padTriads(roots List<Int>, dur Float, amp Float) List<Event> =
+    merge(padLayer(roots, 0, dur, amp),
+          merge(padLayer(roots, 2, dur, amp), padLayer(roots, 4, dur, amp)));
 
 fn demo1() Void {
     randSeed(112);
@@ -137,43 +162,96 @@ fn demo1() Void {
     setControl(kVerb, 2, 0.28);     -- reverb mix
     sched(0);
 
-    -- melody: weighted random degrees with breathing rests, cycled
+    -- A (0-32): weighted random degrees with breathing rests, cycled
     -- durations that cross the bar, brownian dynamics
-    let melody = bind(
+    let melodyA = bind(
         wpicks([degree(0), degree(1), degree(2), degree(3),
                 degree(4), degree(6), rest()],
                [3.0, 2.0, 3.0, 1.5, 2.5, 1.0, 2.0]),
         List(0.5, 0.25, 0.25, 0.5, 0.5, 1.0) cyc,
         browns(0.25, 0.6, 0.08),
         List(0.85) cyc);
-
-    -- bass: tresillo (3+3+2 eighths) on roots, fifths, and fourths,
-    -- two octaves down on the plucked strings
-    let bassLine = bind(
+    let bassA = bind(
         List(-14, -14, -10, -14, -14, -11) cyc degree,
         List(0.75, 0.75, 0.5) cyc,
         List(0.6) cyc,
         List(0.9) cyc);
+    let padsA = padTriads(List(0, -1, 1, -3) cyc, 4.0, 0.26);
 
-    -- pads: a triad every four beats, three stacked bind layers
-    let pads = merge(padLayer(0), merge(padLayer(2), padLayer(4)));
+    -- B (32-64): the melody climbs an octave and gets busier, the bass
+    -- keeps the tresillo but walks, the pads move to new roots
+    let melodyB = bind(
+        wpicks([degree(7), degree(8), degree(9), degree(11),
+                degree(6), degree(4), rest()],
+               [3.0, 2.0, 2.5, 1.5, 2.0, 1.5, 1.0]),
+        List(0.25, 0.25, 0.5, 0.25, 0.25, 0.5) cyc,
+        browns(0.3, 0.65, 0.08),
+        List(0.8) cyc);
+    let bassB = bind(
+        List(-14, -12, -11, -10, -11, -12) cyc degree,
+        List(0.75, 0.75, 0.5) cyc,
+        List(0.65) cyc,
+        List(0.9) cyc);
+    let padsB = padTriads(List(3, 2, -1, 0) cyc, 4.0, 0.26);
 
-    play(melody takeDur(32.0), leadV, keyA, dorian);
-    play(bassLine takeDur(32.0), pluckV, keyA, dorian);
-    play(pads takeDur(31.0), bankV, keyA, dorian);
+    -- C (64-96): breakdown -- the melody mostly rests, the bass halves its
+    -- density and sinks, the pads stretch to eight-beat dyad-like swells
+    let melodyC = bind(
+        wpicks([degree(4), degree(2), degree(1), rest(), rest()],
+               [2.0, 2.0, 1.5, 3.0, 2.0]),
+        List(1.0, 0.5, 1.5) cyc,
+        browns(0.2, 0.45, 0.06),
+        List(0.9) cyc);
+    let bassC = bind(
+        List(-14, -17, -14, -16) cyc degree,
+        List(1.5, 1.5, 1.0) cyc,
+        List(0.55) cyc,
+        List(0.95) cyc);
+    let padsC = padTriads(List(-3, -4) cyc, 8.0, 0.22);
 
-    -- at beat 16, open the lead filter and push the echo regeneration --
-    -- a beat-scheduled panel move riding the same clock as the players
+    -- D (96-128): reprise of A (the same lazy streams re-read from their
+    -- heads replay the same take), with a fourth pad voice on top
+    let padsD = merge(padsA, padLayer(List(0, -1, 1, -3) cyc, 6, 4.0, 0.2));
+
+    play(seq4(melodyA, melodyB, melodyC, melodyA, 32.0), leadV, keyA, dorian);
+    play(seq4(bassA, bassB, bassC, bassA, 32.0), pluckV, keyA, dorian);
+    play(seq4(padsA, padsB, padsC, padsD, 32.0), bankV, keyA, dorian);
+
+    -- panel moves at the section boundaries, beat-scheduled on the same
+    -- clock as the players: brighter into B, closed and cavernous for the
+    -- breakdown, wide open with tight echoes for the reprise
+    let b0 = getBeats() + getLatency();
+    bundle()
+        setControl(kLead, 4, 1600.0)
+        setControl(kEcho, 1, 0.45)
+        sched(0, 0, b0 + 32.0);
+    bundle()
+        setControl(kLead, 4, 500.0)
+        setControl(kEcho, 0, 0.6)
+        setControl(kVerb, 0, 6.0)
+        sched(0, 0, b0 + 64.0);
     bundle()
         setControl(kLead, 4, 2400.0)
+        setControl(kEcho, 0, 0.4)
         setControl(kEcho, 1, 0.55)
-        sched(0, 0, getBeats() + 16.0 + getLatency());
+        setControl(kVerb, 0, 3.0)
+        sched(0, 0, b0 + 96.0);
 }
 
 ---------------------------------------------------------------------------
--- Demo 2: music.media -- a canon in A minor across all three instruments.
+-- Demo 2: music.media -- a six-section canon in A minor (104 beats), all
+-- of it grown from one six-beat theme by the temporal-media algebra.
 
 fn mdeg(d Int, dur Float) Music<Pitch> = note(dur, degree(d));
+
+-- melodic inversion about degree 2 (the theme spans degrees 0..5, so the
+-- mirror stays inside one octave); non-degree pitches pass through
+fn invDeg(p Pitch) Pitch {
+    match (p) {
+        Pitch.degree(d): Pitch.degree(4 - d.0, d.1);
+        _: p;
+    }
+}
 
 fn demo2() Float {
     -- panel: rounder lead, brighter longer strings, struck-bell bank,
@@ -196,18 +274,47 @@ fn demo2() Float {
     let theme = line([mdeg(0, 1.0), mdeg(2, 0.5), mdeg(3, 0.5), mdeg(4, 1.0),
                       mdeg(2, 0.5), mdeg(5, 0.75), mdeg(4, 0.25),
                       mdeg(3, 0.5), mdeg(0, 1.0)]);   -- 6 beats
+    let themeR = theme retro;
+    let themeInv = theme mmap(invDeg);
+    let expo = theme $ themeR;                        -- palindrome, 12 beats
 
-    -- plucked strings: theme, its retrograde, then a closing statement
-    -- up a step -- an 18-beat palindrome-plus-coda
-    let pluckPart = theme $ (theme retro) $ (theme trans(1) dyn(1.1));
+    -- Sections (beats):  1 exposition 12 | 2 canon 24 | 3 inversion 18 |
+    --                    4 stretto 18    | 5 recap 18 | 6 coda 14  = 104
 
-    -- filter bank: the same palindrome a fourth down, two beats late,
-    -- softer, over a held drone on the low fifth
-    let answer = mrest(2.0) $ ((theme $ (theme retro)) trans(-3) dyn(0.65));
-    let bankPart = answer | (note(18.0, degree(-7)) dyn(0.45));
+    -- plucked strings: the leading voice throughout
+    let pluckPart =
+        expo                                              -- 1: states the palindrome
+        $ (expo $ (expo trans(1)))                        -- 2: dux, then a step up
+        $ (theme tempo(2.0) dyn(0.55) times(6))           -- 3: murmured under the bells
+        $ (theme $ (theme trans(1)) $ (theme trans(-1)))  -- 4: stretto lead
+        $ (expo $ (theme trans(2) dyn(1.1)))              -- 5: recap + rising close
+        $ (chord([mdeg(0, 4.0), mdeg(2, 4.0), mdeg(4, 4.0)])         -- 6: rung chords
+           $ chord([mdeg(-1, 4.0), mdeg(1, 4.0), mdeg(4, 4.0)])
+           $ (chord([mdeg(0, 6.0), mdeg(2, 6.0), mdeg(4, 6.0), mdeg(7, 6.0)]) dyn(1.1)));
 
-    -- lead: sits out the first half, then the theme twice at double speed
-    let leadPart = mrest(12.0) $ (theme tempo(2.0) times(2) dyn(0.8));
+    -- filter bank: drone, canon answer, and the inverted theme as bells
+    let bankPart =
+        (mrest(6.0) $ (note(6.0, degree(-7)) dyn(0.4)))                  -- 1: drone enters
+        $ (mrest(2.0) $ (expo trans(-3) dyn(0.65))                       -- 2: comes, a
+           $ (theme trans(-3) dyn(0.6)) $ mrest(4.0))                    --    fourth down
+        $ (((themeInv dyn(0.8)) $ (themeInv retro) $ (themeInv trans(2)))-- 3: INVERTED
+           | (note(18.0, degree(-7)) dyn(0.35)))                         --    over drone
+        $ (mrest(1.0) $ (theme trans(-3)) $ (theme trans(-2)) $ mrest(5.0)) -- 4: stretto mid
+        $ ((mrest(2.0) $ (expo trans(-3) dyn(0.6)) $ mrest(4.0))         -- 5: recap answer
+           | (note(18.0, degree(-14)) dyn(0.35)))                        --    over deep drone
+        $ (mrest(2.0)                                                    -- 6: final swell
+           $ (chord([note(12.0, degree(-7)), note(12.0, degree(-3))]) dyn(0.5)));
+
+    -- lead: silent at first, then sparkle in the upper octave
+    let leadPart =
+        mrest(12.0)                                                      -- 1: tacet
+        $ (mrest(12.0) $ (theme tempo(2.0) dyn(0.6) times(4)))           -- 2: late sparkle
+        $ (theme tempo(2.0) trans(7) dyn(0.5) times(6))                  -- 3: high halo
+        $ (mrest(2.0) $ (theme tempo(2.0) trans(4) times(2))             -- 4: stretto top
+           $ mrest(1.0) $ (theme tempo(2.0) trans(7) times(3)))
+        $ ((theme trans(7) dyn(0.6)) $ (themeR trans(7) dyn(0.55))       -- 5: recap up top
+           $ (theme tempo(2.0) trans(7) times(2)))
+        $ ((theme tempo(4.0) times(4)) $ mrest(8.0));                    -- 6: last flourish
 
     play(pluckPart perform, pluckV, keyA, minor);
     play(bankPart perform, bankV, keyA, minor);
@@ -216,13 +323,22 @@ fn demo2() Float {
 }
 
 ---------------------------------------------------------------------------
--- Demo 3: music.spans -- euclidean patterns in Bohlen-Pierce (13ED3).
+-- Demo 3: music.spans -- four 8-cycle sections of euclidean patterns in
+-- Bohlen-Pierce (13ED3), 128 beats.
 
 fn spd(x Int) Pattern<Pitch> = pure(degree(x));
 
+-- render four patterns back to back, 8 cycles of 4 beats each
+fn spanSeq4(a Pattern<Event>, b Pattern<Event>, c Pattern<Event>,
+            d Pattern<Event>) List<Event> =
+    cat(patEvents(a, 8.0, 4.0),
+    cat((patEvents(b, 8.0, 4.0)) offset(32.0),
+    cat((patEvents(c, 8.0, 4.0)) offset(64.0),
+        (patEvents(d, 8.0, 4.0)) offset(96.0))));
+
 fn demo3() Float {
     -- panel: glassy short lead stabs, tighter strings, bell-like bank,
-    -- and delays that will be pushed deeper while it plays
+    -- and delays that get pushed deeper section by section
     begin();
     setControl(kLead, 0, 0.002);
     setControl(kLead, 3, 0.15);     -- short release
@@ -244,41 +360,67 @@ fn demo3() Float {
     sched(0);
 
     -- 13 equal divisions of the tritave, anchored at 110 Hz; every step
-    -- is a degree, so euclid(5, 13) is five pulses around the whole gamut
+    -- is a degree, so a euclidean 13-grid walks the whole gamut
     let bpKey = bp() root(110.0, 0.0);
     let bpScale = chromatic(13);
 
-    -- bass: 5-in-13 euclidean pulse on the root a tritave down
-    let bassPat = spd(-13) euclid(5, 13) events(0.7, 0.5);
+    -- bass (plucked strings): the euclidean pulse thickens across the
+    -- sections -- 5-in-13, walking 6-in-13, a sparse low 3, a full 7
+    let bassA = spd(-13) euclid(5, 13) events(0.7, 0.5);
+    let bassB = fastcat([spd(-13), spd(-11)]) euclid(6, 13) events(0.7, 0.45);
+    let bassC = spd(-13) euclid(3, 13) events(0.75, 0.7);
+    let bassD = fastcat([spd(-13), spd(-9), spd(-11)]) euclid(7, 13, 1) events(0.7, 0.4);
 
-    -- bells: six-step figure in the upper tritave, rotating its start
-    -- each cycle, reversed every third cycle, amp riding a slow sine
-    let bells = fastcat([spd(13), spd(16), spd(19), spd(22), spd(20), spd(17)])
+    -- bells (filter bank): a rotating six-step figure that reverses on a
+    -- cycle count, thins to a slow euclidean toll, then doubles speed
+    let bellsA = [13, 16, 19, 22, 20, 17] spd fastcat
         iterp(6)
         every(3, fn(p Pattern<Pitch>) Pattern<Pitch> { p rev })
         events(0.45, 0.25)
         withAmp(sinePat() slow(3.0) range(0.18, 0.45) segment(6));
+    let bellsB = [13, 17, 20, 24, 21, 18] spd fastcat
+        iterp(3)
+        every(2, fn(p Pattern<Pitch>) Pattern<Pitch> { p rev })
+        events(0.45, 0.25)
+        withAmp(sinePat() slow(2.0) range(0.2, 0.45) segment(6));
+    let bellsC = [19, 22, 26] spd fastcat
+        euclid(5, 8)
+        events(0.5, 0.4)
+        withAmp(sinePat() slow(6.0) range(0.15, 0.35) segment(4));
+    let bellsD = [13, 16, 19, 22, 24, 20] spd fastcat
+        fast(2.0)
+        iterp(6)
+        every(2, fn(p Pattern<Pitch>) Pattern<Pitch> { p rev })
+        events(0.4, 0.2)
+        withAmp(sinePat() slow(2.0) range(0.2, 0.5) segment(8));
 
-    -- stabs: three offbeat hits per cycle at the top of the gamut
-    let stabs = spd(26) euclid(3, 8, 1) late(0.125) events(0.3, 0.3);
+    -- stabs (lead): offbeat hits at the top of the gamut that multiply,
+    -- fall almost silent for the third section, and pile up for the last
+    let stabsA = spd(26) euclid(3, 8, 1) late(0.125) events(0.3, 0.3);
+    let stabsB = fastcat([spd(26), spd(23)]) euclid(4, 8, 1) late(0.125) events(0.3, 0.28);
+    let stabsC = spd(30) euclid(1, 8, 4) events(0.5, 0.25);
+    let stabsD = fastcat([spd(26), spd(28), spd(23)]) euclid(5, 8, 1) late(0.125) events(0.28, 0.3);
 
-    -- 8 cycles of 4 beats = 32 beats
-    play(patEvents(bassPat, 8.0, 4.0), pluckV, bpKey, bpScale);
-    play(patEvents(bells, 8.0, 4.0), bankV, bpKey, bpScale);
-    play(patEvents(stabs, 8.0, 4.0), leadV, bpKey, bpScale);
+    play(spanSeq4(bassA, bassB, bassC, bassD), pluckV, bpKey, bpScale);
+    play(spanSeq4(bellsA, bellsB, bellsC, bellsD), bankV, bpKey, bpScale);
+    play(spanSeq4(stabsA, stabsB, stabsC, stabsD), leadV, bpKey, bpScale);
 
-    -- deepen the effects as the pattern runs: phaser bites at beat 16,
-    -- both delays regenerate harder at beat 24
+    -- deepen the effects at each section boundary: phaser bites, then the
+    -- reverb yawns open for the sparse section, then tight and driven
     let b0 = getBeats() + getLatency();
     bundle()
-        setControl(kPhase, 1, 0.6)
-        setControl(kVerb, 0, 7.0)
-        sched(0, 0, b0 + 16.0);
+        setControl(kPhase, 1, 0.5)
+        sched(0, 0, b0 + 32.0);
     bundle()
-        setControl(kPong, 1, 0.65)
+        setControl(kVerb, 0, 8.0)
+        setControl(kPong, 1, 0.6)
+        sched(0, 0, b0 + 64.0);
+    bundle()
+        setControl(kVerb, 0, 4.0)
+        setControl(kPhase, 0, 0.8)
         setControl(kEcho, 1, 0.55)
-        sched(0, 0, b0 + 24.0);
-    32.0
+        sched(0, 0, b0 + 96.0);
+    128.0
 }
 
 ---------------------------------------------------------------------------
@@ -287,21 +429,21 @@ fn demo3() Float {
 
 fn runDemos() Void {
     go(coro fn() Float {
-        "== demo 1: music.pat groove -- melody + tresillo bass + pads ==" println;
+        "== demo 1: music.pat groove -- 128 beats, four sections ==" println;
         setTempo(0, 112.0);
         demo1();
-        yield 34.0;
+        yield 130.0;
         stopAll();
         yield 2.0;
 
-        "== demo 2: music.media canon -- theme, retrograde, drone ==" println;
+        "== demo 2: music.media canon -- 104 beats, six sections ==" println;
         setTempo(0, 96.0);
         let len2 = demo2();
         yield (len2 + 4.0);
         stopAll();
         yield 2.0;
 
-        "== demo 3: music.spans in Bohlen-Pierce -- euclidean bells ==" println;
+        "== demo 3: music.spans in Bohlen-Pierce -- 128 beats, four sections ==" println;
         setTempo(0, 116.0);
         let len3 = demo3();
         yield (len3 + 6.0);

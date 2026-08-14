@@ -261,6 +261,21 @@ int64_t renderNRTAsync(RenderJobOpts const& opts,
     job->sched = std::make_unique<ts::NRTTempoScheduler>(nrtvm);
     job->sched->setManualMode(true);
     job->sched->setLatency(0.0);
+    // Slave the scheduler to the render engine's TempoClock slots, exactly
+    // as the app slaves the live scheduler to the live engine: setTempo /
+    // schedTempoChange made from render code then move NRT callbacks the
+    // same way they move engine commands. Without this the manual timeline
+    // stayed at its internal default (60 BPM) while player bundles targeted
+    // the engine clock's beats, so any render at another tempo crawled at
+    // 60 with every bundle firing late.
+    {
+        engine::Engine* renderEng = job->eng.get();
+        job->sched->setEngineClockHook(
+            [renderEng](int slot, f64 target, f64& beatsNow, f64& secsUntil) {
+                return engine::clockQuery(renderEng, slot, target,
+                                          beatsNow, secsUntil);
+            });
+    }
     job->sched->start();
 
     // Register before running setup so isRenderDone(h) and friends work

@@ -343,7 +343,25 @@ void NRTTempoScheduler::tickTo(f64 seconds) {
             f64 beatFire = 0.;
             size_t beatIdx = 0;
             for (size_t i = 0; i < queue_.size(); ++i) {
-                f64 fs = ramp_.beatsToSeconds(queue_[i].beatTime) - latencySeconds_;
+                // Beat -> logical-seconds fire time from the ENGINE clock
+                // when the hook can read it (the render pump keeps
+                // manualSeconds_ equal to the engine's seconds, so
+                // manualSeconds_ + secsUntil is the entry's deadline on this
+                // timeline and engine-side setTempo/ramps are honored), else
+                // from the internal ramp as before.
+                f64 fs;
+                bool synced = false;
+                if (engineClock_) {
+                    f64 beatsNow = 0., secsUntil = 0.;
+                    if (engineClock_(queue_[i].clockSlot, queue_[i].beatTime,
+                                     beatsNow, secsUntil)) {
+                        fs = manualSeconds_ + secsUntil - latencySeconds_;
+                        synced = true;
+                    }
+                }
+                if (!synced) {
+                    fs = ramp_.beatsToSeconds(queue_[i].beatTime) - latencySeconds_;
+                }
                 if (i == 0 || fs < beatFire) { beatFire = fs; beatIdx = i; }
             }
             if (!queue_.empty() && beatFire <= manualSeconds_) {
