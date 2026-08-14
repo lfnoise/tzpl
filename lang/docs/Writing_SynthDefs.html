@@ -1438,8 +1438,8 @@ noteOff(<span class="hl-num">100</span>, <span class="hl-num">1</span>);</code><
             <h3 id="ug-env">15.10 Envelopes and smoothing</h3>
             <table>
                 <tr><th>Function</th><th>Description</th></tr>
-                <tr><td><code>asr(gate, a, s, r)</code></td><td>Attack-sustain-release envelope driven by a gate: exponential attack over <code>a</code> samples toward sustain level <code>s</code>; exponential release over <code>r</code> samples when the gate falls. (Times are in cycles of decay-to--40 dB; see <code>decay40dB</code>.)</td></tr>
-                <tr><td><code>adsr(gate, a, d, s, r)</code></td><td>Attack-decay-sustain-release: full-scale attack, decay to sustain <code>s</code>, release on gate-off.</td></tr>
+                <tr><td><code>asr(gate, a, s, r)</code></td><td>Attack-sustain-release envelope driven by a gate: exponential attack over <code>a</code> seconds toward sustain level <code>s</code>; exponential release over <code>r</code> seconds when the gate falls. (A segment time is the time to close 99% of the distance to its goal; see <code>decay40dB</code>.)</td></tr>
+                <tr><td><code>adsr(gate, a, d, s, r)</code></td><td>Attack-decay-sustain-release: full-scale attack over <code>a</code> seconds, decay to sustain <code>s</code> over <code>d</code> seconds, release over <code>r</code> seconds on gate-off.</td></tr>
                 <tr><td><code>lag(x, t)</code> / <code>lag2</code> / <code>lag3</code></td><td>Exponential smoothing toward <code>x</code> with time constant <code>t</code> seconds (one, two, or three cascaded stages &mdash; higher orders are smoother). The standard control de-zipper.</td></tr>
                 <tr><td><code>lag(x, u, d)</code> / <code>lag2(x, u, d)</code> / <code>lag3(x, u, d)</code></td><td>Lag with separate up/down time constants &mdash; envelope followers, attack/release ballistics.</td></tr>
                 <tr><td><code>onepole(x, a)</code></td><td>One-pole lowpass with raw coefficient <code>a</code> (0..1; higher = slower).</td></tr>
@@ -1448,8 +1448,7 @@ noteOff(<span class="hl-num">100</span>, <span class="hl-num">1</span>);</code><
                 <tr><td><code>leakdc(x, k)</code></td><td>DC blocker (differentiator + leaky integrator, leak <code>k</code> &asymp; 0.995).</td></tr>
                 <tr><td><code>decay(x, t)</code></td><td>Exponential decay of impulses over <code>t</code> seconds &mdash; feed it triggers to get percussive envelopes.</td></tr>
                 <tr><td><code>decay2(x, atk, dcy)</code></td><td>Attack-decay envelope from impulses: difference of two <code>decay</code>s.</td></tr>
-                <tr><td><code>fadein(x, fadeinTime)</code></td><td>Fade the signal in from silence over <code>fadeinTime</code> seconds at synth start (cubic curve).</td></tr>
-            </table>
+                <tr><td><code>fadein(x, fadeinTime)</code></td><td>Fade the signal in from silence over <code>fadeinTime</code> seconds at synth start (cubic curve).</td></tr>            </table>
 
 <pre><code><span class="cmt">-- percussive: no gate needed, just triggers</span>
 dust(<span class="hl-num">4</span>) decay2(<span class="hl-num">0.005</span>, <span class="hl-num">0.3</span>) * <span class="hl-num">800</span> fsinxosc

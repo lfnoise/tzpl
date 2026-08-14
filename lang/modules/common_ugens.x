@@ -502,10 +502,12 @@ fn iseq(trigger S, pattern AsSignal, length AsSignal) S {
 }
 
 -- envelopes
+-- Segment times are in seconds: the time to close 99% of the distance to
+-- the segment's goal (a decay40dB interval).
 
 fn asr(gate S, a, s, r) S {
-	let a = a decay40dB;
-	let r = r decay40dB;
+	let a = decay40dB(a * fs());
+	let r = decay40dB(r * fs());
 	let y = delayVar();
 
 	-- stages: 0: gate off (released + waiting for attack) 1: gate on (attack + sustain).
@@ -521,9 +523,9 @@ fn asr(gate S, a, s, r) S {
 }
 
 fn adsr(gate S, a, d, s, r) S {
-	let a = a decay40dB;
-	let d = d decay40dB;
-	let r = r decay40dB;
+	let a = decay40dB(a * fs());
+	let d = decay40dB(d * fs());
+	let r = decay40dB(r * fs());
 	let stage = delayVar();
 	let y = delayVar();
 
