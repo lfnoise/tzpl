@@ -685,6 +685,16 @@ fn fadein(x, fadeinTime) S {
     min(1, dt + y(1)) f64 write(y) f32 cb * x
 }
 
+-- full level for sustainTime seconds, then fades to silence over
+-- fadeoutTime (the same cubed ramp as fadein).
+fn fadeout(x, sustainTime, fadeoutTime) S {
+    let dt = 1 / (fadeoutTime * fs());
+    let end = 1 + sustainTime / fadeoutTime;
+    let y = delayVar();
+    let t = min(end, dt + y(1)) f64 write(y);
+    (end - t) uclip f32 cb * x
+}
+
 fn pinkingFilter(x S) S {
     -- from Paul Kellett
     let b0 = delayVar(); (0.99886 * b0(1) + x * 0.0555179) write(b0);

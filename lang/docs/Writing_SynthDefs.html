@@ -1449,7 +1449,8 @@ noteOff(<span class="hl-num">100</span>, <span class="hl-num">1</span>);</code><
                 <tr><td><code>leakdc(x, k)</code></td><td>DC blocker (differentiator + leaky integrator, leak <code>k</code> &asymp; 0.995).</td></tr>
                 <tr><td><code>decay(x, t)</code></td><td>Exponential decay of impulses over <code>t</code> seconds &mdash; feed it triggers to get percussive envelopes.</td></tr>
                 <tr><td><code>decay2(x, atk, dcy)</code></td><td>Attack-decay envelope from impulses: difference of two <code>decay</code>s.</td></tr>
-                <tr><td><code>fadein(x, fadeinTime)</code></td><td>Fade the signal in from silence over <code>fadeinTime</code> seconds at synth start (cubic curve).</td></tr>            </table>
+                <tr><td><code>fadein(x, fadeinTime)</code></td><td>Fade the signal in from silence over <code>fadeinTime</code> seconds at synth start (cubic curve).</td></tr>
+                <tr><td><code>fadeout(x, sustainTime, fadeoutTime)</code></td><td>Pass the signal at full level for <code>sustainTime</code> seconds, then fade it to silence over <code>fadeoutTime</code> seconds (the same cubic curve as <code>fadein</code>).</td></tr>            </table>
 
 <pre><code><span class="cmt">-- percussive: no gate needed, just triggers</span>
 dust(<span class="hl-num">4</span>) decay2(<span class="hl-num">0.005</span>, <span class="hl-num">0.3</span>) * <span class="hl-num">800</span> fsinxosc
