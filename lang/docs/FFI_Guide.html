@@ -695,6 +695,30 @@ compiler.<span class="fn">registerForeignFunction</span>(
   <strong>Note:</strong> Foreign functions must be registered <em>before</em> compiling any source code that calls them. The type checker resolves foreign function names during compilation.
 </div>
 
+<h4>Reporting errors from a foreign function</h4>
+
+<p>A recoverable failure should be returned as a value &mdash; the stdlib convention is
+<code>Option&lt;T&gt;</code> for builtins and <code>Result&lt;T, String&gt;</code> for APIs that
+carry an error message. For a failure the program must <em>not</em> continue past, print a
+diagnostic to <code>vm.printOutput()</code> and call <code>vm.haltWithError()</code>: execution
+stops at the current builtin-call boundary (statements after the call never run), and the
+host&rsquo;s script run exits nonzero. This is the same trap behind the language-level
+<code>panic(message)</code> builtin and <code>unwrap</code> on a <code>none</code>. Plain
+<code>vm.setHalted(true)</code> is <em>not</em> an error signal &mdash; it doubles as the
+internal &ldquo;nested execution unit finished&rdquo; marker used by coroutine resumption, and
+on its own it does not stop the caller.</p>
+
+<pre><code><span class="cmt">// divideExact(a: Int, b: Int) -&gt; Int, halting on a zero divisor</span>
+<span class="kw">void</span> <span class="fn">divideExact</span>(ts::<span class="typ">VM</span>&amp; vm, <span class="typ">u16</span> dst, <span class="typ">u16</span> argc, <span class="typ">u16</span> argBase) {
+    <span class="typ">i64</span> b = vm.<span class="fn">reg</span>(argBase + <span class="num">1</span>).i;
+    <span class="kw">if</span> (b == <span class="num">0</span>) {
+        <span class="fn">fprintf</span>(vm.<span class="fn">printOutput</span>(), <span class="str">"Error: divideExact by zero\n"</span>);
+        vm.<span class="fn">haltWithError</span>();
+        <span class="kw">return</span>;
+    }
+    vm.<span class="fn">reg</span>(dst).i = vm.<span class="fn">reg</span>(argBase).i / b;
+}</code></pre>
+
 <h4>Example: A function with Float parameters</h4>
 
 <pre><code><span class="cmt">// lerp(a: Float, b: Float, t: Float) -&gt; Float</span>
