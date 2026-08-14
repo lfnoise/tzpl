@@ -5,6 +5,7 @@
 -- synthdef.x's defSynth.
 
 import synthdef.*;
+import std.result.*;
 import synthc.ir.*;
 import synthc.importer.*;
 import synthc.passes.*;
@@ -63,22 +64,40 @@ fn compileAndLoadGraph(g SignalGraph, name String) String {
 -- redefining a def that is already playing, fire-and-forget is fine -- players
 -- keep the old def and hot-swap when the new one loads. (Inside an NRT render
 -- the compile runs synchronously, so the future is already resolved.)
+--
+-- A failed compile PANICS (prints the error and halts) -- a script must not
+-- sail past a def that never loaded. Harnesses that need to tolerate and
+-- report failures use defSynthXChecked, which returns ok(cpp) / err(message)
+-- instead of halting.
 fn defSynthX(synthFun GraphFn, synthName String) Future<String> =
 	defSynthX(synthFun, synthName, [String]());
 
 async fn defSynthX(synthFun GraphFn, synthName String, tags [String]) String {
+	match (defSynthXChecked(synthFun, synthName, tags) await) {
+		ok(cpp): {
+			println(synthName $ " compiled successfully (synthc).");
+			cpp
+		}
+		err(msg): { panic(msg); "" }
+	}
+}
+
+-- Fallible form of defSynthX: ok(generated C++ source) on success,
+-- err(message) on a failed analysis, compile, or load. Never halts and
+-- prints nothing.
+fn defSynthXChecked(synthFun GraphFn, synthName String) Future<Result<String, String>> =
+	defSynthXChecked(synthFun, synthName, [String]());
+
+async fn defSynthXChecked(synthFun GraphFn, synthName String, tags [String]) Result<String, String> {
 	let g = makeGraph(synthFun);
 	let cpp = compileToCpp(g, synthName, true, 4,
 	                       mergeSynthTags(tags, defaultSynthTags()));
 	if (cpp startsWith("error:")) {
-		println("ERROR compiling " $ synthName $ " (synthc): " $ cpp);
-		return cpp;
+		return Result<String, String>.err("compiling " $ synthName $ " (synthc) failed: " $ cpp);
 	}
 	let err = writeCompileAndLoadAsync(synthName, cpp) await;
 	if (err length > 0) {
-		println("ERROR compiling " $ synthName $ " (synthc): " $ err);
-	} else {
-		println(synthName $ " compiled successfully (synthc).");
+		return Result<String, String>.err("compiling " $ synthName $ " (synthc) failed: " $ err);
 	}
-	cpp
+	Result<String, String>.ok(cpp)
 }

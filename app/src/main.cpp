@@ -118,7 +118,8 @@ static int runSource(VM& vm, Compiler& compiler, const VMTarget& target,
     vm.install(result);
     vm.execute(result.mainBlock);
 
-    return 0;
+    // A panic / unwrap-on-none / no-match trap halted the run: fail loudly.
+    return vm.isErrorHalted() ? 1 : 0;
 }
 
 // Wrap runSource in the NRTVM mutex. Concurrent threads (live tempo

@@ -1045,6 +1045,14 @@ void op_call_primitive(VM& vm, Code* pc) {
     vm.setSyncCallerPC(pc + 3);
     prim->cfun_(vm, dst, argc, argBase);
     vm.setSyncCallerPC(savedSyncPC);
+    // A builtin that ERROR-halted (panic, unwrap on none) stops execution
+    // HERE: returning unwinds the whole musttail dispatch chain, exactly
+    // like op_return's top-level path. Without this the flag was never
+    // consulted and execution sailed on past the error with a garbage
+    // result in dst. Keyed on the ERROR flag, not halted_ -- plain halted_
+    // is also the routine "nested execution unit finished" signal used by
+    // coroutine resume and the higher-order builtins' sync frames.
+    if (vm.isErrorHalted()) { vm.setHalted(true); return; }
     DISPATCH(3);
 }
 
@@ -1116,7 +1124,7 @@ void op_undefined_function(VM& vm, Code* pc) {
     if (vm.target() && vm.target()->rtRestricted) {
         fprintf(stderr, "*** ERROR: real-time VM called a function whose "
                         "definition failed to compile; halting this VM\n");
-        vm.setHalted(true);
+        vm.haltWithError();
         return;
     }
     throw std::runtime_error(
@@ -1136,7 +1144,7 @@ void op_no_match(VM& vm, Code* pc) {
     if (vm.target() && vm.target()->rtRestricted) {
         fprintf(stderr, "*** ERROR: no case of a match expression matched "
                         "the value (in '%s'); halting this VM\n", where);
-        vm.setHalted(true);
+        vm.haltWithError();
         return;
     }
     throw std::runtime_error(std::format(

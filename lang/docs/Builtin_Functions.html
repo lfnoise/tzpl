@@ -363,7 +363,7 @@
                 <li><a href="#enum-functions">Enum Functions</a> &mdash; ordinal, tag</li>
                 <li><a href="#operators">Built-in Operators</a> &mdash; arithmetic, comparison, bitwise, logical, string</li>
                 <li><a href="#type-conversions">Type Conversions</a> &mdash; toInt, toFloat, toFraction, toComplex</li>
-                <li><a href="#io">I/O Functions</a> &mdash; print, println, toString, prettyString, prettyPrint, getListPrintLimit, setListPrintLimit, setGraphMaxDepth, setLazyForceLimit, setPrintMaxDepth</li>
+                <li><a href="#io">I/O Functions</a> &mdash; print, println, panic, toString, prettyString, prettyPrint, getListPrintLimit, setListPrintLimit, setGraphMaxDepth, setLazyForceLimit, setPrintMaxDepth</li>
                 <li><a href="#file-os">File &amp; OS Functions (NRT)</a> &mdash; readFile, readFileBytes, writeFile, appendFile (+ Async variants), fileExists, isDirectory, fileSize, fileModTime, listDir, makeDir, removeFile, renameFile, getEnv, programArgs, currentDir</li>
                 <li><a href="#fft">FFT Functions (NRT)</a> &mdash; fft, ifft</li>
                 <li><a href="#introspection">Introspection</a> &mdash; disassemble, typeName&lt;T&gt;, typeRepr</li>
@@ -2585,6 +2585,16 @@ println(<span class="hl-num">42</span>);                       <span class="cmt"
 
 <span class="cmt">-- Auto-mapping: print each element on its own line</span>
 [<span class="hl-num">1</span>, <span class="hl-num">2</span>, <span class="hl-num">3</span>] @ println;                <span class="cmt">-- 1  2  3  (each on its own line)</span></code></pre>
+
+            <h3><code>panic(message)</code></h3>
+            <p>Print <code>Error: &lt;message&gt;</code> and halt execution &mdash; the same trap <code>unwrap</code> springs on a <code>none</code>, with a message of your choosing. Statements after the panic do not run; a script that panics exits with a nonzero status. Use it in library code that must not continue past a failure &mdash; for example, <code>defSynth</code>/<code>defSynthX</code> panic when a synthdef fails to compile.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>panic(String) &rarr; Void</code></td><td>Print the message and halt execution.</td></tr>
+            </table>
+            <pre><code><span class="hl-str">"before"</span> println;                  <span class="cmt">-- before</span>
+panic(<span class="hl-str">"something went wrong"</span>);     <span class="cmt">-- Error: something went wrong</span>
+<span class="hl-str">"after"</span> println;                    <span class="cmt">-- never runs</span></code></pre>
 
             <h3><code>toString(x)</code></h3>
             <p>Convert any value to its printed representation. The result is exactly the text that <code>print</code> would output for the value, as a single-line <code>String</code> with no width awareness (see <code>prettyString</code> below for the width-aware form). Works on values of every type: numbers, Bool, Symbol, String, containers, tuples, structs, enums, and so on.</p>

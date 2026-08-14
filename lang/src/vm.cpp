@@ -601,6 +601,7 @@ Word VM::evalPrimitive(Primitive* prim, const Word* args, u16 argc) {
 
 Word VM::callFunction(CodeBlock* block, const Word* args, u16 argc) {
     halted_ = false;
+    errorHalted_ = false;
     frameCount_ = 0;
     baseReg_ = 0;
     currentRegs_ = regs_;
@@ -670,6 +671,7 @@ Word VM::callCallable(Obj* callable, const Word* args, u16 argc) {
 
 Word VM::execute(CodeBlock* block) {
     halted_ = false;
+    errorHalted_ = false;
     frameCount_ = 0;
     baseReg_ = 0;
     currentRegs_ = regs_;

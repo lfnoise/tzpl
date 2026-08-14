@@ -1519,6 +1519,17 @@ static bool isOptionType(Type* t) {
     return s.substr(0, 7) == "Option<";
 }
 
+// panic: String -> Void. Print the message and halt execution -- the
+// user-facing counterpart of unwrap-on-none's trap, for library code that
+// must not continue past a failure (e.g. a synthdef that failed to
+// compile). The message goes to the VM's print output so it lands next to
+// the output of the code that panicked.
+static void builtin_panic(VM& vm, u16, u16, u16 ab) {
+    auto* s = static_cast<StringObj*>(vm.reg(ab).o);
+    fprintf(vm.printOutput(), "Error: %.*s\n", (int)s->s.size(), s->s.data());
+    vm.haltWithError();
+}
+
 // unwrap: Option<T> -> T
 //
 // Phase 4g.15: heap Enum payload stored natively in v[]. Copy the case's
@@ -1527,7 +1538,7 @@ static void builtin_unwrap(VM& vm, u16 dst, u16, u16 ab) {
     auto* e = static_cast<Enum*>(vm.reg(ab).o);
     if (e->which_ != 0) {
         fprintf(vm.printOutput(), "Error: unwrap called on none\n");
-        vm.setHalted(true);
+        vm.haltWithError();
         return;
     }
     auto* et = static_cast<EnumType*>(e->type_);
@@ -1541,7 +1552,7 @@ static void builtin_unwrap(VM& vm, u16 dst, u16, u16 ab) {
 static void builtin_unwrap_nullableptr(VM& vm, u16 dst, u16, u16 ab) {
     if (!vm.reg(ab).o) {
         fprintf(vm.printOutput(), "Error: unwrap called on none\n");
-        vm.setHalted(true);
+        vm.haltWithError();
         return;
     }
     vm.reg(dst).o = vm.reg(ab).o;
@@ -1601,7 +1612,7 @@ static void builtin_isNone_nullableptr(VM& vm, u16 dst, u16, u16 ab) {
 static void builtin_unwrap_inline(VM& vm, u16 dst, u16, u16 ab) {
     if (vm.reg(ab).i != 0) {
         fprintf(vm.printOutput(), "Error: unwrap called on none\n");
-        vm.setHalted(true);
+        vm.haltWithError();
         return;
     }
     auto* prim = static_cast<Primitive*>(vm.currentPrimitive());
@@ -4192,6 +4203,11 @@ void registerBuiltinFunctions(Compiler& compiler,
     // multi-word inline slots directly via slotToString).
     registerTemplate(compiler, functions, "print",        resolve_print,   /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
     registerTemplate(compiler, functions, "println",      resolve_println, /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+
+    // --- panic builtin: print the message and halt (unwrap-on-none's trap
+    // with a caller-supplied message) ---
+    registerOne(compiler, functions, "panic", compiler.voidType(),
+        {compiler.stringType()}, builtin_panic, /*pure=*/false, /*rtSafe=*/true);
 
     // --- disassemble builtin (not RT-safe: writes to stdout) ---
     registerTemplate(compiler, functions, "disassemble",  resolve_disassemble, /*rtSafe=*/false, /*acceptsInlineArgs=*/true);

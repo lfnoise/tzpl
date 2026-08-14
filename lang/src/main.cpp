@@ -61,7 +61,8 @@ static int runSource(NRTVM& nrtvm, Compiler& compiler, const VMTarget& target,
         return 1;
     }
     nrtvm.execute(result.mainBlock);
-    return 0;
+    // A panic / unwrap-on-none / no-match trap halted the run: fail loudly.
+    return nrtvm.vm.isErrorHalted() ? 1 : 0;
 }
 
 // Read entire file into string

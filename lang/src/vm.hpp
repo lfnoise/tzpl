@@ -320,6 +320,11 @@ private:
     // Flag set by HALT instruction
     bool halted_;
 
+    // Set alongside halted_ when the halt is an ERROR (panic, unwrap on
+    // none, no-match trap, ...) rather than normal top-level completion.
+    // Hosts read it after a run to exit nonzero on a failed script.
+    bool errorHalted_ = false;
+
     // Coroutine state
     CoroutineObj*    currentCoroutine_ = nullptr;
     CoroutineFrame*  currentCoroFrame_ = nullptr;
@@ -834,6 +839,13 @@ public:
     // Halted state
     bool isHalted() const { return halted_; }
     void setHalted(bool h) { halted_ = h; }
+
+    // Error halt: like setHalted(true), but marks the halt as a FAILURE
+    // (panic, unwrap on none, no-match trap, ...) so hosts can distinguish
+    // it from normal top-level completion and exit nonzero. Cleared at the
+    // same entry points that clear halted_.
+    void haltWithError() { halted_ = true; errorHalted_ = true; }
+    bool isErrorHalted() const { return errorHalted_; }
 
     // Print output
     FILE* printOutput() const { return printOutput_; }

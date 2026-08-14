@@ -1196,8 +1196,9 @@ noteOff(<span class="hl-num">100</span>, <span class="hl-num">1</span>);</code><
             that builds the <code>.dylib</code> runs on a background worker, so sequences that are
             already playing keep playing while a def compiles. The call returns a
             <code>Future&lt;String&gt;</code> holding the generated C++ source; when it resolves, the
-            def has been compiled, loaded, and registered (a success or error line is printed
-            either way). Two usage patterns:</p>
+            def has been compiled, loaded, and registered. A <strong>failed</strong> compile
+            <strong>panics</strong>: the error prints and the script halts, so code never sails past
+            a def that did not load. Two usage patterns:</p>
 
             <ul>
                 <li><strong>First definition:</strong> <code>await</code> before playing the def
@@ -1211,10 +1212,17 @@ noteOff(<span class="hl-num">100</span>, <span class="hl-num">1</span>);</code><
             <p>Inside a non-real-time render script the compile runs synchronously (the render
             cannot proceed without the def), so the returned future is already resolved.</p>
 
+            <p><code>defSynthXChecked</code> is the fallible form for code that must tolerate and
+            report failures rather than halt (test harnesses that sweep many defs): it returns a
+            <code>Future&lt;Result&lt;String, String&gt;&gt;</code> &mdash; <code>ok(cpp)</code> on
+            success, <code>err(message)</code> on a failed analysis, compile, or load &mdash; and
+            prints nothing.</p>
+
             <p><code>defSynth</code> (in <code>synthdef.x</code>) is the legacy path through the C++
             compiler via the S-expression serializer. It byte-matches <code>defSynthX</code>'s output
             and is retained as the differential-test oracle; new code should use
-            <code>defSynthX</code>. It is async in the same way and returns the synthdef's
+            <code>defSynthX</code>. It is async in the same way, panics on failure the same way
+            (with a <code>defSynthChecked</code> fallible form), and returns the synthdef's
             S-expression text.</p>
 
             <h3>Tags</h3>

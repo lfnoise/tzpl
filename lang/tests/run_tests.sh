@@ -116,6 +116,14 @@ for test_file in "${TEST_FILES[@]}"; do
         I_FLAGS+=(--rt)
     fi
 
+    # Check for @fails marker: "-- @fails" means the script is EXPECTED to
+    # exit nonzero (a runtime error test: panic, unwrap on none, ...).
+    # stdout is still golden-compared against .expected.
+    expects_fail=false
+    if grep -q '^-- @fails' "$test_file"; then
+        expects_fail=true
+    fi
+
     # Run the test with timeout
     stdout_file=$(mktemp)
     stderr_file=$(mktemp)
@@ -178,7 +186,7 @@ for test_file in "${TEST_FILES[@]}"; do
         continue
     fi
 
-    if ! $is_error_test && [[ $exit_code -ne 0 ]]; then
+    if ! $is_error_test && ! $expects_fail && [[ $exit_code -ne 0 ]]; then
         echo -e "${RED}FAIL${RESET} $rel_path (exit code $exit_code)"
         FAIL=$((FAIL + 1))
         if $VERBOSE; then
@@ -186,6 +194,14 @@ for test_file in "${TEST_FILES[@]}"; do
             cat "$stderr_file"
             echo ""
         fi
+        rm -f "$stdout_file" "$stderr_file"
+        if $STOP_ON_FAIL; then break; fi
+        continue
+    fi
+
+    if $expects_fail && [[ $exit_code -eq 0 ]]; then
+        echo -e "${RED}FAIL${RESET} $rel_path (expected nonzero exit, got 0)"
+        FAIL=$((FAIL + 1))
         rm -f "$stdout_file" "$stderr_file"
         if $STOP_ON_FAIL; then break; fi
         continue

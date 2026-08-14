@@ -6,6 +6,8 @@
 
 export synthdef_ffi.*;
 
+import std.result.*;    -- Result<T, E> for defSynthChecked
+
 ---------------------------------------------------------------------------
 --- Rate
 
@@ -1359,10 +1361,30 @@ fn toSynthSexpr(graph SignalGraph, synthName String, tags [String]) String {
 -- redefining a def that is already playing, fire-and-forget is fine -- players
 -- keep the old def and hot-swap when the new one loads. (Inside an NRT render
 -- the compile runs synchronously, so the future is already resolved.)
+--
+-- A failed compile PANICS (prints the error and halts) -- a script must not
+-- sail past a def that never loaded. Harnesses that need to tolerate and
+-- report failures use defSynthChecked, which returns ok(sexpr) / err(message)
+-- instead of halting.
 fn defSynth(synthFun GraphFn, synthName String) Future<String> =
 	defSynth(synthFun, synthName, [String]());
 
 async fn defSynth(synthFun GraphFn, synthName String, tags [String]) String {
+	match (defSynthChecked(synthFun, synthName, tags) await) {
+		ok(sx): {
+			println(synthName $ " compiled successfully.");
+			sx
+		}
+		err(msg): { panic(msg); "" }
+	}
+}
+
+-- Fallible form of defSynth: ok(sexpr source) on success, err(message) on a
+-- failed compile. Never halts and prints nothing.
+fn defSynthChecked(synthFun GraphFn, synthName String) Future<Result<String, String>> =
+	defSynthChecked(synthFun, synthName, [String]());
+
+async fn defSynthChecked(synthFun GraphFn, synthName String, tags [String]) Result<String, String> {
 
 	let graph SignalGraph = synthFun _makeTopGraph;
 
@@ -1371,12 +1393,9 @@ async fn defSynth(synthFun GraphFn, synthName String, tags [String]) String {
 
 	let err = sexprString compileSynthDefAndLoadAsync await;
 	if (err length > 0) {
-		println("ERROR compiling " $ synthName $ ": " $ err);
-	} else {
-		println(synthName $ " compiled successfully.");
+		return Result<String, String>.err("compiling " $ synthName $ " failed: " $ err);
 	}
-
-	sexprString
+	Result<String, String>.ok(sexprString)
 }
 
 ---------------------------------------------------------------------------

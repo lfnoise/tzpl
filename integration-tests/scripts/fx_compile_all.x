@@ -13,16 +13,23 @@
 
 import synthdef.*;
 import synthc.compile.*;
+import std.result.*;
 import effects.*;
 import instruments.*;
 import audio_engine.*;
 
 let fails = &0;
 
+-- defSynthXChecked, not defSynthX: a failed compile must be REPORTED and
+-- counted, not halt the sweep (defSynthX panics on failure).
 async fn cc(f GraphFn, name String) Void {
-	f defSynthX(name) await;
-	if (listSynthDefs() contains(name)) { println("PASS " $ name); }
-	else { fails <- *fails + 1; println("FAIL " $ name); }
+	match (f defSynthXChecked(name) await) {
+		ok(cpp): {
+			if (listSynthDefs() contains(name)) { println("PASS " $ name); }
+			else { fails <- *fails + 1; println("FAIL " $ name $ " (compiled but not registered)"); }
+		}
+		err(msg): { fails <- *fails + 1; println("FAIL " $ name $ ": " $ msg); }
+	}
 }
 
 cc(fxTremolo, "fxTremolo") await;
