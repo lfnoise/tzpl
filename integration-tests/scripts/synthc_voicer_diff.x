@@ -172,6 +172,21 @@ fn ringSynth() S {
 	}) sum outlet
 }
 
+-- Declared-but-unused noteParam: sink-unreachable, so it never enters the
+-- sorted graph -- but it still owns a column of the params matrix (noteOn
+-- params follow declaration order, used or not). synthc used to size the
+-- matrix from sorted, leaving the surviving params reading out-of-bounds
+-- columns (a silent synth); it must size from the declaration list like
+-- the C++ (RowVoicer<8,2> + params[8][3] + both defaults here).
+fn unusedParamSynth() S {
+	voicer(8, fn() {
+		let f   = noteParam("freq", ControlSpec { lo: 20.0, hi: 2000.0, init: 440.0, warp: ControlWarp.linear });
+		let amp = noteParam("amp",  ControlSpec { lo: 0.0, hi: 1.0, init: 0.5, warp: ControlWarp.linear });
+		let g   = gate();
+		white() * g * amp * 0.2
+	}) sum outlet
+}
+
 checkVoicer("tiny", tiny);
 checkVoicer("tiny8", tiny8);
 checkVoicer("gateonly", gateonly);
@@ -183,6 +198,7 @@ checkVoicer("stereo_noise", stereoNoiseSynth);
 checkVoicer("additive_synth", additiveSynth);
 checkVoicer("comb_synth", combSynth);
 checkVoicer("ring_synth", ringSynth);
+checkVoicer("unused_param", unusedParamSynth);
 
 if (`failures == 0) {
 	println("M4 VOICER DIFF PASS");

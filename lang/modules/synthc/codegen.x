@@ -1194,12 +1194,17 @@ fn _graphHasDelays(ctx Ctx, g Int) Bool {
 -- init values in serial order (excluding gate).
 fn _voicerNoteParams(ctx Ctx, bg Int) [Int] {
 	var out [Int] = [];
-	-- collect, then order by serial
+	-- Collect from the declaration list (ctx.noteParams), NOT ctx.sorted: a
+	-- declared-but-unused param is sink-unreachable, so the topo sort leaves
+	-- it out of sorted -- but it still owns a column of the params matrix
+	-- (noteOn params follow declaration order, used or not). Sizing from
+	-- sorted shrank the matrix while surviving params kept their original
+	-- column serials -- an out-of-bounds row read that silenced the synth.
+	-- Mirrors the C++, which sizes from the synth->noteParams declaration
+	-- list; then order by serial.
 	var nodes [Int] = [];
-	for (n : ctx.sorted) {
-		if (ctx.graphOf[n] == bg) {
-			match (ctx.kind[n]) { noteParamK(_, _, _): nodes push!(n); _: {} }
-		}
+	for (n : ctx.noteParams) {
+		if (ctx.graphOf[n] == bg) { nodes push!(n); }
 	}
 	-- selection sort by param serial (small N)
 	var picked [Int] = [];
