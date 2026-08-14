@@ -137,6 +137,11 @@ Flat (audio-domain):
   phaser, delays, reverb, dynamics, distortion, pitch shift, granulator,
   formant, ...) plus ready-made `fx*()` stereo synthdef graph functions
   (registered by `examples/effect_synthdefs.x`)
+- `instruments.x` -- Note-playing instrument synthdefs: ugen-layer voice
+  builders (Karplus-Strong string, ringing-filter bank, sample-bank playback
+  helpers, standard note params) plus ready-made voicer graph functions
+  (three sample players, wavetable lead, resonator bank, K-S pluck;
+  registered by `examples/note_synthdefs.x`)
 - `filters.x` -- IIR/FIR filter implementations
 - `complex_signal.x` -- complex arithmetic over signals
 - `actors.x`, `silo.x`, `silo_actors.x` -- engine-coupled concurrency helpers
