@@ -1160,7 +1160,8 @@ void test_switch_sexpr_parse() {
         (Synth test_switch_sexpr
             (Graph 4 (
                 (0 Control "sel" 1 (ControlSpec 0 2 0 0))
-                (4 SwitchExpr (0)
+                (6 CastOp 1 (0))
+                (4 SwitchExpr (6)
                     (Graph 1 (
                         (1 Constant 1 12 (100.0))))
                     (Graph 2 (

@@ -325,7 +325,9 @@ fn svf(x S, freq AsSignal, rq AsSignal) (S, S, S, S) {
 -- 3 notch.
 fn multiFilter(x S, typ AsSignal, freq AsSignal, rq AsSignal) S {
 	let (lp, hp, bp, br) = x svf(freq, rq);
-	typ asSignal select([lp, hp, bp, br])
+	-- select's index must be an integer type; a float (e.g. a control) would
+	-- fail type inference
+	typ asSignal i32 select([lp, hp, bp, br])
 }
 
 ---------------------------------------------------------------------------
@@ -624,7 +626,7 @@ fn fxLoFi() S {
 
 fn fxFilter() S {
 	let x = _fxIn();
-	let typ = choice("type", 4) f32;
+	let typ = choice("type", 4);
 	let freq = control("freq", _exp(40.0, 12000.0, 1200.0)) lag(0.05);
 	let rq = control("rq", _lin(0.05, 2.0, 1.0));
 	x multiFilter(typ, freq, rq) outlet

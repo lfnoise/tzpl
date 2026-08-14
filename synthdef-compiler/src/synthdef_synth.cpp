@@ -501,6 +501,24 @@ namespace synthdef {
     
     void Synth::setNonConcreteTypesToDefault() {
         for (S expr : sorted) {
+            // A live expr whose type intersected to empty has conflicting
+            // constraints (e.g. a float select index where an integer is
+            // required). The conflict can arrive via a consumer's
+            // input-type constraint, which propagate_input_type applies
+            // without checking, so refuse it here rather than emit an
+            // "empty"-typed declaration that cannot compile. Constants are
+            // exempt: they are deduped across consumers whose demands may
+            // conflict, and codegen emits them inline in each consumer's
+            // own type.
+            if (expr->type.is_empty() && expr->consumers.total() > 0
+                && !expr->is_constant()) {
+                throw std::runtime_error(std::format(
+                    "type error: #{} {} has no possible type -- a consumer's "
+                    "input-type constraint conflicts with what the expr "
+                    "produces (e.g. a float select index where an integer "
+                    "is required)",
+                    expr->userial, expr->str()));
+            }
             if (expr->type.is_concrete()) continue;
             if (expr->type & NumType::f32) expr->type = NumType::f32;
             else if (expr->type & NumType::f64) expr->type = NumType::f64;
@@ -754,6 +772,25 @@ namespace synthdef {
         // Reassign serial numbers to reflect the final topological order.
         for (usize i = 0; i < isoGroups.size(); ++i) {
             isoGroups[i]->serial = i;
+        }
+
+        // A temp-var tree root computed in one iso-group but consumed by a
+        // tree in another is emitted as a local inside the producer group's
+        // guarded block -- out of scope where the consumer group reads it,
+        // and stale when the consumer group fires without the producer.
+        // Promote such roots to instance variables: the iso-group boundary
+        // is the event-rate analogue of a rate boundary.
+        for (ExprTree* tree : sortedTrees) {
+            S root = tree->root;
+            if (root->rate != eventSignalRate || !is_temp_var(root->cut)) {
+                continue;
+            }
+            for (S consumer : root->consumers.exprs()) {
+                if (consumer->tree && consumer->tree->isoGroup != tree->isoGroup) {
+                    setGraphCut(root, GraphCut::Rate);
+                    break;
+                }
+            }
         }
 
         printf("   Computed %zu iso-groups from %zu event-rate trees\n",

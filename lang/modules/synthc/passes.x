@@ -427,6 +427,21 @@ fn _defaultType(t NumType) NumType {
 
 fn setNonConcreteTypesToDefault(ctx Ctx) Void {
 	for (n : ctx.sorted) {
+		-- A live node whose type intersected to empty has conflicting
+		-- constraints (e.g. a float select index where an integer is
+		-- required). The conflict can arrive via a consumer's input-type
+		-- constraint, which _propagateTypes applies without checking, so
+		-- refuse it here rather than emit an "empty"-typed declaration
+		-- that cannot compile. Constants are exempt: they are deduped
+		-- across consumers whose demands may conflict, and codegen emits
+		-- them inline in each consumer's own type.
+		if (ctx.typ[n] isEmpty && ctx.consumers[n] length > 0
+				&& !(ctx.kind[n] isConstantKind)) {
+			ctx.errors push!(("type error: node %^ %^ has no possible type -- "
+				$ "a consumer's input-type constraint conflicts with what the "
+				$ "node produces (e.g. a float select index where an integer "
+				$ "is required)") fmt(ctx.serial[n], nodeStr(ctx, n)));
+		}
 		ctx.typ[n] = _defaultType(ctx.typ[n]);
 	}
 	-- Each delay buffer takes its writer's (now concrete) type.
@@ -954,6 +969,26 @@ fn computeIsoGroups(ctx Ctx) Void {
 		let g = ctx.isoOrder[pos];
 		ctx.isoGroups[g] = IsoGroup { ...ctx.isoGroups[g], serial: pos };
 		pos = pos + 1;
+	}
+
+	-- A temp-var tree root computed in one iso-group but consumed by a tree
+	-- in another is emitted as a local inside the producer group's guarded
+	-- block -- out of scope where the consumer group reads it, and stale when
+	-- the consumer group fires without the producer. Promote such roots to
+	-- instance variables: the iso-group boundary is the event-rate analogue
+	-- of a rate boundary.
+	for (treeIdx : ctx.sortedTrees) {
+		let root = ctx.trees[treeIdx].root;
+		if (ctx.nrate[root] == Rate.event && ctx.cut[root] isTempVarCut) {
+			var promote = false;
+			for (c : ctx.consumers[root]) {
+				let ct = ctx.treeOf[c];
+				if (ct != NONE && ctx.trees[ct].isoGroupOf != ctx.trees[treeIdx].isoGroupOf) {
+					promote = true;
+				}
+			}
+			if (promote) { _setCut(ctx, root, GraphCut.rate); }
+		}
 	}
 }
 
