@@ -367,7 +367,13 @@ if (localStorage.getItem('tzpl-docs-theme') === 'light') document.documentElemen
         <li><a href="#nodegraph-cook">Build a graph</a></li>
       </ol>
     </li>
-    <li><a href="#notes">Playing notes</a></li>
+    <li><a href="#notes">Playing notes</a>
+      <ol>
+        <li><a href="#notes-commands">Note commands</a></li>
+        <li><a href="#notes-instruments">The instruments library</a></li>
+        <li><a href="#notes-data">Wavetables &amp; sample banks</a></li>
+      </ol>
+    </li>
     <li><a href="#silos">Loading scripts into silos</a></li>
     <li><a href="#scheduling">Scheduling on the beat</a></li>
     <li><a href="#generative">Generative sequences</a></li>
@@ -711,8 +717,11 @@ transition use the crossfading variants (<code>connectX</code>,
 
 <!-- ================================================================ -->
 <h2 id="notes">4. Playing notes</h2>
-<p>A <em>voicer</em> node (your <code>sine_voice</code> from section&nbsp;2, or the
-engine's built-in <code>"voicer"</code>) holds a pool of polyphonic voices. You
+
+<h3 id="notes-commands">4.1 Note commands</h3>
+<p>A <em>voicer</em> node (your <code>sine_voice</code> from section&nbsp;2, the
+engine's built-in <code>"voicer"</code>, or a ready-made instrument from
+<a href="#notes-instruments">&sect;4.2</a>) holds a pool of polyphonic voices. You
 trigger and release voices by a <em>note id</em> you choose:</p>
 <table>
   <tr><th>From NRT</th><th>From inside a silo</th><th>Meaning</th></tr>
@@ -760,6 +769,165 @@ release stage plays out. Reusing a note id while it is still sounding retriggers
 that same voice. Like all graph changes, note commands are bundled and can be
 beat-scheduled with <code>sched(silo, clock, beat)</code> &mdash; which is exactly what
 the generative and actor recipes below do.</p>
+
+<h3 id="notes-instruments">4.2 Ready-made instruments: the instruments library</h3>
+<p><code>lang/modules/instruments.x</code> is a library of note-playing
+instruments, so you can play something real without writing a synthdef first.
+It has two layers: voice-building UGen functions (a Karplus-Strong string
+<code>ksString</code>, a ringing-filter bank <code>ringBank</code>, sample-bank
+playback helpers, standard note parameters) for composing your own voices, and
+six ready-made defs, each a polyphonic voicer wrapped around one synthesis
+model:</p>
+<table>
+  <tr><th>Def</th><th>Sound</th><th><code>noteOn</code> params</th><th>Controls (index&nbsp;&middot;&nbsp;name)</th><th>Out</th></tr>
+  <tr><td><code>smpPerc</code></td><td>Percussive sample player: the resolved sample plays once, at the pitch-shifted rate, and stops at its end. Note-off is ignored.</td><td><code>[pitch, vel]</code></td><td>&mdash;</td><td>stereo</td></tr>
+  <tr><td><code>smpLoopTail</code></td><td>Sample player: loops the sample's sustain loop while the note is held; on release the playhead runs on through the sample's own recorded decay.</td><td><code>[pitch, vel]</code></td><td>&mdash;</td><td>stereo</td></tr>
+  <tr><td><code>smpLoopEnv</code></td><td>Sample player: keeps looping through sustain <em>and</em> release; an exponential envelope of <code>release</code> seconds shapes the tail.</td><td><code>[pitch, vel]</code></td><td>0&nbsp;release</td><td>stereo</td></tr>
+  <tr><td><code>wtLead</code></td><td>Band-limited wavetable oscillator (<a href="#synthdef-wavetable">&sect;2.4</a>) through a resonant lowpass; separate ADSR envelopes for amplitude and filter, the latter sweeping the cutoff up to <code>envOct</code> octaves.</td><td><code>[freq, amp]</code></td><td>0&nbsp;attack, 1&nbsp;decay, 2&nbsp;sustain, 3&nbsp;release, 4&nbsp;cutoff, 5&nbsp;envOct, 6&nbsp;res, 7&nbsp;fattack, 8&nbsp;fdecay, 9&nbsp;fsustain</td><td>mono</td></tr>
+  <tr><td><code>resonBank</code></td><td>Harmonic ringing-filter bank excited by gated noise: hold the note for a bowed, breathy tone; release it and the modes ring out over <code>decay</code> seconds.</td><td><code>[freq, amp]</code></td><td>0&nbsp;attack, 1&nbsp;release, 2&nbsp;decay</td><td>mono</td></tr>
+  <tr><td><code>ksPluck</code></td><td>Karplus-Strong plucked string: a noise burst of <code>pluck</code> seconds excites a tuned string that rings for <code>decay</code> seconds; <code>damp</code> darkens it. Note-off is ignored.</td><td><code>[freq, amp]</code></td><td>0&nbsp;pluck, 1&nbsp;decay, 2&nbsp;damp</td><td>mono</td></tr>
+</table>
+<p>Two conventions to know:</p>
+<ul>
+  <li><strong>Each def is a factory.</strong> <code>ksPluck</code> is not the
+  graph function &mdash; <code>ksPluck()</code> returns it, with an optional
+  voice count (default 8): <code>ksPluck() defSynthX(<span
+  class="str">"ksPluck"</span>)</code> compiles the standard def,
+  <code>ksPluck(<span class="num">16</span>) defSynthX(<span
+  class="str">"ksPluck16"</span>)</code> a 16-voice variant. Running the file
+  <code>examples/note_synthdefs.x</code> registers all six at the default
+  voice count.</li>
+  <li><strong>Note params are only what genuinely varies per note</strong>
+  &mdash; <code>[pitch, vel]</code> (MIDI-style, 0&ndash;127) for the sample
+  players, <code>[freq, amp]</code> (Hz, 0&ndash;1) for the synthesis models.
+  Everything panel-like &mdash; envelope segments, cutoff, damping &mdash; is a
+  node-level <em>control</em>, shared by all voices like the panel of a
+  hardware synth: set it with <code>setControl(node, index, value)</code>
+  (a bundle command), using the indexes in the table.</li>
+</ul>
+<p>The plucked string, end to end &mdash; compile, instantiate, play a chord,
+then turn the panel:</p>
+<pre><code><span class="kw">import</span> synthdef.*;
+<span class="kw">import</span> synthc.compile.*;
+<span class="kw">import</span> instruments.*;
+<span class="kw">import</span> audio_engine.*;
+
+<span class="fn">ksPluck</span>() <span class="fn">defSynthX</span>(<span class="str">"ksPluck"</span>) <span class="kw">await</span>;
+
+<span class="fn">engineStart</span>();
+<span class="fn">masterGain</span>(<span class="num">0.2</span>);
+<span class="fn">begin</span>();
+<span class="fn">newNode</span>(<span class="str">"ksPluck"</span>, <span class="num">210</span>);
+<span class="fn">connect</span>(<span class="num">210</span>, <span class="num">0</span>, <span class="num">0</span>, <span class="num">0</span>);
+<span class="fn">sched</span>(<span class="num">0</span>);
+
+<span class="cmt">-- an open A-minor chord; ksPluck ignores note-off -- the strings ring out</span>
+<span class="fn">begin</span>();
+<span class="fn">noteOn</span>(<span class="num">210</span>, <span class="num">0</span>, [<span class="num">110.0</span>, <span class="num">0.8</span>]);
+<span class="fn">noteOn</span>(<span class="num">210</span>, <span class="num">1</span>, [<span class="num">164.8</span>, <span class="num">0.5</span>]);
+<span class="fn">noteOn</span>(<span class="num">210</span>, <span class="num">2</span>, [<span class="num">220.0</span>, <span class="num">0.45</span>]);
+<span class="fn">noteOn</span>(<span class="num">210</span>, <span class="num">3</span>, [<span class="num">261.6</span>, <span class="num">0.4</span>]);
+<span class="fn">noteOn</span>(<span class="num">210</span>, <span class="num">4</span>, [<span class="num">329.6</span>, <span class="num">0.35</span>]);
+<span class="fn">sched</span>(<span class="num">0</span>);
+
+<span class="cmt">-- turn the panel: darker, shorter strings -- then re-run the chord block</span>
+<span class="fn">begin</span>();
+<span class="fn">setControl</span>(<span class="num">210</span>, <span class="num">2</span>, <span class="num">0.8</span>);   <span class="cmt">-- damp: roll the highs off the string loop</span>
+<span class="fn">setControl</span>(<span class="num">210</span>, <span class="num">1</span>, <span class="num">1.0</span>);   <span class="cmt">-- decay: ring time down to 1 s</span>
+<span class="fn">sched</span>(<span class="num">0</span>);</code></pre>
+<p>And to stop:</p>
+<pre><code><span class="fn">begin</span>();
+<span class="fn">freeNode</span>(<span class="num">210</span>);   <span class="cmt">-- remove the instrument -- silence</span>
+<span class="fn">sched</span>(<span class="num">0</span>);</code></pre>
+<p><strong>How it works.</strong> Each def wraps
+<code>voicer(maxVoices, voiceFn)</code> exactly as you did by hand in
+<a href="#synthdef-voice">&sect;2.3</a> &mdash; the library just ships the
+voice. <code>noteOn</code> params land in declaration order (the gate is
+implicit, always input&nbsp;0), and omitted trailing params take their spec
+defaults, so <code>noteOn(<span class="num">210</span>, <span
+class="num">5</span>, [<span class="num">440.0</span>])</code> plucks at the
+default amplitude. Controls are read by the voices as shared values, so a
+control change moves every sounding voice at once &mdash;
+<code>decay</code> and <code>damp</code> sit inside the string's feedback loop
+and re-shape strings that are already ringing. And because the synthesis
+models declare <code>[freq, amp]</code>, they are exactly the layout
+<code>music.play</code>'s <code>freqVoice</code> expects
+(<a href="#musiclibs-play">&sect;11.6</a>): <code>play(tune, freqVoice(<span
+class="num">210</span>))</code> plays a chapter&nbsp;11 stream on the plucked
+string.</p>
+
+<h3 id="notes-data">4.3 Instruments with per-node data: wavetables and sample banks</h3>
+<p>Three of the defs read data you load into the node right after
+<code>newNode</code>, in the same bundle. <code>wtLead</code> reads a wavetable
+bank (buffer&nbsp;0) built by the <code>wavetables</code> module, as in
+<a href="#synthdef-wavetable">&sect;2.4</a>:</p>
+<pre><code><span class="kw">import</span> synthdef.*;
+<span class="kw">import</span> synthc.compile.*;
+<span class="kw">import</span> instruments.*;
+<span class="kw">import</span> wavetables.*;
+<span class="kw">import</span> audio_engine.*;
+
+<span class="fn">wtLead</span>() <span class="fn">defSynthX</span>(<span class="str">"wtLead"</span>) <span class="kw">await</span>;
+
+<span class="fn">engineStart</span>();
+<span class="fn">masterGain</span>(<span class="num">0.2</span>);
+<span class="fn">begin</span>();
+<span class="fn">newNode</span>(<span class="str">"wtLead"</span>, <span class="num">211</span>);
+<span class="fn">fillBuffer</span>(<span class="num">211</span>, <span class="num">0</span>, <span class="num">1</span>, <span class="fn">sawTables</span>(<span class="num">1.0</span>));   <span class="cmt">-- the bank the oscillator reads</span>
+<span class="fn">connect</span>(<span class="num">211</span>, <span class="num">0</span>, <span class="num">0</span>, <span class="num">0</span>);
+<span class="fn">sched</span>(<span class="num">0</span>);
+
+<span class="cmt">-- hold a fifth; each note's filter envelope sweeps its own cutoff</span>
+<span class="fn">begin</span>();
+<span class="fn">noteOn</span>(<span class="num">211</span>, <span class="num">0</span>, [<span class="num">110.0</span>, <span class="num">0.5</span>]);
+<span class="fn">noteOn</span>(<span class="num">211</span>, <span class="num">1</span>, [<span class="num">165.0</span>, <span class="num">0.4</span>]);
+<span class="fn">sched</span>(<span class="num">0</span>);
+
+<span class="cmt">-- play the panel while they hold: open the filter, sharpen the resonance</span>
+<span class="fn">begin</span>();
+<span class="fn">setControl</span>(<span class="num">211</span>, <span class="num">4</span>, <span class="num">3000.0</span>);   <span class="cmt">-- cutoff up</span>
+<span class="fn">setControl</span>(<span class="num">211</span>, <span class="num">6</span>, <span class="num">0.15</span>);     <span class="cmt">-- res is 1/Q -- smaller is more resonant</span>
+<span class="fn">sched</span>(<span class="num">0</span>);</code></pre>
+<p>These notes are sustained, so release them to stop:</p>
+<pre><code><span class="fn">begin</span>();
+<span class="fn">allNotesOff</span>(<span class="num">211</span>);   <span class="cmt">-- both notes play out their release stage</span>
+<span class="fn">sched</span>(<span class="num">0</span>);</code></pre>
+<p>The <code>smp*</code> players resolve every note against <strong>sample
+bank&nbsp;0</strong> of their node: an array of <em>zones</em>, each a sound
+file mapped to a key range, velocity range, and root key. Substitute a couple
+of files of your own:</p>
+<pre><code><span class="cmt">-- zones: sampleZone(path, loKey, hiKey, loVel, hiVel, rootKey)</span>
+<span class="fn">begin</span>();
+<span class="fn">newNode</span>(<span class="str">"smpLoopEnv"</span>, <span class="num">212</span>);
+<span class="fn">loadSampleBank</span>(<span class="num">212</span>, <span class="num">0</span>, [
+    <span class="fn">sampleZone</span>(<span class="str">"samples/epiano_c3.wav"</span>, <span class="num">0</span>, <span class="num">59</span>, <span class="num">0</span>, <span class="num">127</span>, <span class="num">48</span>),
+    <span class="fn">sampleZone</span>(<span class="str">"samples/epiano_c4.wav"</span>, <span class="num">60</span>, <span class="num">127</span>, <span class="num">0</span>, <span class="num">127</span>, <span class="num">72</span>)
+]);
+<span class="fn">connect</span>(<span class="num">212</span>, <span class="num">0</span>, <span class="num">0</span>, <span class="num">0</span>);
+<span class="fn">sched</span>(<span class="num">0</span>);
+
+<span class="cmt">-- middle C, forte -- the sample players take [pitch, vel], MIDI-style</span>
+<span class="fn">begin</span>();
+<span class="fn">noteOn</span>(<span class="num">212</span>, <span class="num">0</span>, [<span class="num">60.0</span>, <span class="num">96.0</span>]);
+<span class="fn">sched</span>(<span class="num">0</span>);</code></pre>
+<p>Stop it the same way &mdash; <code>begin(); allNotesOff(<span
+class="num">212</span>); sched(<span class="num">0</span>);</code>.</p>
+<p><strong>How it works.</strong> At note-on the voice looks its
+<code>[pitch, vel]</code> up in the bank and latches the matching zone; the
+playback rate comes from the semitone distance to the zone's root key,
+corrected for the file's sample rate, so every sample sounds at the requested
+pitch. Loop points come from the file itself when it carries them (the WAV
+<code>smpl</code> / AIFF <code>INST</code> chunks most samplers write), or from
+explicit <code>loopStart</code>/<code>loopEnd</code> frame arguments to
+<code>sampleZone</code>; <code>smpPerc</code> ignores loops entirely. Choose the
+player by what your files contain: <code>smpLoopTail</code> when the audio
+after the loop is a recorded decay worth keeping, <code>smpLoopEnv</code> when
+it isn't (its <code>release</code> control shapes the tail instead), and
+<code>smpPerc</code> for one-shots like drums. Like <code>fillBuffer</code>,
+<code>loadSampleBank</code> is a bundle command: the files are read and the
+zones validated up front on the calling thread &mdash; a missing file or bad
+loop spec returns an error instead of ever reaching the audio thread &mdash;
+and the finished bank lands on the RT thread sample-accurately.</p>
 
 <!-- ================================================================ -->
 <h2 id="silos">5. Loading scripts into silos</h2>
@@ -1460,7 +1628,11 @@ follows, <code>stop</code> releases everything, and <code>stopAll()</code> stops
 every player started so far &mdash; the recovery when the <code>p</code> binding
 was overwritten by re-running the play block (<code>stopFirst()</code> and
 <code>stopLast()</code> peel off one player at a time, oldest or newest first). The first block defines the
-section&nbsp;2.3 sine voice inline, so this chapter sounds on its own.</p>
+section&nbsp;2.3 sine voice inline, so this chapter sounds on its own.
+<code>pitchVoice(node)</code> matches defs whose note params are
+<code>[pitch, amp]</code>; <code>freqVoice(node)</code> is the same for defs
+taking Hz directly, like the instruments-library models of
+<a href="#notes-instruments">&sect;4.2</a>.</p>
 <pre><code><span class="kw">import</span> music.play.*;
 <span class="kw">import</span> audio_engine.*;
 <span class="kw">import</span> synthdef.*;
@@ -1522,7 +1694,9 @@ run command. The pure layers are golden-tested in <code>lang/tests/music/</code>
   <tr><td><code>attachVM / siloLoad / siloStartAt / detachVM</code></td><td>audio_engine</td><td>NRT</td></tr>
   <tr><td><code>defSynthX / defSynth / listSynthDefs</code></td><td>synthc.compile / synthdef / audio_engine</td><td>NRT</td></tr>
   <tr><td><code>loadBuffer / fillBuffer / resizeBuffer</code></td><td>audio_engine</td><td>NRT</td></tr>
+  <tr><td><code>loadSampleBank / sampleZone</code></td><td>audio_engine</td><td>NRT</td></tr>
   <tr><td><code>oscTables / sawTables / squareTables / triTables</code></td><td>wavetables</td><td>NRT</td></tr>
+  <tr><td><code>smpPerc / smpLoopTail / smpLoopEnv / wtLead / resonBank / ksPluck</code> (def factories)</td><td>instruments</td><td>NRT</td></tr>
   <tr><td><code>sched / after / at / go / delayBeats / delayReal / setTempo / getBeats / cancel</code> (scheduling forms take an optional clock slot as first argument)</td><td>clock</td><td>NRT</td></tr>
   <tr><td><code>bind / merge / takeDur / perform / realize / patEvents</code></td><td>music.*</td><td>NRT / silo</td></tr>
   <tr><td><code>play / stop / stopAll / stopFirst / stopLast / replace / enqueue / voiceBundle / render</code></td><td>music.play</td><td>NRT</td></tr>
@@ -1549,6 +1723,7 @@ run command. The pure layers are golden-tested in <code>lang/tests/music/</code>
   <tr><td>Engine design: silos, nodes, commands, voices, topo sort</td><td><code>engine/Architecture.md</code>, <code>engine/CLAUDE.md</code></td></tr>
   <tr><td>SynthDef compiler: the <code>S</code> graph, rates, codegen</td><td><code>synthdef-compiler/ARCHITECTURE.md</code></td></tr>
   <tr><td>UGen / filter / DSP libraries</td><td><code>lang/modules/common_ugens.x</code>, <code>filters.x</code>, <code>dsp_math.x</code></td></tr>
+  <tr><td>Ready-made note-playing instruments (defs + voice-building UGens)</td><td><code>lang/modules/instruments.x</code>, <code>examples/note_synthdefs.x</code></td></tr>
   <tr><td>Actor model + message format</td><td><code>lang/modules/actors.x</code>, <code>messageEncoding.x</code>, <code>message.x</code></td></tr>
   <tr><td>Worked examples to copy from</td><td><code>integration-tests/scripts/*.x</code>, <code>lang/tests/actors/*.x</code></td></tr>
 </table>
