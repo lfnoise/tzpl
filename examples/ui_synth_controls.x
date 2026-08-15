@@ -42,4 +42,11 @@ let sc = scope("out", node);
 let freqW = control(node, "freq");
 freqW setValue(330.0);
 
+-- Or skip the widget: setControl also addresses controls by name,
+-- resolved against the node's def when the bundle is submitted. (The
+-- widget doesn't see this value; it moves only on drags and setValue.)
+begin();
+setControl(node, "rate", 6.0);
+sched(0);
+
 "interface ready -- drag away" println;
