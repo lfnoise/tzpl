@@ -75,6 +75,12 @@ enum : juce::CommandID {
     toggleSidebar,  // folder tree on the left of the center pane
     togglePerform,
     togglePluginBrowser,
+    // Cmd+` / Cmd+Shift+`: cycle main + panel windows. Handled in-app
+    // (not left to macOS) so the shortcut is consumed before the text
+    // input context turns it into an unhandled noop: -- the OS would
+    // still cycle, but with a sysbeep whenever an editor had focus.
+    windowCycle,
+    windowCycleBack,
 
     // Eval (keyboard only, like the ImGui app)
     evalSelection,

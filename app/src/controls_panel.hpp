@@ -30,6 +30,7 @@
 #include "tzpl_spectrum.hpp"
 
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 namespace bridge { struct AppContext; struct UIState; }
@@ -73,6 +74,11 @@ private:
     // Panels whose floating window was closed this frame; dispatch()
     // removes their widgets (and releases engine taps).
     std::vector<std::string> pendingClosedPanels_;
+    // Root panels whose window got an initial staggered position this run
+    // (FirstUseEver -- imgui.ini and user drags win afterwards), plus the
+    // running slot counter that spreads them down the right edge.
+    std::unordered_set<std::string> placedPanels_;
+    int placedCount_ = 0;
     // FFT setups + scratch for Spectrum widgets, shared across all of them
     // (cached by size). Used only from dispatch(), on the GUI thread.
     bridge::SpectrumEngine spectrum_;

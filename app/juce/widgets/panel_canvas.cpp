@@ -206,13 +206,12 @@ static bool stretchKind(bridge::UIWidgetKind k) {
     }
 }
 
-int PanelCanvas::preferredHeight(int width) const {
+int PanelCanvas::flowHeight(std::vector<std::uint64_t> const& ids,
+                            int top) const {
     // Mirrors layOutWidgets' flow rule exactly, so the height it reports
-    // is the height that layout will actually use.
-    int top = contentTop();
+    // is the height that layout will actually use. Caller holds ui_.mtx.
     int flowY = top, bottomMost = top;
-    std::lock_guard<std::mutex> lock(ui_.mtx);
-    for (auto id : visibleIds()) {
+    for (auto id : ids) {
         auto it = widgets_.find(id);
         if (it == widgets_.end()) continue;
         auto pref = it->second->preferredSize();
@@ -227,8 +226,43 @@ int PanelCanvas::preferredHeight(int width) const {
         bottomMost = std::max(bottomMost, bottom);
         flowY = std::max(flowY, snapUpGrid(bottom + kGap));
     }
-    juce::ignoreUnused(width);
     return std::max(40, bottomMost + kGap);
+}
+
+int PanelCanvas::preferredHeight(int width) const {
+    juce::ignoreUnused(width);
+    std::lock_guard<std::mutex> lock(ui_.mtx);
+    return flowHeight(visibleIds(), contentTop());
+}
+
+juce::Point<int> PanelCanvas::preferredContentSize() const {
+    // Natural size across ALL pages -- the widest widget and the tallest
+    // page -- so a floating window can open fitted to its content and
+    // switching tabs never needs a bigger window. Arranged widgets count
+    // their placed frame; flowing ones their preferred size.
+    int top = contentTop();
+    int wMax = 0, hMax = 0;
+    bool anyStretch = false;
+    std::lock_guard<std::mutex> lock(ui_.mtx);
+    for (auto const& [page, ids] : pageIds_) {
+        hMax = std::max(hMax, flowHeight(ids, top));
+        for (auto id : ids) {
+            auto it = widgets_.find(id);
+            if (it == widgets_.end()) continue;
+            auto pref = it->second->preferredSize();
+            auto* uw = ui_.findById(id);
+            int right = (uw && uw->fx >= 0.0f)
+                ? (int)uw->fx + (uw->fw > 0.0f ? (int)uw->fw : pref.x)
+                : pref.x;
+            wMax = std::max(wMax, right);
+            anyStretch |= stretchKind(it->second->kind());
+        }
+    }
+    // Slider-likes stretch to the window width: open them with room to
+    // drag precisely, not at their 200 px minimum.
+    if (anyStretch) wMax = std::max(wMax, 408);
+    wMax = std::min(wMax, kFullWidthMax);
+    return { wMax + 2 * kGap, hMax };
 }
 
 void PanelCanvas::resized() { layOutWidgets(); }

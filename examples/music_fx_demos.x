@@ -11,11 +11,13 @@
 --     resonBank(103) -> gain(213) -> fxPhaser(204) -----------------/
 --
 -- When this file is evaluated in the app (GUI), it also builds live
--- controls: a "mixer" panel with one level slider per chain and an output
--- meter, plus one spec-derived panel per instrument and per effect
--- (controls(node) materializes every declared control as a correctly
--- ranged widget). Drag while the demos play; note that each demo re-dials
--- the instrument/effect panels at its start. Headless runs are unaffected
+-- controls in three windows: a "mixer" panel with one level slider per
+-- chain and an output meter, an "instruments" panel with a tab per
+-- instrument, and an "effects" panel with a tab per effect (sub-panel
+-- names like "effects/chorus" become tabs of one window; controls(node,
+-- panel) materializes every declared control as a correctly ranged
+-- widget). Drag while the demos play; note that each demo re-dials the
+-- instrument/effect panels at its start. Headless runs are unaffected
 -- (the widgets are just never shown).
 --
 -- Three demos then play different music through that graph, one per
@@ -152,9 +154,11 @@ let keyA = transposeRoot(et12, -12.0);
 ---------------------------------------------------------------------------
 -- Live controls. In the app GUI this builds a "mixer" panel (per-chain
 -- level sliders bound straight to the gain trims, plus an output meter on
--- the reverb bus) and one spec-derived panel per instrument and effect --
--- controls(node) turns every control the def declares into a correctly
--- ranged, engine-bound widget. Headless, the widgets simply never render.
+-- the reverb bus) and two spec-derived panels -- controls(node, panel)
+-- turns every control the def declares into a correctly ranged,
+-- engine-bound widget, and "root/sub" panel names collapse into one
+-- window per root with a tab per sub-panel, so all the timbre controls
+-- live in just two windows. Headless, the widgets simply never render.
 
 panel("mixer");
 slider("lead", ControlSpec { lo: 0.0, hi: 2.0, init: 0.9, warp: ControlWarp.linear })
@@ -166,16 +170,17 @@ slider("pads", ControlSpec { lo: 0.0, hi: 2.0, init: 0.4, warp: ControlWarp.line
 meter("mix", kVerb);
 panel("");
 
--- timbre panels, one per def: wtLead's envelopes/filter, ksPluck's
--- pluck/decay/damp, resonBank's attack/release/decay, and each effect
-controls(kLead);
-controls(kPluck);
-controls(kBank);
-controls(kChorus);
-controls(kEcho);
-controls(kPong);
-controls(kPhase);
-controls(kVerb);
+-- timbre panels: one "instruments" window (wtLead's envelopes/filter,
+-- ksPluck's pluck/decay/damp, resonBank's attack/release/decay) and one
+-- "effects" window, a tab per def
+controls(kLead,   "instruments/wtLead");
+controls(kPluck,  "instruments/ksPluck");
+controls(kBank,   "instruments/resonBank");
+controls(kChorus, "effects/chorus");
+controls(kEcho,   "effects/echo");
+controls(kPong,   "effects/pingpong");
+controls(kPhase,  "effects/phaser");
+controls(kVerb,   "effects/reverb");
 
 ---------------------------------------------------------------------------
 -- Shared section plumbing: four event streams played back to back, each

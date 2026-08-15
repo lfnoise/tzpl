@@ -58,6 +58,7 @@ private:
         Content(bridge::UIState& ui, std::string const& panel,
                 ControlsDispatcher& d);
         void resized() override;
+        juce::Point<int> preferredContentSize() const;
     private:
         juce::Viewport viewport_;
         PanelCanvas canvas_;

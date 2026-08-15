@@ -45,6 +45,10 @@ void ControlsWindow::Content::resized() {
                                viewport_.getHeight()));
 }
 
+juce::Point<int> ControlsWindow::Content::preferredContentSize() const {
+    return canvas_.preferredContentSize();
+}
+
 ControlsWindow::ControlsWindow(bridge::UIState& ui, std::string const& panel,
                                ControlsDispatcher& dispatcher)
     : juce::DocumentWindow(panel.empty() ? "Controls" : String(panel),
@@ -54,9 +58,13 @@ ControlsWindow::ControlsWindow(bridge::UIState& ui, std::string const& panel,
 {
     setUsingNativeTitleBar(true);
     setResizable(true, false);
-    setContentOwned(new Content(ui, panel, dispatcher), false);
-    centreWithSize(440, 300);
-    setVisible(true);
+    auto* content = new Content(ui, panel, dispatcher);
+    setContentOwned(content, false);
+    // Open fitted to the panel's widgets rather than at one fixed size.
+    // The host (MainComponent) clamps to the display, picks a position
+    // that doesn't cover other panel windows, and shows the window.
+    setSize(content->preferredContentSize().x,
+            content->preferredContentSize().y);
 }
 
 }

@@ -377,6 +377,7 @@ void MainComponent::togglePluginBrowser() {
     if (!pluginBrowser_) {
         pluginBrowser_ = std::make_unique<PluginBrowserWindow>(appCtx_);
         pluginBrowser_->onClose = [this] { commands_.commandStatusChanged(); };
+        pluginBrowser_->addKeyListener(commands_.getKeyMappings());
     } else if (pluginBrowser_->isVisible()) {
         pluginBrowser_->setVisible(false);
     } else {
@@ -518,8 +519,78 @@ void MainComponent::refreshControlsWindows() {
             dispatcher_.queuePanelRemoval({ panel });
             controlsWindows_.erase(panel);
         };
+        // App shortcuts (Cmd+` window cycling etc.) work from panel
+        // windows too.
+        win->addKeyListener(commands_.getKeyMappings());
+        placeControlsWindow(*win);
         controlsWindows_[panel] = std::move(win);
     }
+}
+
+// New panel windows open content-sized (the ControlsWindow constructor);
+// place each in the first free spot tiling down the right edge of the
+// screen, then in further columns leftward, so evaluating a file that
+// builds several panels never stacks them on one point. Cascade when the
+// screen is full. User moves are respected: only NEW windows are placed.
+void MainComponent::placeControlsWindow(ControlsWindow& win) {
+    auto const& displays = juce::Desktop::getInstance().getDisplays();
+    auto const* display = displays.getDisplayForRect(getScreenBounds());
+    if (!display) display = displays.getPrimaryDisplay();
+    if (!display) { win.setVisible(true); return; }
+    // The native title bar sits above getBounds(); keep it on screen and
+    // clear of other windows' content.
+    constexpr int kTitle = 28, kPad = 8, kStep = 16;
+    auto area = display->userArea.reduced(kPad);
+    area.removeFromTop(kTitle);
+    win.setSize(std::min(win.getWidth(), area.getWidth()),
+                std::min(win.getHeight(), area.getHeight()));
+
+    std::vector<juce::Rectangle<int>> taken;
+    for (auto const& [name, other] : controlsWindows_)
+        if (other && other->isVisible())
+            taken.push_back(other->getBounds().expanded(kPad)
+                                .withTop(other->getY() - kTitle - kPad));
+
+    int w = win.getWidth(), h = win.getHeight();
+    for (int x = area.getRight() - w; x >= area.getX(); x -= kStep) {
+        for (int y = area.getY(); y + h <= area.getBottom(); y += kStep) {
+            juce::Rectangle<int> cand(x, y, w, h);
+            bool free = true;
+            for (auto const& r : taken)
+                if (r.intersects(cand)) { free = false; break; }
+            if (free) {
+                win.setTopLeftPosition(x, y);
+                win.setVisible(true);
+                return;
+            }
+        }
+    }
+    // Screen full: cascade from the top-left instead.
+    int n = (int)controlsWindows_.size() % 12;
+    win.setTopLeftPosition(area.getX() + 28 * n, area.getY() + 28 * n);
+    win.setVisible(true);
+}
+
+// Cmd+` / Cmd+Shift+`: cycle keyboard focus through the app's windows --
+// main window, panel windows (alphabetical), plugin browser. Done in-app
+// because leaving the shortcut to macOS sysbeeps whenever a text editor
+// has focus: the text input context swallows the event as an unhandled
+// noop: before the OS window cycling sees it.
+void MainComponent::cycleWindows(int delta) {
+    std::vector<juce::TopLevelWindow*> wins;
+    if (auto* top = dynamic_cast<juce::TopLevelWindow*>(getTopLevelComponent()))
+        wins.push_back(top);
+    for (auto const& [name, w] : controlsWindows_)
+        if (w && w->isVisible()) wins.push_back(w.get());
+    if (pluginBrowser_ && pluginBrowser_->isVisible())
+        wins.push_back(pluginBrowser_.get());
+    if (wins.size() < 2) return;
+
+    int cur = 0;
+    for (int i = 0; i < (int)wins.size(); ++i)
+        if (wins[(size_t)i]->isActiveWindow()) { cur = i; break; }
+    int n = (int)wins.size();
+    wins[(size_t)((cur + delta + n) % n)]->toFront(true);
 }
 
 void MainComponent::logLine(String const& line) {
@@ -1313,6 +1384,7 @@ void MainComponent::getAllCommands(juce::Array<juce::CommandID>& ids) {
         cmd::fontIncrease, cmd::fontDecrease,
         cmd::viewEditor, cmd::viewNotebook, cmd::viewGraph, cmd::viewRotate,
         cmd::toggleSidebar, cmd::togglePerform, cmd::togglePluginBrowser,
+        cmd::windowCycle, cmd::windowCycleBack,
         cmd::evalSelection, cmd::evalLine, cmd::evalFile,
     });
     for (int i = 0; i < cmd::kNumEditorFontSizes; ++i)
@@ -1518,6 +1590,17 @@ void MainComponent::getCommandInfo(juce::CommandID id,
         set("Plugin Browser", "View");
         info.addDefaultKeypress('b', modShift);
         info.setTicked(pluginBrowser_ != nullptr && pluginBrowser_->isVisible());
+        break;
+    case cmd::windowCycle:
+        set("Next Window", "View");
+        info.addDefaultKeypress('`', mod);
+        break;
+    case cmd::windowCycleBack:
+        set("Previous Window", "View");
+        // Shifted keypresses report the shifted character on most
+        // layouts; register both so either matches.
+        info.addDefaultKeypress('`', modShift);
+        info.addDefaultKeypress('~', modShift);
         break;
 
     case cmd::evalSelection:
@@ -1726,6 +1809,12 @@ bool MainComponent::perform(InvocationInfo const& info) {
         return true;
     case cmd::togglePluginBrowser:
         togglePluginBrowser();
+        return true;
+    case cmd::windowCycle:
+        cycleWindows(1);
+        return true;
+    case cmd::windowCycleBack:
+        cycleWindows(-1);
         return true;
 
     // -- Eval ---------------------------------------------------------------

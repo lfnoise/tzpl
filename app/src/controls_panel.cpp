@@ -28,6 +28,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <unordered_map>
 #include <vector>
 
 using bridge::UIWidget;
@@ -38,10 +39,13 @@ void ControlsPanel::draw(bridge::UIState& ui,
     std::lock_guard<std::mutex> lock(ui.mtx);
     if (ui.widgets.empty()) return;
 
-    // Group widgets by panel, preserving insertion order of first
-    // appearance. Claimed panels (exact or sub-panels of a claimed
+    // Group widgets by ROOT panel ("root/sub" collapses into a tab of the
+    // root's window, matching the JUCE app), preserving insertion order of
+    // first appearance. Claimed panels (exact or sub-panels of a claimed
     // root) render inline in the notebook, not as floating windows.
-    std::vector<std::string> panels;
+    std::vector<std::string> roots;
+    std::unordered_map<std::string, std::vector<std::string>> subs;
+    std::unordered_set<std::string> bare;   // roots with direct widgets
     for (auto& w : ui.widgets) {
         if (skipPanels) {
             bool claimed = false;
@@ -53,22 +57,63 @@ void ControlsPanel::draw(bridge::UIState& ui,
             }
             if (claimed) continue;
         }
-        if (std::find(panels.begin(), panels.end(), w->panel) == panels.end())
-            panels.push_back(w->panel);
+        std::string root = w->panel;
+        auto slash = root.find('/');
+        if (slash != std::string::npos) root = root.substr(0, slash);
+        if (std::find(roots.begin(), roots.end(), root) == roots.end())
+            roots.push_back(root);
+        if (root == w->panel) {
+            bare.insert(root);
+        } else {
+            auto& sv = subs[root];
+            if (std::find(sv.begin(), sv.end(), w->panel) == sv.end())
+                sv.push_back(w->panel);
+        }
     }
 
-    for (auto const& panel : panels) {
-        std::string title = panel.empty() ? "Controls" : panel;
+    for (auto const& root : roots) {
+        std::string title = root.empty() ? "Controls" : root;
+        // Stagger windows we've never placed down the right edge of the
+        // viewport (new column leftward every 8) instead of letting them
+        // all open on one spot. FirstUseEver: imgui.ini positions and any
+        // user drag win afterwards.
+        if (placedPanels_.insert(root).second) {
+            auto* vp = ImGui::GetMainViewport();
+            int slot = placedCount_++;
+            float x = vp->WorkPos.x + vp->WorkSize.x - 436.0f
+                      - 28.0f * (float)(slot / 8);
+            float y = vp->WorkPos.y + 16.0f + 40.0f * (float)(slot % 8);
+            ImGui::SetNextWindowPos(ImVec2(std::max(vp->WorkPos.x, x), y),
+                                    ImGuiCond_FirstUseEver);
+        }
         ImGui::SetNextWindowSize(ImVec2(420.0f, 0.0f), ImGuiCond_FirstUseEver);
-        // Closing a floating panel window REMOVES its widgets (code can
-        // recreate them by re-running). Processed in dispatch(), which has
-        // the engine context to release taps.
+        // Closing a floating panel window REMOVES its widgets -- including
+        // its sub-panels' (removePanelWidgets matches by panelUnderRoot);
+        // code can recreate them by re-running. Processed in dispatch(),
+        // which has the engine context to release taps.
         bool open = true;
         if (ImGui::Begin(title.c_str(), &open)) {
-            anyTapsVisible_ |= drawPanelWidgets(ui, panel);
+            auto it = subs.find(root);
+            if (it == subs.end()) {
+                anyTapsVisible_ |= drawPanelWidgets(ui, root);
+            } else if (ImGui::BeginTabBar("pages")) {
+                // A tab per page: "main" for widgets on the root itself,
+                // then one per sub-panel -- same pages as the JUCE window.
+                if (bare.count(root) && ImGui::BeginTabItem("main")) {
+                    anyTapsVisible_ |= drawPanelWidgets(ui, root);
+                    ImGui::EndTabItem();
+                }
+                for (auto const& sub : it->second) {
+                    if (ImGui::BeginTabItem(sub.c_str() + root.size() + 1)) {
+                        anyTapsVisible_ |= drawPanelWidgets(ui, sub);
+                        ImGui::EndTabItem();
+                    }
+                }
+                ImGui::EndTabBar();
+            }
         }
         ImGui::End();
-        if (!open) pendingClosedPanels_.push_back(panel);
+        if (!open) pendingClosedPanels_.push_back(root);
     }
 }
 

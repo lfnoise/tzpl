@@ -54,6 +54,10 @@ public:
     // notebook panel cell can grow to fit).
     int preferredHeight(int width) const;
 
+    // The natural content size across ALL pages -- widest widget, tallest
+    // page -- so a floating window can open fitted to its content.
+    juce::Point<int> preferredContentSize() const;
+
     // Reconcile now (also driven by the internal timer). Returns true if the
     // set of widgets changed (host may need to relayout for a new height).
     bool reconcile();
@@ -76,6 +80,8 @@ private:
     void notifyHost();
     void layOutWidgets();
     int contentTop() const;   // y where widgets start (below any tab strip)
+    // Flow height of one page's widgets (caller holds ui_.mtx).
+    int flowHeight(std::vector<std::uint64_t> const& ids, int top) const;
     void rebuildTabs();
     // The panel's pages: "(main)" for the bare root, one per sub-panel
     // "root/sub". Fills pages_/pageIds_ under the lock; returns the union of

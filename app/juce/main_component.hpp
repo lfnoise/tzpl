@@ -203,6 +203,11 @@ private:
     void timerCallback() override; // print-drain coordinator
     // Show a floating window per ui panel not claimed by the open notebook.
     void refreshControlsWindows();
+    // Position (and show) a freshly created, content-sized panel window:
+    // first free spot tiling down the right screen edge, cascade fallback.
+    void placeControlsWindow(ControlsWindow& win);
+    // Cmd+`: move focus to the next/previous app window (delta +1/-1).
+    void cycleWindows(int delta);
 
     bridge::AppContext& appCtx_;
     juce::ApplicationCommandManager& commands_;

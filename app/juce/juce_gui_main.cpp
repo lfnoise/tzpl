@@ -134,6 +134,9 @@ public:
             m.addCommandItem(&commands_, cmd::togglePerform);
             m.addCommandItem(&commands_, cmd::togglePluginBrowser);
             m.addSeparator();
+            m.addCommandItem(&commands_, cmd::windowCycle);
+            m.addCommandItem(&commands_, cmd::windowCycleBack);
+            m.addSeparator();
             juce::PopupMenu fontMenu;
             for (int i = 0; i < cmd::kNumEditorFontSizes; ++i)
                 fontMenu.addCommandItem(&commands_, cmd::fontSetBase + i);
