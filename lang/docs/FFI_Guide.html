@@ -3640,6 +3640,7 @@ collector <span class="fn">spawn</span>(Msg.int(<span class="num">0</span>)) <sp
   <tr><td><code>setInput(nodeID Int, portIndex Int, value Float) Int</code></td><td>Set an input port to a constant value (no crossfade). Overrides any existing connection on that port.</td></tr>
   <tr><td><code>setInputX(nodeID Int, portIndex Int, value Float, xfade Float, curve Int) Int</code></td><td>Set an input port to a constant value with a crossfade from the current value.</td></tr>
   <tr><td><code>setControl(nodeID Int, controlID Int, value Float) Int</code></td><td>Set a control parameter on a node. Controls are node-specific named parameters distinct from audio-rate input ports.</td></tr>
+  <tr><td><code>setControl(nodeID Int, name String, value Float) Int</code></td><td>By-name overload: the engine resolves the control name against the node's def when the bundle is submitted. An unknown name aborts the bundle with <code>errControlNotFound</code>.</td></tr>
 </table>
 
 <!-- -------------------------------- -->

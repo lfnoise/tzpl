@@ -1550,6 +1550,28 @@ static tzpl_SErr applySetControl(Engine*, Silo* s, CommandList& out,
     return tzpl_errNone;
 }
 
+// By-name form: resolve the control name against the target node's def, then
+// hand off to the by-ID path. Runs at submit, so a node created earlier in
+// the same bundle already exists here.
+static tzpl_SErr applySetControlByName(Engine* e, Silo* s, CommandList& out,
+                                       ShadowEdits& edits,
+                                       i64 nodeID, char const* controlName,
+                                       tzpl_ElemType srcElem, void const* bytes,
+                                       int numValues) {
+    Node* node = s->nrt_getNode(nodeID);
+    if (!node) return tzpl_errNodeNotFound;
+
+    NodeDefInfo const& info = node->def->info_;
+    for (int i = 0; i < info.num_controls; ++i) {
+        ControlInfo const& c = info.controls[i];
+        if (c.name && strcmp(c.name, controlName) == 0) {
+            return applySetControl(e, s, out, edits, nodeID, c.controlID,
+                                   srcElem, bytes, numValues);
+        }
+    }
+    return tzpl_errControlNotFound;
+}
+
 // ----------------------------------------------------------------------------
 // Bundle op records. All argument data is OWNED by the op (copied at record
 // time): the caller's strings/arrays need not outlive the builder call.
@@ -1778,6 +1800,28 @@ struct SetControlOp : BundleOp
     tzpl_SErr apply(Engine* e, Silo* s, CommandList& out, ShadowEdits& edits) override {
         return applySetControl(e, s, out, edits, nodeID_, controlID_, elem_,
                                bytes_.data(), numValues_);
+    }
+};
+
+struct SetControlByNameOp : BundleOp
+{
+    i64 nodeID_;
+    std::string controlName_;
+    tzpl_ElemType elem_;
+    int numValues_;
+    std::vector<u8> bytes_;
+
+    SetControlByNameOp(i64 nodeID, char const* controlName, tzpl_ElemType elem,
+                       int numValues, void const* values)
+        : nodeID_(nodeID), controlName_(controlName), elem_(elem),
+          numValues_(numValues), bytes_(numValues * elemSize(elem))
+    {
+        memcpy(bytes_.data(), values, bytes_.size());
+    }
+
+    tzpl_SErr apply(Engine* e, Silo* s, CommandList& out, ShadowEdits& edits) override {
+        return applySetControlByName(e, s, out, edits, nodeID_, controlName_.c_str(),
+                                     elem_, bytes_.data(), numValues_);
     }
 };
 
@@ -2080,6 +2124,27 @@ tzpl_SErr setControl(i64 nodeID, i64 controlID, int numValues, i32 const* values
 }
 tzpl_SErr setControl(i64 nodeID, i64 controlID, int numValues, i64 const* values) {
     return recordSetControl(nodeID, controlID, tzpl_kI64, numValues, values);
+}
+
+static tzpl_SErr recordSetControlByName(i64 nodeID, char const* controlName,
+                                        tzpl_ElemType elem, int numValues,
+                                        void const* values) {
+    if (!tBundle.engine) return tzpl_errNoActiveBundle;
+    tBundle.add(new SetControlByNameOp(nodeID, controlName, elem, numValues, values));
+    return tzpl_errNone;
+}
+
+tzpl_SErr setControl(i64 nodeID, char const* controlName, int numValues, f32 const* values) {
+    return recordSetControlByName(nodeID, controlName, tzpl_kF32, numValues, values);
+}
+tzpl_SErr setControl(i64 nodeID, char const* controlName, int numValues, f64 const* values) {
+    return recordSetControlByName(nodeID, controlName, tzpl_kF64, numValues, values);
+}
+tzpl_SErr setControl(i64 nodeID, char const* controlName, int numValues, i32 const* values) {
+    return recordSetControlByName(nodeID, controlName, tzpl_kI32, numValues, values);
+}
+tzpl_SErr setControl(i64 nodeID, char const* controlName, int numValues, i64 const* values) {
+    return recordSetControlByName(nodeID, controlName, tzpl_kI64, numValues, values);
 }
 
 tzpl_SErr tapOutlet(i64 nodeID, int outlet, i64 tapID, int mode,

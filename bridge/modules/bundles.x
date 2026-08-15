@@ -49,6 +49,7 @@ enum EngineCmd {
 	setInput(Int, Int, Float),                         -- node, port, value
 	setInputX(Int, Int, Float, Float, FadeCurve),      -- node, port, value, xfade, curve
 	setControl(Int, Int, Float),                       -- node, controlID, value
+	setControlNamed(Int, String, Float),               -- node, controlName, value
 	noteOn(Int, Int, [Float]),                         -- node, noteID, params
 	noteOff(Int, Int),                                 -- node, noteID
 	allNotesOff Int,                                   -- node
@@ -151,6 +152,12 @@ fn setControl(b Bundle, node Int, controlID Int, value Float) Bundle {
 	b add(EngineCmd.setControl(node, controlID, value))
 }
 
+-- By-name overload: the engine resolves the name against the node's def when
+-- the bundle is submitted (unknown names abort the bundle).
+fn setControl(b Bundle, node Int, controlName String, value Float) Bundle {
+	b add(EngineCmd.setControlNamed(node, controlName, value))
+}
+
 fn noteOn(b Bundle, node Int, noteID Int, params [Float]) Bundle {
 	b add(EngineCmd.noteOn(node, noteID, params))
 }
@@ -190,6 +197,7 @@ fn _issue(c EngineCmd) Int {
 		setInput(n, p, v)                 : setInput(n, p, v);
 		setInputX(n, p, v, x, cv)         : setInputX(n, p, v, x, cv ordinal);
 		setControl(n, cid, v)             : setControl(n, cid, v);
+		setControlNamed(n, name, v)       : setControl(n, name, v);
 		noteOn(n, nid, params)            : noteOn(n, nid, params);
 		noteOff(n, nid)                   : noteOff(n, nid);
 		allNotesOff(n)                    : allNotesOff(n);
@@ -261,6 +269,7 @@ fn toString(c EngineCmd) String {
 		setInput(n, p, v)                 : "setInput(%^, %^, %^)" fmt(n, p, v);
 		setInputX(n, p, v, x, cv)         : "setInputX(%^, %^, %^, %^, %^)" fmt(n, p, v, x, cv tag toString);
 		setControl(n, cid, v)             : "setControl(%^, %^, %^)" fmt(n, cid, v);
+		setControlNamed(n, name, v)       : "setControl(%^, \"%^\", %^)" fmt(n, name, v);
 		noteOn(n, nid, params)            : "noteOn(%^, %^, %^)" fmt(n, nid, params _fmtFloats);
 		noteOff(n, nid)                   : "noteOff(%^, %^)" fmt(n, nid);
 		allNotesOff(n)                    : "allNotesOff(%^)" fmt(n);

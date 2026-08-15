@@ -459,6 +459,16 @@ static void ffi_setControl(ts::VM& vm, u16 dst, u16, u16 argBase) {
     returnErr(vm, dst, engine::setControl(nodeID, controlID, 1, &val), __func__);
 }
 
+// fn setControl(nodeID: Int, name: String, value: Float) -> Int
+// By-name overload: the engine resolves the name against the node's def at
+// bundle submit (errControlNotFound aborts the bundle if it doesn't exist).
+static void ffi_setControlByName(ts::VM& vm, u16 dst, u16, u16 argBase) {
+    auto nodeID = static_cast<engine::i64>(vm.reg(argBase).i);
+    const char* name = regString(vm, argBase + 1);
+    engine::f32 val = static_cast<engine::f32>(vm.reg(argBase + 2).f);
+    returnErr(vm, dst, engine::setControl(nodeID, name, 1, &val), __func__);
+}
+
 // fn setSharedInput(slot: Int, value: Float) -> Int
 // Writes one slot of the process-global shared-input table, read by synths
 // via the sharedIn ugen. Slots 0..2 are the mouse (owned by the app's
@@ -1787,6 +1797,7 @@ void registerAudioEngineFFI(ts::Compiler& compiler) {
     reg("setInput",         Int, {Int, Int, Float},             ffi_setInput,    true);
     reg("setInputX",        Int, {Int, Int, Float, Float, Int}, ffi_setInputX,   true);
     reg("setControl",       Int, {Int, Int, Float},             ffi_setControl,  true);
+    reg("setControl",       Int, {Int, String, Float},          ffi_setControlByName, true);
     reg("setSharedInput",   Int, {Int, Float},                  ffi_setSharedInput, true);
     reg("getSharedInput",   Float, {Int},                       ffi_getSharedInput, true);
 

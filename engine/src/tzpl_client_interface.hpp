@@ -344,6 +344,14 @@ tzpl_SErr setControl(i64 nodeID, i64 controlID, int numValues, f64 const* values
 tzpl_SErr setControl(i64 nodeID, i64 controlID, int numValues, i32 const* values);
 tzpl_SErr setControl(i64 nodeID, i64 controlID, int numValues, i64 const* values);
 
+// By-name forms: the name is resolved to a controlID at submit, against the
+// def of the node the bundle sees (so a node created earlier in the same
+// bundle works). Unknown names abort the bundle with tzpl_errControlNotFound.
+tzpl_SErr setControl(i64 nodeID, char const* controlName, int numValues, f32 const* values);
+tzpl_SErr setControl(i64 nodeID, char const* controlName, int numValues, f64 const* values);
+tzpl_SErr setControl(i64 nodeID, char const* controlName, int numValues, i32 const* values);
+tzpl_SErr setControl(i64 nodeID, char const* controlName, int numValues, i64 const* values);
+
 // Signal taps: RT -> NRT readback of a node outlet for meters/scopes.
 // tapOutlet is a bundled command (record between begin() and go()/sched()):
 // it creates tap `tapID` (caller-chosen, unique) on outlet `outlet` of node
