@@ -361,6 +361,16 @@ void op_div_fraction(VM& vm, Code* pc) {
     DISPATCH(2);
 }
 
+void op_div_int_to_fraction(VM& vm, Code* pc) {
+    u16 dst = pc[1].regs[0], a = pc[1].regs[1], b = pc[1].regs[2];
+    i64 n = vm.reg(a).i;
+    i64 d = vm.reg(b).i;
+    norm_frac(n, d);
+    vm.reg(dst).i         = n;
+    vm.reg((u16)(dst+1)).i = d;
+    DISPATCH(2);
+}
+
 void op_neg_fraction(VM& vm, Code* pc) {
     u16 dst = pc[1].regs[0], a = pc[1].regs[1];
     vm.reg(dst).i         = -vm.reg(a).i;

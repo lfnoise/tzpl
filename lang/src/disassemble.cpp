@@ -113,6 +113,7 @@ static const std::unordered_map<Operation, OpInfo>& opInfoMap() {
         { op_sub_fraction,      { "SUB_FRAC",          2, OpFmt::Regs, 3 } },
         { op_mul_fraction,      { "MUL_FRAC",          2, OpFmt::Regs, 3 } },
         { op_div_fraction,      { "DIV_FRAC",          2, OpFmt::Regs, 3 } },
+        { op_div_int_to_fraction, { "DIV_INT_TO_FRAC", 2, OpFmt::Regs, 3 } },
         { op_neg_fraction,      { "NEG_FRAC",          2, OpFmt::Regs, 2 } },
 
         // --- Fraction Comparison ---

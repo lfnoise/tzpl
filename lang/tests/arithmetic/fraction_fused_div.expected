@@ -1,0 +1,15 @@
+-- divideTwoInts  (4 regs, 2 args, type fn(Int, Int) Fraction)
+     0  SAFEPOINT                 ; refs: []
+     1  DIV_INT_TO_FRAC         r2, r0, r1
+     3  RETURN                  r2, r2
+10/3
+-10/3
+-10/3
+10/3
+0/1
+7/1
+2/1
+23/6
+90/1
+[15/2, 5/1, 5/2]
+[1/2, 1/2, 1/2]

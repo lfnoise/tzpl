@@ -76,6 +76,7 @@ void op_add_fraction(VM& vm, Code* pc);       // ADD_FRACTION Rd, Ra, Rb (2 word
 void op_sub_fraction(VM& vm, Code* pc);       // SUB_FRACTION Rd, Ra, Rb (2 words)
 void op_mul_fraction(VM& vm, Code* pc);       // MUL_FRACTION Rd, Ra, Rb (2 words)
 void op_div_fraction(VM& vm, Code* pc);       // DIV_FRACTION Rd, Ra, Rb (2 words)
+void op_div_int_to_fraction(VM& vm, Code* pc); // DIV_INT_TO_FRAC Rd, Ra, Rb (2 words): Int Ra / Int Rb -> reduced Fraction
 void op_neg_fraction(VM& vm, Code* pc);       // NEG_FRACTION Rd, Ra (2 words)
 
 // --- Fraction Comparison ---

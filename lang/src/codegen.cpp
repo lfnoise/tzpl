@@ -3789,7 +3789,15 @@ u16 CodeGen::genBinaryOp(BinaryOpExpr* expr) {
         }
 
         case BinaryOpExpr::Div: {
-            // Int / Int -> Fraction: promote both to fraction first
+            // Int / Int -> Fraction: fused opcode reduces the two ints by
+            // their GCD directly, skipping the two INT_TO_FRAC conversions.
+            if (resultType == compiler_.fractionType()
+                && leftType == compiler_.intType()
+                && rightType == compiler_.intType()) {
+                emitOp(op_div_int_to_fraction);
+                emitRegs(dst, leftReg, rightReg);
+                break;
+            }
             // Otherwise promote to common type
             leftReg = ensureType(leftReg, leftType, resultType);
             rightReg = ensureType(rightReg, rightType, resultType);
@@ -5204,6 +5212,16 @@ u16 CodeGen::emitBinaryOpElem(BinaryOpExpr* expr,
     }
 
     // Scalar numeric op
+    // Int / Int -> Fraction: fused opcode, no INT_TO_FRAC conversions.
+    if (expr->op == BinaryOpExpr::Div
+        && scalarResultType == compiler_.fractionType()
+        && leftElemType == compiler_.intType()
+        && rightElemType == compiler_.intType()) {
+        u16 elemResultReg = allocReg();
+        emitOp(op_div_int_to_fraction);
+        emitRegs(elemResultReg, leftElemReg, rightElemReg);
+        return elemResultReg;
+    }
     leftElemReg = ensureType(leftElemReg, leftElemType, scalarResultType);
     rightElemReg = ensureType(rightElemReg, rightElemType, scalarResultType);
     u16 elemResultReg = allocReg();
@@ -5534,6 +5552,14 @@ u16 CodeGen::genAutoMapBinaryOpList(BinaryOpExpr* expr) {
             rightElemReg = ensureType(rightElemReg, rightElemType, cmpType);
             elemResultReg = allocReg();
             emitOp(getCmpOp(expr->op, cmpType));
+            emitRegs(elemResultReg, leftElemReg, rightElemReg);
+        } else if (expr->op == BinaryOpExpr::Div
+                   && scalarResultType == compiler_.fractionType()
+                   && leftElemType == compiler_.intType()
+                   && rightElemType == compiler_.intType()) {
+            // Int / Int -> Fraction: fused opcode, no INT_TO_FRAC conversions.
+            elemResultReg = allocReg();
+            emitOp(op_div_int_to_fraction);
             emitRegs(elemResultReg, leftElemReg, rightElemReg);
         } else {
             leftElemReg = ensureType(leftElemReg, leftElemType, scalarResultType);
