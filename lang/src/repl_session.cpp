@@ -111,6 +111,28 @@ struct REPLSession::Impl {
             vm.install(installResult);
         }
     }
+
+    // Run the init block of every loaded-but-uninitialized module. Module
+    // init calls are only emitted (flag-guarded) into blocks that contain
+    // the `import` declaration, so an eval that imports a module and then
+    // fails its own typecheck or codegen installs the module's code and
+    // globals but never runs its initializer -- leaving every module-level
+    // `let` null for the rest of the session (a later eval that touches the
+    // module then reads garbage and crashes). Initialize here, keyed on the
+    // same runtime flag the emitted guards use; on the success path the
+    // block's own guarded calls become no-ops. Call with the VM context
+    // current (right after installPendingGlobals).
+    void runPendingModuleInits() {
+        for (auto* mod : typeChecker.allImportedModules()) {
+            if (!mod || !mod->initBlock) continue;
+            if (vm.global(mod->initFlagGlobalIndex).i != 0) continue;
+            vm.callFunction(mod->initBlock, nullptr, 0);
+            // A panicking init behaves like the emitted guard: the flag stays
+            // clear so the next importing eval retries it.
+            if (vm.isErrorHalted()) break;
+            vm.global(mod->initFlagGlobalIndex).i = 1;
+        }
+    }
 };
 
 REPLSession::REPLSession(Compiler& compiler, VM& vm, const VMTarget& target,
@@ -188,6 +210,7 @@ REPLSession::EvalResult REPLSession::eval(const std::string& input) {
         if (codegen.hasErrors()) {
             result.errors = codegen.errors();
             impl_->installPendingGlobals();
+            impl_->runPendingModuleInits();
             return result;
         }
 
@@ -208,8 +231,11 @@ REPLSession::EvalResult REPLSession::eval(const std::string& input) {
         }
     }
 
-    // Always harvest and install pending globals
+    // Always harvest and install pending globals, and initialize any modules
+    // this eval loaded -- even when the eval itself failed (see
+    // runPendingModuleInits).
     impl_->installPendingGlobals();
+    impl_->runPendingModuleInits();
 
     if (typeError) {
         result.errors = impl_->typeChecker.errors();
@@ -263,8 +289,9 @@ REPLSession::EvalResult REPLSession::queryType(const std::string& expr) {
 
     impl_->typeChecker.checkREPLInput(program);
 
-    // Harvest any globals
+    // Harvest any globals (and init any modules the query loaded)
     impl_->installPendingGlobals();
+    impl_->runPendingModuleInits();
 
     if (impl_->typeChecker.hasErrors()) {
         result.errors = impl_->typeChecker.errors();

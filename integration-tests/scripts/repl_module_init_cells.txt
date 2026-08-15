@@ -1,0 +1,7 @@
+import repl_init_helper.*;
+let m = ["a": 1];
+let bad = 1 + m["a"];
+"UNREACHABLE cell1" println;
+%%
+readTable() println;
+"MODULE INIT AFTER FAILED EVAL: OK" println;
