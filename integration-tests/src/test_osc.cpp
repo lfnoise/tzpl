@@ -178,6 +178,44 @@ static void test_local_dispatch() {
     engine::freeEngine(eng);
 }
 
+static void test_setcontrol_by_name_dispatch() {
+    std::print("Test: /engine/setControl accepts int and string control arg\n");
+
+    engine::Engine* eng = makeTestEngine();
+
+    osc::OscDispatcher dispatcher;
+    dispatcher.setEngine(eng);
+    osc::registerEngineHandlers(dispatcher);
+
+    engine::begin(eng);
+    engine::newNode("sinosc", 700);
+    engine::go(0);
+
+    // String control arg selects the by-name overload. The built-in sinosc
+    // def has no controls, so the set aborts at submit (errControlNotFound);
+    // the point here is that the string form parses and dispatches -- before
+    // the by-name overload existed this message would throw in AsInt32.
+    osc::SenderInfo local{"127.0.0.1", 0};
+    char buffer[256];
+    {
+        ::osc::OutboundPacketStream p(buffer, sizeof(buffer));
+        p << ::osc::BeginMessage("/engine/setControl")
+          << (::osc::int32)700 << "freq" << 0.5f << ::osc::EndMessage;
+        dispatcher.dispatch(p.Data(), static_cast<int>(p.Size()), local);
+    }
+    check(true, "by-name setControl dispatched without crash");
+
+    {
+        ::osc::OutboundPacketStream p(buffer, sizeof(buffer));
+        p << ::osc::BeginMessage("/engine/setControl")
+          << (::osc::int32)700 << (::osc::int32)0 << 0.5f << ::osc::EndMessage;
+        dispatcher.dispatch(p.Data(), static_cast<int>(p.Size()), local);
+    }
+    check(true, "by-index setControl still dispatches");
+
+    engine::freeEngine(eng);
+}
+
 static void test_ffi_registration() {
     std::print("Test: OSC FFI functions register and compile\n");
 
@@ -583,6 +621,7 @@ int main() {
     test_client_send();
     test_engine_commands();
     test_local_dispatch();
+    test_setcontrol_by_name_dispatch();
     test_ffi_registration();
 
     std::print("\n--- VM OSC Handler Tests ---\n\n");

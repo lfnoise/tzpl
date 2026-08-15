@@ -66,6 +66,17 @@ static const char* argStr(const std::vector<std::string>& args, size_t idx) {
     return args[idx].c_str();
 }
 
+// True if the token is an optionally signed run of digits. Used where an
+// argument may be either a numeric ID or a name (names are never all digits).
+static bool isIntToken(std::string const& s) {
+    size_t i = (!s.empty() && (s[0] == '-' || s[0] == '+')) ? 1 : 0;
+    if (i >= s.size()) return false;
+    for (; i < s.size(); ++i) {
+        if (s[i] < '0' || s[i] > '9') return false;
+    }
+    return true;
+}
+
 // ---------------------------------------------------------------------------
 // Engine lifecycle handlers
 // ---------------------------------------------------------------------------
@@ -262,16 +273,22 @@ static void handleSetInput(const char*, const char* data, int len, const char*,
     engine::go(0);
 }
 
+// The control argument is either a numeric controlID or a control name
+// (resolved against the node's def at bundle submit).
 static void handleSetControl(const char*, const char* data, int len, const char*,
                                NatsDispatcher& d) {
     auto args = splitArgs(data, len);
     if (args.size() < 3) return;
     auto nodeID = static_cast<engine::i64>(argInt(args, 0));
-    auto controlID = static_cast<engine::i64>(argInt(args, 1));
     engine::f32 val = argFloat(args, 2);
 
     engine::begin(d.engine());
-    engine::setControl(nodeID, controlID, 1, &val);
+    if (isIntToken(args[1])) {
+        auto controlID = static_cast<engine::i64>(argInt(args, 1));
+        engine::setControl(nodeID, controlID, 1, &val);
+    } else {
+        engine::setControl(nodeID, argStr(args, 1), 1, &val);
+    }
     engine::go(0);
 }
 

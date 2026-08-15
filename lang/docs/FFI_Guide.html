@@ -2028,7 +2028,7 @@ osc.<span class="fn">removeHandler</span>(<span class="str">"/trigger"</span>);<
   <tr><td><code>/engine/reconnectOutput</code></td><td><code>i i i i f i</code></td><td>Reconnect an output to a new source with crossfade.</td></tr>
   <tr><td><code>/engine/setInput</code></td><td><code>i</code> nodeID, <code>i</code> port, <code>f</code> value</td><td>Set an input to a constant value.</td></tr>
   <tr><td><code>/engine/setInputX</code></td><td><code>i i f f i</code></td><td>Set input with crossfade.</td></tr>
-  <tr><td><code>/engine/setControl</code></td><td><code>i</code> nodeID, <code>i</code> controlID, <code>f</code> value</td><td>Set a control parameter.</td></tr>
+  <tr><td><code>/engine/setControl</code></td><td><code>i</code> nodeID, <code>i</code> controlID <i>or</i> <code>s</code> name, <code>f</code> value</td><td>Set a control parameter, addressed by controlID or by name (a string argument is resolved against the node's def at submit).</td></tr>
 </table>
 
 <h4>Notes</h4>
@@ -2293,7 +2293,7 @@ nats.<span class="fn">removeHandler</span>(<span class="str">"trigger"</span>);<
   <tr><td><code>engine.disconnectOutput</code></td><td><code>nodeID port</code></td><td>Disconnect an output.</td></tr>
   <tr><td><code>engine.disconnectNode</code></td><td><code>nodeID</code></td><td>Disconnect all connections of a node.</td></tr>
   <tr><td><code>engine.setInput</code></td><td><code>nodeID port value</code></td><td>Set an input to a constant value.</td></tr>
-  <tr><td><code>engine.setControl</code></td><td><code>nodeID controlID value</code></td><td>Set a control parameter.</td></tr>
+  <tr><td><code>engine.setControl</code></td><td><code>nodeID controlID|name value</code></td><td>Set a control parameter. The second argument is a controlID if it is all digits, otherwise a control name (resolved against the node's def at submit).</td></tr>
 </table>
 
 <h4>Notes</h4>

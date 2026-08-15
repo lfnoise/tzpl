@@ -184,6 +184,19 @@ static void test_engine_commands() {
     std::string reply = client.request("engine.isAudioRunning", "", 0, 1000);
     check(reply == "0", "engine.isAudioRunning returns 0 when not running");
 
+    // setControl takes a numeric controlID or a control name as its second
+    // argument. The built-in sinosc def has no controls, so both sets abort
+    // at submit (errControlNotFound); the point is that the string form
+    // parses as a name (it previously would have been atoi'd to 0). The
+    // trailing request roundtrip proves both handlers ran without crashing.
+    engine::begin(eng);
+    engine::newNode("sinosc", 700);
+    engine::go(0);
+    client.publish("engine.setControl", "700 freq 0.5");
+    client.publish("engine.setControl", "700 0 0.5");
+    reply = client.request("engine.isAudioRunning", "", 0, 1000);
+    check(reply == "0", "setControl by-name and by-index dispatched without crash");
+
     dispatcher.unsubscribeAll();
     client.disconnect();
     engine::freeEngine(eng);

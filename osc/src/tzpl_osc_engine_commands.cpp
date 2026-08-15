@@ -312,11 +312,22 @@ static void handleSetInputX(const char*, const void* data, int size,
     autoGo();
 }
 
+// The control argument is either an int32 controlID or a string control
+// name (resolved against the node's def at bundle submit).
 static void handleSetControl(const char*, const void* data, int size,
                               const SenderInfo&, OscDispatcher& d) {
     ::osc::ReceivedMessage msg(::osc::ReceivedPacket(static_cast<const char*>(data), size));
     auto arg = msg.ArgumentsBegin();
     auto nodeID = static_cast<engine::i64>(arg->AsInt32()); ++arg;
+    if (arg->IsString()) {
+        const char* controlName = arg->AsString(); ++arg;
+        engine::f32 val = arg->AsFloat();
+
+        autoBegin(d.engine());
+        engine::setControl(nodeID, controlName, 1, &val);
+        autoGo();
+        return;
+    }
     auto controlID = static_cast<engine::i64>(arg->AsInt32()); ++arg;
     engine::f32 val = arg->AsFloat();
 
