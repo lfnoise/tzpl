@@ -138,9 +138,9 @@ connect(kVerb, 0, 0, 0);
 -- starting balance: the sustained noise-driven pads dominate at unity and
 -- the low strings vanish, so cut the pads hard and boost the bass; the
 -- mixer sliders trim from here
-setControl(kGainLead, 0, 0.9);
-setControl(kGainPluck, 0, 1.8);
-setControl(kGainBank, 0, 0.4);
+setControl(kGainLead, "level", 0.9);
+setControl(kGainPluck, "level", 1.8);
+setControl(kGainBank, "level", 0.4);
 sched(0);
 
 -- The instruments declare [freq, amp] note params -- freqVoice's layout.
@@ -213,23 +213,23 @@ fn demo1() Void {
     -- panel: plucky sweeping lead, dark long bass strings, slow-swell pads,
     -- and demo-specific delay/reverb settings
     begin();
-    setControl(kLead, 0, 0.004);    -- attack
-    setControl(kLead, 4, 700.0);    -- cutoff base
-    setControl(kLead, 5, 4.0);      -- envOct: sweep four octaves
-    setControl(kLead, 6, 0.25);     -- res (1/Q -- smaller is sharper)
-    setControl(kLead, 8, 0.3);      -- fdecay
-    setControl(kPluck, 1, 2.2);     -- string decay
-    setControl(kPluck, 2, 0.4);     -- damp: warm but with audible harmonics
-    setControl(kBank, 0, 0.4);      -- pad attack swell
-    setControl(kBank, 2, 5.0);      -- mode ring-out
-    setControl(kEcho, 0, 0.4);      -- echo time (seconds)
-    setControl(kEcho, 1, 0.35);     -- echo feedback
-    setControl(kEcho, 2, 0.3);      -- echo mix
-    setControl(kPong, 0, 0.268);    -- dotted-eighth ping-pong at 112 bpm
-    setControl(kPong, 1, 0.3);
-    setControl(kPong, 2, 0.25);
-    setControl(kVerb, 0, 3.0);      -- reverb decay
-    setControl(kVerb, 2, 0.28);     -- reverb mix
+    setControl(kLead, "attack", 0.004);
+    setControl(kLead, "cutoff", 700.0);
+    setControl(kLead, "envOct", 4.0);        -- sweep four octaves
+    setControl(kLead, "res", 0.25);          -- 1/Q -- smaller is sharper
+    setControl(kLead, "fdecay", 0.3);
+    setControl(kPluck, "decay", 2.2);
+    setControl(kPluck, "damp", 0.4);         -- warm but with audible harmonics
+    setControl(kBank, "attack", 0.4);        -- pad swell
+    setControl(kBank, "decay", 5.0);         -- mode ring-out
+    setControl(kEcho, "time", 0.4);          -- seconds
+    setControl(kEcho, "feedback", 0.35);
+    setControl(kEcho, "mix", 0.3);
+    setControl(kPong, "time", 0.268);        -- dotted eighth at 112 bpm
+    setControl(kPong, "feedback", 0.3);
+    setControl(kPong, "mix", 0.25);
+    setControl(kVerb, "decay", 3.0);
+    setControl(kVerb, "mix", 0.28);
     sched(0);
 
     -- A (0-32): weighted random degrees with breathing rests, cycled
@@ -292,19 +292,19 @@ fn demo1() Void {
     -- breakdown, wide open with tight echoes for the reprise
     let b0 = getBeats() + getLatency();
     bundle()
-        setControl(kLead, 4, 1600.0)
-        setControl(kEcho, 1, 0.45)
+        setControl(kLead, "cutoff", 1600.0)
+        setControl(kEcho, "feedback", 0.45)
         sched(0, 0, b0 + 32.0);
     bundle()
-        setControl(kLead, 4, 500.0)
-        setControl(kEcho, 0, 0.6)
-        setControl(kVerb, 0, 6.0)
+        setControl(kLead, "cutoff", 500.0)
+        setControl(kEcho, "time", 0.6)
+        setControl(kVerb, "decay", 6.0)
         sched(0, 0, b0 + 64.0);
     bundle()
-        setControl(kLead, 4, 2400.0)
-        setControl(kEcho, 0, 0.4)
-        setControl(kEcho, 1, 0.55)
-        setControl(kVerb, 0, 3.0)
+        setControl(kLead, "cutoff", 2400.0)
+        setControl(kEcho, "time", 0.4)
+        setControl(kEcho, "feedback", 0.55)
+        setControl(kVerb, "decay", 3.0)
         sched(0, 0, b0 + 96.0);
 }
 
@@ -327,18 +327,18 @@ fn demo2() Float {
     -- panel: rounder lead, brighter longer strings, struck-bell bank,
     -- echo on the beat at 96 bpm, bigger room
     begin();
-    setControl(kLead, 0, 0.03);
-    setControl(kLead, 4, 1200.0);
-    setControl(kLead, 5, 2.0);
-    setControl(kPluck, 1, 3.5);
-    setControl(kPluck, 2, 0.3);
-    setControl(kBank, 0, 0.01);
-    setControl(kBank, 2, 3.5);
-    setControl(kEcho, 0, 0.625);
-    setControl(kEcho, 1, 0.4);
-    setControl(kChorus, 0, 0.15);   -- slower chorus
-    setControl(kVerb, 0, 5.0);
-    setControl(kVerb, 2, 0.33);
+    setControl(kLead, "attack", 0.03);
+    setControl(kLead, "cutoff", 1200.0);
+    setControl(kLead, "envOct", 2.0);
+    setControl(kPluck, "decay", 3.5);
+    setControl(kPluck, "damp", 0.3);
+    setControl(kBank, "attack", 0.01);
+    setControl(kBank, "decay", 3.5);
+    setControl(kEcho, "time", 0.625);
+    setControl(kEcho, "feedback", 0.4);
+    setControl(kChorus, "rate", 0.15);       -- slower chorus
+    setControl(kVerb, "decay", 5.0);
+    setControl(kVerb, "mix", 0.33);
     sched(0);
 
     let theme = line([mdeg(0, 1.0), mdeg(2, 0.5), mdeg(3, 0.5), mdeg(4, 1.0),
@@ -410,23 +410,23 @@ fn demo3() Float {
     -- panel: glassy short lead stabs, tighter strings, bell-like bank,
     -- and delays that get pushed deeper section by section
     begin();
-    setControl(kLead, 0, 0.002);
-    setControl(kLead, 3, 0.15);     -- short release
-    setControl(kLead, 4, 1800.0);
-    setControl(kLead, 5, 3.0);
-    setControl(kPluck, 1, 1.6);
-    setControl(kPluck, 2, 0.3);
-    setControl(kBank, 0, 0.003);    -- struck, not bowed
-    setControl(kBank, 1, 0.03);
-    setControl(kBank, 2, 4.0);
-    setControl(kPhase, 0, 0.25);    -- slow phaser sweep on the bells
-    setControl(kPhase, 1, 0.35);
-    setControl(kEcho, 0, 0.31);
-    setControl(kEcho, 2, 0.35);
-    setControl(kPong, 0, 0.345);
-    setControl(kPong, 1, 0.45);
-    setControl(kVerb, 0, 4.0);
-    setControl(kVerb, 2, 0.3);
+    setControl(kLead, "attack", 0.002);
+    setControl(kLead, "release", 0.15);      -- short
+    setControl(kLead, "cutoff", 1800.0);
+    setControl(kLead, "envOct", 3.0);
+    setControl(kPluck, "decay", 1.6);
+    setControl(kPluck, "damp", 0.3);
+    setControl(kBank, "attack", 0.003);      -- struck, not bowed
+    setControl(kBank, "release", 0.03);
+    setControl(kBank, "decay", 4.0);
+    setControl(kPhase, "rate", 0.25);        -- slow sweep on the bells
+    setControl(kPhase, "feedback", 0.35);
+    setControl(kEcho, "time", 0.31);
+    setControl(kEcho, "mix", 0.35);
+    setControl(kPong, "time", 0.345);
+    setControl(kPong, "feedback", 0.45);
+    setControl(kVerb, "decay", 4.0);
+    setControl(kVerb, "mix", 0.3);
     sched(0);
 
     -- 13 equal divisions of the tritave, anchored at 110 Hz; every step
@@ -481,16 +481,16 @@ fn demo3() Float {
     -- reverb yawns open for the sparse section, then tight and driven
     let b0 = getBeats() + getLatency();
     bundle()
-        setControl(kPhase, 1, 0.5)
+        setControl(kPhase, "feedback", 0.5)
         sched(0, 0, b0 + 32.0);
     bundle()
-        setControl(kVerb, 0, 8.0)
-        setControl(kPong, 1, 0.6)
+        setControl(kVerb, "decay", 8.0)
+        setControl(kPong, "feedback", 0.6)
         sched(0, 0, b0 + 64.0);
     bundle()
-        setControl(kVerb, 0, 4.0)
-        setControl(kPhase, 0, 0.8)
-        setControl(kEcho, 1, 0.55)
+        setControl(kVerb, "decay", 4.0)
+        setControl(kPhase, "rate", 0.8)
+        setControl(kEcho, "feedback", 0.55)
         sched(0, 0, b0 + 96.0);
     128.0
 }
