@@ -386,13 +386,28 @@ fn shapeInference(ctx Ctx) Void {
 				_: {}
 			}
 		}
+		-- A delay's width covers its writer AND its init values. Widen-only
+		-- keeps the fixpoint monotone: a pure at/put feedback cycle has no
+		-- width source other than the init, and the writer pass must not
+		-- shrink it back. (Mirrors the C++ shapeInference.)
 		match (ctx.kind[n]) {
 			delayWriteK(d): {
-				if (ch != ctx.delays[d].chans) {
+				if (ch > ctx.delays[d].chans) {
 					ctx.delays[d] = DelayInfo { ...ctx.delays[d], chans: ch };
 					for (u : ctx.delays[d].initters) { wl wlPush(u); }
 					for (u : ctx.delays[d].fixReaders) { wl wlPush(u); }
 					for (u : ctx.delays[d].varReaders) { wl wlPush(u); }
+					if (ctx.delays[d].writer != NONE) { wl wlPush(ctx.delays[d].writer); }
+				}
+			}
+			delayInitK(d, _): {
+				let w = ctx.chans[ctx.ins[n][0]];
+				if (w > ctx.delays[d].chans) {
+					ctx.delays[d] = DelayInfo { ...ctx.delays[d], chans: w };
+					for (u : ctx.delays[d].initters) { wl wlPush(u); }
+					for (u : ctx.delays[d].fixReaders) { wl wlPush(u); }
+					for (u : ctx.delays[d].varReaders) { wl wlPush(u); }
+					if (ctx.delays[d].writer != NONE) { wl wlPush(ctx.delays[d].writer); }
 				}
 			}
 			_: {}
@@ -663,6 +678,76 @@ fn _treeAddAntecedent(ctx Ctx, treeIdx Int, anteTreeIdx Int, sep Bool) Void {
 	}
 	ante push!(anteTreeIdx);
 	anteSep push!(sep);
+}
+
+---------------------------------------------------------------------------
+-- inplaceDelayOps (mirrors synthdef_synth.cpp inplaceDelayOps)
+--
+-- A DelayWrite whose value is VecPut(read of the same single-slot delay,
+-- idx, val) replaces ONE element of the state, so it is emitted as a single
+-- indexed store instead of materializing the read, copying the whole vector
+-- through the put, and storing every lane back. When every other consumer
+-- of the read is a scalar VecAt, the read's materialization is suppressed
+-- too and the VecAts load the state directly; appending them to fixReaders
+-- makes addDelayAntecedents order those loads before the in-place store.
+
+fn _inplaceForWrite(ctx Ctx, n NIdx, d Int) Void {
+	let info = ctx.delays[d];
+	if (info.allocSize != 1) { return; }
+	if (info.varReaders length != 0) { return; }
+	let isAudio = match (ctx.nrate[n]) { audio: true; _: false; };
+	if (!isAudio) { return; }
+	if (ctx.graphOf[n] != 0) { return; }
+	let p = ctx.ins[n][0];
+	let isPut = match (ctx.kind[p]) {
+		vecK(vop): match (vop) { put: true; _: false; };
+		_: false;
+	};
+	if (!isPut) { return; }
+	if (ctx.consumers[p] length != 1) { return; }
+	let r = ctx.ins[p][0];
+	let readsSame = match (ctx.kind[r]) {
+		delayFixReadK(rd, _): rd == d;
+		_: false;
+	};
+	if (!readsSame) { return; }
+	if (ctx.graphOf[r] != 0) { return; }
+	if (ctx.chans[ctx.ins[p][1]] != 1 || ctx.chans[ctx.ins[p][2]] != 1) { return; }
+
+	ctx.suppressed[p] = true;
+	ctx.chans[n] = 1;
+
+	-- iterate r's consumers distinct in first-occurrence order (the C++
+	-- consumer bag is distinct; synthc's array carries one entry per edge)
+	var allAts = true;
+	var ats [Int] = [];
+	var seen = Set(p);
+	for (c : ctx.consumers[r]) {
+		if (seen contains(c)) { continue; }
+		seen insert!(c);
+		let ok = match (ctx.kind[c]) {
+			vecK(vop): match (vop) {
+				at: ctx.chans[c] == 1 && ctx.chans[ctx.ins[c][1]] == 1;
+				_: false;
+			};
+			_: false;
+		};
+		if (!ok) { allAts = false; break; }
+		ats push!(c);
+	}
+	if (allAts) {
+		ctx.suppressed[r] = true;
+		for (a : ats) { info.fixReaders push!(a); }
+	}
+}
+
+fn inplaceDelayOps(ctx Ctx) Void {
+	for (n : ctx.sorted) {
+		match (ctx.kind[n]) {
+			delayWriteK(d): { _inplaceForWrite(ctx, n, d); }
+			_: {}
+		}
+	}
 }
 
 fn addDelayAntecedents(ctx Ctx) Void {
@@ -1153,6 +1238,7 @@ fn analyzeTrees(ctx Ctx) Ctx {
 	ctx analyzeTypes;
 	ctx cutGraphToTrees;
 	ctx removeDeadCode;
+	ctx inplaceDelayOps;
 	ctx addDelayAntecedents;
 	ctx addSubgraphAntecedents;
 	ctx sortTrees;

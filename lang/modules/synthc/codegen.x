@@ -428,7 +428,9 @@ fn _inlineExpr(ctx Ctx, n NIdx, cel String) String {
 		vecK(vop):      _genVec(ctx, n, vop, cel);
 		urandK(_):      "urand%^(%^)" fmt(ctx.typ[n] _isF32 ? "f" : "", _rngStateRef(ctx, n, cel));
 		birandK(_):     "birand%^(%^)" fmt(ctx.typ[n] _isF32 ? "f" : "", _rngStateRef(ctx, n, cel));
-		rand64K(_):     "rand64(%^)" fmt(_rngStateRef(ctx, n, cel));
+		-- runtime rand64() returns u64; cast to the node's signed type so an
+		-- inlined draw cannot turn an additive chain into unsigned arithmetic
+		rand64K(_):     "i64(rand64(%^))" fmt(_rngStateRef(ctx, n, cel));
 		bufFixReadK(bi, index, rc, sc): _bufFixReadExpr(ctx, n, bi, index, rc, sc, cel);
 		bufVarReadK(bi, ip, rc, sc):    _bufVarReadExpr(ctx, n, bi, ip, rc, sc, cel);
 		bufLengthK(bi):                 _bufLengthExpr(ctx, n, bi);
@@ -476,7 +478,21 @@ fn _genVec(ctx Ctx, n NIdx, vop VecOp, cel String) String {
 	-- at(a, i): a dynamic gather from the materialized array a by the index signal i
 	-- at channel cel, wrapped mod a.chans. Mirrors the C++ VecAt visitor.
 	match (vop) {
-		at: { return "%^[synthdef::mod(isize(%^), isize(%^))]"
+		at: {
+			-- In-place delay element read (inplaceDelayOps): the delay
+			-- read's materialization is suppressed, so load the state
+			-- directly. The fixReaders antecedents order this before the
+			-- in-place store.
+			if (ctx.suppressed[inp]) {
+				match (ctx.kind[inp]) {
+					delayFixReadK(d, _): {
+						return "p->d%^[synthdef::mod(isize(%^), isize(%^))]"
+							fmt(ctx.delays[d].serial, genExpr(ctx, ctx.ins[n][1], cel), ctx.delays[d].chans);
+					}
+					_: {}
+				}
+			}
+			return "%^[synthdef::mod(isize(%^), isize(%^))]"
 			fmt(_varName(ctx, inp), genExpr(ctx, ctx.ins[n][1], cel), inChans); }
 		_: {}
 	}
@@ -507,10 +523,14 @@ fn _genVecPut(ctx Ctx, root NIdx) String {
 	let aChans = ctx.chans[a];
 	let putCount = min(ctx.chans[i], ctx.chans[v]);
 	let t = _tabs(`cgIndent); let t1 = _tabs(`cgIndent + 1);
+	-- Scalar index / value inputs (chans == 1) are declared as values, not
+	-- arrays, so they are referenced without the per-put subscript.
+	let iref = ctx.chans[i] == 1 ? _varName(ctx, i) : _varName(ctx, i) $ "[_j]";
+	let vref = ctx.chans[v] == 1 ? _varName(ctx, v) : _varName(ctx, v) $ "[_j]";
 	var parts [String] = [];
 	parts push!(t $ "memcpy(%^, %^, %^ * sizeof(%^));" fmt(outv, _varName(ctx, a), aChans, ty));
 	parts push!(t $ "for (usize _j = 0; _j < %^; ++_j) {" fmt(putCount));
-	parts push!(t1 $ "%^[synthdef::mod(isize(%^[_j]), isize(%^))] = %^[_j];" fmt(outv, _varName(ctx, i), aChans, _varName(ctx, v)));
+	parts push!(t1 $ "%^[synthdef::mod(isize(%^), isize(%^))] = %^;" fmt(outv, iref, aChans, vref));
 	parts push!(t $ "}");
 	parts join("\n")
 }
@@ -939,6 +959,14 @@ fn _voiceDelayWriteSimd(ctx Ctx, info DelayInfo, value String, cel String, treeS
 -- Emit a delay-write statement (a sink, called from genTree).
 fn _delayWriteStmt(ctx Ctx, n NIdx, d Int, cel String, treeSerial Int) String {
 	let info = ctx.delays[d];
+	-- In-place put (inplaceDelayOps): replace one element of the delay
+	-- state with a single indexed store.
+	let vin = ctx.ins[n][0];
+	if (ctx.suppressed[vin]) {
+		return "p->d%^[synthdef::mod(isize(%^), isize(%^))] = %^; // %^ DelayWrite (in-place put)\n"
+			fmt(info.serial, genExpr(ctx, ctx.ins[vin][1], cel), info.chans,
+			    genExpr(ctx, ctx.ins[vin][2], cel), treeSerial);
+	}
 	let value = genExpr(ctx, ctx.ins[n][0], cel);
 	if (ctx _isVoiceDelay(d)) {
 		if (`cgSimdW > 0) { return _voiceDelayWriteSimd(ctx, info, value, cel, treeSerial); }
@@ -1702,6 +1730,17 @@ fn _flatVoiceIdx(ctx Ctx, chans Int, cel String) String {
 fn genLoop(ctx Ctx, loopIdx Int) String {
 	let loop = ctx.loops[loopIdx];
 	if (loop.chans == 0) { return ""; }
+	-- Trees folded into in-place delay element accesses (inplaceDelayOps)
+	-- are not emitted; drop them, and drop the loop if nothing remains.
+	var live [Int] = [];
+	for (t : loop.trees) {
+		if (!ctx.suppressed[ctx.trees[t].root]) { live push!(t); }
+	}
+	if (live length < loop.trees length) {
+		if (live length == 0) { return ""; }
+		ctx.loops[loopIdx] = Loop { ...loop, trees: live };
+		return genLoop(ctx, loopIdx);
+	}
 	-- Auto-enter flat voice mode for a voicer-body loop reached outside _genVoicer
 	-- (e.g. the body's init-rate loop emitted from genInitFun).
 	let rootGraph = ctx.graphOf[ctx.trees[loop.trees[0]].root];
@@ -2090,12 +2129,15 @@ fn genDelayInit(ctx Ctx) String {
 					} else {
 						var j = 0;
 						while (j < d.chans) {
+							-- Re-generate per channel: a multichannel init
+							-- value must index its own channel, not channel 0.
+							let valueJ = genExpr(ctx, ctx.ins[n][0], "%^" fmt(j));
 							if (d.allocSize == 1) {
-								s = s $ "\tp->d%^[%^] = %^;\n" fmt(d.serial, j, value);
+								s = s $ "\tp->d%^[%^] = %^;\n" fmt(d.serial, j, valueJ);
 							} else if (d.allocSize > 1) {
-								s = s $ "\tp->d%^[%^][(0ull - %^ull) & %^] = %^;\n" fmt(d.serial, j, offset, d.allocSize - 1, value);
+								s = s $ "\tp->d%^[%^][(0ull - %^ull) & %^] = %^;\n" fmt(d.serial, j, offset, d.allocSize - 1, valueJ);
 							} else {
-								s = s $ "\tp->d%^[%^][(0ull - %^ull) & p->d%^_mask] = %^;\n" fmt(d.serial, j, offset, d.serial, value);
+								s = s $ "\tp->d%^[%^][(0ull - %^ull) & p->d%^_mask] = %^;\n" fmt(d.serial, j, offset, d.serial, valueJ);
 							}
 							j = j + 1;
 						}

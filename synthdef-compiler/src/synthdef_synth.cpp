@@ -467,11 +467,17 @@ namespace synthdef {
                     cfx->insertPhiNodes(worklist);
                 }
             }
+            // A delay's width covers its writer AND its init values.
+            // Widen-only keeps the fixpoint monotone: a pure at/put
+            // feedback cycle has no width source other than the init,
+            // and the writer pass must not shrink it back.
             auto dwrite = expr.as<DelayWrite>();
-            if (dwrite) {
-                D d = dwrite->delayBuf;
-                if (expr->chans != d->chans) {
-                    d->chans = expr->chans;
+            auto dinit = expr.as<DelayInit>();
+            if (dwrite || dinit) {
+                D d = dwrite ? dwrite->delayBuf : dinit->delayBuf;
+                usize w = dwrite ? expr->chans : dinit->in0()->chans;
+                if (w > d->chans) {
+                    d->chans = w;
                     for (S u : d->initters) {
                         worklist.insert(u);
                     }
@@ -481,8 +487,11 @@ namespace synthdef {
                     for (S u : d->varReaders) {
                         worklist.insert(u);
                     }
+                    if (d->writer.notNull()) {
+                        worklist.insert(d->writer);
+                    }
                 }
-            }                    
+            }
         }
     }
 
@@ -536,6 +545,50 @@ namespace synthdef {
         }
     }
     
+    // In-place delay ops: a DelayWrite whose value is VecPut(read of the
+    // same single-slot delay, idx, val) replaces ONE element of the state,
+    // so emit it as a single indexed store instead of materializing the
+    // read, copying the whole vector through the put, and storing every
+    // lane back. When every other consumer of the read is a scalar VecAt,
+    // the read's materialization is suppressed too and the VecAts load the
+    // state directly; appending them to fixReaders makes
+    // addDelayAntecedents order those loads before the in-place store.
+    void Synth::inplaceDelayOps() {
+        for (S expr : sorted) {
+            auto w = expr.as<DelayWrite>();
+            if (!w) continue;
+            D d = w->delayBuf;
+            if (d->allocSize != 1) continue;
+            if (!d->varReaders.empty()) continue;
+            if (w->rate != audioSignalRate) continue;
+            if (w->graph->parent || d->graph->parent) continue;
+            auto p = w->in0().as<VecPutExpr>();
+            if (!p) continue;
+            if (p->consumers.total() != 1) continue;
+            auto r = p->in0().as<DelayFixRead>();
+            if (!r || !(r->delayBuf == d)) continue;
+            if (r->graph->parent) continue;
+            if (p->in1()->chans != 1 || p->in2()->chans != 1) continue;
+
+            p->suppressEmit = true;
+            w->chans = 1;
+
+            bool allAts = true;
+            for (S c : r->consumers) {
+                if (c.get() == (Expr*)p) continue;
+                auto a = c.as<VecAtExpr>();
+                if (!a || a->chans != 1 || a->in1()->chans != 1) { allAts = false; break; }
+            }
+            if (allAts) {
+                r->suppressEmit = true;
+                for (S c : r->consumers) {
+                    if (c.get() == (Expr*)p) continue;
+                    d->fixReaders.push_back(c);
+                }
+            }
+        }
+    }
+
     void Synth::addDelayAntecedents() {
         for (S expr : sorted) {
             auto writer = expr.as<DelayWrite>();
@@ -1159,6 +1212,7 @@ namespace synthdef {
             runPass("FIND GRAPH CUTS",              [&]{ findGraphCuts(); });
             runPass("CUT GRAPH TO TREES",           [&]{ cutGraphToTrees(); });
             runPass("REMOVE DEAD CODE",             [&]{ removeDeadCode(); });
+            runPass("INPLACE DELAY OPS",            [&]{ inplaceDelayOps(); });
             runPass("ADD DELAY ANTECEDENTS",        [&]{ addDelayAntecedents(); });
             runPass("ADD LOOP ANTECEDENTS",         [&]{ addSubgraphAntecedents(); });
             runPass("SORT TREES",                   [&]{ sortTrees(); });

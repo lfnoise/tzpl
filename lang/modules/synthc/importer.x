@@ -206,6 +206,7 @@ fn _appendNode(kind NodeKind, ins [Int], serial Int, r Rate, t NumType, ch Int) 
 	ctx.cut push!(GraphCut.none);
 	ctx.treeOf push!(NONE);
 	ctx.consumers push!([Int]());
+	ctx.suppressed push!(false);
 
 	if (kind isSinkKind) { ctx.sinks push!(idx); }
 
@@ -371,6 +372,7 @@ fn _unopSupported(op UnaryOp) Bool = match (op) {
 	asinh: true;  acosh: true;  atanh: true;
 	sinpi: true;  cospi: true;  tanpi: true;
 	erf: true;  erfc: true;
+	clz: true;  ctz: true;  popCount: true;  bitWidth: true;
 	_: false;
 };
 
@@ -481,7 +483,8 @@ fn _foldCmpNode(ctx Ctx, op CompareOp, ins [Int]) Int {
 	_addFoldedConstant(r, r _foldInitType)
 }
 fn _foldOp(ctx Ctx, kind NodeKind, ins [Int]) Option<Int> = match (kind) {
-	unopK(op):      _someInt(_foldUnopNode(ctx, op, ins));
+	unopK(op):      canFoldUnary(_constValOf(ctx, ins[0]), op)
+	                    ? _someInt(_foldUnopNode(ctx, op, ins)) : _noInt();
 	binopK(op):     _someInt(_foldBinopNode(ctx, op, ins));
 	compareopK(op): _someInt(_foldCmpNode(ctx, op, ins));
 	_:              _noInt();

@@ -346,6 +346,8 @@ std::expected<UnaryOp, std::string> parseUnaryOp(sexpr::Symbol const& sym) {
         {"round", UnaryOp::Round},
         {"sinpi", UnaryOp::SinPi}, {"cospi", UnaryOp::CosPi}, {"tanpi", UnaryOp::TanPi},
         {"erf", UnaryOp::Erf}, {"erfc", UnaryOp::Erfc},
+        {"clz", UnaryOp::Clz}, {"ctz", UnaryOp::Ctz},
+        {"popCount", UnaryOp::PopCount}, {"bitWidth", UnaryOp::NumBits},
     };
 
     auto it = opMap.find(sym.name);

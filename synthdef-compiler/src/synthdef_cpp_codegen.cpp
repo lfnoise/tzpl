@@ -1081,6 +1081,14 @@ struct ExprCodegenVisitor : ExprVisitor {
         s += g.genExpr(p->in0(), mod(cel + vx(r), vx(ptrdiff_t(input_chans))));
     }
     void visit(VecAtExpr* p) override {
+        // In-place delay element read (inplaceDelayOps): the delay read's
+        // materialization is suppressed, so load the state directly. The
+        // fixReaders antecedents order this before the in-place store.
+        if (auto r = p->in0().as<DelayFixRead>(); r && r->suppressEmit) {
+            s += FMT("p->d{}[synthdef::mod(isize({}), isize({}))]",
+                r->delayBuf->serial, g.genExpr(p->in1(), cel), r->delayBuf->chans);
+            return;
+        }
         string idx = g.genExpr(p->in1(), cel);
         s += FMT("{}[synthdef::mod(isize({}), isize({}))]",
             g.genVarName(p->in0()), idx, p->in0()->chans);
@@ -1161,10 +1169,13 @@ struct ExprCodegenVisitor : ExprVisitor {
             } else {
                 vi = FMT("{} >> {}", vxstr(cel), g.flatChanShift);
             }
-            s += FMT("rand64(p->voice_rgen{}[{}])", p->graph->serial, vi);
+            // The runtime rand64() returns u64; cast to the node's signed
+            // type so an inlined draw cannot turn an additive chain into
+            // (wrapping) unsigned arithmetic.
+            s += FMT("i64(rand64(p->voice_rgen{}[{}]))", p->graph->serial, vi);
         } else {
             string prefix = g.inVoiceLoop ? "vs." : "p->";
-            s += FMT("rand64({}rgen{})", prefix, p->graph->serial);
+            s += FMT("i64(rand64({}rgen{}))", prefix, p->graph->serial);
         }
     }
     void visit(MaxDelay* p) override {
@@ -2089,6 +2100,14 @@ struct Rank1GenTreeExprVisitor : GenTreeExprVisitor {
     
     void visit(DelayWrite* p) override {
         handled = true;
+        // In-place put (inplaceDelayOps): replace one element of the delay
+        // state with a single indexed store.
+        if (auto put = p->in0().as<VecPutExpr>(); put && put->suppressEmit) {
+            s += FMT("p->d{}[synthdef::mod(isize({}), isize({}))] = {}; // {} DelayWrite (in-place put)\n",
+                p->delayBuf->serial, g.genExpr(put->in1(), cel),
+                p->delayBuf->chans, g.genExpr(put->in2(), cel), tree.serial);
+            return;
+        }
         if (g.inFlatVoiceMode && g.isVoicerSubgraph(p->delayBuf->graph)) {
             if (g.inSimdMode) {
                 // SIMD + flat voice mode
@@ -2341,18 +2360,23 @@ struct GenLoopExprVisitor : ExprVisitor {
 
     void visit(VecPutExpr* p) override {
         handled = true;
-        // Copy input array, then overwrite at index positions
+        // Copy input array, then overwrite at index positions. Scalar index
+        // and value inputs (chans == 1) are declared as values, not arrays,
+        // so they are referenced without the per-put subscript.
         tabIndent(s, g.indent);
         s += FMT("memcpy({0}, {1}, {2} * sizeof({3}));\n",
             g.genVarName(p), g.genVarName(p->in0()),
             p->in0()->chans, p->type.str());
         tabIndent(s, g.indent);
         usize putCount = std::min(p->in1()->chans, p->in2()->chans);
+        string idx = p->in1()->chans == 1
+            ? g.genVarName(p->in1()) : g.genVarName(p->in1()) + "[_j]";
+        string val = p->in2()->chans == 1
+            ? g.genVarName(p->in2()) : g.genVarName(p->in2()) + "[_j]";
         s += FMT("for (usize _j = 0; _j < {}; ++_j) {{\n", putCount);
         tabIndent(s, g.indent + 1);
-        s += FMT("{0}[synthdef::mod(isize({1}[_j]), isize({2}))] = {3}[_j];\n",
-            g.genVarName(p), g.genVarName(p->in1()),
-            p->in0()->chans, g.genVarName(p->in2()));
+        s += FMT("{0}[synthdef::mod(isize({1}), isize({2}))] = {3};\n",
+            g.genVarName(p), idx, p->in0()->chans, val);
         tabIndent(s, g.indent);
         s += "}\n";
     }
@@ -2413,6 +2437,24 @@ string CppCodeGen::genLoop(GenLoop const& loop) {
 
     // Skip loops with zero channels (e.g. DelayInit sinks handled by genDelayInit)
     if (loop.chans == 0) return s;
+
+    // Trees folded into in-place delay element accesses (inplaceDelayOps)
+    // are not emitted; drop them, and drop the loop if nothing remains.
+    {
+        bool anySuppressed = false;
+        for (ExprTree* t : loop.trees) {
+            if (t->root->suppressEmit) { anySuppressed = true; break; }
+        }
+        if (anySuppressed) {
+            GenLoop filtered = loop;
+            filtered.trees.clear();
+            for (ExprTree* t : loop.trees) {
+                if (!t->root->suppressEmit) filtered.trees.push_back(t);
+            }
+            if (filtered.trees.empty()) return s;
+            return genLoop(filtered);
+        }
+    }
 
     // Auto-enter flat voice mode for a voicer-body loop reached outside the
     // voicer (e.g. an event-rate loop emitted from genHandleEventsFun, where
@@ -2777,6 +2819,10 @@ string CppCodeGen::genDelayAlloc() {
 
 string CppCodeGen::genDelayInit() {
     string s;
+    // Init values reference the temps materialized by the init loops; a
+    // stale current_root from the last emitted loop would suppress the
+    // root reference and re-inline that expression instead.
+    current_root = nullptr;
     for (auto delay : sortedDelays(synth->delayBufs)) {
         if (isVoicerSubgraph(delay->graph)) continue;
         for (S expr : delay->initters) {
@@ -2796,14 +2842,17 @@ string CppCodeGen::genDelayInit() {
                 }
             } else {
                 for (int j = 0; j < delay->chans; ++j) {
+                    // Re-generate per channel: a multichannel init value
+                    // must index its own channel, not channel 0.
+                    string valueJ = genExpr(init->in0(), vx(j));
                     if (delay->allocSize == 1) {
-                        s += FMT("\tp->d{}[{}] = {};\n", ser, j, value);
+                        s += FMT("\tp->d{}[{}] = {};\n", ser, j, valueJ);
                     } else if (delay->allocSize > 1) {
                         s += FMT("\tp->d{}[{}][(0ull - {}ull) & {}] = {};\n",
-                            ser, j, offset, delay->allocSize - 1, value);
+                            ser, j, offset, delay->allocSize - 1, valueJ);
                     } else {
                         s += FMT("\tp->d{}[{}][(0ull - {}ull) & p->d{}_mask] = {};\n",
-                            ser, j, offset, ser, value);
+                            ser, j, offset, ser, valueJ);
                     }
                 }
             }

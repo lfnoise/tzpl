@@ -72,6 +72,10 @@ namespace synthdef {
         struct ExprTree* tree = nullptr;
         ExprIdentityBag consumers;
 
+        // Set by inplaceDelayOps: this expr's tree is folded into an
+        // in-place delay element access and must not be emitted.
+        bool suppressEmit = false;
+
         Expr(SignalRate rate, vector<S> inputs);
         
         virtual string typeName() const = 0;

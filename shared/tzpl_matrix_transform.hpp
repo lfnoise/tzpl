@@ -66,6 +66,49 @@ constexpr T fold(T a, T b) {
     return b - std::abs(b - mod(a, 2*b));
 }
 
+// Bit-manipulation ops. The plugin codegen emits these as plain function
+// calls (clz, ctz, popcount, numbits, ushr) for integer-typed signals.
+
+template <typename T>
+    requires std::is_integral_v<T>
+inline T clz(T x) { return T(std::countl_zero(std::make_unsigned_t<T>(x))); }
+
+template <typename T>
+    requires std::is_integral_v<T>
+inline T ctz(T x) { return T(std::countr_zero(std::make_unsigned_t<T>(x))); }
+
+template <typename T>
+    requires std::is_integral_v<T>
+inline T popcount(T x) { return T(std::popcount(std::make_unsigned_t<T>(x))); }
+
+template <typename T>
+    requires std::is_integral_v<T>
+inline T numbits(T x) { return T(std::bit_width(std::make_unsigned_t<T>(x))); }
+
+template <typename T, typename U>
+    requires (std::is_integral_v<T> && std::is_integral_v<U>)
+inline T ushr(T a, U b) { return T(std::make_unsigned_t<T>(a) >> b); }
+
+#define TZPL_BITOPS_VEC(VT, N) \
+    inline VT clz(VT x) { VT r{}; for (int i_ = 0; i_ < N; ++i_) r[i_] = clz(x[i_]); return r; } \
+    inline VT ctz(VT x) { VT r{}; for (int i_ = 0; i_ < N; ++i_) r[i_] = ctz(x[i_]); return r; } \
+    inline VT popcount(VT x) { VT r{}; for (int i_ = 0; i_ < N; ++i_) r[i_] = popcount(x[i_]); return r; } \
+    inline VT numbits(VT x) { VT r{}; for (int i_ = 0; i_ < N; ++i_) r[i_] = numbits(x[i_]); return r; } \
+    inline VT ushr(VT a, VT b) { VT r{}; for (int i_ = 0; i_ < N; ++i_) r[i_] = ushr(a[i_], b[i_]); return r; } \
+    inline VT ushr(VT a, i64 b) { VT r{}; for (int i_ = 0; i_ < N; ++i_) r[i_] = ushr(a[i_], b); return r; }
+
+TZPL_BITOPS_VEC(i32x2, 2)
+TZPL_BITOPS_VEC(i32x4, 4)
+TZPL_BITOPS_VEC(i32x8, 8)
+TZPL_BITOPS_VEC(i64x2, 2)
+TZPL_BITOPS_VEC(i64x4, 4)
+TZPL_BITOPS_VEC(i64x8, 8)
+TZPL_BITOPS_VEC(u64x2, 2)
+TZPL_BITOPS_VEC(u64x4, 4)
+TZPL_BITOPS_VEC(u64x8, 8)
+
+#undef TZPL_BITOPS_VEC
+
 
 
 template <typename T, usize N>

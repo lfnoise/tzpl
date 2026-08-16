@@ -88,8 +88,17 @@ fn _applyFloatUnary(op UnaryOp, x Float) Float = match (op) {
 
 fn _applyIntUnary(op UnaryOp, x Int) Int = match (op) {
 	neg: 0 - x;  abs: x abs;  not: x == 0 ? 1 : 0;  bitNot: ~x;
+	clz: x clz;  ctz: x ctz;
+	popCount: x popCount;  bitWidth: x bitWidth;
 	_: x;
 };
+
+-- Integer-only unary ops (ctz, clz, popCount, bitWidth, ...) have no float
+-- interpretation; folding one over float storage would silently produce
+-- garbage, so the importer must decline and leave the node unfolded (the
+-- reference compiler emits the unfolded op, which then fails to compile --
+-- refusing loudly beats folding wrong).
+fn canFoldUnary(v ConstVal, op UnaryOp) Bool = !(op isIntUnop) || v _isInts;
 
 -- Returns the folded ConstVal. Float unary ops promote int storage to float.
 fn foldUnary(v ConstVal, op UnaryOp) ConstVal {

@@ -155,6 +155,7 @@ namespace synthdef {
         void findGraphCuts();
         void cutGraphToTrees();
         void removeDeadCode();
+        void inplaceDelayOps();
         void shapeInference();
         void typeInference();
         void setNonConcreteTypesToDefault();

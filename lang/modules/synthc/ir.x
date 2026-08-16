@@ -433,6 +433,9 @@ struct Ctx {
 	cut [GraphCut],
 	treeOf [Int],             -- tree index, NONE if none
 	consumers [[NIdx]],
+	suppressed [Bool],        -- set by inplaceDelayOps: the node's tree is
+	                          -- folded into an in-place delay element access
+	                          -- and must not be emitted
 
 	-- graph-level node lists (indices into the node arrays)
 	sorted [NIdx],
@@ -477,6 +480,7 @@ fn newCtx(name String) Ctx {
 		cut: [GraphCut](),
 		treeOf: [Int](),
 		consumers: [[NIdx]](),
+		suppressed: [Bool](),
 		sorted: [NIdx](),
 		sinks: [NIdx](),
 		inlets: [NIdx](),
