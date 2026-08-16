@@ -696,24 +696,29 @@ fn fadeout(x, sustainTime, fadeoutTime) S {
 }
 
 fn pinkingFilter(x S) S {
-    -- from Paul Kellett
-    let b0 = delayVar(); (0.99886 * b0(1) + x * 0.0555179) write(b0);
-    let b1 = delayVar(); (0.99332 * b1(1) + x * 0.0750759) write(b1);
-    let b2 = delayVar(); (0.96900 * b2(1) + x * 0.1538520) write(b2);
-    let b3 = delayVar(); (0.86650 * b3(1) + x * 0.3104856) write(b3);
-    let b4 = delayVar(); (0.55000 * b4(1) + x * 0.5329522) write(b4);
-    let b5 = delayVar(); (-0.7616 * b5(1) - x * 0.0168980) write(b5);
+    -- from Paul Kellett. The sum uses the write RESULTS (this sample's
+    -- states, equivalently b0() now that d(0) resolves to the written
+    -- signal): summing the PREVIOUS states instead puts a z^-1 on each
+    -- pole term but not the direct terms, collapsing the response near
+    -- Nyquist (-11 dB at 20 kHz instead of +/-0.05 dB).
+    let b0 = delayVar(); let s0 = (0.99886 * b0(1) + x * 0.0555179) write(b0);
+    let b1 = delayVar(); let s1 = (0.99332 * b1(1) + x * 0.0750759) write(b1);
+    let b2 = delayVar(); let s2 = (0.96900 * b2(1) + x * 0.1538520) write(b2);
+    let b3 = delayVar(); let s3 = (0.86650 * b3(1) + x * 0.3104856) write(b3);
+    let b4 = delayVar(); let s4 = (0.55000 * b4(1) + x * 0.5329522) write(b4);
+    let b5 = delayVar(); let s5 = (-0.7616 * b5(1) - x * 0.0168980) write(b5);
     let b6 = delayVar(); (x * 0.115926) write(b6);
-    return b0() + b1() + b2() + b3() + b4() + b5() + b6(1) + x * 0.5362;
+    return s0 + s1 + s2 + s3 + s4 + s5 + b6(1) + x * 0.5362;
 }
 
 
 fn pinkingFilterEco(x S) S
 {
-    let b0 = delayVar(); (0.99765 * b0(1) + x * 0.0990460) write(b0);
-    let b1 = delayVar(); (0.96300 * b1(1) + x * 0.2965164) write(b1);
-    let b2 = delayVar(); (0.57000 * b2(1) + x * 1.0526913) write(b2);
-    b0() + b1() + b2() + x * 0.1848
+    -- as above: sum the write results, not offset-0 re-reads
+    let b0 = delayVar(); let s0 = (0.99765 * b0(1) + x * 0.0990460) write(b0);
+    let b1 = delayVar(); let s1 = (0.96300 * b1(1) + x * 0.2965164) write(b1);
+    let b2 = delayVar(); let s2 = (0.57000 * b2(1) + x * 1.0526913) write(b2);
+    s0 + s1 + s2 + x * 0.1848
 }
 
 /*
@@ -743,7 +748,12 @@ fn pinkmfe(chans Int = 1) S = 0.25 * white(chans) pinkingFilterEcoMat;
 
 fn white(chans Int = 1) S = birand(chans);
 
+-- Measured at fs = 48 kHz: 1/f within +/-0.05 dB from 100 Hz to Nyquist
+-- (+/-0.2 dB from 20 Hz); flattens to white below ~10 Hz (lowest pole).
 fn pinkf(chans Int = 1) S = 0.25 * white(chans) pinkingFilter;
+
+-- Measured at fs = 48 kHz: 1/f within +/-0.6 dB over 20 Hz-20 kHz;
+-- flattens to white below ~20 Hz.
 fn pinkfe(chans Int = 1) S = 0.25 * white(chans) pinkingFilterEco;
 
 
@@ -759,6 +769,61 @@ fn red(chans Int = 1, a=0.05) S {
 fn gray(chans Int = 1) S {
 	let r = delayVar() init(1, rand64(chans, Rate.init));
 	(r <- r(1) ^ (1 << (rand64(chans) & 63))) f64 * 1.084202172485504434e-19 |> f32
+}
+
+-- pink noise: the SuperCollider PinkNoise algorithm (Voss-McCartney with
+-- Magnus Jonsson's improvement), extended to flatten the plain ladder's
+-- -1.2 dB dip near fs/5. Each sample one random integer is drawn: the
+-- count of its trailing zeros picks which of 16 dice to reroll (a random
+-- source rather than a counter, so the reroll pattern itself has no
+-- periodicities to leave peaks in the spectrum), and its high bits become
+-- the new die value; the output is the running total of the dice. The
+-- classic extra white die is replaced by an auxiliary die rerolled with
+-- probability 3/4 -- the top rung of a powers-of-4 second ladder, whose
+-- deeper rungs measure as redundant -- filling the gap between the
+-- fastest die (probability 1/2) and white (probability 1). Small integer
+-- amplitude weights (x32: die0 39, die1 29, die2 36, aux 40, rest 32),
+-- fitted jointly across 44.1/48/96 kHz, balance the top octaves. Weights
+-- ride the running total as total += w[k]*(new - prev), so the sum stays
+-- integer, drift-free, and O(1) per sample (the compilers emit the die
+-- replacement as an in-place indexed store); 53-bit dice keep the
+-- weighted sum (560/32 unit dice) inside i64.
+-- Measured (480 s, 1/6-octave bins): 1/f within +/-0.16 dB over
+-- 20 Hz-20 kHz at fs = 48 kHz, holding to below 10 Hz.
+fn _pink1() S {
+	let kw = [39, 29, 36, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32];
+
+	let r = rand64();
+	let k = r ctz & 15;
+	let newDie = r >>> 11 i64;
+
+	-- the i64 casts on the shift counts anchor them against the f32 type
+	-- that the weight-table constant would otherwise bleed into them
+	let dice0 = rand64(16, Rate.init) >>> 11 i64;
+	let d = delayVar() init(1, dice0);
+	let t = delayVar() init(1, (dice0 * kw vec i64) sum);
+
+	let prev = d(1) at(k);
+	d(1) put(k, newDie) write(d);
+	let w = kw vec i64 at(k);
+	let total = (t(1) + w * (newDie - prev)) write(t);
+
+	-- auxiliary die: value from a second draw's high bits, rerolled when
+	-- two of its low bits are nonzero (probability 3/4)
+	let r2 = rand64();
+	let a = delayVar() init(1, rand64(1, Rate.init) >>> 11 i64);
+	let aux = ((r2 & 3) != 0) select2(r2 >>> 11 i64, a(1)) write(a);
+
+	-- center on the weighted mean (560 * 2^52), scale by 2^-61 for the
+	-- same nominal level as SC's PinkNoise (rms ~0.15, peak ~1.09)
+	((total + 40 * aux - 2522015791327477760 i64) f64) * 4.336808689942017736e-19 |> f32
+}
+
+fn pink(chans Int = 1) S {
+	if (chans == 1) { return _pink1(); }
+	var v [S] = [];
+	for (i : (1..chans)) { v push!(_pink1()); }
+	v join
 }
 
 -- 1 with probability `prob`, else zero, each sample.

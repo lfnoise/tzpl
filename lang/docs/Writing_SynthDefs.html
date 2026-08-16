@@ -1400,7 +1400,9 @@ noteOff(<span class="hl-num">100</span>, <span class="hl-num">1</span>);</code><
             <table>
                 <tr><th>Function</th><th>Description</th></tr>
                 <tr><td><code>white(chans = 1)</code></td><td>White noise (= <code>birand(chans)</code>).</td></tr>
-                <tr><td><code>pinkf(chans = 1)</code> / <code>pinkfe(chans = 1)</code></td><td>Pink noise via the Paul Kellett filter (7-stage accurate / 3-stage economy).</td></tr>
+                <tr><td><code>pink(chans = 1)</code></td><td>Pink noise: the SuperCollider PinkNoise algorithm (Voss-McCartney, 16 dice rerolled by the trailing zeros of a random integer), plus an auxiliary 3/4-probability die and per-die weights that flatten the ladder. Channels are independent generators. Measured: 1/f within &plusmn;0.16&nbsp;dB over 20&nbsp;Hz&ndash;20&nbsp;kHz at 48&nbsp;kHz, holding to below 10&nbsp;Hz (slowest die corner ~0.2&nbsp;Hz). The residual shape scales with the sample rate: predicted &plusmn;0.25&nbsp;dB at 44.1&nbsp;kHz, &plusmn;0.07&nbsp;dB at 96&nbsp;kHz.</td></tr>
+                <tr><td><code>pinkf(chans = 1)</code></td><td>Pink noise via the Paul Kellett 7-stage filter. Measured: 1/f within &plusmn;0.05&nbsp;dB from 100&nbsp;Hz to Nyquist at 48&nbsp;kHz (&plusmn;0.2&nbsp;dB from 20&nbsp;Hz); flattens to white below ~10&nbsp;Hz.</td></tr>
+                <tr><td><code>pinkfe(chans = 1)</code></td><td>Pink noise via the Paul Kellett 3-stage economy filter. Measured: 1/f within &plusmn;0.6&nbsp;dB over 20&nbsp;Hz&ndash;20&nbsp;kHz at 48&nbsp;kHz; flattens to white below ~20&nbsp;Hz.</td></tr>
                 <tr><td><code>violet(chans = 1)</code></td><td>Violet noise (differentiated white, +6 dB/8ve).</td></tr>
                 <tr><td><code>blue(chans = 1)</code></td><td>Blue noise (differentiated pink, +3 dB/8ve).</td></tr>
                 <tr><td><code>red(chans = 1, a = 0.05)</code></td><td>Red/brown noise: a folded random walk with step size <code>a</code>.</td></tr>
