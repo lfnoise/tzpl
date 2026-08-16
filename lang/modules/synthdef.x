@@ -830,12 +830,20 @@ fn init(d DelayVar, index Int, s AsSignal) DelayVar {
     d
 }
 
-fn at(d DelayVar, index Int) S {
-    SignalExprKind.delay(d, DelayOp.read(index)) _newSignalExpr
-}
+fn at(d DelayVar, index Int) S = d read(index);
 
 fn read(d DelayVar, index Int) S {
-    SignalExprKind.delay(d, DelayOp.read(index)) _newSignalExpr
+	-- d(0) is a delay of ZERO samples: the value written this sample. It
+	-- resolves at graph-build time to the written signal itself, so the
+	-- write must already have been built -- a d(0) read before the write
+	-- is a zero-delay feedback loop, which has no defined value.
+	if (index == 0) {
+		match (`delayWrites[d.id]) {
+			some(s): { return s; }
+			none: { panic("d(0) read before the delay's write was built (zero-delay feedback?)"); }
+		}
+	}
+	SignalExprKind.delay(d, DelayOp.read(index)) _newSignalExpr
 }
 
 fn vread(d DelayVar, index AsSignal, interp Interpolation = Interpolation.cubic) S {
@@ -843,13 +851,12 @@ fn vread(d DelayVar, index AsSignal, interp Interpolation = Interpolation.cubic)
 }
 
 fn write(d DelayVar, s AsSignal) S {
-    SignalExprKind.delay(d, DelayOp.write) _newSignalExpr([s asSignal]);
-	s
+	let sig = s asSignal;
+	SignalExprKind.delay(d, DelayOp.write) _newSignalExpr([sig]);
+	`delayWrites = `delayWrites put(d.id, sig);
+	sig
 }
-fn write(s AsSignal, d DelayVar) S {
-    SignalExprKind.delay(d, DelayOp.write) _newSignalExpr([s asSignal]);
-	s
-}
+fn write(s AsSignal, d DelayVar) S = d write(s);
 
 fn call(d DelayVar, index Int = 0) S = d read(index);
 fn call(d DelayVar, index S, interp Interpolation = Interpolation.cubic) S = d vread(index);
@@ -1019,6 +1026,7 @@ fn _makeTopGraph(f GraphFn) SignalGraph {
 	var `delayVarIds Int = 0;
 	var `bufferVarIds Int = 0;
 	var `sampleBankVarIds Int = 0;
+	var `delayWrites [Int: S] = [:];   -- delayVar id -> written signal (for d(0))
 
 	let root S = f();
 
