@@ -1,17 +1,3 @@
-TZPL is licensed under the GNU General Public License, version 3 (GPLv3),
-reproduced in full below.
-
-Note on the optional JUCE application: the tzpl_app_juce target (built only
-when TZPL_BUILD_APP_JUCE is enabled) downloads and links against the JUCE
-framework, which this project uses under the GNU Affero General Public
-License, version 3 (AGPLv3) -- not the commercial JUCE licence. JUCE is not
-included in this repository. Binaries built from that target combine
-GPLv3-covered code with AGPLv3-covered code, as permitted by section 13 of
-each licence; the AGPLv3's requirements concerning interaction through a
-network apply to such combined binaries.
-
-----------------------------------------------------------------------
-
                     GNU GENERAL PUBLIC LICENSE
                        Version 3, 29 June 2007
 

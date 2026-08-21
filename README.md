@@ -94,10 +94,10 @@ tzpl/
 ├── packaging/                  Distribution: DMG build, signing, notarization
 ├── tools/                      Standalone developer tools
 ├── docs/                       Project-level design documents
-├── third_party/
-│   ├── oscpack/                OSC message encoding/decoding
-│   └── rtaudio/                Audio I/O library
-└── IMPLEMENTATION_PLAN.md      Detailed integration roadmap
+├── devplans/                   Development roadmaps and plans
+└── third_party/
+    ├── oscpack/                OSC message encoding/decoding
+    └── rtaudio/                Audio I/O library
 ```
 
 ## Prerequisites
@@ -230,7 +230,7 @@ The language and library guides are rendered at **<https://lfnoise.github.io/tzp
 - [Synthdef Compiler Architecture](synthdef-compiler/ARCHITECTURE.md) — Compilation pipeline, expression graph, type system, and code generation
 - [Audio Engine Architecture](engine/Architecture.md) — Engine design, silos, commands, plugin ABI, and thread safety
 - [Tzopilotl Theory of Operation](lang/Theory_of_Operation.md) — Detailed design document for the language implementation
-- [Integration Plan](IMPLEMENTATION_PLAN.md) — Step-by-step roadmap for integrating the sub-projects
+- [Integration Plan](devplans/IMPLEMENTATION_PLAN.md) — Step-by-step roadmap for integrating the sub-projects
 
 ### Editor Support
 
@@ -244,4 +244,8 @@ Syntax highlighting for Tzopilotl is available for:
 
 Copyright (C) 2026 James McCartney.
 
-This project is licensed under the [GNU General Public License v3.0](LICENSE). Vendored third-party code (`third_party/`, `lang/third_party/`, `app/vendor/`) retains its original permissive licenses; see the LICENSE files in those directories.
+This project is licensed under the [GNU General Public License v3.0](LICENSE). Files that do not carry an explicit license header (including the Tzopilotl `.x` modules, examples, and build/test scripts) are covered by that license.
+
+Vendored third-party code (`third_party/`, `lang/third_party/`, `app/vendor/`, and a few other locations) retains its original permissive licenses; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and the LICENSE files in those directories.
+
+**Note on the optional JUCE application:** the `tzpl_app_juce` target (built only when `TZPL_BUILD_APP_JUCE` is enabled) downloads and links against the JUCE framework, which this project uses under the GNU Affero General Public License, version 3 (AGPLv3) -- not the commercial JUCE licence. JUCE is not included in this repository. Binaries built from that target combine GPLv3-covered code with AGPLv3-covered code, as permitted by section 13 of each licence; the AGPLv3's requirements concerning interaction through a network apply to such combined binaries.

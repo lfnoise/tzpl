@@ -11,3 +11,10 @@ lang/scratch/
 *.dylib
 .claude/scheduled_tasks.lock
 .claude/worktrees/
+.claude/settings.local.json
+.idea/
+**/xcuserdata/
+.env
+*.pem
+*.key
+*.profraw

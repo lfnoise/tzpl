@@ -1,4 +1,8 @@
 /*
+	NOTE: This file is locally modified in TZPL: aarch64/arm64 guards were
+	added to the x86_64 preprocessor conditionals for Apple Silicon support.
+*/
+/*
 	oscpack -- Open Sound Control (OSC) packet manipulation library
     http://www.rossbencina.com/code/oscpack
 

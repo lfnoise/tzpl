@@ -1,3 +1,10 @@
+// ImGuiColorTextEdit
+// Copyright (c) 2017 BalazsJako
+// Licensed under the MIT License; see the LICENSE file in this directory.
+//
+// This copy is vendored in TZPL and locally modified (undo-chunking patch
+// and other fixes); it diverges from the upstream repository.
+
 #pragma once
 
 #include <string>

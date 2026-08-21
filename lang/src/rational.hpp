@@ -19,7 +19,6 @@
 //  routines
 //
 //  Created by James McCartney on 5/23/20.
-//  Copyright © 2020 James McCartney. All rights reserved.
 //
 
 #ifndef tzpl_rational_hpp

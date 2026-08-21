@@ -424,7 +424,7 @@ void registerIoBuiltins(Compiler& compiler, FuncMap& functions) {
     // returned Future resolves when the I/O lands. Still rtSafe=false --
     // NRT-only until the RT payload-delivery path is designed (a Pending
     // Future is RT-compatible, but resolving one with file contents on the
-    // audio thread is not; see IMPLEMENTATION_PLAN.md).
+    // audio thread is not; see devplans/LANG_IMPLEMENTATION_PLAN.md).
     Type* FutOptStr   = compiler.futureType(OptStr);
     Type* FutOptBytes = compiler.futureType(OptBytes);
     Type* FutBool     = compiler.futureType(Bool);
