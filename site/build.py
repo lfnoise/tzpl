@@ -401,6 +401,12 @@ def main():
         shutil.copy(src, OUT / src.name)
 
     landing = (SITE / "index.html").read_text(encoding="utf-8")
+    landing = re.sub(
+        r"<!-- tzpl:source-note-begin -->.*?<!-- tzpl:source-note-end -->\n?",
+        "",
+        landing,
+        flags=re.S,
+    )
     landing = landing.replace("<!-- tzpl:header -->", build_header(nav, "index.html"))
     landing = landing.replace("<!-- tzpl:doccards -->", build_doc_cards(nav))
     (OUT / "index.html").write_text(landing, encoding="utf-8")
