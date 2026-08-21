@@ -137,9 +137,14 @@ fn _voicerChans(ctx Ctx, n NIdx, maxVoices Int) Int {
 }
 
 -- PhiNode shape: broadcast(current, target, input). Mirrors PhiNodeExpr::calcShape.
+-- A voicer target's chans is maxVoices * voiceChans, but the phi represents a
+-- single voice's output (voiceChans wide); broadcasting to the target would
+-- voice-expand the phi's shape. The per-voice fan-out happens at codegen time.
 fn _phiChans(ctx Ctx, n NIdx, target Int) Int {
 	var ch = ctx.chans[n];
-	if (target != NONE) { ch = _broadcastC(ch, ctx.chans[target]); }
+	if (target != NONE && !(ctx.kind[target] isVoicerKind)) {
+		ch = _broadcastC(ch, ctx.chans[target]);
+	}
 	_broadcastC(ch, ctx.chans[ctx.ins[n][0]])
 }
 

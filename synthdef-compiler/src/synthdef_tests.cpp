@@ -33,6 +33,16 @@ namespace synthdef {
     void test_sexpr_integration();
 }
 
+// The test suite is built with NDEBUG in Release, which makes assert() a
+// no-op. TEST_ASSERT aborts on failure in release builds too, with a clear
+// message.
+#define TEST_ASSERT(cond) do { \
+    if (!(cond)) { \
+        fprintf(stderr, "TEST FAILED: %s:%d: %s\n", __FILE__, __LINE__, #cond); \
+        abort(); \
+    } \
+} while (0)
+
 
 void test_rates() {
     printf("test_rates\n");
@@ -788,13 +798,31 @@ void test_branching_voice_stays_looped() {
     string code = cppCodeGen(gSynth);
 
     // Branching body: should use AoS mode with per-voice loop
-    assert(code.find("VoiceState") != string::npos);
-    assert(code.find("for (int v = 0; v < 8; ++v)") != string::npos);
+    TEST_ASSERT(code.find("VoiceState") != string::npos);
+    TEST_ASSERT(code.find("for (int v = 0; v < 8; ++v)") != string::npos);
 
     // Should NOT have SoA flat arrays
-    assert(code.find("voice_v0[8]") == string::npos);
+    TEST_ASSERT(code.find("voice_v0[8]") == string::npos);
 
-    printf("  branching voice body falls back to per-voice loop\n");
+    // Per-voice PhiNode writes must use the voice offset into the output
+    // array. The previous bug wrote each voice's value to *all* output
+    // channels via an inner `for (usize i = 0; i < 8; ...) v9[i] = ...`
+    // loop, so only the last voice survived. The correct AoS emission
+    // writes exactly `<output>[v] = <voice-local value>;` inside the
+    // per-voice loop (no inner channel loop for a 1-chan voice body).
+    auto loopStart = code.find("for (int v = 0; v < 8; ++v)");
+    TEST_ASSERT(loopStart != string::npos);
+    auto loopEnd = code.find("\n\t}\n", loopStart); // closes per-voice loop
+    TEST_ASSERT(loopEnd != string::npos);
+    string voiceLoopBody = code.substr(loopStart, loopEnd - loopStart);
+    // Must contain a per-voice-indexed write into the voicer output array.
+    TEST_ASSERT(voiceLoopBody.find("[v] = ") != string::npos);
+    // Must NOT contain the buggy inner-channel loop writing all 8 chans.
+    TEST_ASSERT(voiceLoopBody.find("for (usize i = 0; i < 8;") == string::npos);
+    // Must NOT write to every channel via the loop index.
+    TEST_ASSERT(voiceLoopBody.find("[i] = ") == string::npos);
+
+    printf("  branching voice body: per-voice AoS loop with v-indexed output writes\n");
 }
 
 void test_voicer_sexpr_parse() {

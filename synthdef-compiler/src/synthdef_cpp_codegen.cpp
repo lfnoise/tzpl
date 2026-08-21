@@ -521,12 +521,10 @@ int CppCodeGen::simdWidth(GenLoop const& loop) {
 
     usize totalCount;
     if (inFlatVoiceMode) {
-        // Check if PhiNode loop (already voice-expanded)
-        bool isPhiNodeLoop = false;
-        for (ExprTree* tree : loop.trees) {
-            if (tree->root.as<PhiNodeExpr>()) { isPhiNodeLoop = true; break; }
-        }
-        totalCount = isPhiNodeLoop ? loop.chans : flatVoiceCount * loop.chans;
+        // All voicer-subgraph loops (including PhiNode output loops) iterate
+        // flatVoiceCount * loop.chans in flat mode. PhiNode loop.chans is the
+        // per-voice channel count (voiceChans), not the voice-expanded total.
+        totalCount = flatVoiceCount * loop.chans;
     } else {
         totalCount = loop.chans;
     }
@@ -1890,7 +1888,22 @@ struct Rank1GenTreeExprVisitor : GenTreeExprVisitor {
     }
     void visit(PhiNodeExpr* p) override {
         handled = true;
-        s += FMT("{} = {};\n", g.genVarRef(p->target, cel), g.genExpr(p->in0(), cel));    
+        if (g.inVoiceLoop && p->target.as<VoicerExpr>()) {
+            // AoS per-voice loop: phi writes to output channel
+            // (v * voiceChans + cel). Without the per-voice offset every
+            // voice iteration would overwrite the same output slots, so
+            // only the last voice's value would survive.
+            int voiceChans = (int)p->in0()->chans;
+            string const& v = g.voiceLoopIndexName;
+            VarIndex voiceCel = (voiceChans == 1)
+                ? vx(v)
+                : vx(FMT("({} * {} + ({}))", v, voiceChans, vxstr(cel)));
+            s += FMT("{} = {};\n",
+                g.genVarRef(p->target, voiceCel),
+                g.genExpr(p->in0(), cel));
+            return;
+        }
+        s += FMT("{} = {};\n", g.genVarRef(p->target, cel), g.genExpr(p->in0(), cel));
     }
     void visit(SelectExpr* p) override {}
     void visit(IfElseExpr* p) override {
@@ -2526,43 +2539,20 @@ string CppCodeGen::genLoop(GenLoop const& loop) {
             if (v.handled) return s;
         }
         if (inFlatVoiceMode) {
-            // Detect PhiNode loops (output mapping, already voice-expanded)
-            bool isPhiNodeLoop = false;
-            for (ExprTree* tree : loop.trees) {
-                if (tree->root.as<PhiNodeExpr>()) {
-                    isPhiNodeLoop = true;
-                    break;
-                }
-            }
-
-            usize totalCount;
-            if (isPhiNodeLoop) {
-                // PhiNode loop: chans already includes voice dimension
-                totalCount = loop.chans;
-                // Set chanShift based on voiceChans for voice indexing
-                if (flatVoiceChans <= 1) {
-                    flatChanShift = 0;
-                    flatChanMask = 0;
-                } else {
-                    int shift = 0;
-                    usize c = flatVoiceChans;
-                    while (c > 1) { c >>= 1; ++shift; }
-                    flatChanShift = shift;
-                    flatChanMask = flatVoiceChans - 1;
-                }
+            // All voicer-subgraph loops (including PhiNode output loops)
+            // iterate flatVoiceCount * loop.chans. loop.chans is the per-voice
+            // channel count; the voice fan-out is in the loop iteration count
+            // and chanShift/chanMask for voice/channel decomposition of `i`.
+            usize totalCount = flatVoiceCount * loop.chans;
+            if (loop.chans == 1) {
+                flatChanShift = 0;
+                flatChanMask = 0;
             } else {
-                // Per-voice computation loop: multiply by maxVoices
-                totalCount = flatVoiceCount * loop.chans;
-                if (loop.chans == 1) {
-                    flatChanShift = 0;
-                    flatChanMask = 0;
-                } else {
-                    int shift = 0;
-                    usize c = loop.chans;
-                    while (c > 1) { c >>= 1; ++shift; }
-                    flatChanShift = shift;
-                    flatChanMask = loop.chans - 1;
-                }
+                int shift = 0;
+                usize c = loop.chans;
+                while (c > 1) { c >>= 1; ++shift; }
+                flatChanShift = shift;
+                flatChanMask = loop.chans - 1;
             }
             flatLoopTotal = totalCount;
             int width = simdWidth(loop);

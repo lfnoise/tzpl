@@ -726,7 +726,15 @@ namespace synthdef {
     void PhiNodeExpr::calcShape() {
 //        std::print("PhiNodeExpr::calcShape sn tgt {} {}\n", userial, target.get() ? std::to_string(target->userial) : "nil");
         if (target.get()) {
-            chans = broadcast(chans, target->chans);
+            // A VoicerExpr target's chans is maxVoices * voiceChans, but this
+            // phi represents a single voice's output and has in0()->chans ==
+            // voiceChans. Broadcasting to the target would voice-expand the
+            // phi's shape. The per-voice fan-out happens at codegen time
+            // (flat SoA iteration in flat-voice mode; a per-voice loop with
+            // an explicit v*voiceChans+cel offset in AoS mode).
+            if (!target.as<VoicerExpr>()) {
+                chans = broadcast(chans, target->chans);
+            }
         }
         chans = broadcast(chans, in0()->chans);
 //        std::print("PhiNodeExpr::calcShape sn {}  shape {} tgt {}\n", userial, chans, target.get() ? target->chans : "nil");

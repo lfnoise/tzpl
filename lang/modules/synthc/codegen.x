@@ -1711,12 +1711,6 @@ fn _voicerChansForGraph(ctx Ctx, g Int) Int {
 
 fn _log2(n Int) Int { var s = 0; var c = n; while (c > 1) { c = c // 2; s = s + 1; } s }
 
--- Is loop a PhiNode loop (its chans are already voice-expanded)?
-fn _isPhiLoop(ctx Ctx, loop Loop) Bool {
-	for (t : loop.trees) { if (ctx.kind[ctx.trees[t].root] isPhiKind) { return true; } }
-	false
-}
-
 -- Flat-voice index for a node/delay of `chans` channels at flat loop index `cel`.
 -- voice = cel >> shift, chan = cel & (chans-1). Mirrors the C++ flat-voice
 -- genVarRef SoA indexing: full-width -> [cel]; mono -> [voice]; partial -> wrap.
@@ -1750,18 +1744,15 @@ fn genLoop(ctx Ctx, loopIdx Int) String {
 		var `cgVoiceChans Int = ctx _voicerChansForGraph(rootGraph);
 		return genLoop(ctx, loopIdx);
 	}
-	-- In flat voice mode the loop iterates voices x channels. cgLoopChans stays
-	-- the loop's per-voice chans; the flat shift/mask and trip count are derived
-	-- from whether this is a phi loop (voice-expanded) or a compute loop.
+	-- In flat voice mode every voicer-subgraph loop (including PhiNode output
+	-- loops) iterates voices x channels: loop.chans is the per-voice channel
+	-- count, and the voice fan-out is in the trip count and the shift/mask
+	-- voice/channel decomposition of `i`. Mirrors the C++ genLoop/simdWidth.
 	let flat = `cgVoiceCount > 0;
 	var `cgLoopChans Int = loop.chans;
-	let isPhi = flat && ctx _isPhiLoop(loop);
-	-- per-voice channel count for shift/mask: bodyChans for a phi loop, the loop's
-	-- own chans for a compute loop.
-	let perVoiceChans = isPhi ? `cgVoiceChans : loop.chans;
-	var `cgFlatChanShift Int = (flat && perVoiceChans > 1) ? _log2(perVoiceChans) : 0;
-	var `cgFlatChanMask Int = (flat && perVoiceChans > 1) ? perVoiceChans - 1 : 0;
-	let trip = flat ? (isPhi ? loop.chans : `cgVoiceCount * loop.chans) : loop.chans;
+	var `cgFlatChanShift Int = (flat && loop.chans > 1) ? _log2(loop.chans) : 0;
+	var `cgFlatChanMask Int = (flat && loop.chans > 1) ? loop.chans - 1 : 0;
+	let trip = flat ? `cgVoiceCount * loop.chans : loop.chans;
 	var `cgFlatTrip Int = flat ? trip : 0;
 
 	-- Sort antecedent serials so the LOOP comment is deterministic (the C++
