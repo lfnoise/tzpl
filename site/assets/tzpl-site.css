@@ -182,3 +182,170 @@ nav.sidebar a.tzpl-spy-current {
   .tzpl-quicklinks { display: none; }
   .tzpl-menu-panel { position: fixed; left: 0.5rem; right: 0.5rem; min-width: 0; }
 }
+
+/* ---- Search button in the header ------------------------------------- */
+
+.tzpl-search-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: none;
+  border: 1px solid var(--tzpl-sh-border);
+  border-radius: 6px;
+  color: var(--tzpl-sh-muted);
+  font-size: 0.85rem;
+  padding: 0.3rem 0.6rem;
+  cursor: pointer;
+}
+.tzpl-search-btn:hover { border-color: var(--tzpl-sh-accent); color: var(--tzpl-sh-fg); }
+.tzpl-search-btn kbd {
+  font-family: inherit;
+  font-size: 0.7rem;
+  border: 1px solid var(--tzpl-sh-border);
+  border-radius: 4px;
+  padding: 0.05rem 0.3rem;
+  color: var(--tzpl-sh-muted);
+}
+
+/* ---- Search modal ----------------------------------------------------- */
+
+.tzpl-search-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 3000;
+  display: none;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 12vh 1rem 0;
+  background: rgba(0, 0, 0, 0.55);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+               'Helvetica Neue', Arial, sans-serif;
+}
+.tzpl-search-box {
+  width: 100%;
+  max-width: 40rem;
+  background: var(--tzpl-sh-bg);
+  border: 1px solid var(--tzpl-sh-border);
+  border-radius: 12px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  max-height: 70vh;
+}
+.tzpl-search-input {
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--tzpl-sh-fg);
+  font-size: 1.05rem;
+  padding: 0.95rem 1.1rem;
+  border-bottom: 1px solid var(--tzpl-sh-border);
+}
+.tzpl-search-chips {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  padding: 0.6rem 1rem 0.2rem;
+}
+.tzpl-search-chips:empty { display: none; }
+.tzpl-chip {
+  background: none;
+  border: 1px solid var(--tzpl-sh-border);
+  border-radius: 999px;
+  color: var(--tzpl-sh-muted);
+  font-size: 0.78rem;
+  padding: 0.15rem 0.7rem;
+  cursor: pointer;
+}
+.tzpl-chip:hover { color: var(--tzpl-sh-fg); }
+.tzpl-chip-on {
+  border-color: var(--tzpl-sh-accent);
+  color: var(--tzpl-sh-accent);
+}
+.tzpl-search-results {
+  overflow-y: auto;
+  padding: 0.6rem 0.6rem 0.8rem;
+}
+.tzpl-search-results:empty { padding: 0; }
+.tzpl-sr-group { margin-bottom: 0.35rem; }
+.tzpl-sr {
+  display: block;
+  padding: 0.55rem 0.65rem;
+  border-radius: 8px;
+  text-decoration: none;
+  color: var(--tzpl-sh-fg);
+}
+.tzpl-sr:hover, .tzpl-sr.tzpl-sel { background: var(--tzpl-sh-hover); }
+.tzpl-sr-section {
+  float: right;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--tzpl-sh-muted);
+  margin-left: 0.6rem;
+}
+.tzpl-sr strong { color: var(--tzpl-sh-accent); font-size: 0.95rem; }
+.tzpl-sr p {
+  margin: 0.2rem 0 0;
+  font-size: 0.84rem;
+  line-height: 1.45;
+  color: var(--tzpl-sh-muted);
+}
+.tzpl-sr mark {
+  background: none;
+  color: var(--tzpl-sh-fg);
+  font-weight: 600;
+}
+.tzpl-sr-sub {
+  display: block;
+  margin: 0.1rem 0 0.1rem 1.4rem;
+  padding: 0.25rem 0.65rem;
+  border-left: 2px solid var(--tzpl-sh-border);
+  border-radius: 0 6px 6px 0;
+  font-size: 0.84rem;
+  text-decoration: none;
+  color: var(--tzpl-sh-fg);
+}
+.tzpl-sr-sub:hover, .tzpl-sr-sub.tzpl-sel { background: var(--tzpl-sh-hover); }
+.tzpl-search-note {
+  padding: 1rem 1.1rem;
+  color: var(--tzpl-sh-muted);
+  font-size: 0.9rem;
+}
+
+/* ---- Split-page chrome: breadcrumb, chapter list, edit link ----------- */
+
+.tzpl-crumb {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+               'Helvetica Neue', Arial, sans-serif;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin: 0 0 1rem;
+}
+.tzpl-crumb a { color: var(--tzpl-sh-muted); text-decoration: none; }
+.tzpl-crumb a:hover { color: var(--tzpl-sh-accent); }
+
+.tzpl-chapters {
+  columns: 2;
+  gap: 2rem;
+  list-style: none;
+  padding-left: 0;
+  margin: 1rem 0 2rem;
+}
+@media (max-width: 720px) { .tzpl-chapters { columns: 1; } }
+.tzpl-chapters li { margin: 0.3rem 0; break-inside: avoid; }
+.tzpl-chapters a { color: var(--tzpl-sh-accent); text-decoration: none; font-weight: 600; }
+.tzpl-chapters a:hover { text-decoration: underline; }
+
+.tzpl-editlink {
+  text-align: center;
+  font-size: 0.8rem;
+  margin: 0 0 2rem;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+               'Helvetica Neue', Arial, sans-serif;
+}
+.tzpl-editlink a { color: var(--tzpl-sh-muted); text-decoration: none; }
+.tzpl-editlink a:hover { color: var(--tzpl-sh-accent); }
+.tzpl-foot .tzpl-prevnext { padding-bottom: 1rem; }

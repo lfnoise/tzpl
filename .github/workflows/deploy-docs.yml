@@ -36,6 +36,13 @@ jobs:
       - name: Stage site
         run: python3 site/build.py
 
+      # Builds the client-side full-text search index the ⌘K modal loads.
+      - name: Build search index
+        run: npx --yes pagefind@1 --site _site
+
+      - name: Check internal links
+        run: python3 site/check_links.py
+
       - uses: actions/configure-pages@v5
 
       - uses: actions/upload-pages-artifact@v3

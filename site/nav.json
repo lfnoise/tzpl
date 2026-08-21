@@ -12,7 +12,8 @@
         {
           "file": "Tzopilotl_by_Example.html",
           "title": "Tzopilotl by Example",
-          "description": "Comprehensive syntax and feature guide for the language."
+          "description": "Comprehensive syntax and feature guide for the language.",
+          "split": { "prefix": "By_Example", "mode": "h2" }
         }
       ]
     },
@@ -42,7 +43,8 @@
         {
           "file": "Writing_SynthDefs.html",
           "title": "Writing SynthDefs",
-          "description": "Signal rates, element types, channel broadcasting, delays, buffers, voicers, and the synthdef / common_ugens / filters reference."
+          "description": "Signal rates, element types, channel broadcasting, delays, buffers, voicers, and the synthdef / common_ugens / filters reference.",
+          "split": { "prefix": "SynthDefs", "mode": "sections" }
         },
         {
           "file": "Tzopilotl_Music_Cookbook.html",

@@ -136,6 +136,25 @@ Goal: Flow-grade findability.
 Exit criteria: any function, module, or concept is reachable in a few
 keystrokes from any page.
 
+**Status (2026-08-21): implemented on branch `site-phase1`.** Delivered:
+Pagefind index built in the deploy workflow (`npx pagefind@1 --site _site`;
+54 pages indexed, landing excluded) with a custom ⌘K modal in the shell JS
+(debounced queries, section filter chips from the index, per-heading
+sub-result links, keyboard navigation); build-time splitting of the two
+monoliths driven by `split` configs in nav.json (Tzopilotl_by_Example ->
+27 chapter pages split on `<h2 id>`, Writing_SynthDefs -> 16 section pages
+split on `.section` divs) with the original URLs serving intro + chapter
+list, a JS anchor map redirecting old deep links to the right chapter, all
+cross-page and sidebar links rewritten at build time, and per-chapter
+prev/next; edit-on-GitHub links on every page (chapters point at their
+monolith source); and `site/check_links.py`, a stdlib link-and-anchor
+checker run in CI after the index build (it caught one pre-existing broken
+anchor in Tzopilotl_by_Example, now fixed at the source). Sources remain
+unsplit monoliths -- authoring is unchanged. Also added the app splash art
+to the landing hero (`site/assets/tzopilotl-splash.png`, a 480px copy of
+`app/Tzopilotl-Splash.png`). Verified in-browser: search, chapter pages,
+redirects, both themes.
+
 ## Phase 3 -- The missing content types
 
 Goal: add the document categories Flow has and TZPL lacks. These are
