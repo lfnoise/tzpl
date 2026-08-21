@@ -194,6 +194,40 @@ shippable.
 - **FAQ**: seeded from questions the docs answer awkwardly today (RT-safety
   rules, `!` convention, auto-mapping surprises, licensing/JUCE).
 
+**Status (2026-08-21): core implemented on branch `site-phase1`.** The
+offline-render prerequisite was verified and better than hoped: the app has
+a first-class NRT CLI (`tzpl_app --nrt out.wav --duration N script.x`, no
+audio device, builds headless with `TZPL_BUILD_GUI=OFF`), and renders run
+much faster than real time. Delivered:
+
+- **Gallery** (`Gallery.html`): five entries -- the `music_fx_demos.x`
+  flagship (full 3.5-minute three-dialect piece) plus four short synth
+  clips with `site/gallery/*.x` render scripts -- each showing highlighted
+  code (tiny Tzopilotl highlighter in build.py), an audio player, and a
+  source link. `site/render_gallery.py` renders WAV via the headless app
+  and encodes AAC (.m4a, ~96 kbps) with afconvert into gitignored
+  `site/_audio/`; the deploy workflow grew a `render-audio` job on
+  `macos-14` (cached build, `continue-on-error` so a render failure
+  deploys the site without players rather than blocking). The landing hero
+  now embeds the bubbles clip under its code sample.
+- **Markdown pipeline**: `site/md.py`, a vendored stdlib-only converter
+  covering the subset the project's markdown uses (verified against the
+  three internals docs), rendering through `site/md_template.html` --
+  nothing to pip-install locally or in CI.
+- **New pages**: Changelog (from a new curated repo-root `NEWS.md`),
+  Download & Install, Community, FAQ, and Tutorial 1 (First Sounds) under
+  a Tutorials section, all in `site/pages/`; the three architecture docs
+  published under an Internals section. All flow through the normal shell:
+  search-indexed, prev/next, edit links (now pointing at each page's real
+  repo source).
+- **`site/serve.py`**: preview server with correct audio MIME + HTTP Range
+  (the bare `python -m http.server` mis-types .m4a and breaks players).
+
+Still open from this phase: more tutorials (2-5), and gallery entries for
+the voicer/instrument side. Browser-verified except audible playback,
+which the automation context blocks (clips verified valid AAC-LC by
+ffprobe and round-trip decode) -- worth one manual play-button click.
+
 ## Phase 4 -- Interactive (stretch, research-grade)
 
 Goal: Flow's playground/runnable-examples tier, adapted to audio. Each item

@@ -18,6 +18,17 @@
       ]
     },
     {
+      "title": "Gallery",
+      "pages": [
+        {
+          "file": "Gallery.html",
+          "gallery": true,
+          "title": "Audio Gallery",
+          "description": "Hear the platform: clips rendered offline from the code shown beside them."
+        }
+      ]
+    },
+    {
       "title": "Reference",
       "pages": [
         {
@@ -69,12 +80,75 @@
       ]
     },
     {
+      "title": "Tutorials",
+      "pages": [
+        {
+          "file": "Tutorial_1_First_Sounds.html",
+          "md": "site/pages/tutorial-1-first-sounds.md",
+          "title": "1. First Sounds",
+          "description": "Define a synth, play it, and change it while it plays."
+        }
+      ]
+    },
+    {
+      "title": "Internals",
+      "pages": [
+        {
+          "file": "Theory_of_Operation.html",
+          "md": "lang/Theory_of_Operation.md",
+          "title": "Theory of Operation",
+          "description": "The language implementation: VM, type system, GC, allocator."
+        },
+        {
+          "file": "Engine_Architecture.html",
+          "md": "engine/Architecture.md",
+          "title": "Engine Architecture",
+          "description": "The real-time engine: silos, commands, plugin ABI, thread safety."
+        },
+        {
+          "file": "Synthdef_Compiler_Architecture.html",
+          "md": "synthdef-compiler/ARCHITECTURE.md",
+          "title": "Synthdef Compiler",
+          "description": "The 14-pass pipeline, expression graph, and code generation."
+        }
+      ]
+    },
+    {
       "title": "Design Notes",
       "pages": [
         {
           "file": "Existential_Types_Comparison.html",
           "title": "Existential Types",
           "description": "How Tzopilotl's `some C` compares with existentials in Haskell, Rust, Swift, and Go."
+        }
+      ]
+    },
+    {
+      "title": "Project",
+      "pages": [
+        {
+          "file": "Changelog.html",
+          "md": "NEWS.md",
+          "title": "Changelog",
+          "description": "Curated highlights of what has changed, newest first."
+        },
+        {
+          "file": "Downloads.html",
+          "md": "site/pages/downloads.md",
+          "title": "Download & Install",
+          "description": "Packaged releases, requirements, building from source, editor support."
+        },
+        {
+          "file": "Community.html",
+          "md": "site/pages/community.md",
+          "title": "Community",
+          "description": "Contributing, reporting problems, and security policy."
+        },
+        {
+          "file": "FAQ.html",
+          "md": "site/pages/faq.md",
+          "title": "FAQ",
+          "description": "Common questions about the language, synthdefs, and the project."
         }
       ]
     }

@@ -89,6 +89,11 @@
     font-family: 'SF Mono', SFMono-Regular, ui-monospace, Menlo, Consolas, monospace;
     font-size: 0.86rem; line-height: 1.55;
   }
+  .hero-audio { margin: 1rem 0 0; }
+  .hero-audio figcaption {
+    color: var(--muted-fg); font-size: 0.85rem; margin-bottom: 0.4rem;
+  }
+  .hero-audio audio { width: 100%; display: block; }
   .sample .caption {
     color: var(--muted-fg); font-size: 0.9rem; margin-top: 0.7rem;
     max-width: 46rem;
@@ -179,6 +184,7 @@ in the assembled site. Run <code>python3 site/build.py</code> and open
     that hot-loads them while the music plays.</p>
     <div class="hero-actions">
       <a class="primary" href="Getting_Started.html">Get Started</a>
+      <a class="secondary" href="Gallery.html">Audio Gallery</a>
       <a class="secondary" href="Tzopilotl_Music_Cookbook.html">Music Cookbook</a>
       <a class="secondary" href="https://github.com/lfnoise/tzpl">GitHub</a>
     </div>
@@ -199,6 +205,7 @@ in the assembled site. Run <code>python3 site/build.py</code> and open
     |&gt; combn(<span class="num">0.2</span>, <span class="num">4</span>) outlet;
 
 bubbles <span class="fnm">defSynthX</span>(<span class="str">"bubbles"</span>) <span class="kw">await</span>;</code></pre>
+    <!-- tzpl:hero-audio -->
     <p class="caption">Evaluate this in the app and <code>defSynthX</code> walks the
     signal graph, generates SIMD C++, compiles and links a native plugin in the
     background, and registers it with the running engine — music that is already

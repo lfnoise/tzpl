@@ -1,0 +1,40 @@
+{
+  "entries": [
+    {
+      "id": "music_fx_demos",
+      "title": "Three Dialects, One Graph",
+      "description": "The flagship demo: three instruments (wavetable lead, Karplus-Strong pluck, resonator bank) each through its own effect chain into a shared reverb bus, playing three multi-section pieces -- a weighted-random groove in music.pat, a six-section canon built by the temporal-media algebra of music.media, and 128 beats of Bohlen-Pierce euclidean patterns in music.spans. About 3.5 minutes.",
+      "script": "examples/music_fx_demos.x",
+      "excerpt_range": [4, 12],
+      "duration_cap": 0
+    },
+    {
+      "id": "bubbles",
+      "title": "Bubbles",
+      "description": "The cookbook's first synth: two LFOs glissando a sine wave through a comb-filter echo. Eight lines, compiled to a native plugin.",
+      "script": "site/gallery/bubbles.x",
+      "duration_cap": 30
+    },
+    {
+      "id": "seq",
+      "title": "Fraction Sequencer",
+      "description": "A just-intonation pattern written as exact Fractions, stepped at three tempos by three detuned smooth-saw layers into a comb echo.",
+      "script": "site/gallery/seq.x",
+      "duration_cap": 40
+    },
+    {
+      "id": "blip",
+      "title": "Blip Sweep",
+      "description": "A detuned pair of band-limited impulse trains whose harmonic count breathes with a slow sine.",
+      "script": "site/gallery/blip.x",
+      "duration_cap": 35
+    },
+    {
+      "id": "urand_cloud",
+      "title": "Sine Cloud",
+      "description": "Sixteen randomly tuned sines, each pulsing on its own slow LFO -- the whole cloud built by auto-mapping over array-shaped arguments.",
+      "script": "site/gallery/urand_cloud.x",
+      "duration_cap": 30
+    }
+  ]
+}
