@@ -41,7 +41,7 @@ documentation site as the Changelog page.
   documented in a new Music Cookbook chapter.
 - `examples/music_fx_demos.x`: three multi-section demos tying the music
   dialects, instruments, and effects libraries together in one persistent
-  node graph -- also the flagship piece in the site gallery.
+  node graph -- also rendered in the site gallery.
 
 **App**
 

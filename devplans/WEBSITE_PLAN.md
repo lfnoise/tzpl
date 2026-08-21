@@ -200,9 +200,11 @@ a first-class NRT CLI (`tzpl_app --nrt out.wav --duration N script.x`, no
 audio device, builds headless with `TZPL_BUILD_GUI=OFF`), and renders run
 much faster than real time. Delivered:
 
-- **Gallery** (`Gallery.html`): five entries -- the `music_fx_demos.x`
-  flagship (full 3.5-minute three-dialect piece) plus four short synth
-  clips with `site/gallery/*.x` render scripts -- each showing highlighted
+- **Gallery** (`Gallery.html`): five entries -- four short synth clips
+  with `site/gallery/*.x` render scripts, plus the `music_fx_demos.x`
+  music-libraries demo (full 3.5-minute three-dialect piece; listed last,
+  as the piece still needs musical polish -- instrument balance, and the
+  Bohlen-Pierce section's texture/melody) -- each showing highlighted
   code (tiny Tzopilotl highlighter in build.py), an audio player, and a
   source link. `site/render_gallery.py` renders WAV via the headless app
   and encodes AAC (.m4a, ~96 kbps) with afconvert into gitignored
