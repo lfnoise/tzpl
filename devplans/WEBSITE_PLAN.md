@@ -39,8 +39,14 @@ prominent community/contribution links.
   inline `<style>` block (styling and title conventions drift between pages);
   two are large monoliths (`Tzopilotl_by_Example.html` ~220 KB,
   `Writing_SynthDefs.html` ~128 KB).
-- No cross-page navigation, no search, no TOC/scroll-spy, no prev/next, no
-  edit links, no manual theme toggle (only `prefers-color-scheme`).
+- The pages already share a dark/light theme system (dark default,
+  `html.light` override, per-page toggle persisted under the
+  `tzpl-docs-theme` localStorage key) and carry per-page tables of contents
+  (a sticky sidebar on the guide-style pages; inline TOC boxes on the
+  reference-style pages).
+- What's missing is everything *between* pages: no cross-page navigation,
+  no search, no prev/next, no edit links, no scroll-spy, and no shared
+  shell (two distinct page templates that drift independently).
 - Architecture docs (`engine/Architecture.md`,
   `synthdef-compiler/ARCHITECTURE.md`, `lang/Theory_of_Operation.md`) are
   repo-only markdown, not published.
@@ -64,15 +70,20 @@ prominent community/contribution links.
 4. **TZPL's differentiator is sound.** Where Flow shows compile-status
    badges, TZPL should ship rendered audio: every gallery entry pairs code
    with an `<audio>` clip (and screenshots of the app/notebooks).
+5. **No audio files in the repository.** All audio clips are rendered at
+   deploy time in CI and exist only in the published Pages artifact (see
+   Phase 3 gallery item for the mechanism). Committed binary media is
+   limited to small, rarely-changing images.
 
 ## Phase 1 -- Landing page and unified shell
 
 Goal: the site looks and navigates like one product instead of ten files.
 
 - **New landing page** (`site/index.html`): one-line pitch, a short
-  Tzopilotl code sample with what it sounds like (audio clip), a screenshot
-  of the JUCE app, install/build snippet, and card links into Get Started /
-  By Example / Reference / Cookbook / GitHub.
+  Tzopilotl code sample with what it sounds like (audio clip, CI-rendered
+  once the Phase 3 render pipeline exists; ship without it initially), a
+  screenshot of the JUCE app, install/build snippet, and card links into
+  Get Started / By Example / Reference / Cookbook / GitHub.
 - **Shared shell**: extract a common stylesheet (`site/tzpl-docs.css`) and
   header/footer template -- top nav bar (Home, Guides, Reference, GitHub),
   consistent `Tzopilotl -- <Page>` titles, footer with repo/license links.
@@ -82,16 +93,27 @@ Goal: the site looks and navigates like one product instead of ten files.
     (marker comments in the HTML keep pages viewable standalone from disk);
   - generates prev/next links from the nav order;
   - stages `_site/` exactly as the workflow does today.
-- **Per-page TOC**: small shared JS that builds "On this page" from h2/h3
-  with scroll-spy highlighting.
-- **Theme toggle** persisted in localStorage, layered over the existing
-  `prefers-color-scheme` defaults.
+- **Scroll-spy**: small shared JS that highlights the current section in
+  the per-page sidebar TOCs the guide-style pages already have.
+- **Header theme toggle** sharing the pages' existing `tzpl-docs-theme`
+  localStorage convention, so the choice follows the reader across pages.
 - Update `deploy-docs.yml` paths (`site/**` triggers) and verify the
   published result renders identically for existing deep links (all current
   URLs must keep working).
 
-Exit criteria: every page shares one look, has sidebar + TOC + prev/next,
-and the landing page pitches the project.
+Exit criteria: every page shares one look, is reachable from every other
+page, has prev/next, and the landing page pitches the project.
+
+**Status (2026-08-21): implemented on branch `site-phase1`.** Delivered:
+`site/nav.json` (nav manifest), `site/build.py` (stdlib-only build script:
+shell injection, title normalization, prev/next, landing assembly, warns on
+pages missing from nav.json and deploys them unshelled so deep links
+survive), `site/assets/tzpl-site.css` + `tzpl-site.js` (fixed header with
+grouped Docs menu, quick links, GitHub, theme toggle; scroll-spy;
+coexistence overrides for both page families), `site/index.html` (landing:
+hero, cookbook `bubbles` code sample, three-pillar overview, doc cards
+generated from nav.json, build-from-source section), and the updated
+workflow. Verified in-browser on both page families in both themes.
 
 ## Phase 2 -- Search and navigation polish
 
@@ -122,10 +144,20 @@ shippable.
 
 - **Gallery / showcase** (highest value): a grid of examples, each with a
   code excerpt, an audio render, and a link to the full source in
-  `examples/`. Add a small offline render step (run `tzpl` NRT, encode to
-  ogg/mp3, commit or artifact the clips) so the audio stays in sync with the
-  code. Include notebook screenshots (piano roll, UI controls) for the
-  app-side examples.
+  `examples/`. Audio is rendered **at deploy time in CI** -- no audio files
+  are ever committed to the repository (binary clips in git history grow the
+  repo permanently on every re-render). The deploy workflow builds `tzpl` on
+  a `macos-latest` runner (platform is currently macOS-only; free for public
+  repos), runs each gallery example in NRT mode to render audio to file,
+  encodes to Opus/OGG (~96 kbps), and stages the clips into `_site/`
+  alongside the HTML. The clips exist only in the Pages deployment artifact,
+  can never drift out of sync with the example code, and the render step
+  doubles as a CI smoke test that the gallery examples run. Prerequisites:
+  verify offline render-to-file works without opening the live CoreAudio
+  device, and add build caching to keep deploy times tolerable. Include
+  notebook screenshots (piano roll, UI controls) for the app-side examples;
+  screenshots are captured manually and are small and rarely re-taken, so
+  committing those under `site/` is acceptable.
 - **Tutorial track**: a numbered, progressive series distinct from
   reference -- e.g. 1. First sound, 2. Your first synthdef, 3. Sequencing
   with `music.pat`, 4. Live controls and notebooks, 5. A small live set.

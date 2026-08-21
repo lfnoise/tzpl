@@ -1,0 +1,184 @@
+/* TZPL docs site shell: fixed header, docs menu, prev/next links, and the
+   overrides that let the shell coexist with each page's own self-contained
+   styling. Injected into every staged page by site/build.py. Theme follows
+   the pages' existing convention: dark by default, `html.light` for light,
+   persisted under the `tzpl-docs-theme` localStorage key. */
+
+:root {
+  --tzpl-header-h: 3rem;
+  --tzpl-sh-bg: #16171f;
+  --tzpl-sh-border: #2a2d3a;
+  --tzpl-sh-fg: #c9d1d9;
+  --tzpl-sh-muted: #8b949e;
+  --tzpl-sh-accent: #58a6ff;
+  --tzpl-sh-hover: #21222c;
+}
+html.light {
+  --tzpl-sh-bg: #f8f9fb;
+  --tzpl-sh-border: #e2e5ea;
+  --tzpl-sh-fg: #1a1a1a;
+  --tzpl-sh-muted: #64748b;
+  --tzpl-sh-accent: #2563eb;
+  --tzpl-sh-hover: #eef0f4;
+}
+
+/* ---- Coexistence overrides ------------------------------------------- */
+
+html { scroll-padding-top: calc(var(--tzpl-header-h) + 1rem); }
+body { padding-top: var(--tzpl-header-h) !important; }
+
+/* Family-A pages: full-height sticky per-page TOC sidebar starts below the
+   fixed header instead of underneath it. */
+body > nav.sidebar {
+  top: var(--tzpl-header-h) !important;
+  height: calc(100vh - var(--tzpl-header-h)) !important;
+}
+
+/* Family-B pages float their own theme toggle at the top right, which the
+   header now occupies; the header provides the toggle instead. */
+body > .theme-toggle { display: none !important; }
+
+/* ---- Header ----------------------------------------------------------- */
+
+.tzpl-header {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  height: var(--tzpl-header-h);
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  gap: 1.1rem;
+  padding: 0 1rem;
+  background: var(--tzpl-sh-bg);
+  border-bottom: 1px solid var(--tzpl-sh-border);
+  color: var(--tzpl-sh-fg);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+               'Helvetica Neue', Arial, sans-serif;
+  font-size: 0.9rem;
+  line-height: 1;
+}
+.tzpl-header a { color: var(--tzpl-sh-fg); text-decoration: none; }
+.tzpl-header a:hover { color: var(--tzpl-sh-accent); }
+
+.tzpl-brand {
+  font-weight: 700;
+  font-size: 1rem;
+  letter-spacing: 0.01em;
+  color: var(--tzpl-sh-accent) !important;
+}
+
+.tzpl-quicklinks { display: flex; gap: 0.9rem; }
+.tzpl-quicklinks a { color: var(--tzpl-sh-muted); }
+
+.tzpl-header-right {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+}
+
+.tzpl-theme {
+  background: none;
+  border: 1px solid var(--tzpl-sh-border);
+  border-radius: 6px;
+  color: var(--tzpl-sh-fg);
+  font-size: 0.95rem;
+  padding: 0.25rem 0.55rem;
+  cursor: pointer;
+}
+.tzpl-theme:hover { border-color: var(--tzpl-sh-accent); }
+
+/* ---- Docs menu -------------------------------------------------------- */
+
+.tzpl-menu { position: relative; }
+.tzpl-menu summary {
+  list-style: none;
+  cursor: pointer;
+  color: var(--tzpl-sh-fg);
+  padding: 0.35rem 0.2rem;
+  user-select: none;
+}
+.tzpl-menu summary::-webkit-details-marker { display: none; }
+.tzpl-menu summary::after { content: " ▾"; color: var(--tzpl-sh-muted); font-size: 0.75em; }
+.tzpl-menu[open] summary, .tzpl-menu summary:hover { color: var(--tzpl-sh-accent); }
+
+.tzpl-menu-panel {
+  position: absolute;
+  top: calc(100% + 0.55rem);
+  left: -0.5rem;
+  min-width: 17rem;
+  max-height: calc(100vh - var(--tzpl-header-h) - 2rem);
+  overflow-y: auto;
+  background: var(--tzpl-sh-bg);
+  border: 1px solid var(--tzpl-sh-border);
+  border-radius: 8px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
+  padding: 0.85rem 1rem 1rem;
+}
+.tzpl-menu-section h3 {
+  margin: 0.75rem 0 0.25rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--tzpl-sh-muted);
+}
+.tzpl-menu-section:first-child h3 { margin-top: 0; }
+.tzpl-menu-section a {
+  display: block;
+  padding: 0.28rem 0.45rem;
+  margin: 0 -0.45rem;
+  border-radius: 5px;
+  white-space: nowrap;
+}
+.tzpl-menu-section a:hover { background: var(--tzpl-sh-hover); }
+.tzpl-menu-section a.tzpl-current-page {
+  color: var(--tzpl-sh-accent);
+  font-weight: 600;
+}
+
+/* ---- Prev/next footer links ------------------------------------------ */
+
+.tzpl-prevnext {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  max-width: 60rem;
+  margin: 3.5rem auto 0;
+  padding: 1.25rem 1.2rem 2.5rem;
+  border-top: 1px solid var(--tzpl-sh-border);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+               'Helvetica Neue', Arial, sans-serif;
+}
+.tzpl-prevnext a {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  text-decoration: none;
+  color: var(--tzpl-sh-accent);
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+.tzpl-prevnext a:hover { text-decoration: underline; }
+.tzpl-prevnext a span {
+  font-weight: 400;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--tzpl-sh-muted);
+}
+.tzpl-next { text-align: right; margin-left: auto; }
+
+/* ---- Scroll-spy highlight in family-A page sidebars ------------------- */
+
+nav.sidebar a.tzpl-spy-current {
+  color: var(--tzpl-sh-accent);
+  font-weight: 600;
+}
+
+/* ---- Small screens ---------------------------------------------------- */
+
+@media (max-width: 720px) {
+  .tzpl-quicklinks { display: none; }
+  .tzpl-menu-panel { position: fixed; left: 0.5rem; right: 0.5rem; min-width: 0; }
+}

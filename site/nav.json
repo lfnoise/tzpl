@@ -1,0 +1,80 @@
+{
+  "github": "https://github.com/lfnoise/tzpl",
+  "sections": [
+    {
+      "title": "Getting Started",
+      "pages": [
+        {
+          "file": "Getting_Started.html",
+          "title": "Getting Started",
+          "description": "Build the platform, run the app, and make your first sounds."
+        },
+        {
+          "file": "Tzopilotl_by_Example.html",
+          "title": "Tzopilotl by Example",
+          "description": "Comprehensive syntax and feature guide for the language."
+        }
+      ]
+    },
+    {
+      "title": "Reference",
+      "pages": [
+        {
+          "file": "Builtin_Functions.html",
+          "title": "Built-in Functions",
+          "description": "Reference for all built-in functions."
+        },
+        {
+          "file": "Standard_Library.html",
+          "title": "Standard Library",
+          "description": "The std.* module reference."
+        },
+        {
+          "file": "Music_Libraries.html",
+          "title": "Music Libraries",
+          "description": "The music.* namespace: events, tunings, and four composition dialects."
+        }
+      ]
+    },
+    {
+      "title": "Guides",
+      "pages": [
+        {
+          "file": "Writing_SynthDefs.html",
+          "title": "Writing SynthDefs",
+          "description": "Signal rates, element types, channel broadcasting, delays, buffers, voicers, and the synthdef / common_ugens / filters reference."
+        },
+        {
+          "file": "Tzopilotl_Music_Cookbook.html",
+          "title": "Music Cookbook",
+          "description": "Task-oriented recipes for making sound and music."
+        },
+        {
+          "file": "Live_Controls_and_Notebooks.html",
+          "title": "Live Controls & Notebooks",
+          "description": "The ui widget module, notebook documents, and engine monitoring in the app."
+        },
+        {
+          "file": "Coroutines.html",
+          "title": "Coroutines",
+          "description": "Coroutine system design and usage."
+        },
+        {
+          "file": "FFI_Guide.html",
+          "title": "FFI Guide",
+          "description": "Calling C functions from Tzopilotl, including the audio engine FFI."
+        }
+      ]
+    },
+    {
+      "title": "Design Notes",
+      "pages": [
+        {
+          "file": "Existential_Types_Comparison.html",
+          "title": "Existential Types",
+          "description": "How Tzopilotl's `some C` compares with existentials in Haskell, Rust, Swift, and Go."
+        }
+      ]
+    }
+  ]
+}

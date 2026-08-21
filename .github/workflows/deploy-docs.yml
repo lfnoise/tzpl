@@ -9,6 +9,7 @@ on:
     branches: [ main ]
     paths:
       - 'lang/docs/**'
+      - 'site/**'
       - '.github/workflows/deploy-docs.yml'
   workflow_dispatch:
 
@@ -30,12 +31,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Only the rendered guides are published; Markdown dev notes stay
-      # repo-only.
+      # Assembles the landing page plus the rendered guides (with the shared
+      # site shell injected) into _site/; Markdown dev notes stay repo-only.
       - name: Stage site
-        run: |
-          mkdir -p _site
-          cp lang/docs/*.html _site/
+        run: python3 site/build.py
 
       - uses: actions/configure-pages@v5
 
