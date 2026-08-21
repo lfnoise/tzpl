@@ -377,6 +377,7 @@ def gallery_excerpt(entry):
 GALLERY_STYLE = """<style>
   .gal-entry { margin: 2.2rem 0 2.8rem; }
   .gal-entry h2 { border-bottom: none; margin-bottom: 0.3rem; }
+  .gal-entry pre { max-height: 24rem; overflow: auto; }
   .gal-entry audio { width: 100%; margin: 0.8rem 0 0.2rem; display: block; }
   .gal-links { font-size: 0.85rem; margin-top: 0.3rem; }
   .gal-pending { color: var(--muted-fg); font-size: 0.9rem; font-style: italic;

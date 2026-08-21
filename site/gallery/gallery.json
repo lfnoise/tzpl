@@ -33,7 +33,7 @@
       "title": "Music Libraries Demo",
       "description": "A demo of the music libraries: three instruments (wavetable lead, Karplus-Strong pluck, resonator bank) each through its own effect chain into a shared reverb bus, playing a multi-section piece in each composition dialect -- a weighted-random groove in music.pat, a six-section canon built by the temporal-media algebra of music.media, and Bohlen-Pierce euclidean patterns in music.spans. About 3.5 minutes.",
       "script": "examples/music_fx_demos.x",
-      "excerpt_range": [4, 12],
+      "excerpt_range": [235, 249],
       "duration_cap": 0
     }
   ]
